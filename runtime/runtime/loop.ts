@@ -6,7 +6,7 @@ import {
 } from './input-validation';
 import { ensureRuntimeState } from './runtime-state';
 import type { RuntimeState, RuntimeInput } from '../types';
-import { closeFrameDb, closeInfraDb, closeStorageDb } from '../storage/runtime-dbs';
+import { closeRuntimeWalDb, closeHistoryViewDb, closeInfraDb, closeStorageDb } from '../storage/runtime-dbs';
 import {
   ENV_APPLY_ALLOWED_KEY,
   ENV_REPLAY_MODE_KEY,
@@ -24,13 +24,15 @@ import {
   enqueueRuntimeContinuation,
   enqueueRuntimeInputs,
   getCleanLogs,
-  getRuntimeFrameDb,
+  getRuntimeHistoryView,
+  getRuntimeHistoryViewDb,
   getRuntimeInfraDb,
   getRuntimeStorageDb,
   infraGossipDbAccess,
   rotateRuntimeStorageEpochDb,
   trackInfraDbWrite,
-  tryOpenRuntimeFrameDb,
+  tryOpenRuntimeHistoryView,
+  tryOpenRuntimeHistoryViewDb,
   tryOpenRuntimeInfraDb,
   tryOpenRuntimeStorageDb,
 } from './loop-infrastructure';
@@ -113,7 +115,8 @@ export const createRuntimeLoopApi = (deps: RuntimeLoopApiDeps) => {
     const closed = await Promise.allSettled([
       closeStorageDb(env, 'current'),
       closeStorageDb(env, 'previous'),
-      closeFrameDb(env),
+      closeRuntimeWalDb(env),
+      closeHistoryViewDb(env),
     ]);
     throwSettledErrors(closed, 'RUNTIME_DB_CLOSE_FAILED');
   };
@@ -136,10 +139,12 @@ export const createRuntimeLoopApi = (deps: RuntimeLoopApiDeps) => {
     getRuntimeStorageDb,
     getStorageDb: getRuntimeStorageDb,
     getInfraDb: getRuntimeInfraDb,
-    getFrameDb: getRuntimeFrameDb,
+    getRuntimeWalDb: getRuntimeHistoryView,
+    getHistoryViewDb: getRuntimeHistoryViewDb,
     tryOpenStorageDb: tryOpenRuntimeStorageDb,
     rotateStorageEpochDb: rotateRuntimeStorageEpochDb,
-    tryOpenFrameDb: tryOpenRuntimeFrameDb,
+    tryOpenRuntimeWalDb: tryOpenRuntimeHistoryView,
+    tryOpenHistoryViewDb: tryOpenRuntimeHistoryViewDb,
     closeRuntimeDb,
     closeInfraDb: closeManagedInfraDb,
     getCleanLogs,

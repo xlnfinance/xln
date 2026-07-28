@@ -64,7 +64,7 @@ export const LIMITS = {
   /** Recent terminal swap lifecycle rows retained in the live Account projection. */
   MAX_ACCOUNT_TERMINAL_SWAP_HISTORY: 100,
 
-  /** Recent partial-fill details retained per swap; full frames remain in frame DB. */
+  /** Recent partial-fill details retained per swap; full frames remain in the Runtime WAL and history views. */
   MAX_ACCOUNT_SWAP_RESOLVES_PER_ORDER: 100,
 
   /** Maximum offer-id/comment characters retained in the live swap projection. */

@@ -1,7 +1,14 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { rmSync } from 'fs';
 
-import { closeInfraDb, closeRuntimeDb, createEmptyEnv, getFrameDb, readPersistedFrameJournal } from '../runtime';
+import {
+  closeInfraDb,
+  closeRuntimeDb,
+  createEmptyEnv,
+  getRuntimeWalDb,
+  getHistoryViewDb,
+  readPersistedRuntimeActivityJournal,
+} from '../runtime';
 import { deriveSignerAddressSync } from '../account/crypto';
 import { encodeBuffer } from '../storage/codec';
 import { computeStorageFrameHash, computeStorageReplicaMetaDigest } from '../storage/hashes';
@@ -9,7 +16,7 @@ import {
   KEY_HEAD,
   STORAGE_SCHEMA_VERSION,
   keyFrame,
-  keyFrameDbRuntimeActivity,
+  keyHistoryViewRuntimeActivity,
   ZERO_FRAME_HASH,
 } from '../storage/keys';
 import { resolveDbPath } from '../storage/runtime-dbs';
@@ -20,7 +27,7 @@ const cleanupPaths: string[] = [];
 afterEach(() => {
   while (cleanupPaths.length > 0) {
     const base = cleanupPaths.pop()!;
-    for (const suffix of ['', '-storage-current', '-storage-previous', '-frames', '-events', '-infra']) {
+    for (const suffix of ['', '-storage-current', '-storage-previous', '-wal', '-history-views', '-events', '-infra']) {
       rmSync(`${base}${suffix}`, { recursive: true, force: true });
     }
   }
@@ -33,8 +40,8 @@ describe('secondary storage error severity', () => {
     env.runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
     env.dbNamespace = env.runtimeId;
     cleanupPaths.push(resolveDbPath(env, 'core'));
-    const frameDb = getFrameDb(env);
-    await frameDb.open();
+    const historyView = getRuntimeWalDb(env);
+    await historyView.open();
     const frameBase: StorageFrameRecord = {
       height: 1,
       timestamp: 1_234,
@@ -48,12 +55,14 @@ describe('secondary storage error severity', () => {
       materializedState: true,
       entityHashes: [],
       runtimeInput: { runtimeTxs: [], entityInputs: [] },
+      historyRecords: [],
+      activityLogs: [],
       touchedEntities: [],
       touchedAccounts: [],
       touchedBookEntities: [],
     };
     const frame: StorageFrameRecord = { ...frameBase, frameHash: computeStorageFrameHash(frameBase) };
-    await frameDb.put(
+    await historyView.put(
       KEY_HEAD,
       encodeBuffer({
         schemaVersion: STORAGE_SCHEMA_VERSION,
@@ -69,10 +78,14 @@ describe('secondary storage error severity', () => {
       }),
       { sync: true },
     );
-    await frameDb.put(keyFrame(1), encodeBuffer(frame), { sync: true });
-    await frameDb.put(keyFrameDbRuntimeActivity(1), Buffer.from([0xc1]), { sync: true });
+    await historyView.put(keyFrame(1), encodeBuffer(frame), { sync: true });
+    const historyViewDb = getHistoryViewDb(env);
+    await historyViewDb.open();
+    await historyViewDb.put(keyHistoryViewRuntimeActivity(1), Buffer.from([0xc1]), { sync: true });
     try {
-      await expect(readPersistedFrameJournal(env, 1)).rejects.toThrow();
+      await expect(readPersistedRuntimeActivityJournal(env, 1)).rejects.toThrow(
+        'STORAGE_ACTIVITY_JOURNAL_READ_FAILED',
+      );
     } finally {
       await closeRuntimeDb(env);
       await closeInfraDb(env);

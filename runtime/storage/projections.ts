@@ -278,7 +278,7 @@ const projectAccountDocFull = (account: AccountState): StorageAccountDoc => ({
 
 export const projectAccountDoc = (account: AccountState): StorageAccountDoc => {
   // Historical account frames are not future-consensus state. They are written
-  // to the frame DB by deterministic keys and intentionally omitted here.
+  // to rebuildable history views by deterministic keys and intentionally omitted here.
   return projectAccountDocFull(account);
 };
 

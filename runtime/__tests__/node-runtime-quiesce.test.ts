@@ -23,7 +23,7 @@ import { resolveDbPath } from '../storage/runtime-dbs';
 import type { JReplica, JurisdictionConfig } from '../types';
 
 const removeRuntimeStorage = (basePath: string): void => {
-  for (const suffix of ['', '-storage-current', '-storage-previous', '-frames', '-events', '-infra']) {
+  for (const suffix of ['', '-storage-current', '-storage-previous', '-wal', '-events', '-infra']) {
     rmSync(`${basePath}${suffix}`, { recursive: true, force: true });
   }
 };

@@ -22,8 +22,8 @@ describe('storage config', () => {
       ['snapshotPeriodFrames', Number.NaN],
       ['retainSnapshots', 0],
       ['epochMaxBytes', -1],
-      ['frameDbMaxBytes', 'invalid'],
-      ['frameDbRetainFrames', 1.5],
+      ['historyViewMaxBytes', 'invalid'],
+      ['historyViewRetainFrames', 1.5],
       ['materializePeriodFrames', Number.POSITIVE_INFINITY],
     ] as const) {
       const env = createEmptyEnv(`invalid-storage-${field}`);
@@ -35,8 +35,8 @@ describe('storage config', () => {
   test('accepts an explicit 10 TiB hub budget without losing integer precision', () => {
     const env = createEmptyEnv('large-hub-storage');
     const tenTiB = 10 * 1024 ** 4;
-    env.runtimeConfig = { storage: { frameDbMaxBytes: tenTiB } };
-    expect(resolveStorageRuntimeConfig(env).frameDbMaxBytes).toBe(tenTiB);
+    env.runtimeConfig = { storage: { historyViewMaxBytes: tenTiB } };
+    expect(resolveStorageRuntimeConfig(env).historyViewMaxBytes).toBe(tenTiB);
   });
 
   test('persists a fail-fast epoch byte override into each fresh Runtime config', () => {

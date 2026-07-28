@@ -12,7 +12,7 @@ export const cleanupRuntimeStorage = (runtimeId: string): void => {
   rmSync(namespacePath, { recursive: true, force: true });
   rmSync(`${namespacePath}-storage-current`, { recursive: true, force: true });
   rmSync(`${namespacePath}-storage-previous`, { recursive: true, force: true });
-  rmSync(`${namespacePath}-frames`, { recursive: true, force: true });
+  rmSync(`${namespacePath}-wal`, { recursive: true, force: true });
   rmSync(`${namespacePath}-events`, { recursive: true, force: true });
   rmSync(`${namespacePath}-infra`, { recursive: true, force: true });
 };

@@ -8,10 +8,11 @@ export type RuntimeFrameSharedStateGroup = {
   keys: readonly string[];
 };
 
-export const RUNTIME_FRAME_DB_HANDLE_GROUPS: readonly RuntimeFrameSharedStateGroup[] = [
+export const RUNTIME_HISTORY_VIEW_HANDLE_GROUPS: readonly RuntimeFrameSharedStateGroup[] = [
   { name: 'storage-current', keys: ['storageDb', 'storageDbOpenPromise'] },
   { name: 'storage-previous', keys: ['storagePreviousDb', 'storagePreviousDbOpenPromise'] },
-  { name: 'frames', keys: ['frameDb', 'frameDbOpenPromise'] },
+  { name: 'runtime-wal', keys: ['runtimeWalDb', 'runtimeWalDbOpenPromise'] },
+  { name: 'history-views', keys: ['historyViewDb', 'historyViewDbOpenPromise'] },
   { name: 'infra', keys: ['infraDb', 'infraDbOpenPromise'] },
 ] as const;
 
@@ -79,7 +80,7 @@ export const reconcileRuntimeFrameSharedState = (
   liveState: Record<string, unknown>,
   workingState: Record<string, unknown>,
   sharedKeys: ReadonlySet<string>,
-  groups: readonly RuntimeFrameSharedStateGroup[] = RUNTIME_FRAME_DB_HANDLE_GROUPS,
+  groups: readonly RuntimeFrameSharedStateGroup[] = RUNTIME_HISTORY_VIEW_HANDLE_GROUPS,
 ): Map<string, RuntimeFrameSharedStateSnapshot> => {
   const selected = new Map<string, RuntimeFrameSharedStateSnapshot>();
   const groupedKeys = new Set<string>();
@@ -125,7 +126,7 @@ const assertHandleGroup = (
 };
 
 export const assertRuntimeFrameStorageState = (state: Record<string, unknown>): void => {
-  for (const group of RUNTIME_FRAME_DB_HANDLE_GROUPS) assertHandleGroup(state, group);
+  for (const group of RUNTIME_HISTORY_VIEW_HANDLE_GROUPS) assertHandleGroup(state, group);
   const current = state['storageDb'];
   const previous = state['storagePreviousDb'];
   if (current !== null && current !== undefined && Object.is(current, previous)) {

@@ -114,6 +114,10 @@ test('retained checkpoint roots preserve board witnesses until snapshot pruning 
   const historyDb = new Level<Buffer, Buffer>(join(dbRoot, 'history'), {
     keyEncoding: 'buffer', valueEncoding: 'buffer',
   });
+  const historyViewDb = new Level<Buffer, Buffer>(join(dbRoot, 'history-views'), {
+    keyEncoding: 'buffer',
+    valueEncoding: 'buffer',
+  });
   await Promise.all([currentDb.open(), historyDb.open()]);
   env.runtimeConfig = {
     storage: {
@@ -129,8 +133,13 @@ test('retained checkpoint roots preserve board witnesses until snapshot pruning 
       env,
       tryOpenDb: async () => true,
       getRuntimeDb: () => currentDb,
-      tryOpenFrameDb: async () => true,
-      getFrameDb: () => historyDb,
+      tryOpenRuntimeWalDb: async () => true,
+      getRuntimeWalDb: () => historyDb,
+      tryOpenHistoryViewDb: async () => {
+        await historyViewDb.open();
+        return true;
+      },
+      getHistoryViewDb: () => historyViewDb,
       getPerfMs,
       formatPerfMs: (value) => value.toFixed(2),
     });
@@ -218,7 +227,11 @@ test('retained checkpoint roots preserve board witnesses until snapshot pruning 
       try {
         await historyDb.close();
       } finally {
-        rmSync(dbRoot, { recursive: true, force: true });
+        try {
+          await historyViewDb.close();
+        } finally {
+          rmSync(dbRoot, { recursive: true, force: true });
+        }
       }
     }
   }

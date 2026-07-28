@@ -20,6 +20,7 @@ import type {
   RebalanceRequestFeeState,
   RoutedEntityInput,
   RuntimeInput,
+  RuntimeHistoryRecord,
   RuntimeOverlayRecord,
   SwapOffer,
 } from '../types';
@@ -48,8 +49,8 @@ export type StorageRuntimeConfig = {
   snapshotPeriodFrames?: number;
   retainSnapshots?: number;
   epochMaxBytes?: number;
-  frameDbMaxBytes?: number;
-  frameDbRetainFrames?: number;
+  historyViewMaxBytes?: number;
+  historyViewRetainFrames?: number;
   materializePeriodFrames?: number;
   /**
    * Canonical runtime-state commitment.
@@ -63,8 +64,9 @@ export type StorageRuntimeConfig = {
 
 export type StoragePersistenceBoundary =
   | 'after-authoritative-history-commit'
+  | 'after-history-view-commit'
   | 'after-current-cache-commit'
-  | 'after-frame-db-prune'
+  | 'after-history-view-prune'
   | 'after-snapshot-body-batch'
   | 'after-snapshot-manifest'
   | 'after-snapshot-history-publish'
@@ -245,6 +247,14 @@ export type StorageFrameRecord = {
   /** Sparse canonical Entity + durable R-machine replay oracle. */
   runtimeStateHash?: string;
   runtimeInput: RuntimeInput;
+  /**
+   * Exact certified child frames produced by this Runtime frame. These live in
+   * the authoritative WAL so every disposable history view can be rebuilt
+   * after a crash or local deletion.
+   */
+  historyRecords: RuntimeHistoryRecord[];
+  /** Exact committed-frame log payload used to rebuild the Activity view. */
+  activityLogs: FrameLogEntry[];
   /** Exact bounded input queue retained after this frame (for deferred H+1 work). */
   pendingRuntimeInput?: RuntimeInput;
   /** Full durable Runtime state is a sparse materialization checkpoint only. */
@@ -436,11 +446,9 @@ export type StorageOverlayRefs = {
 
 export type StorageReplicaLookup = Map<string, { replicaKey: string; replica: EntityReplica; state: EntityState }>;
 
-export type RuntimeFrameDbLike = RuntimeDbLike;
+export type HistoryViewPut = { key: Buffer; value: Buffer };
 
-export type FrameDbPut = { key: Buffer; value: Buffer };
-
-export type StorageFrameDbHead = {
+export type StorageHistoryViewHead = {
   schemaVersion: number;
   latestHeight: number;
   latestPrunedRuntimeHeight: number;

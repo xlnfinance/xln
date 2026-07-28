@@ -41,7 +41,7 @@ import type {
 
 const cleanupRuntimeStorage = (runtimeId: string): void => {
   const namespacePath = join(dbRootPath, runtimeId);
-  for (const suffix of ['', '-storage-current', '-storage-previous', '-frames', '-events', '-infra']) {
+  for (const suffix of ['', '-storage-current', '-storage-previous', '-wal', '-events', '-infra']) {
     rmSync(`${namespacePath}${suffix}`, { recursive: true, force: true });
   }
 };

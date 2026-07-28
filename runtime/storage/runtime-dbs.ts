@@ -16,7 +16,7 @@ import {
 } from './fs-durability';
 
 type RuntimeLifecycleState = NonNullable<RuntimeState['runtimeState']>;
-type RuntimeDbHandleRole = 'storage-current' | 'storage-previous' | 'frames' | 'infra';
+type RuntimeDbHandleRole = 'storage-current' | 'storage-previous' | 'runtime-wal' | 'history-views' | 'infra';
 
 const storageLog = createStructuredLogger('runtime.storage');
 const closingRuntimeDbHandles = new Set<string>();
@@ -24,7 +24,8 @@ const closingRuntimeDbHandles = new Set<string>();
 const runtimeDbHandleKey = (env: RuntimeState, role: RuntimeDbHandleRole): string => {
   if (role === 'storage-current') return resolveStorageDbPath(env, 'current');
   if (role === 'storage-previous') return resolveStorageDbPath(env, 'previous');
-  if (role === 'frames') return resolveFrameDbPath(env);
+  if (role === 'runtime-wal') return resolveRuntimeWalDbPath(env);
+  if (role === 'history-views') return resolveHistoryViewDbPath(env);
   return resolveDbPath(env, 'infra');
 };
 
@@ -107,9 +108,14 @@ export const resolveStorageDbPath = (env: RuntimeState, role: StorageDbRole = 'c
   return `${base}-storage-${role}`;
 };
 
-export const resolveFrameDbPath = (env: RuntimeState): string => {
+export const resolveRuntimeWalDbPath = (env: RuntimeState): string => {
   const base = resolveDbPath(env, 'core');
-  return `${base}-frames`;
+  return `${base}-wal`;
+};
+
+export const resolveHistoryViewDbPath = (env: RuntimeState): string => {
+  const base = resolveDbPath(env, 'core');
+  return `${base}-history-views`;
 };
 
 export const STORAGE_WRITER_LOCK_TTL_MS = 30_000;
@@ -862,33 +868,62 @@ export const getInfraDb = (
   return state.infraDb;
 };
 
-export const getFrameDb = (
+export const getRuntimeWalDb = (
   env: RuntimeState,
   deps: RuntimeStorageDbDeps,
 ): Level<Buffer, Buffer> => {
-  assertRuntimeDbNotClosing(env, 'frames');
+  assertRuntimeDbNotClosing(env, 'runtime-wal');
   const state = deps.ensureRuntimeState(env);
-  if (!state.frameDb) {
-    state.frameDb = createRebranchedLevel(resolveFrameDbPath(env));
+  if (!state.runtimeWalDb) {
+    state.runtimeWalDb = createRebranchedLevel(resolveRuntimeWalDbPath(env));
   }
-  return state.frameDb as Level<Buffer, Buffer>;
+  return state.runtimeWalDb as Level<Buffer, Buffer>;
 };
 
-export const closeFrameDb = async (env: RuntimeState): Promise<void> => {
+export const closeRuntimeWalDb = async (env: RuntimeState): Promise<void> => {
   const state = env.runtimeState;
-  const db = state?.frameDb as Level<Buffer, Buffer> | undefined;
+  const db = state?.runtimeWalDb as Level<Buffer, Buffer> | undefined;
   if (!db) return;
-  beginRuntimeDbClose(env, 'frames');
-  state!.frameDb = null;
-  state!.frameDbOpenPromise = null;
-  delete state!.storageVerifiedHistoryHeight;
+  beginRuntimeDbClose(env, 'runtime-wal');
+  state!.runtimeWalDb = null;
+  state!.runtimeWalDbOpenPromise = null;
+  delete state!.storageVerifiedWalHeight;
   try {
     await db.close();
   } catch (error) {
-    storageLog.warn('frame_db.close_failed', { error: formatStorageError(error) });
+    storageLog.warn('runtime_wal.close_failed', { error: formatStorageError(error) });
     throw error;
   } finally {
-    endRuntimeDbClose(env, 'frames');
+    endRuntimeDbClose(env, 'runtime-wal');
+  }
+};
+
+export const getHistoryViewDb = (
+  env: RuntimeState,
+  deps: RuntimeStorageDbDeps,
+): Level<Buffer, Buffer> => {
+  assertRuntimeDbNotClosing(env, 'history-views');
+  const state = deps.ensureRuntimeState(env);
+  if (!state.historyViewDb) {
+    state.historyViewDb = createRebranchedLevel(resolveHistoryViewDbPath(env));
+  }
+  return state.historyViewDb;
+};
+
+export const closeHistoryViewDb = async (env: RuntimeState): Promise<void> => {
+  const state = env.runtimeState;
+  const db = state?.historyViewDb;
+  if (!db) return;
+  beginRuntimeDbClose(env, 'history-views');
+  state.historyViewDb = null;
+  state.historyViewDbOpenPromise = null;
+  try {
+    await db.close();
+  } catch (error) {
+    storageLog.warn('history_view_db.close_failed', { error: formatStorageError(error) });
+    throw error;
+  } finally {
+    endRuntimeDbClose(env, 'history-views');
   }
 };
 
@@ -909,20 +944,20 @@ export const closeInfraDb = async (env: RuntimeState): Promise<void> => {
   }
 };
 
-export async function tryOpenFrameDb(
+export async function tryOpenRuntimeWalDb(
   env: RuntimeState,
   deps: RuntimeStorageDbDeps,
 ): Promise<boolean> {
   const state = deps.ensureRuntimeState(env);
-  if (!state.frameDbOpenPromise) {
-    const db = getFrameDb(env, deps);
-    state.frameDbOpenPromise = (async () => {
+  if (!state.runtimeWalDbOpenPromise) {
+    const db = getRuntimeWalDb(env, deps);
+    state.runtimeWalDbOpenPromise = (async () => {
       try {
         await db.open();
-        const previousVerifiedHeight = Number(state.storageVerifiedHistoryHeight ?? -1);
+        const previousVerifiedHeight = Number(state.storageVerifiedWalHeight ?? -1);
         const verified = await verifyStorageTailIntegrity(db, { tailFrames: 128 });
         if (verified.latestHeight > previousVerifiedHeight) {
-          state.storageVerifiedHistoryHeight = verified.latestHeight;
+          state.storageVerifiedWalHeight = verified.latestHeight;
         }
         return true;
       } catch (error) {
@@ -930,18 +965,50 @@ export async function tryOpenFrameDb(
           error instanceof Error &&
           (error.message?.includes('blocked') || error.name === 'SecurityError' || error.name === 'InvalidStateError');
         if (isBlocked) {
-          storageLog.warn('frame_db.blocked', { error: formatStorageError(error) });
+          storageLog.warn('runtime_wal.blocked', { error: formatStorageError(error) });
           return false;
         }
-        state.frameDbOpenPromise = null;
+        state.runtimeWalDbOpenPromise = null;
         throw error;
       }
     })();
   }
   try {
-    return await state.frameDbOpenPromise;
+    return await state.runtimeWalDbOpenPromise;
   } catch (error) {
-    storageLog.error('frame_db.open_failed', { error: formatStorageError(error) });
+    storageLog.error('runtime_wal.open_failed', { error: formatStorageError(error) });
+    throw error;
+  }
+}
+
+export async function tryOpenHistoryViewDb(
+  env: RuntimeState,
+  deps: RuntimeStorageDbDeps,
+): Promise<boolean> {
+  const state = deps.ensureRuntimeState(env);
+  if (!state.historyViewDbOpenPromise) {
+    const db = getHistoryViewDb(env, deps);
+    state.historyViewDbOpenPromise = (async () => {
+      try {
+        await db.open();
+        return true;
+      } catch (error) {
+        const isBlocked =
+          error instanceof Error &&
+          (error.message?.includes('blocked') || error.name === 'SecurityError' || error.name === 'InvalidStateError');
+        if (isBlocked) {
+          storageLog.warn('history_view_db.blocked', { error: formatStorageError(error) });
+          return false;
+        }
+        state.historyViewDbOpenPromise = null;
+        throw error;
+      }
+    })();
+  }
+  try {
+    return await state.historyViewDbOpenPromise;
+  } catch (error) {
+    storageLog.error('history_view_db.open_failed', { error: formatStorageError(error) });
     throw error;
   }
 }

@@ -6,7 +6,7 @@ import {
   closeRuntimeDb,
   createEmptyEnv,
   enqueueRuntimeInput,
-  getFrameDb,
+  getHistoryViewDb,
   processRuntime,
   readPersistedFrameJournal,
   readPersistedRuntimeActivityJournal,
@@ -19,8 +19,8 @@ import {
   registerSignerKey,
 } from '../account/crypto';
 import { generateLazyEntityId } from '../entity/factory';
-import { readFrameDbRuntimeActivity } from '../storage/frame-db';
-import { keyFrameDbRuntimeActivity } from '../storage/keys';
+import { readHistoryViewRuntimeActivity } from '../storage/history-view';
+import { keyHistoryViewRuntimeActivity } from '../storage/keys';
 import { buildDurableRuntimeMachineSnapshot } from '../wal/snapshot';
 import { readFrameReceipts } from '../server/rpc-ws';
 
@@ -36,7 +36,7 @@ test('activity remains queryable while snapshots retain the authoritative R-fram
     namespacePath,
     `${namespacePath}-storage-current`,
     `${namespacePath}-storage-previous`,
-    `${namespacePath}-frames`,
+    `${namespacePath}-wal`,
     `${namespacePath}-infra`,
   ]) rmSync(path, { recursive: true, force: true });
   mkdirSync(dbRoot, { recursive: true });
@@ -135,7 +135,7 @@ test('activity remains queryable while snapshots retain the authoritative R-fram
     }
 
     expect(await readPersistedFrameJournal(env, 3)).not.toBeNull();
-    const compactActivity = await readFrameDbRuntimeActivity(getFrameDb(env), 3);
+    const compactActivity = await readHistoryViewRuntimeActivity(getHistoryViewDb(env), 3);
     expect(compactActivity?.runtimeInput.entityInputs).toEqual([{
       entityId,
       entityTxs: [{
@@ -195,7 +195,7 @@ test('activity remains queryable while snapshots retain the authoritative R-fram
       amount: '7',
     });
 
-    await getFrameDb(env).put(keyFrameDbRuntimeActivity(3), Buffer.from([0xc1]));
+    await getHistoryViewDb(env).put(keyHistoryViewRuntimeActivity(3), Buffer.from([0xc1]));
     await expect(readPersistedRuntimeActivityJournal(env, 3))
       .rejects.toThrow('STORAGE_ACTIVITY_JOURNAL_READ_FAILED:height=3');
   } finally {

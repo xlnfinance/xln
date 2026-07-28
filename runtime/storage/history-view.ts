@@ -1,62 +1,63 @@
-import type { EntityTx, FrameLogEntry, JInput, RuntimeFrameDbRecord, RuntimeInput } from '../types';
+import type { EntityTx, FrameLogEntry, JInput, RuntimeHistoryRecord, RuntimeInput } from '../types';
 import { cloneIsolatedEntityTxs } from '../protocol/runtime-input-clone';
 import { decodeValidatedBuffer, encodeBuffer, writeBatch } from './codec';
 import { deleteKeyRange, iterateKeys, readRawOrNull } from './level';
 import {
-  FRAME_DB_ACCOUNT_FRAME_BY_RUNTIME,
-  FRAME_DB_ENTITY_FRAME_BY_RUNTIME,
-  FRAME_DB_RUNTIME_ACTIVITY,
-  KEY_FRAME_DB_HEAD,
+  HISTORY_VIEW_ACCOUNT_FRAME_BY_RUNTIME,
+  HISTORY_VIEW_ENTITY_FRAME_BY_RUNTIME,
+  HISTORY_VIEW_RUNTIME_ACTIVITY,
+  KEY_HISTORY_VIEW_HEAD,
   STORAGE_SCHEMA_VERSION,
   encodeHeight,
-  keyFrameDbAccountFrame,
-  keyFrameDbAccountFrameByRuntime,
-  keyFrameDbAccountFrameByRuntimePrefix,
-  keyFrameDbAccountFramePrefix,
-  keyFrameDbEntityFrame,
-  keyFrameDbEntityFrameByRuntime,
-  keyFrameDbEntityFrameByRuntimePrefix,
-  keyFrameDbEntityFramePrefix,
-  keyFrameDbRuntimeActivity,
+  keyHistoryViewAccountFrame,
+  keyHistoryViewAccountFrameByRuntime,
+  keyHistoryViewAccountFrameByRuntimePrefix,
+  keyHistoryViewAccountFramePrefix,
+  keyHistoryViewEntityFrame,
+  keyHistoryViewEntityFrameByRuntime,
+  keyHistoryViewEntityFrameByRuntimePrefix,
+  keyHistoryViewEntityFramePrefix,
+  keyHistoryViewRuntimeActivity,
   normalizeEntityId,
-  parseFrameDbAccountFrameKey,
-  parseFrameDbEntityFrameKey,
+  parseHistoryViewAccountFrameKey,
+  parseHistoryViewEntityFrameKey,
 } from './keys';
 import {
-  validateFrameDbHeadValue,
+  validateHistoryViewHeadValue,
   validateStoredAccountFrameValue,
   validateStoredEntityFrameValue,
   validateStoredRuntimeActivityValue,
-} from './frame-db-schema';
+} from './history-view-schema';
 import type {
-  FrameDbPut,
-  RuntimeFrameDbLike,
-  StorageFrameDbHead,
+  HistoryViewPut,
+  RuntimeDbLike,
+  StorageHistoryViewHead,
   StoragePersistenceBoundaryHook,
   StorageRuntimeConfig,
+  StorageFrameRecord,
 } from './types';
 
-type RuntimeFrameDbBatch = ReturnType<RuntimeFrameDbLike['batch']>;
+type RuntimeHistoryViewBatch = ReturnType<RuntimeDbLike['batch']>;
 
-export type StoredAccountFrameRecord = Extract<RuntimeFrameDbRecord, { kind: 'accountFrame' }> & {
+export type StoredAccountFrameRecord = Extract<RuntimeHistoryRecord, { kind: 'accountFrame' }> & {
   runtimeHeight: number;
   timestamp: number;
 };
 
 export type StoredAccountFrameValue = {
-  source: Extract<RuntimeFrameDbRecord, { kind: 'accountFrame' }>['source'];
-  frame: Extract<RuntimeFrameDbRecord, { kind: 'accountFrame' }>['frame'];
+  source: Extract<RuntimeHistoryRecord, { kind: 'accountFrame' }>['source'];
+  frame: Extract<RuntimeHistoryRecord, { kind: 'accountFrame' }>['frame'];
   runtimeHeight: number;
   timestamp: number;
 };
 
-export type StoredEntityFrameRecord = Extract<RuntimeFrameDbRecord, { kind: 'entityFrame' }> & {
+export type StoredEntityFrameRecord = Extract<RuntimeHistoryRecord, { kind: 'entityFrame' }> & {
   runtimeHeight: number;
   timestamp: number;
 };
 
 export type StoredEntityFrameValue = {
-  link: Extract<RuntimeFrameDbRecord, { kind: 'entityFrame' }>['link'];
+  link: Extract<RuntimeHistoryRecord, { kind: 'entityFrame' }>['link'];
   runtimeHeight: number;
   timestamp: number;
 };
@@ -73,7 +74,7 @@ export type StoredRuntimeActivityValue = {
   touchedBookEntities: string[];
 };
 
-export type ReadFrameDbAccountFramesOptions = {
+export type ReadHistoryViewAccountFramesOptions = {
   limit?: number;
   maxAccountHeight?: number;
   maxRuntimeHeight?: number;
@@ -84,7 +85,7 @@ export type StoredRuntimeActivityRecord = StoredRuntimeActivityValue & {
   height: number;
 };
 
-export const buildFrameDbPuts = (options: {
+export const buildHistoryViewPuts = (options: {
   height: number;
   timestamp: number;
   runtimeInput: RuntimeInput;
@@ -92,9 +93,9 @@ export const buildFrameDbPuts = (options: {
   touchedEntities: string[];
   touchedAccounts: Array<{ entityId: string; counterpartyId: string }>;
   touchedBookEntities: string[];
-  frameDbRecords?: RuntimeFrameDbRecord[];
-}): FrameDbPut[] => {
-  const puts: FrameDbPut[] = [];
+  historyRecords?: RuntimeHistoryRecord[];
+}): HistoryViewPut[] => {
+  const puts: HistoryViewPut[] = [];
   const runtimeInput: StoredRuntimeActivityValue['runtimeInput'] = {
     entityInputs: options.runtimeInput.entityInputs.map((input) => ({
       entityId: input.entityId,
@@ -113,15 +114,15 @@ export const buildFrameDbPuts = (options: {
     touchedBookEntities: options.touchedBookEntities,
   };
   validateStoredRuntimeActivityValue(runtimeActivity, options.height);
-  puts.push({ key: keyFrameDbRuntimeActivity(options.height), value: encodeBuffer(runtimeActivity) });
+  puts.push({ key: keyHistoryViewRuntimeActivity(options.height), value: encodeBuffer(runtimeActivity) });
 
-  for (const record of options.frameDbRecords ?? []) {
+  for (const record of options.historyRecords ?? []) {
     if (record.kind === 'entityFrame') {
       const entityId = normalizeEntityId(record.entityId);
       const entityHeight = record.entityHeight;
-      if (!entityId) throw new Error('FRAME_DB_ENTITY_FRAME_ENTITY_ID_INVALID');
+      if (!entityId) throw new Error('HISTORY_VIEW_ENTITY_FRAME_ENTITY_ID_INVALID');
       if (!Number.isSafeInteger(entityHeight) || entityHeight <= 0) {
-        throw new Error(`FRAME_DB_ENTITY_FRAME_HEIGHT_INVALID:${String(entityHeight)}`);
+        throw new Error(`HISTORY_VIEW_ENTITY_FRAME_HEIGHT_INVALID:${String(entityHeight)}`);
       }
       const recordHeight = record.runtimeHeight ?? options.height;
       const recordTimestamp = record.timestamp ?? options.timestamp;
@@ -131,9 +132,9 @@ export const buildFrameDbPuts = (options: {
         timestamp: recordTimestamp,
       };
       validateStoredEntityFrameValue(stored, entityHeight);
-      puts.push({ key: keyFrameDbEntityFrame(entityId, entityHeight), value: encodeBuffer(stored) });
+      puts.push({ key: keyHistoryViewEntityFrame(entityId, entityHeight), value: encodeBuffer(stored) });
       puts.push({
-        key: keyFrameDbEntityFrameByRuntime(recordHeight, entityId, entityHeight),
+        key: keyHistoryViewEntityFrameByRuntime(recordHeight, entityId, entityHeight),
         value: Buffer.alloc(0),
       });
       continue;
@@ -141,9 +142,9 @@ export const buildFrameDbPuts = (options: {
     const entityId = normalizeEntityId(record.entityId);
     const counterpartyId = normalizeEntityId(record.counterpartyId);
     const accountHeight = record.accountHeight;
-    if (!entityId || !counterpartyId) throw new Error('FRAME_DB_ACCOUNT_FRAME_ENTITY_ID_INVALID');
+    if (!entityId || !counterpartyId) throw new Error('HISTORY_VIEW_ACCOUNT_FRAME_ENTITY_ID_INVALID');
     if (!Number.isSafeInteger(accountHeight) || accountHeight <= 0) {
-      throw new Error(`FRAME_DB_ACCOUNT_FRAME_HEIGHT_INVALID:${String(accountHeight)}`);
+      throw new Error(`HISTORY_VIEW_ACCOUNT_FRAME_HEIGHT_INVALID:${String(accountHeight)}`);
     }
     const recordHeight = record.runtimeHeight ?? options.height;
     const recordTimestamp = record.timestamp ?? options.timestamp;
@@ -155,11 +156,11 @@ export const buildFrameDbPuts = (options: {
     };
     validateStoredAccountFrameValue(stored, accountHeight);
     puts.push({
-      key: keyFrameDbAccountFrame(entityId, counterpartyId, Math.floor(accountHeight)),
+      key: keyHistoryViewAccountFrame(entityId, counterpartyId, Math.floor(accountHeight)),
       value: encodeBuffer(stored),
     });
     puts.push({
-      key: keyFrameDbAccountFrameByRuntime(recordHeight, entityId, counterpartyId, Math.floor(accountHeight)),
+      key: keyHistoryViewAccountFrameByRuntime(recordHeight, entityId, counterpartyId, Math.floor(accountHeight)),
       value: Buffer.alloc(0),
     });
   }
@@ -167,56 +168,56 @@ export const buildFrameDbPuts = (options: {
   return puts;
 };
 
-export const readFrameDbHead = async (
-  db: RuntimeFrameDbLike,
+export const readHistoryViewHead = async (
+  db: RuntimeDbLike,
   config: Required<StorageRuntimeConfig>,
-): Promise<StorageFrameDbHead> => {
-  const raw = await readRawOrNull(db, KEY_FRAME_DB_HEAD);
-  const decoded = raw ? decodeValidatedBuffer(raw, validateFrameDbHeadValue) : null;
+): Promise<StorageHistoryViewHead> => {
+  const raw = await readRawOrNull(db, KEY_HISTORY_VIEW_HEAD);
+  const decoded = raw ? decodeValidatedBuffer(raw, validateHistoryViewHeadValue) : null;
   return {
     schemaVersion: STORAGE_SCHEMA_VERSION,
     latestHeight: decoded?.latestHeight ?? 0,
     latestPrunedRuntimeHeight: decoded?.latestPrunedRuntimeHeight ?? 0,
     retainedBytes: decoded?.retainedBytes ?? 0,
-    maxBytes: config.frameDbMaxBytes,
-    retainFrames: config.frameDbRetainFrames,
+    maxBytes: config.historyViewMaxBytes,
+    retainFrames: config.historyViewRetainFrames,
   };
 };
 
-const writeFrameDbHead = async (
-  db: RuntimeFrameDbLike,
-  head: StorageFrameDbHead,
+const writeHistoryViewHead = async (
+  db: RuntimeDbLike,
+  head: StorageHistoryViewHead,
   onPersistenceBoundary?: StoragePersistenceBoundaryHook,
 ): Promise<void> => {
   const batch = db.batch();
-  batch.put(KEY_FRAME_DB_HEAD, encodeBuffer(head));
+  batch.put(KEY_HISTORY_VIEW_HEAD, encodeBuffer(head));
   await writeBatch(batch);
-  await onPersistenceBoundary?.('after-frame-db-prune');
+  await onPersistenceBoundary?.('after-history-view-prune');
 };
 
-export type FrameDbCommitPlan = {
-  puts: FrameDbPut[];
+export type HistoryViewCommitPlan = {
+  puts: HistoryViewPut[];
   writtenBytes: number;
-  nextHead: StorageFrameDbHead;
+  nextHead: StorageHistoryViewHead;
 };
 
-export const prepareFrameDbCommit = async (options: {
-  db: RuntimeFrameDbLike;
+export const prepareHistoryViewCommit = async (options: {
+  db: RuntimeDbLike;
   height: number;
-  puts: FrameDbPut[];
+  puts: HistoryViewPut[];
   config: Required<StorageRuntimeConfig>;
-}): Promise<FrameDbCommitPlan> => {
+}): Promise<HistoryViewCommitPlan> => {
   const height = Math.max(1, Math.floor(Number(options.height)));
-  const head = await readFrameDbHead(options.db, options.config);
+  const head = await readHistoryViewHead(options.db, options.config);
   const writtenBytes = options.puts.reduce((sum, item) => sum + item.key.byteLength + item.value.byteLength, 0);
   const appendBytes = head.latestHeight >= height ? 0 : writtenBytes;
-  const nextHead: StorageFrameDbHead = {
+  const nextHead: StorageHistoryViewHead = {
     schemaVersion: STORAGE_SCHEMA_VERSION,
     latestHeight: Math.max(head.latestHeight, height),
     latestPrunedRuntimeHeight: head.latestPrunedRuntimeHeight,
     retainedBytes: head.retainedBytes + appendBytes,
-    maxBytes: options.config.frameDbMaxBytes,
-    retainFrames: options.config.frameDbRetainFrames,
+    maxBytes: options.config.historyViewMaxBytes,
+    retainFrames: options.config.historyViewRetainFrames,
   };
 
   return {
@@ -226,13 +227,82 @@ export const prepareFrameDbCommit = async (options: {
   };
 };
 
-export const putFrameDbCommit = (batch: RuntimeFrameDbBatch, plan: FrameDbCommitPlan): void => {
+export const putHistoryViewCommit = (batch: RuntimeHistoryViewBatch, plan: HistoryViewCommitPlan): void => {
   for (const item of plan.puts) batch.put(item.key, item.value);
-  batch.put(KEY_FRAME_DB_HEAD, encodeBuffer(plan.nextHead));
+  batch.put(KEY_HISTORY_VIEW_HEAD, encodeBuffer(plan.nextHead));
 };
 
-const pruneFrameDbBeforeRuntimeHeight = async (
-  db: RuntimeFrameDbLike,
+export const reconcileHistoryViews = async (options: {
+  viewDb: RuntimeDbLike;
+  firstWalHeight: number;
+  latestWalHeight: number;
+  readWalFrame: (height: number) => Promise<StorageFrameRecord | null>;
+  config: Required<StorageRuntimeConfig>;
+}): Promise<{ materializedThroughRuntimeHeight: number; writtenBytes: number }> => {
+  const firstWalHeight = Math.max(1, Math.floor(Number(options.firstWalHeight)));
+  const latestWalHeight = Math.max(0, Math.floor(Number(options.latestWalHeight)));
+  let head = await readHistoryViewHead(options.viewDb, options.config);
+  if (latestWalHeight > 0 && firstWalHeight > latestWalHeight) {
+    throw new Error(
+      `HISTORY_VIEW_WAL_RANGE_INVALID:first=${firstWalHeight}:latest=${latestWalHeight}`,
+    );
+  }
+  if (head.latestHeight > latestWalHeight) {
+    throw new Error(
+      `HISTORY_VIEW_AHEAD_OF_WAL:view=${head.latestHeight}:wal=${latestWalHeight}`,
+    );
+  }
+  if (head.latestHeight + 1 < firstWalHeight) {
+    // A checkpoint import or WAL compaction may intentionally replace the
+    // replay prefix with one complete snapshot frame. The view is rebuildable,
+    // so advance its cursor to the explicit WAL floor and mark the unavailable
+    // prefix as pruned. Never skip a hole at or after this floor: those frames
+    // are part of the authoritative retained suffix and must fail loudly.
+    head = {
+      ...head,
+      latestHeight: firstWalHeight - 1,
+      latestPrunedRuntimeHeight: Math.max(
+        head.latestPrunedRuntimeHeight,
+        firstWalHeight - 1,
+      ),
+    };
+    const floorBatch = options.viewDb.batch();
+    floorBatch.put(KEY_HISTORY_VIEW_HEAD, encodeBuffer(head));
+    await writeBatch(floorBatch, { sync: true });
+  }
+  let writtenBytes = 0;
+  for (let height = head.latestHeight + 1; height <= latestWalHeight; height += 1) {
+    const frame = await options.readWalFrame(height);
+    if (!frame) throw new Error(`HISTORY_VIEW_WAL_FRAME_MISSING:height=${height}`);
+    const puts = buildHistoryViewPuts({
+      height: frame.height,
+      timestamp: frame.timestamp,
+      runtimeInput: frame.runtimeInput,
+      logs: frame.activityLogs,
+      touchedEntities: frame.touchedEntities,
+      touchedAccounts: frame.touchedAccounts,
+      touchedBookEntities: frame.touchedBookEntities,
+      historyRecords: frame.historyRecords,
+    });
+    const plan = await prepareHistoryViewCommit({
+      db: options.viewDb,
+      height,
+      puts,
+      config: options.config,
+    });
+    const batch = options.viewDb.batch();
+    putHistoryViewCommit(batch, plan);
+    await writeBatch(batch, { sync: true });
+    writtenBytes += plan.writtenBytes;
+  }
+  return {
+    materializedThroughRuntimeHeight: latestWalHeight,
+    writtenBytes,
+  };
+};
+
+const pruneHistoryViewBeforeRuntimeHeight = async (
+  db: RuntimeDbLike,
   heightInclusive: number,
   onPersistenceBoundary?: StoragePersistenceBoundaryHook,
 ): Promise<{ removedBytes: number; removedKeys: number }> => {
@@ -242,13 +312,13 @@ const pruneFrameDbBeforeRuntimeHeight = async (
   let removedBytes = 0;
   let removedKeys = 0;
   const onPruneBatch = async (): Promise<void> => {
-    await onPersistenceBoundary?.('after-frame-db-prune');
+    await onPersistenceBoundary?.('after-history-view-prune');
   };
   const runtimeActivityPruned = await deleteKeyRange(
     db,
     {
-      gte: Buffer.from([FRAME_DB_RUNTIME_ACTIVITY]),
-      lt: Buffer.concat([Buffer.from([FRAME_DB_RUNTIME_ACTIVITY]), encodeHeight(cutoff + 1)]),
+      gte: Buffer.from([HISTORY_VIEW_RUNTIME_ACTIVITY]),
+      lt: Buffer.concat([Buffer.from([HISTORY_VIEW_RUNTIME_ACTIVITY]), encodeHeight(cutoff + 1)]),
     },
     () => true,
     onPruneBatch,
@@ -264,8 +334,8 @@ const pruneFrameDbBeforeRuntimeHeight = async (
   const accountRuntimeIndexesPruned = await deleteKeyRange(
     db,
     {
-    gte: keyFrameDbAccountFrameByRuntimePrefix(),
-    lt: Buffer.concat([Buffer.from([FRAME_DB_ACCOUNT_FRAME_BY_RUNTIME]), encodeHeight(cutoff + 1)]),
+    gte: keyHistoryViewAccountFrameByRuntimePrefix(),
+    lt: Buffer.concat([Buffer.from([HISTORY_VIEW_ACCOUNT_FRAME_BY_RUNTIME]), encodeHeight(cutoff + 1)]),
     },
     () => true,
     onPruneBatch,
@@ -276,8 +346,8 @@ const pruneFrameDbBeforeRuntimeHeight = async (
   const entityRuntimeIndexesPruned = await deleteKeyRange(
     db,
     {
-      gte: keyFrameDbEntityFrameByRuntimePrefix(),
-      lt: Buffer.concat([Buffer.from([FRAME_DB_ENTITY_FRAME_BY_RUNTIME]), encodeHeight(cutoff + 1)]),
+      gte: keyHistoryViewEntityFrameByRuntimePrefix(),
+      lt: Buffer.concat([Buffer.from([HISTORY_VIEW_ENTITY_FRAME_BY_RUNTIME]), encodeHeight(cutoff + 1)]),
     },
     () => true,
     onPruneBatch,
@@ -288,10 +358,10 @@ const pruneFrameDbBeforeRuntimeHeight = async (
   return { removedBytes, removedKeys };
 };
 
-export const pruneFrameDbRetention = async (options: {
-  db: RuntimeFrameDbLike;
+export const pruneHistoryViewRetention = async (options: {
+  db: RuntimeDbLike;
   height: number;
-  head: StorageFrameDbHead;
+  head: StorageHistoryViewHead;
   config: Required<StorageRuntimeConfig>;
   onPersistenceBoundary?: StoragePersistenceBoundaryHook;
 }): Promise<{
@@ -302,7 +372,7 @@ export const pruneFrameDbRetention = async (options: {
 }> => {
   const height = Math.max(1, Math.floor(Number(options.height)));
   const nextHead = options.head;
-  if (nextHead.retainedBytes <= options.config.frameDbMaxBytes || height <= options.config.frameDbRetainFrames) {
+  if (nextHead.retainedBytes <= options.config.historyViewMaxBytes || height <= options.config.historyViewRetainFrames) {
     return {
       prunedBytes: 0,
       retainedBytes: nextHead.retainedBytes,
@@ -311,18 +381,18 @@ export const pruneFrameDbRetention = async (options: {
     };
   }
 
-  const cutoff = height - options.config.frameDbRetainFrames;
-  const pruned = await pruneFrameDbBeforeRuntimeHeight(
+  const cutoff = height - options.config.historyViewRetainFrames;
+  const pruned = await pruneHistoryViewBeforeRuntimeHeight(
     options.db,
     cutoff,
     options.onPersistenceBoundary,
   );
-  const finalHead: StorageFrameDbHead = {
+  const finalHead: StorageHistoryViewHead = {
     ...nextHead,
     latestPrunedRuntimeHeight: Math.max(nextHead.latestPrunedRuntimeHeight, cutoff),
     retainedBytes: Math.max(0, nextHead.retainedBytes - pruned.removedBytes),
   };
-  await writeFrameDbHead(options.db, finalHead, options.onPersistenceBoundary);
+  await writeHistoryViewHead(options.db, finalHead, options.onPersistenceBoundary);
   return {
     prunedBytes: pruned.removedBytes,
     retainedBytes: finalHead.retainedBytes,
@@ -331,13 +401,13 @@ export const pruneFrameDbRetention = async (options: {
   };
 };
 
-export const readFrameDbRuntimeActivity = async (
-  db: RuntimeFrameDbLike,
+export const readHistoryViewRuntimeActivity = async (
+  db: RuntimeDbLike,
   height: number,
 ): Promise<StoredRuntimeActivityRecord | null> => {
   const targetHeight = Number.isFinite(height) ? Math.max(1, Math.floor(height)) : 0;
   if (targetHeight <= 0) return null;
-  const raw = await readRawOrNull(db, keyFrameDbRuntimeActivity(targetHeight));
+  const raw = await readRawOrNull(db, keyHistoryViewRuntimeActivity(targetHeight));
   if (!raw) return null;
   const value = decodeValidatedBuffer(raw, decoded =>
     validateStoredRuntimeActivityValue(decoded, targetHeight));
@@ -361,33 +431,33 @@ export const readFrameDbRuntimeActivity = async (
   };
 };
 
-export const readFrameDbAccountFrames = async (
-  db: RuntimeFrameDbLike,
+export const readHistoryViewAccountFrames = async (
+  db: RuntimeDbLike,
   entityId: string,
   counterpartyId: string,
-  options: ReadFrameDbAccountFramesOptions = {},
+  options: ReadHistoryViewAccountFramesOptions = {},
 ): Promise<StoredAccountFrameRecord[]> => {
   const limit = options.limit ?? Number.POSITIVE_INFINITY;
   if (limit !== Number.POSITIVE_INFINITY && (!Number.isSafeInteger(limit) || limit <= 0)) {
-    throw new Error(`FRAME_DB_ACCOUNT_FRAME_LIMIT_INVALID:${String(limit)}`);
+    throw new Error(`HISTORY_VIEW_ACCOUNT_FRAME_LIMIT_INVALID:${String(limit)}`);
   }
   const maxAccountHeight = options.maxAccountHeight ?? Number.MAX_SAFE_INTEGER;
   const maxRuntimeHeight = options.maxRuntimeHeight ?? Number.MAX_SAFE_INTEGER;
   if (!Number.isSafeInteger(maxAccountHeight) || maxAccountHeight < 0) {
-    throw new Error(`FRAME_DB_ACCOUNT_FRAME_MAX_ACCOUNT_HEIGHT_INVALID:${String(maxAccountHeight)}`);
+    throw new Error(`HISTORY_VIEW_ACCOUNT_FRAME_MAX_ACCOUNT_HEIGHT_INVALID:${String(maxAccountHeight)}`);
   }
   if (!Number.isSafeInteger(maxRuntimeHeight) || maxRuntimeHeight < 0) {
-    throw new Error(`FRAME_DB_ACCOUNT_FRAME_MAX_RUNTIME_HEIGHT_INVALID:${String(maxRuntimeHeight)}`);
+    throw new Error(`HISTORY_VIEW_ACCOUNT_FRAME_MAX_RUNTIME_HEIGHT_INVALID:${String(maxRuntimeHeight)}`);
   }
   if (maxAccountHeight === 0 || maxRuntimeHeight === 0) return [];
 
-  const prefix = keyFrameDbAccountFramePrefix(entityId, counterpartyId);
+  const prefix = keyHistoryViewAccountFramePrefix(entityId, counterpartyId);
   const range = maxAccountHeight < Number.MAX_SAFE_INTEGER
-    ? { gte: prefix, lt: keyFrameDbAccountFrame(entityId, counterpartyId, maxAccountHeight + 1), reverse: true }
+    ? { gte: prefix, lt: keyHistoryViewAccountFrame(entityId, counterpartyId, maxAccountHeight + 1), reverse: true }
     : { prefix, reverse: true };
   const records: StoredAccountFrameRecord[] = [];
   for await (const key of iterateKeys(db, range)) {
-    const parsed = parseFrameDbAccountFrameKey(key);
+    const parsed = parseHistoryViewAccountFrameKey(key);
     const accountHeight = parsed.accountHeight;
     if (accountHeight > maxAccountHeight) continue;
     const record = decodeValidatedBuffer(await db.get(key), decoded =>
@@ -395,7 +465,7 @@ export const readFrameDbAccountFrames = async (
     if (record.runtimeHeight > maxRuntimeHeight) continue;
     const frameHeight = record.frame.height;
     if (frameHeight !== accountHeight) {
-      throw new Error(`FRAME_DB_ACCOUNT_FRAME_HEIGHT_MISMATCH: key=${accountHeight} frame=${frameHeight}`);
+      throw new Error(`HISTORY_VIEW_ACCOUNT_FRAME_HEIGHT_MISMATCH: key=${accountHeight} frame=${frameHeight}`);
     }
     records.push({
       kind: 'accountFrame',
@@ -412,33 +482,33 @@ export const readFrameDbAccountFrames = async (
   return records.sort((left, right) => left.accountHeight - right.accountHeight);
 };
 
-export const readFrameDbEntityFrames = async (
-  db: RuntimeFrameDbLike,
+export const readHistoryViewEntityFrames = async (
+  db: RuntimeDbLike,
   entityId: string,
   options: { limit?: number; maxEntityHeight?: number; maxRuntimeHeight?: number } = {},
 ): Promise<StoredEntityFrameRecord[]> => {
   const limit = options.limit ?? Number.POSITIVE_INFINITY;
   if (limit !== Number.POSITIVE_INFINITY && (!Number.isSafeInteger(limit) || limit <= 0)) {
-    throw new Error(`FRAME_DB_ENTITY_FRAME_LIMIT_INVALID:${String(limit)}`);
+    throw new Error(`HISTORY_VIEW_ENTITY_FRAME_LIMIT_INVALID:${String(limit)}`);
   }
   const maxEntityHeight = options.maxEntityHeight ?? Number.MAX_SAFE_INTEGER;
   const maxRuntimeHeight = options.maxRuntimeHeight ?? Number.MAX_SAFE_INTEGER;
   if (!Number.isSafeInteger(maxEntityHeight) || maxEntityHeight < 0) {
-    throw new Error(`FRAME_DB_ENTITY_FRAME_MAX_ENTITY_HEIGHT_INVALID:${String(maxEntityHeight)}`);
+    throw new Error(`HISTORY_VIEW_ENTITY_FRAME_MAX_ENTITY_HEIGHT_INVALID:${String(maxEntityHeight)}`);
   }
   if (!Number.isSafeInteger(maxRuntimeHeight) || maxRuntimeHeight < 0) {
-    throw new Error(`FRAME_DB_ENTITY_FRAME_MAX_RUNTIME_HEIGHT_INVALID:${String(maxRuntimeHeight)}`);
+    throw new Error(`HISTORY_VIEW_ENTITY_FRAME_MAX_RUNTIME_HEIGHT_INVALID:${String(maxRuntimeHeight)}`);
   }
   if (maxEntityHeight === 0 || maxRuntimeHeight === 0) return [];
-  const prefix = keyFrameDbEntityFramePrefix(entityId);
+  const prefix = keyHistoryViewEntityFramePrefix(entityId);
   const range = maxEntityHeight < Number.MAX_SAFE_INTEGER
-    ? { gte: prefix, lt: keyFrameDbEntityFrame(entityId, maxEntityHeight + 1), reverse: true }
+    ? { gte: prefix, lt: keyHistoryViewEntityFrame(entityId, maxEntityHeight + 1), reverse: true }
     : { prefix, reverse: true };
   const records: StoredEntityFrameRecord[] = [];
   for await (const key of iterateKeys(db, range)) {
-    const parsed = parseFrameDbEntityFrameKey(key);
+    const parsed = parseHistoryViewEntityFrameKey(key);
     if (normalizeEntityId(parsed.entityId) !== normalizeEntityId(entityId)) {
-      throw new Error(`FRAME_DB_ENTITY_FRAME_KEY_BINDING_MISMATCH:${parsed.entityId}:${entityId}`);
+      throw new Error(`HISTORY_VIEW_ENTITY_FRAME_KEY_BINDING_MISMATCH:${parsed.entityId}:${entityId}`);
     }
     const entityHeight = parsed.entityHeight;
     if (entityHeight > maxEntityHeight) continue;

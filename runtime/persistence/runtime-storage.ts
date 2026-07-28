@@ -13,9 +13,9 @@ import { assertPersistedLocalEntityCryptoKeys } from './../entity/crypto';
 import { getLiveConsumptionAccumulatorStates } from './../entity/consumption-store';
 import { getLiveAccountJClaimAccumulatorStates } from './../account/j-claim-store';
 import {
-  dropPendingFrameDbRecords,
+  dropPendingHistoryRecords,
   dropOverlay,
-  peekPendingFrameDbRecords,
+  peekPendingHistoryRecords,
   setAccountFrameHistoryView,
 } from './../runtime/env-events';
 import { normalizeRuntimeId } from './../networking/runtime-id';
@@ -47,8 +47,9 @@ import {
   listStorageSnapshotReplicaMetas,
   listStorageReplicaMetas,
   loadEntityStatesAtHeightFromStorage,
-  readFrameDbAccountFrames,
-  readFrameDbRuntimeActivity,
+  readHistoryViewAccountFrames,
+  reconcileHistoryViews,
+  resolveStorageRuntimeConfig,
   readStorageFrameRecord,
   readStorageHead,
   readStorageOverlayRecordsFromDiffs,
@@ -70,7 +71,6 @@ import type {
   EntityReplica,
   EntityState,
   RuntimeState,
-  FrameLogEntry,
   RoutedEntityInput,
   RuntimeOverlayRecord,
   RuntimeInput,
@@ -85,10 +85,12 @@ type RuntimeModule = typeof import('../runtime');
 
 export type RuntimeStorageApiDeps = Pick<RuntimeModule, 'closeRuntimeDb' | 'closeInfraDb' | 'createEmptyEnv'> & {
   getStorageDb(env: RuntimeState, role?: StorageDbRole): Level<Buffer, Buffer>;
-  getFrameDb(env: RuntimeState): Level<Buffer, Buffer>;
+  getRuntimeWalDb(env: RuntimeState): Level<Buffer, Buffer>;
+  getHistoryViewDb(env: RuntimeState): Level<Buffer, Buffer>;
   tryOpenStorageDb(env: RuntimeState, role?: StorageDbRole): Promise<boolean>;
   rotateStorageEpochDb(env: RuntimeState, snapshotHeight: number, timestamp?: number): Promise<boolean>;
-  tryOpenFrameDb(env: RuntimeState): Promise<boolean>;
+  tryOpenRuntimeWalDb(env: RuntimeState): Promise<boolean>;
+  tryOpenHistoryViewDb(env: RuntimeState): Promise<boolean>;
   waitForPromiseBeforeTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<boolean>;
   replayRecoveryFrameJournals(env: RuntimeState, frames: PersistedFrameJournal[]): Promise<void>;
 };
@@ -145,10 +147,12 @@ export const notifyRuntimeSyncAfterCommit = (
 export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
   const {
     getStorageDb,
-    getFrameDb,
+    getRuntimeWalDb,
+    getHistoryViewDb,
     tryOpenStorageDb,
     rotateStorageEpochDb,
-    tryOpenFrameDb,
+    tryOpenRuntimeWalDb,
+    tryOpenHistoryViewDb,
     closeRuntimeDb,
     closeInfraDb,
     waitForPromiseBeforeTimeout,
@@ -292,10 +296,10 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
     env: RuntimeState,
     expectedInput: RuntimeInput | undefined,
   ): Promise<RuntimeFrameCommitStatus> => {
-    if (!(await tryOpenFrameDb(env))) return 'unknown';
-    const historyDb = getFrameDb(env);
-    const head = await readStorageHead(historyDb);
-    const frame = await readStorageFrameRecord(historyDb, env.height);
+    if (!(await tryOpenRuntimeWalDb(env))) return 'unknown';
+    const walDb = getRuntimeWalDb(env);
+    const head = await readStorageHead(walDb);
+    const frame = await readStorageFrameRecord(walDb, env.height);
     if (frame) {
       const expectedInputValue = expectedInput ?? { runtimeTxs: [], entityInputs: [] };
       const inputMatches = safeStringify(frame.runtimeInput) === safeStringify(expectedInputValue);
@@ -305,7 +309,7 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
           safeStringify(
             buildDurableRuntimeMachineSnapshot(env, {
               pendingNetworkOutputs: env.pendingNetworkOutputs ?? [],
-              excludePersistedFrameDbRecords: true,
+              excludePersistedHistoryRecords: true,
             }),
           );
       const stateMatches = !frame.runtimeStateHash || frame.runtimeStateHash === computeCanonicalStateHashFromEnv(env);
@@ -329,7 +333,7 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
     if (envRecord(env)[ENV_REPLAY_MODE_KEY] === true) {
       throw new Error('REPLAY_INVARIANT_FAILED: saveEnvToDB called during replay');
     }
-    const pendingFrameDbRecords = peekPendingFrameDbRecords(env, env.height, env.timestamp);
+    const pendingHistoryRecords = peekPendingHistoryRecords(env, env.height, env.timestamp);
     let saveResult: Awaited<ReturnType<typeof saveRuntimeFrameToStorage>>;
     try {
       saveResult = await withStorageWriteTimeout(env, markStorageProgress =>
@@ -338,12 +342,14 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
             env,
             tryOpenDb: targetEnv => tryOpenStorageDb(targetEnv, 'current'),
             getRuntimeDb: targetEnv => getStorageDb(targetEnv, 'current'),
-            tryOpenFrameDb,
-            getFrameDb,
+            tryOpenRuntimeWalDb,
+            getRuntimeWalDb,
+            tryOpenHistoryViewDb,
+            getHistoryViewDb,
             rotateEpochDb: rotateStorageEpochDb,
             getPerfMs,
             formatPerfMs,
-            frameDbRecords: pendingFrameDbRecords,
+            historyRecords: pendingHistoryRecords,
             stopStaleWriterOnHeadAhead: runtimeIsBrowser && !env.scenarioMode,
             ...(currentFrameInput === undefined ? {} : { currentFrameInput }),
             ...(currentFrameOutputs === undefined ? {} : { currentFrameOutputs }),
@@ -371,7 +377,7 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
       }
       throw new RuntimeFrameStorageError(commitStatus, error);
     }
-    if (!saveResult.frameDbCommitted && !saveResult.staleWriterStopped) {
+    if (!saveResult.historyViewsMaterialized && !saveResult.staleWriterStopped) {
       throw new RuntimeFrameStorageError(
         'not-committed',
         new Error(`STORAGE_AUTHORITATIVE_FRAME_NOT_COMMITTED:height=${env.height}`),
@@ -388,8 +394,8 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
       state.stopLoop?.();
       return { staleWriterStopped: true };
     }
-    if (saveResult.frameDbCommitted) {
-      dropPendingFrameDbRecords(env, pendingFrameDbRecords.length);
+    if (saveResult.historyViewsMaterialized) {
+      dropPendingHistoryRecords(env, pendingHistoryRecords.length);
     }
     if (saveResult.materialized) {
       dropOverlay(env, saveResult.materializedOverlayRecords);
@@ -433,9 +439,9 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
   };
 
   const listPersistedStorageHandles = async (env: RuntimeState): Promise<PersistedStorageHandle[]> => {
-    const opened = await tryOpenFrameDb(env);
+    const opened = await tryOpenRuntimeWalDb(env);
     if (!opened) return [];
-    const db = getFrameDb(env);
+    const db = getRuntimeWalDb(env);
     const head = await readStorageHead(db);
     if (!head || head.latestHeight <= 0) return [];
     return [
@@ -516,9 +522,9 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
   ): Promise<Awaited<ReturnType<typeof listStorageReplicaMetas>>> => {
     const normalizedEntityId = String(entityId || '').toLowerCase();
     if (!normalizedEntityId) return [];
-    if (!(await tryOpenFrameDb(env))) return [];
-    const historyDb = getFrameDb(env);
-    return listStorageReplicaMetas(historyDb, normalizedEntityId, sharedState);
+    if (!(await tryOpenRuntimeWalDb(env))) return [];
+    const walDb = getRuntimeWalDb(env);
+    return listStorageReplicaMetas(walDb, normalizedEntityId, sharedState);
   };
 
   const readPersistedStorageSnapshotReplicaMetas = async (
@@ -528,8 +534,8 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
   ): Promise<Awaited<ReturnType<typeof listStorageSnapshotReplicaMetas>>> => {
     const normalizedEntityId = String(entityId || '').toLowerCase();
     if (!normalizedEntityId || snapshotHeight <= 0) return [];
-    if (!(await tryOpenFrameDb(env))) return [];
-    return listStorageSnapshotReplicaMetas(getFrameDb(env), snapshotHeight, normalizedEntityId);
+    if (!(await tryOpenRuntimeWalDb(env))) return [];
+    return listStorageSnapshotReplicaMetas(getRuntimeWalDb(env), snapshotHeight, normalizedEntityId);
   };
 
   const resolvePersistedSnapshotHeight = async (env: RuntimeState, targetHeight: number): Promise<number> => {
@@ -694,8 +700,8 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
       }
       const restoredStates = await loadEntityStatesAtHeightFromStorage({
         env,
-        tryOpenDb: tryOpenFrameDb,
-        getRuntimeDb: getFrameDb,
+        tryOpenDb: tryOpenRuntimeWalDb,
+        getRuntimeDb: getRuntimeWalDb,
         height: targetHeight,
       });
       for (const state of restoredStates.values()) assertCertifiedJHistoryIntegrity(state);
@@ -773,18 +779,18 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
         }
       }
 
-      const historyDb = getFrameDb(env);
+      const walDb = getRuntimeWalDb(env);
       for (const root of new Set(
         Array.from(env.eReplicas.values(), replica => replica.state.certifiedBoardState?.boardRegistryRoot).filter(
           (value): value is string => Boolean(value),
         ),
       )) {
-        await hydrateCertifiedBoardRootNodesFromStorage(env, historyDb, root);
+        await hydrateCertifiedBoardRootNodesFromStorage(env, walDb, root);
       }
       for (const state of getLiveConsumptionAccumulatorStates(env)) {
-        await hydrateConsumptionRootNodesFromStorage(env, historyDb, state);
+        await hydrateConsumptionRootNodesFromStorage(env, walDb, state);
       }
-      await hydrateAccountJClaimRootNodesFromStorage(env, historyDb, getLiveAccountJClaimAccumulatorStates(env));
+      await hydrateAccountJClaimRootNodesFromStorage(env, walDb, getLiveAccountJClaimAccumulatorStates(env));
 
       if (env.jReplicas.size === 0) rebuildPersistedJurisdictions(env);
       await assertCertifiedRegistrationEvidenceStore(env);
@@ -823,21 +829,7 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
       restoreDurableOutputRetryState(env, frame.runtimeOutputRetryState ?? [], frame.runtimeOutputs ?? []);
       await restoreOverlayFromFrameLog(env, targetHeight);
       await hydrateAccountFrameHistoryViews(env);
-      let restoredFrameLogs: FrameLogEntry[] = [];
-      try {
-        if (await tryOpenFrameDb(env)) {
-          const activity = await readFrameDbRuntimeActivity(getFrameDb(env), targetHeight);
-          if (activity?.logs) restoredFrameLogs = activity.logs.map(entry => ({ ...entry }));
-        }
-      } catch (error) {
-        // Activity logs are secondary; classify the failure without hiding it or
-        // making authoritative state restore depend on an auxiliary index.
-        runtimeLog.warn('storage.activity_restore_failed', {
-          height: targetHeight,
-          error: error instanceof Error ? `${error.name}: ${error.message}` : String(error),
-        });
-      }
-      env.frameLogs = restoredFrameLogs;
+      env.frameLogs = frame.activityLogs.map(entry => ({ ...entry }));
       if (frame.runtimeMachine) {
         restoreDurableRuntimeSnapshot(env, frame.runtimeMachine);
         await assertCertifiedRegistrationEvidenceStore(env);
@@ -900,14 +892,14 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
   const hydrateAccountFrameHistoryViews = async (env: RuntimeState, limit = 0): Promise<void> => {
     if (limit <= 0) return;
     try {
-      if (!(await tryOpenFrameDb(env))) return;
-      const db = getFrameDb(env);
+      if (!(await tryOpenRuntimeWalDb(env))) return;
+      const db = getRuntimeWalDb(env);
       for (const [replicaKey, replica] of env.eReplicas.entries()) {
         const entityId = String(replica?.entityId || String(replicaKey).split(':')[0] || '').toLowerCase();
         if (!entityId || !replica?.state?.accounts) continue;
         for (const [counterpartyId, account] of replica.state.accounts.entries()) {
           const accountCurrentHeight = Math.max(0, Math.floor(Number(account.currentHeight ?? 0)));
-          const records = await readFrameDbAccountFrames(db, entityId, String(counterpartyId).toLowerCase(), {
+          const records = await readHistoryViewAccountFrames(db, entityId, String(counterpartyId).toLowerCase(), {
             limit,
             maxRuntimeHeight: env.height,
             maxAccountHeight: accountCurrentHeight,
@@ -952,7 +944,7 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
       replicaMetaDigest: actualReplicaMetaDigest,
       runtimeMachine: buildReplayVerifiableRuntimeMachineSnapshot(env, {
         pendingNetworkOutputs: env.pendingNetworkOutputs ?? [],
-        excludePersistedFrameDbRecords: true,
+        excludePersistedHistoryRecords: true,
       }),
     });
     const expectedCanonicalStateHash = storageHashMode
@@ -1098,17 +1090,28 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
     // input state reconstructed from the latest WAL frame.
     await restoreOverlayFromFrameLog(env, targetHeight);
     await hydrateAccountFrameHistoryViews(env);
-    env.frameLogs = [];
-    if (!(await tryOpenFrameDb(env))) return;
-    try {
-      const activity = await readFrameDbRuntimeActivity(getFrameDb(env), targetHeight);
-      env.frameLogs = activity?.logs?.map(entry => ({ ...entry })) ?? [];
-    } catch (error) {
-      runtimeLog.warn('storage.activity_restore_failed', {
-        height: targetHeight,
-        error: error instanceof Error ? `${error.name}: ${error.message}` : String(error),
-      });
+    const frame = await readPersistedStorageFrameRecord(env, targetHeight);
+    env.frameLogs = frame?.activityLogs.map(entry => ({ ...entry })) ?? [];
+  };
+
+  const reconcilePersistedHistoryViews = async (
+    env: RuntimeState,
+    latestHeight: number,
+  ): Promise<void> => {
+    if (!(await tryOpenRuntimeWalDb(env))) {
+      throw new Error(`HISTORY_VIEW_WAL_DB_OPEN_FAILED:height=${latestHeight}`);
     }
+    if (!(await tryOpenHistoryViewDb(env))) {
+      throw new Error(`HISTORY_VIEW_DB_OPEN_FAILED:height=${latestHeight}`);
+    }
+    const retainedSnapshotHeights = await listStorageSnapshotHeights(getRuntimeWalDb(env));
+    await reconcileHistoryViews({
+      viewDb: getHistoryViewDb(env),
+      firstWalHeight: retainedSnapshotHeights[0] ?? 1,
+      latestWalHeight: latestHeight,
+      readWalFrame: height => readStorageFrameRecord(getRuntimeWalDb(env), height),
+      config: resolveStorageRuntimeConfig(env),
+    });
   };
 
   const assertReplayedStorageFrameMatches = (env: RuntimeState, frame: StorageFrameRecord): void => {
@@ -1174,6 +1177,9 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
       }
       if (!targetFrame) throw new Error(`STORAGE_RESTORE_FRAME_MISSING:height=${target.targetHeight}`);
       await finalizeReplayedStorageRestore(restored, target, targetFrame);
+      if (target.targetHeight === target.latestHeight) {
+        await reconcilePersistedHistoryViews(restored.env, target.latestHeight);
+      }
       restored.latestHeight = target.latestHeight;
       restored.checkpointHeight = target.selectedSnapshotHeight;
       restored.selectedSnapshotHeight = target.selectedSnapshotHeight;

@@ -36,7 +36,6 @@ import { verifyStorageTailIntegrity } from './verify';
 import { projectReplayVerifiableRuntimeMachine } from '../wal/snapshot';
 import type {
   RuntimeDbLike,
-  RuntimeFrameDbLike,
   StorageDoc,
   StorageEntityHashDoc,
   StorageFrameEntityHash,
@@ -54,7 +53,7 @@ type ExistingHistoryDecision =
 
 export type RestoredStorageBaseOptions = {
   currentDb: RuntimeDbLike;
-  historyDb: RuntimeFrameDbLike;
+  walDb: RuntimeDbLike;
   height: number;
   timestamp: number;
   docs: StorageDoc[];
@@ -160,7 +159,7 @@ const assertUniqueReplicaMetas = (entries: readonly ReplicaMetaEntry[]): void =>
   }
 };
 
-const readAuthoritativeReplicaMetas = async (db: RuntimeFrameDbLike): Promise<ReplicaMetaEntry[]> => {
+const readAuthoritativeReplicaMetas = async (db: RuntimeDbLike): Promise<ReplicaMetaEntry[]> => {
   const entries: ReplicaMetaEntry[] = [];
   for await (const key of iterateKeys(db, { prefix: keyLiveReplicaMetaPrefix() })) {
     entries.push({ key, value: await db.get(key) });
@@ -171,10 +170,10 @@ const readAuthoritativeReplicaMetas = async (db: RuntimeFrameDbLike): Promise<Re
 const decideExistingHistory = async (
   options: RestoredStorageBaseOptions,
 ): Promise<ExistingHistoryDecision> => {
-  const verified = await verifyStorageTailIntegrity(options.historyDb);
+  const verified = await verifyStorageTailIntegrity(options.walDb);
   if (verified.latestHeight === 0) return { kind: 'replace' };
-  const head = await readStorageHead(options.historyDb);
-  const frame = await readStorageFrameRecord(options.historyDb, verified.latestHeight);
+  const head = await readStorageHead(options.walDb);
+  const frame = await readStorageFrameRecord(options.walDb, verified.latestHeight);
   if (!head || !frame) throw new Error('RECOVERY_IMPORT_EXISTING_HISTORY_INCOMPLETE');
   if (verified.latestHeight > options.height) {
     throw new Error(
@@ -197,7 +196,7 @@ const decideExistingHistory = async (
       `existingHash=${frame.canonicalStateHash}:candidateHash=${options.canonicalStateHash}`,
     );
   }
-  const existingMetaDigest = computeStorageReplicaMetaDigest(await readAuthoritativeReplicaMetas(options.historyDb));
+  const existingMetaDigest = computeStorageReplicaMetaDigest(await readAuthoritativeReplicaMetas(options.walDb));
   const candidateMetaDigest = computeStorageReplicaMetaDigest(options.replicaMetas);
   if (existingMetaDigest !== candidateMetaDigest) {
     throw new Error(
@@ -209,9 +208,9 @@ const decideExistingHistory = async (
 };
 
 const queueHistoryReplacement = async (
-  db: RuntimeFrameDbLike,
+  db: RuntimeDbLike,
   entries: readonly { key: Buffer; value: Buffer }[],
-): Promise<ReturnType<RuntimeFrameDbLike['batch']>> => {
+): Promise<ReturnType<RuntimeDbLike['batch']>> => {
   if (typeof db.keys !== 'function') throw new Error('RECOVERY_IMPORT_HISTORY_KEYS_UNSUPPORTED');
   const batch = db.batch();
   requireAtomicDelete(batch, 'RECOVERY_IMPORT_HISTORY');
@@ -326,6 +325,8 @@ export const replaceRestoredStorageBase = async (
     runtimeStateHash: options.canonicalStateHash,
     runtimeMachine: options.runtimeMachine,
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
+    historyRecords: [],
+    activityLogs: [],
     touchedEntities: Array.from(new Set(options.docs.map((doc) => doc.entityId))).sort(),
     touchedAccounts: options.docs
       .filter((doc): doc is Extract<StorageDoc, { family: 'account' }> => doc.family === 'account')
@@ -354,7 +355,7 @@ export const replaceRestoredStorageBase = async (
     epochReplayBytes: 0,
     retainedHistoryBytes,
   };
-  const historyEntries = [
+  const walEntries = [
     ...snapshotEntries,
     ...snapshotReplicaMetaEntries,
     manifestEntry,
@@ -365,10 +366,10 @@ export const replaceRestoredStorageBase = async (
     ...accountJClaimNodes,
     { key: KEY_HEAD, value: encodeBuffer(head) },
   ];
-  const historyBatch = await queueHistoryReplacement(options.historyDb, historyEntries);
-  await writeBatch(historyBatch);
+  const walBatch = await queueHistoryReplacement(options.walDb, walEntries);
+  await writeBatch(walBatch);
   await options.onPersistenceBoundary?.('after-restore-authoritative-swap');
-  await verifyStorageSnapshotIntegrity(options.historyDb, head);
+  await verifyStorageSnapshotIntegrity(options.walDb, head);
 
   const currentHead = options.currentDb.batch();
   currentHead.put(KEY_HEAD, encodeBuffer(head));

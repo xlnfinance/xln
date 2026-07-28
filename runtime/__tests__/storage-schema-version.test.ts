@@ -1,18 +1,18 @@
 import { describe, expect, test } from 'bun:test';
 
 import { encodeBuffer } from '../storage/codec';
-import { readFrameDbHead } from '../storage/frame-db';
+import { readHistoryViewHead } from '../storage/history-view';
 import { inspectStorage } from '../storage/inspect';
 import { recoverStorageDbFromHistory } from '../storage/index';
 import {
-  KEY_FRAME_DB_HEAD,
+  KEY_HISTORY_VIEW_HEAD,
   KEY_HEAD,
   STORAGE_FRAME_FORMAT,
   STORAGE_SCHEMA_VERSION,
 } from '../storage/keys';
 import { seedFreshStorageEpoch } from '../storage/lifecycle';
 import { readStorageHead } from '../storage/read';
-import type { RuntimeDbLike, StorageFrameDbHead, StorageHead, StorageRuntimeConfig } from '../storage/types';
+import type { RuntimeDbLike, StorageHistoryViewHead, StorageHead, StorageRuntimeConfig } from '../storage/types';
 import { verifyStorageTailIntegrity } from '../storage/verify';
 import type { RuntimeState } from '../types';
 
@@ -34,8 +34,8 @@ const storageConfig: Required<StorageRuntimeConfig> = {
   snapshotPeriodFrames: 256,
   retainSnapshots: 3,
   epochMaxBytes: 256 * 1024 * 1024,
-  frameDbMaxBytes: 256 * 1024 * 1024,
-  frameDbRetainFrames: 100_000,
+  historyViewMaxBytes: 256 * 1024 * 1024,
+  historyViewRetainFrames: 100_000,
   materializePeriodFrames: 64,
   accountMerkleRadix: 16,
 };
@@ -77,12 +77,12 @@ describe('storage schema boundary', () => {
     await expect(readStorageHead(memoryDbWithHead(currentHead(6)))).rejects.toThrow(
       `STORAGE_SCHEMA_MISMATCH:stored=6:current=${STORAGE_SCHEMA_VERSION}:boundary=storage-head`,
     );
-    expect(STORAGE_SCHEMA_VERSION).toBe(9);
+    expect(STORAGE_SCHEMA_VERSION).toBe(10);
   });
 
   test('pins the one current frame format as one inseparable descriptor', () => {
     expect(STORAGE_FRAME_FORMAT).toEqual({
-      schemaVersion: 9,
+      schemaVersion: 10,
       domain: 'xln.storage.frame',
       postStateDomain: 'xln.storage.postState',
       algorithmId: 'sha256',
@@ -113,16 +113,16 @@ describe('storage schema boundary', () => {
   });
 
   test('rejects legacy frame-journal heads instead of relabelling them current', async () => {
-    const legacy: StorageFrameDbHead = {
+    const legacy: StorageHistoryViewHead = {
       schemaVersion: 2,
       latestHeight: 7,
       latestPrunedRuntimeHeight: 0,
       retainedBytes: 1_024,
-      maxBytes: storageConfig.frameDbMaxBytes,
-      retainFrames: storageConfig.frameDbRetainFrames,
+      maxBytes: storageConfig.historyViewMaxBytes,
+      retainFrames: storageConfig.historyViewRetainFrames,
     };
-    await expect(readFrameDbHead(memoryDb([[KEY_FRAME_DB_HEAD, legacy]]), storageConfig)).rejects.toThrow(
-      `STORAGE_SCHEMA_MISMATCH:stored=2:current=${STORAGE_SCHEMA_VERSION}:boundary=frame-db-head`,
+    await expect(readHistoryViewHead(memoryDb([[KEY_HISTORY_VIEW_HEAD, legacy]]), storageConfig)).rejects.toThrow(
+      `STORAGE_SCHEMA_MISMATCH:stored=2:current=${STORAGE_SCHEMA_VERSION}:boundary=history-view-head`,
     );
   });
 
@@ -131,7 +131,7 @@ describe('storage schema boundary', () => {
     await expect(
       recoverStorageDbFromHistory({
         db: memoryDb(),
-        historyDb: legacyDb,
+        walDb: legacyDb,
         config: storageConfig,
       }),
     ).rejects.toThrow(`STORAGE_SCHEMA_MISMATCH:stored=2:current=${STORAGE_SCHEMA_VERSION}`);

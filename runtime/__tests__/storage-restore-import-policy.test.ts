@@ -6,7 +6,7 @@ import {
   closeRuntimeDb,
   createEmptyEnv,
   enqueueRuntimeInput,
-  getFrameDb,
+  getRuntimeWalDb,
   loadEnvFromDB,
   persistRestoredEnvToDB,
   processRuntime,
@@ -25,7 +25,7 @@ type RecoveryEnv = { env: RuntimeState; entityId: string; signerId: string; repl
 const cleanupPaths: string[] = [];
 
 const cleanup = (base: string): void => {
-  for (const suffix of ['', '-storage-current', '-storage-previous', '-frames', '-events', '-infra']) {
+  for (const suffix of ['', '-storage-current', '-storage-previous', '-wal', '-events', '-infra']) {
     rmSync(`${base}${suffix}`, { recursive: true, force: true });
   }
 };
@@ -237,10 +237,10 @@ describe('restored checkpoint conflict policy', () => {
     const seed = `restore idempotent ${process.pid} deterministic seed`;
     const current = await createRecoveryEnv(seed, true);
     cleanupPaths.push(resolveDbPath(current.env, 'core'));
-    const before = await readStorageFrameRecord(getFrameDb(current.env), current.env.height);
+    const before = await readStorageFrameRecord(getRuntimeWalDb(current.env), current.env.height);
     expect(before?.canonicalStateHash).toBeString();
     await persistRestoredEnvToDB(current.env);
-    const after = await readStorageFrameRecord(getFrameDb(current.env), current.env.height);
+    const after = await readStorageFrameRecord(getRuntimeWalDb(current.env), current.env.height);
     expect(after?.frameHash).toBe(before?.frameHash);
     await closeRecoveryEnv(current.env);
   });

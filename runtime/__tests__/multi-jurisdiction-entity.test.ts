@@ -41,7 +41,7 @@ const createdEnvs: RuntimeState[] = [];
 
 const cleanupEnvStorage = (env: RuntimeState): void => {
   const base = resolveDbPath(env, 'core');
-  for (const suffix of ['', '-storage-current', '-storage-previous', '-frames', '-events', '-infra']) {
+  for (const suffix of ['', '-storage-current', '-storage-previous', '-wal', '-events', '-infra']) {
     rmSync(`${base}${suffix}`, { recursive: true, force: true });
   }
 };

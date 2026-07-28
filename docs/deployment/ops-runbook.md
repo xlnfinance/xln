@@ -66,10 +66,19 @@ bun run prod:health
 
 ## Storage Recovery
 
-- The history frame DB is authoritative for runtime replay.
-- On startup and before durable writes, the current materialized DB is reconciled from history if it lagged after a crash.
-- `storage.epochMaxBytes` is the byte trigger for a full storage epoch rotation. The normal runtime default is 16 GiB; small values belong only in explicit rotation tests and smoke drills. When the current epoch's replay bytes cross the limit, the runtime writes a full snapshot into the history frame DB, prunes replay diffs covered by the retained snapshot, seeds a fresh `*-storage-current` DB from live rows plus Merkle rows, and leaves the replaced DB at `*-storage-previous`.
-- Treat `*-frames` as the recovery source of truth. `*-storage-previous` is an archive/debug candidate after the new `*-storage-current` opens and `/api/health` is green; do not delete or move `*-frames` while investigating storage incidents.
+- The `*-wal` Runtime WAL is authoritative for replay. The `*-history-views`
+  database is a rebuildable inspection/UI index, never a commit authority.
+- On startup, current state and history views reconcile from the WAL if either
+  lagged after a crash. A secondary-database failure must not roll Runtime back.
+- `storage.epochMaxBytes` is the byte trigger for a full storage epoch rotation.
+  The normal runtime default is 16 GiB; small values belong only in explicit
+  rotation tests and smoke drills. The Runtime writes a full snapshot to the
+  WAL, prunes replay diffs covered by the retained snapshot, seeds a fresh
+  `*-storage-current` DB from live rows plus Merkle rows, and leaves the
+  replaced DB at `*-storage-previous`.
+- Treat `*-wal` as the recovery source of truth. Preserve both `*-wal` and
+  `*-history-views` during incident investigation; the latter can be rebuilt,
+  but contains useful evidence about materialization progress.
 - For high-load hub drills, use the rotation benchmarks:
 
   ```bash

@@ -34,7 +34,8 @@ XLN already has most of the raw material:
 - `AccountMachine.currentFrame`, `pendingFrame`, `currentHeight`, `currentFrameHanko`, and `counterpartyFrameHanko` in `runtime/types.ts`.
 - Dispute proof state: `abiProofBody`, `currentDisputeProofHanko`, `counterpartyDisputeProofHanko`, `disputeProofNoncesByHash`, and `disputeProofBodiesByHash`.
 - `buildAccountProofBody()` and `createDisputeProofHash()` in `runtime/protocol/dispute/proof-builder.ts`.
-- durable account frame journal via `RuntimeFrameDbRecord` and `runtime/storage/frame-db.ts`.
+- durable account frame history via `RuntimeHistoryRecord` materialized by
+  `runtime/storage/history-view.ts` from the authoritative Runtime WAL.
 - storage Merkle roots used by `stateHash`, documented in `docs/merkle.md`.
 - `entity-crontab.ts` already handles pending-frame resend, stale pending-frame detection, HTLC timeouts, rollback suggestions, and rebalance automation.
 - the native wallet plan already says relays/watchtowers may notify and prove, but must not hold spend-capable user keys.
@@ -292,7 +293,7 @@ type AccountRecoveryBundleV1 = {
   anchors: {
     storageStateHash?: string;
     storageMerkleRoot?: string;
-    lastFrameDbRuntimeHeight?: number;
+    lastHistoryRuntimeHeight?: number;
     lastJBlockHash?: string;
   };
 
@@ -506,7 +507,7 @@ Detailed steps:
 
 6. **Materialize runtime**
    - Rebuild `AccountMachine` with current frame, deltas, locks, proof metadata, J observations, settlement workspace, and pending frame if valid.
-   - Write storage snapshot and frame DB records.
+   - Append the Runtime WAL, then materialize history views.
    - Restart PSR cadence and tower uploads.
    - Mark account status as `verified`, `peer-restored`, `tower-restored`, `proof-only`, or `conflict`.
 

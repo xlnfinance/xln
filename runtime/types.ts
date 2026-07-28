@@ -17,7 +17,7 @@ import type {
   AccountFrame,
   AccountState,
   AccountTx,
-  AccountFrameDbRecord,
+  AccountHistoryRecord,
   HtlcNoteKey,
   HtlcRoute,
   RuntimeOverlayRecord,
@@ -163,7 +163,7 @@ export type {
   AccountSnapshot,
   AccountStatus,
   AccountTx,
-  AccountFrameDbRecord,
+  AccountHistoryRecord,
   AssetBalance,
   CrossJurisdictionSecretRelay,
   Delta,
@@ -1027,7 +1027,7 @@ export interface CertifiedEntityFrameLink {
   postAuthority: EntityFrameAuthority;
 }
 
-export type RuntimeFrameDbRecord = AccountFrameDbRecord | {
+export type RuntimeHistoryRecord = AccountHistoryRecord | {
   kind: 'entityFrame';
   entityId: string;
   entityHeight: number;
@@ -1061,7 +1061,7 @@ export type EntityCandidateEffect =
       entityId: string;
       counterpartyId: string;
       accountHeight: number;
-      source: Extract<RuntimeFrameDbRecord, { kind: 'accountFrame' }>['source'];
+      source: Extract<RuntimeHistoryRecord, { kind: 'accountFrame' }>['source'];
       frame: AccountFrame;
     }
   | {
@@ -1109,7 +1109,7 @@ export interface EntityReplica {
   lockedFrame?: ProposedEntityFrame; // Frame this validator is locked/precommitted to
   /** Validator-local replay result; commits never consume proposer-supplied state or outputs. */
   validatorExecution?: ValidatorEntityFrameExecution;
-  /** Latest finalized certificate only; historical certificates live in the frame DB. */
+  /** Latest finalized certificate only; historical certificates live in the Runtime WAL and history views. */
   certifiedFrameLineage?: CertifiedEntityFrameLink[];
   certifiedFrameAnchor?: CertifiedEntityLineageAnchor;
   isProposer: boolean;
@@ -1205,8 +1205,8 @@ export interface RuntimeState {
       snapshotPeriodFrames?: number;
       retainSnapshots?: number;
       epochMaxBytes?: number;
-      frameDbMaxBytes?: number;
-      frameDbRetainFrames?: number;
+      historyViewMaxBytes?: number;
+      historyViewRetainFrames?: number;
       materializePeriodFrames?: number;
       canonicalHashPeriodFrames?: number;
       accountMerkleRadix?: 16 | 256;
@@ -1260,7 +1260,7 @@ export interface RuntimeState {
     storagePreviousDbOpenPromise?: Promise<boolean> | null | undefined;
     storageVerifiedCurrentHeight?: number;
     storageVerifiedPreviousHeight?: number;
-    storageVerifiedHistoryHeight?: number;
+    storageVerifiedWalHeight?: number;
     storageEpochRotatePromise?: Promise<void> | null;
     storageEntityHashDocs?: unknown;
     /** Content-addressed board nodes. Authority is the root in EntityState. */
@@ -1282,8 +1282,11 @@ export interface RuntimeState {
     /** Validator-local receipt proofs; never sourced from Entity/peer state. */
     certifiedRegistrationEvidence?: Map<string, CertifiedRegistrationEvidence>;
     currentStorageOverlayMarks?: RuntimeOverlayRecord[];
-    frameDb?: Level<Buffer, Buffer> | null | undefined;
-    frameDbOpenPromise?: Promise<boolean> | null | undefined;
+    runtimeWalDb?: Level<Buffer, Buffer> | null | undefined;
+    runtimeWalDbOpenPromise?: Promise<boolean> | null | undefined;
+    /** Rebuildable Entity/Account/J history indexes. Runtime WAL remains authoritative. */
+    historyViewDb?: Level<Buffer, Buffer> | null | undefined;
+    historyViewDbOpenPromise?: Promise<boolean> | null | undefined;
     infraDb?: Level<Buffer, Buffer> | null | undefined;
     infraDbOpenPromise?: Promise<boolean> | null | undefined;
     infraDbClosing?: boolean;
@@ -1343,7 +1346,7 @@ export interface RuntimeState {
         jTxCount: number;
       }>;
     }>;
-    pendingFrameDbRecords?: RuntimeFrameDbRecord[];
+    pendingHistoryRecords?: RuntimeHistoryRecord[];
     cleanLogs?: string[];
     routeDeferState?: Map<string, {
       warnAt: number;

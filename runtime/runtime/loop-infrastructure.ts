@@ -12,11 +12,13 @@ import {
 } from './input-queue';
 import { ensureRuntimeState } from './runtime-state';
 import {
-  getFrameDb,
+  getRuntimeWalDb,
+  getHistoryViewDb,
   getInfraDb,
   getStorageDb,
   rotateStorageEpochDb,
-  tryOpenFrameDb,
+  tryOpenRuntimeWalDb,
+  tryOpenHistoryViewDb,
   tryOpenStorageDb,
   type StorageDbRole,
 } from '../storage/runtime-dbs';
@@ -41,8 +43,11 @@ export const getRuntimeStorageDb = (
 export const getRuntimeInfraDb = (env: RuntimeState): Level<Buffer, Buffer> =>
   getInfraDb(env, storageDeps);
 
-export const getRuntimeFrameDb = (env: RuntimeState): Level<Buffer, Buffer> =>
-  getFrameDb(env, storageDeps);
+export const getRuntimeHistoryView = (env: RuntimeState): Level<Buffer, Buffer> =>
+  getRuntimeWalDb(env, storageDeps);
+
+export const getRuntimeHistoryViewDb = (env: RuntimeState): Level<Buffer, Buffer> =>
+  getHistoryViewDb(env, storageDeps);
 
 export const tryOpenRuntimeStorageDb = (
   env: RuntimeState,
@@ -56,8 +61,11 @@ export const rotateRuntimeStorageEpochDb = (
 ): Promise<boolean> =>
   rotateStorageEpochDb(env, storageDeps, snapshotHeight, timestamp);
 
-export const tryOpenRuntimeFrameDb = (env: RuntimeState): Promise<boolean> =>
-  tryOpenFrameDb(env, storageDeps);
+export const tryOpenRuntimeHistoryView = (env: RuntimeState): Promise<boolean> =>
+  tryOpenRuntimeWalDb(env, storageDeps);
+
+export const tryOpenRuntimeHistoryViewDb = (env: RuntimeState): Promise<boolean> =>
+  tryOpenHistoryViewDb(env, storageDeps);
 
 export const waitForRuntimeLoopWake = async (env: RuntimeState): Promise<void> => {
   const state = ensureRuntimeState(env);

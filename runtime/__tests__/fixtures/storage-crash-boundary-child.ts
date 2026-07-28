@@ -3,12 +3,14 @@ import {
   closeRuntimeDb,
   createEmptyEnv,
   enqueueRuntimeInput,
-  getFrameDb,
+  getRuntimeWalDb,
+  getHistoryViewDb,
   getRuntimeStorageDb,
   persistRestoredEnvToDB,
   processRuntime,
   tryOpenStorageDb,
-  tryOpenFrameDb,
+  tryOpenRuntimeWalDb,
+  tryOpenHistoryViewDb,
 } from '../../runtime';
 import {
   deriveSignerAddressSync,
@@ -265,8 +267,8 @@ env.runtimeConfig = {
     snapshotPeriodFrames: 1,
     retainSnapshots: 1,
     epochMaxBytes: 1_000_000_000,
-    frameDbMaxBytes: 1,
-    frameDbRetainFrames: 1,
+    historyViewMaxBytes: 1,
+    historyViewRetainFrames: 1,
     materializePeriodFrames: 1_000,
     canonicalHashPeriodFrames: 1,
     accountMerkleRadix: 16,
@@ -373,7 +375,7 @@ const certifiedHeightOne = await certifyNextFrame(
 );
 
 // A quorum-certified Entity frame reaches local replicas over later reliable
-// R-frames. Persist the legal transient where the proposer already committed
+// R-wal. Persist the legal transient where the proposer already committed
 // height 1 while the second validator is still durably catching up from 0.
 // Shared storage must materialize the highest committed state, while replica
 // metadata must retain each validator's exact local state for crash recovery.
@@ -458,15 +460,17 @@ if (!recoveryLagMode && !recoveryBoardRootLagMode) {
     currentFrameInput: { runtimeTxs: [], entityInputs: [] },
     tryOpenDb: tryOpenStorageDb,
     getRuntimeDb: getRuntimeStorageDb,
-    tryOpenFrameDb,
-    getFrameDb,
+    tryOpenRuntimeWalDb,
+    getRuntimeWalDb,
+    tryOpenHistoryViewDb,
+    getHistoryViewDb,
     getPerfMs,
     formatPerfMs: (value) => Math.round(value * 1_000) / 1_000,
   });
-  const historyHead = await readStorageHead(getFrameDb(env));
+  const historyHead = await readStorageHead(getRuntimeWalDb(env));
   const currentHead = await readStorageHead(getRuntimeStorageDb(env));
   if (!historyHead || !currentHead) throw new Error('crash fixture epoch head missing');
-  await getFrameDb(env).put(
+  await getRuntimeWalDb(env).put(
     KEY_HEAD,
     encodeBuffer({ ...historyHead, epochReplayBytes: historyHead.epochMaxBytes }),
     { sync: true },
@@ -570,8 +574,10 @@ if (recoveryLagMode || recoveryBoardRootLagMode) {
     currentFrameInput: appliedRuntimeInput,
     tryOpenDb: tryOpenStorageDb,
     getRuntimeDb: getRuntimeStorageDb,
-    tryOpenFrameDb,
-    getFrameDb,
+    tryOpenRuntimeWalDb,
+    getRuntimeWalDb,
+    tryOpenHistoryViewDb,
+    getHistoryViewDb,
     getPerfMs,
     formatPerfMs: (value) => Math.round(value * 1_000) / 1_000,
     onPersistenceBoundary: (reached) => {

@@ -1640,7 +1640,7 @@ describe('production startup wiring', () => {
       '"prod:bootstrap:rotation": "XLN_STORAGE_EPOCH_MAX_BYTES=33554432 XLN_LOCAL_PROD_SMOKE_REQUIRE_EPOCH_ROTATION=1',
     );
     expect(smoke).toContain('await commitPostRotationProofFrames();');
-    expect(smoke).toContain("recordStage('storage-epoch:post-rotation-frames-committed');");
+    expect(smoke).toContain("recordStage('storage-epoch:post-rotation-wal-committed');");
     expect(smoke).toContain("recordStage('storage-epoch:verified', epochRotations);");
     expect(smoke).toContain('LOCAL_PROD_SMOKE_STORAGE_POST_ROTATION_FRAME_MISSING');
     expect(soundcheck).toContain("import { createConnection } from 'node:net';");

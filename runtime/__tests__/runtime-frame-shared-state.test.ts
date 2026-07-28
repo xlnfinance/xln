@@ -37,14 +37,14 @@ describe('runtime frame shared storage ownership', () => {
     env.runtimeState!.storageDbOpenPromise = Promise.resolve(true);
     const transaction = createRuntimeFrameTransaction(env);
     const candidateStorage = { close: () => closed.push('candidate-storage') };
-    const candidateFrames = { close: () => closed.push('candidate-frames') };
+    const candidateFrames = { close: () => closed.push('candidate-wal') };
     transaction.workingEnv.runtimeState!.storageDb = candidateStorage as never;
     transaction.workingEnv.runtimeState!.storageDbOpenPromise = Promise.resolve(true);
-    transaction.workingEnv.runtimeState!.frameDb = candidateFrames as never;
-    transaction.workingEnv.runtimeState!.frameDbOpenPromise = Promise.resolve(true);
+    transaction.workingEnv.runtimeState!.runtimeWalDb = candidateFrames as never;
+    transaction.workingEnv.runtimeState!.runtimeWalDbOpenPromise = Promise.resolve(true);
 
     expect(await abortRuntimeFrameTransaction(transaction)).toEqual([]);
-    expect(closed).toEqual(['candidate-storage', 'candidate-frames']);
+    expect(closed).toEqual(['candidate-storage', 'candidate-wal']);
     expect(env.runtimeState?.storageDb).toBe(liveHandle);
   });
 

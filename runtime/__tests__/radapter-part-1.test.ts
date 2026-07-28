@@ -1524,6 +1524,8 @@ test('runtime adapter frame read returns compact summary without raw runtime inp
     postStateHash: 'post-state',
     stateHash: 'state',
     runtimeInput,
+    historyRecords: [],
+    activityLogs: [],
     overlayRecords: [{ scope: { family: 'entity', entityId }, key: 'raw', value: new Uint8Array([1, 2, 3]) }],
     touchedEntities: [entityId],
     touchedAccounts: [{ entityId, counterpartyId }],

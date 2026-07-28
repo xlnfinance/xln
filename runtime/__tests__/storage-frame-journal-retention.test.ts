@@ -8,7 +8,8 @@ import {
   closeRuntimeDb,
   createEmptyEnv,
   enqueueRuntimeInput,
-  getFrameDb,
+  getRuntimeWalDb,
+  getHistoryViewDb,
   getRuntimeStorageDb,
   getPersistedLatestHeight,
   listPersistedEntityIdsAtHeight,
@@ -24,7 +25,7 @@ import {
 } from '../runtime.ts';
 import {
   computeStorageFrameHash,
-  readFrameDbRuntimeActivity,
+  readHistoryViewRuntimeActivity,
   readStorageFrameRecord,
   readStorageHead,
   listStorageSnapshotReplicaMetas,
@@ -51,7 +52,7 @@ import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
 import type { StorageEntityCoreDoc, StorageFrameRecord } from '../storage/types';
 import type { DeliverableEntityInput, JReplica, JurisdictionConfig } from '../types';
 import {
-  resolveFrameDbPath,
+  resolveRuntimeWalDbPath,
   resolveStorageWriterLockPath,
   STORAGE_WRITER_LOCK_TTL_MS,
   withStorageWriterLock,
@@ -64,7 +65,8 @@ describe('storage frame journal retention', () => {
     rmSync(namespacePath, { recursive: true, force: true });
     rmSync(`${namespacePath}-storage-current`, { recursive: true, force: true });
     rmSync(`${namespacePath}-storage-previous`, { recursive: true, force: true });
-    rmSync(`${namespacePath}-frames`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-wal`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-history-views`, { recursive: true, force: true });
     rmSync(`${namespacePath}-events`, { recursive: true, force: true });
     rmSync(`${namespacePath}-infra`, { recursive: true, force: true });
     mkdirSync(dbRoot, { recursive: true });
@@ -136,7 +138,7 @@ describe('storage frame journal retention', () => {
       envClosed = true;
       expect((await verifyRuntimeChain(runtimeId, seed, { fromSnapshotHeight: 1 })).ok).toBe(true);
 
-      const historyDb = new Level<Buffer, Buffer>(`${join(dbRoot, runtimeId)}-frames`, {
+      const historyDb = new Level<Buffer, Buffer>(`${join(dbRoot, runtimeId)}-wal`, {
         keyEncoding: 'buffer',
         valueEncoding: 'buffer',
       });
@@ -173,7 +175,7 @@ describe('storage frame journal retention', () => {
 
   test('accounts full authoritative frame journals in retained history bytes', async () => {
     const env = await createSavedEmptyEnv('frame-byte-accounting');
-    const db = getFrameDb(env);
+    const db = getRuntimeWalDb(env);
     const frameKey = keyFrame(1);
     const diffKey = keyDiff(1);
     const manifestKey = keySnapshotManifest(1);
@@ -217,9 +219,9 @@ describe('storage frame journal retention', () => {
       await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
     }
 
-    const first = await readStorageFrameRecord(getFrameDb(env), 1);
-    const middle = await readStorageFrameRecord(getFrameDb(env), 2);
-    const checkpoint = await readStorageFrameRecord(getFrameDb(env), 3);
+    const first = await readStorageFrameRecord(getRuntimeWalDb(env), 1);
+    const middle = await readStorageFrameRecord(getRuntimeWalDb(env), 2);
+    const checkpoint = await readStorageFrameRecord(getRuntimeWalDb(env), 3);
     expect(first?.runtimeStateHash).toMatch(/^0x[0-9a-f]{64}$/);
     expect(middle?.runtimeStateHash).toBeUndefined();
     expect(middle?.canonicalStateHash).toBeUndefined();
@@ -229,7 +231,7 @@ describe('storage frame journal retention', () => {
     expect(middle?.frameHash).toMatch(/^0x[0-9a-f]{64}$/);
     expect(checkpoint?.runtimeStateHash).toMatch(/^0x[0-9a-f]{64}$/);
     expect(checkpoint?.prevFrameHash).toBe(middle?.frameHash);
-    expect((await verifyStorageTailIntegrity(getFrameDb(env))).checkedFrames).toBe(3);
+    expect((await verifyStorageTailIntegrity(getRuntimeWalDb(env))).checkedFrames).toBe(3);
 
     await closeRuntimeDb(env);
     await closeInfraDb(env);
@@ -537,7 +539,7 @@ describe('storage frame journal retention', () => {
     )?.[1];
     expect(restoredReplica?.certifiedFrameAnchor).toBeTruthy();
 
-    const historyDb = new Level(resolveFrameDbPath(env), {
+    const historyDb = new Level(resolveRuntimeWalDbPath(env), {
       valueEncoding: 'buffer',
       keyEncoding: 'binary',
     }) as unknown as Level<Buffer, Buffer>;
@@ -566,7 +568,7 @@ describe('storage frame journal retention', () => {
     env.height = 1;
     env.timestamp = 1_000;
     env.quietRuntimeLogs = true;
-    const competingHistoryDb = new Level(resolveFrameDbPath(env), {
+    const competingHistoryDb = new Level(resolveRuntimeWalDbPath(env), {
       valueEncoding: 'buffer',
       keyEncoding: 'binary',
     }) as unknown as Level<Buffer, Buffer>;
@@ -629,7 +631,7 @@ describe('storage frame journal retention', () => {
     rmSync(namespacePath, { recursive: true, force: true });
     rmSync(`${namespacePath}-storage-current`, { recursive: true, force: true });
     rmSync(`${namespacePath}-storage-previous`, { recursive: true, force: true });
-    rmSync(`${namespacePath}-frames`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-wal`, { recursive: true, force: true });
     rmSync(`${namespacePath}-events`, { recursive: true, force: true });
     rmSync(`${namespacePath}-infra`, { recursive: true, force: true });
     mkdirSync(dbRoot, { recursive: true });
@@ -685,7 +687,7 @@ describe('storage frame journal retention', () => {
     env.quietRuntimeLogs = true;
 
     await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
-    const beforeFrame = await readStorageFrameRecord(getFrameDb(env), 1);
+    const beforeFrame = await readStorageFrameRecord(getRuntimeWalDb(env), 1);
     expect(beforeFrame).toBeTruthy();
 
     const result = await saveRuntimeFrameToStorage({
@@ -695,20 +697,25 @@ describe('storage frame journal retention', () => {
         return true;
       },
       getRuntimeDb: getRuntimeStorageDb,
-      tryOpenFrameDb: async (targetEnv) => {
-        await getFrameDb(targetEnv).open();
+      tryOpenRuntimeWalDb: async (targetEnv) => {
+        await getRuntimeWalDb(targetEnv).open();
         return true;
       },
-      getFrameDb,
+      getRuntimeWalDb,
+      tryOpenHistoryViewDb: async (targetEnv) => {
+        await getHistoryViewDb(targetEnv).open();
+        return true;
+      },
+      getHistoryViewDb,
       getPerfMs,
       formatPerfMs: (value) => value.toFixed(2),
       stopStaleWriterOnHeadAhead: true,
     });
 
     expect(result.staleWriterStopped).toBe(true);
-    expect(result.frameDbCommitted).toBe(false);
-    const head = await readStorageHead(getFrameDb(env));
-    const afterFrame = await readStorageFrameRecord(getFrameDb(env), 1);
+    expect(result.historyViewsMaterialized).toBe(false);
+    const head = await readStorageHead(getRuntimeWalDb(env));
+    const afterFrame = await readStorageFrameRecord(getRuntimeWalDb(env), 1);
     expect(head?.latestHeight).toBe(1);
     expect(afterFrame?.frameHash).toBe(beforeFrame?.frameHash);
 
@@ -743,19 +750,24 @@ describe('storage frame journal retention', () => {
         return true;
       },
       getRuntimeDb: getRuntimeStorageDb,
-      tryOpenFrameDb: async (targetEnv) => {
-        await getFrameDb(targetEnv).open();
+      tryOpenRuntimeWalDb: async (targetEnv) => {
+        await getRuntimeWalDb(targetEnv).open();
         return true;
       },
-      getFrameDb,
+      getRuntimeWalDb,
+      tryOpenHistoryViewDb: async (targetEnv) => {
+        await getHistoryViewDb(targetEnv).open();
+        return true;
+      },
+      getHistoryViewDb,
       getPerfMs,
       formatPerfMs: (value) => value.toFixed(2),
       stopStaleWriterOnHeadAhead: true,
     });
 
     expect(result.staleWriterStopped).toBe(true);
-    expect(result.frameDbCommitted).toBe(false);
-    const head = await readStorageHead(getFrameDb(env));
+    expect(result.historyViewsMaterialized).toBe(false);
+    const head = await readStorageHead(getRuntimeWalDb(env));
     expect(head?.latestHeight).toBe(2);
 
     await closeRuntimeDb(env);
@@ -780,8 +792,8 @@ describe('storage frame journal retention', () => {
       'STORAGE_WRITER_LOCK_HELD',
     );
 
-    expect(await readStorageFrameRecord(getFrameDb(env), 2)).toBeNull();
-    const head = await readStorageHead(getFrameDb(env));
+    expect(await readStorageFrameRecord(getRuntimeWalDb(env), 2)).toBeNull();
+    const head = await readStorageHead(getRuntimeWalDb(env));
     expect(head?.latestHeight).toBe(1);
 
     rmSync(lockPath, { force: true });
@@ -807,8 +819,8 @@ describe('storage frame journal retention', () => {
       'STORAGE_WRITER_LOCK_HELD',
     );
 
-    expect(await readStorageFrameRecord(getFrameDb(env), 2)).toBeNull();
-    const head = await readStorageHead(getFrameDb(env));
+    expect(await readStorageFrameRecord(getRuntimeWalDb(env), 2)).toBeNull();
+    const head = await readStorageHead(getRuntimeWalDb(env));
     expect(head?.latestHeight).toBe(1);
 
     rmSync(lockPath, { force: true });
@@ -885,18 +897,18 @@ describe('storage frame journal retention', () => {
       .map(({ signerId, isProposer }) => [signerId, isProposer])
       .sort((left, right) => String(left[0]).localeCompare(String(right[0])));
     expect(identitiesFromHistory).toEqual(expectedReplicas);
-    await getFrameDb(restoredFromHistory).del(keyLiveReplicaMeta(entityId, signerA));
-    await getFrameDb(restoredFromHistory).del(keyLiveReplicaMeta(entityId, signerB));
+    await getRuntimeWalDb(restoredFromHistory).del(keyLiveReplicaMeta(entityId, signerA));
+    await getRuntimeWalDb(restoredFromHistory).del(keyLiveReplicaMeta(entityId, signerB));
     await closeRuntimeDb(restoredFromHistory);
     await closeInfraDb(restoredFromHistory);
 
     await expect(loadEnvFromDB(runtimeId, seed)).rejects.toThrow('STORAGE_VERIFY_REPLICA_META_DIGEST_MISMATCH');
   });
 
-  test('stores replay frames and diffs only in the history frame DB', async () => {
+  test('stores replay frames and diffs only in the Runtime WAL', async () => {
     const env = await createSavedEmptyEnv('storage-history-db-split');
     const currentDb = getRuntimeStorageDb(env);
-    const historyDb = getFrameDb(env);
+    const historyDb = getRuntimeWalDb(env);
 
     expect(await readRawOrNull(currentDb, keyFrame(1))).toBeNull();
     expect(await readRawOrNull(currentDb, keyDiff(1))).toBeNull();
@@ -1071,7 +1083,7 @@ describe('storage frame journal retention', () => {
       env.timestamp = 1_000;
 
       await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
-      const frame = await readStorageFrameRecord(getFrameDb(env), 1);
+      const frame = await readStorageFrameRecord(getRuntimeWalDb(env), 1);
       expect(frame?.stateHash).toMatch(/^0x[0-9a-f]{64}$/);
       expect(frame?.frameHash).toMatch(/^0x[0-9a-f]{64}$/);
       expect(frame?.canonicalStateHash).toBeUndefined();
@@ -1097,7 +1109,7 @@ describe('storage frame journal retention', () => {
     rmSync(namespacePath, { recursive: true, force: true });
     rmSync(`${namespacePath}-storage-current`, { recursive: true, force: true });
     rmSync(`${namespacePath}-storage-previous`, { recursive: true, force: true });
-    rmSync(`${namespacePath}-frames`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-wal`, { recursive: true, force: true });
     rmSync(`${namespacePath}-events`, { recursive: true, force: true });
     rmSync(`${namespacePath}-infra`, { recursive: true, force: true });
     mkdirSync(dbRoot, { recursive: true });
@@ -1149,14 +1161,14 @@ describe('storage frame journal retention', () => {
     await processRuntime(env, []);
 
     const latestHeight = await getPersistedLatestHeight(env);
-    const frame = await readStorageFrameRecord(getFrameDb(env), latestHeight);
+    const frame = await readStorageFrameRecord(getRuntimeWalDb(env), latestHeight);
     expect(frame?.canonicalStateHash).toMatch(/^0x[0-9a-f]{64}$/);
 
     const snapshotKey = keySnapshotEntity(latestHeight, entityId);
-    const raw = await getFrameDb(env).get(snapshotKey);
+    const raw = await getRuntimeWalDb(env).get(snapshotKey);
     const corrupted = decodeBuffer<StorageEntityCoreDoc>(raw);
     corrupted.messages = [...(Array.isArray(corrupted.messages) ? corrupted.messages : []), 'corrupted snapshot body'];
-    await getFrameDb(env).put(snapshotKey, encodeBuffer(corrupted));
+    await getRuntimeWalDb(env).put(snapshotKey, encodeBuffer(corrupted));
 
     await closeRuntimeDb(env);
     await closeInfraDb(env);
@@ -1173,7 +1185,7 @@ describe('storage frame journal retention', () => {
     rmSync(namespacePath, { recursive: true, force: true });
     rmSync(`${namespacePath}-storage-current`, { recursive: true, force: true });
     rmSync(`${namespacePath}-storage-previous`, { recursive: true, force: true });
-    rmSync(`${namespacePath}-frames`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-wal`, { recursive: true, force: true });
     rmSync(`${namespacePath}-events`, { recursive: true, force: true });
     rmSync(`${namespacePath}-infra`, { recursive: true, force: true });
     mkdirSync(dbRoot, { recursive: true });
@@ -1237,7 +1249,7 @@ describe('storage frame journal retention', () => {
     await processRuntime(env, []);
     expect(env.height).toBe(2);
 
-    const historyDb = getFrameDb(env);
+    const historyDb = getRuntimeWalDb(env);
     expect(await readRawOrNull(historyDb, keyDiff(2))).toBeTruthy();
     const batch = historyDb.batch();
     batch.del?.(keyDiff(2));
@@ -1251,14 +1263,14 @@ describe('storage frame journal retention', () => {
 
   test('fails closed when overlay replay diff is missing', async () => {
     const env = await createSavedEmptyEnv('storage-missing-overlay-diff');
-    const frameDb = getFrameDb(env);
+    const historyView = getRuntimeWalDb(env);
 
-    expect(await readRawOrNull(frameDb, keyDiff(1))).toBeTruthy();
-    const batch = frameDb.batch();
+    expect(await readRawOrNull(historyView, keyDiff(1))).toBeTruthy();
+    const batch = historyView.batch();
     batch.del?.(keyDiff(1));
     await batch.write({ sync: true });
 
-    await expect(readStorageOverlayRecordsFromDiffs(frameDb, 1, 1))
+    await expect(readStorageOverlayRecordsFromDiffs(historyView, 1, 1))
       .rejects.toThrow('STORAGE_DIFF_MISSING: height=1 scope=overlay');
 
     await closeRuntimeDb(env);
@@ -1274,7 +1286,7 @@ describe('storage frame journal retention', () => {
     rmSync(namespacePath, { recursive: true, force: true });
     rmSync(`${namespacePath}-storage-current`, { recursive: true, force: true });
     rmSync(`${namespacePath}-storage-previous`, { recursive: true, force: true });
-    rmSync(`${namespacePath}-frames`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-wal`, { recursive: true, force: true });
     rmSync(`${namespacePath}-events`, { recursive: true, force: true });
     rmSync(`${namespacePath}-infra`, { recursive: true, force: true });
     mkdirSync(dbRoot, { recursive: true });
@@ -1329,13 +1341,13 @@ describe('storage frame journal retention', () => {
     // open LevelDB handles. Force that exact boundary without shrinking the
     // configured epoch below one ordinary frame: after rotation the unchanged
     // threshold must allow the next frame instead of rotating forever.
-    const preRotationHistoryHead = await readStorageHead(getFrameDb(env));
+    const preRotationHistoryHead = await readStorageHead(getRuntimeWalDb(env));
     if (!preRotationHistoryHead) throw new Error('rotation test history head missing');
     const forcedEpochHead = {
       ...preRotationHistoryHead,
       epochReplayBytes: preRotationHistoryHead.epochMaxBytes,
     };
-    const forceHistory = getFrameDb(env).batch();
+    const forceHistory = getRuntimeWalDb(env).batch();
     forceHistory.put(KEY_HEAD, encodeBuffer(forcedEpochHead));
     await writeBatch(forceHistory);
     const forceCurrent = getRuntimeStorageDb(env).batch();
@@ -1360,7 +1372,7 @@ describe('storage frame journal retention', () => {
     expect(existsSync(`${namespacePath}-storage-previous`)).toBe(true);
 
     const currentHead = await readStorageHead(getRuntimeStorageDb(env));
-    const historyHead = await readStorageHead(getFrameDb(env));
+    const historyHead = await readStorageHead(getRuntimeWalDb(env));
     const snapshotHeight = historyHead?.latestSnapshotHeight ?? 0;
     expect(snapshotHeight).toBe(latestAfterRotation);
     expect(currentHead?.latestHeight).toBe(historyHead?.latestHeight);
@@ -1370,9 +1382,9 @@ describe('storage frame journal retention', () => {
     expect(historyHead?.epochReplayBytes).toBe(0);
     expect(currentHead?.retainedHistoryBytes).toBe(0);
     expect(historyHead?.retainedHistoryBytes ?? 0).toBeGreaterThan(0);
-    expect(await readRawOrNull(getFrameDb(env), keySnapshotManifest(snapshotHeight))).toBeTruthy();
-    expect(await readRawOrNull(getFrameDb(env), keyFrame(snapshotHeight))).toBeTruthy();
-    expect(await readRawOrNull(getFrameDb(env), keyDiff(snapshotHeight))).toBeNull();
+    expect(await readRawOrNull(getRuntimeWalDb(env), keySnapshotManifest(snapshotHeight))).toBeTruthy();
+    expect(await readRawOrNull(getRuntimeWalDb(env), keyFrame(snapshotHeight))).toBeTruthy();
+    expect(await readRawOrNull(getRuntimeWalDb(env), keyDiff(snapshotHeight))).toBeNull();
     expect(await readRawOrNull(getRuntimeStorageDb(env), keyFrame(snapshotHeight))).toBeNull();
 
     enqueueRuntimeInput(env, {
@@ -1388,7 +1400,7 @@ describe('storage frame journal retention', () => {
     });
     await processRuntime(env, []);
     expect(await getPersistedLatestHeight(env)).toBe(latestAfterRotation + 1);
-    const postRotationHistoryHead = await readStorageHead(getFrameDb(env));
+    const postRotationHistoryHead = await readStorageHead(getRuntimeWalDb(env));
     expect(postRotationHistoryHead?.latestSnapshotHeight).toBe(snapshotHeight);
     expect(postRotationHistoryHead?.epochReplayBytes ?? 0).toBeGreaterThan(0);
     expect(postRotationHistoryHead?.epochReplayBytes ?? Number.POSITIVE_INFINITY)
@@ -1428,7 +1440,7 @@ describe('storage frame journal retention', () => {
     rmSync(namespacePath, { recursive: true, force: true });
     rmSync(`${namespacePath}-storage-current`, { recursive: true, force: true });
     rmSync(`${namespacePath}-storage-previous`, { recursive: true, force: true });
-    rmSync(`${namespacePath}-frames`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-wal`, { recursive: true, force: true });
     rmSync(`${namespacePath}-events`, { recursive: true, force: true });
     rmSync(`${namespacePath}-infra`, { recursive: true, force: true });
     mkdirSync(dbRoot, { recursive: true });
@@ -1598,8 +1610,8 @@ describe('storage frame journal retention', () => {
     }
   });
 
-  test('fails closed when the primary history frame DB is lost', async () => {
-    const seed = `storage-crash-frame-db-loss ${Date.now()} alpha beta gamma`;
+  test('fails closed when the authoritative Runtime WAL is lost', async () => {
+    const seed = `storage-crash-history-view-loss ${Date.now()} alpha beta gamma`;
     const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
     const dbRoot = process.env.XLN_DB_PATH || 'db-tmp/runtime';
     const namespacePath = join(dbRoot, runtimeId);
@@ -1607,7 +1619,7 @@ describe('storage frame journal retention', () => {
     rmSync(namespacePath, { recursive: true, force: true });
     rmSync(`${namespacePath}-storage-current`, { recursive: true, force: true });
     rmSync(`${namespacePath}-storage-previous`, { recursive: true, force: true });
-    rmSync(`${namespacePath}-frames`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-wal`, { recursive: true, force: true });
     rmSync(`${namespacePath}-events`, { recursive: true, force: true });
     rmSync(`${namespacePath}-infra`, { recursive: true, force: true });
     mkdirSync(dbRoot, { recursive: true });
@@ -1629,8 +1641,8 @@ describe('storage frame journal retention', () => {
     registerSignerKey(env, signer, deriveSignerKeySync(seed, '1'));
     const entityId = generateLazyEntityId([signer], 1n).toLowerCase();
     const jurisdiction = {
-      name: 'storage-crash-frame-db-loss-test',
-      address: 'browservm://storage-crash-frame-db-loss-test',
+      name: 'storage-crash-history-view-loss-test',
+      address: 'browservm://storage-crash-history-view-loss-test',
       depositoryAddress: '0x000000000000000000000000000000000000dEaD',
       entityProviderAddress: '0x000000000000000000000000000000000000bEEF',
       chainId: 31337,
@@ -1664,7 +1676,7 @@ describe('storage frame journal retention', () => {
         timestamp: env.timestamp,
         level: 'info',
         category: 'system',
-        message: `storage-crash-frame-db-loss-${height}`,
+        message: `storage-crash-history-view-loss-${height}`,
       }];
       const nextSigner = deriveSignerAddressSync(seed, String(signerIndex));
       registerSignerKey(env, nextSigner, deriveSignerKeySync(seed, String(signerIndex)));
@@ -1700,9 +1712,9 @@ describe('storage frame journal retention', () => {
     const beforeCrashVerify = await verifyRuntimeChain(runtimeId, seed, { fromSnapshotHeight: replayFromHeight });
     expect(beforeCrashVerify.ok).toBe(true);
 
-    // The frame DB is the primary history/replay store. Losing it must fail
+    // The Runtime WAL is the authoritative history/replay store. Losing it must fail
     // closed instead of silently rebuilding from current-state rows.
-    rmSync(`${namespacePath}-frames`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-wal`, { recursive: true, force: true });
 
     const restored = await loadEnvFromDB(runtimeId, seed);
     expect(restored).toBeNull();
@@ -1724,7 +1736,7 @@ describe('storage frame journal retention', () => {
     rmSync(namespacePath, { recursive: true, force: true });
     rmSync(`${namespacePath}-storage-current`, { recursive: true, force: true });
     rmSync(`${namespacePath}-storage-previous`, { recursive: true, force: true });
-    rmSync(`${namespacePath}-frames`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-wal`, { recursive: true, force: true });
     rmSync(`${namespacePath}-events`, { recursive: true, force: true });
     rmSync(`${namespacePath}-infra`, { recursive: true, force: true });
     mkdirSync(dbRoot, { recursive: true });
@@ -1737,7 +1749,7 @@ describe('storage frame journal retention', () => {
     env.quietRuntimeLogs = true;
     await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
 
-    const db = getFrameDb(env);
+    const db = getRuntimeWalDb(env);
     const head = await readStorageHead(db);
     if (!head) throw new Error('TEST_HEAD_MISSING');
     const batch = db.batch();
@@ -1757,7 +1769,7 @@ describe('storage frame journal retention', () => {
 
   test('rejects a snapshot head that points past the latest frame', async () => {
     const env = await createSavedEmptyEnv('storage-crash-snapshot-after-head');
-    const db = getFrameDb(env);
+    const db = getRuntimeWalDb(env);
     const head = await readStorageHead(db);
     if (!head) throw new Error('TEST_HEAD_MISSING');
     const batch = db.batch();
@@ -1775,7 +1787,7 @@ describe('storage frame journal retention', () => {
 
   test('rejects a snapshot manifest with the wrong height', async () => {
     const env = await createSavedEmptyEnv('storage-crash-snapshot-manifest-height');
-    const db = getFrameDb(env);
+    const db = getRuntimeWalDb(env);
     const head = await readStorageHead(db);
     if (!head) throw new Error('TEST_HEAD_MISSING');
     const batch = db.batch();
@@ -1795,7 +1807,7 @@ describe('storage frame journal retention', () => {
 
   test('rejects a snapshot manifest when the materialized frame is missing', async () => {
     const env = await createSavedEmptyEnv('storage-crash-snapshot-frame-missing');
-    const db = getFrameDb(env);
+    const db = getRuntimeWalDb(env);
     const head = await readStorageHead(db);
     if (!head) throw new Error('TEST_HEAD_MISSING');
     const batch = db.batch();
@@ -1818,7 +1830,7 @@ describe('storage frame journal retention', () => {
 
   test('rejects a snapshot manifest when the frame was not materialized', async () => {
     const env = await createSavedEmptyEnv('storage-crash-snapshot-not-materialized');
-    const db = getFrameDb(env);
+    const db = getRuntimeWalDb(env);
     const head = await readStorageHead(db);
     if (!head) throw new Error('TEST_HEAD_MISSING');
     const frame = decodeBuffer<StorageFrameRecord>(await db.get(keyFrame(1)));
@@ -1848,7 +1860,7 @@ describe('storage frame journal retention', () => {
     rmSync(namespacePath, { recursive: true, force: true });
     rmSync(`${namespacePath}-storage-current`, { recursive: true, force: true });
     rmSync(`${namespacePath}-storage-previous`, { recursive: true, force: true });
-    rmSync(`${namespacePath}-frames`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-wal`, { recursive: true, force: true });
     rmSync(`${namespacePath}-events`, { recursive: true, force: true });
     rmSync(`${namespacePath}-infra`, { recursive: true, force: true });
     mkdirSync(dbRoot, { recursive: true });
@@ -1898,7 +1910,7 @@ describe('storage frame journal retention', () => {
     });
     await processRuntime(env, []);
 
-    const db = getFrameDb(env);
+    const db = getRuntimeWalDb(env);
     const head = await readStorageHead(db);
     const snapshotHeight = Number(head?.latestSnapshotHeight ?? 0);
     expect(snapshotHeight).toBeGreaterThan(0);
@@ -1956,7 +1968,7 @@ describe('storage frame journal retention', () => {
     rmSync(namespacePath, { recursive: true, force: true });
     rmSync(`${namespacePath}-storage-current`, { recursive: true, force: true });
     rmSync(`${namespacePath}-storage-previous`, { recursive: true, force: true });
-    rmSync(`${namespacePath}-frames`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-wal`, { recursive: true, force: true });
     rmSync(`${namespacePath}-events`, { recursive: true, force: true });
     rmSync(`${namespacePath}-infra`, { recursive: true, force: true });
     mkdirSync(dbRoot, { recursive: true });
@@ -2054,14 +2066,14 @@ describe('storage frame journal retention', () => {
     await processRuntime(restoredAtTwo, []);
     expect(restoredAtTwo.height).toBe(3);
     expect(restoredAtTwo.overlay?.length ?? 0).toBe(0);
-    const materializedFrame = await readStorageFrameRecord(getFrameDb(restoredAtTwo), 3);
+    const materializedFrame = await readStorageFrameRecord(getRuntimeWalDb(restoredAtTwo), 3);
     expect(materializedFrame?.replicaMetaStateMode).toBe('shared-entity-state');
     const compactMeta = decodeBuffer<Record<string, unknown>>(
-      await getFrameDb(restoredAtTwo).get(keyLiveReplicaMeta(entityId, signer)),
+      await getRuntimeWalDb(restoredAtTwo).get(keyLiveReplicaMeta(entityId, signer)),
     );
     expect(compactMeta['state']).toBeUndefined();
     expect(compactMeta['localEntityState']).toBeDefined();
-    expect((await verifyStorageTailIntegrity(getFrameDb(restoredAtTwo))).checkedFrames).toBe(3);
+    expect((await verifyStorageTailIntegrity(getRuntimeWalDb(restoredAtTwo))).checkedFrames).toBe(3);
 
     await closeRuntimeDb(restoredAtTwo);
     await closeInfraDb(restoredAtTwo);
@@ -2077,8 +2089,8 @@ describe('storage frame journal retention', () => {
     }
   });
 
-	test('prunes old frame DB activity without pruning replay frames', async () => {
-	  const seed = `frame-db-prune ${Date.now()} alpha beta gamma`;
+  test('prunes old history-view activity without pruning replay frames', async () => {
+	  const seed = `history-view-prune ${Date.now()} alpha beta gamma`;
 	  const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
 	  const dbRoot = process.env.XLN_DB_PATH || 'db-tmp/runtime';
 	  const namespacePath = join(dbRoot, runtimeId);
@@ -2086,7 +2098,7 @@ describe('storage frame journal retention', () => {
 	  rmSync(namespacePath, { recursive: true, force: true });
 	  rmSync(`${namespacePath}-storage-current`, { recursive: true, force: true });
 	  rmSync(`${namespacePath}-storage-previous`, { recursive: true, force: true });
-	  rmSync(`${namespacePath}-frames`, { recursive: true, force: true });
+	  rmSync(`${namespacePath}-wal`, { recursive: true, force: true });
 	  rmSync(`${namespacePath}-events`, { recursive: true, force: true });
 	  rmSync(`${namespacePath}-infra`, { recursive: true, force: true });
 	  mkdirSync(dbRoot, { recursive: true });
@@ -2099,8 +2111,8 @@ describe('storage frame journal retention', () => {
 	    ...(env.runtimeConfig || {}),
 	    storage: {
 	      ...(env.runtimeConfig?.storage || {}),
-	      frameDbMaxBytes: 1,
-	      frameDbRetainFrames: 1,
+	      historyViewMaxBytes: 1,
+	      historyViewRetainFrames: 1,
 	    },
 	  };
 
@@ -2112,18 +2124,51 @@ describe('storage frame journal retention', () => {
 	      timestamp: env.timestamp,
 	      level: 'info',
 	      category: 'system',
-	      message: `frame-db-prune-${height}`,
+	      message: `history-view-prune-${height}`,
 	    }];
 	    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
 	  }
 
-	  expect(await readFrameDbRuntimeActivity(getFrameDb(env), 1)).toBeNull();
-	  const latestActivity = await readFrameDbRuntimeActivity(getFrameDb(env), 4);
-	  expect(latestActivity?.logs?.[0]?.message).toBe('frame-db-prune-4');
+	  expect(await readHistoryViewRuntimeActivity(getHistoryViewDb(env), 1)).toBeNull();
+	  const latestActivity = await readHistoryViewRuntimeActivity(getHistoryViewDb(env), 4);
+	  expect(latestActivity?.logs?.[0]?.message).toBe('history-view-prune-4');
 	  const replayFrame = await readPersistedFrameJournal(env, 1);
 	  expect(replayFrame?.height).toBe(1);
 
 	  await closeRuntimeDb(env);
 	  await closeInfraDb(env);
 	});
+
+  test('rebuilds a deleted history-view DB from authoritative Runtime WAL', async () => {
+    const seed = `history-view-rebuild ${Date.now()} alpha beta gamma`;
+    const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
+    const dbRoot = process.env.XLN_DB_PATH || 'db-tmp/runtime';
+    cleanupRuntimeStorage(dbRoot, runtimeId);
+    const env = createEmptyEnv(seed);
+    env.runtimeId = runtimeId;
+    env.dbNamespace = runtimeId;
+    env.height = 1;
+    env.timestamp = 4_001;
+    env.quietRuntimeLogs = true;
+    env.frameLogs = [{
+      id: 1,
+      timestamp: env.timestamp,
+      level: 'info',
+      category: 'system',
+      message: 'durable-wal-activity',
+    }];
+    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
+    expect((await readStorageFrameRecord(getRuntimeWalDb(env), 1))?.activityLogs[0]?.message)
+      .toBe('durable-wal-activity');
+    await closeRuntimeDb(env);
+    await closeInfraDb(env);
+
+    rmSync(join(dbRoot, `${runtimeId}-history-views`), { recursive: true, force: true });
+    const restored = await loadEnvFromDB(runtimeId, seed);
+    if (!restored) throw new Error('history-view rebuild restore failed');
+    const rebuilt = await readHistoryViewRuntimeActivity(getHistoryViewDb(restored), 1);
+    expect(rebuilt?.logs[0]?.message).toBe('durable-wal-activity');
+    await closeRuntimeDb(restored);
+    await closeInfraDb(restored);
+  });
 });

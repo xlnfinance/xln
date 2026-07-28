@@ -10,8 +10,10 @@ type RuntimeDb = Level<Buffer, Buffer>;
 export type PersistenceQueryDeps = {
   tryOpenStorageDb(env: RuntimeState, role: StorageDbRole): Promise<boolean>;
   getStorageDb(env: RuntimeState, role: StorageDbRole): RuntimeDb;
-  tryOpenFrameDb(env: RuntimeState): Promise<boolean>;
-  getFrameDb(env: RuntimeState): RuntimeDb;
+  tryOpenRuntimeWalDb(env: RuntimeState): Promise<boolean>;
+  getRuntimeWalDb(env: RuntimeState): RuntimeDb;
+  tryOpenHistoryViewDb(env: RuntimeState): Promise<boolean>;
+  getHistoryViewDb(env: RuntimeState): RuntimeDb;
   resolvePersistedLatestHeight(env: RuntimeState): Promise<number>;
   resolvePersistedCheckpointHeights(env: RuntimeState): Promise<number[]>;
   readPersistedStorageFrameRecord(env: RuntimeState, height: number): Promise<StorageFrameRecord | null>;

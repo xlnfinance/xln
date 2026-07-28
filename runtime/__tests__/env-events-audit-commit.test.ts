@@ -122,9 +122,9 @@ test('candidate Account history is idempotent and conflicting bytes fail fast', 
   };
 
   publishEntityCandidateEffects(env, [effect, effect]);
-  expect(env.runtimeState?.pendingFrameDbRecords).toHaveLength(1);
+  expect(env.runtimeState?.pendingHistoryRecords).toHaveLength(1);
   expect(() => publishEntityCandidateEffects(env, [{
     ...effect,
     frame: { ...frame, stateHash: '0x03' },
-  }])).toThrow('FRAME_DB_ACCOUNT_FRAME_FORK');
+  }])).toThrow('HISTORY_VIEW_ACCOUNT_FRAME_FORK');
 });

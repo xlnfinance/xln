@@ -9,7 +9,7 @@ export { STORAGE_MERKLE_NAMESPACE_TAG, type StorageMerkleNamespace } from './mer
  * per-epoch replay-byte rotation counter from total retained history bytes.
  * Schema 8 overloaded retainedHistoryBytes for both roles.
  */
-export const STORAGE_SCHEMA_VERSION = 9;
+export const STORAGE_SCHEMA_VERSION = 10;
 
 export const STORAGE_FRAME_FORMAT = Object.freeze({
   schemaVersion: STORAGE_SCHEMA_VERSION,
@@ -53,8 +53,11 @@ export const assertStorageSchemaVersion = (
 export const DEFAULT_SNAPSHOT_PERIOD_FRAMES = 10_000;
 export const DEFAULT_RETAIN_SNAPSHOTS = 2;
 export const DEFAULT_EPOCH_MAX_BYTES = 16 * 1024 * 1024 * 1024;
-export const DEFAULT_FRAME_DB_MAX_BYTES = 1024 * 1024 * 1024;
-export const DEFAULT_FRAME_DB_RETAIN_FRAMES = 100_000;
+// Archival history is the safe default. Operators may opt into bounded local
+// materialized views, but xln must never silently prune activity merely because
+// a validator ran long enough.
+export const DEFAULT_HISTORY_VIEW_MAX_BYTES = Number.MAX_SAFE_INTEGER;
+export const DEFAULT_HISTORY_VIEW_RETAIN_FRAMES = Number.MAX_SAFE_INTEGER;
 export const DEFAULT_MATERIALIZE_PERIOD_FRAMES = 100;
 export const DEFAULT_ACCOUNT_MERKLE_RADIX: RadixMerkleRadix = 16;
 
@@ -83,12 +86,12 @@ export const KEY_REBRANCH_NODE = 0x7e;
 export const STORAGE_VERIFY_TAIL_FRAMES = 128;
 export const EPOCH_SEED_FRAME_TAIL = STORAGE_VERIFY_TAIL_FRAMES + 1;
 
-export const KEY_FRAME_DB_HEAD = Buffer.from([0x00]);
-export const FRAME_DB_ACCOUNT_FRAME = 0x01;
-export const FRAME_DB_RUNTIME_ACTIVITY = 0x02;
-export const FRAME_DB_ENTITY_FRAME = 0x03;
-export const FRAME_DB_ACCOUNT_FRAME_BY_RUNTIME = 0x04;
-export const FRAME_DB_ENTITY_FRAME_BY_RUNTIME = 0x05;
+export const KEY_HISTORY_VIEW_HEAD = Buffer.from([0x00]);
+export const HISTORY_VIEW_ACCOUNT_FRAME = 0x01;
+export const HISTORY_VIEW_RUNTIME_ACTIVITY = 0x02;
+export const HISTORY_VIEW_ENTITY_FRAME = 0x03;
+export const HISTORY_VIEW_ACCOUNT_FRAME_BY_RUNTIME = 0x04;
+export const HISTORY_VIEW_ENTITY_FRAME_BY_RUNTIME = 0x05;
 export const ZERO_FRAME_HASH = `0x${'00'.repeat(32)}`;
 
 export const normalizeEntityId = (value: string): string => String(value || '').toLowerCase();
@@ -234,39 +237,39 @@ export const keyMerkleLeafPrefix = (entityId?: string, namespace?: StorageMerkle
   return Buffer.from([KEY_MERKLE_LEAF]);
 };
 
-export const keyFrameDbAccountFrame = (
+export const keyHistoryViewAccountFrame = (
   entityId: string,
   counterpartyId: string,
   accountHeight: number,
-): Buffer => Buffer.concat([Buffer.from([FRAME_DB_ACCOUNT_FRAME]), hexBytes(entityId), hexBytes(counterpartyId), encodeHeight(accountHeight)]);
+): Buffer => Buffer.concat([Buffer.from([HISTORY_VIEW_ACCOUNT_FRAME]), hexBytes(entityId), hexBytes(counterpartyId), encodeHeight(accountHeight)]);
 
-export const keyFrameDbAccountFrameByRuntime = (
+export const keyHistoryViewAccountFrameByRuntime = (
   runtimeHeight: number,
   entityId: string,
   counterpartyId: string,
   accountHeight: number,
 ): Buffer => Buffer.concat([
-  Buffer.from([FRAME_DB_ACCOUNT_FRAME_BY_RUNTIME]),
+  Buffer.from([HISTORY_VIEW_ACCOUNT_FRAME_BY_RUNTIME]),
   encodeHeight(runtimeHeight),
   hexBytes(entityId),
   hexBytes(counterpartyId),
   encodeHeight(accountHeight),
 ]);
 
-export const keyFrameDbRuntimeActivity = (height: number): Buffer =>
-  Buffer.concat([Buffer.from([FRAME_DB_RUNTIME_ACTIVITY]), encodeHeight(height)]);
+export const keyHistoryViewRuntimeActivity = (height: number): Buffer =>
+  Buffer.concat([Buffer.from([HISTORY_VIEW_RUNTIME_ACTIVITY]), encodeHeight(height)]);
 
-export const keyFrameDbEntityFrame = (entityId: string, entityHeight: number): Buffer =>
-  Buffer.concat([Buffer.from([FRAME_DB_ENTITY_FRAME]), hexBytes(entityId), encodeHeight(entityHeight)]);
+export const keyHistoryViewEntityFrame = (entityId: string, entityHeight: number): Buffer =>
+  Buffer.concat([Buffer.from([HISTORY_VIEW_ENTITY_FRAME]), hexBytes(entityId), encodeHeight(entityHeight)]);
 
-export const keyFrameDbEntityFramePrefix = (entityId?: string): Buffer =>
+export const keyHistoryViewEntityFramePrefix = (entityId?: string): Buffer =>
   entityId
-    ? Buffer.concat([Buffer.from([FRAME_DB_ENTITY_FRAME]), hexBytes(entityId)])
-    : Buffer.from([FRAME_DB_ENTITY_FRAME]);
+    ? Buffer.concat([Buffer.from([HISTORY_VIEW_ENTITY_FRAME]), hexBytes(entityId)])
+    : Buffer.from([HISTORY_VIEW_ENTITY_FRAME]);
 
-export const parseFrameDbEntityFrameKey = (key: Buffer): { entityId: string; entityHeight: number } => {
-  if (key.length !== 41 || key[0] !== FRAME_DB_ENTITY_FRAME) {
-    throw new Error(`STORAGE_FRAME_DB_ENTITY_KEY_INVALID:${key.toString('hex')}`);
+export const parseHistoryViewEntityFrameKey = (key: Buffer): { entityId: string; entityHeight: number } => {
+  if (key.length !== 41 || key[0] !== HISTORY_VIEW_ENTITY_FRAME) {
+    throw new Error(`STORAGE_HISTORY_VIEW_ENTITY_KEY_INVALID:${key.toString('hex')}`);
   }
   return {
     entityId: decodeEntityId(key.subarray(1, 33)),
@@ -274,27 +277,27 @@ export const parseFrameDbEntityFrameKey = (key: Buffer): { entityId: string; ent
   };
 };
 
-export const keyFrameDbEntityFrameByRuntime = (
+export const keyHistoryViewEntityFrameByRuntime = (
   runtimeHeight: number,
   entityId: string,
   entityHeight: number,
 ): Buffer => Buffer.concat([
-  Buffer.from([FRAME_DB_ENTITY_FRAME_BY_RUNTIME]),
+  Buffer.from([HISTORY_VIEW_ENTITY_FRAME_BY_RUNTIME]),
   encodeHeight(runtimeHeight),
   hexBytes(entityId),
   encodeHeight(entityHeight),
 ]);
 
-export const keyFrameDbEntityFrameByRuntimePrefix = (): Buffer =>
-  Buffer.from([FRAME_DB_ENTITY_FRAME_BY_RUNTIME]);
+export const keyHistoryViewEntityFrameByRuntimePrefix = (): Buffer =>
+  Buffer.from([HISTORY_VIEW_ENTITY_FRAME_BY_RUNTIME]);
 
-export const parseFrameDbEntityFrameRuntimeIndexKey = (key: Buffer): {
+export const parseHistoryViewEntityFrameRuntimeIndexKey = (key: Buffer): {
   runtimeHeight: number;
   entityId: string;
   entityHeight: number;
 } => {
-  if (key.length !== 49 || key[0] !== FRAME_DB_ENTITY_FRAME_BY_RUNTIME) {
-    throw new Error(`STORAGE_FRAME_DB_ENTITY_RUNTIME_KEY_INVALID:${key.toString('hex')}`);
+  if (key.length !== 49 || key[0] !== HISTORY_VIEW_ENTITY_FRAME_BY_RUNTIME) {
+    throw new Error(`STORAGE_HISTORY_VIEW_ENTITY_RUNTIME_KEY_INVALID:${key.toString('hex')}`);
   }
   return {
     runtimeHeight: decodeHeight(key, 1),
@@ -303,22 +306,22 @@ export const parseFrameDbEntityFrameRuntimeIndexKey = (key: Buffer): {
   };
 };
 
-export const keyFrameDbAccountFramePrefix = (entityId?: string, counterpartyId?: string): Buffer => {
-  if (entityId && counterpartyId) return Buffer.concat([Buffer.from([FRAME_DB_ACCOUNT_FRAME]), hexBytes(entityId), hexBytes(counterpartyId)]);
-  if (entityId) return Buffer.concat([Buffer.from([FRAME_DB_ACCOUNT_FRAME]), hexBytes(entityId)]);
-  return Buffer.from([FRAME_DB_ACCOUNT_FRAME]);
+export const keyHistoryViewAccountFramePrefix = (entityId?: string, counterpartyId?: string): Buffer => {
+  if (entityId && counterpartyId) return Buffer.concat([Buffer.from([HISTORY_VIEW_ACCOUNT_FRAME]), hexBytes(entityId), hexBytes(counterpartyId)]);
+  if (entityId) return Buffer.concat([Buffer.from([HISTORY_VIEW_ACCOUNT_FRAME]), hexBytes(entityId)]);
+  return Buffer.from([HISTORY_VIEW_ACCOUNT_FRAME]);
 };
 
-export const keyFrameDbAccountFrameByRuntimePrefix = (): Buffer => Buffer.from([FRAME_DB_ACCOUNT_FRAME_BY_RUNTIME]);
+export const keyHistoryViewAccountFrameByRuntimePrefix = (): Buffer => Buffer.from([HISTORY_VIEW_ACCOUNT_FRAME_BY_RUNTIME]);
 
-export const parseFrameDbAccountFrameRuntimeIndexKey = (key: Buffer): {
+export const parseHistoryViewAccountFrameRuntimeIndexKey = (key: Buffer): {
   runtimeHeight: number;
   entityId: string;
   counterpartyId: string;
   accountHeight: number;
 } => {
-  if (key.length !== 81 || key[0] !== FRAME_DB_ACCOUNT_FRAME_BY_RUNTIME) {
-    throw new Error(`STORAGE_FRAME_DB_ACCOUNT_RUNTIME_KEY_INVALID:${key.toString('hex')}`);
+  if (key.length !== 81 || key[0] !== HISTORY_VIEW_ACCOUNT_FRAME_BY_RUNTIME) {
+    throw new Error(`STORAGE_HISTORY_VIEW_ACCOUNT_RUNTIME_KEY_INVALID:${key.toString('hex')}`);
   }
   return {
     runtimeHeight: decodeHeight(key, 1),
@@ -328,13 +331,13 @@ export const parseFrameDbAccountFrameRuntimeIndexKey = (key: Buffer): {
   };
 };
 
-export const parseFrameDbAccountFrameKey = (key: Buffer): {
+export const parseHistoryViewAccountFrameKey = (key: Buffer): {
   entityId: string;
   counterpartyId: string;
   accountHeight: number;
 } => {
-  if (key.length !== 73 || key[0] !== FRAME_DB_ACCOUNT_FRAME) {
-    throw new Error(`STORAGE_FRAME_DB_ACCOUNT_KEY_INVALID:${key.toString('hex')}`);
+  if (key.length !== 73 || key[0] !== HISTORY_VIEW_ACCOUNT_FRAME) {
+    throw new Error(`STORAGE_HISTORY_VIEW_ACCOUNT_KEY_INVALID:${key.toString('hex')}`);
   }
   return {
     entityId: decodeEntityId(key.subarray(1, 33)),

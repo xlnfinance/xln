@@ -14,8 +14,9 @@ import type {
   StoredAccountFrameValue,
   StoredEntityFrameValue,
   StoredRuntimeActivityValue,
-} from './frame-db';
-import type { StorageFrameDbHead } from './types';
+} from './history-view';
+import type { StorageHistoryViewHead } from './types';
+import type { RuntimeHistoryRecord } from '../types';
 
 const requireStringArray = (value: unknown, code: string): string[] => {
   if (!Array.isArray(value) || value.some(entry => typeof entry !== 'string' || entry.length === 0)) {
@@ -24,25 +25,25 @@ const requireStringArray = (value: unknown, code: string): string[] => {
   return value;
 };
 
-export const validateFrameDbHeadValue = (value: unknown): StorageFrameDbHead => {
-  const head = requireBoundaryRecord(value, 'FRAME_DB_HEAD_INVALID');
+export const validateHistoryViewHeadValue = (value: unknown): StorageHistoryViewHead => {
+  const head = requireBoundaryRecord(value, 'HISTORY_VIEW_HEAD_INVALID');
   requireExactBoundaryKeys(
     head,
     ['schemaVersion', 'latestHeight', 'latestPrunedRuntimeHeight', 'retainedBytes', 'maxBytes', 'retainFrames'],
     [],
-    'FRAME_DB_HEAD_FIELDS_INVALID',
+    'HISTORY_VIEW_HEAD_FIELDS_INVALID',
   );
-  const schemaVersion = assertStorageSchemaVersion(head['schemaVersion'], 'frame-db-head');
+  const schemaVersion = assertStorageSchemaVersion(head['schemaVersion'], 'history-view-head');
   return {
     schemaVersion,
-    latestHeight: requireBoundaryInteger(head['latestHeight'], 'FRAME_DB_HEAD_LATEST_HEIGHT_INVALID'),
+    latestHeight: requireBoundaryInteger(head['latestHeight'], 'HISTORY_VIEW_HEAD_LATEST_HEIGHT_INVALID'),
     latestPrunedRuntimeHeight: requireBoundaryInteger(
       head['latestPrunedRuntimeHeight'],
-      'FRAME_DB_HEAD_PRUNED_HEIGHT_INVALID',
+      'HISTORY_VIEW_HEAD_PRUNED_HEIGHT_INVALID',
     ),
-    retainedBytes: requireBoundaryInteger(head['retainedBytes'], 'FRAME_DB_HEAD_RETAINED_BYTES_INVALID'),
-    maxBytes: requireBoundaryInteger(head['maxBytes'], 'FRAME_DB_HEAD_MAX_BYTES_INVALID', 1),
-    retainFrames: requireBoundaryInteger(head['retainFrames'], 'FRAME_DB_HEAD_RETAIN_FRAMES_INVALID', 1),
+    retainedBytes: requireBoundaryInteger(head['retainedBytes'], 'HISTORY_VIEW_HEAD_RETAINED_BYTES_INVALID'),
+    maxBytes: requireBoundaryInteger(head['maxBytes'], 'HISTORY_VIEW_HEAD_MAX_BYTES_INVALID', 1),
+    retainFrames: requireBoundaryInteger(head['retainFrames'], 'HISTORY_VIEW_HEAD_RETAIN_FRAMES_INVALID', 1),
   };
 };
 
@@ -50,12 +51,12 @@ const validateCompactRuntimeInput = (
   value: unknown,
   height: number,
 ): StoredRuntimeActivityValue['runtimeInput'] => {
-  const code = `FRAME_DB_RUNTIME_ACTIVITY_INPUT_INVALID:height=${height}`;
+  const code = `HISTORY_VIEW_RUNTIME_ACTIVITY_INPUT_INVALID:height=${height}`;
   const input = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(input, ['entityInputs'], ['jInputs'], `${code}:fields`);
   if (!Array.isArray(input['entityInputs'])) throw new Error(code);
   for (const [index, rawEntry] of input['entityInputs'].entries()) {
-    const entryCode = `FRAME_DB_RUNTIME_ACTIVITY_ENTITY_INPUT_INVALID:height=${height}:index=${index}`;
+    const entryCode = `HISTORY_VIEW_RUNTIME_ACTIVITY_ENTITY_INPUT_INVALID:height=${height}:index=${index}`;
     const entry = requireBoundaryRecord(rawEntry, entryCode);
     requireExactBoundaryKeys(entry, ['entityId'], ['entityTxs'], `${entryCode}:fields`);
     if (typeof entry['entityId'] !== 'string' || entry['entityId'].length === 0) throw new Error(entryCode);
@@ -83,26 +84,26 @@ export const validateStoredRuntimeActivityValue = (
   value: unknown,
   height: number,
 ): StoredRuntimeActivityValue => {
-  const activity = requireBoundaryRecord(value, `FRAME_DB_RUNTIME_ACTIVITY_INVALID:height=${height}`);
+  const activity = requireBoundaryRecord(value, `HISTORY_VIEW_RUNTIME_ACTIVITY_INVALID:height=${height}`);
   requireExactBoundaryKeys(
     activity,
     ['timestamp', 'runtimeInput', 'logs', 'touchedEntities', 'touchedAccounts', 'touchedBookEntities'],
     [],
-    `FRAME_DB_RUNTIME_ACTIVITY_FIELDS_INVALID:height=${height}`,
+    `HISTORY_VIEW_RUNTIME_ACTIVITY_FIELDS_INVALID:height=${height}`,
   );
   const touchedEntities = requireStringArray(
     activity['touchedEntities'],
-    `FRAME_DB_RUNTIME_ACTIVITY_TOUCHED_ENTITIES_INVALID:height=${height}`,
+    `HISTORY_VIEW_RUNTIME_ACTIVITY_TOUCHED_ENTITIES_INVALID:height=${height}`,
   );
   const touchedBookEntities = requireStringArray(
     activity['touchedBookEntities'],
-    `FRAME_DB_RUNTIME_ACTIVITY_TOUCHED_BOOK_ENTITIES_INVALID:height=${height}`,
+    `HISTORY_VIEW_RUNTIME_ACTIVITY_TOUCHED_BOOK_ENTITIES_INVALID:height=${height}`,
   );
   if (!Array.isArray(activity['touchedAccounts'])) {
-    throw new Error(`FRAME_DB_RUNTIME_ACTIVITY_TOUCHED_ACCOUNTS_INVALID:height=${height}`);
+    throw new Error(`HISTORY_VIEW_RUNTIME_ACTIVITY_TOUCHED_ACCOUNTS_INVALID:height=${height}`);
   }
   const touchedAccounts = activity['touchedAccounts'].map((rawEntry, index) => {
-    const code = `FRAME_DB_RUNTIME_ACTIVITY_TOUCHED_ACCOUNT_INVALID:height=${height}:index=${index}`;
+    const code = `HISTORY_VIEW_RUNTIME_ACTIVITY_TOUCHED_ACCOUNT_INVALID:height=${height}:index=${index}`;
     const entry = requireBoundaryRecord(rawEntry, code);
     requireExactBoundaryKeys(entry, ['entityId', 'counterpartyId'], [], `${code}:fields`);
     if (typeof entry['entityId'] !== 'string' || typeof entry['counterpartyId'] !== 'string') throw new Error(code);
@@ -111,12 +112,12 @@ export const validateStoredRuntimeActivityValue = (
   return {
     timestamp: requireBoundaryInteger(
       activity['timestamp'],
-      `FRAME_DB_RUNTIME_ACTIVITY_TIMESTAMP_INVALID:height=${height}`,
+      `HISTORY_VIEW_RUNTIME_ACTIVITY_TIMESTAMP_INVALID:height=${height}`,
     ),
     runtimeInput: validateCompactRuntimeInput(activity['runtimeInput'], height),
     logs: validateFrameLogEntries(
       activity['logs'],
-      `FRAME_DB_RUNTIME_ACTIVITY_LOGS_INVALID:height=${height}`,
+      `HISTORY_VIEW_RUNTIME_ACTIVITY_LOGS_INVALID:height=${height}`,
     ),
     touchedEntities,
     touchedAccounts,
@@ -128,30 +129,30 @@ export const validateStoredAccountFrameValue = (
   value: unknown,
   accountHeight: number,
 ): StoredAccountFrameValue => {
-  const code = `FRAME_DB_ACCOUNT_FRAME_FIELDS_INVALID:height=${accountHeight}`;
+  const code = `HISTORY_VIEW_ACCOUNT_FRAME_FIELDS_INVALID:height=${accountHeight}`;
   const record = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(record, ['source', 'frame', 'runtimeHeight', 'timestamp'], [], code);
   if (record['source'] !== 'ackCommit' && record['source'] !== 'peerCommit') {
-    throw new Error(`FRAME_DB_ACCOUNT_FRAME_SOURCE_INVALID:height=${accountHeight}`);
+    throw new Error(`HISTORY_VIEW_ACCOUNT_FRAME_SOURCE_INVALID:height=${accountHeight}`);
   }
-  const frameRecord = requireBoundaryRecord(record['frame'], `FRAME_DB_ACCOUNT_FRAME_INVALID:height=${accountHeight}`);
+  const frameRecord = requireBoundaryRecord(record['frame'], `HISTORY_VIEW_ACCOUNT_FRAME_INVALID:height=${accountHeight}`);
   requireExactBoundaryKeys(
     frameRecord,
     ['height', 'timestamp', 'jHeight', 'accountTxs', 'prevFrameHash', 'accountStateRoot', 'stateHash', 'deltas'],
     ['byLeft'],
-    `FRAME_DB_ACCOUNT_FRAME_FIELDS_INVALID:height=${accountHeight}:frame`,
+    `HISTORY_VIEW_ACCOUNT_FRAME_FIELDS_INVALID:height=${accountHeight}:frame`,
   );
   return {
     source: record['source'],
-    frame: validateAccountFrame(frameRecord, `FrameDb.AccountFrame[${accountHeight}]`),
+    frame: validateAccountFrame(frameRecord, `HistoryView.AccountFrame[${accountHeight}]`),
     runtimeHeight: requireBoundaryInteger(
       record['runtimeHeight'],
-      `FRAME_DB_ACCOUNT_FRAME_RUNTIME_HEIGHT_INVALID:height=${accountHeight}`,
+      `HISTORY_VIEW_ACCOUNT_FRAME_RUNTIME_HEIGHT_INVALID:height=${accountHeight}`,
       1,
     ),
     timestamp: requireBoundaryInteger(
       record['timestamp'],
-      `FRAME_DB_ACCOUNT_FRAME_TIMESTAMP_INVALID:height=${accountHeight}`,
+      `HISTORY_VIEW_ACCOUNT_FRAME_TIMESTAMP_INVALID:height=${accountHeight}`,
     ),
   };
 };
@@ -160,14 +161,14 @@ export const validateStoredEntityFrameValue = (
   value: unknown,
   entityHeight: number,
 ): StoredEntityFrameValue => {
-  const code = `FRAME_DB_ENTITY_FRAME_FIELDS_INVALID:height=${entityHeight}`;
+  const code = `HISTORY_VIEW_ENTITY_FRAME_FIELDS_INVALID:height=${entityHeight}`;
   const record = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(record, ['link', 'runtimeHeight', 'timestamp'], [], code);
   const link = requireBoundaryRecord(record['link'], `${code}:link`);
   requireExactBoundaryKeys(link, ['frame', 'postAuthority'], [], `${code}:link`);
-  const frame = validateProposedEntityFrame(link['frame'], `FrameDb.EntityFrame[${entityHeight}]`);
+  const frame = validateProposedEntityFrame(link['frame'], `HistoryView.EntityFrame[${entityHeight}]`);
   if (frame.height !== entityHeight) {
-    throw new Error(`FRAME_DB_ENTITY_FRAME_HEIGHT_MISMATCH:key=${entityHeight}:frame=${frame.height}`);
+    throw new Error(`HISTORY_VIEW_ENTITY_FRAME_HEIGHT_MISMATCH:key=${entityHeight}:frame=${frame.height}`);
   }
   const authority = requireBoundaryRecord(link['postAuthority'], `${code}:postAuthority`);
   requireExactBoundaryKeys(authority, ['config', 'leaderState'], [], `${code}:postAuthority`);
@@ -195,4 +196,57 @@ export const validateStoredEntityFrameValue = (
     runtimeHeight: requireBoundaryInteger(record['runtimeHeight'], `${code}:runtimeHeight`, 1),
     timestamp: requireBoundaryInteger(record['timestamp'], `${code}:timestamp`),
   };
+};
+
+export const validateRuntimeHistoryRecords = (
+  value: unknown,
+  runtimeHeight: number,
+  runtimeTimestamp: number,
+): RuntimeHistoryRecord[] => {
+  if (!Array.isArray(value)) throw new Error('STORAGE_HISTORY_RECORDS_INVALID');
+  return value.map((raw, index) => {
+    const code = `STORAGE_HISTORY_RECORD_INVALID:index=${index}`;
+    const record = requireBoundaryRecord(raw, code);
+    if (record['kind'] === 'accountFrame') {
+      requireExactBoundaryKeys(
+        record,
+        ['kind', 'entityId', 'counterpartyId', 'accountHeight', 'source', 'frame', 'runtimeHeight', 'timestamp'],
+        [],
+        `${code}:fields`,
+      );
+      if (typeof record['entityId'] !== 'string' || typeof record['counterpartyId'] !== 'string') {
+        throw new Error(`${code}:identity`);
+      }
+      const accountHeight = requireBoundaryInteger(record['accountHeight'], `${code}:accountHeight`, 1);
+      validateStoredAccountFrameValue({
+        source: record['source'],
+        frame: record['frame'],
+        runtimeHeight: record['runtimeHeight'],
+        timestamp: record['timestamp'],
+      }, accountHeight);
+    } else if (record['kind'] === 'entityFrame') {
+      requireExactBoundaryKeys(
+        record,
+        ['kind', 'entityId', 'entityHeight', 'link', 'runtimeHeight', 'timestamp'],
+        [],
+        `${code}:fields`,
+      );
+      if (typeof record['entityId'] !== 'string') throw new Error(`${code}:entityId`);
+      const entityHeight = requireBoundaryInteger(record['entityHeight'], `${code}:entityHeight`, 1);
+      validateStoredEntityFrameValue({
+        link: record['link'],
+        runtimeHeight: record['runtimeHeight'],
+        timestamp: record['timestamp'],
+      }, entityHeight);
+    } else {
+      throw new Error(`${code}:kind`);
+    }
+    if (record['runtimeHeight'] !== runtimeHeight || record['timestamp'] !== runtimeTimestamp) {
+      throw new Error(
+        `${code}:runtime_binding:expected=${runtimeHeight}/${runtimeTimestamp}:` +
+        `actual=${String(record['runtimeHeight'])}/${String(record['timestamp'])}`,
+      );
+    }
+    return record as unknown as RuntimeHistoryRecord;
+  });
 };

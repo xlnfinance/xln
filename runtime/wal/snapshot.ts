@@ -220,7 +220,7 @@ const DURABLE_RUNTIME_STATE_KEYS = [
   'maxEntityTxsPerFrame',
   'securityIncidents',
   'quarantinedRuntimeInputs',
-  'pendingFrameDbRecords',
+  'pendingHistoryRecords',
   'deferredNetworkMeta',
   'reliableIngressReceiptLedger',
   'reliableIngressTerminalWatermarks',
@@ -240,7 +240,7 @@ const buildDurableRuntimeStateSnapshot = (
   options?: {
     includeCertifiedBoardNodes?: boolean;
     includeIngressWorkingState?: boolean;
-    excludePersistedFrameDbRecords?: boolean;
+    excludePersistedHistoryRecords?: boolean;
   },
 ): Record<string, unknown> | undefined => {
   const state = env.runtimeState;
@@ -252,8 +252,8 @@ const buildDurableRuntimeStateSnapshot = (
     ...(state.maxEntityTxsPerFrame !== undefined ? { maxEntityTxsPerFrame: state.maxEntityTxsPerFrame } : {}),
     ...(hasDurableEntries(state.securityIncidents) ? { securityIncidents: structuredClone(state.securityIncidents) } : {}),
     ...(hasDurableEntries(state.quarantinedRuntimeInputs) ? { quarantinedRuntimeInputs: structuredClone(state.quarantinedRuntimeInputs) } : {}),
-    ...(!options?.excludePersistedFrameDbRecords && hasDurableEntries(state.pendingFrameDbRecords)
-      ? { pendingFrameDbRecords: structuredClone(state.pendingFrameDbRecords) }
+    ...(!options?.excludePersistedHistoryRecords && hasDurableEntries(state.pendingHistoryRecords)
+      ? { pendingHistoryRecords: structuredClone(state.pendingHistoryRecords) }
       : {}),
     ...(hasDurableEntries(state.deferredNetworkMeta) ? { deferredNetworkMeta: structuredClone(state.deferredNetworkMeta) } : {}),
     ...(hasDurableEntries(state.reliableIngressReceiptLedger)
@@ -314,12 +314,12 @@ export const buildDurableRuntimeMachineSnapshot = (
   options?: {
     pendingNetworkOutputs?: RoutedEntityInput[];
     includeIngressWorkingState?: boolean;
-    excludePersistedFrameDbRecords?: boolean;
+    excludePersistedHistoryRecords?: boolean;
   },
 ): Record<string, unknown> => {
   const runtimeState = buildDurableRuntimeStateSnapshot(env, {
     includeIngressWorkingState: options?.includeIngressWorkingState === true,
-    excludePersistedFrameDbRecords: options?.excludePersistedFrameDbRecords === true,
+    excludePersistedHistoryRecords: options?.excludePersistedHistoryRecords === true,
   });
   return {
     ...(env.runtimeId ? { runtimeId: env.runtimeId } : {}),
@@ -363,7 +363,7 @@ export const buildReplayVerifiableRuntimeMachineSnapshot = (
   options?: {
     pendingNetworkOutputs?: RoutedEntityInput[];
     includeIngressWorkingState?: boolean;
-    excludePersistedFrameDbRecords?: boolean;
+    excludePersistedHistoryRecords?: boolean;
   },
 ): Record<string, unknown> => projectReplayVerifiableRuntimeMachine(
   buildDurableRuntimeMachineSnapshot(env, options),

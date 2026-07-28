@@ -5,11 +5,11 @@ import {
   readRawOrNull,
 } from './level';
 import {
-  buildFrameDbPuts,
-  prepareFrameDbCommit,
-  pruneFrameDbRetention,
-  putFrameDbCommit,
-} from './frame-db';
+  buildHistoryViewPuts,
+  pruneHistoryViewRetention,
+  readHistoryViewHead,
+  reconcileHistoryViews,
+} from './history-view';
 import {
   canonicalizeStorageDoc,
   computeStorageFrameHash,
@@ -86,7 +86,7 @@ import type {
   RuntimeState,
   RoutedEntityInput,
   RuntimeInput,
-  RuntimeFrameDbRecord,
+  RuntimeHistoryRecord,
 } from '../types';
 import { cloneIsolatedRoutedEntityInputs } from '../protocol/runtime-input-clone';
 import {
@@ -135,7 +135,6 @@ import {
 import type {
   PerfDeps,
   RuntimeDbLike,
-  RuntimeFrameDbLike,
   StorageDiffRecord,
   StorageDoc,
   StorageDocRef,
@@ -157,10 +156,12 @@ export {
   projectEntityCoreDoc,
 } from './projections';
 export {
-  readFrameDbAccountFrames,
-  readFrameDbEntityFrames,
-  readFrameDbRuntimeActivity,
-} from './frame-db';
+  readHistoryViewAccountFrames,
+  readHistoryViewEntityFrames,
+  readHistoryViewRuntimeActivity,
+  readHistoryViewHead,
+  reconcileHistoryViews,
+} from './history-view';
 export {
   inspectStorage,
 } from './inspect';
@@ -328,13 +329,13 @@ const storageHeadsEqual = (left: StorageHead, right: StorageHead): boolean =>
   left.retainedHistoryBytes === right.retainedHistoryBytes;
 
 const synchronizeCertifiedBoardNodes = async (
-  historyDb: RuntimeFrameDbLike,
+  walDb: RuntimeDbLike,
   currentDb: RuntimeDbLike,
   batch: ReturnType<RuntimeDbLike['batch']>,
 ): Promise<boolean> => {
   let changed = false;
-  for await (const key of iterateKeys(historyDb, { prefix: keyCertifiedBoardNodePrefix() })) {
-    const authoritative = await historyDb.get(key);
+  for await (const key of iterateKeys(walDb, { prefix: keyCertifiedBoardNodePrefix() })) {
+    const authoritative = await walDb.get(key);
     const current = await readRawOrNull(currentDb, key);
     if (current?.equals(authoritative)) continue;
     batch.put(key, authoritative);
@@ -344,7 +345,7 @@ const synchronizeCertifiedBoardNodes = async (
 };
 
 const synchronizeConsumptionNodes = async (
-  historyDb: RuntimeFrameDbLike,
+  walDb: RuntimeDbLike,
   currentDb: RuntimeDbLike,
   batch: ReturnType<RuntimeDbLike['batch']>,
 ): Promise<boolean> => {
@@ -355,9 +356,9 @@ const synchronizeConsumptionNodes = async (
   }
   const authoritative = new Map<string, ConsumptionNode>();
   const authoritativeValues = new Map<string, Buffer>();
-  for await (const key of iterateKeys(historyDb, { prefix: keyConsumptionNodePrefix() })) {
+  for await (const key of iterateKeys(walDb, { prefix: keyConsumptionNodePrefix() })) {
     const hash = decodeTaggedStorageHash(key, KEY_CONSUMPTION_NODE, 'STORAGE_CONSUMPTION_NODE_KEY_INVALID');
-    const value = await historyDb.get(key);
+    const value = await walDb.get(key);
     const node = decodeValidatedBuffer(value, validateConsumptionNodeValue);
     const actual = hashConsumptionNode(node);
     if (actual !== hash) throw new Error(`CONSUMPTION_NODE_CORRUPT:${hash}:${actual}`);
@@ -387,18 +388,18 @@ const synchronizeConsumptionNodes = async (
 };
 
 const readSnapshotReplicaStates = async (
-  historyDb: RuntimeFrameDbLike,
+  walDb: RuntimeDbLike,
   height: number,
   docs: readonly StorageDoc[],
 ): Promise<EntityState[]> => {
   const entityIds = Array.from(new Set(docs.map((doc) => doc.entityId))).sort();
-  for await (const key of iterateKeys(historyDb, { prefix: keySnapshotReplicaMetaPrefix(height) })) {
+  for await (const key of iterateKeys(walDb, { prefix: keySnapshotReplicaMetaPrefix(height) })) {
     if (key.byteLength !== 73) throw new Error(`STORAGE_SNAPSHOT_REPLICA_META_KEY_LENGTH_INVALID:${key.byteLength}`);
     entityIds.push(decodeEntityId(key.subarray(9, 41)));
   }
   const states: EntityState[] = [];
   for (const entityId of [...new Set(entityIds)].sort()) {
-    const metas = await listStorageSnapshotReplicaMetas(historyDb, height, entityId);
+    const metas = await listStorageSnapshotReplicaMetas(walDb, height, entityId);
     for (const meta of metas) {
       if (!meta.state) throw new Error(`STORAGE_SNAPSHOT_REPLICA_STATE_MISSING:${height}:${entityId}`);
       states.push(meta.state);
@@ -414,20 +415,20 @@ const certifiedBoardRoot = (
 
 const collectCertifiedBoardHistoryRoots = async (
   env: RuntimeState,
-  historyDb: RuntimeFrameDbLike,
+  walDb: RuntimeDbLike,
 ): Promise<Set<string>> => {
   const roots = new Set<string>();
   const remember = (root: string | undefined): void => {
     if (root) roots.add(root);
   };
   for (const { state } of env.eReplicas.values()) remember(certifiedBoardRoot(state));
-  for (const height of await listSnapshotHeights(historyDb)) {
-    const docs = await readSnapshotDocs(historyDb, height);
+  for (const height of await listSnapshotHeights(walDb)) {
+    const docs = await readSnapshotDocs(walDb, height);
     for (const doc of docs) if (doc.family === 'entity') remember(certifiedBoardRoot(doc.value));
-    for (const state of await readSnapshotReplicaStates(historyDb, height, docs)) remember(certifiedBoardRoot(state));
+    for (const state of await readSnapshotReplicaStates(walDb, height, docs)) remember(certifiedBoardRoot(state));
   }
-  for await (const key of iterateKeys(historyDb, { prefix: Buffer.from([KEY_DIFF]) })) {
-    const diff = decodeValidatedBuffer(await historyDb.get(key), validateStorageDiffRecordValue);
+  for await (const key of iterateKeys(walDb, { prefix: Buffer.from([KEY_DIFF]) })) {
+    const diff = decodeValidatedBuffer(await walDb.get(key), validateStorageDiffRecordValue);
     if (diff.height !== decodeTaggedStorageHeight(key, KEY_DIFF, 'STORAGE_DIFF_KEY_INVALID')) {
       throw new Error('STORAGE_DIFF_KEY_HEIGHT_MISMATCH:scope=board-gc');
     }
@@ -467,14 +468,14 @@ const deleteCertifiedBoardNodes = async (
 
 const pruneUnreachableCertifiedBoardHistoryNodes = async (
   env: RuntimeState,
-  historyDb: RuntimeFrameDbLike,
+  walDb: RuntimeDbLike,
   currentDb: RuntimeDbLike,
 ): Promise<number> => {
-  const stored = await readCertifiedBoardNodes(historyDb);
-  const roots = await collectCertifiedBoardHistoryRoots(env, historyDb);
+  const stored = await readCertifiedBoardNodes(walDb);
+  const roots = await collectCertifiedBoardHistoryRoots(env, walDb);
   const reachable = collectReachableCertifiedBoardNodes(stored.nodes, roots);
   const stale = [...stored.nodes.keys()].filter((hash) => !reachable.has(hash)).sort();
-  await deleteCertifiedBoardNodes(historyDb, stale, 'STORAGE_HISTORY_CERTIFIED_BOARD_GC_UNSUPPORTED');
+  await deleteCertifiedBoardNodes(walDb, stale, 'STORAGE_HISTORY_CERTIFIED_BOARD_GC_UNSUPPORTED');
   await deleteCertifiedBoardNodes(currentDb, stale, 'STORAGE_CURRENT_CERTIFIED_BOARD_GC_UNSUPPORTED');
   const memoryStore = getCertifiedBoardNodeStore(env);
   for (const hash of stale) memoryStore.delete(hash);
@@ -483,24 +484,24 @@ const pruneUnreachableCertifiedBoardHistoryNodes = async (
 
 const pruneUnreachableConsumptionHistoryNodes = async (
   env: RuntimeState,
-  historyDb: RuntimeFrameDbLike,
+  walDb: RuntimeDbLike,
 ): Promise<number> => {
   const byRoot = new Map<string, ConsumptionAccumulatorState>();
   const remember = (state: ConsumptionAccumulatorState | undefined): void => {
     if (state) byRoot.set(`${state.root}:${state.count.toString()}`, state);
   };
   for (const state of getLiveConsumptionAccumulatorStates(env)) remember(state);
-  for (const height of await listSnapshotHeights(historyDb)) {
-    const docs = await readSnapshotDocs(historyDb, height);
+  for (const height of await listSnapshotHeights(walDb)) {
+    const docs = await readSnapshotDocs(walDb, height);
     for (const doc of docs) {
       if (doc.family === 'entity') remember(doc.value.consumptionAccumulator);
     }
-    for (const state of await readSnapshotReplicaStates(historyDb, height, docs)) {
+    for (const state of await readSnapshotReplicaStates(walDb, height, docs)) {
       remember(state.consumptionAccumulator);
     }
   }
-  for await (const key of iterateKeys(historyDb, { prefix: Buffer.from([KEY_DIFF]) })) {
-    const diff = decodeValidatedBuffer(await historyDb.get(key), validateStorageDiffRecordValue);
+  for await (const key of iterateKeys(walDb, { prefix: Buffer.from([KEY_DIFF]) })) {
+    const diff = decodeValidatedBuffer(await walDb.get(key), validateStorageDiffRecordValue);
     if (diff.height !== decodeTaggedStorageHeight(key, KEY_DIFF, 'STORAGE_DIFF_KEY_INVALID')) {
       throw new Error('STORAGE_DIFF_KEY_HEIGHT_MISMATCH:scope=consumption-gc');
     }
@@ -511,9 +512,9 @@ const pruneUnreachableConsumptionHistoryNodes = async (
 
   const stored = new Map<string, ConsumptionNode>();
   const encodedBytes = new Map<string, number>();
-  for await (const key of iterateKeys(historyDb, { prefix: keyConsumptionNodePrefix() })) {
+  for await (const key of iterateKeys(walDb, { prefix: keyConsumptionNodePrefix() })) {
     const hash = decodeTaggedStorageHash(key, KEY_CONSUMPTION_NODE, 'STORAGE_CONSUMPTION_NODE_KEY_INVALID');
-    const raw = await historyDb.get(key);
+    const raw = await walDb.get(key);
     const node = decodeValidatedBuffer(raw, validateConsumptionNodeValue);
     const actual = hashConsumptionNode(node);
     if (actual !== hash) throw new Error(`CONSUMPTION_NODE_CORRUPT:${hash}:${actual}`);
@@ -524,7 +525,7 @@ const pruneUnreachableConsumptionHistoryNodes = async (
   const reachable = collectReachableConsumptionNodes(stored, Array.from(byRoot.values()));
   const stale = Array.from(stored.keys()).filter((hash) => !reachable.has(hash)).sort();
   if (stale.length === 0) return 0;
-  const batch = historyDb.batch();
+  const batch = walDb.batch();
   if (typeof batch.del !== 'function') throw new Error('STORAGE_HISTORY_CONSUMPTION_GC_UNSUPPORTED');
   let prunedBytes = 0;
   for (const hash of stale) {
@@ -536,7 +537,7 @@ const pruneUnreachableConsumptionHistoryNodes = async (
 };
 
 const synchronizeAccountJClaimNodes = async (
-  historyDb: RuntimeFrameDbLike,
+  walDb: RuntimeDbLike,
   currentDb: RuntimeDbLike,
   batch: ReturnType<RuntimeDbLike['batch']>,
 ): Promise<boolean> => {
@@ -550,9 +551,9 @@ const synchronizeAccountJClaimNodes = async (
   }
   const authoritative = new Map<string, AccountJClaimNode>();
   const values = new Map<string, Buffer>();
-  for await (const key of iterateKeys(historyDb, { prefix: keyAccountJClaimNodePrefix() })) {
+  for await (const key of iterateKeys(walDb, { prefix: keyAccountJClaimNodePrefix() })) {
     const hash = decodeTaggedStorageHash(key, KEY_ACCOUNT_J_CLAIM_NODE, 'STORAGE_ACCOUNT_J_CLAIM_NODE_KEY_INVALID');
-    const value = await historyDb.get(key);
+    const value = await walDb.get(key);
     const node = decodeValidatedBuffer(value, validateAccountJClaimNodeValue);
     const actual = hashAccountJClaimNode(node);
     if (actual !== hash) throw new Error(`ACCOUNT_J_CLAIM_NODE_CORRUPT:${hash}:${actual}`);
@@ -582,29 +583,29 @@ const synchronizeAccountJClaimNodes = async (
 
 const pruneUnreachableAccountJClaimHistoryNodes = async (
   env: RuntimeState,
-  historyDb: RuntimeFrameDbLike,
+  walDb: RuntimeDbLike,
 ): Promise<number> => {
   const states = new Map<string, AccountJClaimAccumulatorState>();
   const remember = (state: AccountJClaimAccumulatorState): void => {
     states.set(`${state.root}:${state.count.toString()}`, state);
   };
   for (const state of getLiveAccountJClaimAccumulatorStates(env)) remember(state);
-  for (const height of await listSnapshotHeights(historyDb)) {
-    const docs = await readSnapshotDocs(historyDb, height);
+  for (const height of await listSnapshotHeights(walDb)) {
+    const docs = await readSnapshotDocs(walDb, height);
     for (const doc of docs) {
       if (doc.family !== 'account') continue;
       remember(doc.value.leftPendingJClaims);
       remember(doc.value.rightPendingJClaims);
     }
-    for (const state of await readSnapshotReplicaStates(historyDb, height, docs)) {
+    for (const state of await readSnapshotReplicaStates(walDb, height, docs)) {
       for (const account of state.accounts.values()) {
         remember(account.leftPendingJClaims);
         remember(account.rightPendingJClaims);
       }
     }
   }
-  for await (const key of iterateKeys(historyDb, { prefix: Buffer.from([KEY_DIFF]) })) {
-    const diff = decodeValidatedBuffer(await historyDb.get(key), validateStorageDiffRecordValue);
+  for await (const key of iterateKeys(walDb, { prefix: Buffer.from([KEY_DIFF]) })) {
+    const diff = decodeValidatedBuffer(await walDb.get(key), validateStorageDiffRecordValue);
     if (diff.height !== decodeTaggedStorageHeight(key, KEY_DIFF, 'STORAGE_DIFF_KEY_INVALID')) {
       throw new Error('STORAGE_DIFF_KEY_HEIGHT_MISMATCH:scope=account-j-gc');
     }
@@ -616,9 +617,9 @@ const pruneUnreachableAccountJClaimHistoryNodes = async (
   }
   const stored = new Map<string, AccountJClaimNode>();
   const bytes = new Map<string, number>();
-  for await (const key of iterateKeys(historyDb, { prefix: keyAccountJClaimNodePrefix() })) {
+  for await (const key of iterateKeys(walDb, { prefix: keyAccountJClaimNodePrefix() })) {
     const hash = decodeTaggedStorageHash(key, KEY_ACCOUNT_J_CLAIM_NODE, 'STORAGE_ACCOUNT_J_CLAIM_NODE_KEY_INVALID');
-    const raw = await historyDb.get(key);
+    const raw = await walDb.get(key);
     const node = decodeValidatedBuffer(raw, validateAccountJClaimNodeValue);
     const actual = hashAccountJClaimNode(node);
     if (actual !== hash) throw new Error(`ACCOUNT_J_CLAIM_NODE_CORRUPT:${hash}:${actual}`);
@@ -629,7 +630,7 @@ const pruneUnreachableAccountJClaimHistoryNodes = async (
   const reachable = collectReachableAccountJClaimNodes(stored, [...states.values()]);
   const stale = [...stored.keys()].filter((hash) => !reachable.has(hash)).sort();
   if (stale.length === 0) return 0;
-  const batch = historyDb.batch();
+  const batch = walDb.batch();
   if (typeof batch.del !== 'function') throw new Error('STORAGE_HISTORY_ACCOUNT_J_CLAIM_GC_UNSUPPORTED');
   let prunedBytes = 0;
   for (const hash of stale) {
@@ -642,18 +643,18 @@ const pruneUnreachableAccountJClaimHistoryNodes = async (
 
 export const recoverStorageDbFromHistory = async (options: {
   db: RuntimeDbLike;
-  historyDb: RuntimeFrameDbLike;
+  walDb: RuntimeDbLike;
   config: Required<StorageRuntimeConfig>;
   onPersistenceProgress?: StoragePersistenceProgressHook;
 }): Promise<{ recovered: boolean; entityHashDocs?: Map<string, StorageEntityHashDoc> }> => {
-  const historyHead = await readHead(options.historyDb, options.config);
+  const walHead = await readHead(options.walDb, options.config);
   const rawCurrentHead = await readRawOrNull(options.db, KEY_HEAD);
   const currentHead = rawCurrentHead ? await readHead(options.db, options.config) : defaultStorageHead(options.config);
-  const historyLatestHeight = Math.max(0, Math.floor(Number(historyHead.latestHeight ?? 0)));
+  const historyLatestHeight = Math.max(0, Math.floor(Number(walHead.latestHeight ?? 0)));
   const currentLatestHeight = Math.max(0, Math.floor(Number(currentHead.latestHeight ?? 0)));
-  const historyMaterializedHeight = materializedHeightOf(historyHead);
+  const historyMaterializedHeight = materializedHeightOf(walHead);
   const currentMaterializedHeight = materializedHeightOf(currentHead);
-  const historySnapshotHeight = Math.max(0, Math.floor(Number(historyHead.latestSnapshotHeight ?? 0)));
+  const historySnapshotHeight = Math.max(0, Math.floor(Number(walHead.latestSnapshotHeight ?? 0)));
   options.onPersistenceProgress?.('recovery-heads-read');
 
   if (
@@ -678,7 +679,7 @@ export const recoverStorageDbFromHistory = async (options: {
     // This path is cold (fresh/current-lagging restore), so the full integrity
     // scan does not add per-frame cost to the normal append path.
     if (historySnapshotHeight > 0) {
-      await verifyStorageSnapshotIntegrity(options.historyDb, historyHead);
+      await verifyStorageSnapshotIntegrity(options.walDb, walHead);
       options.onPersistenceProgress?.('recovery-snapshot-verified');
     }
     await clearCurrentRecoveryState(options.db);
@@ -686,7 +687,7 @@ export const recoverStorageDbFromHistory = async (options: {
     replayFromHeight = 0;
     recovered = true;
     if (historySnapshotHeight > 0) {
-      const snapshotDocs = await readSnapshotDocs(options.historyDb, historySnapshotHeight);
+      const snapshotDocs = await readSnapshotDocs(options.walDb, historySnapshotHeight);
       entityHashDocs = await applyDiffToLiveDb({
         db: options.db,
         diff: { height: historySnapshotHeight, puts: snapshotDocs, dels: [] },
@@ -696,7 +697,7 @@ export const recoverStorageDbFromHistory = async (options: {
     }
   }
   for (let height = replayFromHeight + 1; height <= historyMaterializedHeight; height += 1) {
-    const rawDiff = await readRawOrNull(options.historyDb, keyDiff(height));
+    const rawDiff = await readRawOrNull(options.walDb, keyDiff(height));
     const diff = rawDiff ? decodeValidatedBuffer(rawDiff, validateStorageDiffRecordValue) : null;
     if (!diff) throw new Error(`STORAGE_RECOVERY_DIFF_MISSING: height=${height}`);
     if (diff.height !== height) {
@@ -712,23 +713,23 @@ export const recoverStorageDbFromHistory = async (options: {
   }
 
   const batch = options.db.batch();
-  const headChanged = !rawCurrentHead || !storageHeadsEqual(historyHead, currentHead);
+  const headChanged = !rawCurrentHead || !storageHeadsEqual(walHead, currentHead);
   // History commits before the rebuildable current projection cache.
   // The normal append path writes both DBs and never scans the content-addressed
   // DAG. Only a lagging/current-cache recovery needs to copy immutable nodes.
   const boardNodesChanged = headChanged
-    ? await synchronizeCertifiedBoardNodes(options.historyDb, options.db, batch)
+    ? await synchronizeCertifiedBoardNodes(options.walDb, options.db, batch)
     : false;
   options.onPersistenceProgress?.('recovery-board-nodes-synchronized');
   const consumptionNodesChanged = headChanged
-    ? await synchronizeConsumptionNodes(options.historyDb, options.db, batch)
+    ? await synchronizeConsumptionNodes(options.walDb, options.db, batch)
     : false;
   options.onPersistenceProgress?.('recovery-consumption-nodes-synchronized');
   const accountJClaimNodesChanged = headChanged
-    ? await synchronizeAccountJClaimNodes(options.historyDb, options.db, batch)
+    ? await synchronizeAccountJClaimNodes(options.walDb, options.db, batch)
     : false;
   options.onPersistenceProgress?.('recovery-account-j-nodes-synchronized');
-  if (headChanged) batch.put(KEY_HEAD, encodeBuffer(historyHead));
+  if (headChanged) batch.put(KEY_HEAD, encodeBuffer(walHead));
   if (boardNodesChanged || consumptionNodesChanged || accountJClaimNodesChanged || headChanged) {
     await writeBatch(batch);
     options.onPersistenceProgress?.('recovery-current-write-done');
@@ -740,7 +741,7 @@ export const recoverStorageDbFromHistory = async (options: {
 export type StorageFrameSaveResult = {
   materialized: boolean;
   materializedOverlayRecords: number;
-  frameDbCommitted: boolean;
+  historyViewsMaterialized: boolean;
   staleWriterStopped?: boolean;
   latestSnapshotHeight?: number;
   retainedHistoryBytes?: number;
@@ -749,8 +750,8 @@ export type StorageFrameSaveResult = {
   historyPrunedBytes?: number;
   epochRotated?: boolean;
   epochDbRotated?: boolean;
-  frameDbRetainedBytes?: number;
-  frameDbPrunedBytes?: number;
+  historyViewRetainedBytes?: number;
+  historyViewPrunedBytes?: number;
   persistencePerfMs?: StoragePersistencePerf;
 };
 
@@ -773,32 +774,34 @@ export const saveRuntimeFrameToStorage = async (options: {
   stateHash?: string;
   currentFrameInput?: RuntimeInput;
   currentFrameOutputs?: RoutedEntityInput[];
-  frameDbRecords?: RuntimeFrameDbRecord[];
+  historyRecords?: RuntimeHistoryRecord[];
   tryOpenDb: (env: RuntimeState) => Promise<boolean>;
   getRuntimeDb: (env: RuntimeState) => RuntimeDbLike;
-  tryOpenFrameDb: (env: RuntimeState) => Promise<boolean>;
-  getFrameDb: (env: RuntimeState) => RuntimeFrameDbLike;
+  tryOpenRuntimeWalDb: (env: RuntimeState) => Promise<boolean>;
+  getRuntimeWalDb: (env: RuntimeState) => RuntimeDbLike;
+  tryOpenHistoryViewDb: (env: RuntimeState) => Promise<boolean>;
+  getHistoryViewDb: (env: RuntimeState) => RuntimeDbLike;
   rotateEpochDb?: (env: RuntimeState, snapshotHeight: number, timestamp: number) => Promise<boolean | void>;
   stopStaleWriterOnHeadAhead?: boolean;
   onPersistenceBoundary?: StoragePersistenceBoundaryHook;
   onPersistenceProgress?: StoragePersistenceProgressHook;
 } & PerfDeps): Promise<StorageFrameSaveResult> => {
   const config = resolveStorageRuntimeConfig(options.env);
-  if (!config.enabled) return { materialized: false, materializedOverlayRecords: 0, frameDbCommitted: true };
+  if (!config.enabled) return { materialized: false, materializedOverlayRecords: 0, historyViewsMaterialized: true };
 
   const state = options.env.runtimeState ?? {};
-  if (state.persistencePaused) return { materialized: false, materializedOverlayRecords: 0, frameDbCommitted: true };
+  if (state.persistencePaused) return { materialized: false, materializedOverlayRecords: 0, historyViewsMaterialized: true };
 
   const openStartedAt = options.getPerfMs();
   const opened = await options.tryOpenDb(options.env);
-  if (!opened) return { materialized: false, materializedOverlayRecords: 0, frameDbCommitted: false };
+  if (!opened) return { materialized: false, materializedOverlayRecords: 0, historyViewsMaterialized: false };
   const db = options.getRuntimeDb(options.env);
-  const historyOpened = await options.tryOpenFrameDb(options.env);
-  if (!historyOpened) return { materialized: false, materializedOverlayRecords: 0, frameDbCommitted: false };
-  const historyDb = options.getFrameDb(options.env);
+  const walOpened = await options.tryOpenRuntimeWalDb(options.env);
+  if (!walOpened) return { materialized: false, materializedOverlayRecords: 0, historyViewsMaterialized: false };
+  const walDb = options.getRuntimeWalDb(options.env);
   const recoveredStorage = await recoverStorageDbFromHistory({
     db,
-    historyDb,
+    walDb,
     config,
     ...(options.onPersistenceProgress
       ? { onPersistenceProgress: options.onPersistenceProgress }
@@ -809,7 +812,7 @@ export const saveRuntimeFrameToStorage = async (options: {
   }
   options.onPersistenceProgress?.('opened');
   const openMs = options.getPerfMs() - openStartedAt;
-  const head = await readHead(historyDb, config);
+  const head = await readHead(walDb, config);
   const appliedRuntimeInput = options.currentFrameInput ?? { runtimeTxs: [], entityInputs: [] };
   const snapshotDue =
     options.env.height === 1 ||
@@ -861,17 +864,17 @@ export const saveRuntimeFrameToStorage = async (options: {
       return {
         materialized: false,
         materializedOverlayRecords: 0,
-        frameDbCommitted: false,
+        historyViewsMaterialized: false,
         staleWriterStopped: true,
       };
     }
     if (head.latestHeight === options.env.height) {
-      const persistedFrame = await readStorageFrameRecord(historyDb, options.env.height);
+      const persistedFrame = await readStorageFrameRecord(walDb, options.env.height);
       if (persistedFrame) {
         return {
           materialized: false,
           materializedOverlayRecords: 0,
-          frameDbCommitted: false,
+          historyViewsMaterialized: false,
           staleWriterStopped: true,
         };
       }
@@ -882,7 +885,7 @@ export const saveRuntimeFrameToStorage = async (options: {
       `STORAGE_APPEND_INVARIANT_FAILED: refusing to write frame ${options.env.height} after persisted head ${head.latestHeight}`,
     );
   }
-  const previousFrame = head.latestHeight > 0 ? await readStorageFrameRecord(historyDb, head.latestHeight) : null;
+  const previousFrame = head.latestHeight > 0 ? await readStorageFrameRecord(walDb, head.latestHeight) : null;
   if (head.latestHeight > 0 && !previousFrame) {
     throw new Error(`STORAGE_PREV_FRAME_MISSING: height=${head.latestHeight}`);
   }
@@ -954,12 +957,12 @@ export const saveRuntimeFrameToStorage = async (options: {
   );
   const runtimeMachineForPostState = buildReplayVerifiableRuntimeMachineSnapshot(options.env, {
     pendingNetworkOutputs: options.currentFrameOutputs ?? options.env.pendingNetworkOutputs ?? [],
-    excludePersistedFrameDbRecords: true,
+    excludePersistedHistoryRecords: true,
   });
   const runtimeMachine = shouldMaterialize || canonicalHashDue
     ? buildDurableRuntimeMachineSnapshot(options.env, {
         pendingNetworkOutputs: options.currentFrameOutputs ?? options.env.pendingNetworkOutputs ?? [],
-        excludePersistedFrameDbRecords: true,
+        excludePersistedHistoryRecords: true,
       })
     : undefined;
   checkpointPrepare('runtimeMachine');
@@ -1024,7 +1027,7 @@ export const saveRuntimeFrameToStorage = async (options: {
   } else {
     // A process restart pays one authoritative scan. Subsequent appends use
     // the writer-local key set published only after both DB batches commit.
-    for await (const key of iterateKeys(historyDb, { prefix: keyLiveReplicaMetaPrefix() })) {
+    for await (const key of iterateKeys(walDb, { prefix: keyLiveReplicaMetaPrefix() })) {
       if (!liveReplicaMetaKeys.has(key.toString('hex'))) staleHistoryReplicaMetaKeys.push(Buffer.from(key));
     }
   }
@@ -1063,6 +1066,8 @@ export const saveRuntimeFrameToStorage = async (options: {
       runtimeStateHash: runtimeStateHashes.canonicalStateHash,
     } : {}),
     runtimeInput: appliedRuntimeInput,
+    historyRecords: (options.historyRecords ?? []).map(record => structuredClone(record)),
+    activityLogs: frameLogs.map(log => structuredClone(log)),
     ...(hasDurablePendingRuntimeInput
       ? { pendingRuntimeInput: durablePendingRuntimeInput }
       : {}),
@@ -1084,7 +1089,7 @@ export const saveRuntimeFrameToStorage = async (options: {
     ...frameRecordBase,
     frameHash: computeStorageFrameHash(frameRecordBase),
   };
-  const frameDbPuts = buildFrameDbPuts({
+  const historyViewPuts = buildHistoryViewPuts({
     height: options.env.height,
     timestamp: options.env.timestamp,
     runtimeInput: appliedRuntimeInput,
@@ -1092,7 +1097,7 @@ export const saveRuntimeFrameToStorage = async (options: {
     touchedEntities,
     touchedAccounts,
     touchedBookEntities,
-    frameDbRecords: options.frameDbRecords ?? [],
+    historyRecords: options.historyRecords ?? [],
   });
   const highSignalEvents = frameLogs
     .map((entry) => (typeof entry?.message === 'string' ? entry.message : ''))
@@ -1125,46 +1130,36 @@ export const saveRuntimeFrameToStorage = async (options: {
     pendingBoardHistoryBytes +
     pendingConsumptionHistoryBytes +
     pendingAccountJClaimHistoryBytes;
-  let frameDbBytes = 0;
-  let frameDbPrunedBytes = 0;
-  let frameDbRetainedBytes = 0;
-  let frameDbPrunedKeys = 0;
-  let frameDbLatestPrunedHeight = 0;
-  let frameDbCommitted = frameDbPuts.length === 0;
-  let frameDbCommitPlan: Awaited<ReturnType<typeof prepareFrameDbCommit>> | null = null;
-  const historyBatch = historyDb.batch();
-  if (staleHistoryReplicaMetaKeys.length > 0 && typeof historyBatch.del !== 'function') {
+  let historyViewBytes = 0;
+  let historyViewPrunedBytes = 0;
+  let historyViewRetainedBytes = 0;
+  let historyViewPrunedKeys = 0;
+  let historyViewLatestPrunedHeight = 0;
+  let historyViewsMaterialized = historyViewPuts.length === 0;
+  let viewMaterializedThrough = 0;
+  const walBatch = walDb.batch();
+  if (staleHistoryReplicaMetaKeys.length > 0 && typeof walBatch.del !== 'function') {
     throw new Error('STORAGE_HISTORY_REPLICA_META_DELETE_UNSUPPORTED');
   }
-  for (const key of staleHistoryReplicaMetaKeys) historyBatch.del!(key);
+  for (const key of staleHistoryReplicaMetaKeys) walBatch.del!(key);
   for (const { key, value } of pendingBoardEntries) {
     // Root-bearing entity docs and all newly referenced nodes share both
     // atomic batches. History is authoritative; current is a rebuildable cache.
-    historyBatch.put(key, value);
+    walBatch.put(key, value);
   }
   const safeConsumptionDeletes = getSafePendingConsumptionDeletes(options.env);
   const safeAccountJClaimDeletes = getSafePendingAccountJClaimDeletes(options.env);
   for (const [hash, node] of pendingConsumptionNodes) {
     if (hashConsumptionNode(node) !== hash) throw new Error(`CONSUMPTION_NODE_CORRUPT:${hash}`);
-    historyBatch.put(keyConsumptionNode(hash), encodeBuffer(node));
+    walBatch.put(keyConsumptionNode(hash), encodeBuffer(node));
   }
   for (const [hash, node] of pendingAccountJClaimNodes) {
     if (hashAccountJClaimNode(node) !== hash) throw new Error(`ACCOUNT_J_CLAIM_NODE_CORRUPT:${hash}`);
-    historyBatch.put(keyAccountJClaimNode(hash), encodeBuffer(node));
+    walBatch.put(keyAccountJClaimNode(hash), encodeBuffer(node));
   }
-  historyBatch.put(frameKey, frameBuffer);
-  historyBatch.put(diffKey, diffBuffer);
-  if (frameDbPuts.length > 0) {
-    frameDbCommitPlan = await prepareFrameDbCommit({
-      db: historyDb,
-      height: options.env.height,
-      puts: frameDbPuts,
-      config,
-    });
-    frameDbBytes = frameDbCommitPlan.writtenBytes;
-    putFrameDbCommit(historyBatch, frameDbCommitPlan);
-  }
-  options.onPersistenceProgress?.('frame-db-plan-built');
+  walBatch.put(frameKey, frameBuffer);
+  walBatch.put(diffKey, diffBuffer);
+  options.onPersistenceProgress?.('history-view-plan-built');
   const batch = db.batch();
   for (const { key, value } of pendingBoardEntries) {
     batch.put(key, value);
@@ -1198,7 +1193,7 @@ export const saveRuntimeFrameToStorage = async (options: {
   for (const entry of replicaMetaEntries) {
     // Replica metadata is authoritative recovery state. Keep one copy in the
     // same atomic history batch as frame, diff, and HEAD.
-    historyBatch.put(entry.key, entry.value);
+    walBatch.put(entry.key, entry.value);
   }
 
   const nextHead: StorageHead = {
@@ -1215,19 +1210,34 @@ export const saveRuntimeFrameToStorage = async (options: {
     epochReplayBytes: projectedEpochReplayBytes,
     retainedHistoryBytes: projectedReplayBytes,
   };
-  historyBatch.put(KEY_HEAD, encodeBuffer(nextHead));
+  walBatch.put(KEY_HEAD, encodeBuffer(nextHead));
   batch.put(KEY_HEAD, encodeBuffer(nextHead));
   checkpointPrepare('batchPlan');
   const authoritativeWriteStartedAt = options.getPerfMs();
   const prepareMs = authoritativeWriteStartedAt - writeStartedAt;
   const prepareStages = cumulativeMarksToDurations(prepareMarks, prepareMs);
   options.onPersistenceProgress?.('authoritative-write-start');
-  await writeBatch(historyBatch, { sync: true });
+  await writeBatch(walBatch, { sync: true });
   const authoritativeWriteMs = options.getPerfMs() - authoritativeWriteStartedAt;
   options.onPersistenceProgress?.('authoritative-write-done');
   await options.onPersistenceBoundary?.('after-authoritative-history-commit');
-  if (frameDbCommitPlan) {
-    frameDbCommitted = true;
+  if (historyViewPuts.length > 0) {
+    if (!(await options.tryOpenHistoryViewDb(options.env))) {
+      throw new Error(`HISTORY_VIEW_DB_OPEN_FAILED:height=${options.env.height}`);
+    }
+    const viewDb = options.getHistoryViewDb(options.env);
+    const retainedSnapshotHeights = await listSnapshotHeights(walDb);
+    const reconciled = await reconcileHistoryViews({
+      viewDb,
+      firstWalHeight: retainedSnapshotHeights[0] ?? 1,
+      latestWalHeight: options.env.height,
+      readWalFrame: height => readStorageFrameRecord(walDb, height),
+      config,
+    });
+    historyViewBytes = reconciled.writtenBytes;
+    viewMaterializedThrough = reconciled.materializedThroughRuntimeHeight;
+    historyViewsMaterialized = true;
+    await options.onPersistenceBoundary?.('after-history-view-commit');
   }
   const currentCacheWriteStartedAt = options.getPerfMs();
   options.onPersistenceProgress?.('current-cache-write-start');
@@ -1246,21 +1256,21 @@ export const saveRuntimeFrameToStorage = async (options: {
   if (preparedHashes) {
     state.storageEntityHashDocs = preparedHashes.entityHashDocs;
   }
-  if (frameDbCommitPlan) {
-    const frameDbResult = await pruneFrameDbRetention({
-      db: historyDb,
+  if (viewMaterializedThrough > 0) {
+    const historyViewResult = await pruneHistoryViewRetention({
+      db: options.getHistoryViewDb(options.env),
       height: options.env.height,
-      head: frameDbCommitPlan.nextHead,
+      head: await readHistoryViewHead(options.getHistoryViewDb(options.env), config),
       config,
       ...(options.onPersistenceBoundary
         ? { onPersistenceBoundary: options.onPersistenceBoundary }
         : {}),
     });
-    frameDbPrunedBytes = frameDbResult.prunedBytes;
-    frameDbRetainedBytes = frameDbResult.retainedBytes;
-    frameDbPrunedKeys = frameDbResult.prunedKeys;
-    frameDbLatestPrunedHeight = frameDbResult.latestPrunedRuntimeHeight;
-    frameDbCommitted = true;
+    historyViewPrunedBytes = historyViewResult.prunedBytes;
+    historyViewRetainedBytes = historyViewResult.retainedBytes;
+    historyViewPrunedKeys = historyViewResult.prunedKeys;
+    historyViewLatestPrunedHeight = historyViewResult.latestPrunedRuntimeHeight;
+    historyViewsMaterialized = true;
   }
   const postCommitMs = options.getPerfMs() - currentCacheWriteStartedAt - currentCacheWriteMs;
   const writeMs = options.getPerfMs() - writeStartedAt;
@@ -1279,7 +1289,7 @@ export const saveRuntimeFrameToStorage = async (options: {
     const snapshotStartedAt = options.getPerfMs();
     const snapshotResult = await createSnapshot(
       db,
-      historyDb,
+      walDb,
       options.env.height,
       options.env.timestamp,
       options.onPersistenceBoundary,
@@ -1295,18 +1305,18 @@ export const saveRuntimeFrameToStorage = async (options: {
     // snapshot plus replay diffs, or the complete new snapshot, never a head
     // whose base was already pruned.
     const publishedHead = {
-      ...(await readHead(historyDb, config)),
+      ...(await readHead(walDb, config)),
       latestSnapshotHeight,
       retainedHistoryBytes,
     } satisfies StorageHead;
-    await verifyStorageSnapshotIntegrity(historyDb, publishedHead);
-    const publishBatch = historyDb.batch();
+    await verifyStorageSnapshotIntegrity(walDb, publishedHead);
+    const publishBatch = walDb.batch();
     publishBatch.put(KEY_HEAD, encodeBuffer(publishedHead));
     await writeBatch(publishBatch);
     await options.onPersistenceBoundary?.('after-snapshot-history-publish');
 
     prunedBytes += await maybeRotateSnapshots(
-      historyDb,
+      walDb,
       config.retainSnapshots,
       options.onPersistenceBoundary,
     );
@@ -1316,42 +1326,42 @@ export const saveRuntimeFrameToStorage = async (options: {
 
   if (snapDocs > 0) {
     if (latestSnapshotHeight > 0) {
-      const retainedSnapshotHeights = await listSnapshotHeights(historyDb);
+      const retainedSnapshotHeights = await listSnapshotHeights(walDb);
       const oldestRetainedSnapshotHeight = retainedSnapshotHeights[0] ?? latestSnapshotHeight;
       // Every retained snapshot advertises a usable historical base. Keep the
       // contiguous diff suffix after the oldest base; pruning through the newest
       // snapshot leaves older retained snapshots present but unreplayable.
       prunedBytes += await pruneHistoryBeforeHeight(
-        historyDb,
+        walDb,
         oldestRetainedSnapshotHeight,
         options.onPersistenceBoundary,
       );
     }
-    prunedBytes += await pruneUnreachableCertifiedBoardHistoryNodes(options.env, historyDb, db);
+    prunedBytes += await pruneUnreachableCertifiedBoardHistoryNodes(options.env, walDb, db);
     options.onPersistenceProgress?.('snapshot-board-gc-done');
-    prunedBytes += await pruneUnreachableConsumptionHistoryNodes(options.env, historyDb);
+    prunedBytes += await pruneUnreachableConsumptionHistoryNodes(options.env, walDb);
     options.onPersistenceProgress?.('snapshot-consumption-gc-done');
-    prunedBytes += await pruneUnreachableAccountJClaimHistoryNodes(options.env, historyDb);
+    prunedBytes += await pruneUnreachableAccountJClaimHistoryNodes(options.env, walDb);
     options.onPersistenceProgress?.('snapshot-account-j-gc-done');
   }
 
   retainedHistoryBytes = Math.max(0, retainedHistoryBytes - prunedBytes);
 
   if (snapDocs > 0 || prunedBytes > 0) {
-    const latest = await readHead(historyDb, config);
-    const historyUpdate = historyDb.batch();
+    const latest = await readHead(walDb, config);
+    const walUpdate = walDb.batch();
     const stateUpdate = db.batch();
     const updatedHead = {
       ...latest,
       latestSnapshotHeight,
       retainedHistoryBytes,
     } satisfies StorageHead;
-    historyUpdate.put(
+    walUpdate.put(
       KEY_HEAD,
       encodeBuffer(updatedHead),
     );
     stateUpdate.put(KEY_HEAD, encodeBuffer(updatedHead));
-    await writeBatch(historyUpdate);
+    await writeBatch(walUpdate);
     await options.onPersistenceBoundary?.('after-snapshot-history-head');
     await writeBatch(stateUpdate);
     await options.onPersistenceBoundary?.('after-snapshot-current-head');
@@ -1362,10 +1372,10 @@ export const saveRuntimeFrameToStorage = async (options: {
     epochDbRotated = rotated !== false;
     if (epochDbRotated) {
       const rotatedHistoryHead = {
-        ...(await readHead(historyDb, config)),
+        ...(await readHead(walDb, config)),
         epochReplayBytes: 0,
       } satisfies StorageHead;
-      const resetEpochBatch = historyDb.batch();
+      const resetEpochBatch = walDb.batch();
       resetEpochBatch.put(KEY_HEAD, encodeBuffer(rotatedHistoryHead));
       await writeBatch(resetEpochBatch, { sync: true });
       await options.onPersistenceBoundary?.('after-epoch-history-head-reset');
@@ -1397,11 +1407,11 @@ export const saveRuntimeFrameToStorage = async (options: {
       dels: diff.dels.length,
       frameBytes: frameBuffer.byteLength,
       diffBytes: diffBuffer.byteLength,
-      frameDbBytes,
-      frameDbRetainedBytes,
-      frameDbPrunedBytes,
-      frameDbPrunedKeys,
-      frameDbLatestPrunedHeight,
+      historyViewBytes,
+      historyViewRetainedBytes,
+      historyViewPrunedBytes,
+      historyViewPrunedKeys,
+      historyViewLatestPrunedHeight,
       snapshotBytes,
       retainedHistoryBytes,
       entities: frameTouched.touchedEntities.size,
@@ -1438,7 +1448,7 @@ export const saveRuntimeFrameToStorage = async (options: {
   return {
     materialized: shouldMaterialize,
     materializedOverlayRecords: shouldMaterialize ? overlayRecords.length : 0,
-    frameDbCommitted,
+    historyViewsMaterialized,
     latestSnapshotHeight,
     retainedHistoryBytes,
     snapshotCreated: snapDocs > 0,
@@ -1446,8 +1456,8 @@ export const saveRuntimeFrameToStorage = async (options: {
     historyPrunedBytes: prunedBytes,
     epochRotated,
     epochDbRotated,
-    frameDbRetainedBytes,
-    frameDbPrunedBytes,
+    historyViewRetainedBytes,
+    historyViewPrunedBytes,
     persistencePerfMs,
   };
 };

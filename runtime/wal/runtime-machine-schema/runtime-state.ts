@@ -164,7 +164,7 @@ export const validateDurableRuntimeState = (value: unknown, code: string): void 
   const state = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(state, [], [
     'halted', 'fatalDebugPayload', 'maxEntityInputsPerFrame', 'maxEntityTxsPerFrame',
-    'pendingAuditEvents', 'securityIncidents', 'quarantinedRuntimeInputs', 'pendingFrameDbRecords', 'deferredNetworkMeta',
+    'pendingAuditEvents', 'securityIncidents', 'quarantinedRuntimeInputs', 'pendingHistoryRecords', 'deferredNetworkMeta',
     'reliableIngressReceiptLedger', 'reliableIngressTerminalWatermarks',
     'receivedReliableReceiptLedger', 'receivedReliableTerminalWatermarks',
     'pendingReliableIngress', 'reliableIngressCommitting',
@@ -200,7 +200,7 @@ export const validateDurableRuntimeState = (value: unknown, code: string): void 
     }
   }
   if (state['quarantinedRuntimeInputs'] !== undefined) requireArray(state['quarantinedRuntimeInputs'], `${code}_QUARANTINE`).forEach((entry, index) => validateQuarantine(entry, `${code}_QUARANTINE_${index}`));
-  if (state['pendingFrameDbRecords'] !== undefined) requireArray(state['pendingFrameDbRecords'], `${code}_FRAME_DB`).forEach((entry, index) => validateAccountFrameRecord(entry, `${code}_FRAME_DB_${index}`));
+  if (state['pendingHistoryRecords'] !== undefined) requireArray(state['pendingHistoryRecords'], `${code}_HISTORY_VIEW`).forEach((entry, index) => validateAccountFrameRecord(entry, `${code}_HISTORY_VIEW_${index}`));
   if (state['deferredNetworkMeta'] !== undefined) validateStringMap(state['deferredNetworkMeta'], `${code}_DEFERRED_NETWORK`, (entry, entryCode) => {
     const meta = requireBoundaryRecord(entry, entryCode);
     requireExactBoundaryKeys(meta, ['attempts', 'nextRetryAt'], ['manual'], `${entryCode}_FIELDS`);

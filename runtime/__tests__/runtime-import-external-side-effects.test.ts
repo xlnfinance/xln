@@ -27,7 +27,7 @@ const cleanupNamespaces: string[] = [];
 
 const cleanupRuntimeStorage = (namespace: string): void => {
   const base = join(dbRootPath, namespace);
-  for (const suffix of ['', '-storage-current', '-storage-previous', '-frames', '-events', '-infra']) {
+  for (const suffix of ['', '-storage-current', '-storage-previous', '-wal', '-events', '-infra']) {
     rmSync(`${base}${suffix}`, { recursive: true, force: true });
   }
 };

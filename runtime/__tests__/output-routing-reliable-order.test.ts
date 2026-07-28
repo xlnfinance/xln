@@ -111,7 +111,7 @@ const crossJProposalOutput = (
   const fullHash = `0x${'bc'.repeat(32)}`;
   const partialRoot = `0x${'cd'.repeat(32)}`;
   const route = {
-    orderId: 'cross-j-adjacent-runtime-frames',
+    orderId: 'cross-j-adjacent-runtime-wal',
     routeHash,
     source: {
       jurisdiction: 'stack:1:source',
@@ -321,7 +321,7 @@ describe('ordered reliable output lanes', () => {
     const dbRoot = process.env.XLN_DB_PATH || 'db-tmp/runtime';
     const removeStorage = (): void => {
       const namespacePath = join(dbRoot, sourceRuntimeId);
-      for (const suffix of ['', '-storage-current', '-storage-previous', '-frames', '-events', '-infra']) {
+      for (const suffix of ['', '-storage-current', '-storage-previous', '-wal', '-events', '-infra']) {
         rmSync(`${namespacePath}${suffix}`, { recursive: true, force: true });
       }
     };

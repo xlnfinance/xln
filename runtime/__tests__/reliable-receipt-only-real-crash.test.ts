@@ -7,7 +7,7 @@ import { dbRootPath } from '../runtime/platform';
 import {
   closeInfraDb,
   closeRuntimeDb,
-  getFrameDb,
+  getRuntimeWalDb,
   loadEnvFromDB,
 } from '../runtime';
 import { readStorageFrameRecord } from '../storage';
@@ -21,7 +21,7 @@ let cleanupRuntimeId: string | null = null;
 
 const cleanupRuntimeStorage = (runtimeId: string): void => {
   const namespacePath = join(dbRootPath, runtimeId);
-  for (const suffix of ['', '-storage-current', '-storage-previous', '-frames', '-events', '-infra']) {
+  for (const suffix of ['', '-storage-current', '-storage-previous', '-wal', '-events', '-infra']) {
     rmSync(`${namespacePath}${suffix}`, { recursive: true, force: true });
   }
 };
@@ -71,7 +71,7 @@ test('restores a terminal receipt-only frontier after real SIGKILL', async () =>
       height: 1,
     });
 
-    const frame = await readStorageFrameRecord(getFrameDb(restored), 3);
+    const frame = await readStorageFrameRecord(getRuntimeWalDb(restored), 3);
     expect(frame?.runtimeInput.entityInputs).toHaveLength(1);
     expect(frame?.runtimeInput.entityInputs[0]?.from).toBe(peerRuntimeId);
     expect(frame?.runtimeMachine).toBeUndefined();

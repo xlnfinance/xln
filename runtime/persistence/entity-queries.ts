@@ -7,7 +7,7 @@ import {
   type StorageHead,
 } from '../storage';
 import {
-  resolveFrameDbPath,
+  resolveRuntimeWalDbPath,
   resolveStorageDbPath,
 } from '../storage/runtime-dbs';
 import { verifyStorageTailIntegrity } from '../storage/verify';
@@ -27,8 +27,8 @@ export const createPersistenceEntityQueries = (deps: PersistenceQueryDeps) => {
   ): Promise<EntityState | null> => {
     const state = await loadEntityStateFromStorage({
       env,
-      tryOpenDb: deps.tryOpenFrameDb,
-      getRuntimeDb: deps.getFrameDb,
+      tryOpenDb: deps.tryOpenRuntimeWalDb,
+      getRuntimeDb: deps.getRuntimeWalDb,
       entityId,
       ...(height === undefined ? {} : { height }),
       liveStateReadable: false,
@@ -44,8 +44,8 @@ export const createPersistenceEntityQueries = (deps: PersistenceQueryDeps) => {
     height?: number,
   ) => loadEntityAccountDocFromStorage({
     env,
-    tryOpenDb: deps.tryOpenFrameDb,
-    getRuntimeDb: deps.getFrameDb,
+    tryOpenDb: deps.tryOpenRuntimeWalDb,
+    getRuntimeDb: deps.getRuntimeWalDb,
     entityId,
     counterpartyId,
     ...(height === undefined ? {} : { height }),
@@ -75,8 +75,8 @@ export const createPersistenceEntityQueries = (deps: PersistenceQueryDeps) => {
     };
     return loadEntityViewPageFromStorage({
       env,
-      tryOpenDb: deps.tryOpenFrameDb,
-      getRuntimeDb: deps.getFrameDb,
+      tryOpenDb: deps.tryOpenRuntimeWalDb,
+      getRuntimeDb: deps.getRuntimeWalDb,
       entityId,
       height,
       accountQuery,
@@ -93,8 +93,8 @@ export const createPersistenceEntityQueries = (deps: PersistenceQueryDeps) => {
     });
     const history = await inspectStorage({
       env,
-      tryOpenDb: deps.tryOpenFrameDb,
-      getRuntimeDb: deps.getFrameDb,
+      tryOpenDb: deps.tryOpenRuntimeWalDb,
+      getRuntimeDb: deps.getRuntimeWalDb,
     });
     if (!current && !history) return null;
 
@@ -116,7 +116,7 @@ export const createPersistenceEntityQueries = (deps: PersistenceQueryDeps) => {
       history
         ? {
             role: 'history' as const,
-            path: resolveFrameDbPath(env),
+            path: resolveRuntimeWalDbPath(env),
             latestHeight: history.head?.latestHeight ?? 0,
             latestSnapshotHeight: history.head?.latestSnapshotHeight ?? 0,
             frameCount: history.frameCount,
@@ -157,8 +157,8 @@ export const createPersistenceEntityQueries = (deps: PersistenceQueryDeps) => {
     deps.resolvePersistedCheckpointHeights(env);
 
   const readPersistedStorageHead = async (env: RuntimeState): Promise<StorageHead | null> => {
-    if (!(await deps.tryOpenFrameDb(env))) return null;
-    return readStorageHead(deps.getFrameDb(env));
+    if (!(await deps.tryOpenRuntimeWalDb(env))) return null;
+    return readStorageHead(deps.getRuntimeWalDb(env));
   };
 
   const verifyLiveRuntimeStorage = async (env: RuntimeState): Promise<{
@@ -167,9 +167,9 @@ export const createPersistenceEntityQueries = (deps: PersistenceQueryDeps) => {
     latestHeight: number;
     checkedFrames: number;
   }> => {
-    if (!(await deps.tryOpenFrameDb(env))) throw new Error('LIVE_RUNTIME_STORAGE_UNAVAILABLE');
+    if (!(await deps.tryOpenRuntimeWalDb(env))) throw new Error('LIVE_RUNTIME_STORAGE_UNAVAILABLE');
     return deps.withStorageConsistentRead(env, async () => {
-      const result = await verifyStorageTailIntegrity(deps.getFrameDb(env));
+      const result = await verifyStorageTailIntegrity(deps.getRuntimeWalDb(env));
       return { ok: true, runtimeId: String(env.runtimeId || ''), ...result };
     });
   };

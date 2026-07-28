@@ -7,7 +7,7 @@ import { dbRootPath } from '../runtime/platform';
 import {
   closeInfraDb,
   closeRuntimeDb,
-  getFrameDb,
+  getRuntimeWalDb,
   loadEnvFromDB,
   processRuntime,
 } from '../runtime';
@@ -27,7 +27,7 @@ const cleanupRuntimeStorage = (runtimeId: string): void => {
   rmSync(namespacePath, { recursive: true, force: true });
   rmSync(`${namespacePath}-storage-current`, { recursive: true, force: true });
   rmSync(`${namespacePath}-storage-previous`, { recursive: true, force: true });
-  rmSync(`${namespacePath}-frames`, { recursive: true, force: true });
+  rmSync(`${namespacePath}-wal`, { recursive: true, force: true });
   rmSync(`${namespacePath}-events`, { recursive: true, force: true });
   rmSync(`${namespacePath}-infra`, { recursive: true, force: true });
 };
@@ -77,7 +77,7 @@ test('restores H+1 and deferred H+2 from LevelDB after real SIGKILL', async () =
 
     const h2Hash = restored.pendingNetworkOutputs?.[0]?.proposedFrame?.hash;
     expect(h2Hash).toMatch(/^0x[0-9a-f]{64}$/);
-    const frame = await readStorageFrameRecord(getFrameDb(restored), 2);
+    const frame = await readStorageFrameRecord(getRuntimeWalDb(restored), 2);
     expect(frame?.runtimeMachine).toBeTruthy();
     expect(frame?.pendingRuntimeInput?.entityInputs.map(input => input.proposedFrame?.height)).toEqual([2]);
     expect(frame?.runtimeStateHash).toBe(computeCanonicalStateHashFromEnv(restored));

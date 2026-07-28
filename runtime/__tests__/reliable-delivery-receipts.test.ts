@@ -42,7 +42,7 @@ import {
 } from './fixtures/reliable-local-catchup-fixture';
 import {
   createEmptyEnv,
-  getFrameDb,
+  getRuntimeWalDb,
   handleInboundReliableReceipt,
   processRuntime,
 } from '../runtime';
@@ -1739,7 +1739,7 @@ describe('durable scoped reliable delivery receipts', () => {
     expect(sender.height).toBe(1);
     expect(sender.pendingNetworkOutputs).toEqual([]);
     expect(sender.runtimeState?.receivedReliableReceiptLedger?.size).toBe(1);
-    const durableFrame = await readStorageFrameRecord(getFrameDb(sender), sender.height);
+    const durableFrame = await readStorageFrameRecord(getRuntimeWalDb(sender), sender.height);
     expect(durableFrame?.runtimeInput.reliableReceipts).toEqual([commits[0]!.receipt]);
 
     handleInboundReliableReceipt(sender, receiver.runtimeId!, commits[0]!.receipt);
@@ -1787,7 +1787,7 @@ describe('durable scoped reliable delivery receipts', () => {
     await processRuntime(receiver, [output]);
 
     expect(receiver.height).toBe(heightBefore + 1);
-    const receiptOnlyFrame = await readStorageFrameRecord(getFrameDb(receiver), receiver.height);
+    const receiptOnlyFrame = await readStorageFrameRecord(getRuntimeWalDb(receiver), receiver.height);
     expect(receiptOnlyFrame?.runtimeInput.entityInputs).toEqual([{
       ...output,
       from: sender.runtimeId,

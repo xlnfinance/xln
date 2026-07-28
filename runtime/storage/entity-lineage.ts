@@ -1136,7 +1136,7 @@ export const buildRuntimeCheckpointLineagePlan = (
       const certifiedLineage = entry.replica.certifiedFrameLineage;
       if (certifiedLineage && certifiedLineage.length > 0) {
         // Checkpoint publication cannot silently destroy audit evidence. The
-        // frame DB is a second durable copy, not a substitute for the lineage
+        // Runtime WAL is a second durable copy, not a substitute for the lineage
         // committed by replica metadata.
         lineageByReplicaKey.set(entry.replicaKey, structuredClone(certifiedLineage));
       }

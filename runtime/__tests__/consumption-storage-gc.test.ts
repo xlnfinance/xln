@@ -185,12 +185,15 @@ test('snapshot retention keeps old witnesses until their roots are pruned, then 
   };
   const currentDb = makeAtomicMemoryDb();
   const historyDb = makeAtomicMemoryDb();
+  const historyViewDb = makeAtomicMemoryDb();
   const save = () => saveRuntimeFrameToStorage({
     env,
     tryOpenDb: async () => true,
     getRuntimeDb: () => currentDb,
-    tryOpenFrameDb: async () => true,
-    getFrameDb: () => historyDb,
+    tryOpenRuntimeWalDb: async () => true,
+    getRuntimeWalDb: () => historyDb,
+    tryOpenHistoryViewDb: async () => true,
+    getHistoryViewDb: () => historyViewDb,
     getPerfMs,
     formatPerfMs: (value) => value.toFixed(2),
   });
@@ -213,14 +216,14 @@ test('snapshot retention keeps old witnesses until their roots are pruned, then 
   const rebuiltCurrent = makeAtomicMemoryDb();
   await recoverStorageDbFromHistory({
     db: rebuiltCurrent,
-    historyDb,
+    walDb: historyDb,
     config: {
       enabled: true,
       snapshotPeriodFrames: 1,
       retainSnapshots: 1,
       epochMaxBytes: 256 * 1024 * 1024,
-      frameDbMaxBytes: 1024 * 1024 * 1024,
-      frameDbRetainFrames: 100_000,
+      historyViewMaxBytes: 1024 * 1024 * 1024,
+      historyViewRetainFrames: 100_000,
       materializePeriodFrames: 1,
       canonicalHashPeriodFrames: 1,
       accountMerkleRadix: 16,

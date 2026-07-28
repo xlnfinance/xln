@@ -4,13 +4,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Level } from 'level';
 
-import { pruneFrameDbRetention } from '../storage/frame-db';
+import { pruneHistoryViewRetention } from '../storage/history-view';
 import {
-  keyFrameDbAccountFrame,
-  keyFrameDbAccountFrameByRuntime,
-  keyFrameDbEntityFrame,
-  keyFrameDbEntityFrameByRuntime,
-  keyFrameDbRuntimeActivity,
+  keyHistoryViewAccountFrame,
+  keyHistoryViewAccountFrameByRuntime,
+  keyHistoryViewEntityFrame,
+  keyHistoryViewEntityFrameByRuntime,
+  keyHistoryViewRuntimeActivity,
   STORAGE_SCHEMA_VERSION,
 } from '../storage/keys';
 import { readRawOrNull } from '../storage/level';
@@ -25,8 +25,8 @@ const config: Required<StorageRuntimeConfig> = {
   snapshotPeriodFrames: 100,
   retainSnapshots: 2,
   epochMaxBytes: 1_000_000,
-  frameDbMaxBytes: 1,
-  frameDbRetainFrames: 1,
+  historyViewMaxBytes: 1,
+  historyViewRetainFrames: 1,
   materializePeriodFrames: 10,
   canonicalHashPeriodFrames: 0,
   accountMerkleRadix: 16,
@@ -44,19 +44,19 @@ describe('independent frame history retention', () => {
       keyEncoding: 'buffer',
       valueEncoding: 'buffer',
     });
-    const accountFrameKey = keyFrameDbAccountFrame(entityId, counterpartyId, 1);
-    const entityFrameKey = keyFrameDbEntityFrame(entityId, 1);
-    const accountRuntimeIndex = keyFrameDbAccountFrameByRuntime(1, entityId, counterpartyId, 1);
-    const entityRuntimeIndex = keyFrameDbEntityFrameByRuntime(1, entityId, 1);
+    const accountFrameKey = keyHistoryViewAccountFrame(entityId, counterpartyId, 1);
+    const entityFrameKey = keyHistoryViewEntityFrame(entityId, 1);
+    const accountRuntimeIndex = keyHistoryViewAccountFrameByRuntime(1, entityId, counterpartyId, 1);
+    const entityRuntimeIndex = keyHistoryViewEntityFrameByRuntime(1, entityId, 1);
     await db.batch()
-      .put(keyFrameDbRuntimeActivity(1), Buffer.from('runtime-activity'))
+      .put(keyHistoryViewRuntimeActivity(1), Buffer.from('runtime-activity'))
       .put(accountFrameKey, Buffer.from('account-frame'))
       .put(entityFrameKey, Buffer.from('entity-frame'))
       .put(accountRuntimeIndex, Buffer.alloc(0))
       .put(entityRuntimeIndex, Buffer.alloc(0))
       .write();
 
-    await pruneFrameDbRetention({
+    await pruneHistoryViewRetention({
       db,
       height: 3,
       head: {
@@ -70,7 +70,7 @@ describe('independent frame history retention', () => {
       config,
     });
 
-    expect(await readRawOrNull(db, keyFrameDbRuntimeActivity(1))).toBeNull();
+    expect(await readRawOrNull(db, keyHistoryViewRuntimeActivity(1))).toBeNull();
     expect(await readRawOrNull(db, accountRuntimeIndex)).toBeNull();
     expect(await readRawOrNull(db, entityRuntimeIndex)).toBeNull();
     expect(await readRawOrNull(db, accountFrameKey)).toEqual(Buffer.from('account-frame'));

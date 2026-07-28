@@ -174,7 +174,7 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   halt after waking, a post-WAL notification failure cannot downgrade a
   durable commit, and abort closes candidate-only storage handles without
   touching live handles.
-- [ ] Fix the confirmed Runtime WAL ambiguity fail-open before further
+- [x] Fix the confirmed Runtime WAL ambiguity fail-open before further
   structural work. `RuntimeFrameStorageError(commitStatus='unknown')`
   currently installs the working candidate with
   `publishRuntimeFrameTransaction` and only then halts. Unknown durability is
@@ -184,6 +184,10 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   for `not-committed`, `committed`, and `unknown`, plus an L2 child-process
   timeout/crash test that proves RAM height, mempool ownership, receipts and
   post-restart state all follow the durable frame.
+  **Done:** unknown/conflict durability aborts the candidate and halts on the
+  last proven live frame; only a positively proven commit is installed.
+  `runtime-storage-failure.test.ts` pins all four dispositions and a real child
+  process proves restart follows WAL truth after a write timeout.
 - [ ] Remove ephemeral Account replica fields from `AccountState`, starting
   with `clonedForValidation`. It is currently kept out of consensus and
   persistence by independent name-based exclusions in clone, serialization,
@@ -194,7 +198,7 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   Do not add a compatibility fallback: this is testnet, so make one canonical
   schema transition with explicit migration tooling if durable fixtures need
   conversion.
-- [ ] Delete the remaining Account-boundary escape hatches. Delete
+- [x] Delete the remaining Account-boundary escape hatches. Delete
   `rollbackTimedOutFrames`, `ACCOUNT_ACK_TIMEOUT_MS`, and every scheduler path
   that deletes a signed pending proposal because time or an embedded HTLC
   deadline elapsed. Rename `checkAccountTimeouts` to the actual liveness job:
@@ -213,6 +217,10 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   unreachable fail-fast handler, clone path, witness path and unused
   `account-settlement` consumption lane. Settlement negotiation has one path:
   canonical EntityTxs produce bilateral `settle_transition` AccountTxs.
+  **Done:** repository call-site scans contain no `rollbackTimedOutFrames`,
+  `ACCOUNT_ACK_TIMEOUT_MS`, `checkAccountTimeouts`, or
+  `addToAccountMempool`. Signed Account proposals are resent exactly and
+  same-height rollback remains inside Account consensus.
 - [ ] Remove confirmed vestigial or misplaced state only with root/storage
   evidence. Owner decision: `EntityState.messages`, `batchHistory`, and
   diagnostic activity are not consensus state. Persist certified Entity frames
@@ -231,21 +239,28 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   `EntityState.accountInputQueue` and hash-excluded `entityEncPrivKey`; delete
   or relocate each only after dynamic/browser entrypoints, recovery hydration
   and state-root fixtures prove its real ownership.
-- [ ] Store Runtime, Entity, and Account histories as independent logical
-  streams in one physical LevelDB. Runtime WAL epochs are a compaction detail
-  and must not partition or own Entity/Account history. Key certified Entity
+- [ ] Store Runtime, Entity, Account, and J histories across three explicit
+  physical roles: rebuildable hot `current`, authoritative epoch-rolled
+  `runtimeWal`, and rebuildable `historyViews`. Runtime WAL epochs are a
+  compaction detail and must not partition certified Entity/Account chains.
+  Key certified Entity
   frames by entity/height/hash with their certificate; key accepted Account
   frames by canonical pair/height/hash with Hanko, ACK, and same-height
   collision evidence. Record losing candidates only as evidence, never as the
-  canonical Account chain. Commit the Runtime WAL record, new Entity frames,
-  Account frames, evidence, and stream indexes in one atomic LevelDB batch so
-  no child history becomes visible before its owning Runtime frame is durable.
+  canonical Account chain. Commit each Runtime frame first with its exact
+  certified child-frame records and Activity inputs inside the WAL hash. Only
+  then advance the idempotent history-view cursor. A crash between databases
+  never rolls back Runtime: startup replays WAL heights after the cursor.
   Keep only latest committed R/E/A state plus one necessary in-flight candidate
   in RAM. Owner clarification: an operator reset creates a new network/genesis,
   not a new epoch of the existing network. Epoch rotation is a separate local
   history-compaction mechanism for reducing Hub storage weight; it must
   preserve network identity and continuous certified Entity/Account chains.
-  **Done:** Runtime retention now removes only Runtime Activity and reverse
+  **Done:** storage schema v10 physically separates `current`, `runtimeWal`,
+  and `historyViews`; strict TS boundary validators bind every child history
+  record to its owning Runtime height/timestamp. Real SIGKILL tests cover both
+  sides of the WAL/view boundary, and deleting the entire view DB rebuilds it
+  exactly from WAL. Runtime retention now removes only Runtime Activity and reverse
   runtime-height indexes. It no longer deletes canonical Entity/Account frame
   bodies; a real LevelDB regression pins this ownership boundary.
 - [ ] Make long-term history retention independent per replica. Add certified

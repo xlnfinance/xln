@@ -5,12 +5,12 @@ import {
   hydrateConsumptionRootNodesFromStorage,
 } from '../storage';
 import {
-  buildFrameDbPuts,
-  prepareFrameDbCommit,
-  putFrameDbCommit,
-  readFrameDbHead,
-  readFrameDbRuntimeActivity,
-} from '../storage/frame-db';
+  buildHistoryViewPuts,
+  prepareHistoryViewCommit,
+  putHistoryViewCommit,
+  readHistoryViewHead,
+  readHistoryViewRuntimeActivity,
+} from '../storage/history-view';
 import { decodeBuffer, decodeValidatedBuffer, encodeBuffer } from '../storage/codec';
 import { liveKeyForDoc } from '../storage/doc-refs';
 import { prepareStorageStateHashes } from '../storage/hashes';
@@ -60,8 +60,8 @@ const config: Required<StorageRuntimeConfig> = {
   snapshotPeriodFrames: 256,
   retainSnapshots: 3,
   epochMaxBytes: 1_000_000,
-  frameDbMaxBytes: 1_000_000,
-  frameDbRetainFrames: 128,
+  historyViewMaxBytes: 1_000_000,
+  historyViewRetainFrames: 128,
   materializePeriodFrames: 1,
   accountMerkleRadix: 16,
 };
@@ -211,7 +211,7 @@ describe('storage crash recovery', () => {
       [KEY_HEAD, encodeBuffer(head(1, 0))],
       [keyCertifiedBoardNode(nodeHash), encodeBuffer(node)],
     ]);
-    await recoverStorageDbFromHistory({ db: currentDb, historyDb, config });
+    await recoverStorageDbFromHistory({ db: currentDb, walDb: historyDb, config });
     expect(decodeBuffer(await currentDb.get(keyCertifiedBoardNode(nodeHash)))).toEqual(node);
     expect(decodeBuffer<StorageHead>(await currentDb.get(KEY_HEAD)).latestHeight).toBe(1);
   });
@@ -249,7 +249,7 @@ describe('storage crash recovery', () => {
       [keyConsumptionNode(node.hash), encodeBuffer(node.node)],
     ]);
 
-    await recoverStorageDbFromHistory({ db: currentDb, historyDb, config });
+    await recoverStorageDbFromHistory({ db: currentDb, walDb: historyDb, config });
     expect(decodeBuffer(await currentDb.get(keyConsumptionNode(node.hash)))).toEqual(node.node);
     await expect(currentDb.get(keyConsumptionNode(stale.hash))).rejects.toMatchObject({
       code: 'LEVEL_NOT_FOUND',
@@ -320,7 +320,7 @@ describe('storage crash recovery', () => {
       [keyDiff(2), encodeBuffer(diff2)],
     ]);
 
-    const result = await recoverStorageDbFromHistory({ db: currentDb, historyDb, config });
+    const result = await recoverStorageDbFromHistory({ db: currentDb, walDb: historyDb, config });
     expect(result.recovered).toBe(true);
 
     const recoveredHead = decodeBuffer<StorageHead>(await currentDb.get(KEY_HEAD));
@@ -336,13 +336,13 @@ describe('storage crash recovery', () => {
     const currentDb = makeMemoryDb([[KEY_HEAD, encodeBuffer(head(4, 4))]]);
     const historyDb = makeMemoryDb([[KEY_HEAD, encodeBuffer(head(3, 3))]]);
 
-    await expect(recoverStorageDbFromHistory({ db: currentDb, historyDb, config }))
+    await expect(recoverStorageDbFromHistory({ db: currentDb, walDb: historyDb, config }))
       .rejects.toThrow('STORAGE_CURRENT_AHEAD_OF_HISTORY');
   });
 
-  test('frame DB activity rows and head can be committed by the caller batch', async () => {
+  test('history-view activity rows and head can be committed by the caller batch', async () => {
     const historyDb = makeMemoryDb();
-    const puts = buildFrameDbPuts({
+    const puts = buildHistoryViewPuts({
       height: 7,
       timestamp: 700,
       runtimeInput: { runtimeTxs: [], entityInputs: [] },
@@ -350,17 +350,17 @@ describe('storage crash recovery', () => {
       touchedEntities: [entityId],
       touchedAccounts: [],
       touchedBookEntities: [],
-      frameDbRecords: [],
+      historyRecords: [],
     });
-    const plan = await prepareFrameDbCommit({ db: historyDb, height: 7, puts, config });
+    const plan = await prepareHistoryViewCommit({ db: historyDb, height: 7, puts, config });
     const batch = historyDb.batch();
-    putFrameDbCommit(batch, plan);
+    putHistoryViewCommit(batch, plan);
     await batch.write();
 
-    const activity = await readFrameDbRuntimeActivity(historyDb, 7);
+    const activity = await readHistoryViewRuntimeActivity(historyDb, 7);
     expect(activity?.logs[0]?.message).toBe('durable');
 
-    const frameHead = await readFrameDbHead(historyDb, config);
+    const frameHead = await readHistoryViewHead(historyDb, config);
     expect(frameHead.latestHeight).toBe(7);
     expect(frameHead.retainedBytes).toBe(plan.writtenBytes);
   });
@@ -375,7 +375,7 @@ describe('storage crash recovery', () => {
       [keyDiff(2), encodeBuffer(diff2)],
     ]);
 
-    const result = await recoverStorageDbFromHistory({ db: currentDb, historyDb, config });
+    const result = await recoverStorageDbFromHistory({ db: currentDb, walDb: historyDb, config });
     const diff3 = entityDiff(3);
     const prepared = await prepareStorageStateHashes({
       db: currentDb,

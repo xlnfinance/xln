@@ -14,7 +14,7 @@ import {
   cloneRuntimeFrameMempool,
   createEmptyEnv,
   enqueueRuntimeInput,
-  getFrameDb,
+  getRuntimeWalDb,
   getRuntimeStorageDb,
   handleInboundP2PEntityInput,
   handleInboundReliableReceipt,
@@ -59,7 +59,7 @@ const hash = (byte: string): string => `0x${byte.repeat(32)}`;
 
 const cleanupRuntimeStorage = (namespace: string): void => {
   const base = join(dbRootPath, namespace);
-  for (const suffix of ['', '-storage-current', '-storage-previous', '-frames', '-events', '-infra']) {
+  for (const suffix of ['', '-storage-current', '-storage-previous', '-wal', '-events', '-infra']) {
     rmSync(`${base}${suffix}`, { recursive: true, force: true });
   }
 };
@@ -685,7 +685,7 @@ describe('runtime frame atomicity', () => {
     enqueueRuntimeInput(env, { runtimeTxs: [cursorTx], entityInputs: [] });
     await processRuntime(env);
 
-    const persisted = await readStorageFrameRecord(getFrameDb(env), env.height);
+    const persisted = await readStorageFrameRecord(getRuntimeWalDb(env), env.height);
     expect(persisted?.runtimeInput.runtimeTxs).toEqual([{
       type: 'advanceJWatcherCursor',
       data: {

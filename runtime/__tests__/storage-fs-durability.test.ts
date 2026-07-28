@@ -9,10 +9,10 @@ import {
   type StorageDurabilityBoundary,
 } from '../storage/fs-durability';
 import {
-  closeFrameDb,
+  closeRuntimeWalDb,
   closeInfraDb,
   closeStorageDb,
-  getFrameDb,
+  getRuntimeWalDb,
   getInfraDb,
   getStorageDb,
   resolveDbPath,
@@ -183,9 +183,9 @@ describe('storage filesystem durability', () => {
       runtimeId: `storage-close-all-${process.pid}-${Date.now()}`,
       dbNamespace: `storage-close-all-${process.pid}-${Date.now()}`,
       runtimeState: {
-        frameDb: { close: () => frameClose.promise },
-        frameDbOpenPromise: Promise.resolve(true),
-        storageVerifiedHistoryHeight: 9,
+        runtimeWalDb: { close: () => frameClose.promise },
+        runtimeWalDbOpenPromise: Promise.resolve(true),
+        storageVerifiedWalHeight: 9,
         infraDb: { close: () => infraClose.promise },
         infraDbOpenPromise: Promise.resolve(true),
       },
@@ -194,17 +194,17 @@ describe('storage filesystem durability', () => {
       ensureRuntimeState: (target: RuntimeState) => (target.runtimeState ??= {}),
     };
 
-    const closingFrame = closeFrameDb(env);
+    const closingFrame = closeRuntimeWalDb(env);
     const closingInfra = closeInfraDb(env);
-    expect(() => getFrameDb(env, deps)).toThrow(
-      'STORAGE_HANDLE_STATUS_CONFLICT:role=frames:status=closing',
+    expect(() => getRuntimeWalDb(env, deps)).toThrow(
+      'STORAGE_HANDLE_STATUS_CONFLICT:role=runtime-wal:status=closing',
     );
     expect(() => getInfraDb(env, deps)).toThrow(
       'STORAGE_HANDLE_STATUS_CONFLICT:role=infra:status=closing',
     );
-    expect(env.runtimeState?.frameDb).toBeNull();
-    expect(env.runtimeState?.frameDbOpenPromise).toBeNull();
-    expect(env.runtimeState?.storageVerifiedHistoryHeight).toBeUndefined();
+    expect(env.runtimeState?.runtimeWalDb).toBeNull();
+    expect(env.runtimeState?.runtimeWalDbOpenPromise).toBeNull();
+    expect(env.runtimeState?.storageVerifiedWalHeight).toBeUndefined();
     expect(env.runtimeState?.infraDb).toBeNull();
     expect(env.runtimeState?.infraDbOpenPromise).toBeNull();
 

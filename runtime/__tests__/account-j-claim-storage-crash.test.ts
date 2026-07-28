@@ -6,7 +6,7 @@ import {
   closeInfraDb,
   closeRuntimeDb,
   createEmptyEnv,
-  getFrameDb,
+  getRuntimeWalDb,
   getRuntimeStorageDb,
   loadEnvFromDB,
 } from '../runtime';
@@ -33,7 +33,7 @@ const cleanupRuntimeStorage = (dbRoot: string, runtimeId: string): void => {
   rmSync(namespacePath, { recursive: true, force: true });
   rmSync(`${namespacePath}-storage-current`, { recursive: true, force: true });
   rmSync(`${namespacePath}-storage-previous`, { recursive: true, force: true });
-  rmSync(`${namespacePath}-frames`, { recursive: true, force: true });
+  rmSync(`${namespacePath}-wal`, { recursive: true, force: true });
   rmSync(`${namespacePath}-events`, { recursive: true, force: true });
   rmSync(`${namespacePath}-infra`, { recursive: true, force: true });
 };
@@ -114,7 +114,7 @@ describe('Account J-claim real storage crash recovery', () => {
         const proof = createAccountJClaimProof(getAccountJClaimNodeStore(restored), state.root, record);
         expect(verifyAccountJClaimProof(state.root, record, proof)).toEqual({ status: 'member', record });
 
-        const historyDb = getFrameDb(restored);
+        const historyDb = getRuntimeWalDb(restored);
         const persistedNode = decodeBuffer<AccountJClaimNode>(await historyDb.get(keyAccountJClaimNode(state.root)));
         const diff = decodeBuffer<StorageDiffRecord>(await historyDb.get(keyDiff(restored.height)));
         const accountDoc = diff.puts.find((doc) => (

@@ -18,7 +18,7 @@ import type {
   RuntimeState,
   LogCategory,
   FrameLogEntry,
-  RuntimeFrameDbRecord,
+  RuntimeHistoryRecord,
   RuntimeOverlayRecord,
 } from '../types';
 import { encodeCanonicalEntityConsensusValue } from '../entity/consensus/state-root';
@@ -179,10 +179,10 @@ export const clearPendingAuditEvents = (env: RuntimeState): void => {
   pending.length = 0;
 };
 
-const getPendingFrameDbRecords = (env: RuntimeState): RuntimeFrameDbRecord[] => {
+const getPendingHistoryRecords = (env: RuntimeState): RuntimeHistoryRecord[] => {
   if (!env.runtimeState) env.runtimeState = {};
-  if (!env.runtimeState.pendingFrameDbRecords) env.runtimeState.pendingFrameDbRecords = [];
-  return env.runtimeState.pendingFrameDbRecords;
+  if (!env.runtimeState.pendingHistoryRecords) env.runtimeState.pendingHistoryRecords = [];
+  return env.runtimeState.pendingHistoryRecords;
 };
 
 const getOverlay = (env: RuntimeState): RuntimeOverlayRecord[] => {
@@ -281,7 +281,7 @@ export const applyStorageChanges = (
 };
 
 // AccountState already owns currentFrame and pendingFrame. Historical frames
-// are written to the frame DB and loaded explicitly by inspection APIs.
+// are carried by the Runtime WAL and materialized into history views.
 export const ACCOUNT_FRAME_HISTORY_VIEW_LIMIT = 0;
 const ACCOUNT_FRAME_HISTORY_VIEW = Symbol.for('xln.accountFrameHistoryView');
 type AccountWithFrameHistoryView = AccountState & {
@@ -327,7 +327,7 @@ export const recordAccountFrameHistory = (
     entityId: string;
     counterpartyId: string;
     accountHeight: number;
-    source: Extract<RuntimeFrameDbRecord, { kind: 'accountFrame' }>['source'];
+    source: Extract<RuntimeHistoryRecord, { kind: 'accountFrame' }>['source'];
     frame: AccountFrame;
   },
 ): void => {
@@ -335,8 +335,8 @@ export const recordAccountFrameHistory = (
   const counterpartyId = String(record.counterpartyId || '').toLowerCase();
   const accountHeight = Number(record.accountHeight || record.frame?.height || 0);
   if (!entityId || !counterpartyId || !Number.isFinite(accountHeight) || accountHeight <= 0) return;
-  const pending = getPendingFrameDbRecords(env);
-  const existing = pending.find((candidate): candidate is Extract<RuntimeFrameDbRecord, { kind: 'accountFrame' }> => (
+  const pending = getPendingHistoryRecords(env);
+  const existing = pending.find((candidate): candidate is Extract<RuntimeHistoryRecord, { kind: 'accountFrame' }> => (
     candidate.kind === 'accountFrame' &&
     candidate.entityId === entityId &&
     candidate.counterpartyId === counterpartyId &&
@@ -349,7 +349,7 @@ export const recordAccountFrameHistory = (
       encodeCanonicalEntityConsensusValue(record.frame)
     ) {
       throw new Error(
-        `FRAME_DB_ACCOUNT_FRAME_FORK:entity=${entityId}:counterparty=${counterpartyId}:height=${accountHeight}`,
+        `HISTORY_VIEW_ACCOUNT_FRAME_FORK:entity=${entityId}:counterparty=${counterpartyId}:height=${accountHeight}`,
       );
     }
     return;
@@ -387,10 +387,10 @@ export const recordEntityFrameHistory = (
   const entityId = String(record.entityId || '').toLowerCase();
   const entityHeight = Number(record.link?.frame?.height ?? 0);
   if (!entityId || !Number.isSafeInteger(entityHeight) || entityHeight <= 0) {
-    throw new Error(`FRAME_DB_ENTITY_FRAME_IDENTITY_INVALID:${entityId}:${String(entityHeight)}`);
+    throw new Error(`HISTORY_VIEW_ENTITY_FRAME_IDENTITY_INVALID:${entityId}:${String(entityHeight)}`);
   }
-  const pending = getPendingFrameDbRecords(env);
-  const existing = pending.find((candidate): candidate is Extract<RuntimeFrameDbRecord, { kind: 'entityFrame' }> => (
+  const pending = getPendingHistoryRecords(env);
+  const existing = pending.find((candidate): candidate is Extract<RuntimeHistoryRecord, { kind: 'entityFrame' }> => (
     candidate.kind === 'entityFrame' &&
     candidate.entityId === entityId &&
     candidate.entityHeight === entityHeight
@@ -398,7 +398,7 @@ export const recordEntityFrameHistory = (
   if (existing) {
     if (existing.link.frame.hash !== record.link.frame.hash) {
       throw new Error(
-        `FRAME_DB_ENTITY_FRAME_FORK:entity=${entityId}:height=${entityHeight}:` +
+        `HISTORY_VIEW_ENTITY_FRAME_FORK:entity=${entityId}:height=${entityHeight}:` +
         `existing=${existing.link.frame.hash}:incoming=${record.link.frame.hash}`,
       );
     }
@@ -419,12 +419,12 @@ export const recordEntityFrameHistory = (
   applyRuntimeStorageChanges(env, [{ family: 'entity', entityId }]);
 };
 
-export const peekPendingFrameDbRecords = (
+export const peekPendingHistoryRecords = (
   env: RuntimeState,
   runtimeHeight?: number,
   timestamp?: number,
-): RuntimeFrameDbRecord[] => {
-  const pending = env.runtimeState?.pendingFrameDbRecords;
+): RuntimeHistoryRecord[] => {
+  const pending = env.runtimeState?.pendingHistoryRecords;
   if (!Array.isArray(pending) || pending.length === 0) return [];
   const stampedHeight = Number.isFinite(runtimeHeight)
     ? Math.max(0, Math.floor(Number(runtimeHeight)))
@@ -439,8 +439,8 @@ export const peekPendingFrameDbRecords = (
   return pending.map((record) => structuredClone(record));
 };
 
-export const dropPendingFrameDbRecords = (env: RuntimeState, count: number): void => {
-  const pending = env.runtimeState?.pendingFrameDbRecords;
+export const dropPendingHistoryRecords = (env: RuntimeState, count: number): void => {
+  const pending = env.runtimeState?.pendingHistoryRecords;
   if (!Array.isArray(pending) || pending.length === 0) return;
   pending.splice(0, Math.max(0, Math.floor(count)));
 };

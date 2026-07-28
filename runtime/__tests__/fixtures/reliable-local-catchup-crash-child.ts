@@ -2,7 +2,7 @@ import { deriveSignerAddressSync } from '../../account/crypto';
 import {
   createEmptyEnv,
   enqueueRuntimeInput,
-  getFrameDb,
+  getRuntimeWalDb,
   processRuntime,
 } from '../../runtime';
 import { readStorageFrameRecord } from '../../storage';
@@ -32,8 +32,8 @@ env.runtimeConfig = {
     snapshotPeriodFrames: 50,
     retainSnapshots: 2,
     epochMaxBytes: 1_000_000_000,
-    frameDbMaxBytes: 1_000_000_000,
-    frameDbRetainFrames: 100,
+    historyViewMaxBytes: 1_000_000_000,
+    historyViewRetainFrames: 100,
     materializePeriodFrames: 1,
     canonicalHashPeriodFrames: 1,
     accountMerkleRadix: 16,
@@ -92,7 +92,7 @@ const afterH1 = env.eReplicas.get(`${initialState.entityId}:${targetSignerId}`);
 if (env.height !== 2 || afterH1?.state.height !== 1) {
   throw new Error(`CATCHUP_CRASH_H1_NOT_DURABLE:R=${env.height}:E=${afterH1?.state.height ?? 'missing'}`);
 }
-const durableFrame = await readStorageFrameRecord(getFrameDb(env), env.height);
+const durableFrame = await readStorageFrameRecord(getRuntimeWalDb(env), env.height);
 const durableHeights = durableFrame?.runtimeInput.entityInputs
   .map(input => input.proposedFrame?.height ?? null);
 if (durableHeights?.length !== 1 || durableHeights[0] !== 1) {

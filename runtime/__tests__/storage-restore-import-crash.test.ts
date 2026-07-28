@@ -5,7 +5,7 @@ import { join } from 'path';
 import {
   closeInfraDb,
   closeRuntimeDb,
-  getFrameDb,
+  getRuntimeWalDb,
   getRuntimeStorageDb,
   loadEnvFromDB,
 } from '../runtime';
@@ -33,7 +33,7 @@ const boundaries = [
 
 const cleanup = (runtimeId: string): void => {
   const namespace = join(dbRootPath, runtimeId);
-  for (const suffix of ['', '-storage-current', '-storage-previous', '-frames', '-events', '-infra']) {
+  for (const suffix of ['', '-storage-current', '-storage-previous', '-wal', '-events', '-infra']) {
     rmSync(`${namespace}${suffix}`, { recursive: true, force: true });
   }
 };
@@ -98,18 +98,18 @@ describe('restored checkpoint atomic publication', () => {
             count: BigInt(expectedHeight),
           }),
         });
-        const historyHead = await readStorageHead(getFrameDb(restored));
+        const historyHead = await readStorageHead(getRuntimeWalDb(restored));
         expect(historyHead?.latestHeight).toBe(expectedHeight);
         await recoverStorageDbFromHistory({
           db: getRuntimeStorageDb(restored),
-          historyDb: getFrameDb(restored),
+          walDb: getRuntimeWalDb(restored),
           config: {
             enabled: true,
             snapshotPeriodFrames: historyHead!.snapshotPeriodFrames,
             retainSnapshots: historyHead!.retainSnapshots,
             epochMaxBytes: historyHead!.epochMaxBytes,
-            frameDbMaxBytes: 1_073_741_824,
-            frameDbRetainFrames: 100_000,
+            historyViewMaxBytes: 1_073_741_824,
+            historyViewRetainFrames: 100_000,
             materializePeriodFrames: 64,
             canonicalHashPeriodFrames: 1,
             accountMerkleRadix: historyHead!.accountMerkleRadix,

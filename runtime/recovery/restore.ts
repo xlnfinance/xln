@@ -34,7 +34,7 @@ import {
   getAccountJClaimNodeStore,
   getLiveAccountJClaimAccumulatorStates,
 } from './../account/j-claim-store';
-import { clearPendingAuditEvents, dropPendingFrameDbRecords, peekPendingFrameDbRecords } from '../runtime/env-events';
+import { clearPendingAuditEvents, dropPendingHistoryRecords, peekPendingHistoryRecords } from '../runtime/env-events';
 import { getCachedSignerPrivateKey, getLocalSignerPrivateKey } from './../account/crypto';
 import type { Profile } from './../networking/gossip';
 import { normalizeRuntimeId } from './../networking/runtime-id';
@@ -117,9 +117,9 @@ export type RuntimeRecoveryDeps = Pick<
   ensureRuntimeConfig(env: RuntimeState): NonNullable<RuntimeState['runtimeConfig']>;
   createEmptyEnv: RuntimeModule['createEmptyEnv'];
   getStorageDb(env: RuntimeState, role?: StorageDbRole): Level<Buffer, Buffer>;
-  getFrameDb(env: RuntimeState): Level<Buffer, Buffer>;
+  getRuntimeWalDb(env: RuntimeState): Level<Buffer, Buffer>;
   tryOpenStorageDb(env: RuntimeState, role?: StorageDbRole): Promise<boolean>;
-  tryOpenFrameDb(env: RuntimeState): Promise<boolean>;
+  tryOpenRuntimeWalDb(env: RuntimeState): Promise<boolean>;
   enqueueRuntimeContinuation(
     env: RuntimeState,
     inputs?: import('../types').EntityInput[],
@@ -144,9 +144,9 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
     ensureRuntimeConfig,
     createEmptyEnv,
     getStorageDb,
-    getFrameDb,
+    getRuntimeWalDb,
     tryOpenStorageDb,
-    tryOpenFrameDb,
+    tryOpenRuntimeWalDb,
     closeRuntimeDb,
     closeInfraDb,
     enqueueRuntimeContinuation,
@@ -441,7 +441,7 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
           );
           applyDeterministicRuntimeOutputPlan(env, replayResult.entityOutbox, getRuntimeOutputRoutingDeps());
           generateHookPings(env);
-          const replayFrameDbRecords = peekPendingFrameDbRecords(env, env.height, env.timestamp);
+          const replayHistoryViewRecords = peekPendingHistoryRecords(env, env.height, env.timestamp);
           finalizeReliableIngressCommit(env, replayResult.reliableIngressCommits);
           // Audit events are flushed only after the live WAL commit and are not
           // consensus/recovery state. Replay must neither retain nor re-emit them.
@@ -454,7 +454,7 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
           // These activity records were consumed by the same atomic storage
           // batch as the Runtime frame. Compare the committed post-state, not
           // the writer's pre-commit buffer.
-          dropPendingFrameDbRecords(env, replayFrameDbRecords.length);
+          dropPendingHistoryRecords(env, replayHistoryViewRecords.length);
           // A sparse checkpoint gives a field-level diagnostic; use it before
           // the compact replica digest so recovery failures name the root cause.
           if (frame.runtimeMachine) {
@@ -506,7 +506,7 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
             replicaMetaDigest: actualReplicaMetaDigest,
             runtimeMachine: buildReplayVerifiableRuntimeMachineSnapshot(env, {
               pendingNetworkOutputs: env.pendingNetworkOutputs ?? [],
-              excludePersistedFrameDbRecords: true,
+              excludePersistedHistoryRecords: true,
             }),
           });
           if (actualPostStateHash !== frame.postStateHash) {
@@ -738,17 +738,17 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
     if (!(await tryOpenStorageDb(env, 'current'))) {
       throw new Error('RECOVERY_PERSIST_STORAGE_OPEN_FAILED');
     }
-    if (!(await tryOpenFrameDb(env))) {
-      throw new Error('RECOVERY_PERSIST_FRAME_DB_OPEN_FAILED');
+    if (!(await tryOpenRuntimeWalDb(env))) {
+      throw new Error('RECOVERY_PERSIST_RUNTIME_WAL_OPEN_FAILED');
     }
 
     const currentDb = getStorageDb(env, 'current');
-    const frameDb = getFrameDb(env);
+    const walDb = getRuntimeWalDb(env);
     const puts = materialized.docs;
     const replicaMetas = buildStorageReplicaMetaCommitment(env, lineagePlan).entries;
     const replacement = await replaceRestoredStorageBase({
       currentDb,
-      historyDb: frameDb,
+      walDb,
       height: restoredHeight,
       timestamp: restoredTimestamp,
       docs: puts,

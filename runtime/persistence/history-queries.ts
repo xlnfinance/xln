@@ -1,7 +1,7 @@
 import {
-  readFrameDbAccountFrames,
-  readFrameDbEntityFrames,
-  readFrameDbRuntimeActivity,
+  readHistoryViewAccountFrames,
+  readHistoryViewEntityFrames,
+  readHistoryViewRuntimeActivity,
   type StorageFrameRecord,
 } from '../storage';
 import {
@@ -76,19 +76,7 @@ export const createPersistenceHistoryQueries = (deps: PersistenceQueryDeps) => {
   ): Promise<PersistedFrameJournal | null> => {
     const frame = await deps.readPersistedStorageFrameRecord(env, height);
     if (!frame) return null;
-    let logs: FrameLogEntry[] = [];
-    if (await deps.tryOpenFrameDb(env)) {
-      try {
-        const activity = await readFrameDbRuntimeActivity(deps.getFrameDb(env), height);
-        if (activity?.logs) logs = activity.logs;
-      } catch (error) {
-        throw new Error(
-          `STORAGE_ACTIVITY_JOURNAL_READ_FAILED:height=${height}:` +
-          `${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    }
-    return buildRecoveryJournalFromStorageFrame(frame, logs);
+    return buildRecoveryJournalFromStorageFrame(frame, frame.activityLogs);
   };
 
   const readPersistedRuntimeActivityJournal = async (
@@ -99,11 +87,11 @@ export const createPersistenceHistoryQueries = (deps: PersistenceQueryDeps) => {
     if (targetHeight <= 0) {
       throw new Error(`STORAGE_ACTIVITY_JOURNAL_HEIGHT_INVALID:${String(height)}`);
     }
-    if (!(await deps.tryOpenFrameDb(env))) {
+    if (!(await deps.tryOpenHistoryViewDb(env))) {
       throw new Error(`STORAGE_ACTIVITY_JOURNAL_DB_OPEN_FAILED:height=${targetHeight}`);
     }
     try {
-      const activity = await readFrameDbRuntimeActivity(deps.getFrameDb(env), targetHeight);
+      const activity = await readHistoryViewRuntimeActivity(deps.getHistoryViewDb(env), targetHeight);
       if (!activity) return null;
       return {
         height: targetHeight,
@@ -134,15 +122,15 @@ export const createPersistenceHistoryQueries = (deps: PersistenceQueryDeps) => {
     limit = 50,
     opts?: { maxRuntimeHeight?: number; maxAccountHeight?: number },
   ): Promise<AccountFrame[]> => {
-    if (!(await deps.tryOpenFrameDb(env))) return [];
+    if (!(await deps.tryOpenHistoryViewDb(env))) return [];
     const maxRuntimeHeight = Number.isFinite(Number(opts?.maxRuntimeHeight))
       ? Math.max(0, Math.floor(Number(opts?.maxRuntimeHeight)))
       : Number.POSITIVE_INFINITY;
     const maxAccountHeight = Number.isFinite(Number(opts?.maxAccountHeight))
       ? Math.max(0, Math.floor(Number(opts?.maxAccountHeight)))
       : Number.POSITIVE_INFINITY;
-    const records = await readFrameDbAccountFrames(
-      deps.getFrameDb(env),
+    const records = await readHistoryViewAccountFrames(
+      deps.getHistoryViewDb(env),
       entityId,
       counterpartyId,
       {
@@ -160,14 +148,14 @@ export const createPersistenceHistoryQueries = (deps: PersistenceQueryDeps) => {
     limit = 50,
     opts?: { maxRuntimeHeight?: number; maxEntityHeight?: number },
   ): Promise<CertifiedEntityFrameLink[]> => {
-    if (!(await deps.tryOpenFrameDb(env))) return [];
+    if (!(await deps.tryOpenHistoryViewDb(env))) return [];
     const maxRuntimeHeight = Number.isFinite(Number(opts?.maxRuntimeHeight))
       ? Math.max(0, Math.floor(Number(opts?.maxRuntimeHeight)))
       : Number.POSITIVE_INFINITY;
     const maxEntityHeight = Number.isFinite(Number(opts?.maxEntityHeight))
       ? Math.max(0, Math.floor(Number(opts?.maxEntityHeight)))
       : Number.POSITIVE_INFINITY;
-    const records = await readFrameDbEntityFrames(deps.getFrameDb(env), entityId, {
+    const records = await readHistoryViewEntityFrames(deps.getHistoryViewDb(env), entityId, {
       limit: Math.max(1, Math.min(1000, Math.floor(Number(limit || 50)))),
       ...(Number.isSafeInteger(maxRuntimeHeight) ? { maxRuntimeHeight } : {}),
       ...(Number.isSafeInteger(maxEntityHeight) ? { maxEntityHeight } : {}),

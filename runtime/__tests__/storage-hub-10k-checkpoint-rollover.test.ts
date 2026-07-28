@@ -11,7 +11,7 @@ import {
   closeRuntimeDb,
   createEmptyEnv,
   enqueueRuntimeInput,
-  getFrameDb,
+  getRuntimeWalDb,
   listPersistedCheckpointHeights,
   loadEnvFromDB,
   processRuntime,
@@ -33,13 +33,13 @@ const percentile = (sorted: readonly number[], fraction: number): number => (
 
 const cleanupRuntimeStorage = (dbRoot: string, runtimeId: string): void => {
   const namespacePath = join(dbRoot, runtimeId);
-  for (const suffix of ['', '-storage-current', '-storage-previous', '-frames', '-events', '-infra']) {
+  for (const suffix of ['', '-storage-current', '-storage-previous', '-wal', '-events', '-infra']) {
     rmSync(`${namespacePath}${suffix}`, { recursive: true, force: true });
   }
   mkdirSync(dbRoot, { recursive: true });
 };
 
-test('hub persists 20k non-empty R-frames across 10k checkpoint rollover and cold replay', async () => {
+test('hub persists 20k non-empty R-wal across 10k checkpoint rollover and cold replay', async () => {
   const seed = 'hub ten thousand checkpoint rollover alpha beta gamma';
   const signerId = deriveSignerAddressSync(seed, '1').toLowerCase();
   const runtimeId = signerId;
@@ -157,7 +157,7 @@ test('hub persists 20k non-empty R-frames across 10k checkpoint rollover and col
     expect(env.runtimeState?.runtimeAdapterCommandFrontiers?.get(laneId)?.lastContiguousSequence)
       .toBe(FINAL_HEIGHT - 1);
 
-    const db = getFrameDb(env);
+    const db = getRuntimeWalDb(env);
     const frame19_900 = await readStorageFrameRecord(db, 19_900);
     const frame19_901 = await readStorageFrameRecord(db, 19_901);
     const frame20_000 = await readStorageFrameRecord(db, 20_000);

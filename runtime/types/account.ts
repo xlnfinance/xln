@@ -221,7 +221,7 @@ export interface AccountState {
   status: AccountStatus; // Manual lifecycle gate for dispute freeze/reopen
 
   mempool: AccountTx[]; // Unprocessed account transactions
-  currentFrame: AccountFrame; // Latest finalized bilateral frame; older frames live in the frame DB.
+  currentFrame: AccountFrame; // Latest finalized bilateral frame; older frames live in the Runtime WAL and history views.
 
   // Per-token delta states (giant per-token table like old_src)
   deltas: Map<number, Delta>; // tokenId -> Delta
@@ -272,7 +272,7 @@ export interface AccountState {
   lastRollbackFrameHash?: string; // Track last rollback to prevent duplicate increments
 
   // Bilateral J-event consensus. Only authenticated pending roots are state;
-  // finalized bodies have already been applied and belong in the frame DB UI view.
+  // finalized bodies have already been applied and belong in the rebuildable history view.
   leftPendingJClaims: AccountJClaimAccumulatorState;
   rightPendingJClaims: AccountJClaimAccumulatorState;
   lastFinalizedJHeight: number;
@@ -446,7 +446,7 @@ export interface AccountFrame {
   deltas: Delta[];
 }
 
-export type AccountFrameDbRecord =
+export type AccountHistoryRecord =
   {
     kind: 'accountFrame';
     entityId: string;

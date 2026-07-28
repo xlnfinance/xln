@@ -1,11 +1,13 @@
 # Storage Map
 
-This folder owns persistence, replay, and canonical restore verification.
+This folder owns persistence, replay, canonical restore verification, and
+rebuildable history views.
 
 ## What it does
 
 - projects runtime/entity/account/book state into durable docs
-- writes frame records and WAL
+- appends complete Runtime frames to the authoritative WAL
+- materializes filterable Entity/Account/J activity views after WAL commit
 - restores state by snapshot + diff replay
 - verifies restore against canonical runtime-state hashes
 
@@ -15,7 +17,18 @@ This folder owns persistence, replay, and canonical restore verification.
 2. **Rebuild and verify.** Hydration reconstructs Maps and reachable immutable node stores, then checks replica lineage, J-history roots, materialized state, and the canonical runtime/entity hashes. Any missing or malformed authoritative record aborts restore.
 3. **Start live work.** Only after exact restore succeeds does the caller attach trusted RPC/network adapters and start the runtime loop. New J-events are admitted normally and the durable outbox is retried from its restored exact payload and signer route.
 
-Checkpoint publication uses one LevelDB batch for the changed materialized documents, immutable nodes, replica metadata, frame record, and published head. The head is never visible without the records it names. Historical account/J bodies used only for display may be pruned; consensus roots and live retry state may not.
+Persistence has three physical roles:
+
+1. `current` is the hot, rebuildable Runtime state.
+2. `runtimeWal` is the authoritative sequence of complete Runtime frames.
+3. `historyViews` contains rebuildable Entity/Account/J frame and activity
+   indexes for inspection and UI filtering.
+
+The Runtime WAL is committed first. History views advance only after that
+durable commit and record their own Runtime-height cursor. If the process dies
+between databases, startup replays the WAL from `cursor + 1`; it never rolls the
+authoritative Runtime back to a secondary view. The current-state database is
+published last and is likewise rebuilt from the WAL when it lags.
 
 ## Main files
 
@@ -29,8 +42,10 @@ Checkpoint publication uses one LevelDB batch for the changed materialized docum
   Canonical runtime-state commitment for fail-fast restore.
 - `hashes.ts`
   Frame/entity storage hashes.
-- `frame-db.ts`
-  Separate account-frame journal DB helpers.
+- `history-view.ts`, `history-view-schema.ts`
+  Rebuildable Entity/Account/J frame and activity indexes.
+- `runtime-dbs.ts`
+  Explicit handles and paths for current state, Runtime WAL, and history views.
 - `verify.ts`, `safety.ts`, `lifecycle.ts`
   Storage checks, compaction safety, and lifecycle helpers.
 

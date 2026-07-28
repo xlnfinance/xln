@@ -978,7 +978,7 @@ describe('jadapter helper cursors', () => {
   });
 
   test('sparse semantic event waits for its exact contiguous prefix instead of certifying empty catch-up pages', async () => {
-    const env = createEmptyEnv('jadapter-sparse-event-no-empty-entity-frames');
+    const env = createEmptyEnv('jadapter-sparse-event-no-empty-entity-wal');
     env.timestamp = 1_000;
     env.quietRuntimeLogs = true;
     const entityId = `0x${'58'.repeat(32)}`;

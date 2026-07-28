@@ -1,4 +1,7 @@
-import { validateRuntimeInputEnvelope } from '../protocol/boundary-validation';
+import {
+  validateFrameLogEntries,
+  validateRuntimeInputEnvelope,
+} from '../protocol/boundary-validation';
 import type { RoutedEntityInput } from '../types';
 import { decodeRoutedEntityInput } from '../validation-utils';
 import { assertStorageSchemaVersion, STORAGE_FRAME_FORMAT } from './keys';
@@ -29,6 +32,7 @@ import {
 } from './schema-state-docs';
 import { validateDurableRuntimeMachineSnapshot } from '../wal/runtime-machine-schema';
 import { validateDurableOutputRetryState } from '../runtime/durable-output-retry';
+import { validateRuntimeHistoryRecords } from './history-view-schema';
 
 export * from './schema-state-docs';
 export * from './schema-merkle-cas';
@@ -79,7 +83,7 @@ export const validateStorageFrameRecordValue = (value: unknown): StorageFrameRec
   requireExactBoundaryKeys(frame, [
     'height', 'timestamp', 'prevFrameHash', 'frameHash', 'replicaMetaDigest', 'replicaMetaCheckpoint',
     'replicaMetaStateMode', 'postStateHash', 'stateHash',
-    'hashMode', 'materializedState', 'runtimeInput',
+    'hashMode', 'materializedState', 'runtimeInput', 'historyRecords', 'activityLogs',
     'touchedEntities', 'touchedAccounts',
     'touchedBookEntities',
   ], ['entityHashes', 'canonicalStateHash', 'canonicalEntityHashes', 'runtimeStateHash', 'runtimeMachine', 'pendingRuntimeInput', 'runtimeOutputs', 'runtimeOutputRetryState', 'overlayRecords'], `${code}_FIELDS`);
@@ -120,6 +124,12 @@ export const validateStorageFrameRecordValue = (value: unknown): StorageFrameRec
     );
   }
   validateRuntimeInputEnvelope(frame['runtimeInput'], `${code}_RUNTIME_INPUT`);
+  frame['historyRecords'] = validateRuntimeHistoryRecords(
+    frame['historyRecords'],
+    Number(frame['height']),
+    Number(frame['timestamp']),
+  );
+  validateFrameLogEntries(frame['activityLogs'], `${code}_ACTIVITY_LOGS`);
   if (frame['pendingRuntimeInput'] !== undefined) {
     validateRuntimeInputEnvelope(frame['pendingRuntimeInput'], `${code}_PENDING_RUNTIME_INPUT`);
   }

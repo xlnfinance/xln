@@ -31,7 +31,7 @@ afterEach(async () => {
     await closeInfraDb(env);
     const root = process.env['XLN_DB_PATH'] || 'db-tmp/runtime';
     const namespace = String(env.dbNamespace || env.runtimeId || '').toLowerCase();
-    for (const suffix of ['', '-storage-current', '-storage-previous', '-frames', '-infra']) {
+    for (const suffix of ['', '-storage-current', '-storage-previous', '-wal', '-infra']) {
       rmSync(join(root, `${namespace}${suffix}`), { recursive: true, force: true });
     }
   }

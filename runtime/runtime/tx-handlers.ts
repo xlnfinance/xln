@@ -249,7 +249,7 @@ const resolveImportCheckpointState = (
 ): EntityState => {
   // Live Runtime memory keeps only the latest certified Entity endpoint. The
   // complete certificate history is an inspection/replay concern stored in the
-  // frame DB; requiring it here would turn every late validator import into an
+  // Runtime WAL; requiring it here would turn every late validator import into an
   // accidental in-memory archive dependency. Bind the import to the exact
   // already-certified local endpoint that the next Runtime checkpoint uses.
   const selected = buildRuntimeCheckpointLineagePlan(env).lookup.get(entityId);

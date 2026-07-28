@@ -7,38 +7,38 @@ import type { AccountFrame } from '../types';
 import { decodeBinaryPayload, encodeBinaryPayload } from '../storage/binary-codec';
 import { decodeBuffer, encodeBuffer, writeBatch } from '../storage/codec';
 import {
-  readFrameDbAccountFrames,
-  readFrameDbHead,
-  readFrameDbRuntimeActivity,
+  readHistoryViewAccountFrames,
+  readHistoryViewHead,
+  readHistoryViewRuntimeActivity,
   type StoredAccountFrameValue,
-} from '../storage/frame-db';
+} from '../storage/history-view';
 import {
-  KEY_FRAME_DB_HEAD,
+  KEY_HISTORY_VIEW_HEAD,
   STORAGE_SCHEMA_VERSION,
   decodeEntityId,
   hexBytes,
   keyCertifiedBoardNode,
-  keyFrameDbAccountFrame,
-  keyFrameDbAccountFrameByRuntime,
-  keyFrameDbEntityFrame,
-  keyFrameDbEntityFrameByRuntime,
-  keyFrameDbRuntimeActivity,
+  keyHistoryViewAccountFrame,
+  keyHistoryViewAccountFrameByRuntime,
+  keyHistoryViewEntityFrame,
+  keyHistoryViewEntityFrameByRuntime,
+  keyHistoryViewRuntimeActivity,
   keyLiveAccount,
   keyLiveBook,
   keyLiveEntity,
   keyLiveReplicaMeta,
   keySnapshotAccountPrefix,
   keySnapshotEntity,
-  parseFrameDbAccountFrameKey,
-  parseFrameDbAccountFrameRuntimeIndexKey,
-  parseFrameDbEntityFrameKey,
-  parseFrameDbEntityFrameRuntimeIndexKey,
+  parseHistoryViewAccountFrameKey,
+  parseHistoryViewAccountFrameRuntimeIndexKey,
+  parseHistoryViewEntityFrameKey,
+  parseHistoryViewEntityFrameRuntimeIndexKey,
   parseLiveAccountKey,
   parseLiveBookKey,
   parseSnapshotAccountKey,
   parseSnapshotEntityKey,
 } from '../storage/keys';
-import type { RuntimeFrameDbLike, StorageRuntimeConfig } from '../storage/types';
+import type { RuntimeDbLike, StorageRuntimeConfig } from '../storage/types';
 
 const tempPaths: string[] = [];
 const zeroHash = `0x${'00'.repeat(32)}`;
@@ -73,8 +73,8 @@ const storageConfig: Required<StorageRuntimeConfig> = {
   maxStateBytes: 1024 * 1024,
   warningStateBytes: 512 * 1024,
   maxReplayBytes: 1024 * 1024,
-  frameDbMaxBytes: 1024 * 1024,
-  frameDbRetainFrames: 100,
+  historyViewMaxBytes: 1024 * 1024,
+  historyViewRetainFrames: 100,
 };
 
 const openDb = async (label: string): Promise<Level<Buffer, Buffer>> => {
@@ -161,10 +161,10 @@ describe('canonical binary codec', () => {
   test('all fixed-width storage key parsers reject wrong tags, truncation, and trailing bytes', () => {
     const validKeys: Array<[Buffer, (key: Buffer) => unknown]> = [
       [keyLiveAccount(entityId, counterpartyId), parseLiveAccountKey],
-      [keyFrameDbEntityFrame(entityId, 7), parseFrameDbEntityFrameKey],
-      [keyFrameDbEntityFrameByRuntime(8, entityId, 7), parseFrameDbEntityFrameRuntimeIndexKey],
-      [keyFrameDbAccountFrame(entityId, counterpartyId, 7), parseFrameDbAccountFrameKey],
-      [keyFrameDbAccountFrameByRuntime(8, entityId, counterpartyId, 7), parseFrameDbAccountFrameRuntimeIndexKey],
+      [keyHistoryViewEntityFrame(entityId, 7), parseHistoryViewEntityFrameKey],
+      [keyHistoryViewEntityFrameByRuntime(8, entityId, 7), parseHistoryViewEntityFrameRuntimeIndexKey],
+      [keyHistoryViewAccountFrame(entityId, counterpartyId, 7), parseHistoryViewAccountFrameKey],
+      [keyHistoryViewAccountFrameByRuntime(8, entityId, counterpartyId, 7), parseHistoryViewAccountFrameRuntimeIndexKey],
       [keySnapshotEntity(8, entityId), parseSnapshotEntityKey],
       [Buffer.concat([keySnapshotAccountPrefix(8, entityId), hexBytes(counterpartyId)]), parseSnapshotAccountKey],
     ];
@@ -302,16 +302,16 @@ describe('canonical binary codec', () => {
 });
 
 describe('strict LevelDB decode boundaries', () => {
-  test('rejects malformed frame DB head fields after a real close and reopen', async () => {
+  test('rejects malformed history-view head fields after a real close and reopen', async () => {
     const db = await openDb('head');
     const path = db.location;
-    await db.put(KEY_FRAME_DB_HEAD, encodeBuffer({
+    await db.put(KEY_HISTORY_VIEW_HEAD, encodeBuffer({
       schemaVersion: STORAGE_SCHEMA_VERSION,
       latestHeight: '7junk',
       latestPrunedRuntimeHeight: 0,
       retainedBytes: 0,
-      maxBytes: storageConfig.frameDbMaxBytes,
-      retainFrames: storageConfig.frameDbRetainFrames,
+      maxBytes: storageConfig.historyViewMaxBytes,
+      retainFrames: storageConfig.historyViewRetainFrames,
     }));
     await db.close();
 
@@ -320,14 +320,14 @@ describe('strict LevelDB decode boundaries', () => {
       valueEncoding: 'buffer',
     });
     await reopened.open();
-    await expect(readFrameDbHead(reopened as unknown as RuntimeFrameDbLike, storageConfig))
-      .rejects.toThrow('FRAME_DB_HEAD_LATEST_HEIGHT_INVALID');
+    await expect(readHistoryViewHead(reopened as unknown as RuntimeDbLike, storageConfig))
+      .rejects.toThrow('HISTORY_VIEW_HEAD_LATEST_HEIGHT_INVALID');
     await reopened.close();
   });
 
   test('rejects missing compact activity fields instead of defaulting them', async () => {
     const db = await openDb('activity');
-    await db.put(keyFrameDbRuntimeActivity(3), encodeBuffer({
+    await db.put(keyHistoryViewRuntimeActivity(3), encodeBuffer({
       timestamp: 123,
       runtimeInput: { entityInputs: [] },
       logs: [],
@@ -335,14 +335,14 @@ describe('strict LevelDB decode boundaries', () => {
       touchedBookEntities: [],
     }));
 
-    await expect(readFrameDbRuntimeActivity(db as unknown as RuntimeFrameDbLike, 3))
-      .rejects.toThrow('FRAME_DB_RUNTIME_ACTIVITY_FIELDS_INVALID:height=3');
+    await expect(readHistoryViewRuntimeActivity(db as unknown as RuntimeDbLike, 3))
+      .rejects.toThrow('HISTORY_VIEW_RUNTIME_ACTIVITY_FIELDS_INVALID:height=3');
     await db.close();
   });
 
   test('rejects missing and extra compact account-frame fields', async () => {
     const db = await openDb('account');
-    const key = keyFrameDbAccountFrame(entityId, counterpartyId, 2);
+    const key = keyHistoryViewAccountFrame(entityId, counterpartyId, 2);
     await db.put(key, encodeBuffer({
       frame: validFrame(),
       runtimeHeight: 8,
@@ -350,11 +350,11 @@ describe('strict LevelDB decode boundaries', () => {
       unexpected: true,
     }));
 
-    await expect(readFrameDbAccountFrames(
-      db as unknown as RuntimeFrameDbLike,
+    await expect(readHistoryViewAccountFrames(
+      db as unknown as RuntimeDbLike,
       entityId,
       counterpartyId,
-    )).rejects.toThrow('FRAME_DB_ACCOUNT_FRAME_FIELDS_INVALID');
+    )).rejects.toThrow('HISTORY_VIEW_ACCOUNT_FRAME_FIELDS_INVALID');
     await db.close();
   });
 });

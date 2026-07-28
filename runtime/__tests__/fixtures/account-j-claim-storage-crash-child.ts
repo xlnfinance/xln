@@ -2,11 +2,13 @@ import {
   applyRuntimeInput,
   createEmptyEnv,
   enqueueRuntimeInput,
-  getFrameDb,
+  getRuntimeWalDb,
+  getHistoryViewDb,
   getRuntimeStorageDb,
   processRuntime,
   tryOpenStorageDb,
-  tryOpenFrameDb,
+  tryOpenRuntimeWalDb,
+  tryOpenHistoryViewDb,
 } from '../../runtime';
 import { applyAccountInput } from '../../account/consensus';
 import { proposeAccountFrame } from '../../account/consensus/propose';
@@ -73,8 +75,8 @@ const storageConfig = {
     snapshotPeriodFrames: 256,
     retainSnapshots: 3,
     epochMaxBytes: 1_000_000_000,
-    frameDbMaxBytes: 1_000_000_000,
-    frameDbRetainFrames: 100_000,
+    historyViewMaxBytes: 1_000_000_000,
+    historyViewRetainFrames: 100_000,
     materializePeriodFrames: 1,
     canonicalHashPeriodFrames: 0,
     accountMerkleRadix: 16,
@@ -121,7 +123,7 @@ await processRuntime(env, []);
 
 const replica = Array.from(env.eReplicas.values()).find((candidate) => candidate.entityId === entityId);
 if (!replica) throw new Error('ACCOUNT_J_CRASH_REPLICA_MISSING');
-const opened = handleOpenAccountEntityTx(env, replica.state, {
+const opened = await handleOpenAccountEntityTx(env, replica.state, {
   type: 'openAccount',
   data: {
     targetEntityId: counterpartyId,
@@ -134,7 +136,7 @@ const counterpartyReplica = Array.from(env.eReplicas.values()).find((candidate) 
   candidate.entityId === counterpartyId
 ));
 if (!counterpartyReplica) throw new Error('ACCOUNT_J_CRASH_COUNTERPARTY_REPLICA_MISSING');
-const counterpartyOpened = handleOpenAccountEntityTx(env, counterpartyReplica.state, {
+const counterpartyOpened = await handleOpenAccountEntityTx(env, counterpartyReplica.state, {
   type: 'openAccount',
   data: {
     targetEntityId: entityId,
@@ -214,8 +216,10 @@ await saveRuntimeFrameToStorage({
   env,
   tryOpenDb: tryOpenStorageDb,
   getRuntimeDb: getRuntimeStorageDb,
-  tryOpenFrameDb,
-  getFrameDb,
+  tryOpenRuntimeWalDb,
+  getRuntimeWalDb,
+  tryOpenHistoryViewDb,
+  getHistoryViewDb,
   getPerfMs,
   formatPerfMs: (value) => value.toFixed(2),
 });
@@ -263,8 +267,10 @@ await saveRuntimeFrameToStorage({
   currentFrameInput: appliedRuntime.appliedRuntimeInput,
   tryOpenDb: tryOpenStorageDb,
   getRuntimeDb: getRuntimeStorageDb,
-  tryOpenFrameDb,
-  getFrameDb,
+  tryOpenRuntimeWalDb,
+  getRuntimeWalDb,
+  tryOpenHistoryViewDb,
+  getHistoryViewDb,
   getPerfMs,
   formatPerfMs: (value) => value.toFixed(2),
   onPersistenceBoundary: (boundary: StoragePersistenceBoundary) => {

@@ -443,7 +443,7 @@ const commitPostRotationProofFrames = async (): Promise<void> => {
       adapter.disconnect();
     }
   }));
-  recordStage('storage-epoch:post-rotation-frames-committed');
+  recordStage('storage-epoch:post-rotation-wal-committed');
 };
 
 const copySnapshotTemplate = (sourceDir: string, targetDir: string): void => {

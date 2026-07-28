@@ -4,7 +4,7 @@ import { requireRuntimeMempool } from '../input-queue';
 import {
   assertRuntimeFrameStorageState,
   reconcileRuntimeFrameSharedState,
-  RUNTIME_FRAME_DB_HANDLE_GROUPS,
+  RUNTIME_HISTORY_VIEW_HANDLE_GROUPS,
   type RuntimeFrameSharedStateSnapshot,
 } from '../runtime-frame-shared-state';
 import { ensureRuntimeState } from '../runtime-state';
@@ -214,14 +214,14 @@ const closeCandidateRuntimeDbHandles = async (
   const liveState = ensureRuntimeState(transaction.liveEnv) as Record<string, unknown>;
   const workingState = ensureRuntimeState(transaction.workingEnv) as Record<string, unknown>;
   const protectedHandles = new Set<unknown>();
-  for (const group of RUNTIME_FRAME_DB_HANDLE_GROUPS) {
+  for (const group of RUNTIME_HISTORY_VIEW_HANDLE_GROUPS) {
     const handleKey = group.keys[0]!;
     protectedHandles.add(transaction.sharedStateBaseline.get(handleKey)?.value);
     protectedHandles.add(liveState[handleKey]);
   }
 
   const candidates = new Map<ClosableRuntimeResource, unknown>();
-  for (const group of RUNTIME_FRAME_DB_HANDLE_GROUPS) {
+  for (const group of RUNTIME_HISTORY_VIEW_HANDLE_GROUPS) {
     const [handleKey, promiseKey] = group.keys;
     const handle = workingState[handleKey!];
     if (isClosableRuntimeResource(handle) && !protectedHandles.has(handle)) {

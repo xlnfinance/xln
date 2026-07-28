@@ -185,6 +185,8 @@ test('storage frame integrity commits every named runtime-machine field', () => 
     postStateHash: `0x${'44'.repeat(32)}`,
     stateHash: `0x${'33'.repeat(32)}`,
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
+    historyRecords: [],
+    activityLogs: [],
     touchedEntities: [],
     touchedAccounts: [],
     touchedBookEntities: [],
@@ -195,13 +197,13 @@ test('storage frame integrity commits every named runtime-machine field', () => 
 
   // Current testnet storage checksum golden. Fresh deploys intentionally keep
   // one format instead of a parallel versioned recovery implementation.
-  expect(alpha).toBe('0x94202ebbd430e4046de88aeb99a9c985346649a40b279eee2d6b3c3cb5652d93');
+  expect(alpha).toBe('0xb711a92f0823e4baa28163882c6472ab7ce987d67fb0d2ed3c8c62aca5cbd5ee');
   expect(alpha).not.toBe(beta);
   const ownUndefined = computeStorageFrameHash({ ...base, runtimeMachine: { hidden: undefined } });
   // Authoritative MessagePack preserves an explicitly named undefined field;
   // it must therefore remain distinguishable from both an empty and an absent
   // runtime-machine record in the WAL integrity preimage.
-  expect(ownUndefined).toBe('0xdcd35dcdbd949e29ba3c8ee47c94e5731c15c5187c275fbb69f9220c49cbd180');
+  expect(ownUndefined).toBe('0xb8f7ac30f32b382a52f1898cb30a704090f71683c8c124567677aee44c8e701d');
   expect(ownUndefined).not.toBe(computeStorageFrameHash({ ...base, runtimeMachine: {} }));
   expect(ownUndefined).not.toBe(computeStorageFrameHash(base));
 });
