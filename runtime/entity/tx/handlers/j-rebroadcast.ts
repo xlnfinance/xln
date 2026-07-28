@@ -51,6 +51,68 @@ function normalizeGasBumpBps(value: number | undefined): number | undefined {
   return rounded;
 }
 
+const resolveRebroadcastJurisdiction = (
+  env: RuntimeState,
+  state: EntityState,
+): { name: string; chainId: bigint; depositoryAddress: string } | undefined => {
+  const configuredName = getJurisdictionConfigName(state.config.jurisdiction);
+  if (!configuredName) {
+    addMessage(state, '❌ No jurisdiction configured for j_rebroadcast');
+    return undefined;
+  }
+  try {
+    const jurisdiction = requireRuntimeJurisdictionConfigByName(
+      env,
+      configuredName,
+      state.config.jurisdiction,
+    );
+    const chainId = BigInt(jurisdiction.chainId ?? 0);
+    if (!chainId) {
+      addMessage(state, '❌ Missing chainId for j_rebroadcast');
+      return undefined;
+    }
+    return {
+      name: jurisdiction.name,
+      chainId,
+      depositoryAddress: requireUsableContractAddress(
+        'depository',
+        jurisdiction.depositoryAddress,
+      ),
+    };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    addMessage(state, `❌ Jurisdiction unavailable for j_rebroadcast: ${detail}`);
+    return undefined;
+  }
+};
+
+const buildRebroadcastJTx = (
+  entityState: EntityState,
+  signerId: string,
+  batchGeneration: number,
+  gasBumpBps: number | undefined,
+  batch: ReturnType<typeof cloneJBatch>,
+  batchHash: string,
+  encodedBatch: string,
+): JTx => {
+  const sent = entityState.jBatchState!.sentBatch!;
+  return {
+    type: 'batch',
+    entityId: entityState.entityId,
+    data: {
+      batch: cloneJBatch(batch),
+      batchHash,
+      encodedBatch,
+      entityNonce: sent.entityNonce,
+      batchGeneration,
+      batchSize: batchOpCount(batch),
+      signerId,
+      ...(gasBumpBps !== undefined ? { feeOverrides: { gasBumpBps } } : {}),
+    },
+    timestamp: entityState.timestamp,
+  };
+};
+
 export async function handleJRebroadcast(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'j_rebroadcast' }>,
@@ -81,33 +143,8 @@ export async function handleJRebroadcast(
   }
 
   const gasBumpBps = normalizeGasBumpBps(entityTx.data.gasBumpBps);
-  const configuredJurisdictionName = getJurisdictionConfigName(newState.config.jurisdiction);
-  if (!configuredJurisdictionName) {
-    const msg = '❌ No jurisdiction configured for j_rebroadcast';
-    addMessage(newState, msg);
-    return { newState, outputs, jOutputs };
-  }
-
-  let jurisdiction;
-  try {
-    jurisdiction = requireRuntimeJurisdictionConfigByName(
-      env,
-      configuredJurisdictionName,
-      newState.config.jurisdiction,
-    );
-  } catch (error) {
-    const msg = `❌ Jurisdiction unavailable for j_rebroadcast: ${error instanceof Error ? error.message : String(error)}`;
-    addMessage(newState, msg);
-    return { newState, outputs, jOutputs };
-  }
-  const depositoryAddress = requireUsableContractAddress('depository', jurisdiction.depositoryAddress);
-  const chainId = BigInt(jurisdiction.chainId ?? 0);
-  if (!chainId) {
-    const msg = '❌ Missing chainId for j_rebroadcast';
-    addMessage(newState, msg);
-    return { newState, outputs, jOutputs };
-  }
-  const jurisdictionName = jurisdiction.name;
+  const jurisdiction = resolveRebroadcastJurisdiction(env, newState);
+  if (!jurisdiction) return { newState, outputs, jOutputs };
   const batchGeneration = newState.jBatchState.broadcastCount + 1;
   // j_rebroadcast must stay dumb on purpose:
   // resend the current sentBatch exactly as stored, without revalidation, filtering,
@@ -121,27 +158,23 @@ export async function handleJRebroadcast(
     return { newState, outputs, jOutputs };
   }
   const encodedBatch = encodeJBatch(rebroadcastBatch);
-  const batchHash = computeBatchHankoHash(chainId, depositoryAddress, encodedBatch, BigInt(sent.entityNonce));
+  const batchHash = computeBatchHankoHash(
+    jurisdiction.chainId,
+    jurisdiction.depositoryAddress,
+    encodedBatch,
+    BigInt(sent.entityNonce),
+  );
+  const jTx = buildRebroadcastJTx(
+    newState,
+    signerId,
+    batchGeneration,
+    gasBumpBps,
+    rebroadcastBatch,
+    batchHash,
+    encodedBatch,
+  );
 
-  const jTx: JTx = {
-    type: 'batch',
-    entityId: entityState.entityId,
-    data: {
-      batch: cloneJBatch(rebroadcastBatch),
-      batchHash,
-      encodedBatch,
-      entityNonce: sent.entityNonce,
-      batchGeneration,
-      batchSize: batchOpCount(rebroadcastBatch),
-      signerId,
-      ...(gasBumpBps !== undefined
-        ? { feeOverrides: { gasBumpBps } }
-        : {}),
-    },
-    timestamp: newState.timestamp,
-  };
-
-  jOutputs.push({ jurisdictionName, jTxs: [jTx] });
+  jOutputs.push({ jurisdictionName: jurisdiction.name, jTxs: [jTx] });
 
   sent.batch = cloneJBatch(rebroadcastBatch);
   sent.batchHash = batchHash;

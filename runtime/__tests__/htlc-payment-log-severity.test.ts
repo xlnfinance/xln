@@ -7,8 +7,8 @@ test('expected HTLC capacity rejection is informational, not a browser error', (
     join(process.cwd(), 'runtime/entity/tx/handlers/htlc-payment.ts'),
     'utf8',
   );
-  const start = source.indexOf('if (prepared.senderLockAmount > nextHopCapacity)');
-  const end = source.indexOf('newState.htlcRoutes.set', start);
+  const start = source.indexOf('if (prepared.senderLockAmount > capacity)');
+  const end = source.indexOf('return account;', start);
   expect(start).toBeGreaterThanOrEqual(0);
   expect(end).toBeGreaterThan(start);
 

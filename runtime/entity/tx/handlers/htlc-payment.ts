@@ -8,6 +8,7 @@
  */
 
 import type {
+  AccountState,
   AccountTx,
   EntityCandidateEffect,
   EntityInput,
@@ -23,61 +24,78 @@ import { setHtlcRouteNote } from '../htlc-route-lifecycle';
 
 const htlcLog = createStructuredLogger('entity.htlc');
 const formatEntityId = (id: string): string => id.slice(-4);
-
-export async function handleHtlcPayment(
-  entityState: EntityState,
-  entityTx: Extract<EntityTx, { type: 'htlcPayment' }>,
-  env: RuntimeState,
-  candidateEffects: EntityCandidateEffect[] = [],
-): Promise<{
+type PreparedHtlcPayment = Awaited<ReturnType<typeof validatePreparedHtlcPayment>>;
+type HtlcPaymentResult = {
   newState: EntityState;
   outputs: EntityInput[];
   accountTxs: Array<{ accountId: string; tx: AccountTx }>;
-}> {
-  const prepared = await validatePreparedHtlcPayment(env, entityState, entityTx);
-  const trace = (message: string, fields: Record<string, unknown> = {}): void => {
-    if (env.quietRuntimeLogs !== true) htlcLog.debug(message, fields);
-  };
-  trace('start', {
-    from: shortId(entityState.entityId),
-    target: shortId(prepared.targetEntityId),
-    tokenId: prepared.tokenId,
-    amount: formatAmount(prepared.recipientAmount),
-    route: prepared.route.map(shortId),
-  });
-  const newState = cloneEntityState(entityState);
+};
+
+const rejectHtlcPayment = (
+  newState: EntityState,
+  message: string,
+  logMessage: string,
+): HtlcPaymentResult => {
+  htlcLog.error('failed', { context: 'HTLC_PAYMENT', message: logMessage });
+  addMessage(newState, message);
+  return { newState, outputs: [], accountTxs: [] };
+};
+
+const requireOutboundCapacity = (
+  newState: EntityState,
+  prepared: PreparedHtlcPayment,
+): AccountState | HtlcPaymentResult => {
   const account = newState.accounts.get(prepared.nextHop);
   if (!account) {
-    htlcLog.error('failed', {
-      context: 'HTLC_PAYMENT',
-      message: `No account with next hop ${formatEntityId(prepared.nextHop)}`,
-    });
-    addMessage(newState, `❌ HTLC payment failed: No account with ${formatEntityId(prepared.nextHop)}`);
-    return { newState, outputs: [], accountTxs: [] };
+    return rejectHtlcPayment(
+      newState,
+      `❌ HTLC payment failed: No account with ${formatEntityId(prepared.nextHop)}`,
+      `No account with next hop ${formatEntityId(prepared.nextHop)}`,
+    );
   }
   const delta = account.deltas?.get(prepared.tokenId);
   if (!delta) {
-    htlcLog.error('failed', {
-      context: 'HTLC_PAYMENT',
-      message: `No delta state for next hop ${formatEntityId(prepared.nextHop)} token ${prepared.tokenId}`,
-    });
-    addMessage(newState, '❌ HTLC payment failed: missing account state');
-    return { newState, outputs: [], accountTxs: [] };
+    return rejectHtlcPayment(
+      newState,
+      '❌ HTLC payment failed: missing account state',
+      `No delta state for next hop ${formatEntityId(prepared.nextHop)} token ${prepared.tokenId}`,
+    );
   }
-  const senderIsLeft = account.leftEntity === entityState.entityId;
-  const nextHopCapacity = deriveDelta(delta, senderIsLeft).outCapacity;
-  if (prepared.senderLockAmount > nextHopCapacity) {
+  const senderIsLeft = account.leftEntity === newState.entityId;
+  const capacity = deriveDelta(delta, senderIsLeft).outCapacity;
+  if (prepared.senderLockAmount > capacity) {
     htlcLog.info('rejected', {
       context: 'HTLC_PAYMENT',
       reason: 'insufficient-capacity',
       nextHop: formatEntityId(prepared.nextHop),
       required: prepared.senderLockAmount,
-      available: nextHopCapacity,
+      available: capacity,
     });
     addMessage(newState, '❌ HTLC payment failed: insufficient capacity');
     return { newState, outputs: [], accountTxs: [] };
   }
+  return account;
+};
 
+const buildOutboundLockTx = (prepared: PreparedHtlcPayment): AccountTx => ({
+  type: 'htlc_lock',
+  data: {
+    lockId: prepared.lockId,
+    hashlock: prepared.hashlock,
+    timelock: prepared.timelock,
+    revealBeforeHeight: prepared.revealBeforeHeight,
+    amount: prepared.senderLockAmount,
+    tokenId: prepared.tokenId,
+    deliveryMode: prepared.deliveryMode,
+    envelope: prepared.envelope,
+  },
+});
+
+const recordOriginatedHtlc = (
+  newState: EntityState,
+  prepared: PreparedHtlcPayment,
+  candidateEffects: EntityCandidateEffect[],
+): void => {
   newState.htlcRoutes.set(prepared.hashlock, {
     hashlock: prepared.hashlock,
     tokenId: prepared.tokenId,
@@ -91,29 +109,12 @@ export async function handleHtlcPayment(
   if (prepared.description) {
     setHtlcRouteNote(newState, prepared.hashlock, prepared.lockId, prepared.description);
   }
-
-  const accountTx: AccountTx = {
-    type: 'htlc_lock',
-    data: {
-      lockId: prepared.lockId,
-      hashlock: prepared.hashlock,
-      timelock: prepared.timelock,
-      revealBeforeHeight: prepared.revealBeforeHeight,
-      amount: prepared.senderLockAmount,
-      tokenId: prepared.tokenId,
-      deliveryMode: prepared.deliveryMode,
-      envelope: prepared.envelope,
-    },
-  };
-  const accountTxs = [{ accountId: prepared.nextHop, tx: accountTx }];
-  // Persist the audit event only after this replay has built the exact AccountTx.
-  // Emitting before account/capacity validation made rejected payments look sent.
   candidateEffects.push({
     kind: 'runtimeEvent',
     eventName: 'HtlcInitiated',
     data: {
-      entityId: entityState.entityId,
-      fromEntity: entityState.entityId,
+      entityId: newState.entityId,
+      fromEntity: newState.entityId,
       toEntity: prepared.targetEntityId,
       tokenId: prepared.tokenId,
       amount: prepared.recipientAmount.toString(),
@@ -136,6 +137,32 @@ export async function handleHtlcPayment(
     direction: 'outgoing',
     createdAt: BigInt(newState.timestamp),
   });
+};
+
+export async function handleHtlcPayment(
+  entityState: EntityState,
+  entityTx: Extract<EntityTx, { type: 'htlcPayment' }>,
+  env: RuntimeState,
+  candidateEffects: EntityCandidateEffect[] = [],
+): Promise<HtlcPaymentResult> {
+  const prepared = await validatePreparedHtlcPayment(env, entityState, entityTx);
+  const trace = (message: string, fields: Record<string, unknown> = {}): void => {
+    if (env.quietRuntimeLogs !== true) htlcLog.debug(message, fields);
+  };
+  trace('start', {
+    from: shortId(entityState.entityId),
+    target: shortId(prepared.targetEntityId),
+    tokenId: prepared.tokenId,
+    amount: formatAmount(prepared.recipientAmount),
+    route: prepared.route.map(shortId),
+  });
+  const newState = cloneEntityState(entityState);
+  const account = requireOutboundCapacity(newState, prepared);
+  if ('newState' in account) return account;
+
+  recordOriginatedHtlc(newState, prepared, candidateEffects);
+  const accountTx = buildOutboundLockTx(prepared);
+  const accountTxs = [{ accountId: prepared.nextHop, tx: accountTx }];
   addMessage(
     newState,
     `🔒 HTLC: Recipient ${prepared.recipientAmount}, sender lock ${prepared.senderLockAmount} `

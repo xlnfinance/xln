@@ -43,6 +43,136 @@ const requireIntentUint = (value: unknown, code: string, allowZero = true): bigi
   return value;
 };
 
+type TrustedEntityProviderDomain = {
+  chainId: number | bigint;
+  entityProviderAddress: string;
+  depositoryAddress: string;
+  entityId?: string;
+  expectedKind?: EntityProviderActionKind;
+  boardEpoch?: number | bigint;
+};
+
+const normalizeTrustedDomain = (
+  trusted: TrustedEntityProviderDomain,
+): { chainId: bigint; provider: string; depository: string } => {
+  const chainId = BigInt(trusted.chainId);
+  const provider = ethers.isAddress(trusted.entityProviderAddress)
+    ? ethers.getAddress(trusted.entityProviderAddress).toLowerCase()
+    : '';
+  const depository = ethers.isAddress(trusted.depositoryAddress)
+    ? ethers.getAddress(trusted.depositoryAddress).toLowerCase()
+    : '';
+  if (
+    chainId <= 0n ||
+    chainId > ethers.MaxUint256 ||
+    !provider ||
+    provider === ZERO_ADDRESS ||
+    !depository ||
+    depository === ZERO_ADDRESS
+  ) {
+    throw new Error('ENTITY_PROVIDER_ACTION_TRUSTED_DOMAIN_INVALID');
+  }
+  return { chainId, provider, depository };
+};
+
+const assertIntentEnvelope = (
+  intent: EntityProviderActionIntent,
+  trusted: TrustedEntityProviderDomain,
+  domain: ReturnType<typeof normalizeTrustedDomain>,
+): void => {
+  if (
+    intent.version !== 1 ||
+    typeof intent.entityId !== 'string' ||
+    typeof intent.entityNumber !== 'bigint' ||
+    intent.entityNumber <= 0n ||
+    intent.entityNumber > ethers.MaxUint256 ||
+    intent.entityId.toLowerCase() !== ethers.zeroPadValue(ethers.toBeHex(intent.entityNumber), 32).toLowerCase() ||
+    (trusted.entityId !== undefined && intent.entityId.toLowerCase() !== trusted.entityId.toLowerCase()) ||
+    intent.chainId !== domain.chainId ||
+    typeof intent.entityProviderAddress !== 'string' ||
+    intent.entityProviderAddress.toLowerCase() !== domain.provider ||
+    typeof intent.boardEpoch !== 'bigint' ||
+    intent.boardEpoch < 0n ||
+    intent.boardEpoch > ethers.MaxUint256 ||
+    (trusted.boardEpoch !== undefined && intent.boardEpoch !== BigInt(trusted.boardEpoch)) ||
+    typeof intent.actionNonce !== 'bigint' ||
+    intent.actionNonce <= 0n ||
+    intent.actionNonce > ethers.MaxUint256 ||
+    !Number.isSafeInteger(intent.generation) ||
+    intent.generation <= 0 ||
+    !Number.isSafeInteger(intent.createdAt) ||
+    intent.createdAt < 0 ||
+    typeof intent.actionHash !== 'string' ||
+    !BYTES32.test(intent.actionHash.toLowerCase()) ||
+    !intent.payload ||
+    typeof intent.payload !== 'object' ||
+    Array.isArray(intent.payload)
+  ) {
+    throw new Error('ENTITY_PROVIDER_ACTION_INTENT_INVALID');
+  }
+};
+
+const assertReleaseControlShares = (
+  intent: Extract<EntityProviderActionIntent['payload'], { kind: 'releaseControlShares' }>,
+  trustedDepository: string,
+): void => {
+  const depository = requireIntentAddress(
+    intent.release?.depositoryAddress,
+    'ENTITY_PROVIDER_ACTION_DEPOSITORY_INVALID',
+  );
+  if (depository !== trustedDepository) {
+    throw new Error(`ENTITY_PROVIDER_ACTION_DEPOSITORY_MISMATCH:${depository}:${trustedDepository}`);
+  }
+  const control = requireIntentUint(
+    intent.release?.controlAmount,
+    'ENTITY_PROVIDER_ACTION_CONTROL_AMOUNT_INVALID',
+  );
+  const dividend = requireIntentUint(
+    intent.release?.dividendAmount,
+    'ENTITY_PROVIDER_ACTION_DIVIDEND_AMOUNT_INVALID',
+  );
+  if (control === 0n && dividend === 0n) {
+    throw new Error('ENTITY_PROVIDER_ACTION_RELEASE_AMOUNT_EMPTY');
+  }
+  if (typeof intent.release?.purpose !== 'string') {
+    throw new Error('ENTITY_PROVIDER_ACTION_PURPOSE_INVALID:not-string');
+  }
+  const purposeBytes = new TextEncoder().encode(intent.release.purpose).byteLength;
+  if (purposeBytes > 1_024) {
+    throw new Error(`ENTITY_PROVIDER_ACTION_PURPOSE_OVERSIZED:${purposeBytes}:1024`);
+  }
+};
+
+const assertIntentPayload = (
+  intent: EntityProviderActionIntent,
+  trustedDepository: string,
+): void => {
+  if (intent.payload.kind === 'entityTransferTokens') {
+    requireIntentAddress(intent.payload.transfer?.to, 'ENTITY_PROVIDER_ACTION_RECIPIENT_INVALID');
+    requireIntentUint(intent.payload.transfer?.tokenId, 'ENTITY_PROVIDER_ACTION_TOKEN_ID_INVALID');
+    requireIntentUint(intent.payload.transfer?.amount, 'ENTITY_PROVIDER_ACTION_AMOUNT_INVALID', false);
+    return;
+  }
+  if (intent.payload.kind === 'releaseControlShares') {
+    assertReleaseControlShares(intent.payload, trustedDepository);
+    return;
+  }
+  if (intent.payload.kind === 'cancelPendingAction') {
+    const cancelledHash = String(intent.payload.cancel?.cancelledActionHash ?? '').toLowerCase();
+    if (!BYTES32.test(cancelledHash) || cancelledHash === `0x${'00'.repeat(32)}`) {
+      throw new Error(`ENTITY_PROVIDER_ACTION_CANCELLED_HASH_INVALID:${cancelledHash || 'missing'}`);
+    }
+    const cancelledKind = intent.payload.cancel?.cancelledActionKind;
+    if (cancelledKind !== 0 && cancelledKind !== 1) {
+      throw new Error(`ENTITY_PROVIDER_ACTION_CANCELLED_KIND_INVALID:${String(cancelledKind)}`);
+    }
+    return;
+  }
+  throw new Error(
+    `ENTITY_PROVIDER_ACTION_KIND_INVALID:${String((intent.payload as { kind?: unknown }).kind)}`,
+  );
+};
+
 export const recomputeEntityProviderActionHash = (
   intent: Omit<EntityProviderActionIntent, 'actionHash'> | EntityProviderActionIntent,
 ): string => {
@@ -74,112 +204,19 @@ export const recomputeEntityProviderActionHash = (
 
 export const assertEntityProviderActionIntent = (
   intent: EntityProviderActionIntent,
-  trusted: {
-    chainId: number | bigint;
-    entityProviderAddress: string;
-    depositoryAddress: string;
-    entityId?: string;
-    expectedKind?: EntityProviderActionKind;
-    boardEpoch?: number | bigint;
-  },
+  trusted: TrustedEntityProviderDomain,
 ): void => {
   if (!intent || typeof intent !== 'object' || Array.isArray(intent)) {
     throw new Error('ENTITY_PROVIDER_ACTION_INTENT_INVALID');
   }
-  const trustedChainId = BigInt(trusted.chainId);
-  const trustedProvider = ethers.isAddress(trusted.entityProviderAddress)
-    ? ethers.getAddress(trusted.entityProviderAddress).toLowerCase()
-    : '';
-  const trustedDepository = ethers.isAddress(trusted.depositoryAddress)
-    ? ethers.getAddress(trusted.depositoryAddress).toLowerCase()
-    : '';
-  if (
-    trustedChainId <= 0n ||
-    trustedChainId > ethers.MaxUint256 ||
-    !trustedProvider ||
-    trustedProvider === ZERO_ADDRESS ||
-    !trustedDepository ||
-    trustedDepository === ZERO_ADDRESS
-  ) {
-    throw new Error('ENTITY_PROVIDER_ACTION_TRUSTED_DOMAIN_INVALID');
-  }
-  if (
-    intent.version !== 1 ||
-    typeof intent.entityId !== 'string' ||
-    typeof intent.entityNumber !== 'bigint' ||
-    intent.entityNumber <= 0n ||
-    intent.entityNumber > ethers.MaxUint256 ||
-    intent.entityId.toLowerCase() !== ethers.zeroPadValue(ethers.toBeHex(intent.entityNumber), 32).toLowerCase() ||
-    (trusted.entityId !== undefined && intent.entityId.toLowerCase() !== trusted.entityId.toLowerCase()) ||
-    intent.chainId !== trustedChainId ||
-    typeof intent.entityProviderAddress !== 'string' ||
-    intent.entityProviderAddress.toLowerCase() !== trustedProvider ||
-    typeof intent.boardEpoch !== 'bigint' ||
-    intent.boardEpoch < 0n ||
-    intent.boardEpoch > ethers.MaxUint256 ||
-    (trusted.boardEpoch !== undefined && intent.boardEpoch !== BigInt(trusted.boardEpoch)) ||
-    typeof intent.actionNonce !== 'bigint' ||
-    intent.actionNonce <= 0n ||
-    intent.actionNonce > ethers.MaxUint256 ||
-    !Number.isSafeInteger(intent.generation) ||
-    intent.generation <= 0 ||
-    !Number.isSafeInteger(intent.createdAt) ||
-    intent.createdAt < 0 ||
-    typeof intent.actionHash !== 'string' ||
-    !BYTES32.test(intent.actionHash.toLowerCase()) ||
-    !intent.payload ||
-    typeof intent.payload !== 'object' ||
-    Array.isArray(intent.payload)
-  ) {
-    throw new Error('ENTITY_PROVIDER_ACTION_INTENT_INVALID');
-  }
+  const domain = normalizeTrustedDomain(trusted);
+  assertIntentEnvelope(intent, trusted, domain);
   if (trusted.expectedKind && intent.payload.kind !== trusted.expectedKind) {
     throw new Error(
       `ENTITY_PROVIDER_ACTION_KIND_MISMATCH:${intent.payload.kind}:${trusted.expectedKind}`,
     );
   }
-  if (intent.payload.kind === 'entityTransferTokens') {
-    requireIntentAddress(intent.payload.transfer?.to, 'ENTITY_PROVIDER_ACTION_RECIPIENT_INVALID');
-    requireIntentUint(intent.payload.transfer?.tokenId, 'ENTITY_PROVIDER_ACTION_TOKEN_ID_INVALID');
-    requireIntentUint(intent.payload.transfer?.amount, 'ENTITY_PROVIDER_ACTION_AMOUNT_INVALID', false);
-  } else if (intent.payload.kind === 'releaseControlShares') {
-    const depository = requireIntentAddress(
-      intent.payload.release?.depositoryAddress,
-      'ENTITY_PROVIDER_ACTION_DEPOSITORY_INVALID',
-    );
-    if (depository !== trustedDepository) {
-      throw new Error(`ENTITY_PROVIDER_ACTION_DEPOSITORY_MISMATCH:${depository}:${trustedDepository}`);
-    }
-    const control = requireIntentUint(
-      intent.payload.release?.controlAmount,
-      'ENTITY_PROVIDER_ACTION_CONTROL_AMOUNT_INVALID',
-    );
-    const dividend = requireIntentUint(
-      intent.payload.release?.dividendAmount,
-      'ENTITY_PROVIDER_ACTION_DIVIDEND_AMOUNT_INVALID',
-    );
-    if (control === 0n && dividend === 0n) {
-      throw new Error('ENTITY_PROVIDER_ACTION_RELEASE_AMOUNT_EMPTY');
-    }
-    if (typeof intent.payload.release?.purpose !== 'string') {
-      throw new Error('ENTITY_PROVIDER_ACTION_PURPOSE_INVALID:not-string');
-    }
-    const purposeBytes = new TextEncoder().encode(intent.payload.release.purpose).byteLength;
-    if (purposeBytes > 1_024) {
-      throw new Error(`ENTITY_PROVIDER_ACTION_PURPOSE_OVERSIZED:${purposeBytes}:1024`);
-    }
-  } else if (intent.payload.kind === 'cancelPendingAction') {
-    const cancelledActionHash = String(intent.payload.cancel?.cancelledActionHash ?? '').toLowerCase();
-    if (!BYTES32.test(cancelledActionHash) || cancelledActionHash === `0x${'00'.repeat(32)}`) {
-      throw new Error(`ENTITY_PROVIDER_ACTION_CANCELLED_HASH_INVALID:${cancelledActionHash || 'missing'}`);
-    }
-    const cancelledActionKind = intent.payload.cancel?.cancelledActionKind;
-    if (cancelledActionKind !== 0 && cancelledActionKind !== 1) {
-      throw new Error(`ENTITY_PROVIDER_ACTION_CANCELLED_KIND_INVALID:${String(cancelledActionKind)}`);
-    }
-  } else {
-    throw new Error(`ENTITY_PROVIDER_ACTION_KIND_INVALID:${String((intent.payload as { kind?: unknown }).kind)}`);
-  }
+  assertIntentPayload(intent, domain.depository);
   const recomputed = recomputeEntityProviderActionHash(intent);
   if (recomputed !== intent.actionHash.toLowerCase()) {
     throw new Error(`ENTITY_PROVIDER_ACTION_HASH_MISMATCH:${intent.actionHash}:${recomputed}`);

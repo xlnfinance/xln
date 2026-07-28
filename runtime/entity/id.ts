@@ -101,6 +101,117 @@ export function createProviderScopedEntityId(provider: string, entityId: string)
   return ethers.keccak256(packed);
 }
 
+type EntityIdLookup = (query: string) => string | null;
+
+const parsedEntityId = (
+  input: string,
+  entityId: string,
+  provider: string | undefined,
+  inputType: ParsedEntityId['inputType'],
+  shortId: string,
+  needsProfileLookup: boolean,
+): ParsedEntityId => ({
+  input,
+  entityId,
+  provider,
+  inputType,
+  shortId,
+  needsProfileLookup,
+});
+
+const parseProviderScopedId = (
+  input: string,
+  lookupFn?: EntityIdLookup,
+): ParsedEntityId | undefined => {
+  const separator = input.indexOf(':');
+  if (separator < 1 || separator !== input.lastIndexOf(':')) return undefined;
+  const providerPart = input.slice(0, separator);
+  const entityPart = input.slice(separator + 1);
+  if (!entityPart) throw new Error('ENTITY_ID_PROVIDER_SCOPE_ENTITY_MISSING');
+  const provider = providerPart.startsWith('0x') ? providerPart : `0x${providerPart}`;
+  const inner = parseUniversalEntityId(entityPart, provider, lookupFn);
+  return {
+    ...inner,
+    input,
+    provider,
+    inputType: 'provider-scoped',
+    entityId: createProviderScopedEntityId(provider, inner.entityId),
+  };
+};
+
+const parseFullEntityId = (
+  input: string,
+  provider?: string,
+): ParsedEntityId | undefined => {
+  const match = input.match(/^(0x)?([0-9a-fA-F]{64})$/);
+  if (!match) return undefined;
+  const entityId = normalizeEntityId(`0x${match[2]}`);
+  return parsedEntityId(input, entityId, provider, 'full', getShortId(entityId), false);
+};
+
+const parseShortEntityId = (
+  input: string,
+  provider?: string,
+  lookupFn?: EntityIdLookup,
+): ParsedEntityId | undefined => {
+  const match = input.match(/^#?([0-9a-fA-F]{4})$/i);
+  if (!match) return undefined;
+  const shortId = match[1]!.toLowerCase();
+  const resolved = lookupFn?.(shortId);
+  if (resolved) {
+    return parsedEntityId(
+      input,
+      normalizeEntityId(resolved),
+      provider,
+      'short',
+      shortId.toUpperCase(),
+      false,
+    );
+  }
+  return parsedEntityId(
+    input,
+    `0x${shortId.padEnd(64, '0')}`,
+    provider,
+    'short',
+    shortId.toUpperCase(),
+    true,
+  );
+};
+
+const parseNumberedEntityId = (
+  input: string,
+  provider?: string,
+): ParsedEntityId | undefined => {
+  const match = input.match(/^#?(\d+)$/);
+  if (!match) return undefined;
+  const number = BigInt(match[1]!);
+  if (number >= BigInt(256 ** 6)) return undefined;
+  return parsedEntityId(
+    input,
+    `0x${number.toString(16).padStart(64, '0')}`,
+    provider,
+    'numbered',
+    number.toString(),
+    false,
+  );
+};
+
+const parseNamedEntityId = (
+  input: string,
+  provider?: string,
+  lookupFn?: EntityIdLookup,
+): ParsedEntityId | undefined => {
+  const match = input.match(/^@?([a-zA-Z][a-zA-Z0-9_.-]*)$/);
+  if (!match) return undefined;
+  const name = match[1]!.toLowerCase();
+  const resolved = lookupFn?.(name);
+  if (resolved) {
+    return parsedEntityId(input, normalizeEntityId(resolved), provider, 'named', name, false);
+  }
+  const entityId = ethers.keccak256(ethers.toUtf8Bytes(name));
+  return parsedEntityId(input, entityId, provider, 'named', name, true);
+};
+
 /**
  * Parse any entity ID input format and resolve to canonical form.
  *
@@ -122,125 +233,17 @@ export function parseUniversalEntityId(
   lookupFn?: (query: string) => string | null
 ): ParsedEntityId {
   const trimmed = input.trim();
-
-  // Provider-scoped format: "provider:entityId"
-  if (trimmed.includes(':') && !trimmed.startsWith('0x')) {
-    const [providerPart, entityPart] = trimmed.split(':', 2);
-    if (providerPart && entityPart) {
-      const provider = providerPart.startsWith('0x') ? providerPart : `0x${providerPart}`;
-      const innerParsed = parseUniversalEntityId(entityPart, provider, lookupFn);
-      return {
-        ...innerParsed,
-        provider,
-        inputType: 'provider-scoped',
-        // Create provider-scoped hash
-        entityId: createProviderScopedEntityId(provider, innerParsed.entityId),
-      };
-    }
-  }
-
-  // Full 32-byte hex (with or without 0x)
-  const hexMatch = trimmed.match(/^(0x)?([0-9a-fA-F]{64})$/);
-  if (hexMatch) {
-    const entityId = normalizeEntityId(`0x${hexMatch[2]}`);
-    return {
-      input: trimmed,
-      entityId,
-      provider: defaultProvider,
-      inputType: 'full',
-      shortId: getShortId(entityId),
-      needsProfileLookup: false,
-    };
-  }
-
-  // Short hex ID: "#ABCD" or "ABCD" (4 hex chars)
-  const shortHexMatch = trimmed.match(/^#?([0-9a-fA-F]{4})$/i);
-  if (shortHexMatch) {
-    const shortHex = shortHexMatch[1]!.toLowerCase();
-    // Try lookup function first
-    if (lookupFn) {
-      const resolved = lookupFn(shortHex);
-      if (resolved) {
-        return {
-          input: trimmed,
-          entityId: normalizeEntityId(resolved),
-          provider: defaultProvider,
-          inputType: 'short',
-          shortId: shortHex.toUpperCase(),
-          needsProfileLookup: false,
-        };
-      }
-    }
-    // Can't resolve without lookup - mark as needing profile
-    return {
-      input: trimmed,
-      entityId: `0x${shortHex.padEnd(64, '0')}`, // Placeholder
-      provider: defaultProvider,
-      inputType: 'short',
-      shortId: shortHex.toUpperCase(),
-      needsProfileLookup: true,
-    };
-  }
-
-  // Numbered entity: "#5" or "5" (decimal)
-  const numberedMatch = trimmed.match(/^#?(\d+)$/);
-  if (numberedMatch) {
-    const num = BigInt(numberedMatch[1]!);
-    const NUMERIC_THRESHOLD = BigInt(256 ** 6); // 281 trillion
-
-    if (num >= 0n && num < NUMERIC_THRESHOLD) {
-      const entityId = `0x${num.toString(16).padStart(64, '0')}`;
-      return {
-        input: trimmed,
-        entityId,
-        provider: defaultProvider,
-        inputType: 'numbered',
-        shortId: num.toString(),
-        needsProfileLookup: false,
-      };
-    }
-  }
-
-  // Named entity: "@alice" or "alice.xln"
-  const namedMatch = trimmed.match(/^@?([a-zA-Z][a-zA-Z0-9_.-]*)$/);
-  if (namedMatch) {
-    const name = namedMatch[1]!.toLowerCase();
-    // Try lookup function
-    if (lookupFn) {
-      const resolved = lookupFn(name);
-      if (resolved) {
-        return {
-          input: trimmed,
-          entityId: normalizeEntityId(resolved),
-          provider: defaultProvider,
-          inputType: 'named',
-          shortId: name,
-          needsProfileLookup: false,
-        };
-      }
-    }
-    // Hash the name as entity ID (on-chain name resolution)
-    const entityId = ethers.keccak256(ethers.toUtf8Bytes(name));
-    return {
-      input: trimmed,
-      entityId,
-      provider: defaultProvider,
-      inputType: 'named',
-      shortId: name,
-      needsProfileLookup: true,
-    };
-  }
-
-  // Fallback: treat as raw hex
-  const rawHex = trimmed.startsWith('0x') ? trimmed : `0x${trimmed}`;
-  return {
-    input: trimmed,
-    entityId: normalizeEntityId(rawHex),
-    provider: defaultProvider,
-    inputType: 'full',
-    shortId: getShortId(rawHex),
-    needsProfileLookup: false,
-  };
+  if (!trimmed) throw new Error('ENTITY_ID_EMPTY');
+  const parsed =
+    parseProviderScopedId(trimmed, lookupFn) ??
+    parseFullEntityId(trimmed, defaultProvider) ??
+    parseShortEntityId(trimmed, defaultProvider, lookupFn) ??
+    parseNumberedEntityId(trimmed, defaultProvider) ??
+    parseNamedEntityId(trimmed, defaultProvider, lookupFn);
+  if (parsed) return parsed;
+  // There is no raw-hex fallback. Accepting malformed identifiers as if they
+  // were canonical makes typos address a different Entity instead of failing.
+  throw new Error(`ENTITY_ID_FORMAT_INVALID:${trimmed}`);
 }
 
 /**

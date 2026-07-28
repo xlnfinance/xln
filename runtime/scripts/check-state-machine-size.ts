@@ -19,7 +19,7 @@ const TARGET_COORDINATOR_LINES = 150;
 const COORDINATOR_DEBT: Readonly<Record<string, number>> = {
 };
 
-const MAX_OVER_100_FUNCTIONS = 32;
+const MAX_OVER_100_FUNCTIONS = 26;
 
 type FunctionSize = {
   key: string;

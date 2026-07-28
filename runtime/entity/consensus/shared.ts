@@ -1448,121 +1448,124 @@ export const appendCertifiedEntityFrameLink = (
 /**
  * Validates entity input to prevent malicious or corrupted data
  */
+const hasWellFormedEntityTxs = (input: EntityInput): boolean => {
+  if (!input.entityTxs) return true;
+  if (!Array.isArray(input.entityTxs)) {
+    log.error(`❌ EntityTxs must be array, got: ${typeof input.entityTxs}`);
+    return false;
+  }
+  if (input.entityTxs.length > LIMITS.MEMPOOL_SIZE) {
+    log.error(`❌ Too many transactions: ${input.entityTxs.length} > ${LIMITS.MEMPOOL_SIZE}`);
+    return false;
+  }
+  const invalid = input.entityTxs.find(tx => !tx.type || !tx.data);
+  if (!invalid) return true;
+  log.error(`❌ Invalid transaction: ${safeStringify(invalid)}`);
+  return false;
+};
+
+const hasWellFormedHashPrecommits = (input: EntityInput): boolean => {
+  if (!input.hashPrecommits) return true;
+  if (!(input.hashPrecommits instanceof Map)) {
+    log.error(`❌ HashPrecommits must be Map, got: ${typeof input.hashPrecommits}`);
+    return false;
+  }
+  if (input.hashPrecommits.size > LIMITS.MAX_VALIDATORS) {
+    log.error(`❌ Too many hashPrecommits: ${input.hashPrecommits.size} > ${LIMITS.MAX_VALIDATORS}`);
+    return false;
+  }
+  const reference = input.hashPrecommitFrame;
+  if (
+    !reference ||
+    !Number.isSafeInteger(reference.height) ||
+    reference.height < 0 ||
+    typeof reference.frameHash !== 'string' ||
+    reference.frameHash.trim().length === 0
+  ) {
+    log.error(`❌ Invalid hashPrecommitFrame: ${safeStringify(reference)}`);
+    return false;
+  }
+  for (const [signerId, sigs] of input.hashPrecommits) {
+    if (typeof signerId === 'string' && Array.isArray(sigs)) continue;
+    log.error(`❌ Invalid hashPrecommit format: ${signerId} -> ${typeof sigs}`);
+    return false;
+  }
+  return true;
+};
+
+const hasWellFormedJPrefixAttestations = (input: EntityInput): boolean => {
+  if (!input.jPrefixAttestations) return true;
+  if (!(input.jPrefixAttestations instanceof Map) || input.jPrefixAttestations.size === 0) {
+    log.error(`❌ J-prefix attestations must be a non-empty Map`);
+    return false;
+  }
+  if (input.jPrefixAttestations.size > LIMITS.MAX_VALIDATORS) {
+    log.error(`❌ Too many J-prefix attestations: ${input.jPrefixAttestations.size}`);
+    return false;
+  }
+  for (const [signerId, attestation] of input.jPrefixAttestations) {
+    if (typeof signerId === 'string' && attestation && typeof attestation === 'object') continue;
+    log.error(`❌ Invalid J-prefix attestation entry`);
+    return false;
+  }
+  return true;
+};
+
+const hasWellFormedProposedFrame = (input: EntityInput): boolean => {
+  if (!input.proposedFrame) return true;
+  const frame = input.proposedFrame;
+  validateProposedEntityFrame(frame, 'EntityInput.proposedFrame');
+  if (typeof frame.height !== 'number' || frame.height < 0) {
+    log.error(`❌ Invalid frame height: ${frame.height}`);
+    return false;
+  }
+  if (!Array.isArray(frame.txs)) {
+    log.error(`❌ Frame txs must be array`);
+    return false;
+  }
+  if (!frame.hash || typeof frame.hash !== 'string') {
+    log.error(`❌ Invalid frame hash: ${frame.hash}`);
+    return false;
+  }
+  if (
+    !frame.leader ||
+    typeof frame.leader.proposerSignerId !== 'string' ||
+    !Number.isSafeInteger(frame.leader.view) ||
+    frame.leader.view < 0
+  ) {
+    log.error(`❌ Invalid frame leader metadata`);
+    return false;
+  }
+  return true;
+};
+
+const hasWellFormedLeaderTimeoutVote = (input: EntityInput): boolean => {
+  if (!input.leaderTimeoutVote) return true;
+  const vote = input.leaderTimeoutVote;
+  const valid =
+    typeof vote.entityId === 'string' &&
+    typeof vote.voterId === 'string' &&
+    typeof vote.signature === 'string' &&
+    Number.isSafeInteger(vote.targetHeight) &&
+    Number.isSafeInteger(vote.fromView) &&
+    Number.isSafeInteger(vote.toView);
+  if (!valid) log.error(`❌ Invalid leader timeout vote`);
+  return valid;
+};
+
 export const isEntityInputWellFormed = (input: EntityInput): boolean => {
   try {
-    // Basic required fields
     if (!input.entityId || typeof input.entityId !== 'string') {
       log.error(`❌ Invalid entityId: ${input.entityId}`);
       return false;
     }
-    // EntityTx validation
-    if (input.entityTxs) {
-      if (!Array.isArray(input.entityTxs)) {
-        log.error(`❌ EntityTxs must be array, got: ${typeof input.entityTxs}`);
-        return false;
-      }
-      if (input.entityTxs.length > LIMITS.MEMPOOL_SIZE) {
-        log.error(`❌ Too many transactions: ${input.entityTxs.length} > ${LIMITS.MEMPOOL_SIZE}`);
-        return false;
-      }
-      for (const tx of input.entityTxs) {
-        if (!tx.type || !tx.data) {
-          log.error(`❌ Invalid transaction: ${safeStringify(tx)}`);
-          return false;
-        }
-        // Type system ensures tx.type is always a string literal
-      }
-    }
-
-    // HashPrecommits validation (multi-hash signatures)
-    if (input.hashPrecommits) {
-      if (!(input.hashPrecommits instanceof Map)) {
-        log.error(`❌ HashPrecommits must be Map, got: ${typeof input.hashPrecommits}`);
-        return false;
-      }
-      if (input.hashPrecommits.size > LIMITS.MAX_VALIDATORS) {
-        log.error(`❌ Too many hashPrecommits: ${input.hashPrecommits.size} > ${LIMITS.MAX_VALIDATORS}`);
-        return false;
-      }
-      const reference = input.hashPrecommitFrame;
-      if (
-        !reference ||
-        !Number.isSafeInteger(reference.height) ||
-        reference.height < 0 ||
-        typeof reference.frameHash !== 'string' ||
-        reference.frameHash.trim().length === 0
-      ) {
-        log.error(`❌ Invalid hashPrecommitFrame: ${safeStringify(reference)}`);
-        return false;
-      }
-      for (const [signerId, sigs] of input.hashPrecommits) {
-        if (typeof signerId !== 'string' || !Array.isArray(sigs)) {
-          log.error(`❌ Invalid hashPrecommit format: ${signerId} -> ${typeof sigs}`);
-          return false;
-        }
-      }
-    }
-
-    if (input.jPrefixAttestations) {
-      if (!(input.jPrefixAttestations instanceof Map) || input.jPrefixAttestations.size === 0) {
-        log.error(`❌ J-prefix attestations must be a non-empty Map`);
-        return false;
-      }
-      if (input.jPrefixAttestations.size > LIMITS.MAX_VALIDATORS) {
-        log.error(`❌ Too many J-prefix attestations: ${input.jPrefixAttestations.size}`);
-        return false;
-      }
-      for (const [signerId, attestation] of input.jPrefixAttestations) {
-        if (typeof signerId !== 'string' || !attestation || typeof attestation !== 'object') {
-          log.error(`❌ Invalid J-prefix attestation entry`);
-          return false;
-        }
-      }
-    }
-
-    // ProposedFrame validation
-    if (input.proposedFrame) {
-      const frame = input.proposedFrame;
-      validateProposedEntityFrame(frame, 'EntityInput.proposedFrame');
-      if (typeof frame.height !== 'number' || frame.height < 0) {
-        log.error(`❌ Invalid frame height: ${frame.height}`);
-        return false;
-      }
-      if (!Array.isArray(frame.txs)) {
-        log.error(`❌ Frame txs must be array`);
-        return false;
-      }
-      if (!frame.hash || typeof frame.hash !== 'string') {
-        log.error(`❌ Invalid frame hash: ${frame.hash}`);
-        return false;
-      }
-      if (
-        !frame.leader ||
-        typeof frame.leader.proposerSignerId !== 'string' ||
-        !Number.isSafeInteger(frame.leader.view) ||
-        frame.leader.view < 0
-      ) {
-        log.error(`❌ Invalid frame leader metadata`);
-        return false;
-      }
-    }
-
-    if (input.leaderTimeoutVote) {
-      const vote = input.leaderTimeoutVote;
-      if (
-        typeof vote.entityId !== 'string' ||
-        typeof vote.voterId !== 'string' ||
-        typeof vote.signature !== 'string' ||
-        !Number.isSafeInteger(vote.targetHeight) ||
-        !Number.isSafeInteger(vote.fromView) ||
-        !Number.isSafeInteger(vote.toView)
-      ) {
-        log.error(`❌ Invalid leader timeout vote`);
-        return false;
-      }
-    }
-
-    return true;
+    return (
+      hasWellFormedEntityTxs(input) &&
+      hasWellFormedHashPrecommits(input) &&
+      hasWellFormedJPrefixAttestations(input) &&
+      hasWellFormedProposedFrame(input) &&
+      hasWellFormedLeaderTimeoutVote(input)
+    );
   } catch (error) {
     log.error(`❌ Input validation error: ${error}`);
     return false;

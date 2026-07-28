@@ -39,6 +39,55 @@ const sameCommittedFillNotice = (
   );
 };
 
+const requireSourceHubRoute = (
+  state: EntityState,
+  orderId: string,
+): CrossJurisdictionSwapRoute => {
+  const route = state.crossJurisdictionSwaps?.get(orderId);
+  if (!route) throw new Error(`CROSS_J_FILL_NOTICE_ROUTE_MISSING: order=${orderId}`);
+
+  // A fill notice writes the source bilateral Account. The book owner may
+  // discover a match, but it cannot repair or impersonate the source hub.
+  const currentEntityId = normalizeEntityRef(state.entityId);
+  const bookOwner = normalizeEntityRef(
+    route.bookOwnerEntityId || route.source.counterpartyEntityId || route.hubEntityId,
+  );
+  const sourceHub = normalizeEntityRef(route.source.counterpartyEntityId);
+  if (sourceHub !== currentEntityId) {
+    throw new Error(
+      `CROSS_J_FILL_NOTICE_SOURCE_HUB_REQUIRED: order=${orderId} current=${state.entityId} ` +
+      `owner=${bookOwner} sourceHub=${sourceHub}`,
+    );
+  }
+  return route;
+};
+
+const assertFillNoticeSequence = (
+  route: CrossJurisdictionSwapRoute,
+  data: CrossJurisdictionFillNoticeTx['data'],
+): 'duplicate' | 'next' => {
+  const current = Math.max(0, Math.floor(Number(route.fillSeq ?? 0) || 0));
+  const incoming = Math.floor(Number(data.fillSeq));
+  if (incoming <= current) {
+    if (incoming === current && !sameCommittedFillNotice(route, data)) {
+      throw new Error(
+        `CROSS_J_FILL_NOTICE_STALE_CONFLICT: order=${data.orderId} seq=${incoming} current=${current}`,
+      );
+    }
+    return 'duplicate';
+  }
+  if (
+    data.previousFillSeq !== undefined &&
+    Math.floor(Number(data.previousFillSeq)) !== current
+  ) {
+    throw new Error(
+      `CROSS_J_FILL_NOTICE_PREV_SEQ_MISMATCH: order=${data.orderId} ` +
+      `prev=${data.previousFillSeq} current=${current}`,
+    );
+  }
+  return 'next';
+};
+
 export const handleCrossJurisdictionFillNoticeEntityTx = (
   entityState: EntityState,
   entityTx: CrossJurisdictionFillNoticeTx,
@@ -66,23 +115,7 @@ export const handleCrossJurisdictionFillNoticeEntityTx = (
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
   const accountTxs: AccountTxTarget[] = [];
-  let route = newState.crossJurisdictionSwaps?.get(orderId);
-  if (!route) {
-    throw new Error(`CROSS_J_FILL_NOTICE_ROUTE_MISSING: order=${orderId}`);
-  }
-
-  // Fill notices are account writes, not book repairs. The book owner may create
-  // a match, but only the source hub owns the source bilateral account that can
-  // commit `cross_swap_fill_ack`. Do not rehydrate/merge from account offer state
-  // here: a missing or stale entity route is corruption and must fail loudly.
-  const currentEntityId = normalizeEntityRef(newState.entityId);
-  const routeBookOwner = normalizeEntityRef(route.bookOwnerEntityId || route.source.counterpartyEntityId || route.hubEntityId);
-  const routeSourceHub = normalizeEntityRef(route.source.counterpartyEntityId);
-  if (routeSourceHub !== currentEntityId) {
-    throw new Error(
-      `CROSS_J_FILL_NOTICE_SOURCE_HUB_REQUIRED: order=${orderId} current=${newState.entityId} owner=${routeBookOwner} sourceHub=${routeSourceHub}`,
-    );
-  }
+  const route = requireSourceHubRoute(newState, orderId);
 
   if (
     routeHash &&
@@ -93,21 +126,9 @@ export const handleCrossJurisdictionFillNoticeEntityTx = (
   }
 
   const currentFillSeq = Math.max(0, Math.floor(Number(route.fillSeq ?? 0) || 0));
-  const noticeFillSeq = Math.floor(Number(fillSeq));
-  if (noticeFillSeq <= currentFillSeq) {
-    if (noticeFillSeq === currentFillSeq && !sameCommittedFillNotice(route, entityTx.data)) {
-      throw new Error(`CROSS_J_FILL_NOTICE_STALE_CONFLICT: order=${orderId} seq=${noticeFillSeq} current=${currentFillSeq}`);
-    }
-    addMessage(newState, `🌉 Cross-j fill notice ${orderId} duplicate seq ${noticeFillSeq}`);
+  if (assertFillNoticeSequence(route, entityTx.data) === 'duplicate') {
+    addMessage(newState, `🌉 Cross-j fill notice ${orderId} duplicate seq ${Math.floor(Number(fillSeq))}`);
     return { newState, outputs, accountTxs };
-  }
-  if (
-    previousFillSeq !== undefined &&
-    Math.floor(Number(previousFillSeq)) !== currentFillSeq
-  ) {
-    throw new Error(
-      `CROSS_J_FILL_NOTICE_PREV_SEQ_MISMATCH: order=${orderId} prev=${previousFillSeq} current=${currentFillSeq}`,
-    );
   }
 
   const allowed = route.status === 'resting' || route.status === 'partially_filled';
