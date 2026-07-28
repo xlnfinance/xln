@@ -33,8 +33,8 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   over 100 lines under `runtime/runtime`, `runtime/entity` and
   `runtime/account`. Reduce every coordinator to at most 150 lines and every
   pure/helper function to at most 100 lines, with no file above 3000 lines;
-  `check:state-machine-size` now ratchets the current debt at 31 functions over
-  150 lines and 84 over 100, rejects any new/growing allowance and rejects
+  `check:state-machine-size` now ratchets the current debt at 30 functions over
+  150 lines and 83 over 100, rejects any new/growing allowance and rejects
   files over 3000 lines. Keep reducing both counts to zero, deleting each exact
   allowance as its function is split.
   Keep Runtime-machine logic under `runtime/runtime/`, Entity-machine logic
@@ -42,8 +42,6 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   `runtime/account/`; adapters, storage, transport, UI and QA remain separate
   infrastructure rather than being mislabeled as a state machine. The current
   first structural targets are:
-  `applyAccountInputToEntity` (223 after inbound/frozen/committed/dispute phase
-  extraction; still above the 150-line coordinator gate),
   `proposeAccountFrame` (625),
   `hubRebalanceHandler` (521),
   same/cross-J orderbook matching (485/468),

@@ -54,13 +54,19 @@ const makeEntityState = (): EntityState => ({
 
 test('account handlers keep failures behind structured logging', () => {
   const account = readFileSync(join(process.cwd(), 'runtime/entity/tx/handlers/account.ts'), 'utf8');
+  const inputPhases = readFileSync(
+    join(process.cwd(), 'runtime/entity/tx/handlers/account/input-phases.ts'),
+    'utf8',
+  );
   const openAccount = readFileSync(join(process.cwd(), 'runtime/entity/tx/handlers/open-account.ts'), 'utf8');
 
   expect(account).toContain("const accountHandlerLog = createStructuredLogger('account.handler');");
+  expect(inputPhases).toContain("const accountHandlerLog = createStructuredLogger('account.handler');");
   expect(openAccount).toContain("const openAccountLog = createStructuredLogger('account.open');");
   expect(account).not.toContain('console.');
+  expect(inputPhases).not.toContain('console.');
   expect(openAccount).not.toContain('console.');
-  expect(account).toContain('ACCOUNT_INPUT_EMPTY');
+  expect(inputPhases).toContain('ACCOUNT_INPUT_EMPTY');
 });
 
 test('account input without frame or settlement action fails fast', async () => {

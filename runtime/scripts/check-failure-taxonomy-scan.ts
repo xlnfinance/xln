@@ -45,6 +45,10 @@ const readText = (path: string): string => {
       'runtime/runtime/loop-lifecycle.ts',
       'runtime/runtime/loop-failure.ts',
     ],
+    'runtime/entity/tx/handlers/account.ts': [
+      'runtime/entity/tx/handlers/account.ts',
+      'runtime/entity/tx/handlers/account/input-phases.ts',
+    ],
     'runtime/orchestrator/mm-node.ts': [
       'runtime/orchestrator/mm-node.ts',
       'runtime/orchestrator/mm-node-core.ts',
