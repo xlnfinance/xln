@@ -49,6 +49,12 @@ const readText = (path: string): string => {
       'runtime/entity/tx/handlers/account.ts',
       'runtime/entity/tx/handlers/account/input-phases.ts',
     ],
+    'runtime/entity/tx/handlers/dispute.ts': [
+      'runtime/entity/tx/handlers/dispute.ts',
+      'runtime/entity/tx/handlers/dispute/shared.ts',
+      'runtime/entity/tx/handlers/dispute/start.ts',
+      'runtime/entity/tx/handlers/dispute/finalize.ts',
+    ],
     'runtime/account/consensus/propose.ts': [
       'runtime/account/consensus/propose.ts',
       'runtime/account/consensus/proposal-admission.ts',

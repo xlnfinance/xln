@@ -191,9 +191,14 @@ test('htlc payment handler traces stay behind structured logging', () => {
 });
 
 test('dispute handler traces stay behind structured logging', () => {
-  const source = readFileSync(join(process.cwd(), 'runtime/entity/tx/handlers/dispute.ts'), 'utf8');
+  const source = [
+    'runtime/entity/tx/handlers/dispute.ts',
+    'runtime/entity/tx/handlers/dispute/shared.ts',
+    'runtime/entity/tx/handlers/dispute/start.ts',
+    'runtime/entity/tx/handlers/dispute/finalize.ts',
+  ].map(path => readFileSync(join(process.cwd(), path), 'utf8')).join('\n');
 
-  expect(source).toContain("const disputeLog = createStructuredLogger('entity.dispute');");
+  expect(source).toContain("export const disputeLog = createStructuredLogger('entity.dispute');");
   expect(source).not.toContain('console.');
   expect(source).toContain('disputeLog.debug');
   expect(source).toContain('disputeLog.error');
