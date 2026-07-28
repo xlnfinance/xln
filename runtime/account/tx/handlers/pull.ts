@@ -1,4 +1,10 @@
-import type { AccountState, AccountTx, CrossJurisdictionPullBinding, CrossJurisdictionSwapRoute } from '../../../types';
+import type {
+  AccountState,
+  AccountTx,
+  CrossJurisdictionPullBinding,
+  CrossJurisdictionSwapRoute,
+  PullCommitment,
+} from '../../../types';
 import { deriveDelta } from '../../utils';
 import { FINANCIAL, LIMITS } from '../../../constants';
 import {
@@ -104,6 +110,44 @@ const crossProofMatchesBinding = (
     }
   }
   return null;
+};
+
+const validateCrossPullCloseEvidence = (
+  pull: PullCommitment,
+  binding: CrossJurisdictionPullBinding,
+  tx: CrossPullCloseTx,
+  currentTimestamp: number,
+): Readonly<{ ok: true; ratio: number } | { ok: false; error: string }> => {
+  const { pullId, binary, proof } = tx.data;
+  const proofError = crossProofMatchesBinding(binding, proof, pullId);
+  if (proofError) return { ok: false, error: `Cross-j close proof mismatch: ${proofError}` };
+  const binaryHash = hashCrossJurisdictionCloseBinary(binary);
+  if (binaryHash.toLowerCase() !== proof.binaryHash.toLowerCase()) {
+    return { ok: false, error: 'Cross-j close binary hash mismatch' };
+  }
+  let decodedRatio: number;
+  try {
+    decodedRatio = verifyHashLadderBinary({
+      fullHash: pull.fullHash,
+      partialRoot: pull.partialRoot,
+    }, binary).fillRatio;
+  } catch (error) {
+    return {
+      ok: false,
+      error: `Invalid cross-j close binary: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+  const ratio = Math.max(
+    0,
+    Math.min(HASHLADDER_MAX_FILL_RATIO, Math.floor(Number(proof.fillRatio) || 0)),
+  );
+  if (decodedRatio !== ratio) {
+    return { ok: false, error: `Cross-j close ratio mismatch: binary ${decodedRatio} != proof ${ratio}` };
+  }
+  if (ratio > 0 && isPullRevealExpired(pull.revealedUntilTimestamp, currentTimestamp)) {
+    return { ok: false, error: 'Pull reveal deadline expired' };
+  }
+  return { ok: true, ratio };
 };
 
 const validateCrossJurisdictionPullResolve = (
@@ -338,7 +382,7 @@ export async function handleCrossPullClose(
   pullResolved?: { pullId: string; fillRatio: number };
   pullCancelled?: { pullId: string; status: 'cancelled' | 'already-closed' };
 }> {
-  const { pullId, binary, proof } = accountTx.data;
+  const { pullId, proof } = accountTx.data;
   const events: string[] = [];
   const pull = account.pulls?.get(pullId);
   if (!pull) {
@@ -350,26 +394,9 @@ export async function handleCrossPullClose(
   }
   const binding = findCrossJurisdictionPullBinding(account, pullId);
   if (!binding) return { success: false, error: `Cross-j close requires pull binding`, events };
-  const proofError = crossProofMatchesBinding(binding, proof, pullId);
-  if (proofError) return { success: false, error: `Cross-j close proof mismatch: ${proofError}`, events };
-  const binaryHash = hashCrossJurisdictionCloseBinary(binary);
-  if ((binaryHash || '').toLowerCase() !== (proof.binaryHash || '').toLowerCase()) {
-    return { success: false, error: `Cross-j close binary hash mismatch`, events };
-  }
-
-  let decoded: { fillRatio: number };
-  try {
-    decoded = verifyHashLadderBinary({ fullHash: pull.fullHash, partialRoot: pull.partialRoot }, binary);
-  } catch (error) {
-    return { success: false, error: `Invalid cross-j close binary: ${error instanceof Error ? error.message : String(error)}`, events };
-  }
-  const ratio = Math.max(0, Math.min(HASHLADDER_MAX_FILL_RATIO, Math.floor(Number(proof.fillRatio) || 0)));
-  if (decoded.fillRatio !== ratio) {
-    return { success: false, error: `Cross-j close ratio mismatch: binary ${decoded.fillRatio} != proof ${ratio}`, events };
-  }
-  if (ratio > 0 && isPullRevealExpired(pull.revealedUntilTimestamp, currentTimestamp)) {
-    return { success: false, error: `Pull reveal deadline expired`, events };
-  }
+  const evidence = validateCrossPullCloseEvidence(pull, binding, accountTx, currentTimestamp);
+  if (!evidence.ok) return { success: false, error: evidence.error, events };
+  const ratio = evidence.ratio;
 
   const beneficiaryIsLeft = pull.amount > 0n;
   // Cross-j close economics are authored by the Hub Runtime as one exact

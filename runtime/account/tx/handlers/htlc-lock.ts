@@ -19,9 +19,34 @@ import { addHold } from '../hold-utils';
 import { isHtlcTimelockExpired } from '../../htlc-deadline';
 import { encryptedHtlcLayer, hashEncryptedHtlcLayer } from '../../../protocol/htlc/onion-advance';
 
+type HtlcLockTx = Extract<AccountTx, { type: 'htlc_lock' }>;
+
+const validateHtlcLock = (
+  account: AccountState,
+  tx: HtlcLockTx,
+  currentTimestamp: number,
+  currentHeight: number,
+): string | undefined => {
+  const { lockId, timelock, revealBeforeHeight, amount } = tx.data;
+  if (account.locks.has(lockId)) return `Lock ${lockId} already exists`;
+  if (account.locks.size >= LIMITS.MAX_ACCOUNT_HTLC_LOCKS) {
+    return `Too many active HTLC locks: max ${LIMITS.MAX_ACCOUNT_HTLC_LOCKS}`;
+  }
+  if (isHtlcTimelockExpired(currentTimestamp, timelock)) {
+    return `Timelock ${timelock} already expired (timestamp)`;
+  }
+  if (revealBeforeHeight <= currentHeight) {
+    return `revealBeforeHeight ${revealBeforeHeight} already passed (current height: ${currentHeight})`;
+  }
+  if (amount < FINANCIAL.MIN_PAYMENT_AMOUNT || amount > FINANCIAL.MAX_PAYMENT_AMOUNT) {
+    return `Invalid amount: ${amount} (min ${FINANCIAL.MIN_PAYMENT_AMOUNT}, max ${FINANCIAL.MAX_PAYMENT_AMOUNT})`;
+  }
+  return undefined;
+};
+
 export async function handleHtlcLock(
   account: AccountState,
-  accountTx: Extract<AccountTx, { type: 'htlc_lock' }>,
+  accountTx: HtlcLockTx,
   byLeft: boolean,
   currentTimestamp: number,
   currentHeight: number,
@@ -35,39 +60,8 @@ export async function handleHtlcLock(
     account.locks = new Map();
   }
 
-  // 1. Validate lockId uniqueness
-  if (account.locks.has(lockId)) {
-    return { success: false, error: `Lock ${lockId} already exists`, events };
-  }
-  if (account.locks.size >= LIMITS.MAX_ACCOUNT_HTLC_LOCKS) {
-    return {
-      success: false,
-      error: `Too many active HTLC locks: max ${LIMITS.MAX_ACCOUNT_HTLC_LOCKS}`,
-      events,
-    };
-  }
-
-  // 2. Validate expiry is in future - BOTH timelock AND revealBeforeHeight
-  if (isHtlcTimelockExpired(currentTimestamp, timelock)) {
-    return { success: false, error: `Timelock ${timelock} already expired (timestamp)`, events };
-  }
-
-  if (revealBeforeHeight <= currentHeight) {
-    return {
-      success: false,
-      error: `revealBeforeHeight ${revealBeforeHeight} already passed (current height: ${currentHeight})`,
-      events
-    };
-  }
-
-  // 3. Validate amount bounds (network-wide payment limits)
-  if (amount < FINANCIAL.MIN_PAYMENT_AMOUNT || amount > FINANCIAL.MAX_PAYMENT_AMOUNT) {
-    return {
-      success: false,
-      error: `Invalid amount: ${amount} (min ${FINANCIAL.MIN_PAYMENT_AMOUNT}, max ${FINANCIAL.MAX_PAYMENT_AMOUNT})`,
-      events,
-    };
-  }
+  const validationError = validateHtlcLock(account, accountTx, currentTimestamp, currentHeight);
+  if (validationError) return { success: false, error: validationError, events };
 
   const delta = ensureDelta(account, tokenId);
 

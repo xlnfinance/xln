@@ -22,29 +22,56 @@ import { isLeftEntity } from '../../../entity/id';
 import { deriveDelta } from '../../utils';
 import { getDefaultRebalanceBaseFeeForToken } from '../../rebalance-defaults';
 
+type RequestCollateralTx = Extract<AccountTx, { type: 'request_collateral' }>;
+type RequestCollateralResult = { success: boolean; events: string[]; error?: string };
+
+const validateCollateralRequest = (
+  account: AccountState,
+  data: RequestCollateralTx['data'],
+): string | undefined => {
+  if (data.amount <= 0n) return 'request_collateral: amount must be > 0';
+  if (data.feeAmount < 0n) return 'request_collateral: feeAmount must be >= 0';
+  if (!Number.isFinite(data.policyVersion) || data.policyVersion < 1) {
+    return `request_collateral: invalid policyVersion ${data.policyVersion}`;
+  }
+  if (!account.deltas.has(data.tokenId)) {
+    return `request_collateral: no delta for token ${data.tokenId}`;
+  }
+  return undefined;
+};
+
+const storeCollateralRequest = (
+  account: AccountState,
+  tx: RequestCollateralTx,
+  requestedByLeft: boolean,
+  requestedAmount: bigint,
+  feeTokenId: number,
+  feePaidUpfront: bigint,
+  currentTimestamp: number,
+): void => {
+  account.requestedRebalanceFeeState ||= new Map();
+  account.requestedRebalance.set(tx.data.tokenId, requestedAmount);
+  account.requestedRebalanceFeeState.set(tx.data.tokenId, {
+    requestId: `rebalance:${requestedByLeft ? 'left' : 'right'}:${tx.data.tokenId}:${account.currentHeight + 1}`,
+    feeTokenId,
+    feePaidUpfront,
+    requestedAmount,
+    policyVersion: tx.data.policyVersion,
+    requestedAt: currentTimestamp,
+    requestedByLeft,
+  });
+};
+
 export function handleRequestCollateral(
   account: AccountState,
-  accountTx: Extract<AccountTx, { type: 'request_collateral' }>,
+  accountTx: RequestCollateralTx,
   byLeft?: boolean,
   currentTimestamp = 0,
-): { success: boolean; events: string[]; error?: string } {
-  const { tokenId, amount, feeTokenId, feeAmount, policyVersion } = accountTx.data;
+): RequestCollateralResult {
+  const { tokenId, amount, feeTokenId, feeAmount } = accountTx.data;
 
-  // ── Validation ────────────────────────────────────────────────
-  if (amount <= 0n) {
-    return { success: false, events: [], error: 'request_collateral: amount must be > 0' };
-  }
-  if (feeAmount < 0n) {
-    return { success: false, events: [], error: 'request_collateral: feeAmount must be >= 0' };
-  }
-  if (!Number.isFinite(policyVersion) || policyVersion < 1) {
-    return { success: false, events: [], error: `request_collateral: invalid policyVersion ${policyVersion}` };
-  }
-
-  const delta = account.deltas.get(tokenId);
-  if (!delta) {
-    return { success: false, events: [], error: `request_collateral: no delta for token ${tokenId}` };
-  }
+  const validationError = validateCollateralRequest(account, accountTx.data);
+  if (validationError) return { success: false, events: [], error: validationError };
 
   const existingRequest = account.requestedRebalance.get(tokenId) ?? 0n;
   if (existingRequest > 0n) {
@@ -60,11 +87,9 @@ export function handleRequestCollateral(
   // Do not recompute from live outPeerCredit at commit time, otherwise the same tx
   // can produce different request sizes between propose/commit during races.
   const requesterIsLeft = !!byLeft;
-  const effectiveAmount = amount;
-
-  // Fee is prepaid in this same account frame.
-  // Keep fee proportional to effective request after clamping.
-  const effectiveFeeTarget = amount > 0n ? (feeAmount * effectiveAmount) / amount : 0n;
+  // Validation established amount > 0, and this handler never clamps the
+  // signed payload. Therefore the exact prepaid fee is already feeAmount.
+  const effectiveFeeTarget = feeAmount;
   if (effectiveFeeTarget <= 0n) {
     return { success: false, events: [], error: 'request_collateral: feeAmount must produce effectiveFee > 0' };
   }
@@ -77,9 +102,9 @@ export function handleRequestCollateral(
 
   // Request size is deterministic from payload; when fee is paid in the SAME token,
   // request collateral for net amount after prepaid fee to avoid tiny pending tails.
-  let effectiveRequest = effectiveAmount;
+  let effectiveRequest = amount;
   if (feeToken === tokenId) {
-    effectiveRequest = effectiveAmount > effectiveFeeTarget ? effectiveAmount - effectiveFeeTarget : 0n;
+    effectiveRequest = amount > effectiveFeeTarget ? amount - effectiveFeeTarget : 0n;
   }
   if (effectiveRequest <= 0n) {
     return {
@@ -106,22 +131,17 @@ export function handleRequestCollateral(
     else feeDelta.offdelta += effectiveFeeTarget;
   }
 
-  if (!account.requestedRebalanceFeeState) {
-    account.requestedRebalanceFeeState = new Map();
-  }
-
-  // ── Store request for hub crontab ─────────────────────────────
-  // Hub's hubRebalanceHandler will pick this up and add R→C to jBatch.
-  account.requestedRebalance.set(tokenId, effectiveRequest);
-  account.requestedRebalanceFeeState.set(tokenId, {
-    requestId: `rebalance:${requesterIsLeft ? 'left' : 'right'}:${tokenId}:${account.currentHeight + 1}`,
-    feeTokenId: feeToken,
-    feePaidUpfront: effectiveFeeTarget,
-    requestedAmount: effectiveRequest,
-    policyVersion,
-    requestedAt: currentTimestamp,
-    requestedByLeft: !!byLeft,
-  });
+  // Hub crontab consumes this immutable request. A later request must not top
+  // it up: the finalized J event clears the cycle before new exposure starts.
+  storeCollateralRequest(
+    account,
+    accountTx,
+    requesterIsLeft,
+    effectiveRequest,
+    feeToken,
+    effectiveFeeTarget,
+    currentTimestamp,
+  );
 
   const feeDisplay = effectiveFeeTarget > 0n ? `, prepaidFee=${effectiveFeeTarget}` : '';
   const events = [
