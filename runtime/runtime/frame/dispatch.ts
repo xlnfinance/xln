@@ -1,15 +1,23 @@
 import { getSignerPrivateKeyIfAvailable } from '../../account/crypto';
 import { extractEntityId, extractSignerId } from '../../ids';
 import { createStructuredLogger } from '../../infra/logger';
+import { announceCertifiedLocalProfiles } from '../../networking/local-profile-lifecycle';
 import { isDeliveryDelivered } from '../../protocol/payments/delivery-result';
-import type { Env } from '../../types';
+import type { Env, RoutedEntityInput } from '../../types';
+import {
+  buildPendingNetworkOutputs,
+  dispatchEntityOutputs,
+  rescheduleDeferredOutputs,
+  type PlannedRemoteOutput,
+  type RuntimeOutputRoutingDeps,
+} from '../output-routing';
 import { ensureRuntimeState } from '../runtime-state';
 import { finalizeReliableIngressCommit } from '../reliable-delivery';
 import type { FrameExecutionState } from './execution-state';
 
 const runtimeLog = createStructuredLogger('runtime');
 
-export const collectLocallySignableEntityIds = (env: Env): Set<string> => {
+const collectLocallySignableEntityIds = (env: Env): Set<string> => {
   const entityIds = new Set<string>();
   for (const replicaKey of env.eReplicas.keys()) {
     const signerId = extractSignerId(replicaKey);
@@ -17,6 +25,60 @@ export const collectLocallySignableEntityIds = (env: Env): Set<string> => {
     entityIds.add(extractEntityId(replicaKey).toLowerCase());
   }
   return entityIds;
+};
+
+export type CommittedEntityOutputPlan = {
+  remoteOutputs: PlannedRemoteOutput[];
+  deferredOutputs: RoutedEntityInput[];
+  readyPendingOutputs: RoutedEntityInput[];
+  waitingPendingOutputs: RoutedEntityInput[];
+  retainedLocalReliableOutputs: RoutedEntityInput[];
+};
+
+export const dispatchCommittedEntityOutputs = async (
+  env: Env,
+  changedEntityIds: ReadonlySet<string>,
+  plan: CommittedEntityOutputPlan,
+  routing: RuntimeOutputRoutingDeps,
+): Promise<void> => {
+  const p2p = ensureRuntimeState(env).p2p ?? null;
+  const localIds = collectLocallySignableEntityIds(env);
+  const changedLocalIds = [...changedEntityIds].filter(entityId => localIds.has(entityId));
+  const knownIds = new Set(
+    (env.gossip?.getProfiles?.() ?? []).map(profile => profile.entityId.toLowerCase()),
+  );
+  const newIds = changedLocalIds.filter(entityId => !knownIds.has(entityId));
+  const refreshIds = changedLocalIds.filter(entityId => knownIds.has(entityId));
+
+  if (p2p && plan.remoteOutputs.length > 0 && newIds.length > 0) {
+    await p2p.announceProfilesForEntitiesNow(newIds, 'pre-output-profile-refresh', false);
+  } else if (!p2p && changedLocalIds.length > 0) {
+    await announceCertifiedLocalProfiles(env, changedLocalIds);
+  }
+  if (plan.remoteOutputs.length > 0 && env.quietRuntimeLogs !== true) {
+    runtimeLog.debug('side_effect.remote_outputs.dispatch', {
+      remoteOutputs: plan.remoteOutputs.length,
+    });
+  }
+  const dispatchDeferred = dispatchEntityOutputs(env, plan.remoteOutputs, routing);
+  if (refreshIds.length > 0) {
+    p2p?.announceProfilesForEntities(refreshIds, 'routing-profile-refresh');
+  }
+  if (p2p && plan.remoteOutputs.length === 0 && newIds.length > 0) {
+    p2p.announceProfilesForEntities(newIds, 'routing-profile-new');
+  }
+
+  const rescheduled = rescheduleDeferredOutputs(
+    env,
+    plan.readyPendingOutputs,
+    [...plan.deferredOutputs, ...dispatchDeferred],
+    plan.waitingPendingOutputs,
+    routing,
+  );
+  env.pendingNetworkOutputs = buildPendingNetworkOutputs([
+    ...rescheduled,
+    ...plan.retainedLocalReliableOutputs,
+  ]);
 };
 
 export const runCommittedRecoveryBarrier = async (

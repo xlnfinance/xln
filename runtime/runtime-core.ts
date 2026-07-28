@@ -41,17 +41,11 @@ import {
 } from './account/crypto';
 import { normalizeRuntimeId } from './networking/runtime-id';
 import {
-  buildPendingNetworkOutputs,
-  dispatchEntityOutputs,
   markRestoredReliableOutputsDue,
-  rescheduleDeferredOutputs,
   splitRoutedOutputByDeliveryLane,
 } from './runtime/output-routing';
 import { prepareHtlcPaymentEntityInputs } from './protocol/htlc/payment-admission';
-import {
-  announceCertifiedLocalProfiles,
-  collectDueLocalProfileCertificationInputs,
-} from './networking/local-profile-lifecycle';
+import { collectDueLocalProfileCertificationInputs } from './networking/local-profile-lifecycle';
 import {
   selectMatchedCrossJAccountInputPairs,
   selectPotentialCrossJAccountInputPairs,
@@ -146,7 +140,7 @@ import {
 import { acquireRuntimeFrameWriter } from './runtime/frame/writer-lock';
 import { rollbackUndurableRuntimeFrame } from './runtime/frame/rollback';
 import {
-  collectLocallySignableEntityIds,
+  dispatchCommittedEntityOutputs,
   dispatchCommittedReceipts,
   finalizeCommittedReceiptDeliveries,
   runCommittedRecoveryBarrier,
@@ -1730,59 +1724,15 @@ export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDe
 
     // === SIDE EFFECTS (safe to fail — bilateral consensus retries) ===
 
-    // A fresh account frame can reference a brand-new user entity. Publish the
-    // sender profile before remote delivery so the counterparty can enforce the
-    // same-jurisdiction invariant without racing gossip.
-    const p2p = getP2P(env);
-    const localEntityIds = collectLocallySignableEntityIds(env);
-    const changedLocalEntityIds = [...changedEntityIds].filter(entityId => localEntityIds.has(entityId));
-    const knownProfileIds = new Set((env.gossip?.getProfiles?.() ?? []).map(profile => profile.entityId.toLowerCase()));
-    const newLocalEntityIds = changedLocalEntityIds.filter(entityId => !knownProfileIds.has(entityId));
-    const refreshLocalEntityIds = changedLocalEntityIds.filter(entityId => knownProfileIds.has(entityId));
-    if (
-      p2p &&
-      remoteOutputs.length > 0 &&
-      newLocalEntityIds.length > 0 &&
-      typeof p2p.announceProfilesForEntitiesNow === 'function'
-    ) {
-      // Only a previously unknown sender must precede its first remote output.
-      // Existing route-capacity refreshes are metadata and are coalesced below.
-      await p2p.announceProfilesForEntitiesNow(newLocalEntityIds, 'pre-output-profile-refresh', false);
-    } else if (!p2p && changedLocalEntityIds.length > 0) {
-      // The in-process gossip store is the only discovery surface in this
-      // topology, so certified profile changes must be observable when the
-      // frame promise resolves. Live P2P runtimes coalesce refreshes below.
-      await announceCertifiedLocalProfiles(env, changedLocalEntityIds);
-    }
-    processProfile.mark('profileAnnounce');
-
-    // 1. Broadcast entity outputs via P2P (fire-and-forget)
-    if (remoteOutputs.length > 0 && env.quietRuntimeLogs !== true) {
-      runtimeLog.debug('side_effect.remote_outputs.dispatch', { remoteOutputs: remoteOutputs.length });
-    }
-    const dispatchDeferred = dispatchEntityOutputs(env, remoteOutputs, outputRoutingDeps);
-
-    if (refreshLocalEntityIds.length > 0) {
-      p2p?.announceProfilesForEntities(refreshLocalEntityIds, 'routing-profile-refresh');
-    }
-    const deferredNewLocalEntityIds = p2p && remoteOutputs.length === 0 ? newLocalEntityIds : [];
-    if (deferredNewLocalEntityIds.length > 0) {
-      p2p?.announceProfilesForEntities(deferredNewLocalEntityIds, 'routing-profile-new');
-    }
-
-    const allDeferred = [...deferredOutputs, ...dispatchDeferred];
-    const rescheduledNetworkOutputs = rescheduleDeferredOutputs(
-      env,
+    await dispatchCommittedEntityOutputs(env, changedEntityIds, {
+      remoteOutputs,
+      deferredOutputs,
       readyPendingOutputs,
-      allDeferred,
       waitingPendingOutputs,
-      outputRoutingDeps,
-    );
-    env.pendingNetworkOutputs = buildPendingNetworkOutputs([
-      ...rescheduledNetworkOutputs,
-      ...retainedLocalReliableOutputs,
-    ]);
-    processProfile.metrics.pendingNetworkAfter = env.pendingNetworkOutputs.length;
+      retainedLocalReliableOutputs,
+    }, outputRoutingDeps);
+    processProfile.mark('profileAnnounce');
+    processProfile.metrics.pendingNetworkAfter = env.pendingNetworkOutputs?.length ?? 0;
     processProfile.metrics.deferredNetworkMeta = env.runtimeState?.deferredNetworkMeta?.size ?? 0;
     processProfile.mark('dispatchOutputs');
 
