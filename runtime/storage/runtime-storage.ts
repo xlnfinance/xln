@@ -1,14 +1,9 @@
 import { runtimeIsBrowser } from '../runtime/platform';
-import { cloneIsolatedRoutedEntityInputs, cloneIsolatedRuntimeInput } from '../protocol/runtime-input-clone';
-import { requireBoundaryInteger } from '../protocol/boundary-validation';
 import {
   buildReplayVerifiableRuntimeMachineSnapshot,
-  authorizeRestoredRuntimeInput,
-  restoreDurableRuntimeSnapshot,
 } from './wal/snapshot';
 import { setAccountFrameHistoryView } from '../runtime/env-events';
 import { ensureRuntimeState } from '../runtime/runtime-state';
-import { restoreDurableOutputRetryState } from '../runtime/durable-output-retry';
 import { safeStringify } from '../protocol/serialization';
 import {
   computeCanonicalEntityHashesFromEnv,
@@ -37,13 +32,9 @@ import { buildRecoveryJournalFromStorageFrame } from './queries';
 import { createStructuredLogger } from '../infra/logger';
 import { envRecord } from '../runtime/loop-environment';
 import type { RuntimeStorageApiDeps } from './runtime-storage-deps';
-import {
-  createRuntimeStorageCommitApi,
-  shouldRequireCanonicalStorageAudit,
-} from './commit';
+import { createRuntimeStorageCommitApi } from './commit';
 import { createPersistedStorageReadApi } from './persisted-read';
-import { resolvePersistedRestoreSource } from './recovery/source';
-import { restorePersistedEntityGraph } from './recovery/entities';
+import { loadPersistedRuntime } from './recovery/load';
 
 export type { RuntimeStorageApiDeps } from './runtime-storage-deps';
 
@@ -129,133 +120,21 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
     listPersistedEntityIdsAtHeight,
   } = persistedReadApi;
 
-  const loadEnvFromStorage = async (
+  const loadEnvFromStorage = (
     runtimeId?: string | null,
     runtimeSeed?: string | null,
     targetHeightOverride?: number,
     options: { prunedTargetReturnsNull?: boolean } = {},
-  ): Promise<{
-    env: RuntimeState;
-    latestHeight: number;
-    checkpointHeight: number;
-    selectedSnapshotHeight: number;
-  } | null> => {
-    /**
-     * Authoritative daemon restore has three deliberately separate phases:
-     *
-     * 1. Read compact snapshot/frame records and decode every Runtime, Entity,
-     *    Account, replica-meta and immutable DAG node through its strict schema.
-     * 2. Rebuild Maps and reachable node stores in memory, then verify lineage,
-     *    J-history roots and the canonical state hash before returning any RuntimeState.
-     * 3. Only the caller may attach live RPC/network infrastructure and start the
-     *    runtime loop. New J-events and durable outbox retries therefore cannot
-     *    mutate state until the restored checkpoint has passed every check.
-     *
-     * Keep external I/O out of phases 1-2. A restore failure must close the probe
-     * databases and fail loud; it must never expose a partially hydrated RuntimeState.
-     */
-    const env = createPersistedStorageEnv(runtimeId, runtimeSeed);
-    assertStorageSafetyOverridesAllowed();
-    let returningEnv = false;
-    try {
-      const source = await resolvePersistedRestoreSource(
-        deps,
-        persistedReadApi,
-        env,
-        targetHeightOverride,
-        options,
-      );
-      if (!source) return null;
-      const {
-        latestHeight,
-        targetHeight,
-        frame,
-        selectedSnapshotHeight,
-        restoredStates,
-      } = source;
-      if (frame.runtimeMachine) restoreDurableRuntimeSnapshot(env, frame.runtimeMachine);
-
-      await restorePersistedEntityGraph(
-        deps,
-        persistedReadApi,
-        env,
-        restoredStates,
-        targetHeight,
-        latestHeight,
-        selectedSnapshotHeight,
-      );
-
-      env.height = targetHeight;
-      env.timestamp = requireBoundaryInteger(
-        frame.timestamp,
-        `STORAGE_RESTORE_TIMESTAMP_INVALID:height=${targetHeight}`,
-      );
-      env.runtimeMempool = frame.pendingRuntimeInput
-        ? authorizeRestoredRuntimeInput(cloneIsolatedRuntimeInput(frame.pendingRuntimeInput))
-        : { runtimeTxs: [], entityInputs: [] };
-      env.pendingNetworkOutputs = cloneIsolatedRoutedEntityInputs(frame.runtimeOutputs ?? []);
-      restoreDurableOutputRetryState(env, frame.runtimeOutputRetryState ?? [], frame.runtimeOutputs ?? []);
-      await restoreOverlayFromFrameLog(env, targetHeight);
-      await hydrateAccountFrameHistoryViews(env);
-      env.frameLogs = frame.activityLogs.map(entry => ({ ...entry }));
-      if (frame.runtimeMachine) {
-        restoreDurableRuntimeSnapshot(env, frame.runtimeMachine);
-        await assertCertifiedRegistrationEvidenceStore(env);
-      }
-      const shouldVerifyCanonicalAudit = Boolean(frame.canonicalStateHash) || shouldRequireCanonicalStorageAudit();
-      if (shouldVerifyCanonicalAudit && !frame.canonicalStateHash) {
-        throw new Error(`STORAGE_RESTORE_CANONICAL_HASH_MISSING: height=${targetHeight}`);
-      }
-      const restoredCanonicalStateHash = shouldVerifyCanonicalAudit ? computeCanonicalStateHashFromEnv(env) : '';
-      if (shouldVerifyCanonicalAudit && restoredCanonicalStateHash !== frame.canonicalStateHash) {
-        const expectedEntities = new Map(
-          (frame.canonicalEntityHashes || []).map(entry => [entry.entityId, entry.hash]),
-        );
-        const actualEntities = computeCanonicalEntityHashesFromEnv(env);
-        const mismatch = actualEntities.find(entry => expectedEntities.get(entry.entityId) !== entry.hash);
-        const missing = (frame.canonicalEntityHashes || []).find(
-          entry => !actualEntities.some(actual => actual.entityId === entry.entityId),
-        );
-        const mismatchDetail = mismatch
-          ? ` entity=${mismatch.entityId} expectedEntity=${expectedEntities.get(mismatch.entityId) || 'missing'} actualEntity=${mismatch.hash}`
-          : missing
-            ? ` entity=${missing.entityId} expectedEntity=${missing.hash} actualEntity=missing`
-            : '';
-        throw new Error(
-          `STORAGE_RESTORE_CANONICAL_HASH_MISMATCH: height=${targetHeight} ` +
-            `expected=${frame.canonicalStateHash} actual=${restoredCanonicalStateHash}${mismatchDetail}`,
-        );
-      }
-      envRecord(env)['__replayMeta'] = {
-        checkpointHeight: selectedSnapshotHeight,
-        selectedSnapshotHeight,
-        selectedSnapshotLabel:
-          selectedSnapshotHeight <= 1
-            ? 'genesis:1'
-            : selectedSnapshotHeight === targetHeight
-              ? `checkpoint:${selectedSnapshotHeight}`
-              : `snapshot:${selectedSnapshotHeight}`,
-        latestHeight,
-      };
-      env.history = [];
-
-      returningEnv = true;
-      return {
-        env,
-        latestHeight,
-        checkpointHeight: selectedSnapshotHeight,
-        selectedSnapshotHeight,
-      };
-    } finally {
-      // loadEnvFromDB probes storage on fresh starts. If there is nothing to
-      // restore, the probe env must release LevelDB locks before the real runtime
-      // opens the same storage path for frame 1.
-      if (!returningEnv) {
-        await closeRuntimeDb(env);
-        await closeInfraDb(env);
-      }
-    }
-  };
+  ) =>
+    loadPersistedRuntime(
+      deps,
+      persistedReadApi,
+      hydrateAccountFrameHistoryViews,
+      runtimeId,
+      runtimeSeed,
+      targetHeightOverride,
+      options,
+    );
 
   const hydrateAccountFrameHistoryViews = async (env: RuntimeState, limit = 0): Promise<void> => {
     if (limit <= 0) return;
