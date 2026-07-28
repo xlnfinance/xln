@@ -68,6 +68,10 @@ const readText = (path: string): string => {
       'runtime/account/consensus/proposal-finalize.ts',
       'runtime/account/consensus/proposal-transactions.ts',
     ],
+    'runtime/account/tx/apply.ts': [
+      'runtime/account/tx/apply.ts',
+      'runtime/account/tx/mutation.ts',
+    ],
     'runtime/orchestrator/mm-node.ts': [
       'runtime/orchestrator/mm-node.ts',
       'runtime/orchestrator/mm-node-core.ts',

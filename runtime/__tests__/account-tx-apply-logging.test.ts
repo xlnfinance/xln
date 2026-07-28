@@ -44,7 +44,10 @@ test('applyAccountTx rejects account_frame without direct console output', async
 });
 
 test('account tx applicator uses structured logging only for account_frame rejection', () => {
-  const source = readFileSync(join(process.cwd(), 'runtime/account/tx/apply.ts'), 'utf8');
+  const source = readFileSync(
+    join(process.cwd(), 'runtime/account/tx/mutation.ts'),
+    'utf8',
+  );
 
   expect(source).toContain("createStructuredLogger('account.tx')");
   expect(source).toContain("accountTxLog.debug('account_frame.rejected'");
