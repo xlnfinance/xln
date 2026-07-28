@@ -43,6 +43,12 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   `runtime/core.ts` a short composition root with no alternate commit path.
   Precompute every throwing assertion before install; any doubt after WAL
   halts and reloads the durable frame.
+- [ ] Make post-state Runtime ingress rejection explicit and deterministic.
+  Inputs admitted against frame H may become stale after the single writer
+  commits H+1; classify authenticated terminal protocol rejection separately
+  from invariant/storage failure, consume or quarantine it exactly once, and
+  never turn an expected nonce/board/order conflict into a global Runtime
+  halt. Keep failures loud and add queued-writer stale-input/rotation tests.
 - [ ] Split remaining god-functions by protocol phase and failure boundary:
   `applyEntityInput`, `applyAccountInput`, Runtime scheduler/transport/storage,
   and RPC submit/watch/receipt. Target functions below 50 lines and files below
@@ -78,9 +84,12 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   start/finality and choose one canonical nonce representation that cannot
   round `9007199254740993` to `9007199254740992`; prove malformed/oversized
   events leave Account state unchanged.
-- [ ] Repair the three stale tests that import removed `process`; bind them to
-  canonical `processRuntime` after the public API surface is characterized, and
-  require the test collector to fail when a test module cannot load.
+- [ ] Make hub rebalance scheduling fail before money mutation on every
+  cross-map inconsistency. Preflight fee metadata, Delta presence, reserve
+  capacity and all selected J-batch operations before changing the draft or
+  submission markers; missing state and batch construction errors must abort
+  the isolated frame instead of logging `continue` after a prepaid request.
+  Prove rollback leaves fee, request, draft and Account roots byte-identical.
 - [ ] Make the directory hierarchy match the three nested state machines only
   after semantic diffs are green. Keep the stable root `runtime/runtime.ts`
   browser facade; place Runtime frame transition/mempool/transaction/lifecycle
