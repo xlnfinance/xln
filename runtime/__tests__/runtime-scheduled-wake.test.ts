@@ -32,7 +32,11 @@ import { safeStringify } from '../protocol/serialization';
 import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
 import { computeCanonicalEntityHash } from '../storage/canonical-hash';
 import type { EntityReplica, EntityState, RuntimeInput } from '../types';
-import { buildCanonicalRuntimeStateSnapshot, restoreDurableRuntimeSnapshot } from '../wal/snapshot';
+import {
+  buildCanonicalRuntimeStateSnapshot,
+  buildDurableRuntimeMempool,
+  restoreDurableRuntimeSnapshot,
+} from '../wal/snapshot';
 import {
   collectLocalProfileEncryptionAnnouncements,
   getCompleteProfileEncryptionManifest,
@@ -328,6 +332,33 @@ describe('runtime scheduled wake', () => {
     expect(() => assertScheduledWakeTxAuthorized(tx, false)).toThrow(
       /SCHEDULED_WAKE_EXTERNAL_INGRESS_REJECTED/,
     );
+  });
+
+  test('does not persist process-local scheduled wakes in pending Runtime input', () => {
+    const env = createEmptyEnv('scheduled-wake-durable-mempool');
+    env.timestamp = 10_000;
+    const id = entityId('52');
+    const proposer = signerId('53');
+    const state = makeState(id, proposer, env.timestamp);
+    scheduleHook(state.crontabState!, {
+      id: 'durable:regenerate',
+      triggerAt: 9_000,
+      type: 'watchdog',
+      data: {},
+    });
+    env.eReplicas.set(`${id}:${proposer}`, makeReplica(state, proposer, true));
+    const [wakeInput] = createDueScheduledWakeInputs(env, env.timestamp);
+    if (!wakeInput) throw new Error('scheduled wake fixture missing');
+
+    const durable = buildDurableRuntimeMempool({
+      runtimeTxs: [],
+      entityInputs: [wakeInput],
+      queuedAt: env.timestamp,
+    });
+
+    expect(durable.entityInputs).toEqual([]);
+    expect(durable.queuedAt).toBeUndefined();
+    expect(state.crontabState?.hooks.has('durable:regenerate')).toBe(true);
   });
 
   test('replays the same crontab mutation on proposer and validator state', async () => {

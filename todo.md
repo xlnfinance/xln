@@ -11,7 +11,9 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 - [ ] Close the still-live findings from the GPT audit of
   `main@fddcac8bab9420f48168b0453cc05419f858f392`, reverified against
   `main@f1de788d87619ff85a944df382cdb8b8ca02a979` instead of copying stale line
-  numbers. Current-code inspection
+  numbers. A second GPT read-only audit of the same old SHA independently
+  reported the same financial/runtime findings; it adds no new accepted item
+  until each claim is reproduced on current `main`. Current-code inspection
   confirms the R→C duplicate lifecycle (`FIN-01/02`), unsafe dispute
   `uint256 → Number` conversion (`FIN-03`), fail-open rebalance construction
   (`FIN-04`), non-durable faucet admission (`SRV-01`) and duplicate/inexact UI
@@ -37,21 +39,30 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   `bun run check` passed and isolated full browser E2E passed `125/125`; these
   prove the current baseline, not the still-open findings above. The concrete
   open fixes remain decomposed below so each gets its own L1 → L2 → L3 gate.
+  A later full-E2E run exposed one additional durability bug not present in the
+  audit: a derived `scheduledWake` could be written as pending WAL input and
+  lose its process-local authorization on reload. The canonical durable
+  mempool projection now removes derived wakes and orphaned timestamps while
+  retaining their crontab source; L1 scheduled-wake tests and the exact
+  BrainVault reload L2 are green. Keep this regression in the full gate.
 - [ ] Pass the human-audit completion gate for the three nested state
   machines. Baseline on `main@404851e82`: 35 functions over 150 lines and 89
   over 100 lines under `runtime/runtime`, `runtime/entity` and
   `runtime/account`. Reduce every coordinator to at most 150 lines and every
   pure/helper function to at most 100 lines, with no file above 3000 lines;
-  `check:state-machine-size` now ratchets the current debt at 15 functions over
-  150 lines and 69 over 100, rejects any new/growing allowance and rejects
+  `check:state-machine-size` now ratchets the current debt at 9 functions over
+  150 lines and 63 over 100, rejects any new/growing allowance and rejects
   files over 3000 lines. Keep reducing both counts to zero, deleting each exact
   allowance as its function is split.
   Keep Runtime-machine logic under `runtime/runtime/`, Entity-machine logic
   under `runtime/entity/`, and Account money/consensus logic under
   `runtime/account/`; adapters, storage, transport, UI and QA remain separate
-  infrastructure rather than being mislabeled as a state machine. The current
-  first structural targets are Account pending-ACK/preflight (208/190),
-  committed lending follow-up (195), and settlement execution/seal (194/184).
+  infrastructure rather than being mislabeled as a state machine. Account
+  pending-ACK/preflight, committed lending follow-up, settlement execution/seal
+  and HTLC resolution are split and covered by targeted tests. The remaining
+  over-150 targets are cross-J clear, orderbook matching, R→C scheduling,
+  authorization, Account proposal scheduling, open-account, cross-J progress,
+  delta derivation and J broadcast.
   Each split must follow protocol phase, owner and failure boundary—not
   arbitrary line chunks—and preserve byte-identical roots, failures and
   ordering through characterization tests.

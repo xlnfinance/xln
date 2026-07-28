@@ -121,6 +121,7 @@ import {
   getSafePendingAccountJClaimDeletes,
 } from '../account/j-claim-store';
 import {
+  buildDurableRuntimeMempool,
   buildDurableRuntimeMachineSnapshot,
   buildReplayVerifiableRuntimeMachineSnapshot,
 } from '../wal/snapshot';
@@ -1036,6 +1037,12 @@ export const saveRuntimeFrameToStorage = async (options: {
     options.env,
     options.currentFrameOutputs ?? [],
   );
+  const durablePendingRuntimeInput = buildDurableRuntimeMempool(options.env.runtimeMempool);
+  const hasDurablePendingRuntimeInput =
+    durablePendingRuntimeInput.runtimeTxs.length > 0 ||
+    durablePendingRuntimeInput.entityInputs.length > 0 ||
+    (durablePendingRuntimeInput.jInputs?.length ?? 0) > 0 ||
+    (durablePendingRuntimeInput.reliableReceipts?.length ?? 0) > 0;
   const frameRecordBase: StorageFrameRecord = {
     height: options.env.height,
     timestamp: options.env.timestamp,
@@ -1059,12 +1066,9 @@ export const saveRuntimeFrameToStorage = async (options: {
       runtimeStateHash: runtimeStateHashes.canonicalStateHash,
     } : {}),
     runtimeInput: appliedRuntimeInput,
-    ...(options.env.runtimeMempool && (
-      options.env.runtimeMempool.runtimeTxs.length > 0 ||
-      options.env.runtimeMempool.entityInputs.length > 0 ||
-      (options.env.runtimeMempool.jInputs?.length ?? 0) > 0 ||
-      (options.env.runtimeMempool.reliableReceipts?.length ?? 0) > 0
-    ) ? { pendingRuntimeInput: cloneIsolatedRuntimeInput(options.env.runtimeMempool) } : {}),
+    ...(hasDurablePendingRuntimeInput
+      ? { pendingRuntimeInput: durablePendingRuntimeInput }
+      : {}),
     ...(runtimeMachine ? { runtimeMachine } : {}),
     ...(options.currentFrameOutputs && options.currentFrameOutputs.length > 0
       ? { runtimeOutputs: cloneIsolatedRoutedEntityInputs(options.currentFrameOutputs) }

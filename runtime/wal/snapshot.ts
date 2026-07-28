@@ -163,27 +163,41 @@ const buildDurableJReplicaSnapshot = (jr: JReplica): JReplica => ({
   lastBlockTimestamp: 0,
 });
 
-const withoutEphemeralScheduledWake = (runtimeInput?: RuntimeInput): RuntimeInput => {
+/**
+ * Scheduled wakes are derived from durable Entity crontab state. Persisting
+ * one in the Runtime mempool would turn a process-local authorization marker
+ * into unauthenticated bytes after reload, and could also replay an obsolete
+ * wake. Persist only the non-derived work; recovery regenerates due wakes.
+ */
+export const buildDurableRuntimeMempool = (runtimeInput?: RuntimeInput): RuntimeInput => {
   const cloned = cloneIsolatedRuntimeInput(runtimeInput ?? { runtimeTxs: [], entityInputs: [] });
-  const { jInputs, reliableReceipts, ...requiredInput } = cloned;
+  const { jInputs, reliableReceipts, queuedAt, timestamp, ...requiredInput } = cloned;
+  const entityInputs = cloned.entityInputs.flatMap(input => {
+    const originallyEmptyTrigger = Array.isArray(input.entityTxs) && input.entityTxs.length === 0;
+    const durableInput = {
+      ...input,
+      entityTxs: (input.entityTxs ?? []).filter(tx => tx.type !== 'scheduledWake'),
+    };
+    const keep =
+      originallyEmptyTrigger ||
+      durableInput.entityTxs.length > 0 ||
+      durableInput.proposedFrame !== undefined ||
+      (durableInput.hashPrecommits?.size ?? 0) > 0 ||
+      (durableInput.jPrefixAttestations?.size ?? 0) > 0;
+    return keep ? [durableInput] : [];
+  });
+  const hasWork =
+    requiredInput.runtimeTxs.length > 0 ||
+    entityInputs.length > 0 ||
+    (jInputs?.length ?? 0) > 0 ||
+    (reliableReceipts?.length ?? 0) > 0;
   return {
     ...requiredInput,
+    entityInputs,
     ...(jInputs && jInputs.length > 0 ? { jInputs } : {}),
     ...(reliableReceipts && reliableReceipts.length > 0 ? { reliableReceipts } : {}),
-    entityInputs: cloned.entityInputs.flatMap(input => {
-      const originallyEmptyTrigger = Array.isArray(input.entityTxs) && input.entityTxs.length === 0;
-      const durableInput = {
-        ...input,
-        entityTxs: (input.entityTxs ?? []).filter(tx => tx.type !== 'scheduledWake'),
-      };
-      const keep =
-        originallyEmptyTrigger ||
-        durableInput.entityTxs.length > 0 ||
-        durableInput.proposedFrame !== undefined ||
-        (durableInput.hashPrecommits?.size ?? 0) > 0 ||
-        (durableInput.jPrefixAttestations?.size ?? 0) > 0;
-      return keep ? [durableInput] : [];
-    }),
+    ...(hasWork && timestamp !== undefined ? { timestamp } : {}),
+    ...(hasWork && queuedAt !== undefined ? { queuedAt } : {}),
   };
 };
 
@@ -313,7 +327,7 @@ export const buildDurableRuntimeMachineSnapshot = (
     ...(env.browserVMState ? { browserVMState: structuredClone(env.browserVMState) } : {}),
     ...(env.runtimeConfig ? { runtimeConfig: structuredClone(env.runtimeConfig) } : {}),
     ...(runtimeState ? { runtimeState } : {}),
-    runtimeInput: withoutEphemeralScheduledWake(env.runtimeMempool),
+    runtimeInput: buildDurableRuntimeMempool(env.runtimeMempool),
     ...(env.pendingOutputs?.length ? { pendingOutputs: cloneRuntimeOutputs(env.pendingOutputs) } : {}),
     ...(env.networkInbox?.length ? { networkInbox: cloneRuntimeOutputs(env.networkInbox) } : {}),
     ...((options?.pendingNetworkOutputs ?? env.pendingNetworkOutputs)?.length
@@ -386,7 +400,7 @@ export const buildCanonicalRuntimeStateSnapshot = (
       : {}),
     ...(env.runtimeConfig ? { runtimeConfig: structuredClone(env.runtimeConfig) } : {}),
     ...(runtimeState ? { runtimeState } : {}),
-    runtimeInput: withoutEphemeralScheduledWake(env.runtimeMempool),
+    runtimeInput: buildDurableRuntimeMempool(env.runtimeMempool),
     ...(env.pendingOutputs ? { pendingOutputs: cloneRuntimeOutputs(env.pendingOutputs) } : {}),
     ...(env.networkInbox ? { networkInbox: cloneRuntimeOutputs(env.networkInbox) } : {}),
     ...(env.pendingNetworkOutputs ? { pendingNetworkOutputs: cloneRuntimeOutputs(env.pendingNetworkOutputs) } : {}),
@@ -432,7 +446,7 @@ export const restoreDurableRuntimeSnapshot = (
   const runtimeInput = snapshot['runtimeInput'];
   if (runtimeInput && typeof runtimeInput === 'object') {
     const restoredInput = authorizeRestoredRuntimeInput(
-      withoutEphemeralScheduledWake(runtimeInput as RuntimeInput),
+      buildDurableRuntimeMempool(runtimeInput as RuntimeInput),
     );
     env.runtimeMempool = restoredInput;
   }
