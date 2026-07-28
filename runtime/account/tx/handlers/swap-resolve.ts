@@ -1,457 +1,98 @@
 /**
- * Swap Resolve Handler
- * Hub (counterparty) fills and/or cancels user's offer
+ * Same-jurisdiction swap settlement pipeline.
  *
- * Settlement:
- * - non-zero fills MUST carry exact execution amounts from matcher/manual caller
- * - better prices are represented directly in those execution amounts
- * - cancel-only path is still fillRatio=0 with no execution amounts
- *
- * Flow:
- * 1. Find offer by offerId
- * 2. Validate caller is NOT the maker (is the counterparty/hub)
- * 3. Validate exact execution amounts for fills
- * 4. Update deltas atomically (both tokens)
- * 5. Release proportional hold
- * 6. If cancelRemainder: remove offer; else: update remaining amount
- *
- * Delta rules (same as HTLC):
- * - Left gives -> offdelta decreases (negative)
- * - Right gives -> offdelta increases (positive)
+ * The Account reducer validates immutable maker terms first, applies both
+ * token deltas and holds atomically on the Account candidate, then updates or
+ * closes the remaining order. Cross-j offers use their separate ACK protocol.
  */
 
-import type { AccountMachine, AccountTx } from '../../../types';
-import { deriveDelta } from '../../utils';
-import { createDefaultDelta } from '../../../validation-utils';
-import { FINANCIAL } from '../../../constants';
-import {
-  deriveExactSwapFillRatio,
-  deriveSwapOffdeltaChanges,
-  exactFillRatioToUint16,
-  MAX_SWAP_FILL_RATIO,
-} from '../../../orderbook/swap-execution';
-import {
-  computeSwapPriceTicks,
-  requantizeRemainingSwapAtPrice,
-} from '../../../orderbook/types';
+import type { AccountMachine } from '../../../types';
 import { recordSwapClosedLifecycle, recordSwapResolveLifecycle } from './swap-history';
-import { createStructuredLogger, shortOrder } from '../../../infra/logger';
-import { getHold, releaseHold } from '../hold-utils';
-import { ensureDelta } from '../delta-utils';
+import {
+  validateSwapResolve,
+} from './swap-resolve-validation';
+import {
+  applySwapResolveFinancials,
+} from './swap-resolve-settlement';
+import {
+  applySwapResolveRemainder,
+} from './swap-resolve-remainder';
+import type {
+  SwapResolveResult,
+  SwapResolveTx,
+} from './swap-resolve-types';
 
-const swapResolveLog = createStructuredLogger('account.swap');
-
-export async function handleSwapResolve(
-  accountMachine: AccountMachine,
-  accountTx: Extract<AccountTx, { type: 'swap_resolve' }>,
-  byLeft: boolean,
+const recordSwapResolveHistory = (
+  account: AccountMachine,
+  tx: SwapResolveTx,
   currentHeight: number,
-  _isValidation: boolean = false
-): Promise<{ success: boolean; events: string[]; error?: string; swapOfferCancelled?: { offerId: string; accountId: string } }> {
-  const {
-    offerId,
-    fillRatio,
-    cancelRemainder,
-    feeTokenId,
-    feeAmount = 0n,
-    executionGiveAmount,
-    executionWantAmount,
-    fillNumerator,
-    fillDenominator,
-    restingPriceTicks,
-    restingGiveAmount,
-    restingWantAmount,
-    restingQuantizedGive,
-    restingQuantizedWant,
-  } = accountTx.data;
-  const events: string[] = [];
-
-  // 1. Find offer
-  if (!accountMachine.swapOffers) {
-    return { success: false, error: `No swap offers exist`, events };
-  }
-  const offer = accountMachine.swapOffers.get(offerId);
-  if (!offer) {
-    return { success: false, error: `Offer ${offerId} not found`, events };
-  }
-  if (offer.crossJurisdiction) {
-    return { success: false, error: `Cross-jurisdiction offers must use cross_swap_fill_ack/requestCrossJurisdictionClear`, events };
-  }
-
-  const canonicalGiveAmount = offer.giveAmount;
-  const canonicalWantAmount = offer.wantAmount;
-  const canonicalQuantizedGive = offer.quantizedGive ?? canonicalGiveAmount;
-  const canonicalQuantizedWant = offer.quantizedWant ?? canonicalWantAmount;
-  const canonicalPriceTicks = offer.priceTicks;
-
-  // The maker's resting terms are consensus state. Older orderbook plumbing may
-  // still attach resting* fields for diagnostics, but account settlement must
-  // never trust caller-supplied limits. If a caller sends them, they are allowed
-  // only as an exact assertion against the live offer.
-  if (
-    (restingGiveAmount !== undefined && restingGiveAmount !== canonicalGiveAmount) ||
-    (restingWantAmount !== undefined && restingWantAmount !== canonicalWantAmount) ||
-    (restingQuantizedGive !== undefined && restingQuantizedGive !== canonicalQuantizedGive) ||
-    (restingQuantizedWant !== undefined && restingQuantizedWant !== canonicalQuantizedWant) ||
-    (restingPriceTicks !== undefined && canonicalPriceTicks !== undefined && restingPriceTicks !== canonicalPriceTicks)
-  ) {
-    return {
-      success: false,
-      error: `Resting swap terms mismatch live offer`,
-      events,
-    };
-  }
-
-  if (canonicalGiveAmount <= 0n || canonicalWantAmount <= 0n) {
-    return { success: false, error: `Canonical resting offer amounts must be positive`, events };
-  }
-  if (canonicalQuantizedGive <= 0n || canonicalQuantizedWant <= 0n) {
-    return { success: false, error: `Canonical resting quantized amounts must be positive`, events };
-  }
-  if (canonicalQuantizedGive > canonicalGiveAmount || canonicalQuantizedWant > canonicalWantAmount) {
-    return { success: false, error: `Canonical resting quantized amounts exceed offer amounts`, events };
-  }
-
-  // 2. Validate caller is the counterparty (Channel.ts: byLeft = frame proposer = caller)
-  const callerIsLeft = byLeft;
-
-  // Caller must be opposite of maker
-  if (callerIsLeft === offer.makerIsLeft) {
-    return { success: false, error: `Only counterparty can resolve swap`, events };
-  }
-
-  // 3. Validate fillRatio
-  if (fillRatio < 0 || fillRatio > MAX_SWAP_FILL_RATIO) {
-    return { success: false, error: `Invalid fillRatio: ${fillRatio}`, events };
-  }
-  const effectiveCancelRemainder = cancelRemainder || fillRatio === 0;
-
-  // 4. Calculate fill amounts
-  const effectiveGive = canonicalQuantizedGive;
-  const effectiveWant = canonicalQuantizedWant;
-  const executionProvided = executionGiveAmount !== undefined || executionWantAmount !== undefined;
-  if (executionProvided && (executionGiveAmount === undefined || executionWantAmount === undefined)) {
-    return {
-      success: false,
-      error: `executionGiveAmount and executionWantAmount must both be provided`,
-      events,
-    };
-  }
-  if (fillRatio > 0 && !executionProvided) {
-    return {
-      success: false,
-      error: `executionGiveAmount and executionWantAmount required for non-zero fills`,
-      events,
-    };
-  }
-
-  const limitFilledGive = (effectiveGive * BigInt(fillRatio)) / BigInt(MAX_SWAP_FILL_RATIO);
-  const limitFilledWant = effectiveGive > 0n
-    ? (limitFilledGive * effectiveWant + effectiveGive - 1n) / effectiveGive
-    : 0n;
-
-  const filledGive = executionProvided ? executionGiveAmount! : limitFilledGive;
-  const filledWant = executionProvided ? executionWantAmount! : limitFilledWant;
-  const exactFillRatio = deriveExactSwapFillRatio(effectiveGive, filledGive);
-  const canonicalFillRatio = executionProvided
-    ? exactFillRatioToUint16(exactFillRatio)
-    : fillRatio;
-  const effectiveFeeTokenId = feeTokenId ?? offer.wantTokenId;
-  const exactRatioProvided = fillNumerator !== undefined || fillDenominator !== undefined;
-  if (exactRatioProvided) {
-    if (fillNumerator === undefined || fillDenominator === undefined) {
-      return {
-        success: false,
-        error: `fillNumerator and fillDenominator must both be provided`,
-        events,
-      };
-    }
-    if (fillDenominator <= 0n || fillNumerator < 0n || fillNumerator > fillDenominator) {
-      return {
-        success: false,
-        error: `Exact fill ratio out of range: ${fillNumerator}/${fillDenominator}`,
-        events,
-      };
-    }
-    if (fillNumerator * effectiveGive !== filledGive * fillDenominator) {
-      return {
-        success: false,
-        error: `Exact fill ratio mismatch: ${fillNumerator}/${fillDenominator} != ${filledGive}/${effectiveGive}`,
-        events,
-      };
-    }
-  }
-
-  if (feeAmount < 0n) {
-    return { success: false, error: `Swap taker fee must be >= 0`, events };
-  }
-  if (feeAmount > 0n && filledGive <= 0n) {
-    return { success: false, error: `Swap taker fee requires a non-zero fill`, events };
-  }
-  if (feeAmount > 0n && effectiveFeeTokenId !== offer.wantTokenId) {
-    return {
-      success: false,
-      error: `Swap taker fee token mismatch: expected ${offer.wantTokenId}, got ${effectiveFeeTokenId}`,
-      events,
-    };
-  }
-  if (feeAmount >= filledWant && filledWant > 0n) {
-    return {
-      success: false,
-      error: `Swap taker fee ${feeAmount} exceeds or equals filled receive amount ${filledWant}`,
-      events,
-    };
-  }
-
-  if (executionProvided) {
-    const hasExecutionFill = filledGive > 0n || filledWant > 0n;
-    if (hasExecutionFill && (filledGive <= 0n || filledWant <= 0n)) {
-      return {
-        success: false,
-        error: `Execution amounts must both be positive for a fill`,
-        events,
-      };
-    }
-    if (fillRatio !== canonicalFillRatio) {
-      return {
-        success: false,
-        error: `fillRatio ${fillRatio} does not match canonical execution ratio ${canonicalFillRatio}`,
-        events,
-      };
-    }
-  }
-
-  // For explicit execution amounts, ensure they match the offer's absolute limits.
-  if (executionProvided && (filledGive > 0n || filledWant > 0n)) {
-    if (filledGive > effectiveGive) {
-      return {
-        success: false,
-        error: `Execution give amount ${filledGive} exceeds offer limit ${effectiveGive}`,
-        events,
-      };
-    }
-    if (filledWant * effectiveGive < filledGive * effectiveWant) {
-      const limitLhs = filledWant * effectiveGive;
-      const limitRhs = filledGive * effectiveWant;
-      swapResolveLog.debug('maker_limit_violation', {
-        offer: shortOrder(offerId, 8),
-        byLeft,
-        makerIsLeft: offer.makerIsLeft,
-        giveTokenId: offer.giveTokenId,
-        wantTokenId: offer.wantTokenId,
-        effectiveGive: effectiveGive.toString(),
-        effectiveWant: effectiveWant.toString(),
-        filledGive: filledGive.toString(),
-        filledWant: filledWant.toString(),
-        fillRatio,
-        canonicalFillRatio,
-        limitLhs: limitLhs.toString(),
-        limitRhs: limitRhs.toString(),
-      });
-      return {
-        success: false,
-        error:
-          `Execution violates maker limit price: ` +
-          `offer=${offerId} makerIsLeft=${offer.makerIsLeft} ` +
-          `effectiveGive=${effectiveGive} effectiveWant=${effectiveWant} ` +
-          `filledGive=${filledGive} filledWant=${filledWant} ` +
-          `lhs=${limitLhs} rhs=${limitRhs}`,
-        events,
-      };
-    }
-  }
-
-  if (canonicalFillRatio > 0) {
-    if (filledGive < FINANCIAL.MIN_PAYMENT_AMOUNT || filledGive > FINANCIAL.MAX_PAYMENT_AMOUNT) {
-      return {
-        success: false,
-        error: `Filled give amount out of bounds: ${filledGive} (min ${FINANCIAL.MIN_PAYMENT_AMOUNT}, max ${FINANCIAL.MAX_PAYMENT_AMOUNT})`,
-        events,
-      };
-    }
-    if (filledWant < FINANCIAL.MIN_PAYMENT_AMOUNT || filledWant > FINANCIAL.MAX_PAYMENT_AMOUNT) {
-      return {
-        success: false,
-        error: `Filled want amount out of bounds: ${filledWant} (min ${FINANCIAL.MIN_PAYMENT_AMOUNT}, max ${FINANCIAL.MAX_PAYMENT_AMOUNT})`,
-        events,
-      };
-    }
-  }
-
-  const giveDelta = ensureDelta(accountMachine, offer.giveTokenId);
-  const wantDelta = ensureDelta(accountMachine, offer.wantTokenId);
-
-  // 5b. Check counterparty capacity for the full outgoing bundle.
-  // swap_resolve is proposed by the counterparty/hub, so they must be able to fund:
-  // - the canonical fill on offer.wantTokenId
-  const counterpartyIsLeft = !offer.makerIsLeft;
-  const counterpartyOutgoing = new Map<number, bigint>();
-  if (filledWant > 0n) {
-    counterpartyOutgoing.set(offer.wantTokenId, filledWant);
-  }
-  for (const [tokenId, requiredAmount] of counterpartyOutgoing) {
-    if (requiredAmount <= 0n) continue;
-    const deltaForCapacity =
-      tokenId === offer.wantTokenId
-        ? wantDelta
-        : tokenId === offer.giveTokenId
-          ? giveDelta
-          : createDefaultDelta(tokenId);
-    const counterpartyDerived = deriveDelta(deltaForCapacity, counterpartyIsLeft);
-    if (requiredAmount > counterpartyDerived.outCapacity) {
-      return {
-        success: false,
-        error: `Counterparty insufficient capacity on token ${tokenId}: needs ${requiredAmount}, has ${counterpartyDerived.outCapacity}`,
-        events,
-      };
-    }
-  }
-
-  const makerHoldSide = offer.makerIsLeft ? 'left' : 'right';
-  const currentMakerHold = getHold(giveDelta, makerHoldSide);
-  if (currentMakerHold < effectiveGive) {
-    return {
-      success: false,
-      error: `Hold underflow: current=${currentMakerHold} < required=${effectiveGive}`,
-      events,
-    };
-  }
-
-  // 6. Update deltas atomically if filling (at LIMIT PRICE)
-  if (filledGive > 0n) {
-    const change = deriveSwapOffdeltaChanges(offer.makerIsLeft, filledGive, filledWant);
-    giveDelta.offdelta += change.give;
-    wantDelta.offdelta += change.want;
-
-    events.push(`💱 Swap filled: ${filledGive} token${offer.giveTokenId} for ${filledWant} token${offer.wantTokenId}`);
-  }
-
-  if (feeAmount > 0n) {
-    if (offer.makerIsLeft) {
-      wantDelta.offdelta -= feeAmount;
-    } else {
-      wantDelta.offdelta += feeAmount;
-    }
-    events.push(`💸 Swap taker fee: ${feeAmount} token${effectiveFeeTokenId}`);
-  }
-
-  // 6. Release hold proportionally
-  const holdRelease = filledGive;
-  const holdReleaseError = releaseHold(
-    giveDelta,
-    makerHoldSide,
-    holdRelease,
-    (currentHold, releaseAmount) =>
-      `Hold underflow: current=${currentHold} < required=${releaseAmount}`,
-  );
-  if (holdReleaseError) return { success: false, error: holdReleaseError, events };
-
-  // 7. Handle remainder
-  const makerId = offer.makerIsLeft ? accountMachine.leftEntity : accountMachine.rightEntity;
-  let swapOfferCancelled: { offerId: string; accountId: string } | undefined;
-  let closeOrderInHistory = false;
-
-  if (effectiveCancelRemainder || canonicalFillRatio === MAX_SWAP_FILL_RATIO) {
-    // Cancel or fully filled - remove offer and notify orderbook
-    const remainingHold = effectiveGive - filledGive;
-    if (remainingHold > 0n) {
-      const releaseError = releaseHold(
-        giveDelta,
-        makerHoldSide,
-        remainingHold,
-        (currentHold, releaseAmount) =>
-          `Hold underflow: current=${currentHold} < required=${releaseAmount}`,
-      );
-      if (releaseError) return { success: false, error: releaseError, events };
-    }
-    accountMachine.swapOffers.delete(offerId);
-    swapOfferCancelled = { offerId, accountId: makerId };
-    closeOrderInHistory = true;
-    events.push(`📊 Swap offer ${offerId.slice(0,8)}... ${canonicalFillRatio === MAX_SWAP_FILL_RATIO ? 'fully filled' : 'cancelled'}`);
-  } else {
-    // Partial fill - requantize remainder so subsequent fills stay lot-aligned.
-    const remainingGiveRaw = effectiveGive - filledGive;
-    const offerPriceTicks = canonicalPriceTicks ?? computeSwapPriceTicks(
-      offer.giveTokenId,
-      offer.wantTokenId,
-      effectiveGive,
-      effectiveWant,
-    );
-    const requantized = requantizeRemainingSwapAtPrice(
-      offer.giveTokenId,
-      offer.wantTokenId,
-      remainingGiveRaw,
-      offerPriceTicks,
-    );
-
-    if (!requantized) {
-      if (remainingGiveRaw > 0n) {
-        const releaseError = releaseHold(
-          giveDelta,
-          makerHoldSide,
-          remainingGiveRaw,
-          (currentHold, releaseAmount) =>
-            `Hold underflow: current=${currentHold} < required=${releaseAmount}`,
-        );
-        if (releaseError) return { success: false, error: releaseError, events };
-      }
-      accountMachine.swapOffers.delete(offerId);
-      swapOfferCancelled = { offerId, accountId: makerId };
-      closeOrderInHistory = true;
-      events.push(`📊 Swap offer ${offerId.slice(0,8)}... filled remainder dropped below lot size`);
-    } else {
-      const releasedGiveDust = requantized.releasedGiveDust;
-      if (releasedGiveDust > 0n) {
-        const releaseError = releaseHold(
-          giveDelta,
-          makerHoldSide,
-          releasedGiveDust,
-          (currentHold, releaseAmount) =>
-            `Hold underflow: current=${currentHold} < required=${releaseAmount}`,
-        );
-        if (releaseError) return { success: false, error: releaseError, events };
-      }
-
-      offer.giveAmount = requantized.effectiveGive;
-      offer.wantAmount = requantized.effectiveWant;
-      offer.priceTicks = offerPriceTicks;
-      offer.quantizedGive = requantized.effectiveGive;
-      offer.quantizedWant = requantized.effectiveWant;
-      events.push(`📊 Swap offer ${offerId.slice(0,8)}... partially filled, ${offer.giveAmount} remaining`);
-    }
-  }
-
+  resolve: ReturnType<typeof validateSwapResolve> & { success?: never },
+  closeOrder: boolean,
+): void => {
+  const data = tx.data;
   recordSwapResolveLifecycle(
-    accountMachine,
-    offerId,
+    account,
+    resolve.offerId,
     currentHeight,
     {
-      fillRatio,
-      fillNumerator: fillNumerator ?? exactFillRatio.numerator,
-      fillDenominator: fillDenominator ?? exactFillRatio.denominator,
-      cancelRemainder: effectiveCancelRemainder,
+      fillRatio: data.fillRatio,
+      fillNumerator: data.fillNumerator ?? resolve.exactFillRatio.numerator,
+      fillDenominator: data.fillDenominator ?? resolve.exactFillRatio.denominator,
+      cancelRemainder: resolve.effectiveCancelRemainder,
       height: currentHeight,
-      ...(executionGiveAmount !== undefined ? { executionGiveAmount } : {}),
-      ...(executionWantAmount !== undefined ? { executionWantAmount } : {}),
-      ...(feeTokenId !== undefined ? { feeTokenId } : {}),
-      ...(feeAmount > 0n ? { feeAmount } : {}),
-      ...(typeof accountTx.data.comment === 'string' && accountTx.data.comment.trim()
-        ? { comment: accountTx.data.comment }
+      ...(data.executionGiveAmount !== undefined
+        ? { executionGiveAmount: data.executionGiveAmount }
+        : {}),
+      ...(data.executionWantAmount !== undefined
+        ? { executionWantAmount: data.executionWantAmount }
+        : {}),
+      ...(data.feeTokenId !== undefined ? { feeTokenId: data.feeTokenId } : {}),
+      ...(resolve.feeAmount > 0n ? { feeAmount: resolve.feeAmount } : {}),
+      ...(typeof data.comment === 'string' && data.comment.trim()
+        ? { comment: data.comment }
         : {}),
     },
     {
-      giveTokenId: offer.giveTokenId,
-      giveAmount: canonicalGiveAmount,
-      wantTokenId: offer.wantTokenId,
-      wantAmount: canonicalWantAmount,
-      ...(canonicalPriceTicks !== undefined ? { priceTicks: canonicalPriceTicks } : {}),
-      createdHeight: offer.createdHeight,
+      giveTokenId: resolve.offer.giveTokenId,
+      giveAmount: resolve.canonicalGiveAmount,
+      wantTokenId: resolve.offer.wantTokenId,
+      wantAmount: resolve.canonicalWantAmount,
+      ...(resolve.canonicalPriceTicks !== undefined
+        ? { priceTicks: resolve.canonicalPriceTicks }
+        : {}),
+      createdHeight: resolve.offer.createdHeight,
     },
   );
+  if (closeOrder) recordSwapClosedLifecycle(account, resolve.offerId);
+};
 
-  if (closeOrderInHistory) {
-    recordSwapClosedLifecycle(accountMachine, offerId);
-  }
+export async function handleSwapResolve(
+  account: AccountMachine,
+  tx: SwapResolveTx,
+  byLeft: boolean,
+  currentHeight: number,
+  _isValidation = false,
+): Promise<SwapResolveResult> {
+  const events: string[] = [];
+  const validated = validateSwapResolve(account, tx, byLeft, events);
+  if ('success' in validated) return validated;
+  const applied = applySwapResolveFinancials(account, validated, events);
+  if ('success' in applied) return applied;
+  const remainder = applySwapResolveRemainder(account, applied, events);
+  if (!remainder.success) return remainder;
 
-  return { success: true, events, ...(swapOfferCancelled !== undefined && { swapOfferCancelled }) };
+  recordSwapResolveHistory(
+    account,
+    tx,
+    currentHeight,
+    validated,
+    remainder.closeOrderInHistory,
+  );
+  return {
+    success: true,
+    events,
+    ...(remainder.swapOfferCancelled
+      ? { swapOfferCancelled: remainder.swapOfferCancelled }
+      : {}),
+  };
 }

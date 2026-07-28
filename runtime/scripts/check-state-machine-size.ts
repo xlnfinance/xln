@@ -19,7 +19,6 @@ const TARGET_COORDINATOR_LINES = 150;
 const COORDINATOR_DEBT: Readonly<Record<string, number>> = {
   'runtime/entity/tx/handlers/account/orderbook-matching-same.ts::processSameAccountOrderbookOffers': 485,
   'runtime/entity/tx/handlers/account/orderbook-matching-cross.ts::processCrossJurisdictionOrderbookOffers': 468,
-  'runtime/account/tx/handlers/swap-resolve.ts::handleSwapResolve': 414,
   'runtime/entity/tx/handlers/dispute.ts::handleDisputeStart': 399,
   'runtime/account/tx/handlers/swap-offer.ts::handleSwapOffer': 335,
   'runtime/entity/tx/handlers/dispute.ts::handleDisputeFinalize': 308,
@@ -47,7 +46,7 @@ const COORDINATOR_DEBT: Readonly<Record<string, number>> = {
   'runtime/entity/tx/handlers/j-broadcast.ts::handleJBroadcast': 154,
 };
 
-const MAX_OVER_100_FUNCTIONS = 82;
+const MAX_OVER_100_FUNCTIONS = 81;
 
 type FunctionSize = {
   key: string;
