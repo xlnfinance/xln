@@ -61,7 +61,10 @@ import {
   createFrameExecutionState,
   type FrameExecutionState,
 } from './runtime/frame/execution-state';
-import { acquireRuntimeFrameWriter } from './runtime/frame/writer-lock';
+import {
+  acquireRuntimeFrameWriter,
+  assertRuntimeWriterAcceptingIngress,
+} from './runtime/frame/writer-lock';
 import { rollbackUndurableRuntimeFrame } from './runtime/frame/rollback';
 import { applyPreparedRuntimeFrame } from './runtime/frame/apply';
 import {
@@ -670,6 +673,15 @@ const commitRuntimeFrame = async (
 export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0) => {
   const liveEnv = env;
   const processState = ensureRuntimeState(env);
+  // Admission belongs to the one live Runtime mempool, not to the writer that
+  // happens to process it. Enqueue synchronously before waiting so inputs that
+  // arrive during frame H remain visible and are picked up by H+1. The
+  // lifecycle assertion prevents a halted Runtime from accumulating work.
+  assertRuntimeWriterAcceptingIngress(processState);
+  if (inputs?.length) {
+    const ingressTimestamp = env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
+    enqueueRuntimeInputs(env, inputs, undefined, undefined, ingressTimestamp);
+  }
   const releaseProcessLock = await acquireRuntimeFrameWriter(processState);
 
   const processProfile = createRuntimeProcessProfile(liveEnv, getRuntimeWorkReason(env));
@@ -677,7 +689,7 @@ export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDe
   try {
     const started = await startRuntimeFrame(
       env,
-      inputs,
+      undefined,
       processState,
       runtimeDelay,
       processProfile,

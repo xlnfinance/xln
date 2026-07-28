@@ -3,7 +3,7 @@ import { inferRuntimeLifecyclePhase } from '../lifecycle';
 
 type RuntimeState = NonNullable<Env['runtimeState']>;
 
-const assertRuntimeNotHalted = (state: RuntimeState): void => {
+export const assertRuntimeWriterAcceptingIngress = (state: RuntimeState): void => {
   if (inferRuntimeLifecyclePhase(state) === 'halted') {
     throw new Error('RUNTIME_PROCESS_HALTED');
   }
@@ -17,9 +17,9 @@ const assertRuntimeNotHalted = (state: RuntimeState): void => {
 export const acquireRuntimeFrameWriter = async (
   state: RuntimeState,
 ): Promise<() => void> => {
-  assertRuntimeNotHalted(state);
+  assertRuntimeWriterAcceptingIngress(state);
   while (state.processingPromise) await state.processingPromise;
-  assertRuntimeNotHalted(state);
+  assertRuntimeWriterAcceptingIngress(state);
 
   let unlock!: () => void;
   state.processingPromise = new Promise<void>(resolve => {
