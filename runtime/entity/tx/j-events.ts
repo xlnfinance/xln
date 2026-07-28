@@ -11,12 +11,10 @@ import type {
 } from '../../types';
 import type { ProofBodyStruct } from '../../protocol/dispute/proof-body';
 import { cloneEntityState, addMessage } from '../../state-helpers';
-import { getTokenInfo } from '../../account/utils';
 import { CANONICAL_J_EVENTS } from '../../jadapter/helpers';
 import { hashHtlcSecret } from '../../protocol/htlc/utils';
-import { scheduleHook, cancelHook } from '../scheduler';
+import { cancelHook, scheduleHook } from '../scheduler';
 import { scrubDisputeFinalizationsForCounterparty } from './dispute-finalize-guards';
-import { normalizeJurisdictionEvents } from '../../jurisdiction/event-normalization';
 import {
   getJEventJurisdictionRef,
 } from '../../jurisdiction/event-observation';
@@ -30,7 +28,6 @@ import {
   mergeBatchOps,
 } from '../../jurisdiction/batch';
 import { canonicalizeProofBodyStruct } from './handlers/dispute';
-import { applyDebtCreated, applyDebtEnforced, applyDebtForgiven } from './j-events-debt';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import {
   applyKnownHtlcSecret,
@@ -60,29 +57,22 @@ import {
 import { assertEntityFrameJRangeBudget } from '../../jurisdiction/range-budget';
 import { getEntityLeaderState } from '../consensus/leader';
 import {
-  applySignerEntityExternalWalletDelta,
-  applySignerEntityExternalWalletSnapshot,
-} from '../signer-wallet';
-import {
   advanceCertifiedBoardFinality,
-  applyCertifiedBoardRegistryEvent,
-  cacheCertifiedBoardNodes,
-  getCertifiedBoardNodeStore,
-  resolveObserverCertifiedBoardRecord,
 } from '../../jurisdiction/board-registry';
 import { clearFinalizedSettlementWorkspace } from '../../account/tx/handlers/settle-transition';
-import {
-  BOARD_RESEAL_HOOK_ID,
-  markBoardRotationResealsPending,
-} from './board-rotation-reseal';
 import { validateJEventRangeEnvelope } from '../../jurisdiction/j-event-range-validation';
 import { invalidateAccountMapCommitment } from '../../account/map-commitment';
+import { applyCertifiedBoardJEvent } from './j-events-board';
+import { applyAccountSettledJEvent } from './j-events-account-settled';
+import {
+  applyDebtJEvent,
+  applyExternalWalletJEvent,
+  applyReserveUpdatedJEvent,
+  applySecretRevealedJEvent,
+} from './j-events-observations';
 
 const jEventLog = createStructuredLogger('j.event');
 const normalizeSignerId = (value: unknown): string => String(value || '').trim().toLowerCase();
-
-const getTokenSymbol = (tokenId: number): string => getTokenInfo(tokenId).symbol;
-const getTokenDecimals = (tokenId: number): number => getTokenInfo(tokenId).decimals;
 
 const invalidateSettlementIntentAfterDisputeFinality = (
   state: EntityState,
@@ -266,7 +256,7 @@ export const applyJEvent = async (
   };
 };
 
-type FinalizedJEventContext = {
+export type FinalizedJEventContext = {
   entityState: EntityState;
   newState: EntityState;
   event: JurisdictionEvent;
@@ -709,8 +699,6 @@ async function applyFinalizedJEvent(
 ): Promise<JEventApplyResult> {
   const blockNumber = event.blockNumber ?? 0;
   const transactionHash = event.transactionHash || 'unknown';
-  const txHashShort = transactionHash.slice(0, 10) + '...';
-
   const newState = cloneEntityState(entityState);
   const mempoolOps: JEventMempoolOp[] = [];
   const outputs: EntityInput[] = [];
@@ -735,224 +723,58 @@ async function applyFinalizedJEvent(
     dirtyAccounts,
   };
 
-  if (
-    event.type === 'FoundationBootstrapped' ||
-    event.type === 'EntityRegistered' ||
-    event.type === 'BoardActivated'
-  ) {
-    const jurisdiction = newState.config.jurisdiction;
-    if (!jurisdiction) throw new Error('CERTIFIED_BOARD_ENTITY_JURISDICTION_MISSING');
-    const applied = applyCertifiedBoardRegistryEvent(
-      newState.certifiedBoardState,
-      getCertifiedBoardNodeStore(env),
-      jurisdiction,
-      event,
-    );
-    cacheCertifiedBoardNodes(env, applied.newNodes);
-    newState.certifiedBoardState = applied.state;
-    addMessage(newState, `🔐 BOARD AUTHORITY: ${event.type} | Block ${blockNumber}`);
-    if (event.type === 'BoardActivated') {
-      const pending = newState.entityProviderActionState?.pending;
-      if (event.data.entityId.toLowerCase() === newState.entityId.toLowerCase() && pending) {
-        const certifiedBoard = resolveObserverCertifiedBoardRecord(
-          newState,
-          getCertifiedBoardNodeStore(env),
-          newState.entityId,
-        );
-        if (!certifiedBoard) throw new Error(`ENTITY_PROVIDER_ACTION_CERTIFIED_BOARD_MISSING:${newState.entityId}`);
-        const certifiedEpoch = BigInt(certifiedBoard.boardEpoch);
-        if (pending.boardEpoch > certifiedEpoch) {
-          throw new Error(
-            `ENTITY_PROVIDER_ACTION_PENDING_BOARD_EPOCH_AHEAD:` +
-            `${pending.boardEpoch.toString()}:${certifiedEpoch.toString()}`,
-          );
-        }
-        if (pending.boardEpoch < certifiedEpoch) {
-          delete newState.entityProviderActionState!.pending;
-          addMessage(newState, '🛑 Pending EntityProvider action expired at board activation');
-        }
-      }
-      const reseal = markBoardRotationResealsPending(newState, event);
-      for (const accountId of reseal.dirtyAccounts) dirtyAccounts.add(accountId);
-      if (event.data.entityId.toLowerCase() === newState.entityId.toLowerCase()) {
-        if (reseal.dirtyAccounts.length > 0) {
-          if (!newState.crontabState) throw new Error('BOARD_RESEAL_CRONTAB_MISSING');
-          scheduleHook(newState.crontabState, {
-            id: BOARD_RESEAL_HOOK_ID,
-            triggerAt: newState.timestamp,
-            type: 'board_reseal',
-            data: {
-              activationJHeight: reseal.activation.jHeight,
-              activationLogIndex: reseal.activation.logIndex,
-              afterCounterpartyId: '',
-            },
-          });
-        } else if (newState.crontabState) {
-          cancelHook(newState.crontabState, BOARD_RESEAL_HOOK_ID);
-        }
-      }
-    }
-
-  } else if (event.type === 'ReserveUpdated') {
-    const { entity, tokenId, newBalance } = event.data;
-    const tokenIdNum = Number(tokenId);
-    const tokenSymbol = getTokenSymbol(tokenIdNum);
-    const decimals = getTokenDecimals(tokenIdNum);
-    const balanceDisplay = (Number(newBalance) / (10 ** decimals)).toFixed(4);
-
-    if (String(entity).toLowerCase() === String(entityState.entityId).toLowerCase()) {
-      newState.reserves.set(tokenIdNum, BigInt(newBalance as string | number | bigint));
-    }
-
-    addMessage(newState, `📊 RESERVE: ${tokenSymbol} = ${balanceDisplay} | Block ${blockNumber} | Tx ${txHashShort}`);
-
-  } else if (event.type === 'ExternalWalletSnapshot') {
-    const { entityId } = event.data;
-    if (String(entityId).toLowerCase() !== String(entityState.entityId).toLowerCase()) {
-      return done();
-    }
-    const normalizedOwner = applySignerEntityExternalWalletSnapshot(newState, event, blockNumber, transactionHash);
-
-    addMessage(newState, `💼 EXTERNAL: ${normalizedOwner.slice(0, 10)} snapshot | Block ${blockNumber} | Tx ${txHashShort}`);
-
-  } else if (event.type === 'ExternalWalletDelta') {
-    const { entityId } = event.data;
-    if (String(entityId).toLowerCase() !== String(entityState.entityId).toLowerCase()) {
-      return done();
-    }
-    const normalizedOwner = applySignerEntityExternalWalletDelta(newState, event, blockNumber, transactionHash);
-
-    addMessage(newState, `💼 EXTERNAL: ${normalizedOwner.slice(0, 10)} delta | Block ${blockNumber} | Tx ${txHashShort}`);
-
-  } else if (event.type === 'SecretRevealed') {
-    const { hashlock, secret } = event.data;
-    applyKnownHtlcSecret(env, newState, mempoolOps, outputs, String(hashlock), String(secret), blockNumber, 'SecretRevealed');
-
-  } else if (event.type === 'AccountSettled') {
-    const { leftEntity, rightEntity, tokenId, leftReserve, rightReserve, collateral } = event.data;
-    const tokenIdNum = Number(tokenId);
-    const myEntityId = String(entityState.entityId).toLowerCase();
-    const leftId = String(leftEntity).toLowerCase();
-    const rightId = String(rightEntity).toLowerCase();
-    const myIsLeft = myEntityId === leftId;
-    const myIsRight = myEntityId === rightId;
-    if (!myIsLeft && !myIsRight) {
-      jEventLog.warn('account_settled.wrong_entity', { entity: shortId(entityState.entityId), left: shortId(leftId), right: shortId(rightId) });
-      return done();
-    }
-    const counterpartyEntityId = myIsLeft ? rightEntity : leftEntity;
-    const cpShort = String(counterpartyEntityId).slice(-4);
-    const ownReserve = myIsLeft ? leftReserve : rightReserve;
-    const tokenSymbol = getTokenSymbol(tokenIdNum);
-    const decimals = getTokenDecimals(tokenIdNum);
-
-    if (ownReserve !== undefined && ownReserve !== null) {
-      const newReserve = BigInt(ownReserve as string | number | bigint);
-      newState.reserves.set(tokenIdNum, newReserve);
-    } else {
-      jEventLog.warn('account_settled.reserve_missing', { counterparty: shortId(cpShort), tokenId: tokenIdNum });
-    }
-
-    // Account deltas move only through bilateral account-frame consensus.
-    const account = newState.accounts.get(counterpartyEntityId as string);
-    if (!account) {
-      jEventLog.warn('account_settled.account_missing', { counterparty: shortId(cpShort) });
-      return done();
-    }
-    dirtyAccounts.add(String(counterpartyEntityId).toLowerCase());
-
-    if (account.lastFinalizedJHeight === undefined) account.lastFinalizedJHeight = 0;
-
-    const jHeight = event.blockNumber ?? blockNumber;
-    const jBlockHash = event.blockHash || '';
-
-    // The claim uses normalized payload so both sides hash the same data.
-    const normalizedClaimEvents = normalizeJurisdictionEvents([event]);
-    if (normalizedClaimEvents.length !== 1) {
-      jEventLog.warn('account_settled.claim_normalize_failed', { tokenId: tokenIdNum, counterparty: shortId(cpShort), block: blockNumber });
-      return done();
-    }
-    const normalizedClaimEvent = normalizedClaimEvents[0];
-    if (!normalizedClaimEvent) return done();
-    const eventCopy = structuredClone(normalizedClaimEvent);
-    mempoolOps.push({
-      accountId: counterpartyEntityId as string,
-      tx: { type: 'j_event_claim', data: { jHeight, jBlockHash, events: [eventCopy] } },
-    });
-    candidateEffects.push({
-      kind: 'debug',
-      payload: {
-        level: 'info',
-        code: 'REB_STEP',
-        step: 4,
-        status: 'ok',
-        event: 'j_event_claim_queued',
-        entityId: entityState.entityId,
-        counterpartyId: String(counterpartyEntityId),
-        tokenId: tokenIdNum,
-        jHeight,
-      },
-    });
-
-    const collDisplay = (Number(collateral) / (10 ** decimals)).toFixed(4);
-    addMessage(newState, `⚖️ OBSERVED: ${tokenSymbol} ${cpShort} | coll=${collDisplay} | j-block ${blockNumber} (awaiting 2-of-2)`);
-
-  } else if (event.type === 'DebtCreated') {
-    const { debtor, creditor, tokenId, amount } = event.data;
-    const tokenSymbol = getTokenSymbol(tokenId as number);
-    const decimals = getTokenDecimals(tokenId as number);
-    const amountDisplay = (Number(amount) / (10 ** decimals)).toFixed(4);
-    applyDebtCreated(newState, event);
-
-    addMessage(newState, `🔴 DEBT: ${(debtor as string).slice(-8)} owes ${amountDisplay} ${tokenSymbol} to ${(creditor as string).slice(-8)} | Block ${blockNumber}`);
-
-  } else if (event.type === 'DebtEnforced') {
-    const { creditor, tokenId, amountPaid } = event.data;
-    const tokenSymbol = getTokenSymbol(tokenId as number);
-    const decimals = getTokenDecimals(tokenId as number);
-    const paidDisplay = (Number(amountPaid) / (10 ** decimals)).toFixed(4);
-    applyDebtEnforced(newState, event);
-
-    addMessage(newState, `✅ DEBT PAID: ${paidDisplay} ${tokenSymbol} to ${(creditor as string).slice(-8)} | Block ${blockNumber}`);
-
-  } else if (event.type === 'DebtForgiven') {
-    const { debtor, creditor, tokenId, amountForgiven, debtIndex } = event.data;
-    const tokenSymbol = getTokenSymbol(tokenId as number);
-    const decimals = getTokenDecimals(tokenId as number);
-    const forgivenDisplay = (Number(amountForgiven) / (10 ** decimals)).toFixed(4);
-    applyDebtForgiven(newState, event);
-
-    addMessage(newState, `🩶 DEBT FORGIVEN: ${forgivenDisplay} ${tokenSymbol} between ${(debtor as string).slice(-8)} and ${(creditor as string).slice(-8)} | Block ${blockNumber} · debt #${debtIndex}`);
-
-  } else if (event.type === 'DisputeStarted') {
-    await applyDisputeStartedJEvent(context);
-
-  } else if (event.type === 'DisputeFinalized') {
-    applyDisputeFinalizedJEvent(context, disputeFinalizationEvidence);
-
-  } else if (event.type === 'BatchOperationSkipped') {
-    applyBatchOperationSkippedEvent(newState, event);
-
-  } else if (event.type === 'HankoBatchProcessed') {
-    await applyHankoBatchProcessedEvent({
-      newState,
-      event,
-      transactionHash,
-      blockNumber,
-      dirtyAccounts,
-      outputs,
-    });
-
-  } else if (event.type === 'EntityProviderActionExecuted') {
-    applyEntityProviderActionExecuted(newState, event.data, blockNumber);
-
-  } else if (event.type === 'EntityProviderActionCancelled') {
-    applyEntityProviderActionCancelled(newState, event.data, blockNumber);
-
-  } else {
-    // Unknown event - log but don't fail
-    addMessage(newState, `⚠️ Unknown j-event: ${event.type} | Block ${blockNumber}`);
-    jEventLog.warn('unknown_event', { type: event.type, canonical: CANONICAL_J_EVENTS });
+  switch (event.type) {
+    case 'FoundationBootstrapped':
+    case 'EntityRegistered':
+    case 'BoardActivated':
+      applyCertifiedBoardJEvent(context);
+      break;
+    case 'ReserveUpdated':
+      applyReserveUpdatedJEvent(context);
+      break;
+    case 'ExternalWalletSnapshot':
+    case 'ExternalWalletDelta':
+      applyExternalWalletJEvent(context);
+      break;
+    case 'SecretRevealed':
+      applySecretRevealedJEvent(context);
+      break;
+    case 'AccountSettled':
+      applyAccountSettledJEvent(context, candidateEffects);
+      break;
+    case 'DebtCreated':
+    case 'DebtEnforced':
+    case 'DebtForgiven':
+      applyDebtJEvent(context);
+      break;
+    case 'DisputeStarted':
+      await applyDisputeStartedJEvent(context);
+      break;
+    case 'DisputeFinalized':
+      applyDisputeFinalizedJEvent(context, disputeFinalizationEvidence);
+      break;
+    case 'BatchOperationSkipped':
+      applyBatchOperationSkippedEvent(newState, event);
+      break;
+    case 'HankoBatchProcessed':
+      await applyHankoBatchProcessedEvent({
+        newState,
+        event,
+        transactionHash,
+        blockNumber,
+        dirtyAccounts,
+        outputs,
+      });
+      break;
+    case 'EntityProviderActionExecuted':
+      applyEntityProviderActionExecuted(newState, event.data, blockNumber);
+      break;
+    case 'EntityProviderActionCancelled':
+      applyEntityProviderActionCancelled(newState, event.data, blockNumber);
+      break;
+    default:
+      addMessage(newState, `⚠️ Unknown j-event: ${event.type} | Block ${blockNumber}`);
+      jEventLog.warn('unknown_event', { type: event.type, canonical: CANONICAL_J_EVENTS });
   }
 
   return done();

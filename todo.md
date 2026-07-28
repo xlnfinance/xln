@@ -37,8 +37,8 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   over 100 lines under `runtime/runtime`, `runtime/entity` and
   `runtime/account`. Reduce every coordinator to at most 150 lines and every
   pure/helper function to at most 100 lines, with no file above 3000 lines;
-  `check:state-machine-size` now ratchets the current debt at 20 functions over
-  150 lines and 75 over 100, rejects any new/growing allowance and rejects
+  `check:state-machine-size` now ratchets the current debt at 19 functions over
+  150 lines and 74 over 100, rejects any new/growing allowance and rejects
   files over 3000 lines. Keep reducing both counts to zero, deleting each exact
   allowance as its function is split.
   Keep Runtime-machine logic under `runtime/runtime/`, Entity-machine logic
@@ -48,7 +48,6 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   first structural targets are:
   same/cross-J orderbook matching (485/468),
   `submitRuntimeJOutbox` (259),
-  `applyFinalizedJEvent` (257),
   `handleCrossSwapFillAck` (255),
   and Runtime output plan/dispatch (189/201).
   Each split must follow protocol phase, owner and failure boundary—not
