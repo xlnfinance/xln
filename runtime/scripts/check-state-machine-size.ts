@@ -17,7 +17,7 @@ const TARGET_COORDINATOR_LINES = 150;
 // fails the gate. Refactors therefore ratchet the list toward zero instead of
 // turning today's debt into a permanent global threshold.
 const COORDINATOR_DEBT: Readonly<Record<string, number>> = {
-  'runtime/entity/tx/handlers/account.ts::applyAccountInputToEntity': 519,
+  'runtime/entity/tx/handlers/account.ts::applyAccountInputToEntity': 223,
   'runtime/account/consensus/propose.ts::proposeAccountFrame': 625,
   'runtime/entity/scheduler.ts::hubRebalanceHandler': 521,
   'runtime/entity/tx/handlers/account/orderbook-matching-same.ts::processSameAccountOrderbookOffers': 485,

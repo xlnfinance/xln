@@ -3,26 +3,12 @@ import type {
   EntityState,
   Env,
   EntityInput,
-  AccountMachine,
   EntityCandidateEffect,
 } from '../../../types';
 import { applyAccountInput } from '../../../account/consensus/index';
-import { addMessage, addMessages, emitScopedEvents } from '../../../state-helpers';
+import { addMessage } from '../../../state-helpers';
 import { createStructuredLogger, shortId } from '../../../infra/logger';
-import { scheduleHook } from '../../scheduler';
-import { upsertSortedStringMapEntry } from '../../../storage/sorted-index';
-import { applyCommittedCrossJurisdictionAccountTxFollowup } from './account-cross-j-followups';
-import { applyCommittedAccountFrameFollowups } from './account/committed-frame-followups';
-import {
-  applyCommittedHtlcLockFollowup,
-  applyHtlcSecretFollowups,
-  applyHtlcTimeoutFollowups,
-  applyPendingForwardFollowup,
-} from './account/committed-htlc-followups';
-import {
-  processCommittedSettlementTransitionFollowup,
-  processSettleAction,
-} from './settle';
+import { processSettleAction } from './settle';
 import type { MempoolOp } from './account/orderbook-queue';
 import type {
   SwapCancelEvent,
@@ -30,19 +16,28 @@ import type {
   SwapOfferEvent,
 } from './account/orderbook-offers';
 import { accountInputAck, accountInputProposal, accountInputReferenceHeight } from '../../../account/consensus/flush';
-import { handlePrepareDispute } from './dispute';
 import {
   getCertifiedBoardNodeStore,
   resolveObserverCertifiedBoardHash,
 } from '../../../jurisdiction/board-registry';
 import type { AccountJClaimNodeChanges } from '../../../types/account-j-claims';
-import { pruneUnreachableDisputeEvidence } from '../../../protocol/dispute/evidence-retention';
 import type { ApplyEntityTxOptions } from '../apply';
-import { armHtlcSecretAckTimeout, persistVerifiedHtlcSecret } from '../htlc-route-lifecycle';
-import { buildHubRebalancePolicyTx } from './account-admin';
 import { cumulativeMarksToPhases } from '../../../infra/perf-profile';
 import { getPerfMs } from '../../../utils';
 import { resolveInboundAccount } from './account/inbound-account';
+import {
+  rejectFrozenAccountInput,
+} from './account/frozen-input';
+import {
+  applySuccessfulAccountInput,
+  type CommittedAccountEffects,
+} from './account/committed-input';
+import { handleUnsafeAccountFrame } from './account/dispute-input';
+
+export {
+  canProcessFrozenAccountInput,
+  frozenAccountInputLogLevel,
+} from './account/frozen-input';
 
 export type { MempoolOp } from './account/orderbook-queue';
 export {
@@ -79,45 +74,6 @@ const accountInputSlowMs = (): number => {
   return Number.isFinite(configured) && configured >= 0 ? configured : ACCOUNT_INPUT_SLOW_MS;
 };
 
-export const frozenAccountInputLogLevel = (
-  account: Pick<AccountMachine, 'status' | 'activeDispute'>,
-  input: Pick<AccountInput, 'kind'>,
-): 'info' | 'warn' | 'error' => {
-  // A signed ACK may legitimately be retried by the reliable transport after
-  // local dispute preparation or J submission. It is security-relevant and
-  // must remain visible, but it is an expected no-op rather than a Runtime
-  // fault. The frozen gate below still rejects it before any Account mutation.
-  if (input.kind === 'ack') return 'warn';
-  const durableOnchainFreeze =
-    account.status === 'disputed' &&
-    (account.activeDispute?.observedOnChain === true || account.activeDispute === undefined);
-  return durableOnchainFreeze && input.kind === 'frame_ack' ? 'info' : 'error';
-};
-
-export const canProcessFrozenAccountInput = (
-  status: AccountMachine['status'],
-  hasActiveDispute: boolean,
-  _hasAck: boolean,
-  frameTxTypes: readonly string[],
-): boolean => {
-  if ((status ?? 'active') === 'active') return true;
-  // Finalization removes activeDispute but deliberately leaves the Account
-  // closed. The only bilateral frame allowed through that terminal fence is
-  // the explicit reopen transition (and its exact ACK). Before finalization,
-  // activeDispute remains present from local draft through the on-chain event,
-  // so even a forged/retried reopen frame cannot bypass the freeze.
-  if (
-    status === 'disputed' &&
-    !hasActiveDispute &&
-    frameTxTypes.length === 1 &&
-    frameTxTypes[0] === 'reopen_disputed'
-  ) return true;
-  // No external AccountInput may extend a lane after dispute preparation has
-  // begun. This includes ACK-only inputs and apparent control proposals: the
-  // jurisdiction path is anchored to the last mutually signed ProofBody.
-  return false;
-};
-
 export { applyCommittedAccountFrameFollowups } from './account/committed-frame-followups';
 
 export interface AccountHandlerResult {
@@ -135,6 +91,24 @@ export interface AccountHandlerResult {
   accountJClaimNodeChanges?: AccountJClaimNodeChanges;
   candidateEffects: EntityCandidateEffect[];
 }
+
+const buildAccountHandlerResult = (
+  newState: EntityState,
+  effects: CommittedAccountEffects,
+  requiredAccountResponse?: AccountInput,
+  accountJClaimNodeChanges?: AccountJClaimNodeChanges,
+): AccountHandlerResult => ({
+  newState,
+  outputs: effects.outputs,
+  mempoolOps: effects.mempoolOps,
+  swapOffersCreated: effects.swapOffersCreated,
+  swapCancelRequests: effects.swapCancelRequests,
+  swapOffersCancelled: effects.swapOffersCancelled,
+  candidateEffects: effects.candidateEffects,
+  ...(requiredAccountResponse ? { requiredAccountResponse } : {}),
+  ...(effects.hashesToSign.length > 0 ? { hashesToSign: effects.hashesToSign } : {}),
+  ...(accountJClaimNodeChanges ? { accountJClaimNodeChanges } : {}),
+});
 
 export async function applyAccountInputToEntity(
   state: EntityState,
@@ -161,20 +135,18 @@ export async function applyAccountInputToEntity(
     prevHanko: Boolean(incomingAck),
   });
 
-  const outputs: EntityInput[] = [];
-
-  // Collect events for entity-level orchestration (pure - no direct mempool mutation)
-  const mempoolOps: MempoolOp[] = [];
-  const allSwapOffersCreated: SwapOfferEvent[] = [];
-  const allSwapCancelRequests: SwapCancelRequestEvent[] = [];
-  const allSwapOffersCancelled: SwapCancelEvent[] = [];
-  const candidateEffects: EntityCandidateEffect[] = [];
-  // Multi-signer: Collect hashes during processing (not scanning)
-  const allHashesToSign: Array<{
-    hash: string;
-    type: 'accountFrame' | 'dispute' | 'settlement';
-    context: string;
-  }> = [];
+  // Followups append to one explicit effect accumulator. No helper publishes
+  // transport or storage effects directly from the isolated Entity candidate.
+  const effects: CommittedAccountEffects = {
+    outputs: [],
+    mempoolOps: [],
+    swapOffersCreated: [],
+    swapCancelRequests: [],
+    swapOffersCancelled: [],
+    candidateEffects: [],
+    hashesToSign: [],
+  };
+  const { outputs, hashesToSign: allHashesToSign } = effects;
   let accountJClaimNodeChanges: AccountJClaimNodeChanges | undefined;
 
   let requiredAccountResponse: AccountInput | undefined;
@@ -186,49 +158,10 @@ export async function applyAccountInputToEntity(
   );
   checkpointProfile('accountResolve');
 
-  // Dispute freeze happens at AccountInput ingress. Optional transformer
-  // evidence lives in Entity state; accepting even an ACK-only input here would
-  // let a late optimistic frame replace the exact signed proof selected for J.
-  if ((accountMachine.status ?? 'active') !== 'active') {
-    const proposalTxTypes = incomingProposal?.frame.accountTxs.map((tx) => tx.type) || [];
-    const pendingAckTxTypes = incomingAck
-      ? accountMachine.pendingFrame?.accountTxs.map((tx) => tx.type) ?? []
-      : [];
-    const frameTxTypes = proposalTxTypes.length > 0 ? proposalTxTypes : pendingAckTxTypes;
-    const allowedWhileDisputed = canProcessFrozenAccountInput(
-      accountMachine.status,
-      Boolean(accountMachine.activeDispute),
-      Boolean(incomingAck),
-      frameTxTypes,
-    );
-    if (!allowedWhileDisputed) {
-      const dropMsg =
-        `🛑 Frozen account input dropped for ${counterpartyId.slice(-4)} ` +
-        `(height=${accountInputReferenceHeight(input) ?? 'n/a'}, txs=[${frameTxTypes.join(',')}], ack=${!!incomingAck})`;
-      const severity = frozenAccountInputLogLevel(accountMachine, input);
-      const logFrozenInput = severity === 'info'
-        ? accountHandlerLog.info
-        : severity === 'warn'
-          ? accountHandlerLog.warn
-          : accountHandlerLog.error;
-      logFrozenInput('input.dropped_frozen_account', {
-        counterparty: shortId(counterpartyId),
-        height: accountInputReferenceHeight(input) ?? null,
-        txs: frameTxTypes,
-        ack: Boolean(incomingAck),
-      });
-      addMessage(newState, dropMsg);
-      return {
-        newState,
-        outputs,
-        mempoolOps,
-        swapOffersCreated: allSwapOffersCreated,
-        swapCancelRequests: allSwapCancelRequests,
-        swapOffersCancelled: allSwapOffersCancelled,
-        candidateEffects,
-        ...(allHashesToSign.length > 0 && { hashesToSign: allHashesToSign }),
-      };
-    }
+  // Entity-local dispute evidence selects the exact signed proof for J.
+  // No external AccountInput may extend that lane once the freeze begins.
+  if (rejectFrozenAccountInput(newState, accountMachine, input, counterpartyId)) {
+    return buildAccountHandlerResult(newState, effects);
   }
 
   // NOTE: Credit limits start at 0 - no auto-credit on account opening
@@ -312,297 +245,48 @@ export async function applyAccountInputToEntity(
     }
 
     if (result.success) {
-      candidateEffects.push(...(result.candidateEffects ?? []));
-      addMessages(newState, result.events);
-      emitScopedEvents(
+      requiredAccountResponse = await applySuccessfulAccountInput({
         env,
-        'account',
-        `E/A/${newState.entityId.slice(-4)}:${counterpartyId.slice(-4)}/consensus`,
-        result.events,
-        {
-          entityId: newState.entityId,
-          counterpartyId,
-          frameHeight: accountInputReferenceHeight(input),
-          hasNewFrame: Boolean(incomingProposal),
-        },
-        newState.entityId,
-      );
-
-      // Hub rebalance must remain global (all accounts matched together), but we
-      // still want it to react quickly after any committed account frame.
-      // Schedule a one-shot global rebalance kick for the next crontab wake-up.
-      if (newState.hubRebalanceConfig && newState.crontabState) {
-        scheduleHook(newState.crontabState, {
-          id: 'hub-rebalance-kick',
-          triggerAt: newState.timestamp,
-          type: 'hub_rebalance_kick',
-          data: {
-            reason: 'account_frame_committed',
-            counterpartyId,
-          },
-        });
-      }
-
-      // Multi-signer: Collect hashes from result during processing
-      if (result.hashesToSign) {
-        allHashesToSign.push(...result.hashesToSign);
-      }
-
-      // === COMMITTED FRAME PROCESSING: Check if account-level commits need entity side effects ===
-      // Account consensus returns the committed frames explicitly. This avoids
-      // guessing from input shape, especially for batched ACK + new-frame flows.
-      const buildCommittedSwapOfferEvent = (offerId: string): SwapOfferEvent | null => {
-        const offer = accountMachine.swapOffers?.get(offerId);
-        if (!offer) return null;
-        return {
-          offerId,
-          accountId: counterpartyId,
-          makerIsLeft: offer.makerIsLeft,
-          fromEntity: accountMachine.leftEntity,
-          toEntity: accountMachine.rightEntity,
-          createdHeight: offer.createdHeight,
-          giveTokenId: offer.giveTokenId,
-          giveAmount: offer.giveAmount,
-          wantTokenId: offer.wantTokenId,
-          wantAmount: offer.wantAmount,
-          ...(offer.priceTicks !== undefined ? { priceTicks: offer.priceTicks } : {}),
-          ...(offer.timeInForce !== undefined ? { timeInForce: offer.timeInForce } : {}),
-          ...(offer.crossJurisdiction ? { crossJurisdiction: offer.crossJurisdiction } : {}),
-        };
-      };
-      const committedFrameEntries = result.committedFrames ?? [];
-      for (const { frame, committedViaNewFrame } of committedFrameEntries) {
-        candidateEffects.push({
-          kind: 'accountFrameHistory',
-          entityId: accountMachine.proofHeader.fromEntity,
-          counterpartyId: input.fromEntityId,
-          accountHeight: frame.height,
-          source: committedViaNewFrame ? 'peerCommit' : 'ackCommit',
-          frame: structuredClone(frame),
-        });
-      }
-      const committedInboundGenesis = committedFrameEntries.some(({ frame }) => frame.height === 1);
-      if (createdAccount) {
-        if (!committedInboundGenesis) {
-          throw new Error(`ACCOUNT_GENESIS_COMMIT_REQUIRED:${counterpartyId}`);
-        }
-        upsertSortedStringMapEntry(newState.accounts, counterpartyId, accountMachine);
-        accountHandlerLog.debug('machine.created', { counterparty: shortId(counterpartyId) });
-      }
-
-      for (const { frame: committedFrame, committedViaNewFrame } of committedFrameEntries) {
-        if (!committedFrame?.accountTxs) continue;
-        applyCommittedAccountFrameFollowups(
-          newState,
-          counterpartyId,
-          committedFrame,
-          mempoolOps,
-          env,
-          candidateEffects,
-        );
-
-        for (const accountTx of committedFrame.accountTxs) {
-          const settlementFollowup = await processCommittedSettlementTransitionFollowup(
-            accountMachine,
-            accountTx,
-            committedFrame,
-            counterpartyId,
-            newState,
-            env,
-          );
-          outputs.push(...settlementFollowup.outputs);
-          mempoolOps.push(...settlementFollowup.mempoolOps);
-          allHashesToSign.push(...settlementFollowup.hashesToSign);
-          const crossJurisdictionFollowupHandled = applyCommittedCrossJurisdictionAccountTxFollowup(
-            env,
-            newState,
-            counterpartyId,
-            accountTx,
-            outputs,
-            committedFrame.timestamp,
-            allSwapOffersCreated,
-            options?.storageChanges,
-          );
-          if (!crossJurisdictionFollowupHandled) {
-            await applyCommittedHtlcLockFollowup(
-              { env, state, newState, input, accountMachine, outputs, mempoolOps, candidateEffects },
-              accountTx,
-              committedViaNewFrame,
-            );
-          }
-
-          if (accountTx.type === 'swap_offer') {
-            const committedOfferEvent = buildCommittedSwapOfferEvent(accountTx.data.offerId);
-            if (committedOfferEvent) allSwapOffersCreated.push(committedOfferEvent);
-          } else if (accountTx.type === 'swap_resolve' || accountTx.type === 'cross_swap_fill_ack') {
-            const committedOfferEvent = buildCommittedSwapOfferEvent(accountTx.data.offerId);
-            if (committedOfferEvent) {
-              allSwapOffersCreated.push(committedOfferEvent);
-            } else {
-              allSwapOffersCancelled.push({ offerId: accountTx.data.offerId, accountId: counterpartyId });
-            }
-          } else if (accountTx.type === 'swap_cancel_request') {
-            allSwapCancelRequests.push({ offerId: accountTx.data.offerId, accountId: counterpartyId });
-          }
-        }
-      }
-      if (createdAccount && committedInboundGenesis && newState.hubRebalanceConfig) {
-        const localSide = newState.entityId.toLowerCase() === accountMachine.leftEntity.toLowerCase()
-          ? 'left'
-          : 'right';
-        for (const tokenId of Array.from(accountMachine.deltas.keys()).sort((left, right) => left - right)) {
-          const currentPolicy = accountMachine.rebalanceFeePolicies?.get(tokenId)?.[localSide];
-          if (currentPolicy?.policyVersion === newState.hubRebalanceConfig.policyVersion) continue;
-          mempoolOps.push({
-            accountId: counterpartyId,
-            tx: buildHubRebalancePolicyTx(newState.hubRebalanceConfig, tokenId),
-          });
-        }
-      }
-      const htlcFollowupContext = {
-        env,
-        state,
-        newState,
+        state: newState,
         input,
-        accountMachine,
-        outputs,
-        mempoolOps,
-        candidateEffects,
-      };
-      applyPendingForwardFollowup(htlcFollowupContext);
-      applyHtlcTimeoutFollowups(htlcFollowupContext, result.timedOutHashlocks || []);
-      applyHtlcSecretFollowups(htlcFollowupContext, result.revealedSecrets || []);
-      if (committedFrameEntries.length > 0) {
-        pruneUnreachableDisputeEvidence(accountMachine, newState.jBatchState);
-      }
-      checkpointProfile('committedFollowups');
-
-      if (allSwapOffersCreated.length > 0) {
-        accountHandlerLog.debug('swap.offers_committed', { count: allSwapOffersCreated.length });
-      }
-      if (allSwapCancelRequests.length > 0) {
-        accountHandlerLog.debug('swap.cancel_requests_committed', { count: allSwapCancelRequests.length });
-      }
-      if (allSwapOffersCancelled.length > 0) {
-        accountHandlerLog.debug('swap.offers_cancelled_committed', { count: allSwapOffersCancelled.length });
-      }
-
-      // Account responses are not outputs yet. Entity consensus performs one
-      // final Account flush after every AccountInput, matching pass, and hook
-      // has run, so an ACK can be combined with all same-frame Account work.
-      if (result.response) {
-        requiredAccountResponse = structuredClone(result.response);
-        accountHandlerLog.debug('response.deferred_to_entity_flush', {
-          from: shortId(state.entityId),
-          to: shortId(result.response.toEntityId),
-          height: accountInputReferenceHeight(result.response),
-          prevHanko: Boolean(accountInputAck(result.response)),
-        });
-        checkpointProfile('responseDeferred');
-      }
+        account: accountMachine,
+        counterpartyId,
+        createdAccount,
+        result,
+        effects,
+        ...(options ? { options } : {}),
+        checkpointProfile,
+      });
       checkpointProfile('postConsensus');
     } else if (result.disputeRequired) {
-      if (createdAccount) {
-        addMessage(newState, `⚠️ Rejected uncommitted account genesis from ${counterpartyId.slice(-8)}`);
-        return {
-          newState,
-          outputs,
-          mempoolOps,
-          swapOffersCreated: allSwapOffersCreated,
-          swapCancelRequests: allSwapCancelRequests,
-          swapOffersCancelled: allSwapOffersCancelled,
-          candidateEffects,
-          ...(allHashesToSign.length > 0 && { hashesToSign: allHashesToSign }),
-          ...(accountJClaimNodeChanges ? { accountJClaimNodeChanges } : {}),
-        };
-      }
-      if (result.disputeRequired.signedFrame) {
-        accountMachine.shadow.rejectedFrameEvidence = {
-          reason: result.disputeRequired.reason,
-          frame: structuredClone(result.disputeRequired.signedFrame.frame),
-          frameHanko: result.disputeRequired.signedFrame.frameHanko,
-        };
-      }
-      for (const { hashlock, secret } of result.disputeRequired.evidenceSecrets) {
-        const lock = [...accountMachine.locks.values()].find(
-          candidate => candidate.hashlock.toLowerCase() === hashlock.toLowerCase(),
-        );
-        if (!lock) {
-          throw new Error(`HTLC_DISPUTE_EVIDENCE_LOCK_MISSING:${hashlock}`);
-        }
-        persistVerifiedHtlcSecret(newState, counterpartyId, lock, secret);
-        const route = newState.htlcRoutes.get(hashlock)!;
-        const localIsLeft = accountMachine.leftEntity.toLowerCase() === newState.entityId.toLowerCase();
-        const localSentLock = lock.senderIsLeft === localIsLeft;
-        if (localSentLock && route.inboundEntity && route.inboundLockId) {
-          mempoolOps.push({
-            accountId: route.inboundEntity,
-            tx: {
-              type: 'htlc_resolve',
-              data: { lockId: route.inboundLockId, outcome: 'secret', secret },
-            },
-          });
-          armHtlcSecretAckTimeout(newState, route);
-        }
-      }
-      const startsBefore = newState.jBatchState?.batch.disputeStarts.length ?? 0;
-      const prepared = await handlePrepareDispute(
-        newState,
-        {
-          type: 'prepareDispute',
-          data: {
-            counterpartyEntityId: counterpartyId,
-            description: 'late-htlc-secret-enforcement',
-          },
-        },
+      const unsafe = await handleUnsafeAccountFrame({
         env,
+        state: newState,
+        input,
+        account: accountMachine,
+        counterpartyId,
+        createdAccount,
+        dispute: result.disputeRequired,
+        effects,
+      });
+      return buildAccountHandlerResult(
+        unsafe.newState,
+        { ...effects, outputs: unsafe.outputs },
+        undefined,
+        accountJClaimNodeChanges,
       );
-      const startsAfter = prepared.newState.jBatchState?.batch.disputeStarts.length ?? 0;
-      const disputeStarted = startsAfter > startsBefore;
-      if (disputeStarted && prepared.newState.jBatchState) {
-        prepared.newState.jBatchState.autoBroadcastDraft = true;
-      }
-      const disputeOutputs = disputeStarted && !prepared.newState.jBatchState?.sentBatch
-        ? [{
-            entityId: prepared.newState.entityId,
-            signerId: prepared.newState.config.validators[0]!,
-            entityTxs: [{ type: 'j_broadcast' as const, data: {} }],
-          }]
-        : [];
-      addMessage(
-        prepared.newState,
-        disputeStarted
-          ? `⚠️ Unsafe account frame rejected; dispute start queued`
-          : `⚠️ Unsafe account frame rejected; dispute preparation awaits Hanko`,
-      );
-      return {
-        newState: prepared.newState,
-        outputs: [...outputs, ...prepared.outputs, ...disputeOutputs],
-        mempoolOps,
-        swapOffersCreated: allSwapOffersCreated,
-        swapCancelRequests: allSwapCancelRequests,
-        swapOffersCancelled: allSwapOffersCancelled,
-        candidateEffects,
-        ...(allHashesToSign.length > 0 && { hashesToSign: allHashesToSign }),
-        ...(accountJClaimNodeChanges ? { accountJClaimNodeChanges } : {}),
-      };
     } else if (result.rejected) {
       accountHandlerLog.warn('frame.rejected', {
         from: shortId(input.fromEntityId),
         error: result.rejected.reason,
       });
       addMessage(newState, `⚠️ Rejected account frame: ${result.rejected.reason}`);
-      return {
+      return buildAccountHandlerResult(
         newState,
-        outputs,
-        mempoolOps,
-        swapOffersCreated: allSwapOffersCreated,
-        swapCancelRequests: allSwapCancelRequests,
-        swapOffersCancelled: allSwapOffersCancelled,
-        candidateEffects,
-        ...(allHashesToSign.length > 0 && { hashesToSign: allHashesToSign }),
-        ...(accountJClaimNodeChanges ? { accountJClaimNodeChanges } : {}),
-      };
+        effects,
+        undefined,
+        accountJClaimNodeChanges,
+      );
     } else {
       accountHandlerLog.error('frame.consensus_failed', {
         from: shortId(input.fromEntityId),
@@ -624,18 +308,12 @@ export async function applyAccountInputToEntity(
   }
 
   checkpointProfile('finalize');
-  return {
+  return buildAccountHandlerResult(
     newState,
-    outputs,
-    mempoolOps,
-    swapOffersCreated: allSwapOffersCreated,
-    swapCancelRequests: allSwapCancelRequests,
-    swapOffersCancelled: allSwapOffersCancelled,
-    candidateEffects,
-    ...(requiredAccountResponse ? { requiredAccountResponse } : {}),
-    ...(allHashesToSign.length > 0 && { hashesToSign: allHashesToSign }),
-    ...(accountJClaimNodeChanges ? { accountJClaimNodeChanges } : {}),
-  };
+    effects,
+    requiredAccountResponse,
+    accountJClaimNodeChanges,
+  );
   } catch (error) {
     profileOutcome = 'threw';
     throw error;

@@ -14,16 +14,20 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   confirms the R→C duplicate lifecycle (`FIN-01/02`), unsafe dispute
   `uint256 → Number` conversion (`FIN-03`), fail-open rebalance construction
   (`FIN-04`), non-durable faucet admission (`SRV-01`), misplaced Account money
-  mutation (`ARCH-01`), duplicate/inexact UI money models (`UI-01`) and missing
-  function-size gate (`ARCH-02`). Reproduce `RUN-04` against the current single
-  Runtime mempool before accepting its old “concurrent ingress” explanation:
+  mutation (`ARCH-01`) and duplicate/inexact UI money models (`UI-01`).
+  Reproduce `RUN-04` against the current single Runtime mempool before accepting
+  its old “concurrent ingress” explanation:
   one writer is intentional, but a queued input can still become stale after
   the preceding committed frame. Do not reopen already-fixed findings:
   sticky-halt waiter recheck (`RUN-01`), post-WAL notification isolation
   (`RUN-02`), candidate-only handle cleanup (`RUN-03`), canonical
   `processRuntime` test imports (`TEST-01`) and exact `XLNModule` alias
-  (`API-01`) now have source/test evidence. The concrete open fixes remain
-  decomposed below so each gets its own L1 → L2 → L3 gate.
+  (`API-01`) now have source/test evidence; the AST file/function ratchet closes
+  `ARCH-02` and must be tightened to zero debt rather than reimplemented.
+  Treat the audit's 278-LOC deletion table as candidates, not proof: recheck
+  current static imports, dynamic entrypoints, browser exports and owning tests
+  immediately before each deletion. The concrete open fixes remain decomposed
+  below so each gets its own L1 → L2 → L3 gate.
 - [ ] Pass the human-audit completion gate for the three nested state
   machines. Baseline on `main@404851e82`: 35 functions over 150 lines and 89
   over 100 lines under `runtime/runtime`, `runtime/entity` and
@@ -38,7 +42,8 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   `runtime/account/`; adapters, storage, transport, UI and QA remain separate
   infrastructure rather than being mislabeled as a state machine. The current
   first structural targets are:
-  `applyAccountInputToEntity` (662),
+  `applyAccountInputToEntity` (223 after inbound/frozen/committed/dispute phase
+  extraction; still above the 150-line coordinator gate),
   `proposeAccountFrame` (625),
   `hubRebalanceHandler` (521),
   same/cross-J orderbook matching (485/468),
