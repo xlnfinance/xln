@@ -1657,9 +1657,12 @@ $: {
     if (preserveAmountOnNextContextChange) {
       preserveAmountOnNextContextChange = false;
       amountEditedByUser = true;
-    } else {
-      amountEditedByUser = false;
     }
+    // A late reactive venue/capacity update must never take ownership back
+    // from a value the user already typed. Context changes still re-validate
+    // that value against the new tokens and capacity; they merely cannot
+    // replace it with a derived 100% amount. This also prevents an async auto
+    // value from landing between the clear and insert events of one edit.
   }
   if (!amountEditedByUser && activeOrderAccountId && Number.isFinite(giveToken) && giveToken > 0 && availableGiveCapacity !== lastAutoAmountCapacity) {
     lastAutoAmountCapacity = availableGiveCapacity;

@@ -343,6 +343,13 @@ export async function placeCrossOrder(
   const beforeMessageCount = beforeSubmit.messages.length;
   if (params.amount !== undefined) {
     await amountInput.fill(params.amount);
+    await expect
+      .poll(() => amountInput.inputValue(), {
+        timeout: 10_000,
+        intervals: [50, 100, 250],
+        message: 'manual cross-j amount must remain owned by the user after reactive route updates',
+      })
+      .toBe(params.amount);
   } else {
     const autoAmount = Number(String(await amountInput.inputValue()).replace(/,/g, ''));
     expect(autoAmount, 'book click must populate a positive source amount').toBeGreaterThan(0);
