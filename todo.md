@@ -8,6 +8,43 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 
 ## 1. Core simplification and human auditability — P0/P1, owner-approved
 
+- [ ] Pass the human-audit completion gate for the three nested state
+  machines. Baseline on `main@404851e82`: 35 functions over 150 lines and 89
+  over 100 lines under `runtime/runtime`, `runtime/entity` and
+  `runtime/account`. Reduce every coordinator to at most 150 lines and every
+  pure/helper function to at most 100 lines, with no file above 3000 lines;
+  ratchet the limits with an AST/source gate so the counts can only decrease.
+  Keep Runtime-machine logic under `runtime/runtime/`, Entity-machine logic
+  under `runtime/entity/`, and Account money/consensus logic under
+  `runtime/account/`; adapters, storage, transport, UI and QA remain separate
+  infrastructure rather than being mislabeled as a state machine. The current
+  first structural targets are:
+  `applyAccountInputToEntity` (662),
+  `proposeAccountFrame` (625),
+  `hubRebalanceHandler` (521),
+  same/cross-J orderbook matching (485/468),
+  `handleSwapResolve` (414),
+  dispute start/finalize (399/308),
+  `processDueHooks` (293),
+  `applyEntityFrame` (286),
+  `applyAccountTxMutation` (265),
+  `submitRuntimeJOutbox` (259),
+  `applyFinalizedJEvent`/`applyEntityTxsInOrder` (257/255),
+  `handleCrossSwapFillAck` (255),
+  and Runtime output plan/dispatch (189/201).
+  Each split must follow protocol phase, owner and failure boundary—not
+  arbitrary line chunks—and preserve byte-identical roots, failures and
+  ordering through characterization tests.
+- [ ] Make the audit surface mechanically legible after the function split.
+  Delete rename-only import aliases where the canonical exported name can be
+  used directly; retain namespace imports, `as const`, type assertions and
+  genuine collision resolution because they are different language features.
+  Remove duplicate constructors/policies/serializers only after proving one
+  canonical owner, delete dead exports only after static and dynamic
+  entrypoint/call-site checks, and add concise comments at every financial
+  invariant, WAL boundary, adversarial-input boundary and intentionally
+  non-obvious ordering rule. Comments must explain why the tempting alternative
+  is unsafe rather than restating the code.
 - [ ] Pin the financial and durability baselines before structural changes.
   Add byte-identical roots for payment/HTLC/settlement/rebalance, durable
   reliable-frontier assertions on both peers, rollback ordering, and measured

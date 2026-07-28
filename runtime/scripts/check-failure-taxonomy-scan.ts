@@ -168,7 +168,11 @@ const fatalIncidentRoutes = [
     steps: [
       [
         'runtime/runtime/j-submit.ts',
-        ['J_SUBMIT_FATAL:', "queueBatchResult(env, deps, jInput.jurisdictionName, jTx, 'terminalFailure'"],
+        [
+          'J_SUBMIT_FATAL:',
+          "failure.category === 'transient' ? 'transientFailure' : 'terminalFailure'",
+          'queueBatchResult(env, deps, jurisdictionName, jTx, outcome, extra)',
+        ],
       ],
       ['runtime/runtime/loop.ts', ['await deps.processRuntime(env);', 'await config.onFatal({']],
     ],
