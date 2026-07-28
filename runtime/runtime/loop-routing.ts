@@ -1,5 +1,4 @@
-import { deriveSignerAddressSync, getSignerPrivateKeyIfAvailable } from '../account/crypto';
-import { extractEntityId, extractSignerId } from '../ids';
+import { extractEntityId } from '../ids';
 import { createStructuredLogger } from '../infra/logger';
 import { normalizeRuntimeId } from '../networking/runtime-id';
 import { safeStringify } from '../protocol/serialization';
@@ -13,8 +12,7 @@ import {
   type RuntimeInboundEntityInputsResult,
   type RuntimeEntityRoutingDeps,
 } from './entity-routing';
-import { clearInfraGossipProfiles } from './infra-gossip-store';
-import { enqueueRuntimeInputs, infraGossipDbAccess, drainInfraDbWrites } from './loop-infrastructure';
+import { enqueueRuntimeInputs } from './loop-infrastructure';
 import {
   ensureRuntimeGossipProfiles,
   getRuntimeP2P,
@@ -49,56 +47,20 @@ import type {
   RuntimeEntityInputsEnvelope,
   RuntimeInput,
 } from '../types';
+import { clearRuntimeGossip } from './loop-gossip';
+import {
+  deriveRuntimeId,
+  getLocalSignerIdsForEntity,
+  getRuntimeEnv,
+  hasLocalSignerForEntity,
+  hasLocalSignerForEntitySigner,
+  resolveSoleLocalSignerForEntity,
+} from './loop-identity';
 
 const routingLog = createStructuredLogger('runtime.routing');
 
 export type RuntimeRoutingApiDeps = {
   notifyEnvChange(env: Env): void;
-};
-
-const getEnv = (env?: Env | null): Env | null => {
-  if (!env) {
-    routingLog.warn('env.missing');
-    return null;
-  }
-  return env;
-};
-
-const deriveRuntimeId = (seed: string): string =>
-  normalizeRuntimeId(deriveSignerAddressSync(seed, '1'));
-
-const getLocalSignerIdsForEntity = (env: Env, entityId: string): string[] => {
-  const targetEntityId = String(entityId || '').toLowerCase();
-  const signerIds = new Set<string>();
-  for (const replicaKey of env.eReplicas.keys()) {
-    const replicaEntityId = extractEntityId(replicaKey).toLowerCase();
-    const signerId = extractSignerId(replicaKey);
-    if (replicaEntityId !== targetEntityId || !signerId) continue;
-    if (getSignerPrivateKeyIfAvailable(env, signerId) !== null) signerIds.add(signerId);
-  }
-  return [...signerIds];
-};
-
-const hasLocalSignerForEntity = (env: Env, entityId: string): boolean =>
-  getLocalSignerIdsForEntity(env, entityId).length > 0;
-
-const hasLocalSignerForEntitySigner = (
-  env: Env,
-  entityId: string,
-  signerId: string,
-): boolean => {
-  const targetSignerId = String(signerId || '').toLowerCase();
-  return Boolean(
-    targetSignerId &&
-    getLocalSignerIdsForEntity(env, entityId).some(
-      localSignerId => localSignerId.toLowerCase() === targetSignerId,
-    ),
-  );
-};
-
-const resolveSoleLocalSignerForEntity = (env: Env, entityId: string): string | null => {
-  const signerIds = getLocalSignerIdsForEntity(env, entityId);
-  return signerIds.length === 1 ? signerIds[0]! : null;
 };
 
 const normalizeRuntimeEntityInput = (
@@ -281,32 +243,12 @@ const validateRuntimeInputAdmission = (
   });
 };
 
-const clearGossip = async (
-  apiDeps: RuntimeRoutingApiDeps,
-  env: Env,
-  options: { runtimeId?: string } = {},
-): Promise<void> => {
-  await drainInfraDbWrites(env);
-  await clearInfraGossipProfiles(env, infraGossipDbAccess, options);
-  const runtimeId = String(options.runtimeId || '').trim().toLowerCase();
-  if (!runtimeId) {
-    env.gossip?.profiles?.clear();
-  } else {
-    for (const [entityId, profile] of env.gossip?.profiles ?? []) {
-      if (String(profile.runtimeId || '').trim().toLowerCase() === runtimeId) {
-        env.gossip.profiles.delete(entityId);
-      }
-    }
-  }
-  apiDeps.notifyEnvChange(env);
-};
-
 export const createRuntimeRoutingApi = (deps: RuntimeRoutingApiDeps) => {
   const entityRoutingDeps = () => getRuntimeEntityRoutingDeps(deps);
   const outputRoutingDeps = () => createRuntimeOutputRoutingDeps(entityRoutingDeps());
   const p2pDeps = () => getRuntimeP2PLifecycleDeps(deps);
   return {
-    getEnv,
+    getEnv: getRuntimeEnv,
     setRuntimeId: (env: Env, id: string | null) => setRuntimeId(deps, env, id),
     deriveRuntimeId,
     registerEntityRuntimeHint: (env: Env, entityId: string, runtimeId: string) =>
@@ -340,7 +282,7 @@ export const createRuntimeRoutingApi = (deps: RuntimeRoutingApiDeps) => {
     ensureGossipProfiles: (env: Env, entityIds: string[]) =>
       ensureRuntimeGossipProfiles(env, p2pDeps(), entityIds),
     clearGossip: (env: Env, options: { runtimeId?: string } = {}) =>
-      clearGossip(deps, env, options),
+      clearRuntimeGossip(env, deps.notifyEnvChange, options),
     MAX_RUNTIME_J_INPUTS,
     MAX_RUNTIME_J_TXS,
     MAX_RUNTIME_J_TXS_PER_JURISDICTION,

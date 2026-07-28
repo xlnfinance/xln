@@ -236,7 +236,7 @@ describe('production startup wiring', () => {
     const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
     const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
     const mmNode = readMarketMakerNodeSource();
-    const runtimeLoop = readFileSync(join(repoRoot, 'runtime/runtime/loop.ts'), 'utf8');
+    const runtimeLoop = readFileSync(join(repoRoot, 'runtime/runtime/loop-failure.ts'), 'utf8');
 
     expect(orchestrator.match(/stdio: \['pipe', 'pipe', 'pipe', 'ipc'\]/g)).toHaveLength(2);
     expect(orchestrator.match(/attachManagedChildFatalIpc\(/g)).toHaveLength(2);
@@ -245,7 +245,7 @@ describe('production startup wiring', () => {
     expect(hubNode).toContain('await reportManagedChildFatal({');
     expect(mmNode).toContain('await reportManagedChildFatal({');
     const report = runtimeLoop.indexOf('await config.onFatal({');
-    const exit = runtimeLoop.indexOf('runtimeProcess.exit(1);', report);
+    const exit = runtimeLoop.indexOf('getRuntimeProcessGlobal()?.exit?.(1);', report);
     expect(report).toBeGreaterThan(0);
     expect(exit).toBeGreaterThan(report);
   });
@@ -617,7 +617,11 @@ describe('production startup wiring', () => {
     expect(runtimeEntityRouting).not.toContain('deps.startRuntimeLoop(env);');
     expect(runtimeEntityRouting).not.toContain('processRuntime(env)');
     expect(runtimeEntityRouting).not.toContain('queueMicrotask(() =>');
-    expect(runtimeLoopSource).toContain('runtimeProcess.exit(1);');
+    const runtimeLifecycleSource = readFileSync(
+      join(repoRoot, 'runtime/runtime/loop-failure.ts'),
+      'utf8',
+    );
+    expect(runtimeLifecycleSource).toContain('getRuntimeProcessGlobal()?.exit?.(1);');
     expect(runtimeLoopSource).not.toContain('shouldExitOnRuntimeFatal');
     expect(orchestrator).toContain("XLN_STORAGE_SYNC_WRITES: process.env['XLN_STORAGE_SYNC_WRITES'] ?? '1'");
     expect(orchestrator).not.toContain('XLN_MARKET_MAKER_DISABLE_STORAGE');
@@ -780,11 +784,15 @@ describe('production startup wiring', () => {
       join(repoRoot, 'runtime/runtime/loop-work.ts'),
       'utf8',
     );
-    expect(runtimeLoopSource).toContain(
-      'const runtimeLoopTickDelayMs = Math.max(0, Math.floor(Number(config?.tickDelayMs ?? 0)));',
+    const runtimeLoopLifecycleSource = readFileSync(
+      join(repoRoot, 'runtime/runtime/loop-lifecycle.ts'),
+      'utf8',
     );
-    expect(runtimeLoopSource).toContain('maxEntityInputsPerFrame?: number');
-    expect(runtimeLoopSource).toContain('maxEntityTxsPerFrame?: number');
+    expect(runtimeLoopLifecycleSource).toContain(
+      'const tickDelayMs = Math.max(0, Math.floor(Number(config?.tickDelayMs ?? 0)));',
+    );
+    expect(runtimeLoopLifecycleSource).toContain('maxEntityInputsPerFrame?: number');
+    expect(runtimeLoopLifecycleSource).toContain('maxEntityTxsPerFrame?: number');
     expect(runtimeLoopWorkSource).toContain('export const applyEntityInputFrameCap =');
     expect(runtimeLoopWorkSource).toContain('export const applyEntityTxFrameCap =');
     expect(runtimeLoopWorkSource).toContain('mempool.entityInputs = [...deferredInputs, ...mempool.entityInputs];');
@@ -801,7 +809,7 @@ describe('production startup wiring', () => {
       'if (plan.remoteOutputs.length > 0 && env.quietRuntimeLogs !== true)',
     );
     expect(runtimeSource).not.toContain('void config;');
-    expect(runtimeLoopSource).toContain('else if (runtimeLoopTickDelayMs > 0)');
+    expect(runtimeLoopLifecycleSource).toContain('else if (tickDelayMs > 0)');
     expect(mmNode).toContain("MARKET_MAKER_RUNTIME_TICK_DELAY_MS'] || '0'");
     expect(mmNode).toContain("MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '0'");
     expect(mmNode).toContain("MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '0'");
@@ -1208,6 +1216,7 @@ describe('production startup wiring', () => {
   test('managed runtime teardown stops J-event producers before draining runtime and network IO', () => {
     const runtimeMain = readFileSync(join(repoRoot, 'runtime/runtime-core.ts'), 'utf8');
     const runtimeLoop = readFileSync(join(repoRoot, 'runtime/runtime/loop.ts'), 'utf8');
+    const runtimeWatchers = readFileSync(join(repoRoot, 'runtime/runtime/loop-watchers.ts'), 'utf8');
     const nodeQuiesce = readFileSync(join(repoRoot, 'runtime/orchestrator/node-runtime-quiesce.ts'), 'utf8');
     const sources = [
       readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8'),
@@ -1215,8 +1224,8 @@ describe('production startup wiring', () => {
     ];
 
     expect(runtimeMain).toContain('stopJurisdictionWatchersAndWait,');
-    expect(runtimeLoop).toContain('const stopJurisdictionWatchersAndWait = async (env: Env): Promise<void> => {');
-    expect(runtimeLoop).toContain('await stopJurisdictionWatchersAndWait(env);');
+    expect(runtimeWatchers).toContain('export const stopJurisdictionWatchersAndWait = async (env: Env): Promise<void> => {');
+    expect(runtimeLoop).toContain('await lifecycle.stopJurisdictionWatchersAndWait(env);');
     expect(nodeQuiesce.indexOf('await stopJurisdictionWatchersAndWait(env)')).toBeLessThan(
       nodeQuiesce.indexOf('runtimeDrained = await waitForRuntimeWorkDrained('),
     );

@@ -42,6 +42,8 @@ const readText = (path: string): string => {
     'runtime/runtime/loop.ts': [
       'runtime/runtime/loop.ts',
       'runtime/runtime/input-quarantine.ts',
+      'runtime/runtime/loop-lifecycle.ts',
+      'runtime/runtime/loop-failure.ts',
     ],
     'runtime/orchestrator/mm-node.ts': [
       'runtime/orchestrator/mm-node.ts',
@@ -116,7 +118,7 @@ const fatalIncidentRoutes = [
   {
     name: 'managed-runtime',
     steps: [
-      ['runtime/runtime/loop.ts', ['await config.onFatal({', 'runtimeProcess.exit(1);']],
+      ['runtime/runtime/loop.ts', ['await config.onFatal({', 'getRuntimeProcessGlobal()?.exit?.(1);']],
       ['runtime/orchestrator/hub-node.ts', ['onFatal: async payload => {', 'await reportManagedChildFatal({']],
       ['runtime/orchestrator/mm-node.ts', ['onFatal: async payload => {', 'await reportManagedChildFatal({']],
       [
@@ -168,7 +170,7 @@ const fatalIncidentRoutes = [
         'runtime/runtime/j-submit.ts',
         ['J_SUBMIT_FATAL:', "queueBatchResult(env, deps, jInput.jurisdictionName, jTx, 'terminalFailure'"],
       ],
-      ['runtime/runtime/loop.ts', ['await processRuntime(env);', 'await config.onFatal({']],
+      ['runtime/runtime/loop.ts', ['await deps.processRuntime(env);', 'await config.onFatal({']],
     ],
   },
 ] as const;
