@@ -141,9 +141,11 @@ import {
 import {
   ACCOUNT_CAUSAL_TRACE,
   createRuntimeProcessProfile,
+  type RuntimeProcessProfile,
 } from './runtime/frame/process-profile';
 import { createFrameExecutionState } from './runtime/frame/execution-state';
 import { acquireRuntimeFrameWriter } from './runtime/frame/writer-lock';
+import { rollbackUndurableRuntimeFrame } from './runtime/frame/rollback';
 
 const runtimeLog = createStructuredLogger('runtime');
 
@@ -1181,6 +1183,140 @@ const hasPendingLocalReliableOutput = runtimeRecoveryApi.hasPendingLocalReliable
 const applyDeterministicRuntimeOutputPlan = runtimeRecoveryApi.applyDeterministicRuntimeOutputPlan;
 const applyCommittedLocalReliableReceipts = runtimeRecoveryApi.applyCommittedLocalReliableReceipts;
 
+type RuntimeState = NonNullable<Env['runtimeState']>;
+
+type RuntimeIngressDecision =
+  | { ready: true }
+  | { ready: false; outcome: 'no-work' | 'not-ready' };
+
+const collectRuntimeIngress = async (
+  env: Env,
+  inputs: EntityInput[] | undefined,
+  state: RuntimeState,
+  runtimeDelay: number,
+  profile: RuntimeProcessProfile,
+): Promise<RuntimeIngressDecision> => {
+  const ingressTimestamp = env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
+  if (inputs?.length) enqueueRuntimeInputs(env, inputs, undefined, undefined, ingressTimestamp);
+  if (env.pendingOutputs?.length) {
+    enqueueRuntimeContinuation(env, env.pendingOutputs, undefined, undefined, ingressTimestamp);
+    env.pendingOutputs = [];
+  }
+  if (env.networkInbox?.length) {
+    enqueueRuntimeContinuation(env, env.networkInbox, undefined, undefined, ingressTimestamp);
+    env.networkInbox = [];
+  }
+  profile.mark('ingressQueues');
+
+  await materializePendingJurisdictionImportResults(env, runtimeTx => {
+    enqueueRuntimeContinuation(
+      env,
+      undefined,
+      [runtimeTx],
+      undefined,
+      env.scenarioMode ? env.timestamp : getWallClockMs(),
+    );
+  });
+  profile.mark('jurisdictionImports');
+
+  const profileInputs = collectDueLocalProfileCertificationInputs(
+    env,
+    state.pendingProfileCertificationEntityIds,
+  );
+  // Undefined triggers the first complete scan. Later frames consume only the
+  // Entity ids dirtied by the previous committed frame.
+  state.pendingProfileCertificationEntityIds = new Set();
+  if (profileInputs.length > 0) {
+    const profileTimestamp = ensureRuntimeMempool(env).queuedAt ?? ingressTimestamp;
+    enqueueRuntimeContinuation(env, profileInputs, undefined, undefined, profileTimestamp);
+  }
+  profile.mark('profileCertification');
+  profile.mark('enqueue');
+
+  if (!hasRuntimeWork(env)) return { ready: false, outcome: 'no-work' };
+  const gateTimestamp = env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
+  if (!isRuntimeFrameReady(env, gateTimestamp, runtimeDelay)) {
+    return { ready: false, outcome: 'not-ready' };
+  }
+  profile.mark('frameReady');
+  return { ready: true };
+};
+
+type RuntimeFrameCandidate = {
+  transaction: ReturnType<typeof createRuntimeFrameTransaction>;
+  env: Env;
+  state: RuntimeState;
+  mempool: RuntimeInput;
+  runtimeInput: RuntimeInput;
+  mempoolQueuedAt: number | undefined;
+  quietRuntimeLogs: boolean;
+};
+
+const openRuntimeFrameCandidate = (
+  liveEnv: Env,
+  liveState: RuntimeState,
+): RuntimeFrameCandidate => {
+  const mempoolQueuedAt = ensureRuntimeMempool(liveEnv).queuedAt;
+  const quietRuntimeLogs = liveEnv.quietRuntimeLogs === true;
+  const transaction = createRuntimeFrameTransaction(liveEnv);
+  const env = transaction.workingEnv;
+  const state = ensureRuntimeState(env);
+  const mempool = ensureRuntimeMempool(env);
+  for (const replica of env.jReplicas.values()) {
+    replica.jadapter?.setQuietLogs?.(quietRuntimeLogs);
+  }
+
+  if (env.scenarioMode) {
+    env.timestamp = requireBoundaryInteger(
+      requireBoundaryInteger(env.timestamp, 'RUNTIME_TIMESTAMP_INVALID') + 100,
+      'RUNTIME_TIMESTAMP_OVERFLOW',
+    );
+  } else {
+    const liveNow = getWallClockMs();
+    const previousTimestamp = requireBoundaryInteger(env.timestamp, 'RUNTIME_TIMESTAMP_INVALID');
+    if (previousTimestamp > liveNow + TIMING.TIMESTAMP_DRIFT_MS) {
+      throw new Error(`RUNTIME_CLOCK_AHEAD: env.timestamp=${previousTimestamp} wall=${liveNow}`);
+    }
+    const queuedTimestamp = requireBoundaryInteger(
+      mempoolQueuedAt ?? liveNow,
+      'RUNTIME_MEMPOOL_TIMESTAMP_INVALID',
+    );
+    env.timestamp = Math.max(
+      previousTimestamp,
+      Math.min(queuedTimestamp, liveNow + TIMING.TIMESTAMP_DRIFT_MS),
+    );
+  }
+  for (const replica of env.jReplicas.values()) {
+    replica.jadapter?.setBlockTimestamp(env.timestamp);
+  }
+
+  generateHookPings(env);
+  const automaticInputs = [
+    ...collectEntityMempoolWakeInputs(env),
+    ...collectAccountMempoolWakeInputs(env),
+  ];
+  const explicitKeys = new Set(
+    mempool.entityInputs.map(input =>
+      `${String(input.entityId || '').toLowerCase()}:${String(input.signerId || '').toLowerCase()}`),
+  );
+  const dedupedAutomaticInputs = automaticInputs.filter(input => {
+    const key = `${input.entityId.toLowerCase()}:${input.signerId.toLowerCase()}`;
+    if (explicitKeys.has(key)) return false;
+    explicitKeys.add(key);
+    return true;
+  });
+  const runtimeInput: RuntimeInput = {
+    runtimeTxs: [...mempool.runtimeTxs],
+    entityInputs: [...mempool.entityInputs, ...dedupedAutomaticInputs],
+    ...(mempool.jInputs?.length ? { jInputs: [...mempool.jInputs] } : {}),
+    ...(mempool.reliableReceipts?.length
+      ? { reliableReceipts: [...mempool.reliableReceipts] }
+      : {}),
+  };
+  liveState.inFlightEntityInputs = runtimeInput.entityInputs.length;
+  return { transaction, env, state, mempool, runtimeInput, mempoolQueuedAt, quietRuntimeLogs };
+};
+
 // === CONSENSUS PROCESSING ===
 // ONE TICK = ONE ITERATION. No cascade. E→E communication always requires new tick.
 
@@ -1215,154 +1351,39 @@ export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDe
       throw new Error(`FRAME_STEP: Stopped at frame ${env.height} for debugging`);
     }
 
-    const ingressNow = env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
-    if (inputs && inputs.length > 0) {
-      enqueueRuntimeInputs(env, inputs, undefined, undefined, ingressNow);
-    }
-    if (env.pendingOutputs && env.pendingOutputs.length > 0) {
-      enqueueRuntimeContinuation(env, env.pendingOutputs, undefined, undefined, ingressNow);
-      env.pendingOutputs = [];
-    }
-    if (env.networkInbox && env.networkInbox.length > 0) {
-      enqueueRuntimeContinuation(env, env.networkInbox, undefined, undefined, ingressNow);
-      env.networkInbox = [];
-    }
-    processProfile.mark('ingressQueues');
-    await materializePendingJurisdictionImportResults(env, runtimeTx => {
-      enqueueRuntimeContinuation(
-        env,
-        undefined,
-        [runtimeTx],
-        undefined,
-        env.scenarioMode ? env.timestamp : getWallClockMs(),
-      );
-    });
-    processProfile.mark('jurisdictionImports');
-    const pendingProfileCertificationEntityIds = processState.pendingProfileCertificationEntityIds;
-    const profileCertificationInputs = collectDueLocalProfileCertificationInputs(
-      env,
-      pendingProfileCertificationEntityIds,
-    );
-    // Undefined means the first post-start scan covered every local Entity.
-    // Later scans consume only Entities dirtied by the preceding committed
-    // Runtime frame; a crash naturally restores the one-time full scan.
-    processState.pendingProfileCertificationEntityIds = new Set();
-    if (profileCertificationInputs.length > 0) {
-      // Derived local work belongs to the already-open ingress boundary. Do
-      // not replace an explicit queued timestamp with the wall clock observed
-      // later by process(); that would make the same signed input hash
-      // differently depending on scheduler latency.
-      const profileIngressTimestamp = ensureRuntimeMempool(env).queuedAt ?? ingressNow;
-      enqueueRuntimeContinuation(env, profileCertificationInputs, undefined, undefined, profileIngressTimestamp);
-    }
-    processProfile.mark('profileCertification');
-    processProfile.mark('enqueue');
-
-    if (!hasRuntimeWork(env)) {
-      processProfile.outcome = 'no-work';
+    const ingress = await collectRuntimeIngress(env, inputs, processState, runtimeDelay, processProfile);
+    if (!ingress.ready) {
+      processProfile.outcome = ingress.outcome;
       return env;
     }
 
-    const frameGateNow = env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
-    if (!isRuntimeFrameReady(env, frameGateNow, runtimeDelay)) {
-      processProfile.outcome = 'not-ready';
-      return env;
-    }
-    processProfile.mark('frameReady');
-
-    const mempoolQueuedAt = ensureRuntimeMempool(env).queuedAt;
-    const quietRuntimeLogs = env.quietRuntimeLogs === true;
-    frame.transaction = createRuntimeFrameTransaction(env);
-    env = frame.transaction.workingEnv;
-    let state = ensureRuntimeState(env);
-    const mempool = ensureRuntimeMempool(env);
-    for (const jReplica of env.jReplicas?.values?.() ?? []) {
-      jReplica.jadapter?.setQuietLogs?.(quietRuntimeLogs);
-    }
-
-    if (env.scenarioMode) {
-      env.timestamp = requireBoundaryInteger(
-        requireBoundaryInteger(env.timestamp, 'RUNTIME_TIMESTAMP_INVALID') + 100,
-        'RUNTIME_TIMESTAMP_OVERFLOW',
-      );
-    } else {
-      const liveNow = getWallClockMs();
-      const previousTimestamp = requireBoundaryInteger(env.timestamp, 'RUNTIME_TIMESTAMP_INVALID');
-      if (previousTimestamp > liveNow + TIMING.TIMESTAMP_DRIFT_MS) {
-        throw new Error(`RUNTIME_CLOCK_AHEAD: env.timestamp=${previousTimestamp} wall=${liveNow}`);
-      }
-      const ingressTimestamp = requireBoundaryInteger(mempoolQueuedAt ?? liveNow, 'RUNTIME_MEMPOOL_TIMESTAMP_INVALID');
-      const boundedIngressTimestamp = Math.min(ingressTimestamp, liveNow + TIMING.TIMESTAMP_DRIFT_MS);
-      env.timestamp = Math.max(previousTimestamp, boundedIngressTimestamp);
-    }
-    for (const jReplica of env.jReplicas?.values?.() ?? []) {
-      jReplica.jadapter?.setBlockTimestamp(env.timestamp);
-    }
-
-    // Inject pings for entities with due scheduled hooks (setTimeout-like)
-    generateHookPings(env);
-
-    const automaticWakeInputs = [...collectEntityMempoolWakeInputs(env), ...collectAccountMempoolWakeInputs(env)];
-    const explicitEntityInputKeys = new Set(
-      mempool.entityInputs.map(
-        input => `${String(input.entityId || '').toLowerCase()}:${String(input.signerId || '').toLowerCase()}`,
-      ),
-    );
-    const dedupedAutomaticWakeInputs = automaticWakeInputs.filter(input => {
-      const key = `${input.entityId.toLowerCase()}:${input.signerId.toLowerCase()}`;
-      if (explicitEntityInputKeys.has(key)) return false;
-      explicitEntityInputKeys.add(key);
-      return true;
-    });
-    const runtimeInput: RuntimeInput = {
-      runtimeTxs: [...mempool.runtimeTxs],
-      entityInputs: [...mempool.entityInputs, ...dedupedAutomaticWakeInputs],
-      ...(mempool.jInputs && mempool.jInputs.length > 0 ? { jInputs: [...mempool.jInputs] } : {}),
-      ...(mempool.reliableReceipts && mempool.reliableReceipts.length > 0
-        ? { reliableReceipts: [...mempool.reliableReceipts] }
-        : {}),
-    };
-    // Automatic Entity/account wakes join after the live mempool is detached.
-    // Publish their exact count before the first await in frame processing.
-    processState.inFlightEntityInputs = runtimeInput.entityInputs.length;
-    let runtimeInputDrained = false;
-    let runtimeInputForRequeue: RuntimeInput | undefined;
+    const candidate = openRuntimeFrameCandidate(env, processState);
+    frame.transaction = candidate.transaction;
+    env = candidate.env;
+    let state = candidate.state;
+    const mempool = candidate.mempool;
+    const runtimeInput = candidate.runtimeInput;
+    const mempoolQueuedAt = candidate.mempoolQueuedAt;
+    const quietRuntimeLogs = candidate.quietRuntimeLogs;
     frame.rollbackUndurable = async (
       error: unknown,
       options: { quarantine?: boolean; requeue?: boolean } = {},
     ): Promise<Error> => {
-      const originalError = error instanceof Error ? error : new Error(String(error));
-      const workingMempoolAfterAttempt = frame.transaction
-        ? ensureRuntimeMempool(frame.transaction.workingEnv)
-        : ensureRuntimeMempool(env);
-      const rollbackErrors = frame.transaction ? await abortRuntimeFrameTransaction(frame.transaction) : [];
-      env = liveEnv;
-      state = ensureRuntimeState(env);
-      frame.reliableIngressCommits = [];
-      frame.reliableReceiptSenderCheckpoint = undefined;
-      const quarantineResult =
-        options.quarantine === false
-          ? null
-          : quarantineLiveRuntimeInput(liveEnv, runtimeInput, originalError, quietRuntimeLogs);
-      if (!quarantineResult && options.requeue !== false) {
-        const retry = runtimeInputDrained
-          ? (() => {
-              const attempted = runtimeInputForRequeue ?? cloneRuntimeFrameMempool(runtimeInput);
-              if (attempted.queuedAt === undefined) {
-                attempted.queuedAt = mempoolQueuedAt ?? frameTimestampBeforeTick;
-              }
-              return prependOlderRuntimeInput(attempted, workingMempoolAfterAttempt);
-            })()
-          : workingMempoolAfterAttempt;
-        const restoredMempool = prependOlderRuntimeInput(retry, ensureRuntimeMempool(liveEnv));
-        liveEnv.runtimeMempool = restoredMempool;
-        liveEnv.runtimeInput = restoredMempool;
-      }
-      return rollbackErrors.length > 0
-        ? new AggregateError([originalError, ...rollbackErrors], 'RUNTIME_APPLY_ROLLBACK_FAILED')
-        : quarantineResult
-          ? new RuntimeInputQuarantinedError(originalError)
-          : originalError;
+      const rollback = await rollbackUndurableRuntimeFrame({
+        frame,
+        liveEnv,
+        attemptedEnv: env,
+        runtimeInput,
+        mempoolQueuedAt,
+        frameTimestampBeforeTick,
+        quietRuntimeLogs,
+        quarantine: (input, cause, quiet) =>
+          quarantineLiveRuntimeInput(liveEnv, input, cause, quiet),
+        quarantinedError: cause => new RuntimeInputQuarantinedError(cause),
+      }, error, options);
+      env = rollback.env;
+      state = rollback.state;
+      return rollback.error;
     };
     processProfile.metrics.runtimeTxs = runtimeInput.runtimeTxs.length;
     processProfile.metrics.entityInputs = runtimeInput.entityInputs.length;
@@ -1377,7 +1398,7 @@ export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDe
     if (mempool.jInputs) mempool.jInputs = [];
     if (mempool.reliableReceipts) mempool.reliableReceipts = [];
     mempool.queuedAt = undefined;
-    runtimeInputDrained = true;
+    frame.inputDrained = true;
 
     const jEventFramePrioritized = prioritizeJEventFrame(runtimeInput, mempool, mempoolQueuedAt ?? env.timestamp ?? 0);
     runtimeInput.entityInputs = prioritizeEntityConsensusInputs(runtimeInput.entityInputs, input =>
@@ -1398,7 +1419,7 @@ export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDe
       mempoolQueuedAt ?? env.timestamp ?? 0,
     );
     runtimeInput.entityInputs = await prepareHtlcPaymentEntityInputs(env, runtimeInput.entityInputs);
-    runtimeInputForRequeue = cloneRuntimeFrameMempool(runtimeInput);
+    frame.inputForRequeue = cloneRuntimeFrameMempool(runtimeInput);
     if (ACCOUNT_CAUSAL_TRACE) {
       const ingress = summarizeRuntimeAccountCausality(runtimeInput.entityInputs);
       if (causalTraceContainsWork(ingress)) {

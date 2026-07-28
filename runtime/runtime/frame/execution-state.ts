@@ -1,6 +1,7 @@
 import type {
   EnvSnapshot,
   ReliableDeliveryReceipt,
+  RuntimeInput,
 } from '../../types';
 import type {
   ReliableIngressCommit,
@@ -36,6 +37,8 @@ export type FrameExecutionState = {
   transaction: RuntimeFrameTransaction | undefined;
   pendingTraceSnapshot: EnvSnapshot | undefined;
   rollbackUndurable: RuntimeFrameRollback | undefined;
+  inputDrained: boolean;
+  inputForRequeue: RuntimeInput | undefined;
 };
 
 export const createFrameExecutionState = (): FrameExecutionState => ({
@@ -49,4 +52,6 @@ export const createFrameExecutionState = (): FrameExecutionState => ({
   transaction: undefined,
   pendingTraceSnapshot: undefined,
   rollbackUndurable: undefined,
+  inputDrained: false,
+  inputForRequeue: undefined,
 });
