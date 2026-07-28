@@ -70,7 +70,7 @@ test('rebalance defaults reject an inverted or negative jurisdiction policy', ()
 test('both account creation paths seed the local rebalance policy', () => {
   const source = (path: string): string => readFileSync(join(process.cwd(), path), 'utf8');
   const openAccount = source('runtime/entity/tx/handlers/open-account.ts');
-  const inboundAccount = source('runtime/entity/tx/handlers/account.ts');
+  const inboundAccount = source('runtime/entity/tx/handlers/account/inbound-account.ts');
 
   for (const handler of [openAccount, inboundAccount]) {
     expect(handler).toContain('resolveJurisdictionRebalanceDefaults');

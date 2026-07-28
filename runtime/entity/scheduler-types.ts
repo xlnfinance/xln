@@ -75,3 +75,12 @@ export interface CrontabState {
   tasks: Map<CrontabTaskMethod, CrontabTaskState>;
   hooks: Map<string, ScheduledHook>;
 }
+
+/** Mutable effect sinks shared by one isolated Entity crontab pass. */
+export type CrontabExecutionContext = {
+  manualBroadcastInInput: boolean;
+  hashesToSign?: HashToSign[];
+  accountChanges: Set<string>;
+  candidateEffects?: EntityCandidateEffect[];
+};
+import type { EntityCandidateEffect, HashToSign } from '../types';
