@@ -20,7 +20,7 @@ const readText = (path: string): string => {
     'runtime/runtime.ts': [
       'runtime/runtime.ts',
       'runtime/runtime/composition.ts',
-      'runtime/runtime-public-api.ts',
+      'runtime/api/runtime-public.ts',
       'runtime/runtime/frame/apply.ts',
       'runtime/runtime/frame/clone.ts',
       'runtime/runtime/frame/dispatch.ts',

@@ -5,4 +5,4 @@
  * implementation remains split into reviewable state-machine modules.
  */
 export * from './runtime/composition';
-export * from './runtime-public-api';
+export * from './api/runtime-public';

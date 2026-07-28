@@ -13,8 +13,6 @@ const ROOT_ENTRYPOINTS = new Set(['runtime/runtime.ts']);
 const ROOT_FILE_DEBT = new Set([
   'runtime/constants.ts',
   'runtime/ids.ts',
-  'runtime/public-utilities.ts',
-  'runtime/runtime-public-api.ts',
   'runtime/state-helpers.ts',
   'runtime/types.ts',
   'runtime/utils.ts',

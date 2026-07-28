@@ -11,16 +11,16 @@ export {
   isEntityRegistered,
   requestNamedEntity,
   resolveEntityIdentifier,
-} from './entity/factory';
+} from '../entity/factory';
 export {
   debugFundReserves,
   getBrowserVMInstance,
   getEntityInfoFromChain,
   getJurisdictionByAddress,
   submitProcessBatch,
-} from './jadapter';
-export { getAvailableJurisdictions } from './jurisdiction/config';
-export { createProfileUpdateTx } from './routing/name-resolution';
+} from '../jadapter';
+export { getAvailableJurisdictions } from '../jurisdiction/config';
+export { createProfileUpdateTx } from '../routing/name-resolution';
 export {
   createDemoDelta,
   deriveDelta,
@@ -32,15 +32,15 @@ export {
   getTokenInfo,
   isLeft,
   isLiquidSwapToken,
-} from './account/utils';
+} from '../account/utils';
 export {
   computeSwapPriceTicks,
   getSwapLotScale,
   prepareSwapOrder,
   quantizeSwapOrder,
   requantizeRemainingSwapAtPrice,
-} from './orderbook';
-export { listOpenSwapOffers } from './orderbook/open-swap-offers';
+} from '../orderbook';
+export { listOpenSwapOffers } from '../orderbook/open-swap-offers';
 export {
   BigIntMath,
   calculatePercentageEthers,
@@ -50,11 +50,11 @@ export {
   formatTokenAmount,
   formatTokenAmountEthers,
   parseTokenAmount,
-} from './account/financial-utils';
-export { calculateSolvency, verifySolvency } from './account/solvency';
-export { classifyBilateralState, getAccountBarVisual } from './account/view-state';
-export { createDefaultDelta, isDelta, validateAccountDeltas, validateDelta } from './validation-utils';
-export { decode, encode } from './storage/snapshot-coder';
+} from '../account/financial-utils';
+export { calculateSolvency, verifySolvency } from '../account/solvency';
+export { classifyBilateralState, getAccountBarVisual } from '../account/view-state';
+export { createDefaultDelta, isDelta, validateAccountDeltas, validateDelta } from '../validation-utils';
+export { decode, encode } from '../storage/snapshot-coder';
 export {
   CHAIN_IDS,
   createLazyJId,
@@ -87,7 +87,7 @@ export {
   toSignerId,
   XLN_COORDINATOR,
   XLN_URI_SCHEME,
-} from './ids';
+} from '../ids';
 export {
   clearDatabase,
   formatEntityDisplay,
@@ -97,7 +97,7 @@ export {
   getEntityDisplayInfo,
   getSignerDisplayInfo,
   hashToAvatar,
-} from './utils';
-export { formatEntityId, getEntityShortId } from './utils';
-export { safeStringify } from './protocol/serialization';
-export { resolveEntityProposerId } from './state-helpers';
+} from '../utils';
+export { formatEntityId, getEntityShortId } from '../utils';
+export { safeStringify } from '../protocol/serialization';
+export { resolveEntityProposerId } from '../state-helpers';

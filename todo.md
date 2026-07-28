@@ -85,6 +85,16 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   invariant, WAL boundary, adversarial-input boundary and intentionally
   non-obvious ordering rule. Comments must explain why the tempting alternative
   is unsafe rather than restating the code.
+- [ ] Replace technical-history top-level folders with an owner-first tree,
+  preserving the distinct guarantees as named subfolders rather than unrelated
+  roots: `storage/{wal,state,views,queries,recovery}`,
+  `jurisdiction/{machine,adapter}`, `network/{p2p,relay}`,
+  `api/{public,server,runtime}`, and `watchtower/push`. Eliminate singleton
+  `state/` by moving Runtime construction under `runtime/`; move the single MPP
+  module from `agent-payments/` to `protocol/payments/`; delete empty
+  untracked `engine/` and `e2e/`. Perform path-only batches with exact export
+  surface checks and no compatibility re-exports, then tighten the dependency
+  and root-surface ratchets after every move.
 - [ ] Normalize the three nested state-machine vocabularies (owner-approved)
   without pretending
   their consensus protocols are identical. Preferred names are `RuntimeState`,
