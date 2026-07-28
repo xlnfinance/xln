@@ -13,6 +13,10 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   reliable-frontier assertions on both peers, rollback ordering, and measured
   clone/apply/WAL/dispatch p50/p95. Record the public `runtime.ts` export
   surface and always rebuild the browser bundle before browser evidence.
+  Preserve explicit regressions proving that a queued writer rechecks sticky
+  halt after waking, a post-WAL notification failure cannot downgrade a
+  durable commit, and abort closes candidate-only storage handles without
+  touching live handles.
 - [ ] Prove and fix the likely unilateral rebalance consensus wedge first.
   Reproduce bilateral request → reverse payment/self-pay → hub crontab and
   assert equal Account roots and pending state on both peers. Crontab must
@@ -44,7 +48,9 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   Extract transaction, commit, rollback and dispatch modules; keep
   `runtime/core.ts` a short composition root with no alternate commit path.
   Precompute every throwing assertion before install; any doubt after WAL
-  halts and reloads the durable frame.
+  halts and reloads the durable frame. Operational notifications happen only
+  after the durable result is fixed and can report failure but never reclassify
+  or roll back that result.
 - [ ] Make post-state Runtime ingress rejection explicit and deterministic.
   Inputs admitted against frame H may become stale after the single writer
   commits H+1; classify authenticated terminal protocol rejection separately
