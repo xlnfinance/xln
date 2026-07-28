@@ -51,7 +51,7 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   `runtime/account`. Reduce every coordinator to at most 150 lines and every
   pure/helper function to at most 100 lines, with no file above 3000 lines;
   `check:state-machine-size` now reports zero functions over 150 lines and
-  ratchets the remaining 43 functions over 100 lines; it rejects any new debt
+  ratchets the remaining 42 functions over 100 lines; it rejects any new debt
   and every file over 3000 lines. Keep reducing the helper count to zero,
   tightening the exact ceiling after each phase split.
   Keep Runtime-machine logic under `runtime/runtime/`, Entity-machine logic

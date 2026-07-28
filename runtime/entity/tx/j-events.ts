@@ -445,20 +445,33 @@ const retireDisputeEvidenceEpoch = (account: AccountState): void => {
   delete account.disputeArgumentSnapshotsByHash;
 };
 
-async function applyDisputeStartedJEvent(context: FinalizedJEventContext): Promise<void> {
-  const { newState, event, env, blockNumber, transactionHash, mempoolOps, outputs, dirtyAccounts } = context;
-  const data = event.data as {
-    sender: string;
-    counterentity: string;
-    nonce: string;
-    proofbodyHash: string;
-    starterInitialArguments: string;
-    starterIncrementedArguments: string;
-    watchSeed?: unknown;
-    batchNonce?: number;
-    disputeTimeout?: unknown;
-    jNonce?: unknown;
-  };
+type DisputeStartedEventData = {
+  sender: string;
+  counterentity: string;
+  nonce: string;
+  proofbodyHash: string;
+  starterInitialArguments: string;
+  starterIncrementedArguments: string;
+  watchSeed?: unknown;
+  batchNonce?: number;
+  disputeTimeout?: unknown;
+  jNonce?: unknown;
+};
+
+type StartedDispute = {
+  counterpartyId: string;
+  senderStr: string;
+  entityIdNorm: string;
+  weAreStarter: boolean;
+  starterInitialArguments: string;
+  disputeTimeout: number;
+};
+
+const initializeStartedDispute = (
+  context: FinalizedJEventContext,
+  data: DisputeStartedEventData,
+): StartedDispute | null => {
+  const { newState, env, blockNumber, dirtyAccounts } = context;
   const { sender, counterentity, nonce, proofbodyHash } = data;
   const {
     senderStr,
@@ -471,7 +484,7 @@ async function applyDisputeStartedJEvent(context: FinalizedJEventContext): Promi
 
   if (!account) {
     jEventLog.warn('dispute_started.account_missing', { account: shortId(candidateCounterpartyId), entity: shortId(entityIdNorm) });
-    return;
+    return null;
   }
 
   dirtyAccounts.add(counterpartyId.toLowerCase());
@@ -515,14 +528,49 @@ async function applyDisputeStartedJEvent(context: FinalizedJEventContext): Promi
       storedProofKnown,
     });
   }
+  return {
+    counterpartyId,
+    senderStr,
+    entityIdNorm,
+    weAreStarter,
+    starterInitialArguments: data.starterInitialArguments || '0x',
+    disputeTimeout,
+  };
+};
 
-  const starterInitialArguments = data.starterInitialArguments || '0x';
+const applyStartedDisputeFollowups = (
+  context: FinalizedJEventContext,
+  data: DisputeStartedEventData,
+  dispute: StartedDispute,
+): void => {
+  const {
+    newState,
+    env,
+    blockNumber,
+    transactionHash,
+    mempoolOps,
+    outputs,
+  } = context;
+  const {
+    counterpartyId,
+    senderStr,
+    weAreStarter,
+    starterInitialArguments,
+    disputeTimeout,
+  } = dispute;
   const disputeSecrets = decodeDisputeStarterInitialSecrets(starterInitialArguments);
-  if (disputeSecrets.length > 0) {
-    for (const disputeSecret of disputeSecrets) {
-      const hashlock = hashHtlcSecret(disputeSecret);
-      applyKnownHtlcSecret(env, newState, mempoolOps, outputs, hashlock, disputeSecret, blockNumber, 'DisputeStarted');
-    }
+  for (const disputeSecret of disputeSecrets) {
+    const hashlock = hashHtlcSecret(disputeSecret);
+    applyKnownHtlcSecret(
+      env,
+      newState,
+      mempoolOps,
+      outputs,
+      hashlock,
+      disputeSecret,
+      blockNumber,
+      'DisputeStarted',
+    );
   }
   queueCrossJurisdictionSalvageFromDispute(
     env,
@@ -540,18 +588,22 @@ async function applyDisputeStartedJEvent(context: FinalizedJEventContext): Promi
     starterInitialArguments,
   );
 
-  addMessage(newState, `⚔️ DISPUTE ${weAreStarter ? 'STARTED' : 'vs us'} with ${counterpartyId.slice(-4)}, timeout: block ${account.activeDispute.disputeTimeout}`);
+  addMessage(
+    newState,
+    `⚔️ DISPUTE ${weAreStarter ? 'STARTED' : 'vs us'} with ` +
+      `${counterpartyId.slice(-4)}, timeout: block ${disputeTimeout}`,
+  );
   if (!weAreStarter) {
     const ops = emptyOpBreakdown();
     ops.disputeStarts = 1;
     appendBatchHistory(newState, {
-      batchHash: `event:dispute-start:${String(proofbodyHash).slice(0, 12)}`,
+      batchHash: `event:dispute-start:${String(data.proofbodyHash).slice(0, 12)}`,
       txHash: transactionHash || '',
       status: 'confirmed' as const,
       broadcastedAt: newState.timestamp,
       confirmedAt: newState.timestamp,
       opCount: 1,
-      entityNonce: Number(nonce || 0),
+      entityNonce: Number(data.nonce || 0),
       jBlockNumber: Number(blockNumber || 0),
       operations: ops,
       source: 'counterparty-event' as const,
@@ -560,19 +612,22 @@ async function applyDisputeStartedJEvent(context: FinalizedJEventContext): Promi
     });
   }
 
-  if (newState.crontabState) {
-    const kickoffDelayMs = weAreStarter ? 1 : 5000;
-    const logicalTimestamp =
-      Number.isFinite(Number(newState.timestamp)) && Number(newState.timestamp) >= 0
-        ? Number(newState.timestamp)
-        : 0;
-    scheduleHook(newState.crontabState, {
-      id: `dispute-deadline:${counterpartyId.toLowerCase()}`,
-      triggerAt: logicalTimestamp + kickoffDelayMs,
-      type: 'dispute_deadline',
-      data: { accountId: counterpartyId },
-    });
-  }
+  if (!newState.crontabState) return;
+  const kickoffDelayMs = weAreStarter ? 1 : 5000;
+  const timestamp = Number(newState.timestamp);
+  const logicalTimestamp = Number.isFinite(timestamp) && timestamp >= 0 ? timestamp : 0;
+  scheduleHook(newState.crontabState, {
+    id: `dispute-deadline:${counterpartyId.toLowerCase()}`,
+    triggerAt: logicalTimestamp + kickoffDelayMs,
+    type: 'dispute_deadline',
+    data: { accountId: counterpartyId },
+  });
+};
+
+async function applyDisputeStartedJEvent(context: FinalizedJEventContext): Promise<void> {
+  const data = context.event.data as DisputeStartedEventData;
+  const dispute = initializeStartedDispute(context, data);
+  if (dispute) applyStartedDisputeFollowups(context, data, dispute);
 }
 
 type DisputeFinalizedEventData = {
