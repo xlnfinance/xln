@@ -189,6 +189,576 @@ const sendRelayDelivery = (
   }
 };
 
+const createRelayRouteContext = (
+  config: RelayRouterConfig,
+  ws: RelaySocketLike,
+  msg: RuntimeWsMessage,
+) => {
+  const type = String(msg.type);
+  const fromKey = normalizeRuntimeKey(msg.from);
+  const toKey = normalizeRuntimeKey(msg.to);
+  return {
+    config,
+    ws,
+    msg,
+    type,
+    to: msg.to,
+    from: msg.from,
+    payload: msg.payload,
+    id: msg.id,
+    fromKey,
+    toKey,
+    traceId: typeof msg.id === 'string' && msg.id.length > 0
+      ? msg.id
+      : `relay-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+    rememberedRuntimeId: getRememberedSocketRuntimeId(ws),
+    fromEncryptionPubKey: typeof msg.fromEncryptionPubKey === 'string'
+      ? msg.fromEncryptionPubKey
+      : null,
+    deliveryEntityId: typeof msg.entityId === 'string' && msg.entityId.length > 0
+      ? msg.entityId
+      : undefined,
+    deliveryTxCount: typeof msg.txs === 'number' && Number.isFinite(msg.txs)
+      ? msg.txs
+      : undefined,
+  };
+};
+
+type RelayRouteContext = ReturnType<typeof createRelayRouteContext>;
+
+const handleHello = (context: RelayRouteContext): boolean => {
+  const { config, ws, type, from, fromKey, traceId, fromEncryptionPubKey } = context;
+  const { store, send } = config;
+  if (type !== 'hello' || !from) return false;
+  if (!isCanonicalRuntimeId(from)) {
+    pushDebugEvent(store, {
+      event: 'error',
+      from,
+      msgType: type,
+      status: 'rejected',
+      reason: 'Invalid runtimeId in hello',
+      details: { traceId },
+    });
+    send(ws, serializeWsMessage({ type: 'error', error: 'Invalid runtimeId in hello' }));
+    return true;
+  }
+  if (config.requireHelloAuth !== false) {
+    const challengeAccepted = config.consumeHelloChallenge?.(ws as object, context.msg.auth?.nonce) ?? true;
+    const authError = challengeAccepted
+      ? verifyHelloAuth(
+          fromKey,
+          fromEncryptionPubKey!,
+          context.msg.auth,
+          config.helloSkewMs ?? DEFAULT_HELLO_SKEW_MS,
+        )
+      : 'Hello challenge missing, expired, or already consumed';
+    if (authError) {
+      pushDebugEvent(store, {
+        event: 'hello',
+        runtimeId: from,
+        from,
+        msgType: type,
+        status: 'rejected',
+        reason: 'HELLO_AUTH_INVALID',
+        details: { traceId, authError },
+      });
+      send(ws, serializeWsMessage({ type: 'error', error: authError }));
+      return true;
+    }
+  }
+  const existingClient = store.clients.get(fromKey);
+  if (existingClient && existingClient.ws !== ws) {
+    // A fresh challenge signed by the same runtime key proves reconnect
+    // authority. Install the new socket before closing the stale one so its
+    // close callback cannot remove the replacement.
+    removeClient(store, existingClient.ws);
+    closeSupersededRuntimeSocket(existingClient.ws);
+    pushDebugEvent(store, {
+      event: 'ws_runtime_replaced',
+      runtimeId: fromKey,
+      from: fromKey,
+      msgType: type,
+      status: 'reconnected',
+      details: { traceId },
+    });
+  }
+  if (!registerClient(store, from, ws)) {
+    pushDebugEvent(store, {
+      event: 'hello',
+      runtimeId: from,
+      from,
+      msgType: type,
+      status: 'rejected',
+      reason: 'DUPLICATE_RUNTIME_CONNECTION',
+      details: { traceId },
+    });
+    closeDuplicateRuntimeSocket(ws);
+    return true;
+  }
+  rememberSocketRuntimeId(ws, fromKey);
+  if (fromEncryptionPubKey) cacheEncryptionKey(store, fromKey, fromEncryptionPubKey);
+  pushDebugEvent(store, {
+    event: 'hello',
+    runtimeId: from,
+    from,
+    msgType: type,
+    status: 'connected',
+    details: { traceId },
+  });
+  send(ws, serializeWsMessage({ type: 'hello_ack', to: fromKey }));
+  flushPendingToSocket(store, fromKey, ws, send);
+  return true;
+};
+
+type StoredGossipProfiles = {
+  received: number;
+  stored: number;
+  droppedMalformed: number;
+  droppedInvalidSignature: number;
+  profiles: Profile[];
+};
+
+const storeAnnouncedProfiles = async (
+  context: RelayRouteContext,
+  profiles: Profile[],
+): Promise<StoredGossipProfiles> => {
+  const { config, from, fromKey, type, traceId } = context;
+  const result: StoredGossipProfiles = {
+    received: profiles.length,
+    stored: 0,
+    droppedMalformed: 0,
+    droppedInvalidSignature: 0,
+    profiles: [],
+  };
+  const verifyProfile = config.verifyProfile ?? verifyProfileSignature;
+  for (const profile of profiles) {
+    if (!profile || typeof profile !== 'object') continue;
+    const normalized: Profile = { ...profile, runtimeId: profile.runtimeId || fromKey };
+    try {
+      const verified = await verifyProfile(normalized);
+      if (!verified.valid) {
+        result.droppedInvalidSignature += 1;
+        pushDebugEvent(config.store, {
+          event: 'error',
+          from,
+          msgType: type,
+          status: 'rejected',
+          reason: 'GOSSIP_PROFILE_SIGNATURE_INVALID',
+          details: {
+            entityId: typeof normalized.entityId === 'string' ? normalized.entityId : null,
+            verifyReason: verified.reason || 'invalid',
+            traceId,
+          },
+        });
+        continue;
+      }
+      if (storeVerifiedGossipProfile(config.store, normalized)) {
+        result.stored += 1;
+        result.profiles.push(normalized);
+      }
+      config.onGossipStore?.(normalized);
+    } catch (error) {
+      result.droppedMalformed += 1;
+      pushDebugEvent(config.store, {
+        event: 'error',
+        from,
+        msgType: type,
+        status: 'rejected',
+        reason: 'GOSSIP_PROFILE_DROPPED_MALFORMED',
+        details: {
+          entityId: typeof normalized.entityId === 'string' ? normalized.entityId : null,
+          message: error instanceof Error ? error.message : String(error),
+          traceId,
+        },
+      });
+    }
+  }
+  return result;
+};
+
+const broadcastGossipProfiles = (
+  context: RelayRouteContext,
+  storedProfiles: Profile[],
+): number => {
+  if (storedProfiles.length === 0) return 0;
+  const { config, fromKey, id } = context;
+  const defaultEntityIds = new Set(
+    getDefaultGossipProfiles(config.store, DEFAULT_GOSSIP_SYNC_LIMIT)
+      .map(profile => profile.entityId.toLowerCase()),
+  );
+  const profiles = storedProfiles.filter(
+    profile => defaultEntityIds.has(profile.entityId.toLowerCase()) || profile.metadata.isHub === true,
+  );
+  if (profiles.length === 0) return 0;
+  let targets = 0;
+  for (const [runtimeId, client] of config.store.clients.entries()) {
+    if (!client?.ws || (fromKey && runtimeId === fromKey)) continue;
+    config.send(client.ws, serializeWsMessage({
+      type: 'gossip_update',
+      id: `gossip_update_${Date.now()}`,
+      from: config.store.serverId,
+      to: runtimeId,
+      timestamp: Date.now(),
+      payload: { profiles },
+      ...(id ? { inReplyTo: id } : {}),
+    }));
+    targets += 1;
+  }
+  return targets;
+};
+
+const handleGossipAnnounce = async (context: RelayRouteContext): Promise<boolean> => {
+  const { config, ws, payload, type, from, fromKey, rememberedRuntimeId, traceId } = context;
+  if (type !== 'gossip_announce') return false;
+  if (!fromKey || rememberedRuntimeId !== fromKey) {
+    pushDebugEvent(config.store, {
+      event: 'error',
+      from,
+      msgType: type,
+      status: 'rejected',
+      reason: 'GOSSIP_ANNOUNCE_UNREGISTERED_RUNTIME',
+      details: { traceId },
+    });
+    config.send(ws, serializeWsMessage({
+      type: 'error',
+      error: 'Gossip announce requires registered relay hello',
+    }));
+    return true;
+  }
+  const value = payload && typeof payload === 'object' ? payload as { profiles?: unknown } : {};
+  const announced = (Array.isArray(value.profiles) ? value.profiles : []) as Profile[];
+  const stored = await storeAnnouncedProfiles(context, announced);
+  const broadcastTargets = broadcastGossipProfiles(context, stored.profiles);
+  pushDebugEvent(config.store, {
+    event: 'gossip_store',
+    from,
+    msgType: type,
+    status: 'stored',
+    details: {
+      received: stored.received,
+      stored: stored.stored,
+      droppedMalformed: stored.droppedMalformed,
+      droppedInvalidSignature: stored.droppedInvalidSignature,
+      broadcastTargets,
+      traceId,
+    },
+  });
+  return true;
+};
+
+const handleSimpleRelayMessage = (context: RelayRouteContext): boolean => {
+  const { config, ws, payload, type, from, to, id, traceId } = context;
+  if (type === 'gossip_request') {
+    const request = payload && typeof payload === 'object' ? payload as {
+      ids?: string[];
+      set?: 'default' | 'hubs';
+      updatedSince?: number;
+      limit?: number;
+    } : {};
+    const profiles = getProfileBatch(config.store, request);
+    pushDebugEvent(config.store, {
+      event: 'gossip_request',
+      from,
+      to,
+      msgType: type,
+      details: {
+        returnedProfiles: profiles.length,
+        ids: request.ids ?? [],
+        set: request.set ?? 'default',
+        updatedSince: request.updatedSince ?? null,
+        limit: request.limit ?? DEFAULT_GOSSIP_SYNC_LIMIT,
+        traceId,
+      },
+    });
+    config.send(ws, serializeWsMessage({
+      type: 'gossip_response',
+      id: `gossip_${Date.now()}`,
+      from: config.store.serverId,
+      ...(from ? { to: from } : {}),
+      timestamp: Date.now(),
+      payload: { profiles },
+      ...(id ? { inReplyTo: id } : {}),
+    }));
+    return true;
+  }
+  if (type === 'debug_event') {
+    pushDebugEvent(config.store, {
+      event: 'debug_event',
+      from,
+      to,
+      msgType: type,
+      details: { traceId, payload },
+    });
+    return true;
+  }
+  if (type === 'ping') {
+    config.send(ws, serializeWsMessage({ type: 'pong', ...(id ? { inReplyTo: id } : {}) }));
+    return true;
+  }
+  return false;
+};
+
+const isRoutableRelayType = (type: string): boolean =>
+  type === 'entity_inputs' ||
+  type === 'entity_input_receipt' ||
+  type === 'gossip_response' ||
+  LIVE_RECOVERY_MESSAGE_TYPES.has(type);
+
+const routeDeliveryDetails = (context: RelayRouteContext): Record<string, unknown> => ({
+  traceId: context.traceId,
+  ...(context.deliveryEntityId ? { entityId: context.deliveryEntityId } : {}),
+  ...(context.deliveryTxCount !== undefined ? { txs: context.deliveryTxCount } : {}),
+});
+
+const forwardToRemoteRuntime = (
+  context: RelayRouteContext,
+  isLocalTarget: boolean,
+): boolean => {
+  const { config, msg, type, from, to, toKey } = context;
+  const target = config.store.clients.get(toKey);
+  if (!target || isLocalTarget) return false;
+  const delivery = sendRelayDelivery(config, target.ws, msg);
+  if (isDeliveryDelivered(delivery)) {
+    relayLog('[RELAY] → forwarding to WS client');
+    pushDebugEvent(config.store, {
+      event: 'delivery',
+      from,
+      to,
+      msgType: type,
+      encrypted: msg.encrypted === true,
+      status: 'delivered',
+      delivery,
+      details: routeDeliveryDetails(context),
+    });
+    return true;
+  }
+  removeClient(config.store, target.ws);
+  const sendFailure = delivery.code !== 'TARGET_SOCKET_NOT_OPEN' && delivery.code !== 'DELIVERY_STALE_TARGET';
+  pushDebugEvent(config.store, {
+    event: 'delivery',
+    from,
+    to,
+    msgType: type,
+    encrypted: msg.encrypted === true,
+    status: sendFailure ? 'send-failed' : 'stale-target',
+    reason: delivery.failure?.message ?? delivery.code,
+    delivery,
+    details: routeDeliveryDetails(context),
+  });
+  return false;
+};
+
+type LocalDeliveryDisposition = 'delivered' | 'rejected' | 'unavailable';
+
+const deliverToLocalRuntime = async (
+  context: RelayRouteContext,
+  isLocalTarget: boolean,
+): Promise<LocalDeliveryDisposition> => {
+  const { config, ws, msg, type, from, to, payload, traceId } = context;
+  const isApplicationMessage = type === 'entity_inputs' || type === 'entity_input_receipt';
+  if (!isApplicationMessage || !payload || !isLocalTarget) return 'unavailable';
+  try {
+    await config.localDeliver(from, msg);
+    return 'delivered';
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    relayLog(`[RELAY] Local delivery failed: ${reason}`);
+    pushDebugEvent(config.store, {
+      event: 'error',
+      from,
+      to,
+      msgType: type,
+      status: 'local-delivery-failed',
+      reason,
+      delivery: relayDeliveryMetadata('local-delivery-failed', reason),
+      details: { traceId },
+    });
+    // Poisoned ciphertext and unknown local replicas cannot become valid by
+    // replaying. Reject them instead of creating an immortal pending loop.
+    if (NON_RECOVERABLE_LOCAL_DELIVERY_ERRORS.some(part => reason.includes(part))) {
+      config.send(ws, serializeWsMessage({ type: 'error', error: reason }));
+      return 'rejected';
+    }
+    return 'unavailable';
+  }
+};
+
+const rejectUnavailableReliableMessage = (context: RelayRouteContext): boolean => {
+  const { config, ws, msg, type, from, to, id } = context;
+  if (type === 'entity_inputs' || type === 'entity_input_receipt') {
+    const code = type === 'entity_inputs'
+      ? 'ENTITY_INPUT_TARGET_NOT_CONNECTED'
+      : 'ENTITY_INPUT_RECEIPT_TARGET_NOT_CONNECTED';
+    relayLog(`[RELAY] → rejected ${type} (target not connected)`);
+    pushDebugEvent(config.store, {
+      event: 'delivery',
+      from,
+      to,
+      msgType: type,
+      encrypted: msg.encrypted === true,
+      status: 'rejected',
+      reason: code,
+      details: routeDeliveryDetails(context),
+    });
+    config.send(ws, serializeWsMessage({
+      type: 'error',
+      error: code,
+      ...(id ? { inReplyTo: id } : {}),
+      ...(to ? { to } : {}),
+    }));
+    return true;
+  }
+  if (!LIVE_RECOVERY_MESSAGE_TYPES.has(type)) return false;
+  const code = 'RECOVERY_TARGET_NOT_CONNECTED';
+  relayLog(`[RELAY] → rejected ${type} (target not connected)`);
+  pushDebugEvent(config.store, {
+    event: 'delivery',
+    from,
+    to,
+    msgType: type,
+    encrypted: msg.encrypted === true,
+    status: 'rejected',
+    reason: code,
+    details: { traceId: context.traceId },
+  });
+  config.send(ws, serializeWsMessage({
+    type: 'error',
+    error: code,
+    ...(id ? { inReplyTo: id } : {}),
+    ...(to ? { to } : {}),
+  }));
+  return true;
+};
+
+const handleRoutableMessage = async (context: RelayRouteContext): Promise<boolean> => {
+  const { config, ws, msg, type, from, to, payload, toKey, traceId } = context;
+  if (!isRoutableRelayType(type)) return false;
+  if (!toKey) {
+    pushDebugEvent(config.store, {
+      event: 'error',
+      from,
+      msgType: type,
+      status: 'rejected',
+      reason: 'Missing target runtimeId',
+      details: { traceId },
+    });
+    config.send(ws, serializeWsMessage({ type: 'error', error: 'Missing target runtimeId' }));
+    return true;
+  }
+  if (type === 'entity_inputs' && (msg.encrypted !== true || typeof payload !== 'string')) {
+    pushDebugEvent(config.store, {
+      event: 'error',
+      from,
+      to,
+      msgType: type,
+      status: 'rejected',
+      reason: 'ENTITY_INPUT_MUST_BE_ENCRYPTED',
+      delivery: relayDeliveryMetadata('rejected', 'ENTITY_INPUT_MUST_BE_ENCRYPTED'),
+      details: { traceId },
+    });
+    config.send(ws, serializeWsMessage({ type: 'error', error: 'entity_inputs must be encrypted' }));
+    return true;
+  }
+  relayLog(`[RELAY] ${type} from=${from || 'none'} to=${to || 'none'} encrypted=${msg.encrypted ?? false}`);
+  const localRuntimeKey = normalizeRuntimeKey(config.localRuntimeId);
+  const isLocalTarget = !!localRuntimeKey && toKey === localRuntimeKey;
+  if (forwardToRemoteRuntime(context, isLocalTarget)) return true;
+  const local = await deliverToLocalRuntime(context, isLocalTarget);
+  if (local !== 'unavailable') return true;
+  if (rejectUnavailableReliableMessage(context)) return true;
+  // Only gossip responses are durable offline relay traffic. Financial and
+  // recovery messages must fail now so senders never assume unseen progress.
+  const queueSize = enqueueMessage(config.store, toKey, msg);
+  relayLog(`[RELAY] → queued (no client, queue=${queueSize})`);
+  pushDebugEvent(config.store, {
+    event: 'delivery',
+    from,
+    to,
+    msgType: type,
+    encrypted: msg.encrypted === true,
+    status: 'queued',
+    queueSize,
+    details: routeDeliveryDetails(context),
+  });
+  return true;
+};
+
+const prepareRelaySession = (context: RelayRouteContext): boolean => {
+  const {
+    config,
+    ws,
+    msg,
+    type,
+    to,
+    from,
+    id,
+    fromKey,
+    traceId,
+    rememberedRuntimeId,
+    fromEncryptionPubKey,
+  } = context;
+  const { store, send } = config;
+  if (rememberedRuntimeId && fromKey && rememberedRuntimeId !== fromKey) {
+    pushDebugEvent(store, {
+      event: 'error',
+      from,
+      to,
+      msgType: type,
+      status: 'rejected',
+      reason: 'RELAY_FROM_RUNTIME_MISMATCH',
+      details: { traceId, rememberedRuntimeId },
+    });
+    send(ws, serializeWsMessage({ type: 'error', error: 'Relay socket runtime mismatch' }));
+    return false;
+  }
+  if (rememberedRuntimeId && fromKey && rememberedRuntimeId === fromKey) {
+    const existing = store.clients.get(rememberedRuntimeId);
+    if (!existing || existing.ws !== ws) {
+      const registered = registerClient(store, rememberedRuntimeId, ws);
+      const flushedPending = registered ? flushPendingToSocket(store, rememberedRuntimeId, ws, send) : 0;
+      pushDebugEvent(store, {
+        event: 'ws_rebind',
+        runtimeId: rememberedRuntimeId,
+        from,
+        msgType: type,
+        status: registered ? 'reconnected' : 'rejected',
+        details: { traceId: typeof id === 'string' ? id : null, flushedPending },
+      });
+    } else {
+      existing.lastSeen = nextWsTimestamp(store);
+    }
+  }
+  if (from && !fromEncryptionPubKey && type !== 'ping' && type !== 'pong') {
+    pushDebugEvent(store, {
+      event: 'error',
+      from,
+      to,
+      msgType: type,
+      status: 'rejected',
+      reason: 'MISSING_FROM_ENCRYPTION_PUBKEY',
+      details: { traceId },
+    });
+    send(ws, serializeWsMessage({ type: 'error', error: 'Missing fromEncryptionPubKey' }));
+    return false;
+  }
+  if (from && fromEncryptionPubKey && rememberedRuntimeId === fromKey) {
+    cacheEncryptionKey(store, fromKey, fromEncryptionPubKey);
+  }
+  if (type !== 'gossip_request' && type !== 'gossip_response' && type !== 'gossip_announce') {
+    relayLog(`[RELAY-MSG] type=${type} from=${from || 'none'} to=${to || 'none'}`);
+  }
+  pushDebugEvent(store, {
+    event: 'message',
+    from,
+    to,
+    msgType: type,
+    encrypted: msg.encrypted === true,
+    size: new TextEncoder().encode(safeStringify(msg)).byteLength,
+    details: { traceId, hasFromEncryptionPubKey: !!fromEncryptionPubKey },
+  });
+  return true;
+};
+
 // ---------------------------------------------------------------------------
 // Main entry point
 // ---------------------------------------------------------------------------
@@ -218,522 +788,17 @@ export const relayRoute = async (
     return;
   }
 
-  const msg = rawMsg as RuntimeWsMessage;
-  const type = String((rawMsg as { type: string }).type);
-  const { to, from, payload, id } = msg;
-  const fromKey = normalizeRuntimeKey(from);
-  const toKey = normalizeRuntimeKey(to);
-  const traceId = typeof id === 'string' && id.length > 0
-    ? id
-    : `relay-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
-  const rememberedRuntimeId = getRememberedSocketRuntimeId(ws);
+  const context = createRelayRouteContext(config, ws, rawMsg as RuntimeWsMessage);
+  if (!prepareRelaySession(context)) return;
+  const { type, to, from, traceId } = context;
 
-  if (rememberedRuntimeId && fromKey && rememberedRuntimeId !== fromKey) {
-    pushDebugEvent(store, {
-      event: 'error',
-      from,
-      to,
-      msgType: type,
-      status: 'rejected',
-      reason: 'RELAY_FROM_RUNTIME_MISMATCH',
-      details: { traceId, rememberedRuntimeId },
-    });
-    send(ws, serializeWsMessage({ type: 'error', error: 'Relay socket runtime mismatch' }));
-    return;
-  }
+  if (handleHello(context)) return;
 
-  if (rememberedRuntimeId && fromKey && rememberedRuntimeId === fromKey) {
-    const existing = store.clients.get(rememberedRuntimeId);
-    if (!existing || existing.ws !== ws) {
-      const registered = registerClient(store, rememberedRuntimeId, ws);
-      const flushedPending = registered
-        ? flushPendingToSocket(store, rememberedRuntimeId, ws, send)
-        : 0;
-      pushDebugEvent(store, {
-        event: 'ws_rebind',
-        runtimeId: rememberedRuntimeId,
-        from,
-        msgType: type,
-        status: registered ? 'reconnected' : 'rejected',
-        details: { traceId: typeof id === 'string' ? id : null, flushedPending },
-      });
-    } else {
-      existing.lastSeen = nextWsTimestamp(store);
-    }
-  }
+  if (await handleGossipAnnounce(context)) return;
 
-  // Cache encryption public key if provided
-  const fromEncryptionPubKey = typeof msg.fromEncryptionPubKey === 'string'
-    ? msg.fromEncryptionPubKey
-    : null;
-  if (from && !fromEncryptionPubKey && type !== 'ping' && type !== 'pong') {
-    pushDebugEvent(store, {
-      event: 'error',
-      from,
-      to,
-      msgType: type,
-      status: 'rejected',
-      reason: 'MISSING_FROM_ENCRYPTION_PUBKEY',
-      details: { traceId },
-    });
-    send(ws, serializeWsMessage({ type: 'error', error: 'Missing fromEncryptionPubKey' }));
-    return;
-  }
-  if (from && fromEncryptionPubKey && rememberedRuntimeId === fromKey) {
-    cacheEncryptionKey(store, fromKey, fromEncryptionPubKey);
-  }
-  const deliveryEntityId = typeof msg.entityId === 'string' && msg.entityId.length > 0 ? msg.entityId : undefined;
-  const deliveryTxCount = typeof msg.txs === 'number' && Number.isFinite(msg.txs) ? msg.txs : undefined;
+  if (handleSimpleRelayMessage(context)) return;
 
-  const size = new TextEncoder().encode(safeStringify(msg)).byteLength;
-
-  // Log non-gossip messages
-  if (type !== 'gossip_request' && type !== 'gossip_response' && type !== 'gossip_announce') {
-    relayLog(`[RELAY-MSG] type=${type} from=${from || 'none'} to=${to || 'none'}`);
-  }
-
-  pushDebugEvent(store, {
-    event: 'message',
-    from,
-    to,
-    msgType: type,
-    encrypted: msg.encrypted === true,
-    size,
-    details: { traceId, hasFromEncryptionPubKey: !!fromEncryptionPubKey },
-  });
-
-  // ----- hello -----
-  if (type === 'hello' && from) {
-    if (!isCanonicalRuntimeId(from)) {
-      pushDebugEvent(store, {
-        event: 'error',
-        from,
-        msgType: type,
-        status: 'rejected',
-        reason: 'Invalid runtimeId in hello',
-        details: { traceId },
-      });
-      send(ws, serializeWsMessage({ type: 'error', error: 'Invalid runtimeId in hello' }));
-      return;
-    }
-    if (config.requireHelloAuth !== false) {
-      const challengeAccepted = config.consumeHelloChallenge?.(ws as object, msg.auth?.nonce) ?? true;
-      const authError = challengeAccepted
-        ? verifyHelloAuth(fromKey, fromEncryptionPubKey!, msg.auth, config.helloSkewMs ?? DEFAULT_HELLO_SKEW_MS)
-        : 'Hello challenge missing, expired, or already consumed';
-      if (authError) {
-        pushDebugEvent(store, {
-          event: 'hello',
-          runtimeId: from,
-          from,
-          msgType: type,
-          status: 'rejected',
-          reason: 'HELLO_AUTH_INVALID',
-          details: { traceId, authError },
-        });
-        send(ws, serializeWsMessage({ type: 'error', error: authError }));
-        return;
-      }
-    }
-    const existingClient = store.clients.get(fromKey);
-    if (existingClient && existingClient.ws !== ws) {
-      // This hello passed a fresh relay challenge and a signature by the same
-      // runtime key. It is therefore a reconnect, not an unauthenticated
-      // displacement. Replace atomically before closing the stale transport:
-      // its later close callback is socket-scoped and cannot delete `ws`.
-      removeClient(store, existingClient.ws);
-      closeSupersededRuntimeSocket(existingClient.ws);
-      pushDebugEvent(store, {
-        event: 'ws_runtime_replaced',
-        runtimeId: fromKey,
-        from: fromKey,
-        msgType: type,
-        status: 'reconnected',
-        details: { traceId },
-      });
-    }
-    const registered = registerClient(store, from, ws);
-    if (!registered) {
-      pushDebugEvent(store, {
-        event: 'hello',
-        runtimeId: from,
-        from,
-        msgType: type,
-        status: 'rejected',
-        reason: 'DUPLICATE_RUNTIME_CONNECTION',
-        details: { traceId },
-      });
-      closeDuplicateRuntimeSocket(ws);
-      return;
-    }
-    rememberSocketRuntimeId(ws, fromKey);
-    if (fromEncryptionPubKey) {
-      cacheEncryptionKey(store, fromKey, fromEncryptionPubKey);
-    }
-    pushDebugEvent(store, {
-      event: 'hello',
-      runtimeId: from,
-      from,
-      msgType: type,
-      status: 'connected',
-      details: { traceId },
-    });
-
-    send(ws, serializeWsMessage({ type: 'hello_ack', to: fromKey }));
-    flushPendingToSocket(store, fromKey, ws, send);
-
-    return;
-  }
-
-  // ----- gossip_announce: store + fanout -----
-  if (type === 'gossip_announce') {
-    if (!fromKey || rememberedRuntimeId !== fromKey) {
-      pushDebugEvent(store, {
-        event: 'error',
-        from,
-        msgType: type,
-        status: 'rejected',
-        reason: 'GOSSIP_ANNOUNCE_UNREGISTERED_RUNTIME',
-        details: { traceId },
-      });
-      send(ws, serializeWsMessage({ type: 'error', error: 'Gossip announce requires registered relay hello' }));
-      return;
-    }
-    const payloadRecord = payload && typeof payload === 'object' ? payload as { profiles?: unknown } : {};
-    const profiles = (Array.isArray(payloadRecord.profiles) ? payloadRecord.profiles : []) as Profile[];
-    let stored = 0;
-    let droppedMalformed = 0;
-    let droppedInvalidSignature = 0;
-    const storedProfiles: Profile[] = [];
-    const verifyProfile = config.verifyProfile ?? verifyProfileSignature;
-    for (const profile of profiles) {
-      if (!profile || typeof profile !== 'object') continue;
-      const normalized: Profile = {
-        ...profile,
-        runtimeId: profile.runtimeId || fromKey,
-      };
-      try {
-        const verified = await verifyProfile(normalized);
-        if (!verified.valid) {
-          droppedInvalidSignature += 1;
-          pushDebugEvent(store, {
-            event: 'error',
-            from,
-            msgType: type,
-            status: 'rejected',
-            reason: 'GOSSIP_PROFILE_SIGNATURE_INVALID',
-            details: {
-              entityId: typeof normalized.entityId === 'string' ? normalized.entityId : null,
-              verifyReason: verified.reason || 'invalid',
-              traceId,
-            },
-          });
-          continue;
-        }
-        if (storeVerifiedGossipProfile(store, normalized)) {
-          stored += 1;
-          storedProfiles.push(normalized);
-        }
-        // Mirror into env gossip cache via hook
-        config.onGossipStore?.(normalized);
-      } catch (error) {
-        droppedMalformed += 1;
-        pushDebugEvent(store, {
-          event: 'error',
-          from,
-          msgType: type,
-          status: 'rejected',
-          reason: 'GOSSIP_PROFILE_DROPPED_MALFORMED',
-          details: {
-            entityId: typeof normalized.entityId === 'string' ? normalized.entityId : null,
-            message: error instanceof Error ? error.message : String(error),
-            traceId,
-          },
-        });
-        continue;
-      }
-    }
-    let broadcastTargets = 0;
-    if (storedProfiles.length > 0) {
-      const defaultEntityIds = new Set(
-        getDefaultGossipProfiles(store, DEFAULT_GOSSIP_SYNC_LIMIT).map(profile => profile.entityId.toLowerCase()),
-      );
-      const broadcastProfiles = storedProfiles.filter(
-        profile =>
-          defaultEntityIds.has(profile.entityId.toLowerCase()) ||
-          profile.metadata.isHub === true,
-      );
-      if (broadcastProfiles.length === 0) {
-        pushDebugEvent(store, {
-          event: 'gossip_store',
-          from,
-          msgType: type,
-          status: 'stored',
-          details: { received: profiles.length, stored, droppedMalformed, droppedInvalidSignature, broadcastTargets, traceId },
-        });
-        return;
-      }
-      for (const [runtimeId, client] of store.clients.entries()) {
-        if (!client?.ws) continue;
-        if (fromKey && runtimeId === fromKey) continue;
-        send(client.ws, serializeWsMessage({
-          type: 'gossip_update',
-          id: `gossip_update_${Date.now()}`,
-          from: store.serverId,
-          to: runtimeId,
-          timestamp: Date.now(),
-          payload: { profiles: broadcastProfiles },
-          ...(id ? { inReplyTo: id } : {}),
-        }));
-        broadcastTargets += 1;
-      }
-    }
-    pushDebugEvent(store, {
-      event: 'gossip_store',
-      from,
-      msgType: type,
-      status: 'stored',
-      details: { received: profiles.length, stored, droppedMalformed, droppedInvalidSignature, broadcastTargets, traceId },
-    });
-
-    return;
-  }
-
-  // ----- gossip_request -----
-  if (type === 'gossip_request') {
-    const request = payload && typeof payload === 'object' ? payload as {
-      ids?: string[];
-      set?: 'default' | 'hubs';
-      updatedSince?: number;
-      limit?: number;
-    } : {};
-    const profiles = getProfileBatch(store, request);
-    pushDebugEvent(store, {
-      event: 'gossip_request',
-      from,
-      to,
-      msgType: type,
-      details: {
-        returnedProfiles: profiles.length,
-        ids: request.ids ?? [],
-        set: request.set ?? 'default',
-        updatedSince: request.updatedSince ?? null,
-        limit: request.limit ?? DEFAULT_GOSSIP_SYNC_LIMIT,
-        traceId,
-      },
-    });
-    send(ws, serializeWsMessage({
-      type: 'gossip_response',
-      id: `gossip_${Date.now()}`,
-      from: store.serverId,
-      ...(from ? { to: from } : {}),
-      timestamp: Date.now(),
-      payload: { profiles },
-      ...(id ? { inReplyTo: id } : {}),
-    }));
-    return;
-  }
-
-  // ----- debug_event -----
-  if (type === 'debug_event') {
-    pushDebugEvent(store, {
-      event: 'debug_event',
-      from,
-      to,
-      msgType: type,
-      details: { traceId, payload },
-    });
-    return;
-  }
-
-  // ----- ping -----
-  if (type === 'ping') {
-    send(ws, serializeWsMessage({ type: 'pong', ...(id ? { inReplyTo: id } : {}) }));
-    return;
-  }
-
-  // ----- routable messages -----
-  if (
-    type === 'entity_inputs' ||
-    type === 'entity_input_receipt' ||
-    type === 'gossip_response' ||
-    LIVE_RECOVERY_MESSAGE_TYPES.has(type)
-  ) {
-    if (!toKey) {
-      pushDebugEvent(store, {
-        event: 'error',
-        from,
-        msgType: type,
-        status: 'rejected',
-        reason: 'Missing target runtimeId',
-        details: { traceId },
-      });
-      send(ws, serializeWsMessage({ type: 'error', error: 'Missing target runtimeId' }));
-      return;
-    }
-
-    if (type === 'entity_inputs' && (msg.encrypted !== true || typeof payload !== 'string')) {
-      pushDebugEvent(store, {
-        event: 'error',
-        from,
-        to,
-        msgType: type,
-        status: 'rejected',
-        reason: 'ENTITY_INPUT_MUST_BE_ENCRYPTED',
-        delivery: relayDeliveryMetadata('rejected', 'ENTITY_INPUT_MUST_BE_ENCRYPTED'),
-        details: { traceId },
-      });
-      send(ws, serializeWsMessage({ type: 'error', error: 'entity_inputs must be encrypted' }));
-      return;
-    }
-
-    relayLog(`[RELAY] ${type} from=${from || 'none'} to=${to || 'none'} encrypted=${msg.encrypted ?? false}`);
-
-    const localRuntimeKey = normalizeRuntimeKey(config.localRuntimeId);
-    const isLocalTarget = !!localRuntimeKey && toKey === localRuntimeKey;
-
-    // If addressed to a remote WS client (not local), forward directly
-    const target = store.clients.get(toKey);
-    if (target && !isLocalTarget) {
-      const relayDelivery = sendRelayDelivery(config, target.ws, msg);
-      if (isDeliveryDelivered(relayDelivery)) {
-        relayLog(`[RELAY] → forwarding to WS client`);
-        pushDebugEvent(store, {
-          event: 'delivery',
-          from,
-          to,
-          msgType: type,
-          encrypted: msg.encrypted === true,
-          status: 'delivered',
-          delivery: relayDelivery,
-          details: {
-            traceId,
-            ...(deliveryEntityId ? { entityId: deliveryEntityId } : {}),
-            ...(deliveryTxCount !== undefined ? { txs: deliveryTxCount } : {}),
-          },
-        });
-        return;
-      }
-      removeClient(store, target.ws);
-      const sendFailure = relayDelivery.code !== 'TARGET_SOCKET_NOT_OPEN' && relayDelivery.code !== 'DELIVERY_STALE_TARGET';
-      pushDebugEvent(store, {
-        event: 'delivery',
-        from,
-        to,
-        msgType: type,
-        encrypted: msg.encrypted === true,
-        status: sendFailure ? 'send-failed' : 'stale-target',
-        reason: relayDelivery.failure?.message ?? relayDelivery.code,
-        delivery: relayDelivery,
-        details: {
-          traceId,
-          ...(deliveryEntityId ? { entityId: deliveryEntityId } : {}),
-          ...(deliveryTxCount !== undefined ? { txs: deliveryTxCount } : {}),
-        },
-      });
-    }
-
-    // Local application delivery for scoped reliable protocol messages.
-    if ((type === 'entity_inputs' || type === 'entity_input_receipt') && payload && isLocalTarget) {
-      try {
-        await config.localDeliver(from, msg);
-        return;
-      } catch (error) {
-        const reason = (error as Error).message;
-        relayLog(`[RELAY] Local delivery failed: ${reason}`);
-        pushDebugEvent(store, {
-          event: 'error',
-          from,
-          to,
-          msgType: type,
-          status: 'local-delivery-failed',
-          reason,
-          delivery: relayDeliveryMetadata('local-delivery-failed', reason),
-          details: { traceId },
-        });
-        // Non-recoverable decrypt/auth errors should be dropped immediately.
-        // Re-queuing poisoned ciphertext for the same local runtime just causes
-        // endless pending loops and hides the true root cause.
-        if (NON_RECOVERABLE_LOCAL_DELIVERY_ERRORS.some((part) => reason.includes(part))) {
-          send(ws, serializeWsMessage({ type: 'error', error: reason }));
-          return;
-        }
-        // Fall through to queue
-      }
-    }
-
-    if (type === 'entity_inputs' || type === 'entity_input_receipt') {
-      const unavailableCode = type === 'entity_inputs'
-        ? 'ENTITY_INPUT_TARGET_NOT_CONNECTED'
-        : 'ENTITY_INPUT_RECEIPT_TARGET_NOT_CONNECTED';
-      relayLog(`[RELAY] → rejected ${type} (target not connected)`);
-      pushDebugEvent(store, {
-        event: 'delivery',
-        from,
-        to,
-        msgType: type,
-        encrypted: msg.encrypted === true,
-        status: 'rejected',
-        reason: unavailableCode,
-        details: {
-          traceId,
-          ...(deliveryEntityId ? { entityId: deliveryEntityId } : {}),
-          ...(deliveryTxCount !== undefined ? { txs: deliveryTxCount } : {}),
-        },
-      });
-      send(ws, serializeWsMessage({
-        type: 'error',
-        error: unavailableCode,
-        ...(id ? { inReplyTo: id } : {}),
-        ...(to ? { to } : {}),
-      }));
-      return;
-    }
-
-    if (LIVE_RECOVERY_MESSAGE_TYPES.has(type)) {
-      const reason = 'RECOVERY_TARGET_NOT_CONNECTED';
-      relayLog(`[RELAY] → rejected ${type} (target not connected)`);
-      pushDebugEvent(store, {
-        event: 'delivery',
-        from,
-        to,
-        msgType: type,
-        encrypted: msg.encrypted === true,
-        status: 'rejected',
-        reason,
-        details: { traceId },
-      });
-      send(ws, serializeWsMessage({
-        type: 'error',
-        error: reason,
-        ...(id ? { inReplyTo: id } : {}),
-        ...(to ? { to } : {}),
-      }));
-      return;
-    }
-
-    // Queue gossip for offline clients. Financial entity_input traffic is never
-    // queued here because the sender would otherwise continue with a pending
-    // consensus frame while the target runtime never saw the input. Recovery
-    // request/response traffic is a live probe and must not be replayed later.
-    const queueSize = enqueueMessage(store, toKey, msg);
-    relayLog(`[RELAY] → queued (no client, queue=${queueSize})`);
-    pushDebugEvent(store, {
-      event: 'delivery',
-      from,
-      to,
-      msgType: type,
-      encrypted: msg.encrypted === true,
-      status: 'queued',
-      queueSize,
-      details: {
-        traceId,
-        ...(deliveryEntityId ? { entityId: deliveryEntityId } : {}),
-        ...(deliveryTxCount !== undefined ? { txs: deliveryTxCount } : {}),
-      },
-    });
-    return;
-  }
+  if (await handleRoutableMessage(context)) return;
 
   // Unknown message type
   pushDebugEvent(store, {
