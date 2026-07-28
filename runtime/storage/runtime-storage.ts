@@ -1,4 +1,3 @@
-import { Level } from 'level';
 import { runtimeIsBrowser } from '../runtime/platform';
 import { cloneIsolatedRoutedEntityInputs, cloneIsolatedRuntimeInput } from '../protocol/runtime-input-clone';
 import { requireBoundaryInteger } from '../protocol/boundary-validation';
@@ -11,7 +10,6 @@ import { assertPersistedLocalEntityCryptoKeys } from '../entity/crypto';
 import { getLiveConsumptionAccumulatorStates } from '../entity/consumption-store';
 import { getLiveAccountJClaimAccumulatorStates } from '../account/j-claim-store';
 import { setAccountFrameHistoryView } from '../runtime/env-events';
-import { normalizeRuntimeId } from '../networking/runtime-id';
 import { formatReplicaKey, createReplicaKey } from '../ids';
 import { ensureRuntimeState } from '../runtime/runtime-state';
 import { restoreDurableOutputRetryState } from '../runtime/durable-output-retry';
@@ -30,23 +28,16 @@ import {
 import { assertCertifiedRegistrationEvidenceStore } from '../jurisdiction/registration-evidence';
 import {
   computeStoragePostStateHash,
-  findStorageLatestSnapshotAtOrBelow,
   hydrateAccountJClaimRootNodesFromStorage,
   hydrateCertifiedBoardRootNodesFromStorage,
   hydrateConsumptionRootNodesFromStorage,
-  listStorageSnapshotEntityIds,
   listStorageSnapshotHeights,
-  listStorageSnapshotReplicaMetas,
-  listStorageReplicaMetas,
   loadEntityStatesAtHeightFromStorage,
   readHistoryViewAccountFrames,
   reconcileHistoryViews,
   resolveStorageRuntimeConfig,
   readStorageFrameRecord,
-  readStorageHead,
-  readStorageOverlayRecordsFromDiffs,
   type StorageFrameRecord,
-  type StorageHead,
   verifyStorageSnapshotAtHeight,
 } from '.';
 import {
@@ -54,17 +45,14 @@ import {
   buildStorageReplicaMetaCommitmentFromCheckpointPlan,
 } from './replicas';
 import { assertStorageSafetyOverridesAllowed } from './safety';
-import { storageOverlayRecordKey } from './overlay';
 import { assertCertifiedJHistoryIntegrity, assertValidatorJHistoryIntegrity } from '../jurisdiction/local-history';
 import { restoreJPrefixRound } from '../jurisdiction/j-prefix-consensus';
 import type {
   EntityReplica,
   EntityState,
   RuntimeState,
-  RuntimeOverlayRecord,
 } from '../types';
 import { buildRecoveryJournalFromStorageFrame } from './queries';
-import { normalizeDbNamespace } from './runtime-dbs';
 import { createStructuredLogger } from '../infra/logger';
 import { envRecord } from '../runtime/loop-environment';
 import type { RuntimeStorageApiDeps } from './runtime-storage-deps';
@@ -72,6 +60,7 @@ import {
   createRuntimeStorageCommitApi,
   shouldRequireCanonicalStorageAudit,
 } from './commit';
+import { createPersistedStorageReadApi } from './persisted-read';
 
 export type { RuntimeStorageApiDeps } from './runtime-storage-deps';
 
@@ -129,7 +118,6 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
     tryOpenHistoryViewDb,
     closeRuntimeDb,
     closeInfraDb,
-    createEmptyEnv,
     replayRecoveryFrameJournals,
   } = deps;
 
@@ -147,170 +135,19 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
     actualCanonicalStateHash?: string;
   };
 
-  type PersistedStorageHandle = {
-    role: 'history';
-    db: Level<Buffer, Buffer>;
-    head: StorageHead;
-    latestHeight: number;
-    latestMaterializedHeight: number;
-    latestSnapshotHeight: number;
-    snapshotHeights: number[];
-  };
-
-  const createPersistedStorageEnv = (runtimeId?: string | null, runtimeSeed?: string | null): RuntimeState => {
-    const env = createEmptyEnv(runtimeSeed ?? null);
-    const normalizedRuntimeId = normalizeRuntimeId(runtimeId ?? env.runtimeId ?? null);
-    if (normalizedRuntimeId) {
-      env.runtimeId = normalizedRuntimeId;
-      env.dbNamespace = normalizeDbNamespace(normalizedRuntimeId);
-    }
-    return env;
-  };
-
-  const listPersistedStorageHandles = async (env: RuntimeState): Promise<PersistedStorageHandle[]> => {
-    const opened = await tryOpenRuntimeWalDb(env);
-    if (!opened) return [];
-    const db = getRuntimeWalDb(env);
-    const head = await readStorageHead(db);
-    if (!head || head.latestHeight <= 0) return [];
-    return [
-      {
-        role: 'history',
-        db,
-        head,
-        latestHeight: head.latestHeight,
-        latestMaterializedHeight: Math.max(
-          0,
-          Math.floor(Number(head.latestMaterializedHeight ?? head.latestSnapshotHeight ?? 0)),
-        ),
-        latestSnapshotHeight: head.latestSnapshotHeight,
-        snapshotHeights: (await listStorageSnapshotHeights(db)).filter(height => height <= head.latestSnapshotHeight),
-      },
-    ];
-  };
-
-  const restoreOverlayFromFrameLog = async (env: RuntimeState, targetHeight: number): Promise<void> => {
-    for (const handle of await listPersistedStorageHandles(env)) {
-      if (targetHeight > handle.latestHeight) continue;
-
-      const targetFrame = await readStorageFrameRecord(handle.db, targetHeight);
-      if (targetFrame?.materializedState !== false) {
-        env.overlay = [];
-        return;
-      }
-
-      const startHeight = Math.max(1, handle.latestMaterializedHeight + 1);
-      if (startHeight > targetHeight) {
-        env.overlay = [];
-        return;
-      }
-
-      const records = new Map<string, RuntimeOverlayRecord>();
-      for (const record of await readStorageOverlayRecordsFromDiffs(handle.db, startHeight, targetHeight)) {
-        records.set(storageOverlayRecordKey(record), { ...record });
-      }
-      if (records.size === 0 && Array.isArray(targetFrame?.overlayRecords)) {
-        for (const record of targetFrame.overlayRecords) {
-          records.set(storageOverlayRecordKey(record), { ...record });
-        }
-      }
-      env.overlay = Array.from(records.values());
-      return;
-    }
-    env.overlay = [];
-  };
-
-  const resolvePersistedLatestHeight = async (env: RuntimeState): Promise<number> => {
-    const handles = await listPersistedStorageHandles(env);
-    return handles.reduce((max, handle) => Math.max(max, handle.latestHeight), 0);
-  };
-
-  const resolvePersistedCheckpointHeights = async (env: RuntimeState): Promise<number[]> => {
-    const handles = await listPersistedStorageHandles(env);
-    return Array.from(new Set(handles.flatMap(handle => handle.snapshotHeights))).sort((left, right) => left - right);
-  };
-
-  const readPersistedStorageFrameRecord = async (
-    env: RuntimeState,
-    height: number,
-  ): Promise<ReturnType<typeof readStorageFrameRecord> extends Promise<infer T> ? T : never> => {
-    const targetHeight = Number.isFinite(height) ? Math.floor(height) : 0;
-    if (targetHeight <= 0) return null;
-    for (const handle of await listPersistedStorageHandles(env)) {
-      if (targetHeight > handle.latestHeight) continue;
-      const frame = await readStorageFrameRecord(handle.db, targetHeight);
-      if (frame) return frame;
-    }
-    return null;
-  };
-
-  const readPersistedStorageReplicaMetas = async (
-    env: RuntimeState,
-    entityId: string,
-    sharedState?: EntityState,
-  ): Promise<Awaited<ReturnType<typeof listStorageReplicaMetas>>> => {
-    const normalizedEntityId = String(entityId || '').toLowerCase();
-    if (!normalizedEntityId) return [];
-    if (!(await tryOpenRuntimeWalDb(env))) return [];
-    const walDb = getRuntimeWalDb(env);
-    return listStorageReplicaMetas(walDb, normalizedEntityId, sharedState);
-  };
-
-  const readPersistedStorageSnapshotReplicaMetas = async (
-    env: RuntimeState,
-    snapshotHeight: number,
-    entityId: string,
-  ): Promise<Awaited<ReturnType<typeof listStorageSnapshotReplicaMetas>>> => {
-    const normalizedEntityId = String(entityId || '').toLowerCase();
-    if (!normalizedEntityId || snapshotHeight <= 0) return [];
-    if (!(await tryOpenRuntimeWalDb(env))) return [];
-    return listStorageSnapshotReplicaMetas(getRuntimeWalDb(env), snapshotHeight, normalizedEntityId);
-  };
-
-  const resolvePersistedSnapshotHeight = async (env: RuntimeState, targetHeight: number): Promise<number> => {
-    let best = 0;
-    for (const handle of await listPersistedStorageHandles(env)) {
-      if (targetHeight > handle.latestHeight) continue;
-      const candidate = await findStorageLatestSnapshotAtOrBelow(handle.db, targetHeight);
-      if (candidate > best) best = candidate;
-    }
-    return best;
-  };
-
-  const listPersistedEntityIdsAtHeight = async (env: RuntimeState, targetHeight: number): Promise<string[]> => {
-    const entityIds = new Set<string>();
-    for (const handle of await listPersistedStorageHandles(env)) {
-      const snapshotHeight = await findStorageLatestSnapshotAtOrBelow(handle.db, targetHeight);
-      if (snapshotHeight > 0) {
-        for (const entityId of await listStorageSnapshotEntityIds(handle.db, snapshotHeight)) {
-          entityIds.add(entityId);
-        }
-      }
-      const replayStartHeight = Math.max(1, snapshotHeight + 1);
-      const replayEndHeight = Math.min(targetHeight, handle.latestHeight);
-      for (let height = replayStartHeight; height <= replayEndHeight; height += 1) {
-        const frame = await readStorageFrameRecord(handle.db, height);
-        for (const entityId of frame?.touchedEntities ?? []) {
-          const normalized = String(entityId || '').toLowerCase();
-          if (normalized) entityIds.add(normalized);
-        }
-        for (const account of frame?.touchedAccounts ?? []) {
-          const entityId = String(account?.entityId || '').toLowerCase();
-          if (entityId) entityIds.add(entityId);
-          // An Account doc belongs to `entityId`; its counterparty is commonly a
-          // remote Entity and therefore has no core doc in this Runtime. Graph
-          // projection adds that endpoint as a placeholder after loading the
-          // local Account. Treating it as local makes historical reads demand an
-          // Entity core that cannot exist in this keyspace.
-        }
-        for (const entry of frame?.entityHashes ?? []) {
-          const entityId = String(entry?.entityId || '').toLowerCase();
-          if (entityId) entityIds.add(entityId);
-        }
-      }
-    }
-    return Array.from(entityIds).sort();
-  };
+  const persistedReadApi = createPersistedStorageReadApi(deps);
+  const {
+    createPersistedStorageEnv,
+    listPersistedStorageHandles,
+    restoreOverlayFromFrameLog,
+    resolvePersistedLatestHeight,
+    resolvePersistedCheckpointHeights,
+    readPersistedStorageFrameRecord,
+    readPersistedStorageReplicaMetas,
+    readPersistedStorageSnapshotReplicaMetas,
+    resolvePersistedSnapshotHeight,
+    listPersistedEntityIdsAtHeight,
+  } = persistedReadApi;
 
   const listPersistedReplicaValidators = (state: EntityState): string[] => {
     if (!Array.isArray(state.config?.validators)) return [];
