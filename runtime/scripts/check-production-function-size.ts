@@ -42,7 +42,6 @@ const COORDINATOR_DEBT: Readonly<Record<string, number>> = {
   "runtime/orchestrator/orchestrator.ts::fetch": 388,
   "runtime/orchestrator/orchestrator.ts::runReset": 156,
   "runtime/orchestrator/orchestrator.ts::spawnMarketMaker": 159,
-  "runtime/storage/runtime-storage.ts::createRuntimeStorageApi": 1070,
   "runtime/protocol/dispute/proof-builder.ts::buildAccountProofBody": 172,
   "runtime/protocol/htlc/onion-advance.ts::validateHtlcOnionAdvanceTx": 213,
   "runtime/radapter/resolve.ts::projectGraphFrame": 175,
