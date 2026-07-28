@@ -76,7 +76,7 @@ import {
   selectCrossJOpeningAccountProposalTxs,
 } from '../cross-j-proposer-materialization';
 import { initCrontab } from '../scheduler';
-import { applyEntityTx } from '../tx';
+import { applyEntityTx, type ApplyEntityTxResult } from '../tx';
 import {
   normalizeSwapOfferForOrderbook,
   processOrderbookCancels,
@@ -207,136 +207,147 @@ const applyCertifiedConsensusOutput = async (
   return { ...applied, consumptionAccumulator: consumption.state };
 };
 
+const applyNestedEntityTx = async (
+  context: ApplyEntityTxsInOrderContext,
+  state: EntityState,
+  tx: EntityTx,
+): Promise<{ handled: boolean; state: EntityState }> => {
+  if (tx.type === 'runtimeOutput') {
+    return { handled: true, state: await applyRuntimeOutput(context, state, tx) };
+  }
+  if (tx.type === 'consensusOutput') {
+    return { handled: true, state: await applyCertifiedConsensusOutput(context, state, tx) };
+  }
+  if (tx.type !== 'entityCommand') return { handled: false, state };
+
+  const command = assertSignedEntityCommand(context.env, state, tx.data);
+  if (getEntityCommandDisposition(state, command) === 'retry') {
+    return { handled: true, state };
+  }
+  const applied = await applyEntityTxsInOrder({
+    ...context,
+    entityTxs: command.txs,
+    currentEntityState: state,
+    authorizedCommand: true,
+  });
+  return {
+    handled: true,
+    state: advanceEntityCommandNonce(applied, command),
+  };
+};
+
+const assertEntityTxAuthorization = (
+  context: ApplyEntityTxsInOrderContext,
+  tx: EntityTx,
+): void => {
+  if (isEntityCommandForbiddenTx(tx)) return;
+  if (context.authorizedCommand && !isIndividualEntityCommandTx(tx)) {
+    throw new Error(`ENTITY_COMMAND_COLLECTIVE_ACTION_REQUIRES_PROPOSAL:${tx.type}`);
+  }
+  if (context.authorizedCollective && !isCollectiveEntityActionTx(tx)) {
+    throw new Error(`ENTITY_COLLECTIVE_ACTION_TX_FORBIDDEN:${tx.type}`);
+  }
+  if (
+    !context.authorizedCommand &&
+    !context.authorizedCollective &&
+    !context.authorizedCertifiedOutput &&
+    !context.authorizedRuntimeOutput
+  ) {
+    throw new Error(`ENTITY_COMMAND_REQUIRED:${tx.type}`);
+  }
+};
+
+const collectEntityTxResult = (
+  context: ApplyEntityTxsInOrderContext,
+  result: ApplyEntityTxResult,
+): void => {
+  context.storageChanges.push(...result.storageChanges);
+  context.candidateEffects.push(...result.candidateEffects);
+  for (const { hash, node } of result.accountJClaimNodeChanges?.newNodes ?? []) {
+    context.accountJClaimNewNodes.set(hash, node);
+    context.accountJClaimReplacedNodeHashes.delete(hash);
+  }
+  for (const hash of result.accountJClaimNodeChanges?.replacedNodeHashes ?? []) {
+    if (!context.accountJClaimNewNodes.delete(hash)) {
+      context.accountJClaimReplacedNodeHashes.add(hash);
+    }
+  }
+  if (result.requiredAccountResponse) {
+    const accountId = result.requiredAccountResponse.toEntityId.toLowerCase();
+    context.proposableAccounts.add(accountId);
+    // Later authenticated inputs supersede earlier responses for the same
+    // bilateral lane because only the final Account state may be flushed.
+    context.requiredAccountResponses.set(
+      accountId,
+      structuredClone(result.requiredAccountResponse),
+    );
+  }
+  context.allOutputs.push(...result.outputs);
+  if (result.jOutputs) context.allJOutputs.push(...result.jOutputs);
+  if (result.hashesToSign?.length) {
+    context.collectedHashes.push(...result.hashesToSign);
+  }
+};
+
+const applyRegularEntityTx = async (
+  context: ApplyEntityTxsInOrderContext,
+  state: EntityState,
+  tx: EntityTx,
+  manualBroadcastInInput: boolean,
+): Promise<EntityState> => {
+  assertEntityTxAuthorization(context, tx);
+  const txProfileStartMs = getPerfMs();
+  const result = await applyEntityTx(context.env, state, tx, {
+    mutableFrameState: true,
+    manualBroadcastInInput,
+    accountJClaimNodeStore: context.accountJClaimNodeStore,
+  });
+  if (result.skippedError) {
+    throw new MalformedEntityFrameInputError(String(tx.type), result.skippedError);
+  }
+
+  let nextState = result.newState;
+  collectEntityTxResult(context, result);
+  if (result.approvedEntityTxs?.length) {
+    nextState = await applyEntityTxsInOrder({
+      ...context,
+      entityTxs: result.approvedEntityTxs,
+      currentEntityState: nextState,
+      authorizedCommand: undefined,
+      authorizedCollective: true,
+      authorizedCertifiedOutput: undefined,
+      authorizedRuntimeOutput: undefined,
+    });
+  }
+  applyEntityTxReturnedEffects(context, nextState, tx, txProfileStartMs, {
+    ...(result.mempoolOps ? { mempoolOps: result.mempoolOps } : {}),
+    ...(result.swapOffersCreated ? { swapOffersCreated: result.swapOffersCreated } : {}),
+    ...(result.swapCancelRequests ? { swapCancelRequests: result.swapCancelRequests } : {}),
+    ...(result.swapOffersCancelled ? { swapOffersCancelled: result.swapOffersCancelled } : {}),
+  });
+  return nextState;
+};
+
 async function applyEntityTxsInOrder(context: ApplyEntityTxsInOrderContext): Promise<EntityState> {
-  const {
-    env,
-    entityTxs,
-    allOutputs,
-    allJOutputs,
-    collectedHashes,
-    proposableAccounts,
-    requiredAccountResponses,
-  } = context;
   let currentEntityState = context.currentEntityState;
-  const manualBroadcastInInput = entityTxs.some(tx => tx.type === 'j_broadcast');
+  const manualBroadcastInInput = context.entityTxs.some(tx => tx.type === 'j_broadcast');
 
   // Preserve WAL transaction order exactly during live processing and replay.
   // Reordering batched txs can change bilateral account state transitions
   // (e.g., openAccount + accountInput ACK in same frame).
-  for (const entityTx of entityTxs) {
-    if (entityTx.type === 'runtimeOutput') {
-      currentEntityState = await applyRuntimeOutput(context, currentEntityState, entityTx);
+  for (const entityTx of context.entityTxs) {
+    const nested = await applyNestedEntityTx(context, currentEntityState, entityTx);
+    if (nested.handled) {
+      currentEntityState = nested.state;
       continue;
     }
-    if (entityTx.type === 'consensusOutput') {
-      currentEntityState = await applyCertifiedConsensusOutput(context, currentEntityState, entityTx);
-      continue;
-    }
-    if (entityTx.type === 'entityCommand') {
-      const command = assertSignedEntityCommand(env, currentEntityState, entityTx.data);
-      if (getEntityCommandDisposition(currentEntityState, command) === 'retry') continue;
-      const applied = await applyEntityTxsInOrder({
-        ...context,
-        entityTxs: command.txs,
-        currentEntityState,
-        authorizedCommand: true,
-      });
-      currentEntityState = advanceEntityCommandNonce(applied, command);
-      continue;
-    }
-    if (!isEntityCommandForbiddenTx(entityTx)) {
-      if (context.authorizedCommand && !isIndividualEntityCommandTx(entityTx)) {
-        throw new Error(`ENTITY_COMMAND_COLLECTIVE_ACTION_REQUIRES_PROPOSAL:${entityTx.type}`);
-      }
-      if (context.authorizedCollective && !isCollectiveEntityActionTx(entityTx)) {
-        throw new Error(`ENTITY_COLLECTIVE_ACTION_TX_FORBIDDEN:${entityTx.type}`);
-      }
-      if (
-        !context.authorizedCommand &&
-        !context.authorizedCollective &&
-        !context.authorizedCertifiedOutput &&
-        !context.authorizedRuntimeOutput
-      ) {
-        throw new Error(`ENTITY_COMMAND_REQUIRED:${entityTx.type}`);
-      }
-    }
-    const txProfileStartMs = getPerfMs();
-    const {
-      newState,
-      outputs,
-      jOutputs,
-      hashesToSign,
-      mempoolOps,
-      storageChanges,
-      candidateEffects,
-      requiredAccountResponse,
-      swapOffersCreated,
-      swapCancelRequests,
-      swapOffersCancelled,
-      accountJClaimNodeChanges,
-      approvedEntityTxs,
-      skippedError,
-    } = await applyEntityTx(env, currentEntityState, entityTx, {
-      mutableFrameState: true,
-      manualBroadcastInInput,
-      accountJClaimNodeStore: context.accountJClaimNodeStore,
-    });
-    if (skippedError) {
-      throw new MalformedEntityFrameInputError(String(entityTx.type), skippedError);
-    }
-    currentEntityState = newState;
-    context.storageChanges.push(...storageChanges);
-    context.candidateEffects.push(...candidateEffects);
-    if (accountJClaimNodeChanges) {
-      for (const { hash, node } of accountJClaimNodeChanges.newNodes) {
-        context.accountJClaimNewNodes.set(hash, node);
-        context.accountJClaimReplacedNodeHashes.delete(hash);
-      }
-      for (const hash of accountJClaimNodeChanges.replacedNodeHashes) {
-        if (!context.accountJClaimNewNodes.delete(hash)) context.accountJClaimReplacedNodeHashes.add(hash);
-      }
-    }
-    if (approvedEntityTxs && approvedEntityTxs.length > 0) {
-      currentEntityState = await applyEntityTxsInOrder({
-        ...context,
-        entityTxs: approvedEntityTxs,
-        currentEntityState,
-        authorizedCommand: undefined,
-        authorizedCollective: true,
-        authorizedCertifiedOutput: undefined,
-        authorizedRuntimeOutput: undefined,
-      });
-    }
-    if (requiredAccountResponse) {
-      const accountId = requiredAccountResponse.toEntityId.toLowerCase();
-      proposableAccounts.add(accountId);
-      // Multiple authenticated AccountInputs for one bilateral lane can arrive
-      // in one Runtime wave. Each response is derived after applying every
-      // earlier input, so the last validated response is the only one that can
-      // represent the final Account state. The Entity flush below emits it once
-      // (or bundles its ACK into the successor proposal).
-      requiredAccountResponses.set(accountId, structuredClone(requiredAccountResponse));
-    }
-    allOutputs.push(...outputs);
-    if (jOutputs) allJOutputs.push(...jOutputs);
-    if (hashesToSign && hashesToSign.length > 0) {
-      collectedHashes.push(...hashesToSign);
-    }
-
-    applyEntityTxReturnedEffects(
+    currentEntityState = await applyRegularEntityTx(
       context,
       currentEntityState,
       entityTx,
-      txProfileStartMs,
-      {
-        ...(mempoolOps ? { mempoolOps } : {}),
-        ...(swapOffersCreated ? { swapOffersCreated } : {}),
-        ...(swapCancelRequests ? { swapCancelRequests } : {}),
-        ...(swapOffersCancelled ? { swapOffersCancelled } : {}),
-      },
+      manualBroadcastInInput,
     );
   }
-
   return currentEntityState;
 }
 

@@ -1,8 +1,5 @@
 import { logError, shortHash } from '../../infra/logger';
-import type {
-  ProposedEntityFrame,
-  ValidatorEntityFrameExecution,
-} from '../../types';
+import type { EntityState, ProposedEntityFrame, ValidatorEntityFrameExecution } from '../../types';
 import { applyEntityFrame } from './frame-application';
 import { createEntityFrameHashFromStateRoot } from './frame';
 import {
@@ -30,11 +27,98 @@ export type ProposalReplayResult =
   | { accepted: true; execution: ValidatorEntityFrameExecution }
   | { accepted: false; result: ApplyEntityInputResult };
 
+const rejectProposal = (
+  context: ApplyEntityInputContext,
+  reason?: string,
+): ProposalReplayResult => ({ accepted: false, result: rejectEntityConsensusInput(context, reason) });
+
+const verifyProposalRoots = (
+  context: ApplyEntityInputContext,
+  frame: ProposedEntityFrame,
+  state: EntityState,
+): ProposalReplayResult | null => {
+  const stateRoot = computeCanonicalEntityConsensusStateHash(state);
+  if (stateRoot !== frame.stateRoot) {
+    entityLog.error('proposal.state_root_rejected', {
+      expected: stateRoot,
+      received: frame.stateRoot,
+    });
+    return rejectProposal(context, 'PROPOSAL_STATE_ROOT_MISMATCH');
+  }
+  const authorityRoot = computeEntityFrameAuthorityRoot(
+    buildEntityFrameAuthority(state),
+  );
+  if (authorityRoot !== frame.authorityRoot) {
+    entityLog.error('proposal.authority_root_rejected', {
+      expected: authorityRoot,
+      received: frame.authorityRoot,
+    });
+    return rejectProposal(context, 'PROPOSAL_AUTHORITY_ROOT_MISMATCH');
+  }
+  return null;
+};
+
+const verifyProposalFrameHash = (
+  context: ApplyEntityInputContext,
+  frame: ProposedEntityFrame,
+  state: EntityState,
+): ProposalReplayResult | null => {
+  const frameHash = createEntityFrameHashFromStateRoot(
+    getPrevFrameHash(context.workingReplica.state),
+    frame.height,
+    frame.timestamp,
+    frame.txs,
+    state.entityId,
+    frame.stateRoot,
+    frame.authorityRoot,
+    frame.jPrefixCertificate,
+  );
+  if (frameHash === frame.hash) return null;
+  logError('FRAME_CONSENSUS', '❌ HASH MISMATCH: invalid proposal frame hash', {
+    expected: frameHash,
+    received: frame.hash,
+  });
+  return rejectProposal(context, 'PROPOSAL_FRAME_HASH_MISMATCH');
+};
+
+const buildVerifiedProposalHashes = (
+  context: ApplyEntityInputContext,
+  frame: ProposedEntityFrame,
+  state: EntityState,
+  outputs: ValidatorEntityFrameExecution['outputs'],
+  collectedHashes: NonNullable<ValidatorEntityFrameExecution['hashesToSign']>,
+): NonNullable<ValidatorEntityFrameExecution['hashesToSign']> | ProposalReplayResult => {
+  const outputHashes = buildCertifiedEntityOutputHashes(
+    state,
+    context.env,
+    frame.height,
+    frame.hash,
+    outputs,
+  );
+  const hashesToSign = buildEntityHashesToSign(
+    context.workingReplica.state.entityId,
+    frame.height,
+    frame.hash,
+    [...collectedHashes, ...outputHashes],
+  );
+  const mismatch = getEntityHashManifestMismatch(hashesToSign, frame.hashesToSign);
+  if (!mismatch) return hashesToSign;
+  logError(
+    'FRAME_CONSENSUS',
+    `❌ BYZANTINE: Secondary hash manifest mismatch: ${mismatch}`,
+    {
+      frame: frame.hash,
+      expected: hashesToSign,
+      received: frame.hashesToSign ?? null,
+    },
+  );
+  return rejectProposal(context);
+};
+
 export const replayProposedEntityFrame = async (
   context: ApplyEntityInputContext,
   frame: ProposedEntityFrame,
 ): Promise<ProposalReplayResult> => {
-  const { env, workingReplica } = context;
   const {
     newState,
     collectedHashes = [],
@@ -45,103 +129,31 @@ export const replayProposedEntityFrame = async (
     consumptionNodeChanges,
     accountJClaimNodeChanges,
   } = await applyEntityFrame(
-    env,
-    workingReplica.state,
+    context.env,
+    context.workingReplica.state,
     frame.txs,
     frame.timestamp,
   );
   const state = {
     ...newState,
-    entityId: workingReplica.state.entityId,
+    entityId: context.workingReplica.state.entityId,
     height: frame.height,
     timestamp: frame.timestamp,
-    leaderState: expectedCommittedLeaderState(workingReplica.state, frame),
+    leaderState: expectedCommittedLeaderState(context.workingReplica.state, frame),
   };
-  const stateRoot = computeCanonicalEntityConsensusStateHash(state);
-  if (stateRoot !== frame.stateRoot) {
-    entityLog.error('proposal.state_root_rejected', {
-      expected: stateRoot,
-      received: frame.stateRoot,
-    });
-    return {
-      accepted: false,
-      result: rejectEntityConsensusInput(
-        context,
-        'PROPOSAL_STATE_ROOT_MISMATCH',
-      ),
-    };
-  }
-  const authorityRoot = computeEntityFrameAuthorityRoot(
-    buildEntityFrameAuthority(state),
-  );
-  if (authorityRoot !== frame.authorityRoot) {
-    entityLog.error('proposal.authority_root_rejected', {
-      expected: authorityRoot,
-      received: frame.authorityRoot,
-    });
-    return {
-      accepted: false,
-      result: rejectEntityConsensusInput(
-        context,
-        'PROPOSAL_AUTHORITY_ROOT_MISMATCH',
-      ),
-    };
-  }
-  const frameHash = createEntityFrameHashFromStateRoot(
-    getPrevFrameHash(workingReplica.state),
-    frame.height,
-    frame.timestamp,
-    frame.txs,
-    state.entityId,
-    stateRoot,
-    authorityRoot,
-    frame.jPrefixCertificate,
-  );
-  if (frameHash !== frame.hash) {
-    logError('FRAME_CONSENSUS', '❌ HASH MISMATCH: invalid proposal frame hash', {
-      expected: frameHash,
-      received: frame.hash,
-    });
-    return {
-      accepted: false,
-      result: rejectEntityConsensusInput(
-        context,
-        'PROPOSAL_FRAME_HASH_MISMATCH',
-      ),
-    };
-  }
-  const outputHashes = buildCertifiedEntityOutputHashes(
+  const rootFailure = verifyProposalRoots(context, frame, state);
+  if (rootFailure) return rootFailure;
+  const hashFailure = verifyProposalFrameHash(context, frame, state);
+  if (hashFailure) return hashFailure;
+  const hashesToSign = buildVerifiedProposalHashes(
+    context,
+    frame,
     state,
-    env,
-    frame.height,
-    frameHash,
     outputs,
+    collectedHashes,
   );
-  const hashesToSign = buildEntityHashesToSign(
-    workingReplica.state.entityId,
-    frame.height,
-    frameHash,
-    [...collectedHashes, ...outputHashes],
-  );
-  const manifestMismatch = getEntityHashManifestMismatch(
-    hashesToSign,
-    frame.hashesToSign,
-  );
-  if (manifestMismatch) {
-    logError(
-      'FRAME_CONSENSUS',
-      `❌ BYZANTINE: Secondary hash manifest mismatch: ${manifestMismatch}`,
-      {
-        frame: frame.hash,
-        expected: hashesToSign,
-        received: frame.hashesToSign ?? null,
-      },
-    );
-    return {
-      accepted: false,
-      result: rejectEntityConsensusInput(context),
-    };
-  }
+  if (!Array.isArray(hashesToSign)) return hashesToSign;
+
   entityLog.debug('proposal.hash_verified', { frame: shortHash(frame.hash) });
   return {
     accepted: true,
