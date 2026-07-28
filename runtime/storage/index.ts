@@ -88,10 +88,7 @@ import type {
   RuntimeInput,
   RuntimeFrameDbRecord,
 } from '../types';
-import {
-  cloneIsolatedRoutedEntityInputs,
-  cloneIsolatedRuntimeInput,
-} from '../protocol/runtime-input-clone';
+import { cloneIsolatedRoutedEntityInputs } from '../protocol/runtime-input-clone';
 import {
   collectReachableCertifiedBoardNodes,
   getCertifiedBoardNodeStore,

@@ -22,6 +22,100 @@ export function isLeft(myEntityId: string, counterpartyEntityId: string): boolea
 
 // CRITICAL: Default credit is 0 - credit must be explicitly extended via set_credit_limit
 const BASE_CREDIT_LIMIT = 0n;
+const nonNegative = (value: bigint): bigint => value < 0n ? 0n : value;
+
+type DeltaPerspective = Omit<DerivedDelta, 'delta' | 'collateral' | 'totalCapacity' | 'ascii'>;
+
+type LeftDeltaDerivation = DeltaPerspective & {
+  effectiveOwnCreditWindow: bigint;
+  totalCapacity: bigint;
+};
+
+const deriveLeftPerspective = (
+  delta: Delta,
+  totalDelta: bigint,
+  collateral: bigint,
+): LeftDeltaDerivation => {
+  const ownCreditLimit = delta.leftCreditLimit;
+  const peerCreditLimit = delta.rightCreditLimit;
+  const inCollateral = totalDelta > 0n ? nonNegative(collateral - totalDelta) : collateral;
+  const outCollateral = totalDelta > 0n ? (totalDelta > collateral ? collateral : totalDelta) : 0n;
+  // Drawn debt is historical exposure. A later limit reduction may block new
+  // risk, but must never erase a signed receivable or repayment capacity.
+  const inOwnCredit = nonNegative(-totalDelta);
+  const outPeerCredit = nonNegative(totalDelta - collateral);
+  const outOwnCredit = nonNegative(ownCreditLimit - inOwnCredit);
+  const inPeerCredit = nonNegative(peerCreditLimit - outPeerCredit);
+  const effectiveOwnCreditWindow = ownCreditLimit > inOwnCredit ? ownCreditLimit : inOwnCredit;
+  const effectivePeerCreditWindow = peerCreditLimit > outPeerCredit ? peerCreditLimit : outPeerCredit;
+  const leftHold = delta.leftHold || 0n;
+  const rightHold = delta.rightHold || 0n;
+  return {
+    inCollateral,
+    outCollateral,
+    inOwnCredit,
+    outPeerCredit,
+    inAllowance: delta.rightAllowance,
+    outAllowance: delta.leftAllowance,
+    ownCreditLimit,
+    peerCreditLimit,
+    inCapacity: nonNegative(
+      inOwnCredit + inCollateral + inPeerCredit - delta.rightAllowance - rightHold,
+    ),
+    outCapacity: nonNegative(
+      outPeerCredit + outCollateral + outOwnCredit - delta.leftAllowance - leftHold,
+    ),
+    outOwnCredit,
+    inPeerCredit,
+    peerCreditUsed: inOwnCredit,
+    ownCreditUsed: outPeerCredit,
+    outTotalHold: leftHold,
+    inTotalHold: rightHold,
+    effectiveOwnCreditWindow,
+    totalCapacity: collateral + effectiveOwnCreditWindow + effectivePeerCreditWindow,
+  };
+};
+
+const flipDeltaPerspective = (left: DeltaPerspective): DeltaPerspective => ({
+  inCollateral: left.outCollateral,
+  outCollateral: left.inCollateral,
+  inOwnCredit: left.outPeerCredit,
+  outPeerCredit: left.inOwnCredit,
+  inAllowance: left.outAllowance,
+  outAllowance: left.inAllowance,
+  ownCreditLimit: left.peerCreditLimit,
+  peerCreditLimit: left.ownCreditLimit,
+  inCapacity: left.outCapacity,
+  outCapacity: left.inCapacity,
+  outOwnCredit: left.inPeerCredit,
+  inPeerCredit: left.outOwnCredit,
+  peerCreditUsed: left.ownCreditUsed,
+  ownCreditUsed: left.peerCreditUsed,
+  outTotalHold: left.inTotalHold,
+  inTotalHold: left.outTotalHold,
+});
+
+const formatDeltaAscii = (
+  totalDelta: bigint,
+  collateral: bigint,
+  totalCapacity: bigint,
+  effectiveOwnCreditWindow: bigint,
+): string => {
+  const totalWidth = Number(totalCapacity);
+  const width = Number.isFinite(totalWidth) && totalWidth > 0 ? totalWidth : 1;
+  const leftCreditWidth = Math.floor((Number(effectiveOwnCreditWindow) / width) * 50);
+  const collateralWidth = Math.floor((Number(collateral) / width) * 50);
+  const rightCreditWidth = 50 - leftCreditWidth - collateralWidth;
+  const marker = Math.floor(
+    ((Number(totalDelta) + Number(effectiveOwnCreditWindow)) / width) * 50,
+  );
+  const bar =
+    '-'.repeat(leftCreditWidth) +
+    '='.repeat(collateralWidth) +
+    '-'.repeat(rightCreditWidth);
+  const position = Math.max(0, Math.min(marker, bar.length));
+  return `[${bar.substring(0, position)}|${bar.substring(position)}]`;
+};
 
 /**
  * Derive account balance information for a specific token
@@ -55,158 +149,37 @@ const BASE_CREDIT_LIMIT = 0n;
  * @returns Derived balance information including capacities and credits
  */
 export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
-  // VALIDATE AT SOURCE: Financial data must be valid
   validateDelta(delta, 'deriveDelta');
-
-  const nonNegative = (x: bigint): bigint => x < 0n ? 0n : x;
-
-  // [---.*∆--][INVARIANT-1]
-  // Canonical net state for this token pair.
   const totalDelta = delta.ondelta + delta.offdelta;
-
   const collateral = nonNegative(delta.collateral);
-
-  let ownCreditLimit = delta.leftCreditLimit;
-  let peerCreditLimit = delta.rightCreditLimit;
-
-  // [---.*∆--][INVARIANT-2][LEFT-PERSPECTIVE]
-  // When totalDelta > 0, peer owes left side; collateral is split into:
-  // - outCollateral: collateral we can use to send out (already secured for us)
-  // - inCollateral: residual collateral still counted on inbound side
-  let inCollateral = totalDelta > 0n ? nonNegative(collateral - totalDelta) : collateral;
-  let outCollateral = totalDelta > 0n ? (totalDelta > collateral ? collateral : totalDelta) : 0n;
-
-  // When delta > 0: peer owes us (peer is using OUR credit or we hold their collateral)
-  // When delta < 0: we owe peer (we're using PEER's credit or they hold our collateral)
-
-  // [---.*∆--][INVARIANT-3]
-  // Credit limits govern NEW risk, not already-drawn debt. A lender may revoke
-  // unused credit prospectively, but that cannot erase the signed receivable or
-  // remove the creditor's capacity to net/cure it. Clamping debt to the current
-  // limit made a limit reduction rewrite accounting history and wedge repayment.
-  let inOwnCredit = nonNegative(-totalDelta);
-
-  // [---.*∆--][INVARIANT-4]
-  // outPeerCredit = how much peer owes us beyond collateral. Like inOwnCredit,
-  // this is historical exposure and therefore is not clamped by a later grant.
-  let outPeerCredit = nonNegative(totalDelta - collateral);
-
-  // [---.*∆--][INVARIANT-5][MIRROR]
-  // outOwnCredit = unused portion of our credit window
-  let outOwnCredit = nonNegative(ownCreditLimit - inOwnCredit);
-
-  // inPeerCredit = unused portion of peer credit window
-  let inPeerCredit = nonNegative(peerCreditLimit - outPeerCredit);
-
-  // Track used credit for reporting (not used in capacity calculation).
-  // LEFT perspective initialization:
-  // - peerCreditUsed: credit peer lent to left that left is currently using
-  // - ownCreditUsed:  credit left lent to peer that peer is currently using
-  let peerCreditUsed = inOwnCredit;
-  let ownCreditUsed = outPeerCredit;
-
-  let inAllowance = delta.rightAllowance;
-  let outAllowance = delta.leftAllowance;
-  // Allowances are directional capacity locks/overrides used by transformer/final-proof
-  // settlement paths. They reduce immediate capacity, but do not change
-  // delta/collateral ownership semantics.
-
-  const effectiveOwnCreditWindow = ownCreditLimit > inOwnCredit ? ownCreditLimit : inOwnCredit;
-  const effectivePeerCreditWindow = peerCreditLimit > outPeerCredit ? peerCreditLimit : outPeerCredit;
-  const totalCapacity = collateral + effectiveOwnCreditWindow + effectivePeerCreditWindow;
-
-  // Unified per-side holds (single source of truth).
-  const leftHold = delta.leftHold || 0n;
-  const rightHold = delta.rightHold || 0n;
-
-  // [---.*∆--][INVARIANT-6][CAPACITY]
-  // Capacity is composition of credit+collateral slices minus allowances.
-  // Holds are subtracted after this base decomposition.
-  let inCapacity = nonNegative(inOwnCredit + inCollateral + inPeerCredit - inAllowance);
-  let outCapacity = nonNegative(outPeerCredit + outCollateral + outOwnCredit - outAllowance);
-
-  // [---.*∆--][INVARIANT-7][HOLD-SAFETY]
-  // Deduct holds from capacity in LEFT perspective (prevents double-spend).
-  // Always deduct leftHold from out, rightHold from in — the flip at line 101 handles RIGHT perspective
-  outCapacity = nonNegative(outCapacity - leftHold);
-  inCapacity = nonNegative(inCapacity - rightHold);
-
-  // Hold fields for UI (LEFT's perspective: out = left, in = right)
-  let outTotalHold = leftHold;
-  let inTotalHold = rightHold;
-
-  if (!isLeft) {
-    // [---.*∆--][INVARIANT-8][PERSPECTIVE-FLIP]
-    // Flip all directional fields for RIGHT perspective.
-    // This preserves semantic meaning:
-    // out* always means "my outbound capacity", in* means "my inbound capacity".
-    [inCollateral, inAllowance, inCapacity,
-     outCollateral, outAllowance, outCapacity] =
-    [outCollateral, outAllowance, outCapacity,
-     inCollateral, inAllowance, inCapacity];
-
-    [ownCreditLimit, peerCreditLimit] = [peerCreditLimit, ownCreditLimit];
-    [outOwnCredit, inOwnCredit, outPeerCredit, inPeerCredit] =
-    [inPeerCredit, outPeerCredit, inOwnCredit, outOwnCredit];
-    [peerCreditUsed, ownCreditUsed] = [ownCreditUsed, peerCreditUsed];
-
-    [outTotalHold, inTotalHold] = [inTotalHold, outTotalHold];
-  }
-
-  // [---.*∆--][DEBUG-VISUAL]
-  // ASCII visualization for deterministic debugging and quick human inspection.
-  const totalWidth = Number(totalCapacity);
-  const safeTotalWidth = Number.isFinite(totalWidth) && totalWidth > 0 ? totalWidth : 1;
-  const leftCreditWidth = Math.floor((Number(effectiveOwnCreditWindow) / safeTotalWidth) * 50);
-  const collateralWidth = Math.floor((Number(collateral) / safeTotalWidth) * 50);
-  const rightCreditWidth = 50 - leftCreditWidth - collateralWidth;
-  const deltaPosition = Math.floor(((Number(totalDelta) + Number(effectiveOwnCreditWindow)) / safeTotalWidth) * 50);
-
-  // ASCII visualization - proper bar with position marker
-  // Build the full capacity bar first
-  const fullBar =
-    '-'.repeat(leftCreditWidth) +
-    '='.repeat(collateralWidth) +
-    '-'.repeat(rightCreditWidth);
-
-  // Insert position marker at deltaPosition
-  const clampedPosition = Math.max(0, Math.min(deltaPosition, fullBar.length));
-  const ascii =
-    '[' +
-    fullBar.substring(0, clampedPosition) +
-    '|' +
-    fullBar.substring(clampedPosition) +
-    ']';
+  const left = deriveLeftPerspective(delta, totalDelta, collateral);
+  const {
+    effectiveOwnCreditWindow,
+    totalCapacity,
+    ...leftPerspective
+  } = left;
+  const perspective = isLeft ? leftPerspective : flipDeltaPerspective(leftPerspective);
+  const ascii = formatDeltaAscii(
+    totalDelta,
+    collateral,
+    totalCapacity,
+    effectiveOwnCreditWindow,
+  );
 
   if (PERFORMANCE.DEBUG_ACCOUNTS) {
     logDebug('ACCOUNT_STATE', 'deriveDelta.return', {
       isLeft,
-      inCapacity,
-      outCapacity,
-      capacitySum: inCapacity + outCapacity,
+      inCapacity: perspective.inCapacity,
+      outCapacity: perspective.outCapacity,
+      capacitySum: perspective.inCapacity + perspective.outCapacity,
     });
   }
 
   return {
     delta: totalDelta,
     collateral,
-    inCollateral,
-    outCollateral,
-    inOwnCredit,
-    outPeerCredit,
-    inAllowance,
-    outAllowance,
+    ...perspective,
     totalCapacity,
-    ownCreditLimit,
-    peerCreditLimit,
-    inCapacity,
-    outCapacity,
-    outOwnCredit,
-    inPeerCredit,
-    peerCreditUsed,  // HYBRID: credit peer lent that we're using
-    ownCreditUsed,   // HYBRID: credit we lent that peer is using
-    outTotalHold,
-    inTotalHold,
     ascii,
   };
 }

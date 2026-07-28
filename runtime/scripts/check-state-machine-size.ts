@@ -24,11 +24,9 @@ const COORDINATOR_DEBT: Readonly<Record<string, number>> = {
   'runtime/entity/consensus/frame-application.ts::proposePendingAccountFrames': 170,
   'runtime/entity/tx/handlers/open-account.ts::handleOpenAccountEntityTx': 166,
   'runtime/entity/tx/handlers/cross-j-book-order.ts::applyCrossJurisdictionBookProgressToState': 163,
-  'runtime/account/utils.ts::deriveDelta': 156,
-  'runtime/entity/tx/handlers/j-broadcast.ts::handleJBroadcast': 154,
 };
 
-const MAX_OVER_100_FUNCTIONS = 63;
+const MAX_OVER_100_FUNCTIONS = 61;
 
 type FunctionSize = {
   key: string;

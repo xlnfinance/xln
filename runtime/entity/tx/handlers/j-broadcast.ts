@@ -31,6 +31,99 @@ import { getEntityLeaderState } from '../../consensus/leader';
 
 const jBatchActionLog = createStructuredLogger('entity.jbatch');
 
+const resolveBroadcastJurisdiction = (
+  state: EntityState,
+  env: Env,
+): ReturnType<typeof requireRuntimeJurisdictionConfigByName> | null => {
+  const configuredName = getJurisdictionConfigName(state.config.jurisdiction);
+  if (!configuredName) {
+    addMessage(state, '❌ No jurisdiction configured for this entity');
+    return null;
+  }
+  try {
+    return requireRuntimeJurisdictionConfigByName(env, configuredName, state.config.jurisdiction);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    addMessage(state, `❌ Jurisdiction unavailable: ${message}`);
+    return null;
+  }
+};
+
+type PreparedBroadcast = {
+  batchHash: string;
+  batchGeneration: number;
+  encodedBatch: string;
+  jTx: JTx;
+  nextNonce: bigint;
+  opCount: number;
+};
+
+const prepareBroadcast = (
+  state: EntityState,
+  entityTx: Extract<EntityTx, { type: 'j_broadcast' }>,
+  entityId: string,
+  jurisdiction: ReturnType<typeof requireRuntimeJurisdictionConfigByName>,
+  signerId: string,
+): PreparedBroadcast => {
+  const depositoryAddress = requireUsableContractAddress('depository', jurisdiction.depositoryAddress);
+  requireUsableContractAddress('entity_provider', jurisdiction.entityProviderAddress);
+  const chainId = BigInt(jurisdiction.chainId ?? 0);
+  const nextNonce = BigInt(state.jBatchState!.entityNonce ?? 0) + 1n;
+  assertJBatchWithinContractLimits(state.jBatchState!.batch, 'j_broadcast');
+  const encodedBatch = encodeJBatch(state.jBatchState!.batch);
+  const batchHash = computeBatchHankoHash(chainId, depositoryAddress, encodedBatch, nextNonce);
+  const batchSize = getBatchSize(state.jBatchState!.batch);
+  const opCount = batchOpCount(state.jBatchState!.batch);
+  const batchGeneration = state.jBatchState!.broadcastCount + 1;
+  const jTx: JTx = {
+    type: 'batch',
+    entityId,
+    data: {
+      batch: cloneJBatch(state.jBatchState!.batch),
+      batchHash,
+      encodedBatch,
+      entityNonce: Number(nextNonce),
+      batchGeneration,
+      ...(entityTx.data?.feeOverrides ? { feeOverrides: { ...entityTx.data.feeOverrides } } : {}),
+      batchSize,
+      signerId,
+    },
+    timestamp: state.timestamp,
+  };
+  jBatchActionLog.debug('broadcast.submit', {
+    entity: shortId(entityId),
+    jurisdiction: jurisdiction.name,
+    batchSize,
+    opCount,
+    nonce: nextNonce.toString(),
+    batchHash: shortHash(batchHash),
+  });
+  return { batchHash, batchGeneration, encodedBatch, jTx, nextNonce, opCount };
+};
+
+const commitBroadcast = (
+  state: EntityState,
+  entityTx: Extract<EntityTx, { type: 'j_broadcast' }>,
+  prepared: PreparedBroadcast,
+): void => {
+  const batch = cloneJBatch(state.jBatchState!.batch);
+  state.jBatchState!.sentBatch = {
+    batch,
+    batchHash: prepared.batchHash,
+    encodedBatch: prepared.encodedBatch,
+    entityNonce: Number(prepared.nextNonce),
+    firstSubmittedAt: state.timestamp,
+    lastSubmittedAt: 0,
+    submitAttempts: 0,
+    ...(entityTx.data?.feeOverrides ? { feeOverrides: { ...entityTx.data.feeOverrides } } : {}),
+  };
+  state.jBatchState!.batch = createEmptyBatch();
+  delete state.jBatchState!.autoBroadcastDraft;
+  state.jBatchState!.broadcastCount = prepared.batchGeneration;
+  state.jBatchState!.lastBroadcast = state.timestamp;
+  state.jBatchState!.status = 'sent';
+};
+
 export async function handleJBroadcast(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'j_broadcast' }>,
@@ -60,34 +153,13 @@ export async function handleJBroadcast(
     return { newState, outputs, jOutputs };
   }
 
-  // ── Validate: jurisdiction configured ──
-  const configuredJurisdictionName = getJurisdictionConfigName(newState.config.jurisdiction);
-  if (!configuredJurisdictionName) {
-    addMessage(newState, '❌ No jurisdiction configured for this entity');
-    return { newState, outputs, jOutputs };
-  }
-
-  let jurisdiction;
-  try {
-    jurisdiction = requireRuntimeJurisdictionConfigByName(
-      env,
-      configuredJurisdictionName,
-      newState.config.jurisdiction,
-    );
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    addMessage(newState, `❌ Jurisdiction unavailable: ${message}`);
-    return { newState, outputs, jOutputs };
-  }
+  const jurisdiction = resolveBroadcastJurisdiction(newState, env);
+  if (!jurisdiction) return { newState, outputs, jOutputs };
   newState.config = {
     ...newState.config,
     jurisdiction,
   };
-
-  const depositoryAddress = requireUsableContractAddress('depository', jurisdiction.depositoryAddress);
-  requireUsableContractAddress('entity_provider', jurisdiction.entityProviderAddress);
-  const chainId = BigInt(jurisdiction.chainId ?? 0);
-  if (!chainId) {
+  if (!BigInt(jurisdiction.chainId ?? 0)) {
     addMessage(newState, '❌ Missing chainId');
     return { newState, outputs, jOutputs };
   }
@@ -99,88 +171,20 @@ export async function handleJBroadcast(
     return { newState, outputs, jOutputs };
   }
 
-  // ── Compute batch hash (deterministic: uses tracked confirmed nonce) ──
-  // Entity nonce advances from finalized HankoBatchProcessed events. Dispute
-  // events also carry the sibling Hanko nonce as exact watcher metadata so
-  // replicas that observe a dispute outcome without their local sentBatch still
-  // stay aligned before the next broadcast.
-  const currentEntityNonce = BigInt(newState.jBatchState.entityNonce ?? 0);
-  // Contract expects currentNonce + 1 for a new submission.
-  const nextNonce = currentEntityNonce + 1n;
-
-  assertJBatchWithinContractLimits(newState.jBatchState.batch, 'j_broadcast');
-
-  const encodedBatch = encodeJBatch(newState.jBatchState.batch);
-  const batchHash = computeBatchHankoHash(chainId, depositoryAddress, encodedBatch, nextNonce);
-
-  const batchSize = getBatchSize(newState.jBatchState.batch);
-  const opCount = batchOpCount(newState.jBatchState.batch);
-  const jurisdictionName = jurisdiction.name;
-  const batchGeneration = newState.jBatchState.broadcastCount + 1;
-
-  jBatchActionLog.debug('broadcast.submit', {
-    entity: shortId(entityState.entityId),
-    jurisdiction: jurisdictionName,
-    batchSize,
-    opCount,
-    nonce: nextNonce.toString(),
-    batchHash: shortHash(batchHash),
-  });
-
-  // ── Create JTx WITHOUT hanko (attached post-commit by entity-consensus) ──
-  const jTx: JTx = {
-    type: 'batch',
-    entityId: entityState.entityId,
-    data: {
-      batch: cloneJBatch(newState.jBatchState.batch),
-      batchHash,
-      encodedBatch,
-      entityNonce: Number(nextNonce),
-      batchGeneration,
-      ...(entityTx.data?.feeOverrides ? { feeOverrides: { ...entityTx.data.feeOverrides } } : {}),
-      batchSize,
-      signerId,
-    },
-    timestamp: newState.timestamp,
-  };
-
-  jOutputs.push({
-    jurisdictionName,
-    jTxs: [jTx],
-  });
-
-  // ── Move current batch → sentBatch, clear current ──
-  const firstSubmittedAt = newState.timestamp;
-  newState.jBatchState.sentBatch = {
-    batch: cloneJBatch(newState.jBatchState.batch),
-    batchHash,
-    encodedBatch,
-    entityNonce: Number(nextNonce),
-    firstSubmittedAt,
-    // External submission is a validator-local side effect. The replayable
-    // retryJSubmit RuntimeTx records attempt count/time before I/O.
-    lastSubmittedAt: 0,
-    submitAttempts: 0,
-    ...(entityTx.data?.feeOverrides ? { feeOverrides: { ...entityTx.data.feeOverrides } } : {}),
-  };
-  newState.jBatchState.batch = createEmptyBatch();
-  delete newState.jBatchState.autoBroadcastDraft;
-
-  // ── Update batch state metadata ──
-  newState.jBatchState.broadcastCount = batchGeneration;
-  newState.jBatchState.lastBroadcast = newState.timestamp;
-  newState.jBatchState.status = 'sent';
+  const prepared = prepareBroadcast(newState, entityTx, entityState.entityId, jurisdiction, signerId);
+  jOutputs.push({ jurisdictionName: jurisdiction.name, jTxs: [prepared.jTx] });
+  commitBroadcast(newState, entityTx, prepared);
   // IMPORTANT: do not advance entityNonce optimistically here.
   // If network submission fails, optimistic increment causes permanent nonce desync.
   // entityNonce is advanced only when HankoBatchProcessed is observed.
 
-  addMessage(newState, `📤 Batch (${opCount} ops) → hashesToSign [nonce=${nextNonce}]`);
+  addMessage(newState, `📤 Batch (${prepared.opCount} ops) → hashesToSign [nonce=${prepared.nextNonce}]`);
 
   // ── Return hashesToSign for entity consensus ──
   const hashesToSign: Array<{ hash: string; type: HashType; context: string }> = [{
-    hash: batchHash,
+    hash: prepared.batchHash,
     type: 'jBatch',
-    context: `jBatch:${entityState.entityId.slice(-4)}:nonce:${nextNonce}`,
+    context: `jBatch:${entityState.entityId.slice(-4)}:nonce:${prepared.nextNonce}`,
   }];
 
   return { newState, outputs, jOutputs, hashesToSign };
