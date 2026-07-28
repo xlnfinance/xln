@@ -69,6 +69,71 @@ export type PersistedRuntimeActivityPage = {
   events: RuntimeActivityEvent[];
 };
 
+const readRuntimeActivityJournal = async (
+  deps: PersistenceQueryDeps,
+  env: RuntimeState,
+  height: number,
+): Promise<(PersistedActivityJournal & { logs: FrameLogEntry[] }) | null> => {
+  const targetHeight = Number.isFinite(height) ? Math.floor(height) : 0;
+  if (targetHeight <= 0) {
+    throw new Error(`STORAGE_ACTIVITY_JOURNAL_HEIGHT_INVALID:${String(height)}`);
+  }
+  if (!(await deps.tryOpenHistoryViewDb(env))) {
+    throw new Error(`STORAGE_ACTIVITY_JOURNAL_DB_OPEN_FAILED:height=${targetHeight}`);
+  }
+  try {
+    const activity = await readHistoryViewRuntimeActivity(deps.getHistoryViewDb(env), targetHeight);
+    if (!activity) return null;
+    return {
+      height: targetHeight,
+      timestamp: activity.timestamp,
+      runtimeInput: {
+        runtimeTxs: [],
+        entityInputs: activity.runtimeInput.entityInputs.map(input =>
+          cloneIsolatedEntityInput(input as EntityInput)),
+        ...(activity.runtimeInput.jInputs
+          ? { jInputs: activity.runtimeInput.jInputs.map(input => structuredClone(input)) }
+          : {}),
+      },
+      logs: activity.logs.map((entry) => ({ ...entry })),
+    };
+  } catch (error) {
+    throw new Error(
+      `STORAGE_ACTIVITY_JOURNAL_READ_FAILED:height=${targetHeight}:` +
+      `${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
+};
+
+const readAccountFrameHistory = async (
+  deps: PersistenceQueryDeps,
+  env: RuntimeState,
+  entityId: string,
+  counterpartyId: string,
+  limit = 50,
+  opts?: { maxRuntimeHeight?: number; maxAccountHeight?: number },
+): Promise<AccountFrame[]> => {
+  if (!(await deps.tryOpenHistoryViewDb(env))) return [];
+  const maxRuntimeHeight = Number.isFinite(Number(opts?.maxRuntimeHeight))
+    ? Math.max(0, Math.floor(Number(opts?.maxRuntimeHeight)))
+    : Number.POSITIVE_INFINITY;
+  const maxAccountHeight = Number.isFinite(Number(opts?.maxAccountHeight))
+    ? Math.max(0, Math.floor(Number(opts?.maxAccountHeight)))
+    : Number.POSITIVE_INFINITY;
+  const records = await readHistoryViewAccountFrames(
+    deps.getHistoryViewDb(env),
+    entityId,
+    counterpartyId,
+    {
+      limit: Math.max(1, Math.min(1000, Math.floor(Number(limit || 50)))),
+      ...(Number.isSafeInteger(maxRuntimeHeight) ? { maxRuntimeHeight } : {}),
+      ...(Number.isSafeInteger(maxAccountHeight) ? { maxAccountHeight } : {}),
+    },
+  );
+  return records.map((record) => structuredClone(record.frame));
+};
+
 export const createPersistenceHistoryQueries = (deps: PersistenceQueryDeps) => {
   const readPersistedFrameJournal = async (
     env: RuntimeState,
@@ -79,68 +144,18 @@ export const createPersistenceHistoryQueries = (deps: PersistenceQueryDeps) => {
     return buildRecoveryJournalFromStorageFrame(frame, frame.activityLogs);
   };
 
-  const readPersistedRuntimeActivityJournal = async (
+  const readPersistedRuntimeActivityJournal = (
     env: RuntimeState,
     height: number,
-  ): Promise<(PersistedActivityJournal & { logs: FrameLogEntry[] }) | null> => {
-    const targetHeight = Number.isFinite(height) ? Math.floor(height) : 0;
-    if (targetHeight <= 0) {
-      throw new Error(`STORAGE_ACTIVITY_JOURNAL_HEIGHT_INVALID:${String(height)}`);
-    }
-    if (!(await deps.tryOpenHistoryViewDb(env))) {
-      throw new Error(`STORAGE_ACTIVITY_JOURNAL_DB_OPEN_FAILED:height=${targetHeight}`);
-    }
-    try {
-      const activity = await readHistoryViewRuntimeActivity(deps.getHistoryViewDb(env), targetHeight);
-      if (!activity) return null;
-      return {
-        height: targetHeight,
-        timestamp: activity.timestamp,
-        runtimeInput: {
-          runtimeTxs: [],
-          entityInputs: activity.runtimeInput.entityInputs.map(input =>
-            cloneIsolatedEntityInput(input as EntityInput)),
-          ...(activity.runtimeInput.jInputs
-            ? { jInputs: activity.runtimeInput.jInputs.map(input => structuredClone(input)) }
-            : {}),
-        },
-        logs: activity.logs.map((entry) => ({ ...entry })),
-      };
-    } catch (error) {
-      throw new Error(
-        `STORAGE_ACTIVITY_JOURNAL_READ_FAILED:height=${targetHeight}:` +
-        `${error instanceof Error ? error.message : String(error)}`,
-        { cause: error },
-      );
-    }
-  };
+  ) => readRuntimeActivityJournal(deps, env, height);
 
-  const readPersistedAccountFrameHistory = async (
+  const readPersistedAccountFrameHistory = (
     env: RuntimeState,
     entityId: string,
     counterpartyId: string,
     limit = 50,
     opts?: { maxRuntimeHeight?: number; maxAccountHeight?: number },
-  ): Promise<AccountFrame[]> => {
-    if (!(await deps.tryOpenHistoryViewDb(env))) return [];
-    const maxRuntimeHeight = Number.isFinite(Number(opts?.maxRuntimeHeight))
-      ? Math.max(0, Math.floor(Number(opts?.maxRuntimeHeight)))
-      : Number.POSITIVE_INFINITY;
-    const maxAccountHeight = Number.isFinite(Number(opts?.maxAccountHeight))
-      ? Math.max(0, Math.floor(Number(opts?.maxAccountHeight)))
-      : Number.POSITIVE_INFINITY;
-    const records = await readHistoryViewAccountFrames(
-      deps.getHistoryViewDb(env),
-      entityId,
-      counterpartyId,
-      {
-        limit: Math.max(1, Math.min(1000, Math.floor(Number(limit || 50)))),
-        ...(Number.isSafeInteger(maxRuntimeHeight) ? { maxRuntimeHeight } : {}),
-        ...(Number.isSafeInteger(maxAccountHeight) ? { maxAccountHeight } : {}),
-      },
-    );
-    return records.map((record) => structuredClone(record.frame));
-  };
+  ) => readAccountFrameHistory(deps, env, entityId, counterpartyId, limit, opts);
 
   const readPersistedEntityFrameHistory = async (
     env: RuntimeState,
