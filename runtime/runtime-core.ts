@@ -1,6 +1,5 @@
 import { TIMING } from './constants';
 import { dbRootPath, nodeProcess, runtimeIsBrowser } from './runtime/platform';
-import { isRuntimePerfProfileEnabled, readRuntimePerfSlowMs } from './infra/perf-runtime-flags';
 
 // Bump this on runtime bundle changes that must be reflected in frontend immediately.
 const RUNTIME_BUILD_ID = '2026-07-18-16:00Z';
@@ -10,20 +9,11 @@ export const RUNTIME_BUILD = RUNTIME_BUILD_ID;
 
 const RUNTIME_APPLY_PROFILE = nodeProcess?.env?.['XLN_RUNTIME_APPLY_PROFILE'] === '1';
 const RUNTIME_APPLY_SLOW_MS = Math.max(0, Number(nodeProcess?.env?.['XLN_RUNTIME_APPLY_SLOW_MS'] || '500'));
-const RUNTIME_ACCOUNT_CAUSAL_TRACE = nodeProcess?.env?.['XLN_ACCOUNT_CAUSAL_TRACE'] === '1';
-const RUNTIME_PROCESS_PROFILE =
-  RUNTIME_APPLY_PROFILE || RUNTIME_ACCOUNT_CAUSAL_TRACE || nodeProcess?.env?.['XLN_RUNTIME_PROCESS_PROFILE'] === '1';
-const RUNTIME_PROCESS_SLOW_MS = Math.max(0, Number(nodeProcess?.env?.['XLN_RUNTIME_PROCESS_SLOW_MS'] || '1000'));
-const runtimeProcessProfileEnabled = (): boolean =>
-  RUNTIME_PROCESS_PROFILE || isRuntimePerfProfileEnabled('XLN_RUNTIME_APPLY_PROFILE', 'XLN_ACCOUNT_CAUSAL_TRACE');
-const runtimeProcessSlowMs = (): number =>
-  readRuntimePerfSlowMs('XLN_RUNTIME_PROCESS_SLOW_MS', RUNTIME_PROCESS_SLOW_MS);
 import { getPerfMs, getWallClockMs } from './utils';
 import { cumulativeMarksToPhases } from './infra/perf-profile';
 import {
   causalTraceContainsWork,
   summarizeRuntimeAccountCausality,
-  type EntityInputCausalTrace,
 } from './infra/account-causal-trace';
 import { cloneIsolatedRuntimeInput } from './protocol/runtime-input-clone';
 import { requireBoundaryInteger } from './protocol/boundary-validation';
@@ -74,7 +64,7 @@ import {
   assertScheduledWakeTxAuthorized,
   refreshScheduledWakeIndex,
 } from './runtime/scheduled-wake';
-import { inferRuntimeLifecyclePhase, transitionRuntimeLifecycle } from './runtime/lifecycle';
+import { transitionRuntimeLifecycle } from './runtime/lifecycle';
 import { ensureRuntimeMempool } from './runtime/input-queue';
 import { ensureRuntimeState } from './runtime/runtime-state';
 import {
@@ -88,7 +78,6 @@ import {
   rollbackReliableDeliveryReceipts,
   rollbackReliableIngressCommit,
   type ReliableIngressCommit,
-  type ReliableReceiptSenderCheckpoint,
 } from './runtime/reliable-delivery';
 import { reliableIdentityExactKey } from './runtime/reliable-frontier';
 import { mergeDurableReceiptOnlyInputs } from './runtime/reliable-durable-inputs';
@@ -109,13 +98,11 @@ import {
 import {
   materializePendingJurisdictionImportResults,
 } from './runtime/jurisdiction-import';
-import { saveRuntimeFrameToStorage } from './storage';
 import { validateEntityInput } from './validation-utils';
 import type {
   EntityInput,
   EntityTx,
   Env,
-  EnvSnapshot,
   FrameLogEntry,
   JInput,
   ReliableDeliveryReceipt,
@@ -150,8 +137,13 @@ import {
   prependOlderRuntimeInput,
   publishRuntimeFrameTransaction,
   runtimeInputHasQueuedWork,
-  type RuntimeFrameTransaction,
 } from './runtime/frame/transaction';
+import {
+  ACCOUNT_CAUSAL_TRACE,
+  createRuntimeProcessProfile,
+} from './runtime/frame/process-profile';
+import { createFrameExecutionState } from './runtime/frame/execution-state';
+import { acquireRuntimeFrameWriter } from './runtime/frame/writer-lock';
 
 const runtimeLog = createStructuredLogger('runtime');
 
@@ -1195,114 +1187,10 @@ const applyCommittedLocalReliableReceipts = runtimeRecoveryApi.applyCommittedLoc
 export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0) => {
   const liveEnv = env;
   const processState = ensureRuntimeState(env);
-  if (inferRuntimeLifecyclePhase(processState) === 'halted') {
-    throw new Error('RUNTIME_PROCESS_HALTED');
-  }
-  while (processState.processingPromise) {
-    await processState.processingPromise;
-  }
-  // A previous writer may discover an ambiguous durable outcome and halt while
-  // this caller waits. Halt is terminal: a waiter must never become the next
-  // writer after that discovery.
-  if (inferRuntimeLifecyclePhase(processState) === 'halted') {
-    throw new Error('RUNTIME_PROCESS_HALTED');
-  }
-  let releaseProcessLock: () => void = () => {};
-  processState.processingPromise = new Promise<void>(resolve => {
-    releaseProcessLock = resolve;
-  });
+  const releaseProcessLock = await acquireRuntimeFrameWriter(processState);
 
-  const processProfileStartMs = getPerfMs();
-  const processProfileEnabled = runtimeProcessProfileEnabled();
-  const processProfileCpuStart = processProfileEnabled && nodeProcess?.cpuUsage ? nodeProcess.cpuUsage() : undefined;
-  const processProfileMarks: Record<string, number> = {};
-  const processProfileMetrics = {
-    triggerReason: processProfileEnabled ? getRuntimeWorkReason(env) : undefined,
-    heightBefore: env.height,
-    heightAfter: env.height,
-    timestampBefore: env.timestamp,
-    timestampAfter: env.timestamp,
-    runtimeTxs: 0,
-    entityInputs: 0,
-    entityTxs: 0,
-    jInputs: 0,
-    reliableReceipts: 0,
-    localOutputs: 0,
-    remoteOutputs: 0,
-    deferredOutputs: 0,
-    pendingNetworkBefore: env.pendingNetworkOutputs?.length ?? 0,
-    readyPendingOutputs: 0,
-    waitingPendingOutputs: 0,
-    pendingNetworkAfter: env.pendingNetworkOutputs?.length ?? 0,
-    deferredNetworkMeta: env.runtimeState?.deferredNetworkMeta?.size ?? 0,
-    jOutputs: 0,
-    frameAdvanced: false,
-    storageMs: undefined as Awaited<ReturnType<typeof saveRuntimeFrameToStorage>>['persistencePerfMs'],
-    cpuMs: undefined as { user: number; system: number; total: number } | undefined,
-    accountCausality: undefined as
-      | {
-          ingress: EntityInputCausalTrace[];
-          egress: EntityInputCausalTrace[];
-        }
-      | undefined,
-  };
-  let processProfileOutcome = 'unknown';
-  let reliableIngressCommits: ReliableIngressCommit[] = [];
-  let reliableReceiptSenderCheckpoint: ReliableReceiptSenderCheckpoint | undefined;
-  let reliableReceiptDeliveries: Array<{
-    runtimeId: string;
-    receipt: ReliableDeliveryReceipt;
-  }> = [];
-  let immediateReliableReceiptDeliveries: Array<{
-    runtimeId: string;
-    receipt: ReliableDeliveryReceipt;
-  }> = [];
-  let reliableReceiptStateDurable = false;
-  let frameCommitDisposition: 'undurable' | 'committed' | 'unknown' = 'undurable';
-  let frameRollbackHandled = false;
-  let frameTransaction: RuntimeFrameTransaction | undefined;
-  let pendingRuntimeTraceSnapshot: EnvSnapshot | undefined;
-  let rollbackUndurableFrame:
-    ((error: unknown, options?: { quarantine?: boolean; requeue?: boolean }) => Promise<Error>) | undefined;
-  const markProcessProfile = (label: string): void => {
-    processProfileMarks[label] = Math.round(getPerfMs() - processProfileStartMs);
-    // Operational watchdog progress only. Keep this on the live Env so a
-    // long private frame remains observable without contaminating RJEA state.
-    liveEnv.activeProcessProgressAt = Date.now();
-    liveEnv.activeProcessProgressStep = label;
-  };
-  const logProcessProfile = (): void => {
-    processProfileMetrics.heightAfter = env.height;
-    processProfileMetrics.timestampAfter = env.timestamp;
-    const elapsedMs = Math.round(getPerfMs() - processProfileStartMs);
-    if (processProfileCpuStart && nodeProcess?.cpuUsage) {
-      const cpu = nodeProcess.cpuUsage(processProfileCpuStart);
-      const user = cpu.user / 1_000;
-      const system = cpu.system / 1_000;
-      processProfileMetrics.cpuMs = { user, system, total: user + system };
-    }
-    const hasProfileWork =
-      processProfileMetrics.runtimeTxs > 0 ||
-      processProfileMetrics.entityInputs > 0 ||
-      processProfileMetrics.jInputs > 0 ||
-      processProfileMetrics.reliableReceipts > 0 ||
-      processProfileMetrics.localOutputs > 0 ||
-      processProfileMetrics.remoteOutputs > 0 ||
-      processProfileMetrics.jOutputs > 0 ||
-      processProfileMetrics.frameAdvanced;
-    if ((!processProfileEnabled || !hasProfileWork) && elapsedMs < runtimeProcessSlowMs()) return;
-    const profileFields = {
-      outcome: processProfileOutcome,
-      elapsedMs,
-      ...processProfileMetrics,
-      phases: cumulativeMarksToPhases(processProfileMarks, elapsedMs),
-    };
-    // Completed-frame timings are telemetry consumed by the perf analyzer, not
-    // degraded operation. Preserve WARN for incomplete/failed frame outcomes.
-    if (processProfileOutcome === 'completed') runtimeLog.info('process.profile', profileFields);
-    else runtimeLog.warn('process.profile', profileFields);
-  };
-
+  const processProfile = createRuntimeProcessProfile(liveEnv, getRuntimeWorkReason(env));
+  const frame = createFrameExecutionState();
   try {
     // IMPORTANT: capture frame baseline only after acquiring the process lock.
     // If captured before waiting on an in-flight tick, we can mis-detect
@@ -1339,7 +1227,7 @@ export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDe
       enqueueRuntimeContinuation(env, env.networkInbox, undefined, undefined, ingressNow);
       env.networkInbox = [];
     }
-    markProcessProfile('ingressQueues');
+    processProfile.mark('ingressQueues');
     await materializePendingJurisdictionImportResults(env, runtimeTx => {
       enqueueRuntimeContinuation(
         env,
@@ -1349,7 +1237,7 @@ export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDe
         env.scenarioMode ? env.timestamp : getWallClockMs(),
       );
     });
-    markProcessProfile('jurisdictionImports');
+    processProfile.mark('jurisdictionImports');
     const pendingProfileCertificationEntityIds = processState.pendingProfileCertificationEntityIds;
     const profileCertificationInputs = collectDueLocalProfileCertificationInputs(
       env,
@@ -1367,25 +1255,25 @@ export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDe
       const profileIngressTimestamp = ensureRuntimeMempool(env).queuedAt ?? ingressNow;
       enqueueRuntimeContinuation(env, profileCertificationInputs, undefined, undefined, profileIngressTimestamp);
     }
-    markProcessProfile('profileCertification');
-    markProcessProfile('enqueue');
+    processProfile.mark('profileCertification');
+    processProfile.mark('enqueue');
 
     if (!hasRuntimeWork(env)) {
-      processProfileOutcome = 'no-work';
+      processProfile.outcome = 'no-work';
       return env;
     }
 
     const frameGateNow = env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
     if (!isRuntimeFrameReady(env, frameGateNow, runtimeDelay)) {
-      processProfileOutcome = 'not-ready';
+      processProfile.outcome = 'not-ready';
       return env;
     }
-    markProcessProfile('frameReady');
+    processProfile.mark('frameReady');
 
     const mempoolQueuedAt = ensureRuntimeMempool(env).queuedAt;
     const quietRuntimeLogs = env.quietRuntimeLogs === true;
-    frameTransaction = createRuntimeFrameTransaction(env);
-    env = frameTransaction.workingEnv;
+    frame.transaction = createRuntimeFrameTransaction(env);
+    env = frame.transaction.workingEnv;
     let state = ensureRuntimeState(env);
     const mempool = ensureRuntimeMempool(env);
     for (const jReplica of env.jReplicas?.values?.() ?? []) {
@@ -1439,19 +1327,19 @@ export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDe
     processState.inFlightEntityInputs = runtimeInput.entityInputs.length;
     let runtimeInputDrained = false;
     let runtimeInputForRequeue: RuntimeInput | undefined;
-    rollbackUndurableFrame = async (
+    frame.rollbackUndurable = async (
       error: unknown,
       options: { quarantine?: boolean; requeue?: boolean } = {},
     ): Promise<Error> => {
       const originalError = error instanceof Error ? error : new Error(String(error));
-      const workingMempoolAfterAttempt = frameTransaction
-        ? ensureRuntimeMempool(frameTransaction.workingEnv)
+      const workingMempoolAfterAttempt = frame.transaction
+        ? ensureRuntimeMempool(frame.transaction.workingEnv)
         : ensureRuntimeMempool(env);
-      const rollbackErrors = frameTransaction ? await abortRuntimeFrameTransaction(frameTransaction) : [];
+      const rollbackErrors = frame.transaction ? await abortRuntimeFrameTransaction(frame.transaction) : [];
       env = liveEnv;
       state = ensureRuntimeState(env);
-      reliableIngressCommits = [];
-      reliableReceiptSenderCheckpoint = undefined;
+      frame.reliableIngressCommits = [];
+      frame.reliableReceiptSenderCheckpoint = undefined;
       const quarantineResult =
         options.quarantine === false
           ? null
@@ -1476,14 +1364,14 @@ export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDe
           ? new RuntimeInputQuarantinedError(originalError)
           : originalError;
     };
-    processProfileMetrics.runtimeTxs = runtimeInput.runtimeTxs.length;
-    processProfileMetrics.entityInputs = runtimeInput.entityInputs.length;
-    processProfileMetrics.entityTxs = runtimeInput.entityInputs.reduce(
+    processProfile.metrics.runtimeTxs = runtimeInput.runtimeTxs.length;
+    processProfile.metrics.entityInputs = runtimeInput.entityInputs.length;
+    processProfile.metrics.entityTxs = runtimeInput.entityInputs.reduce(
       (sum, input) => sum + Number(input.entityTxs?.length || 0),
       0,
     );
-    processProfileMetrics.jInputs = runtimeInput.jInputs?.length ?? 0;
-    processProfileMetrics.reliableReceipts = runtimeInput.reliableReceipts?.length ?? 0;
+    processProfile.metrics.jInputs = runtimeInput.jInputs?.length ?? 0;
+    processProfile.metrics.reliableReceipts = runtimeInput.reliableReceipts?.length ?? 0;
     mempool.runtimeTxs = [];
     mempool.entityInputs = [];
     if (mempool.jInputs) mempool.jInputs = [];
@@ -1511,18 +1399,18 @@ export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDe
     );
     runtimeInput.entityInputs = await prepareHtlcPaymentEntityInputs(env, runtimeInput.entityInputs);
     runtimeInputForRequeue = cloneRuntimeFrameMempool(runtimeInput);
-    if (RUNTIME_ACCOUNT_CAUSAL_TRACE) {
+    if (ACCOUNT_CAUSAL_TRACE) {
       const ingress = summarizeRuntimeAccountCausality(runtimeInput.entityInputs);
       if (causalTraceContainsWork(ingress)) {
-        processProfileMetrics.accountCausality = { ingress, egress: [] };
+        processProfile.metrics.accountCausality = { ingress, egress: [] };
       }
     }
-    processProfileMetrics.entityInputs = runtimeInput.entityInputs.length;
-    processProfileMetrics.entityTxs = runtimeInput.entityInputs.reduce(
+    processProfile.metrics.entityInputs = runtimeInput.entityInputs.length;
+    processProfile.metrics.entityTxs = runtimeInput.entityInputs.reduce(
       (sum, input) => sum + Number(input.entityTxs?.length || 0),
       0,
     );
-    markProcessProfile('mempoolFrame');
+    processProfile.mark('mempoolFrame');
     const hasRuntimeInput =
       runtimeInput.runtimeTxs.length > 0 ||
       runtimeInput.entityInputs.length > 0 ||
@@ -1531,7 +1419,7 @@ export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDe
     let appliedRuntimeInputForPersistence: RuntimeInput | undefined;
 
     if ((runtimeInput.reliableReceipts?.length ?? 0) > 0 || hasPendingLocalReliableOutput(env)) {
-      reliableReceiptSenderCheckpoint = captureReliableReceiptSenderCheckpoint(env);
+      frame.reliableReceiptSenderCheckpoint = captureReliableReceiptSenderCheckpoint(env);
     }
 
     let entityOutbox: RoutedEntityInput[] = [];
@@ -1564,7 +1452,7 @@ export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDe
       try {
         envRecord(env)[ENV_APPLY_ALLOWED_KEY] = true;
         const result = await applyRuntimeInput(env, runtimeInput);
-        markProcessProfile('apply');
+        processProfile.mark('apply');
         if (!quietRuntimeLogs && (result.entityOutbox.length > 0 || result.jOutbox.length > 0)) {
           runtimeLog.debug('process.apply.output', {
             entityOutbox: result.entityOutbox.length,
@@ -1572,11 +1460,11 @@ export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDe
           });
         }
         entityOutbox = result.entityOutbox;
-        if (RUNTIME_ACCOUNT_CAUSAL_TRACE) {
+        if (ACCOUNT_CAUSAL_TRACE) {
           const egress = summarizeRuntimeAccountCausality(entityOutbox);
           if (causalTraceContainsWork(egress)) {
-            processProfileMetrics.accountCausality = {
-              ingress: processProfileMetrics.accountCausality?.ingress ?? [],
+            processProfile.metrics.accountCausality = {
+              ingress: processProfile.metrics.accountCausality?.ingress ?? [],
               egress,
             };
           }
@@ -1591,8 +1479,8 @@ export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDe
         // frame). Persisting them would make an otherwise valid frame depend
         // on process-local object metadata, so strip them at this boundary.
         appliedRuntimeInputForPersistence = cloneIsolatedRuntimeInput(result.appliedRuntimeInput);
-        reliableIngressCommits = result.reliableIngressCommits;
-        immediateReliableReceiptDeliveries = result.immediateReliableReceipts;
+        frame.reliableIngressCommits = result.reliableIngressCommits;
+        frame.immediateReliableReceiptDeliveries = result.immediateReliableReceipts;
         refreshScheduledWakeIndex(env, new Set(runtimeInput.entityInputs.map(input => input.entityId.toLowerCase())));
         for (const runtimeTx of runtimeInput.runtimeTxs) {
           if (runtimeTx.type === 'importReplica') {
@@ -1614,7 +1502,7 @@ export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDe
           if (!hasCertifiedManifest) certificationCandidates.add(entityId);
         }
         state.pendingProfileCertificationEntityIds = certificationCandidates;
-        markProcessProfile('fingerprints');
+        processProfile.mark('fingerprints');
       } finally {
         envRecord(env)[ENV_APPLY_ALLOWED_KEY] = false;
       }
@@ -1636,13 +1524,13 @@ export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDe
       waitingPendingOutputs,
       retainedLocalReliableOutputs,
     } = applyDeterministicRuntimeOutputPlan(env, entityOutbox, outputRoutingDeps);
-    processProfileMetrics.localOutputs = localOutputs.length;
-    processProfileMetrics.remoteOutputs = remoteOutputs.length;
-    processProfileMetrics.deferredOutputs = deferredOutputs.length;
-    processProfileMetrics.readyPendingOutputs = readyPendingOutputs.length;
-    processProfileMetrics.waitingPendingOutputs = waitingPendingOutputs.length;
-    processProfileMetrics.jOutputs = jOutbox.length;
-    markProcessProfile('planOutputs');
+    processProfile.metrics.localOutputs = localOutputs.length;
+    processProfile.metrics.remoteOutputs = remoteOutputs.length;
+    processProfile.metrics.deferredOutputs = deferredOutputs.length;
+    processProfile.metrics.readyPendingOutputs = readyPendingOutputs.length;
+    processProfile.metrics.waitingPendingOutputs = waitingPendingOutputs.length;
+    processProfile.metrics.jOutputs = jOutbox.length;
+    processProfile.mark('planOutputs');
     if (localOutputs.length > 0 && !quietRuntimeLogs) {
       runtimeLog.debug('tick.local_outputs.queued', {
         localOutputs: localOutputs.length,
@@ -1658,13 +1546,13 @@ export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDe
     // Only serialized on shutdown/page-unload for reload recovery.
 
     const frameAdvanced = env.height !== frameHeightBeforeTick;
-    processProfileMetrics.frameAdvanced = frameAdvanced;
+    processProfile.metrics.frameAdvanced = frameAdvanced;
     if (frameAdvanced) {
       if (hasRuntimeHistoryTraceForTesting(liveEnv)) {
         const committedFrameLogs = Array.isArray(env.frameLogs)
           ? env.frameLogs.map((entry): FrameLogEntry => ({ ...entry }))
           : [];
-        pendingRuntimeTraceSnapshot = buildCanonicalEnvSnapshot(env, {
+        frame.pendingTraceSnapshot = buildCanonicalEnvSnapshot(env, {
           runtimeInput: appliedRuntimeInputForPersistence ?? { runtimeTxs: [], entityInputs: [] },
           runtimeOutputs: env.pendingOutputs ?? [],
           description: env.extra?.description ?? `Frame ${env.height}`,
@@ -1681,7 +1569,7 @@ export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDe
         // not retain a second full copy of finalized state.
       }
       env.history = [];
-      markProcessProfile('snapshot');
+      processProfile.mark('snapshot');
     }
     env.extra = undefined;
 
@@ -1704,10 +1592,10 @@ export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDe
       }
       try {
         const saveOutcome = await saveEnvToDB(env, appliedRuntimeInputForPersistence, env.pendingNetworkOutputs);
-        processProfileMetrics.storageMs = saveOutcome.persistencePerfMs;
+        processProfile.metrics.storageMs = saveOutcome.persistencePerfMs;
         if (saveOutcome.staleWriterStopped) {
-          frameRollbackHandled = true;
-          const rollbackError = await rollbackUndurableFrame(new Error('STALE_RUNTIME_WRITER_STOPPED'), {
+          frame.rollbackHandled = true;
+          const rollbackError = await frame.rollbackUndurable(new Error('STALE_RUNTIME_WRITER_STOPPED'), {
             quarantine: false,
             requeue: false,
           });
@@ -1723,32 +1611,32 @@ export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDe
             timestamp: Math.max(0, env.timestamp ?? 0),
           };
           haltedState.stopLoop?.();
-          processProfileOutcome = 'stale-writer-stopped';
+          processProfile.outcome = 'stale-writer-stopped';
           if (rollbackError.message !== 'STALE_RUNTIME_WRITER_STOPPED') throw rollbackError;
           return env;
         }
-        frameCommitDisposition = 'committed';
-        reliableReceiptStateDurable = true;
-        markProcessProfile('save');
+        frame.commitDisposition = 'committed';
+        frame.reliableReceiptStateDurable = true;
+        processProfile.mark('save');
         flushPendingAuditEvents(env);
         env.frameLogs = [];
-        if (!frameTransaction) throw new Error('RUNTIME_FRAME_TRANSACTION_MISSING_AT_COMMIT');
-        env = publishRuntimeFrameTransaction(frameTransaction);
+        if (!frame.transaction) throw new Error('RUNTIME_FRAME_TRANSACTION_MISSING_AT_COMMIT');
+        env = publishRuntimeFrameTransaction(frame.transaction);
         state = ensureRuntimeState(env);
-        if (pendingRuntimeTraceSnapshot) {
-          recordRuntimeHistoryTraceForTesting(env, pendingRuntimeTraceSnapshot);
+        if (frame.pendingTraceSnapshot) {
+          recordRuntimeHistoryTraceForTesting(env, frame.pendingTraceSnapshot);
         }
         if (!quietRuntimeLogs) {
           runtimeLog.debug('storage.save.done', { height: env.height });
         }
-        markProcessProfile('publish');
+        processProfile.mark('publish');
       } catch (error) {
         if (error instanceof RuntimeFrameStorageError && error.commitStatus !== 'not-committed') {
-          frameCommitDisposition = error.commitStatus === 'committed' ? 'committed' : 'unknown';
-          reliableReceiptStateDurable = true;
+          frame.commitDisposition = error.commitStatus === 'committed' ? 'committed' : 'unknown';
+          frame.reliableReceiptStateDurable = true;
           clearPendingAuditEvents(env);
-          if (frameTransaction && (error.commitStatus === 'committed' || error.commitStatus === 'unknown')) {
-            env = publishRuntimeFrameTransaction(frameTransaction);
+          if (frame.transaction && (error.commitStatus === 'committed' || error.commitStatus === 'unknown')) {
+            env = publishRuntimeFrameTransaction(frame.transaction);
           } else {
             env = liveEnv;
           }
@@ -1767,10 +1655,10 @@ export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDe
         throw error;
       }
     } else {
-      frameCommitDisposition = 'committed';
+      frame.commitDisposition = 'committed';
       clearPendingAuditEvents(env);
-      if (!frameTransaction) throw new Error('RUNTIME_FRAME_TRANSACTION_MISSING_AT_EMPTY_COMMIT');
-      env = publishRuntimeFrameTransaction(frameTransaction);
+      if (!frame.transaction) throw new Error('RUNTIME_FRAME_TRANSACTION_MISSING_AT_EMPTY_COMMIT');
+      env = publishRuntimeFrameTransaction(frame.transaction);
       state = ensureRuntimeState(env);
     }
 
@@ -1786,7 +1674,7 @@ export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDe
     }
 
     const recoveryBarrier = state.recoveryBackupBarrier;
-    const pendingReliableReceiptDeliveryCount = reliableIngressCommits.reduce(
+    const pendingReliableReceiptDeliveryCount = frame.reliableIngressCommits.reduce(
       (count, commit) => count + commit.targetRuntimeIds.length,
       0,
     );
@@ -1811,7 +1699,7 @@ export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDe
         throw error;
       }
     }
-    markProcessProfile('recoveryBackup');
+    processProfile.mark('recoveryBackup');
 
     await reconcileCommittedRuntimeInfraEffects(env, appliedRuntimeInputForPersistence?.runtimeTxs ?? []);
     await materializePendingJurisdictionImportResults(env, runtimeTx => {
@@ -1823,15 +1711,15 @@ export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDe
         env.scenarioMode ? env.timestamp : getWallClockMs(),
       );
     });
-    markProcessProfile('runtimeInfra');
+    processProfile.mark('runtimeInfra');
 
-    reliableReceiptDeliveries = [
-      ...immediateReliableReceiptDeliveries,
-      ...finalizeReliableIngressCommit(env, reliableIngressCommits),
+    frame.reliableReceiptDeliveries = [
+      ...frame.immediateReliableReceiptDeliveries,
+      ...finalizeReliableIngressCommit(env, frame.reliableIngressCommits),
     ];
-    if (reliableReceiptDeliveries.some(delivery => delivery.receipt.body.identity.kind === 'account-ack')) {
+    if (frame.reliableReceiptDeliveries.some(delivery => delivery.receipt.body.identity.kind === 'account-ack')) {
       runtimeLog.info('reliable.account_receipts.finalized', {
-        receipts: reliableReceiptDeliveries
+        receipts: frame.reliableReceiptDeliveries
           .filter(delivery => delivery.receipt.body.identity.kind === 'account-ack')
           .map(delivery => ({
             targetRuntimeId: delivery.runtimeId,
@@ -1872,7 +1760,7 @@ export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDe
       // frame promise resolves. Live P2P runtimes coalesce refreshes below.
       await announceCertifiedLocalProfiles(env, changedLocalEntityIds);
     }
-    markProcessProfile('profileAnnounce');
+    processProfile.mark('profileAnnounce');
 
     // 1. Broadcast entity outputs via P2P (fire-and-forget)
     if (remoteOutputs.length > 0 && env.quietRuntimeLogs !== true) {
@@ -1900,17 +1788,17 @@ export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDe
       ...rescheduledNetworkOutputs,
       ...retainedLocalReliableOutputs,
     ]);
-    processProfileMetrics.pendingNetworkAfter = env.pendingNetworkOutputs.length;
-    processProfileMetrics.deferredNetworkMeta = env.runtimeState?.deferredNetworkMeta?.size ?? 0;
-    markProcessProfile('dispatchOutputs');
+    processProfile.metrics.pendingNetworkAfter = env.pendingNetworkOutputs.length;
+    processProfile.metrics.deferredNetworkMeta = env.runtimeState?.deferredNetworkMeta?.size ?? 0;
+    processProfile.mark('dispatchOutputs');
 
     // A committed business response and its transport receipt share one
     // post-WAL boundary. Queue the useful Entity envelope first on the same
     // ordered connection; otherwise the sender spends a complete R-frame
     // persisting receipt GC before it can apply ACK+next Account proposal.
-    if (reliableReceiptDeliveries.length > 0) {
+    if (frame.reliableReceiptDeliveries.length > 0) {
       const receiptP2P = getP2P(env);
-      for (const delivery of reliableReceiptDeliveries) {
+      for (const delivery of frame.reliableReceiptDeliveries) {
         const directResult = state.directReliableReceiptDispatch?.(delivery.runtimeId, delivery.receipt);
         const usedDirect = Boolean(directResult && isDeliveryDelivered(directResult));
         const result = usedDirect
@@ -1934,50 +1822,50 @@ export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDe
         }
       }
     }
-    markProcessProfile('dispatchReceipts');
+    processProfile.mark('dispatchReceipts');
 
     // 2. Execute J-batches via JAdapter.submitTx (events arrive next frame via j-watcher)
     await submitRuntimeJOutbox(env, jOutbox, {
       enqueueRuntimeInputs: enqueueRuntimeContinuation,
     });
-    markProcessProfile('jOutbox');
+    processProfile.mark('jOutbox');
 
     state.lastFrameAt = getWallClockMs();
 
     if (env.strictScenario) {
       const { assertRuntimeStateStrict } = await import('./protocol/assertions');
       await assertRuntimeStateStrict(env);
-      markProcessProfile('strict');
+      processProfile.mark('strict');
     }
 
     // CRITICAL: Notify frontend after snapshot is pushed to history
     // Without this, UI (TimeMachine, AccountPanel) never learns about new frames
     notifyEnvChange(env);
-    markProcessProfile('notify');
+    processProfile.mark('notify');
 
-    processProfileOutcome = 'completed';
+    processProfile.outcome = 'completed';
     return env;
   } catch (error) {
-    if (frameCommitDisposition === 'undurable' && !frameRollbackHandled && rollbackUndurableFrame) {
-      frameRollbackHandled = true;
-      const rollbackError = await rollbackUndurableFrame(error, {
+    if (frame.commitDisposition === 'undurable' && !frame.rollbackHandled && frame.rollbackUndurable) {
+      frame.rollbackHandled = true;
+      const rollbackError = await frame.rollbackUndurable(error, {
         quarantine: !(error instanceof RuntimeFrameStorageError),
       });
       if (rollbackError instanceof RuntimeInputQuarantinedError) {
-        processProfileOutcome = 'input-dropped';
+        processProfile.outcome = 'input-dropped';
         return liveEnv;
       }
       throw rollbackError;
     }
     if (
-      frameCommitDisposition === 'undurable' &&
-      !frameRollbackHandled &&
-      frameTransaction &&
-      !frameTransaction.published
+      frame.commitDisposition === 'undurable' &&
+      !frame.rollbackHandled &&
+      frame.transaction &&
+      !frame.transaction.published
     ) {
-      frameRollbackHandled = true;
-      const workingMempool = ensureRuntimeMempool(frameTransaction.workingEnv);
-      const cleanupErrors = await abortRuntimeFrameTransaction(frameTransaction);
+      frame.rollbackHandled = true;
+      const workingMempool = ensureRuntimeMempool(frame.transaction.workingEnv);
+      const cleanupErrors = await abortRuntimeFrameTransaction(frame.transaction);
       const restoredMempool = prependOlderRuntimeInput(workingMempool, ensureRuntimeMempool(liveEnv));
       liveEnv.runtimeMempool = restoredMempool;
       liveEnv.runtimeInput = restoredMempool;
@@ -1989,18 +1877,17 @@ export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDe
     }
     throw error;
   } finally {
-    if (!reliableReceiptStateDurable) {
-      rollbackReliableIngressCommit(env, reliableIngressCommits);
-      if (reliableReceiptSenderCheckpoint) {
-        rollbackReliableDeliveryReceipts(env, reliableReceiptSenderCheckpoint);
+    if (!frame.reliableReceiptStateDurable) {
+      rollbackReliableIngressCommit(env, frame.reliableIngressCommits);
+      if (frame.reliableReceiptSenderCheckpoint) {
+        rollbackReliableDeliveryReceipts(env, frame.reliableReceiptSenderCheckpoint);
       }
     }
-    if (processProfileOutcome === 'unknown') {
-      processProfileOutcome = 'thrown';
+    if (processProfile.outcome === 'unknown') {
+      processProfile.outcome = 'thrown';
     }
-    logProcessProfile();
+    processProfile.finish(env);
     processState.inFlightEntityInputs = 0;
-    processState.processingPromise = null;
     delete liveEnv.activeProcessProgressAt;
     delete liveEnv.activeProcessProgressStep;
     releaseProcessLock();

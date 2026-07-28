@@ -21,6 +21,11 @@ const readText = (path: string): string => {
       'runtime/runtime.ts',
       'runtime/runtime-core.ts',
       'runtime/runtime-public-api.ts',
+      'runtime/runtime/frame/clone.ts',
+      'runtime/runtime/frame/execution-state.ts',
+      'runtime/runtime/frame/process-profile.ts',
+      'runtime/runtime/frame/transaction.ts',
+      'runtime/runtime/frame/writer-lock.ts',
     ],
     'runtime/orchestrator/mm-node.ts': [
       'runtime/orchestrator/mm-node.ts',
