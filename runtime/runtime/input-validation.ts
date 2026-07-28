@@ -1,0 +1,88 @@
+import { safeStringify } from '../protocol/serialization';
+import type { Env, RuntimeInput } from '../types';
+
+export const MAX_RUNTIME_J_INPUTS = 256;
+export const MAX_RUNTIME_J_TXS = 1_024;
+export const MAX_RUNTIME_J_TXS_PER_JURISDICTION = 512;
+export const MAX_RUNTIME_J_INPUT_BYTES = 1024 * 1024;
+export const MAX_RUNTIME_TXS = 1_000;
+export const MAX_RUNTIME_ENTITY_INPUTS = 10_000;
+export const MAX_RUNTIME_RELIABLE_RECEIPTS = 10_000;
+
+type RejectRuntimeInput = (message: string) => never;
+
+const validateRuntimeJIngressLimits = (
+  env: Env,
+  runtimeInput: RuntimeInput,
+  reject: RejectRuntimeInput,
+): void => {
+  if (runtimeInput.jInputs === undefined) return;
+  if (!Array.isArray(runtimeInput.jInputs)) {
+    reject(`Invalid jInputs: expected array, got ${typeof runtimeInput.jInputs}`);
+  }
+  if (runtimeInput.jInputs.length > MAX_RUNTIME_J_INPUTS) {
+    reject(`Too many J inputs: ${runtimeInput.jInputs.length} > ${MAX_RUNTIME_J_INPUTS}`);
+  }
+
+  let totalTxs = 0;
+  let totalBytes = 0;
+  const txsByJurisdiction = new Map<string, number>();
+  for (const [index, input] of runtimeInput.jInputs.entries()) {
+    if (!input || !Array.isArray(input.jTxs)) reject(`Invalid J input at index ${index}`);
+    const jurisdictionName = String(input.jurisdictionName || '');
+    if (!env.jReplicas.has(jurisdictionName)) {
+      reject(`Unknown J jurisdiction: ${jurisdictionName}`);
+    }
+    totalTxs += input.jTxs.length;
+    if (totalTxs > MAX_RUNTIME_J_TXS) {
+      reject(`Too many J transactions: ${totalTxs} > ${MAX_RUNTIME_J_TXS}`);
+    }
+    const jurisdictionTxs = (txsByJurisdiction.get(jurisdictionName) ?? 0) + input.jTxs.length;
+    if (jurisdictionTxs > MAX_RUNTIME_J_TXS_PER_JURISDICTION) {
+      reject(
+        `Too many J transactions for ${jurisdictionName}: ` +
+        `${jurisdictionTxs} > ${MAX_RUNTIME_J_TXS_PER_JURISDICTION}`,
+      );
+    }
+    txsByJurisdiction.set(jurisdictionName, jurisdictionTxs);
+    totalBytes += new TextEncoder().encode(safeStringify(input)).byteLength;
+    if (totalBytes > MAX_RUNTIME_J_INPUT_BYTES) {
+      reject(`J payload too large: ${totalBytes} > ${MAX_RUNTIME_J_INPUT_BYTES}`);
+    }
+  }
+};
+
+/**
+ * One shape/resource boundary shared by public admission and isolated apply.
+ * Callers own the error prefix because admission and replay intentionally
+ * expose different failure taxonomies while enforcing identical limits.
+ */
+export const validateRuntimeInputShapeAndLimits = (
+  env: Env,
+  runtimeInput: RuntimeInput,
+  reject: RejectRuntimeInput,
+): void => {
+  if (!runtimeInput) reject('Null runtime input provided');
+  if (!Array.isArray(runtimeInput.runtimeTxs)) {
+    reject(`Invalid runtimeTxs: expected array, got ${typeof runtimeInput.runtimeTxs}`);
+  }
+  if (!Array.isArray(runtimeInput.entityInputs)) {
+    reject(`Invalid entityInputs: expected array, got ${typeof runtimeInput.entityInputs}`);
+  }
+  if (runtimeInput.reliableReceipts !== undefined && !Array.isArray(runtimeInput.reliableReceipts)) {
+    reject(`Invalid reliableReceipts: expected array, got ${typeof runtimeInput.reliableReceipts}`);
+  }
+  validateRuntimeJIngressLimits(env, runtimeInput, reject);
+  if (runtimeInput.runtimeTxs.length > MAX_RUNTIME_TXS) {
+    reject(`Too many runtime transactions: ${runtimeInput.runtimeTxs.length} > ${MAX_RUNTIME_TXS}`);
+  }
+  if (runtimeInput.entityInputs.length > MAX_RUNTIME_ENTITY_INPUTS) {
+    reject(`Too many entity inputs: ${runtimeInput.entityInputs.length} > ${MAX_RUNTIME_ENTITY_INPUTS}`);
+  }
+  if ((runtimeInput.reliableReceipts?.length ?? 0) > MAX_RUNTIME_RELIABLE_RECEIPTS) {
+    reject(
+      `Too many reliable receipts: ` +
+      `${runtimeInput.reliableReceipts!.length} > ${MAX_RUNTIME_RELIABLE_RECEIPTS}`,
+    );
+  }
+};

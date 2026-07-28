@@ -37,6 +37,7 @@ import {
 } from './runtime/scheduled-wake';
 import { transitionRuntimeLifecycle } from './runtime/lifecycle';
 import { requireRuntimeMempool } from './runtime/input-queue';
+import { validateRuntimeInputShapeAndLimits } from './runtime/input-validation';
 import { ensureRuntimeState } from './runtime/runtime-state';
 import {
   applyReliableDeliveryReceipts,
@@ -190,7 +191,6 @@ const {
   MAX_RUNTIME_J_TXS,
   MAX_RUNTIME_J_TXS_PER_JURISDICTION,
   MAX_RUNTIME_J_INPUT_BYTES,
-  validateRuntimeJIngressLimits,
   handleInboundP2PEntityInput,
   handleInboundP2PEntityInputs,
   handleInboundReliableReceipt,
@@ -338,21 +338,7 @@ const applyRuntimeInput = async (
         entityInputs: runtimeInput.entityInputs.length,
       });
     }
-    // SECURITY: Validate runtime input
-    if (!runtimeInput) {
-      rejectRuntimeInput('Null runtime input provided');
-    }
-    if (!Array.isArray(runtimeInput.runtimeTxs)) {
-      rejectRuntimeInput(`Invalid runtimeTxs: expected array, got ${typeof runtimeInput.runtimeTxs}`);
-    }
-    if (!Array.isArray(runtimeInput.entityInputs)) {
-      rejectRuntimeInput(`Invalid entityInputs: expected array, got ${typeof runtimeInput.entityInputs}`);
-    }
-    if (runtimeInput.reliableReceipts !== undefined && !Array.isArray(runtimeInput.reliableReceipts)) {
-      rejectRuntimeInput(`Invalid reliableReceipts: expected array, got ${typeof runtimeInput.reliableReceipts}`);
-    }
-
-    validateRuntimeJIngressLimits(env, runtimeInput);
+    validateRuntimeInputShapeAndLimits(env, runtimeInput, rejectRuntimeInput);
 
     // Collect incoming J-inputs into early jOutbox (will be merged with handler jOutputs later)
     // These are NOT pushed to jReplica.mempool — they go to jOutbox → JAdapter post-save
@@ -372,17 +358,6 @@ const applyRuntimeInput = async (
         });
         earlyJOutbox.push(jInput);
       }
-    }
-
-    // SECURITY: Resource limits
-    if (runtimeInput.runtimeTxs.length > 1000) {
-      rejectRuntimeInput(`Too many runtime transactions: ${runtimeInput.runtimeTxs.length} > 1000`);
-    }
-    if (runtimeInput.entityInputs.length > 10000) {
-      rejectRuntimeInput(`Too many entity inputs: ${runtimeInput.entityInputs.length} > 10000`);
-    }
-    if ((runtimeInput.reliableReceipts?.length ?? 0) > 10000) {
-      rejectRuntimeInput(`Too many reliable receipts: ${runtimeInput.reliableReceipts!.length} > 10000`);
     }
 
     const validatedRuntimeTxs = [...runtimeInput.runtimeTxs];

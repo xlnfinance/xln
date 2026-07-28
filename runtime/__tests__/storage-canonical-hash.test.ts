@@ -250,11 +250,11 @@ test('replay oracle canonicalizes empty optional Runtime input queues', () => {
   const base = {
     eReplicas: new Map(),
     jReplicas: new Map(),
-    runtimeInput: { runtimeTxs: [], entityInputs: [] },
+    runtimeMempool: { runtimeTxs: [], entityInputs: [] },
   } as unknown as Env;
   const withEmptyOptionals = {
     ...base,
-    runtimeInput: {
+    runtimeMempool: {
       runtimeTxs: [],
       entityInputs: [],
       jInputs: [],

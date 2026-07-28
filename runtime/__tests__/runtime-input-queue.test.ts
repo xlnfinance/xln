@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { enqueueRuntimeInputsWithDeps } from '../runtime/input-queue';
-import type { Env, RuntimeInput } from '../types';
+import type { Env } from '../types';
 
 const makeEnv = (): Env => ({
   eReplicas: new Map(),
@@ -11,7 +11,7 @@ const makeEnv = (): Env => ({
   height: 0,
   timestamp: 1000,
   runtimeId: 'runtime-a',
-  runtimeInput: { runtimeTxs: [], entityInputs: [] },
+  runtimeMempool: { runtimeTxs: [], entityInputs: [] },
 } as Env);
 
 test('runtime input queue debug diagnostics use structured logging', () => {

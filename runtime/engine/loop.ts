@@ -38,6 +38,13 @@ import {
 } from '../runtime/output-routing';
 import { runtimeInputRequiresOutboxCapacity } from '../runtime/admission';
 import {
+  MAX_RUNTIME_J_INPUT_BYTES,
+  MAX_RUNTIME_J_INPUTS,
+  MAX_RUNTIME_J_TXS,
+  MAX_RUNTIME_J_TXS_PER_JURISDICTION,
+  validateRuntimeInputShapeAndLimits,
+} from '../runtime/input-validation';
+import {
   createRuntimeOutputRoutingDeps,
   registerEntityRuntimeHintWithDeps,
   validateInboundP2PEntityInput,
@@ -1288,57 +1295,6 @@ export const createRuntimeLoopApi = (deps: RuntimeLoopApiDeps) => {
     registerEntityRuntimeHintWithDeps(env, entityId, runtimeId, getRuntimeEntityRoutingDeps());
   };
 
-  const MAX_RUNTIME_J_INPUTS = 256;
-  const MAX_RUNTIME_J_TXS = 1_024;
-  const MAX_RUNTIME_J_TXS_PER_JURISDICTION = 512;
-  const MAX_RUNTIME_J_INPUT_BYTES = 1024 * 1024;
-
-  const validateRuntimeJIngressLimits = (env: Env, runtimeInput: RuntimeInput): void => {
-    if (runtimeInput.jInputs === undefined) return;
-    if (!Array.isArray(runtimeInput.jInputs)) {
-      throw new Error(
-        `RUNTIME_INPUT_ADMISSION_REJECTED: Invalid jInputs: expected array, got ${typeof runtimeInput.jInputs}`,
-      );
-    }
-    if (runtimeInput.jInputs.length > MAX_RUNTIME_J_INPUTS) {
-      throw new Error(
-        `RUNTIME_INPUT_ADMISSION_REJECTED: Too many J inputs: ${runtimeInput.jInputs.length} > ${MAX_RUNTIME_J_INPUTS}`,
-      );
-    }
-    let totalTxs = 0;
-    let totalBytes = 0;
-    const txsByJurisdiction = new Map<string, number>();
-    for (const [index, input] of runtimeInput.jInputs.entries()) {
-      if (!input || !Array.isArray(input.jTxs)) {
-        throw new Error(`RUNTIME_INPUT_ADMISSION_REJECTED: Invalid J input at index ${index}`);
-      }
-      const jurisdictionName = String(input.jurisdictionName || '');
-      if (!env.jReplicas?.has(jurisdictionName)) {
-        throw new Error(`RUNTIME_INPUT_ADMISSION_REJECTED: Unknown J jurisdiction: ${jurisdictionName}`);
-      }
-      totalTxs += input.jTxs.length;
-      if (totalTxs > MAX_RUNTIME_J_TXS) {
-        throw new Error(
-          `RUNTIME_INPUT_ADMISSION_REJECTED: Too many J transactions: ${totalTxs} > ${MAX_RUNTIME_J_TXS}`,
-        );
-      }
-      const jurisdictionTxs = (txsByJurisdiction.get(jurisdictionName) ?? 0) + input.jTxs.length;
-      if (jurisdictionTxs > MAX_RUNTIME_J_TXS_PER_JURISDICTION) {
-        throw new Error(
-          `RUNTIME_INPUT_ADMISSION_REJECTED: Too many J transactions for ${jurisdictionName}: ` +
-            `${jurisdictionTxs} > ${MAX_RUNTIME_J_TXS_PER_JURISDICTION}`,
-        );
-      }
-      txsByJurisdiction.set(jurisdictionName, jurisdictionTxs);
-      totalBytes += new TextEncoder().encode(safeStringify(input)).byteLength;
-      if (totalBytes > MAX_RUNTIME_J_INPUT_BYTES) {
-        throw new Error(
-          `RUNTIME_INPUT_ADMISSION_REJECTED: J payload too large: ${totalBytes} > ${MAX_RUNTIME_J_INPUT_BYTES}`,
-        );
-      }
-    }
-  };
-
   const handleInboundP2PEntityInput = (env: Env, from: string, input: RoutedEntityInput, ingressTimestamp?: number) => {
     const deps = getRuntimeEntityRoutingDeps();
     const validation = validateInboundP2PEntityInput(env, from, input, deps);
@@ -1456,40 +1412,9 @@ export const createRuntimeLoopApi = (deps: RuntimeLoopApiDeps) => {
 
   const validateRuntimeInputAdmission = (env: Env, runtimeInput: RuntimeInput): void => {
     assertRuntimeCommandReady(env);
-    if (!runtimeInput) {
-      throw new Error('RUNTIME_INPUT_ADMISSION_REJECTED: Null runtime input provided');
-    }
-    if (!Array.isArray(runtimeInput.runtimeTxs)) {
-      throw new Error(
-        `RUNTIME_INPUT_ADMISSION_REJECTED: Invalid runtimeTxs: expected array, got ${typeof runtimeInput.runtimeTxs}`,
-      );
-    }
-    if (!Array.isArray(runtimeInput.entityInputs)) {
-      throw new Error(
-        `RUNTIME_INPUT_ADMISSION_REJECTED: Invalid entityInputs: expected array, got ${typeof runtimeInput.entityInputs}`,
-      );
-    }
-    if (runtimeInput.reliableReceipts !== undefined && !Array.isArray(runtimeInput.reliableReceipts)) {
-      throw new Error(
-        `RUNTIME_INPUT_ADMISSION_REJECTED: Invalid reliableReceipts: expected array, got ${typeof runtimeInput.reliableReceipts}`,
-      );
-    }
-    validateRuntimeJIngressLimits(env, runtimeInput);
-    if (runtimeInput.runtimeTxs.length > 1000) {
-      throw new Error(
-        `RUNTIME_INPUT_ADMISSION_REJECTED: Too many runtime transactions: ${runtimeInput.runtimeTxs.length} > 1000`,
-      );
-    }
-    if (runtimeInput.entityInputs.length > 10000) {
-      throw new Error(
-        `RUNTIME_INPUT_ADMISSION_REJECTED: Too many entity inputs: ${runtimeInput.entityInputs.length} > 10000`,
-      );
-    }
-    if ((runtimeInput.reliableReceipts?.length ?? 0) > 10000) {
-      throw new Error(
-        `RUNTIME_INPUT_ADMISSION_REJECTED: Too many reliable receipts: ${runtimeInput.reliableReceipts!.length} > 10000`,
-      );
-    }
+    validateRuntimeInputShapeAndLimits(env, runtimeInput, message => {
+      throw new Error(`RUNTIME_INPUT_ADMISSION_REJECTED: ${message}`);
+    });
     const pendingNetworkOutputs = env.pendingNetworkOutputs?.length ?? 0;
     const hasNewLocalFinancialCommand = runtimeInputRequiresOutboxCapacity(runtimeInput.entityInputs);
     if (pendingNetworkOutputs >= MAX_PENDING_NETWORK_OUTPUTS && hasNewLocalFinancialCommand) {
@@ -1677,7 +1602,6 @@ export const createRuntimeLoopApi = (deps: RuntimeLoopApiDeps) => {
     MAX_RUNTIME_J_TXS,
     MAX_RUNTIME_J_TXS_PER_JURISDICTION,
     MAX_RUNTIME_J_INPUT_BYTES,
-    validateRuntimeJIngressLimits,
     handleInboundP2PEntityInput,
     handleInboundP2PEntityInputs,
     handleInboundReliableReceipt,
