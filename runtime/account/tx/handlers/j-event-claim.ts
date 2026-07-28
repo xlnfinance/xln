@@ -2,7 +2,7 @@ import type { AccountMachine, AccountTx, EntityCandidateEffect, Env } from '../.
 import type { AccountJClaimSession } from '../../j-claim-session';
 import { getAccountPerspective } from '../../../state-helpers';
 import { applyAccountJClaimTransition } from '../../j-claim-transition';
-import { applyFinalizedAccountJEvents } from '../../../entity/tx/j-events-account';
+import { applyFinalizedAccountJEvents } from './j-event-finality';
 import { getAccountStateDomain, requireAccountDeltaTransformerAddress } from '../../consensus/helpers';
 import { createStructuredLogger, shortHash } from '../../../infra/logger';
 

@@ -11,7 +11,7 @@ import { applyEntityInput } from '../entity/consensus';
 import { assertEntityAccountInsertionCapacity } from '../entity/account-capacity';
 import { encodeBoard, generateLazyEntityId, hashBoard } from '../entity/factory';
 import { isLeftEntity } from '../entity/id';
-import { applyAccountInput } from '../entity/tx/handlers/account';
+import { applyAccountInputToEntity } from '../entity/tx/handlers/account';
 import { handleOpenAccountEntityTx } from '../entity/tx/handlers/open-account';
 import { handleRollbackTimedOutFramesEntityTx } from '../entity/tx/handlers/htlc-direct';
 import { createEmptyEnv } from '../runtime';
@@ -212,7 +212,7 @@ test('inbound mirrored-account insertion rejects capacity overflow before state 
     state: { ...makeState(), entityId: counterpartyId },
   } as EntityReplica);
 
-  await expect(applyAccountInput(state, {
+  await expect(applyAccountInputToEntity(state, {
     fromEntityId: counterpartyId,
     toEntityId: entityId,
     watchSeed,
@@ -301,11 +301,11 @@ test('only an accepted signed genesis can reserve an Account slot', async () => 
   );
   invalidInput.proposal.frameHanko = frameHanko!;
 
-  await applyAccountInput(targetState, invalidInput, env).catch(() => undefined);
+  await applyAccountInputToEntity(targetState, invalidInput, env).catch(() => undefined);
   expect(targetState.accounts.has(sourceEntityId)).toBe(false);
   expect(targetState.accounts.size).toBe(0);
 
-  await applyAccountInput(targetState, proposed.accountInput, env);
+  await applyAccountInputToEntity(targetState, proposed.accountInput, env);
   expect(targetState.accounts.get(sourceEntityId)?.currentHeight).toBe(1);
   expect(targetState.accounts.size).toBe(1);
 });

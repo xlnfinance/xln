@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { deriveAccountWatchSeed } from '../account/watch-seed';
-import { applyAccountInput } from '../entity/tx/handlers/account';
+import { applyAccountInputToEntity } from '../entity/tx/handlers/account';
 import { createEmptyEnv } from '../runtime';
 import type { EntityReplica, EntityState, JurisdictionConfig } from '../types';
 
@@ -94,7 +94,7 @@ test('account input without frame or settlement action fails fast', async () => 
   process.env['XLN_LOG_SCOPES'] = 'none';
 
   try {
-    await expect(applyAccountInput(state, {
+    await expect(applyAccountInputToEntity(state, {
       fromEntityId: counterpartyId,
       toEntityId: entityId,
       watchSeed,

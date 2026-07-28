@@ -6,7 +6,7 @@ import type {
   AccountMachine,
   EntityCandidateEffect,
 } from '../../../types';
-import { applyAccountInput as applyConsensusAccountInput } from '../../../account/consensus/index';
+import { applyAccountInput } from '../../../account/consensus/index';
 import { addMessage, addMessages, emitScopedEvents } from '../../../state-helpers';
 import { createStructuredLogger, shortId } from '../../../infra/logger';
 import {
@@ -158,7 +158,7 @@ export interface AccountHandlerResult {
   candidateEffects: EntityCandidateEffect[];
 }
 
-export async function applyAccountInput(
+export async function applyAccountInputToEntity(
   state: EntityState,
   input: AccountInput,
   env: Env,
@@ -445,7 +445,7 @@ export async function applyAccountInput(
       getCertifiedBoardNodeStore(env),
       input.fromEntityId,
     );
-    const result = await applyConsensusAccountInput(env, accountMachine, input, {
+    const result = await applyAccountInput(env, accountMachine, input, {
       entityTimestamp: newState.timestamp,
       finalizedJHeight: newState.lastFinalizedJHeight ?? 0,
       owningEntityIsHub: Boolean(newState.hubRebalanceConfig),

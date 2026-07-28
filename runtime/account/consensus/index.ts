@@ -2024,8 +2024,188 @@ async function handleIncomingAccountFrame(
   };
 }
 
+type AccountInputSession = {
+  env: Env;
+  accountMachine: AccountMachine;
+  input: AccountInput;
+  securityContext: AccountInputSecurityContext;
+  normalizedInputHeight: number;
+  replay: ReturnType<typeof classifyAccountInputReplay>;
+  events: string[];
+  timedOutHashlocks: string[];
+  committedFrames: Array<{
+    frame: AccountFrame;
+    committedViaNewFrame: boolean;
+  }>;
+  committedJClaims: ReturnType<typeof createAccountJClaimSession>;
+  candidateEffects: EntityCandidateEffect[];
+};
+
+const finishAccountInput = (
+  session: AccountInputSession,
+  result: HandleAccountInputResult,
+): HandleAccountInputResult => {
+  const accountJClaimNodeChanges = session.committedJClaims.changes();
+  return {
+    ...result,
+    ...(session.candidateEffects.length > 0
+      ? { candidateEffects: session.candidateEffects }
+      : {}),
+    ...(accountJClaimNodeChanges ? { accountJClaimNodeChanges } : {}),
+  };
+};
+
+const handleAccountAckPhase = async (
+  session: AccountInputSession,
+): Promise<
+  | { kind: 'continue'; ackProcessed: boolean }
+  | { kind: 'return'; result: HandleAccountInputResult }
+> => {
+  const {
+    env,
+    accountMachine,
+    input,
+    normalizedInputHeight,
+    securityContext,
+    events,
+    timedOutHashlocks,
+    committedFrames,
+    committedJClaims,
+    candidateEffects,
+  } = session;
+  let disputeSeal: ValidatedCounterpartyDisputeSeal | undefined;
+  try {
+    disputeSeal = await validateCounterpartyDisputeSeal(
+      env,
+      accountMachine,
+      input,
+      accountInputAck(input)?.disputeSeal,
+      'ACCOUNT_ACK',
+      securityContext,
+    );
+  } catch (error) {
+    return {
+      kind: 'return',
+      result: { success: false, error: (error as Error).message, events },
+    };
+  }
+  const { ackHeight } = resolveAccountAckTarget(
+    accountMachine,
+    input,
+    normalizedInputHeight,
+  );
+  const pending = await handlePendingFrameAck(
+    env,
+    accountMachine,
+    input,
+    ackHeight,
+    disputeSeal,
+    events,
+    timedOutHashlocks,
+    committedFrames,
+    committedJClaims,
+    securityContext,
+    candidateEffects,
+  );
+  if (pending.kind === 'return') return pending;
+  const ackProcessed = pending.kind === 'fallthrough';
+  const unmatched = handleUnmatchedAck(
+    accountMachine,
+    input,
+    normalizedInputHeight,
+    ackProcessed,
+    events,
+    committedFrames,
+    'before_frame',
+  );
+  return unmatched
+    ? { kind: 'return', result: unmatched }
+    : { kind: 'continue', ackProcessed };
+};
+
+const handleStandaloneDispute = async (
+  session: AccountInputSession,
+): Promise<HandleAccountInputResult> => {
+  const { env, accountMachine, input, securityContext, events } = session;
+  if (input.kind !== 'dispute') {
+    throw new Error(`ACCOUNT_DISPUTE_PHASE_KIND_INVALID:${input.kind}`);
+  }
+  try {
+    const seal = await validateCounterpartyDisputeSeal(
+      env,
+      accountMachine,
+      input,
+      input.disputeSeal,
+      'ACCOUNT_DISPUTE',
+      securityContext,
+    );
+    storeCounterpartyDisputeSeal(accountMachine, seal);
+    return { success: true, events };
+  } catch (error) {
+    return { success: false, error: (error as Error).message, events };
+  }
+};
+
+const handleAccountProposalPhase = async (
+  session: AccountInputSession,
+  ackProcessed: boolean,
+): Promise<HandleAccountInputResult | null> => {
+  const {
+    env,
+    accountMachine,
+    input,
+    normalizedInputHeight,
+    replay,
+    securityContext,
+    events,
+    timedOutHashlocks,
+    committedFrames,
+    committedJClaims,
+    candidateEffects,
+  } = session;
+  let disputeSeal: ValidatedCounterpartyDisputeSeal | undefined;
+  try {
+    disputeSeal = await validateCounterpartyDisputeSeal(
+      env,
+      accountMachine,
+      input,
+      accountInputProposal(input)?.disputeSeal,
+      'ACCOUNT_PROPOSAL',
+      securityContext,
+    );
+  } catch (error) {
+    return { success: false, error: (error as Error).message, events };
+  }
+  if (input.kind === 'dispute') return handleStandaloneDispute(session);
+  const incoming = await handleIncomingAccountFrame(
+    env,
+    accountMachine,
+    input,
+    normalizedInputHeight,
+    replay.currentHeight,
+    disputeSeal,
+    events,
+    timedOutHashlocks,
+    committedFrames,
+    committedJClaims,
+    securityContext,
+    candidateEffects,
+  );
+  if (incoming.kind === 'return') return incoming.result;
+  return handleUnmatchedAck(
+    accountMachine,
+    input,
+    normalizedInputHeight,
+    ackProcessed,
+    events,
+    committedFrames,
+    'after_frame',
+  ) ?? null;
+};
+
 /**
- * Handle received AccountInput (bilateral consensus)
+ * Bilateral Account input composition root. Protocol-specific validation and
+ * mutation remain in the phase handlers above.
  */
 export async function applyAccountInput(
   env: Env,
@@ -2034,9 +2214,11 @@ export async function applyAccountInput(
   securityContext: AccountInputSecurityContext = {
     entityTimestamp: env.timestamp,
     owningEntityIsHub: false,
-    finalizedJHeight: getReplicaByEntityId(env, accountMachine.proofHeader.fromEntity)?.state.lastFinalizedJHeight
-      ?? accountMachine.lastFinalizedJHeight
-    ?? 0,
+    finalizedJHeight:
+      getReplicaByEntityId(env, accountMachine.proofHeader.fromEntity)?.state
+        .lastFinalizedJHeight ??
+      accountMachine.lastFinalizedJHeight ??
+      0,
   },
   accountJClaimNodeStore?: AccountJClaimNodeStore,
 ): Promise<HandleAccountInputResult> {
@@ -2051,34 +2233,32 @@ export async function applyAccountInput(
     return { success: false, error: heightNormalization.error, events: [] };
   }
   const { normalizedInputHeight } = heightNormalization;
-  const committedFrames: Array<{ frame: AccountFrame; committedViaNewFrame: boolean }> = [];
-  const candidateEffects: EntityCandidateEffect[] = [];
-
+  if (normalizedInputHeight === undefined) {
+    throw new Error('ACCOUNT_INPUT_HEIGHT_NORMALIZATION_INVARIANT');
+  }
   const events: string[] = [];
-  const timedOutHashlocks: string[] = [];
-  const committedJClaims = createAccountJClaimSession(env, accountJClaimNodeStore);
-  const finish = (result: HandleAccountInputResult): HandleAccountInputResult => {
-    const accountJClaimNodeChanges = committedJClaims.changes();
-    return {
-      ...result,
-      ...(candidateEffects.length > 0 ? { candidateEffects } : {}),
-      ...(accountJClaimNodeChanges ? { accountJClaimNodeChanges } : {}),
-    };
-  };
-  let ackProcessed = false;
-  // Replay protection: frame chain (height + prevFrameHash) checked at :836
-  // ACK replay protection: pendingFrame cleared on commit, so replayed ACK fails pendingFrame check
-
   const disputeHankoShapeError = getDisputeHankoShapeError(input);
   if (disputeHankoShapeError) {
     return { success: false, error: disputeHankoShapeError, events };
   }
-
   const boardReseal = await handleBoardReseal(env, accountMachine, input, securityContext);
-  if (boardReseal) return finish(boardReseal);
-
+  if (boardReseal) {
+    const session = {
+      env,
+      accountMachine,
+      input,
+      securityContext,
+      normalizedInputHeight,
+      replay: classifyAccountInputReplay(accountMachine, input),
+      events,
+      timedOutHashlocks: [],
+      committedFrames: [],
+      committedJClaims: createAccountJClaimSession(env, accountJClaimNodeStore),
+      candidateEffects: [],
+    };
+    return finishAccountInput(session, boardReseal);
+  }
   const replay = classifyAccountInputReplay(accountMachine, input);
-
   const replayGateResult = await handleReplayOrObsoleteAccountInput(
     accountMachine,
     input,
@@ -2086,122 +2266,37 @@ export async function applyAccountInput(
     events,
   );
   if (replayGateResult) return replayGateResult;
-
-  let validatedCounterpartyAckDisputeSeal: ValidatedCounterpartyDisputeSeal | undefined;
-  try {
-    validatedCounterpartyAckDisputeSeal = await validateCounterpartyDisputeSeal(
-      env,
-      accountMachine,
-      input,
-      accountInputAck(input)?.disputeSeal,
-      'ACCOUNT_ACK',
-      securityContext,
-    );
-  } catch (error) {
-    return { success: false, error: (error as Error).message, events };
-  }
-
-  const { ackHeight } = resolveAccountAckTarget(accountMachine, input, normalizedInputHeight);
-
-  const pendingAckResult = await handlePendingFrameAck(
+  const session: AccountInputSession = {
     env,
     accountMachine,
     input,
-    ackHeight,
-    validatedCounterpartyAckDisputeSeal,
-    events,
-    timedOutHashlocks,
-    committedFrames,
-    committedJClaims,
     securityContext,
-    candidateEffects,
-  );
-  if (pendingAckResult.kind === 'return') return finish(pendingAckResult.result);
-  if (pendingAckResult.kind === 'fallthrough') ackProcessed = true;
-
-  // ACK for a pending frame must never be ignored unless this is the valid
-  // same-height race case: peer ACKs the last committed frame and proposes the
-  // same next height we already have pending. That path is resolved below by
-  // the simultaneous-proposal handler.
-  const unmatchedPendingAck = handleUnmatchedAck(
-    accountMachine,
-    input,
     normalizedInputHeight,
-    ackProcessed,
+    replay,
     events,
-    committedFrames,
-    'before_frame',
+    timedOutHashlocks: [],
+    committedFrames: [],
+    committedJClaims: createAccountJClaimSession(env, accountJClaimNodeStore),
+    candidateEffects: [],
+  };
+  const ack = await handleAccountAckPhase(session);
+  if (ack.kind === 'return') return finishAccountInput(session, ack.result);
+  const proposalResult = await handleAccountProposalPhase(
+    session,
+    ack.ackProcessed,
   );
-  if (unmatchedPendingAck) return finish(unmatchedPendingAck);
-
-  let validatedCounterpartyProposalDisputeSeal: ValidatedCounterpartyDisputeSeal | undefined;
-  try {
-    validatedCounterpartyProposalDisputeSeal = await validateCounterpartyDisputeSeal(
-      env,
-      accountMachine,
-      input,
-      accountInputProposal(input)?.disputeSeal,
-      'ACCOUNT_PROPOSAL',
-      securityContext,
-    );
-  } catch (error) {
-    return { success: false, error: (error as Error).message, events };
-  }
-
-  if (input.kind === 'dispute') {
-    try {
-      const standaloneSeal = await validateCounterpartyDisputeSeal(
-        env,
-        accountMachine,
-        input,
-        input.disputeSeal,
-        'ACCOUNT_DISPUTE',
-        securityContext,
-      );
-      storeCounterpartyDisputeSeal(accountMachine, standaloneSeal);
-      return finish({ success: true, events });
-    } catch (error) {
-      return { success: false, error: (error as Error).message, events };
-    }
-  }
-
-  const incomingFrameResult = await handleIncomingAccountFrame(
-    env,
-    accountMachine,
-    input,
-    normalizedInputHeight,
-    replay.currentHeight,
-    validatedCounterpartyProposalDisputeSeal,
-    events,
-    timedOutHashlocks,
-    committedFrames,
-    committedJClaims,
-    securityContext,
-    candidateEffects,
-  );
-  if (incomingFrameResult.kind === 'return') return finish(incomingFrameResult.result);
-
-  // ACK inputs must never be silently ignored; this causes replay divergence.
-  const unmatchedAck = handleUnmatchedAck(
-    accountMachine,
-    input,
-    normalizedInputHeight,
-    ackProcessed,
-    events,
-    committedFrames,
-    'after_frame',
-  );
-  if (unmatchedAck) return finish(unmatchedAck);
-
+  if (proposalResult) return finishAccountInput(session, proposalResult);
   if (HEAVY_LOGS) accountLog.debug('return.no_response');
-  return finish({
+  return finishAccountInput(session, {
     success: true,
     events,
     swapOffersCreated: [],
     swapCancelRequests: [],
     swapOffersCancelled: [],
-    timedOutHashlocks,
-    ...(committedFrames.length > 0 && { committedFrames }),
+    timedOutHashlocks: session.timedOutHashlocks,
+    ...(session.committedFrames.length > 0 && {
+      committedFrames: session.committedFrames,
+    }),
   });
 }
 

@@ -12,7 +12,7 @@ import type {
 import type { AccountJClaimNodeStore } from '../../types/account-j-claims';
 // import { addToReserves, subtractFromReserves } from './financial'; // Currently unused
 import {
-  applyAccountInput,
+  applyAccountInputToEntity,
   type MempoolOp,
   type SwapOfferEvent,
   type SwapCancelEvent,
@@ -207,7 +207,7 @@ const handleJEventEntityTx: EntityTxDispatcher = async (env, entityState, entity
 
 const handleAccountInputEntityTx: EntityTxDispatcher = async (env, entityState, entityTx, options) => {
   if (entityTx.type !== 'accountInput') throw new Error(`ENTITY_TX_DISPATCH_MISMATCH: ${entityTx.type}`);
-  const result = await applyAccountInput(entityState, entityTx.data, env, options);
+  const result = await applyAccountInputToEntity(entityState, entityTx.data, env, options);
   return {
     newState: result.newState,
     outputs: result.outputs,

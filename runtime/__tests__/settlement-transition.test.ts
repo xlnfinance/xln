@@ -33,7 +33,7 @@ import {
   HUB_REBALANCE_INTERVAL_MS,
   initCrontab,
 } from '../entity/scheduler';
-import { applyFinalizedAccountJEvents } from '../entity/tx/j-events-account';
+import { applyFinalizedAccountJEvents } from '../account/tx/handlers/j-event-finality';
 import { createEmptyBatch, initJBatch } from '../jurisdiction/batch';
 import { buildAccountProofBody } from '../protocol/dispute/proof-builder';
 import {

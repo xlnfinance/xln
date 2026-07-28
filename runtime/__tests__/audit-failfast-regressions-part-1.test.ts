@@ -135,7 +135,7 @@ import { applyJEvent } from '../entity/tx/j-events';
 
 import { applyJEventRange, buildJEventRangeData } from './helpers/j-history';
 
-import { applyFinalizedAccountJEvents } from '../entity/tx/j-events-account';
+import { applyFinalizedAccountJEvents } from '../account/tx/handlers/j-event-finality';
 
 import { queueCrossJurisdictionSalvageFromArgumentList } from '../entity/tx/j-events-htlc';
 
