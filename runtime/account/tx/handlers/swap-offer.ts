@@ -1,368 +1,54 @@
 /**
- * Swap Offer Handler
- * User creates limit order, locks capacity
+ * Swap-offer Account transition.
  *
- * Flow:
- * 1. Validate offerId uniqueness
- * 2. Validate amounts > 0
- * 3. Check capacity (including existing holds)
- * 4. Lock capacity via leftHold or rightHold
- * 5. Store in swapOffers Map
+ * The coordinator keeps the financial order visible:
+ * admission → deterministic quantization → cross-J lock binding → commit.
  */
 
-import type { AccountMachine, AccountTx, SwapOffer } from '../../../types';
+import type {
+  AccountMachine,
+  AccountTx,
+} from '../../../types';
 import type { SwapOfferEvent } from '../../../entity/tx/handlers/account';
-import { deriveDelta, getSwapPairPolicyByBaseQuote } from '../../utils';
-import {
-  computePriceTicksForBaseQuote,
-  deriveSide,
-  getSwapLotScale,
-  prepareSwapOrder,
-  quoteAmountAtPrice,
-} from '../../../orderbook';
-import { FINANCIAL, LIMITS } from '../../../constants';
-import { recordSwapOfferLifecycle } from './swap-history';
-import {
-  cloneCrossJurisdictionRoute,
-  deriveCanonicalCrossJurisdictionMarket,
-  withCanonicalCrossJurisdictionRouteHash,
-} from '../../../extensions/cross-j/index';
-import { ensureDelta } from '../delta-utils';
-import { addHold } from '../hold-utils';
-import { getAccountSwapMarketLimitError } from '../../swap-limits';
+import { validateSwapOfferAdmission } from './swap-offer/admission';
+import { prepareSwapOfferAmounts } from './swap-offer/quantization';
+import { validateCrossJurisdictionSourceBinding } from './swap-offer/cross-j-binding';
+import { commitSwapOffer } from './swap-offer/commit';
 
-export async function handleSwapOffer(
-  accountMachine: AccountMachine,
-  accountTx: Extract<AccountTx, { type: 'swap_offer' }>,
+type SwapOfferResult = {
+  success: boolean;
+  events: string[];
+  error?: string;
+  swapOfferCreated?: SwapOfferEvent;
+};
+
+export const handleSwapOffer = async (
+  account: AccountMachine,
+  tx: Extract<AccountTx, { type: 'swap_offer' }>,
   byLeft: boolean,
   currentHeight: number,
-  _isValidation: boolean = false
-): Promise<{ success: boolean; events: string[]; error?: string; swapOfferCreated?: SwapOfferEvent }> {
-  const { offerId, giveTokenId, giveAmount, wantTokenId, wantAmount, priceTicks: inputPriceTicks, timeInForce, crossJurisdiction } = accountTx.data;
-  const events: string[] = [];
-
-  // Initialize swapOffers Map if not present
-  if (!accountMachine.swapOffers) {
-    accountMachine.swapOffers = new Map();
+  _isValidation = false,
+): Promise<SwapOfferResult> => {
+  // Preserve the canonical empty map even when admission rejects. Both Account
+  // frame validation and commit execute this same transition.
+  account.swapOffers ??= new Map();
+  const admissionResult = validateSwapOfferAdmission(account, tx, byLeft);
+  if (!admissionResult.admission) {
+    return { success: false, error: admissionResult.error!, events: [] };
   }
-
-  // 1. Validate offerId format and uniqueness
-  // offerId must not contain colons - they're used as delimiters in namespaced IDs
-  if (offerId.includes(':')) {
-    return { success: false, error: `Invalid offerId: colons not allowed (got ${offerId})`, events };
+  const amountResult = prepareSwapOfferAmounts(tx);
+  if (!amountResult.prepared) {
+    return { success: false, error: amountResult.error!, events: [] };
   }
-  if (accountMachine.swapOffers.has(offerId)) {
-    return { success: false, error: `Offer ${offerId} already exists`, events };
+  const bindingError = validateCrossJurisdictionSourceBinding(account, tx);
+  if (bindingError) {
+    return { success: false, error: bindingError, events: [] };
   }
-  if (accountMachine.swapOffers.size >= LIMITS.MAX_ACCOUNT_SWAP_OFFERS) {
-    return {
-      success: false,
-      error: `Too many open swap offers: max ${LIMITS.MAX_ACCOUNT_SWAP_OFFERS}`,
-      events,
-    };
-  }
-  const sameJurisdictionOfferCount = Array.from(accountMachine.swapOffers.values())
-    .filter(offer => !offer.crossJurisdiction).length;
-  if (!crossJurisdiction && sameJurisdictionOfferCount >= LIMITS.MAX_ACCOUNT_SAME_J_SWAP_OFFERS) {
-    return {
-      success: false,
-      error: `Too many open same-j swap offers: max ${LIMITS.MAX_ACCOUNT_SAME_J_SWAP_OFFERS}`,
-      events,
-    };
-  }
-  if (
-    crossJurisdiction &&
-    Array.from(accountMachine.swapOffers.values()).filter(offer => offer.crossJurisdiction).length >=
-      LIMITS.MAX_ACCOUNT_CROSS_J_SWAP_OFFERS
-  ) {
-    return {
-      success: false,
-      error: `Too many open cross-j swap offers: max ${LIMITS.MAX_ACCOUNT_CROSS_J_SWAP_OFFERS}`,
-      events,
-    };
-  }
-
-  // 2. Validate amounts (network-wide bounds)
-  if (giveAmount < FINANCIAL.MIN_PAYMENT_AMOUNT || giveAmount > FINANCIAL.MAX_PAYMENT_AMOUNT) {
-    return {
-      success: false,
-      error: `Invalid giveAmount: ${giveAmount} (min ${FINANCIAL.MIN_PAYMENT_AMOUNT}, max ${FINANCIAL.MAX_PAYMENT_AMOUNT})`,
-      events,
-    };
-  }
-  if (wantAmount < FINANCIAL.MIN_PAYMENT_AMOUNT || wantAmount > FINANCIAL.MAX_PAYMENT_AMOUNT) {
-    return {
-      success: false,
-      error: `Invalid wantAmount: ${wantAmount} (min ${FINANCIAL.MIN_PAYMENT_AMOUNT}, max ${FINANCIAL.MAX_PAYMENT_AMOUNT})`,
-      events,
-    };
-  }
-  if (giveTokenId === wantTokenId && !crossJurisdiction) {
-    return { success: false, error: `Cannot swap same token: ${giveTokenId}`, events };
-  }
-  if (crossJurisdiction) {
-    if (
-      crossJurisdiction.status !== 'resting' ||
-      !crossJurisdiction.sourcePull ||
-      !crossJurisdiction.targetPull
-    ) {
-      return { success: false, error: `Cross-j swap must be prepared before entering the book`, events };
-    }
-  }
-  if (timeInForce !== undefined && timeInForce !== 0 && timeInForce !== 1 && timeInForce !== 2) {
-    return { success: false, error: `Invalid timeInForce: ${String(timeInForce)}`, events };
-  }
-
-  // 3. Determine maker perspective (Channel.ts: byLeft = frame proposer = maker)
-  const { leftEntity, rightEntity } = accountMachine;
-  const proposerEntityId = byLeft ? leftEntity : rightEntity;
-  const makerIsLeft = crossJurisdiction
-    ? crossJurisdiction.makerEntityId.toLowerCase() === leftEntity.toLowerCase()
-    : byLeft;
-  const makerEntityId = makerIsLeft ? leftEntity : rightEntity;
-  if (
-    crossJurisdiction &&
-    (
-      crossJurisdiction.makerEntityId.toLowerCase() !== makerEntityId.toLowerCase() ||
-      ![
-        crossJurisdiction.makerEntityId,
-        crossJurisdiction.source.counterpartyEntityId,
-      ].some(entityId => entityId.toLowerCase() === proposerEntityId.toLowerCase())
-    )
-  ) {
-    return {
-      success: false,
-      error: `Cross-j swap proposer must be the maker or source hub`,
-      events,
-    };
-  }
-
-  const marketLimitError = getAccountSwapMarketLimitError(accountMachine.swapOffers.values(), {
-    giveTokenId,
-    wantTokenId,
-    ...(crossJurisdiction ? { crossJurisdiction } : {}),
-    makerIsLeft,
-  });
-  if (marketLimitError) return { success: false, error: marketLimitError, events };
-
-  // 4. Quantize order to orderbook lot granularity at source.
-  // This keeps account holds, swap state, and orderbook matching deterministic.
-  const crossMarket = crossJurisdiction ? deriveCanonicalCrossJurisdictionMarket(crossJurisdiction) : null;
-  const side = crossMarket ? (crossMarket.sourceIsBase ? 1 : 0) : deriveSide(giveTokenId, wantTokenId);
-  const rawBaseAmount = side === 1 ? giveAmount : wantAmount;
-  const rawQuoteAmount = side === 1 ? wantAmount : giveAmount;
-  const baseTokenId = side === 1 ? giveTokenId : wantTokenId;
-  const quoteTokenId = side === 1 ? wantTokenId : giveTokenId;
-  const lotScale = getSwapLotScale(baseTokenId);
-  if (rawBaseAmount < lotScale) {
-    return { success: false, error: `Order too small for lot size (${lotScale.toString()} base units)`, events };
-  }
-  if (crossMarket && rawBaseAmount % lotScale !== 0n) {
-    return {
-      success: false,
-      error: `Cross-j base amount must align to lot size (${lotScale.toString()} base units)`,
-      events,
-    };
-  }
-  const pairPolicy = crossMarket ? null : getSwapPairPolicyByBaseQuote(baseTokenId, quoteTokenId);
-  const stepTicks = BigInt(Math.max(1, pairPolicy?.priceStepTicks ?? 1));
-  let priceTicks: bigint;
-  if (!crossMarket) {
-    const prepared = prepareSwapOrder(giveTokenId, wantTokenId, giveAmount, wantAmount);
-    if (!prepared) {
-      return { success: false, error: `Invalid price ratio or order too small after canonical quantization`, events };
-    }
-    priceTicks = prepared.priceTicks;
-    if (inputPriceTicks !== undefined) {
-      if (inputPriceTicks <= 0n) {
-        return { success: false, error: `Invalid explicit priceTicks: ${inputPriceTicks}`, events };
-      }
-      // Explicit price must already be step-aligned to keep signer intent exact.
-      const alignedInput = (inputPriceTicks / stepTicks) * stepTicks;
-      if (alignedInput !== inputPriceTicks) {
-        return {
-          success: false,
-          error: `Explicit priceTicks must align to step ${stepTicks.toString()} (got ${inputPriceTicks.toString()})`,
-          events,
-        };
-      }
-      // Allow ±1 step tolerance: amounts derived from exact priceTicks can
-      // round-trip with 1 tick drift due to integer division truncation.
-      // When within tolerance, use the explicit price (preserves user's click intent).
-      const tickDrift = inputPriceTicks > priceTicks
-        ? inputPriceTicks - priceTicks
-        : priceTicks - inputPriceTicks;
-      if (tickDrift > stepTicks) {
-        return {
-          success: false,
-          error: `Price mismatch after deterministic quantization: expected ${priceTicks.toString()}, got ${inputPriceTicks.toString()} (drift ${tickDrift} > step ${stepTicks})`,
-          events,
-        };
-      }
-      // Adopt explicit price — this is the exact book level the user clicked
-      priceTicks = inputPriceTicks;
-    }
-  } else {
-    priceTicks = computePriceTicksForBaseQuote(
-      side,
-      baseTokenId,
-      quoteTokenId,
-      rawBaseAmount,
-      rawQuoteAmount,
-    );
-    if (priceTicks <= 0n) {
-      return { success: false, error: `Invalid cross-j price ratio or order too small after canonical quantization`, events };
-    }
-  }
-  // A prepared cross-j route already commits both raw asset amounts through its
-  // pull receipts and route hash. The orderbook price is an index derived from
-  // those bytes; it is not authority to rewrite either amount. Same-chain user
-  // intent is still quantized normally before it becomes a resting offer.
-  const quantizedBaseAmount = crossMarket
-    ? rawBaseAmount
-    : (rawBaseAmount / lotScale) * lotScale;
-  const recomputedQuote = crossMarket
-    ? rawQuoteAmount
-    : quoteAmountAtPrice(baseTokenId, quoteTokenId, quantizedBaseAmount, priceTicks);
-  const effectiveGiveAmount = side === 1 ? quantizedBaseAmount : recomputedQuote;
-  const effectiveWantAmount = side === 1 ? recomputedQuote : quantizedBaseAmount;
-  if (effectiveGiveAmount < FINANCIAL.MIN_PAYMENT_AMOUNT || effectiveGiveAmount > FINANCIAL.MAX_PAYMENT_AMOUNT) {
-    return {
-      success: false,
-      error: `Quantized giveAmount out of bounds: ${effectiveGiveAmount} (min ${FINANCIAL.MIN_PAYMENT_AMOUNT}, max ${FINANCIAL.MAX_PAYMENT_AMOUNT})`,
-      events,
-    };
-  }
-  if (effectiveWantAmount < FINANCIAL.MIN_PAYMENT_AMOUNT || effectiveWantAmount > FINANCIAL.MAX_PAYMENT_AMOUNT) {
-    return {
-      success: false,
-      error: `Quantized wantAmount out of bounds: ${effectiveWantAmount} (min ${FINANCIAL.MIN_PAYMENT_AMOUNT}, max ${FINANCIAL.MAX_PAYMENT_AMOUNT})`,
-      events,
-    };
-  }
-  if (crossJurisdiction) {
-    if (effectiveGiveAmount !== BigInt(crossJurisdiction.source.amount)) {
-      return {
-        success: false,
-        error: `Cross-j source amount changed by quantization: route=${crossJurisdiction.source.amount} offer=${effectiveGiveAmount}`,
-        events,
-      };
-    }
-    if (effectiveWantAmount !== BigInt(crossJurisdiction.target.amount)) {
-      return {
-        success: false,
-        error: `Cross-j target amount changed by quantization: route=${crossJurisdiction.target.amount} offer=${effectiveWantAmount}`,
-        events,
-      };
-    }
-  }
-
-  if (crossJurisdiction) {
-    const canonicalCrossJurisdiction = withCanonicalCrossJurisdictionRouteHash(crossJurisdiction);
-    const sourcePull = crossJurisdiction.sourcePull;
-    const pairedPull = sourcePull ? accountMachine.pulls?.get(sourcePull.pullId) : undefined;
-    if (!sourcePull || !pairedPull) {
-      return {
-        success: false,
-        error: `Cross-j swap offer requires paired source pull lock`,
-        events,
-      };
-    }
-    if (
-      pairedPull.tokenId !== sourcePull.tokenId ||
-      pairedPull.tokenId !== giveTokenId ||
-      pairedPull.amount !== sourcePull.signedAmount ||
-      (pairedPull.fullHash || '').toLowerCase() !== sourcePull.fullHash.toLowerCase() ||
-      (pairedPull.partialRoot || '').toLowerCase() !== sourcePull.partialRoot.toLowerCase() ||
-      pairedPull.revealedUntilTimestamp !== sourcePull.revealedUntilTimestamp
-    ) {
-      return {
-        success: false,
-        error: `Cross-j swap offer source pull mismatch`,
-        events,
-      };
-    }
-    const binding = pairedPull.crossJurisdiction;
-    if (
-      !binding ||
-      binding.leg !== 'source' ||
-      binding.orderId !== canonicalCrossJurisdiction.orderId ||
-      (binding.routeHash || '').toLowerCase() !== (canonicalCrossJurisdiction.routeHash || '').toLowerCase()
-    ) {
-      return {
-        success: false,
-        error: `Cross-j source pull binding mismatch`,
-        events,
-      };
-    }
-  }
-
-  const delta = ensureDelta(accountMachine, giveTokenId);
-
-  // Cross-j source funds are already locked by the paired pull_lock in the same
-  // account. The swap_offer is the order/audit object for the book, not a second
-  // economic hold. Same-account swaps still lock capacity here.
-  if (!crossJurisdiction) {
-    const derived = deriveDelta(delta, makerIsLeft);
-    if (effectiveGiveAmount > derived.outCapacity) {
-      return {
-        success: false,
-        error: `Insufficient capacity: need ${effectiveGiveAmount}, available ${derived.outCapacity}`,
-        events,
-      };
-    }
-  }
-
-  // 7. Create offer (stored amounts are already quantized for deterministic matching)
-  const publicCrossJurisdiction = crossJurisdiction
-    ? cloneCrossJurisdictionRoute(crossJurisdiction)
-    : undefined;
-  const offer: SwapOffer = {
-    offerId,
-    giveTokenId,
-    giveAmount: effectiveGiveAmount,
-    wantTokenId,
-    wantAmount: effectiveWantAmount,
-    priceTicks,
-    ...(timeInForce !== undefined ? { timeInForce } : {}),
-    makerIsLeft,
-    createdHeight: currentHeight,
-    quantizedGive: effectiveGiveAmount,
-    quantizedWant: effectiveWantAmount,
-    ...(publicCrossJurisdiction ? { crossJurisdiction: publicCrossJurisdiction } : {}),
-  };
-
-  // 8. Lock capacity (CRITICAL PER CODEX: Apply during BOTH validation and commit!)
-  // Holds ARE consensus-critical - included in AccountFrame.deltas hash.
-  // Must be in BOTH validation (for hash) and commit (for real state) to match
-  if (!crossJurisdiction) {
-    const holdError = addHold(delta, makerIsLeft ? 'left' : 'right', effectiveGiveAmount);
-    if (holdError) return { success: false, error: holdError, events };
-  }
-
-  // 9. Store offer (proofBody includes swapOffers, so keep validation+commit aligned)
-  accountMachine.swapOffers.set(offerId, offer);
-  recordSwapOfferLifecycle(accountMachine, offer);
-
-  events.push(`📊 Swap offer created: ${offerId.slice(0,8)}... give ${effectiveGiveAmount} token${giveTokenId} for ${effectiveWantAmount} token${wantTokenId}`);
-
-  // Return event with canonical entities for deterministic attribution
-  return {
-    success: true,
-    events,
-    swapOfferCreated: {
-      offerId,
-      makerIsLeft,
-      fromEntity: leftEntity,   // Canonical entities (same on both sides)
-      toEntity: rightEntity,
-      createdHeight: currentHeight,
-      giveTokenId,
-      giveAmount: effectiveGiveAmount,
-      wantTokenId,
-      wantAmount: effectiveWantAmount,
-      priceTicks,
-      ...(timeInForce !== undefined ? { timeInForce } : {}),
-      ...(publicCrossJurisdiction ? { crossJurisdiction: publicCrossJurisdiction } : {}),
-    },
-  };
-}
+  return commitSwapOffer(
+    account,
+    tx,
+    admissionResult.admission,
+    amountResult.prepared,
+    currentHeight,
+  );
+};
