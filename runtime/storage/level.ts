@@ -1,4 +1,4 @@
-import { decodeBuffer, decodeValidatedBuffer, notFound, writeBatch } from './codec';
+import { decodeValidatedBuffer, notFound, writeBatch } from './codec';
 import { prefixUpperBound } from './keys';
 import type { NamespaceBytes, RuntimeDbLike } from './types';
 
@@ -30,15 +30,6 @@ const keyIteratorOptions = (range: KeyRangeOptions): { gte?: Buffer; lt?: Buffer
   };
 };
 
-export const readJsonOrNull = async <T>(db: RuntimeDbLike, key: Buffer): Promise<T | null> => {
-  try {
-    return decodeBuffer<T>(await db.get(key));
-  } catch (error) {
-    if (notFound(error)) return null;
-    throw error;
-  }
-};
-
 export const readValidatedOrNull = async <T>(
   db: RuntimeDbLike,
   key: Buffer,
@@ -68,18 +59,6 @@ export async function* iterateKeys(db: RuntimeDbLike, range: KeyRangeOptions): A
   }
 }
 
-export const listKeys = async (db: RuntimeDbLike, prefix: Buffer): Promise<Buffer[]> => {
-  const out: Buffer[] = [];
-  for await (const key of iterateKeys(db, { prefix })) out.push(key);
-  return out;
-};
-
-export const listKeysRange = async (db: RuntimeDbLike, gte: Buffer, lt: Buffer): Promise<Buffer[]> => {
-  const out: Buffer[] = [];
-  for await (const key of iterateKeys(db, { gte, lt })) out.push(key);
-  return out;
-};
-
 export const countKeys = async (db: RuntimeDbLike, range: KeyRangeOptions): Promise<number> => {
   let count = 0;
   for await (const _key of iterateKeys(db, range)) count += 1;
@@ -97,26 +76,6 @@ export const measurePrefixBytes = async (db: RuntimeDbLike, prefix: Buffer): Pro
     count += 1;
   }
   return { count, bytes, maxValueBytes };
-};
-
-export const copyKeys = async (
-  sourceDb: RuntimeDbLike,
-  targetDb: RuntimeDbLike,
-  keys: Buffer[],
-): Promise<{ bytes: number; count: number }> => {
-  let bytes = 0;
-  let count = 0;
-  for (let offset = 0; offset < keys.length; offset += STORAGE_BATCH_CHUNK_SIZE) {
-    const batch = targetDb.batch();
-    for (const key of keys.slice(offset, offset + STORAGE_BATCH_CHUNK_SIZE)) {
-      const value = await sourceDb.get(key);
-      batch.put(key, value);
-      bytes += key.byteLength + value.byteLength;
-      count += 1;
-    }
-    await writeBatch(batch);
-  }
-  return { bytes, count };
 };
 
 export const copyKeyRange = async (

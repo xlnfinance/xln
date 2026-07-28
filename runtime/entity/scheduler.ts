@@ -725,43 +725,6 @@ async function checkAccountTimeoutsHandler(
 }
 
 /**
- * Get statistics about pending frames across all accounts
- */
-export function getAccountTimeoutStats(replica: EntityReplica): {
-  totalAccounts: number;
-  pendingFrames: number;
-  timedOutFrames: number;
-  oldestPendingFrameAge: number;
-} {
-  const now = replica.state.timestamp; // DETERMINISTIC: Use entity's own timestamp
-  let pendingFrames = 0;
-  let timedOutFrames = 0;
-  let oldestPendingFrameAge = 0;
-
-  for (const accountMachine of replica.state.accounts.values()) {
-    if (accountMachine.pendingFrame) {
-      pendingFrames++;
-      const frameAge = now - accountMachine.pendingFrame.timestamp;
-
-      if (frameAge > ACCOUNT_TIMEOUT_MS) {
-        timedOutFrames++;
-      }
-
-      if (frameAge > oldestPendingFrameAge) {
-        oldestPendingFrameAge = frameAge;
-      }
-    }
-  }
-
-  return {
-    totalAccounts: replica.state.accounts.size,
-    pendingFrames,
-    timedOutFrames,
-    oldestPendingFrameAge,
-  };
-}
-
-/**
  * Hub Rebalance Handler
  * Prepaid request_collateral flow (no quotes).
  *

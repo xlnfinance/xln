@@ -18,7 +18,6 @@ import {
   accountInputDisputeSeal,
   accountInputProposal,
 } from '../../account/consensus/flush';
-import { serializeTaggedJson } from '../../protocol/serialization';
 import {
   cloneIsolatedAccountInput,
   cloneIsolatedAccountTx,
@@ -403,97 +402,6 @@ export const sealHankoWitnessInState = (
   }
   return sealed;
 };
-
-export type HankoOutputBinding = {
-  output: number;
-  tx: number;
-  routedEntity: string;
-  routedSigner: string;
-  from: string;
-  to: string;
-  kind: string;
-  type: HankoWitnessEntry['type'];
-  hash: string;
-};
-
-export const buildHankoOutputBindings = (
-  outputs: readonly EntityInput[],
-  jOutputs: readonly JInput[],
-  state: EntityState,
-): HankoOutputBinding[] => {
-  const bindings: HankoOutputBinding[] = [];
-  outputs.forEach((output, outputIndex) => {
-    (output.entityTxs ?? []).forEach((tx, txIndex) => {
-      if (tx.type !== 'accountInput') return;
-      const input = tx.data;
-      const add = (type: HankoWitnessEntry['type'], hash: string) => bindings.push({
-        output: outputIndex,
-        tx: txIndex,
-        routedEntity: output.entityId.toLowerCase(),
-        routedSigner: output.signerId.toLowerCase(),
-        from: input.fromEntityId.toLowerCase(),
-        to: input.toEntityId.toLowerCase(),
-        kind: input.kind,
-        type,
-        hash,
-      });
-      const proposal = accountInputProposal(input);
-      if (proposal?.frame.stateHash) add('accountFrame', proposal.frame.stateHash);
-      const reseal = accountInputBoardReseal(input);
-      if (reseal?.frameHash) add('accountFrame', reseal.frameHash);
-      const ackHash = getAckFrameHash(state, input);
-      if (accountInputAck(input) && !ackHash) {
-        throw new Error(`ACK_FRAME_HASH_UNRESOLVED:counterparty=${input.toEntityId}`);
-      }
-      if (ackHash) add('accountFrame', ackHash);
-      for (const seal of [accountInputAck(input)?.disputeSeal, proposal?.disputeSeal, accountInputDisputeSeal(input)]) {
-        if (seal?.hash) add('dispute', seal.hash);
-      }
-    });
-  });
-  jOutputs.forEach((jInput, outputIndex) => {
-    jInput.jTxs.forEach((jTx, txIndex) => {
-      if (jTx.type === 'batch' && jTx.data?.batchHash) {
-        bindings.push({
-          output: outputs.length + outputIndex,
-          tx: txIndex,
-          routedEntity: state.entityId.toLowerCase(),
-          routedSigner: state.entityId.toLowerCase(),
-          from: state.entityId.toLowerCase(),
-          to: jInput.jurisdictionName,
-          kind: 'jBatch',
-          type: 'jBatch',
-          hash: jTx.data.batchHash,
-        });
-      }
-      if (
-        jTx.type === 'entityProviderTransfer' ||
-        jTx.type === 'entityProviderReleaseControlShares' ||
-        jTx.type === 'entityProviderCancelAction'
-      ) {
-        bindings.push({
-          output: outputs.length + outputIndex,
-          tx: txIndex,
-          routedEntity: state.entityId.toLowerCase(),
-          routedSigner: state.entityId.toLowerCase(),
-          from: state.entityId.toLowerCase(),
-          to: jInput.jurisdictionName,
-          kind: jTx.type,
-          type: 'entityProviderAction',
-          hash: jTx.data.intent.actionHash,
-        });
-      }
-    });
-  });
-  return bindings;
-};
-
-export const getHankoOutputBindingMismatch = (
-  expected: readonly HankoOutputBinding[],
-  received: readonly HankoOutputBinding[],
-): string | null => serializeTaggedJson(expected) === serializeTaggedJson(received)
-  ? null
-  : `expected=${serializeTaggedJson(expected)} received=${serializeTaggedJson(received)}`;
 
 export const buildEntityHashesToSign = (
   entityId: string,

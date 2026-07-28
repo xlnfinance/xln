@@ -7,7 +7,3 @@ export function getReplicaByEntityId(env: Pick<Env, 'eReplicas'>, entityId: stri
   }
   return undefined;
 }
-
-export function getFirstSignerForEntity(env: Pick<Env, 'eReplicas'>, entityId: string): string | null {
-  return getReplicaByEntityId(env, entityId)?.state.config.validators[0] ?? null;
-}

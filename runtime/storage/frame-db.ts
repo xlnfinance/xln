@@ -301,47 +301,6 @@ const pruneFrameDbBeforeRuntimeHeight = async (
   return { removedBytes, removedKeys };
 };
 
-export const writeFrameDbPutsWithRetention = async (options: {
-  db: RuntimeFrameDbLike;
-  height: number;
-  puts: FrameDbPut[];
-  config: Required<StorageRuntimeConfig>;
-}): Promise<{
-  writtenBytes: number;
-  prunedBytes: number;
-  retainedBytes: number;
-  prunedKeys: number;
-  latestPrunedRuntimeHeight: number;
-}> => {
-  if (options.puts.length === 0) {
-    const head = await readFrameDbHead(options.db, options.config);
-    return {
-      writtenBytes: 0,
-      prunedBytes: 0,
-      retainedBytes: head.retainedBytes,
-      prunedKeys: 0,
-      latestPrunedRuntimeHeight: head.latestPrunedRuntimeHeight,
-    };
-  }
-
-  const height = Math.max(1, Math.floor(Number(options.height)));
-  const plan = await prepareFrameDbCommit(options);
-  const batch = options.db.batch();
-  putFrameDbCommit(batch, plan);
-  await writeBatch(batch);
-
-  const retention = await pruneFrameDbRetention({
-    db: options.db,
-    height,
-    head: plan.nextHead,
-    config: options.config,
-  });
-  return {
-    writtenBytes: plan.writtenBytes,
-    ...retention,
-  };
-};
-
 export const pruneFrameDbRetention = async (options: {
   db: RuntimeFrameDbLike;
   height: number;
