@@ -3,13 +3,13 @@
  * committed account/J-layer side effects back into the runtime.
  */
 
-import { logError, shortHash, shortId } from '../../infra/logger';
+import { logError, shortHash } from '../../infra/logger';
 import type {
   EntityInput,
   EntityReplica,
   Env,
 } from '../../types';
-import { getPerfMs, HEAVY_LOGS } from '../../utils';
+import { getPerfMs } from '../../utils';
 import { accountHasProposableMempool } from './account-mempool-eligibility';
 import { isCanonicalEntityFrameDigest } from './frame';
 import {
@@ -113,6 +113,54 @@ async function handleCommitNotification(context: ApplyEntityInputContext): Promi
   );
 }
 
+type EntityProposalSelection = Awaited<ReturnType<typeof selectEntityProposal>>;
+
+const hasLocalConsensusWork = (
+  replica: EntityReplica,
+  trustedLocalEntityTxs: EntityInput['entityTxs'],
+): boolean =>
+  Boolean(trustedLocalEntityTxs?.length) ||
+  replica.mempool.length > 0 ||
+  Array.from(replica.state.accounts.values()).some(account =>
+    accountHasProposableMempool(account, replica.state),
+  );
+
+const advanceEntityProposal = async (
+  context: ApplyEntityInputContext,
+  selection: EntityProposalSelection,
+  localCanPropose: boolean,
+  profile: {
+    startedAt: number;
+    checkpoints: Record<string, number>;
+    checkpoint: (label: string) => void;
+  },
+): Promise<ApplyEntityInputResult | null> => {
+  const singleSignerResult = selection.isSingleSigner
+    ? await commitSingleSignerFrameIfReady(context, {
+        localCanPropose,
+        hasProposableAccountMempool: selection.hasProposableAccountMempool,
+        proposalJPrefixCertificate: selection.proposalJPrefixCertificate,
+        proposalSelection: selection.proposalSelection,
+        proposalTxs: selection.proposalTxs,
+        shouldRollFrozenBaseJPrefixRound: selection.shouldRollFrozenBaseJPrefixRound,
+        profileStartedAt: profile.startedAt,
+        profileCheckpoints: profile.checkpoints,
+        checkpoint: profile.checkpoint,
+      })
+    : null;
+  if (singleSignerResult) return singleSignerResult;
+  await relayPreparedFrameIfReady(context, localCanPropose, selection.isSingleSigner);
+  await startMultiSignerProposalIfReady(context, {
+    hasProposableAccountMempool: selection.hasProposableAccountMempool,
+    isSingleSigner: selection.isSingleSigner,
+    proposalJPrefixCertificate: selection.proposalJPrefixCertificate,
+    proposalSelection: selection.proposalSelection,
+    proposalTxs: selection.proposalTxs,
+    shouldRollFrozenBaseJPrefixRound: selection.shouldRollFrozenBaseJPrefixRound,
+  }, localCanPropose);
+  return null;
+};
+
 /**
  * Main entity input processor - handles consensus, proposals, and state transitions
  */
@@ -138,7 +186,6 @@ export const applyEntityInput = async (
   const phaseContext = ingress.context;
   entityInput = phaseContext.entityInput;
   const { entityOutbox, jOutbox, workingReplica } = phaseContext;
-  const { entityDisplay, quietRuntimeLogs } = ingress;
   checkpointConsensusProfile('ingress');
 
   const leaderVoteResult = await handleLeaderTimeoutVote(phaseContext);
@@ -158,93 +205,30 @@ export const applyEntityInput = async (
   const hashPrecommitResult = await handleHashPrecommits(phaseContext);
   if (hashPrecommitResult) return hashPrecommitResult;
 
-  const hasLocalConsensusWork =
-    trustedLocalEntityTxs.length > 0 ||
-    workingReplica.mempool.length > 0 ||
-    Array.from(workingReplica.state.accounts.values()).some(account =>
-      accountHasProposableMempool(account, workingReplica.state),
-    );
-  if (entityInput.jPrefixAttestations || hasLocalConsensusWork) {
+  if (entityInput.jPrefixAttestations || hasLocalConsensusWork(workingReplica, trustedLocalEntityTxs)) {
     // Commit/proposal notifications above may advance the parent Entity height.
     // Only sign after those terminal paths so this validator never emits a head
     // for a parent that was committed by the same input.
     ensureLocalJPrefixAttestation(env, workingReplica, entityOutbox, Boolean(entityInput.jPrefixAttestations));
   }
 
-  if (!quietRuntimeLogs) {
-    entityLog.debug('consensus.check', {
-      entity: shortId(workingReplica.entityId),
-      signer: shortId(workingReplica.signerId),
-      proposer: workingReplica.isProposer,
-      mempool: workingReplica.mempool.length,
-      localRuntimeMempool: trustedLocalEntityTxs.length,
-      hasProposal: Boolean(workingReplica.proposal),
-      txs: [...trustedLocalEntityTxs, ...workingReplica.mempool].map(tx => tx.type),
-    });
-  }
-
-  const {
-    hasProposableAccountMempool,
-    isSingleSigner,
-    proposalJPrefixCertificate,
-    proposalSelection,
-    proposalTxs,
-    shouldRollFrozenBaseJPrefixRound,
-  } = await selectEntityProposal(env, workingReplica, {
+  const proposalSelection = await selectEntityProposal(env, workingReplica, {
     localCanPropose,
     trustedLocalCrossJurisdiction,
     trustedLocalEntityTxs,
     checkpoint: checkpointConsensusProfile,
   });
-
-  const singleSignerResult = isSingleSigner
-    ? await commitSingleSignerFrameIfReady(phaseContext, {
-        localCanPropose,
-        hasProposableAccountMempool,
-        proposalJPrefixCertificate,
-        proposalSelection,
-        proposalTxs,
-        shouldRollFrozenBaseJPrefixRound,
-        profileStartedAt: consensusProfileStartedAt,
-        profileCheckpoints: consensusProfileCheckpoints,
-        checkpoint: checkpointConsensusProfile,
-      })
-    : null;
-  if (singleSignerResult) return singleSignerResult;
-
-  await relayPreparedFrameIfReady(phaseContext, localCanPropose, isSingleSigner);
-  await startMultiSignerProposalIfReady(phaseContext, {
-    hasProposableAccountMempool,
-    isSingleSigner,
-    proposalJPrefixCertificate,
+  const proposalResult = await advanceEntityProposal(
+    phaseContext,
     proposalSelection,
-    proposalTxs,
-    shouldRollFrozenBaseJPrefixRound,
-  }, localCanPropose);
-
-  if (!quietRuntimeLogs) {
-    entityLog.debug('outputs.generated', {
-      entity: entityDisplay,
-      signer: shortId(workingReplica.signerId),
-      outputs: entityOutbox.length,
-      proposal: shortHash(workingReplica.proposal?.hash || 'none'),
-      mempool: workingReplica.mempool.length,
-      locked: shortHash(workingReplica.lockedFrame?.hash || 'none'),
-    });
-  }
-
-  entityOutbox.forEach((output, index) => {
-    if (!HEAVY_LOGS) return;
-    entityLog.trace('output.detail', {
-      index,
-      entity: shortId(output.entityId),
-      signer: shortId(output.signerId ?? ''),
-      txs: output.entityTxs?.length || 0,
-      hashPrecommits: output.hashPrecommits?.size || 0,
-      frame: shortHash(output.proposedFrame?.hash || 'none'),
-      commit: Boolean(output.proposedFrame?.collectedSigs?.size),
-    });
-  });
+    localCanPropose,
+    {
+      startedAt: consensusProfileStartedAt,
+      checkpoints: consensusProfileCheckpoints,
+      checkpoint: checkpointConsensusProfile,
+    },
+  );
+  if (proposalResult) return proposalResult;
 
   if (trustedLocalCrossJurisdiction) {
     throw new Error(
