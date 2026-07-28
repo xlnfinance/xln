@@ -15,8 +15,9 @@ import type {
   LendingState,
   LogCategory,
 } from './types';
-import type { DisputeArgumentSnapshot } from './protocol/dispute/arguments';
+import { cloneDisputeArgumentSnapshot } from './protocol/dispute/arguments';
 import type { ProofBodyStruct } from '../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
+import { cloneProofBodyStruct } from './protocol/dispute/proof-body';
 import { validateEntityReplica, validateEntityState } from './validation-utils';
 import { safeStringify } from './protocol/serialization';
 import {
@@ -386,35 +387,10 @@ const isProofBodyStructLike = (value: unknown): value is ProofBodyStruct => {
   );
 };
 
-const cloneProofBodyStruct = (proofBody: unknown): unknown => {
+const cloneProofBodyEvidence = (proofBody: unknown): unknown => {
   if (!isProofBodyStructLike(proofBody)) return proofBody;
-  return {
-    watchSeed: proofBody.watchSeed,
-    offdeltas: [...proofBody.offdeltas],
-    tokenIds: [...proofBody.tokenIds],
-    transformers: proofBody.transformers.map((transformer) => ({
-      transformerAddress: transformer.transformerAddress,
-      encodedBatch: transformer.encodedBatch,
-      allowances: transformer.allowances.map((allowance) => ({ ...allowance })),
-    })),
-  } satisfies ProofBodyStruct;
+  return cloneProofBodyStruct(proofBody);
 };
-
-const cloneDisputeArgumentSnapshot = (
-  snapshot: DisputeArgumentSnapshot,
-): DisputeArgumentSnapshot => ({
-  proofbodyHash: snapshot.proofbodyHash,
-  nonce: snapshot.nonce,
-  side: snapshot.side,
-  proofBodyStruct: cloneProofBodyStruct(snapshot.proofBodyStruct) as ProofBodyStruct,
-  plan: {
-    paymentHashlocks: [...snapshot.plan.paymentHashlocks],
-    leftSwapOfferIds: [...snapshot.plan.leftSwapOfferIds],
-    rightSwapOfferIds: [...snapshot.plan.rightSwapOfferIds],
-    leftPullIds: [...snapshot.plan.leftPullIds],
-    rightPullIds: [...snapshot.plan.rightPullIds],
-  },
-});
 
 const cloneDisputeEvidenceIntoAccount = (
   target: AccountMachine,
@@ -432,7 +408,7 @@ const cloneDisputeEvidenceIntoAccount = (
     target.disputeProofBodiesByHash = Object.fromEntries(
       Object.entries(source.disputeProofBodiesByHash).map(([hash, proofBody]) => [
         hash,
-        cloneProofBodyStruct(proofBody),
+        cloneProofBodyEvidence(proofBody),
       ]),
     );
   } else {
@@ -470,8 +446,9 @@ const findStructuredCloneFailurePath = (
   if (seen.has(value)) return path;
   seen.add(value);
 
-  const children: Array<[string, unknown]> = value instanceof Map
-    ? [...value.entries()].flatMap(([key, entry], index) => [
+  const mapEntries = value instanceof Map ? [...value.entries()] : undefined;
+  const children: Array<[string, unknown]> = mapEntries
+    ? mapEntries.flatMap(([key, entry], index) => [
         [`${path}.<map-key:${index}>`, key] as [string, unknown],
         [`${path}.<map-value:${index}>`, entry] as [string, unknown],
       ])
@@ -483,6 +460,28 @@ const findStructuredCloneFailurePath = (
       return findStructuredCloneFailurePath(child, childPath, seen);
     }
   }
+  if (mapEntries) {
+    const prefix = new Map<unknown, unknown>();
+    for (let index = 0; index < mapEntries.length; index += 1) {
+      const entry = mapEntries[index];
+      if (!entry) continue;
+      prefix.set(entry[0], entry[1]);
+      if (!structuredCloneWorks(prefix)) {
+        if (entry[1] && typeof entry[1] === 'object' && !(entry[1] instanceof Map)) {
+          const partial: Record<string, unknown> = {};
+          for (const [key, child] of Object.entries(entry[1])) {
+            partial[key] = child;
+            const candidate = new Map(prefix);
+            candidate.set(entry[0], partial);
+            if (!structuredCloneWorks(candidate)) {
+              return `${path}.<map-entry:${index}>.${key}`;
+            }
+          }
+        }
+        return `${path}.<map-entry:${index}>`;
+      }
+    }
+  }
   return path;
 };
 
@@ -491,7 +490,10 @@ const structuredCloneOrThrow = <T>(value: T, code: string): T => {
     return structuredClone(value);
   } catch (cause) {
     const path = findStructuredCloneFailurePath(value);
-    throw new Error(`${code}:path=${path}`, { cause });
+    const detail = cause instanceof Error
+      ? `${cause.name}:${cause.message}`
+      : String(cause);
+    throw new Error(`${code}:path=${path}:cause=${detail}`, { cause });
   }
 };
 

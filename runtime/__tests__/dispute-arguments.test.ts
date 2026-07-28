@@ -86,6 +86,29 @@ function decodeFirstRatio(wrapped: string): number {
 }
 
 describe('dispute argument snapshots', () => {
+  test('stores Account-owned evidence without aliases to the proof builder result', () => {
+    const account = accountWithSwaps([]);
+    const proof = buildAccountProofBody(account, DELTA_TRANSFORMER);
+    const snapshot = captureDisputeArgumentSnapshot(
+      account,
+      proof.proofBodyHash,
+      1,
+      proof.proofBodyStruct,
+    );
+
+    storeDisputeArgumentSnapshot(account, snapshot);
+    const stored = account.disputeArgumentSnapshotsByHash?.[proof.proofBodyHash];
+
+    expect(stored).toBeDefined();
+    expect(stored).not.toBe(snapshot);
+    expect(stored?.proofBodyStruct).not.toBe(proof.proofBodyStruct);
+    expect(stored?.proofBodyStruct.transformers).not.toBe(proof.proofBodyStruct.transformers);
+    snapshot.plan.paymentHashlocks.push(`0x${'ab'.repeat(32)}`);
+    proof.proofBodyStruct.tokenIds.push(99n);
+    expect(stored?.plan.paymentHashlocks).toEqual([]);
+    expect(stored?.proofBodyStruct.tokenIds).toEqual([1n, 2n]);
+  });
+
   test('sanitizes malformed optional transformer arguments with a structured warning', () => {
     const result = sanitizeOptionalDisputeArgument('0x1234', 'dispute.test');
 

@@ -8,6 +8,7 @@ import {
   sanitizeOptionalDisputeArgument,
   type OptionalDisputeArgumentWarning,
 } from '../../jurisdiction/batch';
+import { cloneProofBodyStruct } from './proof-body';
 
 const MAX_FILL_RATIO = 0xffff;
 
@@ -31,6 +32,22 @@ export type DisputeArgumentSnapshot = {
   proofBodyStruct: ProofBodyStruct;
   plan: DisputeArgumentPlan;
 };
+
+export const cloneDisputeArgumentSnapshot = (
+  snapshot: DisputeArgumentSnapshot,
+): DisputeArgumentSnapshot => ({
+  proofbodyHash: snapshot.proofbodyHash,
+  nonce: snapshot.nonce,
+  side: snapshot.side,
+  proofBodyStruct: cloneProofBodyStruct(snapshot.proofBodyStruct),
+  plan: {
+    paymentHashlocks: [...snapshot.plan.paymentHashlocks],
+    leftSwapOfferIds: [...snapshot.plan.leftSwapOfferIds],
+    rightSwapOfferIds: [...snapshot.plan.rightSwapOfferIds],
+    leftPullIds: [...snapshot.plan.leftPullIds],
+    rightPullIds: [...snapshot.plan.rightPullIds],
+  },
+});
 
 type PullArgumentBuckets = { binaries: string[] };
 
@@ -216,7 +233,8 @@ export function storeDisputeArgumentSnapshot(
   snapshot: DisputeArgumentSnapshot,
 ): void {
   account.disputeArgumentSnapshotsByHash ??= {};
-  account.disputeArgumentSnapshotsByHash[snapshot.proofbodyHash] = snapshot;
+  account.disputeArgumentSnapshotsByHash[snapshot.proofbodyHash] =
+    cloneDisputeArgumentSnapshot(snapshot);
 }
 
 export function requireDisputeArgumentSnapshot(
