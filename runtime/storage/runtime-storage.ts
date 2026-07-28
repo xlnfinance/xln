@@ -6,51 +6,33 @@ import {
   authorizeRestoredRuntimeInput,
   restoreDurableRuntimeSnapshot,
 } from './wal/snapshot';
-import { assertPersistedLocalEntityCryptoKeys } from '../entity/crypto';
-import { getLiveConsumptionAccumulatorStates } from '../entity/consumption-store';
-import { getLiveAccountJClaimAccumulatorStates } from '../account/j-claim-store';
 import { setAccountFrameHistoryView } from '../runtime/env-events';
-import { formatReplicaKey, createReplicaKey } from '../ids';
 import { ensureRuntimeState } from '../runtime/runtime-state';
 import { restoreDurableOutputRetryState } from '../runtime/durable-output-retry';
-import { cloneEntityState } from '../state-helpers';
 import { safeStringify } from '../protocol/serialization';
 import {
-  computeCanonicalEntityHash,
   computeCanonicalEntityHashesFromEnv,
   computeCanonicalStateHashFromEnv,
 } from './canonical-hash';
 import {
-  applyCertifiedEntityLineagePlan,
-  buildCertifiedEntityLineagePlan,
   buildRuntimeCheckpointLineagePlan,
 } from './entity-lineage';
 import { assertCertifiedRegistrationEvidenceStore } from '../jurisdiction/registration-evidence';
 import {
   computeStoragePostStateHash,
-  hydrateAccountJClaimRootNodesFromStorage,
-  hydrateCertifiedBoardRootNodesFromStorage,
-  hydrateConsumptionRootNodesFromStorage,
   listStorageSnapshotHeights,
-  loadEntityStatesAtHeightFromStorage,
   readHistoryViewAccountFrames,
   reconcileHistoryViews,
   resolveStorageRuntimeConfig,
   readStorageFrameRecord,
   type StorageFrameRecord,
-  verifyStorageSnapshotAtHeight,
 } from '.';
 import {
   buildStorageLiveReplicaMetaCommitment,
   buildStorageReplicaMetaCommitmentFromCheckpointPlan,
 } from './replicas';
 import { assertStorageSafetyOverridesAllowed } from './safety';
-import { assertCertifiedJHistoryIntegrity, assertValidatorJHistoryIntegrity } from '../jurisdiction/local-history';
-import { restoreJPrefixRound } from '../jurisdiction/j-prefix-consensus';
-import type {
-  EntityReplica,
-  RuntimeState,
-} from '../types';
+import type { RuntimeState } from '../types';
 import { buildRecoveryJournalFromStorageFrame } from './queries';
 import { createStructuredLogger } from '../infra/logger';
 import { envRecord } from '../runtime/loop-environment';
@@ -60,10 +42,8 @@ import {
   shouldRequireCanonicalStorageAudit,
 } from './commit';
 import { createPersistedStorageReadApi } from './persisted-read';
-import {
-  rebuildPersistedJurisdictions,
-  resolvePersistedReplicaIdentity,
-} from './recovery/identity';
+import { resolvePersistedRestoreSource } from './recovery/source';
+import { restorePersistedEntityGraph } from './recovery/entities';
 
 export type { RuntimeStorageApiDeps } from './runtime-storage-deps';
 
@@ -141,13 +121,10 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
   const persistedReadApi = createPersistedStorageReadApi(deps);
   const {
     createPersistedStorageEnv,
-    listPersistedStorageHandles,
     restoreOverlayFromFrameLog,
     resolvePersistedLatestHeight,
     resolvePersistedCheckpointHeights,
     readPersistedStorageFrameRecord,
-    readPersistedStorageReplicaMetas,
-    readPersistedStorageSnapshotReplicaMetas,
     resolvePersistedSnapshotHeight,
     listPersistedEntityIdsAtHeight,
   } = persistedReadApi;
@@ -181,159 +158,32 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
     assertStorageSafetyOverridesAllowed();
     let returningEnv = false;
     try {
-      const persistedHandles = await listPersistedStorageHandles(env);
-      const latestHeight = persistedHandles.reduce((max, handle) => Math.max(max, handle.latestHeight), 0);
-      if (latestHeight <= 0) return null;
-      const targetHeight = Math.max(
-        1,
-        Math.min(
-          latestHeight,
-          Number.isFinite(Number(targetHeightOverride)) ? Math.floor(Number(targetHeightOverride)) : latestHeight,
-        ),
-      );
-      const frame = await readPersistedStorageFrameRecord(env, targetHeight);
-      if (!frame) {
-        const latestSnapshotHeight = persistedHandles.reduce(
-          (max, handle) => Math.max(max, handle.latestSnapshotHeight),
-          0,
-        );
-        const retainedCheckpoint = persistedHandles.some(handle => handle.snapshotHeights.includes(targetHeight));
-        if (options.prunedTargetReturnsNull && targetHeight < latestSnapshotHeight && !retainedCheckpoint) return null;
-        throw new Error(`STORAGE_RESTORE_FRAME_MISSING: height=${targetHeight}`);
-      }
-      const selectedSnapshotHeight = await resolvePersistedSnapshotHeight(env, targetHeight);
-      if (selectedSnapshotHeight > 0) {
-        const snapshotHandle = persistedHandles.find(handle => handle.snapshotHeights.includes(selectedSnapshotHeight));
-        if (!snapshotHandle) {
-          throw new Error(`STORAGE_RESTORE_SNAPSHOT_HANDLE_MISSING:height=${selectedSnapshotHeight}`);
-        }
-        await verifyStorageSnapshotAtHeight(snapshotHandle.db, snapshotHandle.head, selectedSnapshotHeight);
-      }
-      const restoredStates = await loadEntityStatesAtHeightFromStorage({
+      const source = await resolvePersistedRestoreSource(
+        deps,
+        persistedReadApi,
         env,
-        tryOpenDb: tryOpenRuntimeWalDb,
-        getRuntimeDb: getRuntimeWalDb,
-        height: targetHeight,
-      });
-      for (const state of restoredStates.values()) assertCertifiedJHistoryIntegrity(state);
-
+        targetHeightOverride,
+        options,
+      );
+      if (!source) return null;
+      const {
+        latestHeight,
+        targetHeight,
+        frame,
+        selectedSnapshotHeight,
+        restoredStates,
+      } = source;
       if (frame.runtimeMachine) restoreDurableRuntimeSnapshot(env, frame.runtimeMachine);
 
-      env.eReplicas = new Map();
-      for (const [entityId, state] of restoredStates.entries()) {
-        const persistedMetas =
-          targetHeight === latestHeight
-            ? await readPersistedStorageReplicaMetas(env, entityId, state)
-            : targetHeight === selectedSnapshotHeight
-              ? await readPersistedStorageSnapshotReplicaMetas(env, selectedSnapshotHeight, entityId)
-              : [];
-        const metas = persistedMetas.length > 0 ? persistedMetas : [null];
-        for (const meta of metas) {
-          const isLatestRestore = targetHeight === latestHeight;
-          const isCheckpointRestore = targetHeight === selectedSnapshotHeight;
-          const requiresExactReplica = isLatestRestore || isCheckpointRestore;
-          if (requiresExactReplica && !meta) {
-            throw new Error(
-              `STORAGE_RESTORE_REPLICA_META_REQUIRED:entity=${entityId}:height=${targetHeight}:` +
-                `source=${isLatestRestore ? 'head' : 'checkpoint'}`,
-            );
-          }
-          const persistedReplicaState = requiresExactReplica ? (meta?.state ?? state) : state;
-          if (String(persistedReplicaState.entityId || '').toLowerCase() !== entityId.toLowerCase()) {
-            throw new Error(
-              `STORAGE_RESTORE_REPLICA_STATE_ENTITY_MISMATCH: expected=${entityId.toLowerCase()} ` +
-                `actual=${String(persistedReplicaState.entityId || '').toLowerCase()}`,
-            );
-          }
-          assertCertifiedJHistoryIntegrity(persistedReplicaState);
-          const { signerId, isProposer } = resolvePersistedReplicaIdentity(
-            entityId,
-            persistedReplicaState,
-            meta,
-            targetHeight,
-            latestHeight,
-          );
-          const hankoWitness = meta?.hankoWitness ?? new Map();
-          assertValidatorJHistoryIntegrity(persistedReplicaState, meta?.jHistory);
-          const replicaState = cloneEntityState(persistedReplicaState, true);
-          if (requiresExactReplica) {
-            assertPersistedLocalEntityCryptoKeys(env, entityId, signerId, meta!);
-          }
-          // Historical replay between retained checkpoints reconstructs only
-          // consensus State. Validator-local crypto identity is required for a
-          // live head/checkpoint and intentionally absent from intermediate views.
-          const entityEncPubKey = meta ? meta.entityEncPubKey : '';
-          const entityEncPrivKey = meta ? meta.entityEncPrivKey : '';
-          const restoredReplica: EntityReplica = {
-            entityId,
-            signerId,
-            entityEncPubKey,
-            entityEncPrivKey,
-            state: replicaState,
-            mempool: requiresExactReplica ? meta!.mempool : [],
-            isProposer,
-            hankoWitness,
-            ...(meta?.proposal ? { proposal: meta.proposal } : {}),
-            ...(meta?.lockedFrame ? { lockedFrame: meta.lockedFrame } : {}),
-            ...(meta?.validatorExecution ? { validatorExecution: meta.validatorExecution } : {}),
-            ...(meta?.certifiedFrameLineage ? { certifiedFrameLineage: meta.certifiedFrameLineage } : {}),
-            ...(meta?.certifiedFrameAnchor ? { certifiedFrameAnchor: meta.certifiedFrameAnchor } : {}),
-            ...(meta?.position ? { position: meta.position } : {}),
-            ...(meta?.jHistory ? { jHistory: meta.jHistory } : {}),
-            ...(meta?.jSubmitState ? { jSubmitState: meta.jSubmitState } : {}),
-            ...(meta?.entityProviderActionSubmitState
-              ? { entityProviderActionSubmitState: meta.entityProviderActionSubmitState }
-              : {}),
-            ...(meta?.leaderVotes ? { leaderVotes: meta.leaderVotes } : {}),
-            ...(meta?.pendingLeaderCertificate ? { pendingLeaderCertificate: meta.pendingLeaderCertificate } : {}),
-            ...(meta?.lastConsensusProgressAt !== undefined
-              ? { lastConsensusProgressAt: meta.lastConsensusProgressAt }
-              : {}),
-          };
-          if (meta?.jPrefixRound) {
-            restoredReplica.jPrefixRound = restoreJPrefixRound(env, replicaState, meta.jPrefixRound);
-          }
-          env.eReplicas.set(formatReplicaKey(createReplicaKey(entityId, signerId)), restoredReplica);
-        }
-      }
-
-      const walDb = getRuntimeWalDb(env);
-      for (const root of new Set(
-        Array.from(env.eReplicas.values(), replica => replica.state.certifiedBoardState?.boardRegistryRoot).filter(
-          (value): value is string => Boolean(value),
-        ),
-      )) {
-        await hydrateCertifiedBoardRootNodesFromStorage(env, walDb, root);
-      }
-      for (const state of getLiveConsumptionAccumulatorStates(env)) {
-        await hydrateConsumptionRootNodesFromStorage(env, walDb, state);
-      }
-      await hydrateAccountJClaimRootNodesFromStorage(env, walDb, getLiveAccountJClaimAccumulatorStates(env));
-
-      if (env.jReplicas.size === 0) rebuildPersistedJurisdictions(env);
-      await assertCertifiedRegistrationEvidenceStore(env);
-
-      if (targetHeight === latestHeight) {
-        const lineagePlan = buildCertifiedEntityLineagePlan(env);
-        for (const [entityId, sharedState] of restoredStates) {
-          const selected = lineagePlan.lookup.get(entityId.toLowerCase());
-          if (!selected) {
-            throw new Error(`STORAGE_RESTORE_LINEAGE_ENTITY_MISSING:${entityId}`);
-          }
-          const selectedHash = computeCanonicalEntityHash(selected.replica).hash;
-          const sharedHash = computeCanonicalEntityHash({
-            ...selected.replica,
-            state: sharedState,
-          }).hash;
-          if (selectedHash !== sharedHash) {
-            throw new Error(
-              `STORAGE_RESTORE_SHARED_STATE_MISMATCH:entity=${entityId}:` +
-                `selected=${selectedHash}:shared=${sharedHash}`,
-            );
-          }
-        }
-        applyCertifiedEntityLineagePlan(env, lineagePlan);
-      }
+      await restorePersistedEntityGraph(
+        deps,
+        persistedReadApi,
+        env,
+        restoredStates,
+        targetHeight,
+        latestHeight,
+        selectedSnapshotHeight,
+      );
 
       env.height = targetHeight;
       env.timestamp = requireBoundaryInteger(

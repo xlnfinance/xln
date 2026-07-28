@@ -280,3 +280,7 @@ export const createPersistedStorageReadApi = (
   const entityReads = createPersistedStorageEntityReadApi(deps, navigation);
   return { ...navigation, ...entityReads };
 };
+
+export type PersistedStorageReadApi = ReturnType<
+  typeof createPersistedStorageReadApi
+>;
