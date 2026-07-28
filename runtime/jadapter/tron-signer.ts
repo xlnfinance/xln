@@ -1,13 +1,13 @@
 import { ethers } from 'ethers';
-import type { TronWeb as TronWebInstance } from 'tronweb';
+import type { TronWeb } from 'tronweb';
 import { safeStringify } from '../protocol/serialization';
 
 type TronWebConstructor = typeof import('tronweb')['TronWeb'];
 type TronTransferTransaction = Awaited<
-  ReturnType<TronWebInstance['transactionBuilder']['sendTrx']>
+  ReturnType<TronWeb['transactionBuilder']['sendTrx']>
 >;
 type TronTriggerResult = Awaited<
-  ReturnType<TronWebInstance['transactionBuilder']['triggerSmartContract']>
+  ReturnType<TronWeb['transactionBuilder']['triggerSmartContract']>
 >;
 type TronContractTransaction = NonNullable<TronTriggerResult['transaction']>;
 
@@ -26,7 +26,7 @@ const transactionError = (prefix: string, value: unknown): Error =>
 export class TronSigner extends ethers.AbstractSigner<ethers.JsonRpcProvider> {
   readonly #privateKey: string;
   readonly #wallet: ethers.Wallet;
-  readonly #tronWeb: TronWebInstance;
+  readonly #tronWeb: TronWeb;
   readonly #TronWeb: TronWebConstructor;
   readonly #maxFeeLimit: number;
   readonly #owner: string;

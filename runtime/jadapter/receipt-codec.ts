@@ -1,4 +1,4 @@
-import type { Input as RlpInput } from '@ethereumjs/rlp';
+import type { Input } from '@ethereumjs/rlp';
 import { ethers } from 'ethers';
 
 export type CanonicalRpcLog = {
@@ -105,7 +105,7 @@ const encodeReceiptPayload = async (
       parseReceiptHex(log.data, `LOG_${logIndex}_DATA`),
     ];
   });
-  const fields: RlpInput[] = [
+  const fields: Input[] = [
     outcome,
     parseReceiptQuantity(receipt.cumulativeGasUsed, 'CUMULATIVE_GAS'),
     parseReceiptHex(receipt.logsBloom, 'BLOOM', 256),

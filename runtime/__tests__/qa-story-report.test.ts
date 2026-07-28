@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { spawn as spawnChild, type ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, rm, symlink, writeFile } from 'node:fs/promises';
@@ -110,7 +110,7 @@ const restartRunBody = (): Record<string, unknown> => ({
   expectedGitHead: TEST_RESTART_FINGERPRINT.gitHead,
 });
 
-const spawnSleeperRestart = (): ChildProcess => spawnChild('bun', [
+const spawnSleeperRestart = (): ChildProcess => spawn('bun', [
   '-e',
   'process.on("SIGTERM",()=>process.exit(0)); setTimeout(()=>{}, 60000);',
 ], {
@@ -118,7 +118,7 @@ const spawnSleeperRestart = (): ChildProcess => spawnChild('bun', [
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 
-const spawnImmediateRestart = (): ChildProcess => spawnChild('bun', ['-e', 'process.exit(0);'], {
+const spawnImmediateRestart = (): ChildProcess => spawn('bun', ['-e', 'process.exit(0);'], {
   cwd: process.cwd(),
   stdio: ['ignore', 'pipe', 'pipe'],
 });

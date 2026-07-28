@@ -4,7 +4,7 @@
  */
 
 import { toSvg } from 'jdenticon';
-import { Buffer as BufferPolyfill } from 'buffer';
+import buffer from 'buffer';
 import { sha256 } from '@noble/hashes/sha2.js';
 
 import { extractNumberFromEntityId } from './entity/factory';
@@ -12,7 +12,7 @@ import { extractNumberFromEntityId } from './entity/factory';
 type RuntimePerformance = Pick<Performance, 'now' | 'timeOrigin'>;
 type RuntimeGlobal = typeof globalThis & {
   performance?: RuntimePerformance;
-  Buffer?: typeof BufferPolyfill;
+  Buffer?: typeof buffer.Buffer;
 };
 
 // === Time Helpers (merged from time.ts) ===
@@ -79,7 +79,7 @@ class XlnSha256Hash {
   digest(): Buffer;
   digest(encoding: 'hex'): string;
   digest(encoding?: 'hex'): Buffer | string {
-    const digest = BufferPolyfill.from(this.hash.digest());
+    const digest = buffer.Buffer.from(this.hash.digest());
     return encoding === 'hex' ? digest.toString('hex') : digest;
   }
 }
@@ -108,7 +108,7 @@ const getBuffer = () => {
   if (globalBuffer && typeof globalBuffer.isBuffer === 'function') {
     return globalBuffer;
   }
-  return BufferPolyfill;
+  return buffer.Buffer;
 };
 
 export const Buffer = getBuffer();

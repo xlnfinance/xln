@@ -8,12 +8,12 @@ import { hmac } from '@noble/hashes/hmac.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { concatBytes } from '@noble/hashes/utils.js';
 import { HDNodeWallet, getIndexedAccountPath, getBytes, keccak256 } from 'ethers';
-import { Buffer as BufferPolyfill } from 'buffer';
+import { Buffer } from 'buffer';
 import * as bip39 from 'bip39';
 
 type RuntimeGlobal = typeof globalThis & {
   Bun?: unknown;
-  Buffer?: typeof BufferPolyfill;
+  Buffer?: typeof Buffer;
 };
 
 type NativeSecp256k1 = {
@@ -106,7 +106,7 @@ const bytesToHex = (bytes: Uint8Array): string =>
 const ensureGlobalBuffer = () => {
   const globalBuffer = (globalThis as RuntimeGlobal).Buffer;
   if (!globalBuffer || typeof globalBuffer.isBuffer !== 'function') {
-    (globalThis as RuntimeGlobal).Buffer = BufferPolyfill;
+    (globalThis as RuntimeGlobal).Buffer = Buffer;
   }
 };
 
