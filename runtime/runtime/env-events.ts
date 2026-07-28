@@ -106,6 +106,64 @@ const queuePendingAuditEvent = (env: RuntimeState, payload: Record<string, unkno
   pending.push(structuredClone(payload));
 };
 
+const appendFrameLog = (
+  env: RuntimeState,
+  entry: Omit<FrameLogEntry, 'id' | 'timestamp'>,
+  cleanLevel: string,
+): void => {
+  const logState = getLogState(env);
+  env.frameLogs.push({
+    id: logState.nextId++,
+    timestamp: env.timestamp,
+    ...entry,
+  });
+  addCleanLog(env, cleanLevel, entry.message);
+};
+
+const queueStructuredAuditEvent = (
+  env: RuntimeState,
+  level: 'info' | 'warn' | 'error',
+  category: LogCategory,
+  message: string,
+  data?: Record<string, unknown>,
+  entityId?: string,
+): void => {
+  queuePendingAuditEvent(env, {
+    level,
+    category,
+    message,
+    entityId,
+    data,
+    runtimeId: env.runtimeId,
+    at: env.timestamp,
+  });
+};
+
+const attachStructuredLogger = (
+  env: RuntimeState,
+  level: 'info' | 'warn' | 'error',
+  cleanLevel: 'INFO' | 'WARN' | 'ERR',
+) => (
+  category: LogCategory,
+  message: string,
+  data?: Record<string, unknown>,
+  entityId?: string,
+): void => {
+  appendFrameLog(env, {
+    level,
+    category,
+    message,
+    ...(entityId && { entityId }),
+    ...(data && { data }),
+  }, cleanLevel);
+
+  if (level === 'warn') console.warn(`[${category}]`, message, data || '');
+  if (level === 'error') console.error(`[${category}]`, message, data || '');
+  if (level !== 'info' || message.startsWith('REB_')) {
+    queueStructuredAuditEvent(env, level, category, message, data, entityId);
+  }
+};
+
 export const flushPendingAuditEvents = (env: RuntimeState): void => {
   const pending = env.runtimeState?.pendingAuditEvents;
   if (!Array.isArray(pending) || pending.length === 0) return;
@@ -402,118 +460,32 @@ export const dropOverlay = (env: RuntimeState, count: number): void => {
  * Called once during env creation (createEmptyEnv).
  */
 export function attachEventEmitters(env: RuntimeState): void {
-  // Helper: Use env.timestamp for deterministic logs
-  const getTimestamp = () => env.timestamp;
-  const logState = getLogState(env);
-
-  // Simple log (like console.log but captured)
   env.log = (message: string) => {
-    const entry: FrameLogEntry = {
-      id: logState.nextId++,
-      timestamp: getTimestamp(),
+    appendFrameLog(env, {
       level: 'info',
       category: 'system',
       message,
-    };
-    env.frameLogs.push(entry);
-    addCleanLog(env, 'LOG', message);
+    }, 'LOG');
   };
 
-  // Structured info log
-  env.info = (category: LogCategory, message: string, data?: Record<string, unknown>, entityId?: string) => {
-    const entry: FrameLogEntry = {
-      id: logState.nextId++,
-      timestamp: getTimestamp(),
-      level: 'info',
-      category,
-      message,
-      ...(entityId && { entityId }),
-      ...(data && { data }),
-    };
-    env.frameLogs.push(entry);
-    addCleanLog(env, 'INFO', message);
-    if (message.startsWith('REB_')) {
-      queuePendingAuditEvent(env, {
-        level: 'info',
-        category,
-        message,
-        entityId,
-        data,
-        runtimeId: env.runtimeId,
-        at: getTimestamp(),
-      });
-    }
-  };
+  env.info = attachStructuredLogger(env, 'info', 'INFO');
+  env.warn = attachStructuredLogger(env, 'warn', 'WARN');
+  env.error = attachStructuredLogger(env, 'error', 'ERR');
 
-  // Structured warning log
-  env.warn = (category: LogCategory, message: string, data?: Record<string, unknown>, entityId?: string) => {
-    const entry: FrameLogEntry = {
-      id: logState.nextId++,
-      timestamp: getTimestamp(),
-      level: 'warn',
-      category,
-      message,
-      ...(entityId && { entityId }),
-      ...(data && { data }),
-    };
-    env.frameLogs.push(entry);
-    addCleanLog(env, 'WARN', message);
-    console.warn(`[${category}]`, message, data || '');
-    queuePendingAuditEvent(env, {
-      level: 'warn',
-      category,
-      message,
-      entityId,
-      data,
-      runtimeId: env.runtimeId,
-      at: getTimestamp(),
-    });
-  };
-
-  // Structured error log
-  env.error = (category: LogCategory, message: string, data?: Record<string, unknown>, entityId?: string) => {
-    const entry: FrameLogEntry = {
-      id: logState.nextId++,
-      timestamp: getTimestamp(),
-      level: 'error',
-      category,
-      message,
-      ...(entityId && { entityId }),
-      ...(data && { data }),
-    };
-    env.frameLogs.push(entry);
-    addCleanLog(env, 'ERR', message);
-    console.error(`[${category}]`, message, data || '');
-    queuePendingAuditEvent(env, {
-      level: 'error',
-      category,
-      message,
-      entityId,
-      data,
-      runtimeId: env.runtimeId,
-      at: getTimestamp(),
-    });
-  };
-
-  // Generic event emission (EVM-style)
   env.emit = (eventName: string, data: Record<string, unknown>) => {
-    const entry: FrameLogEntry = {
-      id: logState.nextId++,
-      timestamp: getTimestamp(),
+    appendFrameLog(env, {
       level: 'info',
       category: 'system',
       message: eventName,
       data,
-    };
-    env.frameLogs.push(entry);
-    addCleanLog(env, 'EVENT', eventName);
+    }, 'EVENT');
     if (HIGH_SIGNAL_EVENTS.has(eventName) || isCriticalMessage(eventName)) {
       queuePendingAuditEvent(env, {
         level: 'event',
         eventName,
         data,
         runtimeId: env.runtimeId,
-        at: getTimestamp(),
+        at: env.timestamp,
       });
     }
   };

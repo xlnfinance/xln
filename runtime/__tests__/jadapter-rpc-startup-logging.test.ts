@@ -42,8 +42,11 @@ test('rpc jadapter startup and watcher lifecycle logs stay structured', () => {
 });
 
 test('runtime dev startup status logs stay structured', () => {
-  const runtime = readFileSync(join(process.cwd(), 'runtime/runtime-core.ts'), 'utf8');
+  const runtime = readFileSync(join(process.cwd(), 'runtime/runtime/composition.ts'), 'utf8');
   const runtimeLoop = readFileSync(join(process.cwd(), 'runtime/runtime/loop.ts'), 'utf8');
+  const runtimeWatchers = readFileSync(join(process.cwd(), 'runtime/runtime/loop-watchers.ts'), 'utf8');
+  const runtimeFailure = readFileSync(join(process.cwd(), 'runtime/runtime/loop-failure.ts'), 'utf8');
+  const runtimeFrameStart = readFileSync(join(process.cwd(), 'runtime/runtime/frame/start.ts'), 'utf8');
   const hubNode = readFileSync(join(process.cwd(), 'runtime/orchestrator/hub-node.ts'), 'utf8');
   const marketMakerNode = readMarketMakerNodeSource();
   const orchestrator = readFileSync(join(process.cwd(), 'runtime/orchestrator/orchestrator.ts'), 'utf8');
@@ -52,16 +55,16 @@ test('runtime dev startup status logs stay structured', () => {
   const localConfig = readFileSync(join(process.cwd(), 'runtime/jadapter/local-config.ts'), 'utf8');
   const logger = readFileSync(join(process.cwd(), 'runtime/infra/logger.ts'), 'utf8');
   const devRunner = readFileSync(join(process.cwd(), 'scripts/dev/run-dev.sh'), 'utf8');
-  const runtimeConsoleLines = runtime
+  const runtimeConsoleLines = runtimeFrameStart
     .split('\n')
     .map((line) => line.trim())
     .filter((line) => line.includes('console.'));
 
   expect(runtime).not.toContain('console.log(`JAdapter watcher started for jReplica');
-  expect(runtimeLoop).toContain("runtimeLog.debug('jadapter_watcher.started'");
+  expect(runtimeWatchers).toContain("watcherLog.debug('started'");
   expect(runtimeLoop).toContain("throw new Error('RUNTIME_DB_CLOSE_LOOP_DRAIN_TIMEOUT')");
   expect(runtimeLoop).toContain("throwSettledErrors(shutdown, 'RUNTIME_DB_CLOSE_QUIESCE_FAILED')");
-  expect(runtimeLoop).toContain("runtimeLog.error('loop.error'");
+  expect(runtimeFailure).toContain("failureLog.error('error'");
   expect(runtimeConsoleLines).toEqual([
     "console.log(`\\n⏸️  FRAME STEPPING: Stopped at frame ${env.height}`);",
     "console.log('═'.repeat(80));",

@@ -2,7 +2,7 @@
  * Stable convenience exports for UI, tooling, and tests.
  *
  * These helpers do not participate in the Runtime frame transition. Keeping
- * them outside runtime-core.ts makes the money-moving path easier to audit.
+ * them outside runtime/runtime/composition.ts makes the money-moving path easier to audit.
  */
 export { entityNeedsPeriodicWake } from './runtime/wake';
 export * from './public-utilities';

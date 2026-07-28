@@ -637,6 +637,37 @@ const preserveAppliedRoutedProvenance = (
     : {}),
 });
 
+const normalizeEntityInputForReplica = (
+  entityInput: RoutedEntityInput,
+  signerId: string,
+): EntityInput => ({
+  entityId: entityInput.entityId,
+  signerId,
+  ...(entityInput.entityTxs ? { entityTxs: entityInput.entityTxs } : {}),
+  ...(entityInput.proposedFrame ? { proposedFrame: entityInput.proposedFrame } : {}),
+  ...(entityInput.hashPrecommitFrame ? { hashPrecommitFrame: entityInput.hashPrecommitFrame } : {}),
+  ...(entityInput.hashPrecommits ? { hashPrecommits: entityInput.hashPrecommits } : {}),
+  ...(entityInput.jPrefixAttestations
+    ? { jPrefixAttestations: entityInput.jPrefixAttestations }
+    : {}),
+  ...(entityInput.leaderTimeoutVote ? { leaderTimeoutVote: entityInput.leaderTimeoutVote } : {}),
+});
+
+const decodeEntityOutputs = (
+  outputs: unknown[],
+  replicaKey: string,
+): RoutedEntityInput[] => outputs.map((output, index) => {
+  try {
+    return decodeRoutedEntityOutput(output);
+  } catch (error) {
+    logError('RUNTIME_TICK', `🚨 CRITICAL FINANCIAL ERROR: Invalid EntityOutput[${index}] from ${replicaKey}!`, {
+      error: (error as Error).message,
+      output,
+    });
+    throw error;
+  }
+});
+
 const applyEntityInputToReplica = async (
   env: RuntimeState,
   entityReplica: EntityReplica,
@@ -662,18 +693,7 @@ const applyEntityInputToReplica = async (
     });
   }
 
-  const normalizedInput: EntityInput = {
-    entityId: entityInput.entityId,
-    signerId: actualSignerId,
-    ...(entityInput.entityTxs ? { entityTxs: entityInput.entityTxs } : {}),
-    ...(entityInput.proposedFrame ? { proposedFrame: entityInput.proposedFrame } : {}),
-    ...(entityInput.hashPrecommitFrame ? { hashPrecommitFrame: entityInput.hashPrecommitFrame } : {}),
-    ...(entityInput.hashPrecommits ? { hashPrecommits: entityInput.hashPrecommits } : {}),
-    ...(entityInput.jPrefixAttestations
-      ? { jPrefixAttestations: entityInput.jPrefixAttestations }
-      : {}),
-    ...(entityInput.leaderTimeoutVote ? { leaderTimeoutVote: entityInput.leaderTimeoutVote } : {}),
-  };
+  const normalizedInput = normalizeEntityInputForReplica(entityInput, actualSignerId);
   if (isReplay) {
     entityInputLog.debug('replay.apply_input', {
       replica: shortId(replicaKey, 10),
@@ -716,25 +736,12 @@ const applyEntityInputToReplica = async (
   } : entityReplica;
   const entityFrameCommitted = didCommitEntityFrame(entityReplica, nextReplica, outcome);
 
-  const routedOutputs: RoutedEntityInput[] = [];
-  outputs.forEach((output, index) => {
-    try {
-      routedOutputs.push(decodeRoutedEntityOutput(output));
-    } catch (error) {
-      logError('RUNTIME_TICK', `🚨 CRITICAL FINANCIAL ERROR: Invalid EntityOutput[${index}] from ${replicaKey}!`, {
-        error: (error as Error).message,
-        output,
-      });
-      throw error;
-    }
-  });
-
   return {
     outcome,
     appliedInput,
     entityFrameCommitted,
     nextReplica,
-    outputs: routedOutputs,
+    outputs: decodeEntityOutputs(outputs, replicaKey),
     jOutputs: jOutputs || [],
   };
 };

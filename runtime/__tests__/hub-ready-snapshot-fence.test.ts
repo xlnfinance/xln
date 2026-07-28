@@ -12,21 +12,29 @@ const readMarketMakerNodeSource = (): string => [
 ].map(file => readFileSync(join(repoRoot, 'runtime/orchestrator', file), 'utf8')).join('\n');
 
 test('bootstrap uses the canonical WAL-before-dispatch commit path', () => {
-  const runtime = readFileSync(join(repoRoot, 'runtime/runtime-core.ts'), 'utf8');
+  const process = readFileSync(join(repoRoot, 'runtime/runtime/frame/process.ts'), 'utf8');
+  const postCommit = readFileSync(
+    join(repoRoot, 'runtime/runtime/frame/post-commit.ts'),
+    'utf8',
+  );
   const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
   const mmNode = readMarketMakerNodeSource();
   const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
 
-  const plan = runtime.indexOf('applyDeterministicRuntimeOutputPlan(env, entityOutbox, outputRoutingDeps)');
-  const commit = runtime.indexOf('// === COMMIT POINT: persist finalized R-frame ===');
-  const save = runtime.indexOf('const saveOutcome = await saveEnvToDB(', commit);
-  const recoveryBarrier = runtime.indexOf('const recoveryBarrier = state.recoveryBackupBarrier;', save);
-  const dispatch = runtime.indexOf('dispatchEntityOutputs(env, remoteOutputs', recoveryBarrier);
+  const plan = process.indexOf('const outputPlan = planRuntimeFrameOutputs(');
+  const commit = process.indexOf('const commit = await commitRuntimeFrame(', plan);
+  const effects = process.indexOf('await runCommittedRuntimeEffects(', commit);
+  const save = process.indexOf('const outcome = await deps.storage.saveEnvToDB(');
+  const publish = process.indexOf('return publishCommittedRuntimeFrame(', save);
+  const recoveryBarrier = postCommit.indexOf('await runCommittedRecoveryBarrier(');
+  const dispatch = postCommit.indexOf('await dispatchCommittedEntityOutputs(', recoveryBarrier);
 
   expect(plan).toBeGreaterThanOrEqual(0);
   expect(commit).toBeGreaterThan(plan);
-  expect(save).toBeGreaterThan(commit);
-  expect(recoveryBarrier).toBeGreaterThan(save);
+  expect(effects).toBeGreaterThan(commit);
+  expect(save).toBeGreaterThanOrEqual(0);
+  expect(publish).toBeGreaterThan(save);
+  expect(recoveryBarrier).toBeGreaterThanOrEqual(0);
   expect(dispatch).toBeGreaterThan(recoveryBarrier);
 
   for (const source of [hubNode, mmNode, orchestrator]) {

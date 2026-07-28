@@ -448,6 +448,96 @@ const closePreparedAdapter = async (
   if (primaryError !== undefined) throw primaryError;
 };
 
+const buildJurisdictionImportAdapterConfig = (
+  request: JurisdictionImportRequest,
+  isBrowserVM: boolean,
+): JAdapterConfig => {
+  const config: JAdapterConfig = {
+    mode: isBrowserVM ? 'browservm' : 'rpc',
+    chainId: request.chainId,
+    ...(!isBrowserVM ? { watchOnly: true } : {}),
+  };
+  if (isBrowserVM) return config;
+
+  const rpcUrl = request.rpcs[0];
+  if (!rpcUrl) throw new Error(`IMPORT_J_RPC_MISSING:${request.name}`);
+  const contracts = normalizeContracts(request.contracts, true)!;
+  config.rpcUrl = rpcUrl;
+  config.fromReplica = {
+    name: request.name,
+    blockNumber: 0n,
+    stateRoot: null,
+    mempool: [],
+    blockDelayMs: 300,
+    lastBlockTimestamp: 0,
+    position: { x: 0, y: 50, z: 0 },
+    depositoryAddress: contracts.depository,
+    entityProviderAddress: contracts.entityProvider,
+    contracts,
+    rpcs: request.rpcs,
+    chainId: request.chainId,
+    ...(request.entityProviderDeploymentBlock !== undefined
+      ? { entityProviderDeploymentBlock: request.entityProviderDeploymentBlock }
+      : {}),
+  };
+  return config;
+};
+
+const requireWatcherConfirmationDepth = (
+  adapter: JAdapter,
+  request: JurisdictionImportRequest,
+): number => {
+  const depth = adapter.getFinalityDepth?.();
+  if (depth === undefined || !Number.isSafeInteger(depth) || depth < 0) {
+    throw new Error(`IMPORT_J_FINALITY_POLICY_MISSING:${request.name}`);
+  }
+  return depth;
+};
+
+const buildPreparedJurisdictionImportResult = async (
+  pending: PendingJurisdictionImport,
+  adapter: JAdapter,
+  isBrowserVM: boolean,
+): Promise<JurisdictionImportResult> => {
+  const request = pending.request;
+  const contracts = assertAdapterAddresses(adapter, request);
+  const defaultDisputeDelayBlocks = await ensureLocalDisputeDelayConfigured(adapter, request.name);
+  const watcherConfirmationDepth = requireWatcherConfirmationDepth(adapter, request);
+  const stateRootBytes = adapter.captureStateRoot ? await adapter.captureStateRoot() : null;
+  if (isBrowserVM && !(stateRootBytes instanceof Uint8Array && stateRootBytes.length === 32)) {
+    throw new Error(`IMPORT_J_STATE_ROOT_UNAVAILABLE:${request.name}`);
+  }
+  if (!isBrowserVM && stateRootBytes !== null) {
+    throw new Error(`IMPORT_J_RPC_STATE_ROOT_UNEXPECTED:${request.name}`);
+  }
+  const entityProviderDeploymentBlock = adapter.entityProviderDeploymentBlock;
+  if (!Number.isSafeInteger(entityProviderDeploymentBlock) || entityProviderDeploymentBlock < 1) {
+    throw new Error(`IMPORT_J_ENTITY_PROVIDER_DEPLOYMENT_BLOCK_INVALID:${request.name}`);
+  }
+  const browserVMState = isBrowserVM ? await adapter.dumpState() : undefined;
+  if (isBrowserVM && (!browserVMState || typeof browserVMState === 'string')) {
+    throw new Error(`IMPORT_J_BROWSERVM_STATE_UNAVAILABLE:${request.name}`);
+  }
+  return {
+    importId: pending.importId,
+    requestHash: pending.requestHash,
+    name: request.name,
+    chainId: request.chainId,
+    ticker: request.ticker,
+    rpcs: [...request.rpcs],
+    ...(request.blockTimeMs ? { blockTimeMs: request.blockTimeMs } : {}),
+    blockNumber: (await resolveInitialBlockNumber(adapter, request)).toString(),
+    stateRoot: stateRootBytes ? ethers.hexlify(stateRootBytes) : null,
+    defaultDisputeDelayBlocks,
+    watcherConfirmationDepth,
+    entityProviderDeploymentBlock,
+    contracts,
+    ...(browserVMState && typeof browserVMState !== 'string'
+      ? { browserVMState: structuredClone(browserVMState) }
+      : {}),
+  };
+};
+
 export const prepareJurisdictionImportResult = async (
   pending: PendingJurisdictionImport,
 ): Promise<JurisdictionImportResult> => {
@@ -458,34 +548,7 @@ export const prepareJurisdictionImportResult = async (
     chainId: request.chainId,
     mode: isBrowserVM ? 'browservm' : 'rpc',
   });
-  const adapterConfig: JAdapterConfig = {
-    mode: isBrowserVM ? 'browservm' : 'rpc',
-    chainId: request.chainId,
-    ...(!isBrowserVM ? { watchOnly: true } : {}),
-  };
-  if (!isBrowserVM) {
-    const rpcUrl = request.rpcs[0];
-    if (!rpcUrl) throw new Error(`IMPORT_J_RPC_MISSING:${request.name}`);
-    const contracts = normalizeContracts(request.contracts, true)!;
-    adapterConfig.rpcUrl = rpcUrl;
-    adapterConfig.fromReplica = {
-      name: request.name,
-      blockNumber: 0n,
-      stateRoot: null,
-      mempool: [],
-      blockDelayMs: 300,
-      lastBlockTimestamp: 0,
-      position: { x: 0, y: 50, z: 0 },
-      depositoryAddress: contracts.depository,
-      entityProviderAddress: contracts.entityProvider,
-      contracts,
-      rpcs: request.rpcs,
-      chainId: request.chainId,
-      ...(request.entityProviderDeploymentBlock !== undefined
-        ? { entityProviderDeploymentBlock: request.entityProviderDeploymentBlock }
-        : {}),
-    };
-  }
+  const adapterConfig = buildJurisdictionImportAdapterConfig(request, isBrowserVM);
   const adapter = await createJAdapterWithRetry(adapterConfig, {
     context: `importJ:${request.name}`,
     attempts: typeof window !== 'undefined' ? 5 : 3,
@@ -502,47 +565,7 @@ export const prepareJurisdictionImportResult = async (
   let result: JurisdictionImportResult | undefined;
   let primaryError: unknown;
   try {
-    const contracts = assertAdapterAddresses(adapter, request);
-    const defaultDisputeDelayBlocks = await ensureLocalDisputeDelayConfigured(adapter, request.name);
-    const watcherConfirmationDepth = adapter.getFinalityDepth?.();
-    if (
-      watcherConfirmationDepth === undefined ||
-      !Number.isSafeInteger(watcherConfirmationDepth) ||
-      watcherConfirmationDepth < 0
-    ) throw new Error(`IMPORT_J_FINALITY_POLICY_MISSING:${request.name}`);
-    const stateRootBytes = adapter.captureStateRoot ? await adapter.captureStateRoot() : null;
-    if (isBrowserVM && !(stateRootBytes instanceof Uint8Array && stateRootBytes.length === 32)) {
-      throw new Error(`IMPORT_J_STATE_ROOT_UNAVAILABLE:${request.name}`);
-    }
-    if (!isBrowserVM && stateRootBytes !== null) {
-      throw new Error(`IMPORT_J_RPC_STATE_ROOT_UNEXPECTED:${request.name}`);
-    }
-    const entityProviderDeploymentBlock = adapter.entityProviderDeploymentBlock;
-    if (!Number.isSafeInteger(entityProviderDeploymentBlock) || entityProviderDeploymentBlock < 1) {
-      throw new Error(`IMPORT_J_ENTITY_PROVIDER_DEPLOYMENT_BLOCK_INVALID:${request.name}`);
-    }
-    const browserVMState = isBrowserVM ? await adapter.dumpState() : undefined;
-    if (isBrowserVM && (!browserVMState || typeof browserVMState === 'string')) {
-      throw new Error(`IMPORT_J_BROWSERVM_STATE_UNAVAILABLE:${request.name}`);
-    }
-    result = {
-      importId: pending.importId,
-      requestHash: pending.requestHash,
-      name: request.name,
-      chainId: request.chainId,
-      ticker: request.ticker,
-      rpcs: [...request.rpcs],
-      ...(request.blockTimeMs ? { blockTimeMs: request.blockTimeMs } : {}),
-      blockNumber: (await resolveInitialBlockNumber(adapter, request)).toString(),
-      stateRoot: stateRootBytes ? ethers.hexlify(stateRootBytes) : null,
-      defaultDisputeDelayBlocks,
-      watcherConfirmationDepth,
-      entityProviderDeploymentBlock,
-      contracts,
-      ...(browserVMState && typeof browserVMState !== 'string'
-        ? { browserVMState: structuredClone(browserVMState) }
-        : {}),
-    };
+    result = await buildPreparedJurisdictionImportResult(pending, adapter, isBrowserVM);
   } catch (error) {
     primaryError = error;
   }

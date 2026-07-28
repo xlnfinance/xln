@@ -169,6 +169,139 @@ const logAtomicCrossJCommit = (
   });
 };
 
+type PreparedRuntimeIngress = ReturnType<typeof prepareRuntimeInputIngress>;
+type AppliedEntityBatch = Awaited<ReturnType<typeof applyMergedEntityInputs>>;
+type PreparedAtomicCrossJ = Awaited<ReturnType<typeof prepareAtomicCrossJAccountInputs>>;
+
+const applyRuntimeEntityBatch = async (
+  env: RuntimeState,
+  ingress: PreparedRuntimeIngress,
+  mergedInputs: RoutedEntityInput[],
+  isReplay: boolean,
+  deps: RuntimeInputReducerDeps,
+  profile: ApplyProfiler,
+): Promise<{ prepared: PreparedAtomicCrossJ; batch: AppliedEntityBatch }> => {
+  const lineage = createLineageRefresh(env);
+  const runtimeJOutbox = await applyRuntimeTransactions(
+    env,
+    ingress.runtimeTxs,
+    isReplay,
+    lineage,
+  );
+  profile.mark('runtimeTxs');
+  profile.mark('lineage');
+
+  const initialJOutbox = [...ingress.jOutbox, ...runtimeJOutbox];
+  const routingDeps = deps.getRoutingDeps();
+  const prepared = await prepareAtomicCrossJAccountInputs(
+    env,
+    mergedInputs,
+    initialJOutbox,
+    isReplay,
+    routingDeps,
+  );
+  profile.mark('atomicCrossJPreflight');
+  const batch = await applyMergedEntityInputs(env, prepared.inputs, initialJOutbox, {
+    isReplay,
+    routingDeps,
+    beforeEntityApply: lineage.beforeEntityApply,
+  });
+  lineage.finalize();
+  logAtomicCrossJCommit(prepared, batch);
+  profile.mark('entityApply');
+  return { prepared, batch };
+};
+
+const finalizeRuntimeInputApply = (
+  env: RuntimeState,
+  runtimeInput: RuntimeInput,
+  ingress: PreparedRuntimeIngress,
+  prepared: PreparedAtomicCrossJ,
+  batch: AppliedEntityBatch,
+  isReplay: boolean,
+  deps: RuntimeInputReducerDeps,
+  profile: ApplyProfiler,
+): AppliedRuntimeInput => {
+  if (atomicCrossJPairIndexesThatDidNotCommit(prepared.pairs, batch.inputOutcomes).size) {
+    throw new Error('RUNTIME_CROSS_J_ACCOUNT_PAIR_COMMIT_DIVERGED_FROM_PREFLIGHT');
+  }
+  markCommittedAtomicCrossJAckOutputs(batch.entityOutbox, prepared.pairs);
+  const commits = commitRuntimeReliableIngress(
+    env,
+    ingress.entityInputs,
+    batch.appliedEntityInputs,
+    isReplay,
+    deps,
+  );
+  profile.mark('reliableCommit');
+  profile.mark('reliableLocalReceipts');
+  profile.mark('reliableRelease');
+
+  advanceAppliedRuntimeFrame(
+    env,
+    runtimeInput,
+    ingress.runtimeTxs,
+    batch.appliedEntityInputs,
+    batch.entityFrameCommitted,
+    batch.entityOutbox,
+    batch.jOutbox,
+    commits.length > 0,
+  );
+  profile.mark('finalize');
+  const appliedRuntimeInput = buildAppliedRuntimeInput(
+    env,
+    runtimeInput,
+    ingress.runtimeTxs,
+    ingress.entityInputs,
+    batch.appliedEntityInputs,
+    commits,
+  );
+  profile.mark('durableReceiptInputs');
+  return {
+    entityOutbox: batch.entityOutbox,
+    mergedInputs: prepared.inputs,
+    jOutbox: batch.jOutbox,
+    appliedRuntimeInput,
+    reliableIngressCommits: commits,
+    immediateReliableReceipts: ingress.immediateReliableReceipts,
+  };
+};
+
+const applyRuntimeInputPhases = async (
+  env: RuntimeState,
+  runtimeInput: RuntimeInput,
+  deps: RuntimeInputReducerDeps,
+  profile: ApplyProfiler,
+  isReplay: boolean,
+): Promise<{ result: AppliedRuntimeInput; profiledRuntimeTxs: RuntimeTx[] }> => {
+  const ingress = prepareRuntimeInputIngress(env, runtimeInput, isReplay, deps);
+  const mergedInputs = mergeEntityInputs(ingress.entityInputs, input =>
+    hasVerifiedEntityCommitPrecertificate(env, input));
+  profile.mark('validateMerge');
+  if (runtimeInput.reliableReceipts?.length) {
+    applyReliableDeliveryReceipts(env, runtimeInput.reliableReceipts);
+  }
+  const { prepared, batch } = await applyRuntimeEntityBatch(
+    env,
+    ingress,
+    mergedInputs,
+    isReplay,
+    deps,
+    profile,
+  );
+  const result = finalizeRuntimeInputApply(
+    env,
+    runtimeInput,
+    ingress,
+    prepared,
+    batch,
+    isReplay,
+    deps,
+    profile,
+  );
+  return { result, profiledRuntimeTxs: ingress.runtimeTxs };
+};
+
 export const createRuntimeInputReducer = (
   deps: RuntimeInputReducerDeps,
 ) => async (
@@ -187,87 +320,14 @@ export const createRuntimeInputReducer = (
         entityInputs: runtimeInput.entityInputs.length,
       });
     }
-    const ingress = prepareRuntimeInputIngress(env, runtimeInput, isReplay, deps);
-    const mergedInputs = mergeEntityInputs(ingress.entityInputs, input =>
-      hasVerifiedEntityCommitPrecertificate(env, input));
-    profile.mark('validateMerge');
-    if (runtimeInput.reliableReceipts?.length) {
-      applyReliableDeliveryReceipts(env, runtimeInput.reliableReceipts);
-    }
-
-    const lineage = createLineageRefresh(env);
-    const runtimeJOutbox = await applyRuntimeTransactions(
+    const { result, profiledRuntimeTxs } = await applyRuntimeInputPhases(
       env,
-      ingress.runtimeTxs,
-      isReplay,
-      lineage,
-    );
-    profile.mark('runtimeTxs');
-    profile.mark('lineage');
-
-    const initialJOutbox = [...ingress.jOutbox, ...runtimeJOutbox];
-    const routingDeps = deps.getRoutingDeps();
-    const prepared = await prepareAtomicCrossJAccountInputs(
-      env,
-      mergedInputs,
-      initialJOutbox,
-      isReplay,
-      routingDeps,
-    );
-    profile.mark('atomicCrossJPreflight');
-    const batch = await applyMergedEntityInputs(env, prepared.inputs, initialJOutbox, {
-      isReplay,
-      routingDeps,
-      beforeEntityApply: lineage.beforeEntityApply,
-    });
-    lineage.finalize();
-    logAtomicCrossJCommit(prepared, batch);
-    profile.mark('entityApply');
-
-    if (atomicCrossJPairIndexesThatDidNotCommit(prepared.pairs, batch.inputOutcomes).size) {
-      throw new Error('RUNTIME_CROSS_J_ACCOUNT_PAIR_COMMIT_DIVERGED_FROM_PREFLIGHT');
-    }
-    markCommittedAtomicCrossJAckOutputs(batch.entityOutbox, prepared.pairs);
-    const commits = commitRuntimeReliableIngress(
-      env,
-      ingress.entityInputs,
-      batch.appliedEntityInputs,
-      isReplay,
+      runtimeInput,
       deps,
+      profile,
+      isReplay,
     );
-    profile.mark('reliableCommit');
-    profile.mark('reliableLocalReceipts');
-    profile.mark('reliableRelease');
-
-    advanceAppliedRuntimeFrame(
-      env,
-      runtimeInput,
-      ingress.runtimeTxs,
-      batch.appliedEntityInputs,
-      batch.entityFrameCommitted,
-      batch.entityOutbox,
-      batch.jOutbox,
-      commits.length > 0,
-    );
-    profile.mark('finalize');
-    const appliedRuntimeInput = buildAppliedRuntimeInput(
-      env,
-      runtimeInput,
-      ingress.runtimeTxs,
-      ingress.entityInputs,
-      batch.appliedEntityInputs,
-      commits,
-    );
-    profile.mark('durableReceiptInputs');
-    const result: AppliedRuntimeInput = {
-      entityOutbox: batch.entityOutbox,
-      mergedInputs: prepared.inputs,
-      jOutbox: batch.jOutbox,
-      appliedRuntimeInput,
-      reliableIngressCommits: commits,
-      immediateReliableReceipts: ingress.immediateReliableReceipts,
-    };
-    profile.finish(env, result, ingress.runtimeTxs);
+    profile.finish(env, result, profiledRuntimeTxs);
     return result;
   } catch (error) {
     if (env.strictScenario) throw error;

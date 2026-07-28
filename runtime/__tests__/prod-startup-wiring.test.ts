@@ -154,19 +154,14 @@ describe('production startup wiring', () => {
   });
 
   test('canonical runtime commit persists the durable outbox before backup and dispatch', () => {
-    const runtime = readFileSync(join(repoRoot, 'runtime/runtime-core.ts'), 'utf8');
+    const process = readFileSync(join(repoRoot, 'runtime/runtime/frame/process.ts'), 'utf8');
     const recovery = readFileSync(join(repoRoot, 'runtime/recovery/restore.ts'), 'utf8');
     const postCommit = readFileSync(
       join(repoRoot, 'runtime/runtime/frame/post-commit.ts'),
       'utf8',
     );
     const durableOutbox = recovery.indexOf('env.pendingNetworkOutputs = buildPendingNetworkOutputs([');
-    const process = extractSourceBlock(
-      runtime,
-      'export const processRuntime = async',
-      'const runtimeStorageApi =',
-    );
-    const save = runtime.indexOf('const outcome = await saveEnvToDB(');
+    const save = process.indexOf('const outcome = await deps.storage.saveEnvToDB(');
     const plan = process.indexOf('const outputPlan = planRuntimeFrameOutputs(');
     const commit = process.indexOf('const commit = await commitRuntimeFrame(', plan);
     const effects = process.indexOf('await runCommittedRuntimeEffects(', commit);
@@ -771,7 +766,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain(
       'if (hasJurisdictionReplica(env, jurisdiction) && hasLiveJurisdictionAdapter(env, jurisdiction)) return;',
     );
-    const runtimeSource = readFileSync(join(repoRoot, 'runtime/runtime-core.ts'), 'utf8');
+    const runtimeSource = readFileSync(join(repoRoot, 'runtime/runtime/composition.ts'), 'utf8');
     const frameDispatchSource = readFileSync(
       join(repoRoot, 'runtime/runtime/frame/dispatch.ts'),
       'utf8',
@@ -1111,8 +1106,7 @@ describe('production startup wiring', () => {
   test('prod runtime child keeps merge debug output structured and gated', () => {
     const mergeSource = readFileSync(join(repoRoot, 'runtime/entity/consensus/input-merge.ts'), 'utf8');
     expect(mergeSource).toContain("const entityInputMergeLog = createStructuredLogger('entity.input.merge');");
-    expect(mergeSource).toContain("entityInputMergeLog.debug('precommits.merge'");
-    expect(mergeSource).toContain("entityInputMergeLog.debug('input.merged'");
+    expect(mergeSource).toContain("entityInputMergeLog.warn('frame.conflict'");
     expect(mergeSource).not.toContain('console.');
   });
 
@@ -1214,7 +1208,7 @@ describe('production startup wiring', () => {
   });
 
   test('managed runtime teardown stops J-event producers before draining runtime and network IO', () => {
-    const runtimeMain = readFileSync(join(repoRoot, 'runtime/runtime-core.ts'), 'utf8');
+    const runtimeMain = readFileSync(join(repoRoot, 'runtime/runtime/composition.ts'), 'utf8');
     const runtimeLoop = readFileSync(join(repoRoot, 'runtime/runtime/loop.ts'), 'utf8');
     const runtimeWatchers = readFileSync(join(repoRoot, 'runtime/runtime/loop-watchers.ts'), 'utf8');
     const nodeQuiesce = readFileSync(join(repoRoot, 'runtime/orchestrator/node-runtime-quiesce.ts'), 'utf8');

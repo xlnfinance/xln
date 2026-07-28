@@ -529,61 +529,68 @@ const collectCrossJAdmissionCandidates = (
   });
 });
 
-/**
- * Opening and closing both cross-j legs are atomic Runtime cohorts. Proposals
- * and ACKs must carry the exact source/target pair from one source Runtime
- * frame; a standalone monetary leg is dropped before Account consensus.
- */
-export const selectMatchedCrossJAccountInputPairs = (
-  env: RuntimeState,
+const crossJAdmissionCohortKey = (
+  input: RoutedEntityInput,
+  phase: 'proposal' | 'ack',
+  pairKey: string,
+): string => {
+  const frame = input.sourceRuntimeFrame;
+  return `${phase}\u0000${pairKey}\u0000${admissionOriginKey(input)}` +
+    `\u0000${frame?.height ?? ''}\u0000${frame?.timestamp ?? ''}`;
+};
+
+const collectAtomicCrossJGroups = (
   inputs: readonly RoutedEntityInput[],
-): CrossJAccountInputPairSelection => {
-  const candidates = collectCrossJAdmissionCandidates(env, inputs);
-  const cohortKey = (input: RoutedEntityInput, phase: 'proposal' | 'ack', pairKey: string): string => {
-    const frame = input.sourceRuntimeFrame;
-    return `${phase}\u0000${pairKey}\u0000${admissionOriginKey(input)}\u0000${frame?.height ?? ''}\u0000${frame?.timestamp ?? ''}`;
-  };
-  const atomicGroups = new Map<string, number[]>();
+): Map<string, number[]> => {
+  const groups = new Map<string, number[]>();
   for (const [inputIndex, input] of inputs.entries()) {
     const marker = input.atomicCrossJurisdictionPair;
     if (!marker) continue;
-    const key = cohortKey(input, marker.phase, marker.pairKey);
-    const group = atomicGroups.get(key) ?? [];
+    const key = crossJAdmissionCohortKey(input, marker.phase, marker.pairKey);
+    const group = groups.get(key) ?? [];
     group.push(inputIndex);
-    atomicGroups.set(key, group);
+    groups.set(key, group);
   }
-  if (candidates.length === 0 && atomicGroups.size === 0) {
-    return { inputs: [...inputs], pairs: [], droppedInputIndexes: [] };
-  }
+  return groups;
+};
 
+const groupUncommittedCrossJCandidates = (
+  candidates: readonly CrossJAdmissionFrameCandidate[],
+  inputs: readonly RoutedEntityInput[],
+): {
+  candidates: CrossJAdmissionFrameCandidate[];
+  byCohort: Map<string, CrossJAdmissionFrameCandidate[]>;
+  invalidIndexes: Set<number>;
+} => {
   // A byte-exact Account frame already present in durable state is transport
-  // replay, not a new monetary leg. Let bilateral consensus emit its missing
-  // ACK independently; requiring the sibling again would turn packet loss into
-  // an alert/retry loop after a successful atomic commit.
-  const uncommittedCandidates = candidates.filter(candidate => !candidate.alreadyCommitted);
-  const byKey = new Map<string, CrossJAdmissionFrameCandidate[]>();
-  for (const candidate of uncommittedCandidates) {
-    // pairKey binds economics; the authenticated transport frame binds one
-    // delivery attempt. Combining retries by pairKey alone turns two valid
-    // two-leg cohorts into one invalid four-leg cohort.
+  // replay. Its missing ACK may be emitted without receiving its sibling again.
+  const uncommitted = candidates.filter(candidate => !candidate.alreadyCommitted);
+  const byCohort = new Map<string, CrossJAdmissionFrameCandidate[]>();
+  const counts = new Map<number, number>();
+  for (const candidate of uncommitted) {
     const input = inputs[candidate.inputIndex]!;
-    const key = cohortKey(input, candidate.phase, candidate.pairKey);
-    const group = byKey.get(key) ?? [];
+    const key = crossJAdmissionCohortKey(input, candidate.phase, candidate.pairKey);
+    const group = byCohort.get(key) ?? [];
     group.push(candidate);
-    byKey.set(key, group);
+    byCohort.set(key, group);
+    counts.set(candidate.inputIndex, (counts.get(candidate.inputIndex) ?? 0) + 1);
   }
-  const candidateCounts = new Map<number, number>();
-  for (const candidate of uncommittedCandidates) {
-    candidateCounts.set(candidate.inputIndex, (candidateCounts.get(candidate.inputIndex) ?? 0) + 1);
-  }
-  const invalidIndexes = new Set([...candidateCounts]
+  const invalidIndexes = new Set([...counts]
     .filter(([, count]) => count !== 1)
     .map(([inputIndex]) => inputIndex));
-  uncommittedCandidates
+  uncommitted
     .filter(candidate => !candidate.valid)
     .forEach(candidate => invalidIndexes.add(candidate.inputIndex));
+  return { candidates: uncommitted, byCohort, invalidIndexes };
+};
+
+const matchCrossJCandidateGroups = (
+  groups: Iterable<CrossJAdmissionFrameCandidate[]>,
+  inputs: readonly RoutedEntityInput[],
+  invalidIndexes: Set<number>,
+): CrossJAccountInputPair[] => {
   const pairs: CrossJAccountInputPair[] = [];
-  for (const group of byKey.values()) {
+  for (const group of groups) {
     const groupIndexes = new Set(group.map(candidate => candidate.inputIndex));
     if (
       group.length !== 2 ||
@@ -621,28 +628,63 @@ export const selectMatchedCrossJAccountInputPairs = (
       },
     });
   }
-  const allCandidateIndexes = new Set(uncommittedCandidates.map(candidate => candidate.inputIndex));
+  return pairs;
+};
+
+const findInvalidAtomicCrossJIndexes = (
+  atomicGroups: Iterable<number[]>,
+  committedIndexes: ReadonlySet<number>,
+  pairs: readonly CrossJAccountInputPair[],
+): Set<number> => {
+  const invalid = new Set<number>();
+  for (const group of atomicGroups) {
+    const allCommitted = group.length === 2 &&
+      group.every(inputIndex => committedIndexes.has(inputIndex));
+    const exactPairExists = group.length === 2 && pairs.some(pair =>
+      group.includes(pair.sourceInputIndex) && group.includes(pair.targetInputIndex));
+    // The authenticated envelope marker survives even when a corrupt ACK no
+    // longer resolves to pending state. It must not escape the atomic gate.
+    if (!allCommitted && !exactPairExists) {
+      group.forEach(inputIndex => invalid.add(inputIndex));
+    }
+  }
+  return invalid;
+};
+
+/**
+ * Opening and closing both cross-j legs are atomic Runtime cohorts. Proposals
+ * and ACKs must carry the exact source/target pair from one source Runtime
+ * frame; a standalone monetary leg is dropped before Account consensus.
+ */
+export const selectMatchedCrossJAccountInputPairs = (
+  env: RuntimeState,
+  inputs: readonly RoutedEntityInput[],
+): CrossJAccountInputPairSelection => {
+  const candidates = collectCrossJAdmissionCandidates(env, inputs);
+  const atomicGroups = collectAtomicCrossJGroups(inputs);
+  if (candidates.length === 0 && atomicGroups.size === 0) {
+    return { inputs: [...inputs], pairs: [], droppedInputIndexes: [] };
+  }
+
+  const grouped = groupUncommittedCrossJCandidates(candidates, inputs);
+  const pairs = matchCrossJCandidateGroups(
+    grouped.byCohort.values(),
+    inputs,
+    grouped.invalidIndexes,
+  );
+  const allCandidateIndexes = new Set(grouped.candidates.map(candidate => candidate.inputIndex));
   const pairedIndexes = new Set(pairs.flatMap(pair => [pair.sourceInputIndex, pair.targetInputIndex]));
   const committedCandidateIndexes = new Set(candidates
     .filter(candidate => candidate.alreadyCommitted)
     .map(candidate => candidate.inputIndex));
-  const atomicInvalidIndexes = new Set<number>();
-  for (const groupIndexes of atomicGroups.values()) {
-    const allAlreadyCommitted = groupIndexes.length === 2 &&
-      groupIndexes.every(inputIndex => committedCandidateIndexes.has(inputIndex));
-    const exactPairExists = groupIndexes.length === 2 && pairs.some(pair =>
-      groupIndexes.includes(pair.sourceInputIndex) &&
-      groupIndexes.includes(pair.targetInputIndex));
-    // The authenticated envelope marker survives even when a corrupt ACK no
-    // longer resolves to pending state. Treating that ACK as ordinary traffic
-    // would let one leg escape the atomic scratch-state gate.
-    if (!allAlreadyCommitted && !exactPairExists) {
-      groupIndexes.forEach(inputIndex => atomicInvalidIndexes.add(inputIndex));
-    }
-  }
+  const atomicInvalidIndexes = findInvalidAtomicCrossJIndexes(
+    atomicGroups.values(),
+    committedCandidateIndexes,
+    pairs,
+  );
   const droppedInputIndexes = [...new Set([
     ...[...allCandidateIndexes]
-      .filter(inputIndex => invalidIndexes.has(inputIndex) || !pairedIndexes.has(inputIndex)),
+      .filter(inputIndex => grouped.invalidIndexes.has(inputIndex) || !pairedIndexes.has(inputIndex)),
     ...atomicInvalidIndexes,
   ])].sort((left, right) => left - right);
   const dropped = new Set(droppedInputIndexes);
@@ -780,101 +822,53 @@ export const collectCrossJurisdictionRemoteEntityHints = (
   return [...hints];
 };
 
-export const validateInboundP2PEntityInput = (
+type InboundEntityContext = {
+  targetEntityId: string;
+  txTypes: string;
+  hasTransactions: boolean;
+};
+
+const inboundEntityContext = (input: RoutedEntityInput): InboundEntityContext => ({
+  targetEntityId: String(input.entityId || '').toLowerCase(),
+  txTypes: input.entityTxs?.map(tx => tx.type).join(',') || 'none',
+  hasTransactions: (input.entityTxs?.length ?? 0) > 0,
+});
+
+const rejectUnavailableInboundTarget = (
+  env: RuntimeState,
+  input: RoutedEntityInput,
+  code: string,
+  payload: Record<string, unknown>,
+  context: InboundEntityContext,
+  transactionalLevel: 'error' | 'info' = 'error',
+): RuntimeInboundEntityInputValidation => {
+  if (context.hasTransactions) {
+    env[transactionalLevel]?.('network', code, payload, input.entityId);
+    throw new Error(
+      `${code}: entity=${input.entityId} signer=${input.signerId} txTypes=${context.txTypes}`,
+    );
+  }
+  env.warn('network', code, payload, input.entityId);
+  return { kind: 'ignored' };
+};
+
+const findInboundTargetReplica = (
+  env: RuntimeState,
+  input: RoutedEntityInput,
+): EntityReplica | undefined => {
+  const entityId = normalizeEntityKey(input.entityId);
+  const signerId = normalizeEntityKey(input.signerId);
+  return [...env.eReplicas.values()].find(replica =>
+    normalizeEntityKey(replica.entityId) === entityId &&
+    normalizeEntityKey(replica.signerId) === signerId);
+};
+
+const validateInboundEntityCommands = (
   env: RuntimeState,
   from: string,
   input: RoutedEntityInput,
-  deps: RuntimeEntityRoutingDeps,
-  options: RuntimeInboundEntityInputOptions = {},
-): RuntimeInboundEntityInputValidation => {
-  const txTypes = input.entityTxs?.map(tx => tx.type).join(',') || 'none';
-  const targetEntityId = String(input.entityId || '').toLowerCase();
-  const localReplicaExists = Array.from(env.eReplicas.keys()).some(key => {
-    const [entityKey] = String(key).split(':');
-    return String(entityKey || '').toLowerCase() === targetEntityId;
-  });
-  if (!localReplicaExists) {
-    const payload = {
-      fromRuntimeId: from,
-      entityId: input.entityId,
-      txTypes,
-    };
-    if ((input.entityTxs?.length ?? 0) > 0) {
-      env.error?.('network', 'INBOUND_ENTITY_UNKNOWN_TARGET', payload, input.entityId);
-      throw new Error(
-        `INBOUND_ENTITY_UNKNOWN_TARGET: entity=${input.entityId} signer=${input.signerId} txTypes=${txTypes}`,
-      );
-    }
-    env.warn('network', 'INBOUND_ENTITY_UNKNOWN_TARGET', payload, input.entityId);
-    return { kind: 'ignored' };
-  }
-  if (!deps.hasLocalSignerForEntitySigner(env, input.entityId, input.signerId)) {
-    if ((input.entityTxs?.length ?? 0) > 0) {
-      env.error?.(
-        'network',
-        'INBOUND_ENTITY_SIGNER_MISMATCH',
-        {
-          fromRuntimeId: from,
-          entityId: input.entityId,
-          signerId: input.signerId,
-          txTypes,
-        },
-        input.entityId,
-      );
-      throw new Error(
-        `INBOUND_ENTITY_SIGNER_MISMATCH: entity=${input.entityId} signer=${input.signerId} txTypes=${txTypes}`,
-      );
-    }
-    env.warn(
-      'network',
-      'INBOUND_ENTITY_SIGNER_MISMATCH',
-      {
-        fromRuntimeId: from,
-        entityId: input.entityId,
-        signerId: input.signerId,
-        txTypes,
-      },
-      input.entityId,
-    );
-    return { kind: 'ignored' };
-  }
-
-  const runtimeState = deps.ensureRuntimeState(env);
-  if (runtimeState.halted && !env.scenarioMode) {
-    const payload = { fromRuntimeId: from, entityId: input.entityId, txTypes };
-    if ((input.entityTxs?.length ?? 0) > 0) {
-      env.error?.('network', 'INBOUND_ENTITY_RUNTIME_HALTED', payload, input.entityId);
-      throw new Error(
-        `INBOUND_ENTITY_RUNTIME_HALTED: entity=${input.entityId} signer=${input.signerId} txTypes=${txTypes}`,
-      );
-    }
-    env.warn?.('network', 'INBOUND_ENTITY_RUNTIME_HALTED', payload, input.entityId);
-    return { kind: 'ignored' };
-  }
-
-  if (
-    runtimeState.persistenceQuiescing &&
-    !env.scenarioMode &&
-    options.acceptedBeforeQuiesce !== true
-  ) {
-    const payload = { fromRuntimeId: from, entityId: input.entityId, txTypes };
-    if ((input.entityTxs?.length ?? 0) > 0) {
-      // Persistence quiesce is bounded transport backpressure, not state
-      // corruption. The sender receives the explicit failure and its durable
-      // lane retries the same input after publication completes.
-      env.info?.('network', 'INBOUND_ENTITY_RUNTIME_QUIESCING', payload, input.entityId);
-      throw new Error(
-        `INBOUND_ENTITY_RUNTIME_QUIESCING: entity=${input.entityId} signer=${input.signerId} txTypes=${txTypes}`,
-      );
-    }
-    env.warn?.('network', 'INBOUND_ENTITY_RUNTIME_QUIESCING', payload, input.entityId);
-    return { kind: 'ignored' };
-  }
-
-  const targetReplica = Array.from(env.eReplicas.values()).find(replica =>
-    String(replica.entityId || '').toLowerCase() === targetEntityId &&
-    String(replica.signerId || '').toLowerCase() === String(input.signerId || '').toLowerCase());
-  let commandState = targetReplica?.state;
+): void => {
+  let commandState = findInboundTargetReplica(env, input)?.state;
   for (const tx of input.entityTxs ?? []) {
     if (tx.type === 'consensusOutput') continue;
     if (tx.type === 'runtimeOutput') {
@@ -885,14 +879,68 @@ export const validateInboundP2PEntityInput = (
       env.error?.('network', 'INBOUND_ENTITY_UNSIGNED_USER_COMMAND', payload, input.entityId);
       throw new Error(`INBOUND_ENTITY_UNSIGNED_USER_COMMAND:entity=${input.entityId}:txType=${tx.type}`);
     }
-    if (!commandState) throw new Error(`INBOUND_ENTITY_COMMAND_STATE_MISSING:${input.entityId}:${input.signerId}`);
+    if (!commandState) {
+      throw new Error(`INBOUND_ENTITY_COMMAND_STATE_MISSING:${input.entityId}:${input.signerId}`);
+    }
     const command = assertSignedEntityCommand(env, commandState, tx.data);
     commandState = advanceEntityCommandNonce(commandState, command);
   }
+};
 
+export const validateInboundP2PEntityInput = (
+  env: RuntimeState,
+  from: string,
+  input: RoutedEntityInput,
+  deps: RuntimeEntityRoutingDeps,
+  options: RuntimeInboundEntityInputOptions = {},
+): RuntimeInboundEntityInputValidation => {
+  const context = inboundEntityContext(input);
+  const localReplicaExists = Array.from(env.eReplicas.keys()).some(key => {
+    const [entityKey] = String(key).split(':');
+    return normalizeEntityKey(entityKey || '') === context.targetEntityId;
+  });
+  if (!localReplicaExists) {
+    return rejectUnavailableInboundTarget(env, input, 'INBOUND_ENTITY_UNKNOWN_TARGET', {
+      fromRuntimeId: from,
+      entityId: input.entityId,
+      txTypes: context.txTypes,
+    }, context);
+  }
+  if (!deps.hasLocalSignerForEntitySigner(env, input.entityId, input.signerId)) {
+    return rejectUnavailableInboundTarget(env, input, 'INBOUND_ENTITY_SIGNER_MISMATCH', {
+      fromRuntimeId: from,
+      entityId: input.entityId,
+      signerId: input.signerId,
+      txTypes: context.txTypes,
+    }, context);
+  }
+
+  const runtimeState = deps.ensureRuntimeState(env);
+  if (runtimeState.halted && !env.scenarioMode) {
+    return rejectUnavailableInboundTarget(env, input, 'INBOUND_ENTITY_RUNTIME_HALTED', {
+      fromRuntimeId: from,
+      entityId: input.entityId,
+      txTypes: context.txTypes,
+    }, context);
+  }
+
+  if (
+    runtimeState.persistenceQuiescing &&
+    !env.scenarioMode &&
+    options.acceptedBeforeQuiesce !== true
+  ) {
+    // Persistence quiesce is bounded transport backpressure, not corruption.
+    // The durable sender retries the exact input after publication completes.
+    return rejectUnavailableInboundTarget(env, input, 'INBOUND_ENTITY_RUNTIME_QUIESCING', {
+      fromRuntimeId: from,
+      entityId: input.entityId,
+      txTypes: context.txTypes,
+    }, context, 'info');
+  }
+
+  validateInboundEntityCommands(env, from, input);
   // Never learn sender routes from raw payload fields. The authenticated
   // account/entity transition registers them only after successful apply.
-
   return { kind: 'accepted' };
 };
 

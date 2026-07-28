@@ -19,7 +19,7 @@ const readText = (path: string): string => {
   const splitSources: Record<string, string[]> = {
     'runtime/runtime.ts': [
       'runtime/runtime.ts',
-      'runtime/runtime-core.ts',
+      'runtime/runtime/composition.ts',
       'runtime/runtime-public-api.ts',
       'runtime/runtime/frame/apply.ts',
       'runtime/runtime/frame/clone.ts',

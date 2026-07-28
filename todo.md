@@ -53,6 +53,15 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   mempool projection now removes derived wakes and orphaned timestamps while
   retaining their crontab source; L1 scheduled-wake tests and the exact
   BrainVault reload L2 are green. Keep this regression in the full gate.
+  The later Kimi architecture/naming audit was rechecked on
+  `main@fe533f375efe`: its remaining live findings are already tracked below
+  (Entity-owned dispute-finality money mutation, explicit
+  `RuntimeReplica`/`AccountReplica` envelopes, the Account-frame
+  `decode*`/`isWellFormed*` validator pair, and a narrow Runtime facade).
+  Do not resurrect its stale items: the `settle` AccountInput bypass,
+  `addToAccountMempool`, `RuntimeSnapshot`, `EntityOutput`, and missing WAL
+  rejection of routed local `AccountInput.txs` are already deleted or fenced
+  with tests.
 - [ ] Pass the human-audit completion gate for the three nested state
   machines. Baseline on `main@404851e82`: 35 functions over 150 lines and 89
   over 100 lines under `runtime/runtime`, `runtime/entity` and
@@ -205,10 +214,44 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   `account-settlement` consumption lane. Settlement negotiation has one path:
   canonical EntityTxs produce bilateral `settle_transition` AccountTxs.
 - [ ] Remove confirmed vestigial or misplaced state only with root/storage
-  evidence: investigate the unwritten `EntityState.accountInputQueue`,
-  the hash-excluded `entityEncPrivKey`, and dead/misleading `EntityOutput`
-  surface. Delete or relocate each only after dynamic/browser entrypoints,
-  recovery hydration and state-root fixtures prove its real ownership.
+  evidence. Owner decision: `EntityState.messages`, `batchHistory`, and
+  diagnostic activity are not consensus state. Persist certified Entity frames
+  as the permanent source of truth, and expose one typed, filterable Activity
+  projection whose disposable LevelDB index can be rebuilt exactly from that
+  frame history. Before removing the fields, prove that every current message
+  and event is represented in deterministic frame data or output; add an
+  explicit frame event when it is not. Use one testnet schema migration and no
+  fallback reader. A user message is the ordinary typed
+  `EntityEvent { kind: 'text', validatorId, ... }`, attributed to the specific
+  validator and certified as part of its Entity frame; it is not a special
+  State collection. Entity, Account, and authenticated J events share one
+  `ActivityEvent` projection with deterministic event id, source
+  machine/frame/hash/index, scopes, actor, kind, and payload so one UI history
+  panel can filter them without duplicating canonical history. Also investigate the unwritten
+  `EntityState.accountInputQueue` and hash-excluded `entityEncPrivKey`; delete
+  or relocate each only after dynamic/browser entrypoints, recovery hydration
+  and state-root fixtures prove its real ownership.
+- [ ] Store Runtime, Entity, and Account histories as independent logical
+  streams in one physical LevelDB. Runtime WAL epochs are a compaction detail
+  and must not partition or own Entity/Account history. Key certified Entity
+  frames by entity/height/hash with their certificate; key accepted Account
+  frames by canonical pair/height/hash with Hanko, ACK, and same-height
+  collision evidence. Record losing candidates only as evidence, never as the
+  canonical Account chain. Commit the Runtime WAL record, new Entity frames,
+  Account frames, evidence, and stream indexes in one atomic LevelDB batch so
+  no child history becomes visible before its owning Runtime frame is durable.
+  Keep only latest committed R/E/A state plus one necessary in-flight candidate
+  in RAM.
+- [ ] Make long-term history retention independent per replica. Add certified
+  checkpoints containing machine id, height, state root, previous checkpoint
+  hash, and certificate; permit each Entity validator/Account peer to prune
+  old local frame bodies only after its configured archival policy is
+  satisfied. Full-history validators/watchtowers may retain or export immutable
+  segments forever. A pruned node must recover from a verified checkpoint plus
+  later frames, without consulting a Runtime epoch or accepting an
+  unverifiable state snapshot. Activity indexes remain disposable and
+  rebuildable; signed dispute/evidence records use an explicit longer
+  retention class.
 - [ ] Prove and fix the likely unilateral rebalance consensus wedge first.
   Reproduce bilateral request → reverse payment/self-pay → hub crontab and
   assert equal Account roots and pending state on both peers. Crontab must
@@ -230,12 +273,24 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   settlement-Hanko projection and RuntimeState symbols. Apply the same
   `decode/assert` versus `isWellFormed/isProposable` distinction to twin
   Account-frame validators; identical names must not hide throwing schema
-  validation versus a soft consensus predicate.
+  validation versus a soft consensus predicate. Use exactly three semantic
+  verb families: `decode*` for unknown/wire → typed and throw, `assert*` for a
+  typed invariant and throw, and `is<Decision>*` for a boolean decision.
+  Rename the throwing Account-frame decoder to `decodeAccountFrame` and the
+  bounded consensus predicate to `isWithinAccountFrameBounds`; if a predicate
+  cannot be named for one decision, split its grab-bag checks instead of
+  calling it generically `validate*`.
 - [ ] Restore a structurally enforceable money boundary. Move finalized
   Account J-event settlement/dispute mutations out of `entity/tx/` and into
   Account-owned handlers; Entity may authenticate and route, but only Account
-  code may change delta, collateral, holds or credit. Preserve proof gating,
-  cache invalidation and state roots with settlement/dispute tests.
+  code may change delta, collateral, holds or credit. This does not make
+  dispute finality bilateral: the Account-owned J-finality handler is applied
+  immediately and unilaterally from authenticated chain history, without an
+  Account mempool, proposal, or peer ACK. The returning peer independently
+  consumes the same finalized J-event and converges byte-identically. Preserve
+  proof gating, cache invalidation and state roots with settlement/dispute
+  tests, and add an ownership gate forbidding Entity/Runtime writes to Account
+  money fields outside calls into Account-owned handlers.
 - [ ] Turn Runtime execution into one visible pipeline:
   `take → validate/plan → isolated RJEA apply → WAL → install → dispatch`.
   Keep exactly one live `RuntimeReplica` mempool; `runtimeInput` names only the
@@ -325,6 +380,16 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   validation without byte-identical differential roots, equivalent failures
   and measured improvement. Include stale-bundle detection in performance
   evidence; performance changes stay separate from money/refactor changes.
+  Record WAL bytes/frame, durable commit latency p50/p95/p99 with fsync,
+  crash-replay time per recovered height, and current-cache rebuild time.
+  Prove incremental Entity/Account roots equal cold recomputation with
+  differential randomized transaction sequences. Benchmark growing hubs at
+  10k, 100k, and 1M accounts before claiming a path to 10M accounts/10k TPS;
+  explicitly measure full Runtime replica clone bytes, entity-root account
+  traversal, loaded Account working-set size, LevelDB compaction stalls, and
+  batch/group-commit throughput. Touched-only state or DB-backed Account state
+  requires these proofs and remains a separate performance design, never an
+  opportunistic consensus refactor.
 
 ## 2. Contract boundedness — P0/P1, owner-approved
 - [ ] Remove the remaining proven pre-mainnet compatibility ABI/state:

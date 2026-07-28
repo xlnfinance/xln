@@ -50,9 +50,6 @@ export type CrossJurisdictionSwapSubmitResult = {
   route: CrossJurisdictionSwapRoute;
 };
 
-export type CrossJurisdictionSwapSubmission = CrossJurisdictionSwapSubmitResult & {
-};
-
 export type DebtEnforcementRuntimeInputParams = {
   entityId: string;
   tokenId: number;
@@ -90,100 +87,134 @@ const findRuntimeAccountWith = (state: EntityState | null, counterpartyId: strin
   return null;
 };
 
-export function buildCrossJurisdictionSwapSubmission(
+const resolveCrossJurisdictionSwapContext = (
   env: RuntimeState,
   params: CrossJurisdictionSwapSubmitParams,
-): CrossJurisdictionSwapSubmission {
+) => {
   const now = env.scenarioMode ? env.timestamp : getWallClockMs();
-  const orderId = params.orderId || `cross-${now}-${ethers.hexlify(ethers.randomBytes(4)).slice(2)}`;
-  const sourceUserSignerId = params.sourceUserSignerId || resolveEntityProposerId(env, params.sourceUserEntityId, 'cross-swap.source-user');
-  const sourceHubSignerId = params.sourceHubSignerId || resolveEntityProposerId(env, params.sourceHubEntityId, 'cross-swap.source-hub');
-  const targetHubSignerId = params.targetHubSignerId || resolveEntityProposerId(env, params.targetHubEntityId, 'cross-swap.target-hub');
-  const targetUserSignerId = params.targetUserSignerId || resolveEntityProposerId(env, params.targetUserEntityId, 'cross-swap.target-user');
-
-  const sourceUserJ = requireEntityRuntimeJurisdictionConfig(env, params.sourceUserEntityId, sourceUserSignerId);
-  const targetUserJ = requireEntityRuntimeJurisdictionConfig(env, params.targetUserEntityId, targetUserSignerId);
-  const sourceUserState = findEntityStateForRuntime(env, params.sourceUserEntityId, sourceUserSignerId);
-  const targetUserState = findEntityStateForRuntime(env, params.targetUserEntityId, targetUserSignerId);
-  const sourceAccount = findRuntimeAccountWith(sourceUserState, params.sourceHubEntityId);
-  const targetAccount = findRuntimeAccountWith(targetUserState, params.targetHubEntityId);
+  const sourceUserSignerId = params.sourceUserSignerId ??
+    resolveEntityProposerId(env, params.sourceUserEntityId, 'cross-swap.source-user');
+  const sourceHubSignerId = params.sourceHubSignerId ??
+    resolveEntityProposerId(env, params.sourceHubEntityId, 'cross-swap.source-hub');
+  const targetHubSignerId = params.targetHubSignerId ??
+    resolveEntityProposerId(env, params.targetHubEntityId, 'cross-swap.target-hub');
+  const targetUserSignerId = params.targetUserSignerId ??
+    resolveEntityProposerId(env, params.targetUserEntityId, 'cross-swap.target-user');
+  const sourceJurisdiction = requireEntityRuntimeJurisdictionConfig(
+    env,
+    params.sourceUserEntityId,
+    sourceUserSignerId,
+  );
+  const targetJurisdiction = requireEntityRuntimeJurisdictionConfig(
+    env,
+    params.targetUserEntityId,
+    targetUserSignerId,
+  );
+  const sourceAccount = findRuntimeAccountWith(
+    findEntityStateForRuntime(env, params.sourceUserEntityId, sourceUserSignerId),
+    params.sourceHubEntityId,
+  );
+  const targetAccount = findRuntimeAccountWith(
+    findEntityStateForRuntime(env, params.targetUserEntityId, targetUserSignerId),
+    params.targetHubEntityId,
+  );
   if (!sourceAccount) {
-    throw new Error(`CROSS_SWAP_SOURCE_ACCOUNT_MISSING: user=${params.sourceUserEntityId} hub=${params.sourceHubEntityId}`);
+    throw new Error(
+      `CROSS_SWAP_SOURCE_ACCOUNT_MISSING: user=${params.sourceUserEntityId} hub=${params.sourceHubEntityId}`,
+    );
   }
   if (!targetAccount) {
-    throw new Error(`CROSS_SWAP_TARGET_ACCOUNT_MISSING: user=${params.targetUserEntityId} hub=${params.targetHubEntityId}`);
+    throw new Error(
+      `CROSS_SWAP_TARGET_ACCOUNT_MISSING: user=${params.targetUserEntityId} hub=${params.targetHubEntityId}`,
+    );
   }
-  const sourceHubJ = sourceUserJ;
-  const targetHubJ = targetUserJ;
-  const sourceUserStackId = getJurisdictionStackId(sourceUserJ);
-  const sourceHubStackId = getJurisdictionStackId(sourceHubJ);
-  const targetHubStackId = getJurisdictionStackId(targetHubJ);
-  const targetUserStackId = getJurisdictionStackId(targetUserJ);
-  if (!sourceUserStackId || !sourceHubStackId || !targetHubStackId || !targetUserStackId) {
-    throw new Error('CROSS_SWAP_STACK_ID_MISSING');
+  const sourceStackId = getJurisdictionStackId(sourceJurisdiction);
+  const targetStackId = getJurisdictionStackId(targetJurisdiction);
+  if (!sourceStackId || !targetStackId) throw new Error('CROSS_SWAP_STACK_ID_MISSING');
+  if (sourceStackId === targetStackId) {
+    throw new Error(`CROSS_SWAP_REQUIRES_DISTINCT_JURISDICTIONS: ${sourceJurisdiction.name}`);
   }
-  if (sourceUserStackId !== sourceHubStackId) {
-    throw new Error(`CROSS_SWAP_SOURCE_JURISDICTION_MISMATCH: user=${sourceUserJ.name} hub=${sourceHubJ.name}`);
+  if (getJurisdictionStackId(sourceAccount.domain) !== sourceStackId) {
+    throw new Error(
+      `CROSS_SWAP_SOURCE_ACCOUNT_DOMAIN_MISMATCH:${params.sourceUserEntityId}:${params.sourceHubEntityId}`,
+    );
   }
-  if (targetHubStackId !== targetUserStackId) {
-    throw new Error(`CROSS_SWAP_TARGET_JURISDICTION_MISMATCH: hub=${targetHubJ.name} user=${targetUserJ.name}`);
+  if (getJurisdictionStackId(targetAccount.domain) !== targetStackId) {
+    throw new Error(
+      `CROSS_SWAP_TARGET_ACCOUNT_DOMAIN_MISMATCH:${params.targetUserEntityId}:${params.targetHubEntityId}`,
+    );
   }
-  if (sourceUserStackId === targetHubStackId) {
-    throw new Error(`CROSS_SWAP_REQUIRES_DISTINCT_JURISDICTIONS: ${sourceUserJ.name}`);
-  }
-  if (getJurisdictionStackId(sourceAccount.domain) !== sourceUserStackId) {
-    throw new Error(`CROSS_SWAP_SOURCE_ACCOUNT_DOMAIN_MISMATCH:${params.sourceUserEntityId}:${params.sourceHubEntityId}`);
-  }
-  if (getJurisdictionStackId(targetAccount.domain) !== targetUserStackId) {
-    throw new Error(`CROSS_SWAP_TARGET_ACCOUNT_DOMAIN_MISMATCH:${params.targetUserEntityId}:${params.targetHubEntityId}`);
-  }
+  return {
+    now,
+    orderId: params.orderId ?? `cross-${now}-${ethers.hexlify(ethers.randomBytes(4)).slice(2)}`,
+    sourceUserSignerId,
+    sourceHubSignerId,
+    targetHubSignerId,
+    targetUserSignerId,
+    sourceJurisdiction,
+    targetJurisdiction,
+    sourceStackId,
+    targetStackId,
+  };
+};
 
-  const expiresInMs = Math.max(30_000, Math.floor(params.expiresInMs ?? 120_000));
-  const canonicalBookHubEntityId = deriveCanonicalCrossJurisdictionBookOwnerForLegs(
-    sourceUserStackId,
+const resolveCrossJurisdictionBook = (
+  params: CrossJurisdictionSwapSubmitParams,
+  context: ReturnType<typeof resolveCrossJurisdictionSwapContext>,
+): { entityId: string; signerId: string } => {
+  const entityId = deriveCanonicalCrossJurisdictionBookOwnerForLegs(
+    context.sourceStackId,
     params.sourceHubEntityId,
-    targetHubStackId,
+    context.targetStackId,
     params.targetHubEntityId,
   );
   if (
     params.bookHubEntityId &&
-    normalizeRuntimeEntityId(params.bookHubEntityId) !== normalizeRuntimeEntityId(canonicalBookHubEntityId)
+    normalizeRuntimeEntityId(params.bookHubEntityId) !== normalizeRuntimeEntityId(entityId)
   ) {
-    throw new Error(`CROSS_SWAP_BOOK_OWNER_NON_CANONICAL:${params.bookHubEntityId}:${canonicalBookHubEntityId}`);
+    throw new Error(`CROSS_SWAP_BOOK_OWNER_NON_CANONICAL:${params.bookHubEntityId}:${entityId}`);
   }
-  const bookHubEntityId = canonicalBookHubEntityId;
-  const canonicalBookHubSignerId = (
-    normalizeRuntimeEntityId(bookHubEntityId) === normalizeRuntimeEntityId(params.sourceHubEntityId) ? sourceHubSignerId :
-    normalizeRuntimeEntityId(bookHubEntityId) === normalizeRuntimeEntityId(params.targetHubEntityId) ? targetHubSignerId :
-    ''
-  );
+  const signerId =
+    normalizeRuntimeEntityId(entityId) === normalizeRuntimeEntityId(params.sourceHubEntityId)
+      ? context.sourceHubSignerId
+      : normalizeRuntimeEntityId(entityId) === normalizeRuntimeEntityId(params.targetHubEntityId)
+        ? context.targetHubSignerId
+        : '';
   if (
     params.bookHubSignerId &&
-    normalizeRuntimeEntityId(params.bookHubSignerId) !== normalizeRuntimeEntityId(canonicalBookHubSignerId)
+    normalizeRuntimeEntityId(params.bookHubSignerId) !== normalizeRuntimeEntityId(signerId)
   ) {
-    throw new Error(`CROSS_SWAP_BOOK_SIGNER_NON_CANONICAL:${params.bookHubSignerId}:${canonicalBookHubSignerId}`);
+    throw new Error(`CROSS_SWAP_BOOK_SIGNER_NON_CANONICAL:${params.bookHubSignerId}:${signerId}`);
   }
-  const bookHubSignerId = canonicalBookHubSignerId;
+  return { entityId, signerId };
+};
 
+export function buildCrossJurisdictionSwapSubmission(
+  env: RuntimeState,
+  params: CrossJurisdictionSwapSubmitParams,
+): CrossJurisdictionSwapSubmitResult {
+  const context = resolveCrossJurisdictionSwapContext(env, params);
+  const book = resolveCrossJurisdictionBook(params, context);
+  const expiresInMs = Math.max(30_000, Math.floor(params.expiresInMs ?? 120_000));
   const route: CrossJurisdictionSwapRoute = withCanonicalCrossJurisdictionRouteHash({
-    orderId,
-    bookOwnerEntityId: bookHubEntityId,
+    orderId: context.orderId,
+    bookOwnerEntityId: book.entityId,
     makerEntityId: params.sourceUserEntityId,
-    hubEntityId: bookHubEntityId,
-    sourceSignerId: sourceUserSignerId,
-    sourceHubSignerId,
-    targetHubSignerId,
-    targetSignerId: targetUserSignerId,
-    ...(bookHubSignerId ? { bookHubSignerId } : {}),
+    hubEntityId: book.entityId,
+    sourceSignerId: context.sourceUserSignerId,
+    sourceHubSignerId: context.sourceHubSignerId,
+    targetHubSignerId: context.targetHubSignerId,
+    targetSignerId: context.targetUserSignerId,
+    ...(book.signerId ? { bookHubSignerId: book.signerId } : {}),
     source: {
-      jurisdiction: sourceUserStackId,
+      jurisdiction: context.sourceStackId,
       entityId: params.sourceUserEntityId,
       counterpartyEntityId: params.sourceHubEntityId,
       tokenId: Number(params.sourceTokenId),
       amount: BigInt(params.sourceAmount),
     },
     target: {
-      jurisdiction: targetHubStackId,
+      jurisdiction: context.targetStackId,
       entityId: params.targetHubEntityId,
       counterpartyEntityId: params.targetUserEntityId,
       tokenId: Number(params.targetTokenId),
@@ -192,21 +223,21 @@ export function buildCrossJurisdictionSwapSubmission(
     domain: {
       protocol: 'xln-cross-j',
       hashSchema: 'route-domain',
-      sourceStackId: sourceUserStackId,
-      targetStackId: targetHubStackId,
-      sourceEntityProviderAddress: sourceUserJ.entityProviderAddress.toLowerCase(),
-      targetEntityProviderAddress: targetHubJ.entityProviderAddress.toLowerCase(),
-      sourceAssetRef: `${sourceUserStackId}:${Number(params.sourceTokenId)}`,
-      targetAssetRef: `${targetHubStackId}:${Number(params.targetTokenId)}`,
+      sourceStackId: context.sourceStackId,
+      targetStackId: context.targetStackId,
+      sourceEntityProviderAddress: context.sourceJurisdiction.entityProviderAddress.toLowerCase(),
+      targetEntityProviderAddress: context.targetJurisdiction.entityProviderAddress.toLowerCase(),
+      sourceAssetRef: `${context.sourceStackId}:${Number(params.sourceTokenId)}`,
+      targetAssetRef: `${context.targetStackId}:${Number(params.targetTokenId)}`,
     },
     ...(params.settlementPolicy ? { settlementPolicy: params.settlementPolicy } : {}),
     riskMode: params.riskMode || 'fully_collateralized',
     ...(params.priceTicks !== undefined ? { priceTicks: params.priceTicks } : {}),
     ...(params.priceImprovementMode ? { priceImprovementMode: params.priceImprovementMode } : {}),
     status: 'intent',
-    createdAt: now,
-    updatedAt: now,
-    expiresAt: now + expiresInMs,
+    createdAt: context.now,
+    updatedAt: context.now,
+    expiresAt: context.now + expiresInMs,
     ...(params.memo ? { memo: params.memo } : {}),
   });
 

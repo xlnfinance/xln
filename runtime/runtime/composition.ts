@@ -1,0 +1,403 @@
+import { runtimeIsBrowser } from './platform';
+
+// Bump this on runtime bundle changes that must be reflected in frontend immediately.
+const RUNTIME_BUILD_ID = '2026-07-18-16:00Z';
+// Bump this only on breaking persistence/replay format or invariants.
+export const RUNTIME_SCHEMA_VERSION = 5;
+export const RUNTIME_BUILD = RUNTIME_BUILD_ID;
+
+import { setBrowserVMJurisdiction } from '../jadapter';
+import { attachEventEmitters } from './env-events';
+import type {
+  EntityInput,
+  RuntimeState,
+} from '../types';
+import { createPersistenceQueries } from '../persistence/queries';
+import { createRuntimeStorageApi } from '../persistence/runtime-storage';
+import { rehydrateRestoredRuntimeInfra, type TrustedJurisdictionRpcBinding } from './infra';
+import { createRuntimeLoopApi } from './loop';
+import { createRuntimeRecoveryApi } from '../recovery/restore';
+import { createRuntimeStateApi } from '../state/create';
+import { loadGossipProfilesFromInfraDb } from './infra-gossip-store';
+import { withStorageConsistentRead } from '../storage/runtime-dbs';
+import {
+  createRuntimeCommandApi,
+  getEntityDisplayInfoFromProfile,
+  resolveEntityName,
+  searchEntityNames,
+} from './command-api';
+import {
+  cloneRuntimeFrameMempool,
+  runtimeInputHasQueuedWork,
+} from './frame/transaction';
+import {
+  prepareAtomicCrossJAccountInputs,
+} from './frame/cross-j-preflight';
+import { createRuntimeInputReducer } from './frame/input-reducer';
+import { createRuntimeProcessor } from './frame/process';
+import { clearRuntimeDatabases } from './storage-admin';
+import { loadLiveRuntimeFromDB } from './live-restore';
+import {
+  bootstrapRuntime,
+  getCurrentHistoryIndex,
+  getHistory,
+  getSnapshot,
+  queueEntityTransaction,
+  type RuntimeCreationOptions,
+  type RuntimeLocalSigner,
+} from './bootstrap';
+import {
+  notifyRuntimeFrameCommitted,
+  notifyRuntimeStateChanged,
+} from './frame/notifications';
+
+export { prepareAtomicCrossJAccountInputs };
+
+let processRuntimeImpl: ReturnType<typeof createRuntimeProcessor> | undefined;
+
+export const processRuntime = async (
+  env: RuntimeState,
+  inputs?: EntityInput[],
+  runtimeDelay = 0,
+): Promise<RuntimeState> => {
+  if (!processRuntimeImpl) throw new Error('RUNTIME_PROCESSOR_NOT_INITIALIZED');
+  return processRuntimeImpl(env, inputs, runtimeDelay);
+};
+
+// Runtime execution state lives on RuntimeState. This module owns the canonical
+// frame transition; runtime.ts is intentionally only the public entrypoint.
+
+const runtimeLoopApi = createRuntimeLoopApi({
+  notifyEnvChange: env => notifyRuntimeStateChanged(env),
+  processRuntime: (env, inputs, runtimeDelay) => processRuntime(env, inputs, runtimeDelay),
+  waitForRuntimeProcessingIdle: (env, timeoutMs) => waitForRuntimeProcessingIdle(env, timeoutMs),
+  getRuntimeProcessGlobal: () => getRuntimeProcessGlobal(),
+  runtimeInputHasQueuedWork: input => runtimeInputHasQueuedWork(input),
+});
+
+const {
+  registerEnvChangeCallback,
+  registerRuntimeFrameCommitCallback,
+  registerRecoveryBackupBarrier,
+  ENV_APPLY_ALLOWED_KEY,
+  ENV_REPLAY_MODE_KEY,
+  envRecord,
+  ensureRuntimeConfig,
+  getRuntimeStorageDb,
+  getStorageDb,
+  getInfraDb,
+  getFrameDb,
+  tryOpenStorageDb,
+  rotateStorageEpochDb,
+  tryOpenFrameDb,
+  closeRuntimeDb,
+  closeInfraDb,
+  getCleanLogs,
+  clearCleanLogs,
+  copyCleanLogs,
+  enqueueRuntimeInputs,
+  enqueueRuntimeContinuation,
+  infraGossipDbAccess,
+  trackInfraDbWrite,
+  hasRuntimeWork,
+  prioritizeJEventFrame,
+  generateHookPings,
+  startRuntimeLoop,
+  waitForPromiseBeforeTimeout,
+  stopRuntimeLoopAndWait,
+  resumeRuntimeLoop,
+  resumeRuntimeAfterPersistenceQuiesce,
+  waitForRuntimeWorkDrained,
+  startJurisdictionWatchers,
+  stopJurisdictionWatchers,
+  stopJurisdictionWatchersAndWait,
+  getEnv,
+  setRuntimeId,
+  deriveRuntimeId,
+  registerEntityRuntimeHint,
+  MAX_RUNTIME_J_INPUTS,
+  MAX_RUNTIME_J_TXS,
+  MAX_RUNTIME_J_TXS_PER_JURISDICTION,
+  MAX_RUNTIME_J_INPUT_BYTES,
+  handleInboundP2PEntityInput,
+  handleInboundP2PEntityInputs,
+  handleInboundReliableReceipt,
+  normalizeRuntimeEntityInput,
+  validateRuntimeInputAdmission,
+  getRuntimeEntityRoutingDeps,
+  getRuntimeOutputRoutingDeps,
+  sendEntityInput,
+  startP2P,
+  stopP2P,
+  stopP2PAndWait,
+  getP2P,
+  getP2PState,
+  refreshGossip,
+  ensureGossipProfiles,
+  clearGossip,
+} = runtimeLoopApi;
+
+const failfastAssert: (
+  condition: unknown,
+  code: string,
+  message: string,
+  details?: Record<string, unknown>,
+) => asserts condition = runtimeLoopApi.failfastAssert;
+
+export type RuntimeLoopConfig = NonNullable<Parameters<typeof startRuntimeLoop>[1]>;
+
+export {
+  registerEnvChangeCallback,
+  registerRuntimeFrameCommitCallback,
+  registerRecoveryBackupBarrier,
+  getRuntimeStorageDb,
+  getInfraDb,
+  getFrameDb,
+  tryOpenStorageDb,
+  tryOpenFrameDb,
+  closeRuntimeDb,
+  closeInfraDb,
+  getCleanLogs,
+  clearCleanLogs,
+  copyCleanLogs,
+  hasRuntimeWork,
+  prioritizeJEventFrame,
+  startRuntimeLoop,
+  stopRuntimeLoopAndWait,
+  resumeRuntimeLoop,
+  resumeRuntimeAfterPersistenceQuiesce,
+  waitForRuntimeWorkDrained,
+  startJurisdictionWatchers,
+  stopJurisdictionWatchers,
+  stopJurisdictionWatchersAndWait,
+  getEnv,
+  setRuntimeId,
+  deriveRuntimeId,
+  registerEntityRuntimeHint,
+  MAX_RUNTIME_J_INPUTS,
+  MAX_RUNTIME_J_TXS,
+  MAX_RUNTIME_J_TXS_PER_JURISDICTION,
+  MAX_RUNTIME_J_INPUT_BYTES,
+  handleInboundP2PEntityInput,
+  handleInboundP2PEntityInputs,
+  handleInboundReliableReceipt,
+  validateRuntimeInputAdmission,
+  sendEntityInput,
+  startP2P,
+  stopP2P,
+  stopP2PAndWait,
+  getP2P,
+  getP2PState,
+  refreshGossip,
+  ensureGossipProfiles,
+  clearGossip,
+};
+export const initEnv = (seed?: string | null): RuntimeState => {
+  return createEmptyEnv(seed ?? null);
+};
+
+const applyRuntimeInput = createRuntimeInputReducer({
+  assertApplyAllowed: env => {
+    failfastAssert(
+      env.scenarioMode === true || envRecord(env)[ENV_APPLY_ALLOWED_KEY] === true,
+      'RUNTIME_APPLY_DIRECT_CALL',
+      'applyRuntimeInput must be invoked via process()/WAL replay (non-scenario)',
+      { runtimeId: env.runtimeId, height: env.height },
+    );
+  },
+  isReplay: env => envRecord(env)[ENV_REPLAY_MODE_KEY] === true,
+  normalizeEntityInput: normalizeRuntimeEntityInput,
+  getRoutingDeps: getRuntimeEntityRoutingDeps,
+  applyCommittedLocalReceipts: (env, commits, options) =>
+    applyCommittedLocalReliableReceipts(env, commits, options),
+});
+
+export type { RuntimeCreationOptions, RuntimeLocalSigner };
+
+const main = (
+  runtimeSeedOverride?: string | null,
+  options?: RuntimeCreationOptions,
+): Promise<RuntimeState> => bootstrapRuntime({
+  createRuntime: createEmptyEnv,
+  loadRuntime: loadEnvFromDB,
+  loadGossipProfiles: env => loadGossipProfilesFromInfraDb(env, infraGossipDbAccess),
+  startRuntimeLoop,
+}, runtimeSeedOverride, options);
+
+// Clear database for a specific runtime and return a fresh env
+/**
+ * Queue an entity transaction for processing (helper for UI components)
+ * Wraps applyRuntimeInput with a single entity tx
+ */
+export const queueEntityInput = async (
+  env: RuntimeState,
+  entityId: string,
+  signerId: string,
+  txData: Parameters<typeof queueEntityTransaction>[4],
+): Promise<void> => {
+  queueEntityTransaction((target, targetEntityId, targetSignerId, tx) => {
+    enqueueRuntimeInputs(
+      target,
+      [{ entityId: targetEntityId, signerId: targetSignerId, entityTxs: [tx] }],
+      undefined,
+      undefined,
+      target.timestamp,
+    );
+  }, env, entityId, signerId, txData);
+};
+
+export {
+  applyRuntimeInput,
+  getCurrentHistoryIndex,
+  getEntityDisplayInfoFromProfile,
+  getHistory,
+  getSnapshot,
+  main,
+  resolveEntityName,
+  searchEntityNames,
+  setBrowserVMJurisdiction,
+};
+
+// Runtime is a pure library - no auto-execution side effects.
+// Browser and server entrypoints call xln.main() explicitly.
+
+const runtimeStateApi = createRuntimeStateApi({
+  ensureRuntimeConfig,
+  infraGossipDbAccess,
+  trackInfraDbWrite,
+});
+
+export const prewarmRuntimeSignerCache = runtimeStateApi.prewarmRuntimeSignerCache;
+export const createEmptyEnv = runtimeStateApi.createEmptyEnv;
+export { cloneRuntimeFrameMempool };
+
+const runtimeRecoveryApi = createRuntimeRecoveryApi({
+  ensureRuntimeConfig,
+  createEmptyEnv,
+  getStorageDb,
+  getFrameDb,
+  tryOpenStorageDb,
+  tryOpenFrameDb,
+  closeRuntimeDb,
+  closeInfraDb,
+  enqueueRuntimeContinuation,
+  infraGossipDbAccess,
+  generateHookPings,
+  startJurisdictionWatchers,
+  getRuntimeOutputRoutingDeps,
+  applyRuntimeInput,
+});
+
+export const restoreEnvFromCheckpointSnapshot = runtimeRecoveryApi.restoreEnvFromCheckpointSnapshot;
+export const restoreEnvFromRecoveryBundles = runtimeRecoveryApi.restoreEnvFromRecoveryBundles;
+export const persistRestoredEnvToDB = runtimeRecoveryApi.persistRestoredEnvToDB;
+const replayRecoveryFrameJournals = runtimeRecoveryApi.replayRecoveryFrameJournals;
+const assertPersistedContractConfigReady = runtimeRecoveryApi.assertPersistedContractConfigReady;
+const registerCommittedSingleSignerWallets = runtimeRecoveryApi.registerCommittedSingleSignerWallets;
+const applyCommittedLocalReliableReceipts = runtimeRecoveryApi.applyCommittedLocalReliableReceipts;
+
+const runtimeStorageApi = createRuntimeStorageApi({
+  getStorageDb,
+  getFrameDb,
+  tryOpenStorageDb,
+  rotateStorageEpochDb,
+  tryOpenFrameDb,
+  closeRuntimeDb,
+  closeInfraDb,
+  waitForPromiseBeforeTimeout,
+  createEmptyEnv,
+  replayRecoveryFrameJournals,
+});
+
+processRuntimeImpl = createRuntimeProcessor({
+  loop: runtimeLoopApi,
+  recovery: runtimeRecoveryApi,
+  storage: runtimeStorageApi,
+  attachEventEmitters,
+  applyRuntimeInput,
+  setApplyAllowed: (env, allowed) => {
+    envRecord(env)[ENV_APPLY_ALLOWED_KEY] = allowed;
+  },
+  getRuntimeOutputRoutingDeps,
+  notifyEnvChange: notifyRuntimeStateChanged,
+  notifyRuntimeFrameCommitted,
+});
+
+export const waitForRuntimeProcessingIdle = runtimeStorageApi.waitForRuntimeProcessingIdle;
+const getRuntimeProcessGlobal = runtimeStorageApi.getRuntimeProcessGlobal;
+export const RuntimeStorageWriteTimeoutError = runtimeStorageApi.RuntimeStorageWriteTimeoutError;
+export type RuntimeStorageWriteTimeoutError = InstanceType<typeof RuntimeStorageWriteTimeoutError>;
+export const RuntimeFrameStorageError = runtimeStorageApi.RuntimeFrameStorageError;
+export type RuntimeFrameStorageError = InstanceType<typeof RuntimeFrameStorageError>;
+export const saveEnvToDB = runtimeStorageApi.saveEnvToDB;
+export const readPersistedStorageFrameRecord = runtimeStorageApi.readPersistedStorageFrameRecord;
+export const listPersistedEntityIdsAtHeight = runtimeStorageApi.listPersistedEntityIdsAtHeight;
+export const verifyRuntimeChain = runtimeStorageApi.verifyRuntimeChain;
+const resolvePersistedLatestHeight = runtimeStorageApi.resolvePersistedLatestHeight;
+const resolvePersistedCheckpointHeights = runtimeStorageApi.resolvePersistedCheckpointHeights;
+const loadEnvFromStorageByReplay = runtimeStorageApi.loadEnvFromStorageByReplay;
+export const {
+  getPersistedLatestHeight,
+  loadEntityStateFromStorageDb,
+  loadEntityAccountDocFromStorageDb,
+  loadEntityViewPageFromStorageDb,
+  inspectStorageDb,
+  listPersistedCheckpointHeights,
+  readPersistedStorageHead,
+  verifyLiveRuntimeStorage,
+  readPersistedFrameJournal,
+  readPersistedRuntimeActivityJournal,
+  readPersistedAccountFrameHistory,
+  readPersistedEntityFrameHistory,
+  readPersistedFrameJournals,
+  readPersistedRuntimeActivityPage,
+  readPersistedCheckpointSnapshot,
+  buildPersistedRuntimeRecording,
+  openDetachedRuntimeRecording,
+} = createPersistenceQueries({
+  tryOpenStorageDb,
+  getStorageDb,
+  tryOpenFrameDb,
+  getFrameDb,
+  resolvePersistedLatestHeight,
+  resolvePersistedCheckpointHeights,
+  readPersistedStorageFrameRecord,
+  loadEnvFromStorageByReplay,
+  closeRuntimeDb,
+  restoreEnvFromRecoveryBundles,
+  withStorageConsistentRead,
+});
+
+export const loadEnvFromDB = async (
+  runtimeId?: string | null,
+  runtimeSeed?: string | null,
+  options?: {
+    fromSnapshotHeight?: number;
+    trustedJurisdictionRpcBindings?: readonly TrustedJurisdictionRpcBinding[];
+  },
+): Promise<RuntimeState | null> => loadLiveRuntimeFromDB({
+  loadByReplay: loadEnvFromStorageByReplay,
+  rehydrate: (env, trustedJurisdictionRpcBindings) =>
+    rehydrateRestoredRuntimeInfra(env, {
+      isBrowser: runtimeIsBrowser,
+      loadGossipProfiles: targetEnv =>
+        loadGossipProfilesFromInfraDb(targetEnv, infraGossipDbAccess),
+      assertPersistedContractConfigReady,
+      setBrowserVMJurisdiction,
+      ...(trustedJurisdictionRpcBindings ? { trustedJurisdictionRpcBindings } : {}),
+    }),
+  registerCommittedSingleSignerWallets,
+}, runtimeId, runtimeSeed, options);
+
+export const clearDB = async (env?: RuntimeState): Promise<void> => {
+  const targetEnv = env ?? createEmptyEnv(null);
+  await clearRuntimeDatabases(targetEnv, runtimeLoopApi);
+};
+
+const runtimeCommandApi = createRuntimeCommandApi({
+  getP2P,
+  getRuntimeOutputRoutingDeps,
+});
+
+export const submitCrossJurisdictionIntent = runtimeCommandApi.submitCrossJurisdictionIntent;
+export const submitCrossJurisdictionSwap = runtimeCommandApi.submitCrossJurisdictionSwap;
