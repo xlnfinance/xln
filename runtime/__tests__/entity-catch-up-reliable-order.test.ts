@@ -621,7 +621,7 @@ describe('ordered reliable Entity catch-up', () => {
     const firstTickReplica = receiver.eReplicas.get(`${initialState.entityId}:${signerId}`);
     expect(firstTickReplica?.state.height, safeStringify({
       runtimeHeight: receiver.height,
-      runtimeInput: receiver.runtimeInput,
+      runtimeInput: receiver.runtimeMempool,
       runtimeMempool: receiver.runtimeMempool,
       historyInput: receiver.history?.at(-1)?.runtimeInput,
       replica: firstTickReplica,

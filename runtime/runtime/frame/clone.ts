@@ -12,7 +12,7 @@ import { copyLocalRuntimeAdapterCommandAuthorization } from '../../radapter/comm
 import { buildCanonicalJReplicaSnapshot } from '../../wal/snapshot';
 import { attachEventEmitters } from '../env-events';
 import { copyLocalEntityProviderActionRuntimeTxAuthorization } from '../entity-provider-action-submit-auth';
-import { ensureRuntimeMempool } from '../input-queue';
+import { requireRuntimeMempool } from '../input-queue';
 import { copyLocalJImportResultRuntimeTxAuthorization } from '../jurisdiction-import';
 import { copyLocalJSubmitRuntimeTxAuthorization } from '../j-submit-state';
 import {
@@ -107,7 +107,7 @@ const cloneGossip = (env: Env): Env['gossip'] => {
 };
 
 export const cloneRuntimeFrameWorkingEnv = (source: Env): Env => {
-  const mempool = cloneRuntimeFrameMempool(ensureRuntimeMempool(source));
+  const mempool = cloneRuntimeFrameMempool(requireRuntimeMempool(source));
   const working: Env = {
     ...source,
     eReplicas: new Map(
@@ -124,7 +124,6 @@ export const cloneRuntimeFrameWorkingEnv = (source: Env): Env => {
     ),
     runtimeState: cloneRuntimeFrameState(source),
     runtimeMempool: mempool,
-    runtimeInput: mempool,
     ...(source.runtimeConfig ? { runtimeConfig: structuredClone(source.runtimeConfig) } : {}),
     ...(source.browserVMState ? { browserVMState: structuredClone(source.browserVMState) } : {}),
     ...(source.overlay ? { overlay: structuredClone(source.overlay) } : {}),

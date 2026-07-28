@@ -73,14 +73,11 @@ export const hasPendingRuntimeWork = (env: Env): boolean => {
   if (env.pendingOutputs?.length) return true;
   if (env.pendingNetworkOutputs?.length) return true;
   if (env.networkInbox?.length) return true;
-  const queuedInputs = [env.runtimeMempool, env.runtimeInput]
-    .filter((input, index, all) => input && all.indexOf(input) === index);
-  for (const input of queuedInputs) {
-    if (input!.entityInputs?.length) return true;
-    if (input!.runtimeTxs?.length) return true;
-    if (input!.jInputs?.length) return true;
-    if (input!.reliableReceipts?.length) return true;
-  }
+  const mempool = env.runtimeMempool;
+  if (mempool.entityInputs.length) return true;
+  if (mempool.runtimeTxs.length) return true;
+  if (mempool.jInputs?.length) return true;
+  if (mempool.reliableReceipts?.length) return true;
 
   if (env.jReplicas) {
     for (const replica of env.jReplicas.values()) {
@@ -213,14 +210,10 @@ export const hasQueuedOpenAccount = (
 
 const queuedEntityTxsFor = (env: Env, targetEntityId: string): EntityTx[] => {
   const normalizedEntityId = String(targetEntityId || '').toLowerCase();
-  const queues = [env.runtimeMempool?.entityInputs, env.runtimeInput?.entityInputs]
-    .filter((queue, index, all) => Array.isArray(queue) && all.indexOf(queue) === index);
   const txs: EntityTx[] = [];
-  for (const queue of queues) {
-    for (const input of queue || []) {
-      if (String(input.entityId || '').toLowerCase() !== normalizedEntityId) continue;
-      txs.push(...(input.entityTxs || []));
-    }
+  for (const input of env.runtimeMempool.entityInputs) {
+    if (String(input.entityId || '').toLowerCase() !== normalizedEntityId) continue;
+    txs.push(...(input.entityTxs || []));
   }
   return txs;
 };

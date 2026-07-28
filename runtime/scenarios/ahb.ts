@@ -105,12 +105,7 @@ export async function ahb(env: Env): Promise<void> {
       env.history = [];
     }
     env.height = 0;
-    if (env.runtimeInput) {
-      env.runtimeInput.runtimeTxs = [];
-      env.runtimeInput.entityInputs = [];
-    } else {
-      env.runtimeInput = { runtimeTxs: [], entityInputs: [] };
-    }
+    env.runtimeMempool = { runtimeTxs: [], entityInputs: [] };
     env.pendingOutputs = [];
     env.pendingNetworkOutputs = [];
     env.frameLogs = [];

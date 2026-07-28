@@ -615,7 +615,6 @@ export const runMarketMakerNode = async (): Promise<void> => {
         fatalDebugPayload: env.runtimeState?.fatalDebugPayload ?? null,
         loopActive: Boolean(env.runtimeState?.loopActive),
         backlog: getMarketMakerRuntimeBacklogSnapshot(env, { includeQueuedEntityInputs: true }),
-        runtimeInput: summarizeRuntimeInputs(env.runtimeInput?.entityInputs),
         runtimeMempool: summarizeRuntimeInputs(env.runtimeMempool?.entityInputs),
       },
       replica: replica

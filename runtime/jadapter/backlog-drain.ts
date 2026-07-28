@@ -254,7 +254,7 @@ const getDrainFingerprint = (
   statuses: JWatcherDrainStatus[],
 ): string => safeStringify({
   statuses,
-  queuedJInputs: (env.runtimeInput?.entityInputs ?? [])
+  queuedJInputs: (env.runtimeMempool?.entityInputs ?? [])
     .filter((input) =>
       input.entityTxs?.some((tx) => tx.type === 'j_event') ||
       input.proposedFrame ||
@@ -287,7 +287,7 @@ export const drainJWatcherBacklog = async (
 ): Promise<JWatcherDrainStatus[]> => {
   const targets = await captureTrustedJWatcherTargets(env);
   if (targets.length === 0) {
-    if ((env.runtimeInput?.entityInputs.length ?? 0) > 0) await processFrame(env);
+    if ((env.runtimeMempool?.entityInputs.length ?? 0) > 0) await processFrame(env);
     return [];
   }
 

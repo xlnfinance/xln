@@ -64,7 +64,7 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
       jReplicas: new Map(),
       height: 0,
       timestamp: SCENARIO_START_TIMESTAMP,
-      runtimeInput: { runtimeTxs: [], entityInputs: [] },
+      runtimeMempool: { runtimeTxs: [], entityInputs: [] },
       history: [],
       gossip: createGossipLayer(),
       frameLogs: [],

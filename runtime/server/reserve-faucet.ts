@@ -95,9 +95,8 @@ const resolveReserveWaitPollMs = (adapter: JAdapter | null): number => {
 const hasPendingRuntimeWork = (env: Env): boolean => {
   if (env.pendingOutputs?.length) return true;
   if (env.networkInbox?.length) return true;
-  if (env.runtimeInput?.runtimeTxs?.length) return true;
-  if (env.runtimeMempool?.entityInputs?.length) return true;
-  if (env.runtimeMempool?.runtimeTxs?.length) return true;
+  if (env.runtimeMempool.runtimeTxs.length) return true;
+  if (env.runtimeMempool.entityInputs.length) return true;
 
   if (env.jReplicas) {
     for (const replica of env.jReplicas.values()) {

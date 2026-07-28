@@ -3,7 +3,7 @@ import {
   rollbackReliableDeliveryReceipts,
   rollbackReliableIngressCommit,
 } from '../reliable-delivery';
-import { ensureRuntimeMempool } from '../input-queue';
+import { requireRuntimeMempool } from '../input-queue';
 import {
   abortRuntimeFrameTransaction,
   prependOlderRuntimeInput,
@@ -53,14 +53,13 @@ export const handleRuntimeFrameFailure = async (
     !frame.transaction.published
   ) {
     frame.rollbackHandled = true;
-    const workingMempool = ensureRuntimeMempool(frame.transaction.workingEnv);
+    const workingMempool = requireRuntimeMempool(frame.transaction.workingEnv);
     const cleanupErrors = await abortRuntimeFrameTransaction(frame.transaction);
     const restored = prependOlderRuntimeInput(
       workingMempool,
-      ensureRuntimeMempool(liveEnv),
+      requireRuntimeMempool(liveEnv),
     );
     liveEnv.runtimeMempool = restored;
-    liveEnv.runtimeInput = restored;
     if (cleanupErrors.length > 0) {
       const original = error instanceof Error ? error : new Error(String(error));
       return {

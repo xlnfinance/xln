@@ -222,7 +222,6 @@ describe('runtime ingress timestamp', () => {
       entityInputs: [],
       queuedAt: 9_000,
     };
-    env.runtimeInput = env.runtimeMempool;
 
     expect(hasRuntimeWork(env)).toBe(false);
   });
@@ -430,7 +429,7 @@ describe('runtime ingress timestamp', () => {
 
     const importedSignerId = deriveSignerAddressSync(env.runtimeSeed!, 'imported').toLowerCase();
     const importedEntityId = generateLazyEntityId([importedSignerId], 1n).toLowerCase();
-    env.runtimeInput = { runtimeTxs: [], entityInputs: [] };
+    env.runtimeMempool = { runtimeTxs: [], entityInputs: [] };
     await processRuntime(env, undefined);
     expect(replica.state.crontabState?.hooks?.has('watchdog:due-after-ingress')).toBe(true);
 

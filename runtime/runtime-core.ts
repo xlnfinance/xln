@@ -44,7 +44,7 @@ import {
   assertScheduledWakeTxAuthorized,
 } from './runtime/scheduled-wake';
 import { transitionRuntimeLifecycle } from './runtime/lifecycle';
-import { ensureRuntimeMempool } from './runtime/input-queue';
+import { requireRuntimeMempool } from './runtime/input-queue';
 import { ensureRuntimeState } from './runtime/runtime-state';
 import {
   applyReliableDeliveryReceipts,
@@ -1202,7 +1202,7 @@ const collectRuntimeIngress = async (
   // Entity ids dirtied by the previous committed frame.
   state.pendingProfileCertificationEntityIds = new Set();
   if (profileInputs.length > 0) {
-    const profileTimestamp = ensureRuntimeMempool(env).queuedAt ?? ingressTimestamp;
+    const profileTimestamp = requireRuntimeMempool(env).queuedAt ?? ingressTimestamp;
     enqueueRuntimeContinuation(env, profileInputs, undefined, undefined, profileTimestamp);
   }
   profile.mark('profileCertification');
@@ -1231,12 +1231,12 @@ const openRuntimeFrameCandidate = (
   liveEnv: Env,
   liveState: RuntimeState,
 ): RuntimeFrameCandidate => {
-  const mempoolQueuedAt = ensureRuntimeMempool(liveEnv).queuedAt;
+  const mempoolQueuedAt = requireRuntimeMempool(liveEnv).queuedAt;
   const quietRuntimeLogs = liveEnv.quietRuntimeLogs === true;
   const transaction = createRuntimeFrameTransaction(liveEnv);
   const env = transaction.workingEnv;
   const state = ensureRuntimeState(env);
-  const mempool = ensureRuntimeMempool(env);
+  const mempool = requireRuntimeMempool(env);
   for (const replica of env.jReplicas.values()) {
     replica.jadapter?.setQuietLogs?.(quietRuntimeLogs);
   }

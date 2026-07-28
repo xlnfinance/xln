@@ -37,6 +37,8 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   cache invalidation and state roots with settlement/dispute tests.
 - [ ] Turn Runtime execution into one visible pipeline:
   `take → validate/plan → isolated RJEA apply → WAL → install → dispatch`.
+  Keep exactly one live `Env.runtimeMempool`; `runtimeInput` names only the
+  immutable input persisted in a committed frame, never a second live queue.
   Represent all frame disposition, rollback and reliable-delivery flags in one
   explicit `FrameExecutionState` instead of cross-stage locals or closures.
   Extract transaction, commit, rollback and dispatch modules; keep
@@ -51,8 +53,9 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   halt. Keep failures loud and add queued-writer stale-input/rotation tests.
 - [ ] Split remaining god-functions by protocol phase and failure boundary:
   `applyEntityInput`, `applyAccountInput`, Runtime scheduler/transport/storage,
-  and RPC submit/watch/receipt. Target functions below 50 lines and files below
-  3000 lines. After the pipeline, collapse DI factories that add navigation
+  and RPC submit/watch/receipt. Target pure helpers below 50 lines,
+  coordinators below 100–150 lines, and every file below 3000 lines. After the
+  pipeline, collapse DI factories that add navigation
   without providing a real swappable boundary. Add an AST gate for function
   budgets so future 600–2800-line coordinators cannot pass a file-only limit.
 - [ ] Enforce an acyclic browser-safe core dependency graph. Keep cloning,

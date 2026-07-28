@@ -40,14 +40,8 @@ const shouldLogRuntimeInputDebug = (): boolean => {
   return env?.['XLN_RUNTIME_INPUT_DEBUG'] === '1';
 };
 
-export const ensureRuntimeMempool = (env: Env): RuntimeInput => {
-  if (!env.runtimeMempool) {
-    const base = env.runtimeInput ?? { runtimeTxs: [], entityInputs: [] };
-    env.runtimeMempool = base;
-    env.runtimeInput = base;
-  } else if (env.runtimeInput !== env.runtimeMempool) {
-    env.runtimeInput = env.runtimeMempool;
-  }
+export const requireRuntimeMempool = (env: Env): RuntimeInput => {
+  if (!env.runtimeMempool) throw new Error('RUNTIME_MEMPOOL_MISSING');
   return env.runtimeMempool;
 };
 
@@ -76,7 +70,7 @@ export const enqueueRuntimeInputsWithDeps = (
   reliableReceipts?: ReliableDeliveryReceipt[],
   options: RuntimeInputQueueOptions = {},
 ): void => {
-  const mempool = ensureRuntimeMempool(env);
+  const mempool = requireRuntimeMempool(env);
   const state = deps.ensureRuntimeState(env);
   const hasIncomingWork = Boolean(
     inputs?.length || runtimeTxs?.length || jInputs?.length || reliableReceipts?.length,

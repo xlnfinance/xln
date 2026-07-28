@@ -18,7 +18,7 @@ type RuntimeState = NonNullable<Env['runtimeState']>;
 
 export type RuntimeWakeDeps = {
   ensureRuntimeState(env: Env): RuntimeState;
-  ensureRuntimeMempool(env: Env): RuntimeInput;
+  requireRuntimeMempool(env: Env): RuntimeInput;
   enqueueRuntimeInputs(
     env: Env,
     inputs?: RoutedEntityInput[],
@@ -78,7 +78,7 @@ export const generateHookPingsWithDeps = (
   nowMs = deps.getRuntimeNowMs(env),
   queuedAt = env.timestamp ?? 0,
 ): void => {
-  deps.ensureRuntimeMempool(env);
+  deps.requireRuntimeMempool(env);
   const pings: RoutedEntityInput[] = createDueScheduledWakeInputs(env, nowMs);
   const jRetries = collectDueJSubmitRuntimeTxs(env, nowMs);
   const actionRetries = collectDueEntityProviderActionRuntimeTxs(env, nowMs);

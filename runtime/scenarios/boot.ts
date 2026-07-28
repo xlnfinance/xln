@@ -339,7 +339,7 @@ export async function bootScenario(config: ScenarioConfig): Promise<ScenarioBoot
   }
 
   // 5. Attach jadapter to jReplica (all 4 contract addresses)
-  // 6. Start watching (feeds events into env.runtimeInput.entityInputs)
+  // 6. Start watching (feeds events into env.runtimeMempool.entityInputs)
   jadapter.startWatching(env);
 
   // 7. Create jurisdiction config

@@ -78,8 +78,8 @@ const deriveHubSigner = (seed: string, signerLabel: string): { signerAddress: st
 };
 
 const ensureRuntimeInput = (env: Env) => {
-  if (!env.runtimeInput) {
-    env.runtimeInput = { runtimeTxs: [], entityInputs: [] };
+  if (!env.runtimeMempool) {
+    env.runtimeMempool = { runtimeTxs: [], entityInputs: [] };
   }
 };
 
@@ -135,7 +135,7 @@ export async function bootstrapHub(env?: Env, config?: Partial<HubConfig>): Prom
 
   if (!replicaExists) {
     ensureRuntimeInput(env);
-    env.runtimeInput.runtimeTxs.push({
+    env.runtimeMempool.runtimeTxs.push({
       type: 'importReplica',
       entityId,
       signerId: signerAddress,
@@ -174,7 +174,7 @@ export async function bootstrapHub(env?: Env, config?: Partial<HubConfig>): Prom
   }
 
   ensureRuntimeInput(env);
-  env.runtimeInput.entityInputs.push({
+  env.runtimeMempool.entityInputs.push({
     entityId,
     signerId: signerAddress,
     entityTxs: [

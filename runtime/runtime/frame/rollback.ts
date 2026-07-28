@@ -1,5 +1,5 @@
 import type { Env, RuntimeInput } from '../../types';
-import { ensureRuntimeMempool } from '../input-queue';
+import { requireRuntimeMempool } from '../input-queue';
 import { ensureRuntimeState } from '../runtime-state';
 import type { FrameExecutionState } from './execution-state';
 import {
@@ -38,9 +38,8 @@ const restoreFailedInput = (
         return prependOlderRuntimeInput(attempted, workingMempool);
       })()
     : workingMempool;
-  const restored = prependOlderRuntimeInput(retry, ensureRuntimeMempool(liveEnv));
+  const restored = prependOlderRuntimeInput(retry, requireRuntimeMempool(liveEnv));
   liveEnv.runtimeMempool = restored;
-  liveEnv.runtimeInput = restored;
 };
 
 export const rollbackUndurableRuntimeFrame = async (
@@ -51,8 +50,8 @@ export const rollbackUndurableRuntimeFrame = async (
   const originalError = cause instanceof Error ? cause : new Error(String(cause));
   const { frame, liveEnv } = context;
   const workingMempool = frame.transaction
-    ? ensureRuntimeMempool(frame.transaction.workingEnv)
-    : ensureRuntimeMempool(context.attemptedEnv);
+    ? requireRuntimeMempool(frame.transaction.workingEnv)
+    : requireRuntimeMempool(context.attemptedEnv);
   const cleanupErrors = frame.transaction
     ? await abortRuntimeFrameTransaction(frame.transaction)
     : [];

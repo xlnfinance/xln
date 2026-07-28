@@ -2,7 +2,7 @@ import { getSignerPrivateKeyIfAvailable, prewarmSignerKeyCache } from '../accoun
 import { createStructuredLogger } from '../infra/logger';
 import { extractEntityId, extractSignerId } from '../ids';
 import { attachEventEmitters } from '../runtime/env-events';
-import { ensureRuntimeMempool } from '../runtime/input-queue';
+import { requireRuntimeMempool } from '../runtime/input-queue';
 import { persistGossipProfileToInfraDb } from '../runtime/infra-gossip-store';
 import { ensureRuntimeState } from '../runtime/runtime-state';
 import { createGossipLayer, type Profile } from '../networking/gossip';
@@ -87,10 +87,9 @@ export const createRuntimeStateApi = (deps: RuntimeStateCreateDeps) => {
       runtimeSeed: seedText,
       ...(resolvedRuntimeId ? { runtimeId: resolvedRuntimeId } : {}),
       ...(dbNamespace ? { dbNamespace } : {}),
-      runtimeMempool: undefined,
+      runtimeMempool: { runtimeTxs: [], entityInputs: [] },
       runtimeConfig: undefined,
       runtimeState: undefined,
-      runtimeInput: { runtimeTxs: [], entityInputs: [] },
       history: [],
       gossip,
       frameLogs: [],
@@ -105,7 +104,7 @@ export const createRuntimeStateApi = (deps: RuntimeStateCreateDeps) => {
     };
 
     attachEventEmitters(env);
-    ensureRuntimeMempool(env);
+    requireRuntimeMempool(env);
     deps.ensureRuntimeConfig(env);
     ensureRuntimeState(env);
     if (seedText) prewarmRuntimeSignerCache(seedText, 20);

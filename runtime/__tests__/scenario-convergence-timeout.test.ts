@@ -18,7 +18,7 @@ const runtimeId = `0x${'22'.repeat(20)}`;
 const envWithBacklog = (label: string) => {
   const env = createEmptyEnv(`scenario-convergence-timeout:${label}`);
   env.scenarioMode = true;
-  env.runtimeInput.entityInputs = [{
+  env.runtimeMempool.entityInputs = [{
     entityId,
     signerId: '1',
   }];
@@ -151,13 +151,12 @@ describe('scenario convergence timeout diagnostics', () => {
 
     expect(registerReliableIngress(env, receiverRuntimeId, output).kind).toBe('enqueue');
     expect(env.runtimeState?.pendingReliableIngress?.size).toBe(1);
-    env.runtimeInput.entityInputs = [output];
-    env.runtimeMempool!.entityInputs = [output];
+    env.runtimeMempool.entityInputs = [output];
 
     await processWithOffline(env, undefined, new Set(['4']), 'validator-offline');
 
     expect(env.runtimeState?.pendingReliableIngress?.size).toBe(0);
-    expect(env.runtimeInput.entityInputs).toEqual([]);
+    expect(env.runtimeMempool.entityInputs).toEqual([]);
     expect(registerReliableIngress(env, receiverRuntimeId, output).kind).toBe('enqueue');
   });
 });

@@ -472,7 +472,7 @@ const importParticipants = async (
         },
       })),
       entityInputs: [],
-    } as unknown as Env['runtimeInput'];
+    } as unknown as Env['runtimeMempool'];
     await applyRuntimeInput(env, runtimeInput);
     if (env.runtimeConfig?.storage?.enabled === true || env.runtimeState?.persistencePaused !== true) {
       await saveEnvToDB(env, runtimeInput);

@@ -346,7 +346,7 @@ export async function processWithOffline(
   }
   env.pendingOutputs = filteredPending;
 
-  const queuedInputs = env.runtimeInput?.entityInputs || [];
+  const queuedInputs = env.runtimeMempool?.entityInputs || [];
   const { filtered: filteredQueued, dropped: droppedQueued } = filterOfflineInputs(queuedInputs, offlineSigners);
   if (droppedQueued.length > 0) {
     env.info('network', 'OFFLINE_SIGNER_DROP', {
@@ -356,8 +356,7 @@ export async function processWithOffline(
       count: droppedQueued.length,
       entities: Array.from(new Set(droppedQueued.map(i => i.entityId))),
     });
-    if (env.runtimeInput) env.runtimeInput.entityInputs = filteredQueued;
-    if (env.runtimeMempool) env.runtimeMempool.entityInputs = filteredQueued;
+    env.runtimeMempool.entityInputs = filteredQueued;
   }
 
   const { filtered: filteredInputs, dropped: droppedInputs } = filterOfflineInputs(inputs || [], offlineSigners);
@@ -384,7 +383,7 @@ export async function processWithOffline(
   );
 
   const processed = await process(env, filteredInputs);
-  const postProcessInputs = processed.runtimeInput?.entityInputs ?? [];
+  const postProcessInputs = processed.runtimeMempool?.entityInputs ?? [];
   const { filtered: retainedPostProcessInputs, dropped: droppedPostProcessInputs } =
     filterOfflineInputs(postProcessInputs, offlineSigners);
   if (droppedPostProcessInputs.length > 0) {
@@ -395,8 +394,7 @@ export async function processWithOffline(
       count: droppedPostProcessInputs.length,
       entities: Array.from(new Set(droppedPostProcessInputs.map(input => input.entityId))),
     });
-    processed.runtimeInput!.entityInputs = retainedPostProcessInputs;
-    if (processed.runtimeMempool) processed.runtimeMempool.entityInputs = retainedPostProcessInputs;
+    processed.runtimeMempool.entityInputs = retainedPostProcessInputs;
     releaseUncommittedReliableIngress(processed, droppedPostProcessInputs, []);
   }
   return processed;
@@ -415,7 +413,7 @@ export async function converge(env: Env, maxCycles = 10): Promise<void> {
     const pendingOutputs = env.pendingOutputs?.length || 0;
     const pendingNetwork = env.pendingNetworkOutputs?.length || 0;
     const pendingInbox = env.networkInbox?.length || 0;
-    const pendingInputs = env.runtimeInput?.entityInputs?.length || 0;
+    const pendingInputs = env.runtimeMempool?.entityInputs?.length || 0;
     if (pendingOutputs > 0 || pendingNetwork > 0 || pendingInbox > 0 || pendingInputs > 0) {
       hasWork = true;
     }
@@ -490,7 +488,7 @@ export async function convergeWithOffline(
     const pendingOutputs = env.pendingOutputs?.length || 0;
     const pendingNetwork = countOnlinePendingNetworkOutputs(env, offlineSigners);
     const pendingInbox = env.networkInbox?.length || 0;
-    const pendingInputs = env.runtimeInput?.entityInputs?.length || 0;
+    const pendingInputs = env.runtimeMempool?.entityInputs?.length || 0;
     if (pendingOutputs > 0 || pendingNetwork > 0 || pendingInbox > 0 || pendingInputs > 0) {
       hasWork = true;
     }
@@ -534,7 +532,7 @@ const throwScenarioConvergenceTimeout = (
   throw new Error(
     `${label}: not converged after ${maxCycles} cycles; ` +
     `outputs=${env.pendingOutputs?.length ?? 0},network=${env.pendingNetworkOutputs?.length ?? 0},` +
-    `inbox=${env.networkInbox?.length ?? 0},inputs=${env.runtimeInput?.entityInputs?.length ?? 0},` +
+    `inbox=${env.networkInbox?.length ?? 0},inputs=${env.runtimeMempool?.entityInputs?.length ?? 0},` +
     `networkLanes=[${pendingNetworkDiagnostics(env)}],entities=[${entityBacklog.join(';')}]`,
   );
 };
@@ -626,7 +624,7 @@ export function assertBilateralSync(
 
 /**
  * Process pending j-events from JAdapter operations (BrowserVM or RPC).
- * Drains env.runtimeInput.entityInputs queue through process().
+ * Drains env.runtimeMempool.entityInputs queue through process().
  * Call after any JAdapter write operation (debugFundReserves, processBatch, etc.)
  */
 export async function processJEvents(env: Env): Promise<void> {
@@ -697,14 +695,11 @@ const isMeaningfulScenarioEntityInput = (input: EntityInput): boolean => {
 };
 
 const pruneIdleScenarioEntityInputs = (env: Env): void => {
-  const currentInputs = env.runtimeInput?.entityInputs;
+  const currentInputs = env.runtimeMempool?.entityInputs;
   if (!currentInputs || currentInputs.length === 0) return;
   const meaningfulInputs = currentInputs.filter(isMeaningfulScenarioEntityInput);
   if (meaningfulInputs.length === currentInputs.length) return;
-  env.runtimeInput.entityInputs = meaningfulInputs;
-  if (env.runtimeMempool) {
-    env.runtimeMempool.entityInputs = meaningfulInputs;
-  }
+  env.runtimeMempool.entityInputs = meaningfulInputs;
 };
 
 /**
@@ -718,7 +713,7 @@ export async function drainRuntime(env: Env, maxIterations: number = 20): Promis
   while (iterations < maxIterations) {
     pruneIdleScenarioEntityInputs(env);
     const pendingOutputs = env.pendingOutputs?.length || 0;
-    const pendingInputs = env.runtimeInput?.entityInputs?.length || 0;
+    const pendingInputs = env.runtimeMempool?.entityInputs?.length || 0;
     const pendingInbox = env.networkInbox?.length || 0;
     const pendingNetwork = env.pendingNetworkOutputs?.length || 0;
 
@@ -737,7 +732,7 @@ export function assertRuntimeIdle(env: Env, label: string = 'runtime'): void {
   const errors: string[] = [];
 
   const pendingOutputs = env.pendingOutputs?.length || 0;
-  const pendingInputs = env.runtimeInput?.entityInputs?.length || 0;
+  const pendingInputs = env.runtimeMempool?.entityInputs?.length || 0;
   const pendingInbox = env.networkInbox?.length || 0;
   const pendingNetwork = env.pendingNetworkOutputs?.length || 0;
 

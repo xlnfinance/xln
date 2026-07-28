@@ -84,10 +84,10 @@ async function openGridAccount(env: Env, fromEntityId: string, toEntityId: strin
 // Process pending j_events queued by j-watcher
 async function processJEvents(env: Env): Promise<void> {
   const process = await getProcess();
-  const pendingInputs = env.runtimeInput?.entityInputs || [];
+  const pendingInputs = env.runtimeMempool?.entityInputs || [];
   if (pendingInputs.length > 0) {
     const toProcess = [...pendingInputs];
-    env.runtimeInput.entityInputs = [];
+    env.runtimeMempool.entityInputs = [];
     await process(env, toProcess);
   }
 }

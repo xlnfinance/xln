@@ -818,8 +818,7 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
       );
       env.runtimeMempool = frame.pendingRuntimeInput
         ? authorizeRestoredRuntimeInput(cloneIsolatedRuntimeInput(frame.pendingRuntimeInput))
-        : undefined;
-      env.runtimeInput = env.runtimeMempool ?? { runtimeTxs: [], entityInputs: [] };
+        : { runtimeTxs: [], entityInputs: [] };
       env.pendingNetworkOutputs = cloneIsolatedRoutedEntityInputs(frame.runtimeOutputs ?? []);
       restoreDurableOutputRetryState(env, frame.runtimeOutputRetryState ?? [], frame.runtimeOutputs ?? []);
       await restoreOverlayFromFrameLog(env, targetHeight);
@@ -1097,7 +1096,6 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
   const restoreReplayedActivityViews = async (env: Env, targetHeight: number): Promise<void> => {
     // Activity/history hydration is a read-model concern. Never erase deferred
     // input state reconstructed from the latest WAL frame.
-    env.runtimeInput = env.runtimeMempool ?? { runtimeTxs: [], entityInputs: [] };
     await restoreOverlayFromFrameLog(env, targetHeight);
     await hydrateAccountFrameHistoryViews(env);
     env.frameLogs = [];

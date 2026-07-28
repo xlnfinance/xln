@@ -60,10 +60,10 @@ async function processJEvents(env: Env): Promise<void> {
     if (ja?.pollNow) await ja.pollNow();
   }
 
-  const pending = env.runtimeInput.entityInputs.length;
+  const pending = env.runtimeMempool.entityInputs.length;
   if (pending === 0) return;
-  const inputs = [...env.runtimeInput.entityInputs];
-  env.runtimeInput.entityInputs = [];
+  const inputs = [...env.runtimeMempool.entityInputs];
+  env.runtimeMempool.entityInputs = [];
   await commitRuntimeInput(env, { runtimeTxs: [], entityInputs: inputs });
 }
 
@@ -254,12 +254,7 @@ export async function swap(env: Env): Promise<void> {
     env.history = [];
   }
   env.height = 0; // Reset to frame 0
-  if (env.runtimeInput) {
-    env.runtimeInput.runtimeTxs = [];
-    env.runtimeInput.entityInputs = [];
-  } else {
-    env.runtimeInput = { runtimeTxs: [], entityInputs: [] };
-  }
+  env.runtimeMempool = { runtimeTxs: [], entityInputs: [] };
   env.pendingOutputs = [];
   env.pendingNetworkOutputs = [];
   env.networkInbox = [];

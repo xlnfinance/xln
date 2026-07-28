@@ -142,7 +142,7 @@ export const createLocalDeliveryHandler = (
     if (result.kind === 'ignored' && result.receipts.length === 0) {
       throw new Error('INBOUND_ENTITY_INPUTS_IGNORED');
     }
-    const queueSize = env.runtimeMempool?.entityInputs?.length ?? env.runtimeInput?.entityInputs?.length ?? 0;
+    const queueSize = env.runtimeMempool.entityInputs.length;
     relayLog(`[RELAY] → local entity_inputs result=${result.kind} (queue=${queueSize})`);
     pushDebugEvent(store, {
       event: 'delivery',

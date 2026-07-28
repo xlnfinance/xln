@@ -38,13 +38,12 @@ describe('runtime snapshot codec', () => {
   test('durable runtime snapshot helper restores queues config and failover outbox', () => {
     const env = createEmptyEnv('durable-runtime-snapshot');
     env.runtimeConfig = { minFrameDelayMs: 25, snapshotIntervalFrames: 7 };
-    env.runtimeInput = {
+    env.runtimeMempool = {
       runtimeTxs: [],
       entityInputs: [],
       jInputs: [{ jurisdictionName: 'Testnet', jTxs: [] }],
       queuedAt: 120,
     };
-    env.runtimeMempool = env.runtimeInput;
     env.pendingOutputs = [{
       entityId: `0x${'11'.repeat(32)}`,
       signerId: `0x${'22'.repeat(20)}`,
@@ -85,8 +84,7 @@ describe('runtime snapshot codec', () => {
 
     restoreDurableRuntimeSnapshot(restored, checkpoint);
 
-    expect(restored.runtimeInput).toEqual(env.runtimeInput);
-    expect(restored.runtimeMempool).toBe(restored.runtimeInput);
+    expect(restored.runtimeMempool).toEqual(env.runtimeMempool);
     expect(restored.runtimeConfig).toEqual(env.runtimeConfig);
     expect(restored.pendingOutputs).toEqual(env.pendingOutputs);
     // Authenticated gossip routes are a rebuildable transport cache. They are
@@ -109,7 +107,7 @@ describe('runtime snapshot codec', () => {
     const entityId = `0x${'71'.repeat(32)}`;
     const signerId = `0x${'72'.repeat(20)}`;
     const emptyTrigger = { entityId, signerId, entityTxs: [] };
-    env.runtimeInput = {
+    env.runtimeMempool = {
       runtimeTxs: [],
       entityInputs: [emptyTrigger, {
         entityId,
@@ -125,7 +123,6 @@ describe('runtime snapshot codec', () => {
         }],
       }],
     };
-    env.runtimeMempool = env.runtimeInput;
 
     const checkpoint = buildDurableRuntimeMachineSnapshot(env);
     const restored = createEmptyEnv('durable-runtime-empty-trigger-restored');

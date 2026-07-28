@@ -64,7 +64,7 @@ const captureQueuedAck = (env: Env, toEntityId: string): AccountAckInput | undef
     env.pendingOutputs ?? [],
     env.networkInbox ?? [],
     env.pendingNetworkOutputs ?? [],
-    env.runtimeInput.entityInputs,
+    env.runtimeMempool.entityInputs,
   ];
   for (const queue of queues) {
     for (const envelope of queue) {
@@ -90,7 +90,7 @@ const dropPartitionedOutputs = (env: Env, entityIds: ReadonlySet<string>): void 
   env.pendingNetworkOutputs = (env.pendingNetworkOutputs ?? []).filter(
     (output) => !entityIds.has(output.entityId),
   );
-  env.runtimeInput.entityInputs = env.runtimeInput.entityInputs.filter((input) => {
+  env.runtimeMempool.entityInputs = env.runtimeMempool.entityInputs.filter((input) => {
     if (!entityIds.has(input.entityId)) return true;
     return !(input.entityTxs ?? []).some((tx) => tx.type === 'consensusOutput');
   });

@@ -1,6 +1,6 @@
 import type { JAdapter } from '../../jadapter';
 import type { Env, RuntimeInput } from '../../types';
-import { ensureRuntimeMempool } from '../input-queue';
+import { requireRuntimeMempool } from '../input-queue';
 import {
   assertRuntimeFrameStorageState,
   reconcileRuntimeFrameSharedState,
@@ -54,7 +54,7 @@ export type RuntimeFrameTransaction = {
 
 export const createRuntimeFrameTransaction = (liveEnv: Env): RuntimeFrameTransaction => {
   const workingEnv = cloneRuntimeFrameWorkingEnv(liveEnv);
-  const workingMempool = ensureRuntimeMempool(workingEnv);
+  const workingMempool = requireRuntimeMempool(workingEnv);
   const workingState = ensureRuntimeState(workingEnv);
   const liveState = ensureRuntimeState(liveEnv);
   const sharedStateBaseline = new Map(
@@ -69,7 +69,6 @@ export const createRuntimeFrameTransaction = (liveEnv: Env): RuntimeFrameTransac
   const activeMempool: RuntimeInput = { runtimeTxs: [], entityInputs: [] };
   liveState.inFlightEntityInputs = workingMempool.entityInputs.length;
   liveEnv.runtimeMempool = activeMempool;
-  liveEnv.runtimeInput = activeMempool;
   return {
     liveEnv,
     workingEnv,
@@ -161,8 +160,8 @@ const publishRuntimeState = (transaction: RuntimeFrameTransaction): void => {
 export const publishRuntimeFrameTransaction = (transaction: RuntimeFrameTransaction): Env => {
   if (transaction.published) return transaction.liveEnv;
   const { liveEnv, workingEnv } = transaction;
-  const activeMempool = ensureRuntimeMempool(liveEnv);
-  const workingMempool = ensureRuntimeMempool(workingEnv);
+  const activeMempool = requireRuntimeMempool(liveEnv);
+  const workingMempool = requireRuntimeMempool(workingEnv);
   publishRuntimeState(transaction);
 
   liveEnv.height = workingEnv.height;
@@ -187,7 +186,6 @@ export const publishRuntimeFrameTransaction = (transaction: RuntimeFrameTransact
   liveEnv.frameLogs = liveEnv.frameLogs.slice(transaction.liveFrameLogBaseLength);
   const mergedMempool = prependOlderRuntimeInput(workingMempool, activeMempool);
   liveEnv.runtimeMempool = mergedMempool;
-  liveEnv.runtimeInput = mergedMempool;
   const state = ensureRuntimeState(liveEnv);
   state.wakeRequested =
     state.wakeRequested === true ||

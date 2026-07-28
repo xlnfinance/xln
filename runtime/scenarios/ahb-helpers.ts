@@ -140,7 +140,7 @@ export async function processJEvents(env: Env): Promise<void> {
   if (typeof jadapter?.pollNow === 'function') {
     await jadapter.pollNow();
   }
-  const pendingInputs = env.runtimeInput?.entityInputs || [];
+  const pendingInputs = env.runtimeMempool?.entityInputs || [];
   if (!env.quietRuntimeLogs) {
     console.log(`🔄 processJEvents CALLED: ${pendingInputs.length} pending in queue`);
   }
@@ -149,7 +149,7 @@ export async function processJEvents(env: Env): Promise<void> {
       console.log(`   routing ${pendingInputs.length} to entities...`);
     }
     const toProcess = [...pendingInputs];
-    env.runtimeInput.entityInputs = [];
+    env.runtimeMempool.entityInputs = [];
     await processRuntime(env, toProcess);
     if (!env.quietRuntimeLogs) {
       console.log(`   ✓ ${toProcess.length} j-events processed`);

@@ -13,6 +13,7 @@ import type {
   PendingJurisdictionImport,
   RuntimeTx,
 } from '../types';
+import { requireRuntimeMempool } from './input-queue';
 
 type ImportJRuntimeTx = Extract<RuntimeTx, { type: 'importJ' }>;
 type CompleteImportJRuntimeTx = Extract<RuntimeTx, { type: 'completeImportJ' }>;
@@ -556,7 +557,7 @@ export const materializePendingJurisdictionImportResults = async (
 ): Promise<void> => {
   const pending = env.runtimeState?.pendingJurisdictionImports;
   if (!pending || pending.size === 0) return;
-  const queuedIds = new Set((env.runtimeMempool ?? env.runtimeInput).runtimeTxs
+  const queuedIds = new Set(requireRuntimeMempool(env).runtimeTxs
     .filter((tx): tx is CompleteImportJRuntimeTx => tx.type === 'completeImportJ')
     .map(tx => tx.data.importId));
   const ordered = [...pending.values()].sort((left, right) =>

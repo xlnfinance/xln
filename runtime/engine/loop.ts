@@ -65,7 +65,7 @@ import {
 } from '../runtime/lifecycle';
 import {
   enqueueRuntimeInputsWithDeps,
-  ensureRuntimeMempool,
+  requireRuntimeMempool,
   requestRuntimeLoopWake,
   type RuntimeInputQueueDeps,
   type RuntimeInputQueueOptions,
@@ -435,7 +435,7 @@ export const createRuntimeLoopApi = (deps: RuntimeLoopApiDeps) => {
   };
 
   const getRuntimeWorkReason = (env: Env): string | null => {
-    const mempool = ensureRuntimeMempool(env);
+    const mempool = requireRuntimeMempool(env);
     if ((env.runtimeState?.pendingProfileCertificationEntityIds?.size ?? 0) > 0) return 'profile-certification';
     if ((env.runtimeState?.pendingCommittedJOutbox?.length ?? 0) > 0) return 'committed-j-outbox';
     if ((env.runtimeState?.pendingJurisdictionImports?.size ?? 0) > 0) return 'jurisdiction-import';
@@ -663,7 +663,7 @@ export const createRuntimeLoopApi = (deps: RuntimeLoopApiDeps) => {
 
   const getRuntimeWakeDeps = (): RuntimeWakeDeps => ({
     ensureRuntimeState,
-    ensureRuntimeMempool,
+    requireRuntimeMempool,
     enqueueRuntimeInputs,
     getRuntimeNowMs,
   });
@@ -977,7 +977,7 @@ export const createRuntimeLoopApi = (deps: RuntimeLoopApiDeps) => {
             const waitResult = await waitForRuntimeLoopWakeOrTimeout(env, Math.max(0, nextDueAt - getWallClockMs()));
             if (waitResult === 'timeout') {
               const dueTimestamp = getEarliestWallClockDueTimestamp(env) ?? nextDueAt;
-              const mempool = ensureRuntimeMempool(env);
+              const mempool = requireRuntimeMempool(env);
               mempool.queuedAt =
                 mempool.queuedAt === undefined ? dueTimestamp : Math.max(mempool.queuedAt, dueTimestamp);
               generateHookPings(env, dueTimestamp, dueTimestamp);

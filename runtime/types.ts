@@ -1204,9 +1204,9 @@ export interface Env {
   /** Last completed operational phase of the active process(); diagnostics only. */
   activeProcessProgressStep?: string;
   dbNamespace?: string; // DB namespace for per-runtime persistence (defaults to runtimeId)
-  // Runtime mempool (runtime-level queue; WAL-like). runtimeInput is the persisted frame input field.
-  runtimeMempool?: RuntimeInput | undefined;
-  runtimeInput: RuntimeInput;
+  // The sole live Runtime ingress queue. Persisted frames separately call
+  // their immutable applied input `runtimeInput`.
+  runtimeMempool: RuntimeInput;
   overlay?: RuntimeOverlayRecord[];
   runtimeConfig?: {
     minFrameDelayMs?: number; // Minimum delay between runtime frames

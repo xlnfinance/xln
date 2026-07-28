@@ -49,9 +49,8 @@ test('enqueueRuntimeInputs timestamps work and wakes the loop', () => {
   );
 
   expect(wakeCount).toBe(1);
-  expect(env.runtimeMempool).toBe(env.runtimeInput);
-  expect((env.runtimeInput as RuntimeInput).entityInputs).toHaveLength(1);
-  expect(env.runtimeInput.queuedAt).toBe(1000);
+  expect(env.runtimeMempool.entityInputs).toHaveLength(1);
+  expect(env.runtimeMempool.queuedAt).toBe(1000);
 });
 
 test('enqueueRuntimeInputs preserves already accepted internal continuations during durable pause', () => {
@@ -76,7 +75,7 @@ test('enqueueRuntimeInputs preserves already accepted internal continuations dur
     undefined,
     { acceptedBeforeQuiesce: true },
   );
-  expect(env.runtimeInput.runtimeTxs).toHaveLength(1);
+  expect(env.runtimeMempool.runtimeTxs).toHaveLength(1);
   expect(wakeCount).toBe(1);
 });
 
@@ -101,5 +100,5 @@ test('enqueueRuntimeInputs rejects work after quiesce has paused durable persist
   )).toThrow(
     'RUNTIME_INPUT_INGRESS_AFTER_PERSISTENCE_PAUSE:runtime=runtime-a:runtimeTxs=observeJRange',
   );
-  expect(env.runtimeInput.runtimeTxs).toHaveLength(0);
+  expect(env.runtimeMempool.runtimeTxs).toHaveLength(0);
 });

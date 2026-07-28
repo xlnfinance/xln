@@ -233,7 +233,7 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
     const snapshotGossipProfiles = Array.isArray(snapshotGossip?.profiles)
       ? (snapshotGossip.profiles as Profile[])
       : [];
-    env.runtimeInput = { runtimeTxs: [], entityInputs: [] };
+    env.runtimeMempool = { runtimeTxs: [], entityInputs: [] };
     env.frameLogs = [];
     env.networkInbox = [];
     env.pendingNetworkOutputs = [];
@@ -448,8 +448,7 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
           clearPendingAuditEvents(env);
           env.runtimeMempool = frame.pendingRuntimeInput
             ? authorizeRestoredRuntimeInput(cloneIsolatedRuntimeInput(frame.pendingRuntimeInput))
-            : undefined;
-          env.runtimeInput = env.runtimeMempool ?? { runtimeTxs: [], entityInputs: [] };
+            : { runtimeTxs: [], entityInputs: [] };
           env.pendingNetworkOutputs = cloneIsolatedRoutedEntityInputs(frame.runtimeOutputs ?? []);
           restoreDurableOutputRetryState(env, frame.runtimeOutputRetryState ?? [], frame.runtimeOutputs ?? []);
           // These activity records were consumed by the same atomic storage

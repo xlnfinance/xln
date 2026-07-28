@@ -40,10 +40,7 @@ const hasPendingCertification = (env: Env, entityId: string): boolean => {
       || hasCertificationTx(replica.lockedFrame?.txs)
     ) return true;
   }
-  for (const input of [
-    ...(env.runtimeMempool?.entityInputs ?? []),
-    ...(env.runtimeInput?.entityInputs ?? []),
-  ]) {
+  for (const input of env.runtimeMempool.entityInputs) {
     if (normalize(input.entityId) === normalizedEntityId && hasCertificationTx(input.entityTxs)) return true;
   }
   return false;

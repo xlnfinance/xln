@@ -19,6 +19,7 @@ import {
 } from './entity-provider-action-submit-state';
 import { makeEntityProviderActionResultRuntimeTx } from './entity-provider-action-submit-result';
 import { isEntityActiveLeader } from '../entity/consensus/leader';
+import { requireRuntimeMempool } from './input-queue';
 
 const jSubmitLog = createStructuredLogger('runtime.jsubmit');
 
@@ -46,13 +47,13 @@ const hasSemanticJHistoryTx = (input: EntityInput): boolean =>
   );
 
 const captureQueuedEntityInputs = (env: Env): EntityInput[] => {
-  const mempool = env.runtimeMempool ?? env.runtimeInput;
+  const mempool = requireRuntimeMempool(env);
   return Array.isArray(mempool?.entityInputs) ? [...mempool.entityInputs] : [];
 };
 
 const prioritizeJEventsQueuedAfterSubmit = (env: Env, beforePoll: EntityInput[]): number => {
-  const mempool = env.runtimeMempool ?? env.runtimeInput;
-  if (!mempool || !Array.isArray(mempool.entityInputs)) return 0;
+  const mempool = requireRuntimeMempool(env);
+  if (!Array.isArray(mempool.entityInputs)) return 0;
   const current = mempool.entityInputs;
   if (current.length <= beforePoll.length) return 0;
 
@@ -67,7 +68,6 @@ const prioritizeJEventsQueuedAfterSubmit = (env: Env, beforePoll: EntityInput[])
   // fail even though the chain transaction has already finalized.
   mempool.entityInputs = [...newlyQueuedJEvents, ...beforePoll, ...newlyQueuedOtherInputs];
   env.runtimeMempool = mempool;
-  env.runtimeInput = mempool;
   return newlyQueuedJEvents.length;
 };
 

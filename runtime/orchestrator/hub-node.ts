@@ -1821,7 +1821,6 @@ const run = async (): Promise<void> => {
             halted: Boolean(runtimeState?.halted),
             fatalDebugPayload: runtimeState?.fatalDebugPayload ?? null,
             loopActive: Boolean(runtimeState?.loopActive),
-            runtimeInput: summarizeRuntimeInputs(env.runtimeInput?.entityInputs),
             runtimeMempool: summarizeRuntimeInputs(env.runtimeMempool?.entityInputs),
           },
           replica: replica ? {

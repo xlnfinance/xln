@@ -18,7 +18,6 @@ describe('mesh queued work detection', () => {
     const env = {
       runtimeState: { processingPromise: new Promise<void>(() => {}) },
       runtimeMempool: { runtimeTxs: [], entityInputs: [] },
-      runtimeInput: { runtimeTxs: [], entityInputs: [] },
       eReplicas: new Map(),
       jReplicas: new Map(),
     } as unknown as Env;
@@ -113,6 +112,7 @@ describe('mesh queued work detection', () => {
       },
     };
     const env = {
+      runtimeMempool: { runtimeTxs: [], entityInputs: [] },
       eReplicas: new Map([[`${entityId}:${author}`, { entityId, mempool: [signedCommand] }]]),
     } as unknown as Env;
 

@@ -264,7 +264,7 @@ const snapshotEnvProjection = (env: Env): Record<string, unknown> => ({
   runtimeId: env.runtimeId,
   eReplicas: env.eReplicas,
   jReplicas: projectJReplicas(env.jReplicas),
-  runtimeInput: env.runtimeInput,
+  runtimeInput: env.runtimeMempool,
   pendingOutputs: env.pendingOutputs ?? [],
   pendingNetworkOutputs: env.pendingNetworkOutputs ?? [],
   networkInbox: env.networkInbox ?? [],
