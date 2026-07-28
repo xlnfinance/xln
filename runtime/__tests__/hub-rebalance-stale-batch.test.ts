@@ -1,8 +1,10 @@
 import { expect, test } from 'bun:test';
 
+import { computeAccountStateRoot } from '../account/state-root';
 import { executeCrontab, initCrontab, HUB_PENDING_BROADCAST_STALE_MS } from '../entity/scheduler';
 import { createEmptyEnv } from '../runtime';
 import type { EntityReplica, EntityState, JurisdictionConfig } from '../types';
+import { makeAccount } from './helpers/cross-j';
 
 const entityId = `0x${'c5'.repeat(32)}`;
 const signerId = `0x${'da'.repeat(20)}`;
@@ -134,4 +136,44 @@ test('a hub still waits while the sent batch is younger than the stale threshold
     .filter((tx) => tx.type === 'j_abort_sent_batch');
 
   expect(abortTxs, 'a fresh in-flight batch must not be aborted').toEqual([]);
+});
+
+test('hub crontab cannot unilaterally clear a bilateral rebalance request', async () => {
+  const userId = `0x${'f5'.repeat(32)}`;
+  const tokenId = 1;
+  const requestedAmount = 500n;
+  const hubAccount = makeAccount(entityId, userId, jurisdiction);
+  hubAccount.requestedRebalance.set(tokenId, requestedAmount);
+  hubAccount.requestedRebalanceFeeState.set(tokenId, {
+    requestId: 'bilateral-request',
+    feeTokenId: tokenId,
+    feePaidUpfront: 10n ** 30n,
+    requestedAmount,
+    policyVersion: 1,
+    requestedAt: 1,
+    requestedByLeft: false,
+  });
+  const userAccount = structuredClone(hubAccount);
+  const bilateralRoot = computeAccountStateRoot(userAccount);
+
+  const env = createEmptyEnv('hub-rebalance-bilateral-clear');
+  env.scenarioMode = true;
+  env.quietRuntimeLogs = true;
+  env.timestamp = 1_000_000;
+  const state = makeHubState(env.timestamp, 0);
+  state.jBatchState = undefined;
+  state.accounts.set(userId, hubAccount);
+  state.crontabState = initCrontab();
+  for (const task of state.crontabState.tasks.values()) task.lastRun = 0;
+  const replica = { entityId, signerId, mempool: [], isProposer: true, state } as EntityReplica;
+  env.eReplicas.set(`${entityId}:${signerId}`, replica);
+
+  await executeCrontab(env, replica, state.crontabState, {
+    manualBroadcastInInput: false,
+    accountChanges: new Set(),
+  });
+
+  expect(computeAccountStateRoot(hubAccount)).toBe(bilateralRoot);
+  expect(hubAccount.requestedRebalance.get(tokenId)).toBe(requestedAmount);
+  expect(hubAccount.requestedRebalanceFeeState.has(tokenId)).toBe(true);
 });

@@ -44,6 +44,11 @@ export function handleRebalanceRefund(
   if (nextRefunded === feeState.feePaidUpfront) {
     account.requestedRebalance.delete(requestTokenId);
     account.requestedRebalanceFeeState.delete(requestTokenId);
+    // The submission marker is local execution bookkeeping, but it controls
+    // whether a later request may enter J-batch. Clearing the canonical request
+    // without clearing this marker permanently suppresses a new request for
+    // the same token after a full bilateral refund.
+    account.shadow.rebalance.submittedAtByToken.delete(requestTokenId);
   } else {
     feeState.refund = { reason, refundedAmount: nextRefunded };
   }

@@ -32,6 +32,12 @@ const account = (): AccountMachine => ({
     [7, requestState('request-7', 1, 100n)],
     [8, requestState('request-8', 1, 100n)],
   ]),
+  shadow: {
+    rebalance: {
+      policy: new Map(),
+      submittedAtByToken: new Map([[7, 123], [8, 123]]),
+    },
+  },
 }) as unknown as AccountMachine;
 
 describe('rebalance financial transitions', () => {
@@ -54,6 +60,8 @@ describe('rebalance financial transitions', () => {
     expect(final.success).toBe(true);
     expect(state.requestedRebalance.has(7)).toBe(false);
     expect(state.requestedRebalanceFeeState.has(7)).toBe(false);
+    expect(state.shadow.rebalance.submittedAtByToken.has(7)).toBe(false);
+    expect(state.shadow.rebalance.submittedAtByToken.get(8)).toBe(123);
     expect(state.requestedRebalance.has(8)).toBe(true);
   });
 

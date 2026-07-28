@@ -886,19 +886,9 @@ async function hubRebalanceHandler(
 
       const feeState = accountMachine.requestedRebalanceFeeState?.get(tokenId);
       if (!feeState) {
-        console.warn(
-          `⚠️ R→C request dropped (missing fee state): token=${tokenId} cp=${counterpartyId.slice(-4)}`,
+        throw new Error(
+          `REBALANCE_REQUEST_FEE_STATE_MISSING:${counterpartyId}:${tokenId}`,
         );
-        emitRebalanceDebug({
-          step: 2,
-          status: 'error',
-          event: 'request_dropped_missing_fee_state',
-          counterpartyId,
-          tokenId,
-        });
-        accountMachine.requestedRebalance.delete(tokenId);
-        context.accountChanges.add(counterpartyId);
-        continue;
       }
       const prepaidFee = feeState.feePaidUpfront;
       if (feeState.refund) {
@@ -1003,18 +993,17 @@ async function hubRebalanceHandler(
       const counterpartyDerived = deriveDelta(delta, !hubIsLeft);
       const uncollateralized = counterpartyDerived.outPeerCredit;
       if (uncollateralized <= 0n) {
-        // Fee remains prepaid by design (no automatic refunds in crontab path).
-        // Operators can handle discretionary refunds explicitly if needed.
+        // This request is bilateral Account state. A hub crontab tick is only
+        // local Entity execution and therefore cannot clear it: doing so gives
+        // hub and counterparty different Account roots. Keep the request intact
+        // until an explicit bilateral completion/refund transition resolves it.
         emitRebalanceDebug({
           step: 2,
-          status: 'ok',
-          event: 'request_cleared_already_collateralized',
+          status: 'blocked',
+          event: 'request_waiting_bilateral_resolution',
           counterpartyId,
           tokenId,
         });
-        accountMachine.requestedRebalance.delete(tokenId);
-        accountMachine.requestedRebalanceFeeState?.delete(tokenId);
-        context.accountChanges.add(counterpartyId);
         continue;
       }
 
