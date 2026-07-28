@@ -13,7 +13,6 @@ import {
   applyRuntimeInput,
   cloneRuntimeFrameMempool,
   createEmptyEnv,
-  describeRuntimeFrameIngressErrors,
   enqueueRuntimeInput,
   getFrameDb,
   getRuntimeStorageDb,
@@ -44,7 +43,6 @@ import type {
   JurisdictionConfig,
   ReliableDeliveryReceipt,
   RoutedEntityInput,
-  RuntimeFrameIngressBuffer,
   RuntimeInput,
   RuntimeTx,
 } from '../types';
@@ -234,16 +232,6 @@ const exactQueuedInput = (env: Env): RuntimeInput => ({
     ? { reliableReceipts: env.runtimeMempool.reliableReceipts }
     : {}),
 });
-
-const installTestIngressBuffer = (env: Env): RuntimeFrameIngressBuffer => {
-  const buffer: RuntimeFrameIngressBuffer = {
-    status: 'active',
-    entries: [],
-  };
-  env.runtimeState ??= {};
-  env.runtimeState.runtimeFrameIngressBuffer = buffer;
-  return buffer;
-};
 
 const createTestReliableReceipt = (
   targetEnv: Env,
@@ -686,12 +674,11 @@ describe('runtime frame atomicity', () => {
     expect(Object.getOwnPropertySymbols(persisted!.runtimeInput.runtimeTxs[0]!)).toHaveLength(0);
   });
 
-  test('frame ingress remains lossless beyond former count and byte thresholds', () => {
+  test('the single Runtime mempool remains lossless beyond former ingress thresholds', () => {
     const env = createEmptyEnv(`runtime ingress load ${TEST_RUN_ID}`);
     env.quietRuntimeLogs = true;
     installJurisdiction(env);
     const replica = installValidatorReplica(env, address('c1'), env.runtimeId!);
-    const buffer = installTestIngressBuffer(env);
     const sourceRuntimeId = address('c3');
     const input = {
       entityId: replica.entityId,
@@ -709,35 +696,26 @@ describe('runtime frame atomicity', () => {
     }
     const reliable = createTestReliableReceipt(env, replica.entityId, replica.signerId);
     expect(handleInboundReliableReceipt(env, reliable.from, reliable.receipt)).toBe('queued');
-    expect(buffer.entries).toHaveLength(1_026);
+    expect(env.runtimeMempool?.entityInputs).toHaveLength(1_025);
+    expect(env.runtimeMempool?.reliableReceipts).toHaveLength(1);
   });
 
-  test('receipt ingress is fenced before it can enter an active frame buffer', () => {
+  test('receipt ingress is fenced before it can enter the Runtime mempool', () => {
     const env = createEmptyEnv(`runtime receipt quiesce fence ${TEST_RUN_ID}`);
     env.quietRuntimeLogs = true;
     installJurisdiction(env);
     const replica = installValidatorReplica(env, address('c5'), env.runtimeId!);
-    const buffer = installTestIngressBuffer(env);
     const reliable = createTestReliableReceipt(env, replica.entityId, replica.signerId);
     env.runtimeState!.persistenceQuiescing = true;
 
     expect(handleInboundReliableReceipt(env, reliable.from, reliable.receipt))
       .toBe('deferred');
-    expect(buffer.entries).toHaveLength(0);
+    expect(env.runtimeMempool?.reliableReceipts ?? []).toHaveLength(0);
     expect(env.runtimeState?.receivedReliableReceiptLedger).toBeUndefined();
     expect(env.runtimeState?.receivedReliableTerminalWatermarks).toBeUndefined();
   });
 
-  test('frame ingress aggregate diagnostics preserve every child error code', () => {
-    expect(describeRuntimeFrameIngressErrors([
-      new Error('FIRST_INGRESS_FAILURE'),
-      new TypeError('SECOND_INGRESS_FAILURE'),
-    ])).toBe(
-      '1/2:Error:FIRST_INGRESS_FAILURE|2/2:TypeError:SECOND_INGRESS_FAILURE',
-    );
-  });
-
-  test('frame ingress ownership is env-local and closes after the exact frame', async () => {
+  test('each Runtime owns one active mempool while a detached frame executes', async () => {
     const activeEnv = createEmptyEnv(`runtime ingress owner ${TEST_RUN_ID}`);
     activeEnv.scenarioMode = true;
     activeEnv.quietRuntimeLogs = true;
@@ -763,10 +741,8 @@ describe('runtime frame atomicity', () => {
       await Bun.sleep(0);
     }
     expect(observedDetachedIngressTail).toBe(true);
-    expect(activeEnv.runtimeState?.runtimeFrameIngressBuffer?.status).toBe('active');
     const durableWhileActive = buildDurableRuntimeMachineSnapshot(activeEnv);
-    expect((durableWhileActive.runtimeState as Record<string, unknown> | undefined)
-      ?.runtimeFrameIngressBuffer).toBeUndefined();
+    expect((durableWhileActive.runtimeInput as RuntimeInput).runtimeTxs).toEqual([]);
     expect(() => restoreDurableRuntimeSnapshot(activeEnv, durableWhileActive))
       .toThrow('RUNTIME_SNAPSHOT_RESTORE_DURING_ACTIVE_FRAME');
 
@@ -783,12 +759,10 @@ describe('runtime frame atomicity', () => {
     expect(handleInboundP2PEntityInput(otherEnv, address('53'), otherInput, otherEnv.timestamp))
       .toEqual({ kind: 'queued' });
     expect(otherEnv.runtimeMempool?.entityInputs).toEqual([{ ...otherInput, from: address('53') }]);
-    expect(otherEnv.runtimeState?.runtimeFrameIngressBuffer).toBeUndefined();
-    expect(activeEnv.runtimeState?.runtimeFrameIngressBuffer?.entries).toHaveLength(0);
+    expect(activeEnv.runtimeMempool?.entityInputs).toHaveLength(0);
 
     try {
       await processPromise;
-      expect(activeEnv.runtimeState?.runtimeFrameIngressBuffer).toBeUndefined();
 
       const postFrameInput: RoutedEntityInput = {
         entityId: baselineImport.entityId,
@@ -803,12 +777,6 @@ describe('runtime frame atomicity', () => {
       )).toEqual({ kind: 'queued' });
       expect(activeEnv.runtimeMempool?.entityInputs)
         .toEqual([{ ...postFrameInput, from: address('54') }]);
-      expect(activeEnv.runtimeState?.runtimeFrameIngressBuffer).toBeUndefined();
-      expect(() => restoreDurableRuntimeSnapshot(activeEnv, {
-        runtimeState: {
-          runtimeFrameIngressBuffer: { status: 'active', entries: [] },
-        },
-      })).toThrow('RUNTIME_SNAPSHOT_EPHEMERAL_FRAME_INGRESS_FORBIDDEN');
     } finally {
       await closeTestEnv(activeEnv);
     }
@@ -967,8 +935,8 @@ describe('runtime frame atomicity', () => {
     }
   });
 
-  test('concurrent reliable ingress survives a pre-authoritative frame rollback', async () => {
-    const seed = `runtime concurrent ingress rollback ${TEST_RUN_ID}`;
+  test('later reliable ingress survives a pre-authoritative frame rollback', async () => {
+    const seed = `runtime later ingress rollback ${TEST_RUN_ID}`;
     const env = createEmptyEnv(seed);
     env.scenarioMode = true;
     env.quietRuntimeLogs = true;
@@ -1015,28 +983,26 @@ describe('runtime frame atomicity', () => {
       await Bun.sleep(0);
     }
     expect(observedDetachedIngressTail).toBe(true);
-    expect(env.runtimeState?.runtimeFrameIngressBuffer?.status).toBe('active');
     try {
       expect(handleInboundP2PEntityInput(env, sourceRuntimeId, frameB, env.timestamp))
         .toEqual({ kind: 'queued' });
       await expect(processPromise).rejects.toThrow('STORAGE_CURRENT_AHEAD_OF_HISTORY');
-      expect(env.runtimeState?.runtimeFrameIngressBuffer).toBeUndefined();
 
       expect(env.height).toBe(heightBefore);
       expect(env.timestamp).toBe(timestampBefore);
       expect(env.runtimeMempool?.runtimeTxs).toEqual(frameA.runtimeTxs);
       expect(env.runtimeMempool?.entityInputs.filter(input => input.hashPrecommitFrame))
         .toEqual([{ ...frameB, from: sourceRuntimeId }]);
-      expect(env.runtimeState?.pendingReliableIngress?.size).toBe(1);
-      const pending = [...(env.runtimeState?.pendingReliableIngress?.values() ?? [])][0];
-      expect(pending?.targetRuntimeIds).toEqual(new Set([sourceRuntimeId]));
+      // Transport admission only appends bytes. Reliable frontier state changes
+      // when this input belongs to the next isolated Runtime frame.
+      expect(env.runtimeState?.pendingReliableIngress?.size ?? 0).toBe(0);
     } finally {
       await closeTestEnv(env);
     }
   });
 
   test('pre-quiesce reliable ingress is replayed against the committed frame state', async () => {
-    const seed = `runtime concurrent ingress commit ${TEST_RUN_ID}`;
+    const seed = `runtime later ingress commit ${TEST_RUN_ID}`;
     const env = createEmptyEnv(seed);
     env.scenarioMode = true;
     env.quietRuntimeLogs = true;
@@ -1065,7 +1031,6 @@ describe('runtime frame atomicity', () => {
       await Bun.sleep(0);
     }
     expect(observedDetachedIngressTail).toBe(true);
-    expect(env.runtimeState?.runtimeFrameIngressBuffer?.status).toBe('active');
 
     const frameB: RoutedEntityInput = {
       runtimeId: env.runtimeId!,
@@ -1078,21 +1043,17 @@ describe('runtime frame atomicity', () => {
     try {
       expect(handleInboundP2PEntityInput(env, sourceRuntimeId, frameB, env.timestamp))
         .toEqual({ kind: 'queued' });
-      // The transport accepted frameB while this R-frame was running. A
-      // persistence cut may close new ingress before the committed frame drains
-      // that private buffer, but it must not retroactively reject frameB.
+      // The transport accepted frameB while this R-frame was running. It belongs
+      // to the next frame even if persistence quiesces before this frame commits.
       env.scenarioMode = false;
       env.runtimeState!.persistenceQuiescing = true;
       env.runtimeState!.persistencePaused = true;
       await processPromise;
-      expect(env.runtimeState?.runtimeFrameIngressBuffer).toBeUndefined();
 
       expect(env.height).toBe(heightBefore + 1);
       expect(env.eReplicas.has(`${frameA.entityId}:${frameA.signerId}`)).toBe(true);
       expect(env.runtimeMempool?.entityInputs).toEqual([{ ...frameB, from: sourceRuntimeId }]);
-      expect(env.runtimeState?.pendingReliableIngress?.size).toBe(1);
-      const pending = [...(env.runtimeState?.pendingReliableIngress?.values() ?? [])][0];
-      expect(pending?.targetRuntimeIds).toEqual(new Set([sourceRuntimeId]));
+      expect(env.runtimeState?.pendingReliableIngress?.size ?? 0).toBe(0);
     } finally {
       env.scenarioMode = true;
       await closeTestEnv(env);

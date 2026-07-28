@@ -37,15 +37,13 @@ import {
   type RuntimeOutputRoutingDeps,
 } from '../runtime/output-routing';
 import { runtimeInputRequiresOutboxCapacity } from '../runtime/admission';
-import { isDeliveryDelivered } from './../protocol/payments/delivery-result';
 import {
   createRuntimeOutputRoutingDeps,
-  routeInboundP2PEntityInput,
-  routeInboundP2PEntityInputs,
   registerEntityRuntimeHintWithDeps,
   validateInboundP2PEntityInput,
   validateInboundP2PEntityInputsEnvelope,
   type RuntimeInboundEntityInputOptions,
+  type RuntimeInboundEntityInputsResult,
   type RuntimeEntityRoutingDeps,
 } from '../runtime/entity-routing';
 import {
@@ -99,7 +97,6 @@ import type {
   ReliableDeliveryReceipt,
   RoutedEntityInput,
   RuntimeEntityInputsEnvelope,
-  RuntimeFrameIngressBuffer,
   RuntimeInput,
   RuntimeTx,
 } from './../types';
@@ -121,11 +118,6 @@ import {
 import { createStructuredLogger } from '../infra/logger';
 
 type RuntimeModule = typeof import('../runtime');
-
-type RuntimeFrameIngressTransaction = {
-  liveEnv: Env;
-  ingressBuffer: RuntimeFrameIngressBuffer;
-};
 
 export type RuntimeLoopApiDeps = {
   notifyEnvChange(env: Env): void;
@@ -1347,45 +1339,13 @@ export const createRuntimeLoopApi = (deps: RuntimeLoopApiDeps) => {
     }
   };
 
-  type RuntimeFrameIngressEntry = RuntimeFrameIngressBuffer['entries'][number];
-
-  const beginRuntimeFrameIngressBuffer = (env: Env): RuntimeFrameIngressBuffer => {
-    const state = ensureRuntimeState(env);
-    if (state.runtimeFrameIngressBuffer) {
-      throw new Error(`RUNTIME_FRAME_INGRESS_BUFFER_ALREADY_ACTIVE:${state.runtimeFrameIngressBuffer.status}`);
-    }
-    const buffer: RuntimeFrameIngressBuffer = {
-      status: 'active',
-      entries: [],
-    };
-    state.runtimeFrameIngressBuffer = buffer;
-    return buffer;
-  };
-
-  const getRuntimeFrameIngressBuffer = (env: Env): RuntimeFrameIngressBuffer | undefined => {
-    const buffer = env.runtimeState?.runtimeFrameIngressBuffer;
-    if (buffer && buffer.status !== 'active') {
-      throw new Error(`RUNTIME_FRAME_INGRESS_BUFFER_INVALID_LIFECYCLE:${buffer.status}`);
-    }
-    return buffer;
-  };
-
-  const appendRuntimeFrameIngress = (buffer: RuntimeFrameIngressBuffer, entry: RuntimeFrameIngressEntry): void => {
-    buffer.entries.push(structuredClone(entry));
-  };
-
   const handleInboundP2PEntityInput = (env: Env, from: string, input: RoutedEntityInput, ingressTimestamp?: number) => {
     const deps = getRuntimeEntityRoutingDeps();
-    const buffered = getRuntimeFrameIngressBuffer(env);
-    if (!buffered) return routeInboundP2PEntityInput(env, from, input, deps, ingressTimestamp);
     const validation = validateInboundP2PEntityInput(env, from, input, deps);
     if (validation.kind === 'ignored') return validation;
-    appendRuntimeFrameIngress(buffered, {
-      kind: 'entity',
-      from,
-      input,
-      ...(ingressTimestamp === undefined ? {} : { ingressTimestamp }),
-    });
+    // The transport boundary validates and appends to the one Runtime
+    // mempool. Reliable frontier registration belongs to the isolated frame.
+    deps.enqueueRuntimeInputs(env, [{ ...input, from }], undefined, undefined, ingressTimestamp);
     return { kind: 'queued' } as const;
   };
 
@@ -1394,19 +1354,18 @@ export const createRuntimeLoopApi = (deps: RuntimeLoopApiDeps) => {
     from: string,
     envelope: RuntimeEntityInputsEnvelope,
     ingressTimestamp?: number,
-  ) => {
+  ): RuntimeInboundEntityInputsResult => {
     const deps = getRuntimeEntityRoutingDeps();
-    const buffered = getRuntimeFrameIngressBuffer(env);
-    if (!buffered) {
-      return routeInboundP2PEntityInputs(env, from, envelope, deps, ingressTimestamp);
+    const inputs = validateInboundP2PEntityInputsEnvelope(env, from, envelope, deps);
+    if (inputs.length > 0) {
+      deps.enqueueRuntimeInputs(
+        env,
+        inputs.map(input => ({ ...input, from })),
+        undefined,
+        undefined,
+        ingressTimestamp,
+      );
     }
-    validateInboundP2PEntityInputsEnvelope(env, from, envelope, deps);
-    appendRuntimeFrameIngress(buffered, {
-      kind: 'entity-inputs',
-      from,
-      envelope,
-      ...(ingressTimestamp === undefined ? {} : { ingressTimestamp }),
-    });
     return { kind: 'queued' as const, receipts: [] as ReliableDeliveryReceipt[] };
   };
 
@@ -1439,99 +1398,11 @@ export const createRuntimeLoopApi = (deps: RuntimeLoopApiDeps) => {
         height: receipt.body.identity.height,
         coverage: receipt.body.coverage,
         registration,
-        buffered: Boolean(getRuntimeFrameIngressBuffer(env)),
       });
     }
     if (registration === 'duplicate') return 'duplicate';
-    const buffered = getRuntimeFrameIngressBuffer(env);
-    if (buffered) {
-      appendRuntimeFrameIngress(buffered, { kind: 'receipt', from, receipt });
-      return 'queued';
-    }
     enqueueRuntimeInputs(env, undefined, undefined, undefined, env.timestamp, [receipt], options);
     return 'queued';
-  };
-
-  const dispatchRuntimeReliableReceipt = (env: Env, runtimeId: string, receipt: ReliableDeliveryReceipt): void => {
-    const state = ensureRuntimeState(env);
-    const directResult = state.directReliableReceiptDispatch?.(runtimeId, receipt);
-    const result =
-      directResult && isDeliveryDelivered(directResult)
-        ? directResult
-        : (getP2P(env)?.enqueueReliableReceiptDelivery(runtimeId, receipt) ?? directResult);
-    if (!result || !isDeliveryDelivered(result)) {
-      env.warn('network', 'RELIABLE_RECEIPT_SEND_DEFERRED', {
-        targetRuntimeId: runtimeId,
-        delivery: result ?? null,
-      });
-    }
-  };
-
-  const describeRuntimeFrameIngressErrors = (errors: readonly Error[]): string =>
-    errors.map((error, index) => `${index + 1}/${errors.length}:${error.name}:${error.message}`).join('|');
-
-  const drainRuntimeFrameIngressBuffer = (transaction: RuntimeFrameIngressTransaction): void => {
-    const env = transaction.liveEnv;
-    const state = ensureRuntimeState(env);
-    const buffered = transaction.ingressBuffer;
-    if (state.runtimeFrameIngressBuffer !== buffered) {
-      throw new Error('RUNTIME_FRAME_INGRESS_BUFFER_OWNERSHIP_MISMATCH');
-    }
-    if (buffered.status !== 'active') {
-      throw new Error(`RUNTIME_FRAME_INGRESS_BUFFER_INVALID_DRAIN:${buffered.status}`);
-    }
-    buffered.status = 'draining';
-    delete state.runtimeFrameIngressBuffer;
-    const entries = buffered.entries;
-    buffered.entries = [];
-    const deps = getRuntimeEntityRoutingDeps();
-    const errors: Error[] = [];
-    try {
-      for (const ingress of entries) {
-        try {
-          if (ingress.kind === 'receipt') {
-            handleInboundReliableReceipt(env, ingress.from, ingress.receipt, { acceptedBeforeQuiesce: true });
-            continue;
-          }
-          if (ingress.kind === 'entity') {
-            const result = routeInboundP2PEntityInput(
-              env,
-              ingress.from,
-              ingress.input,
-              deps,
-              ingress.ingressTimestamp,
-              { acceptedBeforeQuiesce: true },
-            );
-            if (result.kind === 'receipt') {
-              dispatchRuntimeReliableReceipt(env, ingress.from, result.receipt);
-            }
-            continue;
-          }
-          const result = routeInboundP2PEntityInputs(
-            env,
-            ingress.from,
-            ingress.envelope,
-            deps,
-            ingress.ingressTimestamp,
-            { acceptedBeforeQuiesce: true },
-          );
-          for (const receipt of result.receipts) {
-            dispatchRuntimeReliableReceipt(env, ingress.from, receipt);
-          }
-        } catch (error) {
-          errors.push(error instanceof Error ? error : new Error(String(error)));
-        }
-      }
-    } finally {
-      buffered.status = 'closed';
-    }
-    if (errors.length === 1) throw errors[0];
-    if (errors.length > 1) {
-      throw new AggregateError(
-        errors,
-        `RUNTIME_FRAME_INGRESS_DRAIN_FAILED:${describeRuntimeFrameIngressErrors(errors)}`,
-      );
-    }
   };
 
   const getRuntimeNowMs = (env: Env): number => env.timestamp ?? 0;
@@ -1803,12 +1674,9 @@ export const createRuntimeLoopApi = (deps: RuntimeLoopApiDeps) => {
     MAX_RUNTIME_J_TXS_PER_JURISDICTION,
     MAX_RUNTIME_J_INPUT_BYTES,
     validateRuntimeJIngressLimits,
-    beginRuntimeFrameIngressBuffer,
     handleInboundP2PEntityInput,
     handleInboundP2PEntityInputs,
     handleInboundReliableReceipt,
-    describeRuntimeFrameIngressErrors,
-    drainRuntimeFrameIngressBuffer,
     normalizeRuntimeEntityInput,
     validateRuntimeInputAdmission,
     getRuntimeEntityRoutingDeps,

@@ -73,7 +73,11 @@ import {
   announceCertifiedLocalProfiles,
   collectDueLocalProfileCertificationInputs,
 } from './networking/local-profile-lifecycle';
-import { selectMatchedCrossJAccountInputPairs, type RuntimeEntityRoutingDeps } from './runtime/entity-routing';
+import {
+  selectMatchedCrossJAccountInputPairs,
+  selectPotentialCrossJAccountInputPairs,
+  type RuntimeEntityRoutingDeps,
+} from './runtime/entity-routing';
 import {
   assertScheduledWakeTxAuthorized,
   copyLocalScheduledWakeAuthorization,
@@ -133,7 +137,6 @@ import type {
   JReplica,
   ReliableDeliveryReceipt,
   RoutedEntityInput,
-  RuntimeFrameIngressBuffer,
   RuntimeInput,
   RuntimeTx,
 } from './types';
@@ -221,12 +224,9 @@ const {
   MAX_RUNTIME_J_TXS_PER_JURISDICTION,
   MAX_RUNTIME_J_INPUT_BYTES,
   validateRuntimeJIngressLimits,
-  beginRuntimeFrameIngressBuffer,
   handleInboundP2PEntityInput,
   handleInboundP2PEntityInputs,
   handleInboundReliableReceipt,
-  describeRuntimeFrameIngressErrors,
-  drainRuntimeFrameIngressBuffer,
   normalizeRuntimeEntityInput,
   validateRuntimeInputAdmission,
   getRuntimeEntityRoutingDeps,
@@ -286,7 +286,6 @@ export {
   handleInboundP2PEntityInput,
   handleInboundP2PEntityInputs,
   handleInboundReliableReceipt,
-  describeRuntimeFrameIngressErrors,
   validateRuntimeInputAdmission,
   sendEntityInput,
   startP2P,
@@ -624,6 +623,10 @@ const applyRuntimeInput = async (
   jOutbox: JInput[];
   appliedRuntimeInput: RuntimeInput;
   reliableIngressCommits: ReliableIngressCommit[];
+  immediateReliableReceipts: Array<{
+    runtimeId: string;
+    receipt: ReliableDeliveryReceipt;
+  }>;
 }> => {
   failfastAssert(
     env.scenarioMode === true || envRecord(env)[ENV_APPLY_ALLOWED_KEY] === true,
@@ -701,7 +704,7 @@ const applyRuntimeInput = async (
     }
 
     const validatedRuntimeTxs = [...runtimeInput.runtimeTxs];
-    const validatedEntityInputs = runtimeInput.entityInputs.map((input, i) => {
+    let validatedEntityInputs = runtimeInput.entityInputs.map((input, i) => {
       try {
         const isReplay = envRecord(env)[ENV_REPLAY_MODE_KEY] === true;
         for (const tx of input.entityTxs ?? []) assertScheduledWakeTxAuthorized(tx, isReplay);
@@ -719,24 +722,46 @@ const applyRuntimeInput = async (
       }
     });
 
+    const isReplay = envRecord(env)[ENV_REPLAY_MODE_KEY] === true;
+    const immediateReliableReceipts: Array<{
+      runtimeId: string;
+      receipt: ReliableDeliveryReceipt;
+    }> = [];
+    const atomicCrossJInputIndexes = new Set(
+      selectPotentialCrossJAccountInputPairs(validatedEntityInputs)
+        .flatMap(pair => [pair.sourceInputIndex, pair.targetInputIndex]),
+    );
+    const admittedEntityInputs: RoutedEntityInput[] = [];
+    for (const [inputIndex, input] of validatedEntityInputs.entries()) {
+      const sourceRuntimeId = normalizeRuntimeId(input.from);
+      // Local inputs and non-reliable remote inputs enter the frame directly.
+      // Reliable remote ingress is registered only on this isolated working
+      // Env, never by transport against the live committed Env.
+      if (!sourceRuntimeId || !getInputReliableIdentity(input)) {
+        admittedEntityInputs.push(input);
+        continue;
+      }
+      const registration = registerReliableIngress(env, sourceRuntimeId, input, {
+        allowContiguousPendingAccountAck: atomicCrossJInputIndexes.has(inputIndex),
+      });
+      // WAL replay contains only inputs selected by the original committed
+      // frame. Recreate its frontier and apply the exact persisted batch.
+      if (isReplay || registration.kind === 'ordinary' || registration.kind === 'enqueue') {
+        admittedEntityInputs.push(input);
+        continue;
+      }
+      if (registration.kind === 'receipt') {
+        immediateReliableReceipts.push({ runtimeId: sourceRuntimeId, receipt: registration.receipt });
+      }
+    }
+    validatedEntityInputs = admittedEntityInputs;
+
     const mergedRuntimeTxs = [...validatedRuntimeTxs];
     const mergedInputs = mergeEntityInputs([...validatedEntityInputs], input =>
       hasVerifiedEntityCommitPrecertificate(env, input),
     );
     markApplyProfile('validateMerge');
 
-    const isReplay = envRecord(env)[ENV_REPLAY_MODE_KEY] === true;
-    if (isReplay) {
-      for (const input of validatedEntityInputs.flatMap(splitRoutedOutputByDeliveryLane)) {
-        if (!getInputReliableIdentity(input)) continue;
-        const sourceRuntimeId = normalizeRuntimeId(input.from);
-        // Direct/local Entity inputs may carry a reliable identity without a
-        // transport sender and therefore never owned a receiver frontier.
-        // Receipt-only WAL inputs are materialized with `from` below.
-        if (!sourceRuntimeId) continue;
-        registerReliableIngress(env, sourceRuntimeId, input);
-      }
-    }
     if (runtimeInput.reliableReceipts && runtimeInput.reliableReceipts.length > 0) {
       applyReliableDeliveryReceipts(env, runtimeInput.reliableReceipts);
     }
@@ -990,6 +1015,7 @@ const applyRuntimeInput = async (
       jOutbox,
       appliedRuntimeInput,
       reliableIngressCommits,
+      immediateReliableReceipts,
     };
   } catch (error) {
     // Strict scenarios already surface the thrown value at their outer boundary.
@@ -1190,10 +1216,12 @@ const RUNTIME_FRAME_SHARED_STATE_KEYS = new Set<string>([
   'canUseConnectedRelayFallback',
   'recoveryBackupBarrier',
   'watcherDedupCounter',
-  'runtimeFrameIngressBuffer',
 ]);
 
-const RUNTIME_FRAME_CONCURRENT_STATE_KEYS = new Set<string>([
+// Process-local state belongs to the live Runtime instance, not to the
+// deterministic frame candidate. Publishing a frame must retain these exact
+// live handles and operator flags.
+const RUNTIME_FRAME_LIVE_STATE_KEYS = new Set<string>([
   'lifecyclePhase',
   'halted',
   'fatalDebugPayload',
@@ -1216,7 +1244,6 @@ const RUNTIME_FRAME_CONCURRENT_STATE_KEYS = new Set<string>([
 type RuntimeFrameTransaction = {
   liveEnv: Env;
   workingEnv: Env;
-  ingressBuffer: RuntimeFrameIngressBuffer;
   sharedStateBaseline: Map<string, RuntimeFrameSharedStateSnapshot>;
   liveFrameLogBaseLength: number;
   workingCleanLogBaseLength: number;
@@ -1348,18 +1375,16 @@ const createRuntimeFrameTransaction = (liveEnv: Env): RuntimeFrameTransaction =>
       },
     ]),
   );
-  const concurrentMempool: RuntimeInput = { runtimeTxs: [], entityInputs: [] };
-  const ingressBuffer = beginRuntimeFrameIngressBuffer(liveEnv);
+  const activeMempool: RuntimeInput = { runtimeTxs: [], entityInputs: [] };
   // Operational producers read the live Env while this private working Env is
   // executing. Preserve the detached Entity count until publish or rollback;
   // processingPromise alone also covers harmless runtime-only bookkeeping.
   ensureRuntimeState(liveEnv).inFlightEntityInputs = workingMempool.entityInputs.length;
-  liveEnv.runtimeMempool = concurrentMempool;
-  liveEnv.runtimeInput = concurrentMempool;
+  liveEnv.runtimeMempool = activeMempool;
+  liveEnv.runtimeInput = activeMempool;
   return {
     liveEnv,
     workingEnv,
-    ingressBuffer,
     sharedStateBaseline,
     liveFrameLogBaseLength: liveEnv.frameLogs.length,
     workingCleanLogBaseLength: workingState.cleanLogs?.length ?? 0,
@@ -1388,18 +1413,19 @@ const runtimeInputHasQueuedWork = (input: RuntimeInput): boolean =>
   (input.jInputs?.length ?? 0) > 0 ||
   (input.reliableReceipts?.length ?? 0) > 0;
 
-const mergeRuntimeFrameMempools = (frame: RuntimeInput, concurrent: RuntimeInput): RuntimeInput => {
+/** Put older detached input before work that arrived in the active mempool later. */
+const prependOlderRuntimeInput = (older: RuntimeInput, newer: RuntimeInput): RuntimeInput => {
   const merged: RuntimeInput = {
-    runtimeTxs: [...frame.runtimeTxs, ...concurrent.runtimeTxs],
-    entityInputs: [...frame.entityInputs, ...concurrent.entityInputs],
-    ...((frame.jInputs?.length ?? 0) + (concurrent.jInputs?.length ?? 0) > 0
-      ? { jInputs: [...(frame.jInputs ?? []), ...(concurrent.jInputs ?? [])] }
+    runtimeTxs: [...older.runtimeTxs, ...newer.runtimeTxs],
+    entityInputs: [...older.entityInputs, ...newer.entityInputs],
+    ...((older.jInputs?.length ?? 0) + (newer.jInputs?.length ?? 0) > 0
+      ? { jInputs: [...(older.jInputs ?? []), ...(newer.jInputs ?? [])] }
       : {}),
-    ...((frame.reliableReceipts?.length ?? 0) + (concurrent.reliableReceipts?.length ?? 0) > 0
-      ? { reliableReceipts: [...(frame.reliableReceipts ?? []), ...(concurrent.reliableReceipts ?? [])] }
+    ...((older.reliableReceipts?.length ?? 0) + (newer.reliableReceipts?.length ?? 0) > 0
+      ? { reliableReceipts: [...(older.reliableReceipts ?? []), ...(newer.reliableReceipts ?? [])] }
       : {}),
   };
-  const queuedAt = [frame.queuedAt, concurrent.queuedAt]
+  const queuedAt = [older.queuedAt, newer.queuedAt]
     .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
     .reduce<number | undefined>((latest, value) => (latest === undefined ? value : Math.max(latest, value)), undefined);
   if (runtimeInputHasQueuedWork(merged) && queuedAt !== undefined) merged.queuedAt = queuedAt;
@@ -1423,7 +1449,7 @@ const publishRuntimeFrameTransaction = (transaction: RuntimeFrameTransaction): E
   const { liveEnv, workingEnv } = transaction;
   const liveState = ensureRuntimeState(liveEnv);
   const workingState = ensureRuntimeState(workingEnv);
-  const concurrentMempool = ensureRuntimeMempool(liveEnv);
+  const activeMempool = ensureRuntimeMempool(liveEnv);
   const workingMempool = ensureRuntimeMempool(workingEnv);
   const liveRecord = liveState as Record<string, unknown>;
   const workingRecord = workingState as Record<string, unknown>;
@@ -1436,11 +1462,11 @@ const publishRuntimeFrameTransaction = (transaction: RuntimeFrameTransaction): E
   const mergedHints = mergeRuntimeEntityHints(workingState.entityRuntimeHints, liveState.entityRuntimeHints);
   const nextState: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(workingState)) {
-    if (!RUNTIME_FRAME_SHARED_STATE_KEYS.has(key) && !RUNTIME_FRAME_CONCURRENT_STATE_KEYS.has(key)) {
+    if (!RUNTIME_FRAME_SHARED_STATE_KEYS.has(key) && !RUNTIME_FRAME_LIVE_STATE_KEYS.has(key)) {
       nextState[key] = value;
     }
   }
-  for (const key of RUNTIME_FRAME_CONCURRENT_STATE_KEYS) {
+  for (const key of RUNTIME_FRAME_LIVE_STATE_KEYS) {
     if (Object.prototype.hasOwnProperty.call(liveRecord, key)) nextState[key] = liveRecord[key];
   }
   for (const [key, snapshot] of selectedSharedState) {
@@ -1482,7 +1508,7 @@ const publishRuntimeFrameTransaction = (transaction: RuntimeFrameTransaction): E
   if (workingEnv.extra === undefined) delete liveEnv.extra;
   else liveEnv.extra = workingEnv.extra;
   liveEnv.frameLogs = liveEnv.frameLogs.slice(transaction.liveFrameLogBaseLength);
-  const mergedMempool = mergeRuntimeFrameMempools(workingMempool, concurrentMempool);
+  const mergedMempool = prependOlderRuntimeInput(workingMempool, activeMempool);
   liveEnv.runtimeMempool = mergedMempool;
   liveEnv.runtimeInput = mergedMempool;
   liveState.wakeRequested =
@@ -1558,6 +1584,10 @@ export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDe
   let reliableIngressCommits: ReliableIngressCommit[] = [];
   let reliableReceiptSenderCheckpoint: ReliableReceiptSenderCheckpoint | undefined;
   let reliableReceiptDeliveries: Array<{
+    runtimeId: string;
+    receipt: ReliableDeliveryReceipt;
+  }> = [];
+  let immediateReliableReceiptDeliveries: Array<{
     runtimeId: string;
     receipt: ReliableDeliveryReceipt;
   }> = [];
@@ -1767,18 +1797,12 @@ export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDe
               if (attempted.queuedAt === undefined) {
                 attempted.queuedAt = mempoolQueuedAt ?? frameTimestampBeforeTick;
               }
-              return mergeRuntimeFrameMempools(attempted, workingMempoolAfterAttempt);
+              return prependOlderRuntimeInput(attempted, workingMempoolAfterAttempt);
             })()
           : workingMempoolAfterAttempt;
-        const restoredMempool = mergeRuntimeFrameMempools(retry, ensureRuntimeMempool(liveEnv));
+        const restoredMempool = prependOlderRuntimeInput(retry, ensureRuntimeMempool(liveEnv));
         liveEnv.runtimeMempool = restoredMempool;
         liveEnv.runtimeInput = restoredMempool;
-      }
-      try {
-        if (!frameTransaction) throw new Error('RUNTIME_FRAME_TRANSACTION_MISSING_AT_ROLLBACK_DRAIN');
-        drainRuntimeFrameIngressBuffer(frameTransaction);
-      } catch (drainError) {
-        rollbackErrors.push(drainError instanceof Error ? drainError : new Error(String(drainError)));
       }
       return rollbackErrors.length > 0
         ? new AggregateError([originalError, ...rollbackErrors], 'RUNTIME_APPLY_ROLLBACK_FAILED')
@@ -1902,6 +1926,7 @@ export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDe
         // on process-local object metadata, so strip them at this boundary.
         appliedRuntimeInputForPersistence = cloneIsolatedRuntimeInput(result.appliedRuntimeInput);
         reliableIngressCommits = result.reliableIngressCommits;
+        immediateReliableReceiptDeliveries = result.immediateReliableReceipts;
         refreshScheduledWakeIndex(env, new Set(runtimeInput.entityInputs.map(input => input.entityId.toLowerCase())));
         for (const runtimeTx of runtimeInput.runtimeTxs) {
           if (runtimeTx.type === 'importReplica') {
@@ -2047,7 +2072,6 @@ export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDe
         if (pendingRuntimeTraceSnapshot) {
           recordRuntimeHistoryTraceForTesting(env, pendingRuntimeTraceSnapshot);
         }
-        drainRuntimeFrameIngressBuffer(frameTransaction);
         if (!quietRuntimeLogs) {
           runtimeLog.debug('storage.save.done', { height: env.height });
         }
@@ -2063,8 +2087,6 @@ export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDe
             env = liveEnv;
           }
           state = ensureRuntimeState(env);
-          if (!frameTransaction) throw new Error('RUNTIME_FRAME_TRANSACTION_MISSING_AT_STORAGE_ERROR_DRAIN');
-          drainRuntimeFrameIngressBuffer(frameTransaction);
           const haltedState = state;
           transitionRuntimeLifecycle(haltedState, 'halted');
           haltedState.fatalDebugPayload = {
@@ -2084,7 +2106,6 @@ export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDe
       if (!frameTransaction) throw new Error('RUNTIME_FRAME_TRANSACTION_MISSING_AT_EMPTY_COMMIT');
       env = publishRuntimeFrameTransaction(frameTransaction);
       state = ensureRuntimeState(env);
-      drainRuntimeFrameIngressBuffer(frameTransaction);
     }
 
     if (frameAdvanced && appliedRuntimeInputForPersistence) {
@@ -2131,7 +2152,10 @@ export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDe
     });
     markProcessProfile('runtimeInfra');
 
-    reliableReceiptDeliveries = finalizeReliableIngressCommit(env, reliableIngressCommits);
+    reliableReceiptDeliveries = [
+      ...immediateReliableReceiptDeliveries,
+      ...finalizeReliableIngressCommit(env, reliableIngressCommits),
+    ];
     if (reliableReceiptDeliveries.some(delivery => delivery.receipt.body.identity.kind === 'account-ack')) {
       runtimeLog.info('reliable.account_receipts.finalized', {
         receipts: reliableReceiptDeliveries
@@ -2281,15 +2305,10 @@ export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDe
       frameRollbackHandled = true;
       const workingMempool = ensureRuntimeMempool(frameTransaction.workingEnv);
       const cleanupErrors = await abortRuntimeFrameTransaction(frameTransaction);
-      const restoredMempool = mergeRuntimeFrameMempools(workingMempool, ensureRuntimeMempool(liveEnv));
+      const restoredMempool = prependOlderRuntimeInput(workingMempool, ensureRuntimeMempool(liveEnv));
       liveEnv.runtimeMempool = restoredMempool;
       liveEnv.runtimeInput = restoredMempool;
       env = liveEnv;
-      try {
-        drainRuntimeFrameIngressBuffer(frameTransaction);
-      } catch (drainError) {
-        cleanupErrors.push(drainError instanceof Error ? drainError : new Error(String(drainError)));
-      }
       if (cleanupErrors.length > 0) {
         const originalError = error instanceof Error ? error : new Error(String(error));
         throw new AggregateError([originalError, ...cleanupErrors], 'RUNTIME_FRAME_TRANSACTION_ABORT_FAILED');

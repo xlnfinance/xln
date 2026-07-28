@@ -722,35 +722,6 @@ export interface RuntimeEntityInputsEnvelope {
 }
 
 /**
- * Live-only ingress received while a runtime frame is isolated from its Env.
- * The owning frame transaction must detach and drain this exact buffer on
- * commit or abort. It is deliberately excluded from every durable snapshot.
- */
-export type RuntimeFrameIngressBuffer = {
-  status: 'active' | 'draining' | 'closed';
-  entries: Array<
-    | {
-        /** Internal/test ingress API; cross-runtime transports use entity-inputs. */
-        kind: 'entity';
-        from: string;
-        input: RoutedEntityInput;
-        ingressTimestamp?: number;
-      }
-    | {
-        kind: 'entity-inputs';
-        from: string;
-        envelope: RuntimeEntityInputsEnvelope;
-        ingressTimestamp?: number;
-      }
-    | {
-        kind: 'receipt';
-        from: string;
-        receipt: ReliableDeliveryReceipt;
-      }
-  >;
-};
-
-/**
  * Network-deliverable entity input.
  * By the time an input leaves the local runtime, target runtime resolution must
  * already be complete and runtimeId becomes mandatory.
@@ -1408,8 +1379,6 @@ export interface Env {
     pendingReliableIngress?: Map<string, PendingReliableIngress>;
     /** Ephemeral guard: receipt exists in working state but the enclosing frame is not durable yet. */
     reliableIngressCommitting?: Set<string>;
-    /** Ephemeral exact-owner sidecar for ingress racing an isolated frame. */
-    runtimeFrameIngressBuffer?: RuntimeFrameIngressBuffer;
     verifiedProfileRoutes?: Map<string, {
       runtimeId: string;
       runtimeEncPubKey: string;

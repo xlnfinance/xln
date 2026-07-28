@@ -421,16 +421,8 @@ export const restoreDurableRuntimeSnapshot = (
   env: Env,
   snapshot: Record<string, unknown>,
 ): void => {
-  if (env.runtimeState?.runtimeFrameIngressBuffer) {
+  if (env.runtimeState?.processingPromise) {
     throw new Error('RUNTIME_SNAPSHOT_RESTORE_DURING_ACTIVE_FRAME');
-  }
-  const snapshotRuntimeState = snapshot['runtimeState'];
-  if (
-    snapshotRuntimeState &&
-    typeof snapshotRuntimeState === 'object' &&
-    Object.prototype.hasOwnProperty.call(snapshotRuntimeState, 'runtimeFrameIngressBuffer')
-  ) {
-    throw new Error('RUNTIME_SNAPSHOT_EPHEMERAL_FRAME_INGRESS_FORBIDDEN');
   }
   if (typeof snapshot['runtimeId'] === 'string') env.runtimeId = snapshot['runtimeId'];
   if (typeof snapshot['activeJurisdiction'] === 'string') env.activeJurisdiction = snapshot['activeJurisdiction'];
