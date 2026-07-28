@@ -271,13 +271,11 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   and RPC submit/watch/receipt. Target pure helpers below 50 lines,
   coordinators below 100–150 lines, and every file below 3000 lines. After the
   pipeline, collapse DI factories that add navigation
-  without providing a real swappable boundary. Add an AST gate for function
-  budgets so future 600–2800-line coordinators cannot pass a file-only limit.
-  The R/E/A state-machine gate is already at zero functions over 100 lines;
-  extend the same ratchet to production infrastructure. Current read-only
-  baseline (excluding tests, QA, scenarios and scripts): 61 functions over
-  150 lines after splitting reserve-faucet, credit-request, HTTP routing,
-  health and relay routing. Start with
+  without providing a real swappable boundary. The R/E/A gate is already at
+  zero functions over 100 lines. The production ratchet now owns 61 exact
+  allowances over 150 lines and rejects every new/growing coordinator plus
+  every file over 3000 lines; delete each allowance with its verified split.
+  Start with
   `jadapter/rpc-adapter.ts`,
   `orchestrator/mm-node-run.ts`, `persistence/runtime-storage.ts`,
   `orchestrator/hub-node.ts`, `recovery/restore.ts` and `storage/index.ts`;
