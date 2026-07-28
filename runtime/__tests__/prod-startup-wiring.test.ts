@@ -156,6 +156,10 @@ describe('production startup wiring', () => {
   test('canonical runtime commit persists the durable outbox before backup and dispatch', () => {
     const runtime = readFileSync(join(repoRoot, 'runtime/runtime-core.ts'), 'utf8');
     const recovery = readFileSync(join(repoRoot, 'runtime/recovery/restore.ts'), 'utf8');
+    const postCommit = readFileSync(
+      join(repoRoot, 'runtime/runtime/frame/post-commit.ts'),
+      'utf8',
+    );
     const durableOutbox = recovery.indexOf('env.pendingNetworkOutputs = buildPendingNetworkOutputs([');
     const process = extractSourceBlock(
       runtime,
@@ -163,15 +167,17 @@ describe('production startup wiring', () => {
       'const runtimeStorageApi =',
     );
     const save = runtime.indexOf('const outcome = await saveEnvToDB(');
-    const plan = process.indexOf('applyDeterministicRuntimeOutputPlan(env, entityOutbox, outputRoutingDeps)');
+    const plan = process.indexOf('const outputPlan = planRuntimeFrameOutputs(');
     const commit = process.indexOf('const commit = await commitRuntimeFrame(', plan);
-    const backup = process.indexOf('await runCommittedRecoveryBarrier(', commit);
-    const dispatch = process.indexOf('await dispatchCommittedEntityOutputs(', backup);
+    const effects = process.indexOf('await runCommittedRuntimeEffects(', commit);
+    const backup = postCommit.indexOf('await runCommittedRecoveryBarrier(');
+    const dispatch = postCommit.indexOf('await dispatchCommittedEntityOutputs(', backup);
     expect(durableOutbox).toBeGreaterThanOrEqual(0);
     expect(save).toBeGreaterThanOrEqual(0);
     expect(plan).toBeGreaterThanOrEqual(0);
     expect(commit).toBeGreaterThan(plan);
-    expect(backup).toBeGreaterThan(commit);
+    expect(effects).toBeGreaterThan(commit);
+    expect(backup).toBeGreaterThanOrEqual(0);
     expect(dispatch).toBeGreaterThan(backup);
   });
 

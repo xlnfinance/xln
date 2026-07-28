@@ -11,14 +11,8 @@ const RUNTIME_APPLY_PROFILE = nodeProcess?.env?.['XLN_RUNTIME_APPLY_PROFILE'] ==
 const RUNTIME_APPLY_SLOW_MS = Math.max(0, Number(nodeProcess?.env?.['XLN_RUNTIME_APPLY_SLOW_MS'] || '500'));
 import { getPerfMs, getWallClockMs } from './utils';
 import { cumulativeMarksToPhases } from './infra/perf-profile';
-import {
-  causalTraceContainsWork,
-  summarizeRuntimeAccountCausality,
-} from './infra/account-causal-trace';
-import { cloneIsolatedRuntimeInput } from './protocol/runtime-input-clone';
 import { requireBoundaryInteger } from './protocol/boundary-validation';
-import { buildCanonicalEnvSnapshot } from './wal/snapshot';
-import { hasRuntimeHistoryTraceForTesting, recordRuntimeHistoryTraceForTesting } from './history-retention';
+import { recordRuntimeHistoryTraceForTesting } from './history-retention';
 import { mergeEntityInputs } from './entity/consensus/index';
 import { hasVerifiedEntityCommitPrecertificate } from './entity/consensus/commit-precheck';
 import {
@@ -48,29 +42,20 @@ import {
 } from './runtime/entity-routing';
 import {
   assertScheduledWakeTxAuthorized,
-  refreshScheduledWakeIndex,
 } from './runtime/scheduled-wake';
 import { transitionRuntimeLifecycle } from './runtime/lifecycle';
 import { ensureRuntimeMempool } from './runtime/input-queue';
 import { ensureRuntimeState } from './runtime/runtime-state';
 import {
   applyReliableDeliveryReceipts,
-  captureReliableReceiptSenderCheckpoint,
   commitReliableIngress,
   getInputReliableIdentity,
   registerReliableIngress,
   releaseUncommittedReliableIngress,
-  rollbackReliableDeliveryReceipts,
-  rollbackReliableIngressCommit,
   type ReliableIngressCommit,
 } from './runtime/reliable-delivery';
 import { reliableIdentityExactKey } from './runtime/reliable-frontier';
 import { mergeDurableReceiptOnlyInputs } from './runtime/reliable-durable-inputs';
-import { submitRuntimeJOutbox } from './runtime/j-submit';
-import {
-  registerPendingCommittedJOutbox,
-  splitJOutboxForDurableSubmit,
-} from './runtime/j-submit-state';
 import { applyRuntimeTx } from './runtime/tx-handlers';
 import { applyMergedEntityInputs, RuntimeEntityInputApplyError } from './runtime/entity-inputs';
 import { safeStringify } from './protocol/serialization';
@@ -79,20 +64,16 @@ import {
   beginRuntimeCheckpointLineageRefresh,
   refreshRuntimeCheckpointLineageForEntity,
 } from './storage/entity-lineage';
-import {
-  materializePendingJurisdictionImportResults,
-} from './runtime/jurisdiction-import';
+import { materializePendingJurisdictionImportResults } from './runtime/jurisdiction-import';
 import { validateEntityInput } from './validation-utils';
 import type {
   EntityInput,
   EntityTx,
   Env,
-  FrameLogEntry,
   JInput,
   ReliableDeliveryReceipt,
   RoutedEntityInput,
   RuntimeInput,
-  RuntimeTx,
 } from './types';
 import { DEBUG, log } from './utils';
 import { createStructuredLogger, logError, shortId } from './infra/logger';
@@ -114,16 +95,13 @@ import {
   searchEntityNames,
 } from './runtime/command-api';
 import {
-  abortRuntimeFrameTransaction,
   cloneRuntimeFrameMempool,
   cloneRuntimeFrameWorkingEnv,
   createRuntimeFrameTransaction,
-  prependOlderRuntimeInput,
   publishRuntimeFrameTransaction,
   runtimeInputHasQueuedWork,
 } from './runtime/frame/transaction';
 import {
-  ACCOUNT_CAUSAL_TRACE,
   createRuntimeProcessProfile,
   type RuntimeProcessProfile,
 } from './runtime/frame/process-profile';
@@ -133,13 +111,16 @@ import {
 } from './runtime/frame/execution-state';
 import { acquireRuntimeFrameWriter } from './runtime/frame/writer-lock';
 import { rollbackUndurableRuntimeFrame } from './runtime/frame/rollback';
+import { applyPreparedRuntimeFrame } from './runtime/frame/apply';
 import {
-  dispatchCommittedEntityOutputs,
-  dispatchCommittedReceipts,
-  finalizeCommittedReceiptDeliveries,
-  runCommittedRecoveryBarrier,
-} from './runtime/frame/dispatch';
+  finishRuntimeFrame,
+  handleRuntimeFrameFailure,
+} from './runtime/frame/finish';
+import { planRuntimeFrameOutputs } from './runtime/frame/plan';
+import { runCommittedRuntimeEffects } from './runtime/frame/post-commit';
 import { prepareRuntimeFrameInput } from './runtime/frame/prepare';
+import { prepareRuntimeFrameCommit } from './runtime/frame/snapshot';
+import { startRuntimeFrame } from './runtime/frame/start';
 
 const runtimeLog = createStructuredLogger('runtime');
 
@@ -1422,34 +1403,19 @@ export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDe
   const processProfile = createRuntimeProcessProfile(liveEnv, getRuntimeWorkReason(env));
   const frame = createFrameExecutionState();
   try {
-    // IMPORTANT: capture frame baseline only after acquiring the process lock.
-    // If captured before waiting on an in-flight tick, we can mis-detect
-    // frame advancement and overwrite WAL entries with empty runtime input.
-    const frameHeightBeforeTick = env.height;
-    const frameTimestampBeforeTick = env.timestamp;
-    env.lastProcessEnteredAt = Date.now();
-    env.activeProcessProgressAt = env.lastProcessEnteredAt;
-    env.activeProcessProgressStep = 'entered';
-
-    if (!env.emit) {
-      attachEventEmitters(env);
-    }
-
-    if (env.stopAtFrame !== undefined && env.height >= env.stopAtFrame) {
-      console.log(`\n⏸️  FRAME STEPPING: Stopped at frame ${env.height}`);
-      console.log('═'.repeat(80));
-      const { formatRuntime } = await import('./qa/runtime-ascii');
-      console.log(formatRuntime(env, { maxAccounts: 10, maxLocks: 20, maxSwaps: 20 }));
-      console.log('═'.repeat(80) + '\n');
-      console.log('💾 State captured - use jq on /tmp/{scenario}-runtime.json for deep queries');
-      throw new Error(`FRAME_STEP: Stopped at frame ${env.height} for debugging`);
-    }
-
-    const ingress = await collectRuntimeIngress(env, inputs, processState, runtimeDelay, processProfile);
-    if (!ingress.ready) {
-      processProfile.outcome = ingress.outcome;
-      return env;
-    }
+    const started = await startRuntimeFrame(
+      env,
+      inputs,
+      processState,
+      runtimeDelay,
+      processProfile,
+      {
+        attachEventEmitters,
+        collectIngress: collectRuntimeIngress,
+      },
+    );
+    if (!started.ready) return env;
+    const { frameHeightBeforeTick, frameTimestampBeforeTick } = started;
 
     const candidate = openRuntimeFrameCandidate(env, processState);
     frame.transaction = candidate.transaction;
@@ -1497,152 +1463,50 @@ export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDe
       hasInput: hasRuntimeInput,
       jEventPrioritized: jEventFramePrioritized,
     } = prepared;
-    let appliedRuntimeInputForPersistence: RuntimeInput | undefined;
-
-    if ((runtimeInput.reliableReceipts?.length ?? 0) > 0 || hasPendingLocalReliableOutput(env)) {
-      frame.reliableReceiptSenderCheckpoint = captureReliableReceiptSenderCheckpoint(env);
-    }
-
-    let entityOutbox: RoutedEntityInput[] = [];
-    let jOutbox: JInput[] = [];
-    let queuedJSubmitRetries: RuntimeTx[] = [];
-    const changedEntityIds = new Set<string>();
-    if (hasRuntimeInput) {
-      if (!quietRuntimeLogs) {
-        runtimeLog.debug('tick.input.processing', {
-          entityInputs: runtimeInput.entityInputs.length,
-          entityIds: runtimeInput.entityInputs.map(o => o.entityId.slice(-4)),
-        });
-        if (jEventFramePrioritized) {
-          runtimeLog.debug('tick.input.deferred_for_j_event');
-        }
-        if (runtimeInput.runtimeTxs.length > 0) {
-          runtimeLog.debug('tick.runtime_txs.processing', { runtimeTxs: runtimeInput.runtimeTxs.length });
-        }
-      }
-      try {
-        envRecord(env)[ENV_APPLY_ALLOWED_KEY] = true;
-        const result = await applyRuntimeInput(env, runtimeInput);
-        processProfile.mark('apply');
-        if (!quietRuntimeLogs && (result.entityOutbox.length > 0 || result.jOutbox.length > 0)) {
-          runtimeLog.debug('process.apply.output', {
-            entityOutbox: result.entityOutbox.length,
-            jOutbox: result.jOutbox.length,
-          });
-        }
-        entityOutbox = result.entityOutbox;
-        if (ACCOUNT_CAUSAL_TRACE) {
-          const egress = summarizeRuntimeAccountCausality(entityOutbox);
-          if (causalTraceContainsWork(egress)) {
-            processProfile.metrics.accountCausality = {
-              ingress: processProfile.metrics.accountCausality?.ingress ?? [],
-              egress,
-            };
-          }
-        }
-        const splitJOutbox = splitJOutboxForDurableSubmit(result.jOutbox);
-        registerPendingCommittedJOutbox(env, splitJOutbox.durable);
-        queuedJSubmitRetries = splitJOutbox.retries;
-        jOutbox = splitJOutbox.maintenance;
-        // Local authorization symbols prove that a command entered through a
-        // trusted in-process adapter. They are neither deterministic protocol
-        // data nor needed on replay (replay is authorized by the committed
-        // frame). Persisting them would make an otherwise valid frame depend
-        // on process-local object metadata, so strip them at this boundary.
-        appliedRuntimeInputForPersistence = cloneIsolatedRuntimeInput(result.appliedRuntimeInput);
-        frame.reliableIngressCommits = result.reliableIngressCommits;
-        frame.immediateReliableReceiptDeliveries = result.immediateReliableReceipts;
-        refreshScheduledWakeIndex(env, new Set(runtimeInput.entityInputs.map(input => input.entityId.toLowerCase())));
-        for (const runtimeTx of runtimeInput.runtimeTxs) {
-          if (runtimeTx.type === 'importReplica') {
-            changedEntityIds.add(runtimeTx.entityId.toLowerCase());
-          }
-        }
-        // Every Entity state mutation is represented by the canonical applied
-        // input, including sibling cross-j cascades. Re-announcing those exact
-        // Entities is cheaper and safer than rebuilding every local public
-        // profile twice per Runtime frame merely to detect a difference.
-        for (const entityInput of result.appliedRuntimeInput.entityInputs) {
-          if (entityInput.entityId) changedEntityIds.add(entityInput.entityId.toLowerCase());
-        }
-        const certificationCandidates = state.pendingProfileCertificationEntityIds ?? new Set<string>();
-        for (const entityId of changedEntityIds) {
-          const hasCertifiedManifest = [...env.eReplicas.values()].some(
-            replica => replica.entityId.toLowerCase() === entityId && Boolean(replica.state.profileEncryptionManifest),
-          );
-          if (!hasCertifiedManifest) certificationCandidates.add(entityId);
-        }
-        state.pendingProfileCertificationEntityIds = certificationCandidates;
-        processProfile.mark('fingerprints');
-      } finally {
-        envRecord(env)[ENV_APPLY_ALLOWED_KEY] = false;
-      }
-    }
-
-    jOutbox = [...(state.pendingCommittedJOutbox ?? []), ...jOutbox];
-    const jSideEffectIntentCount = jOutbox.length + queuedJSubmitRetries.length;
-    const runtimeInfraEffectCount = (appliedRuntimeInputForPersistence?.runtimeTxs ?? []).filter(
-      runtimeTx =>
-        runtimeTx.type === 'importJ' || runtimeTx.type === 'completeImportJ' || runtimeTx.type === 'importReplica',
-    ).length;
-
-    const outputRoutingDeps = getRuntimeOutputRoutingDeps();
+    const applied = await applyPreparedRuntimeFrame(
+      env,
+      runtimeInput,
+      hasRuntimeInput,
+      jEventFramePrioritized,
+      quietRuntimeLogs,
+      hasPendingLocalReliableOutput(env),
+      frame,
+      processProfile,
+      {
+        applyRuntimeInput,
+        setApplyAllowed: (targetEnv, allowed) => {
+          envRecord(targetEnv)[ENV_APPLY_ALLOWED_KEY] = allowed;
+        },
+      },
+    );
     const {
-      localOutputs,
-      remoteOutputs,
-      deferredOutputs,
-      readyPendingOutputs,
-      waitingPendingOutputs,
-      retainedLocalReliableOutputs,
-    } = applyDeterministicRuntimeOutputPlan(env, entityOutbox, outputRoutingDeps);
-    processProfile.metrics.localOutputs = localOutputs.length;
-    processProfile.metrics.remoteOutputs = remoteOutputs.length;
-    processProfile.metrics.deferredOutputs = deferredOutputs.length;
-    processProfile.metrics.readyPendingOutputs = readyPendingOutputs.length;
-    processProfile.metrics.waitingPendingOutputs = waitingPendingOutputs.length;
+      appliedInput: appliedRuntimeInputForPersistence,
+      entityOutbox,
+      jOutbox,
+      queuedJSubmitRetries,
+      changedEntityIds,
+    } = applied;
+    const outputRoutingDeps = getRuntimeOutputRoutingDeps();
+    const outputPlan = planRuntimeFrameOutputs(
+      env,
+      entityOutbox,
+      outputRoutingDeps,
+      processProfile,
+      quietRuntimeLogs,
+      {
+        applyOutputPlan: applyDeterministicRuntimeOutputPlan,
+        generateHookPings,
+      },
+    );
     processProfile.metrics.jOutputs = jOutbox.length;
-    processProfile.mark('planOutputs');
-    if (localOutputs.length > 0 && !quietRuntimeLogs) {
-      runtimeLog.debug('tick.local_outputs.queued', {
-        localOutputs: localOutputs.length,
-        reliableRetained: retainedLocalReliableOutputs.length,
-        entityIds: localOutputs.map(o => o.entityId.slice(-4)),
-      });
-    }
-    // Re-check due crontab work after apply. Hooks scheduled at the current
-    // logical timestamp should run on the next tick without importing wall
-    // clock time into runtime consensus.
-    generateHookPings(env);
-    // BrowserVM trie is NOT serialized per-frame — it's J-layer state.
-    // Only serialized on shutdown/page-unload for reload recovery.
-
-    const frameAdvanced = env.height !== frameHeightBeforeTick;
-    processProfile.metrics.frameAdvanced = frameAdvanced;
-    if (frameAdvanced) {
-      if (hasRuntimeHistoryTraceForTesting(liveEnv)) {
-        const committedFrameLogs = Array.isArray(env.frameLogs)
-          ? env.frameLogs.map((entry): FrameLogEntry => ({ ...entry }))
-          : [];
-        frame.pendingTraceSnapshot = buildCanonicalEnvSnapshot(env, {
-          runtimeInput: appliedRuntimeInputForPersistence ?? { runtimeTxs: [], entityInputs: [] },
-          runtimeOutputs: env.pendingOutputs ?? [],
-          description: env.extra?.description ?? `Frame ${env.height}`,
-          meta: {
-            title: env.extra?.subtitle?.title ?? `Frame ${env.height}`,
-            ...(env.extra?.subtitle ? { subtitle: env.extra.subtitle } : {}),
-            ...(env.frameDisplayMs !== undefined ? { displayMs: env.frameDisplayMs } : {}),
-          },
-          logs: committedFrameLogs,
-          gossipProfiles: env.gossip?.getProfiles ? env.gossip.getProfiles() : [],
-        });
-
-        // The collector owns this explicit debug lifetime. Production Env does
-        // not retain a second full copy of finalized state.
-      }
-      env.history = [];
-      processProfile.mark('snapshot');
-    }
-    env.extra = undefined;
+    const frameAdvanced = prepareRuntimeFrameCommit(
+      env,
+      liveEnv,
+      frameHeightBeforeTick,
+      appliedRuntimeInputForPersistence,
+      frame,
+      processProfile,
+    );
 
     // WAL is the only commit point. The helper returns only after install, or
     // after making an ambiguous/stale outcome terminal.
@@ -1656,121 +1520,45 @@ export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDe
     state = commit.state;
     if (commit.staleWriterStopped) return env;
 
-    await runCommittedRecoveryBarrier(
+    await runCommittedRuntimeEffects(
       env,
       frame,
-      remoteOutputs.length,
-      jSideEffectIntentCount,
-      runtimeInfraEffectCount,
+      {
+        appliedInput: appliedRuntimeInputForPersistence,
+        changedEntityIds,
+        jOutbox,
+        queuedJSubmitRetries,
+        outputPlan,
+        routing: outputRoutingDeps,
+      },
+      processProfile,
+      {
+        enqueueRuntimeInputs: enqueueRuntimeContinuation,
+        reconcileRuntimeInfraEffects: reconcileCommittedRuntimeInfraEffects,
+        notifyEnvChange,
+      },
     );
-    processProfile.mark('recoveryBackup');
-
-    await reconcileCommittedRuntimeInfraEffects(env, appliedRuntimeInputForPersistence?.runtimeTxs ?? []);
-    await materializePendingJurisdictionImportResults(env, runtimeTx => {
-      enqueueRuntimeContinuation(
-        env,
-        undefined,
-        [runtimeTx],
-        undefined,
-        env.scenarioMode ? env.timestamp : getWallClockMs(),
-      );
-    });
-    processProfile.mark('runtimeInfra');
-
-    finalizeCommittedReceiptDeliveries(env, frame);
-
-    if (queuedJSubmitRetries.length > 0) {
-      enqueueRuntimeContinuation(env, undefined, queuedJSubmitRetries, undefined, env.timestamp);
-    }
-
-    // === SIDE EFFECTS (safe to fail — bilateral consensus retries) ===
-
-    await dispatchCommittedEntityOutputs(env, changedEntityIds, {
-      remoteOutputs,
-      deferredOutputs,
-      readyPendingOutputs,
-      waitingPendingOutputs,
-      retainedLocalReliableOutputs,
-    }, outputRoutingDeps);
-    processProfile.mark('profileAnnounce');
-    processProfile.metrics.pendingNetworkAfter = env.pendingNetworkOutputs?.length ?? 0;
-    processProfile.metrics.deferredNetworkMeta = env.runtimeState?.deferredNetworkMeta?.size ?? 0;
-    processProfile.mark('dispatchOutputs');
-
-    // A committed business response and its transport receipt share one
-    // post-WAL boundary. Queue the useful Entity envelope first on the same
-    // ordered connection; otherwise the sender spends a complete R-frame
-    // persisting receipt GC before it can apply ACK+next Account proposal.
-    dispatchCommittedReceipts(env, frame);
-    processProfile.mark('dispatchReceipts');
-
-    // 2. Execute J-batches via JAdapter.submitTx (events arrive next frame via j-watcher)
-    await submitRuntimeJOutbox(env, jOutbox, {
-      enqueueRuntimeInputs: enqueueRuntimeContinuation,
-    });
-    processProfile.mark('jOutbox');
-
-    state.lastFrameAt = getWallClockMs();
-
-    if (env.strictScenario) {
-      const { assertRuntimeStateStrict } = await import('./protocol/assertions');
-      await assertRuntimeStateStrict(env);
-      processProfile.mark('strict');
-    }
-
-    // CRITICAL: Notify frontend after snapshot is pushed to history
-    // Without this, UI (TimeMachine, AccountPanel) never learns about new frames
-    notifyEnvChange(env);
-    processProfile.mark('notify');
 
     processProfile.outcome = 'completed';
     return env;
   } catch (error) {
-    if (frame.commitDisposition === 'undurable' && !frame.rollbackHandled && frame.rollbackUndurable) {
-      frame.rollbackHandled = true;
-      const rollbackError = await frame.rollbackUndurable(error, {
-        quarantine: !(error instanceof RuntimeFrameStorageError),
-      });
-      if (rollbackError instanceof RuntimeInputQuarantinedError) {
-        processProfile.outcome = 'input-dropped';
-        return liveEnv;
-      }
-      throw rollbackError;
-    }
-    if (
-      frame.commitDisposition === 'undurable' &&
-      !frame.rollbackHandled &&
-      frame.transaction &&
-      !frame.transaction.published
-    ) {
-      frame.rollbackHandled = true;
-      const workingMempool = ensureRuntimeMempool(frame.transaction.workingEnv);
-      const cleanupErrors = await abortRuntimeFrameTransaction(frame.transaction);
-      const restoredMempool = prependOlderRuntimeInput(workingMempool, ensureRuntimeMempool(liveEnv));
-      liveEnv.runtimeMempool = restoredMempool;
-      liveEnv.runtimeInput = restoredMempool;
-      env = liveEnv;
-      if (cleanupErrors.length > 0) {
-        const originalError = error instanceof Error ? error : new Error(String(error));
-        throw new AggregateError([originalError, ...cleanupErrors], 'RUNTIME_FRAME_TRANSACTION_ABORT_FAILED');
-      }
-    }
-    throw error;
+    const failure = await handleRuntimeFrameFailure(error, liveEnv, frame, {
+      isStorageError: candidate => candidate instanceof RuntimeFrameStorageError,
+      isQuarantinedError: candidate => candidate instanceof RuntimeInputQuarantinedError,
+    });
+    env = failure.env;
+    if (!failure.inputDropped) throw failure.error;
+    processProfile.outcome = 'input-dropped';
+    return liveEnv;
   } finally {
-    if (!frame.reliableReceiptStateDurable) {
-      rollbackReliableIngressCommit(env, frame.reliableIngressCommits);
-      if (frame.reliableReceiptSenderCheckpoint) {
-        rollbackReliableDeliveryReceipts(env, frame.reliableReceiptSenderCheckpoint);
-      }
-    }
-    if (processProfile.outcome === 'unknown') {
-      processProfile.outcome = 'thrown';
-    }
-    processProfile.finish(env);
-    processState.inFlightEntityInputs = 0;
-    delete liveEnv.activeProcessProgressAt;
-    delete liveEnv.activeProcessProgressStep;
-    releaseProcessLock();
+    finishRuntimeFrame(
+      env,
+      liveEnv,
+      processState,
+      frame,
+      processProfile,
+      releaseProcessLock,
+    );
   }
 };
 
