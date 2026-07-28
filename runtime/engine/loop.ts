@@ -1358,9 +1358,13 @@ export const createRuntimeLoopApi = (deps: RuntimeLoopApiDeps) => {
     const deps = getRuntimeEntityRoutingDeps();
     const inputs = validateInboundP2PEntityInputsEnvelope(env, from, envelope, deps);
     if (inputs.length > 0) {
+      // Validation stamps authenticated provenance on transported Entity
+      // inputs, but intentionally leaves an accepted cross-j intent's locally
+      // synthesized command untagged. Reapplying `from` here would turn that
+      // local command into forbidden remote consensus input.
       deps.enqueueRuntimeInputs(
         env,
-        inputs.map(input => ({ ...input, from })),
+        inputs,
         undefined,
         undefined,
         ingressTimestamp,
