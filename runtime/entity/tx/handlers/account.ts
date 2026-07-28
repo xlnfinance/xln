@@ -9,19 +9,8 @@ import type {
 import { applyAccountInput } from '../../../account/consensus/index';
 import { addMessage, addMessages, emitScopedEvents } from '../../../state-helpers';
 import { createStructuredLogger, shortId } from '../../../infra/logger';
-import {
-  accountStateDomainFromJurisdiction,
-  computeAccountStateRoot,
-  EMPTY_ACCOUNT_STATE_ROOT,
-  normalizeAccountStateDomain,
-  sameAccountStateDomain,
-} from '../../../account/state-root';
-import { isLeftEntity } from '../../id';
 import { scheduleHook } from '../../scheduler';
 import { upsertSortedStringMapEntry } from '../../../storage/sorted-index';
-import { normalizeAccountWatchSeed } from '../../../account/watch-seed';
-import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../../../account/default-tokens';
-import { resolveJurisdictionRebalanceDefaults } from '../../../account/rebalance-policy-defaults';
 import { applyCommittedCrossJurisdictionAccountTxFollowup } from './account-cross-j-followups';
 import { applyCommittedAccountFrameFollowups } from './account/committed-frame-followups';
 import {
@@ -46,8 +35,6 @@ import {
   getCertifiedBoardNodeStore,
   resolveObserverCertifiedBoardHash,
 } from '../../../jurisdiction/board-registry';
-import { assertEntityAccountInsertionCapacity } from '../../account-capacity';
-import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claim-accumulator';
 import type { AccountJClaimNodeChanges } from '../../../types/account-j-claims';
 import { pruneUnreachableDisputeEvidence } from '../../../protocol/dispute/evidence-retention';
 import type { ApplyEntityTxOptions } from '../apply';
@@ -55,6 +42,7 @@ import { armHtlcSecretAckTimeout, persistVerifiedHtlcSecret } from '../htlc-rout
 import { buildHubRebalancePolicyTx } from './account-admin';
 import { cumulativeMarksToPhases } from '../../../infra/perf-profile';
 import { getPerfMs } from '../../../utils';
+import { resolveInboundAccount } from './account/inbound-account';
 
 export type { MempoolOp } from './account/orderbook-queue';
 export {
@@ -75,7 +63,6 @@ export type {
   SwapOfferEvent,
 } from './account/orderbook-offers';
 
-const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 const accountHandlerLog = createStructuredLogger('account.handler');
 const ACCOUNT_INPUT_PROFILE = typeof process !== 'undefined' && (
   process.env?.['XLN_ACCOUNT_INPUT_PROFILE'] === '1' ||
@@ -133,15 +120,6 @@ export const canProcessFrozenAccountInput = (
 
 export { applyCommittedAccountFrameFollowups } from './account/committed-frame-followups';
 
-const findAccountKeyInsensitive = (accounts: Map<string, AccountMachine>, counterpartyId: string): string | null => {
-  const target = normalizeEntityRef(counterpartyId);
-  for (const key of accounts.keys()) {
-    if (normalizeEntityRef(key) === target) return key;
-  }
-  return null;
-};
-
-
 export interface AccountHandlerResult {
   newState: EntityState;
   outputs: EntityInput[];
@@ -183,14 +161,6 @@ export async function applyAccountInputToEntity(
     prevHanko: Boolean(incomingAck),
   });
 
-  if (normalizeEntityRef(input.toEntityId) !== normalizeEntityRef(newState.entityId)) {
-    throw new Error(
-      `ACCOUNT_INPUT_WRONG_TARGET: expected=${shortId(newState.entityId)} got=${shortId(input.toEntityId)}`,
-    );
-  }
-  if (normalizeEntityRef(input.fromEntityId) === normalizeEntityRef(newState.entityId)) {
-    throw new Error(`ACCOUNT_INPUT_SELF_SENDER: entity=${shortId(newState.entityId)}`);
-  }
   const outputs: EntityInput[] = [];
 
   // Collect events for entity-level orchestration (pure - no direct mempool mutation)
@@ -207,148 +177,13 @@ export async function applyAccountInputToEntity(
   }> = [];
   let accountJClaimNodeChanges: AccountJClaimNodeChanges | undefined;
 
-  // Get or create account machine (KEY: counterparty ID for simpler lookups)
-  // AccountMachine still uses canonical left/right internally
-  const counterpartyId = normalizeEntityRef(input.fromEntityId);
   let requiredAccountResponse: AccountInput | undefined;
-  const existingAccountKey = findAccountKeyInsensitive(newState.accounts, counterpartyId);
-  let accountMachine = existingAccountKey ? newState.accounts.get(existingAccountKey) : undefined;
-  const createdAccount = !accountMachine;
-  if (!accountMachine) {
-    assertEntityAccountInsertionCapacity(
-      newState.accounts,
-      counterpartyId,
-      `accountInput:${newState.entityId}`,
-    );
-  }
-  if (input.domain === undefined) throw new Error(`ACCOUNT_INPUT_DOMAIN_REQUIRED:${counterpartyId}`);
-  const inputDomain = normalizeAccountStateDomain(input.domain, 'ACCOUNT_INPUT_DOMAIN');
-  if (accountMachine) {
-    if (!sameAccountStateDomain(inputDomain, accountMachine.domain)) {
-      throw new Error(`ACCOUNT_DOMAIN_CHANGED:${counterpartyId}`);
-    }
-  } else {
-    const jurisdiction = state.config?.jurisdiction;
-    if (!jurisdiction) throw new Error(`ACCOUNT_STATE_DOMAIN_MISSING: entity=${shortId(state.entityId)}`);
-    if (!sameAccountStateDomain(inputDomain, accountStateDomainFromJurisdiction(jurisdiction))) {
-      throw new Error(`ACCOUNT_INPUT_DOMAIN_MISMATCH:${counterpartyId}`);
-    }
-  }
-  const inputWatchSeed = input.watchSeed === undefined
-    ? undefined
-    : normalizeAccountWatchSeed(input.watchSeed, 'ACCOUNT_INPUT');
-  if (accountMachine && inputWatchSeed && accountMachine.watchSeed.toLowerCase() !== inputWatchSeed) {
-    throw new Error(`ACCOUNT_WATCH_SEED_MISMATCH:${counterpartyId}`);
-  }
-  if (!accountMachine) {
-    if ((incomingAck && !incomingProposal) || input.kind === 'board_reseal') {
-      const code = input.kind === 'board_reseal'
-        ? 'ACCOUNT_BOARD_RESEAL_UNKNOWN_ACCOUNT'
-        : 'ACCOUNT_INPUT_ACK_FOR_UNKNOWN_ACCOUNT';
-      const error = `${code}: from=${input.fromEntityId.slice(-8)} to=${input.toEntityId.slice(-8)}`;
-      throw new Error(error);
-    }
-    const incomingFrameHeight = Number(accountInputReferenceHeight(input) ?? 0);
-    if (!incomingProposal || incomingFrameHeight !== 1) {
-      const code = incomingFrameHeight > 1 ? 'ACCOUNT_SYNC_REQUIRED' : 'ACCOUNT_GENESIS_FRAME_REQUIRED';
-      const error =
-        `${code}: entity=${shortId(newState.entityId)} ` +
-        `counterparty=${shortId(counterpartyId)} inputHeight=${incomingFrameHeight}`;
-      addMessage(newState, error);
-      throw new Error(error);
-    }
-    const watchSeed = normalizeAccountWatchSeed(inputWatchSeed, 'ACCOUNT_INPUT_GENESIS');
-    accountHandlerLog.debug('machine.create', { counterparty: shortId(counterpartyId) });
-
-    // CONSENSUS FIX: Start with empty deltas (Channel.ts pattern)
-    const initialDeltas = new Map();
-
-    // CANONICAL: Sort entities (left < right) for AccountMachine internals (like Channel.ts)
-    const leftEntity = isLeftEntity(state.entityId, counterpartyId) ? state.entityId : counterpartyId;
-    const rightEntity = isLeftEntity(state.entityId, counterpartyId) ? counterpartyId : state.entityId;
-
-    accountMachine = {
-      leftEntity,
-      rightEntity,
-      domain: inputDomain,
-      watchSeed,
-      status: 'active',
-      mempool: [],
-      currentFrame: {
-        height: 0,
-        // Deterministic account genesis: fixed zero timestamp.
-        // First committed account frame carries consensus timestamp.
-        timestamp: 0,
-        jHeight: 0,
-        accountTxs: [],
-        prevFrameHash: '',
-        accountStateRoot: EMPTY_ACCOUNT_STATE_ROOT,
-        deltas: [],
-        stateHash: '',
-        byLeft: state.entityId === leftEntity, // Am I left entity?
-      },
-      deltas: initialDeltas,
-      globalCreditLimits: {
-        ownLimit: 0n, // Credit starts at 0 - must be explicitly extended
-        peerLimit: 0n, // Credit starts at 0 - must be explicitly extended
-      },
-      currentHeight: 0,
-      pendingSignatures: [],
-      rollbackCount: 0,
-      proofHeader: {
-        fromEntity: state.entityId,
-        toEntity: counterpartyId,
-        nextProofNonce: 1,
-      },
-      proofBody: {
-        tokenIds: [],
-        deltas: [],
-      },
-      pendingWithdrawals: new Map(),
-      requestedRebalance: new Map(), // request_collateral target amounts (prepaid by requester)
-      requestedRebalanceFeeState: new Map(), // Bilateral prepaid fee metadata
-      shadow: {
-        rebalance: {
-          policy: new Map(),
-          submittedAtByToken: new Map(),
-        },
-      },
-      locks: new Map(), // HTLC: Empty locks map
-      swapOffers: new Map(), // Swap: Empty offers map
-      pulls: new Map(), // Pull: Empty ratio-gated pull map
-      swapOrderHistory: new Map(),
-      swapClosedOrders: new Map(),
-      // Bilateral J-event consensus: roots only; bodies live in Account frames.
-      leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
-      rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
-      lastFinalizedJHeight: 0,
-      // Dispute resolution values are encoded in 10-block units.
-      // 576 * 10 = 5760 blocks, roughly 24h at 15-second block time.
-      disputeConfig: {
-        leftDisputeDelay: 576,
-        rightDisputeDelay: 576,
-      },
-      jNonce: 0,
-    };
-    // The opening side seeds its local rebalance policy in openAccount. The side
-    // that first learns of the account from an inbound genesis frame must seed
-    // the same jurisdiction defaults, or checkAutoRebalance returns early on an
-    // empty policy map and this side can never auto-request collateral.
-    for (const policyTokenId of DEFAULT_ACCOUNT_TOKEN_IDS) {
-      accountMachine.shadow.rebalance.policy.set(
-        policyTokenId,
-        resolveJurisdictionRebalanceDefaults(newState, policyTokenId),
-      );
-    }
-    accountMachine.currentFrame.accountStateRoot = computeAccountStateRoot(accountMachine);
-    accountMachine.currentFrame.stateHash = accountMachine.currentFrame.accountStateRoot;
-    accountHandlerLog.debug('machine.candidate_created', { counterparty: shortId(counterpartyId) });
-  }
-
-  // FINTECH-SAFETY: Ensure accountMachine exists
-  if (!accountMachine) {
-    throw new Error(`CRITICAL: AccountMachine creation failed for ${input.fromEntityId}`);
-  }
+  const { accountMachine, counterpartyId, createdAccount } = resolveInboundAccount(
+    newState,
+    input,
+    Boolean(incomingAck),
+    Boolean(incomingProposal),
+  );
   checkpointProfile('accountResolve');
 
   // Dispute freeze happens at AccountInput ingress. Optional transformer
