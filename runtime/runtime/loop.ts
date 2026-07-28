@@ -5,52 +5,17 @@ import {
 import { getWallClockMs } from './../utils';
 import type { JAdapter } from './../jadapter';
 import { normalizeRuntimeFailureCode } from './../protocol/failure-taxonomy';
-import { deriveSignerAddressSync, getSignerPrivateKeyIfAvailable } from './../account/crypto';
-import { normalizeRuntimeId } from './../networking/runtime-id';
-import {
-  ensureRuntimeGossipProfiles,
-  getRuntimeP2P,
-  getRuntimeP2PState,
-  refreshRuntimeGossip,
-  startPendingRuntimeP2PIfReady,
-  startRuntimeP2P,
-  stopRuntimeP2P,
-  stopRuntimeP2PAndWait,
-  type P2PConfig,
-  type P2PConnectionState,
-  type RuntimeP2PLifecycleDeps,
-} from '../runtime/p2p-lifecycle';
-import { extractEntityId, extractSignerId } from './../ids';
-import {
-  MAX_PENDING_NETWORK_OUTPUTS,
-  sendEntityInputWithRouting,
-  type RuntimeEntityInputRoutingResult,
-  type RuntimeOutputRoutingDeps,
-} from '../runtime/output-routing';
-import { runtimeInputRequiresOutboxCapacity } from '../runtime/admission';
 import {
   MAX_RUNTIME_J_INPUT_BYTES,
   MAX_RUNTIME_J_INPUTS,
   MAX_RUNTIME_J_TXS,
   MAX_RUNTIME_J_TXS_PER_JURISDICTION,
-  validateRuntimeInputShapeAndLimits,
 } from '../runtime/input-validation';
 import {
-  createRuntimeOutputRoutingDeps,
-  registerEntityRuntimeHintWithDeps,
-  validateInboundP2PEntityInput,
-  validateInboundP2PEntityInputsEnvelope,
-  type RuntimeInboundEntityInputOptions,
-  type RuntimeInboundEntityInputsResult,
-  type RuntimeEntityRoutingDeps,
-} from '../runtime/entity-routing';
-import {
-  assertScheduledWakeTxAuthorized,
   deleteScheduledWakeIndex,
   rebuildScheduledWakeIndex,
 } from '../runtime/scheduled-wake';
 import {
-  assertRuntimeCommandReady,
   inferRuntimeLifecyclePhase,
   transitionRuntimeLifecycle,
 } from '../runtime/lifecycle';
@@ -59,24 +24,15 @@ import {
   requestRuntimeLoopWake,
 } from '../runtime/input-queue';
 import { ensureRuntimeState } from '../runtime/runtime-state';
-import { registerReliableReceiptIngress } from '../runtime/reliable-delivery';
-import { safeStringify } from './../protocol/serialization';
-import { validateEntityInput } from './../validation-utils';
 import type {
-  EntityInput,
   Env,
   JReplica,
-  ReliableDeliveryReceipt,
-  RoutedEntityInput,
-  RuntimeEntityInputsEnvelope,
   RuntimeInput,
 } from './../types';
-import { clearInfraGossipProfiles } from '../runtime/infra-gossip-store';
 import {
   closeFrameDb,
   closeInfraDb,
   closeStorageDb,
-  normalizeDbNamespace,
 } from './../storage/runtime-dbs';
 import { createStructuredLogger } from '../infra/logger';
 import {
@@ -126,6 +82,7 @@ import {
   quarantineLiveRuntimeInput,
   RuntimeInputQuarantinedError,
 } from './input-quarantine';
+import { createRuntimeRoutingApi } from './loop-routing';
 
 type RuntimeModule = typeof import('../runtime');
 
@@ -142,6 +99,28 @@ const runtimeLog = createStructuredLogger('runtime');
 export const createRuntimeLoopApi = (deps: RuntimeLoopApiDeps) => {
   const { notifyEnvChange, processRuntime, waitForRuntimeProcessingIdle, getRuntimeProcessGlobal, runtimeInputHasQueuedWork } =
     deps;
+  const {
+    getEnv,
+    setRuntimeId,
+    deriveRuntimeId,
+    registerEntityRuntimeHint,
+    handleInboundP2PEntityInput,
+    handleInboundP2PEntityInputs,
+    handleInboundReliableReceipt,
+    normalizeRuntimeEntityInput,
+    validateRuntimeInputAdmission,
+    getRuntimeEntityRoutingDeps,
+    getRuntimeOutputRoutingDeps,
+    sendEntityInput,
+    startP2P,
+    stopP2P,
+    stopP2PAndWait,
+    getP2P,
+    getP2PState,
+    refreshGossip,
+    ensureGossipProfiles,
+    clearGossip,
+  } = createRuntimeRoutingApi({ notifyEnvChange });
 
   const throwSettledErrors = (results: PromiseSettledResult<unknown>[], code: string): void => {
     const errors = results
@@ -621,288 +600,7 @@ export const createRuntimeLoopApi = (deps: RuntimeLoopApiDeps) => {
     deleteScheduledWakeIndex(env);
   };
 
-  /**
-   * Identity function for env (no module-level env exists).
-   */
-  const getEnv = (env?: Env | null): Env | null => {
-    if (!env) {
-      runtimeLog.warn('env.missing');
-      return null;
-    }
-    return env;
-  };
 
-  const setRuntimeId = (env: Env, id: string | null): void => {
-    const normalizedRuntimeId = normalizeRuntimeId(id);
-    if (normalizedRuntimeId) env.runtimeId = normalizedRuntimeId;
-    else delete env.runtimeId;
-    if (env.runtimeId) {
-      env.dbNamespace = normalizeDbNamespace(env.runtimeId);
-    }
-    startPendingRuntimeP2PIfReady(env, getRuntimeP2PLifecycleDeps());
-  };
-
-  // Derive runtimeId from seed (for isolated envs that need to set their own runtimeId)
-  const deriveRuntimeId = (seed: string): string => {
-    return normalizeRuntimeId(deriveSignerAddressSync(seed, '1'));
-  };
-
-  // scheduleNetworkProcess removed — loop is always-on via startRuntimeLoop()
-
-  const registerEntityRuntimeHint = (env: Env, entityId: string, runtimeId: string): void => {
-    registerEntityRuntimeHintWithDeps(env, entityId, runtimeId, getRuntimeEntityRoutingDeps());
-  };
-
-  const handleInboundP2PEntityInput = (env: Env, from: string, input: RoutedEntityInput, ingressTimestamp?: number) => {
-    const deps = getRuntimeEntityRoutingDeps();
-    const validation = validateInboundP2PEntityInput(env, from, input, deps);
-    if (validation.kind === 'ignored') return validation;
-    // The transport boundary validates and appends to the one Runtime
-    // mempool. Reliable frontier registration belongs to the isolated frame.
-    deps.enqueueRuntimeInputs(env, [{ ...input, from }], undefined, undefined, ingressTimestamp);
-    return { kind: 'queued' } as const;
-  };
-
-  const handleInboundP2PEntityInputs = (
-    env: Env,
-    from: string,
-    envelope: RuntimeEntityInputsEnvelope,
-    ingressTimestamp?: number,
-  ): RuntimeInboundEntityInputsResult => {
-    const deps = getRuntimeEntityRoutingDeps();
-    const inputs = validateInboundP2PEntityInputsEnvelope(env, from, envelope, deps);
-    if (inputs.length > 0) {
-      // Validation stamps authenticated provenance on transported Entity
-      // inputs, but intentionally leaves an accepted cross-j intent's locally
-      // synthesized command untagged. Reapplying `from` here would turn that
-      // local command into forbidden remote consensus input.
-      deps.enqueueRuntimeInputs(
-        env,
-        inputs,
-        undefined,
-        undefined,
-        ingressTimestamp,
-      );
-    }
-    return { kind: 'queued' as const, receipts: [] as ReliableDeliveryReceipt[] };
-  };
-
-  const handleInboundReliableReceipt = (
-    env: Env,
-    from: string,
-    receipt: ReliableDeliveryReceipt,
-    options: RuntimeInboundEntityInputOptions = {},
-  ): 'queued' | 'duplicate' | 'deferred' => {
-    const sourceRuntimeId = normalizeRuntimeId(from);
-    if (!sourceRuntimeId || sourceRuntimeId !== receipt?.body?.receiverRuntimeId) {
-      throw new Error('RELIABLE_RECEIPT_TRANSPORT_SOURCE_MISMATCH');
-    }
-    if (env.runtimeState?.persistenceQuiescing && !env.scenarioMode && options.acceptedBeforeQuiesce !== true) {
-      // This is a normal persistence boundary, not malformed peer input. The
-      // original reliable output remains pending and will recreate this exact
-      // signed receipt on retry, so rejecting it as a transport error only
-      // creates false browser noise (and a useless debug-event/error loop).
-      env.info('network', 'RELIABLE_RECEIPT_DEFERRED_QUIESCING', {
-        sourceRuntimeId,
-        receiverRuntimeId: receipt.body.receiverRuntimeId,
-        identity: receipt.body.identity,
-      });
-      return 'deferred';
-    }
-    const registration = registerReliableReceiptIngress(env, receipt);
-    if (receipt.body.identity.kind === 'account-ack') {
-      runtimeLog.info('reliable.account_receipt.ingress', {
-        fromRuntimeId: sourceRuntimeId,
-        height: receipt.body.identity.height,
-        coverage: receipt.body.coverage,
-        registration,
-      });
-    }
-    if (registration === 'duplicate') return 'duplicate';
-    enqueueRuntimeInputs(env, undefined, undefined, undefined, env.timestamp, [receipt], options);
-    return 'queued';
-  };
-
-  const normalizeRuntimeEntityInput = (_env: Env, input: EntityInput, _context: string): RoutedEntityInput => {
-    const signerId = input.signerId.trim();
-    failfastAssert(
-      signerId.length > 0,
-      'RUNTIME_ENTITY_INPUT_SIGNER_MISSING',
-      'EntityInput signerId must be resolved before enqueue/process',
-      { entityId: input.entityId },
-    );
-    return {
-      ...input,
-      signerId,
-    };
-  };
-
-  const hasLocalSignerForEntity = (env: Env, entityId: string): boolean => {
-    return getLocalSignerIdsForEntity(env, entityId).length > 0;
-  };
-
-  const getLocalSignerIdsForEntity = (env: Env, entityId: string): string[] => {
-    const targetEntityId = String(entityId || '').toLowerCase();
-    const signerIds = new Set<string>();
-    for (const replicaKey of env.eReplicas.keys()) {
-      const replicaEntityId = extractEntityId(replicaKey).toLowerCase();
-      const signerId = extractSignerId(replicaKey);
-      if (replicaEntityId !== targetEntityId || !signerId) continue;
-      if (getSignerPrivateKeyIfAvailable(env, signerId) !== null) signerIds.add(signerId);
-    }
-    return [...signerIds];
-  };
-
-  const hasLocalSignerForEntitySigner = (env: Env, entityId: string, signerId: string): boolean => {
-    const targetSignerId = String(signerId || '').toLowerCase();
-    if (!targetSignerId) return false;
-    return getLocalSignerIdsForEntity(env, entityId).some(
-      localSignerId => localSignerId.toLowerCase() === targetSignerId,
-    );
-  };
-
-  const resolveSoleLocalSignerForEntity = (env: Env, entityId: string): string | null => {
-    const signerIds = getLocalSignerIdsForEntity(env, entityId);
-    return signerIds.length === 1 ? signerIds[0]! : null;
-  };
-
-  const validateRuntimeInputAdmission = (env: Env, runtimeInput: RuntimeInput): void => {
-    assertRuntimeCommandReady(env);
-    validateRuntimeInputShapeAndLimits(env, runtimeInput, message => {
-      throw new Error(`RUNTIME_INPUT_ADMISSION_REJECTED: ${message}`);
-    });
-    const pendingNetworkOutputs = env.pendingNetworkOutputs?.length ?? 0;
-    const hasNewLocalFinancialCommand = runtimeInputRequiresOutboxCapacity(runtimeInput.entityInputs);
-    if (pendingNetworkOutputs >= MAX_PENDING_NETWORK_OUTPUTS && hasNewLocalFinancialCommand) {
-      throw new Error(
-        `RUNTIME_INPUT_ADMISSION_REJECTED: NETWORK_OUTBOX_BACKPRESSURE ` +
-          `pending=${pendingNetworkOutputs} max=${MAX_PENDING_NETWORK_OUTPUTS}`,
-      );
-    }
-    const importedReplicaSigners = new Map<string, Set<string>>();
-    for (const runtimeTx of runtimeInput.runtimeTxs) {
-      if (runtimeTx.type !== 'importReplica') continue;
-      const entityId = String(runtimeTx.entityId || '').toLowerCase();
-      const signerId = String(runtimeTx.signerId || '').trim();
-      if (!entityId || !signerId) continue;
-      const signers = importedReplicaSigners.get(entityId) ?? new Set<string>();
-      signers.add(signerId);
-      importedReplicaSigners.set(entityId, signers);
-    }
-
-    runtimeInput.entityInputs.forEach((input, index) => {
-      for (const tx of input.entityTxs ?? []) assertScheduledWakeTxAuthorized(tx, false);
-      const validated = normalizeRuntimeEntityInput(env, validateEntityInput(input), `runtimeInput[${index}]`);
-      const localSignerIds = [
-        ...getLocalSignerIdsForEntity(env, validated.entityId),
-        ...(importedReplicaSigners.get(String(validated.entityId || '').toLowerCase()) ?? []),
-      ];
-      if (localSignerIds.length === 0) {
-        throw new Error(
-          `RUNTIME_ENTITY_INPUT_UNKNOWN_TARGET: Entity input target does not exist in local runtime ` +
-            safeStringify({
-              index,
-              entityId: validated.entityId,
-              signerId: validated.signerId,
-              txTypes: (validated.entityTxs || []).map(tx => tx.type),
-            }),
-        );
-      }
-      if (
-        hasLocalSignerForEntitySigner(env, validated.entityId, validated.signerId) ||
-        localSignerIds.some(signerId => signerId.toLowerCase() === validated.signerId.toLowerCase())
-      )
-        return;
-      const txTypes = (validated.entityTxs || []).map(tx => tx.type);
-      if (localSignerIds.length === 1 && txTypes.length === 0) return;
-      throw new Error(
-        `RUNTIME_REPLICA_NOT_FOUND: Entity input target replica missing for exact signerId ` +
-          safeStringify({
-            index,
-            entityId: validated.entityId,
-            inputSignerId: validated.signerId,
-            localSignerIds,
-            txTypes,
-          }),
-      );
-    });
-  };
-
-  function getRuntimeEntityRoutingDeps(): RuntimeEntityRoutingDeps {
-    return {
-      ensureRuntimeState,
-      enqueueRuntimeInputs: (env, inputs, runtimeTxs, jInputs, ingressTimestamp, options) =>
-        enqueueRuntimeInputs(env, inputs, runtimeTxs, jInputs, ingressTimestamp, undefined, options),
-      extractEntityId,
-      hasLocalSignerForEntity,
-      hasLocalSignerForEntitySigner,
-      resolveSoleLocalSignerForEntity,
-      getP2P,
-    };
-  }
-
-  function getRuntimeOutputRoutingDeps(): RuntimeOutputRoutingDeps {
-    return createRuntimeOutputRoutingDeps(getRuntimeEntityRoutingDeps());
-  }
-
-  function getRuntimeP2PLifecycleDeps(): RuntimeP2PLifecycleDeps {
-    return {
-      ensureRuntimeState,
-      notifyEnvChange,
-      enqueueRuntimeInputs: (env, inputs) => enqueueRuntimeInputs(env, inputs),
-      handleInboundP2PEntityInputs,
-      handleInboundReliableReceipt,
-    };
-  }
-
-  const sendEntityInput = (env: Env, input: RoutedEntityInput): RuntimeEntityInputRoutingResult => {
-    return sendEntityInputWithRouting(env, input, getRuntimeOutputRoutingDeps());
-  };
-
-  const startP2P = (env: Env, config: P2PConfig = {}) => startRuntimeP2P(env, config, getRuntimeP2PLifecycleDeps());
-
-  const stopP2P = (env: Env): void => stopRuntimeP2P(env, getRuntimeP2PLifecycleDeps());
-
-  const stopP2PAndWait = (env: Env, timeoutMs?: number): Promise<void> =>
-    stopRuntimeP2PAndWait(env, getRuntimeP2PLifecycleDeps(), timeoutMs);
-
-  const getP2P = (env: Env) => getRuntimeP2P(env, getRuntimeP2PLifecycleDeps());
-
-  const getP2PState = (env: Env): P2PConnectionState => getRuntimeP2PState(env, getRuntimeP2PLifecycleDeps());
-
-  const refreshGossip = (env: Env): void => refreshRuntimeGossip(env, getRuntimeP2PLifecycleDeps());
-
-  const ensureGossipProfiles = async (env: Env, entityIds: string[]): Promise<boolean> =>
-    ensureRuntimeGossipProfiles(env, getRuntimeP2PLifecycleDeps(), entityIds);
-
-  const clearGossip = async (env: Env, options: { runtimeId?: string } = {}): Promise<void> => {
-    // Restoring infra gossip announces every loaded profile and queues its
-    // LevelDB write. Drain those puts before deleting the relocated route or a
-    // late put can resurrect the old signed endpoint after the clear completes.
-    await drainInfraDbWrites(env);
-    await clearInfraGossipProfiles(env, infraGossipDbAccess, options);
-    const targetRuntimeId = String(options.runtimeId || '')
-      .trim()
-      .toLowerCase();
-    if (!targetRuntimeId) {
-      env.gossip?.profiles?.clear();
-    } else {
-      for (const [entityId, profile] of env.gossip?.profiles ?? []) {
-        if (
-          String(profile.runtimeId || '')
-            .trim()
-            .toLowerCase() === targetRuntimeId
-        ) {
-          env.gossip.profiles.delete(entityId);
-        }
-      }
-    }
-    notifyEnvChange(env);
-  };
-
-  /**
-   * Create a runtime environment for frontend initialization.
-   */
 
   return {
     registerEnvChangeCallback,

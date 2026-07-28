@@ -249,15 +249,14 @@ const p2pSource = readText('runtime/networking/p2p.ts');
 assertNotIncludes(p2pSource, 'pendingByRuntime', 'runtime/networking/p2p.ts');
 assertNotIncludes(p2pSource, 'flushPending', 'runtime/networking/p2p.ts');
 
-const runtimeLoopPath = 'runtime/runtime/loop.ts';
-const runtimeLoop = readText(runtimeLoopPath);
-assertIncludes(runtimeLoop, '): RuntimeEntityInputRoutingResult => {', runtimeLoopPath);
-assertIncludes(runtimeLoop, 'return sendEntityInputWithRouting(env, input, getRuntimeOutputRoutingDeps());', runtimeLoopPath);
-const sendEntityInputStart = runtimeLoop.indexOf('const sendEntityInput =');
-const sendEntityInputEnd = runtimeLoop.indexOf('const startP2P', sendEntityInputStart);
-const sendEntityInputSource = runtimeLoop.slice(sendEntityInputStart, sendEntityInputEnd);
-assertNotIncludes(sendEntityInputSource, 'return true', runtimeLoopPath);
-assertNotIncludes(sendEntityInputSource, 'return false', runtimeLoopPath);
+const runtimeRoutingPath = 'runtime/runtime/loop-routing.ts';
+const runtimeRouting = readText(runtimeRoutingPath);
+assertIncludes(runtimeRouting, 'sendEntityInputWithRouting(env, input, outputRoutingDeps())', runtimeRoutingPath);
+const sendEntityInputStart = runtimeRouting.indexOf('sendEntityInput: (env: Env');
+const sendEntityInputEnd = runtimeRouting.indexOf('startP2P:', sendEntityInputStart);
+const sendEntityInputSource = runtimeRouting.slice(sendEntityInputStart, sendEntityInputEnd);
+assertNotIncludes(sendEntityInputSource, 'return true', runtimeRoutingPath);
+assertNotIncludes(sendEntityInputSource, 'return false', runtimeRoutingPath);
 
 const relayDirectTs = readText('runtime/server/relay-direct.ts');
 assertNotIncludes(relayDirectTs, '[RELAY] Direct dispatch', 'runtime/server/relay-direct.ts');

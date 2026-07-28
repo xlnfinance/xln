@@ -814,7 +814,7 @@ for (const marker of [
   assertIncludes(runtimeEntityInputs, marker, runtimeEntityInputsPath);
 }
 
-const runtimeSourcePath = 'runtime/runtime/loop.ts';
+const runtimeSourcePath = 'runtime/runtime/input-quarantine.ts';
 const runtimeSource = readText(runtimeSourcePath);
 assertIncludes(runtimeSource, 'error.isQuarantinableRemoteIngress', runtimeSourcePath);
 assertNotIncludes(

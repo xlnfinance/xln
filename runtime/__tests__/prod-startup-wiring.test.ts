@@ -776,17 +776,24 @@ describe('production startup wiring', () => {
       join(repoRoot, 'runtime/runtime/frame/prepare.ts'),
       'utf8',
     );
+    const runtimeLoopWorkSource = readFileSync(
+      join(repoRoot, 'runtime/runtime/loop-work.ts'),
+      'utf8',
+    );
     expect(runtimeLoopSource).toContain(
       'const runtimeLoopTickDelayMs = Math.max(0, Math.floor(Number(config?.tickDelayMs ?? 0)));',
     );
     expect(runtimeLoopSource).toContain('maxEntityInputsPerFrame?: number');
     expect(runtimeLoopSource).toContain('maxEntityTxsPerFrame?: number');
-    expect(runtimeLoopSource).toContain('const applyEntityInputFrameCap =');
-    expect(runtimeLoopSource).toContain('const applyEntityTxFrameCap =');
-    expect(runtimeLoopSource).toContain('mempool.entityInputs = [...deferredInputs, ...mempool.entityInputs];');
+    expect(runtimeLoopWorkSource).toContain('export const applyEntityInputFrameCap =');
+    expect(runtimeLoopWorkSource).toContain('export const applyEntityTxFrameCap =');
+    expect(runtimeLoopWorkSource).toContain('mempool.entityInputs = [...deferredInputs, ...mempool.entityInputs];');
     expect(runtimeSource).not.toContain('prepareCrossJurisdictionEntityInputs');
-    const entityConsensusSource = readFileSync(join(repoRoot, 'runtime/entity/consensus/input-consensus.ts'), 'utf8');
-    expect(entityConsensusSource).toContain('appendDefaultProposerCrossJMaterializations');
+    const entityAdmissionSource = readFileSync(
+      join(repoRoot, 'runtime/entity/consensus/input-admission.ts'),
+      'utf8',
+    );
+    expect(entityAdmissionSource).toContain('appendDefaultProposerCrossJMaterializations');
     expect(framePreparationSource.indexOf('input.entityInputs = await prepareHtlcPaymentEntityInputs(')).toBeGreaterThan(
       framePreparationSource.lastIndexOf('deps.applyEntityInputFrameCap('),
     );
