@@ -13,8 +13,8 @@ import type {
   EntityInput,
   RuntimeState,
 } from '../types';
-import { createPersistenceQueries } from '../persistence/queries';
-import { createRuntimeStorageApi } from '../persistence/runtime-storage';
+import { createPersistenceQueries } from '../storage/queries';
+import { createRuntimeStorageApi } from '../storage/runtime-storage';
 import { rehydrateRestoredRuntimeInfra, type TrustedJurisdictionRpcBinding } from './infra';
 import { createRuntimeLoopApi } from './loop';
 import { createRuntimeRecoveryApi } from '../recovery/restore';

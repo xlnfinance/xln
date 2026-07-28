@@ -9,8 +9,8 @@ import { requireRuntimeMempool } from '../input-queue';
 import { transitionRuntimeLifecycle } from '../lifecycle';
 import { ensureRuntimeState } from '../runtime-state';
 import type { createRuntimeRecoveryApi } from '../../recovery/restore';
-import type { createRuntimeStorageApi } from '../../persistence/runtime-storage';
-import { notifyRuntimeSyncAfterCommit } from '../../persistence/runtime-storage';
+import type { createRuntimeStorageApi } from '../../storage/runtime-storage';
+import { notifyRuntimeSyncAfterCommit } from '../../storage/runtime-storage';
 import type {
   EntityInput,
   RuntimeInput,

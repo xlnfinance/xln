@@ -5,16 +5,16 @@ import {
   loadEntityViewPageFromStorage,
   readStorageHead,
   type StorageHead,
-} from '../storage';
+} from '..';
 import {
   resolveRuntimeWalDbPath,
   resolveStorageDbPath,
-} from '../storage/runtime-dbs';
-import { verifyStorageTailIntegrity } from '../storage/verify';
-import { assertCertifiedJHistoryIntegrity } from '../jurisdiction/local-history';
-import type { RuntimeAdapterReadQuery } from '../radapter';
-import type { EntityState, RuntimeState } from '../types';
-import type { PersistenceQueryDeps } from './query-deps';
+} from '../runtime-dbs';
+import { verifyStorageTailIntegrity } from '../verify';
+import { assertCertifiedJHistoryIntegrity } from '../../jurisdiction/local-history';
+import type { RuntimeAdapterReadQuery } from '../../radapter';
+import type { EntityState, RuntimeState } from '../../types';
+import type { PersistenceQueryDeps } from './deps';
 
 export const createPersistenceEntityQueries = (deps: PersistenceQueryDeps) => {
   const getPersistedLatestHeight = (env: RuntimeState): Promise<number> =>

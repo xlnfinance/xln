@@ -1,41 +1,41 @@
 import { Level } from 'level';
-import { runtimeIsBrowser } from './../runtime/platform';
-import { getPerfMs } from './../utils';
-import { cloneIsolatedRoutedEntityInputs, cloneIsolatedRuntimeInput } from './../protocol/runtime-input-clone';
-import { requireBoundaryInteger } from './../protocol/boundary-validation';
+import { runtimeIsBrowser } from '../runtime/platform';
+import { getPerfMs } from '../utils';
+import { cloneIsolatedRoutedEntityInputs, cloneIsolatedRuntimeInput } from '../protocol/runtime-input-clone';
+import { requireBoundaryInteger } from '../protocol/boundary-validation';
 import {
   buildDurableRuntimeMachineSnapshot,
   buildReplayVerifiableRuntimeMachineSnapshot,
   authorizeRestoredRuntimeInput,
   restoreDurableRuntimeSnapshot,
-} from './../wal/snapshot';
-import { assertPersistedLocalEntityCryptoKeys } from './../entity/crypto';
-import { getLiveConsumptionAccumulatorStates } from './../entity/consumption-store';
-import { getLiveAccountJClaimAccumulatorStates } from './../account/j-claim-store';
+} from '../wal/snapshot';
+import { assertPersistedLocalEntityCryptoKeys } from '../entity/crypto';
+import { getLiveConsumptionAccumulatorStates } from '../entity/consumption-store';
+import { getLiveAccountJClaimAccumulatorStates } from '../account/j-claim-store';
 import {
   dropPendingHistoryRecords,
   dropOverlay,
   peekPendingHistoryRecords,
   setAccountFrameHistoryView,
-} from './../runtime/env-events';
-import { normalizeRuntimeId } from './../networking/runtime-id';
-import { formatReplicaKey, createReplicaKey } from './../ids';
-import { transitionRuntimeLifecycle } from './../runtime/lifecycle';
-import { ensureRuntimeState } from './../runtime/runtime-state';
-import { restoreDurableOutputRetryState } from './../runtime/durable-output-retry';
-import { cloneEntityState } from './../state-helpers';
-import { safeStringify } from './../protocol/serialization';
+} from '../runtime/env-events';
+import { normalizeRuntimeId } from '../networking/runtime-id';
+import { formatReplicaKey, createReplicaKey } from '../ids';
+import { transitionRuntimeLifecycle } from '../runtime/lifecycle';
+import { ensureRuntimeState } from '../runtime/runtime-state';
+import { restoreDurableOutputRetryState } from '../runtime/durable-output-retry';
+import { cloneEntityState } from '../state-helpers';
+import { safeStringify } from '../protocol/serialization';
 import {
   computeCanonicalEntityHash,
   computeCanonicalEntityHashesFromEnv,
   computeCanonicalStateHashFromEnv,
-} from './../storage/canonical-hash';
+} from './canonical-hash';
 import {
   applyCertifiedEntityLineagePlan,
   buildCertifiedEntityLineagePlan,
   buildRuntimeCheckpointLineagePlan,
-} from './../storage/entity-lineage';
-import { assertCertifiedRegistrationEvidenceStore } from './../jurisdiction/registration-evidence';
+} from './entity-lineage';
+import { assertCertifiedRegistrationEvidenceStore } from '../jurisdiction/registration-evidence';
 import {
   computeStoragePostStateHash,
   findStorageLatestSnapshotAtOrBelow,
@@ -57,16 +57,16 @@ import {
   type StorageFrameRecord,
   type StorageHead,
   verifyStorageSnapshotAtHeight,
-} from './../storage';
+} from '.';
 import {
   buildStorageLiveReplicaMetaCommitment,
   buildStorageReplicaMetaCommitmentFromCheckpointPlan,
-} from './../storage/replicas';
-import { assertStorageSafetyOverridesAllowed } from './../storage/safety';
-import { storageOverlayRecordKey } from './../storage/overlay';
-import { evaluateStorageProgressDeadline } from './../storage/progress-deadline';
-import { assertCertifiedJHistoryIntegrity, assertValidatorJHistoryIntegrity } from './../jurisdiction/local-history';
-import { restoreJPrefixRound } from './../jurisdiction/j-prefix-consensus';
+} from './replicas';
+import { assertStorageSafetyOverridesAllowed } from './safety';
+import { storageOverlayRecordKey } from './overlay';
+import { evaluateStorageProgressDeadline } from './progress-deadline';
+import { assertCertifiedJHistoryIntegrity, assertValidatorJHistoryIntegrity } from '../jurisdiction/local-history';
+import { restoreJPrefixRound } from '../jurisdiction/j-prefix-consensus';
 import type {
   EntityReplica,
   EntityState,
@@ -74,12 +74,12 @@ import type {
   RoutedEntityInput,
   RuntimeOverlayRecord,
   RuntimeInput,
-} from './../types';
+} from '../types';
 import { buildRecoveryJournalFromStorageFrame } from './queries';
-import { normalizeDbNamespace, withStorageWriterLock } from './../storage/runtime-dbs';
+import { normalizeDbNamespace, withStorageWriterLock } from './runtime-dbs';
 import { createStructuredLogger } from '../infra/logger';
-import type { PersistedFrameJournal } from '../storage/types';
-import type { StorageDbRole } from '../storage/runtime-dbs';
+import type { PersistedFrameJournal } from './types';
+import type { StorageDbRole } from './runtime-dbs';
 import { envRecord } from '../runtime/loop-environment';
 
 type RuntimeModule = typeof import('../runtime');

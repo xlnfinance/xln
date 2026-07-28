@@ -9,7 +9,7 @@ const coordinatorModules = [
   'api/runtime-public.ts',
   'api/public-utilities.ts',
   'runtime/loop.ts',
-  'persistence/runtime-storage.ts',
+  'storage/runtime-storage.ts',
   'recovery/restore.ts',
   'runtime/state-create.ts',
 ] as const;

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { createEmptyEnv } from '../runtime';
-import { notifyRuntimeSyncAfterCommit } from '../persistence/runtime-storage';
+import { notifyRuntimeSyncAfterCommit } from '../storage/runtime-storage';
 
 describe('post-commit Runtime sync notification', () => {
   test('reports a broken channel without changing the durable frame', () => {

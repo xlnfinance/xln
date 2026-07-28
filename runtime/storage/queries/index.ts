@@ -1,26 +1,26 @@
 import {
   createPersistenceEntityQueries,
-} from './entity-queries';
+} from './entity';
 import {
   createPersistenceHistoryQueries,
-} from './history-queries';
+} from './history';
 import {
   createPersistenceRecordingQueries,
-} from './recording-queries';
-import type { PersistenceQueryDeps } from './query-deps';
+} from './recording';
+import type { PersistenceQueryDeps } from './deps';
 
 export {
   buildRecoveryJournalFromStorageFrame,
-} from './history-queries';
+} from './history';
 export type {
   PersistedRuntimeActivityPage,
-} from './history-queries';
+} from './history';
 export type {
   DetachedRuntimeRecordingAdapter,
-} from './recording-queries';
+} from './recording';
 export type {
   PersistenceQueryDeps,
-} from './query-deps';
+} from './deps';
 
 export const createPersistenceQueries = (deps: PersistenceQueryDeps) => {
   const entityQueries = createPersistenceEntityQueries(deps);

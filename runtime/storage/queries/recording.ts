@@ -1,21 +1,21 @@
 import {
   buildRuntimeRecoveryBundle,
   buildRuntimeRecoveryCheckpointBundle,
-} from '../recovery/bundle';
+} from '../../recovery/bundle';
 import {
   buildRuntimeRecording,
   validateRuntimeRecording,
-} from '../recovery/recording';
-import { buildRuntimeCheckpointSnapshot } from '../wal/snapshot';
+} from '../../recovery/recording';
+import { buildRuntimeCheckpointSnapshot } from '../../wal/snapshot';
 import type {
   RuntimeRecording,
   RuntimeRecoveryMetaV1,
   RuntimeRecoverySignerV1,
-} from '../recovery/types';
-import type { RuntimeState } from '../types';
-import type { PersistenceQueryDeps } from './query-deps';
-import type { createPersistenceEntityQueries } from './entity-queries';
-import type { createPersistenceHistoryQueries } from './history-queries';
+} from '../../recovery/types';
+import type { RuntimeState } from '../../types';
+import type { PersistenceQueryDeps } from './deps';
+import type { createPersistenceEntityQueries } from './entity';
+import type { createPersistenceHistoryQueries } from './history';
 
 type EntityQueries = ReturnType<typeof createPersistenceEntityQueries>;
 type HistoryQueries = ReturnType<typeof createPersistenceHistoryQueries>;

@@ -1,9 +1,9 @@
 import type { Level } from 'level';
 
-import type { RuntimeRecoveryBundleV1 } from '../recovery/types';
-import type { StorageFrameRecord } from '../storage';
-import type { StorageDbRole } from '../storage/runtime-dbs';
-import type { RuntimeState } from '../types';
+import type { RuntimeRecoveryBundleV1 } from '../../recovery/types';
+import type { StorageFrameRecord } from '..';
+import type { StorageDbRole } from '../runtime-dbs';
+import type { RuntimeState } from '../../types';
 
 type RuntimeDb = Level<Buffer, Buffer>;
 
