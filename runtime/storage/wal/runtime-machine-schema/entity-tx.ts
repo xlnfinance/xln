@@ -1,8 +1,8 @@
-import { assertEntityProposalAction } from '../../entity/authorization';
-import { normalizeSignedEntityCommand } from '../../entity/command-codec';
-import { normalizeConsensusOutputBoardAuthority } from '../../entity/consensus/output-certification';
-import type { EntityTx, ProposalAction } from '../../types';
-import { assertExactMultiRecipientCiphertextSchema } from '../../protocol/htlc/multi-recipient-schema';
+import { assertEntityProposalAction } from '../../../entity/authorization';
+import { normalizeSignedEntityCommand } from '../../../entity/command-codec';
+import { normalizeConsensusOutputBoardAuthority } from '../../../entity/consensus/output-certification';
+import type { EntityTx, ProposalAction } from '../../../types';
+import { assertExactMultiRecipientCiphertextSchema } from '../../../protocol/htlc/multi-recipient-schema';
 import {
   requireArray,
   requireBigInt,

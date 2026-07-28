@@ -4,7 +4,7 @@ import {
   requireExactBoundaryKeys,
   validateRuntimeInputEnvelope,
 } from '../protocol/boundary-validation';
-import { validateStorageSafeValue } from '../wal/runtime-machine-schema/primitives';
+import { validateStorageSafeValue } from '../storage/wal/runtime-machine-schema/primitives';
 import type {
   RuntimeAdapterErrorCode,
   RuntimeAdapterErrorPayload,

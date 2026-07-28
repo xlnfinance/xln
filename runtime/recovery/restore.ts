@@ -15,7 +15,7 @@ import {
   normalizePersistedSnapshotInPlace,
   projectReplayVerifiableRuntimeMachine,
   restoreDurableRuntimeSnapshot,
-} from './../wal/snapshot';
+} from '../storage/wal/snapshot';
 import { setBrowserVMJurisdiction } from './../jadapter';
 import {
   assertCertifiedBoardRootsAvailable,

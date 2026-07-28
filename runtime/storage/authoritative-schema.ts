@@ -30,7 +30,7 @@ import {
   validateStorageBookDocValue,
   validateStorageEntityCoreDocValue,
 } from './schema-state-docs';
-import { validateDurableRuntimeMachineSnapshot } from '../wal/runtime-machine-schema';
+import { validateDurableRuntimeMachineSnapshot } from './wal/runtime-machine-schema';
 import { validateDurableOutputRetryState } from '../runtime/durable-output-retry';
 import { validateRuntimeHistoryRecords } from './history-view-schema';
 

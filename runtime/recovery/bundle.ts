@@ -5,7 +5,7 @@ import {
   verifyAccountSignature,
 } from '../account/crypto';
 import { serializeTaggedJson } from '../protocol/serialization';
-import { buildRuntimeRecoveryCheckpointSnapshot } from '../wal';
+import { buildRuntimeRecoveryCheckpointSnapshot } from '../storage/wal';
 import type { RuntimeState } from '../types';
 import type {
   RuntimeRecoveryBundleV1,

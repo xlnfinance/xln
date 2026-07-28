@@ -29,8 +29,8 @@ import {
   encryptRuntimeRecoveryBundle,
 } from '../recovery/crypto';
 import type { TowerAppointmentV1 } from '../recovery/types';
-import { buildRuntimeCheckpointSnapshot } from '../wal';
-import { computePersistedEnvStateHash } from '../wal/hash';
+import { buildRuntimeCheckpointSnapshot } from '../storage/wal';
+import { computePersistedEnvStateHash } from '../storage/wal/hash';
 import { createWatchtowerStore } from '../watchtower/store';
 import { handleRecoveryDiscover, handleTowerAppointment, handleTowerRestore } from '../watchtower/http';
 import type { JReplica, JurisdictionConfig } from '../types';

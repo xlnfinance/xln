@@ -20,7 +20,7 @@ import type { EntityReplica, RuntimeState, JReplica, JurisdictionConfig } from '
 import {
   buildDurableRuntimeMachineSnapshot,
   restoreDurableRuntimeSnapshot,
-} from '../wal/snapshot';
+} from '../storage/wal/snapshot';
 import { addr, makeState } from './helpers/cross-j';
 import { installCanonicalRegistrationEvidence } from './helpers/registration-evidence';
 

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 
 import { cloneAccountState, cloneEntityReplica, cloneEntityState } from '../state-helpers';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
-import { buildCanonicalEntityReplicaSnapshot } from '../wal/snapshot';
+import { buildCanonicalEntityReplicaSnapshot } from '../storage/wal/snapshot';
 import { validateConsensusConfig, validateEntityReplica } from '../validation-utils';
 
 const makeCrossJurisdictionRoute = () => ({

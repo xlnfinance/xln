@@ -11,7 +11,7 @@ import {
   registerSignerKey,
 } from '../account/crypto';
 import { generateLazyEntityId } from '../entity/factory';
-import { buildCanonicalEnvSnapshot } from '../wal/snapshot';
+import { buildCanonicalEnvSnapshot } from '../storage/wal/snapshot';
 import {
   appendRecentRuntimeSnapshot,
   RECENT_RUNTIME_HISTORY_LIMIT,

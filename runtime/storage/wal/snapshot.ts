@@ -6,32 +6,32 @@ import type {
   Profile,
   RoutedEntityInput,
   RuntimeInput,
-} from '../types';
-import { cloneEntityReplica } from '../state-helpers';
-import { markRestoredJSubmitRuntimeTxs } from '../runtime/j-submit-state';
-import { markRestoredJAuthorityRuntimeTxs } from '../jurisdiction/registration-evidence';
-import { markRestoredJImportResultRuntimeTxs } from '../runtime/jurisdiction-import';
-import { markRestoredEntityProviderActionRuntimeTxs } from '../runtime/entity-provider-action-submit-auth';
+} from '../../types';
+import { cloneEntityReplica } from '../../state-helpers';
+import { markRestoredJSubmitRuntimeTxs } from '../../runtime/j-submit-state';
+import { markRestoredJAuthorityRuntimeTxs } from '../../jurisdiction/registration-evidence';
+import { markRestoredJImportResultRuntimeTxs } from '../../runtime/jurisdiction-import';
+import { markRestoredEntityProviderActionRuntimeTxs } from '../../runtime/entity-provider-action-submit-auth';
 import {
   collectReachableCertifiedBoardNodes,
   getCertifiedBoardNodeStore,
-} from '../jurisdiction/board-registry';
+} from '../../jurisdiction/board-registry';
 import {
   collectReachableConsumptionNodes,
   getConsumptionNodeStore,
   getLiveConsumptionAccumulatorStates,
-} from '../entity/consumption-store';
+} from '../../entity/consumption-store';
 import {
   collectReachableAccountJClaimNodes,
-} from '../account/j-claim-accumulator';
+} from '../../account/j-claim-accumulator';
 import {
   getAccountJClaimNodeStore,
   getLiveAccountJClaimAccumulatorStates,
-} from '../account/j-claim-store';
+} from '../../account/j-claim-store';
 import {
   cloneIsolatedRoutedEntityInputs,
   cloneIsolatedRuntimeInput,
-} from '../protocol/runtime-input-clone';
+} from '../../protocol/runtime-input-clone';
 
 export const authorizeRestoredRuntimeInput = (runtimeInput: RuntimeInput): RuntimeInput => {
   markRestoredJSubmitRuntimeTxs(runtimeInput.runtimeTxs);

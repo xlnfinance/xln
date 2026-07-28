@@ -38,7 +38,7 @@ import {
   buildCanonicalRuntimeStateSnapshot,
   buildDurableRuntimeMempool,
   restoreDurableRuntimeSnapshot,
-} from '../wal/snapshot';
+} from '../storage/wal/snapshot';
 import {
   collectLocalProfileEncryptionAnnouncements,
   getCompleteProfileEncryptionManifest,

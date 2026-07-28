@@ -22,7 +22,7 @@ If you only have 1-2 hours, read files in this order:
    Bilateral account-tx dispatcher.
 7. `runtime/jurisdiction/history-consensus.ts`, `runtime/jurisdiction/event-observation.ts`, `runtime/runtime/j-submit.ts`
    Per-validator J-block histories, quorum-prefix finality, observation, and durable submission.
-8. `runtime/storage/`, `runtime/wal/snapshot.ts`
+8. `runtime/storage/`, `runtime/storage/wal/snapshot.ts`
    Snapshot/WAL/materialization and local integrity hashes.
 9. `runtime/extensions/cross-j/`, `runtime/orderbook/`
    Cross-j lifecycle and same-j market extensions outside the minimal payment core.
@@ -45,7 +45,7 @@ If you only have 1-2 hours, read files in this order:
   Applies bilateral txs such as payment, HTLC, pull, swap, settlement-side actions.
 - `runtime/jurisdiction/`
   Groups validator observations by jurisdiction block and finalizes only the exact quorum-supported prefix.
-- `runtime/storage/`, `runtime/wal/`
+- `runtime/storage/`, including `runtime/storage/wal/`
   Durable truth: snapshot, WAL, materialized docs, canonical hash verification.
 - `runtime/networking/`, `runtime/relay/`
   Transport only. These modules deliver inputs; they do not define financial truth.
@@ -87,7 +87,7 @@ These files define correctness and are the first audit target:
 - `runtime/account/tx/`
 - `runtime/jurisdiction/`
 - `runtime/storage/`
-- `runtime/wal/`
+- `runtime/storage/wal/`
 
 ### Infrastructure, not protocol truth
 

@@ -31,7 +31,7 @@ import {
   buildCanonicalEntityReplicaSnapshot,
   buildDurableRuntimeMachineSnapshot,
   restoreDurableRuntimeSnapshot,
-} from '../wal/snapshot';
+} from '../storage/wal/snapshot';
 import type {
   AccountInput,
   ConsensusConfig,

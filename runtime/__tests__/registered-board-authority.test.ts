@@ -50,7 +50,7 @@ import { recordValidatorJHistory } from '../jurisdiction/local-history';
 import { createEmptyEnv, restoreEnvFromCheckpointSnapshot } from '../runtime';
 import { getReliableOutputIdentity } from '../runtime/output-routing';
 import { createDueScheduledWakeInputs, refreshScheduledWakeIndex } from '../runtime/scheduled-wake';
-import { buildRuntimeCheckpointSnapshot } from '../wal/snapshot';
+import { buildRuntimeCheckpointSnapshot } from '../storage/wal/snapshot';
 import { cloneEntityState } from '../state-helpers';
 import type {
   ConsensusOutputOrigin,

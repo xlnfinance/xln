@@ -4,7 +4,7 @@ import type { JReplica } from '../types';
 import {
   buildCanonicalJReplicaSnapshot,
   normalizePersistedSnapshotInPlace,
-} from '../wal/snapshot';
+} from '../storage/wal/snapshot';
 import {
   applyTrustedJurisdictionRpcBindings,
   ensureLiveJAdapterForReplica,

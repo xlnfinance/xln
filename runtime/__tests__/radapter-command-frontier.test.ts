@@ -5,7 +5,7 @@ import {
 } from '../radapter/command-frontier';
 import { markLocalRuntimeAdapterCommandTx } from '../radapter/command-frontier-auth';
 import { applyRuntimeTx } from '../runtime/tx-handlers';
-import { buildDurableRuntimeMachineSnapshot, restoreDurableRuntimeSnapshot } from '../wal/snapshot';
+import { buildDurableRuntimeMachineSnapshot, restoreDurableRuntimeSnapshot } from '../storage/wal/snapshot';
 import { createEmptyEnv } from '../runtime';
 
 const laneId = runtimeAdapterCommandLaneId('device-key', 'short-lived-capability');

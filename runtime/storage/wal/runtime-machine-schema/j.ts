@@ -1,5 +1,5 @@
-import type { JInput, JReplica } from '../../types';
-import type { JTx } from '../../types/jurisdiction-runtime';
+import type { JInput, JReplica } from '../../../types';
+import type { JTx } from '../../../types/jurisdiction-runtime';
 import { validateJBatch } from './j-batch';
 import {
   requireArray,

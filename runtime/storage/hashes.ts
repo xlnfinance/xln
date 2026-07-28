@@ -2,7 +2,7 @@ import { ethers } from 'ethers';
 import { computeIntegrityDigest } from '../infra/integrity-checksum';
 import { compareStableText } from '../protocol/serialization';
 import type { RuntimeState } from '../types';
-import { buildDurableRuntimeMachineSnapshot } from '../wal/snapshot';
+import { buildDurableRuntimeMachineSnapshot } from './wal/snapshot';
 import {
   computeCanonicalEntityHash,
   computeCanonicalRuntimeStateHash,

@@ -6,7 +6,7 @@ import {
   buildRuntimeRecording,
   validateRuntimeRecording,
 } from '../../recovery/recording';
-import { buildRuntimeCheckpointSnapshot } from '../../wal/snapshot';
+import { buildRuntimeCheckpointSnapshot } from '../wal/snapshot';
 import type {
   RuntimeRecording,
   RuntimeRecoveryMetaV1,

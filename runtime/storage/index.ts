@@ -121,7 +121,7 @@ import {
   buildDurableRuntimeMempool,
   buildDurableRuntimeMachineSnapshot,
   buildReplayVerifiableRuntimeMachineSnapshot,
-} from '../wal/snapshot';
+} from './wal/snapshot';
 import { buildDurableOutputRetryState } from '../runtime/durable-output-retry';
 import { verifyStorageSnapshotIntegrity } from './verify';
 import {

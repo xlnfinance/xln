@@ -55,7 +55,7 @@ import {
   buildCanonicalEntityReplicaSnapshot,
   buildDurableRuntimeMachineSnapshot,
   restoreDurableRuntimeSnapshot,
-} from '../wal/snapshot';
+} from '../storage/wal/snapshot';
 import { hydrateEntityStateFromStorage } from '../storage/hydration';
 import { projectEntityCoreDoc } from '../storage/projections';
 import type { ConsensusConfig, EntityReplica, EntityState, EntityTx, RuntimeState, JTx } from '../types';

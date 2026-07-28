@@ -15,7 +15,7 @@ import {
   buildCanonicalEntityReplicaSnapshot,
   buildDurableRuntimeMachineSnapshot,
   restoreDurableRuntimeSnapshot,
-} from '../wal/snapshot';
+} from '../storage/wal/snapshot';
 import { createEmptyEnv, processRuntime } from '../runtime';
 import type { RuntimeState } from '../types';
 import {

@@ -71,7 +71,7 @@ import {
   buildDurableRuntimeMachineSnapshot,
   buildReplayVerifiableRuntimeMachineSnapshot,
   restoreDurableRuntimeSnapshot,
-} from '../wal/snapshot';
+} from '../storage/wal/snapshot';
 import type { PersistedFrameJournal } from '../storage/types';
 import {
   DeterministicFaults,

@@ -18,7 +18,7 @@ import type { AccountState, EntityReplica, RuntimeState } from '../types';
 import {
   buildReplayVerifiableRuntimeMachineSnapshot,
   projectReplayVerifiableRuntimeMachine,
-} from '../wal/snapshot';
+} from '../storage/wal/snapshot';
 
 const signerIds = [`0x${'11'.repeat(20)}`, `0x${'12'.repeat(20)}`];
 const consensusConfig = {

@@ -15,7 +15,7 @@ import { commitRuntimeInput, processJEvents, setScenarioStorageEnabled } from '.
 import {
   buildDurableRuntimeMachineSnapshot,
   restoreDurableRuntimeSnapshot,
-} from '../wal/snapshot';
+} from '../storage/wal/snapshot';
 import type { RuntimeState, JReplica, JurisdictionConfig } from '../types';
 
 const attach = (

@@ -5,7 +5,7 @@ import {
   buildCanonicalEnvSnapshot,
   buildDurableRuntimeMachineSnapshot,
   restoreDurableRuntimeSnapshot,
-} from '../wal/snapshot';
+} from '../storage/wal/snapshot';
 
 describe('runtime snapshot codec', () => {
   test('time-machine snapshots preserve complete runtime input and routed output metadata', () => {

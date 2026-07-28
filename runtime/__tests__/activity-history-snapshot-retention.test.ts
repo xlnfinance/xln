@@ -21,7 +21,7 @@ import {
 import { generateLazyEntityId } from '../entity/factory';
 import { readHistoryViewRuntimeActivity } from '../storage/history-view';
 import { keyHistoryViewRuntimeActivity } from '../storage/keys';
-import { buildDurableRuntimeMachineSnapshot } from '../wal/snapshot';
+import { buildDurableRuntimeMachineSnapshot } from '../storage/wal/snapshot';
 import { readFrameReceipts } from '../server/rpc-ws';
 
 const recipientId = `0x${'bb'.repeat(32)}`;

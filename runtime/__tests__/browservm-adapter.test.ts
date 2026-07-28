@@ -5,7 +5,7 @@ import { createJAdapter } from '../jadapter';
 import { verifyCanonicalReceiptProof } from '../jadapter/receipt-codec';
 import { createEmptyEnv } from '../runtime';
 import { bindScenarioJReplica, createJReplica, createJurisdictionConfig } from '../scenarios/boot';
-import { buildCanonicalJReplicaSnapshot } from '../wal/snapshot';
+import { buildCanonicalJReplicaSnapshot } from '../storage/wal/snapshot';
 import type { EntityReplica } from '../types';
 
 const makeReplica = (entityId: string, signerId: string): EntityReplica =>

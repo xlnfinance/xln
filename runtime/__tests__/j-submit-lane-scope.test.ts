@@ -6,7 +6,7 @@ import {
   registerPendingCommittedJOutbox,
 } from '../runtime/j-submit-state';
 import { collectDueJSubmitRuntimeTxs } from '../runtime/j-submit-scheduler';
-import { buildCanonicalEntityReplicaSnapshot } from '../wal/snapshot';
+import { buildCanonicalEntityReplicaSnapshot } from '../storage/wal/snapshot';
 import {
   makeJSubmitDurabilityFixture,
   batchHash,

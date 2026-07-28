@@ -33,7 +33,7 @@ import {
 import { readStorageFrameRecord, readStorageHead } from './read';
 import { verifyStorageSnapshotIntegrity } from './verify';
 import { verifyStorageTailIntegrity } from './verify';
-import { projectReplayVerifiableRuntimeMachine } from '../wal/snapshot';
+import { projectReplayVerifiableRuntimeMachine } from './wal/snapshot';
 import type {
   RuntimeDbLike,
   StorageDoc,

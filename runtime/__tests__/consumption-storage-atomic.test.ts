@@ -32,7 +32,7 @@ import { KEY_HEAD, keyConsumptionNode, keyDiff, keyLiveEntity } from '../storage
 import type { RuntimeDbLike, StorageEntityCoreDoc, StorageHead } from '../storage/types';
 import type { JReplica, JurisdictionConfig } from '../types';
 import { getPerfMs } from '../utils';
-import { buildRuntimeCheckpointSnapshot } from '../wal/snapshot';
+import { buildRuntimeCheckpointSnapshot } from '../storage/wal/snapshot';
 import { hydrateEntityStateFromStorage, projectEntityCoreDoc } from '../storage/projections';
 import { LIMITS } from '../constants';
 

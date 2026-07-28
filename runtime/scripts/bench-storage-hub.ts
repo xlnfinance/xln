@@ -26,7 +26,7 @@ import {
 import { dbRootPath } from '../runtime/platform';
 import type { AccountState, EntityReplica, EntityState, EntityTx, RuntimeState, JReplica, RoutedEntityInput } from '../types';
 import { getPerfMs } from '../utils';
-import { buildRuntimeCheckpointSnapshot } from '../wal/snapshot';
+import { buildRuntimeCheckpointSnapshot } from '../storage/wal/snapshot';
 import {
   buildStorageLiveReplicaMetaCommitment,
   inspectStorageReplicaMetaEntries,

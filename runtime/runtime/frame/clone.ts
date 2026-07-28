@@ -12,7 +12,7 @@ import { copyLocalRuntimeAdapterCommandAuthorization } from '../../radapter/comm
 import {
   buildCanonicalJReplicaSnapshot,
   buildCanonicalRuntimeStateSnapshot,
-} from '../../wal/snapshot';
+} from '../../storage/wal/snapshot';
 import { encodeBuffer } from '../../storage/codec';
 import { attachEventEmitters } from '../env-events';
 import { copyLocalEntityProviderActionRuntimeTxAuthorization } from '../entity-provider-action-submit-auth';

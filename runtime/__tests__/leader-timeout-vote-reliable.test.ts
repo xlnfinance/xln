@@ -36,7 +36,7 @@ import {
 } from '../runtime/reliable-delivery';
 import { deliveryAccepted, deliveryFailure } from '../protocol/payments/delivery-result';
 import { applyRuntimeInput, createEmptyEnv } from '../runtime';
-import { buildDurableRuntimeMachineSnapshot, restoreDurableRuntimeSnapshot } from '../wal/snapshot';
+import { buildDurableRuntimeMachineSnapshot, restoreDurableRuntimeSnapshot } from '../storage/wal/snapshot';
 import type {
   DeliverableEntityInput,
   EntityLeaderTimeoutVote,

@@ -38,7 +38,7 @@ import {
 } from '../../storage';
 import type { EntityReplica, JReplica, JurisdictionConfig } from '../../types';
 import { getPerfMs } from '../../utils';
-import { buildRuntimeCheckpointSnapshot } from '../../wal/snapshot';
+import { buildRuntimeCheckpointSnapshot } from '../../storage/wal/snapshot';
 
 const [seed, requestedBoundary] = Bun.argv.slice(2);
 if (!seed || !requestedBoundary) throw new Error('account J crash seed and boundary are required');

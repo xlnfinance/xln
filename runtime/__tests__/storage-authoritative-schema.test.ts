@@ -19,12 +19,12 @@ import {
 } from '../storage/authoritative-schema';
 import { decodeValidatedBuffer, encodeBuffer } from '../storage/codec';
 import { createEmptyEnv } from '../runtime';
-import { buildDurableRuntimeMachineSnapshot, restoreDurableRuntimeSnapshot } from '../wal/snapshot';
+import { buildDurableRuntimeMachineSnapshot, restoreDurableRuntimeSnapshot } from '../storage/wal/snapshot';
 import { computeStorageFrameHash } from '../storage/hashes';
 import type { StorageFrameRecord } from '../storage/types';
 import { createEmptyBatch } from '../jurisdiction/batch';
-import { validateDurableRuntimeMachineSnapshot } from '../wal/runtime-machine-schema';
-import { validateEntityTx } from '../wal/runtime-machine-schema/entity-tx';
+import { validateDurableRuntimeMachineSnapshot } from '../storage/wal/runtime-machine-schema';
+import { validateEntityTx } from '../storage/wal/runtime-machine-schema/entity-tx';
 import { buildEntityTransactionProposalAction } from '../entity/authorization';
 import { hashEntityCommandTxs } from '../entity/command-codec';
 import {

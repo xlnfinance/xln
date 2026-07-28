@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { createEmptyEnv, restoreEnvFromCheckpointSnapshot } from '../runtime';
-import { buildRuntimeCheckpointSnapshot } from '../wal/snapshot';
+import { buildRuntimeCheckpointSnapshot } from '../storage/wal/snapshot';
 
 test('recovery rejects timestamp normalization instead of clamping durable state', async () => {
   const snapshot = buildRuntimeCheckpointSnapshot(createEmptyEnv('recovery-timestamp-reject'));

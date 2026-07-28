@@ -32,7 +32,7 @@ import {
 import { generateLazyEntityId } from '../entity/factory';
 import { applyMergedEntityInputs } from '../runtime/entity-inputs';
 import { recordValidatorJHistory } from '../jurisdiction/local-history';
-import { buildDurableRuntimeMachineSnapshot, restoreDurableRuntimeSnapshot } from '../wal/snapshot';
+import { buildDurableRuntimeMachineSnapshot, restoreDurableRuntimeSnapshot } from '../storage/wal/snapshot';
 import {
   buildCatchupFixtureCertificate,
   catchupFixtureDeliverable,

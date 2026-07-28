@@ -8,7 +8,7 @@ import {
   buildReplayVerifiableRuntimeMachineSnapshot,
   authorizeRestoredRuntimeInput,
   restoreDurableRuntimeSnapshot,
-} from '../wal/snapshot';
+} from './wal/snapshot';
 import { assertPersistedLocalEntityCryptoKeys } from '../entity/crypto';
 import { getLiveConsumptionAccumulatorStates } from '../entity/consumption-store';
 import { getLiveAccountJClaimAccumulatorStates } from '../account/j-claim-store';

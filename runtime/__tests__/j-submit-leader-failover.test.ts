@@ -11,7 +11,7 @@ import {
   buildCanonicalEntityReplicaSnapshot,
   buildDurableRuntimeMachineSnapshot,
   restoreDurableRuntimeSnapshot,
-} from '../wal/snapshot';
+} from '../storage/wal/snapshot';
 import type { EntityReplica } from '../types';
 import {
   makeJSubmitDurabilityFixture,

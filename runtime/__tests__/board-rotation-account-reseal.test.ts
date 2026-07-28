@@ -35,7 +35,7 @@ import type {
 import {
   buildDurableRuntimeMachineSnapshot,
   restoreDurableRuntimeSnapshot,
-} from '../wal/snapshot';
+} from '../storage/wal/snapshot';
 import { applyJEventRange } from './helpers/j-history';
 import { addr, makeAccount, makeState } from './helpers/cross-j';
 

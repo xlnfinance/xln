@@ -12,7 +12,7 @@ import { submitRuntimeJOutbox } from '../runtime/j-submit';
 import { ENTITY_J_SUBMIT_FALLBACK_MS } from '../entity/consensus/leader';
 import { createEmptyBatch } from '../jurisdiction/batch';
 import { computeCanonicalEntityHash } from '../storage/canonical-hash';
-import { buildCanonicalEntityReplicaSnapshot } from '../wal/snapshot';
+import { buildCanonicalEntityReplicaSnapshot } from '../storage/wal/snapshot';
 import {
   batchHash,
   commitJSubmitAttempt,

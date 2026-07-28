@@ -7,8 +7,8 @@ import {
   resolveRuntimeSecurityIncident,
 } from '../runtime/security-incidents';
 import { createEmptyEnv } from '../runtime';
-import { buildDurableRuntimeMachineSnapshot, restoreDurableRuntimeSnapshot } from '../wal/snapshot';
-import { validateDurableRuntimeMachineSnapshot } from '../wal/runtime-machine-schema';
+import { buildDurableRuntimeMachineSnapshot, restoreDurableRuntimeSnapshot } from '../storage/wal/snapshot';
+import { validateDurableRuntimeMachineSnapshot } from '../storage/wal/runtime-machine-schema';
 
 const incident = {
   domain: 'cross-j' as const,

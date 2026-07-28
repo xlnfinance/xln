@@ -91,7 +91,7 @@ describe('determinism cleanup lifecycle', () => {
     expect(projectEnd).toBeGreaterThan(projectStart);
     const projectSource = source.slice(projectStart, projectEnd);
 
-    expect(source).toContain("import { buildCanonicalJReplicaSnapshot } from '../wal/snapshot';");
+    expect(source).toContain("import { buildCanonicalJReplicaSnapshot } from '../storage/wal/snapshot';");
     expect(projectSource).toContain('buildCanonicalJReplicaSnapshot(replica)');
     expect(projectSource).not.toContain('blockNumber: replica.blockNumber');
     expect(projectSource).not.toContain('lastBlockTimestamp: replica.lastBlockTimestamp');

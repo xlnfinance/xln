@@ -4,7 +4,7 @@ import type { BrowserVMProvider, JAdapterConfig } from '../jadapter/types';
 import { createJAdapterWithRetry } from '../jadapter/retry';
 import { createStructuredLogger } from '../infra/logger';
 import { getJurisdictionIdentityRef } from '../jurisdiction/jurisdiction-runtime';
-import { buildCanonicalJReplicaSnapshot } from '../wal/snapshot';
+import { buildCanonicalJReplicaSnapshot } from '../storage/wal/snapshot';
 
 const infraLog = createStructuredLogger('runtime.infra');
 const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error);

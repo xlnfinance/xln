@@ -11,7 +11,7 @@ import {
 } from '../runtime.ts';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
 import { generateLazyEntityId } from '../entity/factory';
-import { buildRuntimeCheckpointSnapshot } from '../wal/snapshot';
+import { buildRuntimeCheckpointSnapshot } from '../storage/wal/snapshot';
 import { serializeTaggedJson } from '../protocol/serialization';
 import type { BrowserVMState, EntityReplica, JReplica } from '../types';
 import { accountInputProposal } from '../account/consensus/flush';
@@ -405,8 +405,8 @@ async function main() {
     runtimeId,
     liveHeight: liveSnapshot['height'],
     replayHeight: replaySnapshot['height'],
-    liveHash: (await import('../wal/hash')).computePersistedEnvStateHash(liveSnapshot),
-    replayHash: (await import('../wal/hash')).computePersistedEnvStateHash(replaySnapshot),
+    liveHash: (await import('../storage/wal/hash')).computePersistedEnvStateHash(liveSnapshot),
+    replayHash: (await import('../storage/wal/hash')).computePersistedEnvStateHash(replaySnapshot),
     diffCount: diffs.length,
     diffs,
     firstSerializedDiff: diffContext,

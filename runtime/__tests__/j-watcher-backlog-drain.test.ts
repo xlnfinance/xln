@@ -25,7 +25,7 @@ import {
   buildCanonicalEntityReplicaSnapshot,
   buildDurableRuntimeMachineSnapshot,
   restoreDurableRuntimeSnapshot,
-} from '../wal/snapshot';
+} from '../storage/wal/snapshot';
 
 const CHAIN_ID = 31_337;
 const RUNTIME_SEED = 'j-watcher-backlog-drain';
