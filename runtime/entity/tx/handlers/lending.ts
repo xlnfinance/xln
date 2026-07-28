@@ -1,14 +1,14 @@
 import type { AccountTx, EntityInput, EntityState, EntityTx } from '../../../types';
 import { normalizeInterestBps, normalizeLendingTerm } from '../../../extensions/lending';
 import { addMessage, cloneEntityState } from '../../../state-helpers';
-import type { MempoolOp } from './account';
+import type { AccountTxTarget } from './account';
 
 type EntityTxOf<T extends EntityTx['type']> = Extract<EntityTx, { type: T }>;
 
 type LendingResult = {
   newState: EntityState;
   outputs: EntityInput[];
-  mempoolOps?: MempoolOp[];
+  accountTxs?: AccountTxTarget[];
 };
 
 const INTENT_ID_RE = /^(?:lend|borrow|loan)-[0-9a-f]{16}$/;
@@ -52,7 +52,7 @@ const queueAccountTx = (
   return {
     newState,
     outputs: processingTrigger(state),
-    mempoolOps: [{ accountId: hubEntityId, tx }],
+    accountTxs: [{ accountId: hubEntityId, tx }],
   };
 };
 

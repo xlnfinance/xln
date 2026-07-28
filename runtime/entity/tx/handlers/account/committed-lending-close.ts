@@ -16,7 +16,7 @@ export function applyLendingCloseRequest(
     counterpartyId,
     proposer,
     now,
-    mempoolOps,
+    accountTxs,
   } = context;
   if (
     proposer !== normalizeEntityRef(tx.data.lenderEntityId) ||
@@ -45,7 +45,7 @@ export function applyLendingCloseRequest(
   }
   pool.status = 'closing';
   pool.updatedAt = now;
-  mempoolOps.push({
+  accountTxs.push({
     accountId: proposer,
     tx: {
       type: 'lending_close_payout',

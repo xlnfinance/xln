@@ -3,10 +3,10 @@ import {
   compareCanonicalJurisdictionEvents,
   normalizeJurisdictionEvents,
 } from '../../jurisdiction/event-normalization';
-import type { JEventClaimTx, JEventMempoolOp } from './j-events-types';
+import type { JEventClaimTx, JEventAccountTx } from './j-events-types';
 
 const isJEventClaimOp = (
-  op: JEventMempoolOp,
+  op: JEventAccountTx,
 ): op is { accountId: string; tx: JEventClaimTx } =>
   op.tx.type === 'j_event_claim';
 
@@ -14,7 +14,7 @@ const isJEventClaimOp = (
  * Entity owns claim ordering only. Financial application of finalized claims
  * lives in Account handlers, where delta/proof invariants can be enforced.
  */
-export function mergeJEventClaimOps(ops: JEventMempoolOp[]): void {
+export function mergeJEventClaimOps(ops: JEventAccountTx[]): void {
   const groups = new Map<string, number>();
   for (let index = 0; index < ops.length; ) {
     const op = ops[index];

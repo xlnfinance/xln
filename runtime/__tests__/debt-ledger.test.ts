@@ -256,7 +256,7 @@ describe('debt ledger', () => {
     const replay = await applyJEvent(aliceState, createdRange, env);
     expect(replay.newState).toBe(aliceState);
     expect(replay.outputs).toEqual([]);
-    expect(replay.mempoolOps).toEqual([]);
+    expect(replay.accountTxs).toEqual([]);
     expect(aliceState.outDebtsByToken).toBeUndefined();
 
     const terminalReplay = await applyJEvent(aliceState, forgivenRange, env);

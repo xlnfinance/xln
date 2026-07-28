@@ -32,7 +32,7 @@ export async function handleHtlcPayment(
 ): Promise<{
   newState: EntityState;
   outputs: EntityInput[];
-  mempoolOps: Array<{ accountId: string; tx: AccountTx }>;
+  accountTxs: Array<{ accountId: string; tx: AccountTx }>;
 }> {
   const prepared = await validatePreparedHtlcPayment(env, entityState, entityTx);
   const trace = (message: string, fields: Record<string, unknown> = {}): void => {
@@ -53,7 +53,7 @@ export async function handleHtlcPayment(
       message: `No account with next hop ${formatEntityId(prepared.nextHop)}`,
     });
     addMessage(newState, `❌ HTLC payment failed: No account with ${formatEntityId(prepared.nextHop)}`);
-    return { newState, outputs: [], mempoolOps: [] };
+    return { newState, outputs: [], accountTxs: [] };
   }
   const delta = account.deltas?.get(prepared.tokenId);
   if (!delta) {
@@ -62,7 +62,7 @@ export async function handleHtlcPayment(
       message: `No delta state for next hop ${formatEntityId(prepared.nextHop)} token ${prepared.tokenId}`,
     });
     addMessage(newState, '❌ HTLC payment failed: missing account state');
-    return { newState, outputs: [], mempoolOps: [] };
+    return { newState, outputs: [], accountTxs: [] };
   }
   const senderIsLeft = account.leftEntity === entityState.entityId;
   const nextHopCapacity = deriveDelta(delta, senderIsLeft).outCapacity;
@@ -75,7 +75,7 @@ export async function handleHtlcPayment(
       available: nextHopCapacity,
     });
     addMessage(newState, '❌ HTLC payment failed: insufficient capacity');
-    return { newState, outputs: [], mempoolOps: [] };
+    return { newState, outputs: [], accountTxs: [] };
   }
 
   newState.htlcRoutes.set(prepared.hashlock, {
@@ -105,7 +105,7 @@ export async function handleHtlcPayment(
       envelope: prepared.envelope,
     },
   };
-  const mempoolOps = [{ accountId: prepared.nextHop, tx: accountTx }];
+  const accountTxs = [{ accountId: prepared.nextHop, tx: accountTx }];
   // Persist the audit event only after this replay has built the exact AccountTx.
   // Emitting before account/capacity validation made rejected payments look sent.
   candidateEffects.push({
@@ -150,5 +150,5 @@ export async function handleHtlcPayment(
     tokenId: prepared.tokenId,
   });
 
-  return { newState, outputs: [], mempoolOps };
+  return { newState, outputs: [], accountTxs };
 }

@@ -77,7 +77,7 @@ const queueSameTradeFills = (
       takerFeeBps: pass.swapTakerFeeBps,
     });
     const queued = queueUniqueSwapResolveForEntityState(
-      pass.mempoolOps,
+      pass.accountTxs,
       pass.hubState,
       pass.queuedSwapResolutions,
       accountId,
@@ -116,7 +116,7 @@ const rejectUnfilledOffer = (
     return;
   }
   const queued = queueUniqueSwapResolveForEntityState(
-    pass.mempoolOps,
+    pass.accountTxs,
     pass.hubState,
     pass.queuedSwapResolutions,
     offer.accountId,

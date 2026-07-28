@@ -516,7 +516,7 @@ describe('orderbook matching fallback execution mapping', () => {
 
     const result = processCommittedOrderbookSwaps(entityState, [takerOffer] as any);
 
-    expect(result.mempoolOps).toEqual([]);
+    expect(result.accountTxs).toEqual([]);
     expect(result.crossJurisdictionFills).toEqual([]);
     expect(getBookOrder(book, makerOrderId)).not.toBeNull();
   });
@@ -844,7 +844,7 @@ describe('orderbook matching fallback execution mapping', () => {
       'maker-cross-committed',
       'taker-cross',
     ]);
-    expect(result.mempoolOps.map(op => `${op.accountId}:${op.tx.type}`).sort()).toEqual([
+    expect(result.accountTxs.map(op => `${op.accountId}:${op.tx.type}`).sort()).toEqual([
       'maker-committed-account:cross_swap_fill_ack',
       'taker-account:cross_swap_fill_ack',
     ]);
@@ -969,7 +969,7 @@ describe('orderbook matching fallback execution mapping', () => {
     const result = processCommittedOrderbookSwaps(entityState, [takerOffer] as any);
 
     expect(result.crossJurisdictionFills.map(fill => fill.offerId).sort()).toEqual(['maker-cross', 'taker-cross']);
-    expect(result.mempoolOps.map(op => `${op.accountId}:${op.tx.type}`).sort()).toEqual([
+    expect(result.accountTxs.map(op => `${op.accountId}:${op.tx.type}`).sort()).toEqual([
       'local-taker-account:cross_swap_fill_ack',
       'remote-maker:cross_swap_fill_ack',
     ]);
@@ -1107,7 +1107,7 @@ describe('orderbook matching fallback execution mapping', () => {
     const result = processCommittedOrderbookSwaps(entityState, [takerOffer] as any);
 
     expect(result.crossJurisdictionFills).toEqual([]);
-    expect(result.mempoolOps).toEqual([]);
+    expect(result.accountTxs).toEqual([]);
     expect(getBookOrder(book, remoteOrderId)).not.toBeNull();
   });
 
@@ -1375,7 +1375,7 @@ describe('orderbook matching fallback execution mapping', () => {
     };
 
     const result = processCommittedOrderbookSwaps(entityState as any, [makerOffer, takerOne, takerTwo] as any);
-    const makerAcks = result.mempoolOps.filter(
+    const makerAcks = result.accountTxs.filter(
       op => op.accountId === 'maker-account' && op.tx.type === 'cross_swap_fill_ack',
     );
 
@@ -1383,9 +1383,9 @@ describe('orderbook matching fallback execution mapping', () => {
     expect(makerAcks[0]?.tx.data.fillSeq).toBe(1);
     expect(makerAcks[0]?.tx.data.cumulativeFillRatio).toBe(32_768);
     expect(makerAcks[0]?.tx.data.incrementalSourceAmount).toBe(lot);
-    expect(result.mempoolOps.filter(op => op.tx.type === 'cross_swap_fill_ack')).toHaveLength(2);
+    expect(result.accountTxs.filter(op => op.tx.type === 'cross_swap_fill_ack')).toHaveLength(2);
     expect(
-      result.mempoolOps.some(op => op.accountId === 'taker-two-account' && op.tx.type === 'cross_swap_fill_ack'),
+      result.accountTxs.some(op => op.accountId === 'taker-two-account' && op.tx.type === 'cross_swap_fill_ack'),
     ).toBe(false);
   });
 
@@ -1461,7 +1461,7 @@ describe('orderbook matching fallback execution mapping', () => {
     });
 
     expect(result.bookUpdates).toEqual([]);
-    expect(result.mempoolOps).toEqual([]);
+    expect(result.accountTxs).toEqual([]);
     expect(result.crossJurisdictionFills).toEqual([]);
     expect(result.debugProjectionRejects).toEqual([]);
     expect(entityState.orderbookExt.books.has(pairId)).toBe(false);
@@ -1751,7 +1751,7 @@ describe('orderbook matching fallback execution mapping', () => {
 
     const result = processCommittedOrderbookSwaps(entityState, [takerOffer] as any);
 
-    expect(result.mempoolOps).toEqual([]);
+    expect(result.accountTxs).toEqual([]);
     expect(getBookOrder(staleBook, 'maker-account:maker-ask')).not.toBeNull();
   });
 
@@ -1872,7 +1872,7 @@ describe('orderbook matching fallback execution mapping', () => {
     expect(finalBook).toBeDefined();
     expect(finalBook!.orders.size).toBe(maxOrders);
 
-    const cancelOp = result.mempoolOps.find(
+    const cancelOp = result.accountTxs.find(
       item => item.tx.type === 'swap_resolve' && item.tx.data.offerId === rejectedOfferId,
     );
     expect(cancelOp).toBeDefined();
@@ -2026,11 +2026,11 @@ describe('orderbook matching fallback execution mapping', () => {
     } as any;
 
     const result = processOrderbookCancels(entityState, [{ accountId: 'alice', offerId: 'offer-cancel' }]);
-    expect(result.mempoolOps).toHaveLength(1);
-    expect(result.mempoolOps[0]!.accountId).toBe('alice');
-    expect(result.mempoolOps[0]!.tx.type).toBe('swap_resolve');
-    expect(result.mempoolOps[0]!.tx.data.offerId).toBe('offer-cancel');
-    expect(result.mempoolOps[0]!.tx.data.cancelRemainder).toBe(true);
+    expect(result.accountTxs).toHaveLength(1);
+    expect(result.accountTxs[0]!.accountId).toBe('alice');
+    expect(result.accountTxs[0]!.tx.type).toBe('swap_resolve');
+    expect(result.accountTxs[0]!.tx.data.offerId).toBe('offer-cancel');
+    expect(result.accountTxs[0]!.tx.data.cancelRemainder).toBe(true);
   });
 
   test('processOrderbookCancels does not duplicate account-level cancel already pending in frame', () => {
@@ -2104,7 +2104,7 @@ describe('orderbook matching fallback execution mapping', () => {
     } as any;
 
     const result = processOrderbookCancels(entityState, [{ accountId: 'alice', offerId: 'offer-cancel-pending' }]);
-    expect(result.mempoolOps).toHaveLength(0);
+    expect(result.accountTxs).toHaveLength(0);
   });
 
   test('fails fast on malformed persisted book order ids', () => {

@@ -1371,7 +1371,7 @@ describe('audit fail-fast regressions', () => {
     );
 
     expect(result.outputs).toEqual([]);
-    expect(result.mempoolOps).toEqual([]);
+    expect(result.accountTxs).toEqual([]);
     expect(userState.deferredAccountProposals?.get(hub.entityId)).toBe(account.settlementWorkspace?.workspaceHash);
     expect(buildSettlementSealDraft(account, userState, hub.entityId, env).tx).toMatchObject({
       type: 'settle_transition',

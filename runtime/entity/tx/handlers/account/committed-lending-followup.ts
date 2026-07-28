@@ -13,7 +13,7 @@ import {
   LENDING_TERM_MS,
   selectBestLendingPool,
 } from '../../../../extensions/lending';
-import type { MempoolOp } from './orderbook-queue';
+import type { AccountTxTarget } from './orderbook-queue';
 import {
   applyLendingClosePayout,
   applyLendingCloseRequest,
@@ -29,13 +29,13 @@ export type LendingFollowupContext = {
   counterpartyId: string;
   proposer: string;
   now: number;
-  mempoolOps: MempoolOp[];
+  accountTxs: AccountTxTarget[];
 };
 
 const lendingCreditOp = (
   accountId: string,
   data: Extract<AccountTx, { type: 'lending_credit' }>['data'],
-): MempoolOp => ({
+): AccountTxTarget => ({
   accountId,
   tx: { type: 'lending_credit', data },
 });
@@ -75,7 +75,7 @@ function applyLendingBorrow(
   context: LendingFollowupContext,
   tx: Extract<AccountTx, { type: 'lending_borrow_request' }>,
 ): void {
-  const { account, lending, hubEntityId, counterpartyId, proposer, now, mempoolOps } = context;
+  const { account, lending, hubEntityId, counterpartyId, proposer, now, accountTxs } = context;
   if (
     proposer !== normalizeEntityRef(tx.data.borrowerEntityId) ||
     proposer !== counterpartyId
@@ -131,7 +131,7 @@ function applyLendingBorrow(
     hubEntityId,
     tx.data.tokenId,
   );
-  mempoolOps.push(lendingCreditOp(proposer, {
+  accountTxs.push(lendingCreditOp(proposer, {
     action: 'grant',
     loanId,
     hubEntityId,
@@ -179,7 +179,7 @@ function applyLendingRepay(
   context: LendingFollowupContext,
   tx: Extract<AccountTx, { type: 'lending_repay' }>,
 ): void {
-  const { account, lending, hubEntityId, counterpartyId, proposer, now, mempoolOps } = context;
+  const { account, lending, hubEntityId, counterpartyId, proposer, now, accountTxs } = context;
   if (
     proposer !== normalizeEntityRef(tx.data.borrowerEntityId) ||
     proposer !== counterpartyId
@@ -201,7 +201,7 @@ function applyLendingRepay(
   loan.status = 'closing';
   loan.updatedAt = now;
   const currentLimit = getCreditGrantedByAccountOwner(account, hubEntityId, loan.tokenId);
-  mempoolOps.push(lendingCreditOp(proposer, {
+  accountTxs.push(lendingCreditOp(proposer, {
     action: 'revoke',
     loanId: loan.loanId,
     hubEntityId,
@@ -219,7 +219,7 @@ export function applyCommittedLendingFollowup(
   counterpartyIdRaw: string,
   tx: AccountTx,
   frame: AccountFrame,
-  mempoolOps: MempoolOp[],
+  accountTxs: AccountTxTarget[],
 ): void {
   const hubEntityId = normalizeEntityRef(state.entityId);
   if (state.profile?.isHub !== true) return;
@@ -239,7 +239,7 @@ export function applyCommittedLendingFollowup(
       Math.floor(Number(frame.timestamp || 0)),
       Math.floor(Number(state.timestamp || 0)),
     ),
-    mempoolOps,
+    accountTxs,
   };
   if (tx.type === 'lending_fund') return applyLendingFund(context, tx);
   if (tx.type === 'lending_borrow_request') return applyLendingBorrow(context, tx);

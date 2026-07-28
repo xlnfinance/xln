@@ -9,7 +9,7 @@ import {
   type NormalizedOrderbookOffer,
 } from '../../../../orderbook/swap-execution';
 import type { CrossJurisdictionFillInstruction } from '../../../../extensions/cross-j/orderbook';
-import type { MempoolOp } from './orderbook-queue';
+import type { AccountTxTarget } from './orderbook-queue';
 
 type StoredOfferEntityRefs = {
   fromEntity?: string;
@@ -55,7 +55,7 @@ export interface SwapCancelRequestEvent {
 }
 
 export interface MatchResult {
-  mempoolOps: MempoolOp[];
+  accountTxs: AccountTxTarget[];
   crossJurisdictionFills: CrossJurisdictionFillInstruction[];
   bookUpdates: {
     pairId: string;

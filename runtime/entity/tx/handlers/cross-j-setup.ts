@@ -21,7 +21,7 @@ import { cloneEntityState, addMessage } from '../../../state-helpers';
 import { safeStringify } from '../../../protocol/serialization';
 import type { CrossJurisdictionSwapRoute, EntityInput, EntityState, EntityTx, RuntimeState } from '../../../types';
 import type { ApplyEntityTxOptions } from '../apply';
-import type { MempoolOp } from './account';
+import type { AccountTxTarget } from './account';
 import { findAccountKey } from '../account-key';
 
 type EntityTxOf<T extends EntityTx['type']> = Extract<EntityTx, { type: T }>;
@@ -29,7 +29,7 @@ type EntityTxOf<T extends EntityTx['type']> = Extract<EntityTx, { type: T }>;
 type CrossJSetupResult = {
   newState: EntityState;
   outputs: EntityInput[];
-  mempoolOps?: MempoolOp[];
+  accountTxs?: AccountTxTarget[];
 };
 
 const deterministicEntityTimestamp = (state: EntityState, env: RuntimeState): number =>
@@ -250,7 +250,7 @@ export const handleRegisterCrossJurisdictionSwapEntityTx = (
     return {
       newState,
       outputs: [],
-      mempoolOps: [
+      accountTxs: [
         {
           accountId: sourceAccountId,
           tx: {
@@ -292,7 +292,7 @@ export const handleRegisterCrossJurisdictionSwapEntityTx = (
     return {
       newState,
       outputs: [],
-      mempoolOps: [{
+      accountTxs: [{
         accountId: targetAccountId,
         tx: {
           type: 'pull_lock',

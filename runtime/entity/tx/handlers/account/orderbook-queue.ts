@@ -1,7 +1,7 @@
 import type { AccountTx, EntityState } from '../../../../types';
 import { swapKey } from '../../../../orderbook/swap-execution';
 
-export interface MempoolOp {
+export interface AccountTxTarget {
   accountId: string;
   tx: AccountTx;
 }
@@ -73,7 +73,7 @@ export function findQueuedCrossSwapAckForEntityState(
 }
 
 export function queueUniqueSwapResolveForEntityState(
-  mempoolOps: MempoolOp[],
+  accountTxs: AccountTxTarget[],
   hubState: EntityState,
   queuedSwapResolutions: Set<string>,
   accountId: string,
@@ -83,7 +83,7 @@ export function queueUniqueSwapResolveForEntityState(
     return false;
   }
   queuedSwapResolutions.add(swapKey(accountId, data.offerId));
-  mempoolOps.push({
+  accountTxs.push({
     accountId,
     tx: {
       type: 'swap_resolve',

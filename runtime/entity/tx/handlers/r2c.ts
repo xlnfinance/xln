@@ -23,7 +23,7 @@ import { batchAddReserveToCollateral, initJBatch } from '../../../jurisdiction/b
 import { createStructuredLogger, formatAmount, shortId } from '../../../infra/logger';
 import { getReserveCandidateIssue } from './j-batch-reserve-admission';
 
-type MempoolOp = { accountId: string; tx: AccountTx };
+type AccountTxTarget = { accountId: string; tx: AccountTx };
 
 const r2cLog = createStructuredLogger('entity.r2c');
 
@@ -32,7 +32,7 @@ const collectRebalanceFee = (
   state: EntityState,
   tx: Extract<EntityTx, { type: 'r2c' }>,
   localReceivingEntity: boolean,
-  mempoolOps: MempoolOp[],
+  accountTxs: AccountTxTarget[],
 ): boolean => {
   const {
     counterpartyId,
@@ -86,7 +86,7 @@ const collectRebalanceFee = (
     return false;
   }
   if (rebalanceFeeAmount > 0n && rebalanceFeeTokenId !== undefined) {
-    mempoolOps.push({
+    accountTxs.push({
       accountId: counterpartyId,
       tx: {
         type: 'direct_payment',
@@ -107,7 +107,7 @@ const collectRebalanceFee = (
     feeTokenId: rebalanceFeeTokenId,
     feeAmount: formatAmount(rebalanceFeeAmount),
     rebalanceQuoteId,
-    mempoolOps: mempoolOps.length,
+    accountTxs: accountTxs.length,
   });
   return true;
 };
@@ -115,7 +115,7 @@ const collectRebalanceFee = (
 export async function handleR2C(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'r2c' }>,
-): Promise<{ newState: EntityState; outputs: EntityInput[]; jOutputs?: JInput[]; mempoolOps?: MempoolOp[] }> {
+): Promise<{ newState: EntityState; outputs: EntityInput[]; jOutputs?: JInput[]; accountTxs?: AccountTxTarget[] }> {
   const { counterpartyId, receivingEntityId, tokenId, amount, rebalanceQuoteId } = entityTx.data;
   const receivingEntity = String(receivingEntityId || entityState.entityId || '').trim().toLowerCase();
   const isLocalReceivingEntity = receivingEntity === String(entityState.entityId || '').trim().toLowerCase();
@@ -129,7 +129,7 @@ export async function handleR2C(
   });
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
-  const mempoolOps: MempoolOp[] = [];
+  const accountTxs: AccountTxTarget[] = [];
 
   // Validate: Do we have enough reserve?
   const reserveIssue = getReserveCandidateIssue(entityState, {
@@ -169,7 +169,7 @@ export async function handleR2C(
     newState,
     entityTx,
     isLocalReceivingEntity,
-    mempoolOps,
+    accountTxs,
   )) return { newState, outputs };
 
   // CRITICAL: Do NOT update state here - wait for SettlementProcessed event from j-watcher
@@ -201,5 +201,5 @@ export async function handleR2C(
     amount: formatAmount(amount),
   });
 
-  return { newState, outputs, mempoolOps };
+  return { newState, outputs, accountTxs };
 }

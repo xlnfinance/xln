@@ -8,14 +8,14 @@ import {
 import { cloneEntityState, addMessage } from '../../../state-helpers';
 import type { CrossJurisdictionSwapRoute, EntityInput, EntityState, EntityTx } from '../../../types';
 import { findAccountKey, normalizeEntityRef } from '../account-key';
-import type { MempoolOp } from './account';
+import type { AccountTxTarget } from './account';
 
 type CrossJurisdictionFillNoticeTx = Extract<EntityTx, { type: 'crossJurisdictionFillNotice' }>;
 
 type CrossJurisdictionFillResult = {
   newState: EntityState;
   outputs: EntityInput[];
-  mempoolOps?: MempoolOp[];
+  accountTxs?: AccountTxTarget[];
 };
 
 const sameCommittedFillNotice = (
@@ -65,7 +65,7 @@ export const handleCrossJurisdictionFillNoticeEntityTx = (
   assertCrossJurisdictionPriceImprovementMode(priceImprovementMode, orderId);
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
-  const mempoolOps: MempoolOp[] = [];
+  const accountTxs: AccountTxTarget[] = [];
   let route = newState.crossJurisdictionSwaps?.get(orderId);
   if (!route) {
     throw new Error(`CROSS_J_FILL_NOTICE_ROUTE_MISSING: order=${orderId}`);
@@ -99,7 +99,7 @@ export const handleCrossJurisdictionFillNoticeEntityTx = (
       throw new Error(`CROSS_J_FILL_NOTICE_STALE_CONFLICT: order=${orderId} seq=${noticeFillSeq} current=${currentFillSeq}`);
     }
     addMessage(newState, `🌉 Cross-j fill notice ${orderId} duplicate seq ${noticeFillSeq}`);
-    return { newState, outputs, mempoolOps };
+    return { newState, outputs, accountTxs };
   }
   if (
     previousFillSeq !== undefined &&
@@ -130,7 +130,7 @@ export const handleCrossJurisdictionFillNoticeEntityTx = (
     throw new Error(`CROSS_J_FILL_NOTICE_SOURCE_ACCOUNT_MISSING: order=${orderId} source=${route.source.entityId}`);
   }
 
-  mempoolOps.push({
+  accountTxs.push({
     accountId,
     tx: {
       type: 'cross_swap_fill_ack',
@@ -164,5 +164,5 @@ export const handleCrossJurisdictionFillNoticeEntityTx = (
   const firstValidator = entityState.config.validators[0];
   if (firstValidator) outputs.push({ entityId: newState.entityId, signerId: firstValidator, entityTxs: [] });
   addMessage(newState, `🌉 Cross-j fill notice ${orderId} queued account ack ${fill.nextRatio}/${CROSS_J_MAX_FILL_RATIO}`);
-  return { newState, outputs, mempoolOps };
+  return { newState, outputs, accountTxs };
 };

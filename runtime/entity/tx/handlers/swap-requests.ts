@@ -5,7 +5,7 @@ import {
   isCrossJurisdictionRouteExpired,
   withCanonicalCrossJurisdictionRouteHash,
 } from '../../../extensions/cross-j/index';
-import type { MempoolOp } from './account';
+import type { AccountTxTarget } from './account';
 import {
   mergeCrossJurisdictionRoute,
   validateCrossJurisdictionRouteTransition,
@@ -15,7 +15,7 @@ import type { ApplyEntityTxOptions } from '../apply';
 type SwapRequestResult = {
   newState: EntityState;
   outputs: EntityInput[];
-  mempoolOps?: MempoolOp[];
+  accountTxs?: AccountTxTarget[];
 };
 
 const deterministicEntityTimestamp = (state: EntityState, env: RuntimeState): number =>
@@ -53,7 +53,7 @@ export const handlePlaceSwapOfferRequest = (
 ): SwapRequestResult => {
   const newState = stateForEntityTx(entityState, options);
   const outputs: EntityInput[] = [];
-  const mempoolOps: MempoolOp[] = [];
+  const accountTxs: AccountTxTarget[] = [];
   const { counterpartyEntityId, offerId, giveTokenId, giveAmount, wantTokenId, wantAmount, priceTicks, timeInForce, crossJurisdiction } =
     entityTx.data;
 
@@ -92,10 +92,10 @@ export const handlePlaceSwapOfferRequest = (
     },
   };
 
-  mempoolOps.push({ accountId: counterpartyEntityId, tx: accountTx });
+  accountTxs.push({ accountId: counterpartyEntityId, tx: accountTx });
   wakeEntity(entityState, outputs);
 
-  return { newState, outputs, mempoolOps };
+  return { newState, outputs, accountTxs };
 };
 
 export const handleResolveSwapRequest = (
@@ -105,7 +105,7 @@ export const handleResolveSwapRequest = (
 ): SwapRequestResult => {
   const newState = stateForEntityTx(entityState, options);
   const outputs: EntityInput[] = [];
-  const mempoolOps: MempoolOp[] = [];
+  const accountTxs: AccountTxTarget[] = [];
   const {
     counterpartyEntityId,
     offerId,
@@ -123,7 +123,7 @@ export const handleResolveSwapRequest = (
   const accountMachine = requireSwapAccount(newState, counterpartyEntityId, 'resolveSwap');
   if (accountMachine.swapOffers.get(offerId)?.crossJurisdiction) {
     addMessage(newState, `❌ Cross-j offer ${offerId} cannot be resolved through plain swap_resolve`);
-    return { newState, outputs, mempoolOps };
+    return { newState, outputs, accountTxs };
   }
 
   const accountTx: AccountTx = {
@@ -146,10 +146,10 @@ export const handleResolveSwapRequest = (
     },
   };
 
-  mempoolOps.push({ accountId: counterpartyEntityId, tx: accountTx });
+  accountTxs.push({ accountId: counterpartyEntityId, tx: accountTx });
   wakeEntity(entityState, outputs);
 
-  return { newState, outputs, mempoolOps };
+  return { newState, outputs, accountTxs };
 };
 
 export const handleCancelSwapRequest = (
@@ -159,12 +159,12 @@ export const handleCancelSwapRequest = (
 ): SwapRequestResult => {
   const newState = stateForEntityTx(entityState, options);
   const outputs: EntityInput[] = [];
-  const mempoolOps: MempoolOp[] = [];
+  const accountTxs: AccountTxTarget[] = [];
   const { counterpartyEntityId, offerId } = entityTx.data;
 
   requireSwapAccount(newState, counterpartyEntityId, 'proposeCancelSwap');
 
-  mempoolOps.push({
+  accountTxs.push({
     accountId: counterpartyEntityId,
     tx: {
       type: 'swap_cancel_request',
@@ -173,5 +173,5 @@ export const handleCancelSwapRequest = (
   });
   wakeEntity(entityState, outputs);
 
-  return { newState, outputs, mempoolOps };
+  return { newState, outputs, accountTxs };
 };

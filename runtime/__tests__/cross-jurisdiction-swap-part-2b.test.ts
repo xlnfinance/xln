@@ -687,7 +687,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       data: { orderId: route.orderId, cancelRemainder: true },
     });
 
-    expect(result.mempoolOps).toEqual([]);
+    expect(result.accountTxs).toEqual([]);
     expect(result.newState.crossJurisdictionSwaps?.get(route.orderId)?.status).toBe('clear_requested');
     const [clearMaterialization] = appendDefaultProposerCrossJMaterializations(
       env,
@@ -702,10 +702,10 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(clearMaterialization?.type).toBe('materializeCrossJurisdictionClear');
     const sourceAccountRootBeforeMaterialization = computeAccountStateRoot(result.newState.accounts.get(sourceUser)!);
     const materialized = await applyEntityTx(env, result.newState, clearMaterialization!);
-    expect(materialized.mempoolOps?.map(op => op.tx.type)).toEqual(['cross_pull_close']);
-    expect(materialized.mempoolOps?.[0]?.accountId).toBe(sourceUser);
-    expect((materialized.mempoolOps?.[0]?.tx as any).data.binary).toMatch(/^0x/);
-    expect((materialized.mempoolOps?.[0]?.tx as any).data.proof.fillRatio).toBe(32_768);
+    expect(materialized.accountTxs?.map(op => op.tx.type)).toEqual(['cross_pull_close']);
+    expect(materialized.accountTxs?.[0]?.accountId).toBe(sourceUser);
+    expect((materialized.accountTxs?.[0]?.tx as any).data.binary).toMatch(/^0x/);
+    expect((materialized.accountTxs?.[0]?.tx as any).data.proof.fillRatio).toBe(32_768);
     const targetCloseOutput = materialized.outputs.find(output => output.entityId === targetHub);
     expect(targetCloseOutput).toMatchObject({
       entityId: targetHub,
@@ -719,13 +719,13 @@ describe('cross-jurisdiction hashledger swap', () => {
     );
     const targetCloseCommand = targetCloseOutput!.entityTxs![0]!;
     const stagedTargetClose = await applyEntityTx(env, targetState, targetCloseCommand);
-    expect(stagedTargetClose.mempoolOps?.map(op => op.tx.type)).toEqual(['cross_pull_close']);
-    expect(stagedTargetClose.mempoolOps?.[0]?.accountId).toBe(targetUser);
+    expect(stagedTargetClose.accountTxs?.map(op => op.tx.type)).toEqual(['cross_pull_close']);
+    expect(stagedTargetClose.accountTxs?.[0]?.accountId).toBe(targetUser);
     expect(stagedTargetClose.newState.crossJurisdictionSwaps?.get(route.orderId)?.status).toBe('clearing');
     const byTargetHub = targetHub.toLowerCase() < targetUser.toLowerCase();
     const targetCloseResult = await applyAccountTx(
       stagedTargetClose.newState.accounts.get(targetUser)!,
-      stagedTargetClose.mempoolOps![0]!.tx,
+      stagedTargetClose.accountTxs![0]!.tx,
       byTargetHub,
       env.timestamp,
       1,
@@ -735,7 +735,7 @@ describe('cross-jurisdiction hashledger swap', () => {
 
     const accountAfterClear = materialized.newState.accounts.get(sourceUser)!;
     const invalidProposalAccount = cloneAccountMachine(accountAfterClear);
-    const validClose = materialized.mempoolOps![0]!.tx;
+    const validClose = materialized.accountTxs![0]!.tx;
     if (validClose.type !== 'cross_pull_close') throw new Error('TEST_CROSS_J_CLOSE_REQUIRED');
     const invalidClose: Extract<AccountTx, { type: 'cross_pull_close' }> = {
       ...validClose,
@@ -758,7 +758,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     const bySourceHub = sourceHub.toLowerCase() < sourceUser.toLowerCase();
     const resolveResult = await applyAccountTx(
       accountAfterClear,
-      materialized.mempoolOps![0]!.tx,
+      materialized.accountTxs![0]!.tx,
       bySourceHub,
       env.timestamp,
       1,
@@ -1057,7 +1057,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       },
     });
 
-    expect(result.mempoolOps ?? []).toHaveLength(0);
+    expect(result.accountTxs ?? []).toHaveLength(0);
     expect(result.newState.crossJurisdictionSwaps?.get(route.orderId)?.status).toBe('partially_filled');
     expect(
       result.newState.messages.some(message => message.includes('must clear through requestCrossJurisdictionClear')),
@@ -1203,7 +1203,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       },
     });
 
-    expect(result.mempoolOps ?? []).toHaveLength(0);
+    expect(result.accountTxs ?? []).toHaveLength(0);
     expect(result.newState.crossJurisdictionSwaps?.get(route.orderId)?.status).toBe(route.status);
     expect(
       result.newState.messages.some(message => message.includes('must clear through requestCrossJurisdictionClear')),
@@ -1382,7 +1382,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         binary,
       },
     });
-    expect(blocked.mempoolOps ?? []).toHaveLength(0);
+    expect(blocked.accountTxs ?? []).toHaveLength(0);
     expect(blocked.newState.crossJurisdictionSwaps?.get(route.orderId)?.status).toBe('resting');
     expect(blocked.newState.messages.some(message => message.includes('only the Hub atomic close cohort'))).toBe(true);
 
@@ -1408,7 +1408,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         binary,
       },
     });
-    expect(result.mempoolOps ?? []).toEqual([]);
+    expect(result.accountTxs ?? []).toEqual([]);
     expect(result.newState.crossJurisdictionSwaps?.get(route.orderId)?.status).toBe('resting');
     expect(result.newState.messages.some(message => message.includes('only the Hub atomic close cohort'))).toBe(true);
   });
@@ -1479,7 +1479,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       type: 'requestCrossJurisdictionClear',
       data: { orderId: restingRoute.orderId, cancelRemainder: false },
     });
-    expect(ignored.mempoolOps).toEqual([]);
+    expect(ignored.accountTxs).toEqual([]);
     expect(ignored.newState.crossJurisdictionSwaps?.get(restingRoute.orderId)?.status).toBe('resting');
 
     const route = {
@@ -1513,7 +1513,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     });
 
     expect(result.outputs).toEqual([]);
-    expect(result.mempoolOps).toEqual([
+    expect(result.accountTxs).toEqual([
       {
         accountId: sourceHub,
         tx: { type: 'swap_cancel_request', data: { offerId: route.orderId } },
@@ -1607,9 +1607,9 @@ describe('cross-jurisdiction hashledger swap', () => {
       data: { orderId: route.orderId, cancelRemainder: true },
     });
 
-    expect(result.mempoolOps?.map(op => op.tx.type)).toEqual(['cross_swap_fill_ack']);
-    expect((result.mempoolOps?.[0]?.tx as any).data.cancelRemainder).toBe(true);
-    expect(result.mempoolOps?.some(op => op.tx.type === 'pull_resolve')).toBe(false);
+    expect(result.accountTxs?.map(op => op.tx.type)).toEqual(['cross_swap_fill_ack']);
+    expect((result.accountTxs?.[0]?.tx as any).data.cancelRemainder).toBe(true);
+    expect(result.accountTxs?.some(op => op.tx.type === 'pull_resolve')).toBe(false);
     expect(result.newState.crossJurisdictionSwaps?.get(route.orderId)?.status).toBe('clear_requested');
   });
 
@@ -1678,8 +1678,8 @@ describe('cross-jurisdiction hashledger swap', () => {
     state.crossJurisdictionSwaps?.set(route.orderId, route);
 
     const result = processOrderbookCancels(state, [{ accountId: sourceUser, offerId: route.orderId }]);
-    expect(result.mempoolOps).toHaveLength(1);
-    expect(result.mempoolOps[0]?.tx.type).toBe('cross_swap_fill_ack');
-    expect(result.mempoolOps.some(op => op.tx.type === 'swap_resolve')).toBe(false);
+    expect(result.accountTxs).toHaveLength(1);
+    expect(result.accountTxs[0]?.tx.type).toBe('cross_swap_fill_ack');
+    expect(result.accountTxs.some(op => op.tx.type === 'swap_resolve')).toBe(false);
   });
 });

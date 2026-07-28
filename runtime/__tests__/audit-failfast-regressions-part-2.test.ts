@@ -1030,7 +1030,7 @@ describe('audit fail-fast regressions', () => {
         inboundLockId: upstreamLockId,
       },
     });
-    expect(applied.mempoolOps).toContainEqual({
+    expect(applied.accountTxs).toContainEqual({
       accountId: upstreamEntityId,
       tx: {
         type: 'htlc_resolve',

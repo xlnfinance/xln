@@ -37,7 +37,7 @@ import {
   queueCrossJurisdictionSourceDisputeFromTargetDispute,
 } from './j-events-htlc';
 import { mergeJEventClaimOps } from './j-events-account';
-import type { JEventApplyResult, JEventMempoolOp } from './j-events-types';
+import type { JEventApplyResult, JEventAccountTx } from './j-events-types';
 import { appendBatchHistory, emptyOpBreakdown } from './j-events-history';
 import { applyHankoBatchProcessedEvent } from './j-events-batch';
 import { applyBatchOperationSkippedEvent } from './j-events-batch-skip';
@@ -129,7 +129,7 @@ const retireSentBatchInvalidatedByDisputeFinality = (
 
 type AppliedJRange = {
   state: EntityState;
-  mempoolOps: JEventMempoolOp[];
+  accountTxs: JEventAccountTx[];
   outputs: EntityInput[];
   hashesToSign: HashToSign[];
   dirtyAccounts: Set<string>;
@@ -148,7 +148,7 @@ const applyJRangeBlocks = async (
   let state = cloneEntityState(entityState);
   const applied: AppliedJRange = {
     state,
-    mempoolOps: [],
+    accountTxs: [],
     outputs: [],
     hashesToSign: [],
     dirtyAccounts: new Set(),
@@ -187,7 +187,7 @@ const applyJRangeBlocks = async (
         candidateEffects,
       );
       state = applied.state = result.newState;
-      applied.mempoolOps.push(...result.mempoolOps);
+      applied.accountTxs.push(...result.accountTxs);
       applied.outputs.push(...result.outputs);
       if (result.hashesToSign) applied.hashesToSign.push(...result.hashesToSign);
       for (const accountId of result.dirtyAccounts) applied.dirtyAccounts.add(accountId);
@@ -264,7 +264,7 @@ export const applyJEvent = async (
   const reconciled = reconcileJEventRangeWithFinalizedState(entityState, canonicalData);
 
   if (reconciled.kind === 'noop') {
-    return { newState: entityState, mempoolOps: [], outputs: [], dirtyAccounts: [] };
+    return { newState: entityState, accountTxs: [], outputs: [], dirtyAccounts: [] };
   }
   const applied = await applyJRangeBlocks(
     entityState,
@@ -289,7 +289,7 @@ export const applyJEvent = async (
     signerId,
     signature,
   );
-  mergeJEventClaimOps(applied.mempoolOps);
+  mergeJEventClaimOps(applied.accountTxs);
   jEventLog.info('history.finalized_by_entity', {
     range: `${reconciled.baseHeight + 1}-${reconciled.scannedThroughHeight}`,
     eventBlocks: reconciled.blocks.length,
@@ -298,7 +298,7 @@ export const applyJEvent = async (
   });
   return {
     newState: state,
-    mempoolOps: applied.mempoolOps,
+    accountTxs: applied.accountTxs,
     outputs: applied.outputs,
     dirtyAccounts: [...applied.dirtyAccounts],
     ...(applied.hashesToSign.length > 0 ? { hashesToSign: applied.hashesToSign } : {}),
@@ -312,7 +312,7 @@ export type FinalizedJEventContext = {
   env: RuntimeState;
   blockNumber: number;
   transactionHash: string;
-  mempoolOps: JEventMempoolOp[];
+  accountTxs: JEventAccountTx[];
   outputs: EntityInput[];
   dirtyAccounts: Set<string>;
 };
@@ -548,7 +548,7 @@ const applyStartedDisputeFollowups = (
     env,
     blockNumber,
     transactionHash,
-    mempoolOps,
+    accountTxs,
     outputs,
   } = context;
   const {
@@ -564,7 +564,7 @@ const applyStartedDisputeFollowups = (
     applyKnownHtlcSecret(
       env,
       newState,
-      mempoolOps,
+      accountTxs,
       outputs,
       hashlock,
       disputeSecret,
@@ -852,13 +852,13 @@ async function applyFinalizedJEvent(
   const blockNumber = event.blockNumber ?? 0;
   const transactionHash = event.transactionHash || 'unknown';
   const newState = cloneEntityState(entityState);
-  const mempoolOps: JEventMempoolOp[] = [];
+  const accountTxs: JEventAccountTx[] = [];
   const outputs: EntityInput[] = [];
   const hashesToSign: HashToSign[] = [];
   const dirtyAccounts = new Set<string>();
   const done = (): JEventApplyResult => ({
     newState,
-    mempoolOps,
+    accountTxs,
     outputs,
     dirtyAccounts: Array.from(dirtyAccounts),
     ...(hashesToSign.length > 0 ? { hashesToSign } : {}),
@@ -870,7 +870,7 @@ async function applyFinalizedJEvent(
     env,
     blockNumber,
     transactionHash,
-    mempoolOps,
+    accountTxs,
     outputs,
     dirtyAccounts,
   };

@@ -163,7 +163,7 @@ export const buildSettlementSealDraft = (
   return { tx: { type: 'settle_transition', data }, hashesToSign };
 };
 
-type MempoolOp = { accountId: string; tx: import('../../../types').AccountTx };
+type AccountTxTarget = { accountId: string; tx: import('../../../types').AccountTx };
 
 const assertNoPendingSettlementTransition = (account: AccountState): void => {
   if (hasPendingSettlementTransition(account)) throw new Error('SETTLEMENT_TRANSITION_ALREADY_PENDING');
@@ -195,12 +195,12 @@ export async function handleSettlePropose(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'settle_propose' }>,
   _env: RuntimeState
-): Promise<{ newState: EntityState; outputs: EntityInput[]; mempoolOps: MempoolOp[] }> {
+): Promise<{ newState: EntityState; outputs: EntityInput[]; accountTxs: AccountTxTarget[] }> {
   const { counterpartyEntityId, executorIsLeft: execParam, memo } = entityTx.data;
   const ops = diffsToOps(entityTx.data);
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
-  const mempoolOps: MempoolOp[] = [];
+  const accountTxs: AccountTxTarget[] = [];
 
   settleLog.debug('propose.start', { entity: shortId(entityState.entityId), counterparty: shortId(counterpartyEntityId) });
 
@@ -210,7 +210,7 @@ export async function handleSettlePropose(
     const version = account.settlementWorkspace.version;
     addMessage(newState, `⏭️ Settlement propose skipped: workspace already exists (v${version})`);
     settleLog.warn('propose.skip_workspace_exists', { counterparty: shortId(counterpartyEntityId), version });
-    return { newState, outputs, mempoolOps };
+    return { newState, outputs, accountTxs };
   }
   assertNoPendingSettlementTransition(account);
 
@@ -222,7 +222,7 @@ export async function handleSettlePropose(
   // the only settlement Hanko accepted on-chain; the executor never submits a
   // signature it created itself.
   const executorIsLeft = execParam ?? isLeft;
-  mempoolOps.push({
+  accountTxs.push({
     accountId: counterpartyEntityId,
     tx: {
       type: 'settle_transition',
@@ -239,7 +239,7 @@ export async function handleSettlePropose(
   settleLog.debug('propose.created', { version: 1, ops: ops.length });
   addMessage(newState, `⚖️ Settlement proposal queued for bilateral Account consensus`);
 
-  return { newState, outputs, mempoolOps };
+  return { newState, outputs, accountTxs };
 }
 
 /**
@@ -249,12 +249,12 @@ export async function handleSettleUpdate(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'settle_update' }>,
   _env: RuntimeState
-): Promise<{ newState: EntityState; outputs: EntityInput[]; mempoolOps: MempoolOp[] }> {
+): Promise<{ newState: EntityState; outputs: EntityInput[]; accountTxs: AccountTxTarget[] }> {
   const { counterpartyEntityId, executorIsLeft: execParam, memo } = entityTx.data;
   const ops = diffsToOps(entityTx.data);
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
-  const mempoolOps: MempoolOp[] = [];
+  const accountTxs: AccountTxTarget[] = [];
 
   settleLog.debug('update.start', { entity: shortId(entityState.entityId), counterparty: shortId(counterpartyEntityId) });
 
@@ -276,7 +276,7 @@ export async function handleSettleUpdate(
   const previousWorkspaceHash = assertCanonicalSettlementWorkspace(account, workspace);
   const newVersion = workspace.version + 1;
   const effectiveMemo = memo !== undefined ? memo : workspace.memo;
-  mempoolOps.push({
+  accountTxs.push({
     accountId: counterpartyEntityId,
     tx: {
       type: 'settle_transition',
@@ -294,7 +294,7 @@ export async function handleSettleUpdate(
   settleLog.debug('update.applied', { version: newVersion, ops: ops.length });
   addMessage(newState, `⚖️ Settlement update v${newVersion} queued for bilateral Account consensus`);
 
-  return { newState, outputs, mempoolOps };
+  return { newState, outputs, accountTxs };
 }
 
 /**
@@ -307,11 +307,11 @@ export async function handleSettleApprove(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'settle_approve' }>,
   _env: RuntimeState
-): Promise<{ newState: EntityState; outputs: EntityInput[]; mempoolOps: MempoolOp[]; hashesToSign?: Array<{ hash: string; type: 'settlement' | 'dispute'; context: string }> }> {
+): Promise<{ newState: EntityState; outputs: EntityInput[]; accountTxs: AccountTxTarget[]; hashesToSign?: Array<{ hash: string; type: 'settlement' | 'dispute'; context: string }> }> {
   const { counterpartyEntityId, workspaceHash: requestedWorkspaceHash } = entityTx.data;
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
-  const mempoolOps: MempoolOp[] = [];
+  const accountTxs: AccountTxTarget[] = [];
 
   settleLog.debug('approve.start', { entity: shortId(entityState.entityId), counterparty: shortId(counterpartyEntityId) });
 
@@ -322,7 +322,7 @@ export async function handleSettleApprove(
   if (account.settlementWorkspace.status === 'submitted') {
     addMessage(newState, `⏭️ settle_execute skipped: workspace already submitted`);
     settleLog.debug('execute.skip_already_submitted', { counterparty: shortId(counterpartyEntityId) });
-    return { newState, outputs, mempoolOps };
+    return { newState, outputs, accountTxs };
   }
   const canonicalWorkspaceHash = assertCanonicalSettlementWorkspace(
     account,
@@ -344,7 +344,7 @@ export async function handleSettleApprove(
     workspaceHash: canonicalWorkspaceHash,
   });
   addMessage(newState, `⚖️ Settlement approval accepted; waiting for prior Account work`);
-  return { newState, outputs, mempoolOps };
+  return { newState, outputs, accountTxs };
 }
 
 /**
@@ -563,11 +563,11 @@ export async function handleSettleExecute(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'settle_execute' }>,
   env: RuntimeState
-): Promise<{ newState: EntityState; outputs: EntityInput[]; mempoolOps: MempoolOp[] }> {
+): Promise<{ newState: EntityState; outputs: EntityInput[]; accountTxs: AccountTxTarget[] }> {
   const { counterpartyEntityId, disableC2RShortcut = false } = entityTx.data;
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
-  const mempoolOps: MempoolOp[] = [];
+  const accountTxs: AccountTxTarget[] = [];
 
   settleLog.debug('execute.start', { entity: shortId(entityState.entityId), counterparty: shortId(counterpartyEntityId) });
 
@@ -575,12 +575,12 @@ export async function handleSettleExecute(
   if (!account) {
     addMessage(newState, `⏭️ settle_execute skipped: no account with ${counterpartyEntityId.slice(-4)}`);
     settleLog.warn('execute.skip_no_account', { counterparty: shortId(counterpartyEntityId) });
-    return { newState, outputs, mempoolOps };
+    return { newState, outputs, accountTxs };
   }
   if (!account.settlementWorkspace) {
     addMessage(newState, `⏭️ settle_execute skipped: no workspace with ${counterpartyEntityId.slice(-4)}`);
     settleLog.warn('execute.skip_no_workspace', { counterparty: shortId(counterpartyEntityId) });
-    return { newState, outputs, mempoolOps };
+    return { newState, outputs, accountTxs };
   }
 
   const workspace = account.settlementWorkspace;
@@ -589,7 +589,7 @@ export async function handleSettleExecute(
   if (workspace.status === 'submitted') {
     addMessage(newState, `⏭️ settle_execute skipped: settlement already submitted`);
     settleLog.warn('execute.skip_already_submitted', { counterparty: shortId(counterpartyEntityId) });
-    return { newState, outputs, mempoolOps };
+    return { newState, outputs, accountTxs };
   }
 
   const { iAmLeft } = getAccountPerspective(account, entityState.entityId);
@@ -600,7 +600,7 @@ export async function handleSettleExecute(
   if (!counterpartyHanko) {
     addMessage(newState, `⏭️ settle_execute skipped: missing counterparty signature`);
     settleLog.warn('execute.skip_missing_counterparty_hanko', { counterparty: shortId(counterpartyEntityId), iAmLeft });
-    return { newState, outputs, mempoolOps };
+    return { newState, outputs, accountTxs };
   }
   const prepared = prepareSettlementExecution(
     env,
@@ -625,11 +625,11 @@ export async function handleSettleExecute(
       prepared,
     )
   ) {
-    return { newState, outputs, mempoolOps };
+    return { newState, outputs, accountTxs };
   }
   settleLog.debug('execute.j_batch_added', { diffs: prepared.diffs.length });
 
-  mempoolOps.push({
+  accountTxs.push({
     accountId: counterpartyEntityId,
     tx: {
       type: 'settle_transition',
@@ -645,7 +645,7 @@ export async function handleSettleExecute(
     `✅ Settlement submission queued (${prepared.diffs.length} diffs) - use j_broadcast to commit`,
   );
 
-  return { newState, outputs, mempoolOps };
+  return { newState, outputs, accountTxs };
 }
 
 /**
@@ -655,11 +655,11 @@ export async function handleSettleReject(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'settle_reject' }>,
   _env: RuntimeState
-): Promise<{ newState: EntityState; outputs: EntityInput[]; mempoolOps: MempoolOp[] }> {
+): Promise<{ newState: EntityState; outputs: EntityInput[]; accountTxs: AccountTxTarget[] }> {
   const { counterpartyEntityId, reason } = entityTx.data;
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
-  const mempoolOps: MempoolOp[] = [];
+  const accountTxs: AccountTxTarget[] = [];
 
   settleLog.debug('reject.start', { entity: shortId(entityState.entityId), counterparty: shortId(counterpartyEntityId) });
 
@@ -668,7 +668,7 @@ export async function handleSettleReject(
 
   if (!account.settlementWorkspace) {
     settleLog.debug('reject.no_workspace', { counterparty: shortId(counterpartyEntityId) });
-    return { newState, outputs, mempoolOps };
+    return { newState, outputs, accountTxs };
   }
   assertNoPendingSettlementTransition(account);
   if (
@@ -680,7 +680,7 @@ export async function handleSettleReject(
     throw new Error('SETTLEMENT_REJECT_SIGNED_FORBIDDEN');
   }
   const workspaceHash = assertCanonicalSettlementWorkspace(account, account.settlementWorkspace);
-  mempoolOps.push({
+  accountTxs.push({
     accountId: counterpartyEntityId,
     tx: {
       type: 'settle_transition',
@@ -695,12 +695,12 @@ export async function handleSettleReject(
   settleLog.debug('reject.queued');
   addMessage(newState, `❌ Settlement clear queued${reason ? `: ${reason}` : ''}`);
 
-  return { newState, outputs, mempoolOps };
+  return { newState, outputs, accountTxs };
 }
 
 type CommittedSettlementFollowup = {
   outputs: EntityInput[];
-  mempoolOps: MempoolOp[];
+  accountTxs: AccountTxTarget[];
   hashesToSign: SettlementHashToSign[];
 };
 
@@ -717,7 +717,7 @@ export async function processCommittedSettlementTransitionFollowup(
   entityState: EntityState,
   _env: RuntimeState,
 ): Promise<CommittedSettlementFollowup> {
-  const empty = (): CommittedSettlementFollowup => ({ outputs: [], mempoolOps: [], hashesToSign: [] });
+  const empty = (): CommittedSettlementFollowup => ({ outputs: [], accountTxs: [], hashesToSign: [] });
   if (
     accountTx.type !== 'settle_transition' ||
     (accountTx.data.kind !== 'upsert' && accountTx.data.kind !== 'seal')

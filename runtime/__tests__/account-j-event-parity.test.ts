@@ -7,7 +7,7 @@ import { createAccountJClaimSession } from '../account/j-claim-session';
 import { cacheCommittedAccountJClaimNodeChanges } from '../account/j-claim-store';
 import { prepareAccountJClaimTx } from '../account/j-claim-transition';
 import { mergeJEventClaimOps } from '../entity/tx/j-events-account';
-import type { JEventMempoolOp } from '../entity/tx/j-events-types';
+import type { JEventAccountTx } from '../entity/tx/j-events-types';
 import { createEmptyEnv } from '../runtime';
 import type { AccountState, AccountTx, RuntimeState, JurisdictionEvent } from '../types';
 import { createDefaultDelta } from '../validation-utils';
@@ -135,7 +135,7 @@ describe('account J-event validate/commit parity', () => {
   });
 
   test('orders claims by account and height without moving unrelated account operations', () => {
-    const claim = (jHeight: number): JEventMempoolOp => ({
+    const claim = (jHeight: number): JEventAccountTx => ({
       accountId: RIGHT,
       tx: {
         ...rawClaim(),
@@ -146,7 +146,7 @@ describe('account J-event validate/commit parity', () => {
         },
       },
     });
-    const unrelated: JEventMempoolOp = {
+    const unrelated: JEventAccountTx = {
       accountId: RIGHT,
       tx: { type: 'add_delta', data: { tokenId: 1 } },
     };

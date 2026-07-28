@@ -5,7 +5,7 @@ import type {
   CrossMarketOffer,
 } from '../../../../extensions/cross-j/orderbook';
 import type { CrossJurisdictionWorkingOrderbookOffer } from '../../../../orderbook/swap-execution';
-import type { MempoolOp } from './orderbook-queue';
+import type { AccountTxTarget } from './orderbook-queue';
 
 type RejectInvalidCrossOffer = (
   accountId: string,
@@ -25,7 +25,7 @@ export type CrossOrderbookProcessInput = {
   crossJurisdictionSwapOffers: CrossJurisdictionWorkingOrderbookOffer[];
   bookCache: Map<string, BookState>;
   bookUpdates: { pairId: string; book: BookState }[];
-  mempoolOps: MempoolOp[];
+  accountTxs: AccountTxTarget[];
   crossJurisdictionFills: CrossJurisdictionFillInstruction[];
   queuedSwapResolutions: Set<string>;
   debugRebuildProjectionOnly: boolean;

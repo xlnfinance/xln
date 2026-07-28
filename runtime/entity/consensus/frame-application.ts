@@ -320,7 +320,7 @@ const applyRegularEntityTx = async (
     });
   }
   applyEntityTxReturnedEffects(context, nextState, tx, txProfileStartMs, {
-    ...(result.mempoolOps ? { mempoolOps: result.mempoolOps } : {}),
+    ...(result.accountTxs ? { accountTxs: result.accountTxs } : {}),
     ...(result.swapOffersCreated ? { swapOffersCreated: result.swapOffersCreated } : {}),
     ...(result.swapCancelRequests ? { swapCancelRequests: result.swapCancelRequests } : {}),
     ...(result.swapOffersCancelled ? { swapOffersCancelled: result.swapOffersCancelled } : {}),
@@ -727,7 +727,7 @@ const applyOrderbookMempoolOps = (
   result: OrderbookMatchResult,
 ): void => {
   const { env, currentEntityState: state, allOutputs, proposableAccounts, storageChanges } = context;
-  for (const { accountId, tx } of result.mempoolOps) {
+  for (const { accountId, tx } of result.accountTxs) {
     const account = state.accounts.get(accountId);
     if (tx.type === 'swap_resolve') {
       const offer = account?.swapOffers?.get(tx.data.offerId);
@@ -829,7 +829,7 @@ function applyOrderbookMatching(context: ApplyOrderbookMatchingContext): Orderbo
   const offersToMatch = collectOffersForMatching(env, currentEntityState, allSwapOffersCreated);
   const matchResult = processOrderbookSwaps(currentEntityState, offersToMatch, { runtimeEnv: env });
   stats.orderbookMatched = true;
-  stats.orderbookMempoolOps = matchResult.mempoolOps.length;
+  stats.orderbookMempoolOps = matchResult.accountTxs.length;
   stats.orderbookBookUpdates = matchResult.bookUpdates.length;
   stats.orderbookCrossFills = matchResult.crossJurisdictionFills.length;
 
@@ -854,7 +854,7 @@ function applySwapCancelRequests(context: ApplySwapCancelRequestsContext): void 
 
   const routedCancels = routeRemoteCrossJurisdictionBookCancels(env, currentEntityState, allSwapCancelRequests);
   allOutputs.push(...routedCancels.outputs);
-  for (const { accountId, tx } of routedCancels.mempoolOps) {
+  for (const { accountId, tx } of routedCancels.accountTxs) {
     if (tx.type !== 'cross_swap_fill_ack') {
       throw new Error(`CROSS_J_CANCEL_ACK_TX_INVALID:account=${accountId}:type=${tx.type}`);
     }
@@ -873,7 +873,7 @@ function applySwapCancelRequests(context: ApplySwapCancelRequestsContext): void 
   if (currentEntityState.orderbookExt) {
     const cancelResult = processOrderbookCancels(currentEntityState, localBookCancels);
 
-    for (const { accountId, tx } of cancelResult.mempoolOps) {
+    for (const { accountId, tx } of cancelResult.accountTxs) {
       const account = currentEntityState.accounts.get(accountId);
       if (!account) continue;
       if (!queueAccountMempoolTx(account, tx)) {

@@ -1541,16 +1541,16 @@ describe('audit fail-fast regressions', () => {
     });
     const result = await handleHtlcOnionAdvance(env, hubState, advanceTx);
 
-    expect(result.mempoolOps).toHaveLength(1);
-    expect(result.mempoolOps[0]?.accountId).toBe(payerId);
-    expect(result.mempoolOps[0]?.tx).toEqual({
+    expect(result.accountTxs).toHaveLength(1);
+    expect(result.accountTxs[0]?.accountId).toBe(payerId);
+    expect(result.accountTxs[0]?.tx).toEqual({
       type: 'htlc_resolve',
       data: { lockId, outcome: 'error', reason: 'fee_below_ppm' },
     });
     expect(result.newState.htlcRoutes.has(hashlock)).toBe(false);
 
     const replay = await handleHtlcOnionAdvance(env, structuredClone(hubState), advanceTx);
-    expect(replay.mempoolOps).toEqual(result.mempoolOps);
+    expect(replay.accountTxs).toEqual(result.accountTxs);
     expect(replay.newState.htlcRoutes).toEqual(result.newState.htlcRoutes);
   });
 

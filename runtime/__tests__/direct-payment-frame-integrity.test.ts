@@ -122,7 +122,7 @@ describe('direct payment frame integrity', () => {
       }
       expect(account.pendingForwards).toHaveLength(paymentCount);
 
-      const mempoolOps: Array<{ accountId: string; tx: AccountTx }> = [];
+      const accountTxs: Array<{ accountId: string; tx: AccountTx }> = [];
       const state = { entityId: LEFT } as EntityState;
       const newState = { entityId: LEFT, accounts: new Map([[NEXT, {} as AccountState]]) } as EntityState;
       applyPendingForwardFollowup({
@@ -132,11 +132,11 @@ describe('direct payment frame integrity', () => {
         input: {} as AccountInput,
         accountMachine: account,
         outputs: [],
-        mempoolOps,
+        accountTxs,
       });
 
-      expect(mempoolOps).toHaveLength(paymentCount);
-      expect(mempoolOps.every(op => op.accountId === NEXT && op.tx.type === 'direct_payment')).toBe(true);
+      expect(accountTxs).toHaveLength(paymentCount);
+      expect(accountTxs.every(op => op.accountId === NEXT && op.tx.type === 'direct_payment')).toBe(true);
       expect(account.pendingForwards).toBeUndefined();
     });
   }
@@ -152,7 +152,7 @@ describe('direct payment frame integrity', () => {
       input: {} as AccountInput,
       accountMachine: account,
       outputs: [],
-      mempoolOps: [],
+      accountTxs: [],
     })).toThrow('ROUTED_PAYMENT_NEXT_HOP_ACCOUNT_MISSING');
     expect(account.pendingForwards).toHaveLength(1);
   });

@@ -13,7 +13,7 @@ import type { AccountJClaimNodeStore } from '../../types/account-j-claims';
 // import { addToReserves, subtractFromReserves } from './financial'; // Currently unused
 import {
   applyAccountInputToEntity,
-  type MempoolOp,
+  type AccountTxTarget,
   type SwapOfferEvent,
   type SwapCancelEvent,
   type SwapCancelRequestEvent,
@@ -120,7 +120,7 @@ export interface ApplyEntityTxResult {
   candidateEffects: EntityCandidateEffect[];
   jOutputs?: JInput[];
   // Pure events for entity-level orchestration
-  mempoolOps?: MempoolOp[];
+  accountTxs?: AccountTxTarget[];
   /** Exact consensus response that the final Entity flush must preserve. */
   requiredAccountResponse?: AccountInput;
   accountJClaimNodeChanges?: AccountJClaimNodeChanges;
@@ -189,7 +189,7 @@ const handleJEventEntityTx: EntityTxDispatcher = async (env, entityState, entity
       data: { entityId: entityState.entityId, eventType: 'liveness' },
     });
   }
-  const { newState, mempoolOps, outputs, dirtyAccounts, hashesToSign } = await applyJEvent(
+  const { newState, accountTxs, outputs, dirtyAccounts, hashesToSign } = await applyJEvent(
     entityState,
     entityTx.data,
     env,
@@ -199,7 +199,7 @@ const handleJEventEntityTx: EntityTxDispatcher = async (env, entityState, entity
     newState,
     outputs: outputs || [],
     candidateEffects,
-    mempoolOps: mempoolOps || [],
+    accountTxs: accountTxs || [],
     accountChanges: dirtyAccounts,
     ...(hashesToSign && hashesToSign.length > 0 ? { hashesToSign } : {}),
   };
@@ -211,7 +211,7 @@ const handleAccountInputEntityTx: EntityTxDispatcher = async (env, entityState, 
   return {
     newState: result.newState,
     outputs: result.outputs,
-    mempoolOps: result.mempoolOps,
+    accountTxs: result.accountTxs,
     accountChanges: [entityTx.data.fromEntityId],
     candidateEffects: result.candidateEffects,
     swapOffersCreated: result.swapOffersCreated,

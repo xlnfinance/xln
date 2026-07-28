@@ -12,7 +12,7 @@ import { cancelHook } from '../../../scheduler';
 import { pruneSettledOriginatedHtlcRoutes, terminateHtlcRoute } from '../../htlc-route-lifecycle';
 import { buildHtlcFinalizedEventPayload, buildHtlcReceivedEventPayload } from '../../../../protocol/htlc/events';
 import { createStructuredLogger } from '../../../../infra/logger';
-import type { MempoolOp } from './orderbook-queue';
+import type { AccountTxTarget } from './orderbook-queue';
 import { applyCommittedLendingFollowup } from './committed-lending-followup';
 
 const accountFollowupLog = createStructuredLogger('account.followup');
@@ -57,7 +57,7 @@ export function applyCommittedAccountFrameFollowups(
   newState: EntityState,
   counterpartyId: string,
   committedFrame: AccountFrame,
-  mempoolOps: MempoolOp[],
+  accountTxs: AccountTxTarget[],
   env: RuntimeState | undefined,
   candidateEffects: EntityCandidateEffect[],
 ): void {
@@ -70,7 +70,7 @@ export function applyCommittedAccountFrameFollowups(
 
   for (const accountTx of committedFrame.accountTxs) {
     if (HEAVY_LOGS) accountFollowupLog.debug('frame.tx', { type: accountTx.type });
-    applyCommittedLendingFollowup(newState, counterpartyId, accountTx, committedFrame, mempoolOps);
+    applyCommittedLendingFollowup(newState, counterpartyId, accountTx, committedFrame, accountTxs);
 
     // Account frames are canonical once committed; keep entity-local indexes in
     // sync here instead of mutating them while the account proposal is still tentative.

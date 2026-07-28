@@ -140,7 +140,7 @@ const commitCrossAck = (
     );
   }
   pass.crossJurisdictionFills.push(ack.instruction);
-  pass.mempoolOps.push({ accountId, tx: ack.tx });
+  pass.accountTxs.push({ accountId, tx: ack.tx });
 };
 
 export const finalizeCrossOrderbookAcks = (

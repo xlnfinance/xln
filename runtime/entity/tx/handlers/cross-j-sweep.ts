@@ -21,14 +21,14 @@ import {
   findCrossJurisdictionOfferRoute,
   mergeCrossJurisdictionRoute,
 } from '../cross-jurisdiction-helpers';
-import type { MempoolOp } from './account';
+import type { AccountTxTarget } from './account';
 
 type CrossJurisdictionSweepTx = Extract<EntityTx, { type: 'orderbookSweepCrossJurisdiction' }>;
 
 type CrossJurisdictionSweepResult = {
   newState: EntityState;
   outputs: EntityInput[];
-  mempoolOps?: MempoolOp[];
+  accountTxs?: AccountTxTarget[];
 };
 
 const deterministicEntityTimestamp = (state: EntityState, env: RuntimeState): number =>
@@ -49,7 +49,7 @@ export const handleOrderbookSweepCrossJurisdictionEntityTx = (
 ): CrossJurisdictionSweepResult => {
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
-  const mempoolOps: MempoolOp[] = [];
+  const accountTxs: AccountTxTarget[] = [];
   const now = deterministicEntityTimestamp(newState, env);
   let expiredRoutes = 0;
   let closedOffers = 0;
@@ -93,7 +93,7 @@ export const handleOrderbookSweepCrossJurisdictionEntityTx = (
       cancelOrderbookOfferIfPresent(newState, accountId, orderId, storageChanges);
       markCrossJurisdictionBookAdmissionClosed(newState, sourceEntityId, orderId, now, 'sweep_expired');
       if (!accountHasCrossSwapAckQueued(account, orderId)) {
-        mempoolOps.push({
+        accountTxs.push({
           accountId,
           tx: buildCrossJurisdictionCancelAck(orderId, route),
         });
@@ -110,7 +110,7 @@ export const handleOrderbookSweepCrossJurisdictionEntityTx = (
       route.sourceCloseProof = proof;
       if (accountId && account?.pulls?.has(route.sourcePull?.pullId || '')) {
         const sourcePullId = route.sourcePull!.pullId;
-        mempoolOps.push({
+        accountTxs.push({
           accountId,
           tx: {
             type: 'cross_pull_close',
@@ -140,5 +140,5 @@ export const handleOrderbookSweepCrossJurisdictionEntityTx = (
     `🌉 Cross-j orderbook sweep${entityTx.data?.reason ? `: ${entityTx.data.reason}` : ''} ` +
     `expired=${expiredRoutes} closedOffers=${closedOffers} waiting=${waitingRoutes}`,
   );
-  return { newState, outputs, mempoolOps };
+  return { newState, outputs, accountTxs };
 };

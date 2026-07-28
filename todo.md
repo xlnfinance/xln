@@ -103,6 +103,8 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   `outputs` are deterministic messages to another state machine; `effects` are
   post-commit external I/O only; queued child-machine inputs must be named for
   their destination instead of the implementation detail `mempoolOps`.
+  Entity reducers now expose addressed Account transactions as `accountTxs`;
+  keep that destination vocabulary when the machine envelopes are separated.
   Evaluate a small structural `Transition<State, Output, Effect>` result type,
   but adopt it only where it removes duplicate result shapes without weakening
   the Runtime/Entity/Account ownership boundary.

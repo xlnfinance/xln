@@ -21,7 +21,7 @@ import { pushCrossJurisdictionEntityOutput } from '../../cross-j-outputs';
 import { CROSS_J_MAX_FILL_RATIO } from '../../../../extensions/cross-j/index';
 import { buildHtlcFinalizedEventPayload } from '../../../../protocol/htlc/events';
 import { createStructuredLogger } from '../../../../infra/logger';
-import type { MempoolOp } from './orderbook-queue';
+import type { AccountTxTarget } from './orderbook-queue';
 
 const accountFollowupLog = createStructuredLogger('account.followup');
 
@@ -32,14 +32,14 @@ type HtlcFollowupContext = {
   input: AccountInput;
   accountMachine: AccountState;
   outputs: EntityInput[];
-  mempoolOps: MempoolOp[];
+  accountTxs: AccountTxTarget[];
   candidateEffects: EntityCandidateEffect[];
 };
 
 type RevealedSecret = { secret: string; hashlock: string };
 type HtlcSecretFollowupContext = Pick<
   HtlcFollowupContext,
-  'env' | 'state' | 'newState' | 'outputs' | 'mempoolOps' | 'candidateEffects'
+  'env' | 'state' | 'newState' | 'outputs' | 'accountTxs' | 'candidateEffects'
 >;
 
 const getJurisdictionId = (state: EntityState, env: RuntimeState): string =>
@@ -77,7 +77,7 @@ export async function applyCommittedHtlcLockFollowup(
 }
 
 export function applyPendingForwardFollowup(ctx: HtlcFollowupContext): void {
-  const { state, accountMachine, newState, mempoolOps } = ctx;
+  const { state, accountMachine, newState, accountTxs } = ctx;
   const forwards = accountMachine.pendingForwards;
   if (!forwards?.length) return;
 
@@ -89,7 +89,7 @@ export function applyPendingForwardFollowup(ctx: HtlcFollowupContext): void {
     if (!newState.accounts.has(nextHop)) {
       throw new Error(`ROUTED_PAYMENT_NEXT_HOP_ACCOUNT_MISSING:index=${forwardIndex}:nextHop=${nextHop}`);
     }
-    mempoolOps.push({
+    accountTxs.push({
       accountId: nextHop,
       tx: {
         type: 'direct_payment',
@@ -110,12 +110,12 @@ export function applyPendingForwardFollowup(ctx: HtlcFollowupContext): void {
 }
 
 export function applyHtlcTimeoutFollowups(ctx: HtlcFollowupContext, timedOutHashlocks: string[]): void {
-  const { state, newState, mempoolOps, candidateEffects } = ctx;
+  const { state, newState, accountTxs, candidateEffects } = ctx;
   for (const timedOutHashlock of timedOutHashlocks) {
     const route = newState.htlcRoutes.get(timedOutHashlock);
     if (!route) continue;
     if (route.inboundEntity && route.inboundLockId) {
-      mempoolOps.push({
+      accountTxs.push({
         accountId: route.inboundEntity,
         tx: {
           type: 'htlc_resolve',
@@ -139,7 +139,7 @@ export function applyHtlcTimeoutFollowups(ctx: HtlcFollowupContext, timedOutHash
 }
 
 export function applyHtlcSecretFollowups(ctx: HtlcSecretFollowupContext, revealedSecrets: RevealedSecret[]): void {
-  const { env, state, newState, outputs, mempoolOps, candidateEffects } = ctx;
+  const { env, state, newState, outputs, accountTxs, candidateEffects } = ctx;
   if (HEAVY_LOGS) accountFollowupLog.debug('htlc.secret_check', { secrets: revealedSecrets.length });
 
   for (const { secret, hashlock } of revealedSecrets) {
@@ -165,7 +165,7 @@ export function applyHtlcSecretFollowups(ctx: HtlcSecretFollowupContext, reveale
     if (route.inboundLockId) newState.lockBook.delete(route.inboundLockId);
 
     if (route.inboundEntity && route.inboundLockId) {
-      mempoolOps.push({
+      accountTxs.push({
         accountId: route.inboundEntity,
         tx: { type: 'htlc_resolve', data: { lockId: route.inboundLockId, outcome: 'secret', secret } },
       });

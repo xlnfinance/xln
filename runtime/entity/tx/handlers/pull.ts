@@ -13,19 +13,19 @@ import { formatEntityId } from '../../../utils';
 import { findAccountKey, normalizeEntityRef } from '../account-key';
 import { findCrossJurisdictionPullRoute, isCrossJurisdictionPullCancelWithinClear } from '../cross-jurisdiction-helpers';
 import type { ApplyEntityTxOptions } from '../apply';
-import type { MempoolOp } from './account';
+import type { AccountTxTarget } from './account';
 
 type PullLockTx = Extract<EntityTx, { type: 'pullLock' }>;
 type ResolvePullTx = Extract<EntityTx, { type: 'resolvePull' }>;
 type CrossPullCloseTx = Extract<EntityTx, { type: 'crossPullClose' }>;
 type CancelPullTx = Extract<EntityTx, { type: 'cancelPull' | 'pullCancelExpired' }>;
-type PullResult = { newState: EntityState; outputs: EntityInput[]; mempoolOps: MempoolOp[] };
+type PullResult = { newState: EntityState; outputs: EntityInput[]; accountTxs: AccountTxTarget[] };
 
 const now = (state: EntityState, env: RuntimeState): number => Number(state.timestamp || env.timestamp || 0);
 const createResult = (state: EntityState, options?: ApplyEntityTxOptions): PullResult => ({
   newState: options?.mutableFrameState ? state : cloneEntityState(state),
   outputs: [],
-  mempoolOps: [],
+  accountTxs: [],
 });
 const fail = (result: PullResult, message: string): PullResult => {
   addMessage(result.newState, message);
@@ -57,7 +57,7 @@ export const handlePullLockEntityTx = (_env: RuntimeState, state: EntityState, t
   } = tx.data;
   const accountId = resolveCounterparty(result, counterpartyEntityId, 'lock');
   if (!accountId) return result;
-  result.mempoolOps.push({
+  result.accountTxs.push({
     accountId,
     tx: {
       type: 'pull_lock',
@@ -189,7 +189,7 @@ export const handleResolvePullEntityTx = (_env: RuntimeState, state: EntityState
       `❌ Cross-j target pull ${pullId.slice(0, 8)} resolve blocked: only the Hub atomic close cohort may settle it`,
     );
   }
-  result.mempoolOps.push({
+  result.accountTxs.push({
     accountId,
     tx: { type: 'pull_resolve', data: { pullId, binary } },
   });
@@ -231,7 +231,7 @@ export const handleCrossPullCloseEntityTx = (env: RuntimeState, state: EntitySta
     transitionCrossJurisdictionRouteStatus(route, 'clearing', result.newState.timestamp || env.timestamp);
   }
   result.newState.crossJurisdictionSwaps?.set(route.orderId, route);
-  result.mempoolOps.push({ accountId, tx: { type: 'cross_pull_close', data: { pullId, binary, proof } } });
+  result.accountTxs.push({ accountId, tx: { type: 'cross_pull_close', data: { pullId, binary, proof } } });
   requestFrame(state, result.outputs);
   return result;
 };
@@ -252,7 +252,7 @@ export const handleCancelPullEntityTx = (_env: RuntimeState, state: EntityState,
       `❌ Cross-j ${crossPullRoute.leg} pull ${pullId.slice(0, 8)} cancel blocked: route ${crossPullRoute.route.orderId} must clear through requestCrossJurisdictionClear`,
     );
   }
-  result.mempoolOps.push({
+  result.accountTxs.push({
     accountId,
     tx: { type: 'pull_cancel', data: { pullId, reason: tx.type === 'pullCancelExpired' ? 'expired' : 'beneficiary_release' } },
   });

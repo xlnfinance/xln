@@ -1,13 +1,13 @@
 import type { AccountTx, EntityInput, EntityState, HashToSign } from '../../types';
 
-export type JEventMempoolOp = {
+export type JEventAccountTx = {
   accountId: string;
   tx: AccountTx;
 };
 
 export type JEventApplyResult = {
   newState: EntityState;
-  mempoolOps: JEventMempoolOp[];
+  accountTxs: JEventAccountTx[];
   outputs: EntityInput[];
   dirtyAccounts: string[];
   hashesToSign?: HashToSign[];

@@ -78,7 +78,7 @@ const rejectOutsidePriceBand = (
     return;
   }
   queueUniqueSwapResolveForEntityState(
-    pass.mempoolOps,
+    pass.accountTxs,
     pass.hubState,
     pass.queuedSwapResolutions,
     offer.accountId,

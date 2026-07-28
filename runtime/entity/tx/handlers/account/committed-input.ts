@@ -28,7 +28,7 @@ import {
   applyHtlcTimeoutFollowups,
   applyPendingForwardFollowup,
 } from './committed-htlc-followups';
-import type { MempoolOp } from './orderbook-queue';
+import type { AccountTxTarget } from './orderbook-queue';
 import type {
   SwapCancelEvent,
   SwapCancelRequestEvent,
@@ -45,7 +45,7 @@ type AccountHashToSign = {
 
 export type CommittedAccountEffects = {
   outputs: EntityInput[];
-  mempoolOps: MempoolOp[];
+  accountTxs: AccountTxTarget[];
   swapOffersCreated: SwapOfferEvent[];
   swapCancelRequests: SwapCancelRequestEvent[];
   swapOffersCancelled: SwapCancelEvent[];
@@ -150,7 +150,7 @@ const applyCommittedFrameTransactions = async (
       state,
       counterpartyId,
       frame,
-      effects.mempoolOps,
+      effects.accountTxs,
       env,
       effects.candidateEffects,
     );
@@ -164,7 +164,7 @@ const applyCommittedFrameTransactions = async (
         env,
       );
       effects.outputs.push(...settlement.outputs);
-      effects.mempoolOps.push(...settlement.mempoolOps);
+      effects.accountTxs.push(...settlement.accountTxs);
       effects.hashesToSign.push(...settlement.hashesToSign);
       const crossJurisdictionHandled = applyCommittedCrossJurisdictionAccountTxFollowup(
         env,
@@ -185,7 +185,7 @@ const applyCommittedFrameTransactions = async (
             input,
             accountMachine: account,
             outputs: effects.outputs,
-            mempoolOps: effects.mempoolOps,
+            accountTxs: effects.accountTxs,
             candidateEffects: effects.candidateEffects,
           },
           accountTx,
@@ -209,7 +209,7 @@ const queueInitialHubPolicies = (
   for (const tokenId of [...account.deltas.keys()].sort((left, right) => left - right)) {
     const policy = account.rebalanceFeePolicies?.get(tokenId)?.[localSide];
     if (policy?.policyVersion === state.hubRebalanceConfig.policyVersion) continue;
-    effects.mempoolOps.push({
+    effects.accountTxs.push({
       accountId: counterpartyId,
       tx: buildHubRebalancePolicyTx(state.hubRebalanceConfig, tokenId),
     });
@@ -227,7 +227,7 @@ const applyCommittedHtlcFollowups = (
     input,
     accountMachine: account,
     outputs: effects.outputs,
-    mempoolOps: effects.mempoolOps,
+    accountTxs: effects.accountTxs,
     candidateEffects: effects.candidateEffects,
   };
   applyPendingForwardFollowup(followupContext);

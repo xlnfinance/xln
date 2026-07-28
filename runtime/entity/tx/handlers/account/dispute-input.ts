@@ -39,7 +39,7 @@ const persistDisputeEvidenceSecrets = (context: UnsafeFrameContext): void => {
     const localIsLeft = account.leftEntity.toLowerCase() === state.entityId.toLowerCase();
     const localSentLock = lock.senderIsLeft === localIsLeft;
     if (!localSentLock || !route.inboundEntity || !route.inboundLockId) continue;
-    effects.mempoolOps.push({
+    effects.accountTxs.push({
       accountId: route.inboundEntity,
       tx: {
         type: 'htlc_resolve',

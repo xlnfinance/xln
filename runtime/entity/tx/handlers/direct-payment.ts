@@ -10,7 +10,7 @@ import type {
 import { formatEntityId } from '../../../utils';
 import { createStructuredLogger, logError, shortId } from '../../../infra/logger';
 import { cloneEntityState, addMessage } from '../../../state-helpers';
-import type { MempoolOp } from './account';
+import type { AccountTxTarget } from './account';
 import { requireTrustedPaymentGateway } from '../../../protocol/payments/delivery';
 import { requireCommittedDirectPaymentRoute } from '../../../protocol/payments/route';
 
@@ -20,7 +20,7 @@ type DirectPaymentAccountTx = Extract<AccountTx, { type: 'direct_payment' }>;
 type DirectPaymentResult = {
   newState: EntityState;
   outputs: EntityInput[];
-  mempoolOps?: MempoolOp[];
+  accountTxs?: AccountTxTarget[];
 };
 
 const directPaymentInvariant = (code: string, detail: string): Error =>
@@ -156,14 +156,14 @@ export const handleDirectPaymentEntityTx = async (
 
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
-  const mempoolOps: MempoolOp[] = [];
+  const accountTxs: AccountTxTarget[] = [];
 
   const validationError = validateEntityPayment(newState, entityTx, route, []);
   if (validationError) return validationError;
   const received = finishReceivedPayment(newState, entityTx, route, candidateEffects, trace);
   if (received) return received;
   const { nextHop, accountTx } = buildNextHopPayment(newState, entityTx, route);
-  mempoolOps.push({ accountId: nextHop, tx: accountTx });
+  accountTxs.push({ accountId: nextHop, tx: accountTx });
   trace('mempool.queued', {
     account: shortId(nextHop),
     tx: accountTx.type,
@@ -171,7 +171,7 @@ export const handleDirectPaymentEntityTx = async (
     from: shortId(accountTx.data.fromEntityId),
     to: shortId(accountTx.data.toEntityId),
     route: accountTx.data.route?.map((entityId: string) => shortId(entityId)) ?? [],
-    mempoolOps: mempoolOps.length,
+    accountTxs: accountTxs.length,
   });
 
   addMessage(
@@ -189,5 +189,5 @@ export const handleDirectPaymentEntityTx = async (
     });
   }
 
-  return { newState, outputs, mempoolOps };
+  return { newState, outputs, accountTxs };
 };

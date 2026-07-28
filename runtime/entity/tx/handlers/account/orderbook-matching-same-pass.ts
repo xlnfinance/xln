@@ -18,7 +18,7 @@ import type {
 import {
   hasQueuedSwapResolveForEntityState,
   queueUniqueSwapResolveForEntityState,
-  type MempoolOp,
+  type AccountTxTarget,
 } from './orderbook-queue';
 import {
   normalizeSwapOfferForOrderbook,
@@ -50,7 +50,7 @@ export type SameOrderbookProcessInput = {
   swapTakerFeeBps: number;
   bookCache: Map<string, BookState>;
   bookUpdates: { pairId: string; book: BookState }[];
-  mempoolOps: MempoolOp[];
+  accountTxs: AccountTxTarget[];
   queuedSwapResolutions: Set<string>;
   debugRebuildProjectionOnly: boolean;
   recordDebugProjectionReject: RecordDebugProjectionReject;
@@ -184,7 +184,7 @@ export const sweepSamePairOutOfBandOffers = (
       orderId: order.orderId,
     }).state;
     queueUniqueSwapResolveForEntityState(
-      pass.mempoolOps,
+      pass.accountTxs,
       pass.hubState,
       pass.queuedSwapResolutions,
       liveOffer.accountId,

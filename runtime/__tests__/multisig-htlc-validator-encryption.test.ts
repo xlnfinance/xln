@@ -1231,7 +1231,7 @@ describe('multisig HTLC validator encryption', () => {
       secretAckPending: true,
     });
     expect(applied.newState.htlcFeesEarned).toBe(7n);
-    expect(applied.mempoolOps).toEqual([{
+    expect(applied.accountTxs).toEqual([{
       accountId: upstreamEntityId,
       tx: {
         type: 'htlc_resolve',
@@ -1519,7 +1519,7 @@ describe('multisig HTLC validator encryption', () => {
     const error = spyOn(console, 'error').mockImplementation(() => undefined);
     try {
       const result = await handleHtlcPayment(state, prepared, env);
-      expect(result.mempoolOps).toHaveLength(0);
+      expect(result.accountTxs).toHaveLength(0);
       expect(emitted).toEqual([]);
       expect(result.newState.messages.at(-1)).toBe('❌ HTLC payment failed: insufficient capacity');
       expect(warn).toHaveBeenCalledTimes(0);
@@ -1569,7 +1569,7 @@ describe('multisig HTLC validator encryption', () => {
 
     const candidateEffects: EntityCandidateEffect[] = [];
     const result = await handleHtlcPayment(state, prepared, env, candidateEffects);
-    expect(result.mempoolOps).toHaveLength(1);
+    expect(result.accountTxs).toHaveLength(1);
     expect(emitted).toHaveLength(0);
     expect(candidateEffects).toHaveLength(1);
     expect(candidateEffects[0]).toMatchObject({

@@ -26,7 +26,7 @@ export {
   frozenAccountInputLogLevel,
 } from './account/frozen-input';
 export type { AccountHandlerResult } from './account/result';
-export type { MempoolOp } from './account/orderbook-queue';
+export type { AccountTxTarget } from './account/orderbook-queue';
 export {
   compareSwapOffersForOrderbook,
   normalizeSwapOfferForOrderbook,
@@ -70,7 +70,7 @@ const accountInputSlowMs = (): number => {
 
 const createCommittedAccountEffects = (): CommittedAccountEffects => ({
   outputs: [],
-  mempoolOps: [],
+  accountTxs: [],
   swapOffersCreated: [],
   swapCancelRequests: [],
   swapOffersCancelled: [],

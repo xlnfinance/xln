@@ -39,9 +39,9 @@ const recordAccountChange = (
 const applyReturnedMempoolOps = (
   context: ApplyEntityTxsInOrderContext,
   state: EntityState,
-  mempoolOps: Array<{ accountId: string; tx: AccountTx }>,
+  accountTxs: Array<{ accountId: string; tx: AccountTx }>,
 ): void => {
-  for (const { accountId, tx } of mempoolOps) {
+  for (const { accountId, tx } of accountTxs) {
     const account = state.accounts.get(accountId);
     if (tx.type === 'cross_swap_fill_ack' && !account?.swapOffers?.has(tx.data.offerId)) {
       const routed = buildCrossJurisdictionFillNoticeOutput(state, accountId, tx);
@@ -151,14 +151,14 @@ export const applyEntityTxReturnedEffects = (
   entityTx: EntityTx,
   txProfileStartMs: number,
   effects: {
-    mempoolOps?: Array<{ accountId: string; tx: AccountTx }>;
+    accountTxs?: Array<{ accountId: string; tx: AccountTx }>;
     swapOffersCreated?: SwapOfferEvent[];
     swapCancelRequests?: SwapCancelRequestEvent[];
     swapOffersCancelled?: SwapCancelEvent[];
   },
 ): void => {
-  if (effects.mempoolOps?.length) {
-    applyReturnedMempoolOps(context, state, effects.mempoolOps);
+  if (effects.accountTxs?.length) {
+    applyReturnedMempoolOps(context, state, effects.accountTxs);
   }
   collectSwapEvents(
     context,

@@ -309,7 +309,7 @@ describe('overlapping finalized J-range consensus', () => {
 
     const replay = await applyJEvent(secondCommit.workingReplica.state, firstRange.data, env);
     expect(replay.newState).toBe(secondCommit.workingReplica.state);
-    expect(replay.mempoolOps).toEqual([]);
+    expect(replay.accountTxs).toEqual([]);
     expect(replay.outputs).toEqual([]);
   });
 });

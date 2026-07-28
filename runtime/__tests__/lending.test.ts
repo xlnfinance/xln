@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import { applyAccountTx } from '../account/tx/apply';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
 import { createEntityFrameHash } from '../entity/consensus/frame';
-import { applyCommittedAccountFrameFollowups, type MempoolOp } from '../entity/tx/handlers/account';
+import { applyCommittedAccountFrameFollowups, type AccountTxTarget } from '../entity/tx/handlers/account';
 import type { AccountFrame, AccountState, AccountTx, ConsensusConfig, EntityState } from '../types';
 import { createDefaultDelta } from '../validation-utils';
 
@@ -110,10 +110,10 @@ const commit = async (
   tx: AccountTx,
   byLeft: boolean,
   timestamp: number,
-): Promise<MempoolOp[]> => {
+): Promise<AccountTxTarget[]> => {
   const result = await applyAccountTx(state.accounts.get(counterparty)!, tx, byLeft, timestamp, 0, false);
   expect(result.success, result.error).toBe(true);
-  const followups: MempoolOp[] = [];
+  const followups: AccountTxTarget[] = [];
   applyCommittedAccountFrameFollowups(state, counterparty, frame(tx, byLeft, timestamp), followups, undefined, []);
   return followups;
 };

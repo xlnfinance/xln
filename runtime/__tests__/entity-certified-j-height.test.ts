@@ -128,16 +128,16 @@ describe('two-validator replay uses Entity-certified jurisdiction height', () =>
     } satisfies Extract<EntityTx, { type: 'hashlockPayment' }>;
     const applyAt = (height: number, delay: number) => {
       const result = handleHashlockPaymentEntityTx(envAt(height, delay), state, tx);
-      const op = result.mempoolOps[0]!;
+      const op = result.accountTxs[0]!;
       result.newState.accounts.get(op.accountId)!.mempool.push(op.tx);
       return result;
     };
     const lagging = applyAt(110, 5);
     const leading = applyAt(130, 5_760);
 
-    expect(lagging.mempoolOps).toEqual(leading.mempoolOps);
+    expect(lagging.accountTxs).toEqual(leading.accountTxs);
     expect(lagging.outputs).toEqual(leading.outputs);
-    expect((lagging.mempoolOps[0]!.tx as Extract<typeof lagging.mempoolOps[0]['tx'], { type: 'htlc_lock' }>).data.revealBeforeHeight)
+    expect((lagging.accountTxs[0]!.tx as Extract<typeof lagging.accountTxs[0]['tx'], { type: 'htlc_lock' }>).data.revealBeforeHeight)
       .toBe(150);
     expect(computeCanonicalEntityConsensusStateHash(lagging.newState))
       .toBe(computeCanonicalEntityConsensusStateHash(leading.newState));

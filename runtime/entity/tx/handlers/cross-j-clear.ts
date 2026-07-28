@@ -20,7 +20,7 @@ import {
   mergeCrossJurisdictionRoute,
 } from '../cross-jurisdiction-helpers';
 import { pushCrossJurisdictionEntityOutput } from '../cross-j-outputs';
-import type { MempoolOp } from './account';
+import type { AccountTxTarget } from './account';
 
 type CrossJurisdictionClearTx = Extract<EntityTx, { type: 'requestCrossJurisdictionClear' }>;
 type CrossJurisdictionClearMaterializationTx = Extract<EntityTx, { type: 'materializeCrossJurisdictionClear' }>;
@@ -28,7 +28,7 @@ type CrossJurisdictionClearMaterializationTx = Extract<EntityTx, { type: 'materi
 type CrossJurisdictionClearResult = {
   newState: EntityState;
   outputs: EntityInput[];
-  mempoolOps?: MempoolOp[];
+  accountTxs?: AccountTxTarget[];
 };
 
 const deterministicEntityTimestamp = (state: EntityState, env: RuntimeState): number =>
@@ -59,7 +59,7 @@ type ClearContext = {
   entityState: EntityState;
   newState: EntityState;
   outputs: EntityInput[];
-  mempoolOps: MempoolOp[];
+  accountTxs: AccountTxTarget[];
   orderId: string;
   cancelRemainder: boolean;
 };
@@ -68,7 +68,7 @@ const requestClearThroughSourceAccount = (
   context: ClearContext,
   route: CrossJurisdictionSwapRoute,
 ): CrossJurisdictionClearResult | undefined => {
-  const { env, newState, outputs, mempoolOps, orderId, cancelRemainder } = context;
+  const { env, newState, outputs, accountTxs, orderId, cancelRemainder } = context;
   const sourceHubId = normalizeEntityRef(route.source.counterpartyEntityId);
   if (normalizeEntityRef(newState.entityId) === sourceHubId) return undefined;
 
@@ -86,12 +86,12 @@ const requestClearThroughSourceAccount = (
   }
   if (!cancelRemainder && getCrossJurisdictionCommittedFillAmounts(route).fillRatio <= 0) {
     addMessage(newState, `🌉 Cross-j clear ${orderId} ignored: no pending fill`);
-    return { newState, outputs, mempoolOps };
+    return { newState, outputs, accountTxs };
   }
 
   // The user cannot address the remote hub diagonally. Committing this request
   // through the bilateral Account lets the source hub close the exact offer.
-  mempoolOps.push({
+  accountTxs.push({
     accountId: sourceAccountId,
     tx: { type: 'swap_cancel_request', data: { offerId: orderId } },
   });
@@ -101,7 +101,7 @@ const requestClearThroughSourceAccount = (
   route.clearingPolicy = cancelRemainder ? 'cancel_and_clear' : 'manual';
   newState.crossJurisdictionSwaps?.set(orderId, route);
   addMessage(newState, `🌉 Cross-j clear ${orderId} queued through source Account`);
-  return { newState, outputs, mempoolOps };
+  return { newState, outputs, accountTxs };
 };
 
 const closeLiveSourceOffer = (
@@ -110,22 +110,22 @@ const closeLiveSourceOffer = (
   accountId: string | null,
   storageChanges: RuntimeOverlayRecord[],
 ): CrossJurisdictionClearResult | undefined => {
-  const { env, entityState, newState, outputs, mempoolOps, orderId, cancelRemainder } = context;
+  const { env, entityState, newState, outputs, accountTxs, orderId, cancelRemainder } = context;
   const account = accountId ? newState.accounts.get(accountId) : undefined;
   const liveOffer = account?.swapOffers?.get(orderId);
   const ratio = getCrossJurisdictionCommittedFillAmounts(route).fillRatio;
   if (!liveOffer?.crossJurisdiction || (!cancelRemainder && ratio <= 0)) return undefined;
   if (!accountId || !account) {
     addMessage(newState, `❌ Cross-j clear ${orderId} blocked: no source account with ${formatEntityId(route.source.entityId)}`);
-    return { newState, outputs, mempoolOps };
+    return { newState, outputs, accountTxs };
   }
   if (accountHasCrossSwapAckQueued(account, orderId)) {
     addMessage(newState, `🌉 Cross-j clear ${orderId} waiting for account offer close ack`);
-    return { newState, outputs, mempoolOps };
+    return { newState, outputs, accountTxs };
   }
 
   const removedFromBook = cancelOrderbookOfferIfPresent(newState, accountId, orderId, storageChanges);
-  mempoolOps.push({ accountId, tx: buildCrossJurisdictionCancelAck(orderId, route) });
+  accountTxs.push({ accountId, tx: buildCrossJurisdictionCancelAck(orderId, route) });
   const requestedAt = deterministicEntityTimestamp(newState, env);
   transitionCrossJurisdictionRouteStatus(route, 'clear_requested', requestedAt);
   route.pendingClearRequestedAt = requestedAt;
@@ -139,7 +139,7 @@ const closeLiveSourceOffer = (
       ? `🌉 Cross-j clear ${orderId} removed live book order and queued account offer close before pull reveal`
       : `🌉 Cross-j clear ${orderId} queued account offer close before pull reveal`,
   );
-  return { newState, outputs, mempoolOps };
+  return { newState, outputs, accountTxs };
 };
 
 const requestPureCancel = (
@@ -147,18 +147,18 @@ const requestPureCancel = (
   route: CrossJurisdictionSwapRoute,
   accountId: string | null,
 ): CrossJurisdictionClearResult => {
-  const { env, entityState, newState, outputs, mempoolOps, orderId, cancelRemainder } = context;
+  const { env, entityState, newState, outputs, accountTxs, orderId, cancelRemainder } = context;
   const account = accountId ? newState.accounts.get(accountId) : undefined;
   if (!cancelRemainder) {
     addMessage(newState, `🌉 Cross-j clear ${orderId} ignored: no pending fill`);
-    return { newState, outputs, mempoolOps };
+    return { newState, outputs, accountTxs };
   }
   const proof = buildCrossJurisdictionCloseProof(route, '0x');
   if (!accountId || !account?.pulls?.has(route.sourcePull!.pullId)) {
     addMessage(newState, `🌉 Cross-j clear ${orderId} waiting for source close proof`);
-    return { newState, outputs, mempoolOps };
+    return { newState, outputs, accountTxs };
   }
-  mempoolOps.push({
+  accountTxs.push({
     accountId,
     tx: { type: 'cross_pull_close', data: { pullId: route.sourcePull!.pullId, binary: '0x', proof } },
   });
@@ -191,7 +191,7 @@ const requestPureCancel = (
   const firstValidator = entityState.config.validators[0];
   if (firstValidator) outputs.push({ entityId: newState.entityId, signerId: firstValidator, entityTxs: [] });
   addMessage(newState, `🌉 Cross-j clear ${orderId} queued atomic Hub pure-cancel close`);
-  return { newState, outputs, mempoolOps };
+  return { newState, outputs, accountTxs };
 };
 
 const requestFilledRouteReveal = (
@@ -200,19 +200,19 @@ const requestFilledRouteReveal = (
   accountId: string | null,
   ratio: number,
 ): CrossJurisdictionClearResult => {
-  const { env, entityState, newState, outputs, mempoolOps, orderId, cancelRemainder } = context;
+  const { env, entityState, newState, outputs, accountTxs, orderId, cancelRemainder } = context;
   const account = accountId ? newState.accounts.get(accountId) : undefined;
   if (!accountId || !account) {
     addMessage(newState, `❌ Cross-j clear ${orderId} blocked: no source account with ${formatEntityId(route.source.entityId)}`);
-    return { newState, outputs, mempoolOps };
+    return { newState, outputs, accountTxs };
   }
   if (!account.pulls?.has(route.sourcePull!.pullId)) {
     addMessage(newState, `🌉 Cross-j clear ${orderId} ignored: source pull already closed`);
-    return { newState, outputs, mempoolOps };
+    return { newState, outputs, accountTxs };
   }
   if (accountHasPullResolveQueued(account, route.sourcePull!.pullId)) {
     addMessage(newState, `🌉 Cross-j clear ${orderId} ignored: source pull resolve already queued`);
-    return { newState, outputs, mempoolOps };
+    return { newState, outputs, accountTxs };
   }
 
   const requestedAt = deterministicEntityTimestamp(newState, env);
@@ -223,7 +223,7 @@ const requestFilledRouteReveal = (
   const firstValidator = entityState.config.validators[0];
   if (firstValidator) outputs.push({ entityId: newState.entityId, signerId: firstValidator, entityTxs: [] });
   addMessage(newState, `🌉 Cross-j clear ${orderId} awaiting proposer reveal ratio=${ratio}/${CROSS_J_MAX_FILL_RATIO}`);
-  return { newState, outputs, mempoolOps };
+  return { newState, outputs, accountTxs };
 };
 
 export const handleRequestCrossJurisdictionClearEntityTx = (
@@ -235,7 +235,7 @@ export const handleRequestCrossJurisdictionClearEntityTx = (
   const { orderId, cancelRemainder = false } = entityTx.data;
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
-  const mempoolOps: MempoolOp[] = [];
+  const accountTxs: AccountTxTarget[] = [];
   let route = newState.crossJurisdictionSwaps?.get(orderId);
   if (!route) {
     throw new Error(`CROSS_J_CLEAR_ROUTE_MISSING:${orderId}`);
@@ -251,7 +251,7 @@ export const handleRequestCrossJurisdictionClearEntityTx = (
     newState.crossJurisdictionSwaps.set(orderId, route);
   }
 
-  const context = { env, entityState, newState, outputs, mempoolOps, orderId, cancelRemainder };
+  const context = { env, entityState, newState, outputs, accountTxs, orderId, cancelRemainder };
   const sourceUserResult = requestClearThroughSourceAccount(context, route);
   if (sourceUserResult) return sourceUserResult;
 
@@ -289,7 +289,7 @@ export const handleMaterializeCrossJurisdictionClearEntityTx = (
   }
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
-  const mempoolOps: MempoolOp[] = [];
+  const accountTxs: AccountTxTarget[] = [];
   const storedRoute = newState.crossJurisdictionSwaps?.get(orderId);
   if (!storedRoute || storedRoute.status !== 'clear_requested') {
     throw new Error(`CROSS_J_CLEAR_MATERIALIZE_INTENT_MISSING:${orderId}`);
@@ -334,7 +334,7 @@ export const handleMaterializeCrossJurisdictionClearEntityTx = (
     throw new Error(`CROSS_J_CLEAR_MATERIALIZE_ALREADY_QUEUED:${orderId}`);
   }
 
-  mempoolOps.push({
+  accountTxs.push({
     accountId,
     tx: {
       type: 'cross_pull_close',
@@ -343,7 +343,7 @@ export const handleMaterializeCrossJurisdictionClearEntityTx = (
   });
   const sourceSavingsAmount = route.priceImprovementSourceAmount ?? 0n;
   if (sourceSavingsAmount > 0n) {
-    mempoolOps.push({
+    accountTxs.push({
       accountId,
       tx: {
         type: 'direct_payment',
@@ -391,5 +391,5 @@ export const handleMaterializeCrossJurisdictionClearEntityTx = (
     newState,
     `🌉 Cross-j clear ${orderId} queued atomic Hub source+target close ratio=${fillRatio}/${CROSS_J_MAX_FILL_RATIO}`,
   );
-  return { newState, outputs, mempoolOps };
+  return { newState, outputs, accountTxs };
 };

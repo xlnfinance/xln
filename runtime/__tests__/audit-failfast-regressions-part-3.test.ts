@@ -2065,7 +2065,7 @@ describe('audit fail-fast regressions', () => {
       },
     });
 
-    expect(result.mempoolOps?.map(({ tx }) => tx)).toEqual([
+    expect(result.accountTxs?.map(({ tx }) => tx)).toEqual([
       {
         type: 'rebalance_policy',
         data: { tokenId: 1, policyVersion: 4, baseFee: 100_000n, liquidityFeeBps: 5n, gasFee: 0n },
@@ -2220,9 +2220,9 @@ describe('audit fail-fast regressions', () => {
     });
 
     expect(result.newState.accounts.get(hubId)?.shadow.rebalance.policy.get(1)?.r2cRequestSoftLimit).toBe(500n * usd);
-    expect(result.mempoolOps).toHaveLength(1);
-    expect(result.mempoolOps?.[0]?.tx.type).toBe('request_collateral');
-    expect(result.mempoolOps?.[0]?.tx.data.feeAmount).toBe(1_055_000_000_000_000_000n);
+    expect(result.accountTxs).toHaveLength(1);
+    expect(result.accountTxs?.[0]?.tx.type).toBe('request_collateral');
+    expect(result.accountTxs?.[0]?.tx.data.feeAmount).toBe(1_055_000_000_000_000_000n);
     expect(result.outputs).toHaveLength(1);
     expect('rebalancePolicy' in result.newState.accounts.get(hubId)!).toBe(false);
   });

@@ -25,7 +25,7 @@ const rejectFullBook = (
     return;
   }
   const queued = queueUniqueSwapResolveForEntityState(
-    pass.mempoolOps,
+    pass.accountTxs,
     pass.hubState,
     pass.queuedSwapResolutions,
     offer.accountId,

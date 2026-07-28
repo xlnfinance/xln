@@ -8,7 +8,7 @@ import { type WorkingOrderbookOffer, swapKey } from '../../../../orderbook/swap-
 import { type CrossJurisdictionFillInstruction } from '../../../../extensions/cross-j/orderbook';
 import {
   queueUniqueSwapResolveForEntityState,
-  type MempoolOp,
+  type AccountTxTarget,
 } from './orderbook-queue';
 import {
   sortSwapOffersForOrderbook,
@@ -44,12 +44,12 @@ export function processOrderbookSwaps(
   swapOffers: WorkingOrderbookOffer[],
   options: OrderbookProcessOptions = {},
 ): MatchResult {
-  const mempoolOps: MempoolOp[] = [];
+  const accountTxs: AccountTxTarget[] = [];
   const crossJurisdictionFills: CrossJurisdictionFillInstruction[] = [];
   const bookUpdates: { pairId: string; book: BookState }[] = [];
   const debugProjectionRejects: Array<{ offerId: string; accountId: string; reason: string }> = [];
   const ext = hubState.orderbookExt as OrderbookExtState | undefined;
-  if (!ext) return { mempoolOps, crossJurisdictionFills, bookUpdates, debugProjectionRejects };
+  if (!ext) return { accountTxs, crossJurisdictionFills, bookUpdates, debugProjectionRejects };
   const debugRebuildProjectionOnly = options.debugRebuildProjectionOnly === true;
   const splitOffers = splitWorkingOrderbookOffers(swapOffers);
   const sameAccountSwapOffers = sortSwapOffersForOrderbook(splitOffers.sameAccountSwapOffers);
@@ -90,7 +90,7 @@ export function processOrderbookSwaps(
       recordDebugProjectionReject(accountId, offerId, reason);
       return;
     }
-    queueUniqueSwapResolveForEntityState(mempoolOps, hubState, queuedSwapResolutions, accountId, {
+    queueUniqueSwapResolveForEntityState(accountTxs, hubState, queuedSwapResolutions, accountId, {
       offerId,
       fillRatio: 0,
       cancelRemainder: true,
@@ -105,7 +105,7 @@ export function processOrderbookSwaps(
     crossJurisdictionSwapOffers,
     bookCache,
     bookUpdates,
-    mempoolOps,
+    accountTxs,
     crossJurisdictionFills,
     queuedSwapResolutions,
     debugRebuildProjectionOnly,
@@ -120,12 +120,12 @@ export function processOrderbookSwaps(
     swapTakerFeeBps,
     bookCache,
     bookUpdates,
-    mempoolOps,
+    accountTxs,
     queuedSwapResolutions,
     debugRebuildProjectionOnly,
     recordDebugProjectionReject,
     rejectInvalidOffer,
   });
 
-  return { mempoolOps, crossJurisdictionFills, bookUpdates, debugProjectionRejects };
+  return { accountTxs, crossJurisdictionFills, bookUpdates, debugProjectionRejects };
 }

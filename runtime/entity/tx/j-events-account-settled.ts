@@ -20,7 +20,7 @@ export const applyAccountSettledJEvent = (
     newState,
     event,
     blockNumber,
-    mempoolOps,
+    accountTxs,
     dirtyAccounts,
   } = context;
   if (event.type !== 'AccountSettled') {
@@ -73,7 +73,7 @@ export const applyAccountSettledJEvent = (
   }
   const jHeight = event.blockNumber ?? blockNumber;
   const jBlockHash = event.blockHash || '';
-  mempoolOps.push({
+  accountTxs.push({
     accountId: counterpartyId,
     tx: {
       type: 'j_event_claim',

@@ -126,7 +126,7 @@ describe('htlc event contract and dispute tail', () => {
       data: { counterpartyEntityId: counterpartyId, lockId, secret },
     });
 
-    expect(result.mempoolOps).toEqual([{
+    expect(result.accountTxs).toEqual([{
       accountId: counterpartyId,
       tx: { type: 'htlc_resolve', data: { lockId, outcome: 'secret', secret } },
     }]);
@@ -144,7 +144,7 @@ describe('htlc event contract and dispute tail', () => {
       type: 'resolveHtlcLock',
       data: { counterpartyEntityId: counterpartyId, lockId, secret: `0x${'55'.repeat(32)}` },
     });
-    expect(invalid.mempoolOps).toEqual([]);
+    expect(invalid.accountTxs).toEqual([]);
     expect(invalid.newState.htlcRoutes.has(hashlock)).toBe(false);
 
     const conflicted = structuredClone(replica.state);
@@ -428,7 +428,7 @@ describe('htlc event contract and dispute tail', () => {
 
     expect(replica.state.htlcRoutes.has(hashlock)).toBe(true);
 
-    const mempoolOps: Array<{
+    const accountTxs: Array<{
       accountId: string;
       tx: { type: 'htlc_resolve'; data: { lockId: string; outcome: 'secret'; secret: string } };
     }> = [];
@@ -437,11 +437,11 @@ describe('htlc event contract and dispute tail', () => {
       state: replica.state,
       newState: replica.state,
       outputs: [],
-      mempoolOps,
+      accountTxs,
       candidateEffects: [],
     }, [{ hashlock, secret }]);
 
-    expect(mempoolOps).toEqual([{
+    expect(accountTxs).toEqual([{
       accountId: inboundEntityId,
       tx: {
         type: 'htlc_resolve',
@@ -471,18 +471,18 @@ describe('htlc event contract and dispute tail', () => {
       outboundLockId: 'self-outbound',
       createdTimestamp: replica.state.timestamp,
     });
-    const mempoolOps: Parameters<typeof applyHtlcSecretFollowups>[0]['mempoolOps'] = [];
+    const accountTxs: Parameters<typeof applyHtlcSecretFollowups>[0]['accountTxs'] = [];
 
     applyHtlcSecretFollowups({
       env: createEmptyEnv('htlc-self-cycle-secret-seed'),
       state: replica.state,
       newState: replica.state,
       outputs: [],
-      mempoolOps,
+      accountTxs,
       candidateEffects: [],
     }, [{ hashlock, secret }]);
 
-    expect(mempoolOps).toEqual([
+    expect(accountTxs).toEqual([
       {
         accountId: inboundEntityId,
         tx: { type: 'htlc_resolve', data: { lockId: 'self-inbound', outcome: 'secret', secret } },
@@ -686,7 +686,7 @@ describe('htlc event contract and dispute tail', () => {
       state: replica.state,
       newState: replica.state,
       outputs: [],
-      mempoolOps: [],
+      accountTxs: [],
       candidateEffects,
     }, [{ hashlock, secret }]);
 

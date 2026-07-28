@@ -23,7 +23,7 @@ const log = createStructuredLogger('entity.htlc_onion_advance');
 type Result = {
   newState: EntityState;
   outputs: EntityInput[];
-  mempoolOps: Array<{ accountId: string; tx: AccountTx }>;
+  accountTxs: Array<{ accountId: string; tx: AccountTx }>;
 };
 
 const queuedResolve = (state: EntityState, accountId: string, lockId: string): boolean => {
@@ -40,10 +40,10 @@ const cancelInbound = (
   lockId: string,
   hashlock: string,
   reason: string,
-  mempoolOps: Result['mempoolOps'],
+  accountTxs: Result['accountTxs'],
 ): void => {
   if (!queuedResolve(state, accountId, lockId)) {
-    mempoolOps.push({
+    accountTxs.push({
       accountId,
       tx: { type: 'htlc_resolve', data: { lockId, outcome: 'error', reason } },
     });
@@ -55,7 +55,7 @@ const applyFinalAdvance = (
   _env: RuntimeState,
   state: EntityState,
   tx: HtlcOnionAdvanceTx,
-  mempoolOps: Result['mempoolOps'],
+  accountTxs: Result['accountTxs'],
 ): void => {
   if (tx.data.advance.kind !== 'final') throw new Error('HTLC_ONION_ADVANCE_FINAL_DISPATCH_MISMATCH');
   const { inboundEntityId, inboundLockId, hashlock, tokenId, amount } = tx.data;
@@ -80,7 +80,7 @@ const applyFinalAdvance = (
   const description = tx.data.advance.description?.trim() ?? '';
   if (description) setHtlcRouteNote(state, hashlock, inboundLockId, description);
   if (!queuedResolve(state, inboundEntityId, inboundLockId)) {
-    mempoolOps.push({
+    accountTxs.push({
       accountId: inboundEntityId,
       tx: {
         type: 'htlc_resolve',
@@ -93,13 +93,13 @@ const applyFinalAdvance = (
 const applyAcceptOfferAdvance = (
   state: EntityState,
   tx: HtlcOnionAdvanceTx,
-  mempoolOps: Result['mempoolOps'],
+  accountTxs: Result['accountTxs'],
 ): void => {
   if (tx.data.advance.kind !== 'acceptOffer') {
     throw new Error('HTLC_ONION_ADVANCE_ACCEPT_DISPATCH_MISMATCH');
   }
   if (!queuedResolve(state, tx.data.inboundEntityId, tx.data.inboundLockId)) {
-    mempoolOps.push({
+    accountTxs.push({
       accountId: tx.data.inboundEntityId,
       tx: {
         type: 'htlc_resolve',
@@ -123,7 +123,7 @@ const nextHopCapacity = (state: EntityState, nextHop: string, tokenId: number) =
 const applyForwardAdvance = (
   state: EntityState,
   tx: HtlcOnionAdvanceTx,
-  mempoolOps: Result['mempoolOps'],
+  accountTxs: Result['accountTxs'],
 ): void => {
   if (tx.data.advance.kind !== 'forward') throw new Error('HTLC_ONION_ADVANCE_FORWARD_DISPATCH_MISMATCH');
   const { inboundEntityId, inboundLockId, hashlock, tokenId, amount, timelock, revealBeforeHeight } = tx.data;
@@ -143,7 +143,7 @@ const applyForwardAdvance = (
   };
   state.htlcRoutes.set(hashlock, route);
   if (!state.accounts.has(nextHop)) {
-    cancelInbound(state, inboundEntityId, inboundLockId, hashlock, `no_account:${nextHop.slice(-4)}`, mempoolOps);
+    cancelInbound(state, inboundEntityId, inboundLockId, hashlock, `no_account:${nextHop.slice(-4)}`, accountTxs);
     return;
   }
 
@@ -161,7 +161,7 @@ const applyForwardAdvance = (
       inboundLockId,
       hashlock,
       feeAmount < baseFee ? 'fee_below_base' : 'fee_below_ppm',
-      mempoolOps,
+      accountTxs,
     );
     return;
   }
@@ -170,15 +170,15 @@ const applyForwardAdvance = (
   const forwardTimelock = timelock - BigInt(HTLC.MIN_TIMELOCK_DELTA_MS);
   const forwardHeight = revealBeforeHeight - HTLC.MIN_REVEAL_HEIGHT_DELTA_BLOCKS;
   if (forwardTimelock < BigInt(state.timestamp) + 1000n) {
-    cancelInbound(state, inboundEntityId, inboundLockId, hashlock, 'timelock_too_tight', mempoolOps);
+    cancelInbound(state, inboundEntityId, inboundLockId, hashlock, 'timelock_too_tight', accountTxs);
     return;
   }
   if (forwardHeight <= (state.lastFinalizedJHeight || 0)) {
-    cancelInbound(state, inboundEntityId, inboundLockId, hashlock, 'height_expired', mempoolOps);
+    cancelInbound(state, inboundEntityId, inboundLockId, hashlock, 'height_expired', accountTxs);
     return;
   }
 
-  mempoolOps.push({
+  accountTxs.push({
     accountId: nextHop,
     tx: {
       type: 'htlc_lock',
@@ -204,21 +204,21 @@ export const handleHtlcOnionAdvance = async (
   const validated = await validateHtlcOnionAdvanceTx(env, entityState, rawTx);
   const tx = validated.tx;
   const newState = cloneEntityState(entityState);
-  const mempoolOps: Result['mempoolOps'] = [];
+  const accountTxs: Result['accountTxs'] = [];
   const outputs: EntityInput[] = [];
-  if (tx.data.advance.kind === 'final') applyFinalAdvance(env, newState, tx, mempoolOps);
-  else if (tx.data.advance.kind === 'acceptOffer') applyAcceptOfferAdvance(newState, tx, mempoolOps);
+  if (tx.data.advance.kind === 'final') applyFinalAdvance(env, newState, tx, accountTxs);
+  else if (tx.data.advance.kind === 'acceptOffer') applyAcceptOfferAdvance(newState, tx, accountTxs);
   else if (tx.data.advance.kind === 'revealAccepted') {
     applyHtlcSecretFollowups(
-      { env, state: entityState, newState, outputs, mempoolOps, candidateEffects },
+      { env, state: entityState, newState, outputs, accountTxs, candidateEffects },
       [{ secret: tx.data.advance.secret, hashlock: tx.data.hashlock }],
     );
-  } else applyForwardAdvance(newState, tx, mempoolOps);
+  } else applyForwardAdvance(newState, tx, accountTxs);
   addMessage(newState, `🔐 HTLC onion advanced ${tx.data.inboundLockId}`);
   log.debug('applied', {
     entityId: newState.entityId,
     lockId: tx.data.inboundLockId,
     kind: tx.data.advance.kind,
   });
-  return { newState, outputs, mempoolOps };
+  return { newState, outputs, accountTxs };
 };

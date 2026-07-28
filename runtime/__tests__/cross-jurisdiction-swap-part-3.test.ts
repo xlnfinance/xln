@@ -348,7 +348,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     });
 
     const cancelled = processOrderbookCancels(state, [{ accountId: sourceUser, offerId: route.orderId }]);
-    expect(cancelled.mempoolOps).toEqual([]);
+    expect(cancelled.accountTxs).toEqual([]);
     expect(admission.pendingCancel?.bookRemovalCommittedAt).toBe(state.timestamp);
 
     account.mempool = [];
@@ -450,7 +450,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     ]);
 
     expect(result.localBookCancels).toEqual([]);
-    expect(result.mempoolOps).toEqual([]);
+    expect(result.accountTxs).toEqual([]);
     expect(sourceHubState.crossJurisdictionBookAdmissions?.values().next().value?.pendingCancel).toMatchObject({
       sourceAccountId: sourceUser,
     });
@@ -487,10 +487,10 @@ describe('cross-jurisdiction hashledger swap', () => {
         },
       ],
     });
-    expect(result.mempoolOps).toEqual([]);
+    expect(result.accountTxs).toEqual([]);
 
     const sourceFollowup = await applyEntityTx(env, sourceHubState, ownerRemoval.outputs[0]!.entityTxs![0]!);
-    expect(sourceFollowup.mempoolOps?.map(op => op.tx.type)).toEqual(['cross_swap_fill_ack']);
+    expect(sourceFollowup.accountTxs?.map(op => op.tx.type)).toEqual(['cross_swap_fill_ack']);
     const removedAt = (
       ownerRemoval.outputs[0]!.entityTxs![0] as Extract<
         EntityTx,
@@ -710,7 +710,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       },
     });
 
-    expect(result.mempoolOps?.map(op => op.tx.type)).toEqual(['cross_swap_fill_ack']);
+    expect(result.accountTxs?.map(op => op.tx.type)).toEqual(['cross_swap_fill_ack']);
     const canonical = result.newState.crossJurisdictionSwaps?.get(route.orderId);
     expect(canonical?.status).toBe('resting');
     expect(canonical?.fillSeq).toBeUndefined();
@@ -784,7 +784,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       },
     });
 
-    expect(duplicate.mempoolOps ?? []).toHaveLength(0);
+    expect(duplicate.accountTxs ?? []).toHaveLength(0);
     expect(duplicate.newState.crossJurisdictionSwaps?.get(route.orderId)?.fillSeq).toBe(1);
 
     await expect(
@@ -1216,9 +1216,9 @@ describe('cross-jurisdiction hashledger swap', () => {
       data: { reason: 'test-expired' },
     });
 
-    expect(result.mempoolOps?.map(op => op.tx.type)).toEqual(['cross_swap_fill_ack', 'cross_pull_close']);
-    expect((result.mempoolOps?.[1]?.tx as any).data.binary).toBe('0x');
-    expect((result.mempoolOps?.[1]?.tx as any).data.proof.fillRatio).toBe(0);
+    expect(result.accountTxs?.map(op => op.tx.type)).toEqual(['cross_swap_fill_ack', 'cross_pull_close']);
+    expect((result.accountTxs?.[1]?.tx as any).data.binary).toBe('0x');
+    expect((result.accountTxs?.[1]?.tx as any).data.proof.fillRatio).toBe(0);
     expect(
       result.outputs.some(
         output => output.entityId === targetUser && output.entityTxs?.some(tx => tx.type === 'cancelPull'),
@@ -1310,11 +1310,11 @@ describe('cross-jurisdiction hashledger swap', () => {
       data: { reason: 'test-filled-expired' },
     });
 
-    expect(result.mempoolOps?.map(op => op.tx.type)).toEqual(['cross_swap_fill_ack']);
-    expect((result.mempoolOps?.[0]?.tx as any).data.fillNumerator).toBe(1n);
-    expect((result.mempoolOps?.[0]?.tx as any).data.fillDenominator).toBe(2n);
-    expect((result.mempoolOps?.[0]?.tx as any).data.cumulativeSourceAmount).toBe(500n);
-    expect((result.mempoolOps?.[0]?.tx as any).data.cumulativeTargetAmount).toBe(450n);
+    expect(result.accountTxs?.map(op => op.tx.type)).toEqual(['cross_swap_fill_ack']);
+    expect((result.accountTxs?.[0]?.tx as any).data.fillNumerator).toBe(1n);
+    expect((result.accountTxs?.[0]?.tx as any).data.fillDenominator).toBe(2n);
+    expect((result.accountTxs?.[0]?.tx as any).data.cumulativeSourceAmount).toBe(500n);
+    expect((result.accountTxs?.[0]?.tx as any).data.cumulativeTargetAmount).toBe(450n);
     const swept = result.newState.crossJurisdictionSwaps?.get(route.orderId);
     expect(swept?.status).toBe('clear_requested');
     expect(swept?.clearingPolicy).toBe('cancel_and_clear');
@@ -1930,7 +1930,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       const applied = await applyEntityTx(env, chainedState, entityTx);
       chainedState = applied.newState;
       nestedOutputs.push(...(applied.outputs ?? []));
-      for (const op of applied.mempoolOps ?? []) {
+      for (const op of applied.accountTxs ?? []) {
         const account = chainedState.accounts.get(op.accountId);
         expect(account, `mempool op account ${op.accountId.slice(-4)} must exist`).toBeDefined();
         account?.mempool.push(op.tx);

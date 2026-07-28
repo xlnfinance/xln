@@ -10,7 +10,7 @@ import { decodeHashLadderBinary } from '../../protocol/htlc/hash-ladder';
 import { CROSS_J_MAX_FILL_RATIO, isCrossJurisdictionTerminalStatus } from '../../extensions/cross-j/index';
 import { createStructuredLogger, shortHash } from '../../infra/logger';
 import { pushCrossJurisdictionEntityOutput } from './cross-j-outputs';
-import type { JEventMempoolOp } from './j-events-types';
+import type { JEventAccountTx } from './j-events-types';
 
 const jEventHtlcLog = createStructuredLogger('j.event.htlc');
 
@@ -218,7 +218,7 @@ export function queueCrossJurisdictionSourceDisputeFromTargetDispute(
 
 function queueInboundResolvesByHashlock(
   newState: EntityState,
-  mempoolOps: JEventMempoolOp[],
+  accountTxs: JEventAccountTx[],
   hashlock: string,
   secret: string,
 ): number {
@@ -229,7 +229,7 @@ function queueInboundResolvesByHashlock(
       if (String(lock.hashlock).toLowerCase() !== hashlock) continue;
       const senderIsUs = (lock.senderIsLeft && weAreLeft) || (!lock.senderIsLeft && !weAreLeft);
       if (senderIsUs) continue;
-      mempoolOps.push({
+      accountTxs.push({
         accountId: counterpartyId,
         tx: {
           type: 'htlc_resolve',
@@ -249,7 +249,7 @@ function queueInboundResolvesByHashlock(
 export function applyKnownHtlcSecret(
   env: RuntimeState,
   newState: EntityState,
-  mempoolOps: JEventMempoolOp[],
+  accountTxs: JEventAccountTx[],
   outputs: EntityInput[],
   hashlockRaw: string,
   secretRaw: string,
@@ -264,7 +264,7 @@ export function applyKnownHtlcSecret(
     .find(([candidateKey]) => candidateKey.toLowerCase() === hashlock)?.[1];
 
   if (!route) {
-    const recovered = queueInboundResolvesByHashlock(newState, mempoolOps, hashlock, secret);
+    const recovered = queueInboundResolvesByHashlock(newState, accountTxs, hashlock, secret);
     if (recovered > 0) {
       addMessage(newState, `🔓 HTLC reveal observed: ${hashlock.slice(0, 10)}... | Block ${blockNumber}`);
       return true;
@@ -293,7 +293,7 @@ export function applyKnownHtlcSecret(
   }
 
   if (route.inboundEntity && route.inboundLockId) {
-    mempoolOps.push({
+    accountTxs.push({
       accountId: route.inboundEntity,
       tx: {
         type: 'htlc_resolve',

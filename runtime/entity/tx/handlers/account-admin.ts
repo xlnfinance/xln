@@ -7,14 +7,14 @@ import {
   assertNoTokenlessHubRawOverrides,
   getDefaultRebalanceBaseFeeForToken,
 } from '../../../account/rebalance-defaults';
-import type { MempoolOp } from './account';
+import type { AccountTxTarget } from './account';
 
 type EntityTxOf<T extends EntityTx['type']> = Extract<EntityTx, { type: T }>;
 
 type AccountAdminResult = {
   newState: EntityState;
   outputs: EntityInput[];
-  mempoolOps?: MempoolOp[];
+  accountTxs?: AccountTxTarget[];
 };
 
 const log = createStructuredLogger('entity.tx.account-admin');
@@ -45,7 +45,7 @@ export const handleExtendCreditEntityTx = (
   entityTx: EntityTxOf<'extendCredit'>,
 ): AccountAdminResult => {
   const newState = cloneEntityState(entityState);
-  const mempoolOps: MempoolOp[] = [];
+  const accountTxs: AccountTxTarget[] = [];
   const { counterpartyEntityId, tokenId, amount } = entityTx.data;
 
   if (!newState.accounts.has(counterpartyEntityId)) {
@@ -58,7 +58,7 @@ export const handleExtendCreditEntityTx = (
     data: { tokenId, amount },
   };
 
-  mempoolOps.push({ accountId: counterpartyEntityId, tx: accountTx });
+  accountTxs.push({ accountId: counterpartyEntityId, tx: accountTx });
   addMessage(newState, `💳 Extended credit of ${amount} to ${counterpartyEntityId.slice(-4)}`);
   log.info('extend_credit.queued', {
     entity: shortId(entityState.entityId),
@@ -67,7 +67,7 @@ export const handleExtendCreditEntityTx = (
     amount,
   });
 
-  return { newState, outputs: processingTrigger(entityState), mempoolOps };
+  return { newState, outputs: processingTrigger(entityState), accountTxs };
 };
 
 export const handleSetHubConfigEntityTx = (
@@ -164,7 +164,7 @@ export const handleSetHubConfigEntityTx = (
     feePolicyChanged,
   });
 
-  const mempoolOps = Array.from(newState.accounts.entries())
+  const accountTxs = Array.from(newState.accounts.entries())
     .sort(([left], [right]) => left.localeCompare(right))
     .flatMap(([accountId, account]) => Array.from(account.deltas.keys())
       .sort((left, right) => left - right)
@@ -175,8 +175,8 @@ export const handleSetHubConfigEntityTx = (
 
   return {
     newState,
-    outputs: mempoolOps.length > 0 ? processingTrigger(newState) : [],
-    ...(mempoolOps.length > 0 ? { mempoolOps } : {}),
+    outputs: accountTxs.length > 0 ? processingTrigger(newState) : [],
+    ...(accountTxs.length > 0 ? { accountTxs } : {}),
   };
 };
 
@@ -214,7 +214,7 @@ export const handleSetRebalancePolicyEntityTx = (
   return {
     newState,
     outputs: rebalanceTxs.length > 0 ? processingTrigger(newState) : [],
-    mempoolOps: rebalanceTxs.map((tx) => ({ accountId: counterpartyEntityId, tx })),
+    accountTxs: rebalanceTxs.map((tx) => ({ accountId: counterpartyEntityId, tx })),
   };
 };
 
@@ -233,7 +233,7 @@ export const handleRequestCollateralEntityTx = (
   return {
     newState,
     outputs: processingTrigger(entityState),
-    mempoolOps: [{
+    accountTxs: [{
       accountId: counterpartyEntityId,
       tx: {
         type: 'request_collateral',
@@ -268,7 +268,7 @@ export const handleReopenDisputedAccountEntityTx = (
   return {
     newState,
     outputs: processingTrigger(entityState),
-    mempoolOps: [{
+    accountTxs: [{
       accountId: counterpartyEntityId,
       tx: {
         type: 'reopen_disputed',

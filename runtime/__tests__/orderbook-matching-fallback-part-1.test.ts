@@ -245,7 +245,7 @@ describe('orderbook matching fallback execution mapping', () => {
     } as any;
 
     const result = processCommittedOrderbookSwaps(entityState, [swapOffer]);
-    const op = result.mempoolOps.find(item => item.accountId === 'alice' && item.tx.type === 'swap_resolve');
+    const op = result.accountTxs.find(item => item.accountId === 'alice' && item.tx.type === 'swap_resolve');
 
     expect(op).toBeDefined();
     expect(op!.tx.data.fillRatio).toBe(deriveCanonicalSwapFillRatio(quoteAmount, 210_000_000_000n));
@@ -318,10 +318,10 @@ describe('orderbook matching fallback execution mapping', () => {
     } as any;
 
     const result = processCommittedOrderbookSwaps(entityState, [makerOffer, takerOffer]);
-    const makerResolve = result.mempoolOps.find(
+    const makerResolve = result.accountTxs.find(
       item => item.accountId === 'maker-account' && item.tx.type === 'swap_resolve',
     );
-    const takerResolve = result.mempoolOps.find(
+    const takerResolve = result.accountTxs.find(
       item => item.accountId === 'taker-account' && item.tx.type === 'swap_resolve',
     );
 
@@ -404,10 +404,10 @@ describe('orderbook matching fallback execution mapping', () => {
     } as any;
 
     const result = processCommittedOrderbookSwaps(entityState, [makerOffer, takerOffer]);
-    const makerResolve = result.mempoolOps.find(
+    const makerResolve = result.accountTxs.find(
       item => item.accountId === 'maker-account' && item.tx.type === 'swap_resolve',
     );
-    const takerResolve = result.mempoolOps.find(
+    const takerResolve = result.accountTxs.find(
       item => item.accountId === 'taker-account' && item.tx.type === 'swap_resolve',
     );
     const finalBook = result.bookUpdates.at(-1)?.book;
@@ -503,13 +503,13 @@ describe('orderbook matching fallback execution mapping', () => {
     } as any;
 
     const result = processCommittedOrderbookSwaps(entityState, [makerAsk1, makerAsk2, takerBuy] as any);
-    const takerResolve = result.mempoolOps.find(
+    const takerResolve = result.accountTxs.find(
       item => item.accountId === 'taker-account' && item.tx.type === 'swap_resolve',
     );
-    const makerResolve1 = result.mempoolOps.find(
+    const makerResolve1 = result.accountTxs.find(
       item => item.accountId === 'maker-account-1' && item.tx.type === 'swap_resolve',
     );
-    const makerResolve2 = result.mempoolOps.find(
+    const makerResolve2 = result.accountTxs.find(
       item => item.accountId === 'maker-account-2' && item.tx.type === 'swap_resolve',
     );
 
@@ -610,13 +610,13 @@ describe('orderbook matching fallback execution mapping', () => {
     } as any;
 
     const result = processCommittedOrderbookSwaps(entityState, [selfMakerOffer, otherAskOffer, takerBuyOffer]);
-    const takerResolve = result.mempoolOps.find(
+    const takerResolve = result.accountTxs.find(
       item => item.accountId === 'alice-taker-account' && item.tx.type === 'swap_resolve',
     );
-    const otherMakerResolve = result.mempoolOps.find(
+    const otherMakerResolve = result.accountTxs.find(
       item => item.accountId === 'bob-maker-account' && item.tx.type === 'swap_resolve',
     );
-    const selfMakerResolve = result.mempoolOps.find(
+    const selfMakerResolve = result.accountTxs.find(
       item => item.accountId === 'alice-maker-account' && item.tx.type === 'swap_resolve',
     );
 
@@ -772,7 +772,7 @@ describe('orderbook matching fallback execution mapping', () => {
     } as any;
 
     const result = processCommittedOrderbookSwaps(entityState, [makerBid, makerAsk, takerBuy]);
-    const takerResolve = result.mempoolOps.find(
+    const takerResolve = result.accountTxs.find(
       item =>
         item.accountId === 'taker-account' &&
         item.tx.type === 'swap_resolve' &&
@@ -860,7 +860,7 @@ describe('orderbook matching fallback execution mapping', () => {
     } as any;
 
     const result = processCommittedOrderbookSwaps(entityState, [makerBid, makerAsk, takerSell]);
-    const takerResolve = result.mempoolOps.find(
+    const takerResolve = result.accountTxs.find(
       item =>
         item.accountId === 'taker-account' &&
         item.tx.type === 'swap_resolve' &&
@@ -957,7 +957,7 @@ describe('orderbook matching fallback execution mapping', () => {
     } as any;
 
     const result = processCommittedOrderbookSwaps(entityState, [takerOffer]);
-    const makerResolve = result.mempoolOps.find(
+    const makerResolve = result.accountTxs.find(
       item =>
         item.accountId === 'maker-account' &&
         item.tx.type === 'swap_resolve' &&
@@ -1056,7 +1056,7 @@ describe('orderbook matching fallback execution mapping', () => {
     const result = processCommittedOrderbookSwaps(entityState, [hugePriceOffer] as any);
     const book = result.bookUpdates.find(item => item.pairId === '2/5')?.book;
 
-    expect(result.mempoolOps.some((item: any) => item.tx?.type === 'swap_resolve')).toBe(false);
+    expect(result.accountTxs.some((item: any) => item.tx?.type === 'swap_resolve')).toBe(false);
     expect(book).toBeDefined();
     expect(getBookOrder(book!, 'alice:maker-huge-price')?.priceTicks).toBe(hugePriceTicks);
   });
@@ -1134,7 +1134,7 @@ describe('orderbook matching fallback execution mapping', () => {
     };
 
     const result = processCommittedOrderbookSwaps(entityState, [makerOffer, takerOffer]);
-    const takerResolve = result.mempoolOps.find(
+    const takerResolve = result.accountTxs.find(
       item =>
         item.accountId === 'taker-account' &&
         item.tx.type === 'swap_resolve' &&
@@ -1276,7 +1276,7 @@ describe('orderbook matching fallback execution mapping', () => {
     } as any;
 
     const result = processCommittedOrderbookSwaps(entityState, [makerOffer, takerOffer]);
-    const cancelOp = result.mempoolOps.find(
+    const cancelOp = result.accountTxs.find(
       item =>
         item.accountId === 'taker-account' &&
         item.tx.type === 'swap_resolve' &&
@@ -1396,7 +1396,7 @@ describe('orderbook matching fallback execution mapping', () => {
     } as any;
 
     const result = processCommittedOrderbookSwaps(entityState, [incomingBidOffer] as any);
-    const farCancel = result.mempoolOps.find(
+    const farCancel = result.accountTxs.find(
       item =>
         item.accountId === 'far-maker-account' && item.tx.type === 'swap_resolve' && item.tx.data.offerId === 'far-ask',
     );
@@ -1478,29 +1478,29 @@ describe('orderbook matching fallback execution mapping', () => {
     } as any;
 
     const firstPass = processCommittedOrderbookSwaps(entityState, [makerOffer, takerOffer] as any);
-    expect(firstPass.mempoolOps).toHaveLength(1);
-    expect(firstPass.mempoolOps[0]?.accountId).toBe('taker-account');
-    expect(firstPass.mempoolOps[0]?.tx.type).toBe('swap_resolve');
-    expect(firstPass.mempoolOps[0]?.tx.data.offerId).toBe('taker-buy-too-high');
-    expect(firstPass.mempoolOps[0]?.tx.data.cancelRemainder).toBe(true);
+    expect(firstPass.accountTxs).toHaveLength(1);
+    expect(firstPass.accountTxs[0]?.accountId).toBe('taker-account');
+    expect(firstPass.accountTxs[0]?.tx.type).toBe('swap_resolve');
+    expect(firstPass.accountTxs[0]?.tx.data.offerId).toBe('taker-buy-too-high');
+    expect(firstPass.accountTxs[0]?.tx.data.cancelRemainder).toBe(true);
 
-    takerAccount.mempool.push(firstPass.mempoolOps[0]!.tx as AccountTx);
+    takerAccount.mempool.push(firstPass.accountTxs[0]!.tx as AccountTx);
     const secondPass = processCommittedOrderbookSwaps(entityState, [makerOffer, takerOffer] as any);
-    expect(secondPass.mempoolOps).toHaveLength(0);
+    expect(secondPass.accountTxs).toHaveLength(0);
 
     takerAccount.mempool = [];
     takerAccount.pendingFrame = {
       height: 1,
       timestamp: 1,
       jHeight: 0,
-      accountTxs: [firstPass.mempoolOps[0]!.tx as AccountTx],
+      accountTxs: [firstPass.accountTxs[0]!.tx as AccountTx],
       prevFrameHash: '',
       deltas: [],
       stateHash: '',
       byLeft: true,
     };
     const thirdPass = processCommittedOrderbookSwaps(entityState, [makerOffer, takerOffer] as any);
-    expect(thirdPass.mempoolOps).toHaveLength(0);
+    expect(thirdPass.accountTxs).toHaveLength(0);
   });
 
   test('sorts live offers canonically before inserting into the book', () => {
@@ -1627,7 +1627,7 @@ describe('orderbook matching fallback execution mapping', () => {
     ];
 
     const result = processCommittedOrderbookSwaps(entityState, offers as any, { debugRebuildProjectionOnly: true });
-    expect(result.mempoolOps).toHaveLength(0);
+    expect(result.accountTxs).toHaveLength(0);
     expect(result.bookUpdates).toEqual([]);
     expect(result.debugProjectionRejects.map(offer => `${offer.accountId}:${offer.offerId}`)).toEqual(['bob:offer-b']);
     expect(result.debugProjectionRejects[0]?.reason).toBe('post-only-reject:postOnly would cross');
@@ -2149,7 +2149,7 @@ describe('orderbook matching fallback execution mapping', () => {
     } as any;
 
     const result = processCommittedOrderbookSwaps(entityState, [makerOffer, takerOffer] as any);
-    const makerAck = result.mempoolOps.find(
+    const makerAck = result.accountTxs.find(
       op => op.accountId === 'maker-account' && op.tx.type === 'cross_swap_fill_ack',
     );
 
@@ -2422,7 +2422,7 @@ describe('orderbook matching fallback execution mapping', () => {
     const result = processCommittedOrderbookSwaps(entityState, [takerOffer] as any);
 
     expect(result.crossJurisdictionFills).toEqual([]);
-    expect(result.mempoolOps).toEqual([]);
+    expect(result.accountTxs).toEqual([]);
     expect(getBookOrder(book, staleOrderId)).toBeNull();
   });
 
@@ -2567,7 +2567,7 @@ describe('orderbook matching fallback execution mapping', () => {
     const result = processCommittedOrderbookSwaps(entityState, [takerOffer] as any);
 
     expect(result.crossJurisdictionFills).toEqual([]);
-    expect(result.mempoolOps).toEqual([]);
+    expect(result.accountTxs).toEqual([]);
     expect(getBookOrder(book, staleOrderId)).toBeNull();
   });
 });

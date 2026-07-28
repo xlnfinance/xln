@@ -464,9 +464,9 @@ export const handleCrossJurisdictionBookOrderRemovedEntityTx = async (
       env,
       options?.storageChanges,
     );
-    return { newState: drafted.newState, outputs: drafted.outputs, mempoolOps: [] };
+    return { newState: drafted.newState, outputs: drafted.outputs, accountTxs: [] };
   }
-  const mempoolOps = hasQueuedCrossSwapAckForEntityState(
+  const accountTxs = hasQueuedCrossSwapAckForEntityState(
     newState,
     entityTx.data.sourceAccountId,
     route.orderId,
@@ -475,7 +475,7 @@ export const handleCrossJurisdictionBookOrderRemovedEntityTx = async (
     tx: buildCrossJurisdictionCancelAck(route.orderId, currentRoute),
   }];
   addMessage(newState, `🌉 Cross-j book removal committed ${route.orderId}`);
-  return { newState, outputs: [], mempoolOps };
+  return { newState, outputs: [], accountTxs };
 };
 
 export const handleRemoveCrossJurisdictionBookOrderEntityTx = (

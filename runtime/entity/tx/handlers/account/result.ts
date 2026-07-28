@@ -5,7 +5,7 @@ import type {
   EntityState,
 } from '../../../../types';
 import type { AccountJClaimNodeChanges } from '../../../../types/account-j-claims';
-import type { MempoolOp } from './orderbook-queue';
+import type { AccountTxTarget } from './orderbook-queue';
 import type {
   SwapCancelEvent,
   SwapCancelRequestEvent,
@@ -16,7 +16,7 @@ import type { CommittedAccountEffects } from './committed-input';
 export interface AccountHandlerResult {
   newState: EntityState;
   outputs: EntityInput[];
-  mempoolOps: MempoolOp[];
+  accountTxs: AccountTxTarget[];
   swapOffersCreated: SwapOfferEvent[];
   swapCancelRequests: SwapCancelRequestEvent[];
   swapOffersCancelled: SwapCancelEvent[];
@@ -40,7 +40,7 @@ export const buildAccountHandlerResult = (
 ): AccountHandlerResult => ({
   newState,
   outputs: effects.outputs,
-  mempoolOps: effects.mempoolOps,
+  accountTxs: effects.accountTxs,
   swapOffersCreated: effects.swapOffersCreated,
   swapCancelRequests: effects.swapCancelRequests,
   swapOffersCancelled: effects.swapOffersCancelled,

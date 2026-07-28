@@ -211,7 +211,7 @@ test('timeout terminal activity is emitted before its HTLC notes are removed', (
     input: { fromEntityId: rightEntity, toEntityId: leftEntity, watchSeed: account.watchSeed },
     accountMachine: account,
     outputs: [],
-    mempoolOps: [],
+    accountTxs: [],
     candidateEffects,
   }, [hashlock]);
 

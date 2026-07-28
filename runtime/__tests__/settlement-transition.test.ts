@@ -612,8 +612,8 @@ describe('atomic settlement Account transition', () => {
 
     expect(result.newState.accounts.get(RIGHT)?.settlementWorkspace).toBeUndefined();
     expect(result.outputs).toEqual([]);
-    expect(result.mempoolOps).toHaveLength(1);
-    expect(result.mempoolOps[0]?.tx).toMatchObject({
+    expect(result.accountTxs).toHaveLength(1);
+    expect(result.accountTxs[0]?.tx).toMatchObject({
       type: 'settle_transition',
       data: { kind: 'upsert', version: 1, executorIsLeft: false },
     });
@@ -686,7 +686,7 @@ describe('atomic settlement Account transition', () => {
     // secondary hashes only after every earlier Account transition drains.
     expect(rightAccount.settlementWorkspace?.rightHanko).toBeUndefined();
     expect(followup.outputs).toEqual([]);
-    expect(followup.mempoolOps).toEqual([]);
+    expect(followup.accountTxs).toEqual([]);
     expect(followup.hashesToSign).toEqual([]);
     expect(rightState.deferredAccountProposals?.get(LEFT))
       .toBe(rightAccount.settlementWorkspace?.workspaceHash);
@@ -1110,9 +1110,9 @@ describe('atomic settlement Account transition', () => {
       env,
     );
 
-    expect(staleFollowup).toEqual({ outputs: [], mempoolOps: [], hashesToSign: [] });
+    expect(staleFollowup).toEqual({ outputs: [], accountTxs: [], hashesToSign: [] });
     expect(finalFollowup.outputs).toEqual([]);
-    expect(finalFollowup.mempoolOps).toEqual([]);
+    expect(finalFollowup.accountTxs).toEqual([]);
     expect(finalFollowup.hashesToSign).toEqual([]);
     expect(rightState.deferredAccountProposals?.get(LEFT))
       .toBe(account.settlementWorkspace?.workspaceHash);

@@ -21,7 +21,7 @@ import {
 import {
   hasQueuedCrossSwapAckForEntityState,
   queueUniqueSwapResolveForEntityState,
-  type MempoolOp,
+  type AccountTxTarget,
 } from './orderbook-queue';
 import type {
   MatchResult,
@@ -32,7 +32,7 @@ const orderbookLog = createStructuredLogger('orderbook');
 
 export interface RoutedOrderbookCancels {
   localBookCancels: SwapCancelRequestEvent[];
-  mempoolOps: MempoolOp[];
+  accountTxs: AccountTxTarget[];
   outputs: EntityInput[];
 }
 
@@ -51,7 +51,7 @@ export function routeRemoteCrossJurisdictionBookCancels(
   cancels: SwapCancelRequestEvent[],
 ): RoutedOrderbookCancels {
   const localBookCancels: SwapCancelRequestEvent[] = [];
-  const mempoolOps: MempoolOp[] = [];
+  const accountTxs: AccountTxTarget[] = [];
   const outputs: EntityInput[] = [];
   const currentEntityId = normalizeEntityRef(sourceHubState.entityId);
 
@@ -107,13 +107,13 @@ export function routeRemoteCrossJurisdictionBookCancels(
     }], bookOwnerSignerId));
   }
 
-  return { localBookCancels, mempoolOps, outputs };
+  return { localBookCancels, accountTxs, outputs };
 }
 
 export function collectCommittedCrossJurisdictionCancelAcks(
   sourceHubState: EntityState,
-): MempoolOp[] {
-  const mempoolOps: MempoolOp[] = [];
+): AccountTxTarget[] {
+  const accountTxs: AccountTxTarget[] = [];
   const currentEntityId = normalizeEntityRef(sourceHubState.entityId);
   const admissions = Array.from(sourceHubState.crossJurisdictionBookAdmissions?.entries() ?? [])
     .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0);
@@ -134,12 +134,12 @@ export function collectCommittedCrossJurisdictionCancelAcks(
     if (hasQueuedCrossSwapAckForEntityState(sourceHubState, pending.sourceAccountId, admission.orderId)) {
       continue;
     }
-    mempoolOps.push({
+    accountTxs.push({
       accountId: pending.sourceAccountId,
       tx: buildCrossJurisdictionCancelAck(admission.orderId, route),
     });
   }
-  return mempoolOps;
+  return accountTxs;
 }
 
 /**
@@ -151,13 +151,13 @@ export function processOrderbookCancels(
   hubState: EntityState,
   cancels: SwapCancelRequestEvent[],
 ): MatchResult {
-  const mempoolOps: MempoolOp[] = [];
+  const accountTxs: AccountTxTarget[] = [];
   const crossJurisdictionFills: CrossJurisdictionFillInstruction[] = [];
   const bookUpdates: { pairId: string; book: BookState }[] = [];
   const debugProjectionRejects: MatchResult['debugProjectionRejects'] = [];
   const queuedSwapResolutions = new Set<string>();
   const ext = hubState.orderbookExt as OrderbookExtState | undefined;
-  if (!ext) return { mempoolOps, crossJurisdictionFills, bookUpdates, debugProjectionRejects };
+  if (!ext) return { accountTxs, crossJurisdictionFills, bookUpdates, debugProjectionRejects };
 
   for (const { offerId, accountId } of cancels) {
     const accountMachine = hubState.accounts.get(accountId);
@@ -210,12 +210,12 @@ export function processOrderbookCancels(
         });
         continue;
       }
-      mempoolOps.push({ accountId, tx: buildCrossJurisdictionCancelAck(offerId, offer.crossJurisdiction) });
+      accountTxs.push({ accountId, tx: buildCrossJurisdictionCancelAck(offerId, offer.crossJurisdiction) });
       orderbookLog.debug('crossj.cancel_ack_queued', { offer: shortOrder(offerId, 8), account: shortId(accountId, 8) });
       continue;
     }
 
-    if (queueUniqueSwapResolveForEntityState(mempoolOps, hubState, queuedSwapResolutions, accountId, {
+    if (queueUniqueSwapResolveForEntityState(accountTxs, hubState, queuedSwapResolutions, accountId, {
       offerId,
       fillRatio: 0,
       cancelRemainder: true,
@@ -229,5 +229,5 @@ export function processOrderbookCancels(
     }
   }
 
-  return { mempoolOps, crossJurisdictionFills, bookUpdates, debugProjectionRejects };
+  return { accountTxs, crossJurisdictionFills, bookUpdates, debugProjectionRejects };
 }
