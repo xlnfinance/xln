@@ -168,12 +168,12 @@ const findForbiddenRpcProxyMethod = (bodyText: string): string | null => {
   return null;
 };
 
-export const createOrchestratorProxyHandlers = (deps: OrchestratorProxyDeps) => {
-  const proxyRpc = async (
-    request: Request,
-    upstreamRpcUrl = deps.defaultRpcUrl,
-    operatorAuthorized = false,
-  ): Promise<Response> => {
+const proxyRpc = async (
+  deps: OrchestratorProxyDeps,
+  request: Request,
+  upstreamRpcUrl = deps.defaultRpcUrl,
+  operatorAuthorized = false,
+): Promise<Response> => {
     if (!upstreamRpcUrl) {
       return new Response(
         safeStringify(proxyFailureBody({
@@ -219,9 +219,13 @@ export const createOrchestratorProxyHandlers = (deps: OrchestratorProxyDeps) => 
         { status: 502, headers: CORS_JSON_HEADERS },
       );
     }
-  };
+};
 
-  const proxyHubApi = async (request: Request, endpoint: ProxyHubEndpoint): Promise<Response> => {
+const proxyHubApi = async (
+  deps: OrchestratorProxyDeps,
+  request: Request,
+  endpoint: ProxyHubEndpoint,
+): Promise<Response> => {
     const proxyStartedAt = Date.now();
     let healthPolled = false;
     let healthPollMs = 0;
@@ -292,9 +296,13 @@ export const createOrchestratorProxyHandlers = (deps: OrchestratorProxyDeps) => 
         headers: proxyHeaders(),
       });
     }
-  };
+};
 
-  const proxyEntityHubApi = async (request: Request, endpoint: ProxyEntityHubEndpoint): Promise<Response> => {
+const proxyEntityHubApi = async (
+  deps: OrchestratorProxyDeps,
+  request: Request,
+  endpoint: ProxyEntityHubEndpoint,
+): Promise<Response> => {
     const proxyStartedAt = Date.now();
     let healthPolled = false;
     let healthPollMs = 0;
@@ -370,9 +378,13 @@ export const createOrchestratorProxyHandlers = (deps: OrchestratorProxyDeps) => 
         headers: proxyHeaders(),
       });
     }
-  };
+};
 
-  const proxyAnyHubGet = async (request: Request, endpointWithQuery: string): Promise<Response> => {
+const proxyAnyHubGet = async (
+  deps: OrchestratorProxyDeps,
+  request: Request,
+  endpointWithQuery: string,
+): Promise<Response> => {
     await deps.pollAllHubHealth();
     let parsedEndpoint: URL;
     try {
@@ -425,9 +437,13 @@ export const createOrchestratorProxyHandlers = (deps: OrchestratorProxyDeps) => 
         headers: CORS_JSON_HEADERS,
       });
     }
-  };
+};
 
-  const proxyAnyHubRequest = async (request: Request, endpointWithQuery: string): Promise<Response> => {
+const proxyAnyHubRequest = async (
+  deps: OrchestratorProxyDeps,
+  request: Request,
+  endpointWithQuery: string,
+): Promise<Response> => {
     await deps.pollAllHubHealth();
     const child = deps.getHealthyHub();
     if (!child) {
@@ -469,13 +485,19 @@ export const createOrchestratorProxyHandlers = (deps: OrchestratorProxyDeps) => 
         headers: CORS_JSON_HEADERS,
       });
     }
-  };
+};
 
+export const createOrchestratorProxyHandlers = (deps: OrchestratorProxyDeps) => {
   return {
-    proxyAnyHubGet,
-    proxyAnyHubRequest,
-    proxyEntityHubApi,
-    proxyHubApi,
-    proxyRpc,
+    proxyAnyHubGet: (request: Request, endpoint: string) =>
+      proxyAnyHubGet(deps, request, endpoint),
+    proxyAnyHubRequest: (request: Request, endpoint: string) =>
+      proxyAnyHubRequest(deps, request, endpoint),
+    proxyEntityHubApi: (request: Request, endpoint: ProxyEntityHubEndpoint) =>
+      proxyEntityHubApi(deps, request, endpoint),
+    proxyHubApi: (request: Request, endpoint: ProxyHubEndpoint) =>
+      proxyHubApi(deps, request, endpoint),
+    proxyRpc: (request: Request, upstreamRpcUrl?: string, operatorAuthorized?: boolean) =>
+      proxyRpc(deps, request, upstreamRpcUrl, operatorAuthorized),
   };
 };

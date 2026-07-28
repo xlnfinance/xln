@@ -42,7 +42,6 @@ const COORDINATOR_DEBT: Readonly<Record<string, number>> = {
   "runtime/orchestrator/orchestrator.ts::fetch": 388,
   "runtime/orchestrator/orchestrator.ts::runReset": 156,
   "runtime/orchestrator/orchestrator.ts::spawnMarketMaker": 159,
-  "runtime/orchestrator/proxy.ts::createOrchestratorProxyHandlers": 311,
   "runtime/persistence/entity-queries.ts::createPersistenceEntityQueries": 169,
   "runtime/persistence/history-queries.ts::createPersistenceHistoryQueries": 196,
   "runtime/persistence/runtime-storage.ts::createRuntimeStorageApi": 1070,
