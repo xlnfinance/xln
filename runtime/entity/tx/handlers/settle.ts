@@ -350,6 +350,215 @@ export async function handleSettleApprove(
 /**
  * settle_execute: Recompile from ops (guard 4), assert match, submit to jBatch
  */
+const assertCompiledSettlementDiffs = (
+  workspace: SettlementWorkspace,
+  diffs: readonly SettlementDiff[],
+): void => {
+  const cached = workspace.compiledDiffs;
+  if (!cached) return;
+  if (diffs.length !== cached.length) {
+    throw new Error(`Recompiled diffs length mismatch: ${diffs.length} vs ${cached.length}`);
+  }
+  for (let index = 0; index < diffs.length; index += 1) {
+    const next = diffs[index];
+    const previous = cached[index];
+    if (!next || !previous) throw new Error(`Recompiled diff missing at index ${index}`);
+    if (
+      next.tokenId !== previous.tokenId ||
+      next.leftDiff !== previous.leftDiff ||
+      next.rightDiff !== previous.rightDiff ||
+      next.collateralDiff !== previous.collateralDiff ||
+      next.ondeltaDiff !== previous.ondeltaDiff
+    ) {
+      throw new Error(`Recompiled diff mismatch at index ${index}`);
+    }
+  }
+};
+
+const prepareSettlementExecution = (
+  env: Env,
+  entityState: EntityState,
+  account: AccountMachine,
+  workspace: SettlementWorkspace,
+) => {
+  const { diffs, forgiveTokenIds } = compileOps(
+    workspace.ops,
+    workspace.lastModifiedByLeft,
+  );
+  assertCompiledSettlementDiffs(workspace, diffs);
+  const signedNonce = workspace.nonceAtSign;
+  if (
+    typeof signedNonce !== 'number' ||
+    !Number.isSafeInteger(signedNonce) ||
+    signedNonce < 1
+  ) {
+    throw new Error(`SETTLEMENT_SIGNED_NONCE_MISSING:${String(signedNonce)}`);
+  }
+  if (!workspace.settlementHash) throw new Error('SETTLEMENT_SIGNED_HASH_MISSING');
+  const jurisdiction = entityState.config.jurisdiction;
+  if (!jurisdiction?.depositoryAddress || !jurisdiction.entityProviderAddress) {
+    throw new Error('SETTLEMENT_JURISDICTION_MISSING');
+  }
+  const expectedSettlementHash = createSettlementHashWithNonce(
+    account,
+    diffs,
+    forgiveTokenIds,
+    {
+      chainId: Number(jurisdiction.chainId),
+      depositoryAddress: jurisdiction.depositoryAddress,
+    },
+    signedNonce,
+  );
+  if (expectedSettlementHash.toLowerCase() !== workspace.settlementHash.toLowerCase()) {
+    throw new Error(
+      `SETTLEMENT_SIGNED_HASH_MISMATCH:${workspace.settlementHash}:` +
+      expectedSettlementHash,
+    );
+  }
+  if (workspace.status !== 'ready_to_submit') {
+    throw new Error(`SETTLEMENT_NOT_FULLY_SEALED:${workspace.status}`);
+  }
+  const postProof = workspace.postSettlementDisputeProof;
+  if (!postProof || postProof.nonce !== signedNonce + 1) {
+    throw new Error(
+      `POST_SETTLEMENT_PROOF_NONCE_MISMATCH:${String(postProof?.nonce)}:` +
+      `${signedNonce + 1}`,
+    );
+  }
+  const expectedPostProof = buildPostSettlementDisputeProof(
+    env,
+    entityState,
+    account,
+    signedNonce,
+    diffs,
+    forgiveTokenIds,
+  );
+  if (
+    postProof.proofBodyHash.toLowerCase() !== expectedPostProof.proofBodyHash.toLowerCase() ||
+    postProof.disputeHash.toLowerCase() !== expectedPostProof.disputeHash.toLowerCase()
+  ) {
+    throw new Error('POST_SETTLEMENT_PROOF_HASH_MISMATCH');
+  }
+  if (!postProof.leftHanko || !postProof.rightHanko) {
+    throw new Error('POST_SETTLEMENT_PROOF_HANKO_MISSING');
+  }
+  return {
+    diffs,
+    forgiveTokenIds,
+    signedNonce,
+    expectedSettlementHash,
+    expectedPostProof,
+    postProof,
+    jurisdiction,
+  };
+};
+
+type PreparedSettlementExecution = ReturnType<typeof prepareSettlementExecution>;
+
+const verifySettlementHanko = async (
+  env: Env,
+  entityState: EntityState,
+  hanko: string,
+  hash: string,
+  entityId: string,
+  context: string,
+): Promise<void> => {
+  const boardHash = resolveObserverCertifiedBoardHash(
+    entityState,
+    getCertifiedBoardNodeStore(env),
+    entityId,
+  );
+  const verified = await verifyHankoForHash(
+    hanko as import('../../../types').HankoString,
+    hash,
+    entityId,
+    env,
+    boardHash ? { registeredBoardHash: boardHash } : undefined,
+  );
+  if (!verified.valid || verified.entityId?.toLowerCase() !== entityId.toLowerCase()) {
+    throw new Error(`${context}_HANKO_INVALID`);
+  }
+};
+
+const verifySettlementExecutionHankos = async (
+  env: Env,
+  entityState: EntityState,
+  account: AccountMachine,
+  counterpartyEntityId: string,
+  counterpartyHanko: string,
+  prepared: PreparedSettlementExecution,
+): Promise<void> => {
+  await verifySettlementHanko(
+    env,
+    entityState,
+    counterpartyHanko,
+    prepared.expectedSettlementHash,
+    counterpartyEntityId,
+    'SETTLEMENT_NONEXECUTOR',
+  );
+  await verifySettlementHanko(
+    env,
+    entityState,
+    prepared.postProof.leftHanko!,
+    prepared.expectedPostProof.disputeHash,
+    account.leftEntity,
+    'POST_SETTLEMENT_LEFT',
+  );
+  await verifySettlementHanko(
+    env,
+    entityState,
+    prepared.postProof.rightHanko!,
+    prepared.expectedPostProof.disputeHash,
+    account.rightEntity,
+    'POST_SETTLEMENT_RIGHT',
+  );
+};
+
+const queueSettlementExecution = (
+  state: EntityState,
+  counterpartyEntityId: string,
+  counterpartyHanko: string,
+  disableC2RShortcut: boolean,
+  prepared: PreparedSettlementExecution,
+): boolean => {
+  state.jBatchState ??= initJBatch();
+  // A nonce-bound settlement cannot wait behind another on-chain batch:
+  // finalizing that batch can invalidate every signature prepared here.
+  if (state.jBatchState.sentBatch) {
+    addMessage(state, '⏭️ settle_execute skipped: jBatch sentBatch pending');
+    settleLog.warn('execute.skip_sent_batch_pending', {
+      counterparty: shortId(counterpartyEntityId),
+    });
+    return false;
+  }
+  const entityIsLeft = isLeftEntity(state.entityId, counterpartyEntityId);
+  const leftEntity = entityIsLeft ? state.entityId : counterpartyEntityId;
+  const rightEntity = entityIsLeft ? counterpartyEntityId : state.entityId;
+  try {
+    batchAddSettlement(
+      state.jBatchState,
+      leftEntity,
+      rightEntity,
+      prepared.diffs,
+      prepared.forgiveTokenIds,
+      counterpartyHanko,
+      prepared.signedNonce,
+      state.entityId,
+      disableC2RShortcut,
+    );
+  } catch (error) {
+    if (!(error instanceof Error) || !error.message.includes('pending broadcast')) {
+      throw error;
+    }
+    addMessage(state, '⏭️ settle_execute skipped: jBatch sentBatch pending');
+    settleLog.warn('execute.skip_pending_broadcast', {
+      counterparty: shortId(counterpartyEntityId),
+    });
+    return false;
+  }
+  return true;
+};
+
 export async function handleSettleExecute(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'settle_execute' }>,
@@ -383,7 +592,6 @@ export async function handleSettleExecute(
     return { newState, outputs, mempoolOps };
   }
 
-  // Need counterparty's hanko for on-chain validation
   const { iAmLeft } = getAccountPerspective(account, entityState.entityId);
   if (workspace.executorIsLeft !== iAmLeft) {
     throw new Error(`SETTLEMENT_EXECUTOR_MISMATCH:expected=${workspace.executorIsLeft ? 'left' : 'right'}`);
@@ -394,140 +602,32 @@ export async function handleSettleExecute(
     settleLog.warn('execute.skip_missing_counterparty_hanko', { counterparty: shortId(counterpartyEntityId), iAmLeft });
     return { newState, outputs, mempoolOps };
   }
-
-  // Guard 4: Recompile from ops and assert match against cached
-  const { diffs, forgiveTokenIds } = compileOps(workspace.ops, workspace.lastModifiedByLeft);
-  if (workspace.compiledDiffs) {
-    const cached = workspace.compiledDiffs;
-    if (diffs.length !== cached.length) {
-      throw new Error(`Recompiled diffs length mismatch: ${diffs.length} vs ${cached.length}`);
-    }
-    for (let i = 0; i < diffs.length; i++) {
-      const nextDiff = diffs[i];
-      const cachedDiff = cached[i];
-      if (!nextDiff || !cachedDiff) {
-        throw new Error(`Recompiled diff missing at index ${i}`);
-      }
-      if (nextDiff.tokenId !== cachedDiff.tokenId ||
-          nextDiff.leftDiff !== cachedDiff.leftDiff ||
-          nextDiff.rightDiff !== cachedDiff.rightDiff ||
-          nextDiff.collateralDiff !== cachedDiff.collateralDiff ||
-          nextDiff.ondeltaDiff !== cachedDiff.ondeltaDiff) {
-        throw new Error(`Recompiled diff mismatch at index ${i}`);
-      }
-    }
-  }
-
-  const signedNonce = workspace.nonceAtSign;
-  if (typeof signedNonce !== 'number' || !Number.isSafeInteger(signedNonce) || signedNonce < 1) {
-    throw new Error(`SETTLEMENT_SIGNED_NONCE_MISSING:${String(signedNonce)}`);
-  }
-  if (!workspace.settlementHash) throw new Error('SETTLEMENT_SIGNED_HASH_MISSING');
-  const jurisdiction = entityState.config.jurisdiction;
-  if (!jurisdiction?.depositoryAddress || !jurisdiction.entityProviderAddress) {
-    throw new Error('SETTLEMENT_JURISDICTION_MISSING');
-  }
-  const expectedSettlementHash = createSettlementHashWithNonce(
-    account,
-    diffs,
-    forgiveTokenIds,
-    { chainId: Number(jurisdiction.chainId), depositoryAddress: jurisdiction.depositoryAddress },
-    signedNonce,
-  );
-  if (expectedSettlementHash.toLowerCase() !== workspace.settlementHash.toLowerCase()) {
-    throw new Error(`SETTLEMENT_SIGNED_HASH_MISMATCH:${workspace.settlementHash}:${expectedSettlementHash}`);
-  }
-  if (workspace.status !== 'ready_to_submit') {
-    throw new Error(`SETTLEMENT_NOT_FULLY_SEALED:${workspace.status}`);
-  }
-  const postProof = workspace.postSettlementDisputeProof;
-  if (!postProof || postProof.nonce !== signedNonce + 1) {
-    throw new Error(`POST_SETTLEMENT_PROOF_NONCE_MISMATCH:${String(postProof?.nonce)}:${signedNonce + 1}`);
-  }
-  const expectedPostProof = buildPostSettlementDisputeProof(
+  const prepared = prepareSettlementExecution(
     env,
     entityState,
     account,
-    signedNonce,
-    diffs,
-    forgiveTokenIds,
+    workspace,
+  );
+  await verifySettlementExecutionHankos(
+    env,
+    entityState,
+    account,
+    counterpartyEntityId,
+    counterpartyHanko,
+    prepared,
   );
   if (
-    postProof.proofBodyHash.toLowerCase() !== expectedPostProof.proofBodyHash.toLowerCase() ||
-    postProof.disputeHash.toLowerCase() !== expectedPostProof.disputeHash.toLowerCase()
-  ) {
-    throw new Error('POST_SETTLEMENT_PROOF_HASH_MISMATCH');
-  }
-  if (!postProof.leftHanko || !postProof.rightHanko) {
-    throw new Error('POST_SETTLEMENT_PROOF_HANKO_MISSING');
-  }
-
-  const boardStore = getCertifiedBoardNodeStore(env);
-  const verifyExactHanko = async (hanko: string, hash: string, entityId: string, context: string) => {
-    const boardHash = resolveObserverCertifiedBoardHash(entityState, boardStore, entityId);
-    const verified = await verifyHankoForHash(
-      hanko as import('../../../types').HankoString,
-      hash,
-      entityId,
-      env,
-      boardHash ? { registeredBoardHash: boardHash } : undefined,
-    );
-    if (!verified.valid || verified.entityId?.toLowerCase() !== entityId.toLowerCase()) {
-      throw new Error(`${context}_HANKO_INVALID`);
-    }
-  };
-  await verifyExactHanko(counterpartyHanko, expectedSettlementHash, counterpartyEntityId, 'SETTLEMENT_NONEXECUTOR');
-  await verifyExactHanko(postProof.leftHanko, expectedPostProof.disputeHash, account.leftEntity, 'POST_SETTLEMENT_LEFT');
-  await verifyExactHanko(postProof.rightHanko, expectedPostProof.disputeHash, account.rightEntity, 'POST_SETTLEMENT_RIGHT');
-
-  // Initialize jBatch only after every signed invariant is proven. A rejected
-  // executor/hash/nonce must leave no empty or partially-filled J batch behind.
-  if (!newState.jBatchState) {
-    newState.jBatchState = initJBatch();
-  }
-
-  // Settlement proofs are nonce-bound to the current bilateral account state.
-  // Do not queue them behind an in-flight sentBatch: by the time that batch finalizes,
-  // these proofs can already be stale and the next processBatch will revert on-chain.
-  if (newState.jBatchState.sentBatch) {
-    addMessage(newState, `⏭️ settle_execute skipped: jBatch sentBatch pending`);
-    settleLog.warn('execute.skip_sent_batch_pending', { counterparty: shortId(counterpartyEntityId) });
-    return { newState, outputs, mempoolOps };
-  }
-
-  const isLeft = isLeftEntity(entityState.entityId, counterpartyEntityId);
-  const leftEntity = isLeft ? entityState.entityId : counterpartyEntityId;
-  const rightEntity = isLeft ? counterpartyEntityId : entityState.entityId;
-
-  if (!jurisdiction?.entityProviderAddress) {
-    addMessage(newState, '⏭️ settle_execute skipped: no entityProvider configured');
-    settleLog.warn('execute.skip_entity_provider_missing', { jurisdiction: jurisdiction?.name ?? 'unknown' });
-    return { newState, outputs, mempoolOps };
-  }
-
-  try {
-    batchAddSettlement(
-      newState.jBatchState,
-      leftEntity,
-      rightEntity,
-      diffs,
-      forgiveTokenIds,
-      counterpartyHanko!,
-      signedNonce,
-      entityState.entityId,
+    !queueSettlementExecution(
+      newState,
+      counterpartyEntityId,
+      counterpartyHanko,
       disableC2RShortcut,
-    );
-  } catch (error) {
-    const msg = (error as Error)?.message || '';
-    if (msg.includes('pending broadcast')) {
-      addMessage(newState, `⏭️ settle_execute skipped: jBatch sentBatch pending`);
-      settleLog.warn('execute.skip_pending_broadcast', { counterparty: shortId(counterpartyEntityId) });
-      return { newState, outputs, mempoolOps };
-    }
-    throw error;
+      prepared,
+    )
+  ) {
+    return { newState, outputs, mempoolOps };
   }
-
-  settleLog.debug('execute.j_batch_added', { diffs: diffs.length });
+  settleLog.debug('execute.j_batch_added', { diffs: prepared.diffs.length });
 
   mempoolOps.push({
     accountId: counterpartyEntityId,
@@ -540,7 +640,10 @@ export async function handleSettleExecute(
       },
     },
   });
-  addMessage(newState, `✅ Settlement submission queued (${diffs.length} diffs) - use j_broadcast to commit`);
+  addMessage(
+    newState,
+    `✅ Settlement submission queued (${prepared.diffs.length} diffs) - use j_broadcast to commit`,
+  );
 
   return { newState, outputs, mempoolOps };
 }

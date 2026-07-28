@@ -254,39 +254,45 @@ const resolveSettlementSealBoardAuthority = async (
   return certifiedBoardHash;
 };
 
-const applySettlementSeal = async (
+const assertSettlementSealNonce = (
+  draft: AccountMachine,
+  workspace: SettlementWorkspace,
+  settlementNonce: number,
+): void => {
+  const minimumSafeNonce = getMinimumSafeSettlementNonce(draft);
+  if (workspace.nonceAtSign !== undefined) {
+    if (workspace.nonceAtSign !== settlementNonce) {
+      throw new Error(
+        `SETTLEMENT_SEAL_NONCE_MISMATCH:${workspace.nonceAtSign}:${settlementNonce}`,
+      );
+    }
+    return;
+  }
+  // A bilateral seal must use the exact locally derived nonce. Tolerance here
+  // would turn a replica/catch-up bug into two valid on-chain authorizations.
+  if (settlementNonce !== minimumSafeNonce) {
+    throw new Error(
+      `SETTLEMENT_SEAL_NONCE_MISMATCH:${settlementNonce}:${minimumSafeNonce}` +
+      `:j=${Number(draft.jNonce ?? 0)}` +
+      `:next=${Number(draft.proofHeader.nextProofNonce ?? 0)}` +
+      `:local=${Number(draft.currentDisputeProofNonce ?? 0)}` +
+      `:peer=${Number(draft.counterpartyDisputeProofNonce ?? 0)}`,
+    );
+  }
+};
+
+const prepareSettlementSeal = (
   draft: AccountMachine,
   transition: Extract<SettleTransitionTx['data'], { kind: 'seal' }>,
-  byLeft: boolean,
-  timestamp: number,
-  env: Env | undefined,
-  registeredBoardHash?: string,
-): Promise<void> => {
+  env: Env,
+) => {
   const workspace = assertCurrentWorkspace(draft, transition.version, transition.workspaceHash);
   if (workspace.status === 'submitted') throw new Error('SETTLEMENT_SEAL_SUBMITTED_FORBIDDEN');
-  if (!env) throw new Error('SETTLEMENT_SEAL_ENV_MISSING');
-
   const settlementNonce = assertSettlementNonce(
     transition.settlementNonce,
     'SETTLEMENT_SEAL_NONCE_INVALID',
   );
-  const minimumSafeNonce = getMinimumSafeSettlementNonce(draft);
-  if (workspace.nonceAtSign === undefined) {
-    // A seal is bilateral consensus data. A one-slot tolerance would turn a
-    // replica/catch-up bug into two valid on-chain authorizations, so accept
-    // only the locally re-derived exact nonce and fail closed on divergence.
-    if (settlementNonce !== minimumSafeNonce) {
-      throw new Error(
-        `SETTLEMENT_SEAL_NONCE_MISMATCH:${settlementNonce}:${minimumSafeNonce}` +
-        `:j=${Number(draft.jNonce ?? 0)}` +
-        `:next=${Number(draft.proofHeader.nextProofNonce ?? 0)}` +
-        `:local=${Number(draft.currentDisputeProofNonce ?? 0)}` +
-        `:peer=${Number(draft.counterpartyDisputeProofNonce ?? 0)}`,
-      );
-    }
-  } else if (workspace.nonceAtSign !== settlementNonce) {
-    throw new Error(`SETTLEMENT_SEAL_NONCE_MISMATCH:${workspace.nonceAtSign}:${settlementNonce}`);
-  }
+  assertSettlementSealNonce(draft, workspace, settlementNonce);
 
   const domain = getAccountStateDomain(draft);
   const { diffs, forgiveTokenIds } = compileOps(workspace.ops, workspace.lastModifiedByLeft);
@@ -318,8 +324,11 @@ const applySettlementSeal = async (
   if (postNonce !== settlementNonce + 1) {
     throw new Error(`POST_SETTLEMENT_PROOF_NONCE_MISMATCH:${postNonce}:${settlementNonce + 1}`);
   }
-  const projectedPostSettlement = projectAccountAfterSettlement(draft, diffs, forgiveTokenIds);
-  if (!env) throw new Error('SETTLEMENT_PROOF_ENV_REQUIRED');
+  const projectedPostSettlement = projectAccountAfterSettlement(
+    draft,
+    diffs,
+    forgiveTokenIds,
+  );
   const { proofBodyHash, proofBodyStruct } = buildAccountProofBodyFromEnv(env, projectedPostSettlement);
   if (transition.postProof.proofBodyHash.toLowerCase() !== proofBodyHash.toLowerCase()) {
     throw new Error(
@@ -348,7 +357,31 @@ const applySettlementSeal = async (
   ) {
     throw new Error('POST_SETTLEMENT_PROOF_PIN_MISMATCH');
   }
+  return {
+    workspace,
+    settlementNonce,
+    diffs,
+    forgiveTokenIds,
+    proofBodyHash,
+    proofBodyStruct,
+    postNonce,
+    projectedPostSettlement,
+    expectedSettlementHash,
+    expectedDisputeHash,
+    pinnedPostProof,
+  };
+};
 
+type PreparedSettlementSeal = ReturnType<typeof prepareSettlementSeal>;
+
+const verifySettlementSealHankos = async (
+  draft: AccountMachine,
+  transition: Extract<SettleTransitionTx['data'], { kind: 'seal' }>,
+  byLeft: boolean,
+  env: Env,
+  prepared: PreparedSettlementSeal,
+  registeredBoardHash?: string,
+): Promise<{ postHanko: string; settlementHanko?: string }> => {
   const sourceEntity = byLeft ? draft.leftEntity : draft.rightEntity;
   const sealBoardHash = await resolveSettlementSealBoardAuthority(
     env,
@@ -361,7 +394,7 @@ const applySettlementSeal = async (
   );
   const verifiedPost = await verifyHankoForHash(
     postHanko,
-    expectedDisputeHash,
+    prepared.expectedDisputeHash,
     sourceEntity,
     env,
     sealBoardHash ? { registeredBoardHash: sealBoardHash } : undefined,
@@ -370,7 +403,7 @@ const applySettlementSeal = async (
     throw new Error('POST_SETTLEMENT_PROOF_HANKO_INVALID');
   }
 
-  const sourceIsExecutor = workspace.executorIsLeft === byLeft;
+  const sourceIsExecutor = prepared.workspace.executorIsLeft === byLeft;
   let settlementHanko: string | undefined;
   if (sourceIsExecutor) {
     if (transition.settlementHanko !== undefined) {
@@ -383,7 +416,7 @@ const applySettlementSeal = async (
     );
     const verifiedSettlement = await verifyHankoForHash(
       settlementHanko,
-      expectedSettlementHash,
+      prepared.expectedSettlementHash,
       sourceEntity,
       env,
       sealBoardHash ? { registeredBoardHash: sealBoardHash } : undefined,
@@ -392,8 +425,33 @@ const applySettlementSeal = async (
       throw new Error('SETTLEMENT_NONEXECUTOR_HANKO_INVALID');
     }
   }
+  return { postHanko, ...(settlementHanko ? { settlementHanko } : {}) };
+};
 
-  const sourcePostHanko = byLeft ? pinnedPostProof?.leftHanko : pinnedPostProof?.rightHanko;
+const commitSettlementSeal = (
+  draft: AccountMachine,
+  byLeft: boolean,
+  timestamp: number,
+  prepared: PreparedSettlementSeal,
+  verified: { postHanko: string; settlementHanko?: string },
+): void => {
+  const {
+    workspace,
+    settlementNonce,
+    diffs,
+    forgiveTokenIds,
+    proofBodyHash,
+    proofBodyStruct,
+    postNonce,
+    projectedPostSettlement,
+    expectedSettlementHash,
+    expectedDisputeHash,
+    pinnedPostProof,
+  } = prepared;
+  const sourcePostHanko = byLeft
+    ? pinnedPostProof?.leftHanko
+    : pinnedPostProof?.rightHanko;
+  const { postHanko, settlementHanko } = verified;
   assertSameOptionalHanko(sourcePostHanko, postHanko, 'POST_SETTLEMENT_PROOF_EQUIVOCATION');
   const sourceSettlementHanko = byLeft ? workspace.leftHanko : workspace.rightHanko;
   if (settlementHanko) {
@@ -437,6 +495,29 @@ const applySettlementSeal = async (
       proofBodyStruct,
     ),
   );
+};
+
+const applySettlementSeal = async (
+  draft: AccountMachine,
+  transition: Extract<SettleTransitionTx['data'], { kind: 'seal' }>,
+  byLeft: boolean,
+  timestamp: number,
+  env: Env | undefined,
+  registeredBoardHash?: string,
+): Promise<void> => {
+  if (!env) throw new Error('SETTLEMENT_SEAL_ENV_MISSING');
+  const prepared = prepareSettlementSeal(draft, transition, env);
+  const verified = await verifySettlementSealHankos(
+    draft,
+    transition,
+    byLeft,
+    env,
+    prepared,
+    registeredBoardHash,
+  );
+  // All hashes and both authority domains are proven before the first write.
+  // This ordering is the Account-level atomicity boundary for settlement seals.
+  commitSettlementSeal(draft, byLeft, timestamp, prepared, verified);
 };
 
 const buildUpsertWorkspace = (
