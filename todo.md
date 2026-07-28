@@ -241,7 +241,13 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   Account frames, evidence, and stream indexes in one atomic LevelDB batch so
   no child history becomes visible before its owning Runtime frame is durable.
   Keep only latest committed R/E/A state plus one necessary in-flight candidate
-  in RAM.
+  in RAM. Owner clarification: an operator reset creates a new network/genesis,
+  not a new epoch of the existing network. Epoch rotation is a separate local
+  history-compaction mechanism for reducing Hub storage weight; it must
+  preserve network identity and continuous certified Entity/Account chains.
+  **Done:** Runtime retention now removes only Runtime Activity and reverse
+  runtime-height indexes. It no longer deletes canonical Entity/Account frame
+  bodies; a real LevelDB regression pins this ownership boundary.
 - [ ] Make long-term history retention independent per replica. Add certified
   checkpoints containing machine id, height, state root, previous checkpoint
   hash, and certificate; permit each Entity validator/Account peer to prune
@@ -251,7 +257,10 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   later frames, without consulting a Runtime epoch or accepting an
   unverifiable state snapshot. Activity indexes remain disposable and
   rebuildable; signed dispute/evidence records use an explicit longer
-  retention class.
+  retention class. Retain history forever by default. Pruning is an explicit
+  local opt-in and requires a verified checkpoint before any frame body is
+  removed. The user-facing Activity stream contains committed facts only;
+  rejected/quarantined inputs belong to a separate Operations/Debug journal.
 - [ ] Prove and fix the likely unilateral rebalance consensus wedge first.
   Reproduce bilateral request → reverse payment/self-pay → hub crontab and
   assert equal Account roots and pending state on both peers. Crontab must

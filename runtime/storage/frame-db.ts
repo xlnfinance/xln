@@ -1,7 +1,7 @@
 import type { EntityTx, FrameLogEntry, JInput, RuntimeFrameDbRecord, RuntimeInput } from '../types';
 import { cloneIsolatedEntityTxs } from '../protocol/runtime-input-clone';
 import { decodeValidatedBuffer, encodeBuffer, writeBatch } from './codec';
-import { deleteKeyRange, deleteKeys, iterateKeys, readRawOrNull } from './level';
+import { deleteKeyRange, iterateKeys, readRawOrNull } from './level';
 import {
   FRAME_DB_ACCOUNT_FRAME_BY_RUNTIME,
   FRAME_DB_ENTITY_FRAME_BY_RUNTIME,
@@ -20,9 +20,7 @@ import {
   keyFrameDbRuntimeActivity,
   normalizeEntityId,
   parseFrameDbAccountFrameKey,
-  parseFrameDbAccountFrameRuntimeIndexKey,
   parseFrameDbEntityFrameKey,
-  parseFrameDbEntityFrameRuntimeIndexKey,
 } from './keys';
 import {
   validateFrameDbHeadValue,
@@ -258,45 +256,34 @@ const pruneFrameDbBeforeRuntimeHeight = async (
   removedBytes += runtimeActivityPruned.removedBytes;
   removedKeys += runtimeActivityPruned.removedKeys;
 
-  const accountFrameKeysByHex = new Map<string, Buffer>();
-  for await (const key of iterateKeys(db, {
+  // Runtime retention owns only Runtime activity and its reverse indexes.
+  // Certified Entity/Account frame bodies are independent replica histories:
+  // deleting them because the hosting Runtime compacted would couple child
+  // recovery to an unrelated parent epoch. Their eventual pruning requires a
+  // replica checkpoint and an explicit local archival policy.
+  const accountRuntimeIndexesPruned = await deleteKeyRange(
+    db,
+    {
     gte: keyFrameDbAccountFrameByRuntimePrefix(),
     lt: Buffer.concat([Buffer.from([FRAME_DB_ACCOUNT_FRAME_BY_RUNTIME]), encodeHeight(cutoff + 1)]),
-  })) {
-    accountFrameKeysByHex.set(key.toString('hex'), key);
-    const parsed = parseFrameDbAccountFrameRuntimeIndexKey(key);
-    const primaryKey = keyFrameDbAccountFrame(parsed.entityId, parsed.counterpartyId, parsed.accountHeight);
-    accountFrameKeysByHex.set(primaryKey.toString('hex'), primaryKey);
-    if (accountFrameKeysByHex.size >= 512) {
-      const keysToDelete = Array.from(accountFrameKeysByHex.values());
-      removedBytes += await deleteKeys(db, keysToDelete, onPruneBatch);
-      removedKeys += keysToDelete.length;
-      accountFrameKeysByHex.clear();
-    }
-  }
-  const accountFrameKeysToDelete = Array.from(accountFrameKeysByHex.values());
-  removedBytes += await deleteKeys(db, accountFrameKeysToDelete, onPruneBatch);
-  removedKeys += accountFrameKeysToDelete.length;
+    },
+    () => true,
+    onPruneBatch,
+  );
+  removedBytes += accountRuntimeIndexesPruned.removedBytes;
+  removedKeys += accountRuntimeIndexesPruned.removedKeys;
 
-  const entityFrameKeysByHex = new Map<string, Buffer>();
-  for await (const key of iterateKeys(db, {
-    gte: keyFrameDbEntityFrameByRuntimePrefix(),
-    lt: Buffer.concat([Buffer.from([FRAME_DB_ENTITY_FRAME_BY_RUNTIME]), encodeHeight(cutoff + 1)]),
-  })) {
-    entityFrameKeysByHex.set(key.toString('hex'), key);
-    const parsed = parseFrameDbEntityFrameRuntimeIndexKey(key);
-    const primaryKey = keyFrameDbEntityFrame(parsed.entityId, parsed.entityHeight);
-    entityFrameKeysByHex.set(primaryKey.toString('hex'), primaryKey);
-    if (entityFrameKeysByHex.size >= 512) {
-      const keysToDelete = Array.from(entityFrameKeysByHex.values());
-      removedBytes += await deleteKeys(db, keysToDelete, onPruneBatch);
-      removedKeys += keysToDelete.length;
-      entityFrameKeysByHex.clear();
-    }
-  }
-  const entityFrameKeysToDelete = Array.from(entityFrameKeysByHex.values());
-  removedBytes += await deleteKeys(db, entityFrameKeysToDelete, onPruneBatch);
-  removedKeys += entityFrameKeysToDelete.length;
+  const entityRuntimeIndexesPruned = await deleteKeyRange(
+    db,
+    {
+      gte: keyFrameDbEntityFrameByRuntimePrefix(),
+      lt: Buffer.concat([Buffer.from([FRAME_DB_ENTITY_FRAME_BY_RUNTIME]), encodeHeight(cutoff + 1)]),
+    },
+    () => true,
+    onPruneBatch,
+  );
+  removedBytes += entityRuntimeIndexesPruned.removedBytes;
+  removedKeys += entityRuntimeIndexesPruned.removedKeys;
 
   return { removedBytes, removedKeys };
 };
