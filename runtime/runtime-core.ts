@@ -143,7 +143,10 @@ import {
   createRuntimeProcessProfile,
   type RuntimeProcessProfile,
 } from './runtime/frame/process-profile';
-import { createFrameExecutionState } from './runtime/frame/execution-state';
+import {
+  createFrameExecutionState,
+  type FrameExecutionState,
+} from './runtime/frame/execution-state';
 import { acquireRuntimeFrameWriter } from './runtime/frame/writer-lock';
 import { rollbackUndurableRuntimeFrame } from './runtime/frame/rollback';
 
@@ -1317,6 +1320,106 @@ const openRuntimeFrameCandidate = (
   return { transaction, env, state, mempool, runtimeInput, mempoolQueuedAt, quietRuntimeLogs };
 };
 
+type RuntimeFrameCommitResult = {
+  env: Env;
+  state: RuntimeState;
+  staleWriterStopped: boolean;
+};
+
+const commitRuntimeFrame = async (
+  candidateEnv: Env,
+  liveEnv: Env,
+  frame: FrameExecutionState,
+  profile: RuntimeProcessProfile,
+  options: {
+    frameAdvanced: boolean;
+    frameHeightBeforeTick: number;
+    appliedInput: RuntimeInput | undefined;
+    quietLogs: boolean;
+  },
+): Promise<RuntimeFrameCommitResult> => {
+  if (!frame.transaction) throw new Error('RUNTIME_FRAME_TRANSACTION_MISSING_AT_COMMIT');
+  if (!options.frameAdvanced) {
+    frame.commitDisposition = 'committed';
+    clearPendingAuditEvents(candidateEnv);
+    const env = publishRuntimeFrameTransaction(frame.transaction);
+    return { env, state: ensureRuntimeState(env), staleWriterStopped: false };
+  }
+
+  if (!options.quietLogs) runtimeLog.debug('storage.save.start', { height: candidateEnv.height });
+  try {
+    const outcome = await saveEnvToDB(
+      candidateEnv,
+      options.appliedInput,
+      candidateEnv.pendingNetworkOutputs,
+    );
+    profile.metrics.storageMs = outcome.persistencePerfMs;
+    if (outcome.staleWriterStopped) {
+      frame.rollbackHandled = true;
+      if (!frame.rollbackUndurable) throw new Error('RUNTIME_FRAME_ROLLBACK_MISSING');
+      const rollbackError = await frame.rollbackUndurable(new Error('STALE_RUNTIME_WRITER_STOPPED'), {
+        quarantine: false,
+        requeue: false,
+      });
+      const state = ensureRuntimeState(liveEnv);
+      transitionRuntimeLifecycle(state, 'halted');
+      state.fatalDebugPayload = {
+        message:
+          `STALE_RUNTIME_WRITER_STOPPED: frame=${options.frameHeightBeforeTick + 1} ` +
+          `runtime=${String(liveEnv.runtimeId || '').slice(0, 12)}`,
+        height: Math.max(0, liveEnv.height),
+        timestamp: Math.max(0, liveEnv.timestamp),
+      };
+      state.stopLoop?.();
+      profile.outcome = 'stale-writer-stopped';
+      if (rollbackError.message !== 'STALE_RUNTIME_WRITER_STOPPED') throw rollbackError;
+      return { env: liveEnv, state, staleWriterStopped: true };
+    }
+
+    frame.commitDisposition = 'committed';
+    frame.reliableReceiptStateDurable = true;
+    profile.mark('save');
+    flushPendingAuditEvents(candidateEnv);
+    candidateEnv.frameLogs = [];
+    const env = publishRuntimeFrameTransaction(frame.transaction);
+    const state = ensureRuntimeState(env);
+    if (frame.pendingTraceSnapshot) {
+      recordRuntimeHistoryTraceForTesting(env, frame.pendingTraceSnapshot);
+    }
+    if (!options.quietLogs) runtimeLog.debug('storage.save.done', { height: env.height });
+    profile.mark('publish');
+    if (options.appliedInput) {
+      const notificationError = notifyRuntimeSyncAfterCommit(env);
+      if (notificationError) {
+        runtimeLog.error('runtime_sync.notification_failed', {
+          error: notificationError.message,
+          height: env.height,
+        });
+      }
+      notifyRuntimeFrameCommitted(env, options.appliedInput);
+    }
+    return { env, state, staleWriterStopped: false };
+  } catch (error) {
+    if (error instanceof RuntimeFrameStorageError && error.commitStatus !== 'not-committed') {
+      frame.commitDisposition = error.commitStatus === 'committed' ? 'committed' : 'unknown';
+      frame.reliableReceiptStateDurable = true;
+      clearPendingAuditEvents(candidateEnv);
+      const env = publishRuntimeFrameTransaction(frame.transaction);
+      const state = ensureRuntimeState(env);
+      transitionRuntimeLifecycle(state, 'halted');
+      state.fatalDebugPayload = {
+        message: error.message,
+        height: Math.max(0, env.height),
+        timestamp: Math.max(0, env.timestamp),
+      };
+      state.stopLoop?.();
+    } else {
+      clearPendingAuditEvents(candidateEnv);
+    }
+    throw error;
+  }
+};
+
 // === CONSENSUS PROCESSING ===
 // ONE TICK = ONE ITERATION. No cascade. E→E communication always requires new tick.
 
@@ -1594,105 +1697,17 @@ export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDe
     }
     env.extra = undefined;
 
-    // === COMMIT POINT: persist finalized R-frame ===
-    // Persist only when a new runtime frame was actually applied.
-    // Side-effect-only ticks (e.g. deferred network retries) must never
-    // overwrite WAL entries for the current height.
-    //
-    // Why this ordering exists:
-    // 1. applyRuntimeInput() computes the post-state for frame N in memory
-    // 2. saveEnvToDB() makes frame N durable / replayable
-    // 3. only after that do we treat downstream effects as safe to emit
-    //
-    // That keeps execution, hashing, and recovery aligned around one exact
-    // post-state. A crash before save loses only the uncommitted in-memory
-    // tail, just like a block that executed locally but was never committed.
-    if (frameAdvanced) {
-      if (!quietRuntimeLogs) {
-        runtimeLog.debug('storage.save.start', { height: env.height });
-      }
-      try {
-        const saveOutcome = await saveEnvToDB(env, appliedRuntimeInputForPersistence, env.pendingNetworkOutputs);
-        processProfile.metrics.storageMs = saveOutcome.persistencePerfMs;
-        if (saveOutcome.staleWriterStopped) {
-          frame.rollbackHandled = true;
-          const rollbackError = await frame.rollbackUndurable(new Error('STALE_RUNTIME_WRITER_STOPPED'), {
-            quarantine: false,
-            requeue: false,
-          });
-          env = liveEnv;
-          state = ensureRuntimeState(env);
-          const haltedState = state;
-          transitionRuntimeLifecycle(haltedState, 'halted');
-          haltedState.fatalDebugPayload = {
-            message:
-              `STALE_RUNTIME_WRITER_STOPPED: frame=${frameHeightBeforeTick + 1} ` +
-              `runtime=${String(env.runtimeId || '').slice(0, 12)}`,
-            height: Math.max(0, env.height ?? 0),
-            timestamp: Math.max(0, env.timestamp ?? 0),
-          };
-          haltedState.stopLoop?.();
-          processProfile.outcome = 'stale-writer-stopped';
-          if (rollbackError.message !== 'STALE_RUNTIME_WRITER_STOPPED') throw rollbackError;
-          return env;
-        }
-        frame.commitDisposition = 'committed';
-        frame.reliableReceiptStateDurable = true;
-        processProfile.mark('save');
-        flushPendingAuditEvents(env);
-        env.frameLogs = [];
-        if (!frame.transaction) throw new Error('RUNTIME_FRAME_TRANSACTION_MISSING_AT_COMMIT');
-        env = publishRuntimeFrameTransaction(frame.transaction);
-        state = ensureRuntimeState(env);
-        if (frame.pendingTraceSnapshot) {
-          recordRuntimeHistoryTraceForTesting(env, frame.pendingTraceSnapshot);
-        }
-        if (!quietRuntimeLogs) {
-          runtimeLog.debug('storage.save.done', { height: env.height });
-        }
-        processProfile.mark('publish');
-      } catch (error) {
-        if (error instanceof RuntimeFrameStorageError && error.commitStatus !== 'not-committed') {
-          frame.commitDisposition = error.commitStatus === 'committed' ? 'committed' : 'unknown';
-          frame.reliableReceiptStateDurable = true;
-          clearPendingAuditEvents(env);
-          if (frame.transaction && (error.commitStatus === 'committed' || error.commitStatus === 'unknown')) {
-            env = publishRuntimeFrameTransaction(frame.transaction);
-          } else {
-            env = liveEnv;
-          }
-          state = ensureRuntimeState(env);
-          const haltedState = state;
-          transitionRuntimeLifecycle(haltedState, 'halted');
-          haltedState.fatalDebugPayload = {
-            message: error.message,
-            height: Math.max(0, env.height ?? 0),
-            timestamp: Math.max(0, env.timestamp ?? 0),
-          };
-          haltedState.stopLoop?.();
-        } else {
-          clearPendingAuditEvents(env);
-        }
-        throw error;
-      }
-    } else {
-      frame.commitDisposition = 'committed';
-      clearPendingAuditEvents(env);
-      if (!frame.transaction) throw new Error('RUNTIME_FRAME_TRANSACTION_MISSING_AT_EMPTY_COMMIT');
-      env = publishRuntimeFrameTransaction(frame.transaction);
-      state = ensureRuntimeState(env);
-    }
-
-    if (frameAdvanced && appliedRuntimeInputForPersistence) {
-      const syncNotificationError = notifyRuntimeSyncAfterCommit(env);
-      if (syncNotificationError) {
-        runtimeLog.error('runtime_sync.notification_failed', {
-          error: syncNotificationError.message,
-          height: env.height,
-        });
-      }
-      notifyRuntimeFrameCommitted(env, appliedRuntimeInputForPersistence);
-    }
+    // WAL is the only commit point. The helper returns only after install, or
+    // after making an ambiguous/stale outcome terminal.
+    const commit = await commitRuntimeFrame(env, liveEnv, frame, processProfile, {
+      frameAdvanced,
+      frameHeightBeforeTick,
+      appliedInput: appliedRuntimeInputForPersistence,
+      quietLogs: quietRuntimeLogs,
+    });
+    env = commit.env;
+    state = commit.state;
+    if (commit.staleWriterStopped) return env;
 
     const recoveryBarrier = state.recoveryBackupBarrier;
     const pendingReliableReceiptDeliveryCount = frame.reliableIngressCommits.reduce(
