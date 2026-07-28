@@ -128,7 +128,7 @@ import {
   requireJurisdictionBlockTimeMs,
   resolveMeshJurisdictionConfig,
   resolveSecondaryJurisdictions,
-  type MeshJurisdictionConfig,
+  type ResolvedMeshJurisdictionConfig,
 } from './mesh-jurisdictions';
 import { buildRuntimeImportLogLine } from './runtime-import-log';
 import {
@@ -910,9 +910,7 @@ const refreshChildHealthForResponse = async (): Promise<void> => {
 
 const getHubSpecsArg = (): string => HUB_NAMES.join(',');
 
-type MarketMakerJurisdictionConfig = MeshJurisdictionConfig & {
-  contracts: NonNullable<MeshJurisdictionConfig['contracts']>;
-};
+type MarketMakerJurisdictionConfig = ResolvedMeshJurisdictionConfig;
 
 type MarketMakerSupportPeerIdentity = {
   name: string;
@@ -969,11 +967,11 @@ const buildMarketMakerIdentity = (
 };
 
 const getMarketMakerIdentities = (): MarketMakerSupportPeerIdentity[] => {
-  const primary = resolveMeshJurisdictionConfig<MarketMakerJurisdictionConfig>(args.rpcUrl);
+  const primary = resolveMeshJurisdictionConfig(args.rpcUrl);
   const identities: MarketMakerSupportPeerIdentity[] = [
     buildMarketMakerIdentity(primary, marketMakerChild.signerLabel, marketMakerChild.name),
   ];
-  for (const [index, secondary] of resolveSecondaryJurisdictions<MarketMakerJurisdictionConfig>(primary.rpc).entries()) {
+  for (const [index, secondary] of resolveSecondaryJurisdictions(primary.rpc).entries()) {
     const secondaryName = String(secondary.name || `Secondary ${index + 1}`).trim();
     if (!secondaryName) continue;
     identities.push(buildMarketMakerIdentity(

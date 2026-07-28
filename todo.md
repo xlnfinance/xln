@@ -63,6 +63,12 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   rejection of routed local `AccountInput.txs` are already deleted or fenced
   with tests.
 - [ ] Make the audit surface mechanically legible after the function split.
+  Keep production runtime at zero explicit `any`; drive the exact
+  `as unknown as` debt and TypeScript suppression debt to zero through typed
+  boundary decoders/adapters. The AST ratchet must reject every new occurrence
+  and every increase. Decode untrusted WAL/P2P/RPC/LevelDB data exactly once,
+  then pass canonical types through reducers instead of scattering defensive
+  guards through trusted financial code.
   Delete rename-only import aliases where the canonical exported name can be
   used directly; retain namespace imports, `as const`, type assertions and
   genuine collision resolution because they are different language features.

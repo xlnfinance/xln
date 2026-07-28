@@ -15,10 +15,10 @@ interface BrowserWebSocket {
   readyState: number;
   send(data: string | ArrayBuffer | ArrayBufferView | Blob): void;
   close(): void;
-  onopen: ((this: WebSocket, ev: Event) => any) | null;
-  onmessage: ((this: WebSocket, ev: MessageEvent) => any) | null;
-  onclose: ((this: WebSocket, ev: CloseEvent) => any) | null;
-  onerror: ((this: WebSocket, ev: Event) => any) | null;
+  onopen: ((this: WebSocket, ev: Event) => void) | null;
+  onmessage: ((this: WebSocket, ev: MessageEvent) => void) | null;
+  onclose: ((this: WebSocket, ev: CloseEvent) => void) | null;
+  onerror: ((this: WebSocket, ev: Event) => void) | null;
 }
 
 interface NodeWebSocket {

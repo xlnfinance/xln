@@ -138,7 +138,7 @@ import {
   resolveMeshJurisdictionConfig,
   resolveMeshJurisdictionRpcBindings,
   resolveSecondaryJurisdictions,
-  type MeshJurisdictionConfig,
+  type ResolvedMeshJurisdictionConfig,
 } from './mesh-jurisdictions';
 
 type HubServerSocket = DirectWebSocket & RuntimeAdapterSocket & { data?: { type?: string } };
@@ -283,7 +283,7 @@ type LocalHealthResponse = {
   timings: TimingMap;
 };
 
-type JurisdictionConfig = MeshJurisdictionConfig;
+type JurisdictionConfig = ResolvedMeshJurisdictionConfig;
 
 type JurisdictionsFile = {
   version?: string;
@@ -649,7 +649,7 @@ const startedAtFor = (stage: keyof typeof timings): number | null => {
 };
 
 const resolveJurisdictionConfig = (rpcUrlOverride: string): JurisdictionConfig =>
-  resolveMeshJurisdictionConfig<JurisdictionConfig>(rpcUrlOverride);
+  resolveMeshJurisdictionConfig(rpcUrlOverride);
 
 const prepareJurisdictionForImport = async (jurisdiction: JurisdictionConfig): Promise<JurisdictionConfig> => {
   jurisdictionImportDiagnostics = {

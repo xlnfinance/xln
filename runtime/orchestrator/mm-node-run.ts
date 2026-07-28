@@ -81,7 +81,6 @@ import {
   CrossQuoteJob,
   HubProfile,
   JSON_HEADERS,
-  JurisdictionConfig,
   MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK,
   MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK,
   MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE,
@@ -915,7 +914,7 @@ export const runMarketMakerNode = async (): Promise<void> => {
   activeMmEntityId = primaryMmContext.entityId;
   mmContexts = [primaryMmContext];
 
-  const secondaryJurisdictions = resolveSecondaryJurisdictions<JurisdictionConfig>(jurisdiction.rpc);
+  const secondaryJurisdictions = resolveSecondaryJurisdictions(jurisdiction.rpc);
   for (const [index, secondary] of secondaryJurisdictions.entries()) {
     const secondaryName = String(secondary.name || `Secondary ${index + 1}`).trim();
     const secondaryDisplayName = formatJurisdictionDisplayName(secondaryName) || secondaryName;

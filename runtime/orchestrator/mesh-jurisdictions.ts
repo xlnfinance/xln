@@ -17,16 +17,32 @@ export type MeshJurisdictionConfig = {
   };
 };
 
-const hasRequiredContracts = (entry: unknown): entry is MeshJurisdictionConfig => {
-  const jurisdiction = entry as MeshJurisdictionConfig | null | undefined;
-  return Boolean(
-    Number.isSafeInteger(jurisdiction?.entityProviderDeploymentBlock) &&
-    Number(jurisdiction?.entityProviderDeploymentBlock) > 0 &&
-    jurisdiction?.contracts?.account &&
-    jurisdiction.contracts.depository &&
-    jurisdiction.contracts.entityProvider &&
-    jurisdiction.contracts.deltaTransformer,
-  );
+export type ResolvedMeshJurisdictionConfig = MeshJurisdictionConfig & {
+  contracts: Required<NonNullable<MeshJurisdictionConfig['contracts']>>;
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const isNonEmptyString = (value: unknown): value is string =>
+  typeof value === 'string' && value.trim().length > 0;
+
+// jurisdictions.json is external input even though the loader exposes a
+// TypeScript shape. Establish the trusted config exactly once here; callers
+// must not select a stronger result type through a generic assertion.
+const hasRequiredContracts = (entry: unknown): entry is ResolvedMeshJurisdictionConfig => {
+  if (!isRecord(entry) || !isRecord(entry['contracts'])) return false;
+  const contracts = entry['contracts'];
+  return isNonEmptyString(entry['name'])
+    && Number.isSafeInteger(entry['chainId'])
+    && Number(entry['chainId']) > 0
+    && isNonEmptyString(entry['rpc'])
+    && Number.isSafeInteger(entry['entityProviderDeploymentBlock'])
+    && Number(entry['entityProviderDeploymentBlock']) > 0
+    && isNonEmptyString(contracts['account'])
+    && isNonEmptyString(contracts['depository'])
+    && isNonEmptyString(contracts['entityProvider'])
+    && isNonEmptyString(contracts['deltaTransformer']);
 };
 
 const sameMeshRpc = (left: unknown, right: unknown): boolean => {
@@ -39,15 +55,15 @@ const sameMeshRpc = (left: unknown, right: unknown): boolean => {
 };
 
 const isPrimaryJurisdiction = (entry: unknown): boolean =>
-  (entry as { primary?: unknown } | null | undefined)?.primary === true;
+  isRecord(entry) && entry['primary'] === true;
 
 export const resetMeshJurisdictionsCache = (): void => {
   clearJurisdictionsCache();
 };
 
-export const resolveMeshJurisdictionConfig = <T extends MeshJurisdictionConfig = MeshJurisdictionConfig>(
+export const resolveMeshJurisdictionConfig = (
   rpcUrlOverride: string,
-): T => {
+): ResolvedMeshJurisdictionConfig => {
   const data = loadJurisdictions();
   const map = data.jurisdictions ?? {};
   const requestedRpc = String(rpcUrlOverride || '').trim();
@@ -60,7 +76,7 @@ export const resolveMeshJurisdictionConfig = <T extends MeshJurisdictionConfig =
   return {
     ...selected,
     rpc: rpcUrlOverride || selected.rpc,
-  } as unknown as T;
+  };
 };
 
 export const requireJurisdictionBlockTimeMs = (
@@ -91,16 +107,18 @@ export const formatJurisdictionDisplayName = (name: string): string =>
     .replace(/\s*\((?:local|shared)\s+anvil\)\s*$/i, '')
     .trim();
 
-export const resolveSecondaryJurisdictions = <T extends MeshJurisdictionConfig = MeshJurisdictionConfig>(
+export const resolveSecondaryJurisdictions = (
   primaryRpc: string,
-): T[] => {
+): ResolvedMeshJurisdictionConfig[] => {
   resetMeshJurisdictionsCache();
   const data = loadJurisdictions();
-  const entries = Object.entries(data.jurisdictions ?? {});
+  const entries: Array<[string, ResolvedMeshJurisdictionConfig]> = [];
+  for (const [key, jurisdiction] of Object.entries(data.jurisdictions ?? {})) {
+    if (hasRequiredContracts(jurisdiction)) entries.push([key, jurisdiction]);
+  }
   return entries
-    .filter(([, jurisdiction]) => Boolean(jurisdiction?.rpc && hasRequiredContracts(jurisdiction)))
-    .filter(([key, jurisdiction]) => isSecondaryJurisdictionConfig(key, jurisdiction as MeshJurisdictionConfig, primaryRpc))
-    .map(([, jurisdiction]) => jurisdiction as unknown as T);
+    .filter(([key, jurisdiction]) => isSecondaryJurisdictionConfig(key, jurisdiction, primaryRpc))
+    .map(([, jurisdiction]) => jurisdiction);
 };
 
 export const resolveMeshJurisdictionRpcBindings = (

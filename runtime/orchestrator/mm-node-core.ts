@@ -68,7 +68,7 @@ import {
   requireJurisdictionBlockTimeMs,
   resolveMeshJurisdictionConfig,
   resolveSecondaryJurisdictions,
-  type MeshJurisdictionConfig,
+  type ResolvedMeshJurisdictionConfig,
 } from './mesh-jurisdictions';
 import { runtimeBacklogBlocksMarketMakerQuotes } from './mm-bootstrap-progress';
 
@@ -89,9 +89,7 @@ type Args = {
 
 export type MarketMakerServerSocket = DirectWebSocket & RuntimeAdapterSocket & { data?: { type?: string } };
 
-export type JurisdictionConfig = MeshJurisdictionConfig & {
-  contracts: NonNullable<MeshJurisdictionConfig['contracts']>;
-};
+export type JurisdictionConfig = ResolvedMeshJurisdictionConfig;
 
 export type HubProfile = {
   name: string;
@@ -539,7 +537,7 @@ export const envFlagEnabled = (value: unknown): boolean => {
 export const buildLocalMarketMakerSignerLabels = (): string[] => {
   const primary = resolveJurisdictionConfig(resolvedArgs.rpcUrl);
   const labels = [resolvedArgs.signerLabel];
-  for (const [index, secondary] of resolveSecondaryJurisdictions<JurisdictionConfig>(primary.rpc).entries()) {
+  for (const [index, secondary] of resolveSecondaryJurisdictions(primary.rpc).entries()) {
     const secondaryName = String(secondary.name || `Secondary ${index + 1}`).trim();
     if (secondaryName) labels.push(`${resolvedArgs.signerLabel}:${secondaryName}`);
   }
@@ -552,7 +550,7 @@ export const configureMarketMakerRuntimeLogging = (env: RuntimeState): void => {
 };
 
 export const resolveJurisdictionConfig = (rpcUrlOverride: string): JurisdictionConfig =>
-  resolveMeshJurisdictionConfig<JurisdictionConfig>(rpcUrlOverride);
+  resolveMeshJurisdictionConfig(rpcUrlOverride);
 
 export const resolveImportedJurisdictionRpc = (jurisdiction: JurisdictionConfig): string =>
   resolveLocalApiUrl(jurisdiction.rpc);

@@ -632,7 +632,7 @@ describe('production startup wiring', () => {
       'deriveMarketMakerEntityId(signerId, toMarketMakerEntityJurisdictionConfig(jurisdiction))',
     );
     expect(orchestrator).toContain('blockTimeMs: requireJurisdictionBlockTimeMs(jurisdiction)');
-    expect(orchestrator).toContain('resolveSecondaryJurisdictions<MarketMakerJurisdictionConfig>(primary.rpc)');
+    expect(orchestrator).toContain('resolveSecondaryJurisdictions(primary.rpc)');
     expect(orchestrator).toContain('`${marketMakerChild.signerLabel}:${secondaryName}`');
     expect(orchestrator).toContain('jurisdictionName: jurisdiction.name');
     expect(orchestrator).toContain('chainId: Number(jurisdiction.chainId || 0)');
