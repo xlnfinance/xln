@@ -269,28 +269,24 @@ export const handleRequestCrossJurisdictionClearEntityTx = (
   return requestFilledRouteReveal(context, canonicalRoute, accountId, ratio);
 };
 
-/**
- * Apply only proposer-authored public reveal bytes. The private ladder seed is
- * deliberately absent from deterministic replay; every validator verifies the
- * exact binary and proof against the already-committed source pull hashes.
- */
-export const handleMaterializeCrossJurisdictionClearEntityTx = (
-  env: RuntimeState,
-  entityState: EntityState,
+const validateClearMaterialization = (
+  state: EntityState,
   entityTx: CrossJurisdictionClearMaterializationTx,
-): CrossJurisdictionClearResult => {
+): Readonly<{
+  route: CrossJurisdictionSwapRoute;
+  accountId: string;
+  fillRatio: number;
+  proof: CrossJurisdictionClearMaterializationTx['data']['proof'];
+}> => {
   const { orderId, binary, proof } = entityTx.data;
-  const expectedProposer = normalizeEntityRef(entityState.config.validators[0] || '');
+  const expectedProposer = normalizeEntityRef(state.config.validators[0] || '');
   const claimedProposer = normalizeEntityRef(entityTx.data.proposerSignerId);
   if (!expectedProposer || claimedProposer !== expectedProposer) {
     throw new Error(
       `CROSS_J_CLEAR_MATERIALIZE_PROPOSER_INVALID:${claimedProposer || 'missing'}:${expectedProposer || 'missing'}`,
     );
   }
-  const newState = cloneEntityState(entityState);
-  const outputs: EntityInput[] = [];
-  const accountTxs: AccountTxTarget[] = [];
-  const storedRoute = newState.crossJurisdictionSwaps?.get(orderId);
+  const storedRoute = state.crossJurisdictionSwaps?.get(orderId);
   if (!storedRoute || storedRoute.status !== 'clear_requested') {
     throw new Error(`CROSS_J_CLEAR_MATERIALIZE_INTENT_MISSING:${orderId}`);
   }
@@ -298,7 +294,7 @@ export const handleMaterializeCrossJurisdictionClearEntityTx = (
   if (!route.sourcePull || !route.targetPull) {
     throw new Error(`CROSS_J_CLEAR_MATERIALIZE_PULLS_MISSING:${orderId}`);
   }
-  if (normalizeEntityRef(route.source.counterpartyEntityId) !== normalizeEntityRef(newState.entityId)) {
+  if (normalizeEntityRef(route.source.counterpartyEntityId) !== normalizeEntityRef(state.entityId)) {
     throw new Error(`CROSS_J_CLEAR_MATERIALIZE_SOURCE_HUB_MISMATCH:${orderId}`);
   }
   const { fillRatio } = getCrossJurisdictionCommittedFillAmounts(route);
@@ -322,8 +318,8 @@ export const handleMaterializeCrossJurisdictionClearEntityTx = (
   if (!closeProofMatches(proof, expectedProof)) {
     throw new Error(`CROSS_J_CLEAR_MATERIALIZE_PROOF_MISMATCH:${orderId}`);
   }
-  const accountId = findAccountKey(newState, route.source.entityId);
-  const account = accountId ? newState.accounts.get(accountId) : undefined;
+  const accountId = findAccountKey(state, route.source.entityId);
+  const account = accountId ? state.accounts.get(accountId) : undefined;
   if (!accountId || !account?.pulls?.has(route.sourcePull.pullId)) {
     throw new Error(`CROSS_J_CLEAR_MATERIALIZE_SOURCE_PULL_MISSING:${orderId}`);
   }
@@ -333,33 +329,62 @@ export const handleMaterializeCrossJurisdictionClearEntityTx = (
   if (accountHasPullResolveQueued(account, route.sourcePull.pullId)) {
     throw new Error(`CROSS_J_CLEAR_MATERIALIZE_ALREADY_QUEUED:${orderId}`);
   }
+  return { route, accountId, fillRatio, proof: expectedProof };
+};
 
-  accountTxs.push({
+const buildSourceCloseAccountTxs = (
+  route: CrossJurisdictionSwapRoute,
+  accountId: string,
+  binary: string,
+  proof: CrossJurisdictionClearMaterializationTx['data']['proof'],
+): AccountTxTarget[] => {
+  const sourcePull = route.sourcePull;
+  if (!sourcePull) throw new Error(`CROSS_J_CLEAR_SOURCE_PULL_MISSING:${route.orderId}`);
+  const accountTxs: AccountTxTarget[] = [{
     accountId,
     tx: {
       type: 'cross_pull_close',
-      data: { pullId: route.sourcePull.pullId, binary, proof: expectedProof },
+      data: { pullId: sourcePull.pullId, binary, proof },
+    },
+  }];
+  const sourceSavingsAmount = route.priceImprovementSourceAmount ?? 0n;
+  if (sourceSavingsAmount <= 0n) return accountTxs;
+  accountTxs.push({
+    accountId,
+    tx: {
+      type: 'direct_payment',
+      data: {
+        tokenId: Number(route.source.tokenId),
+        amount: sourceSavingsAmount,
+        route: [],
+        description: `cross-j-source-savings:${route.orderId}`,
+        fromEntityId: route.source.counterpartyEntityId,
+        toEntityId: route.source.entityId,
+      },
     },
   });
-  const sourceSavingsAmount = route.priceImprovementSourceAmount ?? 0n;
-  if (sourceSavingsAmount > 0n) {
-    accountTxs.push({
-      accountId,
-      tx: {
-        type: 'direct_payment',
-        data: {
-          tokenId: Number(route.source.tokenId),
-          amount: sourceSavingsAmount,
-          route: [],
-          description: `cross-j-source-savings:${orderId}`,
-          fromEntityId: route.source.counterpartyEntityId,
-          toEntityId: route.source.entityId,
-        },
-      },
-    });
-  }
+  return accountTxs;
+};
+
+/**
+ * Apply only proposer-authored public reveal bytes. The private ladder seed is
+ * deliberately absent from deterministic replay; every validator verifies the
+ * exact binary and proof against the already-committed source pull hashes.
+ */
+export const handleMaterializeCrossJurisdictionClearEntityTx = (
+  env: RuntimeState,
+  entityState: EntityState,
+  entityTx: CrossJurisdictionClearMaterializationTx,
+): CrossJurisdictionClearResult => {
+  const { orderId, binary } = entityTx.data;
+  const newState = cloneEntityState(entityState);
+  const outputs: EntityInput[] = [];
+  const { route, accountId, fillRatio, proof } = validateClearMaterialization(newState, entityTx);
+  const accountTxs = buildSourceCloseAccountTxs(route, accountId, binary, proof);
+  const targetPull = route.targetPull;
+  if (!targetPull) throw new Error(`CROSS_J_CLEAR_TARGET_PULL_MISSING:${orderId}`);
   const targetCommandRoute = cloneCrossJurisdictionRoute(route);
-  targetCommandRoute.sourceCloseProof = expectedProof;
+  targetCommandRoute.sourceCloseProof = proof;
   transitionCrossJurisdictionRouteStatus(
     targetCommandRoute,
     'clearing',
@@ -373,16 +398,16 @@ export const handleMaterializeCrossJurisdictionClearEntityTx = (
       type: 'crossPullClose',
       data: {
         counterpartyEntityId: route.target.counterpartyEntityId,
-        pullId: route.targetPull.pullId,
+        pullId: targetPull.pullId,
         binary,
-        proof: expectedProof,
+        proof,
         route: targetCommandRoute,
         description: `Cross-j ${route.orderId} paired target close ${fillRatio}/${CROSS_J_MAX_FILL_RATIO}`,
       },
     }],
     route.targetHubSignerId,
   );
-  route.sourceCloseProof = expectedProof;
+  route.sourceCloseProof = proof;
   transitionCrossJurisdictionRouteStatus(route, 'clearing', deterministicEntityTimestamp(newState, env));
   newState.crossJurisdictionSwaps?.set(orderId, route);
   const firstValidator = entityState.config.validators[0];

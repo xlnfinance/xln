@@ -93,6 +93,21 @@ type SameFillResolvePlan = {
   };
 };
 
+type SameFillResolveInput = {
+  accountId: string;
+  offerId: string;
+  namespacedOrderId: string;
+  fill: SameTradeFillAggregate;
+  currentNamespacedOrderId: string;
+  currentOffer: NormalizedOrderbookOffer;
+  batchOffer: RestingOrderTerms | null;
+  accountOffer: RestingOrderTerms | null;
+  book: BookState;
+  bookKey: string;
+  resolveComment?: string;
+  takerFeeBps: number;
+};
+
 type SameOrderbookMaterialization = {
   pairId: string;
   base: number;
@@ -480,20 +495,46 @@ export const extractOfferIdForLog = (namespacedId: string): string => {
   return lastColon >= 0 ? namespacedId.slice(lastColon + 1) : namespacedId;
 };
 
-export const buildSameFillResolvePlan = (input: {
-  accountId: string;
-  offerId: string;
-  namespacedOrderId: string;
-  fill: SameTradeFillAggregate;
-  currentNamespacedOrderId: string;
-  currentOffer: NormalizedOrderbookOffer;
-  batchOffer: RestingOrderTerms | null;
-  accountOffer: RestingOrderTerms | null;
-  book: BookState;
-  bookKey: string;
-  resolveComment?: string;
-  takerFeeBps: number;
-}): SameFillResolvePlan => {
+const resolveSameExecutionOffer = (
+  input: SameFillResolveInput,
+  isCurrentTakerOrder: boolean,
+  restingPriceTicks: bigint,
+  originalLots: bigint,
+): NormalizedOrderbookOffer | CanonicalRestingOffer => {
+  if (isCurrentTakerOrder) {
+    return {
+      ...input.currentOffer,
+      quantizedGive: input.currentOffer.giveAmount,
+      quantizedWant: input.currentOffer.wantAmount,
+    };
+  }
+  const resting = input.batchOffer ?? input.accountOffer;
+  if (!resting) {
+    throw new Error(
+      `ORDERBOOK_FILL_SOURCE_MISSING: order=${input.namespacedOrderId} pair=${input.bookKey} ` +
+        `account=${input.accountId} offer=${input.offerId}`,
+    );
+  }
+  return materializeCanonicalRestingOffer(
+    resting.giveTokenId,
+    resting.wantTokenId,
+    restingPriceTicks,
+    originalLots,
+  );
+};
+
+const applySameFillTakerFee = (
+  data: SwapResolveEnqueueData,
+  offer: NormalizedOrderbookOffer | CanonicalRestingOffer,
+  takerFeeBps: number,
+): void => {
+  const fee = calculateSwapTakerFeeAmount(data.executionWantAmount ?? 0n, takerFeeBps);
+  if (fee <= 0n) return;
+  data.feeTokenId = offer.wantTokenId;
+  data.feeAmount = fee;
+};
+
+export const buildSameFillResolvePlan = (input: SameFillResolveInput): SameFillResolvePlan => {
   const { filledLots, originalLots, weightedCost } = input.fill;
   const filledBig = BigInt(filledLots);
   const isCurrentTakerOrder = input.namespacedOrderId === input.currentNamespacedOrderId;
@@ -508,19 +549,16 @@ export const buildSameFillResolvePlan = (input: {
     );
   }
 
-  if (!isCurrentTakerOrder && !input.batchOffer && !input.accountOffer) {
-    throw new Error(
-      `ORDERBOOK_FILL_SOURCE_MISSING: order=${input.namespacedOrderId} pair=${input.bookKey} ` +
-        `account=${input.accountId} offer=${input.offerId}`,
-    );
-  }
-
-  const executionTerms = isCurrentTakerOrder
-    ? input.currentOffer
-    : input.batchOffer ?? input.accountOffer!;
+  const restingPriceTicks = weightedCost / filledBig;
+  const offerForExecution = resolveSameExecutionOffer(
+    input,
+    isCurrentTakerOrder,
+    restingPriceTicks,
+    originalLots,
+  );
   const { base: executionBaseTokenId, quote: executionQuoteTokenId } = canonicalPair(
-    executionTerms.giveTokenId,
-    executionTerms.wantTokenId,
+    offerForExecution.giveTokenId,
+    offerForExecution.wantTokenId,
   );
   const executionBaseWei = baseAmountFromLots(executionBaseTokenId, filledBig);
   const executionQuoteWei = quoteAmountFromWeightedLots(
@@ -528,31 +566,6 @@ export const buildSameFillResolvePlan = (input: {
     executionQuoteTokenId,
     weightedCost,
   );
-  const restingPriceTicks = weightedCost / filledBig;
-
-  const offerForExecution = isCurrentTakerOrder
-    ? {
-        giveTokenId: input.currentOffer.giveTokenId,
-        wantTokenId: input.currentOffer.wantTokenId,
-        giveAmount: input.currentOffer.giveAmount,
-        wantAmount: input.currentOffer.wantAmount,
-        quantizedGive: input.currentOffer.giveAmount,
-        quantizedWant: input.currentOffer.wantAmount,
-        priceTicks: input.currentOffer.priceTicks,
-      }
-    : input.batchOffer
-      ? materializeCanonicalRestingOffer(
-          input.batchOffer.giveTokenId,
-          input.batchOffer.wantTokenId,
-          restingPriceTicks,
-          originalLots,
-        )
-      : materializeCanonicalRestingOffer(
-          input.accountOffer!.giveTokenId,
-          input.accountOffer!.wantTokenId,
-          restingPriceTicks,
-          originalLots,
-        );
   const orderStillInBook = getBookOrder(input.book, input.namespacedOrderId) !== null;
   const offerSource = isCurrentTakerOrder
     ? 'current-taker-offer'
@@ -579,11 +592,7 @@ export const buildSameFillResolvePlan = (input: {
     ...(isCurrentTakerOrder && input.resolveComment ? { comment: input.resolveComment } : {}),
   };
   if (isCurrentTakerOrder) {
-    const takerFeeAmount = calculateSwapTakerFeeAmount(resolveData.executionWantAmount ?? 0n, input.takerFeeBps);
-    if (takerFeeAmount > 0n) {
-      resolveEnqueueData.feeTokenId = offerForExecution.wantTokenId;
-      resolveEnqueueData.feeAmount = takerFeeAmount;
-    }
+    applySameFillTakerFee(resolveEnqueueData, offerForExecution, input.takerFeeBps);
   }
 
   return {
