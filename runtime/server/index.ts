@@ -405,22 +405,12 @@ const handleRpcMessage = createServerRpcMessageHandler({
   buildRuntimeInputStatusUrl: runtimeInputStatusUrl,
 });
 
-const handleApi = async (
+const maybeHandleControlApi = async (
   req: Request,
   pathname: string,
   env: RuntimeState | null,
-  clientId: string,
-  operatorAuthorized: boolean,
-): Promise<Response> => {
-  const headers = JSON_HEADERS;
-
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { headers });
-  }
-
-  const assistantResponse = await assistantProxy.handle(req, pathname, clientId);
-  if (assistantResponse) return assistantResponse;
-
+  headers: typeof JSON_HEADERS,
+): Promise<Response | null> => {
   if (pathname === '/api/control/entities' && req.method === 'GET') {
     const authError = requireDaemonControlAuth(req, env);
     if (authError) return authError;
@@ -475,14 +465,16 @@ const handleApi = async (
     if (authError) return authError;
     return handleP2PControl(req, headers, env, { parseTaggedControlBody, startP2P });
   }
+  return null;
+};
 
-  // JSON-RPC proxy endpoint (single canonical path: /rpc).
-  // Keep /api/rpc for compatibility with older clients.
-  if ((pathname === '/api/rpc' || pathname === '/rpc') && req.method === 'POST') {
-    return handleRuntimeRpcProxy({ req, pathname, env, relayStore, headers, operatorAuthorized });
-  }
-
-  // Health check
+const maybeHandleRuntimeInfoApi = async (
+  req: Request,
+  pathname: string,
+  env: RuntimeState | null,
+  headers: typeof JSON_HEADERS,
+  operatorAuthorized: boolean,
+): Promise<Response | null> => {
   if (pathname === '/api/health') {
     return handleRuntimeHealth(req, headers, {
       env,
@@ -515,91 +507,102 @@ const handleApi = async (
   if (pathname === '/api/hubs') {
     return new Response(safeStringify(buildHubDiscoveryPayload({ env, relayStore })), { headers });
   }
-
-  if (pathname === '/api/gossip/profile') {
-    const url = new URL(req.url);
-    const targetEntityId = String(url.searchParams.get('entityId') || '').trim().toLowerCase();
-    if (!targetEntityId) {
-      return new Response(
-        safeStringify({ ok: false, error: 'entityId is required' }),
-        { status: 400, headers },
-      );
-    }
-
-    try {
-      await env?.runtimeState?.p2p?.syncProfiles?.();
-    } catch (error) {
-      serverLog.warn('gossip.profile_sync_failed', {
-        targetEntityId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-    try {
-      if (env) {
-        await ensureGossipProfiles(env, [targetEntityId]);
-      }
-    } catch (error) {
-      serverLog.warn('gossip.profile_ensure_failed', {
-        targetEntityId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-
-    const bundle = buildKnownProfileBundle({ env, relayStore, entityId: targetEntityId });
-    return new Response(
-      safeStringify({
-        ok: true,
-        entityId: targetEntityId,
-        found: !!bundle.profile,
-        profile: bundle.profile,
-        peers: bundle.peers,
-      }),
-      { headers },
-    );
-  }
-
-  if (pathname === '/api/jurisdictions') {
-    try {
-      const payload = await buildRuntimeJurisdictionsJson(env) ?? await readCanonicalJurisdictionsJson();
-      return new Response(payload, {
-        headers: {
-          ...headers,
-          'Content-Type': 'application/json',
-          'Cache-Control': 'no-store, no-cache, must-revalidate',
-        },
-      });
-    } catch (error: unknown) {
-      return new Response(
-        safeStringify({ error: getErrorMessage(error, 'Failed to read jurisdictions.json') }),
-        { status: 500, headers },
-      );
-    }
-  }
-
-  // Runtime state
   if (pathname === '/api/state' && env) {
-    return new Response(
-      JSON.stringify({
-        height: env.height,
-        timestamp: env.timestamp,
-        runtimeId: env.runtimeId,
-        entityCount: env.eReplicas?.size || 0,
-      }),
-      { headers },
-    );
+    return new Response(safeStringify({
+      height: env.height,
+      timestamp: env.timestamp,
+      runtimeId: env.runtimeId,
+      entityCount: env.eReplicas?.size || 0,
+    }), { headers });
   }
-
-  // Connected clients
   if (pathname === '/api/clients') {
+    return new Response(safeStringify({
+      count: relayStore.clients.size,
+      clients: Array.from(relayStore.clients.keys()),
+    }), { headers });
+  }
+  return null;
+};
+
+const handleGossipProfileApi = async (
+  req: Request,
+  env: RuntimeState | null,
+  headers: typeof JSON_HEADERS,
+): Promise<Response> => {
+  const url = new URL(req.url);
+  const targetEntityId = String(url.searchParams.get('entityId') || '').trim().toLowerCase();
+  if (!targetEntityId) {
+    return new Response(safeStringify({ ok: false, error: 'entityId is required' }), { status: 400, headers });
+  }
+  try {
+    await env?.runtimeState?.p2p?.syncProfiles?.();
+  } catch (error) {
+    serverLog.warn('gossip.profile_sync_failed', {
+      targetEntityId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  try {
+    if (env) await ensureGossipProfiles(env, [targetEntityId]);
+  } catch (error) {
+    serverLog.warn('gossip.profile_ensure_failed', {
+      targetEntityId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const bundle = buildKnownProfileBundle({ env, relayStore, entityId: targetEntityId });
+  return new Response(safeStringify({
+    ok: true,
+    entityId: targetEntityId,
+    found: !!bundle.profile,
+    profile: bundle.profile,
+    peers: bundle.peers,
+  }), { headers });
+};
+
+const handleJurisdictionsApi = async (
+  env: RuntimeState | null,
+  headers: typeof JSON_HEADERS,
+): Promise<Response> => {
+  try {
+    const payload = await buildRuntimeJurisdictionsJson(env) ?? await readCanonicalJurisdictionsJson();
+    return new Response(payload, {
+      headers: {
+        ...headers,
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-store, no-cache, must-revalidate',
+      },
+    });
+  } catch (error) {
     return new Response(
-      JSON.stringify({
-        count: relayStore.clients.size,
-        clients: Array.from(relayStore.clients.keys()),
-      }),
-      { headers },
+      safeStringify({ error: getErrorMessage(error, 'Failed to read jurisdictions.json') }),
+      { status: 500, headers },
     );
   }
+};
 
+const maybeHandleDiscoveryApi = (
+  req: Request,
+  pathname: string,
+  env: RuntimeState | null,
+  headers: typeof JSON_HEADERS,
+): Promise<Response> | null => {
+  if (pathname === '/api/gossip/profile') {
+    return handleGossipProfileApi(req, env, headers);
+  }
+  if (pathname === '/api/jurisdictions') {
+    return handleJurisdictionsApi(env, headers);
+  }
+  return null;
+};
+
+const maybeHandleDebugApi = async (
+  req: Request,
+  pathname: string,
+  env: RuntimeState | null,
+  headers: typeof JSON_HEADERS,
+  operatorAuthorized: boolean,
+): Promise<Response | null> => {
   const relayDebugResponse = await maybeHandleRelayDebugRequest({
     request: req,
     pathname,
@@ -609,15 +612,11 @@ const handleApi = async (
     operatorAuthorized,
   });
   if (relayDebugResponse) return relayDebugResponse;
-
   if (pathname === '/api/debug/activity' && env) {
-    return await handleRuntimeActivityRequest(env, new URL(req.url), headers);
+    return handleRuntimeActivityRequest(env, new URL(req.url), headers);
   }
-
   const debugDumpsResponse = await maybeHandleDebugDumpsRequest({ req, pathname, relayStore, headers });
   if (debugDumpsResponse) return debugDumpsResponse;
-
-  // Registered gossip entities (relay-authoritative public profile store)
   if (pathname === '/api/debug/entities') {
     const url = new URL(req.url);
     return new Response(
@@ -630,7 +629,6 @@ const handleApi = async (
       { headers },
     );
   }
-
   if (pathname === '/api/debug/reserve') {
     if (!globalJAdapter) {
       return new Response(safeStringify({ error: 'J-adapter not initialized' }), { status: 503, headers });
@@ -663,33 +661,27 @@ const handleApi = async (
       return new Response(safeStringify({ error: message }), { status: 500, headers });
     }
   }
+  return null;
+};
 
-  // J-event watching is handled by JAdapter.startWatching() per-jReplica
-
-  // Token catalog (for UI token list + deposits)
+const maybeHandleFinancialApi = (
+  req: Request,
+  pathname: string,
+  env: RuntimeState | null,
+  headers: typeof JSON_HEADERS,
+): Promise<Response> | Response | null => {
   if (pathname === '/api/tokens') {
-    return await externalWalletApi.handleTokens();
+    return externalWalletApi.handleTokens();
   }
-
   if (pathname === '/api/external-wallet/snapshot' && req.method === 'POST') {
-    return await externalWalletApi.handleWalletSnapshot(req);
+    return externalWalletApi.handleWalletSnapshot(req);
   }
-
-  // ============================================================================
-  // FAUCET ENDPOINTS
-  // ============================================================================
-
-  // Faucet A: External ERC20 → user wallet
   if (pathname === '/api/faucet/erc20' && req.method === 'POST') {
-    return await externalWalletApi.handleErc20Faucet(req);
+    return externalWalletApi.handleErc20Faucet(req);
   }
-
-  // Faucet A2: Gas-only topup (for approve/deposit)
   if (pathname === '/api/faucet/gas' && req.method === 'POST') {
-    return await externalWalletApi.handleGasFaucet(req);
+    return externalWalletApi.handleGasFaucet(req);
   }
-
-  // Faucet B: Hub reserve → user reserve via processBatch
   if (pathname === '/api/faucet/reserve' && req.method === 'POST') {
     return handleReserveFaucet({
       req,
@@ -701,8 +693,6 @@ const handleApi = async (
       enqueueRuntimeInput,
     });
   }
-
-  // Faucet C: Offchain payment via bilateral account
   if (pathname === '/api/faucet/offchain' && req.method === 'POST') {
     return handleOffchainFaucet({
       req,
@@ -737,6 +727,34 @@ const handleApi = async (
       activeHubEntityIds: relayStore.activeHubEntityIds,
     });
   }
+  return null;
+};
+
+const handleApi = async (
+  req: Request,
+  pathname: string,
+  env: RuntimeState | null,
+  clientId: string,
+  operatorAuthorized: boolean,
+): Promise<Response> => {
+  const headers = JSON_HEADERS;
+  if (req.method === 'OPTIONS') return new Response(null, { headers });
+  const assistantResponse = await assistantProxy.handle(req, pathname, clientId);
+  if (assistantResponse) return assistantResponse;
+  const controlResponse = await maybeHandleControlApi(req, pathname, env, headers);
+  if (controlResponse) return controlResponse;
+  // /rpc is the canonical JSON-RPC path; /api/rpc remains a transport alias.
+  if ((pathname === '/api/rpc' || pathname === '/rpc') && req.method === 'POST') {
+    return handleRuntimeRpcProxy({ req, pathname, env, relayStore, headers, operatorAuthorized });
+  }
+  const runtimeInfoResponse = await maybeHandleRuntimeInfoApi(req, pathname, env, headers, operatorAuthorized);
+  if (runtimeInfoResponse) return runtimeInfoResponse;
+  const discoveryResponse = maybeHandleDiscoveryApi(req, pathname, env, headers);
+  if (discoveryResponse) return discoveryResponse;
+  const debugResponse = await maybeHandleDebugApi(req, pathname, env, headers, operatorAuthorized);
+  if (debugResponse) return debugResponse;
+  const financialResponse = maybeHandleFinancialApi(req, pathname, env, headers);
+  if (financialResponse) return financialResponse;
   return new Response(safeStringify({ error: 'Not found' }), { status: 404, headers });
 };
 
