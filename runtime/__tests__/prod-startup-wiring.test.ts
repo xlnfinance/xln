@@ -157,14 +157,21 @@ describe('production startup wiring', () => {
     const runtime = readFileSync(join(repoRoot, 'runtime/runtime-core.ts'), 'utf8');
     const recovery = readFileSync(join(repoRoot, 'runtime/recovery/restore.ts'), 'utf8');
     const durableOutbox = recovery.indexOf('env.pendingNetworkOutputs = buildPendingNetworkOutputs([');
-    const plan = runtime.indexOf('applyDeterministicRuntimeOutputPlan(env, entityOutbox, outputRoutingDeps)');
-    const save = runtime.indexOf('const saveOutcome = await saveEnvToDB(', plan);
-    const backup = runtime.indexOf('const recoveryBarrier = state.recoveryBackupBarrier;', save);
-    const dispatch = runtime.indexOf('dispatchEntityOutputs(env, remoteOutputs', backup);
+    const process = extractSourceBlock(
+      runtime,
+      'export const processRuntime = async',
+      'const runtimeStorageApi =',
+    );
+    const save = runtime.indexOf('const outcome = await saveEnvToDB(');
+    const plan = process.indexOf('applyDeterministicRuntimeOutputPlan(env, entityOutbox, outputRoutingDeps)');
+    const commit = process.indexOf('const commit = await commitRuntimeFrame(', plan);
+    const backup = process.indexOf('await runCommittedRecoveryBarrier(', commit);
+    const dispatch = process.indexOf('await dispatchCommittedEntityOutputs(', backup);
     expect(durableOutbox).toBeGreaterThanOrEqual(0);
+    expect(save).toBeGreaterThanOrEqual(0);
     expect(plan).toBeGreaterThanOrEqual(0);
-    expect(save).toBeGreaterThan(plan);
-    expect(backup).toBeGreaterThan(save);
+    expect(commit).toBeGreaterThan(plan);
+    expect(backup).toBeGreaterThan(commit);
     expect(dispatch).toBeGreaterThan(backup);
   });
 
@@ -755,6 +762,14 @@ describe('production startup wiring', () => {
       'if (hasJurisdictionReplica(env, jurisdiction) && hasLiveJurisdictionAdapter(env, jurisdiction)) return;',
     );
     const runtimeSource = readFileSync(join(repoRoot, 'runtime/runtime-core.ts'), 'utf8');
+    const frameDispatchSource = readFileSync(
+      join(repoRoot, 'runtime/runtime/frame/dispatch.ts'),
+      'utf8',
+    );
+    const framePreparationSource = readFileSync(
+      join(repoRoot, 'runtime/runtime/frame/prepare.ts'),
+      'utf8',
+    );
     expect(runtimeLoopSource).toContain(
       'const runtimeLoopTickDelayMs = Math.max(0, Math.floor(Number(config?.tickDelayMs ?? 0)));',
     );
@@ -766,10 +781,12 @@ describe('production startup wiring', () => {
     expect(runtimeSource).not.toContain('prepareCrossJurisdictionEntityInputs');
     const entityConsensusSource = readFileSync(join(repoRoot, 'runtime/entity/consensus/input-consensus.ts'), 'utf8');
     expect(entityConsensusSource).toContain('appendDefaultProposerCrossJMaterializations');
-    expect(runtimeSource.indexOf('runtimeInput.entityInputs = await prepareHtlcPaymentEntityInputs(')).toBeGreaterThan(
-      runtimeSource.lastIndexOf('applyEntityInputFrameCap('),
+    expect(framePreparationSource.indexOf('input.entityInputs = await prepareHtlcPaymentEntityInputs(')).toBeGreaterThan(
+      framePreparationSource.lastIndexOf('deps.applyEntityInputFrameCap('),
     );
-    expect(runtimeSource).toContain('if (remoteOutputs.length > 0 && env.quietRuntimeLogs !== true)');
+    expect(frameDispatchSource).toContain(
+      'if (plan.remoteOutputs.length > 0 && env.quietRuntimeLogs !== true)',
+    );
     expect(runtimeSource).not.toContain('void config;');
     expect(runtimeLoopSource).toContain('else if (runtimeLoopTickDelayMs > 0)');
     expect(mmNode).toContain("MARKET_MAKER_RUNTIME_TICK_DELAY_MS'] || '0'");

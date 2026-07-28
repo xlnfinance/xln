@@ -19,11 +19,7 @@ import { cloneIsolatedRuntimeInput } from './protocol/runtime-input-clone';
 import { requireBoundaryInteger } from './protocol/boundary-validation';
 import { buildCanonicalEnvSnapshot } from './wal/snapshot';
 import { hasRuntimeHistoryTraceForTesting, recordRuntimeHistoryTraceForTesting } from './history-retention';
-import {
-  mergeEntityInputs,
-  prioritizeEntityConsensusInputs,
-  prioritizeProtocolEntityInputs,
-} from './entity/consensus/index';
+import { mergeEntityInputs } from './entity/consensus/index';
 import { hasVerifiedEntityCommitPrecertificate } from './entity/consensus/commit-precheck';
 import {
   isLocalEntityLeaderTimeoutVote,
@@ -44,7 +40,6 @@ import {
   markRestoredReliableOutputsDue,
   splitRoutedOutputByDeliveryLane,
 } from './runtime/output-routing';
-import { prepareHtlcPaymentEntityInputs } from './protocol/htlc/payment-admission';
 import { collectDueLocalProfileCertificationInputs } from './networking/local-profile-lifecycle';
 import {
   selectMatchedCrossJAccountInputPairs,
@@ -78,7 +73,6 @@ import {
 } from './runtime/j-submit-state';
 import { applyRuntimeTx } from './runtime/tx-handlers';
 import { applyMergedEntityInputs, RuntimeEntityInputApplyError } from './runtime/entity-inputs';
-import { applyEntityHeightDurabilityBarrier } from './runtime/entity-height-barrier';
 import { safeStringify } from './protocol/serialization';
 import { validateJInputs } from './wal/runtime-machine-schema/j';
 import {
@@ -145,6 +139,7 @@ import {
   finalizeCommittedReceiptDeliveries,
   runCommittedRecoveryBarrier,
 } from './runtime/frame/dispatch';
+import { prepareRuntimeFrameInput } from './runtime/frame/prepare';
 
 const runtimeLog = createStructuredLogger('runtime');
 
@@ -1484,58 +1479,24 @@ export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDe
       state = rollback.state;
       return rollback.error;
     };
-    processProfile.metrics.runtimeTxs = runtimeInput.runtimeTxs.length;
-    processProfile.metrics.entityInputs = runtimeInput.entityInputs.length;
-    processProfile.metrics.entityTxs = runtimeInput.entityInputs.reduce(
-      (sum, input) => sum + Number(input.entityTxs?.length || 0),
-      0,
-    );
-    processProfile.metrics.jInputs = runtimeInput.jInputs?.length ?? 0;
-    processProfile.metrics.reliableReceipts = runtimeInput.reliableReceipts?.length ?? 0;
-    mempool.runtimeTxs = [];
-    mempool.entityInputs = [];
-    if (mempool.jInputs) mempool.jInputs = [];
-    if (mempool.reliableReceipts) mempool.reliableReceipts = [];
-    mempool.queuedAt = undefined;
-    frame.inputDrained = true;
-
-    const jEventFramePrioritized = prioritizeJEventFrame(runtimeInput, mempool, mempoolQueuedAt ?? env.timestamp ?? 0);
-    runtimeInput.entityInputs = prioritizeEntityConsensusInputs(runtimeInput.entityInputs, input =>
-      hasVerifiedEntityCommitPrecertificate(env, input),
-    );
-    runtimeInput.entityInputs = prioritizeProtocolEntityInputs(runtimeInput.entityInputs);
-    applyEntityHeightDurabilityBarrier(env, runtimeInput, mempool, mempoolQueuedAt ?? env.timestamp ?? 0);
-    applyEntityTxFrameCap(
+    const prepared = await prepareRuntimeFrameInput(
+      env,
+      state,
       runtimeInput,
       mempool,
-      state.maxEntityTxsPerFrame ?? 0,
-      mempoolQueuedAt ?? env.timestamp ?? 0,
+      mempoolQueuedAt,
+      frame,
+      processProfile,
+      {
+        prioritizeJEventFrame,
+        applyEntityTxFrameCap,
+        applyEntityInputFrameCap,
+      },
     );
-    applyEntityInputFrameCap(
-      runtimeInput,
-      mempool,
-      state.maxEntityInputsPerFrame ?? 0,
-      mempoolQueuedAt ?? env.timestamp ?? 0,
-    );
-    runtimeInput.entityInputs = await prepareHtlcPaymentEntityInputs(env, runtimeInput.entityInputs);
-    frame.inputForRequeue = cloneRuntimeFrameMempool(runtimeInput);
-    if (ACCOUNT_CAUSAL_TRACE) {
-      const ingress = summarizeRuntimeAccountCausality(runtimeInput.entityInputs);
-      if (causalTraceContainsWork(ingress)) {
-        processProfile.metrics.accountCausality = { ingress, egress: [] };
-      }
-    }
-    processProfile.metrics.entityInputs = runtimeInput.entityInputs.length;
-    processProfile.metrics.entityTxs = runtimeInput.entityInputs.reduce(
-      (sum, input) => sum + Number(input.entityTxs?.length || 0),
-      0,
-    );
-    processProfile.mark('mempoolFrame');
-    const hasRuntimeInput =
-      runtimeInput.runtimeTxs.length > 0 ||
-      runtimeInput.entityInputs.length > 0 ||
-      (runtimeInput.jInputs?.length ?? 0) > 0 ||
-      (runtimeInput.reliableReceipts?.length ?? 0) > 0;
+    const {
+      hasInput: hasRuntimeInput,
+      jEventPrioritized: jEventFramePrioritized,
+    } = prepared;
     let appliedRuntimeInputForPersistence: RuntimeInput | undefined;
 
     if ((runtimeInput.reliableReceipts?.length ?? 0) > 0 || hasPendingLocalReliableOutput(env)) {
