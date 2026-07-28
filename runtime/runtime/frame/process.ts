@@ -1,7 +1,7 @@
 import { TIMING } from '../../constants';
 import { collectDueLocalProfileCertificationInputs } from '../../networking/local-profile-lifecycle';
 import { requireBoundaryInteger } from '../../protocol/boundary-validation';
-import { recordRuntimeHistoryTraceForTesting } from '../../history-retention';
+import { recordRuntimeHistoryTraceForTesting } from '../history-retention';
 import { createStructuredLogger } from '../../infra/logger';
 import type { createRuntimeLoopApi } from '../loop';
 import { materializePendingJurisdictionImportResults } from '../jurisdiction-import';

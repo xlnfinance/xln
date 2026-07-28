@@ -1,4 +1,4 @@
-import type { RuntimeState, EnvSnapshot } from './types';
+import type { RuntimeState, EnvSnapshot } from '../types';
 
 // Runtime memory is the live finalized state plus the private in-flight clone.
 // Historical views belong to LevelDB or to an explicit test-only collector.

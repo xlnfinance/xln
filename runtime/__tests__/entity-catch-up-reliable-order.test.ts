@@ -20,7 +20,7 @@ import { generateLazyEntityId } from '../entity/factory';
 import { deriveLocalEntityCryptoKeys } from '../entity/crypto';
 import { initCrontab } from '../entity/scheduler';
 import { buildQuorumHanko } from '../hanko/signing';
-import { startRuntimeHistoryTraceForTesting } from '../history-retention';
+import { startRuntimeHistoryTraceForTesting } from '../runtime/history-retention';
 import { buildLocalEntityProfile } from '../networking/gossip-helper';
 import {
   collectLocalProfileEncryptionAnnouncements,

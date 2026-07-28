@@ -28,7 +28,7 @@ import { deriveDelta } from '../account/utils';
 import { isLeftEntity } from '../entity/id';
 import { hashHtlcSecret } from '../protocol/htlc/utils';
 import { withDeterministicHtlcTestSecret } from '../protocol/htlc/test-secret-capability';
-import { startRuntimeHistoryTraceForTesting } from '../history-retention';
+import { startRuntimeHistoryTraceForTesting } from '../runtime/history-retention';
 import { ethers } from 'ethers';
 
 const USDC = 1;

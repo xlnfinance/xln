@@ -104,7 +104,7 @@ import { recordValidatorJHistory } from '../jurisdiction/local-history';
 import { canonicalJurisdictionEventsHash, getJEventJurisdictionRef } from '../jurisdiction/event-observation';
 import { buildLocalJPrefixAttestation } from '../jurisdiction/j-prefix-consensus';
 import { hydrateEntityStateFromStorage, projectEntityCoreDoc } from '../storage/projections';
-import { startRuntimeHistoryTraceForTesting } from '../history-retention';
+import { startRuntimeHistoryTraceForTesting } from '../runtime/history-retention';
 import { validateEntityTx } from '../wal/runtime-machine-schema/entity-tx';
 import {
   buildConsensusOutputOrigin,

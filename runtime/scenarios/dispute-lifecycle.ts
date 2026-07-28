@@ -11,7 +11,7 @@
 import type { AccountState, RuntimeState } from '../types';
 import type { JAdapter } from '../jadapter/types';
 import { getAccountFrameHistoryView } from '../runtime/env-events';
-import { startRuntimeHistoryTraceForTesting } from '../history-retention';
+import { startRuntimeHistoryTraceForTesting } from '../runtime/history-retention';
 import { bootScenario, registerEntities, fundEntities } from './boot';
 import {
   getProcess,

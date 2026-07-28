@@ -15,7 +15,7 @@ import { assertRuntimeIdle } from './helpers';
 import { setEntityFrameHashDebugRecorder, type EntityFrameHashDebugRecord } from '../entity/consensus/frame';
 import { stopManagedScenarioAnvil } from './boot';
 import { buildCanonicalJReplicaSnapshot } from '../wal/snapshot';
-import { startRuntimeHistoryTraceForTesting } from '../history-retention';
+import { startRuntimeHistoryTraceForTesting } from '../runtime/history-retention';
 import {
   setAccountStateRootDebugRecorder,
   type AccountStateRootDebugRecord,

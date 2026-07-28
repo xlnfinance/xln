@@ -16,7 +16,7 @@ import {
   appendRecentRuntimeSnapshot,
   RECENT_RUNTIME_HISTORY_LIMIT,
   startRuntimeHistoryTraceForTesting,
-} from '../history-retention';
+} from '../runtime/history-retention';
 
 test('recent snapshot helper enforces its exact bound and rejects invalid limits', () => {
   const first = { height: 1 } as never;
