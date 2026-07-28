@@ -28,8 +28,6 @@ const COORDINATOR_DEBT: Readonly<Record<string, number>> = {
   "runtime/jadapter/rpc-reads.ts::readWalletSnapshot": 155,
   "runtime/jadapter/rpc-wallet-writes.ts::createRpcWalletWriteMethods": 160,
   "runtime/jurisdiction/event-normalization.ts::normalizeJurisdictionEvent": 399,
-  "runtime/networking/direct-runtime-bun.ts::createDirectRuntimeWsRoute": 379,
-  "runtime/networking/direct-runtime-bun.ts::message": 167,
   "runtime/networking/ws-client.ts::connectForGeneration": 157,
   "runtime/networking/ws-client.ts::handleMessage": 155,
   "runtime/orchestrator/bootstrap-timeline.ts::buildBootstrapTimeline": 206,
