@@ -303,8 +303,6 @@ describe('mergeEntityInputs', () => {
 
     expect(source).toContain("createStructuredLogger('entity.input.merge')");
     expect(source).toContain("entityInputMergeLog.warn('frame.conflict'");
-    expect(source).toContain("entityInputMergeLog.debug('precommits.merge'");
-    expect(source).toContain("entityInputMergeLog.debug('duplicates.deduped'");
     expect(source).not.toContain('console.');
   });
 });

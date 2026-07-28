@@ -1,7 +1,6 @@
 import type { EntityTx, JPrefixAttestation, JurisdictionEventData, RoutedEntityInput } from '../../types';
 import { signatureMapSize } from '../../protocol/signatures';
 import { compareStableText, safeStringify } from '../../protocol/serialization';
-import { HEAVY_LOGS } from '../../utils';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import { hashEntityLeaderVoteBody } from './leader';
 import { hashJPrefixAttestation } from '../../jurisdiction/j-prefix-consensus';
@@ -291,14 +290,11 @@ export const mergeEntityInputs = (
 ): RoutedEntityInput[] => {
   const merged = new Map<string, RoutedEntityInput>();
   const conflicts: RoutedEntityInput[] = [];
-  let duplicateCount = 0;
   for (const input of inputs) {
     const key = entityInputMergeKey(input);
-    const entityShort = input.entityId.slice(0, 10);
 
     if (merged.has(key)) {
       const existing = merged.get(key)!;
-      duplicateCount++;
 
       if (input.leaderTimeoutVote || existing.leaderTimeoutVote) {
         if (safeStringify(input.leaderTimeoutVote) !== safeStringify(existing.leaderTimeoutVote)) {
@@ -345,44 +341,15 @@ export const mergeEntityInputs = (
         continue;
       }
 
-      if (HEAVY_LOGS) {
-        entityInputMergeLog.debug('duplicate.found', {
-          duplicateCount,
-          entity: entityShort,
-          signer: shortId(input.signerId || ''),
-        });
-      }
-
       if (input.entityTxs) {
         existing.entityTxs = [...(existing.entityTxs || []), ...input.entityTxs];
         if (existing.entityTxs) {
           existing.entityTxs = mergeJEventTxs(existing.entityTxs);
         }
-        if (HEAVY_LOGS) entityInputMergeLog.debug('txs.added', { count: input.entityTxs.length });
       }
 
       if (input.hashPrecommits) {
-        const existingPrecommits = existing.hashPrecommits || new Map<string, string[]>();
-        if (HEAVY_LOGS) {
-          entityInputMergeLog.debug('precommits.merge', {
-            incoming: input.hashPrecommits.size,
-            existing: existingPrecommits.size,
-            entity: entityShort,
-            signer: shortId(input.signerId || ''),
-          });
-        }
-        input.hashPrecommits.forEach((sigs, signerId) => {
-          if (HEAVY_LOGS) {
-            entityInputMergeLog.debug('precommit.added', {
-              signer: shortId(signerId),
-              signatures: sigs.length,
-            });
-          }
-        });
         existing.hashPrecommits = mergePrecommitBundles(existing.hashPrecommits, input.hashPrecommits);
-        if (HEAVY_LOGS) {
-          entityInputMergeLog.debug('precommits.result', { total: existing.hashPrecommits.size });
-        }
       }
 
       if (input.proposedFrame) {
@@ -393,26 +360,9 @@ export const mergeEntityInputs = (
         }
       }
 
-      if (HEAVY_LOGS) {
-        entityInputMergeLog.debug('input.merged', {
-          entity: shortId(input.entityId),
-          signer: shortId(input.signerId || ''),
-          txs: input.entityTxs?.length || 0,
-          hashPrecommits: input.hashPrecommits?.size || 0,
-          frame: Boolean(input.proposedFrame),
-        });
-      }
     } else {
       merged.set(key, { ...input });
     }
-  }
-
-  if (HEAVY_LOGS && duplicateCount > 0) {
-    entityInputMergeLog.debug('duplicates.deduped', {
-      duplicates: duplicateCount,
-      inputs: inputs.length,
-      merged: merged.size,
-    });
   }
 
   const mergedInputs = Array.from(merged.values());
