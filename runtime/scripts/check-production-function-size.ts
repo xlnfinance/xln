@@ -49,7 +49,6 @@ const COORDINATOR_DEBT: Readonly<Record<string, number>> = {
   "runtime/persistence/runtime-storage.ts::loadEnvFromStorage": 254,
   "runtime/protocol/dispute/proof-builder.ts::buildAccountProofBody": 172,
   "runtime/protocol/htlc/onion-advance.ts::validateHtlcOnionAdvanceTx": 213,
-  "runtime/push/store.ts::createPushStore": 179,
   "runtime/radapter/resolve.ts::projectGraphFrame": 175,
   "runtime/radapter/resolve.ts::resolveRuntimeAdapterRead": 154,
   "runtime/radapter/server.ts::handleRuntimeAdapterMessage": 302,
