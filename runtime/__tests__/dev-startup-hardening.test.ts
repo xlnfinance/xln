@@ -288,7 +288,7 @@ test('storage health measures the configured RDB and JDB shard roots', async () 
   const jdbRoot = join(root, 'jdb');
   const historyPath = join(root, 'health.json');
   const probe = await run('bun', ['-e', [
-    "const { getStorageHealth } = await import('./runtime/orchestrator/storage-monitor.ts');",
+    "const { getStorageHealth } = await import('./runtime/infra/storage-monitor.ts');",
     'const health = await getStorageHealth();',
     'console.log(JSON.stringify({ historyPath: health.historyPath, tracked: health.tracked.map(x => ({ name: x.name, path: x.path })) }));',
   ].join(' ')], {

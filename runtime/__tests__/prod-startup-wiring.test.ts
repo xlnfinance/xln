@@ -1904,7 +1904,7 @@ describe('production startup wiring', () => {
     expect(fatalHelper).toContain('/child\\.unexpected_exit/');
     expect(fatalHelper).toContain('export const E2E_FATAL_LOG_TAIL_LINES = 80;');
     expect(runner).toContain('const startFailFastLogMonitor = (');
-    expect(runner).toContain("import { assertMinDiskFree } from '../orchestrator/storage-monitor';");
+    expect(runner).toContain("import { assertMinDiskFree } from '../infra/storage-monitor';");
     expect(runner).toContain('const assertRunnerPreflight = async (): Promise<void> => {');
     expect(runner).toContain('assertMinDiskFree();');
     expect(runner).toContain('createIncrementalRuntimeFatalLogScanner,');

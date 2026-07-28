@@ -5,7 +5,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { Readable } from 'node:stream';
 
-import { assertMinDiskFree, getMinDiskFreeBytes } from '../orchestrator/storage-monitor';
+import { assertMinDiskFree, getMinDiskFreeBytes } from '../infra/storage-monitor';
 import { MAINNET_GATE } from './mainnet-gate-constants';
 import {
   cleanupTestArtifactsBeforeRun,

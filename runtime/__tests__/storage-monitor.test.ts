@@ -9,7 +9,7 @@ import {
   getMinDiskFreeBytes,
   isStoragePathMissingError,
   parseStorageHistory,
-} from '../orchestrator/storage-monitor';
+} from '../infra/storage-monitor';
 
 describe('storage monitor disk guard', () => {
   test('accepts free space equal to the required floor', () => {

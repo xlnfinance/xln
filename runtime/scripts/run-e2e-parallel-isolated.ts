@@ -49,7 +49,7 @@ import type {
   QaScenarioMetadata,
   QaTestCategory,
 } from '../qa/types';
-import { assertMinDiskFree } from '../orchestrator/storage-monitor';
+import { assertMinDiskFree } from '../infra/storage-monitor';
 import { compareStableText } from '../protocol/serialization';
 import { sanitizeChildProcessEnv } from '../server/child-process-env';
 import {

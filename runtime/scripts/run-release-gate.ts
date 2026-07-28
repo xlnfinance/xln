@@ -3,7 +3,7 @@
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import type { Readable } from 'node:stream';
 
-import { assertMinDiskFree, getMinDiskFreeBytes } from '../orchestrator/storage-monitor';
+import { assertMinDiskFree, getMinDiskFreeBytes } from '../infra/storage-monitor';
 import {
   cleanupTestArtifactsBeforeRun,
   TEST_ARTIFACT_CLEANUP_DONE_ENV,

@@ -37,7 +37,7 @@ import {
   encodeMarketWireMessage,
   type MarketWireRequest,
 } from '../relay/market-wire';
-import { assertMinDiskFree, getStorageHealth, getStorageHealthSnapshotSync } from './storage-monitor';
+import { assertMinDiskFree, getStorageHealth, getStorageHealthSnapshotSync } from '../infra/storage-monitor';
 import { maybeHandleQaRequest } from '../qa/api';
 import { serveRuntimeBundle, serveStatic } from '../server/static-assets';
 import { handleWatchtowerProxy } from '../server/watchtower-proxy';

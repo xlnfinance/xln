@@ -19,7 +19,7 @@ const REVERSE_DEPENDENCY_DEBT: Readonly<Record<string, number>> = {
   'entity->storage': 3,
   'protocol->account': 7,
   'protocol->entity': 2,
-  'server->orchestrator': 4,
+  'server->orchestrator': 2,
 };
 
 const collectFiles = (directory: string): string[] =>

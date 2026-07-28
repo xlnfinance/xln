@@ -1,5 +1,5 @@
 import type { AggregatedHealth } from './orchestrator-types';
-import type { StorageHealth } from './storage-monitor';
+import type { StorageHealth } from '../infra/storage-monitor';
 
 const toGiB = (bytes: number): number => Math.round((bytes / 1024 ** 3) * 100) / 100;
 
