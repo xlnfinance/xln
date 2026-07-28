@@ -390,6 +390,12 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   restore and dispute recovery before removing plaintext duplication.
 
 ## 4. Crash, corruption and load evidence — P1, open
+- [ ] Replace unchecked `JSON.parse(...) as Stored*` reads in push and
+  watchtower LevelDB stores with one strict decoder per persisted schema.
+  Reject malformed records loudly with the key and schema name, never coerce
+  corrupt financial-protection metadata to defaults, and prove behavior with
+  real LevelDB corruption/reopen tests. Ship each schema boundary separately;
+  do not add legacy or fallback decoders.
 - [ ] Add one real Anvil contract-event dispute E2E after payment, HTLC,
   same-J/cross-J swap and pull state. Exercise malformed/oversized optional
   transformer arguments, compare final Depository reserves/debts to the
