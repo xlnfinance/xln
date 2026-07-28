@@ -121,7 +121,8 @@ describe('standalone watchtower service', () => {
 
     expect(source).toContain("createStructuredLogger('watchtower.standalone')");
     expect(source).toContain('WATCHTOWER_CORS_HEADERS');
-    expect(source).toContain("if (req.method === 'OPTIONS')");
+    expect(source).toContain('const handleWatchtowerRequest');
+    expect(source).toContain("request.method === 'OPTIONS'");
     expect(source).toContain("watchtowerLog.info('service.listen'");
     expect(source).toContain("watchtowerLog.error('sweep.failed'");
     expect(source).toContain("watchtowerLog.error('push_sweep.failed'");

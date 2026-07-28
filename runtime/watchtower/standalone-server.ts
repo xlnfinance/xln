@@ -56,6 +56,17 @@ type SweepScheduler = {
   close: () => void;
 };
 
+type StandaloneWatchtowerContext = {
+  options: StandaloneWatchtowerOptions;
+  store: WatchtowerStore;
+  pushStore: PushStore | null;
+  pushSender: ReturnType<typeof createPushSender>;
+  scheduler: SweepScheduler;
+  pushScheduler: SweepScheduler;
+  operatorApiEnabled: boolean;
+  operatorToken: string;
+};
+
 const SWEEP_PRUNE_INTERVAL_MS = 60 * 60 * 1000;
 const watchtowerLog = createStructuredLogger('watchtower.standalone');
 const WATCHTOWER_CORS_HEADERS = {
@@ -227,7 +238,157 @@ const startPushWatchScheduler = (
   };
 };
 
+const operatorAllowed = (
+  context: StandaloneWatchtowerContext,
+  request: Request,
+): boolean => {
+  if (!context.operatorApiEnabled) return false;
+  if (!context.operatorToken) return true;
+  return request.headers.get('authorization') === `Bearer ${context.operatorToken}`
+    || request.headers.get('x-watchtower-operator-token') === context.operatorToken;
+};
+
+const operatorDenied = (context: StandaloneWatchtowerContext): Response =>
+  new Response(JSON.stringify({
+    ok: false,
+    error: context.operatorApiEnabled
+      ? 'WATCHTOWER_OPERATOR_AUTH_REQUIRED'
+      : 'WATCHTOWER_OPERATOR_API_DISABLED',
+  }), {
+    status: context.operatorApiEnabled ? 401 : 404,
+    headers: WATCHTOWER_JSON_HEADERS,
+  });
+
+const pushDisabled = (): Response => new Response(JSON.stringify({
+  ok: false,
+  error: 'WATCHTOWER_PUSH_WAKE_DISABLED',
+}), {
+  status: 404,
+  headers: WATCHTOWER_JSON_HEADERS,
+});
+
+const handleHealth = async (
+  context: StandaloneWatchtowerContext,
+): Promise<Response> => {
+  const { store, pushStore, pushSender, scheduler, pushScheduler } = context;
+  const stats = await store.getStats();
+  const pushStats = pushStore ? await pushStore.getStats() : null;
+  return new Response(JSON.stringify({
+    ok: true,
+    service: 'xln-watchtower',
+    towerId: store.towerId,
+    signerAddress: store.signerAddress,
+    maxStoredBytesPerLookupKey: store.maxStoredBytesPerLookupKey,
+    maxBundlesPerLookupKey: store.maxBundlesPerLookupKey,
+    sweep: { enabled: scheduler.enabled, intervalMs: scheduler.intervalMs },
+    pushWake: {
+      enabled: pushScheduler.enabled,
+      intervalMs: pushScheduler.intervalMs,
+      sender: pushSender.kind,
+      ...(pushStats ? { stats: pushStats } : {}),
+    },
+    operatorApi: {
+      enabled: context.operatorApiEnabled,
+      auth: context.operatorToken ? 'bearer' : 'local-only',
+    },
+    stats,
+  }), { headers: WATCHTOWER_JSON_HEADERS });
+};
+
+const handlePublicTowerRoute = async (
+  context: StandaloneWatchtowerContext,
+  request: Request,
+  pathname: string,
+): Promise<Response | null> => {
+  const { store } = context;
+  if (pathname === '/api/tower/appointment' && request.method === 'PUT') {
+    return withCors(await handleTowerAppointment(request, store));
+  }
+  if (pathname === '/api/tower/restore' && request.method === 'POST') {
+    return withCors(await handleTowerRestore(request, store));
+  }
+  const receiptMatch = pathname.match(/^\/api\/tower\/receipt\/([^/]+)$/);
+  if (receiptMatch && request.method === 'GET') {
+    return withCors(await handleTowerReceipt(decodeURIComponent(receiptMatch[1] || ''), store));
+  }
+  if (pathname === '/api/recovery/discover' && request.method === 'POST') {
+    return withCors(await handleRecoveryDiscover(request, store));
+  }
+  if (pathname === '/api/recovery/state' && request.method === 'POST') {
+    return withCors(await handleRecoveryState(request, store));
+  }
+  if (pathname === '/api/recovery/complaint' && request.method === 'POST') {
+    return withCors(await handleRecoveryComplaint(request, store));
+  }
+  return null;
+};
+
+const handleOperatorRoute = async (
+  context: StandaloneWatchtowerContext,
+  request: Request,
+  pathname: string,
+): Promise<Response | null> => {
+  if (pathname === '/api/watchtower/sweep' && request.method === 'POST') {
+    if (!operatorAllowed(context, request)) return operatorDenied(context);
+    return withCors(await handleWatchtowerSweep(request, context.store, {
+      ...(context.options.towerPrivateKey
+        ? { towerPrivateKey: context.options.towerPrivateKey }
+        : {}),
+    }));
+  }
+  const receiptMatch = pathname.match(/^\/api\/watchtower\/actions\/([^/]+)$/);
+  if (!receiptMatch || request.method !== 'GET') return null;
+  if (!operatorAllowed(context, request)) return operatorDenied(context);
+  return withCors(await handleWatchtowerActions(
+    decodeURIComponent(receiptMatch[1] || ''),
+    context.store,
+  ));
+};
+
+const handlePushRoute = async (
+  context: StandaloneWatchtowerContext,
+  request: Request,
+  pathname: string,
+): Promise<Response | null> => {
+  if (pathname === '/api/push/register' && (request.method === 'PUT' || request.method === 'POST')) {
+    if (!context.pushStore) return pushDisabled();
+    return withCors(await handlePushRegister(request, context.pushStore));
+  }
+  if (pathname !== '/api/push/unregister' || request.method !== 'POST') return null;
+  if (!context.pushStore) return pushDisabled();
+  return withCors(await handlePushUnregister(request, context.pushStore));
+};
+
+const handleWatchtowerRequest = async (
+  context: StandaloneWatchtowerContext,
+  request: Request,
+): Promise<Response> => {
+  const pathname = new URL(request.url).pathname;
+  if (request.method === 'OPTIONS') {
+    return new Response(null, { status: 204, headers: WATCHTOWER_CORS_HEADERS });
+  }
+  if (pathname === '/' || pathname === '/healthz' || pathname === '/api/tower/healthz') {
+    return handleHealth(context);
+  }
+  const publicResponse = await handlePublicTowerRoute(context, request, pathname);
+  if (publicResponse) return publicResponse;
+  const operatorResponse = await handleOperatorRoute(context, request, pathname);
+  if (operatorResponse) return operatorResponse;
+  const pushResponse = await handlePushRoute(context, request, pathname);
+  return pushResponse ?? new Response('Not found', {
+    status: 404,
+    headers: WATCHTOWER_CORS_HEADERS,
+  });
+};
+
 export const startStandaloneWatchtowerServer = (options: StandaloneWatchtowerOptions): StandaloneWatchtowerServer => {
+  const bindHost = options.host || '0.0.0.0';
+  const operatorApiEnabled = options.enableOperatorApi === true;
+  const operatorToken = String(options.operatorToken || '').trim();
+  const localOperatorHost = bindHost === '127.0.0.1' || bindHost === 'localhost' || bindHost === '::1';
+  if (operatorApiEnabled && !operatorToken && !localOperatorHost) {
+    throw new Error('WATCHTOWER_OPERATOR_TOKEN_REQUIRED_FOR_PUBLIC_BIND');
+  }
   const store = createWatchtowerStore({
     ...(options.towerId ? { towerId: options.towerId } : {}),
     ...(options.dbPath ? { dbPath: options.dbPath } : {}),
@@ -255,120 +416,21 @@ export const startStandaloneWatchtowerServer = (options: StandaloneWatchtowerOpt
         ...(options.allowedRpcUrls ? { allowedRpcUrls: options.allowedRpcUrls } : {}),
       })
     : { enabled: false, intervalMs: 0, close: () => {} };
-  const operatorApiEnabled = options.enableOperatorApi === true;
-  const operatorToken = String(options.operatorToken || '').trim();
-  const bindHost = options.host || '0.0.0.0';
-  const localOperatorHost = bindHost === '127.0.0.1' || bindHost === 'localhost' || bindHost === '::1';
-  if (operatorApiEnabled && !operatorToken && !localOperatorHost) {
-    throw new Error('WATCHTOWER_OPERATOR_TOKEN_REQUIRED_FOR_PUBLIC_BIND');
-  }
-
-  const operatorAllowed = (req: Request): boolean => {
-    if (!operatorApiEnabled) return false;
-    if (!operatorToken) return true;
-    return req.headers.get('authorization') === `Bearer ${operatorToken}`
-      || req.headers.get('x-watchtower-operator-token') === operatorToken;
+  const context: StandaloneWatchtowerContext = {
+    options,
+    store,
+    pushStore,
+    pushSender,
+    scheduler,
+    pushScheduler,
+    operatorApiEnabled,
+    operatorToken,
   };
-
-  const operatorDenied = (): Response => new Response(JSON.stringify({
-    ok: false,
-    error: operatorApiEnabled ? 'WATCHTOWER_OPERATOR_AUTH_REQUIRED' : 'WATCHTOWER_OPERATOR_API_DISABLED',
-  }), {
-    status: operatorApiEnabled ? 401 : 404,
-    headers: WATCHTOWER_JSON_HEADERS,
-  });
-
-  const pushDisabled = (): Response => new Response(JSON.stringify({
-    ok: false,
-    error: 'WATCHTOWER_PUSH_WAKE_DISABLED',
-  }), {
-    status: 404,
-    headers: WATCHTOWER_JSON_HEADERS,
-  });
 
   const server = Bun.serve({
     hostname: bindHost,
     port: options.port,
-    async fetch(req) {
-      const url = new URL(req.url);
-      const pathname = url.pathname;
-
-      if (req.method === 'OPTIONS') {
-        return new Response(null, { status: 204, headers: WATCHTOWER_CORS_HEADERS });
-      }
-
-      if (pathname === '/' || pathname === '/healthz' || pathname === '/api/tower/healthz') {
-        const stats = await store.getStats();
-        const pushStats = pushStore ? await pushStore.getStats() : null;
-        return new Response(JSON.stringify({
-          ok: true,
-          service: 'xln-watchtower',
-          towerId: store.towerId,
-          signerAddress: store.signerAddress,
-          maxStoredBytesPerLookupKey: store.maxStoredBytesPerLookupKey,
-          maxBundlesPerLookupKey: store.maxBundlesPerLookupKey,
-          sweep: {
-            enabled: scheduler.enabled,
-            intervalMs: scheduler.intervalMs,
-          },
-          pushWake: {
-            enabled: pushScheduler.enabled,
-            intervalMs: pushScheduler.intervalMs,
-            sender: pushSender.kind,
-            ...(pushStats ? { stats: pushStats } : {}),
-          },
-          operatorApi: {
-            enabled: operatorApiEnabled,
-            auth: operatorToken ? 'bearer' : 'local-only',
-          },
-          stats,
-        }), {
-          headers: WATCHTOWER_JSON_HEADERS,
-        });
-      }
-
-      if (pathname === '/api/tower/appointment' && req.method === 'PUT') {
-        return withCors(await handleTowerAppointment(req, store));
-      }
-      if (pathname === '/api/tower/restore' && req.method === 'POST') {
-        return withCors(await handleTowerRestore(req, store));
-      }
-      const towerReceiptMatch = pathname.match(/^\/api\/tower\/receipt\/([^/]+)$/);
-      if (towerReceiptMatch && req.method === 'GET') {
-        return withCors(await handleTowerReceipt(decodeURIComponent(towerReceiptMatch[1] || ''), store));
-      }
-      if (pathname === '/api/recovery/discover' && req.method === 'POST') {
-        return withCors(await handleRecoveryDiscover(req, store));
-      }
-      if (pathname === '/api/recovery/state' && req.method === 'POST') {
-        return withCors(await handleRecoveryState(req, store));
-      }
-      if (pathname === '/api/recovery/complaint' && req.method === 'POST') {
-        return withCors(await handleRecoveryComplaint(req, store));
-      }
-      if (pathname === '/api/watchtower/sweep' && req.method === 'POST') {
-        if (!operatorAllowed(req)) return operatorDenied();
-        return withCors(await handleWatchtowerSweep(req, store, {
-          ...(options.towerPrivateKey ? { towerPrivateKey: options.towerPrivateKey } : {}),
-        }));
-      }
-      const actionReceiptMatch = pathname.match(/^\/api\/watchtower\/actions\/([^/]+)$/);
-      if (actionReceiptMatch && req.method === 'GET') {
-        if (!operatorAllowed(req)) return operatorDenied();
-        return withCors(await handleWatchtowerActions(decodeURIComponent(actionReceiptMatch[1] || ''), store));
-      }
-
-      if (pathname === '/api/push/register' && (req.method === 'PUT' || req.method === 'POST')) {
-        if (!pushStore) return pushDisabled();
-        return withCors(await handlePushRegister(req, pushStore));
-      }
-      if (pathname === '/api/push/unregister' && req.method === 'POST') {
-        if (!pushStore) return pushDisabled();
-        return withCors(await handlePushUnregister(req, pushStore));
-      }
-
-      return new Response('Not found', { status: 404, headers: WATCHTOWER_CORS_HEADERS });
-    },
+    fetch: request => handleWatchtowerRequest(context, request),
   });
 
   watchtowerLog.info('service.listen', {

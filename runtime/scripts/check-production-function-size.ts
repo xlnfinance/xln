@@ -62,7 +62,6 @@ const COORDINATOR_DEBT: Readonly<Record<string, number>> = {
   "runtime/validation-utils.ts::validateEntityReplica": 247,
   "runtime/validation-utils.ts::validateEntityState": 368,
   "runtime/watchtower/action.ts::runWatchtowerSweep": 159,
-  "runtime/watchtower/standalone-server.ts::startStandaloneWatchtowerServer": 164,
   "runtime/watchtower/store.ts::createWatchtowerStore": 372,
 };
 
