@@ -21,9 +21,6 @@ import {
 import { setBrowserVMJurisdiction } from './jadapter';
 import { createGossipLayer } from './networking/gossip';
 import { attachEventEmitters, clearPendingAuditEvents, flushPendingAuditEvents } from './runtime/env-events';
-import { recordRuntimeSecurityIncident } from './runtime/security-incidents';
-import { accountInputAck, accountInputProposal } from './account/consensus/flush';
-import { getEffectiveEntityInputTxs } from './entity/consensus/output-envelope';
 import {
   deriveSignerAddressSync,
   deriveSignerKeySync,
@@ -35,11 +32,6 @@ import {
   splitRoutedOutputByDeliveryLane,
 } from './runtime/output-routing';
 import { collectDueLocalProfileCertificationInputs } from './networking/local-profile-lifecycle';
-import {
-  selectMatchedCrossJAccountInputPairs,
-  selectPotentialCrossJAccountInputPairs,
-  type RuntimeEntityRoutingDeps,
-} from './runtime/entity-routing';
 import {
   assertScheduledWakeTxAuthorized,
 } from './runtime/scheduled-wake';
@@ -57,7 +49,7 @@ import {
 import { reliableIdentityExactKey } from './runtime/reliable-frontier';
 import { mergeDurableReceiptOnlyInputs } from './runtime/reliable-durable-inputs';
 import { applyRuntimeTx } from './runtime/tx-handlers';
-import { applyMergedEntityInputs, RuntimeEntityInputApplyError } from './runtime/entity-inputs';
+import { applyMergedEntityInputs } from './runtime/entity-inputs';
 import { safeStringify } from './protocol/serialization';
 import { validateJInputs } from './wal/runtime-machine-schema/j';
 import {
@@ -96,7 +88,6 @@ import {
 } from './runtime/command-api';
 import {
   cloneRuntimeFrameMempool,
-  cloneRuntimeFrameWorkingEnv,
   createRuntimeFrameTransaction,
   publishRuntimeFrameTransaction,
   runtimeInputHasQueuedWork,
@@ -121,6 +112,17 @@ import { runCommittedRuntimeEffects } from './runtime/frame/post-commit';
 import { prepareRuntimeFrameInput } from './runtime/frame/prepare';
 import { prepareRuntimeFrameCommit } from './runtime/frame/snapshot';
 import { startRuntimeFrame } from './runtime/frame/start';
+import {
+  atomicCrossJPairIndexesThatDidNotCommit,
+  prepareAtomicCrossJAccountInputs,
+  selectPotentialAtomicCrossJInputIndexes,
+} from './runtime/frame/cross-j-preflight';
+import {
+  markCommittedAtomicCrossJAckOutputs,
+  summarizeAtomicCrossJAccountInput,
+} from './runtime/frame/cross-j-evidence';
+
+export { prepareAtomicCrossJAccountInputs };
 
 const runtimeLog = createStructuredLogger('runtime');
 
@@ -294,291 +296,6 @@ const notifyRuntimeFrameCommitted = (env: Env, runtimeInput: RuntimeInput): void
   }
 };
 
-const crossJPairIndexesThatDidNotCommit = (
-  pairs: ReturnType<typeof selectMatchedCrossJAccountInputPairs>['pairs'],
-  outcomes: Awaited<ReturnType<typeof applyMergedEntityInputs>>['inputOutcomes'],
-): Set<number> => {
-  const committed = new Map(
-    outcomes
-      .filter(entry => entry.outcome.kind === 'committed' && entry.entityFrameCommitted)
-      .map(entry => [entry.inputIndex, entry]),
-  );
-  const exactAccountFrameCommitted = (
-    inputIndex: number,
-    expected: ReturnType<typeof selectMatchedCrossJAccountInputPairs>['pairs'][number]['sourceAccountFrame'],
-  ): boolean =>
-    committed
-      .get(inputIndex)
-      ?.committedAccountFrames.some(
-        frame =>
-          frame.counterpartyEntityId === expected.counterpartyEntityId.toLowerCase() &&
-          frame.height === expected.height &&
-          frame.stateHash === expected.stateHash.toLowerCase(),
-      ) === true;
-  return new Set(
-    pairs
-      .filter(
-        pair =>
-          !exactAccountFrameCommitted(pair.sourceInputIndex, pair.sourceAccountFrame) ||
-          !exactAccountFrameCommitted(pair.targetInputIndex, pair.targetAccountFrame),
-      )
-      .flatMap(pair => [pair.sourceInputIndex, pair.targetInputIndex]),
-  );
-};
-
-const crossJAccountFrameMatches = (
-  env: Env,
-  expected: ReturnType<typeof selectMatchedCrossJAccountInputPairs>['pairs'][number]['sourceAccountFrame'],
-): boolean => {
-  const replica = [...env.eReplicas.values()].find(
-    candidate =>
-      candidate.entityId.toLowerCase() === expected.entityId.toLowerCase() &&
-      candidate.signerId.toLowerCase() === expected.signerId.toLowerCase(),
-  );
-  const account = [...(replica?.state.accounts.entries() ?? [])].find(
-    ([counterpartyId]) => counterpartyId.toLowerCase() === expected.counterpartyEntityId.toLowerCase(),
-  )?.[1];
-  return (
-    account?.currentFrame.height === expected.height &&
-    String(account.currentFrame.stateHash || '').toLowerCase() === expected.stateHash.toLowerCase()
-  );
-};
-
-const markCommittedCrossJAtomicAckOutputs = (
-  outputs: RoutedEntityInput[],
-  pairs: ReturnType<typeof selectMatchedCrossJAccountInputPairs>['pairs'],
-): void => {
-  for (const pair of pairs) {
-    if (pair.phase !== 'proposal') continue;
-    const expectedFrames = [pair.sourceAccountFrame, pair.targetAccountFrame];
-    const matched = expectedFrames.map(expected =>
-      outputs.filter(
-        output =>
-          output.entityId.toLowerCase() === expected.counterpartyEntityId.toLowerCase() &&
-          getEffectiveEntityInputTxs(output).some(tx => {
-            if (tx.type !== 'accountInput') return false;
-            const ack = accountInputAck(tx.data);
-            return Boolean(
-              ack &&
-              tx.data.fromEntityId.toLowerCase() === expected.entityId.toLowerCase() &&
-              tx.data.toEntityId.toLowerCase() === expected.counterpartyEntityId.toLowerCase() &&
-              ack.height === expected.height &&
-              String(ack.frameHash || '').toLowerCase() === expected.stateHash.toLowerCase(),
-            );
-          }),
-      ),
-    );
-    if (matched.some(candidates => candidates.length !== 1) || matched[0]![0] === matched[1]![0]) {
-      throw new Error(`RUNTIME_CROSS_J_ATOMIC_ACK_OUTPUTS_INVALID:${pair.pairKey}`);
-    }
-    for (const output of [matched[0]![0]!, matched[1]![0]!]) {
-      output.atomicCrossJurisdictionPair = { phase: 'ack', pairKey: pair.pairKey };
-    }
-  }
-};
-
-const summarizeCrossJAccountInput = (input: RoutedEntityInput, inputIndex: number) => ({
-  inputIndex,
-  entityId: input.entityId,
-  signerId: input.signerId,
-  fromRuntimeId: input.from ?? '',
-  sourceRuntimeFrame: input.sourceRuntimeFrame ?? null,
-  accountInputs: getEffectiveEntityInputTxs(input).flatMap(tx => {
-    if (tx.type !== 'accountInput') return [];
-    const ack = accountInputAck(tx.data);
-    const proposal = accountInputProposal(tx.data);
-    const crossPulls =
-      proposal?.frame.accountTxs.flatMap(accountTx => {
-        if (accountTx.type !== 'pull_lock' || !accountTx.data.crossJurisdiction) return [];
-        return [
-          {
-            leg: accountTx.data.crossJurisdiction.leg,
-            orderId: accountTx.data.crossJurisdiction.orderId,
-            routeHash: accountTx.data.crossJurisdiction.routeHash,
-          },
-        ];
-      }) ?? [];
-    return [
-      {
-        kind: tx.data.kind,
-        fromEntityId: tx.data.fromEntityId,
-        toEntityId: tx.data.toEntityId,
-        ackHeight: ack?.height ?? null,
-        proposalHeight: proposal?.frame.height ?? null,
-        crossPulls,
-      },
-    ];
-  }),
-});
-
-const groupAtomicCrossJAccountInputsFirst = (
-  env: Env,
-  selection: ReturnType<typeof selectMatchedCrossJAccountInputPairs>,
-): ReturnType<typeof selectMatchedCrossJAccountInputPairs> => {
-  if (selection.pairs.length === 0) return selection;
-  const orderedPairs = [...selection.pairs].sort(
-    (left, right) =>
-      Math.min(left.sourceInputIndex, left.targetInputIndex) - Math.min(right.sourceInputIndex, right.targetInputIndex),
-  );
-  const pairedIndexes = new Set(orderedPairs.flatMap(pair => [pair.sourceInputIndex, pair.targetInputIndex]));
-  if (pairedIndexes.size !== orderedPairs.length * 2) {
-    throw new Error('RUNTIME_CROSS_J_ACCOUNT_PAIR_INPUT_OVERLAP');
-  }
-  const groupedInputs = [
-    ...orderedPairs.flatMap(pair =>
-      [pair.sourceInputIndex, pair.targetInputIndex]
-        .sort((left, right) => left - right)
-        .map(inputIndex => selection.inputs[inputIndex]!),
-    ),
-    ...selection.inputs.filter((_input, inputIndex) => !pairedIndexes.has(inputIndex)),
-  ];
-  const grouped = selectMatchedCrossJAccountInputPairs(env, groupedInputs);
-  if (grouped.droppedInputIndexes.length > 0 || grouped.pairs.length !== selection.pairs.length) {
-    throw new Error('RUNTIME_CROSS_J_ACCOUNT_PAIR_GROUPING_DIVERGED');
-  }
-  return grouped;
-};
-
-export const prepareAtomicCrossJAccountInputs = async (
-  env: Env,
-  inputs: readonly RoutedEntityInput[],
-  initialJOutbox: JInput[],
-  isReplay: boolean,
-  routingDeps: RuntimeEntityRoutingDeps,
-): Promise<{
-  inputs: RoutedEntityInput[];
-  pairs: ReturnType<typeof selectMatchedCrossJAccountInputPairs>['pairs'];
-}> => {
-  const initial = selectMatchedCrossJAccountInputPairs(env, inputs);
-  if (initial.pairs.length > 0) {
-    runtimeLog.info('crossj.atomic_pair_preflight', {
-      inputCount: inputs.length,
-      pairCount: initial.pairs.length,
-      pairs: initial.pairs.map(pair => ({
-        sourceInputIndex: pair.sourceInputIndex,
-        targetInputIndex: pair.targetInputIndex,
-        sourceHeight: pair.sourceAccountFrame.height,
-        targetHeight: pair.targetAccountFrame.height,
-      })),
-    });
-  }
-  if (initial.droppedInputIndexes.length > 0) {
-    if (isReplay) throw new Error('RUNTIME_REPLAY_CROSS_J_ACCOUNT_PAIR_INVALID');
-    const droppedInputs = initial.droppedInputIndexes.map(inputIndex =>
-      summarizeCrossJAccountInput(inputs[inputIndex]!, inputIndex),
-    );
-    env.warn('network', 'CROSS_J_ACCOUNT_PAIR_STRUCTURAL_MISMATCH', {
-      received: inputs.length,
-      droppedInputIndexes: initial.droppedInputIndexes,
-      // Keep one flat canonical string: Bun's structured console formatter
-      // collapses nested objects to `[Object ...]`, which destroyed the exact
-      // ACK/proposal/frame evidence needed to diagnose a rejected money leg.
-      inputSummary: safeStringify(inputs.map(summarizeCrossJAccountInput)),
-    });
-    for (const dropped of droppedInputs) {
-      recordRuntimeSecurityIncident(env, {
-        domain: 'cross-j',
-        code: 'CROSS_J_ACCOUNT_PAIR_STRUCTURAL_MISMATCH',
-        source: 'remote-ingress',
-        severity: 'warning',
-        summary: 'A cross-j Account leg arrived without its exact atomic sibling leg and was ignored',
-        entityId: dropped.entityId,
-      });
-    }
-  }
-  let retained = initial.inputs;
-  for (let attempt = 0; attempt <= initial.pairs.length; attempt += 1) {
-    const selected = selectMatchedCrossJAccountInputPairs(env, retained);
-    const selection = groupAtomicCrossJAccountInputsFirst(env, selected);
-    if (selection.droppedInputIndexes.length > 0) {
-      throw new Error('RUNTIME_CROSS_J_ACCOUNT_PAIR_SELECTION_UNSTABLE');
-    }
-    if (isReplay || selection.pairs.length === 0) return selection;
-    const pairedInputCount = selection.pairs.length * 2;
-    const pairedSelection = selectMatchedCrossJAccountInputPairs(env, selection.inputs.slice(0, pairedInputCount));
-    if (pairedSelection.droppedInputIndexes.length > 0 || pairedSelection.pairs.length !== selection.pairs.length) {
-      throw new Error('RUNTIME_CROSS_J_ACCOUNT_PAIR_PREFLIGHT_GROUP_INVALID');
-    }
-    const previewEnv = cloneRuntimeFrameWorkingEnv(env);
-    let failedIndexes: Set<number>;
-    let failureDetail = '';
-    try {
-      const preview = await applyMergedEntityInputs(previewEnv, pairedSelection.inputs, initialJOutbox, {
-        isReplay: false,
-        routingDeps,
-      });
-      failedIndexes = crossJPairIndexesThatDidNotCommit(pairedSelection.pairs, preview.inputOutcomes);
-      if (failedIndexes.size > 0) {
-        failureDetail = safeStringify({
-          outcomes: preview.inputOutcomes.map(entry => ({
-            inputIndex: entry.inputIndex,
-            kind: entry.outcome.kind,
-            entityFrameCommitted: entry.entityFrameCommitted,
-            committedAccountFrames: entry.committedAccountFrames,
-          })),
-          localCrossJurisdictionEvents: preview.localCrossJurisdictionEventTrace.map(input => ({
-            entityId: input.entityId,
-            txTypes: getEffectiveEntityInputTxs(input).map(tx => tx.type),
-          })),
-        });
-      }
-    } catch (error) {
-      if (!(error instanceof RuntimeEntityInputApplyError) || !error.isRemoteIngress) throw error;
-      failureDetail = error.message;
-      const failedInputIndex = pairedSelection.inputs.findIndex(
-        input =>
-          input.entityId.toLowerCase() === error.entityId.toLowerCase() &&
-          input.signerId.toLowerCase() === error.signerId.toLowerCase() &&
-          String(input.from ?? '')
-            .trim()
-            .toLowerCase() === error.sourceRuntimeId.toLowerCase() &&
-          input.sourceRuntimeFrame?.height === error.sourceRuntimeHeight &&
-          input.sourceRuntimeFrame?.timestamp === error.sourceRuntimeTimestamp,
-      );
-      const failedPair = pairedSelection.pairs.find(
-        pair => pair.sourceInputIndex === failedInputIndex || pair.targetInputIndex === failedInputIndex,
-      );
-      // Only the exact two-leg remote cohort is soft-rejected. A tempting
-      // catch-all here would hide an unrelated Runtime/Entity invariant failure.
-      if (!failedPair) throw error;
-      failedIndexes = new Set([failedPair.sourceInputIndex, failedPair.targetInputIndex]);
-    }
-    for (const pair of pairedSelection.pairs) {
-      if (
-        crossJAccountFrameMatches(env, pair.sourceAccountFrame) ||
-        crossJAccountFrameMatches(env, pair.targetAccountFrame)
-      ) {
-        failedIndexes.add(pair.sourceInputIndex);
-        failedIndexes.add(pair.targetInputIndex);
-      }
-    }
-    if (failedIndexes.size === 0) return selection;
-    env.warn('network', 'CROSS_J_ACCOUNT_PAIR_PREVIEW_REJECTED', {
-      attempt,
-      pairCount: pairedSelection.pairs.length,
-      droppedInputIndexes: [...failedIndexes].sort((left, right) => left - right),
-      failureDetail,
-    });
-    for (const pair of pairedSelection.pairs) {
-      const pairIndexes = [pair.sourceInputIndex, pair.targetInputIndex];
-      if (!pairIndexes.some(inputIndex => failedIndexes.has(inputIndex))) continue;
-      for (const inputIndex of pairIndexes) {
-        const rejectedInput = pairedSelection.inputs[inputIndex]!;
-        recordRuntimeSecurityIncident(env, {
-          domain: 'cross-j',
-          code: 'CROSS_J_ACCOUNT_PAIR_PREVIEW_REJECTED',
-          source: 'remote-ingress',
-          severity: 'warning',
-          summary: 'A signed cross-j Account pair failed atomic scratch-state validation and was ignored',
-          entityId: rejectedInput.entityId,
-        });
-      }
-    }
-    retained = selection.inputs.filter((_input, inputIndex) => !failedIndexes.has(inputIndex));
-  }
-  throw new Error('RUNTIME_CROSS_J_ACCOUNT_PAIR_PREFLIGHT_DID_NOT_CONVERGE');
-};
-
 const applyRuntimeInput = async (
   env: Env,
   runtimeInput: RuntimeInput,
@@ -692,10 +409,8 @@ const applyRuntimeInput = async (
       runtimeId: string;
       receipt: ReliableDeliveryReceipt;
     }> = [];
-    const atomicCrossJInputIndexes = new Set(
-      selectPotentialCrossJAccountInputPairs(validatedEntityInputs)
-        .flatMap(pair => [pair.sourceInputIndex, pair.targetInputIndex]),
-    );
+    const atomicCrossJInputIndexes =
+      selectPotentialAtomicCrossJInputIndexes(validatedEntityInputs);
     const admittedEntityInputs: RoutedEntityInput[] = [];
     for (const [inputIndex, input] of validatedEntityInputs.entries()) {
       const sourceRuntimeId = normalizeRuntimeId(input.from);
@@ -794,20 +509,20 @@ const applyRuntimeInput = async (
         outputSummary: safeStringify(
           appliedEntityBatch.entityOutbox.map((output, outputIndex) => ({
             outputIndex,
-            ...summarizeCrossJAccountInput(output, outputIndex),
+            ...summarizeAtomicCrossJAccountInput(output, outputIndex),
           })),
         ),
       });
     }
     markApplyProfile('entityApply');
-    const failedAtomicIndexes = crossJPairIndexesThatDidNotCommit(
+    const failedAtomicIndexes = atomicCrossJPairIndexesThatDidNotCommit(
       preparedEntityInputs.pairs,
       appliedEntityBatch.inputOutcomes,
     );
     if (failedAtomicIndexes.size > 0) {
       throw new Error('RUNTIME_CROSS_J_ACCOUNT_PAIR_COMMIT_DIVERGED_FROM_PREFLIGHT');
     }
-    markCommittedCrossJAtomicAckOutputs(appliedEntityBatch.entityOutbox, preparedEntityInputs.pairs);
+    markCommittedAtomicCrossJAckOutputs(appliedEntityBatch.entityOutbox, preparedEntityInputs.pairs);
     const { entityOutbox, appliedEntityInputs, entityFrameCommitted, jOutbox } = appliedEntityBatch;
 
     // Reliable receiver authority is part of the R-machine post-state, not a
