@@ -19,7 +19,7 @@ export const admitLocalAccountTx = (
   tx: AccountTx,
 ): boolean => {
   if (tx.type === 'direct_payment') {
-    appendAccountMempoolTx(account, tx, 'accountMachine:localPayment');
+    appendAccountMempoolTx(account, tx, 'account:localPayment');
     return true;
   }
 
@@ -30,7 +30,7 @@ export const admitLocalAccountTx = (
   for (const pendingTx of account.pendingFrame?.accountTxs ?? []) {
     if (txFingerprint(pendingTx) === fingerprint) return false;
   }
-  appendAccountMempoolTx(account, tx, 'accountMachine:localLifecycle');
+  appendAccountMempoolTx(account, tx, 'account:localLifecycle');
   return true;
 };
 

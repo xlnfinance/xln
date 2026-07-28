@@ -18,7 +18,7 @@ import { recordSwapCancelRequested } from './swap-history';
 const swapCancelLog = createStructuredLogger('account.swap');
 
 export async function handleSwapCancelRequest(
-  accountMachine: AccountState,
+  account: AccountState,
   accountTx: Extract<AccountTx, { type: 'swap_cancel_request' }>,
   byLeft: boolean,
   _currentHeight: number,
@@ -28,10 +28,10 @@ export async function handleSwapCancelRequest(
   const events: string[] = [];
 
   // 1. Find offer
-  if (!accountMachine.swapOffers) {
+  if (!account.swapOffers) {
     return { success: false, error: `No swap offers exist`, events };
   }
-  const offer = accountMachine.swapOffers.get(offerId);
+  const offer = account.swapOffers.get(offerId);
   if (!offer) {
     return { success: false, error: `Offer ${offerId} not found`, events };
   }
@@ -46,6 +46,6 @@ export async function handleSwapCancelRequest(
   // 3. Emit request event (used by hub orderbook cancel flow)
   events.push(`📨 Swap cancel requested: ${offerId.slice(0, 8)}...`);
   swapCancelLog.debug('cancel_request.accepted', { offer: shortOrder(offerId, 8), phase: isValidation ? 'validation' : 'commit' });
-  recordSwapCancelRequested(accountMachine, offerId, _currentHeight);
+  recordSwapCancelRequested(account, offerId, _currentHeight);
   return { success: true, events, swapOfferCancelRequested: { offerId } };
 }

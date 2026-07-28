@@ -20,7 +20,7 @@ import { isHtlcTimelockExpired } from '../../htlc-deadline';
 import { encryptedHtlcLayer, hashEncryptedHtlcLayer } from '../../../protocol/htlc/onion-advance';
 
 export async function handleHtlcLock(
-  accountMachine: AccountState,
+  account: AccountState,
   accountTx: Extract<AccountTx, { type: 'htlc_lock' }>,
   byLeft: boolean,
   currentTimestamp: number,
@@ -31,15 +31,15 @@ export async function handleHtlcLock(
   const events: string[] = [];
 
   // Initialize locks Map if not present (defensive - should be initialized at account creation)
-  if (!accountMachine.locks) {
-    accountMachine.locks = new Map();
+  if (!account.locks) {
+    account.locks = new Map();
   }
 
   // 1. Validate lockId uniqueness
-  if (accountMachine.locks.has(lockId)) {
+  if (account.locks.has(lockId)) {
     return { success: false, error: `Lock ${lockId} already exists`, events };
   }
-  if (accountMachine.locks.size >= LIMITS.MAX_ACCOUNT_HTLC_LOCKS) {
+  if (account.locks.size >= LIMITS.MAX_ACCOUNT_HTLC_LOCKS) {
     return {
       success: false,
       error: `Too many active HTLC locks: max ${LIMITS.MAX_ACCOUNT_HTLC_LOCKS}`,
@@ -69,7 +69,7 @@ export async function handleHtlcLock(
     };
   }
 
-  const delta = ensureDelta(accountMachine, tokenId);
+  const delta = ensureDelta(account, tokenId);
 
   // 5. Determine sender perspective (Channel.ts: byLeft = frame proposer = sender)
   const senderIsLeft = byLeft;
@@ -103,7 +103,7 @@ export async function handleHtlcLock(
     amount,
     tokenId,
     senderIsLeft,
-    createdHeight: accountMachine.currentHeight,
+    createdHeight: account.currentHeight,
     createdTimestamp: currentTimestamp,
     ...(encryptedLayer ? { envelopeHash: hashEncryptedHtlcLayer(encryptedLayer) } : {}),
   };
@@ -117,7 +117,7 @@ export async function handleHtlcLock(
   // 9. Add lock to locks Map
   // CRITICAL CONSENSUS FIX: Add during validation too (prevents duplicate lockId in same frame)
   // Validation runs on an isolated clone; commit runs on the real machine.
-  accountMachine.locks.set(lockId, lock);
+  account.locks.set(lockId, lock);
 
   events.push(`🔒 HTLC locked: ${amount} token ${tokenId}, expires block ${revealBeforeHeight}, hash ${hashlock.slice(0,16)}...`);
 

@@ -23,7 +23,7 @@ import { deriveDelta } from '../../utils';
 import { getDefaultRebalanceBaseFeeForToken } from '../../rebalance-defaults';
 
 export function handleRequestCollateral(
-  accountMachine: AccountState,
+  account: AccountState,
   accountTx: Extract<AccountTx, { type: 'request_collateral' }>,
   byLeft?: boolean,
   currentTimestamp = 0,
@@ -41,12 +41,12 @@ export function handleRequestCollateral(
     return { success: false, events: [], error: `request_collateral: invalid policyVersion ${policyVersion}` };
   }
 
-  const delta = accountMachine.deltas.get(tokenId);
+  const delta = account.deltas.get(tokenId);
   if (!delta) {
     return { success: false, events: [], error: `request_collateral: no delta for token ${tokenId}` };
   }
 
-  const existingRequest = accountMachine.requestedRebalance.get(tokenId) ?? 0n;
+  const existingRequest = account.requestedRebalance.get(tokenId) ?? 0n;
   if (existingRequest > 0n) {
     return {
       success: true,
@@ -70,7 +70,7 @@ export function handleRequestCollateral(
   }
 
   const feeToken = feeTokenId ?? tokenId;
-  const feeDelta = accountMachine.deltas.get(feeToken);
+  const feeDelta = account.deltas.get(feeToken);
   if (!feeDelta) {
     return { success: false, events: [], error: `request_collateral: no delta for fee token ${feeToken}` };
   }
@@ -106,15 +106,15 @@ export function handleRequestCollateral(
     else feeDelta.offdelta += effectiveFeeTarget;
   }
 
-  if (!accountMachine.requestedRebalanceFeeState) {
-    accountMachine.requestedRebalanceFeeState = new Map();
+  if (!account.requestedRebalanceFeeState) {
+    account.requestedRebalanceFeeState = new Map();
   }
 
   // ── Store request for hub crontab ─────────────────────────────
   // Hub's hubRebalanceHandler will pick this up and add R→C to jBatch.
-  accountMachine.requestedRebalance.set(tokenId, effectiveRequest);
-  accountMachine.requestedRebalanceFeeState.set(tokenId, {
-    requestId: `rebalance:${requesterIsLeft ? 'left' : 'right'}:${tokenId}:${accountMachine.currentHeight + 1}`,
+  account.requestedRebalance.set(tokenId, effectiveRequest);
+  account.requestedRebalanceFeeState.set(tokenId, {
+    requestId: `rebalance:${requesterIsLeft ? 'left' : 'right'}:${tokenId}:${account.currentHeight + 1}`,
     feeTokenId: feeToken,
     feePaidUpfront: effectiveFeeTarget,
     requestedAmount: effectiveRequest,
@@ -137,7 +137,7 @@ export function handleRequestCollateral(
  *
  * Returns mempool operations to queue if rebalance is needed.
  *
- * @param accountMachine - The account after frame commit
+ * @param account - The account after frame commit
  * @param ourEntityId - Our entity ID
  * @param counterpartyId - Counterparty entity ID
  * @param feePolicy - Exact bilateral fee policy already committed in Account state
@@ -151,20 +151,20 @@ export interface RebalanceFeePolicy {
 }
 
 export function resolveAutoRebalanceFeePolicy(
-  accountMachine: AccountState,
+  account: AccountState,
   ourEntityId: string,
   tokenId: number,
 ): RebalanceFeePolicy | undefined {
   const ours = ourEntityId.toLowerCase();
-  const counterpartySide = ours === accountMachine.leftEntity.toLowerCase()
+  const counterpartySide = ours === account.leftEntity.toLowerCase()
     ? 'right'
-    : ours === accountMachine.rightEntity.toLowerCase()
+    : ours === account.rightEntity.toLowerCase()
       ? 'left'
       : undefined;
   if (!counterpartySide) {
     throw new Error(`REBALANCE_POLICY_ENTITY_NOT_IN_ACCOUNT:${ourEntityId}`);
   }
-  const policy = accountMachine.rebalanceFeePolicies?.get(tokenId)?.[counterpartySide];
+  const policy = account.rebalanceFeePolicies?.get(tokenId)?.[counterpartySide];
   if (!policy) return undefined;
   return {
     policyVersion: policy.policyVersion,
@@ -175,7 +175,7 @@ export function resolveAutoRebalanceFeePolicy(
 }
 
 export function checkAutoRebalance(
-  accountMachine: AccountState,
+  account: AccountState,
   ourEntityId: string,
   counterpartyId: string,
 ): AccountTx[] {
@@ -184,27 +184,27 @@ export function checkAutoRebalance(
   // New rebalance cycles must not start during settlement. A committed request
   // is immutable until its finalized event clears it. New exposure accumulates
   // independently and is considered by the next cycle after finalization.
-  const settlementInFlight = !!accountMachine.settlementWorkspace;
+  const settlementInFlight = !!account.settlementWorkspace;
 
-  if (accountMachine.shadow.rebalance.policy.size === 0) {
+  if (account.shadow.rebalance.policy.size === 0) {
     return result;
   }
 
   const isLeft = isLeftEntity(ourEntityId, counterpartyId);
-  const orderedPolicies = [...accountMachine.shadow.rebalance.policy.entries()]
+  const orderedPolicies = [...account.shadow.rebalance.policy.entries()]
     .sort(([leftTokenId], [rightTokenId]) => leftTokenId - rightTokenId);
   for (const [tokenId, policy] of orderedPolicies) {
-    const feePolicy = resolveAutoRebalanceFeePolicy(accountMachine, ourEntityId, tokenId);
+    const feePolicy = resolveAutoRebalanceFeePolicy(account, ourEntityId, tokenId);
     if (!feePolicy) continue;
     // Skip manual mode (r2cRequestSoftLimit === hardLimit convention)
     if (policy.r2cRequestSoftLimit === policy.hardLimit) continue;
 
-    const delta = accountMachine.deltas.get(tokenId);
+    const delta = account.deltas.get(tokenId);
     if (!delta) continue;
 
     const derived = deriveDelta(delta, isLeft);
     const outPeerCredit = derived.outPeerCredit;
-    const existingRequest = accountMachine.requestedRebalance.get(tokenId) ?? 0n;
+    const existingRequest = account.requestedRebalance.get(tokenId) ?? 0n;
     if (existingRequest > 0n) continue;
     // Rebalance trigger must be based ONLY on uncollateralized peer credit usage.
     //
@@ -217,7 +217,7 @@ export function checkAutoRebalance(
     const rebalanceTrigger = outPeerCredit;
     // Also dedupe pre-commit queue: if request_collateral is already in account mempool
     // for this token, do not enqueue another copy in the same consensus window.
-    const hasQueuedRequest = accountMachine.mempool.some(
+    const hasQueuedRequest = account.mempool.some(
       (tx) => tx.type === 'request_collateral' && Number(tx.data?.tokenId) === Number(tokenId),
     );
     if (hasQueuedRequest) {
@@ -225,7 +225,7 @@ export function checkAutoRebalance(
     }
 
     // Check if there's already a pending frame (don't pile up)
-    if (accountMachine.pendingFrame) {
+    if (account.pendingFrame) {
       continue;
     }
 

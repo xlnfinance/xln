@@ -160,8 +160,8 @@ export function processOrderbookCancels(
   if (!ext) return { accountTxs, crossJurisdictionFills, bookUpdates, debugProjectionRejects };
 
   for (const { offerId, accountId } of cancels) {
-    const accountMachine = hubState.accounts.get(accountId);
-    const hasOffer = Boolean(accountMachine?.swapOffers?.has(offerId));
+    const account = hubState.accounts.get(accountId);
+    const hasOffer = Boolean(account?.swapOffers?.has(offerId));
     if (!hasOffer) continue;
 
     const namespacedOrderId = `${accountId}:${offerId}`;
@@ -194,7 +194,7 @@ export function processOrderbookCancels(
       orderbookCancelled = true;
     }
 
-    const offer = accountMachine?.swapOffers?.get(offerId);
+    const offer = account?.swapOffers?.get(offerId);
     if (offer?.crossJurisdiction) {
       markCrossJurisdictionBookRemovalCommitted(
         hubState,

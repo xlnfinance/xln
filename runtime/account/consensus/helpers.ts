@@ -36,8 +36,8 @@ type AccountDomainSubject = Readonly<{
   domain: AccountStateDomain;
 }>;
 
-export function getAccountStateDomain(accountMachine: AccountDomainSubject): AccountStateDomain {
-  return normalizeAccountStateDomain(accountMachine.domain);
+export function getAccountStateDomain(account: AccountDomainSubject): AccountStateDomain {
+  return normalizeAccountStateDomain(account.domain);
 }
 
 /**
@@ -48,9 +48,9 @@ export function getAccountStateDomain(accountMachine: AccountDomainSubject): Acc
  */
 export function requireAccountDeltaTransformerAddress(
   env: RuntimeState,
-  accountMachine: AccountDomainSubject,
+  account: AccountDomainSubject,
 ): string {
-  const domain = getAccountStateDomain(accountMachine);
+  const domain = getAccountStateDomain(account);
   const depository = domain.depositoryAddress.toLowerCase();
   const matches = Array.from(env.jReplicas.values()).flatMap((replica) => {
     if (Number(replica.chainId) !== domain.chainId) return [];
@@ -69,10 +69,10 @@ export function requireAccountDeltaTransformerAddress(
   return matches[0]!.deltaTransformer;
 }
 
-export const buildAccountProofBodyFromEnv = (env: RuntimeState, accountMachine: AccountState) =>
+export const buildAccountProofBodyFromEnv = (env: RuntimeState, account: AccountState) =>
   buildAccountProofBody(
-    accountMachine,
-    requireAccountDeltaTransformerAddress(env, accountMachine),
+    account,
+    requireAccountDeltaTransformerAddress(env, account),
   );
 
 export function shouldIncludeToken(delta: Delta, totalDelta: bigint): boolean {
@@ -85,17 +85,17 @@ export function shouldIncludeToken(delta: Delta, totalDelta: bigint): boolean {
 
 type SettlementVector = Map<number, { collateral: bigint; ondelta: bigint }>;
 
-export function captureSettlementVector(accountMachine: AccountState): SettlementVector {
+export function captureSettlementVector(account: AccountState): SettlementVector {
   const out: SettlementVector = new Map();
-  for (const [tokenId, delta] of accountMachine.deltas.entries()) {
+  for (const [tokenId, delta] of account.deltas.entries()) {
     out.set(tokenId, { collateral: delta.collateral, ondelta: delta.ondelta });
   }
   return out;
 }
 
-export function prependUniqueMempoolTxs(accountMachine: AccountState, txs: AccountTx[]): number {
+export function prependUniqueMempoolTxs(account: AccountState, txs: AccountTx[]): number {
   if (txs.length === 0) return 0;
-  const existing = new Set(accountMachine.mempool.map(txFingerprint));
+  const existing = new Set(account.mempool.map(txFingerprint));
   const missing: AccountTx[] = [];
   for (const tx of txs) {
     // Each direct payment is one separately authorized intent even when its
@@ -114,24 +114,24 @@ export function prependUniqueMempoolTxs(accountMachine: AccountState, txs: Accou
     // These txs move out of pendingFrame rather than entering from outside, so
     // validate the resulting queue itself. The caller clears pendingFrame only
     // after this atomic prepend succeeds.
-    const nextMempool = [...missing, ...accountMachine.mempool];
+    const nextMempool = [...missing, ...account.mempool];
     assertAccountMempoolWithinLimit(
       { mempool: nextMempool },
       'accountConsensus:rollbackRestore',
     );
-    accountMachine.mempool = nextMempool;
+    account.mempool = nextMempool;
   }
   return missing.length;
 }
 
 export function assertNoUnilateralSettlementMutation(
-  accountMachine: AccountState,
+  account: AccountState,
   before: SettlementVector,
   tx: AccountTx,
   phase: string,
 ): void {
   if (tx.type === 'j_event_claim') return;
-  for (const [tokenId, delta] of accountMachine.deltas.entries()) {
+  for (const [tokenId, delta] of account.deltas.entries()) {
     const prev = before.get(tokenId);
     const prevCollateral = prev?.collateral ?? 0n;
     const prevOndelta = prev?.ondelta ?? 0n;
@@ -155,7 +155,7 @@ export { resolveAutoRebalanceFeePolicy };
 
 export async function runPostFrameAutoRebalanceCheck(
   _env: RuntimeState,
-  accountMachine: AccountState,
+  account: AccountState,
   ourEntityId: string,
   counterpartyEntityId: string,
   frameHeight: number,
@@ -181,8 +181,8 @@ export async function runPostFrameAutoRebalanceCheck(
         status: 'skipped',
         event: 'request_not_queued',
         reason,
-        policyCount: accountMachine.shadow.rebalance.policy.size,
-        hasPendingFrame: !!accountMachine.pendingFrame,
+        policyCount: account.shadow.rebalance.policy.size,
+        hasPendingFrame: !!account.pendingFrame,
       });
     };
 
@@ -191,15 +191,15 @@ export async function runPostFrameAutoRebalanceCheck(
       return [];
     }
 
-    const hasCounterpartyPolicy = Array.from(accountMachine.shadow.rebalance.policy.keys())
-      .some((tokenId) => resolveAutoRebalanceFeePolicy(accountMachine, ourEntityId, tokenId));
+    const hasCounterpartyPolicy = Array.from(account.shadow.rebalance.policy.keys())
+      .some((tokenId) => resolveAutoRebalanceFeePolicy(account, ourEntityId, tokenId));
     if (!hasCounterpartyPolicy) {
       emitSkip('counterparty-fee-policy-missing');
       return [];
     }
 
     const rebalanceTxs = checkAutoRebalance(
-      accountMachine,
+      account,
       ourEntityId,
       counterpartyEntityId,
     );

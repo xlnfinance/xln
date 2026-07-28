@@ -197,7 +197,7 @@ function applyHtlcResolution(
 }
 
 export async function handleHtlcResolve(
-  accountMachine: AccountState,
+  account: AccountState,
   accountTx: HtlcResolveTx,
   byLeft: boolean,
   currentHeight: number,
@@ -205,12 +205,12 @@ export async function handleHtlcResolve(
 ): Promise<HtlcResolveResult> {
   const { lockId, outcome } = accountTx.data;
   const events: string[] = [];
-  const lock = accountMachine.locks.get(lockId);
+  const lock = account.locks.get(lockId);
   if (!lock) return { success: false, error: `Lock ${lockId} not found`, events };
   if (outcome === 'offer') {
-    return handleHtlcSecretOffer(accountMachine, lock, accountTx.data, byLeft, events);
+    return handleHtlcSecretOffer(account, lock, accountTx.data, byLeft, events);
   }
-  const delta = accountMachine.deltas.get(lock.tokenId);
+  const delta = account.deltas.get(lock.tokenId);
   if (!delta) return { success: false, error: `Delta ${lock.tokenId} not found`, events };
   const validationError = outcome === 'secret'
     ? getHtlcSecretResolveError(
@@ -228,5 +228,5 @@ export async function handleHtlcResolve(
         currentTimestamp,
       );
   if (validationError) return { success: false, error: validationError, events };
-  return applyHtlcResolution(accountMachine, lock, delta, accountTx.data, events);
+  return applyHtlcResolution(account, lock, delta, accountTx.data, events);
 }

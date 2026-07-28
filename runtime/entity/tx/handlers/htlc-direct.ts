@@ -47,19 +47,19 @@ export const handleHashlockPaymentEntityTx = (
     return { newState, outputs, accountTxs };
   }
 
-  const accountMachine = newState.accounts.get(normalizedTarget);
+  const account = newState.accounts.get(normalizedTarget);
   const preparedLockId = typeof entityTx.data.lockId === 'string' ? entityTx.data.lockId : '';
   const explicitLockId = HEX_32_RE.test(preparedLockId);
-  let lockNonce = (accountMachine?.currentHeight ?? 0) + (accountMachine?.mempool?.length ?? 0);
+  let lockNonce = (account?.currentHeight ?? 0) + (account?.mempool?.length ?? 0);
   let lockId = explicitLockId
     ? preparedLockId
     : generateLockId(hashlock, newState.height, lockNonce, newState.timestamp);
   while (
     !explicitLockId &&
     (
-      accountMachine?.locks?.has(lockId) ||
-      (accountMachine?.mempool ?? []).some((tx) => tx.type === 'htlc_lock' && tx.data.lockId === lockId) ||
-      (accountMachine?.pendingFrame?.accountTxs ?? []).some((tx) => tx.type === 'htlc_lock' && tx.data.lockId === lockId)
+      account?.locks?.has(lockId) ||
+      (account?.mempool ?? []).some((tx) => tx.type === 'htlc_lock' && tx.data.lockId === lockId) ||
+      (account?.pendingFrame?.accountTxs ?? []).some((tx) => tx.type === 'htlc_lock' && tx.data.lockId === lockId)
     )
   ) {
     lockNonce += 1;
@@ -201,18 +201,18 @@ export const handleRollbackTimedOutFramesEntityTx = (
   const accountTxs: AccountTxTarget[] = [];
 
   for (const { counterpartyId, frameHeight } of entityTx.data.timedOutAccounts) {
-    const accountMachine = newState.accounts.get(counterpartyId);
-    if (!accountMachine?.pendingFrame) continue;
-    if (accountMachine.pendingFrame.height !== frameHeight) continue;
+    const account = newState.accounts.get(counterpartyId);
+    if (!account?.pendingFrame) continue;
+    if (account.pendingFrame.height !== frameHeight) continue;
 
-    const pendingFrame = accountMachine.pendingFrame;
+    const pendingFrame = account.pendingFrame;
     const retryTxs = pendingFrame.accountTxs.filter((tx) => tx.type !== 'htlc_lock');
-    delete accountMachine.pendingFrame;
-    delete accountMachine.pendingAccountInput;
-    delete accountMachine.pendingAccountInputSignerId;
-    delete accountMachine.clonedForValidation;
+    delete account.pendingFrame;
+    delete account.pendingAccountInput;
+    delete account.pendingAccountInputSignerId;
+    delete account.clonedForValidation;
     appendAccountMempoolTxs(
-      accountMachine,
+      account,
       retryTxs,
       `rollbackTimedOutFrames:${counterpartyId}:${frameHeight}`,
     );

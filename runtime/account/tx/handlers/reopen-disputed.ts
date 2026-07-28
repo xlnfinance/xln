@@ -1,7 +1,7 @@
 import type { AccountState, AccountTx } from '../../../types';
 
 export function handleReopenDisputed(
-  accountMachine: AccountState,
+  account: AccountState,
   accountTx: Extract<AccountTx, { type: 'reopen_disputed' }>,
 ): { success: boolean; events: string[]; error?: string } {
   const events: string[] = [];
@@ -11,11 +11,11 @@ export function handleReopenDisputed(
     return { success: false, events, error: `Invalid reopen jNonce: ${String(accountTx.data.jNonce)}` };
   }
 
-  if (accountMachine.activeDispute) {
+  if (account.activeDispute) {
     return { success: false, events, error: 'Cannot reopen while activeDispute exists' };
   }
 
-  const knownJNonce = Number(accountMachine.jNonce ?? 0);
+  const knownJNonce = Number(account.jNonce ?? 0);
   if (requestedJNonce < knownJNonce) {
     return {
       success: false,
@@ -24,21 +24,21 @@ export function handleReopenDisputed(
     };
   }
 
-  accountMachine.jNonce = requestedJNonce;
-  if (accountMachine.proofHeader.nextProofNonce <= requestedJNonce) {
-    accountMachine.proofHeader.nextProofNonce = requestedJNonce + 1;
+  account.jNonce = requestedJNonce;
+  if (account.proofHeader.nextProofNonce <= requestedJNonce) {
+    account.proofHeader.nextProofNonce = requestedJNonce + 1;
   }
 
   // Drop stale counterpart proofs from pre-dispute epoch.
-  delete accountMachine.counterpartyDisputeProofHanko;
-  delete accountMachine.counterpartyDisputeProofNonce;
-  delete accountMachine.counterpartyDisputeProofBodyHash;
-  delete accountMachine.disputePrepare;
+  delete account.counterpartyDisputeProofHanko;
+  delete account.counterpartyDisputeProofNonce;
+  delete account.counterpartyDisputeProofBodyHash;
+  delete account.disputePrepare;
 
-  accountMachine.status = 'active';
+  account.status = 'active';
 
   events.push(
-    `🔓 Account reopened (jNonce=${requestedJNonce}, nextProofNonce=${accountMachine.proofHeader.nextProofNonce})`,
+    `🔓 Account reopened (jNonce=${requestedJNonce}, nextProofNonce=${account.proofHeader.nextProofNonce})`,
   );
   return { success: true, events };
 }

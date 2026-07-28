@@ -9,7 +9,7 @@ import { createStructuredLogger, shortHash } from '../../../infra/logger';
 const jEventClaimLog = createStructuredLogger('account.j_event');
 
 export function handleJEventClaim(
-  accountMachine: AccountState,
+  account: AccountState,
   accountTx: Extract<AccountTx, { type: 'j_event_claim' }>,
   byLeft: boolean,
   _currentTimestamp: number,
@@ -21,17 +21,17 @@ export function handleJEventClaim(
 ): { success: boolean; events: string[]; error?: string } {
   const { jHeight, jBlockHash } = accountTx.data;
   jEventClaimLog.debug('claim.received', { jHeight, hash: shortHash(jBlockHash), byLeft });
-  const { counterparty } = getAccountPerspective(accountMachine, myEntityId);
+  const { counterparty } = getAccountPerspective(account, myEntityId);
   const transition = applyAccountJClaimTransition(
-    accountMachine,
+    account,
     accountTx,
     byLeft,
-    getAccountStateDomain(accountMachine),
+    getAccountStateDomain(account),
     session,
   );
   if (transition.status === 'pending' || transition.status === 'idempotent' || transition.status === 'stale') {
-    accountMachine.leftPendingJClaims = transition.left;
-    accountMachine.rightPendingJClaims = transition.right;
+    account.leftPendingJClaims = transition.left;
+    account.rightPendingJClaims = transition.right;
     return {
       success: true,
       events: [transition.status === 'pending'
@@ -40,7 +40,7 @@ export function handleJEventClaim(
     };
   }
 
-  const staged = structuredClone(accountMachine);
+  const staged = structuredClone(account);
   staged.leftPendingJClaims = transition.left;
   staged.rightPendingJClaims = transition.right;
   applyFinalizedAccountJEvents(
@@ -50,13 +50,13 @@ export function handleJEventClaim(
     requireAccountDeltaTransformerAddress(env, staged),
   );
   staged.lastFinalizedJHeight = jHeight;
-  Object.assign(accountMachine, staged);
-  if (!staged.settlementWorkspace) delete accountMachine.settlementWorkspace;
+  Object.assign(account, staged);
+  if (!staged.settlementWorkspace) delete account.settlementWorkspace;
 
   const settledTokenId = Number(
     transition.events.find((event) => event.type === 'AccountSettled')?.data?.tokenId ?? 1,
   );
-  const delta = accountMachine.deltas.get(settledTokenId);
+  const delta = account.deltas.get(settledTokenId);
   if (!isValidation) {
     const data = {
       entityId: myEntityId,

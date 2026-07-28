@@ -120,8 +120,8 @@ export const handleResolveSwapRequest = (
     executionWantAmount,
   } = entityTx.data;
 
-  const accountMachine = requireSwapAccount(newState, counterpartyEntityId, 'resolveSwap');
-  if (accountMachine.swapOffers.get(offerId)?.crossJurisdiction) {
+  const account = requireSwapAccount(newState, counterpartyEntityId, 'resolveSwap');
+  if (account.swapOffers.get(offerId)?.crossJurisdiction) {
     addMessage(newState, `❌ Cross-j offer ${offerId} cannot be resolved through plain swap_resolve`);
     return { newState, outputs, accountTxs };
   }

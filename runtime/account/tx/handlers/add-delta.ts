@@ -6,14 +6,14 @@
 import type { AccountState, AccountTx } from '../../../types';
 
 export function handleAddDelta(
-  accountMachine: AccountState,
+  account: AccountState,
   accountTx: Extract<AccountTx, { type: 'add_delta' }>
 ): { success: boolean; events: string[]; error?: string } {
   const { tokenId } = accountTx.data;
   const events: string[] = [];
 
   // Check if delta already exists
-  if (accountMachine.deltas.has(tokenId)) {
+  if (account.deltas.has(tokenId)) {
     return { success: true, events }; // Idempotent - not an error
   }
 
@@ -29,7 +29,7 @@ export function handleAddDelta(
     rightAllowance: 0n,
   };
 
-  accountMachine.deltas.set(tokenId, newDelta);
+  account.deltas.set(tokenId, newDelta);
 
   events.push(`➕ Added token ${tokenId} to account`);
   return { success: true, events };

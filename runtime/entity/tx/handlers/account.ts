@@ -100,14 +100,14 @@ const applyAccountInputPhases = async (
   // Entity-frame isolation already cloned state. Every phase mutates this
   // candidate and records effects; none may publish transport or storage.
   const effects = createCommittedAccountEffects();
-  const { accountMachine, counterpartyId, createdAccount } = resolveInboundAccount(
+  const { account, counterpartyId, createdAccount } = resolveInboundAccount(
     state,
     input,
     Boolean(incomingAck),
     Boolean(incomingProposal),
   );
   checkpointProfile('accountResolve');
-  if (rejectFrozenAccountInput(state, accountMachine, input, counterpartyId)) {
+  if (rejectFrozenAccountInput(state, account, input, counterpartyId)) {
     return buildAccountHandlerResult(state, effects);
   }
 
@@ -115,7 +115,7 @@ const applyAccountInputPhases = async (
     env,
     state,
     input,
-    account: accountMachine,
+    account: account,
     counterpartyId,
     createdAccount,
     effects,

@@ -626,15 +626,15 @@ async function proposePendingAccountFrames(context: ProposePendingAccountFramesC
       .sort(compareStableText)[0];
     if (!accountKey) break;
     processedAccounts.add(accountKey);
-    const accountMachine = currentEntityState.accounts.get(accountKey);
-    const { counterparty: cpId } = accountMachine
-      ? getAccountPerspective(accountMachine, currentEntityState.entityId)
+    const account = currentEntityState.accounts.get(accountKey);
+    const { counterparty: cpId } = account
+      ? getAccountPerspective(account, currentEntityState.entityId)
       : { counterparty: 'unknown' };
-    if (!accountMachine) {
+    if (!account) {
       throw new Error(`ACCOUNT_FLUSH_ACCOUNT_MISSING:${accountKey}`);
     }
 
-    const crossJOpeningProposalTxs = selectCrossJOpeningAccountProposalTxs(env, currentEntityState, accountMachine);
+    const crossJOpeningProposalTxs = selectCrossJOpeningAccountProposalTxs(env, currentEntityState, account);
     if (crossJOpeningProposalTxs === null) {
       entityLog.debug('account.cross_j_opening_cohort_wait', {
         account: shortId(accountKey),
@@ -648,7 +648,7 @@ async function proposePendingAccountFrames(context: ProposePendingAccountFramesC
     const proposal = await proposeAccountMachineFrame(
       context,
       accountKey,
-      accountMachine,
+      account,
       crossJOpeningProposalTxs,
     );
     if (proposal) proposedFrames += 1;
@@ -659,7 +659,7 @@ async function proposePendingAccountFrames(context: ProposePendingAccountFramesC
     await routeFinalAccountInput(
       context,
       accountKey,
-      accountMachine,
+      account,
       cpId,
       finalAccountInput,
       proposal,

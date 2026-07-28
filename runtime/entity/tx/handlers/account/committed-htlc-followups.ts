@@ -30,7 +30,7 @@ type HtlcFollowupContext = {
   state: EntityState;
   newState: EntityState;
   input: AccountPeerInput;
-  accountMachine: AccountState;
+  account: AccountState;
   outputs: EntityInput[];
   accountTxs: AccountTxTarget[];
   candidateEffects: EntityCandidateEffect[];
@@ -56,8 +56,8 @@ export async function applyCommittedHtlcLockFollowup(
   _committedViaNewFrame: boolean,
 ): Promise<void> {
   if (accountTx.type !== 'htlc_lock') return;
-  const { env, state, input, newState, accountMachine } = ctx;
-  const lock = accountMachine.locks.get(accountTx.data.lockId);
+  const { env, state, input, newState, account } = ctx;
+  const lock = account.locks.get(accountTx.data.lockId);
   if (!lock || accountTx.data.envelope === undefined) return;
   const layer = encryptedHtlcLayer(accountTx.data.envelope);
   if (!layer) throw new Error(`HTLC_ONION_ENCRYPTED_LAYER_REQUIRED:${lock.lockId}`);
@@ -77,8 +77,8 @@ export async function applyCommittedHtlcLockFollowup(
 }
 
 export function applyPendingForwardFollowup(ctx: HtlcFollowupContext): void {
-  const { state, accountMachine, newState, accountTxs } = ctx;
-  const forwards = accountMachine.pendingForwards;
+  const { state, account, newState, accountTxs } = ctx;
+  const forwards = account.pendingForwards;
   if (!forwards?.length) return;
 
   for (const [forwardIndex, forward] of forwards.entries()) {
@@ -106,7 +106,7 @@ export function applyPendingForwardFollowup(ctx: HtlcFollowupContext): void {
       },
     });
   }
-  delete accountMachine.pendingForwards;
+  delete account.pendingForwards;
 }
 
 export function applyHtlcTimeoutFollowups(ctx: HtlcFollowupContext, timedOutHashlocks: string[]): void {

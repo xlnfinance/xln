@@ -22,7 +22,7 @@ const accountHandlerLog = createStructuredLogger('account.handler');
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 
 export type InboundAccountResolution = {
-  accountMachine: AccountState;
+  account: AccountState;
   counterpartyId: string;
   createdAccount: boolean;
 };
@@ -193,13 +193,13 @@ export const resolveInboundAccount = (
     if (inputWatchSeed && existing.watchSeed.toLowerCase() !== inputWatchSeed) {
       throw new Error(`ACCOUNT_WATCH_SEED_MISMATCH:${counterpartyId}`);
     }
-    return { accountMachine: existing, counterpartyId, createdAccount: false };
+    return { account: existing, counterpartyId, createdAccount: false };
   }
 
   assertUnknownAccountGenesis(state, input, counterpartyId, hasAck, hasProposal);
   const watchSeed = normalizeAccountWatchSeed(inputWatchSeed, 'ACCOUNT_INPUT_GENESIS');
   accountHandlerLog.debug('machine.create', { counterparty: shortId(counterpartyId) });
-  const accountMachine = createInboundAccountMachine(state, counterpartyId, domain, watchSeed);
+  const account = createInboundAccountMachine(state, counterpartyId, domain, watchSeed);
   accountHandlerLog.debug('machine.candidate_created', { counterparty: shortId(counterpartyId) });
-  return { accountMachine, counterpartyId, createdAccount: true };
+  return { account, counterpartyId, createdAccount: true };
 };

@@ -95,14 +95,14 @@ const accountLog = createStructuredLogger('account');
 const STALE_ACCOUNT_FRAME_WARNING_MS = 5 * 60_000;
 
 const assertLiveCommitMatchesFrame = (
-  accountMachine: AccountState,
+  account: AccountState,
   expectedRoot: string,
   side: 'proposer' | 'receiver',
   height: number,
   validatedMachine?: AccountState,
 ): void => {
-  const incrementalRoot = computeAccountStateRoot(accountMachine);
-  const coldRoot = computeAccountStateRootCold(accountMachine);
+  const incrementalRoot = computeAccountStateRoot(account);
+  const coldRoot = computeAccountStateRootCold(account);
   if (incrementalRoot === expectedRoot && coldRoot === expectedRoot) return;
   const details = {
     side,
@@ -110,23 +110,23 @@ const assertLiveCommitMatchesFrame = (
     expectedRoot,
     incrementalRoot,
     coldRoot,
-    incrementalSectionHashes: computeAccountStateSectionHashes(accountMachine),
-    coldSectionHashes: computeAccountStateSectionHashesCold(accountMachine),
-    incrementalCommitments: computeAccountCommitmentSectionDetail(accountMachine),
-    coldCommitments: computeAccountCommitmentSectionDetailCold(accountMachine),
-    pendingFrameTxTypes: accountMachine.pendingFrame?.accountTxs.map((tx) => tx.type) ?? [],
+    incrementalSectionHashes: computeAccountStateSectionHashes(account),
+    coldSectionHashes: computeAccountStateSectionHashesCold(account),
+    incrementalCommitments: computeAccountCommitmentSectionDetail(account),
+    coldCommitments: computeAccountCommitmentSectionDetailCold(account),
+    pendingFrameTxTypes: account.pendingFrame?.accountTxs.map((tx) => tx.type) ?? [],
     commitmentEntryCounts: {
-      locks: accountMachine.locks.size,
-      pulls: accountMachine.pulls?.size ?? 0,
-      swapOffers: accountMachine.swapOffers.size,
-      subcontracts: accountMachine.subcontracts?.size ?? 0,
-      lendingIntents: accountMachine.lendingIntents?.size ?? 0,
+      locks: account.locks.size,
+      pulls: account.pulls?.size ?? 0,
+      swapOffers: account.swapOffers.size,
+      subcontracts: account.subcontracts?.size ?? 0,
+      lendingIntents: account.lendingIntents?.size ?? 0,
     },
     liveFinancial: {
-      deltas: Array.from(accountMachine.deltas.entries()),
-      globalCreditLimits: accountMachine.globalCreditLimits,
-      jNonce: accountMachine.jNonce,
-      disputeConfig: accountMachine.disputeConfig,
+      deltas: Array.from(account.deltas.entries()),
+      globalCreditLimits: account.globalCreditLimits,
+      jNonce: account.jNonce,
+      disputeConfig: account.disputeConfig,
     },
     ...(validatedMachine ? {
       validatedFinancial: {
@@ -162,7 +162,7 @@ type ValidatedCounterpartyDisputeSeal = {
 
 async function validateCounterpartyDisputeSeal(
   env: RuntimeState,
-  accountMachine: AccountState,
+  account: AccountState,
   input: AccountPeerInput,
   seal: ReturnType<typeof accountInputDisputeSeal>,
   context: string,
@@ -174,7 +174,7 @@ async function validateCounterpartyDisputeSeal(
     throw new Error(`${context}:DISPUTE_SEAL_HANKO_MISSING`);
   }
 
-  const hankoDomain = getAccountStateDomain(accountMachine);
+  const hankoDomain = getAccountStateDomain(account);
 
   // A dispute Hanko is only useful if it signs the exact Solidity message:
   // (MessageType.DisputeProof, chainId, depository, canonical accountKey, nonce,
@@ -182,7 +182,7 @@ async function validateCounterpartyDisputeSeal(
   // enough: a malicious peer can sign any random hash, attach a plausible
   // proofbodyHash, and make us store metadata that later fails on-chain.
   const expectedHash = createDisputeProofHashWithNonce(
-    accountMachine,
+    account,
     seal.proofBodyHash,
     hankoDomain,
     seal.proofNonce,
@@ -190,11 +190,11 @@ async function validateCounterpartyDisputeSeal(
   if (String(seal.hash).toLowerCase() !== expectedHash.toLowerCase()) {
     throw new Error(`${context}:DISPUTE_SEAL_HASH_MISMATCH:${safeStringify({
       kind: input.kind,
-      currentHeight: accountMachine.currentHeight,
-      pendingHeight: accountMachine.pendingFrame?.height ?? null,
+      currentHeight: account.currentHeight,
+      pendingHeight: account.pendingFrame?.height ?? null,
       inputHeight: accountInputAck(input)?.height ?? null,
       newFrameHeight: accountInputProposal(input)?.frame.height ?? null,
-      localNonce: accountMachine.proofHeader.nextProofNonce,
+      localNonce: account.proofHeader.nextProofNonce,
       signedNonce: seal.proofNonce,
       proofBodyHash: seal.proofBodyHash,
       expected: expectedHash,
@@ -374,18 +374,18 @@ const verifyBoardResealWitnesses = async (
 
 const handleBoardReseal = async (
   env: RuntimeState,
-  accountMachine: AccountState,
+  account: AccountState,
   input: AccountPeerInput,
   securityContext: AccountInputSecurityContext,
 ): Promise<HandleAccountInputResult | undefined> => {
   const reseal = accountInputBoardReseal(input);
   if (!reseal) return undefined;
   const events: string[] = [];
-  const metadata = validateBoardResealMetadata(accountMachine, input, reseal, events);
+  const metadata = validateBoardResealMetadata(account, input, reseal, events);
   if ('success' in metadata) return metadata;
   const witnesses = await verifyBoardResealWitnesses(
     env,
-    accountMachine,
+    account,
     input,
     reseal,
     metadata,
@@ -396,11 +396,11 @@ const handleBoardReseal = async (
 
   // The exact Account state and on-chain dispute nonce remain untouched. Only
   // replace cached authority witnesses after every supplied hash validates.
-  accountMachine.counterpartyFrameHanko = reseal.frameHanko!;
+  account.counterpartyFrameHanko = reseal.frameHanko!;
   if (witnesses.verifiedDispute) {
-    accountMachine.counterpartyDisputeProofHanko = witnesses.verifiedDispute.hanko;
+    account.counterpartyDisputeProofHanko = witnesses.verifiedDispute.hanko;
   }
-  accountMachine.counterpartyBoardReseal = {
+  account.counterpartyBoardReseal = {
     activationJHeight: metadata.activationJHeight,
     activationLogIndex: metadata.activationLogIndex,
     frameHeight: metadata.frameHeight,
@@ -411,16 +411,16 @@ const handleBoardReseal = async (
 };
 
 function storeCounterpartyDisputeSeal(
-  accountMachine: AccountState,
+  account: AccountState,
   seal: ValidatedCounterpartyDisputeSeal | undefined,
 ): void {
   if (!seal) return;
-  accountMachine.counterpartyDisputeProofHanko = seal.hanko;
-  accountMachine.counterpartyDisputeProofNonce = seal.nonce;
-  accountMachine.counterpartyDisputeHash = seal.hash;
-  accountMachine.counterpartyDisputeProofBodyHash = seal.proofBodyHash;
-  accountMachine.disputeProofNoncesByHash ??= {};
-  accountMachine.disputeProofNoncesByHash[seal.proofBodyHash] = seal.nonce;
+  account.counterpartyDisputeProofHanko = seal.hanko;
+  account.counterpartyDisputeProofNonce = seal.nonce;
+  account.counterpartyDisputeHash = seal.hash;
+  account.counterpartyDisputeProofBodyHash = seal.proofBodyHash;
+  account.disputeProofNoncesByHash ??= {};
+  account.disputeProofNoncesByHash[seal.proofBodyHash] = seal.nonce;
 }
 
 const disputeSealRequirementError = (
@@ -469,17 +469,17 @@ function getDisputeHankoShapeError(input: AccountInput): string | undefined {
   return undefined;
 }
 
-function describeAccountState(accountMachine: AccountState): Record<string, unknown> {
+function describeAccountState(account: AccountState): Record<string, unknown> {
   return {
-    currentHeight: Number(accountMachine.currentHeight ?? 0),
-    currentHash: accountMachine.currentFrame?.stateHash ?? null,
-    currentPrev: accountMachine.currentFrame?.prevFrameHash ?? null,
-    currentTimestamp: Number(accountMachine.currentFrame?.timestamp ?? 0),
-    pendingHeight: Number(accountMachine.pendingFrame?.height ?? 0),
-    pendingHash: accountMachine.pendingFrame?.stateHash ?? null,
-    pendingPrev: accountMachine.pendingFrame?.prevFrameHash ?? null,
-    pendingTimestamp: Number(accountMachine.pendingFrame?.timestamp ?? 0),
-    frameHistoryTail: getAccountFrameHistoryView(accountMachine).slice(-3).map((frame) => ({
+    currentHeight: Number(account.currentHeight ?? 0),
+    currentHash: account.currentFrame?.stateHash ?? null,
+    currentPrev: account.currentFrame?.prevFrameHash ?? null,
+    currentTimestamp: Number(account.currentFrame?.timestamp ?? 0),
+    pendingHeight: Number(account.pendingFrame?.height ?? 0),
+    pendingHash: account.pendingFrame?.stateHash ?? null,
+    pendingPrev: account.pendingFrame?.prevFrameHash ?? null,
+    pendingTimestamp: Number(account.pendingFrame?.timestamp ?? 0),
+    frameHistoryTail: getAccountFrameHistoryView(account).slice(-3).map((frame) => ({
       height: Number(frame?.height ?? 0),
       stateHash: frame?.stateHash ?? null,
       prevFrameHash: frame?.prevFrameHash ?? null,
@@ -497,13 +497,13 @@ type AccountInputReplayClassification = {
 };
 
 function classifyAccountInputReplay(
-  accountMachine: AccountState,
+  account: AccountState,
   input: AccountInput,
 ): AccountInputReplayClassification {
   const ack = accountInputAck(input);
   const proposal = accountInputProposal(input);
-  const currentHeight = Number(accountMachine.currentHeight ?? 0);
-  const pendingHeight = Number(accountMachine.pendingFrame?.height ?? 0);
+  const currentHeight = Number(account.currentHeight ?? 0);
+  const pendingHeight = Number(account.pendingFrame?.height ?? 0);
   const inputHeight =
     ack?.height === undefined || ack.height === null
       ? 0
@@ -533,7 +533,7 @@ function classifyAccountInputReplay(
 }
 
 async function buildDuplicateCommittedFrameAck(
-  accountMachine: AccountState,
+  account: AccountState,
   input: AccountInput,
   events: string[],
   replayCurrentHeight: number,
@@ -542,11 +542,11 @@ async function buildDuplicateCommittedFrameAck(
   const receivedHeight = Number(receivedFrame.height ?? 0);
   if (
     receivedHeight !== replayCurrentHeight ||
-    receivedFrame.stateHash !== accountMachine.currentFrame?.stateHash
+    receivedFrame.stateHash !== account.currentFrame?.stateHash
   ) {
     return null;
   }
-  const pendingResponse = accountMachine.pendingAccountInput;
+  const pendingResponse = account.pendingAccountInput;
   const pendingResponseAck = pendingResponse ? accountInputAck(pendingResponse) : undefined;
   if (
     pendingResponse &&
@@ -563,7 +563,7 @@ async function buildDuplicateCommittedFrameAck(
       events,
     };
   }
-  const cachedAck = accountMachine.lastOutboundFrameAck;
+  const cachedAck = account.lastOutboundFrameAck;
   if (
     cachedAck &&
     Number(cachedAck.height) === receivedHeight &&
@@ -586,7 +586,7 @@ async function buildDuplicateCommittedFrameAck(
 }
 
 async function handleReplayOrObsoleteAccountInput(
-  accountMachine: AccountState,
+  account: AccountState,
   input: AccountInput,
   replay: AccountInputReplayClassification,
   events: string[],
@@ -598,7 +598,7 @@ async function handleReplayOrObsoleteAccountInput(
     // committed frame because our ACK was lost, re-ACK before the generic stale
     // guards. The safety gate is exact: same height and same committed stateHash.
     const duplicateAck = await buildDuplicateCommittedFrameAck(
-      accountMachine,
+      account,
       input,
       events,
       replay.currentHeight,
@@ -634,17 +634,17 @@ async function handleReplayOrObsoleteAccountInput(
   if (
     ack &&
     !proposal &&
-    !accountMachine.pendingFrame &&
-    (accountMachine.status ?? 'active') !== 'active'
+    !account.pendingFrame &&
+    (account.status ?? 'active') !== 'active'
   ) {
     events.push(
       `ℹ️ Ignored obsolete ACK for frozen account frame ${String(replay.inputHeight ?? 'none')} ` +
-      `(current=${String(accountMachine.currentHeight ?? 0)}, status=${String(accountMachine.status)})`,
+      `(current=${String(account.currentHeight ?? 0)}, status=${String(account.status)})`,
     );
     accountLog.debug('input.frozen_ack_ignored', {
       currentHeight: replay.currentHeight,
       inputHeight: replay.inputHeight,
-      status: accountMachine.status,
+      status: account.status,
       from: shortId(input.fromEntityId),
     });
     return { success: true, events };
@@ -670,7 +670,7 @@ type PendingAckCertificateResult =
 
 async function verifyPendingAckCertificate(
   env: RuntimeState,
-  accountMachine: AccountState,
+  account: AccountState,
   ack: AccountFrameAck,
   ackHeight: number,
   validatedSeal: ValidatedCounterpartyDisputeSeal | undefined,
@@ -678,17 +678,17 @@ async function verifyPendingAckCertificate(
   securityContext: AccountInputSecurityContext,
 ): Promise<PendingAckCertificateResult> {
   const sealError = disputeSealRequirementError(
-    accountMachine.currentDisputeProofBodyHash,
-    accountMachine.counterpartyDisputeProofBodyHash,
-    accountMachine.counterpartyDisputeProofNonce,
-    Number(accountMachine.jNonce ?? 0),
+    account.currentDisputeProofBodyHash,
+    account.counterpartyDisputeProofBodyHash,
+    account.counterpartyDisputeProofNonce,
+    Number(account.jNonce ?? 0),
     validatedSeal,
   );
   if (sealError) {
     return { kind: 'return', result: { success: false, error: sealError, events } };
   }
 
-  const pendingFrame = accountMachine.pendingFrame!;
+  const pendingFrame = account.pendingFrame!;
   const frameHash = pendingFrame.stateHash;
   if (typeof ack.frameHash !== 'string' || ack.frameHash.toLowerCase() !== frameHash.toLowerCase()) {
     return {
@@ -707,7 +707,7 @@ async function verifyPendingAckCertificate(
     };
   }
 
-  const expectedEntity = accountMachine.proofHeader.toEntity;
+  const expectedEntity = account.proofHeader.toEntity;
   accountLog.debug('hanko.ack.verify', { height: ackHeight, frame: shortHash(frameHash) });
   const verified = await verifyHankoForHash(
     ack.frameHanko,
@@ -745,17 +745,17 @@ async function verifyPendingAckCertificate(
 
 async function applyPendingFrameTransactions(
   env: RuntimeState,
-  accountMachine: AccountState,
+  account: AccountState,
   pendingFrame: AccountFrame,
   committedJClaims: AccountJClaimSession,
   timedOutHashlocks: string[],
   candidateEffects: EntityCandidateEffect[],
 ): Promise<void> {
-  const pendingJHeight = pendingFrame.jHeight ?? accountMachine.lastFinalizedJHeight ?? 0;
+  const pendingJHeight = pendingFrame.jHeight ?? account.lastFinalizedJHeight ?? 0;
   for (const tx of pendingFrame.accountTxs) {
-    const beforeSettlement = captureSettlementVector(accountMachine);
+    const beforeSettlement = captureSettlementVector(account);
     const result = await applyAccountTx(
-      accountMachine,
+      account,
       tx,
       pendingFrame.byLeft!,
       pendingFrame.timestamp,
@@ -776,16 +776,16 @@ async function applyPendingFrameTransactions(
       );
     }
     assertNoUnilateralSettlementMutation(
-      accountMachine,
+      account,
       beforeSettlement,
       tx,
       'proposer/commit',
     );
     if (result.timedOutHashlock) timedOutHashlocks.push(result.timedOutHashlock);
   }
-  commitStagedAccountCommitmentCache(accountMachine);
+  commitStagedAccountCommitmentCache(account);
   assertLiveCommitMatchesFrame(
-    accountMachine,
+    account,
     pendingFrame.accountStateRoot,
     'proposer',
     pendingFrame.height,
@@ -793,7 +793,7 @@ async function applyPendingFrameTransactions(
 }
 
 function installPendingFrameCommit(
-  accountMachine: AccountState,
+  account: AccountState,
   input: AccountInput,
   pendingFrame: AccountFrame,
   ack: AccountFrameAck,
@@ -801,13 +801,13 @@ function installPendingFrameCommit(
   validatedSeal: ValidatedCounterpartyDisputeSeal | undefined,
   committedFrames: Array<{ frame: AccountFrame; committedViaNewFrame: boolean }>,
 ): number {
-  accountMachine.currentFrame = structuredClone(pendingFrame);
-  accountMachine.currentHeight = pendingFrame.height;
+  account.currentFrame = structuredClone(pendingFrame);
+  account.currentHeight = pendingFrame.height;
   // The peer ACK is the second half of this exact bilateral certificate.
   // Dropping it would make later board rotation unable to prove mutual commit.
-  accountMachine.counterpartyFrameHanko = ackHanko;
+  account.counterpartyFrameHanko = ackHanko;
   if (ack.disputeSeal) {
-    storeCounterpartyDisputeSeal(accountMachine, validatedSeal);
+    storeCounterpartyDisputeSeal(account, validatedSeal);
     accountLog.debug('hanko.dispute_ack_stored', {
       nonce: ack.disputeSeal.proofNonce,
       from: shortId(input.fromEntityId),
@@ -816,31 +816,31 @@ function installPendingFrameCommit(
 
   const committedFrame = cloneAccountFrame(pendingFrame);
   committedFrames.push({ frame: committedFrame, committedViaNewFrame: false });
-  appendAccountFrameHistoryView(accountMachine, committedFrame);
+  appendAccountFrameHistoryView(account, committedFrame);
   accountLog.debug('frame.indexed', {
     source: 'ackCommit',
     height: pendingFrame.height,
   });
 
-  delete accountMachine.pendingFrame;
-  delete accountMachine.pendingAccountInput;
-  delete accountMachine.pendingAccountInputSignerId;
-  delete accountMachine.clonedForValidation;
-  discardStagedAccountCommitmentCache(accountMachine);
+  delete account.pendingFrame;
+  delete account.pendingAccountInput;
+  delete account.pendingAccountInputSignerId;
+  delete account.clonedForValidation;
+  discardStagedAccountCommitmentCache(account);
   if (
-    accountMachine.lastOutboundFrameAck &&
-    Number(accountMachine.lastOutboundFrameAck.height) < Number(pendingFrame.height)
+    account.lastOutboundFrameAck &&
+    Number(account.lastOutboundFrameAck.height) < Number(pendingFrame.height)
   ) {
-    delete accountMachine.lastOutboundFrameAck;
+    delete account.lastOutboundFrameAck;
   }
-  accountMachine.rollbackCount = Math.max(0, accountMachine.rollbackCount - 1);
-  if (accountMachine.rollbackCount === 0) delete accountMachine.lastRollbackFrameHash;
+  account.rollbackCount = Math.max(0, account.rollbackCount - 1);
+  if (account.rollbackCount === 0) delete account.lastRollbackFrameHash;
   return pendingFrame.height;
 }
 
 async function queuePostAckWork(
   env: RuntimeState,
-  accountMachine: AccountState,
+  account: AccountState,
   input: AccountInput,
   committedHeight: number,
   securityContext: AccountInputSecurityContext,
@@ -851,21 +851,21 @@ async function queuePostAckWork(
   // Running it earlier silently suppresses the check as "frame still pending".
   const txs = await runPostFrameAutoRebalanceCheck(
     env,
-    accountMachine,
-    accountMachine.proofHeader.fromEntity,
+    account,
+    account.proofHeader.fromEntity,
     input.fromEntityId,
     committedHeight,
     securityContext.owningEntityIsHub,
     candidateEffects,
   );
   if (txs.length === 0) return;
-  appendAccountMempoolTxs(accountMachine, txs, 'accountConsensus:ackAutoRebalance');
+  appendAccountMempoolTxs(account, txs, 'accountConsensus:ackAutoRebalance');
   events.push(`🔄 Auto-rebalance queued ${txs.length} tx(s) after ACK commit`);
 }
 
 async function handlePendingFrameAck(
   env: RuntimeState,
-  accountMachine: AccountState,
+  account: AccountState,
   input: AccountInput,
   ackHeight: number | undefined,
   validatedCounterpartyDisputeSeal: ValidatedCounterpartyDisputeSeal | undefined,
@@ -878,14 +878,14 @@ async function handlePendingFrameAck(
 ): Promise<PendingFrameAckResult> {
   const ack = accountInputAck(input);
   const proposal = accountInputProposal(input);
-  const pendingFrame = accountMachine.pendingFrame;
+  const pendingFrame = account.pendingFrame;
   if (!(pendingFrame && ackHeight === pendingFrame.height && ack)) {
     return { kind: 'not_applicable' };
   }
   if (HEAVY_LOGS) accountLog.debug('ack.debug', { from: shortId(input.fromEntityId), to: shortId(input.toEntityId) });
   const certificate = await verifyPendingAckCertificate(
     env,
-    accountMachine,
+    account,
     ack,
     ackHeight,
     validatedCounterpartyDisputeSeal,
@@ -901,7 +901,7 @@ async function handlePendingFrameAck(
     tokens: tokenIds,
     state: shortHash(certificate.frameHash),
   });
-  const { counterparty: cpForLog } = getAccountPerspective(accountMachine, accountMachine.proofHeader.fromEntity);
+  const { counterparty: cpForLog } = getAccountPerspective(account, account.proofHeader.fromEntity);
   accountLog.debug('frame.reexecute', {
     height: pendingFrame.height,
     counterparty: shortId(cpForLog),
@@ -909,7 +909,7 @@ async function handlePendingFrameAck(
   });
   await applyPendingFrameTransactions(
     env,
-    accountMachine,
+    account,
     pendingFrame,
     committedJClaims,
     timedOutHashlocks,
@@ -919,10 +919,10 @@ async function handlePendingFrameAck(
     side: 'proposer',
     counterparty: shortId(cpForLog),
     height: pendingFrame.height,
-    tokens: accountMachine.deltas.size,
+    tokens: account.deltas.size,
   });
   const committedHeight = installPendingFrameCommit(
-    accountMachine,
+    account,
     input,
     pendingFrame,
     ack,
@@ -933,7 +933,7 @@ async function handlePendingFrameAck(
   events.push(`✅ Frame ${ackHeight} confirmed and committed`);
   await queuePostAckWork(
     env,
-    accountMachine,
+    account,
     input,
     committedHeight,
     securityContext,
@@ -1024,20 +1024,20 @@ type AccountAckTarget = {
 };
 
 function resolveAccountAckTarget(
-  accountMachine: AccountState,
+  account: AccountState,
   input: AccountInput,
   normalizedInputHeight: number | undefined,
 ): AccountAckTarget {
   const ack = accountInputAck(input);
   const proposal = accountInputProposal(input);
-  const pendingHeight = Number(accountMachine.pendingFrame?.height ?? 0);
+  const pendingHeight = Number(account.pendingFrame?.height ?? 0);
   const bundledNewFrameHeight =
     proposal?.frame === undefined || proposal.frame === null
       ? undefined
       : Number(proposal.frame.height);
   const ackTargetsPendingFrame =
     Boolean(ack) &&
-    Boolean(accountMachine.pendingFrame) &&
+    Boolean(account.pendingFrame) &&
     // Normal ACK-only message.
     (normalizedInputHeight === pendingHeight ||
       // BATCHED message: ACK for pending frame + next proposed frame.
@@ -1050,13 +1050,13 @@ function resolveAccountAckTarget(
 }
 
 function isSameHeightSimultaneousProposalAck(
-  accountMachine: AccountState,
+  account: AccountState,
   input: AccountInput,
   normalizedInputHeight: number | undefined,
 ): boolean {
   const ack = accountInputAck(input);
   const proposal = accountInputProposal(input);
-  const pendingFrameHeight = Number(accountMachine.pendingFrame?.height ?? 0);
+  const pendingFrameHeight = Number(account.pendingFrame?.height ?? 0);
   return (
     Boolean(ack) &&
     Boolean(proposal) &&
@@ -1067,7 +1067,7 @@ function isSameHeightSimultaneousProposalAck(
 }
 
 function handleUnmatchedAck(
-  accountMachine: AccountState,
+  account: AccountState,
   input: AccountInput,
   normalizedInputHeight: number | undefined,
   ackProcessed: boolean,
@@ -1079,17 +1079,17 @@ function handleUnmatchedAck(
   const proposal = accountInputProposal(input);
   if (!ack || ackProcessed) return undefined;
   if (phase === 'before_frame') {
-    if (!accountMachine.pendingFrame || isSameHeightSimultaneousProposalAck(accountMachine, input, normalizedInputHeight)) {
+    if (!account.pendingFrame || isSameHeightSimultaneousProposalAck(account, input, normalizedInputHeight)) {
       return undefined;
     }
-    const pending = accountMachine.pendingFrame.height;
+    const pending = account.pendingFrame.height;
     const staleAck =
       normalizedInputHeight !== undefined &&
       Number(normalizedInputHeight) > 0 &&
-      Number(normalizedInputHeight) <= Number(accountMachine.currentHeight ?? 0);
+      Number(normalizedInputHeight) <= Number(account.currentHeight ?? 0);
     if (staleAck) {
       events.push(
-        `ℹ️ Ignored stale ACK for frame ${String(normalizedInputHeight)} (current=${String(accountMachine.currentHeight ?? 0)}, pending=${String(pending)})`,
+        `ℹ️ Ignored stale ACK for frame ${String(normalizedInputHeight)} (current=${String(account.currentHeight ?? 0)}, pending=${String(pending)})`,
       );
       return { success: true, events, ...(committedFrames.length > 0 && { committedFrames }) };
     }
@@ -1105,18 +1105,18 @@ function handleUnmatchedAck(
   }
 
   if (proposal) return undefined;
-  const pending = accountMachine.pendingFrame?.height ?? 'none';
+  const pending = account.pendingFrame?.height ?? 'none';
   const nextHeightAckWithoutPending =
     normalizedInputHeight !== undefined &&
-    Number(normalizedInputHeight) === Number(accountMachine.currentHeight ?? 0) + 1 &&
-    !accountMachine.pendingFrame;
+    Number(normalizedInputHeight) === Number(account.currentHeight ?? 0) + 1 &&
+    !account.pendingFrame;
   const staleAck =
     normalizedInputHeight !== undefined &&
     Number(normalizedInputHeight) > 0 &&
-    Number(normalizedInputHeight) <= Number(accountMachine.currentHeight ?? 0);
+    Number(normalizedInputHeight) <= Number(account.currentHeight ?? 0);
   if (staleAck) {
     events.push(
-      `ℹ️ Ignored stale ACK for frame ${String(normalizedInputHeight)} (current=${String(accountMachine.currentHeight ?? 0)}, pending=${String(pending)})`,
+      `ℹ️ Ignored stale ACK for frame ${String(normalizedInputHeight)} (current=${String(account.currentHeight ?? 0)}, pending=${String(pending)})`,
     );
     return { success: true, events, ...(committedFrames.length > 0 && { committedFrames }) };
   }
@@ -1126,7 +1126,7 @@ function handleUnmatchedAck(
     // without the matching pending frame, so keep it non-mutating and rely on
     // the account pending resend path to recover the ACK deterministically.
     events.push(
-      `Ignored early ACK for frame ${String(normalizedInputHeight)} (current=${String(accountMachine.currentHeight ?? 0)}, pending=none)`,
+      `Ignored early ACK for frame ${String(normalizedInputHeight)} (current=${String(account.currentHeight ?? 0)}, pending=none)`,
     );
     return { success: true, events, ...(committedFrames.length > 0 && { committedFrames }) };
   }
@@ -1138,28 +1138,28 @@ function handleUnmatchedAck(
 }
 
 function resolveSameHeightIncomingFrame(
-  accountMachine: AccountState,
+  account: AccountState,
   receivedFrame: AccountFrame,
   events: string[],
   committedFrames: AccountCommittedFrame[],
   validatedCounterpartyDisputeSeal: ValidatedCounterpartyDisputeSeal | undefined,
 ): HandleAccountInputResult | true | undefined {
-  if (!(accountMachine.pendingFrame && receivedFrame.height === accountMachine.pendingFrame.height)) {
+  if (!(account.pendingFrame && receivedFrame.height === account.pendingFrame.height)) {
     return undefined;
   }
 
   // Simultaneous proposal tiebreaker: left keeps its pending frame, right rolls back.
-  const isLeftEntity = isLeft(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
+  const isLeftEntity = isLeft(account.proofHeader.fromEntity, account.proofHeader.toEntity);
   if (HEAVY_LOGS) {
     accountLog.debug('frame.tiebreaker', {
-      from: shortId(accountMachine.proofHeader.fromEntity),
-      to: shortId(accountMachine.proofHeader.toEntity),
+      from: shortId(account.proofHeader.fromEntity),
+      to: shortId(account.proofHeader.toEntity),
       isLeft: isLeftEntity,
     });
   }
 
   const pendingSettlementNonceConflict = validatedCounterpartyDisputeSeal
-    ? accountMachine.pendingFrame.accountTxs.some((tx) =>
+    ? account.pendingFrame.accountTxs.some((tx) =>
         tx.type === 'settle_transition' &&
         tx.data.kind === 'seal' &&
         tx.data.settlementNonce <= validatedCounterpartyDisputeSeal.nonce
@@ -1168,15 +1168,15 @@ function resolveSameHeightIncomingFrame(
 
   if (isLeftEntity && !pendingSettlementNonceConflict) {
     events.push(`📤 LEFT-WINS: Ignored RIGHT's frame ${receivedFrame.height} (waiting for their ACK)`);
-    if (accountMachine.mempool.length > 0) {
-      events.push(`⚠️ LEFT has ${accountMachine.mempool.length} pending txs while waiting for RIGHT's ACK`);
+    if (account.mempool.length > 0) {
+      events.push(`⚠️ LEFT has ${account.mempool.length} pending txs while waiting for RIGHT's ACK`);
     }
-    const pendingResponse = accountMachine.pendingAccountInput;
+    const pendingResponse = account.pendingAccountInput;
     const pendingProposal = pendingResponse ? accountInputProposal(pendingResponse) : undefined;
     if (
       !pendingResponse ||
       !pendingProposal ||
-      pendingProposal.frame.stateHash !== accountMachine.pendingFrame.stateHash
+      pendingProposal.frame.stateHash !== account.pendingFrame.stateHash
     ) {
       throw new Error(`ACCOUNT_COLLISION_PENDING_RESPONSE_MISSING:${receivedFrame.height}`);
     }
@@ -1204,7 +1204,7 @@ function resolveSameHeightIncomingFrame(
   }
 
   const receivedHash = receivedFrame.stateHash;
-  if (accountMachine.lastRollbackFrameHash === receivedHash) {
+  if (account.lastRollbackFrameHash === receivedHash) {
     accountLog.debug('rollback.duplicate', { frame: shortHash(receivedHash) });
     return undefined;
   }
@@ -1214,31 +1214,31 @@ function resolveSameHeightIncomingFrame(
 
 function applySameHeightIncomingFrameRollback(
   _env: RuntimeState,
-  accountMachine: AccountState,
+  account: AccountState,
   _input: AccountInput,
   receivedFrame: AccountFrame,
   events: string[],
 ): void {
   const receivedHash = receivedFrame.stateHash;
   let restoredTxCount = 0;
-  if (accountMachine.pendingFrame) {
-    restoredTxCount = accountMachine.pendingFrame.accountTxs.length;
-    const uniqueRestored = prependUniqueMempoolTxs(accountMachine, accountMachine.pendingFrame.accountTxs);
+  if (account.pendingFrame) {
+    restoredTxCount = account.pendingFrame.accountTxs.length;
+    const uniqueRestored = prependUniqueMempoolTxs(account, account.pendingFrame.accountTxs);
 
     events.push(
-      `🔄 ROLLBACK: Discarded our frame ${accountMachine.pendingFrame.height}, restored ${uniqueRestored}/${restoredTxCount} txs to mempool`,
+      `🔄 ROLLBACK: Discarded our frame ${account.pendingFrame.height}, restored ${uniqueRestored}/${restoredTxCount} txs to mempool`,
     );
   }
 
-  delete accountMachine.pendingFrame;
-  delete accountMachine.pendingAccountInput;
-  delete accountMachine.pendingAccountInputSignerId;
-  delete accountMachine.clonedForValidation;
-  discardStagedAccountCommitmentCache(accountMachine);
-  accountMachine.rollbackCount = Math.max(1, accountMachine.rollbackCount + 1);
-  accountMachine.lastRollbackFrameHash = receivedHash; // Track this rollback
-  if (accountMachine.rollbackCount > 1) {
-    accountLog.warn('rollback.retry', { count: accountMachine.rollbackCount, frame: shortHash(receivedHash) });
+  delete account.pendingFrame;
+  delete account.pendingAccountInput;
+  delete account.pendingAccountInputSignerId;
+  delete account.clonedForValidation;
+  discardStagedAccountCommitmentCache(account);
+  account.rollbackCount = Math.max(1, account.rollbackCount + 1);
+  account.lastRollbackFrameHash = receivedHash; // Track this rollback
+  if (account.rollbackCount > 1) {
+    accountLog.warn('rollback.retry', { count: account.rollbackCount, frame: shortHash(receivedHash) });
   }
 
   events.push(`📥 Accepted LEFT's frame ${receivedFrame.height} (we are RIGHT, deterministic tiebreaker)`);
@@ -1278,18 +1278,18 @@ async function verifyIncomingFrameHanko(
 }
 
 async function handleStaleIncomingFrame(
-  accountMachine: AccountState,
+  account: AccountState,
   input: AccountInput,
   receivedFrame: AccountFrame,
   replayCurrentHeight: number,
   events: string[],
   committedFrames: AccountCommittedFrame[],
 ): Promise<HandleAccountInputResult | undefined> {
-  if (Number(receivedFrame.height) > Number(accountMachine.currentHeight ?? 0)) {
+  if (Number(receivedFrame.height) > Number(account.currentHeight ?? 0)) {
     return undefined;
   }
   const duplicateAck = await buildDuplicateCommittedFrameAck(
-    accountMachine,
+    account,
     input,
     events,
     replayCurrentHeight,
@@ -1298,7 +1298,7 @@ async function handleStaleIncomingFrame(
   if (duplicateAck) return duplicateAck;
   events.push(
     `ℹ️ Ignored stale frame ${String(receivedFrame.height)} ` +
-    `(current=${String(accountMachine.currentHeight ?? 0)})`,
+    `(current=${String(account.currentHeight ?? 0)})`,
   );
   return {
     success: true,
@@ -1308,14 +1308,14 @@ async function handleStaleIncomingFrame(
 }
 
 function validateIncomingFrameProposer(
-  accountMachine: AccountState,
+  account: AccountState,
   input: AccountInput,
   receivedFrame: AccountFrame,
   events: string[],
 ): HandleAccountInputResult | undefined {
   const proposer = input.fromEntityId.toLowerCase();
-  const proposerIsLeft = proposer === accountMachine.leftEntity.toLowerCase();
-  if (!proposerIsLeft && proposer !== accountMachine.rightEntity.toLowerCase()) {
+  const proposerIsLeft = proposer === account.leftEntity.toLowerCase();
+  if (!proposerIsLeft && proposer !== account.rightEntity.toLowerCase()) {
     return {
       success: false,
       error: `Frame proposer is not an account party: ${input.fromEntityId.slice(-8)}`,
@@ -1333,7 +1333,7 @@ function validateIncomingFrameProposer(
 }
 
 function validateIncomingFrameChain(
-  accountMachine: AccountState,
+  account: AccountState,
   input: AccountInput,
   receivedFrame: AccountFrame,
   normalizedInputHeight: number | undefined,
@@ -1352,10 +1352,10 @@ function validateIncomingFrameChain(
     };
   }
 
-  const previousTimestamp = accountMachine.currentFrame?.timestamp;
+  const previousTimestamp = account.currentFrame?.timestamp;
   if (previousTimestamp !== undefined && receivedFrame.timestamp < previousTimestamp) {
     accountLog.warn('frame.timestamp_regressed_accepted', {
-      accountHeight: accountMachine.currentHeight,
+      accountHeight: account.currentHeight,
       entityId: input.toEntityId,
       counterpartyEntityId: input.fromEntityId,
       previousTimestamp,
@@ -1366,7 +1366,7 @@ function validateIncomingFrameChain(
   }
 
   const expectedPrevHash =
-    accountMachine.currentHeight === 0 ? 'genesis' : accountMachine.currentFrame.stateHash || '';
+    account.currentHeight === 0 ? 'genesis' : account.currentFrame.stateHash || '';
   if (receivedFrame.prevFrameHash !== expectedPrevHash) {
     const mismatch = {
       inputFromEntityId: input.fromEntityId,
@@ -1377,7 +1377,7 @@ function validateIncomingFrameChain(
       receivedPrevFrameHash: receivedFrame.prevFrameHash ?? null,
       receivedTxTypes: receivedFrame.accountTxs.map((tx) => tx.type),
       expectedPrevFrameHash: expectedPrevHash,
-      account: describeAccountState(accountMachine),
+      account: describeAccountState(account),
     };
     accountLog.warn('frame.prev_hash_mismatch', mismatch);
     return {
@@ -1386,17 +1386,17 @@ function validateIncomingFrameChain(
         `Frame chain broken: prevFrameHash mismatch ` +
         `(expected ${expectedPrevHash.slice(0, 16)}..., ` +
         `got ${String(receivedFrame.prevFrameHash).slice(0, 16)}..., ` +
-        `current=${accountMachine.currentHeight}, ` +
-        `pending=${Number(accountMachine.pendingFrame?.height ?? 0)})`,
+        `current=${account.currentHeight}, ` +
+        `pending=${Number(account.pendingFrame?.height ?? 0)})`,
       events,
     };
   }
 
-  const expectedHeight = accountMachine.currentHeight + 1;
+  const expectedHeight = account.currentHeight + 1;
   if (HEAVY_LOGS) {
     accountLog.debug('frame.sequence_check', {
       receivedHeight: receivedFrame.height,
-      currentHeight: accountMachine.currentHeight,
+      currentHeight: account.currentHeight,
       expectedHeight,
     });
   }
@@ -1413,7 +1413,7 @@ function validateIncomingFrameChain(
 }
 
 function validateIncomingFrameDeadline(
-  accountMachine: AccountState,
+  account: AccountState,
   input: AccountInput,
   receivedFrame: AccountFrame,
   securityContext: AccountInputSecurityContext,
@@ -1433,7 +1433,7 @@ function validateIncomingFrameDeadline(
   }
 
   const violation = getIncomingAccountDeadlineViolation(
-    accountMachine,
+    account,
     receivedFrame,
     securityContext,
   );
@@ -1458,7 +1458,7 @@ function validateIncomingFrameDeadline(
 
 async function preflightIncomingAccountFrame(
   env: RuntimeState,
-  accountMachine: AccountState,
+  account: AccountState,
   input: AccountInput,
   normalizedInputHeight: number | undefined,
   replayCurrentHeight: number,
@@ -1473,7 +1473,7 @@ async function preflightIncomingAccountFrame(
   }
 
   const staleResult = await handleStaleIncomingFrame(
-    accountMachine,
+    account,
     input,
     receivedFrame,
     replayCurrentHeight,
@@ -1483,7 +1483,7 @@ async function preflightIncomingAccountFrame(
   if (staleResult) return { kind: 'return', result: staleResult };
 
   const proposerError = validateIncomingFrameProposer(
-    accountMachine,
+    account,
     input,
     receivedFrame,
     events,
@@ -1491,7 +1491,7 @@ async function preflightIncomingAccountFrame(
   if (proposerError) return { kind: 'return', result: proposerError };
 
   const chainError = validateIncomingFrameChain(
-    accountMachine,
+    account,
     input,
     receivedFrame,
     normalizedInputHeight,
@@ -1504,7 +1504,7 @@ async function preflightIncomingAccountFrame(
   if (hankoError) return { kind: 'return', result: hankoError };
 
   const deadlineError = validateIncomingFrameDeadline(
-    accountMachine,
+    account,
     input,
     receivedFrame,
     securityContext,
@@ -1517,7 +1517,7 @@ async function preflightIncomingAccountFrame(
   // replay on a clone succeeds, so a rejected peer frame cannot mutate live
   // pending state or restore its transactions into the mempool.
   const sameHeightResolution = resolveSameHeightIncomingFrame(
-    accountMachine,
+    account,
     receivedFrame,
     events,
     committedFrames,
@@ -1527,8 +1527,8 @@ async function preflightIncomingAccountFrame(
     return { kind: 'return', result: sameHeightResolution };
   }
 
-  const ourEntityId = accountMachine.proofHeader.fromEntity;
-  const currentJHeight = accountMachine.lastFinalizedJHeight ?? 0;
+  const ourEntityId = account.proofHeader.fromEntity;
+  const currentJHeight = account.lastFinalizedJHeight ?? 0;
   const frameJHeight = receivedFrame.jHeight ?? currentJHeight;
 
   return {
@@ -1615,7 +1615,7 @@ async function verifySenderFrameHash(
 
 async function validateIncomingFrameOnClone(
   env: RuntimeState,
-  accountMachine: AccountState,
+  account: AccountState,
   input: AccountInput,
   receivedFrame: AccountFrame,
   frameJHeight: number,
@@ -1625,7 +1625,7 @@ async function validateIncomingFrameOnClone(
   accountJClaimNodeStore: AccountJClaimNodeStore,
   securityContext: AccountInputSecurityContext,
 ): Promise<IncomingFrameValidationResult> {
-  const clonedMachine = cloneAccountMachine(accountMachine);
+  const clonedMachine = cloneAccountMachine(account);
   const jClaimSession = createAccountJClaimSession(env, accountJClaimNodeStore);
   const processEvents: string[] = [];
   const revealedSecrets: AccountRevealedSecret[] = [];
@@ -1704,9 +1704,9 @@ async function validateIncomingFrameOnClone(
   const localProofBodyHash = proofResult.proofBodyHash;
   const frameSealError = disputeSealRequirementError(
     localProofBodyHash,
-    accountMachine.counterpartyDisputeProofBodyHash,
-    accountMachine.counterpartyDisputeProofNonce,
-    Number(clonedMachine.jNonce ?? accountMachine.jNonce ?? 0),
+    account.counterpartyDisputeProofBodyHash,
+    account.counterpartyDisputeProofNonce,
+    Number(clonedMachine.jNonce ?? account.jNonce ?? 0),
     validatedCounterpartyDisputeSeal,
   );
   if (frameSealError) {
@@ -1735,7 +1735,7 @@ async function validateIncomingFrameOnClone(
 
 async function commitIncomingFrameOnRealState(
   env: RuntimeState,
-  accountMachine: AccountState,
+  account: AccountState,
   input: AccountInput,
   receivedFrame: AccountFrame,
   frameJHeight: number,
@@ -1748,7 +1748,7 @@ async function commitIncomingFrameOnRealState(
   securityContext: AccountInputSecurityContext,
   candidateEffects: EntityCandidateEffect[],
 ): Promise<void> {
-  const { counterparty: cpForCommitLog } = getAccountPerspective(accountMachine, ourEntityId);
+  const { counterparty: cpForCommitLog } = getAccountPerspective(account, ourEntityId);
   if (HEAVY_LOGS) {
     accountLog.debug('receiver.commit.reexecute', {
       txs: receivedFrame.accountTxs.length,
@@ -1757,9 +1757,9 @@ async function commitIncomingFrameOnRealState(
   }
 
   for (const tx of receivedFrame.accountTxs) {
-    const beforeSettlement = captureSettlementVector(accountMachine);
+    const beforeSettlement = captureSettlementVector(account);
     const commitResult = await applyAccountTx(
-      accountMachine,
+      account,
       tx,
       receivedFrame.byLeft!,
       receivedFrame.timestamp,
@@ -1775,12 +1775,12 @@ async function commitIncomingFrameOnRealState(
       accountLog.error('frame.commit.failed', { side: 'receiver', type: tx.type, error: commitResult.error });
       throw new Error(`Frame ${receivedFrame.height} commit failed: ${tx.type} - ${commitResult.error}`);
     }
-    assertNoUnilateralSettlementMutation(accountMachine, beforeSettlement, tx, 'receiver/commit');
+    assertNoUnilateralSettlementMutation(account, beforeSettlement, tx, 'receiver/commit');
   }
 
-  forkAccountCommitmentCache(validation.clonedMachine, accountMachine);
+  forkAccountCommitmentCache(validation.clonedMachine, account);
   assertLiveCommitMatchesFrame(
-    accountMachine,
+    account,
     receivedFrame.accountStateRoot,
     'receiver',
     receivedFrame.height,
@@ -1791,29 +1791,29 @@ async function commitIncomingFrameOnRealState(
     side: 'receiver',
     counterparty: shortId(cpForCommitLog),
     height: receivedFrame.height,
-    tokens: accountMachine.deltas.size,
+    tokens: account.deltas.size,
   });
   if (validation.clonedMachine.pendingForwards?.length) {
-    accountMachine.pendingForwards = validation.clonedMachine.pendingForwards;
+    account.pendingForwards = validation.clonedMachine.pendingForwards;
     accountLog.debug('pending_forwards.copied', {
       count: validation.clonedMachine.pendingForwards.length,
       routes: validation.clonedMachine.pendingForwards.map(forward => forward.route.map(r => shortId(r))),
     });
   }
 
-  accountMachine.currentFrame = structuredClone(receivedFrame);
-  accountMachine.currentHeight = receivedFrame.height;
+  account.currentFrame = structuredClone(receivedFrame);
+  account.currentHeight = receivedFrame.height;
   const acceptedFrameHanko = accountInputProposal(input)?.frameHanko;
   if (!acceptedFrameHanko) throw new Error('ACCEPTED_ACCOUNT_FRAME_HANKO_MISSING');
-  accountMachine.counterpartyFrameHanko = acceptedFrameHanko;
+  account.counterpartyFrameHanko = acceptedFrameHanko;
   if (accountInputProposal(input)?.disputeSeal) {
-    storeCounterpartyDisputeSeal(accountMachine, validatedCounterpartyDisputeSeal);
+    storeCounterpartyDisputeSeal(account, validatedCounterpartyDisputeSeal);
     accountLog.debug('hanko.dispute_frame_stored', { height: receivedFrame.height, from: shortId(input.fromEntityId) });
   }
 
   const committedFrame = cloneAccountFrame(receivedFrame);
   committedFrames.push({ frame: committedFrame, committedViaNewFrame: true });
-  appendAccountFrameHistoryView(accountMachine, committedFrame);
+  appendAccountFrameHistoryView(account, committedFrame);
   accountLog.debug('frame.indexed', { source: 'peerCommit', height: receivedFrame.height });
 
   events.push(...validation.processEvents);
@@ -1821,7 +1821,7 @@ async function commitIncomingFrameOnRealState(
 
   const postCommitAutoRebalanceTxs = await runPostFrameAutoRebalanceCheck(
     env,
-    accountMachine,
+    account,
     ourEntityId,
     input.fromEntityId,
     receivedFrame.height,
@@ -1830,7 +1830,7 @@ async function commitIncomingFrameOnRealState(
   );
   if (postCommitAutoRebalanceTxs.length > 0) {
     appendAccountMempoolTxs(
-      accountMachine,
+      account,
       postCommitAutoRebalanceTxs,
       'accountConsensus:postCommitAutoRebalance',
     );
@@ -1858,13 +1858,13 @@ type IncomingFrameAckMaterialResult =
 
 async function buildIncomingFrameAckMaterial(
   env: RuntimeState,
-  accountMachine: AccountState,
+  account: AccountState,
   input: AccountInput,
   receivedFrame: AccountFrame,
   ackProofResult: ReturnType<typeof buildAccountProofBodyFromEnv>,
   events: string[],
 ): Promise<IncomingFrameAckMaterialResult> {
-  const ackEntityId = accountMachine.proofHeader.fromEntity;
+  const ackEntityId = account.proofHeader.fromEntity;
   const ackReplica = getReplicaByEntityId(env, ackEntityId);
   const ackSignerId = ackReplica?.state.config.validators[0];
   if (!ackSignerId) {
@@ -1878,17 +1878,17 @@ async function buildIncomingFrameAckMaterial(
     height: receivedFrame.height,
   });
 
-  const ackHankoDomain = getAccountStateDomain(accountMachine);
+  const ackHankoDomain = getAccountStateDomain(account);
   const proofChanged =
-    ackProofResult.proofBodyHash.toLowerCase() !== accountMachine.currentDisputeProofBodyHash?.toLowerCase() ||
-    Number(accountMachine.currentDisputeProofNonce ?? 0) <= Number(accountMachine.jNonce ?? 0);
+    ackProofResult.proofBodyHash.toLowerCase() !== account.currentDisputeProofBodyHash?.toLowerCase() ||
+    Number(account.currentDisputeProofNonce ?? 0) <= Number(account.jNonce ?? 0);
   const ackSignedNonce = Math.max(
-    Number(accountMachine.proofHeader.nextProofNonce ?? 0),
-    Number(accountMachine.jNonce ?? 0) + 1,
+    Number(account.proofHeader.nextProofNonce ?? 0),
+    Number(account.jNonce ?? 0) + 1,
   );
   const ackDisputeHash = proofChanged
     ? createDisputeProofHashWithNonce(
-      accountMachine,
+      account,
       ackProofResult.proofBodyHash,
       ackHankoDomain,
       ackSignedNonce,
@@ -1910,14 +1910,14 @@ async function buildIncomingFrameAckMaterial(
     if (!ackDisputeHash || (directSigner && !ackDisputeHanko)) {
       return { kind: 'return', result: { success: false, error: 'Failed to build ACK dispute hanko', events } };
     }
-    accountMachine.disputeProofNoncesByHash ??= {};
-    accountMachine.disputeProofNoncesByHash[ackProofResult.proofBodyHash] = ackSignedNonce;
-    accountMachine.disputeProofBodiesByHash ??= {};
-    accountMachine.disputeProofBodiesByHash[ackProofResult.proofBodyHash] = ackProofResult.proofBodyStruct;
+    account.disputeProofNoncesByHash ??= {};
+    account.disputeProofNoncesByHash[ackProofResult.proofBodyHash] = ackSignedNonce;
+    account.disputeProofBodiesByHash ??= {};
+    account.disputeProofBodiesByHash[ackProofResult.proofBodyHash] = ackProofResult.proofBodyStruct;
     storeDisputeArgumentSnapshot(
-      accountMachine,
+      account,
       captureDisputeArgumentSnapshot(
-        accountMachine,
+        account,
         ackProofResult.proofBodyHash,
         ackSignedNonce,
         ackProofResult.proofBodyStruct,
@@ -1931,25 +1931,25 @@ async function buildIncomingFrameAckMaterial(
     proofBodyHash: ackProofResult.proofBodyHash,
     proofNonce: ackSignedNonce,
   } : (
-    accountMachine.currentDisputeProofHanko &&
-    accountMachine.currentDisputeHash &&
-    accountMachine.currentDisputeProofBodyHash?.toLowerCase() === ackProofResult.proofBodyHash.toLowerCase() &&
-    Number(accountMachine.currentDisputeProofNonce ?? 0) > Number(accountMachine.jNonce ?? 0)
+    account.currentDisputeProofHanko &&
+    account.currentDisputeHash &&
+    account.currentDisputeProofBodyHash?.toLowerCase() === ackProofResult.proofBodyHash.toLowerCase() &&
+    Number(account.currentDisputeProofNonce ?? 0) > Number(account.jNonce ?? 0)
       ? {
-          hanko: accountMachine.currentDisputeProofHanko,
-          hash: accountMachine.currentDisputeHash,
-          proofBodyHash: accountMachine.currentDisputeProofBodyHash,
-          proofNonce: accountMachine.currentDisputeProofNonce!,
+          hanko: account.currentDisputeProofHanko,
+          hash: account.currentDisputeHash,
+          proofBodyHash: account.currentDisputeProofBodyHash,
+          proofNonce: account.currentDisputeProofNonce!,
         }
       : undefined
   );
 
   const response: Extract<AccountInput, { kind: 'ack' }> = {
     kind: 'ack',
-    fromEntityId: accountMachine.proofHeader.fromEntity,
+    fromEntityId: account.proofHeader.fromEntity,
     toEntityId: input.fromEntityId,
-    domain: structuredClone(accountMachine.domain),
-    watchSeed: accountMachine.watchSeed,
+    domain: structuredClone(account.domain),
+    watchSeed: account.watchSeed,
     ack: {
       height: receivedFrame.height,
       frameHash: receivedFrame.stateHash,
@@ -1977,16 +1977,16 @@ async function buildIncomingFrameAckMaterial(
 }
 
 function storeAckDisputeState(
-  accountMachine: AccountState,
+  account: AccountState,
   material: IncomingFrameAckMaterial,
 ): void {
   if (material.proofChanged && material.ackDisputeHash) {
     if (material.ackDisputeHanko) {
-      accountMachine.currentDisputeProofHanko = material.ackDisputeHanko;
+      account.currentDisputeProofHanko = material.ackDisputeHanko;
     }
-    accountMachine.currentDisputeProofNonce = material.ackSignedNonce;
-    accountMachine.currentDisputeProofBodyHash = material.ackProofBodyHash;
-    accountMachine.currentDisputeHash = material.ackDisputeHash;
+    account.currentDisputeProofNonce = material.ackSignedNonce;
+    account.currentDisputeProofBodyHash = material.ackProofBodyHash;
+    account.currentDisputeHash = material.ackDisputeHash;
   }
 }
 
@@ -2043,7 +2043,7 @@ function buildIncomingFrameReturnPayload(
 
 async function buildAckResponseForIncomingFrame(
   env: RuntimeState,
-  accountMachine: AccountState,
+  account: AccountState,
   input: AccountPeerInput,
   receivedFrame: AccountFrame,
   validation: IncomingFrameValidation,
@@ -2053,7 +2053,7 @@ async function buildAckResponseForIncomingFrame(
 ): Promise<HandleAccountInputResult> {
   const ackMaterial = await buildIncomingFrameAckMaterial(
     env,
-    accountMachine,
+    account,
     input,
     receivedFrame,
     validation.proofResult,
@@ -2061,12 +2061,12 @@ async function buildAckResponseForIncomingFrame(
   );
   if (ackMaterial.kind === 'return') return ackMaterial.result;
   const { material } = ackMaterial;
-  storeAckDisputeState(accountMachine, material);
-  if (material.proofChanged) accountMachine.proofHeader.nextProofNonce = material.ackSignedNonce + 1;
+  storeAckDisputeState(account, material);
+  if (material.proofChanged) account.proofHeader.nextProofNonce = material.ackSignedNonce + 1;
   // Install the reusable ACK before the final Entity flush. The flush may
   // combine it with a successor proposal, while retries retain these exact
   // ACK bytes independently of that successor.
-  accountMachine.lastOutboundFrameAck = material.outboundAck;
+  account.lastOutboundFrameAck = material.outboundAck;
   // Entity consensus owns the only Account-output flush point. Do not propose
   // here: later AccountInputs, matching, HTLC hooks, and cross-j hooks in the
   // same Entity frame may enqueue more work for this account. The final
@@ -2139,7 +2139,7 @@ const classifyIncomingValidationFailure = (
 
 async function handleIncomingAccountFrame(
   env: RuntimeState,
-  accountMachine: AccountState,
+  account: AccountState,
   input: AccountPeerInput,
   normalizedInputHeight: number | undefined,
   replayCurrentHeight: number,
@@ -2157,7 +2157,7 @@ async function handleIncomingAccountFrame(
 
   const preflight = await preflightIncomingAccountFrame(
     env,
-    accountMachine,
+    account,
     input,
     normalizedInputHeight,
     replayCurrentHeight,
@@ -2172,7 +2172,7 @@ async function handleIncomingAccountFrame(
 
   const validationResult = await validateIncomingFrameOnClone(
     env,
-    accountMachine,
+    account,
     input,
     preflight.receivedFrame,
     preflight.frameJHeight,
@@ -2184,7 +2184,7 @@ async function handleIncomingAccountFrame(
   );
   if (validationResult.kind === 'return') {
     return classifyIncomingValidationFailure(
-      accountMachine,
+      account,
       input,
       preflight.receivedFrame,
       validationResult.result,
@@ -2194,7 +2194,7 @@ async function handleIncomingAccountFrame(
   if (preflight.rollbackPendingFrame) {
     applySameHeightIncomingFrameRollback(
       env,
-      accountMachine,
+      account,
       input,
       preflight.receivedFrame,
       events,
@@ -2203,7 +2203,7 @@ async function handleIncomingAccountFrame(
 
   await commitIncomingFrameOnRealState(
     env,
-    accountMachine,
+    account,
     input,
     preflight.receivedFrame,
     preflight.frameJHeight,
@@ -2221,7 +2221,7 @@ async function handleIncomingAccountFrame(
     kind: 'return',
     result: await buildAckResponseForIncomingFrame(
       env,
-      accountMachine,
+      account,
       input,
       preflight.receivedFrame,
       validationResult.validation,
@@ -2234,7 +2234,7 @@ async function handleIncomingAccountFrame(
 
 type AccountInputSession = {
   env: RuntimeState;
-  accountMachine: AccountState;
+  account: AccountState;
   input: AccountPeerInput;
   securityContext: AccountInputSecurityContext;
   normalizedInputHeight: number;
@@ -2271,7 +2271,7 @@ const handleAccountAckPhase = async (
 > => {
   const {
     env,
-    accountMachine,
+    account,
     input,
     normalizedInputHeight,
     securityContext,
@@ -2285,7 +2285,7 @@ const handleAccountAckPhase = async (
   try {
     disputeSeal = await validateCounterpartyDisputeSeal(
       env,
-      accountMachine,
+      account,
       input,
       accountInputAck(input)?.disputeSeal,
       'ACCOUNT_ACK',
@@ -2298,13 +2298,13 @@ const handleAccountAckPhase = async (
     };
   }
   const { ackHeight } = resolveAccountAckTarget(
-    accountMachine,
+    account,
     input,
     normalizedInputHeight,
   );
   const pending = await handlePendingFrameAck(
     env,
-    accountMachine,
+    account,
     input,
     ackHeight,
     disputeSeal,
@@ -2318,7 +2318,7 @@ const handleAccountAckPhase = async (
   if (pending.kind === 'return') return pending;
   const ackProcessed = pending.kind === 'fallthrough';
   const unmatched = handleUnmatchedAck(
-    accountMachine,
+    account,
     input,
     normalizedInputHeight,
     ackProcessed,
@@ -2334,20 +2334,20 @@ const handleAccountAckPhase = async (
 const handleStandaloneDispute = async (
   session: AccountInputSession,
 ): Promise<HandleAccountInputResult> => {
-  const { env, accountMachine, input, securityContext, events } = session;
+  const { env, account, input, securityContext, events } = session;
   if (input.kind !== 'dispute') {
     throw new Error(`ACCOUNT_DISPUTE_PHASE_KIND_INVALID:${input.kind}`);
   }
   try {
     const seal = await validateCounterpartyDisputeSeal(
       env,
-      accountMachine,
+      account,
       input,
       input.disputeSeal,
       'ACCOUNT_DISPUTE',
       securityContext,
     );
-    storeCounterpartyDisputeSeal(accountMachine, seal);
+    storeCounterpartyDisputeSeal(account, seal);
     return { success: true, events };
   } catch (error) {
     return { success: false, error: (error as Error).message, events };
@@ -2360,7 +2360,7 @@ const handleAccountProposalPhase = async (
 ): Promise<HandleAccountInputResult | null> => {
   const {
     env,
-    accountMachine,
+    account,
     input,
     normalizedInputHeight,
     replay,
@@ -2375,7 +2375,7 @@ const handleAccountProposalPhase = async (
   try {
     disputeSeal = await validateCounterpartyDisputeSeal(
       env,
-      accountMachine,
+      account,
       input,
       accountInputProposal(input)?.disputeSeal,
       'ACCOUNT_PROPOSAL',
@@ -2387,7 +2387,7 @@ const handleAccountProposalPhase = async (
   if (input.kind === 'dispute') return handleStandaloneDispute(session);
   const incoming = await handleIncomingAccountFrame(
     env,
-    accountMachine,
+    account,
     input,
     normalizedInputHeight,
     replay.currentHeight,
@@ -2401,7 +2401,7 @@ const handleAccountProposalPhase = async (
   );
   if (incoming.kind === 'return') return incoming.result;
   return handleUnmatchedAck(
-    accountMachine,
+    account,
     input,
     normalizedInputHeight,
     ackProcessed,
@@ -2430,20 +2430,20 @@ const resolveAccountInputSecurityContext = (
 
 export async function applyAccountInput(
   env: RuntimeState,
-  accountMachine: AccountState,
+  account: AccountState,
   input: AccountInput,
   providedSecurityContext?: AccountInputSecurityContext,
   accountJClaimNodeStore?: AccountJClaimNodeStore,
 ): Promise<HandleAccountInputResult> {
-  if (input.kind === 'txs') return applyLocalAccountInput(accountMachine, input);
+  if (input.kind === 'txs') return applyLocalAccountInput(account, input);
   const securityContext = resolveAccountInputSecurityContext(
     env,
-    accountMachine,
+    account,
     providedSecurityContext,
   );
   if (input.watchSeed !== undefined) {
     const inputWatchSeed = normalizeAccountWatchSeed(input.watchSeed, 'ACCOUNT_INPUT');
-    if (accountMachine.watchSeed.toLowerCase() !== inputWatchSeed) {
+    if (account.watchSeed.toLowerCase() !== inputWatchSeed) {
       return { success: false, error: `ACCOUNT_WATCH_SEED_MISMATCH:${input.fromEntityId}`, events: [] };
     }
   }
@@ -2460,15 +2460,15 @@ export async function applyAccountInput(
   if (disputeHankoShapeError) {
     return { success: false, error: disputeHankoShapeError, events };
   }
-  const boardReseal = await handleBoardReseal(env, accountMachine, input, securityContext);
+  const boardReseal = await handleBoardReseal(env, account, input, securityContext);
   if (boardReseal) {
     const session = {
       env,
-      accountMachine,
+      account,
       input,
       securityContext,
       normalizedInputHeight,
-      replay: classifyAccountInputReplay(accountMachine, input),
+      replay: classifyAccountInputReplay(account, input),
       events,
       timedOutHashlocks: [],
       committedFrames: [],
@@ -2477,9 +2477,9 @@ export async function applyAccountInput(
     };
     return finishAccountInput(session, boardReseal);
   }
-  const replay = classifyAccountInputReplay(accountMachine, input);
+  const replay = classifyAccountInputReplay(account, input);
   const replayGateResult = await handleReplayOrObsoleteAccountInput(
-    accountMachine,
+    account,
     input,
     replay,
     events,
@@ -2487,7 +2487,7 @@ export async function applyAccountInput(
   if (replayGateResult) return replayGateResult;
   const session: AccountInputSession = {
     env,
-    accountMachine,
+    account,
     input,
     securityContext,
     normalizedInputHeight,
@@ -2524,7 +2524,7 @@ export async function applyAccountInput(
 /**
  * Add transaction to account mempool with limits
  */
-export function addToAccountMempool(accountMachine: AccountState, accountTx: AccountTx): boolean {
-  appendAccountMempoolTx(accountMachine, accountTx, 'accountConsensus:externalAdmission');
+export function addToAccountMempool(account: AccountState, accountTx: AccountTx): boolean {
+  appendAccountMempoolTx(account, accountTx, 'accountConsensus:externalAdmission');
   return true;
 }

@@ -84,7 +84,7 @@ const invalidateCommittedMapsForTx = (
 };
 
 export async function applyAccountTx(
-  accountMachine: AccountState,
+  account: AccountState,
   accountTx: AccountTx,
   byLeft: boolean,
   currentTimestamp: number = 0,
@@ -94,10 +94,10 @@ export async function applyAccountTx(
   jClaimSession?: AccountJClaimSession,
   counterpartyCertifiedBoardHash?: string,
 ): Promise<ApplyAccountTxResult> {
-  const deltaKeysBeforeMutation = swapDeltaKeys(accountMachine, accountTx);
+  const deltaKeysBeforeMutation = swapDeltaKeys(account, accountTx);
   const candidateEffects: EntityCandidateEffect[] = [];
   const result = await applyAccountTxMutation(
-    accountMachine,
+    account,
     accountTx,
     byLeft,
     currentTimestamp,
@@ -109,7 +109,7 @@ export async function applyAccountTx(
     candidateEffects,
   );
   if (result.success) {
-    invalidateCommittedMapsForTx(accountMachine, accountTx, deltaKeysBeforeMutation);
+    invalidateCommittedMapsForTx(account, accountTx, deltaKeysBeforeMutation);
   }
   return candidateEffects.length > 0 ? { ...result, candidateEffects } : result;
 }

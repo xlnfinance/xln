@@ -46,7 +46,7 @@ const validatePaymentEnvelope = (
 };
 
 const resolvePaymentParties = (
-  accountMachine: AccountState,
+  account: AccountState,
   payment: DirectPaymentTx['data'],
   byLeft: boolean,
   events: string[],
@@ -55,7 +55,7 @@ const resolvePaymentParties = (
   paymentFromEntity: string;
   paymentToEntity: string;
 } => {
-  const { fromEntity, toEntity } = accountMachine.proofHeader;
+  const { fromEntity, toEntity } = account.proofHeader;
   const leftEntity = isLeftEntity(fromEntity, toEntity) ? fromEntity : toEntity;
   const rightEntity = leftEntity === fromEntity ? toEntity : fromEntity;
   const paymentFromEntity = byLeft ? leftEntity : rightEntity;
@@ -79,15 +79,15 @@ const resolvePaymentParties = (
 };
 
 const appendPaymentEvent = (
-  accountMachine: AccountState,
+  account: AccountState,
   payment: DirectPaymentTx['data'],
   parties: { leftEntity: string; paymentFromEntity: string },
   byLeft: boolean,
   events: string[],
 ): string => {
   const { amount, tokenId, description } = payment;
-  const { counterparty } = getAccountPerspective(accountMachine, accountMachine.proofHeader.fromEntity);
-  const isOurFrame = byLeft === (accountMachine.proofHeader.fromEntity === parties.leftEntity);
+  const { counterparty } = getAccountPerspective(account, account.proofHeader.fromEntity);
+  const isOurFrame = byLeft === (account.proofHeader.fromEntity === parties.leftEntity);
   events.push(
     isOurFrame
       ? `💸 Sent ${amount.toString()} token ${tokenId} to Entity ${counterparty.slice(-4)} ${description ? `(${description})` : ''}`
@@ -97,14 +97,14 @@ const appendPaymentEvent = (
 };
 
 const queuePaymentForward = (
-  accountMachine: AccountState,
+  account: AccountState,
   payment: DirectPaymentTx['data'],
   paymentFromEntity: string,
   counterparty: string,
   events: string[],
 ): DirectPaymentResult | undefined => {
   const { route, tokenId, amount, description, deliveryMode, trustedGatewayEntityId } = payment;
-  const isOutgoing = paymentFromEntity === accountMachine.proofHeader.fromEntity;
+  const isOutgoing = paymentFromEntity === account.proofHeader.fromEntity;
   if (!route?.length || isOutgoing) return undefined;
 
   const [currentEntityInRoute, nextHop] = route;
@@ -113,7 +113,7 @@ const queuePaymentForward = (
     directPaymentLog.debug('empty_route', { routeLength: route.length });
     return { success: false, error: 'Invalid payment route', events };
   }
-  if (currentEntityInRoute !== accountMachine.proofHeader.fromEntity || currentEntityInRoute === finalTarget) {
+  if (currentEntityInRoute !== account.proofHeader.fromEntity || currentEntityInRoute === finalTarget) {
     return undefined;
   }
   if (!nextHop) {
@@ -126,7 +126,7 @@ const queuePaymentForward = (
   }
 
   events.push(`↪️ Forwarding payment to ${finalTarget.slice(-4)} via ${route.length - 1} more hops`);
-  const pendingForwards = accountMachine.pendingForwards ?? [];
+  const pendingForwards = account.pendingForwards ?? [];
   pendingForwards.push({
     tokenId,
     amount,
@@ -135,12 +135,12 @@ const queuePaymentForward = (
     ...(deliveryMode ? { deliveryMode } : {}),
     ...(trustedGatewayEntityId ? { trustedGatewayEntityId } : {}),
   });
-  accountMachine.pendingForwards = pendingForwards;
+  account.pendingForwards = pendingForwards;
   return undefined;
 };
 
 export function handleDirectPayment(
-  accountMachine: AccountState,
+  account: AccountState,
   accountTx: DirectPaymentTx,
   byLeft: boolean
 ): DirectPaymentResult {
@@ -148,9 +148,9 @@ export function handleDirectPayment(
   const events: string[] = [];
   const envelopeError = validatePaymentEnvelope(accountTx.data, events);
   if (envelopeError) return envelopeError;
-  const parties = resolvePaymentParties(accountMachine, accountTx.data, byLeft, events);
+  const parties = resolvePaymentParties(account, accountTx.data, byLeft, events);
   if ('success' in parties) return parties;
-  const delta = ensureDelta(accountMachine, tokenId);
+  const delta = ensureDelta(account, tokenId);
   const senderIsLeft = parties.paymentFromEntity === parties.leftEntity;
   const senderDerived = deriveDelta(delta, senderIsLeft);
   if (amount > senderDerived.outCapacity) {
@@ -161,9 +161,9 @@ export function handleDirectPayment(
     };
   }
   delta.offdelta += deriveTransferOffdeltaChange(senderIsLeft, amount);
-  const counterparty = appendPaymentEvent(accountMachine, accountTx.data, parties, byLeft, events);
+  const counterparty = appendPaymentEvent(account, accountTx.data, parties, byLeft, events);
   const forwardingError = queuePaymentForward(
-    accountMachine,
+    account,
     accountTx.data,
     parties.paymentFromEntity,
     counterparty,

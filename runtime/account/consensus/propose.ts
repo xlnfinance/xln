@@ -79,7 +79,7 @@ const logProposalProfile = (
 
 export async function proposeAccountFrame(
   env: RuntimeState,
-  accountMachine: AccountState,
+  account: AccountState,
   entityFrameTimestamp: number,
   entityJHeight?: number, // Optional: J-height from entity state for HTLC consensus
   accountJClaimNodeStore?: AccountJClaimNodeStore,
@@ -92,7 +92,7 @@ export async function proposeAccountFrame(
   };
   const admission = prepareProposalAdmission(
     env,
-    accountMachine,
+    account,
     entityFrameTimestamp,
     entityJHeight,
     selectedMempoolTxs,
@@ -109,21 +109,21 @@ export async function proposeAccountFrame(
   checkpointProfile('admission');
   if (HEAVY_LOGS) {
     accountLog.debug('proof.header', {
-      from: shortId(accountMachine.proofHeader.fromEntity, 8),
-      to: shortId(accountMachine.proofHeader.toEntity, 8),
+      from: shortId(account.proofHeader.fromEntity, 8),
+      to: shortId(account.proofHeader.toEntity, 8),
     });
   }
 
   if (HEAVY_LOGS) {
     accountLog.debug('mempool.before_process', {
       proposalWindow: proposalWindow.length,
-      mempool: accountMachine.mempool.length,
+      mempool: account.mempool.length,
       txs: proposalWindow.map(tx => tx.type),
     });
   }
   const validation = await validateProposalTransactions({
     env,
-    account: accountMachine,
+    account: account,
     proposalWindow,
     frameTimestamp,
     frameJHeight,
@@ -139,11 +139,11 @@ export async function proposeAccountFrame(
   } = validation;
   checkpointProfile('validateTxs');
 
-  const emptyProposal = finishEmptyProposal(accountMachine, validation);
+  const emptyProposal = finishEmptyProposal(account, validation);
   if (emptyProposal) return emptyProposal;
 
   const frameBuild = await buildProposalFrame(
-    accountMachine,
+    account,
     clonedMachine,
     validTxs,
     frameTimestamp,
@@ -156,7 +156,7 @@ export async function proposeAccountFrame(
 
   const proof = await prepareProposalProof(
     env,
-    accountMachine,
+    account,
     clonedMachine,
     newFrame,
     events,
@@ -165,7 +165,7 @@ export async function proposeAccountFrame(
   );
   if (!proof.success) return proof.result;
   const finalResult = finalizeAccountProposal(
-    accountMachine,
+    account,
     clonedMachine,
     newFrame,
     proof,

@@ -36,10 +36,10 @@ export function hasQueuedSwapResolveForEntityState(
 ): boolean {
   const key = swapKey(accountId, offerId);
   if (queuedSwapResolutions.has(key)) return true;
-  const accountMachine = hubState.accounts.get(accountId);
-  if (!accountMachine) return false;
-  if ((accountMachine.mempool ?? []).some((tx) => tx.type === 'swap_resolve' && tx.data.offerId === offerId)) return true;
-  if ((accountMachine.pendingFrame?.accountTxs ?? []).some((tx) => tx.type === 'swap_resolve' && tx.data.offerId === offerId)) return true;
+  const account = hubState.accounts.get(accountId);
+  if (!account) return false;
+  if ((account.mempool ?? []).some((tx) => tx.type === 'swap_resolve' && tx.data.offerId === offerId)) return true;
+  if ((account.pendingFrame?.accountTxs ?? []).some((tx) => tx.type === 'swap_resolve' && tx.data.offerId === offerId)) return true;
   return false;
 }
 
@@ -48,10 +48,10 @@ export function hasQueuedCrossSwapAckForEntityState(
   accountId: string,
   offerId: string,
 ): boolean {
-  const accountMachine = hubState.accounts.get(accountId);
-  if (!accountMachine) return false;
-  if ((accountMachine.mempool ?? []).some((tx) => tx.type === 'cross_swap_fill_ack' && tx.data.offerId === offerId)) return true;
-  if ((accountMachine.pendingFrame?.accountTxs ?? []).some((tx) => tx.type === 'cross_swap_fill_ack' && tx.data.offerId === offerId)) return true;
+  const account = hubState.accounts.get(accountId);
+  if (!account) return false;
+  if ((account.mempool ?? []).some((tx) => tx.type === 'cross_swap_fill_ack' && tx.data.offerId === offerId)) return true;
+  if ((account.pendingFrame?.accountTxs ?? []).some((tx) => tx.type === 'cross_swap_fill_ack' && tx.data.offerId === offerId)) return true;
   return false;
 }
 
@@ -60,13 +60,13 @@ export function findQueuedCrossSwapAckForEntityState(
   accountId: string,
   offerId: string,
 ): CrossSwapFillAckTx | null {
-  const accountMachine = hubState.accounts.get(accountId);
-  if (!accountMachine) return null;
-  const mempoolAck = (accountMachine.mempool ?? []).find(
+  const account = hubState.accounts.get(accountId);
+  if (!account) return null;
+  const mempoolAck = (account.mempool ?? []).find(
     (tx): tx is CrossSwapFillAckTx => tx.type === 'cross_swap_fill_ack' && tx.data.offerId === offerId,
   );
   if (mempoolAck) return mempoolAck;
-  const pendingAck = (accountMachine.pendingFrame?.accountTxs ?? []).find(
+  const pendingAck = (account.pendingFrame?.accountTxs ?? []).find(
     (tx): tx is CrossSwapFillAckTx => tx.type === 'cross_swap_fill_ack' && tx.data.offerId === offerId,
   );
   return pendingAck ?? null;

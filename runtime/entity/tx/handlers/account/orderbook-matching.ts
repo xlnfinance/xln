@@ -27,8 +27,8 @@ const orderbookLog = createStructuredLogger('orderbook');
  * Shared orderbook matcher for both same-chain and cross-chain swaps.
  *
  * Hard invariants:
- * - same-chain rows require an offer already stored in accountMachine.swapOffers
- * - cross-chain rows require accountMachine.swapOffers or an admitted cross book route
+ * - same-chain rows require an offer already stored in account.swapOffers
+ * - cross-chain rows require account.swapOffers or an admitted cross book route
  * - same-chain fills settle with account-level swap_resolve
  * - cross-chain fills settle with cross_swap_fill_ack plus hash-ledger pull clear
  * - cross-chain partial fills keep the existing book row alive; terminal fills

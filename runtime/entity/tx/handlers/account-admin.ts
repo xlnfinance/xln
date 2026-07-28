@@ -255,14 +255,14 @@ export const handleReopenDisputedAccountEntityTx = (
 ): AccountAdminResult => {
   const newState = cloneEntityState(entityState);
   const { counterpartyEntityId } = entityTx.data;
-  const accountMachine = newState.accounts.get(counterpartyEntityId);
+  const account = newState.accounts.get(counterpartyEntityId);
 
-  if (!accountMachine) {
+  if (!account) {
     log.warn('reopen_disputed.missing_account', { entity: shortId(entityState.entityId), counterparty: shortId(counterpartyEntityId) });
     return { newState: entityState, outputs: [] };
   }
 
-  const jNonce = Number(entityTx.data.jNonce ?? accountMachine.jNonce ?? 0);
+  const jNonce = Number(entityTx.data.jNonce ?? account.jNonce ?? 0);
   addMessage(newState, `🔓 Reopen requested with ${counterpartyEntityId.slice(-4)} at nonce=${jNonce}`);
 
   return {

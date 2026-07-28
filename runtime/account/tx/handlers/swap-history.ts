@@ -10,18 +10,18 @@ import {
 } from '../../../extensions/cross-j/index';
 import { LIMITS } from '../../../constants';
 
-function ensureSwapOrderHistory(accountMachine: AccountState): Map<string, SwapOrderHistoryEntry> {
-  if (!(accountMachine.swapOrderHistory instanceof Map)) {
-    accountMachine.swapOrderHistory = new Map();
+function ensureSwapOrderHistory(account: AccountState): Map<string, SwapOrderHistoryEntry> {
+  if (!(account.swapOrderHistory instanceof Map)) {
+    account.swapOrderHistory = new Map();
   }
-  return accountMachine.swapOrderHistory;
+  return account.swapOrderHistory;
 }
 
-function ensureSwapClosedOrders(accountMachine: AccountState): Map<string, SwapOrderHistoryEntry> {
-  if (!(accountMachine.swapClosedOrders instanceof Map)) {
-    accountMachine.swapClosedOrders = new Map();
+function ensureSwapClosedOrders(account: AccountState): Map<string, SwapOrderHistoryEntry> {
+  if (!(account.swapClosedOrders instanceof Map)) {
+    account.swapClosedOrders = new Map();
   }
-  return accountMachine.swapClosedOrders;
+  return account.swapClosedOrders;
 }
 
 const sameOptionalBigint = (left: bigint | undefined, right: bigint | undefined): boolean =>
@@ -52,16 +52,16 @@ const byOldestLifecycle = (
   return left[0] < right[0] ? -1 : left[0] > right[0] ? 1 : 0;
 };
 
-function pruneTerminalSwapHistory(accountMachine: AccountState): void {
-  const terminalHistory = Array.from(ensureSwapOrderHistory(accountMachine).entries())
-    .filter(([offerId]) => !accountMachine.swapOffers.has(offerId))
+function pruneTerminalSwapHistory(account: AccountState): void {
+  const terminalHistory = Array.from(ensureSwapOrderHistory(account).entries())
+    .filter(([offerId]) => !account.swapOffers.has(offerId))
     .sort(byOldestLifecycle);
   const excessHistory = terminalHistory.length - LIMITS.MAX_ACCOUNT_TERMINAL_SWAP_HISTORY;
   for (const [offerId] of terminalHistory.slice(0, Math.max(0, excessHistory))) {
-    accountMachine.swapOrderHistory!.delete(offerId);
+    account.swapOrderHistory!.delete(offerId);
   }
 
-  const closedOrders = ensureSwapClosedOrders(accountMachine);
+  const closedOrders = ensureSwapClosedOrders(account);
   const excessClosed = closedOrders.size - LIMITS.MAX_ACCOUNT_TERMINAL_SWAP_HISTORY;
   if (excessClosed <= 0) return;
   for (const [offerId] of Array.from(closedOrders.entries()).sort(byOldestLifecycle).slice(0, excessClosed)) {
@@ -70,7 +70,7 @@ function pruneTerminalSwapHistory(accountMachine: AccountState): void {
 }
 
 export function recordSwapOfferLifecycle(
-  accountMachine: AccountState,
+  account: AccountState,
   offer: SwapOffer,
 ): void {
   if (
@@ -80,7 +80,7 @@ export function recordSwapOfferLifecycle(
   ) {
     throw new Error(`ACCOUNT_SWAP_HISTORY_OFFER_ID_INVALID:${offer.offerId.length}`);
   }
-  const history = ensureSwapOrderHistory(accountMachine);
+  const history = ensureSwapOrderHistory(account);
   if (history.has(offer.offerId)) return;
   history.set(offer.offerId, {
     offerId: offer.offerId,
@@ -100,18 +100,18 @@ export function recordSwapOfferLifecycle(
 }
 
 export function recordSwapCancelRequested(
-  accountMachine: AccountState,
+  account: AccountState,
   offerId: string,
   currentHeight: number,
 ): void {
-  const entry = ensureSwapOrderHistory(accountMachine).get(offerId);
+  const entry = ensureSwapOrderHistory(account).get(offerId);
   if (!entry) return;
   entry.cancelRequested = true;
   entry.lastUpdatedHeight = currentHeight;
 }
 
 export function recordSwapResolveLifecycle(
-  accountMachine: AccountState,
+  account: AccountState,
   offerId: string,
   currentHeight: number,
   resolve: SwapOrderResolveHistoryEntry,
@@ -127,7 +127,7 @@ export function recordSwapResolveLifecycle(
   if ((resolve.comment?.length ?? 0) > LIMITS.MAX_ACCOUNT_SWAP_HISTORY_TEXT) {
     throw new Error(`ACCOUNT_SWAP_HISTORY_COMMENT_TOO_LONG:${resolve.comment!.length}`);
   }
-  const history = ensureSwapOrderHistory(accountMachine);
+  const history = ensureSwapOrderHistory(account);
   let entry = history.get(offerId);
   if (!entry) {
     if (!fallbackOffer) return;
@@ -157,16 +157,16 @@ export function recordSwapResolveLifecycle(
 }
 
 export function recordSwapClosedLifecycle(
-  accountMachine: AccountState,
+  account: AccountState,
   offerId: string,
 ): void {
-  const historyEntry = ensureSwapOrderHistory(accountMachine).get(offerId);
+  const historyEntry = ensureSwapOrderHistory(account).get(offerId);
   if (!historyEntry) return;
-  const closedOrders = ensureSwapClosedOrders(accountMachine);
+  const closedOrders = ensureSwapClosedOrders(account);
   // Open lifecycle and terminal history are separate state owners. Reusing
   // the mutable cross-j route here creates an alias across two Account maps;
   // that alias has caused Bun's composite structuredClone to fail after a
   // cross-j close. Use the canonical deep carrier clone for every nested leg.
   closedOrders.set(offerId, cloneCrossJurisdictionSwapHistoryRoute(historyEntry));
-  pruneTerminalSwapHistory(accountMachine);
+  pruneTerminalSwapHistory(account);
 }

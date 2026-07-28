@@ -294,19 +294,19 @@ async function checkAccountTimeoutsHandler(
   // Collect accounts with expired HTLC locks in their pending frames
   const timedOutAccounts: Array<{ counterpartyId: string; frameHeight: number }> = [];
 
-  for (const [counterpartyId, accountMachine] of replica.state.accounts.entries()) {
-    if (!accountMachine.pendingFrame) continue;
+  for (const [counterpartyId, account] of replica.state.accounts.entries()) {
+    if (!account.pendingFrame) continue;
 
     // Check if any htlc_lock in the pending frame has expired
     // Cancel ONLY when hashlock expires — until then, counterparty could still claim
     let hasExpiredHtlc = false;
-    for (const tx of accountMachine.pendingFrame.accountTxs) {
+    for (const tx of account.pendingFrame.accountTxs) {
       if (tx.type === 'htlc_lock') {
         const heightExpired = currentHeight > 0 && currentHeight > tx.data.revealBeforeHeight;
         const timestampExpired = isHtlcTimelockExpired(now, tx.data.timelock);
         if (heightExpired || timestampExpired) {
           console.warn(
-            `⏰ HTLC-IN-PENDING-EXPIRED: Account ${counterpartyId.slice(-4)} frame h${accountMachine.pendingFrame.height}, lock ${tx.data.lockId.slice(0, 12)}... expired`,
+            `⏰ HTLC-IN-PENDING-EXPIRED: Account ${counterpartyId.slice(-4)} frame h${account.pendingFrame.height}, lock ${tx.data.lockId.slice(0, 12)}... expired`,
           );
           hasExpiredHtlc = true;
           break;
@@ -317,42 +317,42 @@ async function checkAccountTimeoutsHandler(
     if (hasExpiredHtlc) {
       timedOutAccounts.push({
         counterpartyId,
-        frameHeight: accountMachine.pendingFrame.height,
+        frameHeight: account.pendingFrame.height,
       });
     } else {
-      const frameAge = now - accountMachine.pendingFrame.timestamp;
+      const frameAge = now - account.pendingFrame.timestamp;
 
       // ACK may be lost on relay reconnect. Safe resend of the exact cached input
       // unblocks bilateral consensus without mutating account shared state.
-      const cachedInputHeight = accountMachine.pendingAccountInput
-        ? accountInputProposedFrameHeight(accountMachine.pendingAccountInput)
+      const cachedInputHeight = account.pendingAccountInput
+        ? accountInputProposedFrameHeight(account.pendingAccountInput)
         : 0;
       if (
         frameAge > ACCOUNT_PENDING_RESEND_AFTER_MS &&
-        accountMachine.pendingAccountInput &&
-        cachedInputHeight === accountMachine.pendingFrame.height
+        account.pendingAccountInput &&
+        cachedInputHeight === account.pendingFrame.height
       ) {
-        const targetSignerId = accountMachine.pendingAccountInputSignerId;
+        const targetSignerId = account.pendingAccountInputSignerId;
         if (!targetSignerId) {
           throw new Error(
             `ACCOUNT_PENDING_INPUT_SIGNER_MISSING: entity=${replica.entityId}` +
-            ` counterparty=${accountMachine.pendingAccountInput.toEntityId}` +
-            ` height=${accountMachine.pendingFrame.height}`,
+            ` counterparty=${account.pendingAccountInput.toEntityId}` +
+            ` height=${account.pendingFrame.height}`,
           );
         }
         outputs.push({
-          entityId: accountMachine.pendingAccountInput.toEntityId,
+          entityId: account.pendingAccountInput.toEntityId,
           signerId: targetSignerId,
           entityTxs: [
             {
               type: 'accountInput',
-              data: accountMachine.pendingAccountInput,
+              data: account.pendingAccountInput,
             },
           ],
         });
         crontabLog.debug('pending_frame.resend', {
           account: shortId(counterpartyId),
-          height: accountMachine.pendingFrame.height,
+          height: account.pendingFrame.height,
           ageSeconds: Math.floor(frameAge / 1000),
         });
       }
