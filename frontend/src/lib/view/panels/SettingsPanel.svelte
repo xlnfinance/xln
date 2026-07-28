@@ -73,11 +73,12 @@
   }
 
   const DEFAULT_SETTINGS: ViewSettings = {
-    // Scene
-    gridSize: 300,
-    gridDivisions: 12, // PERF: Reduced from 60 (5x less visual noise)
+    // Scene — must match Graph3DPanel's own defaults, otherwise the first broadcast
+    // after mount visibly changes a scene the user never configured.
+    gridSize: 2000,
+    gridDivisions: 3,
     gridOpacity: 0.4,
-    gridColor: '#00ff41',
+    gridColor: '#ffffff',
 
     // Camera
     cameraDistance: 500,
@@ -139,13 +140,10 @@
       settingsStorageError = '';
       entityOpenMode = localStorage.getItem('xln-dock-entity-open-mode') === 'new-tab' ? 'new-tab' : 'replace';
 
-      // Auto-detect WebGPU if not explicitly set by user
-      if (!storedSettings?.rendererMode) {
-        if (typeof navigator !== 'undefined' && navigator.gpu) {
-          settings.rendererMode = 'webgpu';
-          saveSettings();
-        }
-      }
+      // WebGL is the deterministic compatibility default. `navigator.gpu`
+      // only proves that the API exists; the browser may still have no usable
+      // adapter, and Three.js then emits warnings before falling back. WebGPU
+      // remains an explicit operator choice in Performance settings.
     } catch (err) {
       settingsStorageError = formatSettingsError('load', err);
     }
@@ -161,7 +159,7 @@
       };
     });
 
-    loadSettings();
+    void loadSettings().then(broadcastAllSettings);
     try {
       networkMachineOperations.load();
       networkMachineJson = networkMachineOperations.exportJson();
@@ -191,6 +189,17 @@
 
     // Notify Graph3DPanel
     panelBridge.emit('settings:update', { key, value });
+  }
+
+  /**
+   * Graph3DPanel holds its own copy of these values and only learns about changes through
+   * `settings:update`. Without this replay the persisted settings silently did not survive
+   * a reload — the graph kept rendering its hardcoded defaults until a slider was touched.
+   */
+  function broadcastAllSettings() {
+    for (const [key, value] of Object.entries(settings)) {
+      panelBridge.emit('settings:update', { key, value });
+    }
   }
 
   // Reset to defaults
@@ -456,11 +465,13 @@
       <div class="setting-group">
         <label>
           Grid Divisions: {settings.gridDivisions}
+          <!-- min must cover the default (3); a higher floor silently clamped the thumb
+               to a value that did not match the setting the label displayed. -->
           <input
             type="range"
-            min="20"
+            min="1"
             max="200"
-            step="10"
+            step="1"
             bind:value={settings.gridDivisions}
             on:input={() => updateSetting('gridDivisions', settings.gridDivisions)}
           />

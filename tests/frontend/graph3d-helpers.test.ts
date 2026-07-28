@@ -16,6 +16,7 @@ import {
   getGraphEntityNameFromGossip,
   getGraphSignerIdForEntity,
   graphEntityHasReserves,
+  graphJReplicaHeight,
   graphReserveValue,
   graphReserveValues,
   parseGraphScenarioSteps,
@@ -31,6 +32,15 @@ describe('graph3d helpers', () => {
     expect(findGraphJReplica([tron], 'Tron')).toBe(tron);
     expect(findGraphJReplica([['Tron', tron]], 'Tron')).toBe(tron);
     expect(findGraphJReplica(new Map([['Tron', tron]]), 'Testnet')).toBeUndefined();
+  });
+
+  test('reads J height from blockNumber, the only field JReplica actually carries', () => {
+    expect(graphJReplicaHeight({ name: 'Tron', blockNumber: 9n })).toBe(9);
+    expect(graphJReplicaHeight({ name: 'Tron', blockNumber: 0n })).toBe(0);
+    expect(graphJReplicaHeight(undefined)).toBe(0);
+    // Regression: reading a non-existent `jHeight` returned 0 for every frame, so block
+    // history diffing saw a phantom height jump on every pass.
+    expect(graphJReplicaHeight({ name: 'Tron', blockNumber: 4n } as never)).toBe(4);
   });
 
   test('normalizes reserve maps and snapshot objects', () => {

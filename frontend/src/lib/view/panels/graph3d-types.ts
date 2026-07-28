@@ -1,4 +1,5 @@
 import type * as THREE from 'three';
+import type { DerivedAccountData } from '$lib/network3d/derivedAccount';
 
 export type GraphJBlockHistoryEntry = {
   blockNumber: bigint;
@@ -7,24 +8,8 @@ export type GraphJBlockHistoryEntry = {
   yOffset: number;
 };
 
-export type GraphDerivedAccountData = {
-  delta: number;
-  totalCapacity: number;
-  ownCreditLimit: number;
-  peerCreditLimit: number;
-  inCapacity: number;
-  outCapacity: number;
-  collateral: number;
-  outOwnCredit: number;
-  inCollateral: number;
-  outPeerCredit: number;
-  inOwnCredit: number;
-  outCollateral: number;
-  inPeerCredit: number;
-};
-
 export type GraphXLNRuntime = {
-  deriveDelta: (delta: { [tokenId: number]: bigint }, isLeft: boolean) => GraphDerivedAccountData;
+  deriveDelta: (delta: { [tokenId: number]: bigint }, isLeft: boolean) => DerivedAccountData;
   getTokenInfo: (tokenId: number) => { symbol: string; decimals: number } | undefined;
   getEntityShortId: (entityId: string) => string;
   isLeft: (myEntityId: string, counterpartyEntityId: string) => boolean;
@@ -70,7 +55,8 @@ export type GraphConnectionData = {
   to: string;
   line: THREE.Line;
   progressBars?: THREE.Group | undefined;
-  mempoolBoxes?: { leftBox: THREE.Group; rightBox: THREE.Group } | null | undefined;
+  /** One entry per observed account side (0..2). See createAccountMempoolBoxes. */
+  mempoolBoxes: THREE.Group[];
 };
 
 export type GraphPaymentJob = {

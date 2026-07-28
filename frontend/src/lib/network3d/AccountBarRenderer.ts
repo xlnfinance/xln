@@ -10,8 +10,14 @@
  */
 
 import * as THREE from 'three';
-import type { EntityData, DerivedAccountData } from './types';
+import { toDerivedAccountData, type DerivedAccountData } from './derivedAccount';
 import { requireTokenDecimals } from '$lib/components/Entity/token-metadata';
+
+/** Minimal endpoint shape the bars need. Structurally satisfied by GraphEntityData. */
+export interface BarEndpoint {
+  id: string;
+  position: THREE.Vector3;
+}
 
 export interface AccountBarVisual {
   glowColor: string | null;
@@ -52,14 +58,17 @@ const BAR_COLORS = {
 
 /**
  * Create account capacity bars for a bilateral account (multi-token parallel bars)
+ * @param parent - Object the bars attach to. MUST be the same object the caller detaches
+ *                 them from later (the graph world group), otherwise removal is a no-op
+ *                 and every rebuild leaks a bar group into the scene.
  * @param deltas - Map of all token deltas for this account
  * @param fromIsLeft - whether fromEntity is the LEFT entity (smaller entityId)
  * @param xlnFunctions - XLN runtime functions (needed for deriveDelta)
  */
 export function createAccountBars(
-  scene: THREE.Scene,
-  fromEntity: EntityData,
-  toEntity: EntityData,
+  parent: THREE.Object3D,
+  fromEntity: BarEndpoint,
+  toEntity: BarEndpoint,
   deltas: Map<number, any>,  // Map<tokenId, Delta>
   fromIsLeft: boolean,
   settings: AccountBarSettings,
@@ -104,45 +113,12 @@ export function createAccountBars(
     }
 
     // Derive capacity data for this token and convert BigInt to number
-    const fromDerivedRaw = xlnFunctions.deriveDelta(delta, fromIsLeft);
-    const toDerivedRaw = xlnFunctions.deriveDelta(delta, !fromIsLeft);
     const tokenDecimals = requireTokenDecimals(
       xlnFunctions.getTokenInfo?.(tokenId)?.decimals,
       `token:${tokenId}`,
     );
-
-    // Convert BigInt values to numbers for 3D visualization
-    const fromDerived: DerivedAccountData = {
-      delta: Number(fromDerivedRaw.delta),
-      totalCapacity: Number(fromDerivedRaw.totalCapacity || 0n),
-      ownCreditLimit: Number(fromDerivedRaw.ownCreditLimit || 0n),
-      peerCreditLimit: Number(fromDerivedRaw.peerCreditLimit || 0n),
-      inCapacity: Number(fromDerivedRaw.inCapacity || 0n),
-      outCapacity: Number(fromDerivedRaw.outCapacity || 0n),
-      collateral: Number(fromDerivedRaw.collateral || 0n),
-      outOwnCredit: Number(fromDerivedRaw.outOwnCredit || 0n),
-      inCollateral: Number(fromDerivedRaw.inCollateral || 0n),
-      outPeerCredit: Number(fromDerivedRaw.outPeerCredit || 0n),
-      inOwnCredit: Number(fromDerivedRaw.inOwnCredit || 0n),
-      outCollateral: Number(fromDerivedRaw.outCollateral || 0n),
-      inPeerCredit: Number(fromDerivedRaw.inPeerCredit || 0n)
-    };
-
-    const toDerived: DerivedAccountData = {
-      delta: Number(toDerivedRaw.delta),
-      totalCapacity: Number(toDerivedRaw.totalCapacity || 0n),
-      ownCreditLimit: Number(toDerivedRaw.ownCreditLimit || 0n),
-      peerCreditLimit: Number(toDerivedRaw.peerCreditLimit || 0n),
-      inCapacity: Number(toDerivedRaw.inCapacity || 0n),
-      outCapacity: Number(toDerivedRaw.outCapacity || 0n),
-      collateral: Number(toDerivedRaw.collateral || 0n),
-      outOwnCredit: Number(toDerivedRaw.outOwnCredit || 0n),
-      inCollateral: Number(toDerivedRaw.inCollateral || 0n),
-      outPeerCredit: Number(toDerivedRaw.outPeerCredit || 0n),
-      inOwnCredit: Number(toDerivedRaw.inOwnCredit || 0n),
-      outCollateral: Number(toDerivedRaw.outCollateral || 0n),
-      inPeerCredit: Number(toDerivedRaw.inPeerCredit || 0n)
-    };
+    const fromDerived = toDerivedAccountData(xlnFunctions.deriveDelta(delta, fromIsLeft));
+    const toDerived = toDerivedAccountData(xlnFunctions.deriveDelta(delta, !fromIsLeft));
 
     // Calculate perpendicular offset for this token's bars
     const offset = startOffset + (i * adjustedDiameter);
@@ -169,7 +145,7 @@ export function createAccountBars(
     group.add(tokenBarGroup);
   }
 
-  scene.add(group);
+  parent.add(group);
   return group;
 }
 
@@ -177,8 +153,8 @@ export function createAccountBars(
  * Create bars for a single token (extracted from original createAccountBars logic)
  */
 function createTokenBars(
-  fromEntity: EntityData,
-  toEntity: EntityData,
+  fromEntity: BarEndpoint,
+  toEntity: BarEndpoint,
   normalizedDirection: THREE.Vector3,
   fromDerived: DerivedAccountData,
   toDerived: DerivedAccountData,
@@ -343,8 +319,8 @@ function createTokenBars(
  */
 function renderSpreadMode(
   group: THREE.Group,
-  fromEntity: EntityData,
-  toEntity: EntityData,
+  fromEntity: BarEndpoint,
+  toEntity: BarEndpoint,
   direction: THREE.Vector3,
   fromSegments: AccountSegments,
   toSegments: AccountSegments,
@@ -428,8 +404,8 @@ function renderSpreadMode(
  */
 function renderCloseMode(
   group: THREE.Group,
-  fromEntity: EntityData,
-  toEntity: EntityData,
+  fromEntity: BarEndpoint,
+  toEntity: BarEndpoint,
   direction: THREE.Vector3,
   fromSegments: AccountSegments,
   toSegments: AccountSegments,
@@ -582,8 +558,8 @@ function calculatePerpendicularVector(direction: THREE.Vector3): THREE.Vector3 {
  * Shows ⚔️ icon near the entity that started the dispute
  */
 function createDisputeIndicator(
-  fromEntity: EntityData,
-  toEntity: EntityData,
+  fromEntity: BarEndpoint,
+  toEntity: BarEndpoint,
   startedByLeft: boolean,
   fromIsLeft: boolean,
   barRadius: number

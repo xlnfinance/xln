@@ -103,14 +103,12 @@
           try {
             await browserVM.restoreState(browserVMState);
             if (nonce !== timeTravelNonce) return;
-            panelBridge.emit('time:changed', { frame: targetIndex, block: Number(jReplicas[0]?.blockNumber || 0) });
           } catch (e: any) {
             console.warn('[TimeMachine] restoreState failed:', e);
             if (stateRoot && stateRoot.length === 32 && browserVM?.timeTravel) {
               browserVM.timeTravel(new Uint8Array(stateRoot))
                 .then(() => {
                   if (nonce !== timeTravelNonce) return;
-                  panelBridge.emit('time:changed', { frame: targetIndex, block: Number(jReplicas[0]?.blockNumber || 0) });
                 })
                 .catch((err: any) => console.warn('[TimeMachine] timeTravel failed:', err));
             }
@@ -119,7 +117,6 @@
           browserVM.timeTravel(new Uint8Array(stateRoot))
             .then(() => {
               if (nonce !== timeTravelNonce) return;
-              panelBridge.emit('time:changed', { frame: targetIndex, block: Number(jReplicas[0]?.blockNumber || 0) });
             })
             .catch((e: any) => console.warn('[TimeMachine] timeTravel failed:', e));
         }

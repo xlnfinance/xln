@@ -22,6 +22,13 @@
   export let particleCount = 0;
   export let barsMode: 'close' | 'spread' = 'close';
   export let isVRActive = false;
+  export let tooltip: { visible: boolean; x: number; y: number; content: string } = {
+    visible: false, x: 0, y: 0, content: '',
+  };
+  export let dualTooltip: {
+    visible: boolean; x: number; y: number;
+    leftContent: string; rightContent: string; leftEntity: string; rightEntity: string;
+  } = { visible: false, x: 0, y: 0, leftContent: '', rightContent: '', leftEntity: '', rightEntity: '' };
   export let runtimeScope = 'merged';
   export let runtimeScopeOptions: Array<{ value: string; label: string }> = [];
   export let canonicity: RuntimeGraphCanonicity = 'timestamp';
@@ -99,6 +106,31 @@
           <time datetime={new Date(timelineTimestamp).toISOString()}>{new Date(timelineTimestamp).toISOString()}</time>
         </div>
       {/if}
+    </div>
+  {/if}
+
+  {#if tooltip.visible}
+    <div
+      class="graph-tooltip"
+      data-testid="graph-entity-tooltip"
+      style={`left:${tooltip.x}px; top:${tooltip.y}px`}
+    >{tooltip.content}</div>
+  {/if}
+
+  {#if dualTooltip.visible}
+    <div
+      class="graph-tooltip dual"
+      data-testid="graph-account-tooltip"
+      style={`left:${dualTooltip.x}px; top:${dualTooltip.y}px`}
+    >
+      <div class="dual-side">
+        <strong>{dualTooltip.leftEntity}</strong>
+        <pre>{dualTooltip.leftContent}</pre>
+      </div>
+      <div class="dual-side">
+        <strong>{dualTooltip.rightEntity}</strong>
+        <pre>{dualTooltip.rightContent}</pre>
+      </div>
     </div>
   {/if}
 
@@ -222,6 +254,48 @@
   }
 
   .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+
+  .graph-tooltip {
+    position: fixed;
+    z-index: 40;
+    max-width: 340px;
+    padding: 8px 10px;
+    border: 1px solid rgba(105, 210, 255, 0.28);
+    border-radius: 7px;
+    background: rgba(5, 10, 16, 0.94);
+    box-shadow: 0 10px 32px rgba(0, 0, 0, 0.45);
+    color: #d7e7f3;
+    font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+    white-space: pre;
+    pointer-events: none;
+    transform: translate(14px, 14px);
+    backdrop-filter: blur(10px);
+  }
+
+  .graph-tooltip.dual {
+    display: flex;
+    gap: 14px;
+    max-width: 520px;
+    white-space: normal;
+  }
+
+  .dual-side {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .dual-side strong {
+    color: #7dd3fc;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+
+  .dual-side pre {
+    margin: 0;
+    font: inherit;
+    white-space: pre;
+  }
 
   .timeline-runtime-highlight {
     display: flex;

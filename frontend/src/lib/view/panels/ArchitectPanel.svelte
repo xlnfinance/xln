@@ -1804,7 +1804,6 @@
         : 'entity'; // Fallback
 
       publishCurrentEnv();
-      panelBridge.emit('entity:created', { entityId, type: 'manual' });
     } catch (err: any) {
       lastAction = ` ${err.message}`;
       console.error('[Architect] Create entity error:', err);

@@ -45,7 +45,6 @@
   let workspaceReadyFrame: number | null = null;
   let workspaceReady = false;
   let pendingRequestedPanelId: string | null = null;
-  let timeMachinePosition: 'bottom' | 'top' | 'left' | 'right' = 'bottom';
   let collapsed = false;
   let showSidebarInEmbed = false;
   $: showDockTimeMachine = !embedMode || $settings.showTimeMachine;
@@ -596,7 +595,7 @@
   });
 </script>
 
-<div class="view-wrapper" class:embed-mode={embedMode}>
+<div class="view-wrapper" class:embed-mode={embedMode} class:sidebar-open={embedMode && showSidebarInEmbed}>
   {#if !embedMode}
     <button
       type="button"
@@ -615,10 +614,7 @@
   ></div>
 
   {#if showDockTimeMachine}
-    <div class="time-machine-bar" class:collapsed class:embed={embedMode} data-position={timeMachinePosition}>
-      {#if !embedMode}
-        <div class="drag-handle" title="Drag to reposition">⋮⋮</div>
-      {/if}
+    <div class="time-machine-bar" class:collapsed class:embed={embedMode}>
       <TimeMachine
         history={runtimeFrameHistory}
         timeIndex={runtimeFrameTimeIndex}
@@ -628,13 +624,6 @@
       {#if !embedMode}
         <button class="collapse-btn" on:click={() => collapsed = !collapsed}>
           {collapsed ? '▲' : '▼'}
-        </button>
-        <button
-          class="position-toggle-btn"
-          on:click={() => timeMachinePosition = timeMachinePosition === 'bottom' ? 'top' : 'bottom'}
-          title="Move to {timeMachinePosition === 'bottom' ? 'top' : 'bottom'}"
-        >
-          {timeMachinePosition === 'bottom' ? '⬆️' : '⬇️'}
         </button>
       {/if}
     </div>
@@ -712,8 +701,10 @@
     height: calc(100dvh - 48px);
   }
 
-  .view-wrapper.embed-mode :global(.dockview-tabs-container),
-  .view-wrapper.embed-mode :global(.dockview-groupcontrol) {
+  /* Dockview ships `dv-*` class names. The previous `dockview-*` selectors below matched
+     nothing, so embed mode never actually hid its tab strip. Verified against the rendered
+     DOM: .dv-tabs-and-actions-container / .dv-tab / .dv-active-tab / .dv-sash / .dv-groupview */
+  .view-wrapper.embed-mode:not(.sidebar-open) :global(.dv-tabs-and-actions-container) {
     display: none !important;
   }
 
@@ -721,22 +712,20 @@
     height: 48px;
   }
 
-  :global(.dockview-theme-dark .dockview-tab) {
+  :global(.dockview-theme-dark .dv-tab) {
     background: var(--theme-surface, #2d2d30);
     color: var(--theme-text-secondary, #ccc);
   }
 
-  :global(.dockview-theme-dark .dockview-tab.active) {
+  :global(.dockview-theme-dark .dv-tab.dv-active-tab) {
     background: var(--theme-header-bg, #1e1e1e);
     color: var(--theme-text-primary, #fff);
   }
 
-  :global(.dockview-theme-dark .dockview-separator) {
+  :global(.dockview-theme-dark .dv-sash) {
     background: var(--theme-accent, #007acc);
   }
 
-  :global(.dockview-theme-dark .dockview-groupview),
-  :global(.dockview-theme-dark .dockview-groupcontrol),
   :global(.dockview-theme-dark .dv-groupview) {
     background: var(--theme-background, #09090b);
     color: var(--theme-text-primary, #e4e4e7);
@@ -772,18 +761,7 @@
     overflow: hidden;
   }
 
-  .drag-handle {
-    position: absolute;
-    left: 8px;
-    top: 50%;
-    transform: translateY(-50%);
-    color: rgba(255, 255, 255, 0.38);
-    font-size: 12px;
-    user-select: none;
-  }
-
   .collapse-btn,
-  .position-toggle-btn,
   .embed-sidebar-toggle {
     position: absolute;
     right: 8px;
@@ -796,10 +774,6 @@
     min-width: 28px;
     height: 28px;
     cursor: pointer;
-  }
-
-  .position-toggle-btn {
-    right: 42px;
   }
 
   .embed-sidebar-toggle {

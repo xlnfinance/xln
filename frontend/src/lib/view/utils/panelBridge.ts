@@ -5,24 +5,24 @@
 
 export type EntityOpenAction = 'r2r' | 'r2c' | 'pay' | 'swap' | 'dispute';
 
+/**
+ * Every channel here must have a live producer AND consumer — a typed event nobody listens
+ * on reads like working wiring. Dropped as fully unwired: account:updated, reserves:updated,
+ * transfer:executed, layout:changed, rebalance:requested, timeMachine:play, vr:hand-payment,
+ * time:changed, entity:created, renderFps (Graph3D renders its own overlay).
+ *
+ * KNOWN DEAD CONTROL: ArchitectPanel's broadcast-style radios emit 'broadcast:style' and
+ * nothing consumes it. Kept typed until that UI is either wired or removed.
+ */
 type EventMap = {
   'entity:selected': { entityId: string };
-  'entity:created': { entityId: string; type: string };
-  'account:updated': { accountId: string; balance: bigint };
-  'reserves:updated': { entityId: string; tokenId: number; amount: bigint };
-  'time:changed': { frame: number; block: number };
-  'layout:changed': { layout: any };
-  'transfer:executed': { from: string; to: string; tokenId: number; amount: bigint };
   'vr:toggle': {};
   'vr:payment': { from: string; to: string }; // VR hand gesture payment
-  'vr:hand-payment': { from: string; to: string; amount?: bigint }; // Hand tracking payment
   'broadcast:toggle': { enabled: boolean };
   'broadcast:style': { style: 'raycast' | 'wave' | 'particles' };
   'settings:update': { key: string; value: any };
   'settings:reset': {};
   'camera:focus': { target: { x: number; y: number; z: number } };
-  'rebalance:requested': { entityId: string };
-  'renderFps': number; // Real-time rendering FPS from Graph3DPanel
   'auto-demo:start': {}; // Auto-start demo in VR mode
   'openEntityOperations': { entityId: string; entityName: string; signerId?: string; action?: EntityOpenAction }; // Open entity panel with optional action
   'dock:selectEntity': { entityId: string; entityName: string; signerId?: string; action?: EntityOpenAction };
@@ -30,8 +30,7 @@ type EventMap = {
   'focusPanel': { panelId: string }; // Focus any panel by ID
   'scenario:loaded': { name: string; frames: number }; // Scenario loaded successfully
   'camera:update': { position: { x: number; y: number; z: number }; target: { x: number; y: number; z: number }; distance?: number }; // Camera position changed
-  'camera:restore': { position: { x: number; y: number; z: number }; target: { x: number; y: number; z: number }; distance?: number }; // Restore saved camera position
-  'timeMachine:play': {}; // Time machine playback started
+  'camera:restore': { position: { x: number; y: number; z: number }; target: { x: number; y: number; z: number }; distance?: number }; // Apply a saved camera preset
   'playback:speed': number; // Playback speed multiplier from TimeMachine
 };
 

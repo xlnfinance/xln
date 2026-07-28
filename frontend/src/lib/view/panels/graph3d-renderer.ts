@@ -34,15 +34,27 @@ export async function createGraphRenderer(
   }
 }
 
+type DisposableMaterial = { dispose?: () => void; map?: { dispose?: () => void } | null };
+
+/**
+ * Frees geometry, materials AND their textures. Label/mempool sprites carry a CanvasTexture
+ * per instance, so skipping `material.map` leaks one texture per rebuild.
+ */
 export function disposeGraphObject3D(obj: THREE.Object3D): void {
   obj.traverse((child: THREE.Object3D & { geometry?: { dispose?: () => void }; material?: unknown }) => {
     child.geometry?.dispose?.();
     if (!child.material) return;
-    const material = child.material;
-    if (Array.isArray(material)) {
-      for (const entry of material) entry?.dispose?.();
-      return;
+    const materials = Array.isArray(child.material) ? child.material : [child.material];
+    for (const entry of materials as DisposableMaterial[]) {
+      entry?.map?.dispose?.();
+      entry?.dispose?.();
     }
-    (material as { dispose?: () => void }).dispose?.();
   });
+}
+
+/** Detach from `parent` and free every GPU resource underneath. Safe on null/undefined. */
+export function detachGraphObject3D(parent: THREE.Object3D | null, child: THREE.Object3D | null | undefined): void {
+  if (!child) return;
+  parent?.remove(child);
+  disposeGraphObject3D(child);
 }

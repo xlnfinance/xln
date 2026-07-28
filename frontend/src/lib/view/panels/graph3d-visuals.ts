@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { createAccountBars } from '$lib/network3d/AccountBarRenderer';
+import { toDerivedAccountData, type DerivedAccountData } from '$lib/network3d/derivedAccount';
 import { getGraphThemeColors } from './graph3d-renderer';
-import type { GraphConnectionData, GraphDerivedAccountData, GraphEntityData, GraphXLNRuntime } from './graph3d-types';
+import type { GraphConnectionData, GraphEntityData, GraphXLNRuntime } from './graph3d-types';
 import { formatGraphMempoolTxLabel } from './graph3d-helpers';
 
 function createTxLabelSprite(text: string): THREE.Sprite {
@@ -120,42 +121,10 @@ export function deriveGraphEntry(
   runtime: GraphXLNRuntime | null | undefined,
   tokenDelta: unknown,
   isLeft: boolean,
-): GraphDerivedAccountData {
+): DerivedAccountData {
   if (!runtime?.deriveDelta) throw new Error('FINTECH-SAFETY: xlnFunctions.deriveDelta not available');
   if (!tokenDelta) throw new Error('FINTECH-SAFETY: Cannot derive from null token delta');
-  const derived = runtime.deriveDelta(tokenDelta as never, isLeft);
-  if (!derived) {
-    return {
-      delta: 0,
-      totalCapacity: 0,
-      ownCreditLimit: 0,
-      peerCreditLimit: 0,
-      inCapacity: 0,
-      outCapacity: 0,
-      collateral: 0,
-      outOwnCredit: 0,
-      inCollateral: 0,
-      outPeerCredit: 0,
-      inOwnCredit: 0,
-      outCollateral: 0,
-      inPeerCredit: 0,
-    };
-  }
-  return {
-    delta: Number(derived.delta),
-    totalCapacity: Number(derived.totalCapacity || 0n),
-    ownCreditLimit: Number(derived.ownCreditLimit || 0n),
-    peerCreditLimit: Number(derived.peerCreditLimit || 0n),
-    inCapacity: Number(derived.inCapacity || 0n),
-    outCapacity: Number(derived.outCapacity || 0n),
-    collateral: Number(derived.collateral || 0n),
-    outOwnCredit: Number(derived.outOwnCredit || 0n),
-    inCollateral: Number(derived.inCollateral || 0n),
-    outPeerCredit: Number(derived.outPeerCredit || 0n),
-    inOwnCredit: Number(derived.inOwnCredit || 0n),
-    outCollateral: Number(derived.outCollateral || 0n),
-    inPeerCredit: Number(derived.inPeerCredit || 0n),
-  };
+  return toDerivedAccountData(runtime.deriveDelta(tokenDelta as never, isLeft));
 }
 
 function createMempoolBox(
@@ -213,6 +182,11 @@ function createMempoolBox(
   return group;
 }
 
+/**
+ * One box per OBSERVED account side. The merged graph projection materializes only the
+ * policy-selected observation (see runtimeGraphRender), so an absent side means "not
+ * observed" — never "not committed". Rendering a red box for it would fake a desync.
+ */
 export function createAccountMempoolBoxes(options: {
   fromEntity: any;
   toEntity: any;
@@ -220,38 +194,27 @@ export function createAccountMempoolBoxes(options: {
   rightAccount: any;
   runtime: GraphXLNRuntime | null | undefined;
   getEntitySize(entityId: string, tokenId: number): number;
-}): { leftBox: THREE.Group; rightBox: THREE.Group } | null {
-  if (!options.leftAccount && !options.rightAccount) return null;
+}): THREE.Group[] {
   const direction = new THREE.Vector3().subVectors(options.toEntity.position, options.fromEntity.position).normalize();
-  const leftState = options.leftAccount
-    ? options.runtime?.classifyBilateralState?.(options.leftAccount, 0, true)
-    : null;
-  const rightState = options.rightAccount
-    ? options.runtime?.classifyBilateralState?.(options.rightAccount, 0, false)
-    : null;
-  const leftBox = createMempoolBox(
-    leftState?.state === 'committed' ? 0x00ff88 : 0xff4444,
-    options.leftAccount?.mempool || [],
-    options.leftAccount?.pendingFrame?.accountTxs || [],
-    direction,
-  );
-  const rightBox = createMempoolBox(
-    rightState?.state === 'committed' ? 0x00ff88 : 0xff4444,
-    options.rightAccount?.mempool || [],
-    options.rightAccount?.pendingFrame?.accountTxs || [],
-    direction,
-  );
   const barRadiusAndGap = 0.4;
   const halfBoxDepth = 0.2;
-  leftBox.position
-    .copy(options.fromEntity.position)
-    .add(direction.clone().multiplyScalar(options.getEntitySize(options.fromEntity.id, 1) + barRadiusAndGap))
-    .sub(direction.clone().multiplyScalar(halfBoxDepth));
-  rightBox.position
-    .copy(options.toEntity.position)
-    .sub(direction.clone().multiplyScalar(options.getEntitySize(options.toEntity.id, 1) + barRadiusAndGap))
-    .add(direction.clone().multiplyScalar(halfBoxDepth));
-  return { leftBox, rightBox };
+  const sides = [
+    { account: options.leftAccount, isLeft: true, anchor: options.fromEntity, sign: 1 },
+    { account: options.rightAccount, isLeft: false, anchor: options.toEntity, sign: -1 },
+  ];
+  return sides.flatMap(({ account, isLeft, anchor, sign }) => {
+    if (!account) return [];
+    const state = options.runtime?.classifyBilateralState?.(account, 0, isLeft);
+    const box = createMempoolBox(
+      state && state.state !== 'committed' ? 0xff4444 : 0x00ff88,
+      account.mempool || [],
+      account.pendingFrame?.accountTxs || [],
+      direction,
+    );
+    const offset = sign * (options.getEntitySize(anchor.id, 1) + barRadiusAndGap - halfBoxDepth);
+    box.position.copy(anchor.position).add(direction.clone().multiplyScalar(offset));
+    return [box];
+  });
 }
 
 export function positionEntityLabel(label: THREE.Sprite, entitySize: number): void {
@@ -345,7 +308,6 @@ export function createGraphRippleMesh(position: THREE.Vector3): THREE.Mesh {
 }
 
 type GraphConnectionOptions = {
-  scene: THREE.Scene | null;
   graphWorld: THREE.Group;
   fromEntity: any;
   toEntity: any;
@@ -386,10 +348,8 @@ export function buildGraphConnection(options: GraphConnectionOptions): GraphConn
 
 export function buildGraphAccountVisuals(options: GraphConnectionOptions): {
   bars: THREE.Group;
-  mempoolBoxes: { leftBox: THREE.Group; rightBox: THREE.Group } | null;
+  mempoolBoxes: THREE.Group[];
 } {
-  const scene = options.scene;
-  if (!scene) throw new Error('GRAPH_SCENE_UNAVAILABLE_FOR_ACCOUNT_VISUALS');
   const findReplica = (entityId: string) => {
     const key = [...options.replicas.keys()].find(candidate => candidate.startsWith(`${entityId}:`));
     return key ? options.replicas.get(key) : null;
@@ -412,7 +372,7 @@ export function buildGraphAccountVisuals(options: GraphConnectionOptions): {
   if (!account?.deltas || account.deltas.size === 0) {
     const bars = new THREE.Group();
     options.graphWorld.add(bars);
-    return { bars, mempoolBoxes: null };
+    return { bars, mempoolBoxes: [] };
   }
 
   const leftEntityAccount = fromIsLeft ? confirmedAccount : pendingAccount;
@@ -429,9 +389,13 @@ export function buildGraphAccountVisuals(options: GraphConnectionOptions): {
   );
   const barVisual =
     leftConsensus && rightConsensus ? options.runtime?.getAccountBarVisual?.(leftConsensus, rightConsensus) : null;
+  // Unknown consensus (no runtime helper) is not evidence of desync.
+  const desyncDetected = Boolean(
+    leftConsensus && rightConsensus && (leftConsensus.state !== 'committed' || rightConsensus.state !== 'committed'),
+  );
   const dispute = account.activeDispute;
   const bars = createAccountBars(
-    scene,
+    options.graphWorld,
     options.fromEntity,
     options.toEntity,
     account.deltas,
@@ -439,7 +403,7 @@ export function buildGraphAccountVisuals(options: GraphConnectionOptions): {
     {
       barsMode: options.barsMode,
       portfolioScale: options.portfolioScale,
-      desyncDetected: leftConsensus?.state !== 'committed' || rightConsensus?.state !== 'committed',
+      desyncDetected,
       bilateralState: barVisual,
       dispute: dispute
         ? {
@@ -460,10 +424,7 @@ export function buildGraphAccountVisuals(options: GraphConnectionOptions): {
     runtime: options.runtime,
     getEntitySize: options.getEntitySize,
   });
-  if (mempoolBoxes) {
-    options.graphWorld.add(mempoolBoxes.leftBox);
-    options.graphWorld.add(mempoolBoxes.rightBox);
-  }
+  for (const box of mempoolBoxes) options.graphWorld.add(box);
   return { bars, mempoolBoxes };
 }
 
@@ -613,8 +574,13 @@ export function createGraphEntityNode(options: {
   };
 }
 
-export function createGraphGrid(color: THREE.ColorRepresentation, opacity: number): THREE.GridHelper {
-  const grid = new THREE.GridHelper(2_000, 3, color, color);
+export function createGraphGrid(
+  color: THREE.ColorRepresentation,
+  opacity: number,
+  size: number,
+  divisions: number,
+): THREE.GridHelper {
+  const grid = new THREE.GridHelper(size, Math.max(1, Math.floor(divisions)), color, color);
   grid.material.opacity = opacity;
   grid.material.transparent = true;
   grid.position.set(0, -50, 0);

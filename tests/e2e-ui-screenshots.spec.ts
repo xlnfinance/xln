@@ -294,7 +294,8 @@ async function captureAccountWorkspaces(
   });
 
   await openAccountWorkspaceTab(page, 'history');
-  await expect(page.locator('.history-card').first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId('entity-history-panel').first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId('entity-history-event').first()).toBeVisible({ timeout: 20_000 });
   await captureUxPage(page, output, `${prefix}-accounts-history.png`, {
     title: `${platform} on-chain batch history`,
     group: 'History',

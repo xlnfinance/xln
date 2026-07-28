@@ -1,97 +1,58 @@
-# /view - XLNView Panel Architecture
+# /view — dock workspace
 
-**New implementation** of XLNView with flexible panel-based workspace.
+Panel workspace behind `/app` (dev mode) and `/embed`. Entry point is `View.svelte`.
 
-## Directory Structure
+## Layout
 
 ```
 /view
-├── README.md                       # This file
-├── XLNView.svelte                  # Main orchestrator (replaces NetworkTopology)
+├── View.svelte                 # Entry: wires runtime stores, picks user mode vs dock
+├── DockRoot.svelte             # Dockview host. Panels are registered in code, not JSON
+├── UserModePanel.svelte        # Simplified wallet surface (userMode=true)
 │
-├── core/                           # Core components
-│   ├── PanelContainer.svelte       # Dockview wrapper
-│   ├── PanelRegistry.ts            # Panel definitions and factory
-│   └── TimeMachine.svelte          # Moveable time control
+├── core/
+│   ├── TimeMachine.svelte      # Frame scrubber shown under the dock
+│   └── NetworkMachineTimeline.svelte
 │
-├── panels/                         # Individual panels
-│   ├── Graph3DPanel.svelte         # 3D visualization (extracted from NetworkTopology)
-│   ├── EntitiesPanel.svelte        # Entity list/grid with actions
-│   ├── DepositoryPanel.svelte      # BrowserVM queries (J-state viewer)
-│   ├── ArchitectPanel.svelte       # 5 modes (Explore/Build/Economy/Governance/Resolve)
-│   ├── AccountsPanel.svelte        # Bilateral account details
-│   ├── ConsolePanel.svelte         # Event log stream
-│   └── NetworkPanel.svelte         # Gossip/consensus health
+├── panels/                     # One file per dock panel
+│   ├── Graph3DPanel.svelte     # 3D network view (three.js)
+│   ├── graph3d-*.ts            # Graph3D helpers: visuals, renderer, actions, settings, types
+│   ├── ArchitectPanel.svelte   # Dev lab (lazy-loaded)
+│   ├── JurisdictionPanel.svelte, SettingsPanel.svelte, ConsolePanel.svelte,
+│   ├── RuntimeIOPanel.svelte, GossipPanel.svelte, SolvencyPanel.svelte, …
+│   └── wrappers/EntityPanelWrapper.svelte
 │
-├── layouts/                        # Layout presets
-│   ├── default.json                # Graph3D + Entities + Depository + Architect
-│   ├── analyst.json                # Graph3D + Depository + Console
-│   ├── builder.json                # Architect + Graph3D + Entities
-│   ├── embed.json                  # Graph3D only (fullscreen)
-│   └── tutorial.json               # Graph3D + Architect (with narrative)
-│
-└── utils/                          # Utilities
-    ├── layoutManager.ts            # Save/load layouts to localStorage
-    ├── panelBridge.ts              # Communication between panels
-    └── browserVMProvider.ts        # BrowserVM integration
+├── components/                 # Graph3D chrome: viewport, FPS overlay, VR HUD, mini panel
+└── utils/                      # panelBridge (event bus), perfMonitor, frontendLogger
 ```
 
-## Key Design Decisions
+`network3d/` (sibling directory) holds the pure, testable layer: runtime→graph projection,
+force layout, frame cache, account bar geometry, gesture state. It has no Svelte imports.
 
-1. **Dockview Library**: Battle-tested (2.8k stars), zero deps, Vanilla TS
-2. **Panel Isolation**: Each panel is self-contained Svelte component
-3. **State Bridge**: Central event bus for panel-to-panel communication
-4. **BrowserVM**: Depository panel queries in-browser EVM for J-state
-5. **Layout Persistence**: Layouts saved to localStorage + shareable JSON
-6. **Mobile-First**: Vertical stacking on iPad/mobile
+## Key decisions
 
-## Migration Strategy
+1. **Dockview** hosts the panels; each panel is mounted imperatively in `DockRoot.createComponent`.
+2. **Panels are declared in code** (`ensureWorkspacePanels`), not in layout JSON. User-modified
+   layouts are serialized to `localStorage['xln-workspace-layout']`.
+3. **panelBridge** is the panel-to-panel event bus. Only wire events that have both a producer
+   and a consumer — see the comment in `utils/panelBridge.ts`.
+4. **Graph3D owns its scene graph.** All graph content is attached to the `graphWorld` group,
+   never to `scene` directly: cleanup removes from `graphWorld`, and VR rescales `graphWorld`.
+   Attaching content to `scene` silently leaks it on every rebuild.
 
-1. **Phase 0** (This PR): New /view structure, core panels
-2. **Phase 1**: Extract Graph3D from NetworkTopology → Graph3DPanel
-3. **Phase 2**: Build Entities + Depository + Architect panels
-4. **Phase 3**: Wire up BrowserVM to Depository panel
-5. **Phase 4**: Deprecate NetworkTopology, redirect to XLNView
+## Persisted state
 
-## Usage
-
-```svelte
-<!-- New main app entry -->
-<script>
-  import XLNView from './view/XLNView.svelte';
-</script>
-
-<XLNView
-  layout="default"
-  networkMode="simnet"
-/>
-```
-
-## Panel Communication Pattern
-
-```typescript
-// panels/Graph3DPanel.svelte
-import { panelBridge } from '../utils/panelBridge';
-
-function onEntityClick(entityId: string) {
-  panelBridge.emit('entity:selected', { entityId });
-}
-
-// panels/EntitiesPanel.svelte
-import { panelBridge } from '../utils/panelBridge';
-
-panelBridge.on('entity:selected', ({ entityId }) => {
-  // Scroll to and highlight entity
-  selectedEntityId = entityId;
-});
-```
+| Key | Owner | Contents |
+| --- | --- | --- |
+| `xln-workspace-layout` | DockRoot | Dockview grid |
+| `xln-view-settings` | SettingsPanel | Grid/camera/entity/perf settings, replayed to Graph3D on mount |
+| `xln-bird-view-settings` | Graph3DPanel | Camera pose, bars mode, selected token |
+| `xln-graph-position-overrides-v1` | graphPositionOverrides | Manually dragged entity positions |
+| `xln-dock-entity-open-mode` | SettingsPanel | `replace` vs `new-tab` for entity panels |
 
 ## Testing
 
 ```bash
-# Run new view in isolation
-bun run dev:view
-
-# Run the production Svelte app
-bun run dev
+bun test tests/frontend/                       # projection, layout, helpers, bar parenting
+bunx playwright test tests/dockview.spec.ts    # dock smoke
 ```

@@ -1,10 +1,6 @@
+import type { DerivedAccountData } from '$lib/network3d/derivedAccount';
+
 export type ReserveMapLike = Map<string | number, bigint> | Record<string, unknown> | undefined;
-export type GraphDerivedAccountData = {
-  delta: number;
-  ownCreditLimit: number;
-  peerCreditLimit: number;
-  collateral: number;
-};
 
 export type GraphDualConnectionAccountInfo = {
   left: string;
@@ -45,10 +41,19 @@ export type GraphScenarioStep = {
 
 export type GraphJReplicaLike = {
   name?: string;
-  jHeight?: number | bigint;
   blockNumber?: number | bigint;
   mempool?: unknown[];
 };
+
+/**
+ * J-block height of a replica. The runtime type (JReplica) only ever carries `blockNumber`;
+ * reading a `jHeight` field here silently yielded 0 and made block-history diffing fire on
+ * phantom height jumps.
+ */
+export function graphJReplicaHeight(replica: GraphJReplicaLike | null | undefined): number {
+  const height = Number(replica?.blockNumber ?? 0);
+  return Number.isFinite(height) && height > 0 ? height : 0;
+}
 
 export function findGraphJReplica(
   replicas: Map<string, GraphJReplicaLike> | GraphJReplicaLike[] | Array<[string, GraphJReplicaLike]> | null | undefined,
@@ -374,7 +379,7 @@ export function formatGraphDualConnectionAccountInfo(input: {
   accountData: { deltas?: Map<number, unknown> } | null | undefined;
   selectedTokenId: number;
   getAccountTokenDelta: (accountData: unknown, tokenId: number) => unknown | null;
-  deriveEntry: (tokenDelta: unknown, isLeft: boolean) => GraphDerivedAccountData;
+  deriveEntry: (tokenDelta: unknown, isLeft: boolean) => DerivedAccountData;
   getEntityShortName: (entityId: string) => string;
   getTokenDecimals: (tokenId: number) => number;
 }): GraphDualConnectionAccountInfo {
@@ -424,7 +429,7 @@ export function formatGraphDualConnectionAccountInfoFromReplicas(input: {
   replicas: Map<string, GraphReplicaLike>;
   selectedTokenId: number;
   getAccountTokenDelta: (accountData: unknown, tokenId: number) => unknown | null;
-  deriveEntry: (tokenDelta: unknown, isLeft: boolean) => GraphDerivedAccountData;
+  deriveEntry: (tokenDelta: unknown, isLeft: boolean) => DerivedAccountData;
   getEntityShortName: (entityId: string) => string;
   getTokenDecimals: (tokenId: number) => number;
 }): GraphDualConnectionAccountInfo {

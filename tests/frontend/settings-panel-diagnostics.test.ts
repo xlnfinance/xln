@@ -13,19 +13,25 @@ describe('settings panel diagnostics', () => {
 
   test('loads browser settings only from the mount path', () => {
     const source = readFileSync('frontend/src/lib/view/panels/SettingsPanel.svelte', 'utf8');
-    const loadCalls = source.match(/loadSettings\(\);/g) ?? [];
+    // Call sites only — the `async function loadSettings()` declaration is excluded.
+    const loadCalls = source.match(/(?<!function )loadSettings\(\)/g) ?? [];
 
     expect(loadCalls).toHaveLength(1);
     expect(source).not.toContain('JSON.parse(stored).rendererMode');
   });
 
-  test('does not clear an auto-save failure after WebGPU detection', () => {
+  test('replays persisted settings to Graph3D so they survive a reload', () => {
     const source = readFileSync('frontend/src/lib/view/panels/SettingsPanel.svelte', 'utf8');
-    const clearIndex = source.indexOf("settingsStorageError = '';");
-    const autoDetectIndex = source.indexOf('Auto-detect WebGPU');
 
-    expect(clearIndex).toBeGreaterThan(0);
-    expect(autoDetectIndex).toBeGreaterThan(clearIndex);
-    expect(source).not.toContain("saveSettings();\n        }\n      }\n      settingsStorageError = '';");
+    expect(source).toContain('loadSettings().then(broadcastAllSettings)');
+    expect(source).toContain("panelBridge.emit('settings:update', { key, value })");
+  });
+
+  test('keeps WebGPU opt-in because API presence does not prove adapter availability', () => {
+    const source = readFileSync('frontend/src/lib/view/panels/SettingsPanel.svelte', 'utf8');
+
+    expect(source).toContain("rendererMode: 'webgl'");
+    expect(source).not.toContain('settings.rendererMode = \'webgpu\'');
+    expect(source).not.toContain('if (typeof navigator');
   });
 });
