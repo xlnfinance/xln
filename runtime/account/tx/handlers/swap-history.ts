@@ -4,7 +4,10 @@ import type {
   SwapOrderHistoryEntry,
   SwapOrderResolveHistoryEntry,
 } from '../../../types';
-import { cloneCrossJurisdictionRoute } from '../../../extensions/cross-j/index';
+import {
+  cloneCrossJurisdictionRoute,
+  cloneCrossJurisdictionSwapHistoryRoute,
+} from '../../../extensions/cross-j/index';
 import { LIMITS } from '../../../constants';
 
 function ensureSwapOrderHistory(accountMachine: AccountMachine): Map<string, SwapOrderHistoryEntry> {
@@ -160,11 +163,10 @@ export function recordSwapClosedLifecycle(
   const historyEntry = ensureSwapOrderHistory(accountMachine).get(offerId);
   if (!historyEntry) return;
   const closedOrders = ensureSwapClosedOrders(accountMachine);
-  closedOrders.set(offerId, {
-    ...historyEntry,
-    resolves: Array.isArray(historyEntry.resolves)
-      ? historyEntry.resolves.map((resolve) => ({ ...resolve }))
-      : [],
-  });
+  // Open lifecycle and terminal history are separate state owners. Reusing
+  // the mutable cross-j route here creates an alias across two Account maps;
+  // that alias has caused Bun's composite structuredClone to fail after a
+  // cross-j close. Use the canonical deep carrier clone for every nested leg.
+  closedOrders.set(offerId, cloneCrossJurisdictionSwapHistoryRoute(historyEntry));
   pruneTerminalSwapHistory(accountMachine);
 }
