@@ -414,20 +414,11 @@ const isValidInitialSequence = (identity: ConsumptionOutputIdentity, sequence: b
   return sequence >= 0n;
 };
 
-export const applyConsumptionOutput = (
-  stateInput: ConsumptionAccumulatorState,
-  identityInput: ConsumptionOutputIdentity,
-  proof: unknown,
-): ConsumptionApplyResult => {
-  const state = parseState(stateInput);
-  const identity = normalizeIdentity(identityInput);
-  const key = getConsumptionKey(identity);
-  const inspected = inspectProof(state.root, key, proof);
-  if (inspected.result.status === 'absent' && state.count >= MAX_CONSUMPTION_RELATIONSHIPS_PER_ENTITY) {
-    throw new Error(
-      `CONSUMPTION_RELATIONSHIP_LIMIT_EXCEEDED:${state.count}:${MAX_CONSUMPTION_RELATIONSHIPS_PER_ENTITY}`,
-    );
-  }
+const getUnchangedConsumptionResult = (
+  state: ConsumptionAccumulatorState,
+  identity: ConsumptionOutputIdentity,
+  inspected: Inspection,
+): ConsumptionApplyResult | null => {
   const sequence = identity.sequence as bigint;
   if (inspected.result.status === 'member') {
     const frontier = inspected.result.value;
@@ -442,6 +433,53 @@ export const applyConsumptionOutput = (
   } else if (!isValidInitialSequence(identity, sequence)) {
     return unchanged('gap', state);
   }
+  return null;
+};
+
+const buildNextConsumptionFrontier = (
+  identity: ConsumptionOutputIdentity,
+  inspected: Inspection,
+): Readonly<{
+  status: ConsumptionApplyResult['status'];
+  value: ConsumptionFrontierValue;
+}> => {
+  if (inspected.result.status !== 'member') {
+    return { status: 'inserted', value: getConsumptionValue(identity) };
+  }
+  const frontier = inspected.result.value;
+  if (identity.sequence !== frontier.lastContiguousSeq) {
+    return { status: 'advanced', value: frontierFromIdentity(identity, frontier.count + 1n) };
+  }
+  return {
+    status: 'quarantined',
+    value: Object.freeze({
+      ...frontier,
+      quarantine: Object.freeze({
+        sequence: identity.sequence,
+        conflictingSemanticHash: identity.semanticHash,
+        conflictingOutputHash: identity.outputHash,
+        conflictingOutputHanko: identity.outputHanko,
+      }),
+    }),
+  };
+};
+
+export const applyConsumptionOutput = (
+  stateInput: ConsumptionAccumulatorState,
+  identityInput: ConsumptionOutputIdentity,
+  proof: unknown,
+): ConsumptionApplyResult => {
+  const state = parseState(stateInput);
+  const identity = normalizeIdentity(identityInput);
+  const key = getConsumptionKey(identity);
+  const inspected = inspectProof(state.root, key, proof);
+  if (inspected.result.status === 'absent' && state.count >= MAX_CONSUMPTION_RELATIONSHIPS_PER_ENTITY) {
+    throw new Error(
+      `CONSUMPTION_RELATIONSHIP_LIMIT_EXCEEDED:${state.count}:${MAX_CONSUMPTION_RELATIONSHIPS_PER_ENTITY}`,
+    );
+  }
+  const unchangedResult = getUnchangedConsumptionResult(state, identity, inspected);
+  if (unchangedResult) return unchangedResult;
 
   const nodes = new Map<string, ConsumptionNode>();
   const put = (nodeInput: ConsumptionNode): string => {
@@ -451,29 +489,7 @@ export const applyConsumptionOutput = (
     return hash;
   };
 
-  let status: ConsumptionApplyResult['status'];
-  let nextValue: ConsumptionFrontierValue;
-  if (inspected.result.status === 'member') {
-    const frontier = inspected.result.value;
-    if (sequence === frontier.lastContiguousSeq) {
-      status = 'quarantined';
-      nextValue = Object.freeze({
-        ...frontier,
-        quarantine: Object.freeze({
-          sequence,
-          conflictingSemanticHash: identity.semanticHash,
-          conflictingOutputHash: identity.outputHash,
-          conflictingOutputHanko: identity.outputHanko,
-        }),
-      });
-    } else {
-      status = 'advanced';
-      nextValue = frontierFromIdentity(identity, frontier.count + 1n);
-    }
-  } else {
-    status = 'inserted';
-    nextValue = getConsumptionValue(identity);
-  }
+  const { status, value: nextValue } = buildNextConsumptionFrontier(identity, inspected);
 
   const leaf: ConsumptionLeafNode = { version: 2, type: 'leaf', key, value: nextValue };
   let childHash = put(leaf);

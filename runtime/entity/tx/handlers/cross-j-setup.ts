@@ -63,6 +63,89 @@ const pushCrossJOutput = (
   pushCrossJurisdictionEntityOutput(env, outputs, entityId, entityTxs, signerIdHint);
 };
 
+const prepareRawCrossJurisdictionIntent = (
+  env: RuntimeState,
+  state: EntityState,
+  route: CrossJurisdictionSwapRoute,
+  outputs: EntityInput[],
+): CrossJSetupResult => {
+  if (route.status !== 'intent') {
+    throw new Error(`CROSS_J_RAW_PREPARE_STATUS_INVALID:${route.orderId}:${route.status}`);
+  }
+  if (isCrossJurisdictionRouteExpired(route, deterministicEntityTimestamp(state, env))) {
+    addMessage(state, `❌ Cross-j prepare ${route.orderId} expired`);
+    return { newState: state, outputs };
+  }
+  const sameJurisdiction =
+    String(route.source.jurisdiction).trim().toLowerCase() ===
+    String(route.target.jurisdiction).trim().toLowerCase();
+  if (sameJurisdiction && Number(route.source.tokenId) === Number(route.target.tokenId)) {
+    addMessage(state, `❌ Cross-j prepare ${route.orderId} must cross a jurisdiction or asset boundary`);
+    return { newState: state, outputs };
+  }
+  try {
+    // Validate every public prerequisite before making the intent durable.
+    // The private seed remains untouched until the default proposer signs
+    // the later materialization command.
+    committedCrossJSourceDisputeDelayMs(state, route);
+  } catch (error) {
+    addMessage(
+      state,
+      `❌ Cross-j prepare ${route.orderId} blocked: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return { newState: state, outputs };
+  }
+  state.crossJurisdictionSwaps ||= new Map();
+  const existing = state.crossJurisdictionSwaps.get(route.orderId);
+  if (existing?.sourcePull || existing?.targetPull) {
+    throw new Error(`CROSS_J_RAW_PREPARE_AFTER_MATERIALIZATION:${route.orderId}`);
+  }
+  if (existing) {
+    if (exactRouteBytes(existing) !== exactRouteBytes(route)) {
+      throw new Error(`CROSS_J_RAW_PREPARE_CONFLICT:${route.orderId}`);
+    }
+    return { newState: state, outputs };
+  }
+  state.crossJurisdictionSwaps.set(route.orderId, cloneCrossJurisdictionRoute(route));
+  const firstValidator = state.config.validators[0];
+  if (!firstValidator) throw new Error(`CROSS_J_SOURCE_HUB_PROPOSER_MISSING:${route.orderId}`);
+  outputs.push({ entityId: state.entityId, signerId: firstValidator, entityTxs: [] });
+  addMessage(state, `🌉 Cross-j swap ${route.orderId} awaiting source-hub proposer commitments`);
+  return { newState: state, outputs };
+};
+
+const prepareMaterializedCrossJurisdictionRoute = (
+  env: RuntimeState,
+  state: EntityState,
+  route: CrossJurisdictionSwapRoute,
+  outputs: EntityInput[],
+): CrossJSetupResult => {
+  const preparedRoute = validatePreparedCrossJurisdictionRoute(state, route);
+  state.crossJurisdictionSwaps ||= new Map();
+  const existing = state.crossJurisdictionSwaps.get(preparedRoute.orderId);
+  const transitionError = validateCrossJurisdictionRouteTransition(existing, preparedRoute);
+  if (transitionError) {
+    addMessage(state, `❌ Cross-j prepare ${route.orderId} blocked: ${transitionError}`);
+    return { newState: state, outputs };
+  }
+  const publicPreparedRoute = cloneCrossJurisdictionRoute(preparedRoute);
+  state.crossJurisdictionSwaps.set(
+    publicPreparedRoute.orderId,
+    mergeCrossJurisdictionRoute(existing, publicPreparedRoute),
+  );
+  const readyRoute = { ...cloneCrossJurisdictionRoute(publicPreparedRoute), status: 'resting' as const };
+  // Both Account legs originate in one committed Entity frame. Routing them
+  // together prevents one sibling from observing a half-created swap.
+  pushCrossJOutput(env, outputs, readyRoute.source.counterpartyEntityId, [
+    { type: 'registerCrossJurisdictionSwap', data: { route: readyRoute } },
+  ], readyRoute.sourceHubSignerId);
+  pushCrossJOutput(env, outputs, readyRoute.target.entityId, [
+    { type: 'registerCrossJurisdictionSwap', data: { route: readyRoute } },
+  ], readyRoute.targetHubSignerId);
+  addMessage(state, `🌉 Cross-j swap ${preparedRoute.orderId} paired source and target proposals requested by hub`);
+  return { newState: state, outputs };
+};
+
 export const handlePrepareCrossJurisdictionSwapEntityTx = (
   env: RuntimeState,
   entityState: EntityState,
@@ -94,84 +177,9 @@ export const handlePrepareCrossJurisdictionSwapEntityTx = (
   if (hasSourcePull !== hasTargetPull) {
     throw new Error(`CROSS_J_PREPARED_PAYLOAD_PARTIAL:${route.orderId}`);
   }
-  if (!hasSourcePull) {
-    if (route.status !== 'intent') {
-      throw new Error(`CROSS_J_RAW_PREPARE_STATUS_INVALID:${route.orderId}:${route.status}`);
-    }
-    const now = deterministicEntityTimestamp(newState, env);
-    if (isCrossJurisdictionRouteExpired(route, now)) {
-      addMessage(newState, `❌ Cross-j prepare ${route.orderId} expired`);
-      return { newState, outputs };
-    }
-    if (
-      String(route.source.jurisdiction).trim().toLowerCase() ===
-        String(route.target.jurisdiction).trim().toLowerCase() &&
-      Number(route.source.tokenId) === Number(route.target.tokenId)
-    ) {
-      addMessage(newState, `❌ Cross-j prepare ${route.orderId} must cross a jurisdiction or asset boundary`);
-      return { newState, outputs };
-    }
-    try {
-      // Validate every public prerequisite before making the intent durable.
-      // The private seed remains untouched until the default proposer signs
-      // the later materialization command.
-      committedCrossJSourceDisputeDelayMs(newState, route);
-    } catch (error) {
-      addMessage(
-        newState,
-        `❌ Cross-j prepare ${route.orderId} blocked: ${error instanceof Error ? error.message : String(error)}`,
-      );
-      return { newState, outputs };
-    }
-    newState.crossJurisdictionSwaps ||= new Map();
-    const existing = newState.crossJurisdictionSwaps.get(route.orderId);
-    if (existing?.sourcePull || existing?.targetPull) {
-      throw new Error(`CROSS_J_RAW_PREPARE_AFTER_MATERIALIZATION:${route.orderId}`);
-    }
-    if (existing) {
-      if (exactRouteBytes(existing) !== exactRouteBytes(route)) {
-        throw new Error(`CROSS_J_RAW_PREPARE_CONFLICT:${route.orderId}`);
-      }
-      return { newState, outputs };
-    }
-    newState.crossJurisdictionSwaps.set(route.orderId, cloneCrossJurisdictionRoute(route));
-    const firstValidator = newState.config.validators[0];
-    if (!firstValidator) throw new Error(`CROSS_J_SOURCE_HUB_PROPOSER_MISSING:${route.orderId}`);
-    outputs.push({ entityId: newState.entityId, signerId: firstValidator, entityTxs: [] });
-    addMessage(newState, `🌉 Cross-j swap ${route.orderId} awaiting source-hub proposer commitments`);
-    return { newState, outputs };
-  }
-  const preparedRoute = validatePreparedCrossJurisdictionRoute(newState, route);
-  newState.crossJurisdictionSwaps ||= new Map();
-  const existing = newState.crossJurisdictionSwaps.get(preparedRoute.orderId);
-  const transitionError = validateCrossJurisdictionRouteTransition(existing, preparedRoute);
-  if (transitionError) {
-    addMessage(newState, `❌ Cross-j prepare ${route.orderId} blocked: ${transitionError}`);
-    return { newState, outputs };
-  }
-  const publicPreparedRoute = cloneCrossJurisdictionRoute(preparedRoute);
-  newState.crossJurisdictionSwaps.set(
-    publicPreparedRoute.orderId,
-    mergeCrossJurisdictionRoute(existing, publicPreparedRoute),
-  );
-  const readyRoute = {
-    ...cloneCrossJurisdictionRoute(publicPreparedRoute),
-    status: 'resting' as const,
-  };
-
-  // Both Account legs must be derived from one committed Entity frame. The
-  // former inline source mempool write raced the sibling target command: a
-  // second route could enter only one pending Account frame and leave both
-  // frames permanently unacknowledgeable. These two runtime-local commands
-  // are committed together, then each sibling derives exactly its own leg.
-  pushCrossJOutput(env, outputs, readyRoute.source.counterpartyEntityId, [
-    { type: 'registerCrossJurisdictionSwap', data: { route: readyRoute } },
-  ], readyRoute.sourceHubSignerId);
-  pushCrossJOutput(env, outputs, readyRoute.target.entityId, [
-    { type: 'registerCrossJurisdictionSwap', data: { route: readyRoute } },
-  ], readyRoute.targetHubSignerId);
-  addMessage(newState, `🌉 Cross-j swap ${preparedRoute.orderId} paired source and target proposals requested by hub`);
-  return { newState, outputs };
+  return hasSourcePull
+    ? prepareMaterializedCrossJurisdictionRoute(env, newState, route, outputs)
+    : prepareRawCrossJurisdictionIntent(env, newState, route, outputs);
 };
 
 export const handleMaterializeCrossJurisdictionSwapEntityTx = (
@@ -198,6 +206,76 @@ export const handleMaterializeCrossJurisdictionSwapEntityTx = (
     type: 'prepareCrossJurisdictionSwap',
     data: { route: entityTx.data.route },
   }, options);
+};
+
+const buildSourceRegistrationTxs = (
+  state: EntityState,
+  route: CrossJurisdictionSwapRoute,
+): AccountTxTarget[] => {
+  const sourcePull = route.sourcePull;
+  if (!sourcePull) throw new Error(`CROSS_J_REGISTER_SOURCE_PULL_MISSING:${route.orderId}`);
+  const accountId = findAccountKey(state, route.source.entityId);
+  if (!accountId) throw new Error(`CROSS_J_SOURCE_ACCOUNT_MISSING:${route.orderId}`);
+  return [
+    {
+      accountId,
+      tx: {
+        type: 'pull_lock',
+        data: {
+          pullId: sourcePull.pullId,
+          tokenId: sourcePull.tokenId,
+          amount: sourcePull.signedAmount,
+          revealedUntilTimestamp: sourcePull.revealedUntilTimestamp,
+          fullHash: sourcePull.fullHash,
+          partialRoot: sourcePull.partialRoot,
+          crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'source'),
+          crossJurisdictionRoute: cloneCrossJurisdictionRoute(route),
+        },
+      },
+    },
+    {
+      accountId,
+      tx: {
+        type: 'swap_offer',
+        data: {
+          offerId: route.orderId,
+          giveTokenId: route.source.tokenId,
+          giveAmount: route.source.amount,
+          wantTokenId: route.target.tokenId,
+          wantAmount: route.target.amount,
+          ...(route.priceTicks !== undefined ? { priceTicks: route.priceTicks } : {}),
+          timeInForce: 0,
+          crossJurisdiction: cloneCrossJurisdictionRoute(route),
+        },
+      },
+    },
+  ];
+};
+
+const buildTargetRegistrationTxs = (
+  state: EntityState,
+  route: CrossJurisdictionSwapRoute,
+): AccountTxTarget[] => {
+  const targetPull = route.targetPull;
+  if (!targetPull) throw new Error(`CROSS_J_REGISTER_TARGET_PULL_MISSING:${route.orderId}`);
+  const accountId = findAccountKey(state, route.target.counterpartyEntityId);
+  if (!accountId) throw new Error(`CROSS_J_TARGET_ACCOUNT_MISSING:${route.orderId}`);
+  return [{
+    accountId,
+    tx: {
+      type: 'pull_lock',
+      data: {
+        pullId: targetPull.pullId,
+        tokenId: targetPull.tokenId,
+        amount: targetPull.signedAmount,
+        revealedUntilTimestamp: targetPull.revealedUntilTimestamp,
+        fullHash: targetPull.fullHash,
+        partialRoot: targetPull.partialRoot,
+        crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'target'),
+        crossJurisdictionRoute: cloneCrossJurisdictionRoute(route),
+      },
+    },
+  }];
 };
 
 export const handleRegisterCrossJurisdictionSwapEntityTx = (
@@ -245,70 +323,10 @@ export const handleRegisterCrossJurisdictionSwapEntityTx = (
   const sourceHubEntityId = normalizeEntityRef(route.source.counterpartyEntityId);
   const targetHubEntityId = normalizeEntityRef(route.target.entityId);
   if (localEntityId === sourceHubEntityId) {
-    const sourceAccountId = findAccountKey(newState, route.source.entityId);
-    if (!sourceAccountId) throw new Error(`CROSS_J_SOURCE_ACCOUNT_MISSING:${route.orderId}`);
-    return {
-      newState,
-      outputs: [],
-      accountTxs: [
-        {
-          accountId: sourceAccountId,
-          tx: {
-            type: 'pull_lock',
-            data: {
-              pullId: route.sourcePull.pullId,
-              tokenId: route.sourcePull.tokenId,
-              amount: route.sourcePull.signedAmount,
-              revealedUntilTimestamp: route.sourcePull.revealedUntilTimestamp,
-              fullHash: route.sourcePull.fullHash,
-              partialRoot: route.sourcePull.partialRoot,
-              crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'source'),
-              crossJurisdictionRoute: cloneCrossJurisdictionRoute(route),
-            },
-          },
-        },
-        {
-          accountId: sourceAccountId,
-          tx: {
-            type: 'swap_offer',
-            data: {
-              offerId: route.orderId,
-              giveTokenId: route.source.tokenId,
-              giveAmount: route.source.amount,
-              wantTokenId: route.target.tokenId,
-              wantAmount: route.target.amount,
-              ...(route.priceTicks !== undefined ? { priceTicks: route.priceTicks } : {}),
-              timeInForce: 0,
-              crossJurisdiction: cloneCrossJurisdictionRoute(route),
-            },
-          },
-        },
-      ],
-    };
+    return { newState, outputs: [], accountTxs: buildSourceRegistrationTxs(newState, route) };
   }
   if (localEntityId === targetHubEntityId) {
-    const targetAccountId = findAccountKey(newState, route.target.counterpartyEntityId);
-    if (!targetAccountId) throw new Error(`CROSS_J_TARGET_ACCOUNT_MISSING:${route.orderId}`);
-    return {
-      newState,
-      outputs: [],
-      accountTxs: [{
-        accountId: targetAccountId,
-        tx: {
-          type: 'pull_lock',
-          data: {
-            pullId: route.targetPull.pullId,
-            tokenId: route.targetPull.tokenId,
-            amount: route.targetPull.signedAmount,
-            revealedUntilTimestamp: route.targetPull.revealedUntilTimestamp,
-            fullHash: route.targetPull.fullHash,
-            partialRoot: route.targetPull.partialRoot,
-            crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'target'),
-            crossJurisdictionRoute: cloneCrossJurisdictionRoute(route),
-          },
-        },
-      }],
-    };
+    return { newState, outputs: [], accountTxs: buildTargetRegistrationTxs(newState, route) };
   }
   return { newState, outputs: [] };
 };

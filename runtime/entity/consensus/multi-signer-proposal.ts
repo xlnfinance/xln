@@ -8,6 +8,7 @@ import {
 } from '../../protocol/runtime-input-clone';
 import type {
   EntityReplica,
+  EntityState,
   RuntimeState,
   ProposedEntityFrame,
   ValidatorEntityFrameExecution,
@@ -180,6 +181,43 @@ const shouldStartProposal = (
   );
 };
 
+const buildProposalState = (
+  replica: EntityReplica,
+  appliedState: EntityState,
+  height: number,
+  timestamp: number,
+  view: number,
+): EntityState => ({
+  ...appliedState,
+  entityId: replica.state.entityId,
+  height,
+  timestamp,
+  leaderState: {
+    activeValidatorId: replica.signerId.toLowerCase(),
+    view,
+    changedAtHeight: replica.pendingLeaderCertificate
+      ? height
+      : (replica.state.leaderState?.changedAtHeight ?? 0),
+  },
+});
+
+const signProposalManifest = async (
+  env: RuntimeState,
+  replica: EntityReplica,
+  state: EntityState,
+  hashesToSign: ReturnType<typeof buildEntityHashesToSign>,
+): Promise<string[]> => {
+  await assertEntityConfigBoardAuthority(
+    env,
+    replica.state.entityId,
+    replica.state.config,
+    state,
+  );
+  return Promise.all(
+    hashesToSign.map(hash => signAccountFrame(env, replica.signerId, hash.hash)),
+  );
+};
+
 const buildMultiSignerProposal = async (
   context: ApplyEntityInputContext,
   selection: EntityProposalSelection,
@@ -207,19 +245,13 @@ const buildMultiSignerProposal = async (
     env.timestamp,
   );
   const height = workingReplica.state.height + 1;
-  const state = {
-    ...applied.newState,
-    entityId: workingReplica.state.entityId,
+  const state = buildProposalState(
+    workingReplica,
+    applied.newState,
     height,
-    timestamp: env.timestamp,
-    leaderState: {
-      activeValidatorId: workingReplica.signerId.toLowerCase(),
-      view: leader.view,
-      changedAtHeight: workingReplica.pendingLeaderCertificate
-        ? height
-        : (workingReplica.state.leaderState?.changedAtHeight ?? 0),
-    },
-  };
+    env.timestamp,
+    leader.view,
+  );
   const parentFrameHash = getPrevFrameHash(workingReplica.state);
   const stateRoot = computeCanonicalEntityConsensusStateHash(state);
   const authorityRoot = computeEntityFrameAuthorityRoot(buildEntityFrameAuthority(state));
@@ -246,16 +278,7 @@ const buildMultiSignerProposal = async (
     frameHash,
     [...(applied.collectedHashes ?? []), ...outputHashes],
   );
-  await assertEntityConfigBoardAuthority(
-    env,
-    workingReplica.state.entityId,
-    workingReplica.state.config,
-    state,
-  );
-  const selfSigs = await Promise.all(
-    hashesToSign.map(hash =>
-      signAccountFrame(env, workingReplica.signerId, hash.hash)),
-  );
+  const selfSigs = await signProposalManifest(env, workingReplica, state, hashesToSign);
   workingReplica.validatorExecution = {
     frameHash,
     height,
