@@ -11,7 +11,7 @@ const coordinatorModules = [
   'runtime/loop.ts',
   'persistence/runtime-storage.ts',
   'recovery/restore.ts',
-  'state/create.ts',
+  'runtime/state-create.ts',
 ] as const;
 
 describe('runtime coordinator module boundaries', () => {

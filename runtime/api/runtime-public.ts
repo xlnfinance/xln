@@ -108,7 +108,7 @@ export {
   parseMppChallengeHeader,
   parseMppCredentialHeader,
   parseMppReceiptHeader,
-} from '../agent-payments/mpp';
+} from '../protocol/payments/mpp';
 export type {
   MppChallenge,
   MppChallengeBindingInput,
@@ -116,7 +116,7 @@ export type {
   MppJsonRecord,
   MppJsonValue,
   MppReceipt,
-} from '../agent-payments/mpp';
+} from '../protocol/payments/mpp';
 export { createJAdapter } from '../jadapter';
 export type { JAdapter, JAdapterConfig, JAdapterMode, JEvent } from '../jadapter';
 export { applyJEventsToEnv, buildJEventsRuntimeInput } from '../jadapter/watcher';

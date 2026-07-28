@@ -18,7 +18,7 @@ import { createRuntimeStorageApi } from '../persistence/runtime-storage';
 import { rehydrateRestoredRuntimeInfra, type TrustedJurisdictionRpcBinding } from './infra';
 import { createRuntimeLoopApi } from './loop';
 import { createRuntimeRecoveryApi } from '../recovery/restore';
-import { createRuntimeStateApi } from '../state/create';
+import { createRuntimeStateApi } from './state-create';
 import { loadGossipProfilesFromInfraDb } from './infra-gossip-store';
 import { withStorageConsistentRead } from '../storage/runtime-dbs';
 import {

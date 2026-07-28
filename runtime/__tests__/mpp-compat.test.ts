@@ -12,7 +12,7 @@ import {
   parseMppCredentialHeader,
   parseMppReceiptHeader,
   type MppChallenge,
-} from '../agent-payments/mpp';
+} from '../protocol/payments/mpp';
 
 const request = encodeMppJson({
   recipient: 'acct_123',

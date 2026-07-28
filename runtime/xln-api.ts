@@ -101,7 +101,7 @@ export type {
   MppJsonRecord,
   MppJsonValue,
   MppReceipt,
-} from './agent-payments/mpp';
+} from './protocol/payments/mpp';
 export type { RuntimeActivityEvent, RuntimeActivityFilters } from './api/activity-history';
 export type { DeliveryOutcome, DeliveryResult } from './protocol/payments/delivery-result';
 export type { RuntimeEntityInputRoutingResult } from './runtime/output-routing';
@@ -125,7 +125,7 @@ export {
   parseMppChallengeHeader,
   parseMppCredentialHeader,
   parseMppReceiptHeader,
-} from './agent-payments/mpp';
+} from './protocol/payments/mpp';
 export {
   deriveCanonicalCrossJurisdictionBookOwnerForLegs,
   deriveCanonicalCrossJurisdictionMarketForLegs,
