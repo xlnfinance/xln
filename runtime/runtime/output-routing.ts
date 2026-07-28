@@ -1642,6 +1642,210 @@ export const markPendingCrossJAdmissionOutputsReady = (
   return readyEnvelopes;
 };
 
+type PlannedEntityOutput =
+  | { kind: 'local'; output: RoutedEntityInput }
+  | { kind: 'remote'; output: PlannedRemoteOutput }
+  | { kind: 'deferred'; output: RoutedEntityInput };
+
+const dedupeEntityOutputs = (outputs: RoutedEntityInput[]): RoutedEntityInput[] => {
+  const deduped = new Map<string, RoutedEntityInput>();
+  for (const output of outputs.flatMap(candidate => splitRoutedOutputByDeliveryLane(candidate))) {
+    const key = buildRouteOutputKey(output);
+    const existing = deduped.get(key);
+    if (existing) mergeRoutedEntityOutput(existing, output);
+    else deduped.set(key, cloneRoutedOutputWithCachedIdentity(output));
+  }
+  return [...deduped.values()];
+};
+
+const resolveLocalEntityOutput = (
+  env: Env,
+  output: RoutedEntityInput,
+  deps: RuntimeOutputRoutingDeps,
+): PlannedEntityOutput | null => {
+  if (deps.hasLocalSignerForEntitySigner(env, output.entityId, output.signerId)) {
+    return { kind: 'local', output };
+  }
+  if (!deps.hasLocalSignerForEntity(env, output.entityId)) return null;
+
+  const resolvedSignerId = deps.resolveSoleLocalSignerForEntity(env, output.entityId);
+  if (!resolvedSignerId) return null;
+  if (isTriggerOnlyOutput(output)) {
+    env.warn('network', 'ROUTE_RETARGET_LOCAL_TRIGGER_SIGNER', {
+      entityId: output.entityId,
+      inputSignerId: output.signerId,
+      resolvedSignerId,
+    }, output.entityId);
+    return { kind: 'local', output: { ...output, signerId: resolvedSignerId } };
+  }
+
+  const txTypes = (output.entityTxs || []).map(tx => tx.type);
+  if (!isTxBearingOutput(output)) {
+    env.error?.('network', 'ROUTE_LOCAL_SIGNER_MISMATCH', {
+      entityId: output.entityId,
+      signerId: output.signerId,
+      resolvedSignerId,
+      hasProposedFrame: Boolean(output.proposedFrame),
+      hasHashPrecommits: Boolean(output.hashPrecommits && output.hashPrecommits.size > 0),
+    }, output.entityId);
+    throw new Error(
+      'ROUTE_LOCAL_SIGNER_MISMATCH: entity=' + output.entityId +
+      ' signer=' + output.signerId + ' resolved=' + resolvedSignerId +
+      ' consensusOnly=true',
+    );
+  }
+  env.error?.('network', 'ROUTE_LOCAL_SIGNER_MISMATCH', {
+    entityId: output.entityId,
+    signerId: output.signerId,
+    txTypes,
+  }, output.entityId);
+  throw new Error(
+    'ROUTE_LOCAL_SIGNER_MISMATCH: entity=' + output.entityId +
+    ' signer=' + output.signerId + ' txTypes=' + txTypes.join(','),
+  );
+};
+
+const alignRemoteOutputSigner = (
+  env: Env,
+  output: RoutedEntityInput,
+): RoutedEntityInput => {
+  const gossipSignerIds = resolveGossipBoardSignerIds(env, output.entityId);
+  const preferredSignerId = gossipSignerIds[0] || '';
+  const outputSignerId = String(output.signerId || '').trim();
+  if (!preferredSignerId || preferredSignerId.toLowerCase() === outputSignerId.toLowerCase()) {
+    return output;
+  }
+  if (isTriggerOnlyOutput(output)) {
+    env.warn?.('network', 'ROUTE_RETARGET_REMOTE_PROFILE_SIGNER', {
+      entityId: output.entityId,
+      inputSignerId: output.signerId,
+      resolvedSignerId: preferredSignerId,
+    }, output.entityId);
+    return { ...output, signerId: preferredSignerId };
+  }
+
+  const signerKnown = gossipSignerIds.some(
+    signerId => signerId.toLowerCase() === outputSignerId.toLowerCase(),
+  );
+  if (!isTxBearingOutput(output) || signerKnown) return output;
+  const txTypes = (output.entityTxs || []).map(tx => tx.type);
+  env.error?.('network', 'ROUTE_REMOTE_SIGNER_MISMATCH', {
+    entityId: output.entityId,
+    signerId: output.signerId,
+    resolvedSignerId: preferredSignerId,
+    boardSignerIds: gossipSignerIds,
+    txTypes,
+    hasProposedFrame: Boolean(output.proposedFrame),
+    hasHashPrecommits: Boolean(output.hashPrecommits && output.hashPrecommits.size > 0),
+  }, output.entityId);
+  throw new Error(
+    'ROUTE_REMOTE_SIGNER_MISMATCH: entity=' + output.entityId +
+    ' signer=' + output.signerId + ' resolved=' + preferredSignerId +
+    ' txTypes=' + txTypes.join(','),
+  );
+};
+
+const bindVerifiedTargetRuntime = (
+  env: Env,
+  output: RoutedEntityInput,
+  deps: RuntimeOutputRoutingDeps,
+): { output: RoutedEntityInput; targetRuntimeId: string } => {
+  const persisted = normalizeRuntimeId(String(output.runtimeId || ''));
+  const resolved = deps.resolveRuntimeIdForEntity(env, output.entityId);
+  const verified = normalizeRuntimeId(
+    deps.getP2P(env)?.getVerifiedRuntimeRoute?.(output.entityId)?.runtimeId ?? '',
+  );
+  let routed = output;
+
+  // A transport-authenticated profile supersedes durable destinations and
+  // short-lived hints after a peer moves to a new Runtime.
+  if (verified && persisted !== verified) {
+    const routeBindingData = {
+      entityId: output.entityId,
+      persistedRuntimeId: persisted || null,
+      resolvedRuntimeId: verified,
+    };
+    if (persisted) env.warn?.('network', 'ROUTE_TARGET_RUNTIME_REBOUND', routeBindingData);
+    else env.info?.('network', 'ROUTE_TARGET_RUNTIME_BOUND', routeBindingData);
+    routed = { ...output, runtimeId: verified };
+  } else if (persisted && resolved && persisted !== resolved) {
+    if (verified && verified === resolved) {
+      env.warn?.('network', 'ROUTE_TARGET_RUNTIME_REBOUND', {
+        entityId: output.entityId,
+        persistedRuntimeId: persisted,
+        resolvedRuntimeId: resolved,
+      });
+      routed = { ...output, runtimeId: resolved };
+    } else {
+      env.warn?.('network', 'ROUTE_TARGET_RUNTIME_CHANGE_UNVERIFIED', {
+        entityId: output.entityId,
+        persistedRuntimeId: persisted,
+        resolvedRuntimeId: resolved,
+      });
+    }
+  }
+  return {
+    output: routed,
+    targetRuntimeId: normalizeRuntimeId(String(routed.runtimeId || '')) || verified || resolved || '',
+  };
+};
+
+const planRemoteEntityOutput = (
+  env: Env,
+  initialOutput: RoutedEntityInput,
+  deps: RuntimeOutputRoutingDeps,
+): PlannedEntityOutput => {
+  const signedOutput = alignRemoteOutputSigner(env, initialOutput);
+  const { output, targetRuntimeId } = bindVerifiedTargetRuntime(env, signedOutput, deps);
+  routeLog.debug('plan.output', {
+    entity: shortId(output.entityId),
+    runtime: targetRuntimeId ? shortId(targetRuntimeId, 8) : 'unknown',
+  });
+  if (!targetRuntimeId) {
+    const txTypes = (output.entityTxs || []).map(tx => tx.type);
+    if (entityInputHasCrossJurisdictionIntraRuntimeTx(output)) {
+      env.error?.('network', 'ROUTE_TARGET_RUNTIME_UNKNOWN', {
+        entityId: output.entityId,
+        txTypes,
+        protocol: 'cross-j',
+      });
+      throw new Error(
+        'ROUTE_TARGET_RUNTIME_UNKNOWN: cross-j sibling entity=' + output.entityId +
+        ' txTypes=' + txTypes.join(','),
+      );
+    }
+    reportRetryableRouteDefer(env, deps, output, {
+      entityId: output.entityId,
+      reason: 'target-runtime-unknown',
+      txTypes,
+    });
+    return { kind: 'deferred', output };
+  }
+
+  const localRuntimeId = normalizeRuntimeId(String(env.runtimeId || ''));
+  if (localRuntimeId && targetRuntimeId === localRuntimeId) {
+    env.error?.('network', 'ROUTE_STALE_SELF_HINT', {
+      entityId: output.entityId,
+      runtimeId: targetRuntimeId,
+    });
+    throw new Error(
+      'ROUTE_STALE_SELF_HINT: entity=' + output.entityId + ' runtime=' + targetRuntimeId +
+      ' txTypes=' + (output.entityTxs || []).map(tx => tx.type).join(','),
+    );
+  }
+  if (entityInputHasCrossJurisdictionIntraRuntimeTx(output)) {
+    throw new Error(
+      'CROSS_J_REMOTE_OUTPUT_FORBIDDEN: entity=' +
+      String(output.entityId || '').toLowerCase() + ' targetRuntime=' + targetRuntimeId +
+      ' txTypes=' + (output.entityTxs || []).map(tx => tx.type).join(','),
+    );
+  }
+  return {
+    kind: 'remote',
+    output: { output: toDeliverableEntityInput(output, targetRuntimeId), targetRuntimeId },
+  };
+};
+
 export const planEntityOutputs = (
   env: Env,
   outputs: RoutedEntityInput[],
@@ -1653,182 +1857,14 @@ export const planEntityOutputs = (
 } => {
   const localOutputs: RoutedEntityInput[] = [];
   const remoteOutputs: PlannedRemoteOutput[] = [];
-  const deduped = new Map<string, RoutedEntityInput>();
-  for (const output of outputs.flatMap(candidate => splitRoutedOutputByDeliveryLane(candidate))) {
-    const key = buildRouteOutputKey(output);
-    const existing = deduped.get(key);
-    if (existing) {
-      mergeRoutedEntityOutput(existing, output);
-    } else {
-      deduped.set(key, cloneRoutedOutputWithCachedIdentity(output));
-    }
-  }
-  const allOutputs = [...deduped.values()];
   const deferredOutputs: RoutedEntityInput[] = [];
-
-  for (const output of allOutputs) {
-    if (deps.hasLocalSignerForEntitySigner(env, output.entityId, output.signerId)) {
-      localOutputs.push(output);
-      continue;
-    }
-    if (deps.hasLocalSignerForEntity(env, output.entityId)) {
-      const resolvedSignerId = deps.resolveSoleLocalSignerForEntity(env, output.entityId);
-      if (resolvedSignerId && isTriggerOnlyOutput(output)) {
-        env.warn('network', 'ROUTE_RETARGET_LOCAL_TRIGGER_SIGNER', {
-          entityId: output.entityId,
-          inputSignerId: output.signerId,
-          resolvedSignerId,
-        }, output.entityId);
-        localOutputs.push({ ...output, signerId: resolvedSignerId });
-        continue;
-      }
-      if (resolvedSignerId) {
-        if (!isTxBearingOutput(output)) {
-          env.error?.('network', 'ROUTE_LOCAL_SIGNER_MISMATCH', {
-            entityId: output.entityId,
-            signerId: output.signerId,
-            resolvedSignerId,
-            hasProposedFrame: Boolean(output.proposedFrame),
-            hasHashPrecommits: Boolean(output.hashPrecommits && output.hashPrecommits.size > 0),
-          }, output.entityId);
-          throw new Error(
-            `ROUTE_LOCAL_SIGNER_MISMATCH: entity=${output.entityId} signer=${output.signerId} ` +
-            `resolved=${resolvedSignerId} consensusOnly=true`,
-          );
-        }
-        env.error?.('network', 'ROUTE_LOCAL_SIGNER_MISMATCH', {
-          entityId: output.entityId,
-          signerId: output.signerId,
-          txTypes: (output.entityTxs || []).map(tx => tx.type),
-        }, output.entityId);
-        throw new Error(
-          `ROUTE_LOCAL_SIGNER_MISMATCH: entity=${output.entityId} signer=${output.signerId} ` +
-          `txTypes=${(output.entityTxs || []).map(tx => tx.type).join(',')}`,
-        );
-      }
-    }
-    let outputToRoute = output;
-    const gossipSignerIds = resolveGossipBoardSignerIds(env, output.entityId);
-    const preferredGossipSignerId = gossipSignerIds[0] || '';
-    const outputSignerId = String(output.signerId || '').trim();
-    const outputSignerKnownByGossip = gossipSignerIds.some(
-      signerId => signerId.toLowerCase() === outputSignerId.toLowerCase(),
-    );
-    if (preferredGossipSignerId && preferredGossipSignerId.toLowerCase() !== outputSignerId.toLowerCase()) {
-      if (isTriggerOnlyOutput(output)) {
-        env.warn?.('network', 'ROUTE_RETARGET_REMOTE_PROFILE_SIGNER', {
-          entityId: output.entityId,
-          inputSignerId: output.signerId,
-          resolvedSignerId: preferredGossipSignerId,
-        }, output.entityId);
-        outputToRoute = { ...output, signerId: preferredGossipSignerId };
-      } else if (isTxBearingOutput(output) && !outputSignerKnownByGossip) {
-        const txTypes = (output.entityTxs || []).map(tx => tx.type);
-        env.error?.('network', 'ROUTE_REMOTE_SIGNER_MISMATCH', {
-          entityId: output.entityId,
-          signerId: output.signerId,
-          resolvedSignerId: preferredGossipSignerId,
-          boardSignerIds: gossipSignerIds,
-          txTypes,
-          hasProposedFrame: Boolean(output.proposedFrame),
-          hasHashPrecommits: Boolean(output.hashPrecommits && output.hashPrecommits.size > 0),
-        }, output.entityId);
-        throw new Error(
-          `ROUTE_REMOTE_SIGNER_MISMATCH: entity=${output.entityId} signer=${output.signerId} ` +
-          `resolved=${preferredGossipSignerId} txTypes=${txTypes.join(',')}`,
-        );
-      }
-    }
-
-    const persistedTargetRuntimeId = normalizeRuntimeId(String(outputToRoute.runtimeId || ''));
-    const resolvedTargetRuntimeId = deps.resolveRuntimeIdForEntity(env, outputToRoute.entityId);
-    const verifiedTargetRuntimeId = normalizeRuntimeId(
-      deps.getP2P(env)?.getVerifiedRuntimeRoute?.(outputToRoute.entityId)?.runtimeId ?? '',
-    );
-    // A verified profile is transport-authenticated current routing metadata.
-    // It must supersede both a durable output destination and a short-lived
-    // hint: after a runtime restart those two stale values can agree and would
-    // otherwise route the bilateral message to the retired runtime forever.
-    if (verifiedTargetRuntimeId && persistedTargetRuntimeId !== verifiedTargetRuntimeId) {
-      const routeBindingData = {
-        entityId: outputToRoute.entityId,
-        persistedRuntimeId: persistedTargetRuntimeId || null,
-        resolvedRuntimeId: verifiedTargetRuntimeId,
-      };
-      if (persistedTargetRuntimeId) {
-        env.warn?.('network', 'ROUTE_TARGET_RUNTIME_REBOUND', routeBindingData);
-      } else {
-        env.info?.('network', 'ROUTE_TARGET_RUNTIME_BOUND', routeBindingData);
-      }
-      outputToRoute = { ...outputToRoute, runtimeId: verifiedTargetRuntimeId };
-    } else if (
-      persistedTargetRuntimeId &&
-      resolvedTargetRuntimeId &&
-      persistedTargetRuntimeId !== resolvedTargetRuntimeId
-    ) {
-      if (verifiedTargetRuntimeId && verifiedTargetRuntimeId === resolvedTargetRuntimeId) {
-        env.warn?.('network', 'ROUTE_TARGET_RUNTIME_REBOUND', {
-          entityId: outputToRoute.entityId,
-          persistedRuntimeId: persistedTargetRuntimeId,
-          resolvedRuntimeId: resolvedTargetRuntimeId,
-        });
-        outputToRoute = { ...outputToRoute, runtimeId: resolvedTargetRuntimeId };
-      } else {
-        env.warn?.('network', 'ROUTE_TARGET_RUNTIME_CHANGE_UNVERIFIED', {
-          entityId: outputToRoute.entityId,
-          persistedRuntimeId: persistedTargetRuntimeId,
-          resolvedRuntimeId: resolvedTargetRuntimeId,
-        });
-      }
-    }
-    const targetRuntimeId = normalizeRuntimeId(String(outputToRoute.runtimeId || '')) ||
-      verifiedTargetRuntimeId ||
-      resolvedTargetRuntimeId;
-    routeLog.debug('plan.output', {
-      entity: shortId(outputToRoute.entityId),
-      runtime: targetRuntimeId ? shortId(targetRuntimeId, 8) : 'unknown',
-    });
-    if (!targetRuntimeId) {
-      if (entityInputHasCrossJurisdictionIntraRuntimeTx(outputToRoute)) {
-        const txTypes = (outputToRoute.entityTxs || []).map(tx => tx.type);
-        env.error?.('network', 'ROUTE_TARGET_RUNTIME_UNKNOWN', {
-          entityId: outputToRoute.entityId,
-          txTypes,
-          protocol: 'cross-j',
-        });
-        throw new Error(
-          `ROUTE_TARGET_RUNTIME_UNKNOWN: cross-j sibling entity=${outputToRoute.entityId} ` +
-          `txTypes=${txTypes.join(',')}`,
-        );
-      }
-      reportRetryableRouteDefer(env, deps, outputToRoute, {
-        entityId: outputToRoute.entityId,
-        reason: 'target-runtime-unknown',
-        txTypes: (outputToRoute.entityTxs || []).map(tx => tx.type),
-      });
-      deferredOutputs.push(outputToRoute);
-      continue;
-    }
-    const localRuntimeId = normalizeRuntimeId(String(env.runtimeId || ''));
-    if (localRuntimeId && targetRuntimeId === localRuntimeId) {
-      env.error?.('network', 'ROUTE_STALE_SELF_HINT', {
-        entityId: outputToRoute.entityId,
-        runtimeId: targetRuntimeId,
-      });
-      throw new Error(
-        `ROUTE_STALE_SELF_HINT: entity=${outputToRoute.entityId} runtime=${targetRuntimeId} ` +
-        `txTypes=${(outputToRoute.entityTxs || []).map(tx => tx.type).join(',')}`,
-      );
-    }
-    if (entityInputHasCrossJurisdictionIntraRuntimeTx(outputToRoute)) {
-      throw new Error(
-        `CROSS_J_REMOTE_OUTPUT_FORBIDDEN: entity=${String(outputToRoute.entityId || '').toLowerCase()} ` +
-        `targetRuntime=${targetRuntimeId} txTypes=${(outputToRoute.entityTxs || []).map(tx => tx.type).join(',')}`,
-      );
-    }
-    remoteOutputs.push({ output: toDeliverableEntityInput(outputToRoute, targetRuntimeId), targetRuntimeId });
+  for (const output of dedupeEntityOutputs(outputs)) {
+    const decision = resolveLocalEntityOutput(env, output, deps) ??
+      planRemoteEntityOutput(env, output, deps);
+    if (decision.kind === 'local') localOutputs.push(decision.output);
+    else if (decision.kind === 'remote') remoteOutputs.push(decision.output);
+    else deferredOutputs.push(decision.output);
   }
-
   return { localOutputs, remoteOutputs, deferredOutputs };
 };
 
@@ -1961,36 +1997,37 @@ const awaitsDurableEntityCertificate = (
   return [...proposals].some(height => !certificates.has(height));
 };
 
-export const dispatchEntityOutputs = (
-  env: Env,
-  outputs: PlannedRemoteOutput[],
-  deps: RuntimeOutputRoutingDeps,
-): RoutedEntityInput[] => {
-  const state = deps.ensureRuntimeState(env);
-  const directDispatch = state.directEntityInputsDispatch;
-  const p2p = deps.getP2P(env);
+type OutputEnvelopeGroup = {
+  targetRuntimeId: string;
+  outputs: DeliverableEntityInput[];
+  atomic: boolean;
+  complete: boolean;
+};
 
-  const groupedByEnvelope = new Map<string, {
+const buildOutputEnvelopeGroups = (
+  outputs: PlannedRemoteOutput[],
+): OutputEnvelopeGroup[] => {
+  const byTarget = new Map<string, {
     targetRuntimeId: string;
     outputs: DeliverableEntityInput[];
   }>();
   for (const { output, targetRuntimeId } of outputs) {
     const key = outputEnvelopeGroupKey(output);
-    const group = groupedByEnvelope.get(key) ?? { targetRuntimeId, outputs: [] };
+    const group = byTarget.get(key) ?? { targetRuntimeId, outputs: [] };
     if (group.targetRuntimeId !== targetRuntimeId) {
       throw new Error('ROUTE_ENTITY_INPUTS_ENVELOPE_TARGET_MISMATCH');
     }
     group.outputs.push(output);
-    groupedByEnvelope.set(key, group);
+    byTarget.set(key, group);
   }
 
-  const envelopeGroups = [...groupedByEnvelope.values()]
+  return [...byTarget.values()]
     .flatMap(group => {
       const units = groupAtomicCrossJAdmissionOutputs(group.outputs);
       const atomicUnits = units.filter(unit => unit.atomic);
-      const ordinaryOutputs = units.filter(unit => !unit.atomic).flatMap(unit => unit.outputs);
-      const ordinaryUnits = ordinaryOutputs.length > 0
-        ? groupAtomicCrossJAdmissionOutputs(batchOutputsByTarget(ordinaryOutputs))
+      const ordinary = units.filter(unit => !unit.atomic).flatMap(unit => unit.outputs);
+      const ordinaryUnits = ordinary.length > 0
+        ? groupAtomicCrossJAdmissionOutputs(batchOutputsByTarget(ordinary))
         : [];
       return [...atomicUnits, ...ordinaryUnits]
         .map(unit => ({ targetRuntimeId: group.targetRuntimeId, ...unit }));
@@ -1998,167 +2035,227 @@ export const dispatchEntityOutputs = (
     .sort((left, right) =>
       compareStableText(left.targetRuntimeId, right.targetRuntimeId) ||
       compareOutputDelivery(left.outputs[0]!, right.outputs[0]!));
+};
 
-  const deferredOutputs: RoutedEntityInput[] = [];
-  // Every reliable lane except Account ACK serializes handoff until exact
-  // durable application. Account ACKs are emitted in canonical height order
-  // without a receipt-gated pause: ACK H+1 can only exist after this same peer
-  // signed Account frame H+1 on top of H, so its signed frame is already the
-  // causal proof that waiting for a separate transport receipt would duplicate.
-  // The receiver still queues out-of-order delivery and rejects equivocation.
-  const blockedReliableLanes = new Set<string>();
-  for (const group of envelopeGroups) {
-    if (!group.complete) {
-      throw new Error(
-        `ROUTE_CROSS_J_INCOMPLETE_COHORT_MARKED_READY:${safeStringify({
-          targetRuntimeId: group.targetRuntimeId,
-          outputs: summarizeAccountEnvelopeOutputs(group.outputs),
-          atomicPairs: group.outputs.map(output => output.atomicCrossJurisdictionPair ?? null),
-          plannedOutputs: outputs.map(({ output, targetRuntimeId }) => ({
-            targetRuntimeId,
-            ...summarizeAccountEnvelopeOutputs([output])[0],
-          })),
-        })}`,
+const assertCompleteOutputGroup = (
+  group: OutputEnvelopeGroup,
+  plannedOutputs: PlannedRemoteOutput[],
+): void => {
+  if (group.complete) return;
+  throw new Error(
+    'ROUTE_CROSS_J_INCOMPLETE_COHORT_MARKED_READY:' + safeStringify({
+      targetRuntimeId: group.targetRuntimeId,
+      outputs: summarizeAccountEnvelopeOutputs(group.outputs),
+      atomicPairs: group.outputs.map(output => output.atomicCrossJurisdictionPair ?? null),
+      plannedOutputs: plannedOutputs.map(({ output, targetRuntimeId }) => ({
+        targetRuntimeId,
+        ...summarizeAccountEnvelopeOutputs([output])[0],
+      })),
+    }),
+  );
+};
+
+const selectSendableOutputs = (
+  env: Env,
+  group: OutputEnvelopeGroup,
+  blockedReliableLanes: Set<string>,
+  deferredOutputs: RoutedEntityInput[],
+): DeliverableEntityInput[] => {
+  const sendable: DeliverableEntityInput[] = [];
+  for (const output of group.outputs) {
+    const reliable = getReliableOutputIdentity(output);
+    const blockedByLane =
+      !group.atomic &&
+      reliable &&
+      reliable.kind !== 'account-ack' &&
+      blockedReliableLanes.has(reliable.laneKey);
+    if (blockedByLane) {
+      deferredOutputs.push(output);
+      continue;
+    }
+    if (reliable && awaitsDurableEntityCertificate(env, group.targetRuntimeId, reliable)) {
+      deferredOutputs.push(output);
+      blockedReliableLanes.add(reliable.laneKey);
+      continue;
+    }
+    sendable.push(output);
+    // Except for Account ACKs, one reliable lane head remains pending until
+    // its durable application receipt and therefore fences later entries.
+    if (reliable && reliable.kind !== 'account-ack') {
+      blockedReliableLanes.add(reliable.laneKey);
+    }
+  }
+  return sendable;
+};
+
+const retainDeliveredReliableOutputs = (
+  sendable: DeliverableEntityInput[],
+  atomic: boolean,
+  deferredOutputs: RoutedEntityInput[],
+): void => {
+  if (atomic) {
+    deferredOutputs.push(...sendable);
+    return;
+  }
+  deferredOutputs.push(...sendable.filter(output => getReliableOutputIdentity(output) !== null));
+};
+
+const deferOutputsAfterDeliveryFailure = (
+  env: Env,
+  deps: RuntimeOutputRoutingDeps,
+  sendable: DeliverableEntityInput[],
+  targetRuntimeId: string,
+  details: Record<string, unknown>,
+  deferredOutputs: RoutedEntityInput[],
+): void => {
+  for (const output of sendable) {
+    reportRetryableRouteDefer(env, deps, output, {
+      entityId: output.entityId,
+      runtimeId: targetRuntimeId,
+      ...details,
+    });
+  }
+  deferredOutputs.push(...sendable);
+};
+
+const dispatchOutputEnvelope = (
+  env: Env,
+  group: OutputEnvelopeGroup,
+  sendable: DeliverableEntityInput[],
+  envelope: RuntimeEntityInputsEnvelope,
+  deps: RuntimeOutputRoutingDeps,
+  deferredOutputs: RoutedEntityInput[],
+): void => {
+  const state = deps.ensureRuntimeState(env);
+  const directDispatch = state.directEntityInputsDispatch;
+  if (directDispatch) {
+    const delivery = requireDeliveryResult(
+      directDispatch(group.targetRuntimeId, envelope, envelope.sourceRuntimeTimestamp),
+      'ROUTE_DIRECT_INVALID_DELIVERY_RESULT',
+    );
+    if (isDeliveryDelivered(delivery)) {
+      routeLog.info('output.accepted', {
+        atMs: getWallClockMs(),
+        transport: 'direct',
+        code: delivery.code,
+        targetRuntimeId: group.targetRuntimeId,
+        sourceRuntimeHeight: envelope.sourceRuntimeHeight,
+        outputs: summarizeAccountEnvelopeOutputs(sendable),
+      });
+      retainDeliveredReliableOutputs(sendable, group.atomic, deferredOutputs);
+      return;
+    }
+  }
+
+  const p2p = deps.getP2P(env);
+  if (!p2p) {
+    for (const output of sendable) {
+      const details = { entityId: output.entityId, runtimeId: group.targetRuntimeId };
+      if (getReliableOutputIdentity(output)) {
+        env.warn?.('network', 'ROUTE_RELIABLE_DEFERRED_NO_P2P', details);
+      } else {
+        env.info?.('network', 'ROUTE_DEFERRED_NO_P2P', details);
+      }
+    }
+    deferredOutputs.push(...sendable);
+    return;
+  }
+
+  routeLog.debug('p2p.enqueue_envelope', {
+    runtime: shortId(group.targetRuntimeId, 8),
+    sourceHeight: envelope.sourceRuntimeHeight,
+    inputs: envelope.entityInputs.length,
+  });
+  let delivery: DeliveryResult | null = null;
+  try {
+    delivery = enqueueP2PEntityInputsDelivery(
+      p2p,
+      group.targetRuntimeId,
+      envelope,
+      envelope.sourceRuntimeTimestamp,
+    );
+    if (isDeliveryDelivered(delivery)) {
+      routeLog.info('output.accepted', {
+        atMs: getWallClockMs(),
+        transport: 'p2p',
+        code: delivery.code,
+        targetRuntimeId: group.targetRuntimeId,
+        sourceRuntimeHeight: envelope.sourceRuntimeHeight,
+        outputs: summarizeAccountEnvelopeOutputs(sendable),
+      });
+      retainDeliveredReliableOutputs(sendable, group.atomic, deferredOutputs);
+      return;
+    }
+    if (shouldRetryDelivery(delivery)) {
+      deferOutputsAfterDeliveryFailure(
+        env,
+        deps,
+        sendable,
+        group.targetRuntimeId,
+        { delivery },
+        deferredOutputs,
       );
+      return;
     }
-    const atomicCrossJAdmission = group.atomic;
-    const sendable: DeliverableEntityInput[] = [];
-    for (const output of group.outputs) {
-      const reliable = getReliableOutputIdentity(output);
-      if (
-        !atomicCrossJAdmission &&
-        reliable &&
-        reliable.kind !== 'account-ack' &&
-        blockedReliableLanes.has(reliable.laneKey)
-      ) {
-        deferredOutputs.push(output);
-        continue;
-      }
-      if (reliable && awaitsDurableEntityCertificate(env, group.targetRuntimeId, reliable)) {
-        deferredOutputs.push(output);
-        blockedReliableLanes.add(reliable.laneKey);
-        continue;
-      }
-      sendable.push(output);
-      // A reliable lane head remains pending until its durable application
-      // receipt, so later lane entries cannot share this transport envelope.
-      if (reliable && reliable.kind !== 'account-ack') blockedReliableLanes.add(reliable.laneKey);
+    requireDeliveryDelivered(delivery, result =>
+      'ROUTE_SEND_NOT_DELIVERED: runtime=' + group.targetRuntimeId +
+      ' code=' + result.code + ' inputs=' + sendable.length);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const transient = [
+      'P2P_ENTITY_INPUTS_NOT_DELIVERED',
+      'P2P_ENTITY_INPUTS_SEND_THROW',
+      'P2P_TRANSPORT',
+      'WebSocket',
+    ].some(marker => message.includes(marker));
+    if ((delivery !== null && shouldRetryDelivery(delivery)) || transient) {
+      deferOutputsAfterDeliveryFailure(
+        env,
+        deps,
+        sendable,
+        group.targetRuntimeId,
+        { error: message, ...(delivery ? { delivery } : {}) },
+        deferredOutputs,
+      );
+      return;
     }
-    if (sendable.length === 0) continue;
+    env.error?.('network', 'ROUTE_SEND_FAILED', {
+      runtimeId: group.targetRuntimeId,
+      inputCount: sendable.length,
+      error: message,
+      ...(delivery ? { delivery } : {}),
+    });
+    throw error;
+  }
+};
 
+export const dispatchEntityOutputs = (
+  env: Env,
+  outputs: PlannedRemoteOutput[],
+  deps: RuntimeOutputRoutingDeps,
+): RoutedEntityInput[] => {
+  const deferredOutputs: RoutedEntityInput[] = [];
+  const blockedReliableLanes = new Set<string>();
+  for (const group of buildOutputEnvelopeGroups(outputs)) {
+    assertCompleteOutputGroup(group, outputs);
+    const sendable = selectSendableOutputs(
+      env,
+      group,
+      blockedReliableLanes,
+      deferredOutputs,
+    );
+    if (sendable.length === 0) continue;
     const envelope = buildRuntimeEntityInputsEnvelope(env, sendable);
-    if (atomicCrossJAdmission || sendable.some(isCrossJAdmissionSourceProposal)) {
+    if (group.atomic || sendable.some(isCrossJAdmissionSourceProposal)) {
       routeLog.info('crossj.admission_envelope_dispatch', {
-        atomic: atomicCrossJAdmission,
+        atomic: group.atomic,
         targetRuntimeId: group.targetRuntimeId,
         sourceRuntimeHeight: envelope.sourceRuntimeHeight,
         inputCount: sendable.length,
         outputs: summarizeAccountEnvelopeOutputs(sendable),
       });
     }
-    const retainReliable = (): void => {
-      if (atomicCrossJAdmission) {
-        deferredOutputs.push(...sendable);
-        return;
-      }
-      deferredOutputs.push(...sendable.filter(output => getReliableOutputIdentity(output) !== null));
-    };
-    if (directDispatch) {
-      const directDelivery = requireDeliveryResult(
-        directDispatch(group.targetRuntimeId, envelope, envelope.sourceRuntimeTimestamp),
-        'ROUTE_DIRECT_INVALID_DELIVERY_RESULT',
-      );
-      if (isDeliveryDelivered(directDelivery)) {
-        routeLog.info('output.accepted', {
-          atMs: getWallClockMs(),
-          transport: 'direct',
-          code: directDelivery.code,
-          targetRuntimeId: group.targetRuntimeId,
-          sourceRuntimeHeight: envelope.sourceRuntimeHeight,
-          outputs: summarizeAccountEnvelopeOutputs(sendable),
-        });
-        retainReliable();
-        continue;
-      }
-    }
-    if (!p2p) {
-      for (const output of sendable) {
-        const reliable = getReliableOutputIdentity(output);
-        const details = { entityId: output.entityId, runtimeId: group.targetRuntimeId };
-        if (reliable) env.warn?.('network', 'ROUTE_RELIABLE_DEFERRED_NO_P2P', details);
-        else env.info?.('network', 'ROUTE_DEFERRED_NO_P2P', details);
-      }
-      deferredOutputs.push(...sendable);
-      continue;
-    }
-
-    routeLog.debug('p2p.enqueue_envelope', {
-      runtime: shortId(group.targetRuntimeId, 8),
-      sourceHeight: envelope.sourceRuntimeHeight,
-      inputs: envelope.entityInputs.length,
-    });
-    let p2pDelivery: DeliveryResult | null = null;
-    try {
-      p2pDelivery = enqueueP2PEntityInputsDelivery(
-        p2p,
-        group.targetRuntimeId,
-        envelope,
-        envelope.sourceRuntimeTimestamp,
-      );
-      if (isDeliveryDelivered(p2pDelivery)) {
-        routeLog.info('output.accepted', {
-          atMs: getWallClockMs(),
-          transport: 'p2p',
-          code: p2pDelivery.code,
-          targetRuntimeId: group.targetRuntimeId,
-          sourceRuntimeHeight: envelope.sourceRuntimeHeight,
-          outputs: summarizeAccountEnvelopeOutputs(sendable),
-        });
-        retainReliable();
-        continue;
-      }
-      if (shouldRetryDelivery(p2pDelivery)) {
-        for (const output of sendable) {
-          reportRetryableRouteDefer(env, deps, output, {
-            entityId: output.entityId,
-            runtimeId: group.targetRuntimeId,
-            delivery: p2pDelivery,
-          });
-        }
-        deferredOutputs.push(...sendable);
-        continue;
-      }
-      requireDeliveryDelivered(p2pDelivery, delivery =>
-        `ROUTE_SEND_NOT_DELIVERED: runtime=${group.targetRuntimeId} ` +
-        `code=${delivery.code} inputs=${sendable.length}`);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      const transientTransportFailure = [
-        'P2P_ENTITY_INPUTS_NOT_DELIVERED',
-        'P2P_ENTITY_INPUTS_SEND_THROW',
-        'P2P_TRANSPORT',
-        'WebSocket',
-      ].some(marker => message.includes(marker));
-      if ((p2pDelivery !== null && shouldRetryDelivery(p2pDelivery)) || transientTransportFailure) {
-        for (const output of sendable) {
-          reportRetryableRouteDefer(env, deps, output, {
-            entityId: output.entityId,
-            runtimeId: group.targetRuntimeId,
-            error: message,
-            ...(p2pDelivery ? { delivery: p2pDelivery } : {}),
-          });
-        }
-        deferredOutputs.push(...sendable);
-        continue;
-      }
-      env.error?.('network', 'ROUTE_SEND_FAILED', {
-        runtimeId: group.targetRuntimeId,
-        inputCount: sendable.length,
-        error: message,
-        ...(p2pDelivery ? { delivery: p2pDelivery } : {}),
-      });
-      throw error;
-    }
+    dispatchOutputEnvelope(env, group, sendable, envelope, deps, deferredOutputs);
   }
   return deferredOutputs.sort(compareOutputDelivery);
 };
