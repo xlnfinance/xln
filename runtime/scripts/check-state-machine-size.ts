@@ -19,14 +19,12 @@ const TARGET_COORDINATOR_LINES = 150;
 const COORDINATOR_DEBT: Readonly<Record<string, number>> = {
   'runtime/entity/tx/handlers/cross-j-clear.ts::handleRequestCrossJurisdictionClearEntityTx': 179,
   'runtime/entity/consensus/frame-application.ts::applyOrderbookMatching': 178,
-  'runtime/entity/tx/handlers/r2c.ts::handleR2C': 171,
-  'runtime/entity/authorization.ts::assertCertifiedOutputSemanticAuthority': 170,
   'runtime/entity/consensus/frame-application.ts::proposePendingAccountFrames': 170,
   'runtime/entity/tx/handlers/open-account.ts::handleOpenAccountEntityTx': 166,
   'runtime/entity/tx/handlers/cross-j-book-order.ts::applyCrossJurisdictionBookProgressToState': 163,
 };
 
-const MAX_OVER_100_FUNCTIONS = 61;
+const MAX_OVER_100_FUNCTIONS = 59;
 
 type FunctionSize = {
   key: string;

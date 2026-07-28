@@ -27,12 +27,96 @@ type MempoolOp = { accountId: string; tx: AccountTx };
 
 const r2cLog = createStructuredLogger('entity.r2c');
 
+const collectRebalanceFee = (
+  originalState: EntityState,
+  state: EntityState,
+  tx: Extract<EntityTx, { type: 'r2c' }>,
+  localReceivingEntity: boolean,
+  mempoolOps: MempoolOp[],
+): boolean => {
+  const {
+    counterpartyId,
+    rebalanceQuoteId,
+    rebalanceFeeAmount,
+    rebalanceFeeTokenId,
+  } = tx.data;
+  if (rebalanceQuoteId === undefined) return true;
+  if (!localReceivingEntity) {
+    addMessage(state, '❌ Rebalance fee unsupported for remote reserve → account deposits');
+    return false;
+  }
+  const account = state.accounts.get(counterpartyId);
+  const quote = account?.shadow.rebalance.activeQuote;
+  r2cLog.debug('quote.validate', {
+    entity: shortId(originalState.entityId),
+    counterparty: shortId(counterpartyId),
+    hasAccount: Boolean(account),
+    quote: quote
+      ? {
+        quoteId: quote.quoteId,
+        accepted: quote.accepted,
+        feeTokenId: quote.feeTokenId,
+        feeAmount: formatAmount(quote.feeAmount),
+      }
+      : null,
+  });
+  if (!quote) {
+    addMessage(state, `❌ Rebalance fee: no active quote for ${counterpartyId.slice(-4)}`);
+    return false;
+  }
+  if (quote.quoteId !== rebalanceQuoteId) {
+    addMessage(state, `❌ Rebalance fee: quoteId mismatch (expected ${quote.quoteId}, got ${rebalanceQuoteId})`);
+    return false;
+  }
+  if (!quote.accepted) {
+    addMessage(state, '❌ Rebalance fee: quote not accepted');
+    return false;
+  }
+  if (originalState.timestamp > quote.quoteId + QUOTE_EXPIRY_MS) {
+    delete account!.shadow.rebalance.activeQuote;
+    addMessage(state, `❌ Rebalance fee: quote expired (age: ${originalState.timestamp - quote.quoteId}ms)`);
+    return false;
+  }
+  if (rebalanceFeeAmount !== quote.feeAmount) {
+    addMessage(state, `❌ Rebalance fee: amount mismatch (expected ${quote.feeAmount}, got ${rebalanceFeeAmount})`);
+    return false;
+  }
+  if (rebalanceFeeTokenId !== quote.feeTokenId) {
+    addMessage(state, `❌ Rebalance fee: tokenId mismatch (expected ${quote.feeTokenId}, got ${rebalanceFeeTokenId})`);
+    return false;
+  }
+  if (rebalanceFeeAmount > 0n && rebalanceFeeTokenId !== undefined) {
+    mempoolOps.push({
+      accountId: counterpartyId,
+      tx: {
+        type: 'direct_payment',
+        data: {
+          fromEntityId: counterpartyId,
+          toEntityId: originalState.entityId,
+          tokenId: rebalanceFeeTokenId,
+          amount: rebalanceFeeAmount,
+          description: `rebalance fee (quoteId: ${rebalanceQuoteId})`,
+        },
+      },
+    });
+  }
+  delete account!.shadow.rebalance.activeQuote;
+  r2cLog.debug('fee.collected', {
+    entity: shortId(originalState.entityId),
+    counterparty: shortId(counterpartyId),
+    feeTokenId: rebalanceFeeTokenId,
+    feeAmount: formatAmount(rebalanceFeeAmount),
+    rebalanceQuoteId,
+    mempoolOps: mempoolOps.length,
+  });
+  return true;
+};
+
 export async function handleR2C(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'r2c' }>,
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; jOutputs?: JInput[]; mempoolOps?: MempoolOp[] }> {
-  const currentTimestamp = entityState.timestamp;
-  const { counterpartyId, receivingEntityId, tokenId, amount, rebalanceQuoteId, rebalanceFeeTokenId, rebalanceFeeAmount } = entityTx.data;
+  const { counterpartyId, receivingEntityId, tokenId, amount, rebalanceQuoteId } = entityTx.data;
   const receivingEntity = String(receivingEntityId || entityState.entityId || '').trim().toLowerCase();
   const isLocalReceivingEntity = receivingEntity === String(entityState.entityId || '').trim().toLowerCase();
   r2cLog.debug('start', {
@@ -80,92 +164,13 @@ export async function handleR2C(
     return { newState, outputs };
   }
 
-  // Validate rebalance fee if present
-  if (rebalanceQuoteId !== undefined) {
-    if (!isLocalReceivingEntity) {
-      addMessage(newState, '❌ Rebalance fee unsupported for remote reserve → account deposits');
-      return { newState, outputs };
-    }
-    const account = newState.accounts.get(counterpartyId);
-    const quote = account?.shadow.rebalance.activeQuote;
-    r2cLog.debug('quote.validate', {
-      entity: shortId(entityState.entityId),
-      counterparty: shortId(counterpartyId),
-      hasAccount: Boolean(account),
-      quote: quote
-        ? {
-          quoteId: quote.quoteId,
-          accepted: quote.accepted,
-          feeTokenId: quote.feeTokenId,
-          feeAmount: formatAmount(quote.feeAmount),
-        }
-        : null,
-    });
-
-    if (!quote) {
-      r2cLog.debug('quote.missing', { entity: shortId(entityState.entityId), counterparty: shortId(counterpartyId) });
-      addMessage(newState, `❌ Rebalance fee: no active quote for ${counterpartyId.slice(-4)}`);
-      return { newState, outputs };
-    }
-    if (quote.quoteId !== rebalanceQuoteId) {
-      r2cLog.debug('quote.id_mismatch', {
-        entity: shortId(entityState.entityId),
-        counterparty: shortId(counterpartyId),
-        expected: quote.quoteId,
-        actual: rebalanceQuoteId,
-      });
-      addMessage(newState, `❌ Rebalance fee: quoteId mismatch (expected ${quote.quoteId}, got ${rebalanceQuoteId})`);
-      return { newState, outputs };
-    }
-    if (!quote.accepted) {
-      addMessage(newState, `❌ Rebalance fee: quote not accepted`);
-      return { newState, outputs };
-    }
-    if (currentTimestamp > quote.quoteId + QUOTE_EXPIRY_MS) {
-      // Quote expired — clear it
-      delete account!.shadow.rebalance.activeQuote;
-      addMessage(newState, `❌ Rebalance fee: quote expired (age: ${currentTimestamp - quote.quoteId}ms)`);
-      return { newState, outputs };
-    }
-    if (rebalanceFeeAmount !== quote.feeAmount) {
-      addMessage(newState, `❌ Rebalance fee: amount mismatch (expected ${quote.feeAmount}, got ${rebalanceFeeAmount})`);
-      return { newState, outputs };
-    }
-    if (rebalanceFeeTokenId !== quote.feeTokenId) {
-      addMessage(newState, `❌ Rebalance fee: tokenId mismatch (expected ${quote.feeTokenId}, got ${rebalanceFeeTokenId})`);
-      return { newState, outputs };
-    }
-
-    // Fee collection: inject a direct_payment accountTx to shift offdelta (user→hub)
-    // This goes into the bilateral account mempool for the next frame
-    if (rebalanceFeeAmount && rebalanceFeeAmount > 0n && rebalanceFeeTokenId !== undefined) {
-      mempoolOps.push({
-        accountId: counterpartyId,
-        tx: {
-          type: 'direct_payment',
-          data: {
-            fromEntityId: counterpartyId,        // user pays fee
-            toEntityId: entityState.entityId,     // hub receives fee
-            tokenId: rebalanceFeeTokenId,
-            amount: rebalanceFeeAmount,
-            description: `rebalance fee (quoteId: ${rebalanceQuoteId})`,
-          },
-        },
-      });
-    }
-
-    // Clear the quote (consumed)
-    delete account!.shadow.rebalance.activeQuote;
-
-    r2cLog.debug('fee.collected', {
-      entity: shortId(entityState.entityId),
-      counterparty: shortId(counterpartyId),
-      feeTokenId: rebalanceFeeTokenId,
-      feeAmount: formatAmount(rebalanceFeeAmount),
-      rebalanceQuoteId,
-      mempoolOps: mempoolOps.length,
-    });
-  }
+  if (!collectRebalanceFee(
+    entityState,
+    newState,
+    entityTx,
+    isLocalReceivingEntity,
+    mempoolOps,
+  )) return { newState, outputs };
 
   // CRITICAL: Do NOT update state here - wait for SettlementProcessed event from j-watcher
   // This is consensus-critical: both entities must update based on the on-chain event
