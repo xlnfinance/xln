@@ -70,9 +70,16 @@ const CORE_FILES = {
     'ids.ts',                // Identity system: EntityId, SignerId, JId, ReplicaKey
 
     // Main coordinators (how the system works)
-    'runtime.ts',            // Main coordinator, 100ms ticks, R->E->A routing
+    'runtime.ts',            // Narrow public facade
+    'runtime/composition.ts', // Runtime composition root and dependency wiring
+    'runtime/frame/process.ts', // take -> apply -> WAL -> install -> dispatch pipeline
+    'runtime/input-queue.ts', // The single Runtime mempool
+    'runtime/output-routing.ts', // Post-commit output routing
+    'runtime/live-restore.ts', // Durable Runtime restore boundary
     'entity/consensus/index.ts',   // BFT consensus (ADD_TX -> PROPOSE -> SIGN -> COMMIT)
     'account/consensus/index.ts',  // Bilateral account consensus between entities
+    'account/input.ts',      // Canonical AccountInput boundary
+    'account/j-finality.ts', // Account-owned unilateral Depository finality
     'account/view-state.ts', // Bilateral state machine (classifyBilateralState)
     'jurisdiction/batch.ts',            // J-batch system: E-machine accumulates -> jBroadcast -> J-machine
 
@@ -95,7 +102,7 @@ const CORE_FILES = {
     'entity/tx/handlers/dispute.ts',         // Dispute/salvage gateway and evidence handling
 
     // Swaps, orderbooks, and cross-jurisdiction markets (critical for current product)
-    'machine/swap-pairs.ts',                 // Canonical same-chain swap pair orientation and policies
+    'runtime/swap-pairs.ts',                 // Canonical same-chain swap pair orientation and policies
     'orderbook/swap-execution.ts',                     // Swap lifecycle helpers and terminal settlement summaries
     'orderbook/swap-keys.ts',                          // Swap/order identifier keys and namespacing
     'orderbook/open-swap-offers.ts',                   // Open swap offer projection
@@ -152,7 +159,7 @@ const CORE_FILES = {
     // Utilities (support functions)
     'state-helpers.ts',      // Pure state management functions
     'storage/snapshot-coder.ts',     // Deterministic state serialization (RLP encoding)
-    'machine/jurisdiction-api.ts', // J-adapter / on-chain integration surface
+    'runtime/jurisdiction-api.ts', // J-adapter / on-chain integration surface
   ],
   docs: [
     // Canonical live docs only - theory, current status, and implementation-grade specs
@@ -183,12 +190,16 @@ const CORE_FILES = {
   ],
   tests: [
     // Behavior contracts: if code and prose disagree, these tests show intended user flow
-    'runtime/__tests__/cross-jurisdiction-swap.test.ts',
+    'runtime/__tests__/cross-jurisdiction-swap-part-1.test.ts',
+    'runtime/__tests__/cross-jurisdiction-swap-part-2a.test.ts',
+    'runtime/__tests__/cross-jurisdiction-swap-part-2b.test.ts',
+    'runtime/__tests__/cross-jurisdiction-swap-part-3.test.ts',
     'runtime/__tests__/cross-jurisdiction-security.test.ts',
     'runtime/__tests__/market-subscription-stack.test.ts',
     'runtime/__tests__/market-maker-health.test.ts',
     'runtime/__tests__/orderbook-lifecycle.test.ts',
-    'runtime/__tests__/orderbook-matching-fallback.test.ts',
+    'runtime/__tests__/orderbook-matching-fallback-part-1.test.ts',
+    'runtime/__tests__/orderbook-matching-fallback-part-2.test.ts',
     'runtime/__tests__/swap-order-preparation.test.ts',
     'runtime/__tests__/lending.test.ts',
     'tests/e2e-swap.spec.ts',
@@ -247,10 +258,16 @@ const CROSS_FILES = {
     'account/crypto.ts',
     'state-helpers.ts',
     'runtime.ts',
-    'machine/jurisdiction-api.ts',
-    'machine/swap-pairs.ts',
-    'machine/output-routing.ts',
-    'machine/j-submit.ts',
+    'runtime/composition.ts',
+    'runtime/frame/process.ts',
+    'runtime/input-queue.ts',
+    'runtime/live-restore.ts',
+    'runtime/jurisdiction-api.ts',
+    'runtime/swap-pairs.ts',
+    'runtime/output-routing.ts',
+    'runtime/j-submit.ts',
+    'account/input.ts',
+    'account/j-finality.ts',
     'entity/consensus/index.ts',
     'orderbook/cross-j-orderbook.ts',
     'account/consensus/index.ts',
@@ -353,11 +370,15 @@ const CROSS_FILES = {
   ],
   tests: [
     'runtime/__tests__/helpers/cross-j.ts',
-    'runtime/__tests__/cross-jurisdiction-swap.test.ts',
+    'runtime/__tests__/cross-jurisdiction-swap-part-1.test.ts',
+    'runtime/__tests__/cross-jurisdiction-swap-part-2a.test.ts',
+    'runtime/__tests__/cross-jurisdiction-swap-part-2b.test.ts',
+    'runtime/__tests__/cross-jurisdiction-swap-part-3.test.ts',
     'runtime/__tests__/cross-jurisdiction-security.test.ts',
     'runtime/__tests__/multi-jurisdiction-entity.test.ts',
     'runtime/__tests__/orderbook-lifecycle.test.ts',
-    'runtime/__tests__/orderbook-matching-fallback.test.ts',
+    'runtime/__tests__/orderbook-matching-fallback-part-1.test.ts',
+    'runtime/__tests__/orderbook-matching-fallback-part-2.test.ts',
     'runtime/__tests__/orderbook-validity.test.ts',
     'runtime/__tests__/orderbook-relay-url.test.ts',
     'runtime/__tests__/swap-order-preparation.test.ts',
@@ -384,14 +405,20 @@ const RUNTIME_FILES = {
     'ids.ts',
     'constants.ts',
     'runtime.ts',
-    'machine/tx-handlers.ts',
-    'machine/output-routing.ts',
-    'machine/j-submit.ts',
+    'runtime/composition.ts',
+    'runtime/frame/process.ts',
+    'runtime/input-queue.ts',
+    'runtime/live-restore.ts',
+    'runtime/tx-handlers.ts',
+    'runtime/output-routing.ts',
+    'runtime/j-submit.ts',
     'entity/consensus/index.ts',
     'entity/consensus/frame.ts',
     'entity/consensus/hanko-witness.ts',
     'entity/consensus/input-merge.ts',
     'account/consensus/index.ts',
+    'account/input.ts',
+    'account/j-finality.ts',
     'account/consensus/frame.ts',
     'account/consensus/helpers.ts',
     'account/view-state.ts',
@@ -430,12 +457,12 @@ const RUNTIME_FILES = {
     'protocol/serialization.ts',
     'storage/snapshot-coder.ts',
     'state-helpers.ts',
-    'machine/env-events.ts',
+    'runtime/env-events.ts',
     'infra/logger.ts',
     'jurisdiction/jurisdiction-runtime.ts',
     'jurisdiction/config.ts',
     'jurisdiction/jurisdiction-stack.ts',
-    'machine/jurisdiction-api.ts',
+    'runtime/jurisdiction-api.ts',
     'storage/canonical-hash.ts',
     'storage/hashes.ts',
     'wal/hash.ts',
@@ -471,7 +498,7 @@ const ORDERBOOK_FILES = {
     'account/utils.ts',
     'protocol/serialization.ts',
     'state-helpers.ts',
-    'machine/swap-pairs.ts',
+    'runtime/swap-pairs.ts',
     'orderbook/swap-execution.ts',
     'orderbook/swap-keys.ts',
     'orderbook/open-swap-offers.ts',
@@ -511,7 +538,8 @@ const ORDERBOOK_FILES = {
   ],
   tests: [
     'runtime/__tests__/orderbook-lifecycle.test.ts',
-    'runtime/__tests__/orderbook-matching-fallback.test.ts',
+    'runtime/__tests__/orderbook-matching-fallback-part-1.test.ts',
+    'runtime/__tests__/orderbook-matching-fallback-part-2.test.ts',
     'runtime/__tests__/orderbook-validity.test.ts',
     'runtime/__tests__/orderbook-relay-url.test.ts',
     'runtime/__tests__/market-subscription-stack.test.ts',
@@ -539,7 +567,7 @@ const SWAP_FILES = {
     'account/utils.ts',
     'protocol/serialization.ts',
     'state-helpers.ts',
-    'machine/swap-pairs.ts',
+    'runtime/swap-pairs.ts',
     'orderbook/swap-execution.ts',
     'orderbook/swap-keys.ts',
     'orderbook/open-swap-offers.ts',
@@ -1130,10 +1158,10 @@ xln/
     account/utils.ts             ${fileSizes['runtime/account/utils.ts'] || '?'} lines - deriveDelta() RCPAN calculation
     protocol/serialization.ts       ${fileSizes['runtime/protocol/serialization.ts'] || '?'} lines - BigInt serialization
     account/crypto.ts            ${fileSizes['runtime/account/crypto.ts'] || '?'} lines - Signature verification
-    machine/jurisdiction-api.ts  ${fileSizes['runtime/runtime/jurisdiction-api.ts'] || '?'} lines - J-adapter / on-chain integration
+    runtime/jurisdiction-api.ts  ${fileSizes['runtime/runtime/jurisdiction-api.ts'] || '?'} lines - J-adapter / on-chain integration
 
     swap/cross-j/orderbook:
-      machine/swap-pairs.ts       ${fileSizes['runtime/runtime/swap-pairs.ts'] || '?'} lines - Same-chain pair orientation/policies
+      runtime/swap-pairs.ts       ${fileSizes['runtime/runtime/swap-pairs.ts'] || '?'} lines - Same-chain pair orientation/policies
       orderbook/swap-execution.ts           ${fileSizes['runtime/orderbook/swap-execution.ts'] || '?'} lines - Swap lifecycle helpers
       extensions/cross-j/index.ts       ${fileSizes['runtime/extensions/cross-j/index.ts'] || '?'} lines - Cross-j route hashes and fill progress
       extensions/cross-j/market.ts ${fileSizes['runtime/extensions/cross-j/market.ts'] || '?'} lines - Cross-j market derivation
