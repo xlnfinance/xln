@@ -80,6 +80,7 @@ import { normalizeDbNamespace, withStorageWriterLock } from './../storage/runtim
 import { createStructuredLogger } from '../infra/logger';
 import type { PersistedFrameJournal } from '../storage/types';
 import type { StorageDbRole } from '../storage/runtime-dbs';
+import { envRecord } from '../runtime/loop-environment';
 
 type RuntimeModule = typeof import('../runtime');
 
@@ -96,7 +97,6 @@ export type RuntimeStorageApiDeps = Pick<RuntimeModule, 'closeRuntimeDb' | 'clos
 };
 
 const ENV_REPLAY_MODE_KEY = Symbol.for('xln.runtime.env.replay.mode');
-const envRecord = (env: RuntimeState): Record<PropertyKey, unknown> => env as unknown as Record<PropertyKey, unknown>;
 const runtimeLog = createStructuredLogger('runtime');
 const formatPerfMs = (value: number): string => value.toFixed(2);
 

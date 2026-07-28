@@ -23,7 +23,6 @@ const DOUBLE_ASSERTION_DEBT: Readonly<Record<string, number>> = {
   'runtime/networking/profile-encryption.ts': 1,
   'runtime/networking/ws-client.ts': 1,
   'runtime/orchestrator/hub-node.ts': 2,
-  'runtime/persistence/runtime-storage.ts': 1,
   'runtime/protocol/boundary-validation.ts': 2,
   'runtime/protocol/htlc/payment-admission.ts': 1,
   'runtime/radapter/resolve.ts': 1,
