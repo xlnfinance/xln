@@ -39,6 +39,10 @@ const readText = (path: string): string => {
       'runtime/runtime/frame/transaction.ts',
       'runtime/runtime/frame/writer-lock.ts',
     ],
+    'runtime/runtime/loop.ts': [
+      'runtime/runtime/loop.ts',
+      'runtime/runtime/input-quarantine.ts',
+    ],
     'runtime/orchestrator/mm-node.ts': [
       'runtime/orchestrator/mm-node.ts',
       'runtime/orchestrator/mm-node-core.ts',

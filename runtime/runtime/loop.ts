@@ -1,16 +1,9 @@
-import { Level } from 'level';
 import type { Provider } from 'ethers';
 import {
-  DEFAULT_SNAPSHOT_INTERVAL_FRAMES,
-  isProductionRuntime,
-  readRuntimeEnv,
   yieldRuntimeIoTurn,
 } from '../runtime/platform';
 import { getWallClockMs } from './../utils';
-import { accountHasProposableMempool } from './../entity/consensus/account-mempool-eligibility';
-import { isEntityActiveLeader } from './../entity/consensus/leader';
 import type { JAdapter } from './../jadapter';
-import { recordRuntimeSecurityIncident } from '../runtime/security-incidents';
 import { normalizeRuntimeFailureCode } from './../protocol/failure-taxonomy';
 import { deriveSignerAddressSync, getSignerPrivateKeyIfAvailable } from './../account/crypto';
 import { normalizeRuntimeId } from './../networking/runtime-id';
@@ -29,8 +22,6 @@ import {
 } from '../runtime/p2p-lifecycle';
 import { extractEntityId, extractSignerId } from './../ids';
 import {
-  getNextNetworkRetryTimestamp,
-  hasReadyPendingNetworkOutputs,
   MAX_PENDING_NETWORK_OUTPUTS,
   sendEntityInputWithRouting,
   type RuntimeEntityInputRoutingResult,
@@ -54,13 +45,6 @@ import {
   type RuntimeEntityRoutingDeps,
 } from '../runtime/entity-routing';
 import {
-  generateHookPingsWithDeps,
-  getEarliestWallClockDueTimestampWithDeps,
-  getNextWallClockWakeTimestampWithDeps,
-  hasDueEntityHooksWithDeps,
-  type RuntimeWakeDeps,
-} from '../runtime/wake';
-import {
   assertScheduledWakeTxAuthorized,
   deleteScheduledWakeIndex,
   rebuildScheduledWakeIndex,
@@ -71,58 +55,77 @@ import {
   transitionRuntimeLifecycle,
 } from '../runtime/lifecycle';
 import {
-  enqueueRuntimeInputsWithDeps,
   requireRuntimeMempool,
   requestRuntimeLoopWake,
-  type RuntimeInputQueueDeps,
-  type RuntimeInputQueueOptions,
 } from '../runtime/input-queue';
 import { ensureRuntimeState } from '../runtime/runtime-state';
 import { registerReliableReceiptIngress } from '../runtime/reliable-delivery';
-import {
-  clearRuntimeCleanLogs,
-  copyRuntimeCleanLogs,
-  getRuntimeCleanLogs,
-  type RuntimeCleanLogDeps,
-} from '../runtime/clean-logs';
-import { RuntimeEntityInputApplyError } from '../runtime/entity-inputs';
 import { safeStringify } from './../protocol/serialization';
-import {
-  entityRequiresJPrefixCertificate,
-  getLocalJPrefixAttestableHeight,
-  hasCurrentRoundJPrefixAttestation,
-  hasPendingLocalJEvent,
-  isFrozenBaseJPrefixRollAuthorized,
-} from './../jurisdiction/j-prefix-consensus';
 import { validateEntityInput } from './../validation-utils';
 import type {
   EntityInput,
-  EntityReplica,
   Env,
-  JInput,
   JReplica,
   ReliableDeliveryReceipt,
   RoutedEntityInput,
   RuntimeEntityInputsEnvelope,
   RuntimeInput,
-  RuntimeTx,
 } from './../types';
 import { clearInfraGossipProfiles } from '../runtime/infra-gossip-store';
 import {
   closeFrameDb,
   closeInfraDb,
   closeStorageDb,
-  getFrameDb,
-  getInfraDb,
-  getStorageDb,
   normalizeDbNamespace,
-  rotateStorageEpochDb,
-  tryOpenFrameDb,
-  tryOpenStorageDb,
-  type RuntimeStorageDbDeps,
-  type StorageDbRole,
 } from './../storage/runtime-dbs';
 import { createStructuredLogger } from '../infra/logger';
+import {
+  ENV_APPLY_ALLOWED_KEY,
+  ENV_REPLAY_MODE_KEY,
+  ensureRuntimeConfig,
+  envRecord,
+  failfastAssert,
+  registerEnvChangeCallback,
+  registerRecoveryBackupBarrier,
+  registerRuntimeFrameCommitCallback,
+} from './loop-environment';
+import {
+  clearCleanLogs,
+  copyCleanLogs,
+  drainInfraDbWrites,
+  enqueueRuntimeContinuation,
+  enqueueRuntimeInputs,
+  getCleanLogs,
+  getRuntimeFrameDb,
+  getRuntimeInfraDb,
+  getRuntimeStorageDb,
+  infraGossipDbAccess,
+  rotateRuntimeStorageEpochDb,
+  trackInfraDbWrite,
+  tryOpenRuntimeFrameDb,
+  tryOpenRuntimeInfraDb,
+  tryOpenRuntimeStorageDb,
+  waitForRuntimeLoopWake,
+  waitForRuntimeLoopWakeOrTimeout,
+} from './loop-infrastructure';
+import {
+  applyEntityInputFrameCap,
+  applyEntityTxFrameCap,
+  collectAccountMempoolWakeInputs,
+  collectEntityMempoolWakeInputs,
+  generateHookPings,
+  getEarliestWallClockDueTimestamp,
+  getRemainingRuntimeFrameDelayMs,
+  isRuntimeFrameReady,
+  prioritizeJEventFrame,
+  resolveNextWallClockWakeTimestamp,
+  resolveRuntimeWorkReason,
+  type RuntimeWorkDeps,
+} from './loop-work';
+import {
+  quarantineLiveRuntimeInput,
+  RuntimeInputQuarantinedError,
+} from './input-quarantine';
 
 type RuntimeModule = typeof import('../runtime');
 
@@ -139,97 +142,6 @@ const runtimeLog = createStructuredLogger('runtime');
 export const createRuntimeLoopApi = (deps: RuntimeLoopApiDeps) => {
   const { notifyEnvChange, processRuntime, waitForRuntimeProcessingIdle, getRuntimeProcessGlobal, runtimeInputHasQueuedWork } =
     deps;
-
-  const registerEnvChangeCallback = (env: Env, callback: (env: Env) => void): (() => void) => {
-    const state = ensureRuntimeState(env);
-    if (!state.envChangeCallbacks) {
-      state.envChangeCallbacks = new Set();
-    }
-    state.envChangeCallbacks.add(callback);
-    return () => state.envChangeCallbacks?.delete(callback);
-  };
-
-  const registerRuntimeFrameCommitCallback = (
-    env: Env,
-    callback: (frame: { height: number; runtimeInput: RuntimeInput }) => void,
-  ): (() => void) => {
-    const state = ensureRuntimeState(env);
-    if (!state.runtimeFrameCommitCallbacks) state.runtimeFrameCommitCallbacks = new Set();
-    state.runtimeFrameCommitCallbacks.add(callback);
-    return () => state.runtimeFrameCommitCallbacks?.delete(callback);
-  };
-
-  const registerRecoveryBackupBarrier = (
-    env: Env,
-    callback: (env: Env, info: { height: number; remoteOutputCount: number; jInputCount: number }) => Promise<void>,
-  ): (() => void) => {
-    const state = ensureRuntimeState(env);
-    state.recoveryBackupBarrier = callback;
-    return () => {
-      if (state.recoveryBackupBarrier === callback) {
-        state.recoveryBackupBarrier = null;
-      }
-    };
-  };
-
-  const ensureRuntimeConfig = (env: Env): NonNullable<Env['runtimeConfig']> => {
-    if (!env.runtimeConfig) {
-      env.runtimeConfig = {
-        minFrameDelayMs: 0,
-        loopIntervalMs: isProductionRuntime ? 25 : 0,
-        snapshotIntervalFrames: DEFAULT_SNAPSHOT_INTERVAL_FRAMES,
-      };
-    }
-    const storageEpochMaxBytesEnv = readRuntimeEnv('XLN_STORAGE_EPOCH_MAX_BYTES');
-    if (storageEpochMaxBytesEnv !== undefined && env.runtimeConfig.storage?.epochMaxBytes === undefined) {
-      const epochMaxBytes = Number(storageEpochMaxBytesEnv);
-      if (!Number.isSafeInteger(epochMaxBytes) || epochMaxBytes < 1) {
-        throw new Error(`RUNTIME_CONFIG_STORAGE_EPOCH_MAX_BYTES_INVALID:${storageEpochMaxBytesEnv}`);
-      }
-      env.runtimeConfig.storage = {
-        ...(env.runtimeConfig.storage || {}),
-        epochMaxBytes,
-      };
-    }
-    const storageSnapshotPeriodEnv = readRuntimeEnv('XLN_STORAGE_SNAPSHOT_PERIOD_FRAMES');
-    if (storageSnapshotPeriodEnv !== undefined && env.runtimeConfig.storage?.snapshotPeriodFrames === undefined) {
-      const snapshotPeriodFrames = Number(storageSnapshotPeriodEnv);
-      if (!Number.isSafeInteger(snapshotPeriodFrames) || snapshotPeriodFrames < 1) {
-        throw new Error(`RUNTIME_CONFIG_STORAGE_SNAPSHOT_PERIOD_FRAMES_INVALID:${storageSnapshotPeriodEnv}`);
-      }
-      env.runtimeConfig.storage = {
-        ...(env.runtimeConfig.storage || {}),
-        snapshotPeriodFrames,
-      };
-    }
-    const configuredSnapshotInterval = env.runtimeConfig.snapshotIntervalFrames;
-    if (!Number.isFinite(configuredSnapshotInterval ?? NaN) || (configuredSnapshotInterval ?? 0) < 1) {
-      env.runtimeConfig.snapshotIntervalFrames = DEFAULT_SNAPSHOT_INTERVAL_FRAMES;
-    }
-    return env.runtimeConfig;
-  };
-
-  const getRuntimeStorageDbDeps = (): RuntimeStorageDbDeps => ({
-    ensureRuntimeState,
-  });
-
-  const getRuntimeStorageDb = (env: Env, role: StorageDbRole = 'current'): Level<Buffer, Buffer> =>
-    getManagedStorageDb(env, role);
-
-  const getManagedStorageDb = (env: Env, role: StorageDbRole = 'current'): Level<Buffer, Buffer> =>
-    getStorageDb(env, getRuntimeStorageDbDeps(), role);
-
-  const getManagedInfraDb = (env: Env): Level<Buffer, Buffer> => getInfraDb(env, getRuntimeStorageDbDeps());
-
-  const getManagedFrameDb = (env: Env): Level<Buffer, Buffer> => getFrameDb(env, getRuntimeStorageDbDeps());
-
-  const tryOpenManagedStorageDb = (env: Env, role: StorageDbRole = 'current'): Promise<boolean> =>
-    tryOpenStorageDb(env, getRuntimeStorageDbDeps(), role);
-
-  const rotateManagedStorageEpochDb = (env: Env, snapshotHeight: number, timestamp = env.timestamp): Promise<boolean> =>
-    rotateStorageEpochDb(env, getRuntimeStorageDbDeps(), snapshotHeight, timestamp);
-
-  const tryOpenManagedFrameDb = (env: Env): Promise<boolean> => tryOpenFrameDb(env, getRuntimeStorageDbDeps());
 
   const throwSettledErrors = (results: PromiseSettledResult<unknown>[], code: string): void => {
     const errors = results
@@ -264,460 +176,15 @@ export const createRuntimeLoopApi = (deps: RuntimeLoopApiDeps) => {
     await closeInfraDb(env);
   };
 
-  const waitForRuntimeLoopWake = async (env: Env): Promise<void> => {
-    const state = ensureRuntimeState(env);
-    if (state.wakeRequested) {
-      state.wakeRequested = false;
-      return;
-    }
-    await new Promise<void>(resolve => {
-      let settled = false;
-      const finish = () => {
-        if (settled) return;
-        settled = true;
-        if (state.wakeLoop === wake) {
-          state.wakeLoop = null;
-        }
-        resolve();
-      };
-      const wake = () => {
-        state.wakeRequested = false;
-        finish();
-      };
-      state.wakeLoop = wake;
-    });
+  const runtimeWorkDeps: RuntimeWorkDeps = {
+    runtimeInputHasQueuedWork,
+    getOutputRoutingDeps: () => getRuntimeOutputRoutingDeps(),
   };
-
-  const waitForRuntimeLoopWakeOrTimeout = async (env: Env, timeoutMs: number): Promise<'wake' | 'timeout'> => {
-    const state = ensureRuntimeState(env);
-    if (timeoutMs <= 0) {
-      if (state.wakeRequested) state.wakeRequested = false;
-      await sleep(0);
-      return 'timeout';
-    }
-    if (state.wakeRequested) {
-      state.wakeRequested = false;
-      return 'wake';
-    }
-    return await new Promise<'wake' | 'timeout'>(resolve => {
-      let settled = false;
-      let timeoutId: ReturnType<typeof setTimeout> | null = null;
-      let result: 'wake' | 'timeout' = 'timeout';
-      const finish = () => {
-        if (settled) return;
-        settled = true;
-        if (timeoutId) clearTimeout(timeoutId);
-        if (state.wakeLoop === wake) {
-          state.wakeLoop = null;
-        }
-        resolve(result);
-      };
-      const wake = () => {
-        state.wakeRequested = false;
-        result = 'wake';
-        finish();
-      };
-      state.wakeLoop = wake;
-      timeoutId = setTimeout(finish, timeoutMs);
-    });
-  };
-
-  const ENV_APPLY_ALLOWED_KEY = Symbol.for('xln.runtime.env.apply.allowed');
-  const ENV_REPLAY_MODE_KEY = Symbol.for('xln.runtime.env.replay.mode');
-
-  const envRecord = (env: Env): Record<PropertyKey, unknown> => env as unknown as Record<PropertyKey, unknown>;
-
-  const failfastAssert: (
-    condition: unknown,
-    code: string,
-    message: string,
-    details?: Record<string, unknown>,
-  ) => asserts condition = (condition: unknown, code: string, message: string, details?: Record<string, unknown>) => {
-    if (condition) return;
-    const detailText = details ? ` ${safeStringify(details)}` : '';
-    throw new Error(`${code}: ${message}${detailText}`);
-  };
-
-  const getCleanLogs = (env: Env): string => getRuntimeCleanLogs(env, getRuntimeCleanLogDeps());
-
-  const clearCleanLogs = (env: Env): void => clearRuntimeCleanLogs(env, getRuntimeCleanLogDeps());
-
-  const copyCleanLogs = async (env: Env): Promise<string> => copyRuntimeCleanLogs(env, getRuntimeCleanLogDeps());
-
-  function getRuntimeCleanLogDeps(): RuntimeCleanLogDeps {
-    return { ensureRuntimeState };
-  }
-
-  const enqueueRuntimeInputs = (
-    env: Env,
-    inputs?: EntityInput[],
-    runtimeTxs?: RuntimeTx[],
-    jInputs?: JInput[],
-    explicitTimestamp?: number,
-    reliableReceipts?: ReliableDeliveryReceipt[],
-    options: RuntimeInputQueueOptions = {},
-  ): void => {
-    enqueueRuntimeInputsWithDeps(
-      env,
-      getRuntimeInputQueueDeps(),
-      inputs,
-      runtimeTxs,
-      jInputs,
-      explicitTimestamp,
-      reliableReceipts,
-      options,
-    );
-  };
-
-  /** Queue only deterministic work derived from an already-accepted transition. */
-  const enqueueRuntimeContinuation = (
-    env: Env,
-    inputs?: EntityInput[],
-    runtimeTxs?: RuntimeTx[],
-    jInputs?: JInput[],
-    explicitTimestamp?: number,
-    reliableReceipts?: ReliableDeliveryReceipt[],
-  ): void =>
-    enqueueRuntimeInputs(env, inputs, runtimeTxs, jInputs, explicitTimestamp, reliableReceipts, {
-      acceptedBeforeQuiesce: true,
-    });
-
-  function getRuntimeInputQueueDeps(): RuntimeInputQueueDeps {
-    return {
-      ensureRuntimeState,
-      requestRuntimeLoopWake,
-    };
-  }
-
-  async function tryOpenInfraDb(env: Env): Promise<boolean> {
-    const state = ensureRuntimeState(env);
-    if (state.infraDbClosing) return false;
-    if (!state.infraDbOpenPromise) {
-      const db = getManagedInfraDb(env);
-      state.infraDbOpenPromise = (async () => {
-        try {
-          await db.open();
-          return true;
-        } catch (error) {
-          const isBlocked =
-            error instanceof Error &&
-            (error.message?.includes('blocked') ||
-              error.name === 'SecurityError' ||
-              error.name === 'InvalidStateError');
-          if (isBlocked) {
-            runtimeLog.warn('infra_db.blocked_in_memory', {
-              error: error instanceof Error ? error.message : String(error),
-            });
-            return false;
-          }
-          state.infraDbOpenPromise = null;
-          throw error;
-        }
-      })();
-    }
-    try {
-      return await state.infraDbOpenPromise;
-    } catch (error) {
-      runtimeLog.error('infra_db.open_failed', { error: error instanceof Error ? error.message : String(error) });
-      throw error;
-    }
-  }
-
-  const infraGossipDbAccess = { tryOpenInfraDb, getInfraDb: getManagedInfraDb };
-
-  const trackInfraDbWrite = (env: Env, promise: Promise<void>): void => {
-    const state = ensureRuntimeState(env);
-    if (!state.infraDbPendingWrites) state.infraDbPendingWrites = new Set();
-    const tracked = promise.finally(() => {
-      state.infraDbPendingWrites?.delete(tracked);
-    });
-    state.infraDbPendingWrites.add(tracked);
-  };
-
-  const drainInfraDbWrites = async (env: Env): Promise<void> => {
-    const state = ensureRuntimeState(env);
-    while (state.infraDbPendingWrites && state.infraDbPendingWrites.size > 0) {
-      await Promise.allSettled([...state.infraDbPendingWrites]);
-    }
-  };
-
-  const getRuntimeWorkReason = (env: Env): string | null => {
-    const mempool = requireRuntimeMempool(env);
-    if ((env.runtimeState?.pendingProfileCertificationEntityIds?.size ?? 0) > 0) return 'profile-certification';
-    if ((env.runtimeState?.pendingCommittedJOutbox?.length ?? 0) > 0) return 'committed-j-outbox';
-    if ((env.runtimeState?.pendingJurisdictionImports?.size ?? 0) > 0) return 'jurisdiction-import';
-    if (mempool.runtimeTxs.length > 0 || mempool.entityInputs.length > 0) return 'runtime-mempool';
-    if ((mempool.jInputs?.length ?? 0) > 0) return 'j-input';
-    if ((mempool.reliableReceipts?.length ?? 0) > 0) return 'reliable-receipt';
-    if (runtimeInputHasQueuedWork(mempool) && (mempool.queuedAt ?? 0) > (env.timestamp ?? 0)) {
-      return 'future-queued-input';
-    }
-    if (env.pendingOutputs && env.pendingOutputs.length > 0) return 'pending-output';
-    if (env.networkInbox && env.networkInbox.length > 0) return 'network-inbox';
-    if (hasReadyPendingNetworkOutputs(env, getRuntimeOutputRoutingDeps(), getWallClockMs())) return 'network-retry';
-    if (hasEntityMempoolWakeInput(env)) return 'entity-mempool';
-    if (hasAccountMempoolWakeInput(env)) return 'account-mempool';
-    // Quiesce drains work accepted before the ingress fence. Timers remain
-    // durable and fire after an explicit resume; materializing a newly-due hook
-    // while the loop is stopping makes repeated shutdown impossible.
-    if (!env.runtimeState?.persistenceQuiescing && hasDueEntityHooks(env)) return 'entity-hook';
-    return null;
-  };
-
+  const getRuntimeWorkReason = (env: Env): string | null =>
+    resolveRuntimeWorkReason(env, runtimeWorkDeps);
   const hasRuntimeWork = (env: Env): boolean => getRuntimeWorkReason(env) !== null;
-
-  const collectAccountMempoolWakeInputs = (env: Env): EntityInput[] => {
-    const wakeInputs: EntityInput[] = [];
-    for (const replica of env.eReplicas?.values?.() ?? []) {
-      const entityId = String(replica?.entityId || replica?.state?.entityId || '')
-        .trim()
-        .toLowerCase();
-      const signerId = String(replica?.signerId || '')
-        .trim()
-        .toLowerCase();
-      if (!entityId || !signerId) continue;
-      const accounts = replica?.state?.accounts;
-      if (!(accounts instanceof Map)) continue;
-      const hasAccountMempool = Array.from(accounts.values()).some(account =>
-        accountHasProposableMempool(account, replica.state),
-      );
-      if (!hasAccountMempool) continue;
-      wakeInputs.push({ entityId, signerId, entityTxs: [] });
-    }
-    return wakeInputs;
-  };
-
-  const entityJPrefixReadyForWake = (replica: EntityReplica): boolean => {
-    const prefixNeeded =
-      entityRequiresJPrefixCertificate(replica.state) || hasPendingLocalJEvent(replica.state, replica.jHistory);
-    if (!prefixNeeded || replica.jPrefixRound?.certificate) return true;
-    if (hasCurrentRoundJPrefixAttestation(replica)) return false;
-    return Boolean(replica.jHistory && getLocalJPrefixAttestableHeight(replica.state, replica.jHistory) !== null);
-  };
-
-  const entityMempoolNeedsWake = (replica: EntityReplica): boolean =>
-    isEntityActiveLeader(replica) &&
-    entityJPrefixReadyForWake(replica) &&
-    (replica.mempool.length > 0 ||
-      Boolean(
-        replica.jPrefixRound?.certificate &&
-        replica.jPrefixRound.certificate.selected.scannedThroughHeight > replica.state.lastFinalizedJHeight,
-      ) ||
-      isFrozenBaseJPrefixRollAuthorized(replica, replica.jPrefixRound?.certificate)) &&
-    !replica.proposal &&
-    !replica.lockedFrame;
-
-  const collectEntityMempoolWakeInputs = (env: Env): EntityInput[] => {
-    const wakeInputs: EntityInput[] = [];
-    for (const replica of env.eReplicas?.values?.() ?? []) {
-      if (!entityMempoolNeedsWake(replica)) continue;
-      const entityId = String(replica.entityId || replica.state?.entityId || '')
-        .trim()
-        .toLowerCase();
-      const signerId = String(replica.signerId || '')
-        .trim()
-        .toLowerCase();
-      if (!entityId || !signerId) continue;
-      wakeInputs.push({ entityId, signerId, entityTxs: [] });
-    }
-    return wakeInputs;
-  };
-
-  const hasEntityMempoolWakeInput = (env: Env): boolean => {
-    for (const replica of env.eReplicas?.values?.() ?? []) {
-      if (entityMempoolNeedsWake(replica)) return true;
-    }
-    return false;
-  };
-
-  const hasAccountMempoolWakeInput = (env: Env): boolean => {
-    for (const replica of env.eReplicas?.values?.() ?? []) {
-      for (const account of replica.state?.accounts?.values?.() ?? []) {
-        if (accountHasProposableMempool(account, replica.state)) return true;
-      }
-    }
-    return false;
-  };
-
-  const prioritizeJEventFrame = (runtimeInput: RuntimeInput, mempool: RuntimeInput, timestamp: number): boolean => {
-    const priorityInputs: EntityInput[] = [];
-    const deferredInputs: EntityInput[] = [];
-
-    for (const input of runtimeInput.entityInputs) {
-      const entityTxs = input.entityTxs ?? [];
-      const jEventTxs = entityTxs.filter(tx => tx?.type === 'j_event');
-      const otherTxs = entityTxs.filter(tx => tx?.type !== 'j_event');
-      const hasNonTxPayload =
-        !!input.proposedFrame ||
-        !!input.hashPrecommitFrame ||
-        (!!input.hashPrecommits && input.hashPrecommits.size > 0) ||
-        (!!input.jPrefixAttestations && input.jPrefixAttestations.size > 0) ||
-        !!input.leaderTimeoutVote;
-
-      if (jEventTxs.length > 0) {
-        // Consensus lanes are not Entity transactions. If a mixed envelope is
-        // split at the J-event barrier, those lanes must remain exclusively on
-        // the deferred copy or the next Runtime frame would replay them.
-        const {
-          proposedFrame: _proposedFrame,
-          hashPrecommitFrame: _hashPrecommitFrame,
-          hashPrecommits: _hashPrecommits,
-          jPrefixAttestations: _jPrefixAttestations,
-          leaderTimeoutVote: _leaderTimeoutVote,
-          ...transactionLane
-        } = input;
-        priorityInputs.push({ ...transactionLane, entityTxs: jEventTxs });
-      }
-
-      if (otherTxs.length > 0 || hasNonTxPayload) {
-        const deferredInput: EntityInput = { ...input, entityTxs: otherTxs };
-        if (otherTxs.length === 0) {
-          delete deferredInput.entityTxs;
-        }
-        deferredInputs.push(deferredInput);
-      }
-    }
-
-    if (priorityInputs.length === 0 || deferredInputs.length === 0) return false;
-
-    // Chain observations are frame-boundary facts. Apply them alone before any
-    // local follow-up tx that may depend on sentBatch, entityNonce, reserves, or
-    // account-settlement claims; merging both into one entity frame can make the
-    // follow-up build a stale J batch against pre-event state.
-    runtimeInput.entityInputs = priorityInputs;
-    mempool.entityInputs = [...deferredInputs, ...mempool.entityInputs];
-    mempool.queuedAt = mempool.queuedAt ?? timestamp;
-    return true;
-  };
-
-  const applyEntityInputFrameCap = (
-    runtimeInput: RuntimeInput,
-    mempool: RuntimeInput,
-    maxEntityInputsPerFrame: number,
-    timestamp: number,
-  ): boolean => {
-    const frameLimit = Math.max(0, Math.floor(Number(maxEntityInputsPerFrame)));
-    if (frameLimit <= 0 || runtimeInput.entityInputs.length <= frameLimit) return false;
-
-    const deferredInputs = runtimeInput.entityInputs.slice(frameLimit);
-    runtimeInput.entityInputs = runtimeInput.entityInputs.slice(0, frameLimit);
-    mempool.entityInputs = [...deferredInputs, ...mempool.entityInputs];
-    mempool.queuedAt = mempool.queuedAt ?? timestamp;
-    return true;
-  };
-
-  const applyEntityTxFrameCap = (
-    runtimeInput: RuntimeInput,
-    mempool: RuntimeInput,
-    maxEntityTxsPerFrame: number,
-    timestamp: number,
-  ): boolean => {
-    const frameLimit = Math.max(0, Math.floor(Number(maxEntityTxsPerFrame)));
-    if (frameLimit <= 0) return false;
-
-    let selectedTxs = 0;
-    let capReached = false;
-    let changed = false;
-    const frameInputs: EntityInput[] = [];
-    const deferredInputs: EntityInput[] = [];
-
-    for (const input of runtimeInput.entityInputs) {
-      const txs = input.entityTxs ?? [];
-      const txCount = txs.length;
-
-      if (capReached) {
-        deferredInputs.push(input);
-        changed = true;
-        continue;
-      }
-
-      if (txCount === 0) {
-        frameInputs.push(input);
-        continue;
-      }
-
-      const remaining = frameLimit - selectedTxs;
-      if (remaining <= 0) {
-        deferredInputs.push(input);
-        changed = true;
-        continue;
-      }
-
-      // EntityInput is the accepted consensus envelope. Splitting entityTxs here
-      // would turn one authorized intent into independently durable prefixes and
-      // make receipts/cross-leg invariants observe states the sender never made.
-      // The cap schedules whole envelopes only; one oversized head may pass whole
-      // so FIFO can never deadlock.
-      if (txCount <= remaining || selectedTxs === 0) {
-        frameInputs.push(input);
-        selectedTxs += txCount;
-        if (selectedTxs >= frameLimit) capReached = true;
-        continue;
-      }
-
-      deferredInputs.push(input);
-      capReached = true;
-      changed = true;
-    }
-
-    if (!changed) return false;
-
-    runtimeInput.entityInputs = frameInputs;
-    mempool.entityInputs = [...deferredInputs, ...mempool.entityInputs];
-    mempool.queuedAt = mempool.queuedAt ?? timestamp;
-    return true;
-  };
-
-  const getRuntimeWakeDeps = (): RuntimeWakeDeps => ({
-    ensureRuntimeState,
-    requireRuntimeMempool,
-    enqueueRuntimeInputs,
-    getRuntimeNowMs,
-  });
-
-  const hasDueEntityHooks = (env: Env): boolean => hasDueEntityHooksWithDeps(env, getRuntimeWakeDeps());
-
-  const getEarliestWallClockDueTimestamp = (env: Env): number | null =>
-    getEarliestWallClockDueTimestampWithDeps(env, getRuntimeWakeDeps());
-
-  const getNextWallClockWakeTimestamp = (env: Env): number | null => {
-    const entityDueAt = getNextWallClockWakeTimestampWithDeps(env, getRuntimeWakeDeps());
-    const networkDueAt = getNextNetworkRetryTimestamp(env, getRuntimeOutputRoutingDeps());
-    if (entityDueAt === null) return networkDueAt;
-    if (networkDueAt === null) return entityDueAt;
-    return Math.min(entityDueAt, networkDueAt);
-  };
-
-  const generateHookPings = (env: Env, nowMs = getRuntimeNowMs(env), queuedAt = env.timestamp ?? 0): void => {
-    // Quiesce drains only work accepted before its ingress fence. Scheduled
-    // hooks remain durable for resume and must not extend the shutdown drain.
-    if (env.runtimeState?.persistenceQuiescing) return;
-    generateHookPingsWithDeps(env, getRuntimeWakeDeps(), nowMs, queuedAt);
-  };
-
-  const isRuntimeFrameReady = (env: Env, now: number, overrideDelayMs?: number): boolean => {
-    if (env.scenarioMode) return true; // deterministic scenarios advance manually
-    const config = ensureRuntimeConfig(env);
-    const rawDelayMs = overrideDelayMs !== undefined ? overrideDelayMs : (config.minFrameDelayMs ?? 0);
-    if (!Number.isFinite(rawDelayMs) || rawDelayMs <= 0) return true;
-    const delayMs = Math.max(0, Math.floor(rawDelayMs));
-    const state = ensureRuntimeState(env);
-    const lastFrameAt = state.lastFrameAt;
-    if (typeof lastFrameAt !== 'number' || !Number.isFinite(lastFrameAt) || lastFrameAt <= 0) return true;
-    return Math.max(0, now - lastFrameAt) >= delayMs;
-  };
-
-  const getRemainingRuntimeFrameDelayMs = (env: Env, overrideDelayMs?: number): number => {
-    if (env.scenarioMode) return 0;
-    const wallClockNow = getWallClockMs();
-    const config = ensureRuntimeConfig(env);
-    const rawDelayMs = overrideDelayMs !== undefined ? overrideDelayMs : (config.minFrameDelayMs ?? 0);
-    if (!Number.isFinite(rawDelayMs) || rawDelayMs <= 0) return 0;
-    const delayMs = Math.max(0, Math.floor(rawDelayMs));
-    const lastFrameAt = ensureRuntimeState(env).lastFrameAt;
-    if (typeof lastFrameAt !== 'number' || !Number.isFinite(lastFrameAt) || lastFrameAt <= 0) return 0;
-    return Math.max(0, delayMs - Math.max(0, wallClockNow - lastFrameAt));
-  };
+  const getNextWallClockWakeTimestamp = (env: Env): number | null =>
+    resolveNextWallClockWakeTimestamp(env, runtimeWorkDeps);
 
   const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
@@ -736,115 +203,6 @@ export const createRuntimeLoopApi = (deps: RuntimeLoopApiDeps) => {
     }
   };
 
-  const MAX_RUNTIME_INPUT_QUARANTINE_RECORDS = 50;
-  const QUARANTINABLE_RUNTIME_INPUT_ERROR_MARKERS = [
-    'FINANCIAL-SAFETY:',
-    'Invalid runtimeTxs:',
-    'Invalid entityInputs:',
-    'Too many runtime transactions:',
-    'Too many entity inputs:',
-    'RUNTIME_ENTITY_INPUT_UNKNOWN_TARGET',
-    'RUNTIME_REPLICA_NOT_FOUND',
-    'RUNTIME_SIGNER_MISSING',
-    // Exact ingress-boundary code only. The bare 'CROSS_J_'/'ORDERBOOK_'
-    // prefixes also match dozens of internal invariant throws deep inside
-    // entity-tx handlers (e.g. ORDERBOOK_RESIZE_CORRUPT, CROSS_J_CLEAR_
-    // MATERIALIZE_PROOF_MISMATCH) that invariant-errors.ts deliberately
-    // rethrows instead of skipping. A substring match here silently undid
-    // that rethrow and quarantined-instead-of-halted a real consensus bug.
-    'RUNTIME_CROSS_J_EXTERNAL_INGRESS_FORBIDDEN',
-  ] as const;
-
-  const getRuntimeInputErrorMessage = (error: unknown): string =>
-    error instanceof Error ? error.message : String(error);
-
-  const runtimeInputHasWork = (runtimeInput: RuntimeInput): boolean =>
-    runtimeInput.runtimeTxs.length > 0 ||
-    runtimeInput.entityInputs.length > 0 ||
-    (runtimeInput.jInputs?.length ?? 0) > 0 ||
-    (runtimeInput.reliableReceipts?.length ?? 0) > 0;
-
-  const getRuntimeInputQuarantineReason = (error: unknown, message: string): string | null => {
-    if (error instanceof RuntimeEntityInputApplyError) {
-      return error.isQuarantinableRemoteIngress ? 'REMOTE_ENTITY_INPUT_APPLY_FAILED' : null;
-    }
-    return QUARANTINABLE_RUNTIME_INPUT_ERROR_MARKERS.find(marker => message.includes(marker)) ?? null;
-  };
-
-  const summarizeRuntimeInputForQuarantine = (runtimeInput: RuntimeInput) => ({
-    counts: {
-      runtimeTxs: runtimeInput.runtimeTxs.length,
-      entityInputs: runtimeInput.entityInputs.length,
-      jInputs: runtimeInput.jInputs?.length ?? 0,
-    },
-    entityInputs: runtimeInput.entityInputs.slice(0, 10).map(input => ({
-      entityId: String(input.entityId || ''),
-      signerId: String(input.signerId || ''),
-      txTypes: (input.entityTxs || []).slice(0, 20).map(tx => String(tx?.type || '')),
-    })),
-    runtimeTxTypes: runtimeInput.runtimeTxs.slice(0, 20).map(tx => String(tx?.type || '')),
-    jInputs: (runtimeInput.jInputs || []).slice(0, 10).map(input => ({
-      jurisdictionName: String(input.jurisdictionName || ''),
-      jTxCount: input.jTxs?.length ?? 0,
-    })),
-  });
-
-  const quarantineLiveRuntimeInput = (
-    env: Env,
-    runtimeInput: RuntimeInput,
-    error: unknown,
-    quietRuntimeLogs: boolean,
-  ): boolean => {
-    if (env.scenarioMode === true || envRecord(env)[ENV_REPLAY_MODE_KEY] === true) return false;
-    if (!runtimeInputHasWork(runtimeInput)) return false;
-    const message = getRuntimeInputErrorMessage(error);
-    const reason = getRuntimeInputQuarantineReason(error, message);
-    if (!reason) return false;
-
-    const state = ensureRuntimeState(env);
-    const summary = summarizeRuntimeInputForQuarantine(runtimeInput);
-    const record = {
-      id: `runtime-input-quarantine-${Math.max(0, env.height)}-${Math.max(0, env.timestamp || 0)}-${(state.quarantinedRuntimeInputs?.length ?? 0) + 1}`,
-      height: Math.max(0, env.height),
-      timestamp: Math.max(0, env.timestamp || 0),
-      reason,
-      message,
-      action: 'dropped' as const,
-      ...summary,
-    };
-    state.quarantinedRuntimeInputs = [...(state.quarantinedRuntimeInputs ?? []), record].slice(
-      -MAX_RUNTIME_INPUT_QUARANTINE_RECORDS,
-    );
-    if (reason === 'RUNTIME_CROSS_J_EXTERNAL_INGRESS_FORBIDDEN') {
-      recordRuntimeSecurityIncident(env, {
-        domain: 'cross-j',
-        code: 'CROSS_J_REMOTE_INPUT_REJECTED',
-        source: 'remote-ingress',
-        severity: 'warning',
-        summary: 'An untrusted cross-j input was rejected before state application',
-        entityId: summary.entityInputs[0]?.entityId ?? '',
-      });
-    }
-    const payload = {
-      quarantineId: record.id,
-      reason,
-      action: record.action,
-      message,
-      ...summary,
-    };
-    env.error?.('system', 'RUNTIME_INPUT_QUARANTINED', payload, env.runtimeId);
-    if (!quietRuntimeLogs) {
-      runtimeLog.error('input.quarantined', payload);
-    }
-    return true;
-  };
-
-  class RuntimeInputQuarantinedError extends Error {
-    constructor(cause: Error) {
-      super(`RUNTIME_INPUT_DROPPED:${cause.message}`, { cause });
-      this.name = 'RuntimeInputQuarantinedError';
-    }
-  }
 
   /**
    * Start the single runtime event loop. Called once on init.
@@ -1365,8 +723,6 @@ export const createRuntimeLoopApi = (deps: RuntimeLoopApiDeps) => {
     return 'queued';
   };
 
-  const getRuntimeNowMs = (env: Env): number => env.timestamp ?? 0;
-
   const normalizeRuntimeEntityInput = (_env: Env, input: EntityInput, _context: string): RoutedEntityInput => {
     const signerId = input.signerId.trim();
     failfastAssert(
@@ -1558,12 +914,12 @@ export const createRuntimeLoopApi = (deps: RuntimeLoopApiDeps) => {
     failfastAssert,
     ensureRuntimeConfig,
     getRuntimeStorageDb,
-    getStorageDb: getManagedStorageDb,
-    getInfraDb: getManagedInfraDb,
-    getFrameDb: getManagedFrameDb,
-    tryOpenStorageDb: tryOpenManagedStorageDb,
-    rotateStorageEpochDb: rotateManagedStorageEpochDb,
-    tryOpenFrameDb: tryOpenManagedFrameDb,
+    getStorageDb: getRuntimeStorageDb,
+    getInfraDb: getRuntimeInfraDb,
+    getFrameDb: getRuntimeFrameDb,
+    tryOpenStorageDb: tryOpenRuntimeStorageDb,
+    rotateStorageEpochDb: rotateRuntimeStorageEpochDb,
+    tryOpenFrameDb: tryOpenRuntimeFrameDb,
     closeRuntimeDb,
     closeInfraDb: closeManagedInfraDb,
     getCleanLogs,
@@ -1571,7 +927,7 @@ export const createRuntimeLoopApi = (deps: RuntimeLoopApiDeps) => {
     copyCleanLogs,
     enqueueRuntimeInputs,
     enqueueRuntimeContinuation,
-    tryOpenInfraDb,
+    tryOpenInfraDb: tryOpenRuntimeInfraDb,
     infraGossipDbAccess,
     trackInfraDbWrite,
     hasRuntimeWork,
