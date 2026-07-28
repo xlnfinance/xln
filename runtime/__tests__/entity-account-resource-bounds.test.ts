@@ -1,9 +1,10 @@
 import { expect, spyOn, test } from 'bun:test';
 
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
-import { addToAccountMempool, proposeAccountFrame } from '../account/consensus';
+import { applyAccountInput, proposeAccountFrame } from '../account/consensus';
 import { createFrameHash } from '../account/consensus/frame';
 import { prependUniqueMempoolTxs } from '../account/consensus/helpers';
+import { createLocalAccountInput } from '../account/input';
 import { computeAccountStateRoot, EMPTY_ACCOUNT_STATE_ROOT } from '../account/state-root';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
 import { LIMITS } from '../constants';
@@ -13,7 +14,6 @@ import { encodeBoard, generateLazyEntityId, hashBoard } from '../entity/factory'
 import { isLeftEntity } from '../entity/id';
 import { applyAccountInputToEntity } from '../entity/tx/handlers/account';
 import { handleOpenAccountEntityTx } from '../entity/tx/handlers/open-account';
-import { handleRollbackTimedOutFramesEntityTx } from '../entity/tx/handlers/htlc-direct';
 import { createEmptyEnv } from '../runtime';
 import { hydrateAccountDocFromStorage, hydrateEntityStateFromStorage } from '../storage/hydration';
 import { projectAccountDoc, projectEntityCoreDoc } from '../storage/projections';
@@ -322,13 +322,16 @@ test('Account validation and storage hydration reject an undrainable mempool', (
   );
 });
 
-test('single and batch Account mempool enqueue reject atomically at the shared cap', () => {
+test('single and batch Account mempool enqueue reject atomically at the shared cap', async () => {
   const full = makeAccount(
     Array.from({ length: LIMITS.ACCOUNT_MEMPOOL_SIZE }, (_, index) => memoTx(index)),
   );
-  expect(() => addToAccountMempool(full, memoTx(20_000))).toThrow(
-    'ACCOUNT_MEMPOOL_LIMIT_EXCEEDED',
-  );
+  const env = createEmptyEnv('account-resource-bounds');
+  await expect(applyAccountInput(
+    env,
+    full,
+    createLocalAccountInput(full, entityId, [memoTx(20_000)]),
+  )).rejects.toThrow('ACCOUNT_MEMPOOL_LIMIT_EXCEEDED');
   expect(full.mempool).toHaveLength(LIMITS.ACCOUNT_MEMPOOL_SIZE);
 
   const nearlyFull = makeAccount(
@@ -338,41 +341,6 @@ test('single and batch Account mempool enqueue reject atomically at the shared c
   expect(() => prependUniqueMempoolTxs(nearlyFull, [memoTx(30_000), memoTx(30_001)]))
     .toThrow('ACCOUNT_MEMPOOL_LIMIT_EXCEEDED');
   expect(nearlyFull.mempool).toEqual(before);
-});
-
-test('timed-out frame rollback cannot partially restore an over-cap transaction batch', () => {
-  const state = makeState();
-  const account = makeAccount(
-    Array.from({ length: LIMITS.ACCOUNT_MEMPOOL_SIZE - 1 }, (_, index) => memoTx(index)),
-  );
-  const pendingFrame = {
-    height: 7,
-    timestamp: 1_000,
-    jHeight: 0,
-    accountTxs: [memoTx(20_000), memoTx(20_001)],
-    prevFrameHash: EMPTY_ACCOUNT_STATE_ROOT,
-    accountStateRoot: EMPTY_ACCOUNT_STATE_ROOT,
-    deltas: [],
-    stateHash: EMPTY_ACCOUNT_STATE_ROOT,
-    byLeft: true,
-  };
-  account.pendingFrame = pendingFrame;
-  account.pendingAccountInput = {
-    kind: 'frame',
-    fromEntityId: entityId,
-    toEntityId: counterpartyId,
-    domain: structuredClone(account.domain),
-    proposal: { frame: structuredClone(pendingFrame) },
-  };
-  account.pendingAccountInputSignerId = 'fixture-counterparty-signer';
-  state.accounts.set(counterpartyId, account);
-
-  expect(() => handleRollbackTimedOutFramesEntityTx(state, {
-    type: 'rollbackTimedOutFrames',
-    data: { timedOutAccounts: [{ counterpartyId, frameHeight: 7 }] },
-  })).toThrow('ACCOUNT_MEMPOOL_LIMIT_EXCEEDED');
-  expect(account.mempool).toHaveLength(LIMITS.ACCOUNT_MEMPOOL_SIZE - 1);
-  expect(account.pendingFrame?.height).toBe(7);
 });
 
 test('every committed Entity transition emits a size measurement without consumption changes', async () => {

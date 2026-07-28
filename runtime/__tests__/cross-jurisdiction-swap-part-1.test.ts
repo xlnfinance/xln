@@ -1532,7 +1532,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     if (!dueWake) throw new Error('TEST_CROSS_J_SOURCE_HUB_WAKE_MISSING');
     expect(
       dueWake.entityTxs?.flatMap(tx => (tx.type === 'scheduledWake' ? tx.data.jobs.map(job => job.id) : [])),
-    ).toContain('checkAccountTimeouts');
+    ).toContain('maintainPendingAccounts');
     const preparedHubInputsWithWake = await prepareAtomicCrossJAccountInputs(
       hubEnv,
       mergeEntityInputs([...acknowledgements, dueWake]),

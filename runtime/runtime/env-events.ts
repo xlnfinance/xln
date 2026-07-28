@@ -433,7 +433,7 @@ export function attachEventEmitters(env: RuntimeState): void {
     env.frameLogs.push(entry);
     addCleanLog(env, 'INFO', message);
     if (message.startsWith('REB_')) {
-      forwardDebugEvent(env, {
+      queuePendingAuditEvent(env, {
         level: 'info',
         category,
         message,
@@ -459,7 +459,7 @@ export function attachEventEmitters(env: RuntimeState): void {
     env.frameLogs.push(entry);
     addCleanLog(env, 'WARN', message);
     console.warn(`[${category}]`, message, data || '');
-    forwardDebugEvent(env, {
+    queuePendingAuditEvent(env, {
       level: 'warn',
       category,
       message,
@@ -484,7 +484,7 @@ export function attachEventEmitters(env: RuntimeState): void {
     env.frameLogs.push(entry);
     addCleanLog(env, 'ERR', message);
     console.error(`[${category}]`, message, data || '');
-    forwardDebugEvent(env, {
+    queuePendingAuditEvent(env, {
       level: 'error',
       category,
       message,
@@ -508,7 +508,7 @@ export function attachEventEmitters(env: RuntimeState): void {
     env.frameLogs.push(entry);
     addCleanLog(env, 'EVENT', eventName);
     if (HIGH_SIGNAL_EVENTS.has(eventName) || isCriticalMessage(eventName)) {
-      getPendingAuditEvents(env).push({
+      queuePendingAuditEvent(env, {
         level: 'event',
         eventName,
         data,

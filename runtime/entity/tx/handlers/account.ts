@@ -13,7 +13,6 @@ import { rejectFrozenAccountInput } from './account/frozen-input';
 import type { CommittedAccountEffects } from './account/committed-input';
 import {
   applyAccountConsensusInput,
-  applySettlementWorkspaceInput,
   type AccountInputPhaseContext,
 } from './account/input-phases';
 import {
@@ -122,7 +121,6 @@ const applyAccountInputPhases = async (
     ...(options ? { options } : {}),
     checkpointProfile,
   };
-  await applySettlementWorkspaceInput(context);
   checkpointProfile('preConsensus');
   const consensus = await applyAccountConsensusInput(context);
   if (consensus.terminalResult) return consensus.terminalResult;

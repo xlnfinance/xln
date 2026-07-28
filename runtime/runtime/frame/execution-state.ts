@@ -32,7 +32,7 @@ export type FrameExecutionState = {
   reliableReceiptDeliveries: RuntimeReceiptDelivery[];
   immediateReliableReceiptDeliveries: RuntimeReceiptDelivery[];
   reliableReceiptStateDurable: boolean;
-  commitDisposition: 'undurable' | 'committed' | 'unknown';
+  commitDisposition: 'undurable' | 'committed' | 'conflict' | 'unknown';
   rollbackHandled: boolean;
   transaction: RuntimeFrameTransaction | undefined;
   pendingTraceSnapshot: EnvSnapshot | undefined;

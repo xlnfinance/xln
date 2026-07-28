@@ -13,7 +13,7 @@ import {
   entityLog,
   getEntityMempoolAdmissionError,
   isSingleSignerEntity,
-  validateEntityInput,
+  isEntityInputWellFormed,
   validateEntityReplica,
 } from './shared';
 
@@ -99,7 +99,7 @@ export const prepareEntityInputIngress = (
   // Validate the exact retry bytes before canonical clone normalization can
   // discard forbidden fields or coerce malformed signature containers.
   const workingReplica = cloneEntityReplica(replica);
-  if (!validateEntityInput(ingressInput)) {
+  if (!isEntityInputWellFormed(ingressInput)) {
     const detail =
       `entityId=${ingressInput.entityId} ` +
       `txs=${ingressInput.entityTxs?.map(tx => tx.type).join(',') || 'none'}`;
@@ -118,7 +118,7 @@ export const prepareEntityInputIngress = (
   const frameHash = input.proposedFrame?.hash?.slice(0, 10) || 'none';
   logEntityInput(env, input, workingReplica, entityDisplay, frameHash);
 
-  if (!validateEntityInput(input)) {
+  if (!isEntityInputWellFormed(input)) {
     const detail =
       `entityId=${input.entityId} ` +
       `txs=${input.entityTxs?.map(tx => tx.type).join(',') || 'none'}`;

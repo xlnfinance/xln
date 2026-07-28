@@ -62,12 +62,10 @@ import type {
 } from './scheduler-types';
 import { isLeftEntity } from './id';
 import { deriveDelta } from '../account/utils';
-import { isHtlcTimelockExpired } from '../account/htlc-deadline';
 import { TIMING } from '../constants';
 import {
   getDefaultRebalancePolicyForToken,
 } from '../account/rebalance-defaults';
-import { getEntityCertifiedJurisdictionHeight } from '../jurisdiction/height';
 import { createStructuredLogger, shortId } from '../infra/logger';
 import { accountInputProposal, accountInputReferenceHeight } from '../account/consensus/flush';
 import { hasPendingSettlementTransition } from '../account/tx/handlers/settle-transition';
@@ -89,9 +87,9 @@ export {
 const crontabLog = createStructuredLogger('entity.crontab');
 
 // Configuration constants
-export const ACCOUNT_TIMEOUT_MS = 30000; // 30 seconds (configurable)
+export const ACCOUNT_PENDING_STALE_WARNING_MS = 30_000;
 export const HTLC_SECRET_ACK_TIMEOUT_MS = 30000; // auto-dispute if secret-return ACK missing
-export const ACCOUNT_TIMEOUT_CHECK_INTERVAL_MS = 10000; // Check every 10 seconds
+export const ACCOUNT_MAINTENANCE_INTERVAL_MS = 10_000;
 export const ACCOUNT_PENDING_RESEND_AFTER_MS = 8000; // Resend pending frame input after 8s without ACK
 export const HUB_REBALANCE_INTERVAL_MS = TIMING.CRONTAB_INTERVAL_MS; // Keep hub rebalance aligned with the canonical 1s runtime cadence.
 
@@ -106,8 +104,8 @@ export const emitCommittedPendingFrameWarnings = (
   previousState: EntityReplica['state'],
   committedState: EntityReplica['state'],
 ): void => {
-  const previousRun = previousState.crontabState?.tasks.get('checkAccountTimeouts')?.lastRun;
-  const committedRun = committedState.crontabState?.tasks.get('checkAccountTimeouts')?.lastRun;
+  const previousRun = previousState.crontabState?.tasks.get('maintainPendingAccounts')?.lastRun;
+  const committedRun = committedState.crontabState?.tasks.get('maintainPendingAccounts')?.lastRun;
   if (
     committedRun === undefined ||
     committedRun !== committedState.timestamp ||
@@ -117,13 +115,8 @@ export const emitCommittedPendingFrameWarnings = (
   for (const [counterpartyId, account] of committedState.accounts) {
     const pending = account.pendingFrame;
     if (!pending) continue;
-    const hasExpiredHtlc = pending.accountTxs.some(tx => tx.type === 'htlc_lock' && (
-      (getEntityCertifiedJurisdictionHeight(committedState) > 0 &&
-        getEntityCertifiedJurisdictionHeight(committedState) > tx.data.revealBeforeHeight) ||
-      isHtlcTimelockExpired(committedState.timestamp, tx.data.timelock)
-    ));
     const frameAge = committedState.timestamp - pending.timestamp;
-    if (!hasExpiredHtlc && frameAge > ACCOUNT_TIMEOUT_MS) {
+    if (frameAge > ACCOUNT_PENDING_STALE_WARNING_MS) {
       console.warn(
         `⏰ PENDING-FRAME-STALE: Account with ${counterpartyId.slice(-4)} h${pending.height} for ${Math.floor(frameAge / 1000)}s — consider dispute`,
       );
@@ -156,14 +149,14 @@ const createTaskState = (
 export function initCrontab(): CrontabState {
   return {
     tasks: new Map<CrontabTaskMethod, CrontabTaskState>([
-      ['checkAccountTimeouts', createTaskState('checkAccountTimeouts', ACCOUNT_TIMEOUT_CHECK_INTERVAL_MS)],
+      ['maintainPendingAccounts', createTaskState('maintainPendingAccounts', ACCOUNT_MAINTENANCE_INTERVAL_MS)],
       ['hubRebalance', createTaskState('hubRebalance', HUB_REBALANCE_INTERVAL_MS)],
     ]),
     hooks: new Map(),
   };
 }
 
-const accountNeedsTimeoutTask = (state: EntityReplica['state']): boolean =>
+const accountNeedsMaintenance = (state: EntityReplica['state']): boolean =>
   [...state.accounts.values()].some(account => Boolean(account.pendingFrame));
 
 const accountNeedsHubRebalanceTask = (
@@ -207,7 +200,7 @@ export const crontabTaskHasPendingWork = (
   state: EntityReplica['state'],
   method: CrontabTaskMethod,
 ): boolean => {
-  if (method === 'checkAccountTimeouts') return accountNeedsTimeoutTask(state);
+  if (method === 'maintainPendingAccounts') return accountNeedsMaintenance(state);
   if (!state.hubRebalanceConfig) return false;
   if (state.jBatchState?.sentBatch) return true;
   for (const counterpartyId of state.accounts.keys()) {
@@ -217,7 +210,7 @@ export const crontabTaskHasPendingWork = (
 };
 
 const CRONTAB_TASK_HANDLERS: Record<CrontabTaskMethod, CrontabTaskHandler> = {
-  checkAccountTimeouts: checkAccountTimeoutsHandler,
+  maintainPendingAccounts: maintainPendingAccounts,
   hubRebalance: hubRebalanceHandler,
 };
 
@@ -273,14 +266,15 @@ export async function executeCrontab(
 }
 
 /**
- * Check all accounts for timeout and suggest disputes
+ * Resend the exact signed proposal; a Hanko-backed Account frame never expires.
  *
- * Pattern from 2019src.txt lines 1622-1675:
- * - Iterate over all accounts
- * - Check missed_ack time
- * - If > threshold, suggest dispute to entity members
+ * Do not add a local timeout rollback here. Once the signature leaves this
+ * replica, the peer may accept or submit it later. Liveness comes from exact
+ * resend and, ultimately, the dispute protocol. Same-height collision rollback
+ * belongs exclusively to Account consensus, where the fixed LEFT winner is
+ * identical to Depository.sol.
  */
-async function checkAccountTimeoutsHandler(
+async function maintainPendingAccounts(
   _env: RuntimeState,
   replica: EntityReplica,
   _task: CrontabTaskState,
@@ -288,99 +282,37 @@ async function checkAccountTimeoutsHandler(
 ): Promise<EntityInput[]> {
   const outputs: EntityInput[] = [];
   const now = replica.state.timestamp; // DETERMINISTIC: Use entity's own timestamp
-  const currentHeight = getEntityCertifiedJurisdictionHeight(replica.state);
-  const firstValidator = replica.state.config.validators?.[0];
-
-  // Collect accounts with expired HTLC locks in their pending frames
-  const timedOutAccounts: Array<{ counterpartyId: string; frameHeight: number }> = [];
 
   for (const [counterpartyId, account] of replica.state.accounts.entries()) {
     if (!account.pendingFrame) continue;
+    const frameAge = now - account.pendingFrame.timestamp;
+    const cachedInputHeight = account.pendingAccountInput
+      ? accountInputProposedFrameHeight(account.pendingAccountInput)
+      : 0;
+    if (
+      frameAge <= ACCOUNT_PENDING_RESEND_AFTER_MS ||
+      !account.pendingAccountInput ||
+      cachedInputHeight !== account.pendingFrame.height
+    ) continue;
 
-    // Check if any htlc_lock in the pending frame has expired
-    // Cancel ONLY when hashlock expires — until then, counterparty could still claim
-    let hasExpiredHtlc = false;
-    for (const tx of account.pendingFrame.accountTxs) {
-      if (tx.type === 'htlc_lock') {
-        const heightExpired = currentHeight > 0 && currentHeight > tx.data.revealBeforeHeight;
-        const timestampExpired = isHtlcTimelockExpired(now, tx.data.timelock);
-        if (heightExpired || timestampExpired) {
-          console.warn(
-            `⏰ HTLC-IN-PENDING-EXPIRED: Account ${counterpartyId.slice(-4)} frame h${account.pendingFrame.height}, lock ${tx.data.lockId.slice(0, 12)}... expired`,
-          );
-          hasExpiredHtlc = true;
-          break;
-        }
-      }
-    }
-
-    if (hasExpiredHtlc) {
-      timedOutAccounts.push({
-        counterpartyId,
-        frameHeight: account.pendingFrame.height,
-      });
-    } else {
-      const frameAge = now - account.pendingFrame.timestamp;
-
-      // ACK may be lost on relay reconnect. Safe resend of the exact cached input
-      // unblocks bilateral consensus without mutating account shared state.
-      const cachedInputHeight = account.pendingAccountInput
-        ? accountInputProposedFrameHeight(account.pendingAccountInput)
-        : 0;
-      if (
-        frameAge > ACCOUNT_PENDING_RESEND_AFTER_MS &&
-        account.pendingAccountInput &&
-        cachedInputHeight === account.pendingFrame.height
-      ) {
-        const targetSignerId = account.pendingAccountInputSignerId;
-        if (!targetSignerId) {
-          throw new Error(
-            `ACCOUNT_PENDING_INPUT_SIGNER_MISSING: entity=${replica.entityId}` +
-            ` counterparty=${account.pendingAccountInput.toEntityId}` +
-            ` height=${account.pendingFrame.height}`,
-          );
-        }
-        outputs.push({
-          entityId: account.pendingAccountInput.toEntityId,
-          signerId: targetSignerId,
-          entityTxs: [
-            {
-              type: 'accountInput',
-              data: account.pendingAccountInput,
-            },
-          ],
-        });
-        crontabLog.debug('pending_frame.resend', {
-          account: shortId(counterpartyId),
-          height: account.pendingFrame.height,
-          ageSeconds: Math.floor(frameAge / 1000),
-        });
-      }
-
-      // Non-HTLC pending frames: dispute suggestion after 30s
-      // Observability is emitted only after this Entity frame commits. A valid
-      // ACK later in the same frame must clear the pending state before a
-      // liveness warning is evaluated.
-    }
-  }
-
-  // Generate rollback EntityTx for accounts with expired HTLC locks in pending frames
-  if (timedOutAccounts.length > 0) {
-    if (firstValidator) {
-      outputs.push({
-        entityId: replica.entityId,
-        signerId: firstValidator,
-        entityTxs: [
-          {
-            type: 'rollbackTimedOutFrames',
-            data: { timedOutAccounts },
-          },
-        ],
-      });
-      console.warn(
-        `⏰ ROLLBACK: Generated rollbackTimedOutFrames for ${timedOutAccounts.length} accounts (HTLC expired in pendingFrame)`,
+    const targetSignerId = account.pendingAccountInputSignerId;
+    if (!targetSignerId) {
+      throw new Error(
+        `ACCOUNT_PENDING_INPUT_SIGNER_MISSING: entity=${replica.entityId}` +
+        ` counterparty=${account.pendingAccountInput.toEntityId}` +
+        ` height=${account.pendingFrame.height}`,
       );
     }
+    outputs.push({
+      entityId: account.pendingAccountInput.toEntityId,
+      signerId: targetSignerId,
+      entityTxs: [{ type: 'accountInput', data: account.pendingAccountInput }],
+    });
+    crontabLog.debug('pending_frame.resend', {
+      account: shortId(counterpartyId),
+      height: account.pendingFrame.height,
+      ageSeconds: Math.floor(frameAge / 1000),
+    });
   }
 
   return outputs;

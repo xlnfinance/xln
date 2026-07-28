@@ -3,7 +3,7 @@
  * One canonical codec is used for logs, network payloads, and persisted snapshots.
  */
 
-const ALWAYS_EXCLUDED_KEYS = new Set(['clonedForValidation', 'provider', 'ethersProvider']);
+const ALWAYS_EXCLUDED_KEYS = new Set(['provider', 'ethersProvider']);
 
 type JsonPrimitive = string | number | boolean | null;
 

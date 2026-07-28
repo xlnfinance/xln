@@ -1,6 +1,6 @@
 import { createStructuredLogger, logError, shortId } from '../../infra/logger';
 import { normalizeRuntimeId } from '../../networking/runtime-id';
-import { validateEntityInput } from '../../validation-utils';
+import { decodeRoutedEntityInput } from '../../validation-utils';
 import { validateJInputs } from '../../wal/runtime-machine-schema/j';
 import type {
   RuntimeState,
@@ -76,7 +76,7 @@ const validateEntityInputs = (
       }
       return deps.normalizeEntityInput(
         env,
-        validateEntityInput(input),
+        decodeRoutedEntityInput(input),
         `runtimeInput[${index}]`,
       );
     } catch (error) {

@@ -67,7 +67,6 @@ export const freezeAccountForDispute = (
   delete account.pendingFrame;
   delete account.pendingAccountInput;
   delete account.pendingAccountInputSignerId;
-  delete account.clonedForValidation;
   account.rollbackCount = 0;
   delete account.lastRollbackFrameHash;
 };

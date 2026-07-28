@@ -49,7 +49,6 @@ import { HTLC, LIMITS } from '../constants';
 
 import {
   ACCOUNT_PENDING_RESEND_AFTER_MS,
-  ACCOUNT_TIMEOUT_MS,
   emitCommittedPendingFrameWarnings,
   executeCrontab,
   HTLC_SECRET_ACK_TIMEOUT_MS,

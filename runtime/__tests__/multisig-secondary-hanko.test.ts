@@ -78,8 +78,8 @@ const buildGenericOrigin = (
   frameHash: string,
   outputIndex: number,
 ): ConsensusOutputOrigin => {
-  const lane = entityTxs.some(tx => tx.type === 'accountInput' && tx.data.kind !== 'board_reseal')
-    ? 'account-settlement'
+  const lane = entityTxs.some(tx => tx.type === 'accountInput' && tx.data.kind === 'dispute')
+    ? 'account-dispute'
     : 'generic';
   return {
     sourceEntityId,
@@ -1204,14 +1204,19 @@ describe('multisig secondary Hanko production', () => {
     const entityTxs: EntityTx[] = [{
       type: 'accountInput',
       data: {
-        kind: 'settle',
+        kind: 'dispute',
         fromEntityId: forgedSource,
         toEntityId: source.counterpartyId,
         domain: {
           chainId: 31_337,
           depositoryAddress: `0x${'dd'.repeat(20)}`,
         },
-        settleAction: { type: 'reject', memo: 'must not mutate target', version: 1 },
+        disputeSeal: {
+          hanko: '0x01',
+          hash: digest('8'),
+          proofBodyHash: digest('9'),
+          proofNonce: 1,
+        },
       },
     }];
     const origin = buildGenericOrigin(

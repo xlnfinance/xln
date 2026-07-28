@@ -1448,7 +1448,7 @@ export const appendCertifiedEntityFrameLink = (
 /**
  * Validates entity input to prevent malicious or corrupted data
  */
-export const validateEntityInput = (input: EntityInput): boolean => {
+export const isEntityInputWellFormed = (input: EntityInput): boolean => {
   try {
     // Basic required fields
     if (!input.entityId || typeof input.entityId !== 'string') {

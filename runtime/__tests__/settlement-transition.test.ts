@@ -25,7 +25,6 @@ import {
   handleSettleExecute,
   handleSettlePropose,
   processCommittedSettlementTransitionFollowup,
-  processSettleAction,
 } from '../entity/tx/handlers/settle';
 import { handleJAbortSentBatch } from '../entity/tx/handlers/j-abort-sent-batch';
 import {
@@ -307,19 +306,6 @@ describe('atomic settlement Account transition', () => {
     expect(account.settlementWorkspace).toEqual(workspaceBefore);
     expect(account.mempool).toEqual(mempoolBefore);
     expect(state.jBatchState).toEqual(batchBefore);
-  });
-
-  test('legacy direct settlement actions cannot bypass bilateral Account ordering', async () => {
-    const account = makeAccount(LEFT, RIGHT);
-    await expect(processSettleAction(
-      account,
-      { type: 'approve' },
-      RIGHT,
-      LEFT,
-      1_000,
-    )).rejects.toThrow('SETTLEMENT_DIRECT_ACTION_FORBIDDEN:approve');
-    expect(account.settlementWorkspace).toBeUndefined();
-    expect(account.mempool).toHaveLength(0);
   });
 
   test('keeps an unsigned settlement seal queued until its Entity quorum Hanko exists', async () => {

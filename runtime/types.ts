@@ -149,7 +149,6 @@ export type {
 } from './types/lending';
 export type {
   AccountDelta,
-  AccountEvent,
   AccountFrame,
   AccountFrameAck,
   AccountBoardReseal,
@@ -161,7 +160,6 @@ export type {
   AccountState,
   AccountDisputeSeal,
   AccountStateDomain,
-  AccountSettleAction,
   AccountSnapshot,
   AccountStatus,
   AccountTx,
@@ -732,12 +730,6 @@ export interface DeliverableEntityInput extends RoutedEntityInput {
   runtimeId: string;
 }
 
-/** Entity output - can include both E→E messages AND J-layer outputs */
-export interface EntityOutput {
-  entityInputs: RoutedEntityInput[];  // E→E messages
-  jInputs: JInput[];             // E→J messages (batches to queue)
-}
-
 export interface Proposal {
   id: string; // hash of the proposal
   proposer: string;
@@ -774,16 +766,6 @@ export interface VoteData {
   voter: string;
   choice: 'yes' | 'no' | 'abstain';
   comment?: string;
-}
-
-export interface AccountTxInput {
-  fromEntityId: string;
-  toEntityId: string;
-  accountTx: AccountTx; // The actual account transaction to process
-  metadata?: {
-    purpose?: string;
-    description?: string;
-  };
 }
 
 export type {
@@ -1495,14 +1477,6 @@ export interface RuntimeState {
   warn: (category: LogCategory, message: string, data?: Record<string, unknown>, entityId?: string) => void;
   error: (category: LogCategory, message: string, data?: Record<string, unknown>, entityId?: string) => void;
   emit: (eventName: string, data: Record<string, unknown>) => void; // Generic event emission
-}
-
-export interface RuntimeSnapshot {
-  height: number;
-  entities: Record<string, EntityState>;
-  gossip: {
-    profiles: Record<string, Profile>;
-  };
 }
 
 export interface EnvSnapshot {

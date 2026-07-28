@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 
 import {
   clearPendingAuditEvents,
@@ -47,6 +47,33 @@ test('clearing pending audit events drops uncommitted high-signal emits', () => 
 
   expect(forwarded).toHaveLength(0);
   expect(env.runtimeState?.pendingAuditEvents).toHaveLength(0);
+});
+
+test('warn, error, and rebalance diagnostics cannot escape before WAL commit', () => {
+  const env = createEmptyEnv('env-events-structured-log-boundary');
+  const forwarded: Array<Record<string, unknown>> = [];
+  env.runtimeState!.p2p = {
+    sendDebugEvent: (payload: unknown) => {
+      forwarded.push(payload as Record<string, unknown>);
+      return true;
+    },
+  } as never;
+  const warn = spyOn(console, 'warn').mockImplementation(() => undefined);
+  const error = spyOn(console, 'error').mockImplementation(() => undefined);
+
+  try {
+    env.info('account', 'REB_STARTED', { height: 7 });
+    env.warn('account', 'signed proposal is stale');
+    env.error('runtime', 'candidate failed');
+    expect(forwarded).toEqual([]);
+    expect(env.runtimeState?.pendingAuditEvents).toHaveLength(3);
+
+    flushPendingAuditEvents(env);
+    expect(forwarded.map(payload => payload.level)).toEqual(['info', 'warn', 'error']);
+  } finally {
+    warn.mockRestore();
+    error.mockRestore();
+  }
 });
 
 test('candidate notifications remain inert until commit publication and dedupe by exact payload', () => {

@@ -528,13 +528,6 @@ const cloneEntityStateWithPolicy = (
     throw new Error('cloneEntityState failed: lastFinalizedJHeight was not preserved');
   }
 
-  // For snapshots, remove clonedForValidation from all accounts to avoid cycles.
-  if (forSnapshot) {
-    for (const account of cloned.accounts.values()) {
-      delete account.clonedForValidation;
-    }
-  }
-
   if (entityState.jBatchState) {
     cloned.jBatchState = cloneJBatchState(entityState.jBatchState);
   }
@@ -677,13 +670,9 @@ export const cloneTrustedEntityReplica = (
  * Clone AccountState for validation (replaces dryRun pattern)
  */
 export function cloneAccountState(account: AccountState, forSnapshot: boolean = false): AccountState {
-  // Snapshot state intentionally excludes the validation candidate. It is
-  // transient consensus work, not durable Account state.
   if (forSnapshot) {
-    const { clonedForValidation, ...accountWithoutCloned } = account;
-    void clonedForValidation;
     const cloned = structuredCloneOrThrow(
-      accountWithoutCloned,
+      account,
       'ACCOUNT_SNAPSHOT_STRUCTURED_CLONE_FAILED',
     ) as AccountState;
     cloneDisputeEvidenceIntoAccount(cloned, account);

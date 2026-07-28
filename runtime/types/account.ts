@@ -279,9 +279,6 @@ export interface AccountState {
 
   // Removed isProposer - use isLeft() function like old_src Channel.ts instead
 
-  // Cloned state for validation before committing (replaces dryRun)
-  clonedForValidation?: AccountState;
-
   // Proof structures for dispute resolution
   proofHeader: {
     fromEntity: string; // Our entity ID
@@ -466,18 +463,6 @@ export type RuntimeOverlayRecord =
   | { family: 'account'; entityId: string; counterpartyId: string }
   | { family: 'book'; entityId: string; pairId: string; deleted?: boolean };
 
-export type AccountSettleAction = {
-  type: 'propose' | 'update' | 'approve' | 'execute' | 'reject';
-  ops?: SettlementOp[];                // For propose/update
-  executorIsLeft?: boolean;            // For propose/update
-  hanko?: HankoString;                 // For approve (signer's hanko)
-  memo?: string;                       // For propose/update/reject
-  version?: number;                    // Version being approved/executed
-  nonceAtSign?: number;                // Settlement nonce counterparty signed with (approve)
-  /** Exact cooperative-settlement digest; required for Entity-quorum drafts. */
-  settlementHash?: string;
-};
-
 type AccountInputBase = {
   fromEntityId: string;
   toEntityId: string;
@@ -558,11 +543,6 @@ export type AccountPeerInput =
   | (AccountInputBase & {
       kind: 'board_reseal';
       reseal: AccountBoardReseal;
-    })
-  | (AccountInputBase & {
-      kind: 'settle';
-      settleAction: AccountSettleAction;
-      newSettlementHanko?: HankoString;
     });
 
 /** Every command accepted by an Account replica enters this one boundary. */
@@ -690,15 +670,6 @@ export interface DerivedDelta {
   inTotalHold: bigint;     // Unified hold deducted from in capacity
   ascii: string; // ASCII visualization from deriveDelta (like old_src)
 }
-
-/**
- * Account Events - Bubbled up from A-layer to E-layer
- * Used for routing (HTLC secrets) and matching (swap offers)
- */
-export type AccountEvent =
-  | { type: 'htlc_revealed'; hashlock: string; secret: string }
-  | { type: 'swap_offer_created'; offerId: string; makerId: string; accountId: string; giveTokenId: number; giveAmount: bigint; wantTokenId: number; wantAmount: bigint; timeInForce?: 0 | 1 | 2; crossJurisdiction?: CrossJurisdictionSwapRoute }
-  | { type: 'swap_offer_cancelled'; offerId: string; accountId: string };
 
 // Account transaction types
 export type AccountTx =

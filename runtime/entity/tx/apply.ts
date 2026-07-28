@@ -65,7 +65,6 @@ import {
   handleManualHtlcLockEntityTx,
   handleProcessHtlcTimeoutsEntityTx,
   handleResolveHtlcLockEntityTx,
-  handleRollbackTimedOutFramesEntityTx,
 } from './handlers/htlc-direct';
 import { handleDirectPaymentEntityTx } from './handlers/direct-payment';
 import {
@@ -293,7 +292,6 @@ const entityTxDispatchers: Record<string, EntityTxDispatcher> = {
   hashlockPayment: (env, state, tx) => handleHashlockPaymentEntityTx(env, state, tx as Extract<EntityTx, { type: 'hashlockPayment' }>),
   resolveHtlcLock: (_env, state, tx) => handleResolveHtlcLockEntityTx(state, tx as Extract<EntityTx, { type: 'resolveHtlcLock' }>),
   processHtlcTimeouts: (_env, state, tx) => handleProcessHtlcTimeoutsEntityTx(state, tx as Extract<EntityTx, { type: 'processHtlcTimeouts' }>),
-  rollbackTimedOutFrames: (_env, state, tx) => handleRollbackTimedOutFramesEntityTx(state, tx as Extract<EntityTx, { type: 'rollbackTimedOutFrames' }>),
   manualHtlcLock: (_env, state, tx) => handleManualHtlcLockEntityTx(state, tx as Extract<EntityTx, { type: 'manualHtlcLock' }>),
   directPayment: (env, state, tx, options) => handleDirectPaymentEntityTx(
     env,

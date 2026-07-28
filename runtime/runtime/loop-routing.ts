@@ -38,7 +38,7 @@ import {
 } from './input-validation';
 import { MAX_PENDING_NETWORK_OUTPUTS, sendEntityInputWithRouting } from './output-routing';
 import { normalizeDbNamespace } from '../storage/runtime-dbs';
-import { validateEntityInput } from '../validation-utils';
+import { decodeRoutedEntityInput } from '../validation-utils';
 import type {
   EntityInput,
   RuntimeState,
@@ -210,7 +210,7 @@ const validateRuntimeInputAdmission = (
   }
   runtimeInput.entityInputs.forEach((input, index) => {
     for (const tx of input.entityTxs ?? []) assertScheduledWakeTxAuthorized(tx, false);
-    const validated = normalizeRuntimeEntityInput(env, validateEntityInput(input), `runtimeInput[${index}]`);
+    const validated = normalizeRuntimeEntityInput(env, decodeRoutedEntityInput(input), `runtimeInput[${index}]`);
     const localSignerIds = [
       ...getLocalSignerIdsForEntity(env, validated.entityId),
       ...(importedSigners.get(String(validated.entityId).toLowerCase()) ?? []),

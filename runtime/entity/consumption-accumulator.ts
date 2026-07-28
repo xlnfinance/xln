@@ -50,7 +50,6 @@ const CONSUMPTION_LANES = new Set<ConsumptionOutputIdentity['lane']>([
   'account-frame',
   'account-ack',
   'account-dispute',
-  'account-settlement',
 ]);
 
 const record = (value: unknown, label: string): Record<string, unknown> => {
@@ -404,13 +403,12 @@ const unchanged = (
 const isSparseNativeLane = (lane: ConsumptionOutputIdentity['lane']): boolean =>
   lane === 'account-frame' ||
   lane === 'account-ack' ||
-  lane === 'account-dispute' ||
-  lane === 'account-settlement';
+  lane === 'account-dispute';
 
 const isValidInitialSequence = (identity: ConsumptionOutputIdentity, sequence: bigint): boolean => {
   if (identity.lane === 'generic') return sequence === 1n;
   // A restored/imported Account can already be above genesis. Its own state
-  // machine validates the exact native frame/proof/settlement nonce; this
+  // machine validates the exact native frame/proof nonce; this
   // accumulator must not invent a second base counter.
   if (identity.lane === 'account-frame' || identity.lane === 'account-ack') return sequence >= 1n;
   return sequence >= 0n;

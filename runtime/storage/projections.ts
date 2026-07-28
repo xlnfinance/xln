@@ -194,23 +194,11 @@ export const projectReplicaMeta = (
   options?: ReplicaMetaProjectionOptions,
 ): StorageReplicaMeta => buildReplicaMetaProjection(
   replica,
-  // Snapshot now. Replica states continue mutating after projection, and
-  // Account clonedForValidation is an ephemeral replay cache, not recovery data.
+  // Snapshot now. Replica states continue mutating after projection.
   cloneEntityState(replica.state, true),
   structuredClone(replica.mempool),
   options,
 );
-
-const projectEntityStateForImmediateEncoding = (state: EntityState): EntityState => {
-  let accounts: EntityState['accounts'] | undefined;
-  for (const [accountId, account] of state.accounts) {
-    if (!Object.hasOwn(account, 'clonedForValidation')) continue;
-    accounts ??= new Map(state.accounts);
-    const { clonedForValidation: _ephemeralValidationCache, ...durableAccount } = account;
-    accounts.set(accountId, durableAccount as typeof account);
-  }
-  return accounts ? { ...state, accounts } : state;
-};
 
 /**
  * Encode the authoritative replica metadata synchronously without first making
@@ -222,7 +210,7 @@ export const encodeReplicaMeta = (
   options?: ReplicaMetaProjectionOptions,
 ): Buffer => encodeBuffer(buildReplicaMetaProjection(
   replica,
-  projectEntityStateForImmediateEncoding(replica.state),
+  replica.state,
   replica.mempool,
   options,
 ), { omitSymbolKeys: true });

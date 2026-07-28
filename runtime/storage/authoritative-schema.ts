@@ -1,6 +1,6 @@
 import { validateRuntimeInputEnvelope } from '../protocol/boundary-validation';
 import type { RoutedEntityInput } from '../types';
-import { validateEntityInput } from '../validation-utils';
+import { decodeRoutedEntityInput } from '../validation-utils';
 import { assertStorageSchemaVersion, STORAGE_FRAME_FORMAT } from './keys';
 import type {
   StorageDiffRecord,
@@ -159,7 +159,7 @@ const validateOptionalFrameFields = (frame: Record<string, unknown>, code: strin
   }
   if (frame['runtimeOutputs'] !== undefined) {
     frame['runtimeOutputs'] = requireStorageArray(frame['runtimeOutputs'], `${code}_OUTPUTS`)
-      .map(validateEntityInput);
+      .map(decodeRoutedEntityInput);
   }
   if (frame['overlayRecords'] !== undefined) requireStorageArray(frame['overlayRecords'], `${code}_OVERLAYS`);
 };

@@ -13,7 +13,7 @@ import { getEffectiveEntityInputTxs } from '../entity/consensus/output-envelope'
 import { accountInputAck, accountInputProposal } from '../account/consensus/flush';
 import type { EntityInput, EntityReplica, EntityTx, RuntimeState, JInput, RoutedEntityInput } from '../types';
 import { resolveEntityProposerId } from '../state-helpers';
-import { validateEntityOutput } from '../validation-utils';
+import { decodeRoutedEntityOutput } from '../validation-utils';
 import { nodeProcess } from './platform';
 import { isRuntimePerfProfileEnabled, readRuntimePerfSlowMs } from '../infra/perf-runtime-flags';
 import { DEBUG, getPerfMs } from '../utils';
@@ -719,7 +719,7 @@ const applyEntityInputToReplica = async (
   const routedOutputs: RoutedEntityInput[] = [];
   outputs.forEach((output, index) => {
     try {
-      routedOutputs.push(validateEntityOutput(output));
+      routedOutputs.push(decodeRoutedEntityOutput(output));
     } catch (error) {
       logError('RUNTIME_TICK', `🚨 CRITICAL FINANCIAL ERROR: Invalid EntityOutput[${index}] from ${replicaKey}!`, {
         error: (error as Error).message,

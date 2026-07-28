@@ -169,9 +169,6 @@ export const TIMING = {
   /** Proposal timeout before new proposer elected (10 seconds) */
   PROPOSAL_TIMEOUT_MS: 10_000,
 
-  /** Account frame acknowledgment timeout (5 seconds) */
-  ACCOUNT_ACK_TIMEOUT_MS: 5_000,
-
   /** Withdrawal request timeout before auto-reject */
   WITHDRAWAL_TIMEOUT_MS: 60_000, // 1 minute
 

@@ -163,7 +163,7 @@ assertOrder(entityConsensus, entityConsensusPath, [
   'if (admissionError) {',
   'const ingressEntityInput = entityInput;',
   'const workingReplica = cloneEntityReplica(entityReplica);',
-  'if (!validateEntityInput(ingressEntityInput)) {',
+  'if (!isEntityInputWellFormed(ingressEntityInput)) {',
   'entityInput = cloneIsolatedEntityInput(ingressEntityInput);',
   'const suppliedEntityTxs = entityInput.entityTxs ?? [];',
   'const secretAwareEntityTxs = localCanPropose && suppliedEntityTxs.length > 0',

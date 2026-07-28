@@ -33,7 +33,7 @@ const ENTITY_TX_TYPES = [
   'reopenDisputedAccount', 'requestCollateral', 'requestCrossJurisdictionClear',
   'materializeCrossJurisdictionClear', 'materializeCrossJurisdictionSwap',
   'resolveHtlcLock', 'resolvePull', 'resolveSwap',
-  'rollbackTimedOutFrames', 'runtimeOutput', 'scheduledWake', 'setHubConfig', 'setRebalancePolicy',
+  'runtimeOutput', 'scheduledWake', 'setHubConfig', 'setRebalancePolicy',
   'settle_approve', 'settle_execute', 'settle_propose', 'settle_reject', 'settle_update', 'vote',
 ] as const satisfies readonly EntityTx['type'][];
 
@@ -52,7 +52,7 @@ const validateOrigin = (value: unknown, code: string): void => {
   for (const field of ['sourceEntityId', 'semanticHash', 'frameHash']) {
     requireString(origin[field], `${code}_${field.toUpperCase()}`);
   }
-  if (!['generic', 'account-frame', 'account-ack', 'account-dispute', 'account-settlement'].includes(String(origin['lane']))) {
+  if (!['generic', 'account-frame', 'account-ack', 'account-dispute'].includes(String(origin['lane']))) {
     throw new Error(`${code}_LANE`);
   }
   requireBigInt(origin['sequence'], `${code}_SEQUENCE`, 0n);
@@ -281,6 +281,14 @@ const validateCrossJClearMaterialization = (value: unknown, code: string): void 
   }
 };
 
+const validateAccountPeerInput = (value: unknown, code: string): void => {
+  const input = requireBoundaryRecord(value, code);
+  const kind = requireString(input['kind'], `${code}_KIND`);
+  if (kind === 'txs') {
+    throw new Error(`${code}_LOCAL_INPUT_FORBIDDEN`);
+  }
+};
+
 const validateEntityTxRecord = (value: unknown, code: string, depth: number): EntityTx => {
   if (depth > ENTITY_TX_NESTING_LIMIT) throw new Error(`${code}_NESTING_LIMIT`);
   const tx = requireBoundaryRecord(value, code);
@@ -296,6 +304,7 @@ const validateEntityTxRecord = (value: unknown, code: string, depth: number): En
   else if (type === 'scheduledWake') validateScheduledWake(tx['data'], `${code}_DATA`);
   else if (type === 'htlcPayment') validatePreparedHtlcPayment(tx['data'], `${code}_DATA`);
   else if (type === 'htlcOnionAdvance') validateHtlcOnionAdvance(tx['data'], `${code}_DATA`);
+  else if (type === 'accountInput') validateAccountPeerInput(tx['data'], `${code}_DATA`);
   else if (type === 'materializeCrossJurisdictionClear') validateCrossJClearMaterialization(tx['data'], `${code}_DATA`);
   else if (type === 'materializeCrossJurisdictionSwap') validateCrossJMaterialization(tx['data'], `${code}_DATA`);
   else validateSimpleIdentityTx(type, tx['data'], `${code}_DATA`);

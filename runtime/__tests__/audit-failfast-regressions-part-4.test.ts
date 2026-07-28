@@ -49,7 +49,7 @@ import { HTLC, LIMITS } from '../constants';
 
 import {
   ACCOUNT_PENDING_RESEND_AFTER_MS,
-  ACCOUNT_TIMEOUT_MS,
+  ACCOUNT_PENDING_STALE_WARNING_MS,
   emitCommittedPendingFrameWarnings,
   executeCrontab,
   HTLC_SECRET_ACK_TIMEOUT_MS,
@@ -1109,6 +1109,7 @@ describe('audit fail-fast regressions', () => {
         kind: 'ack',
         fromEntityId: left.entityId,
         toEntityId: right.entityId,
+        domain: { ...accountMachine.domain },
         ack: {
           height: 10,
           frameHash: accountMachine.currentFrame.stateHash,
@@ -1392,7 +1393,7 @@ describe('audit fail-fast regressions', () => {
     expect(outputs[0]?.entityTxs).toEqual([{ type: 'accountInput', data: accountMachine.pendingAccountInput }]);
   });
 
-  test('crontab rolls back a pending HTLC exactly at its timelock boundary', async () => {
+  test('expired HTLC never rolls back its signed pending Account frame', async () => {
     const env = createEmptyEnv('pending-htlc-exact-timelock');
     env.quietRuntimeLogs = true;
     const replica = makeReplicaMissingPrevFrameHash();
@@ -1430,13 +1431,9 @@ describe('audit fail-fast regressions', () => {
         manualBroadcastInInput: false,
         accountChanges: new Set(),
       });
-      const rollback = outputs
-        .flatMap(output => output.entityTxs ?? [])
-        .find(tx => tx.type === 'rollbackTimedOutFrames');
-      expect(rollback).toEqual({
-        type: 'rollbackTimedOutFrames',
-        data: { timedOutAccounts: [{ counterpartyId, frameHeight: 11 }] },
-      });
+      expect(outputs).toEqual([]);
+      expect(accountMachine.pendingFrame?.height).toBe(11);
+      expect(accountMachine.pendingFrame?.accountTxs[0]?.type).toBe('htlc_lock');
     } finally {
       warning.mockRestore();
     }
@@ -1549,7 +1546,7 @@ describe('audit fail-fast regressions', () => {
     const account = makeProposalAccount([], replica.entityId, counterpartyId);
     account.pendingFrame = {
       height: 11,
-      timestamp: replica.state.timestamp - ACCOUNT_TIMEOUT_MS - 1,
+      timestamp: replica.state.timestamp - ACCOUNT_PENDING_STALE_WARNING_MS - 1,
       jHeight: 0,
       accountTxs: [{ type: 'add_delta', data: { tokenId: 1 } }],
       prevFrameHash: `0x${'ab'.repeat(32)}`,
@@ -1561,7 +1558,7 @@ describe('audit fail-fast regressions', () => {
     replica.state.accounts.set(counterpartyId, account);
     const previousState = structuredClone(replica.state);
     const committedPending = structuredClone(replica.state);
-    committedPending.crontabState!.tasks.get('checkAccountTimeouts')!.lastRun = committedPending.timestamp;
+    committedPending.crontabState!.tasks.get('maintainPendingAccounts')!.lastRun = committedPending.timestamp;
     const committedAcked = structuredClone(committedPending);
     delete committedAcked.accounts.get(counterpartyId)!.pendingFrame;
     const warning = spyOn(console, 'warn').mockImplementation(() => undefined);
@@ -1617,6 +1614,7 @@ describe('audit fail-fast regressions', () => {
       kind: 'frame',
       fromEntityId: right.entityId,
       toEntityId: left.entityId,
+      domain: { ...accountMachine.domain },
       signerId: right.signerId,
       proposal: {
         frame: {
@@ -1749,6 +1747,7 @@ describe('audit fail-fast regressions', () => {
       kind: 'frame_ack',
       fromEntityId: left.entityId,
       toEntityId: right.entityId,
+      domain: { ...accountMachine.domain },
       ack: {
         height: 10,
         frameHash: accountMachine.currentFrame.stateHash,
@@ -1763,6 +1762,7 @@ describe('audit fail-fast regressions', () => {
       kind: 'frame',
       fromEntityId: right.entityId,
       toEntityId: left.entityId,
+      domain: { ...accountMachine.domain },
       signerId: right.signerId,
       proposal: {
         frame: {
@@ -1801,6 +1801,7 @@ describe('audit fail-fast regressions', () => {
       kind: 'frame',
       fromEntityId: right.entityId,
       toEntityId: left.entityId,
+      domain: { ...accountMachine.domain },
       signerId: right.signerId,
       proposal: {
         frame: {
@@ -1837,6 +1838,7 @@ describe('audit fail-fast regressions', () => {
       kind: 'ack',
       fromEntityId: right.entityId,
       toEntityId: left.entityId,
+      domain: { ...accountMachine.domain },
       ack: { height: 9, frameHash: `0x${'09'.repeat(32)}`, frameHanko: `0x${'12'.repeat(65)}` },
     });
 
@@ -1867,6 +1869,7 @@ describe('audit fail-fast regressions', () => {
       kind: 'ack',
       fromEntityId: right.entityId,
       toEntityId: left.entityId,
+      domain: { ...accountMachine.domain },
       ack: { height: 20, frameHash: `0x${'20'.repeat(32)}`, frameHanko: `0x${'12'.repeat(65)}` },
     });
 
@@ -1931,6 +1934,7 @@ describe('audit fail-fast regressions', () => {
       kind: 'frame',
       fromEntityId: left.entityId,
       toEntityId: right.entityId,
+      domain: { ...receiverAccount.domain },
       proposal: { frame: maliciousFrame, frameHanko: newHanko! },
     });
 
@@ -1994,6 +1998,7 @@ describe('audit fail-fast regressions', () => {
       kind: 'frame',
       fromEntityId: left.entityId,
       toEntityId: right.entityId,
+      domain: { ...receiverAccount.domain },
       proposal: {
         frame,
         frameHanko: newHanko!,
@@ -2072,8 +2077,8 @@ describe('audit fail-fast regressions', () => {
     expect(rightAccount.rollbackCount).toBe(1);
   });
 
-  test('LEFT yields a same-height collision when the peer proof consumes its settlement nonce', async () => {
-    const seed = 'settlement-nonce-collision-left-yields';
+  test('LEFT always wins a valid same-height collision regardless of settlement evidence', async () => {
+    const seed = 'settlement-nonce-collision-left-wins';
     const env = createEmptyEnv(seed);
     env.quietRuntimeLogs = true;
     env.timestamp = 10_000;
@@ -2129,11 +2134,12 @@ describe('audit fail-fast regressions', () => {
 
     const result = await applyAccountInput(env, leftAccount, rightProposal.accountInput);
     expect(result.success).toBe(true);
-    expect(result.events).toContainEqual(expect.stringContaining('LEFT-YIELDS'));
-    expect(leftAccount.currentHeight).toBe(1);
-    expect(leftAccount.pendingFrame).toBeUndefined();
-    expect(leftAccount.mempool).toEqual([staleSettlementSeal]);
-    expect(leftAccount.rollbackCount).toBe(1);
+    expect(result.events).toContainEqual(expect.stringContaining('LEFT-WINS'));
+    expect(result.response).toEqual(leftAccount.pendingAccountInput);
+    expect(leftAccount.currentHeight).toBe(0);
+    expect(leftAccount.pendingFrame?.accountTxs).toEqual([staleSettlementSeal]);
+    expect(leftAccount.mempool).toEqual([]);
+    expect(leftAccount.rollbackCount).toBe(0);
   });
 
   test('deadline rejection preserves the complete live Account and warmed commitment cache', async () => {
@@ -2241,6 +2247,7 @@ describe('audit fail-fast regressions', () => {
         kind: 'frame',
         fromEntityId: left.entityId,
         toEntityId: right.entityId,
+        domain: { ...receiver.domain },
         proposal: { frame, frameHanko: frameHanko! },
       },
       {

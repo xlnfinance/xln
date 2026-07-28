@@ -71,6 +71,7 @@ import {
   finishRuntimeFrame,
   handleRuntimeFrameFailure,
 } from './runtime/frame/finish';
+import { handleRuntimeFrameStorageFailure } from './runtime/frame/storage-failure';
 import { planRuntimeFrameOutputs } from './runtime/frame/plan';
 import { runCommittedRuntimeEffects } from './runtime/frame/post-commit';
 import { prepareRuntimeFrameInput } from './runtime/frame/prepare';
@@ -647,19 +648,14 @@ const commitRuntimeFrame = async (
     }
     return { env, state, staleWriterStopped: false };
   } catch (error) {
-    if (error instanceof RuntimeFrameStorageError && error.commitStatus !== 'not-committed') {
-      frame.commitDisposition = error.commitStatus === 'committed' ? 'committed' : 'unknown';
-      frame.reliableReceiptStateDurable = true;
-      clearPendingAuditEvents(candidateEnv);
-      const env = publishRuntimeFrameTransaction(frame.transaction);
-      const state = ensureRuntimeState(env);
-      transitionRuntimeLifecycle(state, 'halted');
-      state.fatalDebugPayload = {
-        message: error.message,
-        height: Math.max(0, env.height),
-        timestamp: Math.max(0, env.timestamp),
-      };
-      state.stopLoop?.();
+    if (error instanceof RuntimeFrameStorageError) {
+      await handleRuntimeFrameStorageFailure(
+        error.commitStatus,
+        error,
+        liveEnv,
+        candidateEnv,
+        frame,
+      );
     } else {
       clearPendingAuditEvents(candidateEnv);
     }

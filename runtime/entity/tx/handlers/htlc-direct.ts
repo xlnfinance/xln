@@ -5,8 +5,7 @@ import { formatEntityId } from '../../../utils';
 import { cloneEntityState, addMessage } from '../../../state-helpers';
 import { findAccountKey } from '../account-key';
 import type { AccountTxTarget } from './account';
-import { appendAccountMempoolTxs } from '../../../account/mempool';
-import { persistVerifiedHtlcSecret, setHtlcRouteNote, terminateHtlcRoute } from '../htlc-route-lifecycle';
+import { persistVerifiedHtlcSecret, setHtlcRouteNote } from '../htlc-route-lifecycle';
 
 type EntityTxOf<T extends EntityTx['type']> = Extract<EntityTx, { type: T }>;
 
@@ -187,56 +186,6 @@ export const handleProcessHtlcTimeoutsEntityTx = (
         data: { lockId, outcome: 'error' as const, reason: 'timeout' },
       },
     });
-  }
-
-  return { newState, outputs, accountTxs };
-};
-
-export const handleRollbackTimedOutFramesEntityTx = (
-  entityState: EntityState,
-  entityTx: EntityTxOf<'rollbackTimedOutFrames'>,
-): HtlcEntityTxResult => {
-  const newState = cloneEntityState(entityState);
-  const outputs: EntityInput[] = [];
-  const accountTxs: AccountTxTarget[] = [];
-
-  for (const { counterpartyId, frameHeight } of entityTx.data.timedOutAccounts) {
-    const account = newState.accounts.get(counterpartyId);
-    if (!account?.pendingFrame) continue;
-    if (account.pendingFrame.height !== frameHeight) continue;
-
-    const pendingFrame = account.pendingFrame;
-    const retryTxs = pendingFrame.accountTxs.filter((tx) => tx.type !== 'htlc_lock');
-    delete account.pendingFrame;
-    delete account.pendingAccountInput;
-    delete account.pendingAccountInputSignerId;
-    delete account.clonedForValidation;
-    appendAccountMempoolTxs(
-      account,
-      retryTxs,
-      `rollbackTimedOutFrames:${counterpartyId}:${frameHeight}`,
-    );
-    for (const tx of pendingFrame.accountTxs) {
-      if (tx.type === 'htlc_lock') {
-        const hashlock = tx.data.hashlock;
-        const route = newState.htlcRoutes.get(hashlock);
-        if (route && route.inboundEntity && route.inboundLockId) {
-          accountTxs.push({
-            accountId: route.inboundEntity,
-            tx: {
-              type: 'htlc_resolve',
-              data: {
-                lockId: route.inboundLockId,
-                outcome: 'error' as const,
-                reason: 'ack_timeout',
-              },
-            },
-          });
-          terminateHtlcRoute(newState, hashlock, newState.timestamp);
-        }
-      }
-    }
-
   }
 
   return { newState, outputs, accountTxs };

@@ -147,7 +147,6 @@ test('native Account lanes reuse imported bases and sparse proof nonces without 
   const cases = [
     output(7, { lane: 'account-frame' }),
     output(1, { lane: 'account-dispute' }),
-    output(2, { lane: 'account-settlement' }),
   ];
   for (const identity of cases) {
     const inserted = applyConsumptionOutput(

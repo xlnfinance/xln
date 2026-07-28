@@ -829,10 +829,19 @@ describe('runtime frame atomicity', () => {
       entityTxs: [{
         type: 'accountInput',
         data: {
-          kind: 'settle',
+          kind: 'dispute',
           fromEntityId: remoteEntityId,
           toEntityId: replica.entityId,
-          settleAction: { type: 'reject', memo: 'valid queued remote input' },
+          domain: {
+            chainId: 31_337,
+            depositoryAddress: `0x${'dd'.repeat(20)}`,
+          },
+          disputeSeal: {
+            hanko: '0x01',
+            hash: hash('41'),
+            proofBodyHash: hash('42'),
+            proofNonce: 1,
+          },
         },
       }],
     };

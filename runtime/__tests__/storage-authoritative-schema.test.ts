@@ -305,6 +305,23 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
     }
   });
 
+  test('rejects a local AccountInput hidden inside a persisted EntityTx', () => {
+    expect(() => validateEntityTx({
+      type: 'accountInput',
+      data: {
+        kind: 'txs',
+        fromEntityId: entityId,
+        toEntityId: counterpartyId,
+        domain: {
+          chainId: 31_337,
+          depositoryAddress: `0x${'11'.repeat(20)}`,
+        },
+        watchSeed: hash,
+        txs: [],
+      },
+    }, 'ACCOUNT_INPUT_WAL')).toThrow('ACCOUNT_INPUT_WAL_DATA_LOCAL_INPUT_FORBIDDEN');
+  });
+
   test('valid nested outbox round-trips without changing frame hash or restore state', async () => {
     const env = createEmptyEnv('storage-runtime-machine-roundtrip');
     const batch = createEmptyBatch();

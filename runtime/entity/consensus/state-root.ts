@@ -418,7 +418,6 @@ const ACCOUNT_ROOT_COMMITTED_FIELDS = [
 
 const projectAccountConsensusState = (account: AccountState): Record<string, unknown> => {
   const projected = { ...account } as AccountWithReplicaCaches as unknown as Record<string, unknown>;
-  delete projected['clonedForValidation'];
   delete projected['frameHistory'];
   delete projected['provider'];
   delete projected['ethersProvider'];

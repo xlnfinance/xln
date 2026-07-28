@@ -105,6 +105,44 @@ describe('account mempool multiplicity', () => {
     expect(account.pendingFrame?.accountTxs).toHaveLength(1);
   });
 
+  test('rejects an oversized local batch without partially admitting it', async () => {
+    const account = accountWithPending(PAYMENT) as AccountState;
+    account.leftEntity = '0xsender';
+    account.rightEntity = '0xrecipient';
+    account.domain = { chainId: 1, depositoryAddress: '0xdepository' };
+    account.watchSeed = `0x${'11'.repeat(32)}`;
+    account.mempool = Array.from(
+      { length: LIMITS.ACCOUNT_MEMPOOL_SIZE - 2 },
+      () => structuredClone(PAYMENT),
+    );
+    const before = structuredClone(account.mempool);
+    const input = createLocalAccountInput(account, '0xsender', [
+      structuredClone(PAYMENT),
+      structuredClone(PAYMENT),
+    ]);
+
+    await expect(applyAccountInput({} as RuntimeState, account, input))
+      .rejects.toThrow('ACCOUNT_MEMPOOL_LIMIT_EXCEEDED');
+    expect(account.mempool).toEqual(before);
+  });
+
+  test('rejects a malformed local envelope before mempool mutation', async () => {
+    const account = accountWithPending(PAYMENT) as AccountState;
+    account.leftEntity = '0xsender';
+    account.rightEntity = '0xrecipient';
+    account.domain = { chainId: 1, depositoryAddress: '0xdepository' };
+    account.watchSeed = `0x${'11'.repeat(32)}`;
+    const input = {
+      ...createLocalAccountInput(account, '0xsender', [structuredClone(PAYMENT)]),
+      toEntityId: '0xthird-party',
+    };
+
+    const result = await applyAccountInput({} as RuntimeState, account, input);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('ACCOUNT_INPUT_PARTY_MISMATCH');
+    expect(account.mempool).toEqual([]);
+  });
+
   test('rollback restores identical direct payments with their full multiplicity', () => {
     const account = accountWithPending(PAYMENT) as AccountState;
     account.mempool = [structuredClone(PAYMENT)];

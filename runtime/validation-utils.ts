@@ -309,7 +309,7 @@ export function isDelta(obj: unknown): obj is Delta {
  * depend on ambient local state and can send a proposal through the wrong
  * jurisdiction sibling or a read-only imported replica.
  */
-export function validateEntityInput(input: unknown): RoutedEntityInput {
+export function decodeRoutedEntityInput(input: unknown): RoutedEntityInput {
   const obj = validateObject(input, 'EntityInput');
 
   if (typeof obj['entityId'] !== 'string' || obj['entityId'].length === 0) {
@@ -380,12 +380,12 @@ export function validateEntityInput(input: unknown): RoutedEntityInput {
 }
 
 /**
- * CRITICAL: Validate EntityOutput (same as EntityInput) has required routing identifiers.
- * Ensure all outputs have proper routing data for financial flows
- * @param output - Unvalidated output claiming to be EntityOutput
+ * Decode an Entity reducer output into the same routed input envelope consumed
+ * by the destination Entity replica. "Output" is a direction, not a second
+ * wire type: the bytes remain one canonical RoutedEntityInput.
  */
-export function validateEntityOutput(output: unknown): RoutedEntityInput {
-  const obj = validateObject(output, 'EntityOutput');
+export function decodeRoutedEntityOutput(output: unknown): RoutedEntityInput {
+  const obj = validateObject(output, 'RoutedEntityOutput');
 
   if (typeof obj['entityId'] !== 'string' || obj['entityId'].length === 0) {
     throw new Error(`FINANCIAL-SAFETY: EntityOutput entityId is missing - routing corruption`);
@@ -405,7 +405,7 @@ export function validateEntityOutput(output: unknown): RoutedEntityInput {
  * These inputs must already have a resolved runtimeId before leaving the local runtime.
  */
 export function validateDeliverableEntityInput(output: unknown): DeliverableEntityInput {
-  const validated = validateEntityOutput(output);
+  const validated = decodeRoutedEntityOutput(output);
   if (typeof validated.runtimeId !== 'string' || validated.runtimeId.trim().length === 0) {
     throw new Error('FINANCIAL-SAFETY: Deliverable EntityOutput missing runtimeId');
   }
@@ -605,7 +605,7 @@ function validateBigIntRecordValues(value: unknown, fieldName: string): Record<s
 }
 
 function isValidCrontabTaskMethod(value: unknown): value is CrontabTaskMethod {
-  return value === 'checkAccountTimeouts' || value === 'hubRebalance';
+  return value === 'maintainPendingAccounts' || value === 'hubRebalance';
 }
 
 function isValidScheduledHookType(value: unknown): value is ScheduledHookType {

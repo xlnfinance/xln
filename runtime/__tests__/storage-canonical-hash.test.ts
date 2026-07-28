@@ -471,7 +471,6 @@ test('immediate replica metadata encoding matches the isolated recovery projecti
   const env = makeEnv(makeAccount('history-a'), [[1, 10n]]);
   const replica = Array.from(env.eReplicas.values())[0]!;
   const account = replica.state.accounts.get(counterpartyId)!;
-  account.clonedForValidation = structuredClone(account);
   Object.defineProperty(account, Symbol('ephemeral-account-marker'), {
     configurable: true,
     enumerable: true,
@@ -482,7 +481,6 @@ test('immediate replica metadata encoding matches the isolated recovery projecti
   const actual = encodeReplicaMeta(replica);
 
   expect(actual.equals(expected)).toBeTrue();
-  expect(replica.state.accounts.get(counterpartyId)?.clonedForValidation).toBeDefined();
 });
 
 test('live replica metadata omits transient commitment caches at every in-flight state level', () => {

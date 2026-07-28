@@ -353,7 +353,6 @@ export type StorageReplicaMeta = {
 };
 
 type AssertNoUnclassifiedPersistenceKeys<T extends never> = T;
-type AccountPersistenceCacheKeys = 'clonedForValidation';
 type EntityPersistenceSplitKeys =
   | 'accounts'
   | 'orderbookExt'
@@ -363,7 +362,7 @@ type EntityPersistenceSplitKeys =
 type ReplicaPersistenceSplitKeys = never;
 
 export type AccountPersistenceCoverage = AssertNoUnclassifiedPersistenceKeys<
-  Exclude<keyof AccountState, keyof StorageAccountDoc | AccountPersistenceCacheKeys>
+  Exclude<keyof AccountState, keyof StorageAccountDoc>
 >;
 export type EntityPersistenceCoverage = AssertNoUnclassifiedPersistenceKeys<
   Exclude<keyof EntityState, keyof StorageEntityCoreDoc | EntityPersistenceSplitKeys>

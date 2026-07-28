@@ -44,7 +44,7 @@ export type EntityCommandNonceState = {
 
 export type ConsensusOutputOrigin = {
   sourceEntityId: string;
-  lane: 'generic' | 'account-frame' | 'account-ack' | 'account-dispute' | 'account-settlement';
+  lane: 'generic' | 'account-frame' | 'account-ack' | 'account-dispute';
   /** Lifetime-monotonic for this exact source→target relationship. */
   sequence: bigint;
   /** Stable payload commitment preserved across a current-board reissue. */
@@ -872,13 +872,6 @@ type EntityTxPayload =
       type: 'processHtlcTimeouts';
       data: {
         expiredLocks?: Array<{ accountId: string; lockId: string }>;
-      };
-    }
-  | {
-      // Rollback timed-out pending frames and cancel HTLC locks backward
-      type: 'rollbackTimedOutFrames';
-      data: {
-        timedOutAccounts: Array<{ counterpartyId: string; frameHeight: number }>;
       };
     }
   | {

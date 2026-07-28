@@ -50,7 +50,7 @@ import type {
   ProposedEntityFrame,
   ValidatorJHistory,
 } from '../types';
-import { validateConsensusConfig, validateEntityInput, validateEntityReplica } from '../validation-utils';
+import { decodeRoutedEntityInput, validateConsensusConfig, validateEntityReplica } from '../validation-utils';
 
 const leaderTestJurisdiction = {
   name: 'entity-leader-test',
@@ -119,7 +119,7 @@ describe('entity leader policy', () => {
       voterId: 'alice',
       signature: '',
     };
-    expect(validateEntityInput({
+    expect(decodeRoutedEntityInput({
       entityId: state().entityId,
       signerId: 'alice',
       leaderTimeoutVote: vote,

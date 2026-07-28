@@ -18,7 +18,6 @@ import {
 } from '../../../../jurisdiction/board-registry';
 import type { AccountJClaimNodeChanges } from '../../../../types/account-j-claims';
 import type { ApplyEntityTxOptions } from '../../apply';
-import { processSettleAction } from '../settle';
 import {
   applySuccessfulAccountInput,
   type CommittedAccountEffects,
@@ -47,33 +46,6 @@ export type AccountConsensusOutcome = {
   requiredAccountResponse?: AccountPeerInput;
   accountJClaimNodeChanges?: AccountJClaimNodeChanges;
   terminalResult?: AccountHandlerResult;
-};
-
-export const applySettlementWorkspaceInput = async (
-  context: AccountInputPhaseContext,
-): Promise<void> => {
-  const { input, account, state, env, effects } = context;
-  if (input.kind !== 'settle') return;
-  const result = await processSettleAction(
-    account,
-    input.settleAction,
-    input.fromEntityId,
-    state.entityId,
-    state.timestamp,
-    env,
-    state,
-  );
-  if (!result.success) {
-    accountHandlerLog.warn('settle_action.failed', {
-      from: shortId(input.fromEntityId),
-      message: result.message,
-    });
-    addMessage(state, `⚠️ Settlement: ${result.message}`);
-    return;
-  }
-  addMessage(state, `⚖️ ${result.message}`);
-  if (result.autoApproveOutput) effects.outputs.push(result.autoApproveOutput);
-  effects.hashesToSign.push(...(result.hashesToSign ?? []));
 };
 
 const logCrossFillAckResult = (
@@ -131,8 +103,7 @@ export const applyAccountConsensusInput = async (
     input.kind === 'dispute' ||
     input.kind === 'board_reseal';
   if (!hasConsensusInput) {
-    if (input.kind !== 'settle') rejectEmptyAccountInput(context);
-    return {};
+    rejectEmptyAccountInput(context);
   }
 
   const pendingBeforeTxs = account.pendingFrame?.accountTxs.map(tx => tx.type) ?? [];

@@ -13,7 +13,6 @@
 
 import type {
   AccountFrame,
-  AccountSettleAction,
   AccountTx,
   EntityInput,
   EntityState,
@@ -764,28 +763,6 @@ export async function processCommittedSettlementTransitionFollowup(
   }
   entityState.deferredAccountProposals.set(counterpartyEntityId, workspaceHash);
   return empty();
-}
-
-/**
- * Process incoming settleAction from AccountInput (counterparty receive path)
- *
- * Guard 1: compileOps runs on receive path too (dual-side validation)
- */
-export async function processSettleAction(
-  _account: import('../../../types').AccountState,
-  settleAction: AccountSettleAction,
-  _fromEntityId: string,
-  _myEntityId: string,
-  _entityTimestamp: number,
-  _env?: RuntimeState,
-  _entityState?: EntityState,
-): Promise<{
-  success: boolean;
-  message: string;
-  autoApproveOutput?: EntityInput;
-  hashesToSign?: Array<{ hash: string; type: 'settlement' | 'dispute'; context: string }>;
-}> {
-  throw new Error(`SETTLEMENT_DIRECT_ACTION_FORBIDDEN:${settleAction.type}`);
 }
 
 /**

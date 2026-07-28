@@ -4,7 +4,6 @@ import type {
   AccountFrameAck,
   AccountFrameProposal,
   AccountInput,
-  AccountSettleAction,
   AccountTx,
 } from '../types';
 
@@ -35,11 +34,6 @@ const cloneFrameProposal = (proposal: AccountFrameProposal): AccountFrameProposa
   ...(proposal.disputeSeal ? { disputeSeal: cloneDisputeSeal(proposal.disputeSeal) } : {}),
 });
 
-const cloneSettleAction = (action: AccountSettleAction): AccountSettleAction => ({
-  ...action,
-  ...(action.ops ? { ops: action.ops.map(op => structuredClone(op)) } : {}),
-});
-
 export function cloneIsolatedAccountInput<T extends AccountInput>(input: T): T;
 export function cloneIsolatedAccountInput(input: AccountInput): AccountInput {
   const base = {
@@ -66,14 +60,5 @@ export function cloneIsolatedAccountInput(input: AccountInput): AccountInput {
       return { ...base, kind: input.kind, disputeSeal: cloneDisputeSeal(input.disputeSeal) };
     case 'board_reseal':
       return { ...base, kind: input.kind, reseal: cloneFrameAck(input.reseal) };
-    case 'settle':
-      return {
-        ...base,
-        kind: input.kind,
-        settleAction: cloneSettleAction(input.settleAction),
-        ...(input.newSettlementHanko !== undefined
-          ? { newSettlementHanko: input.newSettlementHanko }
-          : {}),
-      };
   }
 }

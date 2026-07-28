@@ -1,7 +1,7 @@
 import type { RoutedEntityInput, RuntimeInput } from '../../types';
 import { validateRuntimeInputEnvelope } from '../../protocol/boundary-validation';
 import { cloneIsolatedRuntimeSnapshot } from '../../protocol/runtime-input-clone';
-import { validateEntityInput } from '../../validation-utils';
+import { decodeRoutedEntityInput } from '../../validation-utils';
 import { validateBrowserVmState } from './browser';
 import { validateEntityTxs } from './entity-tx';
 import { validateJInputs, validateJReplicas } from './j';
@@ -63,7 +63,7 @@ const validateRoutedEntityInput = (
     'atomicCrossJurisdictionPair',
     ...(options.allowSourceRuntimeFrame ? ['sourceRuntimeFrame'] : []),
   ], `${code}_FIELDS`);
-  validateEntityInput(input);
+  decodeRoutedEntityInput(input);
   for (const field of ['entityId', 'signerId', 'runtimeId', 'from']) {
     if (input[field] !== undefined) requireString(input[field], `${code}_${field.toUpperCase()}`);
   }

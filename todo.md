@@ -106,17 +106,32 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   may then use single-writer mutate+halt/reload instead of a full clone; Entity
   and Account must retain isolated candidates until their respective
   certificate or bilateral ACK commits them. Keep single-signer Entity on the
-  same candidate pipeline with an immediate local certificate.
+  same candidate pipeline with an immediate local certificate. Preserve the
+  intentional parent commitment: EntityState binds the deterministic
+  AccountReplica envelope (mempool, pending candidate and delivery state with
+  post-commit Hankos stripped), while AccountStateRoot binds only bilateral
+  committed state. Replace implicit field-deletion projections with two
+  explicitly named byte-identical projections.
 - [ ] Give every nested machine one explicit deterministic input boundary.
   `RuntimeInput` owns `RuntimeTx[]` plus routed Entity inputs; `EntityInput`
   owns `EntityTx[]` plus Entity-consensus evidence. `AccountInput` is the one
   Account boundary: its local `txs` branch carries `AccountTx[]` destined for
   a future Account frame, while its peer
-  `frame/ack/frame_ack/dispute/reseal/settle` branches carry bilateral
+  `frame/ack/frame_ack/dispute/reseal` branches carry bilateral
   consensus evidence. The `accountInput` EntityTx commits the exact child
   `AccountPeerInput`; Entity-owned financial transactions create the local
   `AccountInput.txs` branch. Both paths enter one `applyAccountInput`
   transition so Entity reducers never mutate an Account mempool directly.
+  Do not serialize that deterministically derived local child input as an
+  additional `EntityTx.accountInput`: the parent EntityTx already commits the
+  instruction that produces it, while duplicating the child would change
+  EntityFrame bytes and create two sources of truth. Add an explicit
+  WAL/schema fence rejecting `EntityTx.accountInput.data.kind === 'txs'`,
+  matching the existing TypeScript and P2P boundary.
+  Validate pair endpoints, domain and watch seed before dispatching every
+  AccountInput variant. Preflight a complete local `txs` batch and install it
+  atomically so a rejected later transaction cannot leave earlier admission
+  behind at the Account API boundary.
   Each replica transition
   returns deterministic outputs to its parent; only Runtime may interpret
   committed outputs as post-WAL external effects. Keep transaction order and
@@ -129,8 +144,15 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   Entity reducers wrap local future-frame `AccountTx[]` in
   `AccountInput { kind: 'txs' }`; peer AccountInput variants remain exact
   bilateral protocol payloads.
-  Model candidate timeout/rollback as an explicit local AccountInput rather
-  than letting Entity delete `pendingFrame` or rewrite Account mempool.
+  Account proposals never time out: once a Hanko leaves the replica, the
+  signed proposal is final and non-negotiable. Lost delivery only resends the
+  exact signed `AccountPeerInput`. A pending proposal may be rolled back only
+  during deterministic same-height collision resolution: the valid LEFT frame
+  wins, the losing pending transactions return to the Account mempool in their
+  original order, and they are reapplied above the accepted frame. The winner
+  never depends on wall time, retries, HTLC deadlines, dispute evidence or a
+  settlement nonce: the protocol permits one proposal per side per height, and
+  `Depository.sol` uses the same unconditional LEFT tie-break.
   Evaluate a small structural `Transition<State, Output, Effect>` result type,
   but adopt it only where it removes duplicate result shapes without weakening
   the Runtime/Entity/Account ownership boundary.
@@ -163,14 +185,25 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   Do not add a compatibility fallback: this is testnet, so make one canonical
   schema transition with explicit migration tooling if durable fixtures need
   conversion.
-- [ ] Delete the remaining Account-boundary escape hatches. Replace
-  `rollbackTimedOutFrames` direct candidate deletion with a local AccountInput;
-  move Entity-side mempool pruning after HTLC/dispute/settlement events into
+- [ ] Delete the remaining Account-boundary escape hatches. Delete
+  `rollbackTimedOutFrames`, `ACCOUNT_ACK_TIMEOUT_MS`, and every scheduler path
+  that deletes a signed pending proposal because time or an embedded HTLC
+  deadline elapsed. Rename `checkAccountTimeouts` to the actual liveness job:
+  exact signed-input resend plus diagnostics/dispute escalation. An expired
+  HTLC never authorizes local proposal deletion; resolve it in a later Account
+  frame or through the dispute protocol. Keep same-height rollback exclusively
+  inside Account consensus, where a valid LEFT frame wins and the losing
+  proposal's transactions are restored exactly once. Move Entity-side mempool
+  pruning after HTLC/dispute/settlement events into
   Account-owned transitions; delete the production-dead
   `addToAccountMempool` export and update its bounds test to use
   `applyAccountInput`. Prove by import/call-site scan that Entity and Runtime
   cannot write Account mempool, pending candidate, delta, collateral, holds or
   credit directly.
+  **Done:** deleted the wire `AccountInput.kind === 'settle'` branch, its
+  unreachable fail-fast handler, clone path, witness path and unused
+  `account-settlement` consumption lane. Settlement negotiation has one path:
+  canonical EntityTxs produce bilateral `settle_transition` AccountTxs.
 - [ ] Remove confirmed vestigial or misplaced state only with root/storage
   evidence: investigate the unwritten `EntityState.accountInputQueue`,
   the hash-excluded `entityEncPrivKey`, and dead/misleading `EntityOutput`
@@ -190,9 +223,14 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 - [ ] Canonicalize financial construction and naming. Make hold fields
   mandatory, build every empty Delta through one Account-owned constructor,
   and prove identical keys/roots across add-delta, J-settlement and projection.
-  Rename the soft consensus predicate and strict ingress assertion so two
-  operations are not both called `validateEntityInput`; centralize
-  settlement-Hanko projection and RuntimeState symbols.
+  **Done:** renamed the strict wire decoder to `decodeRoutedEntityInput` and
+  the soft consensus predicate to `isEntityInputWellFormed`; reducer outputs
+  decode through `decodeRoutedEntityOutput` because Output is a direction, not
+  a duplicate wire type. Next, centralize
+  settlement-Hanko projection and RuntimeState symbols. Apply the same
+  `decode/assert` versus `isWellFormed/isProposable` distinction to twin
+  Account-frame validators; identical names must not hide throwing schema
+  validation versus a soft consensus predicate.
 - [ ] Restore a structurally enforceable money boundary. Move finalized
   Account J-event settlement/dispute mutations out of `entity/tx/` and into
   Account-owned handlers; Entity may authenticate and route, but only Account
@@ -209,7 +247,10 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   Precompute every throwing assertion before install; any doubt after WAL
   halts and reloads the durable frame. Operational notifications happen only
   after the durable result is fixed and can report failure but never reclassify
-  or roll back that result.
+  or roll back that result. `env.warn`, `env.error` and special info diagnostics
+  currently call P2P debug delivery from the working candidate; queue all
+  network-visible diagnostics and flush them only after WAL commit. A rolled
+  back frame may log locally but must be externally unobservable.
 - [ ] Make post-state Runtime ingress rejection explicit and deterministic.
   Inputs admitted against frame H may become stale after the single writer
   commits H+1; classify authenticated terminal protocol rejection separately
@@ -230,6 +271,11 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   proposal construction and one Account open from the actual browser bundle,
   not only Bun source imports. Programming faults such as `TypeError` must
   preserve their source stack and halt, never be relabelled as rejected input.
+  Remove confirmed Account→Entity/Runtime ownership imports by moving pair
+  ordering into a neutral protocol module, moving graph-wide solvency
+  inspection under Runtime audit, and injecting signer/history/effect
+  dependencies into Account consensus. Entity may return deterministic
+  storage/effect descriptions but must not import Runtime mutation helpers.
 - [ ] Remove only call-site-proven dead code in small module-owned batches.
   Reverify dynamic imports, scenario/CLI entrypoints and browser API first;
   `runNumberedRegistrationIntent` is currently live scenario infrastructure,
@@ -237,8 +283,12 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   wallet/helper, retention/hook, lookup/barrel and rename-only orphans.
   The old audit's named deletion batch has been exhausted or disproved on the
   current tree; discover the next candidates from current call sites instead
-  of carrying that stale list forward. Public API removals require an explicit
-  compatibility decision.
+  of carrying that stale list forward. Reverify and delete the unwritten
+  `accountInputQueue`, dead `RuntimeSnapshot`, zombie `EntityOutput`, and
+  zero-call-site tx/financial/hook/barrel exports. Do not invent empty
+  `RuntimeOutput` or `AccountOutput` aliases merely for naming symmetry;
+  derive output unions only from real reducer results. Public API removals
+  require an explicit compatibility decision.
 - [ ] Remove duplicate policy and display code: use canonical Account
   `Delta`/`DerivedDelta` and `deriveDelta` in the dev visualizer and Graph3D;
   BigInt remains exact until the geometry/formatting boundary. Fix the stale

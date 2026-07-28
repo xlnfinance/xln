@@ -6,7 +6,6 @@
 import type {
   AccountState,
   AccountFrame,
-  AccountTx,
   AccountInput,
   AccountPeerInput,
   EntityCandidateEffect,
@@ -41,8 +40,9 @@ import {
   shouldIncludeToken,
   summarizeDeltasForLog,
 } from './helpers';
-import { appendAccountMempoolTx, appendAccountMempoolTxs } from '../mempool';
+import { appendAccountMempoolTxs } from '../mempool';
 import { applyLocalAccountInput } from '../local-tx-admission';
+import { getAccountInputEnvelopeError } from '../input';
 import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '../../protocol/dispute/arguments';
 import type {
   AccountConsensusHashToSign,
@@ -825,7 +825,6 @@ function installPendingFrameCommit(
   delete account.pendingFrame;
   delete account.pendingAccountInput;
   delete account.pendingAccountInputSignerId;
-  delete account.clonedForValidation;
   discardStagedAccountCommitmentCache(account);
   if (
     account.lastOutboundFrameAck &&
@@ -1142,13 +1141,27 @@ function resolveSameHeightIncomingFrame(
   receivedFrame: AccountFrame,
   events: string[],
   committedFrames: AccountCommittedFrame[],
-  validatedCounterpartyDisputeSeal: ValidatedCounterpartyDisputeSeal | undefined,
 ): HandleAccountInputResult | true | undefined {
   if (!(account.pendingFrame && receivedFrame.height === account.pendingFrame.height)) {
     return undefined;
   }
 
-  // Simultaneous proposal tiebreaker: left keeps its pending frame, right rolls back.
+  /*
+   * One Account height permits one proposal from each side. If both proposals
+   * race, the valid LEFT proposal is canonical.
+   *
+   * Why fixed LEFT:
+   * - Depository.sol uses the same equal-height winner, so off-chain recovery
+   *   and an adversarial on-chain dispute cannot disagree.
+   * - A selected proposer would need timeout/view-change state when it is
+   *   offline, turning bilateral consensus into a leader-election protocol.
+   * - Alternating LEFT/RIGHT by height would either disagree with Depository
+   *   or require a contract-level protocol migration.
+   *
+   * Time, retry count, HTLC expiry and settlement evidence deliberately do
+   * not affect this choice. They cannot create a higher Account proposal in
+   * the same round.
+   */
   const isLeftEntity = isLeft(account.proofHeader.fromEntity, account.proofHeader.toEntity);
   if (HEAVY_LOGS) {
     accountLog.debug('frame.tiebreaker', {
@@ -1158,15 +1171,7 @@ function resolveSameHeightIncomingFrame(
     });
   }
 
-  const pendingSettlementNonceConflict = validatedCounterpartyDisputeSeal
-    ? account.pendingFrame.accountTxs.some((tx) =>
-        tx.type === 'settle_transition' &&
-        tx.data.kind === 'seal' &&
-        tx.data.settlementNonce <= validatedCounterpartyDisputeSeal.nonce
-      )
-    : false;
-
-  if (isLeftEntity && !pendingSettlementNonceConflict) {
+  if (isLeftEntity) {
     events.push(`📤 LEFT-WINS: Ignored RIGHT's frame ${receivedFrame.height} (waiting for their ACK)`);
     if (account.mempool.length > 0) {
       events.push(`⚠️ LEFT has ${account.mempool.length} pending txs while waiting for RIGHT's ACK`);
@@ -1191,18 +1196,6 @@ function resolveSameHeightIncomingFrame(
     };
   }
 
-  if (isLeftEntity) {
-    // LEFT normally wins a same-height collision. A settlement authorization
-    // cannot win after the peer has produced a valid dispute proof at the same
-    // or a higher shared Account-contract nonce: the peer signature already
-    // makes that nonce unsafe to reuse for settlement. Yield to the peer frame,
-    // then restore and rebuild our pending transactions at the next nonce.
-    events.push(
-      `🔄 LEFT-YIELDS: peer proof nonce ${validatedCounterpartyDisputeSeal!.nonce} ` +
-      `invalidated our pending settlement nonce`,
-    );
-  }
-
   const receivedHash = receivedFrame.stateHash;
   if (account.lastRollbackFrameHash === receivedHash) {
     accountLog.debug('rollback.duplicate', { frame: shortHash(receivedHash) });
@@ -1219,6 +1212,16 @@ function applySameHeightIncomingFrameRollback(
   receivedFrame: AccountFrame,
   events: string[],
 ): void {
+  /*
+   * Only RIGHT reaches this rollback. Its signed frame was never committed,
+   * and the contract-level LEFT tie-break proves it cannot beat the accepted
+   * frame at this height. Restore the losing intentions exactly once so the
+   * normal proposer can apply them above the newly committed frame.
+   *
+   * Never call this because a clock elapsed. A Hanko already sent to the peer
+   * does not expire, and deleting it locally would create two incompatible
+   * views of still-valid signed evidence.
+   */
   const receivedHash = receivedFrame.stateHash;
   let restoredTxCount = 0;
   if (account.pendingFrame) {
@@ -1233,7 +1236,6 @@ function applySameHeightIncomingFrameRollback(
   delete account.pendingFrame;
   delete account.pendingAccountInput;
   delete account.pendingAccountInputSignerId;
-  delete account.clonedForValidation;
   discardStagedAccountCommitmentCache(account);
   account.rollbackCount = Math.max(1, account.rollbackCount + 1);
   account.lastRollbackFrameHash = receivedHash; // Track this rollback
@@ -1465,7 +1467,6 @@ async function preflightIncomingAccountFrame(
   events: string[],
   committedFrames: AccountCommittedFrame[],
   securityContext: AccountInputSecurityContext,
-  validatedCounterpartyDisputeSeal: ValidatedCounterpartyDisputeSeal | undefined,
 ): Promise<IncomingFramePreflightResult> {
   const receivedFrame = accountInputProposal(input)?.frame;
   if (!receivedFrame) {
@@ -1521,7 +1522,6 @@ async function preflightIncomingAccountFrame(
     receivedFrame,
     events,
     committedFrames,
-    validatedCounterpartyDisputeSeal,
   );
   if (sameHeightResolution !== true && sameHeightResolution) {
     return { kind: 'return', result: sameHeightResolution };
@@ -2164,7 +2164,6 @@ async function handleIncomingAccountFrame(
     events,
     committedFrames,
     securityContext,
-    validatedCounterpartyDisputeSeal,
   );
   if (preflight.kind === 'return') {
     return classifyPreflightReturn(preflight.result);
@@ -2435,6 +2434,10 @@ export async function applyAccountInput(
   providedSecurityContext?: AccountInputSecurityContext,
   accountJClaimNodeStore?: AccountJClaimNodeStore,
 ): Promise<HandleAccountInputResult> {
+  const envelopeError = getAccountInputEnvelopeError(account, input);
+  if (envelopeError) {
+    return { success: false, error: envelopeError, events: [] };
+  }
   if (input.kind === 'txs') return applyLocalAccountInput(account, input);
   const securityContext = resolveAccountInputSecurityContext(
     env,
@@ -2517,14 +2520,4 @@ export async function applyAccountInput(
       committedFrames: session.committedFrames,
     }),
   });
-}
-
-// === E-MACHINE INTEGRATION ===
-
-/**
- * Add transaction to account mempool with limits
- */
-export function addToAccountMempool(account: AccountState, accountTx: AccountTx): boolean {
-  appendAccountMempoolTx(account, accountTx, 'accountConsensus:externalAdmission');
-  return true;
 }

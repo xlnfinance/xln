@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
-  ACCOUNT_TIMEOUT_CHECK_INTERVAL_MS,
+  ACCOUNT_MAINTENANCE_INTERVAL_MS,
   HUB_REBALANCE_INTERVAL_MS,
   initCrontab,
   scheduleHook,
@@ -123,11 +123,11 @@ describe('runtime scheduled wake', () => {
 
     expect(entityNeedsPeriodicWake(replica)).toBe(true);
     expect(collectDueScheduledWakeJobs(state, HUB_REBALANCE_INTERVAL_MS, true)).toEqual([]);
-    expect(collectDueScheduledWakeJobs(state, ACCOUNT_TIMEOUT_CHECK_INTERVAL_MS, true)).toEqual([
+    expect(collectDueScheduledWakeJobs(state, ACCOUNT_MAINTENANCE_INTERVAL_MS, true)).toEqual([
       {
         kind: 'task',
-        id: 'checkAccountTimeouts',
-        dueAt: ACCOUNT_TIMEOUT_CHECK_INTERVAL_MS,
+        id: 'maintainPendingAccounts',
+        dueAt: ACCOUNT_MAINTENANCE_INTERVAL_MS,
       },
     ]);
   });

@@ -258,14 +258,12 @@ test('Entity consensus root excludes only typed Account replica caches', () => {
     mempool: [],
     pendingWithdrawals: new Map(),
     frameHistory: [{ stateHash: 'left-cache' }],
-    clonedForValidation: { status: 'left-clone' },
   } as never);
   right.accounts.set(counterpartyId, {
     status: 'active',
     mempool: [],
     pendingWithdrawals: new Map(),
     frameHistory: [{ stateHash: 'right-cache' }],
-    clonedForValidation: { status: 'right-clone' },
   } as never);
   expect(computeCanonicalEntityConsensusStateHash(left))
     .toBe(computeCanonicalEntityConsensusStateHash(right));

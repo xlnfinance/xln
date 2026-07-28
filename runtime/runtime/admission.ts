@@ -6,7 +6,6 @@ const OUTBOX_BACKPRESSURE_EXEMPT_TXS = new Set<EntityTx['type']>([
   'j_event',
   'j_event_account_claim',
   'processHtlcTimeouts',
-  'rollbackTimedOutFrames',
   'prepareDispute',
   'disputeStart',
   'disputeFinalize',

@@ -206,8 +206,7 @@ export const normalizeConsensusOutputOrigin = (value: unknown): ConsensusOutputO
     lane !== 'generic' &&
     lane !== 'account-frame' &&
     lane !== 'account-ack' &&
-    lane !== 'account-dispute' &&
-    lane !== 'account-settlement'
+    lane !== 'account-dispute'
   ) {
     throw new Error(`CONSENSUS_OUTPUT_LANE_INVALID:${lane || 'missing'}`);
   }
@@ -378,13 +377,6 @@ const accountInputLaneAndSequence = (
     if (sequence < 0n) throw new Error(`CONSENSUS_OUTPUT_ACCOUNT_DISPUTE_SEQUENCE_INVALID:${sequence}`);
     return { lane: 'account-dispute', sequence };
   }
-  if (input.kind === 'settle') {
-    const rawSequence = input.settleAction.nonceAtSign ?? input.settleAction.version;
-    if (!Number.isSafeInteger(rawSequence) || Number(rawSequence) < 0) {
-      throw new Error(`CONSENSUS_OUTPUT_ACCOUNT_SETTLEMENT_SEQUENCE_INVALID:${String(rawSequence)}`);
-    }
-    return { lane: 'account-settlement', sequence: BigInt(rawSequence!) };
-  }
   throw new Error(`CONSENSUS_OUTPUT_ACCOUNT_LANE_INVALID:${String((input as { kind?: unknown }).kind)}`);
 };
 
@@ -448,7 +440,7 @@ export const assertCertifiedOutputSemanticIdentity = (
 
 /**
  * Allocate only generic source counters. Account lanes reuse their native
- * frame/proof/settlement nonce and therefore never create a parallel counter.
+ * frame/proof nonce and therefore never create a parallel counter.
  * A pre-tagged generic output is a governance reissue and must match the exact
  * bounded last-issued source frontier.
  */
@@ -567,13 +559,6 @@ const collectAccountInputWitnesses = (input: AccountPeerInput): OutputWitness[] 
     ['direct-dispute', accountInputDisputeSeal(input)],
   ] as const) {
     if (seal) witnesses.push(requiredWitness(context, seal.hash, seal.hanko));
-  }
-  if (input.kind === 'settle' && input.settleAction.type === 'approve') {
-    witnesses.push(requiredWitness(
-      'settlement',
-      input.settleAction.settlementHash,
-      input.settleAction.hanko,
-    ));
   }
   return witnesses;
 };
