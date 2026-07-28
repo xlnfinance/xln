@@ -112,7 +112,7 @@ const fatalIncidentRoutes = [
   {
     name: 'managed-runtime',
     steps: [
-      ['runtime/engine/loop.ts', ['await config.onFatal({', 'runtimeProcess.exit(1);']],
+      ['runtime/runtime/loop.ts', ['await config.onFatal({', 'runtimeProcess.exit(1);']],
       ['runtime/orchestrator/hub-node.ts', ['onFatal: async payload => {', 'await reportManagedChildFatal({']],
       ['runtime/orchestrator/mm-node.ts', ['onFatal: async payload => {', 'await reportManagedChildFatal({']],
       [
@@ -164,7 +164,7 @@ const fatalIncidentRoutes = [
         'runtime/runtime/j-submit.ts',
         ['J_SUBMIT_FATAL:', "queueBatchResult(env, deps, jInput.jurisdictionName, jTx, 'terminalFailure'"],
       ],
-      ['runtime/engine/loop.ts', ['await processRuntime(env);', 'await config.onFatal({']],
+      ['runtime/runtime/loop.ts', ['await processRuntime(env);', 'await config.onFatal({']],
     ],
   },
 ] as const;
@@ -810,7 +810,7 @@ for (const marker of [
   assertIncludes(runtimeEntityInputs, marker, runtimeEntityInputsPath);
 }
 
-const runtimeSourcePath = 'runtime/engine/loop.ts';
+const runtimeSourcePath = 'runtime/runtime/loop.ts';
 const runtimeSource = readText(runtimeSourcePath);
 assertIncludes(runtimeSource, 'error.isQuarantinableRemoteIngress', runtimeSourcePath);
 assertNotIncludes(

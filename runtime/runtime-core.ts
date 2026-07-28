@@ -36,7 +36,7 @@ import {
   notifyRuntimeSyncAfterCommit,
 } from './persistence/runtime-storage';
 import { rehydrateRestoredRuntimeInfra, type TrustedJurisdictionRpcBinding } from './runtime/infra';
-import { createRuntimeLoopApi } from './engine/loop';
+import { createRuntimeLoopApi } from './runtime/loop';
 import { createRuntimeRecoveryApi } from './recovery/restore';
 import { createRuntimeStateApi } from './state/create';
 import { loadGossipProfilesFromInfraDb } from './runtime/infra-gossip-store';

@@ -7,7 +7,7 @@ import {
   resolveRuntimeEntityName,
   searchRuntimeEntityNames,
 } from '../routing/name-resolution';
-import type { createRuntimeLoopApi } from '../engine/loop';
+import type { createRuntimeLoopApi } from './loop';
 import type {
   CrossJurisdictionSwapRoute,
   Env,

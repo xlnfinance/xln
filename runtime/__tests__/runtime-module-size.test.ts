@@ -8,7 +8,7 @@ const coordinatorModules = [
   'runtime-core.ts',
   'runtime-public-api.ts',
   'public-utilities.ts',
-  'engine/loop.ts',
+  'runtime/loop.ts',
   'persistence/runtime-storage.ts',
   'recovery/restore.ts',
   'state/create.ts',
