@@ -193,7 +193,7 @@ assertOrder(accountFrame, accountFramePath, [
 ]);
 assertOrder(entityFrame, entityFramePath, [
   'const frameData = {',
-  "version: 'xln:entity-frame:v4',",
+  "version: 'xln:entity-frame:v1',",
   'txs: txs.map(canonicalEntityTxForFrameHash),',
   'stateRoot: stateRoot.toLowerCase(),',
   'authorityRoot: authorityRoot.toLowerCase(),',

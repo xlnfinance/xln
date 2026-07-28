@@ -1011,7 +1011,7 @@ const isRefreshableStaleIncomingSettlementSeal = (
     tx.type === 'settle_transition' &&
     tx.data.kind === 'seal' &&
     tx.data.settlementNonce === suppliedNonce &&
-    tx.data.version === workspace.version &&
+    tx.data.revision === workspace.revision &&
     tx.data.workspaceHash.toLowerCase() === workspace.workspaceHash.toLowerCase()
   );
   return matchingSeals.length === 1;

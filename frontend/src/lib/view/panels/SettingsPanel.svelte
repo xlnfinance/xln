@@ -13,6 +13,8 @@
   import { setFrontendVerboseLogging } from '../utils/frontendLogger';
   import ConsolePanel from './ConsolePanel.svelte';
   import IndexedDbInspector from '$lib/components/Settings/IndexedDbInspector.svelte';
+  import RuntimeStorageLimits from '$lib/components/Settings/RuntimeStorageLimits.svelte';
+  import RuntimePerformanceBudgets from '$lib/components/Settings/RuntimePerformanceBudgets.svelte';
   import TabStylePicker from '$lib/components/Settings/TabStylePicker.svelte';
   import { TAB_STYLE_OPTIONS } from '$lib/utils/ui-style-options';
   import { settings as appSettings, settingsOperations } from '$lib/stores/settingsStore';
@@ -418,6 +420,7 @@
 
   <div class="settings-content">
     {#if activeCategory === 'storage'}
+      <RuntimeStorageLimits {runtimeFrameEnv} />
       <IndexedDbInspector />
 
     {:else if activeCategory === 'scene'}
@@ -720,6 +723,7 @@
       </div>
 
     {:else if activeCategory === 'performance'}
+      <RuntimePerformanceBudgets {runtimeFrameEnv} />
       <h4>Performance Settings</h4>
 
       <div class="setting-group">

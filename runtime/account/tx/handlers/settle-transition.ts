@@ -45,9 +45,9 @@ type HoldPlan = Readonly<{
 const transitionLog = createStructuredLogger('account.settle');
 const WORKSPACE_DOMAIN = 'xln:settlement-workspace:v1';
 
-const assertVersion = (version: number): void => {
-  if (!Number.isSafeInteger(version) || version < 1) {
-    throw new Error(`SETTLEMENT_WORKSPACE_VERSION_INVALID:${String(version)}`);
+const assertVersion = (revision: number): void => {
+  if (!Number.isSafeInteger(revision) || revision < 1) {
+    throw new Error(`SETTLEMENT_WORKSPACE_VERSION_INVALID:${String(revision)}`);
   }
 };
 
@@ -88,12 +88,12 @@ const assertSettlementOps = (ops: readonly SettlementOp[]): void => {
 
 const canonicalWorkspaceBody = (
   account: Pick<AccountState, 'leftEntity' | 'rightEntity'>,
-  workspace: Pick<SettlementWorkspace, 'version' | 'ops' | 'lastModifiedByLeft' | 'executorIsLeft' | 'memo'>,
+  workspace: Pick<SettlementWorkspace, 'revision' | 'ops' | 'lastModifiedByLeft' | 'executorIsLeft' | 'memo'>,
 ) => ({
   domain: WORKSPACE_DOMAIN,
   leftEntity: account.leftEntity.toLowerCase(),
   rightEntity: account.rightEntity.toLowerCase(),
-  version: workspace.version,
+  revision: workspace.revision,
   ops: workspace.ops,
   lastModifiedByLeft: workspace.lastModifiedByLeft,
   executorIsLeft: workspace.executorIsLeft,
@@ -102,7 +102,7 @@ const canonicalWorkspaceBody = (
 
 export const createSettlementWorkspaceHash = (
   account: Pick<AccountState, 'leftEntity' | 'rightEntity'>,
-  workspace: Pick<SettlementWorkspace, 'version' | 'ops' | 'lastModifiedByLeft' | 'executorIsLeft' | 'memo'>,
+  workspace: Pick<SettlementWorkspace, 'revision' | 'ops' | 'lastModifiedByLeft' | 'executorIsLeft' | 'memo'>,
 ): string => computeCanonicalMerkleRoot('settlement.workspace', [
   ['body', canonicalWorkspaceBody(account, workspace)],
 ]);
@@ -182,16 +182,16 @@ const addWorkspaceHolds = (
 
 const assertCurrentWorkspace = (
   account: AccountState,
-  version: number,
+  revision: number,
   suppliedHash: string,
 ): SettlementWorkspace => {
-  assertVersion(version);
+  assertVersion(revision);
   const workspace = account.settlementWorkspace;
   if (!workspace) throw new Error('SETTLEMENT_WORKSPACE_MISSING');
   const currentHash = assertCanonicalSettlementWorkspace(account, workspace);
   const requestedHash = assertWorkspaceHash(suppliedHash, 'SETTLEMENT_WORKSPACE_TARGET_HASH_INVALID');
-  if (workspace.version !== version) {
-    throw new Error(`SETTLEMENT_WORKSPACE_VERSION_MISMATCH:${workspace.version}:${version}`);
+  if (workspace.revision !== revision) {
+    throw new Error(`SETTLEMENT_WORKSPACE_VERSION_MISMATCH:${workspace.revision}:${revision}`);
   }
   if (currentHash !== requestedHash) {
     throw new Error(`SETTLEMENT_WORKSPACE_TARGET_HASH_MISMATCH:${currentHash}:${requestedHash}`);
@@ -286,7 +286,7 @@ const prepareSettlementSeal = (
   transition: Extract<SettleTransitionTx['data'], { kind: 'seal' }>,
   env: RuntimeState,
 ) => {
-  const workspace = assertCurrentWorkspace(draft, transition.version, transition.workspaceHash);
+  const workspace = assertCurrentWorkspace(draft, transition.revision, transition.workspaceHash);
   if (workspace.status === 'submitted') throw new Error('SETTLEMENT_SEAL_SUBMITTED_FORBIDDEN');
   const settlementNonce = assertSettlementNonce(
     transition.settlementNonce,
@@ -526,14 +526,14 @@ const buildUpsertWorkspace = (
   byLeft: boolean,
   timestamp: number,
 ): SettlementWorkspace => {
-  assertVersion(transition.version);
+  assertVersion(transition.revision);
   assertSettlementOps(transition.ops);
   if (typeof transition.executorIsLeft !== 'boolean') {
     throw new Error('SETTLEMENT_WORKSPACE_EXECUTOR_INVALID');
   }
   compileOps(transition.ops, byLeft);
   const current = account.settlementWorkspace;
-  if (transition.version === 1) {
+  if (transition.revision === 1) {
     if (current) throw new Error('SETTLEMENT_WORKSPACE_ALREADY_EXISTS');
     if (transition.previousWorkspaceHash !== undefined) {
       throw new Error('SETTLEMENT_WORKSPACE_PREVIOUS_HASH_UNEXPECTED');
@@ -541,8 +541,8 @@ const buildUpsertWorkspace = (
   } else {
     if (!current) throw new Error('SETTLEMENT_WORKSPACE_PREVIOUS_MISSING');
     if (current.leftHanko || current.rightHanko) throw new Error('SETTLEMENT_WORKSPACE_SIGNED_UPDATE_FORBIDDEN');
-    if (current.version + 1 !== transition.version) {
-      throw new Error(`SETTLEMENT_WORKSPACE_NON_CONTIGUOUS_VERSION:${current.version}:${transition.version}`);
+    if (current.revision + 1 !== transition.revision) {
+      throw new Error(`SETTLEMENT_WORKSPACE_NON_CONTIGUOUS_VERSION:${current.revision}:${transition.revision}`);
     }
     const currentHash = assertCanonicalSettlementWorkspace(account, current);
     const previousHash = assertWorkspaceHash(
@@ -559,7 +559,7 @@ const buildUpsertWorkspace = (
     lastModifiedByLeft: byLeft,
     status: 'awaiting_counterparty',
     ...(transition.memo !== undefined ? { memo: transition.memo } : {}),
-    version: transition.version,
+    revision: transition.revision,
     createdAt: current?.createdAt ?? timestamp,
     lastUpdatedAt: timestamp,
     executorIsLeft: transition.executorIsLeft,
@@ -633,8 +633,8 @@ export async function handleSettleTransition(
       draft.settlementWorkspace = next;
       for (const tokenId of addWorkspaceHolds(draft, next)) changed.add(tokenId);
       commitDraft(account, draft, changed);
-      transitionLog.debug('workspace.upserted', { version: next.version, hash: next.workspaceHash });
-      return { success: true, events: [`Settlement workspace v${next.version} committed`] };
+      transitionLog.debug('workspace.upserted', { revision: next.revision, hash: next.workspaceHash });
+      return { success: true, events: [`Settlement workspace v${next.revision} committed`] };
     }
 
     if (transition.kind === 'seal') {
@@ -643,10 +643,10 @@ export async function handleSettleTransition(
       account.disputeProofBodiesByHash = structuredClone(draft.disputeProofBodiesByHash ?? {});
       account.disputeProofNoncesByHash = { ...(draft.disputeProofNoncesByHash ?? {}) };
       account.disputeArgumentSnapshotsByHash = structuredClone(draft.disputeArgumentSnapshotsByHash ?? {});
-      return { success: true, events: [`Settlement workspace v${transition.version} sealed`] };
+      return { success: true, events: [`Settlement workspace v${transition.revision} sealed`] };
     }
 
-    const workspace = assertCurrentWorkspace(draft, transition.version, transition.workspaceHash);
+    const workspace = assertCurrentWorkspace(draft, transition.revision, transition.workspaceHash);
     if (transition.kind === 'submit') {
       if (workspace.status === 'submitted') throw new Error('SETTLEMENT_WORKSPACE_ALREADY_SUBMITTED');
       if (byLeft !== workspace.executorIsLeft) throw new Error('SETTLEMENT_SUBMIT_EXECUTOR_MISMATCH');
@@ -663,7 +663,7 @@ export async function handleSettleTransition(
       workspace.status = 'submitted';
       workspace.lastUpdatedAt = timestamp;
       commitDraft(account, draft, changed);
-      return { success: true, events: [`Settlement workspace v${workspace.version} submitted`] };
+      return { success: true, events: [`Settlement workspace v${workspace.revision} submitted`] };
     }
 
     if (workspace.status === 'submitted') throw new Error('SETTLEMENT_CLEAR_SUBMITTED_FORBIDDEN');
@@ -676,7 +676,7 @@ export async function handleSettleTransition(
     for (const tokenId of releaseWorkspaceHolds(draft, workspace)) changed.add(tokenId);
     delete draft.settlementWorkspace;
     commitDraft(account, draft, changed);
-    return { success: true, events: [`Settlement workspace v${workspace.version} cleared`] };
+    return { success: true, events: [`Settlement workspace v${workspace.revision} cleared`] };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     transitionLog.warn('workspace.transition_rejected', { kind: tx.data.kind, error: message });

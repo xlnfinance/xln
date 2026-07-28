@@ -29,6 +29,10 @@ const API_BASE_URL = requireIsolatedBaseUrl('E2E_API_BASE_URL');
 const LONG_E2E = process.env.E2E_LONG === '1';
 const INIT_TIMEOUT = 30_000;
 const SETTLE_MS = 10_000;
+// The full gate runs eight complete browser+Anvil stacks. Durable event
+// delivery normally finishes well inside this in isolation; the larger wait
+// prevents host contention from being misreported as a consensus failure.
+const DURABLE_EVENT_TIMEOUT_MS = 60_000;
 const FEE_DENOM = 1_000_000n;
 
 type HubFeeConfig = {
@@ -808,7 +812,7 @@ test('bidirectional payments survive across two isolated browser contexts', { ta
         eventName: 'HtlcFinalized',
         entityId: alice.entityId,
         cursor: aliceForwardFinalizeCursor,
-        timeoutMs: 30_000,
+        timeoutMs: DURABLE_EVENT_TIMEOUT_MS,
         predicate: (event) => String(event.data?.amount || '') === forwardAmount.toString(),
       });
       assertHtlcFinalizedPayload(aliceForwardFinalizeEvent, alice.entityId, hubId, forwardAmount);
@@ -816,7 +820,7 @@ test('bidirectional payments survive across two isolated browser contexts', { ta
         eventName: 'HtlcReceived',
         entityId: bob.entityId,
         cursor: bobForwardCursor,
-        timeoutMs: 20_000,
+        timeoutMs: DURABLE_EVENT_TIMEOUT_MS,
         predicate: (event) => String(event.data?.amount || '') === forwardAmount.toString(),
       });
       assertHtlcReceivedPayload(bobForwardReceiveEvent, bob.entityId, hubId, forwardAmount);
@@ -849,7 +853,7 @@ test('bidirectional payments survive across two isolated browser contexts', { ta
         eventName: 'HtlcFinalized',
         entityId: bob.entityId,
         cursor: bobReverseFinalizeCursor,
-        timeoutMs: 30_000,
+        timeoutMs: DURABLE_EVENT_TIMEOUT_MS,
         predicate: (event) => String(event.data?.amount || '') === reverseAmount.toString(),
       });
       assertHtlcFinalizedPayload(bobReverseFinalizeEvent, bob.entityId, hubId, reverseAmount);
@@ -857,7 +861,7 @@ test('bidirectional payments survive across two isolated browser contexts', { ta
         eventName: 'HtlcReceived',
         entityId: alice.entityId,
         cursor: aliceReverseCursor,
-        timeoutMs: 20_000,
+        timeoutMs: DURABLE_EVENT_TIMEOUT_MS,
         predicate: (event) => String(event.data?.amount || '') === reverseAmount.toString(),
       });
       assertHtlcReceivedPayload(aliceReverseReceiveEvent, alice.entityId, hubId, reverseAmount);
@@ -930,7 +934,7 @@ test('bidirectional payments survive across two isolated browser contexts', { ta
           eventName: 'HtlcFinalized',
           entityId: alice.entityId,
           cursor: aliceSecondForwardFinalizeCursor,
-          timeoutMs: 30_000,
+          timeoutMs: DURABLE_EVENT_TIMEOUT_MS,
           predicate: (event) => String(event.data?.amount || '') === secondForwardAmount.toString(),
         });
         assertHtlcFinalizedPayload(aliceSecondFinalizeEvent, alice.entityId, hubId, secondForwardAmount);
@@ -938,7 +942,7 @@ test('bidirectional payments survive across two isolated browser contexts', { ta
           eventName: 'HtlcReceived',
           entityId: bob.entityId,
           cursor: bobSecondForwardCursor,
-          timeoutMs: 20_000,
+          timeoutMs: DURABLE_EVENT_TIMEOUT_MS,
           predicate: (event) => String(event.data?.amount || '') === secondForwardAmount.toString(),
         });
         assertHtlcReceivedPayload(bobSecondReceiveEvent, bob.entityId, hubId, secondForwardAmount);

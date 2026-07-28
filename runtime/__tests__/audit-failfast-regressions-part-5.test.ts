@@ -1153,7 +1153,7 @@ describe('audit fail-fast regressions', () => {
       type: 'settle_transition',
       data: {
         kind: 'upsert',
-        version: 1,
+        revision: 1,
         ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
         executorIsLeft: true,
       },
@@ -1347,7 +1347,7 @@ describe('audit fail-fast regressions', () => {
       type: 'settle_transition',
       data: {
         kind: 'upsert',
-        version: 1,
+        revision: 1,
         ops: [{ type: 'c2r', tokenId: 1, amount: 1n }],
         executorIsLeft: true,
       },
@@ -1405,7 +1405,7 @@ describe('audit fail-fast regressions', () => {
       ops: [],
       lastModifiedByLeft: true,
       status: 'submitted',
-      version: 1,
+      revision: 1,
       createdAt: 1,
       lastUpdatedAt: 2,
       executorIsLeft: true,

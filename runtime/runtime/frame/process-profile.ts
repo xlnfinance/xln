@@ -34,6 +34,10 @@ export type RuntimeProcessProfileMetrics = {
   deferredNetworkMeta: number;
   jOutputs: number;
   frameAdvanced: boolean;
+  cloneBytes?: number;
+  cloneMs?: number;
+  reducerMs?: number;
+  walMs?: number;
   storageMs?: unknown;
   cpuMs?: { user: number; system: number; total: number };
   accountCausality?: {
@@ -43,14 +47,17 @@ export type RuntimeProcessProfileMetrics = {
 };
 
 export type RuntimeProcessProfile = {
+  enabled: boolean;
   metrics: RuntimeProcessProfileMetrics;
   outcome: string;
   mark(label: string): void;
   finish(env: RuntimeState): void;
 };
 
-const profileEnabled = (): boolean =>
-  PROCESS_PROFILE || isRuntimePerfProfileEnabled('XLN_RUNTIME_APPLY_PROFILE', 'XLN_ACCOUNT_CAUSAL_TRACE');
+const profileEnabled = (env: RuntimeState): boolean =>
+  PROCESS_PROFILE ||
+  Object.keys(env.runtimeConfig?.performance ?? {}).length > 0 ||
+  isRuntimePerfProfileEnabled('XLN_RUNTIME_APPLY_PROFILE', 'XLN_ACCOUNT_CAUSAL_TRACE');
 
 const slowThresholdMs = (): number =>
   readRuntimePerfSlowMs('XLN_RUNTIME_PROCESS_SLOW_MS', PROCESS_SLOW_MS);
@@ -69,7 +76,7 @@ export const createRuntimeProcessProfile = (
   liveEnv: RuntimeState,
   triggerReason: string | null | undefined,
 ): RuntimeProcessProfile => {
-  const enabled = profileEnabled();
+  const enabled = profileEnabled(liveEnv);
   const startedAt = getPerfMs();
   const cpuStart = enabled && nodeProcess?.cpuUsage ? nodeProcess.cpuUsage() : undefined;
   const marks: Record<string, number> = {};
@@ -96,6 +103,7 @@ export const createRuntimeProcessProfile = (
     frameAdvanced: false,
   };
   const profile: RuntimeProcessProfile = {
+    enabled,
     metrics,
     outcome: 'unknown',
     mark(label) {
@@ -120,6 +128,27 @@ export const createRuntimeProcessProfile = (
         ...metrics,
         phases: cumulativeMarksToPhases(marks, elapsedMs),
       };
+      const budget = env.runtimeConfig?.performance;
+      const budgetViolations = [
+        budget?.maxCloneBytes !== undefined && (metrics.cloneBytes ?? 0) > budget.maxCloneBytes
+          ? `cloneBytes:${metrics.cloneBytes}>${budget.maxCloneBytes}`
+          : '',
+        budget?.maxCloneMs !== undefined && (metrics.cloneMs ?? 0) > budget.maxCloneMs
+          ? `cloneMs:${metrics.cloneMs}>${budget.maxCloneMs}`
+          : '',
+        budget?.maxReducerMs !== undefined && (metrics.reducerMs ?? 0) > budget.maxReducerMs
+          ? `reducerMs:${metrics.reducerMs}>${budget.maxReducerMs}`
+          : '',
+        budget?.maxWalMs !== undefined && (metrics.walMs ?? 0) > budget.maxWalMs
+          ? `walMs:${metrics.walMs}>${budget.maxWalMs}`
+          : '',
+      ].filter(Boolean);
+      if (budgetViolations.length > 0) {
+        runtimeLog.warn('process.perf_budget_exceeded', {
+          height: metrics.heightAfter,
+          violations: budgetViolations,
+        });
+      }
       if (profile.outcome === 'completed') runtimeLog.info('process.profile', fields);
       else runtimeLog.warn('process.profile', fields);
     },

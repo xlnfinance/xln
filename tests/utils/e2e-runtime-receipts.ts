@@ -113,12 +113,18 @@ async function readPersistedFrameEvents(
     if (!XLN?.getPersistedLatestHeight) throw new Error('PERSISTED_RUNTIME_API_UNAVAILABLE');
 
     const latestHeight = Number(await XLN.getPersistedLatestHeight(env) || 0);
+    let materializedThrough = Math.max(0, nextHeight - 1);
 
     for (let height = Math.max(1, nextHeight); height <= latestHeight; height += 1) {
       if (!XLN?.readPersistedRuntimeActivityJournal) {
         throw new Error('PERSISTED_RUNTIME_ACTIVITY_JOURNAL_API_UNAVAILABLE');
       }
       const frame = await XLN.readPersistedRuntimeActivityJournal(env, height) as PersistedFrameJournalView;
+      // WAL height is published before the rebuildable history projection is
+      // materialized. Never advance past that gap: doing so permanently loses
+      // every event written to this frame once materialization completes.
+      if (!frame) break;
+      materializedThrough = height;
       const logs = Array.isArray(frame?.logs) ? frame.logs : [];
       for (const entry of logs) {
         const message = typeof entry?.message === 'string' ? entry.message : '';
@@ -139,7 +145,7 @@ async function readPersistedFrameEvents(
       }
     }
     return {
-      cursor: { nextHeight: latestHeight + 1 },
+      cursor: { nextHeight: materializedThrough + 1 },
       events,
       runtimeHeight,
     };

@@ -321,7 +321,7 @@ export async function runSettleScenario(existingEnv?: RuntimeState): Promise<Run
 
   assert(aliceAccount?.settlementWorkspace, 'Alice should have settlement workspace', env);
   assert(hubAccount?.settlementWorkspace, 'Hub should have settlement workspace', env);
-  assert(aliceAccount.settlementWorkspace.version === 1, 'Workspace should be version 1');
+  assert(aliceAccount.settlementWorkspace.revision === 1, 'Workspace should be revision 1');
   assert(aliceAccount.settlementWorkspace.lastModifiedByLeft === true, 'Alice (left) should be lastModifier');
 
   // TEST: Verify settlement holds are set via frame consensus
@@ -336,7 +336,7 @@ export async function runSettleScenario(existingEnv?: RuntimeState): Promise<Run
   assert(actualHold === expectedHold, `Settlement hold not set: expected ${expectedHold}, got ${actualHold}`, env);
 
   console.log(`✅ Settlement proposed: Alice → Hub`);
-  console.log(`   Workspace version: ${aliceAccount.settlementWorkspace.version}`);
+  console.log(`   Workspace revision: ${aliceAccount.settlementWorkspace.revision}`);
   console.log(`   Status: ${aliceAccount.settlementWorkspace.status}`);
   const hubHankoField = aliceIsLeft ? 'rightHanko' : 'leftHanko';
   const initialAutoApproved = Boolean(aliceAccount.settlementWorkspace[hubHankoField]);
@@ -406,7 +406,7 @@ export async function runSettleScenario(existingEnv?: RuntimeState): Promise<Run
   }
 
   const manualProposalAccount = findReplica(env, ALICE_ID)[1].state.accounts.get(HUB_ID);
-  assert(manualProposalAccount?.settlementWorkspace?.version === 1, 'Manual workspace should start at version 1', env);
+  assert(manualProposalAccount?.settlementWorkspace?.revision === 1, 'Manual workspace should start at revision 1', env);
   assert(!manualProposalAccount.settlementWorkspace[hubHankoField], 'Manual negotiation workspace should be unsigned before update', env);
 
   // Hub counters by requesting a transfer from Alice. Alice's reserve falls,
@@ -441,7 +441,7 @@ export async function runSettleScenario(existingEnv?: RuntimeState): Promise<Run
 
   // Verify update
   const aliceAccount2 = findReplica(env, ALICE_ID)[1].state.accounts.get(HUB_ID);
-  assert(aliceAccount2?.settlementWorkspace?.version === 2, 'Version should be 2 after update', env);
+  assert(aliceAccount2?.settlementWorkspace?.revision === 2, 'Version should be 2 after update', env);
   // Verify compiled ops match expected values
   const { diffs: compiledDiffs } = compileOps(aliceAccount2.settlementWorkspace.ops, aliceAccount2.settlementWorkspace.lastModifiedByLeft);
   const firstCompiledDiff = compiledDiffs[0];
@@ -450,7 +450,7 @@ export async function runSettleScenario(existingEnv?: RuntimeState): Promise<Run
   assert(firstCompiledDiff.rightDiff === usd(50), 'Compiled diff should reflect update (Hub rightDiff)');
 
   console.log(`✅ Settlement updated by Hub`);
-  console.log(`   New version: ${aliceAccount2.settlementWorkspace.version}`);
+  console.log(`   New revision: ${aliceAccount2.settlementWorkspace.revision}`);
 
   snap(env, 'Settlement Updated', {
     description: 'Hub counter-proposes $50 instead of $100',

@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import type { AccountTx, EntityState, EntityTx, JPrefixCertificate } from '../../types';
+import type { AccountTx, EntityFrameEvent, EntityState, EntityTx, JPrefixCertificate } from '../../types';
 import { HEAVY_LOGS } from '../../utils';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import { compareCanonicalText } from '../../orderbook/swap-execution';
@@ -14,8 +14,16 @@ import {
 } from './state-root';
 import { LIMITS } from '../../constants';
 import { assertNoConsensusVisibleHtlcPaymentSecrets } from '../../protocol/htlc/consensus-secret-guard';
+import { readEntityFrameEvents } from '../../state-helpers';
+import { assertEntityFrameEventByteBudget } from './frame-events';
 
 export const MAX_ENTITY_FRAME_TX_BYTES = LIMITS.MAX_FRAME_SIZE_BYTES;
+export {
+  MAX_ENTITY_FRAME_EVENT_BYTES,
+  assertEntityFrameEventByteBudget,
+  entityFrameEventsEqual,
+  getEntityFrameEventByteLength,
+} from './frame-events';
 
 export const isCanonicalEntityFrameDigest = (value: unknown): value is string =>
   typeof value === 'string' && /^0x[0-9a-f]{64}$/.test(value);
@@ -193,11 +201,13 @@ export function createEntityFrameHashFromStateRoot(
   height: number,
   timestamp: number,
   txs: EntityTx[],
+  events: EntityFrameEvent[],
   entityId: string,
   stateRoot: string,
   authorityRoot: string,
   jPrefixCertificate?: JPrefixCertificate,
 ): string {
+  assertEntityFrameEventByteBudget(events);
   if (!isCanonicalEntityFrameDigest(stateRoot)) {
     throw new Error(`ENTITY_FRAME_STATE_ROOT_INVALID:${stateRoot}`);
   }
@@ -205,11 +215,12 @@ export function createEntityFrameHashFromStateRoot(
     throw new Error(`ENTITY_FRAME_AUTHORITY_ROOT_INVALID:${authorityRoot}`);
   }
   const frameData = {
-    version: 'xln:entity-frame:v4',
+    version: 'xln:entity-frame:v1',
     prevFrameHash,
     height,
     timestamp,
     txs: txs.map(canonicalEntityTxForFrameHash),
+    events,
     entityId,
     stateRoot: stateRoot.toLowerCase(),
     authorityRoot: authorityRoot.toLowerCase(),
@@ -235,6 +246,7 @@ export async function createEntityFrameHash(
   txs: EntityTx[],
   newState: EntityState,
   jPrefixCertificate?: JPrefixCertificate,
+  events: EntityFrameEvent[] = readEntityFrameEvents(newState),
 ): Promise<string> {
   if (HEAVY_LOGS) {
     const accountSnapshot = Array.from(newState.accounts.entries())
@@ -260,6 +272,7 @@ export async function createEntityFrameHash(
     height,
     timestamp,
     txs,
+    events,
     newState.entityId,
     stateRoot,
     authorityRoot,

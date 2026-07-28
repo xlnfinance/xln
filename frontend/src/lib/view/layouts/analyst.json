@@ -1,6 +1,6 @@
 {
   "name": "analyst",
-  "version": "4.0",
+  "version": "1",
   "description": "Analyst layout (Graph3D + Depository + Console)",
   "grid": {
     "root": {

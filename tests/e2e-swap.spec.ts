@@ -155,7 +155,7 @@ async function readSwapScopeMode(page: Page): Promise<'aggregated' | 'selected' 
 
 async function ensureSwapOrderbookVisible(page: Page): Promise<void> {
   if (await page.getByTestId('swap-orderbook').first().isVisible({ timeout: 500 }).catch(() => false)) return;
-  const toggle = page.getByTestId('swap-orderbook-toggle').first();
+  const toggle = page.getByTestId('swap-ticket-orderbook-toggle').first();
   await expect(toggle).toBeVisible({ timeout: 20_000 });
   await toggle.click();
   await expect(page.getByTestId('swap-orderbook').first()).toBeVisible({ timeout: 20_000 });
@@ -168,8 +168,8 @@ async function selectSwapPairSide(page: Page, pairLabel: string, side: 'buy' | '
   if (!baseToken || !quoteToken) throw new Error(`Unsupported swap pair label: ${pairLabel}`);
   const fromToken = side === 'buy' ? quoteToken : baseToken;
   const toToken = side === 'buy' ? baseToken : quoteToken;
-  const fromTokenSelect = page.getByTestId('swap-from-token-select').first();
-  const toTokenSelect = page.getByTestId('swap-to-token-select').first();
+  const fromTokenSelect = page.getByTestId('swap-ticket-from-token').first();
+  const toTokenSelect = page.getByTestId('swap-ticket-to-token').first();
   await expect(fromTokenSelect).toBeVisible({ timeout: 20_000 });
   await expect(toTokenSelect).toBeVisible({ timeout: 20_000 });
   await fromTokenSelect.selectOption(fromToken);
@@ -208,14 +208,12 @@ async function expectSwapTokens(page: Page, expected: { fromSymbol: string; toSy
   const toTokenId = SWAP_TOKEN_BY_SYMBOL[expected.toSymbol.toUpperCase()];
   expect(fromTokenId, `unsupported expected from token ${expected.fromSymbol}`).toBeTruthy();
   expect(toTokenId, `unsupported expected to token ${expected.toSymbol}`).toBeTruthy();
-  await expect(page.getByTestId('swap-from-token-label').first()).toHaveText(
-    `${expected.fromSymbol} (Testnet)`,
-    { timeout: 10_000 },
-  );
-  await expect(page.getByTestId('swap-to-token-label').first()).toHaveText(
-    `${expected.toSymbol} (Testnet)`,
-    { timeout: 10_000 },
-  );
+  const fromToken = page.getByTestId('swap-ticket-from-token').first();
+  const toToken = page.getByTestId('swap-ticket-to-token').first();
+  await expect(fromToken).toHaveValue(String(fromTokenId), { timeout: 10_000 });
+  await expect(toToken).toHaveValue(String(toTokenId), { timeout: 10_000 });
+  await expect(fromToken.locator('option:checked')).toHaveText(expected.fromSymbol);
+  await expect(toToken.locator('option:checked')).toHaveText(expected.toSymbol);
 }
 
 async function ensureSwapScope(page: Page, desired: 'aggregated' | 'selected'): Promise<void> {
@@ -1196,7 +1194,7 @@ async function openSwapWorkspace(page: Page): Promise<void> {
 }
 
 async function selectCounterpartyInSwap(page: Page, preferredAccountId?: string): Promise<void> {
-  const select = page.getByTestId('swap-account-select').first();
+  const select = page.getByTestId('swap-ticket-hub-select').first();
   const hasSelector = await select.isVisible({ timeout: 1500 }).catch(() => false);
   if (!hasSelector) return;
   await expect
@@ -1314,7 +1312,7 @@ async function waitForSwapOrderbookLiquidity(
     return;
   }
 
-  const selectedAccountId = await page.getByTestId('swap-account-select').first().inputValue().catch(() => '');
+  const selectedAccountId = await page.getByTestId('swap-ticket-hub-select').first().inputValue().catch(() => '');
   throw new Error(
     `Swap orderbook stayed empty for ${pairLabel}: ${JSON.stringify({ ...lastState, selectedAccountId, desiredScope, minSources })}`,
   );
@@ -1327,9 +1325,9 @@ async function prepareExecutableOrder(page: Page): Promise<number> {
     throw new Error('No executable WETH/* pair is available in canonical swap pairs');
   }
 
-  const placeButton = page.getByTestId('swap-submit-order').first();
-  const amountInput = page.getByTestId('swap-order-amount').first();
-  const priceInput = page.getByTestId('swap-order-price').first();
+  const placeButton = page.getByTestId('swap-ticket-submit').first();
+  const amountInput = page.getByTestId('swap-ticket-amount').first();
+  const priceInput = page.getByTestId('swap-ticket-rate').first();
   await expect(amountInput).toBeVisible({ timeout: 20_000 });
   await expect(priceInput).toBeVisible({ timeout: 20_000 });
   const deadline = Date.now() + 30_000;
@@ -1362,7 +1360,7 @@ async function prepareExecutableOrder(page: Page): Promise<number> {
           } else {
             await side.rows.first().click();
           }
-          await expect(page.getByTestId('swap-size-hint').first()).toBeVisible({ timeout: 5_000 });
+          await expect(page.getByTestId('swap-ticket-rate').first()).not.toHaveValue('', { timeout: 5_000 });
         } catch {
           continue;
         }
@@ -1394,7 +1392,7 @@ async function prepareExecutableOrder(page: Page): Promise<number> {
       }
     }
 
-    const formError = await page.getByTestId('swap-form-error').first().textContent().catch(() => null);
+    const formError = await page.getByTestId('swap-ticket-error').first().textContent().catch(() => null);
     if (formError?.trim()) lastFormError = formError.trim();
     await page.waitForTimeout(450);
   }
@@ -1467,10 +1465,10 @@ async function executeOrderbookClickFill(
   page.on('request', onRpcRequest as any);
   const readOrderbookDebug = async () => await page.evaluate(({ entityId, signerId, counterpartyId }) => {
     const env = (window as any).isolatedEnv;
-    const accountSelect = document.querySelector('[data-testid="swap-account-select"]') as HTMLSelectElement | null;
+    const accountSelect = document.querySelector('[data-testid="swap-ticket-hub-select"]') as HTMLSelectElement | null;
     const scopeToggle = document.querySelector('[data-testid="swap-scope-toggle"]') as HTMLButtonElement | null;
-    const amountInput = document.querySelector('[data-testid="swap-order-amount"]') as HTMLInputElement | null;
-    const priceInput = document.querySelector('[data-testid="swap-order-price"]') as HTMLInputElement | null;
+    const amountInput = document.querySelector('[data-testid="swap-ticket-amount"]') as HTMLInputElement | null;
+    const priceInput = document.querySelector('[data-testid="swap-ticket-rate"]') as HTMLInputElement | null;
     const formError = (document.querySelector('.swap-panel .form-error') as HTMLElement | null)?.innerText || '';
     if (!env?.eReplicas) return null;
     const key = Array.from(env.eReplicas.keys()).find((k: string) => {
@@ -1561,7 +1559,7 @@ async function executeOrderbookClickFill(
   }, accountRef);
   try {
     const desiredScope = options?.scope ?? 'aggregated';
-    const placeButton = page.getByTestId('swap-submit-order').first();
+    const placeButton = page.getByTestId('swap-ticket-submit').first();
     await ensureSwapScope(page, desiredScope);
     if (options?.preferredAccountId) {
       await selectCounterpartyInSwap(page, options.preferredAccountId);
@@ -1606,10 +1604,7 @@ async function executeOrderbookClickFill(
     } else if (clickTarget === 'highest-bid') {
       await expectSwapTokens(page, { fromSymbol: 'WETH', toSymbol: 'USDC' });
     }
-    await expect(
-      page.getByTestId('swap-size-hint').first(),
-    ).toBeVisible({ timeout: 10_000 });
-    const priceInput = page.getByTestId('swap-order-price').first();
+    const priceInput = page.getByTestId('swap-ticket-rate').first();
     await expect(priceInput).toBeVisible({ timeout: 10_000 });
     if (clickedDisplayedPrice) {
       await expect.poll(async () => String(await priceInput.inputValue()).trim(), {
@@ -1618,7 +1613,7 @@ async function executeOrderbookClickFill(
       }).toBe(normalizeDisplayedPriceText(clickedDisplayedPrice));
     }
     const scopeToggle = page.getByTestId('swap-scope-toggle').first();
-    const selectedHub = page.getByTestId('swap-account-select').first();
+    const selectedHub = page.getByTestId('swap-ticket-hub-select').first();
     await expect
       .poll(async () => await readSwapScopeMode(page), { timeout: 10_000, intervals: [50, 100, 200] })
       .toBe(desiredScope);
@@ -1632,8 +1627,8 @@ async function executeOrderbookClickFill(
       expect(routedCounterpartyId.toLowerCase()).toBe(clickedSourceIds[0]);
     }
     const fillTokenIds = [
-      Number(await page.getByTestId('swap-from-token-select').first().inputValue()),
-      Number(await page.getByTestId('swap-to-token-select').first().inputValue()),
+      Number(await page.getByTestId('swap-ticket-from-token').first().inputValue()),
+      Number(await page.getByTestId('swap-ticket-to-token').first().inputValue()),
     ];
     expect(fillTokenIds.every(tokenId => Number.isInteger(tokenId) && tokenId > 0)).toBe(true);
     expect(new Set(fillTokenIds).size).toBe(2);
@@ -1957,7 +1952,7 @@ async function expectAllCanonicalSwapPairsHaveLiquidity(page: Page): Promise<voi
 }
 
 async function readAvailableFromSizing(page: Page): Promise<number> {
-  const stat = page.getByTestId('swap-available-stat').first();
+  const stat = page.getByTestId('swap-ticket-available').first();
   await expect(stat).toBeVisible({ timeout: 20_000 });
   const text = String((await stat.textContent()) || '');
   const available = parseFirstNumber(text);
@@ -1966,7 +1961,7 @@ async function readAvailableFromSizing(page: Page): Promise<number> {
 }
 
 async function selectSwapAccount(page: Page, accountId: string): Promise<void> {
-  const accountSelect = page.getByTestId('swap-account-select').first();
+  const accountSelect = page.getByTestId('swap-ticket-hub-select').first();
   await expect(accountSelect).toBeVisible({ timeout: 20_000 });
   await accountSelect.selectOption(accountId);
   await page.waitForTimeout(200);
@@ -1993,9 +1988,9 @@ async function configureRestingBuyFromBestAsk(
   page: Page,
   options?: { maxQuote?: number },
 ): Promise<{ restingPrice: string }> {
-  const amountInput = page.getByTestId('swap-order-amount').first();
-  const priceInput = page.getByTestId('swap-order-price').first();
-  const placeButton = page.getByTestId('swap-submit-order').first();
+  const amountInput = page.getByTestId('swap-ticket-amount').first();
+  const priceInput = page.getByTestId('swap-ticket-rate').first();
+  const placeButton = page.getByTestId('swap-ticket-submit').first();
   await selectSwapPairSide(page, 'WETH/USDC', 'buy');
   await expect(amountInput).toBeVisible({ timeout: 20_000 });
   await expect(priceInput).toBeVisible({ timeout: 20_000 });
@@ -2009,7 +2004,7 @@ async function configureRestingBuyFromBestAsk(
 
   const restingPrice = shiftDisplayedPrice(bestAskText, -0.0001);
   await priceInput.fill(restingPrice);
-  await expect(page.getByTestId('swap-size-hint')).toHaveCount(0);
+  await expect(priceInput).toHaveValue(restingPrice);
   await expect(placeButton).toBeEnabled({ timeout: 10_000 });
   return { restingPrice };
 }
@@ -2076,7 +2071,7 @@ async function expectSelectedBooksHaveVisibleLiquidity(
   pairLabels: string[],
   selectedAccountIds: string[],
 ): Promise<void> {
-  const accountSelect = page.getByTestId('swap-account-select').first();
+  const accountSelect = page.getByTestId('swap-ticket-hub-select').first();
   await expect(accountSelect).toBeVisible({ timeout: 20_000 });
   await ensureSwapScope(page, 'selected');
   for (const accountId of selectedAccountIds) {
@@ -2118,9 +2113,9 @@ test.describe('E2E Swap Flow', () => {
     await timedStep('swap_pairs.create_runtime', () => createDemoRuntime(page, `swap-pairs-${Date.now()}`, randomMnemonic()));
     const runtimeRef = await timedStep('swap_pairs.ensure_hub_accounts', () => ensureDeterministicSwapAccounts(page, 3));
     await timedStep('swap_pairs.open_workspace', () => openSwapWorkspace(page));
-    const hubPrecedesLegs = await page.getByTestId('swap-any-builder').first().evaluate((builder) => {
-      const hub = builder.querySelector('[data-testid="swap-hub-selector"]');
-      const firstLeg = builder.querySelector('.swap-leg-card');
+    const hubPrecedesLegs = await page.getByTestId('swap-ticket').first().evaluate((builder) => {
+      const hub = builder.querySelector('[data-testid="swap-ticket-hub-select"]');
+      const firstLeg = builder.querySelector('[data-testid="swap-ticket-from-network"]');
       return Boolean(hub && firstLeg && (hub.compareDocumentPosition(firstLeg) & Node.DOCUMENT_POSITION_FOLLOWING));
     });
     expect(hubPrecedesLegs, 'Hub selector must be the first field before From/To').toBe(true);
@@ -2262,8 +2257,8 @@ test.describe('E2E Swap Flow', () => {
   test('swap place WETH/USDC offer survives reload', { tag: '@resilience' }, async ({ page }) => {
     const accountRef = await timedStep('swap_auto.prepare_book', () => prepareOrderbookClickTest(page));
 
-    const placeButton = page.getByTestId('swap-submit-order').first();
-    const accountSelect = page.getByTestId('swap-account-select').first();
+    const placeButton = page.getByTestId('swap-ticket-submit').first();
+    const accountSelect = page.getByTestId('swap-ticket-hub-select').first();
     const scopeToggle = page.getByTestId('swap-scope-toggle').first();
     await expect(accountSelect).toBeVisible({ timeout: 20_000 });
     await expect(scopeToggle).toBeVisible({ timeout: 20_000 });
@@ -2309,7 +2304,7 @@ test.describe('E2E Swap Flow', () => {
       }, { timeout: 60_000 });
       await openSwapWorkspace(page);
       await selectCounterpartyInSwap(page, accountRef.counterpartyId);
-      const accountSelectAfterReload = page.getByTestId('swap-account-select').first();
+      const accountSelectAfterReload = page.getByTestId('swap-ticket-hub-select').first();
       const scopeToggleAfterReload = page.getByTestId('swap-scope-toggle').first();
       if (String(await scopeToggleAfterReload.textContent() || '').trim() !== 'Selected') {
         await scopeToggleAfterReload.click();
@@ -2334,9 +2329,9 @@ test.describe('E2E Swap Flow', () => {
       readSwapResolveCount(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId),
     );
 
-    const accountSelect = page.getByTestId('swap-account-select').first();
+    const accountSelect = page.getByTestId('swap-ticket-hub-select').first();
     const scopeToggle = page.getByTestId('swap-scope-toggle').first();
-    const placeButton = page.getByTestId('swap-submit-order').first();
+    const placeButton = page.getByTestId('swap-ticket-submit').first();
     await expect(accountSelect).toBeVisible({ timeout: 20_000 });
     await expect(scopeToggle).toBeVisible({ timeout: 20_000 });
     if (String(await scopeToggle.textContent() || '').trim() !== 'Selected') {
@@ -2511,19 +2506,19 @@ async function prepareOrderbookClickTest(page: Page): Promise<{
     await asks.last().click();
     await expectSwapTokens(page, { fromSymbol: 'USDC', toSymbol: 'WETH' });
 
-    const amountInput = page.getByTestId('swap-order-amount').first();
-    const receiveInput = page.getByTestId('swap-receive-amount').first();
+    const amountInput = page.getByTestId('swap-ticket-amount').first();
+    const receiveInput = page.getByTestId('swap-ticket-receive-amount').first();
     await expect(amountInput).toBeVisible({ timeout: 10_000 });
     await expect(receiveInput).toBeVisible({ timeout: 10_000 });
     const spendBefore = parseFirstNumber(await amountInput.inputValue());
-    const receiveBefore = parseFirstNumber(await receiveInput.inputValue());
+    const receiveBefore = parseFirstNumber(await receiveInput.locator('.swap-ticket-receive-value').textContent() || '');
     expect(spendBefore, 'book click must populate source amount').toBeGreaterThan(0);
     expect(receiveBefore, 'book click must populate receive amount').toBeGreaterThan(0);
 
-    await page.getByTestId('swap-flip-tokens').first().click();
+    await page.getByTestId('swap-ticket-flip').first().click();
     await expectSwapTokens(page, { fromSymbol: 'WETH', toSymbol: 'USDC' });
     const flippedSourceAmount = parseFirstNumber(await amountInput.inputValue());
-    const flippedReceiveAmount = parseFirstNumber(await receiveInput.inputValue());
+    const flippedReceiveAmount = parseFirstNumber(await receiveInput.locator('.swap-ticket-receive-value').textContent() || '');
     expect(Math.abs(flippedSourceAmount - receiveBefore), 'flip must not reinterpret USDC amount as WETH').toBeLessThan(0.000001);
     expect(flippedSourceAmount, 'WETH source amount after flip must be much smaller than old USDC source amount').toBeLessThan(spendBefore / 100);
     expect(flippedReceiveAmount, 'flipped receive should stay near the original spend notional').toBeGreaterThan(spendBefore * 0.99);
@@ -2540,19 +2535,19 @@ async function prepareOrderbookClickTest(page: Page): Promise<{
     await bids.first().click();
     await expectSwapTokens(page, { fromSymbol: 'WETH', toSymbol: 'USDC' });
 
-    const amountInput = page.getByTestId('swap-order-amount').first();
-    const receiveInput = page.getByTestId('swap-receive-amount').first();
+    const amountInput = page.getByTestId('swap-ticket-amount').first();
+    const receiveInput = page.getByTestId('swap-ticket-receive-amount').first();
     await expect(amountInput).toBeVisible({ timeout: 10_000 });
     await expect(receiveInput).toBeVisible({ timeout: 10_000 });
     const spendBefore = parseFirstNumber(await amountInput.inputValue());
-    const receiveBefore = parseFirstNumber(await receiveInput.inputValue());
+    const receiveBefore = parseFirstNumber(await receiveInput.locator('.swap-ticket-receive-value').textContent() || '');
     expect(spendBefore, 'sell-side book click must populate source amount').toBeGreaterThan(0);
     expect(receiveBefore, 'sell-side book click must populate receive amount').toBeGreaterThan(0);
 
-    await page.getByTestId('swap-flip-tokens').first().click();
+    await page.getByTestId('swap-ticket-flip').first().click();
     await expectSwapTokens(page, { fromSymbol: 'USDC', toSymbol: 'WETH' });
     const flippedSourceAmount = parseFirstNumber(await amountInput.inputValue());
-    const flippedReceiveAmount = parseFirstNumber(await receiveInput.inputValue());
+    const flippedReceiveAmount = parseFirstNumber(await receiveInput.locator('.swap-ticket-receive-value').textContent() || '');
     expect(Math.abs(flippedSourceAmount - receiveBefore), 'sell-side flip must carry old USDC receive into new USDC source').toBeLessThan(0.000001);
     expect(flippedSourceAmount, 'USDC source after sell-side flip must be much larger than old WETH source').toBeGreaterThan(spendBefore * 100);
     expect(flippedReceiveAmount, 'sell-side flipped receive should stay near the original WETH spend').toBeGreaterThan(spendBefore * 0.99);
@@ -2582,14 +2577,14 @@ async function prepareOrderbookClickTest(page: Page): Promise<{
       minSources: 3,
     });
 
-    const accountSelect = page.getByTestId('swap-account-select').first();
+    const accountSelect = page.getByTestId('swap-ticket-hub-select').first();
     await expect(accountSelect).toBeVisible({ timeout: 20_000 });
     await ensureSwapScope(page, 'selected');
     await selectSwapAccount(page, accountRef.counterpartyId);
 
-    const amountInput = page.getByTestId('swap-order-amount').first();
-    const priceInput = page.getByTestId('swap-order-price').first();
-    const placeButton = page.getByTestId('swap-submit-order').first();
+    const amountInput = page.getByTestId('swap-ticket-amount').first();
+    const priceInput = page.getByTestId('swap-ticket-rate').first();
+    const placeButton = page.getByTestId('swap-ticket-submit').first();
     await selectSwapPairSide(page, 'WETH/USDC', 'buy');
     await expect(amountInput).toBeVisible({ timeout: 20_000 });
     await page.waitForTimeout(120);
@@ -2602,10 +2597,10 @@ async function prepareOrderbookClickTest(page: Page): Promise<{
     const availableQuote = await readAvailableFromSizing(page);
     expect(availableQuote, 'buy-side available quote must be positive').toBeGreaterThan(0);
     await amountInput.fill(formatDecimalForInput(Math.min(availableQuote, 25)));
-    await expect(page.getByTestId('swap-size-hint').first()).toBeVisible({ timeout: 10_000 });
+    await expect(priceInput).toHaveValue(normalizeDisplayedPriceText(clickedAskText), { timeout: 10_000 });
     const editedPrice = shiftDisplayedPrice(clickedAskText, -0.0001);
     await priceInput.fill(editedPrice);
-    await expect(page.getByTestId('swap-size-hint')).toHaveCount(0);
+    await expect(priceInput).toHaveValue(editedPrice);
     await expect(placeButton).toBeEnabled({ timeout: 10_000 });
     await placeButton.click();
 
@@ -2632,9 +2627,9 @@ async function prepareOrderbookClickTest(page: Page): Promise<{
       minSources: 3,
     });
 
-    const amountInput = page.getByTestId('swap-order-amount').first();
-    const priceInput = page.getByTestId('swap-order-price').first();
-    const placeButton = page.getByTestId('swap-submit-order').first();
+    const amountInput = page.getByTestId('swap-ticket-amount').first();
+    const priceInput = page.getByTestId('swap-ticket-rate').first();
+    const placeButton = page.getByTestId('swap-ticket-submit').first();
     await selectSwapPairSide(page, 'WETH/USDC', 'buy');
 
     const asks = page.getByTestId('orderbook-ask-row');
@@ -2646,7 +2641,7 @@ async function prepareOrderbookClickTest(page: Page): Promise<{
     await amountInput.fill('10');
     await priceInput.fill(String((bestAsk * 1.4).toFixed(4)));
     await expect(placeButton).toBeDisabled({ timeout: 10_000 });
-    await expect(page.getByTestId('swap-form-error').first()).toContainText(/within 30% of the current orderbook/i, {
+    await expect(page.getByTestId('swap-ticket-error').first()).toContainText(/within 30% of the current orderbook/i, {
       timeout: 10_000,
     });
   });
@@ -2659,9 +2654,9 @@ async function prepareOrderbookClickTest(page: Page): Promise<{
       minSources: 3,
     });
 
-    const amountInput = page.getByTestId('swap-order-amount').first();
-    const priceInput = page.getByTestId('swap-order-price').first();
-    const placeButton = page.getByTestId('swap-submit-order').first();
+    const amountInput = page.getByTestId('swap-ticket-amount').first();
+    const priceInput = page.getByTestId('swap-ticket-rate').first();
+    const placeButton = page.getByTestId('swap-ticket-submit').first();
     await selectSwapPairSide(page, 'WETH/USDC', 'sell');
 
     const bids = page.getByTestId('orderbook-bid-row');
@@ -2676,16 +2671,16 @@ async function prepareOrderbookClickTest(page: Page): Promise<{
     await amountInput.fill(formatDecimalForInput(sellAmount));
     await priceInput.fill(String((bestBid * 0.59).toFixed(4)));
     await expect(placeButton).toBeDisabled({ timeout: 10_000 });
-    await expect(page.getByTestId('swap-form-error').first()).toContainText(/within 30% of the current orderbook/i, {
+    await expect(page.getByTestId('swap-ticket-error').first()).toContainText(/within 30% of the current orderbook/i, {
       timeout: 10_000,
     });
   });
 
 test('swap keeps a within-band wide limit as a resting order instead of filling immediately', { tag: '@functional' }, async ({ page }, testInfo) => {
     const accountRef = await prepareOrderbookClickTest(page);
-    const amountInput = page.getByTestId('swap-order-amount').first();
-    const priceInput = page.getByTestId('swap-order-price').first();
-    const placeButton = page.getByTestId('swap-submit-order').first();
+    const amountInput = page.getByTestId('swap-ticket-amount').first();
+    const priceInput = page.getByTestId('swap-ticket-rate').first();
+    const placeButton = page.getByTestId('swap-ticket-submit').first();
 
     await selectSwapPairSide(page, 'WETH/USDC', 'buy');
     await waitForSwapOrderbookLiquidity(page, 'WETH/USDC', {
@@ -2761,7 +2756,7 @@ test('swap keeps a within-band wide limit as a resting order instead of filling 
     const asks = page.getByTestId('orderbook-ask-row');
     await expect(asks.last()).toBeVisible({ timeout: 20_000 });
     await asks.last().click();
-    await expect(page.getByTestId('swap-size-hint').first()).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId('swap-ticket-rate').first()).not.toHaveValue('', { timeout: 10_000 });
 
     await selectSwapAccount(page, accountRef.hubIds[1]!);
     await waitForSwapOrderbookLiquidity(page, 'WETH/USDC', {
@@ -2769,7 +2764,6 @@ test('swap keeps a within-band wide limit as a resting order instead of filling 
       scope: 'Selected',
       minSources: 1,
     });
-    await expect(page.getByTestId('swap-size-hint')).toHaveCount(0);
     await expectOrderbookHasAnyVisibleLiquidity(page, { timeoutMs: 10_000, minSources: 1, maxSources: 1 });
 
     await ensureSwapScope(page, 'aggregated');
@@ -2778,7 +2772,6 @@ test('swap keeps a within-band wide limit as a resting order instead of filling 
       scope: 'Aggregated',
       minSources: 3,
     });
-    await expect(page.getByTestId('swap-size-hint')).toHaveCount(0);
     await expectOrderbookHasAnyVisibleLiquidity(page, { timeoutMs: 10_000, minSources: 3, maxSources: 3 });
 
     await selectSwapPairSide(page, 'USDC/USDT', 'buy');
@@ -2787,7 +2780,6 @@ test('swap keeps a within-band wide limit as a resting order instead of filling 
       scope: 'Aggregated',
       minSources: 3,
     });
-    await expect(page.getByTestId('swap-size-hint')).toHaveCount(0);
     await expectOrderbookHasAnyVisibleLiquidity(page, { timeoutMs: 10_000, minSources: 3, maxSources: 3 });
   });
 

@@ -7,6 +7,7 @@ import type {
   AccountFrame,
   AccountState,
   AccountTx,
+  EntityFrameEvent,
   EntityReplica,
   EntityState,
   RuntimeState,
@@ -48,9 +49,43 @@ import { createStructuredLogger } from './infra/logger';
 import { getEntityLeaderState, isEntityActiveLeader } from './entity/consensus/leader';
 import { forkAccountCommitmentCache } from './account/map-commitment';
 import { forkEntityAccountCommitmentCache } from './entity/consensus/state-root';
+import { ENTITY_FRAME_EVENT_COLLECTOR } from './entity/frame-event-collector';
 
 const stateHelperLog = createStructuredLogger('state.helpers');
 const REPLAY_OUTPUT_SIGNER_HINTS = Symbol.for('xln.runtime.replay.output-signer-hints');
+type EntityStateWithFrameEvents = EntityState & {
+  [ENTITY_FRAME_EVENT_COLLECTOR]?: EntityFrameEvent[];
+};
+
+const mutableEntityFrameEvents = (state: EntityState): EntityFrameEvent[] => {
+  const transient = state as EntityStateWithFrameEvents;
+  if (!transient[ENTITY_FRAME_EVENT_COLLECTOR]) {
+    /*
+     * This frame-local field is deliberately enumerable while the reducer is
+     * running. Entity handlers use ordinary immutable object spreads; a Symbol
+     * or non-enumerable property silently vanished at those boundaries and
+     * could make validators derive different signed event lists. Storage and
+     * state-root projections use explicit field allowlists, so this collector
+     * is never durable consensus state. The next frame clears it before apply.
+     */
+    transient[ENTITY_FRAME_EVENT_COLLECTOR] = [];
+  }
+  return transient[ENTITY_FRAME_EVENT_COLLECTOR]!;
+};
+
+export const readEntityFrameEvents = (state: EntityState): EntityFrameEvent[] =>
+  structuredClone(mutableEntityFrameEvents(state));
+
+export const clearEntityFrameEvents = (state: EntityState): void => {
+  const events = (state as EntityStateWithFrameEvents)[ENTITY_FRAME_EVENT_COLLECTOR];
+  if (events) events.length = 0;
+};
+
+const copyEntityFrameEvents = (source: EntityState, target: EntityState): void => {
+  const events = (source as EntityStateWithFrameEvents)[ENTITY_FRAME_EVENT_COLLECTOR];
+  if (!events) return;
+  (target as EntityStateWithFrameEvents)[ENTITY_FRAME_EVENT_COLLECTOR] = structuredClone(events);
+};
 
 export const installReplayOutputSignerHints = (
   env: RuntimeState,
@@ -196,10 +231,21 @@ export function getAccountPerspective(account: AccountState, myEntityId: string)
  * Prevents unbounded message array growth that causes snapshot bloat
  */
 export function addMessage(state: EntityState, message: string): void {
+  mutableEntityFrameEvents(state).push({ type: 'status', message });
   state.messages.push(message);
   if (state.messages.length > ENTITY_MESSAGE_HISTORY_LIMIT) {
     state.messages.shift(); // Remove oldest message
   }
+}
+
+export function addTextMessage(state: EntityState, validatorId: string, message: string): void {
+  mutableEntityFrameEvents(state).push({
+    type: 'text',
+    validatorId: validatorId.trim().toLowerCase(),
+    message,
+  });
+  state.messages.push(`${validatorId}: ${message}`);
+  if (state.messages.length > ENTITY_MESSAGE_HISTORY_LIMIT) state.messages.shift();
 }
 
 /**
@@ -507,6 +553,7 @@ const cloneEntityStateWithPolicy = (
   validateClone: boolean,
 ): EntityState => {
   const cloned = structuredCloneOrThrow(entityState, 'ENTITY_STATE_STRUCTURED_CLONE_FAILED');
+  copyEntityFrameEvents(entityState, cloned);
 
   // CRITICAL: Validate entityId was preserved correctly.
   if (!cloned.entityId || cloned.entityId !== entityState.entityId) {

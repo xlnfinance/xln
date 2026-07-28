@@ -90,7 +90,19 @@ const requirements: CoverageRequirement[] = [
     patterns: [
       'two users can place full, partial, and disputed cross-j swaps through the shared swap builder',
       'real MM full fill auto-closes and partial fill closes manually on both legs',
+    ],
+  },
+  {
+    area: 'cross-j',
+    file: 'tests/e2e-cross-j-swap-helpers-a.ts',
+    patterns: [
       'swap-route-select',
+    ],
+  },
+  {
+    area: 'cross-j',
+    file: 'tests/e2e-cross-j-swap-helpers-b.ts',
+    patterns: [
       'requestCrossJurisdictionClear',
       'Cross-j salvage queued',
       'Dispute started',
@@ -109,7 +121,7 @@ const requirements: CoverageRequirement[] = [
     area: 'frontend',
     file: 'frontend/src/lib/components/Entity/SwapPanel.svelte',
     patterns: [
-      '<SwapTradeTicket',
+      '<SwapTicket',
       '{placeSwapOffer}',
       '<SwapOrderList',
       '{requestCrossClear}',
@@ -120,11 +132,11 @@ const requirements: CoverageRequirement[] = [
   },
   {
     area: 'frontend',
-    file: 'frontend/src/lib/components/Entity/SwapTradeTicket.svelte',
+    file: 'frontend/src/lib/components/Entity/SwapTicket.svelte',
     patterns: [
-      'data-testid="swap-any-builder"',
-      'data-testid="swap-route-select"',
-      "swapRouteMode === 'cross'",
+      'data-testid="swap-ticket-from-network"',
+      'data-testid="swap-ticket-to-network"',
+      'data-testid="swap-ticket-submit"',
       'placeSwapOffer',
     ],
   },

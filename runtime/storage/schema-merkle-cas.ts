@@ -164,10 +164,10 @@ const validateCertifiedBoardRecord = (value: unknown, code: string): void => {
 export const validateConsumptionNodeValue = (value: unknown): ConsumptionNode => {
   const code = 'STORAGE_CONSUMPTION_NODE_INVALID';
   const node = requireBoundaryRecord(value, code);
-  if (node['type'] === 'branch') validatePatriciaBranch(node, 2, code);
+  if (node['type'] === 'branch') validatePatriciaBranch(node, 1, code);
   else {
     requireExactBoundaryKeys(node, ['version', 'type', 'key', 'value'], [], `${code}_FIELDS`);
-    if (node['version'] !== 2 || node['type'] !== 'leaf') throw new Error(code);
+    if (node['version'] !== 1 || node['type'] !== 'leaf') throw new Error(code);
     requireStorageHash(node['key'], `${code}_KEY`);
     validateConsumptionFrontier(node['value'], `${code}_VALUE`);
   }

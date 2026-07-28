@@ -1,21 +1,12 @@
 export type VaultUnlockDurationMs = 600_000 | 86_400_000 | null;
 
-export type ProtectedVaultSecretsV1 = {
+export type ProtectedVaultSecrets = {
   version: 1;
-  iv: string;
-  ciphertext: string;
-  unlockUntil: number | null;
-};
-
-export type ProtectedVaultSecretsV2 = {
-  version: 2;
   keyId: string;
   iv: string;
   ciphertext: string;
   unlockUntil: number | null;
 };
-
-export type ProtectedVaultSecrets = ProtectedVaultSecretsV1 | ProtectedVaultSecretsV2;
 
 export type VaultSecrets = {
   seed: string;
@@ -103,11 +94,9 @@ const randomKeyId = (): string => {
 };
 
 const deviceKeyId = (runtimeId: string, protectedSecrets: ProtectedVaultSecrets): string =>
-  protectedSecrets.version === 2
-    ? `${legacyKeyId(runtimeId)}:${protectedSecrets.keyId}`
-    : legacyKeyId(runtimeId);
+  `${legacyKeyId(runtimeId)}:${protectedSecrets.keyId}`;
 
-const putDeviceKey = (runtimeId: string, protectedSecrets: ProtectedVaultSecretsV2, key: CryptoKey): Promise<IDBValidKey> =>
+const putDeviceKey = (runtimeId: string, protectedSecrets: ProtectedVaultSecrets, key: CryptoKey): Promise<IDBValidKey> =>
   withKeyStore('readwrite', store => store.put(key, deviceKeyId(runtimeId, protectedSecrets)));
 
 const getDeviceKey = (runtimeId: string, protectedSecrets: ProtectedVaultSecrets): Promise<CryptoKey | undefined> =>
@@ -124,8 +113,7 @@ export const sameVaultProtectionLease = (
   right: ProtectedVaultSecrets | null | undefined,
 ): boolean => {
   if (!left || !right || left.version !== right.version) return false;
-  if (left.version === 2 && right.version === 2) return left.keyId === right.keyId;
-  return left.iv === right.iv && left.ciphertext === right.ciphertext;
+  return left.keyId === right.keyId;
 };
 
 export const protectVaultSecrets = async (
@@ -144,8 +132,8 @@ export const protectVaultSecrets = async (
     key,
     asArrayBuffer(plaintext),
   );
-  const protectedSecrets: ProtectedVaultSecretsV2 = {
-    version: 2,
+  const protectedSecrets: ProtectedVaultSecrets = {
+    version: 1,
     keyId: randomKeyId(),
     iv: bytesToBase64(iv),
     ciphertext: bytesToBase64(new Uint8Array(ciphertext)),
@@ -159,13 +147,11 @@ export const unprotectVaultSecrets = async (
   runtimeId: string,
   protectedSecrets: ProtectedVaultSecrets,
 ): Promise<VaultSecrets | null> => {
-  if (protectedSecrets.version !== 1 && protectedSecrets.version !== 2) {
+  if (protectedSecrets.version !== 1) {
     throw new Error('VAULT_PROTECTION_VERSION_UNSUPPORTED');
   }
   if (protectedSecrets.unlockUntil !== null && protectedSecrets.unlockUntil <= Date.now()) {
-    if (protectedSecrets.version === 2) {
-      await deleteVaultDeviceKey(runtimeId, protectedSecrets);
-    }
+    await deleteVaultDeviceKey(runtimeId, protectedSecrets);
     return null;
   }
   const key = await getDeviceKey(runtimeId, protectedSecrets);

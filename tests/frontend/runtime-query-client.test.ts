@@ -344,7 +344,8 @@ test('fast e2e target titles stay in sync with specs', () => {
   for (const match of targetMatches) {
     const [, file, title] = match;
     const specSource = readFileSync(file, 'utf8');
-    const testTitles = [...specSource.matchAll(/test\('([^']+)'/g)].map(([, testTitle]) => testTitle);
+    const testTitles = [...specSource.matchAll(/test\s*\(\s*'([^']+)'/g)]
+      .map(([, testTitle]) => testTitle);
     expect(
       testTitles.some((testTitle) => testTitle.includes(title)),
       `${file} must contain fast e2e target "${title}"`,

@@ -2146,16 +2146,8 @@ export class BrowserVMProvider {
 
       const data = JSON.parse(json);
 
-      // Check version - invalidate stale cache if contract ABI changed
-      const cachedVersion = data.version || 1; // Pre-version data is v1
-      if (cachedVersion !== BROWSERVM_CONTRACT_VERSION) {
-        this.log(`[BrowserVM] ⚠️ Version mismatch: cached=${cachedVersion}, current=${BROWSERVM_CONTRACT_VERSION} - clearing stale cache`);
-        this.clearLocalStorage(key);
-        return false;
-      }
-
       await this.restoreState(data);
-      this.log(`[BrowserVM] Loaded state from localStorage: ${key} (v${cachedVersion})`);
+      this.log(`[BrowserVM] Loaded state from localStorage: ${key} (v${data.version})`);
       return true;
     } catch (err) {
       browserVmLog.error('state.load_failed', {

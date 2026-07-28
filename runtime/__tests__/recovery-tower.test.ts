@@ -321,6 +321,7 @@ describe('runtime recovery tower', () => {
       authorityRoot: computeEntityFrameAuthorityRoot(buildEntityFrameAuthority(bloatedState)),
       timestamp: replica!.state.timestamp,
       txs: [],
+      events: [],
       hash: pendingHash,
       leader: {
         proposerSignerId: replica!.signerId,

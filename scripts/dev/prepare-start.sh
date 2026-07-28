@@ -25,7 +25,7 @@ rm -f "$DEV_OWNER_FILE" "$DEV_PID_DIR"/*.pid
 
 contract_fingerprint="$(
   {
-    printf '%s\n' 'xln-dev-state-v2'
+    printf '%s\n' 'xln-dev-state-v1'
     shasum -a 256 \
       "$ROOT_DIR/frontend/static/contracts/Account.json" \
       "$ROOT_DIR/frontend/static/contracts/Depository.json" \

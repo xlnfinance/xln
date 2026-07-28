@@ -58,7 +58,7 @@ export const createReliableDeliveryReceipt = (
     throw new Error(`RELIABLE_RECEIPT_RUNTIME_HEIGHT_INVALID:${String(env.height)}`);
   }
   const body: ReliableDeliveryReceipt['body'] = {
-    version: 2,
+    version: 1,
     coverage,
     receiverRuntimeId,
     identity,
@@ -75,7 +75,7 @@ export const getReliableDeliveryReceiptValidationError = (
     return 'RELIABLE_RECEIPT_BODY_INVALID';
   }
   const { body } = receipt;
-  if (body.version !== 2) return 'RELIABLE_RECEIPT_VERSION_INVALID';
+  if (body.version !== 1) return 'RELIABLE_RECEIPT_VERSION_INVALID';
   if (body.coverage !== 'exact' && body.coverage !== 'terminal') {
     return 'RELIABLE_RECEIPT_COVERAGE_INVALID';
   }

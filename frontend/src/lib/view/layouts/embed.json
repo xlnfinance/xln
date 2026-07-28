@@ -1,6 +1,6 @@
 {
   "name": "embed",
-  "version": "4.0",
+  "version": "1",
   "description": "Embed layout (Graph3D only, fullscreen)",
   "grid": {
     "root": {

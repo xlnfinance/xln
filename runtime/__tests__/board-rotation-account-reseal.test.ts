@@ -72,6 +72,7 @@ test('board reseal replaces only the exact current counterparty Hanko', async ()
     kind: 'board_reseal',
     fromEntityId: sourceEntityId,
     toEntityId: receiverEntityId,
+    domain: { ...account.domain },
     reseal: {
       height: 7,
       frameHash,
@@ -93,7 +94,7 @@ test('board reseal replaces only the exact current counterparty Hanko', async ()
   }));
   const applied = await applyAccountInput(env, account, input);
 
-  expect(applied.success).toBe(true);
+  expect(applied.success, applied.error).toBe(true);
   expect(account.counterpartyFrameHanko).toBe(frameHanko);
   expect(account.currentFrame).toEqual(beforeFrame);
   expect(account.currentHeight).toBe(7);
@@ -163,10 +164,11 @@ test('ACK commit retains the counterparty Hanko needed for later board reseal', 
     kind: 'ack',
     fromEntityId: peerEntityId,
     toEntityId: localEntityId,
+    domain: { ...account.domain },
     ack: { height: 1, frameHash, frameHanko: peerHanko },
   });
 
-  expect(result.success).toBe(true);
+  expect(result.success, result.error).toBe(true);
   expect(account.currentHeight).toBe(1);
   expect(account.counterpartyFrameHanko).toBe(peerHanko);
 });
@@ -199,6 +201,7 @@ test('board reseal receipt is terminal and stable across Runtime restart', async
     kind: 'board_reseal',
     fromEntityId: sourceEntityId,
     toEntityId: receiverEntityId,
+    domain: { ...account.domain },
     reseal: {
       height: 4,
       frameHash,
@@ -215,7 +218,8 @@ test('board reseal receipt is terminal and stable across Runtime restart', async
   };
 
   expect(registerReliableIngress(receiver, senderRuntimeId, output).kind).toBe('enqueue');
-  expect((await applyAccountInput(receiver, account, reseal)).success).toBe(true);
+  const appliedReseal = await applyAccountInput(receiver, account, reseal);
+  expect(appliedReseal.success, appliedReseal.error).toBe(true);
   const replica = {
     entityId: receiverEntityId,
     signerId: receiverSigner,

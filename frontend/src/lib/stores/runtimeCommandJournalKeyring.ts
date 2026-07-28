@@ -59,7 +59,7 @@ const deriveKeys = async (runtimeId: string, seed: string): Promise<RuntimeComma
     false,
     ['deriveKey'],
   );
-  const salt = ownedArrayBuffer(encoder.encode(`xln-runtime-command-journal-v2:${runtimeId}`));
+  const salt = ownedArrayBuffer(encoder.encode(`xln-runtime-command-journal-v1:${runtimeId}`));
   const encryption = await subtle.deriveKey(
     { name: 'HKDF', hash: 'SHA-256', salt, info: ownedArrayBuffer(encoder.encode('aes-gcm-record')) },
     material,

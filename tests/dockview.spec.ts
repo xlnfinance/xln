@@ -183,7 +183,16 @@ test.describe('dockview', () => {
     await activateDockPanel(page, 'settings');
     await expect(page.getByTestId('dock-settings-panel')).toBeVisible();
     await expect(page.getByRole('button', { name: '🗄️ Storage', exact: true })).toHaveClass(/active/);
+    await expect(page.getByTestId('runtime-storage-limits')).toBeVisible();
+    await expect(page.getByTestId('storage-wal-gib')).toHaveAttribute('placeholder', 'Unlimited');
+    await page.getByTestId('storage-common-gib').fill('0');
+    await page.getByTestId('storage-limits-save').click();
+    await expect(page.getByTestId('storage-limits-error')).toContainText('positive GiB');
+    await page.getByTestId('storage-common-gib').fill('');
     await expect(page.getByTestId('leveldb-inspector')).toBeVisible();
+    await page.getByRole('button', { name: 'Performance', exact: true }).click();
+    await expect(page.getByTestId('runtime-performance-budgets')).toBeVisible();
+    await expect(page.getByTestId('perf-reducer-ms')).toHaveAttribute('placeholder', 'Observe');
     await page.getByRole('button', { name: /Advanced/ }).click();
     await expect(page.getByTestId('network-machine-timeline-mode')).toHaveValue('all-frames');
     await expect(page.locator('.tab-style-card')).toHaveCount(6);

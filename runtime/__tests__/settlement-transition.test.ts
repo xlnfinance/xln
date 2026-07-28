@@ -67,7 +67,7 @@ const transition = (data: Record<string, unknown>): AccountTx => ({
 const upsert = async (
   account: ReturnType<typeof makeAccount>,
   data: {
-    version: number;
+    revision: number;
     previousWorkspaceHash?: string;
     ops: SettlementOp[];
     executorIsLeft: boolean;
@@ -78,7 +78,7 @@ const upsert = async (
 const signedWorkspaceAccount = async (nonceAtSign: number) => {
   const account = makeAccount(LEFT, RIGHT);
   expect((await upsert(account, {
-    version: 1,
+    revision: 1,
     ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
     executorIsLeft: false,
   })).success).toBe(true);
@@ -239,7 +239,7 @@ describe('atomic settlement Account transition', () => {
 
     const account = state.accounts.get(RIGHT)!;
     expect((await upsert(account, {
-      version: 1,
+      revision: 1,
       ops: [{ type: 'c2r', tokenId: 1, amount: 1n }],
       executorIsLeft: true,
     })).success).toBe(true);
@@ -278,7 +278,7 @@ describe('atomic settlement Account transition', () => {
 
     const account = state.accounts.get(RIGHT)!;
     expect((await upsert(account, {
-      version: 1,
+      revision: 1,
       ops: [{ type: 'c2r', tokenId: 1, amount: 1n }],
       executorIsLeft: true,
     })).success).toBe(true);
@@ -287,7 +287,7 @@ describe('atomic settlement Account transition', () => {
     workspace.rightHanko = '0x1234';
     account.mempool.push(transition({
       kind: 'submit',
-      version: workspace.version,
+      revision: workspace.revision,
       workspaceHash: workspace.workspaceHash,
     }));
     const workspaceBefore = structuredClone(workspace);
@@ -326,7 +326,7 @@ describe('atomic settlement Account transition', () => {
     const account = rightState.accounts.get(leftEntity)!;
     expect((await applyAccountTx(account, transition({
       kind: 'upsert',
-      version: 1,
+      revision: 1,
       ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
       executorIsLeft: true,
     }), true, 1_000)).success).toBe(true);
@@ -400,7 +400,7 @@ describe('atomic settlement Account transition', () => {
     const account = state.accounts.get(counterparty)!;
     expect((await applyAccountTx(account, transition({
       kind: 'upsert',
-      version: 1,
+      revision: 1,
       ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
       executorIsLeft: true,
     }), true, 1_000)).success).toBe(true);
@@ -466,7 +466,7 @@ describe('atomic settlement Account transition', () => {
     const rightAccount = rightState.accounts.get(leftEntity)!;
     const upsertTx = transition({
       kind: 'upsert',
-      version: 1,
+      revision: 1,
       ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
       executorIsLeft: true,
     });
@@ -527,7 +527,7 @@ describe('atomic settlement Account transition', () => {
   test('receiver rejects a one-slot settlement nonce tolerance before any Hanko mutation', async () => {
     const account = makeAccount(LEFT, RIGHT);
     expect((await upsert(account, {
-      version: 1,
+      revision: 1,
       ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
       executorIsLeft: false,
     })).success).toBe(true);
@@ -535,7 +535,7 @@ describe('atomic settlement Account transition', () => {
     const workspaceHash = account.settlementWorkspace!.workspaceHash;
     const result = await applyAccountTx(account, transition({
       kind: 'seal',
-      version: 1,
+      revision: 1,
       workspaceHash,
       settlementNonce: 6,
       settlementHash: `0x${'91'.repeat(32)}`,
@@ -555,11 +555,11 @@ describe('atomic settlement Account transition', () => {
     expect(account.settlementWorkspace?.postSettlementDisputeProof).toBeUndefined();
   });
 
-  test('workspace hash binds parties, version, ops, modifier side, executor, and memo only', () => {
+  test('workspace hash binds parties, revision, ops, modifier side, executor, and memo only', () => {
     const leftView = makeAccount(LEFT, RIGHT);
     const rightView = makeAccount(RIGHT, LEFT);
     const body = {
-      version: 1,
+      revision: 1,
       ops: [{ type: 'r2r' as const, tokenId: 1, amount: 4n }],
       lastModifiedByLeft: true,
       executorIsLeft: false,
@@ -567,7 +567,7 @@ describe('atomic settlement Account transition', () => {
     };
     const hash = createSettlementWorkspaceHash(leftView, body);
     expect(createSettlementWorkspaceHash(rightView, body)).toBe(hash);
-    expect(createSettlementWorkspaceHash(leftView, { ...body, version: 2 })).not.toBe(hash);
+    expect(createSettlementWorkspaceHash(leftView, { ...body, revision: 2 })).not.toBe(hash);
     expect(createSettlementWorkspaceHash(leftView, { ...body, executorIsLeft: true })).not.toBe(hash);
     expect(createSettlementWorkspaceHash(leftView, { ...body, memo: 'different' })).not.toBe(hash);
     expect(createSettlementWorkspaceHash(leftView, {
@@ -601,7 +601,7 @@ describe('atomic settlement Account transition', () => {
     expect(result.accountTxs).toHaveLength(1);
     expect(result.accountTxs[0]?.tx).toMatchObject({
       type: 'settle_transition',
-      data: { kind: 'upsert', version: 1, executorIsLeft: false },
+      data: { kind: 'upsert', revision: 1, executorIsLeft: false },
     });
   });
 
@@ -609,7 +609,7 @@ describe('atomic settlement Account transition', () => {
     const account = makeAccount(LEFT, RIGHT);
 
     const result = await upsert(account, {
-      version: 1,
+      revision: 1,
       ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
       executorIsLeft: false,
       memo: 'frame-only proposal',
@@ -617,7 +617,7 @@ describe('atomic settlement Account transition', () => {
 
     expect(result.success).toBe(true);
     expect(account.settlementWorkspace).toMatchObject({
-      version: 1,
+      revision: 1,
       lastModifiedByLeft: true,
       executorIsLeft: false,
       memo: 'frame-only proposal',
@@ -643,7 +643,7 @@ describe('atomic settlement Account transition', () => {
     const rightAccount = rightState.accounts.get(LEFT)!;
     const tx = transition({
       kind: 'upsert',
-      version: 1,
+      revision: 1,
       ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
       executorIsLeft: true,
     });
@@ -681,7 +681,7 @@ describe('atomic settlement Account transition', () => {
   test('pure debt forgiveness is never classified as safe for automatic approval', async () => {
     const pureForgiveness = makeAccount(LEFT, RIGHT);
     expect((await upsert(pureForgiveness, {
-      version: 1,
+      revision: 1,
       ops: [{ type: 'forgive', tokenId: 1 }],
       executorIsLeft: true,
     })).success).toBe(true);
@@ -695,7 +695,7 @@ describe('atomic settlement Account transition', () => {
     const tokenId = 9;
     expect(account.deltas.has(tokenId)).toBe(false);
     expect((await upsert(account, {
-      version: 1,
+      revision: 1,
       ops: [{ type: 'forgive', tokenId }],
       executorIsLeft: true,
     })).success).toBe(true);
@@ -720,7 +720,7 @@ describe('atomic settlement Account transition', () => {
     const account = state.accounts.get(RIGHT)!;
     const tokenId = 9;
     expect((await upsert(account, {
-      version: 1,
+      revision: 1,
       ops: [{ type: 'forgive', tokenId }],
       executorIsLeft: true,
     })).success).toBe(true);
@@ -755,7 +755,7 @@ describe('atomic settlement Account transition', () => {
   test('a mixed workspace containing debt forgiveness always requires explicit approval', async () => {
     const mixedForgiveness = makeAccount(LEFT, RIGHT);
     expect((await upsert(mixedForgiveness, {
-      version: 1,
+      revision: 1,
       ops: [
         { type: 'r2r', tokenId: 1, amount: 4n },
         { type: 'forgive', tokenId: 1 },
@@ -773,7 +773,7 @@ describe('atomic settlement Account transition', () => {
     addReplica(env, leftState, leftSigner);
     const account = leftState.accounts.get(RIGHT)!;
     expect((await upsert(account, {
-      version: 1,
+      revision: 1,
       ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
       executorIsLeft: false,
     })).success).toBe(true);
@@ -798,7 +798,7 @@ describe('atomic settlement Account transition', () => {
     addReplica(env, leftState, leftSigner);
     const account = leftState.accounts.get(RIGHT)!;
     expect((await upsert(account, {
-      version: 1,
+      revision: 1,
       ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
       executorIsLeft: true,
     })).success).toBe(true);
@@ -822,7 +822,7 @@ describe('atomic settlement Account transition', () => {
     addReplica(env, leftState, leftSigner);
     const account = leftState.accounts.get(RIGHT)!;
     expect((await upsert(account, {
-      version: 1,
+      revision: 1,
       ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
       executorIsLeft: true,
     })).success).toBe(true);
@@ -857,7 +857,7 @@ describe('atomic settlement Account transition', () => {
     const leftAccount = leftState.accounts.get(rightEntity)!;
     const tx = transition({
       kind: 'upsert',
-      version: 1,
+      revision: 1,
       ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
       executorIsLeft: true,
     });
@@ -980,7 +980,7 @@ describe('atomic settlement Account transition', () => {
 
     const upsertTx = transition({
       kind: 'upsert',
-      version: 1,
+      revision: 1,
       ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
       executorIsLeft: false,
     });
@@ -1058,14 +1058,14 @@ describe('atomic settlement Account transition', () => {
     const account = rightState.accounts.get(LEFT)!;
     const first = transition({
       kind: 'upsert',
-      version: 1,
+      revision: 1,
       ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
       executorIsLeft: false,
     });
     expect((await applyAccountTx(account, first, true, 1_000)).success).toBe(true);
     const second = transition({
       kind: 'upsert',
-      version: 2,
+      revision: 2,
       previousWorkspaceHash: account.settlementWorkspace!.workspaceHash,
       ops: [{ type: 'r2r', tokenId: 1, amount: 2n }],
       executorIsLeft: false,
@@ -1116,7 +1116,7 @@ describe('atomic settlement Account transition', () => {
     account.deltas.set(3, unrelated);
 
     const first = await upsert(account, {
-      version: 1,
+      revision: 1,
       ops: [
         { type: 'r2r', tokenId: 1, amount: 3n },
         {
@@ -1137,7 +1137,7 @@ describe('atomic settlement Account transition', () => {
     expect(account.deltas.get(2)?.rightHold).toBe(2n);
 
     const invalid = await upsert(account, {
-      version: 2,
+      revision: 2,
       previousWorkspaceHash: firstHash,
       ops: [
         { type: 'r2r', tokenId: 1, amount: 1n },
@@ -1155,14 +1155,14 @@ describe('atomic settlement Account transition', () => {
 
     expect(invalid.success).toBe(false);
     expect(account.settlementWorkspace?.workspaceHash).toBe(firstHash);
-    expect(account.settlementWorkspace?.version).toBe(1);
+    expect(account.settlementWorkspace?.revision).toBe(1);
     expect(account.deltas.get(1)?.leftHold).toBe(3n);
     expect(account.deltas.get(2)?.rightHold).toBe(2n);
     expect(account.deltas.get(3)?.leftHold).toBe(9n);
     expect(account.deltas.get(3)?.rightHold).toBe(8n);
 
     const valid = await upsert(account, {
-      version: 2,
+      revision: 2,
       previousWorkspaceHash: firstHash,
       ops: [
         { type: 'r2r', tokenId: 1, amount: 1n },
@@ -1179,7 +1179,7 @@ describe('atomic settlement Account transition', () => {
     });
 
     expect(valid.success).toBe(true);
-    expect(account.settlementWorkspace?.version).toBe(2);
+    expect(account.settlementWorkspace?.revision).toBe(2);
     expect(account.settlementWorkspace?.workspaceHash).not.toBe(firstHash);
     expect(account.settlementWorkspace?.lastModifiedByLeft).toBe(true);
     expect(account.deltas.get(1)?.leftHold).toBe(1n);
@@ -1192,7 +1192,7 @@ describe('atomic settlement Account transition', () => {
     const account = makeAccount(LEFT, RIGHT);
     account.deltas.get(1)!.rightHold = 7n;
     const first = await upsert(account, {
-      version: 1,
+      revision: 1,
       ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
       executorIsLeft: false,
     });
@@ -1212,7 +1212,7 @@ describe('atomic settlement Account transition', () => {
 
     const wrongSide = await applyAccountTx(account, transition({
       kind: 'submit',
-      version: 1,
+      revision: 1,
       workspaceHash,
     }), true, 2_000);
     expect(wrongSide.success).toBe(false);
@@ -1222,7 +1222,7 @@ describe('atomic settlement Account transition', () => {
 
     const submitted = await applyAccountTx(account, transition({
       kind: 'submit',
-      version: 1,
+      revision: 1,
       workspaceHash,
     }), false, 2_001);
     expect(submitted.success).toBe(true);
@@ -1234,7 +1234,7 @@ describe('atomic settlement Account transition', () => {
   test('clear derives releases from the exact active workspace and removes it atomically', async () => {
     const account = makeAccount(LEFT, RIGHT);
     const first = await upsert(account, {
-      version: 1,
+      revision: 1,
       ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
       executorIsLeft: false,
     });
@@ -1243,7 +1243,7 @@ describe('atomic settlement Account transition', () => {
 
     const mismatched = await applyAccountTx(account, transition({
       kind: 'clear',
-      version: 1,
+      revision: 1,
       workspaceHash: `0x${'ff'.repeat(32)}`,
     }), false, 2_000);
     expect(mismatched.success).toBe(false);
@@ -1252,7 +1252,7 @@ describe('atomic settlement Account transition', () => {
 
     const cleared = await applyAccountTx(account, transition({
       kind: 'clear',
-      version: 1,
+      revision: 1,
       workspaceHash,
     }), false, 2_001);
     expect(cleared.success).toBe(true);
@@ -1286,7 +1286,7 @@ describe('atomic settlement Account transition', () => {
     const account = makeAccount(LEFT, RIGHT);
     account.deltas.get(1)!.rightHold = 6n;
     const first = await upsert(account, {
-      version: 1,
+      revision: 1,
       ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
       executorIsLeft: false,
     });
@@ -1331,7 +1331,7 @@ describe('atomic settlement Account transition', () => {
     installProofStack(env, state);
     const account = state.accounts.get(RIGHT)!;
     expect((await upsert(account, {
-      version: 1,
+      revision: 1,
       ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
       executorIsLeft: false,
     })).success).toBe(true);
@@ -1491,7 +1491,7 @@ describe('atomic settlement Account transition', () => {
   test('AccountSettled finality clears an unsigned workspace whose holds were based on old state', async () => {
     const account = makeAccount(LEFT, RIGHT);
     expect((await upsert(account, {
-      version: 1,
+      revision: 1,
       ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
       executorIsLeft: false,
     })).success).toBe(true);
@@ -1507,7 +1507,7 @@ describe('atomic settlement Account transition', () => {
   test('R2C AccountSettled nonce zero clears an unsigned workspace with stale capacity holds', async () => {
     const account = makeAccount(LEFT, RIGHT);
     expect((await upsert(account, {
-      version: 1,
+      revision: 1,
       ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
       executorIsLeft: false,
     })).success).toBe(true);
@@ -1528,7 +1528,7 @@ describe('atomic settlement Account transition', () => {
     token2.rightCreditLimit = 100n;
     account.deltas.set(2, token2);
     expect((await upsert(account, {
-      version: 1,
+      revision: 1,
       ops: [
         { type: 'r2r', tokenId: 1, amount: 4n },
         { type: 'r2r', tokenId: 2, amount: 2n },
@@ -1616,7 +1616,7 @@ describe('atomic settlement Account transition', () => {
     const state = makeState(LEFT, addr('35'), jurisdiction, RIGHT);
     const account = state.accounts.get(RIGHT)!;
     expect((await upsert(account, {
-      version: 1,
+      revision: 1,
       ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
       executorIsLeft: false,
     })).success).toBe(true);
@@ -1662,10 +1662,10 @@ describe('atomic settlement Account transition', () => {
     expect(resultAccount.deltas.get(1)?.leftHold).toBe(4n);
   });
 
-  test('restored Account state continues the same exact workspace hash/version chain', async () => {
+  test('restored Account state continues the same exact workspace hash/revision chain', async () => {
     const live = makeAccount(LEFT, RIGHT);
     const first = await upsert(live, {
-      version: 1,
+      revision: 1,
       ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
       executorIsLeft: false,
     });
@@ -1674,7 +1674,7 @@ describe('atomic settlement Account transition', () => {
     const previousWorkspaceHash = live.settlementWorkspace!.workspaceHash;
     const update = transition({
       kind: 'upsert',
-      version: 2,
+      revision: 2,
       previousWorkspaceHash,
       ops: [{ type: 'r2r', tokenId: 1, amount: 2n }],
       executorIsLeft: true,
@@ -1695,7 +1695,7 @@ describe('atomic settlement Account transition', () => {
   test('Account cloning isolates nested post-settlement proof signatures', async () => {
     const account = makeAccount(LEFT, RIGHT);
     expect((await upsert(account, {
-      version: 1,
+      revision: 1,
       ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
       executorIsLeft: false,
     })).success).toBe(true);

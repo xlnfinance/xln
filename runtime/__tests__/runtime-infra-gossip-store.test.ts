@@ -4,8 +4,12 @@ import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { loadGossipProfilesFromInfraDb } from '../runtime/infra-gossip-store';
+import {
+  getRuntimeInfraDb,
+  tryOpenRuntimeInfraDb,
+} from '../runtime/loop-infrastructure';
 import { serializeTaggedJson } from '../protocol/serialization';
-import { clearGossip, closeInfraDb, createEmptyEnv, getInfraDb, tryOpenInfraDb } from '../runtime';
+import { clearGossip, closeInfraDb, createEmptyEnv } from '../runtime';
 import { resolveDbPath } from '../storage/runtime-dbs';
 import type { RuntimeState } from '../types';
 import {
@@ -146,7 +150,7 @@ test('relocation clear drains pending profile writes before deleting durable gos
   let probe: RuntimeState | null = null;
 
   try {
-    expect(await tryOpenInfraDb(env)).toBe(true);
+    expect(await tryOpenRuntimeInfraDb(env)).toBe(true);
     env.gossip.announce({
       ...buildCryptographicProfileFixture({ entityId, signingSeed: seed, name: 'Relocated runtime' }),
       wsUrl: 'ws://127.0.0.1:19711/ws',
@@ -164,8 +168,8 @@ test('relocation clear drains pending profile writes before deleting durable gos
     probe = createEmptyEnv(seed);
     probe.dbNamespace = env.dbNamespace;
     await loadGossipProfilesFromInfraDb(probe, {
-      tryOpenInfraDb,
-      getInfraDb,
+      tryOpenInfraDb: tryOpenRuntimeInfraDb,
+      getInfraDb: getRuntimeInfraDb,
     });
     restoredProfiles.push(...probe.gossip.getProfiles());
     expect(restoredProfiles).toHaveLength(0);
@@ -187,7 +191,7 @@ test('relocation clear removes only profiles owned by the moved runtime', async 
   let probe: RuntimeState | null = null;
 
   try {
-    expect(await tryOpenInfraDb(env)).toBe(true);
+    expect(await tryOpenRuntimeInfraDb(env)).toBe(true);
     env.gossip.announce(buildCryptographicProfileFixture({
       entityId: localEntityId,
       signingSeed: localSeed,
@@ -206,7 +210,10 @@ test('relocation clear removes only profiles owned by the moved runtime', async 
 
     probe = createEmptyEnv(localSeed);
     probe.dbNamespace = env.dbNamespace;
-    await loadGossipProfilesFromInfraDb(probe, { tryOpenInfraDb, getInfraDb });
+    await loadGossipProfilesFromInfraDb(probe, {
+      tryOpenInfraDb: tryOpenRuntimeInfraDb,
+      getInfraDb: getRuntimeInfraDb,
+    });
     expect(probe.gossip.getProfiles().map(({ entityId }) => entityId)).toEqual([remoteEntityId]);
   } finally {
     await closeInfraDb(env);

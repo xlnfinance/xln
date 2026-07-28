@@ -145,7 +145,7 @@ describe('canonical account state root', () => {
     const settlement = structuredClone(base);
     settlement.settlementWorkspace = {
       workspaceHash: `0x${'88'.repeat(32)}`,
-      version: 1,
+      revision: 1,
       status: 'awaiting_counterparty',
       lastModifiedByLeft: true,
       ops: [],
@@ -187,7 +187,7 @@ describe('canonical account state root', () => {
     const base = account();
     base.settlementWorkspace = {
       workspaceHash: `0x${'88'.repeat(32)}`,
-      version: 1,
+      revision: 1,
       status: 'ready_to_submit',
       lastModifiedByLeft: true,
       ops: [],

@@ -1,6 +1,6 @@
 import type { RuntimeGraphPosition } from './runtimeGraphProjection';
 
-export const GRAPH_POSITION_OVERRIDES_KEY = 'xln-graph-position-overrides-v2';
+export const GRAPH_POSITION_OVERRIDES_KEY = 'xln-graph-position-overrides-v1';
 
 const normalizePosition = (value: unknown): RuntimeGraphPosition | null => {
   const candidate = value as Partial<RuntimeGraphPosition> | null;

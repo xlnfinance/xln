@@ -80,7 +80,7 @@ const canonicalJEventClaimForFrameHash = (value: unknown): Record<string, unknow
   // The signed Account frame binds the exact chain block, full canonical body,
   // and both independently verified Patricia witnesses. None are local hints.
   return {
-    version: 'xln:account-j-event-claim-frame:v2',
+    version: 'xln:account-j-event-claim-frame:v1',
     jHeight: toInt(data['jHeight']),
     jBlockHash: String(data['jBlockHash'] ?? '').toLowerCase(),
     eventsHash: canonicalJurisdictionEventsHash(events),

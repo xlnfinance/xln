@@ -106,7 +106,7 @@ test('remote command journal survives reload with encrypted exact payload and th
   }, { dbName: DB_NAME, dbVersion: DB_VERSION, intentStore: INTENT_STORE });
   expect(raw.records).toHaveLength(2);
   expect(raw.stores).toEqual(['intents']);
-  expect(raw.records.every(record => record.version === 3)).toBe(true);
+  expect(raw.records.every(record => record.version === 1)).toBe(true);
   expect(raw.records.every(record => record.runtimeId === RUNTIME_ID)).toBe(true);
   expect(raw.records.every(record => record.serverFingerprint === SERVER_FINGERPRINT)).toBe(true);
   expect(raw.records.every(record => /^0x[0-9a-f]{64}$/.test(String(record.inputHmac)))).toBe(true);

@@ -71,7 +71,7 @@ export const buildJSubmitAttemptId = (identity: JSubmitAttemptIdentity): string 
     throw new Error(`J_SUBMIT_ATTEMPT_NUMBER_INVALID:${identity.attemptNumber}`);
   }
   return keccak256(toUtf8Bytes(safeStringify({
-    domain: 'xln/j-submit-attempt/v2',
+    domain: 'xln/j-submit-attempt/v1',
     jurisdictionName,
     entityId,
     signerId,

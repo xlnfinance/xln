@@ -5,11 +5,11 @@ import { STORAGE_MERKLE_NAMESPACE_TAG, type StorageMerkleNamespace } from './mer
 export { STORAGE_MERKLE_NAMESPACE_TAG, type StorageMerkleNamespace } from './merkle-namespace-tags';
 
 /**
- * Schema 9 is the only supported fresh-reset format. It separates the
- * per-epoch replay-byte rotation counter from total retained history bytes.
- * Schema 8 overloaded retainedHistoryBytes for both roles.
+ * xln testnet has one canonical storage format. We deliberately do not carry
+ * migration readers: an incompatible database is rejected and the operator
+ * starts a new network instead of replaying ambiguous historical bytes.
  */
-export const STORAGE_SCHEMA_VERSION = 10;
+export const STORAGE_SCHEMA_VERSION = 1;
 
 export const STORAGE_FRAME_FORMAT = Object.freeze({
   schemaVersion: STORAGE_SCHEMA_VERSION,
@@ -52,10 +52,9 @@ export const assertStorageSchemaVersion = (
 };
 export const DEFAULT_SNAPSHOT_PERIOD_FRAMES = 10_000;
 export const DEFAULT_RETAIN_SNAPSHOTS = 2;
-export const DEFAULT_EPOCH_MAX_BYTES = 16 * 1024 * 1024 * 1024;
-// Archival history is the safe default. Operators may opt into bounded local
-// materialized views, but xln must never silently prune activity merely because
-// a validator ran long enough.
+// Archival storage is unlimited unless the local operator explicitly chooses
+// a quota. Runtime state never changes because of this local policy.
+export const DEFAULT_EPOCH_MAX_BYTES = Number.MAX_SAFE_INTEGER;
 export const DEFAULT_HISTORY_VIEW_MAX_BYTES = Number.MAX_SAFE_INTEGER;
 export const DEFAULT_HISTORY_VIEW_RETAIN_FRAMES = Number.MAX_SAFE_INTEGER;
 export const DEFAULT_MATERIALIZE_PERIOD_FRAMES = 100;

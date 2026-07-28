@@ -5,7 +5,7 @@ import type {
   ValidatorEntityFrameExecution,
 } from '../../types';
 import { applyEntityFrame } from './frame-application';
-import { createEntityFrameHashFromStateRoot } from './frame';
+import { createEntityFrameHashFromStateRoot, entityFrameEventsEqual } from './frame';
 import { buildEntityHashesToSign } from './hanko-witness';
 import {
   deferEntityConsensusInput,
@@ -104,6 +104,7 @@ const validateReplayedCommitments = (
     frame.height,
     frame.timestamp,
     frame.txs,
+    frame.events,
     state.entityId,
     stateRoot,
     authorityRoot,
@@ -133,6 +134,7 @@ const replayCommitFrame = async (
     outputs,
     jOutputs,
     candidateEffects,
+    events,
     storageChanges,
     consumptionNodeChanges,
     accountJClaimNodeChanges,
@@ -142,6 +144,12 @@ const replayCommitFrame = async (
     frame.txs,
     frame.timestamp,
   );
+  if (!entityFrameEventsEqual(events, frame.events)) {
+    return {
+      kind: 'result',
+      result: rejectEntityConsensusInput(context, 'COMMIT_FRAME_EVENTS_MISMATCH'),
+    };
+  }
   const state = {
     ...newState,
     entityId: workingReplica.state.entityId,

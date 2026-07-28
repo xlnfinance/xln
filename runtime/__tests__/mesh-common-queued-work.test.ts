@@ -98,7 +98,7 @@ describe('mesh queued work detection', () => {
     const signedCommand: EntityTx = {
       type: 'entityCommand',
       data: {
-        version: 2,
+        version: 1,
         entityId,
         stackKey: `0x${'01'.repeat(32)}`,
         boardHash: `0x${'02'.repeat(32)}`,

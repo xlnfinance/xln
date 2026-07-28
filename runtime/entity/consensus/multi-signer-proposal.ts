@@ -13,7 +13,7 @@ import type {
   ProposedEntityFrame,
   ValidatorEntityFrameExecution,
 } from '../../types';
-import { createEntityFrameHashFromStateRoot } from './frame';
+import { createEntityFrameHashFromStateRoot, entityFrameEventsEqual } from './frame';
 import { applyEntityFrame } from './frame-application';
 import {
   buildEntityHashesToSign,
@@ -47,6 +47,9 @@ const replayPreparedFrameForRelay = async (
   if (jRangeError) throw new Error(`ENTITY_PREPARED_J_RANGE_MISMATCH:${jRangeError}`);
   assertFrameJPrefix(env, replica, frame);
   const applied = await applyEntityFrame(env, replica.state, frame.txs, frame.timestamp);
+  if (!entityFrameEventsEqual(applied.events, frame.events)) {
+    throw new Error('ENTITY_PREPARED_EVENTS_MISMATCH');
+  }
   const state = {
     ...applied.newState,
     entityId: replica.state.entityId,
@@ -71,6 +74,7 @@ const replayPreparedFrameForRelay = async (
     frame.height,
     frame.timestamp,
     frame.txs,
+    frame.events,
     state.entityId,
     stateRoot,
     authorityRoot,
@@ -238,12 +242,7 @@ const buildMultiSignerProposal = async (
       ? { jPrefixCertificate: proposalJPrefixCertificate }
       : {}),
   });
-  const applied = await applyEntityFrame(
-    env,
-    workingReplica.state,
-    proposalTxs,
-    env.timestamp,
-  );
+  const applied = await applyEntityFrame(env, workingReplica.state, proposalTxs, env.timestamp);
   const height = workingReplica.state.height + 1;
   const state = buildProposalState(
     workingReplica,
@@ -260,6 +259,7 @@ const buildMultiSignerProposal = async (
     height,
     env.timestamp,
     proposalTxs,
+    applied.events,
     state.entityId,
     stateRoot,
     authorityRoot,
@@ -301,6 +301,7 @@ const buildMultiSignerProposal = async (
     stateRoot,
     authorityRoot,
     txs: [...proposalTxs],
+    events: structuredClone(applied.events),
     hash: frameHash,
     timestamp: env.timestamp,
     leader: {

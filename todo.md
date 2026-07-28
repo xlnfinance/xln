@@ -174,20 +174,6 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   halt after waking, a post-WAL notification failure cannot downgrade a
   durable commit, and abort closes candidate-only storage handles without
   touching live handles.
-- [x] Fix the confirmed Runtime WAL ambiguity fail-open before further
-  structural work. `RuntimeFrameStorageError(commitStatus='unknown')`
-  currently installs the working candidate with
-  `publishRuntimeFrameTransaction` and only then halts. Unknown durability is
-  not a commit: keep the live replica at the last proven frame, halt its
-  writer, probe/reload the authoritative WAL, and never dispatch candidate
-  outputs. Preserve the separate proven-committed recovery path. Add L1 tests
-  for `not-committed`, `committed`, and `unknown`, plus an L2 child-process
-  timeout/crash test that proves RAM height, mempool ownership, receipts and
-  post-restart state all follow the durable frame.
-  **Done:** unknown/conflict durability aborts the candidate and halts on the
-  last proven live frame; only a positively proven commit is installed.
-  `runtime-storage-failure.test.ts` pins all four dispositions and a real child
-  process proves restart follows WAL truth after a write timeout.
 - [ ] Remove ephemeral Account replica fields from `AccountState`, starting
   with `clonedForValidation`. It is currently kept out of consensus and
   persistence by independent name-based exclusions in clone, serialization,
@@ -198,29 +184,6 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   Do not add a compatibility fallback: this is testnet, so make one canonical
   schema transition with explicit migration tooling if durable fixtures need
   conversion.
-- [x] Delete the remaining Account-boundary escape hatches. Delete
-  `rollbackTimedOutFrames`, `ACCOUNT_ACK_TIMEOUT_MS`, and every scheduler path
-  that deletes a signed pending proposal because time or an embedded HTLC
-  deadline elapsed. Rename `checkAccountTimeouts` to the actual liveness job:
-  exact signed-input resend plus diagnostics/dispute escalation. An expired
-  HTLC never authorizes local proposal deletion; resolve it in a later Account
-  frame or through the dispute protocol. Keep same-height rollback exclusively
-  inside Account consensus, where a valid LEFT frame wins and the losing
-  proposal's transactions are restored exactly once. Move Entity-side mempool
-  pruning after HTLC/dispute/settlement events into
-  Account-owned transitions; delete the production-dead
-  `addToAccountMempool` export and update its bounds test to use
-  `applyAccountInput`. Prove by import/call-site scan that Entity and Runtime
-  cannot write Account mempool, pending candidate, delta, collateral, holds or
-  credit directly.
-  **Done:** deleted the wire `AccountInput.kind === 'settle'` branch, its
-  unreachable fail-fast handler, clone path, witness path and unused
-  `account-settlement` consumption lane. Settlement negotiation has one path:
-  canonical EntityTxs produce bilateral `settle_transition` AccountTxs.
-  **Done:** repository call-site scans contain no `rollbackTimedOutFrames`,
-  `ACCOUNT_ACK_TIMEOUT_MS`, `checkAccountTimeouts`, or
-  `addToAccountMempool`. Signed Account proposals are resent exactly and
-  same-height rollback remains inside Account consensus.
 - [ ] Remove confirmed vestigial or misplaced state only with root/storage
   evidence. Owner decision: `EntityState.messages`, `batchHistory`, and
   diagnostic activity are not consensus state. Persist certified Entity frames
@@ -256,13 +219,6 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   not a new epoch of the existing network. Epoch rotation is a separate local
   history-compaction mechanism for reducing Hub storage weight; it must
   preserve network identity and continuous certified Entity/Account chains.
-  **Done:** storage schema v10 physically separates `current`, `runtimeWal`,
-  and `historyViews`; strict TS boundary validators bind every child history
-  record to its owning Runtime height/timestamp. Real SIGKILL tests cover both
-  sides of the WAL/view boundary, and deleting the entire view DB rebuilds it
-  exactly from WAL. Runtime retention now removes only Runtime Activity and reverse
-  runtime-height indexes. It no longer deletes canonical Entity/Account frame
-  bodies; a real LevelDB regression pins this ownership boundary.
 - [ ] Make long-term history retention independent per replica. Add certified
   checkpoints containing machine id, height, state root, previous checkpoint
   hash, and certificate; permit each Entity validator/Account peer to prune

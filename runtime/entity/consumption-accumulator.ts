@@ -33,11 +33,11 @@ export type {
 
 const ABI = ethers.AbiCoder.defaultAbiCoder();
 const domain = (label: string): string => ethers.keccak256(ethers.toUtf8Bytes(label)).toLowerCase();
-const KEY_DOMAIN = domain('xln.consumption-frontier.key.v2');
-const FRONTIER_DOMAIN = domain('xln.consumption-frontier.value.v2');
-const LEAF_DOMAIN = domain('xln.consumption-frontier.leaf.v2');
-const BRANCH_DOMAIN = domain('xln.consumption-frontier.branch.v2');
-export const EMPTY_CONSUMPTION_ROOT = domain('xln.consumption-frontier.empty.v2');
+const KEY_DOMAIN = domain('xln.consumption-frontier.key.v1');
+const FRONTIER_DOMAIN = domain('xln.consumption-frontier.value.v1');
+const LEAF_DOMAIN = domain('xln.consumption-frontier.leaf.v1');
+const BRANCH_DOMAIN = domain('xln.consumption-frontier.branch.v1');
+export const EMPTY_CONSUMPTION_ROOT = domain('xln.consumption-frontier.empty.v1');
 export const MAX_CONSUMPTION_PROOF_NODES = 257;
 export const MAX_CONSUMPTION_PROOF_BYTES = LIMITS.MAX_FRAME_SIZE_BYTES;
 export const MAX_CONSUMPTION_HANKO_BYTES = 1_000_000;
@@ -181,7 +181,7 @@ export const getConsumptionKey = (
   ['bytes32', 'bytes32', 'bytes32', 'bytes32'],
   [
     KEY_DOMAIN,
-    domain(`xln.consumption-frontier.lane.${identity.lane}.v2`),
+    domain(`xln.consumption-frontier.lane.${identity.lane}.v1`),
     bytes32(identity.sourceEntityId, 'CONSUMPTION_SOURCE_ENTITY'),
     bytes32(identity.targetEntityId, 'CONSUMPTION_TARGET_ENTITY'),
   ],
@@ -231,11 +231,11 @@ const hashFrontier = (valueInput: ConsumptionFrontierValue): string => {
 
 const parseNode = (value: unknown): ConsumptionNode => {
   const source = record(value, 'CONSUMPTION_NODE');
-  if (source['version'] !== 2) throw new Error(`CONSUMPTION_NODE_VERSION_INVALID:${String(source['version'])}`);
+  if (source['version'] !== 1) throw new Error(`CONSUMPTION_NODE_VERSION_INVALID:${String(source['version'])}`);
   if (source['type'] === 'leaf') {
     exactKeys(source, ['version', 'type', 'key', 'value'], 'CONSUMPTION_LEAF');
     return Object.freeze({
-      version: 2,
+      version: 1,
       type: 'leaf',
       key: bytes32(source['key'], 'CONSUMPTION_LEAF_KEY'),
       value: parseFrontier(source['value']),
@@ -250,7 +250,7 @@ const parseNode = (value: unknown): ConsumptionNode => {
   const left = bytes32(source['left'], 'CONSUMPTION_BRANCH_LEFT');
   const right = bytes32(source['right'], 'CONSUMPTION_BRANCH_RIGHT');
   if (left === right) throw new Error(`CONSUMPTION_BRANCH_UNARY:${left}`);
-  return Object.freeze({ version: 2, type: 'branch', bit, left, right });
+  return Object.freeze({ version: 1, type: 'branch', bit, left, right });
 };
 
 const hashParsedNode = (node: ConsumptionNode): string => node.type === 'leaf'
@@ -281,11 +281,11 @@ const parseProof = (proof: unknown): ConsumptionProof => {
   if (proof === undefined || proof === null) throw new Error('CONSUMPTION_PROOF_REQUIRED');
   const source = record(proof, 'CONSUMPTION_PROOF');
   exactKeys(source, ['version', 'nodes'], 'CONSUMPTION_PROOF');
-  if (source['version'] !== 2) throw new Error(`CONSUMPTION_PROOF_VERSION_INVALID:${String(source['version'])}`);
+  if (source['version'] !== 1) throw new Error(`CONSUMPTION_PROOF_VERSION_INVALID:${String(source['version'])}`);
   if (!Array.isArray(source['nodes'])) throw new Error('CONSUMPTION_PROOF_NODES_INVALID');
   if (source['nodes'].length > MAX_CONSUMPTION_PROOF_NODES) throw new Error('CONSUMPTION_PROOF_LENGTH_INVALID');
   const nodes = Object.freeze(source['nodes'].map(parseNode));
-  const parsed = Object.freeze({ version: 2 as const, nodes });
+  const parsed = Object.freeze({ version: 1 as const, nodes });
   if (getConsumptionProofByteLength(parsed) > MAX_CONSUMPTION_PROOF_BYTES) {
     throw new Error('CONSUMPTION_PROOF_BYTES_INVALID');
   }
@@ -359,12 +359,12 @@ export const verifyConsumptionProof = (root: string, key: string, proof: unknown
   inspectProof(root, key, proof).result;
 
 export const createEmptyConsumptionAccumulator = (): ConsumptionAccumulatorState =>
-  Object.freeze({ version: 2, root: EMPTY_CONSUMPTION_ROOT, count: 0n });
+  Object.freeze({ version: 1, root: EMPTY_CONSUMPTION_ROOT, count: 0n });
 
 const parseState = (state: ConsumptionAccumulatorState): ConsumptionAccumulatorState => {
   const source = record(state, 'CONSUMPTION_STATE');
   exactKeys(source, ['version', 'root', 'count'], 'CONSUMPTION_STATE');
-  if (source['version'] !== 2) throw new Error(`CONSUMPTION_STATE_VERSION_INVALID:${String(source['version'])}`);
+  if (source['version'] !== 1) throw new Error(`CONSUMPTION_STATE_VERSION_INVALID:${String(source['version'])}`);
   if (typeof source['count'] !== 'bigint') throw new Error(`CONSUMPTION_COUNT_INVALID:${String(source['count'])}`);
   const count = boundedUint(source['count'], UINT64_MAX, 'CONSUMPTION_COUNT');
   if (count > MAX_CONSUMPTION_RELATIONSHIPS_PER_ENTITY) {
@@ -374,7 +374,7 @@ const parseState = (state: ConsumptionAccumulatorState): ConsumptionAccumulatorS
   }
   const root = bytes32(source['root'], 'CONSUMPTION_ROOT');
   if ((root === EMPTY_CONSUMPTION_ROOT) !== (count === 0n)) throw new Error('CONSUMPTION_STATE_ROOT_COUNT_MISMATCH');
-  return Object.freeze({ version: 2, root, count });
+  return Object.freeze({ version: 1, root, count });
 };
 
 export const assertConsumptionAccumulatorState = (
@@ -491,7 +491,7 @@ export const applyConsumptionOutput = (
 
   const { status, value: nextValue } = buildNextConsumptionFrontier(identity, inspected);
 
-  const leaf: ConsumptionLeafNode = { version: 2, type: 'leaf', key, value: nextValue };
+  const leaf: ConsumptionLeafNode = { version: 1, type: 'leaf', key, value: nextValue };
   let childHash = put(leaf);
   let replacedNodeHashes: readonly string[] = Object.freeze([]);
   if (inspected.result.status === 'member') {
@@ -517,7 +517,7 @@ export const applyConsumptionOutput = (
       ? inspected.path[prefixLength]!.hash
       : inspected.terminalHash!;
     childHash = put({
-      version: 2,
+      version: 1,
       type: 'branch',
       bit: differingBit,
       left: keyBit(key, differingBit) === 0 ? childHash : subtreeHash,
@@ -536,7 +536,7 @@ export const applyConsumptionOutput = (
   return Object.freeze({
     status,
     state: Object.freeze({
-      version: 2,
+      version: 1,
       root: childHash,
       count: state.count + (status === 'inserted' ? 1n : 0n),
     }),
@@ -553,7 +553,7 @@ export const createConsumptionProof = (
 ): ConsumptionProof => {
   let expectedHash = bytes32(root, 'CONSUMPTION_ROOT');
   const normalizedKey = bytes32(key, 'CONSUMPTION_KEY');
-  if (expectedHash === EMPTY_CONSUMPTION_ROOT) return Object.freeze({ version: 2, nodes: Object.freeze([]) });
+  if (expectedHash === EMPTY_CONSUMPTION_ROOT) return Object.freeze({ version: 1, nodes: Object.freeze([]) });
   const nodes: ConsumptionNode[] = [];
   const seen = new Set<string>();
   let previousBit = -1;
@@ -568,7 +568,7 @@ export const createConsumptionProof = (
     if (actualHash !== expectedHash) throw new Error(`CONSUMPTION_NODE_CORRUPT:${expectedHash}:${actualHash}`);
     nodes.push(node);
     if (node.type === 'leaf') {
-      const proof = Object.freeze({ version: 2 as const, nodes: Object.freeze(nodes) });
+      const proof = Object.freeze({ version: 1 as const, nodes: Object.freeze(nodes) });
       if (getConsumptionProofByteLength(proof) > MAX_CONSUMPTION_PROOF_BYTES) {
         throw new Error('CONSUMPTION_PROOF_BYTES_INVALID');
       }

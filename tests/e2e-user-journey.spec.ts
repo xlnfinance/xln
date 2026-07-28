@@ -346,10 +346,14 @@ async function mineEmptyJurisdictionBlock(page: Page): Promise<void> {
 
 async function expectSwapBuilderLabels(page: Page): Promise<void> {
   await openAccountWorkspaceTab(page, 'swap');
-  await expect(page.getByTestId('swap-from-token-label')).toHaveText(/^(USDC|USDT|WETH) \(Testnet\)$/);
-  await expect(page.getByTestId('swap-to-token-label')).toHaveText(/^(USDC|USDT|WETH) \(Testnet\)$/);
+  await expect(page.getByTestId('swap-ticket-from-token').locator('option:checked')).toHaveText(/^(USDC|USDT|WETH)$/);
+  await expect(page.getByTestId('swap-ticket-to-token').locator('option:checked')).toHaveText(/^(USDC|USDT|WETH)$/);
+  await expect(page.getByTestId('swap-ticket-from-network').locator('option:checked')).toContainText('Testnet');
+  // The default destination is the selected bilateral account. Jurisdiction
+  // labels belong only to explicit cross-jurisdiction routes in this selector.
+  await expect(page.getByTestId('swap-ticket-to-network').locator('option:checked')).toHaveText('Same account');
 
-  const routeLabels = await page.getByTestId('swap-route-select').locator('option').evaluateAll((options) =>
+  const routeLabels = await page.getByTestId('swap-ticket-to-network').locator('option').evaluateAll((options) =>
     options.map((option) => String((option as HTMLOptionElement).label || option.textContent || '').trim()),
   );
   expect(routeLabels.filter((label) => label === 'Same account')).toHaveLength(1);

@@ -92,6 +92,7 @@ const frameOutput = (
     timestamp: height,
     hash: frameHash,
     txs: [],
+    events: [],
     leader: { proposerSignerId: signerId('b2'), view: 0 },
     collectedSigs: new Map(),
     ...(hankos ? { hankos } : {}),

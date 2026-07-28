@@ -2,10 +2,10 @@ import { ethers } from 'ethers';
 
 import { LIMITS } from '../constants';
 import { encodeCanonicalEntityConsensusValue } from './consensus/state-root';
-import type { EntityTx, SignedEntityCommandV2 } from '../types';
+import type { EntityTx, SignedEntityCommandV1 } from '../types';
 import { canonicalEntityBoardSignerId, isEntityProtocolTx } from './authorization';
 
-export const ENTITY_COMMAND_DOMAIN = 'xln:entity-command:v2' as const;
+export const ENTITY_COMMAND_DOMAIN = 'xln:entity-command:v1' as const;
 export const UNREGISTERED_ENTITY_COMMAND_STACK_KEY = ethers.id(
   'xln:entity-command:unregistered-stack:v1',
 ).toLowerCase();
@@ -13,7 +13,7 @@ export const MAX_ENTITY_COMMAND_BYTES = LIMITS.MAX_FRAME_SIZE_BYTES;
 const ADDRESS = /^0x[0-9a-f]{40}$/;
 const BYTES32 = /^0x[0-9a-f]{64}$/;
 
-export type EntityCommandBody = Omit<SignedEntityCommandV2, 'signature'>;
+export type EntityCommandBody = Omit<SignedEntityCommandV1, 'signature'>;
 
 export const canonicalEntityCommandSignerId = (value: unknown): string =>
   canonicalEntityBoardSignerId(value, 'ENTITY_COMMAND_AUTHOR_SIGNER_ID_REQUIRED');
@@ -106,13 +106,13 @@ export const hashEntityCommandTxs = (txs: EntityTx[]): string => {
 };
 
 export const normalizeEntityCommandBody = (command: EntityCommandBody): EntityCommandBody => {
-  if (command.version !== 2) throw new Error(`ENTITY_COMMAND_VERSION_INVALID:${String(command.version)}`);
+  if (command.version !== 1) throw new Error(`ENTITY_COMMAND_VERSION_INVALID:${String(command.version)}`);
   if (typeof command.nonce !== 'bigint' || command.nonce < 1n) {
     throw new Error(`ENTITY_COMMAND_NONCE_INVALID:${String(command.nonce)}`);
   }
   assertEntityCommandTxs(command.txs);
   const body: EntityCommandBody = {
-    version: 2,
+    version: 1,
     entityId: canonicalEntityCommandEntityId(command.entityId),
     stackKey: canonicalEntityCommandBytes32(command.stackKey, 'ENTITY_COMMAND_STACK_KEY_INVALID'),
     boardHash: canonicalEntityCommandBytes32(command.boardHash, 'ENTITY_COMMAND_BOARD_HASH_INVALID'),
@@ -151,7 +151,7 @@ const exactCommandKeys = new Set([
   'authorSigner', 'nonce', 'txsHash', 'txs', 'signature',
 ]);
 
-export const normalizeSignedEntityCommand = (value: unknown): SignedEntityCommandV2 => {
+export const normalizeSignedEntityCommand = (value: unknown): SignedEntityCommandV1 => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('ENTITY_COMMAND_INVALID');
   const raw = value as Record<string, unknown>;
   const keys = Object.keys(raw);
@@ -161,7 +161,7 @@ export const normalizeSignedEntityCommand = (value: unknown): SignedEntityComman
   }
   assertEntityCommandTxs(raw['txs']);
   const body = normalizeEntityCommandBody({
-    version: raw['version'] as 2,
+    version: raw['version'] as 1,
     entityId: String(raw['entityId'] ?? ''),
     stackKey: String(raw['stackKey'] ?? ''),
     boardHash: String(raw['boardHash'] ?? ''),
@@ -177,7 +177,7 @@ export const normalizeSignedEntityCommand = (value: unknown): SignedEntityComman
   return { ...body, signature };
 };
 
-export const signedEntityCommandTx = (command: SignedEntityCommandV2): EntityTx => ({
+export const signedEntityCommandTx = (command: SignedEntityCommandV1): EntityTx => ({
   type: 'entityCommand',
   data: command,
 });

@@ -17,6 +17,7 @@ import { createStructuredLogger } from '../../infra/logger';
 import { isRuntimePerfProfileEnabled } from '../../infra/perf-runtime-flags';
 import { getPerfMs } from '../../utils';
 import { computeIntegrityDigest } from '../../infra/integrity-checksum';
+import { ENTITY_FRAME_EVENT_COLLECTOR } from '../frame-event-collector';
 
 const entityRootLog = createStructuredLogger('entity.state-root');
 
@@ -541,6 +542,9 @@ export const projectEntityConsensusState = (
   expandAccounts = true,
 ): Record<string, unknown> => {
   const projected = { ...state } as Partial<EntityState>;
+  // Frame events are committed by the outer signed frame. The enumerable
+  // reducer-local collector exists only so immutable spreads cannot lose them.
+  delete (projected as Record<string, unknown>)[ENTITY_FRAME_EVENT_COLLECTOR];
   // The previous-frame link is committed by the outer Entity frame payload.
   // The committed state then stores this frame's hash here, so including it in
   // its own state root would be circular.

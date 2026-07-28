@@ -13,7 +13,8 @@ export const cleanupRuntimeStorage = (runtimeId: string): void => {
   rmSync(`${namespacePath}-storage-current`, { recursive: true, force: true });
   rmSync(`${namespacePath}-storage-previous`, { recursive: true, force: true });
   rmSync(`${namespacePath}-wal`, { recursive: true, force: true });
-  rmSync(`${namespacePath}-events`, { recursive: true, force: true });
+  rmSync(`${namespacePath}-history-views`, { recursive: true, force: true });
+  rmSync(`${namespacePath}-writer.lock`, { force: true });
   rmSync(`${namespacePath}-infra`, { recursive: true, force: true });
 };
 

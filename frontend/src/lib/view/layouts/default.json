@@ -1,6 +1,6 @@
 {
   "name": "default",
-  "version": "4.1",
+  "version": "1",
   "description": "Default 4-panel layout (Graph3D 70% + Sidebar 30% for optimal visual focus)",
   "grid": {
     "root": {

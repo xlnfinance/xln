@@ -26,6 +26,7 @@ const frameInput = (index: number, from?: string): RoutedEntityInput => ({
     timestamp: 1,
     hash: `0x${index.toString(16).padStart(64, '0')}`,
     txs: [],
+    events: [],
     leader: { proposerSignerId: signerId(index + 1), view: 0 },
     collectedSigs: new Map(),
   },

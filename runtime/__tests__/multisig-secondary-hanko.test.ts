@@ -1457,7 +1457,7 @@ describe('multisig secondary Hanko production', () => {
       type: 'settle_transition',
       data: {
         kind: 'seal',
-        version: 1,
+        revision: 1,
         workspaceHash: account.settlementWorkspace!.workspaceHash,
         settlementNonce: 1,
         settlementHash,

@@ -19,7 +19,7 @@ const ACCOUNT_FRAME_GOLDEN_HASH = '0x15cd826cf4c3d968ec506d1ec758c7529963079ca1f
 // Keep these literal so changing the production codec cannot bless itself.
 const ENTITY_STATE_ROOT_GOLDEN_HASH = '0x2550ac0a739bb13133109a83608fb9ea340931f861da85242b7d24a4bcc20095';
 const ENTITY_AUTHORITY_ROOT_GOLDEN_HASH = '0xa7c4fd7139d47d2567c6a97c7d7d06bc6d60fc4481acbe8155584f3573b520bd';
-const ENTITY_FRAME_GOLDEN_HASH = '0x6db6b3265794c1f1f64012be6a0efec156c8a68cb38a9e84f85543c8e0717e3c';
+const ENTITY_FRAME_GOLDEN_HASH = '0xb1cef6219d7b79d17f0bb40a830f7160b9ef2a7d5e116312ed601afa8c4fef63';
 
 const makeAccountFrameFixture = (): AccountFrame => ({
   height: 7,
@@ -117,13 +117,14 @@ describe('frame hash golden fixtures', () => {
     );
     expect(frameHash).toBe(ENTITY_FRAME_GOLDEN_HASH);
 
-    // Isolate the v4 authority commitment: the state root, tx bytes and
+    // Isolate the canonical v1 authority commitment: state root, events, tx bytes and
     // every other frame field stay fixed while only authorityRoot is corrupt.
     const authorityTamperedHash = createEntityFrameHashFromStateRoot(
       `0x${'22'.repeat(32)}`,
       4,
       1_700_000_000_456,
       entityTxs,
+      [],
       entityState.entityId,
       ENTITY_STATE_ROOT_GOLDEN_HASH,
       `0x${'ff'.repeat(32)}`,

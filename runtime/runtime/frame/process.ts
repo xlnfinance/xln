@@ -16,7 +16,7 @@ import type {
   RuntimeInput,
   RuntimeState,
 } from '../../types';
-import { getWallClockMs } from '../../utils';
+import { getPerfMs, getWallClockMs } from '../../utils';
 import { clearPendingAuditEvents, flushPendingAuditEvents } from '../env-events';
 import { acquireRuntimeFrameWriter, assertRuntimeWriterAcceptingIngress } from './writer-lock';
 import { createFrameExecutionState, type FrameExecutionState } from './execution-state';
@@ -32,6 +32,7 @@ import { handleRuntimeFrameStorageFailure } from './storage-failure';
 import { runCommittedRuntimeEffects } from './post-commit';
 import { finishRuntimeFrame, handleRuntimeFrameFailure } from './finish';
 import type { AppliedRuntimeInput } from './input-reducer';
+import { measureRuntimeFrameCloneBytes } from './clone';
 
 const runtimeLog = createStructuredLogger('runtime');
 
@@ -206,11 +207,15 @@ const advanceRuntimeFrameTimestamp = (
 const openRuntimeFrameCandidate = (
   liveEnv: RuntimeState,
   liveState: RuntimeLifecycleState,
+  profile: RuntimeProcessProfile,
   deps: RuntimeProcessDeps,
 ): RuntimeFrameCandidate => {
   const mempoolQueuedAt = requireRuntimeMempool(liveEnv).queuedAt;
   const quietRuntimeLogs = liveEnv.quietRuntimeLogs === true;
+  if (profile.enabled) profile.metrics.cloneBytes = measureRuntimeFrameCloneBytes(liveEnv);
+  const cloneStartedAt = profile.enabled ? getPerfMs() : 0;
   const transaction = createRuntimeFrameTransaction(liveEnv);
+  if (profile.enabled) profile.metrics.cloneMs = getPerfMs() - cloneStartedAt;
   const env = transaction.workingEnv;
   const state = ensureRuntimeState(env);
   const mempool = requireRuntimeMempool(env);
@@ -323,6 +328,9 @@ const commitRuntimeFrame = async (
       candidateEnv.pendingNetworkOutputs,
     );
     profile.metrics.storageMs = outcome.persistencePerfMs;
+    if (outcome.persistencePerfMs) {
+      profile.metrics.walMs = outcome.persistencePerfMs.authoritativeWrite;
+    }
     if (outcome.staleWriterStopped) {
       return haltStaleRuntimeWriter(liveEnv, frame, options.frameHeightBeforeTick, profile);
     }
@@ -396,7 +404,7 @@ const applyAndCommitRuntimeFrame = async (
   started: { frameHeightBeforeTick: number; frameTimestampBeforeTick: number },
   deps: RuntimeProcessDeps,
 ): Promise<{ env: RuntimeState; staleWriterStopped: boolean }> => {
-  const candidate = openRuntimeFrameCandidate(liveEnv, processState, deps);
+  const candidate = openRuntimeFrameCandidate(liveEnv, processState, profile, deps);
   frame.transaction = candidate.transaction;
   let env = candidate.env;
   let state = candidate.state;

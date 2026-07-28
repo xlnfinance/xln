@@ -59,7 +59,7 @@ describe('hold underflow guards', () => {
       ],
       lastModifiedByLeft: true,
       status: 'awaiting_counterparty',
-      version: 1,
+      revision: 1,
       createdAt: 1,
       lastUpdatedAt: 1,
       executorIsLeft: true,
@@ -73,7 +73,7 @@ describe('hold underflow guards', () => {
       type: 'settle_transition',
       data: {
         kind: 'clear',
-        version: 1,
+        revision: 1,
         workspaceHash: accountMachine.settlementWorkspace.workspaceHash,
       },
     }, true, 2);

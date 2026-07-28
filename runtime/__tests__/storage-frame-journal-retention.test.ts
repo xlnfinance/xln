@@ -972,6 +972,7 @@ describe('storage frame journal retention', () => {
         timestamp: 22,
         hash: `0x${'77'.repeat(32)}`,
         txs: [],
+        events: [],
         leader: { proposerSignerId: `0x${'73'.repeat(20)}`, view: 0 },
         collectedSigs: new Map(),
       },

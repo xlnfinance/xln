@@ -35,6 +35,7 @@ import { assertEntityProviderActionIntent } from './entity/entity-provider-actio
 import type { EntityProviderActionIntent } from './types/entity-provider-actions';
 import { isRuntimeFailureSignal } from './protocol/failure-taxonomy';
 import type { SwapOrderHistoryEntry, SwapOrderResolveHistoryEntry } from './types';
+import { assertEntityFrameEventByteBudget } from './entity/consensus/frame-events';
 
 const MAX_UINT256 = (1n << 256n) - 1n;
 
@@ -1030,7 +1031,7 @@ export function validateEntityState(value: unknown, context = 'EntityState'): En
   if (obj['entityCommandNonces'] !== undefined) {
     const commandNonces = validateObject(obj['entityCommandNonces'], `${context}.entityCommandNonces`);
     if (
-      commandNonces['version'] !== 2 ||
+      commandNonces['version'] !== 1 ||
       !/^0x[0-9a-f]{64}$/.test(String(commandNonces['boardHash'] ?? '')) ||
       !Number.isSafeInteger(commandNonces['boardEpoch']) ||
       Number(commandNonces['boardEpoch']) < 0
@@ -1591,6 +1592,35 @@ const validateJPrefixCertificate = (value: unknown, context: string): void => {
   }
 };
 
+const validateEntityFrameEvents = (
+  value: unknown,
+  context: string,
+): ProposedEntityFrame['events'] => {
+  const events = validateArray<Record<string, unknown>>(value, context);
+  for (let index = 0; index < events.length; index += 1) {
+    const eventContext = `${context}[${index}]`;
+    const event = validateObject(events[index], eventContext);
+    const type = validateString(event['type'], `${eventContext}.type`);
+    if (type === 'status') {
+      rejectUnexpectedKeys(event, ['type', 'message'], eventContext);
+    } else if (type === 'text') {
+      rejectUnexpectedKeys(event, ['type', 'validatorId', 'message'], eventContext);
+      const validatorId = validateString(event['validatorId'], `${eventContext}.validatorId`);
+      if (!validatorId.trim() || validatorId !== validatorId.trim().toLowerCase()) {
+        throw new FinancialDataCorruptionError(
+          `${eventContext}.validatorId must be a canonical lowercase validator id`,
+        );
+      }
+    } else {
+      throw new FinancialDataCorruptionError(`${eventContext}.type is unsupported`);
+    }
+    validateString(event['message'], `${eventContext}.message`);
+  }
+  const typedEvents = events as unknown as ProposedEntityFrame['events'];
+  assertEntityFrameEventByteBudget(typedEvents);
+  return typedEvents;
+};
+
 export function validateProposedEntityFrame(value: unknown, context: string): ProposedEntityFrame {
   const obj = validateObject(value, context);
   rejectUnexpectedKeys(obj, [
@@ -1600,6 +1630,7 @@ export function validateProposedEntityFrame(value: unknown, context: string): Pr
     'authorityRoot',
     'timestamp',
     'txs',
+    'events',
     'hash',
     'leader',
     'jPrefixCertificate',
@@ -1622,6 +1653,7 @@ export function validateProposedEntityFrame(value: unknown, context: string): Pr
     throw new FinancialDataCorruptionError(`${context}.timestamp must be a non-negative safe integer`);
   }
   validateArray(obj['txs'], `${context}.txs`);
+  validateEntityFrameEvents(obj['events'], `${context}.events`);
   validateString(obj['hash'], `${context}.hash`);
   if ('newState' in obj) {
     throw new FinancialDataCorruptionError(`${context}.newState is forbidden on the proposal boundary`);

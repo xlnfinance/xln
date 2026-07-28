@@ -46,6 +46,7 @@ const frameBodyAndLeaderMatchesLocalReplay = (
       candidate.height,
       candidate.timestamp,
       candidate.txs,
+      candidate.events,
       replica.state.entityId,
       candidate.stateRoot,
       candidate.authorityRoot,

@@ -365,7 +365,7 @@ describe('registered Entity certified board authority', () => {
       genericOutputIdentity(state.entityId, targetEntityId, 1n, outputTxs),
     );
     expect(origin.boardAuthority).toEqual({
-      version: 4,
+      version: 1,
       stackKey: state.certifiedBoardState.stackKey,
       record: expect.objectContaining({
         entityId: registeredEntityId,
@@ -1047,21 +1047,21 @@ describe('registered Entity certified board authority', () => {
     const expected = [
       {
         key: '0x101d8743884cf0bcfb79aac20c3e58f2e38223ef22c443f130f465fcab2dfe5d',
-        record: '0xc5416a4ffa71ec25d3597b642c76c311cd6c756eeaee5d187eac436a440550da',
-        leaf: '0x885ec2edad3f6e4b40f49493a36a7e84260a9d58b6a0b2aa746062b6604e52db',
-        root: '0x885ec2edad3f6e4b40f49493a36a7e84260a9d58b6a0b2aa746062b6604e52db',
+        record: '0x724cdba3163adeb56edf88b0e441c3bb51fae1cf732644280c059cbda1acd2dd',
+        leaf: '0x980d5268f7e3bdf01f53f8a6afe93a0cc0f4d2bd83e26f42cb53ea507a0c069e',
+        root: '0x980d5268f7e3bdf01f53f8a6afe93a0cc0f4d2bd83e26f42cb53ea507a0c069e',
       },
       {
         key: '0x6a4415fffbcfa0b81563e18f4533cef61b69e68423d73670ce00274e29b8f345',
-        record: '0x0034114c44f0abe2761facbc07e82c218703ea875f169457920663cce91b06d3',
-        leaf: '0x7f78f6da9150ec3d7c3c0ba84c4b32f49d9611ea425a860fd0b41e7dde5ed39d',
-        root: '0xb57ad53984d1ba7b64022e25f3ecc2c313f6b205a332d8db2af671db39d70ce8',
+        record: '0x4fc4850e544743d1040276a8a5a87f0ac19473ef2a5c0fc459a56000b3893580',
+        leaf: '0xa5705ed4971fbb3a25f13c1616135a9f7ad7f0632cfdd4eedad05deb5fd5d2df',
+        root: '0x0ea2deb2ebf15eb1364fbfbfe473d0c81e2868ca9b83d5a20fa773e325242359',
       },
       {
         key: '0x995cbe426d58a56ecfe2c946c943b3e7c0737a8b5e3482da001332fee22e361f',
-        record: '0x01295101f6cacd75dca91412f921780ef0ce37db09d9c58b2c86eaaec971cfe1',
-        leaf: '0xd8c27dcb6a099fcaf5ded421300df4ca3175551c1ceeff74e0926ac2fbe94b41',
-        root: '0xe50e4003b6da970ba02da7bc333368000fd9c947fe238f74f12486307cdfbbde',
+        record: '0x904c77a7073e4c1d2495cbf01eac089c84b831352d3d520b3b0bd97c6a6fa1dd',
+        leaf: '0x5fcae0e62e38fcc64fbc68c239adcd56dab72ad26a687669bb3e1ef69bbdb427',
+        root: '0x2c29bb6991678092f07063daa0c50f0ffd288c6808a8a27c23d3d8307efe69c6',
       },
     ];
     for (let index = 0; index < expected.length; index += 1) {

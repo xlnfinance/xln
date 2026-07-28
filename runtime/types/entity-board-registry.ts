@@ -66,7 +66,7 @@ export type CertifiedBoardProof = {
  * movement cannot stale an unchanged board, while any rotation does.
  */
 export type CertifiedBoardAuthorityBinding = {
-  version: 4;
+  version: 1;
   stackKey: string;
   record: CertifiedBoardRecord;
 };

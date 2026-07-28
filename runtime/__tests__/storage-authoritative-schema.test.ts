@@ -254,7 +254,7 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
     const entityCommand = {
       type: 'entityCommand',
       data: {
-        version: 2,
+        version: 1,
         entityId,
         stackKey: hash,
         boardHash: hash,

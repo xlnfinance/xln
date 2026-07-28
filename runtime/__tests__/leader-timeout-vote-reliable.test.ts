@@ -365,6 +365,7 @@ describe('reliable leader timeout vote delivery', () => {
       timestamp: 1,
       hash: `0x${'43'.repeat(32)}`,
       txs: [],
+      events: [],
       leader: { proposerSignerId: vote.previousLeaderId, view: vote.fromView },
       collectedSigs: new Map(),
     };

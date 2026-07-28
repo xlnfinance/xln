@@ -117,7 +117,7 @@ export const normalizeConsensusOutputBoardAuthority = (
     throw new Error('CONSENSUS_OUTPUT_BOARD_AUTHORITY_INVALID');
   }
   const raw = value as Record<string, unknown>;
-  if (raw['version'] !== 4) throw new Error('CONSENSUS_OUTPUT_BOARD_AUTHORITY_VERSION_INVALID');
+  if (raw['version'] !== 1) throw new Error('CONSENSUS_OUTPUT_BOARD_AUTHORITY_VERSION_INVALID');
   const stackKey = normalizeBytes32(raw['stackKey'], 'CONSENSUS_OUTPUT_BOARD_STACK_INVALID');
   const recordValue = raw['record'];
   if (!recordValue || typeof recordValue !== 'object' || Array.isArray(recordValue)) {
@@ -162,7 +162,7 @@ export const normalizeConsensusOutputBoardAuthority = (
     throw new Error('CONSENSUS_OUTPUT_BOARD_PREVIOUS_AUTHORITY_INCONSISTENT');
   }
   return {
-    version: 4,
+    version: 1,
     stackKey,
     record: {
       stackKey: recordStackKey,
@@ -595,7 +595,7 @@ export const hashCertifiedEntityOutput = (
   targetEntityId: string,
   entityTxs: EntityTx[],
 ): string => keccak256(toUtf8Bytes(encodeCanonicalEntityConsensusValue({
-  version: 'xln:certified-entity-output:v3',
+  version: 'xln:certified-entity-output:v1',
   origin,
   targetEntityId: targetEntityId.toLowerCase(),
   entityTxs: canonicalCertifiedEntityTxs(entityTxs),

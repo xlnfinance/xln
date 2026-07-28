@@ -249,6 +249,7 @@ describe('entity leader policy', () => {
       1,
       committedState.timestamp,
       [],
+      [],
       committedState.entityId,
       committedStateRoot,
       committedAuthorityRoot,
@@ -262,6 +263,7 @@ describe('entity leader policy', () => {
       2,
       committedState.timestamp,
       [],
+      [],
       committedState.entityId,
       nextStateRoot,
       nextAuthorityRoot,
@@ -273,6 +275,7 @@ describe('entity leader policy', () => {
       authorityRoot: committedAuthorityRoot,
       timestamp: committedState.timestamp,
       txs: [],
+      events: [],
       hash: committedHash,
       leader: { proposerSignerId: 'ceo', view: 0 },
     };
@@ -283,6 +286,7 @@ describe('entity leader policy', () => {
       authorityRoot: nextAuthorityRoot,
       timestamp: committedState.timestamp,
       txs: [],
+      events: [],
       hash: nextHash,
       leader: { proposerSignerId: 'ceo', view: 0 },
     };
@@ -424,6 +428,7 @@ describe('entity leader policy', () => {
       preparedTxs,
       preparedState,
       certificate,
+      replay.events,
     );
     const hashesToSign = buildEntityHashesToSign(base.entityId, 1, preparedHash, replay.collectedHashes);
     const prepared: ProposedEntityFrame = {
@@ -433,6 +438,7 @@ describe('entity leader policy', () => {
       authorityRoot: computeEntityFrameAuthorityRoot(buildEntityFrameAuthority(preparedState)),
       timestamp: preparedTimestamp,
       txs: structuredClone(preparedTxs),
+      events: structuredClone(replay.events),
       hash: preparedHash,
       leader: { proposerSignerId: proposerId, view: 0 },
       jPrefixCertificate: structuredClone(certificate),
@@ -519,6 +525,9 @@ describe('entity leader policy', () => {
     const differentCertificate = structuredClone(relayed.proposedFrame);
     differentCertificate.jPrefixCertificate!.selected.tipBlockHash = `0x${'ff'.repeat(32)}`;
     await assertRelayRejected(differentCertificate);
+    const differentEvents = structuredClone(relayed.proposedFrame);
+    differentEvents.events.push({ type: 'status', message: 'unsigned display forgery' });
+    await assertRelayRejected(differentEvents);
     const differentRange = structuredClone(relayed.proposedFrame);
     const rangeTx = differentRange.txs.find((tx) => tx.type === 'j_event');
     if (!rangeTx || rangeTx.type !== 'j_event') throw new Error('TEST_J_PREPARED_RANGE_MISSING');
@@ -568,7 +577,15 @@ describe('entity leader policy', () => {
     };
     const preparedStateRoot = computeCanonicalEntityConsensusStateHash(preparedState);
     const preparedAuthorityRoot = computeEntityFrameAuthorityRoot(buildEntityFrameAuthority(preparedState));
-    const preparedHash = await createEntityFrameHash('genesis', 1, preparedTimestamp, preparedTxs, preparedState);
+    const preparedHash = await createEntityFrameHash(
+      'genesis',
+      1,
+      preparedTimestamp,
+      preparedTxs,
+      preparedState,
+      undefined,
+      preparedResult.events,
+    );
     const preparedManifest = buildEntityHashesToSign(
       base.entityId,
       1,
@@ -582,6 +599,7 @@ describe('entity leader policy', () => {
       authorityRoot: preparedAuthorityRoot,
       timestamp: preparedTimestamp,
       txs: structuredClone(preparedTxs),
+      events: structuredClone(preparedResult.events),
       hash: preparedHash,
       leader: { proposerSignerId: proposerId, view: 0 },
       hashesToSign: preparedManifest,
@@ -696,6 +714,7 @@ describe('entity leader policy', () => {
       authorityRoot: conflictingAuthorityRoot,
       timestamp: conflictingTimestamp,
       txs: [],
+      events: [],
       hash: conflictingHash,
       leader: { proposerSignerId: proposerId, view: 0 },
       hashesToSign: conflictingManifest,

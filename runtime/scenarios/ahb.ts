@@ -1247,7 +1247,10 @@ export async function ahb(env: RuntimeState): Promise<void> {
       signerId: alice.signer,
       entityTxs: [{
         type: 'settle_propose',
-        data: { counterpartyEntityId: hub.id, diffs: ahSettlementDiffs }
+        data: {
+          counterpartyEntityId: hub.id,
+          ops: ahSettlementDiffs.map(diff => ({ type: 'rawDiff' as const, ...diff })),
+        }
       }]
     }]);
 
@@ -1370,7 +1373,10 @@ export async function ahb(env: RuntimeState): Promise<void> {
       signerId: hub.signer,
       entityTxs: [{
         type: 'settle_propose',
-        data: { counterpartyEntityId: bob.id, diffs: hbSettlementDiffs }
+        data: {
+          counterpartyEntityId: bob.id,
+          ops: hbSettlementDiffs.map(diff => ({ type: 'rawDiff' as const, ...diff })),
+        }
       }]
     }]);
 
@@ -1734,7 +1740,10 @@ export async function ahb(env: RuntimeState): Promise<void> {
       signerId: hub.signer,
       entityTxs: [{
         type: 'settle_propose',
-        data: { counterpartyEntityId: bob.id, diffs: disputeSettlementDiffs }
+        data: {
+          counterpartyEntityId: bob.id,
+          ops: disputeSettlementDiffs.map(diff => ({ type: 'rawDiff' as const, ...diff })),
+        }
       }]
     }]);
 
@@ -2613,7 +2622,10 @@ export async function ahb(env: RuntimeState): Promise<void> {
         signerId: carol.signer,
         entityTxs: [{
           type: 'settle_propose',
-          data: { counterpartyEntityId: hub.id, diffs: carolCloseDiffs }
+          data: {
+            counterpartyEntityId: hub.id,
+            ops: carolCloseDiffs.map(diff => ({ type: 'rawDiff' as const, ...diff })),
+          }
         }]
       }]);
 

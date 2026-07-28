@@ -77,12 +77,12 @@ describe('storage schema boundary', () => {
     await expect(readStorageHead(memoryDbWithHead(currentHead(6)))).rejects.toThrow(
       `STORAGE_SCHEMA_MISMATCH:stored=6:current=${STORAGE_SCHEMA_VERSION}:boundary=storage-head`,
     );
-    expect(STORAGE_SCHEMA_VERSION).toBe(10);
+    expect(STORAGE_SCHEMA_VERSION).toBe(1);
   });
 
   test('pins the one current frame format as one inseparable descriptor', () => {
     expect(STORAGE_FRAME_FORMAT).toEqual({
-      schemaVersion: 10,
+      schemaVersion: 1,
       domain: 'xln.storage.frame',
       postStateDomain: 'xln.storage.postState',
       algorithmId: 'sha256',

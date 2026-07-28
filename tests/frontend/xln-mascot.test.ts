@@ -31,7 +31,7 @@ describe('xln mascot geometry', () => {
 
   test('normalizes corrupt placement and clamps offsets', () => {
     expect(normalizeXlnMascotDock(null)).toEqual(DEFAULT_XLN_MASCOT_DOCK);
-    expect(normalizeXlnMascotDock({ version: 2, side: 'center', offsetRatio: 99 })).toEqual(DEFAULT_XLN_MASCOT_DOCK);
+    expect(normalizeXlnMascotDock({ version: 0, side: 'center', offsetRatio: 99 })).toEqual(DEFAULT_XLN_MASCOT_DOCK);
     expect(normalizeXlnMascotDock({ version: 1, side: 'left', offsetRatio: 9 })).toEqual({
       version: 1,
       side: 'left',

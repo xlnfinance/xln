@@ -28,7 +28,7 @@ const createE2EBuildCacheFixture = (root: string, codeHash: string) => {
   writeFileSync(join(artifacts.svelteKitOutDir, 'output/server/manifest.js'), 'manifest-v1', 'utf8');
   writeFileSync(join(artifacts.frontendBuildDir, 'index.html'), '<main>v1</main>', 'utf8');
   writeFileSync(join(root, 'manifest.json'), JSON.stringify({
-    version: 2,
+    version: 1,
     buildInputHash: codeHash,
     artifactHash: computeE2EBuildArtifactHash(artifacts),
     createdAt: '2026-07-17T00:00:00.000Z',
@@ -320,15 +320,15 @@ describe('isolated E2E runner resources', () => {
         writeFileSync(resolve(root, file), `${file}:v1`);
       }
       const original = computeE2EBuildInputHash(files, root);
-      writeFileSync(resolve(root, files[0]!), 'runner:v2');
-      writeFileSync(resolve(root, files[1]!), 'test:v2');
+      writeFileSync(resolve(root, files[0]!), 'runner:changed');
+      writeFileSync(resolve(root, files[1]!), 'test:changed');
       expect(computeE2EBuildInputHash(files, root)).toBe(original);
 
-      writeFileSync(resolve(root, files[2]!), 'runtime:v2');
+      writeFileSync(resolve(root, files[2]!), 'runtime:changed');
       const runtimeChanged = computeE2EBuildInputHash(files, root);
       expect(runtimeChanged).not.toBe(original);
 
-      writeFileSync(resolve(root, files[3]!), 'frontend:v2');
+      writeFileSync(resolve(root, files[3]!), 'frontend:changed');
       expect(computeE2EBuildInputHash(files, root)).not.toBe(runtimeChanged);
     } finally {
       rmSync(root, { recursive: true, force: true });

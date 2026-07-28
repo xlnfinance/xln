@@ -246,7 +246,7 @@ export async function runSettleRebalance(_existingEnv?: RuntimeState): Promise<R
   await convergeScenario(env);
 
   const aliceWs1 = findReplica(env, alice.id)[1].state.accounts.get(hub.id)?.settlementWorkspace;
-  assert(aliceWs1?.version === 1, 'Workspace should be version 1', env);
+  assert(aliceWs1?.revision === 1, 'Workspace should be revision 1', env);
   assert(aliceWs1?.lastModifiedByLeft === aliceIsLeft, 'Alice should be lastModifier', env);
 
   // 3b: Verify Hub auto-approved (ondelta-neutral r2c from RIGHT proposer)

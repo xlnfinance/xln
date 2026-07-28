@@ -1,7 +1,7 @@
 import { logError, shortHash } from '../../infra/logger';
 import type { EntityState, ProposedEntityFrame, ValidatorEntityFrameExecution } from '../../types';
 import { applyEntityFrame } from './frame-application';
-import { createEntityFrameHashFromStateRoot } from './frame';
+import { createEntityFrameHashFromStateRoot, entityFrameEventsEqual } from './frame';
 import {
   buildEntityHashesToSign,
   getEntityHashManifestMismatch,
@@ -68,6 +68,7 @@ const verifyProposalFrameHash = (
     frame.height,
     frame.timestamp,
     frame.txs,
+    frame.events,
     state.entityId,
     frame.stateRoot,
     frame.authorityRoot,
@@ -125,6 +126,7 @@ export const replayProposedEntityFrame = async (
     outputs,
     jOutputs,
     candidateEffects,
+    events,
     storageChanges,
     consumptionNodeChanges,
     accountJClaimNodeChanges,
@@ -134,6 +136,9 @@ export const replayProposedEntityFrame = async (
     frame.txs,
     frame.timestamp,
   );
+  if (!entityFrameEventsEqual(events, frame.events)) {
+    return rejectProposal(context, 'PROPOSAL_FRAME_EVENTS_MISMATCH');
+  }
   const state = {
     ...newState,
     entityId: context.workingReplica.state.entityId,

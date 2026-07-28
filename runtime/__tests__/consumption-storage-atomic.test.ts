@@ -137,7 +137,7 @@ test('normal frame atomically publishes accumulator root, witness node, diff, an
     outputHanko: '0x01',
   };
   const applied = applyConsumptionOutput(createEmptyConsumptionAccumulator(), identity, {
-    version: 2,
+    version: 1,
     nodes: [],
   });
   replica.state = { ...replica.state, consumptionAccumulator: applied.state };
@@ -241,7 +241,7 @@ test('normal frame atomically publishes accumulator root, witness node, diff, an
     core: {
       ...projected,
       consumptionAccumulator: {
-        version: 2,
+        version: 1,
         root: `0x${'66'.repeat(32)}`,
         count: MAX_CONSUMPTION_RELATIONSHIPS_PER_ENTITY + 1n,
       },

@@ -1142,7 +1142,7 @@ describe('audit fail-fast regressions', () => {
         type: 'settle_transition',
         data: {
           kind: 'upsert',
-          version: 1,
+          revision: 1,
           ops: [{ type: 'r2r', tokenId: 1, amount: 1n }],
           executorIsLeft: true,
         },
@@ -1157,7 +1157,7 @@ describe('audit fail-fast regressions', () => {
       type: 'settle_transition',
       data: {
         kind: 'seal',
-        version: 1,
+        revision: 1,
         workspaceHash,
         settlementNonce: 8,
         settlementHash: `0x${'81'.repeat(32)}`,

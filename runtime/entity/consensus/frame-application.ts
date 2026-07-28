@@ -31,9 +31,11 @@ import { getNextSettlementNonce } from '../../protocol/settlement/operations';
 import { assertScheduledWakeFrameOrder } from '../../runtime/scheduled-wake';
 import {
   addMessages,
+  clearEntityFrameEvents,
   cloneEntityState,
   emitScopedEvents,
   getAccountPerspective,
+  readEntityFrameEvents,
   resolveEntityProposerId,
 } from '../../state-helpers';
 import { mergeStorageOverlayRecords } from '../../storage/overlay';
@@ -42,6 +44,7 @@ import type {
   AccountState,
   AccountTx,
   EntityCandidateEffect,
+  EntityFrameEvent,
   EntityInput,
   EntityState,
   EntityTx,
@@ -463,7 +466,7 @@ function refreshStaleUncommittedSettlementSeals(state: EntityState, storageChang
       (tx): tx is SettlementSealTx =>
         tx.type === 'settle_transition' &&
         tx.data.kind === 'seal' &&
-        tx.data.version === workspace.version &&
+        tx.data.revision === workspace.revision &&
         tx.data.workspaceHash.toLowerCase() === workspaceHash &&
         tx.data.settlementNonce !== expectedNonce,
     );
@@ -959,6 +962,7 @@ type EntityFrameResult = {
   jOutputs: JInput[];
   candidateEffects: EntityCandidateEffect[];
   storageChanges: RuntimeOverlayRecord[];
+  events: EntityFrameEvent[];
   collectedHashes?: Array<{ hash: string; type: HashType; context: string }>;
   consumptionNodeChanges?: ConsumptionNodeChanges;
   accountJClaimNodeChanges?: AccountJClaimNodeChanges;
@@ -1003,6 +1007,7 @@ const prepareEntityFrameWorkingSet = async (
     normalizeEntityCommandNonceBoard(env, entityState),
   );
   const currentEntityState = cloneEntityState(normalized);
+  clearEntityFrameEvents(currentEntityState);
   currentEntityState.crontabState ??= initCrontab();
   markFrameProfile('clone');
   const effectiveTimestamp = frameTimestamp ?? env.timestamp;
@@ -1082,6 +1087,7 @@ const buildEntityFrameResult = (
   jOutputs: context.allJOutputs,
   candidateEffects: context.candidateEffects,
   storageChanges: mergeStorageOverlayRecords(undefined, context.storageChanges),
+  events: readEntityFrameEvents(currentEntityState),
   collectedHashes: context.collectedHashes,
   ...(context.consumptionNewNodes.size > 0 ||
   context.consumptionReplacedNodeHashes.size > 0

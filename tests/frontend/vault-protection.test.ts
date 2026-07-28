@@ -90,7 +90,7 @@ test('vault persistence excludes every raw signing and recovery secret', () => {
     mnemonic12: 'raw 12 word mnemonic',
     devicePassphrase: 'raw brainvault passphrase',
     env: { runtimeSeed: 'raw runtime seed' },
-    protectedSecrets: { version: 1, iv: 'iv', ciphertext: 'ciphertext', unlockUntil: null },
+    protectedSecrets: { version: 1, keyId: 'key', iv: 'iv', ciphertext: 'ciphertext', unlockUntil: null },
   });
   const serialized = JSON.stringify(persisted);
 
@@ -103,14 +103,14 @@ test('vault persistence excludes every raw signing and recovery secret', () => {
 
 test('vault protection lease identity prevents stale tabs from locking a refreshed key', () => {
   const oldLease: ProtectedVaultSecrets = {
-    version: 2,
+    version: 1,
     keyId: 'old-key',
     iv: 'old-iv',
     ciphertext: 'old-ciphertext',
     unlockUntil: 100,
   };
   const refreshedLease: ProtectedVaultSecrets = {
-    version: 2,
+    version: 1,
     keyId: 'new-key',
     iv: 'new-iv',
     ciphertext: 'new-ciphertext',
@@ -122,24 +122,26 @@ test('vault protection lease identity prevents stale tabs from locking a refresh
   expect(sameVaultProtectionLease(oldLease, undefined)).toBe(false);
 });
 
-test('legacy vault protection leases compare their encrypted record exactly', () => {
-  const legacy: ProtectedVaultSecrets = {
+test('vault protection lease ignores renewed ciphertext for the same device key', () => {
+  const lease: ProtectedVaultSecrets = {
     version: 1,
+    keyId: 'same-key',
     iv: 'iv',
     ciphertext: 'ciphertext',
     unlockUntil: null,
   };
-  expect(sameVaultProtectionLease(legacy, { ...legacy, unlockUntil: 10 })).toBe(true);
-  expect(sameVaultProtectionLease(legacy, { ...legacy, ciphertext: 'other' })).toBe(false);
+  expect(sameVaultProtectionLease(lease, { ...lease, unlockUntil: 10 })).toBe(true);
+  expect(sameVaultProtectionLease(lease, { ...lease, ciphertext: 'other' })).toBe(true);
+  expect(sameVaultProtectionLease(lease, { ...lease, keyId: 'other-key' })).toBe(false);
 });
 
-test('expired V2 lease deletes only its exact IndexedDB key before returning locked', async () => {
+test('expired lease deletes only its exact IndexedDB key before returning locked', async () => {
   const previousIndexedDb = globalThis.indexedDB;
   const operations: Array<{ method: string; key: IDBValidKey }> = [];
   globalThis.indexedDB = installSuccessfulKeyDb(operations);
   try {
     const result = await unprotectVaultSecrets('Runtime-A', {
-      version: 2,
+      version: 1,
       keyId: 'expired-key',
       iv: 'unused',
       ciphertext: 'unused',

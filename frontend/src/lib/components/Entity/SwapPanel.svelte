@@ -88,8 +88,7 @@ import {
 import SwapOrderList from './SwapOrderList.svelte';
 import SwapCompletionDialog from './SwapCompletionDialog.svelte';
 import SwapOrderbookSection from './SwapOrderbookSection.svelte';
-import SwapTradeTicket from './SwapTradeTicket.svelte';
-import SwapTicketV2 from './SwapTicketV2.svelte';
+import SwapTicket from './SwapTicket.svelte';
 import type { SwapOrderbookLevelClickDetail, SwapOrderbookPairOption } from './swap-orderbook-view';
 import './SwapPanel.css';
 import {
@@ -114,11 +113,6 @@ let createOrderAccountId = '';
 let selectedBookAccountId = '';
 let activeOrderAccountId = '';
 let showOrderbook = true;
-let useTicketV2 = typeof localStorage !== 'undefined' && localStorage.getItem('xln-swap-ticket-v2') === '1';
-function toggleTicketV2(): void {
-  useTicketV2 = !useTicketV2;
-  localStorage.setItem('xln-swap-ticket-v2', useTicketV2 ? '1' : '0');
-}
 let selectedRouteEntityId = '';
 let selectedRouteEntityName = '';
 let selectedRouteJurisdictionLabel = '';
@@ -2650,21 +2644,8 @@ function useMarketPrice(): void {
   class="swap-panel"
   bind:this={swapPanelRoot}
 >
-  <div class="ticket-version-row">
-    <button
-      type="button"
-      class="ticket-version-toggle"
-      class:active={useTicketV2}
-      data-testid="swap-ticket-v2-toggle"
-      aria-pressed={useTicketV2}
-      on:click={toggleTicketV2}
-    >
-      {useTicketV2 ? 'Classic view' : 'New view'}
-    </button>
-  </div>
   <div class="trade-grid" class:book-open={showOrderbook}>
-    {#if useTicketV2}
-      <SwapTicketV2
+      <SwapTicket
         bind:showOrderbook
         bind:createOrderAccountId
         {selectedHubOptions}
@@ -2676,6 +2657,7 @@ function useMarketPrice(): void {
         {orderAmountInput}
         {handleOrderAmountInput}
         bind:giveTokenId
+        {giveToken}
         {giveTokenOptions}
         {handleGiveTokenChange}
         {giveTokenSymbol}
@@ -2702,6 +2684,24 @@ function useMarketPrice(): void {
         {useMarketPrice}
         {marketPriceTicks}
         {marketPriceLabel}
+        {giveTokenDecimals}
+        {giveAmount}
+        {canonicalGiveAmount}
+        {routeSummaryLabel}
+        {routePathLabel}
+        {routeVenueDisplayLabel}
+        {routeSummaryAssetsLabel}
+        bind:routeDetailsOpen
+        {swapRouteMode}
+        {liveSelectedRouteValue}
+        {routePathSourceLabel}
+        {routePathTargetLabel}
+        {selectedRouteLabel}
+        {sourceRouteEntityLabel}
+        {targetRouteEntityLabel}
+        {showManualRouteRecommendation}
+        {routedRouteRecommendations}
+        {manualRouteEstimateLabel}
         {capacityWarning}
         {autoCapacityNote}
         {crossSwapSetupSteps}
@@ -2711,119 +2711,6 @@ function useMarketPrice(): void {
         {swapSubmitLabel}
         {submitError}
       />
-    {:else}
-    <SwapTradeTicket
-      bind:showOrderbook
-      {swapRouteMode}
-      {sourceAssetLabel}
-      {targetAssetLabel}
-      {swapRouteTitle}
-      {selectedSourceEntity}
-      bind:selectedSourceEntityValue
-      {selectedSourceEntityLabel}
-      {sourceEntityIdValue}
-      {sourceJurisdictionLabel}
-      {sourceMenuOpen}
-      {sourceEntityOptions}
-      {toggleSourceMenu}
-      {handleSourceEntityChange}
-      {selectSourceEntityOption}
-      {accountLabel}
-      {entityAvatarSrc}
-      {orderAmountInput}
-      {handleOrderAmountInput}
-      {openTokenMenu}
-      {toggleTokenMenu}
-      {tokenClass}
-      {tokenIconText}
-      bind:giveTokenId
-      {giveToken}
-      {giveTokenSymbol}
-      {giveTokenOptions}
-      {handleGiveTokenChange}
-      {selectGiveTokenOption}
-      {formattedAvailableGive}
-      {formattedAvailableGiveAmount}
-      {flipSwapTokens}
-      {routeMenuButtonAction}
-      {routeMenuOpenStore}
-      {routeMenuToggleCount}
-      {routeMenuNativeClickCount}
-      {routeMenuSetCount}
-      {routeMenuLastSetReason}
-      {selectedRouteLabel}
-      {selectedRouteEntityId}
-      {selectedRouteEntityName}
-      {selectedRouteJurisdictionLabel}
-      bind:routeSelectElement
-      bind:selectedRouteValue
-      {liveSelectedRouteValue}
-      {committedRouteSelectionValue}
-      {routeSelectionCommitNonce}
-      {visibleRouteOptions}
-      {handleRouteSelectChange}
-      {selectRouteOption}
-      {wantAmount}
-      {wantToken}
-      bind:wantTokenId
-      {wantTokenSymbol}
-      {wantTokenOptions}
-      {handleWantTokenChange}
-      {selectWantTokenOption}
-      {targetAccountReady}
-      {formattedTargetCapacityAmount}
-      {targetCapacityLabel}
-      bind:priceRatioInput
-      bind:createOrderAccountId
-      {quoteTokenSymbol}
-      {marketPriceTicks}
-      {marketPriceSideLabel}
-      {marketPriceLabel}
-      {bookVenueLabel}
-      {hubMenuOpen}
-      {activeOrderAccountId}
-      {selectedHubDisplayLabel}
-      {selectedHubLabel}
-      {selectedHubJurisdictionLabel}
-      {selectedHubOptions}
-      {orderPercent}
-      {handlePriceRatioInput}
-      {stepPrice}
-      {useMarketPrice}
-      {toggleHubMenu}
-      {handleSelectedHubChange}
-      {selectHubOption}
-      {hubJurisdictionLabel}
-      {applyOrderPercent}
-      {giveTokenDecimals}
-      {giveAmount}
-      {canonicalGiveAmount}
-      {routeSummaryLabel}
-      {routePathLabel}
-      {routeVenueDisplayLabel}
-      {routeSummaryAssetsLabel}
-      bind:routeDetailsOpen
-      {routePathSourceLabel}
-      {routePathTargetLabel}
-      {sourceRouteEntityLabel}
-      {targetRouteEntityLabel}
-      {showManualRouteRecommendation}
-      {routedRouteRecommendations}
-      {manualRouteEstimateLabel}
-      {capacityWarning}
-      {autoCapacityNote}
-      {crossSwapSetupSteps}
-      {selectedOrderLevel}
-      {formatPriceTicks}
-      {formatAmount}
-      {orderMode}
-      {placingSwapOffer}
-      {swapActionDisabledReason}
-      {placeSwapOffer}
-      {swapSubmitLabel}
-      {submitError}
-    />
-    {/if}
     {#if showOrderbook}
       <SwapOrderbookSection
         {activeBookHubId}

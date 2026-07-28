@@ -2,7 +2,7 @@ import { createOrderbookExtState, validateSpreadDistribution } from '../../../or
 import type { EntityInput, EntityState, EntityTx, RuntimeState, Proposal } from '../../../types';
 import { formatEntityId, log } from '../../../utils';
 import { normalizeEntityName } from '../../../networking/gossip';
-import { cloneEntityState, addMessage } from '../../../state-helpers';
+import { cloneEntityState, addMessage, addTextMessage } from '../../../state-helpers';
 import {
   assertEntityProposalCapacity,
   executeProposal,
@@ -39,7 +39,7 @@ export const handleChatEntityTx = (entityState: EntityState, entityTx: EntityTxO
   }
 
   const newEntityState = cloneEntityState(entityState);
-  addMessage(newEntityState, `${from}: ${message}`);
+  addTextMessage(newEntityState, from, message);
 
   return { newState: newEntityState, outputs: [] };
 };

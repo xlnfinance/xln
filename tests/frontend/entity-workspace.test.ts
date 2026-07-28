@@ -102,10 +102,10 @@ test('entity settings workspace is a projection command surface, not the legacy 
   const settings = readFileSync('frontend/src/lib/components/Entity/EntitySettingsProjectionPanel.svelte', 'utf8');
   const consensusSettings = readFileSync('frontend/src/lib/components/Entity/EntityConsensusSettingsPanel.svelte', 'utf8');
 
-  expect(tabs).toContain("import EntitySettingsProjectionPanel from './EntitySettingsProjectionPanel.svelte'");
+  expect(tabs).toContain('EntitySettingsProjectionPanel.svelte');
   expect(tabs).toContain('<EntitySettingsProjectionPanel');
   expect(tabs).toContain('saveSettingsProjectionProfile');
-  expect(tabs).toContain("type: 'profile-update' as const");
+  expect(tabs).toMatch(/type: ["']profile-update["'] as const/);
   expect(tabs).toContain('importJMachineViaRuntime');
   expect(tabs).toContain('importSettingsJMachine');
   expect(tabs).not.toContain("Settings/EntitySettingsPanel");
@@ -309,8 +309,8 @@ test('runtime frame context separates projection metadata from embedded RuntimeS
   expect(runtimeContext).toContain('isLive');
   expect(embeddedContext).toContain('RuntimeState, EnvSnapshot');
   expect(embeddedContext).toContain('liveEnvResolver');
-  expect(workspace).toContain("from './embedded-runtime-context'");
-  expect(tabs).toContain("from './embedded-runtime-context'");
+  expect(workspace).toContain('./embedded-runtime-context');
+  expect(tabs).toContain('./embedded-runtime-context');
   expect(tabs).toContain('$: env = embeddedRuntimeContext.env;');
   expect(tabs).not.toContain('$: env = runtimeFrameContext.env;');
 });

@@ -14,6 +14,7 @@ import {
   getInputReliableIdentity,
   registerReliableIngress,
 } from '../reliable-delivery';
+import { splitRoutedOutputByDeliveryLane } from '../output-routing';
 import { assertScheduledWakeTxAuthorized } from '../scheduled-wake';
 import { validateRuntimeInputShapeAndLimits } from '../input-validation';
 import { selectPotentialAtomicCrossJInputIndexes } from './cross-j-preflight';
@@ -109,6 +110,24 @@ const registerReliableEntityInputs = (
   const immediateReliableReceipts: PreparedRuntimeIngress['immediateReliableReceipts'] = [];
 
   for (const [inputIndex, input] of inputs.entries()) {
+    if (isReplay) {
+      /*
+       * WAL records the canonical Entity input that consensus actually
+       * applied. Several individually reliable transport envelopes can merge
+       * into that one input before Entity execution. Rebuild each delivery
+       * frontier from its atomic lane, then replay the merged input exactly
+       * once; splitting execution itself would change Entity frame contents.
+       */
+      for (const lane of splitRoutedOutputByDeliveryLane(input)) {
+        const sourceRuntimeId = normalizeRuntimeId(lane.from);
+        if (!sourceRuntimeId || !getInputReliableIdentity(lane)) continue;
+        registerReliableIngress(env, sourceRuntimeId, lane, {
+          allowContiguousPendingAccountAck: atomicIndexes.has(inputIndex),
+        });
+      }
+      entityInputs.push(input);
+      continue;
+    }
     const sourceRuntimeId = normalizeRuntimeId(input.from);
     if (!sourceRuntimeId || !getInputReliableIdentity(input)) {
       entityInputs.push(input);
@@ -119,7 +138,7 @@ const registerReliableEntityInputs = (
     const registration = registerReliableIngress(env, sourceRuntimeId, input, {
       allowContiguousPendingAccountAck: atomicIndexes.has(inputIndex),
     });
-    if (isReplay || registration.kind === 'ordinary' || registration.kind === 'enqueue') {
+    if (registration.kind === 'ordinary' || registration.kind === 'enqueue') {
       entityInputs.push(input);
     } else if (registration.kind === 'receipt') {
       immediateReliableReceipts.push({

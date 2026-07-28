@@ -422,9 +422,7 @@ async function openSwapWorkspace(page: Page): Promise<void> {
 }
 
 async function selectCounterpartyInSwap(page: Page, preferredAccountId?: string): Promise<void> {
-  const createSelect = page.getByTestId('swap-create-account-select').first();
-  const createVisible = await createSelect.isVisible({ timeout: 1500 }).catch(() => false);
-  const select = createVisible ? createSelect : page.getByTestId('swap-account-select').first();
+  const select = page.getByTestId('swap-ticket-hub-select').first();
   const hasSelector = await select.isVisible({ timeout: 1500 }).catch(() => false);
   if (!hasSelector) return;
   await expect
@@ -465,8 +463,8 @@ async function configurePair(page: Page, pairLabel: string, side: 'buy' | 'sell'
   if (!baseToken || !quoteToken) throw new Error(`Unsupported swap pair label: ${pairLabel}`);
   const fromToken = side === 'buy' ? quoteToken : baseToken;
   const toToken = side === 'buy' ? baseToken : quoteToken;
-  const fromTokenSelect = page.getByTestId('swap-from-token-select').first();
-  const toTokenSelect = page.getByTestId('swap-to-token-select').first();
+  const fromTokenSelect = page.getByTestId('swap-ticket-from-token').first();
+  const toTokenSelect = page.getByTestId('swap-ticket-to-token').first();
   await expect(fromTokenSelect).toBeVisible({ timeout: 20_000 });
   await expect(toTokenSelect).toBeVisible({ timeout: 20_000 });
   await fromTokenSelect.selectOption(fromToken);
@@ -475,7 +473,7 @@ async function configurePair(page: Page, pairLabel: string, side: 'buy' | 'sell'
 
 async function ensureOrderbookVisible(page: Page): Promise<void> {
   if (await page.getByTestId('swap-orderbook').first().isVisible({ timeout: 500 }).catch(() => false)) return;
-  const toggle = page.getByTestId('swap-orderbook-toggle').first();
+  const toggle = page.getByTestId('swap-ticket-orderbook-toggle').first();
   await expect(toggle).toBeVisible({ timeout: 20_000 });
   await toggle.click();
   await expect(page.getByTestId('swap-orderbook').first()).toBeVisible({ timeout: 20_000 });
@@ -505,11 +503,13 @@ async function ensureSelectedScope(page: Page): Promise<void> {
 }
 
 async function readAvailableSwapAmount(page: Page): Promise<number> {
-  const stat = page.getByTestId('swap-available-stat').first();
+  const stat = page.getByTestId('swap-ticket-available').first();
   await expect(stat).toBeVisible({ timeout: 20_000 });
-  const text = String(await stat.textContent() || '');
-  const match = text.match(/Available:\s*([0-9]+(?:\.[0-9]+)?)/i);
-  return match ? Number.parseFloat(match[1] || '0') : 0;
+  const text = String(await stat.textContent() || '').trim().replaceAll(',', '');
+  if (!/^[0-9]+(?:\.[0-9]+)?$/.test(text)) {
+    throw new Error(`SWAP_AVAILABLE_AMOUNT_FORMAT_INVALID:${text || 'empty'}`);
+  }
+  return Number.parseFloat(text);
 }
 
 async function waitForPositiveAvailableSwapAmount(page: Page, sideLabel: 'buy' | 'sell'): Promise<void> {
@@ -524,9 +524,9 @@ async function waitForPositiveAvailableSwapAmount(page: Page, sideLabel: 'buy' |
 
 async function placeAliceSellOffer(page: Page, amount: string, price: string): Promise<void> {
   await configurePair(page, 'WETH/USDC', 'sell');
-  const amountInput = page.getByTestId('swap-order-amount').first();
-  const priceInput = page.getByTestId('swap-order-price').first();
-  const placeButton = page.getByTestId('swap-submit-order').first();
+  const amountInput = page.getByTestId('swap-ticket-amount').first();
+  const priceInput = page.getByTestId('swap-ticket-rate').first();
+  const placeButton = page.getByTestId('swap-ticket-submit').first();
   const targetAmount = Number.parseFloat(amount);
 
   await expect(amountInput).toBeVisible({ timeout: 20_000 });
@@ -544,9 +544,9 @@ async function placeAliceSellOffer(page: Page, amount: string, price: string): P
 
 async function placeBobMatchingBuyOrder(page: Page, spendAmount: string, price: string): Promise<void> {
   await configurePair(page, 'WETH/USDC', 'buy');
-  const amountInput = page.getByTestId('swap-order-amount').first();
-  const priceInput = page.getByTestId('swap-order-price').first();
-  const placeButton = page.getByTestId('swap-submit-order').first();
+  const amountInput = page.getByTestId('swap-ticket-amount').first();
+  const priceInput = page.getByTestId('swap-ticket-rate').first();
+  const placeButton = page.getByTestId('swap-ticket-submit').first();
   const targetAmount = Number.parseFloat(spendAmount);
 
   await expect(amountInput).toBeVisible({ timeout: 20_000 });
@@ -1076,9 +1076,9 @@ test.describe('E2E Swap Isolated Flow', () => {
       ]);
 
       await configurePair(bobPage, 'WETH/USDC', 'buy');
-      const bobAmountInput = bobPage.getByTestId('swap-order-amount').first();
-      const bobPriceInput = bobPage.getByTestId('swap-order-price').first();
-      const bobSubmit = bobPage.getByTestId('swap-submit-order').first();
+      const bobAmountInput = bobPage.getByTestId('swap-ticket-amount').first();
+      const bobPriceInput = bobPage.getByTestId('swap-ticket-rate').first();
+      const bobSubmit = bobPage.getByTestId('swap-ticket-submit').first();
       await expect(bobAmountInput).toBeVisible({ timeout: 20_000 });
       await expect(bobPriceInput).toBeVisible({ timeout: 20_000 });
       await bobAmountInput.fill('50');

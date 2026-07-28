@@ -155,7 +155,7 @@ describe('reachable-only dispute evidence retention', () => {
       ops: [],
       lastModifiedByLeft: true,
       status: 'awaiting_counterparty',
-      version: 1,
+      revision: 1,
       createdAt: 1,
       lastUpdatedAt: 1,
       executorIsLeft: true,

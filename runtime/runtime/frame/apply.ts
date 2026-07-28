@@ -12,6 +12,7 @@ import type {
   RuntimeInput,
   RuntimeTx,
 } from '../../types';
+import { getPerfMs } from '../../utils';
 import {
   captureReliableReceiptSenderCheckpoint,
   type ReliableIngressCommit,
@@ -125,7 +126,9 @@ export const applyPreparedRuntimeFrame = async (
     }
     try {
       deps.setApplyAllowed(env, true);
+      const reducerStartedAt = profile.enabled ? getPerfMs() : 0;
       const result = await deps.applyRuntimeInput(env, input);
+      if (profile.enabled) profile.metrics.reducerMs = getPerfMs() - reducerStartedAt;
       profile.mark('apply');
       if (!quietLogs && (result.entityOutbox.length > 0 || result.jOutbox.length > 0)) {
         runtimeLog.debug('process.apply.output', {

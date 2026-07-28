@@ -374,12 +374,12 @@ export type ReliableDeliveryIdentity = {
 
 export type ReliableDeliveryReceiptBody = {
   /**
-   * Version 2 receipts bind one exact durably applied identity. Receivers and
+   * Canonical v1 receipts bind one exact durably applied identity. Receivers and
    * senders may compact protocol-terminal identities to one monotonic frontier
    * per lane, but height alone is not an authenticated ancestry proof and never
    * ACKs a different lower frameHash.
    */
-  version: 2;
+  version: 1;
   /** `terminal` changes frontier retention, never the receipt's exact hash coverage. */
   coverage: 'exact' | 'terminal';
   receiverRuntimeId: string;
@@ -772,7 +772,7 @@ export type {
   ConsensusOutputOrigin,
   EntityCommandNonceState,
   EntityTx,
-  SignedEntityCommandV2,
+  SignedEntityCommandV1,
 } from './types/entity-tx';
 
 export interface EntitySwapPair {
@@ -985,6 +985,14 @@ export interface ProposedEntityFrame {
   /** Proposer-chosen deterministic frame time; validators replay with this value. */
   timestamp: number;
   txs: EntityTx[];
+  /**
+   * Deterministic activity produced while replaying `txs`.
+   *
+   * Events belong to the signed frame and durable history, never to the
+   * ever-growing EntityState. This keeps replay auditable without making every
+   * future state transition carry all past presentation data.
+   */
+  events: EntityFrameEvent[];
   hash: string;
   leader: {
     proposerSignerId: string;
@@ -1008,6 +1016,18 @@ export interface ProposedEntityFrame {
   // 3. After threshold: merged quorum hankos (one per hash, indexes match hashesToSign[])
   hankos?: HankoString[];
 }
+
+export type EntityFrameEvent =
+  | {
+      type: 'status';
+      message: string;
+    }
+  | {
+      type: 'text';
+      /** Validator whose signed Entity command authored this text event. */
+      validatorId: string;
+      message: string;
+    };
 
 /**
  * Durable quorum certificate for one Entity state transition.
@@ -1200,6 +1220,16 @@ export interface RuntimeState {
     /** Local operator warning only; never rejects an otherwise valid Entity frame. */
     entityConsensusStateWarningBytes?: number;
     advertiseProfileMirrors?: boolean; // Opt-in only; otherwise profiles do not correlate sibling entities.
+    /**
+     * Local operator alarms. These never reject or alter a deterministic
+     * frame: exceeding a budget emits a structured warning after processing.
+     */
+    performance?: {
+      maxCloneBytes?: number;
+      maxCloneMs?: number;
+      maxReducerMs?: number;
+      maxWalMs?: number;
+    };
     storage?: {
       enabled?: boolean;
       snapshotPeriodFrames?: number;

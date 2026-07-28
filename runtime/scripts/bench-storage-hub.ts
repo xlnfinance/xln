@@ -847,6 +847,7 @@ async function main() {
             frame.height,
             frame.timestamp,
             frame.txs,
+            frame.events,
             replica.entityId,
             frame.stateRoot,
             frame.authorityRoot,

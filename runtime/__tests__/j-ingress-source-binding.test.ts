@@ -310,26 +310,31 @@ describe('manual J-event ingress source binding', () => {
   }, 120_000);
 
   test('frontend HTTP responses cannot be promoted into local consensus events', () => {
-    const source = readFileSync(join(
+    const panelSource = readFileSync(join(
       process.cwd(),
       'frontend/src/lib/components/Entity/EntityPanelTabs.svelte',
     ), 'utf8');
-    const snapshotFallbackStart = source.indexOf(
-      'const response = await fetch(`${requestApiBase}/api/external-wallet/snapshot`',
+    const walletSource = readFileSync(join(
+      process.cwd(),
+      'frontend/src/lib/components/Entity/external-wallet-reader.ts',
+    ), 'utf8');
+    const snapshotFallbackStart = walletSource.indexOf(
+      'const response = await fetch(`${apiBase}/api/external-wallet/snapshot`',
     );
-    const snapshotFallbackEnd = source.indexOf('const balanceByToken = new Map(', snapshotFallbackStart);
-    const faucetStart = source.indexOf('async function faucetReserves(');
-    const faucetEnd = source.indexOf('async function faucetOffchain(', faucetStart);
+    const snapshotFallbackEnd = walletSource.indexOf('const balanceByToken = new Map(', snapshotFallbackStart);
+    const faucetStart = panelSource.indexOf('async function faucetReserves(');
+    const faucetEnd = panelSource.indexOf('async function faucetOffchain(', faucetStart);
     expect(snapshotFallbackStart).toBeGreaterThan(0);
     expect(snapshotFallbackEnd).toBeGreaterThan(snapshotFallbackStart);
     expect(faucetStart).toBeGreaterThan(0);
     expect(faucetEnd).toBeGreaterThan(faucetStart);
-    expect(source.slice(snapshotFallbackStart, snapshotFallbackEnd)).not.toContain(
+    expect(walletSource.slice(snapshotFallbackStart, snapshotFallbackEnd)).not.toContain(
       'applyCanonicalJEventsToActiveEnv',
     );
-    expect(source.slice(faucetStart, faucetEnd)).not.toContain(
+    expect(panelSource.slice(faucetStart, faucetEnd)).not.toContain(
       'applyCanonicalJEventsToActiveEnv(result.events',
     );
-    expect(source).not.toContain('async function applyCanonicalJEventsToActiveEnv');
+    expect(panelSource).not.toContain('async function applyCanonicalJEventsToActiveEnv');
+    expect(walletSource).not.toContain('async function applyCanonicalJEventsToActiveEnv');
   });
 });

@@ -2481,6 +2481,7 @@ describe('audit fail-fast regressions', () => {
         authorityRoot,
         timestamp: env.timestamp,
         txs: frameTxs,
+        events: [],
         hash: frameHash,
         leader: { proposerSignerId: signerId, view: 0 },
         hashesToSign,

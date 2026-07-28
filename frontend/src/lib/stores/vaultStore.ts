@@ -1174,21 +1174,19 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
     if (parseStorageSchemaMismatch(error)) {
       schemaMismatchRecoveryRuntimeIds.add(runtimeIdLower);
     }
-    if (strictRestore) {
-      const message = error instanceof Error ? error.message : String(error);
-      errorLog.log(
-        `Strict restore failed for ${runtime.id.slice(0, 12)}; refusing to reset persisted runtime state`,
-        'Runtime Restore',
-        { runtimeId: runtime.id, error },
-      );
-      throw new Error(`[VaultStore] Strict restore failed for ${runtime.id.slice(0, 12)}: ${message}`);
-    } else {
-      errorLog.log('Failed to load env from DB; falling back to fresh import', 'Runtime Restore', {
-        runtimeId: runtime.id,
-        error,
-      });
-      env = null;
-    }
+    // A thrown durable-read error means storage exists but cannot be trusted.
+    // Treating it like "no local data" would silently replace financial state
+    // with a fresh Runtime. Missing storage is already represented by `null`;
+    // corruption, schema mismatch, and I/O failure must stop initialization.
+    const message = error instanceof Error ? error.message : String(error);
+    errorLog.log(
+      `Runtime restore failed for ${runtime.id.slice(0, 12)}; refusing to replace persisted state`,
+      'Runtime Restore',
+      { runtimeId: runtime.id, strictRestore, error },
+    );
+    throw new Error(`[VaultStore] Runtime restore failed for ${runtime.id.slice(0, 12)}: ${message}`, {
+      cause: error,
+    });
   }
 
   if (!env) {

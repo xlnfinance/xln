@@ -1689,7 +1689,7 @@ export async function openSwapWorkspace(page: Page): Promise<void> {
 }
 
 export async function selectSourceChainInSwap(page: Page, sourceEntityId: string): Promise<void> {
-  const sourceSelect = page.getByTestId('swap-from-chain-select').first();
+  const sourceSelect = page.getByTestId('swap-ticket-from-network').first();
   await expect(sourceSelect).toBeVisible({ timeout: 20_000 });
   await expect
     .poll(
@@ -1715,10 +1715,7 @@ export async function selectSourceChainInSwap(page: Page, sourceEntityId: string
 }
 
 export async function selectCounterpartyInSwap(page: Page, hubId: string): Promise<void> {
-  const createSelect = page.getByTestId('swap-create-account-select').first();
-  const select = (await createSelect.isVisible({ timeout: 1500 }).catch(() => false))
-    ? createSelect
-    : page.getByTestId('swap-account-select').first();
+  const select = page.getByTestId('swap-ticket-hub-select').first();
   await expect(select).toBeVisible({ timeout: 20_000 });
   await expect
     .poll(async () => select.locator('option').count(), {
@@ -1734,8 +1731,8 @@ export async function configurePair(page: Page, side: 'buy' | 'sell'): Promise<v
 }
 
 export async function configureTokens(page: Page, fromTokenId: number, toTokenId: number): Promise<void> {
-  const fromTokenSelect = page.getByTestId('swap-from-token-select').first();
-  const toTokenSelect = page.getByTestId('swap-to-token-select').first();
+  const fromTokenSelect = page.getByTestId('swap-ticket-from-token').first();
+  const toTokenSelect = page.getByTestId('swap-ticket-to-token').first();
   await expect(fromTokenSelect).toBeVisible({ timeout: 20_000 });
   await expect(toTokenSelect).toBeVisible({ timeout: 20_000 });
   await fromTokenSelect.selectOption(String(fromTokenId));
@@ -1765,12 +1762,7 @@ export async function readOrderbookRowCounts(page: Page): Promise<{ asks: number
 }
 
 export async function selectCrossRoute(page: Page, targetEntityId: string): Promise<void> {
-  const swapPanel = page
-    .locator('.swap-panel')
-    .filter({ has: page.getByTestId('swap-order-amount') })
-    .filter({ has: page.getByTestId('swap-route-flow') })
-    .first();
-  const routeSelect = swapPanel.getByTestId('swap-route-select').first();
+  const routeSelect = page.getByTestId('swap-ticket-to-network').first();
   await expect(routeSelect).toBeVisible({ timeout: 20_000 });
   try {
     await expect
@@ -1796,14 +1788,14 @@ export async function selectCrossRoute(page: Page, targetEntityId: string): Prom
     const debug = await page.evaluate(() => {
       const view = window as CrossRuntimeWindow;
       const env = view.isolatedEnv;
-      const routeOptions = Array.from(document.querySelectorAll('[data-testid="swap-route-select"] option')).map(
+      const routeOptions = Array.from(document.querySelectorAll('[data-testid="swap-ticket-to-network"] option')).map(
         option => ({
           value: (option as HTMLOptionElement).value,
           text: option.textContent,
           disabled: (option as HTMLOptionElement).disabled,
         }),
       );
-      const sourceOptions = Array.from(document.querySelectorAll('[data-testid="swap-from-chain-select"] option')).map(
+      const sourceOptions = Array.from(document.querySelectorAll('[data-testid="swap-ticket-from-network"] option')).map(
         option => ({
           value: (option as HTMLOptionElement).value,
           text: option.textContent,
@@ -1840,16 +1832,11 @@ export async function selectCrossRoute(page: Page, targetEntityId: string): Prom
   }, targetEntityId);
   expect(value, 'cross route value must be present').toBeTruthy();
   await routeSelect.selectOption(value);
-  await routeSelect.dispatchEvent('input');
-  await routeSelect.dispatchEvent('change');
   await expect
     .poll(
       async () =>
         routeSelect.evaluate(select => ({
           value: String((select as HTMLSelectElement).value || ''),
-          componentSelected: String((select as HTMLElement).dataset.selectedRouteValue || ''),
-          committedSelected: String((select as HTMLElement).dataset.committedRouteValue || ''),
-          commitNonce: String((select as HTMLElement).dataset.routeCommitNonce || ''),
           options: Array.from((select as HTMLSelectElement).options).map(option => String(option.value || '')),
         })),
       {
@@ -1859,9 +1846,7 @@ export async function selectCrossRoute(page: Page, targetEntityId: string): Prom
       },
     )
     .toMatchObject({
-      componentSelected: value,
-      committedSelected: value,
-      commitNonce: expect.stringMatching(/[1-9]/),
+      value,
       options: expect.arrayContaining([value]),
     });
   const selectedOptionLabel = await routeSelect.evaluate(select => {
@@ -1873,52 +1858,12 @@ export async function selectCrossRoute(page: Page, targetEntityId: string): Prom
   expect(selectedOptionLabel, 'cross route option must name the target jurisdiction once').toMatch(
     /\((Testnet|Tron)\)/,
   );
-  await expect
-    .poll(
-      async () =>
-        routeSelect.evaluate(select => {
-          const panel = (select as HTMLElement).closest('.swap-panel');
-          const routeFlow = panel?.querySelector('[data-testid="swap-route-flow"]') as HTMLElement | null;
-          const routeButton = panel?.querySelector('[data-testid="swap-route-menu-button"]') as HTMLElement | null;
-          const routeButtonText = String(routeButton?.textContent || '')
-            .replace(/\s+/g, ' ')
-            .trim();
-          return {
-            text: String(routeFlow?.textContent || ''),
-            routeButtonText,
-            visibleNetworkWordCount: (routeButtonText.match(/\b(?:Testnet|Tron)\b/g) || []).length,
-            mode: String(routeFlow?.dataset.routeMode || ''),
-            selected: String(routeFlow?.dataset.selectedRouteValue || ''),
-            selectValue: String((select as HTMLSelectElement).value || ''),
-            componentSelected: String((select as HTMLElement).dataset.selectedRouteValue || ''),
-            committedSelected: String((select as HTMLElement).dataset.committedRouteValue || ''),
-            commitNonce: String((select as HTMLElement).dataset.routeCommitNonce || ''),
-            componentMode: String((select as HTMLElement).dataset.selectedRouteMode || ''),
-            routeKnown: String((select as HTMLElement).dataset.selectedRouteKnown || ''),
-            routeDisabled: String((select as HTMLElement).dataset.selectedRouteDisabled || ''),
-            actionTicks: String((select as HTMLElement).dataset.routeActionTicks || ''),
-            domSyncTicks: String((select as HTMLElement).dataset.routeDomSyncTicks || ''),
-            domSyncValue: String((select as HTMLElement).dataset.routeDomSyncValue || ''),
-            actionSyncValue: String((select as HTMLElement).dataset.routeSyncValue || ''),
-            actionSyncKnown: String((select as HTMLElement).dataset.routeSyncKnown || ''),
-            actionSyncDisabled: String((select as HTMLElement).dataset.routeSyncDisabled || ''),
-            actionCommitted: String((select as HTMLElement).dataset.routeCommittedValue || ''),
-          };
-        }),
-      {
-        timeout: 10_000,
-        intervals: [100, 250, 500],
-        message: 'cross route selection must update the visible route flow in the same swap panel',
-      },
-    )
-    .toMatchObject({
-      mode: 'cross',
-      selectValue: value,
-      componentSelected: value,
-      committedSelected: value,
-      commitNonce: expect.stringMatching(/[1-9]/),
-      componentMode: 'cross',
-      routeDisabled: 'false',
-      visibleNetworkWordCount: 1,
-    });
+  await expect(
+    routeSelect,
+    'cross route selection must remain selected after the reactive UI update',
+  ).toHaveValue(value);
+  await expect(
+    routeSelect.locator('xpath=..').locator('.swap-ticket-sel-text'),
+    'the visible destination label must match the selected route',
+  ).toHaveText(selectedOptionLabel);
 }

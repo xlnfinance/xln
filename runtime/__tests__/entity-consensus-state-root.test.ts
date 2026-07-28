@@ -52,7 +52,7 @@ const mutators = {
   timestamp: state => { state.timestamp = 101; },
   nonces: state => { state.nonces.set('alice', 1); },
   entityCommandNonces: state => { state.entityCommandNonces = {
-    version: 2,
+    version: 1,
     boardHash: `0x${'12'.repeat(32)}`,
     boardEpoch: 0,
     bySigner: new Map([['1', { nonce: 1n, commandHash: `0x${'13'.repeat(32)}` }]]),
@@ -105,7 +105,7 @@ const mutators = {
   htlcFeesEarned: state => { state.htlcFeesEarned = 1n; },
   htlcNotes: state => { state.htlcNotes = new Map([['note' as never, 'validator-local-note']]); },
   consumptionAccumulator: state => { state.consumptionAccumulator = {
-    version: 2,
+    version: 1,
     root: `0x${'ab'.repeat(32)}`,
     count: 1n,
   }; },

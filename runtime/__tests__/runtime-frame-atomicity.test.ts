@@ -401,6 +401,7 @@ describe('runtime frame atomicity', () => {
       authorityRoot: hash('d3'),
       timestamp: 1_000,
       txs: frameTxs(),
+      events: [],
       hash: hash('d4'),
       leader: { proposerSignerId: address('d5'), view: 0 },
     };

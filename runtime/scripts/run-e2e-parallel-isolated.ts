@@ -1553,7 +1553,7 @@ const prepareShardSvelteKitOutDir = (
 };
 
 const E2E_BUILD_CACHE_ROOT = resolve(process.cwd(), '.logs', 'e2e-build-cache');
-const E2E_BUILD_CACHE_MANIFEST_VERSION = 2;
+const E2E_BUILD_CACHE_MANIFEST_VERSION = 1;
 
 export const deriveE2EBuildArtifacts = (
   cacheRoot = E2E_BUILD_CACHE_ROOT,

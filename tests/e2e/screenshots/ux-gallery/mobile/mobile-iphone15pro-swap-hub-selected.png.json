@@ -1,11 +1,11 @@
 {
-  "title": "mobile swap token picker",
+  "title": "mobile swap hub selection",
   "group": "Swap",
-  "description": "Token selector with balances during swap preparation.",
+  "description": "Swap ticket after selecting a market-making hub.",
   "platform": "mobile",
   "tags": [
     "swap",
-    "token-picker"
+    "hub"
   ],
   "sourceTest": "ui screenshot smoke captures desktop and mobile main tabs",
   "project": "chromium"

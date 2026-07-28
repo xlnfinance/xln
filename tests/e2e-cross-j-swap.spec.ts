@@ -265,8 +265,10 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         expectedAutoAmount: 300,
         screenshotPath: testInfo.outputPath('cross-j-mm-10x10-hub-first.png'),
       });
-      await expect(page.getByTestId('swap-from-token-label').first()).toContainText('USDC (Testnet)');
-      await expect(page.getByTestId('swap-to-token-label').first()).toContainText('USDC (Tron)');
+      await expect(page.getByTestId('swap-ticket-from-token').first().locator('option:checked')).toHaveText('USDC');
+      await expect(page.getByTestId('swap-ticket-to-token').first().locator('option:checked')).toHaveText('USDC');
+      await expect(page.getByTestId('swap-ticket-from-network').first().locator('option:checked')).toContainText('Testnet');
+      await expect(page.getByTestId('swap-ticket-to-network').first().locator('option:checked')).toContainText('Tron');
 
       await waitForCrossPullFlow(page, source, target, hubId, targetHub.entityId, {
         sourceRouteId: orderId,
@@ -1121,17 +1123,19 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
             .map(option => String((option as HTMLOptionElement).textContent || '').trim())
             .filter(Boolean);
         return {
-          from: optionTexts('[data-testid="swap-from-token-select"]'),
-          to: optionTexts('[data-testid="swap-to-token-select"]'),
+          from: optionTexts('[data-testid="swap-ticket-from-token"]'),
+          to: optionTexts('[data-testid="swap-ticket-to-token"]'),
         };
       });
       expect(tokenOptions.from, 'Tron source token list must expose Tron-only assets').toEqual(
-        expect.arrayContaining(['TRX (Tron)', 'SUN (Tron)']),
+        expect.arrayContaining(['TRX', 'SUN']),
       );
       expect(
-        tokenOptions.to.some(label => /^(TRX|SUN)(?:\s|\(|$)/.test(label)),
+        tokenOptions.to.some(label => label === 'TRX' || label === 'SUN'),
         'Testnet target token list must not leak Tron-only assets',
       ).toBe(false);
+      await expect(page.getByTestId('swap-ticket-from-network').locator('option:checked')).toContainText('Tron');
+      await expect(page.getByTestId('swap-ticket-to-network').locator('option:checked')).toContainText('Testnet');
       await expect(
         page.getByTestId('orderbook-bid-row').first().locator('.price'),
         'cross WETH/USDT price must be displayed as USDT per WETH, not inverted WETH per USDT',
@@ -1168,7 +1172,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
       await expectSwapAssetRoute(page, USDT, 'Tron', USDT, 'Testnet');
 
       await timedStep('cross_j_stable_quote.reverse_same_symbol_asset_identity', async () => {
-        await page.getByTestId('swap-flip-tokens').first().click();
+        await page.getByTestId('swap-ticket-flip').first().click();
       });
       await expectSwapAssetRoute(page, USDT, 'Testnet', USDT, 'Tron');
       await expectCrossOrderbookReady(page, {
@@ -1177,7 +1181,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
       });
 
       await timedStep('cross_j_stable_quote.restore_original_cross_direction', async () => {
-        await page.getByTestId('swap-flip-tokens').first().click();
+        await page.getByTestId('swap-ticket-flip').first().click();
       });
       await expectSwapAssetRoute(page, USDT, 'Tron', USDT, 'Testnet');
 

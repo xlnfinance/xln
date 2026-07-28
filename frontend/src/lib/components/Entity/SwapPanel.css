@@ -1770,7 +1770,10 @@
   }
 
   @media (max-width: 1100px) {
-    .swap-panel .trade-grid {
+    /* `.book-open` has higher specificity than the base grid selector. Keep it
+       in this rule so the orderbook stacks instead of overflowing mobile. */
+    .swap-panel .trade-grid,
+    .swap-panel .trade-grid.book-open {
       grid-template-columns: 1fr;
       gap: 12px;
     }

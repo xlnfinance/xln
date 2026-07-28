@@ -15,7 +15,7 @@ const ABI = ethers.AbiCoder.defaultAbiCoder();
 const domain = (label: string): string => ethers.keccak256(ethers.toUtf8Bytes(label));
 const STACK_DOMAIN = domain('xln.certified-board.stack.v1');
 const KEY_DOMAIN = domain('xln.certified-board.key.v1');
-const RECORD_DOMAIN = domain('xln.certified-board.record.v2');
+const RECORD_DOMAIN = domain('xln.certified-board.record.v1');
 const LEAF_DOMAIN = domain('xln.certified-board.leaf.v1');
 const BRANCH_DOMAIN = domain('xln.certified-board.branch.v1');
 export const EMPTY_CERTIFIED_BOARD_ROOT = domain('xln.certified-board.empty.v1');
@@ -631,7 +631,7 @@ export const createCertifiedBoardAuthorityBinding = (
     throw new Error(`CERTIFIED_BOARD_OUTPUT_FINALITY_DIVERGENCE:${state.entityId}`);
   }
   return {
-    version: 4,
+    version: 1,
     stackKey,
     record,
   };

@@ -40,13 +40,24 @@ const validateRuntimeConfig = (value: unknown, code: string): void => {
   const config = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(config, [], [
     'minFrameDelayMs', 'loopIntervalMs', 'snapshotIntervalFrames',
-    'entityConsensusStateWarningBytes', 'advertiseProfileMirrors', 'storage',
+    'entityConsensusStateWarningBytes', 'advertiseProfileMirrors', 'performance', 'storage',
   ], `${code}_FIELDS`);
   for (const field of [
     'minFrameDelayMs', 'loopIntervalMs', 'snapshotIntervalFrames', 'entityConsensusStateWarningBytes',
   ]) if (config[field] !== undefined) requireFiniteNumber(config[field], `${code}_${field.toUpperCase()}`, 0);
   if (config['advertiseProfileMirrors'] !== undefined) {
     requireBoolean(config['advertiseProfileMirrors'], `${code}_ADVERTISE_PROFILE_MIRRORS`);
+  }
+  if (config['performance'] !== undefined) {
+    const performance = requireBoundaryRecord(config['performance'], `${code}_PERFORMANCE`);
+    requireExactBoundaryKeys(performance, [], [
+      'maxCloneBytes', 'maxCloneMs', 'maxReducerMs', 'maxWalMs',
+    ], `${code}_PERFORMANCE_FIELDS`);
+    for (const field of ['maxCloneBytes', 'maxCloneMs', 'maxReducerMs', 'maxWalMs']) {
+      if (performance[field] !== undefined) {
+        requireFiniteNumber(performance[field], `${code}_PERFORMANCE_${field.toUpperCase()}`, 0);
+      }
+    }
   }
   if (config['storage'] !== undefined) validateStorageConfig(config['storage'], `${code}_STORAGE`);
 };

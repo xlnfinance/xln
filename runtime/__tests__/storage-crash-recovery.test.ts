@@ -225,7 +225,7 @@ describe('storage crash recovery', () => {
       semanticHash: `0x${'33'.repeat(32)}`,
       outputHash: `0x${'44'.repeat(32)}`,
       outputHanko: '0x01',
-    }, { version: 2, nodes: [] });
+    }, { version: 1, nodes: [] });
     const node = inserted.newNodes[0]!;
     const stale = applyConsumptionOutput(createEmptyConsumptionAccumulator(), {
       targetEntityId: entityId,
@@ -235,7 +235,7 @@ describe('storage crash recovery', () => {
       semanticHash: `0x${'66'.repeat(32)}`,
       outputHash: `0x${'77'.repeat(32)}`,
       outputHanko: '0x02',
-    }, { version: 2, nodes: [] }).newNodes[0]!;
+    }, { version: 1, nodes: [] }).newNodes[0]!;
     const currentDb = makeMemoryDb([[keyConsumptionNode(stale.hash), encodeBuffer(stale.node)]]);
     const core = entityDoc(1);
     core.consumptionAccumulator = inserted.state;
@@ -270,7 +270,7 @@ describe('storage crash recovery', () => {
     const first = applyConsumptionOutput(
       createEmptyConsumptionAccumulator(),
       firstIdentity,
-      { version: 2, nodes: [] },
+      { version: 1, nodes: [] },
     );
     const firstStore = new Map(first.newNodes.map(({ hash, node }) => [hash, node]));
     const secondIdentity = {

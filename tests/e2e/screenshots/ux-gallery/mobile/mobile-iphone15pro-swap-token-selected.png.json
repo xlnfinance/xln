@@ -1,11 +1,11 @@
 {
-  "title": "desktop swap route menu",
+  "title": "mobile swap token selection",
   "group": "Swap",
-  "description": "Route selector for cross-chain liquidity paths.",
-  "platform": "desktop",
+  "description": "Swap ticket after selecting the asset to sell.",
+  "platform": "mobile",
   "tags": [
     "swap",
-    "route"
+    "token"
   ],
   "sourceTest": "ui screenshot smoke captures desktop and mobile main tabs",
   "project": "chromium"

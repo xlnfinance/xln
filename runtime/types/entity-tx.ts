@@ -1,5 +1,5 @@
 import type { JurisdictionEvent, JurisdictionEventData } from './jurisdiction-events';
-import type { AccountPeerInput, AccountStateDomain, CrossJurisdictionSecretRelay, SettlementDiff, SettlementOp } from './account';
+import type { AccountPeerInput, AccountStateDomain, CrossJurisdictionSecretRelay, SettlementOp } from './account';
 import type { CrossJurisdictionCloseProof, CrossJurisdictionPullBinding, CrossJurisdictionSwapRoute } from './cross-jurisdiction';
 import type { LendingTermId } from './lending';
 import type { ProfileUpdateTx } from './profile';
@@ -11,8 +11,8 @@ import type { CertifiedBoardAuthorityBinding } from './entity-board-registry';
 import type { ConsumptionProof } from '../entity/consumption-accumulator-types';
 import type { MultiRecipientCiphertext } from '../protocol/htlc/multi-recipient';
 
-export type SignedEntityCommandV2 = Readonly<{
-  version: 2;
+export type SignedEntityCommandV1 = Readonly<{
+  version: 1;
   entityId: string;
   /** Trusted jurisdiction-stack commitment, recomputed from EntityState. */
   stackKey: string;
@@ -32,7 +32,7 @@ export type SignedEntityCommandV2 = Readonly<{
 }>;
 
 export type EntityCommandNonceState = {
-  version: 2;
+  version: 1;
   boardHash: string;
   boardEpoch: number;
   /** One bounded retry/equivocation fence per current board alias. */
@@ -60,7 +60,7 @@ type EntityTxPayload =
   | {
       /** Independently authored board-member command; validators replay and verify it. */
       type: 'entityCommand';
-      data: SignedEntityCommandV2;
+      data: SignedEntityCommandV1;
     }
   | {
       /** Quorum-certified source-frame output, deduplicated in target consensus state. */
@@ -821,9 +821,7 @@ type EntityTxPayload =
       type: 'settle_propose';
       data: {
         counterpartyEntityId: string;
-        ops?: SettlementOp[];
-        diffs?: SettlementDiff[];           // V1 compat: auto-converted to rawDiff ops
-        forgiveTokenIds?: number[];          // V1 compat: auto-converted to forgive ops
+        ops: SettlementOp[];
         executorIsLeft?: boolean;
         memo?: string;
       };
@@ -833,9 +831,7 @@ type EntityTxPayload =
       type: 'settle_update';
       data: {
         counterpartyEntityId: string;
-        ops?: SettlementOp[];
-        diffs?: SettlementDiff[];           // V1 compat: auto-converted to rawDiff ops
-        forgiveTokenIds?: number[];          // V1 compat: auto-converted to forgive ops
+        ops: SettlementOp[];
         executorIsLeft?: boolean;
         memo?: string;
       };

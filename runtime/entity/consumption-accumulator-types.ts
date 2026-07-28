@@ -1,5 +1,5 @@
 export type ConsumptionAccumulatorState = Readonly<{
-  version: 2;
+  version: 1;
   root: string;
   /** Number of source→target relationship frontiers, never output count. */
   count: bigint;
@@ -25,14 +25,14 @@ export type ConsumptionFrontierValue = Readonly<{
 }>;
 
 export type ConsumptionLeafNode = Readonly<{
-  version: 2;
+  version: 1;
   type: 'leaf';
   key: string;
   value: ConsumptionFrontierValue;
 }>;
 
 export type ConsumptionBranchNode = Readonly<{
-  version: 2;
+  version: 1;
   type: 'branch';
   bit: number;
   left: string;
@@ -42,7 +42,7 @@ export type ConsumptionBranchNode = Readonly<{
 export type ConsumptionNode = ConsumptionLeafNode | ConsumptionBranchNode;
 export type ConsumptionNodeStore = ReadonlyMap<string, ConsumptionNode>;
 export type ConsumptionNodeEntry = Readonly<{ hash: string; node: ConsumptionNode }>;
-export type ConsumptionProof = Readonly<{ version: 2; nodes: readonly ConsumptionNode[] }>;
+export type ConsumptionProof = Readonly<{ version: 1; nodes: readonly ConsumptionNode[] }>;
 
 /** Stable semantic identity; frame/board certificates are deliberately outside it. */
 export type ConsumptionOutputIdentity = Readonly<{

@@ -97,7 +97,7 @@ test('measurement uses the canonical Entity encoding and preserves BigInt exactl
 test('optional accumulator adapter adds exact conceptual Patricia bytes', () => {
   const state = baseState();
   const accumulator: ConsumptionAccumulatorState = {
-    version: 2,
+    version: 1,
     root: `0x${'22'.repeat(32)}`,
     count: 2n,
   };

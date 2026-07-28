@@ -304,9 +304,7 @@ async function openSwapWorkspace(page: Page): Promise<void> {
 }
 
 async function selectCounterpartyInSwap(page: Page, preferredAccountId?: string): Promise<void> {
-  const createSelect = page.getByTestId('swap-create-account-select').first();
-  const createVisible = await createSelect.isVisible({ timeout: 1500 }).catch(() => false);
-  const select = createVisible ? createSelect : page.getByTestId('swap-account-select').first();
+  const select = page.getByTestId('swap-ticket-hub-select').first();
   const hasSelector = await select.isVisible({ timeout: 1500 }).catch(() => false);
   if (!hasSelector) return;
   const values = await select.locator('option').evaluateAll((options) =>
@@ -330,7 +328,7 @@ async function selectCounterpartyInSwap(page: Page, preferredAccountId?: string)
 }
 
 async function readAvailableFromSizing(page: Page): Promise<number> {
-  const stat = page.getByTestId('swap-available-stat').first();
+  const stat = page.getByTestId('swap-ticket-available').first();
   await expect(stat).toBeVisible({ timeout: 20_000 });
   const text = String((await stat.textContent()) || '');
   const available = parseFirstNumber(text);
@@ -394,14 +392,14 @@ async function readSwapState(page: Page, entityId: string, signerId: string, cou
 async function placeNonMarketableSwapOrder(page: Page, counterpartyId: string): Promise<void> {
   await openSwapWorkspace(page);
   await selectCounterpartyInSwap(page, counterpartyId);
-  const fromTokenSelect = page.getByTestId('swap-from-token-select').first();
-  const toTokenSelect = page.getByTestId('swap-to-token-select').first();
+  const fromTokenSelect = page.getByTestId('swap-ticket-from-token').first();
+  const toTokenSelect = page.getByTestId('swap-ticket-to-token').first();
   await expect(fromTokenSelect).toBeVisible({ timeout: 20_000 });
   await expect(toTokenSelect).toBeVisible({ timeout: 20_000 });
   await fromTokenSelect.selectOption('1');
   await toTokenSelect.selectOption('2');
-  const amountInput = page.getByTestId('swap-order-amount').first();
-  const priceInput = page.getByTestId('swap-order-price').first();
+  const amountInput = page.getByTestId('swap-ticket-amount').first();
+  const priceInput = page.getByTestId('swap-ticket-rate').first();
   await expect(amountInput).toBeVisible({ timeout: 20_000 });
   await expect(priceInput).toBeVisible({ timeout: 20_000 });
   const availableGive = await readAvailableFromSizing(page);
@@ -409,7 +407,7 @@ async function placeNonMarketableSwapOrder(page: Page, counterpartyId: string): 
   await amountInput.fill(formatDecimalForInput(orderAmount));
   await priceInput.fill('2000');
   await page.waitForTimeout(200);
-  const placeButton = page.getByTestId('swap-submit-order').first();
+  const placeButton = page.getByTestId('swap-ticket-submit').first();
   await expect(placeButton).toBeEnabled({ timeout: 20_000 });
   await placeButton.click();
   await expect(page.getByTestId('swap-open-orders')).toBeVisible({ timeout: 60_000 });

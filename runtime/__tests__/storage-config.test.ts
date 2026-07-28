@@ -3,16 +3,37 @@ import { describe, expect, test } from 'bun:test';
 import { createEmptyEnv } from '../runtime';
 import { resolveStorageRuntimeConfig } from '../storage';
 import { DEFAULT_EPOCH_MAX_BYTES } from '../storage/keys';
+import { ensureRuntimeConfig } from '../runtime/loop-environment';
+import { measureRuntimeFrameCloneBytes } from '../runtime/frame/clone';
 
 describe('storage config', () => {
+  test('keeps performance budgets opt-in and measures deterministic clone payload bytes', () => {
+    const env = createEmptyEnv('frame-performance-budget');
+    expect(env.runtimeConfig?.performance).toBeUndefined();
+    const first = measureRuntimeFrameCloneBytes(env);
+    const second = measureRuntimeFrameCloneBytes(env);
+    expect(first).toBeGreaterThan(0);
+    expect(second).toBe(first);
+
+    env.runtimeConfig = { performance: { maxCloneBytes: first, maxReducerMs: 25 } };
+    expect(ensureRuntimeConfig(env).performance).toEqual({
+      maxCloneBytes: first,
+      maxReducerMs: 25,
+    });
+    env.runtimeConfig.performance = { maxWalMs: 0 };
+    expect(() => ensureRuntimeConfig(env)).toThrow(
+      'RUNTIME_CONFIG_PERFORMANCE_MAXWALMS_INVALID:0',
+    );
+  });
+
   test('uses sparse full-state checkpoints without weakening per-frame WAL chaining', () => {
     const env = createEmptyEnv('sparse-storage-checkpoints');
     env.runtimeConfig = { ...(env.runtimeConfig || {}), snapshotIntervalFrames: 100 };
     expect(resolveStorageRuntimeConfig(env).canonicalHashPeriodFrames).toBe(0);
     expect(resolveStorageRuntimeConfig(env).materializePeriodFrames).toBe(100);
     expect(resolveStorageRuntimeConfig(env).snapshotPeriodFrames).toBe(10_000);
-    expect(resolveStorageRuntimeConfig(env).epochMaxBytes).toBe(16 * 1024 ** 3);
-    expect(DEFAULT_EPOCH_MAX_BYTES).toBe(16 * 1024 ** 3);
+    expect(resolveStorageRuntimeConfig(env).epochMaxBytes).toBe(Number.MAX_SAFE_INTEGER);
+    expect(DEFAULT_EPOCH_MAX_BYTES).toBe(Number.MAX_SAFE_INTEGER);
     env.runtimeConfig = { storage: { canonicalHashPeriodFrames: 37 } };
     expect(resolveStorageRuntimeConfig(env).canonicalHashPeriodFrames).toBe(37);
   });

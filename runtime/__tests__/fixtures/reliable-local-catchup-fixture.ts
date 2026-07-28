@@ -163,6 +163,8 @@ export const buildCatchupFixtureCertificate = async (
     timestamp,
     [],
     nextStateBeforeLink,
+    undefined,
+    execution.events,
   );
   const hashesToSign = buildEntityHashesToSign(
     state.entityId,
@@ -194,6 +196,7 @@ export const buildCatchupFixtureCertificate = async (
     authorityRoot: computeEntityFrameAuthorityRoot(buildEntityFrameAuthority(nextStateBeforeLink)),
     timestamp,
     txs: [],
+    events: structuredClone(execution.events),
     hash: frameHash,
     leader: { proposerSignerId: state.config.validators[0]!, view: 0 },
     hashesToSign,

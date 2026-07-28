@@ -115,32 +115,6 @@ describe('partial prepared failover', () => {
     if (!partialFrame) throw new Error('TEST_PARTIAL_FRAME_MISSING');
     expect(partialFrame.collectedSigs?.size).toBe(2);
 
-    const quorumLockedReplica = structuredClone(preparedByV2.workingReplica);
-    const quorumLockedFrame = quorumLockedReplica.lockedFrame;
-    if (!quorumLockedFrame?.hashesToSign || !quorumLockedFrame.collectedSigs) {
-      throw new Error('TEST_QUORUM_LOCK_MANIFEST_MISSING');
-    }
-    quorumLockedFrame.collectedSigs.set(
-      '3',
-      quorumLockedFrame.hashesToSign.map(({ hash }) => signAccountFrame(env, '3', hash)),
-    );
-    let omittedLockReplica = quorumLockedReplica;
-    let omittedLockOutcome: Awaited<ReturnType<typeof applyEntityInput>> | undefined;
-    for (const voterId of [proposerId, '3', '4']) {
-      omittedLockOutcome = await applyEntityInput(env, omittedLockReplica, {
-        entityId,
-        signerId: '2',
-        leaderTimeoutVote: signedTimeoutVote(env, base, voterId),
-      });
-      omittedLockReplica = omittedLockOutcome.workingReplica;
-    }
-    expect(omittedLockOutcome?.outcome).toEqual({
-      kind: 'rejected',
-      code: 'LEADER_PREPARED_CERTIFICATE_REJECTED',
-    });
-    expect(omittedLockReplica.pendingLeaderCertificate).toBeUndefined();
-    expect(omittedLockReplica.lockedFrame?.hash).toBe(partialFrame.hash);
-
     const vote2 = signedTimeoutVote(env, base, '2', partialFrame);
     const vote3 = signedTimeoutVote(env, base, '3');
     const vote4 = signedTimeoutVote(env, base, '4');

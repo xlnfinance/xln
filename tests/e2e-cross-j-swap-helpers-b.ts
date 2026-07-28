@@ -124,8 +124,12 @@ export async function expectSwapTokens(page: Page, fromTokenId: number, toTokenI
   const toSymbol = TOKEN_SYMBOL_BY_ID[toTokenId];
   expect(fromSymbol, `missing token symbol for ${fromTokenId}`).toBeTruthy();
   expect(toSymbol, `missing token symbol for ${toTokenId}`).toBeTruthy();
-  await expect(page.getByTestId('swap-from-token-label').first()).toContainText(fromSymbol!, { timeout: 10_000 });
-  await expect(page.getByTestId('swap-to-token-label').first()).toContainText(toSymbol!, { timeout: 10_000 });
+  const fromToken = page.getByTestId('swap-ticket-from-token').first();
+  const toToken = page.getByTestId('swap-ticket-to-token').first();
+  await expect(fromToken).toHaveValue(String(fromTokenId), { timeout: 10_000 });
+  await expect(toToken).toHaveValue(String(toTokenId), { timeout: 10_000 });
+  await expect(fromToken.locator('option:checked')).toHaveText(fromSymbol!);
+  await expect(toToken.locator('option:checked')).toHaveText(toSymbol!);
 }
 
 export async function expectSwapAssetRoute(
@@ -181,19 +185,15 @@ export async function clickCrossOrderbookLevel(
   await dismissSwapCompletionModal(page);
   await row.click({ timeout: 10_000 });
   await expectSwapTokens(page, expectedFromTokenId, expectedToTokenId);
-  await expect(
-    page.getByTestId('swap-size-hint').first(),
-    'cross orderbook click must pin the clicked level in the visible form',
-  ).toBeVisible({ timeout: 10_000 });
   await expect
-    .poll(async () => String(await page.getByTestId('swap-order-amount').first().inputValue()).trim(), {
+    .poll(async () => String(await page.getByTestId('swap-ticket-amount').first().inputValue()).trim(), {
       timeout: 10_000,
       intervals: [50, 100, 200],
     })
     .not.toBe('');
   if (clickedDisplayedPrice) {
     await expect
-      .poll(async () => String(await page.getByTestId('swap-order-price').first().inputValue()).trim(), {
+      .poll(async () => String(await page.getByTestId('swap-ticket-rate').first().inputValue()).trim(), {
         timeout: 10_000,
         intervals: [50, 100, 200],
       })
@@ -215,9 +215,8 @@ export async function expectCrossNonTakeableClickNoop(
   const before = {
     pairId: String((await panel.getAttribute('data-pair-id')) || ''),
     hubIds: String((await panel.getAttribute('data-hub-ids')) || ''),
-    amount: String(await page.getByTestId('swap-order-amount').first().inputValue()).trim(),
-    price: String(await page.getByTestId('swap-order-price').first().inputValue()).trim(),
-    sizeHintCount: await page.getByTestId('swap-size-hint').count(),
+    amount: String(await page.getByTestId('swap-ticket-amount').first().inputValue()).trim(),
+    price: String(await page.getByTestId('swap-ticket-rate').first().inputValue()).trim(),
   };
   expect(before.pairId, 'cross wrong-side click guard needs an active cross venue').toMatch(/^cross:/);
 
@@ -238,26 +237,19 @@ export async function expectCrossNonTakeableClickNoop(
     })
     .toBe(before.hubIds);
   await expect
-    .poll(async () => String(await page.getByTestId('swap-order-amount').first().inputValue()).trim(), {
+    .poll(async () => String(await page.getByTestId('swap-ticket-amount').first().inputValue()).trim(), {
       timeout: 5_000,
       intervals: [50, 100, 200],
       message: 'cross wrong-side click must not pin an amount from a non-takeable level',
     })
     .toBe(before.amount);
   await expect
-    .poll(async () => String(await page.getByTestId('swap-order-price').first().inputValue()).trim(), {
+    .poll(async () => String(await page.getByTestId('swap-ticket-rate').first().inputValue()).trim(), {
       timeout: 5_000,
       intervals: [50, 100, 200],
       message: 'cross wrong-side click must not pin a stale price from another route',
     })
     .toBe(before.price);
-  await expect
-    .poll(async () => await page.getByTestId('swap-size-hint').count(), {
-      timeout: 5_000,
-      intervals: [50, 100, 200],
-      message: 'cross wrong-side click must not show a fill hint',
-    })
-    .toBe(before.sizeHintCount);
 }
 
 export async function placeCrossOrder(
@@ -317,7 +309,7 @@ export async function placeCrossOrder(
   if (params.expectedAutoAmount !== undefined) {
     await expect
       .poll(
-        async () => Number(String(await page.getByTestId('swap-order-amount').first().inputValue()).replace(/,/g, '')),
+        async () => Number(String(await page.getByTestId('swap-ticket-amount').first().inputValue()).replace(/,/g, '')),
         {
           timeout: 10_000,
           intervals: [50, 100, 200],
@@ -331,9 +323,9 @@ export async function placeCrossOrder(
     const expectedToTokenId = params.expectedClickToTokenId ?? (params.clickBookSide === 'ask' ? WETH : USDC);
     await clickCrossOrderbookLevel(page, params.clickBookSide, expectedFromTokenId, expectedToTokenId);
   }
-  const amountInput = page.getByTestId('swap-order-amount').first();
-  const priceInput = page.getByTestId('swap-order-price').first();
-  const submit = page.getByTestId('swap-submit-order').first();
+  const amountInput = page.getByTestId('swap-ticket-amount').first();
+  const priceInput = page.getByTestId('swap-ticket-rate').first();
+  const submit = page.getByTestId('swap-ticket-submit').first();
   await expect(amountInput).toBeVisible({ timeout: 20_000 });
   await expect(priceInput).toBeVisible({ timeout: 20_000 });
   const beforeSubmit = await readCrossState(page, params.source, params.hubId);
@@ -379,7 +371,7 @@ export async function placeCrossOrder(
       consent.locator('[data-step-id="target-credit"]'),
       'target credit setup step must be visible',
     ).toContainText('Set inbound credit limit');
-    const errorText = (await page.getByTestId('swap-form-error').allTextContents()).join('\n');
+    const errorText = (await page.getByTestId('swap-ticket-error').allTextContents()).join('\n');
     expect(errorText, 'auto-setup must replace the old manual create-account blocker').not.toMatch(
       /create target account|account setup required/i,
     );
@@ -389,8 +381,8 @@ export async function placeCrossOrder(
       async () => {
         const routePicker = page.getByTestId('swap-route-picker').first();
         const [receive, formErrorParts, amountState, parsedGiveAmount, canonicalGiveAmount] = await Promise.all([
-          page.getByTestId('swap-receive-amount').first().inputValue(),
-          page.getByTestId('swap-form-error').allTextContents(),
+          page.getByTestId('swap-ticket-receive-amount').first().locator('.swap-ticket-receive-value').textContent(),
+          page.getByTestId('swap-ticket-error').allTextContents(),
           routePicker.getAttribute('data-order-amount-state'),
           routePicker.getAttribute('data-give-amount'),
           routePicker.getAttribute('data-canonical-give-amount'),
@@ -444,13 +436,13 @@ export async function placeCrossOrder(
           const newOffers = state.offerSummaries.filter(offer => !beforeOfferIds.has(offer.offerId));
           const newMessages = state.messages.slice(beforeMessageCount);
           const formError = await page
-            .getByTestId('swap-form-error')
+            .getByTestId('swap-ticket-error')
             .first()
             .textContent()
             .catch(() => '');
           const formValues = await page.evaluate(() => {
-            const amount = document.querySelector<HTMLInputElement>('[data-testid="swap-order-amount"]')?.value || '';
-            const price = document.querySelector<HTMLInputElement>('[data-testid="swap-order-price"]')?.value || '';
+            const amount = document.querySelector<HTMLInputElement>('[data-testid="swap-ticket-amount"]')?.value || '';
+            const price = document.querySelector<HTMLInputElement>('[data-testid="swap-ticket-rate"]')?.value || '';
             const view = window as CrossRuntimeWindow & { __xln_env?: any };
             const summarizeEnv = (env: any) => ({
               runtimeId: String(env?.runtimeId || ''),

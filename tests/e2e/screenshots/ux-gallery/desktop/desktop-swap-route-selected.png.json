@@ -1,11 +1,11 @@
 {
-  "title": "desktop swap source picker",
+  "title": "desktop swap route selection",
   "group": "Swap",
-  "description": "Source account menu while preparing a routed swap.",
+  "description": "Swap ticket after selecting a destination route.",
   "platform": "desktop",
   "tags": [
     "swap",
-    "account-picker"
+    "route"
   ],
   "sourceTest": "ui screenshot smoke captures desktop and mobile main tabs",
   "project": "chromium"

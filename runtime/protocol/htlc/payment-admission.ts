@@ -345,7 +345,7 @@ const validateCanonicalProfileDescriptor = (raw: unknown): EntityProfileDescript
     throw new Error('HTLC_PAYMENT_PREPARED_ROUTE_PROFILE_DESCRIPTOR_INVALID');
   }
   const { version, ...profileFields } = raw as EntityProfileDescriptor & Record<string, unknown>;
-  if (version !== 'xln:entity-profile:v2') {
+  if (version !== 'xln:entity-profile:v1') {
     throw new Error('HTLC_PAYMENT_PREPARED_ROUTE_PROFILE_DESCRIPTOR_VERSION_INVALID');
   }
   let canonical: EntityProfileDescriptor;

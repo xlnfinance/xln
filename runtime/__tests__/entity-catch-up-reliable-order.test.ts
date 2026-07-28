@@ -199,6 +199,7 @@ const buildCommitCertificate = async (
     authorityRoot: computeEntityFrameAuthorityRoot(buildEntityFrameAuthority(nextStateBeforeLink)),
     timestamp,
     txs: [],
+    events: [],
     hash: frameHash,
     leader: { proposerSignerId: state.config.validators[0]!, view: 0 },
     hashesToSign,

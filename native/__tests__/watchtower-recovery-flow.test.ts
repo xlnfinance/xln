@@ -237,8 +237,8 @@ describe('watchtower recovery full flow', () => {
       }],
       entityInputs: [],
     });
-    await xln.process(env);
-    await xln.process(env);
+    await xln.processRuntime(env);
+    await xln.processRuntime(env);
     const restoredJReplica = env.jReplicas.get(jurisdictionName);
     if (!restoredJReplica?.depositoryAddress || !restoredJReplica.entityProviderAddress) {
       throw new Error('RESTORE_FLOW_JURISDICTION_IMPORT_FAILED');
@@ -274,7 +274,7 @@ describe('watchtower recovery full flow', () => {
       }],
       entityInputs: [],
     });
-    await xln.process(env);
+    await xln.processRuntime(env);
 
     const bundle = xln.buildRuntimeRecoveryBundle(env, {
       signers: [{
@@ -392,7 +392,7 @@ describe('watchtower recovery full flow', () => {
       }],
       entityInputs: [],
     });
-    await xln.process(env);
+    await xln.processRuntime(env);
 
     const replica = [...env.eReplicas.values()][0];
     expect(replica).toBeTruthy();
@@ -503,7 +503,7 @@ describe('watchtower recovery full flow', () => {
       }],
       entityInputs: [],
     });
-    await xln.process(env);
+    await xln.processRuntime(env);
 
     const replica = [...env.eReplicas.values()][0];
     expect(replica).toBeTruthy();

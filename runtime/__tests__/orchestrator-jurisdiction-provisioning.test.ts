@@ -35,7 +35,7 @@ test('ephemeral shards never import unrelated public RPC jurisdictions', () => {
     ephemeralTestnet: true,
   };
   const isolated = JSON.parse(isolateEphemeralJurisdictions(config, JSON.stringify({
-    version: '3',
+    version: '1',
     jurisdictions: {
       arrakis: { name: 'Testnet', primary: true, status: 'active', rpc: '/rpc' },
       tron: { name: 'Tron', status: 'active', rpc: '/rpc2' },
@@ -168,7 +168,7 @@ test('orchestrator provisions exact primary contracts before RPC import', async 
   try {
     await waitForRpc(rpcUrl);
     await writeFile(jurisdictionsPath, `${JSON.stringify({
-      version: '3',
+      version: '1',
       jurisdictions: {
         primary: {
           name: 'Primary',
@@ -307,7 +307,7 @@ test('fresh RPC import uses provisioned deployment metadata after Anvil history 
   try {
     await waitForRpc(rpcUrl);
     await writeFile(jurisdictionsPath, `${JSON.stringify({
-      version: '3',
+      version: '1',
       jurisdictions: {
         primary: {
           name: 'Primary', primary: true, chainId: CHAIN_ID, rpc: '/rpc',
@@ -390,7 +390,7 @@ test('secondary RPC stack reuses deterministic addresses across reset retries', 
   try {
     await Promise.all([waitForRpc(primaryRpc), waitForRpc(secondaryRpc, CHAIN_ID_2)]);
     await writeFile(jurisdictionsPath, `${JSON.stringify({
-      version: '3',
+      version: '1',
       jurisdictions: {
         primary: {
           name: 'Primary', primary: true, chainId: CHAIN_ID, rpc: '/rpc',

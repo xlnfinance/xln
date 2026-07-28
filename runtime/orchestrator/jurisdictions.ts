@@ -291,7 +291,7 @@ const persistPrimaryRpcStack = (
   };
   const updatedAt = new Date().toISOString();
   payload['lastUpdated'] = updatedAt;
-  const version = String(payload.version || '').trim() || '3';
+  const version = String(payload.version || '').trim() || '1';
   const networkVersion = computeJurisdictionsNetworkVersion(payload, version);
   payload['deployVersion'] = networkVersion;
   payload['networkVersion'] = networkVersion;
@@ -420,7 +420,7 @@ export const deployRpc2JurisdictionStack = async (config: OrchestratorJurisdicti
     },
   };
   const nextPayload: ShardJurisdictionsFile = {
-    version: String(current.version || '').trim() || '3',
+    version: String(current.version || '').trim() || '1',
     lastUpdated: updatedAt,
     jurisdictions,
     defaults: current.defaults ?? {
@@ -429,7 +429,7 @@ export const deployRpc2JurisdictionStack = async (config: OrchestratorJurisdicti
       gasLimit: 1000000,
     },
   };
-  const networkVersion = computeJurisdictionsNetworkVersion(nextPayload, String(nextPayload.version || '3'));
+  const networkVersion = computeJurisdictionsNetworkVersion(nextPayload, String(nextPayload.version || '1'));
   nextPayload['deployVersion'] = networkVersion;
   nextPayload['networkVersion'] = networkVersion;
   writeFileSync(config.shardJurisdictionsPath, JSON.stringify(nextPayload, null, 2) + '\n', 'utf8');
@@ -481,7 +481,7 @@ export const toPublicJurisdictionsPayload = (
     );
   }
   if (!parsed || typeof parsed !== 'object' || !parsed.jurisdictions) return raw;
-  const networkVersion = computeJurisdictionsNetworkVersion(parsed, String(parsed.version || '3'));
+  const networkVersion = computeJurisdictionsNetworkVersion(parsed, String(parsed.version || '1'));
   parsed['deployVersion'] = networkVersion;
   parsed['networkVersion'] = networkVersion;
   parsed['ephemeralTestnet'] = config.ephemeralTestnet === true;

@@ -763,8 +763,8 @@ test('server-side faucet requests publish upstream runtime ingress receipts when
   expect(panelSource).toContain('function recordServerIngressReceipt');
   expect(panelSource).toContain('recordServerIngressReceipt(result);');
   expect(panelSource).toContain('statusUrl: result.statusUrl ?? null');
-  expect(panelSource).toContain("notifyUserActionError('asset-faucet', 'Runtime is not ready for financial actions')");
-  expect(panelSource).toContain("notifyUserActionError('offchain-faucet', 'Runtime is not ready for financial actions')");
+  expect(panelSource).toMatch(/notifyUserActionError\(["']asset-faucet["'], ["']Runtime is not ready for financial actions["']\)/);
+  expect(panelSource).toMatch(/notifyUserActionError\(["']offchain-faucet["'], ["']Runtime is not ready for financial actions["']\)/);
   expect(assetFaucetSource).toContain('export let ready = false');
   expect(assetFaucetSource.match(/disabled={!ready \\|\\| submitting}/g)).toHaveLength(3);
   expect(assetsSource).toContain('ready={activeIsLive}');
@@ -821,17 +821,21 @@ test('entity panel pure RuntimeInput mutations do not require embedded RuntimeSt
   expect(source).not.toContain("requireRuntimeEnv(actionRuntimeEnv, 'dispute-start')");
   expect(source).not.toContain("requireRuntimeEnv(actionRuntimeEnv, 'add-token-to-account')");
   expect(source).not.toContain("throw new Error('Environment not ready')");
-  expect(source).toContain("requireRuntimeEnv(actionRuntimeEnv, 'settings-import-jmachine')");
-  expect(source).toContain("requireRuntimeEnv(actionRuntimeEnv, 'send-external-asset')");
+  expect(source).toMatch(/requireRuntimeEnv\(actionRuntimeEnv, ["']settings-import-jmachine["']\)/);
+  expect(source).toMatch(/requireRuntimeEnv\(actionRuntimeEnv, ["']send-external-asset["']\)/);
   expect(source).not.toContain("requireRuntimeEnv(actionRuntimeEnv, 'move-reserve-to-external-draft')");
   expect(source).not.toContain("requireRuntimeEnv(actionRuntimeEnv, 'move-external-to-reserve-draft')");
   expect(source).not.toContain("requireRuntimeEnv(actionRuntimeEnv, 'debt-enforcement')");
-  expect(source).toContain("resolveEntitySigner(entityId, 'reserve-to-external')");
-  expect(source).toContain("resolveEntitySigner(entityId, 'move-reserve-to-external-draft')");
-  expect(source).toContain("resolveEntitySigner(entityId, 'move-external-to-reserve-draft')");
-  expect(source).toContain("resolveEntitySigner(entityId, 'debt-enforcement')");
-  expect(source).toContain("resolveEntitySigner(entityId, 'reserve-to-collateral')");
-  expect(source).toContain("resolveEntitySigner(entityId, 'add-token-to-account')");
+  for (const context of [
+    'reserve-to-external',
+    'move-reserve-to-external-draft',
+    'move-external-to-reserve-draft',
+    'debt-enforcement',
+    'reserve-to-collateral',
+    'add-token-to-account',
+  ]) {
+    expect(source).toMatch(new RegExp(`resolveEntitySigner\\(entityId, ["']${context}["']\\)`));
+  }
   expect(source).toContain("getRuntimeId(actionRuntimeEnv)");
 });
 
@@ -842,15 +846,16 @@ test('entity panel debt enforcement submits RuntimeInput instead of calling JAda
   const enforceSource = source.slice(enforceIndex, source.indexOf('async function addTokenToAccount', enforceIndex));
 
   expect(existsSync('frontend/src/lib/components/Entity/debt-enforcement-command.ts')).toBe(false);
-  expect(source).toContain("import { buildDebtEnforcementRuntimeInputFromProjection } from '@xln/runtime/protocol/payments/debt-enforcement';");
+  expect(source).toContain('buildDebtEnforcementRuntimeInputFromProjection');
+  expect(source).toContain('@xln/runtime/protocol/payments/debt-enforcement');
   expect(enforceSource).toContain('buildDebtEnforcementRuntimeInputFromProjection');
   expect(enforceSource).toContain('jurisdictionName');
-  expect(enforceSource).toContain("timestamp: requirePanelRuntimeTimestamp('debt-enforcement')");
+  expect(enforceSource).toMatch(/timestamp: requirePanelRuntimeTimestamp\(["']debt-enforcement["']\)/);
   expect(enforceSource).not.toContain('Date.now()');
-  expect(enforceSource).toContain('submitRuntimeCommandInput(input)');
+  expect(enforceSource).toContain('submitRuntimeInput(input)');
   expect(enforceSource).not.toContain('requireRuntimeEnv(actionRuntimeEnv');
   expect(enforceSource).not.toContain('getXLN()');
   expect(enforceSource).not.toContain('xln.buildDebtEnforcementRuntimeInput');
-  expect(enforceSource).not.toContain('submitRuntimeCommandInput(env, input)');
+  expect(enforceSource).not.toContain('submitRuntimeInput(env, input)');
   expect(enforceSource).not.toContain('submitDebtEnforcement');
 });

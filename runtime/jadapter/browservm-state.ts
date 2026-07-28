@@ -1,8 +1,8 @@
 import { hexToBytes } from '@ethereumjs/util';
 
-// Increment when contract ABI/encoding changes to invalidate cached BrowserVM state.
-// v6 gives BrowserVM a deployment nonce namespace and persists its chain domain.
-export const BROWSERVM_CONTRACT_VERSION = 6;
+// Testnet has one canonical BrowserVM snapshot. Breaking changes replace v1;
+// stale snapshots fail closed instead of entering a migration branch.
+export const BROWSERVM_CONTRACT_VERSION = 1;
 
 export type BrowserVmStoredReceipt = {
   transactionHash: string;
@@ -37,12 +37,12 @@ export type BrowserVmChainCheckpoint = {
 };
 
 export type BrowserVmSerializedState = {
-  version?: number;
+  version: 1;
   chainId: number;
   stateRoot: string;
   trieData: Array<[string, string]>;
   nonce: string;
-  entityProviderDeploymentBlock?: number;
+  entityProviderDeploymentBlock: number;
   chain: BrowserVmChainCheckpoint;
   addresses: {
     depository: string;

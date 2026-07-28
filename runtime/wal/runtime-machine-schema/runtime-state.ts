@@ -63,7 +63,7 @@ export const validateReliableReceipt = (value: unknown, code: string): void => {
     [],
     `${code}_BODY_FIELDS`,
   );
-  if (body['version'] !== 2) throw new Error(`${code}_BODY_VERSION`);
+  if (body['version'] !== 1) throw new Error(`${code}_BODY_VERSION`);
   if (body['coverage'] !== 'exact' && body['coverage'] !== 'terminal') throw new Error(`${code}_BODY_COVERAGE`);
   requireString(body['receiverRuntimeId'], `${code}_BODY_RECEIVER`);
   validateReliableIdentity(body['identity'], `${code}_BODY_IDENTITY`);

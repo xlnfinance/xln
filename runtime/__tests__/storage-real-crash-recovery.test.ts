@@ -15,6 +15,7 @@ import {
 } from '../runtime';
 import { deriveSignerAddressSync } from '../account/crypto';
 import { deriveLocalEntityCryptoKeys } from '../entity/crypto';
+import { ENTITY_FRAME_EVENT_COLLECTOR } from '../entity/frame-event-collector';
 import { getEntityLeaderState } from '../entity/consensus/leader';
 import { buildJPrefixCertificate } from '../jurisdiction/j-prefix-consensus';
 import { generateNumberedEntityId } from '../entity/factory';
@@ -507,6 +508,7 @@ describe('real process storage crash recovery', () => {
         expectedSharedState.entityEncPubKey = '';
         expectedSharedState.entityEncPrivKey = '';
         delete expectedSharedState.htlcNotes;
+        delete (expectedSharedState as Record<string, unknown>)[ENTITY_FRAME_EVENT_COLLECTOR];
       }
       expect(rebuiltState).toEqual(expectedSharedState);
       expect(rebuiltState

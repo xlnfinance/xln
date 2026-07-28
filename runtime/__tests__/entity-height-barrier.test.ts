@@ -14,6 +14,7 @@ const certifiedFrame = (height: number, byte: string): ProposedEntityFrame => ({
   authorityRoot: `0x${'30'.repeat(32)}`,
   timestamp: height,
   txs: [],
+  events: [],
   hash: `0x${byte.repeat(32)}`,
   leader: { proposerSignerId: signer('11'), view: 0 },
   hashesToSign: [],

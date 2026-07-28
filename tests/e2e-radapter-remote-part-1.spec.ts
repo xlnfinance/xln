@@ -1454,7 +1454,7 @@ test(
     );
 
     await openAccountWorkspaceTab(page, 'swap');
-    await expect(page.getByTestId('swap-any-builder')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+    await expect(page.getByTestId('swap-ticket')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
     await expect(page.getByTestId('swap-market-section')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
     await expect(page.locator('body')).not.toContainText('Swap requires a live runtime frame.');
     await expect(page.locator('body')).not.toContainText('Swap projection is not available yet.');
@@ -2066,7 +2066,7 @@ test(
     await openAccountWorkspaceTab(page, 'send');
     await expect(page.getByText('Payments are only available in LIVE mode.')).toBeVisible();
     await openAccountWorkspaceTab(page, 'swap');
-    await expect(page.getByTestId('swap-submit-order')).toBeDisabled();
+    await expect(page.getByTestId('swap-ticket-submit')).toBeDisabled();
     await openAccountWorkspaceTab(page, 'lending');
     await expect(page.getByTestId('lending-offer-submit')).toBeDisabled();
 

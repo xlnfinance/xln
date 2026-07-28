@@ -110,6 +110,7 @@ const cloneProposedEntityFrame = (
       authorityRoot: frame.authorityRoot,
       timestamp: frame.timestamp,
       txs: cloneIsolatedEntityTxs(frame.txs),
+      events: structuredClone(frame.events),
       hash: frame.hash,
       leader: {
         proposerSignerId: frame.leader.proposerSignerId,

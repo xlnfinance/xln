@@ -35,7 +35,7 @@ describe('orchestrator public RPC routes', () => {
         8: 'http://127.0.0.1:8552',
       },
     }, JSON.stringify({
-      version: '3',
+      version: '1',
       jurisdictions: {
         primary: {
           name: 'Primary',
@@ -115,7 +115,7 @@ describe('orchestrator public RPC routes', () => {
 
     for (const entityProviderDeploymentBlock of [undefined, 0, -1, 1.5]) {
       expect(() => toPublicJurisdictionsPayload(config, JSON.stringify({
-        version: '3',
+        version: '1',
         jurisdictions: {
           primary: {
             ...jurisdiction,
@@ -132,7 +132,7 @@ describe('orchestrator public RPC routes', () => {
 
     for (const status of ['pending', 'inactive']) {
       expect(() => toPublicJurisdictionsPayload(config, JSON.stringify({
-        version: '3',
+        version: '1',
         jurisdictions: {
           primary: { ...jurisdiction, status },
         },
@@ -140,7 +140,7 @@ describe('orchestrator public RPC routes', () => {
     }
 
     const published = JSON.parse(toPublicJurisdictionsPayload(config, JSON.stringify({
-      version: '3',
+      version: '1',
       jurisdictions: {
         primary: { ...jurisdiction, status: 'active', entityProviderDeploymentBlock: 2 },
       },
@@ -163,7 +163,7 @@ describe('orchestrator public RPC routes', () => {
     };
     const serialize = (contracts: Record<string, string>, status = 'active') =>
       toPublicJurisdictionsPayload(config, JSON.stringify({
-        version: '3',
+        version: '1',
         jurisdictions: { primary: { ...base, status, contracts } },
       }));
 
@@ -190,7 +190,7 @@ describe('orchestrator public RPC routes', () => {
 
   test('selects the custody primary jurisdiction key without arrakis coupling', () => {
     const primary = selectPrimaryHubJurisdiction({
-      version: '3',
+      version: '1',
       jurisdictions: {
         tron: {
           name: 'Tron',

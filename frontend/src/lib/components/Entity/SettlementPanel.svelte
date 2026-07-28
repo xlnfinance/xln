@@ -671,7 +671,7 @@
     const workspace = account?.settlementWorkspace;
     if (!workspace) return '';
     const nonceAtSign = workspace.nonceAtSign ?? 0;
-    return `${normalizeEntityId(counterparty)}:${workspace.version}:${workspace.status}:${nonceAtSign}`;
+    return `${normalizeEntityId(counterparty)}:${workspace.revision}:${workspace.status}:${nonceAtSign}`;
   }
 
   function toErrorMessage(err: unknown, fallback = 'Unknown error'): string {

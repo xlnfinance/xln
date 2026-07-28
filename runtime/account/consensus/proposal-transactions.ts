@@ -96,7 +96,7 @@ const isRefreshableStaleSettlementSeal = (
   return Boolean(
     workspace &&
     workspace.nonceAtSign === undefined &&
-    tx.data.version === workspace.version &&
+    tx.data.revision === workspace.revision &&
     tx.data.workspaceHash.toLowerCase() === workspace.workspaceHash.toLowerCase() &&
     tx.data.settlementNonce !== getNextSettlementNonce(account),
   );

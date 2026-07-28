@@ -8,7 +8,7 @@ const read = (path: string) => readFileSync(join(repoRoot, path), 'utf8');
 
 describe('vault runtime creation lock', () => {
   test('default jurisdiction import names preserve configured labels', () => {
-    const source = read('frontend/src/lib/stores/vaultStore.ts');
+    const source = read('frontend/src/lib/stores/vault-helpers.ts');
     const functionStart = source.indexOf('const resolveDefaultJurisdictionImportName = (');
     expect(functionStart).toBeGreaterThan(0);
     const functionSource = source.slice(functionStart, source.indexOf('\n};', functionStart) + 3);
@@ -21,7 +21,7 @@ describe('vault runtime creation lock', () => {
   });
 
   test('primary jurisdiction selection does not depend on arrakis key', () => {
-    const source = read('frontend/src/lib/stores/vaultStore.ts');
+    const source = read('frontend/src/lib/stores/vault-helpers.ts');
     const functionStart = source.indexOf('const resolveJurisdictionConfig = (');
     const functionEnd = source.indexOf('const resolveDefaultJurisdictionImportName = (', functionStart);
     expect(functionStart).toBeGreaterThan(0);
@@ -38,11 +38,12 @@ describe('vault runtime creation lock', () => {
 
   test('createRuntime serializes concurrent creation for the same runtime id', () => {
     const source = read('frontend/src/lib/stores/vaultStore.ts');
+    const recoverySource = read('frontend/src/lib/stores/vault-recovery.ts');
     const functionStart = source.indexOf('async createRuntime(name: string, seed: string');
     expect(functionStart).toBeGreaterThan(0);
     const functionSource = source.slice(functionStart, source.indexOf('\n  // Select runtime', functionStart));
 
-    expect(source).toContain('const runtimeCreationInFlight = new Map<string, Promise<void>>();');
+    expect(recoverySource).toContain('export const runtimeCreationInFlight = new Map<string, Promise<void>>();');
     expect(functionSource).toContain('const priorCreation = runtimeCreationInFlight.get(id);');
     expect(functionSource).toContain('await priorCreation.catch(() => undefined);');
     expect(functionSource).toContain('const postCreateState = get(runtimesState);');
@@ -94,7 +95,8 @@ describe('vault runtime creation lock', () => {
     expect(pausePersistence).toBeGreaterThan(drainWork);
     expect(stopLoop).toBeGreaterThan(quiescePersistence);
     expect(stopP2P).toBeGreaterThan(stopLoop);
-    expect(source).toContain('const RUNTIME_P2P_SHUTDOWN_TIMEOUT_MS = 10_000;');
+    expect(read('frontend/src/lib/stores/vault-recovery.ts'))
+      .toContain('export const RUNTIME_P2P_SHUTDOWN_TIMEOUT_MS = 10_000;');
   });
 
   test('page shutdown retains the recovery barrier until accepted work is fully stopped', () => {

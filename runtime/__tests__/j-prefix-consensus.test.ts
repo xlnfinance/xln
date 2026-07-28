@@ -181,6 +181,8 @@ const buildOrdinaryProposal = async (
     timestamp,
     txs,
     postState,
+    undefined,
+    replay.events,
   );
   const hashesToSign = buildEntityHashesToSign(entityId, postState.height, hash, []);
   return {
@@ -190,6 +192,7 @@ const buildOrdinaryProposal = async (
     authorityRoot: computeEntityFrameAuthorityRoot(buildEntityFrameAuthority(postState)),
     timestamp,
     txs,
+    events: structuredClone(replay.events),
     hash,
     leader: { proposerSignerId, view: 0 },
     hashesToSign,

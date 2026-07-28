@@ -166,11 +166,12 @@ test('runtime recovery tower status summaries are bounded, compact, and fail-fas
 
 test('vault runtime recovery and restore diagnostics use persistent error log', () => {
   const source = readFileSync('frontend/src/lib/stores/vaultStore.ts', 'utf8');
+  const bootstrapSource = readFileSync('frontend/src/lib/stores/vault-bootstrap.ts', 'utf8');
   const recoveryStart = source.indexOf('const persistRuntimeMetadataSnapshot');
-  const recoveryEnd = source.indexOf('const findRuntimeByIdCaseInsensitive', recoveryStart);
-  const cleanupStart = source.indexOf('async function fundSignerWalletViaFaucet');
-  const cleanupEnd = source.indexOf('async function buildOrRestoreRuntimeEnv', cleanupStart);
-  const restoreStart = cleanupEnd;
+  const recoveryEnd = source.indexOf('async function cleanupRuntimeEnv', recoveryStart);
+  const cleanupStart = recoveryEnd;
+  const cleanupEnd = source.indexOf('async function stopRuntimeEnv', cleanupStart);
+  const restoreStart = source.indexOf('async function buildOrRestoreRuntimeEnv');
   const restoreEnd = source.indexOf('function registerRuntimeResumeListener', restoreStart);
 
   expect(source).toContain("import { errorLog } from './errorLogStore';");
@@ -186,18 +187,21 @@ test('vault runtime recovery and restore diagnostics use persistent error log', 
 
   expect(recoverySource).toContain("errorLog.log('Runtime metadata snapshot persistence failed', 'Runtime Recovery', error)");
   expect(recoverySource).toContain('Tower recovery upload failed');
-  expect(cleanupSource).toContain("errorLog.log('Faucet failed', 'Runtime Funding'");
+  expect(bootstrapSource).toContain("errorLog.log('Faucet failed', 'Runtime Funding'");
   expect(cleanupSource).toContain('RUNTIME_CLEANUP_STORAGE_FAILED');
   expect(cleanupSource).toContain("'Runtime Cleanup'");
   expect(cleanupSource).toContain('throw err;');
   expect(restoreSource).toContain('Restored runtime ${runtime.id.slice(0, 12)} from tower after ${reason}');
   expect(restoreSource).toContain('Failed to restore env from tower; continuing with local recovery path');
-  expect(restoreSource).toContain('Failed to load env from DB; falling back to fresh import');
+  expect(restoreSource).toContain('Runtime restore failed for ${runtime.id.slice(0, 12)}; refusing to replace persisted state');
+  expect(restoreSource).toContain('[VaultStore] Runtime restore failed for ${runtime.id.slice(0, 12)}');
+  expect(restoreSource).not.toContain('Failed to load env from DB; falling back to fresh import');
   expect(restoreSource).toContain('Restored env missing J-replicas; retrying tower restore before local re-import');
   expect(restoreSource).toContain('${message}; waiting for jurisdiction import');
-  expect(`${recoverySource}\n${cleanupSource}\n${restoreSource}`).not.toContain('console.warn');
-  expect(`${recoverySource}\n${cleanupSource}\n${restoreSource}`).not.toContain('console.error');
-  expect(`${recoverySource}\n${cleanupSource}\n${restoreSource}`).not.toContain('console.info');
+  const diagnosticsSource = `${recoverySource}\n${cleanupSource}\n${restoreSource}\n${bootstrapSource}`;
+  expect(diagnosticsSource).not.toContain('console.warn');
+  expect(diagnosticsSource).not.toContain('console.error');
+  expect(diagnosticsSource).not.toContain('console.info');
 });
 
 test('vaultStore diagnostics do not use raw console output', () => {

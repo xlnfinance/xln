@@ -30,8 +30,8 @@ test('jurisdictions reader distinguishes a missing file from malformed JSON', ()
 });
 
 test('jurisdictions reader returns a parsed object', () => {
-  const filePath = tempPath('{"version":"3","jurisdictions":{}}');
-  expect(readJurisdictionsFile(filePath)).toEqual({ version: '3', jurisdictions: {} });
+  const filePath = tempPath('{"version":"1","jurisdictions":{}}');
+  expect(readJurisdictionsFile(filePath)).toEqual({ version: '1', jurisdictions: {} });
 });
 
 test('runtime imports only explicitly active jurisdiction profiles', () => {

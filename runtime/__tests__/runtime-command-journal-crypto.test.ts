@@ -134,8 +134,8 @@ test('runtime command journal exposes only a keyed input identity and authentica
     ...record,
     payloadBytes: Number.MAX_SAFE_INTEGER,
   })).rejects.toThrow('RUNTIME_COMMAND_INTENT_STORAGE_LIMIT_EXCEEDED');
-  await expect(decryptProtectedRemoteRuntimeCommandIntentRecord({ version: 1 }))
-    .rejects.toThrow('RUNTIME_COMMAND_INTENT_STORAGE_VERSION_UNSUPPORTED:1');
+  await expect(decryptProtectedRemoteRuntimeCommandIntentRecord({ version: 2 }))
+    .rejects.toThrow('RUNTIME_COMMAND_INTENT_STORAGE_VERSION_UNSUPPORTED:2');
 
   lockRuntimeCommandJournal(runtimeId);
   await expect(decryptProtectedRemoteRuntimeCommandIntentRecord(record))

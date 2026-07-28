@@ -1,6 +1,8 @@
 <script lang="ts">
+  import type { RoutedSwapRouteCandidate } from './routed-swap-planner';
   import type { CrossSwapSetupStep } from './swap-panel-helpers';
   import { formatEntityNetworkLabel } from './swap-panel-helpers';
+  import SwapRouteBuilder from './SwapRouteBuilder.svelte';
 
   type SourceEntityOption = {
     value: string;
@@ -46,6 +48,7 @@
   export let orderAmountInput = '';
   export let handleOrderAmountInput: (value: string) => void = noop;
   export let giveTokenId = '1';
+  export let giveToken = 1;
   export let giveTokenOptions: TokenOption[] = [];
   export let handleGiveTokenChange: (event: Event) => void = noop;
   export let giveTokenSymbol = '';
@@ -77,6 +80,25 @@
   export let marketPriceTicks: bigint | null = null;
   export let marketPriceLabel = '';
 
+  export let giveTokenDecimals = 18;
+  export let giveAmount = 0n;
+  export let canonicalGiveAmount = 0n;
+  export let routeSummaryLabel = '';
+  export let routePathLabel = '';
+  export let routeVenueDisplayLabel = '';
+  export let routeSummaryAssetsLabel = '';
+  export let routeDetailsOpen = false;
+  export let swapRouteMode: 'same' | 'cross' = 'same';
+  export let liveSelectedRouteValue = 'same';
+  export let routePathSourceLabel = '';
+  export let routePathTargetLabel = '';
+  export let selectedRouteLabel = '';
+  export let sourceRouteEntityLabel = '';
+  export let targetRouteEntityLabel = '';
+  export let showManualRouteRecommendation = false;
+  export let routedRouteRecommendations: RoutedSwapRouteCandidate[] = [];
+  export let manualRouteEstimateLabel: (route: RoutedSwapRouteCandidate) => string = () => '';
+
   export let capacityWarning = '';
   export let autoCapacityNote = '';
   export let crossSwapSetupSteps: CrossSwapSetupStep[] = [];
@@ -100,16 +122,16 @@
   $: receiveDisplay = trimDecimals(formatAmount(wantAmount, wantToken), 6);
 </script>
 
-<div class="section section-order ticket-v2">
-  <div class="v2-top">
-    <div class="v2-sel v2-sel-hub" title="Hub counterparty">
-      <span class="v2-net-dot">{(selectedHubOption?.label || '?').slice(0, 2)}</span>
-      <span class="v2-sel-text">{selectedHubOption ? formatEntityNetworkLabel(selectedHubOption.label, hubJurisdictionLabel(selectedHubOption.value)) : 'Select hub'}</span>
-      <span class="v2-chevron" aria-hidden="true"></span>
+<div class="section section-order swap-ticket" data-testid="swap-ticket">
+  <div class="swap-ticket-top">
+    <div class="swap-ticket-sel swap-ticket-sel-hub" title="Hub counterparty">
+      <span class="swap-ticket-net-dot">{(selectedHubOption?.label || '?').slice(0, 2)}</span>
+      <span class="swap-ticket-sel-text">{selectedHubOption ? formatEntityNetworkLabel(selectedHubOption.label, hubJurisdictionLabel(selectedHubOption.value)) : 'Select hub'}</span>
+      <span class="swap-ticket-chevron" aria-hidden="true"></span>
       <select
-        class="v2-native"
+        class="swap-ticket-native"
         bind:value={createOrderAccountId}
-        data-testid="swap2-hub-select"
+        data-testid="swap-ticket-hub-select"
         aria-label="Hub counterparty"
         on:change={(event) => handleSelectedHubChange((event.currentTarget as HTMLSelectElement).value)}
       >
@@ -120,30 +142,30 @@
     </div>
     <button
       type="button"
-      class="v2-book-toggle"
+      class="swap-ticket-book-toggle"
       class:active={showOrderbook}
       aria-pressed={showOrderbook}
-      data-testid="swap2-orderbook-toggle"
+      data-testid="swap-ticket-orderbook-toggle"
       on:click={() => showOrderbook = !showOrderbook}
     >
       {showOrderbook ? 'Hide book' : 'Book'}
     </button>
   </div>
 
-  <div class="v2-leg">
-    <div class="v2-leg-head">
-      <span class="v2-label">You pay</span>
+  <div class="swap-ticket-leg">
+    <div class="swap-ticket-leg-head">
+      <span class="swap-ticket-label">You pay</span>
     </div>
-    <div class="v2-box">
-      <div class="v2-selects">
-        <div class="v2-sel">
-          <span class="v2-net-dot">{(selectedSourceOption?.jurisdiction || '?').slice(0, 2)}</span>
-          <span class="v2-sel-text">{selectedSourceOption?.label || 'Network'}</span>
-          <span class="v2-chevron" aria-hidden="true"></span>
+    <div class="swap-ticket-box">
+      <div class="swap-ticket-selects">
+        <div class="swap-ticket-sel">
+          <span class="swap-ticket-net-dot">{(selectedSourceOption?.jurisdiction || '?').slice(0, 2)}</span>
+          <span class="swap-ticket-sel-text">{selectedSourceOption?.label || 'Network'}</span>
+          <span class="swap-ticket-chevron" aria-hidden="true"></span>
           <select
-            class="v2-native"
+            class="swap-ticket-native"
             value={selectedSourceEntityValue}
-            data-testid="swap2-from-network"
+            data-testid="swap-ticket-from-network"
             aria-label="From network"
             on:change={handleSourceEntityChange}
           >
@@ -152,14 +174,14 @@
             {/each}
           </select>
         </div>
-        <div class="v2-sel">
+        <div class="swap-ticket-sel">
           <span class={`token-dot token-${tokenClass(giveTokenSymbol)}`}>{tokenIconText(giveTokenSymbol)}</span>
-          <span class="v2-sel-text v2-sel-token">{giveTokenSymbol}</span>
-          <span class="v2-chevron" aria-hidden="true"></span>
+          <span class="swap-ticket-sel-text swap-ticket-sel-token">{giveTokenSymbol}</span>
+          <span class="swap-ticket-chevron" aria-hidden="true"></span>
           <select
-            class="v2-native"
+            class="swap-ticket-native"
             bind:value={giveTokenId}
-            data-testid="swap2-from-token"
+            data-testid="swap-ticket-from-token"
             aria-label="From token"
             on:change={handleGiveTokenChange}
           >
@@ -169,50 +191,50 @@
           </select>
         </div>
       </div>
-      <div class="v2-amount-row">
+      <div class="swap-ticket-amount-row">
         <input
-          class="v2-amount"
+          class="swap-ticket-amount"
           type="text"
           value={orderAmountInput}
           inputmode="decimal"
           placeholder="0"
-          data-testid="swap2-amount"
+          data-testid="swap-ticket-amount"
           aria-label="Amount to pay"
           on:input={(event) => handleOrderAmountInput((event.currentTarget as HTMLInputElement).value)}
         />
-        <span class="v2-balance">
+        <span class="swap-ticket-balance">
           <span>Available</span>
-          <strong>{formattedAvailableGiveAmount}</strong>
+          <strong data-testid="swap-ticket-available">{formattedAvailableGiveAmount}</strong>
         </span>
       </div>
     </div>
   </div>
 
-  <div class="v2-flip">
+  <div class="swap-ticket-flip">
     <button
       type="button"
-      data-testid="swap2-flip"
+      data-testid="swap-ticket-flip"
       title="Flip tokens"
       aria-label="Flip tokens"
       on:click={flipSwapTokens}
     >&#8645;</button>
   </div>
 
-  <div class="v2-leg">
-    <div class="v2-leg-head">
-      <span class="v2-label">You receive</span>
+  <div class="swap-ticket-leg">
+    <div class="swap-ticket-leg-head">
+      <span class="swap-ticket-label">You receive</span>
     </div>
-    <div class="v2-box">
-      <div class="v2-selects">
-        <div class="v2-sel">
-          <span class="v2-net-dot">{(selectedRouteOption?.targetJurisdiction || selectedRouteOption?.label || '=').slice(0, 2)}</span>
-          <span class="v2-sel-text">{selectedRouteOption?.label || 'Same account'}</span>
-          <span class="v2-chevron" aria-hidden="true"></span>
+    <div class="swap-ticket-box">
+      <div class="swap-ticket-selects">
+        <div class="swap-ticket-sel">
+          <span class="swap-ticket-net-dot">{(selectedRouteOption?.targetJurisdiction || selectedRouteOption?.label || '=').slice(0, 2)}</span>
+          <span class="swap-ticket-sel-text">{selectedRouteOption?.label || 'Same account'}</span>
+          <span class="swap-ticket-chevron" aria-hidden="true"></span>
           <select
-            class="v2-native"
+            class="swap-ticket-native"
             bind:this={routeSelectElement}
             bind:value={selectedRouteValue}
-            data-testid="swap2-to-network"
+            data-testid="swap-ticket-to-network"
             aria-label="To network"
             on:input={handleRouteSelectChange}
             on:change={handleRouteSelectChange}
@@ -224,14 +246,14 @@
             {/each}
           </select>
         </div>
-        <div class="v2-sel">
+        <div class="swap-ticket-sel">
           <span class={`token-dot token-${tokenClass(wantTokenSymbol)}`}>{tokenIconText(wantTokenSymbol)}</span>
-          <span class="v2-sel-text v2-sel-token">{wantTokenSymbol}</span>
-          <span class="v2-chevron" aria-hidden="true"></span>
+          <span class="swap-ticket-sel-text swap-ticket-sel-token">{wantTokenSymbol}</span>
+          <span class="swap-ticket-chevron" aria-hidden="true"></span>
           <select
-            class="v2-native"
+            class="swap-ticket-native"
             bind:value={wantTokenId}
-            data-testid="swap2-to-token"
+            data-testid="swap-ticket-to-token"
             aria-label="To token"
             on:change={handleWantTokenChange}
           >
@@ -241,9 +263,9 @@
           </select>
         </div>
       </div>
-      <div class="v2-amount-row" data-testid="swap2-receive-amount">
-        <span class="v2-amount v2-receive-value" class:muted={wantAmount === 0n}>{receiveDisplay}</span>
-        <span class="v2-balance">
+      <div class="swap-ticket-amount-row" data-testid="swap-ticket-receive-amount">
+        <span class="swap-ticket-amount swap-ticket-receive-value" class:muted={wantAmount === 0n}>{receiveDisplay}</span>
+        <span class="swap-ticket-balance">
           <span>Capacity</span>
           <strong>{targetCapacityLabel}</strong>
         </span>
@@ -251,63 +273,93 @@
     </div>
   </div>
 
-  <div class="v2-rate">
-    <div class="v2-rate-box">
-      <span class="v2-rate-label">Rate</span>
+  <div class="swap-ticket-rate">
+    <div class="swap-ticket-rate-box">
+      <span class="swap-ticket-rate-label">Rate</span>
       <input
-        class="v2-rate-input"
+        class="swap-ticket-rate-input"
         type="text"
         bind:value={priceRatioInput}
         inputmode="decimal"
-        data-testid="swap2-rate"
+        data-testid="swap-ticket-rate"
         aria-label="Limit rate"
         on:input={handlePriceRatioInput}
       />
-      <span class="v2-rate-unit">{quoteTokenSymbol}</span>
+      <span class="swap-ticket-rate-unit">{quoteTokenSymbol}</span>
     </div>
-    <button type="button" class="v2-step" aria-label="Rate down" on:click={() => stepPrice(-1)}>&#8722;</button>
-    <button type="button" class="v2-step" aria-label="Rate up" on:click={() => stepPrice(1)}>+</button>
+    <button type="button" class="swap-ticket-step" aria-label="Rate down" on:click={() => stepPrice(-1)}>&#8722;</button>
+    <button type="button" class="swap-ticket-step" aria-label="Rate up" on:click={() => stepPrice(1)}>+</button>
     <button
       type="button"
-      class="v2-market"
-      data-testid="swap2-use-market"
+      class="swap-ticket-market"
+      data-testid="swap-ticket-use-market"
       disabled={!marketPriceTicks || marketPriceTicks <= 0n}
       title={marketPriceLabel}
       on:click={useMarketPrice}
     >Market</button>
   </div>
 
+  <SwapRouteBuilder
+    {orderAmountInput}
+    {giveToken}
+    {wantToken}
+    {giveTokenDecimals}
+    {giveAmount}
+    {canonicalGiveAmount}
+    {routeSummaryLabel}
+    {routePathLabel}
+    {routeVenueDisplayLabel}
+    {routeSummaryAssetsLabel}
+    bind:routeDetailsOpen
+    {swapRouteMode}
+    {liveSelectedRouteValue}
+    {routePathSourceLabel}
+    {routePathTargetLabel}
+    {selectedRouteLabel}
+    {sourceRouteEntityLabel}
+    {targetRouteEntityLabel}
+    {showManualRouteRecommendation}
+    {routedRouteRecommendations}
+    {manualRouteEstimateLabel}
+  />
+
   {#if capacityWarning}
-    <p class="v2-warn" data-testid="swap2-capacity-warn">{capacityWarning}</p>
+    <p class="swap-ticket-warn" data-testid="swap-ticket-capacity-warn">{capacityWarning}</p>
   {/if}
 
   {#if autoCapacityNote}
-    <p class="v2-note" data-testid="swap2-auto-capacity-note">{autoCapacityNote}</p>
+    <p class="swap-ticket-note" data-testid="swap-ticket-auto-capacity-note">{autoCapacityNote}</p>
   {/if}
 
   {#if crossSwapSetupSteps.length > 0}
-    <div class="v2-setup">
+    <div class="swap-setup-consent" data-testid="swap-setup-consent">
       {#each crossSwapSetupSteps as step (step.id)}
-        <p class="v2-note">{step.label}</p>
+        <label class="swap-setup-step" data-testid="swap-setup-step" data-step-id={step.id}>
+          <input type="checkbox" checked disabled aria-label={step.label} />
+          <span>
+            <strong>{step.label}</strong>
+            <small>{step.detail}</small>
+          </span>
+        </label>
       {/each}
     </div>
   {/if}
 
   <button
-    class="v2-submit"
-    data-testid="swap2-submit"
+    class="swap-ticket-submit"
+    data-testid="swap-ticket-submit"
     on:click={placeSwapOffer}
     disabled={placingSwapOffer || Boolean(swapActionDisabledReason)}
   >
     {placingSwapOffer ? swapSubmitLabel : (swapActionDisabledReason || swapSubmitLabel)}
   </button>
-  {#if submitError}
-    <p class="v2-error" data-testid="swap2-error">{submitError}</p>
+  {#if swapActionDisabledReason || submitError}
+    <p class="swap-ticket-error" data-testid="swap-ticket-error">{submitError || swapActionDisabledReason}</p>
   {/if}
 </div>
 
 <style>
-  .ticket-v2 {
+  .swap-ticket {
     display: grid;
     gap: 12px;
     padding: 20px;
@@ -315,20 +367,20 @@
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   }
 
-  .v2-label {
+  .swap-ticket-label {
     color: #8a919c;
     font-size: 13px;
     font-weight: 500;
     font-family: inherit;
   }
 
-  .v2-top {
+  .swap-ticket-top {
     display: flex;
     align-items: center;
     gap: 10px;
   }
 
-  .v2-sel {
+  .swap-ticket-sel {
     position: relative;
     display: flex;
     align-items: center;
@@ -342,16 +394,16 @@
     cursor: pointer;
   }
 
-  .v2-sel:hover {
+  .swap-ticket-sel:hover {
     border-color: #333a48;
   }
 
-  .v2-sel-hub {
+  .swap-ticket-sel-hub {
     flex: 1;
     height: 44px;
   }
 
-  .v2-sel-text {
+  .swap-ticket-sel-text {
     flex: 1;
     min-width: 0;
     overflow: hidden;
@@ -364,12 +416,12 @@
     text-align: left;
   }
 
-  .v2-sel-token {
+  .swap-ticket-sel-token {
     flex: 0 1 auto;
     font-weight: 600;
   }
 
-  .v2-chevron {
+  .swap-ticket-chevron {
     flex-shrink: 0;
     width: 8px;
     height: 8px;
@@ -378,7 +430,7 @@
     transform: rotate(45deg) translateY(-2px);
   }
 
-  .v2-native {
+  .swap-ticket-native {
     position: absolute;
     inset: 0;
     width: 100%;
@@ -388,7 +440,7 @@
     appearance: none;
   }
 
-  .v2-net-dot {
+  .swap-ticket-net-dot {
     flex-shrink: 0;
     display: flex;
     align-items: center;
@@ -403,7 +455,7 @@
     text-transform: uppercase;
   }
 
-  .v2-book-toggle {
+  .swap-ticket-book-toggle {
     flex-shrink: 0;
     height: 44px;
     padding: 0 14px;
@@ -416,17 +468,17 @@
     cursor: pointer;
   }
 
-  .v2-book-toggle:hover {
+  .swap-ticket-book-toggle:hover {
     border-color: #333a48;
     color: #e8eaed;
   }
 
-  .v2-leg {
+  .swap-ticket-leg {
     display: grid;
     gap: 8px;
   }
 
-  .v2-leg-head {
+  .swap-ticket-leg-head {
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -434,7 +486,7 @@
     padding: 0 2px;
   }
 
-  .v2-box {
+  .swap-ticket-box {
     display: grid;
     gap: 1px;
     background: #262b35;
@@ -443,24 +495,24 @@
     overflow: hidden;
   }
 
-  .v2-box:focus-within {
+  .swap-ticket-box:focus-within {
     border-color: #3a4152;
   }
 
-  .v2-selects {
+  .swap-ticket-selects {
     display: grid;
     grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
     gap: 1px;
   }
 
-  .v2-selects .v2-sel {
+  .swap-ticket-selects .swap-ticket-sel {
     height: 56px;
     border: none;
     border-radius: 0;
     background: #1a1e26;
   }
 
-  .v2-amount-row {
+  .swap-ticket-amount-row {
     display: flex;
     align-items: center;
     gap: 14px;
@@ -469,9 +521,9 @@
     background: #14171d;
   }
 
-  .ticket-v2 .v2-amount,
-  .ticket-v2 input.v2-amount,
-  .ticket-v2 input.v2-amount:focus {
+  .swap-ticket .swap-ticket-amount,
+  .swap-ticket input.swap-ticket-amount,
+  .swap-ticket input.swap-ticket-amount:focus {
     flex: 1;
     min-width: 0;
     padding: 0 !important;
@@ -489,15 +541,15 @@
     white-space: nowrap;
   }
 
-  .v2-amount::placeholder {
+  .swap-ticket-amount::placeholder {
     color: #4b5261;
   }
 
-  .v2-receive-value.muted {
+  .swap-ticket-receive-value.muted {
     color: #4b5261;
   }
 
-  .v2-balance {
+  .swap-ticket-balance {
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
@@ -506,12 +558,12 @@
     max-width: 40%;
   }
 
-  .v2-balance span {
+  .swap-ticket-balance span {
     color: #6b7280;
     font-size: 12px;
   }
 
-  .v2-balance strong {
+  .swap-ticket-balance strong {
     color: #aeb4bd;
     font-size: 13px;
     font-weight: 500;
@@ -522,7 +574,7 @@
     max-width: 100%;
   }
 
-  .v2-flip {
+  .swap-ticket-flip {
     display: flex;
     justify-content: center;
     margin: -22px 0;
@@ -530,7 +582,7 @@
     z-index: 1;
   }
 
-  .v2-flip button {
+  .swap-ticket-flip button {
     width: 38px;
     height: 38px;
     border: 4px solid #0a0c11;
@@ -541,18 +593,18 @@
     cursor: pointer;
   }
 
-  .v2-flip button:hover {
+  .swap-ticket-flip button:hover {
     background: #333a48;
   }
 
-  .v2-rate {
+  .swap-ticket-rate {
     display: flex;
     align-items: center;
     gap: 8px;
     margin-top: 2px;
   }
 
-  .v2-rate-box {
+  .swap-ticket-rate-box {
     display: flex;
     flex: 1;
     align-items: center;
@@ -565,19 +617,19 @@
     background: #14171d;
   }
 
-  .v2-rate-label {
+  .swap-ticket-rate-label {
     flex-shrink: 0;
     color: #8a919c;
     font-size: 13px;
     font-weight: 500;
   }
 
-  .v2-rate-box:focus-within {
+  .swap-ticket-rate-box:focus-within {
     border-color: #3a4152;
   }
 
-  .ticket-v2 .v2-rate-box input,
-  .ticket-v2 .v2-rate-box input:focus {
+  .swap-ticket .swap-ticket-rate-box input,
+  .swap-ticket .swap-ticket-rate-box input:focus {
     flex: 1;
     min-width: 0;
     padding: 0 !important;
@@ -592,14 +644,14 @@
     text-align: right;
   }
 
-  .v2-rate-unit {
+  .swap-ticket-rate-unit {
     flex-shrink: 0;
     color: #6b7280;
     font-size: 12px;
   }
 
-  .v2-step,
-  .v2-market {
+  .swap-ticket-step,
+  .swap-ticket-market {
     flex-shrink: 0;
     height: 44px;
     padding: 0 14px;
@@ -611,28 +663,28 @@
     cursor: pointer;
   }
 
-  .v2-step {
+  .swap-ticket-step {
     width: 44px;
     padding: 0;
   }
 
-  .v2-step:hover,
-  .v2-market:hover {
+  .swap-ticket-step:hover,
+  .swap-ticket-market:hover {
     border-color: #333a48;
     color: #e8eaed;
   }
 
-  .v2-market {
+  .swap-ticket-market {
     font-size: 13px;
     font-weight: 500;
   }
 
-  .v2-market:disabled {
+  .swap-ticket-market:disabled {
     opacity: 0.4;
     cursor: default;
   }
 
-  .v2-warn {
+  .swap-ticket-warn {
     margin: 0;
     padding: 11px 14px;
     border: 1px solid rgba(239, 184, 74, 0.25);
@@ -643,7 +695,7 @@
     line-height: 1.5;
   }
 
-  .v2-note {
+  .swap-ticket-note {
     margin: 0;
     padding: 0 2px;
     color: #8a919c;
@@ -651,12 +703,12 @@
     line-height: 1.5;
   }
 
-  .v2-setup {
+  .swap-ticket-setup {
     display: grid;
     gap: 4px;
   }
 
-  .v2-submit {
+  .swap-ticket-submit {
     height: 50px;
     margin-top: 2px;
     border: none;
@@ -668,17 +720,17 @@
     cursor: pointer;
   }
 
-  .v2-submit:hover:not(:disabled) {
+  .swap-ticket-submit:hover:not(:disabled) {
     background: #ffffff;
   }
 
-  .v2-submit:disabled {
+  .swap-ticket-submit:disabled {
     background: #1e222a;
     color: #6b7280;
     cursor: default;
   }
 
-  .v2-error {
+  .swap-ticket-error {
     margin: 0;
     color: #e07a79;
     font-size: 13px;

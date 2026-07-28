@@ -29,7 +29,7 @@ import {
 export { isBrowserCommandJournal } from './runtimeCommandJournalIndexedDb';
 
 export type PersistedRemoteRuntimeCommandIntent = {
-  version: 3;
+  version: 1;
   commandId: string;
   runtimeId: string;
   serverFingerprint: string;
@@ -65,7 +65,7 @@ const validatePersistedRecord = (
     throw new Error(`RUNTIME_COMMAND_INTENT_STORAGE_CORRUPT: record=${index}`);
   }
   const record = value as Record<string, unknown>;
-  if (record['version'] !== 3) {
+  if (record['version'] !== 1) {
     throw new Error(`RUNTIME_COMMAND_INTENT_STORAGE_VERSION_UNSUPPORTED:${String(record['version'])}`);
   }
   const commandId = normalizeRuntimeCommandId(String(record['commandId'] || ''));
@@ -87,7 +87,7 @@ const validatePersistedRecord = (
   if (!(ciphertext instanceof ArrayBuffer) || ciphertext.byteLength !== payloadBytes + 16) {
     throw new Error(`RUNTIME_COMMAND_INTENT_STORAGE_CORRUPT: ciphertext=${index}`);
   }
-  return { version: 3, commandId, runtimeId, serverFingerprint, inputHmac, payloadBytes, iv, ciphertext };
+  return { version: 1, commandId, runtimeId, serverFingerprint, inputHmac, payloadBytes, iv, ciphertext };
 };
 
 const recordAad = (
@@ -156,7 +156,7 @@ export const encryptProtectedRemoteRuntimeCommandIntentRecord = async (
   }
   const inputHmac = await computeRuntimeCommandInputHmac(runtimeId, commandId, encoded);
   const base = {
-    version: 3 as const,
+    version: 1 as const,
     commandId,
     runtimeId,
     serverFingerprint,

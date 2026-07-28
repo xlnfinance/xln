@@ -18,8 +18,8 @@ const DIVIDEND = 2;
 const FOUNDATION = 3;
 const FOUNDATION_ID = ethers.zeroPadValue(ethers.toBeHex(1), 32);
 const ENTITY_ID = ethers.zeroPadValue(ethers.toBeHex(2), 32);
-const PROPOSAL_DOMAIN = ethers.keccak256(ethers.toUtf8Bytes('XLN_ENTITY_PROVIDER_BOARD_PROPOSAL_V3'));
-const CANCEL_DOMAIN = ethers.keccak256(ethers.toUtf8Bytes('XLN_ENTITY_PROVIDER_BOARD_PROPOSAL_CANCEL_V3'));
+const PROPOSAL_DOMAIN = ethers.keccak256(ethers.toUtf8Bytes('XLN_ENTITY_PROVIDER_BOARD_PROPOSAL_V1'));
+const CANCEL_DOMAIN = ethers.keccak256(ethers.toUtf8Bytes('XLN_ENTITY_PROVIDER_BOARD_PROPOSAL_CANCEL_V1'));
 const ARTICLES = {
   controlDelay: 3,
   dividendDelay: 5,
@@ -352,7 +352,7 @@ describe('EntityProvider board-rotation authority', function () {
       .to.be.revertedWithCustomError(extra.provider, 'InvalidHankoAuthorizationCount');
   });
 
-  it('binds V3 proposal/cancel digests to chain, provider, board epoch, authority, and nonce', async function () {
+  it('binds V1 proposal/cancel digests to chain, provider, board epoch, authority, and nonce', async function () {
     const fx = await fixture();
     const nextHash = boardHash('golden-domain');
     const chainId = (await ethers.provider.getNetwork()).chainId;

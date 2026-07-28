@@ -47,14 +47,14 @@ const commitNodes = (
   for (const hash of result.replacedNodeHashes) store.delete(hash);
 };
 
-test('pinned v2 relationship key and empty root stay byte-for-byte stable', () => {
+test('pinned v1 relationship key and empty root stay byte-for-byte stable', () => {
   const identity = output(1);
-  expect(EMPTY_CONSUMPTION_ROOT).toBe('0x382c422942079a41b66ed7182ed01d99f073b1ef8dd13e2c060b611fffe15532');
-  expect(getConsumptionKey(identity)).toBe('0x4a9039ecf78ce1c1cc8df5b2fc1b78c9dfa09516e46994a736a47034764c8271');
+  expect(EMPTY_CONSUMPTION_ROOT).toBe('0x17f582800fea33f32491d07091123c716ebdf55a9953e95ca1e461cb912b3f10');
+  expect(getConsumptionKey(identity)).toBe('0x65eed7221abfcf241f124b35757685a0cfee756427281d5d880d9e2a891a0725');
   const inserted = applyConsumptionOutput(
-    createEmptyConsumptionAccumulator(), identity, { version: 2, nodes: [] },
+    createEmptyConsumptionAccumulator(), identity, { version: 1, nodes: [] },
   );
-  expect(inserted.state.root).toBe('0x27ed68d6e09dd8512a270698727474829d67ad7275f34a4d2ad180ec0fc4d577');
+  expect(inserted.state.root).toBe('0x6fd7b0a83abb35da970cb83181678db3799b9aa13c944c68dda4020c54e6c863');
 });
 
 test('sequential outputs for one source-target relationship retain one authenticated frontier leaf', () => {
@@ -122,7 +122,7 @@ test('relationship cardinality has an atomic finite protocol boundary', () => {
 test('exact retry and board-recertified retry are no-ops; stale and gap never mutate state', () => {
   const store = new Map<string, ConsumptionNode>();
   const first = output(1);
-  const inserted = applyConsumptionOutput(createEmptyConsumptionAccumulator(), first, { version: 2, nodes: [] });
+  const inserted = applyConsumptionOutput(createEmptyConsumptionAccumulator(), first, { version: 1, nodes: [] });
   commitNodes(store, inserted);
   const proof = createConsumptionProof(store, inserted.state.root, getConsumptionKey(first));
 
@@ -152,7 +152,7 @@ test('native Account lanes reuse imported bases and sparse proof nonces without 
     const inserted = applyConsumptionOutput(
       createEmptyConsumptionAccumulator(),
       identity,
-      { version: 2, nodes: [] },
+      { version: 1, nodes: [] },
     );
     expect(inserted.status).toBe('inserted');
     expect(inserted.state.count).toBe(1n);
@@ -163,7 +163,7 @@ test('native Account lanes reuse imported bases and sparse proof nonces without 
   const inserted = applyConsumptionOutput(
     createEmptyConsumptionAccumulator(),
     firstDispute,
-    { version: 2, nodes: [] },
+    { version: 1, nodes: [] },
   );
   commitNodes(store, inserted);
   const laterDispute = output(3, { lane: 'account-dispute' });
@@ -180,7 +180,7 @@ test('native Account lanes reuse imported bases and sparse proof nonces without 
   const insertedFrame = applyConsumptionOutput(
     createEmptyConsumptionAccumulator(),
     firstFrame,
-    { version: 2, nodes: [] },
+    { version: 1, nodes: [] },
   );
   commitNodes(frameStore, insertedFrame);
   const nextOutputFromSameSide = output(3, { lane: 'account-frame' });
@@ -196,7 +196,7 @@ test('native Account lanes reuse imported bases and sparse proof nonces without 
   expect(applyConsumptionOutput(
     createEmptyConsumptionAccumulator(),
     firstGeneric,
-    { version: 2, nodes: [] },
+    { version: 1, nodes: [] },
   ).status).toBe('gap');
 });
 
@@ -207,7 +207,7 @@ test('same-height Account frame and ACK use independent frontiers while ACK heig
   const insertedFrame = applyConsumptionOutput(
     createEmptyConsumptionAccumulator(),
     frame,
-    { version: 2, nodes: [] },
+    { version: 1, nodes: [] },
   );
   commitNodes(store, insertedFrame);
   const insertedAck = applyConsumptionOutput(
@@ -227,7 +227,7 @@ test('same-height Account frame and ACK use independent frontiers while ACK heig
   const insertedSparseAck = applyConsumptionOutput(
     createEmptyConsumptionAccumulator(),
     ackAtTwo,
-    { version: 2, nodes: [] },
+    { version: 1, nodes: [] },
   );
   commitNodes(sparseStore, insertedSparseAck);
   const ackAtFour = output(4, { lane: 'account-ack' });
@@ -245,7 +245,7 @@ test('same-height Account frame and ACK use independent frontiers while ACK heig
 test('current-sequence equivocation quarantines only the relationship and retains both certificates', () => {
   const store = new Map<string, ConsumptionNode>();
   const accepted = output(1);
-  const inserted = applyConsumptionOutput(createEmptyConsumptionAccumulator(), accepted, { version: 2, nodes: [] });
+  const inserted = applyConsumptionOutput(createEmptyConsumptionAccumulator(), accepted, { version: 1, nodes: [] });
   commitNodes(store, inserted);
   const conflict = {
     ...accepted,
@@ -321,10 +321,10 @@ test('two validators independently compute the same root and Patricia insertion 
 
 test('missing, corrupt, wrongly linked, and oversized witnesses fail closed', () => {
   const identity = output(1);
-  const inserted = applyConsumptionOutput(createEmptyConsumptionAccumulator(), identity, { version: 2, nodes: [] });
+  const inserted = applyConsumptionOutput(createEmptyConsumptionAccumulator(), identity, { version: 1, nodes: [] });
   const key = getConsumptionKey(identity);
   const leaf = inserted.newNodes[0]!.node;
-  const proof: ConsumptionProof = { version: 2, nodes: [leaf] };
+  const proof: ConsumptionProof = { version: 1, nodes: [leaf] };
 
   expect(() => verifyConsumptionProof(inserted.state.root, key, undefined)).toThrow('CONSUMPTION_PROOF_REQUIRED');
   expect(() => verifyConsumptionProof(bytes32('cc'), key, proof)).toThrow('CONSUMPTION_PROOF_LINK_INVALID');
@@ -336,7 +336,7 @@ test('missing, corrupt, wrongly linked, and oversized witnesses fail closed', ()
   expect(() => applyConsumptionOutput(inserted.state, { ...identity, sequence: '1' as unknown as number }, proof))
     .toThrow('CONSUMPTION_SEQUENCE_INVALID');
   expect(() => verifyConsumptionProof(inserted.state.root, key, {
-    version: 2,
+    version: 1,
     nodes: Array.from({ length: MAX_CONSUMPTION_PROOF_NODES + 1 }, () => leaf),
   })).toThrow('CONSUMPTION_PROOF_LENGTH_INVALID');
 });
@@ -350,17 +350,17 @@ test('a malformed Patricia path cannot authenticate a misplaced relationship lea
     lastOutputHash: bytes32('22'),
     lastOutputHanko: '0x01',
   };
-  const misplacedLeaf: ConsumptionNode = { version: 2, type: 'leaf', key: bytes32('80'), value };
+  const misplacedLeaf: ConsumptionNode = { version: 1, type: 'leaf', key: bytes32('80'), value };
   const misplacedLeafHash = hashConsumptionNode(misplacedLeaf);
   const malformedRoot: ConsumptionNode = {
-    version: 2,
+    version: 1,
     type: 'branch',
     bit: 0,
     left: misplacedLeafHash,
     right: bytes32('ff'),
   };
   expect(() => verifyConsumptionProof(hashConsumptionNode(malformedRoot), bytes32('00'), {
-    version: 2,
+    version: 1,
     nodes: [malformedRoot, misplacedLeaf],
   })).toThrow('CONSUMPTION_PROOF_NON_CANONICAL_PATH');
 });

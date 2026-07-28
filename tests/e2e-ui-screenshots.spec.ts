@@ -1,4 +1,4 @@
-import { devices, expect, test, type BrowserContext, type Page } from './global-setup.mts';
+import { devices, expect, test, type BrowserContext, type Locator, type Page } from './global-setup.mts';
 import { ensureE2EBaseline, API_BASE_URL, APP_BASE_URL, waitForNamedHubs } from './utils/e2e-baseline';
 import { connectRuntimeToHubWithCredit } from './utils/e2e-connect';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from './utils/e2e-demo-users';
@@ -177,9 +177,16 @@ async function expectSwapOrderbookReady(page: Page): Promise<void> {
   });
 }
 
-async function closeSwapMenus(page: Page): Promise<void> {
-  await page.keyboard.press('Escape').catch(() => {});
-  await page.locator('.swap-panel').first().click({ position: { x: 4, y: 4 } }).catch(() => {});
+async function selectNextEnabledOption(select: Locator): Promise<boolean> {
+  const currentValue = await select.inputValue();
+  const optionValues = await select.locator('option:enabled').evaluateAll((options) =>
+    options.map((option) => (option as HTMLOptionElement).value),
+  );
+  const nextValue = optionValues.find((value) => value !== currentValue);
+  if (!nextValue) return false;
+  await select.selectOption(nextValue);
+  await expect(select).toHaveValue(nextValue);
+  return true;
 }
 
 async function captureSwapVisualStates(
@@ -189,7 +196,7 @@ async function captureSwapVisualStates(
 ): Promise<void> {
   const platform = platformFromPrefix(prefix);
   await openAccountWorkspaceTab(page, 'swap');
-  await expect(page.getByTestId('swap-order-amount').first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId('swap-ticket-amount').first()).toBeVisible({ timeout: 20_000 });
   await expectSwapOrderbookReady(page);
   const swapPanel = page.locator('.swap-panel').first();
   await captureUxLocator(swapPanel, output, `${prefix}-swap-base.png`, {
@@ -200,51 +207,40 @@ async function captureSwapVisualStates(
     tags: ['swap', 'orderbook'],
   });
 
-  const sourceButton = page.getByTestId('swap-source-account-button').first();
-  await sourceButton.click();
-  await expect(page.getByTestId('swap-source-account-menu').first()).toBeVisible({ timeout: 10_000 });
-  await captureUxLocator(swapPanel, output, `${prefix}-swap-source-menu.png`, {
-    title: `${platform} swap source picker`,
+  const hubSelect = page.getByTestId('swap-ticket-hub-select').first();
+  await expect(hubSelect).toBeVisible();
+  await selectNextEnabledOption(hubSelect);
+  await expectSwapOrderbookReady(page);
+  await captureUxLocator(swapPanel, output, `${prefix}-swap-hub-selected.png`, {
+    title: `${platform} swap hub selection`,
     group: 'Swap',
-    description: uxDescription('Source account menu while preparing a routed swap.'),
-    platform,
-    tags: ['swap', 'account-picker'],
-  });
-  await closeSwapMenus(page);
-
-  const tokenButton = page.locator('.swap-panel .token-select-wrap button.token-select-button').first();
-  await tokenButton.click();
-  await expect(page.locator('.swap-panel .token-menu').first()).toBeVisible({ timeout: 10_000 });
-  await captureUxLocator(swapPanel, output, `${prefix}-swap-token-menu.png`, {
-    title: `${platform} swap token picker`,
-    group: 'Swap',
-    description: uxDescription('Token selector with balances during swap preparation.'),
-    platform,
-    tags: ['swap', 'token-picker'],
-  });
-  await closeSwapMenus(page);
-
-  await page.locator('.swap-panel .route-menu-button').first().click();
-  await expect(page.locator('.swap-panel .route-menu').first()).toBeVisible({ timeout: 10_000 });
-  await captureUxLocator(swapPanel, output, `${prefix}-swap-route-menu.png`, {
-    title: `${platform} swap route menu`,
-    group: 'Swap',
-    description: uxDescription('Route selector for cross-chain liquidity paths.'),
-    platform,
-    tags: ['swap', 'route'],
-  });
-  await closeSwapMenus(page);
-
-  await page.locator('.swap-panel .hub-select-wrap button.entity-select-button').first().click();
-  await expect(page.locator('.swap-panel .hub-menu').first()).toBeVisible({ timeout: 10_000 });
-  await captureUxLocator(swapPanel, output, `${prefix}-swap-hub-menu.png`, {
-    title: `${platform} swap hub menu`,
-    group: 'Swap',
-    description: uxDescription('Hub selector showing available market-making venues.'),
+    description: uxDescription('Swap ticket after selecting a market-making hub.'),
     platform,
     tags: ['swap', 'hub'],
   });
-  await closeSwapMenus(page);
+
+  const tokenSelect = page.getByTestId('swap-ticket-from-token').first();
+  await expect(tokenSelect).toBeVisible();
+  await selectNextEnabledOption(tokenSelect);
+  await expectSwapOrderbookReady(page);
+  await captureUxLocator(swapPanel, output, `${prefix}-swap-token-selected.png`, {
+    title: `${platform} swap token selection`,
+    group: 'Swap',
+    description: uxDescription('Swap ticket after selecting the asset to sell.'),
+    platform,
+    tags: ['swap', 'token'],
+  });
+
+  const routeSelect = page.getByTestId('swap-ticket-to-network').first();
+  await expect(routeSelect).toBeVisible();
+  await selectNextEnabledOption(routeSelect);
+  await captureUxLocator(swapPanel, output, `${prefix}-swap-route-selected.png`, {
+    title: `${platform} swap route selection`,
+    group: 'Swap',
+    description: uxDescription('Swap ticket after selecting a destination route.'),
+    platform,
+    tags: ['swap', 'route'],
+  });
 }
 
 async function connectVisualRuntimeToHubs(

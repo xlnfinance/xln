@@ -32,7 +32,9 @@ import {
 } from '../entity/consensus/output-certification';
 import { handleReissueCertifiedOutputEntityTx } from '../entity/tx/handlers/basic';
 import {
+  assertEntityFrameEventByteBudget,
   assertEntityFrameTxByteBudget,
+  MAX_ENTITY_FRAME_EVENT_BYTES,
   MAX_ENTITY_FRAME_TX_BYTES,
   selectEntityFrameTxByteBudget,
 } from '../entity/consensus/frame';
@@ -685,14 +687,18 @@ describe('signed Entity command admission', () => {
     const verifierEnv = createEmptyEnv('signed-command:independent-frame-validator');
     verifierEnv.scenarioMode = true;
 
-    const { newState: nextState } = await applyEntityFrame(
+    const { events, newState: nextState } = await applyEntityFrame(
       verifierEnv,
       structuredClone(state),
       [signedEntityCommandTx(command)],
       1_001,
     );
 
-    expect(nextState.messages.some(message => message.includes('signed command'))).toBe(true);
+    expect(events).toEqual([{
+      type: 'text',
+      validatorId: authorSignerId,
+      message: 'signed command',
+    }]);
     expect(nextState.entityCommandNonces?.bySigner.get(authorSignerId)?.nonce).toBe(1n);
   });
 
@@ -702,8 +708,12 @@ describe('signed Entity command admission', () => {
     const command = buildSignedEntityCommand(env, state, signerId, [tx]);
     const first = await applyEntityFrame(env, state, [signedEntityCommandTx(command)], 1_001);
     const retry = await applyEntityFrame(env, first.newState, [signedEntityCommandTx(command)], 1_002);
-    expect(first.newState.messages.filter(message => message.includes('apply exactly once'))).toHaveLength(1);
-    expect(retry.newState.messages.filter(message => message.includes('apply exactly once'))).toHaveLength(1);
+    expect(first.events).toEqual([{
+      type: 'text',
+      validatorId: signerId,
+      message: 'apply exactly once',
+    }]);
+    expect(retry.events).toEqual([]);
     expect(retry.outputs).toHaveLength(0);
     expect(retry.jOutputs).toHaveLength(0);
   });
@@ -1104,6 +1114,15 @@ describe('signed Entity command admission', () => {
     ];
     expect(() => assertEntityFrameTxByteBudget(txs)).toThrow('ENTITY_FRAME_TX_BYTE_LIMIT_EXCEEDED');
     expect(selectEntityFrameTxByteBudget(txs)).toEqual([txs[0]]);
+  });
+
+  test('caps signed Entity frame events independently from transaction bytes', () => {
+    const oversizedEvent = {
+      type: 'status' as const,
+      message: 'x'.repeat(MAX_ENTITY_FRAME_EVENT_BYTES),
+    };
+    expect(() => assertEntityFrameEventByteBudget([oversizedEvent]))
+      .toThrow('ENTITY_FRAME_EVENT_BYTE_LIMIT_EXCEEDED');
   });
 
   test('binds trusted cross-j runtime outputs to the two exact sibling edges', () => {

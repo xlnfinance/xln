@@ -983,7 +983,7 @@ describe('ordered reliable output lanes', () => {
     if (!proposalIdentity || !certificateIdentity) throw new Error('TEST_RELIABLE_IDENTITY_MISSING');
     const receipt = (identity: typeof proposalIdentity) => ({
       body: {
-        version: 2 as const,
+        version: 1 as const,
         coverage: 'terminal' as const,
         receiverRuntimeId: targetRuntimeId,
         identity,

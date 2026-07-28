@@ -18,7 +18,6 @@ import type {
   EntityState,
   EntityTx,
   SettlementDiff,
-  SettlementOp,
   SettlementWorkspace,
 } from '../../../types';
 import { cloneEntityState, addMessage, getAccountPerspective } from '../../../state-helpers';
@@ -139,7 +138,7 @@ export const buildSettlementSealDraft = (
   const sourceIsExecutor = workspace.executorIsLeft === iAmLeft;
   const data: SettlementSealTx = {
     kind: 'seal',
-    version: workspace.version,
+    revision: workspace.revision,
     workspaceHash,
     settlementNonce,
     settlementHash,
@@ -169,25 +168,6 @@ const assertNoPendingSettlementTransition = (account: AccountState): void => {
 };
 
 /**
- * Convert V1-compat diffs to rawDiff ops (auto-conversion for backward compat)
- */
-function diffsToOps(data: { ops?: SettlementOp[]; diffs?: SettlementDiff[]; forgiveTokenIds?: number[] }): SettlementOp[] {
-  if (data.ops && data.ops.length > 0) return data.ops;
-  const ops: SettlementOp[] = [];
-  if (data.diffs) {
-    for (const d of data.diffs) {
-      ops.push({ type: 'rawDiff', tokenId: d.tokenId, leftDiff: d.leftDiff, rightDiff: d.rightDiff, collateralDiff: d.collateralDiff, ondeltaDiff: d.ondeltaDiff });
-    }
-  }
-  if (data.forgiveTokenIds) {
-    for (const tokenId of data.forgiveTokenIds) {
-      ops.push({ type: 'forgive', tokenId });
-    }
-  }
-  return ops;
-}
-
-/**
  * settle_propose: Queue a new settlement workspace for Account consensus
  */
 export async function handleSettlePropose(
@@ -195,8 +175,7 @@ export async function handleSettlePropose(
   entityTx: Extract<EntityTx, { type: 'settle_propose' }>,
   _env: RuntimeState
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; accountTxs: AccountTxTarget[] }> {
-  const { counterpartyEntityId, executorIsLeft: execParam, memo } = entityTx.data;
-  const ops = diffsToOps(entityTx.data);
+  const { counterpartyEntityId, executorIsLeft: execParam, memo, ops } = entityTx.data;
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
   const accountTxs: AccountTxTarget[] = [];
@@ -206,9 +185,9 @@ export async function handleSettlePropose(
   const account = newState.accounts.get(counterpartyEntityId);
   if (!account) throw new Error(`No account with ${counterpartyEntityId.slice(-4)}`);
   if (account.settlementWorkspace) {
-    const version = account.settlementWorkspace.version;
-    addMessage(newState, `⏭️ Settlement propose skipped: workspace already exists (v${version})`);
-    settleLog.warn('propose.skip_workspace_exists', { counterparty: shortId(counterpartyEntityId), version });
+    const revision = account.settlementWorkspace.revision;
+    addMessage(newState, `⏭️ Settlement propose skipped: workspace already exists (v${revision})`);
+    settleLog.warn('propose.skip_workspace_exists', { counterparty: shortId(counterpartyEntityId), revision });
     return { newState, outputs, accountTxs };
   }
   assertNoPendingSettlementTransition(account);
@@ -227,7 +206,7 @@ export async function handleSettlePropose(
       type: 'settle_transition',
       data: {
         kind: 'upsert',
-        version: 1,
+        revision: 1,
         ops,
         executorIsLeft,
         ...(memo !== undefined ? { memo } : {}),
@@ -235,7 +214,7 @@ export async function handleSettlePropose(
     },
   });
 
-  settleLog.debug('propose.created', { version: 1, ops: ops.length });
+  settleLog.debug('propose.created', { revision: 1, ops: ops.length });
   addMessage(newState, `⚖️ Settlement proposal queued for bilateral Account consensus`);
 
   return { newState, outputs, accountTxs };
@@ -249,8 +228,7 @@ export async function handleSettleUpdate(
   entityTx: Extract<EntityTx, { type: 'settle_update' }>,
   _env: RuntimeState
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; accountTxs: AccountTxTarget[] }> {
-  const { counterpartyEntityId, executorIsLeft: execParam, memo } = entityTx.data;
-  const ops = diffsToOps(entityTx.data);
+  const { counterpartyEntityId, executorIsLeft: execParam, memo, ops } = entityTx.data;
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
   const accountTxs: AccountTxTarget[] = [];
@@ -273,7 +251,7 @@ export async function handleSettleUpdate(
   compileOps(ops, isLeft);
   const workspace = account.settlementWorkspace;
   const previousWorkspaceHash = assertCanonicalSettlementWorkspace(account, workspace);
-  const newVersion = workspace.version + 1;
+  const newVersion = workspace.revision + 1;
   const effectiveMemo = memo !== undefined ? memo : workspace.memo;
   accountTxs.push({
     accountId: counterpartyEntityId,
@@ -281,7 +259,7 @@ export async function handleSettleUpdate(
       type: 'settle_transition',
       data: {
         kind: 'upsert',
-        version: newVersion,
+        revision: newVersion,
         previousWorkspaceHash,
         ops,
         executorIsLeft: execParam ?? workspace.executorIsLeft,
@@ -290,7 +268,7 @@ export async function handleSettleUpdate(
     },
   });
 
-  settleLog.debug('update.applied', { version: newVersion, ops: ops.length });
+  settleLog.debug('update.applied', { revision: newVersion, ops: ops.length });
   addMessage(newState, `⚖️ Settlement update v${newVersion} queued for bilateral Account consensus`);
 
   return { newState, outputs, accountTxs };
@@ -634,7 +612,7 @@ export async function handleSettleExecute(
       type: 'settle_transition',
       data: {
         kind: 'submit',
-        version: workspace.version,
+        revision: workspace.revision,
         workspaceHash,
       },
     },
@@ -685,7 +663,7 @@ export async function handleSettleReject(
       type: 'settle_transition',
       data: {
         kind: 'clear',
-        version: account.settlementWorkspace.version,
+        revision: account.settlementWorkspace.revision,
         workspaceHash,
       },
     },
@@ -735,8 +713,8 @@ export async function processCommittedSettlementTransitionFollowup(
   const workspace = account.settlementWorkspace;
   if (!workspace) throw new Error('SETTLEMENT_COMMITTED_WORKSPACE_MISSING');
   const workspaceHash = assertCanonicalSettlementWorkspace(account, workspace);
-  if (workspace.version !== accountTx.data.version) {
-    throw new Error(`SETTLEMENT_COMMITTED_VERSION_MISMATCH:${workspace.version}:${accountTx.data.version}`);
+  if (workspace.revision !== accountTx.data.revision) {
+    throw new Error(`SETTLEMENT_COMMITTED_VERSION_MISMATCH:${workspace.revision}:${accountTx.data.revision}`);
   }
   const { iAmLeft } = getAccountPerspective(account, entityState.entityId);
   if (committedFrame.byLeft === iAmLeft) return empty();
@@ -753,7 +731,7 @@ export async function processCommittedSettlementTransitionFollowup(
 
   settleLog.debug('committed.auto_seal.start', {
     from: shortId(counterpartyEntityId),
-    version: workspace.version,
+    revision: workspace.revision,
     workspaceHash,
   });
   entityState.deferredAccountProposals ??= new Map();

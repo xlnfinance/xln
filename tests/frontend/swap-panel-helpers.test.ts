@@ -339,7 +339,7 @@ describe('swap panel helpers', () => {
   test('SwapPanel keeps amount state only in the parent and parses that source directly', async () => {
     const [panel, ticket] = await Promise.all([
       Bun.file('frontend/src/lib/components/Entity/SwapPanel.svelte').text(),
-      Bun.file('frontend/src/lib/components/Entity/SwapTradeTicket.svelte').text(),
+      Bun.file('frontend/src/lib/components/Entity/SwapTicket.svelte').text(),
     ]);
 
     expect(panel).toContain('$: giveAmount = parseDecimalAmountToBigInt(orderAmountInput, giveTokenDecimals);');

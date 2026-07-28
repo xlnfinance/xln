@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 test('frame commit fsyncs authoritative WAL before updating the rebuildable cache', () => {
   const source = readFileSync(join(process.cwd(), 'runtime/storage/index.ts'), 'utf8');
-  const authoritative = source.indexOf('await writeBatch(historyBatch, { sync: true });');
+  const authoritative = source.indexOf('await writeBatch(walBatch, { sync: true });');
   const boundary = source.indexOf("'after-authoritative-history-commit'", authoritative);
   const cache = source.indexOf('await writeBatch(batch, { sync: false });', boundary);
 

@@ -86,6 +86,7 @@ const buildSingleSignerCommitments = (
     height,
     timestamp,
     options.proposalTxs,
+    applied.events,
     state.entityId,
     stateRoot,
     authorityRoot,
@@ -166,6 +167,7 @@ const buildSingleSignerFrame = async (
     authorityRoot: commitments.authorityRoot,
     timestamp: commitments.timestamp,
     txs: [...proposalTxs],
+    events: structuredClone(applied.events),
     hash: commitments.frameHash,
     leader: {
       proposerSignerId: workingReplica.signerId.toLowerCase(),

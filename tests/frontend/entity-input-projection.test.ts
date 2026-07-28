@@ -108,8 +108,8 @@ test('vault user token helpers use active RuntimeStore env and RuntimeInput comm
   const helperSource = vaultStore.slice(balanceStart, endStart > sendStart ? endStart : vaultStore.length);
 
   expect(helperSource).toContain('const runtimeEntry = activeId ? get(runtimes).get(activeId) : null;');
-	  expect(helperSource).toContain('await submitXlnEntityInputs([{');
-	  expect(helperSource).not.toContain('await submitXlnEntityInputs(env,');
+  expect(helperSource).toContain('await submitXlnEntityInputs([');
+  expect(helperSource).not.toContain('await submitXlnEntityInputs(env,');
 	  expect(helperSource).toContain("type: 'r2r'");
 	  expect(helperSource).not.toContain('xlnEnvironment');
 	  expect(helperSource).not.toContain('queueEntityInput');

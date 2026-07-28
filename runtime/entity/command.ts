@@ -18,7 +18,7 @@ import type {
   EntityState,
   EntityTx,
   RuntimeState,
-  SignedEntityCommandV2,
+  SignedEntityCommandV1,
 } from '../types';
 import {
   assertEntityCommandTxs,
@@ -152,8 +152,8 @@ const canonicalCommandNonceState = (
   currentBoardEpoch: number,
 ): EntityCommandNonceState => {
   const stored = state.entityCommandNonces;
-  if (!stored) return { version: 2, boardHash: currentBoardHash, boardEpoch: currentBoardEpoch, bySigner: new Map() };
-  if (stored.version !== 2 || !(stored.bySigner instanceof Map)) {
+  if (!stored) return { version: 1, boardHash: currentBoardHash, boardEpoch: currentBoardEpoch, bySigner: new Map() };
+  if (stored.version !== 1 || !(stored.bySigner instanceof Map)) {
     throw new Error('ENTITY_COMMAND_NONCE_STATE_INVALID');
   }
   const storedBoardHash = canonicalEntityCommandBytes32(
@@ -192,9 +192,9 @@ const canonicalCommandNonceState = (
   if (!isCurrentBoard) {
     // A certified board rotation changes the nonce namespace. The old bounded
     // fence is fully validated above before being deterministically discarded.
-    return { version: 2, boardHash: currentBoardHash, boardEpoch: currentBoardEpoch, bySigner: new Map() };
+    return { version: 1, boardHash: currentBoardHash, boardEpoch: currentBoardEpoch, bySigner: new Map() };
   }
-  return { version: 2, boardHash: currentBoardHash, boardEpoch: currentBoardEpoch, bySigner };
+  return { version: 1, boardHash: currentBoardHash, boardEpoch: currentBoardEpoch, bySigner };
 };
 
 export const normalizeEntityCommandNonceBoard = (
@@ -230,7 +230,7 @@ export type EntityCommandDisposition = 'next' | 'retry';
 /** Classify only against the bounded latest slot for this board member. */
 export const getEntityCommandDisposition = (
   state: EntityState,
-  command: SignedEntityCommandV2,
+  command: SignedEntityCommandV1,
 ): EntityCommandDisposition => {
   const nonceState = canonicalCommandNonceState(state, command.boardHash, command.boardEpoch);
   const latest = nonceState.bySigner.get(command.authorSignerId);
@@ -263,7 +263,7 @@ export const assertSignedEntityCommand = (
   env: RuntimeState,
   state: EntityState,
   value: unknown,
-): SignedEntityCommandV2 => {
+): SignedEntityCommandV1 => {
   const command = normalizeSignedEntityCommand(value);
   const entityId = canonicalEntityCommandEntityId(state.entityId);
   if (command.entityId !== entityId) {
@@ -295,7 +295,7 @@ export const assertSignedEntityCommand = (
 
 export const advanceEntityCommandNonce = (
   state: EntityState,
-  command: SignedEntityCommandV2,
+  command: SignedEntityCommandV1,
 ): EntityState => {
   const disposition = getEntityCommandDisposition(state, command);
   if (disposition === 'retry') return state;
@@ -308,7 +308,7 @@ export const advanceEntityCommandNonce = (
   return {
     ...state,
     entityCommandNonces: {
-      version: 2,
+      version: 1,
       boardHash: command.boardHash,
       boardEpoch: command.boardEpoch,
       bySigner,
@@ -321,7 +321,7 @@ export const buildSignedEntityCommand = (
   state: EntityState,
   authorSignerId: string,
   txs: EntityTx[],
-): SignedEntityCommandV2 => {
+): SignedEntityCommandV1 => {
   assertEntityCommandTxs(txs);
   const board = resolveEntityCommandBoard(env, state);
   const author = resolveEntityCommandAuthor(env, state, authorSignerId, board);
@@ -329,7 +329,7 @@ export const buildSignedEntityCommand = (
   assertEntityCommandAuthorBindings(signerId, txs);
   assertIndividualEntityCommandTxs(txs);
   const unsigned: EntityCommandBody = {
-    version: 2,
+    version: 1,
     entityId: canonicalEntityCommandEntityId(state.entityId),
     stackKey: getEntityCommandStackKey(state),
     boardHash: author.boardHash,

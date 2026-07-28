@@ -2,8 +2,9 @@ import { runtimeIsBrowser } from './platform';
 
 // Bump this on runtime bundle changes that must be reflected in frontend immediately.
 const RUNTIME_BUILD_ID = '2026-07-18-16:00Z';
-// Bump this only on breaking persistence/replay format or invariants.
-export const RUNTIME_SCHEMA_VERSION = 5;
+// The testnet exposes one canonical runtime contract. Breaking changes replace
+// v1 in place; there are no compatibility branches inside the state machine.
+export const RUNTIME_SCHEMA_VERSION = 1;
 export const RUNTIME_BUILD = RUNTIME_BUILD_ID;
 
 import { setBrowserVMJurisdiction } from '../jadapter';

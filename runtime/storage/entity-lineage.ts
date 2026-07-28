@@ -208,6 +208,7 @@ const assertFrameBody = (
     frame.height,
     frame.timestamp,
     frame.txs,
+    frame.events,
     entityId,
     frame.stateRoot,
     frame.authorityRoot,

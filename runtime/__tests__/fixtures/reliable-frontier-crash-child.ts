@@ -105,7 +105,7 @@ const receipt = (
   coverage: ReliableDeliveryReceipt['body']['coverage'],
 ): ReliableDeliveryReceipt => {
   const body: ReliableDeliveryReceipt['body'] = {
-    version: 2,
+    version: 1,
     coverage,
     receiverRuntimeId,
     identity: value,
@@ -156,6 +156,7 @@ env.pendingNetworkOutputs = [{
     timestamp: pendingHeight,
     hash: digest('22'),
     txs: [],
+    events: [],
     leader: { proposerSignerId: senderActiveIdentity.signerId, view: 0 },
     collectedSigs: new Map(),
   },

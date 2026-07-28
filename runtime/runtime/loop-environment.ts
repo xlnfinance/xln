@@ -91,5 +91,10 @@ export const ensureRuntimeConfig = (env: RuntimeState): NonNullable<RuntimeState
   ) {
     env.runtimeConfig.snapshotIntervalFrames = DEFAULT_SNAPSHOT_INTERVAL_FRAMES;
   }
+  for (const [name, value] of Object.entries(env.runtimeConfig.performance ?? {})) {
+    if (!Number.isFinite(value) || Number(value) <= 0) {
+      throw new Error(`RUNTIME_CONFIG_PERFORMANCE_${name.toUpperCase()}_INVALID:${String(value)}`);
+    }
+  }
   return env.runtimeConfig;
 };

@@ -37,8 +37,8 @@
     min-width: 0;
   }
 
-  .entity-panel :global(.content input:not([type="range"]):not([type="checkbox"]):not(.entity-input-field):not(.move-amount-input):not(.move-external-input):not(.v2-amount):not(.v2-rate-input)),
-  .entity-panel :global(.content select:not(.move-token-select):not(.v2-native)) {
+  .entity-panel :global(.content input:not([type="range"]):not([type="checkbox"]):not(.entity-input-field):not(.move-amount-input):not(.move-external-input):not(.swap-ticket-amount):not(.swap-ticket-rate-input)),
+  .entity-panel :global(.content select:not(.move-token-select):not(.swap-ticket-native)) {
     background: color-mix(in srgb, var(--theme-input-bg, #09090b) 88%, transparent) !important;
     border: 1px solid color-mix(in srgb, var(--theme-input-border, #27272a) 82%, transparent) !important;
     border-radius: 6px !important;
@@ -47,8 +47,8 @@
     font-size: 13px !important;
   }
 
-  .entity-panel :global(.content input:not([type="range"]):not([type="checkbox"]):not(.v2-amount):not(.v2-rate-input):focus),
-  .entity-panel :global(.content select:not(.v2-native):focus) {
+  .entity-panel :global(.content input:not([type="range"]):not([type="checkbox"]):not(.swap-ticket-amount):not(.swap-ticket-rate-input):focus),
+  .entity-panel :global(.content select:not(.swap-ticket-native):focus) {
     outline: none !important;
     border-color: var(--theme-input-focus, #fbbf24) !important;
   }

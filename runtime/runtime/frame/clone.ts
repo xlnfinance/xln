@@ -9,7 +9,11 @@ import {
 } from '../../protocol/runtime-input-clone';
 import { copyDeterministicHtlcTestSecretCapability } from '../../protocol/htlc/test-secret-capability';
 import { copyLocalRuntimeAdapterCommandAuthorization } from '../../radapter/command-frontier-auth';
-import { buildCanonicalJReplicaSnapshot } from '../../wal/snapshot';
+import {
+  buildCanonicalJReplicaSnapshot,
+  buildCanonicalRuntimeStateSnapshot,
+} from '../../wal/snapshot';
+import { encodeBuffer } from '../../storage/codec';
 import { attachEventEmitters } from '../env-events';
 import { copyLocalEntityProviderActionRuntimeTxAuthorization } from '../entity-provider-action-submit-auth';
 import { requireRuntimeMempool } from '../input-queue';
@@ -143,3 +147,11 @@ export const cloneRuntimeFrameWorkingEnv = (source: RuntimeState): RuntimeState 
   if (source.runtimeState?.scheduledWakeIndex !== undefined) rebuildScheduledWakeIndex(working);
   return working;
 };
+
+/**
+ * Operational estimate of the deterministic payload copied for a frame.
+ * It is intentionally opt-in because encoding the canonical snapshot adds
+ * measurement cost. Shared process handles are excluded by the snapshot.
+ */
+export const measureRuntimeFrameCloneBytes = (source: RuntimeState): number =>
+  encodeBuffer(buildCanonicalRuntimeStateSnapshot(source)).byteLength;

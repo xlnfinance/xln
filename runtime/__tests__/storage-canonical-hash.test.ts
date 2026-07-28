@@ -397,7 +397,7 @@ test('storage projection round-trip preserves canonical account optional-field s
     loans: new Map(),
   };
   state.consumptionAccumulator = {
-    version: 2,
+    version: 1,
     root: `0x${'44'.repeat(32)}`,
     count: 1n,
   };

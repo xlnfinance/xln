@@ -604,7 +604,7 @@ export type SettlementOp =
  * Flow:
  * 1. An Account settle_transition atomically creates/updates workspace + holds.
  * 2. Each side seals the post-proof; only the non-executor seals settlementHash.
- * 3. Executor submit is an exact hash/version Account transition.
+ * 3. Executor submit is an exact hash/revision Account transition.
  * 4. Submit releases workspace holds; AccountSettled finality clears the body.
  */
 export interface SettlementWorkspace {
@@ -623,7 +623,7 @@ export interface SettlementWorkspace {
   lastModifiedByLeft: boolean;                // Who last proposed/updated
   status: 'draft' | 'awaiting_counterparty' | 'ready_to_submit' | 'submitted';
   memo?: string;                              // Human-readable description
-  version: number;                            // Increments on each update
+  revision: number;                           // Increments on each update
   createdAt: number;                          // Timestamp when created
   lastUpdatedAt: number;                      // Timestamp of last update
 
@@ -952,7 +952,7 @@ export type AccountTx =
       data:
         | {
             kind: 'upsert';
-            version: number;
+            revision: number;
             previousWorkspaceHash?: string;
             ops: SettlementOp[];
             executorIsLeft: boolean;
@@ -960,7 +960,7 @@ export type AccountTx =
           }
         | {
             kind: 'submit' | 'clear';
-            version: number;
+            revision: number;
             workspaceHash: string;
           }
         | {
@@ -970,7 +970,7 @@ export type AccountTx =
              * signs only the post-settlement dispute proof.
              */
             kind: 'seal';
-            version: number;
+            revision: number;
             workspaceHash: string;
             settlementNonce: number;
             settlementHash: string;

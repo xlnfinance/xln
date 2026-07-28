@@ -1,4 +1,5 @@
 import { ethers } from 'ethers';
+import { ENTITY_FRAME_EVENT_COLLECTOR } from '../entity/frame-event-collector';
 import { compareStableText } from '../protocol/serialization';
 import type { EntityReplica, RuntimeState } from '../types';
 import { buildDurableRuntimeMachineSnapshot } from '../wal/snapshot';
@@ -111,6 +112,12 @@ export const computeCanonicalEntityHash = (replica: EntityReplica): CanonicalFra
   delete consensusState.entityEncPubKey;
   delete consensusState.entityEncPrivKey;
   delete consensusState.htlcNotes;
+  // Frame events are signed history derived during one reducer pass, not live
+  // Entity state. The enumerable carrier survives immutable object spreads,
+  // so every persistence/consensus projection must remove it explicitly.
+  // Persisting it here would make a restored state hash depend on whether the
+  // reducer happened to be observed before or after its frame was finalized.
+  delete (consensusState as Record<string, unknown>)[ENTITY_FRAME_EVENT_COLLECTOR];
   return {
     entityId,
     cellCount: 1,
@@ -139,7 +146,7 @@ export const computeCanonicalRuntimeStateHash = (
   runtimeMachine?: Record<string, unknown>,
 ): string =>
   hashCanonical({
-    kind: runtimeMachine ? 'xln.storage.canonicalRuntimeHash.v2' : 'xln.storage.canonicalRuntimeHash.v1',
+    kind: 'xln.storage.canonicalRuntimeHash.v1',
     height,
     timestamp,
     entities: entityHashes
