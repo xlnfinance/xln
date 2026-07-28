@@ -2082,6 +2082,59 @@ async function buildAckResponseForIncomingFrame(
   );
 }
 
+const classifyPreflightReturn = (
+  result: HandleAccountInputResult,
+): IncomingFrameResult => {
+  if (result.success || result.disputeRequired) return { kind: 'return', result };
+  return {
+    kind: 'return',
+    result: {
+      ...result,
+      rejected: { reason: result.error ?? 'Incoming account frame rejected' },
+    },
+  };
+};
+
+const classifyIncomingValidationFailure = (
+  account: AccountMachine,
+  input: AccountInput,
+  receivedFrame: AccountFrame,
+  result: HandleAccountInputResult,
+): IncomingFrameResult => {
+  if (result.success) return { kind: 'return', result };
+  if (isRefreshableStaleIncomingSettlementSeal(account, receivedFrame, result.error)) {
+    accountLog.warn('frame.stale_settlement_seal_rejected', {
+      height: receivedFrame.height,
+      error: result.error,
+    });
+    return {
+      kind: 'return',
+      result: {
+        ...result,
+        rejected: { reason: result.error ?? 'Stale settlement seal rejected' },
+      },
+    };
+  }
+  const proposal = accountInputProposal(input)!;
+  if (!proposal.frameHanko) {
+    throw new Error('INBOUND_ACCOUNT_FRAME_HANKO_MISSING_AFTER_VALIDATION');
+  }
+  return {
+    kind: 'return',
+    result: {
+      ...result,
+      disputeRequired: {
+        reason: result.error ?? 'Signed account frame failed deterministic replay',
+        evidenceSecrets: [],
+        signedFrame: {
+          frame: structuredClone(receivedFrame),
+          frameHanko: proposal.frameHanko,
+        },
+      },
+    },
+  };
+};
+
 async function handleIncomingAccountFrame(
   env: Env,
   accountMachine: AccountMachine,
@@ -2112,16 +2165,7 @@ async function handleIncomingAccountFrame(
     validatedCounterpartyDisputeSeal,
   );
   if (preflight.kind === 'return') {
-    if (!preflight.result.success && !preflight.result.disputeRequired) {
-      return {
-        kind: 'return',
-        result: {
-          ...preflight.result,
-          rejected: { reason: preflight.result.error ?? 'Incoming account frame rejected' },
-        },
-      };
-    }
-    return preflight;
+    return classifyPreflightReturn(preflight.result);
   }
 
   const validationResult = await validateIncomingFrameOnClone(
@@ -2137,46 +2181,12 @@ async function handleIncomingAccountFrame(
     securityContext,
   );
   if (validationResult.kind === 'return') {
-    if (!validationResult.result.success) {
-      if (
-        isRefreshableStaleIncomingSettlementSeal(
-          accountMachine,
-          preflight.receivedFrame,
-          validationResult.result.error,
-        )
-      ) {
-        accountLog.warn('frame.stale_settlement_seal_rejected', {
-          height: preflight.receivedFrame.height,
-          error: validationResult.result.error,
-        });
-        return {
-          kind: 'return',
-          result: {
-            ...validationResult.result,
-            rejected: {
-              reason: validationResult.result.error ?? 'Stale settlement seal rejected',
-            },
-          },
-        };
-      }
-      const proposal = accountInputProposal(input)!;
-      if (!proposal.frameHanko) throw new Error('INBOUND_ACCOUNT_FRAME_HANKO_MISSING_AFTER_VALIDATION');
-      return {
-        kind: 'return',
-        result: {
-          ...validationResult.result,
-          disputeRequired: {
-            reason: validationResult.result.error ?? 'Signed account frame failed deterministic replay',
-            evidenceSecrets: [],
-            signedFrame: {
-              frame: structuredClone(preflight.receivedFrame),
-              frameHanko: proposal.frameHanko,
-            },
-          },
-        },
-      };
-    }
-    return validationResult;
+    return classifyIncomingValidationFailure(
+      accountMachine,
+      input,
+      preflight.receivedFrame,
+      validationResult.result,
+    );
   }
 
   if (preflight.rollbackPendingFrame) {
