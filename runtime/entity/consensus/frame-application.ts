@@ -40,13 +40,13 @@ import {
 import { mergeStorageOverlayRecords } from '../../storage/overlay';
 import type {
   AccountInput,
-  AccountMachine,
+  AccountState,
   AccountTx,
   EntityCandidateEffect,
   EntityInput,
   EntityState,
   EntityTx,
-  Env,
+  RuntimeState,
   HashType,
   JInput,
   RuntimeOverlayRecord,
@@ -341,7 +341,7 @@ async function applyEntityTxsInOrder(context: ApplyEntityTxsInOrderContext): Pro
 }
 
 type ProposePendingAccountFramesContext = {
-  env: Env;
+  env: RuntimeState;
   currentEntityState: EntityState;
   proposableAccounts: Set<string>;
   requiredAccountResponses: Map<string, AccountInput>;
@@ -383,7 +383,7 @@ const certifiedAccountOutputSignerHint = (targetEntityId: string, input: Account
 };
 
 function materializeDeferredSettlementApprovals(
-  env: Env,
+  env: RuntimeState,
   state: EntityState,
   proposableAccounts: Set<string>,
   collectedHashes: Array<{ hash: string; type: HashType; context: string }>,
@@ -481,7 +481,7 @@ type AccountFrameProposal = Awaited<ReturnType<typeof proposeAccountFrame>>;
 const proposeAccountMachineFrame = async (
   context: ProposePendingAccountFramesContext,
   accountKey: string,
-  account: AccountMachine,
+  account: AccountState,
   crossJOpeningProposalTxs: AccountTx[] | undefined,
 ): Promise<AccountFrameProposal | undefined> => {
   const { env, currentEntityState: state, collectedHashes, proposableAccounts, storageChanges } = context;
@@ -545,7 +545,7 @@ const assertRequiredAccountResponsePreserved = (
 const routeFinalAccountInput = async (
   context: ProposePendingAccountFramesContext,
   accountKey: string,
-  account: AccountMachine,
+  account: AccountState,
   counterpartyId: string,
   input: AccountInput,
   proposal: AccountFrameProposal | undefined,
@@ -647,7 +647,7 @@ async function proposePendingAccountFrames(context: ProposePendingAccountFramesC
 }
 
 type ApplyOrderbookMatchingContext = {
-  env: Env;
+  env: RuntimeState;
   currentEntityState: EntityState;
   allSwapOffersCreated: SwapOfferEvent[];
   allOutputs: EntityInput[];
@@ -672,7 +672,7 @@ const emptyOrderbookFrameStats = (): OrderbookFrameStats => ({
 });
 
 const collectOffersForMatching = (
-  env: Env,
+  env: RuntimeState,
   state: EntityState,
   created: SwapOfferEvent[],
 ): WorkingOrderbookOffer[] => {
@@ -829,7 +829,7 @@ function applyOrderbookMatching(context: ApplyOrderbookMatchingContext): Orderbo
 }
 
 type ApplySwapCancelRequestsContext = {
-  env: Env;
+  env: RuntimeState;
   currentEntityState: EntityState;
   allSwapCancelRequests: SwapCancelRequestEvent[];
   proposableAccounts: Set<string>;
@@ -929,7 +929,7 @@ type EntityFrameWorkingSet = {
 };
 
 const prepareEntityFrameWorkingSet = async (
-  env: Env,
+  env: RuntimeState,
   entityState: EntityState,
   entityTxs: EntityTx[],
   frameTimestamp: number | undefined,
@@ -1181,7 +1181,7 @@ const logEntityFrameProfile = (
 };
 
 export const applyEntityFrame = async (
-  env: Env,
+  env: RuntimeState,
   entityState: EntityState,
   entityTxs: EntityTx[],
   frameTimestamp?: number,

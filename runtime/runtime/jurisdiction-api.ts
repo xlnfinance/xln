@@ -4,19 +4,19 @@ import type { JAdapter } from '../jadapter';
 import { withCanonicalCrossJurisdictionRouteHash } from '../extensions/cross-j/index';
 import { getJurisdictionStackId, requireEntityRuntimeJurisdictionConfig } from '../jurisdiction/jurisdiction-runtime';
 import { resolveEntityProposerId } from '../state-helpers';
-import type { AccountMachine, CrossJurisdictionSwapRoute, EntityState, Env, RuntimeInput } from '../types';
+import type { AccountState, CrossJurisdictionSwapRoute, EntityState, RuntimeState, RuntimeInput } from '../types';
 import { getWallClockMs } from '../utils';
 import { buildDebtEnforcementRuntimeInputFromProjection } from '../protocol/payments/debt-enforcement';
 import type { DebtEnforcementProjectionRuntimeInputParams } from '../protocol/payments/debt-enforcement';
 import { deriveCanonicalCrossJurisdictionBookOwnerForLegs } from '../extensions/cross-j/market';
 
-export function getActiveJAdapter(env: Env): JAdapter | null {
+export function getActiveJAdapter(env: RuntimeState): JAdapter | null {
   if (!env.activeJurisdiction) return null;
   const jReplica = env.jReplicas?.get(env.activeJurisdiction);
   return jReplica?.jadapter || null;
 }
 
-export function getEntityJAdapter(env: Env, entityId: string, signerId?: string): JAdapter | null {
+export function getEntityJAdapter(env: RuntimeState, entityId: string, signerId?: string): JAdapter | null {
   const jurisdiction = requireEntityRuntimeJurisdictionConfig(env, entityId, signerId);
   const jReplica = env.jReplicas?.get(jurisdiction.name);
   return jReplica?.jadapter || null;
@@ -65,7 +65,7 @@ export type { DebtEnforcementProjectionRuntimeInputParams };
 
 const normalizeRuntimeEntityId = (entityId: string): string => String(entityId || '').toLowerCase();
 
-const findEntityStateForRuntime = (env: Env, entityId: string, signerId?: string): EntityState | null => {
+const findEntityStateForRuntime = (env: RuntimeState, entityId: string, signerId?: string): EntityState | null => {
   const target = normalizeRuntimeEntityId(entityId);
   const signer = signerId ? String(signerId).toLowerCase() : null;
   for (const [replicaKey, replica] of env.eReplicas.entries()) {
@@ -79,7 +79,7 @@ const findEntityStateForRuntime = (env: Env, entityId: string, signerId?: string
   return null;
 };
 
-const findRuntimeAccountWith = (state: EntityState | null, counterpartyId: string): AccountMachine | null => {
+const findRuntimeAccountWith = (state: EntityState | null, counterpartyId: string): AccountState | null => {
   const counterparty = normalizeRuntimeEntityId(counterpartyId);
   if (!state || !counterparty) return null;
   for (const [accountId, account] of state.accounts.entries()) {
@@ -91,7 +91,7 @@ const findRuntimeAccountWith = (state: EntityState | null, counterpartyId: strin
 };
 
 export function buildCrossJurisdictionSwapSubmission(
-  env: Env,
+  env: RuntimeState,
   params: CrossJurisdictionSwapSubmitParams,
 ): CrossJurisdictionSwapSubmission {
   const now = env.scenarioMode ? env.timestamp : getWallClockMs();
@@ -216,7 +216,7 @@ export function buildCrossJurisdictionSwapSubmission(
 }
 
 export function buildDebtEnforcementRuntimeInput(
-  env: Env,
+  env: RuntimeState,
   params: DebtEnforcementRuntimeInputParams,
 ): RuntimeInput {
   const entityId = String(params.entityId || '').trim().toLowerCase();

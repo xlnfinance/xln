@@ -1,7 +1,7 @@
-import type { Env } from '../types';
+import type { RuntimeState } from '../types';
 import { inferRuntimeLifecyclePhase } from './lifecycle';
 
-export const ensureRuntimeState = (env: Env): NonNullable<Env['runtimeState']> => {
+export const ensureRuntimeState = (env: RuntimeState): NonNullable<RuntimeState['runtimeState']> => {
   if (!env.runtimeState) {
     env.runtimeState = {
       lifecyclePhase: 'booting',

@@ -9,7 +9,7 @@
  * rejected/cleared separately if the settlement is no longer valid.
  */
 
-import type { EntityState, EntityTx, EntityInput, Env, JInput } from '../../../types';
+import type { EntityState, EntityTx, EntityInput, RuntimeState, JInput } from '../../../types';
 import { cloneEntityState, addMessage } from '../../../state-helpers';
 import { createEmptyBatch, getBatchSize } from '../../../jurisdiction/batch';
 import { createStructuredLogger, shortId } from '../../../infra/logger';
@@ -19,7 +19,7 @@ const jBatchActionLog = createStructuredLogger('entity.jbatch');
 export async function handleJClearBatch(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'j_clear_batch' }>,
-  _env: Env
+  _env: RuntimeState
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; jOutputs: JInput[] }> {
   const { reason } = entityTx.data;
   const newState = cloneEntityState(entityState);

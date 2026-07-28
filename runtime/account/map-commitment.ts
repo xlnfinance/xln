@@ -1,7 +1,7 @@
 import { ethers } from 'ethers';
 
 import { computeIntegrityDigest } from '../infra/integrity-checksum';
-import type { AccountMachine } from '../types';
+import type { AccountState } from '../types';
 
 export type AccountCommittedMap =
   | 'deltas'
@@ -51,19 +51,19 @@ type AccountCommitmentCache = Map<AccountCommittedMap, CachedMap>;
 
 const ACCOUNT_CACHE = Symbol('xln.account.commitment-cache');
 const STAGED_ACCOUNT_CACHE = Symbol('xln.account.staged-commitment-cache');
-type AccountWithCommitmentCache = AccountMachine & {
+type AccountWithCommitmentCache = AccountState & {
   [ACCOUNT_CACHE]?: AccountCommitmentCache;
   [STAGED_ACCOUNT_CACHE]?: AccountCommitmentCache;
 };
 
-const readAccountCache = (account: AccountMachine): AccountCommitmentCache | undefined =>
+const readAccountCache = (account: AccountState): AccountCommitmentCache | undefined =>
   (account as AccountWithCommitmentCache)[ACCOUNT_CACHE];
 
-const readStagedAccountCache = (account: AccountMachine): AccountCommitmentCache | undefined =>
+const readStagedAccountCache = (account: AccountState): AccountCommitmentCache | undefined =>
   (account as AccountWithCommitmentCache)[STAGED_ACCOUNT_CACHE];
 
 const writeHiddenCache = (
-  account: AccountMachine,
+  account: AccountState,
   key: typeof ACCOUNT_CACHE | typeof STAGED_ACCOUNT_CACHE,
   cache: AccountCommitmentCache,
 ): void => {
@@ -76,7 +76,7 @@ const writeHiddenCache = (
 };
 
 const deleteHiddenCache = (
-  account: AccountMachine,
+  account: AccountState,
   key: typeof ACCOUNT_CACHE | typeof STAGED_ACCOUNT_CACHE,
 ): void => {
   delete (account as AccountWithCommitmentCache)[key];
@@ -263,12 +263,12 @@ const deleteFromTrie = (
 };
 
 const accountMap = (
-  account: AccountMachine,
+  account: AccountState,
   namespace: AccountCommittedMap,
 ): ReadonlyMap<unknown, unknown> => account[namespace] ?? new Map();
 
 const buildCachedMap = (
-  account: AccountMachine,
+  account: AccountState,
   namespace: AccountCommittedMap,
   encodeValue: EncodedValue,
 ): CachedMap => {
@@ -278,7 +278,7 @@ const buildCachedMap = (
 };
 
 export const computeAccountMapCommitment = (
-  account: AccountMachine,
+  account: AccountState,
   namespace: AccountCommittedMap,
   encodeValue: EncodedValue,
   cold = false,
@@ -334,7 +334,7 @@ export const computeAccountMapCommitment = (
 };
 
 export const invalidateAccountMapCommitment = (
-  account: AccountMachine,
+  account: AccountState,
   namespace: AccountCommittedMap,
   key?: unknown,
 ): void => {
@@ -345,12 +345,12 @@ export const invalidateAccountMapCommitment = (
   else cached.dirtyKeys.add(key);
 };
 
-export const clearAccountCommitmentCache = (account: AccountMachine): void => {
+export const clearAccountCommitmentCache = (account: AccountState): void => {
   deleteHiddenCache(account, ACCOUNT_CACHE);
   deleteHiddenCache(account, STAGED_ACCOUNT_CACHE);
 };
 
-export const forkAccountCommitmentCache = (source: AccountMachine, target: AccountMachine): void => {
+export const forkAccountCommitmentCache = (source: AccountState, target: AccountState): void => {
   const sourceCache = readAccountCache(source);
   if (sourceCache) {
     writeHiddenCache(target, ACCOUNT_CACHE, cloneCacheForTarget(sourceCache, target));
@@ -367,7 +367,7 @@ export const forkAccountCommitmentCache = (source: AccountMachine, target: Accou
 
 const cloneCacheForTarget = (
   sourceCache: AccountCommitmentCache,
-  target: AccountMachine,
+  target: AccountState,
 ): AccountCommitmentCache => new Map(Array.from(sourceCache, ([namespace, cached]) => [
   namespace,
   {
@@ -377,18 +377,18 @@ const cloneCacheForTarget = (
   },
 ]));
 
-export const stageAccountCommitmentCache = (account: AccountMachine, future: AccountMachine): void => {
+export const stageAccountCommitmentCache = (account: AccountState, future: AccountState): void => {
   const futureCache = readAccountCache(future);
   if (futureCache) writeHiddenCache(account, STAGED_ACCOUNT_CACHE, futureCache);
 };
 
-export const commitStagedAccountCommitmentCache = (account: AccountMachine): void => {
+export const commitStagedAccountCommitmentCache = (account: AccountState): void => {
   const staged = readStagedAccountCache(account);
   if (!staged) return;
   writeHiddenCache(account, ACCOUNT_CACHE, cloneCacheForTarget(staged, account));
   deleteHiddenCache(account, STAGED_ACCOUNT_CACHE);
 };
 
-export const discardStagedAccountCommitmentCache = (account: AccountMachine): void => {
+export const discardStagedAccountCommitmentCache = (account: AccountState): void => {
   deleteHiddenCache(account, STAGED_ACCOUNT_CACHE);
 };

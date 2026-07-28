@@ -1,4 +1,4 @@
-import type { Env, RuntimeSecurityIncident } from '../types';
+import type { RuntimeState, RuntimeSecurityIncident } from '../types';
 
 export const MAX_RUNTIME_SECURITY_INCIDENTS = 256;
 const OVERFLOW_INCIDENT_ID = 'cross-j:incident-capacity';
@@ -22,12 +22,12 @@ export const buildRuntimeSecurityIncidentId = (
   canonicalPart(incident.routeHash),
 ].join(':');
 
-const getIncidentMap = (env: Env): Map<string, RuntimeSecurityIncident> => {
+const getIncidentMap = (env: RuntimeState): Map<string, RuntimeSecurityIncident> => {
   const runtimeState = env.runtimeState ?? (env.runtimeState = {});
   return runtimeState.securityIncidents ?? (runtimeState.securityIncidents = new Map());
 };
 
-const incidentTimestamp = (env: Env): number => {
+const incidentTimestamp = (env: RuntimeState): number => {
   const timestamp = Number(env.timestamp);
   if (!Number.isSafeInteger(timestamp) || timestamp < 0) {
     throw new Error(`RUNTIME_SECURITY_INCIDENT_TIMESTAMP_INVALID:${String(env.timestamp)}`);
@@ -35,7 +35,7 @@ const incidentTimestamp = (env: Env): number => {
   return timestamp;
 };
 
-const recordCapacityIncident = (env: Env, incidents: Map<string, RuntimeSecurityIncident>): RuntimeSecurityIncident => {
+const recordCapacityIncident = (env: RuntimeState, incidents: Map<string, RuntimeSecurityIncident>): RuntimeSecurityIncident => {
   const now = incidentTimestamp(env);
   const existing = incidents.get(OVERFLOW_INCIDENT_ID);
   const next: RuntimeSecurityIncident = existing
@@ -58,7 +58,7 @@ const recordCapacityIncident = (env: Env, incidents: Map<string, RuntimeSecurity
 };
 
 export const recordRuntimeSecurityIncident = (
-  env: Env,
+  env: RuntimeState,
   identity: RuntimeSecurityIncidentIdentity,
 ): RuntimeSecurityIncident => {
   const incidents = getIncidentMap(env);
@@ -98,7 +98,7 @@ export const recordRuntimeSecurityIncident = (
 };
 
 export const resolveRuntimeSecurityIncident = (
-  env: Env,
+  env: RuntimeState,
   identity: RuntimeSecurityIncidentIdentity,
 ): RuntimeSecurityIncident | null => {
   const incidents = getIncidentMap(env);

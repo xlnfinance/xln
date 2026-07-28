@@ -23,7 +23,7 @@ import { requireRuntimeMempool } from './input-queue';
 import { ensureRuntimeConfig } from './loop-environment';
 import { enqueueRuntimeInputs } from './loop-infrastructure';
 import { ensureRuntimeState } from './runtime-state';
-import type { EntityInput, EntityReplica, Env, RuntimeInput } from '../types';
+import type { EntityInput, EntityReplica, RuntimeState, RuntimeInput } from '../types';
 
 export type RuntimeWorkDeps = {
   runtimeInputHasQueuedWork(input: RuntimeInput): boolean;
@@ -57,7 +57,7 @@ const entityMempoolNeedsWake = (replica: EntityReplica): boolean =>
   !replica.proposal &&
   !replica.lockedFrame;
 
-export const collectAccountMempoolWakeInputs = (env: Env): EntityInput[] => {
+export const collectAccountMempoolWakeInputs = (env: RuntimeState): EntityInput[] => {
   const inputs: EntityInput[] = [];
   for (const replica of env.eReplicas.values()) {
     const entityId = String(replica.entityId || replica.state.entityId).trim().toLowerCase();
@@ -71,7 +71,7 @@ export const collectAccountMempoolWakeInputs = (env: Env): EntityInput[] => {
   return inputs;
 };
 
-export const collectEntityMempoolWakeInputs = (env: Env): EntityInput[] => {
+export const collectEntityMempoolWakeInputs = (env: RuntimeState): EntityInput[] => {
   const inputs: EntityInput[] = [];
   for (const replica of env.eReplicas.values()) {
     if (!entityMempoolNeedsWake(replica)) continue;
@@ -82,10 +82,10 @@ export const collectEntityMempoolWakeInputs = (env: Env): EntityInput[] => {
   return inputs;
 };
 
-const hasEntityMempoolWakeInput = (env: Env): boolean =>
+const hasEntityMempoolWakeInput = (env: RuntimeState): boolean =>
   [...env.eReplicas.values()].some(entityMempoolNeedsWake);
 
-const hasAccountMempoolWakeInput = (env: Env): boolean =>
+const hasAccountMempoolWakeInput = (env: RuntimeState): boolean =>
   [...env.eReplicas.values()].some(replica =>
     [...replica.state.accounts.values()].some(account =>
       accountHasProposableMempool(account, replica.state),
@@ -96,17 +96,17 @@ const runtimeWakeDeps = {
   ensureRuntimeState,
   requireRuntimeMempool,
   enqueueRuntimeInputs,
-  getRuntimeNowMs: (env: Env) => env.timestamp ?? 0,
+  getRuntimeNowMs: (env: RuntimeState) => env.timestamp ?? 0,
 };
 
-export const hasDueEntityHooks = (env: Env): boolean =>
+export const hasDueEntityHooks = (env: RuntimeState): boolean =>
   hasDueEntityHooksWithDeps(env, runtimeWakeDeps);
 
-export const getEarliestWallClockDueTimestamp = (env: Env): number | null =>
+export const getEarliestWallClockDueTimestamp = (env: RuntimeState): number | null =>
   getEarliestWallClockDueTimestampWithDeps(env, runtimeWakeDeps);
 
 export const resolveRuntimeWorkReason = (
-  env: Env,
+  env: RuntimeState,
   deps: RuntimeWorkDeps,
 ): string | null => {
   const mempool = requireRuntimeMempool(env);
@@ -234,7 +234,7 @@ export const applyEntityTxFrameCap = (
 };
 
 export const resolveNextWallClockWakeTimestamp = (
-  env: Env,
+  env: RuntimeState,
   deps: RuntimeWorkDeps,
 ): number | null => {
   const entityDueAt = getNextWallClockWakeTimestampWithDeps(env, runtimeWakeDeps);
@@ -245,7 +245,7 @@ export const resolveNextWallClockWakeTimestamp = (
 };
 
 export const generateHookPings = (
-  env: Env,
+  env: RuntimeState,
   nowMs = env.timestamp ?? 0,
   queuedAt = env.timestamp ?? 0,
 ): void => {
@@ -254,7 +254,7 @@ export const generateHookPings = (
 };
 
 export const isRuntimeFrameReady = (
-  env: Env,
+  env: RuntimeState,
   now: number,
   overrideDelayMs?: number,
 ): boolean => {
@@ -269,7 +269,7 @@ export const isRuntimeFrameReady = (
 };
 
 export const getRemainingRuntimeFrameDelayMs = (
-  env: Env,
+  env: RuntimeState,
   overrideDelayMs?: number,
 ): number => {
   if (env.scenarioMode) return 0;

@@ -3,7 +3,7 @@ import { normalizeRuntimeId } from '../../networking/runtime-id';
 import { validateEntityInput } from '../../validation-utils';
 import { validateJInputs } from '../../wal/runtime-machine-schema/j';
 import type {
-  Env,
+  RuntimeState,
   JInput,
   ReliableDeliveryReceipt,
   RoutedEntityInput,
@@ -22,7 +22,7 @@ const runtimeLog = createStructuredLogger('runtime');
 
 export type RuntimeInputAdmissionDeps = {
   normalizeEntityInput(
-    env: Env,
+    env: RuntimeState,
     input: RoutedEntityInput,
     context: string,
   ): RoutedEntityInput;
@@ -44,7 +44,7 @@ const rejectRuntimeInput = (message: string): never => {
 };
 
 const collectJOutbox = (
-  env: Env,
+  env: RuntimeState,
   runtimeInput: RuntimeInput,
 ): JInput[] => {
   if (!runtimeInput.jInputs?.length) return [];
@@ -64,7 +64,7 @@ const collectJOutbox = (
 };
 
 const validateEntityInputs = (
-  env: Env,
+  env: RuntimeState,
   runtimeInput: RuntimeInput,
   isReplay: boolean,
   deps: RuntimeInputAdmissionDeps,
@@ -100,7 +100,7 @@ const validateEntityInputs = (
   });
 
 const registerReliableEntityInputs = (
-  env: Env,
+  env: RuntimeState,
   inputs: RoutedEntityInput[],
   isReplay: boolean,
 ): Pick<PreparedRuntimeIngress, 'entityInputs' | 'immediateReliableReceipts'> => {
@@ -132,7 +132,7 @@ const registerReliableEntityInputs = (
 };
 
 export const prepareRuntimeInputIngress = (
-  env: Env,
+  env: RuntimeState,
   runtimeInput: RuntimeInput,
   isReplay: boolean,
   deps: RuntimeInputAdmissionDeps,

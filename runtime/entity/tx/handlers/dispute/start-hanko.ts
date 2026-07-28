@@ -1,7 +1,7 @@
 import type {
-  AccountMachine,
+  AccountState,
   EntityState,
-  Env,
+  RuntimeState,
 } from '../../../../types';
 import { addMessage } from '../../../../state-helpers';
 import { createDisputeProofHashWithNonce } from '../../../../protocol/dispute/proof-builder';
@@ -17,10 +17,10 @@ import type { StartEvidence } from './start-evidence';
 export const verifyStartHanko = async (
   sourceState: EntityState,
   state: EntityState,
-  account: AccountMachine,
+  account: AccountState,
   counterpartyId: string,
   evidence: StartEvidence,
-  env: Env,
+  env: RuntimeState,
 ): Promise<boolean> => {
   const domain = resolveDepositoryHankoDomain(sourceState);
   if (!domain) {

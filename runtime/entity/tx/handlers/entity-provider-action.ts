@@ -4,7 +4,7 @@ import type {
   EntityInput,
   EntityState,
   EntityTx,
-  Env,
+  RuntimeState,
   HashType,
   JInput,
   JTx,
@@ -67,7 +67,7 @@ const requireNumberedEntity = (entityId: string): bigint => {
   return value;
 };
 
-const requireCertifiedBoardEpoch = (state: EntityState, env: Env): bigint => {
+const requireCertifiedBoardEpoch = (state: EntityState, env: RuntimeState): bigint => {
   const record = resolveObserverCertifiedBoardRecord(
     state,
     getCertifiedBoardNodeStore(env),
@@ -132,7 +132,7 @@ const releasePayload = (
 const handleAction = (
   entityState: EntityState,
   entityTx: TransferTx | ReleaseTx,
-  env: Env,
+  env: RuntimeState,
 ): EntityTxReducerResult => {
   const configuredName = getJurisdictionConfigName(entityState.config.jurisdiction);
   if (!configuredName) throw new Error('ENTITY_PROVIDER_ACTION_JURISDICTION_MISSING');
@@ -221,19 +221,19 @@ const handleAction = (
 export const handleEntityProviderTransfer = (
   entityState: EntityState,
   entityTx: TransferTx,
-  env: Env,
+  env: RuntimeState,
 ): EntityTxReducerResult => handleAction(entityState, entityTx, env);
 
 export const handleEntityProviderReleaseControlShares = (
   entityState: EntityState,
   entityTx: ReleaseTx,
-  env: Env,
+  env: RuntimeState,
 ): EntityTxReducerResult => handleAction(entityState, entityTx, env);
 
 export const handleEntityProviderCancelAction = (
   entityState: EntityState,
   entityTx: CancelTx,
-  env: Env,
+  env: RuntimeState,
 ): EntityTxReducerResult => {
   const configuredName = getJurisdictionConfigName(entityState.config.jurisdiction);
   if (!configuredName) throw new Error('ENTITY_PROVIDER_ACTION_JURISDICTION_MISSING');

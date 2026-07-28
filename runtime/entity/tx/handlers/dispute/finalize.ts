@@ -1,9 +1,9 @@
 import type {
-  AccountMachine,
+  AccountState,
   EntityInput,
   EntityState,
   EntityTx,
-  Env,
+  RuntimeState,
 } from '../../../../types';
 import { addMessage, cloneEntityState } from '../../../../state-helpers';
 import {
@@ -32,10 +32,10 @@ type FinalizeTx = Extract<EntityTx, { type: 'disputeFinalize' }>;
 const collectRegistryPublication = (
   tx: FinalizeTx,
   state: EntityState,
-  account: AccountMachine,
+  account: AccountState,
   counterpartyId: string,
   finalProofbodyHash: string,
-  env: Env,
+  env: RuntimeState,
 ): { secrets: string[]; transformerAddress: string } => {
   const secrets = tx.data.useOnchainRegistry
     ? collectKnownDisputeSecretsForSnapshot(
@@ -56,10 +56,10 @@ const collectRegistryPublication = (
 
 const isFinalizeTimingAllowed = (
   state: EntityState,
-  account: AccountMachine,
+  account: AccountState,
   counterpartyId: string,
   selection: FinalProofSelection,
-  env: Env,
+  env: RuntimeState,
 ): boolean => {
   const activeDispute = account.activeDispute!;
   const callerIsLeft = account.leftEntity === state.entityId;
@@ -82,7 +82,7 @@ const isFinalizeTimingAllowed = (
 
 const queueDisputeFinalize = (
   state: EntityState,
-  account: AccountMachine,
+  account: AccountState,
   proof: FinalProofPayload,
   registry: { secrets: string[]; transformerAddress: string },
 ): void => {
@@ -114,7 +114,7 @@ const queueDisputeFinalize = (
 export const handleDisputeFinalize = async (
   entityState: EntityState,
   entityTx: FinalizeTx,
-  env: Env,
+  env: RuntimeState,
 ): Promise<{ newState: EntityState; outputs: EntityInput[] }> => {
   const counterpartyId = entityTx.data.counterpartyEntityId;
   const newState = cloneEntityState(entityState);

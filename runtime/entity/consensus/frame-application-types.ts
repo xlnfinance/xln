@@ -4,7 +4,7 @@ import type {
   EntityInput,
   EntityState,
   EntityTx,
-  Env,
+  RuntimeState,
   HashType,
   JInput,
   RuntimeOverlayRecord,
@@ -21,7 +21,7 @@ import type {
 } from '../tx/handlers/account';
 
 export type ApplyEntityTxsInOrderContext = {
-  env: Env;
+  env: RuntimeState;
   entityTxs: EntityTx[];
   currentEntityState: EntityState;
   allOutputs: EntityInput[];

@@ -1,6 +1,6 @@
 import { normalizeRuntimeId } from '../networking/runtime-id';
 import type {
-  Env,
+  RuntimeState,
   ReliableDeliveryIdentity,
   ReliableDeliveryReceipt,
   RoutedEntityInput,
@@ -43,7 +43,7 @@ export type ReliableIngressRegistrationOptions = {
 };
 
 const validateIngressRoute = (
-  env: Env,
+  env: RuntimeState,
   fromRuntimeIdRaw: string,
   input: RoutedEntityInput,
 ): string => {
@@ -57,7 +57,7 @@ const validateIngressRoute = (
 };
 
 const pendingIdentitiesForLane = (
-  env: Env,
+  env: RuntimeState,
   fromRuntimeId: string,
   identity: ReliableDeliveryIdentity,
 ): ReliableDeliveryIdentity[] => [...(env.runtimeState?.pendingReliableIngress?.values() ?? [])]
@@ -66,7 +66,7 @@ const pendingIdentitiesForLane = (
   .filter(candidate => candidate.laneKey === identity.laneKey);
 
 const assertSourceLaneCapacity = (
-  env: Env,
+  env: RuntimeState,
   fromRuntimeId: string,
   identity: ReliableDeliveryIdentity,
 ): void => assertReceiverSourceLaneCapacity(
@@ -75,7 +75,7 @@ const assertSourceLaneCapacity = (
 );
 
 const registerAgainstDurableFrontiers = (
-  env: Env,
+  env: RuntimeState,
   fromRuntimeId: string,
   input: RoutedEntityInput,
   identity: ReliableDeliveryIdentity,
@@ -169,7 +169,7 @@ const registerAgainstDurableFrontiers = (
 };
 
 const assertNoPendingOrderGap = (
-  env: Env,
+  env: RuntimeState,
   fromRuntimeId: string,
   identity: ReliableDeliveryIdentity,
 ): boolean => {
@@ -185,7 +185,7 @@ const assertNoPendingOrderGap = (
 };
 
 const canEnqueueContiguousPendingAccountAck = (
-  env: Env,
+  env: RuntimeState,
   fromRuntimeId: string,
   identity: ReliableDeliveryIdentity,
 ): boolean => {
@@ -198,7 +198,7 @@ const canEnqueueContiguousPendingAccountAck = (
 
 /** Register transport ingress without treating durable queueing as terminal coverage. */
 export const registerReliableIngress = (
-  env: Env,
+  env: RuntimeState,
   fromRuntimeIdRaw: string,
   input: RoutedEntityInput,
   options: ReliableIngressRegistrationOptions = {},

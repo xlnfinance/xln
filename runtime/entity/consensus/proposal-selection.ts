@@ -6,7 +6,7 @@ import {
   isFrozenBaseJPrefixRollAuthorized,
 } from '../../jurisdiction/j-prefix-consensus';
 import { nodeProcess } from '../../runtime/platform';
-import type { EntityReplica, EntityTx, Env } from '../../types';
+import type { EntityReplica, EntityTx, RuntimeState } from '../../types';
 import { accountHasProposableMempool } from './account-mempool-eligibility';
 import { prioritizeScheduledWakeTransactions } from './input-merge';
 import { getReplicaProposalLeader } from './leader';
@@ -33,7 +33,7 @@ export type EntityProposalSelectionOptions = {
 };
 
 const addCertifiedJRange = (
-  env: Env,
+  env: RuntimeState,
   replica: EntityReplica,
   trustedLocalCrossJurisdiction: boolean,
   certificate: NonNullable<ReturnType<typeof buildJPrefixCertificate>>,
@@ -59,7 +59,7 @@ const addCertifiedJRange = (
 };
 
 export const selectEntityProposal = async (
-  env: Env,
+  env: RuntimeState,
   replica: EntityReplica,
   options: EntityProposalSelectionOptions,
 ): Promise<EntityProposalSelection> => {

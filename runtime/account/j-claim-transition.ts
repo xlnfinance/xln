@@ -1,4 +1,4 @@
-import type { AccountMachine, AccountTx, JurisdictionEvent } from '../types';
+import type { AccountState, AccountTx, JurisdictionEvent } from '../types';
 import type {
   AccountJClaimAccumulatorState,
   AccountJClaimDomain,
@@ -36,14 +36,14 @@ const canonicalEvents = (value: unknown): JurisdictionEvent[] => {
   return ordered;
 };
 
-const claimDomain = (account: AccountMachine, domain: Pick<AccountJClaimDomain, 'chainId' | 'depositoryAddress'>) => ({
+const claimDomain = (account: AccountState, domain: Pick<AccountJClaimDomain, 'chainId' | 'depositoryAddress'>) => ({
   ...domain,
   leftEntity: account.leftEntity,
   rightEntity: account.rightEntity,
 });
 
 const buildRecord = (
-  account: AccountMachine,
+  account: AccountState,
   domain: Pick<AccountJClaimDomain, 'chainId' | 'depositoryAddress'>,
   side: AccountJClaimSide,
   data: ClaimTx['data'],
@@ -55,7 +55,7 @@ const buildRecord = (
 });
 
 export const prepareAccountJClaimTx = (
-  account: AccountMachine,
+  account: AccountState,
   tx: ClaimTx,
   domain: Pick<AccountJClaimDomain, 'chainId' | 'depositoryAddress'>,
   session: AccountJClaimSession,
@@ -106,7 +106,7 @@ export type AccountJClaimTransition = Readonly<{
 }>;
 
 export const applyAccountJClaimTransition = (
-  account: AccountMachine,
+  account: AccountState,
   tx: ClaimTx,
   byLeft: boolean,
   domain: Pick<AccountJClaimDomain, 'chainId' | 'depositoryAddress'>,

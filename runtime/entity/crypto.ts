@@ -1,17 +1,17 @@
 import { getSignerPrivateKey, getSignerPrivateKeyIfAvailable } from '../account/crypto';
 import { extractSignerId } from '../ids';
 import { deriveEncryptionKeyPair, pubKeyToHex } from '../networking/p2p-crypto';
-import type { Env } from '../types';
+import type { RuntimeState } from '../types';
 
 const bytesToHex = (bytes: Uint8Array): string =>
   `0x${Array.from(bytes).map(byte => byte.toString(16).padStart(2, '0')).join('')}`;
 
-export const hasLocalSignerKey = (env: Env, signerId: string): boolean => {
+export const hasLocalSignerKey = (env: RuntimeState, signerId: string): boolean => {
   return getSignerPrivateKeyIfAvailable(env, signerId) !== null;
 };
 
 export const deriveLocalEntityCryptoKeys = (
-  env: Env,
+  env: RuntimeState,
   entityId: string,
   signerId: string,
 ): { publicKey: string; privateKey: string } => {
@@ -22,7 +22,7 @@ export const deriveLocalEntityCryptoKeys = (
 };
 
 export const resolveReplicaEntityCryptoKeys = (
-  env: Env,
+  env: RuntimeState,
   entityId: string,
   signerId: string,
   existing?: { publicKey?: string; privateKey?: string },
@@ -39,7 +39,7 @@ export const resolveReplicaEntityCryptoKeys = (
 };
 
 export const canonicalizeLocalEntityCryptoKeys = (
-  env: Env,
+  env: RuntimeState,
   entityId: string,
   signerId: string,
   state: { entityEncPubKey?: string; entityEncPrivKey?: string },
@@ -62,7 +62,7 @@ export const canonicalizeLocalEntityCryptoKeys = (
  * storage corruption and must never be repaired implicitly during restore.
  */
 export const assertPersistedLocalEntityCryptoKeys = (
-  env: Env,
+  env: RuntimeState,
   entityId: string,
   signerId: string,
   state: { entityEncPubKey?: string; entityEncPrivKey?: string },
@@ -81,7 +81,7 @@ export const assertPersistedLocalEntityCryptoKeys = (
   }
 };
 
-export const assertLocalEntityCryptoKeys = (env: Env): void => {
+export const assertLocalEntityCryptoKeys = (env: RuntimeState): void => {
   for (const [replicaKey, replica] of env.eReplicas.entries()) {
     const signerId = extractSignerId(replicaKey);
     canonicalizeLocalEntityCryptoKeys(env, replica.entityId, signerId, replica.state);

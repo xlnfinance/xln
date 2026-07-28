@@ -6,7 +6,7 @@ import { createStructuredLogger } from '../infra/logger';
 import type { JAdapter, JAdapterConfig } from '../jadapter/types';
 import { safeStringify } from '../protocol/serialization';
 import type {
-  Env,
+  RuntimeState,
   JurisdictionImportRequest,
   JurisdictionImportResult,
   JReplica,
@@ -165,7 +165,7 @@ export const buildJurisdictionImportRequestHash = (
 const jurisdictionNameKey = (name: string): string => name.trim().toLowerCase();
 
 const findJurisdictionReplica = (
-  env: Env,
+  env: RuntimeState,
   name: string,
 ): [string, JReplica] | null => {
   const wanted = jurisdictionNameKey(name);
@@ -206,7 +206,7 @@ const assertReplicaMatchesRequest = (
 };
 
 export const applyImportJurisdictionIntent = (
-  env: Env,
+  env: RuntimeState,
   runtimeTx: ImportJRuntimeTx,
 ): void => {
   const request = normalizeJurisdictionImportRequest(runtimeTx.data);
@@ -338,7 +338,7 @@ const assertReplicaMatchesResult = (
 };
 
 const assertWatcherIdentityAvailable = (
-  env: Env,
+  env: RuntimeState,
   result: JurisdictionImportResult,
 ): void => {
   for (const [name, replica] of env.jReplicas.entries()) {
@@ -355,7 +355,7 @@ const assertWatcherIdentityAvailable = (
 };
 
 export const applyCompleteImportJurisdiction = (
-  env: Env,
+  env: RuntimeState,
   runtimeTx: CompleteImportJRuntimeTx,
 ): void => {
   const existing = findJurisdictionReplica(env, runtimeTx.data.name);
@@ -552,7 +552,7 @@ export const prepareJurisdictionImportResult = async (
 };
 
 export const materializePendingJurisdictionImportResults = async (
-  env: Env,
+  env: RuntimeState,
   enqueue: (runtimeTx: CompleteImportJRuntimeTx) => void,
 ): Promise<void> => {
   const pending = env.runtimeState?.pendingJurisdictionImports;

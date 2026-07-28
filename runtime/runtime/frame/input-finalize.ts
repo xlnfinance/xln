@@ -3,7 +3,7 @@ import { createStructuredLogger } from '../../infra/logger';
 import { createGossipLayer } from '../../networking/gossip';
 import { normalizeRuntimeId } from '../../networking/runtime-id';
 import type {
-  Env,
+  RuntimeState,
   JInput,
   RoutedEntityInput,
   RuntimeInput,
@@ -23,7 +23,7 @@ const runtimeLog = createStructuredLogger('runtime');
 
 export type RuntimeReliableCommitDeps = {
   applyCommittedLocalReceipts(
-    env: Env,
+    env: RuntimeState,
     commits: ReliableIngressCommit[],
     options: {
       isReplay: boolean;
@@ -33,7 +33,7 @@ export type RuntimeReliableCommitDeps = {
 };
 
 export const commitRuntimeReliableIngress = (
-  env: Env,
+  env: RuntimeState,
   receivedInputs: RoutedEntityInput[],
   appliedInputs: RoutedEntityInput[],
   isReplay: boolean,
@@ -63,7 +63,7 @@ const countMeaningfulEntityInputs = (
     return count + Number(meaningful);
   }, 0);
 
-const emitQueuedJBatches = (env: Env, jOutbox: readonly JInput[]): void => {
+const emitQueuedJBatches = (env: RuntimeState, jOutbox: readonly JInput[]): void => {
   for (const jInput of jOutbox) {
     for (const jTx of jInput.jTxs) {
       env.emit('JBatchQueued', {
@@ -76,7 +76,7 @@ const emitQueuedJBatches = (env: Env, jOutbox: readonly JInput[]): void => {
 };
 
 export const advanceAppliedRuntimeFrame = (
-  env: Env,
+  env: RuntimeState,
   runtimeInput: RuntimeInput,
   runtimeTxs: readonly RuntimeTx[],
   appliedEntityInputs: readonly RoutedEntityInput[],
@@ -121,7 +121,7 @@ export const advanceAppliedRuntimeFrame = (
 };
 
 const durableIngressSources = (
-  env: Env,
+  env: RuntimeState,
   commits: readonly ReliableIngressCommit[],
 ): Map<string, Set<string>> => {
   const sourcesByIdentity = new Map<string, Set<string>>();
@@ -170,7 +170,7 @@ const durableReceiptInputs = (
   );
 
 export const buildAppliedRuntimeInput = (
-  env: Env,
+  env: RuntimeState,
   sourceInput: RuntimeInput,
   runtimeTxs: RuntimeTx[],
   receivedInputs: RoutedEntityInput[],

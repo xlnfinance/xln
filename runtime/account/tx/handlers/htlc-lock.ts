@@ -11,7 +11,7 @@
  * - Enforces revealBeforeHeight for griefing protection
  */
 
-import type { AccountMachine, AccountTx, HtlcLock } from '../../../types';
+import type { AccountState, AccountTx, HtlcLock } from '../../../types';
 import { deriveDelta } from '../../utils';
 import { FINANCIAL, LIMITS } from '../../../constants';
 import { ensureDelta } from '../delta-utils';
@@ -20,7 +20,7 @@ import { isHtlcTimelockExpired } from '../../htlc-deadline';
 import { encryptedHtlcLayer, hashEncryptedHtlcLayer } from '../../../protocol/htlc/onion-advance';
 
 export async function handleHtlcLock(
-  accountMachine: AccountMachine,
+  accountMachine: AccountState,
   accountTx: Extract<AccountTx, { type: 'htlc_lock' }>,
   byLeft: boolean,
   currentTimestamp: number,

@@ -1,7 +1,7 @@
 import type {
   AccountFrame,
   AccountInput,
-  AccountMachine,
+  AccountState,
   AccountTx,
 } from '../../types';
 import {
@@ -26,8 +26,8 @@ type DisputeSeal = NonNullable<
 >;
 
 const resolveDisputeSeal = (
-  account: AccountMachine,
-  candidate: AccountMachine,
+  account: AccountState,
+  candidate: AccountState,
   proof: PreparedProposalProof,
 ): DisputeSeal | undefined => {
   if (proof.disputeHash) {
@@ -56,8 +56,8 @@ const resolveDisputeSeal = (
 };
 
 const buildOutboundAccountInput = (
-  account: AccountMachine,
-  candidate: AccountMachine,
+  account: AccountState,
+  candidate: AccountState,
   frame: AccountFrame,
   proof: PreparedProposalProof,
 ): Extract<AccountInput, { kind: 'frame' | 'frame_ack' }> => {
@@ -94,8 +94,8 @@ const buildOutboundAccountInput = (
 };
 
 export const finalizeAccountProposal = (
-  account: AccountMachine,
-  candidate: AccountMachine,
+  account: AccountState,
+  candidate: AccountState,
   frame: AccountFrame,
   proof: PreparedProposalProof,
   counterparty: string,

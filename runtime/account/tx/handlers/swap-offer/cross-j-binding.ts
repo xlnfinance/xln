@@ -1,9 +1,9 @@
-import type { AccountMachine } from '../../../../types';
+import type { AccountState } from '../../../../types';
 import { withCanonicalCrossJurisdictionRouteHash } from '../../../../extensions/cross-j';
 import type { SwapOfferTx } from './admission';
 
 export const validateCrossJurisdictionSourceBinding = (
-  account: AccountMachine,
+  account: AccountState,
   tx: SwapOfferTx,
 ): string | null => {
   const route = tx.data.crossJurisdiction;

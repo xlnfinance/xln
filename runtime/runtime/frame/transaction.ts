@@ -1,5 +1,5 @@
 import type { JAdapter } from '../../jadapter';
-import type { Env, RuntimeInput } from '../../types';
+import type { RuntimeState, RuntimeInput } from '../../types';
 import { requireRuntimeMempool } from '../input-queue';
 import {
   assertRuntimeFrameStorageState,
@@ -43,8 +43,8 @@ const LIVE_STATE_KEYS = new Set<string>([
 ]);
 
 export type RuntimeFrameTransaction = {
-  liveEnv: Env;
-  workingEnv: Env;
+  liveEnv: RuntimeState;
+  workingEnv: RuntimeState;
   sharedStateBaseline: Map<string, RuntimeFrameSharedStateSnapshot>;
   liveFrameLogBaseLength: number;
   workingCleanLogBaseLength: number;
@@ -52,7 +52,7 @@ export type RuntimeFrameTransaction = {
   published: boolean;
 };
 
-export const createRuntimeFrameTransaction = (liveEnv: Env): RuntimeFrameTransaction => {
+export const createRuntimeFrameTransaction = (liveEnv: RuntimeState): RuntimeFrameTransaction => {
   const workingEnv = cloneRuntimeFrameWorkingEnv(liveEnv);
   const workingMempool = requireRuntimeMempool(workingEnv);
   const workingState = ensureRuntimeState(workingEnv);
@@ -111,8 +111,8 @@ export const prependOlderRuntimeInput = (older: RuntimeInput, newer: RuntimeInpu
 };
 
 const mergeEntityHints = (
-  working: NonNullable<Env['runtimeState']>['entityRuntimeHints'],
-  live: NonNullable<Env['runtimeState']>['entityRuntimeHints'],
+  working: NonNullable<RuntimeState['runtimeState']>['entityRuntimeHints'],
+  live: NonNullable<RuntimeState['runtimeState']>['entityRuntimeHints'],
 ) => {
   const merged = new Map(working ?? []);
   for (const [entityId, candidate] of live ?? []) {
@@ -157,7 +157,7 @@ const publishRuntimeState = (transaction: RuntimeFrameTransaction): void => {
   liveState.logState.nextId = Math.max(liveState.logState.nextId, workingState.logState?.nextId ?? 0);
 };
 
-export const publishRuntimeFrameTransaction = (transaction: RuntimeFrameTransaction): Env => {
+export const publishRuntimeFrameTransaction = (transaction: RuntimeFrameTransaction): RuntimeState => {
   if (transaction.published) return transaction.liveEnv;
   const { liveEnv, workingEnv } = transaction;
   const activeMempool = requireRuntimeMempool(liveEnv);

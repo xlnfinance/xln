@@ -1,9 +1,9 @@
 import { ethers } from 'ethers';
 
 import type {
-  AccountMachine,
+  AccountState,
   AccountTx,
-  Env,
+  RuntimeState,
   SettlementDiff,
   SettlementOp,
   SettlementWorkspace,
@@ -31,7 +31,7 @@ type SettleTransitionTx = Extract<AccountTx, { type: 'settle_transition' }>;
 type UpsertTransition = Extract<SettleTransitionTx['data'], { kind: 'upsert' }>;
 
 export const hasPendingSettlementTransition = (
-  account: Pick<AccountMachine, 'mempool' | 'pendingFrame'>,
+  account: Pick<AccountState, 'mempool' | 'pendingFrame'>,
 ): boolean =>
   account.mempool.some((tx) => tx.type === 'settle_transition') ||
   Boolean(account.pendingFrame?.accountTxs.some((tx) => tx.type === 'settle_transition'));
@@ -87,7 +87,7 @@ const assertSettlementOps = (ops: readonly SettlementOp[]): void => {
 };
 
 const canonicalWorkspaceBody = (
-  account: Pick<AccountMachine, 'leftEntity' | 'rightEntity'>,
+  account: Pick<AccountState, 'leftEntity' | 'rightEntity'>,
   workspace: Pick<SettlementWorkspace, 'version' | 'ops' | 'lastModifiedByLeft' | 'executorIsLeft' | 'memo'>,
 ) => ({
   domain: WORKSPACE_DOMAIN,
@@ -101,14 +101,14 @@ const canonicalWorkspaceBody = (
 });
 
 export const createSettlementWorkspaceHash = (
-  account: Pick<AccountMachine, 'leftEntity' | 'rightEntity'>,
+  account: Pick<AccountState, 'leftEntity' | 'rightEntity'>,
   workspace: Pick<SettlementWorkspace, 'version' | 'ops' | 'lastModifiedByLeft' | 'executorIsLeft' | 'memo'>,
 ): string => computeCanonicalMerkleRoot('settlement.workspace', [
   ['body', canonicalWorkspaceBody(account, workspace)],
 ]);
 
 export const assertCanonicalSettlementWorkspace = (
-  account: Pick<AccountMachine, 'leftEntity' | 'rightEntity'>,
+  account: Pick<AccountState, 'leftEntity' | 'rightEntity'>,
   workspace: SettlementWorkspace,
 ): string => {
   const stored = assertWorkspaceHash(workspace.workspaceHash, 'SETTLEMENT_WORKSPACE_HASH_INVALID');
@@ -124,7 +124,7 @@ const holdPlan = (diffs: readonly SettlementDiff[]): HoldPlan[] => diffs.map((di
 }));
 
 const releaseWorkspaceHolds = (
-  draft: AccountMachine,
+  draft: AccountState,
   workspace: SettlementWorkspace,
 ): Set<number> => {
   const changed = new Set<number>();
@@ -153,7 +153,7 @@ const releaseWorkspaceHolds = (
 };
 
 const addWorkspaceHolds = (
-  draft: AccountMachine,
+  draft: AccountState,
   workspace: SettlementWorkspace,
 ): Set<number> => {
   const changed = new Set<number>();
@@ -181,7 +181,7 @@ const addWorkspaceHolds = (
 };
 
 const assertCurrentWorkspace = (
-  account: AccountMachine,
+  account: AccountState,
   version: number,
   suppliedHash: string,
 ): SettlementWorkspace => {
@@ -220,7 +220,7 @@ const assertSameOptionalHanko = (
 };
 
 const resolveSettlementSealBoardAuthority = async (
-  env: Env,
+  env: RuntimeState,
   sourceEntity: string,
   certifiedCounterpartyBoardHash?: string,
 ): Promise<string | undefined> => {
@@ -255,7 +255,7 @@ const resolveSettlementSealBoardAuthority = async (
 };
 
 const assertSettlementSealNonce = (
-  draft: AccountMachine,
+  draft: AccountState,
   workspace: SettlementWorkspace,
   settlementNonce: number,
 ): void => {
@@ -282,9 +282,9 @@ const assertSettlementSealNonce = (
 };
 
 const prepareSettlementSeal = (
-  draft: AccountMachine,
+  draft: AccountState,
   transition: Extract<SettleTransitionTx['data'], { kind: 'seal' }>,
-  env: Env,
+  env: RuntimeState,
 ) => {
   const workspace = assertCurrentWorkspace(draft, transition.version, transition.workspaceHash);
   if (workspace.status === 'submitted') throw new Error('SETTLEMENT_SEAL_SUBMITTED_FORBIDDEN');
@@ -375,10 +375,10 @@ const prepareSettlementSeal = (
 type PreparedSettlementSeal = ReturnType<typeof prepareSettlementSeal>;
 
 const verifySettlementSealHankos = async (
-  draft: AccountMachine,
+  draft: AccountState,
   transition: Extract<SettleTransitionTx['data'], { kind: 'seal' }>,
   byLeft: boolean,
-  env: Env,
+  env: RuntimeState,
   prepared: PreparedSettlementSeal,
   registeredBoardHash?: string,
 ): Promise<{ postHanko: string; settlementHanko?: string }> => {
@@ -429,7 +429,7 @@ const verifySettlementSealHankos = async (
 };
 
 const commitSettlementSeal = (
-  draft: AccountMachine,
+  draft: AccountState,
   byLeft: boolean,
   timestamp: number,
   prepared: PreparedSettlementSeal,
@@ -498,11 +498,11 @@ const commitSettlementSeal = (
 };
 
 const applySettlementSeal = async (
-  draft: AccountMachine,
+  draft: AccountState,
   transition: Extract<SettleTransitionTx['data'], { kind: 'seal' }>,
   byLeft: boolean,
   timestamp: number,
-  env: Env | undefined,
+  env: RuntimeState | undefined,
   registeredBoardHash?: string,
 ): Promise<void> => {
   if (!env) throw new Error('SETTLEMENT_SEAL_ENV_MISSING');
@@ -521,7 +521,7 @@ const applySettlementSeal = async (
 };
 
 const buildUpsertWorkspace = (
-  account: AccountMachine,
+  account: AccountState,
   transition: UpsertTransition,
   byLeft: boolean,
   timestamp: number,
@@ -569,8 +569,8 @@ const buildUpsertWorkspace = (
 };
 
 const commitDraft = (
-  account: AccountMachine,
-  draft: AccountMachine,
+  account: AccountState,
+  draft: AccountState,
   changedTokens: ReadonlySet<number>,
 ): void => {
   for (const tokenId of changedTokens) {
@@ -586,7 +586,7 @@ const commitDraft = (
 
 // AccountSettled is bilateral Account consensus too. If it wins a retry race,
 // release the exact workspace holds before removing the workspace body.
-export function clearFinalizedSettlementWorkspace(account: AccountMachine): void {
+export function clearFinalizedSettlementWorkspace(account: AccountState): void {
   const draft = cloneAccountMachine(account);
   const workspace = draft.settlementWorkspace;
   if (!workspace) return;
@@ -599,7 +599,7 @@ export function clearFinalizedSettlementWorkspace(account: AccountMachine): void
 }
 
 export const getSignedSettlementWorkspaceTxError = (
-  account: AccountMachine,
+  account: AccountState,
   tx: AccountTx,
 ): string | undefined => {
   const workspace = account.settlementWorkspace;
@@ -613,11 +613,11 @@ export const getSignedSettlementWorkspaceTxError = (
 };
 
 export async function handleSettleTransition(
-  account: AccountMachine,
+  account: AccountState,
   tx: SettleTransitionTx,
   byLeft: boolean,
   timestamp: number,
-  env?: Env,
+  env?: RuntimeState,
   registeredBoardHash?: string,
 ): Promise<{ success: boolean; events: string[]; error?: string }> {
   try {

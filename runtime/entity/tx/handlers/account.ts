@@ -1,4 +1,4 @@
-import type { AccountInput, EntityState, Env } from '../../../types';
+import type { AccountInput, EntityState, RuntimeState } from '../../../types';
 import { createStructuredLogger, shortId } from '../../../infra/logger';
 import {
   accountInputAck,
@@ -83,7 +83,7 @@ type AccountInputCheckpoint = (label: string) => void;
 const applyAccountInputPhases = async (
   state: EntityState,
   input: AccountInput,
-  env: Env,
+  env: RuntimeState,
   options: ApplyEntityTxOptions | undefined,
   checkpointProfile: AccountInputCheckpoint,
 ): Promise<AccountHandlerResult> => {
@@ -160,7 +160,7 @@ const logAccountInputProfile = (
 export async function applyAccountInputToEntity(
   state: EntityState,
   input: AccountInput,
-  env: Env,
+  env: RuntimeState,
   options?: ApplyEntityTxOptions,
 ): Promise<AccountHandlerResult> {
   const startedAt = getPerfMs();

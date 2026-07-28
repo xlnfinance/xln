@@ -1,4 +1,4 @@
-import type { AccountFrame, AccountMachine, Env } from '../../types';
+import type { AccountFrame, AccountState, RuntimeState } from '../../types';
 import { createDisputeProofHashWithNonce } from '../../protocol/dispute/proof-builder';
 import { signEntityHashes } from '../../hanko/signing';
 import {
@@ -37,9 +37,9 @@ export type ProposalProofResult =
   | { success: false; result: ProposeAccountFrameResult };
 
 const buildDisputeProjection = (
-  env: Env,
-  account: AccountMachine,
-  candidate: AccountMachine,
+  env: RuntimeState,
+  account: AccountState,
+  candidate: AccountState,
 ): DisputeProjection => {
   try {
     const proof = buildAccountProofBodyFromEnv(env, candidate);
@@ -71,8 +71,8 @@ const buildDisputeProjection = (
 };
 
 const persistDisputeProjection = (
-  account: AccountMachine,
-  candidate: AccountMachine,
+  account: AccountState,
+  candidate: AccountState,
   projection: DisputeProjection,
   disputeHanko: string | undefined,
 ): void => {
@@ -98,9 +98,9 @@ const persistDisputeProjection = (
 };
 
 export const prepareProposalProof = async (
-  env: Env,
-  account: AccountMachine,
-  candidate: AccountMachine,
+  env: RuntimeState,
+  account: AccountState,
+  candidate: AccountState,
   frame: AccountFrame,
   events: string[],
   quiet: boolean,

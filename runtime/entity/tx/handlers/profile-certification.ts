@@ -1,4 +1,4 @@
-import type { EntityState, EntityTx, Env, HashToSign } from '../../../types';
+import type { EntityState, EntityTx, RuntimeState, HashToSign } from '../../../types';
 import { cloneEntityState } from '../../../state-helpers';
 import { buildValidatorEncryptionBoard } from '../../../networking/profile-encryption';
 import { buildEntityProfileDescriptor, computeEntityProfileDescriptorHash } from '../../../networking/profile-descriptor';
@@ -52,7 +52,7 @@ export const buildCurrentEntityProfileHashToSign = (
 };
 
 export const handleCertifyProfileEntityTx = (
-  env: Env,
+  env: RuntimeState,
   entityState: EntityState,
   entityTx: CertifyProfileTx,
 ) => {

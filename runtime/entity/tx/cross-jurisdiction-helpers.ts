@@ -7,7 +7,7 @@ import {
   getJurisdictionStackId,
   isJurisdictionStackRef,
 } from '../../jurisdiction/jurisdiction-runtime';
-import type { AccountTx, CrossJurisdictionSwapRoute, EntityState, Env } from '../../types';
+import type { AccountTx, CrossJurisdictionSwapRoute, EntityState, RuntimeState } from '../../types';
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 const normalizeAddress = (value: unknown): string => String(value || '').trim().toLowerCase();
@@ -133,7 +133,7 @@ export const isCrossJurisdictionPullCancelWithinClear = (route: CrossJurisdictio
 );
 
 export const canonicalizeCrossJurisdictionRouteForKnownEntities = (
-  env: Env,
+  env: RuntimeState,
   state: EntityState,
   route: CrossJurisdictionSwapRoute,
 ): CrossJurisdictionSwapRoute => {
@@ -173,7 +173,7 @@ const routeSignerHintForLocalEntity = (
 };
 
 export const validateCrossJurisdictionLocalBinding = (
-  env: Env,
+  env: RuntimeState,
   state: EntityState,
   route: CrossJurisdictionSwapRoute,
 ): string | null => {

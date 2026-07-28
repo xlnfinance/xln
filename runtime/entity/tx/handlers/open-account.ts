@@ -5,7 +5,7 @@ import type {
   EntityInput,
   EntityState,
   EntityTx,
-  Env,
+  RuntimeState,
 } from '../../../types';
 import { formatEntityId } from '../../../utils';
 import { upsertSortedStringMapEntry } from '../../../storage/sorted-index';
@@ -149,7 +149,7 @@ const seedOpenAccountPolicies = (
 };
 
 export const handleOpenAccountEntityTx = (
-  _env: Env,
+  _env: RuntimeState,
   entityState: EntityState,
   entityTx: OpenAccountEntityTx,
   candidateEffects: EntityCandidateEffect[] = [],

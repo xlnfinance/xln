@@ -1,4 +1,4 @@
-import type { Env, JInput, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../types';
+import type { RuntimeState, JInput, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../types';
 import { getWallClockMs } from '../utils';
 import {
   createDueScheduledWakeInputs,
@@ -14,19 +14,19 @@ import {
   getNextEntityProviderActionRetryTimestamp,
 } from './entity-provider-action-submit-scheduler';
 
-type RuntimeState = NonNullable<Env['runtimeState']>;
+type RuntimeLifecycleState = NonNullable<RuntimeState['runtimeState']>;
 
 export type RuntimeWakeDeps = {
-  ensureRuntimeState(env: Env): RuntimeState;
-  requireRuntimeMempool(env: Env): RuntimeInput;
+  ensureRuntimeState(env: RuntimeState): RuntimeLifecycleState;
+  requireRuntimeMempool(env: RuntimeState): RuntimeInput;
   enqueueRuntimeInputs(
-    env: Env,
+    env: RuntimeState,
     inputs?: RoutedEntityInput[],
     runtimeTxs?: RuntimeTx[],
     jInputs?: JInput[],
     explicitTimestamp?: number,
   ): void;
-  getRuntimeNowMs(env: Env): number;
+  getRuntimeNowMs(env: RuntimeState): number;
 };
 
 /**
@@ -36,7 +36,7 @@ export type RuntimeWakeDeps = {
  */
 export { entityNeedsPeriodicWake };
 
-export const hasDueEntityHooksWithDeps = (env: Env, deps: RuntimeWakeDeps): boolean => {
+export const hasDueEntityHooksWithDeps = (env: RuntimeState, deps: RuntimeWakeDeps): boolean => {
   const dueAt = getNextScheduledWakeTimestamp(env);
   const jDueAt = getNextJSubmitRetryTimestamp(env);
   const actionDueAt = getNextEntityProviderActionRetryTimestamp(env);
@@ -46,7 +46,7 @@ export const hasDueEntityHooksWithDeps = (env: Env, deps: RuntimeWakeDeps): bool
     (actionDueAt !== null && actionDueAt <= now);
 };
 
-export const getEarliestWallClockDueTimestampWithDeps = (env: Env, _deps: RuntimeWakeDeps): number | null => {
+export const getEarliestWallClockDueTimestampWithDeps = (env: RuntimeState, _deps: RuntimeWakeDeps): number | null => {
   const wallClockNow = getWallClockMs();
   const due = [
     getNextScheduledWakeTimestamp(env),
@@ -57,7 +57,7 @@ export const getEarliestWallClockDueTimestampWithDeps = (env: Env, _deps: Runtim
   return due.length > 0 ? Math.min(...due) : null;
 };
 
-export const getNextWallClockWakeTimestampWithDeps = (env: Env, _deps: RuntimeWakeDeps): number | null => {
+export const getNextWallClockWakeTimestampWithDeps = (env: RuntimeState, _deps: RuntimeWakeDeps): number | null => {
   const due = [
     getNextScheduledWakeTimestamp(env),
     getNextJSubmitRetryTimestamp(env),
@@ -73,7 +73,7 @@ export const getNextWallClockWakeTimestampWithDeps = (env: Env, _deps: RuntimeWa
  * the same crontab transition.
  */
 export const generateHookPingsWithDeps = (
-  env: Env,
+  env: RuntimeState,
   deps: RuntimeWakeDeps,
   nowMs = deps.getRuntimeNowMs(env),
   queuedAt = env.timestamp ?? 0,

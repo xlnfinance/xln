@@ -1,7 +1,7 @@
 import type { Provider } from 'ethers';
 import type { JAdapter } from '../jadapter';
 import { createStructuredLogger } from '../infra/logger';
-import type { Env, JReplica } from '../types';
+import type { RuntimeState, JReplica } from '../types';
 
 const watcherLog = createStructuredLogger('runtime.jadapter-watcher');
 
@@ -32,7 +32,7 @@ const getWatcherKey = (replica: JReplica): string | null => {
   return `rpc:${chainId}:${getProviderUrl(adapter, replica).toLowerCase()}:${depository || replica.name}`;
 };
 
-export const startJurisdictionWatchers = (env: Env): void => {
+export const startJurisdictionWatchers = (env: RuntimeState): void => {
   // Quiesce closes ingress before draining accepted work. Never resurrect a
   // producer after that fence has been raised.
   if (env.runtimeState?.persistenceQuiescing || !env.jReplicas?.size) return;
@@ -56,7 +56,7 @@ export const startJurisdictionWatchers = (env: Env): void => {
   }
 };
 
-export const stopJurisdictionWatchers = (env: Env): void => {
+export const stopJurisdictionWatchers = (env: RuntimeState): void => {
   if (!env.jReplicas?.size) return;
   for (const [name, replica] of env.jReplicas) {
     const adapter = replica.jadapter;
@@ -88,7 +88,7 @@ const stopAdapterAndWait = (adapter: JAdapter, names: string[]): Promise<void> =
   }
 };
 
-export const stopJurisdictionWatchersAndWait = async (env: Env): Promise<void> => {
+export const stopJurisdictionWatchersAndWait = async (env: RuntimeState): Promise<void> => {
   if (!env.jReplicas?.size) return;
   const adapters = new Map<JAdapter, string[]>();
   for (const [name, replica] of env.jReplicas) {

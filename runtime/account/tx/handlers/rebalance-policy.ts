@@ -1,4 +1,4 @@
-import type { AccountMachine, AccountTx, RebalanceFeePolicySnapshot } from '../../../types';
+import type { AccountState, AccountTx, RebalanceFeePolicySnapshot } from '../../../types';
 import { TOKENS } from '../../../constants';
 
 type RebalancePolicyTx = Extract<AccountTx, { type: 'rebalance_policy' }>;
@@ -14,7 +14,7 @@ const sameTerms = (
   current.gasFee === next.gasFee;
 
 export const handleRebalancePolicy = (
-  account: AccountMachine,
+  account: AccountState,
   tx: RebalancePolicyTx,
   byLeft: boolean,
   committedTimestamp: number,

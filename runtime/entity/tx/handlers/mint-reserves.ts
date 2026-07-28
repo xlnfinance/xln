@@ -10,7 +10,7 @@
  * 3. J-events route back with ReserveUpdated
  */
 
-import type { EntityState, EntityTx, EntityInput, JInput, JTx, Env } from '../../../types';
+import type { EntityState, EntityTx, EntityInput, JInput, JTx, RuntimeState } from '../../../types';
 import { cloneEntityState, addMessage } from '../../../state-helpers';
 import {
   getJurisdictionConfigName,
@@ -23,7 +23,7 @@ const jBatchActionLog = createStructuredLogger('entity.jbatch');
 export async function handleMintReserves(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'mintReserves' }>,
-  env: Env
+  env: RuntimeState
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; jOutputs: JInput[] }> {
   const { tokenId, amount } = entityTx.data;
   const newState = cloneEntityState(entityState);

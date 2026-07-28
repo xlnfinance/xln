@@ -10,7 +10,7 @@ import { verifyHashLadderBinary } from '../../../protocol/htlc/hash-ladder';
 import { buildCrossJurisdictionCancelAck } from '../../../extensions/cross-j/orderbook';
 import { removeBookOrderById } from '../../../orderbook/cross-j';
 import { cloneEntityState, addMessage } from '../../../state-helpers';
-import type { CrossJurisdictionSwapRoute, EntityInput, EntityState, EntityTx, Env, RuntimeOverlayRecord } from '../../../types';
+import type { CrossJurisdictionSwapRoute, EntityInput, EntityState, EntityTx, RuntimeState, RuntimeOverlayRecord } from '../../../types';
 import { formatEntityId } from '../../../utils';
 import { findAccountKey, normalizeEntityRef } from '../account-key';
 import {
@@ -31,7 +31,7 @@ type CrossJurisdictionClearResult = {
   mempoolOps?: MempoolOp[];
 };
 
-const deterministicEntityTimestamp = (state: EntityState, env: Env): number =>
+const deterministicEntityTimestamp = (state: EntityState, env: RuntimeState): number =>
   Number(state.timestamp || env.timestamp || 0);
 
 const cancelOrderbookOfferIfPresent = (
@@ -55,7 +55,7 @@ const closeProofMatches = (
   left.closeMode === right.closeMode;
 
 type ClearContext = {
-  env: Env;
+  env: RuntimeState;
   entityState: EntityState;
   newState: EntityState;
   outputs: EntityInput[];
@@ -227,7 +227,7 @@ const requestFilledRouteReveal = (
 };
 
 export const handleRequestCrossJurisdictionClearEntityTx = (
-  env: Env,
+  env: RuntimeState,
   entityState: EntityState,
   entityTx: CrossJurisdictionClearTx,
   storageChanges: RuntimeOverlayRecord[] = [],
@@ -275,7 +275,7 @@ export const handleRequestCrossJurisdictionClearEntityTx = (
  * exact binary and proof against the already-committed source pull hashes.
  */
 export const handleMaterializeCrossJurisdictionClearEntityTx = (
-  env: Env,
+  env: RuntimeState,
   entityState: EntityState,
   entityTx: CrossJurisdictionClearMaterializationTx,
 ): CrossJurisdictionClearResult => {

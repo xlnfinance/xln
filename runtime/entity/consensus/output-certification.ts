@@ -7,7 +7,7 @@ import type {
   ConsensusOutputOrigin,
   EntityInput,
   EntityTx,
-  Env,
+  RuntimeState,
   HashToSign,
 } from '../../types';
 import { cloneAccountInputWithoutPostCommitHankos } from './hanko-witness';
@@ -88,7 +88,7 @@ export const buildConsensusOutputOrigin = (
 
 export const buildConsensusOutputOriginForState = (
   sourceState: EntityState,
-  env: Env,
+  env: RuntimeState,
   height: number,
   frameHash: string,
   outputIndex: number,
@@ -283,7 +283,7 @@ const isImmediatePreviousBoardAuthorityLive = (
 export const resolveConsensusOutputBoardAuthority = (
   origin: ConsensusOutputOrigin,
   observerState: EntityState,
-  env: Env,
+  env: RuntimeState,
 ): ConsensusOutputBoardAuthorityResolution => {
   const binding = origin.boardAuthority;
   const store = getCertifiedBoardNodeStore(env);
@@ -581,7 +581,7 @@ const collectAccountInputWitnesses = (input: AccountInput): OutputWitness[] => {
 export const assertCertifiedEntityOutputWitnesses = async (
   entityTxs: EntityTx[],
   sourceEntityId: string,
-  env: Env,
+  env: RuntimeState,
   observerState?: EntityState,
   authorityBoardHash?: string,
 ): Promise<void> => {
@@ -630,7 +630,7 @@ export type VerifiedCertifiedEntityOutput = {
  * that the other validators would later reject.
  */
 export const verifyCertifiedEntityOutput = async (
-  env: Env,
+  env: RuntimeState,
   observerState: EntityState,
   tx: Extract<EntityTx, { type: 'consensusOutput' }>,
 ): Promise<VerifiedCertifiedEntityOutput> => {
@@ -697,7 +697,7 @@ export const verifyCertifiedEntityOutput = async (
 
 export const buildCertifiedEntityOutputHashes = (
   sourceState: EntityState,
-  env: Env,
+  env: RuntimeState,
   height: number,
   frameHash: string,
   outputs: EntityInput[],

@@ -1,4 +1,4 @@
-import type { CrossJurisdictionSwapRoute, EntityInput, EntityState, EntityTx, Env } from '../../types';
+import type { CrossJurisdictionSwapRoute, EntityInput, EntityState, EntityTx, RuntimeState } from '../../types';
 import { resolveEntityProposerId } from '../../state-helpers';
 import { deriveCanonicalCrossJurisdictionBookOwner } from '../../extensions/cross-j/market';
 
@@ -19,7 +19,7 @@ export const crossJurisdictionRouteSignerHint = (
   return null;
 };
 
-export const findLocalEntityState = (env: Env, entityId: string): EntityState | null => {
+export const findLocalEntityState = (env: RuntimeState, entityId: string): EntityState | null => {
   const target = normalizeEntityRef(entityId);
   for (const replica of env.eReplicas?.values?.() || []) {
     const state = replica?.state;
@@ -29,7 +29,7 @@ export const findLocalEntityState = (env: Env, entityId: string): EntityState | 
 };
 
 export const buildCrossJurisdictionEntityOutput = (
-  env: Env,
+  env: RuntimeState,
   entityId: string,
   entityTxs: EntityTx[],
   signerIdHint?: string | null,
@@ -82,7 +82,7 @@ export const buildCertifiedEntityOutput = (
 });
 
 export const pushCrossJurisdictionEntityOutput = (
-  env: Env,
+  env: RuntimeState,
   outputs: EntityInput[],
   entityId: string,
   entityTxs: EntityTx[],

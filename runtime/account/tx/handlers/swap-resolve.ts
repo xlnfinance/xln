@@ -6,7 +6,7 @@
  * closes the remaining order. Cross-j offers use their separate ACK protocol.
  */
 
-import type { AccountMachine } from '../../../types';
+import type { AccountState } from '../../../types';
 import { recordSwapClosedLifecycle, recordSwapResolveLifecycle } from './swap-history';
 import {
   validateSwapResolve,
@@ -23,7 +23,7 @@ import type {
 } from './swap-resolve-types';
 
 const recordSwapResolveHistory = (
-  account: AccountMachine,
+  account: AccountState,
   tx: SwapResolveTx,
   currentHeight: number,
   resolve: ReturnType<typeof validateSwapResolve> & { success?: never },
@@ -67,7 +67,7 @@ const recordSwapResolveHistory = (
 };
 
 export async function handleSwapResolve(
-  account: AccountMachine,
+  account: AccountState,
   tx: SwapResolveTx,
   byLeft: boolean,
   currentHeight: number,

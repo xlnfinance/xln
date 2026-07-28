@@ -1,9 +1,9 @@
-import type { Env } from '../../types';
+import type { RuntimeState } from '../../types';
 import { inferRuntimeLifecyclePhase } from '../lifecycle';
 
-type RuntimeState = NonNullable<Env['runtimeState']>;
+type RuntimeLifecycleState = NonNullable<RuntimeState['runtimeState']>;
 
-export const assertRuntimeWriterAcceptingIngress = (state: RuntimeState): void => {
+export const assertRuntimeWriterAcceptingIngress = (state: RuntimeLifecycleState): void => {
   if (inferRuntimeLifecyclePhase(state) === 'halted') {
     throw new Error('RUNTIME_PROCESS_HALTED');
   }
@@ -15,7 +15,7 @@ export const assertRuntimeWriterAcceptingIngress = (state: RuntimeState): void =
  * discovered an ambiguous WAL outcome while this caller was queued.
  */
 export const acquireRuntimeFrameWriter = async (
-  state: RuntimeState,
+  state: RuntimeLifecycleState,
 ): Promise<() => void> => {
   assertRuntimeWriterAcceptingIngress(state);
   while (state.processingPromise) await state.processingPromise;

@@ -1,4 +1,4 @@
-import type { EntityState, Env } from '../../../../types';
+import type { EntityState, RuntimeState } from '../../../../types';
 import type { BookState, OrderbookExtState } from '../../../../orderbook';
 import type {
   CrossJurisdictionFillInstruction,
@@ -19,7 +19,7 @@ type RecordDebugProjectionReject = (
 ) => true;
 
 export type CrossOrderbookProcessInput = {
-  runtimeEnv?: Env;
+  runtimeEnv?: RuntimeState;
   hubState: EntityState;
   ext: OrderbookExtState;
   crossJurisdictionSwapOffers: CrossJurisdictionWorkingOrderbookOffer[];

@@ -1,4 +1,4 @@
-import type { AccountMachine } from '../../../types';
+import type { AccountState } from '../../../types';
 import { deriveDelta } from '../../utils';
 import { createDefaultDelta } from '../../../validation-utils';
 import { deriveSwapOffdeltaChanges } from '../../../orderbook/swap-execution';
@@ -17,7 +17,7 @@ const failure = (events: string[], error: string): SwapResolveFailure => ({
 });
 
 const validateCounterpartyCapacity = (
-  account: AccountMachine,
+  account: AccountState,
   resolve: ValidatedSwapResolve,
   events: string[],
 ): SwapResolveFailure | null => {
@@ -35,7 +35,7 @@ const validateCounterpartyCapacity = (
 };
 
 export const applySwapResolveFinancials = (
-  account: AccountMachine,
+  account: AccountState,
   resolve: ValidatedSwapResolve,
   events: string[],
 ): AppliedSwapResolve | SwapResolveFailure => {

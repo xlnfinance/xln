@@ -1,7 +1,7 @@
 import { HASHLADDER_MAX_FILL_RATIO, verifyHashLadderBinary } from '../../protocol/htlc/hash-ladder';
 import { hashHtlcSecret } from '../../protocol/htlc/utils';
 import { hashEncryptedHtlcLayer } from '../../protocol/htlc/onion-advance';
-import type { AccountFrame, AccountMachine, HtlcLock, PullCommitment } from '../../types';
+import type { AccountFrame, AccountState, HtlcLock, PullCommitment } from '../../types';
 import { isHtlcTimelockExpired } from '../htlc-deadline';
 import { isPullRevealExpired } from '../pull-deadline';
 import { ACCOUNT_NETWORK_ALLOWANCE_MS } from './constants';
@@ -41,11 +41,11 @@ const deadlineViolation = (reason: string): IncomingDeadlineViolation => ({ reas
 // Deadline admission is speculative: a rejected frame must leave the live
 // Account byte-identical. A Map clone alone still aliases HtlcLock values, so
 // simulating an `offer` would otherwise publish secretOffer before consensus.
-const cloneLocks = (account: AccountMachine): Map<string, HtlcLock> => new Map(
+const cloneLocks = (account: AccountState): Map<string, HtlcLock> => new Map(
   Array.from(account.locks, ([lockId, lock]) => [lockId, { ...lock }]),
 );
 
-const clonePulls = (account: AccountMachine): Map<string, PullCommitment> => new Map(
+const clonePulls = (account: AccountState): Map<string, PullCommitment> => new Map(
   Array.from(account.pulls?.entries() ?? [], ([pullId, pull]) => [pullId, { ...pull }]),
 );
 
@@ -213,7 +213,7 @@ const inspectPullDeadline = (
  * unenforceable obligation or exercising a payer timeout prematurely.
  */
 export function getIncomingAccountDeadlineViolation(
-  account: AccountMachine,
+  account: AccountState,
   frame: AccountFrame,
   context: AccountInputSecurityContext,
 ): IncomingDeadlineViolation | undefined {

@@ -1,11 +1,11 @@
 import type {
   AccountInput,
-  AccountMachine,
+  AccountState,
   AccountTx,
   EntityCandidateEffect,
   EntityInput,
   EntityState,
-  Env,
+  RuntimeState,
   HtlcNoteKey,
 } from '../../../../types';
 import { HEAVY_LOGS } from '../../../../utils';
@@ -26,11 +26,11 @@ import type { MempoolOp } from './orderbook-queue';
 const accountFollowupLog = createStructuredLogger('account.followup');
 
 type HtlcFollowupContext = {
-  env: Env;
+  env: RuntimeState;
   state: EntityState;
   newState: EntityState;
   input: AccountInput;
-  accountMachine: AccountMachine;
+  accountMachine: AccountState;
   outputs: EntityInput[];
   mempoolOps: MempoolOp[];
   candidateEffects: EntityCandidateEffect[];
@@ -42,7 +42,7 @@ type HtlcSecretFollowupContext = Pick<
   'env' | 'state' | 'newState' | 'outputs' | 'mempoolOps' | 'candidateEffects'
 >;
 
-const getJurisdictionId = (state: EntityState, env: Env): string =>
+const getJurisdictionId = (state: EntityState, env: RuntimeState): string =>
   String(state.config?.jurisdiction?.name || env.activeJurisdiction || '').trim();
 
 /**

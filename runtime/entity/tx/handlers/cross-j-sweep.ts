@@ -13,7 +13,7 @@ import {
 } from '../../../extensions/cross-j/orderbook';
 import { removeBookOrderById } from '../../../orderbook/cross-j';
 import { cloneEntityState, addMessage } from '../../../state-helpers';
-import type { EntityInput, EntityState, EntityTx, Env, RuntimeOverlayRecord } from '../../../types';
+import type { EntityInput, EntityState, EntityTx, RuntimeState, RuntimeOverlayRecord } from '../../../types';
 import { formatEntityId } from '../../../utils';
 import { findAccountKey } from '../account-key';
 import {
@@ -31,7 +31,7 @@ type CrossJurisdictionSweepResult = {
   mempoolOps?: MempoolOp[];
 };
 
-const deterministicEntityTimestamp = (state: EntityState, env: Env): number =>
+const deterministicEntityTimestamp = (state: EntityState, env: RuntimeState): number =>
   Number(state.timestamp || env.timestamp || 0);
 
 const cancelOrderbookOfferIfPresent = (
@@ -42,7 +42,7 @@ const cancelOrderbookOfferIfPresent = (
 ): boolean => removeBookOrderById(state, `${accountId}:${offerId}`, storageChanges);
 
 export const handleOrderbookSweepCrossJurisdictionEntityTx = (
-  env: Env,
+  env: RuntimeState,
   entityState: EntityState,
   entityTx: CrossJurisdictionSweepTx,
   storageChanges: RuntimeOverlayRecord[] = [],

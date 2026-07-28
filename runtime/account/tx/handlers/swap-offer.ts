@@ -6,7 +6,7 @@
  */
 
 import type {
-  AccountMachine,
+  AccountState,
   AccountTx,
 } from '../../../types';
 import type { SwapOfferEvent } from '../../../entity/tx/handlers/account';
@@ -23,7 +23,7 @@ type SwapOfferResult = {
 };
 
 export const handleSwapOffer = async (
-  account: AccountMachine,
+  account: AccountState,
   tx: Extract<AccountTx, { type: 'swap_offer' }>,
   byLeft: boolean,
   currentHeight: number,

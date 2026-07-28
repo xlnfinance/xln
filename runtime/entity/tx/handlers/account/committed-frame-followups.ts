@@ -3,7 +3,7 @@ import type {
   AccountTx,
   EntityCandidateEffect,
   EntityState,
-  Env,
+  RuntimeState,
   HtlcNoteKey,
   HtlcRoute,
 } from '../../../../types';
@@ -17,11 +17,11 @@ import { applyCommittedLendingFollowup } from './committed-lending-followup';
 
 const accountFollowupLog = createStructuredLogger('account.followup');
 
-const jurisdictionIdFor = (state: EntityState, env?: Env): string =>
+const jurisdictionIdFor = (state: EntityState, env?: RuntimeState): string =>
   String(state.config?.jurisdiction?.name || env?.activeJurisdiction || '').trim();
 
 function emitOriginatedHtlcFinalized(
-  env: Env | undefined,
+  env: RuntimeState | undefined,
   state: EntityState,
   route: HtlcRoute,
   accountTx: Extract<AccountTx, { type: 'htlc_resolve' }>,
@@ -58,7 +58,7 @@ export function applyCommittedAccountFrameFollowups(
   counterpartyId: string,
   committedFrame: AccountFrame,
   mempoolOps: MempoolOp[],
-  env: Env | undefined,
+  env: RuntimeState | undefined,
   candidateEffects: EntityCandidateEffect[],
 ): void {
   if (HEAVY_LOGS) {

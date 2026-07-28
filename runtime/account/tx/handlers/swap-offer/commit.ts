@@ -1,5 +1,5 @@
 import type {
-  AccountMachine,
+  AccountState,
   SwapOffer,
 } from '../../../../types';
 import type { SwapOfferEvent } from '../../../../entity/tx/handlers/account';
@@ -22,7 +22,7 @@ type SwapOfferResult = {
 };
 
 export const commitSwapOffer = (
-  account: AccountMachine,
+  account: AccountState,
   tx: SwapOfferTx,
   admission: SwapOfferAdmission,
   prepared: PreparedSwapOfferAmounts,

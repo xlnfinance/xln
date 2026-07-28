@@ -1,8 +1,8 @@
 import type {
-  AccountMachine,
+  AccountState,
   AccountTx,
   EntityCandidateEffect,
-  Env,
+  RuntimeState,
 } from '../../types';
 import { getAccountPerspective } from '../../state-helpers';
 import type { AccountJClaimSession } from '../j-claim-session';
@@ -39,13 +39,13 @@ import { handleLendingAccountTx } from './handlers/lending';
 const accountTxLog = createStructuredLogger('account.tx');
 
 type MutationContext = {
-  account: AccountMachine;
+  account: AccountState;
   tx: AccountTx;
   byLeft: boolean;
   timestamp: number;
   height: number;
   isValidation: boolean;
-  env?: Env;
+  env?: RuntimeState;
   jClaimSession?: AccountJClaimSession;
   counterpartyCertifiedBoardHash?: string;
   candidateEffects: EntityCandidateEffect[];
@@ -176,13 +176,13 @@ const rejectFrameOnlyTx = (context: MutationContext): ApplyAccountTxResult => {
  * receives the same frame-controlled time/height and mutates only this Account.
  */
 export const applyAccountTxMutation = async (
-  account: AccountMachine,
+  account: AccountState,
   tx: AccountTx,
   byLeft: boolean,
   timestamp: number,
   height: number,
   isValidation: boolean,
-  env: Env | undefined,
+  env: RuntimeState | undefined,
   jClaimSession: AccountJClaimSession | undefined,
   counterpartyCertifiedBoardHash: string | undefined,
   candidateEffects: EntityCandidateEffect[],

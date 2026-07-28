@@ -7,11 +7,11 @@
  */
 
 import type {
-  AccountMachine,
+  AccountState,
   EntityInput,
   EntityState,
   EntityTx,
-  Env,
+  RuntimeState,
   RuntimeOverlayRecord,
   SwapOffer,
 } from '../../../types';
@@ -90,7 +90,7 @@ const removeDisputedAccountOrdersFromBook = (
   state: EntityState,
   outputs: EntityInput[],
   counterpartyEntityId: string,
-  account: AccountMachine,
+  account: AccountState,
   storageChanges: RuntimeOverlayRecord[],
 ): { remoteOrderIds: string[] } => {
   let localRemoved = 0;
@@ -123,11 +123,11 @@ const removeDisputedAccountOrdersFromBook = (
 
 const markAccountDisputePreparing = (
   state: EntityState,
-  account: AccountMachine,
+  account: AccountState,
   description: string,
   minCooldownMs: number,
   pendingOrderbookRemovalIds: readonly string[],
-  startIntent: NonNullable<AccountMachine['disputePrepare']>['startIntent'],
+  startIntent: NonNullable<AccountState['disputePrepare']>['startIntent'],
 ): void => {
   const startedAt = Number(state.timestamp ?? 0);
   account.status = 'dispute_preparing';
@@ -147,7 +147,7 @@ const markAccountDisputePreparing = (
 
 const buildDisputeStartIntent = (
   tx: Extract<EntityTx, { type: 'prepareDispute' }>,
-): NonNullable<AccountMachine['disputePrepare']>['startIntent'] => ({
+): NonNullable<AccountState['disputePrepare']>['startIntent'] => ({
   description: tx.data.description ?? 'prepare-dispute',
   ...(tx.data.crossJurisdictionRouteId !== undefined
     ? { crossJurisdictionRouteId: tx.data.crossJurisdictionRouteId }
@@ -166,7 +166,7 @@ const buildDisputeStartIntent = (
 export const draftPreparedDisputeStartIfReady = async (
   entityState: EntityState,
   counterpartyEntityId: string,
-  env: Env,
+  env: RuntimeState,
   storageChanges: RuntimeOverlayRecord[] = [],
 ): Promise<{ newState: EntityState; outputs: EntityInput[] }> => {
   const account = entityState.accounts.get(counterpartyEntityId);
@@ -208,7 +208,7 @@ export const draftPreparedDisputeStartIfReady = async (
 export const handlePrepareDispute = async (
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'prepareDispute' }>,
-  env: Env,
+  env: RuntimeState,
   storageChanges: RuntimeOverlayRecord[] = [],
 ): Promise<{ newState: EntityState; outputs: EntityInput[] }> => {
   const counterpartyEntityId = entityTx.data.counterpartyEntityId;

@@ -5,7 +5,7 @@ import type {
   EntityInput,
   EntityState,
   EntityTx,
-  Env,
+  RuntimeState,
 } from '../../../types';
 import { formatEntityId } from '../../../utils';
 import { createStructuredLogger, logError, shortId } from '../../../infra/logger';
@@ -30,7 +30,7 @@ const directPaymentLog = createStructuredLogger('entity.payment');
 
 type PaymentTrace = (message: string, fields?: Record<string, unknown>) => void;
 
-const createPaymentTrace = (env: Env): PaymentTrace =>
+const createPaymentTrace = (env: RuntimeState): PaymentTrace =>
   (message, fields = {}) => {
     if (env.quietRuntimeLogs !== true) directPaymentLog.debug(message, fields);
   };
@@ -134,7 +134,7 @@ const buildNextHopPayment = (
 };
 
 export const handleDirectPaymentEntityTx = async (
-  env: Env,
+  env: RuntimeState,
   entityState: EntityState,
   entityTx: DirectPaymentEntityTx,
   candidateEffects: EntityCandidateEffect[] = [],

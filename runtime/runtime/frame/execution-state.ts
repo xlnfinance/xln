@@ -22,7 +22,7 @@ export type RuntimeFrameRollback = (
 /**
  * Mutable orchestration facts for one Runtime frame attempt.
  *
- * Consensus state stays inside the isolated Env. This object only makes the
+ * Consensus state stays inside the isolated RuntimeState. This object only makes the
  * commit/rollback boundary explicit so catch/finally cannot depend on a loose
  * collection of booleans with accidental combinations.
  */

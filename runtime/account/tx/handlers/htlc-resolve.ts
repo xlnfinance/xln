@@ -9,7 +9,7 @@
  * Pattern: 2019 DeleteLockNew with outcomeType (secret/NoCapacity/invalid/fail)
  */
 
-import type { AccountMachine, AccountTx, Delta, HtlcLock } from '../../../types';
+import type { AccountState, AccountTx, Delta, HtlcLock } from '../../../types';
 import { hashHtlcSecret } from '../../../protocol/htlc/utils';
 import { hashEncryptedHtlcLayer, htlcSecretOfferContextHash } from '../../../protocol/htlc/onion-advance';
 import { validateMultiRecipientCiphertext } from '../../../protocol/htlc/multi-recipient';
@@ -36,7 +36,7 @@ type HtlcResolveResult = {
 };
 
 function handleHtlcSecretOffer(
-  account: AccountMachine,
+  account: AccountState,
   lock: HtlcLock,
   data: Extract<HtlcResolveTx['data'], { outcome: 'offer' }>,
   byLeft: boolean,
@@ -150,7 +150,7 @@ function getHtlcErrorResolveError(
 }
 
 function applyHtlcResolution(
-  account: AccountMachine,
+  account: AccountState,
   lock: HtlcLock,
   delta: Delta,
   data: Exclude<HtlcResolveTx['data'], { outcome: 'offer' }>,
@@ -197,7 +197,7 @@ function applyHtlcResolution(
 }
 
 export async function handleHtlcResolve(
-  accountMachine: AccountMachine,
+  accountMachine: AccountState,
   accountTx: HtlcResolveTx,
   byLeft: boolean,
   currentHeight: number,

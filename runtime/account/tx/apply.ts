@@ -3,13 +3,13 @@
  * Routes AccountTx to the handler that mutates one bilateral account clone/state.
  */
 
-import type { AccountMachine, AccountTx, EntityCandidateEffect, Env } from '../../types';
+import type { AccountState, AccountTx, EntityCandidateEffect, RuntimeState } from '../../types';
 import type { AccountJClaimSession } from '../j-claim-session';
 import { invalidateAccountMapCommitment, type AccountCommittedMap } from '../map-commitment';
 import type { ApplyAccountTxResult } from './apply-types';
 import { applyAccountTxMutation } from './mutation';
 
-const swapDeltaKeys = (account: AccountMachine, tx: AccountTx): number[] => {
+const swapDeltaKeys = (account: AccountState, tx: AccountTx): number[] => {
   if (tx.type === 'swap_offer') return [tx.data.giveTokenId, tx.data.wantTokenId];
   if (tx.type === 'swap_resolve') {
     const offer = account.swapOffers.get(tx.data.offerId);
@@ -24,7 +24,7 @@ const swapDeltaKeys = (account: AccountMachine, tx: AccountTx): number[] => {
 };
 
 const invalidateCommittedMapsForTx = (
-  account: AccountMachine,
+  account: AccountState,
   tx: AccountTx,
   deltaKeysBeforeMutation: readonly number[],
 ): void => {
@@ -84,13 +84,13 @@ const invalidateCommittedMapsForTx = (
 };
 
 export async function applyAccountTx(
-  accountMachine: AccountMachine,
+  accountMachine: AccountState,
   accountTx: AccountTx,
   byLeft: boolean,
   currentTimestamp: number = 0,
   currentHeight: number = 0,
   isValidation: boolean = false,
-  env?: Env,
+  env?: RuntimeState,
   jClaimSession?: AccountJClaimSession,
   counterpartyCertifiedBoardHash?: string,
 ): Promise<ApplyAccountTxResult> {

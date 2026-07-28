@@ -3,10 +3,10 @@
  * Creates a new token delta with zero balances (Channel.ts AddDelta pattern)
  */
 
-import type { AccountMachine, AccountTx } from '../../../types';
+import type { AccountState, AccountTx } from '../../../types';
 
 export function handleAddDelta(
-  accountMachine: AccountMachine,
+  accountMachine: AccountState,
   accountTx: Extract<AccountTx, { type: 'add_delta' }>
 ): { success: boolean; events: string[]; error?: string } {
   const { tokenId } = accountTx.data;

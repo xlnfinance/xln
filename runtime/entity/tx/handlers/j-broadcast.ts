@@ -13,7 +13,7 @@
  * 7. Runtime submits JTx via JAdapter
  */
 
-import type { EntityState, EntityTx, EntityInput, Env, JTx, JInput, HashType } from '../../../types';
+import type { EntityState, EntityTx, EntityInput, RuntimeState, JTx, JInput, HashType } from '../../../types';
 import { requireUsableContractAddress } from '../../../jurisdiction/contract-address';
 import { cloneEntityState, addMessage } from '../../../state-helpers';
 import {
@@ -33,7 +33,7 @@ const jBatchActionLog = createStructuredLogger('entity.jbatch');
 
 const resolveBroadcastJurisdiction = (
   state: EntityState,
-  env: Env,
+  env: RuntimeState,
 ): ReturnType<typeof requireRuntimeJurisdictionConfigByName> | null => {
   const configuredName = getJurisdictionConfigName(state.config.jurisdiction);
   if (!configuredName) {
@@ -127,7 +127,7 @@ const commitBroadcast = (
 export async function handleJBroadcast(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'j_broadcast' }>,
-  env: Env
+  env: RuntimeState
 ): Promise<EntityTxReducerResult> {
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];

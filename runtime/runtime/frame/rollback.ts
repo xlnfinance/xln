@@ -1,4 +1,4 @@
-import type { Env, RuntimeInput } from '../../types';
+import type { RuntimeState, RuntimeInput } from '../../types';
 import { requireRuntimeMempool } from '../input-queue';
 import { ensureRuntimeState } from '../runtime-state';
 import type { FrameExecutionState } from './execution-state';
@@ -10,8 +10,8 @@ import {
 
 export type RuntimeFrameRollbackContext = {
   frame: FrameExecutionState;
-  liveEnv: Env;
-  attemptedEnv: Env;
+  liveEnv: RuntimeState;
+  attemptedEnv: RuntimeState;
   runtimeInput: RuntimeInput;
   mempoolQueuedAt: number | undefined;
   frameTimestampBeforeTick: number;
@@ -21,8 +21,8 @@ export type RuntimeFrameRollbackContext = {
 };
 
 export type RuntimeFrameRollbackResult = {
-  env: Env;
-  state: NonNullable<Env['runtimeState']>;
+  env: RuntimeState;
+  state: NonNullable<RuntimeState['runtimeState']>;
   error: Error;
 };
 

@@ -11,7 +11,7 @@ import {
 import { safeStringify } from '../protocol/serialization';
 import { getEffectiveEntityInputTxs } from '../entity/consensus/output-envelope';
 import { accountInputAck, accountInputProposal } from '../account/consensus/flush';
-import type { EntityInput, EntityReplica, EntityTx, Env, JInput, RoutedEntityInput } from '../types';
+import type { EntityInput, EntityReplica, EntityTx, RuntimeState, JInput, RoutedEntityInput } from '../types';
 import { resolveEntityProposerId } from '../state-helpers';
 import { validateEntityOutput } from '../validation-utils';
 import { nodeProcess } from './platform';
@@ -224,7 +224,7 @@ const collectCommittedAccountFrames = (
 };
 
 const routeCommittedEntityOutputs = (
-  env: Env,
+  env: RuntimeState,
   outputs: RoutedEntityInput[],
   context: RuntimeEntityInputBatchContext,
 ): void => {
@@ -277,7 +277,7 @@ const recordEntityInputProfile = (
 };
 
 const collectCommittedEntityResult = (
-  env: Env,
+  env: RuntimeState,
   replicaKey: string,
   result: Awaited<ReturnType<typeof applyEntityInputToReplica>>,
   context: RuntimeEntityInputBatchContext,
@@ -293,7 +293,7 @@ const collectCommittedEntityResult = (
 };
 
 const drainImmediateCrossJurisdictionOutputs = async (
-  env: Env,
+  env: RuntimeState,
   options: RuntimeEntityInputApplyOptions,
   context: RuntimeEntityInputBatchContext,
 ): Promise<void> => {
@@ -384,7 +384,7 @@ const drainImmediateCrossJurisdictionOutputs = async (
 };
 
 const assertExternalEntityInputAllowed = (
-  env: Env,
+  env: RuntimeState,
   entityInput: RoutedEntityInput,
 ): void => {
   if (
@@ -411,7 +411,7 @@ const assertExternalEntityInputAllowed = (
 };
 
 const resolveEntityInputReplica = (
-  env: Env,
+  env: RuntimeState,
   entityInput: RoutedEntityInput,
 ): { signerId: string; replicaKey: string; replica: EntityReplica } => {
   const signerId = entityInput.signerId.trim();
@@ -486,7 +486,7 @@ const resolveEntityInputReplica = (
 };
 
 const applyExternalEntityInput = async (
-  env: Env,
+  env: RuntimeState,
   entityInput: RoutedEntityInput,
   inputIndex: number,
   options: RuntimeEntityInputApplyOptions,
@@ -550,7 +550,7 @@ const applyExternalEntityInput = async (
 };
 
 export const applyMergedEntityInputs = async (
-  env: Env,
+  env: RuntimeState,
   mergedInputs: RoutedEntityInput[],
   initialJOutbox: JInput[],
   options: RuntimeEntityInputApplyOptions,
@@ -638,7 +638,7 @@ const preserveAppliedRoutedProvenance = (
 });
 
 const applyEntityInputToReplica = async (
-  env: Env,
+  env: RuntimeState,
   entityReplica: EntityReplica,
   replicaKey: string,
   entityInput: RoutedEntityInput,
@@ -739,7 +739,7 @@ const applyEntityInputToReplica = async (
   };
 };
 
-const findReplicaKeyInsensitive = (env: Env, entityId: string, signerId?: string | null): string | null => {
+const findReplicaKeyInsensitive = (env: RuntimeState, entityId: string, signerId?: string | null): string | null => {
   const entityNorm = String(entityId || '').toLowerCase();
   const signerNorm = signerId ? String(signerId).toLowerCase() : null;
   if (signerNorm) {
@@ -755,7 +755,7 @@ const findReplicaKeyInsensitive = (env: Env, entityId: string, signerId?: string
   return null;
 };
 
-const findReplicaKeysForEntityInsensitive = (env: Env, entityId: string): string[] => {
+const findReplicaKeysForEntityInsensitive = (env: RuntimeState, entityId: string): string[] => {
   const entityNorm = String(entityId || '').toLowerCase();
   return Array.from(env.eReplicas.keys()).filter((key) => {
     const [repEntityId] = String(key).split(':');
@@ -779,7 +779,7 @@ const isCrossJCommandEnvelope = (output: RoutedEntityInput): output is CrossJCom
   output.entityTxs[0].data.protocol === 'cross-j'
 );
 
-const decodeCrossJCommand = (env: Env, output: RoutedEntityInput): CrossJCommand => {
+const decodeCrossJCommand = (env: RuntimeState, output: RoutedEntityInput): CrossJCommand => {
   if (!isCrossJCommandEnvelope(output)) {
     throw new Error(`RUNTIME_CROSS_J_COMMAND_ENVELOPE_INVALID:entity=${output.entityId}`);
   }

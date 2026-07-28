@@ -8,13 +8,13 @@ import {
 import { committedCrossJSourceDisputeDelayMs } from '../extensions/cross-j/prepared-route';
 import { MAX_ACCOUNT_FRAME_TXS } from '../account/consensus/frame';
 import type {
-  AccountMachine,
+  AccountState,
   AccountTx,
   CrossJurisdictionSwapRoute,
   EntityReplica,
   EntityState,
   EntityTx,
-  Env,
+  RuntimeState,
 } from '../types';
 import { findAccountKey, normalizeEntityRef } from './tx/account-key';
 import { accountHasPullResolveQueued } from './tx/cross-jurisdiction-helpers';
@@ -229,9 +229,9 @@ const fitOpeningCohort = (
  * cross-j opening exists but its reciprocal leg is not available yet.
  */
 export const selectCrossJOpeningAccountProposalTxs = (
-  env: Env,
+  env: RuntimeState,
   state: EntityState,
-  account: AccountMachine,
+  account: AccountState,
 ): AccountTx[] | null | undefined => {
   const localLegs = crossJOpeningLegs(account.mempool);
   if (localLegs.length === 0) return undefined;
@@ -300,7 +300,7 @@ export const selectCrossJOpeningAccountProposalTxs = (
  * bytes and never read validator-local seeds.
  */
 export const appendDefaultProposerCrossJMaterializations = (
-  env: Env,
+  env: RuntimeState,
   replica: EntityReplica,
   txs: readonly EntityTx[],
 ): EntityTx[] => {

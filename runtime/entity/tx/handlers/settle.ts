@@ -25,7 +25,7 @@ import type {
 import { cloneEntityState, addMessage, getAccountPerspective } from '../../../state-helpers';
 import { initJBatch, batchAddSettlement } from '../../../jurisdiction/batch';
 import { isLeftEntity } from '../../id';
-import type { Env, HashToSign } from '../../../types';
+import type { RuntimeState, HashToSign } from '../../../types';
 import { createSettlementHashWithNonce, createDisputeProofHashWithNonce } from '../../../protocol/dispute/proof-builder';
 import { verifyHankoForHash } from '../../../hanko/signing';
 import {
@@ -46,14 +46,14 @@ import {
 import { projectAccountAfterSettlement } from '../../../protocol/settlement/projection';
 import { buildAccountProofBodyFromEnv } from '../../../account/consensus/helpers';
 
-import type { AccountMachine } from '../../../types';
+import type { AccountState } from '../../../types';
 
 const settleLog = createStructuredLogger('entity.settle');
 
 const buildPostSettlementDisputeProof = (
-  env: Env,
+  env: RuntimeState,
   entityState: EntityState,
-  account: AccountMachine,
+  account: AccountState,
   settlementNonce: number,
   diffs: readonly SettlementDiff[],
   forgiveTokenIds: readonly number[],
@@ -85,10 +85,10 @@ type SettlementSealDraft = {
 };
 
 export const buildSettlementSealDraft = (
-  account: AccountMachine,
+  account: AccountState,
   entityState: EntityState,
   counterpartyEntityId: string,
-  env: Env,
+  env: RuntimeState,
 ): SettlementSealDraft => {
   const workspace = account.settlementWorkspace;
   if (!workspace) throw new Error('SETTLEMENT_WORKSPACE_MISSING');
@@ -165,7 +165,7 @@ export const buildSettlementSealDraft = (
 
 type MempoolOp = { accountId: string; tx: import('../../../types').AccountTx };
 
-const assertNoPendingSettlementTransition = (account: AccountMachine): void => {
+const assertNoPendingSettlementTransition = (account: AccountState): void => {
   if (hasPendingSettlementTransition(account)) throw new Error('SETTLEMENT_TRANSITION_ALREADY_PENDING');
 };
 
@@ -194,7 +194,7 @@ function diffsToOps(data: { ops?: SettlementOp[]; diffs?: SettlementDiff[]; forg
 export async function handleSettlePropose(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'settle_propose' }>,
-  _env: Env
+  _env: RuntimeState
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; mempoolOps: MempoolOp[] }> {
   const { counterpartyEntityId, executorIsLeft: execParam, memo } = entityTx.data;
   const ops = diffsToOps(entityTx.data);
@@ -248,7 +248,7 @@ export async function handleSettlePropose(
 export async function handleSettleUpdate(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'settle_update' }>,
-  _env: Env
+  _env: RuntimeState
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; mempoolOps: MempoolOp[] }> {
   const { counterpartyEntityId, executorIsLeft: execParam, memo } = entityTx.data;
   const ops = diffsToOps(entityTx.data);
@@ -306,7 +306,7 @@ export async function handleSettleUpdate(
 export async function handleSettleApprove(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'settle_approve' }>,
-  _env: Env
+  _env: RuntimeState
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; mempoolOps: MempoolOp[]; hashesToSign?: Array<{ hash: string; type: 'settlement' | 'dispute'; context: string }> }> {
   const { counterpartyEntityId, workspaceHash: requestedWorkspaceHash } = entityTx.data;
   const newState = cloneEntityState(entityState);
@@ -376,9 +376,9 @@ const assertCompiledSettlementDiffs = (
 };
 
 const prepareSettlementExecution = (
-  env: Env,
+  env: RuntimeState,
   entityState: EntityState,
-  account: AccountMachine,
+  account: AccountState,
   workspace: SettlementWorkspace,
 ) => {
   const { diffs, forgiveTokenIds } = compileOps(
@@ -456,7 +456,7 @@ const prepareSettlementExecution = (
 type PreparedSettlementExecution = ReturnType<typeof prepareSettlementExecution>;
 
 const verifySettlementHanko = async (
-  env: Env,
+  env: RuntimeState,
   entityState: EntityState,
   hanko: string,
   hash: string,
@@ -481,9 +481,9 @@ const verifySettlementHanko = async (
 };
 
 const verifySettlementExecutionHankos = async (
-  env: Env,
+  env: RuntimeState,
   entityState: EntityState,
-  account: AccountMachine,
+  account: AccountState,
   counterpartyEntityId: string,
   counterpartyHanko: string,
   prepared: PreparedSettlementExecution,
@@ -562,7 +562,7 @@ const queueSettlementExecution = (
 export async function handleSettleExecute(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'settle_execute' }>,
-  env: Env
+  env: RuntimeState
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; mempoolOps: MempoolOp[] }> {
   const { counterpartyEntityId, disableC2RShortcut = false } = entityTx.data;
   const newState = cloneEntityState(entityState);
@@ -654,7 +654,7 @@ export async function handleSettleExecute(
 export async function handleSettleReject(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'settle_reject' }>,
-  _env: Env
+  _env: RuntimeState
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; mempoolOps: MempoolOp[] }> {
   const { counterpartyEntityId, reason } = entityTx.data;
   const newState = cloneEntityState(entityState);
@@ -710,12 +710,12 @@ type CommittedSettlementFollowup = {
  * and must not be signed or used as canonical settlement state.
  */
 export async function processCommittedSettlementTransitionFollowup(
-  account: AccountMachine,
+  account: AccountState,
   accountTx: AccountTx,
   committedFrame: AccountFrame,
   counterpartyEntityId: string,
   entityState: EntityState,
-  _env: Env,
+  _env: RuntimeState,
 ): Promise<CommittedSettlementFollowup> {
   const empty = (): CommittedSettlementFollowup => ({ outputs: [], mempoolOps: [], hashesToSign: [] });
   if (
@@ -772,12 +772,12 @@ export async function processCommittedSettlementTransitionFollowup(
  * Guard 1: compileOps runs on receive path too (dual-side validation)
  */
 export async function processSettleAction(
-  _account: import('../../../types').AccountMachine,
+  _account: import('../../../types').AccountState,
   settleAction: AccountSettleAction,
   _fromEntityId: string,
   _myEntityId: string,
   _entityTimestamp: number,
-  _env?: Env,
+  _env?: RuntimeState,
   _entityState?: EntityState,
 ): Promise<{
   success: boolean;

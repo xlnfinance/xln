@@ -1,8 +1,8 @@
 import { appendAccountMempoolTx } from '../../account/mempool';
 import { txFingerprint } from '../../state-helpers';
-import type { AccountMachine, AccountTx } from '../../types';
+import type { AccountState, AccountTx } from '../../types';
 
-type AccountMempoolQueue = Pick<AccountMachine, 'mempool' | 'pendingFrame'>;
+type AccountMempoolQueue = Pick<AccountState, 'mempool' | 'pendingFrame'>;
 
 /**
  * Queue an Account transaction while preserving the transaction's intended

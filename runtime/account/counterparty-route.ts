@@ -1,6 +1,6 @@
 import { ethers } from 'ethers';
 
-import type { AccountMachine, EntityState, Env } from '../types';
+import type { AccountState, EntityState, RuntimeState } from '../types';
 import { resolveHankoDefaultProposerSignerId } from '../hanko/signing';
 import { verifyCanonicalHanko } from '../hanko/claims';
 import {
@@ -12,8 +12,8 @@ const normalize = (value: string): string => String(value || '').trim().toLowerC
 
 /** Resolve an established Account lane from the counterparty's certified frame Hanko. */
 export const resolveCertifiedAccountCounterpartyProposer = async (
-  env: Env,
-  account: AccountMachine,
+  env: RuntimeState,
+  account: AccountState,
   counterpartyEntityId: string,
 ): Promise<string | null> => {
   const hanko = account.counterpartyFrameHanko;
@@ -36,9 +36,9 @@ export const resolveCertifiedAccountCounterpartyProposer = async (
  * Entities while replaying the same frame.
  */
 export const resolveObserverCertifiedAccountCounterpartyProposer = (
-  env: Env,
+  env: RuntimeState,
   observerState: EntityState,
-  account: AccountMachine,
+  account: AccountState,
   counterpartyEntityId: string,
 ): string | null => {
   const hanko = account.counterpartyFrameHanko;

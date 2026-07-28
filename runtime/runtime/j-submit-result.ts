@@ -1,4 +1,4 @@
-import type { EntityReplica, Env, JTx, RuntimeTx } from '../types';
+import type { EntityReplica, RuntimeState, JTx, RuntimeTx } from '../types';
 import { classifyRuntimeJBatchFailure } from '../protocol/failure-taxonomy';
 import { safeStringify } from '../protocol/serialization';
 import {
@@ -34,7 +34,7 @@ const assertValidAdapterFailure = (data: RecordJSubmitResultTx['data']): void =>
   }
 };
 
-const findPendingAttempt = (env: Env, attemptId: string): PendingAttempt | null => {
+const findPendingAttempt = (env: RuntimeState, attemptId: string): PendingAttempt | null => {
   const matches: PendingAttempt[] = [];
   for (const input of env.runtimeState?.pendingCommittedJOutbox ?? []) {
     for (const jTx of input.jTxs) {
@@ -102,7 +102,7 @@ const assertValidJSubmitResult = (data: RecordJSubmitResultTx['data']): void => 
   assertValidAdapterFailure(data);
 };
 
-const findRecordedResultFingerprint = (env: Env, attemptId: string): string | null => {
+const findRecordedResultFingerprint = (env: RuntimeState, attemptId: string): string | null => {
   let fingerprint: string | null = null;
   for (const replica of env.eReplicas.values()) {
     const local = replica.jSubmitState;
@@ -129,7 +129,7 @@ const findRecordedResultFingerprint = (env: Env, attemptId: string): string | nu
   return fingerprint;
 };
 
-const removePendingAttempt = (env: Env, attemptId: string): void => {
+const removePendingAttempt = (env: RuntimeState, attemptId: string): void => {
   const pending = env.runtimeState?.pendingCommittedJOutbox ?? [];
   const remaining = pending.flatMap((input) => {
     const jTxs = input.jTxs.filter((jTx) => (
@@ -140,7 +140,7 @@ const removePendingAttempt = (env: Env, attemptId: string): void => {
   if (env.runtimeState) env.runtimeState.pendingCommittedJOutbox = remaining;
 };
 
-const activePendingAttemptIds = (env: Env, replica: EntityReplica): Set<string> => {
+const activePendingAttemptIds = (env: RuntimeState, replica: EntityReplica): Set<string> => {
   const active = new Set<string>();
   for (const input of env.runtimeState?.pendingCommittedJOutbox ?? []) {
     for (const jTx of input.jTxs) {
@@ -173,7 +173,7 @@ const orderedRecordedAttemptIds = (local: NonNullable<EntityReplica['jSubmitStat
 };
 
 const buildBoundedResultJournal = (
-  env: Env,
+  env: RuntimeState,
   replica: EntityReplica,
   attemptId: string,
   fingerprint: string,
@@ -198,7 +198,7 @@ const buildBoundedResultJournal = (
 };
 
 const nextJSubmitState = (
-  env: Env,
+  env: RuntimeState,
   replica: EntityReplica,
   tx: RecordJSubmitResultTx,
   resultFingerprint: string,
@@ -234,7 +234,7 @@ const nextJSubmitState = (
   return next;
 };
 
-export const applyRecordJSubmitResultRuntimeTx = (env: Env, tx: RecordJSubmitResultTx): void => {
+export const applyRecordJSubmitResultRuntimeTx = (env: RuntimeState, tx: RecordJSubmitResultTx): void => {
   assertValidJSubmitResult(tx.data);
   const resultFingerprint = safeStringify(tx.data);
   const pending = findPendingAttempt(env, tx.data.attemptId);

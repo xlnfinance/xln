@@ -93,7 +93,7 @@ const installHmacSync = () => {
 installHmacSync();
 // Browser: deriveSignerKeySync uses noble hashes (no async required)
 
-// Key material is scoped by the owning vault seed fingerprint. Multiple Env
+// Key material is scoped by the owning vault seed fingerprint. Multiple RuntimeState
 // instances may coexist in one JS process, so a process-global address map
 // would let one runtime sign or submit as another runtime's validator. The raw
 // seed is never used as a map key and clearing one vault cannot affect another.
@@ -330,7 +330,7 @@ export function getCachedSignerPrivateKey(scope: SignerKeyScope, signerId: strin
 /**
  * Resolve a key owned by this exact runtime. Numeric aliases are derived from
  * the caller's seed and can never select process-global state from another
- * Env. Address-shaped signer ids remain explicit cache entries and return null
+ * RuntimeState. Address-shaped signer ids remain explicit cache entries and return null
  * when this process does not own their private key.
  */
 export function getLocalSignerPrivateKey(env: SignerKeyEnv, signerId: string): Uint8Array | null {

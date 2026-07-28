@@ -1,5 +1,5 @@
 import type {
-  AccountMachine,
+  AccountState,
   CrossJurisdictionSwapRoute,
   SwapOffer,
 } from '../../../../types';
@@ -17,7 +17,7 @@ type StoredOfferEntityRefs = {
 };
 
 export const resolveStoredOfferEntityRefs = (
-  account: AccountMachine,
+  account: AccountState,
   offer: SwapOffer,
 ): { fromEntity: string; toEntity: string } => {
   const persistedRefs = offer as SwapOffer & StoredOfferEntityRefs;

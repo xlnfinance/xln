@@ -12,7 +12,7 @@ import type {
   EntityCandidateEffect,
   EntityInput,
   EntityState,
-  Env,
+  RuntimeState,
   HtlcRoute,
 } from '../../../types';
 import { setHtlcRouteNote, terminateHtlcRoute } from '../htlc-route-lifecycle';
@@ -52,7 +52,7 @@ const cancelInbound = (
 };
 
 const applyFinalAdvance = (
-  _env: Env,
+  _env: RuntimeState,
   state: EntityState,
   tx: HtlcOnionAdvanceTx,
   mempoolOps: Result['mempoolOps'],
@@ -196,7 +196,7 @@ const applyForwardAdvance = (
 };
 
 export const handleHtlcOnionAdvance = async (
-  env: Env,
+  env: RuntimeState,
   entityState: EntityState,
   rawTx: HtlcOnionAdvanceTx,
   candidateEffects: EntityCandidateEffect[] = [],

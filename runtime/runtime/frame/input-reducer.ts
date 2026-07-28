@@ -7,7 +7,7 @@ import {
   refreshRuntimeCheckpointLineageForEntity,
 } from '../../storage/entity-lineage';
 import type {
-  Env,
+  RuntimeState,
   JInput,
   ReliableDeliveryReceipt,
   RoutedEntityInput,
@@ -52,8 +52,8 @@ const APPLY_SLOW_MS = Math.max(
 export type RuntimeInputReducerDeps =
   RuntimeInputAdmissionDeps &
   RuntimeReliableCommitDeps & {
-    assertApplyAllowed(env: Env): void;
-    isReplay(env: Env): boolean;
+    assertApplyAllowed(env: RuntimeState): void;
+    isReplay(env: RuntimeState): boolean;
     getRoutingDeps(): RuntimeEntityRoutingDeps;
   };
 
@@ -71,7 +71,7 @@ export type AppliedRuntimeInput = {
 
 type ApplyProfiler = {
   mark(label: string): void;
-  finish(env: Env, result: AppliedRuntimeInput, runtimeTxs: RuntimeTx[]): void;
+  finish(env: RuntimeState, result: AppliedRuntimeInput, runtimeTxs: RuntimeTx[]): void;
 };
 
 const createApplyProfiler = (): ApplyProfiler => {
@@ -108,7 +108,7 @@ type LineageRefresh = {
   finalize(): void;
 };
 
-const createLineageRefresh = (env: Env): LineageRefresh => {
+const createLineageRefresh = (env: RuntimeState): LineageRefresh => {
   const guards = new Map<
     string,
     ReturnType<typeof beginRuntimeCheckpointLineageRefresh>
@@ -131,7 +131,7 @@ const createLineageRefresh = (env: Env): LineageRefresh => {
 };
 
 const applyRuntimeTransactions = async (
-  env: Env,
+  env: RuntimeState,
   runtimeTxs: RuntimeTx[],
   isReplay: boolean,
   lineage: LineageRefresh,
@@ -172,7 +172,7 @@ const logAtomicCrossJCommit = (
 export const createRuntimeInputReducer = (
   deps: RuntimeInputReducerDeps,
 ) => async (
-  env: Env,
+  env: RuntimeState,
   runtimeInput: RuntimeInput,
 ): Promise<AppliedRuntimeInput> => {
   deps.assertApplyAllowed(env);

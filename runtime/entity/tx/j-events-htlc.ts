@@ -3,7 +3,7 @@ import type {
   CrossJurisdictionSwapRoute,
   EntityInput,
   EntityState,
-  Env,
+  RuntimeState,
 } from '../../types';
 import { addMessage } from '../../state-helpers';
 import { decodeHashLadderBinary } from '../../protocol/htlc/hash-ladder';
@@ -111,7 +111,7 @@ function findCrossJurisdictionRoutesForTargetDispute(
 }
 
 export function queueCrossJurisdictionSalvageFromDispute(
-  env: Env,
+  env: RuntimeState,
   state: EntityState,
   outputs: EntityInput[],
   counterpartyId: string,
@@ -132,7 +132,7 @@ export function queueCrossJurisdictionSalvageFromDispute(
 }
 
 export function queueCrossJurisdictionSalvageFromArgumentList(
-  env: Env,
+  env: RuntimeState,
   state: EntityState,
   outputs: EntityInput[],
   counterpartyId: string,
@@ -176,7 +176,7 @@ export function queueCrossJurisdictionSalvageFromArgumentList(
 }
 
 export function queueCrossJurisdictionSourceDisputeFromTargetDispute(
-  env: Env,
+  env: RuntimeState,
   state: EntityState,
   outputs: EntityInput[],
   counterpartyId: string,
@@ -247,7 +247,7 @@ function queueInboundResolvesByHashlock(
 }
 
 export function applyKnownHtlcSecret(
-  env: Env,
+  env: RuntimeState,
   newState: EntityState,
   mempoolOps: JEventMempoolOp[],
   outputs: EntityInput[],

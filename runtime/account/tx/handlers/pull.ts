@@ -1,4 +1,4 @@
-import type { AccountMachine, AccountTx, CrossJurisdictionPullBinding, CrossJurisdictionSwapRoute } from '../../../types';
+import type { AccountState, AccountTx, CrossJurisdictionPullBinding, CrossJurisdictionSwapRoute } from '../../../types';
 import { deriveDelta } from '../../utils';
 import { FINANCIAL, LIMITS } from '../../../constants';
 import {
@@ -36,7 +36,7 @@ const isCrossJurisdictionPullCancelWithinClear = (route: CrossJurisdictionSwapRo
   route.clearingPolicy === 'full_fill'
 );
 const findCrossJurisdictionRouteForPull = (
-  accountMachine: AccountMachine,
+  accountMachine: AccountState,
   pullId: string,
 ): { route: CrossJurisdictionSwapRoute; leg: 'source' | 'target' } | undefined => {
   for (const offer of accountMachine.swapOffers?.values() ?? []) {
@@ -52,7 +52,7 @@ const committedCrossJurisdictionRatio = (binding: CrossJurisdictionPullBinding):
   getCrossJurisdictionCommittedProofRatio(binding);
 
 const findCrossJurisdictionPullBinding = (
-  accountMachine: AccountMachine,
+  accountMachine: AccountState,
   pullId: string,
 ): CrossJurisdictionPullBinding | undefined => {
   // Pull close/resolve validates the pull transformer, so the pull-local
@@ -141,7 +141,7 @@ const validateCrossJurisdictionPullResolve = (
   return null;
 };
 
-const validateCrossJurisdictionPullRoute = (account: AccountMachine, tx: PullLockTx): string | null => {
+const validateCrossJurisdictionPullRoute = (account: AccountState, tx: PullLockTx): string | null => {
   const binding = tx.data.crossJurisdiction;
   const supplied = tx.data.crossJurisdictionRoute;
   if (!binding && !supplied) return null;
@@ -172,7 +172,7 @@ const validateCrossJurisdictionPullRoute = (account: AccountMachine, tx: PullLoc
 };
 
 export async function handlePullLock(
-  accountMachine: AccountMachine,
+  accountMachine: AccountState,
   accountTx: PullLockTx,
   _byLeft: boolean,
   currentHeight: number,
@@ -250,7 +250,7 @@ export async function handlePullLock(
 }
 
 export async function handlePullResolve(
-  accountMachine: AccountMachine,
+  accountMachine: AccountState,
   accountTx: PullResolveTx,
   byLeft: boolean,
   currentTimestamp: number,
@@ -327,7 +327,7 @@ export async function handlePullResolve(
 }
 
 export async function handleCrossPullClose(
-  accountMachine: AccountMachine,
+  accountMachine: AccountState,
   accountTx: CrossPullCloseTx,
   byLeft: boolean,
   currentTimestamp: number,
@@ -432,7 +432,7 @@ export async function handleCrossPullClose(
 }
 
 export async function handlePullCancel(
-  accountMachine: AccountMachine,
+  accountMachine: AccountState,
   accountTx: PullCancelTx,
   byLeft: boolean,
   currentTimestamp: number,

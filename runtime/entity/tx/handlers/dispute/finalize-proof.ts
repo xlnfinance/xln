@@ -1,7 +1,7 @@
 import type {
-  AccountMachine,
+  AccountState,
   EntityState,
-  Env,
+  RuntimeState,
 } from '../../../../types';
 import type { ProofBodyStruct } from '../../../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
 import { addMessage } from '../../../../state-helpers';
@@ -53,9 +53,9 @@ export type FinalProofPayload = {
 export const selectFinalProof = (
   sourceState: EntityState,
   state: EntityState,
-  account: AccountMachine,
+  account: AccountState,
   counterpartyId: string,
-  env: Env,
+  env: RuntimeState,
 ): FinalProofSelection | null => {
   const activeDispute = account.activeDispute!;
   const currentProof = buildAccountProofBodyFromEnv(env, account);
@@ -130,7 +130,7 @@ export const selectFinalProof = (
 
 export const verifyCounterProofIdentity = (
   sourceState: EntityState,
-  account: AccountMachine,
+  account: AccountState,
   counterpartyId: string,
   selection: FinalProofSelection,
 ): void => {
@@ -153,10 +153,10 @@ export const verifyCounterProofIdentity = (
 
 export const buildFinalProofPayload = (
   state: EntityState,
-  account: AccountMachine,
+  account: AccountState,
   counterpartyId: string,
   selection: FinalProofSelection,
-  env: Env,
+  env: RuntimeState,
 ): FinalProofPayload => {
   const activeDispute = account.activeDispute!;
   const builtArguments = buildDisputeArgumentsForSnapshot(

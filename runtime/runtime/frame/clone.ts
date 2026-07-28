@@ -1,6 +1,6 @@
 import { copyLocalEntityLeaderTimeoutVoteAuthorization } from '../../entity/consensus/leader';
 import { cloneTrustedEntityReplica } from '../../state-helpers';
-import type { Env, JReplica, RuntimeInput } from '../../types';
+import type { RuntimeState, JReplica, RuntimeInput } from '../../types';
 import { copyLocalJAuthorityRuntimeTxAuthorization } from '../../jurisdiction/registration-evidence';
 import { createGossipLayer } from '../../networking/gossip';
 import {
@@ -47,7 +47,7 @@ export const RUNTIME_FRAME_SHARED_STATE_KEYS = new Set<string>([
   'watcherDedupCounter',
 ]);
 
-const cloneRuntimeFrameState = (env: Env): NonNullable<Env['runtimeState']> => {
+const cloneRuntimeFrameState = (env: RuntimeState): NonNullable<RuntimeState['runtimeState']> => {
   const cloned: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(env.runtimeState ?? {})) {
     if (key === 'scheduledWakeIndex') continue;
@@ -61,7 +61,7 @@ const cloneRuntimeFrameState = (env: Env): NonNullable<Env['runtimeState']> => {
       throw new Error(`RUNTIME_FRAME_STATE_CLONE_FAILED:${key}`, { cause });
     }
   }
-  return cloned as NonNullable<Env['runtimeState']>;
+  return cloned as NonNullable<RuntimeState['runtimeState']>;
 };
 
 export const cloneRuntimeFrameMempool = (input: RuntimeInput): RuntimeInput => {
@@ -97,7 +97,7 @@ export const cloneRuntimeFrameMempool = (input: RuntimeInput): RuntimeInput => {
   return cloned;
 };
 
-const cloneGossip = (env: Env): Env['gossip'] => {
+const cloneGossip = (env: RuntimeState): RuntimeState['gossip'] => {
   const gossip = createGossipLayer();
   for (const profile of env.gossip?.getProfiles?.() ?? []) {
     const cloned = structuredClone(profile);
@@ -106,9 +106,9 @@ const cloneGossip = (env: Env): Env['gossip'] => {
   return gossip;
 };
 
-export const cloneRuntimeFrameWorkingEnv = (source: Env): Env => {
+export const cloneRuntimeFrameWorkingEnv = (source: RuntimeState): RuntimeState => {
   const mempool = cloneRuntimeFrameMempool(requireRuntimeMempool(source));
-  const working: Env = {
+  const working: RuntimeState = {
     ...source,
     eReplicas: new Map(
       [...source.eReplicas].map(([key, replica]) => [key, cloneTrustedEntityReplica(replica)]),

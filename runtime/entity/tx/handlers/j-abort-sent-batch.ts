@@ -1,4 +1,4 @@
-import type { EntityInput, EntityState, EntityTx, Env, JInput } from '../../../types';
+import type { EntityInput, EntityState, EntityTx, RuntimeState, JInput } from '../../../types';
 import { addMessage, cloneEntityState } from '../../../state-helpers';
 import { createEmptyBatch, getBatchSize, mergeBatchOps } from '../../../jurisdiction/batch';
 import { createStructuredLogger, shortId } from '../../../infra/logger';
@@ -16,7 +16,7 @@ function shouldRequeueDisputeFinalize(_state: EntityState, _counterpartyIdRaw: u
 export async function handleJAbortSentBatch(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'j_abort_sent_batch' }>,
-  _env: Env,
+  _env: RuntimeState,
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; jOutputs: JInput[] }> {
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];

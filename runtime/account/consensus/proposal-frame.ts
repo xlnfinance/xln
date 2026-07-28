@@ -1,4 +1,4 @@
-import type { AccountFrame, AccountMachine, AccountTx } from '../../types';
+import type { AccountFrame, AccountState, AccountTx } from '../../types';
 import { HEAVY_LOGS } from '../../utils';
 import { safeStringify } from '../../protocol/serialization';
 import { validateAccountFrame } from '../../validation-utils';
@@ -29,7 +29,7 @@ export type ProposalFrameBuildResult =
       result: ProposeAccountFrameResult;
     };
 
-const collectFrameDeltas = (machine: AccountMachine): AccountFrame['deltas'] => {
+const collectFrameDeltas = (machine: AccountState): AccountFrame['deltas'] => {
   const deltas: AccountFrame['deltas'] = [];
   const sortedTokens = [...machine.deltas.entries()].sort((left, right) => left[0] - right[0]);
   for (const [tokenId, delta] of sortedTokens) {
@@ -46,8 +46,8 @@ const collectFrameDeltas = (machine: AccountMachine): AccountFrame['deltas'] => 
 };
 
 const buildFrameData = async (
-  account: AccountMachine,
-  candidate: AccountMachine,
+  account: AccountState,
+  candidate: AccountState,
   validTxs: readonly AccountTx[],
   timestamp: number,
   jHeight: number,
@@ -71,8 +71,8 @@ const buildFrameData = async (
 };
 
 export const buildProposalFrame = async (
-  account: AccountMachine,
-  candidate: AccountMachine,
+  account: AccountState,
+  candidate: AccountState,
   validTxs: readonly AccountTx[],
   timestamp: number,
   jHeight: number,

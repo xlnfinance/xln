@@ -19,7 +19,7 @@ import {
 import { normalizeEntityRef } from '../account-key';
 import { cloneEntityState, addMessage } from '../../../state-helpers';
 import { safeStringify } from '../../../protocol/serialization';
-import type { CrossJurisdictionSwapRoute, EntityInput, EntityState, EntityTx, Env } from '../../../types';
+import type { CrossJurisdictionSwapRoute, EntityInput, EntityState, EntityTx, RuntimeState } from '../../../types';
 import type { ApplyEntityTxOptions } from '../apply';
 import type { MempoolOp } from './account';
 import { findAccountKey } from '../account-key';
@@ -32,7 +32,7 @@ type CrossJSetupResult = {
   mempoolOps?: MempoolOp[];
 };
 
-const deterministicEntityTimestamp = (state: EntityState, env: Env): number =>
+const deterministicEntityTimestamp = (state: EntityState, env: RuntimeState): number =>
   Number(state.timestamp || env.timestamp || 0);
 
 const stateForEntityTx = (entityState: EntityState, options?: ApplyEntityTxOptions): EntityState =>
@@ -54,7 +54,7 @@ const materializedIntentBytes = (
 };
 
 const pushCrossJOutput = (
-  env: Env,
+  env: RuntimeState,
   outputs: EntityInput[],
   entityId: string,
   entityTxs: EntityTx[],
@@ -64,7 +64,7 @@ const pushCrossJOutput = (
 };
 
 export const handlePrepareCrossJurisdictionSwapEntityTx = (
-  env: Env,
+  env: RuntimeState,
   entityState: EntityState,
   entityTx: EntityTxOf<'prepareCrossJurisdictionSwap'>,
   options?: ApplyEntityTxOptions,
@@ -175,7 +175,7 @@ export const handlePrepareCrossJurisdictionSwapEntityTx = (
 };
 
 export const handleMaterializeCrossJurisdictionSwapEntityTx = (
-  env: Env,
+  env: RuntimeState,
   entityState: EntityState,
   entityTx: EntityTxOf<'materializeCrossJurisdictionSwap'>,
   options?: ApplyEntityTxOptions,
@@ -201,7 +201,7 @@ export const handleMaterializeCrossJurisdictionSwapEntityTx = (
 };
 
 export const handleRegisterCrossJurisdictionSwapEntityTx = (
-  env: Env,
+  env: RuntimeState,
   entityState: EntityState,
   entityTx: EntityTxOf<'registerCrossJurisdictionSwap'>,
   options?: ApplyEntityTxOptions,

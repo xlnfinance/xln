@@ -1,6 +1,6 @@
 import { ethers } from 'ethers';
 
-import type { AccountMachine, AccountStateDomain, JurisdictionConfig, SettlementWorkspace } from '../types';
+import type { AccountState, AccountStateDomain, JurisdictionConfig, SettlementWorkspace } from '../types';
 import { compareStableText } from '../protocol/serialization';
 import { buildHexKeyedMerkle, type RadixMerkleHashAlgorithm } from '../storage/merkle';
 import { computeIntegrityDigest } from '../infra/integrity-checksum';
@@ -284,7 +284,7 @@ export const computeCanonicalMerkleRoot = (
 })), { hashAlgorithm }).root;
 
 const accountStateRootEntries = (
-  account: AccountMachine,
+  account: AccountState,
   cold = false,
   mapTimings?: Record<string, number>,
   mapStatuses?: Record<string, AccountMapCommitmentTiming>,
@@ -338,7 +338,7 @@ const accountStateRootEntries = (
 };
 
 export const computeAccountStateSectionHashes = (
-  account: AccountMachine,
+  account: AccountState,
 ): AccountStateSectionHashes => Object.fromEntries(
   accountStateRootEntries(account).map(([path, value]) => [
     path,
@@ -348,7 +348,7 @@ export const computeAccountStateSectionHashes = (
 
 /** Cold section oracle used only for fail-fast diagnostics and cache audits. */
 export const computeAccountStateSectionHashesCold = (
-  account: AccountMachine,
+  account: AccountState,
 ): AccountStateSectionHashes => Object.fromEntries(
   accountStateRootEntries(account, true).map(([path, value]) => [
     path,
@@ -357,7 +357,7 @@ export const computeAccountStateSectionHashesCold = (
 );
 
 const accountCommitmentSectionDetail = (
-  account: AccountMachine,
+  account: AccountState,
   cold: boolean,
 ): AccountCommitmentSectionDetail => ({
   locksRoot: computeAccountMapCommitment(account, 'locks', encodeAccountStateValue, cold),
@@ -372,16 +372,16 @@ const accountCommitmentSectionDetail = (
 
 /** Exact per-map breakdown emitted only after a commitment-section mismatch. */
 export const computeAccountCommitmentSectionDetail = (
-  account: AccountMachine,
+  account: AccountState,
 ): AccountCommitmentSectionDetail => accountCommitmentSectionDetail(account, false);
 
 /** Cold per-map oracle for commitment-section mismatch diagnostics. */
 export const computeAccountCommitmentSectionDetailCold = (
-  account: AccountMachine,
+  account: AccountState,
 ): AccountCommitmentSectionDetail => accountCommitmentSectionDetail(account, true);
 
 export const computeAccountStateRoot = (
-  account: AccountMachine,
+  account: AccountState,
   timing?: AccountStateRootTiming,
 ): string => {
   const profile = Boolean(timing) ||
@@ -425,7 +425,7 @@ export const computeAccountStateRoot = (
 };
 
 /** Cold oracle used by tests/restore audits to detect every missed cache invalidation. */
-export const computeAccountStateRootCold = (account: AccountMachine): string => {
+export const computeAccountStateRootCold = (account: AccountState): string => {
   const entries = accountStateRootEntries(account, true);
   return buildHexKeyedMerkle(
     entries.map(([path, value]) => stateLeaf(path, value)),
@@ -433,7 +433,7 @@ export const computeAccountStateRootCold = (account: AccountMachine): string => 
   ).root;
 };
 
-export const assertAccountStateRootCache = (account: AccountMachine, code = 'ACCOUNT_STATE_ROOT_CACHE'): string => {
+export const assertAccountStateRootCache = (account: AccountState, code = 'ACCOUNT_STATE_ROOT_CACHE'): string => {
   const incremental = computeAccountStateRoot(account);
   const cold = computeAccountStateRootCold(account);
   if (incremental !== cold) throw new Error(`${code}_MISMATCH:incremental=${incremental}:cold=${cold}`);
@@ -460,14 +460,14 @@ const settlementOverlayState = (
 };
 
 const pendingWithdrawalOverlayState = (
-  withdrawals: AccountMachine['pendingWithdrawals'],
-): Map<string, Omit<AccountMachine['pendingWithdrawals'] extends Map<string, infer Entry> ? Entry : never, 'signature'>> =>
+  withdrawals: AccountState['pendingWithdrawals'],
+): Map<string, Omit<AccountState['pendingWithdrawals'] extends Map<string, infer Entry> ? Entry : never, 'signature'>> =>
   new Map(Array.from(withdrawals.entries()).map(([requestId, withdrawal]) => {
     const { signature: _signature, ...state } = withdrawal;
     return [requestId, state];
   }));
 
-const accountEntityOverlayState = (account: AccountMachine): unknown => ({
+const accountEntityOverlayState = (account: AccountState): unknown => ({
   status: account.status,
   disputePrepare: account.disputePrepare,
   settlementWorkspace: settlementOverlayState(account.settlementWorkspace),
@@ -478,7 +478,7 @@ const accountEntityOverlayState = (account: AccountMachine): unknown => ({
 });
 
 export const computeAccountShadowRoot = (
-  accounts: ReadonlyMap<string, AccountMachine>,
+  accounts: ReadonlyMap<string, AccountState>,
 ): string => computeCanonicalMerkleRoot(
   'entity.account-shadow',
   Array.from(accounts.entries()).map(([counterpartyId, account]) => [

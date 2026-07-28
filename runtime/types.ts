@@ -15,7 +15,7 @@ import type { HankoString } from './types/hanko';
 import type {
   AccountInput,
   AccountFrame,
-  AccountMachine,
+  AccountState,
   AccountTx,
   AccountFrameDbRecord,
   HtlcNoteKey,
@@ -156,6 +156,7 @@ export type {
   AccountBoardResealMigration,
   AccountFrameProposal,
   AccountInput,
+  AccountState,
   AccountDisputeSeal,
   AccountMachine,
   AccountStateDomain,
@@ -849,7 +850,7 @@ export interface EntityState {
   // Financial invariant: entity reserves are always keyed by numeric tokenId.
   // Never persist or pass string token keys through live state.
   reserves: Map<number, bigint>; // tokenId -> amount only, metadata from TOKEN_REGISTRY
-  accounts: Map<string, AccountMachine>; // canonicalKey "left:right" -> account state
+  accounts: Map<string, AccountState>; // canonicalKey "left:right" -> account state
   // External EOA balances/allowances observed through finalized J snapshots.
   // Keyed by owner EOA, then token/spender keys, so multi-validator entities
   // keep one deterministic map instead of signer-local side-channel state.
@@ -1191,7 +1192,7 @@ export interface EntityReplica {
 
 export type BrowserVMState = import('./jadapter/browservm-state').BrowserVmSerializedState;
 
-export interface Env {
+export interface RuntimeState {
   eReplicas: Map<string, EntityReplica>;  // Entity replicas (E-layer state machines)
   jReplicas: Map<string, JReplica>;       // Jurisdiction replicas (J-layer EVM state)
   height: number;
@@ -1494,6 +1495,9 @@ export interface Env {
   error: (category: LogCategory, message: string, data?: Record<string, unknown>, entityId?: string) => void;
   emit: (eventName: string, data: Record<string, unknown>) => void; // Generic event emission
 }
+
+/** @deprecated Use RuntimeState. Kept only while external consumers migrate. */
+export type Env = RuntimeState;
 
 export interface RuntimeSnapshot {
   height: number;

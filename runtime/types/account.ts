@@ -212,7 +212,7 @@ export type AccountStateDomain = {
   depositoryAddress: string;
 };
 
-export interface AccountMachine {
+export interface AccountState {
   // CANONICAL REPRESENTATION (like Channel.ts - both entities store IDENTICAL structure)
   leftEntity: string;   // Lower entity ID (canonical left)
   rightEntity: string;  // Higher entity ID (canonical right)
@@ -420,6 +420,9 @@ export interface AccountMachine {
     rejectedFrameEvidence?: AccountRejectedFrameEvidence;
   };
 }
+
+/** @deprecated Use AccountState. Kept only while external consumers migrate. */
+export type AccountMachine = AccountState;
 
 export type AccountBoardResealMigration = {
   activationJHeight: number;

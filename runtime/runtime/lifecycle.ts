@@ -1,8 +1,8 @@
-import type { Env } from '../types';
+import type { RuntimeState } from '../types';
 
 export type RuntimeLifecyclePhase = 'booting' | 'running' | 'quiescing' | 'stopped' | 'halted';
 
-type RuntimeState = NonNullable<Env['runtimeState']>;
+type RuntimeLifecycleState = NonNullable<RuntimeState['runtimeState']>;
 
 const ALLOWED_TRANSITIONS: Record<RuntimeLifecyclePhase, ReadonlySet<RuntimeLifecyclePhase>> = {
   booting: new Set(['running', 'quiescing', 'stopped', 'halted']),
@@ -12,7 +12,7 @@ const ALLOWED_TRANSITIONS: Record<RuntimeLifecyclePhase, ReadonlySet<RuntimeLife
   halted: new Set(),
 };
 
-export const inferRuntimeLifecyclePhase = (state: RuntimeState): RuntimeLifecyclePhase => {
+export const inferRuntimeLifecyclePhase = (state: RuntimeLifecycleState): RuntimeLifecyclePhase => {
   if (state.lifecyclePhase) return state.lifecyclePhase;
   if (state.halted) return 'halted';
   if (state.persistenceQuiescing) return 'quiescing';
@@ -21,7 +21,7 @@ export const inferRuntimeLifecyclePhase = (state: RuntimeState): RuntimeLifecycl
 };
 
 export const transitionRuntimeLifecycle = (
-  state: RuntimeState,
+  state: RuntimeLifecycleState,
   next: RuntimeLifecyclePhase,
 ): RuntimeLifecyclePhase => {
   const current = inferRuntimeLifecyclePhase(state);
@@ -35,14 +35,14 @@ export const transitionRuntimeLifecycle = (
   return next;
 };
 
-export const runtimeCanScheduleWork = (state: RuntimeState): boolean =>
+export const runtimeCanScheduleWork = (state: RuntimeLifecycleState): boolean =>
   inferRuntimeLifecyclePhase(state) === 'running';
 
 export type RuntimeCommandReadiness =
   | { ready: true; reason: null }
   | { ready: false; reason: string };
 
-export const getRuntimeCommandReadiness = (env: Env): RuntimeCommandReadiness => {
+export const getRuntimeCommandReadiness = (env: RuntimeState): RuntimeCommandReadiness => {
   const state = env.runtimeState ?? {};
   const phase = inferRuntimeLifecyclePhase(state);
   if (phase !== 'running') return { ready: false, reason: `phase=${phase}` };
@@ -52,7 +52,7 @@ export const getRuntimeCommandReadiness = (env: Env): RuntimeCommandReadiness =>
   return { ready: true, reason: null };
 };
 
-export const assertRuntimeCommandReady = (env: Env): void => {
+export const assertRuntimeCommandReady = (env: RuntimeState): void => {
   const readiness = getRuntimeCommandReadiness(env);
   if (!readiness.ready) throw new Error(`RUNTIME_COMMAND_NOT_READY:${readiness.reason}`);
 };

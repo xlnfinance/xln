@@ -1,9 +1,9 @@
 import type {
-  AccountMachine,
+  AccountState,
   EntityInput,
   EntityReplica,
   EntityTx,
-  Env,
+  RuntimeState,
   SettlementOp,
 } from '../../types';
 import { isLeftEntity } from '../id';
@@ -33,7 +33,7 @@ export const HUB_MAX_C2R_PER_TICK = 10;
 type RebalanceDebug = (payload: Record<string, unknown>) => void;
 
 type RebalanceRun = {
-  env: Env;
+  env: RuntimeState;
   replica: EntityReplica;
   execution: CrontabExecutionContext;
   outputs: EntityInput[];
@@ -68,7 +68,7 @@ const compareBigAsc = (left: bigint, right: bigint): number =>
   left === right ? 0 : left < right ? -1 : 1;
 
 const createRebalanceRun = (
-  env: Env,
+  env: RuntimeState,
   replica: EntityReplica,
   execution: CrontabExecutionContext,
 ): RebalanceRun => {
@@ -134,7 +134,7 @@ const resolveBatchAvailability = (run: RebalanceRun): {
 
 const resetStaleR2CSubmission = (
   run: RebalanceRun,
-  account: AccountMachine,
+  account: AccountState,
   counterpartyId: string,
   tokenId: number,
   submittedAgeMs: number,
@@ -157,7 +157,7 @@ const resetStaleR2CSubmission = (
 
 const validateR2CRequestPolicy = (
   run: RebalanceRun,
-  account: AccountMachine,
+  account: AccountState,
   counterpartyId: string,
   tokenId: number,
   requestedAmount: bigint,
@@ -231,7 +231,7 @@ const validateR2CRequestPolicy = (
 
 const evaluateR2CRequest = (
   run: RebalanceRun,
-  account: AccountMachine,
+  account: AccountState,
   counterpartyId: string,
   tokenId: number,
   requestedAmountRaw: bigint,
@@ -410,7 +410,7 @@ const queueR2CTargets = (
 const collectC2RAccountWork = (
   run: RebalanceRun,
   counterpartyId: string,
-  account: AccountMachine,
+  account: AccountState,
   canTouchBatch: boolean,
 ): { plan?: C2RPlan; executable: boolean } => {
   if (account.pendingFrame || hasPendingSettlementTransition(account)) {
@@ -594,7 +594,7 @@ const queueRebalanceBroadcast = (
 };
 
 export async function hubRebalanceHandler(
-  env: Env,
+  env: RuntimeState,
   replica: EntityReplica,
   _task: CrontabTaskState,
   execution: CrontabExecutionContext,

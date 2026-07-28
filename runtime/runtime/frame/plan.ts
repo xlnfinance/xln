@@ -1,5 +1,5 @@
 import { createStructuredLogger } from '../../infra/logger';
-import type { Env, RoutedEntityInput } from '../../types';
+import type { RuntimeState, RoutedEntityInput } from '../../types';
 import type {
   PlannedRemoteOutput,
   RuntimeOutputRoutingDeps,
@@ -19,15 +19,15 @@ export type RuntimeFrameOutputPlan = {
 
 export type RuntimeFrameOutputPlanningDeps = {
   applyOutputPlan(
-    env: Env,
+    env: RuntimeState,
     entityOutbox: readonly RoutedEntityInput[],
     routing: RuntimeOutputRoutingDeps,
   ): RuntimeFrameOutputPlan;
-  generateHookPings(env: Env): void;
+  generateHookPings(env: RuntimeState): void;
 };
 
 export const planRuntimeFrameOutputs = (
-  env: Env,
+  env: RuntimeState,
   entityOutbox: readonly RoutedEntityInput[],
   routing: RuntimeOutputRoutingDeps,
   profile: RuntimeProcessProfile,

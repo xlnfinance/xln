@@ -1,7 +1,7 @@
 import type {
-  AccountMachine,
+  AccountState,
   EntityState,
-  Env,
+  RuntimeState,
 } from '../../../../types';
 import type { ProofBodyStruct } from '../../../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
 import { addMessage } from '../../../../state-helpers';
@@ -39,7 +39,7 @@ export type StartEvidence = {
 export const loadStartProof = (
   sourceState: EntityState,
   state: EntityState,
-  account: AccountMachine,
+  account: AccountState,
   counterpartyId: string,
 ): Omit<StartEvidence, 'signedNonce' | 'nonceSource' | 'jNonce' | 'starterInitialArguments' | 'starterIncrementedArguments'> | null => {
   const counterpartyHanko = account.counterpartyDisputeProofHanko;
@@ -94,7 +94,7 @@ export const loadStartProof = (
 
 export const resolveStartNonce = (
   state: EntityState,
-  account: AccountMachine,
+  account: AccountState,
   counterpartyId: string,
   proofBodyHash: string,
 ): Pick<StartEvidence, 'signedNonce' | 'nonceSource' | 'jNonce'> | null => {
@@ -148,12 +148,12 @@ export const resolveStartNonce = (
 
 export const buildStarterArguments = (
   state: EntityState,
-  account: AccountMachine,
+  account: AccountState,
   counterpartyId: string,
   proofBodyHash: string,
   signedNonce: number,
   overrideInitial: string | undefined,
-  env: Env,
+  env: RuntimeState,
 ): Pick<StartEvidence, 'starterInitialArguments' | 'starterIncrementedArguments'> => {
   const starterIsLeft = account.leftEntity === state.entityId;
   const starterSide: DisputeArgumentSide = starterIsLeft ? 'left' : 'right';

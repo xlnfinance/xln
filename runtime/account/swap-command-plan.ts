@@ -2,10 +2,10 @@ import {
   requantizeRemainingSwapAtPrice,
 } from '../orderbook';
 import type {
-  AccountMachine,
+  AccountState,
   CrossJurisdictionSwapRoute,
   EntityTx,
-  Env,
+  RuntimeState,
   RuntimeInput,
 } from '../types';
 import {
@@ -25,7 +25,7 @@ type SwapCommandParty = Readonly<{
   hubEntityId: string;
   hubSignerId: string;
   jurisdiction: string;
-  account: AccountMachine | null;
+  account: AccountState | null;
 }>;
 
 export type SwapCommandPlanInput = Readonly<{
@@ -263,7 +263,7 @@ export const planSwapCommand = (input: SwapCommandPlanInput): SwapCommandPlan =>
 
 export const assertCrossJurisdictionSwapTargetReady = (
   route: CrossJurisdictionSwapRoute,
-  targetAccount: AccountMachine | null,
+  targetAccount: AccountState | null,
 ): void => {
   const plan = planSwapInboundCapacity({
     account: targetAccount,
@@ -282,7 +282,7 @@ export const assertCrossJurisdictionSwapTargetReady = (
 };
 
 export const assertCrossJurisdictionSwapTargetReadyInEnv = (
-  env: Env,
+  env: RuntimeState,
   route: CrossJurisdictionSwapRoute,
 ): void => {
   const targetEntityId = normalizeId(route.target.counterpartyEntityId);

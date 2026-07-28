@@ -4,12 +4,12 @@
  */
 
 import type {
-  AccountMachine,
+  AccountState,
   AccountFrame,
   AccountTx,
   AccountInput,
   EntityCandidateEffect,
-  Env,
+  RuntimeState,
   Delta,
   HankoString,
 } from '../../types';
@@ -93,11 +93,11 @@ const accountLog = createStructuredLogger('account');
 const STALE_ACCOUNT_FRAME_WARNING_MS = 5 * 60_000;
 
 const assertLiveCommitMatchesFrame = (
-  accountMachine: AccountMachine,
+  accountMachine: AccountState,
   expectedRoot: string,
   side: 'proposer' | 'receiver',
   height: number,
-  validatedMachine?: AccountMachine,
+  validatedMachine?: AccountState,
 ): void => {
   const incrementalRoot = computeAccountStateRoot(accountMachine);
   const coldRoot = computeAccountStateRootCold(accountMachine);
@@ -159,8 +159,8 @@ type ValidatedCounterpartyDisputeSeal = {
 };
 
 async function validateCounterpartyDisputeSeal(
-  env: Env,
-  accountMachine: AccountMachine,
+  env: RuntimeState,
+  accountMachine: AccountState,
   input: AccountInput,
   seal: ReturnType<typeof accountInputDisputeSeal>,
   context: string,
@@ -242,7 +242,7 @@ const rejectBoardReseal = (error: string, events: string[]): HandleAccountInputR
 });
 
 const validateBoardResealMetadata = (
-  account: AccountMachine,
+  account: AccountState,
   input: AccountInput,
   reseal: BoardResealPayload,
   events: string[],
@@ -316,8 +316,8 @@ const validateBoardResealMetadata = (
 };
 
 const verifyBoardResealWitnesses = async (
-  env: Env,
-  account: AccountMachine,
+  env: RuntimeState,
+  account: AccountState,
   input: AccountInput,
   reseal: BoardResealPayload,
   metadata: ValidatedBoardResealMetadata,
@@ -371,8 +371,8 @@ const verifyBoardResealWitnesses = async (
 };
 
 const handleBoardReseal = async (
-  env: Env,
-  accountMachine: AccountMachine,
+  env: RuntimeState,
+  accountMachine: AccountState,
   input: AccountInput,
   securityContext: AccountInputSecurityContext,
 ): Promise<HandleAccountInputResult | undefined> => {
@@ -409,7 +409,7 @@ const handleBoardReseal = async (
 };
 
 function storeCounterpartyDisputeSeal(
-  accountMachine: AccountMachine,
+  accountMachine: AccountState,
   seal: ValidatedCounterpartyDisputeSeal | undefined,
 ): void {
   if (!seal) return;
@@ -467,7 +467,7 @@ function getDisputeHankoShapeError(input: AccountInput): string | undefined {
   return undefined;
 }
 
-function describeAccountState(accountMachine: AccountMachine): Record<string, unknown> {
+function describeAccountState(accountMachine: AccountState): Record<string, unknown> {
   return {
     currentHeight: Number(accountMachine.currentHeight ?? 0),
     currentHash: accountMachine.currentFrame?.stateHash ?? null,
@@ -495,7 +495,7 @@ type AccountInputReplayClassification = {
 };
 
 function classifyAccountInputReplay(
-  accountMachine: AccountMachine,
+  accountMachine: AccountState,
   input: AccountInput,
 ): AccountInputReplayClassification {
   const ack = accountInputAck(input);
@@ -531,7 +531,7 @@ function classifyAccountInputReplay(
 }
 
 async function buildDuplicateCommittedFrameAck(
-  accountMachine: AccountMachine,
+  accountMachine: AccountState,
   input: AccountInput,
   events: string[],
   replayCurrentHeight: number,
@@ -584,7 +584,7 @@ async function buildDuplicateCommittedFrameAck(
 }
 
 async function handleReplayOrObsoleteAccountInput(
-  accountMachine: AccountMachine,
+  accountMachine: AccountState,
   input: AccountInput,
   replay: AccountInputReplayClassification,
   events: string[],
@@ -667,8 +667,8 @@ type PendingAckCertificateResult =
   | { kind: 'return'; result: HandleAccountInputResult };
 
 async function verifyPendingAckCertificate(
-  env: Env,
-  accountMachine: AccountMachine,
+  env: RuntimeState,
+  accountMachine: AccountState,
   ack: AccountFrameAck,
   ackHeight: number,
   validatedSeal: ValidatedCounterpartyDisputeSeal | undefined,
@@ -742,8 +742,8 @@ async function verifyPendingAckCertificate(
 }
 
 async function applyPendingFrameTransactions(
-  env: Env,
-  accountMachine: AccountMachine,
+  env: RuntimeState,
+  accountMachine: AccountState,
   pendingFrame: AccountFrame,
   committedJClaims: AccountJClaimSession,
   timedOutHashlocks: string[],
@@ -791,7 +791,7 @@ async function applyPendingFrameTransactions(
 }
 
 function installPendingFrameCommit(
-  accountMachine: AccountMachine,
+  accountMachine: AccountState,
   input: AccountInput,
   pendingFrame: AccountFrame,
   ack: AccountFrameAck,
@@ -837,8 +837,8 @@ function installPendingFrameCommit(
 }
 
 async function queuePostAckWork(
-  env: Env,
-  accountMachine: AccountMachine,
+  env: RuntimeState,
+  accountMachine: AccountState,
   input: AccountInput,
   committedHeight: number,
   securityContext: AccountInputSecurityContext,
@@ -862,8 +862,8 @@ async function queuePostAckWork(
 }
 
 async function handlePendingFrameAck(
-  env: Env,
-  accountMachine: AccountMachine,
+  env: RuntimeState,
+  accountMachine: AccountState,
   input: AccountInput,
   ackHeight: number | undefined,
   validatedCounterpartyDisputeSeal: ValidatedCounterpartyDisputeSeal | undefined,
@@ -966,7 +966,7 @@ type IncomingFramePreflightResult =
   | { kind: 'return'; result: HandleAccountInputResult };
 
 type IncomingFrameValidation = {
-  clonedMachine: AccountMachine;
+  clonedMachine: AccountState;
   proofResult: ReturnType<typeof buildAccountProofBodyFromEnv>;
   processEvents: string[];
   revealedSecrets: AccountRevealedSecret[];
@@ -984,7 +984,7 @@ type IncomingFrameResult =
   | { kind: 'return'; result: HandleAccountInputResult };
 
 const isRefreshableStaleIncomingSettlementSeal = (
-  account: AccountMachine,
+  account: AccountState,
   frame: AccountFrame,
   error: string | undefined,
 ): boolean => {
@@ -1022,7 +1022,7 @@ type AccountAckTarget = {
 };
 
 function resolveAccountAckTarget(
-  accountMachine: AccountMachine,
+  accountMachine: AccountState,
   input: AccountInput,
   normalizedInputHeight: number | undefined,
 ): AccountAckTarget {
@@ -1048,7 +1048,7 @@ function resolveAccountAckTarget(
 }
 
 function isSameHeightSimultaneousProposalAck(
-  accountMachine: AccountMachine,
+  accountMachine: AccountState,
   input: AccountInput,
   normalizedInputHeight: number | undefined,
 ): boolean {
@@ -1065,7 +1065,7 @@ function isSameHeightSimultaneousProposalAck(
 }
 
 function handleUnmatchedAck(
-  accountMachine: AccountMachine,
+  accountMachine: AccountState,
   input: AccountInput,
   normalizedInputHeight: number | undefined,
   ackProcessed: boolean,
@@ -1136,7 +1136,7 @@ function handleUnmatchedAck(
 }
 
 function resolveSameHeightIncomingFrame(
-  accountMachine: AccountMachine,
+  accountMachine: AccountState,
   receivedFrame: AccountFrame,
   events: string[],
   committedFrames: AccountCommittedFrame[],
@@ -1211,8 +1211,8 @@ function resolveSameHeightIncomingFrame(
 }
 
 function applySameHeightIncomingFrameRollback(
-  _env: Env,
-  accountMachine: AccountMachine,
+  _env: RuntimeState,
+  accountMachine: AccountState,
   _input: AccountInput,
   receivedFrame: AccountFrame,
   events: string[],
@@ -1243,7 +1243,7 @@ function applySameHeightIncomingFrameRollback(
 }
 
 async function verifyIncomingFrameHanko(
-  env: Env,
+  env: RuntimeState,
   input: AccountInput,
   receivedFrame: AccountFrame,
   events: string[],
@@ -1276,7 +1276,7 @@ async function verifyIncomingFrameHanko(
 }
 
 async function handleStaleIncomingFrame(
-  accountMachine: AccountMachine,
+  accountMachine: AccountState,
   input: AccountInput,
   receivedFrame: AccountFrame,
   replayCurrentHeight: number,
@@ -1306,7 +1306,7 @@ async function handleStaleIncomingFrame(
 }
 
 function validateIncomingFrameProposer(
-  accountMachine: AccountMachine,
+  accountMachine: AccountState,
   input: AccountInput,
   receivedFrame: AccountFrame,
   events: string[],
@@ -1331,7 +1331,7 @@ function validateIncomingFrameProposer(
 }
 
 function validateIncomingFrameChain(
-  accountMachine: AccountMachine,
+  accountMachine: AccountState,
   input: AccountInput,
   receivedFrame: AccountFrame,
   normalizedInputHeight: number | undefined,
@@ -1411,7 +1411,7 @@ function validateIncomingFrameChain(
 }
 
 function validateIncomingFrameDeadline(
-  accountMachine: AccountMachine,
+  accountMachine: AccountState,
   input: AccountInput,
   receivedFrame: AccountFrame,
   securityContext: AccountInputSecurityContext,
@@ -1455,8 +1455,8 @@ function validateIncomingFrameDeadline(
 }
 
 async function preflightIncomingAccountFrame(
-  env: Env,
-  accountMachine: AccountMachine,
+  env: RuntimeState,
+  accountMachine: AccountState,
   input: AccountInput,
   normalizedInputHeight: number | undefined,
   replayCurrentHeight: number,
@@ -1538,7 +1538,7 @@ async function preflightIncomingAccountFrame(
   };
 }
 
-function collectReceiverValidationDeltas(clonedMachine: AccountMachine): {
+function collectReceiverValidationDeltas(clonedMachine: AccountState): {
   tokenIds: number[];
   deltas: Delta[];
 } {
@@ -1612,8 +1612,8 @@ async function verifySenderFrameHash(
 }
 
 async function validateIncomingFrameOnClone(
-  env: Env,
-  accountMachine: AccountMachine,
+  env: RuntimeState,
+  accountMachine: AccountState,
   input: AccountInput,
   receivedFrame: AccountFrame,
   frameJHeight: number,
@@ -1732,8 +1732,8 @@ async function validateIncomingFrameOnClone(
 }
 
 async function commitIncomingFrameOnRealState(
-  env: Env,
-  accountMachine: AccountMachine,
+  env: RuntimeState,
+  accountMachine: AccountState,
   input: AccountInput,
   receivedFrame: AccountFrame,
   frameJHeight: number,
@@ -1855,8 +1855,8 @@ type IncomingFrameAckMaterialResult =
   | { kind: 'return'; result: HandleAccountInputResult };
 
 async function buildIncomingFrameAckMaterial(
-  env: Env,
-  accountMachine: AccountMachine,
+  env: RuntimeState,
+  accountMachine: AccountState,
   input: AccountInput,
   receivedFrame: AccountFrame,
   ackProofResult: ReturnType<typeof buildAccountProofBodyFromEnv>,
@@ -1975,7 +1975,7 @@ async function buildIncomingFrameAckMaterial(
 }
 
 function storeAckDisputeState(
-  accountMachine: AccountMachine,
+  accountMachine: AccountState,
   material: IncomingFrameAckMaterial,
 ): void {
   if (material.proofChanged && material.ackDisputeHash) {
@@ -2040,8 +2040,8 @@ function buildIncomingFrameReturnPayload(
 }
 
 async function buildAckResponseForIncomingFrame(
-  env: Env,
-  accountMachine: AccountMachine,
+  env: RuntimeState,
+  accountMachine: AccountState,
   input: AccountInput,
   receivedFrame: AccountFrame,
   validation: IncomingFrameValidation,
@@ -2096,7 +2096,7 @@ const classifyPreflightReturn = (
 };
 
 const classifyIncomingValidationFailure = (
-  account: AccountMachine,
+  account: AccountState,
   input: AccountInput,
   receivedFrame: AccountFrame,
   result: HandleAccountInputResult,
@@ -2136,8 +2136,8 @@ const classifyIncomingValidationFailure = (
 };
 
 async function handleIncomingAccountFrame(
-  env: Env,
-  accountMachine: AccountMachine,
+  env: RuntimeState,
+  accountMachine: AccountState,
   input: AccountInput,
   normalizedInputHeight: number | undefined,
   replayCurrentHeight: number,
@@ -2231,8 +2231,8 @@ async function handleIncomingAccountFrame(
 }
 
 type AccountInputSession = {
-  env: Env;
-  accountMachine: AccountMachine;
+  env: RuntimeState;
+  accountMachine: AccountState;
   input: AccountInput;
   securityContext: AccountInputSecurityContext;
   normalizedInputHeight: number;
@@ -2414,8 +2414,8 @@ const handleAccountProposalPhase = async (
  * mutation remain in the phase handlers above.
  */
 export async function applyAccountInput(
-  env: Env,
-  accountMachine: AccountMachine,
+  env: RuntimeState,
+  accountMachine: AccountState,
   input: AccountInput,
   securityContext: AccountInputSecurityContext = {
     entityTimestamp: env.timestamp,
@@ -2511,7 +2511,7 @@ export async function applyAccountInput(
 /**
  * Add transaction to account mempool with limits
  */
-export function addToAccountMempool(accountMachine: AccountMachine, accountTx: AccountTx): boolean {
+export function addToAccountMempool(accountMachine: AccountState, accountTx: AccountTx): boolean {
   appendAccountMempoolTx(accountMachine, accountTx, 'accountConsensus:externalAdmission');
   return true;
 }

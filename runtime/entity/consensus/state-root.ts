@@ -1,7 +1,7 @@
 import { ethers } from 'ethers';
 
 import type {
-  AccountMachine,
+  AccountState,
   ConsensusConfig,
   EntityFrameAuthority,
   EntityLeaderState,
@@ -335,14 +335,14 @@ const encodeCanonicalEntityConsensusValueDirect = (
   }
 };
 
-type AccountWithReplicaCaches = AccountMachine & {
+type AccountWithReplicaCaches = AccountState & {
   frameHistory?: unknown;
   provider?: unknown;
   ethersProvider?: unknown;
 };
 
 const projectSettlementWorkspace = (
-  workspace: AccountMachine['settlementWorkspace'],
+  workspace: AccountState['settlementWorkspace'],
 ): unknown => {
   if (!workspace) return undefined;
   const {
@@ -361,7 +361,7 @@ const projectSettlementWorkspace = (
 };
 
 const projectPendingWithdrawals = (
-  withdrawals: AccountMachine['pendingWithdrawals'],
+  withdrawals: AccountState['pendingWithdrawals'],
 ): Map<string, unknown> => new Map(Array.from(withdrawals.entries()).map(([requestId, withdrawal]) => {
   const { signature: _signature, ...unsignedWithdrawal } = withdrawal;
   return [requestId, unsignedWithdrawal];
@@ -414,9 +414,9 @@ const ACCOUNT_ROOT_COMMITTED_FIELDS = [
   'requestedRebalance',
   'requestedRebalanceFeeState',
   'rebalanceFeePolicies',
-] as const satisfies readonly (keyof AccountMachine)[];
+] as const satisfies readonly (keyof AccountState)[];
 
-const projectAccountConsensusState = (account: AccountMachine): Record<string, unknown> => {
+const projectAccountConsensusState = (account: AccountState): Record<string, unknown> => {
   const projected = { ...account } as AccountWithReplicaCaches as unknown as Record<string, unknown>;
   delete projected['clonedForValidation'];
   delete projected['frameHistory'];
@@ -585,7 +585,7 @@ type EntitySectionCommitment = {
 };
 
 type EntityAccountCommitmentEntry = {
-  account: AccountMachine;
+  account: AccountState;
   encodedKey: string;
   encodedValue: string;
 };

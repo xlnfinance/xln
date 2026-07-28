@@ -51,7 +51,7 @@ import type {
   AccountInput,
   EntityInput,
   EntityReplica,
-  Env,
+  RuntimeState,
 } from '../types';
 import type {
   CrontabExecutionContext,
@@ -132,7 +132,7 @@ export const emitCommittedPendingFrameWarnings = (
 };
 
 type CrontabTaskHandler = (
-  env: Env,
+  env: RuntimeState,
   replica: EntityReplica,
   task: CrontabTaskState,
   context: CrontabExecutionContext,
@@ -227,7 +227,7 @@ const CRONTAB_TASK_HANDLERS: Record<CrontabTaskMethod, CrontabTaskHandler> = {
  * Uses entity-specific timestamp for determinism (each entity has own clock from frames)
  */
 export async function executeCrontab(
-  env: Env,
+  env: RuntimeState,
   replica: EntityReplica,
   crontabState: CrontabState,
   context: CrontabExecutionContext,
@@ -281,7 +281,7 @@ export async function executeCrontab(
  * - If > threshold, suggest dispute to entity members
  */
 async function checkAccountTimeoutsHandler(
-  _env: Env,
+  _env: RuntimeState,
   replica: EntityReplica,
   _task: CrontabTaskState,
   _context: CrontabExecutionContext,

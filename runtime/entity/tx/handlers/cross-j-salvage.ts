@@ -8,7 +8,7 @@ import {
 } from '../../../extensions/cross-j/index';
 import { verifyHashLadderBinary } from '../../../protocol/htlc/hash-ladder';
 import { cloneEntityState, addMessage } from '../../../state-helpers';
-import type { EntityInput, EntityState, EntityTx, Env } from '../../../types';
+import type { EntityInput, EntityState, EntityTx, RuntimeState } from '../../../types';
 import { normalizeEntityRef } from '../account-key';
 
 type CrossJurisdictionSalvageTx = Extract<EntityTx, { type: 'crossJurisdictionSalvage' }>;
@@ -18,7 +18,7 @@ type CrossJurisdictionSalvageResult = {
   outputs: EntityInput[];
 };
 
-const deterministicEntityTimestamp = (state: EntityState, env: Env): number =>
+const deterministicEntityTimestamp = (state: EntityState, env: RuntimeState): number =>
   Number(state.timestamp || env.timestamp || 0);
 
 const buildCrossJurisdictionStarterPullArguments = (binary: string): string => {
@@ -31,7 +31,7 @@ const buildCrossJurisdictionStarterPullArguments = (binary: string): string => {
 };
 
 export const handleCrossJurisdictionSalvageEntityTx = (
-  env: Env,
+  env: RuntimeState,
   entityState: EntityState,
   entityTx: CrossJurisdictionSalvageTx,
 ): CrossJurisdictionSalvageResult => {

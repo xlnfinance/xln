@@ -1,4 +1,4 @@
-import type { AccountMachine } from '../../../types';
+import type { AccountState } from '../../../types';
 import { MAX_SWAP_FILL_RATIO } from '../../../orderbook/swap-execution';
 import {
   computeSwapPriceTicks,
@@ -41,7 +41,7 @@ const releaseGiveHold = (
 };
 
 const closeSwapOffer = (
-  account: AccountMachine,
+  account: AccountState,
   resolve: AppliedSwapResolve,
   events: string[],
   message: string,
@@ -59,7 +59,7 @@ const closeSwapOffer = (
 };
 
 export const applySwapResolveRemainder = (
-  account: AccountMachine,
+  account: AccountState,
   resolve: AppliedSwapResolve,
   events: string[],
 ): SwapResolveRemainderResult => {

@@ -1,5 +1,5 @@
 import type {
-  AccountMachine,
+  AccountState,
   AccountTx,
   CrossJurisdictionSwapRoute,
 } from '../../../types';
@@ -9,7 +9,7 @@ export type CrossSwapFillAckTx = Extract<
   AccountTx,
   { type: 'cross_swap_fill_ack' }
 >;
-export type CrossSwapOffer = NonNullable<AccountMachine['swapOffers']> extends Map<
+export type CrossSwapOffer = NonNullable<AccountState['swapOffers']> extends Map<
   string,
   infer Offer
 >
@@ -25,7 +25,7 @@ export type CrossSwapFillAckResult = {
 };
 
 export type PreparedCrossSwapFillAck = {
-  account: AccountMachine;
+  account: AccountState;
   tx: CrossSwapFillAckTx;
   offer: CrossSwapOffer;
   route: CrossJurisdictionSwapRoute;

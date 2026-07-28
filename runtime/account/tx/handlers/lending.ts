@@ -1,4 +1,4 @@
-import type { AccountMachine, AccountTx } from '../../../types';
+import type { AccountState, AccountTx } from '../../../types';
 import { normalizeInterestBps, normalizeLendingTerm } from '../../../extensions/lending';
 import { handleDirectPayment } from './direct-payment';
 import { handleSetCreditLimit } from './set-credit-limit';
@@ -20,11 +20,11 @@ const INTENT_ID_RE = /^(?:lend|borrow|loan)-[0-9a-f]{16}$/;
 
 const normalized = (value: unknown): string => String(value || '').trim().toLowerCase();
 
-const proposerId = (account: AccountMachine, byLeft: boolean): string =>
+const proposerId = (account: AccountState, byLeft: boolean): string =>
   normalized(byLeft ? account.leftEntity : account.rightEntity);
 
 const requireRole = (
-  account: AccountMachine,
+  account: AccountState,
   byLeft: boolean,
   role: 'lender' | 'borrower' | 'hub',
   claimedEntityId: string,
@@ -37,7 +37,7 @@ const requireRole = (
   }
 };
 
-const requireCounterparty = (account: AccountMachine, proposer: string, counterparty: string): void => {
+const requireCounterparty = (account: AccountState, proposer: string, counterparty: string): void => {
   const left = normalized(account.leftEntity);
   const right = normalized(account.rightEntity);
   const expected = proposer === left ? right : left;
@@ -54,16 +54,16 @@ const requireIntentId = (value: string, prefix: 'lend' | 'borrow' | 'loan'): voi
 };
 
 const consumeIntent = (
-  account: AccountMachine,
+  account: AccountState,
   key: string,
-  kind: NonNullable<AccountMachine['lendingIntents']> extends Map<string, infer K> ? K : never,
+  kind: NonNullable<AccountState['lendingIntents']> extends Map<string, infer K> ? K : never,
 ): void => {
   account.lendingIntents ??= new Map();
   if (account.lendingIntents.has(key)) throw new Error(`LENDING_INTENT_REPLAY:${key}`);
   account.lendingIntents.set(key, kind);
 };
 
-const requireUnusedIntent = (account: AccountMachine, key: string): void => {
+const requireUnusedIntent = (account: AccountState, key: string): void => {
   if (account.lendingIntents?.has(key)) throw new Error(`LENDING_INTENT_REPLAY:${key}`);
 };
 
@@ -72,7 +72,7 @@ const positiveAmount = (value: bigint, context: string): void => {
 };
 
 const applyPayment = (
-  account: AccountMachine,
+  account: AccountState,
   tx: Extract<LendingAccountTx, { type: 'lending_fund' | 'lending_repay' | 'lending_close_payout' }>,
   byLeft: boolean,
 ): LendingResult => {
@@ -104,7 +104,7 @@ const applyPayment = (
 };
 
 export const handleLendingAccountTx = (
-  account: AccountMachine,
+  account: AccountState,
   tx: LendingAccountTx,
   byLeft: boolean,
 ): LendingResult => {

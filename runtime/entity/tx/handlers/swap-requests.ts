@@ -1,4 +1,4 @@
-import type { AccountMachine, AccountTx, EntityInput, EntityState, EntityTx, Env } from '../../../types';
+import type { AccountState, AccountTx, EntityInput, EntityState, EntityTx, RuntimeState } from '../../../types';
 import { cloneEntityState, addMessage } from '../../../state-helpers';
 import {
   cloneCrossJurisdictionRoute,
@@ -18,7 +18,7 @@ type SwapRequestResult = {
   mempoolOps?: MempoolOp[];
 };
 
-const deterministicEntityTimestamp = (state: EntityState, env: Env): number =>
+const deterministicEntityTimestamp = (state: EntityState, env: RuntimeState): number =>
   Number(state.timestamp || env.timestamp || 0);
 
 const stateForEntityTx = (entityState: EntityState, options?: ApplyEntityTxOptions): EntityState =>
@@ -35,7 +35,7 @@ const requireSwapAccount = (
   state: EntityState,
   counterpartyEntityId: string,
   action: string,
-): AccountMachine => {
+): AccountState => {
   const account = state.accounts.get(counterpartyEntityId);
   if (!account) {
     throw new Error(
@@ -46,7 +46,7 @@ const requireSwapAccount = (
 };
 
 export const handlePlaceSwapOfferRequest = (
-  env: Env,
+  env: RuntimeState,
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'placeSwapOffer' }>,
   options?: ApplyEntityTxOptions,

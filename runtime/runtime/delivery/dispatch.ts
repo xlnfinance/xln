@@ -1,6 +1,6 @@
 import type {
   DeliverableEntityInput,
-  Env,
+  RuntimeState,
   RoutedEntityInput,
   RuntimeEntityInputsEnvelope,
 } from '../../types';
@@ -94,7 +94,7 @@ const outputEnvelopeGroupKey = (output: DeliverableEntityInput): string => {
 };
 
 const buildRuntimeEntityInputsEnvelope = (
-  env: Env,
+  env: RuntimeState,
   outputs: readonly DeliverableEntityInput[],
 ): RuntimeEntityInputsEnvelope => {
   if (outputs.length === 0) throw new Error('ROUTE_ENTITY_INPUTS_ENVELOPE_EMPTY');
@@ -145,7 +145,7 @@ const buildRuntimeEntityInputsEnvelope = (
 };
 
 const awaitsDurableEntityCertificate = (
-  env: Env,
+  env: RuntimeState,
   targetRuntimeId: string,
   identity: ReliableOutputIdentity,
 ): boolean => {
@@ -232,7 +232,7 @@ const assertCompleteOutputGroup = (
 };
 
 const selectSendableOutputs = (
-  env: Env,
+  env: RuntimeState,
   group: OutputEnvelopeGroup,
   blockedReliableLanes: Set<string>,
   deferredOutputs: RoutedEntityInput[],
@@ -277,7 +277,7 @@ const retainDeliveredReliableOutputs = (
 };
 
 const deferOutputsAfterDeliveryFailure = (
-  env: Env,
+  env: RuntimeState,
   deps: RuntimeOutputRoutingDeps,
   sendable: DeliverableEntityInput[],
   targetRuntimeId: string,
@@ -295,7 +295,7 @@ const deferOutputsAfterDeliveryFailure = (
 };
 
 const tryDirectOutputEnvelope = (
-  env: Env,
+  env: RuntimeState,
   group: OutputEnvelopeGroup,
   sendable: DeliverableEntityInput[],
   envelope: RuntimeEntityInputsEnvelope,
@@ -327,7 +327,7 @@ const tryDirectOutputEnvelope = (
 };
 
 const dispatchP2POutputEnvelope = (
-  env: Env,
+  env: RuntimeState,
   group: OutputEnvelopeGroup,
   sendable: DeliverableEntityInput[],
   envelope: RuntimeEntityInputsEnvelope,
@@ -417,7 +417,7 @@ const dispatchP2POutputEnvelope = (
 };
 
 const dispatchOutputEnvelope = (
-  env: Env,
+  env: RuntimeState,
   group: OutputEnvelopeGroup,
   sendable: DeliverableEntityInput[],
   envelope: RuntimeEntityInputsEnvelope,
@@ -447,7 +447,7 @@ const dispatchOutputEnvelope = (
 };
 
 export const dispatchEntityOutputs = (
-  env: Env,
+  env: RuntimeState,
   outputs: PlannedRemoteOutput[],
   deps: RuntimeOutputRoutingDeps,
 ): RoutedEntityInput[] => {
@@ -478,7 +478,7 @@ export const dispatchEntityOutputs = (
 };
 
 export const sendEntityInputWithRouting = (
-  env: Env,
+  env: RuntimeState,
   input: RoutedEntityInput,
   deps: RuntimeOutputRoutingDeps,
 ): RuntimeEntityInputRoutingResult => {

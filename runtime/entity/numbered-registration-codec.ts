@@ -4,7 +4,7 @@ import type { JAdapter } from '../jadapter/types';
 import { getCertifiedBoardStackKey } from '../jurisdiction/board-registry';
 import { encodeCanonicalEntityConsensusValue } from './consensus/state-root';
 import type {
-  Env,
+  RuntimeState,
   NumberedRegistrationRequest,
   PendingNumberedRegistration,
 } from '../types';
@@ -51,7 +51,7 @@ export const encodeNumberedRegistrationCalldata = (
   [request.entities.map(entity => entity.boardHash)],
 ).toLowerCase();
 
-export const assertNumberedRegistrationRequest = (env: Env, request: NumberedRegistrationRequest): void => {
+export const assertNumberedRegistrationRequest = (env: RuntimeState, request: NumberedRegistrationRequest): void => {
   if (request.version !== 1) throw new Error('NUMBERED_REGISTRATION_INTENT_VERSION_INVALID');
   numberedRegistrationBytes32(request.intentId, 'INTENT_ID');
   numberedRegistrationBytes32(request.stackKey, 'STACK_KEY');
@@ -105,7 +105,7 @@ export const parseNumberedRegistrationIntentTransaction = (
 };
 
 export const buildNumberedRegistrationRequest = (
-  env: Env,
+  env: RuntimeState,
   input: {
     intentId: string;
     jurisdiction: NonNullable<NumberedRegistrationRequest['entities'][number]['config']['jurisdiction']>;

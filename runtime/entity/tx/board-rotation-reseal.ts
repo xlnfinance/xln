@@ -1,10 +1,10 @@
 import type {
   AccountBoardResealMigration,
   AccountDisputeSeal,
-  AccountMachine,
+  AccountState,
   EntityInput,
   EntityState,
-  Env,
+  RuntimeState,
   HashToSign,
   JurisdictionEvent,
 } from '../../types';
@@ -47,7 +47,7 @@ export const BOARD_RESEAL_RETRY_MS = 1_000;
 
 const bytes32 = (value: string): boolean => /^0x[0-9a-f]{64}$/.test(value.toLowerCase());
 
-const hasAnyDisputeSealEvidence = (account: AccountMachine): boolean => Boolean(
+const hasAnyDisputeSealEvidence = (account: AccountState): boolean => Boolean(
   account.currentDisputeProofHanko ||
   account.counterpartyDisputeProofHanko ||
   account.currentDisputeHash ||
@@ -63,7 +63,7 @@ type DisputeSealDraft = {
   issue?: AccountBoardResealMigration['reason'];
 };
 
-const exactBilateralDisputeSeal = (account: AccountMachine): DisputeSealDraft => {
+const exactBilateralDisputeSeal = (account: AccountState): DisputeSealDraft => {
   if (!hasAnyDisputeSealEvidence(account)) return {};
   const localHash = account.currentDisputeHash?.toLowerCase();
   const remoteHash = account.counterpartyDisputeHash?.toLowerCase();
@@ -89,7 +89,7 @@ const exactBilateralDisputeSeal = (account: AccountMachine): DisputeSealDraft =>
 const accountFrameIssue = (
   state: EntityState,
   counterpartyId: string,
-  account: AccountMachine,
+  account: AccountState,
 ): AccountBoardResealMigration['reason'] | undefined => {
   if (
     account.proofHeader.fromEntity.toLowerCase() !== state.entityId.toLowerCase() ||
@@ -167,9 +167,9 @@ export const markBoardRotationResealsPending = (
 
 const buildResealOutput = (
   state: EntityState,
-  env: Env,
+  env: RuntimeState,
   counterpartyId: string,
-  account: AccountMachine,
+  account: AccountState,
   input: NonNullable<EntityInput['entityTxs']>,
 ): EntityInput | undefined => {
   try {
@@ -193,10 +193,10 @@ const buildResealOutput = (
 
 const buildCertifiedAccountResealDraft = (
   state: EntityState,
-  env: Env,
+  env: RuntimeState,
   activation: BoardResealActivation,
   counterpartyId: string,
-  account: AccountMachine,
+  account: AccountState,
   position: ActivationPosition,
 ): AccountResealDraft => {
   const frameHash = account.currentFrame.stateHash.toLowerCase();
@@ -237,10 +237,10 @@ const buildCertifiedAccountResealDraft = (
 
 const buildAccountResealDraft = (
   state: EntityState,
-  env: Env,
+  env: RuntimeState,
   activation: BoardResealActivation,
   counterpartyId: string,
-  account: AccountMachine,
+  account: AccountState,
   position: ActivationPosition,
 ): AccountResealDraft => {
   if (Number(account.currentHeight) < 1) {
@@ -265,7 +265,7 @@ export const applyBoardRotationResealMigrations = (
 
 const buildBoardRotationResealDraftsForActivation = (
   state: EntityState,
-  env: Env,
+  env: RuntimeState,
   activation: BoardResealActivation,
   options: {
     afterCounterpartyId?: string;
@@ -317,7 +317,7 @@ const buildBoardRotationResealDraftsForActivation = (
 /** Build at most one bounded frame of Account hashes already certified by both parties. */
 export const buildBoardRotationResealDrafts = (
   state: EntityState,
-  env: Env,
+  env: RuntimeState,
   event: BoardActivatedEvent,
   options: {
     afterCounterpartyId?: string;
@@ -332,7 +332,7 @@ export const buildBoardRotationResealDrafts = (
 
 export const buildPendingBoardRotationResealDrafts = (
   state: EntityState,
-  env: Env,
+  env: RuntimeState,
   activation: BoardResealActivation,
   afterCounterpartyId = '',
 ): BoardRotationResealDrafts => buildBoardRotationResealDraftsForActivation(state, env, activation, {

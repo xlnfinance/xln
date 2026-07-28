@@ -1,4 +1,4 @@
-import type { Env, RoutedEntityInput } from '../types';
+import type { RuntimeState, RoutedEntityInput } from '../types';
 import { keccak256, toUtf8Bytes } from 'ethers';
 import { buildRouteOutputKey } from './output-routing';
 
@@ -60,7 +60,7 @@ export const validateDurableOutputRetryState = (
 };
 
 export const buildDurableOutputRetryState = (
-  env: Env,
+  env: RuntimeState,
   outputs: readonly RoutedEntityInput[],
 ): DurableOutputRetryState[] => outputs.flatMap(output => {
   const liveRouteKey = buildRouteOutputKey(output);
@@ -74,7 +74,7 @@ export const buildDurableOutputRetryState = (
 }).sort((left, right) => left.outputHash.localeCompare(right.outputHash));
 
 export const restoreDurableOutputRetryState = (
-  env: Env,
+  env: RuntimeState,
   entries: readonly DurableOutputRetryState[],
   outputs: readonly RoutedEntityInput[],
 ): void => {

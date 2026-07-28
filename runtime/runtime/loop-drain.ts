@@ -1,4 +1,4 @@
-import type { Env } from '../types';
+import type { RuntimeState } from '../types';
 import { inferRuntimeLifecyclePhase } from './lifecycle';
 import { requestRuntimeLoopWake } from './input-queue';
 import { getRemainingRuntimeFrameDelayMs } from './loop-work';
@@ -7,8 +7,8 @@ import { ensureRuntimeState } from './runtime-state';
 const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
 export type RuntimeDrainDeps = {
-  processRuntime(env: Env): Promise<unknown>;
-  hasRuntimeWork(env: Env): boolean;
+  processRuntime(env: RuntimeState): Promise<unknown>;
+  hasRuntimeWork(env: RuntimeState): boolean;
 };
 
 export const waitForPromiseBeforeTimeout = <T>(
@@ -29,7 +29,7 @@ export const waitForPromiseBeforeTimeout = <T>(
     );
   });
 
-const waitForProcessingCycle = async (env: Env, remaining: number): Promise<void> => {
+const waitForProcessingCycle = async (env: RuntimeState, remaining: number): Promise<void> => {
   const processing = env.runtimeState?.processingPromise;
   if (!processing) return;
   await Promise.race([
@@ -42,7 +42,7 @@ const waitForProcessingCycle = async (env: Env, remaining: number): Promise<void
 };
 
 const drainInactiveRuntime = async (
-  env: Env,
+  env: RuntimeState,
   remaining: number,
   deps: RuntimeDrainDeps,
 ): Promise<boolean> => {
@@ -60,7 +60,7 @@ const drainInactiveRuntime = async (
 };
 
 export const waitForRuntimeWorkDrained = async (
-  env: Env,
+  env: RuntimeState,
   deps: RuntimeDrainDeps,
   timeoutMs = 10_000,
   quietMs = 250,

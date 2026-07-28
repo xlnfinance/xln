@@ -3,7 +3,7 @@ import { extractEntityId, extractSignerId } from '../../ids';
 import { createStructuredLogger } from '../../infra/logger';
 import { announceCertifiedLocalProfiles } from '../../networking/local-profile-lifecycle';
 import { isDeliveryDelivered } from '../../protocol/payments/delivery-result';
-import type { Env, RoutedEntityInput } from '../../types';
+import type { RuntimeState, RoutedEntityInput } from '../../types';
 import {
   buildPendingNetworkOutputs,
   dispatchEntityOutputs,
@@ -17,7 +17,7 @@ import type { FrameExecutionState } from './execution-state';
 
 const runtimeLog = createStructuredLogger('runtime');
 
-const collectLocallySignableEntityIds = (env: Env): Set<string> => {
+const collectLocallySignableEntityIds = (env: RuntimeState): Set<string> => {
   const entityIds = new Set<string>();
   for (const replicaKey of env.eReplicas.keys()) {
     const signerId = extractSignerId(replicaKey);
@@ -36,7 +36,7 @@ export type CommittedEntityOutputPlan = {
 };
 
 export const dispatchCommittedEntityOutputs = async (
-  env: Env,
+  env: RuntimeState,
   changedEntityIds: ReadonlySet<string>,
   plan: CommittedEntityOutputPlan,
   routing: RuntimeOutputRoutingDeps,
@@ -82,7 +82,7 @@ export const dispatchCommittedEntityOutputs = async (
 };
 
 export const runCommittedRecoveryBarrier = async (
-  env: Env,
+  env: RuntimeState,
   frame: FrameExecutionState,
   remoteOutputCount: number,
   jSideEffectCount: number,
@@ -110,7 +110,7 @@ export const runCommittedRecoveryBarrier = async (
 };
 
 export const finalizeCommittedReceiptDeliveries = (
-  env: Env,
+  env: RuntimeState,
   frame: FrameExecutionState,
 ): void => {
   frame.reliableReceiptDeliveries = [
@@ -130,7 +130,7 @@ export const finalizeCommittedReceiptDeliveries = (
   }
 };
 
-export const dispatchCommittedReceipts = (env: Env, frame: FrameExecutionState): void => {
+export const dispatchCommittedReceipts = (env: RuntimeState, frame: FrameExecutionState): void => {
   if (frame.reliableReceiptDeliveries.length === 0) return;
   const state = ensureRuntimeState(env);
   const p2p = state.p2p ?? null;

@@ -1,7 +1,7 @@
 import type {
   EntityInput,
   EntityReplica,
-  Env,
+  RuntimeState,
 } from '../../types';
 import type {
   CrontabExecutionContext,
@@ -39,7 +39,7 @@ const processSecretAckTimeout = (
 };
 
 const processDueHook = (
-  env: Env,
+  env: RuntimeState,
   hook: ScheduledHook,
   replica: EntityReplica,
   context: CrontabExecutionContext,
@@ -160,7 +160,7 @@ const appendBatchedHookOutputs = (
 };
 
 export const processDueHooks = (
-  env: Env,
+  env: RuntimeState,
   hooks: ScheduledHook[],
   replica: EntityReplica,
   context: CrontabExecutionContext,

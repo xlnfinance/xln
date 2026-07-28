@@ -1,4 +1,4 @@
-import type { AccountMachine, SwapOffer } from '../../../types';
+import type { AccountState, SwapOffer } from '../../../types';
 import { FINANCIAL } from '../../../constants';
 import {
   deriveExactSwapFillRatio,
@@ -38,7 +38,7 @@ const failure = (events: string[], error: string): SwapResolveFailure => ({
 });
 
 const resolveCanonicalOffer = (
-  account: AccountMachine,
+  account: AccountState,
   tx: SwapResolveTx,
   byLeft: boolean,
   events: string[],
@@ -267,7 +267,7 @@ const validateExecutionEconomics = (
 };
 
 export const validateSwapResolve = (
-  account: AccountMachine,
+  account: AccountState,
   tx: SwapResolveTx,
   byLeft: boolean,
   events: string[],

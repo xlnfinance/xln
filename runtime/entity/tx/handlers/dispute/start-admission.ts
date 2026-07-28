@@ -1,5 +1,5 @@
 import type {
-  AccountMachine,
+  AccountState,
   EntityState,
   EntityTx,
 } from '../../../../types';
@@ -43,7 +43,7 @@ export const validateCrossJurisdictionDisputeRoute = (
 export const admitDisputeStart = (
   state: EntityState,
   counterpartyId: string,
-): AccountMachine | null => {
+): AccountState | null => {
   state.jBatchState ??= initJBatch();
   if (state.jBatchState.sentBatch) {
     addMessage(

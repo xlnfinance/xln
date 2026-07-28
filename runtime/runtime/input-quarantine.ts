@@ -3,7 +3,7 @@ import { recordRuntimeSecurityIncident } from './security-incidents';
 import { RuntimeEntityInputApplyError } from './entity-inputs';
 import { ENV_REPLAY_MODE_KEY, envRecord } from './loop-environment';
 import { ensureRuntimeState } from './runtime-state';
-import type { Env, RuntimeInput } from '../types';
+import type { RuntimeState, RuntimeInput } from '../types';
 
 const quarantineLog = createStructuredLogger('runtime.input_quarantine');
 const MAX_QUARANTINE_RECORDS = 50;
@@ -53,7 +53,7 @@ const summarizeRuntimeInput = (input: RuntimeInput) => ({
 });
 
 export const quarantineLiveRuntimeInput = (
-  env: Env,
+  env: RuntimeState,
   input: RuntimeInput,
   error: unknown,
   quietLogs: boolean,

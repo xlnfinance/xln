@@ -23,7 +23,7 @@ import {
 } from '../jurisdiction/local-history';
 import { getJEventJurisdictionRef } from '../jurisdiction/event-observation';
 import { normalizeRuntimeId } from '../networking/runtime-id';
-import type { EntityReplica, EntityState, Env, JInput, RuntimeTx } from '../types';
+import type { EntityReplica, EntityState, RuntimeState, JInput, RuntimeTx } from '../types';
 import { applyRuntimeAdapterCommandMarker } from '../radapter/command-frontier';
 import { assertRuntimeAdapterCommandTxAuthorized } from '../radapter/command-frontier-auth';
 import {
@@ -70,13 +70,13 @@ export interface RuntimeTxHandlerDeps {
   isReplay?: boolean;
 }
 
-const commitRuntimeTxEntityChange = (env: Env, entityId: string | undefined): JInput[] => {
+const commitRuntimeTxEntityChange = (env: RuntimeState, entityId: string | undefined): JInput[] => {
   if (entityId) applyRuntimeStorageChanges(env, [{ family: 'entity', entityId }]);
   return [];
 };
 
 export const applyRuntimeTx = async (
-  env: Env,
+  env: RuntimeState,
   runtimeTx: RuntimeTx,
   deps: RuntimeTxHandlerDeps = {},
 ): Promise<JInput[]> => {
@@ -157,7 +157,7 @@ export const applyRuntimeTx = async (
 };
 
 const rewindJHistoryRuntimeTx = (
-  env: Env,
+  env: RuntimeState,
   runtimeTx: Extract<RuntimeTx, { type: 'rewindJHistory' }>,
 ): string => {
   const entityId = String(runtimeTx.data.entityId || '').trim().toLowerCase();
@@ -194,7 +194,7 @@ const rewindJHistoryRuntimeTx = (
 };
 
 const observeJRangeRuntimeTx = (
-  env: Env,
+  env: RuntimeState,
   runtimeTx: Extract<RuntimeTx, { type: 'observeJRange' }>,
 ): string | undefined => {
   const entityId = String(runtimeTx.data.entityId || '').trim().toLowerCase();
@@ -218,7 +218,7 @@ const observeJRangeRuntimeTx = (
   };
   const certifiedAnchor = getEntityCertifiedJAnchor(match.replica.state);
   if (certifiedAnchor && observation.scannedThroughHeight < certifiedAnchor.height) {
-    // A watcher page can be queued against an older live Env while another
+    // A watcher page can be queued against an older live RuntimeState while another
     // Runtime frame advances this Entity's certified J head. Validate the
     // discarded page independently, then prove the retained local cache has
     // not corrupted the newer certified anchor. Never let staleness hide bad
@@ -242,7 +242,7 @@ const observeJRangeRuntimeTx = (
 };
 
 const resolveImportCheckpointState = (
-  env: Env,
+  env: RuntimeState,
   entityId: string,
   signerId: string,
   config: EntityState['config'],
@@ -304,7 +304,7 @@ const entityHasCertifiedCheckpoint = (
     Boolean(replica.certifiedFrameLineage?.length));
 
 const applyReplicaLocalMetadata = (
-  env: Env,
+  env: RuntimeState,
   replica: EntityReplica,
   identity: ReplicaImportIdentity,
   isProposer: boolean,
@@ -321,7 +321,7 @@ const applyReplicaLocalMetadata = (
 };
 
 const reuseExistingReplica = (
-  env: Env,
+  env: RuntimeState,
   runtimeTx: ImportReplicaRuntimeTx,
   identity: ReplicaImportIdentity,
   existingKey: string,
@@ -361,7 +361,7 @@ const reuseExistingReplica = (
 };
 
 const buildCheckpointReplica = (
-  env: Env,
+  env: RuntimeState,
   runtimeTx: ImportReplicaRuntimeTx,
   identity: ReplicaImportIdentity,
   config: EntityState['config'],
@@ -394,7 +394,7 @@ const buildCheckpointReplica = (
 };
 
 const buildGenesisReplica = (
-  env: Env,
+  env: RuntimeState,
   runtimeTx: ImportReplicaRuntimeTx,
   identity: ReplicaImportIdentity,
   config: EntityState['config'],
@@ -458,7 +458,7 @@ const buildGenesisReplica = (
 };
 
 const assertCreatedReplicaJHeight = (
-  env: Env,
+  env: RuntimeState,
   replicaKey: string,
 ): void => {
   const actual = env.eReplicas.get(replicaKey)?.state.lastFinalizedJHeight;
@@ -470,7 +470,7 @@ const assertCreatedReplicaJHeight = (
   }
 };
 
-const importReplicaRuntimeTx = (env: Env, runtimeTx: ImportReplicaRuntimeTx): string => {
+const importReplicaRuntimeTx = (env: RuntimeState, runtimeTx: ImportReplicaRuntimeTx): string => {
   const identity = normalizeReplicaImportIdentity(runtimeTx);
   if (DEBUG) {
     runtimeTxLog.debug('replica.import_start', {
@@ -527,7 +527,7 @@ const importReplicaRuntimeTx = (env: Env, runtimeTx: ImportReplicaRuntimeTx): st
 };
 
 const findExistingReplicaCaseInsensitive = (
-  env: Env,
+  env: RuntimeState,
   entityId: string,
   signerId: string,
 ): { key: string; replica: EntityReplica } | null => {

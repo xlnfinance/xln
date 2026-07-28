@@ -17,13 +17,13 @@
  * Reference: 2019src.txt line 2976 (they_requested_deposit)
  */
 
-import type { AccountMachine, AccountTx } from '../../../types';
+import type { AccountState, AccountTx } from '../../../types';
 import { isLeftEntity } from '../../../entity/id';
 import { deriveDelta } from '../../utils';
 import { getDefaultRebalanceBaseFeeForToken } from '../../rebalance-defaults';
 
 export function handleRequestCollateral(
-  accountMachine: AccountMachine,
+  accountMachine: AccountState,
   accountTx: Extract<AccountTx, { type: 'request_collateral' }>,
   byLeft?: boolean,
   currentTimestamp = 0,
@@ -151,7 +151,7 @@ export interface RebalanceFeePolicy {
 }
 
 export function resolveAutoRebalanceFeePolicy(
-  accountMachine: AccountMachine,
+  accountMachine: AccountState,
   ourEntityId: string,
   tokenId: number,
 ): RebalanceFeePolicy | undefined {
@@ -175,7 +175,7 @@ export function resolveAutoRebalanceFeePolicy(
 }
 
 export function checkAutoRebalance(
-  accountMachine: AccountMachine,
+  accountMachine: AccountState,
   ourEntityId: string,
   counterpartyId: string,
 ): AccountTx[] {

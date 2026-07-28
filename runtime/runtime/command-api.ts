@@ -10,7 +10,7 @@ import {
 import type { createRuntimeLoopApi } from './loop';
 import type {
   CrossJurisdictionSwapRoute,
-  Env,
+  RuntimeState,
   RuntimeEntityInputsEnvelope,
 } from '../types';
 import {
@@ -41,7 +41,7 @@ export const getEntityDisplayInfoFromProfile = (entityId: string) =>
  */
 export const createRuntimeCommandApi = (dependencies: RuntimeCommandDependencies) => {
   const submitCrossJurisdictionIntent = async (
-    env: Env,
+    env: RuntimeState,
     route: CrossJurisdictionSwapRoute,
   ): Promise<CrossJurisdictionSwapSubmitResult> => {
     assertRuntimeCommandReady(env);
@@ -102,7 +102,7 @@ export const createRuntimeCommandApi = (dependencies: RuntimeCommandDependencies
   };
 
   const submitCrossJurisdictionSwap = async (
-    env: Env,
+    env: RuntimeState,
     params: CrossJurisdictionSwapSubmitParams,
   ): Promise<CrossJurisdictionSwapSubmitResult> => {
     const { route } = buildCrossJurisdictionSwapSubmission(env, params);

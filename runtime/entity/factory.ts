@@ -9,7 +9,7 @@ import { getSignerAddress, getSignerPrivateKey } from '../account/crypto';
 import { canonicalJStackAddress } from '../jadapter/stack-binding';
 import type { JAdapter } from '../jadapter/types';
 import { createStructuredLogger, shortHash, shortId } from '../infra/logger';
-import type { ConsensusConfig, EntityType, Env, JurisdictionConfig } from '../types';
+import type { ConsensusConfig, EntityType, RuntimeState, JurisdictionConfig } from '../types';
 import { DEBUG } from '../utils';
 
 // Extend globalThis to include our entity counter
@@ -22,7 +22,7 @@ let namedRequestCounter = 0;
 const factoryLog = createStructuredLogger('entity.factory');
 
 // Entity encoding utilities
-type BoardSignerContext = Pick<Env, 'runtimeSeed'>;
+type BoardSignerContext = Pick<RuntimeState, 'runtimeSeed'>;
 
 export type BoardMemberInput = string | Readonly<{
   name: string;
@@ -74,7 +74,7 @@ const resolveValidatorAddress = (validator: string, env?: BoardSignerContext): s
   if (!derived) {
     throw new Error(
       `BOARD_VALIDATOR_ADDRESS_REQUIRED:${validator}` +
-        (env ? '' : ':numeric aliases require explicit Env'),
+        (env ? '' : ':numeric aliases require explicit RuntimeState'),
     );
   }
   return ethers.getAddress(derived);
@@ -281,7 +281,7 @@ export const createLazyEntity = (
 };
 
 export const getTrustedRegistrationAdapter = (
-  env: Env,
+  env: RuntimeState,
   jurisdiction: JurisdictionConfig,
 ): JAdapter => {
   const expectedChainId = Number(jurisdiction.chainId);
@@ -316,7 +316,7 @@ export const getTrustedRegistrationAdapter = (
 };
 
 export const getNumberedRegistrationWallet = (
-  env: Env,
+  env: RuntimeState,
   jadapter: JAdapter,
   registrationSignerId: string,
 ): ethers.Wallet => {
@@ -384,7 +384,7 @@ export const createNumberedEntity = async (
   validators: readonly BoardMemberInput[],
   threshold: bigint,
   jurisdiction: JurisdictionConfig,
-  env: Env,
+  env: RuntimeState,
   registrationSignerId: string,
 ): Promise<{ config: ConsensusConfig; entityNumber: number; entityId: string }> => {
   if (!jurisdiction) {
@@ -446,7 +446,7 @@ export const createNumberedEntitiesBatch = async (
     threshold: bigint;
   }>[],
   jurisdiction: JurisdictionConfig,
-  env: Env,
+  env: RuntimeState,
   registrationSignerId: string,
 ): Promise<Array<{ config: ConsensusConfig; entityNumber: number; entityId: string }>> => {
   if (!jurisdiction) {

@@ -3,7 +3,7 @@ import type {
   EntityReplica,
   EntityState,
   EntityTx,
-  Env,
+  RuntimeState,
   HashToSign,
 } from '../../../types';
 import { executeCrontab } from '../../scheduler';
@@ -13,7 +13,7 @@ import { isCollectiveEntityActionTx } from '../../authorization';
 type ScheduledWakeTx = Extract<EntityTx, { type: 'scheduledWake' }>;
 
 export const handleScheduledWakeEntityTx = async (
-  env: Env,
+  env: RuntimeState,
   state: EntityState,
   tx: ScheduledWakeTx,
   manualBroadcastInInput: boolean,

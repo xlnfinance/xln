@@ -1,9 +1,9 @@
 import type {
-  AccountMachine,
+  AccountState,
   EntityInput,
   EntityState,
   EntityTx,
-  Env,
+  RuntimeState,
   RuntimeOverlayRecord,
 } from '../../../../types';
 import { addMessage, cloneEntityState } from '../../../../state-helpers';
@@ -35,7 +35,7 @@ type StartTx = Extract<EntityTx, { type: 'disputeStart' }>;
 const queueDisputeStart = (
   sourceState: EntityState,
   state: EntityState,
-  account: AccountMachine,
+  account: AccountState,
   tx: StartTx,
   evidence: StartEvidence,
   outputs: EntityInput[],
@@ -100,7 +100,7 @@ const queueDisputeStart = (
 export const handleDisputeStart = async (
   entityState: EntityState,
   entityTx: StartTx,
-  env: Env,
+  env: RuntimeState,
   _storageChanges: RuntimeOverlayRecord[] = [],
 ): Promise<{ newState: EntityState; outputs: EntityInput[] }> => {
   if (entityTx.data.starterIncrementedArguments !== undefined) {

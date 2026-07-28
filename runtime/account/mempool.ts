@@ -1,8 +1,8 @@
 import { LIMITS } from '../constants';
-import type { AccountMachine, AccountTx } from '../types';
+import type { AccountState, AccountTx } from '../types';
 
-type AccountMempoolSubject = Pick<AccountMachine, 'mempool'> & {
-  pendingFrame?: AccountMachine['pendingFrame'] | undefined;
+type AccountMempoolSubject = Pick<AccountState, 'mempool'> & {
+  pendingFrame?: AccountState['pendingFrame'] | undefined;
 };
 
 const pendingAccountTxCount = (account: AccountMempoolSubject): number =>

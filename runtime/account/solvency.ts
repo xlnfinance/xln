@@ -1,7 +1,7 @@
 import { computeCanonicalEntityConsensusStateHash } from '../entity/consensus/state-root';
 import { isLeftEntity } from '../entity/id';
 import { createStructuredLogger } from '../infra/logger';
-import type { EntityState, Env } from '../types';
+import type { EntityState, RuntimeState } from '../types';
 
 const solvencyLog = createStructuredLogger('runtime.solvency');
 
@@ -49,7 +49,7 @@ const canonicalAmount = (value: unknown, context: string): bigint => {
   throw new Error(`${context} must be a bigint-compatible amount`);
 };
 
-const selectCanonicalStates = (env: Env): EntityState[] => {
+const selectCanonicalStates = (env: RuntimeState): EntityState[] => {
   const selected = new Map<string, { signerId: string; state: EntityState }>();
   for (const replica of env.eReplicas.values()) {
     const entityId = String(replica.state?.entityId || '').trim().toLowerCase();
@@ -93,7 +93,7 @@ const ensureAsset = (
   return created;
 };
 
-export const calculateSolvency = (env: Env, snapshot?: Env): Solvency => {
+export const calculateSolvency = (env: RuntimeState, snapshot?: RuntimeState): Solvency => {
   const states = selectCanonicalStates(snapshot || env);
   const byAsset = new Map<string, AssetSolvency>();
   let accountViews = 0;
@@ -125,7 +125,7 @@ export const calculateSolvency = (env: Env, snapshot?: Env): Solvency => {
   return { byAsset, entityCount: states.length, accountViews, isValid: byAsset.size > 0 && Array.from(byAsset.values()).every(asset => asset.isValid) };
 };
 
-export const verifySolvency = (env: Env, label?: string): boolean => {
+export const verifySolvency = (env: RuntimeState, label?: string): boolean => {
   const solvency = calculateSolvency(env);
   const invalid = Array.from(solvency.byAsset.values()).filter(asset => !asset.isValid);
   if (!solvency.isValid) {

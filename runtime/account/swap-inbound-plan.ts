@@ -1,4 +1,4 @@
-import type { AccountMachine, EntityTx } from '../types';
+import type { AccountState, EntityTx } from '../types';
 import { isLeftEntity } from '../entity/id';
 import { deriveDelta } from './utils';
 
@@ -14,7 +14,7 @@ export type SwapInboundCapacityPlan = Readonly<{
 }>;
 
 export type SwapInboundCapacityPlanInput = Readonly<{
-  account: AccountMachine | null;
+  account: AccountState | null;
   ownerEntityId: string;
   counterpartyEntityId: string;
   tokenId: number;
@@ -31,7 +31,7 @@ export type SwapAccountCapacityView = Readonly<{
 }>;
 
 export type SwapAccountCapacityViewInput = Readonly<{
-  account: AccountMachine | null;
+  account: AccountState | null;
   ownerEntityId: string;
   counterpartyEntityId: string;
   tokenId: number;
@@ -40,7 +40,7 @@ export type SwapAccountCapacityViewInput = Readonly<{
 const normalizeEntityId = (value: string): string => String(value || '').trim().toLowerCase();
 const nonNegative = (value: bigint): bigint => value < 0n ? 0n : value;
 
-const readTokenDelta = (account: AccountMachine, tokenId: number) => {
+const readTokenDelta = (account: AccountState, tokenId: number) => {
   for (const [candidateTokenId, delta] of account.deltas.entries()) {
     if (candidateTokenId === tokenId) return delta;
   }
@@ -56,7 +56,7 @@ const buildPlan = (
 });
 
 const assertAccountParties = (
-  account: AccountMachine,
+  account: AccountState,
   ownerEntityId: string,
   counterpartyEntityId: string,
 ): void => {
@@ -183,7 +183,7 @@ const deriveRequiredPeerCreditLimit = (
 
 const planActiveToken = (
   input: SwapInboundCapacityPlanInput,
-  account: AccountMachine,
+  account: AccountState,
   counterpartyEntityId: string,
   ownerEntityId: string,
 ): SwapInboundCapacityPlan => {

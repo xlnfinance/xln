@@ -22,7 +22,7 @@ import {
 } from '../storage/runtime-dbs';
 import type {
   EntityInput,
-  Env,
+  RuntimeState,
   JInput,
   ReliableDeliveryReceipt,
   RuntimeTx,
@@ -34,32 +34,32 @@ const cleanLogDeps = { ensureRuntimeState };
 const inputQueueDeps = { ensureRuntimeState, requestRuntimeLoopWake };
 
 export const getRuntimeStorageDb = (
-  env: Env,
+  env: RuntimeState,
   role: StorageDbRole = 'current',
 ): Level<Buffer, Buffer> => getStorageDb(env, storageDeps, role);
 
-export const getRuntimeInfraDb = (env: Env): Level<Buffer, Buffer> =>
+export const getRuntimeInfraDb = (env: RuntimeState): Level<Buffer, Buffer> =>
   getInfraDb(env, storageDeps);
 
-export const getRuntimeFrameDb = (env: Env): Level<Buffer, Buffer> =>
+export const getRuntimeFrameDb = (env: RuntimeState): Level<Buffer, Buffer> =>
   getFrameDb(env, storageDeps);
 
 export const tryOpenRuntimeStorageDb = (
-  env: Env,
+  env: RuntimeState,
   role: StorageDbRole = 'current',
 ): Promise<boolean> => tryOpenStorageDb(env, storageDeps, role);
 
 export const rotateRuntimeStorageEpochDb = (
-  env: Env,
+  env: RuntimeState,
   snapshotHeight: number,
   timestamp = env.timestamp,
 ): Promise<boolean> =>
   rotateStorageEpochDb(env, storageDeps, snapshotHeight, timestamp);
 
-export const tryOpenRuntimeFrameDb = (env: Env): Promise<boolean> =>
+export const tryOpenRuntimeFrameDb = (env: RuntimeState): Promise<boolean> =>
   tryOpenFrameDb(env, storageDeps);
 
-export const waitForRuntimeLoopWake = async (env: Env): Promise<void> => {
+export const waitForRuntimeLoopWake = async (env: RuntimeState): Promise<void> => {
   const state = ensureRuntimeState(env);
   if (state.wakeRequested) {
     state.wakeRequested = false;
@@ -82,7 +82,7 @@ export const waitForRuntimeLoopWake = async (env: Env): Promise<void> => {
 };
 
 export const waitForRuntimeLoopWakeOrTimeout = async (
-  env: Env,
+  env: RuntimeState,
   timeoutMs: number,
 ): Promise<'wake' | 'timeout'> => {
   const state = ensureRuntimeState(env);
@@ -115,17 +115,17 @@ export const waitForRuntimeLoopWakeOrTimeout = async (
   });
 };
 
-export const getCleanLogs = (env: Env): string =>
+export const getCleanLogs = (env: RuntimeState): string =>
   getRuntimeCleanLogs(env, cleanLogDeps);
 
-export const clearCleanLogs = (env: Env): void =>
+export const clearCleanLogs = (env: RuntimeState): void =>
   clearRuntimeCleanLogs(env, cleanLogDeps);
 
-export const copyCleanLogs = (env: Env): Promise<string> =>
+export const copyCleanLogs = (env: RuntimeState): Promise<string> =>
   copyRuntimeCleanLogs(env, cleanLogDeps);
 
 export const enqueueRuntimeInputs = (
-  env: Env,
+  env: RuntimeState,
   inputs?: EntityInput[],
   runtimeTxs?: RuntimeTx[],
   jInputs?: JInput[],
@@ -146,7 +146,7 @@ export const enqueueRuntimeInputs = (
 };
 
 export const enqueueRuntimeContinuation = (
-  env: Env,
+  env: RuntimeState,
   inputs?: EntityInput[],
   runtimeTxs?: RuntimeTx[],
   jInputs?: JInput[],
@@ -162,7 +162,7 @@ export const enqueueRuntimeContinuation = (
   { acceptedBeforeQuiesce: true },
 );
 
-export const tryOpenRuntimeInfraDb = async (env: Env): Promise<boolean> => {
+export const tryOpenRuntimeInfraDb = async (env: RuntimeState): Promise<boolean> => {
   const state = ensureRuntimeState(env);
   if (state.infraDbClosing) return false;
   state.infraDbOpenPromise ??= getRuntimeInfraDb(env).open().then(
@@ -196,14 +196,14 @@ export const infraGossipDbAccess = {
   getInfraDb: getRuntimeInfraDb,
 };
 
-export const trackInfraDbWrite = (env: Env, promise: Promise<void>): void => {
+export const trackInfraDbWrite = (env: RuntimeState, promise: Promise<void>): void => {
   const state = ensureRuntimeState(env);
   state.infraDbPendingWrites ??= new Set();
   const tracked = promise.finally(() => state.infraDbPendingWrites?.delete(tracked));
   state.infraDbPendingWrites.add(tracked);
 };
 
-export const drainInfraDbWrites = async (env: Env): Promise<void> => {
+export const drainInfraDbWrites = async (env: RuntimeState): Promise<void> => {
   const state = ensureRuntimeState(env);
   while (state.infraDbPendingWrites && state.infraDbPendingWrites.size > 0) {
     await Promise.allSettled([...state.infraDbPendingWrites]);

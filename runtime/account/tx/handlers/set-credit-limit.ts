@@ -6,7 +6,7 @@
  * Uses byLeft (frame property, same on both sides) — NOT perspective-dependent.
  */
 
-import type { AccountMachine, AccountTx } from '../../../types';
+import type { AccountState, AccountTx } from '../../../types';
 import { FINANCIAL } from '../../../constants';
 import { ensureDelta } from '../delta-utils';
 
@@ -14,7 +14,7 @@ import { ensureDelta } from '../delta-utils';
 const MAX_CREDIT_LIMIT = FINANCIAL.MAX_PAYMENT_AMOUNT * 1000n; // 1000x max payment
 
 export function handleSetCreditLimit(
-  accountMachine: AccountMachine,
+  accountMachine: AccountState,
   accountTx: Extract<AccountTx, { type: 'set_credit_limit' }>,
   byLeft: boolean
 ): { success: boolean; events: string[]; error?: string } {

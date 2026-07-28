@@ -1,4 +1,4 @@
-import type { AccountTx, EntityInput, EntityState, EntityTx, Env } from '../../../types';
+import type { AccountTx, EntityInput, EntityState, EntityTx, RuntimeState } from '../../../types';
 import { createStructuredLogger, shortId } from '../../../infra/logger';
 import { normalizeRebalanceMatchingStrategy } from '../../../extensions/rebalance/policy';
 import { cloneEntityState, addMessage } from '../../../state-helpers';
@@ -71,7 +71,7 @@ export const handleExtendCreditEntityTx = (
 };
 
 export const handleSetHubConfigEntityTx = (
-  _env: Env,
+  _env: RuntimeState,
   entityState: EntityState,
   entityTx: EntityTxOf<'setHubConfig'>,
 ): AccountAdminResult => {
@@ -181,7 +181,7 @@ export const handleSetHubConfigEntityTx = (
 };
 
 export const handleSetRebalancePolicyEntityTx = (
-  _env: Env,
+  _env: RuntimeState,
   entityState: EntityState,
   entityTx: EntityTxOf<'setRebalancePolicy'>,
 ): AccountAdminResult => {

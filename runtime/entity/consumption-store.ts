@@ -1,4 +1,4 @@
-import type { Env } from '../types';
+import type { RuntimeState } from '../types';
 import {
   EMPTY_CONSUMPTION_ROOT,
   assertConsumptionAccumulatorState,
@@ -14,7 +14,7 @@ export type ConsumptionNodeChanges = Readonly<{
   replacedNodeHashes: readonly string[];
 }>;
 
-export const getConsumptionNodeStore = (env: Env): Map<string, ConsumptionNode> => {
+export const getConsumptionNodeStore = (env: RuntimeState): Map<string, ConsumptionNode> => {
   env.runtimeState ??= {};
   const existing = env.runtimeState.consumptionNodes;
   if (existing instanceof Map) return existing as Map<string, ConsumptionNode>;
@@ -40,7 +40,7 @@ const putVerifiedNode = (
 
 /** Publish only a validator-computed delta for a frame that has committed. */
 export const cacheCommittedConsumptionNodeChanges = (
-  env: Env,
+  env: RuntimeState,
   changes: ConsumptionNodeChanges | undefined,
 ): void => {
   if (!changes || (changes.newNodes.length === 0 && changes.replacedNodeHashes.length === 0)) return;
@@ -98,15 +98,15 @@ export const collectReachableConsumptionNodes = (
   return reachable;
 };
 
-export const getLiveConsumptionAccumulatorStates = (env: Env): ConsumptionAccumulatorState[] =>
+export const getLiveConsumptionAccumulatorStates = (env: RuntimeState): ConsumptionAccumulatorState[] =>
   Array.from(env.eReplicas.values(), ({ state }) => state.consumptionAccumulator)
     .filter((state): state is ConsumptionAccumulatorState => Boolean(state));
 
-export const assertConsumptionRootsAvailable = (env: Env): void => {
+export const assertConsumptionRootsAvailable = (env: RuntimeState): void => {
   collectReachableConsumptionNodes(getConsumptionNodeStore(env), getLiveConsumptionAccumulatorStates(env));
 };
 
-export const getSafePendingConsumptionDeletes = (env: Env): string[] => {
+export const getSafePendingConsumptionDeletes = (env: RuntimeState): string[] => {
   const candidates = env.runtimeState?.pendingConsumptionNodeDeletes;
   if (!(candidates instanceof Set) || candidates.size === 0) return [];
   const reachable = collectReachableConsumptionNodes(
@@ -117,7 +117,7 @@ export const getSafePendingConsumptionDeletes = (env: Env): string[] => {
 };
 
 export const finalizePersistedConsumptionNodes = (
-  env: Env,
+  env: RuntimeState,
   deletedHashes: readonly string[],
 ): void => {
   const state = env.runtimeState;

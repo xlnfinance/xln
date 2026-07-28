@@ -1,4 +1,4 @@
-import type { Env } from '../types';
+import type { RuntimeState } from '../types';
 import type {
   AccountJClaimMutationResult,
   AccountJClaimNode,
@@ -14,7 +14,7 @@ export type AccountJClaimSession = {
 };
 
 export const createAccountJClaimSession = (
-  env: Env,
+  env: RuntimeState,
   base: AccountJClaimNodeStore = getAccountJClaimNodeStore(env),
 ): AccountJClaimSession => {
   const overlay = new Map<string, AccountJClaimNode>();

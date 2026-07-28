@@ -1,4 +1,4 @@
-import type { Env, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../types';
+import type { RuntimeState, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../types';
 import { createStructuredLogger, shortId } from '../infra/logger';
 import { RuntimeP2P, type P2PConfig } from '../networking/p2p';
 import { isRuntimeId } from '../networking/runtime-id';
@@ -13,20 +13,20 @@ import {
 export type { P2PConfig } from '../networking/p2p';
 
 export type RuntimeP2PLifecycleDeps = {
-  ensureRuntimeState: (env: Env) => NonNullable<Env['runtimeState']>;
-  notifyEnvChange: (env: Env) => void;
+  ensureRuntimeState: (env: RuntimeState) => NonNullable<RuntimeState['runtimeState']>;
+  notifyEnvChange: (env: RuntimeState) => void;
   handleInboundP2PEntityInputs: (
-    env: Env,
+    env: RuntimeState,
     from: string,
     envelope: RuntimeEntityInputsEnvelope,
     ingressTimestamp?: number,
   ) => RuntimeInboundEntityInputsResult;
   handleInboundReliableReceipt: (
-    env: Env,
+    env: RuntimeState,
     from: string,
     receipt: ReliableDeliveryReceipt,
   ) => void;
-  enqueueRuntimeInputs: (env: Env, inputs: RoutedEntityInput[]) => void;
+  enqueueRuntimeInputs: (env: RuntimeState, inputs: RoutedEntityInput[]) => void;
 };
 
 export type P2PConnectionState = {
@@ -48,15 +48,15 @@ type P2Pish = {
 
 const p2pLifecycleLog = createStructuredLogger('p2p.lifecycle');
 const ENV_P2P_SINGLETON_KEY = Symbol.for('xln.runtime.env.p2p.singleton');
-const envRecord = (env: Env): Record<PropertyKey, unknown> => env as unknown as Record<PropertyKey, unknown>;
+const envRecord = (env: RuntimeState): Record<PropertyKey, unknown> => env as unknown as Record<PropertyKey, unknown>;
 
 /**
  * Runtime P2P is process-local infrastructure, not consensus state.
  * Keep the singleton outside storage/projection paths: encrypted entity_input
- * enters through RuntimeP2P and is normalized before it reaches Env.
+ * enters through RuntimeP2P and is normalized before it reaches RuntimeState.
  */
 export const startRuntimeP2P = (
-  env: Env,
+  env: RuntimeState,
   config: P2PConfig = {},
   deps: RuntimeP2PLifecycleDeps,
 ): RuntimeP2P | null => {
@@ -178,7 +178,7 @@ export const startRuntimeP2P = (
 };
 
 export const startPendingRuntimeP2PIfReady = (
-  env: Env,
+  env: RuntimeState,
   deps: RuntimeP2PLifecycleDeps,
 ): void => {
   const state = deps.ensureRuntimeState(env);
@@ -197,7 +197,7 @@ export const startPendingRuntimeP2PIfReady = (
  * Clearing the singleton here would make a later awaited drain blind to a
  * socket that can still write into Vite's relay proxy during browser teardown.
  */
-export const stopRuntimeP2P = (env: Env, deps: RuntimeP2PLifecycleDeps): void => {
+export const stopRuntimeP2P = (env: RuntimeState, deps: RuntimeP2PLifecycleDeps): void => {
   const state = deps.ensureRuntimeState(env);
   state.pendingP2PConfig = null;
   if (state.p2p) {
@@ -208,7 +208,7 @@ export const stopRuntimeP2P = (env: Env, deps: RuntimeP2PLifecycleDeps): void =>
 };
 
 export const stopRuntimeP2PAndWait = async (
-  env: Env,
+  env: RuntimeState,
   deps: RuntimeP2PLifecycleDeps,
   timeoutMs = 1_000,
 ): Promise<void> => {
@@ -229,7 +229,7 @@ export const stopRuntimeP2PAndWait = async (
   state.lastP2PConfig = null;
 };
 
-export const detachRuntimeP2P = (env: Env, deps: RuntimeP2PLifecycleDeps): void => {
+export const detachRuntimeP2P = (env: RuntimeState, deps: RuntimeP2PLifecycleDeps): void => {
   const state = env.runtimeState;
   if (!state?.p2p) return;
   try {
@@ -247,10 +247,10 @@ export const detachRuntimeP2P = (env: Env, deps: RuntimeP2PLifecycleDeps): void 
   deps.ensureRuntimeState(env);
 };
 
-export const getRuntimeP2P = (env: Env, deps: RuntimeP2PLifecycleDeps): RuntimeP2P | null =>
+export const getRuntimeP2P = (env: RuntimeState, deps: RuntimeP2PLifecycleDeps): RuntimeP2P | null =>
   deps.ensureRuntimeState(env).p2p ?? null;
 
-export const getRuntimeP2PState = (env: Env, deps: RuntimeP2PLifecycleDeps): P2PConnectionState => {
+export const getRuntimeP2PState = (env: RuntimeState, deps: RuntimeP2PLifecycleDeps): P2PConnectionState => {
   const p2p = getRuntimeP2P(env, deps);
   if (!p2p) {
     return {
@@ -270,7 +270,7 @@ export const getRuntimeP2PState = (env: Env, deps: RuntimeP2PLifecycleDeps): P2P
   };
 };
 
-export const refreshRuntimeGossip = (env: Env, deps: RuntimeP2PLifecycleDeps): void => {
+export const refreshRuntimeGossip = (env: RuntimeState, deps: RuntimeP2PLifecycleDeps): void => {
   const state = deps.ensureRuntimeState(env);
   if (state.p2p) {
     state.p2p.refreshGossip();
@@ -278,7 +278,7 @@ export const refreshRuntimeGossip = (env: Env, deps: RuntimeP2PLifecycleDeps): v
 };
 
 export const ensureRuntimeGossipProfiles = async (
-  env: Env,
+  env: RuntimeState,
   deps: RuntimeP2PLifecycleDeps,
   entityIds: string[],
 ): Promise<boolean> => {

@@ -5,12 +5,12 @@ import {
 } from './platform';
 import { safeStringify } from '../protocol/serialization';
 import { ensureRuntimeState } from './runtime-state';
-import type { Env, RuntimeInput } from '../types';
+import type { RuntimeState, RuntimeInput } from '../types';
 
 export const ENV_APPLY_ALLOWED_KEY = Symbol.for('xln.runtime.env.apply.allowed');
 export const ENV_REPLAY_MODE_KEY = Symbol.for('xln.runtime.env.replay.mode');
 
-export const envRecord = (env: Env): Record<PropertyKey, unknown> =>
+export const envRecord = (env: RuntimeState): Record<PropertyKey, unknown> =>
   env as unknown as Record<PropertyKey, unknown>;
 
 export const failfastAssert: (
@@ -25,8 +25,8 @@ export const failfastAssert: (
 };
 
 export const registerEnvChangeCallback = (
-  env: Env,
-  callback: (env: Env) => void,
+  env: RuntimeState,
+  callback: (env: RuntimeState) => void,
 ): (() => void) => {
   const state = ensureRuntimeState(env);
   state.envChangeCallbacks ??= new Set();
@@ -35,7 +35,7 @@ export const registerEnvChangeCallback = (
 };
 
 export const registerRuntimeFrameCommitCallback = (
-  env: Env,
+  env: RuntimeState,
   callback: (frame: { height: number; runtimeInput: RuntimeInput }) => void,
 ): (() => void) => {
   const state = ensureRuntimeState(env);
@@ -45,9 +45,9 @@ export const registerRuntimeFrameCommitCallback = (
 };
 
 export const registerRecoveryBackupBarrier = (
-  env: Env,
+  env: RuntimeState,
   callback: (
-    env: Env,
+    env: RuntimeState,
     info: { height: number; remoteOutputCount: number; jInputCount: number },
   ) => Promise<void>,
 ): (() => void) => {
@@ -68,7 +68,7 @@ const readPositiveInteger = (name: string): number | undefined => {
   return value;
 };
 
-export const ensureRuntimeConfig = (env: Env): NonNullable<Env['runtimeConfig']> => {
+export const ensureRuntimeConfig = (env: RuntimeState): NonNullable<RuntimeState['runtimeConfig']> => {
   env.runtimeConfig ??= {
     minFrameDelayMs: 0,
     loopIntervalMs: isProductionRuntime ? 25 : 0,

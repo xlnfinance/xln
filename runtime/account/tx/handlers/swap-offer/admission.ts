@@ -1,5 +1,5 @@
 import type {
-  AccountMachine,
+  AccountState,
   AccountTx,
 } from '../../../../types';
 import { FINANCIAL, LIMITS } from '../../../../constants';
@@ -14,7 +14,7 @@ export type SwapOfferAdmission = {
 };
 
 const validateOfferCapacityLimits = (
-  account: AccountMachine,
+  account: AccountState,
   tx: SwapOfferTx,
 ): string | null => {
   const { offerId, crossJurisdiction } = tx.data;
@@ -78,7 +78,7 @@ const validateOfferShape = (tx: SwapOfferTx): string | null => {
 };
 
 export const validateSwapOfferAdmission = (
-  account: AccountMachine,
+  account: AccountState,
   tx: SwapOfferTx,
   byLeft: boolean,
 ): { admission?: SwapOfferAdmission; error?: string } => {

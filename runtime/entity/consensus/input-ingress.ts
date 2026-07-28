@@ -1,7 +1,7 @@
 import { shortId } from '../../infra/logger';
 import { cloneIsolatedEntityInput } from '../../protocol/runtime-input-clone';
 import { cloneEntityReplica } from '../../state-helpers';
-import type { EntityInput, EntityReplica, Env } from '../../types';
+import type { EntityInput, EntityReplica, RuntimeState } from '../../types';
 import { formatEntityDisplay, HEAVY_LOGS, log } from '../../utils';
 import { copyLocalEntityLeaderTimeoutVoteAuthorization } from './leader';
 import { normalizeProposedFrameCollectedSigs } from './hanko-witness';
@@ -41,7 +41,7 @@ const rejectIngress = (
 });
 
 const logEntityInput = (
-  env: Env,
+  env: RuntimeState,
   input: EntityInput,
   replica: EntityReplica,
   entityDisplay: string,
@@ -76,7 +76,7 @@ const logEntityInput = (
 };
 
 export const prepareEntityInputIngress = (
-  env: Env,
+  env: RuntimeState,
   replica: EntityReplica,
   ingressInput: EntityInput,
   trustedLocalCrossJurisdiction: boolean,

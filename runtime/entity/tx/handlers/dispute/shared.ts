@@ -1,7 +1,7 @@
 import type {
-  AccountMachine,
+  AccountState,
   EntityState,
-  Env,
+  RuntimeState,
 } from '../../../../types';
 import type { ProofBodyStruct } from '../../../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
 import { isUsableContractAddress } from '../../../../jurisdiction/contract-address';
@@ -16,7 +16,7 @@ import { createStructuredLogger, shortId } from '../../../../infra/logger';
 export const disputeLog = createStructuredLogger('entity.dispute');
 
 export const warnDisputeUnlessQuiet = (
-  env: Env,
+  env: RuntimeState,
   message: string,
   fields: Record<string, unknown>,
 ): void => {
@@ -25,7 +25,7 @@ export const warnDisputeUnlessQuiet = (
 };
 
 export const reportOptionalArgumentWarnings = (
-  env: Env,
+  env: RuntimeState,
   counterpartyEntityId: string,
   warnings: readonly OptionalDisputeArgumentWarning[],
 ): void => {
@@ -162,7 +162,7 @@ export const hasQueuedDisputeFinalize = (
 ): boolean => hasQueuedDisputeOperation(state, counterpartyEntityId, 'disputeFinalizations');
 
 export const collectDisputeEvidenceReadinessIssues = (
-  account: AccountMachine,
+  account: AccountState,
   now: number,
 ): string[] => {
   const issues: string[] = [];

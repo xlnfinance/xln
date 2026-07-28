@@ -9,7 +9,7 @@ import type {
   CrossSwapFillAckTx,
   PreparedCrossSwapFillAck,
 } from './cross-swap-fill-ack-types';
-import type { AccountMachine } from '../../../types';
+import type { AccountState } from '../../../types';
 
 const reject = (
   events: string[],
@@ -20,7 +20,7 @@ const reject = (
 });
 
 export const prepareCrossSwapFillAck = (
-  account: AccountMachine,
+  account: AccountState,
   tx: CrossSwapFillAckTx,
   byLeft: boolean,
 ): CrossSwapFillAckAdmission => {

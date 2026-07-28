@@ -24,7 +24,7 @@
  * Reference: 2019src.txt lines 233-239 (reserveToCollateral pattern)
  */
 
-import type { AccountMachine, AccountTx } from '../../../types';
+import type { AccountState, AccountTx } from '../../../types';
 import { createStructuredLogger } from '../../../infra/logger';
 
 const reserveToCollateralLog = createStructuredLogger('account.reserve');
@@ -37,7 +37,7 @@ const reserveToCollateralLog = createStructuredLogger('account.reserve');
  * via j_event_claim + authenticated bilateral matching.
  */
 export function handleReserveToCollateral(
-  _accountMachine: AccountMachine,
+  _accountMachine: AccountState,
   accountTx: Extract<AccountTx, { type: 'reserve_to_collateral' }>
 ): { success: boolean; events: string[]; error?: string } {
   // ═══════════════════════════════════════════════════════════════════════════

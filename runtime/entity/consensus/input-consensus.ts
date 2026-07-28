@@ -7,7 +7,7 @@ import { logError, shortHash } from '../../infra/logger';
 import type {
   EntityInput,
   EntityReplica,
-  Env,
+  RuntimeState,
 } from '../../types';
 import { getPerfMs } from '../../utils';
 import { accountHasProposableMempool } from './account-mempool-eligibility';
@@ -165,7 +165,7 @@ const advanceEntityProposal = async (
  * Main entity input processor - handles consensus, proposals, and state transitions
  */
 export const applyEntityInput = async (
-  env: Env,
+  env: RuntimeState,
   entityReplica: EntityReplica,
   entityInput: EntityInput,
   options: { trustedLocalRuntimeProtocol?: 'cross-j' } = {},

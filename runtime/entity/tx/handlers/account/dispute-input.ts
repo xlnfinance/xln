@@ -1,9 +1,9 @@
 import type {
   AccountInput,
-  AccountMachine,
+  AccountState,
   EntityInput,
   EntityState,
-  Env,
+  RuntimeState,
 } from '../../../../types';
 import type { HandleAccountInputResult } from '../../../../account/consensus/types';
 import { addMessage } from '../../../../state-helpers';
@@ -12,10 +12,10 @@ import { handlePrepareDispute } from '../dispute';
 import type { CommittedAccountEffects } from './committed-input';
 
 type UnsafeFrameContext = {
-  env: Env;
+  env: RuntimeState;
   state: EntityState;
   input: AccountInput;
-  account: AccountMachine;
+  account: AccountState;
   counterpartyId: string;
   createdAccount: boolean;
   dispute: NonNullable<HandleAccountInputResult['disputeRequired']>;

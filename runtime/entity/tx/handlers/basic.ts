@@ -1,5 +1,5 @@
 import { createOrderbookExtState, validateSpreadDistribution } from '../../../orderbook';
-import type { EntityInput, EntityState, EntityTx, Env, Proposal } from '../../../types';
+import type { EntityInput, EntityState, EntityTx, RuntimeState, Proposal } from '../../../types';
 import { formatEntityId, log } from '../../../utils';
 import { normalizeEntityName } from '../../../networking/gossip';
 import { cloneEntityState, addMessage } from '../../../state-helpers';
@@ -54,7 +54,7 @@ export const handleChatMessageEntityTx = (entityState: EntityState, entityTx: En
 };
 
 export const handleProposeEntityTx = (
-  env: Env,
+  env: RuntimeState,
   entityState: EntityState,
   entityTx: EntityTxOf<'propose'>,
 ): BasicEntityTxResult => {
@@ -121,7 +121,7 @@ export const handleProposeEntityTx = (
 };
 
 export const handleVoteEntityTx = (
-  env: Env,
+  env: RuntimeState,
   entityState: EntityState,
   entityTx: EntityTxOf<'vote'>,
 ): BasicEntityTxResult => {
@@ -201,7 +201,7 @@ export const handleVoteEntityTx = (
 };
 
 export const handleReissueCertifiedOutputEntityTx = (
-  _env: Env,
+  _env: RuntimeState,
   entityState: EntityState,
   entityTx: EntityTxOf<'reissueCertifiedOutput'>,
 ): BasicEntityTxResult => {
@@ -253,7 +253,7 @@ export const handleReissueCertifiedOutputEntityTx = (
 };
 
 export const handleProfileUpdateEntityTx = (
-  _env: Env,
+  _env: RuntimeState,
   entityState: EntityState,
   entityTx: EntityTxOf<'profile-update'>,
 ): BasicEntityTxResult => {

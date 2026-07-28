@@ -1,10 +1,10 @@
 import type {
   AccountInput,
-  AccountMachine,
+  AccountState,
   EntityCandidateEffect,
   EntityInput,
   EntityState,
-  Env,
+  RuntimeState,
 } from '../../../../types';
 import type { HandleAccountInputResult } from '../../../../account/consensus/types';
 import {
@@ -54,10 +54,10 @@ export type CommittedAccountEffects = {
 };
 
 type SuccessfulAccountInputContext = {
-  env: Env;
+  env: RuntimeState;
   state: EntityState;
   input: AccountInput;
-  account: AccountMachine;
+  account: AccountState;
   counterpartyId: string;
   createdAccount: boolean;
   result: HandleAccountInputResult;
@@ -67,7 +67,7 @@ type SuccessfulAccountInputContext = {
 };
 
 const buildCommittedSwapOfferEvent = (
-  account: AccountMachine,
+  account: AccountState,
   counterpartyId: string,
   offerId: string,
 ): SwapOfferEvent | null => {

@@ -1,4 +1,4 @@
-import type { AccountMachine, AccountTx, Env } from '../../types';
+import type { AccountState, AccountTx, RuntimeState } from '../../types';
 import { getAccountPerspective } from '../../state-helpers';
 import { safeStringify } from '../../protocol/serialization';
 import { createStructuredLogger, shortId } from '../../infra/logger';
@@ -24,7 +24,7 @@ export type ProposalAdmissionResult =
   | { success: false; result: ProposeAccountFrameResult };
 
 const selectProposalWindow = (
-  account: AccountMachine,
+  account: AccountState,
   selected: readonly AccountTx[] | undefined,
 ): AccountTx[] => {
   const source = selected ?? account.mempool;
@@ -49,8 +49,8 @@ const selectProposalWindow = (
 };
 
 const validateProposalTimestamp = (
-  env: Env,
-  account: AccountMachine,
+  env: RuntimeState,
+  account: AccountState,
   timestamp: number,
   myEntityId: string,
   counterparty: string,
@@ -72,7 +72,7 @@ const validateProposalTimestamp = (
 };
 
 const rejectUnavailableProposal = (
-  account: AccountMachine,
+  account: AccountState,
   quiet: boolean,
   events: string[],
 ): ProposeAccountFrameResult | null => {
@@ -101,8 +101,8 @@ const rejectUnavailableProposal = (
 };
 
 export const prepareProposalAdmission = (
-  env: Env,
-  account: AccountMachine,
+  env: RuntimeState,
+  account: AccountState,
   entityFrameTimestamp: number,
   entityJHeight: number | undefined,
   selectedMempoolTxs: readonly AccountTx[] | undefined,

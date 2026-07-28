@@ -3,7 +3,7 @@
  * frame construction, frame hanko signing, and dispute-proof signing.
  */
 
-import type { AccountMachine, AccountTx, Env } from '../../types';
+import type { AccountState, AccountTx, RuntimeState } from '../../types';
 import { removeCommittedTxsFromMempool } from '../../state-helpers';
 import { getPerfMs, HEAVY_LOGS } from '../../utils';
 import { createStructuredLogger, shortId } from '../../infra/logger';
@@ -32,7 +32,7 @@ const accountProposalSlowMs = (): number =>
 type ProposalValidation = Awaited<ReturnType<typeof validateProposalTransactions>>;
 
 const finishEmptyProposal = (
-  account: AccountMachine,
+  account: AccountState,
   validation: ProposalValidation,
 ): ProposeAccountFrameResult | undefined => {
   if (validation.validTxs.length > 0) return undefined;
@@ -78,8 +78,8 @@ const logProposalProfile = (
 };
 
 export async function proposeAccountFrame(
-  env: Env,
-  accountMachine: AccountMachine,
+  env: RuntimeState,
+  accountMachine: AccountState,
   entityFrameTimestamp: number,
   entityJHeight?: number, // Optional: J-height from entity state for HTLC consensus
   accountJClaimNodeStore?: AccountJClaimNodeStore,

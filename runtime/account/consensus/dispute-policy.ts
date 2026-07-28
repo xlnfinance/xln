@@ -1,4 +1,4 @@
-import type { AccountMachine, AccountTx } from '../../types';
+import type { AccountState, AccountTx } from '../../types';
 import { prependUniqueMempoolTxs } from './helpers';
 import { createStructuredLogger } from '../../infra/logger';
 
@@ -40,7 +40,7 @@ export const isArgumentChangingAccountTx = (txType: string): boolean =>
   isAccountBusinessTx(txType);
 
 export const freezeAccountForDispute = (
-  account: AccountMachine,
+  account: AccountState,
   retainOptionalEvidence: boolean,
 ): void => {
   const pendingEvidence = retainOptionalEvidence

@@ -8,7 +8,7 @@ import {
 } from '../../protocol/runtime-input-clone';
 import type {
   EntityReplica,
-  Env,
+  RuntimeState,
   ProposedEntityFrame,
   ValidatorEntityFrameExecution,
 } from '../../types';
@@ -37,7 +37,7 @@ import {
 } from './state-root';
 
 const replayPreparedFrameForRelay = async (
-  env: Env,
+  env: RuntimeState,
   replica: EntityReplica,
   frame: ProposedEntityFrame,
 ): Promise<ValidatorEntityFrameExecution> => {

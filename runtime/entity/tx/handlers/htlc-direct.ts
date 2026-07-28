@@ -1,6 +1,6 @@
 import { getEntityCertifiedJurisdictionHeight } from '../../../jurisdiction/height';
 import { generateLockId, hashHtlcSecret } from '../../../protocol/htlc/utils';
-import type { EntityInput, EntityState, EntityTx, Env } from '../../../types';
+import type { EntityInput, EntityState, EntityTx, RuntimeState } from '../../../types';
 import { formatEntityId } from '../../../utils';
 import { cloneEntityState, addMessage } from '../../../state-helpers';
 import { findAccountKey } from '../account-key';
@@ -24,7 +24,7 @@ const wakeLocalProposer = (state: EntityState, outputs: EntityInput[]): void => 
 };
 
 export const handleHashlockPaymentEntityTx = (
-  _env: Env,
+  _env: RuntimeState,
   entityState: EntityState,
   entityTx: EntityTxOf<'hashlockPayment'>,
 ): HtlcEntityTxResult => {

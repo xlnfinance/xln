@@ -1,4 +1,4 @@
-import type { AccountMachine, AccountTx, Delta, EntityCandidateEffect, Env } from '../../types';
+import type { AccountState, AccountTx, Delta, EntityCandidateEffect, RuntimeState } from '../../types';
 import { createStructuredLogger } from '../../infra/logger';
 import { txFingerprint } from '../../state-helpers';
 import {
@@ -47,7 +47,7 @@ export function getAccountStateDomain(accountMachine: AccountDomainSubject): Acc
  * `(chainId, Depository) -> contracts` record is proof authority.
  */
 export function requireAccountDeltaTransformerAddress(
-  env: Env,
+  env: RuntimeState,
   accountMachine: AccountDomainSubject,
 ): string {
   const domain = getAccountStateDomain(accountMachine);
@@ -69,7 +69,7 @@ export function requireAccountDeltaTransformerAddress(
   return matches[0]!.deltaTransformer;
 }
 
-export const buildAccountProofBodyFromEnv = (env: Env, accountMachine: AccountMachine) =>
+export const buildAccountProofBodyFromEnv = (env: RuntimeState, accountMachine: AccountState) =>
   buildAccountProofBody(
     accountMachine,
     requireAccountDeltaTransformerAddress(env, accountMachine),
@@ -85,7 +85,7 @@ export function shouldIncludeToken(delta: Delta, totalDelta: bigint): boolean {
 
 type SettlementVector = Map<number, { collateral: bigint; ondelta: bigint }>;
 
-export function captureSettlementVector(accountMachine: AccountMachine): SettlementVector {
+export function captureSettlementVector(accountMachine: AccountState): SettlementVector {
   const out: SettlementVector = new Map();
   for (const [tokenId, delta] of accountMachine.deltas.entries()) {
     out.set(tokenId, { collateral: delta.collateral, ondelta: delta.ondelta });
@@ -93,7 +93,7 @@ export function captureSettlementVector(accountMachine: AccountMachine): Settlem
   return out;
 }
 
-export function prependUniqueMempoolTxs(accountMachine: AccountMachine, txs: AccountTx[]): number {
+export function prependUniqueMempoolTxs(accountMachine: AccountState, txs: AccountTx[]): number {
   if (txs.length === 0) return 0;
   const existing = new Set(accountMachine.mempool.map(txFingerprint));
   const missing: AccountTx[] = [];
@@ -125,7 +125,7 @@ export function prependUniqueMempoolTxs(accountMachine: AccountMachine, txs: Acc
 }
 
 export function assertNoUnilateralSettlementMutation(
-  accountMachine: AccountMachine,
+  accountMachine: AccountState,
   before: SettlementVector,
   tx: AccountTx,
   phase: string,
@@ -154,8 +154,8 @@ type TokenizedAccountTx = AccountTx & {
 export { resolveAutoRebalanceFeePolicy };
 
 export async function runPostFrameAutoRebalanceCheck(
-  _env: Env,
-  accountMachine: AccountMachine,
+  _env: RuntimeState,
+  accountMachine: AccountState,
   ourEntityId: string,
   counterpartyEntityId: string,
   frameHeight: number,

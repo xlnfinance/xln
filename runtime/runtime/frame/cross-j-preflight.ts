@@ -1,7 +1,7 @@
 import { getEffectiveEntityInputTxs } from '../../entity/consensus/output-envelope';
 import { createStructuredLogger } from '../../infra/logger';
 import { safeStringify } from '../../protocol/serialization';
-import type { Env, JInput, RoutedEntityInput } from '../../types';
+import type { RuntimeState, JInput, RoutedEntityInput } from '../../types';
 import {
   applyMergedEntityInputs,
   RuntimeEntityInputApplyError,
@@ -64,7 +64,7 @@ export const atomicCrossJPairIndexesThatDidNotCommit = (
 };
 
 const accountFrameMatches = (
-  env: Env,
+  env: RuntimeState,
   expected: CrossJPair['sourceAccountFrame'],
 ): boolean => {
   const replica = [...env.eReplicas.values()].find(
@@ -82,7 +82,7 @@ const accountFrameMatches = (
 };
 
 const groupAtomicPairsFirst = (
-  env: Env,
+  env: RuntimeState,
   selection: CrossJSelection,
 ): CrossJSelection => {
   if (selection.pairs.length === 0) return selection;
@@ -128,7 +128,7 @@ const describeFailedPreview = (
   });
 
 const previewAtomicPairs = async (
-  env: Env,
+  env: RuntimeState,
   selection: CrossJSelection,
   initialJOutbox: JInput[],
   routingDeps: RuntimeEntityRoutingDeps,
@@ -172,7 +172,7 @@ const previewAtomicPairs = async (
 };
 
 const addAlreadyCommittedPairIndexes = (
-  env: Env,
+  env: RuntimeState,
   selection: CrossJSelection,
   failedIndexes: Set<number>,
 ): void => {
@@ -197,7 +197,7 @@ const rejectedPairIndexes = (
   });
 
 export const prepareAtomicCrossJAccountInputs = async (
-  env: Env,
+  env: RuntimeState,
   inputs: readonly RoutedEntityInput[],
   initialJOutbox: JInput[],
   isReplay: boolean,

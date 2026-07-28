@@ -1,4 +1,4 @@
-import type { EntityInput, EntityLeaderTimeoutVote, EntityReplica, EntityState, EntityTx, Env } from '../types';
+import type { EntityInput, EntityLeaderTimeoutVote, EntityReplica, EntityState, EntityTx, RuntimeState } from '../types';
 import type { CrontabTaskMethod } from '../entity/scheduler-types';
 import { crontabTaskHasPendingWork } from '../entity/scheduler';
 import { compareStableText, safeStringify } from '../protocol/serialization';
@@ -85,7 +85,7 @@ const heapPop = (heap: DeadlineEntry[]): DeadlineEntry | undefined => {
   return first;
 };
 
-const getIndex = (env: Env): DeadlineIndex => {
+const getIndex = (env: RuntimeState): DeadlineIndex => {
   if (!env.runtimeState) env.runtimeState = {};
   let index = env.runtimeState.scheduledWakeIndex;
   if (!index) {
@@ -149,7 +149,7 @@ const nextReplicaDeadline = (replica: EntityReplica): number | null => {
   return Number.isFinite(next) ? next : null;
 };
 
-const refreshReplica = (env: Env, replica: EntityReplica): void => {
+const refreshReplica = (env: RuntimeState, replica: EntityReplica): void => {
   const index = getIndex(env);
   const key = replicaKey(replica.entityId, replica.signerId);
   index.replicas.set(key, replica);
@@ -166,7 +166,7 @@ const refreshReplica = (env: Env, replica: EntityReplica): void => {
   }
 };
 
-export const rebuildScheduledWakeIndex = (env: Env): void => {
+export const rebuildScheduledWakeIndex = (env: RuntimeState): void => {
   const index = getIndex(env);
   index.heap = [];
   index.generations.clear();
@@ -175,7 +175,7 @@ export const rebuildScheduledWakeIndex = (env: Env): void => {
   for (const replica of env.eReplicas.values()) refreshReplica(env, replica);
 };
 
-export const refreshScheduledWakeIndex = (env: Env, entityIds?: ReadonlySet<string>): void => {
+export const refreshScheduledWakeIndex = (env: RuntimeState, entityIds?: ReadonlySet<string>): void => {
   const index = getIndex(env);
   if (!index.initialized) {
     rebuildScheduledWakeIndex(env);
@@ -203,7 +203,7 @@ export const refreshScheduledWakeIndex = (env: Env, entityIds?: ReadonlySet<stri
   }
 };
 
-const peekValidDeadline = (env: Env): DeadlineEntry | null => {
+const peekValidDeadline = (env: RuntimeState): DeadlineEntry | null => {
   const index = getIndex(env);
   if (!index.initialized) rebuildScheduledWakeIndex(env);
   while (index.heap.length > 0) {
@@ -215,10 +215,10 @@ const peekValidDeadline = (env: Env): DeadlineEntry | null => {
   return null;
 };
 
-export const getNextScheduledWakeTimestamp = (env: Env): number | null =>
+export const getNextScheduledWakeTimestamp = (env: RuntimeState): number | null =>
   peekValidDeadline(env)?.dueAt ?? null;
 
-export const createDueScheduledWakeInputs = (env: Env, now: number): EntityInput[] => {
+export const createDueScheduledWakeInputs = (env: RuntimeState, now: number): EntityInput[] => {
   const inputs: EntityInput[] = [];
   const queued = new Set((env.runtimeMempool?.entityInputs ?? [])
     .filter(input => input.leaderTimeoutVote || input.entityTxs?.some(tx => tx.type === 'scheduledWake'))
@@ -342,7 +342,7 @@ export const assertScheduledWakeFrameOrder = (entityTxs: readonly EntityTx[]): v
   }
 };
 
-export const deleteScheduledWakeIndex = (env: Env): void => {
+export const deleteScheduledWakeIndex = (env: RuntimeState): void => {
   if (env.runtimeState) delete env.runtimeState.scheduledWakeIndex;
 };
 

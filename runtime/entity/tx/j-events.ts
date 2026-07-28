@@ -1,9 +1,9 @@
 import type {
   EntityCandidateEffect,
-  AccountMachine,
+  AccountState,
   EntityInput,
   EntityState,
-  Env,
+  RuntimeState,
   DisputeFinalizationEvidence,
   JurisdictionEvent,
   JurisdictionEventData,
@@ -76,7 +76,7 @@ const normalizeSignerId = (value: unknown): string => String(value || '').trim()
 
 const invalidateSettlementIntentAfterDisputeFinality = (
   state: EntityState,
-  account: AccountMachine,
+  account: AccountState,
   counterpartyId: string,
 ): void => {
   const hadWorkspace = Boolean(account.settlementWorkspace);
@@ -129,7 +129,7 @@ const retireSentBatchInvalidatedByDisputeFinality = (
 export const applyJEvent = async (
   entityState: EntityState,
   data: JurisdictionEventData,
-  env: Env,
+  env: RuntimeState,
   candidateEffects: EntityCandidateEffect[] = [],
 ): Promise<JEventApplyResult> => {
   const activeProposerId = normalizeSignerId(getEntityLeaderState(entityState).activeValidatorId);
@@ -260,7 +260,7 @@ export type FinalizedJEventContext = {
   entityState: EntityState;
   newState: EntityState;
   event: JurisdictionEvent;
-  env: Env;
+  env: RuntimeState;
   blockNumber: number;
   transactionHash: string;
   mempoolOps: JEventMempoolOp[];
@@ -274,7 +274,7 @@ type DisputeAccountContext = {
   entityIdNorm: string;
   candidateCounterpartyId: string;
   counterpartyId: string;
-  account: AccountMachine | undefined;
+  account: AccountState | undefined;
 };
 
 const normalizeEntityId = (id: unknown): string => String(id).toLowerCase();
@@ -318,7 +318,7 @@ const normalizeFinalProofbodyHash = (value: unknown, counterpartyId: string): st
 };
 
 const requireFinalizedProofBodyEvidence = (
-  account: AccountMachine,
+  account: AccountState,
   finalProofbodyHashRaw: unknown,
   counterpartyId: string,
 ): { finalProofbodyHash: string; proofbody: ProofBodyStruct; tokenIds: number[] } => {
@@ -370,7 +370,7 @@ const requireFinalizedProofBodyEvidence = (
 };
 
 const clearDisputeSettledDeltas = (
-  account: AccountMachine,
+  account: AccountState,
   finalizedTokenIds: readonly number[],
 ): void => {
   for (const tokenId of finalizedTokenIds) {
@@ -390,7 +390,7 @@ const clearDisputeSettledDeltas = (
   }
 };
 
-const retireDisputeEvidenceEpoch = (account: AccountMachine): void => {
+const retireDisputeEvidenceEpoch = (account: AccountState): void => {
   delete account.disputeProofBodiesByHash;
   delete account.disputeProofNoncesByHash;
   delete account.disputeArgumentSnapshotsByHash;
@@ -536,7 +536,7 @@ type DisputeFinalizedEventData = {
 };
 
 const resolveFinalizationEvidence = (
-  account: AccountMachine,
+  account: AccountState,
   data: DisputeFinalizedEventData,
   senderStr: string,
   counterentityStr: string,
@@ -581,7 +581,7 @@ const resolveFinalizationEvidence = (
 
 const retireFinalizedDisputeState = (
   context: FinalizedJEventContext,
-  account: AccountMachine,
+  account: AccountState,
   counterpartyId: string,
   candidateCounterpartyId: string,
   senderStr: string,
@@ -741,7 +741,7 @@ function applyDisputeFinalizedJEvent(
 async function applyFinalizedJEvent(
   entityState: EntityState,
   event: JurisdictionEvent,
-  env: Env,
+  env: RuntimeState,
   disputeFinalizationEvidence: DisputeFinalizationEvidence[] = [],
   candidateEffects: EntityCandidateEffect[] = [],
 ): Promise<JEventApplyResult> {

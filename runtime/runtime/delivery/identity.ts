@@ -1,6 +1,6 @@
 import type {
   EntityTx,
-  Env,
+  RuntimeState,
   ReliableDeliveryEvidenceBinding,
   ReliableDeliveryIdentity,
   RoutedEntityInput,
@@ -686,7 +686,7 @@ export const accountProposalEvidenceRank = (output: RoutedEntityInput): number =
   }, 0);
 
 export const accountProposalCommittedBySender = (
-  env: Env,
+  env: RuntimeState,
   output: RoutedEntityInput,
 ): boolean => {
   const proposals = getEffectiveEntityInputTxs(output).flatMap(tx => {

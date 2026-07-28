@@ -1,4 +1,4 @@
-import type { AccountMachine } from '../../../types';
+import type { AccountState } from '../../../types';
 import {
   prepareCrossSwapFillAck,
 } from './cross-swap-fill-ack-admission';
@@ -17,7 +17,7 @@ import type {
  * Admission and exact amount proofs run before any route or history mutation.
  */
 export async function handleCrossSwapFillAck(
-  account: AccountMachine,
+  account: AccountState,
   tx: CrossSwapFillAckTx,
   byLeft: boolean,
   timestamp: number,

@@ -4,7 +4,7 @@ import { signAccountFrame, verifyAccountSignature } from '../account/crypto';
 import { normalizeRuntimeId } from '../networking/runtime-id';
 import { serializeTaggedJson } from '../protocol/serialization';
 import type {
-  Env,
+  RuntimeState,
   ReliableDeliveryIdentity,
   ReliableDeliveryReceipt,
   RoutedEntityInput,
@@ -12,7 +12,7 @@ import type {
 import { getReliableIdentityValidationError } from './reliable-frontier';
 import { getReliableOutputIdentity } from './output-routing';
 
-export const ensureReliableState = (env: Env): NonNullable<Env['runtimeState']> => {
+export const ensureReliableState = (env: RuntimeState): NonNullable<RuntimeState['runtimeState']> => {
   env.runtimeState ??= {};
   return env.runtimeState;
 };
@@ -48,7 +48,7 @@ const receiptDigest = (body: ReliableDeliveryReceipt['body']): string =>
   keccak256(toUtf8Bytes(serializeTaggedJson(body))).toLowerCase();
 
 export const createReliableDeliveryReceipt = (
-  env: Env,
+  env: RuntimeState,
   identity: ReliableDeliveryIdentity,
   coverage: ReliableDeliveryReceipt['body']['coverage'],
 ): ReliableDeliveryReceipt => {
@@ -68,7 +68,7 @@ export const createReliableDeliveryReceipt = (
 };
 
 export const getReliableDeliveryReceiptValidationError = (
-  env: Env,
+  env: RuntimeState,
   receipt: ReliableDeliveryReceipt,
 ): string | null => {
   if (!receipt || typeof receipt !== 'object' || !receipt.body || typeof receipt.body !== 'object') {

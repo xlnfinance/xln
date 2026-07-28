@@ -2,7 +2,7 @@ import { verifyAccountSignature } from '../../account/crypto';
 import type {
   ConsensusConfig,
   EntityReplica,
-  Env,
+  RuntimeState,
   HashToSign,
   ProposedEntityFrame,
   RoutedEntityInput,
@@ -13,7 +13,7 @@ import { encodeCanonicalEntityConsensusValue } from './state-root';
 
 const normalize = (value: unknown): string => String(value ?? '').trim().toLowerCase();
 
-const exactReplica = (env: Env, input: RoutedEntityInput): EntityReplica | null => {
+const exactReplica = (env: RuntimeState, input: RoutedEntityInput): EntityReplica | null => {
   const entityId = normalize(input.entityId);
   const signerId = normalize(input.signerId);
   for (const replica of env.eReplicas.values()) {
@@ -73,7 +73,7 @@ const signerShares = (config: ConsensusConfig, signerId: string): bigint | null 
  * claimed manifest. Consensus still replays state and recomputes every hash.
  */
 export const hasVerifiedEntityCommitPrecertificate = (
-  env: Env,
+  env: RuntimeState,
   input: RoutedEntityInput,
 ): boolean => {
   const frame = input.proposedFrame;

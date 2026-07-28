@@ -1,4 +1,4 @@
-import type { Env } from '../types';
+import type { RuntimeState } from '../types';
 import {
   assertReliableIngressSourceLaneBound,
   assertReliableIngressSourceLaneCapacity,
@@ -7,14 +7,14 @@ import {
 import { ensureReliableState } from './reliable-receipt';
 
 const durableReceiverSourceLaneKeys = (
-  state: NonNullable<Env['runtimeState']>,
+  state: NonNullable<RuntimeState['runtimeState']>,
 ): Set<string> => new Set([
   ...(state.reliableIngressReceiptLedger?.keys() ?? []),
   ...(state.reliableIngressTerminalWatermarks?.keys() ?? []),
 ]);
 
 export const receiverSourceLaneKeys = (
-  state: NonNullable<Env['runtimeState']>,
+  state: NonNullable<RuntimeState['runtimeState']>,
 ): Set<string> => {
   const keys = durableReceiverSourceLaneKeys(state);
   for (const pending of state.pendingReliableIngress?.values() ?? []) {
@@ -26,7 +26,7 @@ export const receiverSourceLaneKeys = (
 };
 
 export const assertReceiverSourceLaneCapacity = (
-  state: NonNullable<Env['runtimeState']>,
+  state: NonNullable<RuntimeState['runtimeState']>,
   candidateKey: string,
   knownKeys = receiverSourceLaneKeys(state),
 ): void => {
@@ -35,8 +35,8 @@ export const assertReceiverSourceLaneCapacity = (
 };
 
 export const ensureReliableIngressState = (
-  env: Env,
-): NonNullable<Env['runtimeState']> => {
+  env: RuntimeState,
+): NonNullable<RuntimeState['runtimeState']> => {
   const state = ensureReliableState(env);
   state.reliableIngressReceiptLedger ??= new Map();
   state.reliableIngressTerminalWatermarks ??= new Map();

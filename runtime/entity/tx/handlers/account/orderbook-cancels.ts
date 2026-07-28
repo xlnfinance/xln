@@ -1,4 +1,4 @@
-import type { EntityInput, EntityState, Env } from '../../../../types';
+import type { EntityInput, EntityState, RuntimeState } from '../../../../types';
 import {
   applyCommand,
   getBookOrder,
@@ -46,7 +46,7 @@ const normalizeEntityRef = (value: string): string => String(value || '').trim()
  * proposal as an external side effect.
  */
 export function routeRemoteCrossJurisdictionBookCancels(
-  env: Env,
+  env: RuntimeState,
   sourceHubState: EntityState,
   cancels: SwapCancelRequestEvent[],
 ): RoutedOrderbookCancels {

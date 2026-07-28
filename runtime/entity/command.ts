@@ -17,7 +17,7 @@ import type {
   EntityCommandNonceState,
   EntityState,
   EntityTx,
-  Env,
+  RuntimeState,
   SignedEntityCommandV2,
 } from '../types';
 import {
@@ -66,7 +66,7 @@ type ResolvedEntityCommandAuthor = Readonly<{
 }>;
 
 export const resolveEntityCommandBoard = (
-  env: Env,
+  env: RuntimeState,
   state: EntityState,
 ): ResolvedEntityCommandBoard => {
   const canonicalShares = resolveCanonicalEntityBoardShares(state.config);
@@ -130,7 +130,7 @@ export const resolveEntityCommandBoard = (
  * nonce fence, or validator replay path.
  */
 export const resolveEntityCommandAuthor = (
-  env: Env,
+  env: RuntimeState,
   state: EntityState,
   rawSignerId: string,
   board: ResolvedEntityCommandBoard = resolveEntityCommandBoard(env, state),
@@ -198,7 +198,7 @@ const canonicalCommandNonceState = (
 };
 
 export const normalizeEntityCommandNonceBoard = (
-  env: Env,
+  env: RuntimeState,
   state: EntityState,
 ): EntityState => {
   if (!state.entityCommandNonces) return state;
@@ -260,7 +260,7 @@ export const getEntityCommandDisposition = (
 };
 
 export const assertSignedEntityCommand = (
-  env: Env,
+  env: RuntimeState,
   state: EntityState,
   value: unknown,
 ): SignedEntityCommandV2 => {
@@ -317,7 +317,7 @@ export const advanceEntityCommandNonce = (
 };
 
 export const buildSignedEntityCommand = (
-  env: Env,
+  env: RuntimeState,
   state: EntityState,
   authorSignerId: string,
   txs: EntityTx[],
@@ -347,7 +347,7 @@ export const buildSignedEntityCommand = (
 };
 
 const materializeLocallyAuthoredEntityTx = (
-  env: Env,
+  env: RuntimeState,
   state: EntityState,
   tx: EntityTx,
 ): EntityTx => {
@@ -387,7 +387,7 @@ const materializeLocallyAuthoredEntityTx = (
  * Protocol transactions remain on their dedicated authorization lanes.
  */
 export const prepareLocallyAuthoredEntityTxs = (
-  env: Env,
+  env: RuntimeState,
   state: EntityState,
   authorSignerId: string,
   txs: EntityTx[],

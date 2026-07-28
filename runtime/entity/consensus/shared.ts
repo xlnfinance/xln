@@ -58,7 +58,7 @@ import type {
   EntityReplica,
   EntityState,
   EntityTx,
-  Env,
+  RuntimeState,
   HankoString,
   HashToSign,
   ProposedEntityFrame,
@@ -125,7 +125,7 @@ type ConsumptionSizeLog = Readonly<{
 const ENTITY_SIZE_OBSERVATION_PERIOD_FRAMES = 100;
 
 export const prepareCommittedEntitySizeLog = (
-  env: Env,
+  env: RuntimeState,
   preState: EntityState,
   postState: EntityState,
 ): ConsumptionSizeLog | null => {
@@ -180,7 +180,7 @@ export const entityFrameProfileEnabled = (): boolean =>
 export const entityFrameSlowMs = (): number => readRuntimePerfSlowMs('XLN_ENTITY_FRAME_SLOW_MS', ENTITY_FRAME_SLOW_MS);
 export const entityLog = createStructuredLogger('entity');
 
-export const getReplicaJRangeValidationError = (env: Env, replica: EntityReplica, txs: EntityTx[]): string | null => {
+export const getReplicaJRangeValidationError = (env: RuntimeState, replica: EntityReplica, txs: EntityTx[]): string | null => {
   try {
     const budgetError = getEntityFrameJRangeBudgetError(txs);
     if (budgetError) return budgetError;
@@ -203,13 +203,13 @@ export const getReplicaJRangeValidationError = (env: Env, replica: EntityReplica
   return null;
 };
 
-export const assertProposerJRangesMatchLocalHistory = (env: Env, replica: EntityReplica, txs: EntityTx[]): void => {
+export const assertProposerJRangesMatchLocalHistory = (env: RuntimeState, replica: EntityReplica, txs: EntityTx[]): void => {
   const error = getReplicaJRangeValidationError(env, replica, txs);
   if (error) throw new Error(`ENTITY_PROPOSER_J_RANGE_INVALID:${error}`);
 };
 
 export const getFrameJPrefixValidationError = (
-  env: Env,
+  env: RuntimeState,
   replica: EntityReplica,
   frame: ProposedEntityFrame,
 ): string | null => {
@@ -238,7 +238,7 @@ const clearCommittedJPrefixRound = (replica: EntityReplica): void => {
 };
 
 export const ensureLocalJPrefixAttestation = (
-  env: Env,
+  env: RuntimeState,
   replica: EntityReplica,
   entityOutbox: EntityInput[],
   force: boolean,
@@ -303,7 +303,7 @@ export const ensureLocalJPrefixAttestation = (
  * An empty suffix remains local and is certified by the next real Entity frame
  * instead of creating one itself.
  */
-const advanceLocalJPrefixRoundAfterCommit = (env: Env, replica: EntityReplica, entityOutbox: EntityInput[]): void => {
+const advanceLocalJPrefixRoundAfterCommit = (env: RuntimeState, replica: EntityReplica, entityOutbox: EntityInput[]): void => {
   clearCommittedJPrefixRound(replica);
   if (!hasDueLocalJPrefixAdvance(replica.state, replica.jHistory)) return;
   if (!ensureLocalJPrefixAttestation(env, replica, entityOutbox, false)) return;
@@ -320,7 +320,7 @@ const advanceLocalJPrefixRoundAfterCommit = (env: Env, replica: EntityReplica, e
 };
 
 export const runLocalPostCommitHooks = async (
-  env: Env,
+  env: RuntimeState,
   replica: EntityReplica,
   entityOutbox: EntityInput[],
 ): Promise<void> => {
@@ -384,7 +384,7 @@ export const normalizePrecommitBundles = (
 };
 
 export const verifyHashPrecommitSignatures = (
-  env: Env,
+  env: RuntimeState,
   signerId: string,
   hashesToSign: HashToSign[] | undefined,
   frameHash: string,
@@ -418,7 +418,7 @@ export const verifyHashPrecommitSignatures = (
 };
 
 export const hasVerifiedPreparedQuorum = (
-  env: Env,
+  env: RuntimeState,
   state: EntityLeaderStateView,
   frame: ProposedEntityFrame,
   context: string,
@@ -478,7 +478,7 @@ const getCertificateSignedVotes = (certificate: EntityLeaderCertificate): Map<st
 };
 
 export const verifyEntityLeaderCertificate = (
-  env: Env,
+  env: RuntimeState,
   state: EntityLeaderStateView,
   frame: ProposedEntityFrame,
 ): boolean => {
@@ -526,7 +526,7 @@ export const verifyEntityLeaderCertificate = (
 };
 
 export const selectPreparedFrameFromCertificate = (
-  env: Env,
+  env: RuntimeState,
   state: EntityLeaderStateView,
   certificate: EntityLeaderCertificate,
 ): ProposedEntityFrame | null => {
@@ -632,7 +632,7 @@ export const selectPreparedFrameFromCertificate = (
 };
 
 export const verifyEntityRelayCertificate = (
-  env: Env,
+  env: RuntimeState,
   state: EntityLeaderStateView,
   frame: ProposedEntityFrame,
 ): boolean => {
@@ -714,7 +714,7 @@ export const buildConsumptionOutputIdentity = (
  * proposer adds a witness from its own pre-state; validators never trust a
  * proof supplied by the source or transport.
  */
-export const attachTargetConsumptionProofs = (env: Env, state: EntityState, txs: readonly EntityTx[]): EntityTx[] => {
+export const attachTargetConsumptionProofs = (env: RuntimeState, state: EntityState, txs: readonly EntityTx[]): EntityTx[] => {
   let accumulator = state.consumptionAccumulator ?? createEmptyConsumptionAccumulator();
   const overlay = new Map<string, ConsumptionNode>(getConsumptionNodeStore(env));
   const selected: EntityTx[] = [];
@@ -765,7 +765,7 @@ export const wrapCertifiedEntityOutputs = (
   outputs: EntityInput[],
   frame: ProposedEntityFrame,
   sourceState: EntityState,
-  env: Env,
+  env: RuntimeState,
   hashesToSign: HashToSign[],
   hankos: HankoString[],
   emitLocalRuntimeOutputs: boolean,
@@ -905,7 +905,7 @@ const applyJRangeBudgetToSelection = (selection: ProposableEntityTxSelection): P
  * prerequisite frame advances independently.
  */
 export const selectProposableEntityTxs = async (
-  env: Env,
+  env: RuntimeState,
   state: EntityState,
   mempool: EntityTx[],
 ): Promise<ProposableEntityTxSelection> => {
@@ -960,7 +960,7 @@ export const selectProposableEntityTxs = async (
 };
 
 export const isSelfBoardAuthorityTransitionFrame = async (
-  env: Env,
+  env: RuntimeState,
   state: EntityState,
   entityTxs: EntityTx[],
 ): Promise<boolean> => {
@@ -976,7 +976,7 @@ export const isSelfBoardAuthorityTransitionFrame = async (
   return finalTarget === configBoardHash;
 };
 
-export const validateProposedFrameLeader = (env: Env, state: EntityState, frame: ProposedEntityFrame): boolean => {
+export const validateProposedFrameLeader = (env: RuntimeState, state: EntityState, frame: ProposedEntityFrame): boolean => {
   return Boolean(
     frame.leader && verifyEntityLeaderCertificate(env, state, frame) && verifyEntityRelayCertificate(env, state, frame),
   );
@@ -1082,7 +1082,7 @@ export const ownsSourceHubRouteForFillAck = (currentEntityState: EntityState, tx
 };
 
 export const stashPendingCrossJurisdictionFillAck = (
-  env: Env,
+  env: RuntimeState,
   currentEntityState: EntityState,
   accountId: string,
   tx: CrossSwapFillAckTx,
@@ -1112,7 +1112,7 @@ export const stashPendingCrossJurisdictionFillAck = (
 };
 
 export const drainPendingCrossJurisdictionFillAcks = (
-  env: Env,
+  env: RuntimeState,
   currentEntityState: EntityState,
   proposableAccounts: Set<string>,
   storageChanges: RuntimeOverlayRecord[],
@@ -1284,7 +1284,7 @@ const assertSameJurisdictionOrderHoldCommitted = (
 };
 
 export const admitOrderbookOfferForMatching = (
-  env: Env,
+  env: RuntimeState,
   state: EntityState,
   offer: NormalizedOrderbookOffer,
 ): WorkingOrderbookOffer | null => {
@@ -1403,7 +1403,7 @@ export const buildCertifiedEntityFrameLink = (
 };
 
 export const appendCertifiedEntityFrameLink = (
-  env: Env,
+  env: RuntimeState,
   replica: EntityReplica,
   link: CertifiedEntityFrameLink,
 ): void => {

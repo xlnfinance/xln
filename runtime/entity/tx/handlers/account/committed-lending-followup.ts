@@ -1,6 +1,6 @@
 import type {
   AccountFrame,
-  AccountMachine,
+  AccountState,
   AccountTx,
   EntityState,
   LendingState,
@@ -23,7 +23,7 @@ const normalizeEntityRef = (value: unknown): string =>
   String(value || '').toLowerCase();
 
 export type LendingFollowupContext = {
-  account: AccountMachine;
+  account: AccountState;
   lending: LendingState;
   hubEntityId: string;
   counterpartyId: string;

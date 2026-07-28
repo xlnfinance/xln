@@ -1,6 +1,6 @@
 import type {
   EntityInput,
-  Env,
+  RuntimeState,
   JAdapterFailure,
   JInput,
   JReplica,
@@ -33,7 +33,7 @@ import { requireRuntimeMempool } from './input-queue';
 const jSubmitLog = createStructuredLogger('runtime.jsubmit');
 
 export type RuntimeJOutboxQueue = (
-  env: Env,
+  env: RuntimeState,
   inputs?: EntityInput[],
   runtimeTxs?: RuntimeTx[],
   jInputs?: JInput[],
@@ -55,12 +55,12 @@ const hasSemanticJHistoryTx = (input: EntityInput): boolean =>
     (attestation) => attestation.blocks.length > 0,
   );
 
-const captureQueuedEntityInputs = (env: Env): EntityInput[] => {
+const captureQueuedEntityInputs = (env: RuntimeState): EntityInput[] => {
   const mempool = requireRuntimeMempool(env);
   return Array.isArray(mempool?.entityInputs) ? [...mempool.entityInputs] : [];
 };
 
-const prioritizeJEventsQueuedAfterSubmit = (env: Env, beforePoll: EntityInput[]): number => {
+const prioritizeJEventsQueuedAfterSubmit = (env: RuntimeState, beforePoll: EntityInput[]): number => {
   const mempool = requireRuntimeMempool(env);
   if (!Array.isArray(mempool.entityInputs)) return 0;
   const current = mempool.entityInputs;
@@ -80,7 +80,7 @@ const prioritizeJEventsQueuedAfterSubmit = (env: Env, beforePoll: EntityInput[])
   return newlyQueuedJEvents.length;
 };
 
-const pollSubmittedJEventsBeforeFollowups = async (env: Env, jAdapter: { pollNow?: () => Promise<void> }): Promise<void> => {
+const pollSubmittedJEventsBeforeFollowups = async (env: RuntimeState, jAdapter: { pollNow?: () => Promise<void> }): Promise<void> => {
   if (typeof jAdapter.pollNow !== 'function') return;
   const beforePoll = captureQueuedEntityInputs(env);
   await jAdapter.pollNow();
@@ -91,7 +91,7 @@ const pollSubmittedJEventsBeforeFollowups = async (env: Env, jAdapter: { pollNow
 };
 
 const awaitAuthenticatedJEventsBeforeSubmit = async (
-  env: Env,
+  env: RuntimeState,
   jAdapter: { pollNow?: () => Promise<void> },
 ): Promise<number> => {
   const alreadyQueued = captureQueuedEntityInputs(env).filter(hasSemanticJHistoryTx).length;
@@ -133,7 +133,7 @@ export const isTransientJSubmitFailure = (error: unknown): boolean => {
 };
 
 const queueBatchResult = (
-  env: Env,
+  env: RuntimeState,
   deps: RuntimeJSubmitDeps,
   jurisdictionName: string,
   jTx: Extract<JTx, { type: 'batch' }>,
@@ -151,7 +151,7 @@ const queueBatchResult = (
 };
 
 const queueEntityProviderActionResult = (
-  env: Env,
+  env: RuntimeState,
   deps: RuntimeJSubmitDeps,
   jurisdictionName: string,
   jTx: ActionJTx,
@@ -168,7 +168,7 @@ const queueEntityProviderActionResult = (
   });
 };
 
-const shouldSubmitFromThisRuntime = (env: Env, jTx: JTx): boolean => {
+const shouldSubmitFromThisRuntime = (env: RuntimeState, jTx: JTx): boolean => {
   if (jTx.type !== 'batch' && !isEntityProviderActionJTx(jTx)) return true;
   const signerId = typeof jTx.data?.signerId === 'string' ? jTx.data.signerId.toLowerCase() : '';
   const runtimeId = typeof env.runtimeId === 'string' ? env.runtimeId.toLowerCase() : '';
@@ -184,7 +184,7 @@ const shouldSubmitFromThisRuntime = (env: Env, jTx: JTx): boolean => {
 };
 
 const reconcileDurablyStaleEntityProviderAction = (
-  env: Env,
+  env: RuntimeState,
   deps: RuntimeJSubmitDeps,
   jurisdictionName: string,
   jTx: JTx,
@@ -209,7 +209,7 @@ const reconcileDurablyStaleEntityProviderAction = (
 };
 
 const reconcileDurablyAbortedBatch = (
-  env: Env,
+  env: RuntimeState,
   deps: RuntimeJSubmitDeps,
   jurisdictionName: string,
   jTx: JTx,
@@ -251,7 +251,7 @@ const reconcileDurablyAbortedBatch = (
  * and deterministic RJEA execution.
  */
 const queueKnownFailure = (
-  env: Env,
+  env: RuntimeState,
   deps: RuntimeJSubmitDeps,
   jurisdictionName: string,
   jTx: JTx,
@@ -271,7 +271,7 @@ const queueKnownFailure = (
 };
 
 const collectActiveJTxs = (
-  env: Env,
+  env: RuntimeState,
   deps: RuntimeJSubmitDeps,
   jInput: JInput,
 ): JTx[] =>
@@ -280,7 +280,7 @@ const collectActiveJTxs = (
     !reconcileDurablyStaleEntityProviderAction(env, deps, jInput.jurisdictionName, jTx));
 
 const queueUnavailableAdapterResults = (
-  env: Env,
+  env: RuntimeState,
   deps: RuntimeJSubmitDeps,
   jurisdictionName: string,
   jTxs: JTx[],
@@ -294,7 +294,7 @@ const queueUnavailableAdapterResults = (
 };
 
 const resolveJSubmitAdapter = async (
-  env: Env,
+  env: RuntimeState,
   deps: RuntimeJSubmitDeps,
   jurisdictionName: string,
   activeJTxs: JTx[],
@@ -333,7 +333,7 @@ const resolveJSubmitAdapter = async (
 };
 
 const deferSealedAttemptsForAuthenticatedEvents = (
-  env: Env,
+  env: RuntimeState,
   deps: RuntimeJSubmitDeps,
   jurisdictionName: string,
   activeJTxs: JTx[],
@@ -359,7 +359,7 @@ const deferSealedAttemptsForAuthenticatedEvents = (
 };
 
 const validateSubmitAttempt = (
-  env: Env,
+  env: RuntimeState,
   deps: RuntimeJSubmitDeps,
   jurisdictionName: string,
   jTx: JTx,
@@ -394,7 +394,7 @@ const validateSubmitAttempt = (
 };
 
 const submitJTxToAdapter = async (
-  env: Env,
+  env: RuntimeState,
   adapter: JAdapter,
   jTx: JTx,
 ): Promise<JSubmitResult> => {
@@ -410,7 +410,7 @@ const submitJTxToAdapter = async (
 };
 
 const recordSuccessfulSubmit = async (
-  env: Env,
+  env: RuntimeState,
   deps: RuntimeJSubmitDeps,
   jurisdictionName: string,
   adapter: JAdapter,
@@ -435,7 +435,7 @@ const recordSuccessfulSubmit = async (
 };
 
 const recordFailedSubmit = (
-  env: Env,
+  env: RuntimeState,
   deps: RuntimeJSubmitDeps,
   jurisdictionName: string,
   jTx: JTx,
@@ -455,7 +455,7 @@ const recordFailedSubmit = (
 };
 
 const submitOneJTx = async (
-  env: Env,
+  env: RuntimeState,
   deps: RuntimeJSubmitDeps,
   jurisdictionName: string,
   adapter: JAdapter,
@@ -494,7 +494,7 @@ const submitOneJTx = async (
 };
 
 const submitJInput = async (
-  env: Env,
+  env: RuntimeState,
   deps: RuntimeJSubmitDeps,
   jInput: JInput,
 ): Promise<void> => {
@@ -533,7 +533,7 @@ const submitJInput = async (
  * as recordJSubmitResult so restart/replay cannot lose failure classification.
  */
 export async function submitRuntimeJOutbox(
-  env: Env,
+  env: RuntimeState,
   jOutbox: JInput[],
   deps: RuntimeJSubmitDeps,
 ): Promise<void> {

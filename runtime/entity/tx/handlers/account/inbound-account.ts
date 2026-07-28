@@ -1,4 +1,4 @@
-import type { AccountInput, AccountMachine, EntityState } from '../../../../types';
+import type { AccountInput, AccountState, EntityState } from '../../../../types';
 import {
   accountStateDomainFromJurisdiction,
   computeAccountStateRoot,
@@ -22,13 +22,13 @@ const accountHandlerLog = createStructuredLogger('account.handler');
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 
 export type InboundAccountResolution = {
-  accountMachine: AccountMachine;
+  accountMachine: AccountState;
   counterpartyId: string;
   createdAccount: boolean;
 };
 
 const findAccountKey = (
-  accounts: Map<string, AccountMachine>,
+  accounts: Map<string, AccountState>,
   counterpartyId: string,
 ): string | null => {
   const target = normalizeEntityRef(counterpartyId);
@@ -57,8 +57,8 @@ const resolveInboundAccountDomain = (
   state: EntityState,
   input: AccountInput,
   counterpartyId: string,
-  existing: AccountMachine | undefined,
-): AccountMachine['domain'] => {
+  existing: AccountState | undefined,
+): AccountState['domain'] => {
   if (input.domain === undefined) throw new Error(`ACCOUNT_INPUT_DOMAIN_REQUIRED:${counterpartyId}`);
   const domain = normalizeAccountStateDomain(input.domain, 'ACCOUNT_INPUT_DOMAIN');
   if (existing) {
@@ -105,16 +105,16 @@ const assertUnknownAccountGenesis = (
 const createInboundAccountMachine = (
   state: EntityState,
   counterpartyId: string,
-  domain: AccountMachine['domain'],
+  domain: AccountState['domain'],
   watchSeed: string,
-): AccountMachine => {
+): AccountState => {
   const leftEntity = isLeftEntity(state.entityId, counterpartyId)
     ? state.entityId
     : counterpartyId;
   const rightEntity = isLeftEntity(state.entityId, counterpartyId)
     ? counterpartyId
     : state.entityId;
-  const account: AccountMachine = {
+  const account: AccountState = {
     leftEntity,
     rightEntity,
     domain,

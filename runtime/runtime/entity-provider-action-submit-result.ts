@@ -1,5 +1,5 @@
 import { safeStringify } from '../protocol/serialization';
-import type { EntityReplica, Env, RuntimeTx } from '../types';
+import type { EntityReplica, RuntimeState, RuntimeTx } from '../types';
 import type { EntityProviderActionSubmitState } from '../types/entity-provider-actions';
 import {
   type ActionJTx,
@@ -71,7 +71,7 @@ const assertValidActionResult = (data: RecordActionResultTx['data']): void => {
   assertValidAdapterFailure(data);
 };
 
-const findPendingAttempt = (env: Env, attemptId: string): PendingActionAttempt | null => {
+const findPendingAttempt = (env: RuntimeState, attemptId: string): PendingActionAttempt | null => {
   const matches: PendingActionAttempt[] = [];
   for (const input of env.runtimeState?.pendingCommittedJOutbox ?? []) {
     for (const jTx of input.jTxs) {
@@ -105,7 +105,7 @@ const pendingMatchesResult = (
   );
 };
 
-const findRecordedFingerprint = (env: Env, attemptId: string): string | null => {
+const findRecordedFingerprint = (env: RuntimeState, attemptId: string): string | null => {
   let found: string | null = null;
   for (const replica of env.eReplicas.values()) {
     const local = replica.entityProviderActionSubmitState;
@@ -128,7 +128,7 @@ const findRecordedFingerprint = (env: Env, attemptId: string): string | null => 
   return found;
 };
 
-export const removePendingEntityProviderActionAttempt = (env: Env, attemptId: string): void => {
+export const removePendingEntityProviderActionAttempt = (env: RuntimeState, attemptId: string): void => {
   const remaining = (env.runtimeState?.pendingCommittedJOutbox ?? []).flatMap((input) => {
     const jTxs = input.jTxs.filter((jTx) => !(
       isEntityProviderActionJTx(jTx) &&
@@ -139,7 +139,7 @@ export const removePendingEntityProviderActionAttempt = (env: Env, attemptId: st
   if (env.runtimeState) env.runtimeState.pendingCommittedJOutbox = remaining;
 };
 
-const activePendingAttemptIds = (env: Env, replica: EntityReplica): Set<string> => {
+const activePendingAttemptIds = (env: RuntimeState, replica: EntityReplica): Set<string> => {
   const active = new Set<string>();
   for (const input of env.runtimeState?.pendingCommittedJOutbox ?? []) {
     for (const jTx of input.jTxs) {
@@ -155,7 +155,7 @@ const activePendingAttemptIds = (env: Env, replica: EntityReplica): Set<string> 
 };
 
 const buildResultJournal = (
-  env: Env,
+  env: RuntimeState,
   replica: EntityReplica,
   attemptId: string,
   fingerprint: string,
@@ -222,7 +222,7 @@ export const makeEntityProviderActionResultRuntimeTx = (
 };
 
 export const applyRecordEntityProviderActionResultRuntimeTx = (
-  env: Env,
+  env: RuntimeState,
   tx: RecordActionResultTx,
 ): void => {
   assertValidActionResult(tx.data);

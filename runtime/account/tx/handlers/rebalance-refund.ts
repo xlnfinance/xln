@@ -1,10 +1,10 @@
-import type { AccountMachine, AccountTx } from '../../../types';
+import type { AccountState, AccountTx } from '../../../types';
 import { deriveDelta } from '../../utils';
 
 type RebalanceRefundTx = Extract<AccountTx, { type: 'rebalance_refund' }>;
 
 export function handleRebalanceRefund(
-  account: AccountMachine,
+  account: AccountState,
   tx: RebalanceRefundTx,
   byLeft: boolean,
 ): { success: boolean; events: string[]; error?: string } {

@@ -1,8 +1,8 @@
 import type {
-  AccountMachine,
+  AccountState,
   EntityState,
   EntityTx,
-  Env,
+  RuntimeState,
 } from '../../../../types';
 import { addMessage } from '../../../../state-helpers';
 import { initJBatch } from '../../../../jurisdiction/batch';
@@ -19,8 +19,8 @@ type FinalizeTx = Extract<EntityTx, { type: 'disputeFinalize' }>;
 export const admitDisputeFinalize = (
   state: EntityState,
   tx: FinalizeTx,
-  env: Env,
-): AccountMachine | null => {
+  env: RuntimeState,
+): AccountState | null => {
   const counterpartyId = tx.data.counterpartyEntityId;
   state.jBatchState ??= initJBatch();
   if (state.jBatchState.sentBatch) {

@@ -1,4 +1,4 @@
-import type { Env, JReplica } from '../types';
+import type { RuntimeState, JReplica } from '../types';
 import type { JAdapter } from '../jadapter';
 import type { BrowserVMProvider, JAdapterConfig } from '../jadapter/types';
 import { createJAdapterWithRetry } from '../jadapter/retry';
@@ -15,7 +15,7 @@ export type TrustedJurisdictionRpcBinding = {
 };
 
 export const applyTrustedJurisdictionRpcBindings = (
-  env: Pick<Env, 'jReplicas'>,
+  env: Pick<RuntimeState, 'jReplicas'>,
   bindings: readonly TrustedJurisdictionRpcBinding[],
 ): void => {
   const rpcByJurisdictionRef = new Map<string, string>();
@@ -53,7 +53,7 @@ export const hasLiveJAdapter = (value: unknown): value is JAdapter => {
   );
 };
 
-export const normalizeRestoredJReplicas = (env: Env): void => {
+export const normalizeRestoredJReplicas = (env: RuntimeState): void => {
   if (!env.jReplicas) env.jReplicas = new Map();
   for (const [name, replica] of env.jReplicas.entries()) {
     const jadapter = hasLiveJAdapter(replica.jadapter) ? replica.jadapter : undefined;
@@ -132,7 +132,7 @@ const assertJAdapterMatchesReplica = async (
 };
 
 export const ensureLiveJAdapterForReplica = async (
-  env: Env,
+  env: RuntimeState,
   name: string,
   options: {
     allowBrowserVm?: boolean;
@@ -214,13 +214,13 @@ export const ensureLiveJAdapterForReplica = async (
 };
 
 export const rehydrateRestoredRuntimeInfra = async (
-  env: Env,
+  env: RuntimeState,
   options: {
     isBrowser: boolean;
-    loadGossipProfiles: (env: Env) => Promise<void>;
-    assertPersistedContractConfigReady: (env: Env, label: string) => void;
+    loadGossipProfiles: (env: RuntimeState) => Promise<void>;
+    assertPersistedContractConfigReady: (env: RuntimeState, label: string) => void;
     setBrowserVMJurisdiction: (
-      env: Env | null,
+      env: RuntimeState | null,
       depositoryAddress: string,
       chainId: number,
       browserVM?: BrowserVMProvider | null,

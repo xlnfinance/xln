@@ -1,8 +1,8 @@
 import type {
   AccountInput,
-  AccountMachine,
+  AccountState,
   EntityState,
-  Env,
+  RuntimeState,
 } from '../../../../types';
 import { applyAccountInput } from '../../../../account/consensus';
 import {
@@ -32,10 +32,10 @@ import {
 const accountHandlerLog = createStructuredLogger('account.handler');
 
 export type AccountInputPhaseContext = {
-  env: Env;
+  env: RuntimeState;
   state: EntityState;
   input: AccountInput;
-  account: AccountMachine;
+  account: AccountState;
   counterpartyId: string;
   createdAccount: boolean;
   effects: CommittedAccountEffects;

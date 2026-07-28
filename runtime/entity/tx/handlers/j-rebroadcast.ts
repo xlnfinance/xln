@@ -1,4 +1,4 @@
-import type { EntityInput, EntityReplica, EntityState, EntityTx, Env, HashType, JInput, JTx } from '../../../types';
+import type { EntityInput, EntityReplica, EntityState, EntityTx, RuntimeState, HashType, JInput, JTx } from '../../../types';
 import { requireUsableContractAddress } from '../../../jurisdiction/contract-address';
 import { addMessage, cloneEntityState } from '../../../state-helpers';
 import { batchOpCount, cloneJBatch, computeBatchHankoHash, encodeJBatch, isBatchEmpty } from '../../../jurisdiction/batch';
@@ -54,7 +54,7 @@ function normalizeGasBumpBps(value: number | undefined): number | undefined {
 export async function handleJRebroadcast(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'j_rebroadcast' }>,
-  env: Env,
+  env: RuntimeState,
 ): Promise<EntityTxReducerResult> {
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];

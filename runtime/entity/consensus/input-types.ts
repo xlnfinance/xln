@@ -2,7 +2,7 @@ import type {
   EntityInput,
   EntityReplica,
   EntityState,
-  Env,
+  RuntimeState,
   JInput,
 } from '../../types';
 
@@ -22,7 +22,7 @@ export type ApplyEntityInputResult = {
 };
 
 export type ApplyEntityInputContext = {
-  env: Env;
+  env: RuntimeState;
   entityInput: EntityInput;
   workingReplica: EntityReplica;
   entityOutbox: EntityInput[];

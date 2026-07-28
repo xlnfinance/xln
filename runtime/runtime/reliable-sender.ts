@@ -1,6 +1,6 @@
 import { normalizeRuntimeId } from '../networking/runtime-id';
 import type {
-  Env,
+  RuntimeState,
   ReliableDeliveryReceipt,
   RoutedEntityInput,
 } from '../types';
@@ -32,14 +32,14 @@ export type ReliableReceiptSenderCheckpoint = {
 };
 
 const senderLedgerForReceipt = (
-  env: Env,
+  env: RuntimeState,
   receipt: ReliableDeliveryReceipt,
 ): Map<string, ReliableDeliveryReceipt> | undefined => receipt.body.coverage === 'terminal'
   ? env.runtimeState?.receivedReliableTerminalWatermarks
   : env.runtimeState?.receivedReliableReceiptLedger;
 
 const receiptCandidates = (
-  env: Env,
+  env: RuntimeState,
   receipt: ReliableDeliveryReceipt,
 ): ReliableDeliveryReceipt[] => {
   const key = senderFrontierKey(receipt);
@@ -140,7 +140,7 @@ const terminalCrossCoverageFromLedger = (
 };
 
 const terminalCrossCoverage = (
-  env: Env,
+  env: RuntimeState,
   receipt: ReliableDeliveryReceipt,
 ): TerminalCrossCoverage => terminalCrossCoverageFromLedger(
   env.runtimeState?.receivedReliableTerminalWatermarks,
@@ -149,7 +149,7 @@ const terminalCrossCoverage = (
 
 /** Suppress signed stale frontiers but reject same-height equivocation. */
 export const registerReliableReceiptIngress = (
-  env: Env,
+  env: RuntimeState,
   receipt: ReliableDeliveryReceipt,
 ): 'enqueue' | 'duplicate' => {
   const validationError = getReliableDeliveryReceiptValidationError(env, receipt);
@@ -202,7 +202,7 @@ const applyReceiptToSenderLedgers = (
 
 /** Apply signed frontier receipts and GC only their explicit exact/terminal coverage. */
 export const applyReliableDeliveryReceipts = (
-  env: Env,
+  env: RuntimeState,
   receipts: readonly ReliableDeliveryReceipt[],
 ): { removed: number } => {
   const state = ensureReliableState(env);
@@ -248,7 +248,7 @@ export const applyReliableDeliveryReceipts = (
 };
 
 export const captureReliableReceiptSenderCheckpoint = (
-  env: Env,
+  env: RuntimeState,
 ): ReliableReceiptSenderCheckpoint => ({
   pendingNetworkOutputs: cloneIsolatedRoutedEntityInputs(env.pendingNetworkOutputs ?? []),
   receivedLedger: env.runtimeState?.receivedReliableReceiptLedger
@@ -263,7 +263,7 @@ export const captureReliableReceiptSenderCheckpoint = (
 });
 
 export const rollbackReliableDeliveryReceipts = (
-  env: Env,
+  env: RuntimeState,
   checkpoint: ReliableReceiptSenderCheckpoint,
 ): void => {
   env.pendingNetworkOutputs = checkpoint.pendingNetworkOutputs;

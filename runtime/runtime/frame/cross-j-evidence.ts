@@ -1,6 +1,6 @@
 import { accountInputAck, accountInputProposal } from '../../account/consensus/flush';
 import { getEffectiveEntityInputTxs } from '../../entity/consensus/output-envelope';
-import type { Env, RoutedEntityInput } from '../../types';
+import type { RuntimeState, RoutedEntityInput } from '../../types';
 import { selectMatchedCrossJAccountInputPairs } from '../entity-routing';
 import { recordRuntimeSecurityIncident } from '../security-incidents';
 
@@ -72,7 +72,7 @@ export const summarizeAtomicCrossJAccountInput = (
 });
 
 export const recordRejectedAtomicCrossJInputs = (
-  env: Env,
+  env: RuntimeState,
   inputs: readonly RoutedEntityInput[],
   inputIndexes: Iterable<number>,
   code: 'CROSS_J_ACCOUNT_PAIR_STRUCTURAL_MISMATCH' | 'CROSS_J_ACCOUNT_PAIR_PREVIEW_REJECTED',

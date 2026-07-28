@@ -75,18 +75,19 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   invariant, WAL boundary, adversarial-input boundary and intentionally
   non-obvious ordering rule. Comments must explain why the tempting alternative
   is unsafe rather than restating the code.
-- [ ] Normalize the three nested state-machine vocabularies without pretending
+- [ ] Normalize the three nested state-machine vocabularies (owner-approved)
+  without pretending
   their consensus protocols are identical. Preferred names are `RuntimeState`,
   `EntityState`, `AccountState`; `RuntimeInput`, `EntityInput`, `AccountInput`;
   `RuntimeFrame`, `EntityFrame`, `AccountFrame`; and matching `*Output` types.
-  Replace the historical `Env` and `AccountMachine` names only as a separately
-  reviewable, compile-checked migration after owner confirmation. Give each
+  Replace the historical `Env` and `AccountMachine` names as a separately
+  reviewable, compile-checked migration. Give each
   machine the same narrow façade and phase vocabulary (`admission`, `apply`,
   `frame`, `consensus`/`commit`, `output`, `state-root`) while keeping Runtime
   WAL, Entity validator certification and Account bilateral ACK semantics
   explicit. Do not introduce inheritance or a generic reducer that hides those
   different trust boundaries.
-- [ ] Standardize transition result naming after the vocabulary decision:
+- [ ] Standardize transition result naming (owner-approved):
   `outputs` are deterministic messages to another state machine; `effects` are
   post-commit external I/O only; queued child-machine inputs must be named for
   their destination instead of the implementation detail `mempoolOps`.

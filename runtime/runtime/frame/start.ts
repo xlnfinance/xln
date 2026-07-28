@@ -1,14 +1,14 @@
-import type { EntityInput, Env } from '../../types';
+import type { EntityInput, RuntimeState } from '../../types';
 import type { RuntimeProcessProfile } from './process-profile';
 
-type RuntimeState = NonNullable<Env['runtimeState']>;
+type RuntimeLifecycleState = NonNullable<RuntimeState['runtimeState']>;
 
 export type RuntimeFrameStartDeps = {
-  attachEventEmitters(env: Env): void;
+  attachEventEmitters(env: RuntimeState): void;
   collectIngress(
-    env: Env,
+    env: RuntimeState,
     inputs: EntityInput[] | undefined,
-    state: RuntimeState,
+    state: RuntimeLifecycleState,
     runtimeDelay: number,
     profile: RuntimeProcessProfile,
   ): Promise<{ ready: true } | { ready: false; outcome: string }>;
@@ -20,7 +20,7 @@ export type RuntimeFrameStart = {
   frameTimestampBeforeTick: number;
 };
 
-const stopAtDebugFrame = async (env: Env): Promise<void> => {
+const stopAtDebugFrame = async (env: RuntimeState): Promise<void> => {
   if (env.stopAtFrame === undefined || env.height < env.stopAtFrame) return;
   console.log(`\n⏸️  FRAME STEPPING: Stopped at frame ${env.height}`);
   console.log('═'.repeat(80));
@@ -32,9 +32,9 @@ const stopAtDebugFrame = async (env: Env): Promise<void> => {
 };
 
 export const startRuntimeFrame = async (
-  env: Env,
+  env: RuntimeState,
   inputs: EntityInput[] | undefined,
-  state: RuntimeState,
+  state: RuntimeLifecycleState,
   runtimeDelay: number,
   profile: RuntimeProcessProfile,
   deps: RuntimeFrameStartDeps,

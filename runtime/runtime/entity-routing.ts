@@ -4,7 +4,7 @@ import type {
   AccountTx,
   EntityInput,
   EntityReplica,
-  Env,
+  RuntimeState,
   JInput,
   ReliableDeliveryReceipt,
   RoutedEntityInput,
@@ -30,7 +30,7 @@ import { recordRuntimeSecurityIncident } from './security-incidents';
 
 const routingLog = createStructuredLogger('network.entity-routing');
 
-type RuntimeState = NonNullable<Env['runtimeState']>;
+type RuntimeLifecycleState = NonNullable<RuntimeState['runtimeState']>;
 
 export type RuntimeInboundEntityInputOptions = {
   /** The transport accepted this exact input before persistence quiescing began. */
@@ -38,9 +38,9 @@ export type RuntimeInboundEntityInputOptions = {
 };
 
 export type RuntimeEntityRoutingDeps = {
-  ensureRuntimeState(env: Env): RuntimeState;
+  ensureRuntimeState(env: RuntimeState): RuntimeLifecycleState;
   enqueueRuntimeInputs(
-    env: Env,
+    env: RuntimeState,
     inputs?: EntityInput[],
     runtimeTxs?: RuntimeTx[],
     jInputs?: JInput[],
@@ -48,9 +48,9 @@ export type RuntimeEntityRoutingDeps = {
     options?: RuntimeInboundEntityInputOptions,
   ): void;
   extractEntityId(replicaKey: string): string;
-  hasLocalSignerForEntity(env: Env, entityId: string): boolean;
-  hasLocalSignerForEntitySigner(env: Env, entityId: string, signerId: string): boolean;
-  resolveSoleLocalSignerForEntity(env: Env, entityId: string): string | null;
+  hasLocalSignerForEntity(env: RuntimeState, entityId: string): boolean;
+  hasLocalSignerForEntitySigner(env: RuntimeState, entityId: string, signerId: string): boolean;
+  resolveSoleLocalSignerForEntity(env: RuntimeState, entityId: string): string | null;
   getP2P: RuntimeOutputRoutingDeps['getP2P'];
 };
 
@@ -186,7 +186,7 @@ const sourceAdmissionCandidate = (
 };
 
 const findInputReplica = (
-  env: Env,
+  env: RuntimeState,
   input: RoutedEntityInput,
 ): EntityReplica | null =>
   ([...env.eReplicas.values()].find(candidate =>
@@ -194,7 +194,7 @@ const findInputReplica = (
     normalizeEntityKey(candidate.signerId) === normalizeEntityKey(input.signerId)) ?? null);
 
 const findReplicaAccount = (
-  env: Env,
+  env: RuntimeState,
   input: RoutedEntityInput,
   counterpartyId: string,
 ) => {
@@ -205,7 +205,7 @@ const findReplicaAccount = (
 };
 
 const proposalAlreadyCommitted = (
-  env: Env,
+  env: RuntimeState,
   input: RoutedEntityInput,
   accountInput: AccountInput,
 ): boolean => {
@@ -397,7 +397,7 @@ const buildCrossJProposalFrameCandidate = (
 };
 
 const buildCrossJAckFrameCandidate = (
-  env: Env,
+  env: RuntimeState,
   input: RoutedEntityInput,
   inputIndex: number,
   accountInput: AccountInput,
@@ -511,7 +511,7 @@ export const selectPotentialCrossJAccountInputPairs = (
 };
 
 const collectCrossJAdmissionCandidates = (
-  env: Env,
+  env: RuntimeState,
   inputs: readonly RoutedEntityInput[],
 ): CrossJAdmissionFrameCandidate[] => inputs.flatMap((input, inputIndex) => {
   const replica = findInputReplica(env, input);
@@ -535,7 +535,7 @@ const collectCrossJAdmissionCandidates = (
  * frame; a standalone monetary leg is dropped before Account consensus.
  */
 export const selectMatchedCrossJAccountInputPairs = (
-  env: Env,
+  env: RuntimeState,
   inputs: readonly RoutedEntityInput[],
 ): CrossJAccountInputPairSelection => {
   const candidates = collectCrossJAdmissionCandidates(env, inputs);
@@ -654,11 +654,11 @@ export const selectMatchedCrossJAccountInputPairs = (
 };
 
 export const filterMatchedCrossJAccountInputPairs = (
-  env: Env,
+  env: RuntimeState,
   inputs: readonly RoutedEntityInput[],
 ): RoutedEntityInput[] => selectMatchedCrossJAccountInputPairs(env, inputs).inputs;
 
-const runtimeRoutingTimestamp = (env: Env): number => {
+const runtimeRoutingTimestamp = (env: RuntimeState): number => {
   const timestamp = Math.floor(Number(env.timestamp ?? 0));
   return Number.isFinite(timestamp) && timestamp >= 0 ? timestamp : 0;
 };
@@ -669,7 +669,7 @@ const resolveRuntimeIdFromProfile = (profile: Profile | undefined): string | nul
 };
 
 export const resolveRuntimeIdForEntity = (
-  env: Env,
+  env: RuntimeState,
   entityId: string,
   deps: Pick<RuntimeEntityRoutingDeps, 'ensureRuntimeState'>,
 ): string | null => {
@@ -711,7 +711,7 @@ export const resolveRuntimeIdForEntity = (
 };
 
 export const hasLocalEntityReplica = (
-  env: Env,
+  env: RuntimeState,
   entityId: string,
   deps: Pick<RuntimeEntityRoutingDeps, 'extractEntityId'>,
 ): boolean => {
@@ -723,7 +723,7 @@ export const hasLocalEntityReplica = (
 };
 
 export const resolveRuntimeIdForCrossJurisdictionEntity = (
-  env: Env,
+  env: RuntimeState,
   entityId: string,
   deps: Pick<RuntimeEntityRoutingDeps, 'ensureRuntimeState' | 'extractEntityId' | 'hasLocalSignerForEntity'>,
 ): string | null => {
@@ -733,7 +733,7 @@ export const resolveRuntimeIdForCrossJurisdictionEntity = (
 };
 
 export const registerEntityRuntimeHintWithDeps = (
-  env: Env,
+  env: RuntimeState,
   entityId: string,
   runtimeId: string,
   deps: Pick<RuntimeEntityRoutingDeps, 'ensureRuntimeState'>,
@@ -750,7 +750,7 @@ export const registerEntityRuntimeHintWithDeps = (
 };
 
 export const collectCrossJurisdictionRemoteEntityHints = (
-  env: Env,
+  env: RuntimeState,
   input: RoutedEntityInput,
   fromRuntimeId: string,
   deps: Pick<RuntimeEntityRoutingDeps, 'extractEntityId' | 'hasLocalSignerForEntity'>,
@@ -781,7 +781,7 @@ export const collectCrossJurisdictionRemoteEntityHints = (
 };
 
 export const validateInboundP2PEntityInput = (
-  env: Env,
+  env: RuntimeState,
   from: string,
   input: RoutedEntityInput,
   deps: RuntimeEntityRoutingDeps,
@@ -897,7 +897,7 @@ export const validateInboundP2PEntityInput = (
 };
 
 export const routeInboundP2PEntityInput = (
-  env: Env,
+  env: RuntimeState,
   from: string,
   input: RoutedEntityInput,
   deps: RuntimeEntityRoutingDeps,
@@ -929,7 +929,7 @@ type AtomicCrossJPair = NonNullable<RuntimeEntityInputsEnvelope['atomicCrossJuri
 type CrossJIntent = NonNullable<RuntimeEntityInputsEnvelope['crossJurisdictionIntent']>;
 
 const validateEntityInputsEnvelopeHeader = (
-  env: Env,
+  env: RuntimeState,
   from: string,
   envelope: RuntimeEntityInputsEnvelope,
 ): {
@@ -975,7 +975,7 @@ const validateEntityInputsEnvelopeHeader = (
 };
 
 const validateEnvelopeEntityInputs = (
-  env: Env,
+  env: RuntimeState,
   from: string,
   envelope: RuntimeEntityInputsEnvelope,
   deps: RuntimeEntityRoutingDeps,
@@ -1005,7 +1005,7 @@ const validateEnvelopeEntityInputs = (
 });
 
 const appendCrossJurisdictionIntentInput = (
-  env: Env,
+  env: RuntimeState,
   rawIntent: CrossJIntent,
   deps: RuntimeEntityRoutingDeps,
   transportSource: string,
@@ -1100,7 +1100,7 @@ const assertAtomicCrossJEnvelope = (
 };
 
 export const validateInboundP2PEntityInputsEnvelope = (
-  env: Env,
+  env: RuntimeState,
   from: string,
   envelope: RuntimeEntityInputsEnvelope,
   deps: RuntimeEntityRoutingDeps,
@@ -1139,7 +1139,7 @@ export const validateInboundP2PEntityInputsEnvelope = (
 };
 
 export const routeInboundP2PEntityInputs = (
-  env: Env,
+  env: RuntimeState,
   from: string,
   envelope: RuntimeEntityInputsEnvelope,
   deps: RuntimeEntityRoutingDeps,

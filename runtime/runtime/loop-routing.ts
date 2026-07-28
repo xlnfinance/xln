@@ -41,7 +41,7 @@ import { normalizeDbNamespace } from '../storage/runtime-dbs';
 import { validateEntityInput } from '../validation-utils';
 import type {
   EntityInput,
-  Env,
+  RuntimeState,
   ReliableDeliveryReceipt,
   RoutedEntityInput,
   RuntimeEntityInputsEnvelope,
@@ -60,11 +60,11 @@ import {
 const routingLog = createStructuredLogger('runtime.routing');
 
 export type RuntimeRoutingApiDeps = {
-  notifyEnvChange(env: Env): void;
+  notifyEnvChange(env: RuntimeState): void;
 };
 
 const normalizeRuntimeEntityInput = (
-  _env: Env,
+  _env: RuntimeState,
   input: EntityInput,
   _context: string,
 ): RoutedEntityInput => {
@@ -93,7 +93,7 @@ const getRuntimeEntityRoutingDeps = (
 
 const handleInboundP2PEntityInput = (
   apiDeps: RuntimeRoutingApiDeps,
-  env: Env,
+  env: RuntimeState,
   from: string,
   input: RoutedEntityInput,
   ingressTimestamp?: number,
@@ -107,7 +107,7 @@ const handleInboundP2PEntityInput = (
 
 const handleInboundP2PEntityInputs = (
   apiDeps: RuntimeRoutingApiDeps,
-  env: Env,
+  env: RuntimeState,
   from: string,
   envelope: RuntimeEntityInputsEnvelope,
   ingressTimestamp?: number,
@@ -123,7 +123,7 @@ const handleInboundP2PEntityInputs = (
 };
 
 const handleInboundReliableReceipt = (
-  env: Env,
+  env: RuntimeState,
   from: string,
   receipt: ReliableDeliveryReceipt,
   options: RuntimeInboundEntityInputOptions = {},
@@ -167,7 +167,7 @@ const getRuntimeP2PLifecycleDeps = (
 
 const setRuntimeId = (
   apiDeps: RuntimeRoutingApiDeps,
-  env: Env,
+  env: RuntimeState,
   id: string | null,
 ): void => {
   const runtimeId = normalizeRuntimeId(id);
@@ -181,7 +181,7 @@ const setRuntimeId = (
 };
 
 const validateRuntimeInputAdmission = (
-  env: Env,
+  env: RuntimeState,
   runtimeInput: RuntimeInput,
 ): void => {
   assertRuntimeCommandReady(env);
@@ -249,18 +249,18 @@ export const createRuntimeRoutingApi = (deps: RuntimeRoutingApiDeps) => {
   const p2pDeps = () => getRuntimeP2PLifecycleDeps(deps);
   return {
     getEnv: getRuntimeEnv,
-    setRuntimeId: (env: Env, id: string | null) => setRuntimeId(deps, env, id),
+    setRuntimeId: (env: RuntimeState, id: string | null) => setRuntimeId(deps, env, id),
     deriveRuntimeId,
-    registerEntityRuntimeHint: (env: Env, entityId: string, runtimeId: string) =>
+    registerEntityRuntimeHint: (env: RuntimeState, entityId: string, runtimeId: string) =>
       registerEntityRuntimeHintWithDeps(env, entityId, runtimeId, entityRoutingDeps()),
     handleInboundP2PEntityInput: (
-      env: Env,
+      env: RuntimeState,
       from: string,
       input: RoutedEntityInput,
       timestamp?: number,
     ) => handleInboundP2PEntityInput(deps, env, from, input, timestamp),
     handleInboundP2PEntityInputs: (
-      env: Env,
+      env: RuntimeState,
       from: string,
       envelope: RuntimeEntityInputsEnvelope,
       timestamp?: number,
@@ -270,18 +270,18 @@ export const createRuntimeRoutingApi = (deps: RuntimeRoutingApiDeps) => {
     validateRuntimeInputAdmission,
     getRuntimeEntityRoutingDeps: entityRoutingDeps,
     getRuntimeOutputRoutingDeps: outputRoutingDeps,
-    sendEntityInput: (env: Env, input: RoutedEntityInput) =>
+    sendEntityInput: (env: RuntimeState, input: RoutedEntityInput) =>
       sendEntityInputWithRouting(env, input, outputRoutingDeps()),
-    startP2P: (env: Env, config: P2PConfig = {}) => startRuntimeP2P(env, config, p2pDeps()),
-    stopP2P: (env: Env) => stopRuntimeP2P(env, p2pDeps()),
-    stopP2PAndWait: (env: Env, timeoutMs?: number) =>
+    startP2P: (env: RuntimeState, config: P2PConfig = {}) => startRuntimeP2P(env, config, p2pDeps()),
+    stopP2P: (env: RuntimeState) => stopRuntimeP2P(env, p2pDeps()),
+    stopP2PAndWait: (env: RuntimeState, timeoutMs?: number) =>
       stopRuntimeP2PAndWait(env, p2pDeps(), timeoutMs),
-    getP2P: (env: Env) => getRuntimeP2P(env, p2pDeps()),
-    getP2PState: (env: Env) => getRuntimeP2PState(env, p2pDeps()),
-    refreshGossip: (env: Env) => refreshRuntimeGossip(env, p2pDeps()),
-    ensureGossipProfiles: (env: Env, entityIds: string[]) =>
+    getP2P: (env: RuntimeState) => getRuntimeP2P(env, p2pDeps()),
+    getP2PState: (env: RuntimeState) => getRuntimeP2PState(env, p2pDeps()),
+    refreshGossip: (env: RuntimeState) => refreshRuntimeGossip(env, p2pDeps()),
+    ensureGossipProfiles: (env: RuntimeState, entityIds: string[]) =>
       ensureRuntimeGossipProfiles(env, p2pDeps(), entityIds),
-    clearGossip: (env: Env, options: { runtimeId?: string } = {}) =>
+    clearGossip: (env: RuntimeState, options: { runtimeId?: string } = {}) =>
       clearRuntimeGossip(env, deps.notifyEnvChange, options),
     MAX_RUNTIME_J_INPUTS,
     MAX_RUNTIME_J_TXS,

@@ -2,7 +2,7 @@ import type {
   AccountInput,
   EntityState,
   EntityTx,
-  Env,
+  RuntimeState,
   EntityInput,
   JInput,
   HashType,
@@ -150,7 +150,7 @@ export type EntityTxReducerResult = Omit<ApplyEntityTxResult, 'storageChanges' |
 };
 
 type EntityTxDispatcher = (
-  env: Env,
+  env: RuntimeState,
   entityState: EntityState,
   entityTx: EntityTx,
   options?: ApplyEntityTxOptions,
@@ -366,7 +366,7 @@ const entityTxDispatchers: Record<string, EntityTxDispatcher> = {
 };
 
 export const applyEntityTx = async (
-  env: Env,
+  env: RuntimeState,
   entityState: EntityState,
   entityTx: EntityTx,
   options?: ApplyEntityTxOptions,

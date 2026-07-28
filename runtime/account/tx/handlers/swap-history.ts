@@ -1,5 +1,5 @@
 import type {
-  AccountMachine,
+  AccountState,
   SwapOffer,
   SwapOrderHistoryEntry,
   SwapOrderResolveHistoryEntry,
@@ -10,14 +10,14 @@ import {
 } from '../../../extensions/cross-j/index';
 import { LIMITS } from '../../../constants';
 
-function ensureSwapOrderHistory(accountMachine: AccountMachine): Map<string, SwapOrderHistoryEntry> {
+function ensureSwapOrderHistory(accountMachine: AccountState): Map<string, SwapOrderHistoryEntry> {
   if (!(accountMachine.swapOrderHistory instanceof Map)) {
     accountMachine.swapOrderHistory = new Map();
   }
   return accountMachine.swapOrderHistory;
 }
 
-function ensureSwapClosedOrders(accountMachine: AccountMachine): Map<string, SwapOrderHistoryEntry> {
+function ensureSwapClosedOrders(accountMachine: AccountState): Map<string, SwapOrderHistoryEntry> {
   if (!(accountMachine.swapClosedOrders instanceof Map)) {
     accountMachine.swapClosedOrders = new Map();
   }
@@ -52,7 +52,7 @@ const byOldestLifecycle = (
   return left[0] < right[0] ? -1 : left[0] > right[0] ? 1 : 0;
 };
 
-function pruneTerminalSwapHistory(accountMachine: AccountMachine): void {
+function pruneTerminalSwapHistory(accountMachine: AccountState): void {
   const terminalHistory = Array.from(ensureSwapOrderHistory(accountMachine).entries())
     .filter(([offerId]) => !accountMachine.swapOffers.has(offerId))
     .sort(byOldestLifecycle);
@@ -70,7 +70,7 @@ function pruneTerminalSwapHistory(accountMachine: AccountMachine): void {
 }
 
 export function recordSwapOfferLifecycle(
-  accountMachine: AccountMachine,
+  accountMachine: AccountState,
   offer: SwapOffer,
 ): void {
   if (
@@ -100,7 +100,7 @@ export function recordSwapOfferLifecycle(
 }
 
 export function recordSwapCancelRequested(
-  accountMachine: AccountMachine,
+  accountMachine: AccountState,
   offerId: string,
   currentHeight: number,
 ): void {
@@ -111,7 +111,7 @@ export function recordSwapCancelRequested(
 }
 
 export function recordSwapResolveLifecycle(
-  accountMachine: AccountMachine,
+  accountMachine: AccountState,
   offerId: string,
   currentHeight: number,
   resolve: SwapOrderResolveHistoryEntry,
@@ -157,7 +157,7 @@ export function recordSwapResolveLifecycle(
 }
 
 export function recordSwapClosedLifecycle(
-  accountMachine: AccountMachine,
+  accountMachine: AccountState,
   offerId: string,
 ): void {
   const historyEntry = ensureSwapOrderHistory(accountMachine).get(offerId);

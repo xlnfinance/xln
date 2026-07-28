@@ -4,7 +4,7 @@
  * Reference: Channel.ts DirectPayment transition (2024_src/app/Transition.ts:321-344)
  */
 
-import type { AccountMachine, AccountTx } from '../../../types';
+import type { AccountState, AccountTx } from '../../../types';
 import { deriveDelta } from '../../utils';
 import { deriveTransferOffdeltaChange } from '../../delta-movement';
 import { FINANCIAL } from '../../../constants';
@@ -46,7 +46,7 @@ const validatePaymentEnvelope = (
 };
 
 const resolvePaymentParties = (
-  accountMachine: AccountMachine,
+  accountMachine: AccountState,
   payment: DirectPaymentTx['data'],
   byLeft: boolean,
   events: string[],
@@ -79,7 +79,7 @@ const resolvePaymentParties = (
 };
 
 const appendPaymentEvent = (
-  accountMachine: AccountMachine,
+  accountMachine: AccountState,
   payment: DirectPaymentTx['data'],
   parties: { leftEntity: string; paymentFromEntity: string },
   byLeft: boolean,
@@ -97,7 +97,7 @@ const appendPaymentEvent = (
 };
 
 const queuePaymentForward = (
-  accountMachine: AccountMachine,
+  accountMachine: AccountState,
   payment: DirectPaymentTx['data'],
   paymentFromEntity: string,
   counterparty: string,
@@ -140,7 +140,7 @@ const queuePaymentForward = (
 };
 
 export function handleDirectPayment(
-  accountMachine: AccountMachine,
+  accountMachine: AccountState,
   accountTx: DirectPaymentTx,
   byLeft: boolean
 ): DirectPaymentResult {

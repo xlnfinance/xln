@@ -13,7 +13,7 @@ import type {
   EntityInput,
   EntityState,
   EntityTx,
-  Env,
+  RuntimeState,
 } from '../../../types';
 import { addMessage, cloneEntityState } from '../../../state-helpers';
 import { deriveDelta } from '../../../account/utils';
@@ -27,7 +27,7 @@ const formatEntityId = (id: string): string => id.slice(-4);
 export async function handleHtlcPayment(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'htlcPayment' }>,
-  env: Env,
+  env: RuntimeState,
   candidateEffects: EntityCandidateEffect[] = [],
 ): Promise<{
   newState: EntityState;

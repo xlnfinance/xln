@@ -1,12 +1,12 @@
 import { hasRuntimeHistoryTraceForTesting } from '../../history-retention';
-import type { Env, FrameLogEntry, RuntimeInput } from '../../types';
+import type { RuntimeState, FrameLogEntry, RuntimeInput } from '../../types';
 import { buildCanonicalEnvSnapshot } from '../../wal/snapshot';
 import type { FrameExecutionState } from './execution-state';
 import type { RuntimeProcessProfile } from './process-profile';
 
 export const prepareRuntimeFrameCommit = (
-  env: Env,
-  liveEnv: Env,
+  env: RuntimeState,
+  liveEnv: RuntimeState,
   frameHeightBeforeTick: number,
   appliedInput: RuntimeInput | undefined,
   frame: FrameExecutionState,
