@@ -269,6 +269,25 @@ const closeTestEnv = async (env: Env): Promise<void> => {
 };
 
 describe('runtime frame atomicity', () => {
+  test('a caller waiting for the writer lock cannot resume after Runtime halts', async () => {
+    const env = createEmptyEnv(`runtime sticky halt waiter ${TEST_RUN_ID}`);
+    env.quietRuntimeLogs = true;
+    let releaseWriter!: () => void;
+    env.runtimeState!.processingPromise = new Promise<void>(resolve => {
+      releaseWriter = resolve;
+    });
+    const heightBefore = env.height;
+    const waitingProcess = processRuntime(env);
+
+    env.runtimeState!.lifecyclePhase = 'halted';
+    env.runtimeState!.halted = true;
+    releaseWriter();
+
+    await expect(waitingProcess).rejects.toThrow('RUNTIME_PROCESS_HALTED');
+    expect(env.height).toBe(heightBefore);
+    expect(env.runtimeState?.processingPromise).toBeTruthy();
+  });
+
   test('frame input cloning preserves every shared board config without cross-message aliases', () => {
     const { runtimeInput: source } = makeAliasedBoardRuntimeInput();
 

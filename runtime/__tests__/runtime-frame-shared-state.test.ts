@@ -5,6 +5,11 @@ import {
   type RuntimeFrameSharedStateGroup,
   type RuntimeFrameSharedStateSnapshot,
 } from '../runtime/runtime-frame-shared-state';
+import { createEmptyEnv } from '../runtime';
+import {
+  abortRuntimeFrameTransaction,
+  createRuntimeFrameTransaction,
+} from '../runtime/frame/transaction';
 
 const CURRENT_GROUP: readonly RuntimeFrameSharedStateGroup[] = [{
   name: 'storage-current',
@@ -24,6 +29,25 @@ const snapshot = (
   ]));
 
 describe('runtime frame shared storage ownership', () => {
+  test('abort closes candidate-only DB handles and preserves live handles', async () => {
+    const env = createEmptyEnv('runtime-frame-candidate-db-abort');
+    const closed: string[] = [];
+    const liveHandle = { close: () => closed.push('live') };
+    env.runtimeState!.storageDb = liveHandle as never;
+    env.runtimeState!.storageDbOpenPromise = Promise.resolve(true);
+    const transaction = createRuntimeFrameTransaction(env);
+    const candidateStorage = { close: () => closed.push('candidate-storage') };
+    const candidateFrames = { close: () => closed.push('candidate-frames') };
+    transaction.workingEnv.runtimeState!.storageDb = candidateStorage as never;
+    transaction.workingEnv.runtimeState!.storageDbOpenPromise = Promise.resolve(true);
+    transaction.workingEnv.runtimeState!.frameDb = candidateFrames as never;
+    transaction.workingEnv.runtimeState!.frameDbOpenPromise = Promise.resolve(true);
+
+    expect(await abortRuntimeFrameTransaction(transaction)).toEqual([]);
+    expect(closed).toEqual(['candidate-storage', 'candidate-frames']);
+    expect(env.runtimeState?.storageDb).toBe(liveHandle);
+  });
+
   test('publishes a working handle and its matching open promise atomically', () => {
     const handleA = { status: 'open', id: 'A' };
     const handleB = { status: 'open', id: 'B' };
@@ -101,4 +125,3 @@ describe('runtime frame shared storage ownership', () => {
     })).toThrow('RUNTIME_FRAME_STORAGE_HANDLE_ALIAS:storage-current:storage-previous');
   });
 });
-

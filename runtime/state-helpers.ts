@@ -462,7 +462,7 @@ const structuredCloneWorks = (value: unknown): boolean => {
 const findStructuredCloneFailurePath = (
   value: unknown,
   path = '$',
-  seen = new WeakSet<object>(),
+  seen = new Set<object>(),
 ): string => {
   if (structuredCloneWorks(value)) return path;
   if ((typeof value !== 'object' && typeof value !== 'function') || value === null) return path;

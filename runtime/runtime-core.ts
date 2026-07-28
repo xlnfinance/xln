@@ -25,9 +25,9 @@ import {
   summarizeRuntimeAccountCausality,
   type EntityInputCausalTrace,
 } from './infra/account-causal-trace';
-import { cloneIsolatedRoutedEntityInputs, cloneIsolatedRuntimeInput } from './protocol/runtime-input-clone';
+import { cloneIsolatedRuntimeInput } from './protocol/runtime-input-clone';
 import { requireBoundaryInteger } from './protocol/boundary-validation';
-import { buildCanonicalEnvSnapshot, buildCanonicalJReplicaSnapshot } from './wal/snapshot';
+import { buildCanonicalEnvSnapshot } from './wal/snapshot';
 import { hasRuntimeHistoryTraceForTesting, recordRuntimeHistoryTraceForTesting } from './history-retention';
 import {
   mergeEntityInputs,
@@ -36,19 +36,12 @@ import {
 } from './entity/consensus/index';
 import { hasVerifiedEntityCommitPrecertificate } from './entity/consensus/commit-precheck';
 import {
-  copyLocalEntityLeaderTimeoutVoteAuthorization,
   isLocalEntityLeaderTimeoutVote,
 } from './entity/consensus/leader';
-import type { JAdapter } from './jadapter';
 import { setBrowserVMJurisdiction } from './jadapter';
 import { createGossipLayer } from './networking/gossip';
 import { attachEventEmitters, clearPendingAuditEvents, flushPendingAuditEvents } from './runtime/env-events';
 import { recordRuntimeSecurityIncident } from './runtime/security-incidents';
-import {
-  assertRuntimeFrameStorageState,
-  reconcileRuntimeFrameSharedState,
-  type RuntimeFrameSharedStateSnapshot,
-} from './runtime/runtime-frame-shared-state';
 import { accountInputAck, accountInputProposal } from './account/consensus/flush';
 import { getEffectiveEntityInputTxs } from './entity/consensus/output-envelope';
 import {
@@ -68,7 +61,6 @@ import {
 } from './runtime/output-routing';
 import { isDeliveryDelivered } from './protocol/payments/delivery-result';
 import { prepareHtlcPaymentEntityInputs } from './protocol/htlc/payment-admission';
-import { copyDeterministicHtlcTestSecretCapability } from './protocol/htlc/test-secret-capability';
 import {
   announceCertifiedLocalProfiles,
   collectDueLocalProfileCertificationInputs,
@@ -80,8 +72,6 @@ import {
 } from './runtime/entity-routing';
 import {
   assertScheduledWakeTxAuthorized,
-  copyLocalScheduledWakeAuthorization,
-  rebuildScheduledWakeIndex,
   refreshScheduledWakeIndex,
 } from './runtime/scheduled-wake';
 import { inferRuntimeLifecyclePhase, transitionRuntimeLifecycle } from './runtime/lifecycle';
@@ -104,25 +94,19 @@ import { reliableIdentityExactKey } from './runtime/reliable-frontier';
 import { mergeDurableReceiptOnlyInputs } from './runtime/reliable-durable-inputs';
 import { submitRuntimeJOutbox } from './runtime/j-submit';
 import {
-  copyLocalJSubmitRuntimeTxAuthorization,
   registerPendingCommittedJOutbox,
   splitJOutboxForDurableSubmit,
 } from './runtime/j-submit-state';
-import { copyLocalEntityProviderActionRuntimeTxAuthorization } from './runtime/entity-provider-action-submit-auth';
 import { applyRuntimeTx } from './runtime/tx-handlers';
-import { copyLocalRuntimeAdapterCommandAuthorization } from './radapter/command-frontier-auth';
 import { applyMergedEntityInputs, RuntimeEntityInputApplyError } from './runtime/entity-inputs';
 import { applyEntityHeightDurabilityBarrier } from './runtime/entity-height-barrier';
-import { cloneTrustedEntityReplica } from './state-helpers';
 import { safeStringify } from './protocol/serialization';
 import { validateJInputs } from './wal/runtime-machine-schema/j';
 import {
   beginRuntimeCheckpointLineageRefresh,
   refreshRuntimeCheckpointLineageForEntity,
 } from './storage/entity-lineage';
-import { copyLocalJAuthorityRuntimeTxAuthorization } from './jurisdiction/registration-evidence';
 import {
-  copyLocalJImportResultRuntimeTxAuthorization,
   materializePendingJurisdictionImportResults,
 } from './runtime/jurisdiction-import';
 import { saveRuntimeFrameToStorage } from './storage';
@@ -134,7 +118,6 @@ import type {
   EnvSnapshot,
   FrameLogEntry,
   JInput,
-  JReplica,
   ReliableDeliveryReceipt,
   RoutedEntityInput,
   RuntimeInput,
@@ -143,7 +126,10 @@ import type {
 import { DEBUG, log } from './utils';
 import { createStructuredLogger, logError, shortId } from './infra/logger';
 import { createPersistenceQueries } from './persistence/queries';
-import { createRuntimeStorageApi } from './persistence/runtime-storage';
+import {
+  createRuntimeStorageApi,
+  notifyRuntimeSyncAfterCommit,
+} from './persistence/runtime-storage';
 import { rehydrateRestoredRuntimeInfra, type TrustedJurisdictionRpcBinding } from './runtime/infra';
 import { createRuntimeLoopApi } from './engine/loop';
 import { createRuntimeRecoveryApi } from './recovery/restore';
@@ -156,6 +142,16 @@ import {
   resolveEntityName,
   searchEntityNames,
 } from './runtime/command-api';
+import {
+  abortRuntimeFrameTransaction,
+  cloneRuntimeFrameMempool,
+  cloneRuntimeFrameWorkingEnv,
+  createRuntimeFrameTransaction,
+  prependOlderRuntimeInput,
+  publishRuntimeFrameTransaction,
+  runtimeInputHasQueuedWork,
+  type RuntimeFrameTransaction,
+} from './runtime/frame/transaction';
 
 const runtimeLog = createStructuredLogger('runtime');
 
@@ -1163,6 +1159,7 @@ const runtimeStateApi = createRuntimeStateApi({
 
 export const prewarmRuntimeSignerCache = runtimeStateApi.prewarmRuntimeSignerCache;
 export const createEmptyEnv = runtimeStateApi.createEmptyEnv;
+export { cloneRuntimeFrameMempool };
 
 const runtimeRecoveryApi = createRuntimeRecoveryApi({
   ensureRuntimeConfig,
@@ -1191,343 +1188,6 @@ const reconcileCommittedRuntimeInfraEffects = runtimeRecoveryApi.reconcileCommit
 const hasPendingLocalReliableOutput = runtimeRecoveryApi.hasPendingLocalReliableOutput;
 const applyDeterministicRuntimeOutputPlan = runtimeRecoveryApi.applyDeterministicRuntimeOutputPlan;
 const applyCommittedLocalReliableReceipts = runtimeRecoveryApi.applyCommittedLocalReliableReceipts;
-const RUNTIME_FRAME_SHARED_STATE_KEYS = new Set<string>([
-  'loopActive',
-  'loopPromise',
-  'stopLoop',
-  'wakeLoop',
-  'processingPromise',
-  'p2p',
-  'envChangeCallbacks',
-  'runtimeFrameCommitCallbacks',
-  'storageDb',
-  'storageDbOpenPromise',
-  'storagePreviousDb',
-  'storagePreviousDbOpenPromise',
-  'storageEpochRotatePromise',
-  'frameDb',
-  'frameDbOpenPromise',
-  'infraDb',
-  'infraDbOpenPromise',
-  'infraDbPendingWrites',
-  'runtimeSyncChannel',
-  'directEntityInputsDispatch',
-  'directReliableReceiptDispatch',
-  'canUseConnectedRelayFallback',
-  'recoveryBackupBarrier',
-  'watcherDedupCounter',
-]);
-
-// Process-local state belongs to the live Runtime instance, not to the
-// deterministic frame candidate. Publishing a frame must retain these exact
-// live handles and operator flags.
-const RUNTIME_FRAME_LIVE_STATE_KEYS = new Set<string>([
-  'lifecyclePhase',
-  'halted',
-  'fatalDebugPayload',
-  'wakeRequested',
-  'persistencePaused',
-  'persistenceQuiescing',
-  'pendingP2PConfig',
-  'lastP2PConfig',
-  'logState',
-  'cleanLogs',
-  'pendingAuditEvents',
-  'recentJEvents',
-  'recentReserveUpdatedEvents',
-  'verifiedProfileRoutes',
-  'externalWalletWatchOwners',
-  'infraDbClosing',
-  'inFlightEntityInputs',
-]);
-
-type RuntimeFrameTransaction = {
-  liveEnv: Env;
-  workingEnv: Env;
-  sharedStateBaseline: Map<string, RuntimeFrameSharedStateSnapshot>;
-  liveFrameLogBaseLength: number;
-  workingCleanLogBaseLength: number;
-  liveAdapters: Set<JAdapter>;
-  published: boolean;
-};
-
-const cloneRuntimeFrameState = (env: Env): NonNullable<Env['runtimeState']> => {
-  const cloned: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(env.runtimeState ?? {})) {
-    if (key === 'scheduledWakeIndex') continue;
-    if (RUNTIME_FRAME_SHARED_STATE_KEYS.has(key)) {
-      cloned[key] = value;
-      continue;
-    }
-    try {
-      cloned[key] = structuredClone(value);
-    } catch (error) {
-      throw new Error(`RUNTIME_FRAME_STATE_CLONE_FAILED:${key}`, { cause: error });
-    }
-  }
-  return cloned as NonNullable<Env['runtimeState']>;
-};
-
-export const cloneRuntimeFrameMempool = (input: RuntimeInput): RuntimeInput => {
-  const cloned = cloneIsolatedRuntimeInput(input);
-  input.runtimeTxs.forEach((source, index) => {
-    const target = cloned.runtimeTxs[index];
-    if (!target) throw new Error(`RUNTIME_FRAME_RUNTIME_TX_CLONE_MISSING:${index}`);
-    copyLocalJAuthorityRuntimeTxAuthorization(source, target);
-    copyLocalJSubmitRuntimeTxAuthorization(source, target);
-    copyLocalJImportResultRuntimeTxAuthorization(source, target);
-    copyLocalEntityProviderActionRuntimeTxAuthorization(source, target);
-    copyLocalRuntimeAdapterCommandAuthorization(source, target);
-  });
-  input.entityInputs.forEach((source, inputIndex) => {
-    const target = cloned.entityInputs[inputIndex];
-    if (!target) throw new Error(`RUNTIME_FRAME_ENTITY_INPUT_CLONE_MISSING:${inputIndex}`);
-    if ((target.entityTxs?.length ?? 0) !== (source.entityTxs?.length ?? 0)) {
-      throw new Error(`RUNTIME_FRAME_ENTITY_TX_CLONE_SHAPE_MISMATCH:${inputIndex}`);
-    }
-    source.entityTxs?.forEach((sourceTx, txIndex) => {
-      const targetTx = target.entityTxs?.[txIndex];
-      if (!targetTx) throw new Error(`RUNTIME_FRAME_ENTITY_TX_CLONE_MISSING:${inputIndex}:${txIndex}`);
-      copyLocalScheduledWakeAuthorization(sourceTx, targetTx);
-      copyDeterministicHtlcTestSecretCapability(sourceTx, targetTx);
-    });
-    if (source.leaderTimeoutVote) {
-      if (!target.leaderTimeoutVote) {
-        throw new Error(`RUNTIME_FRAME_LEADER_VOTE_CLONE_MISSING:${inputIndex}`);
-      }
-      copyLocalEntityLeaderTimeoutVoteAuthorization(source.leaderTimeoutVote, target.leaderTimeoutVote);
-    }
-  });
-  return cloned;
-};
-
-const createRuntimeFrameGossipSnapshot = (env: Env): Env['gossip'] => {
-  const gossip = createGossipLayer();
-  // These profiles already passed parse/signature verification at external
-  // ingress. Re-announcing every profile into the private frame transaction
-  // verifies every signature again and made a user Runtime spend seconds in
-  // secp256k1 recovery before it could receive the hub's Account ACK. Copy the
-  // verified projection by value; untrusted profiles must still enter through
-  // gossip.announce/setProfiles at the network/storage boundaries.
-  for (const profile of env.gossip?.getProfiles?.() ?? []) {
-    const cloned = structuredClone(profile);
-    gossip.profiles.set(cloned.entityId, cloned);
-  }
-  return gossip;
-};
-
-const cloneRuntimeFrameWorkingEnv = (sourceEnv: Env): Env => {
-  const workingMempool = cloneRuntimeFrameMempool(ensureRuntimeMempool(sourceEnv));
-  const workingState = cloneRuntimeFrameState(sourceEnv);
-  const workingEnv: Env = {
-    ...sourceEnv,
-    eReplicas: new Map(
-      Array.from(sourceEnv.eReplicas.entries(), ([key, replica]) => [
-        key,
-        // Runtime-frame isolation is not a persistence boundary. Preserve the
-        // hidden incremental Account commitment caches while cloning the live
-        // replica; snapshot projection intentionally drops them and forced every
-        // large hub Account back through a full cold trie rebuild per R-frame.
-        cloneTrustedEntityReplica(replica),
-      ]),
-    ),
-    jReplicas: new Map<string, JReplica>(
-      Array.from(sourceEnv.jReplicas.entries(), ([key, replica]) => [
-        key,
-        {
-          ...buildCanonicalJReplicaSnapshot(replica),
-          ...(replica.jadapter ? { jadapter: replica.jadapter } : {}),
-        },
-      ]),
-    ),
-    runtimeState: workingState,
-    runtimeMempool: workingMempool,
-    runtimeInput: workingMempool,
-    ...(sourceEnv.runtimeConfig ? { runtimeConfig: structuredClone(sourceEnv.runtimeConfig) } : {}),
-    ...(sourceEnv.browserVMState ? { browserVMState: structuredClone(sourceEnv.browserVMState) } : {}),
-    ...(sourceEnv.overlay ? { overlay: structuredClone(sourceEnv.overlay) } : {}),
-    ...(sourceEnv.pendingOutputs ? { pendingOutputs: cloneIsolatedRoutedEntityInputs(sourceEnv.pendingOutputs) } : {}),
-    ...(sourceEnv.networkInbox ? { networkInbox: cloneIsolatedRoutedEntityInputs(sourceEnv.networkInbox) } : {}),
-    ...(sourceEnv.pendingNetworkOutputs
-      ? { pendingNetworkOutputs: cloneIsolatedRoutedEntityInputs(sourceEnv.pendingNetworkOutputs) }
-      : {}),
-    frameLogs: structuredClone(sourceEnv.frameLogs),
-    history: [...sourceEnv.history],
-    gossip: createRuntimeFrameGossipSnapshot(sourceEnv),
-    ...(sourceEnv.extra ? { extra: structuredClone(sourceEnv.extra) } : {}),
-  };
-  attachEventEmitters(workingEnv);
-  if (sourceEnv.runtimeState?.scheduledWakeIndex !== undefined) rebuildScheduledWakeIndex(workingEnv);
-  return workingEnv;
-};
-
-const createRuntimeFrameTransaction = (liveEnv: Env): RuntimeFrameTransaction => {
-  const workingEnv = cloneRuntimeFrameWorkingEnv(liveEnv);
-  const workingMempool = ensureRuntimeMempool(workingEnv);
-  const workingState = ensureRuntimeState(workingEnv);
-  const liveState = ensureRuntimeState(liveEnv);
-  const sharedStateBaseline = new Map(
-    [...RUNTIME_FRAME_SHARED_STATE_KEYS].map(key => [
-      key,
-      {
-        present: Object.prototype.hasOwnProperty.call(liveState, key),
-        value: (liveState as Record<string, unknown>)[key],
-      },
-    ]),
-  );
-  const activeMempool: RuntimeInput = { runtimeTxs: [], entityInputs: [] };
-  // Operational producers read the live Env while this private working Env is
-  // executing. Preserve the detached Entity count until publish or rollback;
-  // processingPromise alone also covers harmless runtime-only bookkeeping.
-  ensureRuntimeState(liveEnv).inFlightEntityInputs = workingMempool.entityInputs.length;
-  liveEnv.runtimeMempool = activeMempool;
-  liveEnv.runtimeInput = activeMempool;
-  return {
-    liveEnv,
-    workingEnv,
-    sharedStateBaseline,
-    liveFrameLogBaseLength: liveEnv.frameLogs.length,
-    workingCleanLogBaseLength: workingState.cleanLogs?.length ?? 0,
-    liveAdapters: new Set(
-      Array.from(liveEnv.jReplicas.values()).flatMap(replica => (replica.jadapter ? [replica.jadapter] : [])),
-    ),
-    published: false,
-  };
-};
-
-const closeUncommittedJAdapters = async (transaction: RuntimeFrameTransaction): Promise<Error[]> => {
-  const uncommitted = new Set(
-    Array.from(transaction.workingEnv.jReplicas.values()).flatMap(replica =>
-      replica.jadapter && !transaction.liveAdapters.has(replica.jadapter) ? [replica.jadapter] : [],
-    ),
-  );
-  const settled = await Promise.allSettled(Array.from(uncommitted, adapter => adapter.close()));
-  return settled
-    .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
-    .map(result => (result.reason instanceof Error ? result.reason : new Error(String(result.reason))));
-};
-
-const runtimeInputHasQueuedWork = (input: RuntimeInput): boolean =>
-  input.runtimeTxs.length > 0 ||
-  input.entityInputs.length > 0 ||
-  (input.jInputs?.length ?? 0) > 0 ||
-  (input.reliableReceipts?.length ?? 0) > 0;
-
-/** Put older detached input before work that arrived in the active mempool later. */
-const prependOlderRuntimeInput = (older: RuntimeInput, newer: RuntimeInput): RuntimeInput => {
-  const merged: RuntimeInput = {
-    runtimeTxs: [...older.runtimeTxs, ...newer.runtimeTxs],
-    entityInputs: [...older.entityInputs, ...newer.entityInputs],
-    ...((older.jInputs?.length ?? 0) + (newer.jInputs?.length ?? 0) > 0
-      ? { jInputs: [...(older.jInputs ?? []), ...(newer.jInputs ?? [])] }
-      : {}),
-    ...((older.reliableReceipts?.length ?? 0) + (newer.reliableReceipts?.length ?? 0) > 0
-      ? { reliableReceipts: [...(older.reliableReceipts ?? []), ...(newer.reliableReceipts ?? [])] }
-      : {}),
-  };
-  const queuedAt = [older.queuedAt, newer.queuedAt]
-    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
-    .reduce<number | undefined>((latest, value) => (latest === undefined ? value : Math.max(latest, value)), undefined);
-  if (runtimeInputHasQueuedWork(merged) && queuedAt !== undefined) merged.queuedAt = queuedAt;
-  return merged;
-};
-
-const mergeRuntimeEntityHints = (
-  working: NonNullable<Env['runtimeState']>['entityRuntimeHints'],
-  live: NonNullable<Env['runtimeState']>['entityRuntimeHints'],
-): NonNullable<Env['runtimeState']>['entityRuntimeHints'] => {
-  const merged = new Map(working ?? []);
-  for (const [entityId, candidate] of live ?? []) {
-    const current = merged.get(entityId);
-    if (!current || candidate.seenAt > current.seenAt) merged.set(entityId, candidate);
-  }
-  return merged;
-};
-
-const publishRuntimeFrameTransaction = (transaction: RuntimeFrameTransaction): Env => {
-  if (transaction.published) return transaction.liveEnv;
-  const { liveEnv, workingEnv } = transaction;
-  const liveState = ensureRuntimeState(liveEnv);
-  const workingState = ensureRuntimeState(workingEnv);
-  const activeMempool = ensureRuntimeMempool(liveEnv);
-  const workingMempool = ensureRuntimeMempool(workingEnv);
-  const liveRecord = liveState as Record<string, unknown>;
-  const workingRecord = workingState as Record<string, unknown>;
-  const selectedSharedState = reconcileRuntimeFrameSharedState(
-    transaction.sharedStateBaseline,
-    liveRecord,
-    workingRecord,
-    RUNTIME_FRAME_SHARED_STATE_KEYS,
-  );
-  const mergedHints = mergeRuntimeEntityHints(workingState.entityRuntimeHints, liveState.entityRuntimeHints);
-  const nextState: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(workingState)) {
-    if (!RUNTIME_FRAME_SHARED_STATE_KEYS.has(key) && !RUNTIME_FRAME_LIVE_STATE_KEYS.has(key)) {
-      nextState[key] = value;
-    }
-  }
-  for (const key of RUNTIME_FRAME_LIVE_STATE_KEYS) {
-    if (Object.prototype.hasOwnProperty.call(liveRecord, key)) nextState[key] = liveRecord[key];
-  }
-  for (const [key, snapshot] of selectedSharedState) {
-    if (snapshot.present) nextState[key] = snapshot.value;
-  }
-  if (mergedHints) nextState['entityRuntimeHints'] = mergedHints;
-  assertRuntimeFrameStorageState(nextState);
-  for (const key of Object.keys(liveState)) delete liveRecord[key];
-  Object.assign(liveRecord, nextState);
-
-  const workingCleanLogTail = (workingState.cleanLogs ?? []).slice(transaction.workingCleanLogBaseLength);
-  if (workingCleanLogTail.length > 0) {
-    liveState.cleanLogs = [...(liveState.cleanLogs ?? []), ...workingCleanLogTail].slice(-2_000);
-  }
-  liveState.logState ??= { nextId: 0, mirrorToConsole: true };
-  liveState.logState.nextId = Math.max(liveState.logState.nextId, workingState.logState?.nextId ?? 0);
-
-  liveEnv.height = workingEnv.height;
-  liveEnv.timestamp = workingEnv.timestamp;
-  liveEnv.eReplicas = workingEnv.eReplicas;
-  liveEnv.jReplicas = workingEnv.jReplicas;
-  if (workingEnv.activeJurisdiction === undefined) delete liveEnv.activeJurisdiction;
-  else liveEnv.activeJurisdiction = workingEnv.activeJurisdiction;
-  if (workingEnv.browserVM === undefined) delete liveEnv.browserVM;
-  else liveEnv.browserVM = workingEnv.browserVM;
-  if (workingEnv.browserVMState === undefined) delete liveEnv.browserVMState;
-  else liveEnv.browserVMState = workingEnv.browserVMState;
-  if (workingEnv.jAdapter === undefined) delete liveEnv.jAdapter;
-  else liveEnv.jAdapter = workingEnv.jAdapter;
-  if (workingEnv.overlay === undefined) delete liveEnv.overlay;
-  else liveEnv.overlay = workingEnv.overlay;
-  if (workingEnv.pendingOutputs === undefined) delete liveEnv.pendingOutputs;
-  else liveEnv.pendingOutputs = workingEnv.pendingOutputs;
-  if (workingEnv.networkInbox === undefined) delete liveEnv.networkInbox;
-  else liveEnv.networkInbox = workingEnv.networkInbox;
-  if (workingEnv.pendingNetworkOutputs === undefined) delete liveEnv.pendingNetworkOutputs;
-  else liveEnv.pendingNetworkOutputs = workingEnv.pendingNetworkOutputs;
-  liveEnv.history = [];
-  if (workingEnv.extra === undefined) delete liveEnv.extra;
-  else liveEnv.extra = workingEnv.extra;
-  liveEnv.frameLogs = liveEnv.frameLogs.slice(transaction.liveFrameLogBaseLength);
-  const mergedMempool = prependOlderRuntimeInput(workingMempool, activeMempool);
-  liveEnv.runtimeMempool = mergedMempool;
-  liveEnv.runtimeInput = mergedMempool;
-  liveState.wakeRequested =
-    liveState.wakeRequested === true ||
-    runtimeInputHasQueuedWork(mergedMempool) ||
-    (liveState.pendingProfileCertificationEntityIds?.size ?? 0) > 0;
-  rebuildScheduledWakeIndex(liveEnv);
-  for (const jReplica of liveEnv.jReplicas.values()) jReplica.jadapter?.setBlockTimestamp(liveEnv.timestamp);
-  transaction.published = true;
-  return liveEnv;
-};
-
-const abortRuntimeFrameTransaction = async (transaction: RuntimeFrameTransaction): Promise<Error[]> => {
-  const cleanupErrors = await closeUncommittedJAdapters(transaction);
-  for (const jReplica of transaction.liveEnv.jReplicas.values()) {
-    jReplica.jadapter?.setBlockTimestamp(transaction.liveEnv.timestamp);
-  }
-  return cleanupErrors;
-};
 
 // === CONSENSUS PROCESSING ===
 // ONE TICK = ONE ITERATION. No cascade. E→E communication always requires new tick.
@@ -1540,6 +1200,12 @@ export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDe
   }
   while (processState.processingPromise) {
     await processState.processingPromise;
+  }
+  // A previous writer may discover an ambiguous durable outcome and halt while
+  // this caller waits. Halt is terminal: a waiter must never become the next
+  // writer after that discovery.
+  if (inferRuntimeLifecyclePhase(processState) === 'halted') {
+    throw new Error('RUNTIME_PROCESS_HALTED');
   }
   let releaseProcessLock: () => void = () => {};
   processState.processingPromise = new Promise<void>(resolve => {
@@ -2109,6 +1775,13 @@ export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDe
     }
 
     if (frameAdvanced && appliedRuntimeInputForPersistence) {
+      const syncNotificationError = notifyRuntimeSyncAfterCommit(env);
+      if (syncNotificationError) {
+        runtimeLog.error('runtime_sync.notification_failed', {
+          error: syncNotificationError.message,
+          height: env.height,
+        });
+      }
       notifyRuntimeFrameCommitted(env, appliedRuntimeInputForPersistence);
     }
 

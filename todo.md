@@ -6,7 +6,93 @@ fastest proof/fix to the hardest external gate. Completed work is deleted;
 long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 `docs/mainnet-engineering-principles.md`.
 
-## 1. Contract boundedness — P0/P1, owner-approved
+## 1. Core simplification and human auditability — P0/P1, owner-approved
+
+- [ ] Pin the financial and durability baselines before structural changes.
+  Add byte-identical roots for payment/HTLC/settlement/rebalance, durable
+  reliable-frontier assertions on both peers, rollback ordering, and measured
+  clone/apply/WAL/dispatch p50/p95. Record the public `runtime.ts` export
+  surface and always rebuild the browser bundle before browser evidence.
+- [ ] Prove and fix the likely unilateral rebalance consensus wedge first.
+  Reproduce bilateral request → reverse payment/self-pay → hub crontab and
+  assert equal Account roots and pending state on both peers. Crontab must
+  never locally delete canonical `requestedRebalance` or fee state; replace
+  confirmed paths with explicit bilateral Account transitions, invalidate
+  commitment caches before hashing, and clear `submittedAtByToken` on the
+  canonical full-refund transition. Keep this protocol fix separate from
+  Runtime ingress refactoring. Give every successful R→C request one durable
+  `requestId → batchHash/opIndex/outcome` owner: withholding the bilateral
+  claim must never let the hub spend reserve twice, and abort/requeue must
+  rebroadcast or rebuild exactly once rather than doubling the draft amount.
+- [ ] Canonicalize financial construction and naming. Make hold fields
+  mandatory, build every empty Delta through one Account-owned constructor,
+  and prove identical keys/roots across add-delta, J-settlement and projection.
+  Rename the soft consensus predicate and strict ingress assertion so two
+  operations are not both called `validateEntityInput`; centralize
+  settlement-Hanko projection and Runtime Env symbols.
+- [ ] Restore a structurally enforceable money boundary. Move finalized
+  Account J-event settlement/dispute mutations out of `entity/tx/` and into
+  Account-owned handlers; Entity may authenticate and route, but only Account
+  code may change delta, collateral, holds or credit. Preserve proof gating,
+  cache invalidation and state roots with settlement/dispute tests.
+- [ ] Turn Runtime execution into one visible pipeline:
+  `take → validate/plan → isolated RJEA apply → WAL → install → dispatch`.
+  Represent all frame disposition, rollback and reliable-delivery flags in one
+  explicit `FrameExecutionState` instead of cross-stage locals or closures.
+  Extract transaction, commit, rollback and dispatch modules; keep
+  `runtime/core.ts` a short composition root with no alternate commit path.
+  Precompute every throwing assertion before install; any doubt after WAL
+  halts and reloads the durable frame.
+- [ ] Split remaining god-functions by protocol phase and failure boundary:
+  `applyEntityInput`, `applyAccountInput`, Runtime scheduler/transport/storage,
+  and RPC submit/watch/receipt. Target functions below 50 lines and files below
+  3000 lines. After the pipeline, collapse DI factories that add navigation
+  without providing a real swappable boundary. Add an AST gate for function
+  budgets so future 600–2800-line coordinators cannot pass a file-only limit.
+- [ ] Remove only call-site-proven dead code in small module-owned batches.
+  Reverify dynamic imports, scenario/CLI entrypoints and browser API first;
+  `runNumberedRegistrationIntent` is currently live scenario infrastructure,
+  not dead code. Delete proven topology, ID/hash-ladder, validation/logger,
+  wallet/helper, retention/hook, lookup/barrel and rename-only orphans.
+  Recheck the audited Hanko output-binding block, `getAccountTimeoutStats`,
+  `writeFrameDbPutsWithRetention`, dispute lookup/filter chain,
+  `j-events-account-lookup.ts`, `getFirstSignerForEntity` and unused Level
+  helpers first. Public API removals require an explicit compatibility decision.
+- [ ] Remove duplicate policy and display code: use canonical Account
+  `Delta`/`DerivedDelta` and `deriveDelta` in the dev visualizer and Graph3D;
+  BigInt remains exact until the geometry/formatting boundary. Fix the stale
+  source comment and add exact revoked-credit-debt screenshots. Replace the
+  handwritten `XLNModule` and duplicate cross-J DTOs with exact canonical
+  runtime-module types and an exact-key compile-time export test. Centralize
+  bootstrap credit policy; share JAdapter watcher orchestration; use one
+  post-restore digest assertion for boot/checkpoint/bundle/import recovery.
+- [ ] Move numbered-registration chain I/O out of `runtime/entity/`.
+  `externalTokenToReserve` is pure J-batch data and is not the nonce reader.
+  The live path is `runNumberedRegistrationIntent → submit...`, used by the
+  scenario executor. Keep reducer state deterministic, serialize submission
+  through an explicit Runtime/J-adapter outbox using Entity-committed intent
+  data, and add a source gate forbidding provider, wall-clock and randomness
+  access under deterministic Entity/Account/protocol code.
+- [ ] Parse every chain-supplied Account/J nonce through one safe boundary
+  before any mutation. Remove direct `Number(uint256)` conversions in dispute
+  start/finality and choose one canonical nonce representation that cannot
+  round `9007199254740993` to `9007199254740992`; prove malformed/oversized
+  events leave Account state unchanged.
+- [ ] Repair the three stale tests that import removed `process`; bind them to
+  canonical `processRuntime` after the public API surface is characterized, and
+  require the test collector to fail when a test module cannot load.
+- [ ] Make the directory hierarchy match the three nested state machines only
+  after semantic diffs are green. Keep the stable root `runtime/runtime.ts`
+  browser facade; place Runtime frame transition/mempool/transaction/lifecycle
+  under `runtime/runtime/frame/` and reliable delivery/output/J submission
+  under `runtime/runtime/delivery/`. Preserve the exact export surface.
+- [ ] Profile a growing hub only after the structural work. Do not introduce
+  Runtime→Entity→Account COW, optimistic batching or remove receiver
+  validation without byte-identical differential roots, equivalent failures
+  and measured improvement. Include stale-bundle detection in performance
+  evidence; performance changes stay separate from money/refactor changes.
+
+## 2. Contract boundedness — P0/P1, owner-approved
 - [ ] Remove the remaining proven pre-mainnet compatibility ABI/state:
   migrate V1 settlement `diffsToOps` and `position.xlnomy`, then delete unused
   contract `resolveEntityId` and ineffective `hashToBlock/cleanSecret`. Use one
@@ -14,8 +100,12 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   currently live infrastructure, not dead code; do not delete it as an audit
   shortcut.
 
-## 2. Transport and secret persistence — P0/P1, owner-approved
+## 3. Transport and secret persistence — P0/P1, owner-approved
 
+- [ ] Make off-chain faucet admission durable and idempotent. Require a client
+  idempotency key bound to the exact payload, persist the admission result
+  before returning `200 queued`, and prove lost-response retry plus process
+  crash/restart cannot enqueue a second direct payment.
 - [ ] Derive AEAD keys from X25519 with domain-separated HKDF-SHA256 and bind
   protocol/from/to/type/source-frame/message-id as AAD. Replace Base64 with one
   binary wire atomically, reject low-order/shared-zero keys, keep strict
@@ -38,7 +128,7 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   namespace and reference it from Account materialization. Prove backup,
   restore and dispute recovery before removing plaintext duplication.
 
-## 3. Crash, corruption and load evidence — P1, open
+## 4. Crash, corruption and load evidence — P1, open
 - [ ] Add one real Anvil contract-event dispute E2E after payment, HTLC,
   same-J/cross-J swap and pull state. Exercise malformed/oversized optional
   transformer arguments, compare final Depository reserves/debts to the
@@ -60,7 +150,7 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   descriptors; then introduce Runtime→Entity→Account COW only behind
   byte-identical differential roots and measured clone counters.
 
-## 4. Public Ethereum proof — P0 release blocker, open
+## 5. Public Ethereum proof — P0 release blocker, open
 
 - [ ] Prove Runtime ↔ Sepolia debt parity, restart/replay and chain-domain
   deadlines. Reserve parity above does not cover any of these three.
@@ -69,7 +159,7 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 - [ ] Freeze one unchanged candidate SHA and re-run the above as immutable
   evidence, rather than across the several runs that produced them today.
 
-## 5. Immutable mainnet release pipeline — P0 release blocker, open
+## 6. Immutable mainnet release pipeline — P0 release blocker, open
 
 - [ ] Extend the candidate binding already enforced for isolated E2E run/shard
   manifests to unit, contract, scenario, recovery, public-chain and final

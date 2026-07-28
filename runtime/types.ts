@@ -1308,6 +1308,11 @@ export interface Env {
       postMessage(message: unknown): void;
       close(): void;
     } | null;
+    /** Last post-WAL browser notification failure; never changes commit status. */
+    runtimeSyncNotificationFailure?: {
+      height: number;
+      message: string;
+    };
     logState?: {
       nextId: number;
       mirrorToConsole?: boolean;

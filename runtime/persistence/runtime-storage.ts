@@ -98,6 +98,50 @@ const envRecord = (env: Env): Record<PropertyKey, unknown> => env as unknown as 
 const runtimeLog = createStructuredLogger('runtime');
 const formatPerfMs = (value: number): string => value.toFixed(2);
 
+type RuntimeSyncChannel = NonNullable<NonNullable<Env['runtimeState']>['runtimeSyncChannel']>;
+
+export type RuntimeSyncNotificationOptions = {
+  enabled?: boolean;
+  createChannel?: (name: string) => RuntimeSyncChannel;
+};
+
+/**
+ * Broadcast is an operational effect after the WAL commit, never part of it.
+ * A broken browser channel is visible in Runtime state but cannot turn a
+ * durable financial frame into an apparent rollback.
+ */
+export const notifyRuntimeSyncAfterCommit = (
+  env: Env,
+  options: RuntimeSyncNotificationOptions = {},
+): Error | null => {
+  const enabled = options.enabled ?? runtimeIsBrowser;
+  if (!enabled || !env.runtimeId) return null;
+  const state = ensureRuntimeState(env);
+  try {
+    const createChannel =
+      options.createChannel ??
+      ((name: string): RuntimeSyncChannel => new BroadcastChannel(name));
+    state.runtimeSyncChannel ??= createChannel('xln-runtime-sync');
+    state.runtimeSyncChannel.postMessage({ runtimeId: env.runtimeId, height: env.height });
+    delete state.runtimeSyncNotificationFailure;
+    return null;
+  } catch (cause) {
+    const notificationError = new Error(`RUNTIME_SYNC_NOTIFICATION_FAILED:height=${env.height}`, { cause });
+    let reportedError: Error = notificationError;
+    try {
+      state.runtimeSyncChannel?.close();
+    } catch (closeCause) {
+      reportedError = new AggregateError(
+        [notificationError, closeCause],
+        `RUNTIME_SYNC_NOTIFICATION_AND_CLOSE_FAILED:height=${env.height}`,
+      );
+    }
+    state.runtimeSyncChannel = null;
+    state.runtimeSyncNotificationFailure = { height: env.height, message: reportedError.message };
+    return reportedError;
+  }
+};
+
 export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
   const {
     getStorageDb,
@@ -349,19 +393,6 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
     }
     if (saveResult.materialized) {
       dropOverlay(env, saveResult.materializedOverlayRecords);
-    }
-    if (
-      runtimeIsBrowser &&
-      typeof BroadcastChannel !== 'undefined' &&
-      typeof env.runtimeId === 'string' &&
-      env.runtimeId.length > 0
-    ) {
-      const state = ensureRuntimeState(env);
-      state.runtimeSyncChannel ??= new BroadcastChannel('xln-runtime-sync');
-      state.runtimeSyncChannel.postMessage({
-        runtimeId: env.runtimeId,
-        height: env.height,
-      });
     }
     return {
       staleWriterStopped: false,
