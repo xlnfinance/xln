@@ -10,11 +10,14 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 
 - [ ] Close the still-live findings from the GPT audit of
   `main@fddcac8bab9420f48168b0453cc05419f858f392`, reverified against
-  `main@5e30bcf47` instead of copying stale line numbers. Current-code inspection
+  `main@f1de788d87619ff85a944df382cdb8b8ca02a979` instead of copying stale line
+  numbers. Current-code inspection
   confirms the R→C duplicate lifecycle (`FIN-01/02`), unsafe dispute
   `uint256 → Number` conversion (`FIN-03`), fail-open rebalance construction
-  (`FIN-04`), non-durable faucet admission (`SRV-01`), misplaced Account money
-  mutation (`ARCH-01`) and duplicate/inexact UI money models (`UI-01`).
+  (`FIN-04`), non-durable faucet admission (`SRV-01`) and duplicate/inexact UI
+  money models (`UI-01`). `ARCH-01` is partly closed: finalized Account
+  J-claims now apply through Account-owned handlers, but dispute-finality still
+  mutates Account money state from Entity and remains open.
   Reproduce `RUN-04` against the current single Runtime mempool before accepting
   its old “concurrent ingress” explanation:
   one writer is intentional, but a queued input can still become stale after
@@ -30,8 +33,10 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   finalization scrubber, Hanko witness code and every exported Level helper
   have production or owning-test call sites. Do not delete those live paths.
   Recheck static imports, dynamic entrypoints, browser exports and owning tests
-  immediately before any further deletion. The concrete open fixes remain
-  decomposed below so each gets its own L1 → L2 → L3 gate.
+  immediately before any further deletion. Evidence at the reverified SHA:
+  `bun run check` passed and isolated full browser E2E passed `125/125`; these
+  prove the current baseline, not the still-open findings above. The concrete
+  open fixes remain decomposed below so each gets its own L1 → L2 → L3 gate.
 - [ ] Pass the human-audit completion gate for the three nested state
   machines. Baseline on `main@404851e82`: 35 functions over 150 lines and 89
   over 100 lines under `runtime/runtime`, `runtime/entity` and
