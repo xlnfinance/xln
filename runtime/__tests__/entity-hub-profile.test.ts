@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { createEmptyEnv, enqueueRuntimeInput, process } from '../runtime';
+import { createEmptyEnv, enqueueRuntimeInput, processRuntime } from '../runtime';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
 import { encodeBoard, hashBoard } from '../entity/factory';
 import { buildLocalEntityProfile } from '../networking/gossip-helper';
@@ -94,8 +94,8 @@ describe('entity hub profile classification', () => {
       }],
       entityInputs: [],
     });
-    await process(env);
-    await process(env);
+    await processRuntime(env);
+    await processRuntime(env);
 
     const stateBefore = findEntityState(env, entityId);
     expect(stateBefore.profile.isHub).toBe(false);
@@ -116,7 +116,7 @@ describe('entity hub profile classification', () => {
         }],
       }],
     });
-    await process(env);
+    await processRuntime(env);
 
     const stateAfter = findEntityState(env, entityId);
     expect(stateAfter.profile.isHub).toBe(true);
@@ -176,7 +176,7 @@ describe('entity hub profile classification', () => {
       }],
       entityInputs: [],
     });
-    await process(env);
+    await processRuntime(env);
 
     enqueueRuntimeInput(env, {
       runtimeTxs: [],
@@ -186,7 +186,7 @@ describe('entity hub profile classification', () => {
         entityTxs: [{ type: 'setHubConfig', data: { ...DEFAULT_HUB_CONFIG, hubName: 'H1' } }],
       }],
     });
-    await process(env);
+    await processRuntime(env);
 
     enqueueRuntimeInput(env, {
       runtimeTxs: [],
@@ -207,7 +207,7 @@ describe('entity hub profile classification', () => {
         }],
       }],
     });
-    await process(env);
+    await processRuntime(env);
 
     const stateAfterRename = findEntityState(env, entityId);
     const profile = buildLocalEntityProfile(env, stateAfterRename, 4);

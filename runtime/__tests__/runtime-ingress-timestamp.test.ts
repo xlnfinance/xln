@@ -13,7 +13,7 @@ import {
   enqueueRuntimeInput,
   entityNeedsPeriodicWake,
   hasRuntimeWork,
-  process,
+  processRuntime,
   registerRuntimeFrameCommitCallback,
   startRuntimeLoop,
 } from '../runtime';
@@ -150,7 +150,7 @@ describe('runtime ingress timestamp', () => {
     env.runtimeState = { lifecyclePhase: 'halted', halted: true };
     const heightBefore = env.height;
 
-    await expect(process(env)).rejects.toThrow('RUNTIME_PROCESS_HALTED');
+    await expect(processRuntime(env)).rejects.toThrow('RUNTIME_PROCESS_HALTED');
     expect(env.height).toBe(heightBefore);
   });
 
@@ -171,7 +171,7 @@ describe('runtime ingress timestamp', () => {
       data: {},
     });
 
-    await process(env);
+    await processRuntime(env);
 
     expect(env.timestamp).toBe(replica.state.timestamp);
     expect(replica.state.crontabState?.hooks?.has('watchdog:futuristic')).toBe(true);
@@ -201,15 +201,15 @@ describe('runtime ingress timestamp', () => {
       entityInputs: replicas.map(({ entityId, signerId }) => ({ entityId, signerId, entityTxs: [] })),
     });
 
-    await process(env);
+    await processRuntime(env);
     expect(env.runtimeMempool?.entityInputs.map(input => input.entityId)).toEqual(entityIds.slice(1));
     expect(env.runtimeMempool?.queuedAt).toBe(1_000);
 
-    await process(env);
+    await processRuntime(env);
     expect(env.runtimeMempool?.entityInputs.map(input => input.entityId)).toEqual(entityIds.slice(2));
     expect(env.runtimeMempool?.queuedAt).toBe(1_000);
 
-    await process(env);
+    await processRuntime(env);
     expect(env.runtimeMempool?.entityInputs ?? []).toHaveLength(0);
     expect(env.runtimeMempool?.queuedAt).toBeUndefined();
   });
@@ -257,7 +257,7 @@ describe('runtime ingress timestamp', () => {
       committedInputs.push({ height, entityInputCount: runtimeInput.entityInputs.length });
     });
 
-    await process(env);
+    await processRuntime(env);
 
     expect(env.height).toBe(1);
     expect(committedInputs).toEqual([{ height: 1, entityInputCount: 12 }]);
@@ -309,7 +309,7 @@ describe('runtime ingress timestamp', () => {
     });
     enqueueRuntimeInput(env, acceptedInput);
 
-    await process(env);
+    await processRuntime(env);
     const deferredProfileUpdates = (env.runtimeMempool?.entityInputs ?? [])
       .flatMap(input => input.entityTxs ?? [])
       .filter(tx => tx.type === 'profile-update');
@@ -401,7 +401,7 @@ describe('runtime ingress timestamp', () => {
       ],
     });
 
-    await process(env);
+    await processRuntime(env);
     const deferredUserInputs = (env.runtimeMempool?.entityInputs ?? []).filter(input =>
       input.entityTxs?.some(tx => tx.type !== 'certifyProfile'));
     expect(deferredUserInputs.map(input => input.entityId)).toEqual([normalEntityId]);
@@ -431,7 +431,7 @@ describe('runtime ingress timestamp', () => {
     const importedSignerId = deriveSignerAddressSync(env.runtimeSeed!, 'imported').toLowerCase();
     const importedEntityId = generateLazyEntityId([importedSignerId], 1n).toLowerCase();
     env.runtimeInput = { runtimeTxs: [], entityInputs: [] };
-    await process(env, undefined);
+    await processRuntime(env, undefined);
     expect(replica.state.crontabState?.hooks?.has('watchdog:due-after-ingress')).toBe(true);
 
     const futureIngressTimestamp = Date.now() + 365 * 24 * 60 * 60 * 1000;
@@ -458,7 +458,7 @@ describe('runtime ingress timestamp', () => {
       entityInputs: [],
     });
 
-    await process(env);
+    await processRuntime(env);
 
     expect(env.timestamp).toBeLessThan(futureIngressTimestamp);
     expect(env.timestamp).toBeGreaterThan(replica.state.timestamp);
@@ -476,7 +476,7 @@ describe('runtime ingress timestamp', () => {
     const { entityId, signerId } = addSignableReplica(env, 1_000);
 
     const before = getWallClockMs();
-    await process(env, [{ entityId, signerId, entityTxs: [] }]);
+    await processRuntime(env, [{ entityId, signerId, entityTxs: [] }]);
 
     expect(env.timestamp).toBeGreaterThanOrEqual(before);
     expect(env.timestamp).toBeLessThanOrEqual(Date.now() + TIMING.TIMESTAMP_DRIFT_MS);
@@ -515,7 +515,7 @@ describe('runtime ingress timestamp', () => {
       }],
     });
     await sleep(20);
-    await process(env);
+    await processRuntime(env);
 
     expect(env.timestamp).toBe(20_000);
     const updatedReplica = env.eReplicas.get(`${entityId}:${signerId}`);
@@ -552,7 +552,7 @@ describe('runtime ingress timestamp', () => {
           }],
         }],
       });
-      await process(env);
+      await processRuntime(env);
       expect(env.timestamp).toBe(20_000);
       return computeCanonicalStateHashFromEnv(env);
     };
@@ -591,7 +591,7 @@ describe('runtime ingress timestamp', () => {
       entityInputs: [{ entityId, signerId, entityTxs: [] }],
     });
 
-    await process(env);
+    await processRuntime(env);
 
     expect(env.timestamp).toBeGreaterThanOrEqual(10_000);
     expect(env.timestamp).toBeLessThanOrEqual(Date.now() + TIMING.TIMESTAMP_DRIFT_MS);
@@ -700,7 +700,7 @@ describe('runtime ingress timestamp', () => {
         }],
         entityInputs: [],
       });
-      await process(env);
+      await processRuntime(env);
     };
 
     await importReplica('zero-delay-first');
@@ -740,7 +740,7 @@ describe('runtime ingress timestamp', () => {
       entityInputs: [],
     });
 
-    await process(env);
+    await processRuntime(env);
     env.runtimeConfig = { minFrameDelayMs: 60, loopIntervalMs: 1 };
 
     enqueueRuntimeInput(env, {

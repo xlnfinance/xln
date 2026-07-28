@@ -281,11 +281,15 @@ describe('runtime frame atomicity', () => {
 
     env.runtimeState!.lifecyclePhase = 'halted';
     env.runtimeState!.halted = true;
+    // Match the real writer release order: clear ownership before waking the
+    // queued caller. Leaving a resolved Promise installed makes any correct
+    // `while (processingPromise)` lock implementation spin forever.
+    env.runtimeState!.processingPromise = null;
     releaseWriter();
 
     await expect(waitingProcess).rejects.toThrow('RUNTIME_PROCESS_HALTED');
     expect(env.height).toBe(heightBefore);
-    expect(env.runtimeState?.processingPromise).toBeTruthy();
+    expect(env.runtimeState?.processingPromise).toBeNull();
   });
 
   test('frame input cloning preserves every shared board config without cross-message aliases', () => {

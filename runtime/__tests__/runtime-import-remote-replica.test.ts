@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { createEmptyEnv, enqueueRuntimeInput, generateLazyEntityId, process } from '../runtime';
+import { createEmptyEnv, enqueueRuntimeInput, generateLazyEntityId, processRuntime } from '../runtime';
 import { getJEventJurisdictionRef } from '../jurisdiction/event-observation';
 import { EMPTY_J_HISTORY_ROOT } from '../jurisdiction/history-consensus';
 import { hydrateEntityStateFromStorage, projectEntityCoreDoc } from '../storage/projections';
@@ -66,7 +66,7 @@ describe('runtime remote replica import', () => {
       entityInputs: [],
     });
 
-    await process(env);
+    await processRuntime(env);
 
     const replica = env.eReplicas.get(`${entityId}:${signerId}`);
     expect(replica).toBeDefined();
@@ -125,7 +125,7 @@ describe('runtime remote replica import', () => {
     };
     enqueueRuntimeInput(env, runtimeInput);
 
-    await expect(process(env)).rejects.toThrow('RUNTIME_ENTITY_INPUT_UNKNOWN_TARGET');
+    await expect(processRuntime(env)).rejects.toThrow('RUNTIME_ENTITY_INPUT_UNKNOWN_TARGET');
 
     expect(env.eReplicas.has(`${importedEntityId}:${signerId}`)).toBe(false);
     expect([...env.eReplicas.values()].some(replica => replica.certifiedFrameAnchor !== undefined)).toBe(false);
