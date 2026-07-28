@@ -9,7 +9,7 @@
  * Pattern: 2019 DeleteLockNew with outcomeType (secret/NoCapacity/invalid/fail)
  */
 
-import type { AccountMachine, AccountTx } from '../../../types';
+import type { AccountMachine, AccountTx, Delta, HtlcLock } from '../../../types';
 import { hashHtlcSecret } from '../../../protocol/htlc/utils';
 import { hashEncryptedHtlcLayer, htlcSecretOfferContextHash } from '../../../protocol/htlc/onion-advance';
 import { validateMultiRecipientCiphertext } from '../../../protocol/htlc/multi-recipient';
@@ -20,13 +20,8 @@ import { deriveTransferOffdeltaChange } from '../../delta-movement';
 
 const htlcResolveLog = createStructuredLogger('account.htlc');
 
-export async function handleHtlcResolve(
-  accountMachine: AccountMachine,
-  accountTx: Extract<AccountTx, { type: 'htlc_resolve' }>,
-  byLeft: boolean,
-  currentHeight: number,
-  currentTimestamp: number,
-): Promise<{
+type HtlcResolveTx = Extract<AccountTx, { type: 'htlc_resolve' }>;
+type HtlcResolveResult = {
   success: boolean;
   events: string[];
   error?: string;
@@ -38,167 +33,200 @@ export async function handleHtlcResolve(
   amount?: bigint;
   tokenId?: number;
   description?: string;
-}> {
-  const { lockId, outcome } = accountTx.data;
-  const events: string[] = [];
+};
 
-  // 1. Find lock
-  const lock = accountMachine.locks.get(lockId);
-  if (!lock) {
-    return { success: false, error: `Lock ${lockId} not found`, events };
+function handleHtlcSecretOffer(
+  account: AccountMachine,
+  lock: HtlcLock,
+  data: Extract<HtlcResolveTx['data'], { outcome: 'offer' }>,
+  byLeft: boolean,
+  events: string[],
+): HtlcResolveResult {
+  if (byLeft === lock.senderIsLeft) {
+    return {
+      success: false,
+      error: 'Only beneficiary can publish an HTLC secret offer',
+      events,
+    };
   }
-
-  // 2. An opaque offer only records the proposer-encrypted preimage. It does
-  // not release the hold or mutate balances. The payer must accept this exact
-  // ciphertext in a later Account frame after its local proposer decrypts it.
-  if (outcome === 'offer') {
-    const beneficiaryIsLeft = !lock.senderIsLeft;
-    if (byLeft !== beneficiaryIsLeft) {
-      return { success: false, error: 'Only beneficiary can publish an HTLC secret offer', events };
-    }
-    let offer;
-    try {
-      const payerEntityId = lock.senderIsLeft ? accountMachine.leftEntity : accountMachine.rightEntity;
-      const beneficiaryEntityId = lock.senderIsLeft ? accountMachine.rightEntity : accountMachine.leftEntity;
-      offer = validateMultiRecipientCiphertext(
-        accountTx.data.offer,
-        payerEntityId,
-        htlcSecretOfferContextHash(payerEntityId, beneficiaryEntityId, lock),
-      );
-    } catch (error) {
+  let offer;
+  try {
+    const payer = lock.senderIsLeft ? account.leftEntity : account.rightEntity;
+    const beneficiary = lock.senderIsLeft ? account.rightEntity : account.leftEntity;
+    offer = validateMultiRecipientCiphertext(
+      data.offer,
+      payer,
+      htlcSecretOfferContextHash(payer, beneficiary, lock),
+    );
+  } catch (error) {
+    return {
+      success: false,
+      error: `Invalid HTLC secret offer: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+      events,
+    };
+  }
+  const offerHash = hashEncryptedHtlcLayer(offer);
+  if (lock.secretOffer) {
+    const committedHash = hashEncryptedHtlcLayer(lock.secretOffer);
+    if (committedHash !== offerHash) {
       return {
         success: false,
-        error: `Invalid HTLC secret offer: ${error instanceof Error ? error.message : String(error)}`,
+        error: 'HTLC secret offer conflicts with committed offer',
         events,
       };
     }
-    const nextHash = hashEncryptedHtlcLayer(offer);
-    if (lock.secretOffer) {
-      const currentHash = hashEncryptedHtlcLayer(lock.secretOffer);
-      if (currentHash !== nextHash) {
-        return { success: false, error: 'HTLC secret offer conflicts with committed offer', events };
-      }
-      return { success: true, events, outcome: 'offer', hashlock: lock.hashlock, offerHash: currentHash };
-    }
-    lock.secretOffer = offer;
-    events.push(`🔐 HTLC secret offer committed for ${lock.lockId}`);
-    return { success: true, events, outcome: 'offer', hashlock: lock.hashlock, offerHash: nextHash };
+    return {
+      success: true,
+      events,
+      outcome: 'offer',
+      hashlock: lock.hashlock,
+      offerHash: committedHash,
+    };
   }
+  lock.secretOffer = offer;
+  events.push(`🔐 HTLC secret offer committed for ${lock.lockId}`);
+  return { success: true, events, outcome: 'offer', hashlock: lock.hashlock, offerHash };
+}
 
-  // 3. Get delta for terminal success/error mutation.
-  const delta = accountMachine.deltas.get(lock.tokenId);
-  if (!delta) {
-    return { success: false, error: `Delta ${lock.tokenId} not found`, events };
+function getHtlcSecretResolveError(
+  lock: HtlcLock,
+  data: Extract<HtlcResolveTx['data'], { outcome: 'secret' }>,
+  byLeft: boolean,
+  currentHeight: number,
+  currentTimestamp: number,
+): string | undefined {
+  if (currentHeight > 0 && currentHeight > lock.revealBeforeHeight) {
+    return `Lock expired by height: ${currentHeight} > ${lock.revealBeforeHeight}`;
   }
-
-  if (outcome === 'secret') {
-    // Verify not expired
-    if (currentHeight > 0 && currentHeight > lock.revealBeforeHeight) {
-      return { success: false, error: `Lock expired by height: ${currentHeight} > ${lock.revealBeforeHeight}`, events };
-    }
-    if (isHtlcTimelockExpired(currentTimestamp, lock.timelock)) {
-      return { success: false, error: `Lock expired by time: ${currentTimestamp} >= ${lock.timelock}`, events };
-    }
-
-    if ('offerHash' in accountTx.data) {
-      const callerIsPayer = byLeft === lock.senderIsLeft;
-      if (!callerIsPayer) {
-        return { success: false, error: 'Only payer can accept an HTLC secret offer', events };
-      }
-      if (!lock.secretOffer) {
-        return { success: false, error: 'Committed HTLC secret offer required', events };
-      }
-      const committedOfferHash = hashEncryptedHtlcLayer(lock.secretOffer);
-      if (accountTx.data.offerHash.toLowerCase() !== committedOfferHash) {
-        return { success: false, error: 'HTLC secret offer hash mismatch', events };
-      }
-    } else {
-      const secret = accountTx.data.secret;
-      if (lock.secretOffer) {
-        return { success: false, error: 'Raw secret cannot bypass a committed HTLC secret offer', events };
-      }
-      let computedHash: string;
-      try {
-        computedHash = hashHtlcSecret(secret);
-      } catch (e) {
-        return { success: false, error: `Invalid secret: ${e instanceof Error ? e.message : String(e)}`, events };
-      }
-      if (computedHash !== lock.hashlock) {
-        return { success: false, error: `Hash mismatch: expected ${lock.hashlock.slice(0,8)}..., got ${computedHash.slice(0,8)}...`, events };
-      }
-    }
-
-  } else {
-    // === ERROR PATH: Release hold without paying the beneficiary ===
-    //
-    // Safety rule:
-    // - Beneficiary may release an active HTLC when downstream failed.
-    // - Payer may reclaim only after expiry.
-    //
-    // Without the side check, the payer could submit outcome=error with an
-    // arbitrary reason before expiry and cancel an active conditional payment.
-    const beneficiaryIsLeft = !lock.senderIsLeft;
-    const callerIsBeneficiary = byLeft === beneficiaryIsLeft;
-    const callerIsPayer = byLeft === lock.senderIsLeft;
-    const heightExpired = currentHeight > 0 && currentHeight > lock.revealBeforeHeight;
-    const timestampExpired = isHtlcTimelockExpired(currentTimestamp, lock.timelock);
-    const expired = heightExpired || timestampExpired;
-    if (!callerIsBeneficiary && !(callerIsPayer && expired)) {
-      return {
-        success: false,
-        error: `Only beneficiary can release an active HTLC; payer can cancel only after expiry`,
-        events,
-      };
-    }
-
-    // For timeout-type errors, verify expiry regardless of caller side. A
-    // beneficiary-initiated active release must use a non-timeout reason.
-    const reason = accountTx.data.reason;
-    if (reason === 'timeout') {
-      if (!expired) {
-        return { success: false, error: `Lock not expired yet`, events };
-      }
-    }
-
+  if (isHtlcTimelockExpired(currentTimestamp, lock.timelock)) {
+    return `Lock expired by time: ${currentTimestamp} >= ${lock.timelock}`;
   }
+  if ('offerHash' in data) {
+    if (byLeft !== lock.senderIsLeft) {
+      return 'Only payer can accept an HTLC secret offer';
+    }
+    if (!lock.secretOffer) return 'Committed HTLC secret offer required';
+    const committedHash = hashEncryptedHtlcLayer(lock.secretOffer);
+    return data.offerHash.toLowerCase() === committedHash
+      ? undefined
+      : 'HTLC secret offer hash mismatch';
+  }
+  if (lock.secretOffer) {
+    return 'Raw secret cannot bypass a committed HTLC secret offer';
+  }
+  let computedHash: string;
+  try {
+    computedHash = hashHtlcSecret(data.secret);
+  } catch (error) {
+    return `Invalid secret: ${error instanceof Error ? error.message : String(error)}`;
+  }
+  return computedHash === lock.hashlock
+    ? undefined
+    : `Hash mismatch: expected ${lock.hashlock.slice(0, 8)}..., ` +
+      `got ${computedHash.slice(0, 8)}...`;
+}
 
-  // 3. Release hold (common to both paths)
+function getHtlcErrorResolveError(
+  lock: HtlcLock,
+  data: Extract<HtlcResolveTx['data'], { outcome: 'error' }>,
+  byLeft: boolean,
+  currentHeight: number,
+  currentTimestamp: number,
+): string | undefined {
+  const callerIsBeneficiary = byLeft !== lock.senderIsLeft;
+  const callerIsPayer = byLeft === lock.senderIsLeft;
+  const expired =
+    (currentHeight > 0 && currentHeight > lock.revealBeforeHeight) ||
+    isHtlcTimelockExpired(currentTimestamp, lock.timelock);
+  // Before expiry only the beneficiary may cancel. Letting the payer submit an
+  // arbitrary error would make the conditional payment revocable on demand.
+  if (!callerIsBeneficiary && !(callerIsPayer && expired)) {
+    return 'Only beneficiary can release an active HTLC; payer can cancel only after expiry';
+  }
+  if (data.reason === 'timeout' && !expired) return 'Lock not expired yet';
+  return undefined;
+}
+
+function applyHtlcResolution(
+  account: AccountMachine,
+  lock: HtlcLock,
+  delta: Delta,
+  data: Exclude<HtlcResolveTx['data'], { outcome: 'offer' }>,
+  events: string[],
+): HtlcResolveResult {
   const releaseSide = lock.senderIsLeft ? 'left' : 'right';
   const releaseError = releaseHold(
     delta,
     releaseSide,
     lock.amount,
-    (currentHold, releaseAmount) =>
-      `HTLC_RESOLVE_HOLD_UNDERFLOW:${releaseSide} hold=${currentHold.toString()} amount=${releaseAmount.toString()}`,
+    (hold, amount) =>
+      `HTLC_RESOLVE_HOLD_UNDERFLOW:${releaseSide} ` +
+      `hold=${hold.toString()} amount=${amount.toString()}`,
   );
   if (releaseError) return { success: false, error: releaseError, events };
 
-  // 4. Apply outcome mutation after the hold guard. Failed resolves must be
-  // no-ops on account balances and locks.
-  if (outcome === 'secret') {
+  if (data.outcome === 'secret') {
     delta.offdelta += deriveTransferOffdeltaChange(lock.senderIsLeft, lock.amount);
     events.push(`🔓 HTLC resolved (secret): ${lock.amount} token ${lock.tokenId}`);
   } else {
-    const reason = accountTx.data.reason;
-    htlcResolveLog.debug('resolve.error_outcome', { lock: shortHash(lockId), reason: reason || 'unknown' });
-    events.push(`❌ HTLC resolved (error): ${lock.amount} token ${lock.tokenId} returned — ${reason || 'unknown'}`);
+    const reason = data.reason || 'unknown';
+    htlcResolveLog.debug('resolve.error_outcome', {
+      lock: shortHash(lock.lockId),
+      reason,
+    });
+    events.push(
+      `❌ HTLC resolved (error): ${lock.amount} token ${lock.tokenId} ` +
+      `returned — ${reason}`,
+    );
   }
+  account.locks.delete(lock.lockId);
+  return {
+    success: true,
+    events,
+    outcome: data.outcome,
+    hashlock: lock.hashlock,
+    ...(data.outcome === 'secret' && 'secret' in data ? { secret: data.secret } : {}),
+    ...(data.outcome === 'secret' && 'offerHash' in data
+      ? { offerHash: data.offerHash }
+      : {}),
+    ...(data.outcome === 'secret' ? { amount: lock.amount, tokenId: lock.tokenId } : {}),
+    ...(data.outcome === 'error' ? { reason: data.reason || 'unknown' } : {}),
+  };
+}
 
-  // 5. Remove lock
-  accountMachine.locks.delete(lockId);
-
-  const result: {
-    success: boolean; events: string[]; error?: string;
-    outcome?: 'offer' | 'secret' | 'error'; secret?: string; offerHash?: string;
-    hashlock?: string; reason?: string;
-    amount?: bigint; tokenId?: number;
-  } = { success: true, events, outcome, hashlock: lock.hashlock };
-  if (outcome === 'secret' && 'secret' in accountTx.data) result.secret = accountTx.data.secret;
-  if (outcome === 'secret' && 'offerHash' in accountTx.data) result.offerHash = accountTx.data.offerHash;
-  if (outcome === 'error') result.reason = accountTx.data.reason || 'unknown';
-  if (outcome === 'secret') {
-    result.amount = lock.amount;
-    result.tokenId = lock.tokenId;
+export async function handleHtlcResolve(
+  accountMachine: AccountMachine,
+  accountTx: HtlcResolveTx,
+  byLeft: boolean,
+  currentHeight: number,
+  currentTimestamp: number,
+): Promise<HtlcResolveResult> {
+  const { lockId, outcome } = accountTx.data;
+  const events: string[] = [];
+  const lock = accountMachine.locks.get(lockId);
+  if (!lock) return { success: false, error: `Lock ${lockId} not found`, events };
+  if (outcome === 'offer') {
+    return handleHtlcSecretOffer(accountMachine, lock, accountTx.data, byLeft, events);
   }
-  return result;
+  const delta = accountMachine.deltas.get(lock.tokenId);
+  if (!delta) return { success: false, error: `Delta ${lock.tokenId} not found`, events };
+  const validationError = outcome === 'secret'
+    ? getHtlcSecretResolveError(
+        lock,
+        accountTx.data,
+        byLeft,
+        currentHeight,
+        currentTimestamp,
+      )
+    : getHtlcErrorResolveError(
+        lock,
+        accountTx.data,
+        byLeft,
+        currentHeight,
+        currentTimestamp,
+      );
+  if (validationError) return { success: false, error: validationError, events };
+  return applyHtlcResolution(accountMachine, lock, delta, accountTx.data, events);
 }
