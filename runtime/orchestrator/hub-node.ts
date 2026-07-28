@@ -8,7 +8,7 @@ import { createExternalWalletApi } from '../api/external-wallet-api';
 import { createDirectRuntimeWsRoute, type DirectWebSocket } from '../networking/direct-runtime-bun';
 import { normalizeRuntimeId } from '../networking/runtime-id';
 import { bootstrapHub } from '../../scripts/bootstrap-hub';
-import { TOKEN_REGISTRATION_AMOUNT, defaultTokensForJurisdiction, getDefaultTokenSupply } from '../jadapter/default-tokens';
+import { TOKEN_REGISTRATION_AMOUNT, defaultTokensForJurisdiction, getDefaultTokenSupply } from '../jurisdiction/default-tokens';
 import { DEV_CHAIN_IDS } from '../jadapter';
 import type { JAdapter, JTokenInfo } from '../jadapter/types';
 import {

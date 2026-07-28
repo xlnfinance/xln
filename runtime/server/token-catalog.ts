@@ -2,7 +2,7 @@ import { ethers } from 'ethers';
 import type { JAdapter } from '../jadapter';
 import { DEV_CHAIN_IDS } from '../jadapter';
 import type { JTokenInfo } from '../jadapter/types';
-import { TOKEN_REGISTRATION_AMOUNT, defaultTokensForJurisdiction, getDefaultTokenSupply } from '../jadapter/default-tokens';
+import { TOKEN_REGISTRATION_AMOUNT, defaultTokensForJurisdiction, getDefaultTokenSupply } from '../jurisdiction/default-tokens';
 import { createStructuredLogger, shortId } from '../infra/logger';
 import { HUB_REQUIRED_TOKEN_COUNT } from './hub-health';
 import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/index.ts';

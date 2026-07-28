@@ -28,7 +28,7 @@ import {
 } from './boot';
 import { commitRuntimeInput, getOffdelta, converge, assert, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed } from './helpers';
 import { generateLazyEntityId } from '../entity/factory';
-import { DEFAULT_TOKENS } from '../jadapter/default-tokens';
+import { DEFAULT_TOKENS } from '../jurisdiction/default-tokens';
 import { isLeft } from '../account/utils';
 
 let _process: ((env: RuntimeState, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<RuntimeState>) | null = null;

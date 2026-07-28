@@ -35,7 +35,7 @@ import { compareStableText, safeStringify } from '../protocol/serialization';
 import { nodeProcess, runtimeIsBrowser } from '../runtime/platform';
 import { resolveEntityProposerId } from '../state-helpers';
 import type { DisputeFinalizationEvidence, RuntimeState, JTx, RuntimeInput, RuntimeTx } from '../types';
-import { TOKEN_REGISTRATION_AMOUNT, defaultTokensForJurisdiction, getDefaultTokenSupply } from './default-tokens';
+import { TOKEN_REGISTRATION_AMOUNT, defaultTokensForJurisdiction, getDefaultTokenSupply } from '../jurisdiction/default-tokens';
 import { extractCanonicalDepositoryEventArgs, parseKnownDepositoryLog } from './depository-event-codec';
 import { classifyJAdapterFailure, makeJAdapterFailureResult } from './failure';
 import {

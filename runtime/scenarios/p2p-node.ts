@@ -11,7 +11,7 @@ import { processUntil } from './helpers';
 import { isLeft, deriveDelta } from '../account/utils';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey, getSignerPrivateKey } from '../account/crypto';
 import { loadJurisdictions } from '../jurisdiction/jurisdiction-loader';
-import { DEFAULT_TOKENS, TOKEN_REGISTRATION_AMOUNT, getDefaultTokenSupply } from '../jadapter/default-tokens';
+import { DEFAULT_TOKENS, TOKEN_REGISTRATION_AMOUNT, getDefaultTokenSupply } from '../jurisdiction/default-tokens';
 import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/index.ts';
 import { hashHtlcSecret } from '../protocol/htlc/utils';
 import type { AccountState, Delta, EntityInput, RuntimeState, JurisdictionConfig } from '../types';

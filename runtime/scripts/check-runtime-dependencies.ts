@@ -1,0 +1,128 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import ts from 'typescript';
+
+const RUNTIME_ROOT = path.resolve('runtime');
+const EXCLUDED_PATH = /\/(?:__tests__|qa|scenarios|scripts)\//;
+
+// These directions violate the Runtime → Entity → Account cascade or make a
+// lower deterministic layer depend on external/operational infrastructure.
+// Existing counts are migration debt: every increase and every newly
+// introduced direction fails, while completed cleanup must remove its entry.
+const REVERSE_DEPENDENCY_DEBT: Readonly<Record<string, number>> = {
+  'account->entity': 11,
+  'account->runtime': 1,
+  'account->storage': 1,
+  'entity->jadapter': 5,
+  'entity->networking': 6,
+  'entity->runtime': 11,
+  'entity->storage': 3,
+  'protocol->account': 7,
+  'protocol->entity': 2,
+  'server->orchestrator': 4,
+};
+
+const collectFiles = (directory: string): string[] =>
+  fs.readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
+    const target = path.join(directory, entry.name);
+    if (entry.isDirectory()) return collectFiles(target);
+    if (!entry.isFile() || !target.endsWith('.ts') || target.endsWith('.d.ts')) return [];
+    return EXCLUDED_PATH.test(`/${target}`) || target.endsWith('.test.ts') || target.endsWith('.spec.ts')
+      ? []
+      : [target];
+  });
+
+const packageOwner = (file: string): string => {
+  const relative = path.relative(RUNTIME_ROOT, file);
+  const parts = relative.split(path.sep);
+  return parts.length === 1 ? '(root)' : parts[0] ?? '(root)';
+};
+
+const resolvedRuntimeOwner = (specifier: string, importer: string): string | null => {
+  if (!specifier.startsWith('.')) return null;
+  const resolved = ts.resolveModuleName(
+    specifier,
+    importer,
+    {
+      allowImportingTsExtensions: true,
+      moduleResolution: ts.ModuleResolutionKind.Bundler,
+    },
+    ts.sys,
+  ).resolvedModule?.resolvedFileName;
+  if (!resolved) return null;
+  const absolute = path.resolve(resolved);
+  if (absolute !== RUNTIME_ROOT && !absolute.startsWith(`${RUNTIME_ROOT}${path.sep}`)) return null;
+  return packageOwner(absolute);
+};
+
+const literalModuleSpecifier = (node: ts.Node): string | null => {
+  if (
+    (ts.isImportDeclaration(node) || ts.isExportDeclaration(node))
+    && node.moduleSpecifier
+    && ts.isStringLiteral(node.moduleSpecifier)
+  ) {
+    return node.moduleSpecifier.text;
+  }
+  const firstArgument = ts.isCallExpression(node) ? node.arguments[0] : undefined;
+  if (
+    ts.isCallExpression(node)
+    && node.arguments.length === 1
+    && firstArgument
+    && ts.isStringLiteral(firstArgument)
+    && (node.expression.kind === ts.SyntaxKind.ImportKeyword
+      || (ts.isIdentifier(node.expression) && node.expression.text === 'require'))
+  ) {
+    return firstArgument.text;
+  }
+  return null;
+};
+
+const observed = new Map<string, Array<{ file: string; line: number; specifier: string }>>();
+const files = collectFiles('runtime').sort();
+
+for (const file of files) {
+  const from = packageOwner(path.resolve(file));
+  const source = ts.createSourceFile(file, fs.readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
+  const visit = (node: ts.Node): void => {
+    const specifier = literalModuleSpecifier(node);
+    if (specifier) {
+      const to = resolvedRuntimeOwner(specifier, path.resolve(file));
+      const key = to ? `${from}->${to}` : '';
+      if (key && Object.hasOwn(REVERSE_DEPENDENCY_DEBT, key)) {
+        const line = source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
+        const occurrences = observed.get(key) ?? [];
+        occurrences.push({ file, line, specifier });
+        observed.set(key, occurrences);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+}
+
+const errors: string[] = [];
+for (const [key, allowance] of Object.entries(REVERSE_DEPENDENCY_DEBT)) {
+  const occurrences = observed.get(key) ?? [];
+  if (occurrences.length === 0) {
+    errors.push(`STALE_REVERSE_DEPENDENCY_ALLOWANCE ${key}`);
+    continue;
+  }
+  if (occurrences.length <= allowance) continue;
+  const additions = occurrences
+    .slice(allowance)
+    .map(item => `${item.file}:${item.line}:${item.specifier}`)
+    .join(',');
+  errors.push(`REVERSE_DEPENDENCY_GREW ${key} ${occurrences.length} > ${allowance} ${additions}`);
+}
+
+if (errors.length > 0) {
+  console.error('Runtime dependency direction invariant failed:\n');
+  for (const error of errors) console.error(`- ${error}`);
+  process.exit(1);
+}
+
+const debt = [...observed.values()].reduce((sum, occurrences) => sum + occurrences.length, 0);
+console.log(
+  `RUNTIME_DEPENDENCIES_OK files=${files.length} reverseImports=${debt}/` +
+  `${Object.values(REVERSE_DEPENDENCY_DEBT).reduce((sum, count) => sum + count, 0)}`,
+);

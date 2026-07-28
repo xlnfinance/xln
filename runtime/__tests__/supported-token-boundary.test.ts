@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { getTokenInfo } from '../account/utils';
-import { defaultTokensForJurisdiction } from '../jadapter/default-tokens';
+import { defaultTokensForJurisdiction } from '../jurisdiction/default-tokens';
 import { getBootstrapCreditAmount } from '../orchestrator/mesh-common';
 
 describe('supported-token metadata boundary', () => {

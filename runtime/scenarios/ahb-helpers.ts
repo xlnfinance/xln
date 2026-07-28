@@ -5,7 +5,7 @@ import { createEmptyBatch, batchAddReserveToReserve } from '../jurisdiction/batc
 import { formatRuntime } from '../qa/runtime-ascii';
 import { advanceScenarioTime } from './helpers';
 import { submitSignedScenarioBatch } from './j-batch-submit';
-import { DEFAULT_TOKENS } from '../jadapter/default-tokens';
+import { DEFAULT_TOKENS } from '../jurisdiction/default-tokens';
 
 type ProcessFn = (env: RuntimeState, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<RuntimeState>;
 

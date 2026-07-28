@@ -16,6 +16,13 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   only Runtime interprets committed outputs as post-WAL external effects.
   Delete or correct docs, comments, types and helpers that blur local
   `AccountTx[]` with signed bilateral `AccountInput`.
+  Drive the AST-ratcheted reverse-import debt to zero: lower Account code must
+  not import Entity, Runtime, adapters or physical storage; Entity must not
+  import Runtime, adapters, networking or physical storage; shared protocol
+  leaves must not import machine implementations; HTTP server handlers must not
+  reach upward into process orchestration. Move the shared primitive to its
+  canonical owner or pass a narrow dependency explicitly—never hide a reverse
+  edge behind a re-export.
 - [ ] Close the still-live findings from the GPT audit of
   `main@fddcac8bab9420f48168b0453cc05419f858f392`, reverified against
   `main@f1de788d87619ff85a944df382cdb8b8ca02a979` instead of copying stale line
