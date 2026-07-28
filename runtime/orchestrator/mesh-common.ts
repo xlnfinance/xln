@@ -286,7 +286,7 @@ export const hasQueuedSwapOffer = (
   offerId: string,
 ): boolean => collectQueuedSwapOfferIds(env, entityId, counterpartyId).has(String(offerId || '').trim());
 
-export const getAccountMachine = (
+export const getAccountState = (
   env: RuntimeState,
   entityId: string,
   counterpartyId: string,
@@ -307,7 +307,7 @@ export const getAccountDelta = (
   counterpartyId: string,
   tokenId: number,
 ): Delta | null => {
-  const account = getAccountMachine(env, entityId, counterpartyId);
+  const account = getAccountState(env, entityId, counterpartyId);
   if (!account?.deltas) return null;
   return account.deltas.get(tokenId) ?? null;
 };
@@ -379,8 +379,8 @@ export const hasPairMutualCredit = (
   amount: bigint,
 ): boolean => {
   const account =
-    getAccountMachine(env, leftEntityId, rightEntityId)
-    ?? getAccountMachine(env, rightEntityId, leftEntityId);
+    getAccountState(env, leftEntityId, rightEntityId)
+    ?? getAccountState(env, rightEntityId, leftEntityId);
   if (!hasCommittedAccountState(account)) return false;
   const grantedByLeft = getCreditGrantedByEntity(account, leftEntityId, tokenId);
   const grantedByRight = getCreditGrantedByEntity(account, rightEntityId, tokenId);

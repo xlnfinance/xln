@@ -1,7 +1,7 @@
 import type { BookState } from '../orderbook';
 import { validateBookStructure } from '../orderbook/validity';
 import { verifyAndWarmBookCommitment } from '../orderbook/commitment';
-import { validateAccountMachine, validateEntityState } from '../validation-utils';
+import { validateAccountState, validateEntityState } from '../validation-utils';
 import { LIMITS } from '../constants';
 import type { StorageAccountDoc, StorageEntityCoreDoc } from './types';
 import { normalizeAccountStateDomain } from '../account/state-root';
@@ -115,7 +115,7 @@ export const validateStorageAccountDocValue = (value: unknown): StorageAccountDo
   requireStorageMap(doc['pendingWithdrawals'], `${code}_PENDING_WITHDRAWALS`);
   requireStorageMap(doc['requestedRebalance'], `${code}_REQUESTED_REBALANCE`);
   requireStorageMap(doc['requestedRebalanceFeeState'], `${code}_REBALANCE_FEES`);
-  validateAccountMachine(doc, code);
+  validateAccountState(doc, code);
   return doc as StorageAccountDoc;
 };
 

@@ -245,7 +245,7 @@ import { fitCrossAmountsToOrderbook } from '../orchestrator/mm-node';
 
 import {
   clearReplayOutputSignerHints,
-  cloneAccountMachine,
+  cloneAccountState,
   installReplayOutputSignerHints,
   resolveEntityProposerId,
 } from '../state-helpers';

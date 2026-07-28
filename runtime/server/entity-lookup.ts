@@ -36,7 +36,7 @@ export const hasAccount = (env: RuntimeState, entityId: string, counterpartyId: 
   return false;
 };
 
-export const getAccountMachine = (env: RuntimeState, entityId: string, counterpartyId: string): AccountState | null => {
+export const getAccountState = (env: RuntimeState, entityId: string, counterpartyId: string): AccountState | null => {
   const replica = getEntityReplicaById(env, entityId);
   if (!replica?.state?.accounts) return null;
   const needle = counterpartyId.toLowerCase();

@@ -143,6 +143,39 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   halt after waking, a post-WAL notification failure cannot downgrade a
   durable commit, and abort closes candidate-only storage handles without
   touching live handles.
+- [ ] Fix the confirmed Runtime WAL ambiguity fail-open before further
+  structural work. `RuntimeFrameStorageError(commitStatus='unknown')`
+  currently installs the working candidate with
+  `publishRuntimeFrameTransaction` and only then halts. Unknown durability is
+  not a commit: keep the live replica at the last proven frame, halt its
+  writer, probe/reload the authoritative WAL, and never dispatch candidate
+  outputs. Preserve the separate proven-committed recovery path. Add L1 tests
+  for `not-committed`, `committed`, and `unknown`, plus an L2 child-process
+  timeout/crash test that proves RAM height, mempool ownership, receipts and
+  post-restart state all follow the durable frame.
+- [ ] Remove ephemeral Account replica fields from `AccountState`, starting
+  with `clonedForValidation`. It is currently kept out of consensus and
+  persistence by independent name-based exclusions in clone, serialization,
+  canonical hashing, projections, storage typing and Entity state-root code.
+  Move validation candidate/cache, mempool, pending frame, outbound ACK/resend
+  and delivery metadata into `AccountReplica`; delete the exclusion lists only
+  after old/new byte-identical Account roots and restart behavior are proven.
+  Do not add a compatibility fallback: this is testnet, so make one canonical
+  schema transition with explicit migration tooling if durable fixtures need
+  conversion.
+- [ ] Delete the remaining Account-boundary escape hatches. Replace
+  `rollbackTimedOutFrames` direct candidate deletion with a local AccountInput;
+  move Entity-side mempool pruning after HTLC/dispute/settlement events into
+  Account-owned transitions; delete the production-dead
+  `addToAccountMempool` export and update its bounds test to use
+  `applyAccountInput`. Prove by import/call-site scan that Entity and Runtime
+  cannot write Account mempool, pending candidate, delta, collateral, holds or
+  credit directly.
+- [ ] Remove confirmed vestigial or misplaced state only with root/storage
+  evidence: investigate the unwritten `EntityState.accountInputQueue`,
+  the hash-excluded `entityEncPrivKey`, and dead/misleading `EntityOutput`
+  surface. Delete or relocate each only after dynamic/browser entrypoints,
+  recovery hydration and state-root fixtures prove its real ownership.
 - [ ] Prove and fix the likely unilateral rebalance consensus wedge first.
   Reproduce bilateral request → reverse payment/self-pay → hub crontab and
   assert equal Account roots and pending state on both peers. Crontab must

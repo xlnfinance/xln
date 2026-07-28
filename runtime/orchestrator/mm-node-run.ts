@@ -55,7 +55,7 @@ import { reportManagedChildFatal } from './managed-child-fatal-ipc';
 import { deriveMarketMakerChildReadiness } from './market-maker-child-readiness';
 import {
   BOOTSTRAP_POLL_MS,
-  getAccountMachine,
+  getAccountState,
   getEntityOutCapacity,
   getEntityReplicaById,
   isAccountConsensusReady,
@@ -581,7 +581,7 @@ export const runMarketMakerNode = async (): Promise<void> => {
     counterpartyEntityId: string,
     tokenIds: number[],
   ): Record<string, unknown> => {
-    const account = getAccountMachine(env, entityId, counterpartyEntityId);
+    const account = getAccountState(env, entityId, counterpartyEntityId);
     const replica = getEntityReplicaById(env, entityId);
     const summarizeRuntimeInputs = (
       inputs: Array<{ entityId?: string; entityTxs?: Array<{ type?: string }> }> | undefined,
@@ -1017,7 +1017,7 @@ export const runMarketMakerNode = async (): Promise<void> => {
     return false;
   };
   const describeSameQuoteJobProgress = (job: SameQuoteJob): Record<string, unknown> => {
-    const account = getAccountMachine(env, job.context.entityId, job.hub.entityId);
+    const account = getAccountState(env, job.context.entityId, job.hub.entityId);
     return {
       mmEntityId: job.context.entityId,
       jurisdiction: job.context.jurisdictionName,

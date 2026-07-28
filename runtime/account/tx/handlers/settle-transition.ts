@@ -8,7 +8,7 @@ import type {
   SettlementOp,
   SettlementWorkspace,
 } from '../../../types';
-import { cloneAccountMachine } from '../../../state-helpers';
+import { cloneAccountState } from '../../../state-helpers';
 import { computeCanonicalMerkleRoot } from '../../state-root';
 import { deriveDelta } from '../../utils';
 import { compileOps, getMinimumSafeSettlementNonce } from '../../../protocol/settlement/operations';
@@ -587,7 +587,7 @@ const commitDraft = (
 // AccountSettled is bilateral Account consensus too. If it wins a retry race,
 // release the exact workspace holds before removing the workspace body.
 export function clearFinalizedSettlementWorkspace(account: AccountState): void {
-  const draft = cloneAccountMachine(account);
+  const draft = cloneAccountState(account);
   const workspace = draft.settlementWorkspace;
   if (!workspace) return;
   assertCanonicalSettlementWorkspace(draft, workspace);
@@ -621,7 +621,7 @@ export async function handleSettleTransition(
   registeredBoardHash?: string,
 ): Promise<{ success: boolean; events: string[]; error?: string }> {
   try {
-    const draft = cloneAccountMachine(account);
+    const draft = cloneAccountState(account);
     const changed = new Set<number>();
     const transition = tx.data;
     if (transition.kind === 'upsert') {

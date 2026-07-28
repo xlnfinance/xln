@@ -82,15 +82,15 @@ assertIncludes(
   'frameJHeight: entityJHeight ?? account.lastFinalizedJHeight ?? 0,',
   accountProposePath,
 );
-assertIncludes(accountConsensus, 'const pendingJHeight = accountMachine.pendingFrame.jHeight ?? accountMachine.lastFinalizedJHeight ?? 0;', accountConsensusPath);
-assertIncludes(accountConsensus, 'const currentJHeight = accountMachine.lastFinalizedJHeight ?? 0;', accountConsensusPath);
+assertIncludes(accountConsensus, 'const pendingJHeight = account.pendingFrame.jHeight ?? account.lastFinalizedJHeight ?? 0;', accountConsensusPath);
+assertIncludes(accountConsensus, 'const currentJHeight = account.lastFinalizedJHeight ?? 0;', accountConsensusPath);
 assertIncludes(accountConsensus, 'const frameJHeight = receivedFrame.jHeight ?? currentJHeight;', accountConsensusPath);
 assertIncludes(accountFrame, 'if (!Number.isSafeInteger(frame.jHeight) || frame.jHeight < 0)', accountFramePath);
 assertIncludes(accountFrame, 'jHeight: frame.jHeight,', accountFramePath);
 
 assertOrder(accountConsensus, accountConsensusPath, [
   'async function validateIncomingFrameOnClone',
-  'const clonedMachine = cloneAccountMachine(accountMachine);',
+  'const clonedMachine = cloneAccountState(account);',
   'const result = await applyAccountTx(',
   'clonedMachine,',
   'true,',
@@ -107,10 +107,10 @@ assertOrder(accountConsensus, accountConsensusPath, [
 assertOrder(accountConsensus, accountConsensusPath, [
   'async function commitIncomingFrameOnRealState',
   'const commitResult = await applyAccountTx(',
-  'accountMachine,',
+  'account,',
   'false,',
   "throw new Error(`Frame ${receivedFrame.height} commit failed: ${tx.type} - ${commitResult.error}`);",
-  "assertNoUnilateralSettlementMutation(accountMachine, beforeSettlement, tx, 'receiver/commit');",
+  "assertNoUnilateralSettlementMutation(account, beforeSettlement, tx, 'receiver/commit');",
   'const committedFrame = cloneAccountFrame(receivedFrame);',
   'committedFrames.push({ frame: committedFrame, committedViaNewFrame: true });',
 ]);

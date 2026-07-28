@@ -41,7 +41,7 @@ import { hasDaemonControlAuth, parseTaggedControlBody, requireDaemonControlAuth 
 import { isLocalOperatorRequest, resolveSocketPeerAddress } from './health-redaction';
 import { listLocalControlEntities } from './control-entities';
 import {
-  getAccountMachine,
+  getAccountState,
   getEntityReplicaById,
 } from './entity-lookup';
 import { createRuntimeIngressReceiptStore } from './ingress-receipts';
@@ -500,7 +500,7 @@ const handleApi = async (
       },
       activeHubEntityIds: relayStore.activeHubEntityIds,
       marketMakerState,
-      getAccountMachine,
+      getAccountState,
       ensureTokenCatalog: () => tokenCatalogController.ensureTokenCatalog(),
     }, operatorAuthorized);
   }

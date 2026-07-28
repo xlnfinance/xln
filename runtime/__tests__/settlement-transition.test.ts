@@ -42,7 +42,7 @@ import {
   getCertifiedBoardNodeStore,
 } from '../jurisdiction/board-registry';
 import { createEmptyEnv } from '../runtime';
-import { cloneAccountMachine } from '../state-helpers';
+import { cloneAccountState } from '../state-helpers';
 import type { AccountTx, EntityState, RuntimeState, HashToSign, JurisdictionConfig, JurisdictionEvent, SettlementOp } from '../types';
 import { createDefaultDelta } from '../validation-utils';
 import {
@@ -720,7 +720,7 @@ describe('atomic settlement Account transition', () => {
     if (draft.type !== 'settle_transition' || draft.data.kind !== 'seal') {
       throw new Error('TEST_FORGIVENESS_SETTLEMENT_SEAL_MISSING');
     }
-    const expected = cloneAccountMachine(account);
+    const expected = cloneAccountState(account);
     expected.deltas.set(tokenId, createDefaultDelta(tokenId));
     expect(draft.data.postProof.proofBodyHash)
       .toBe(buildAccountProofBody(expected, TEST_DELTA_TRANSFORMER).proofBodyHash);
@@ -1684,7 +1684,7 @@ describe('atomic settlement Account transition', () => {
       executorIsLeft: false,
     });
     expect(first.success).toBe(true);
-    const restored = cloneAccountMachine(live, true);
+    const restored = cloneAccountState(live, true);
     const previousWorkspaceHash = live.settlementWorkspace!.workspaceHash;
     const update = transition({
       kind: 'upsert',
@@ -1719,7 +1719,7 @@ describe('atomic settlement Account transition', () => {
       nonce: 2,
     };
 
-    const clone = cloneAccountMachine(account);
+    const clone = cloneAccountState(account);
     clone.settlementWorkspace!.postSettlementDisputeProof!.leftHanko = '0x1234';
 
     expect(account.settlementWorkspace?.postSettlementDisputeProof?.leftHanko).toBeUndefined();

@@ -58,7 +58,7 @@ import { generateLazyEntityId } from '../entity/factory';
 
 import { createDefaultDelta } from '../validation-utils';
 
-import { cloneAccountMachine, cloneEntityReplica, cloneEntityState } from '../state-helpers';
+import { cloneAccountState, cloneEntityReplica, cloneEntityState } from '../state-helpers';
 
 import { projectAccountDoc, projectEntityCoreDoc } from '../storage/projections';
 
@@ -734,7 +734,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(stagedTargetClose.newState.accounts.get(targetUser)!.pulls?.has(route.targetPull!.pullId)).toBe(false);
 
     const accountAfterClear = materialized.newState.accounts.get(sourceUser)!;
-    const invalidProposalAccount = cloneAccountMachine(accountAfterClear);
+    const invalidProposalAccount = cloneAccountState(accountAfterClear);
     const validClose = materialized.accountTxs![0]!.tx;
     if (validClose.type !== 'cross_pull_close') throw new Error('TEST_CROSS_J_CLOSE_REQUIRED');
     const invalidClose: Extract<AccountTx, { type: 'cross_pull_close' }> = {

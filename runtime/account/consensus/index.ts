@@ -16,7 +16,7 @@ import type {
 } from '../../types';
 import {
   cloneAccountFrame,
-  cloneAccountMachine,
+  cloneAccountState,
   getAccountPerspective,
 } from '../../state-helpers';
 import { isLeft } from '../utils';
@@ -1625,7 +1625,7 @@ async function validateIncomingFrameOnClone(
   accountJClaimNodeStore: AccountJClaimNodeStore,
   securityContext: AccountInputSecurityContext,
 ): Promise<IncomingFrameValidationResult> {
-  const clonedMachine = cloneAccountMachine(account);
+  const clonedMachine = cloneAccountState(account);
   const jClaimSession = createAccountJClaimSession(env, accountJClaimNodeStore);
   const processEvents: string[] = [];
   const revealedSecrets: AccountRevealedSecret[] = [];

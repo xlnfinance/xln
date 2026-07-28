@@ -134,7 +134,7 @@ function buildTransformerAllowances(batch: RuntimeBatch): RuntimeAllowance[] {
  * This is the core function that transforms runtime state into on-chain proof format.
  * The resulting proofBodyHash is signed during bilateral consensus.
  *
- * @param accountMachine - Current bilateral account state
+ * @param account - Current bilateral account state
  * @param deltaTransformerAddress - Exact address resolved by the caller from
  *   this Account's trusted (chainId, Depository) jurisdiction replica. Keeping
  *   it explicit prevents one runtime or chain from changing another runtime's
@@ -142,16 +142,16 @@ function buildTransformerAllowances(batch: RuntimeBatch): RuntimeAllowance[] {
  * @returns ProofBodyResult with runtime, struct, encoded, and hash forms
  */
 export function buildAccountProofBody(
-  accountMachine: AccountState,
+  account: AccountState,
   deltaTransformerAddress: string,
 ): ProofBodyResult {
-  const watchSeed = normalizeAccountWatchSeed(accountMachine.watchSeed, 'PROOF_BODY');
+  const watchSeed = normalizeAccountWatchSeed(account.watchSeed, 'PROOF_BODY');
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Step 1: Extract and sort deltas (DETERMINISTIC ordering by tokenId)
   // ═══════════════════════════════════════════════════════════════════════════
 
-  const sortedDeltas = Array.from(accountMachine.deltas.entries())
+  const sortedDeltas = Array.from(account.deltas.entries())
     .sort((a, b) => a[0] - b[0]); // Sort by tokenId ascending
 
   const tokenIds: number[] = [];
@@ -175,7 +175,7 @@ export function buildAccountProofBody(
 
   // Convert HTLC locks to Payment structs
   // DETERMINISTIC: Sort by lockId for consistent ordering
-  const sortedLocks = sortTransformerEntries(accountMachine.locks.entries());
+  const sortedLocks = sortTransformerEntries(account.locks.entries());
 
   for (const [lockId, lock] of sortedLocks) {
     const deltaIndex = tokenIds.indexOf(lock.tokenId);
@@ -204,7 +204,7 @@ export function buildAccountProofBody(
 
   // Convert SwapOffers to Swap structs
   // DETERMINISTIC: Sort by offerId for consistent ordering
-  const sortedSwaps = sortTransformerEntries(accountMachine.swapOffers.entries());
+  const sortedSwaps = sortTransformerEntries(account.swapOffers.entries());
 
   for (const [offerId, offer] of sortedSwaps) {
     if (offer.crossJurisdiction) continue;
@@ -228,7 +228,7 @@ export function buildAccountProofBody(
     });
   }
 
-  const sortedPulls = sortTransformerEntries((accountMachine.pulls ?? new Map()).entries());
+  const sortedPulls = sortTransformerEntries((account.pulls ?? new Map()).entries());
   for (const [pullId, pull] of sortedPulls) {
     const deltaIndex = tokenIds.indexOf(pull.tokenId);
     if (deltaIndex === -1) {
@@ -266,7 +266,7 @@ export function buildAccountProofBody(
       allowances: buildTransformerAllowances(batch),
     });
   }
-  for (const [subcontractId, subcontract] of Array.from(accountMachine.subcontracts ?? [])
+  for (const [subcontractId, subcontract] of Array.from(account.subcontracts ?? [])
     .sort(([left], [right]) => compareStableText(left, right))) {
     const transformerAddress = requireContractAddress(`subcontract_${subcontractId}`, subcontract.transformerAddress);
     if (!ethers.isHexString(subcontract.encodedBatch)) {
@@ -369,13 +369,13 @@ function runtimeToProofBodyStruct(runtime: RuntimeProofBody): ProofBodyStruct {
   };
 }
 
-function getCanonicalAccountKey(accountMachine: DisputeHashAccount): string {
-  const leftEntity = String(accountMachine.leftEntity).toLowerCase();
-  const rightEntity = String(accountMachine.rightEntity).toLowerCase();
+function getCanonicalAccountKey(account: DisputeHashAccount): string {
+  const leftEntity = String(account.leftEntity).toLowerCase();
+  const rightEntity = String(account.rightEntity).toLowerCase();
   const [first, second] =
     leftEntity < rightEntity
-      ? [accountMachine.leftEntity, accountMachine.rightEntity]
-      : [accountMachine.rightEntity, accountMachine.leftEntity];
+      ? [account.leftEntity, account.rightEntity]
+      : [account.rightEntity, account.leftEntity];
   return ethers.solidityPacked(['bytes32', 'bytes32'], [first, second]);
 }
 
@@ -387,16 +387,16 @@ function getCanonicalAccountKey(accountMachine: DisputeHashAccount): string {
  * nonce, proofbodyHash, watchSeed)
  */
 export function encodeDisputeMessage(
-  accountMachine: DisputeHashAccount,
+  account: DisputeHashAccount,
   proofBodyHash: string,
   domain: DepositoryHankoDomain,
 ): string {
-  const chKey = getCanonicalAccountKey(accountMachine);
-  const watchSeed = normalizeAccountWatchSeed(accountMachine.watchSeed, 'DISPUTE_MESSAGE');
+  const chKey = getCanonicalAccountKey(account);
+  const watchSeed = normalizeAccountWatchSeed(account.watchSeed, 'DISPUTE_MESSAGE');
   return encodeDisputeProofHankoPayload(
     domain,
     chKey,
-    accountMachine.proofHeader.nextProofNonce,
+    account.proofHeader.nextProofNonce,
     proofBodyHash,
     watchSeed,
   );
@@ -407,16 +407,16 @@ export function encodeDisputeMessage(
  * This is what both parties sign to authorize a dispute proof
  */
 export function createDisputeProofHash(
-  accountMachine: DisputeHashAccount,
+  account: DisputeHashAccount,
   proofBodyHash: string,
   domain: DepositoryHankoDomain,
 ): string {
   return hashDisputeProofHankoPayload(
     domain,
-    getCanonicalAccountKey(accountMachine),
-    accountMachine.proofHeader.nextProofNonce,
+    getCanonicalAccountKey(account),
+    account.proofHeader.nextProofNonce,
     proofBodyHash,
-    normalizeAccountWatchSeed(accountMachine.watchSeed, 'DISPUTE_MESSAGE'),
+    normalizeAccountWatchSeed(account.watchSeed, 'DISPUTE_MESSAGE'),
   );
 }
 
@@ -432,19 +432,19 @@ export function createDisputeProofHash(
  * at the new nonce.
  */
 export function createDisputeProofHashWithNonce(
-  accountMachine: DisputeHashAccount,
+  account: DisputeHashAccount,
   proofBodyHash: string,
   domain: DepositoryHankoDomain,
   nonce: number,
 ): string {
-  const chKey = getCanonicalAccountKey(accountMachine);
-  const watchSeed = normalizeAccountWatchSeed(accountMachine.watchSeed, 'DISPUTE_MESSAGE');
+  const chKey = getCanonicalAccountKey(account);
+  const watchSeed = normalizeAccountWatchSeed(account.watchSeed, 'DISPUTE_MESSAGE');
   return hashDisputeProofHankoPayload(domain, chKey, nonce, proofBodyHash, watchSeed);
 }
 
 /** Matches Account.sol MessageType.CooperativeDisputeProof exactly. */
 export function createCooperativeDisputeProofHash(
-  accountMachine: DisputeHashAccount,
+  account: DisputeHashAccount,
   proofBodyHash: string,
   starterInitialArgumentsHash: string,
   domain: DepositoryHankoDomain,
@@ -452,7 +452,7 @@ export function createCooperativeDisputeProofHash(
 ): string {
   return hashCooperativeDisputeProofHankoPayload(
     domain,
-    getCanonicalAccountKey(accountMachine),
+    getCanonicalAccountKey(account),
     nonce,
     proofBodyHash,
     starterInitialArgumentsHash,
@@ -486,7 +486,7 @@ export function getDisputeDelayBlocks(configValue: number): number {
  * can reuse an address across chains, so either value alone is not a domain.
  */
 export function createSettlementHashWithNonce(
-  accountMachine: SettlementHashAccount,
+  account: SettlementHashAccount,
   diffs: Array<{
     tokenId: number;
     leftDiff: bigint;
@@ -501,7 +501,7 @@ export function createSettlementHashWithNonce(
   // Account key is canonical (left:right)
   const accountKey = ethers.solidityPacked(
     ['bytes32', 'bytes32'],
-    [accountMachine.leftEntity, accountMachine.rightEntity]
+    [account.leftEntity, account.rightEntity]
   );
 
   // Match Account.sol CooperativeUpdate encoding exactly:

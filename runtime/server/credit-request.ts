@@ -1,7 +1,7 @@
 import type { RuntimeState, RuntimeInput } from '../types';
 import { safeStringify } from '../protocol/serialization';
 import { resolveEntityProposerId } from '../state-helpers';
-import { getAccountMachine, getEntityOutCapacity, hasAccount } from './entity-lookup';
+import { getAccountState, getEntityOutCapacity, hasAccount } from './entity-lookup';
 import { getFaucetHubProfiles } from './faucet-hubs';
 import { getRequestCreditCap } from './hub-health';
 import { isEntityId32 } from './utils';
@@ -56,8 +56,8 @@ export const handleCreditRequest = async (input: {
     }
 
     const hubEntityId = hubProfile.entityId;
-    const accountMachine = getAccountMachine(env, hubEntityId, userEntityId);
-    if (!accountMachine || !hasAccount(env, hubEntityId, userEntityId)) {
+    const account = getAccountState(env, hubEntityId, userEntityId);
+    if (!account || !hasAccount(env, hubEntityId, userEntityId)) {
       return new Response(
         JSON.stringify({
           error: 'No bilateral account with selected hub. Open account first.',
@@ -76,7 +76,7 @@ export const handleCreditRequest = async (input: {
     const approvedAmount = requestedAmount > getRequestCreditCap(tokenId)
       ? getRequestCreditCap(tokenId)
       : requestedAmount;
-    const currentOutCapacity = getEntityOutCapacity(accountMachine, hubEntityId, tokenId);
+    const currentOutCapacity = getEntityOutCapacity(account, hubEntityId, tokenId);
     if (currentOutCapacity >= approvedAmount) {
       return new Response(
         JSON.stringify({

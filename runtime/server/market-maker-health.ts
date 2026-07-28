@@ -107,7 +107,7 @@ const accountReady = (
 export const getMarketMakerHealth = (
   env: RuntimeState | null,
   state: MarketMakerServerState,
-  getAccountMachine: (env: RuntimeState, entityId: string, counterpartyId: string) => AccountState | null,
+  getAccountState: (env: RuntimeState, entityId: string, counterpartyId: string) => AccountState | null,
 ): {
   applicable: boolean;
   enabled: boolean;
@@ -195,7 +195,7 @@ export const getMarketMakerHealth = (
   }
 
   const perHub = hubs.map(hubEntityId => {
-    const account = getAccountMachine(env, entityId, hubEntityId);
+    const account = getAccountState(env, entityId, hubEntityId);
     const isAccountReady = accountReady(account);
     let reason: 'missing-account' | 'inactive-account' | 'height-zero' | 'pending-frame' | 'mempool' | null = null;
     if (!account) reason = 'missing-account';

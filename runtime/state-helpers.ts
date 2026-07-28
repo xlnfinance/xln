@@ -676,7 +676,7 @@ export const cloneTrustedEntityReplica = (
 /**
  * Clone AccountState for validation (replaces dryRun pattern)
  */
-export function cloneAccountMachine(account: AccountState, forSnapshot: boolean = false): AccountState {
+export function cloneAccountState(account: AccountState, forSnapshot: boolean = false): AccountState {
   // Snapshot state intentionally excludes the validation candidate. It is
   // transient consensus work, not durable Account state.
   if (forSnapshot) {

@@ -245,7 +245,7 @@ import { fitCrossAmountsToOrderbook } from '../orchestrator/mm-node';
 
 import {
   clearReplayOutputSignerHints,
-  cloneAccountMachine,
+  cloneAccountState,
   installReplayOutputSignerHints,
   resolveEntityProposerId,
 } from '../state-helpers';
@@ -788,7 +788,7 @@ describe('audit fail-fast regressions', () => {
       left.entityId,
       right.entityId,
     );
-    const receiver = cloneAccountMachine(proposer);
+    const receiver = cloneAccountState(proposer);
     receiver.mempool = [];
     receiver.proofHeader = { fromEntity: right.entityId, toEntity: left.entityId, nextProofNonce: 0 };
 
@@ -837,7 +837,7 @@ describe('audit fail-fast regressions', () => {
       },
     };
     const proposer = makeProposalAccount([structuredClone(claim)], left.entityId, right.entityId);
-    const receiver = cloneAccountMachine(proposer);
+    const receiver = cloneAccountState(proposer);
     receiver.mempool = [structuredClone(claim)];
     receiver.proofHeader = { fromEntity: right.entityId, toEntity: left.entityId, nextProofNonce: 0 };
 
@@ -964,7 +964,7 @@ describe('audit fail-fast regressions', () => {
       data: { lockId, outcome: 'secret', secret },
     };
     const proposer = makeProposalAccount([resolveTx], left.entityId, right.entityId);
-    const receiver = cloneAccountMachine(proposer);
+    const receiver = cloneAccountState(proposer);
     receiver.mempool = [];
     receiver.proofHeader = { fromEntity: right.entityId, toEntity: left.entityId, nextProofNonce: 0 };
     for (const account of [proposer, receiver]) {
@@ -1091,7 +1091,7 @@ describe('audit fail-fast regressions', () => {
       proposal: { frame: invalidFrame, frameHanko },
     };
 
-    const accountResult = await applyAccountInput(env, cloneAccountMachine(receiver), accountInput, {
+    const accountResult = await applyAccountInput(env, cloneAccountState(receiver), accountInput, {
       entityTimestamp: env.timestamp,
       finalizedJHeight: 0,
     });
@@ -1197,7 +1197,7 @@ describe('audit fail-fast regressions', () => {
     const receiverState = makeEntityState(right.entityId);
     receiverState.config = makeSingleSignerConfigFor(right.signerId);
     receiverState.timestamp = env.timestamp;
-    receiverState.accounts.set(left.entityId, cloneAccountMachine(receiver));
+    receiverState.accounts.set(left.entityId, cloneAccountState(receiver));
     const applied = await applyEntityTx(env, receiverState, {
       type: 'accountInput',
       data: accountInput,
@@ -1645,7 +1645,7 @@ describe('audit fail-fast regressions', () => {
     const delta = createDefaultDelta(1);
     delta.leftCreditLimit = 1_000n;
     proposer.deltas.set(1, delta);
-    const receiver = cloneAccountMachine(proposer);
+    const receiver = cloneAccountState(proposer);
     receiver.proofHeader = { fromEntity: right, toEntity: left, nextProofNonce: 0 };
 
     const proposed = await proposeAccountFrame(env, proposer, env.timestamp);
@@ -1678,8 +1678,8 @@ describe('audit fail-fast regressions', () => {
     base.deltas.set(1, createDefaultDelta(1));
     const committedEntityTimestamp = 1_777;
 
-    const proposer = await proposeAccountFrame(proposerEnv, cloneAccountMachine(base), committedEntityTimestamp);
-    const validator = await proposeAccountFrame(validatorEnv, cloneAccountMachine(base), committedEntityTimestamp);
+    const proposer = await proposeAccountFrame(proposerEnv, cloneAccountState(base), committedEntityTimestamp);
+    const validator = await proposeAccountFrame(validatorEnv, cloneAccountState(base), committedEntityTimestamp);
 
     expect(proposer.success).toBe(true);
     expect(validator.success).toBe(true);

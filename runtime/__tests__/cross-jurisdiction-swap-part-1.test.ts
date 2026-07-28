@@ -58,7 +58,7 @@ import { generateLazyEntityId } from '../entity/factory';
 
 import { createDefaultDelta } from '../validation-utils';
 
-import { cloneAccountMachine, cloneEntityReplica, cloneEntityState } from '../state-helpers';
+import { cloneAccountState, cloneEntityReplica, cloneEntityState } from '../state-helpers';
 
 import { projectAccountDoc, projectEntityCoreDoc } from '../storage/projections';
 
@@ -1178,7 +1178,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(hubOnlySourceAccount.swapOffers.has(prepared.orderId)).toBe(false);
     expect(buildAccountProofBody(hubOnlySourceAccount, '').runtimeProofBody.transformers).toEqual([]);
     const hubOnlyResolve = await applyAccountTx(
-      cloneAccountMachine(hubOnlySourceAccount),
+      cloneAccountState(hubOnlySourceAccount),
       {
         type: 'pull_resolve',
         data: { pullId: prepared.sourcePull!.pullId, binary: '0x' },

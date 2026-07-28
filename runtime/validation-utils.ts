@@ -895,7 +895,7 @@ const validatePendingAccountResend = (
  * Validates AccountState objects - Bilateral account state machines
  * CRITICAL: Account integrity ensures payment routing safety
  */
-export function validateAccountMachine(value: unknown, context = 'AccountState'): AccountState {
+export function validateAccountState(value: unknown, context = 'AccountState'): AccountState {
   const obj = validateObject(value, context);
 
   // CANONICAL REPRESENTATION: Validate leftEntity/rightEntity (not counterpartyEntityId)
@@ -1368,8 +1368,8 @@ export function validateEntityState(value: unknown, context = 'EntityState'): En
     }
   }
 
-  for (const [accountId, accountMachine] of obj['accounts'].entries()) {
-    validateAccountMachine(accountMachine, `${context}.accounts[${String(accountId)}]`);
+  for (const [accountId, account] of obj['accounts'].entries()) {
+    validateAccountState(account, `${context}.accounts[${String(accountId)}]`);
   }
 
   if (obj['crontabState'] !== undefined) {

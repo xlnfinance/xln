@@ -111,7 +111,7 @@ import type { EntityInput, RuntimeState, JReplica } from '../types';
 import {
   BOOTSTRAP_POLL_MS,
   DEFAULT_ACCOUNT_TOKEN_IDS,
-  getAccountMachine,
+  getAccountState,
   getBootstrapCreditAmount,
   getBootstrapTokenAmount,
   getCreditGrantedByEntity,
@@ -1412,7 +1412,7 @@ const visibleDirectSupportPeers = (
 
 const buildPairHealth = (env: RuntimeState, selfEntityId: string, peers: Array<{ name: string; entityId: string }>): HubPairHealth[] => {
   return peers.map(peer => {
-    const account = getAccountMachine(env, selfEntityId, peer.entityId);
+    const account = getAccountState(env, selfEntityId, peer.entityId);
     const grantedByMe = account ? getCreditGrantedByEntity(account, selfEntityId, HUB_MESH_TOKEN_ID) : 0n;
     const grantedByPeer = account ? getCreditGrantedByEntity(account, peer.entityId, HUB_MESH_TOKEN_ID) : 0n;
     return {
@@ -1783,7 +1783,7 @@ const run = async (): Promise<void> => {
             error: 'hubEntityId and counterpartyEntityId are required',
           }), { status: 400, headers });
         }
-        const account = getAccountMachine(env, hubEntityId, counterpartyEntityId);
+        const account = getAccountState(env, hubEntityId, counterpartyEntityId);
         const replica = getEntityReplicaById(env, hubEntityId);
         const runtimeState = env.runtimeState;
         const summarizeRuntimeInputs = (inputs: Array<{ entityId?: string; entityTxs?: Array<{ type?: string }> }> | undefined) =>
@@ -2308,7 +2308,7 @@ const run = async (): Promise<void> => {
           owner,
         );
         for (const peer of visibleSupportPeers) {
-          const localAccount = getAccountMachine(env, owner.entityId, peer.entityId);
+          const localAccount = getAccountState(env, owner.entityId, peer.entityId);
           const canWrite = !localAccount?.pendingFrame && Number(localAccount?.mempool?.length || 0) === 0;
           if (
             isCanonicalAccountOpener(owner.entityId, peer.entityId) &&
@@ -2350,7 +2350,7 @@ const run = async (): Promise<void> => {
       };
 
       for (const peer of peers) {
-        const localAccount = getAccountMachine(env, bootstrap.entityId, peer.entityId);
+        const localAccount = getAccountState(env, bootstrap.entityId, peer.entityId);
         const canWrite = !localAccount?.pendingFrame && Number(localAccount?.mempool?.length || 0) === 0;
         if (
           isCanonicalAccountOpener(bootstrap.entityId, peer.entityId) &&
@@ -2404,7 +2404,7 @@ const run = async (): Promise<void> => {
         peers.length === Math.max(0, resolvedArgs.meshHubNames.length - 1) &&
         peers.every(peer =>
           hasAccount(env, bootstrap.entityId, peer.entityId) &&
-          DEFAULT_ACCOUNT_TOKEN_IDS.every((tokenId) => Boolean(getAccountMachine(env, bootstrap.entityId, peer.entityId)?.deltas.get(tokenId))),
+          DEFAULT_ACCOUNT_TOKEN_IDS.every((tokenId) => Boolean(getAccountState(env, bootstrap.entityId, peer.entityId)?.deltas.get(tokenId))),
         );
       if (allAccountsReady && !accountsReadyMarked) {
         finishTiming('mesh_accounts', startedAtFor('mesh_accounts') ?? startTiming('mesh_accounts'));

@@ -1715,8 +1715,8 @@ function updateMempoolIndicators() {
     let accountMempoolOut = 0;
     let accountMempoolIn = 0;
     if (replica?.state?.accounts) {
-      for (const [, accountMachine] of replica.state.accounts) {
-        const pending = graphAccountMempoolCount(accountMachine);
+      for (const [, account] of replica.state.accounts) {
+        const pending = graphAccountMempoolCount(account);
         accountMempoolOut += pending;
       }
     }

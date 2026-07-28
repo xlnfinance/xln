@@ -1,5 +1,5 @@
 import type { AccountState, AccountTx, RuntimeState } from '../../types';
-import { cloneAccountMachine } from '../../state-helpers';
+import { cloneAccountState } from '../../state-helpers';
 import { isLeft } from '../utils';
 import { HEAVY_LOGS } from '../../utils';
 import { applyAccountTx } from '../tx/apply';
@@ -225,7 +225,7 @@ const validateOptimisticBatch = async (
   jClaimSession: ReturnType<typeof createAccountJClaimSession>,
 ): Promise<{ machine: AccountState; applied: AppliedProposalTx[] } | null> => {
   if (!shouldUseOptimisticProposalBatch(context.proposalWindow)) return null;
-  const machine = cloneAccountMachine(context.account);
+  const machine = cloneAccountState(context.account);
   const applied: AppliedProposalTx[] = [];
   for (const tx of context.proposalWindow) {
     if (HEAVY_LOGS) accountLog.debug('batch.optimistic_tx', { type: tx.type });
@@ -267,10 +267,10 @@ export const validateProposalTransactions = async (
     };
   }
 
-  let clonedMachine = cloneAccountMachine(context.account);
+  let clonedMachine = cloneAccountState(context.account);
   for (const tx of context.proposalWindow) {
     if (HEAVY_LOGS) accountLog.debug('tx.process', { type: tx.type });
-    const txMachine = cloneAccountMachine(clonedMachine);
+    const txMachine = cloneAccountState(clonedMachine);
     const applied = await applyProposalTransaction(context, txMachine, tx, jClaimSession);
     if (!applied.result.success) {
       const disposition = classifyFailedTransaction(context, clonedMachine, applied, effects);

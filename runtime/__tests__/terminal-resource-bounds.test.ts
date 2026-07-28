@@ -12,7 +12,7 @@ import { setHtlcRouteNote, terminateHtlcRoute } from '../entity/tx/htlc-route-li
 import { applyHtlcTimeoutFollowups } from '../entity/tx/handlers/account/committed-htlc-followups';
 import { createEmptyEnv } from '../runtime';
 import type { AccountState, EntityState, SwapOffer } from '../types';
-import { validateAccountMachine, validateEntityState } from '../validation-utils';
+import { validateAccountState, validateEntityState } from '../validation-utils';
 
 const leftEntity = `0x${'11'.repeat(32)}`;
 const rightEntity = `0x${'22'.repeat(32)}`;
@@ -266,7 +266,7 @@ test('decode validation rejects oversized swap history, resolve history, and HTL
       }];
     },
   ));
-  expect(() => validateAccountMachine(account, 'oversizedSwapHistory')).toThrow(
+  expect(() => validateAccountState(account, 'oversizedSwapHistory')).toThrow(
     'ACCOUNT_TERMINAL_SWAP_HISTORY_LIMIT_EXCEEDED',
   );
 
@@ -288,7 +288,7 @@ test('decode validation rejects oversized swap history, resolve history, and HTL
       (_, index) => ({ fillRatio: index, cancelRemainder: false, height: index }),
     ),
   });
-  expect(() => validateAccountMachine(oversizedResolves, 'oversizedSwapResolves')).toThrow(
+  expect(() => validateAccountState(oversizedResolves, 'oversizedSwapResolves')).toThrow(
     'ACCOUNT_SWAP_RESOLVE_HISTORY_LIMIT_EXCEEDED',
   );
 

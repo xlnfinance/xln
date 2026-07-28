@@ -3,7 +3,7 @@ import { scaleWholeTokenAmount, type RuntimeState } from '../types';
 import type { JTokenInfo } from '../jadapter/types';
 import { getBootstrapTokenAmount } from '../jurisdiction/bootstrap-economy';
 import {
-  getAccountMachine,
+  getAccountState,
   getEntityOutCapacity,
   getEntityReplicaById,
   hasAccount,
@@ -61,8 +61,8 @@ export const getHubMeshHealth = (env: RuntimeState | null, activeHubEntityIds: r
     for (let j = i + 1; j < hubIds.length; j++) {
       const left = hubIds[i]!;
       const right = hubIds[j]!;
-      const leftAccount = getAccountMachine(env, left, right);
-      const rightAccount = getAccountMachine(env, right, left);
+      const leftAccount = getAccountState(env, left, right);
+      const rightAccount = getAccountState(env, right, left);
       const leftHasAccount = hasAccount(env, left, right);
       const rightHasAccount = hasAccount(env, right, left);
       const leftOutCapacity = getEntityOutCapacity(leftAccount, left, HUB_MESH_TOKEN_ID);

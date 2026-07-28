@@ -25,7 +25,7 @@ import type {
   EntityState,
   JurisdictionConfig,
 } from '../types';
-import { validateAccountMachine, validateEntityState } from '../validation-utils';
+import { validateAccountState, validateEntityState } from '../validation-utils';
 
 const entityId = `0x${'11'.repeat(32)}`;
 const counterpartyId = `0x${'22'.repeat(32)}`;
@@ -314,7 +314,7 @@ test('Account validation and storage hydration reject an undrainable mempool', (
   const account = makeAccount(
     Array.from({ length: LIMITS.ACCOUNT_MEMPOOL_SIZE + 1 }, (_, index) => memoTx(index)),
   );
-  expect(() => validateAccountMachine(account, 'oversizedAccount')).toThrow(
+  expect(() => validateAccountState(account, 'oversizedAccount')).toThrow(
     'ACCOUNT_MEMPOOL_LIMIT_EXCEEDED',
   );
   expect(() => hydrateAccountDocFromStorage(projectAccountDoc(account))).toThrow(

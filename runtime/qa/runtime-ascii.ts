@@ -5,7 +5,7 @@
  * Usage:
  *   console.log(formatRuntime(env));
  *   console.log(formatEntity(entityState));
- *   console.log(formatAccount(accountMachine, myEntityId));
+ *   console.log(formatAccount(account, myEntityId));
  */
 
 import type { RuntimeState, EntityState, AccountState } from '../types';

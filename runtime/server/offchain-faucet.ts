@@ -7,7 +7,7 @@ import { createStructuredLogger, shortId } from '../infra/logger';
 import { encodeRebalancePolicyMemo } from '../extensions/rebalance/policy';
 import { resolveEntityProposerId } from '../state-helpers';
 import { getErrorMessage, isEntityId32 } from './utils';
-import { getAccountMachine, getEntityOutCapacity, getEntityReplicaById, hasAccount } from './entity-lookup';
+import { getAccountState, getEntityOutCapacity, getEntityReplicaById, hasAccount } from './entity-lookup';
 import { getFaucetHubProfiles } from './faucet-hubs';
 import type { RegisterReceiptOptions, RuntimeIngressReceipt } from './ingress-receipts';
 import {
@@ -248,8 +248,8 @@ export const handleOffchainFaucet = async (input: {
       });
 
       const amountWei = ethers.parseUnits(amount, getTokenInfo(Number(tokenId)).decimals);
-      const accountMachine = getAccountMachine(env, hubEntityId, normalizedUserEntityId);
-      const hasHubAccount = hasAccount(env, hubEntityId, normalizedUserEntityId) || !!accountMachine;
+      const account = getAccountState(env, hubEntityId, normalizedUserEntityId);
+      const hasHubAccount = hasAccount(env, hubEntityId, normalizedUserEntityId) || !!account;
       const buildAccountPresence = () => hubs.map(hub => ({
         hubEntityId: hub.entityId,
         hasAccount: hasAccount(env, hub.entityId, normalizedUserEntityId),
@@ -289,7 +289,7 @@ export const handleOffchainFaucet = async (input: {
           { status: 409, headers },
         );
       }
-      const accountState = describeOffchainFaucetAccountState(accountMachine);
+      const accountState = describeOffchainFaucetAccountState(account);
       if (!accountState.settledCapacitySnapshot) {
         pushDebugEvent(relayStore, {
           event: 'debug_event',
@@ -304,9 +304,9 @@ export const handleOffchainFaucet = async (input: {
           },
         });
       }
-      const currentOutCapacity = getEntityOutCapacity(accountMachine, hubEntityId, tokenId);
+      const currentOutCapacity = getEntityOutCapacity(account, hubEntityId, tokenId);
       if (shouldRejectOffchainFaucetForSettledCapacity({
-        account: accountMachine,
+        account: account,
         senderOutCapacity: currentOutCapacity,
         amount: amountWei,
       })) {

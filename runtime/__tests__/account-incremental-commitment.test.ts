@@ -10,7 +10,7 @@ import {
   computeAccountStateRoot,
   computeAccountStateRootCold,
 } from '../account/state-root';
-import { cloneAccountMachine, cloneEntityState } from '../state-helpers';
+import { cloneAccountState, cloneEntityState } from '../state-helpers';
 import type { AccountState, EntityState, SwapOffer } from '../types';
 import { createDefaultDelta } from '../validation-utils';
 
@@ -88,7 +88,7 @@ describe('incremental Account commitment', () => {
     const cached = measured(() => computeAccountStateRoot(base));
     expect(cached.value).toBe(cold.value);
 
-    const changed = cloneAccountMachine(base);
+    const changed = cloneAccountState(base);
     const changedOffer = changed.swapOffers.get('offer-05000')!;
     changedOffer.giveAmount += 1n;
     changed.deltas.get(2)!.offdelta += 1n;
@@ -158,7 +158,7 @@ describe('incremental Account commitment', () => {
     const base = account(10_000);
     computeAccountStateRoot(base);
 
-    const proposed = cloneAccountMachine(base);
+    const proposed = cloneAccountState(base);
     proposed.swapOffers.get('offer-05000')!.giveAmount += 1n;
     invalidateAccountMapCommitment(proposed, 'swapOffers', 'offer-05000');
     const expectedRoot = computeAccountStateRoot(proposed);

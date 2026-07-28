@@ -40,7 +40,7 @@ export type RuntimeHealthDeps = {
   };
   activeHubEntityIds: string[];
   marketMakerState: MarketMakerServerState;
-  getAccountMachine: Parameters<typeof getMarketMakerHealth>[2];
+  getAccountState: Parameters<typeof getMarketMakerHealth>[2];
   ensureTokenCatalog: () => Promise<JTokenInfo[]>;
 };
 
@@ -131,7 +131,7 @@ export const handleRuntimeHealth = async (
           accounts: env ? getReplicaAccountCount(env, entityId) ?? hub.accounts : hub.accounts,
         };
       });
-      const marketMaker = getMarketMakerHealth(env, deps.marketMakerState, deps.getAccountMachine);
+      const marketMaker = getMarketMakerHealth(env, deps.marketMakerState, deps.getAccountState);
       const bootstrapReserves =
         hubMeshApplicable || marketMaker.applicable
           ? await getBootstrapReserveHealth(env, {

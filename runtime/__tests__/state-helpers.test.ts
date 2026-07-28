@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 
-import { cloneAccountMachine, cloneEntityReplica, cloneEntityState } from '../state-helpers';
+import { cloneAccountState, cloneEntityReplica, cloneEntityState } from '../state-helpers';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
 import { buildCanonicalEntityReplicaSnapshot } from '../wal/snapshot';
 import { validateConsensusConfig, validateEntityReplica } from '../validation-utils';
@@ -384,7 +384,7 @@ describe('state helper cloning', () => {
       uncloneable: () => undefined,
     } as any;
 
-    expect(() => cloneAccountMachine(account))
+    expect(() => cloneAccountState(account))
       .toThrow('ACCOUNT_STATE_STRUCTURED_CLONE_FAILED:path=$.uncloneable');
   });
 
@@ -393,7 +393,7 @@ describe('state helper cloning', () => {
     delete account.pulls;
     delete account.uncloneable;
 
-    const cloned = cloneAccountMachine(account);
+    const cloned = cloneAccountState(account);
 
     expect(Object.hasOwn(cloned, 'pulls')).toBe(false);
   });
@@ -401,7 +401,7 @@ describe('state helper cloning', () => {
   test('account clone isolates mempool, dispute evidence, and cross-j routes', () => {
     const account = makeManualFallbackAccount();
     delete (account as Record<string, unknown>).uncloneable;
-    const cloned = cloneAccountMachine(account as any);
+    const cloned = cloneAccountState(account as any);
 
     (cloned.mempool[0] as any).data.nested.memo = 'mutated';
     (cloned.disputeProofBodiesByHash as any).proof.offdeltas[0] = 999n;

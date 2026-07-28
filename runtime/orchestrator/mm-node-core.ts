@@ -48,7 +48,7 @@ import {
   collectQueuedSwapOfferIds,
   DEFAULT_ACCOUNT_TOKEN_IDS,
   deriveMarketMakerEntityId,
-  getAccountMachine,
+  getAccountState,
   getBootstrapCreditAmount,
   getEntityOutCapacity,
   getEntityReplicaById,
@@ -1444,7 +1444,7 @@ export const countCommittedMarketMakerOffersForHubPair = (
   hubEntityId: string,
   pair: { baseTokenId: number; quoteTokenId: number },
 ): number => {
-  const account = getAccountMachine(env, mmEntityId, hubEntityId);
+  const account = getAccountState(env, mmEntityId, hubEntityId);
   if (!account) return 0;
   const prefix = `mm-${hubEntityId.slice(-6).toLowerCase()}-${pair.baseTokenId}-${pair.quoteTokenId}-`;
   let count = 0;
@@ -1455,7 +1455,7 @@ export const countCommittedMarketMakerOffersForHubPair = (
 };
 
 const countMarketMakerOffersForHub = (env: RuntimeState, mmEntityId: string, hubEntityId: string): number => {
-  const account = getAccountMachine(env, mmEntityId, hubEntityId);
+  const account = getAccountState(env, mmEntityId, hubEntityId);
   if (!account) return 0;
   const prefix = `mm-${hubEntityId.slice(-6).toLowerCase()}-`;
   let count = 0;
@@ -1466,7 +1466,7 @@ const countMarketMakerOffersForHub = (env: RuntimeState, mmEntityId: string, hub
 };
 
 export const countCommittedMarketMakerOffersForHub = (env: RuntimeState, mmEntityId: string, hubEntityId: string): number => {
-  const account = getAccountMachine(env, mmEntityId, hubEntityId);
+  const account = getAccountState(env, mmEntityId, hubEntityId);
   if (!account) return 0;
   const prefix = `mm-${hubEntityId.slice(-6).toLowerCase()}-`;
   let count = 0;
@@ -1477,7 +1477,7 @@ export const countCommittedMarketMakerOffersForHub = (env: RuntimeState, mmEntit
 };
 
 export const isSameQuoteJobDepthReady = (env: RuntimeState, job: SameQuoteJob): boolean => {
-  const account = getAccountMachine(env, job.context.entityId, job.hub.entityId);
+  const account = getAccountState(env, job.context.entityId, job.hub.entityId);
   if (!hasCommittedAccountState(account)) return false;
   const specs = buildMarketMakerOfferSpecs([job.hub.entityId], job.tokenIds);
   if (specs.length === 0) return true;
@@ -1589,7 +1589,7 @@ export const ensureMarketMakerHubConnectivity = async (
   };
 
   collectOpenAccountInputs: for (const hubEntityId of hubEntityIds) {
-    const mmAccount = getAccountMachine(env, mmEntityId, hubEntityId);
+    const mmAccount = getAccountState(env, mmEntityId, hubEntityId);
     const hasPendingConsensus = Boolean(mmAccount?.pendingFrame) || Number(mmAccount?.mempool?.length || 0) > 0;
     if (
       !mmAccount &&
@@ -1626,7 +1626,7 @@ export const ensureMarketMakerHubConnectivity = async (
   }
 
   collectCreditInputs: for (const hubEntityId of hubEntityIds) {
-    const mmAccount = getAccountMachine(env, mmEntityId, hubEntityId);
+    const mmAccount = getAccountState(env, mmEntityId, hubEntityId);
     const hasPendingConsensus = Boolean(mmAccount?.pendingFrame) || Number(mmAccount?.mempool?.length || 0) > 0;
     if (hasPendingConsensus) continue;
     if (!mmAccount) continue;
@@ -1670,7 +1670,7 @@ const isMarketMakerConnectivityReady = (
   tokenIds: number[],
 ): boolean =>
   hubEntityIds.every(hubEntityId => {
-    const account = getAccountMachine(env, mmEntityId, hubEntityId);
+    const account = getAccountState(env, mmEntityId, hubEntityId);
     if (!hasCommittedAccountState(account)) return false;
     return tokenIds.every(tokenId =>
       hasPairMutualCredit(env, mmEntityId, hubEntityId, tokenId, getBootstrapCreditAmount(tokenId)),
@@ -1719,7 +1719,7 @@ export const maintainMarketMakerQuotes = async (
     await yieldMarketMakerApi();
     if (!shouldContinue()) return false;
     if (remainingNewOffers <= 0) break;
-    const account = getAccountMachine(env, mmEntityId, hubEntityId);
+    const account = getAccountState(env, mmEntityId, hubEntityId);
     if (!account) continue;
     if (String(account.status || 'active') !== 'active') continue;
     if (!isAccountConsensusReady(account)) continue;
@@ -1809,7 +1809,7 @@ const isMatchingCrossOfferRoute = (
 };
 
 const hasSourceAccountCrossOffer = (env: RuntimeState, route: CrossJurisdictionSwapRoute): boolean => {
-  const account = getAccountMachine(env, route.source.entityId, route.source.counterpartyEntityId);
+  const account = getAccountState(env, route.source.entityId, route.source.counterpartyEntityId);
   if (!account) return false;
   const committed = account.swapOffers?.get(route.orderId);
   if (isMatchingCrossOfferRoute(committed?.crossJurisdiction, route)) return true;
@@ -1823,7 +1823,7 @@ const hasSourceAccountCrossOffer = (env: RuntimeState, route: CrossJurisdictionS
 };
 
 export const getCommittedSourceAccountCrossOffer = (env: RuntimeState, route: CrossJurisdictionSwapRoute): SwapOffer | null => {
-  const account = getAccountMachine(env, route.source.entityId, route.source.counterpartyEntityId);
+  const account = getAccountState(env, route.source.entityId, route.source.counterpartyEntityId);
   const committed = account?.swapOffers?.get(route.orderId);
   return isMatchingCrossOfferRoute(committed?.crossJurisdiction, route) ? committed! : null;
 };
@@ -1855,7 +1855,7 @@ export const hasFinalizedMarketMakerCrossOffer = (env: RuntimeState, spec: Marke
 };
 
 export const hasMarketMakerAccountBacklog = (env: RuntimeState, entityId: string, hubEntityId: string): boolean => {
-  const account = getAccountMachine(env, entityId, hubEntityId);
+  const account = getAccountState(env, entityId, hubEntityId);
   return Boolean(account?.pendingFrame) || Number(account?.mempool?.length || 0) > 0;
 };
 

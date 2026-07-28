@@ -16,7 +16,7 @@ import { computeCanonicalEntityHashesFromEnv } from '../storage/canonical-hash';
 import type { CrossJurisdictionSwapRoute,EntityInput,RuntimeState,SwapOffer } from '../types';
 import {
 HUB_REQUIRED_TOKEN_COUNT,
-getAccountMachine,
+getAccountState,
 getBootstrapCreditAmount,
 getCreditGrantedByEntity,
 getEntityOutCapacity,
@@ -132,7 +132,7 @@ const describeMarketMakerAccountBlocker = (
   entityId: string,
   counterpartyEntityId: string,
 ): MarketMakerCrossRouteBlocker | null => {
-  const account = getAccountMachine(env, entityId, counterpartyEntityId);
+  const account = getAccountState(env, entityId, counterpartyEntityId);
   const status = account ? String(account.status || 'active') : null;
   const currentHeight = account ? Number(account.currentHeight ?? 0) : null;
   const pendingFrame = Boolean(account?.pendingFrame);
@@ -161,7 +161,7 @@ export const describeMarketMakerSameHubBlocker = (
   entityId: string,
   counterpartyEntityId: string,
 ): MarketMakerAccountBlocker | null => {
-  const account = getAccountMachine(env, entityId, counterpartyEntityId);
+  const account = getAccountState(env, entityId, counterpartyEntityId);
   const status = account ? String(account.status || 'active') : null;
   const currentHeight = account ? Number(account.currentHeight ?? 0) : null;
   const pendingFrame = Boolean(account?.pendingFrame);
@@ -609,7 +609,7 @@ export const maintainMarketMakerCrossQuotes = async (
       if (!shouldContinue()) return false;
       if (remainingNewOffers <= 0 || remainingSourceHubGroups <= 0) break;
       const sourceHubEntityId = sourceHub.entityId;
-      const account = getAccountMachine(env, sourceContext.entityId, sourceHubEntityId);
+      const account = getAccountState(env, sourceContext.entityId, sourceHubEntityId);
       if (!account) continue;
       if (String(account.status || 'active') !== 'active') continue;
       if (!isAccountConsensusReady(account)) continue;
@@ -633,7 +633,7 @@ export const maintainMarketMakerCrossQuotes = async (
       const specs = sourceHubSpecs.filter(spec => {
         const route = spec.crossJurisdiction;
         if (!route) return false;
-        const targetAccount = getAccountMachine(env, targetContext.entityId, route.target.entityId);
+        const targetAccount = getAccountState(env, targetContext.entityId, route.target.entityId);
         if (!targetAccount) return false;
         if (String(targetAccount.status || 'active') !== 'active') return false;
         return isAccountConsensusReady(targetAccount);
@@ -805,7 +805,7 @@ export const maintainMarketMakerCrossQuotes = async (
   for (const [sourceHubEntityId, specs] of groupedEntries) {
     await yieldMarketMakerApi();
     if (!shouldContinue()) return false;
-    const account = getAccountMachine(env, sourceContext.entityId, sourceHubEntityId);
+    const account = getAccountState(env, sourceContext.entityId, sourceHubEntityId);
     if (!account) continue;
     if (String(account.status || 'active') !== 'active') continue;
     if (!isAccountConsensusReady(account)) continue;
@@ -830,7 +830,7 @@ export const maintainMarketMakerCrossQuotes = async (
       )
       .filter(spec => {
         const route = spec.crossJurisdiction!;
-        const targetAccount = getAccountMachine(env, targetContext.entityId, route.target.entityId);
+        const targetAccount = getAccountState(env, targetContext.entityId, route.target.entityId);
         if (!targetAccount) return false;
         if (String(targetAccount.status || 'active') !== 'active') return false;
         if (!isAccountConsensusReady(targetAccount)) return false;
@@ -967,7 +967,7 @@ export const getMarketMakerHealth = (
   }
 
   const hubs = hubEntityIds.map((hubEntityId) => {
-    const account = getAccountMachine(env, mmEntityId, hubEntityId);
+    const account = getAccountState(env, mmEntityId, hubEntityId);
     const blocker = describeMarketMakerSameHubBlocker(env, mmEntityId, hubEntityId);
     const accountReady = !blocker && hasCommittedAccountState(account);
     const offers = countCommittedMarketMakerOffersForHub(env, mmEntityId, hubEntityId);
@@ -994,7 +994,7 @@ export const getMarketMakerHealth = (
   });
 
   const connectivity = hubEntityIds.map((hubEntityId) => {
-    const account = getAccountMachine(env, mmEntityId, hubEntityId);
+    const account = getAccountState(env, mmEntityId, hubEntityId);
     return {
       hubEntityId,
       accountReady: isAccountConsensusReady(account),
@@ -1151,7 +1151,7 @@ const collectCommittedMarketMakerOfferFingerprintsForHub = (
   hubEntityId: string,
   hubRole: string,
 ): Array<Record<string, unknown>> => {
-  const account = getAccountMachine(env, mmEntityId, hubEntityId);
+  const account = getAccountState(env, mmEntityId, hubEntityId);
   const prefix = `mm-${hubEntityId.slice(-6).toLowerCase()}-`;
   return Array.from(account?.swapOffers?.entries?.() ?? [])
     .filter(([offerId]) => String(offerId).startsWith(prefix))
