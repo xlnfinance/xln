@@ -526,118 +526,71 @@ async function applyDisputeStartedJEvent(context: FinalizedJEventContext): Promi
   }
 }
 
-function applyDisputeFinalizedJEvent(
-  context: FinalizedJEventContext,
-  disputeFinalizationEvidence: DisputeFinalizationEvidence[],
-): void {
-  const { newState, event, env, blockNumber, transactionHash, outputs, dirtyAccounts } = context;
-  const data = event.data as { sender: string; counterentity: string; initialNonce: string; initialProofbodyHash: string; finalProofbodyHash: string; batchNonce?: number };
-  const { sender, counterentity, initialNonce, initialProofbodyHash } = data;
-  const {
-    senderStr,
-    counterentityStr,
-    entityIdNorm,
-    candidateCounterpartyId,
-    counterpartyId,
-    account,
-  } = resolveDisputeAccountContext(newState, sender, counterentity);
+type DisputeFinalizedEventData = {
+  sender: string;
+  counterentity: string;
+  initialNonce: string;
+  initialProofbodyHash: string;
+  finalProofbodyHash: string;
+  batchNonce?: number;
+};
 
-  if (!account) {
-    jEventLog.warn('dispute_finalized.account_missing', { account: shortId(candidateCounterpartyId), entity: shortId(entityIdNorm) });
-    return;
-  }
-
-  // Resolve and verify the exact locally signed ProofBody before touching any
-  // account/J-batch state. The event carries only its hash; treating missing or
-  // corrupt evidence as "clear everything" would diverge from Depository,
-  // which settles only the tokenIds in this exact body.
-  const finalizedProof = requireFinalizedProofBodyEvidence(
-    account,
-    data.finalProofbodyHash,
-    counterpartyId,
+const resolveFinalizationEvidence = (
+  account: AccountMachine,
+  data: DisputeFinalizedEventData,
+  senderStr: string,
+  counterentityStr: string,
+  finalProofbodyHash: string,
+  evidenceList: DisputeFinalizationEvidence[],
+): { evidence: DisputeFinalizationEvidence[]; finalizedJNonce: number } => {
+  const evidence = evidenceList.filter((item) =>
+    normalizeEntityId(item.sender) === senderStr &&
+    normalizeEntityId(item.counterentity) === counterentityStr &&
+    String(item.initialNonce) === String(data.initialNonce) &&
+    String(item.initialProofbodyHash).toLowerCase() ===
+      data.initialProofbodyHash.toLowerCase() &&
+    String(item.finalProofbodyHash).toLowerCase() === finalProofbodyHash.toLowerCase()
   );
-  const finalProofbodyHash = finalizedProof.finalProofbodyHash;
-  syncJBatchEntityNonceFromEvent(newState, senderStr, entityIdNorm, data.batchNonce);
-  dirtyAccounts.add(counterpartyId.toLowerCase());
-  const weAreFinalizer = senderStr === entityIdNorm;
-  const finalizationEvidence = disputeFinalizationEvidence.filter((evidence) =>
-    normalizeEntityId(evidence.sender) === senderStr &&
-    normalizeEntityId(evidence.counterentity) === counterentityStr &&
-    String(evidence.initialNonce) === String(initialNonce) &&
-    String(evidence.initialProofbodyHash).toLowerCase() === String(initialProofbodyHash).toLowerCase() &&
-    String(evidence.finalProofbodyHash).toLowerCase() === finalProofbodyHash.toLowerCase()
-  );
-  if (finalizationEvidence.length > 1) {
+  if (evidence.length > 1) {
     throw new Error(
-      `J_EVENT_DISPUTE_FINALIZATION_EVIDENCE_AMBIGUOUS:${senderStr}:${counterentityStr}:${String(initialNonce)}`,
+      `J_EVENT_DISPUTE_FINALIZATION_EVIDENCE_AMBIGUOUS:` +
+      `${senderStr}:${counterentityStr}:${String(data.initialNonce)}`,
     );
   }
-  const primaryFinalizationEvidence = finalizationEvidence[0];
-  const initialNonceNumber = Number(initialNonce || 0);
-  const evidenceFinalNonce = Number(primaryFinalizationEvidence?.finalNonce ?? NaN);
-  const evidenceSig = String(primaryFinalizationEvidence?.sig ?? '').toLowerCase();
+  const primary = evidence[0];
+  const initialNonce = Number(data.initialNonce || 0);
+  const evidenceFinalNonce = Number(primary?.finalNonce ?? NaN);
+  const evidenceSig = String(primary?.sig ?? '').toLowerCase();
   const evidenceIsUnsignedUnilateral = evidenceSig === '' || evidenceSig === '0x';
   const finalProofMatchesInitial =
-    finalProofbodyHash.toLowerCase() === String(initialProofbodyHash || '').toLowerCase();
-  const eventJNonce = primaryFinalizationEvidence
+    finalProofbodyHash.toLowerCase() === String(data.initialProofbodyHash || '').toLowerCase();
+  const eventJNonce = primary
     ? evidenceIsUnsignedUnilateral
-      ? initialNonceNumber + 1
+      ? initialNonce + 1
       : Number.isFinite(evidenceFinalNonce)
         ? evidenceFinalNonce
-        : initialNonceNumber
+        : initialNonce
     : finalProofMatchesInitial
-      ? initialNonceNumber + 1
-      : initialNonceNumber;
-  const finalizedJNonce = Math.max(
-    Number(account.jNonce ?? 0),
-    eventJNonce,
-  );
-  // A finalized dispute changes the authoritative Account epoch. Any
-  // settlement drafted or sealed against the previous epoch is unusable even
-  // when its numeric nonce is higher; retaining it would strand holds or let a
-  // delayed retry resurrect pre-dispute state.
-  invalidateSettlementIntentAfterDisputeFinality(newState, account, counterpartyId);
-  account.jNonce = finalizedJNonce;
-  if (account.activeDispute) {
-    delete account.activeDispute;
-    addMessage(newState, `✅ DISPUTE FINALIZED with ${counterpartyId.slice(-4)} (nonce ${Number(initialNonce)})`);
-    if (newState.crontabState) {
-      cancelHook(newState.crontabState, `dispute-deadline:${counterpartyId.toLowerCase()}`);
-    }
-  } else {
-    jEventLog.warn('dispute_finalized.no_active_dispute', { counterparty: shortId(counterpartyId) });
-  }
-  if (account.proofHeader.nextProofNonce <= finalizedJNonce) {
-    account.proofHeader.nextProofNonce = finalizedJNonce + 1;
-  }
-  account.status = 'disputed';
-  freezeAccountForDispute(account, false);
-  delete account.counterpartyDisputeProofHanko;
-  delete account.counterpartyDisputeProofNonce;
-  delete account.counterpartyDisputeProofBodyHash;
-  if (!weAreFinalizer) {
-    const ops = emptyOpBreakdown();
-    ops.disputeFinalizations = 1;
-    appendBatchHistory(newState, {
-      batchHash: `event:dispute-finalize:${String(initialProofbodyHash).slice(0, 12)}`,
-      txHash: transactionHash || '',
-      status: 'confirmed' as const,
-      broadcastedAt: newState.timestamp,
-      confirmedAt: newState.timestamp,
-      opCount: 1,
-      entityNonce: Number(initialNonce || 0),
-      jBlockNumber: Number(blockNumber || 0),
-      operations: ops,
-      source: 'counterparty-event' as const,
-      eventType: 'DisputeFinalized' as const,
-      note: `Counterparty ${senderStr.slice(-4)} finalized dispute`,
-    });
-  }
+      ? initialNonce + 1
+      : initialNonce;
+  return {
+    evidence,
+    finalizedJNonce: Math.max(Number(account.jNonce ?? 0), eventJNonce),
+  };
+};
 
-  // Counterparty finality proves that any sealed local batch carrying the same
-  // dispute finalization can no longer execute. Self-finality is different:
-  // HankoBatchProcessed from the same block still owns exact batch confirmation.
-  // Keep the immutable payload untouched and requeue only valid remaining ops.
+const retireFinalizedDisputeState = (
+  context: FinalizedJEventContext,
+  account: AccountMachine,
+  counterpartyId: string,
+  candidateCounterpartyId: string,
+  senderStr: string,
+  entityIdNorm: string,
+  evidence: DisputeFinalizationEvidence[],
+  tokenIds: readonly number[],
+): void => {
+  const { newState, env, blockNumber, outputs } = context;
+  const weAreFinalizer = senderStr === entityIdNorm;
   const removedDraft = scrubDisputeFinalizationsForCounterparty(
     newState.jBatchState?.batch,
     candidateCounterpartyId,
@@ -655,27 +608,26 @@ function applyDisputeFinalizedJEvent(
     removedSent,
   });
   if (removed > 0) {
-    addMessage(newState, `🧹 Removed ${removed} stale dispute-finalize op(s) for ${counterpartyId.slice(-4)}`);
+    addMessage(
+      newState,
+      `🧹 Removed ${removed} stale dispute-finalize op(s) for ${counterpartyId.slice(-4)}`,
+    );
   }
-
-  const finalizationArgumentBlobs = finalizationEvidence.flatMap((evidence) => [
-    evidence.leftArguments,
-    evidence.rightArguments,
+  const argumentBlobs = evidence.flatMap((item) => [
+    item.leftArguments,
+    item.rightArguments,
   ]);
-  if (finalizationArgumentBlobs.length > 0) {
+  if (argumentBlobs.length > 0) {
     queueCrossJurisdictionSalvageFromArgumentList(
       env,
       newState,
       outputs,
       counterpartyId,
-      finalizationArgumentBlobs,
+      argumentBlobs,
       blockNumber,
     );
   }
-
-  clearDisputeSettledDeltas(account, finalizedProof.tokenIds);
-
-  // Drop off-chain intents from pre-dispute epoch.
+  clearDisputeSettledDeltas(account, tokenIds);
   if (account.swapOffers.size > 0) {
     account.swapOffers.clear();
     invalidateAccountMapCommitment(account, 'swapOffers');
@@ -684,10 +636,106 @@ function applyDisputeFinalizedJEvent(
     account.locks.clear();
     invalidateAccountMapCommitment(account, 'locks');
   }
-  // Keep exact bodies/snapshots alive through salvage and token cleanup above,
-  // then retire the whole consumed epoch. A later bilateral frame can create a
-  // fresh bounded epoch without carrying historical proof evidence forever.
   retireDisputeEvidenceEpoch(account);
+};
+
+function applyDisputeFinalizedJEvent(
+  context: FinalizedJEventContext,
+  disputeFinalizationEvidence: DisputeFinalizationEvidence[],
+): void {
+  const { newState, event, blockNumber, transactionHash, dirtyAccounts } = context;
+  const data = event.data as DisputeFinalizedEventData;
+  const accountContext = resolveDisputeAccountContext(
+    newState,
+    data.sender,
+    data.counterentity,
+  );
+  const {
+    senderStr,
+    counterentityStr,
+    entityIdNorm,
+    candidateCounterpartyId,
+    counterpartyId,
+    account,
+  } = accountContext;
+  if (!account) {
+    jEventLog.warn('dispute_finalized.account_missing', {
+      account: shortId(candidateCounterpartyId),
+      entity: shortId(entityIdNorm),
+    });
+    return;
+  }
+  // Depository settles only tokenIds from this exact locally signed body.
+  const finalizedProof = requireFinalizedProofBodyEvidence(
+    account,
+    data.finalProofbodyHash,
+    counterpartyId,
+  );
+  const resolved = resolveFinalizationEvidence(
+    account,
+    data,
+    senderStr,
+    counterentityStr,
+    finalizedProof.finalProofbodyHash,
+    disputeFinalizationEvidence,
+  );
+  syncJBatchEntityNonceFromEvent(newState, senderStr, entityIdNorm, data.batchNonce);
+  dirtyAccounts.add(counterpartyId.toLowerCase());
+  // A finalized dispute changes the authoritative Account epoch. Any
+  // settlement drafted or sealed against the previous epoch is unusable even
+  // when its numeric nonce is higher; retaining it would strand holds or let a
+  // delayed retry resurrect pre-dispute state.
+  invalidateSettlementIntentAfterDisputeFinality(newState, account, counterpartyId);
+  account.jNonce = resolved.finalizedJNonce;
+  if (account.activeDispute) {
+    delete account.activeDispute;
+    addMessage(
+      newState,
+      `✅ DISPUTE FINALIZED with ${counterpartyId.slice(-4)} ` +
+      `(nonce ${Number(data.initialNonce)})`,
+    );
+    if (newState.crontabState) {
+      cancelHook(newState.crontabState, `dispute-deadline:${counterpartyId.toLowerCase()}`);
+    }
+  } else {
+    jEventLog.warn('dispute_finalized.no_active_dispute', { counterparty: shortId(counterpartyId) });
+  }
+  if (account.proofHeader.nextProofNonce <= resolved.finalizedJNonce) {
+    account.proofHeader.nextProofNonce = resolved.finalizedJNonce + 1;
+  }
+  account.status = 'disputed';
+  freezeAccountForDispute(account, false);
+  delete account.counterpartyDisputeProofHanko;
+  delete account.counterpartyDisputeProofNonce;
+  delete account.counterpartyDisputeProofBodyHash;
+  if (senderStr !== entityIdNorm) {
+    const ops = emptyOpBreakdown();
+    ops.disputeFinalizations = 1;
+    appendBatchHistory(newState, {
+      batchHash: `event:dispute-finalize:${String(data.initialProofbodyHash).slice(0, 12)}`,
+      txHash: transactionHash || '',
+      status: 'confirmed' as const,
+      broadcastedAt: newState.timestamp,
+      confirmedAt: newState.timestamp,
+      opCount: 1,
+      entityNonce: Number(data.initialNonce || 0),
+      jBlockNumber: Number(blockNumber || 0),
+      operations: ops,
+      source: 'counterparty-event' as const,
+      eventType: 'DisputeFinalized' as const,
+      note: `Counterparty ${senderStr.slice(-4)} finalized dispute`,
+    });
+  }
+  retireFinalizedDisputeState(
+    context,
+    account,
+    counterpartyId,
+    candidateCounterpartyId,
+    senderStr,
+    entityIdNorm,
+    resolved.evidence,
+    finalizedProof.tokenIds,
+  );
 }
 
 async function applyFinalizedJEvent(
