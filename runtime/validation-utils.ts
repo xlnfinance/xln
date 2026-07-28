@@ -1891,6 +1891,157 @@ function validateEntityProviderActionSubmitState(value: unknown, context: string
   validateSubmitResultJournal(state, context);
 }
 
+const validateReplicaExecution = (
+  value: unknown,
+  entityId: string,
+  context: string,
+): void => {
+  if (value === undefined) return;
+  const execution = validateObject(value, `${context}.validatorExecution`);
+  validateString(execution['frameHash'], `${context}.validatorExecution.frameHash`);
+  const executionHeight = validateNumber(execution['height'], `${context}.validatorExecution.height`);
+  if (!Number.isSafeInteger(executionHeight) || executionHeight <= 0) {
+    throw new FinancialDataCorruptionError(`${context}.validatorExecution.height must be a positive safe integer`);
+  }
+  const computed = validateEntityState(execution['state'], `${context}.validatorExecution.state`);
+  if (computed.entityId !== entityId) {
+    throw new FinancialDataCorruptionError(`${context}.validatorExecution.state.entityId must match replica.entityId`);
+  }
+  if (computed.height !== executionHeight) {
+    throw new FinancialDataCorruptionError(`${context}.validatorExecution.state.height must match execution height`);
+  }
+  validateArray(execution['outputs'], `${context}.validatorExecution.outputs`);
+  validateArray(execution['jOutputs'], `${context}.validatorExecution.jOutputs`);
+  validateArray(execution['hashesToSign'], `${context}.validatorExecution.hashesToSign`);
+  const storageChanges = validateArray(
+    execution['storageChanges'],
+    `${context}.validatorExecution.storageChanges`,
+  );
+  for (const [index, rawChange] of storageChanges.entries()) {
+    const changeContext = `${context}.validatorExecution.storageChanges[${index}]`;
+    const change = validateObject(rawChange, changeContext);
+    const family = validateString(change['family'], `${changeContext}.family`);
+    validateString(change['entityId'], `${changeContext}.entityId`);
+    if (family === 'account') {
+      assertExactFields(change, new Set(['family', 'entityId', 'counterpartyId']), changeContext);
+      validateString(change['counterpartyId'], `${changeContext}.counterpartyId`);
+    } else if (family === 'book') {
+      assertExactFields(change, new Set(['family', 'entityId', 'pairId', 'deleted']), changeContext);
+      validateString(change['pairId'], `${changeContext}.pairId`);
+      if (change['deleted'] !== undefined && typeof change['deleted'] !== 'boolean') {
+        throw new FinancialDataCorruptionError(`${changeContext}.deleted must be boolean`);
+      }
+    } else if (family === 'entity') {
+      assertExactFields(change, new Set(['family', 'entityId']), changeContext);
+    } else {
+      throw new FinancialDataCorruptionError(`${changeContext}.family is invalid`);
+    }
+  }
+  if (execution['consumptionNodeChanges'] !== undefined) {
+    const changes = validateObject(
+      execution['consumptionNodeChanges'],
+      `${context}.validatorExecution.consumptionNodeChanges`,
+    );
+    validateArray(changes['newNodes'], `${context}.validatorExecution.consumptionNodeChanges.newNodes`);
+    validateArray(
+      changes['replacedNodeHashes'],
+      `${context}.validatorExecution.consumptionNodeChanges.replacedNodeHashes`,
+    );
+  }
+  if (execution['accountJClaimNodeChanges'] !== undefined) {
+    const changes = validateObject(
+      execution['accountJClaimNodeChanges'],
+      `${context}.validatorExecution.accountJClaimNodeChanges`,
+    );
+    validateArray(changes['newNodes'], `${context}.validatorExecution.accountJClaimNodeChanges.newNodes`);
+    validateArray(
+      changes['replacedNodeHashes'],
+      `${context}.validatorExecution.accountJClaimNodeChanges.replacedNodeHashes`,
+    );
+  }
+};
+
+const validateReplicaJHistory = (value: unknown, context: string): void => {
+  if (value === undefined) return;
+  const history = validateObject(value, `${context}.jHistory`);
+  validateString(history['jurisdictionRef'], `${context}.jHistory.jurisdictionRef`);
+  const scannedThroughHeight = validateNumber(
+    history['scannedThroughHeight'],
+    `${context}.jHistory.scannedThroughHeight`,
+  );
+  if (!Number.isSafeInteger(scannedThroughHeight) || scannedThroughHeight < 0) {
+    throw new FinancialDataCorruptionError(`${context}.jHistory.scannedThroughHeight must be a non-negative safe integer`);
+  }
+  validateString(history['tipBlockHash'], `${context}.jHistory.tipBlockHash`);
+  const eventBlocks = validateMapInstance(history['eventBlocks'], `${context}.jHistory.eventBlocks`);
+  for (const [height, blockValue] of eventBlocks.entries()) {
+    if (!Number.isSafeInteger(height) || Number(height) <= 0) {
+      throw new FinancialDataCorruptionError(`${context}.jHistory.eventBlocks key must be a positive safe integer`);
+    }
+    const block = validateObject(blockValue, `${context}.jHistory.eventBlocks[${String(height)}]`);
+    validateString(block['jurisdictionRef'], `${context}.jHistory.eventBlocks[${String(height)}].jurisdictionRef`);
+    if (validateNumber(block['jHeight'], `${context}.jHistory.eventBlocks[${String(height)}].jHeight`) !== height) {
+      throw new FinancialDataCorruptionError(`${context}.jHistory event block height must match its map key`);
+    }
+    validateString(block['jBlockHash'], `${context}.jHistory.eventBlocks[${String(height)}].jBlockHash`);
+    validateString(block['eventsHash'], `${context}.jHistory.eventBlocks[${String(height)}].eventsHash`);
+    validateArray(block['events'], `${context}.jHistory.eventBlocks[${String(height)}].events`);
+  }
+  const blockHashes = validateMapInstance(history['blockHashes'], `${context}.jHistory.blockHashes`);
+  for (const [height, hash] of blockHashes.entries()) {
+    if (!Number.isSafeInteger(height) || Number(height) <= 0 || typeof hash !== 'string' || hash.length === 0) {
+      throw new FinancialDataCorruptionError(`${context}.jHistory.blockHashes entries must be positive-height hashes`);
+    }
+  }
+};
+
+const validateCertifiedFrameAnchor = (value: unknown, context: string): void => {
+  if (value === undefined) return;
+  const anchor = validateObject(value, `${context}.certifiedFrameAnchor`);
+  validateString(anchor['entityId'], `${context}.certifiedFrameAnchor.entityId`);
+  validateNumber(anchor['height'], `${context}.certifiedFrameAnchor.height`);
+  validateString(anchor['frameHash'], `${context}.certifiedFrameAnchor.frameHash`);
+  validateString(anchor['stateRoot'], `${context}.certifiedFrameAnchor.stateRoot`);
+  if (anchor['authorityEvidenceHash'] !== undefined) {
+    const evidenceHash = validateString(
+      anchor['authorityEvidenceHash'],
+      `${context}.certifiedFrameAnchor.authorityEvidenceHash`,
+    );
+    if (!/^0x[0-9a-fA-F]{64}$/.test(evidenceHash)) {
+      throw new FinancialDataCorruptionError(
+        `${context}.certifiedFrameAnchor.authorityEvidenceHash must be bytes32 hex`,
+      );
+    }
+  }
+  if (anchor['runtimeCheckpoint'] !== undefined) {
+    const checkpoint = validateObject(
+      anchor['runtimeCheckpoint'],
+      `${context}.certifiedFrameAnchor.runtimeCheckpoint`,
+    );
+    const runtimeHeight = validateNumber(
+      checkpoint['runtimeHeight'],
+      `${context}.certifiedFrameAnchor.runtimeCheckpoint.runtimeHeight`,
+    );
+    if (!Number.isSafeInteger(runtimeHeight) || runtimeHeight < 0) {
+      throw new FinancialDataCorruptionError(
+        `${context}.certifiedFrameAnchor.runtimeCheckpoint.runtimeHeight must be a non-negative safe integer`,
+      );
+    }
+    const replicaSetRoot = validateString(
+      checkpoint['replicaSetRoot'],
+      `${context}.certifiedFrameAnchor.runtimeCheckpoint.replicaSetRoot`,
+    );
+    if (!/^0x[0-9a-fA-F]{64}$/.test(replicaSetRoot)) {
+      throw new FinancialDataCorruptionError(
+        `${context}.certifiedFrameAnchor.runtimeCheckpoint.replicaSetRoot must be bytes32 hex`,
+      );
+    }
+  }
+  const authority = validateObject(anchor['authority'], `${context}.certifiedFrameAnchor.authority`);
+  validateObject(authority['config'], `${context}.certifiedFrameAnchor.authority.config`);
+  validateObject(authority['leaderState'], `${context}.certifiedFrameAnchor.authority.leaderState`);
+};
+
 export function validateEntityReplica(value: unknown, context = 'EntityReplica'): EntityReplica {
   const obj = validateObject(value, context);
   const entityId = validateString(obj['entityId'], `${context}.entityId`);
@@ -1916,70 +2067,7 @@ export function validateEntityReplica(value: unknown, context = 'EntityReplica')
   }
   if (obj['proposal'] !== undefined) validateProposedEntityFrame(obj['proposal'], `${context}.proposal`);
   if (obj['lockedFrame'] !== undefined) validateProposedEntityFrame(obj['lockedFrame'], `${context}.lockedFrame`);
-  if (obj['validatorExecution'] !== undefined) {
-    const execution = validateObject(obj['validatorExecution'], `${context}.validatorExecution`);
-    validateString(execution['frameHash'], `${context}.validatorExecution.frameHash`);
-    const executionHeight = validateNumber(execution['height'], `${context}.validatorExecution.height`);
-    if (!Number.isSafeInteger(executionHeight) || executionHeight <= 0) {
-      throw new FinancialDataCorruptionError(`${context}.validatorExecution.height must be a positive safe integer`);
-    }
-    const computed = validateEntityState(execution['state'], `${context}.validatorExecution.state`);
-    if (computed.entityId !== entityId) {
-      throw new FinancialDataCorruptionError(`${context}.validatorExecution.state.entityId must match replica.entityId`);
-    }
-    if (computed.height !== executionHeight) {
-      throw new FinancialDataCorruptionError(`${context}.validatorExecution.state.height must match execution height`);
-    }
-    validateArray(execution['outputs'], `${context}.validatorExecution.outputs`);
-    validateArray(execution['jOutputs'], `${context}.validatorExecution.jOutputs`);
-    validateArray(execution['hashesToSign'], `${context}.validatorExecution.hashesToSign`);
-    const storageChanges = validateArray(
-      execution['storageChanges'],
-      `${context}.validatorExecution.storageChanges`,
-    );
-    for (const [index, rawChange] of storageChanges.entries()) {
-      const changeContext = `${context}.validatorExecution.storageChanges[${index}]`;
-      const change = validateObject(rawChange, changeContext);
-      const family = validateString(change['family'], `${changeContext}.family`);
-      validateString(change['entityId'], `${changeContext}.entityId`);
-      if (family === 'account') {
-        assertExactFields(change, new Set(['family', 'entityId', 'counterpartyId']), changeContext);
-        validateString(change['counterpartyId'], `${changeContext}.counterpartyId`);
-      } else if (family === 'book') {
-        assertExactFields(change, new Set(['family', 'entityId', 'pairId', 'deleted']), changeContext);
-        validateString(change['pairId'], `${changeContext}.pairId`);
-        if (change['deleted'] !== undefined && typeof change['deleted'] !== 'boolean') {
-          throw new FinancialDataCorruptionError(`${changeContext}.deleted must be boolean`);
-        }
-      } else if (family === 'entity') {
-        assertExactFields(change, new Set(['family', 'entityId']), changeContext);
-      } else {
-        throw new FinancialDataCorruptionError(`${changeContext}.family is invalid`);
-      }
-    }
-    if (execution['consumptionNodeChanges'] !== undefined) {
-      const changes = validateObject(
-        execution['consumptionNodeChanges'],
-        `${context}.validatorExecution.consumptionNodeChanges`,
-      );
-      validateArray(changes['newNodes'], `${context}.validatorExecution.consumptionNodeChanges.newNodes`);
-      validateArray(
-        changes['replacedNodeHashes'],
-        `${context}.validatorExecution.consumptionNodeChanges.replacedNodeHashes`,
-      );
-    }
-    if (execution['accountJClaimNodeChanges'] !== undefined) {
-      const changes = validateObject(
-        execution['accountJClaimNodeChanges'],
-        `${context}.validatorExecution.accountJClaimNodeChanges`,
-      );
-      validateArray(changes['newNodes'], `${context}.validatorExecution.accountJClaimNodeChanges.newNodes`);
-      validateArray(
-        changes['replacedNodeHashes'],
-        `${context}.validatorExecution.accountJClaimNodeChanges.replacedNodeHashes`,
-      );
-    }
-  }
+  validateReplicaExecution(obj['validatorExecution'], entityId, context);
   if (obj['certifiedFrameLineage'] !== undefined) {
     const lineage = validateArray(obj['certifiedFrameLineage'], `${context}.certifiedFrameLineage`);
     lineage.forEach((linkValue, index) => {
@@ -1993,51 +2081,7 @@ export function validateEntityReplica(value: unknown, context = 'EntityReplica')
       validateObject(authority['leaderState'], `${context}.certifiedFrameLineage[${index}].postAuthority.leaderState`);
     });
   }
-  if (obj['certifiedFrameAnchor'] !== undefined) {
-    const anchor = validateObject(obj['certifiedFrameAnchor'], `${context}.certifiedFrameAnchor`);
-    validateString(anchor['entityId'], `${context}.certifiedFrameAnchor.entityId`);
-    validateNumber(anchor['height'], `${context}.certifiedFrameAnchor.height`);
-    validateString(anchor['frameHash'], `${context}.certifiedFrameAnchor.frameHash`);
-    validateString(anchor['stateRoot'], `${context}.certifiedFrameAnchor.stateRoot`);
-    if (anchor['authorityEvidenceHash'] !== undefined) {
-      const evidenceHash = validateString(
-        anchor['authorityEvidenceHash'],
-        `${context}.certifiedFrameAnchor.authorityEvidenceHash`,
-      );
-      if (!/^0x[0-9a-fA-F]{64}$/.test(evidenceHash)) {
-        throw new FinancialDataCorruptionError(
-          `${context}.certifiedFrameAnchor.authorityEvidenceHash must be bytes32 hex`,
-        );
-      }
-    }
-    if (anchor['runtimeCheckpoint'] !== undefined) {
-      const checkpoint = validateObject(
-        anchor['runtimeCheckpoint'],
-        `${context}.certifiedFrameAnchor.runtimeCheckpoint`,
-      );
-      const runtimeHeight = validateNumber(
-        checkpoint['runtimeHeight'],
-        `${context}.certifiedFrameAnchor.runtimeCheckpoint.runtimeHeight`,
-      );
-      if (!Number.isSafeInteger(runtimeHeight) || runtimeHeight < 0) {
-        throw new FinancialDataCorruptionError(
-          `${context}.certifiedFrameAnchor.runtimeCheckpoint.runtimeHeight must be a non-negative safe integer`,
-        );
-      }
-      const replicaSetRoot = validateString(
-        checkpoint['replicaSetRoot'],
-        `${context}.certifiedFrameAnchor.runtimeCheckpoint.replicaSetRoot`,
-      );
-      if (!/^0x[0-9a-fA-F]{64}$/.test(replicaSetRoot)) {
-        throw new FinancialDataCorruptionError(
-          `${context}.certifiedFrameAnchor.runtimeCheckpoint.replicaSetRoot must be bytes32 hex`,
-        );
-      }
-    }
-    const authority = validateObject(anchor['authority'], `${context}.certifiedFrameAnchor.authority`);
-    validateObject(authority['config'], `${context}.certifiedFrameAnchor.authority.config`);
-    validateObject(authority['leaderState'], `${context}.certifiedFrameAnchor.authority.leaderState`);
-  }
+  validateCertifiedFrameAnchor(obj['certifiedFrameAnchor'], context);
   if (obj['position'] !== undefined) {
     const position = validateObject(obj['position'], `${context}.position`);
     validateNumber(position['x'], `${context}.position.x`);
@@ -2075,38 +2119,7 @@ export function validateEntityReplica(value: unknown, context = 'EntityReplica')
       throw new FinancialDataCorruptionError(`${context}.lastConsensusProgressAt must be a non-negative safe integer`);
     }
   }
-  if (obj['jHistory'] !== undefined) {
-    const history = validateObject(obj['jHistory'], `${context}.jHistory`);
-    validateString(history['jurisdictionRef'], `${context}.jHistory.jurisdictionRef`);
-    const scannedThroughHeight = validateNumber(
-      history['scannedThroughHeight'],
-      `${context}.jHistory.scannedThroughHeight`,
-    );
-    if (!Number.isSafeInteger(scannedThroughHeight) || scannedThroughHeight < 0) {
-      throw new FinancialDataCorruptionError(`${context}.jHistory.scannedThroughHeight must be a non-negative safe integer`);
-    }
-    validateString(history['tipBlockHash'], `${context}.jHistory.tipBlockHash`);
-    const eventBlocks = validateMapInstance(history['eventBlocks'], `${context}.jHistory.eventBlocks`);
-    for (const [height, blockValue] of eventBlocks.entries()) {
-      if (!Number.isSafeInteger(height) || Number(height) <= 0) {
-        throw new FinancialDataCorruptionError(`${context}.jHistory.eventBlocks key must be a positive safe integer`);
-      }
-      const block = validateObject(blockValue, `${context}.jHistory.eventBlocks[${String(height)}]`);
-      validateString(block['jurisdictionRef'], `${context}.jHistory.eventBlocks[${String(height)}].jurisdictionRef`);
-      if (validateNumber(block['jHeight'], `${context}.jHistory.eventBlocks[${String(height)}].jHeight`) !== height) {
-        throw new FinancialDataCorruptionError(`${context}.jHistory event block height must match its map key`);
-      }
-      validateString(block['jBlockHash'], `${context}.jHistory.eventBlocks[${String(height)}].jBlockHash`);
-      validateString(block['eventsHash'], `${context}.jHistory.eventBlocks[${String(height)}].eventsHash`);
-      validateArray(block['events'], `${context}.jHistory.eventBlocks[${String(height)}].events`);
-    }
-    const blockHashes = validateMapInstance(history['blockHashes'], `${context}.jHistory.blockHashes`);
-    for (const [height, hash] of blockHashes.entries()) {
-      if (!Number.isSafeInteger(height) || Number(height) <= 0 || typeof hash !== 'string' || hash.length === 0) {
-        throw new FinancialDataCorruptionError(`${context}.jHistory.blockHashes entries must be positive-height hashes`);
-      }
-    }
-  }
+  validateReplicaJHistory(obj['jHistory'], context);
   if (obj['jPrefixRound'] !== undefined) {
     const round = validateObject(obj['jPrefixRound'], `${context}.jPrefixRound`);
     rejectUnexpectedKeys(
