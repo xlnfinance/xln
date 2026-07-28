@@ -67,18 +67,12 @@ import { TIMING } from '../constants';
 import {
   getDefaultRebalancePolicyForToken,
 } from '../account/rebalance-defaults';
-import { terminateHtlcRoute } from './tx/htlc-route-lifecycle';
 import { getEntityCertifiedJurisdictionHeight } from '../jurisdiction/height';
-import { createStructuredLogger, shortHash, shortId } from '../infra/logger';
+import { createStructuredLogger, shortId } from '../infra/logger';
 import { accountInputProposal, accountInputReferenceHeight } from '../account/consensus/flush';
 import { hasPendingSettlementTransition } from '../account/tx/handlers/settle-transition';
-import {
-  applyBoardRotationResealMigrations,
-  BOARD_RESEAL_HOOK_ID,
-  BOARD_RESEAL_RETRY_MS,
-  buildPendingBoardRotationResealDrafts,
-} from './tx/board-rotation-reseal';
 import { hubRebalanceHandler } from './scheduler/rebalance';
+import { processDueHooks } from './scheduler/due-hooks';
 
 export {
   HUB_MAX_C2R_PER_TICK,
@@ -86,6 +80,11 @@ export {
   HUB_PENDING_BROADCAST_STALE_MS,
   HUB_SUBMITTED_REQUEST_STALE_MS,
 } from './scheduler/rebalance';
+export {
+  cancelHook,
+  getEarliestHookTime,
+  scheduleHook,
+} from './scheduler/hook-state';
 
 const crontabLog = createStructuredLogger('entity.crontab');
 
@@ -222,39 +221,6 @@ const CRONTAB_TASK_HANDLERS: Record<CrontabTaskMethod, CrontabTaskHandler> = {
   hubRebalance: hubRebalanceHandler,
 };
 
-// ═══════════════════════════════════════════════════════════════════════
-// Scheduled Hooks API (setTimeout-like)
-// ═══════════════════════════════════════════════════════════════════════
-
-/** Schedule a one-shot hook at a specific logical timestamp */
-export function scheduleHook(state: CrontabState, hook: ScheduledHook): void {
-  if (!state.hooks) state.hooks = new Map();
-  state.hooks.set(hook.id, hook);
-  crontabLog.debug('hook.scheduled', { type: hook.type, id: shortHash(hook.id), triggerAt: hook.triggerAt });
-}
-
-/** Cancel a previously scheduled hook (e.g., lock resolved before timeout) */
-export function cancelHook(state: CrontabState, hookId: string): void {
-  if (!state.hooks) return;
-  if (state.hooks.delete(hookId)) {
-    crontabLog.debug('hook.cancelled', { id: shortHash(hookId) });
-  }
-}
-
-/**
- * Get the earliest hook trigger time across all hooks.
- * Returns Infinity if no hooks are scheduled.
- * Used by the runtime loop to know when to wake this entity.
- */
-export function getEarliestHookTime(state: CrontabState): number {
-  if (!state.hooks || state.hooks.size === 0) return Infinity;
-  let earliest = Infinity;
-  for (const hook of state.hooks.values()) {
-    if (hook.triggerAt < earliest) earliest = hook.triggerAt;
-  }
-  return earliest;
-}
-
 /**
  * Execute all due crontab tasks
  * Called during entity input processing
@@ -304,304 +270,6 @@ export async function executeCrontab(
   }
 
   return allOutputs;
-}
-
-/**
- * Process fired hooks → generate entityTxs by hook type.
- * Each hook type maps to a specific security/protocol action.
- */
-async function processDueHooks(
-  env: Env,
-  hooks: ScheduledHook[],
-  replica: EntityReplica,
-  context: CrontabExecutionContext,
-): Promise<EntityInput[]> {
-  const outputs: EntityInput[] = [];
-  const firstValidator = replica.state.config.validators?.[0];
-  if (!firstValidator) return outputs;
-
-  // Group expired locks by type for batch processing
-  const htlcTimeoutLocks: Array<{ accountId: string; lockId: string }> = [];
-  const disputePrepareCounterparties = new Set<string>();
-  const disputeFinalizeCounterparties = new Set<string>();
-  let shouldBroadcastQueuedDisputeFinalizations = false;
-
-  const currentJBlock = getEntityCertifiedJurisdictionHeight(replica.state);
-
-  for (const hook of hooks) {
-    crontabLog.debug('hook.fired', { type: hook.type, id: shortHash(hook.id) });
-
-    switch (hook.type) {
-      case 'htlc_timeout':
-        // HTLC lock expired → resolve with error:timeout
-        {
-          const { accountId, lockId } = hook.data;
-          const account = replica.state.accounts.get(accountId);
-          // Stale hook (already resolved/cancelled path) — skip silently.
-          if (!account?.locks?.has(lockId)) {
-            break;
-          }
-          htlcTimeoutLocks.push({ accountId, lockId });
-        }
-        break;
-
-      case 'dispute_deadline':
-        {
-          const { accountId } = hook.data;
-          const account = replica.state.accounts.get(accountId);
-          if (!account?.activeDispute) break;
-          if (replica.state.hubRebalanceConfig?.disputeAutoFinalizeMode === 'ignore') {
-            break;
-          }
-          const weAreLeft = account.leftEntity === replica.state.entityId;
-          const weAreStarter = weAreLeft === account.activeDispute.startedByLeft;
-
-          const timeoutBlock = Number(account.activeDispute.disputeTimeout || 0);
-          if (account.activeDispute.observedOnChain !== true) {
-            const retryMs = 5000;
-            if (replica.state.crontabState) {
-              scheduleHook(replica.state.crontabState, {
-                id: hook.id,
-                triggerAt: replica.state.timestamp + retryMs,
-                type: 'dispute_deadline',
-                data: { accountId },
-              });
-            }
-            crontabLog.debug('dispute.wait_onchain_start', {
-              account: shortId(accountId),
-              retryMs,
-            });
-            break;
-          }
-
-          if (weAreStarter && (!timeoutBlock || currentJBlock < timeoutBlock)) {
-            const retryMs = 1000;
-            if (replica.state.crontabState) {
-              scheduleHook(replica.state.crontabState, {
-                id: hook.id,
-                triggerAt: replica.state.timestamp + retryMs,
-                type: 'dispute_deadline',
-                data: { accountId },
-              });
-            }
-            crontabLog.debug('dispute.retry_until_timeout', {
-              account: shortId(accountId),
-              currentJBlock,
-              timeoutBlock,
-              retryMs,
-            });
-            break;
-          }
-
-          const accountIdNorm = accountId.toLowerCase();
-          const draftFinalizations = replica.state.jBatchState?.batch?.disputeFinalizations || [];
-          const sentFinalizations = replica.state.jBatchState?.sentBatch?.batch?.disputeFinalizations || [];
-          const draftHasFinalize = draftFinalizations.some(
-            (entry) => String(entry?.counterentity || '').toLowerCase() === accountIdNorm,
-          );
-          const sentHasFinalize = sentFinalizations.some(
-            (entry) => String(entry?.counterentity || '').toLowerCase() === accountIdNorm,
-          );
-
-          if (sentHasFinalize || replica.state.jBatchState?.sentBatch) {
-            account.activeDispute.finalizeQueued = sentHasFinalize || (account.activeDispute.finalizeQueued ?? false);
-            context.accountChanges.add(accountId);
-            const retryMs = 1000;
-            if (replica.state.crontabState) {
-              scheduleHook(replica.state.crontabState, {
-                id: hook.id,
-                triggerAt: replica.state.timestamp + retryMs,
-                type: 'dispute_deadline',
-                data: { accountId },
-              });
-            }
-            crontabLog.debug('dispute.deferred_sent_batch', { account: shortId(accountId), retryMs });
-            break;
-          }
-
-          if (draftHasFinalize) {
-            account.activeDispute.finalizeQueued = true;
-            context.accountChanges.add(accountId);
-            shouldBroadcastQueuedDisputeFinalizations = true;
-            break;
-          }
-
-          if (account.activeDispute.finalizeQueued) {
-            // Recover from stale local latch (e.g. after abort/drop of previous finalize batch).
-            account.activeDispute.finalizeQueued = false;
-            context.accountChanges.add(accountId);
-          }
-
-          disputeFinalizeCounterparties.add(accountId);
-        }
-        break;
-
-      case 'htlc_secret_ack_timeout':
-        {
-          const { hashlock, counterpartyEntityId, inboundLockId } = hook.data;
-
-          const route = replica.state.htlcRoutes.get(hashlock);
-          if (!route?.secretAckPending) break;
-
-          const account = replica.state.accounts.get(counterpartyEntityId);
-          if (!account) break;
-
-          // ACK already finalized (lock removed) — clear latch and skip.
-          if (inboundLockId && !account.locks?.has(inboundLockId)) {
-            terminateHtlcRoute(replica.state, hashlock, replica.state.timestamp);
-            break;
-          }
-
-          // Dispute already active — nothing else to queue.
-          if (account.activeDispute) break;
-
-          disputePrepareCounterparties.add(counterpartyEntityId);
-          crontabLog.warn('htlc_secret_ack_timeout', {
-            counterparty: shortId(counterpartyEntityId),
-            hashlock: shortHash(hashlock),
-          });
-        }
-        break;
-
-      case 'settlement_window':
-        // Future: auto-execute settlement after approval window
-        crontabLog.debug('hook.unimplemented', { type: hook.type });
-        break;
-
-      case 'watchdog':
-        // Future: detect unresponsive counterparty
-        crontabLog.debug('hook.unimplemented', { type: hook.type });
-        break;
-
-      case 'hub_rebalance_kick':
-        // Force next global hub rebalance pass (across all accounts) on this entity.
-        // This is a wake-up hint, not a per-account rebalance decision.
-        {
-          const task = replica.state.crontabState?.tasks?.get('hubRebalance');
-          if (task) {
-            task.lastRun = 0;
-            crontabLog.debug('hub_rebalance.kick');
-          }
-        }
-        break;
-
-      case 'board_reseal':
-        {
-          if (!context.hashesToSign) throw new Error('BOARD_RESEAL_HASH_COLLECTOR_MISSING');
-          const activation = {
-            entityId: replica.state.entityId.toLowerCase(),
-            jHeight: hook.data.activationJHeight,
-            logIndex: hook.data.activationLogIndex,
-          };
-          const drafts = buildPendingBoardRotationResealDrafts(
-            replica.state,
-            env,
-            activation,
-            hook.data.afterCounterpartyId,
-          );
-          applyBoardRotationResealMigrations(replica.state, drafts.accountMigrations);
-          outputs.push(...drafts.outputs);
-          context.hashesToSign.push(...drafts.hashesToSign);
-          for (const update of drafts.accountMigrations) {
-            context.accountChanges.add(update.counterpartyId);
-          }
-          const pendingForActivation = [...replica.state.accounts.values()].some(account =>
-            account.boardResealMigration?.activationJHeight === activation.jHeight &&
-            account.boardResealMigration.activationLogIndex === activation.logIndex);
-          if (drafts.hasMore || pendingForActivation) {
-            if (!replica.state.crontabState) throw new Error('BOARD_RESEAL_CRONTAB_MISSING');
-            scheduleHook(replica.state.crontabState, {
-              id: BOARD_RESEAL_HOOK_ID,
-              triggerAt: drafts.hasMore
-                ? replica.state.timestamp
-                : replica.state.timestamp + BOARD_RESEAL_RETRY_MS,
-              type: 'board_reseal',
-              data: {
-                activationJHeight: activation.jHeight,
-                activationLogIndex: activation.logIndex,
-                afterCounterpartyId: drafts.hasMore ? drafts.nextAfterCounterpartyId : '',
-              },
-            });
-          }
-          if (drafts.accountMigrations.length > 0 || drafts.hasMore || pendingForActivation) {
-          }
-        }
-        break;
-
-      case 'cross_j_orderbook_sweep':
-        outputs.push({
-          entityId: replica.entityId,
-          signerId: firstValidator,
-          entityTxs: [{
-            type: 'orderbookSweepCrossJurisdiction',
-            data: { reason: String(hook.data.reason || 'cross-j-orderbook-sweep') },
-          }],
-        });
-        break;
-    }
-  }
-
-  // Batch HTLC timeouts into single entityTx
-  if (htlcTimeoutLocks.length > 0) {
-    outputs.push({
-      entityId: replica.entityId,
-      signerId: firstValidator,
-      entityTxs: [
-        {
-          type: 'processHtlcTimeouts',
-          data: { expiredLocks: htlcTimeoutLocks },
-        },
-      ],
-    });
-    crontabLog.debug('htlc_timeout.queued', { locks: htlcTimeoutLocks.length });
-  }
-
-  if (disputePrepareCounterparties.size > 0) {
-    const prepareTxs = Array.from(disputePrepareCounterparties).map((counterpartyEntityId) => ({
-      type: 'prepareDispute' as const,
-      data: {
-        counterpartyEntityId,
-        description: 'auto-prepare-dispute-after-secret-ack-timeout',
-      },
-    }));
-    outputs.push({
-      entityId: replica.entityId,
-      signerId: firstValidator,
-      entityTxs: prepareTxs,
-    });
-    crontabLog.debug('dispute_prepare.queued', { accounts: disputePrepareCounterparties.size });
-  }
-
-  if (disputeFinalizeCounterparties.size > 0) {
-    const finalizeTxs = Array.from(disputeFinalizeCounterparties).map((counterpartyEntityId) => ({
-      type: 'disputeFinalize' as const,
-      data: {
-        counterpartyEntityId,
-        description: 'auto-finalize-after-timeout',
-        useOnchainRegistry: true,
-      },
-    }));
-    outputs.push({
-      entityId: replica.entityId,
-      signerId: firstValidator,
-      entityTxs: [
-        ...finalizeTxs,
-        { type: 'j_broadcast', data: {} },
-      ],
-    });
-    crontabLog.debug('dispute_finalize.queued', { accounts: disputeFinalizeCounterparties.size });
-  } else if (shouldBroadcastQueuedDisputeFinalizations) {
-    if (!context.manualBroadcastInInput) {
-      outputs.push({
-        entityId: replica.entityId,
-        signerId: firstValidator,
-        entityTxs: [{ type: 'j_broadcast', data: {} }],
-      });
-      crontabLog.debug('j_broadcast.queued_for_drafted_finalize');
-    }
-  }
-
-  return outputs;
 }
 
 /**
