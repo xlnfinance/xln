@@ -3,7 +3,16 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 test('account frame proposal path uses structured logging only', () => {
-  const source = readFileSync(join(process.cwd(), 'runtime/account/consensus/propose.ts'), 'utf8');
+  const files = [
+    'propose.ts',
+    'proposal-admission.ts',
+    'proposal-frame.ts',
+    'proposal-proof.ts',
+    'proposal-transactions.ts',
+  ];
+  const source = files.map(file =>
+    readFileSync(join(process.cwd(), 'runtime/account/consensus', file), 'utf8')
+  ).join('\n');
 
   expect(source).toContain("createStructuredLogger('account')");
   expect(source).toContain("accountLog.debug('proof.header'");

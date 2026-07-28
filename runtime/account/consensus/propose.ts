@@ -3,43 +3,19 @@
  * frame construction, frame hanko signing, and dispute-proof signing.
  */
 
-import type { AccountFrame, AccountInput, AccountMachine, AccountTx, Delta, Env } from '../../types';
-import {
-  cloneAccountFrame,
-  cloneAccountMachine,
-  getAccountPerspective,
-  removeCommittedTxsFromMempool,
-} from '../../state-helpers';
-import { isLeft } from '../utils';
+import type { AccountMachine, AccountTx, Env } from '../../types';
+import { removeCommittedTxsFromMempool } from '../../state-helpers';
 import { getPerfMs, HEAVY_LOGS } from '../../utils';
-import { safeStringify } from '../../protocol/serialization';
-import { cloneIsolatedAccountInput } from '../../protocol/account-input-clone';
-import { validateAccountFrame } from '../../validation-utils';
-import { applyAccountTx } from '../tx/apply';
-import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
-import { createFrameHash, MAX_ACCOUNT_FRAME_TXS, MAX_FRAME_SIZE_BYTES } from './frame';
-import { createDisputeProofHashWithNonce } from '../../protocol/dispute/proof-builder';
-import { signEntityHashes } from '../../hanko/signing';
-import {
-  assertNoUnilateralSettlementMutation,
-  buildAccountProofBodyFromEnv,
-  captureSettlementVector,
-  getAccountStateDomain,
-  isEntityId32,
-  shouldIncludeToken,
-} from './helpers';
-import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '../../protocol/dispute/arguments';
-import { MEMPOOL_LIMIT } from './constants';
-import type { AccountConsensusHashToSign, AccountSwapOfferCreated, ProposeAccountFrameResult } from './types';
-import { getReplicaByEntityId } from '../../entity/replica';
-import { computeAccountStateRoot, computeAccountStateSectionHashes, type AccountStateRootTiming } from '../state-root';
-import { stageAccountCommitmentCache } from '../map-commitment';
-import { createAccountJClaimSession } from '../j-claim-session';
-import { prepareAccountJClaimTx } from '../j-claim-transition';
+import { createStructuredLogger, shortId } from '../../infra/logger';
+import type { ProposeAccountFrameResult } from './types';
 import type { AccountJClaimNodeStore } from '../../types/account-j-claims';
-import { getNextSettlementNonce } from '../../protocol/settlement/operations';
 import { cumulativeMarksToPhases } from '../../infra/perf-profile';
 import { isRuntimePerfProfileEnabled, readRuntimePerfSlowMs } from '../../infra/perf-runtime-flags';
+import { validateProposalTransactions } from './proposal-transactions';
+import { buildProposalFrame } from './proposal-frame';
+import { prepareProposalProof } from './proposal-proof';
+import { finalizeAccountProposal } from './proposal-finalize';
+import { prepareProposalAdmission } from './proposal-admission';
 
 const accountLog = createStructuredLogger('account');
 const ACCOUNT_PROPOSAL_PROFILE =
@@ -52,51 +28,6 @@ const accountProposalProfileEnabled = (): boolean =>
   ACCOUNT_PROPOSAL_PROFILE || isRuntimePerfProfileEnabled('XLN_ACCOUNT_PROPOSAL_PROFILE');
 const accountProposalSlowMs = (): number =>
   readRuntimePerfSlowMs('XLN_ACCOUNT_PROPOSAL_SLOW_MS', ACCOUNT_PROPOSAL_SLOW_MS);
-
-const shouldUseOptimisticProposalBatch = (txs: readonly AccountTx[]): boolean =>
-  txs.length > 1 &&
-  txs.every(
-    tx =>
-      tx.type === 'swap_resolve' ||
-      tx.type === 'cross_swap_fill_ack' ||
-      tx.type === 'pull_lock' ||
-      tx.type === 'swap_offer',
-  );
-
-const isCrossJurisdictionPullResolveTx = (
-  accountMachine: AccountMachine,
-  accountTx: AccountTx,
-): accountTx is Extract<AccountTx, { type: 'pull_resolve' }> => {
-  if (accountTx.type !== 'pull_resolve') return false;
-  const pullId = accountTx.data.pullId;
-  if (accountMachine.pulls?.get(pullId)?.crossJurisdiction) return true;
-  for (const offer of accountMachine.swapOffers?.values() ?? []) {
-    const route = offer.crossJurisdiction;
-    if (!route) continue;
-    if (route.sourcePull?.pullId === pullId || route.targetPull?.pullId === pullId) return true;
-  }
-  return false;
-};
-
-const isRetryableAccountProposalError = (error: string | undefined): boolean =>
-  Boolean(error?.startsWith('SETTLEMENT_SIGNED_ACCOUNT_FROZEN:'));
-
-const isRefreshableStaleSettlementSeal = (
-  account: AccountMachine,
-  tx: AccountTx,
-  error: string | undefined,
-): boolean => {
-  if (tx.type !== 'settle_transition' || tx.data.kind !== 'seal') return false;
-  if (!error?.startsWith(`SETTLEMENT_SEAL_NONCE_MISMATCH:${tx.data.settlementNonce}:`)) return false;
-  const workspace = account.settlementWorkspace;
-  return Boolean(
-    workspace &&
-    workspace.nonceAtSign === undefined &&
-    tx.data.version === workspace.version &&
-    tx.data.workspaceHash.toLowerCase() === workspace.workspaceHash.toLowerCase() &&
-    tx.data.settlementNonce !== getNextSettlementNonce(account),
-  );
-};
 
 export async function proposeAccountFrame(
   env: Env,
@@ -111,122 +42,29 @@ export async function proposeAccountFrame(
   const checkpointProfile = (label: string): void => {
     profileCheckpoints[label] = Math.round(getPerfMs() - profileStartMs);
   };
-  // Derive counterparty from canonical left/right
-  const myEntityId = accountMachine.proofHeader.fromEntity;
-  const { counterparty } = getAccountPerspective(accountMachine, myEntityId);
-  const quiet = env.quietRuntimeLogs === true;
-  if (!quiet) {
-    accountLog.debug('proposal.start', {
-      counterparty: shortId(counterparty),
-      mempool: accountMachine.mempool.length,
-      pendingFrame: Boolean(accountMachine.pendingFrame),
-      height: accountMachine.currentHeight,
-    });
-  }
-
-  const events: string[] = [];
-
-  if (accountMachine.mempool.length > MEMPOOL_LIMIT) {
-    accountLog.warn('proposal.mempool_overflow', { mempool: accountMachine.mempool.length, limit: MEMPOOL_LIMIT });
-    return { success: false, error: `Mempool overflow: ${accountMachine.mempool.length} > ${MEMPOOL_LIMIT}`, events };
-  }
-
-  if (accountMachine.mempool.length === 0) {
-    accountLog.debug('proposal.empty_mempool');
-    return { success: false, error: 'No transactions to propose', events };
-  }
-
-  if (accountMachine.pendingFrame) {
-    if (!quiet) accountLog.debug('proposal.waiting_ack', { pendingHeight: accountMachine.pendingFrame.height });
-    return { success: false, error: 'Waiting for ACK on pending frame', events };
-  }
-
-  // IMPORTANT: Do NOT gate RIGHT-side j_event_claim proposals on presence of a
-  // previously committed LEFT claim.
-  //
-  // Correct model:
-  // 1. Each side may observe the same J-event independently.
-  // 2. Each side is allowed to propose its own j_event_claim account frame.
-  // 3. Those claims are committed in separate left/right Patricia roots.
-  // 4. The proof-verified transition is the ONLY place that may require 2-of-2
-  //    agreement and finalize the settlement fields.
-  //
-  // If proposal logic blocks one side until the other side's claim is already
-  // committed, bilateral rebalance can deadlock at "Waiting for LEFT claim":
-  // the second observation never enters account state, so the 2-of-2 matcher
-  // never sees both sides. Same-height races are handled by the normal
-  // simultaneous-proposal rollback/tiebreaker path below, not by a special
-  // j_event_claim gate here.
-
-  const proposalSource = selectedMempoolTxs ?? accountMachine.mempool;
-  if (proposalSource.length === 0) {
-    throw new Error('ACCOUNT_PROPOSAL_SELECTION_EMPTY');
-  }
-  if (proposalSource.length > MAX_ACCOUNT_FRAME_TXS) {
-    throw new Error(`ACCOUNT_PROPOSAL_SELECTION_TOO_LARGE:${proposalSource.length}`);
-  }
-  if (selectedMempoolTxs) {
-    const remaining = new Map<string, number>();
-    for (const tx of accountMachine.mempool) {
-      const key = safeStringify(tx);
-      remaining.set(key, (remaining.get(key) ?? 0) + 1);
-    }
-    for (const tx of selectedMempoolTxs) {
-      const key = safeStringify(tx);
-      const count = remaining.get(key) ?? 0;
-      if (count === 0) throw new Error('ACCOUNT_PROPOSAL_SELECTION_NOT_IN_MEMPOOL');
-      remaining.set(key, count - 1);
-    }
-  }
-  const proposalWindow = [...proposalSource];
-  if (!quiet) {
-    accountLog.info('proposal.frame_create', {
-      txs: proposalWindow.map(tx => tx.type),
-      mempool: accountMachine.mempool.length,
-      frameMax: MAX_ACCOUNT_FRAME_TXS,
-    });
-  }
+  const admission = prepareProposalAdmission(
+    env,
+    accountMachine,
+    entityFrameTimestamp,
+    entityJHeight,
+    selectedMempoolTxs,
+  );
+  if (!admission.success) return admission.result;
+  const {
+    counterparty,
+    quiet,
+    events,
+    proposalWindow,
+    frameTimestamp,
+    frameJHeight,
+  } = admission;
+  checkpointProfile('admission');
   if (HEAVY_LOGS) {
     accountLog.debug('proof.header', {
       from: shortId(accountMachine.proofHeader.fromEntity, 8),
       to: shortId(accountMachine.proofHeader.toEntity, 8),
     });
   }
-
-  // Clone account machine for validation
-  let clonedMachine = cloneAccountMachine(accountMachine);
-  checkpointProfile('clone');
-  // NOTE: proofHeader.nextProofNonce is NOT set here — it's incremented per-message, not per-frame
-
-  // Deterministic J-height for account frame hashing:
-  // Use account-level finalized J-height (consensus state), not live replica tip.
-  // Replica tip can drift between runtime sessions and break WAL replay hashes.
-  const frameJHeight = entityJHeight ?? accountMachine.lastFinalizedJHeight ?? 0;
-  // The Entity timestamp is the sole clock for every Account proposal created
-  // inside that Entity frame. Equal timestamps are expected when Entity
-  // consensus iterates more than once inside one Runtime frame.
-  const previousTimestamp = accountMachine.currentFrame?.timestamp ?? 0;
-  if (!Number.isSafeInteger(entityFrameTimestamp) || entityFrameTimestamp < 0) {
-    throw new Error(`ACCOUNT_PROPOSAL_ENTITY_TIMESTAMP_INVALID:${String(entityFrameTimestamp)}`);
-  }
-  const frameTimestamp = entityFrameTimestamp;
-  if (frameTimestamp < previousTimestamp) {
-    accountLog.warn('proposal.timestamp_regressed_accepted', {
-      accountHeight: accountMachine.currentHeight,
-      entityId: myEntityId,
-      counterpartyEntityId: counterparty,
-      previousTimestamp,
-      proposedTimestamp: frameTimestamp,
-      regressionMs: previousTimestamp - frameTimestamp,
-      runtimeTimestamp: env.timestamp,
-    });
-  }
-
-  const allEvents: string[] = [];
-  const revealedSecrets: Array<{ secret: string; hashlock: string }> = [];
-  const swapOffersCreated: AccountSwapOfferCreated[] = [];
-  const swapCancelRequests: Array<{ offerId: string; accountId: string }> = [];
-  const swapOffersCancelled: Array<{ offerId: string; accountId: string }> = [];
 
   if (HEAVY_LOGS) {
     accountLog.debug('mempool.before_process', {
@@ -235,169 +73,25 @@ export async function proposeAccountFrame(
       txs: proposalWindow.map(tx => tx.type),
     });
   }
+  const validation = await validateProposalTransactions({
+    env,
+    account: accountMachine,
+    proposalWindow,
+    frameTimestamp,
+    frameJHeight,
+    ...(accountJClaimNodeStore ? { jClaimNodeStore: accountJClaimNodeStore } : {}),
+  });
 
-  const validTxs: typeof accountMachine.mempool = [];
-  const validMempoolTxs: typeof accountMachine.mempool = [];
-  const failedHtlcLocks: Array<{ hashlock: string; reason: string }> = [];
-  const txsToRemove: typeof accountMachine.mempool = [];
-  let deferredTxCount = 0;
-  const proposerByLeft = isLeft(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
-  const jClaimSession = createAccountJClaimSession(env, accountJClaimNodeStore);
-
-  const processOnMachine = async (machine: AccountMachine, accountTx: AccountTx) => {
-    const preparedTx =
-      accountTx.type === 'j_event_claim'
-        ? prepareAccountJClaimTx(machine, accountTx, getAccountStateDomain(machine), jClaimSession)
-        : accountTx;
-    const beforeSettlement = captureSettlementVector(machine);
-    const result = await applyAccountTx(
-      machine,
-      preparedTx,
-      proposerByLeft,
-      frameTimestamp,
-      frameJHeight, // Entity's synced J-height
-      true, // isValidation = true (on clone, skip persistent state updates)
-      env,
-      jClaimSession,
-    );
-    if (result.success) {
-      assertNoUnilateralSettlementMutation(machine, beforeSettlement, preparedTx, 'propose/validate');
-    }
-    return { result, preparedTx };
-  };
-
-  const collectSuccessfulTx = (
-    accountTx: AccountTx,
-    preparedTx: AccountTx,
-    result: Awaited<ReturnType<typeof applyAccountTx>>,
-  ): void => {
-    validTxs.push(preparedTx);
-    validMempoolTxs.push(accountTx);
-    allEvents.push(...result.events);
-
-    if (HEAVY_LOGS) {
-      accountLog.debug('tx.result', {
-        type: accountTx.type,
-        hasSecret: Boolean(result.secret),
-        hasHashlock: Boolean(result.hashlock),
-      });
-    }
-    if (result.secret && result.hashlock) {
-      revealedSecrets.push({ secret: result.secret, hashlock: result.hashlock });
-    }
-
-    if (result.swapOfferCreated) {
-      swapOffersCreated.push(result.swapOfferCreated);
-    }
-
-    if (result.swapOfferCancelRequested) {
-      swapCancelRequests.push({
-        ...result.swapOfferCancelRequested,
-        accountId: accountMachine.proofHeader.toEntity,
-      });
-    }
-
-    if (result.swapOfferCancelled) {
-      swapOffersCancelled.push(result.swapOfferCancelled);
-    }
-  };
-
-  const canOptimisticallyValidateBatch = shouldUseOptimisticProposalBatch(proposalWindow);
-  let optimisticBatchFailed = false;
-  if (canOptimisticallyValidateBatch) {
-    const optimisticMachine = cloneAccountMachine(accountMachine);
-    const optimisticResults: Array<{
-      tx: AccountTx;
-      preparedTx: AccountTx;
-      result: Awaited<ReturnType<typeof applyAccountTx>>;
-    }> = [];
-    for (const accountTx of proposalWindow) {
-      if (HEAVY_LOGS) accountLog.debug('batch.optimistic_tx', { type: accountTx.type });
-      const { result, preparedTx } = await processOnMachine(optimisticMachine, accountTx);
-      if (!result.success) {
-        optimisticBatchFailed = true;
-        break;
-      }
-      optimisticResults.push({ tx: accountTx, preparedTx, result });
-    }
-    if (!optimisticBatchFailed) {
-      clonedMachine = optimisticMachine;
-      for (const { tx, preparedTx, result } of optimisticResults) collectSuccessfulTx(tx, preparedTx, result);
-    }
-  }
-  if (!canOptimisticallyValidateBatch || optimisticBatchFailed) {
-    if (optimisticBatchFailed) {
-      clonedMachine = cloneAccountMachine(accountMachine);
-    }
-    for (const accountTx of proposalWindow) {
-      if (HEAVY_LOGS) accountLog.debug('tx.process', { type: accountTx.type });
-      const txMachine = cloneAccountMachine(clonedMachine);
-      const { result, preparedTx } = await processOnMachine(txMachine, accountTx);
-
-      if (!result.success) {
-        if (
-          isRetryableAccountProposalError(result.error) ||
-          isRefreshableStaleSettlementSeal(clonedMachine, accountTx, result.error)
-        ) {
-          deferredTxCount += 1;
-          allEvents.push(...result.events);
-          accountLog.info('tx.deferred', {
-            type: accountTx.type,
-            reason: result.error,
-          });
-          continue;
-        }
-        if (accountTx.type === 'settle_transition') {
-          throw new Error(
-            `SETTLEMENT_TRANSITION_PROPOSAL_FAILED:${accountTx.data.kind}:` + `${result.error || 'validation_failed'}`,
-          );
-        }
-        if (accountTx.type === 'cross_swap_fill_ack') {
-          throw new Error(
-            `CROSS_J_FILL_ACK_PROPOSAL_FAILED: offer=${accountTx.data.offerId} ` +
-              `seq=${accountTx.data.fillSeq} error=${result.error || 'validation_failed'}`,
-          );
-        }
-        if (accountTx.type === 'pull_lock' && accountTx.data.crossJurisdiction) {
-          throw new Error(
-            `CROSS_J_PULL_LOCK_PROPOSAL_FAILED: pull=${accountTx.data.pullId} ` +
-              `order=${accountTx.data.crossJurisdiction.orderId} error=${result.error || 'validation_failed'}`,
-          );
-        }
-        if (accountTx.type === 'swap_offer' && accountTx.data.crossJurisdiction) {
-          throw new Error(
-            `CROSS_J_SWAP_OFFER_PROPOSAL_FAILED: offer=${accountTx.data.offerId} ` +
-              `error=${result.error || 'validation_failed'}`,
-          );
-        }
-        if (isCrossJurisdictionPullResolveTx(accountMachine, accountTx)) {
-          throw new Error(
-            `CROSS_J_PULL_RESOLVE_PROPOSAL_FAILED: pull=${accountTx.data.pullId} ` +
-              `error=${result.error || 'validation_failed'}`,
-          );
-        }
-        if (accountTx.type === 'cross_pull_close') {
-          throw new Error(
-            `CROSS_J_PULL_CLOSE_PROPOSAL_FAILED: pull=${accountTx.data.pullId} ` +
-              `error=${result.error || 'validation_failed'}`,
-          );
-        }
-        txsToRemove.push(accountTx);
-        accountLog.debug('tx.skipped', { type: accountTx.type, error: result.error || 'unknown' });
-
-        if (accountTx.type === 'htlc_lock') {
-          failedHtlcLocks.push({
-            hashlock: accountTx.data.hashlock,
-            reason: result.error || 'validation_failed',
-          });
-          accountLog.debug('htlc_lock.cancel_queued', { hashlock: shortHash(accountTx.data.hashlock) });
-        }
-        continue; // Skip to next tx
-      }
-      clonedMachine = txMachine;
-      collectSuccessfulTx(accountTx, preparedTx, result);
-    }
-  }
+  const {
+    clonedMachine,
+    validTxs,
+    validMempoolTxs,
+    txsToRemove,
+    deferredTxCount,
+    events: validationEvents,
+    failedHtlcLocks,
+    optimisticBatch,
+  } = validation;
   checkpointProfile('validateTxs');
 
   const accountChangedBeforeProposal = txsToRemove.length > 0;
@@ -417,303 +111,55 @@ export async function proposeAccountFrame(
         deferredTxCount > 0
           ? `Transactions deferred until signed settlement finalizes: ${deferredTxCount}`
           : 'All transactions failed validation',
-      events: allEvents,
+      events: validationEvents,
     };
     if (failedHtlcLocks.length > 0) earlyResult.failedHtlcLocks = failedHtlcLocks;
     return accountChangedBeforeProposal ? { ...earlyResult, accountChanged: true } : earlyResult;
   }
 
-  const finalDeltas: Delta[] = [];
-
-  // Sort by tokenId for deterministic ordering
-  const sortedTokens = Array.from(clonedMachine.deltas.entries()).sort((a, b) => a[0] - b[0]);
-
-  for (const [tokenId, delta] of sortedTokens) {
-    // CONSENSUS FIX: Only include tokens that were actually used in transactions
-    // This prevents mismatch when one side creates empty delta entries
-    // CRITICAL: Use offdelta ONLY for frame comparison (not ondelta)
-    // ondelta is set by J-events which have timing dependencies (bilateral finalization)
-    // offdelta is set by bilateral transactions (deterministic)
-    const totalDelta = delta.offdelta;
-
-    // Skip tokens with zero delta AND zero limits AND zero holds (never used)
-    // CRITICAL: Include tokens with HTLC/swap holds even if delta/limits/collateral are zero
-    // NOTE: Collateral changes from j_events are included separately in frame validation
-    // Only skip if delta, limits, AND holds are all zero
-    // Collateral is omitted here because j_events can set it during frame processing
-    if (!shouldIncludeToken(delta, totalDelta)) {
-      if (HEAVY_LOGS) accountLog.debug('token.skip_unused', { tokenId });
-      continue;
-    }
-
-    finalDeltas.push({ ...delta });
-  }
-
-  const weAreLeft = isLeft(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
-
-  const accountTxsCopy = structuredClone([...validTxs]);
-  let accountStateRoot: string;
-  const stateRootTiming: AccountStateRootTiming = {};
-  try {
-    accountStateRoot = computeAccountStateRoot(clonedMachine, stateRootTiming);
-  } catch (error) {
-    return {
-      success: false,
-      error: `ACCOUNT_STATE_ROOT_BUILD_FAILED: ${(error as Error).message}`,
-      events,
-    };
-  }
-  checkpointProfile('stateRoot');
-  const frameData = {
-    height: accountMachine.currentHeight + 1,
-    timestamp: frameTimestamp,
-    jHeight: frameJHeight, // CRITICAL: J-height for HTLC consensus
-    accountTxs: accountTxsCopy,
-    // CRITICAL: Use stored stateHash from currentFrame (set during commit)
-    prevFrameHash: accountMachine.currentHeight === 0 ? 'genesis' : accountMachine.currentFrame.stateHash || '',
-    accountStateRoot,
-    stateHash: '', // Will be filled after hash calculation
-    byLeft: weAreLeft, // Who proposed this frame
-    deltas: finalDeltas,
-  };
-
-  frameData.stateHash = await createFrameHash(frameData as AccountFrame);
-  checkpointProfile('frameHash');
-
-  if (HEAVY_LOGS) {
-    accountLog.debug('proposal.frame_built', {
-      height: frameData.height,
-      stateHash: frameData.stateHash,
-      accountStateRoot: frameData.accountStateRoot,
-      accountStateSectionHashes: computeAccountStateSectionHashes(clonedMachine),
-      txs: frameData.accountTxs.map(tx => tx.type),
-    });
-  }
-
-  let newFrame: AccountFrame;
-  try {
-    newFrame = validateAccountFrame(frameData, 'proposeAccountFrame');
-  } catch (error) {
-    accountLog.warn('frame.validation_failed', { error: error instanceof Error ? error.message : String(error) });
-    return {
-      success: false,
-      error: `Frame validation failed: ${(error as Error).message}`,
-      events,
-    };
-  }
-
-  const frameSize = safeStringify(newFrame).length;
-  if (frameSize > MAX_FRAME_SIZE_BYTES) {
-    accountLog.warn('frame.too_large', { frameSize, limit: MAX_FRAME_SIZE_BYTES });
-    return {
-      success: false,
-      error: `Frame exceeds ${MAX_FRAME_SIZE_BYTES} byte limit: ${frameSize} bytes`,
-      events,
-    };
-  }
-  checkpointProfile('frameValidation');
-
-  // Generate HANKO signature - CRITICAL: Use signerId, not entityId
-  // For single-signer entities, build hanko with single EOA signature
-  const signingEntityId = accountMachine.proofHeader.fromEntity;
-  const signingReplica = getReplicaByEntityId(env, signingEntityId);
-  if (!signingReplica) {
-    return { success: false, error: `Cannot find replica for entity ${signingEntityId.slice(-4)}`, events };
-  }
-  const signingSignerId = signingReplica.state.config.validators[0];
-  if (!signingSignerId) {
-    return { success: false, error: `Entity ${signingEntityId.slice(-4)} has no validators`, events };
-  }
-  const directSigner = signingReplica.state.config.validators.length === 1 ? signingSignerId : undefined;
-
-  if (!quiet) {
-    accountLog.debug(directSigner ? 'hanko.sign' : 'hanko.defer_to_entity_quorum', {
-      entity: shortId(signingEntityId),
-      ...(directSigner ? { signer: shortId(directSigner) } : {}),
-    });
-  }
-
-  // Build the on-chain projection from NEW state. Credit-limit and other
-  // off-chain-only changes alter accountStateRoot but intentionally reuse the
-  // last dispute proof when the Solidity ProofBody projection is unchanged.
-  if (!isEntityId32(clonedMachine.leftEntity) || !isEntityId32(clonedMachine.rightEntity)) {
-    const left = String(clonedMachine.leftEntity);
-    const right = String(clonedMachine.rightEntity);
-    return {
-      success: false,
-      error: `INVALID_ACCOUNT_ENTITY_ID: left=${left} right=${right}`,
-      events,
-    };
-  }
-
-  let proofResult: ReturnType<typeof buildAccountProofBodyFromEnv>;
-  let disputeHash: string | undefined;
-  let signedProofNonce = 0;
-  try {
-    proofResult = buildAccountProofBodyFromEnv(env, clonedMachine);
-    const proofBodyChanged =
-      proofResult.proofBodyHash.toLowerCase() !== accountMachine.currentDisputeProofBodyHash?.toLowerCase();
-    const proofNonceConsumed =
-      Number(accountMachine.currentDisputeProofNonce ?? 0) <= Number(clonedMachine.jNonce ?? 0);
-    if (proofBodyChanged || proofNonceConsumed) {
-      signedProofNonce = Math.max(
-        Number(clonedMachine.proofHeader.nextProofNonce ?? 0),
-        Number(clonedMachine.jNonce ?? 0) + 1,
-      );
-      disputeHash = createDisputeProofHashWithNonce(
-        clonedMachine,
-        proofResult.proofBodyHash,
-        getAccountStateDomain(accountMachine),
-        signedProofNonce,
-      );
-    }
-  } catch (error) {
-    // A proof-construction failure is not a user-level rejected Account tx.
-    // Continuing would leave a committed Entity frame with an Account mempool
-    // that can never produce the on-chain recovery proof it promises.
-    throw new Error(`DISPUTE_PROOF_BUILD_FAILED: ${(error as Error).message}`, { cause: error });
-  }
-  checkpointProfile('disputeProof');
-
-  const proofChanged = disputeHash !== undefined;
-  let frameHanko: string | undefined;
-  let disputeHanko: string | undefined;
-  if (directSigner) {
-    [frameHanko, disputeHanko] = await signEntityHashes(env, signingEntityId, directSigner, [
-      newFrame.stateHash,
-      ...(disputeHash ? [disputeHash] : []),
-    ]);
-    if (!frameHanko) {
-      return { success: false, error: 'Failed to build frame hanko', events };
-    }
-    if (proofChanged && !disputeHanko) {
-      return { success: false, error: 'Failed to build dispute hanko', events };
-    }
-    accountMachine.currentFrameHanko = frameHanko;
-  }
-  checkpointProfile('signatures');
-  if (proofChanged && disputeHash) {
-    if (disputeHanko) accountMachine.currentDisputeProofHanko = disputeHanko;
-    accountMachine.currentDisputeProofNonce = signedProofNonce;
-    accountMachine.currentDisputeProofBodyHash = proofResult.proofBodyHash;
-    accountMachine.currentDisputeHash = disputeHash;
-    accountMachine.disputeProofNoncesByHash ??= {};
-    accountMachine.disputeProofNoncesByHash[proofResult.proofBodyHash] = signedProofNonce;
-    accountMachine.disputeProofBodiesByHash ??= {};
-    accountMachine.disputeProofBodiesByHash[proofResult.proofBodyHash] = proofResult.proofBodyStruct;
-    storeDisputeArgumentSnapshot(
-      accountMachine,
-      captureDisputeArgumentSnapshot(
-        clonedMachine,
-        proofResult.proofBodyHash,
-        signedProofNonce,
-        proofResult.proofBodyStruct,
-      ),
-    );
-  }
-
-  // Settlements are handled via SettlementWorkspace flow (entity/tx/handlers/settle.ts).
-
-  // Set pending state (no longer storing clone - re-execution on commit)
-  stageAccountCommitmentCache(accountMachine, clonedMachine);
-  accountMachine.pendingFrame = newFrame;
-
-  // Remove only the transactions that actually made it into the proposed frame.
-  // This function is async and can yield while hashing/signing; late arrivals must
-  // remain queued for the next frame instead of being silently wiped by position.
-  accountMachine.mempool = removeCommittedTxsFromMempool(accountMachine.mempool, [...txsToRemove, ...validMempoolTxs]);
-
-  events.push(`🚀 Proposed frame ${newFrame.height} with ${newFrame.accountTxs.length} transactions`);
-
-  const outboundFrame = cloneAccountFrame(newFrame);
-  const reusableAck = accountMachine.lastOutboundFrameAck;
-  const shouldBundlePreviousAck =
-    !!reusableAck &&
-    reusableAck.counterpartyEntityId.toLowerCase() === accountMachine.proofHeader.toEntity.toLowerCase() &&
-    Number(reusableAck.height) === Number(newFrame.height) - 1 &&
-    Number(accountMachine.currentHeight) === Number(reusableAck.height);
-  const disputeSeal =
-    proofChanged && disputeHash
-      ? {
-          ...(disputeHanko ? { hanko: disputeHanko } : {}),
-          hash: disputeHash,
-          proofBodyHash: proofResult.proofBodyHash,
-          proofNonce: signedProofNonce,
-        }
-      : accountMachine.currentDisputeProofHanko &&
-          accountMachine.currentDisputeHash &&
-          accountMachine.currentDisputeProofBodyHash?.toLowerCase() === proofResult.proofBodyHash.toLowerCase() &&
-          Number(accountMachine.currentDisputeProofNonce ?? 0) > Number(clonedMachine.jNonce ?? 0)
-        ? {
-            hanko: accountMachine.currentDisputeProofHanko,
-            hash: accountMachine.currentDisputeHash,
-            proofBodyHash: accountMachine.currentDisputeProofBodyHash,
-            proofNonce: accountMachine.currentDisputeProofNonce!,
-          }
-        : undefined;
-  const proposal = {
-    frame: outboundFrame,
-    ...(frameHanko ? { frameHanko } : {}),
-    ...(disputeSeal ? { disputeSeal } : {}),
-  };
-  const accountInput: Extract<AccountInput, { kind: 'frame' | 'frame_ack' }> = shouldBundlePreviousAck
-    ? {
-        kind: 'frame_ack',
-        fromEntityId: accountMachine.proofHeader.fromEntity,
-        toEntityId: accountMachine.proofHeader.toEntity,
-        domain: structuredClone(accountMachine.domain),
-        watchSeed: accountMachine.watchSeed,
-        ack: structuredClone(reusableAck.response.ack),
-        proposal,
-      }
-    : {
-        kind: 'frame',
-        fromEntityId: accountMachine.proofHeader.fromEntity,
-        toEntityId: accountMachine.proofHeader.toEntity,
-        domain: structuredClone(accountMachine.domain),
-        watchSeed: accountMachine.watchSeed,
-        proposal,
-      };
-  if (!shouldBundlePreviousAck && reusableAck && Number(reusableAck.height) < Number(accountMachine.currentHeight)) {
-    delete accountMachine.lastOutboundFrameAck;
-  }
-  if (proofChanged) accountMachine.proofHeader.nextProofNonce = signedProofNonce + 1;
-  accountMachine.pendingAccountInput = cloneIsolatedAccountInput(accountInput);
-  checkpointProfile('finalize');
-
-  // Collect hashes for entity-quorum signing (multi-signer support)
-  const hashesToSign: AccountConsensusHashToSign[] = [
-    {
-      hash: newFrame.stateHash,
-      type: 'accountFrame',
-      context: `account:${counterparty.slice(-8)}:frame:${newFrame.height}`,
-    },
-    ...(disputeHash
-      ? [{ hash: disputeHash, type: 'dispute' as const, context: `account:${counterparty.slice(-8)}:dispute` }]
-      : []),
-  ];
-
-  const finalResult: ProposeAccountFrameResult = {
-    success: true,
-    accountChanged: true,
-    accountInput,
+  const frameBuild = await buildProposalFrame(
+    accountMachine,
+    clonedMachine,
+    validTxs,
+    frameTimestamp,
+    frameJHeight,
     events,
-    revealedSecrets,
-    swapOffersCreated,
-    swapCancelRequests,
-    swapOffersCancelled,
-    hashesToSign,
-  };
-  if (failedHtlcLocks.length > 0) finalResult.failedHtlcLocks = failedHtlcLocks;
+    checkpointProfile,
+  );
+  if (!frameBuild.success) return frameBuild.result;
+  const { frame: newFrame, stateRootTiming } = frameBuild;
+
+  const proof = await prepareProposalProof(
+    env,
+    accountMachine,
+    clonedMachine,
+    newFrame,
+    events,
+    quiet,
+    checkpointProfile,
+  );
+  if (!proof.success) return proof.result;
+  const finalResult = finalizeAccountProposal(
+    accountMachine,
+    clonedMachine,
+    newFrame,
+    proof,
+    counterparty,
+    validMempoolTxs,
+    txsToRemove,
+    validation,
+    events,
+    checkpointProfile,
+  );
   const profileTotalMs = Math.round(getPerfMs() - profileStartMs);
   if (accountProposalProfileEnabled() || profileTotalMs >= accountProposalSlowMs()) {
     const profile = {
-      entity: shortId(signingEntityId, 8),
+      entity: shortId(proof.signingEntityId, 8),
       counterparty: shortId(counterparty, 8),
       height: newFrame.height,
       txs: newFrame.accountTxs.length,
       txTypes: Array.from(new Set(newFrame.accountTxs.map(tx => tx.type))).sort(),
-      optimisticBatch: canOptimisticallyValidateBatch && !optimisticBatchFailed,
+      optimisticBatch,
       totalMs: profileTotalMs,
       phases: cumulativeMarksToPhases(profileCheckpoints, profileTotalMs),
       stateRoot: stateRootTiming,

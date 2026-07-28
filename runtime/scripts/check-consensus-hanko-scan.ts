@@ -24,7 +24,11 @@ const assertOrder = (text: string, path: string, markers: string[]): void => {
 
 const accountConsensusPath = 'runtime/account/consensus/index.ts';
 const accountHandlerPath = 'runtime/entity/tx/handlers/account.ts';
-const accountProposePath = 'runtime/account/consensus/propose.ts';
+const accountProposePaths = [
+  'runtime/account/consensus/propose.ts',
+  'runtime/account/consensus/proposal-admission.ts',
+];
+const accountProposePath = accountProposePaths.join(', ');
 const accountFramePath = 'runtime/account/consensus/frame.ts';
 const entityConsensusPaths = [
   'runtime/entity/consensus/shared.ts',
@@ -55,7 +59,7 @@ const auditDocPath = 'docs/security/consensus-hanko-scan.md';
 
 const accountConsensus = readText(accountConsensusPath);
 const accountHandler = readText(accountHandlerPath);
-const accountPropose = readText(accountProposePath);
+const accountPropose = accountProposePaths.map(readText).join('\n');
 const accountFrame = readText(accountFramePath);
 const entityConsensus = entityConsensusPaths.map(readText).join('\n');
 const envEvents = readText(envEventsPath);
@@ -73,7 +77,11 @@ const auditDoc = readText(auditDocPath);
 
 assertNotMatches(accountConsensus, /\bjHeight\s*\|\|/g, accountConsensusPath, 'jHeight || fallback');
 assertNotMatches(accountPropose, /\bjHeight\s*\|\||entityJHeight\s*\|\|/g, accountProposePath, 'jHeight/entityJHeight || fallback');
-assertIncludes(accountPropose, 'const frameJHeight = entityJHeight ?? accountMachine.lastFinalizedJHeight ?? 0;', accountProposePath);
+assertIncludes(
+  accountPropose,
+  'frameJHeight: entityJHeight ?? account.lastFinalizedJHeight ?? 0,',
+  accountProposePath,
+);
 assertIncludes(accountConsensus, 'const pendingJHeight = accountMachine.pendingFrame.jHeight ?? accountMachine.lastFinalizedJHeight ?? 0;', accountConsensusPath);
 assertIncludes(accountConsensus, 'const currentJHeight = accountMachine.lastFinalizedJHeight ?? 0;', accountConsensusPath);
 assertIncludes(accountConsensus, 'const frameJHeight = receivedFrame.jHeight ?? currentJHeight;', accountConsensusPath);
