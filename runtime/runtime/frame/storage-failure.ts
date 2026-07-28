@@ -8,11 +8,9 @@ import {
   publishRuntimeFrameTransaction,
 } from './transaction';
 
-export type RuntimeFrameCommitStatus =
-  | 'not-committed'
-  | 'committed'
-  | 'conflict'
-  | 'unknown';
+import type { RuntimeFrameCommitStatus } from '../../storage/commit-status';
+
+export type { RuntimeFrameCommitStatus } from '../../storage/commit-status';
 
 const haltRuntimeAtProvenState = (
   runtime: RuntimeState,

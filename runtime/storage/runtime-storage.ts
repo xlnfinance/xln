@@ -1,10 +1,8 @@
 import { Level } from 'level';
 import { runtimeIsBrowser } from '../runtime/platform';
-import { getPerfMs } from '../utils';
 import { cloneIsolatedRoutedEntityInputs, cloneIsolatedRuntimeInput } from '../protocol/runtime-input-clone';
 import { requireBoundaryInteger } from '../protocol/boundary-validation';
 import {
-  buildDurableRuntimeMachineSnapshot,
   buildReplayVerifiableRuntimeMachineSnapshot,
   authorizeRestoredRuntimeInput,
   restoreDurableRuntimeSnapshot,
@@ -12,15 +10,9 @@ import {
 import { assertPersistedLocalEntityCryptoKeys } from '../entity/crypto';
 import { getLiveConsumptionAccumulatorStates } from '../entity/consumption-store';
 import { getLiveAccountJClaimAccumulatorStates } from '../account/j-claim-store';
-import {
-  dropPendingHistoryRecords,
-  dropOverlay,
-  peekPendingHistoryRecords,
-  setAccountFrameHistoryView,
-} from '../runtime/env-events';
+import { setAccountFrameHistoryView } from '../runtime/env-events';
 import { normalizeRuntimeId } from '../networking/runtime-id';
 import { formatReplicaKey, createReplicaKey } from '../ids';
-import { transitionRuntimeLifecycle } from '../runtime/lifecycle';
 import { ensureRuntimeState } from '../runtime/runtime-state';
 import { restoreDurableOutputRetryState } from '../runtime/durable-output-retry';
 import { cloneEntityState } from '../state-helpers';
@@ -53,7 +45,6 @@ import {
   readStorageFrameRecord,
   readStorageHead,
   readStorageOverlayRecordsFromDiffs,
-  saveRuntimeFrameToStorage,
   type StorageFrameRecord,
   type StorageHead,
   verifyStorageSnapshotAtHeight,
@@ -64,41 +55,27 @@ import {
 } from './replicas';
 import { assertStorageSafetyOverridesAllowed } from './safety';
 import { storageOverlayRecordKey } from './overlay';
-import { evaluateStorageProgressDeadline } from './progress-deadline';
 import { assertCertifiedJHistoryIntegrity, assertValidatorJHistoryIntegrity } from '../jurisdiction/local-history';
 import { restoreJPrefixRound } from '../jurisdiction/j-prefix-consensus';
 import type {
   EntityReplica,
   EntityState,
   RuntimeState,
-  RoutedEntityInput,
   RuntimeOverlayRecord,
-  RuntimeInput,
 } from '../types';
 import { buildRecoveryJournalFromStorageFrame } from './queries';
-import { normalizeDbNamespace, withStorageWriterLock } from './runtime-dbs';
+import { normalizeDbNamespace } from './runtime-dbs';
 import { createStructuredLogger } from '../infra/logger';
-import type { PersistedFrameJournal } from './types';
-import type { StorageDbRole } from './runtime-dbs';
 import { envRecord } from '../runtime/loop-environment';
+import type { RuntimeStorageApiDeps } from './runtime-storage-deps';
+import {
+  createRuntimeStorageCommitApi,
+  shouldRequireCanonicalStorageAudit,
+} from './commit';
 
-type RuntimeModule = typeof import('../runtime');
+export type { RuntimeStorageApiDeps } from './runtime-storage-deps';
 
-export type RuntimeStorageApiDeps = Pick<RuntimeModule, 'closeRuntimeDb' | 'closeInfraDb' | 'createEmptyEnv'> & {
-  getStorageDb(env: RuntimeState, role?: StorageDbRole): Level<Buffer, Buffer>;
-  getRuntimeWalDb(env: RuntimeState): Level<Buffer, Buffer>;
-  getHistoryViewDb(env: RuntimeState): Level<Buffer, Buffer>;
-  tryOpenStorageDb(env: RuntimeState, role?: StorageDbRole): Promise<boolean>;
-  rotateStorageEpochDb(env: RuntimeState, snapshotHeight: number, timestamp?: number): Promise<boolean>;
-  tryOpenRuntimeWalDb(env: RuntimeState): Promise<boolean>;
-  tryOpenHistoryViewDb(env: RuntimeState): Promise<boolean>;
-  waitForPromiseBeforeTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<boolean>;
-  replayRecoveryFrameJournals(env: RuntimeState, frames: PersistedFrameJournal[]): Promise<void>;
-};
-
-const ENV_REPLAY_MODE_KEY = Symbol.for('xln.runtime.env.replay.mode');
 const runtimeLog = createStructuredLogger('runtime');
-const formatPerfMs = (value: number): string => value.toFixed(2);
 
 type RuntimeSyncChannel = NonNullable<NonNullable<RuntimeState['runtimeState']>['runtimeSyncChannel']>;
 
@@ -146,265 +123,17 @@ export const notifyRuntimeSyncAfterCommit = (
 
 export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
   const {
-    getStorageDb,
     getRuntimeWalDb,
     getHistoryViewDb,
-    tryOpenStorageDb,
-    rotateStorageEpochDb,
     tryOpenRuntimeWalDb,
     tryOpenHistoryViewDb,
     closeRuntimeDb,
     closeInfraDb,
-    waitForPromiseBeforeTimeout,
     createEmptyEnv,
     replayRecoveryFrameJournals,
   } = deps;
 
-  const waitForRuntimeProcessingIdle = async (env: RuntimeState, timeoutMs = 5_000): Promise<boolean> => {
-    const startedAt = Date.now();
-    while (true) {
-      const pending = env.runtimeState?.processingPromise;
-      if (!pending) return true;
-      const remaining = timeoutMs - (Date.now() - startedAt);
-      if (remaining <= 0) return false;
-      const completed = await waitForPromiseBeforeTimeout(pending, remaining);
-      if (!completed) return false;
-    }
-  };
-
-  type RuntimeProcessGlobal = {
-    env?: Record<string, string | undefined>;
-    exit?: (code?: number) => never;
-  };
-
-  const getRuntimeProcessGlobal = (): RuntimeProcessGlobal | null => {
-    const candidate = (globalThis as typeof globalThis & { process?: RuntimeProcessGlobal }).process;
-    return candidate && typeof candidate === 'object' ? candidate : null;
-  };
-
-  const shouldRequireCanonicalStorageAudit = (runtimeProcess = getRuntimeProcessGlobal()): boolean => {
-    const raw = String(runtimeProcess?.env?.['XLN_STORAGE_VERIFY_CANONICAL'] || '')
-      .trim()
-      .toLowerCase();
-    return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
-  };
-
-  const resolveStorageWriteTimeoutMs = (): number => {
-    const raw = String(getRuntimeProcessGlobal()?.env?.['XLN_STORAGE_WRITE_TIMEOUT_MS'] || '').trim();
-    if (!raw) return 0;
-    const parsed = Number(raw);
-    return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 0;
-  };
-
-  type RuntimeFrameCommitStatus = 'committed' | 'not-committed' | 'conflict' | 'unknown';
-
-  class RuntimeStorageWriteTimeoutError extends Error {
-    constructor(
-      readonly timeoutMs: number,
-      readonly frameHeight: number,
-      readonly runtimeId: string,
-      readonly step: string,
-    ) {
-      super(`STORAGE_WRITE_TIMEOUT:frame=${frameHeight}:runtime=${runtimeId}:` + `timeoutMs=${timeoutMs}:step=${step}`);
-      this.name = 'RuntimeStorageWriteTimeoutError';
-    }
-  }
-
-  class RuntimeFrameStorageError extends Error {
-    constructor(
-      readonly commitStatus: RuntimeFrameCommitStatus,
-      cause: unknown,
-    ) {
-      const message = cause instanceof Error ? cause.message : String(cause);
-      super(`RUNTIME_FRAME_STORAGE_${commitStatus.toUpperCase()}:${message}`, { cause });
-      this.name = 'RuntimeFrameStorageError';
-    }
-  }
-
-  const withStorageWriteTimeout = async <T>(
-    env: RuntimeState,
-    operation: (markProgress: (step: string) => void) => Promise<T>,
-  ): Promise<T> => {
-    const timeoutMs = resolveStorageWriteTimeoutMs();
-    const markRuntimeProgress = (step: string): void => {
-      env.activeProcessProgressAt = Date.now();
-      env.activeProcessProgressStep = `storage:${step}`;
-    };
-    if (timeoutMs <= 0) return await operation(markRuntimeProgress);
-
-    return await new Promise<T>((resolve, reject) => {
-      let timer: ReturnType<typeof setTimeout> | null = null;
-      let settled = false;
-      let lastProgressAtMs = Date.now();
-      let lastProgressStep = 'start';
-
-      const clearTimer = (): void => {
-        if (timer) clearTimeout(timer);
-        timer = null;
-      };
-      const schedule = (delayMs: number): void => {
-        clearTimer();
-        timer = setTimeout(() => {
-          if (settled) return;
-          let deadline: ReturnType<typeof evaluateStorageProgressDeadline>;
-          try {
-            deadline = evaluateStorageProgressDeadline(lastProgressAtMs, Date.now(), timeoutMs);
-          } catch (error) {
-            settled = true;
-            reject(error);
-            return;
-          }
-          if (!deadline.stalled) {
-            schedule(deadline.remainingMs);
-            return;
-          }
-          settled = true;
-          reject(
-            new RuntimeStorageWriteTimeoutError(timeoutMs, env.height, String(env.runtimeId || ''), lastProgressStep),
-          );
-        }, delayMs);
-      };
-      const markProgress = (step: string): void => {
-        if (settled) return;
-        markRuntimeProgress(step);
-        lastProgressAtMs = Date.now();
-        lastProgressStep = step;
-        schedule(timeoutMs);
-      };
-
-      schedule(timeoutMs);
-      Promise.resolve()
-        .then(() => operation(markProgress))
-        .then(
-          value => {
-            if (settled) return;
-            settled = true;
-            clearTimer();
-            resolve(value);
-          },
-          (error: unknown) => {
-            if (settled) return;
-            settled = true;
-            clearTimer();
-            reject(error);
-          },
-        );
-    });
-  };
-
-  const resolveAuthoritativeFrameCommitStatus = async (
-    env: RuntimeState,
-    expectedInput: RuntimeInput | undefined,
-  ): Promise<RuntimeFrameCommitStatus> => {
-    if (!(await tryOpenRuntimeWalDb(env))) return 'unknown';
-    const walDb = getRuntimeWalDb(env);
-    const head = await readStorageHead(walDb);
-    const frame = await readStorageFrameRecord(walDb, env.height);
-    if (frame) {
-      const expectedInputValue = expectedInput ?? { runtimeTxs: [], entityInputs: [] };
-      const inputMatches = safeStringify(frame.runtimeInput) === safeStringify(expectedInputValue);
-      const runtimeMachineMatches =
-        !frame.runtimeMachine ||
-        safeStringify(frame.runtimeMachine) ===
-          safeStringify(
-            buildDurableRuntimeMachineSnapshot(env, {
-              pendingNetworkOutputs: env.pendingNetworkOutputs ?? [],
-              excludePersistedHistoryRecords: true,
-            }),
-          );
-      const stateMatches = !frame.runtimeStateHash || frame.runtimeStateHash === computeCanonicalStateHashFromEnv(env);
-      return inputMatches && runtimeMachineMatches && stateMatches ? 'committed' : 'conflict';
-    }
-    if (!head) return 'unknown';
-    if (head.latestHeight >= env.height) return 'conflict';
-    if (head.latestHeight === env.height - 1) return 'not-committed';
-    return 'unknown';
-  };
-
-  // === LEVELDB PERSISTENCE ===
-  const saveEnvToDB = async (
-    env: RuntimeState,
-    currentFrameInput?: RuntimeInput,
-    currentFrameOutputs?: RoutedEntityInput[],
-  ): Promise<{
-    staleWriterStopped: boolean;
-    persistencePerfMs?: Awaited<ReturnType<typeof saveRuntimeFrameToStorage>>['persistencePerfMs'];
-  }> => {
-    if (envRecord(env)[ENV_REPLAY_MODE_KEY] === true) {
-      throw new Error('REPLAY_INVARIANT_FAILED: saveEnvToDB called during replay');
-    }
-    const pendingHistoryRecords = peekPendingHistoryRecords(env, env.height, env.timestamp);
-    let saveResult: Awaited<ReturnType<typeof saveRuntimeFrameToStorage>>;
-    try {
-      saveResult = await withStorageWriteTimeout(env, markStorageProgress =>
-        withStorageWriterLock(env, () =>
-          saveRuntimeFrameToStorage({
-            env,
-            tryOpenDb: targetEnv => tryOpenStorageDb(targetEnv, 'current'),
-            getRuntimeDb: targetEnv => getStorageDb(targetEnv, 'current'),
-            tryOpenRuntimeWalDb,
-            getRuntimeWalDb,
-            tryOpenHistoryViewDb,
-            getHistoryViewDb,
-            rotateEpochDb: rotateStorageEpochDb,
-            getPerfMs,
-            formatPerfMs,
-            historyRecords: pendingHistoryRecords,
-            stopStaleWriterOnHeadAhead: runtimeIsBrowser && !env.scenarioMode,
-            ...(currentFrameInput === undefined ? {} : { currentFrameInput }),
-            ...(currentFrameOutputs === undefined ? {} : { currentFrameOutputs }),
-            onPersistenceProgress: markStorageProgress,
-            onPersistenceBoundary: boundary => markStorageProgress(`boundary:${boundary}`),
-          }),
-        ),
-      );
-    } catch (error) {
-      let commitStatus: RuntimeFrameCommitStatus = 'unknown';
-      if (!(error instanceof RuntimeStorageWriteTimeoutError)) {
-        try {
-          commitStatus = await resolveAuthoritativeFrameCommitStatus(env, currentFrameInput);
-        } catch (probeError) {
-          const writeFailure = error instanceof Error ? error : new Error(String(error));
-          const probeFailure = probeError instanceof Error ? probeError : new Error(String(probeError));
-          const combined = new AggregateError(
-            [writeFailure, probeFailure],
-            `STORAGE_WRITE_AND_AUTHORITATIVE_PROBE_FAILED:` +
-              `write=${writeFailure.name}:${writeFailure.message}:` +
-              `probe=${probeFailure.name}:${probeFailure.message}`,
-          );
-          throw new RuntimeFrameStorageError('unknown', combined);
-        }
-      }
-      throw new RuntimeFrameStorageError(commitStatus, error);
-    }
-    if (!saveResult.historyViewsMaterialized && !saveResult.staleWriterStopped) {
-      throw new RuntimeFrameStorageError(
-        'not-committed',
-        new Error(`STORAGE_AUTHORITATIVE_FRAME_NOT_COMMITTED:height=${env.height}`),
-      );
-    }
-    if (saveResult.staleWriterStopped) {
-      const state = ensureRuntimeState(env);
-      transitionRuntimeLifecycle(state, 'halted');
-      state.fatalDebugPayload = {
-        message: `STALE_RUNTIME_WRITER_STOPPED: frame=${env.height} runtime=${String(env.runtimeId || '').slice(0, 12)}`,
-        height: Math.max(0, env.height ?? 0),
-        timestamp: Math.max(0, env.timestamp ?? 0),
-      };
-      state.stopLoop?.();
-      return { staleWriterStopped: true };
-    }
-    if (saveResult.historyViewsMaterialized) {
-      dropPendingHistoryRecords(env, pendingHistoryRecords.length);
-    }
-    if (saveResult.materialized) {
-      dropOverlay(env, saveResult.materializedOverlayRecords);
-    }
-    return {
-      staleWriterStopped: false,
-      ...(saveResult.persistencePerfMs ? { persistencePerfMs: saveResult.persistencePerfMs } : {}),
-    };
-  };
+  const commitApi = createRuntimeStorageCommitApi(deps);
 
   type VerifyRuntimeChainResult = {
     ok: boolean;
@@ -1201,11 +930,7 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
   };
 
   return {
-    waitForRuntimeProcessingIdle,
-    getRuntimeProcessGlobal,
-    RuntimeStorageWriteTimeoutError,
-    RuntimeFrameStorageError,
-    saveEnvToDB,
+    ...commitApi,
     readPersistedStorageFrameRecord,
     listPersistedEntityIdsAtHeight,
     verifyRuntimeChain,
