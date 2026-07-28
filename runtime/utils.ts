@@ -4,7 +4,7 @@
  */
 
 import { toSvg } from 'jdenticon';
-import buffer from 'buffer';
+import * as buffer from 'buffer';
 import { sha256 } from '@noble/hashes/sha2.js';
 
 import { extractNumberFromEntityId } from './entity/factory';

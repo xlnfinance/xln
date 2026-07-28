@@ -405,6 +405,18 @@ export const applyEntityTx = async (
     return { newState: entityState, outputs: [], storageChanges: [], candidateEffects: [], jOutputs: [], skippedError };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    // A TypeError is a programming fault, not an invalid user transaction.
+    // Converting it to skippedError destroys the source stack and mislabels a
+    // deterministic reducer bug as malformed ingress. Halt with the original
+    // error so the Runtime can preserve state and report the exact fault.
+    if (error instanceof TypeError) {
+      entityTxLog.error('local_bug', {
+        type: String(entityTx.type),
+        error: message,
+        stack: error.stack,
+      });
+      throw error;
+    }
     if (shouldRethrowEntityTxError(error)) {
       entityTxLog.error('failed_invariant', { type: String(entityTx.type), error: message });
       throw error;

@@ -3,7 +3,7 @@ import type { HankoString } from './hanko';
 import type { JurisdictionEvent } from './jurisdiction-events';
 import type { PaymentDeliveryMode } from './payment';
 import type { LendingTermId } from './lending';
-import type { DisputeArgumentSnapshot } from '../protocol/dispute/arguments';
+import type { DisputeArgumentSnapshot } from '../protocol/dispute/argument-snapshot';
 import type {
   AccountRebalanceShadowState,
   BilateralRebalanceFeePolicy,

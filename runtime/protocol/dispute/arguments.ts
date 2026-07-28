@@ -8,46 +8,19 @@ import {
   sanitizeOptionalDisputeArgument,
   type OptionalDisputeArgumentWarning,
 } from '../../jurisdiction/batch';
-import { cloneProofBodyStruct } from './proof-body';
+import {
+  cloneDisputeArgumentSnapshot,
+  type DisputeArgumentSide,
+  type DisputeArgumentSnapshot,
+} from './argument-snapshot';
+
+export type {
+  DisputeArgumentPlan,
+  DisputeArgumentSide,
+  DisputeArgumentSnapshot,
+} from './argument-snapshot';
 
 const MAX_FILL_RATIO = 0xffff;
-
-export type DisputeArgumentSide = 'left' | 'right';
-
-export type DisputeArgumentPlan = {
-  paymentHashlocks: string[];
-  leftSwapOfferIds: string[];
-  rightSwapOfferIds: string[];
-  leftPullIds: string[];
-  rightPullIds: string[];
-};
-
-export type DisputeArgumentSnapshot = {
-  // Arguments are positional calldata for the transformer inside one exact
-  // proof body. The runtime may delete terminal swaps/pulls later; never rebuild
-  // this plan from live Maps for an older proofbodyHash.
-  proofbodyHash: string;
-  nonce: number;
-  side: DisputeArgumentSide;
-  proofBodyStruct: ProofBodyStruct;
-  plan: DisputeArgumentPlan;
-};
-
-export const cloneDisputeArgumentSnapshot = (
-  snapshot: DisputeArgumentSnapshot,
-): DisputeArgumentSnapshot => ({
-  proofbodyHash: snapshot.proofbodyHash,
-  nonce: snapshot.nonce,
-  side: snapshot.side,
-  proofBodyStruct: cloneProofBodyStruct(snapshot.proofBodyStruct),
-  plan: {
-    paymentHashlocks: [...snapshot.plan.paymentHashlocks],
-    leftSwapOfferIds: [...snapshot.plan.leftSwapOfferIds],
-    rightSwapOfferIds: [...snapshot.plan.rightSwapOfferIds],
-    leftPullIds: [...snapshot.plan.leftPullIds],
-    rightPullIds: [...snapshot.plan.rightPullIds],
-  },
-});
 
 type PullArgumentBuckets = { binaries: string[] };
 

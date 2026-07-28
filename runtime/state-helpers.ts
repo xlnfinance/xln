@@ -15,7 +15,7 @@ import type {
   LendingState,
   LogCategory,
 } from './types';
-import { cloneDisputeArgumentSnapshot } from './protocol/dispute/arguments';
+import { cloneDisputeArgumentSnapshot } from './protocol/dispute/argument-snapshot';
 import type { ProofBodyStruct } from '../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
 import { cloneProofBodyStruct } from './protocol/dispute/proof-body';
 import { validateEntityReplica, validateEntityState } from './validation-utils';

@@ -55,6 +55,13 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   3000 lines. After the pipeline, collapse DI factories that add navigation
   without providing a real swappable boundary. Add an AST gate for function
   budgets so future 600–2800-line coordinators cannot pass a file-only limit.
+- [ ] Enforce an acyclic browser-safe core dependency graph. Keep cloning,
+  codecs and state helpers as leaf modules that never import reducers,
+  Runtime routing or chain adapters; add a cycle budget that fails on any new
+  cycle crossing Runtime/Entity/Account/J boundaries. Execute SHA-256,
+  proposal construction and one Account open from the actual browser bundle,
+  not only Bun source imports. Programming faults such as `TypeError` must
+  preserve their source stack and halt, never be relabelled as rejected input.
 - [ ] Remove only call-site-proven dead code in small module-owned batches.
   Reverify dynamic imports, scenario/CLI entrypoints and browser API first;
   `runNumberedRegistrationIntent` is currently live scenario infrastructure,
