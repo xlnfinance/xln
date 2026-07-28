@@ -20,7 +20,7 @@ import { deriveRuntimeAdapterCapabilityToken } from '../runtime/radapter/auth';
 
 import type { RuntimeAdapterRequest } from '../runtime/radapter/types';
 
-import type { Env } from '../runtime/types';
+import type { RuntimeState } from '../runtime/types';
 
 import { captureLocatorScreenshot } from './utils/e2e-screenshots';
 
@@ -122,7 +122,7 @@ const installOneMillionRuntimeAdapterSocket = async (
   const identityEnv = {
     runtimeSeed,
     runtimeId: deriveSignerAddressSync(runtimeSeed, '1').toLowerCase(),
-  } as Env;
+  } as RuntimeState;
   await page.exposeFunction('__xlnDecodeOneMillionRuntimeAdapterRequest', (bytes: number[]) => {
     const request = decodeRuntimeAdapterRequest(Uint8Array.from(bytes)) as RuntimeAdapterRequest;
     return {
@@ -977,7 +977,7 @@ test(
     await openAccountWorkspaceTab(page, 'configure');
     await expect(page.locator('.configure-panel').first()).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
     await expect(page.locator('.configure-panel').first()).not.toContainText(
-      'Account actions require embedded runtime Env',
+      'Account actions require embedded runtime RuntimeState',
     );
     await page.getByTestId('configure-tab-extend-credit').first().click();
     const creditPanel = page

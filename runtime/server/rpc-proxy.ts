@@ -1,4 +1,4 @@
-import type { Env } from '../types';
+import type { RuntimeState } from '../types';
 import { isLoopbackUrl } from '../networking/loopback-url';
 import { findForbiddenRpcProxyMethod } from './rpc-proxy-safety';
 import { pushDebugEvent, type RelayStore } from '../relay/store';
@@ -10,7 +10,7 @@ const DEFAULT_RPC_PROXY_TIMEOUT_MS = 5_000;
 type RuntimeRpcProxyRequest = {
   req: Request;
   pathname: string;
-  env: Env | null;
+  env: RuntimeState | null;
   relayStore: RelayStore;
   headers: HeadersInit;
   operatorAuthorized: boolean;

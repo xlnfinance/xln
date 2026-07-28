@@ -13,7 +13,7 @@ enqueueRuntimeInput,
 submitCrossJurisdictionIntent
 } from '../runtime.ts';
 import { computeCanonicalEntityHashesFromEnv } from '../storage/canonical-hash';
-import type { CrossJurisdictionSwapRoute,EntityInput,Env,SwapOffer } from '../types';
+import type { CrossJurisdictionSwapRoute,EntityInput,RuntimeState,SwapOffer } from '../types';
 import {
 HUB_REQUIRED_TOKEN_COUNT,
 getAccountMachine,
@@ -127,7 +127,7 @@ type MarketMakerCrossPlanSummary = {
 };
 
 const describeMarketMakerAccountBlocker = (
-  env: Env,
+  env: RuntimeState,
   role: MarketMakerCrossRouteBlocker['role'],
   entityId: string,
   counterpartyEntityId: string,
@@ -157,7 +157,7 @@ const describeMarketMakerAccountBlocker = (
 };
 
 export const describeMarketMakerSameHubBlocker = (
-  env: Env,
+  env: RuntimeState,
   entityId: string,
   counterpartyEntityId: string,
 ): MarketMakerAccountBlocker | null => {
@@ -185,7 +185,7 @@ export const describeMarketMakerSameHubBlocker = (
 };
 
 const buildExpectedMarketMakerCrossRouteGroups = (
-  env: Env,
+  env: RuntimeState,
   contexts: MarketMakerEntityContext[],
   visibleHubs: HubProfile[],
   tokenIdsByContext: MarketMakerTokenIdsByContext,
@@ -314,7 +314,7 @@ export const buildMarketMakerCrossPlanSummary = (
 };
 
 export const buildMarketMakerCrossHealth = (
-  env: Env,
+  env: RuntimeState,
   contexts: MarketMakerEntityContext[],
   visibleHubs: HubProfile[],
   tokenIdsByContext: MarketMakerTokenIdsByContext,
@@ -402,7 +402,7 @@ export const buildMarketMakerCrossHealth = (
 };
 
 const getCrossRouteStatus = (
-  env: Env,
+  env: RuntimeState,
   entityId: string,
   orderId: string,
 ): string | null => {
@@ -410,14 +410,14 @@ const getCrossRouteStatus = (
   return route?.status ? String(route.status) : null;
 };
 
-const hasCrossBookOrder = (env: Env, route: CrossJurisdictionSwapRoute): boolean => {
+const hasCrossBookOrder = (env: RuntimeState, route: CrossJurisdictionSwapRoute): boolean => {
   const bookOwnerEntityId = crossJurisdictionBookOwnerRef(route);
   const bookOwner = bookOwnerEntityId ? getEntityReplicaById(env, bookOwnerEntityId)?.state : null;
   return Boolean(bookOwner && hasCrossJurisdictionBookOrder(bookOwner, route));
 };
 
 export const buildMarketMakerCrossDebugSummary = (
-  env: Env,
+  env: RuntimeState,
   contexts: MarketMakerEntityContext[],
   visibleHubs: HubProfile[],
   tokenIdsByContext: MarketMakerTokenIdsByContext,
@@ -504,7 +504,7 @@ export const buildPlannedMarketMakerCrossHealth = (plan: MarketMakerCrossPlanSum
 });
 
 export const maintainMarketMakerCrossQuotes = async (
-  env: Env,
+  env: RuntimeState,
   sourceContext: MarketMakerEntityContext,
   targetContext: MarketMakerEntityContext,
   sourceHubs: HubProfile[],
@@ -914,7 +914,7 @@ export const maintainMarketMakerCrossQuotes = async (
 };
 
 export const getMarketMakerHealth = (
-  env: Env,
+  env: RuntimeState,
   mmEntityId: string | null,
   hubEntityIds: string[],
   tokenIds: number[],
@@ -1146,7 +1146,7 @@ const parseMarketMakerCrossOfferId = (
 };
 
 const collectCommittedMarketMakerOfferFingerprintsForHub = (
-  env: Env,
+  env: RuntimeState,
   mmEntityId: string,
   hubEntityId: string,
   hubRole: string,
@@ -1171,7 +1171,7 @@ const collectCommittedMarketMakerOfferFingerprintsForHub = (
 };
 
 const collectCommittedMarketMakerCrossOfferFingerprints = (
-  env: Env,
+  env: RuntimeState,
   contexts: MarketMakerEntityContext[],
   visibleHubs: HubProfile[],
   tokenIdsByContext: MarketMakerTokenIdsByContext,
@@ -1227,7 +1227,7 @@ const collectCommittedMarketMakerCrossOfferFingerprints = (
 };
 
 export const buildMarketMakerBootstrapFingerprint = (
-  env: Env,
+  env: RuntimeState,
   contexts: MarketMakerEntityContext[],
   visibleHubs: HubProfile[],
   tokenIdsByContext: MarketMakerTokenIdsByContext,
@@ -1323,13 +1323,13 @@ export const buildMarketMakerBootstrapFingerprint = (
   };
 };
 
-export const buildMarketMakerBootstrapEntityStateHash = (env: Env): string =>
+export const buildMarketMakerBootstrapEntityStateHash = (env: RuntimeState): string =>
   buildMarketMakerBootstrapEntityStateHashFromCanonicalHashes(
     computeCanonicalEntityHashesFromEnv(env),
   );
 
 export const assertMarketMakerBootstrapFinalized = (
-  env: Env,
+  env: RuntimeState,
   health: MarketMakerHealth | null,
 ): MarketMakerHealth => {
   const blockers: unknown[] = [];

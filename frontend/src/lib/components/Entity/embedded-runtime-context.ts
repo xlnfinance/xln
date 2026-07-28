@@ -1,9 +1,9 @@
-import type { Env, EnvSnapshot } from '@xln/runtime/xln-api';
+import type { RuntimeState, EnvSnapshot } from '@xln/runtime/xln-api';
 
 export type EntityWorkspaceEmbeddedRuntimeContext = {
-  env: Env | EnvSnapshot | null;
-  liveEnv: Env | null;
-  liveEnvResolver: (() => Env | null) | null;
+  env: RuntimeState | EnvSnapshot | null;
+  liveEnv: RuntimeState | null;
+  liveEnvResolver: (() => RuntimeState | null) | null;
   history: EnvSnapshot[];
 };
 

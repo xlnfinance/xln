@@ -63,7 +63,7 @@ import type {
   DeliverableEntityInput,
   EntityReplica,
   EntityState,
-  Env,
+  RuntimeState,
   JurisdictionEvent,
   ProposedEntityFrame,
 } from '../types';
@@ -81,7 +81,7 @@ import {
 
 const TEST_RUN_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
-const createRuntime = (seed: string): Env => {
+const createRuntime = (seed: string): RuntimeState => {
   const env = createEmptyEnv(seed);
   const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
   registerSignerKey(env, runtimeId, deriveSignerKeySync(seed, '1'));
@@ -141,7 +141,7 @@ const createEntityState = (
 };
 
 const buildCommitCertificate = async (
-  env: Env,
+  env: RuntimeState,
   state: EntityState,
   signerIds: string | string[],
   timestamp: number,
@@ -223,7 +223,7 @@ const deliverable = (
   proposedFrame: structuredClone(frame),
 });
 
-const installReplica = (env: Env, state: EntityState, signerId: string): void => {
+const installReplica = (env: RuntimeState, state: EntityState, signerId: string): void => {
   const replica: EntityReplica = {
     entityId: state.entityId,
     signerId,
@@ -234,7 +234,7 @@ const installReplica = (env: Env, state: EntityState, signerId: string): void =>
   env.eReplicas.set(`${state.entityId}:${signerId}`, replica);
 };
 
-const reliableRecoveryProjection = (env: Env): Record<string, unknown> => ({
+const reliableRecoveryProjection = (env: RuntimeState): Record<string, unknown> => ({
   pendingNetworkOutputs: env.pendingNetworkOutputs ?? [],
   reliableIngressReceiptLedger: env.runtimeState?.reliableIngressReceiptLedger ?? new Map(),
   reliableIngressTerminalWatermarks: env.runtimeState?.reliableIngressTerminalWatermarks ?? new Map(),

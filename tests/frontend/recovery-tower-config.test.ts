@@ -18,7 +18,7 @@ import {
 import * as xln from '../../runtime/runtime';
 import { decryptTowerPayloadWithWatchSeed } from '../../runtime/recovery/crypto';
 import { deserializeTaggedJson } from '../../runtime/protocol/serialization';
-import type { EncryptedRuntimeRecoveryBundleV1, Env, XLNModule } from '../../runtime/xln-api';
+import type { EncryptedRuntimeRecoveryBundleV1, RuntimeState, XLNModule } from '../../runtime/xln-api';
 
 test('resolveDefaultRecoveryTowerUrls uses same-origin production tower by default', () => {
   expect(resolveDefaultRecoveryTowerUrls({
@@ -228,7 +228,7 @@ const proofBodyHashOf = (proofBody: Record<string, unknown>): string =>
 const deriveTestAddress = (index = 0): string =>
   HDNodeWallet.fromMnemonic(Mnemonic.fromPhrase(testMnemonic), getIndexedAccountPath(index)).address.toLowerCase();
 
-const makeTestRecoveryEnv = (runtimeId: string, entityId: string, counterpartyId: string): Env => {
+const makeTestRecoveryEnv = (runtimeId: string, entityId: string, counterpartyId: string): RuntimeState => {
   const env = xln.createEmptyEnv(testMnemonic);
   env.runtimeId = runtimeId;
   env.dbNamespace = `tower-active-encryption-${Date.now()}`;
@@ -245,7 +245,7 @@ const makeTestRecoveryEnv = (runtimeId: string, entityId: string, counterpartyId
       account: '0x3333333333333333333333333333333333333333',
       deltaTransformer: '0x4444444444444444444444444444444444444444',
     },
-  } as Env['jReplicas'] extends Map<string, infer T> ? T : never);
+  } as RuntimeState['jReplicas'] extends Map<string, infer T> ? T : never);
 
   const proofBody = {
     watchSeed: testWatchSeed,
@@ -282,7 +282,7 @@ const makeTestRecoveryEnv = (runtimeId: string, entityId: string, counterpartyId
         },
       }]]),
     },
-  } as unknown as Env['eReplicas'] extends Map<string, infer T> ? T : never);
+  } as unknown as RuntimeState['eReplicas'] extends Map<string, infer T> ? T : never);
 
   return env;
 };

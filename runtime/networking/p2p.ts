@@ -5,7 +5,7 @@
  * Durable retry ownership belongs to the runtime outbox, never this adapter.
  */
 
-import type { Env, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../types';
+import type { RuntimeState, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../types';
 import { canonicalizeProfile, getBoardPrimaryPublicKey, parseProfile, type Profile } from './gossip';
 import { RuntimeWsClient } from './ws-client';
 import { buildLocalEntityProfile } from './gossip-helper';
@@ -47,7 +47,7 @@ const ENTITY_INPUT_TARGET_OFFLINE = 'ENTITY_INPUT_TARGET_NOT_CONNECTED';
 const RELIABLE_RECEIPT_TARGET_OFFLINE = 'ENTITY_INPUT_RECEIPT_TARGET_NOT_CONNECTED';
 const RETRYABLE_INGRESS_BACKPRESSURE = 'INBOUND_ENTITY_RUNTIME_QUIESCING:';
 
-export const reportRelayClientError = (env: Env, relay: string, error: Error): void => {
+export const reportRelayClientError = (env: RuntimeState, relay: string, error: Error): void => {
   if (error.message === ENTITY_INPUT_TARGET_OFFLINE) {
     env.info('network', 'ENTITY_INPUT_TARGET_OFFLINE', { relay, error: error.message });
     return;
@@ -64,7 +64,7 @@ export const reportRelayClientError = (env: Env, relay: string, error: Error): v
 };
 
 export const reportDirectClientError = (
-  env: Env,
+  env: RuntimeState,
   endpoint: string,
   targetRuntimeId: string,
   error: Error,
@@ -99,7 +99,7 @@ export type P2PConfig = {
 };
 
 type RuntimeP2POptions = {
-  env: Env;
+  env: RuntimeState;
   runtimeId: string;
   signerId?: string;
   relayUrls?: string[];
@@ -263,7 +263,7 @@ const isInactiveTabStandby = (): boolean => {
 };
 
 export class RuntimeP2P {
-  private env: Env;
+  private env: RuntimeState;
   private runtimeId: string;
   private signerId: string;
   private relayUrls: string[];
@@ -1231,7 +1231,7 @@ export class RuntimeP2P {
         continue;
       }
       profile.metadata.profileHanko = certification.hanko;
-      const signedProfile = await signProfileRuntimeRoute(this.env as Env, profile, replicaSignerId);
+      const signedProfile = await signProfileRuntimeRoute(this.env as RuntimeState, profile, replicaSignerId);
       profiles.push(signedProfile);
     }
     return profiles;

@@ -4,7 +4,7 @@ import { queueAccountMempoolTx } from '../entity/consensus/account-mempool-queue
 import { prependUniqueMempoolTxs } from '../account/consensus/helpers';
 import { freezeAccountForDispute } from '../account/consensus/dispute-policy';
 import { LIMITS } from '../constants';
-import type { AccountMachine, AccountTx } from '../types';
+import type { AccountState, AccountTx } from '../types';
 
 const PAYMENT: Extract<AccountTx, { type: 'direct_payment' }> = {
   type: 'direct_payment',
@@ -18,7 +18,7 @@ const PAYMENT: Extract<AccountTx, { type: 'direct_payment' }> = {
   },
 };
 
-const accountWithPending = (tx: AccountTx): Pick<AccountMachine, 'mempool' | 'pendingFrame'> => ({
+const accountWithPending = (tx: AccountTx): Pick<AccountState, 'mempool' | 'pendingFrame'> => ({
   mempool: [],
   pendingFrame: {
     height: 7,
@@ -57,7 +57,7 @@ describe('account mempool multiplicity', () => {
       type: 'swap_resolve',
       data: { offerId: 'offer-1', fillRatio: 32_768, cancelRemainder: false },
     };
-    const account = accountWithPending(fill) as AccountMachine;
+    const account = accountWithPending(fill) as AccountState;
     account.mempool = [
       { type: 'pull_resolve', data: { pullId: 'pull-1', binary: '0x1234' } },
       structuredClone(PAYMENT),
@@ -84,7 +84,7 @@ describe('account mempool multiplicity', () => {
   });
 
   test('rollback restores identical direct payments with their full multiplicity', () => {
-    const account = accountWithPending(PAYMENT) as AccountMachine;
+    const account = accountWithPending(PAYMENT) as AccountState;
     account.mempool = [structuredClone(PAYMENT)];
 
     expect(prependUniqueMempoolTxs(account, [structuredClone(PAYMENT)])).toBe(1);

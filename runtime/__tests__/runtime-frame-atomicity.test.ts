@@ -38,7 +38,7 @@ import type {
   EntityInput,
   EntityReplica,
   EntityState,
-  Env,
+  RuntimeState,
   JReplica,
   JurisdictionConfig,
   ReliableDeliveryReceipt,
@@ -111,7 +111,7 @@ const makeAliasedBoardRuntimeInput = (): {
   };
 };
 
-const installJurisdiction = (env: Env): void => {
+const installJurisdiction = (env: RuntimeState): void => {
   env.activeJurisdiction = jurisdiction.name;
   env.jReplicas.set(jurisdiction.name, {
     name: jurisdiction.name,
@@ -169,7 +169,7 @@ const makeEntityState = (entityId: string, config: ConsensusConfig): EntityState
 });
 
 const installValidatorReplica = (
-  env: Env,
+  env: RuntimeState,
   leader: string,
   validator: string,
 ): EntityReplica => {
@@ -202,7 +202,7 @@ const importReplicaTx = (slot: string) => {
   };
 };
 
-const localImportReplicaTx = (env: Env, slot: string) => {
+const localImportReplicaTx = (env: RuntimeState, slot: string) => {
   const signerId = env.runtimeId!;
   const coValidatorId = address(`${slot}f`);
   const config: ConsensusConfig = {
@@ -224,7 +224,7 @@ const localImportReplicaTx = (env: Env, slot: string) => {
   };
 };
 
-const exactQueuedInput = (env: Env): RuntimeInput => ({
+const exactQueuedInput = (env: RuntimeState): RuntimeInput => ({
   runtimeTxs: env.runtimeMempool?.runtimeTxs ?? [],
   entityInputs: env.runtimeMempool?.entityInputs ?? [],
   ...(env.runtimeMempool?.jInputs?.length ? { jInputs: env.runtimeMempool.jInputs } : {}),
@@ -234,7 +234,7 @@ const exactQueuedInput = (env: Env): RuntimeInput => ({
 });
 
 const createTestReliableReceipt = (
-  targetEnv: Env,
+  targetEnv: RuntimeState,
   entityId: string,
   signerId: string,
 ): { from: string; receipt: ReliableDeliveryReceipt } => {
@@ -254,7 +254,7 @@ const createTestReliableReceipt = (
   };
 };
 
-const corruptCurrentHeadAhead = async (env: Env): Promise<void> => {
+const corruptCurrentHeadAhead = async (env: RuntimeState): Promise<void> => {
   const currentDb = getRuntimeStorageDb(env);
   const head = await readStorageHead(currentDb);
   if (!head) throw new Error('TEST_STORAGE_CURRENT_HEAD_MISSING');
@@ -263,7 +263,7 @@ const corruptCurrentHeadAhead = async (env: Env): Promise<void> => {
   await batch.write({ sync: true });
 };
 
-const closeTestEnv = async (env: Env): Promise<void> => {
+const closeTestEnv = async (env: RuntimeState): Promise<void> => {
   await closeRuntimeDb(env);
   await closeInfraDb(env);
 };

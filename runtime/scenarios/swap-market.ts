@@ -15,7 +15,7 @@
  * Run with: bun runtime/scenarios/swap-market.ts
  */
 
-import type { Env, EntityInput } from '../types';
+import type { RuntimeState, EntityInput } from '../types';
 import {
   bindScenarioJReplica,
   createJurisdictionConfig,
@@ -33,7 +33,7 @@ type MarketHub = { name: string; id: string; signer: string; role: string; pairs
 type MarketTrader = { name: string; id: string; signer: string; role: string };
 
 // Lazy-loaded runtime functions
-let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
+let _process: ((env: RuntimeState, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<RuntimeState>) | null = null;
 
 const getProcess = async () => {
   if (!_process) {
@@ -74,7 +74,7 @@ const dai = (amount: number | bigint) => BigInt(amount) * ONE;
 
 // Using helpers from helpers.ts (no duplication)
 
-export async function swapMarket(env: Env): Promise<void> {
+export async function swapMarket(env: RuntimeState): Promise<void> {
   const restoreStrict = enableStrictScenario(env, 'Swap Market');
   const prevScenarioMode = env.scenarioMode;
   try {
@@ -810,7 +810,7 @@ export async function swapMarket(env: Env): Promise<void> {
 // HIGH-LOAD STRESS TEST: Rapid Order Placement & Matching
 // ============================================================================
 
-export async function swapMarketStress(env: Env): Promise<void> {
+export async function swapMarketStress(env: RuntimeState): Promise<void> {
   const restoreStrict = enableStrictScenario(env, 'Swap Market Stress');
   const prevScenarioMode = env.scenarioMode;
   try {

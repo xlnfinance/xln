@@ -40,7 +40,7 @@ import { compareStableText, safeStringify } from '../protocol/serialization';
 import { registerRuntimeAdapterAuthSeed } from '../radapter/auth';
 import { type RuntimeAdapterSocket } from '../radapter/server';
 import { enqueueRuntimeInput } from '../runtime.ts';
-import type { AccountMachine, CrossJurisdictionSwapRoute, EntityInput, Env, SwapOffer } from '../types';
+import type { AccountState, CrossJurisdictionSwapRoute, EntityInput, RuntimeState, SwapOffer } from '../types';
 import { readInheritedChildSecrets, resolveChildSecret } from './child-secrets';
 import {
   BOOTSTRAP_POLL_MS,
@@ -546,7 +546,7 @@ export const buildLocalMarketMakerSignerLabels = (): string[] => {
   return labels;
 };
 
-export const configureMarketMakerRuntimeLogging = (env: Env): void => {
+export const configureMarketMakerRuntimeLogging = (env: RuntimeState): void => {
   if (envFlagEnabled(process.env['XLN_MARKET_MAKER_VERBOSE_RUNTIME_LOGS'])) return;
   env.quietRuntimeLogs = true;
 };
@@ -572,14 +572,14 @@ const sameImportedJurisdiction = (target: JurisdictionConfig, replica: unknown):
   return Boolean(targetRef && replicaRef && targetRef === replicaRef);
 };
 
-const hasJurisdictionReplica = (env: Env, jurisdiction: JurisdictionConfig): boolean => {
+const hasJurisdictionReplica = (env: RuntimeState, jurisdiction: JurisdictionConfig): boolean => {
   for (const replica of env.jReplicas?.values?.() || []) {
     if (sameImportedJurisdiction(jurisdiction, replica)) return true;
   }
   return false;
 };
 
-const hasLiveJurisdictionAdapter = (env: Env, jurisdiction: JurisdictionConfig): boolean => {
+const hasLiveJurisdictionAdapter = (env: RuntimeState, jurisdiction: JurisdictionConfig): boolean => {
   for (const replica of env.jReplicas?.values?.() || []) {
     if (sameImportedJurisdiction(jurisdiction, replica)) {
       return Boolean(replica?.jadapter);
@@ -589,7 +589,7 @@ const hasLiveJurisdictionAdapter = (env: Env, jurisdiction: JurisdictionConfig):
 };
 
 export const importJurisdictionIfNeeded = async (
-  env: Env,
+  env: RuntimeState,
   jurisdiction: JurisdictionConfig,
   rounds = 35,
 ): Promise<void> => {
@@ -617,7 +617,7 @@ export const importJurisdictionIfNeeded = async (
 };
 
 export const createMarketMakerEntityContext = async (
-  env: Env,
+  env: RuntimeState,
   jurisdiction: JurisdictionConfig,
   signerLabel: string,
   profileName: string,
@@ -681,13 +681,13 @@ export const waitForTokenCatalog = async (jadapter: JAdapter, rounds = 80): Prom
   throw new Error('TOKEN_CATALOG_EMPTY');
 };
 
-const findJurisdictionAdapters = (env: Env, jurisdiction: JurisdictionConfig): JAdapter[] =>
+const findJurisdictionAdapters = (env: RuntimeState, jurisdiction: JurisdictionConfig): JAdapter[] =>
   [...(env.jReplicas?.values?.() ?? [])]
     .filter(replica => sameImportedJurisdiction(jurisdiction, replica) && Boolean(replica.jadapter))
     .map(replica => replica.jadapter!);
 
 export const waitForJurisdictionAdapter = async (
-  env: Env,
+  env: RuntimeState,
   jurisdiction: JurisdictionConfig,
   rounds = 1200,
 ): Promise<JAdapter> => {
@@ -711,14 +711,14 @@ export const waitForJurisdictionAdapter = async (
   );
 };
 
-const waitForReplicaReady = async (env: Env, entityId: string, rounds = 200): Promise<void> => {
+const waitForReplicaReady = async (env: RuntimeState, entityId: string, rounds = 200): Promise<void> => {
   const ready = await waitUntil(() => Boolean(getEntityReplicaById(env, entityId)), rounds, BOOTSTRAP_POLL_MS);
   if (!ready) {
     throw new Error(`MM_REPLICA_NOT_READY entityId=${entityId}`);
   }
 };
 
-export const ensureJurisdictionReplica = (env: Env, jadapter: JAdapter, rpcUrl: string): void => {
+export const ensureJurisdictionReplica = (env: RuntimeState, jadapter: JAdapter, rpcUrl: string): void => {
   const activeName = env.activeJurisdiction || Array.from(env.jReplicas?.keys?.() || [])[0];
   if (!activeName) return;
   const replica = env.jReplicas?.get(activeName);
@@ -760,7 +760,7 @@ const readHubSignerId = (profile: {
     .toLowerCase();
 };
 
-export const readVisibleHubProfiles = (env: Env, includeSiblings = false): HubProfile[] => {
+export const readVisibleHubProfiles = (env: RuntimeState, includeSiblings = false): HubProfile[] => {
   const required = new Set(resolvedArgs.meshHubNames.map(name => name.toLowerCase()));
   return (env.gossip?.getProfiles?.() || [])
     .filter(
@@ -1030,7 +1030,7 @@ export const getMarketMakerTokenIds = (
 };
 
 export const collectOfferIdsForAccount = (
-  account: Pick<AccountMachine, 'swapOffers' | 'mempool' | 'pendingFrame'> | null | undefined,
+  account: Pick<AccountState, 'swapOffers' | 'mempool' | 'pendingFrame'> | null | undefined,
 ): Set<string> => {
   const ids = new Set<string>();
   if (account?.swapOffers instanceof Map) {
@@ -1050,7 +1050,7 @@ export const collectOfferIdsForAccount = (
 };
 
 const collectCommittedOfferIdsForAccount = (
-  account: Pick<AccountMachine, 'swapOffers'> | null | undefined,
+  account: Pick<AccountState, 'swapOffers'> | null | undefined,
 ): Set<string> => {
   const ids = new Set<string>();
   if (account?.swapOffers instanceof Map) {
@@ -1245,7 +1245,7 @@ export const mergeMarketMakerEntityInputs = (
 export const countMarketMakerEntityInputTxs = (inputsByEntitySigner: ReadonlyMap<string, EntityInput>): number =>
   Array.from(inputsByEntitySigner.values()).reduce((sum, input) => sum + Number(input.entityTxs?.length || 0), 0);
 
-const resolveEntityRuntimeIdForCrossJ = (env: Env, routeEntityIds: string[], entityId: string): string | null => {
+const resolveEntityRuntimeIdForCrossJ = (env: RuntimeState, routeEntityIds: string[], entityId: string): string | null => {
   const target = normalizeEntityRef(entityId);
   const localRuntimeId = String(env.runtimeId || '')
     .trim()
@@ -1259,7 +1259,7 @@ const resolveEntityRuntimeIdForCrossJ = (env: Env, routeEntityIds: string[], ent
   return routeEntityIds.includes(target) && localRuntimeId ? null : null;
 };
 
-const isCrossJurisdictionRouteTwoRuntime = (env: Env, route: CrossJurisdictionSwapRoute): boolean => {
+const isCrossJurisdictionRouteTwoRuntime = (env: RuntimeState, route: CrossJurisdictionSwapRoute): boolean => {
   const canonical = withCanonicalCrossJurisdictionRouteHash(route);
   const requiredEntityIds = [
     canonical.source.entityId,
@@ -1279,7 +1279,7 @@ const isCrossJurisdictionRouteTwoRuntime = (env: Env, route: CrossJurisdictionSw
 };
 
 const canonicalizeLocalCrossJurisdictionRoute = (
-  env: Env,
+  env: RuntimeState,
   route: CrossJurisdictionSwapRoute,
 ): CrossJurisdictionSwapRoute | null => {
   const canonical = withCanonicalCrossJurisdictionRouteHash(route);
@@ -1287,7 +1287,7 @@ const canonicalizeLocalCrossJurisdictionRoute = (
 };
 
 export const buildMarketMakerCrossOfferSpecs = (
-  env: Env,
+  env: RuntimeState,
   sourceContext: MarketMakerEntityContext,
   targetContext: MarketMakerEntityContext,
   sourceHubs: HubProfile[],
@@ -1439,7 +1439,7 @@ export const buildMarketMakerCrossOfferSpecs = (
 };
 
 export const countCommittedMarketMakerOffersForHubPair = (
-  env: Env,
+  env: RuntimeState,
   mmEntityId: string,
   hubEntityId: string,
   pair: { baseTokenId: number; quoteTokenId: number },
@@ -1454,7 +1454,7 @@ export const countCommittedMarketMakerOffersForHubPair = (
   return count;
 };
 
-const countMarketMakerOffersForHub = (env: Env, mmEntityId: string, hubEntityId: string): number => {
+const countMarketMakerOffersForHub = (env: RuntimeState, mmEntityId: string, hubEntityId: string): number => {
   const account = getAccountMachine(env, mmEntityId, hubEntityId);
   if (!account) return 0;
   const prefix = `mm-${hubEntityId.slice(-6).toLowerCase()}-`;
@@ -1465,7 +1465,7 @@ const countMarketMakerOffersForHub = (env: Env, mmEntityId: string, hubEntityId:
   return count;
 };
 
-export const countCommittedMarketMakerOffersForHub = (env: Env, mmEntityId: string, hubEntityId: string): number => {
+export const countCommittedMarketMakerOffersForHub = (env: RuntimeState, mmEntityId: string, hubEntityId: string): number => {
   const account = getAccountMachine(env, mmEntityId, hubEntityId);
   if (!account) return 0;
   const prefix = `mm-${hubEntityId.slice(-6).toLowerCase()}-`;
@@ -1476,7 +1476,7 @@ export const countCommittedMarketMakerOffersForHub = (env: Env, mmEntityId: stri
   return count;
 };
 
-export const isSameQuoteJobDepthReady = (env: Env, job: SameQuoteJob): boolean => {
+export const isSameQuoteJobDepthReady = (env: RuntimeState, job: SameQuoteJob): boolean => {
   const account = getAccountMachine(env, job.context.entityId, job.hub.entityId);
   if (!hasCommittedAccountState(account)) return false;
   const specs = buildMarketMakerOfferSpecs([job.hub.entityId], job.tokenIds);
@@ -1497,7 +1497,7 @@ export const isSameQuoteJobDepthReady = (env: Env, job: SameQuoteJob): boolean =
 type PendingCrossRequestReader = (entityId: string) => Set<string>;
 
 export const hasCrossSpecBootstrapProgress = (
-  env: Env,
+  env: RuntimeState,
   spec: MarketMakerOfferSpec,
   getPendingCrossRequestOrderIds: PendingCrossRequestReader,
 ): boolean => {
@@ -1510,7 +1510,7 @@ export const hasCrossSpecBootstrapProgress = (
 };
 
 export const countCrossSpecBootstrapProgress = (
-  env: Env,
+  env: RuntimeState,
   specs: MarketMakerOfferSpec[],
   getPendingCrossRequestOrderIds: PendingCrossRequestReader,
 ): number => {
@@ -1522,7 +1522,7 @@ export const countCrossSpecBootstrapProgress = (
 };
 
 export const countCrossSpecBootstrapProgressByPair = (
-  env: Env,
+  env: RuntimeState,
   specs: MarketMakerOfferSpec[],
   getPendingCrossRequestOrderIds: PendingCrossRequestReader,
 ): Map<string, number> => {
@@ -1534,7 +1534,7 @@ export const countCrossSpecBootstrapProgressByPair = (
   return counts;
 };
 
-export const countCrossSpecVisibleOffersByPair = (env: Env, specs: MarketMakerOfferSpec[]): Map<string, number> => {
+export const countCrossSpecVisibleOffersByPair = (env: RuntimeState, specs: MarketMakerOfferSpec[]): Map<string, number> => {
   const counts = new Map<string, number>();
   for (const spec of specs) {
     if (!spec.crossJurisdiction || !hasMarketMakerCrossOffer(env, spec)) continue;
@@ -1543,7 +1543,7 @@ export const countCrossSpecVisibleOffersByPair = (env: Env, specs: MarketMakerOf
   return counts;
 };
 
-const countFinalizedCrossOffersByPair = (env: Env, specs: MarketMakerOfferSpec[]): Map<string, number> => {
+const countFinalizedCrossOffersByPair = (env: RuntimeState, specs: MarketMakerOfferSpec[]): Map<string, number> => {
   const counts = new Map<string, number>();
   for (const spec of specs) {
     if (!spec.crossJurisdiction || !hasFinalizedMarketMakerCrossOffer(env, spec)) continue;
@@ -1555,13 +1555,13 @@ const countFinalizedCrossOffersByPair = (env: Env, specs: MarketMakerOfferSpec[]
 const crossSpecPairIds = (specs: MarketMakerOfferSpec[]): string[] =>
   Array.from(new Set(specs.map(spec => spec.pairId).filter(Boolean))).sort(compareStableText);
 
-export const countCrossPairCoverageGaps = (env: Env, specs: MarketMakerOfferSpec[]): number => {
+export const countCrossPairCoverageGaps = (env: RuntimeState, specs: MarketMakerOfferSpec[]): number => {
   const finalizedByPair = countFinalizedCrossOffersByPair(env, specs);
   return crossSpecPairIds(specs).filter(pairId => (finalizedByPair.get(pairId) || 0) === 0).length;
 };
 
 export const ensureMarketMakerHubConnectivity = async (
-  env: Env,
+  env: RuntimeState,
   mmEntityId: string,
   mmSignerId: string,
   hubEntityIds: string[],
@@ -1664,7 +1664,7 @@ export const ensureMarketMakerHubConnectivity = async (
 };
 
 const isMarketMakerConnectivityReady = (
-  env: Env,
+  env: RuntimeState,
   mmEntityId: string,
   hubEntityIds: string[],
   tokenIds: number[],
@@ -1678,7 +1678,7 @@ const isMarketMakerConnectivityReady = (
   });
 
 export const maintainMarketMakerQuotes = async (
-  env: Env,
+  env: RuntimeState,
   mmEntityId: string,
   mmSignerId: string,
   hubEntityIds: string[],
@@ -1774,7 +1774,7 @@ export const maintainMarketMakerQuotes = async (
   return false;
 };
 
-export const hasCrossRouteRegistered = (env: Env, entityId: string, orderId: string): boolean => {
+export const hasCrossRouteRegistered = (env: RuntimeState, entityId: string, orderId: string): boolean => {
   const replica = getEntityReplicaById(env, entityId);
   return Boolean(replica?.state?.crossJurisdictionSwaps?.has(orderId));
 };
@@ -1808,7 +1808,7 @@ const isMatchingCrossOfferRoute = (
   );
 };
 
-const hasSourceAccountCrossOffer = (env: Env, route: CrossJurisdictionSwapRoute): boolean => {
+const hasSourceAccountCrossOffer = (env: RuntimeState, route: CrossJurisdictionSwapRoute): boolean => {
   const account = getAccountMachine(env, route.source.entityId, route.source.counterpartyEntityId);
   if (!account) return false;
   const committed = account.swapOffers?.get(route.orderId);
@@ -1822,13 +1822,13 @@ const hasSourceAccountCrossOffer = (env: Env, route: CrossJurisdictionSwapRoute)
   );
 };
 
-export const getCommittedSourceAccountCrossOffer = (env: Env, route: CrossJurisdictionSwapRoute): SwapOffer | null => {
+export const getCommittedSourceAccountCrossOffer = (env: RuntimeState, route: CrossJurisdictionSwapRoute): SwapOffer | null => {
   const account = getAccountMachine(env, route.source.entityId, route.source.counterpartyEntityId);
   const committed = account?.swapOffers?.get(route.orderId);
   return isMatchingCrossOfferRoute(committed?.crossJurisdiction, route) ? committed! : null;
 };
 
-export const collectPendingCrossRequestOrderIds = (env: Env, entityId: string): Set<string> => {
+export const collectPendingCrossRequestOrderIds = (env: RuntimeState, entityId: string): Set<string> => {
   const normalizedEntityId = normalizeEntityRef(entityId);
   const ids = new Set<string>();
   const replica = getEntityReplicaById(env, normalizedEntityId);
@@ -1838,7 +1838,7 @@ export const collectPendingCrossRequestOrderIds = (env: Env, entityId: string): 
   return ids;
 };
 
-export const hasMarketMakerCrossOffer = (env: Env, spec: MarketMakerOfferSpec): boolean => {
+export const hasMarketMakerCrossOffer = (env: RuntimeState, spec: MarketMakerOfferSpec): boolean => {
   const route = spec.crossJurisdiction;
   if (!route) return false;
   if (hasSourceAccountCrossOffer(env, route)) return true;
@@ -1848,18 +1848,18 @@ export const hasMarketMakerCrossOffer = (env: Env, spec: MarketMakerOfferSpec): 
   return Boolean(bookOwner && hasCrossJurisdictionBookOrder(bookOwner, route));
 };
 
-export const hasFinalizedMarketMakerCrossOffer = (env: Env, spec: MarketMakerOfferSpec): boolean => {
+export const hasFinalizedMarketMakerCrossOffer = (env: RuntimeState, spec: MarketMakerOfferSpec): boolean => {
   const route = spec.crossJurisdiction;
   if (!route) return false;
   return Boolean(getCommittedSourceAccountCrossOffer(env, route));
 };
 
-export const hasMarketMakerAccountBacklog = (env: Env, entityId: string, hubEntityId: string): boolean => {
+export const hasMarketMakerAccountBacklog = (env: RuntimeState, entityId: string, hubEntityId: string): boolean => {
   const account = getAccountMachine(env, entityId, hubEntityId);
   return Boolean(account?.pendingFrame) || Number(account?.mempool?.length || 0) > 0;
 };
 
-export const hasMarketMakerRuntimeBacklog = (env: Env): boolean => {
+export const hasMarketMakerRuntimeBacklog = (env: RuntimeState): boolean => {
   const runtimeMempool = env.runtimeMempool;
   return runtimeBacklogBlocksMarketMakerQuotes({
     processing: Boolean(env.runtimeState?.processingPromise),
@@ -1871,7 +1871,7 @@ export const hasMarketMakerRuntimeBacklog = (env: Env): boolean => {
 };
 
 export const getMarketMakerRuntimeBacklogSnapshot = (
-  env: Env,
+  env: RuntimeState,
   options: { includeQueuedEntityInputs?: boolean } = {},
 ): Record<string, unknown> => {
   const snapshot: Record<string, unknown> = {

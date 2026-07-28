@@ -6,7 +6,7 @@ import {
 } from '../account/crypto';
 import { serializeTaggedJson } from '../protocol/serialization';
 import { buildRuntimeRecoveryCheckpointSnapshot } from '../wal';
-import type { Env } from '../types';
+import type { RuntimeState } from '../types';
 import type {
   RuntimeRecoveryBundleV1,
   RuntimeRecoveryMetaV1,
@@ -194,7 +194,7 @@ export const assertRuntimeRecoveryBundleAuthenticity = (
 };
 
 const signRuntimeRecoveryBundle = (
-  env: Env,
+  env: RuntimeState,
   bundle: UnsignedRuntimeRecoveryBundleV1,
 ): RuntimeRecoveryBundleV1 => {
   if (env.runtimeSeed === undefined || env.runtimeSeed === null || env.runtimeSeed === '') {
@@ -216,7 +216,7 @@ const signRuntimeRecoveryBundle = (
 };
 
 export const buildRuntimeRecoveryBundle = (
-  env: Env,
+  env: RuntimeState,
   options: {
     signers: RuntimeRecoverySignerV1[];
     meta?: RuntimeRecoveryMetaV1;
@@ -261,7 +261,7 @@ export const buildRuntimeRecoveryBundle = (
 };
 
 export const buildRuntimeRecoveryCheckpointBundle = (
-  env: Env,
+  env: RuntimeState,
   options: {
     checkpoint: Record<string, unknown>;
     signers: RuntimeRecoverySignerV1[];

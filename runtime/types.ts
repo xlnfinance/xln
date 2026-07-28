@@ -158,7 +158,6 @@ export type {
   AccountInput,
   AccountState,
   AccountDisputeSeal,
-  AccountMachine,
   AccountStateDomain,
   AccountSettleAction,
   AccountSnapshot,
@@ -1269,7 +1268,7 @@ export interface RuntimeState {
     p2p?: RuntimeP2P | null | undefined;
     pendingP2PConfig?: RuntimeP2PConfigLike | null;
     lastP2PConfig?: RuntimeP2PConfigLike | null;
-    envChangeCallbacks?: Set<(env: Env) => void>;
+    envChangeCallbacks?: Set<(state: RuntimeState) => void>;
     runtimeFrameCommitCallbacks?: Set<(frame: { height: number; runtimeInput: RuntimeInput }) => void>;
     storageDb?: Level<Buffer, Buffer> | null | undefined;
     storageDbOpenPromise?: Promise<boolean> | null | undefined;
@@ -1417,7 +1416,7 @@ export interface RuntimeState {
      * the just-committed state.
      */
     recoveryBackupBarrier?: ((
-      env: Env,
+      state: RuntimeState,
       info: {
         height: number;
         remoteOutputCount: number;
@@ -1495,9 +1494,6 @@ export interface RuntimeState {
   error: (category: LogCategory, message: string, data?: Record<string, unknown>, entityId?: string) => void;
   emit: (eventName: string, data: Record<string, unknown>) => void; // Generic event emission
 }
-
-/** @deprecated Use RuntimeState. Kept only while external consumers migrate. */
-export type Env = RuntimeState;
 
 export interface RuntimeSnapshot {
   height: number;

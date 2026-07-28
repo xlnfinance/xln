@@ -26,7 +26,7 @@ import type {
   EntityReplica,
   EntityState,
   EntityTx,
-  Env,
+  RuntimeState,
   JurisdictionConfig,
   JurisdictionEvent,
 } from '../types';
@@ -111,7 +111,7 @@ const makeCommittedAccount = (
 };
 
 const makeCertifiedCounterpartyAccount = async (
-  env: Env,
+  env: RuntimeState,
   sourceEntityId: string,
   signerId: string,
   weight: bigint,

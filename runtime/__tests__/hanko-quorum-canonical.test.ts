@@ -14,11 +14,11 @@ import { buildQuorumHanko, inspectHankoForHash, verifyHankoForHash } from '../ha
 import { decodeHankoEnvelope, encodeHankoEnvelope } from '../hanko/codec';
 import { createEmptyEnv } from '../runtime';
 import { createJReplica } from '../scenarios/boot';
-import type { ConsensusConfig, EntityReplica, Env, JurisdictionConfig } from '../types';
+import type { ConsensusConfig, EntityReplica, RuntimeState, JurisdictionConfig } from '../types';
 import { installCanonicalRegisteredBoardAuthority } from './helpers/registration-evidence';
 
 type Fixture = {
-  env: Env;
+  env: RuntimeState;
   entityId: string;
   config: ConsensusConfig;
   digest: string;

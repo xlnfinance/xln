@@ -21,7 +21,7 @@ import type {
   EntityLeaderTimeoutVote,
   EntityReplica,
   EntityState,
-  Env,
+  RuntimeState,
   ProposedEntityFrame,
   RoutedEntityInput,
 } from '../types';
@@ -36,7 +36,7 @@ const jurisdiction = {
   entityProviderAddress: `0x${'a3'.repeat(20)}`,
 };
 
-const boardFor = (env: Env): ConsensusConfig => {
+const boardFor = (env: RuntimeState): ConsensusConfig => {
   const proposerId = deriveSignerAddressSync(env.runtimeSeed!, '1').toLowerCase();
   return {
     mode: 'proposer-based',
@@ -47,7 +47,7 @@ const boardFor = (env: Env): ConsensusConfig => {
   };
 };
 
-const baseState = (env: Env): EntityState => {
+const baseState = (env: RuntimeState): EntityState => {
   const board = boardFor(env);
   return {
     entityId: hashBoard(encodeBoard(board, env)).toLowerCase(),
@@ -84,7 +84,7 @@ const replica = (state: EntityState, signerId: string): EntityReplica => ({
 });
 
 type RaceFixture = {
-  env: Env;
+  env: RuntimeState;
   state: EntityState;
   proposer: EntityReplica;
   proposalInput: RoutedEntityInput;
@@ -137,7 +137,7 @@ const buildFixture = async (label: string): Promise<RaceFixture> => {
 };
 
 const signedTimeoutInput = (
-  env: Env,
+  env: RuntimeState,
   state: EntityState,
   targetSignerId: string,
   voterId: string,

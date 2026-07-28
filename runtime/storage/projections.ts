@@ -1,4 +1,4 @@
-import type { AccountMachine, EntityReplica, EntityState } from '../types';
+import type { AccountState, EntityReplica, EntityState } from '../types';
 import { assertAccountJClaimAccumulatorState } from '../account/j-claim-accumulator';
 import { cloneEntityState } from '../state-helpers';
 import {
@@ -45,13 +45,13 @@ const publicPendingCrossJurisdictionFillAcks = (
     },
   ])) : undefined;
 
-const publicSwapOffers = (offers: AccountMachine['swapOffers']): AccountMachine['swapOffers'] =>
+const publicSwapOffers = (offers: AccountState['swapOffers']): AccountState['swapOffers'] =>
   new Map(Array.from((offers ?? new Map()).entries()).map(([id, offer]) => [
     id,
     cloneCrossJurisdictionSwapOfferRoute(offer),
   ]));
 
-const publicSwapHistory = (history: AccountMachine['swapOrderHistory']): AccountMachine['swapOrderHistory'] =>
+const publicSwapHistory = (history: AccountState['swapOrderHistory']): AccountState['swapOrderHistory'] =>
   history instanceof Map
     ? new Map(Array.from(history.entries()).map(([id, entry]) => [
         id,
@@ -227,7 +227,7 @@ export const encodeReplicaMeta = (
   options,
 ), { omitSymbolKeys: true });
 
-const projectAccountDocFull = (account: AccountMachine): StorageAccountDoc => ({
+const projectAccountDocFull = (account: AccountState): StorageAccountDoc => ({
   leftEntity: account.leftEntity,
   rightEntity: account.rightEntity,
   domain: structuredClone(account.domain),
@@ -288,7 +288,7 @@ const projectAccountDocFull = (account: AccountMachine): StorageAccountDoc => ({
   ...withProp('rebalanceFeePolicies', account.rebalanceFeePolicies),
 });
 
-export const projectAccountDoc = (account: AccountMachine): StorageAccountDoc => {
+export const projectAccountDoc = (account: AccountState): StorageAccountDoc => {
   // Historical account frames are not future-consensus state. They are written
   // to the frame DB by deterministic keys and intentionally omitted here.
   return projectAccountDocFull(account);
@@ -308,7 +308,7 @@ export const buildAccountMerkleFromDocs = (
 };
 
 export const buildAccountMerkleFromState = (
-  accounts: ReadonlyMap<string, AccountMachine>,
+  accounts: ReadonlyMap<string, AccountState>,
   radix: RadixMerkleRadix = DEFAULT_ACCOUNT_MERKLE_RADIX,
 ) => {
   return buildHexKeyedMerkle(

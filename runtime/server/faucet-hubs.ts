@@ -1,7 +1,7 @@
-import type { Env } from '../types';
+import type { RuntimeState } from '../types';
 import type { Profile } from '../networking/gossip';
 
-export const getFaucetHubProfiles = (env: Env, activeHubEntityIds: string[]): Profile[] => {
+export const getFaucetHubProfiles = (env: RuntimeState, activeHubEntityIds: string[]): Profile[] => {
   const activeSet = new Set(activeHubEntityIds.map(id => id.toLowerCase()));
   const selected: Profile[] = [];
   for (const profile of env.gossip?.getProfiles?.() || []) {

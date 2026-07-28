@@ -1,7 +1,7 @@
 // Health check endpoint
 // Returns status of all J-machines, hubs, and system health
 
-import type { EntityReplica, Env } from '../types.js';
+import type { EntityReplica, RuntimeState } from '../types.js';
 import { getP2PState } from '../runtime.js';
 import { compareStableText } from '../protocol/serialization';
 
@@ -58,7 +58,7 @@ export interface SystemHealth {
 
 const startTime = Date.now();
 
-const buildEntityReplicaIndex = (env: Env): Map<string, EntityReplica> => {
+const buildEntityReplicaIndex = (env: RuntimeState): Map<string, EntityReplica> => {
   const replicas = new Map<string, EntityReplica>();
   for (const [replicaKey, replica] of env.eReplicas.entries()) {
     const fallbackEntityId = String(replicaKey).split(':')[0] || '';
@@ -83,7 +83,7 @@ const serializeReserves = (reserves: ReadonlyMap<string | number, bigint>): Reco
   return Object.fromEntries(entries);
 };
 
-export async function getHealthStatus(env: Env | null): Promise<HealthStatus> {
+export async function getHealthStatus(env: RuntimeState | null): Promise<HealthStatus> {
   const jMachines: JMachineHealth[] = [];
   const hubs: HubHealth[] = [];
   const replicasByEntityId = env ? buildEntityReplicaIndex(env) : new Map<string, EntityReplica>();

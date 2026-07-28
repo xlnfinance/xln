@@ -28,7 +28,7 @@ import type {
   EntityReplica,
   EntityState,
   EntityTx,
-  Env,
+  RuntimeState,
   JurisdictionEventBlock,
   JurisdictionEventData,
   ValidatorJEventBlock,
@@ -88,7 +88,7 @@ const scheduledWakeTx: EntityTx = {
   data: { version: 1, proposerSignerId: `0x${'33'.repeat(20)}`, dueAt: 1, jobs: [] },
 };
 
-const installSigner = (env: Env, label: string): string => {
+const installSigner = (env: RuntimeState, label: string): string => {
   const signerId = deriveSignerAddressSync(env.runtimeSeed!, label).toLowerCase();
   registerSignerKey(env, signerId, deriveSignerKeySync(env.runtimeSeed!, label));
   return signerId;

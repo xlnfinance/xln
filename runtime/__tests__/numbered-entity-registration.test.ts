@@ -68,7 +68,7 @@ describe('numbered Entity registration authority', () => {
     }
   }, 30_000);
 
-  test('batch uses the exact trusted Env adapter and explicitly selected vault payer', async () => {
+  test('batch uses the exact trusted RuntimeState adapter and explicitly selected vault payer', async () => {
     const chainId = 31_338;
     const adapter = await createJAdapter({ mode: 'browservm', chainId });
     try {
@@ -120,7 +120,7 @@ describe('numbered Entity registration authority', () => {
     }
   }, 30_000);
 
-  test('uses the exact trusted Env adapter and explicitly selected vault signer', async () => {
+  test('uses the exact trusted RuntimeState adapter and explicitly selected vault signer', async () => {
     const chainId = 31_338;
     const adapter = await createJAdapter({ mode: 'browservm', chainId });
     try {

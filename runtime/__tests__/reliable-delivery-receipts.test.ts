@@ -50,11 +50,11 @@ import { readStorageFrameRecord } from '../storage';
 import { buildRouteOutputKey, getReliableOutputIdentity } from '../runtime/output-routing';
 import { computeAccountStateRoot } from '../account/state-root';
 import type {
-  AccountMachine,
+  AccountState,
   DeliverableEntityInput,
   EntityTx,
   EntityReplica,
-  Env,
+  RuntimeState,
   JPrefixAttestation,
   ReliableDeliveryReceipt,
 } from '../types';
@@ -62,7 +62,7 @@ import { makeAccount } from './helpers/cross-j';
 
 const TEST_RUN_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
-const runtime = (seed: string): Env => {
+const runtime = (seed: string): RuntimeState => {
   const env = createEmptyEnv(seed);
   const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
   registerSignerKey(env, runtimeId, deriveSignerKeySync(seed, '1'));
@@ -266,8 +266,8 @@ const jPrefixAttestationOutput = (
 };
 
 const signedStaleJPrefixOutput = (
-  receiver: Env,
-  source: Env,
+  receiver: RuntimeState,
+  source: RuntimeState,
 ): DeliverableEntityInput => {
   const sourceValidatorId = deriveSignerAddressSync(source.runtimeSeed!, 'stale-j-prefix-source').toLowerCase();
   registerSignerKey(
@@ -306,7 +306,7 @@ const signedStaleJPrefixOutput = (
 };
 
 const installStaleJPrefixAuthority = (
-  receiver: Env,
+  receiver: RuntimeState,
   output: DeliverableEntityInput,
 ): void => {
   const attestation = output.jPrefixAttestations?.values().next().value;
@@ -339,7 +339,7 @@ const installStaleJPrefixAuthority = (
   } as unknown as EntityReplica);
 };
 
-const ensureAppliedAuthority = (env: Env, output: DeliverableEntityInput): void => {
+const ensureAppliedAuthority = (env: RuntimeState, output: DeliverableEntityInput): void => {
   const key = `${output.entityId}:${output.signerId}`;
   const replica = env.eReplicas.get(key) ?? ({
     entityId: output.entityId,
@@ -378,21 +378,21 @@ const ensureAppliedAuthority = (env: Env, output: DeliverableEntityInput): void 
   env.eReplicas.set(key, replica);
 };
 
-const commitApplied = (receiver: Env, outputs: DeliverableEntityInput[]) => {
+const commitApplied = (receiver: RuntimeState, outputs: DeliverableEntityInput[]) => {
   for (const output of outputs) ensureAppliedAuthority(receiver, output);
   return commitReliableIngress(receiver, outputs);
 };
 
-const receiverFrontierCount = (env: Env): number =>
+const receiverFrontierCount = (env: RuntimeState): number =>
   (env.runtimeState?.reliableIngressReceiptLedger?.size ?? 0) +
   (env.runtimeState?.reliableIngressTerminalWatermarks?.size ?? 0);
 
-const senderFrontierCount = (env: Env): number =>
+const senderFrontierCount = (env: RuntimeState): number =>
   (env.runtimeState?.receivedReliableReceiptLedger?.size ?? 0) +
   (env.runtimeState?.receivedReliableTerminalWatermarks?.size ?? 0);
 
 const commitAtReceiver = (
-  receiver: Env,
+  receiver: RuntimeState,
   senderRuntimeId: string,
   output: DeliverableEntityInput,
 ) => {
@@ -403,7 +403,7 @@ const commitAtReceiver = (
 };
 
 const commitTerminalAccountAtReceiver = (
-  receiver: Env,
+  receiver: RuntimeState,
   senderRuntimeId: string,
   output: DeliverableEntityInput,
   height: number,
@@ -773,7 +773,7 @@ describe('durable scoped reliable delivery receipts', () => {
     expect(applied.appliedEntityInputs).toHaveLength(1);
     expect(receiver.eReplicas.get(`${targetEntityId}:${validatorId}`)?.state.height).toBe(1);
     const committedAccount = receiver.eReplicas
-      .get(`${targetEntityId}:${validatorId}`)?.state.accounts.get(sourceEntityId) as AccountMachine | undefined;
+      .get(`${targetEntityId}:${validatorId}`)?.state.accounts.get(sourceEntityId) as AccountState | undefined;
     if (!committedAccount) throw new Error('TEST_FROZEN_PREFIX_ACCOUNT_MISSING');
     expect(committedAccount.currentHeight).toBe(10);
     expect(committedAccount.pendingFrame).toBeUndefined();

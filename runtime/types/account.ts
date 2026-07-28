@@ -280,7 +280,7 @@ export interface AccountState {
   // Removed isProposer - use isLeft() function like old_src Channel.ts instead
 
   // Cloned state for validation before committing (replaces dryRun)
-  clonedForValidation?: AccountMachine;
+  clonedForValidation?: AccountState;
 
   // Proof structures for dispute resolution
   proofHeader: {
@@ -421,9 +421,6 @@ export interface AccountState {
   };
 }
 
-/** @deprecated Use AccountState. Kept only while external consumers migrate. */
-export type AccountMachine = AccountState;
-
 export type AccountBoardResealMigration = {
   activationJHeight: number;
   activationLogIndex: number;
@@ -444,7 +441,7 @@ export interface AccountFrame {
   jHeight: number; // J-machine height agreed for HTLC deadline checks
   accountTxs: AccountTx[]; // Renamed from transitions
   prevFrameHash: string; // Hash of previous frame (creates chain linkage, not state linkage)
-  accountStateRoot: string; // Canonical RLP/radix-Merkle root of bilateral AccountMachine state
+  accountStateRoot: string; // Canonical RLP/radix-Merkle root of bilateral Account state
   stateHash: string;
   byLeft?: boolean; // Who proposed this frame (left or right entity)
   // One source of truth for account-frame token state. Compact offdelta arrays

@@ -1,10 +1,10 @@
-import type { AccountMachine, EntityReplica, Env } from '@xln/runtime/xln-api';
+import type { AccountState, EntityReplica, RuntimeState } from '@xln/runtime/xln-api';
 
 // These helpers operate on validated runtime state only.
 // The only nullable boundary is the outer env reference before a runtime is attached.
 // Do not widen these helpers to ad hoc partial frontend shapes: missing accounts/deltas
 // inside a live replica is a bug and must fail at the real decode/validation layer.
-type EnvLike = Env | null | undefined;
+type EnvLike = RuntimeState | null | undefined;
 
 function toReplicaEntries(envLike: EnvLike): Array<[string, EntityReplica]> {
   if (!envLike) return [];
@@ -16,7 +16,7 @@ export function normalizeEntityId(value: unknown): string {
 }
 
 function matchesCounterparty(
-  account: AccountMachine,
+  account: AccountState,
   ownerEntityId: string,
   counterpartyEntityId: string,
 ): boolean {
@@ -29,7 +29,7 @@ function matchesCounterparty(
   return (left === owner && right === target) || (right === owner && left === target);
 }
 
-function resolveCounterpartyFromAccount(account: AccountMachine, ownerEntityId: string): string {
+function resolveCounterpartyFromAccount(account: AccountState, ownerEntityId: string): string {
   const owner = normalizeEntityId(ownerEntityId);
   const left = normalizeEntityId(account.leftEntity);
   const right = normalizeEntityId(account.rightEntity);
@@ -69,7 +69,7 @@ export function getCounterpartyAccount(
   envLike: EnvLike,
   ownerEntityId: string,
   counterpartyEntityId: string,
-) : { key: string; account: AccountMachine } | null {
+) : { key: string; account: AccountState } | null {
   const replica = getReplicaForEntity(envLike, ownerEntityId);
   if (!replica) return null;
   const accounts = replica.state.accounts;
@@ -97,12 +97,12 @@ export function hasCounterpartyAccount(
   return !!getCounterpartyAccount(envLike, ownerEntityId, counterpartyEntityId);
 }
 
-export function isCommittedAccount(account: AccountMachine | null | undefined): boolean {
+export function isCommittedAccount(account: AccountState | null | undefined): boolean {
   if (!account) return false;
   return Number(account.currentFrame?.height ?? account.currentHeight ?? 0) > 0;
 }
 
-export function isOpeningAccount(account: AccountMachine | null | undefined): boolean {
+export function isOpeningAccount(account: AccountState | null | undefined): boolean {
   if (!account) return false;
   return !isCommittedAccount(account);
 }

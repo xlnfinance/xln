@@ -13,7 +13,7 @@ import {
   splitPendingOutputsByRetryWindow,
 } from '../runtime/output-routing';
 import { deliveryAccepted, deliveryDeferred, deliveryFailure } from '../protocol/payments/delivery-result';
-import type { DeliverableEntityInput, EntityLeaderTimeoutVote, Env, RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../types';
+import type { DeliverableEntityInput, EntityLeaderTimeoutVote, RuntimeState, RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../types';
 import { getWallClockMs } from '../utils';
 
 const runtimeId = (byte: string): string => `0x${byte.repeat(20)}`;
@@ -91,7 +91,7 @@ const dispatchFrameOutputs = (outputs: DeliverableEntityInput[]): {
         return deliveryAccepted('ROUTE_DIRECT_DELIVERED');
       },
     },
-  } as unknown as Env;
+  } as unknown as RuntimeState;
   const deferred = dispatchEntityOutputs(env, outputs.map(output => ({
     output: {
       ...output,
@@ -147,7 +147,7 @@ describe('runtime output routing', () => {
       info: (_scope: string, code: string) => infoCodes.push(code),
       warn: () => {},
       error: () => {},
-    } as unknown as Env;
+    } as unknown as RuntimeState;
 
     const planned = planEntityOutputs(env, [output], {
       ensureRuntimeState: target => target.runtimeState!,
@@ -348,9 +348,9 @@ describe('runtime output routing', () => {
       timestamp: 1_000,
       pendingNetworkOutputs: [],
       runtimeState: {},
-    } as unknown as Env;
+    } as unknown as RuntimeState;
     const deps = {
-      ensureRuntimeState: (targetEnv: Env) => targetEnv.runtimeState!,
+      ensureRuntimeState: (targetEnv: RuntimeState) => targetEnv.runtimeState!,
     } as any;
 
     const pending = rescheduleDeferredOutputs(env, [], [output], [], deps);
@@ -370,9 +370,9 @@ describe('runtime output routing', () => {
       timestamp: 1_000,
       pendingNetworkOutputs: [],
       runtimeState: {},
-    } as unknown as Env;
+    } as unknown as RuntimeState;
     const deps = {
-      ensureRuntimeState: (targetEnv: Env) => targetEnv.runtimeState!,
+      ensureRuntimeState: (targetEnv: RuntimeState) => targetEnv.runtimeState!,
     } as any;
 
     const pending = rescheduleDeferredOutputs(env, [], [output], [], deps);
@@ -396,9 +396,9 @@ describe('runtime output routing', () => {
       timestamp: 1,
       pendingNetworkOutputs: [],
       runtimeState: {},
-    } as unknown as Env;
+    } as unknown as RuntimeState;
     const deps = {
-      ensureRuntimeState: (targetEnv: Env) => targetEnv.runtimeState!,
+      ensureRuntimeState: (targetEnv: RuntimeState) => targetEnv.runtimeState!,
     } as any;
     const before = getWallClockMs();
     const pending = rescheduleDeferredOutputs(env, [], [output], [], deps);
@@ -423,7 +423,7 @@ describe('runtime output routing', () => {
     const env = {
       runtimeId: runtimeId('19'),
       warn: (_scope: string, code: string) => warnings.push(code),
-    } as unknown as Env;
+    } as unknown as RuntimeState;
 
     const planned = planEntityOutputs(env, [output], {
       ensureRuntimeState: (targetEnv) => targetEnv.runtimeState ??= {},
@@ -458,7 +458,7 @@ describe('runtime output routing', () => {
       runtimeId: runtimeId('19'),
       info: (_scope: string, code: string) => info.push(code),
       warn: (_scope: string, code: string) => warnings.push(code),
-    } as unknown as Env;
+    } as unknown as RuntimeState;
 
     const planned = planEntityOutputs(env, [output], {
       ensureRuntimeState: (targetEnv) => targetEnv.runtimeState ??= {},
@@ -494,7 +494,7 @@ describe('runtime output routing', () => {
     const env = {
       runtimeId: runtimeId('1e'),
       warn: (_scope: string, code: string) => warnings.push(code),
-    } as unknown as Env;
+    } as unknown as RuntimeState;
 
     const planned = planEntityOutputs(env, [output], {
       ensureRuntimeState: (targetEnv) => targetEnv.runtimeState ??= {},
@@ -529,7 +529,7 @@ describe('runtime output routing', () => {
     const env = {
       runtimeId: runtimeId('1e'),
       warn: (_scope: string, code: string) => warnings.push(code),
-    } as unknown as Env;
+    } as unknown as RuntimeState;
 
     const planned = planEntityOutputs(env, [output], {
       ensureRuntimeState: (targetEnv) => targetEnv.runtimeState ??= {},
@@ -560,7 +560,7 @@ describe('runtime output routing', () => {
       warn: (_scope: string, code: string) => {
         warnings.push(code);
       },
-    } as unknown as Env;
+    } as unknown as RuntimeState;
     const output: DeliverableEntityInput = {
       runtimeId: targetRuntimeId,
       entityId: entityId('33'),
@@ -613,7 +613,7 @@ describe('runtime output routing', () => {
       },
       warn: () => {},
       error: () => {},
-    } as unknown as Env;
+    } as unknown as RuntimeState;
     const output: DeliverableEntityInput = {
       runtimeId: targetRuntimeId,
       entityId: entityId('31'),
@@ -661,7 +661,7 @@ describe('runtime output routing', () => {
       },
       warn: () => {},
       error: () => {},
-    } as unknown as Env;
+    } as unknown as RuntimeState;
     const output: DeliverableEntityInput = {
       runtimeId: targetRuntimeId,
       entityId: entityId('41'),
@@ -702,7 +702,7 @@ describe('runtime output routing', () => {
       },
       warn: () => {},
       error: () => {},
-    } as unknown as Env;
+    } as unknown as RuntimeState;
     const output: DeliverableEntityInput = {
       runtimeId: targetRuntimeId,
       entityId: entityId('3a'),
@@ -847,7 +847,7 @@ describe('runtime output routing', () => {
       },
       warn: () => {},
       error: () => {},
-    } as unknown as Env;
+    } as unknown as RuntimeState;
     const output: DeliverableEntityInput = {
       runtimeId: targetRuntimeId,
       entityId: entityId('3e'),
@@ -892,7 +892,7 @@ describe('runtime output routing', () => {
       },
       warn: () => {},
       error: () => {},
-    } as unknown as Env;
+    } as unknown as RuntimeState;
     const output: DeliverableEntityInput = {
       runtimeId: targetRuntimeId,
       entityId: entityId('3c'),
@@ -936,7 +936,7 @@ describe('runtime output routing', () => {
       },
       warn: () => {},
       error: () => {},
-    } as unknown as Env;
+    } as unknown as RuntimeState;
     const input: RoutedEntityInput = {
       entityId: entityId('35'),
       signerId: runtimeId('36'),
@@ -990,7 +990,7 @@ describe('runtime output routing', () => {
       runtimeState: {},
       warn: () => {},
       error: () => {},
-    } as unknown as Env;
+    } as unknown as RuntimeState;
     const input: RoutedEntityInput = {
       entityId: localEntityId,
       signerId: localSignerId,
@@ -1050,7 +1050,7 @@ describe('runtime output routing', () => {
       error: (_scope: string, code: string, payload: any) => {
         errors.push({ code, ...payload });
       },
-    } as unknown as Env;
+    } as unknown as RuntimeState;
 
     const deferred = dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
       ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
@@ -1120,7 +1120,7 @@ describe('runtime output routing', () => {
       },
       warn: (_scope: string, code: string) => warnings.push(code),
       info: (_scope: string, code: string) => infos.push(code),
-    } as unknown as Env;
+    } as unknown as RuntimeState;
 
     const deferred = dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
       ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
@@ -1159,7 +1159,7 @@ describe('runtime output routing', () => {
       },
       warn: (_scope: string, code: string) => warnings.push(code),
       info: (_scope: string, code: string) => infos.push(code),
-    } as unknown as Env;
+    } as unknown as RuntimeState;
 
     const deferred = dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
       ensureRuntimeState: target => target.runtimeState!,
@@ -1194,7 +1194,7 @@ describe('runtime output routing', () => {
       runtimeState: {},
       warn: () => {},
       error: () => {},
-    } as unknown as Env;
+    } as unknown as RuntimeState;
 
     expect(() => dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
       ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
@@ -1225,7 +1225,7 @@ describe('runtime output routing', () => {
       warn: (_scope: string, code: string) => warnings.push(code),
       error: () => {},
       runtimeState: { entityRuntimeHints: new Map() },
-    } as unknown as Env;
+    } as unknown as RuntimeState;
 
     const result = planEntityOutputs(env, [{
       entityId: localEntityId,
@@ -1270,7 +1270,7 @@ describe('runtime output routing', () => {
           },
         }],
       },
-    } as unknown as Env;
+    } as unknown as RuntimeState;
 
     const result = planEntityOutputs(env, [{
       entityId: targetEntityId,
@@ -1314,7 +1314,7 @@ describe('runtime output routing', () => {
           },
         }],
       },
-    } as unknown as Env;
+    } as unknown as RuntimeState;
 
     expect(() => planEntityOutputs(env, [{
       entityId: targetEntityId,
@@ -1356,7 +1356,7 @@ describe('runtime output routing', () => {
           },
         }],
       },
-    } as unknown as Env;
+    } as unknown as RuntimeState;
 
     const result = planEntityOutputs(env, [{
       entityId: targetEntityId,
@@ -1401,7 +1401,7 @@ describe('runtime output routing', () => {
           },
         }],
       },
-    } as unknown as Env;
+    } as unknown as RuntimeState;
 
     const proposedFrameResult = planEntityOutputs(env, [{
       entityId: targetEntityId,
@@ -1461,7 +1461,7 @@ describe('runtime output routing', () => {
           metadata: { board: { validators: [{ signerId: runtimeId('70') }] } },
         }],
       },
-    } as unknown as Env;
+    } as unknown as RuntimeState;
 
     const resolved = resolveRuntimeIdForEntity(env, targetEntityId, {
       ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
@@ -1484,9 +1484,9 @@ describe('runtime output routing', () => {
           metadata: { board: { validators: [{ signerId: runtimeId('73') }] } },
         }],
       },
-    } as unknown as Env;
+    } as unknown as RuntimeState;
     const deps = {
-      ensureRuntimeState: (targetEnv: Env) => targetEnv.runtimeState!,
+      ensureRuntimeState: (targetEnv: RuntimeState) => targetEnv.runtimeState!,
     };
 
     expect(resolveRuntimeIdForEntity(env, targetEntityId, deps)).toBe(targetRuntimeId);
@@ -1507,7 +1507,7 @@ describe('runtime output routing', () => {
       warn: () => {},
       error: (_scope: string, code: string) => errors.push(code),
       runtimeState: {},
-    } as unknown as Env;
+    } as unknown as RuntimeState;
 
     expect(() => planEntityOutputs(env, [{
       entityId: localEntityId,
@@ -1545,7 +1545,7 @@ describe('runtime output routing', () => {
       warn: () => {},
       error: (_scope: string, code: string) => errors.push(code),
       runtimeState: {},
-    } as unknown as Env;
+    } as unknown as RuntimeState;
 
     const result = planEntityOutputs(env, [{
       entityId: multiEntityId,
@@ -1589,7 +1589,7 @@ describe('runtime output routing', () => {
       warn: (_scope: string, code: string) => warnings.push(code),
       error: (_scope: string, code: string) => errors.push(code),
       runtimeState: {},
-    } as unknown as Env;
+    } as unknown as RuntimeState;
 
     expect(() => planEntityOutputs(env, [{
       entityId: localEntityId,
@@ -1631,7 +1631,7 @@ describe('runtime output routing', () => {
       warn: () => {},
       info: () => {},
       error: (_scope: string, code: string) => errors.push(code),
-    } as unknown as Env;
+    } as unknown as RuntimeState;
 
     expect(() => routeInboundP2PEntityInput(env, runtimeId('12'), {
       runtimeId: runtimeId('11'),
@@ -1675,7 +1675,7 @@ describe('runtime output routing', () => {
       warn: () => {},
       info: () => {},
       error: (_scope: string, code: string) => errors.push(code),
-    } as unknown as Env;
+    } as unknown as RuntimeState;
 
     expect(() => routeInboundP2PEntityInput(env, runtimeId('12'), {
       runtimeId: runtimeId('11'),
@@ -1717,7 +1717,7 @@ describe('runtime output routing', () => {
       warn: () => {},
       info: () => {},
       error: (_scope: string, code: string) => errors.push(code),
-    } as unknown as Env;
+    } as unknown as RuntimeState;
 
     expect(() => routeInboundP2PEntityInput(env, runtimeId('12'), {
       runtimeId: runtimeId('11'),
@@ -1763,7 +1763,7 @@ describe('runtime output routing', () => {
       warn: () => {},
       info: (_scope: string, code: string) => infos.push(code),
       error: (_scope: string, code: string) => errors.push(code),
-    } as unknown as Env;
+    } as unknown as RuntimeState;
 
     expect(() => routeInboundP2PEntityInput(env, runtimeId('12'), {
       runtimeId: runtimeId('11'),
@@ -1812,7 +1812,7 @@ describe('runtime output routing', () => {
       runtimeState: { entityRuntimeHints: new Map(), persistenceQuiescing: true },
       warn: () => {},
       info: () => {},
-    } as unknown as Env;
+    } as unknown as RuntimeState;
     const input: RoutedEntityInput = {
       runtimeId: runtimeId('11'),
       entityId: localEntityId,

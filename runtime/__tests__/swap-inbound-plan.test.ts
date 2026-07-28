@@ -4,7 +4,7 @@ import {
   planSwapInboundCapacity,
   readSwapAccountCapacity,
 } from '../account/swap-inbound-plan';
-import type { AccountMachine, Delta } from '../types';
+import type { AccountState, Delta } from '../types';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
 
 const left = `0x${'11'.repeat(32)}`;
@@ -24,7 +24,7 @@ const delta = (overrides: Partial<Delta> = {}): Delta => ({
   ...overrides,
 });
 
-const account = (tokenDelta?: Delta): AccountMachine => ({
+const account = (tokenDelta?: Delta): AccountState => ({
   leftEntity: left,
   rightEntity: right,
   domain: {

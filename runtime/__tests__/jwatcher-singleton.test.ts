@@ -2,16 +2,16 @@ import { describe, expect, test } from 'bun:test';
 
 import { getHealthStatus } from '../server/health';
 import { startJurisdictionWatchers } from '../runtime';
-import type { Env, JReplica } from '../types';
+import type { RuntimeState, JReplica } from '../types';
 
-const makeEnv = (replicas: Array<[string, JReplica]>): Env => ({
+const makeEnv = (replicas: Array<[string, JReplica]>): RuntimeState => ({
   runtimeId: 'test-runtime',
   height: 0n,
   timestamp: 0,
   eReplicas: new Map(),
   jReplicas: new Map(replicas),
   runtimeState: {},
-} as unknown as Env);
+} as unknown as RuntimeState);
 
 const makeAdapter = (options?: { watching?: boolean }) => {
   let watching = options?.watching === true;

@@ -1,5 +1,5 @@
 import type { ServerWebSocket } from 'bun';
-import type { Env, RuntimeEntityInputsEnvelope } from '../types';
+import type { RuntimeState, RuntimeEntityInputsEnvelope } from '../types';
 import { encryptJSON, hexToPubKey } from '../networking/p2p-crypto';
 import {
   isRelaySocketOpen,
@@ -76,7 +76,7 @@ const pushDirectRelayDeliveryEvent = (
 
 export const sendEntityInputDirectViaRelaySocketDelivery = (
   relayStore: RelayStore,
-  env: Env,
+  env: RuntimeState,
   targetRuntimeId: string,
   envelope: RuntimeEntityInputsEnvelope,
   logOneShot: RelayDirectOneShotLog,

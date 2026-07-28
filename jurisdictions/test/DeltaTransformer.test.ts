@@ -6,7 +6,7 @@ import { buildAccountProofBody } from "../../runtime/protocol/dispute/proof-buil
 import { buildPositionalSwapFillRatioBuckets } from "../../runtime/protocol/transformer-ordering.ts";
 import { asOfferId } from "../../runtime/orderbook/swap-keys.ts";
 import { deriveSwapOffdeltaChanges } from "../../runtime/orderbook/swap-execution.ts";
-import type { AccountMachine, SwapOffer } from "../../runtime/types.ts";
+import type { AccountState, SwapOffer } from "../../runtime/types.ts";
 
 const { ethers } = hre;
 const MAX_FILL_RATIO = 65535n;
@@ -33,7 +33,7 @@ function makeSwapOffer(
   };
 }
 
-function makeProofAccountMachine(swaps: Array<[string, SwapOffer]>): AccountMachine {
+function makeProofAccountMachine(swaps: Array<[string, SwapOffer]>): AccountState {
   return {
     leftEntity: "left",
     rightEntity: "right",

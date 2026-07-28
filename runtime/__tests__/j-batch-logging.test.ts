@@ -9,7 +9,7 @@ import { cloneJBatch, initJBatch } from '../jurisdiction/batch';
 import { createEmptyEnv } from '../runtime';
 import { hydrateEntityStateFromStorage } from '../storage/hydration';
 import { projectEntityCoreDoc } from '../storage/projections';
-import type { DebtEntry, EntityState, EntityTx, Env } from '../types';
+import type { DebtEntry, EntityState, EntityTx, RuntimeState } from '../types';
 
 const entityId = `0x${'aa'.repeat(32)}`;
 const counterpartyId = `0x${'bb'.repeat(32)}`;
@@ -69,7 +69,7 @@ test('entity j-batch operation handler state transitions are unchanged', async (
   }]);
 
   const mintTx = { type: 'mintReserves', data: { tokenId: 1, amount: 5n } } satisfies EntityTx;
-  const mintResult = await handleMintReserves(makeEntityState(), mintTx, {} as Env);
+  const mintResult = await handleMintReserves(makeEntityState(), mintTx, {} as RuntimeState);
   expect(mintResult.jOutputs).toEqual([]);
   expect(mintResult.newState.messages.at(-1)).toContain('Jurisdiction unavailable for mint');
 });

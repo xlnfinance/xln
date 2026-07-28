@@ -22,7 +22,7 @@ import {
   requireCompleteValidatorEncryptionManifest,
   type CertifiedValidatorEncryptionManifest,
 } from '../protocol/htlc/validator-encryption';
-import type { Env } from '../types';
+import type { RuntimeState } from '../types';
 
 const bytesHex = (bytes: Uint8Array): string => `0x${Buffer.from(bytes).toString('hex')}`;
 const bytes32 = (value: number): string => `0x${value.toString(16).padStart(64, '0')}`;
@@ -77,7 +77,7 @@ const certifiedHop = async (
   const routingStateHash = bytes32(0xa0 + index);
   const profileHash = computeEntityProfileCertificationHash(manifest.hash, routingStateHash);
   const hanko = await buildQuorumHanko(
-    {} as Env,
+    {} as RuntimeState,
     entityId,
     profileHash,
     [{ signerId: signer, signature: signDigest(privateKey, profileHash) }],

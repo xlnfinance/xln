@@ -1,4 +1,4 @@
-import type { Env, RoutedEntityInput } from '@xln/runtime/xln-api';
+import type { RuntimeState, RoutedEntityInput } from '@xln/runtime/xln-api';
 import { buildPendingBatchActionTxs, type PendingBatchAction } from './pending-batch-preview';
 
 type PendingBatchActionRequest = {
@@ -7,7 +7,7 @@ type PendingBatchActionRequest = {
   action: PendingBatchAction;
   context: string;
   resolveEntitySigner: (entityId: string, context: string) => string;
-  submitEntityInputs: (inputs: RoutedEntityInput[]) => Promise<Env | null>;
+  submitEntityInputs: (inputs: RoutedEntityInput[]) => Promise<RuntimeState | null>;
 };
 
 type PendingBatchRunnerState = {

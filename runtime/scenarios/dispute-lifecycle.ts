@@ -8,7 +8,7 @@
  * 4) explicit reopen moves both sides back to active and clears pending disputed state
  */
 
-import type { AccountMachine, Env } from '../types';
+import type { AccountState, RuntimeState } from '../types';
 import type { JAdapter } from '../jadapter/types';
 import { getAccountFrameHistoryView } from '../runtime/env-events';
 import { startRuntimeHistoryTraceForTesting } from '../history-retention';
@@ -36,7 +36,7 @@ const requireRegistered = (entity: Registered | undefined, name: string): Regist
   return entity;
 };
 
-function jEventClaimCount(account: AccountMachine | undefined): number {
+function jEventClaimCount(account: AccountState | undefined): number {
   const frames = account ? getAccountFrameHistoryView(account) : [];
   let count = 0;
   for (const frame of frames) {
@@ -71,7 +71,7 @@ async function mineUntilHeight(jadapter: JAdapter, targetHeight: number): Promis
 }
 
 async function reopenFromAlice(
-  env: Env,
+  env: RuntimeState,
   process: Awaited<ReturnType<typeof getProcess>>,
   aliceId: string,
   aliceSigner: string,
@@ -91,7 +91,7 @@ async function reopenFromAlice(
   await converge(env, 10);
 }
 
-export async function runDisputeLifecycle(_existingEnv?: Env): Promise<Env> {
+export async function runDisputeLifecycle(_existingEnv?: RuntimeState): Promise<RuntimeState> {
   console.log('\n' + '='.repeat(80));
   console.log('  DISPUTE LIFECYCLE SCENARIO (UNILATERAL)');
   console.log('='.repeat(80));

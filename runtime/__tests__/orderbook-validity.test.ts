@@ -4,7 +4,7 @@ import { applyCommand, createBook, type BookState } from '../orderbook/core';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
 import { createOrderbookExtState, ORDERBOOK_PRICE_SCALE, replaceOrderbookPair, SWAP_LOT_SCALE } from '../orderbook/types';
 import { validateBookAgainstOffers, validateBookStructure, validateEntityOrderbooks } from '../orderbook/validity';
-import type { AccountMachine, EntityState, SwapOffer } from '../types';
+import type { AccountState, EntityState, SwapOffer } from '../types';
 
 const makeOffer = (overrides: Partial<SwapOffer> = {}): SwapOffer => ({
   offerId: 'offer-1',
@@ -19,7 +19,7 @@ const makeOffer = (overrides: Partial<SwapOffer> = {}): SwapOffer => ({
   ...overrides,
 });
 
-const makeAccount = (offerId: string, offer: SwapOffer): AccountMachine =>
+const makeAccount = (offerId: string, offer: SwapOffer): AccountState =>
   ({
     leftEntity: 'alice',
     rightEntity: 'hub',
@@ -54,7 +54,7 @@ const makeAccount = (offerId: string, offer: SwapOffer): AccountMachine =>
     lastFinalizedJHeight: 0,
     disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
     jNonce: 0,
-  }) as AccountMachine;
+  }) as AccountState;
 
 const makeState = (book: BookState, offerId = 'offer-1', offer = makeOffer()): EntityState => {
   const orderbookExt = createOrderbookExtState({

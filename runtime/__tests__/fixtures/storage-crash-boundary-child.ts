@@ -564,7 +564,7 @@ if (recoveryLagMode || recoveryBoardRootLagMode) {
 } else {
   await saveRuntimeFrameToStorage({
     env,
-    // WAL stores causal inputs, not a duplicate full Env. The live mutation
+    // WAL stores causal inputs, not a duplicate full RuntimeState. The live mutation
     // above deliberately bypasses process() so this crash fixture must provide
     // the exact input that deterministically rebuilds the durable J attempt.
     currentFrameInput: appliedRuntimeInput,

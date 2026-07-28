@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import { handleDirectPayment } from '../account/tx/handlers/direct-payment';
 import { computeFrameHash } from '../account/consensus/frame';
 import { applyPendingForwardFollowup } from '../entity/tx/handlers/account/committed-htlc-followups';
-import type { AccountFrame, AccountInput, AccountMachine, AccountTx, EntityState, Env } from '../types';
+import type { AccountFrame, AccountInput, AccountState, AccountTx, EntityState, RuntimeState } from '../types';
 import { createDefaultDelta } from '../validation-utils';
 
 const LEFT = `0x${'11'.repeat(32)}`;
@@ -31,7 +31,7 @@ async function makeHashedFrame(): Promise<AccountFrame> {
   return frame;
 }
 
-async function makeAccount(): Promise<AccountMachine> {
+async function makeAccount(): Promise<AccountState> {
   const delta = {
     ...createDefaultDelta(1),
     collateral: 100_000n,
@@ -49,7 +49,7 @@ async function makeAccount(): Promise<AccountMachine> {
     collateral: new Map(),
     requestedRebalance: new Map(),
     mempool: [],
-  } as unknown as AccountMachine;
+  } as unknown as AccountState;
 }
 
 describe('direct payment frame integrity', () => {
@@ -124,9 +124,9 @@ describe('direct payment frame integrity', () => {
 
       const mempoolOps: Array<{ accountId: string; tx: AccountTx }> = [];
       const state = { entityId: LEFT } as EntityState;
-      const newState = { entityId: LEFT, accounts: new Map([[NEXT, {} as AccountMachine]]) } as EntityState;
+      const newState = { entityId: LEFT, accounts: new Map([[NEXT, {} as AccountState]]) } as EntityState;
       applyPendingForwardFollowup({
-        env: {} as Env,
+        env: {} as RuntimeState,
         state,
         newState,
         input: {} as AccountInput,
@@ -146,7 +146,7 @@ describe('direct payment frame integrity', () => {
     account.pendingForwards = [{ tokenId: 1, amount: 1n, route: [LEFT, NEXT, FINAL] }];
 
     expect(() => applyPendingForwardFollowup({
-      env: {} as Env,
+      env: {} as RuntimeState,
       state: { entityId: LEFT } as EntityState,
       newState: { entityId: LEFT, accounts: new Map() } as EntityState,
       input: {} as AccountInput,

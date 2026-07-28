@@ -14,7 +14,7 @@ import {
   senderFrontierKey,
 } from '../runtime/reliable-frontier';
 import { dbRootPath } from '../runtime/platform';
-import type { Env, ReliableDeliveryReceipt } from '../types';
+import type { RuntimeState, ReliableDeliveryReceipt } from '../types';
 
 const fixture = join(import.meta.dir, 'fixtures/reliable-frontier-crash-child.ts');
 let cleanupRuntimeId: string | null = null;
@@ -44,7 +44,7 @@ const onlyReceipt = (
   return value;
 };
 
-const assertReceiptValid = (env: Env, receipt: ReliableDeliveryReceipt): void => {
+const assertReceiptValid = (env: RuntimeState, receipt: ReliableDeliveryReceipt): void => {
   expect(getReliableDeliveryReceiptValidationError(env, receipt)).toBeNull();
 };
 

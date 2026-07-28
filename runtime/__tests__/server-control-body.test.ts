@@ -6,7 +6,7 @@ import {
 } from '../server/auth';
 import { handleRuntimeInputControl } from '../server/runtime-input-control';
 import { deserializeTaggedJson, serializeTaggedJson } from '../protocol/serialization';
-import type { Env, RuntimeInput } from '../types';
+import type { RuntimeState, RuntimeInput } from '../types';
 
 test('control body parser rejects oversized request bodies before deserializing', async () => {
   const request = new Request('http://localhost/api/control/runtime-input', {
@@ -26,7 +26,7 @@ test('runtime input control rejects oversized payloads without enqueueing runtim
       body: 'x'.repeat(DEFAULT_CONTROL_BODY_MAX_BYTES + 1),
     }),
     { 'Content-Type': 'application/json' },
-    {} as Env,
+    {} as RuntimeState,
     {
       enqueueRuntimeInput: () => {
         enqueueCalled = true;
@@ -62,7 +62,7 @@ test('runtime input control still accepts normal tagged payloads', async () => {
       body: serializeTaggedJson({ runtimeTxs: [], entityInputs: [], jInputs: [{ jurisdictionName: 'test', jTxs: [] }] }),
     }),
     { 'Content-Type': 'application/json' },
-    {} as Env,
+    {} as RuntimeState,
     {
       enqueueRuntimeInput: (_env, runtimeInput) => {
         accepted.push(runtimeInput);

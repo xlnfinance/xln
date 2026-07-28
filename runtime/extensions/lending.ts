@@ -1,7 +1,7 @@
 import { ethers } from 'ethers';
 
 import type {
-  AccountMachine,
+  AccountState,
   EntityState,
   LendingLoan,
   LendingPoolPosition,
@@ -93,7 +93,7 @@ export const ensureLendingState = (state: EntityState): LendingState => {
 };
 
 export const getCreditGrantedByAccountOwner = (
-  account: AccountMachine,
+  account: AccountState,
   ownerEntityId: string,
   tokenId: number,
 ): bigint => {
@@ -105,7 +105,7 @@ export const getCreditGrantedByAccountOwner = (
 };
 
 export const getAccountOutCapacity = (
-  account: AccountMachine,
+  account: AccountState,
   entityId: string,
   tokenId: number,
 ): bigint => {

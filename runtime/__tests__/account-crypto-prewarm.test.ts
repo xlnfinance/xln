@@ -15,7 +15,7 @@ import {
 import { createEmptyEnv, prewarmRuntimeSignerCache } from '../runtime';
 
 describe('signer cache prewarm', () => {
-  test('creates deterministic signer keys synchronously with the runtime Env', () => {
+  test('creates deterministic signer keys synchronously with the runtime RuntimeState', () => {
     const seed = 'runtime-creation-signers-ready';
     clearSignerKeys(seed);
     try {

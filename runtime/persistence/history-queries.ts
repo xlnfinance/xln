@@ -21,7 +21,7 @@ import type {
   AccountFrame,
   CertifiedEntityFrameLink,
   EntityInput,
-  Env,
+  RuntimeState,
   FrameLogEntry,
 } from '../types';
 import type { PersistedFrameJournal } from '../storage/types';
@@ -71,7 +71,7 @@ export type PersistedRuntimeActivityPage = {
 
 export const createPersistenceHistoryQueries = (deps: PersistenceQueryDeps) => {
   const readPersistedFrameJournal = async (
-    env: Env,
+    env: RuntimeState,
     height: number,
   ): Promise<PersistedFrameJournal | null> => {
     const frame = await deps.readPersistedStorageFrameRecord(env, height);
@@ -92,7 +92,7 @@ export const createPersistenceHistoryQueries = (deps: PersistenceQueryDeps) => {
   };
 
   const readPersistedRuntimeActivityJournal = async (
-    env: Env,
+    env: RuntimeState,
     height: number,
   ): Promise<(PersistedActivityJournal & { logs: FrameLogEntry[] }) | null> => {
     const targetHeight = Number.isFinite(height) ? Math.floor(height) : 0;
@@ -128,7 +128,7 @@ export const createPersistenceHistoryQueries = (deps: PersistenceQueryDeps) => {
   };
 
   const readPersistedAccountFrameHistory = async (
-    env: Env,
+    env: RuntimeState,
     entityId: string,
     counterpartyId: string,
     limit = 50,
@@ -155,7 +155,7 @@ export const createPersistenceHistoryQueries = (deps: PersistenceQueryDeps) => {
   };
 
   const readPersistedEntityFrameHistory = async (
-    env: Env,
+    env: RuntimeState,
     entityId: string,
     limit = 50,
     opts?: { maxRuntimeHeight?: number; maxEntityHeight?: number },
@@ -176,7 +176,7 @@ export const createPersistenceHistoryQueries = (deps: PersistenceQueryDeps) => {
   };
 
   const readPersistedFrameJournals = async (
-    env: Env,
+    env: RuntimeState,
     opts?: { fromHeight?: number; toHeight?: number; limit?: number },
   ): Promise<PersistedFrameJournal[]> => {
     const latestHeight = await deps.resolvePersistedLatestHeight(env);
@@ -199,7 +199,7 @@ export const createPersistenceHistoryQueries = (deps: PersistenceQueryDeps) => {
   };
 
   const readPersistedRuntimeActivityPage = async (
-    env: Env,
+    env: RuntimeState,
     opts: RuntimeActivityFilters & {
       beforeHeight?: number | undefined;
       limit?: number | undefined;

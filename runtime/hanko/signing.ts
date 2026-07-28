@@ -3,7 +3,7 @@
  * Bridges between account-consensus and hanko.ts library
  */
 
-import type { ConsensusConfig, EntityState, Env, HankoBoardDelays, HankoString } from '../types';
+import type { ConsensusConfig, EntityState, RuntimeState, HankoBoardDelays, HankoString } from '../types';
 import { ethers } from 'ethers';
 import { encodeBoard, generateLazyEntityId, hashBoard } from '../entity/factory';
 import { recoverAddressFromDigestSignature, signDigestBytesWithPrivateKey } from '../account/crypto';
@@ -136,7 +136,7 @@ export async function inspectHankoForHash(
  * For multi-signer quorum, call buildQuorumHanko with the committed votes.
  */
 export async function signEntityHashes(
-  env: Env,
+  env: RuntimeState,
   entityId: string,
   signerId: string,
   hashes: string[],
@@ -260,9 +260,9 @@ const assertExactBoardShares = (signerKeys: Set<string>, shares: Map<string, big
 };
 
 const resolveQuorumBoard = (
-  env: Env,
+  env: RuntimeState,
   config: QuorumConfig,
-  getSignerAddress: (env: Env, signerId: string) => string | null,
+  getSignerAddress: (env: RuntimeState, signerId: string) => string | null,
 ): QuorumValidator[] => {
   if (typeof config.threshold !== 'bigint' || config.threshold <= 0n) {
     throw new Error('BUILD_QUORUM_HANKO_INVALID_THRESHOLD');
@@ -311,7 +311,7 @@ const canonicalBoardHash = (
 
 /** Canonical board committed by this config using only this runtime's key store. */
 export async function getEntityConfigBoardHash(
-  env: Env,
+  env: RuntimeState,
   config: QuorumConfig,
 ): Promise<string> {
   const { getSignerAddress } = await import('../account/crypto');
@@ -323,7 +323,7 @@ export async function getEntityConfigBoardHash(
 }
 
 const assertQuorumBoardBinding = (
-  env: Env,
+  env: RuntimeState,
   entityId: string,
   config: QuorumConfig,
   validators: QuorumValidator[],
@@ -420,7 +420,7 @@ const encodeQuorumEntityId = (entityId: string): string => {
  * @param config - Entity consensus config (for threshold/weights)
  */
 export async function buildQuorumHanko(
-  env: Env,
+  env: RuntimeState,
   entityId: string,
   hash: string,
   signatures: Array<{ signerId: string; signature: string }>,
@@ -482,7 +482,7 @@ export async function buildQuorumHanko(
 
 /** Validators call this after replay and before producing any precommit. */
 export async function assertEntityConfigBoardAuthority(
-  env: Env,
+  env: RuntimeState,
   entityId: string,
   config: QuorumConfig,
   authorityState: EntityState,
@@ -505,7 +505,7 @@ export async function verifyHankoForHash(
   hankoBytes: HankoString,
   hash: string,
   expectedEntityId: string,
-  env?: Env,
+  env?: RuntimeState,
   authority?: { registeredBoardHash?: string; allowPreviousBoard?: boolean },
 ): Promise<{ valid: boolean; entityId: string | null }> {
   try {
@@ -567,7 +567,7 @@ export async function resolveHankoDefaultProposerSignerId(
   hankoBytes: HankoString,
   hash: string,
   expectedEntityId: string,
-  env: Env,
+  env: RuntimeState,
 ): Promise<string> {
   const verified = await verifyHankoForHash(hankoBytes, hash, expectedEntityId, env);
   if (!verified.valid) {

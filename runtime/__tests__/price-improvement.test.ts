@@ -21,7 +21,7 @@ import { createBook, applyCommand, type BookState, type BookEvent } from '../ord
 import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE, computeSwapPriceTicks, deriveSide } from '../orderbook/types';
 import { handleSwapResolve } from '../account/tx/handlers/swap-resolve';
 import { deriveCanonicalSwapFillRatio } from '../orderbook/swap-execution';
-import type { AccountMachine, AccountTx, SwapOffer } from '../types';
+import type { AccountState, AccountTx, SwapOffer } from '../types';
 import { createDefaultDelta } from '../validation-utils';
 
 // Helpers
@@ -63,7 +63,7 @@ function currentSettlement(giveAmount: bigint, wantAmount: bigint, fillRatio: nu
   return { filledGive, filledWant };
 }
 
-function makeAccountMachine(offer: SwapOffer): AccountMachine {
+function makeAccountMachine(offer: SwapOffer): AccountState {
   const heldGiveAmount = offer.quantizedGive ?? offer.giveAmount;
   const giveDelta = createDefaultDelta(offer.giveTokenId);
   giveDelta.leftCreditLimit = 10n ** 30n;

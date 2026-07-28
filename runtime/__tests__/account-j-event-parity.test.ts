@@ -9,7 +9,7 @@ import { prepareAccountJClaimTx } from '../account/j-claim-transition';
 import { mergeJEventClaimOps } from '../entity/tx/j-events-account';
 import type { JEventMempoolOp } from '../entity/tx/j-events-types';
 import { createEmptyEnv } from '../runtime';
-import type { AccountMachine, AccountTx, Env, JurisdictionEvent } from '../types';
+import type { AccountState, AccountTx, RuntimeState, JurisdictionEvent } from '../types';
 import { createDefaultDelta } from '../validation-utils';
 
 const LEFT = `0x${'11'.repeat(32)}`;
@@ -31,7 +31,7 @@ const settledEvent: JurisdictionEvent = {
   },
 };
 
-const machine = (): AccountMachine => ({
+const machine = (): AccountState => ({
   leftEntity: LEFT,
   rightEntity: RIGHT,
   domain: DOMAIN,
@@ -57,9 +57,9 @@ const machine = (): AccountMachine => ({
   requestedRebalance: new Map(),
   requestedRebalanceFeeState: new Map(),
   shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
-} as AccountMachine);
+} as AccountState);
 
-const env = (): Env => {
+const env = (): RuntimeState => {
   const value = createEmptyEnv('account-j-parity');
   value.jReplicas.set('account-j-parity', {
     name: 'account-j-parity',

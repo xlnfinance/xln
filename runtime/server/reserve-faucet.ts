@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import type { Env, RuntimeInput } from '../types';
+import type { RuntimeState, RuntimeInput } from '../types';
 import type { JAdapter } from '../jadapter';
 import { DEV_CHAIN_IDS } from '../jadapter';
 import { safeStringify } from '../protocol/serialization';
@@ -38,7 +38,7 @@ export const parseReserveFaucetAmount = (
 };
 
 export const waitForRecentReserveUpdatedEvent = async (
-  env: Env,
+  env: RuntimeState,
   entityId: string,
   tokenId: number,
   expectedMin: bigint,
@@ -92,7 +92,7 @@ const resolveReserveWaitPollMs = (adapter: JAdapter | null): number => {
   return 300;
 };
 
-const hasPendingRuntimeWork = (env: Env): boolean => {
+const hasPendingRuntimeWork = (env: RuntimeState): boolean => {
   if (env.pendingOutputs?.length) return true;
   if (env.networkInbox?.length) return true;
   if (env.runtimeMempool.runtimeTxs.length) return true;
@@ -107,7 +107,7 @@ const hasPendingRuntimeWork = (env: Env): boolean => {
   return false;
 };
 
-const waitForRuntimeIdle = async (env: Env, adapter: JAdapter | null, timeoutMs = 5000): Promise<boolean> => {
+const waitForRuntimeIdle = async (env: RuntimeState, adapter: JAdapter | null, timeoutMs = 5000): Promise<boolean> => {
   const started = Date.now();
   const pollMs = resolveRuntimeWaitPollMs(adapter);
   while (Date.now() - started < timeoutMs) {
@@ -117,7 +117,7 @@ const waitForRuntimeIdle = async (env: Env, adapter: JAdapter | null, timeoutMs 
   return false;
 };
 
-const waitForJBatchClear = async (env: Env, adapter: JAdapter | null, timeoutMs = 5000): Promise<boolean> => {
+const waitForJBatchClear = async (env: RuntimeState, adapter: JAdapter | null, timeoutMs = 5000): Promise<boolean> => {
   const started = Date.now();
   const pollMs = resolveRuntimeWaitPollMs(adapter);
   while (Date.now() - started < timeoutMs) {
@@ -128,13 +128,13 @@ const waitForJBatchClear = async (env: Env, adapter: JAdapter | null, timeoutMs 
   return false;
 };
 
-const hasEntitySentBatchPending = (env: Env, entityId: string): boolean => {
+const hasEntitySentBatchPending = (env: RuntimeState, entityId: string): boolean => {
   const replica = getEntityReplicaById(env, entityId);
   return Boolean(replica?.state?.jBatchState?.sentBatch);
 };
 
 const waitForEntityBroadcastWindow = async (
-  env: Env,
+  env: RuntimeState,
   adapter: JAdapter | null,
   entityId: string,
   timeoutMs = 10000,
@@ -171,12 +171,12 @@ const waitForReserveUpdate = async (
 
 export const handleReserveFaucet = async (input: {
   req: Request;
-  env: Env | null;
+  env: RuntimeState | null;
   headers: HeadersInit;
   relayStore: { activeHubEntityIds: string[] };
   getJAdapter: () => JAdapter | null;
   ensureTokenCatalog: () => Promise<TokenCatalogEntry[]>;
-  enqueueRuntimeInput: (env: Env, runtimeInput: RuntimeInput) => void;
+  enqueueRuntimeInput: (env: RuntimeState, runtimeInput: RuntimeInput) => void;
 }): Promise<Response> => {
   const { req, env, headers, relayStore, getJAdapter, ensureTokenCatalog, enqueueRuntimeInput } = input;
   await faucetLock.acquire();

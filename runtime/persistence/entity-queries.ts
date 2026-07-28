@@ -13,15 +13,15 @@ import {
 import { verifyStorageTailIntegrity } from '../storage/verify';
 import { assertCertifiedJHistoryIntegrity } from '../jurisdiction/local-history';
 import type { RuntimeAdapterReadQuery } from '../radapter';
-import type { EntityState, Env } from '../types';
+import type { EntityState, RuntimeState } from '../types';
 import type { PersistenceQueryDeps } from './query-deps';
 
 export const createPersistenceEntityQueries = (deps: PersistenceQueryDeps) => {
-  const getPersistedLatestHeight = (env: Env): Promise<number> =>
+  const getPersistedLatestHeight = (env: RuntimeState): Promise<number> =>
     deps.resolvePersistedLatestHeight(env);
 
   const loadEntityStateFromStorageDb = async (
-    env: Env,
+    env: RuntimeState,
     entityId: string,
     height?: number,
   ): Promise<EntityState | null> => {
@@ -38,7 +38,7 @@ export const createPersistenceEntityQueries = (deps: PersistenceQueryDeps) => {
   };
 
   const loadEntityAccountDocFromStorageDb = (
-    env: Env,
+    env: RuntimeState,
     entityId: string,
     counterpartyId: string,
     height?: number,
@@ -53,7 +53,7 @@ export const createPersistenceEntityQueries = (deps: PersistenceQueryDeps) => {
   });
 
   const loadEntityViewPageFromStorageDb = (
-    env: Env,
+    env: RuntimeState,
     entityId: string,
     height: number,
     query?: RuntimeAdapterReadQuery,
@@ -85,7 +85,7 @@ export const createPersistenceEntityQueries = (deps: PersistenceQueryDeps) => {
     });
   };
 
-  const inspectStorageDb = async (env: Env) => {
+  const inspectStorageDb = async (env: RuntimeState) => {
     const current = await inspectStorage({
       env,
       tryOpenDb: (targetEnv) => deps.tryOpenStorageDb(targetEnv, 'current'),
@@ -153,15 +153,15 @@ export const createPersistenceEntityQueries = (deps: PersistenceQueryDeps) => {
     };
   };
 
-  const listPersistedCheckpointHeights = (env: Env): Promise<number[]> =>
+  const listPersistedCheckpointHeights = (env: RuntimeState): Promise<number[]> =>
     deps.resolvePersistedCheckpointHeights(env);
 
-  const readPersistedStorageHead = async (env: Env): Promise<StorageHead | null> => {
+  const readPersistedStorageHead = async (env: RuntimeState): Promise<StorageHead | null> => {
     if (!(await deps.tryOpenFrameDb(env))) return null;
     return readStorageHead(deps.getFrameDb(env));
   };
 
-  const verifyLiveRuntimeStorage = async (env: Env): Promise<{
+  const verifyLiveRuntimeStorage = async (env: RuntimeState): Promise<{
     ok: true;
     runtimeId: string;
     latestHeight: number;

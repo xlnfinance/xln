@@ -32,7 +32,7 @@ import {
   saveEnvToDB,
 } from '../runtime';
 import { deliveryAccepted, deliveryFailure } from '../protocol/payments/delivery-result';
-import type { DeliverableEntityInput, Env, JPrefixAttestation, RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../types';
+import type { DeliverableEntityInput, RuntimeState, JPrefixAttestation, RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../types';
 
 const runtimeId = (byte: string): string => `0x${byte.repeat(20)}`;
 const entityId = (byte: string): string => `0x${byte.repeat(32)}`;
@@ -421,9 +421,9 @@ describe('ordered reliable output lanes', () => {
       timestamp: 1_000,
       runtimeState: {},
       pendingNetworkOutputs: [],
-    } as unknown as Env;
+    } as unknown as RuntimeState;
     const deps = {
-      ensureRuntimeState: (targetEnv: Env) => targetEnv.runtimeState ??= {},
+      ensureRuntimeState: (targetEnv: RuntimeState) => targetEnv.runtimeState ??= {},
     } as RuntimeOutputRoutingDeps;
 
     env.pendingNetworkOutputs = rescheduleDeferredOutputs(
@@ -454,7 +454,7 @@ describe('ordered reliable output lanes', () => {
       runtimeState: {},
       warn: () => {},
       error: () => {},
-    } as unknown as Env;
+    } as unknown as RuntimeState;
 
     dispatchEntityOutputs(
       env,
@@ -494,9 +494,9 @@ describe('ordered reliable output lanes', () => {
       timestamp: 1_000,
       runtimeState: {},
       pendingNetworkOutputs: [],
-    } as unknown as Env;
+    } as unknown as RuntimeState;
     const deps = {
-      ensureRuntimeState: (targetEnv: Env) => targetEnv.runtimeState ??= {},
+      ensureRuntimeState: (targetEnv: RuntimeState) => targetEnv.runtimeState ??= {},
     } as RuntimeOutputRoutingDeps;
 
     env.pendingNetworkOutputs = rescheduleDeferredOutputs(
@@ -526,9 +526,9 @@ describe('ordered reliable output lanes', () => {
       timestamp: 1_000,
       runtimeState: {},
       pendingNetworkOutputs: [],
-    } as unknown as Env;
+    } as unknown as RuntimeState;
     const deps = {
-      ensureRuntimeState: (targetEnv: Env) => targetEnv.runtimeState ??= {},
+      ensureRuntimeState: (targetEnv: RuntimeState) => targetEnv.runtimeState ??= {},
     } as RuntimeOutputRoutingDeps;
 
     env.pendingNetworkOutputs = rescheduleDeferredOutputs(
@@ -572,7 +572,7 @@ describe('ordered reliable output lanes', () => {
       runtimeState: {},
       warn: () => {},
       error: () => {},
-    } as unknown as Env;
+    } as unknown as RuntimeState;
 
     dispatchEntityOutputs(
       env,
@@ -598,9 +598,9 @@ describe('ordered reliable output lanes', () => {
       timestamp: 0,
       runtimeState: {},
       pendingNetworkOutputs: [],
-    } as unknown as Env;
+    } as unknown as RuntimeState;
     const deps = {
-      ensureRuntimeState: (targetEnv: Env) => targetEnv.runtimeState ??= {},
+      ensureRuntimeState: (targetEnv: RuntimeState) => targetEnv.runtimeState ??= {},
     } as RuntimeOutputRoutingDeps;
     let pending: RoutedEntityInput[] = [];
 
@@ -622,9 +622,9 @@ describe('ordered reliable output lanes', () => {
       timestamp: 1_000,
       runtimeState: {},
       pendingNetworkOutputs: [],
-    } as unknown as Env;
+    } as unknown as RuntimeState;
     const deps = {
-      ensureRuntimeState: (targetEnv: Env) => targetEnv.runtimeState ??= {},
+      ensureRuntimeState: (targetEnv: RuntimeState) => targetEnv.runtimeState ??= {},
     } as RuntimeOutputRoutingDeps;
 
     const pending = rescheduleDeferredOutputs(env, [], [lower, higher], [], deps);
@@ -646,7 +646,7 @@ describe('ordered reliable output lanes', () => {
         runtimeState: {},
         warn: () => {},
         error: () => {},
-      } as unknown as Env;
+      } as unknown as RuntimeState;
       const outputs = [createOutput(2), createOutput(1)];
       const deferred = dispatchEntityOutputs(
         env,
@@ -681,7 +681,7 @@ describe('ordered reliable output lanes', () => {
         pendingNetworkOutputs: [],
         warn: () => {},
         error: () => {},
-      } as unknown as Env;
+      } as unknown as RuntimeState;
       const deps = routingDeps(() => transportAvailable
         ? {
             enqueueEntityInputsDelivery: (_runtimeId, output) => {
@@ -727,7 +727,7 @@ describe('ordered reliable output lanes', () => {
       pendingNetworkOutputs: [],
       warn: () => {},
       error: () => {},
-    } as unknown as Env;
+    } as unknown as RuntimeState;
     const deps = routingDeps(() => transportAvailable
       ? {
           enqueueEntityInputsDelivery: (_runtimeId, output) => {
@@ -784,7 +784,7 @@ describe('ordered reliable output lanes', () => {
       pendingNetworkOutputs: [h11],
       warn: () => {},
       error: () => {},
-    } as unknown as Env;
+    } as unknown as RuntimeState;
     expect(applyReliableDeliveryReceipts(env, [receipt])).toEqual({ removed: 1 });
 
     // Entity replay can reproduce an already-ACKed output after the receipt
@@ -830,7 +830,7 @@ describe('ordered reliable output lanes', () => {
         runtimeId: runtimeId('90'),
         runtimeState: {},
         pendingNetworkOutputs,
-      } as unknown as Env;
+      } as unknown as RuntimeState;
       expect(applyReliableDeliveryReceipts(sender, [receipt])).toEqual({ removed: 1 });
       expect(sender.pendingNetworkOutputs).toEqual([]);
     }
@@ -844,7 +844,7 @@ describe('ordered reliable output lanes', () => {
       runtimeState: {},
       warn: () => {},
       error: () => {},
-    } as unknown as Env;
+    } as unknown as RuntimeState;
 
     const deferred = dispatchEntityOutputs(
       env,
@@ -878,7 +878,7 @@ describe('ordered reliable output lanes', () => {
       runtimeState: {},
       warn: () => {},
       error: () => {},
-    } as unknown as Env;
+    } as unknown as RuntimeState;
     const outputs = [
       entityFrameOutput(2, entityA),
       entityFrameOutput(1, entityB),
@@ -917,7 +917,7 @@ describe('ordered reliable output lanes', () => {
       runtimeState: {},
       warn: () => {},
       error: () => {},
-    } as unknown as Env;
+    } as unknown as RuntimeState;
     const ordinary = {
       runtimeId: targetRuntimeId,
       entityId: targetEntityId,
@@ -953,7 +953,7 @@ describe('ordered reliable output lanes', () => {
       runtimeState: {},
       warn: () => {},
       error: () => {},
-    } as unknown as Env;
+    } as unknown as RuntimeState;
     const outputs = [entityFrameOutput(1), accountAckOutput(1)];
 
     const deferred = dispatchEntityOutputs(
@@ -999,7 +999,7 @@ describe('ordered reliable output lanes', () => {
       },
       warn: () => {},
       error: () => {},
-    } as unknown as Env;
+    } as unknown as RuntimeState;
     const attempted: number[] = [];
     const deliver = () => dispatchEntityOutputs(
       env,
@@ -1029,7 +1029,7 @@ describe('ordered reliable output lanes', () => {
       runtimeState: {},
       warn: () => {},
       error: () => {},
-    } as unknown as Env;
+    } as unknown as RuntimeState;
     const output = entityFrameOutput(1);
 
     const deferred = dispatchEntityOutputs(

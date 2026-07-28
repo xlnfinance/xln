@@ -46,7 +46,7 @@ import {
   verifyConsumptionProof,
 } from '../entity/consumption-accumulator';
 import type {
-  AccountMachine,
+  AccountState,
   AccountInput,
   AccountTx,
   CrossJurisdictionSwapRoute,
@@ -55,7 +55,7 @@ import type {
   EntityReplica,
   EntityState,
   EntityTx,
-  Env,
+  RuntimeState,
   JReplica,
   JurisdictionConfig,
 } from '../types';
@@ -122,7 +122,7 @@ const buildUnverifiedBoardResealTx = (
   },
 });
 
-const registerOnly = (env: Env, signerId: string) => {
+const registerOnly = (env: RuntimeState, signerId: string) => {
   clearSignerKeys(env);
   const label = signerLabels[validators.indexOf(signerId)] ?? '4';
   registerSignerKey(env, signerId, deriveSignerKeySync(seed, label));
@@ -206,7 +206,7 @@ const createMultisigAccountState = (
     watchSeed: `0x${'f1'.repeat(32)}`,
     disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
     jNonce: 0,
-  } as AccountMachine;
+  } as AccountState;
   const state = {
     entityId,
     height: 0,
@@ -280,7 +280,7 @@ const installCertifiedOutputTargetAccount = (
   source: ReturnType<typeof createMultisigAccountState>,
   targetState: EntityState,
   targetEntityId: string,
-): AccountMachine => {
+): AccountState => {
   const existing = targetState.accounts.get(source.entityId);
   if (existing) return existing;
   const sourceAccount = source.state.accounts.get(source.counterpartyId);
@@ -1424,7 +1424,7 @@ describe('multisig secondary Hanko production', () => {
 
     const firstHash = digest('e');
     const secondHash = digest('f');
-    const workspace = (account: AccountMachine) => {
+    const workspace = (account: AccountState) => {
       const value = {
       workspaceHash: '',
       ops: [{ type: 'r2r' as const, tokenId: 1, amount: 1n }],
@@ -1445,7 +1445,7 @@ describe('multisig secondary Hanko production', () => {
     const firstPostHash = digest('1');
     const secondPostHash = digest('2');
     const settlementSeal = (
-      account: AccountMachine,
+      account: AccountState,
       settlementHash: string,
       disputeHash: string,
     ): Extract<AccountTx, { type: 'settle_transition' }> => ({

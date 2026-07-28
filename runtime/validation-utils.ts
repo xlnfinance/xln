@@ -18,7 +18,7 @@ import type {
   RoutedEntityInput,
   EntityReplica,
   EntityState,
-  AccountMachine,
+  AccountState,
   AccountFrame,
   EntityLeaderTimeoutVote,
   ProposedEntityFrame,
@@ -884,18 +884,18 @@ const validatePendingAccountResend = (
     throw new FinancialDataCorruptionError(`${context}.pendingAccountInput endpoints must match proofHeader`);
   }
   if (!sameAccountStateDomain(
-    normalizeAccountStateDomain(account['domain'] as AccountMachine['domain']),
-    normalizeAccountStateDomain(input['domain'] as AccountMachine['domain']),
+    normalizeAccountStateDomain(account['domain'] as AccountState['domain']),
+    normalizeAccountStateDomain(input['domain'] as AccountState['domain']),
   )) {
     throw new FinancialDataCorruptionError(`${context}.pendingAccountInput domain must match Account domain`);
   }
 };
 
 /**
- * Validates AccountMachine objects - Bilateral account state machines
+ * Validates AccountState objects - Bilateral account state machines
  * CRITICAL: Account integrity ensures payment routing safety
  */
-export function validateAccountMachine(value: unknown, context = 'AccountMachine'): AccountMachine {
+export function validateAccountMachine(value: unknown, context = 'AccountState'): AccountState {
   const obj = validateObject(value, context);
 
   // CANONICAL REPRESENTATION: Validate leftEntity/rightEntity (not counterpartyEntityId)
@@ -910,7 +910,7 @@ export function validateAccountMachine(value: unknown, context = 'AccountMachine
     throw new FinancialDataCorruptionError(`${context} canonical order violated: leftEntity must be < rightEntity`);
   }
   try {
-    normalizeAccountStateDomain(obj['domain'] as AccountMachine['domain']);
+    normalizeAccountStateDomain(obj['domain'] as AccountState['domain']);
   } catch (error) {
     throw new FinancialDataCorruptionError(`${context}.domain is invalid`, {
       cause: error instanceof Error ? error.message : String(error),
@@ -920,7 +920,7 @@ export function validateAccountMachine(value: unknown, context = 'AccountMachine
   validateString(obj['status'], `${context}.status`);
   validateArray(obj['mempool'], `${context}.mempool`);
   assertAccountMempoolWithinLimit(
-    obj as unknown as Pick<AccountMachine, 'mempool'>,
+    obj as unknown as Pick<AccountState, 'mempool'>,
     `${context}.mempool`,
   );
   validateAccountFrame(obj['currentFrame'], `${context}.currentFrame`);
@@ -983,8 +983,8 @@ export function validateAccountMachine(value: unknown, context = 'AccountMachine
     validateArray(obj['pendingSignatures'], `${context}.pendingSignatures`);
   }
   validateNumber(obj['rollbackCount'], `${context}.rollbackCount`);
-  assertAccountJClaimAccumulatorState(obj['leftPendingJClaims'] as AccountMachine['leftPendingJClaims']);
-  assertAccountJClaimAccumulatorState(obj['rightPendingJClaims'] as AccountMachine['rightPendingJClaims']);
+  assertAccountJClaimAccumulatorState(obj['leftPendingJClaims'] as AccountState['leftPendingJClaims']);
+  assertAccountJClaimAccumulatorState(obj['rightPendingJClaims'] as AccountState['rightPendingJClaims']);
   validateNumber(obj['lastFinalizedJHeight'], `${context}.lastFinalizedJHeight`);
   validateMapInstance(obj['pendingWithdrawals'], `${context}.pendingWithdrawals`);
   validateBigIntMapValues(obj['requestedRebalance'], `${context}.requestedRebalance`);
@@ -1003,7 +1003,7 @@ export function validateAccountMachine(value: unknown, context = 'AccountMachine
     validateDelta(delta, `${context}.deltas[${tokenId}]`);
   }
 
-  return obj as unknown as AccountMachine; // Cast after validation boundary
+  return obj as unknown as AccountState; // Cast after validation boundary
 }
 
 /**

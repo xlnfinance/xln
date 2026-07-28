@@ -13,11 +13,11 @@ import {
   stopRuntimeLoopAndWait,
   waitForRuntimeProcessingIdle,
 } from '../runtime';
-import type { Env } from '../types';
+import type { RuntimeState } from '../types';
 
 describe('runtime lifecycle', () => {
   test('uses one explicit phase as the lifecycle source of truth', () => {
-    const state: NonNullable<Env['runtimeState']> = {
+    const state: NonNullable<RuntimeState['runtimeState']> = {
       lifecyclePhase: 'booting',
       loopActive: false,
       halted: false,
@@ -34,7 +34,7 @@ describe('runtime lifecycle', () => {
   });
 
   test('halted is terminal and cannot self-resurrect', () => {
-    const state: NonNullable<Env['runtimeState']> = { lifecyclePhase: 'halted', halted: true };
+    const state: NonNullable<RuntimeState['runtimeState']> = { lifecyclePhase: 'halted', halted: true };
     expect(() => transitionRuntimeLifecycle(state, 'running')).toThrow(
       /RUNTIME_LIFECYCLE_INVALID_TRANSITION: halted->running/,
     );

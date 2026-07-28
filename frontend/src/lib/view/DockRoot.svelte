@@ -2,7 +2,7 @@
   import { onMount, onDestroy, mount, unmount } from 'svelte';
   import { writable, type Writable } from 'svelte/store';
   import { DockviewComponent } from 'dockview';
-  import type { Env, RuntimeAdapterViewFrame } from '@xln/runtime/xln-api';
+  import type { RuntimeState, RuntimeAdapterViewFrame } from '@xln/runtime/xln-api';
   import type { EnvSnapshot } from '$types';
   import Graph3DPanel from './panels/Graph3DPanel.svelte';
   import ConsolePanel from './panels/ConsolePanel.svelte';
@@ -29,7 +29,7 @@
   import 'dockview/dist/styles/dockview.css';
 
   export let embedMode = false;
-  export let runtimeFrameEnv: Writable<Env | null>;
+  export let runtimeFrameEnv: Writable<RuntimeState | null>;
   export let runtimeFrameHistory: Writable<EnvSnapshot[]>;
   export let runtimeFrameTimeIndex: Writable<number>;
   export let runtimeFrameIsLive: Writable<boolean>;

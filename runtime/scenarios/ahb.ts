@@ -14,7 +14,7 @@
  * Each frame includes Fed-style subtitles explaining what/why/tradfi-parallel
  */
 
-import type { Env, EntityInput } from '../types';
+import type { RuntimeState, EntityInput } from '../types';
 import {
   bindScenarioJReplica,
   ensureJAdapter,
@@ -60,7 +60,7 @@ import {
 // Entities now output jOutputs via process() which auto-queue to J-Machine
 // This prevents duplicate queuing and duplicate execution
 
-export async function ahb(env: Env): Promise<void> {
+export async function ahb(env: RuntimeState): Promise<void> {
   if (env.quietRuntimeLogs === undefined) {
     env.quietRuntimeLogs = true;
   }
@@ -2715,10 +2715,10 @@ if (import.meta.main) {
   console.log(`📊 Total frames: ${env.history?.length || 0}`);
   console.log('🎉 RJEA event consolidation verified - AccountSettled events working!\n');
 
-  // Dump full Env to JSON
+  // Dump full RuntimeState to JSON
   const fs = await import('fs');
 
-  console.log('💾 Dumping full runtime (Env) to JSON...');
+  console.log('💾 Dumping full runtime (RuntimeState) to JSON...');
 
   const seen = new Set<object>();
   const envJson = JSON.stringify(env, function(_key, value) {
@@ -2737,7 +2737,7 @@ if (import.meta.main) {
 
   fs.writeFileSync('/tmp/ahb-runtime.json', envJson);
   const sizeMB = (envJson.length / 1024 / 1024).toFixed(1);
-  console.log(`  ✅ /tmp/ahb-runtime.json (${sizeMB}MB full Env dump)\n`);
+  console.log(`  ✅ /tmp/ahb-runtime.json (${sizeMB}MB full RuntimeState dump)\n`);
 
   process.exit(0);
 }

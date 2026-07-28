@@ -1,4 +1,4 @@
-import type { AccountMachine, EntityReplica, Env, Profile as GossipProfile, RuntimeInput } from '@xln/runtime/xln-api';
+import type { AccountState, EntityReplica, RuntimeState, Profile as GossipProfile, RuntimeInput } from '@xln/runtime/xln-api';
 import { getJurisdictionStackId } from '@xln/runtime/xln-api';
 import {
   buildOpenAccountTx,
@@ -136,7 +136,7 @@ export type HubDiscoveryProjection = {
 export const HUB_OPEN_ACCOUNT_REQUIRES_ADMIN =
   'Account opening requires admin runtime access.';
 
-type RuntimeProfileSourceEnv = Env & {
+type RuntimeProfileSourceEnv = RuntimeState & {
   gossip?: {
     getProfiles?: () => unknown[];
   };
@@ -269,7 +269,7 @@ export function resolveHubDiscoveryEntityJurisdictionKey(
     || hubDiscoveryJurisdictionKey(replica?.position?.jurisdiction);
 }
 
-function getAccountCounterpartyId(account: AccountMachine, ownerEntityId: string): string {
+function getAccountCounterpartyId(account: AccountState, ownerEntityId: string): string {
   const owner = normalizeHubEntityId(ownerEntityId);
   const left = normalizeHubEntityId(account.leftEntity);
   const right = normalizeHubEntityId(account.rightEntity);
@@ -282,16 +282,16 @@ function findAccountForCounterparty(
   ownerReplica: EntityReplica | null,
   ownerEntityId: string,
   counterpartyEntityId: string,
-): AccountMachine | null {
+): AccountState | null {
   const accounts = ownerReplica?.state?.accounts;
   const target = normalizeHubEntityId(counterpartyEntityId);
   if (!target || !(accounts instanceof Map)) return null;
   const direct = accounts.get(target) ?? accounts.get(counterpartyEntityId);
-  if (direct) return direct as AccountMachine;
+  if (direct) return direct as AccountState;
   for (const [key, account] of accounts.entries()) {
-    if (normalizeHubEntityId(key) === target) return account as AccountMachine;
-    if (getAccountCounterpartyId(account as AccountMachine, ownerEntityId) === target) {
-      return account as AccountMachine;
+    if (normalizeHubEntityId(key) === target) return account as AccountState;
+    if (getAccountCounterpartyId(account as AccountState, ownerEntityId) === target) {
+      return account as AccountState;
     }
   }
   return null;
@@ -319,12 +319,12 @@ function buildAccountConnectionStates(
   const owner = normalizeHubEntityId(ownerEntityId);
   const states = new Map<string, HubDiscoveryConnectionState>();
   for (const [key, account] of accounts.entries()) {
-    const counterpartyId = getAccountCounterpartyId(account as AccountMachine, ownerEntityId)
+    const counterpartyId = getAccountCounterpartyId(account as AccountState, ownerEntityId)
       || normalizeHubEntityId(key);
     if (!counterpartyId || counterpartyId === owner) continue;
     states.set(counterpartyId, {
-      isConnected: isCommittedAccount(account as AccountMachine),
-      isOpening: isOpeningAccount(account as AccountMachine),
+      isConnected: isCommittedAccount(account as AccountState),
+      isOpening: isOpeningAccount(account as AccountState),
     });
   }
   return states;
@@ -486,7 +486,7 @@ export function getHubOpenAccountPermissionError(input: HubOpenAccountPermission
   return canSubmitHubOpenAccount(input) ? null : HUB_OPEN_ACCOUNT_REQUIRES_ADMIN;
 }
 
-function hasLiveRuntimeProfileSource(env: Env | null | undefined): boolean {
+function hasLiveRuntimeProfileSource(env: RuntimeState | null | undefined): boolean {
   const runtimeEnv = env as RuntimeProfileSourceEnv | null | undefined;
   return Boolean(
     runtimeEnv?.runtimeState?.p2p?.ensureProfiles
@@ -495,7 +495,7 @@ function hasLiveRuntimeProfileSource(env: Env | null | undefined): boolean {
 }
 
 export async function ensureHubOpenAccountProfileReady(input: {
-  env: Env | null | undefined;
+  env: RuntimeState | null | undefined;
   sourceEntityId: string;
   hub: HubOpenAccountProfile;
   seedProfiles?: (hubId: string) => Promise<HubProfileSeedResult>;

@@ -8,12 +8,12 @@ import {
   getJEventJurisdictionRef,
 } from '../../jurisdiction/event-observation';
 import type {
-  AccountMachine,
+  AccountState,
   ConsensusConfig,
   CrossJurisdictionSwapRoute,
   EntityReplica,
   EntityState,
-  Env,
+  RuntimeState,
   DisputeFinalizationEvidence,
   JurisdictionConfig,
   JurisdictionEvent,
@@ -37,7 +37,7 @@ export const makeJurisdiction = (name: string, chainId: number, depByte: string,
 
 export const jref = (jurisdiction: JurisdictionConfig): string => getJurisdictionStackId(jurisdiction);
 
-export const registerTestSigner = (env: Env, seed: string, slot = '1'): string => {
+export const registerTestSigner = (env: RuntimeState, seed: string, slot = '1'): string => {
   env.runtimeSeed = seed;
   const signerId = deriveSignerAddressSync(seed, slot);
   registerSignerKey(seed, signerId, deriveSignerKeySync(seed, slot));
@@ -45,7 +45,7 @@ export const registerTestSigner = (env: Env, seed: string, slot = '1'): string =
 };
 
 export const prepareJEventInput = (
-  env: Env,
+  env: RuntimeState,
   entityId: string,
   signerId: string,
   input: {
@@ -87,7 +87,7 @@ export const makeAccount = (
     chainId: 31_337,
     depositoryAddress: addr('dd'),
   },
-): AccountMachine => {
+): AccountState => {
   const [leftEntity, rightEntity] = selfId.toLowerCase() < counterpartyId.toLowerCase()
     ? [selfId, counterpartyId]
     : [counterpartyId, selfId];
@@ -147,7 +147,7 @@ export const makeState = (
   jurisdiction: JurisdictionConfig,
   counterpartyId?: string,
 ): EntityState => {
-  const accounts = new Map<string, AccountMachine>();
+  const accounts = new Map<string, AccountState>();
   if (counterpartyId) {
     const account = makeAccount(entityId, counterpartyId, jurisdiction);
     accounts.set(counterpartyId, account);
@@ -175,7 +175,7 @@ export const makeState = (
   };
 };
 
-export const addReplica = (env: Env, state: EntityState, signerId: string, isProposer = true): void => {
+export const addReplica = (env: RuntimeState, state: EntityState, signerId: string, isProposer = true): void => {
   env.eReplicas.set(`${state.entityId}:${signerId}`, {
     entityId: state.entityId,
     signerId,
@@ -185,7 +185,7 @@ export const addReplica = (env: Env, state: EntityState, signerId: string, isPro
   } as EntityReplica);
 };
 
-export const installJurisdictions = (env: Env, ...jurisdictions: JurisdictionConfig[]): void => {
+export const installJurisdictions = (env: RuntimeState, ...jurisdictions: JurisdictionConfig[]): void => {
   for (const jurisdiction of jurisdictions) {
     env.jReplicas.set(jurisdiction.name, {
       name: jurisdiction.name,

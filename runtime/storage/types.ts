@@ -3,7 +3,7 @@ import type { CrontabState } from '../entity/scheduler-types';
 import type { JBatchState } from '../jurisdiction/batch';
 import type {
   AccountInput,
-  AccountMachine,
+  AccountState,
   AccountStatus,
   ConsensusConfig,
   Delta,
@@ -143,57 +143,57 @@ export type StorageEntityCoreDoc = {
 export type StorageAccountDoc = {
   leftEntity: string;
   rightEntity: string;
-  domain: AccountMachine['domain'];
+  domain: AccountState['domain'];
   watchSeed: string;
   status: AccountStatus;
-  mempool: AccountMachine['mempool'];
-  currentFrame: AccountMachine['currentFrame'];
+  mempool: AccountState['mempool'];
+  currentFrame: AccountState['currentFrame'];
   deltas: Map<number, Delta>;
   locks: Map<string, HtlcLock>;
   swapOffers: Map<string, SwapOffer>;
-  pulls?: AccountMachine['pulls'];
-  subcontracts?: AccountMachine['subcontracts'];
-  lendingIntents?: AccountMachine['lendingIntents'];
-  globalCreditLimits: AccountMachine['globalCreditLimits'];
+  pulls?: AccountState['pulls'];
+  subcontracts?: AccountState['subcontracts'];
+  lendingIntents?: AccountState['lendingIntents'];
+  globalCreditLimits: AccountState['globalCreditLimits'];
   currentHeight: number;
-  pendingFrame?: AccountMachine['pendingFrame'];
+  pendingFrame?: AccountState['pendingFrame'];
   pendingSignatures: string[];
-  pendingAccountInput?: AccountMachine['pendingAccountInput'];
-  pendingAccountInputSignerId?: AccountMachine['pendingAccountInputSignerId'];
-  lastOutboundFrameAck?: AccountMachine['lastOutboundFrameAck'];
-  pendingForwards?: AccountMachine['pendingForwards'];
-  hankoSignature?: AccountMachine['hankoSignature'];
+  pendingAccountInput?: AccountState['pendingAccountInput'];
+  pendingAccountInputSignerId?: AccountState['pendingAccountInputSignerId'];
+  lastOutboundFrameAck?: AccountState['lastOutboundFrameAck'];
+  pendingForwards?: AccountState['pendingForwards'];
+  hankoSignature?: AccountState['hankoSignature'];
   rollbackCount: number;
   lastRollbackFrameHash?: string;
-  leftPendingJClaims: AccountMachine['leftPendingJClaims'];
-  rightPendingJClaims: AccountMachine['rightPendingJClaims'];
+  leftPendingJClaims: AccountState['leftPendingJClaims'];
+  rightPendingJClaims: AccountState['rightPendingJClaims'];
   lastFinalizedJHeight: number;
-  proofHeader: AccountMachine['proofHeader'];
-  proofBody: AccountMachine['proofBody'];
-  abiProofBody?: AccountMachine['abiProofBody'];
-  disputeConfig: AccountMachine['disputeConfig'];
-  currentFrameHanko?: AccountMachine['currentFrameHanko'];
-  counterpartyFrameHanko?: AccountMachine['counterpartyFrameHanko'];
-  boardResealMigration?: AccountMachine['boardResealMigration'];
-  counterpartyBoardReseal?: AccountMachine['counterpartyBoardReseal'];
-  currentDisputeProofHanko?: AccountMachine['currentDisputeProofHanko'];
+  proofHeader: AccountState['proofHeader'];
+  proofBody: AccountState['proofBody'];
+  abiProofBody?: AccountState['abiProofBody'];
+  disputeConfig: AccountState['disputeConfig'];
+  currentFrameHanko?: AccountState['currentFrameHanko'];
+  counterpartyFrameHanko?: AccountState['counterpartyFrameHanko'];
+  boardResealMigration?: AccountState['boardResealMigration'];
+  counterpartyBoardReseal?: AccountState['counterpartyBoardReseal'];
+  currentDisputeProofHanko?: AccountState['currentDisputeProofHanko'];
   currentDisputeProofNonce?: number;
   currentDisputeProofBodyHash?: string;
   currentDisputeHash?: string;
-  counterpartyDisputeProofHanko?: AccountMachine['counterpartyDisputeProofHanko'];
+  counterpartyDisputeProofHanko?: AccountState['counterpartyDisputeProofHanko'];
   counterpartyDisputeProofNonce?: number;
   counterpartyDisputeProofBodyHash?: string;
   counterpartyDisputeHash?: string;
-  counterpartySettlementHanko?: AccountMachine['counterpartySettlementHanko'];
-  disputeProofNoncesByHash?: AccountMachine['disputeProofNoncesByHash'];
-  disputeProofBodiesByHash?: AccountMachine['disputeProofBodiesByHash'];
-  disputeArgumentSnapshotsByHash?: AccountMachine['disputeArgumentSnapshotsByHash'];
-  disputePrepare?: AccountMachine['disputePrepare'];
+  counterpartySettlementHanko?: AccountState['counterpartySettlementHanko'];
+  disputeProofNoncesByHash?: AccountState['disputeProofNoncesByHash'];
+  disputeProofBodiesByHash?: AccountState['disputeProofBodiesByHash'];
+  disputeArgumentSnapshotsByHash?: AccountState['disputeArgumentSnapshotsByHash'];
+  disputePrepare?: AccountState['disputePrepare'];
   jNonce: number;
-  settlementWorkspace?: AccountMachine['settlementWorkspace'];
-  activeDispute?: AccountMachine['activeDispute'];
-  swapOrderHistory?: AccountMachine['swapOrderHistory'];
-  swapClosedOrders?: AccountMachine['swapClosedOrders'];
+  settlementWorkspace?: AccountState['settlementWorkspace'];
+  activeDispute?: AccountState['activeDispute'];
+  swapOrderHistory?: AccountState['swapOrderHistory'];
+  swapClosedOrders?: AccountState['swapClosedOrders'];
   pendingWithdrawals: Map<string, {
     requestId: string;
     tokenId: number;
@@ -205,8 +205,8 @@ export type StorageAccountDoc = {
   }>;
   requestedRebalance: Map<number, bigint>;
   requestedRebalanceFeeState: Map<number, RebalanceRequestFeeState>;
-  rebalanceFeePolicies?: AccountMachine['rebalanceFeePolicies'];
-  shadow: AccountMachine['shadow'];
+  rebalanceFeePolicies?: AccountState['rebalanceFeePolicies'];
+  shadow: AccountState['shadow'];
 };
 
 export type StorageDoc =
@@ -363,7 +363,7 @@ type EntityPersistenceSplitKeys =
 type ReplicaPersistenceSplitKeys = never;
 
 export type AccountPersistenceCoverage = AssertNoUnclassifiedPersistenceKeys<
-  Exclude<keyof AccountMachine, keyof StorageAccountDoc | AccountPersistenceCacheKeys>
+  Exclude<keyof AccountState, keyof StorageAccountDoc | AccountPersistenceCacheKeys>
 >;
 export type EntityPersistenceCoverage = AssertNoUnclassifiedPersistenceKeys<
   Exclude<keyof EntityState, keyof StorageEntityCoreDoc | EntityPersistenceSplitKeys>

@@ -107,7 +107,7 @@ import {
   submitCrossJurisdictionIntent,
   validateRuntimeInputAdmission,
 } from '../runtime.ts';
-import type { EntityInput, Env, JReplica } from '../types';
+import type { EntityInput, RuntimeState, JReplica } from '../types';
 import {
   BOOTSTRAP_POLL_MS,
   DEFAULT_ACCOUNT_TOKEN_IDS,
@@ -315,7 +315,7 @@ const normalizeJurisdictionName = (value: unknown): string =>
   normalizeJurisdictionDisplayName(value).trim().toLowerCase();
 
 const resolveJReplicaForJurisdictionName = (
-  env: Env,
+  env: RuntimeState,
   jurisdictionName: string,
 ): { name: string; replica: JReplica } | null => {
   return resolveJReplicaForJurisdictionIdentity(env, { name: jurisdictionName });
@@ -328,7 +328,7 @@ const sameJurisdictionRef = (left: unknown, right: unknown): boolean => {
 };
 
 const resolveJReplicaForJurisdictionIdentity = (
-  env: Env,
+  env: RuntimeState,
   jurisdiction: unknown,
 ): { name: string; replica: JReplica } | null => {
   const explicitRef = isJurisdictionStackRef(jurisdiction) ? String(jurisdiction).trim().toLowerCase() : '';
@@ -351,7 +351,7 @@ const resolveJReplicaForJurisdictionIdentity = (
   return null;
 };
 
-const hasLiveJAdapterForJurisdiction = (env: Env, jurisdictionName: string): boolean =>
+const hasLiveJAdapterForJurisdiction = (env: RuntimeState, jurisdictionName: string): boolean =>
   Boolean(resolveJReplicaForJurisdictionName(env, jurisdictionName)?.replica?.jadapter);
 
 type JurisdictionImportDiagnostics = {
@@ -575,7 +575,7 @@ const buildLocalHubSignerLabels = (): string[] => {
   return labels;
 };
 
-const configureHubRuntimeLogging = (env: Env): void => {
+const configureHubRuntimeLogging = (env: RuntimeState): void => {
   if (envFlagEnabled(process.env['XLN_HUB_VERBOSE_RUNTIME_LOGS'])) return;
   env.quietRuntimeLogs = true;
 };
@@ -592,7 +592,7 @@ const resolveOperatorAppUrl = (): string => {
   return 'http://localhost:8080/app';
 };
 
-const buildRuntimeAdminUrl = (env: Env): string | null => {
+const buildRuntimeAdminUrl = (env: RuntimeState): string | null => {
   const seed = resolveRuntimeAdapterAuthSeed(env);
   if (!seed) return null;
   const runtimeAdapterUrl = new URL(directWsUrl);
@@ -769,7 +769,7 @@ const writeJurisdictionAddresses = async (jadapter: JAdapter, rpcUrl: string): P
   resetMeshJurisdictionsCache();
 };
 
-const syncEnvJurisdictionReplica = (env: Env, jadapter: JAdapter, rpcUrl: string): void => {
+const syncEnvJurisdictionReplica = (env: RuntimeState, jadapter: JAdapter, rpcUrl: string): void => {
   const activeName = env.activeJurisdiction || Array.from(env.jReplicas?.keys?.() || [])[0];
   if (!activeName) return;
   const replica = env.jReplicas?.get(activeName);
@@ -788,7 +788,7 @@ const syncEnvJurisdictionReplica = (env: Env, jadapter: JAdapter, rpcUrl: string
   replica.jadapter = jadapter;
 };
 
-const buildRuntimeJurisdictionsPayload = (env: Env): string | null => {
+const buildRuntimeJurisdictionsPayload = (env: RuntimeState): string | null => {
   const activeName = env.activeJurisdiction || Array.from(env.jReplicas?.keys?.() || [])[0];
   if (!activeName) return null;
   const replica = env.jReplicas?.get(activeName) as
@@ -855,7 +855,7 @@ const buildRuntimeJurisdictionsPayload = (env: Env): string | null => {
   });
 };
 
-const ensureRpcStackReady = async (env: Env, jadapter: JAdapter): Promise<void> => {
+const ensureRpcStackReady = async (env: RuntimeState, jadapter: JAdapter): Promise<void> => {
   if (jadapter.mode === 'browservm') return;
   const hasAddresses = Boolean(
     jadapter.addresses?.account &&
@@ -971,7 +971,7 @@ const waitForTokenCatalog = async (jadapter: JAdapter, rounds = 80): Promise<JTo
   throw new Error(`TOKEN_CATALOG_INCOMPLETE required=${HUB_REQUIRED_TOKEN_COUNT}`);
 };
 
-const ensureOrderbook = async (env: Env, entityId: string, signerId: string): Promise<void> => {
+const ensureOrderbook = async (env: RuntimeState, entityId: string, signerId: string): Promise<void> => {
   const replica = getEntityReplicaById(env, entityId);
   if (replica?.state?.orderbookExt) return;
 
@@ -1005,7 +1005,7 @@ const tokenCatalogsByEntityId = new Map<string, JTokenInfo[]>();
 
 const normalizeEntityId = (entityId: string): string => String(entityId || '').trim().toLowerCase();
 
-const requireJAdapterForEntity = (env: Env, entityId: string, purpose: string): JAdapter => {
+const requireJAdapterForEntity = (env: RuntimeState, entityId: string, purpose: string): JAdapter => {
   const adapter = getEntityJAdapter(env, entityId);
   if (!adapter) {
     throw new Error(`${purpose}_JADAPTER_MISSING: entity=${entityId}`);
@@ -1014,7 +1014,7 @@ const requireJAdapterForEntity = (env: Env, entityId: string, purpose: string): 
 };
 
 const requireJAdapterForDebugReserve = (
-  env: Env,
+  env: RuntimeState,
   entityId: string,
   jurisdictionRef: string,
 ): JAdapter => {
@@ -1045,7 +1045,7 @@ const requireJAdapterForDebugReserve = (
   return activeAdapter;
 };
 
-const getReserveHealth = (env: Env, entityId: string, tokenCatalog: JTokenInfo[]): LocalHealthResponse['bootstrapReserves'] => {
+const getReserveHealth = (env: RuntimeState, entityId: string, tokenCatalog: JTokenInfo[]): LocalHealthResponse['bootstrapReserves'] => {
   const replica = getEntityReplicaById(env, entityId);
   const tokens = tokenCatalogForHubJurisdiction(tokenCatalog, {
     jurisdictionName: getEntityJurisdictionName(env, entityId),
@@ -1073,7 +1073,7 @@ const getReserveHealth = (env: Env, entityId: string, tokenCatalog: JTokenInfo[]
 };
 
 const refreshReserveStateFromWatcher = async (
-  env: Env,
+  env: RuntimeState,
   entityId: string,
   tokenCatalog: JTokenInfo[],
 ): Promise<LocalHealthResponse['bootstrapReserves']> => {
@@ -1090,7 +1090,7 @@ const refreshReserveStateFromWatcher = async (
 };
 
 const ensureBootstrapReserves = async (
-  env: Env,
+  env: RuntimeState,
   entityId: string,
   tokenCatalog: JTokenInfo[],
   reportProgress: (step: string) => void,
@@ -1157,7 +1157,7 @@ const ensureBootstrapReserves = async (
 };
 
 const ensurePeerBootstrapReserves = async (
-  env: Env,
+  env: RuntimeState,
   peerProfiles: VisibleHubProfile[],
   tokenCatalog: JTokenInfo[],
   reportProgress: (step: string) => void,
@@ -1224,20 +1224,20 @@ const ensurePeerBootstrapReserves = async (
   }
 };
 
-const getEntityJurisdictionName = (env: Env, entityId: string | null): string => {
+const getEntityJurisdictionName = (env: RuntimeState, entityId: string | null): string => {
   if (!entityId) return '';
   const replica = getEntityReplicaById(env, entityId);
   return normalizeJurisdictionDisplayName(replica?.state?.config?.jurisdiction?.name || '');
 };
 
-const getEntityJurisdiction = (env: Env, entityId: string | null): unknown | null => {
+const getEntityJurisdiction = (env: RuntimeState, entityId: string | null): unknown | null => {
   if (!entityId) return null;
   const replica = getEntityReplicaById(env, entityId);
   return replica?.state?.config?.jurisdiction ?? null;
 };
 
 const resolveEntityTokenCatalog = async (
-  env: Env,
+  env: RuntimeState,
   entityId: string,
 ): Promise<JTokenInfo[]> => {
   const normalizedEntityId = normalizeEntityId(entityId);
@@ -1270,7 +1270,7 @@ const buildAggregateReserveHealth = (
 });
 
 const buildHubBootstrapReserveHealth = (
-  env: Env,
+  env: RuntimeState,
   primaryEntityId: string | null,
   fallbackCatalog: JTokenInfo[],
   hubEntities: HubBootstrapEntry[] = [],
@@ -1306,7 +1306,7 @@ const buildHubBootstrapReserveHealth = (
 };
 
 const ensureHubBootstrapReserves = async (
-  env: Env,
+  env: RuntimeState,
   hubEntities: HubBootstrapEntry[],
   reportProgress: (step: string) => void,
 ): Promise<BootstrapReserveHealth> => {
@@ -1338,7 +1338,7 @@ const ensureHubBootstrapReserves = async (
   return buildAggregateReserveHealth(primaryHealth, entities);
 };
 
-const readVisibleHubProfiles = (env: Env, jurisdiction: unknown): VisibleHubProfile[] => {
+const readVisibleHubProfiles = (env: RuntimeState, jurisdiction: unknown): VisibleHubProfile[] => {
   const profiles = env.gossip?.getProfiles?.() || [];
   return profiles
     .filter(profile => profile.metadata?.isHub === true)
@@ -1371,24 +1371,24 @@ const readVisibleHubProfiles = (env: Env, jurisdiction: unknown): VisibleHubProf
     );
 };
 
-const openDirectRuntimeIds = (env: Env): Set<string> => new Set(
+const openDirectRuntimeIds = (env: RuntimeState): Set<string> => new Set(
   (getP2PState(env).directPeers || [])
     .filter(peer => peer.open === true)
     .map(peer => normalizeRuntimeId(peer.runtimeId || ''))
     .filter(runtimeId => runtimeId.length > 0),
 );
 
-const directRuntimePeersReady = (env: Env, peers: Array<{ runtimeId: string }>): boolean => {
+const directRuntimePeersReady = (env: RuntimeState, peers: Array<{ runtimeId: string }>): boolean => {
   if (peers.length === 0) return true;
   const openRuntimeIds = openDirectRuntimeIds(env);
   return peers.every(peer => openRuntimeIds.has(peer.runtimeId));
 };
 
-const directHubPeersReady = (env: Env, peers: VisibleHubProfile[]): boolean => directRuntimePeersReady(env, peers);
+const directHubPeersReady = (env: RuntimeState, peers: VisibleHubProfile[]): boolean => directRuntimePeersReady(env, peers);
 
 const visibleDirectSupportPeers = (
   identities: SupportPeerIdentity[],
-  profiles: ReturnType<NonNullable<Env['gossip']>['getProfiles']>,
+  profiles: ReturnType<NonNullable<RuntimeState['gossip']>['getProfiles']>,
   selfEntityId: string,
   jurisdiction: unknown,
 ): VisibleSupportPeer[] => {
@@ -1410,7 +1410,7 @@ const visibleDirectSupportPeers = (
     .filter((peer): peer is VisibleSupportPeer => peer !== null);
 };
 
-const buildPairHealth = (env: Env, selfEntityId: string, peers: Array<{ name: string; entityId: string }>): HubPairHealth[] => {
+const buildPairHealth = (env: RuntimeState, selfEntityId: string, peers: Array<{ name: string; entityId: string }>): HubPairHealth[] => {
   return peers.map(peer => {
     const account = getAccountMachine(env, selfEntityId, peer.entityId);
     const grantedByMe = account ? getCreditGrantedByEntity(account, selfEntityId, HUB_MESH_TOKEN_ID) : 0n;
@@ -1430,7 +1430,7 @@ const buildPairHealth = (env: Env, selfEntityId: string, peers: Array<{ name: st
 };
 
 const buildLocalHealth = (
-  env: Env,
+  env: RuntimeState,
   entityId: string | null,
   tokenCatalog: JTokenInfo[],
   jadapter: JAdapter | null,
@@ -1515,7 +1515,7 @@ const run = async (): Promise<void> => {
   }
   const runtimeIngressReceipts = createRuntimeIngressReceiptStore();
   const faucetRelayStore = createRelayStore(`${resolvedArgs.name}-faucet`);
-  const currentRuntimeHeight = (targetEnv: Env | null): number =>
+  const currentRuntimeHeight = (targetEnv: RuntimeState | null): number =>
     Math.max(0, Math.floor(Number(targetEnv?.height ?? 0)));
   const runtimeInputStatusUrl = (id: string): string =>
     `/api/control/runtime-input/${encodeURIComponent(id)}/status`;

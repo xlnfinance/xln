@@ -1,4 +1,4 @@
-import type { Env, RuntimeInput } from '../types';
+import type { RuntimeState, RuntimeInput } from '../types';
 import { serializeTaggedJson } from '../protocol/serialization';
 import { getControlBodyErrorStatus } from './auth';
 import type { createRuntimeIngressReceiptStore } from './ingress-receipts';
@@ -7,17 +7,17 @@ import type { enqueueRuntimeInput } from '../runtime';
 
 type RuntimeInputControlDeps = {
   enqueueRuntimeInput: typeof enqueueRuntimeInput;
-  validateRuntimeInputAdmission(env: Env, runtimeInput: RuntimeInput): void;
+  validateRuntimeInputAdmission(env: RuntimeState, runtimeInput: RuntimeInput): void;
   parseTaggedControlBody: typeof parseTaggedControlBody;
   receipts: ReturnType<typeof createRuntimeIngressReceiptStore>;
-  getCurrentRuntimeHeight(env: Env | null): number;
+  getCurrentRuntimeHeight(env: RuntimeState | null): number;
   buildStatusUrl(id: string): string;
 };
 
 export const handleRuntimeInputControl = async (
   req: Request,
   headers: HeadersInit,
-  env: Env | null,
+  env: RuntimeState | null,
   deps: RuntimeInputControlDeps,
 ): Promise<Response> => {
   if (!env) {
@@ -75,7 +75,7 @@ export const handleRuntimeInputControl = async (
 export const handleRuntimeInputStatus = (
   receiptId: string,
   headers: HeadersInit,
-  env: Env | null,
+  env: RuntimeState | null,
   deps: Pick<RuntimeInputControlDeps, 'receipts' | 'getCurrentRuntimeHeight'>,
 ): Response => {
   const receipt = deps.receipts.get(receiptId);

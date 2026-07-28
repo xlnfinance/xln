@@ -11,7 +11,7 @@ import {
   computeAccountStateRootCold,
 } from '../account/state-root';
 import { cloneAccountMachine, cloneEntityState } from '../state-helpers';
-import type { AccountMachine, EntityState, SwapOffer } from '../types';
+import type { AccountState, EntityState, SwapOffer } from '../types';
 import { createDefaultDelta } from '../validation-utils';
 
 const LEFT = `0x${'11'.repeat(32)}`;
@@ -29,7 +29,7 @@ const offer = (index: number): SwapOffer => ({
   createdHeight: index + 1,
 });
 
-const account = (offerCount: number): AccountMachine => ({
+const account = (offerCount: number): AccountState => ({
   leftEntity: LEFT,
   rightEntity: RIGHT,
   domain: { chainId: 31337, depositoryAddress: `0x${'33'.repeat(20)}` },

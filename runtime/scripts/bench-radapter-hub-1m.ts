@@ -54,7 +54,7 @@ import type {
   StorageMerkleLeafDoc,
   StorageMerkleRootDoc,
 } from '../storage/types';
-import type { AccountMachine, EntityReplica, EntityState, Env, RuntimeInput } from '../types';
+import type { AccountState, EntityReplica, EntityState, RuntimeState, RuntimeInput } from '../types';
 
 type Cli = {
   accounts: number;
@@ -225,7 +225,7 @@ const randomEntityId = (seed: string, index: number): string =>
 const hubEntityId = (seed: string): string =>
   `0x${createHash('sha256').update(seed).update(':hub').digest('hex')}`;
 
-const makeAccount = (firstEntity: string, secondEntity: string, height: number, timestamp: number): AccountMachine => {
+const makeAccount = (firstEntity: string, secondEntity: string, height: number, timestamp: number): AccountState => {
   if (firstEntity === secondEntity) throw new Error(`BENCH_SELF_ACCOUNT_FORBIDDEN:${firstEntity}`);
   const [leftEntity, rightEntity] = firstEntity < secondEntity
     ? [firstEntity, secondEntity]
@@ -323,7 +323,7 @@ const seedBooks = (state: EntityState, count: number): void => {
   });
 };
 
-const makeEnv = (seed: string, entityId: string, state: EntityState): Env => {
+const makeEnv = (seed: string, entityId: string, state: EntityState): RuntimeState => {
   const runtimeId = deriveRuntimeIdFromSeed(seed);
   if (!runtimeId) throw new Error('BENCH_RUNTIME_ID_DERIVATION_FAILED');
   const env = {
@@ -341,7 +341,7 @@ const makeEnv = (seed: string, entityId: string, state: EntityState): Env => {
       } as EntityReplica],
     ]),
     runtimeState: {},
-  } as Env;
+  } as RuntimeState;
   // This benchmark owns its command consumer below; the synthetic Runtime is
   // fully booted once that consumer exists. Keep the production readiness
   // fence intact instead of teaching the adapter to accept commands in booting.
@@ -585,7 +585,7 @@ const seedHub = async (
 const touchAccounts = async (
   cli: Cli,
   db: RuntimeDbLike,
-  env: Env,
+  env: RuntimeState,
   entityHashDocsRef: { current: Map<string, StorageEntityHashDoc> },
   entityId: string,
   startIndex: number,
@@ -619,7 +619,7 @@ const touchAccounts = async (
 const insertNewAccountsAfterRead = async (
   cli: Cli,
   db: RuntimeDbLike,
-  env: Env,
+  env: RuntimeState,
   entityHashDocsRef: { current: Map<string, StorageEntityHashDoc> },
   entityId: string,
   startIndex: number,
@@ -672,7 +672,7 @@ const runSnapshotRotationProbe = async (
   trace: Trace,
   db: RuntimeDbLike,
   dbPath: string,
-  env: Env,
+  env: RuntimeState,
 ): Promise<RotationProbeResult | null> => {
   if (!cli.rotationProbe) return null;
   const historyPath = `${dbPath}-rotation-frames`;
@@ -847,7 +847,7 @@ async function main() {
 
     const readHead = async (): Promise<StorageHead | null> => readStorageHead(db);
     const loadEntityViewPage = async (
-      targetEnv: Env,
+      targetEnv: RuntimeState,
       targetEntityId: string,
       height: number,
       query?: RuntimeAdapterReadQuery,

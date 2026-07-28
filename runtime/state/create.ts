@@ -8,14 +8,14 @@ import { ensureRuntimeState } from '../runtime/runtime-state';
 import { createGossipLayer, type Profile } from '../networking/gossip';
 import { buildLocalEntityProfile } from '../networking/gossip-helper';
 import { deriveRuntimeIdFromSeed, normalizeDbNamespace } from '../storage/runtime-dbs';
-import type { Env } from '../types';
+import type { RuntimeState } from '../types';
 
 const runtimeLog = createStructuredLogger('runtime');
 
 export type RuntimeStateCreateDeps = {
-  ensureRuntimeConfig(env: Env): NonNullable<Env['runtimeConfig']>;
+  ensureRuntimeConfig(env: RuntimeState): NonNullable<RuntimeState['runtimeConfig']>;
   infraGossipDbAccess: Parameters<typeof persistGossipProfileToInfraDb>[1];
-  trackInfraDbWrite(env: Env, promise: Promise<void>): void;
+  trackInfraDbWrite(env: RuntimeState, promise: Promise<void>): void;
 };
 
 export const createRuntimeStateApi = (deps: RuntimeStateCreateDeps) => {
@@ -30,7 +30,7 @@ export const createRuntimeStateApi = (deps: RuntimeStateCreateDeps) => {
     }
   };
 
-  const createEmptyEnv = (seed?: Uint8Array | string | null): Env => {
+  const createEmptyEnv = (seed?: Uint8Array | string | null): RuntimeState => {
     const normalizedSeed = Array.isArray(seed) ? new Uint8Array(seed) : seed;
     const seedText =
       normalizedSeed !== undefined && normalizedSeed !== null
@@ -42,7 +42,7 @@ export const createRuntimeStateApi = (deps: RuntimeStateCreateDeps) => {
     const resolvedRuntimeId = derivedRuntimeId?.toLowerCase() ?? null;
     const dbNamespace = resolvedRuntimeId ? normalizeDbNamespace(resolvedRuntimeId) : undefined;
 
-    let env!: Env;
+    let env!: RuntimeState;
     const gossip = createGossipLayer({
       onAnnounce: profile => {
         if (!env || env.runtimeState?.infraDbClosing) return;

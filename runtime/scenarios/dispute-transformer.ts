@@ -6,7 +6,7 @@
 
 import { ethers } from 'ethers';
 
-import type { AccountFrame, AccountInput, AccountMachine, EntityTx, Env } from '../types';
+import type { AccountFrame, AccountInput, AccountState, EntityTx, RuntimeState } from '../types';
 import type { JAdapter } from '../jadapter/types';
 import { deriveDisputeTokenFinalization } from '../protocol/dispute/finalization';
 import { generateLockId, hashHtlcSecret } from '../protocol/htlc/utils';
@@ -42,7 +42,7 @@ const requireRegistered = (value: Registered | undefined, name: string): Registe
 const frameTxTypes = (frame: AccountFrame | undefined): string[] =>
   frame?.accountTxs.map((tx) => tx.type) ?? [];
 
-const accountEvidenceSummary = (account: AccountMachine | undefined) => ({
+const accountEvidenceSummary = (account: AccountState | undefined) => ({
   status: account?.status,
   pendingFrameTxs: frameTxTypes(account?.pendingFrame),
   mempool: account?.mempool,
@@ -59,7 +59,7 @@ const findAccountAck = (txs: readonly EntityTx[] | undefined): AccountAckInput |
   return undefined;
 };
 
-const captureQueuedAck = (env: Env, toEntityId: string): AccountAckInput | undefined => {
+const captureQueuedAck = (env: RuntimeState, toEntityId: string): AccountAckInput | undefined => {
   const queues = [
     env.pendingOutputs ?? [],
     env.networkInbox ?? [],
@@ -75,7 +75,7 @@ const captureQueuedAck = (env: Env, toEntityId: string): AccountAckInput | undef
   return undefined;
 };
 
-const requirePendingResolution = (account: AccountMachine | undefined, side: string): AccountFrame => {
+const requirePendingResolution = (account: AccountState | undefined, side: string): AccountFrame => {
   const frame = account?.pendingFrame;
   const types = frameTxTypes(frame);
   if (!frame || !types.includes('htlc_resolve') || !types.includes('swap_resolve')) {
@@ -84,7 +84,7 @@ const requirePendingResolution = (account: AccountMachine | undefined, side: str
   return frame;
 };
 
-const dropPartitionedOutputs = (env: Env, entityIds: ReadonlySet<string>): void => {
+const dropPartitionedOutputs = (env: RuntimeState, entityIds: ReadonlySet<string>): void => {
   env.pendingOutputs = (env.pendingOutputs ?? []).filter((output) => !entityIds.has(output.entityId));
   env.networkInbox = (env.networkInbox ?? []).filter((output) => !entityIds.has(output.entityId));
   env.pendingNetworkOutputs = (env.pendingNetworkOutputs ?? []).filter(
@@ -96,7 +96,7 @@ const dropPartitionedOutputs = (env: Env, entityIds: ReadonlySet<string>): void 
   });
 };
 
-const countOrderbookRows = (env: Env, offerIds: ReadonlySet<string>): number => {
+const countOrderbookRows = (env: RuntimeState, offerIds: ReadonlySet<string>): number => {
   let rows = 0;
   for (const replica of env.eReplicas.values()) {
     for (const orderId of replica.state.orderbookExt?.orderPairs?.keys() ?? []) {
@@ -135,14 +135,14 @@ const deltaByToken = (frame: AccountFrame, tokenId: number) => {
   return delta;
 };
 
-const currentDelta = (account: AccountMachine, tokenId: number) => {
+const currentDelta = (account: AccountState, tokenId: number) => {
   const delta = account.deltas.get(tokenId);
   if (!delta) throw new Error(`DISPUTE_TRANSFORMER_BASE_DELTA_MISSING:${tokenId}`);
   return delta;
 };
 
 const combinedPendingOffdelta = (
-  base: AccountMachine,
+  base: AccountState,
   aliceFrame: AccountFrame,
   hubFrame: AccountFrame,
   tokenId: number,
@@ -154,7 +154,7 @@ const combinedPendingOffdelta = (
 const readDebtOutstanding = async (jadapter: JAdapter, entityId: string, tokenId: number): Promise<bigint> =>
   BigInt(await jadapter.depository.debtOutstanding(entityId, tokenId));
 
-export async function runDisputeTransformer(_existingEnv?: Env): Promise<Env> {
+export async function runDisputeTransformer(_existingEnv?: RuntimeState): Promise<RuntimeState> {
   const process = await getProcess();
   const { env, jadapter, jurisdiction } = await bootScenario({
     name: 'dispute-transformer',

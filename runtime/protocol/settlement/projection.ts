@@ -1,6 +1,6 @@
 import { getDefaultCreditLimit } from '../../account/utils';
 import { cloneAccountMachine } from '../../state-helpers';
-import type { AccountMachine, Delta, SettlementDiff } from '../../types';
+import type { AccountState, Delta, SettlementDiff } from '../../types';
 import { invalidateAccountMapCommitment } from '../../account/map-commitment';
 
 const UINT256_MAX = (1n << 256n) - 1n;
@@ -21,7 +21,7 @@ const createSettlementDelta = (tokenId: number): Delta => {
   };
 };
 
-const requireProjectedDelta = (account: AccountMachine, tokenId: number): Delta => {
+const requireProjectedDelta = (account: AccountState, tokenId: number): Delta => {
   const existing = account.deltas.get(tokenId);
   if (existing) return existing;
   const created = createSettlementDelta(tokenId);
@@ -29,7 +29,7 @@ const requireProjectedDelta = (account: AccountMachine, tokenId: number): Delta 
   return created;
 };
 
-const applyProjectedDiff = (account: AccountMachine, diff: SettlementDiff): void => {
+const applyProjectedDiff = (account: AccountState, diff: SettlementDiff): void => {
   const delta = requireProjectedDelta(account, diff.tokenId);
   const collateral = delta.collateral + diff.collateralDiff;
   const ondelta = delta.ondelta + diff.ondeltaDiff;
@@ -45,10 +45,10 @@ const applyProjectedDiff = (account: AccountMachine, diff: SettlementDiff): void
 
 /** Exact Account projection produced by Account._settleDiffs before its event. */
 export const projectAccountAfterSettlement = (
-  account: AccountMachine,
+  account: AccountState,
   diffs: readonly SettlementDiff[],
   forgiveTokenIds: readonly number[],
-): AccountMachine => {
+): AccountState => {
   const projected = cloneAccountMachine(account);
   for (const diff of diffs) applyProjectedDiff(projected, diff);
   for (const tokenId of forgiveTokenIds) requireProjectedDelta(projected, tokenId);

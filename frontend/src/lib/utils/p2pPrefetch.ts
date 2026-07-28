@@ -1,4 +1,4 @@
-import type { Env, RoutedEntityInput } from '@xln/runtime/xln-api';
+import type { RuntimeState, RoutedEntityInput } from '@xln/runtime/xln-api';
 
 const DEFAULT_PROFILE_PREFETCH_TIMEOUT_MS = 1_200;
 
@@ -35,7 +35,7 @@ const getReplicaEntityId = (replicaKey: unknown, replica: unknown): string => {
   return normalizeEntityId(String(candidate?.state?.entityId || candidate?.entityId || replicaKey || ''));
 };
 
-function getLocalEntityJurisdiction(currentEnv: Env | null | undefined, targetEntityId: string): { found: boolean; key: string } {
+function getLocalEntityJurisdiction(currentEnv: RuntimeState | null | undefined, targetEntityId: string): { found: boolean; key: string } {
   const target = normalizeEntityId(targetEntityId);
   if (!target || !currentEnv?.eReplicas) return { found: false, key: '' };
   for (const [replicaKey, replica] of currentEnv.eReplicas.entries()) {
@@ -49,7 +49,7 @@ function getLocalEntityJurisdiction(currentEnv: Env | null | undefined, targetEn
   return { found: false, key: '' };
 }
 
-function getProfile(currentEnv: Env | null | undefined, targetEntityId: string): {
+function getProfile(currentEnv: RuntimeState | null | undefined, targetEntityId: string): {
   entityId?: string;
   runtimeId?: string;
   metadata?: { isHub?: boolean; jurisdiction?: unknown };
@@ -68,7 +68,7 @@ function getProfile(currentEnv: Env | null | undefined, targetEntityId: string):
  * queue until gossip eventually delivers the target runtime encryption key.
  */
 export async function prewarmCounterpartyProfiles(
-  env: Env | null | undefined,
+  env: RuntimeState | null | undefined,
   entityIds: readonly string[],
   timeoutMs = DEFAULT_PROFILE_PREFETCH_TIMEOUT_MS,
 ): Promise<boolean> {
@@ -92,7 +92,7 @@ export async function prewarmCounterpartyProfiles(
   return resolved === true && !timedOut;
 }
 
-export function hasCounterpartyRuntimeRoute(env: Env | null | undefined, entityId: string): boolean {
+export function hasCounterpartyRuntimeRoute(env: RuntimeState | null | undefined, entityId: string): boolean {
   const target = normalizeEntityId(entityId);
   if (!target) return false;
   const profile = getProfile(env, target);
@@ -100,7 +100,7 @@ export function hasCounterpartyRuntimeRoute(env: Env | null | undefined, entityI
 }
 
 export function hasUsableOpenAccountCounterpartyProfile(
-  env: Env | null | undefined,
+  env: RuntimeState | null | undefined,
   sourceEntityId: string,
   counterpartyEntityId: string,
   options: OpenAccountProfileOptions = {},
@@ -142,7 +142,7 @@ function collectOpenAccountCounterparties(entityInputs: readonly RoutedEntityInp
 }
 
 export async function waitForOpenAccountCounterpartyProfiles(
-  env: Env | null | undefined,
+  env: RuntimeState | null | undefined,
   entityInputs: readonly RoutedEntityInput[],
   timeoutMs = DEFAULT_PROFILE_PREFETCH_TIMEOUT_MS,
 ): Promise<boolean> {
@@ -177,7 +177,7 @@ export async function waitForOpenAccountCounterpartyProfiles(
 }
 
 export async function waitForCounterpartyRuntimeRoutes(
-  env: Env | null | undefined,
+  env: RuntimeState | null | undefined,
   entityIds: readonly string[],
   timeoutMs = DEFAULT_PROFILE_PREFETCH_TIMEOUT_MS,
 ): Promise<boolean> {

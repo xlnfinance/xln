@@ -16,7 +16,7 @@
  * - Result: O(1) per node - unlimited horizontal scaling
  */
 
-import type { Env } from '../types';
+import type { RuntimeState } from '../types';
 import type { JAdapter } from '../jadapter/types';
 import { createEmptyBatch, batchAddReserveToReserve } from '../jurisdiction/batch';
 import {
@@ -33,7 +33,7 @@ import { getProcess, enableStrictScenario, ensureSignerKeysFromSeed, requireRunt
 import { submitSignedScenarioBatch } from './j-batch-submit';
 
 // Simple snapshot helper for this scenario
-function pushSnapshot(env: Env, tag: string, description: string, metadata: Record<string, unknown> = {}) {
+function pushSnapshot(env: RuntimeState, tag: string, description: string, metadata: Record<string, unknown> = {}) {
   if (!env.history) env.history = [];
   const frame = {
     tag,
@@ -43,7 +43,7 @@ function pushSnapshot(env: Env, tag: string, description: string, metadata: Reco
     eReplicas: new Map(env.eReplicas),
     jReplicas: env.jReplicas ? new Map(env.jReplicas) : undefined
   };
-  env.history.push(frame as unknown as Env['history'][number]);
+  env.history.push(frame as unknown as RuntimeState['history'][number]);
   console.log(`📸 Snapshot: ${description}`);
 }
 
@@ -64,7 +64,7 @@ function usd(amount: number): bigint {
   return BigInt(amount) * 10n ** 18n;
 }
 
-async function openGridAccount(env: Env, fromEntityId: string, toEntityId: string): Promise<void> {
+async function openGridAccount(env: RuntimeState, fromEntityId: string, toEntityId: string): Promise<void> {
   const replicaKey = Array.from(env.eReplicas.keys()).find(k => k.startsWith(`${fromEntityId}:`));
   const replica = replicaKey ? env.eReplicas.get(replicaKey) : null;
   if (!replica) {
@@ -82,7 +82,7 @@ async function openGridAccount(env: Env, fromEntityId: string, toEntityId: strin
 }
 
 // Process pending j_events queued by j-watcher
-async function processJEvents(env: Env): Promise<void> {
+async function processJEvents(env: RuntimeState): Promise<void> {
   const process = await getProcess();
   const pendingInputs = env.runtimeMempool?.entityInputs || [];
   if (pendingInputs.length > 0) {
@@ -93,7 +93,7 @@ async function processJEvents(env: Env): Promise<void> {
 }
 
 async function submitReserveToReserveBatch(
-  env: Env,
+  env: RuntimeState,
   jadapter: JAdapter,
   fromEntityId: string,
   toEntityId: string,
@@ -115,7 +115,7 @@ async function submitReserveToReserveBatch(
   await submitSignedScenarioBatch(env, jadapter, fromEntityId, signerId, batch, 'Grid R2R batch');
 }
 
-export async function grid(env: Env): Promise<void> {
+export async function grid(env: RuntimeState): Promise<void> {
   const restoreStrict = enableStrictScenario(env, 'Grid');
   try {
   console.log('🔲 GRID SCALABILITY SCENARIO (2×2×2 = 8 nodes)\n');

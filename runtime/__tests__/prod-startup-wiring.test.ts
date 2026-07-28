@@ -127,7 +127,7 @@ describe('production startup wiring', () => {
     expect(stableReturnIndex).toBeGreaterThan(yieldIndex);
   });
 
-  test('market-maker READY is derived synchronously from the already committed live Env', () => {
+  test('market-maker READY is derived synchronously from the already committed live RuntimeState', () => {
     const mmNode = readMarketMakerNodeSource();
     const finalize = extractSourceBlock(
       mmNode,
@@ -726,7 +726,7 @@ describe('production startup wiring', () => {
     expect(hubNode).toContain("if (!message.startsWith('ENTITY_JURISDICTION_MISSING')) throw error;");
     expect(hubNode).toContain('const activeAdapter = getActiveJAdapter(env);');
     expect(hubNode).not.toContain("return requireJAdapterForEntity(env, entityId, 'DEBUG_RESERVE');");
-    expect(hubNode).toContain('const configureHubRuntimeLogging = (env: Env): void => {');
+    expect(hubNode).toContain('const configureHubRuntimeLogging = (env: RuntimeState): void => {');
     expect(hubNode).toContain("if (envFlagEnabled(process.env['XLN_HUB_VERBOSE_RUNTIME_LOGS'])) return;");
     expect(hubNode).toContain('env.quietRuntimeLogs = true;');
     expect(hubNode).toContain('configureHubRuntimeLogging(env);');
@@ -745,7 +745,7 @@ describe('production startup wiring', () => {
     expect(hubNode).toContain('localSigners: localSignerLabels.map(label => ({ label }))');
     expect(hubNode).not.toContain('prewarmSignerLabels');
     expect(hubNode).toContain(
-      'const hasLiveJAdapterForJurisdiction = (env: Env, jurisdictionName: string): boolean =>',
+      'const hasLiveJAdapterForJurisdiction = (env: RuntimeState, jurisdictionName: string): boolean =>',
     );
     expect(hubNode).toContain('if (!hasLiveJAdapterForJurisdiction(env, secondaryName)) {');
     expect(orchestrator).not.toContain('creditAmount: MARKET_MAKER_CREDIT_AMOUNT.toString()');
@@ -756,14 +756,14 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('blockTimeMs: requireJurisdictionBlockTimeMs(jurisdiction)');
     expect(mmNode).toContain('isCanonicalAccountOpener(mmEntityId, hubEntityId)');
     expect(mmNode).not.toContain('dev_bootstrap.storage_disabled');
-    expect(mmNode).toContain('const configureMarketMakerRuntimeLogging = (env: Env): void => {');
+    expect(mmNode).toContain('const configureMarketMakerRuntimeLogging = (env: RuntimeState): void => {');
     expect(mmNode).toContain("if (envFlagEnabled(process.env['XLN_MARKET_MAKER_VERBOSE_RUNTIME_LOGS'])) return;");
     expect(mmNode).toContain('env.quietRuntimeLogs = true;');
     expect(mmNode).toContain('const buildLocalMarketMakerSignerLabels = (): string[] => {');
     expect(mmNode).toContain('localSigners: localSignerLabels.map(label => ({ label }))');
     expect(mmNode).not.toContain('prewarmSignerLabels');
     expect(mmNode).toContain(
-      'const hasLiveJurisdictionAdapter = (env: Env, jurisdiction: JurisdictionConfig): boolean => {',
+      'const hasLiveJurisdictionAdapter = (env: RuntimeState, jurisdiction: JurisdictionConfig): boolean => {',
     );
     expect(mmNode).toContain('const targetRef = getJurisdictionIdentityRef(target);');
     expect(mmNode).toContain('const replicaRef = getJurisdictionIdentityRef(replica);');
@@ -913,14 +913,14 @@ describe('production startup wiring', () => {
     expect(mmNode).not.toContain('MARKET_MAKER_MAX_CONNECTIVITY_TXS_PER_ENTITY_INPUT');
     expect(mmNode).not.toContain('type MarketMakerCrossOfferBudget = {');
     expect(mmNode).toContain('const hasMarketMakerAccountBacklog = (');
-    expect(mmNode).toContain('const hasMarketMakerRuntimeBacklog = (env: Env): boolean => {');
+    expect(mmNode).toContain('const hasMarketMakerRuntimeBacklog = (env: RuntimeState): boolean => {');
     expect(mmNode).toContain('Boolean(env.runtimeState?.processingPromise)');
     expect(mmNode).toContain('if (hasMarketMakerRuntimeBacklog(env)) return false;');
     expect(mmNode).toContain('type SameQuoteJob = {');
-    expect(mmNode).toContain('const isSameQuoteJobDepthReady = (env: Env, job: SameQuoteJob): boolean => {');
+    expect(mmNode).toContain('const isSameQuoteJobDepthReady = (env: RuntimeState, job: SameQuoteJob): boolean => {');
     expect(mmNode).toContain('buildMarketMakerOfferSpecs([job.hub.entityId], job.tokenIds)');
-    expect(mmNode).not.toContain('const isSameQuoteJobCovered = (env: Env, job: SameQuoteJob): boolean => {');
-    expect(mmNode).not.toContain('const isSameQuoteJobReady = (env: Env, job: SameQuoteJob): boolean => {');
+    expect(mmNode).not.toContain('const isSameQuoteJobCovered = (env: RuntimeState, job: SameQuoteJob): boolean => {');
+    expect(mmNode).not.toContain('const isSameQuoteJobReady = (env: RuntimeState, job: SameQuoteJob): boolean => {');
     expect(mmNode).toContain('const buildSameQuoteJobs = (visibleHubs: HubProfile[]): SameQuoteJob[] => {');
     expect(mmNode).toContain('let bootstrapSameCursor = 0;');
     expect(mmNode).toContain('const isAllSameQuoteDepthReady = (visibleHubs: HubProfile[]): boolean => {');
@@ -1054,7 +1054,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('collectQueuedSwapOfferIds(env, mmEntityId, hubEntityId)');
     expect(mmNode).toContain('hasQueuedExtendCredit(env, mmEntityId, hubEntityId, tokenId, creditAmount)');
     expect(mmNode).toContain(
-      'const hasSourceAccountCrossOffer = (env: Env, route: CrossJurisdictionSwapRoute): boolean => {',
+      'const hasSourceAccountCrossOffer = (env: RuntimeState, route: CrossJurisdictionSwapRoute): boolean => {',
     );
     expect(mmNode).toContain('if (hasSourceAccountCrossOffer(env, route)) return true;');
     expect(mmNode).not.toContain(
@@ -1224,7 +1224,7 @@ describe('production startup wiring', () => {
     ];
 
     expect(runtimeMain).toContain('stopJurisdictionWatchersAndWait,');
-    expect(runtimeWatchers).toContain('export const stopJurisdictionWatchersAndWait = async (env: Env): Promise<void> => {');
+    expect(runtimeWatchers).toContain('export const stopJurisdictionWatchersAndWait = async (env: RuntimeState): Promise<void> => {');
     expect(runtimeLoop).toContain('await lifecycle.stopJurisdictionWatchersAndWait(env);');
     expect(nodeQuiesce.indexOf('await stopJurisdictionWatchersAndWait(env)')).toBeLessThan(
       nodeQuiesce.indexOf('runtimeDrained = await waitForRuntimeWorkDrained('),
@@ -1491,7 +1491,7 @@ describe('production startup wiring', () => {
     expect(buildHealthStart).toBeGreaterThan(buildExpectedStart);
     const buildExpected = mmNode.slice(buildExpectedStart, buildHealthStart);
 
-    expect(buildExpected).toContain('env: Env,');
+    expect(buildExpected).toContain('env: RuntimeState,');
     expect(buildExpected).toContain('for (const spec of buildMarketMakerCrossOfferSpecs(');
     expect(buildExpected).toContain('group.specs.push(spec);');
     expect(buildExpected).not.toContain('for (const pair of buildMarketMakerCrossTokenPairs');
@@ -1545,7 +1545,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('rebuildCachedHealthResponseJson();');
     expect(readMarketMakerNodeModule('mm-node-health.ts')).toContain('computeCanonicalEntityHashesFromEnv');
     expect(readMarketMakerNodeModule('mm-node-run.ts')).toContain('computeCanonicalStateHashFromEnv');
-    expect(mmNode).toContain('export const buildMarketMakerBootstrapEntityStateHash = (env: Env): string =>');
+    expect(mmNode).toContain('export const buildMarketMakerBootstrapEntityStateHash = (env: RuntimeState): string =>');
     expect(mmProgress).toContain("schema: 'market-maker-bootstrap-entity-state-v1'");
     expect(mmNode).toContain('const fingerprint = buildMarketMakerBootstrapFingerprint(');
     expect(mmNode).toContain('const runtimeStateHash = computeCanonicalStateHashFromEnv(env);');
@@ -2183,7 +2183,7 @@ describe('production startup wiring', () => {
     expect(driveQuotes).toContain('sourceHubs,');
     expect(driveQuotes).toContain('targetHubs,');
     expect(driveQuotes).toContain("if (mode === 'steady') return true;");
-    expect(meshCommon).toContain('const queuedEntityTxsFor = (env: Env, targetEntityId: string): EntityTx[] => {');
+    expect(meshCommon).toContain('const queuedEntityTxsFor = (env: RuntimeState, targetEntityId: string): EntityTx[] => {');
     expect(meshCommon).toContain('export const hasQueuedExtendCredit = (');
   });
 
@@ -2681,7 +2681,7 @@ describe('production startup wiring', () => {
 
   test('RPC watcher pauses during persistence quiesce instead of entering j-event ingress', () => {
     const rpc = readRpcAdapterSource();
-    const pauseHelper = rpc.indexOf('const isJEventIngressPaused = (activeEnv: Env): boolean =>');
+    const pauseHelper = rpc.indexOf('const isJEventIngressPaused = (activeEnv: RuntimeState): boolean =>');
     const earlyPause = rpc.indexOf("pauseJEventWatcherForQuiesce({ step: 'before-block-number' });");
     const batchPause = rpc.indexOf("step: 'before-process-event-batch'");
     const processBatch = rpc.indexOf('const builtInput = processEventBatch(');

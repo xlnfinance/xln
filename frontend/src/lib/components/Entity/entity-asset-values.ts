@@ -1,4 +1,4 @@
-import type { AccountMachine } from '@xln/runtime/xln-api';
+import type { AccountState } from '@xln/runtime/xln-api';
 import { ZeroAddress } from 'ethers';
 import type { FrontendXlnFunctions } from '$lib/stores/xlnStore';
 import { amountToUsd, getAssetUsdPrice } from '$lib/utils/assetPricing';
@@ -159,7 +159,7 @@ function emptyAccountPortfolioData(): AccountPortfolioData {
 }
 
 export function buildAccountPortfolioData(options: {
-  accounts: Map<string, AccountMachine> | undefined;
+  accounts: Map<string, AccountState> | undefined;
   localEntityId: string;
   deriveDelta: FrontendXlnFunctions['deriveDelta'] | undefined;
   getTokenInfo: (tokenId: number) => AssetTokenInfo;
@@ -191,7 +191,7 @@ export function buildAccountPortfolioData(options: {
 }
 
 export function buildAccountSpendableByToken(options: {
-  accounts: Map<string, AccountMachine> | undefined;
+  accounts: Map<string, AccountState> | undefined;
   localEntityId: string;
   deriveDelta: FrontendXlnFunctions['deriveDelta'] | undefined;
 }): Map<number, bigint> {

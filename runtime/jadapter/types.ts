@@ -6,7 +6,7 @@
 import type { Provider, Signer } from 'ethers';
 import type { Address } from '@ethereumjs/util';
 import type { Account, Depository, EntityProvider, DeltaTransformer } from '../../jurisdictions/typechain-types/index.ts';
-import type { JAdapterFailure, JReplica, JTx, BrowserVMState, Env } from '../types';
+import type { JAdapterFailure, JReplica, JTx, BrowserVMState, RuntimeState } from '../types';
 
 export type JAdapterMode = 'browservm' | 'anvil' | 'rpc' | 'tron';
 
@@ -181,7 +181,7 @@ export interface JAdapter {
   // === High-level J-tx submission (unified interface for all modes) ===
   // Handles encoding, signing, and execution. Events arrive via j-watcher → next frame.
   submitTx(jTx: JTx, options: {
-    env: Env;           // Runtime env (for hanko signing)
+    env: RuntimeState;           // Runtime env (for hanko signing)
     signerId?: string;  // Which signer to use for hanko
     signerPrivateKey?: Uint8Array;
     timestamp?: number; // Block timestamp (scenarioMode)
@@ -189,7 +189,7 @@ export interface JAdapter {
 
   // === J-Watcher integration ===
   // Starts feeding J-events back to runtime mempool. Same object handles submit + watch.
-  startWatching(env: Env): void;
+  startWatching(env: RuntimeState): void;
   isWatching(): boolean;
   stopWatching(): void;
   /** Invalidates ingress synchronously, then waits for the current external poll to unwind. */

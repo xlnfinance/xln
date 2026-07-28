@@ -25,7 +25,7 @@ import {
 } from '../orchestrator/mm-node';
 import { getBootstrapCreditAmount, HUB_DEFAULT_MIN_TRADE_SIZE } from '../orchestrator/mesh-common';
 import { createEmptyEnv } from '../runtime';
-import type { AccountMachine, EntityReplica, Env } from '../types';
+import type { AccountState, EntityReplica, RuntimeState } from '../types';
 import { createDefaultDelta } from '../validation-utils';
 import { LIMITS } from '../constants';
 import { encodeBuffer } from '../storage/codec';
@@ -69,7 +69,7 @@ test('market maker server health treats absent cross topology as neutral', () =>
   state.targetHubIds = ['hub'];
   state.tokenIds = [1, 2, 3];
 
-  const health = getServerMarketMakerHealth({} as Env, state, () => null);
+  const health = getServerMarketMakerHealth({} as RuntimeState, state, () => null);
 
   expect(health.cross.applicable).toBe(false);
   expect(health.cross.ok).toBe(true);
@@ -93,7 +93,7 @@ test('market maker server health is ready with one committed offer per pair befo
     mempool: [],
     pendingFrame: null,
   };
-  const health = getServerMarketMakerHealth({} as Env, state, () => account as any);
+  const health = getServerMarketMakerHealth({} as RuntimeState, state, () => account as any);
 
   expect(health.ok).toBe(true);
   expect(health.hubs[0]?.ready).toBe(true);
@@ -125,7 +125,7 @@ test('market maker server health reports depthReady at full configured depth', (
       }
     }
   }
-  const health = getServerMarketMakerHealth({} as Env, state, () => ({
+  const health = getServerMarketMakerHealth({} as RuntimeState, state, () => ({
     swapOffers: offers,
     currentHeight: 1,
     mempool: [],
@@ -157,7 +157,7 @@ test('market maker server health does not count pending offers as bootstrap-read
     }
   }
 
-  const health = getServerMarketMakerHealth({} as Env, state, () => ({
+  const health = getServerMarketMakerHealth({} as RuntimeState, state, () => ({
     swapOffers: new Map(),
     currentHeight: 1,
     mempool: [],
@@ -212,7 +212,7 @@ const makeAccount = (
   ownerEntityId: string,
   counterpartyEntityId: string,
   swapOffers: Map<string, unknown> = new Map(),
-): AccountMachine => ({
+): AccountState => ({
   leftEntity: ownerEntityId,
   rightEntity: counterpartyEntityId,
   status: 'active',
@@ -222,7 +222,7 @@ const makeAccount = (
   pendingFrame: null,
   swapOffers,
   deltas: new Map(),
-} as unknown as AccountMachine);
+} as unknown as AccountState);
 
 test('five-token market maker depth remains canonical through Account and hub admission', async () => {
   const mmEntityId = entity('a');
@@ -285,10 +285,10 @@ test('five-token market maker depth remains canonical through Account and hub ad
 });
 
 const addReplica = (
-  env: Env,
+  env: RuntimeState,
   entityId: string,
   signerId: string,
-  accounts: Map<string, AccountMachine> = new Map(),
+  accounts: Map<string, AccountState> = new Map(),
 ): void => {
   env.eReplicas.set(`${entityId}:${signerId}`, {
     entityId,
@@ -313,7 +313,7 @@ const committedSameChainOffers = (hubEntityId: string, tokenIds: number[]): Map<
 };
 
 const buildBootstrapTopology = (): {
-  env: Env;
+  env: RuntimeState;
   contexts: MarketMakerEntityContext[];
   visibleHubs: HubProfile[];
   tokenIdsByContext: MarketMakerTokenIdsByContext;
@@ -378,7 +378,7 @@ const buildBootstrapTopology = (): {
         board: { validators: [{ signerId: hub.signerId }] },
       },
     })),
-  } as Env['gossip'];
+  } as RuntimeState['gossip'];
   const tokenIdsByContext = new Map(contexts.map(context => [context.entityId, [1, 2, 3]]));
   return { env, contexts, visibleHubs, tokenIdsByContext };
 };
@@ -501,7 +501,7 @@ test('runtime market maker health stays red when same-chain offers are committed
         crossJurisdiction: pendingSpec.crossJurisdiction!,
       },
     }],
-  } as AccountMachine['pendingFrame'];
+  } as AccountState['pendingFrame'];
 
   expect(hasFinalizedMarketMakerCrossOffer(env, pendingSpec)).toBe(false);
   const health = getRuntimeMarketMakerHealth(
@@ -556,7 +556,7 @@ test('market maker hub discovery uses stable hubName instead of mutable display 
         },
       },
     ],
-  } as Env['gossip'];
+  } as RuntimeState['gossip'];
 
   const visibleHubs = readVisibleHubProfiles(env);
   expect(visibleHubs.map(hub => hub.entityId)).toEqual([entity('90')]);
@@ -601,7 +601,7 @@ test('runtime market maker health stays red until every byte-budgeted cross mark
     [1, 2, 3],
     [1, 2, 3],
   );
-  const commitOneOfferPerPair = (account: AccountMachine, specs: ReturnType<typeof buildMarketMakerCrossOfferSpecs>): number => {
+  const commitOneOfferPerPair = (account: AccountState, specs: ReturnType<typeof buildMarketMakerCrossOfferSpecs>): number => {
     const coveredPairs = new Set<string>();
     const pairBudget = Math.max(1, new Set(specs.map(spec => spec.pairId)).size - 1);
     for (const spec of specs) {

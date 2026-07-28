@@ -4,7 +4,7 @@ import { applyAccountTx } from '../account/tx/apply';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
 import { createEntityFrameHash } from '../entity/consensus/frame';
 import { applyCommittedAccountFrameFollowups, type MempoolOp } from '../entity/tx/handlers/account';
-import type { AccountFrame, AccountMachine, AccountTx, ConsensusConfig, EntityState } from '../types';
+import type { AccountFrame, AccountState, AccountTx, ConsensusConfig, EntityState } from '../types';
 import { createDefaultDelta } from '../validation-utils';
 
 const entity = (byte: string): string => `0x${byte.repeat(32)}`;
@@ -46,7 +46,7 @@ const makeState = (): EntityState => ({
   swapTradingPairs: [],
 });
 
-const makeAccount = (counterparty: string): AccountMachine => {
+const makeAccount = (counterparty: string): AccountState => {
   const delta = createDefaultDelta(1);
   delta.collateral = 20_000n;
   delta.leftCreditLimit = 20_000n;

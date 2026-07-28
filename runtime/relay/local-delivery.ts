@@ -1,7 +1,7 @@
 /**
  * Relay Local Delivery — decrypt + enqueue for messages addressed to this runtime.
  *
- * This module touches Env and crypto (p2p-crypto). The relay-router delegates
+ * This module touches RuntimeState and crypto (p2p-crypto). The relay-router delegates
  * here via a callback so the router itself stays transport/crypto-agnostic.
  */
 
@@ -11,7 +11,7 @@ import {
 } from '../runtime.ts';
 import { deriveEncryptionKeyPair, decryptJSON, type P2PKeyPair } from '../networking/p2p-crypto';
 import type {
-  Env,
+  RuntimeState,
   EntityReplica,
   ReliableDeliveryReceipt,
   RuntimeEntityInputsEnvelope,
@@ -34,9 +34,9 @@ const relayLog = process.env['RELAY_VERBOSE_LOGS'] === '1'
 // ---------------------------------------------------------------------------
 
 export const createLocalDeliveryHandler = (
-  env: Env,
+  env: RuntimeState,
   store: RelayStore,
-  getEntityReplicaById: (env: Env, entityId: string) => EntityReplica | null,
+  getEntityReplicaById: (env: RuntimeState, entityId: string) => EntityReplica | null,
 ): ((from: string | undefined, msg: {
   type?: unknown;
   payload?: unknown;

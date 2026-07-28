@@ -252,7 +252,7 @@ assertNotIncludes(p2pSource, 'flushPending', 'runtime/networking/p2p.ts');
 const runtimeRoutingPath = 'runtime/runtime/loop-routing.ts';
 const runtimeRouting = readText(runtimeRoutingPath);
 assertIncludes(runtimeRouting, 'sendEntityInputWithRouting(env, input, outputRoutingDeps())', runtimeRoutingPath);
-const sendEntityInputStart = runtimeRouting.indexOf('sendEntityInput: (env: Env');
+const sendEntityInputStart = runtimeRouting.indexOf('sendEntityInput: (env: RuntimeState');
 const sendEntityInputEnd = runtimeRouting.indexOf('startP2P:', sendEntityInputStart);
 const sendEntityInputSource = runtimeRouting.slice(sendEntityInputStart, sendEntityInputEnd);
 assertNotIncludes(sendEntityInputSource, 'return true', runtimeRoutingPath);

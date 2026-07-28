@@ -11,7 +11,7 @@ import {
   type PriceBucketState,
 } from './types';
 import { compareCanonicalText, swapKey, type SwapKey } from './swap-execution';
-import type { AccountMachine, EntityState, SwapOffer } from '../types';
+import type { AccountState, EntityState, SwapOffer } from '../types';
 
 export type OrderbookMediumField = 'pairId' | 'side' | 'priceTicks' | 'qtyLots' | 'ownerId' | 'pairIndex';
 export type QuarantineReason =
@@ -105,7 +105,7 @@ const snapshotBookOrder = (pairId: string, order: BookOrderState): ActualBookOrd
 
 const normalizeOpenOfferForBook = (
   accountId: string,
-  account: AccountMachine,
+  account: AccountState,
   offerId: string,
   offer: SwapOffer,
 ): ExpectedBookOrder | { invalid: { swapKey: string; reason: QuarantineReason } } => {

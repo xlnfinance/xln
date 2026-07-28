@@ -1,4 +1,4 @@
-import type { Env } from '../types';
+import type { RuntimeState } from '../types';
 import { serializeTaggedJson } from '../protocol/serialization';
 import { getControlBodyErrorStatus } from './auth';
 import type { parseTaggedControlBody } from './auth';
@@ -12,7 +12,7 @@ type P2PControlDeps = {
 export const handleP2PControl = async (
   req: Request,
   headers: HeadersInit,
-  env: Env | null,
+  env: RuntimeState | null,
   deps: P2PControlDeps,
 ): Promise<Response> => {
   if (!env) {

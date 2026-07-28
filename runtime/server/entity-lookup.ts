@@ -1,10 +1,10 @@
 import { deriveDelta } from '../account/utils';
-import type { AccountMachine, Env } from '../types';
+import type { AccountState, RuntimeState } from '../types';
 import { getEntityReplicaById } from '../entity/replica-lookup';
 export { getEntityReplicaById } from '../entity/replica-lookup';
 
 const accountMatchesCounterparty = (
-  account: AccountMachine | null | undefined,
+  account: AccountState | null | undefined,
   ownerEntityId: string,
   counterpartyId: string,
 ): boolean => {
@@ -23,7 +23,7 @@ const accountMatchesCounterparty = (
   return false;
 };
 
-export const hasAccount = (env: Env, entityId: string, counterpartyId: string): boolean => {
+export const hasAccount = (env: RuntimeState, entityId: string, counterpartyId: string): boolean => {
   const replica = getEntityReplicaById(env, entityId);
   if (!replica?.state?.accounts) return false;
   const needle = counterpartyId.toLowerCase();
@@ -36,7 +36,7 @@ export const hasAccount = (env: Env, entityId: string, counterpartyId: string): 
   return false;
 };
 
-export const getAccountMachine = (env: Env, entityId: string, counterpartyId: string): AccountMachine | null => {
+export const getAccountMachine = (env: RuntimeState, entityId: string, counterpartyId: string): AccountState | null => {
   const replica = getEntityReplicaById(env, entityId);
   if (!replica?.state?.accounts) return null;
   const needle = counterpartyId.toLowerCase();
@@ -52,7 +52,7 @@ export const getAccountMachine = (env: Env, entityId: string, counterpartyId: st
 };
 
 export const getEntityOutCapacity = (
-  account: AccountMachine | null,
+  account: AccountState | null,
   ownerEntityId: string,
   tokenId: number,
 ): bigint => {
@@ -81,13 +81,13 @@ const serializeReserveMap = (reserves: ReadonlyMap<string | number, bigint>): Re
   return Object.fromEntries(entries);
 };
 
-export const getReplicaReserveSnapshot = (env: Env, entityId: string): Record<string, string> | undefined => {
+export const getReplicaReserveSnapshot = (env: RuntimeState, entityId: string): Record<string, string> | undefined => {
   const replica = getEntityReplicaById(env, entityId);
   if (!replica?.state?.reserves || replica.state.reserves.size === 0) return undefined;
   return serializeReserveMap(replica.state.reserves);
 };
 
-export const getReplicaAccountCount = (env: Env, entityId: string): number | undefined => {
+export const getReplicaAccountCount = (env: RuntimeState, entityId: string): number | undefined => {
   const replica = getEntityReplicaById(env, entityId);
   return replica?.state?.accounts?.size;
 };

@@ -3,7 +3,7 @@ import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumula
 import { buildAccountProofBody } from '../protocol/dispute/proof-builder';
 import { buildPositionalSwapFillRatioBuckets, sortTransformerEntries } from '../protocol/transformer-ordering';
 import { asOfferId } from '../orderbook/swap-keys';
-import type { AccountMachine, SwapOffer } from '../types';
+import type { AccountState, SwapOffer } from '../types';
 
 const MAX_FILL_RATIO = 65535n;
 const DELTA_TRANSFORMER = '0x1111111111111111111111111111111111111111';
@@ -30,7 +30,7 @@ function makeSwapOffer(
   };
 }
 
-function makeProofAccountMachine(swaps: Array<[string, SwapOffer]>): AccountMachine {
+function makeProofAccountMachine(swaps: Array<[string, SwapOffer]>): AccountState {
   return {
     leftEntity: 'left',
     rightEntity: 'right',

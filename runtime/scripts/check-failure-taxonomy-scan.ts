@@ -525,7 +525,7 @@ for (const [path, markers] of [
   ['runtime/relay/standalone-server.ts', ["createStructuredLogger('relay.standalone')", 'service.listen']],
   [
     'runtime/entity/consensus/input-merge.ts',
-    ["createStructuredLogger('entity.input.merge')", 'frame.conflict', 'duplicates.deduped'],
+    ["createStructuredLogger('entity.input.merge')", 'frame.conflict'],
   ],
   ['runtime/entity/tx/handlers/account.ts', ["createStructuredLogger('account.handler')", 'ACCOUNT_INPUT_EMPTY']],
   ['runtime/entity/tx/handlers/open-account.ts', ["createStructuredLogger('account.open')"]],

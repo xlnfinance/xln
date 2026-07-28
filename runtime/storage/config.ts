@@ -1,4 +1,4 @@
-import type { Env } from '../types';
+import type { RuntimeState } from '../types';
 import {
   DEFAULT_ACCOUNT_MERKLE_RADIX,
   DEFAULT_EPOCH_MAX_BYTES,
@@ -26,7 +26,7 @@ const positiveStorageInteger = (value: unknown, label: string): number => {
   return normalized;
 };
 
-const resolveCanonicalHashPeriodFrames = (env: Env): number => {
+const resolveCanonicalHashPeriodFrames = (env: RuntimeState): number => {
   const period =
     env.runtimeConfig?.storage?.canonicalHashPeriodFrames ??
     process.env['XLN_STORAGE_CANONICAL_HASH_PERIOD_FRAMES'];
@@ -38,7 +38,7 @@ const resolveCanonicalHashPeriodFrames = (env: Env): number => {
   return normalized;
 };
 
-export const resolveStorageRuntimeConfig = (env: Env): Required<StorageRuntimeConfig> => {
+export const resolveStorageRuntimeConfig = (env: RuntimeState): Required<StorageRuntimeConfig> => {
   const raw = env.runtimeConfig?.storage;
   const radix = raw?.accountMerkleRadix ?? DEFAULT_ACCOUNT_MERKLE_RADIX;
   if (radix !== 16 && radix !== 256) {

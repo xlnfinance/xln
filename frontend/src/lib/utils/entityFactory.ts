@@ -3,7 +3,7 @@
  */
 
 import { keccak256, toUtf8Bytes } from 'ethers';
-import type { Env, EntityReplica } from '@xln/runtime/xln-api';
+import type { RuntimeState, EntityReplica } from '@xln/runtime/xln-api';
 import { unwrapLiveRuntimeEnv } from './liveRuntimeEnv';
 import { dispatchRuntimeInputToRuntimeEnv, getXLN } from '$lib/stores/xlnStore';
 
@@ -15,7 +15,7 @@ type JurisdictionConfig = {
   chainId?: number;
 };
 
-type JReplica = Env['jReplicas'] extends Map<string, infer T> ? T : never;
+type JReplica = RuntimeState['jReplicas'] extends Map<string, infer T> ? T : never;
 
 const inflightAutoCreates = new Map<string, Promise<string | null>>();
 let isCreatingJMachine = false;
@@ -61,7 +61,7 @@ export function generateEphemeralEntityId(signerId: string): string {
 export async function createEphemeralEntity(
   signerId: string,
   jurisdictionName: string,
-  env: Env
+  env: RuntimeState
 ): Promise<string> {
   const runtimeEnv = unwrapLiveRuntimeEnv(env) ?? env;
   const existing = findReplicaBySigner(runtimeEnv, signerId);
@@ -124,7 +124,7 @@ export async function createEphemeralEntity(
   return entityId;
 }
 
-function findReplicaBySigner(env: Env, signerId: string, jurisdictionName?: string | null): EntityReplica | null {
+function findReplicaBySigner(env: RuntimeState, signerId: string, jurisdictionName?: string | null): EntityReplica | null {
   const jurisdictionLower = String(jurisdictionName || '').trim().toLowerCase();
   for (const replica of env.eReplicas.values()) {
     const replicaJurisdiction = String(replica.state?.config?.jurisdiction?.name || '').trim().toLowerCase();
@@ -138,16 +138,16 @@ function findReplicaBySigner(env: Env, signerId: string, jurisdictionName?: stri
   return null;
 }
 
-function listJMachineNames(env: Env): string[] {
+function listJMachineNames(env: RuntimeState): string[] {
   return Array.from(env.jReplicas.keys());
 }
 
-function formatJMachineNames(env: Env): string {
+function formatJMachineNames(env: RuntimeState): string {
   const names = listJMachineNames(env);
   return names.length > 0 ? names.join(', ') : 'none';
 }
 
-function getJReplica(env: Env, name?: string): JReplica | null {
+function getJReplica(env: RuntimeState, name?: string): JReplica | null {
   const normalized = normalizeJurisdictionKey(name);
   if (name) {
     const direct = env.jReplicas.get(name);
@@ -160,7 +160,7 @@ function getJReplica(env: Env, name?: string): JReplica | null {
   return env.jReplicas.values().next().value ?? null;
 }
 
-function buildJurisdictionConfig(env: Env, name?: string): JurisdictionConfig | null {
+function buildJurisdictionConfig(env: RuntimeState, name?: string): JurisdictionConfig | null {
   const jReplica = getJReplica(env, name);
   if (!jReplica) {
     throw new Error(
@@ -191,7 +191,7 @@ function buildJurisdictionConfig(env: Env, name?: string): JurisdictionConfig | 
   };
 }
 
-async function ensureJMachine(env: Env): Promise<string | null> {
+async function ensureJMachine(env: RuntimeState): Promise<string | null> {
   if (isCreatingJMachine) return null;
 
   const names = listJMachineNames(env);
@@ -211,7 +211,7 @@ async function ensureJMachine(env: Env): Promise<string | null> {
  * Create self-entity for signer (lazy, no blockchain registration)
  */
 export async function createSelfEntity(
-  env: Env,
+  env: RuntimeState,
   signerAddress: string,
   jurisdictionName?: string
 ): Promise<string | null> {
@@ -228,7 +228,7 @@ export async function createSelfEntity(
  */
 export async function autoCreateEntityForSigner(
   signerAddress: string,
-  env: Env,
+  env: RuntimeState,
   jurisdiction: string = 'default',
 ): Promise<string | null> {
   if (!signerAddress) return null;

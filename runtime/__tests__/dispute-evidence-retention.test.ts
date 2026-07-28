@@ -8,7 +8,7 @@ import {
 } from '../protocol/dispute/evidence-retention';
 import { hashProofBodyStruct } from '../protocol/dispute/proof-builder';
 import { hydrateAccountDocFromStorage, projectAccountDoc } from '../storage/projections';
-import type { AccountMachine } from '../types';
+import type { AccountState } from '../types';
 import type { ProofBodyStruct } from '../protocol/dispute/proof-body';
 import { entity, makeAccount } from './helpers/cross-j';
 
@@ -37,7 +37,7 @@ const evidenceSnapshot = (hash: string, nonce: number, body: ProofBodyStruct) =>
 });
 
 const installEvidence = (
-  account: AccountMachine,
+  account: AccountState,
   hashes: readonly string[],
   body: ProofBodyStruct,
 ): void => {
@@ -53,7 +53,7 @@ const installEvidence = (
 };
 
 const installExactEvidence = (
-  account: AccountMachine,
+  account: AccountState,
   body: ProofBodyStruct,
   nonce: number,
 ): string => {

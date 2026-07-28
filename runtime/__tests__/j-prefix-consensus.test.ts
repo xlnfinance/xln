@@ -31,7 +31,7 @@ import type {
   EntityReplica,
   EntityState,
   EntityTx,
-  Env,
+  RuntimeState,
   JurisdictionEvent,
   ProposedEntityFrame,
   ValidatorJHistory,
@@ -144,14 +144,14 @@ const observedThrough = (height: number, includeDispute: boolean): ValidatorJHis
   });
 };
 
-const installOwnKey = (env: Env, label: string): string => {
+const installOwnKey = (env: RuntimeState, label: string): string => {
   const signerId = deriveSignerAddressSync(env.runtimeSeed!, label).toLowerCase();
   registerSignerKey(env, signerId, deriveSignerKeySync(env.runtimeSeed!, label));
   return signerId;
 };
 
 const buildOrdinaryProposal = async (
-  env: Env,
+  env: RuntimeState,
   state: EntityState,
   proposerSignerId: string,
   timestamp: number,

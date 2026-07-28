@@ -3,7 +3,7 @@
   import { writable, get } from 'svelte/store';
   import { formatUnits } from 'ethers';
   import { requireTokenDecimals } from '$lib/components/Entity/token-metadata';
-  import type { Env } from '@xln/runtime/xln-api';
+  import type { RuntimeState } from '@xln/runtime/xln-api';
   import type { EnvSnapshot } from '$types';
   import { toasts } from '$lib/stores/toastStore';
   import { paymentSpotlight } from '$lib/stores/paymentSpotlightStore';
@@ -66,7 +66,7 @@
     data?: Record<string, unknown>;
   };
 
-  const localEnvStore = writable<Env | null>(null);
+  const localEnvStore = writable<RuntimeState | null>(null);
   const localEnvRevisionStore = writable<number>(0);
   const localHistoryStore = writable<EnvSnapshot[]>([]);
   const localTimeIndex = writable<number>(-1);
@@ -82,13 +82,13 @@
   const lastPaymentSpotlightAtByKey = new Map<string, number>();
   const normalizeRuntimeId = (value: unknown): string => String(value || '').trim().toLowerCase();
 
-  const runtimeEnvMatchesActiveSelection = (env: Env | null): boolean => {
+  const runtimeEnvMatchesActiveSelection = (env: RuntimeState | null): boolean => {
     const selectedRuntimeId = normalizeRuntimeId(get(activeRuntimeId));
     if (!selectedRuntimeId) return true;
     return normalizeRuntimeId(env?.runtimeId) === selectedRuntimeId;
   };
 
-  const publishLocalEnv = (env: Env | null) => {
+  const publishLocalEnv = (env: RuntimeState | null) => {
     const runtimeEnv = env ? (unwrapLiveRuntimeEnv(env) ?? env) : null;
     if (runtimeEnv && !runtimeEnvMatchesActiveSelection(runtimeEnv)) {
       const message = `VIEW_RUNTIME_ENV_MISMATCH: refusing local env publish for inactive runtime ${normalizeRuntimeId(runtimeEnv.runtimeId)}`;
@@ -111,7 +111,7 @@
     localEnvRevisionStore.update((revision) => revision + 1);
   };
 
-  const resolveLocalDebugEnv = (): Env | null => {
+  const resolveLocalDebugEnv = (): RuntimeState | null => {
     const projectedEnv = get(localEnvStore);
     const projectedRuntimeEnv = projectedEnv ? (unwrapLiveRuntimeEnv(projectedEnv) ?? projectedEnv) : null;
     const activeEnv = getEnv();

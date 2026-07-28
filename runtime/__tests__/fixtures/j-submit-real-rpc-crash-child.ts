@@ -15,7 +15,7 @@ import {
 } from '../../scenarios/boot';
 import { formatRuntime } from '../../qa/runtime-ascii';
 import { safeStringify } from '../../protocol/serialization';
-import type { Env, JAdapter } from '../../types';
+import type { RuntimeState, JAdapter } from '../../types';
 
 type Phase = 'crash' | 'recover';
 
@@ -63,7 +63,7 @@ const crashNow = (): never => {
   throw new Error('SIGKILL did not stop real RPC crash child');
 };
 
-const findReplica = (env: Env, entityId: string) => {
+const findReplica = (env: RuntimeState, entityId: string) => {
   const normalized = entityId.toLowerCase();
   const replica = Array.from(env.eReplicas.values()).find(
     (candidate) => candidate.entityId.toLowerCase() === normalized,
@@ -73,7 +73,7 @@ const findReplica = (env: Env, entityId: string) => {
 };
 
 const driveUntil = async (
-  env: Env,
+  env: RuntimeState,
   predicate: () => boolean,
   label: string,
   maxRounds = 30,
@@ -114,7 +114,7 @@ const countExactHankoBatchLogs = async (
   return logs.length;
 };
 
-const closeEnv = async (env: Env): Promise<void> => {
+const closeEnv = async (env: RuntimeState): Promise<void> => {
   const adapters = new Set<JAdapter>();
   for (const replica of env.jReplicas.values()) {
     if (replica.jadapter) adapters.add(replica.jadapter);

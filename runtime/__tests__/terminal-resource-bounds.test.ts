@@ -11,14 +11,14 @@ import { LIMITS } from '../constants';
 import { setHtlcRouteNote, terminateHtlcRoute } from '../entity/tx/htlc-route-lifecycle';
 import { applyHtlcTimeoutFollowups } from '../entity/tx/handlers/account/committed-htlc-followups';
 import { createEmptyEnv } from '../runtime';
-import type { AccountMachine, EntityState, SwapOffer } from '../types';
+import type { AccountState, EntityState, SwapOffer } from '../types';
 import { validateAccountMachine, validateEntityState } from '../validation-utils';
 
 const leftEntity = `0x${'11'.repeat(32)}`;
 const rightEntity = `0x${'22'.repeat(32)}`;
 const proposer = `0x${'33'.repeat(20)}`;
 
-const makeAccount = (): AccountMachine => ({
+const makeAccount = (): AccountState => ({
   leftEntity,
   rightEntity,
   domain: {

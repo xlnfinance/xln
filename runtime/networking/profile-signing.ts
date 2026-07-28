@@ -1,6 +1,6 @@
 import { Signature, keccak256, recoverAddress } from 'ethers';
 import { canonicalizeProfile, type Profile } from './gossip';
-import type { Env, HankoString } from '../types';
+import type { RuntimeState, HankoString } from '../types';
 import { verifyHankoForHash } from '../hanko/signing';
 import { resolveCertifiedRegisteredBoardHash } from '../jurisdiction/board-registry';
 import { getSignerAddress, getSignerPublicKey, signAccountFrame } from '../account/crypto';
@@ -42,7 +42,7 @@ const boardValidatorFor = (profile: Profile, signerId: string) => {
   );
 };
 
-const resolveProfileCertifiedBoardHash = (env: Env, profile: Profile): string | null => {
+const resolveProfileCertifiedBoardHash = (env: RuntimeState, profile: Profile): string | null => {
   const jurisdiction = profile.metadata.jurisdiction;
   if (
     !jurisdiction ||
@@ -62,7 +62,7 @@ const resolveProfileCertifiedBoardHash = (env: Env, profile: Profile): string | 
   });
 };
 
-const assertEntityCertification = async (env: Env, profile: Profile): Promise<void> => {
+const assertEntityCertification = async (env: RuntimeState, profile: Profile): Promise<void> => {
   const hanko = profile.metadata.profileHanko as HankoString | undefined;
   if (!hanko) throw new Error(`PROFILE_ENTITY_CERTIFICATION_REQUIRED: entity=${profile.entityId}`);
   const registeredBoardHash = resolveProfileCertifiedBoardHash(env, profile);
@@ -77,7 +77,7 @@ const assertEntityCertification = async (env: Env, profile: Profile): Promise<vo
 };
 
 export async function signProfileRuntimeRoute(
-  env: Env,
+  env: RuntimeState,
   profile: Profile,
   signerId: string,
 ): Promise<Profile> {
@@ -132,7 +132,7 @@ const verifyRuntimeRouteSignature = (profile: Profile): ProfileVerifyResult => {
   return { valid: true, hash, signerId };
 };
 
-export async function verifyProfileSignature(profile: Profile, env?: Env): Promise<ProfileVerifyResult> {
+export async function verifyProfileSignature(profile: Profile, env?: RuntimeState): Promise<ProfileVerifyResult> {
   const canonicalProfile = canonicalizeProfile(profile);
   const hash = computeProfileHash(canonicalProfile);
   const hanko = canonicalProfile.metadata.profileHanko as HankoString | undefined;

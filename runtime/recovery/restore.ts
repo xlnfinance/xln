@@ -97,7 +97,7 @@ import {
   assertCertifiedJHistoryIntegrity,
   assertValidatorJHistoryMatchesCertifiedAnchor,
 } from './../jurisdiction/local-history';
-import type { EntityReplica, Env, JReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeTx } from './../types';
+import type { EntityReplica, RuntimeState, JReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeTx } from './../types';
 import { clearDatabase } from './../utils';
 import type { PersistedFrameJournal } from './../storage/types';
 import { assertRuntimeRecoveryBundleAuthenticity } from './../recovery/bundle';
@@ -114,14 +114,14 @@ export type RuntimeRecoveryDeps = Pick<
   RuntimeModule,
   'closeRuntimeDb' | 'closeInfraDb' | 'startJurisdictionWatchers'
 > & {
-  ensureRuntimeConfig(env: Env): NonNullable<Env['runtimeConfig']>;
+  ensureRuntimeConfig(env: RuntimeState): NonNullable<RuntimeState['runtimeConfig']>;
   createEmptyEnv: RuntimeModule['createEmptyEnv'];
-  getStorageDb(env: Env, role?: StorageDbRole): Level<Buffer, Buffer>;
-  getFrameDb(env: Env): Level<Buffer, Buffer>;
-  tryOpenStorageDb(env: Env, role?: StorageDbRole): Promise<boolean>;
-  tryOpenFrameDb(env: Env): Promise<boolean>;
+  getStorageDb(env: RuntimeState, role?: StorageDbRole): Level<Buffer, Buffer>;
+  getFrameDb(env: RuntimeState): Level<Buffer, Buffer>;
+  tryOpenStorageDb(env: RuntimeState, role?: StorageDbRole): Promise<boolean>;
+  tryOpenFrameDb(env: RuntimeState): Promise<boolean>;
   enqueueRuntimeContinuation(
-    env: Env,
+    env: RuntimeState,
     inputs?: import('../types').EntityInput[],
     runtimeTxs?: RuntimeTx[],
     jInputs?: import('../types').JInput[],
@@ -129,14 +129,14 @@ export type RuntimeRecoveryDeps = Pick<
     reliableReceipts?: ReliableDeliveryReceipt[],
   ): void;
   infraGossipDbAccess: Parameters<typeof loadGossipProfilesFromInfraDb>[1];
-  generateHookPings(env: Env, nowMs?: number, queuedAt?: number): void;
+  generateHookPings(env: RuntimeState, nowMs?: number, queuedAt?: number): void;
   getRuntimeOutputRoutingDeps(): RuntimeOutputRoutingDeps;
   applyRuntimeInput: RuntimeModule['applyRuntimeInput'];
 };
 
 const ENV_APPLY_ALLOWED_KEY = Symbol.for('xln.runtime.env.apply.allowed');
 const ENV_REPLAY_MODE_KEY = Symbol.for('xln.runtime.env.replay.mode');
-const envRecord = (env: Env): Record<PropertyKey, unknown> => env as unknown as Record<PropertyKey, unknown>;
+const envRecord = (env: RuntimeState): Record<PropertyKey, unknown> => env as unknown as Record<PropertyKey, unknown>;
 const runtimeLog = createStructuredLogger('runtime');
 
 export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
@@ -177,7 +177,7 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
       runtimeId?: string | null;
       readOnly?: boolean;
     },
-  ): Promise<Env> => {
+  ): Promise<RuntimeState> => {
     if (!snapshot || typeof snapshot !== 'object') {
       throw new Error('RECOVERY_CHECKPOINT_INVALID');
     }
@@ -223,7 +223,7 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
     const browserVMState = normalizedSnapshot['browserVMState'];
     if (browserVMState !== undefined) {
       Object.assign(env, {
-        browserVMState: structuredClone(browserVMState) as Env['browserVMState'],
+        browserVMState: structuredClone(browserVMState) as RuntimeState['browserVMState'],
       });
     }
     const snapshotGossip =
@@ -331,7 +331,7 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
   };
 
   const assertRecoveryRuntimeMachineMatches = (
-    env: Env,
+    env: RuntimeState,
     expectedMachine: Record<string, unknown>,
     height: number,
     options?: { includeIngressWorkingState?: boolean },
@@ -361,7 +361,7 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
     }
   };
 
-  const replayRecoveryFrameJournals = async (env: Env, frames: PersistedFrameJournal[]): Promise<void> => {
+  const replayRecoveryFrameJournals = async (env: RuntimeState, frames: PersistedFrameJournal[]): Promise<void> => {
     // Live process() normalizes operational defaults before every reducer pass;
     // replay must enter the reducer with the same deterministic configuration.
     ensureRuntimeConfig(env);
@@ -549,7 +549,7 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
     }
   };
 
-  const failRecoveryRestoreAfterCleanup = async (env: Env, error: unknown): Promise<never> => {
+  const failRecoveryRestoreAfterCleanup = async (env: RuntimeState, error: unknown): Promise<never> => {
     const originalError = error instanceof Error ? error : new Error(String(error));
     const cleanup = await Promise.allSettled([closeRuntimeDb(env), closeInfraDb(env)]);
     const cleanupErrors = cleanup
@@ -569,7 +569,7 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
       targetHeight?: number;
       readOnly?: boolean;
     },
-  ): Promise<Env> => {
+  ): Promise<RuntimeState> => {
     const trustedRuntimeSeed = options?.runtimeSeed;
     if (!trustedRuntimeSeed) throw new Error('RECOVERY_BUNDLE_TRUSTED_SEED_REQUIRED');
     const validated = (bundles || []).map(bundle =>
@@ -696,7 +696,7 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
   // local persistence base at the recovered runtime height, anchored by a materialized
   // snapshot and a synthetic frame at that same height.
   const persistRestoredEnvToDBUnlocked = async (
-    env: Env,
+    env: RuntimeState,
     options: { onPersistenceBoundary?: StoragePersistenceBoundaryHook } = {},
   ): Promise<void> => {
     const restoredHeight = Number(env.height);
@@ -782,7 +782,7 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
   };
 
   const persistRestoredEnvToDB = async (
-    env: Env,
+    env: RuntimeState,
     options: { onPersistenceBoundary?: StoragePersistenceBoundaryHook } = {},
   ): Promise<void> => {
     if (!Number.isSafeInteger(Number(env.height)) || Number(env.height) <= 0) {
@@ -794,7 +794,7 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
     await withStorageWriterLock(env, () => persistRestoredEnvToDBUnlocked(env, options));
   };
 
-  const assertPersistedContractConfigReady = (env: Env, label: string): void => {
+  const assertPersistedContractConfigReady = (env: RuntimeState, label: string): void => {
     for (const [name, replica] of env.jReplicas.entries()) {
       try {
         requireDurableJurisdictionStack(replica);
@@ -805,7 +805,7 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
     }
   };
 
-  const findJurisdictionEntryByName = (env: Env, name: string): [string, JReplica] | null => {
+  const findJurisdictionEntryByName = (env: RuntimeState, name: string): [string, JReplica] | null => {
     const normalized = String(name || '')
       .trim()
       .toLowerCase();
@@ -820,7 +820,7 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
     return null;
   };
 
-  const registerCommittedSingleSignerWallet = (env: Env, replica: EntityReplica): void => {
+  const registerCommittedSingleSignerWallet = (env: RuntimeState, replica: EntityReplica): void => {
     const validators = replica.state.config.validators;
     if (validators.length !== 1 || replica.state.config.threshold !== 1n) return;
     const signerId = String(validators[0] || '')
@@ -879,14 +879,14 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
     registerWallet(replica.entityId, ethers.hexlify(privateKey));
   };
 
-  const registerCommittedSingleSignerWallets = (env: Env, entityIds?: ReadonlySet<string>): void => {
+  const registerCommittedSingleSignerWallets = (env: RuntimeState, entityIds?: ReadonlySet<string>): void => {
     for (const replica of env.eReplicas.values()) {
       if (entityIds && !entityIds.has(replica.entityId.toLowerCase())) continue;
       registerCommittedSingleSignerWallet(env, replica);
     }
   };
 
-  const reconcileCommittedRuntimeInfraEffects = async (env: Env, runtimeTxs: readonly RuntimeTx[]): Promise<void> => {
+  const reconcileCommittedRuntimeInfraEffects = async (env: RuntimeState, runtimeTxs: readonly RuntimeTx[]): Promise<void> => {
     const jurisdictionNames = new Set<string>();
     const importedEntityIds = new Set<string>();
     for (const runtimeTx of runtimeTxs) {
@@ -922,7 +922,7 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
     }
   };
 
-  const hasPendingLocalReliableOutput = (env: Env): boolean => {
+  const hasPendingLocalReliableOutput = (env: RuntimeState): boolean => {
     const runtimeId = normalizeRuntimeId(env.runtimeId);
     if (!runtimeId) return false;
     return (env.pendingNetworkOutputs ?? []).some(
@@ -931,7 +931,7 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
   };
 
   const queueLocalOutputsWithReliability = (
-    env: Env,
+    env: RuntimeState,
     localOutputs: readonly RoutedEntityInput[],
   ): RoutedEntityInput[] => {
     const runtimeId = normalizeRuntimeId(env.runtimeId);
@@ -961,7 +961,7 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
   };
 
   const applyDeterministicRuntimeOutputPlan = (
-    env: Env,
+    env: RuntimeState,
     entityOutbox: readonly RoutedEntityInput[],
     outputRoutingDeps: RuntimeOutputRoutingDeps,
   ) => {
@@ -992,7 +992,7 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
   };
 
   const applyCommittedLocalReliableReceipts = (
-    env: Env,
+    env: RuntimeState,
     commits: ReliableIngressCommit[],
     options: {
       isReplay?: boolean;

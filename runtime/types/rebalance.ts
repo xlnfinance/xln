@@ -16,7 +16,7 @@ export interface HubRebalanceConfig {
   rebalanceTimeoutMs?: number;
 }
 
-/** Per-token rebalance policy (stored per-token in AccountMachine). */
+/** Per-token rebalance policy (stored per-token in AccountState). */
 export interface RebalancePolicy {
   r2cRequestSoftLimit: bigint;
   hardLimit: bigint;

@@ -3,7 +3,7 @@ import { detectEntityType, extractNumberFromEntityId } from '../entity/factory';
 import { encodeJBatch, computeBatchHankoHash, type JBatch } from '../jurisdiction/batch';
 import { normalizeEntityId } from '../entity/id';
 import { signEntityHashes } from '../hanko/signing';
-import type { Env, JurisdictionConfig } from '../types';
+import type { RuntimeState, JurisdictionConfig } from '../types';
 import { connectJurisdictionAdapter, connectJurisdictionContracts } from './jurisdiction';
 
 export const debugFundReserves = async (
@@ -18,7 +18,7 @@ export const debugFundReserves = async (
 };
 
 export const submitProcessBatch = async (
-  env: Env,
+  env: RuntimeState,
   jurisdiction: JurisdictionConfig,
   entityId: string,
   batch: JBatch,

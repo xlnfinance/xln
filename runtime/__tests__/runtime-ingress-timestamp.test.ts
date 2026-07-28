@@ -18,7 +18,7 @@ import {
   startRuntimeLoop,
 } from '../runtime';
 import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
-import type { AccountMachine, EntityReplica, Env, JurisdictionConfig, JurisdictionEvent } from '../types';
+import type { AccountState, EntityReplica, RuntimeState, JurisdictionConfig, JurisdictionEvent } from '../types';
 import { getWallClockMs } from '../utils';
 
 const TEST_JURISDICTION = {
@@ -33,14 +33,14 @@ let testSeedCounter = 0;
 
 const uniqueSeed = (label: string): string => `${label}-${TEST_RUN_ID}-${++testSeedCounter}`;
 
-const createIsolatedEnv = (label: string): Env => createEmptyEnv(uniqueSeed(label));
+const createIsolatedEnv = (label: string): RuntimeState => createEmptyEnv(uniqueSeed(label));
 
 const testJurisdiction = (name = TEST_JURISDICTION.name): JurisdictionConfig => ({
   ...TEST_JURISDICTION,
   name,
 });
 
-const addTestJurisdiction = (env: Env, name = TEST_JURISDICTION.name, jadapter?: unknown): void => {
+const addTestJurisdiction = (env: RuntimeState, name = TEST_JURISDICTION.name, jadapter?: unknown): void => {
   env.activeJurisdiction = env.activeJurisdiction || name;
   env.jReplicas.set(name, {
     name,
@@ -108,7 +108,7 @@ const makeReplica = (entityId: string, timestamp: number, signerId = '1'): Entit
   }) as EntityReplica;
 
 const addSignableReplica = (
-  env: Env,
+  env: RuntimeState,
   timestamp: number,
   signerLabel = '1',
 ): { entityId: string; signerId: string; replica: EntityReplica } => {
@@ -491,7 +491,7 @@ describe('runtime ingress timestamp', () => {
     const entityId = generateLazyEntityId([signerId], 1n);
     const replica = makeReplica(entityId, 1_000, signerId);
     env.eReplicas.set(`${entityId}:${signerId}`, replica);
-    let committedInput: Env['runtimeInput'] | null = null;
+    let committedInput: RuntimeState['runtimeInput'] | null = null;
     registerRuntimeFrameCommitCallback(env, ({ runtimeInput }) => {
       committedInput = structuredClone(runtimeInput);
     });
@@ -527,7 +527,7 @@ describe('runtime ingress timestamp', () => {
 
   test('explicit live ingress timestamp keeps canonical state hash deterministic across wall-clock delay', async () => {
     const seed = uniqueSeed('runtime-explicit-ingress-deterministic-hash');
-    const buildEnv = (dbSuffix: string): { env: Env; entityId: string; signerId: string } => {
+    const buildEnv = (dbSuffix: string): { env: RuntimeState; entityId: string; signerId: string } => {
       const env = createEmptyEnv(seed);
       env.dbNamespace = `${String(env.runtimeId || 'runtime')}-${dbSuffix}`;
       env.quietRuntimeLogs = true;
@@ -538,7 +538,7 @@ describe('runtime ingress timestamp', () => {
       env.eReplicas.set(`${entityId}:${signerId}`, makeReplica(entityId, 1_000, signerId));
       return { env, entityId, signerId };
     };
-    const submit = async (env: Env, entityId: string, signerId: string): Promise<string> => {
+    const submit = async (env: RuntimeState, entityId: string, signerId: string): Promise<string> => {
       enqueueRuntimeInput(env, {
         timestamp: 20_000,
         runtimeTxs: [],
@@ -667,7 +667,7 @@ describe('runtime ingress timestamp', () => {
         timestamp: replica.state.timestamp - 20_000,
         accountTxs: [],
       },
-    } as AccountMachine);
+    } as AccountState);
 
     expect(entityNeedsPeriodicWake(replica)).toBe(true);
   });

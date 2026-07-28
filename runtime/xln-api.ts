@@ -6,7 +6,7 @@
  * is loaded dynamically at runtime.
  *
  * Usage in frontend:
- *   import type { XLNModule, Env } from '@xln/runtime/xln-api';
+ *   import type { XLNModule, RuntimeState } from '@xln/runtime/xln-api';
  */
 
 // Re-export identity types from ids.ts
@@ -24,14 +24,14 @@ export type {
 
 // Re-export core types from types.ts
 export type {
-  Env,
+  RuntimeState,
   EnvSnapshot,
   EntityReplica,
   EntityState,
   JReplica,
   SwapBookEntry,
   EntityTx,
-  AccountMachine,
+  AccountState,
   AccountFrame,
   AccountSnapshot,
   Delta,

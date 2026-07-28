@@ -8,14 +8,14 @@ import {
 } from '../account/state-root';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
 import { buildAccountProofBody } from '../protocol/dispute/proof-builder';
-import type { AccountMachine } from '../types';
+import type { AccountState } from '../types';
 import { createDefaultDelta } from '../validation-utils';
 
 const LEFT = `0x${'11'.repeat(32)}`;
 const RIGHT = `0x${'22'.repeat(32)}`;
 const DOMAIN = { chainId: 31337, depositoryAddress: `0x${'33'.repeat(20)}` };
 
-const account = (): AccountMachine => ({
+const account = (): AccountState => ({
   leftEntity: LEFT,
   rightEntity: RIGHT,
   domain: DOMAIN,
@@ -41,7 +41,7 @@ const account = (): AccountMachine => ({
   proofHeader: { fromEntity: LEFT, toEntity: RIGHT, nextProofNonce: 1 },
   proofBody: { tokenIds: [], deltas: [] },
   pendingWithdrawals: new Map(),
-} as AccountMachine);
+} as AccountState);
 
 describe('canonical account state root', () => {
   test('direct canonical RLP encoder stays byte-identical to the recursive oracle', () => {
@@ -112,12 +112,12 @@ describe('canonical account state root', () => {
     expect(computeAccountStateRoot(otherDomain)).not.toBe(root);
 
     for (const mutate of [
-      (machine: AccountMachine) => { machine.deltas.get(1)!.collateral = 1n; },
-      (machine: AccountMachine) => { machine.deltas.get(1)!.ondelta = 1n; },
-      (machine: AccountMachine) => { machine.deltas.get(1)!.offdelta = -1n; },
-      (machine: AccountMachine) => { machine.deltas.get(1)!.leftCreditLimit = 1n; },
-      (machine: AccountMachine) => { machine.deltas.get(1)!.rightAllowance = 1n; },
-      (machine: AccountMachine) => { machine.deltas.get(1)!.leftHold = 1n; },
+      (machine: AccountState) => { machine.deltas.get(1)!.collateral = 1n; },
+      (machine: AccountState) => { machine.deltas.get(1)!.ondelta = 1n; },
+      (machine: AccountState) => { machine.deltas.get(1)!.offdelta = -1n; },
+      (machine: AccountState) => { machine.deltas.get(1)!.leftCreditLimit = 1n; },
+      (machine: AccountState) => { machine.deltas.get(1)!.rightAllowance = 1n; },
+      (machine: AccountState) => { machine.deltas.get(1)!.leftHold = 1n; },
     ]) {
       const changed = structuredClone(base);
       mutate(changed);

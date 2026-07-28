@@ -10,7 +10,7 @@ import { finalizedJHistoryRoot } from '../../jurisdiction/local-history';
 import type {
   DisputeFinalizationEvidence,
   EntityState,
-  Env,
+  RuntimeState,
   JurisdictionEvent,
   JurisdictionEventData,
 } from '../../types';
@@ -33,7 +33,7 @@ export type LegacyJEventInput = {
 
 const signRange = (
   state: EntityState,
-  env: Env,
+  env: RuntimeState,
   signerId: string,
   unsigned: Omit<JurisdictionEventData, 'from' | 'signature' | 'observedAt'>,
 ): JurisdictionEventData => ({
@@ -50,7 +50,7 @@ const signRange = (
 export const buildJEventRangeData = (
   state: EntityState,
   data: LegacyJEventInput,
-  env: Env,
+  env: RuntimeState,
 ): JurisdictionEventData => {
   const events = (data.events ?? [data.event]).map((event, index) => ({
     ...event,
@@ -98,5 +98,5 @@ export const buildJEventRangeData = (
 export const applyJEventRange = async (
   state: EntityState,
   data: LegacyJEventInput,
-  env: Env,
+  env: RuntimeState,
 ): Promise<JEventApplyResult> => applyJEvent(state, buildJEventRangeData(state, data, env), env);

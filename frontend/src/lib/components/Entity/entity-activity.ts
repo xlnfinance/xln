@@ -1,4 +1,4 @@
-import type { AccountFrame, AccountMachine, AccountTx } from '@xln/runtime/xln-api';
+import type { AccountFrame, AccountState, AccountTx } from '@xln/runtime/xln-api';
 import type { FrontendXlnFunctions } from '$lib/stores/xlnStore';
 import type { EntityReplica } from '$lib/types/ui';
 import { entityAvatar as resolveEntityAvatar } from '$lib/utils/avatar';
@@ -128,7 +128,7 @@ function activityEntityName(
 }
 
 function frameActorMeta(
-  account: AccountMachine,
+  account: AccountState,
   byLeft: boolean | undefined,
   options: BuildEntityActivityRowsOptions,
 ): Pick<EntityActivityRow, 'actor' | 'actorSide' | 'actorLabel' | 'actorEntityId' | 'actorName' | 'actorAvatar' | 'actorInitials'> {

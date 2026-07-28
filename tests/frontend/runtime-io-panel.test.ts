@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 
-test('RuntimeIOPanel renders compact projections instead of raw Env dumps', () => {
+test('RuntimeIOPanel renders compact projections instead of raw RuntimeState dumps', () => {
   const source = readFileSync('frontend/src/lib/view/panels/RuntimeIOPanel.svelte', 'utf8');
 
   expect(source).toContain('via compact projections only');

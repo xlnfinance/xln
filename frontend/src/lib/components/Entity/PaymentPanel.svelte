@@ -4,9 +4,9 @@
   import { ScanLine, X, Check } from 'lucide-svelte';
   import jsQR from 'jsqr';
   import type {
-    AccountMachine,
+    AccountState,
     RoutedEntityInput as EntityInputPayload,
-    Env,
+    RuntimeState,
     PaymentRoute,
     PaymentDeliveryMode,
     Profile as GossipProfile,
@@ -44,7 +44,7 @@
 
   export let entityId: string;
   export let paymentView: PaymentPanelView = emptyPaymentPanelView();
-  export let actionRuntimeEnv: Env | null = null;
+  export let actionRuntimeEnv: RuntimeState | null = null;
   export let isLive: boolean;
   export let signerId: string | null = null;
   export let submitRuntimeInput: ((input: RuntimeInput) => Promise<unknown> | unknown) | null = null;
@@ -396,7 +396,7 @@
     return '';
   }
 
-  function resolvePaymentSignerId(env: Env | null): string {
+  function resolvePaymentSignerId(env: RuntimeState | null): string {
     if (env) {
       const runtimeSignerId = activeXlnFunctions?.resolveEntityProposerId?.(env, entityId, 'payment-panel');
       const normalizedRuntimeSignerId = normalizeEntityId(runtimeSignerId);

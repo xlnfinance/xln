@@ -8,7 +8,7 @@ import {
   hasConnectedEncryptedRelayClient,
   sendEntityInputDirectViaRelaySocketDelivery,
 } from '../server/relay-direct';
-import type { DeliverableEntityInput, Env, RuntimeEntityInputsEnvelope } from '../types';
+import type { DeliverableEntityInput, RuntimeState, RuntimeEntityInputsEnvelope } from '../types';
 
 type SentMessage = {
   type?: string;
@@ -89,7 +89,7 @@ describe('relay direct entity delivery', () => {
 
     const delivery = sendEntityInputDirectViaRelaySocketDelivery(
       store,
-      { runtimeId: sourceRuntimeId } as Env,
+      { runtimeId: sourceRuntimeId } as RuntimeState,
       targetRuntimeId,
       envelope,
       (_key, message) => logs.push(message),
@@ -170,7 +170,7 @@ describe('relay direct entity delivery', () => {
 
     const delivery = sendEntityInputDirectViaRelaySocketDelivery(
       store,
-      { runtimeId: sourceRuntimeId } as Env,
+      { runtimeId: sourceRuntimeId } as RuntimeState,
       targetRuntimeId,
       envelope,
       () => undefined,
@@ -230,7 +230,7 @@ describe('relay direct entity delivery', () => {
 
     const delivery = sendEntityInputDirectViaRelaySocketDelivery(
       store,
-      { runtimeId: sourceRuntimeId } as Env,
+      { runtimeId: sourceRuntimeId } as RuntimeState,
       targetRuntimeId,
       envelope,
       () => undefined,
@@ -292,7 +292,7 @@ describe('relay direct entity delivery', () => {
 
     const delivery = sendEntityInputDirectViaRelaySocketDelivery(
       store,
-      { runtimeId: sourceRuntimeId } as Env,
+      { runtimeId: sourceRuntimeId } as RuntimeState,
       targetRuntimeId,
       envelope,
       (_key, message) => logs.push(message),
@@ -357,7 +357,7 @@ describe('relay direct entity delivery', () => {
 
     const delivery = sendEntityInputDirectViaRelaySocketDelivery(
       store,
-      { runtimeId: sourceRuntimeId } as Env,
+      { runtimeId: sourceRuntimeId } as RuntimeState,
       targetRuntimeId,
       envelope,
       (_key, message) => logs.push(message),
@@ -419,7 +419,7 @@ describe('relay direct entity delivery', () => {
 
     const delivery = sendEntityInputDirectViaRelaySocketDelivery(
       store,
-      { runtimeId: sourceRuntimeId } as Env,
+      { runtimeId: sourceRuntimeId } as RuntimeState,
       targetRuntimeId,
       envelope,
       (_key, message) => logs.push(message),

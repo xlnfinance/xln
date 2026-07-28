@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { handleRebalanceRefund } from '../account/tx/handlers/rebalance-refund';
 import { handleRequestCollateral } from '../account/tx/handlers/request-collateral';
-import type { AccountMachine, RebalanceRequestFeeState } from '../types';
+import type { AccountState, RebalanceRequestFeeState } from '../types';
 import { createDefaultDelta } from '../validation-utils';
 
 const requestState = (
@@ -20,7 +20,7 @@ const requestState = (
   requestedByLeft,
 });
 
-const account = (): AccountMachine => ({
+const account = (): AccountState => ({
   currentHeight: 4,
   deltas: new Map([[1, {
     ...createDefaultDelta(1),
@@ -38,7 +38,7 @@ const account = (): AccountMachine => ({
       submittedAtByToken: new Map([[7, 123], [8, 123]]),
     },
   },
-}) as unknown as AccountMachine;
+}) as unknown as AccountState;
 
 describe('rebalance financial transitions', () => {
   test('partial refund preserves exact outstanding request until fully repaid', () => {

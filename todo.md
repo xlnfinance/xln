@@ -51,7 +51,7 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   `runtime/account`. Reduce every coordinator to at most 150 lines and every
   pure/helper function to at most 100 lines, with no file above 3000 lines;
   `check:state-machine-size` now reports zero functions over 150 lines and
-  ratchets the remaining 50 functions over 100 lines; it rejects any new debt
+  ratchets the remaining 46 functions over 100 lines; it rejects any new debt
   and every file over 3000 lines. Keep reducing the helper count to zero,
   tightening the exact ceiling after each phase split.
   Keep Runtime-machine logic under `runtime/runtime/`, Entity-machine logic
@@ -80,8 +80,8 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   their consensus protocols are identical. Preferred names are `RuntimeState`,
   `EntityState`, `AccountState`; `RuntimeInput`, `EntityInput`, `AccountInput`;
   `RuntimeFrame`, `EntityFrame`, `AccountFrame`; and matching `*Output` types.
-  Replace the historical `Env` and `AccountMachine` names as a separately
-  reviewable, compile-checked migration. Give each
+  The compile-checked migration from the historical `Env` and `AccountMachine`
+  names is complete, including frontend and test consumers. Give each
   machine the same narrow façade and phase vocabulary (`admission`, `apply`,
   `frame`, `consensus`/`commit`, `output`, `state-root`) while keeping Runtime
   WAL, Entity validator certification and Account bilateral ACK semantics

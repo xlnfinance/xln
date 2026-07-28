@@ -3,11 +3,11 @@ import { registerSignerKey } from '../account/crypto';
 import { serializeTaggedJson } from '../protocol/serialization';
 import { getControlBodyErrorStatus } from './auth';
 import type { parseTaggedControlBody } from './auth';
-import type { Env } from '../types';
+import type { RuntimeState } from '../types';
 
 type SignerControlDeps = {
   parseTaggedControlBody: typeof parseTaggedControlBody;
-  env: Env;
+  env: RuntimeState;
 };
 
 export const handleSignerRegistration = async (

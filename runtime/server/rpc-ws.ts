@@ -22,12 +22,12 @@ import type {
   RuntimeAdapterReadQuery,
 } from '../radapter/types';
 import type { RuntimeAdapterRequest } from '../radapter/types';
-import type { Env } from '../types';
+import type { RuntimeState } from '../types';
 import type { RelaySocket } from './relay-direct';
 import type { RegisterReceiptOptions, RuntimeIngressReceipt } from './ingress-receipts';
 
 type ServerRpcHandlerDeps = {
-  validateRuntimeInputAdmission?: (env: Env, input: Parameters<typeof enqueueRuntimeInput>[1]) => void;
+  validateRuntimeInputAdmission?: (env: RuntimeState, input: Parameters<typeof enqueueRuntimeInput>[1]) => void;
   registerRuntimeInputReceipt?: (input: RegisterReceiptOptions) => RuntimeIngressReceipt;
   readRuntimeInputReceipt?: (id: string) => RuntimeIngressReceipt | null;
   buildRuntimeInputStatusUrl?: (id: string) => string;
@@ -39,7 +39,7 @@ const stringList = (value: string[] | string | undefined): string[] =>
     .filter(Boolean);
 
 export const readFrameReceipts = async (
-  env: Env,
+  env: RuntimeState,
   query: RuntimeAdapterReadQuery = {},
 ): Promise<RuntimeAdapterFrameReceiptResponse> => {
   const latestHeight = await getPersistedLatestHeight(env);
@@ -84,7 +84,7 @@ export const readFrameReceipts = async (
 };
 
 const findPaymentRoutes = async (
-  env: Env,
+  env: RuntimeState,
   query: RuntimeAdapterReadQuery = {},
 ): Promise<RuntimeAdapterPaymentRoutesResponse> => {
   const sourceEntityId = String(query.sourceEntityId || '').trim().toLowerCase();
@@ -136,7 +136,7 @@ export const createServerRpcMessageHandler = ({
   readRuntimeInputReceipt,
   buildRuntimeInputStatusUrl,
 }: ServerRpcHandlerDeps) =>
-  async (ws: RelaySocket, request: RuntimeAdapterRequest, env: Env | null): Promise<void> => {
+  async (ws: RelaySocket, request: RuntimeAdapterRequest, env: RuntimeState | null): Promise<void> => {
     await handleRuntimeAdapterMessage(ws, request, env, {
       enqueueRuntimeInput,
       submitCrossJurisdictionIntent: async (targetEnv, route) => {

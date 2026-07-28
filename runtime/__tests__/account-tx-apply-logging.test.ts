@@ -2,9 +2,9 @@ import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { applyAccountTx } from '../account/tx/apply';
-import type { AccountMachine, AccountTx } from '../types';
+import type { AccountState, AccountTx } from '../types';
 
-const makeAccount = (): AccountMachine => ({
+const makeAccount = (): AccountState => ({
   proofHeader: { fromEntity: 'left', toEntity: 'right', nextProofNonce: 3 },
   leftEntityId: 'left',
   rightEntityId: 'right',
@@ -16,7 +16,7 @@ const makeAccount = (): AccountMachine => ({
   currentHeight: 0,
   mempool: [],
   frameHistory: [],
-} as unknown as AccountMachine);
+} as unknown as AccountState);
 
 test('applyAccountTx rejects account_frame without direct console output', async () => {
   const originalError = console.error;

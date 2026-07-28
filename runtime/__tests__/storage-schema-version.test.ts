@@ -14,7 +14,7 @@ import { seedFreshStorageEpoch } from '../storage/lifecycle';
 import { readStorageHead } from '../storage/read';
 import type { RuntimeDbLike, StorageFrameDbHead, StorageHead, StorageRuntimeConfig } from '../storage/types';
 import { verifyStorageTailIntegrity } from '../storage/verify';
-import type { Env } from '../types';
+import type { RuntimeState } from '../types';
 
 const currentHead = (schemaVersion: number): StorageHead => ({
   schemaVersion,
@@ -147,7 +147,7 @@ describe('storage schema boundary', () => {
     ).rejects.toThrow(`STORAGE_SCHEMA_MISMATCH:stored=2:current=${STORAGE_SCHEMA_VERSION}`);
     await expect(
       inspectStorage({
-        env: {} as Env,
+        env: {} as RuntimeState,
         tryOpenDb: async () => true,
         getRuntimeDb: () => legacyDb,
       }),

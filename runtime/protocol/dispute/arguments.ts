@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import type { AccountMachine, EntityState } from '../../types';
+import type { AccountState, EntityState } from '../../types';
 import type { ProofBodyStruct } from '../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
 import { asOfferId, type OfferId } from '../../orderbook/swap-keys';
 import { sortTransformerEntries } from '../transformer-ordering';
@@ -58,7 +58,7 @@ const hashHtlcSecret = (secret: string): string => {
 };
 
 const buildPendingSwapFillRatios = (
-  account: AccountMachine,
+  account: AccountState,
   snapshot: DisputeArgumentSnapshot,
 ): Map<OfferId, number> => {
   const ratios = new Map<OfferId, number>();
@@ -114,7 +114,7 @@ const collectKnownSecrets = (
  * authority; live route state is only optional evidence for its hashlocks.
  */
 export const collectKnownDisputeSecretsForSnapshot = (
-  account: AccountMachine,
+  account: AccountState,
   entityState: EntityState,
   counterpartyEntityId: string,
   proofbodyHash: string,
@@ -123,7 +123,7 @@ export const collectKnownDisputeSecretsForSnapshot = (
   return collectKnownSecrets(entityState, counterpartyEntityId, snapshot.plan.paymentHashlocks);
 };
 
-const collectPullResolves = (account: AccountMachine): Map<string, string> => {
+const collectPullResolves = (account: AccountState): Map<string, string> => {
   const resolves = new Map<string, string>();
   for (const tx of [...(account.pendingFrame?.accountTxs ?? []), ...(account.mempool ?? [])]) {
     if (tx.type !== 'pull_resolve') continue;
@@ -162,7 +162,7 @@ const hasArgumentData = (fillRatios: number[], secrets: string[], pulls: PullArg
 };
 
 export function captureDisputeArgumentSnapshot(
-  account: AccountMachine,
+  account: AccountState,
   proofbodyHash: string,
   nonce: number,
   proofBodyStruct: ProofBodyStruct,
@@ -202,7 +202,7 @@ export function captureDisputeArgumentSnapshot(
 }
 
 export function storeDisputeArgumentSnapshot(
-  account: AccountMachine,
+  account: AccountState,
   snapshot: DisputeArgumentSnapshot,
 ): void {
   account.disputeArgumentSnapshotsByHash ??= {};
@@ -211,7 +211,7 @@ export function storeDisputeArgumentSnapshot(
 }
 
 export function requireDisputeArgumentSnapshot(
-  account: AccountMachine,
+  account: AccountState,
   proofbodyHash: string,
   context: string,
 ): DisputeArgumentSnapshot {
@@ -221,7 +221,7 @@ export function requireDisputeArgumentSnapshot(
 }
 
 export function buildDisputeArgumentsForSnapshot(
-  account: AccountMachine,
+  account: AccountState,
   entityState: EntityState,
   counterpartyEntityId: string,
   proofbodyHash: string,

@@ -8,7 +8,7 @@ import {
   type RuntimeLoopConfig,
 } from '../runtime';
 import { transitionRuntimeLifecycle } from '../runtime/lifecycle';
-import type { Env, RuntimeP2PConfigLike } from '../types';
+import type { RuntimeState, RuntimeP2PConfigLike } from '../types';
 
 export type NodeRuntimeQuiesceOptions = {
   workTimeoutMs: number;
@@ -43,7 +43,7 @@ const errorText = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
 export const quiesceNodeRuntime = async (
-  env: Env,
+  env: RuntimeState,
   options: NodeRuntimeQuiesceOptions,
 ): Promise<NodeRuntimeQuiesceResult> => {
   const failures: string[] = [];
@@ -102,7 +102,7 @@ const copyP2PConfig = (
  * producers are stopped before the atomic storage callback runs.
  */
 export const checkpointNodeRuntime = async (
-  env: Env,
+  env: RuntimeState,
   options: NodeRuntimeCheckpointOptions,
 ): Promise<NodeRuntimeCheckpointResult> => {
   env.runtimeState = env.runtimeState ?? {};

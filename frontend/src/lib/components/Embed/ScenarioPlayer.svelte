@@ -9,7 +9,7 @@
   } from '$lib/stores/xlnStore';
   import { timeOperations } from '$lib/stores/timeStore';
   import { errorLog } from '$lib/stores/errorLogStore';
-  import type { Env, EnvSnapshot, XLNModule } from '@xln/runtime/xln-api';
+  import type { RuntimeState, EnvSnapshot, XLNModule } from '@xln/runtime/xln-api';
 
   type ScenarioOption = {
     id: string;
@@ -107,7 +107,7 @@
   let selectedScenarioId = scenarioOptions[0]!.id;
   let selectedScenario = scenarioOptions[0]!;
   let frames: EnvSnapshot[] = [];
-  let loadedEnv: Env | null = null;
+  let loadedEnv: RuntimeState | null = null;
   let currentFrame = 0;
   let status: 'idle' | 'loading' | 'ready' | 'error' = 'idle';
   let statusText = 'Ready to run';
@@ -319,7 +319,7 @@
     };
   }
 
-  function preparePreviewEnv(env: Env): Env {
+  function preparePreviewEnv(env: RuntimeState): RuntimeState {
     env.scenarioMode = true;
     env.scenarioJAdapterMode = 'browservm';
     env.quietRuntimeLogs = true;
@@ -336,7 +336,7 @@
     return env;
   }
 
-  function stopPreviewInfra(env: Env | null, label = 'preview'): string[] {
+  function stopPreviewInfra(env: RuntimeState | null, label = 'preview'): string[] {
     const diagnostics: string[] = [];
     if (!env) return diagnostics;
     for (const [, jReplica] of mapEntries<Record<string, unknown>>(env.jReplicas)) {
@@ -361,11 +361,11 @@
     return diagnostics;
   }
 
-  async function runRuntimeScenario(xln: XLNModule, option: ScenarioOption, env: Env): Promise<Env> {
+  async function runRuntimeScenario(xln: XLNModule, option: ScenarioOption, env: RuntimeState): Promise<RuntimeState> {
     const runtimeAny = xln as XLNModule & {
-      scenarios?: Record<string, (target: Env) => Promise<Env | void>>;
-      getScenario?: (id: string) => { run: (target: Env) => Promise<Env | void> } | undefined;
-      SCENARIOS?: Array<{ id: string; run: (target: Env) => Promise<Env | void> }>;
+      scenarios?: Record<string, (target: RuntimeState) => Promise<RuntimeState | void>>;
+      getScenario?: (id: string) => { run: (target: RuntimeState) => Promise<RuntimeState | void> } | undefined;
+      SCENARIOS?: Array<{ id: string; run: (target: RuntimeState) => Promise<RuntimeState | void> }>;
     };
     const runner = option.runner ? runtimeAny.scenarios?.[option.runner] : undefined;
     if (runner) {

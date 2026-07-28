@@ -5,7 +5,7 @@ const source = await Bun.file(typesPath).text();
 const file = ts.createSourceFile(typesPath, source, ts.ScriptTarget.Latest, true);
 const env = file.statements.find(
   (node): node is ts.InterfaceDeclaration =>
-    ts.isInterfaceDeclaration(node) && node.name.text === 'Env',
+    ts.isInterfaceDeclaration(node) && node.name.text === 'RuntimeState',
 );
 
 if (!env) throw new Error('RUNTIME_ENV_INTERFACE_MISSING');
@@ -28,4 +28,4 @@ if (queueFields.length !== 1 || queueFields[0] !== 'runtimeMempool') {
   );
 }
 
-console.log('✅ Runtime Env has one live mempool: runtimeMempool');
+console.log('✅ RuntimeState has one live mempool: runtimeMempool');

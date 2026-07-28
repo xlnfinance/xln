@@ -255,7 +255,7 @@ import { QUOTE_EXPIRY_MS } from '../types';
 import type {
   AccountFrame,
   AccountInput,
-  AccountMachine,
+  AccountState,
   AccountTx,
   ConsensusConfig,
   CrossJurisdictionSwapRoute,
@@ -264,7 +264,7 @@ import type {
   EntityReplica,
   EntityState,
   EntityTx,
-  Env,
+  RuntimeState,
   JInput,
   JurisdictionConfig,
   JurisdictionEvent,
@@ -301,7 +301,7 @@ const makeSingleSignerConfigFor = (signerId: string): EntityState['config'] => (
   },
 });
 
-const installSingleSignerBoard = (env: Env, state: EntityState, slot = '1'): string => {
+const installSingleSignerBoard = (env: RuntimeState, state: EntityState, slot = '1'): string => {
   const seed = env.runtimeSeed;
   if (!seed) throw new Error('TEST_RUNTIME_SEED_REQUIRED');
   const signerId = deriveSignerAddressSync(seed, slot).toLowerCase();
@@ -357,7 +357,7 @@ const makeEmptyProofBody = () => ({
   transformers: [],
 });
 
-const makeProposalAccount = (mempool: AccountTx[], leftEntity: string, rightEntity: string): AccountMachine => {
+const makeProposalAccount = (mempool: AccountTx[], leftEntity: string, rightEntity: string): AccountState => {
   return {
     leftEntity,
     rightEntity,
@@ -400,11 +400,11 @@ const makeProposalAccount = (mempool: AccountTx[], leftEntity: string, rightEnti
     }),
     disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
     jNonce: 0,
-  } as AccountMachine;
+  } as AccountState;
 };
 
 const setSyntheticPendingAccountProposal = (
-  account: AccountMachine,
+  account: AccountState,
   accountTxs: AccountTx[],
   timestamp: number,
   targetSignerId = 'fixture-counterparty-signer',
@@ -429,7 +429,7 @@ const setSyntheticPendingAccountProposal = (
 };
 
 const makeIncomingAccountFrame = (
-  account: AccountMachine,
+  account: AccountState,
   tx: AccountTx,
   byLeft: boolean,
   timestamp = 10_000,
@@ -493,7 +493,7 @@ const registerLazySigner = (seed: string, signerSlot: string): { signerId: strin
   };
 };
 
-const ensureCanonicalCommandBoardAuthority = async (env: Env, state: EntityState): Promise<void> => {
+const ensureCanonicalCommandBoardAuthority = async (env: RuntimeState, state: EntityState): Promise<void> => {
   const boardHash = hashBoard(encodeBoard(state.config, env)).toLowerCase();
   if (state.entityId.toLowerCase() === boardHash) return;
   const jurisdiction = state.config.jurisdiction;
@@ -522,7 +522,7 @@ const ensureCanonicalCommandBoardAuthority = async (env: Env, state: EntityState
 };
 
 const buildQuorumAuthorizedFrameTxs = async (
-  env: Env,
+  env: RuntimeState,
   state: EntityState,
   collectiveTxs: EntityTx[],
   frameTimestamp: number = env.timestamp,
@@ -659,7 +659,7 @@ const makeDisputeFinalizedFixture = (seed: string, finalProofbody: ProofBodyStru
     initialProofbodyHash: finalProofbodyHash,
     initialNonce: 7,
     finalizeQueued: true,
-  } as AccountMachine['activeDispute'];
+  } as AccountState['activeDispute'];
   state.accounts.set(counterpartyId, account);
   return {
     account,
@@ -695,7 +695,7 @@ const applyDisputeFinalizedFixture = async (fixture: ReturnType<typeof makeDispu
     fixture.env,
   );
 
-const sealAuditJSubmitAttempts = (env: Env, inputs: JInput[]): void => {
+const sealAuditJSubmitAttempts = (env: RuntimeState, inputs: JInput[]): void => {
   for (const input of inputs) {
     for (const jTx of input.jTxs) {
       if (jTx.type !== 'batch' || !jTx.data.runtimeSubmitAttempt) continue;
@@ -763,7 +763,7 @@ const sealAuditJSubmitAttempts = (env: Env, inputs: JInput[]): void => {
 };
 
 const submitAuditRuntimeJOutbox = async (
-  env: Env,
+  env: RuntimeState,
   inputs: JInput[],
   deps: Parameters<typeof submitRuntimeJOutbox>[2],
 ): Promise<void> => {
@@ -1254,7 +1254,7 @@ describe('audit fail-fast regressions', () => {
           },
         },
       ],
-    } as Env['gossip'];
+    } as RuntimeState['gossip'];
 
     expect(resolveEntityProposerId(env, entityId, 'audit')).toBe(actualSignerId);
   });
@@ -1286,7 +1286,7 @@ describe('audit fail-fast regressions', () => {
           },
         },
       ],
-    } as Env['gossip'];
+    } as RuntimeState['gossip'];
 
     expect(resolveEntityProposerId(env, entityId, 'remote-output')).toBe(hubSignerId);
   });
@@ -1428,7 +1428,7 @@ describe('audit fail-fast regressions', () => {
     sourceState.config = makeSingleSignerConfigFor(sourceSigner);
     sourceState.crossJurisdictionSwaps = new Map();
     attachSigningReplica(env, targetUser, targetSigner);
-    (env as Env & { gossip?: { getProfiles: () => unknown[] } }).gossip = {
+    (env as RuntimeState & { gossip?: { getProfiles: () => unknown[] } }).gossip = {
       getProfiles: () => [
         {
           entityId: targetUser,
@@ -2265,7 +2265,7 @@ describe('audit fail-fast regressions', () => {
     } satisfies CrossJurisdictionSwapRoute;
     const admittedRoute = route;
     const account = makeProposalAccount([], sourceUser, sourceHub);
-    (account as AccountMachine & { pulls: Map<string, typeof sourcePull> }).pulls = new Map([
+    (account as AccountState & { pulls: Map<string, typeof sourcePull> }).pulls = new Map([
       [
         sourcePull.pullId,
         {

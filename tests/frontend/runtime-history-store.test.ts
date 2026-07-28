@@ -50,7 +50,7 @@ const frameAt = (
 } as RuntimeAdapterViewFrame);
 
 describe('runtime history store', () => {
-  test('projects RuntimeAdapterViewFrame into bounded history metadata without Env', () => {
+  test('projects RuntimeAdapterViewFrame into bounded history metadata without RuntimeState', () => {
     const item = runtimeHistoryFrameFromViewFrame({
       runtimeId: 'H1',
       mode: 'remote',

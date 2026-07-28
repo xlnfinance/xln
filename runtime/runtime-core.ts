@@ -26,7 +26,7 @@ import { materializePendingJurisdictionImportResults } from './runtime/jurisdict
 import type {
   EntityInput,
   EntityTx,
-  Env,
+  RuntimeState,
   RuntimeInput,
 } from './types';
 import { createStructuredLogger } from './infra/logger';
@@ -85,7 +85,7 @@ export { prepareAtomicCrossJAccountInputs };
 
 const runtimeLog = createStructuredLogger('runtime');
 
-// Runtime execution state lives on Env. This module owns the canonical
+// Runtime execution state lives on RuntimeState. This module owns the canonical
 // frame transition; runtime.ts is intentionally only the public entrypoint.
 
 const runtimeLoopApi = createRuntimeLoopApi({
@@ -222,11 +222,11 @@ export {
   ensureGossipProfiles,
   clearGossip,
 };
-export const initEnv = (seed?: string | null): Env => {
+export const initEnv = (seed?: string | null): RuntimeState => {
   return createEmptyEnv(seed ?? null);
 };
 
-const notifyEnvChange = (env: Env) => {
+const notifyEnvChange = (env: RuntimeState) => {
   const state = ensureRuntimeState(env);
   if (!state.envChangeCallbacks || state.envChangeCallbacks.size === 0) return;
   for (const cb of state.envChangeCallbacks) {
@@ -238,7 +238,7 @@ const notifyEnvChange = (env: Env) => {
   }
 };
 
-const notifyRuntimeFrameCommitted = (env: Env, runtimeInput: RuntimeInput): void => {
+const notifyRuntimeFrameCommitted = (env: RuntimeState, runtimeInput: RuntimeInput): void => {
   const callbacks = ensureRuntimeState(env).runtimeFrameCommitCallbacks;
   if (!callbacks || callbacks.size === 0) return;
   const frame = { height: env.height, runtimeInput };
@@ -281,7 +281,7 @@ export type RuntimeCreationOptions = Readonly<{
   localSigners?: readonly RuntimeLocalSigner[];
 }>;
 
-const main = async (runtimeSeedOverride?: string | null, options?: RuntimeCreationOptions): Promise<Env> => {
+const main = async (runtimeSeedOverride?: string | null, options?: RuntimeCreationOptions): Promise<RuntimeState> => {
   const runtimeSeed = runtimeSeedOverride ?? null;
   if (options?.localSigners?.length && runtimeSeed === null) {
     throw new Error('RUNTIME_LOCAL_SIGNERS_REQUIRE_SEED');
@@ -347,12 +347,12 @@ const main = async (runtimeSeedOverride?: string | null, options?: RuntimeCreati
 };
 
 // === TIME MACHINE API ===
-const getHistory = (env: Env) => env.history || [];
-const getSnapshot = (env: Env, index: number) => {
+const getHistory = (env: RuntimeState) => env.history || [];
+const getSnapshot = (env: RuntimeState, index: number) => {
   const history = env.history || [];
   return index >= 0 && index < history.length ? history[index] : null;
 };
-const getCurrentHistoryIndex = (env: Env) => (env.history || []).length - 1;
+const getCurrentHistoryIndex = (env: RuntimeState) => (env.history || []).length - 1;
 
 // Clear database for a specific runtime and return a fresh env
 /**
@@ -360,7 +360,7 @@ const getCurrentHistoryIndex = (env: Env) => (env.history || []).length - 1;
  * Wraps applyRuntimeInput with a single entity tx
  */
 export const queueEntityInput = async (
-  env: Env,
+  env: RuntimeState,
   entityId: string,
   signerId: string,
   txData: { type: EntityTx['type'] } & Record<string, unknown>,
@@ -433,16 +433,16 @@ const hasPendingLocalReliableOutput = runtimeRecoveryApi.hasPendingLocalReliable
 const applyDeterministicRuntimeOutputPlan = runtimeRecoveryApi.applyDeterministicRuntimeOutputPlan;
 const applyCommittedLocalReliableReceipts = runtimeRecoveryApi.applyCommittedLocalReliableReceipts;
 
-type RuntimeState = NonNullable<Env['runtimeState']>;
+type RuntimeLifecycleState = NonNullable<RuntimeState['runtimeState']>;
 
 type RuntimeIngressDecision =
   | { ready: true }
   | { ready: false; outcome: 'no-work' | 'not-ready' };
 
 const collectRuntimeIngress = async (
-  env: Env,
+  env: RuntimeState,
   inputs: EntityInput[] | undefined,
-  state: RuntimeState,
+  state: RuntimeLifecycleState,
   runtimeDelay: number,
   profile: RuntimeProcessProfile,
 ): Promise<RuntimeIngressDecision> => {
@@ -494,8 +494,8 @@ const collectRuntimeIngress = async (
 
 type RuntimeFrameCandidate = {
   transaction: ReturnType<typeof createRuntimeFrameTransaction>;
-  env: Env;
-  state: RuntimeState;
+  env: RuntimeState;
+  state: RuntimeLifecycleState;
   mempool: RuntimeInput;
   runtimeInput: RuntimeInput;
   mempoolQueuedAt: number | undefined;
@@ -503,8 +503,8 @@ type RuntimeFrameCandidate = {
 };
 
 const openRuntimeFrameCandidate = (
-  liveEnv: Env,
-  liveState: RuntimeState,
+  liveEnv: RuntimeState,
+  liveState: RuntimeLifecycleState,
 ): RuntimeFrameCandidate => {
   const mempoolQueuedAt = requireRuntimeMempool(liveEnv).queuedAt;
   const quietRuntimeLogs = liveEnv.quietRuntimeLogs === true;
@@ -568,14 +568,14 @@ const openRuntimeFrameCandidate = (
 };
 
 type RuntimeFrameCommitResult = {
-  env: Env;
-  state: RuntimeState;
+  env: RuntimeState;
+  state: RuntimeLifecycleState;
   staleWriterStopped: boolean;
 };
 
 const commitRuntimeFrame = async (
-  candidateEnv: Env,
-  liveEnv: Env,
+  candidateEnv: RuntimeState,
+  liveEnv: RuntimeState,
   frame: FrameExecutionState,
   profile: RuntimeProcessProfile,
   options: {
@@ -670,7 +670,7 @@ const commitRuntimeFrame = async (
 // === CONSENSUS PROCESSING ===
 // ONE TICK = ONE ITERATION. No cascade. E→E communication always requires new tick.
 
-export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0) => {
+export const processRuntime = async (env: RuntimeState, inputs?: EntityInput[], runtimeDelay = 0) => {
   const liveEnv = env;
   // Direct callers and the background loop must hash the same effective local
   // configuration. Recovery replays normalize these defaults before applying
@@ -915,7 +915,7 @@ export const loadEnvFromDB = async (
     fromSnapshotHeight?: number;
     trustedJurisdictionRpcBindings?: readonly TrustedJurisdictionRpcBinding[];
   },
-): Promise<Env | null> => {
+): Promise<RuntimeState | null> => {
   try {
     const restored = await loadEnvFromStorageByReplay(
       runtimeId,
@@ -949,7 +949,7 @@ export const loadEnvFromDB = async (
   }
 };
 
-export const clearDB = async (env?: Env): Promise<void> => {
+export const clearDB = async (env?: RuntimeState): Promise<void> => {
   const targetEnv = env ?? createEmptyEnv(null);
 
   if (!runtimeIsBrowser && nodeProcess) {

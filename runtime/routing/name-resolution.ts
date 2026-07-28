@@ -5,7 +5,7 @@
  * We do not keep a second profile source of truth in the runtime DB.
  */
 
-import type { EntityTx, Env, NameSearchResult, ProfileUpdateTx } from '../types';
+import type { EntityTx, RuntimeState, NameSearchResult, ProfileUpdateTx } from '../types';
 import { compareStableText } from '../protocol/serialization';
 import { formatEntityDisplay, generateEntityAvatar } from '../utils';
 
@@ -23,7 +23,7 @@ const normalizeName = (value: string, entityId: string): string => {
   return trimmed.length > 0 ? trimmed : formatEntityDisplay(entityId);
 };
 
-const collectProfiles = (env: Env | null | undefined): Map<string, DisplayProfile> => {
+const collectProfiles = (env: RuntimeState | null | undefined): Map<string, DisplayProfile> => {
   const profiles = new Map<string, DisplayProfile>();
   if (!env) return profiles;
 
@@ -66,7 +66,7 @@ export const createProfileUpdateTx = (
 };
 
 export const searchRuntimeEntityNames = async (
-  env: Env | null | undefined,
+  env: RuntimeState | null | undefined,
   query: string,
   limit: number = 10,
 ): Promise<NameSearchResult[]> => {
@@ -95,7 +95,7 @@ export const searchRuntimeEntityNames = async (
 };
 
 export const resolveRuntimeEntityName = async (
-  env: Env | null | undefined,
+  env: RuntimeState | null | undefined,
   entityId: string,
 ): Promise<string | null> => {
   const normalizedEntityId = normalizeId(entityId);
@@ -104,7 +104,7 @@ export const resolveRuntimeEntityName = async (
 };
 
 export const getRuntimeEntityDisplayInfo = async (
-  env: Env | null | undefined,
+  env: RuntimeState | null | undefined,
   entityId: string,
 ): Promise<{ name: string; avatar: string }> => {
   const normalizedEntityId = normalizeId(entityId);

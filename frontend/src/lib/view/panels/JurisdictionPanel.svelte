@@ -8,7 +8,7 @@
   import type { Writable } from 'svelte/store';
   import { get } from 'svelte/store';
   import { panelBridge } from '../utils/panelBridge';
-  import type { BrowserVMTokenInfo, Env, EnvSnapshot, JReplica } from '@xln/runtime/xln-api';
+  import type { BrowserVMTokenInfo, RuntimeState, EnvSnapshot, JReplica } from '@xln/runtime/xln-api';
   import { activeRuntime, allRuntimes } from '$lib/stores/vaultStore';
   import { settings } from '$lib/stores/settingsStore';
   import { xlnFunctions, xlnInstance } from '$lib/stores/xlnStore';
@@ -16,7 +16,7 @@
 
   // Props
   interface Props {
-    runtimeFrameEnv: Writable<Env | null>;
+    runtimeFrameEnv: Writable<RuntimeState | null>;
     runtimeFrameHistory?: Writable<EnvSnapshot[]> | undefined;
     runtimeFrameTimeIndex?: Writable<number> | undefined;
     selectedJurisdiction?: string | null;
@@ -102,7 +102,7 @@
   // ═══════════════════════════════════════════════════════════════════════════
 
   // Get current frame based on timeIndex
-  function getCurrentFrame(): Env | EnvSnapshot | null {
+  function getCurrentFrame(): RuntimeState | EnvSnapshot | null {
     const timeIndex = runtimeFrameTimeIndex ? get(runtimeFrameTimeIndex) : -1;
     const history = runtimeFrameHistory ? get(runtimeFrameHistory) : [];
     const env = get(runtimeFrameEnv);

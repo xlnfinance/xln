@@ -1,4 +1,4 @@
-import type { CrossJurisdictionSwapRoute, RuntimeInput, Env } from '../types';
+import type { CrossJurisdictionSwapRoute, RuntimeInput, RuntimeState } from '../types';
 import type {
   RuntimeAdapter,
   RuntimeAdapterAuthLevel,
@@ -14,22 +14,22 @@ import { resolveRuntimeAdapterRead, type RuntimeAdapterResolveContext } from './
 import { assertRuntimeCommandReady, getRuntimeCommandReadiness } from '../runtime/lifecycle';
 
 export type EmbeddedRuntimeAdapterDeps = {
-  getEnv: () => Env | null;
-  main?: (seed?: string | null) => Promise<Env>;
-  enqueueRuntimeInput: (env: Env, input: RuntimeInput) => void;
-  validateRuntimeInputAdmission: (env: Env, input: RuntimeInput) => void;
+  getEnv: () => RuntimeState | null;
+  main?: (seed?: string | null) => Promise<RuntimeState>;
+  enqueueRuntimeInput: (env: RuntimeState, input: RuntimeInput) => void;
+  validateRuntimeInputAdmission: (env: RuntimeState, input: RuntimeInput) => void;
   submitCrossJurisdictionIntent: (
-    env: Env,
+    env: RuntimeState,
     route: CrossJurisdictionSwapRoute,
   ) => Promise<RuntimeAdapterCrossJurisdictionIntentResult>;
-  controlRuntime?: (env: Env, action: RuntimeAdapterControlAction) => Promise<unknown>;
-  registerEnvChangeCallback: (env: Env, cb: (env: Env) => void) => (() => void);
-  buildReadContext?: (env: Env) => Partial<Omit<RuntimeAdapterResolveContext, 'env'>>;
+  controlRuntime?: (env: RuntimeState, action: RuntimeAdapterControlAction) => Promise<unknown>;
+  registerEnvChangeCallback: (env: RuntimeState, cb: (env: RuntimeState) => void) => (() => void);
+  buildReadContext?: (env: RuntimeState) => Partial<Omit<RuntimeAdapterResolveContext, 'env'>>;
 };
 
 export class EmbeddedRuntimeAdapter implements RuntimeAdapter {
   readonly mode = 'embedded' as const;
-  private env: Env | null = null;
+  private env: RuntimeState | null = null;
   private unregister: (() => void) | null = null;
   private statusCbs = new Set<(status: RuntimeAdapterStatus) => void>();
   private changeCbs = new Set<(height: number) => void>();
@@ -155,11 +155,11 @@ export class EmbeddedRuntimeAdapter implements RuntimeAdapter {
     for (const cb of this.statusCbs) cb(status);
   }
 
-  private resolveEnv(): Env | null {
+  private resolveEnv(): RuntimeState | null {
     return this.deps.getEnv() ?? this.env;
   }
 
-  private requireCommandReady(env: Env): void {
+  private requireCommandReady(env: RuntimeState): void {
     try {
       assertRuntimeCommandReady(env);
     } catch (error) {

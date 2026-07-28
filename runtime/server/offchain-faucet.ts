@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import type { EntityTx, Env, RuntimeInput } from '../types';
+import type { EntityTx, RuntimeState, RuntimeInput } from '../types';
 import { safeStringify } from '../protocol/serialization';
 import type { Profile } from '../networking/gossip';
 import { normalizeRuntimeKey, pushDebugEvent, type RelayStore } from '../relay/store';
@@ -22,13 +22,13 @@ const faucetLog = createStructuredLogger('server.faucet');
 
 export const handleOffchainFaucet = async (input: {
   req: Request;
-  env: Env | null;
+  env: RuntimeState | null;
   headers: HeadersInit;
   relayStore: RelayStore;
-  enqueueRuntimeInput: (env: Env, runtimeInput: RuntimeInput) => void;
-  validateRuntimeInputAdmission: (env: Env, runtimeInput: RuntimeInput) => void;
+  enqueueRuntimeInput: (env: RuntimeState, runtimeInput: RuntimeInput) => void;
+  validateRuntimeInputAdmission: (env: RuntimeState, runtimeInput: RuntimeInput) => void;
   registerReceipt: (receipt: RegisterReceiptOptions) => RuntimeIngressReceipt;
-  getCurrentRuntimeHeight: (env: Env | null) => number;
+  getCurrentRuntimeHeight: (env: RuntimeState | null) => number;
   buildRuntimeInputStatusUrl: (id: string) => string;
 }): Promise<Response> => {
   const {

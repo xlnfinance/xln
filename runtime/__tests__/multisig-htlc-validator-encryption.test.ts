@@ -21,11 +21,11 @@ import { NobleCryptoProvider } from '../protocol/crypto/noble';
 import { generateLazyEntityId } from '../entity/factory';
 import { buildQuorumHanko, getEntityConfigBoardHash, verifyHankoForHash } from '../hanko/signing';
 import type {
-  AccountMachine,
+  AccountState,
   CertifiedRegistrationEvidence,
   EntityCandidateEffect,
   EntityState,
-  Env,
+  RuntimeState,
   JurisdictionConfig,
   JurisdictionEvent,
 } from '../types';
@@ -223,7 +223,7 @@ const certifyManifest = async (manifestHash: string) => {
     shares: { [first.signer]: 1n, [second.signer]: 1n },
   };
   const hanko = await buildQuorumHanko(
-    {} as Env,
+    {} as RuntimeState,
     ENTITY_ID,
     profileHash,
     [first, second].map((validator) => ({
@@ -302,7 +302,7 @@ const processSenderState = (
 });
 
 const anchorManualGenesisReplica = async (
-  env: Env,
+  env: RuntimeState,
   state: EntityState,
 ): Promise<CertifiedRegistrationEvidence | null> => {
   const boardHash = await getEntityConfigBoardHash(env, state.config);
@@ -319,7 +319,7 @@ const anchorManualGenesisReplica = async (
 };
 
 const certifyRegisteredBoardPrefix = async (
-  env: Env,
+  env: RuntimeState,
   entityId: string,
   signerId: string,
   evidence: CertifiedRegistrationEvidence,
@@ -403,13 +403,13 @@ const certifyRegisteredBoardPrefix = async (
   env.eReplicas.set(replicaKey, applied.workingReplica);
 };
 
-const paymentAccount = (sourceEntityId: string, targetEntityId: string): AccountMachine => {
+const paymentAccount = (sourceEntityId: string, targetEntityId: string): AccountState => {
   const [leftEntity, rightEntity] = [sourceEntityId, targetEntityId].sort() as [string, string];
   const sourceIsLeft = sourceEntityId === leftEntity;
   const delta = createDefaultDelta(1);
   if (sourceIsLeft) delta.leftCreditLimit = 1_000n;
   else delta.rightCreditLimit = 1_000n;
-  const currentFrame: AccountMachine['currentFrame'] = {
+  const currentFrame: AccountState['currentFrame'] = {
     height: 0,
     timestamp: 0,
     jHeight: 0,
@@ -491,7 +491,7 @@ const certifiedGossipProfile = async (): Promise<Profile> => {
   };
   const profileHash = computeProfileHash(profile);
   profile.metadata.profileHanko = await buildQuorumHanko(
-    {} as Env,
+    {} as RuntimeState,
     ENTITY_ID,
     profileHash,
     [first, second].map((validator) => ({
@@ -504,7 +504,7 @@ const certifiedGossipProfile = async (): Promise<Profile> => {
       shares: { [first.signer]: 1n, [second.signer]: 1n },
     },
   );
-  const signingEnv = { runtimeSeed: 'multisig-profile-route' } as Env;
+  const signingEnv = { runtimeSeed: 'multisig-profile-route' } as RuntimeState;
   registerSignerKey(signingEnv, first.signerId, first.privateKey);
   return signProfileRuntimeRoute(signingEnv, profile, first.signerId);
 };
@@ -558,13 +558,13 @@ const certifiedSenderGossipProfile = async (): Promise<Profile> => {
   };
   const profileHash = computeProfileHash(profile);
   profile.metadata.profileHanko = await buildQuorumHanko(
-    {} as Env,
+    {} as RuntimeState,
     SENDER_ID,
     profileHash,
     [{ signerId: SENDER_SIGNER, signature: signDigest(SENDER_PRIVATE_KEY, profileHash) }],
     { threshold: 1n, validators: [SENDER_SIGNER], shares: { [SENDER_SIGNER]: 1n } },
   );
-  const signingEnv = { runtimeSeed: 'sender-profile-route' } as Env;
+  const signingEnv = { runtimeSeed: 'sender-profile-route' } as RuntimeState;
   registerSignerKey(signingEnv, SENDER_SIGNER, SENDER_PRIVATE_KEY);
   return signProfileRuntimeRoute(signingEnv, profile, SENDER_SIGNER);
 };
@@ -620,13 +620,13 @@ const certifiedSingleSignerHubProfile = async (nextHopId: string): Promise<Profi
   };
   const profileHash = computeProfileHash(profile);
   profile.metadata.profileHanko = await buildQuorumHanko(
-    {} as Env,
+    {} as RuntimeState,
     entityId,
     profileHash,
     [{ signerId: validator.signer, signature: signDigest(validator.privateKey, profileHash) }],
     { threshold: 1n, validators: [validator.signer], shares: { [validator.signer]: 1n } },
   );
-  const signingEnv = { runtimeSeed: 'single-hub-profile-route' } as Env;
+  const signingEnv = { runtimeSeed: 'single-hub-profile-route' } as RuntimeState;
   registerSignerKey(signingEnv, validator.signerId, validator.privateKey);
   return signProfileRuntimeRoute(signingEnv, profile, validator.signerId);
 };
@@ -674,13 +674,13 @@ const certifiedProcessSourceProfile = async (
   };
   const profileHash = computeProfileHash(profile);
   profile.metadata.profileHanko = await buildQuorumHanko(
-    {} as Env,
+    {} as RuntimeState,
     entityId,
     profileHash,
     [{ signerId: validator.signer, signature: signDigest(validator.privateKey, profileHash) }],
     { threshold: 1n, validators: [validator.signer], shares: { [validator.signer]: 1n } },
   );
-  const signingEnv = { runtimeSeed: 'process-source-profile-route' } as Env;
+  const signingEnv = { runtimeSeed: 'process-source-profile-route' } as RuntimeState;
   registerSignerKey(signingEnv, validator.signerId, validator.privateKey);
   return signProfileRuntimeRoute(signingEnv, profile, validator.signerId);
 };
@@ -750,7 +750,7 @@ describe('multisig HTLC validator encryption', () => {
   });
 
   test('consensus replay canonicalizes the full manifest and independently derives the profile secondary hash', () => {
-    const env = { eReplicas: new Map() } as unknown as Env;
+    const env = { eReplicas: new Map() } as unknown as RuntimeState;
     const state = certificationState();
     state.config.validators.reverse();
     const result = handleCertifyProfileEntityTx(env, state, {
@@ -886,7 +886,7 @@ describe('multisig HTLC validator encryption', () => {
     // calling the production profile parser that is expected to reject it.
     const profileHash = computeEntityProfileDescriptorHash(profileToEntityProfileDescriptor(profile));
     profile.metadata.profileHanko = await buildQuorumHanko(
-      {} as Env,
+      {} as RuntimeState,
       ENTITY_ID,
       profileHash,
       [first, second].map((validator) => ({
@@ -1115,7 +1115,7 @@ describe('multisig HTLC validator encryption', () => {
       rightEntity,
       deltas: new Map([[1, delta]]),
       locks: new Map([[lockId, lock]]),
-    } as unknown as AccountMachine;
+    } as unknown as AccountState;
 
     const offered = await handleHtlcResolve(
       account,
@@ -1211,18 +1211,18 @@ describe('multisig HTLC validator encryption', () => {
     );
     const withoutAck = structuredClone(state);
     withoutAck.htlcRoutes.get(lock.hashlock)!.acceptedAccountFrameHash = `0x${'7d'.repeat(32)}`;
-    await expect(validateHtlcOnionAdvanceTx({} as Env, withoutAck, reveal))
+    await expect(validateHtlcOnionAdvanceTx({} as RuntimeState, withoutAck, reveal))
       .rejects.toThrow('HTLC_ONION_ADVANCE_REVEAL_ACK_BINDING_MISMATCH');
     const wrongNetAmount = structuredClone(reveal);
     wrongNetAmount.data.amount -= 1n;
-    await expect(validateHtlcOnionAdvanceTx({} as Env, state, wrongNetAmount))
+    await expect(validateHtlcOnionAdvanceTx({} as RuntimeState, state, wrongNetAmount))
       .rejects.toThrow('HTLC_ONION_ADVANCE_REVEAL_ROUTE_BINDING_MISMATCH');
     expect(() => assertNoConsensusVisibleHtlcPaymentSecrets([reveal])).not.toThrow();
     expect(() => validateEntityTx(reveal, 'HTLC_ACCEPTED_REVEAL_WAL')).not.toThrow();
 
     const emitted: string[] = [];
     const applied = await handleHtlcOnionAdvance(
-      { emit: (type: string) => emitted.push(type) } as unknown as Env,
+      { emit: (type: string) => emitted.push(type) } as unknown as RuntimeState,
       state,
       reveal,
     );
@@ -1378,7 +1378,7 @@ describe('multisig HTLC validator encryption', () => {
         getProfiles: () => [senderProfile, profile],
         getNetworkGraph: () => ({ findPaths: async () => [] }),
       },
-    } as unknown as Env;
+    } as unknown as RuntimeState;
     const secret = `0x${'ad'.repeat(32)}`;
     const raw = withDeterministicHtlcTestSecret({
       type: 'htlcPayment' as const,
@@ -1459,7 +1459,7 @@ describe('multisig HTLC validator encryption', () => {
         getProfiles: () => [senderProfile, profile],
         getNetworkGraph: () => ({ findPaths: async () => [] }),
       },
-    } as unknown as Env;
+    } as unknown as RuntimeState;
     const prepared = await prepareHtlcPaymentEntityTx(env, state, {
       type: 'htlcPayment',
       data: {
@@ -1471,7 +1471,7 @@ describe('multisig HTLC validator encryption', () => {
     });
     expect(prepared.data).not.toHaveProperty('secret');
     expect(prepared.data.hashlock).toMatch(/^0x[0-9a-f]{64}$/);
-    await expect(validatePreparedHtlcPayment({ ...env, gossip: undefined } as Env, state, prepared)).resolves.toBeDefined();
+    await expect(validatePreparedHtlcPayment({ ...env, gossip: undefined } as RuntimeState, state, prepared)).resolves.toBeDefined();
     await expect(prepareHtlcPaymentEntityTx(env, state, {
       type: 'htlcPayment',
       data: {
@@ -1500,7 +1500,7 @@ describe('multisig HTLC validator encryption', () => {
         getNetworkGraph: () => ({ findPaths: async () => [] }),
       },
       emit: (eventName: string, data: Record<string, unknown>) => emitted.push({ eventName, data }),
-    } as unknown as Env;
+    } as unknown as RuntimeState;
     const prepared = await prepareHtlcPaymentEntityTx(env, state, withDeterministicHtlcTestSecret({
       type: 'htlcPayment',
       data: {
@@ -1554,7 +1554,7 @@ describe('multisig HTLC validator encryption', () => {
         getNetworkGraph: () => ({ findPaths: async () => [] }),
       },
       emit: (eventName: string, data: Record<string, unknown>) => emitted.push({ eventName, data }),
-    } as unknown as Env;
+    } as unknown as RuntimeState;
     const prepared = await prepareHtlcPaymentEntityTx(env, state, withDeterministicHtlcTestSecret({
       type: 'htlcPayment',
       data: {
@@ -1600,7 +1600,7 @@ describe('multisig HTLC validator encryption', () => {
         signerId: 'sender',
         state,
       }]]),
-    } as unknown as Env;
+    } as unknown as RuntimeState;
     await expect(prepareHtlcPaymentEntityInputs(env, [{
       entityId: SENDER_ID,
       signerId: 'sender',
@@ -1967,7 +1967,7 @@ describe('multisig HTLC validator encryption', () => {
         getProfiles: () => [senderProfile, hub, destination],
         getNetworkGraph: () => ({ findPaths: async () => [] }),
       },
-    } as unknown as Env;
+    } as unknown as RuntimeState;
     const rawSecret = `0x${'bc'.repeat(32)}`;
     const raw = withDeterministicHtlcTestSecret({
       type: 'htlcPayment' as const,
@@ -1988,12 +1988,12 @@ describe('multisig HTLC validator encryption', () => {
       ...admissionEnv,
       gossip: undefined,
       jReplicas: new Map([['j', { blockNumber: 41 }]]),
-    } as unknown as Env;
+    } as unknown as RuntimeState;
     const validatorEnvB = {
       ...admissionEnv,
       gossip: undefined,
       jReplicas: new Map([['j', { blockNumber: 999 }]]),
-    } as unknown as Env;
+    } as unknown as RuntimeState;
     const [validatedA, validatedB] = await Promise.all([
       validatePreparedHtlcPayment(validatorEnvA, structuredClone(state), prepared),
       validatePreparedHtlcPayment(validatorEnvB, structuredClone(state), prepared),
@@ -2092,7 +2092,7 @@ describe('multisig HTLC validator encryption', () => {
         shares: { [first.signer]: 1n, [second.signer]: 1n },
       },
     });
-    const envFor = (validator: typeof first): Env => ({
+    const envFor = (validator: typeof first): RuntimeState => ({
       runtimeSeed: `isolated-${validator.signerId}`,
       runtimeState: {},
       eReplicas: new Map([[`${ENTITY_ID}:${validator.signer}`, {
@@ -2102,8 +2102,8 @@ describe('multisig HTLC validator encryption', () => {
       }]]),
       gossip: { getProfiles: () => [] },
       warn: () => {},
-    } as unknown as Env);
-    const p2pFor = (env: Env, runtimeId: string) => new RuntimeP2P({
+    } as unknown as RuntimeState);
+    const p2pFor = (env: RuntimeState, runtimeId: string) => new RuntimeP2P({
       env,
       runtimeId,
       onEntityInputs: () => {},

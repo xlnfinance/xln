@@ -12,10 +12,10 @@ import { handleResolveHtlcLockEntityTx } from '../entity/tx/handlers/htlc-direct
 import { pruneSettledOriginatedHtlcRoutes } from '../entity/tx/htlc-route-lifecycle';
 import { publishEntityCandidateEffects } from '../runtime/env-events';
 import { createEmptyEnv } from '../runtime';
-import type { AccountMachine, EntityCandidateEffect, EntityReplica } from '../types';
+import type { AccountState, EntityCandidateEffect, EntityReplica } from '../types';
 
 const makeReplica = (entityId: string, counterpartyId: string): EntityReplica => {
-  const account: AccountMachine = {
+  const account: AccountState = {
     leftEntity: entityId,
     rightEntity: counterpartyId,
     domain: {

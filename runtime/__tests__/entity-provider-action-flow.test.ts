@@ -57,7 +57,7 @@ import {
 } from '../wal/snapshot';
 import { hydrateEntityStateFromStorage } from '../storage/hydration';
 import { projectEntityCoreDoc } from '../storage/projections';
-import type { ConsensusConfig, EntityReplica, EntityState, EntityTx, Env, JTx } from '../types';
+import type { ConsensusConfig, EntityReplica, EntityState, EntityTx, RuntimeState, JTx } from '../types';
 import { applyJEventRange } from './helpers/j-history';
 
 const address = (byte: string): string => `0x${byte.repeat(20)}`;
@@ -84,7 +84,7 @@ const baseState = (entityId: string, config: ConsensusConfig, timestamp: number)
   lockBook: new Map(),
 });
 
-const installCertifiedBoardAuthority = (env: Env, state: EntityState): void => {
+const installCertifiedBoardAuthority = (env: RuntimeState, state: EntityState): void => {
   const jurisdiction = state.config.jurisdiction;
   if (!jurisdiction) throw new Error('TEST_CERTIFIED_BOARD_JURISDICTION_MISSING');
   const boardHash = hashBoard(encodeBoard(state.config, env));
@@ -119,7 +119,7 @@ const installCertifiedBoardAuthority = (env: Env, state: EntityState): void => {
 };
 
 const applyCertifiedBoardEvent = (
-  env: Env,
+  env: RuntimeState,
   state: EntityState,
   event: Parameters<typeof applyCertifiedBoardRegistryEvent>[3],
 ): void => {

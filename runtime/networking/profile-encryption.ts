@@ -1,6 +1,6 @@
 import { getSignerAddress, getSignerPublicKey, signAccountFrame } from '../account/crypto';
 import { hasLocalSignerKey } from '../entity/crypto';
-import type { EntityState, Env } from '../types';
+import type { EntityState, RuntimeState } from '../types';
 import { serializeTaggedJson } from '../protocol/serialization';
 import {
   computeValidatorEncryptionAttestationDigest,
@@ -19,7 +19,7 @@ export type ValidatorEncryptionAnnouncement = Readonly<{
 const PROFILE_ENCRYPTION_CACHE = Symbol.for('xln.runtime.profile-encryption-cache');
 type ProfileEncryptionCache = Map<string, Map<string, ValidatorEncryptionAttestation>>;
 
-const cacheForEnv = (env: Env): ProfileEncryptionCache => {
+const cacheForEnv = (env: RuntimeState): ProfileEncryptionCache => {
   const record = env as unknown as Record<PropertyKey, unknown>;
   const existing = record[PROFILE_ENCRYPTION_CACHE];
   if (existing instanceof Map) return existing as ProfileEncryptionCache;
@@ -43,7 +43,7 @@ const publicKeyHex = (bytes: Uint8Array): string => {
 };
 
 export const buildValidatorEncryptionBoard = (
-  env: Env,
+  env: RuntimeState,
   state: EntityState,
 ): ValidatorEncryptionBoard => ({
   entityId: entityKey(state.entityId),
@@ -65,7 +65,7 @@ export const buildValidatorEncryptionBoard = (
   }),
 });
 
-const findLocalReplica = (env: Env, entityId: string, signerId: string) => {
+const findLocalReplica = (env: RuntimeState, entityId: string, signerId: string) => {
   const entity = entityKey(entityId);
   const signer = signerKey(signerId);
   for (const replica of env.eReplicas.values()) {
@@ -75,7 +75,7 @@ const findLocalReplica = (env: Env, entityId: string, signerId: string) => {
 };
 
 export const createLocalValidatorEncryptionAttestation = (
-  env: Env,
+  env: RuntimeState,
   state: EntityState,
   signerId: string,
 ): ValidatorEncryptionAttestation => {
@@ -104,7 +104,7 @@ export const createLocalValidatorEncryptionAttestation = (
   return { ...body, signature: signAccountFrame(env, signerId, computeValidatorEncryptionAttestationDigest(body)) };
 };
 
-const cacheForEntity = (env: Env, entityId: string): Map<string, ValidatorEncryptionAttestation> => {
+const cacheForEntity = (env: RuntimeState, entityId: string): Map<string, ValidatorEncryptionAttestation> => {
   const byEntity = cacheForEnv(env);
   const key = entityKey(entityId);
   let bySigner = byEntity.get(key);
@@ -116,7 +116,7 @@ const cacheForEntity = (env: Env, entityId: string): Map<string, ValidatorEncryp
 };
 
 export const mergeProfileEncryptionAttestations = (
-  env: Env,
+  env: RuntimeState,
   board: ValidatorEncryptionBoard,
   incoming: Iterable<ValidatorEncryptionAttestation>,
 ): ValidatorEncryptionAttestation[] => {
@@ -128,7 +128,7 @@ export const mergeProfileEncryptionAttestations = (
 };
 
 export const collectLocalProfileEncryptionAnnouncements = (
-  env: Env,
+  env: RuntimeState,
   entityIds?: ReadonlySet<string>,
 ): ValidatorEncryptionAnnouncement[] => {
   const announcements: ValidatorEncryptionAnnouncement[] = [];
@@ -144,7 +144,7 @@ export const collectLocalProfileEncryptionAnnouncements = (
 };
 
 export const acceptProfileEncryptionAnnouncement = (
-  env: Env,
+  env: RuntimeState,
   announcement: ValidatorEncryptionAnnouncement,
 ): ValidatorEncryptionAttestation[] => {
   const localReplica = [...env.eReplicas.values()].find(
@@ -160,12 +160,12 @@ export const acceptProfileEncryptionAnnouncement = (
 };
 
 export const getProfileEncryptionAttestations = (
-  env: Env,
+  env: RuntimeState,
   entityId: string,
 ): ValidatorEncryptionAttestation[] => [...(cacheForEntity(env, entityId).values())];
 
 export const requireProfileEncryptionManifest = (
-  env: Env,
+  env: RuntimeState,
   state: EntityState,
 ): ValidatorEncryptionManifest => requireCompleteValidatorEncryptionManifest(
   buildValidatorEncryptionBoard(env, state),
@@ -173,7 +173,7 @@ export const requireProfileEncryptionManifest = (
 );
 
 export const getCompleteProfileEncryptionManifest = (
-  env: Env,
+  env: RuntimeState,
   state: EntityState,
 ): ValidatorEncryptionManifest | null => {
   if (state.profileEncryptionManifest) {

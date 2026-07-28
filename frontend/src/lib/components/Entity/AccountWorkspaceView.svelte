@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Env, EnvSnapshot, Profile as GossipProfile, RuntimeInput } from '@xln/runtime/xln-api';
+  import type { RuntimeState, EnvSnapshot, Profile as GossipProfile, RuntimeInput } from '@xln/runtime/xln-api';
   import type { ComponentType } from 'svelte';
   import { ArrowDownLeft, ArrowUpRight, Activity, Banknote, Landmark, PlusCircle, Repeat, Settings as SettingsIcon, SlidersHorizontal } from 'lucide-svelte';
   import type { EntityReplica, Tab } from '$lib/types/ui';
@@ -69,10 +69,10 @@
 
   export let replica: EntityReplica | null = null;
   export let tab: Tab;
-  export let activeEnv: Env | EnvSnapshot | null = null;
-  export let liveRuntimeEnv: Env | null = null;
+  export let activeEnv: RuntimeState | EnvSnapshot | null = null;
+  export let liveRuntimeEnv: RuntimeState | null = null;
   export let activeIsLive = false;
-  export let actionRuntimeEnv: Env | null = null;
+  export let actionRuntimeEnv: RuntimeState | null = null;
   export let runtimeHeight: number = 0;
   export let entityNames: Map<string, string> = new Map();
   export let profileByEntityId: Map<string, GossipProfile> = new Map();

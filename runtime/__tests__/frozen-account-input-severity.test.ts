@@ -1,14 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 import { canProcessFrozenAccountInput, frozenAccountInputLogLevel } from '../entity/tx/handlers/account';
-import type { AccountInput, AccountMachine } from '../types';
+import type { AccountInput, AccountState } from '../types';
 
 const account = (
   observedOnChain: boolean | undefined,
-): Pick<AccountMachine, 'status' | 'activeDispute'> => ({
+): Pick<AccountState, 'status' | 'activeDispute'> => ({
   status: 'disputed',
   ...(observedOnChain === undefined
     ? {}
-    : { activeDispute: { observedOnChain } as AccountMachine['activeDispute'] }),
+    : { activeDispute: { observedOnChain } as AccountState['activeDispute'] }),
 });
 
 const input = (kind: AccountInput['kind']): Pick<AccountInput, 'kind'> => ({ kind });

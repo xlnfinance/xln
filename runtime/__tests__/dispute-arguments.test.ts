@@ -12,7 +12,7 @@ import {
   sanitizeOptionalDisputeArgument,
   sanitizeOptionalDisputeStarterArgumentPair,
 } from '../jurisdiction/batch';
-import type { AccountMachine, AccountTx, EntityState, SwapOffer } from '../types';
+import type { AccountState, AccountTx, EntityState, SwapOffer } from '../types';
 
 const DELTA_TRANSFORMER = '0x1111111111111111111111111111111111111111';
 const TEST_WATCH_SEED = `0x${'d1'.repeat(32)}`;
@@ -31,7 +31,7 @@ function offer(offerId: string, makerIsLeft: boolean, giveTokenId: number, wantT
   };
 }
 
-function accountWithSwaps(swaps: Array<[string, SwapOffer]>): AccountMachine {
+function accountWithSwaps(swaps: Array<[string, SwapOffer]>): AccountState {
   return {
     leftEntity: 'left',
     rightEntity: 'right',

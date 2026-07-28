@@ -44,7 +44,7 @@ import { createRuntimeIngressReceiptStore } from '../server/ingress-receipts';
 import { requiresLocalNodeOperator } from '../server/node-http-access';
 import { handleRuntimeInputStatus } from '../server/runtime-input-control';
 import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
-import type { EntityInput, Env } from '../types';
+import type { EntityInput, RuntimeState } from '../types';
 import {
   evaluateBootstrapProgressDeadline,
   isBootstrapWorkWithinDeadline,
@@ -173,7 +173,7 @@ export const runMarketMakerNode = async (): Promise<void> => {
   // certified anchor, Entity height, timestamp, and frame hash.
   const restoredEntityStateHash = env.eReplicas.size > 0 ? buildMarketMakerBootstrapEntityStateHash(env) : null;
   const runtimeIngressReceipts = createRuntimeIngressReceiptStore();
-  const currentRuntimeHeight = (targetEnv: Env | null): number =>
+  const currentRuntimeHeight = (targetEnv: RuntimeState | null): number =>
     Math.max(0, Math.floor(Number(targetEnv?.height ?? 0)));
   const runtimeInputStatusUrl = (id: string): string => `/api/control/runtime-input/${encodeURIComponent(id)}/status`;
   registerRuntimeFrameCommitCallback(env, ({ height, runtimeInput }) => {
@@ -1473,7 +1473,7 @@ export const runMarketMakerNode = async (): Promise<void> => {
   };
 
   const finalizeMarketMakerBootstrapState = (): MarketMakerBootstrapFinalization => {
-    // The live Env advances only after the canonical runtime commit point has
+    // The live RuntimeState advances only after the canonical runtime commit point has
     // persisted the finalized frame and its durable outbox. READY therefore
     // describes an already-durable state; it must never create a second,
     // bootstrap-specific snapshot protocol.

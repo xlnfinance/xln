@@ -19,7 +19,7 @@ import { hydrateAccountDocFromStorage, hydrateEntityStateFromStorage } from '../
 import { projectAccountDoc, projectEntityCoreDoc } from '../storage/projections';
 import { signEntityHashes } from '../hanko/signing';
 import type {
-  AccountMachine,
+  AccountState,
   AccountTx,
   EntityReplica,
   EntityState,
@@ -38,7 +38,7 @@ const jurisdiction: JurisdictionConfig = {
   entityProviderAddress: `0x${'55'.repeat(20)}`,
 };
 
-const makeAccount = (mempool: AccountTx[] = []): AccountMachine => ({
+const makeAccount = (mempool: AccountTx[] = []): AccountState => ({
   leftEntity: entityId,
   rightEntity: counterpartyId,
   domain: {

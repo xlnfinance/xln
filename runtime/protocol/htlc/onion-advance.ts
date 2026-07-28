@@ -1,7 +1,7 @@
 import { keccak256 } from 'ethers';
 
 import { HTLC } from '../../constants';
-import type { AccountMachine, AccountTx, EntityState, EntityTx, Env, HtlcLock } from '../../types';
+import type { AccountState, AccountTx, EntityState, EntityTx, RuntimeState, HtlcLock } from '../../types';
 import { encodeCanonicalEntityConsensusValue } from '../../entity/consensus/state-root';
 import {
   getCertifiedBoardNodeStore,
@@ -25,7 +25,7 @@ export type HtlcOnionAdvanceTx = Extract<EntityTx, { type: 'htlcOnionAdvance' }>
 export type HtlcEncryptedEnvelope = HtlcEnvelope | MultiRecipientCiphertext | string | undefined;
 
 export const committedHtlcLockEnvelope = (
-  account: AccountMachine,
+  account: AccountState,
   lockId: string,
 ): HtlcEncryptedEnvelope => {
   for (const frame of [account.pendingFrame, account.currentFrame]) {
@@ -126,7 +126,7 @@ export const htlcSecretOfferContextHash = (
 });
 
 export const validateHtlcSecretOfferForLock = async (
-  env: Env,
+  env: RuntimeState,
   observerState: EntityState,
   payerEntityId: string,
   beneficiaryEntityId: string,
@@ -160,7 +160,7 @@ export const validateHtlcSecretOfferForLock = async (
 };
 
 export const validateLocalCommittedHtlcLayer = async (
-  env: Env,
+  env: RuntimeState,
   state: EntityState,
   lock: HtlcLock,
   envelope: HtlcEncryptedEnvelope,
@@ -298,7 +298,7 @@ export const buildHtlcOnionRevealAcceptedTx = (
 });
 
 export const validateHtlcOnionAdvanceTx = async (
-  env: Env,
+  env: RuntimeState,
   state: EntityState,
   tx: HtlcOnionAdvanceTx,
 ): Promise<{ tx: HtlcOnionAdvanceTx }> => {

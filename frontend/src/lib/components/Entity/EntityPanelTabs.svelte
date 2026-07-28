@@ -4,7 +4,7 @@ import { createEventDispatcher } from "svelte";
 import { onDestroy, onMount } from "svelte";
 import type { ComponentType } from "svelte";
 import { MaxUint256, Wallet, hexlify, isAddress, parseEther, ZeroAddress } from "ethers";
-import type { AccountMachine, EntityTx, Env, EnvSnapshot, JAdapter, JBatch, Profile, RoutedEntityInput, RuntimeAdapterViewFrame, RuntimeInput, XLNModule } from "@xln/runtime/xln-api";
+import type { AccountState, EntityTx, RuntimeState, EnvSnapshot, JAdapter, JBatch, Profile, RoutedEntityInput, RuntimeAdapterViewFrame, RuntimeInput, XLNModule } from "@xln/runtime/xln-api";
 import { buildDebtEnforcementRuntimeInputFromProjection } from "@xln/runtime/protocol/payments/debt-enforcement";
 import { getDraftBatchReserveDelta } from "@xln/runtime/jurisdiction/batch";
 import type { Tab, EntityReplica } from "$lib/types/ui";
@@ -109,9 +109,9 @@ export let runtimeFrameContext: EntityWorkspaceRuntimeFrameContext = emptyEntity
 export let embeddedRuntimeContext: EntityWorkspaceEmbeddedRuntimeContext = emptyEntityWorkspaceEmbeddedRuntimeContext;
 export let runtimeProjectionFrame: RuntimeAdapterViewFrame | null = null;
 const dispatch = createEventDispatcher();
-let env: Env | EnvSnapshot | null = null;
-let liveEnv: Env | null = null;
-let liveEnvResolver: (() => Env | null) | null = null;
+let env: RuntimeState | EnvSnapshot | null = null;
+let liveEnv: RuntimeState | null = null;
+let liveEnvResolver: (() => RuntimeState | null) | null = null;
 let envRevision = "";
 let history: EnvSnapshot[] = [];
 let timeIndex = -1;
@@ -238,7 +238,7 @@ type IconBadgeTabConfig<T extends string> = IconTabConfig<T> & {
 type IndexedDbWithDatabases = IDBFactory & {
   databases?: () => Promise<IDBDatabaseInfo[]>;
 };
-function getCurrentEntityJAdapter(xln: XLNModule, env: Env, context: string): JAdapter {
+function getCurrentEntityJAdapter(xln: XLNModule, env: RuntimeState, context: string): JAdapter {
   const entityId = String(replica?.state?.entityId || tab.entityId || "").trim();
   const signerId = String(currentSignerId || tab.signerId || "").trim();
   const jadapter = entityId && xln.getEntityJAdapter ? xln.getEntityJAdapter(env, entityId, signerId || undefined) : xln.getActiveJAdapter?.(env);
@@ -729,7 +729,7 @@ $: openAccountPermissionError = getHubOpenAccountPermissionError({
   adapterMode: $runtimeControllerHandle.mode,
   authLevel: $runtimeControllerHandle.authLevel,
 });
-async function submitPanelRuntimeInput(input: RuntimeInput): Promise<Env | null> {
+async function submitPanelRuntimeInput(input: RuntimeInput): Promise<RuntimeState | null> {
   if (!getRuntimeEnv(actionRuntimeEnv) && $runtimeControllerHandle.mode !== "remote") {
     requireRuntimeEnv(actionRuntimeEnv, "runtime-input-submit");
   }
@@ -804,7 +804,7 @@ $: isAccountFocused = selectedAccountId !== null;
 $: selectedAccount = isAccountFocused && replica?.state?.accounts && selectedAccountId ? materializeAccountView(replica.state.accounts.get(selectedAccountId)) : null;
 $: accountIds = replica?.state?.accounts ? Array.from(replica.state.accounts.keys()).map((id) => String(id)) : [];
 $: workspaceAccountIds = accountIds.filter((id) => {
-  const account = replica?.state?.accounts?.get?.(id) as AccountMachine | undefined;
+  const account = replica?.state?.accounts?.get?.(id) as AccountState | undefined;
   if (!account) return false;
   return String(account.status || "") !== "disputed";
 });
@@ -1031,7 +1031,7 @@ function getMoveAllowanceToken(): ExternalToken {
   return token;
 }
 async function getMoveAllowanceContext(context: string): Promise<{
-  env: Env;
+  env: RuntimeState;
   jadapter: JAdapter;
   token: ExternalToken;
   owner: string;
@@ -1163,7 +1163,7 @@ function getAccountSpendableCapacity(counterpartyEntityId: string, tokenId: numb
   if (!derived) return 0n;
   return derived.outCapacity;
 }
-function isLocalExecutorForWorkspace(counterpartyEntityId: string, account: AccountMachine | null): boolean {
+function isLocalExecutorForWorkspace(counterpartyEntityId: string, account: AccountState | null): boolean {
   const workspace = account?.settlementWorkspace;
   const entityId = String(replica?.state?.entityId || tab.entityId || "")
     .trim()

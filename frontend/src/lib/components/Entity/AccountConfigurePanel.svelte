@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Env, Profile as GossipProfile, RuntimeInput } from '@xln/runtime/xln-api';
+  import type { RuntimeState, Profile as GossipProfile, RuntimeInput } from '@xln/runtime/xln-api';
   import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
   import type { EntityReplica, Tab } from '$lib/types/ui';
   import CollateralForm from './CollateralForm.svelte';
@@ -22,7 +22,7 @@
   export let replica: EntityReplica | null = null;
   export let tab: Tab;
   export let activeIsLive = false;
-  export let liveRuntimeEnv: Env | null = null;
+  export let liveRuntimeEnv: RuntimeState | null = null;
   export let workspaceAccountId = '';
   export let workspaceAccountIds: string[] = [];
   export let entityNames: Map<string, string> = new Map();
@@ -46,7 +46,7 @@
   $: remoteAdminReady = $runtimeControllerHandle.mode === 'remote' && $runtimeControllerHandle.authLevel === 'admin';
   $: commandReady = activeIsLive && Boolean(liveRuntimeEnv || remoteAdminReady);
   $: commandUnavailableMessage = activeIsLive
-    ? 'Account actions require embedded runtime Env or admin remote runtime.'
+    ? 'Account actions require embedded runtime RuntimeState or admin remote runtime.'
     : 'Account actions are only available in LIVE mode.';
 </script>
 

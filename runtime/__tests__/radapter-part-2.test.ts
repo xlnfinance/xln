@@ -92,7 +92,7 @@ import type {
   StorageSnapshotManifest,
 } from '../storage/types';
 
-import type { AccountTx, CrossJurisdictionSwapRoute, Delta, EntityReplica, Env, RuntimeInput } from '../types';
+import type { AccountTx, CrossJurisdictionSwapRoute, Delta, EntityReplica, RuntimeState, RuntimeInput } from '../types';
 
 import type { BookState } from '../orderbook';
 
@@ -134,7 +134,7 @@ const makeHubProfile = (id: string, name: string, lastUpdated = 7): Profile =>
     },
   });
 
-const makeEnv = (): Env =>
+const makeEnv = (): RuntimeState =>
   ({
     height: 7,
     timestamp: 700,
@@ -231,7 +231,7 @@ const makeEnv = (): Env =>
         } as EntityReplica,
       ],
     ]),
-  }) as Env;
+  }) as RuntimeState;
 
 const makeBook = (_price: bigint): BookState => ({
   params: { bucketWidthTicks: 1n, maxOrders: 100, stpPolicy: 0 },
@@ -322,7 +322,7 @@ const readTestPageLimit = (raw: unknown, fallback = 10): number => {
 };
 
 const makeTestViewPageLoader =
-  (env: Env) =>
+  (env: RuntimeState) =>
   async (
     requestedEntityId: string,
     height: number,
@@ -1200,7 +1200,7 @@ test('runtime adapter cross-j intent requires admin and bypasses the durable com
     enqueueRuntimeInput: () => {
       enqueued += 1;
     },
-    submitCrossJurisdictionIntent: async (_env: Env, submittedRoute: CrossJurisdictionSwapRoute) => {
+    submitCrossJurisdictionIntent: async (_env: RuntimeState, submittedRoute: CrossJurisdictionSwapRoute) => {
       submitted.push(submittedRoute);
     },
   };
@@ -1479,7 +1479,7 @@ test('vault-owner command retry survives capability token rotation without a sec
   const input: RuntimeInput = { runtimeTxs: [], entityInputs: [], jInputs: [] };
   let enqueued = 0;
   const deps = {
-    enqueueRuntimeInput: (_env: Env, marked: RuntimeInput) => {
+    enqueueRuntimeInput: (_env: RuntimeState, marked: RuntimeInput) => {
       const marker = marked.runtimeTxs.find(tx => tx.type === 'recordRuntimeAdapterCommand');
       if (!marker || marker.type !== 'recordRuntimeAdapterCommand') {
         throw new Error('TEST_RUNTIME_ADAPTER_COMMAND_MARKER_MISSING');
@@ -1572,7 +1572,7 @@ test('vault-owner command frontier survives capability expiry and durable restor
       tokenId: 'same-renewed-owner-token',
     });
     const deps = {
-      enqueueRuntimeInput: (_env: Env, marked: RuntimeInput) => {
+      enqueueRuntimeInput: (_env: RuntimeState, marked: RuntimeInput) => {
         const marker = marked.runtimeTxs.find(tx => tx.type === 'recordRuntimeAdapterCommand');
         if (!marker || marker.type !== 'recordRuntimeAdapterCommand') {
           throw new Error('TEST_RUNTIME_ADAPTER_COMMAND_MARKER_MISSING');
@@ -1706,7 +1706,7 @@ test('runtime adapter command replay stays rejected after the bounded result cac
     const env = makeEnv();
     let enqueued = 0;
     const deps = {
-      enqueueRuntimeInput: (_env: Env, input: RuntimeInput) => {
+      enqueueRuntimeInput: (_env: RuntimeState, input: RuntimeInput) => {
         const marker = input.runtimeTxs.find(tx => tx.type === 'recordRuntimeAdapterCommand');
         if (!marker || marker.type !== 'recordRuntimeAdapterCommand') {
           throw new Error('TEST_RUNTIME_ADAPTER_COMMAND_MARKER_MISSING');
@@ -2208,8 +2208,8 @@ test('embedded adapter sends to the latest active env after runtime switch', asy
   const activeEnv = makeEnv();
   activeEnv.height = 5;
 
-  let currentEnv: Env | null = staleEnv;
-  const writtenEnv: Env[] = [];
+  let currentEnv: RuntimeState | null = staleEnv;
+  const writtenEnv: RuntimeState[] = [];
   const adapter = new EmbeddedRuntimeAdapter({
     getEnv: () => currentEnv,
     validateRuntimeInputAdmission: () => {},

@@ -1,6 +1,6 @@
 import type {
-  AccountMachine,
-  Env,
+  AccountState,
+  RuntimeState,
   EnvSnapshot,
   Profile as GossipProfile,
   RuntimeAdapterEntitySummary,
@@ -17,9 +17,9 @@ export function materializeReplicaView(candidate: EntityReplica | null | undefin
   return materialized;
 }
 
-export function materializeAccountView(candidate: AccountMachine | null | undefined): AccountMachine | null {
+export function materializeAccountView(candidate: AccountState | null | undefined): AccountState | null {
   if (!candidate) return null;
-  const materialized: AccountMachine = {
+  const materialized: AccountState = {
     ...candidate,
     deltas: candidate.deltas instanceof Map ? new Map(candidate.deltas) : candidate.deltas,
   };
@@ -36,7 +36,7 @@ export function materializeReplicaMap(
 }
 
 export function getEnvReplicaMap(
-  sourceEnv: Env | EnvSnapshot | null | undefined,
+  sourceEnv: RuntimeState | EnvSnapshot | null | undefined,
   _revision = '',
 ): Map<string, EntityReplica> | null {
   if (!sourceEnv) return null;
@@ -161,11 +161,11 @@ function runtimeProjectionBooksMap(items: RuntimeProjectionBookDoc[] | undefined
 
 function activeEntityProjectionReplica(activeEntity: RuntimeProjectionActiveEntity): EntityReplica {
   const entityId = normalizeEntityId(activeEntity.core.entityId || activeEntity.summary.entityId);
-  const accounts = new Map<string, AccountMachine>();
+  const accounts = new Map<string, AccountState>();
   for (const item of activeEntity.accounts.items ?? []) {
     const key = runtimeProjectionAccountKey(entityId, item);
     if (!key) continue;
-    const account = materializeAccountView(item as AccountMachine) ?? (item as AccountMachine);
+    const account = materializeAccountView(item as AccountState) ?? (item as AccountState);
     accounts.set(key, account);
   }
   const books = runtimeProjectionBooksMap(activeEntity.books.items);
@@ -220,7 +220,7 @@ function buildEntityPanelViewFromRuntimeProjection(
   frame: RuntimeAdapterViewFrame | null | undefined,
   entityId: string,
   signerId: string,
-  sourceEnv: Env | EnvSnapshot | null | undefined,
+  sourceEnv: RuntimeState | EnvSnapshot | null | undefined,
 ): EntityPanelView | null {
   if (!frame?.activeEntity) return null;
   const requestedEntityId = normalizeEntityId(entityId || frame.activeEntityId || frame.activeEntity.summary.entityId);
@@ -267,7 +267,7 @@ function buildEntityPanelViewFromRuntimeProjection(
 }
 
 export function buildEntityPanelView(
-  sourceEnv: Env | EnvSnapshot | null | undefined,
+  sourceEnv: RuntimeState | EnvSnapshot | null | undefined,
   entityId: string,
   signerId: string,
   revision = '',
@@ -308,7 +308,7 @@ export function buildEntityPanelView(
   };
 }
 
-export function hasDevnetJurisdiction(sourceEnv: Env | EnvSnapshot | null | undefined): boolean {
+export function hasDevnetJurisdiction(sourceEnv: RuntimeState | EnvSnapshot | null | undefined): boolean {
   if (!sourceEnv?.jReplicas) return false;
   for (const [, replica] of sourceEnv.jReplicas.entries()) {
     if (Number(replica?.chainId ?? 0) === 31337) return true;
@@ -316,22 +316,22 @@ export function hasDevnetJurisdiction(sourceEnv: Env | EnvSnapshot | null | unde
   return false;
 }
 
-export function getRuntimeEnv(env: Env | EnvSnapshot | null | undefined): Env | null {
+export function getRuntimeEnv(env: RuntimeState | EnvSnapshot | null | undefined): RuntimeState | null {
   return unwrapLiveRuntimeEnv(env);
 }
 
-export function requireRuntimeEnv(env: Env | EnvSnapshot | null | undefined, context: string): Env {
+export function requireRuntimeEnv(env: RuntimeState | EnvSnapshot | null | undefined, context: string): RuntimeState {
   const runtimeEnv = getRuntimeEnv(env);
   if (!runtimeEnv) throw new Error(`${context} requires live runtime environment`);
   return runtimeEnv;
 }
 
-export function getRuntimeId(env: Env | EnvSnapshot | null | undefined): string | null {
+export function getRuntimeId(env: RuntimeState | EnvSnapshot | null | undefined): string | null {
   const runtimeId = env?.runtimeId;
   return typeof runtimeId === 'string' && runtimeId.length > 0 ? runtimeId : null;
 }
 
-export function getActiveJurisdictionName(env: Env | EnvSnapshot | null | undefined): string | null {
+export function getActiveJurisdictionName(env: RuntimeState | EnvSnapshot | null | undefined): string | null {
   if (!env || !('activeJurisdiction' in env)) return null;
   return typeof env.activeJurisdiction === 'string' && env.activeJurisdiction.length > 0
     ? env.activeJurisdiction
@@ -357,7 +357,7 @@ export function jurisdictionKey(value: unknown): string {
 }
 
 export function getCurrentEntityJurisdictionName(
-  env: Env | EnvSnapshot | null | undefined,
+  env: RuntimeState | EnvSnapshot | null | undefined,
   replica: EntityReplica | null | undefined,
 ): string | null {
   const configured = String(replica?.state?.config?.jurisdiction?.name || '').trim();
@@ -365,7 +365,7 @@ export function getCurrentEntityJurisdictionName(
 }
 
 export function getCurrentEntityJurisdictionKey(
-  env: Env | EnvSnapshot | null | undefined,
+  env: RuntimeState | EnvSnapshot | null | undefined,
   replica: EntityReplica | null | undefined,
 ): string {
   return jurisdictionKey(replica?.state?.config?.jurisdiction)
@@ -374,7 +374,7 @@ export function getCurrentEntityJurisdictionKey(
 }
 
 export function getEntityJurisdictionKey(
-  env: Env | EnvSnapshot | null | undefined,
+  env: RuntimeState | EnvSnapshot | null | undefined,
   entityId: string,
 ): string {
   const normalized = String(entityId || '').trim().toLowerCase();
@@ -409,7 +409,7 @@ export function getEntityJurisdictionKeyFromReplicas(
 }
 
 export function isSameJurisdictionEntity(
-  env: Env | EnvSnapshot | null | undefined,
+  env: RuntimeState | EnvSnapshot | null | undefined,
   replica: EntityReplica | null | undefined,
   fallbackEntityId: string,
   leftEntityId: string,
@@ -448,7 +448,7 @@ export function isSameJurisdictionEntityInReplicas(
   return leftJurisdiction === rightJurisdiction;
 }
 
-export function getGossipProfiles(env: Env | EnvSnapshot | null | undefined): GossipProfile[] {
+export function getGossipProfiles(env: RuntimeState | EnvSnapshot | null | undefined): GossipProfile[] {
   if (!env?.gossip) return [];
   if ('getProfiles' in env.gossip && typeof env.gossip.getProfiles === 'function') {
     return env.gossip.getProfiles();
@@ -460,7 +460,7 @@ export function isHubProfile(profile: GossipProfile | undefined): boolean {
   return profile ? profile.metadata.isHub === true : false;
 }
 
-export function resolveAccountCounterparty(entityId: string, account: AccountMachine): string {
+export function resolveAccountCounterparty(entityId: string, account: AccountState): string {
   return account.leftEntity.toLowerCase() === entityId.toLowerCase()
     ? account.rightEntity
     : account.leftEntity;
@@ -468,9 +468,9 @@ export function resolveAccountCounterparty(entityId: string, account: AccountMac
 
 export function findLocalAccountByCounterparty(
   entityId: string,
-  accounts: Map<string, AccountMachine> | undefined,
+  accounts: Map<string, AccountState> | undefined,
   counterpartyId: string | undefined,
-): AccountMachine | null {
+): AccountState | null {
   if (!counterpartyId || !accounts) return null;
   const needle = counterpartyId.toLowerCase();
   for (const [accountKey, account] of accounts.entries()) {
@@ -480,7 +480,7 @@ export function findLocalAccountByCounterparty(
   return null;
 }
 
-export function isAccountLeftPerspective(entityId: string, account: AccountMachine): boolean {
+export function isAccountLeftPerspective(entityId: string, account: AccountState): boolean {
   const owner = String(entityId || '').trim().toLowerCase();
   const left = String(account.leftEntity || '').trim().toLowerCase();
   const right = String(account.rightEntity || '').trim().toLowerCase();

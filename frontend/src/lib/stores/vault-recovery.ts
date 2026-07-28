@@ -1,7 +1,7 @@
 import type {
   ConsensusConfig,
   EncryptedRuntimeRecoveryBundleV1,
-  Env,
+  RuntimeState,
   JurisdictionConfig,
   RuntimeRecoveryBundleV1,
   RuntimeRecoveryMetaV1,
@@ -89,7 +89,7 @@ export interface Runtime {
   requiresOnboarding?: boolean;
   recovery?: RuntimeRecoveryConfig;
   createdAt: number;
-  env?: Env | null;
+  env?: RuntimeState | null;
 }
 
 export const runtimeCreationInFlight = new Map<string, Promise<void>>();
@@ -226,7 +226,7 @@ export const shouldSkipRuntimeRecoveryUploadAtHeight = (
   return Boolean(previous?.lastBundleHash && currentHeight <= previousHeight);
 };
 
-export type FrameLogEntry = Env['frameLogs'][number];
+export type FrameLogEntry = RuntimeState['frameLogs'][number];
 
 export type HealthMachine = { name?: string; status?: string; chainId?: number; lastBlock?: unknown };
 
@@ -329,12 +329,12 @@ export type TowerServerInfo = {
 export const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
 
-export const getRuntimeP2PHandle = (xln: XLNModule, env: Env): RuntimeP2PHandle | null => {
+export const getRuntimeP2PHandle = (xln: XLNModule, env: RuntimeState): RuntimeP2PHandle | null => {
   const candidate = xln.getP2P(unwrapLiveRuntimeEnv(env) ?? env);
   return isRecord(candidate) ? (candidate as RuntimeP2PHandle) : null;
 };
 
-export const getReplayMeta = (env: Env): unknown | null => {
+export const getReplayMeta = (env: RuntimeState): unknown | null => {
   const value = Reflect.get(env as object, '__replayMeta');
   return value === undefined ? null : value;
 };
@@ -365,14 +365,14 @@ export const normalizeJurisdictionKey = (value: string | null | undefined): stri
     .trim()
     .toLowerCase();
 
-export type RuntimeJReplica = Env['jReplicas'] extends Map<string, infer T> ? T : never;
+export type RuntimeJReplica = RuntimeState['jReplicas'] extends Map<string, infer T> ? T : never;
 
-export type RuntimeEntityReplica = Env['eReplicas'] extends Map<string, infer T> ? T : never;
+export type RuntimeEntityReplica = RuntimeState['eReplicas'] extends Map<string, infer T> ? T : never;
 
 export const getJReplicaJurisdictionName = (replica: RuntimeJReplica | null | undefined, fallback = ''): string =>
   String(replica?.name || fallback || '').trim();
 
-export const findJReplicaByName = (env: Env, name: string): RuntimeJReplica | undefined => {
+export const findJReplicaByName = (env: RuntimeState, name: string): RuntimeJReplica | undefined => {
   const normalized = normalizeJurisdictionKey(name);
   if (!normalized) return undefined;
   const direct = env.jReplicas?.get(name);
@@ -391,7 +391,7 @@ export const getEntityReplicaEntityId = (key: string, replica: RuntimeEntityRepl
     .trim()
     .toLowerCase();
 
-export const findEntityReplicaByEntityId = (env: Env, entityId: string): RuntimeEntityReplica | undefined => {
+export const findEntityReplicaByEntityId = (env: RuntimeState, entityId: string): RuntimeEntityReplica | undefined => {
   const target = normalizeEntityId(entityId);
   if (!target) return undefined;
   for (const [key, replica] of env.eReplicas?.entries?.() || []) {
@@ -401,7 +401,7 @@ export const findEntityReplicaByEntityId = (env: Env, entityId: string): Runtime
 };
 
 export const findEntityReplicaByEntityAndSigner = (
-  env: Env,
+  env: RuntimeState,
   entityId: string,
   signerId: string,
 ): RuntimeEntityReplica | undefined => {

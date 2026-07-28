@@ -1,4 +1,4 @@
-import type { EntityState, Env } from '../types';
+import type { EntityState, RuntimeState } from '../types';
 import {
   getJReplicaByJurisdictionRef,
   getJReplicaByName,
@@ -29,7 +29,7 @@ export function getEntityCertifiedJurisdictionHeight(
   return height;
 }
 
-const getJReplicaByJurisdictionNameOrRef = (env: Env, jurisdictionName?: string): ReturnType<typeof getJReplicaByName> => {
+const getJReplicaByJurisdictionNameOrRef = (env: RuntimeState, jurisdictionName?: string): ReturnType<typeof getJReplicaByName> => {
   const raw = String(jurisdictionName || '').trim();
   if (!raw) return undefined;
   return isJurisdictionStackRef(raw)
@@ -37,7 +37,7 @@ const getJReplicaByJurisdictionNameOrRef = (env: Env, jurisdictionName?: string)
     : getJReplicaByName(env, raw);
 };
 
-export function getRuntimeJurisdictionHeight(env: Env, fallbackHeight = 0, jurisdictionName?: string): number {
+export function getRuntimeJurisdictionHeight(env: RuntimeState, fallbackHeight = 0, jurisdictionName?: string): number {
   const fallback = Number.isFinite(fallbackHeight) ? Math.max(0, Math.floor(fallbackHeight)) : 0;
   if (jurisdictionName) {
     const requested = getJReplicaByJurisdictionNameOrRef(env, jurisdictionName);
@@ -59,7 +59,7 @@ export function getRuntimeJurisdictionHeight(env: Env, fallbackHeight = 0, juris
 }
 
 export function getRuntimeJurisdictionDefaultDisputeDelayBlocks(
-  env: Env,
+  env: RuntimeState,
   jurisdictionName?: string,
   fallbackBlocks = PRODUCTION_DISPUTE_DELAY_BLOCKS,
 ): number {
@@ -78,7 +78,7 @@ export function getRuntimeJurisdictionDefaultDisputeDelayBlocks(
     : PRODUCTION_DISPUTE_DELAY_BLOCKS;
 }
 
-export function requireRuntimeJurisdictionBlockTimeMs(env: Env, jurisdictionName?: string): number {
+export function requireRuntimeJurisdictionBlockTimeMs(env: RuntimeState, jurisdictionName?: string): number {
   const preferred =
     getJReplicaByJurisdictionNameOrRef(env, jurisdictionName) ||
     (env.activeJurisdiction ? env.jReplicas?.get(env.activeJurisdiction) : undefined);
@@ -88,7 +88,7 @@ export function requireRuntimeJurisdictionBlockTimeMs(env: Env, jurisdictionName
 }
 
 export function requireRuntimeJurisdictionDisputeDelayMs(
-  env: Env,
+  env: RuntimeState,
   jurisdictionName?: string,
   fallbackBlocks = PRODUCTION_DISPUTE_DELAY_BLOCKS,
 ): number {

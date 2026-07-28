@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Env } from '@xln/runtime/xln-api';
+  import type { RuntimeState } from '@xln/runtime/xln-api';
   import type { RecoveryTowerConfig, Runtime } from '$lib/stores/vaultStore';
   import { vaultOperations } from '$lib/stores/vaultStore';
   import {
@@ -20,7 +20,7 @@
   import { onMount } from 'svelte';
 
   export let runtime: Runtime | null = null;
-  export let env: Env | null = null;
+  export let env: RuntimeState | null = null;
   export let entityId = '';
   export let jurisdictionName = '';
   export let towers: RecoveryTowerConfig[] = [];

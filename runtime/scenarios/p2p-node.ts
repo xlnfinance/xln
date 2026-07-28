@@ -14,7 +14,7 @@ import { loadJurisdictions } from '../jurisdiction/jurisdiction-loader';
 import { DEFAULT_TOKENS, TOKEN_REGISTRATION_AMOUNT, getDefaultTokenSupply } from '../jadapter/default-tokens';
 import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/index.ts';
 import { hashHtlcSecret } from '../protocol/htlc/utils';
-import type { AccountMachine, Delta, EntityInput, Env, JurisdictionConfig } from '../types';
+import type { AccountState, Delta, EntityInput, RuntimeState, JurisdictionConfig } from '../types';
 import type { JAdapter, JTokenInfo } from '../jadapter/types';
 import type { Profile } from '../networking/gossip';
 import { ethers } from 'ethers';
@@ -51,7 +51,7 @@ const R2R_AMOUNT = usd(250);
 const HTLC_AMOUNT = usd(1_000);
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-type P2PScenarioEnv = Env;
+type P2PScenarioEnv = RuntimeState;
 
 const resolveJurisdiction = (): {
   jurisdiction: JurisdictionConfig;
@@ -259,19 +259,19 @@ const getProfileByName = (env: P2PScenarioEnv, name: string): Profile | undefine
   return profile;
 };
 
-const getAccount = (env: P2PScenarioEnv, entityId: string, signerId: string, counterpartyId: string): AccountMachine | undefined => {
+const getAccount = (env: P2PScenarioEnv, entityId: string, signerId: string, counterpartyId: string): AccountState | undefined => {
   const replica = env.eReplicas.get(`${entityId}:${signerId}`);
   return replica?.state.accounts?.get(counterpartyId);
 };
 
-const getLeftEntity = (account: AccountMachine | undefined): string | null => {
+const getLeftEntity = (account: AccountState | undefined): string | null => {
   const from = account?.proofHeader?.fromEntity;
   const to = account?.proofHeader?.toEntity;
   if (!from || !to) return null;
   return from < to ? from : to;
 };
 
-const resolveSides = (account: AccountMachine | undefined, entityId: string, counterpartyId: string) => {
+const resolveSides = (account: AccountState | undefined, entityId: string, counterpartyId: string) => {
   const leftEntity = getLeftEntity(account);
   if (leftEntity) {
     return {
@@ -303,7 +303,7 @@ const describeDelta = (delta: Delta | undefined) => {
   };
 };
 
-const describeAccount = (account: AccountMachine | undefined) => {
+const describeAccount = (account: AccountState | undefined) => {
   if (!account) {
     return { exists: false };
   }

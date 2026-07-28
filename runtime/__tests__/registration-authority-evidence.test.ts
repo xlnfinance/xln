@@ -16,7 +16,7 @@ import {
 import { applyRuntimeTx } from '../runtime/tx-handlers';
 import { createEmptyEnv } from '../runtime';
 import { buildCertifiedEntityLineagePlan } from '../storage/entity-lineage';
-import type { EntityReplica, Env, JReplica, JurisdictionConfig } from '../types';
+import type { EntityReplica, RuntimeState, JReplica, JurisdictionConfig } from '../types';
 import {
   buildDurableRuntimeMachineSnapshot,
   restoreDurableRuntimeSnapshot,
@@ -34,7 +34,7 @@ const jurisdiction: JurisdictionConfig = {
 };
 const entityId = `0x${'00'.repeat(31)}02`;
 
-const installStack = (env: Env, depth = 2): void => {
+const installStack = (env: RuntimeState, depth = 2): void => {
   const replica: JReplica = {
     name: jurisdiction.name,
     blockNumber: 7n,
@@ -56,7 +56,7 @@ const installStack = (env: Env, depth = 2): void => {
 };
 
 const makeRegisteredRuntime = (seed: string): {
-  env: Env;
+  env: RuntimeState;
   replica: EntityReplica;
   boardHash: string;
 } => {
@@ -82,7 +82,7 @@ const makeRegisteredRuntime = (seed: string): {
   return { env, replica, boardHash };
 };
 
-const resign = <T extends { witnessSignature: string }>(env: Env, evidence: T): T => {
+const resign = <T extends { witnessSignature: string }>(env: RuntimeState, evidence: T): T => {
   evidence.witnessSignature = signAccountFrame(
     env,
     env.runtimeId!,

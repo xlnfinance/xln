@@ -1,8 +1,8 @@
 <script lang="ts">
 import { tick } from 'svelte';
-import type { AccountMachine, EntityReplica, Tab } from '$lib/types/ui';
+import type { AccountState, EntityReplica, Tab } from '$lib/types/ui';
 import { writable } from 'svelte/store';
-import type { BookState, Env, SwapAccountCapacityView, SwapInboundCapacityPlan } from '@xln/runtime/xln-api';
+import type { BookState, RuntimeState, SwapAccountCapacityView, SwapInboundCapacityPlan } from '@xln/runtime/xln-api';
 import {
   deriveCanonicalCrossJurisdictionBookOwnerForLegs,
   deriveCanonicalCrossJurisdictionMarketForLegs,
@@ -103,7 +103,7 @@ import {
 } from './swap-panel-core';
 export let replica: EntityReplica | null;
 export let tab: Tab;
-export let env: Env | null = null;
+export let env: RuntimeState | null = null;
 export let isLive: boolean;
 export let runtimeView: SwapPanelRuntimeView | null = null;
 // Props
@@ -2323,14 +2323,14 @@ $: ownOrderbookEntityIds = Array.from(
       .filter(Boolean),
   ),
 );
-function accountMachines(): Array<{ accountId: string; account: AccountMachine }> {
+function accountMachines(): Array<{ accountId: string; account: AccountState }> {
   if (!(currentReplica?.state?.accounts instanceof Map)) return [];
   return Array.from(currentReplica.state.accounts.entries()).map(([accountId, account]) => ({
     accountId: String(accountId),
     account,
   }));
 }
-function collectPanelOfferLifecycles(selectSource: (account: AccountMachine) => Map<string, unknown> | undefined): OfferLifecycle[] {
+function collectPanelOfferLifecycles(selectSource: (account: AccountState) => Map<string, unknown> | undefined): OfferLifecycle[] {
   return collectOfferLifecyclesFrom(accountMachines(), selectSource, computeSwapPriceTicksSafe);
 }
 $: {

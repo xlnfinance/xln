@@ -18,7 +18,7 @@ import {
   resolveDbPath,
   tryOpenStorageDb,
 } from '../storage/runtime-dbs';
-import type { Env } from '../types';
+import type { RuntimeState } from '../types';
 
 const fixture = join(import.meta.dir, 'fixtures/storage-marker-crash-child.ts');
 const tempRoots: string[] = [];
@@ -108,7 +108,7 @@ describe('storage filesystem durability', () => {
       runtimeId: namespace,
       dbNamespace: namespace,
       runtimeState: {},
-    } as Env;
+    } as RuntimeState;
     const basePath = resolveDbPath(env);
     const markerPath = `${basePath}-storage-rotation.json`;
     mkdirSync(dirname(markerPath), { recursive: true });
@@ -146,9 +146,9 @@ describe('storage filesystem durability', () => {
         storageDbOpenPromise: Promise.resolve(true),
         storageVerifiedCurrentHeight: 7,
       },
-    } as unknown as Env;
+    } as unknown as RuntimeState;
     const deps = {
-      ensureRuntimeState: (target: Env) => (target.runtimeState ??= {}),
+      ensureRuntimeState: (target: RuntimeState) => (target.runtimeState ??= {}),
     };
 
     const closing = closeStorageDb(env);
@@ -189,9 +189,9 @@ describe('storage filesystem durability', () => {
         infraDb: { close: () => infraClose.promise },
         infraDbOpenPromise: Promise.resolve(true),
       },
-    } as unknown as Env;
+    } as unknown as RuntimeState;
     const deps = {
-      ensureRuntimeState: (target: Env) => (target.runtimeState ??= {}),
+      ensureRuntimeState: (target: RuntimeState) => (target.runtimeState ??= {}),
     };
 
     const closingFrame = closeFrameDb(env);

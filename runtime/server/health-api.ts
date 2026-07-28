@@ -1,4 +1,4 @@
-import type { Env } from '../types';
+import type { RuntimeState } from '../types';
 import { getHealthStatus, type HubHealth } from './health';
 import type { JTokenInfo } from '../jadapter/types';
 import { getStorageHealthSnapshotSync } from '../orchestrator/storage-monitor';
@@ -25,7 +25,7 @@ export type RuntimeHealthCacheEntry = {
 };
 
 export type RuntimeHealthDeps = {
-  env: Env | null;
+  env: RuntimeState | null;
   relayStore: RelayStore;
   healthCacheTtlMs: number;
   cachedHealthResponse: RuntimeHealthCacheEntry | null;

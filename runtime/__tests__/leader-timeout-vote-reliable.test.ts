@@ -41,11 +41,11 @@ import type {
   EntityLeaderTimeoutVote,
   EntityReplica,
   EntityState,
-  Env,
+  RuntimeState,
   RuntimeEntityInputsEnvelope,
 } from '../types';
 
-const runtime = (seed: string): Env => {
+const runtime = (seed: string): RuntimeState => {
   const env = createEmptyEnv(seed);
   const runtimeId = deriveSignerAddressSync(seed, 'runtime').toLowerCase();
   registerSignerKey(env, runtimeId, deriveSignerKeySync(seed, 'runtime'));
@@ -58,7 +58,7 @@ const runtime = (seed: string): Env => {
 };
 
 const installVoteTarget = (
-  env: Env,
+  env: RuntimeState,
   seed: string,
   options: { localSignerIsFallback?: boolean } = {},
 ): {
@@ -119,7 +119,7 @@ const installVoteTarget = (
 };
 
 const voteOutput = (
-  receiver: Env,
+  receiver: RuntimeState,
   replica: EntityReplica,
   vote: EntityLeaderTimeoutVote,
 ): DeliverableEntityInput => ({
@@ -153,7 +153,7 @@ const routingDeps = (
 });
 
 const applyVote = async (
-  receiver: Env,
+  receiver: RuntimeState,
   output: DeliverableEntityInput,
 ): Promise<void> => {
   const key = `${output.entityId}:${output.signerId}`;

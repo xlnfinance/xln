@@ -6,7 +6,7 @@
 
 import { ethers } from 'ethers';
 import type { JEvent } from './types';
-import type { DisputeFinalizationEvidence, EntityInput, Env, JPrefixAttestation, JReplica, JurisdictionConfig, JurisdictionEvent, RuntimeInput, RuntimeTx, ValidatorJBlockHeader, ValidatorJEventBlock } from '../types';
+import type { DisputeFinalizationEvidence, EntityInput, RuntimeState, JPrefixAttestation, JReplica, JurisdictionConfig, JurisdictionEvent, RuntimeInput, RuntimeTx, ValidatorJBlockHeader, ValidatorJEventBlock } from '../types';
 import { createEmptyBatch, type JBatch } from '../jurisdiction/batch';
 import { enqueueRuntimeInput } from '../runtime/input-queue';
 import { createStructuredLogger, shortId } from '../infra/logger';
@@ -307,7 +307,7 @@ const normalizeJurisdictionAddress = (value: unknown): string =>
   String(value || '').trim().toLowerCase();
 
 export const findWatcherJurisdictionReplica = (
-  env: Env,
+  env: RuntimeState,
   depositoryAddress?: string,
   chainId?: number,
 ) => {
@@ -354,7 +354,7 @@ export const findWatcherJurisdictionReplica = (
 };
 
 const requireWatcherJurisdictionReplica = (
-  env: Env,
+  env: RuntimeState,
   depositoryAddress: string | undefined,
   chainId: number | undefined,
   context: string,
@@ -390,7 +390,7 @@ const watcherChainIdOf = (replica: JReplica | null | undefined): number | null =
 };
 
 export const isEntityReplicaRelevantToWatcher = (
-  env: Env,
+  env: RuntimeState,
   replica: { state?: { config?: { jurisdiction?: JurisdictionConfig } } },
   watcherReplica: JReplica,
 ): boolean => {
@@ -415,7 +415,7 @@ export const isEntityReplicaRelevantToWatcher = (
   return Boolean(watcherName && entityName && watcherName === entityName && chainMatches);
 };
 
-export function getWatcherStartBlock(env: Env, depositoryAddress?: string, chainId?: number): number {
+export function getWatcherStartBlock(env: RuntimeState, depositoryAddress?: string, chainId?: number): number {
   const replica = depositoryAddress || chainId !== undefined
     ? requireWatcherJurisdictionReplica(env, depositoryAddress, chainId, 'start-block')
     : findWatcherJurisdictionReplica(env, depositoryAddress, chainId);
@@ -428,7 +428,7 @@ export function getWatcherStartBlock(env: Env, depositoryAddress?: string, chain
   return Math.max(1, Math.floor(blockNumber) + 1);
 }
 
-export function getMinimumCommittedSignerJHeight(env: Env, watcherReplica?: JReplica): number | null {
+export function getMinimumCommittedSignerJHeight(env: RuntimeState, watcherReplica?: JReplica): number | null {
   let minHeight: number | null = null;
   for (const replica of env.eReplicas?.values?.() || []) {
     if (watcherReplica && !isEntityReplicaRelevantToWatcher(env, replica, watcherReplica)) continue;
@@ -439,7 +439,7 @@ export function getMinimumCommittedSignerJHeight(env: Env, watcherReplica?: JRep
   return minHeight;
 }
 
-export function getMinimumScannedSignerJHeight(env: Env, watcherReplica?: JReplica): number | null {
+export function getMinimumScannedSignerJHeight(env: RuntimeState, watcherReplica?: JReplica): number | null {
   let minHeight: number | null = null;
   for (const replica of env.eReplicas?.values?.() || []) {
     if (watcherReplica && !isEntityReplicaRelevantToWatcher(env, replica, watcherReplica)) continue;
@@ -455,7 +455,7 @@ export function getMinimumScannedSignerJHeight(env: Env, watcherReplica?: JRepli
 }
 
 export function updateWatcherJurisdictionCursor(
-  env: Env,
+  env: RuntimeState,
   blockNumber: number,
   depositoryAddress?: string,
   chainId?: number,
@@ -493,7 +493,7 @@ export function updateWatcherJurisdictionCursor(
 
 /** Apply a durable watcher-cursor RuntimeTx inside the R-frame transaction. */
 export function applyWatcherJurisdictionCursor(
-  env: Env,
+  env: RuntimeState,
   data: Extract<RuntimeTx, { type: 'advanceJWatcherCursor' }>['data'],
 ): void {
   if (!Number.isSafeInteger(data.blockNumber) || data.blockNumber < 0) {
@@ -514,7 +514,7 @@ export function applyWatcherJurisdictionCursor(
     : BigInt(data.blockNumber);
 }
 
-const assertJEventIngressOpen = (env: Env, label: string): void => {
+const assertJEventIngressOpen = (env: RuntimeState, label: string): void => {
   if (env.runtimeState?.persistenceQuiescing && !env.scenarioMode) {
     env.error?.('jurisdiction', 'J_EVENT_INGRESS_QUIESCING', { label });
     throw new Error(`J_EVENT_INGRESS_QUIESCING:${label}`);
@@ -599,7 +599,7 @@ export function isEventRelevantToEntity(event: RawJEvent, entityId: string): boo
   }
 }
 
-export function collectRelevantJEventReplicaKeys(env: Env, rawEvents: RawJEvent[]): string[] {
+export function collectRelevantJEventReplicaKeys(env: RuntimeState, rawEvents: RawJEvent[]): string[] {
   const canonical = rawEvents.filter(isCanonicalEvent);
   if (canonical.length === 0) return [];
 
@@ -616,7 +616,7 @@ export function collectRelevantJEventReplicaKeys(env: Env, rawEvents: RawJEvent[
   return [...replicaKeys].sort();
 }
 
-export function areJEventReplicaKeysFinalizedThrough(env: Env, replicaKeys: Iterable<string>, blockNumber: number): boolean {
+export function areJEventReplicaKeysFinalizedThrough(env: RuntimeState, replicaKeys: Iterable<string>, blockNumber: number): boolean {
   const targetBlock = Math.floor(Number(blockNumber));
   if (!Number.isFinite(targetBlock) || targetBlock < 0) return false;
 
@@ -656,7 +656,7 @@ export function rememberPendingWatcherJBlock(
  * resolveCommittedWatcherCursor; this fence covers Runtime-frame durability.
  */
 export function isWatcherJHistoryRangeDurable(
-  env: Env,
+  env: RuntimeState,
   range: PendingWatcherJHistoryRange,
 ): boolean {
   if (!Number.isSafeInteger(range.fromBlock) || !Number.isSafeInteger(range.toBlock)) {
@@ -695,7 +695,7 @@ export function isWatcherJHistoryRangeDurable(
 }
 
 export function resolveCommittedWatcherCursor(
-  env: Env,
+  env: RuntimeState,
   pending: PendingWatcherJBlockMap,
   candidateCursor: number,
   currentCursor: number,
@@ -1072,7 +1072,7 @@ const resolveJEventObservedAt = (blockNumber: number): number => {
 };
 
 export function buildRawJEventsRuntimeInput(
-  env: Env,
+  env: RuntimeState,
   rawEvents: RawJEvent[],
   options: {
     blockNumber: number;
@@ -1386,7 +1386,7 @@ const combineRuntimeInputs = (inputs: RuntimeInput[]): RuntimeInput | null => {
 };
 
 export function buildJHistoryRangeRuntimeInput(
-  env: Env,
+  env: RuntimeState,
   newlyObservedInputs: RuntimeInput[],
   scannedThroughHeight: number,
   tipBlockHash: string,
@@ -1513,7 +1513,7 @@ export function buildJHistoryRangeRuntimeInput(
 }
 
 export function enqueueJHistoryRange(
-  env: Env,
+  env: RuntimeState,
   newlyObservedInputs: RuntimeInput[],
   scannedThroughHeight: number,
   tipBlockHash: string,
@@ -1550,7 +1550,7 @@ export function enqueueJHistoryRange(
 }
 
 const enqueueJHistoryRewindScoped = (
-  env: Env,
+  env: RuntimeState,
   conflictingHeight: number,
   conflictingBlockHash: string,
   requestedReplicaKeys: ReadonlySet<string> | null,
@@ -1612,7 +1612,7 @@ const enqueueJHistoryRewindScoped = (
 };
 
 export function enqueueJHistoryRewindForReplicaKeys(
-  env: Env,
+  env: RuntimeState,
   conflictingHeight: number,
   conflictingBlockHash: string,
   replicaKeys: readonly string[],
@@ -1633,7 +1633,7 @@ export function enqueueJHistoryRewindForReplicaKeys(
 }
 
 export function enqueueJHistoryRewind(
-  env: Env,
+  env: RuntimeState,
   conflictingHeight: number,
   conflictingBlockHash: string,
   depositoryAddress?: string,
@@ -1685,7 +1685,7 @@ const normalizeManualJEvents = (events: JEvent[], label: string): RawJEvent[] =>
 };
 
 export function applyJEventsToEnv(
-  env: Env,
+  env: RuntimeState,
   events: JEvent[],
   label: string,
   source: LocalJEventIngressSource,
@@ -1716,7 +1716,7 @@ export function applyJEventsToEnv(
 }
 
 export function buildJEventsRuntimeInput(
-  env: Env,
+  env: RuntimeState,
   events: JEvent[],
   label: string,
   source: LocalJEventIngressSource,
@@ -1783,7 +1783,7 @@ export function buildJEventsRuntimeInput(
  */
 export function processEventBatch(
   rawEvents: RawJEvent[],
-  env: Env,
+  env: RuntimeState,
   blockNumber: number,
   blockHash: string,
   txCounter: EventBatchCounter,

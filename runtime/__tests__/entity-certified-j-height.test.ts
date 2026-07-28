@@ -25,7 +25,7 @@ import {
 import { hashHtlcSecret } from '../protocol/htlc/utils';
 import { createEmptyEnv } from '../runtime';
 import { cloneEntityState } from '../state-helpers';
-import type { EntityState, EntityTx, Env } from '../types';
+import type { EntityState, EntityTx, RuntimeState } from '../types';
 import { signEntityHashes } from '../hanko/signing';
 import {
   addr,
@@ -44,7 +44,7 @@ const counterpartyId = entity('02');
 const signerId = addr('31');
 const secondValidatorId = addr('32');
 
-const envAt = (scannedThroughHeight: number, disputeDelayBlocks: number): Env => {
+const envAt = (scannedThroughHeight: number, disputeDelayBlocks: number): RuntimeState => {
   const env = createEmptyEnv(`certified-j-height:${scannedThroughHeight}:${disputeDelayBlocks}`);
   env.timestamp = 1_000;
   env.quietRuntimeLogs = true;
@@ -238,7 +238,7 @@ describe('two-validator replay uses Entity-certified jurisdiction height', () =>
       type: 'disputeStart',
       data: { counterpartyEntityId: peerEntityId },
     } satisfies Extract<EntityTx, { type: 'disputeStart' }>;
-    const envFor = (height: number, delay: number): Env => {
+    const envFor = (height: number, delay: number): RuntimeState => {
       const env = envAt(height, delay);
       env.runtimeSeed = signingEnv.runtimeSeed;
       return env;

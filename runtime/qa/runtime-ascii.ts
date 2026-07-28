@@ -8,7 +8,7 @@
  *   console.log(formatAccount(accountMachine, myEntityId));
  */
 
-import type { Env, EntityState, AccountMachine } from '../types';
+import type { RuntimeState, EntityState, AccountState } from '../types';
 import { getWallClockMs } from '../utils';
 import { listOpenSwapOffers } from '../orderbook/open-swap-offers';
 
@@ -160,9 +160,9 @@ function drawProgressBar(current: bigint, max: bigint, width: number = 10): stri
 }
 
 /**
- * Format full runtime state (Env)
+ * Format full runtime state (RuntimeState)
  */
-export function formatRuntime(env: Env, options?: FormatOptions): string {
+export function formatRuntime(env: RuntimeState, options?: FormatOptions): string {
   const opts = { ...DEFAULT_OPTIONS, ...options };
   const output: string[] = [];
 
@@ -394,7 +394,7 @@ export function formatEntity(entity: EntityState, options?: FormatOptions): stri
 /**
  * Format account machine state (A-Machine)
  */
-export function formatAccount(account: AccountMachine, myEntityId: string, options?: FormatOptions): string {
+export function formatAccount(account: AccountState, myEntityId: string, options?: FormatOptions): string {
   const opts = { ...DEFAULT_OPTIONS, ...options };
   const indent = opts.indentSize || 0;
   const output: string[] = [];
@@ -593,7 +593,7 @@ export function formatOrderbook(bookState: unknown, pairId: string, depth: numbe
 /**
  * Format a summary line for quick status
  */
-export function formatSummary(env: Env): string {
+export function formatSummary(env: RuntimeState): string {
   const entityCount = env.eReplicas.size;
   const jCount = env.jReplicas?.size || 0;
 

@@ -1,4 +1,4 @@
-import { type RuntimeOverlayRecord, type Env } from '../types';
+import { type RuntimeOverlayRecord, type RuntimeState } from '../types';
 import { docRefKey } from './doc-refs';
 import { keyDiff, normalizeEntityId } from './keys';
 import { readValidatedOrNull } from './level';
@@ -34,7 +34,7 @@ const addBookRef = (target: Map<string, StorageBookRef>, entityId: string, pairI
 };
 
 export const mergeOverlayRecordsIntoEnv = (
-  env: Env,
+  env: RuntimeState,
   records: readonly RuntimeOverlayRecord[],
 ): RuntimeOverlayRecord[] => {
   env.overlay = mergeStorageOverlayRecords(env.overlay, records);
@@ -141,7 +141,7 @@ export const storageRefsFromOverlay = (
 };
 
 export const buildDocPuts = (
-  env: Env,
+  env: RuntimeState,
   touched: StorageOverlayRefs,
   replicaLookup = buildReplicaLookup(env),
 ): StorageDoc[] => {

@@ -1,4 +1,4 @@
-import type { Env, RuntimeInput } from '@xln/runtime/xln-api';
+import type { RuntimeState, RuntimeInput } from '@xln/runtime/xln-api';
 
 export const runtimeInputWorkSummary = (input: RuntimeInput | undefined) => ({
   runtimeTxs: (input?.runtimeTxs ?? []).map(tx =>
@@ -22,7 +22,7 @@ export const runtimeInputWorkSummary = (input: RuntimeInput | undefined) => ({
   queuedAt: input?.queuedAt ?? null,
 });
 
-export const runtimeQuiesceWorkSummary = (env: Env) => ({
+export const runtimeQuiesceWorkSummary = (env: RuntimeState) => ({
   runtimeId: env.runtimeId ?? null,
   scenarioMode: Boolean(env.scenarioMode),
   height: env.height,

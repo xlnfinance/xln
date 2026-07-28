@@ -43,7 +43,7 @@ import {
 } from '../jurisdiction/board-registry';
 import { createEmptyEnv } from '../runtime';
 import { cloneAccountMachine } from '../state-helpers';
-import type { AccountTx, EntityState, Env, HashToSign, JurisdictionConfig, JurisdictionEvent, SettlementOp } from '../types';
+import type { AccountTx, EntityState, RuntimeState, HashToSign, JurisdictionConfig, JurisdictionEvent, SettlementOp } from '../types';
 import { createDefaultDelta } from '../validation-utils';
 import {
   addReplica,
@@ -113,7 +113,7 @@ const accountSettledEvent = (nonce: number) => ({
 });
 
 const installRegisteredBoard = (
-  env: Env,
+  env: RuntimeState,
   state: EntityState,
   jurisdiction: JurisdictionConfig,
   boardHash: string,
@@ -154,7 +154,7 @@ const installRegisteredBoard = (
   }
 };
 
-const installProofStack = (env: Env, state: EntityState): void => {
+const installProofStack = (env: RuntimeState, state: EntityState): void => {
   const jurisdiction = state.config.jurisdiction;
   if (!jurisdiction) throw new Error('TEST_PROOF_JURISDICTION_MISSING');
   if (![...env.eReplicas.values()].some((replica) => replica.entityId === state.entityId)) {
@@ -183,7 +183,7 @@ const installProofStack = (env: Env, state: EntityState): void => {
 };
 
 const attachSettlementSealWitness = async (
-  env: Env,
+  env: RuntimeState,
   state: EntityState,
   counterpartyId: string,
   tx: Extract<AccountTx, { type: 'settle_transition' }>,

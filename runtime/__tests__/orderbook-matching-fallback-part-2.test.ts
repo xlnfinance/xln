@@ -24,7 +24,7 @@ import {
   type NormalizedOrderbookOffer,
 } from '../orderbook/swap-execution';
 
-import type { AccountMachine, AccountTx, SwapOffer } from '../types';
+import type { AccountState, AccountTx, SwapOffer } from '../types';
 
 import { createDefaultDelta } from '../validation-utils';
 
@@ -42,7 +42,7 @@ const processCommittedOrderbookSwaps = (
   options?: Parameters<typeof processOrderbookSwaps>[2],
 ) => processOrderbookSwaps(state, offers.map(markWorkingOrderbookOffer), options);
 
-function makeAccountMachine(offer: SwapOffer): AccountMachine {
+function makeAccountMachine(offer: SwapOffer): AccountState {
   const heldGiveAmount = offer.quantizedGive ?? offer.giveAmount;
   const giveDelta = createDefaultDelta(offer.giveTokenId);
   giveDelta.leftCreditLimit = 10n ** 30n;

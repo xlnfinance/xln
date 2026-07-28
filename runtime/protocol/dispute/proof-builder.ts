@@ -1,7 +1,7 @@
 /**
- * ProofBody Builder - Constructs ABI-encoded dispute proofs from AccountMachine state
+ * ProofBody Builder - Constructs ABI-encoded dispute proofs from AccountState state
  *
- * This module bridges runtime AccountMachine state to on-chain dispute proofs.
+ * This module bridges runtime AccountState state to on-chain dispute proofs.
  * The proofBodyHash is what gets signed for bilateral consensus AND dispute submission.
  *
  * Reference: 2024 Channel.ts lines 434-546, Types.sol, DeltaTransformer.sol
@@ -11,7 +11,7 @@
  */
 
 import { ethers } from 'ethers';
-import type { AccountMachine } from '../../types.js';
+import type { AccountState } from '../../types.js';
 import type {
   RuntimeProofBody,
   RuntimeTransformerClause,
@@ -43,8 +43,8 @@ import {
 
 export type { DepositoryHankoDomain } from '../../hanko/onchain-domain.ts';
 
-type DisputeHashAccount = Pick<AccountMachine, 'leftEntity' | 'rightEntity' | 'proofHeader' | 'watchSeed'>;
-type SettlementHashAccount = Pick<AccountMachine, 'leftEntity' | 'rightEntity'>;
+type DisputeHashAccount = Pick<AccountState, 'leftEntity' | 'rightEntity' | 'proofHeader' | 'watchSeed'>;
+type SettlementHashAccount = Pick<AccountState, 'leftEntity' | 'rightEntity'>;
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 const ABI_CODER = ethers.AbiCoder.defaultAbiCoder();
@@ -129,7 +129,7 @@ function buildTransformerAllowances(batch: RuntimeBatch): RuntimeAllowance[] {
 }
 
 /**
- * Build ABI-encoded ProofBody from AccountMachine state
+ * Build ABI-encoded ProofBody from AccountState state
  *
  * This is the core function that transforms runtime state into on-chain proof format.
  * The resulting proofBodyHash is signed during bilateral consensus.
@@ -142,7 +142,7 @@ function buildTransformerAllowances(batch: RuntimeBatch): RuntimeAllowance[] {
  * @returns ProofBodyResult with runtime, struct, encoded, and hash forms
  */
 export function buildAccountProofBody(
-  accountMachine: AccountMachine,
+  accountMachine: AccountState,
   deltaTransformerAddress: string,
 ): ProofBodyResult {
   const watchSeed = normalizeAccountWatchSeed(accountMachine.watchSeed, 'PROOF_BODY');

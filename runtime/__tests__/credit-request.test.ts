@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { createDefaultDelta } from '../validation-utils';
 import { handleCreditRequest } from '../server/credit-request';
-import type { AccountMachine, Env, RuntimeInput } from '../types';
+import type { AccountState, RuntimeState, RuntimeInput } from '../types';
 
 const entity = (byte: string): string => `0x${byte.repeat(32)}`;
 const signer = (byte: string): string => `0x${byte.repeat(20)}`;
@@ -12,7 +12,7 @@ const USER = entity('22');
 const HUB_SIGNER = signer('33');
 const RUNTIME_ID = signer('44');
 
-const makeAccount = (): AccountMachine => {
+const makeAccount = (): AccountState => {
   const delta = createDefaultDelta(1);
   return {
     leftEntity: HUB,
@@ -31,10 +31,10 @@ const makeAccount = (): AccountMachine => {
     },
     mempool: [],
     deltas: new Map([[1, delta]]),
-  } as unknown as AccountMachine;
+  } as unknown as AccountState;
 };
 
-const makeEnv = (): Env => ({
+const makeEnv = (): RuntimeState => ({
   height: 9,
   runtimeId: RUNTIME_ID,
   eReplicas: new Map([
@@ -62,7 +62,7 @@ const makeEnv = (): Env => ({
       metadata: { isHub: true },
     }],
   },
-} as unknown as Env);
+} as unknown as RuntimeState);
 
 describe('credit request ingress', () => {
   test('queues hub credit extension through runtime admission and returns receipt status metadata', async () => {

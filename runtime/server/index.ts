@@ -27,7 +27,7 @@ import {
 } from '../runtime.ts';
 import { readFileSync } from 'node:fs';
 import { safeStringify, serializeTaggedJson } from '../protocol/serialization';
-import type { Env, RuntimeEntityInputsEnvelope } from '../types';
+import type { RuntimeState, RuntimeEntityInputsEnvelope } from '../types';
 import { createExternalWalletApi } from '../api/external-wallet-api';
 import { maybeHandleQaRequest } from '../qa/api';
 import { createJAdapter, createXlnJsonRpcProvider, type JAdapter } from '../jadapter';
@@ -125,7 +125,7 @@ import { dbRootPath } from '../runtime/platform';
 
 // Global J-adapter instance (set during startup)
 let globalJAdapter: JAdapter | null = null;
-let serverEnv: Env | null = null;
+let serverEnv: RuntimeState | null = null;
 let serverStartupBarrier: Promise<void> = Promise.resolve();
 let resolveServerStartupBarrier: (() => void) | null = null;
 // Server encryption keypair now managed by relay-local-delivery.ts
@@ -190,7 +190,7 @@ const logOneShot = (key: string, message: string, fields: Record<string, unknown
   serverLog.warn(message, fields);
 };
 
-const currentRuntimeHeight = (env: Env | null): number =>
+const currentRuntimeHeight = (env: RuntimeState | null): number =>
   Math.max(0, Math.floor(Number(env?.height ?? 0)));
 
 const runtimeInputStatusUrl = (id: string): string =>
@@ -317,7 +317,7 @@ let serverBootStartedAt = 0;
 let serverBootCompletedAt: number | null = null;
 
 const sendDirectEntityInput = (
-  env: Env,
+  env: RuntimeState,
   targetRuntimeId: string,
   envelope: RuntimeEntityInputsEnvelope,
   ingressTimestamp?: number,
@@ -361,7 +361,7 @@ const installProcessSafetyGuards = (): void => {
 };
 
 const buildMarketSnapshot = (
-  env: Env,
+  env: RuntimeState,
   hubEntityId: string,
   pairId: string,
   depth: number,
@@ -408,7 +408,7 @@ const handleRpcMessage = createServerRpcMessageHandler({
 const handleApi = async (
   req: Request,
   pathname: string,
-  env: Env | null,
+  env: RuntimeState | null,
   clientId: string,
   operatorAuthorized: boolean,
 ): Promise<Response> => {
@@ -764,7 +764,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     resolveServerStartupBarrier = resolve;
   });
 
-  let env: Env | null = null;
+  let env: RuntimeState | null = null;
   let routerConfig: RelayRouterConfig | null = null;
   const relayHelloChallenges = createHelloChallengeRegistry();
 

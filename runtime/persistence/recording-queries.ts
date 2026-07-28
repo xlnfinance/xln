@@ -12,7 +12,7 @@ import type {
   RuntimeRecoveryMetaV1,
   RuntimeRecoverySignerV1,
 } from '../recovery/types';
-import type { Env } from '../types';
+import type { RuntimeState } from '../types';
 import type { PersistenceQueryDeps } from './query-deps';
 import type { createPersistenceEntityQueries } from './entity-queries';
 import type { createPersistenceHistoryQueries } from './history-queries';
@@ -24,7 +24,7 @@ export type DetachedRuntimeRecordingAdapter = {
   readonly runtimeId: string;
   readonly baseHeight: number;
   readonly targetHeight: number;
-  readAtHeight(height: number): Promise<Env>;
+  readAtHeight(height: number): Promise<RuntimeState>;
   close(): Promise<void>;
 };
 
@@ -36,7 +36,7 @@ export const createPersistenceRecordingQueries = (
   historyQueries: HistoryQueries,
 ) => {
   const readPersistedCheckpointSnapshot = async (
-    env: Env,
+    env: RuntimeState,
     height: number,
   ): Promise<Record<string, unknown> | null> => {
     const targetHeight = Number.isFinite(height) ? Math.floor(height) : 0;
@@ -61,7 +61,7 @@ export const createPersistenceRecordingQueries = (
   };
 
   const buildPersistedRuntimeRecording = async (
-    env: Env,
+    env: RuntimeState,
     options: {
       signers: RuntimeRecoverySignerV1[];
       meta?: RuntimeRecoveryMetaV1;
@@ -141,12 +141,12 @@ export const createPersistenceRecordingQueries = (
   ): DetachedRuntimeRecordingAdapter => {
     const validated = validateRuntimeRecording(recording);
     let closed = false;
-    let activeProjection: Env | null = null;
+    let activeProjection: RuntimeState | null = null;
     return {
       runtimeId: validated.runtimeId,
       baseHeight: validated.baseHeight,
       targetHeight: validated.targetHeight,
-      async readAtHeight(height: number): Promise<Env> {
+      async readAtHeight(height: number): Promise<RuntimeState> {
         if (closed) throw new Error('RUNTIME_RECORDING_ADAPTER_CLOSED');
         if (!Number.isSafeInteger(height) || height < validated.baseHeight || height > validated.targetHeight) {
           throw new Error(

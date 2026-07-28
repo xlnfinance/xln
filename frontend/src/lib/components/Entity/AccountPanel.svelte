@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { AccountMachine, AccountTx, EntityReplica } from '$lib/types/ui';
+  import type { AccountState, AccountTx, EntityReplica } from '$lib/types/ui';
   import { createEventDispatcher, onMount, onDestroy } from 'svelte';
   import { p2pState, xlnFunctions } from '../../stores/xlnStore';
   import { settings } from '../../stores/settingsStore';
@@ -10,7 +10,7 @@
   import { compareStableText } from '$lib/utils/stableSort';
   import { faucetPendingKey } from './account-faucet';
 
-  export let account: AccountMachine;
+  export let account: AccountState;
   export let counterpartyId: string;
   export let entityId: string;
   export let replica: EntityReplica | null = null;

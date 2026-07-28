@@ -18,7 +18,7 @@ import {
   type Runtime,
 } from '../../frontend/src/lib/stores/vaultStore';
 import { createDefaultDelta } from '../../runtime/validation-utils';
-import type { AccountMachine } from '../../runtime/types';
+import type { AccountState } from '../../runtime/types';
 import { runWatchtowerSweep } from '../../runtime/watchtower/action';
 import { dbRootPath } from '../../runtime/runtime/platform';
 
@@ -98,7 +98,7 @@ const installJurisdiction = (env: ReturnType<typeof xln.createEmptyEnv>, name = 
   return jurisdiction;
 };
 
-const makeAccount = (selfId: string, counterpartyId: string, watchSeed: string): AccountMachine => {
+const makeAccount = (selfId: string, counterpartyId: string, watchSeed: string): AccountState => {
   const [leftEntity, rightEntity] = selfId.toLowerCase() < counterpartyId.toLowerCase()
     ? [selfId, counterpartyId]
     : [counterpartyId, selfId];

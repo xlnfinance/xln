@@ -1,6 +1,6 @@
 <script lang="ts">
   import { get } from 'svelte/store';
-  import type { AccountMachine, Env, RuntimeInput } from '@xln/runtime/xln-api';
+  import type { AccountState, RuntimeState, RuntimeInput } from '@xln/runtime/xln-api';
   import { xlnFunctions, error } from '../../stores/xlnStore';
   import { errorLog } from '../../stores/errorLogStore';
   import { runtimeControllerHandle } from '../../stores/runtimeControllerStore';
@@ -15,13 +15,13 @@
   import { requireTokenDecimals } from './token-metadata';
 
   export let entityId: string;
-  export let actionRuntimeEnv: Env | null = null;
+  export let actionRuntimeEnv: RuntimeState | null = null;
   export let isLive: boolean;
   export let signerId: string | null = null;
   export let counterpartyId: string | null;
   export let accountIds: string[] = [];
   export let entityNames: Map<string, string> = new Map();
-  export let accountOverride: AccountMachine | null = null;
+  export let accountOverride: AccountState | null = null;
   export let submitRuntimeInput: ((input: RuntimeInput) => Promise<unknown> | unknown) | null = null;
 
   $: activeXlnFunctions = $xlnFunctions;
@@ -122,7 +122,7 @@
   };
 
   function resolveCounterpartyPolicy(
-    env: Env,
+    env: RuntimeState,
     ownerEntityId: string,
     cpEntityId: string,
     tokenId: number,
@@ -132,7 +132,7 @@
   }
 
   function resolveProjectedCounterpartyPolicy(
-    account: AccountMachine | null | undefined,
+    account: AccountState | null | undefined,
     ownerEntityId: string,
     tokenId: number,
   ): CounterpartyFeePolicy | null {
@@ -176,7 +176,7 @@
       const env = activeEnv;
       const handle = get(runtimeControllerHandle);
       const remoteWritable = handle.mode === 'remote' && handle.authLevel === 'admin';
-      if (!env && !remoteWritable) throw new Error('Collateral command requires live embedded Env or admin remote runtime');
+      if (!env && !remoteWritable) throw new Error('Collateral command requires live embedded RuntimeState or admin remote runtime');
       if (!activeIsLive) throw new Error('Collateral request is only available in LIVE mode');
       const resolvedSigner = (env && activeXlnFunctions?.resolveEntityProposerId?.(env, entityId, 'collateral-form'))
         || signerId

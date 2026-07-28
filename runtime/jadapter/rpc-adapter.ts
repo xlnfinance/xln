@@ -34,7 +34,7 @@ import { assertSealedJBatchBinding } from '../jurisdiction/sealed-batch';
 import { compareStableText, safeStringify } from '../protocol/serialization';
 import { nodeProcess, runtimeIsBrowser } from '../runtime/platform';
 import { resolveEntityProposerId } from '../state-helpers';
-import type { DisputeFinalizationEvidence, Env, JTx, RuntimeInput, RuntimeTx } from '../types';
+import type { DisputeFinalizationEvidence, RuntimeState, JTx, RuntimeInput, RuntimeTx } from '../types';
 import { TOKEN_REGISTRATION_AMOUNT, defaultTokensForJurisdiction, getDefaultTokenSupply } from './default-tokens';
 import { extractCanonicalDepositoryEventArgs, parseKnownDepositoryLog } from './depository-event-codec';
 import { classifyJAdapterFailure, makeJAdapterFailureResult } from './failure';
@@ -1342,7 +1342,7 @@ export async function createRpcAdapter(
     // === High-level J-tx submission ===
     async submitTx(
       jTx: JTx,
-      options: { env: Env; signerId?: string; signerPrivateKey?: Uint8Array; timestamp?: number },
+      options: { env: RuntimeState; signerId?: string; signerPrivateKey?: Uint8Array; timestamp?: number },
     ): Promise<JSubmitResult> {
       const { env, signerId, signerPrivateKey, timestamp } = options;
 
@@ -1831,7 +1831,7 @@ export async function createRpcAdapter(
     },
 
     // === J-Watcher integration (RPC polling — uses shared event conversion from watcher.ts) ===
-    startWatching(env: Env): void {
+    startWatching(env: RuntimeState): void {
       if (!stackBindingVerified) {
         throw new Error(`J_STACK_BINDING_UNVERIFIED:rpc:chainId=${config.chainId}`);
       }
@@ -1917,7 +1917,7 @@ export async function createRpcAdapter(
         erc20WatchTokensLoadedAt = now;
         return erc20WatchTokensCache;
       };
-      const buildTrackedExternalOwners = (activeEnv: Env): Map<string, ExternalWalletTrackedOwnerCursor[]> => {
+      const buildTrackedExternalOwners = (activeEnv: RuntimeState): Map<string, ExternalWalletTrackedOwnerCursor[]> => {
         const owners = new Map<string, Map<string, ExternalWalletTrackedOwnerCursor>>();
         const readBlock = (value: unknown): number => {
           const numeric = Number(value || 0);
@@ -2076,9 +2076,9 @@ export async function createRpcAdapter(
           });
         }
       };
-      const readCommittedWatcherCursor = (activeEnv: Env): number =>
+      const readCommittedWatcherCursor = (activeEnv: RuntimeState): number =>
         Math.max(0, getWatcherStartBlock(activeEnv, addresses.depository, config.chainId) - 1);
-      const commitScannedWatcherCursor = (activeEnv: Env, candidateCursor: number): number => {
+      const commitScannedWatcherCursor = (activeEnv: RuntimeState, candidateCursor: number): number => {
         const currentCursor = readCommittedWatcherCursor(activeEnv);
         const watcherReplica = findWatcherJurisdictionReplica(activeEnv, addresses.depository, config.chainId);
         if (!watcherReplica) {
@@ -2102,7 +2102,7 @@ export async function createRpcAdapter(
         }
         return resolvedCursor;
       };
-      const reconcileWatcherCanonicalTip = async (activeEnv: Env): Promise<boolean> => {
+      const reconcileWatcherCanonicalTip = async (activeEnv: RuntimeState): Promise<boolean> => {
         if (reorgRewindPendingReplicaKeys.length > 0) {
           const stillPending = reorgRewindPendingReplicaKeys.some(replicaKey => {
             const replica = activeEnv.eReplicas.get(replicaKey);
@@ -2273,7 +2273,7 @@ export async function createRpcAdapter(
         });
         return true;
       };
-      const assertAuthorityEvidenceCanonical = async (activeEnv: Env, currentHead: number): Promise<void> => {
+      const assertAuthorityEvidenceCanonical = async (activeEnv: RuntimeState, currentHead: number): Promise<void> => {
         const stackKey = getCertifiedBoardStackKey({
           chainId: config.chainId,
           depositoryAddress: addresses.depository,
@@ -2313,7 +2313,7 @@ export async function createRpcAdapter(
         }
         lastAuthorityHeaderAuditKey = auditKey;
       };
-      const isJEventIngressPaused = (activeEnv: Env): boolean =>
+      const isJEventIngressPaused = (activeEnv: RuntimeState): boolean =>
         !!activeEnv.runtimeState?.persistenceQuiescing && !activeEnv.scenarioMode;
       const pauseJEventWatcherForQuiesce = (details: Record<string, unknown>): void => {
         emitWatcherDebug({
@@ -2956,7 +2956,7 @@ export async function createRpcAdapter(
 
   // Watcher state
   let watcherInterval: ReturnType<typeof setInterval> | null = null;
-  let watcherEnv: Env | null = null;
+  let watcherEnv: RuntimeState | null = null;
   let pollInFlight: Promise<void> | null = null;
   let pollNowHandler: (() => Promise<void>) | null = null;
   let watcherFatalError: string | null = null;
@@ -2968,7 +2968,7 @@ export async function createRpcAdapter(
     replicaScannedThrough: {} as Record<string, number>,
   };
   const rememberWatcherScanProgress = (
-    env: Env,
+    env: RuntimeState,
     watcherReplica: NonNullable<ReturnType<typeof findWatcherJurisdictionReplica>>,
     scannedThroughHeight: number,
   ): void => {

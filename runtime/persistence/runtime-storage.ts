@@ -69,7 +69,7 @@ import { restoreJPrefixRound } from './../jurisdiction/j-prefix-consensus';
 import type {
   EntityReplica,
   EntityState,
-  Env,
+  RuntimeState,
   FrameLogEntry,
   RoutedEntityInput,
   RuntimeOverlayRecord,
@@ -84,21 +84,21 @@ import type { StorageDbRole } from '../storage/runtime-dbs';
 type RuntimeModule = typeof import('../runtime');
 
 export type RuntimeStorageApiDeps = Pick<RuntimeModule, 'closeRuntimeDb' | 'closeInfraDb' | 'createEmptyEnv'> & {
-  getStorageDb(env: Env, role?: StorageDbRole): Level<Buffer, Buffer>;
-  getFrameDb(env: Env): Level<Buffer, Buffer>;
-  tryOpenStorageDb(env: Env, role?: StorageDbRole): Promise<boolean>;
-  rotateStorageEpochDb(env: Env, snapshotHeight: number, timestamp?: number): Promise<boolean>;
-  tryOpenFrameDb(env: Env): Promise<boolean>;
+  getStorageDb(env: RuntimeState, role?: StorageDbRole): Level<Buffer, Buffer>;
+  getFrameDb(env: RuntimeState): Level<Buffer, Buffer>;
+  tryOpenStorageDb(env: RuntimeState, role?: StorageDbRole): Promise<boolean>;
+  rotateStorageEpochDb(env: RuntimeState, snapshotHeight: number, timestamp?: number): Promise<boolean>;
+  tryOpenFrameDb(env: RuntimeState): Promise<boolean>;
   waitForPromiseBeforeTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<boolean>;
-  replayRecoveryFrameJournals(env: Env, frames: PersistedFrameJournal[]): Promise<void>;
+  replayRecoveryFrameJournals(env: RuntimeState, frames: PersistedFrameJournal[]): Promise<void>;
 };
 
 const ENV_REPLAY_MODE_KEY = Symbol.for('xln.runtime.env.replay.mode');
-const envRecord = (env: Env): Record<PropertyKey, unknown> => env as unknown as Record<PropertyKey, unknown>;
+const envRecord = (env: RuntimeState): Record<PropertyKey, unknown> => env as unknown as Record<PropertyKey, unknown>;
 const runtimeLog = createStructuredLogger('runtime');
 const formatPerfMs = (value: number): string => value.toFixed(2);
 
-type RuntimeSyncChannel = NonNullable<NonNullable<Env['runtimeState']>['runtimeSyncChannel']>;
+type RuntimeSyncChannel = NonNullable<NonNullable<RuntimeState['runtimeState']>['runtimeSyncChannel']>;
 
 export type RuntimeSyncNotificationOptions = {
   enabled?: boolean;
@@ -111,7 +111,7 @@ export type RuntimeSyncNotificationOptions = {
  * durable financial frame into an apparent rollback.
  */
 export const notifyRuntimeSyncAfterCommit = (
-  env: Env,
+  env: RuntimeState,
   options: RuntimeSyncNotificationOptions = {},
 ): Error | null => {
   const enabled = options.enabled ?? runtimeIsBrowser;
@@ -156,7 +156,7 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
     replayRecoveryFrameJournals,
   } = deps;
 
-  const waitForRuntimeProcessingIdle = async (env: Env, timeoutMs = 5_000): Promise<boolean> => {
+  const waitForRuntimeProcessingIdle = async (env: RuntimeState, timeoutMs = 5_000): Promise<boolean> => {
     const startedAt = Date.now();
     while (true) {
       const pending = env.runtimeState?.processingPromise;
@@ -218,7 +218,7 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
   }
 
   const withStorageWriteTimeout = async <T>(
-    env: Env,
+    env: RuntimeState,
     operation: (markProgress: (step: string) => void) => Promise<T>,
   ): Promise<T> => {
     const timeoutMs = resolveStorageWriteTimeoutMs();
@@ -289,7 +289,7 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
   };
 
   const resolveAuthoritativeFrameCommitStatus = async (
-    env: Env,
+    env: RuntimeState,
     expectedInput: RuntimeInput | undefined,
   ): Promise<RuntimeFrameCommitStatus> => {
     if (!(await tryOpenFrameDb(env))) return 'unknown';
@@ -319,7 +319,7 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
 
   // === LEVELDB PERSISTENCE ===
   const saveEnvToDB = async (
-    env: Env,
+    env: RuntimeState,
     currentFrameInput?: RuntimeInput,
     currentFrameOutputs?: RoutedEntityInput[],
   ): Promise<{
@@ -422,7 +422,7 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
     snapshotHeights: number[];
   };
 
-  const createPersistedStorageEnv = (runtimeId?: string | null, runtimeSeed?: string | null): Env => {
+  const createPersistedStorageEnv = (runtimeId?: string | null, runtimeSeed?: string | null): RuntimeState => {
     const env = createEmptyEnv(runtimeSeed ?? null);
     const normalizedRuntimeId = normalizeRuntimeId(runtimeId ?? env.runtimeId ?? null);
     if (normalizedRuntimeId) {
@@ -432,7 +432,7 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
     return env;
   };
 
-  const listPersistedStorageHandles = async (env: Env): Promise<PersistedStorageHandle[]> => {
+  const listPersistedStorageHandles = async (env: RuntimeState): Promise<PersistedStorageHandle[]> => {
     const opened = await tryOpenFrameDb(env);
     if (!opened) return [];
     const db = getFrameDb(env);
@@ -454,7 +454,7 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
     ];
   };
 
-  const restoreOverlayFromFrameLog = async (env: Env, targetHeight: number): Promise<void> => {
+  const restoreOverlayFromFrameLog = async (env: RuntimeState, targetHeight: number): Promise<void> => {
     for (const handle of await listPersistedStorageHandles(env)) {
       if (targetHeight > handle.latestHeight) continue;
 
@@ -485,18 +485,18 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
     env.overlay = [];
   };
 
-  const resolvePersistedLatestHeight = async (env: Env): Promise<number> => {
+  const resolvePersistedLatestHeight = async (env: RuntimeState): Promise<number> => {
     const handles = await listPersistedStorageHandles(env);
     return handles.reduce((max, handle) => Math.max(max, handle.latestHeight), 0);
   };
 
-  const resolvePersistedCheckpointHeights = async (env: Env): Promise<number[]> => {
+  const resolvePersistedCheckpointHeights = async (env: RuntimeState): Promise<number[]> => {
     const handles = await listPersistedStorageHandles(env);
     return Array.from(new Set(handles.flatMap(handle => handle.snapshotHeights))).sort((left, right) => left - right);
   };
 
   const readPersistedStorageFrameRecord = async (
-    env: Env,
+    env: RuntimeState,
     height: number,
   ): Promise<ReturnType<typeof readStorageFrameRecord> extends Promise<infer T> ? T : never> => {
     const targetHeight = Number.isFinite(height) ? Math.floor(height) : 0;
@@ -510,7 +510,7 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
   };
 
   const readPersistedStorageReplicaMetas = async (
-    env: Env,
+    env: RuntimeState,
     entityId: string,
     sharedState?: EntityState,
   ): Promise<Awaited<ReturnType<typeof listStorageReplicaMetas>>> => {
@@ -522,7 +522,7 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
   };
 
   const readPersistedStorageSnapshotReplicaMetas = async (
-    env: Env,
+    env: RuntimeState,
     snapshotHeight: number,
     entityId: string,
   ): Promise<Awaited<ReturnType<typeof listStorageSnapshotReplicaMetas>>> => {
@@ -532,7 +532,7 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
     return listStorageSnapshotReplicaMetas(getFrameDb(env), snapshotHeight, normalizedEntityId);
   };
 
-  const resolvePersistedSnapshotHeight = async (env: Env, targetHeight: number): Promise<number> => {
+  const resolvePersistedSnapshotHeight = async (env: RuntimeState, targetHeight: number): Promise<number> => {
     let best = 0;
     for (const handle of await listPersistedStorageHandles(env)) {
       if (targetHeight > handle.latestHeight) continue;
@@ -542,7 +542,7 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
     return best;
   };
 
-  const listPersistedEntityIdsAtHeight = async (env: Env, targetHeight: number): Promise<string[]> => {
+  const listPersistedEntityIdsAtHeight = async (env: RuntimeState, targetHeight: number): Promise<string[]> => {
     const entityIds = new Set<string>();
     for (const handle of await listPersistedStorageHandles(env)) {
       const snapshotHeight = await findStorageLatestSnapshotAtOrBelow(handle.db, targetHeight);
@@ -608,7 +608,7 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
     return { signerId, isProposer };
   };
 
-  const rebuildPersistedJurisdictions = (env: Env): void => {
+  const rebuildPersistedJurisdictions = (env: RuntimeState): void => {
     env.jReplicas = new Map();
     for (const replica of env.eReplicas.values()) {
       const jurisdiction = replica.state.config?.jurisdiction as Record<string, unknown> | undefined;
@@ -641,7 +641,7 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
     targetHeightOverride?: number,
     options: { prunedTargetReturnsNull?: boolean } = {},
   ): Promise<{
-    env: Env;
+    env: RuntimeState;
     latestHeight: number;
     checkpointHeight: number;
     selectedSnapshotHeight: number;
@@ -652,13 +652,13 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
      * 1. Read compact snapshot/frame records and decode every Runtime, Entity,
      *    Account, replica-meta and immutable DAG node through its strict schema.
      * 2. Rebuild Maps and reachable node stores in memory, then verify lineage,
-     *    J-history roots and the canonical state hash before returning any Env.
+     *    J-history roots and the canonical state hash before returning any RuntimeState.
      * 3. Only the caller may attach live RPC/network infrastructure and start the
      *    runtime loop. New J-events and durable outbox retries therefore cannot
      *    mutate state until the restored checkpoint has passed every check.
      *
      * Keep external I/O out of phases 1-2. A restore failure must close the probe
-     * databases and fail loud; it must never expose a partially hydrated Env.
+     * databases and fail loud; it must never expose a partially hydrated RuntimeState.
      */
     const env = createPersistedStorageEnv(runtimeId, runtimeSeed);
     assertStorageSafetyOverridesAllowed();
@@ -897,7 +897,7 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
     }
   };
 
-  const hydrateAccountFrameHistoryViews = async (env: Env, limit = 0): Promise<void> => {
+  const hydrateAccountFrameHistoryViews = async (env: RuntimeState, limit = 0): Promise<void> => {
     if (limit <= 0) return;
     try {
       if (!(await tryOpenFrameDb(env))) return;
@@ -927,7 +927,7 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
   };
 
   const verifyPersistedFrameState = (
-    env: Env,
+    env: RuntimeState,
     persistedFrame: StorageFrameRecord,
   ): {
     expectedStateHash: string;
@@ -1093,7 +1093,7 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
     }
   };
 
-  const restoreReplayedActivityViews = async (env: Env, targetHeight: number): Promise<void> => {
+  const restoreReplayedActivityViews = async (env: RuntimeState, targetHeight: number): Promise<void> => {
     // Activity/history hydration is a read-model concern. Never erase deferred
     // input state reconstructed from the latest WAL frame.
     await restoreOverlayFromFrameLog(env, targetHeight);
@@ -1111,7 +1111,7 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
     }
   };
 
-  const assertReplayedStorageFrameMatches = (env: Env, frame: StorageFrameRecord): void => {
+  const assertReplayedStorageFrameMatches = (env: RuntimeState, frame: StorageFrameRecord): void => {
     const verification = verifyPersistedFrameState(env, frame);
     if (verification.ok) return;
     const expectedEntities = new Map((frame.canonicalEntityHashes ?? []).map(entry => [entry.entityId, entry.hash]));

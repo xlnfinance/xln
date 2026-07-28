@@ -1,4 +1,4 @@
-import type { Env } from '../types';
+import type { RuntimeState } from '../types';
 import {
   KEY_DIFF,
   KEY_FRAME,
@@ -25,9 +25,9 @@ import { readStorageHead } from './read';
 import type { RuntimeDbLike, StorageDebugStats } from './types';
 
 export const inspectStorage = async (options: {
-  env: Env;
-  tryOpenDb: (env: Env) => Promise<boolean>;
-  getRuntimeDb: (env: Env) => RuntimeDbLike;
+  env: RuntimeState;
+  tryOpenDb: (env: RuntimeState) => Promise<boolean>;
+  getRuntimeDb: (env: RuntimeState) => RuntimeDbLike;
 }): Promise<StorageDebugStats | null> => {
   const opened = await options.tryOpenDb(options.env);
   if (!opened) return null;

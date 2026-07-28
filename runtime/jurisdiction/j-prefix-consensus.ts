@@ -8,7 +8,7 @@ import type {
   EntityReplica,
   EntityState,
   EntityTx,
-  Env,
+  RuntimeState,
   JPrefixAttestation,
   JPrefixCertificate,
   JPrefixClaim,
@@ -382,7 +382,7 @@ const findOutOfRoundAuthority = (
  * limited to the bounded configs already retained by this replica.
  */
 export const verifyOutOfRoundJPrefixAttestation = (
-  env: Env,
+  env: RuntimeState,
   state: EntityState,
   raw: JPrefixAttestation,
   authorityConfigs: readonly ConsensusConfig[],
@@ -426,7 +426,7 @@ export const verifyOutOfRoundJPrefixAttestation = (
   return attestation;
 };
 
-export const verifyJPrefixAttestation = (env: Env, state: EntityState, raw: JPrefixAttestation): JPrefixAttestation => {
+export const verifyJPrefixAttestation = (env: RuntimeState, state: EntityState, raw: JPrefixAttestation): JPrefixAttestation => {
   const attestation = normalizeJPrefixAttestation(state, raw);
   assertBoardSigner(state.config, attestation.validatorId);
   const { signature, ...unsigned } = attestation;
@@ -437,7 +437,7 @@ export const verifyJPrefixAttestation = (env: Env, state: EntityState, raw: JPre
 };
 
 export const buildLocalJPrefixAttestation = (
-  env: Env,
+  env: RuntimeState,
   replica: EntityReplica,
   history: ValidatorJHistory = replica.jHistory!,
 ): JPrefixAttestation | null => {
@@ -603,7 +603,7 @@ export const buildJPrefixCertificate = (
 };
 
 export const verifyJPrefixCertificate = (
-  env: Env,
+  env: RuntimeState,
   state: EntityState,
   certificate: JPrefixCertificate,
 ): JPrefixCertificate => {
@@ -639,7 +639,7 @@ export const verifyJPrefixCertificate = (
 };
 
 export const mergeJPrefixAttestations = (
-  env: Env,
+  env: RuntimeState,
   state: EntityState,
   current: JPrefixRound | undefined,
   incoming: ReadonlyMap<string, JPrefixAttestation>,
@@ -688,7 +688,7 @@ export const mergeJPrefixAttestations = (
   return round;
 };
 
-export const restoreJPrefixRound = (env: Env, state: EntityState, persisted: JPrefixRound): JPrefixRound => {
+export const restoreJPrefixRound = (env: RuntimeState, state: EntityState, persisted: JPrefixRound): JPrefixRound => {
   if (!(persisted.attestations instanceof Map)) throw new Error('J_PREFIX_RESTORE_ATTESTATIONS_INVALID');
   const rebuilt = mergeJPrefixAttestations(env, state, undefined, persisted.attestations);
   const persistedEnvelope = encodeCanonicalEntityConsensusValue({
@@ -730,7 +730,7 @@ const localClaimAtHeight = (
 };
 
 export const assertJPrefixCertificateMatchesLocalHistory = (
-  env: Env,
+  env: RuntimeState,
   state: EntityState,
   history: ValidatorJHistory | undefined,
   certificate: JPrefixCertificate,
@@ -744,7 +744,7 @@ export const assertJPrefixCertificateMatchesLocalHistory = (
 };
 
 export const buildCertifiedJPrefixTx = (
-  env: Env,
+  env: RuntimeState,
   replica: EntityReplica,
   certificate: JPrefixCertificate,
   proposerSignerId: string,
@@ -836,7 +836,7 @@ const isEmptyBaseJPrefixRollFrame = (certificate: JPrefixCertificate, txs: reado
   txs.length === 0 && certificate.selected.scannedThroughHeight === certificate.baseHeight;
 
 export const assertFrameJPrefix = (
-  env: Env,
+  env: RuntimeState,
   replica: Pick<EntityReplica, 'signerId' | 'state' | 'jHistory' | 'jPrefixRound'>,
   frame: Pick<
     import('../types').ProposedEntityFrame,

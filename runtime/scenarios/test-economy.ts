@@ -3,7 +3,7 @@
  * Simplifies creating N hubs + M users with accounts for testing
  */
 
-import type { Env, EntityInput } from '../types';
+import type { RuntimeState, EntityInput } from '../types';
 import {
   createJurisdictionConfig,
   getScenarioJAdapter,
@@ -40,7 +40,7 @@ const requireEconomyEntity = (
  * Returns: { hubs: Entity[], users: Entity[][] }
  */
 export async function createEconomy(
-  env: Env,
+  env: RuntimeState,
   config: EconomyConfig
 ): Promise<{ hubs: EconomyEntity[]; users: EconomyEntity[][]; all: EconomyEntity[] }> {
   const { getProcess } = await import('./helpers');
@@ -138,7 +138,7 @@ export async function createEconomy(
  * Pattern: Creates account + extends credit both ways
  */
 export async function openAccount(
-  env: Env,
+  env: RuntimeState,
   entityA: EconomyEntity,
   entityB: EconomyEntity,
   creditLimit: bigint,
@@ -203,7 +203,7 @@ export async function openAccount(
  * Creates hub-hub accounts + hub-user accounts
  */
 export async function connectEconomy(
-  env: Env,
+  env: RuntimeState,
   hubs: EconomyEntity[],
   users: EconomyEntity[][],
   creditLimit: bigint,
@@ -236,7 +236,7 @@ export async function connectEconomy(
   console.log(`\n   ✅ Economy connected!\n`);
 }
 
-async function converge(env: Env, maxCycles = 10): Promise<void> {
+async function converge(env: RuntimeState, maxCycles = 10): Promise<void> {
   const { converge: helperConverge } = await import('./helpers');
   return helperConverge(env, maxCycles);
 }
@@ -277,7 +277,7 @@ export const htlcRouteConvergenceCycleBudget = (intermediaryCount: number): numb
  * Test HTLC payment through economy
  */
 export async function testHtlcRoute(
-  env: Env,
+  env: RuntimeState,
   from: EconomyEntity,
   to: EconomyEntity,
   route: EconomyEntity[],

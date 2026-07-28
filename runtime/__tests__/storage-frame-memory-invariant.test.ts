@@ -21,9 +21,9 @@ import {
   appendAccountFrameHistoryView,
   getAccountFrameHistoryView,
 } from '../runtime/env-events';
-import type { AccountMachine, Env, JReplica } from '../types';
+import type { AccountState, RuntimeState, JReplica } from '../types';
 
-const created: Env[] = [];
+const created: RuntimeState[] = [];
 
 afterEach(async () => {
   for (const env of created.splice(0)) {
@@ -39,7 +39,7 @@ afterEach(async () => {
 
 test('live Account memory retains no historical frame copies', () => {
   expect(ACCOUNT_FRAME_HISTORY_VIEW_LIMIT).toBe(0);
-  const account = {} as AccountMachine;
+  const account = {} as AccountState;
   appendAccountFrameHistoryView(account, {
     height: 1,
     timestamp: 1,

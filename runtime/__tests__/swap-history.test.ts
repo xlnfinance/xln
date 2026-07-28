@@ -6,9 +6,9 @@ import {
   recordSwapResolveLifecycle,
 } from '../account/tx/handlers/swap-history';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
-import type { AccountMachine, SwapOffer } from '../types';
+import type { AccountState, SwapOffer } from '../types';
 
-const makeAccount = (): AccountMachine => ({
+const makeAccount = (): AccountState => ({
   leftEntity: 'maker',
   rightEntity: 'hub',
   status: 'active',

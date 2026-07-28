@@ -7,7 +7,7 @@ import {
   getJurisdictionIdentityRef,
   sameJurisdictionIdentity,
 } from '../jurisdiction/jurisdiction-runtime';
-import type { Env, JReplica } from '../types';
+import type { RuntimeState, JReplica } from '../types';
 
 const readText = (path: string): string => {
   if (path !== 'runtime/orchestrator/mm-node.ts') return readFileSync(path, 'utf8');
@@ -59,7 +59,7 @@ const env = {
       depositoryAddress: address('11'),
     } as JReplica],
   ]),
-} as Env;
+} as RuntimeState;
 
 requireCondition(getJReplicaByJurisdictionRef(env, canonicalRef)?.name === 'Canonical', 'stack ref lookup picked wrong replica');
 requireCondition(getJReplicaByJurisdictionRef(env, 'Canonical') === undefined, 'stack ref lookup accepted display name');

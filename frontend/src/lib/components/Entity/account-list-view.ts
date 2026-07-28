@@ -1,4 +1,4 @@
-import type { AccountMachine } from '@xln/runtime/xln-api';
+import type { AccountState } from '@xln/runtime/xln-api';
 import type { EntityReplica } from '$lib/types/ui';
 
 const COLLAPSED_ACCOUNT_LIMIT = 5;
@@ -11,7 +11,7 @@ type AccountView = {
 
 export type AccountListEntry = {
   counterpartyId: string;
-  account: AccountMachine;
+  account: AccountState;
 };
 
 export type AccountPageView = {
@@ -42,12 +42,12 @@ function isFinalizedDisputed(account: AccountView): boolean {
   return status === 'disputed' && !activeDispute;
 }
 
-function getAccountsMap(sourceReplica: EntityReplica | null): Map<string, AccountMachine> | null {
+function getAccountsMap(sourceReplica: EntityReplica | null): Map<string, AccountState> | null {
   const accounts = sourceReplica?.state?.accounts;
-  return accounts instanceof Map ? (accounts as Map<string, AccountMachine>) : null;
+  return accounts instanceof Map ? (accounts as Map<string, AccountState>) : null;
 }
 
-function accountMatchesSearch(counterpartyId: string, account: AccountMachine, query: string): boolean {
+function accountMatchesSearch(counterpartyId: string, account: AccountState, query: string): boolean {
   if (!query) return true;
   const fields = [counterpartyId, account.leftEntity, account.rightEntity, account.status];
   return fields.some((field) => String(field || '').toLowerCase().includes(query));

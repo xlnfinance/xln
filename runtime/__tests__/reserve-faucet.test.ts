@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import type { JAdapter } from '../jadapter';
 import { handleReserveFaucet, parseReserveFaucetAmount } from '../server/reserve-faucet';
-import type { Env, RuntimeInput } from '../types';
+import type { RuntimeState, RuntimeInput } from '../types';
 
 const entity = (byte: string): string => `0x${byte.repeat(32)}`;
 const signer = (byte: string): string => `0x${byte.repeat(20)}`;
@@ -20,7 +20,7 @@ const makeAdapter = (): JAdapter => ({
 const makeEnv = (options: {
   activeHubProfile?: boolean;
   hubReserve?: bigint;
-} = {}): Env => ({
+} = {}): RuntimeState => ({
   eReplicas: new Map([
     [`${HUB}:${HUB_SIGNER}`, {
       entityId: HUB,
@@ -51,13 +51,13 @@ const makeEnv = (options: {
         },
       }],
   },
-} as unknown as Env);
+} as unknown as RuntimeState);
 
 const callReserveFaucet = async (options: {
   adapter?: JAdapter | null;
   activeHubEntityIds?: string[];
   amount?: string;
-  env?: Env | null;
+  env?: RuntimeState | null;
   tokenCatalog?: Array<{ tokenId: number; symbol: string; decimals: number }>;
   tokenId?: number | string;
 } = {}): Promise<{ response: Response; body: Record<string, unknown>; enqueued: RuntimeInput[] }> => {

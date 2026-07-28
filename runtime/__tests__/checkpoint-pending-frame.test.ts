@@ -14,9 +14,9 @@ import {
 } from '../runtime.ts';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
 import { generateLazyEntityId } from '../entity/factory';
-import type { Env } from '../types';
+import type { RuntimeState } from '../types';
 
-function hasPendingBilateralState(env: Env): boolean {
+function hasPendingBilateralState(env: RuntimeState): boolean {
   for (const replica of env.eReplicas.values()) {
     for (const account of replica.state?.accounts?.values() || []) {
       if (account.pendingFrame || account.pendingAccountInput) {

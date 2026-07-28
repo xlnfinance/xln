@@ -1,7 +1,7 @@
-import type { AccountMachine } from '$lib/types/ui';
+import type { AccountState } from '$lib/types/ui';
 
-type AccountStatusSource = Pick<AccountMachine, 'status' | 'mempool'> &
-  Partial<Pick<AccountMachine, 'pendingFrame' | 'activeDispute'>>;
+type AccountStatusSource = Pick<AccountState, 'status' | 'mempool'> &
+  Partial<Pick<AccountState, 'pendingFrame' | 'activeDispute'>>;
 
 export type AccountUiStatus = 'ready' | 'sent' | 'dispute_preparing' | 'disputed' | 'finalized_disputed';
 

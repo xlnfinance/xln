@@ -1,6 +1,6 @@
 <script lang="ts">
   import { get } from 'svelte/store';
-  import type { Env, RuntimeInput } from '@xln/runtime/xln-api';
+  import type { RuntimeState, RuntimeInput } from '@xln/runtime/xln-api';
   import { xlnFunctions, error } from '../../stores/xlnStore';
   import { errorLog } from '../../stores/errorLogStore';
   import { recordRuntimeIngressReceipt } from '../../stores/runtimeCommandBus';
@@ -11,7 +11,7 @@
   import { requireTokenDecimals } from './token-metadata';
 
   export let entityId: string;
-  export let actionRuntimeEnv: Env | null = null;
+  export let actionRuntimeEnv: RuntimeState | null = null;
   export let isLive: boolean;
   export let signerId: string | null = null;
   export let counterpartyId: string | null;
@@ -81,7 +81,7 @@
       const env = activeEnv;
       const handle = get(runtimeControllerHandle);
       const remoteWritable = handle.mode === 'remote' && handle.authLevel === 'admin';
-      if (!env && !remoteWritable) throw new Error('Credit command requires live embedded Env or admin remote runtime');
+      if (!env && !remoteWritable) throw new Error('Credit command requires live embedded RuntimeState or admin remote runtime');
       if (!activeIsLive) throw new Error('Credit updates are only available in LIVE mode');
       const resolvedSigner = (env && activeXlnFunctions?.resolveEntityProposerId?.(env, entityId, 'credit-form'))
         || signerId

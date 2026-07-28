@@ -10,7 +10,7 @@
  * Also tests auto-approve logic and conservation law validation.
  */
 
-import type { Env, SettlementDiff, SettlementOp } from '../types';
+import type { RuntimeState, SettlementDiff, SettlementOp } from '../types';
 import { compileOps } from '../protocol/settlement/operations';
 import { snap, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, getProcess, syncChain, findReplica, setScenarioStorageEnabled, converge, processUntil, processJEvents } from './helpers';
 import { bindScenarioJReplica, ensureJAdapter, getScenarioJAdapter, isScenarioJAdapterMissingError, createJReplica, createJurisdictionConfig, registerEntities } from './boot';
@@ -28,7 +28,7 @@ const usd = (amount: number | bigint) => BigInt(amount) * ONE_TOKEN;
 const JURISDICTION = 'Settle Test';
 const ENTITY_NAME_MAP = new Map<string, string>();
 
-function assert(condition: unknown, message: string, env?: Env): asserts condition {
+function assert(condition: unknown, message: string, env?: RuntimeState): asserts condition {
   if (!condition) {
     if (env) {
       console.log('\n' + '='.repeat(80));
@@ -41,7 +41,7 @@ function assert(condition: unknown, message: string, env?: Env): asserts conditi
   }
 }
 
-export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
+export async function runSettleScenario(existingEnv?: RuntimeState): Promise<RuntimeState> {
   console.log('═══════════════════════════════════════════════════════════════════════════════');
   console.log('                    SETTLEMENT WORKSPACE TEST SCENARIO                          ');
   console.log('═══════════════════════════════════════════════════════════════════════════════');
@@ -55,7 +55,7 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
 
   // DETERMINISTIC: Use fixed timestamp for scenario init (scenarioMode advances it manually)
   const SCENARIO_START_TIMESTAMP = 1700000000000; // Fixed epoch for reproducibility
-  let env: Env;
+  let env: RuntimeState;
   if (existingEnv) {
     env = existingEnv;
   } else {

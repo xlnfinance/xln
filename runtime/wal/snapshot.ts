@@ -1,6 +1,6 @@
 import type {
   EntityReplica,
-  Env,
+  RuntimeState,
   EnvSnapshot,
   JReplica,
   Profile,
@@ -236,7 +236,7 @@ const DURABLE_RUNTIME_STATE_KEYS = [
 ] as const;
 
 const buildDurableRuntimeStateSnapshot = (
-  env: Env,
+  env: RuntimeState,
   options?: {
     includeCertifiedBoardNodes?: boolean;
     includeIngressWorkingState?: boolean;
@@ -310,7 +310,7 @@ const buildDurableRuntimeStateSnapshot = (
 };
 
 export const buildDurableRuntimeMachineSnapshot = (
-  env: Env,
+  env: RuntimeState,
   options?: {
     pendingNetworkOutputs?: RoutedEntityInput[];
     includeIngressWorkingState?: boolean;
@@ -359,7 +359,7 @@ export const projectReplayVerifiableRuntimeMachine = (
 };
 
 export const buildReplayVerifiableRuntimeMachineSnapshot = (
-  env: Env,
+  env: RuntimeState,
   options?: {
     pendingNetworkOutputs?: RoutedEntityInput[];
     includeIngressWorkingState?: boolean;
@@ -374,15 +374,15 @@ const cloneProfiles = (profiles: Profile[] | undefined): Profile[] | undefined =
   return profiles.map(profile => structuredClone(profile));
 };
 
-const cloneLogs = (logs: Env['frameLogs'] | undefined): Env['frameLogs'] | undefined => {
+const cloneLogs = (logs: RuntimeState['frameLogs'] | undefined): RuntimeState['frameLogs'] | undefined => {
   if (!Array.isArray(logs) || logs.length === 0) return undefined;
   return logs.map(entry => ({ ...entry }));
 };
 
 export const buildCanonicalRuntimeStateSnapshot = (
-  env: Env,
+  env: RuntimeState,
   options?: {
-    browserVMState?: Env['browserVMState'];
+    browserVMState?: RuntimeState['browserVMState'];
     compactTransient?: boolean;
     includeCertifiedBoardNodes?: boolean;
   },
@@ -418,11 +418,11 @@ export const buildCanonicalRuntimeStateSnapshot = (
   };
 };
 
-export const buildRuntimeCheckpointSnapshot = (env: Env): Record<string, unknown> => {
+export const buildRuntimeCheckpointSnapshot = (env: RuntimeState): Record<string, unknown> => {
   return buildCanonicalRuntimeStateSnapshot(env, { includeCertifiedBoardNodes: true });
 };
 
-export const buildRuntimeRecoveryCheckpointSnapshot = (env: Env): Record<string, unknown> => {
+export const buildRuntimeRecoveryCheckpointSnapshot = (env: RuntimeState): Record<string, unknown> => {
   const snapshot = buildCanonicalRuntimeStateSnapshot(env, { includeCertifiedBoardNodes: true });
   const gossipProfiles = cloneProfiles(env.gossip?.getProfiles?.());
   return {
@@ -432,7 +432,7 @@ export const buildRuntimeRecoveryCheckpointSnapshot = (env: Env): Record<string,
 };
 
 export const restoreDurableRuntimeSnapshot = (
-  env: Env,
+  env: RuntimeState,
   snapshot: Record<string, unknown>,
 ): void => {
   if (env.runtimeState?.processingPromise) {
@@ -441,7 +441,7 @@ export const restoreDurableRuntimeSnapshot = (
   if (typeof snapshot['runtimeId'] === 'string') env.runtimeId = snapshot['runtimeId'];
   if (typeof snapshot['activeJurisdiction'] === 'string') env.activeJurisdiction = snapshot['activeJurisdiction'];
   if (snapshot['browserVMState']) {
-    env.browserVMState = structuredClone(snapshot['browserVMState']) as NonNullable<Env['browserVMState']>;
+    env.browserVMState = structuredClone(snapshot['browserVMState']) as NonNullable<RuntimeState['browserVMState']>;
   }
   const runtimeInput = snapshot['runtimeInput'];
   if (runtimeInput && typeof runtimeInput === 'object') {
@@ -451,12 +451,12 @@ export const restoreDurableRuntimeSnapshot = (
     env.runtimeMempool = restoredInput;
   }
   if (snapshot['runtimeConfig'] && typeof snapshot['runtimeConfig'] === 'object') {
-    env.runtimeConfig = structuredClone(snapshot['runtimeConfig']) as Env['runtimeConfig'];
+    env.runtimeConfig = structuredClone(snapshot['runtimeConfig']) as RuntimeState['runtimeConfig'];
   }
   const retainedRuntimeState = { ...(env.runtimeState ?? {}) };
   for (const key of DURABLE_RUNTIME_STATE_KEYS) delete retainedRuntimeState[key];
   const restoredRuntimeState = snapshot['runtimeState'] && typeof snapshot['runtimeState'] === 'object'
-    ? structuredClone(snapshot['runtimeState']) as NonNullable<Env['runtimeState']>
+    ? structuredClone(snapshot['runtimeState']) as NonNullable<RuntimeState['runtimeState']>
     : {};
   env.runtimeState = { ...retainedRuntimeState, ...restoredRuntimeState };
   env.pendingOutputs = Array.isArray(snapshot['pendingOutputs'])
@@ -479,22 +479,22 @@ export const restoreDurableRuntimeSnapshot = (
 };
 
 export const buildCanonicalEnvSnapshot = (
-  env: Env,
+  env: RuntimeState,
   options: {
     runtimeInput: RuntimeInput;
     runtimeOutputs: RoutedEntityInput[];
     description: string;
     meta?: EnvSnapshot['meta'];
-    browserVMState?: Env['browserVMState'];
+    browserVMState?: RuntimeState['browserVMState'];
     gossipProfiles?: Profile[];
-    logs?: Env['frameLogs'];
+    logs?: RuntimeState['frameLogs'];
   },
 ): EnvSnapshot => {
   const core = buildCanonicalRuntimeStateSnapshot(env, { browserVMState: options.browserVMState }) as {
     height: number;
     timestamp: number;
     runtimeId?: string;
-    browserVMState?: Env['browserVMState'];
+    browserVMState?: RuntimeState['browserVMState'];
     eReplicas: Array<[string, EntityReplica]>;
     jReplicas: Array<[string, JReplica]>;
   };

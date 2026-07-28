@@ -2,7 +2,7 @@ import {
   type EntityInput,
   type EntityReplica,
   type EntityTx,
-  type Env,
+  type RuntimeState,
   type JReplica,
 } from '../types';
 import type { JAdapter } from './types';
@@ -60,7 +60,7 @@ export type JWatcherDrainStatus = {
   }>;
 };
 
-type ProcessRuntimeFrame = (env: Env, inputs?: EntityInput[]) => Promise<Env>;
+type ProcessRuntimeFrame = (env: RuntimeState, inputs?: EntityInput[]) => Promise<RuntimeState>;
 
 const requireSafeBlock = (value: unknown, label: string): number => {
   const block = Number(value);
@@ -70,7 +70,7 @@ const requireSafeBlock = (value: unknown, label: string): number => {
   return block;
 };
 
-const getUniqueWatcherAdapters = (env: Env): JAdapter[] => {
+const getUniqueWatcherAdapters = (env: RuntimeState): JAdapter[] => {
   const adapters = new Set<JAdapter>();
   for (const replica of env.jReplicas.values()) {
     const adapter = replica.jadapter;
@@ -79,7 +79,7 @@ const getUniqueWatcherAdapters = (env: Env): JAdapter[] => {
   return [...adapters];
 };
 
-const requireWatcherReplica = (env: Env, adapter: JAdapter): JReplica => {
+const requireWatcherReplica = (env: RuntimeState, adapter: JAdapter): JReplica => {
   const replica = findWatcherJurisdictionReplica(
     env,
     adapter.addresses.depository,
@@ -91,7 +91,7 @@ const requireWatcherReplica = (env: Env, adapter: JAdapter): JReplica => {
   return replica;
 };
 
-export const captureTrustedJWatcherTargets = async (env: Env): Promise<CapturedJWatcherTarget[]> => {
+export const captureTrustedJWatcherTargets = async (env: RuntimeState): Promise<CapturedJWatcherTarget[]> => {
   const targets: CapturedJWatcherTarget[] = [];
   for (const adapter of getUniqueWatcherAdapters(env)) {
     if (
@@ -116,7 +116,7 @@ export const captureTrustedJWatcherTargets = async (env: Env): Promise<CapturedJ
 };
 
 const relevantReplicas = (
-  env: Env,
+  env: RuntimeState,
   watcherReplica: JReplica,
 ): Array<[string, EntityReplica]> => [...env.eReplicas.entries()]
   .filter(([, replica]) => isEntityReplicaRelevantToWatcher(env, replica, watcherReplica))
@@ -160,7 +160,7 @@ const replicaDrainStatus = (key: string, replica: EntityReplica) => {
 };
 
 export const getJWatcherDrainStatus = (
-  env: Env,
+  env: RuntimeState,
   target: CapturedJWatcherTarget,
 ): JWatcherDrainStatus => {
   const watcherReplica = requireWatcherReplica(env, target.adapter);
@@ -249,7 +249,7 @@ const replicaConsensusSummary = (key: string, replica: EntityReplica): unknown =
 });
 
 const getDrainFingerprint = (
-  env: Env,
+  env: RuntimeState,
   targets: CapturedJWatcherTarget[],
   statuses: JWatcherDrainStatus[],
 ): string => safeStringify({
@@ -282,7 +282,7 @@ const pollCapturedTargets = async (
 };
 
 export const drainJWatcherBacklog = async (
-  env: Env,
+  env: RuntimeState,
   processFrame: ProcessRuntimeFrame,
 ): Promise<JWatcherDrainStatus[]> => {
   const targets = await captureTrustedJWatcherTargets(env);

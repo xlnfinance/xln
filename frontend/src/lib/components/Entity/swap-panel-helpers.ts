@@ -3,7 +3,7 @@ import type { EntityReplica } from '$lib/types/ui';
 import type {
   BookState,
   EntityState,
-  Env,
+  RuntimeState,
   EnvSnapshot,
   Profile as GossipProfile,
 } from '@xln/runtime/xln-api';
@@ -23,7 +23,7 @@ export type SwapPanelProjectionSource = {
   entityNames?: Map<string, string> | null;
   replicas?: Map<string, EntityReplica> | readonly EntityReplica[] | null;
 };
-export type SwapPanelFrame = Env | EnvSnapshot | EntityState | SwapPanelProjectionSource | null | undefined;
+export type SwapPanelFrame = RuntimeState | EnvSnapshot | EntityState | SwapPanelProjectionSource | null | undefined;
 
 type SwapGossipSource = {
   gossip?: {

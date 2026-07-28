@@ -5,11 +5,11 @@
 
 import type {
   AccountFrame,
-  AccountMachine,
+  AccountState,
   AccountTx,
   EntityReplica,
   EntityState,
-  Env,
+  RuntimeState,
   LendingLoan,
   LendingPoolPosition,
   LendingState,
@@ -53,7 +53,7 @@ const stateHelperLog = createStructuredLogger('state.helpers');
 const REPLAY_OUTPUT_SIGNER_HINTS = Symbol.for('xln.runtime.replay.output-signer-hints');
 
 export const installReplayOutputSignerHints = (
-  env: Env,
+  env: RuntimeState,
   hints: ReadonlyMap<string, string>,
 ): void => {
   const canonical = new Map<string, string>();
@@ -73,11 +73,11 @@ export const installReplayOutputSignerHints = (
   });
 };
 
-export const clearReplayOutputSignerHints = (env: Env): void => {
+export const clearReplayOutputSignerHints = (env: RuntimeState): void => {
   delete (env as unknown as Record<PropertyKey, unknown>)[REPLAY_OUTPUT_SIGNER_HINTS];
 };
 
-const replayOutputSignerHint = (env: Env, entityId: string): string | null => {
+const replayOutputSignerHint = (env: RuntimeState, entityId: string): string | null => {
   const hints = (env as unknown as Record<PropertyKey, unknown>)[REPLAY_OUTPUT_SIGNER_HINTS];
   return hints instanceof Map ? String(hints.get(entityId) || '') || null : null;
 };
@@ -116,7 +116,7 @@ const cloneCrossJurisdictionRoutesInState = (state: EntityState, source: EntityS
   }
 };
 
-const cloneCrossJurisdictionRoutesInAccount = (account: AccountMachine, source: AccountMachine = account): void => {
+const cloneCrossJurisdictionRoutesInAccount = (account: AccountState, source: AccountState = account): void => {
   account.mempool = (source.mempool ?? []).map(cloneAccountTxForState);
   account.currentFrame = cloneCrossJurisdictionAccountFrameRoute(source.currentFrame);
   if (source.pendingFrame) account.pendingFrame = cloneCrossJurisdictionAccountFrameRoute(source.pendingFrame);
@@ -176,7 +176,7 @@ export function canonicalAccountKey(entity1: string, entity2: string): string {
 /**
  * Get account perspective: Am I left or right? Derive from/to for current operation.
  */
-export function getAccountPerspective(account: AccountMachine, myEntityId: string): {
+export function getAccountPerspective(account: AccountState, myEntityId: string): {
   iAmLeft: boolean;
   from: string;
   to: string;
@@ -277,7 +277,7 @@ const cloneJBatchState = (state: JBatchState): JBatchState => {
  * This keeps per-frame logs queryable without bloating state.messages.
  */
 export function emitScopedEvents(
-  env: Env,
+  env: RuntimeState,
   category: LogCategory,
   scope: string,
   messages: string[],
@@ -298,7 +298,7 @@ export function emitScopedEvents(
  * config validators[0], then gossip board[0].
  * Throws if no signer can be resolved (fail early).
  */
-export function resolveEntityProposerId(env: Env, entityId: string, context: string): string {
+export function resolveEntityProposerId(env: RuntimeState, entityId: string, context: string): string {
   const targetEntityId = String(entityId || '').toLowerCase();
   let localKeyReplicaFallback: string | null = null;
   let configFallback: string | null = null;
@@ -393,8 +393,8 @@ const cloneProofBodyEvidence = (proofBody: unknown): unknown => {
 };
 
 const cloneDisputeEvidenceIntoAccount = (
-  target: AccountMachine,
-  source: AccountMachine,
+  target: AccountState,
+  source: AccountState,
 ): void => {
   // These two maps deliberately contain different evidence:
   // - disputeProofBodiesByHash is signed-state evidence revealed to Solidity.
@@ -674,9 +674,9 @@ export const cloneTrustedEntityReplica = (
 // === ACCOUNT MACHINE HELPERS ===
 
 /**
- * Clone AccountMachine for validation (replaces dryRun pattern)
+ * Clone AccountState for validation (replaces dryRun pattern)
  */
-export function cloneAccountMachine(account: AccountMachine, forSnapshot: boolean = false): AccountMachine {
+export function cloneAccountMachine(account: AccountState, forSnapshot: boolean = false): AccountState {
   // Snapshot state intentionally excludes the validation candidate. It is
   // transient consensus work, not durable Account state.
   if (forSnapshot) {
@@ -685,7 +685,7 @@ export function cloneAccountMachine(account: AccountMachine, forSnapshot: boolea
     const cloned = structuredCloneOrThrow(
       accountWithoutCloned,
       'ACCOUNT_SNAPSHOT_STRUCTURED_CLONE_FAILED',
-    ) as AccountMachine;
+    ) as AccountState;
     cloneDisputeEvidenceIntoAccount(cloned, account);
     cloneCrossJurisdictionRoutesInAccount(cloned, account);
     return cloned;

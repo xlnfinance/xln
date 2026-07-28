@@ -63,7 +63,7 @@ import type {
   EntityReplica,
   EntityState,
   EntityTx,
-  Env,
+  RuntimeState,
   JurisdictionEvent,
   Proposal,
   RoutedEntityInput,
@@ -195,7 +195,7 @@ const setupNoJurisdictionMultisig = () => {
 };
 
 const installCertifiedBoardEvents = (
-  env: Env,
+  env: RuntimeState,
   state: EntityState,
   events: JurisdictionEvent[],
 ): void => {
@@ -320,7 +320,7 @@ describe('signed Entity command admission', () => {
       warn: () => {},
       info: () => {},
       error: () => {},
-    } as unknown as Env;
+    } as unknown as RuntimeState;
 
     expect(() => routeInboundP2PEntityInput(env, address('44'), {
       entityId: targetEntityId,

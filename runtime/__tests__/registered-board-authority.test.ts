@@ -55,7 +55,7 @@ import type {
   ConsensusOutputOrigin,
   EntityReplica,
   EntityTx,
-  Env,
+  RuntimeState,
   EntityState,
   JurisdictionConfig,
   JurisdictionEvent,
@@ -139,7 +139,7 @@ const event = (
 };
 
 const installEvents = (
-  env: Env,
+  env: RuntimeState,
   state: EntityState,
   events: JurisdictionEvent[],
 ): void => {
@@ -236,7 +236,7 @@ const signDigest = (privateKey: Uint8Array, digest: string): string => {
 
 const buildRegisteredProfile = async (): Promise<{
   profile: Profile;
-  localEnv: Env;
+  localEnv: RuntimeState;
   boardHash: string;
   privateKey: Uint8Array;
 }> => {
@@ -315,7 +315,7 @@ const buildRegisteredProfile = async (): Promise<{
   return { profile: await signProfileRuntimeRoute(localEnv, profile, signer), localEnv, boardHash, privateKey };
 };
 
-const remoteObserverEnv = (boardHash: string): Env => {
+const remoteObserverEnv = (boardHash: string): RuntimeState => {
   const env = createEmptyEnv('registered-board-authority:remote');
   const signerId = addr('91');
   const state = makeState(entity('99'), signerId, jurisdiction);

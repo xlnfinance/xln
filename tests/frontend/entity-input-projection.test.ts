@@ -22,7 +22,7 @@ test('EntityInput consumes projected profiles instead of global runtime env', ()
   expect(payment).toContain('profiles={runtimeProfiles}');
   expect(move).toContain('export let profiles: GossipProfile[] = []');
   expect(settlement).toContain('export let profiles: GossipProfile[] = []');
-  expect(settlement).toContain('export let env: Env | EnvSnapshot | null = null');
+  expect(settlement).toContain('export let env: RuntimeState | EnvSnapshot | null = null');
   expect(settlement).toContain('if (historyOnly) return;');
   expect(settlement).not.toContain('activeEnv?.gossip');
   expect(settlement).not.toContain('getFrameReplicaMap');
@@ -56,7 +56,7 @@ test('entity factory auto-create uses injected runtime env and fails loud', () =
   const vaultStore = readFileSync('frontend/src/lib/stores/vaultStore.ts', 'utf8');
 
   expect(entityFactory).toContain('export async function autoCreateEntityForSigner');
-  expect(entityFactory).toContain('env: Env,');
+  expect(entityFactory).toContain('env: RuntimeState,');
   expect(entityFactory).toContain('const runtimeEnv = unwrapLiveRuntimeEnv(env) ?? env;');
   expect(entityFactory).toContain("throw new Error('[EntityFactory] No runtime env available for auto-create');");
   expect(entityFactory).toContain('available=${formatJMachineNames(env)}');
@@ -116,7 +116,7 @@ test('vault user token helpers use active RuntimeStore env and RuntimeInput comm
 	  expect(vaultStore).not.toContain('async enqueueRuntimeInput');
 	});
 
-test('unmounted legacy Env owner panels are removed instead of kept as dead code', () => {
+test('unmounted legacy RuntimeState owner panels are removed instead of kept as dead code', () => {
   expect(existsSync('frontend/src/lib/components/Admin/AdminPanel.svelte')).toBe(false);
   expect(existsSync('frontend/src/lib/components/Network/ProfileForm.svelte')).toBe(false);
   expect(existsSync('frontend/src/lib/components/Network/ProfileCard.svelte')).toBe(false);

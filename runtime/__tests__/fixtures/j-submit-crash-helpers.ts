@@ -3,7 +3,7 @@ import { join } from 'path';
 
 import { processRuntime } from '../../runtime';
 import { dbRootPath } from '../../runtime/platform';
-import type { EntityInput, Env } from '../../types';
+import type { EntityInput, RuntimeState } from '../../types';
 
 export const crashBoundaryFixture = join(import.meta.dir, 'j-submit-crash-boundary-child.ts');
 
@@ -17,14 +17,14 @@ export const cleanupRuntimeStorage = (runtimeId: string): void => {
   rmSync(`${namespacePath}-infra`, { recursive: true, force: true });
 };
 
-export const findJSubmitCrashReplica = (env: Env, entityId: string) => {
+export const findJSubmitCrashReplica = (env: RuntimeState, entityId: string) => {
   const replica = Array.from(env.eReplicas.values()).find((candidate) => candidate.entityId === entityId);
   if (!replica) throw new Error(`J submit crash fixture replica missing: ${entityId}`);
   return replica;
 };
 
 export const processUntilJSubmitCrash = async (
-  env: Env,
+  env: RuntimeState,
   initialInputs: EntityInput[],
   expectedMarker: string,
 ): Promise<void> => {
@@ -43,7 +43,7 @@ export const processUntilJSubmitCrash = async (
 };
 
 export const driveRuntimeUntil = async (
-  env: Env,
+  env: RuntimeState,
   predicate: () => boolean,
   label: string,
 ): Promise<void> => {

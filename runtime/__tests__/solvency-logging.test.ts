@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { calculateSolvency, verifySolvency } from '../account/solvency';
-import type { Env } from '../types';
+import type { RuntimeState } from '../types';
 
 const ENTITY_A = `0x${'11'.repeat(32)}`;
 const ENTITY_B = `0x${'22'.repeat(32)}`;
@@ -12,7 +12,7 @@ const ENTITY_D = `0x${'ff'.repeat(32)}`;
 const DEPOSITORY = `0x${'33'.repeat(20)}`;
 const SECOND_DEPOSITORY = `0x${'66'.repeat(20)}`;
 
-const expectVerificationFailure = (env: Env, label: string): void => {
+const expectVerificationFailure = (env: RuntimeState, label: string): void => {
   const previousScopes = process.env['XLN_LOG_SCOPES'];
   process.env['XLN_LOG_SCOPES'] = 'test-suppressed';
   try {
@@ -23,7 +23,7 @@ const expectVerificationFailure = (env: Env, label: string): void => {
   }
 };
 
-const makeEnv = (): Env => ({
+const makeEnv = (): RuntimeState => ({
   eReplicas: new Map([
     ['a', {
       state: {
@@ -50,7 +50,7 @@ const makeEnv = (): Env => ({
   jReplicas: new Map(),
   height: 0,
   timestamp: 0,
-} as unknown as Env);
+} as unknown as RuntimeState);
 
 test('solvency diagnostics use structured logging only', () => {
   const source = readFileSync(join(process.cwd(), 'runtime/account/solvency.ts'), 'utf8');

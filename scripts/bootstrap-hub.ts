@@ -15,7 +15,7 @@ import {
 import { encodeBoard, hashBoard } from '../runtime/entity/factory';
 import { createStructuredLogger } from '../runtime/infra/logger';
 import { requireJurisdictionBlockTimeMs } from '../runtime/orchestrator/mesh-jurisdictions';
-import type { ConsensusConfig, Env } from '../runtime/types';
+import type { ConsensusConfig, RuntimeState } from '../runtime/types';
 
 const args = process.argv.slice(2);
 
@@ -77,13 +77,13 @@ const deriveHubSigner = (seed: string, signerLabel: string): { signerAddress: st
   return { signerAddress, signerLabel };
 };
 
-const ensureRuntimeInput = (env: Env) => {
+const ensureRuntimeInput = (env: RuntimeState) => {
   if (!env.runtimeMempool) {
     env.runtimeMempool = { runtimeTxs: [], entityInputs: [] };
   }
 };
 
-const resolveJurisdiction = (env: Env, requestedName?: string) => {
+const resolveJurisdiction = (env: RuntimeState, requestedName?: string) => {
   const normalizedRequested = String(requestedName || '').trim().toLowerCase();
   const name = (normalizedRequested && env.jReplicas
       ? Array.from(env.jReplicas.keys()).find((key) => key.toLowerCase() === normalizedRequested)
@@ -104,7 +104,7 @@ const resolveJurisdiction = (env: Env, requestedName?: string) => {
   };
 };
 
-export async function bootstrapHub(env?: Env, config?: Partial<HubConfig>): Promise<{ entityId: string; signerId: string } | null> {
+export async function bootstrapHub(env?: RuntimeState, config?: Partial<HubConfig>): Promise<{ entityId: string; signerId: string } | null> {
   const hubConfig: HubConfig = { ...DEFAULT_CONFIG, ...(config || {}) };
   const { signerAddress } = deriveHubSigner(hubConfig.seed, hubConfig.signerId);
   bootstrapLog.info('hub.start', {
@@ -223,7 +223,7 @@ export async function bootstrapHub(env?: Env, config?: Partial<HubConfig>): Prom
   return { entityId, signerId: signerAddress };
 }
 
-export async function bootstrapHubs(env: Env, configs: HubConfig[]): Promise<Array<{ entityId: string; signerId: string; signerLabel: string }>> {
+export async function bootstrapHubs(env: RuntimeState, configs: HubConfig[]): Promise<Array<{ entityId: string; signerId: string; signerLabel: string }>> {
   const entities: Array<{ entityId: string; signerId: string; signerLabel: string }> = [];
   for (const config of configs) {
     const result = await bootstrapHub(env, config);

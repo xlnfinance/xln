@@ -24,7 +24,7 @@ import {
   saveEnvToDB,
 } from '../runtime';
 import { dbRootPath } from '../runtime/platform';
-import type { AccountMachine, EntityReplica, EntityState, EntityTx, Env, JReplica, RoutedEntityInput } from '../types';
+import type { AccountState, EntityReplica, EntityState, EntityTx, RuntimeState, JReplica, RoutedEntityInput } from '../types';
 import { getPerfMs } from '../utils';
 import { buildRuntimeCheckpointSnapshot } from '../wal/snapshot';
 import {
@@ -122,8 +122,8 @@ const summarizeBytes = (values: number[]): DocStats => {
 const encodedSize = (value: unknown): number => Buffer.byteLength(serializeTaggedJson(value));
 
 const compareAccountDocs = (
-  liveAccounts: ReadonlyMap<string, AccountMachine>,
-  loadedAccounts: ReadonlyMap<string, AccountMachine>,
+  liveAccounts: ReadonlyMap<string, AccountState>,
+  loadedAccounts: ReadonlyMap<string, AccountState>,
 ): {
   mismatches: number;
   firstMismatchKey: string | null;
@@ -187,7 +187,7 @@ const runQuiet = async <T>(enabled: boolean, fn: () => Promise<T>): Promise<T> =
   }
 };
 
-const findReplica = (env: Env, participant: Participant): EntityReplica => {
+const findReplica = (env: RuntimeState, participant: Participant): EntityReplica => {
   const replica = env.eReplicas.get(`${participant.entityId}:${participant.signerId}`);
   if (!replica) {
     throw new Error(`REPLICA_NOT_FOUND: ${participant.name}`);
@@ -222,7 +222,7 @@ const projectEntityCoreDoc = (state: EntityState): Record<string, unknown> => ({
   hubRebalanceConfig: state.hubRebalanceConfig,
 });
 
-const projectAccountDoc = (account: AccountMachine): Record<string, unknown> => ({
+const projectAccountDoc = (account: AccountState): Record<string, unknown> => ({
   leftEntity: account.leftEntity,
   rightEntity: account.rightEntity,
   status: account.status,
@@ -395,7 +395,7 @@ const describeRouteLockRefs = (
   return `refs=${refs.join(',') || 'none'}`;
 };
 
-const summarizeOpenHtlcLocks = (env: Env): OpenHtlcLockStats => {
+const summarizeOpenHtlcLocks = (env: RuntimeState): OpenHtlcLockStats => {
   const stats: OpenHtlcLockStats = { total: 0, entityLockBook: 0, accountLocks: 0, htlcRoutes: 0, samples: [] };
   for (const replica of env.eReplicas.values()) {
     const entityId = String(replica.state.entityId || '').slice(0, 10);
@@ -426,7 +426,7 @@ const summarizeOpenHtlcLocks = (env: Env): OpenHtlcLockStats => {
 };
 
 const drainHtlcSettlements = async (
-  env: Env,
+  env: RuntimeState,
   maxRounds: number,
   maxConverge: number,
   verbose: boolean,
@@ -447,7 +447,7 @@ const drainHtlcSettlements = async (
 };
 
 const importParticipants = async (
-  env: Env,
+  env: RuntimeState,
   participants: Participant[],
   importBatch: number,
   jurisdiction: { name: string; depositoryAddress: string; entityProviderAddress: string; chainId: number },
@@ -472,7 +472,7 @@ const importParticipants = async (
         },
       })),
       entityInputs: [],
-    } as unknown as Env['runtimeMempool'];
+    } as unknown as RuntimeState['runtimeMempool'];
     await applyRuntimeInput(env, runtimeInput);
     if (env.runtimeConfig?.storage?.enabled === true || env.runtimeState?.persistencePaused !== true) {
       await saveEnvToDB(env, runtimeInput);
@@ -491,7 +491,7 @@ const isStorageAbsentAtHeightError = (error: unknown): boolean =>
   error instanceof Error && error.message.startsWith('STORAGE_DIFF_MISSING:');
 
 const loadOptionalEntityStateFromStorageDb = async (
-  env: Env,
+  env: RuntimeState,
   entityId: string,
   height: number,
 ): Promise<EntityState | null> => {
@@ -587,7 +587,7 @@ async function main() {
       : {}),
   };
   if (!env.runtimeState) {
-    env.runtimeState = {} as NonNullable<Env['runtimeState']>;
+    env.runtimeState = {} as NonNullable<RuntimeState['runtimeState']>;
   }
   env.runtimeState.persistencePaused = !persist && !storageEnabled;
   const jurisdiction = {

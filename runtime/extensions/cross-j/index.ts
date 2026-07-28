@@ -15,7 +15,7 @@ import type {
   CrossJurisdictionSwapRoute,
   CrossJurisdictionSwapStatus,
   CrossJurisdictionTimePolicy,
-  Env,
+  RuntimeState,
   SwapOffer,
   SwapOrderHistoryEntry,
 } from '../../types';
@@ -804,7 +804,7 @@ export function buildCrossJurisdictionCloseProof(
 }
 
 export function getCrossJurisdictionPrivateSeed(
-  env: Pick<Env, 'runtimeSeed'>,
+  env: Pick<RuntimeState, 'runtimeSeed'>,
   route: CrossJurisdictionSwapRoute,
 ): string {
   return deriveCrossJurisdictionPrivateSeed(env.runtimeSeed, route);

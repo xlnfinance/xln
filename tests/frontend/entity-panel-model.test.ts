@@ -83,7 +83,7 @@ describe('entity panel model helpers', () => {
     expect(isSameJurisdictionEntity(env, replica, 'alice', 'alice', 'unknown-hub')).toBe(true);
   });
 
-  test('compares entity jurisdiction from projected replica maps without Env ownership', () => {
+  test('compares entity jurisdiction from projected replica maps without RuntimeState ownership', () => {
     const replica = {
       state: {
         entityId: 'alice',
@@ -342,16 +342,16 @@ describe('entity panel model helpers', () => {
     }
 
     expect(creditForm).toContain('export let entityNames: Map<string, string>');
-    expect(creditForm).toContain('export let actionRuntimeEnv: Env | null = null');
+    expect(creditForm).toContain('export let actionRuntimeEnv: RuntimeState | null = null');
     expect(creditForm).toContain('export let submitRuntimeInput');
-    expect(creditForm).not.toContain('export let env: Env');
+    expect(creditForm).not.toContain('export let env: RuntimeState');
     expect(creditForm).not.toContain('import { submitEntityInputs');
     expect(creditForm).toContain('<EntitySelect bind:value={selectedCounterparty} options={accountIds} {entityNames}');
     expect(collateralForm).toContain('export let entityNames: Map<string, string>');
-    expect(collateralForm).toContain('export let actionRuntimeEnv: Env | null = null');
+    expect(collateralForm).toContain('export let actionRuntimeEnv: RuntimeState | null = null');
     expect(collateralForm).toContain('export let submitRuntimeInput');
     expect(collateralForm).toContain('export let accountOverride');
-    expect(collateralForm).not.toContain('export let env: Env');
+    expect(collateralForm).not.toContain('export let env: RuntimeState');
     expect(collateralForm).not.toContain('import { submitEntityInputs');
     expect(collateralForm).toContain('<EntitySelect bind:value={selectedCounterparty} options={accountIds} {entityNames}');
     expect(lendingPanel).toContain('export let entityNames: Map<string, string>');

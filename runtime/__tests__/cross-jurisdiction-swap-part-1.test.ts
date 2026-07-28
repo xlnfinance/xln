@@ -674,7 +674,7 @@ describe('cross-jurisdiction hashledger swap', () => {
           metadata: { board: { validators: [{ signerId: targetUserSigner }] } },
         },
       ],
-    } as Env['gossip'];
+    } as RuntimeState['gossip'];
     const sourceHubState = makeState(sourceHub, sourceHubSigner, sourceJ, sourceUser);
     const targetHubState = makeState(targetHub, targetHubSigner, targetJ, targetUser);
     sourceHubState.prevFrameHash = 'genesis';
@@ -820,7 +820,7 @@ describe('cross-jurisdiction hashledger swap', () => {
           metadata: { board: { validators: [{ signerId: targetUserSigner }] } },
         },
       ],
-    } as Env['gossip'];
+    } as RuntimeState['gossip'];
     const sourceState = makeState(sourceHub, sourceHubSigner, sourceJ, sourceUser);
     const targetState = makeState(targetHub, targetHubSigner, targetJ, targetUser);
     sourceState.prevFrameHash = 'genesis';

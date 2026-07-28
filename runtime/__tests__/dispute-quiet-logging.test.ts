@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { handleDisputeFinalize } from '../entity/tx/handlers/dispute';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
-import type { EntityState, EntityTx, Env } from '../types';
+import type { EntityState, EntityTx, RuntimeState } from '../types';
 
 const ALICE = `0x${'11'.repeat(32)}`;
 const HUB = `0x${'22'.repeat(32)}`;
@@ -84,7 +84,7 @@ describe('dispute quiet logging', () => {
             cooperative: true,
           },
         } as Extract<EntityTx, { type: 'disputeFinalize' }>,
-        { quietRuntimeLogs: true } as Env,
+        { quietRuntimeLogs: true } as RuntimeState,
       );
 
       expect(result.newState.messages?.some((message) =>

@@ -1,6 +1,6 @@
 import { resolveEntityProposerId } from '../state-helpers';
 import { compareStableText } from '../protocol/serialization';
-import type { Env } from '../types';
+import type { RuntimeState } from '../types';
 
 export type ControlEntitySummary = {
   entityId: string;
@@ -14,7 +14,7 @@ export type ControlEntitySummary = {
 };
 
 const getProfileNameForEntity = (
-  env: Env,
+  env: RuntimeState,
   entityId: string,
   getRelayProfileName: (entityId: string) => string | undefined,
 ): string => {
@@ -27,7 +27,7 @@ const getProfileNameForEntity = (
 };
 
 export const listLocalControlEntities = (
-  env: Env,
+  env: RuntimeState,
   getRelayProfileName: (entityId: string) => string | undefined,
 ): ControlEntitySummary[] => {
   const seen = new Set<string>();

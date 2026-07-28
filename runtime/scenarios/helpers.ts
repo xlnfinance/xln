@@ -2,7 +2,7 @@
  * Shared scenario helpers
  */
 
-import type { Env, EntityInput, EntityReplica, Delta, RoutedEntityInput, RuntimeInput } from '../types';
+import type { RuntimeState, EntityInput, EntityReplica, Delta, RoutedEntityInput, RuntimeInput } from '../types';
 import { formatRuntime } from '../qa/runtime-ascii';
 import { setFailFastErrors } from '../infra/logger';
 import { deriveSignerAddressSync, getSignerPrivateKey } from '../account/crypto';
@@ -15,7 +15,7 @@ import { releaseUncommittedReliableIngress } from '../runtime/reliable-delivery'
 import { accountHasProposableMempool } from '../entity/consensus/account-mempool-eligibility';
 
 // Lazy-loaded process to avoid circular deps
-let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
+let _process: ((env: RuntimeState, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<RuntimeState>) | null = null;
 
 export const getProcess = async () => {
   if (!_process) {
@@ -28,7 +28,7 @@ export const getProcess = async () => {
 // Preferred scenario ingress for anything that should become a durable
 // runtime frame. Direct applyRuntimeInput is only for replay/debug code that is
 // intentionally bypassing WAL commit semantics.
-export const commitRuntimeInput = async (env: Env, runtimeInput: RuntimeInput): Promise<Env> => {
+export const commitRuntimeInput = async (env: RuntimeState, runtimeInput: RuntimeInput): Promise<RuntimeState> => {
   const runtime = await import('../runtime');
   runtime.enqueueRuntimeInput(env, runtimeInput);
   return runtime.processRuntime(env);
@@ -41,7 +41,7 @@ const normalizeRuntimeSeed = (value: string | null | undefined): string | null =
   return String(value).trim().length > 0 ? value : null;
 };
 
-export function requireRuntimeSeed(env: Env, label: string): string {
+export function requireRuntimeSeed(env: RuntimeState, label: string): string {
   const envSeed = normalizeRuntimeSeed(env.runtimeSeed ?? null);
   const processSeed = (typeof process !== 'undefined' && process.env)
     ? normalizeRuntimeSeed(process.env['XLN_RUNTIME_SEED'] ?? process.env['RUNTIME_SEED'] ?? null)
@@ -56,7 +56,7 @@ export function requireRuntimeSeed(env: Env, label: string): string {
   return seed;
 }
 
-export function ensureSignerKeysFromSeed(env: Env, signerIds: string[], label: string): void {
+export function ensureSignerKeysFromSeed(env: RuntimeState, signerIds: string[], label: string): void {
   const runtimeSeed = requireRuntimeSeed(env, label);
   const derivedRuntimeId = deriveSignerAddressSync(runtimeSeed, '1').toLowerCase();
   if (env.runtimeId && normalizeRuntimeId(env.runtimeId) !== derivedRuntimeId) {
@@ -67,13 +67,13 @@ export function ensureSignerKeysFromSeed(env: Env, signerIds: string[], label: s
   // of whichever Entity validator aliases this scenario imports.
   getSignerPrivateKey(env, '1');
   for (const signerId of signerIds) {
-    // Force exact Env-scoped derivation now. Never accept a same-named numeric
+    // Force exact RuntimeState-scoped derivation now. Never accept a same-named numeric
     // alias left in process-global state by another scenario/runtime.
     getSignerPrivateKey(env, signerId);
   }
 }
 
-export function setScenarioStorageEnabled(env: Env, enabled: boolean): void {
+export function setScenarioStorageEnabled(env: RuntimeState, enabled: boolean): void {
   env.runtimeConfig = {
     ...env.runtimeConfig,
     storage: {
@@ -102,7 +102,7 @@ let strictScenarioOriginalWarn: typeof console.warn | null = null;
 let strictScenarioOriginalDebug: typeof console.debug | null = null;
 let strictScenarioOriginalError: typeof console.error | null = null;
 
-const getScenarioTickMs = (env: Env): number => {
+const getScenarioTickMs = (env: RuntimeState): number => {
   if (!env.jReplicas || env.jReplicas.size === 0) return 1;
   let maxDelay = 0;
   for (const replica of env.jReplicas.values()) {
@@ -112,14 +112,14 @@ const getScenarioTickMs = (env: Env): number => {
   return Math.max(1, maxDelay);
 };
 
-export const advanceScenarioTime = (env: Env, stepMs?: number, force: boolean = false): void => {
+export const advanceScenarioTime = (env: RuntimeState, stepMs?: number, force: boolean = false): void => {
   if (!force && !env.scenarioMode) return;
   const step = Math.max(1, stepMs ?? getScenarioTickMs(env));
   // env.timestamp is typed as number - add step directly
   env.timestamp = (env.timestamp || 0) + step;
 };
 
-export const advanceScenarioToNextNetworkRetry = (env: Env): number | null => {
+export const advanceScenarioToNextNetworkRetry = (env: RuntimeState): number | null => {
   const pending = env.pendingNetworkOutputs ?? [];
   if (pending.length === 0) return null;
   const retryMeta = env.runtimeState?.deferredNetworkMeta;
@@ -137,7 +137,7 @@ export const advanceScenarioToNextNetworkRetry = (env: Env): number | null => {
   return nextRetryAt;
 };
 
-export async function waitScenario(env: Env, ms: number): Promise<void> {
+export async function waitScenario(env: RuntimeState, ms: number): Promise<void> {
   if (ms <= 0) return;
   // Always simulate time for scenarios; avoid real sleeps.
   advanceScenarioTime(env, ms, true);
@@ -147,7 +147,7 @@ function shouldEmitScenarioLog(level: ScenarioLogLevel): boolean {
   return LOG_LEVEL_PRIORITY[level] >= LOG_LEVEL_PRIORITY[strictScenarioLogLevel];
 }
 
-export function enableStrictScenario(env: Env, label: string): () => void {
+export function enableStrictScenario(env: RuntimeState, label: string): () => void {
   env.strictScenario = true;
   env.strictScenarioLabel = label;
   if (!env.scenarioLogLevel) {
@@ -236,7 +236,7 @@ export function enableStrictScenario(env: Env, label: string): () => void {
 /**
  * Find entity replica by ID prefix (handles "entityId:signerId" composite keys)
  */
-export function findReplica(env: Env, entityId: string): [string, EntityReplica] {
+export function findReplica(env: RuntimeState, entityId: string): [string, EntityReplica] {
   const entry = Array.from(env.eReplicas.entries()).find(([key]) => key.startsWith(entityId + ':'));
   if (!entry) {
     throw new Error(`Replica for entity ${entityId} not found`);
@@ -247,7 +247,7 @@ export function findReplica(env: Env, entityId: string): [string, EntityReplica]
 /**
  * Get offdelta from LEFT entity's perspective (canonical bilateral view)
  */
-export function getOffdelta(env: Env, leftId: string, rightId: string, tokenId: number): bigint {
+export function getOffdelta(env: RuntimeState, leftId: string, rightId: string, tokenId: number): bigint {
   const [, leftRep] = findReplica(env, leftId);
   const account = leftRep.state.accounts.get(rightId);
   return account?.deltas.get(tokenId)?.offdelta || 0n;
@@ -289,7 +289,7 @@ const isExplicitlyOfflineNetworkTarget = (
   return [...offlineSigners].some(candidate => candidate.trim().toLowerCase() === signerId);
 };
 
-const countOnlinePendingNetworkOutputs = (env: Env, offlineSigners: Set<string>): number =>
+const countOnlinePendingNetworkOutputs = (env: RuntimeState, offlineSigners: Set<string>): number =>
   (env.pendingNetworkOutputs ?? [])
     .filter(output => !isExplicitlyOfflineNetworkTarget(output, offlineSigners))
     .length;
@@ -311,7 +311,7 @@ const pendingNetworkLane = (output: RoutedEntityInput): string => {
   return txTypes.length > 0 ? `tx:${txTypes.join('+')}` : 'trigger';
 };
 
-const pendingNetworkDiagnostics = (env: Env): string => {
+const pendingNetworkDiagnostics = (env: RuntimeState): string => {
   const outputs = env.pendingNetworkOutputs ?? [];
   const visible = outputs.slice(0, 8).map(output =>
     `${pendingNetworkLane(output)}@signer=${boundedDiagnosticText(output.signerId)},` +
@@ -322,11 +322,11 @@ const pendingNetworkDiagnostics = (env: Env): string => {
 };
 
 export async function processWithOffline(
-  env: Env,
+  env: RuntimeState,
   inputs: EntityInput[] | undefined,
   offlineSigners: Set<string>,
   reason: string = 'offline',
-): Promise<Env> {
+): Promise<RuntimeState> {
   const process = await getProcess();
 
   if (offlineSigners.size === 0) {
@@ -404,7 +404,7 @@ export async function processWithOffline(
  * Process frames until all mempools empty and no pending frames
  * Standard convergence - used in all scenarios
  */
-export async function converge(env: Env, maxCycles = 10): Promise<void> {
+export async function converge(env: RuntimeState, maxCycles = 10): Promise<void> {
   const process = await getProcess();
   for (let i = 0; i < maxCycles; i++) {
     await process(env);
@@ -442,7 +442,7 @@ export async function converge(env: Env, maxCycles = 10): Promise<void> {
  * Useful for waiting on specific state changes
  */
 export async function processUntil(
-  env: Env,
+  env: RuntimeState,
   predicate: () => boolean,
   maxRounds: number = 10,
   label: string = 'condition',
@@ -476,7 +476,7 @@ export async function processUntil(
  * Checks BOTH entity-level AND account-level work (like regular converge)
  */
 export async function convergeWithOffline(
-  env: Env,
+  env: RuntimeState,
   offlineSigners: Set<string>,
   maxCycles = 10,
   reason: string = 'offline',
@@ -513,7 +513,7 @@ export async function convergeWithOffline(
 }
 
 const throwScenarioConvergenceTimeout = (
-  env: Env,
+  env: RuntimeState,
   label: string,
   maxCycles: number,
 ): never => {
@@ -544,7 +544,7 @@ const throwScenarioConvergenceTimeout = (
 /**
  * Assert with full runtime state dump on failure (critical debugging tool)
  */
-export function assert(condition: unknown, message: string, env?: Env): asserts condition {
+export function assert(condition: unknown, message: string, env?: RuntimeState): asserts condition {
   if (!condition) {
     if (env) {
       console.log('\n' + '='.repeat(80));
@@ -563,7 +563,7 @@ export function assert(condition: unknown, message: string, env?: Env): asserts 
  * CRITICAL for bilateral correctness testing
  */
 export function assertBilateralSync(
-  env: Env,
+  env: RuntimeState,
   entityA: string,
   entityB: string,
   tokenId: number,
@@ -627,7 +627,7 @@ export function assertBilateralSync(
  * Drains env.runtimeMempool.entityInputs queue through process().
  * Call after any JAdapter write operation (debugFundReserves, processBatch, etc.)
  */
-export async function processJEvents(env: Env): Promise<void> {
+export async function processJEvents(env: RuntimeState): Promise<void> {
   const process = await getProcess();
   await drainJWatcherBacklog(env, async currentEnv => {
     // Scenario time is deterministic and does not advance while the drain is
@@ -661,7 +661,7 @@ export const dai = (amount: number | bigint) => wholeTokenAmount(amount, 3);
  * Used after any on-chain write (j_broadcast, debugFundReserves, etc.)
  * to ensure the runtime sees the resulting events.
  */
-export async function syncChain(env: Env, rounds = 3): Promise<void> {
+export async function syncChain(env: RuntimeState, rounds = 3): Promise<void> {
   const process = await getProcess();
 
   // `rounds` advances explicit scenario time and may trigger new J submissions.
@@ -694,7 +694,7 @@ const isMeaningfulScenarioEntityInput = (input: EntityInput): boolean => {
   return entityTxCount > 0 || hasProposal || hasHashPrecommits;
 };
 
-const pruneIdleScenarioEntityInputs = (env: Env): void => {
+const pruneIdleScenarioEntityInputs = (env: RuntimeState): void => {
   const currentInputs = env.runtimeMempool?.entityInputs;
   if (!currentInputs || currentInputs.length === 0) return;
   const meaningfulInputs = currentInputs.filter(isMeaningfulScenarioEntityInput);
@@ -706,7 +706,7 @@ const pruneIdleScenarioEntityInputs = (env: Env): void => {
  * Drain runtime - keep processing until all pending work is done
  * Used before assertRuntimeIdle to ensure everything is flushed
  */
-export async function drainRuntime(env: Env, maxIterations: number = 20): Promise<Env> {
+export async function drainRuntime(env: RuntimeState, maxIterations: number = 20): Promise<RuntimeState> {
   const process = await getProcess();
   let iterations = 0;
 
@@ -727,7 +727,7 @@ export async function drainRuntime(env: Env, maxIterations: number = 20): Promis
   return env;
 }
 
-export function assertRuntimeIdle(env: Env, label: string = 'runtime'): void {
+export function assertRuntimeIdle(env: RuntimeState, label: string = 'runtime'): void {
   pruneIdleScenarioEntityInputs(env);
   const errors: string[] = [];
 
@@ -765,7 +765,7 @@ export function assertRuntimeIdle(env: Env, label: string = 'runtime'): void {
 
 // Set snapshot extras before process() - call this, then call process()
 export function snap(
-  env: Env,
+  env: RuntimeState,
   title: string,
   opts: {
     what?: string;

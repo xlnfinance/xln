@@ -19,7 +19,7 @@ import {
 import { normalizeEntityId } from '../entity/id';
 import { getBatchSize, isBatchEmpty } from '../jurisdiction/batch';
 import { assertSealedJBatchBinding } from '../jurisdiction/sealed-batch';
-import type { BrowserVMState, Env, JTx, RuntimeTx } from '../types';
+import type { BrowserVMState, RuntimeState, JTx, RuntimeTx } from '../types';
 import {
   CANONICAL_J_EVENTS,
   enqueueJHistoryRange,
@@ -117,7 +117,7 @@ export async function createBrowserVMAdapter(
   await verifyStackBinding('browservm_connect');
 
   let watcherUnsubscribe: (() => void) | null = null;
-  let watcherEnv: Env | null = null;
+  let watcherEnv: RuntimeState | null = null;
   let pollInFlight: Promise<void> | null = null;
   let snapshotCounter = 0;
   const snapshots = new Map<SnapshotId, { root: Uint8Array; chain: BrowserVmChainCheckpoint }>();
@@ -466,7 +466,7 @@ export async function createBrowserVMAdapter(
       await browserVM.fundSignerWallet(address, amount, tokenSymbol);
     },
 
-    async submitTx(jTx: JTx, options: { env: Env; signerId?: string; signerPrivateKey?: Uint8Array; timestamp?: number }): Promise<JSubmitResult> {
+    async submitTx(jTx: JTx, options: { env: RuntimeState; signerId?: string; signerPrivateKey?: Uint8Array; timestamp?: number }): Promise<JSubmitResult> {
       if (jTx.type === 'batch') {
         try {
           assertSealedJBatchBinding(jTx, {
@@ -574,7 +574,7 @@ export async function createBrowserVMAdapter(
       return { success: false, error: `Unhandled JTx type: ${(unhandled as { type?: string }).type}` };
     },
 
-    startWatching(env: Env): void {
+    startWatching(env: RuntimeState): void {
       if (!stackBindingVerified) {
         throw new Error(`J_STACK_BINDING_UNVERIFIED:browservm:chainId=${config.chainId}`);
       }

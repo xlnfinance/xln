@@ -1,4 +1,4 @@
-import type { Env } from '../types';
+import type { RuntimeState } from '../types';
 
 export type RecentJEvent = {
   name: string;
@@ -34,7 +34,7 @@ const readDecimalBigInt = (value: unknown): bigint | null => {
 };
 
 const toRecentJEvent = (
-  env: Env,
+  env: RuntimeState,
   event: {
     name?: string;
     args?: Record<string, unknown>;
@@ -72,7 +72,7 @@ const reserveIndexKeyFromArgs = (args: Record<string, unknown>): string | null =
   return `${entity}:${tokenId}`;
 };
 
-const ensureReserveUpdatedIndex = (env: Env): Map<string, RecentReserveUpdatedEvent> => {
+const ensureReserveUpdatedIndex = (env: RuntimeState): Map<string, RecentReserveUpdatedEvent> => {
   if (!env.runtimeState) env.runtimeState = {};
   const current = env.runtimeState.recentReserveUpdatedEvents;
   if (current instanceof Map) return current;
@@ -92,7 +92,7 @@ const copyRecentJEvent = <T extends RecentJEvent>(event: T): T => ({
 });
 
 export const rememberRecentJEvents = (
-  env: Env,
+  env: RuntimeState,
   events: Array<{
     name?: string;
     args?: Record<string, unknown>;
@@ -122,7 +122,7 @@ export const rememberRecentJEvents = (
 };
 
 export const findRecentReserveUpdatedEvent = (
-  env: Env,
+  env: RuntimeState,
   entityId: string,
   tokenId: number,
   expectedMin: bigint,

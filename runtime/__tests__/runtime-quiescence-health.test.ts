@@ -6,7 +6,7 @@ import {
   isAccountWriteLaneIdle,
   summarizeRuntimeQuiescence,
 } from '../orchestrator/mesh-common';
-import type { AccountMachine, DeliverableEntityInput, EntityReplica } from '../types';
+import type { AccountState, DeliverableEntityInput, EntityReplica } from '../types';
 
 test('bootstrap quiescence counts only reliable outbox and live Account work', () => {
   const env = createEmptyEnv('runtime-quiescence-health deterministic seed');
@@ -59,7 +59,7 @@ test('committed credit stays usable while an offline peer leaves durable Account
     pendingFrame: { height: 8 },
     mempool: [{ type: 'chat', data: { message: 'durable until peer returns' } }],
     deltas: new Map([[1, { leftCreditLimit: 100n, rightCreditLimit: 100n }]]),
-  } as unknown as AccountMachine;
+  } as unknown as AccountState;
   env.eReplicas = new Map([[`${leftEntity}:1`, {
     entityId: leftEntity,
     signerId: '1',

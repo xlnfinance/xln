@@ -1,5 +1,5 @@
 import type {
-  AccountMachine,
+  AccountState,
   EntityReplica,
   PaymentRoute,
   Profile as GossipProfile,
@@ -41,8 +41,8 @@ export const emptyPaymentPanelView = (): PaymentPanelView => ({
   networkGraph: null,
 });
 
-type PaymentAccountSource = Pick<AccountMachine, 'leftEntity' | 'rightEntity'> & {
-  deltas?: AccountMachine['deltas'];
+type PaymentAccountSource = Pick<AccountState, 'leftEntity' | 'rightEntity'> & {
+  deltas?: AccountState['deltas'];
   activeDispute?: unknown;
   status?: unknown;
 };

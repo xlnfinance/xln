@@ -3,7 +3,7 @@
   Compact sortable list with expandable details.
 -->
 <script lang="ts">
-  import type { Env, RuntimeInput } from '@xln/runtime/xln-api';
+  import type { RuntimeState, RuntimeInput } from '@xln/runtime/xln-api';
   import { errorLog } from '../../stores/errorLogStore';
   import { runtimeControllerHandle } from '../../stores/runtimeControllerStore';
   import { xlnFunctions } from '../../stores/xlnStore';
@@ -28,7 +28,7 @@
   import { RefreshCw, ChevronDown, ChevronUp, Plus, Check, AlertTriangle } from 'lucide-svelte';
 
   export let entityId: string = '';
-  export let actionRuntimeEnv: Env | null = null;
+  export let actionRuntimeEnv: RuntimeState | null = null;
   export let hubDiscoveryProjection: HubDiscoveryProjection = emptyHubDiscoveryProjection();
   export let canOpenAccounts = true;
   export let submitRuntimeInput: ((input: RuntimeInput) => Promise<unknown> | unknown) | null = null;
@@ -84,7 +84,7 @@
     expandedHub = expandedHub === hubId ? null : hubId;
   }
 
-  async function requireHubReadyForOpenAccount(currentEnv: Env | null, ownerEntityId: string, hub: Hub): Promise<void> {
+  async function requireHubReadyForOpenAccount(currentEnv: RuntimeState | null, ownerEntityId: string, hub: Hub): Promise<void> {
     await ensureHubOpenAccountProfileReady({
       env: currentEnv,
       sourceEntityId: ownerEntityId,

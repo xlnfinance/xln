@@ -1,5 +1,5 @@
 import { NobleCryptoProvider } from '../crypto/noble';
-import type { EntityInput, EntityState, EntityTx, Env } from '../../types';
+import type { EntityInput, EntityState, EntityTx, RuntimeState } from '../../types';
 import type { Profile } from '../../networking/gossip';
 import { canonicalizeProfile, getValidatorEncryptionManifestFromBoard } from '../../networking/gossip';
 import {
@@ -196,7 +196,7 @@ const assertExactPaymentFields = (
   }
 };
 
-const requireProfiles = (env: Env): Profile[] => {
+const requireProfiles = (env: RuntimeState): Profile[] => {
   if (!env.gossip || typeof env.gossip.getProfiles !== 'function') {
     throw new Error('HTLC_PAYMENT_GOSSIP_UNAVAILABLE');
   }
@@ -212,7 +212,7 @@ const uniqueProfile = <T extends { entityId: string }>(profiles: T[], entityId: 
 };
 
 const resolveRoute = async (
-  env: Env,
+  env: RuntimeState,
   state: EntityState,
   tx: HtlcPaymentTx,
   amount: bigint,
@@ -272,7 +272,7 @@ const certifiedDefaultProposerSignerId = (
 };
 
 const certifyRouteProfiles = async (
-  env: Env,
+  env: RuntimeState,
   profiles: Profile[],
   route: string[],
 ): Promise<{
@@ -373,7 +373,7 @@ const validateCanonicalProfileDescriptor = (raw: unknown): EntityProfileDescript
 };
 
 const validatePreparedRouteProfiles = async (
-  env: Env,
+  env: RuntimeState,
   observerState: EntityState,
   route: string[],
   routeProfiles: unknown,
@@ -552,7 +552,7 @@ const hasEveryPreparedField = (tx: HtlcPaymentTx): boolean => [
   tx.data.preparedHopForwardAmounts,
 ].every((value) => value !== undefined);
 
-const findIngressEntityState = (env: Env, input: EntityInput): EntityState => {
+const findIngressEntityState = (env: RuntimeState, input: EntityInput): EntityState => {
   const entityId = String(input.entityId || '').trim().toLowerCase();
   const signerId = String(input.signerId || '').trim().toLowerCase();
   const exact = [...env.eReplicas.values()].filter((replica) =>
@@ -567,7 +567,7 @@ const findIngressEntityState = (env: Env, input: EntityInput): EntityState => {
 };
 
 export const prepareHtlcPaymentEntityTx = async (
-  env: Env,
+  env: RuntimeState,
   state: EntityState,
   tx: HtlcPaymentTx,
 ): Promise<HtlcPaymentTx> => {
@@ -685,7 +685,7 @@ const requirePreparedEnvelope = async (
 };
 
 export const validatePreparedHtlcPayment = async (
-  env: Env,
+  env: RuntimeState,
   state: EntityState,
   tx: HtlcPaymentTx,
 ): Promise<ValidatedPreparedHtlcPayment> => {
@@ -794,7 +794,7 @@ export const validatePreparedHtlcPayment = async (
 
 /** Seal every raw local HTLC before consensus admission and WAL persistence. */
 export const prepareHtlcPaymentEntityInputs = async (
-  env: Env,
+  env: RuntimeState,
   inputs: readonly EntityInput[],
 ): Promise<EntityInput[]> => Promise.all(inputs.map(async (input) => {
   const paymentTxs = input.entityTxs?.filter((tx): tx is HtlcPaymentTx => tx.type === 'htlcPayment') ?? [];

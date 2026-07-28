@@ -1,8 +1,8 @@
-import type { Env } from '../types';
+import type { RuntimeState } from '../types';
 import { runSwapOrderbookBenchmark } from '../scripts/bench-swap-orderbook-tps';
 import { runSwapRuntimeBenchmark } from '../scripts/bench-swap-runtime-tps';
 
-export async function swapTps(_env: Env): Promise<void> {
+export async function swapTps(_env: RuntimeState): Promise<void> {
   const orderbook = runSwapOrderbookBenchmark({
     swaps: 100_000,
     warmup: 10_000,
@@ -18,5 +18,5 @@ export async function swapTps(_env: Env): Promise<void> {
 }
 
 if (import.meta.main) {
-  await swapTps({} as Env);
+  await swapTps({} as RuntimeState);
 }

@@ -14,7 +14,7 @@ import { applyCommand, createBook, replaceOrderbookPair } from '../orderbook';
 import { encodeReplicaMeta, hydrateEntityStateFromStorage, projectAccountDoc, projectEntityCoreDoc, projectReplicaMeta } from '../storage/projections';
 import { cloneEntityState } from '../state-helpers';
 import type { StorageFrameRecord } from '../storage/types';
-import type { AccountMachine, EntityReplica, Env } from '../types';
+import type { AccountState, EntityReplica, RuntimeState } from '../types';
 import {
   buildReplayVerifiableRuntimeMachineSnapshot,
   projectReplayVerifiableRuntimeMachine,
@@ -30,7 +30,7 @@ const consensusConfig = {
 const entityId = hashBoard(encodeBoard(consensusConfig)).toLowerCase();
 const counterpartyId = `0x${'ff'.repeat(32)}`;
 
-const makeAccount = (frameStateHash: string): AccountMachine =>
+const makeAccount = (frameStateHash: string): AccountState =>
   ({
     leftEntity: entityId,
     rightEntity: counterpartyId,
@@ -85,9 +85,9 @@ const makeAccount = (frameStateHash: string): AccountMachine =>
     lastFinalizedJHeight: 0,
     disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
     jNonce: 0,
-  }) as AccountMachine;
+  }) as AccountState;
 
-const makeEnv = (account: AccountMachine, reserves: Array<[number, bigint]>): Env =>
+const makeEnv = (account: AccountState, reserves: Array<[number, bigint]>): RuntimeState =>
   ({
     height: 7,
     timestamp: 1234,
@@ -121,7 +121,7 @@ const makeEnv = (account: AccountMachine, reserves: Array<[number, bigint]>): En
         },
       } as EntityReplica],
     ]),
-  }) as Env;
+  }) as RuntimeState;
 
 const sharedOrderId = 'account:offer-1';
 
@@ -139,7 +139,7 @@ const createBookWithSharedOrder = () => {
   }).state;
 };
 
-const makeEnvWithOrderbookPairs = (pairIds: string[]): Env => {
+const makeEnvWithOrderbookPairs = (pairIds: string[]): RuntimeState => {
   const env = makeEnv(makeAccount('history-a'), [[1, 10n]]);
   const replica = Array.from(env.eReplicas.values())[0]!;
   const orderbookExt = {
@@ -251,7 +251,7 @@ test('replay oracle canonicalizes empty optional Runtime input queues', () => {
     eReplicas: new Map(),
     jReplicas: new Map(),
     runtimeMempool: { runtimeTxs: [], entityInputs: [] },
-  } as unknown as Env;
+  } as unknown as RuntimeState;
   const withEmptyOptionals = {
     ...base,
     runtimeMempool: {
@@ -260,7 +260,7 @@ test('replay oracle canonicalizes empty optional Runtime input queues', () => {
       jInputs: [],
       reliableReceipts: [],
     },
-  } as Env;
+  } as RuntimeState;
 
   expect(buildReplayVerifiableRuntimeMachineSnapshot(withEmptyOptionals))
     .toEqual(buildReplayVerifiableRuntimeMachineSnapshot(base));
@@ -271,9 +271,9 @@ test('replay oracle canonicalizes the non-halted default but preserves a halt', 
     eReplicas: new Map(),
     jReplicas: new Map(),
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
-  } as unknown as Env;
-  const running = { ...base, runtimeState: { halted: false } } as Env;
-  const halted = { ...base, runtimeState: { halted: true } } as Env;
+  } as unknown as RuntimeState;
+  const running = { ...base, runtimeState: { halted: false } } as RuntimeState;
+  const halted = { ...base, runtimeState: { halted: true } } as RuntimeState;
 
   expect(buildReplayVerifiableRuntimeMachineSnapshot(running))
     .toEqual(buildReplayVerifiableRuntimeMachineSnapshot(base));

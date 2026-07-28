@@ -8,7 +8,7 @@ import { createEmptyEnv, hasRuntimeWork } from '../runtime';
 import { canonicalJurisdictionEventsHash, getJEventJurisdictionRef } from '../jurisdiction/event-observation';
 import { recordValidatorJHistory } from '../jurisdiction/local-history';
 import { buildLocalJPrefixAttestation } from '../jurisdiction/j-prefix-consensus';
-import type { AccountMachine, AccountTx, EntityReplica, JurisdictionEvent } from '../types';
+import type { AccountState, AccountTx, EntityReplica, JurisdictionEvent } from '../types';
 import {
   addReplica,
   installJurisdictions,
@@ -19,9 +19,9 @@ import {
 } from './helpers/cross-j';
 
 const signedWorkspace = (
-  account: Pick<AccountMachine, 'leftEntity' | 'rightEntity'>,
-): NonNullable<AccountMachine['settlementWorkspace']> => {
-  const workspace: NonNullable<AccountMachine['settlementWorkspace']> = {
+  account: Pick<AccountState, 'leftEntity' | 'rightEntity'>,
+): NonNullable<AccountState['settlementWorkspace']> => {
+  const workspace: NonNullable<AccountState['settlementWorkspace']> = {
     workspaceHash: `0x${'00'.repeat(32)}`,
     ops: [],
     settlementHash: `0x${'42'.repeat(32)}`,

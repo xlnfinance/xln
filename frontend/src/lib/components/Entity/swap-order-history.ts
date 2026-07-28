@@ -1,4 +1,4 @@
-import type { AccountMachine } from '$lib/types/ui';
+import type { AccountState } from '$lib/types/ui';
 import { amountToUsd } from '$lib/utils/assetPricing';
 import { requireTokenDecimals } from './token-metadata';
 import type { SwapBookEntry } from '@xln/runtime/xln-api';
@@ -250,8 +250,8 @@ export function computeOfferExecutionSummary(
 }
 
 export function collectOfferLifecyclesFrom(
-  accountMachines: Array<{ accountId: string; account: AccountMachine }>,
-  selectSource: (account: AccountMachine) => Map<string, unknown> | undefined,
+  accountMachines: Array<{ accountId: string; account: AccountState }>,
+  selectSource: (account: AccountState) => Map<string, unknown> | undefined,
   computeSwapPriceTicks: ComputeSwapPriceTicks,
 ): OfferLifecycle[] {
   const lifecycles: OfferLifecycle[] = [];

@@ -2,7 +2,7 @@
  * Relay Store — transport-agnostic state container for the WS relay.
  *
  * Holds clients, gossip profiles, encryption keys, pending messages,
- * and debug events. No WebSocket API, no crypto, no Env.
+ * and debug events. No WebSocket API, no crypto, no RuntimeState.
  */
 
 import { isRuntimeId, normalizeRuntimeId } from '../networking/runtime-id';

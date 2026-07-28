@@ -15,7 +15,7 @@
  * Run with: bun runtime/scenarios/multi-sig.ts
  */
 
-import type { ConsensusConfig, EntityReplica, EntityTx, Env } from '../types';
+import type { ConsensusConfig, EntityReplica, EntityTx, RuntimeState } from '../types';
 import { buildEntityTransactionProposalAction, hashEntityProposalAction } from '../entity/authorization';
 import { prepareLocallyAuthoredEntityTxs } from '../entity/command';
 import { encodeBoard, generateLazyEntityId, generateNumberedEntityId, hashBoard } from '../entity/factory';
@@ -64,14 +64,14 @@ const importBoardReplicas = (entityId: string, config: ConsensusConfig, x: numbe
 
 type GovernanceVote = readonly [signerId: string, choice: 'yes' | 'no'];
 
-const requireReplica = (env: Env, entityId: string, signerId: string): EntityReplica => {
+const requireReplica = (env: RuntimeState, entityId: string, signerId: string): EntityReplica => {
   const replica = env.eReplicas.get(`${entityId}:${signerId}`);
   if (!replica) throw new Error(`MULTISIG_REPLICA_MISSING:${entityId}:${signerId}`);
   return replica;
 };
 
 const assertGovernanceProposal = (
-  env: Env,
+  env: RuntimeState,
   entityId: string,
   validators: string[],
   offlineSigners: Set<string>,
@@ -98,7 +98,7 @@ const assertGovernanceProposal = (
 };
 
 const submitCollectiveProposal = async (
-  env: Env,
+  env: RuntimeState,
   entityId: string,
   validators: string[],
   proposer: string,
@@ -130,7 +130,7 @@ const submitCollectiveProposal = async (
 };
 
 const submitGovernanceVote = async (
-  env: Env,
+  env: RuntimeState,
   entityId: string,
   voter: string,
   proposalId: string,
@@ -157,7 +157,7 @@ const submitGovernanceVote = async (
 };
 
 const executeCollectiveWithVotes = async (
-  env: Env,
+  env: RuntimeState,
   params: {
     entityId: string;
     validators: string[];
@@ -196,14 +196,14 @@ const executeCollectiveWithVotes = async (
   return proposalId;
 };
 
-const assertReserve = (env: Env, entityId: string, signerIds: string[], expected: bigint, label: string): void => {
+const assertReserve = (env: RuntimeState, entityId: string, signerIds: string[], expected: bigint, label: string): void => {
   for (const signerId of signerIds) {
     const actual = requireReplica(env, entityId, signerId).state.reserves.get(USDC) ?? 0n;
     assert(actual === expected, `${label}: ${signerId} reserve ${actual} === ${expected}`, env);
   }
 };
 
-export async function multiSig(env: Env): Promise<void> {
+export async function multiSig(env: RuntimeState): Promise<void> {
   const restoreStrict = enableStrictScenario(env, 'Multi-Sig');
   const prevScenarioMode = env.scenarioMode;
   try {

@@ -7,7 +7,7 @@ import {
   shouldRejectOffchainFaucetForSettledCapacity,
 } from '../server/offchain-faucet-admission';
 import { createRelayStore } from '../relay/store';
-import type { AccountFrame, AccountMachine, Env, RuntimeInput } from '../types';
+import type { AccountFrame, AccountState, RuntimeState, RuntimeInput } from '../types';
 
 const entity = (byte: string): string => `0x${byte.repeat(32)}`;
 const signer = (byte: string): string => `0x${byte.repeat(20)}`;
@@ -34,9 +34,9 @@ const makeFrame = (height: number): AccountFrame => ({
 const makeAccount = (input: {
   currentHeight: number;
   pendingFrame?: AccountFrame;
-  mempool?: AccountMachine['mempool'];
+  mempool?: AccountState['mempool'];
   outCapacity?: bigint;
-}, ownerEntityId: string = HUB): AccountMachine => {
+}, ownerEntityId: string = HUB): AccountState => {
   const delta = createDefaultDelta(1);
   delta.leftCreditLimit = input.outCapacity ?? 0n;
   return {
@@ -48,14 +48,14 @@ const makeAccount = (input: {
     ...(input.pendingFrame ? { pendingFrame: input.pendingFrame } : {}),
     mempool: input.mempool ?? [],
     deltas: new Map([[1, delta]]),
-  } as unknown as AccountMachine;
+  } as unknown as AccountState;
 };
 
 const makeEnv = (
-  account: AccountMachine,
+  account: AccountState,
   hubEntityId: string = HUB,
   hubSignerId: string = HUB_SIGNER,
-): Env => ({
+): RuntimeState => ({
   eReplicas: new Map([
     [`${hubEntityId}:${hubSignerId}`, {
       entityId: hubEntityId,
@@ -76,10 +76,10 @@ const makeEnv = (
   ]),
   gossip: { getProfiles: () => [] },
   runtimeId: USER_RUNTIME_ID,
-} as unknown as Env);
+} as unknown as RuntimeState);
 
 const callFaucet = async (
-  account: AccountMachine,
+  account: AccountState,
   options: {
     hubEntityId?: string;
     hubSignerId?: string;

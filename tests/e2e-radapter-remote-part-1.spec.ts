@@ -20,7 +20,7 @@ import { deriveRuntimeAdapterCapabilityToken } from '../runtime/radapter/auth';
 
 import type { RuntimeAdapterRequest } from '../runtime/radapter/types';
 
-import type { Env } from '../runtime/types';
+import type { RuntimeState } from '../runtime/types';
 
 import { captureLocatorScreenshot } from './utils/e2e-screenshots';
 
@@ -122,7 +122,7 @@ const installOneMillionRuntimeAdapterSocket = async (
   const identityEnv = {
     runtimeSeed,
     runtimeId: deriveSignerAddressSync(runtimeSeed, '1').toLowerCase(),
-  } as Env;
+  } as RuntimeState;
   await page.exposeFunction('__xlnDecodeOneMillionRuntimeAdapterRequest', (bytes: number[]) => {
     const request = decodeRuntimeAdapterRequest(Uint8Array.from(bytes)) as RuntimeAdapterRequest;
     return {
@@ -1744,7 +1744,7 @@ test(
 );
 
 test(
-  'admin remote runtime opens settings projection without legacy Env settings',
+  'admin remote runtime opens settings projection without legacy RuntimeState settings',
   { tag: '@functional' },
   async ({ page }) => {
     const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });

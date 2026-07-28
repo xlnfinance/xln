@@ -92,7 +92,7 @@ import type {
   StorageSnapshotManifest,
 } from '../storage/types';
 
-import type { AccountTx, CrossJurisdictionSwapRoute, Delta, EntityReplica, Env, RuntimeInput } from '../types';
+import type { AccountTx, CrossJurisdictionSwapRoute, Delta, EntityReplica, RuntimeState, RuntimeInput } from '../types';
 
 import type { BookState } from '../orderbook';
 
@@ -134,7 +134,7 @@ const makeHubProfile = (id: string, name: string, lastUpdated = 7): Profile =>
     },
   });
 
-const makeEnv = (): Env =>
+const makeEnv = (): RuntimeState =>
   ({
     height: 7,
     timestamp: 700,
@@ -231,7 +231,7 @@ const makeEnv = (): Env =>
         } as EntityReplica,
       ],
     ]),
-  }) as Env;
+  }) as RuntimeState;
 
 const makeBook = (_price: bigint): BookState => ({
   params: { bucketWidthTicks: 1n, maxOrders: 100, stpPolicy: 0 },
@@ -322,7 +322,7 @@ const readTestPageLimit = (raw: unknown, fallback = 10): number => {
 };
 
 const makeTestViewPageLoader =
-  (env: Env) =>
+  (env: RuntimeState) =>
   async (
     requestedEntityId: string,
     height: number,

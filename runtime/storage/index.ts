@@ -83,7 +83,7 @@ import { cumulativeMarksToDurations } from '../infra/perf-profile';
 import type {
   CertifiedBoardPatriciaNode,
   EntityState,
-  Env,
+  RuntimeState,
   RoutedEntityInput,
   RuntimeInput,
   RuntimeFrameDbRecord,
@@ -413,7 +413,7 @@ const certifiedBoardRoot = (
   state.certifiedBoardState?.boardRegistryRoot;
 
 const collectCertifiedBoardHistoryRoots = async (
-  env: Env,
+  env: RuntimeState,
   historyDb: RuntimeFrameDbLike,
 ): Promise<Set<string>> => {
   const roots = new Set<string>();
@@ -466,7 +466,7 @@ const deleteCertifiedBoardNodes = async (
 };
 
 const pruneUnreachableCertifiedBoardHistoryNodes = async (
-  env: Env,
+  env: RuntimeState,
   historyDb: RuntimeFrameDbLike,
   currentDb: RuntimeDbLike,
 ): Promise<number> => {
@@ -482,7 +482,7 @@ const pruneUnreachableCertifiedBoardHistoryNodes = async (
 };
 
 const pruneUnreachableConsumptionHistoryNodes = async (
-  env: Env,
+  env: RuntimeState,
   historyDb: RuntimeFrameDbLike,
 ): Promise<number> => {
   const byRoot = new Map<string, ConsumptionAccumulatorState>();
@@ -581,7 +581,7 @@ const synchronizeAccountJClaimNodes = async (
 };
 
 const pruneUnreachableAccountJClaimHistoryNodes = async (
-  env: Env,
+  env: RuntimeState,
   historyDb: RuntimeFrameDbLike,
 ): Promise<number> => {
   const states = new Map<string, AccountJClaimAccumulatorState>();
@@ -769,16 +769,16 @@ export type StoragePersistencePerf = {
 };
 
 export const saveRuntimeFrameToStorage = async (options: {
-  env: Env;
+  env: RuntimeState;
   stateHash?: string;
   currentFrameInput?: RuntimeInput;
   currentFrameOutputs?: RoutedEntityInput[];
   frameDbRecords?: RuntimeFrameDbRecord[];
-  tryOpenDb: (env: Env) => Promise<boolean>;
-  getRuntimeDb: (env: Env) => RuntimeDbLike;
-  tryOpenFrameDb: (env: Env) => Promise<boolean>;
-  getFrameDb: (env: Env) => RuntimeFrameDbLike;
-  rotateEpochDb?: (env: Env, snapshotHeight: number, timestamp: number) => Promise<boolean | void>;
+  tryOpenDb: (env: RuntimeState) => Promise<boolean>;
+  getRuntimeDb: (env: RuntimeState) => RuntimeDbLike;
+  tryOpenFrameDb: (env: RuntimeState) => Promise<boolean>;
+  getFrameDb: (env: RuntimeState) => RuntimeFrameDbLike;
+  rotateEpochDb?: (env: RuntimeState, snapshotHeight: number, timestamp: number) => Promise<boolean | void>;
   stopStaleWriterOnHeadAhead?: boolean;
   onPersistenceBoundary?: StoragePersistenceBoundaryHook;
   onPersistenceProgress?: StoragePersistenceProgressHook;

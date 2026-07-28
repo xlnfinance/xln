@@ -1,5 +1,5 @@
 import { buildDefaultEntitySwapPairs } from '../account/utils';
-import type { AccountMachine, Env } from '../types';
+import type { AccountState, RuntimeState } from '../types';
 
 const MARKET_MAKER_LEVEL_OFFSETS_BPS = [2, 4, 6, 8, 10, 12, 15, 20, 25, 32, 40, 50, 65, 80, 100] as const;
 const MARKET_MAKER_LEVEL_BASE_SIZES = [
@@ -63,7 +63,7 @@ const getExpectedMarketMakerOffersForPair = (baseTokenId: number, quoteTokenId: 
 const buildMarketMakerPairs = (tokenIds: number[]): MarketMakerPair[] => buildDefaultEntitySwapPairs(tokenIds);
 
 const collectCommittedOfferIdsForAccount = (
-  account: Pick<AccountMachine, 'swapOffers'> | null | undefined,
+  account: Pick<AccountState, 'swapOffers'> | null | undefined,
 ): Set<string> => {
   const ids = new Set<string>();
   if (account?.swapOffers instanceof Map) {
@@ -73,7 +73,7 @@ const collectCommittedOfferIdsForAccount = (
 };
 
 const countMarketMakerOffersForHub = (
-  account: Pick<AccountMachine, 'swapOffers' | 'mempool' | 'pendingFrame'> | null,
+  account: Pick<AccountState, 'swapOffers' | 'mempool' | 'pendingFrame'> | null,
   hubEntityId: string,
 ): number => {
   const prefix = `mm-${hubEntityId.slice(-6).toLowerCase()}-`;
@@ -85,7 +85,7 @@ const countMarketMakerOffersForHub = (
 };
 
 const countMarketMakerOffersForHubPair = (
-  account: Pick<AccountMachine, 'swapOffers' | 'mempool' | 'pendingFrame'> | null,
+  account: Pick<AccountState, 'swapOffers' | 'mempool' | 'pendingFrame'> | null,
   hubEntityId: string,
   pair: Pick<MarketMakerPair, 'baseTokenId' | 'quoteTokenId'>,
 ): number => {
@@ -98,16 +98,16 @@ const countMarketMakerOffersForHubPair = (
 };
 
 const accountReady = (
-  account: Pick<AccountMachine, 'status' | 'currentHeight' | 'mempool' | 'pendingFrame'> | null | undefined,
+  account: Pick<AccountState, 'status' | 'currentHeight' | 'mempool' | 'pendingFrame'> | null | undefined,
 ): boolean =>
   Boolean(account) &&
   String(account?.status || 'active') === 'active' &&
   Number(account?.currentHeight ?? 0) > 0;
 
 export const getMarketMakerHealth = (
-  env: Env | null,
+  env: RuntimeState | null,
   state: MarketMakerServerState,
-  getAccountMachine: (env: Env, entityId: string, counterpartyId: string) => AccountMachine | null,
+  getAccountMachine: (env: RuntimeState, entityId: string, counterpartyId: string) => AccountState | null,
 ): {
   applicable: boolean;
   enabled: boolean;

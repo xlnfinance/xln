@@ -6,7 +6,7 @@ import {
   resolveRuntimeAdapterAuthSeed,
 } from '../radapter/auth';
 import { safeStringify } from '../protocol/serialization';
-import type { Env } from '../types';
+import type { RuntimeState } from '../types';
 
 const DEFAULT_PAIRING_TTL_MS = 60_000;
 const DEFAULT_CAPABILITY_TTL_MS = 60 * 60 * 1_000;
@@ -17,7 +17,7 @@ type PendingPairing = Readonly<{ expiresAt: number }>;
 
 export type LocalPairingController = Readonly<{
   enabled: boolean;
-  handle: (request: Request, pathname: string, env: Env | null) => Promise<Response | null>;
+  handle: (request: Request, pathname: string, env: RuntimeState | null) => Promise<Response | null>;
 }>;
 
 type LocalPairingOptions = Readonly<{
@@ -90,7 +90,7 @@ const runtimeWsUrl = (requestUrl: string): string => {
   return url.toString();
 };
 
-const runtimeManifest = (env: Env, requestUrl: string, capabilityTtlMs: number, now: number) => {
+const runtimeManifest = (env: RuntimeState, requestUrl: string, capabilityTtlMs: number, now: number) => {
   const seed = resolveRuntimeAdapterAuthSeed(env);
   if (!seed) throw new Error('LOCAL_PAIRING_RUNTIME_AUTH_SEED_MISSING');
   const expiresAt = now + capabilityTtlMs;
@@ -148,7 +148,7 @@ export const createLocalPairingController = (options: LocalPairingOptions = {}):
     return true;
   };
 
-  const handle = async (request: Request, pathname: string, env: Env | null): Promise<Response | null> => {
+  const handle = async (request: Request, pathname: string, env: RuntimeState | null): Promise<Response | null> => {
     if (pathname === '/api/local-pairing/status' && request.method === 'GET') {
       return jsonResponse({ ok: true, enabled: true, ready: env !== null, instanceId, version });
     }

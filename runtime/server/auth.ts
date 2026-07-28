@@ -6,7 +6,7 @@ import {
 } from '../radapter/auth';
 import type { RuntimeAdapterAuthLevel } from '../radapter/types';
 import { safeStringify, deserializeTaggedJson, serializeTaggedJson } from '../protocol/serialization';
-import type { Env } from '../types';
+import type { RuntimeState } from '../types';
 
 type RpcSocket = { send(data: string): unknown };
 
@@ -20,7 +20,7 @@ const extractBearerAuth = (header: string | null): string => {
 };
 
 export const verifyDaemonCapability = (
-  env: Env | null,
+  env: RuntimeState | null,
   key: unknown,
   requiredLevel: RuntimeAdapterAuthLevel,
 ): boolean => {
@@ -34,7 +34,7 @@ export const verifyDaemonCapability = (
 
 export const hasDaemonControlAuth = (
   req: Request,
-  env: Env | null,
+  env: RuntimeState | null,
   requiredLevel: RuntimeAdapterAuthLevel = 'admin',
 ): boolean => env !== null && verifyDaemonCapability(
   env,
@@ -44,7 +44,7 @@ export const hasDaemonControlAuth = (
 
 export const requireDaemonControlAuth = (
   req: Request,
-  env: Env | null,
+  env: RuntimeState | null,
   requiredLevel: RuntimeAdapterAuthLevel = 'admin',
 ): Response | null => {
   if (!env) {
@@ -58,7 +58,7 @@ export const requireDaemonRpcAuth = (
   ws: RpcSocket,
   id: unknown,
   msg: Record<string, unknown>,
-  env: Env | null,
+  env: RuntimeState | null,
   requiredLevel: RuntimeAdapterAuthLevel,
 ): boolean => {
   if (!env) {

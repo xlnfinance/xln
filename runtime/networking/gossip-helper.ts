@@ -4,7 +4,7 @@
  */
 
 import { ethers } from 'ethers';
-import type { EntityState, Env } from '../types';
+import type { EntityState, RuntimeState } from '../types';
 import type {
   BoardMetadata,
   Profile,
@@ -40,7 +40,7 @@ const buildProfileJurisdiction = (state: EntityState): ProfileJurisdiction | und
   };
 };
 
-const buildProfileMirrors = (env: Env, entityState: EntityState): ProfileMirror[] => {
+const buildProfileMirrors = (env: RuntimeState, entityState: EntityState): ProfileMirror[] => {
   const mirrors = new Map<string, ProfileMirror>();
   for (const replica of env.eReplicas?.values?.() || []) {
     const entityId = String(replica?.state?.entityId || replica?.entityId || '').trim();
@@ -155,7 +155,7 @@ export function buildEntityProfile(
   return profile;
 }
 
-export const createProfileSignerResolver = (env: Env): ProfileSignerResolver => {
+export const createProfileSignerResolver = (env: RuntimeState): ProfileSignerResolver => {
   return {
     getSignerAddress: (signerId) => getSignerAddress(env, signerId),
     getSignerPublicKeyHex: (signerId) => {
@@ -166,14 +166,14 @@ export const createProfileSignerResolver = (env: Env): ProfileSignerResolver => 
   };
 };
 
-export const getNextProfileTimestamp = (env: Env, entityId: string, fallbackTimestamp?: number): number => {
+export const getNextProfileTimestamp = (env: RuntimeState, entityId: string, fallbackTimestamp?: number): number => {
   const existingProfile = env.gossip.getProfiles().find((profile) => profile.entityId === entityId);
   const lastTimestamp = existingProfile?.lastUpdated ?? 0;
   const candidate = typeof fallbackTimestamp === 'number' ? fallbackTimestamp : env.timestamp;
   return Math.max(1, lastTimestamp + 1, candidate);
 };
 
-const resolveProfileRuntimeId = (env: Env, entityId: string): string => {
+const resolveProfileRuntimeId = (env: RuntimeState, entityId: string): string => {
   if (typeof env.runtimeId === 'string' && env.runtimeId.trim().length > 0) {
     return env.runtimeId.trim().toLowerCase();
   }
@@ -185,7 +185,7 @@ const resolveProfileRuntimeId = (env: Env, entityId: string): string => {
 };
 
 export const buildLocalEntityProfile = (
-  env: Env,
+  env: RuntimeState,
   entityState: EntityState,
   timestamp: number = getNextProfileTimestamp(env, entityState.entityId),
 ): Profile => {
@@ -212,7 +212,7 @@ export const buildLocalEntityProfile = (
 };
 
 export const announceLocalEntityProfile = (
-  env: Env,
+  env: RuntimeState,
   entityState: EntityState,
   timestamp?: number,
 ): Profile => {

@@ -17,7 +17,7 @@
  * Run with: bun runtime/scenarios/rapid-fire.ts
  */
 
-import type { Env, EntityInput } from '../types';
+import type { RuntimeState, EntityInput } from '../types';
 import { getPerfMs } from '../utils';
 import {
   bindScenarioJReplica,
@@ -31,7 +31,7 @@ import { generateLazyEntityId } from '../entity/factory';
 import { DEFAULT_TOKENS } from '../jadapter/default-tokens';
 import { isLeft } from '../account/utils';
 
-let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
+let _process: ((env: RuntimeState, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<RuntimeState>) | null = null;
 
 const getProcess = async () => {
   if (!_process) {
@@ -48,7 +48,7 @@ const usd = (amount: number | bigint) => BigInt(amount) * ONE;
 
 // Using helpers from helpers.ts (no duplication)
 
-export async function rapidFire(env: Env): Promise<void> {
+export async function rapidFire(env: RuntimeState): Promise<void> {
   const restoreStrict = enableStrictScenario(env, 'Rapid Fire');
   const prevScenarioMode = env.scenarioMode;
   try {

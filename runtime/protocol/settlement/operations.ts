@@ -10,7 +10,7 @@
  * Reference: types.ts SettlementOp / SettlementDiff
  */
 
-import type { AccountMachine, SettlementOp, SettlementDiff } from '../../types';
+import type { AccountState, SettlementOp, SettlementDiff } from '../../types';
 
 const INT256_MIN = -(1n << 255n);
 const INT256_MAX = (1n << 255n) - 1n;
@@ -29,7 +29,7 @@ const assertSettlementNonceCursor = (value: number): number => {
   return value;
 };
 
-export const getMinimumSafeSettlementNonce = (account: AccountMachine): number =>
+export const getMinimumSafeSettlementNonce = (account: AccountState): number =>
   assertSettlementNonceCursor(Math.max(
     Number(account.jNonce ?? 0) + 1,
     Number(account.proofHeader?.nextProofNonce ?? 0),
@@ -37,7 +37,7 @@ export const getMinimumSafeSettlementNonce = (account: AccountMachine): number =
     Number(account.counterpartyDisputeProofNonce ?? 0) + 1,
   ));
 
-export const getNextSettlementNonce = (account: AccountMachine): number => {
+export const getNextSettlementNonce = (account: AccountState): number => {
   // `nextProofNonce` is already the first unused bilateral proof nonce. Adding
   // one here silently skipped a nonce on one replica and was the root cause of
   // the settlement-seal divergence. The exact candidate must be derived from

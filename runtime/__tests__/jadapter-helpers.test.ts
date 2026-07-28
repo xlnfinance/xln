@@ -42,7 +42,7 @@ import {
 import { recordValidatorJHistory } from '../jurisdiction/local-history';
 import { createEmptyEnv } from '../runtime';
 import { applyRuntimeTx } from '../runtime/tx-handlers';
-import type { EntityReplica, Env, JReplica, JurisdictionConfig } from '../types';
+import type { EntityReplica, RuntimeState, JReplica, JurisdictionConfig } from '../types';
 
 const makeJReplica = (
   name: string,
@@ -71,7 +71,7 @@ const makeJurisdiction = (name: string, chainId: number, depositoryAddress: stri
   entityProviderAddress: `0x${(chainId % 256).toString(16).padStart(2, '0').repeat(20)}`,
 });
 
-const makeCursorEnv = (seed: string, replicas: JReplica[], activeJurisdiction?: string): Env => {
+const makeCursorEnv = (seed: string, replicas: JReplica[], activeJurisdiction?: string): RuntimeState => {
   const env = createEmptyEnv(seed);
   env.activeJurisdiction = activeJurisdiction;
   env.jReplicas = new Map(replicas.map((replica) => [replica.name, replica]));
@@ -230,7 +230,7 @@ describe('jadapter helper cursors', () => {
       `0x${'42'.repeat(20)}`,
     );
     env.jReplicas.set(source.name, source);
-    env.runtimeState = { persistenceQuiescing: true } as Env['runtimeState'];
+    env.runtimeState = { persistenceQuiescing: true } as RuntimeState['runtimeState'];
     const entityId = `0x${'44'.repeat(32)}`;
     const owner = `0x${'55'.repeat(20)}`;
     const txCounter = { value: 0 } as { value: number; _seenLogs?: unknown };

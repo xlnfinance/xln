@@ -1,4 +1,4 @@
-import type { Env } from '../types';
+import type { RuntimeState } from '../types';
 import type { Profile } from '../networking/gossip';
 import { getAllGossipProfiles, normalizeRuntimeKey, type RelayStore } from '../relay/store';
 
@@ -6,7 +6,7 @@ const normalizeEntityId = (value: unknown): string => String(value || '').trim()
 
 export const buildKnownProfileBundle = (
   input: {
-    env: Env | null;
+    env: RuntimeState | null;
     relayStore: RelayStore;
     entityId: string;
   },

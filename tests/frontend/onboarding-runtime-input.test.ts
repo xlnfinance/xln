@@ -211,7 +211,7 @@ test('FormationPanel uses injected runtime projection instead of xlnEnvironment'
   expect(source).toContain('createActiveNumberedEntity(');
   expect(source).not.toContain('export let runtimeEnv');
   expect(source).not.toContain('$: env = runtimeEnv');
-  expect(source).not.toContain('Env');
+  expect(source).not.toContain('RuntimeState');
   expect(source).not.toContain('jReplicas');
   expect(source).not.toContain('eReplicas');
   expect(source).not.toContain('xlnEnvironment');

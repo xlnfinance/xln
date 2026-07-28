@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import type { AccountMachine, EntityState } from '../../runtime';
+import type { AccountState, EntityState } from '../../runtime';
 import {
   buildDisputedAccountViews,
   formatCrossJTargetDisputeRiskLabel,
@@ -9,10 +9,10 @@ import {
 
 describe('account dispute view helpers', () => {
   test('builds active disputes before finalized disputed accounts', () => {
-    const accounts = new Map<string, AccountMachine>([
-      ['0xbb', { status: 'disputed' } as AccountMachine],
-      ['0xaa', { status: 'disputed', activeDispute: { nonce: 1 } } as unknown as AccountMachine],
-      ['0xcc', { status: 'open' } as AccountMachine],
+    const accounts = new Map<string, AccountState>([
+      ['0xbb', { status: 'disputed' } as AccountState],
+      ['0xaa', { status: 'disputed', activeDispute: { nonce: 1 } } as unknown as AccountState],
+      ['0xcc', { status: 'open' } as AccountState],
     ]);
 
     expect(buildDisputedAccountViews(accounts)).toEqual([
@@ -24,8 +24,8 @@ describe('account dispute view helpers', () => {
   test('finds cross-j target dispute risk only when the target pull is still held', () => {
     const state = {
       entityId: '0xself',
-      accounts: new Map<string, AccountMachine>([
-        ['0xpeer', { pulls: new Map([['pull-1', {}]]) } as unknown as AccountMachine],
+      accounts: new Map<string, AccountState>([
+        ['0xpeer', { pulls: new Map([['pull-1', {}]]) } as unknown as AccountState],
       ]),
       crossJurisdictionSwaps: new Map([
         ['ignored-source', {

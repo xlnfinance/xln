@@ -1325,7 +1325,7 @@ describe('storage frame journal retention', () => {
     });
     await processRuntime(env, []);
 
-    // Production reaches the byte threshold after the live Env already owns
+    // Production reaches the byte threshold after the live RuntimeState already owns
     // open LevelDB handles. Force that exact boundary without shrinking the
     // configured epoch below one ordinary frame: after rotation the unchanged
     // threshold must allow the next frame instead of rotating forever.

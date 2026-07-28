@@ -33,7 +33,7 @@ import {
   computeEntityFrameAuthorityRoot,
 } from '../../entity/consensus/state-root';
 import type { StoragePersistenceBoundary } from '../../storage';
-import type { AccountMachine, CertifiedEntityFrameLink, JReplica, JurisdictionConfig } from '../../types';
+import type { AccountState, CertifiedEntityFrameLink, JReplica, JurisdictionConfig } from '../../types';
 import { createDefaultDelta } from '../../validation-utils';
 
 const [seed, requestedBoundary] = Bun.argv.slice(2);
@@ -98,7 +98,7 @@ const replica = Array.from(env.eReplicas.values())[0];
 if (!replica) throw new Error('restore import crash replica missing');
 const counterpartyId = `0x${'ff'.repeat(32)}`;
 const [leftEntity, rightEntity] = [entityId, counterpartyId].sort() as [string, string];
-const oversizedAccount: AccountMachine = {
+const oversizedAccount: AccountState = {
   leftEntity,
   rightEntity,
   domain: {

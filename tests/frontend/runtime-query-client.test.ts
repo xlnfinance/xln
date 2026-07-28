@@ -33,7 +33,7 @@ test('runtime query client exposes typed projection reads and bounded cache', ()
   expect(source).toContain('this.cacheRuntimeId || handle.id');
 });
 
-test('runtime view store owns the active projected RuntimeView without Env access', () => {
+test('runtime view store owns the active projected RuntimeView without RuntimeState access', () => {
   const source = readFileSync('frontend/src/lib/stores/runtimeViewStore.ts', 'utf8');
 
   expect(source).toContain('export type RuntimeView');
@@ -54,7 +54,7 @@ test('runtime view store owns the active projected RuntimeView without Env acces
   expect(source).toContain('runtimeAdapter.subscribe');
   expect(source).toContain('resetRuntimeView();');
   expect(source).toContain('runtimeAdapterHeight.subscribe');
-  expect(source).not.toContain('Env');
+  expect(source).not.toContain('RuntimeState');
   expect(source).not.toContain('eReplicas');
   expect(source).not.toContain('jReplicas');
   expect(source).not.toContain('getEnv');
@@ -371,7 +371,7 @@ test('runtime view-frame live reads do not force historical atHeight queries', a
   expect(reads[1]?.query).toEqual({ entityId: '0xabc', atHeight: 7 });
 });
 
-test('remote runtime refresh reads typed RuntimeView projections without Env bridge', () => {
+test('remote runtime refresh reads typed RuntimeView projections without RuntimeState bridge', () => {
   const source = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
   const historySource = readFileSync('frontend/src/lib/stores/runtimeHistoryStore.ts', 'utf8');
   const refreshIndex = source.indexOf('const refreshRemoteRuntimeProjection = async');

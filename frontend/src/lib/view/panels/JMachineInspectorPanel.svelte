@@ -1,9 +1,9 @@
 <script lang="ts">
   import type { Writable } from 'svelte/store';
-  import type { Env, EnvSnapshot, JReplica } from '@xln/runtime/xln-api';
+  import type { RuntimeState, EnvSnapshot, JReplica } from '@xln/runtime/xln-api';
   import { safeStringify } from '@xln/runtime/protocol/serialization';
 
-  export let runtimeFrameEnv: Writable<Env | null>;
+  export let runtimeFrameEnv: Writable<RuntimeState | null>;
   export let runtimeFrameHistory: Writable<EnvSnapshot[]>;
   export let runtimeFrameTimeIndex: Writable<number>;
 

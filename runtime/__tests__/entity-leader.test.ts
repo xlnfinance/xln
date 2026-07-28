@@ -45,7 +45,7 @@ import type {
   EntityReplica,
   EntityState,
   EntityTx,
-  Env,
+  RuntimeState,
   JurisdictionEvent,
   ProposedEntityFrame,
   ValidatorJHistory,
@@ -316,7 +316,7 @@ describe('entity leader policy', () => {
       env.quietRuntimeLogs = true;
       env.timestamp = 20_000;
     }
-    const installKey = (env: Env, label: string): string => {
+    const installKey = (env: RuntimeState, label: string): string => {
       const signerId = deriveSignerAddressSync(env.runtimeSeed!, label).toLowerCase();
       registerSignerKey(env, signerId, deriveSignerKeySync(env.runtimeSeed!, label));
       return signerId;
@@ -390,7 +390,7 @@ describe('entity leader policy', () => {
       isProposer: signerId === proposerId,
       jHistory: history(),
     });
-    const signerEnvs = new Map<string, Env>([
+    const signerEnvs = new Map<string, RuntimeState>([
       [proposerId, proposerEnv],
       [failoverId, failoverEnv],
       [validatorId, validatorEnv],

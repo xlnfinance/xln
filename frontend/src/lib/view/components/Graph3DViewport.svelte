@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Writable } from 'svelte/store';
-  import type { Env, EnvSnapshot } from '@xln/runtime/xln-api';
+  import type { RuntimeState, EnvSnapshot } from '@xln/runtime/xln-api';
   import EntityMiniPanel from './EntityMiniPanel.svelte';
   import Graph3DFpsOverlay from './Graph3DFpsOverlay.svelte';
   import VRControlsHUD from './VRControlsHUD.svelte';
@@ -11,7 +11,7 @@
   export let miniPanelEntityId = '';
   export let miniPanelEntityName = '';
   export let miniPanelPosition: { x: number; y: number } = { x: 0, y: 0 };
-  export let runtimeFrameEnv: Writable<Env | null>;
+  export let runtimeFrameEnv: Writable<RuntimeState | null>;
   export let runtimeFrameHistory: Writable<EnvSnapshot[]>;
   export let runtimeFrameTimeIndex: Writable<number>;
   export let showFpsOverlay = false;

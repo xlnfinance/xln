@@ -1,7 +1,7 @@
 import { ethers } from 'ethers';
 import { computeIntegrityDigest } from '../infra/integrity-checksum';
 import { compareStableText } from '../protocol/serialization';
-import type { Env } from '../types';
+import type { RuntimeState } from '../types';
 import { buildDurableRuntimeMachineSnapshot } from '../wal/snapshot';
 import {
   computeCanonicalEntityHash,
@@ -267,7 +267,7 @@ export const assertEntityHashesEqual = (
 };
 
 export const prepareStorageCanonicalStateHashes = (
-  env: Env,
+  env: RuntimeState,
   touchedEntities: string[],
   previousFrame: StorageFrameRecord | null,
   replicaLookup = buildReplicaLookup(env),

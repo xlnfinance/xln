@@ -1,4 +1,4 @@
-import type { Env, RuntimeInput } from '../types';
+import type { RuntimeState, RuntimeInput } from '../types';
 import { safeStringify } from '../protocol/serialization';
 import { resolveEntityProposerId } from '../state-helpers';
 import { getAccountMachine, getEntityOutCapacity, hasAccount } from './entity-lookup';
@@ -9,13 +9,13 @@ import type { RegisterReceiptOptions, RuntimeIngressReceipt } from './ingress-re
 
 export const handleCreditRequest = async (input: {
   req: Request;
-  env: Env | null;
+  env: RuntimeState | null;
   headers: HeadersInit;
   activeHubEntityIds: string[];
-  enqueueRuntimeInput: (env: Env, runtimeInput: RuntimeInput) => void;
-  validateRuntimeInputAdmission: (env: Env, runtimeInput: RuntimeInput) => void;
+  enqueueRuntimeInput: (env: RuntimeState, runtimeInput: RuntimeInput) => void;
+  validateRuntimeInputAdmission: (env: RuntimeState, runtimeInput: RuntimeInput) => void;
   registerReceipt: (receipt: RegisterReceiptOptions) => RuntimeIngressReceipt;
-  getCurrentRuntimeHeight: (env: Env | null) => number;
+  getCurrentRuntimeHeight: (env: RuntimeState | null) => number;
   buildRuntimeInputStatusUrl: (id: string) => string;
 }): Promise<Response> => {
   const { req, env, headers } = input;

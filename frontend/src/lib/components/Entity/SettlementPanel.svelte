@@ -1,8 +1,8 @@
 <script lang="ts">
   import { getXLN, submitEntityInputs, xlnFunctions } from '../../stores/xlnStore';
   import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
-  import type { EntityReplica, EntityTx, AccountMachine, EntityState } from '$lib/types/ui';
-  import type { Env, EnvSnapshot, Profile as GossipProfile } from '@xln/runtime/xln-api';
+  import type { EntityReplica, EntityTx, AccountState, EntityState } from '$lib/types/ui';
+  import type { RuntimeState, EnvSnapshot, Profile as GossipProfile } from '@xln/runtime/xln-api';
   import { errorLog } from '../../stores/errorLogStore';
   import { toasts } from '../../stores/toastStore';
   import { entityAvatar as resolveEntityAvatar } from '$lib/utils/avatar';
@@ -13,7 +13,7 @@
   export let entityId: string;
   export let replica: EntityReplica | null = null;
   export let historyOnly = false;
-  export let env: Env | EnvSnapshot | null = null;
+  export let env: RuntimeState | EnvSnapshot | null = null;
   export let isLive: boolean;
   export let profiles: GossipProfile[] = [];
   type Action = 'r2c' | 'c2r' | 'transfer' | 'history';
@@ -25,12 +25,12 @@
     entities: string[];
     details: BatchDetailField[];
   };
-  type RuntimeEnv = Env;
+  type RuntimeEnv = RuntimeState;
   type JBatchState = NonNullable<EntityState['jBatchState']>;
   type BatchShape = JBatchState['batch'];
   type CompletedBatch = NonNullable<EntityState['batchHistory']>[number];
   type BatchHistoryRow = { entry: CompletedBatch; details: BatchDetailOp[]; key: string };
-  type ActiveDispute = NonNullable<AccountMachine['activeDispute']>;
+  type ActiveDispute = NonNullable<AccountState['activeDispute']>;
   type FeeOverrides = { gasBumpBps?: number; maxFeePerGasWei?: string; maxPriorityFeePerGasWei?: string };
   type PendingSettleEntityTx = Extract<EntityTx, { type: 'r2r' }>;
   type SettlementLike = {
@@ -659,7 +659,7 @@
     return derived.outCollateral > hold ? derived.outCollateral - hold : 0n;
   }
 
-  function isLocalExecutorForWorkspace(counterparty: string, account: AccountMachine | null): boolean {
+  function isLocalExecutorForWorkspace(counterparty: string, account: AccountState | null): boolean {
     const workspace = account?.settlementWorkspace;
     const owner = String(entityId || '').trim().toLowerCase();
     const peer = String(counterparty || '').trim().toLowerCase();
@@ -667,7 +667,7 @@
     return workspace.executorIsLeft === (owner < peer);
   }
 
-  function getWorkspaceAutoExecuteKey(counterparty: string, account: AccountMachine | null): string {
+  function getWorkspaceAutoExecuteKey(counterparty: string, account: AccountState | null): string {
     const workspace = account?.settlementWorkspace;
     if (!workspace) return '';
     const nonceAtSign = workspace.nonceAtSign ?? 0;

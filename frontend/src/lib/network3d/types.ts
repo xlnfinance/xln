@@ -26,7 +26,7 @@ export interface AccountConnectionData {
   toEntityId: string;
   line: THREE.Line;
   progressBars: THREE.Group | undefined;
-  account: any | undefined; // AccountMachine from replica state
+  account: any | undefined; // AccountState from replica state
 }
 
 export interface DerivedAccountData {

@@ -3,7 +3,7 @@
  * Single entry point for all scenarios — configurable backend (browservm | rpc)
  */
 
-import type { Env, JReplica, JTx, JurisdictionConfig } from '../types';
+import type { RuntimeState, JReplica, JTx, JurisdictionConfig } from '../types';
 import type { JAdapter, JAdapterMode } from '../jadapter/types';
 import { ethers } from 'ethers';
 import { createXlnJsonRpcProvider } from '../jadapter';
@@ -221,7 +221,7 @@ export interface ScenarioConfig {
 }
 
 export interface ScenarioBootResult {
-  env: Env;
+  env: RuntimeState;
   jadapter: JAdapter;
   jurisdiction: JurisdictionConfig;
 }
@@ -261,7 +261,7 @@ export function getJAdapterMode(): JAdapterMode {
  * Create JAdapter based on mode flag
  */
 export async function ensureJAdapter(
-  env?: Env,
+  env?: RuntimeState,
   mode?: JAdapterMode,
   options?: { deployStack?: boolean },
 ): Promise<JAdapter> {
@@ -369,7 +369,7 @@ type ScenarioBoardIdentity = Readonly<{
   boardHash: string;
 }>;
 
-export const resolveScenarioBoardSigner = (env: Env, signerId: string): string => {
+export const resolveScenarioBoardSigner = (env: RuntimeState, signerId: string): string => {
   const privateKey = getSignerPrivateKey(env, signerId);
   const signer = new ethers.Wallet(ethers.hexlify(privateKey)).address.toLowerCase();
   registerSignerKey(env, signer, privateKey);
@@ -378,7 +378,7 @@ export const resolveScenarioBoardSigner = (env: Env, signerId: string): string =
 
 /** Resolve scenario aliases before the consensus boundary. Board member zero is
  * always the literal EOA that Solidity will verify; aliases remain local UX only. */
-function computeBoardIdentity(env: Env, signerId: string): ScenarioBoardIdentity {
+function computeBoardIdentity(env: RuntimeState, signerId: string): ScenarioBoardIdentity {
   const privateKey = getSignerPrivateKey(env, signerId);
   const signer = resolveScenarioBoardSigner(env, signerId);
   const wallet = new ethers.Wallet(ethers.hexlify(privateKey));
@@ -406,7 +406,7 @@ function computeBoardIdentity(env: Env, signerId: string): ScenarioBoardIdentity
  *   ], jurisdiction);
  */
 export async function registerEntities(
-  env: Env,
+  env: RuntimeState,
   jadapter: JAdapter,
   entities: EntityConfig[],
   jurisdiction: JurisdictionConfig,
@@ -503,7 +503,7 @@ export async function registerEntities(
  * For real ERC20 deposits, use jadapter.externalTokenToReserve() directly.
  */
 export async function fundEntities(
-  env: Env,
+  env: RuntimeState,
   jadapter: JAdapter,
   funds: Array<{ id: string; tokenId: number; amount: bigint }>,
 ): Promise<void> {
@@ -523,7 +523,7 @@ export async function fundEntities(
  * Get JAdapter from env's active jReplica.
  * Scenarios call this to access the adapter without passing it separately.
  */
-export function getScenarioJAdapter(env: Env): JAdapter {
+export function getScenarioJAdapter(env: RuntimeState): JAdapter {
   const jReplica = env.jReplicas?.get(env.activeJurisdiction || '');
   if (jReplica?.jadapter) {
     return jReplica.jadapter;
@@ -542,7 +542,7 @@ export function getScenarioJAdapter(env: Env): JAdapter {
  * Create jReplica (J-Machine) for a jurisdiction
  */
 export function createJReplica(
-  env: Env,
+  env: RuntimeState,
   name: string,
   depositoryAddress: string,
   position: { x: number; y: number; z: number } = { x: 0, y: 600, z: 0 }
@@ -574,7 +574,7 @@ export function createJReplica(
 }
 
 /** Install the exact trusted adapter policy used by scenario J-authority checks. */
-export function bindScenarioJReplica(env: Env, replica: JReplica, adapter: JAdapter): JReplica {
+export function bindScenarioJReplica(env: RuntimeState, replica: JReplica, adapter: JAdapter): JReplica {
   const chainId = Number(adapter.chainId);
   const confirmationDepth = adapter.getFinalityDepth?.();
   if (!Number.isSafeInteger(chainId) || chainId <= 0) {
@@ -623,7 +623,7 @@ export function createJurisdictionConfig(
  * Create a numbered scenario entity using importReplica.
  */
 export async function createNumberedEntity(
-  env: Env,
+  env: RuntimeState,
   entityNumber: number,
   _name: string,
   jurisdiction: JurisdictionConfig,
@@ -664,7 +664,7 @@ export async function createNumberedEntity(
  * Create a 3D grid of scenario entities (NxMxZ).
  */
 export async function createGridEntities(
-  env: Env,
+  env: RuntimeState,
   dimensions: { x: number; y: number; z: number },
   jurisdiction: JurisdictionConfig,
   centerOffset: { x: number; y: number; z: number } = { x: 0, y: 0, z: 0 },

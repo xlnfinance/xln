@@ -1,6 +1,6 @@
 import { ethers } from 'ethers';
 import { compareStableText } from '../protocol/serialization';
-import type { EntityReplica, Env } from '../types';
+import type { EntityReplica, RuntimeState } from '../types';
 import { buildDurableRuntimeMachineSnapshot } from '../wal/snapshot';
 import { buildCertifiedEntityLineagePlan } from './entity-lineage';
 
@@ -127,7 +127,7 @@ export const computeCanonicalEntityHash = (replica: EntityReplica): CanonicalFra
   };
 };
 
-export const computeCanonicalEntityHashesFromEnv = (env: Env): CanonicalFrameEntityHash[] => {
+export const computeCanonicalEntityHashesFromEnv = (env: RuntimeState): CanonicalFrameEntityHash[] => {
   const lineagePlan = buildCertifiedEntityLineagePlan(env);
   return Array.from(lineagePlan.lookup.values(), ({ replica }) => computeCanonicalEntityHash(replica))
     .sort((left, right) => compareStableText(left.entityId, right.entityId));
@@ -153,7 +153,7 @@ export const computeCanonicalRuntimeStateHash = (
     ...(runtimeMachine ? { runtimeMachine: canonicalizeStorageAuditValue(runtimeMachine) } : {}),
   });
 
-export const computeCanonicalStateHashFromEnv = (env: Env): string =>
+export const computeCanonicalStateHashFromEnv = (env: RuntimeState): string =>
   computeCanonicalRuntimeStateHash(
     env.height,
     env.timestamp,

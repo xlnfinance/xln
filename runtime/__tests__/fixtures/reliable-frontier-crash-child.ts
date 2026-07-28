@@ -23,7 +23,7 @@ import {
 } from './reliable-local-catchup-fixture';
 import type {
   DeliverableEntityInput,
-  Env,
+  RuntimeState,
   ReliableDeliveryIdentity,
   ReliableDeliveryReceipt,
 } from '../../types';
@@ -99,7 +99,7 @@ const identity = (
 });
 
 const receipt = (
-  signerEnv: Env,
+  signerEnv: RuntimeState,
   receiverRuntimeId: string,
   value: ReliableDeliveryIdentity,
   coverage: ReliableDeliveryReceipt['body']['coverage'],

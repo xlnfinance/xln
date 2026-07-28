@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { detachRuntimeP2P } from '../runtime/p2p-lifecycle';
-import type { Env } from '../types';
+import type { RuntimeState } from '../types';
 
 test('runtime p2p lifecycle diagnostics use structured logging', () => {
   const source = readFileSync(join(process.cwd(), 'runtime/runtime/p2p-lifecycle.ts'), 'utf8');
@@ -24,7 +24,7 @@ test('detachRuntimeP2P closes p2p and clears runtime state', () => {
         },
       },
     },
-  } as unknown as Env;
+  } as unknown as RuntimeState;
 
   detachRuntimeP2P(env, {
     ensureRuntimeState: (targetEnv) => {

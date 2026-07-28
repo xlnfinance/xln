@@ -43,7 +43,7 @@ import type {
   EntityReplica,
   EntityState,
   EntityTx,
-  Env,
+  RuntimeState,
   JReplica,
   JurisdictionConfig,
 } from '../types';
@@ -57,7 +57,7 @@ const lineageJurisdiction: JurisdictionConfig = {
   entityProviderAddress: address('22'),
 };
 
-const makeGenesis = (env: Env, signerId: string): EntityState => {
+const makeGenesis = (env: RuntimeState, signerId: string): EntityState => {
   const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
   return {
     entityId,
@@ -92,7 +92,7 @@ const makeGenesis = (env: Env, signerId: string): EntityState => {
   };
 };
 
-const makeRuntime = (seed: string): { env: Env; signerId: string; genesis: EntityState } => {
+const makeRuntime = (seed: string): { env: RuntimeState; signerId: string; genesis: EntityState } => {
   const env = createEmptyEnv(seed);
   env.runtimeSeed = seed;
   env.scenarioMode = true;
@@ -112,7 +112,7 @@ const genesisAnchor = (state: EntityState): CertifiedEntityLineageAnchor => ({
 });
 
 const certifyNextFrame = async (
-  env: Env,
+  env: RuntimeState,
   signerId: string,
   preState: EntityState,
   txs: EntityTx[],
@@ -164,7 +164,7 @@ const certifyNextFrame = async (
 };
 
 const installReplica = (
-  env: Env,
+  env: RuntimeState,
   signerId: string,
   state: EntityState,
   options: {
@@ -187,7 +187,7 @@ const installReplica = (
 
 const installCertifiedImportFixture = async (
   seed: string,
-): Promise<{ env: Env; signerId: string; state: EntityState }> => {
+): Promise<{ env: RuntimeState; signerId: string; state: EntityState }> => {
   const { env, signerId, genesis } = makeRuntime(seed);
   const jurisdiction: JurisdictionConfig = {
     name: 'LineageTestnet',
