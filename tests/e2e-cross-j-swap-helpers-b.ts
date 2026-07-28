@@ -1525,7 +1525,7 @@ export async function triggerSourceDisputeArguments(
 ): Promise<void> {
   expect(routeId, `${source.entityId.slice(0, 10)} active cross-j route id required for dispute args`).toBeTruthy();
   const abi = AbiCoder.defaultAbiCoder();
-  const partialBinary = await page.evaluate(
+  const sourceDispute = await page.evaluate(
     async ({ source, routeId, sourceHubRuntimeSeed }) => {
       const view = window as CrossRuntimeWindow;
       const env = view.isolatedEnv;
@@ -1554,13 +1554,25 @@ export async function triggerSourceDisputeArguments(
       if (!reveal?.binary || reveal.binary === '0x') {
         throw new Error(`cross-j source dispute reveal missing binary: ${routeId}`);
       }
-      return String(reveal.binary);
+      const currentJHeight = Math.max(
+        0,
+        ...Array.from(env.jReplicas?.values?.() || []).map(
+          (replica: any) => Number(replica?.blockNumber || 0),
+        ),
+      );
+      return {
+        partialBinary: String(reveal.binary),
+        // The synthetic watcher event must model a real fresh dispute. A fixed
+        // absolute timeout eventually becomes overdue during this long E2E and
+        // makes the scheduler finalize a dispute that was never put on-chain.
+        disputeTimeout: currentJHeight + 5_760,
+      };
     },
     { source, routeId, sourceHubRuntimeSeed },
   );
   const crossPullArgs = abi.encode(
     ['tuple(uint16[] fillRatios, bytes32[] secrets, bytes[] pulls)'],
-    [{ fillRatios: [], secrets: [], pulls: [partialBinary] }],
+    [{ fillRatios: [], secrets: [], pulls: [sourceDispute.partialBinary] }],
   );
   const starterInitialArguments = abi.encode(['bytes[]'], [[crossPullArgs]]);
   const suffix = routeId
@@ -1576,7 +1588,7 @@ export async function triggerSourceDisputeArguments(
       proofbodyHash: `0x${suffix}`,
       starterInitialArguments,
       starterIncrementedArguments: '0x',
-      disputeTimeout: 100,
+      disputeTimeout: sourceDispute.disputeTimeout,
       onChainNonce: 1,
     },
   };
@@ -1586,6 +1598,25 @@ export async function triggerSourceDisputeArguments(
     transactionHash,
   });
   await flushRuntime(page, 8);
+}
+
+async function readPersistedEntityEventMessages(page: Page, entityId: string): Promise<string[]> {
+  return page.evaluate(async (targetEntityId) => {
+    const view = window as CrossRuntimeWindow;
+    const env = view.isolatedEnv;
+    const runtimeModule = view.__xln?.instance;
+    if (!env || !runtimeModule?.readPersistedEntityFrameHistory) {
+      throw new Error('persisted Entity history reader missing');
+    }
+    const links = await runtimeModule.readPersistedEntityFrameHistory(env, targetEntityId, 100);
+    return links.flatMap((link: any) =>
+      Array.from(link?.frame?.events || []).map((event: any) =>
+        event?.type === 'text'
+          ? `${String(event?.validatorId || '')}: ${String(event?.message || '')}`
+          : String(event?.message || ''),
+      ),
+    );
+  }, entityId);
 }
 
 export async function waitForCrossDisputeRouted(
@@ -1599,8 +1630,8 @@ export async function waitForCrossDisputeRouted(
       .poll(
         async () => {
           await flushRuntime(page, 1);
-          const state = await readCrossState(page, source, hubId);
-          return state.messages.some(
+          const messages = await readPersistedEntityEventMessages(page, source.entityId);
+          return messages.some(
             message => /Cross-j pull args observed/i.test(message) && message.includes(routeId),
           );
         },
@@ -1613,6 +1644,7 @@ export async function waitForCrossDisputeRouted(
       .toBe(true);
   } catch (error) {
     const state = await readCrossState(page, source, hubId);
+    const messages = await readPersistedEntityEventMessages(page, source.entityId);
     console.log(
       '[E2E source dispute route debug]',
       JSON.stringify(
@@ -1620,7 +1652,7 @@ export async function waitForCrossDisputeRouted(
           routeId,
           routes: state.routeSummaries,
           accountKeys: state.accountKeys,
-          messages: state.messages.slice(-32),
+          messages: messages.slice(-32),
         },
         null,
         2,
@@ -1643,10 +1675,11 @@ export async function waitForCrossSalvageQueued(
           await flushRuntime(page, 1);
           const state = await readCrossState(page, target, hubId);
           const route = state.routeSummaries.find(candidate => candidate.orderId === routeId);
-          const routedMessage = state.messages.some(
+          const messages = await readPersistedEntityEventMessages(page, target.entityId);
+          const routedMessage = messages.some(
             message => /Cross-j salvage queued/i.test(message) && message.includes(routeId),
           );
-          const disputeStarted = state.messages.some(message => /Dispute started/i.test(message));
+          const disputeStarted = messages.some(message => /Dispute started/i.test(message));
           const routeProgressedPastSalvage = Boolean(
             route &&
             route.targetPull &&
@@ -1664,6 +1697,7 @@ export async function waitForCrossSalvageQueued(
       .toBe(true);
   } catch (error) {
     const state = await readCrossState(page, target, hubId);
+    const messages = await readPersistedEntityEventMessages(page, target.entityId);
     console.log(
       '[E2E target salvage debug]',
       JSON.stringify(
@@ -1672,7 +1706,7 @@ export async function waitForCrossSalvageQueued(
           routes: state.routeSummaries,
           pullIds: state.pullIds,
           accountKeys: state.accountKeys,
-          messages: state.messages.slice(-32),
+          messages: messages.slice(-32),
         },
         null,
         2,
