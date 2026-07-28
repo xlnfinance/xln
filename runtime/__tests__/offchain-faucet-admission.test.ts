@@ -86,6 +86,7 @@ const callFaucet = async (
     hubEntityId?: string;
     hubSignerId?: string;
     activeHubEntityIds?: string[];
+    requestBody?: Record<string, unknown>;
   } = {},
 ): Promise<{
   response: Response;
@@ -107,6 +108,7 @@ const callFaucet = async (
         hubEntityId,
         tokenId: 1,
         amount: '100',
+        ...options.requestBody,
       }),
     }),
     env: makeEnv(account, hubEntityId, hubSignerId),
@@ -247,6 +249,21 @@ describe('offchain faucet admission', () => {
       fatal: false,
     });
     expect(body.senderOutCapacity).toBe((99n * USDC_UNIT).toString());
+    expect(enqueued).toBeNull();
+  });
+
+  test('rejects a non-integer token id before constructing financial input', async () => {
+    const account = makeAccount({
+      currentHeight: 1,
+      outCapacity: 1_000n * USDC_UNIT,
+    });
+
+    const { response, body, enqueued } = await callFaucet(account, {
+      requestBody: { tokenId: '1.5' },
+    });
+
+    expect(response.status).toBe(400);
+    expect(body.code).toBe('FAUCET_INVALID_TOKEN_ID');
     expect(enqueued).toBeNull();
   });
 
