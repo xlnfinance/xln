@@ -925,13 +925,19 @@ export const routeInboundP2PEntityInput = (
   return { kind: 'queued' };
 };
 
-export const validateInboundP2PEntityInputsEnvelope = (
+type AtomicCrossJPair = NonNullable<RuntimeEntityInputsEnvelope['atomicCrossJurisdictionPair']>;
+type CrossJIntent = NonNullable<RuntimeEntityInputsEnvelope['crossJurisdictionIntent']>;
+
+const validateEntityInputsEnvelopeHeader = (
   env: Env,
   from: string,
   envelope: RuntimeEntityInputsEnvelope,
-  deps: RuntimeEntityRoutingDeps,
-  options: RuntimeInboundEntityInputOptions = {},
-): RoutedEntityInput[] => {
+): {
+  transportSource: string;
+  localRuntimeId: string;
+  atomicPair: AtomicCrossJPair | undefined;
+  rawIntent: CrossJIntent | undefined;
+} => {
   const sourceRuntimeId = normalizeRuntimeId(envelope?.sourceRuntimeId);
   const transportSource = normalizeRuntimeId(from);
   if (!sourceRuntimeId || sourceRuntimeId !== transportSource) {
@@ -957,112 +963,172 @@ export const validateInboundP2PEntityInputsEnvelope = (
   if (rawIntent && envelope.entityInputs.length > 0) {
     throw new Error('INBOUND_CROSS_J_INTENT_MIXED_ENVELOPE');
   }
-  if (!rawIntent && envelope.entityInputs.length === 0) throw new Error('INBOUND_ENTITY_INPUTS_EMPTY');
-  const localRuntimeId = normalizeRuntimeId(env.runtimeId);
-  const validatedInputs: RoutedEntityInput[] = envelope.entityInputs.flatMap(rawInput => {
-    const input = validateDeliverableEntityInput(rawInput);
-    if (localRuntimeId && normalizeRuntimeId(input.runtimeId) !== localRuntimeId) {
-      throw new Error(
-        `INBOUND_ENTITY_INPUTS_TARGET_RUNTIME_MISMATCH:expected=${localRuntimeId}:actual=${input.runtimeId}`,
-      );
-    }
-    const validation = validateInboundP2PEntityInput(env, from, input, deps, options);
-    return validation.kind === 'accepted'
-      ? [{
-          ...input,
-          from: transportSource,
+  if (!rawIntent && envelope.entityInputs.length === 0) {
+    throw new Error('INBOUND_ENTITY_INPUTS_EMPTY');
+  }
+  return {
+    transportSource,
+    localRuntimeId: normalizeRuntimeId(env.runtimeId),
+    atomicPair,
+    rawIntent,
+  };
+};
+
+const validateEnvelopeEntityInputs = (
+  env: Env,
+  from: string,
+  envelope: RuntimeEntityInputsEnvelope,
+  deps: RuntimeEntityRoutingDeps,
+  options: RuntimeInboundEntityInputOptions,
+  transportSource: string,
+  localRuntimeId: string,
+  atomicPair: AtomicCrossJPair | undefined,
+): RoutedEntityInput[] => envelope.entityInputs.flatMap(rawInput => {
+  const input = validateDeliverableEntityInput(rawInput);
+  if (localRuntimeId && normalizeRuntimeId(input.runtimeId) !== localRuntimeId) {
+    throw new Error(
+      `INBOUND_ENTITY_INPUTS_TARGET_RUNTIME_MISMATCH:expected=${localRuntimeId}:actual=${input.runtimeId}`,
+    );
+  }
+  const validation = validateInboundP2PEntityInput(env, from, input, deps, options);
+  return validation.kind === 'accepted'
+    ? [{
+        ...input,
+        from: transportSource,
         sourceRuntimeFrame: {
           height: envelope.sourceRuntimeHeight,
           timestamp: envelope.sourceRuntimeTimestamp,
         },
         ...(atomicPair ? { atomicCrossJurisdictionPair: { ...atomicPair } } : {}),
       }]
-      : [];
-  });
-  if (rawIntent) {
-    const route = withCanonicalCrossJurisdictionRouteHash(rawIntent);
-    if (safeStringify(route) !== safeStringify(cloneCrossJurisdictionRoute(rawIntent))) {
-      throw new Error('INBOUND_CROSS_J_INTENT_NON_CANONICAL');
-    }
-    if (route.status !== 'intent' || route.sourcePull || route.targetPull) {
-      throw new Error('INBOUND_CROSS_J_INTENT_STATE_INVALID');
-    }
-    const sourceHubEntityId = normalizeEntityKey(route.source.counterpartyEntityId);
-    const targetHubEntityId = normalizeEntityKey(route.target.entityId);
-    const sourceHubSignerId = normalizeEntityKey(route.sourceHubSignerId || '');
-    const targetHubSignerId = normalizeEntityKey(route.targetHubSignerId || '');
-    if (
-      !sourceHubEntityId ||
-      !targetHubEntityId ||
-      !sourceHubSignerId ||
-      !targetHubSignerId ||
-      !deps.hasLocalSignerForEntitySigner(env, sourceHubEntityId, sourceHubSignerId) ||
-      !deps.hasLocalSignerForEntitySigner(env, targetHubEntityId, targetHubSignerId)
-    ) {
-      throw new Error('INBOUND_CROSS_J_INTENT_HUB_SIBLINGS_NOT_LOCAL');
-    }
-    const sourceHubReplica = [...env.eReplicas.values()].find(replica =>
-      normalizeEntityKey(replica.entityId) === sourceHubEntityId &&
-      normalizeEntityKey(replica.signerId) === sourceHubSignerId);
-    const targetHubReplica = [...env.eReplicas.values()].find(replica =>
-      normalizeEntityKey(replica.entityId) === targetHubEntityId &&
-      normalizeEntityKey(replica.signerId) === targetHubSignerId);
-    if (sourceHubReplica?.state.profile.isHub !== true || targetHubReplica?.state.profile.isHub !== true) {
-      throw new Error('INBOUND_CROSS_J_INTENT_TARGET_NOT_HUB');
-    }
-    const sourceUserRuntimeId = resolveRuntimeIdForEntity(env, route.source.entityId, deps);
-    const targetUserRuntimeId = resolveRuntimeIdForEntity(env, route.target.counterpartyEntityId, deps);
-    if (sourceUserRuntimeId !== transportSource || targetUserRuntimeId !== transportSource) {
-      throw new Error('INBOUND_CROSS_J_INTENT_USER_RUNTIME_MISMATCH');
-    }
-    const existingRoute = sourceHubReplica.state.crossJurisdictionSwaps?.get(route.orderId);
-    const queuedRoute = (env.runtimeMempool?.entityInputs ?? []).flatMap(input =>
-      (input.entityTxs ?? []).flatMap(tx =>
-        tx.type === 'prepareCrossJurisdictionSwap' && tx.data.route.orderId === route.orderId
-          ? [tx.data.route]
-          : []),
-    )[0];
-    const priorRoute = existingRoute ?? queuedRoute;
-    if (priorRoute && priorRoute.routeHash?.toLowerCase() !== route.routeHash?.toLowerCase()) {
-      recordRuntimeSecurityIncident(env, {
-        domain: 'cross-j',
-        code: 'CROSS_J_INTENT_ORDER_ID_CONFLICT',
-        source: 'remote-ingress',
-        severity: 'warning',
-        summary: 'A repeated unsigned cross-j intent reused an orderId with different immutable terms',
-        entityId: sourceHubEntityId,
-        routeHash: route.routeHash || '',
-      });
-      throw new Error(`INBOUND_CROSS_J_INTENT_ORDER_ID_CONFLICT:${route.orderId}`);
-    }
-    if (!priorRoute) {
-      validatedInputs.push({
-        entityId: sourceHubEntityId,
-        signerId: sourceHubSignerId,
-        ...(localRuntimeId ? { runtimeId: localRuntimeId } : {}),
-        entityTxs: [{
-          type: 'prepareCrossJurisdictionSwap',
-          data: { route },
-        }],
-      });
-    }
+    : [];
+});
+
+const appendCrossJurisdictionIntentInput = (
+  env: Env,
+  rawIntent: CrossJIntent,
+  deps: RuntimeEntityRoutingDeps,
+  transportSource: string,
+  localRuntimeId: string,
+  validatedInputs: RoutedEntityInput[],
+): void => {
+  const route = withCanonicalCrossJurisdictionRouteHash(rawIntent);
+  if (safeStringify(route) !== safeStringify(cloneCrossJurisdictionRoute(rawIntent))) {
+    throw new Error('INBOUND_CROSS_J_INTENT_NON_CANONICAL');
   }
-  const crossJProposalIndexes = validatedInputs.flatMap((input, inputIndex) =>
+  if (route.status !== 'intent' || route.sourcePull || route.targetPull) {
+    throw new Error('INBOUND_CROSS_J_INTENT_STATE_INVALID');
+  }
+  const sourceHubEntityId = normalizeEntityKey(route.source.counterpartyEntityId);
+  const targetHubEntityId = normalizeEntityKey(route.target.entityId);
+  const sourceHubSignerId = normalizeEntityKey(route.sourceHubSignerId || '');
+  const targetHubSignerId = normalizeEntityKey(route.targetHubSignerId || '');
+  if (
+    !sourceHubEntityId ||
+    !targetHubEntityId ||
+    !sourceHubSignerId ||
+    !targetHubSignerId ||
+    !deps.hasLocalSignerForEntitySigner(env, sourceHubEntityId, sourceHubSignerId) ||
+    !deps.hasLocalSignerForEntitySigner(env, targetHubEntityId, targetHubSignerId)
+  ) {
+    throw new Error('INBOUND_CROSS_J_INTENT_HUB_SIBLINGS_NOT_LOCAL');
+  }
+  const sourceHubReplica = [...env.eReplicas.values()].find(replica =>
+    normalizeEntityKey(replica.entityId) === sourceHubEntityId &&
+    normalizeEntityKey(replica.signerId) === sourceHubSignerId);
+  const targetHubReplica = [...env.eReplicas.values()].find(replica =>
+    normalizeEntityKey(replica.entityId) === targetHubEntityId &&
+    normalizeEntityKey(replica.signerId) === targetHubSignerId);
+  if (sourceHubReplica?.state.profile.isHub !== true || targetHubReplica?.state.profile.isHub !== true) {
+    throw new Error('INBOUND_CROSS_J_INTENT_TARGET_NOT_HUB');
+  }
+  const sourceUserRuntimeId = resolveRuntimeIdForEntity(env, route.source.entityId, deps);
+  const targetUserRuntimeId = resolveRuntimeIdForEntity(env, route.target.counterpartyEntityId, deps);
+  if (sourceUserRuntimeId !== transportSource || targetUserRuntimeId !== transportSource) {
+    throw new Error('INBOUND_CROSS_J_INTENT_USER_RUNTIME_MISMATCH');
+  }
+  const existingRoute = sourceHubReplica.state.crossJurisdictionSwaps?.get(route.orderId);
+  const queuedRoute = (env.runtimeMempool?.entityInputs ?? []).flatMap(input =>
+    (input.entityTxs ?? []).flatMap(tx =>
+      tx.type === 'prepareCrossJurisdictionSwap' && tx.data.route.orderId === route.orderId
+        ? [tx.data.route]
+        : []),
+  )[0];
+  const priorRoute = existingRoute ?? queuedRoute;
+  if (priorRoute && priorRoute.routeHash?.toLowerCase() !== route.routeHash?.toLowerCase()) {
+    recordRuntimeSecurityIncident(env, {
+      domain: 'cross-j',
+      code: 'CROSS_J_INTENT_ORDER_ID_CONFLICT',
+      source: 'remote-ingress',
+      severity: 'warning',
+      summary: 'A repeated unsigned cross-j intent reused an orderId with different immutable terms',
+      entityId: sourceHubEntityId,
+      routeHash: route.routeHash || '',
+    });
+    throw new Error(`INBOUND_CROSS_J_INTENT_ORDER_ID_CONFLICT:${route.orderId}`);
+  }
+  if (!priorRoute) {
+    validatedInputs.push({
+      entityId: sourceHubEntityId,
+      signerId: sourceHubSignerId,
+      ...(localRuntimeId ? { runtimeId: localRuntimeId } : {}),
+      entityTxs: [{ type: 'prepareCrossJurisdictionSwap', data: { route } }],
+    });
+  }
+};
+
+const assertAtomicCrossJEnvelope = (
+  inputs: RoutedEntityInput[],
+  atomicPair: AtomicCrossJPair | undefined,
+): void => {
+  const hasCrossJProposal = inputs.some(input =>
     effectiveAccountInputs(input).some(accountInput => {
       const proposal = accountInputProposal(accountInput);
       return proposal?.frame.accountTxs.some(tx =>
         (tx.type === 'pull_lock' && tx.data.crossJurisdiction) ||
         tx.type === 'cross_pull_close') === true;
-    }) ? [inputIndex] : []);
-  if (crossJProposalIndexes.length > 0 || atomicPair) {
-    const pairs = selectPotentialCrossJAccountInputPairs(validatedInputs);
-    const exactPair = atomicPair !== undefined &&
-      validatedInputs.length === 2 &&
-      pairs.length === 1 &&
-      pairs[0]!.pairKey === atomicPair.pairKey &&
-      new Set([pairs[0]!.sourceInputIndex, pairs[0]!.targetInputIndex]).size === 2;
-    if (!exactPair) throw new Error('INBOUND_CROSS_J_ATOMIC_ENVELOPE_INVALID');
+    }),
+  );
+  if (!hasCrossJProposal && !atomicPair) return;
+  const pairs = selectPotentialCrossJAccountInputPairs(inputs);
+  const exactPair = atomicPair !== undefined &&
+    inputs.length === 2 &&
+    pairs.length === 1 &&
+    pairs[0]!.pairKey === atomicPair.pairKey &&
+    new Set([pairs[0]!.sourceInputIndex, pairs[0]!.targetInputIndex]).size === 2;
+  if (!exactPair) throw new Error('INBOUND_CROSS_J_ATOMIC_ENVELOPE_INVALID');
+};
+
+export const validateInboundP2PEntityInputsEnvelope = (
+  env: Env,
+  from: string,
+  envelope: RuntimeEntityInputsEnvelope,
+  deps: RuntimeEntityRoutingDeps,
+  options: RuntimeInboundEntityInputOptions = {},
+): RoutedEntityInput[] => {
+  const { transportSource, localRuntimeId, atomicPair, rawIntent } =
+    validateEntityInputsEnvelopeHeader(env, from, envelope);
+  const validatedInputs = validateEnvelopeEntityInputs(
+    env,
+    from,
+    envelope,
+    deps,
+    options,
+    transportSource,
+    localRuntimeId,
+    atomicPair,
+  );
+  if (rawIntent) {
+    appendCrossJurisdictionIntentInput(
+      env,
+      rawIntent,
+      deps,
+      transportSource,
+      localRuntimeId,
+      validatedInputs,
+    );
   }
+  assertAtomicCrossJEnvelope(validatedInputs, atomicPair);
   // Pairing is state-dependent: an older Account ACK from the same ordered
   // transport may still be queued immediately before this envelope. Filtering
   // here would inspect stale Account pendingFrame state and destroy one leg of
