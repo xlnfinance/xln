@@ -51,7 +51,7 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   `runtime/account`. Reduce every coordinator to at most 150 lines and every
   pure/helper function to at most 100 lines, with no file above 3000 lines;
   `check:state-machine-size` now reports zero functions over 150 lines and
-  ratchets the remaining 44 functions over 100 lines; it rejects any new debt
+  ratchets the remaining 43 functions over 100 lines; it rejects any new debt
   and every file over 3000 lines. Keep reducing the helper count to zero,
   tightening the exact ceiling after each phase split.
   Keep Runtime-machine logic under `runtime/runtime/`, Entity-machine logic
@@ -87,6 +87,18 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   WAL, Entity validator certification and Account bilateral ACK semantics
   explicit. Do not introduce inheritance or a generic reducer that hides those
   different trust boundaries.
+- [ ] Separate committed frame state from each machine/replica envelope before
+  optimizing clones. Target `RuntimeMachine = RuntimeFrameState + one ingress
+  queue + WAL/outbox/lifecycle`, `EntityReplica = EntityState + mempool +
+  candidate/certificate`, and `AccountReplica = AccountState + mempool +
+  pending bilateral candidate/ACK/resend metadata`. `*State` must contain only
+  deterministic data committed by its corresponding frame; validator-local,
+  transport, watchdog and retry fields belong to the envelope. First pin
+  byte-identical roots, replay, pre-WAL failure and post-WAL recovery. Runtime
+  may then use single-writer mutate+halt/reload instead of a full clone; Entity
+  and Account must retain isolated candidates until their respective
+  certificate or bilateral ACK commits them. Keep single-signer Entity on the
+  same candidate pipeline with an immediate local certificate.
 - [ ] Standardize transition result naming (owner-approved):
   `outputs` are deterministic messages to another state machine; `effects` are
   post-commit external I/O only; queued child-machine inputs must be named for

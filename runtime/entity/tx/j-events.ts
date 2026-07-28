@@ -53,6 +53,7 @@ import {
   finalizedJHistoryRoot,
   pruneCertifiedJHistory,
   reconcileJEventRangeWithFinalizedState,
+  type ReconciledJEventRange,
 } from '../../jurisdiction/local-history';
 import { assertEntityFrameJRangeBudget } from '../../jurisdiction/range-budget';
 import { getEntityLeaderState } from '../consensus/leader';
@@ -126,51 +127,35 @@ const retireSentBatchInvalidatedByDisputeFinality = (
   return removed;
 };
 
-export const applyJEvent = async (
+type AppliedJRange = {
+  state: EntityState;
+  mempoolOps: JEventMempoolOp[];
+  outputs: EntityInput[];
+  hashesToSign: HashToSign[];
+  dirtyAccounts: Set<string>;
+  certifiedPrefixRoot: string;
+};
+
+const applyJRangeBlocks = async (
   entityState: EntityState,
-  data: JurisdictionEventData,
+  range: Extract<ReconciledJEventRange, { kind: 'suffix' }>,
+  jurisdictionRef: string,
+  signerId: string,
+  signature: string,
   env: RuntimeState,
-  candidateEffects: EntityCandidateEffect[] = [],
-): Promise<JEventApplyResult> => {
-  const activeProposerId = normalizeSignerId(getEntityLeaderState(entityState).activeValidatorId);
-  // Reject unauthorized senders before canonicalizing attacker-controlled bytes.
-  // Active proposers still pass the exact same aggregate frame budget below.
-  assertEntityFrameJRangeBudget([{ type: 'j_event', data }]);
-  const expectedJurisdictionRef = getJEventJurisdictionRef(entityState.config.jurisdiction);
-  const validated = validateJEventRangeEnvelope({
-    entityId: entityState.entityId,
-    expectedJurisdictionRef,
-    activeProposerId,
-    data,
-    verifySignature: (signerId, digest, signature) =>
-      verifyAccountSignature(env, signerId, digest, signature),
-  });
-  if (!validated.ok) {
-    if (validated.code === 'J_RANGE_PROPOSER_SIGNATURE_INVALID') {
-      throw new Error(`j_event rejected: invalid proposer signature for ${normalizeSignerId(data.from)}`);
-    }
-    throw new Error(`j_event rejected: ${validated.code}`);
-  }
-  const { signerId, jurisdictionRef, data: canonicalData } = validated.range;
-  const { scannedThroughHeight, tipBlockHash, signature } = canonicalData;
-  // Authenticate before classifying a fully stale delivery as a no-op. The
-  // current Entity head is sufficient: already-applied linked-list history is
-  // never replayed or consulted as authority.
-  const reconciled = reconcileJEventRangeWithFinalizedState(entityState, canonicalData);
-
-  if (reconciled.kind === 'noop') {
-    return { newState: entityState, mempoolOps: [], outputs: [], dirtyAccounts: [] };
-  }
-  const eventHistoryRoot = reconciled.eventHistoryRoot;
-
+  candidateEffects: EntityCandidateEffect[],
+): Promise<AppliedJRange> => {
   let state = cloneEntityState(entityState);
-  const mempoolOps: JEventMempoolOp[] = [];
-  const outputs: EntityInput[] = [];
-  const hashesToSign: HashToSign[] = [];
-  const dirtyAccounts = new Set<string>();
-  let certifiedPrefixRoot = finalizedJHistoryRoot(entityState);
-  for (const block of reconciled.blocks) {
-    certifiedPrefixRoot = foldJHistoryRoot(certifiedPrefixRoot, [{
+  const applied: AppliedJRange = {
+    state,
+    mempoolOps: [],
+    outputs: [],
+    hashesToSign: [],
+    dirtyAccounts: new Set(),
+    certifiedPrefixRoot: finalizedJHistoryRoot(entityState),
+  };
+  for (const block of range.blocks) {
+    applied.certifiedPrefixRoot = foldJHistoryRoot(applied.certifiedPrefixRoot, [{
       jurisdictionRef,
       jHeight: block.blockNumber,
       jBlockHash: block.blockHash,
@@ -201,30 +186,34 @@ export const applyJEvent = async (
         block.disputeFinalizationEvidence ?? [],
         candidateEffects,
       );
-      state = result.newState;
-      mempoolOps.push(...result.mempoolOps);
-      outputs.push(...result.outputs);
-      if (result.hashesToSign) hashesToSign.push(...result.hashesToSign);
-      for (const accountId of result.dirtyAccounts) dirtyAccounts.add(accountId);
-      if (!state.jBlockChain.some((entry) => entry.jHeight === block.blockNumber)) {
+      state = applied.state = result.newState;
+      applied.mempoolOps.push(...result.mempoolOps);
+      applied.outputs.push(...result.outputs);
+      if (result.hashesToSign) applied.hashesToSign.push(...result.hashesToSign);
+      for (const accountId of result.dirtyAccounts) applied.dirtyAccounts.add(accountId);
+      if (!state.jBlockChain.some(entry => entry.jHeight === block.blockNumber)) {
         throw new Error(`j_event invariant: finalized block ${block.blockNumber} lost during apply`);
       }
     }
   }
+  return applied;
+};
 
-  if (certifiedPrefixRoot !== eventHistoryRoot) {
-    throw new Error(
-      `J_HISTORY_FINALITY_ROOT_CORRUPTION:expected=${certifiedPrefixRoot}:certified=${eventHistoryRoot}`,
-    );
-  }
-
-  state.lastFinalizedJHeight = scannedThroughHeight;
+const commitJRangeFinality = (
+  entityState: EntityState,
+  state: EntityState,
+  range: Extract<ReconciledJEventRange, { kind: 'suffix' }>,
+  jurisdictionRef: string,
+  signerId: string,
+  signature: string,
+): EntityState => {
+  state.lastFinalizedJHeight = range.scannedThroughHeight;
   state.jHistoryFinality = {
     jurisdictionRef,
-    baseHeight: reconciled.baseHeight,
-    finalizedThroughHeight: scannedThroughHeight,
-    tipBlockHash,
-    eventHistoryRoot,
+    baseHeight: range.baseHeight,
+    finalizedThroughHeight: range.scannedThroughHeight,
+    tipBlockHash: range.tipBlockHash,
+    eventHistoryRoot: range.eventHistoryRoot,
     proposerSignerId: signerId,
     proposerSignature: signature,
     entityHeight: entityState.height + 1,
@@ -234,25 +223,85 @@ export const applyJEvent = async (
   state.certifiedBoardState = advanceCertifiedBoardFinality(
     state.certifiedBoardState,
     jurisdiction,
-    scannedThroughHeight,
-    tipBlockHash,
-    eventHistoryRoot,
+    range.scannedThroughHeight,
+    range.tipBlockHash,
+    range.eventHistoryRoot,
   );
   state.jBlockChain.sort((left, right) => left.jHeight - right.jHeight);
-  state = pruneCertifiedJHistory(state);
-  mergeJEventClaimOps(mempoolOps);
+  return pruneCertifiedJHistory(state);
+};
+
+export const applyJEvent = async (
+  entityState: EntityState,
+  data: JurisdictionEventData,
+  env: RuntimeState,
+  candidateEffects: EntityCandidateEffect[] = [],
+): Promise<JEventApplyResult> => {
+  const activeProposerId = normalizeSignerId(getEntityLeaderState(entityState).activeValidatorId);
+  // Reject unauthorized senders before canonicalizing attacker-controlled bytes.
+  // Active proposers still pass the exact same aggregate frame budget below.
+  assertEntityFrameJRangeBudget([{ type: 'j_event', data }]);
+  const expectedJurisdictionRef = getJEventJurisdictionRef(entityState.config.jurisdiction);
+  const validated = validateJEventRangeEnvelope({
+    entityId: entityState.entityId,
+    expectedJurisdictionRef,
+    activeProposerId,
+    data,
+    verifySignature: (signerId, digest, signature) =>
+      verifyAccountSignature(env, signerId, digest, signature),
+  });
+  if (!validated.ok) {
+    if (validated.code === 'J_RANGE_PROPOSER_SIGNATURE_INVALID') {
+      throw new Error(`j_event rejected: invalid proposer signature for ${normalizeSignerId(data.from)}`);
+    }
+    throw new Error(`j_event rejected: ${validated.code}`);
+  }
+  const { signerId, jurisdictionRef, data: canonicalData } = validated.range;
+  const { signature } = canonicalData;
+  // Authenticate before classifying a fully stale delivery as a no-op. The
+  // current Entity head is sufficient: already-applied linked-list history is
+  // never replayed or consulted as authority.
+  const reconciled = reconcileJEventRangeWithFinalizedState(entityState, canonicalData);
+
+  if (reconciled.kind === 'noop') {
+    return { newState: entityState, mempoolOps: [], outputs: [], dirtyAccounts: [] };
+  }
+  const applied = await applyJRangeBlocks(
+    entityState,
+    reconciled,
+    jurisdictionRef,
+    signerId,
+    signature,
+    env,
+    candidateEffects,
+  );
+  if (applied.certifiedPrefixRoot !== reconciled.eventHistoryRoot) {
+    throw new Error(
+      `J_HISTORY_FINALITY_ROOT_CORRUPTION:` +
+      `expected=${applied.certifiedPrefixRoot}:certified=${reconciled.eventHistoryRoot}`,
+    );
+  }
+  const state = commitJRangeFinality(
+    entityState,
+    applied.state,
+    reconciled,
+    jurisdictionRef,
+    signerId,
+    signature,
+  );
+  mergeJEventClaimOps(applied.mempoolOps);
   jEventLog.info('history.finalized_by_entity', {
-    range: `${reconciled.baseHeight + 1}-${scannedThroughHeight}`,
+    range: `${reconciled.baseHeight + 1}-${reconciled.scannedThroughHeight}`,
     eventBlocks: reconciled.blocks.length,
-    root: shortHash(eventHistoryRoot),
+    root: shortHash(reconciled.eventHistoryRoot),
     proposer: shortId(signerId),
   });
   return {
     newState: state,
-    mempoolOps,
-    outputs,
-    dirtyAccounts: [...dirtyAccounts],
-    ...(hashesToSign.length > 0 ? { hashesToSign } : {}),
+    mempoolOps: applied.mempoolOps,
+    outputs: applied.outputs,
+    dirtyAccounts: [...applied.dirtyAccounts],
+    ...(applied.hashesToSign.length > 0 ? { hashesToSign: applied.hashesToSign } : {}),
   };
 };
 
