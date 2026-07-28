@@ -3,9 +3,6 @@ import { readFileSync } from 'node:fs';
 
 import { cloneAccountMachine, cloneEntityReplica, cloneEntityState } from '../state-helpers';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
-import {
-  computeCanonicalEntityConsensusStateHash,
-} from '../entity/consensus/state-root';
 import { buildCanonicalEntityReplicaSnapshot } from '../wal/snapshot';
 import { validateConsensusConfig, validateEntityReplica } from '../validation-utils';
 
@@ -169,7 +166,8 @@ describe('state helper cloning', () => {
     expect(source).toContain("const stateHelperLog = createStructuredLogger('state.helpers');");
     expect(source).toContain("stateHelperLog.error('clone.entity_state.entity_id_corrupt'");
     expect(source).toContain("stateHelperLog.error('clone.entity_state.last_finalized_j_height_corrupt'");
-    expect(source).toContain("stateHelperLog.debug('clone.account_machine.structured_clone_failed'");
+    expect(source).toContain('ACCOUNT_STATE_STRUCTURED_CLONE_FAILED');
+    expect(source).not.toContain('manualClone');
     expect(source).not.toContain('console.');
   });
 
@@ -184,6 +182,7 @@ describe('state helper cloning', () => {
     const state = makeProjectionReplica().state as any;
     const route = makeCrossJurisdictionRoute();
     const account = makeManualFallbackAccount() as any;
+    delete account.uncloneable;
     account.swapOffers = new Map([[
       route.orderId,
       {
@@ -325,7 +324,7 @@ describe('state helper cloning', () => {
     expect(replica.hankoWitness.get(hash)?.createdAt).toBe(123);
   });
 
-  test('runtime frame snapshot preserves the exact consensus root through manual clone fallback', () => {
+  test('runtime frame snapshot fails fast with the non-cloneable field path', () => {
     for (const absentField of ['accountInputQueue', 'deferredAccountProposals'] as const) {
       const replica = { ...makeProjectionReplica(), mempool: [] } as any;
       const account = makeManualFallbackAccount() as any;
@@ -334,13 +333,8 @@ describe('state helper cloning', () => {
       replica.state.accounts.set('left', account);
       delete replica.state[absentField];
 
-      const before = computeCanonicalEntityConsensusStateHash(replica.state);
-      const snapshot = buildCanonicalEntityReplicaSnapshot(replica);
-      const afterAccount = snapshot.state.accounts.get('left') as unknown as Record<string, unknown>;
-
-      expect(Object.hasOwn(snapshot.state, absentField)).toBe(false);
-      expect(Object.hasOwn(afterAccount, 'jNonce')).toBe(false);
-      expect(computeCanonicalEntityConsensusStateHash(snapshot.state)).toBe(before);
+      expect(() => buildCanonicalEntityReplicaSnapshot(replica))
+        .toThrow('ENTITY_STATE_STRUCTURED_CLONE_FAILED:path=$.accounts.<map-value:0>.provider.getBlockNumber');
     }
   });
 
@@ -369,8 +363,8 @@ describe('state helper cloning', () => {
     expect(replica.jHistory.blockHashes.has(13)).toBe(false);
   });
 
-  test('manual account clone fallback normalizes missing mempool', () => {
-    const cloned = cloneAccountMachine({
+  test('account clone fails fast instead of normalizing non-cloneable state', () => {
+    const account = {
       currentFrame: {
         height: 0,
         timestamp: 0,
@@ -388,25 +382,25 @@ describe('state helper cloning', () => {
       pulls: new Map(),
       shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
       uncloneable: () => undefined,
-    } as any);
+    } as any;
 
-    expect(cloned.mempool).toEqual([]);
+    expect(() => cloneAccountMachine(account))
+      .toThrow('ACCOUNT_STATE_STRUCTURED_CLONE_FAILED:path=$.uncloneable');
   });
 
   test('account clones preserve absence of optional pulls consensus state', () => {
-    for (const forceManualFallback of [false, true]) {
-      const account = makeManualFallbackAccount() as any;
-      delete account.pulls;
-      if (!forceManualFallback) delete account.uncloneable;
+    const account = makeManualFallbackAccount() as any;
+    delete account.pulls;
+    delete account.uncloneable;
 
-      const cloned = cloneAccountMachine(account);
+    const cloned = cloneAccountMachine(account);
 
-      expect(Object.hasOwn(cloned, 'pulls')).toBe(false);
-    }
+    expect(Object.hasOwn(cloned, 'pulls')).toBe(false);
   });
 
-  test('manual account clone fallback isolates mempool, dispute evidence, and cross-j routes', () => {
+  test('account clone isolates mempool, dispute evidence, and cross-j routes', () => {
     const account = makeManualFallbackAccount();
+    delete (account as Record<string, unknown>).uncloneable;
     const cloned = cloneAccountMachine(account as any);
 
     (cloned.mempool[0] as any).data.nested.memo = 'mutated';
@@ -420,9 +414,8 @@ describe('state helper cloning', () => {
     expect((account.swapOffers.get('offer-1') as any).crossJurisdiction.source.amount).toBe(100n);
   });
 
-  test('manual entity clone fallback isolates pending cross-j fill ack tx data', () => {
+  test('entity clone isolates pending cross-j fill ack tx data', () => {
     const state = makeProjectionReplica().state as any;
-    state.uncloneable = () => undefined;
     state.crossJurisdictionSwaps = new Map([['order-1', makeCrossJurisdictionRoute()]]);
     state.pendingCrossJurisdictionFillAcks = new Map([[
       'ack-1',

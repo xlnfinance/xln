@@ -7,7 +7,6 @@ import type {
   AccountFrame,
   AccountMachine,
   AccountTx,
-  DebtEntry,
   EntityReplica,
   EntityState,
   Env,
@@ -18,7 +17,6 @@ import type {
 } from './types';
 import type { DisputeArgumentSnapshot } from './protocol/dispute/arguments';
 import type { ProofBodyStruct } from '../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
-import { HEAVY_LOGS } from './utils';
 import { validateEntityReplica, validateEntityState } from './validation-utils';
 import { safeStringify } from './protocol/serialization';
 import {
@@ -29,12 +27,11 @@ import {
 } from './protocol/runtime-input-clone';
 import {
   cloneIsolatedAccountFrame,
-  cloneIsolatedAccountInput,
 } from './protocol/account-input-clone';
 import { isLeftEntity } from './entity/id';
 import { getAccountFrameHistoryView, setAccountFrameHistoryView } from './runtime/env-events';
 import { getLocalSignerPrivateKey } from './account/crypto';
-import { cloneJBatch, type CompletedBatch, type JBatchState } from './jurisdiction/batch';
+import { cloneJBatch, type JBatchState } from './jurisdiction/batch';
 import {
   cloneCrossJurisdictionBookAdmission,
   cloneCrossJurisdictionAccountFrameRoute,
@@ -45,7 +42,6 @@ import {
   cloneCrossJurisdictionSwapHistoryRoute,
   cloneCrossJurisdictionSwapOfferRoute,
 } from './extensions/cross-j/index';
-import type { CrontabState, ScheduledHook } from './entity/scheduler-types';
 import type { Profile } from './networking/gossip';
 import { createStructuredLogger } from './infra/logger';
 import { getEntityLeaderState, isEntityActiveLeader } from './entity/consensus/leader';
@@ -84,15 +80,6 @@ const replayOutputSignerHint = (env: Env, entityId: string): string | null => {
   const hints = (env as unknown as Record<PropertyKey, unknown>)[REPLAY_OUTPUT_SIGNER_HINTS];
   return hints instanceof Map ? String(hints.get(entityId) || '') || null : null;
 };
-import type {
-  BookOrderState,
-  BookState,
-  HubProfile,
-  OrderbookExtState,
-  PriceBucketState,
-  PriceLevelState,
-} from './orderbook';
-
 const cloneAccountTxForState = <T extends AccountTx>(tx: T): T => {
   const cloned = structuredClone(tx) as T;
   return cloneCrossJurisdictionAccountTxRoute(cloned) as T;
@@ -362,40 +349,6 @@ export function resolveEntityProposerId(env: Env, entityId: string, context: str
 export const cloneMap = <K, V>(map: Map<K, V>) => new Map(map);
 export const cloneArray = <T>(arr: T[]) => [...arr];
 
-const cloneExternalWalletState = (
-  state: NonNullable<EntityState['externalWallet']>,
-): NonNullable<EntityState['externalWallet']> => ({
-  balances: new Map(
-    Array.from(state.balances.entries()).map(([owner, balances]) => [
-      owner,
-      new Map(Array.from(balances.entries()).map(([key, value]) => [key, { ...value }])),
-    ]),
-  ),
-  allowances: new Map(
-    Array.from(state.allowances.entries()).map(([owner, allowances]) => [
-      owner,
-      new Map(Array.from(allowances.entries()).map(([key, value]) => [key, { ...value }])),
-    ]),
-  ),
-});
-
-const cloneDebtEntry = (entry: DebtEntry): DebtEntry => ({
-  ...entry,
-});
-
-const cloneDebtLedger = (
-  ledger: Map<number, Map<string, DebtEntry>>,
-): Map<number, Map<string, DebtEntry>> => {
-  return new Map(
-    Array.from(ledger.entries()).map(([tokenId, debtMap]) => [
-      tokenId,
-      new Map(
-        Array.from(debtMap.entries()).map(([debtId, entry]) => [debtId, cloneDebtEntry(entry)]),
-      ),
-    ]),
-  );
-};
-
 const cloneLendingPoolPosition = (position: LendingPoolPosition): LendingPoolPosition => ({
   ...position,
 });
@@ -497,15 +450,49 @@ const cloneDisputeEvidenceIntoAccount = (
   }
 };
 
-const cloneBatchHistoryEntry = (entry: CompletedBatch): CompletedBatch => {
-  const cloned: CompletedBatch = { ...entry };
-  if (entry.batch) {
-    cloned.batch = cloneJBatch(entry.batch);
+const structuredCloneWorks = (value: unknown): boolean => {
+  try {
+    structuredClone(value);
+    return true;
+  } catch {
+    return false;
   }
-  if (entry.operations) {
-    cloned.operations = { ...entry.operations };
+};
+
+const findStructuredCloneFailurePath = (
+  value: unknown,
+  path = '$',
+  seen = new WeakSet<object>(),
+): string => {
+  if (structuredCloneWorks(value)) return path;
+  if ((typeof value !== 'object' && typeof value !== 'function') || value === null) return path;
+  if (typeof value === 'function') return path;
+  if (seen.has(value)) return path;
+  seen.add(value);
+
+  const children: Array<[string, unknown]> = value instanceof Map
+    ? [...value.entries()].flatMap(([key, entry], index) => [
+        [`${path}.<map-key:${index}>`, key] as [string, unknown],
+        [`${path}.<map-value:${index}>`, entry] as [string, unknown],
+      ])
+    : value instanceof Set
+      ? [...value].map((entry, index) => [`${path}.<set:${index}>`, entry])
+      : Object.entries(value).map(([key, entry]) => [`${path}.${key}`, entry]);
+  for (const [childPath, child] of children) {
+    if (!structuredCloneWorks(child)) {
+      return findStructuredCloneFailurePath(child, childPath, seen);
+    }
   }
-  return cloned;
+  return path;
+};
+
+const structuredCloneOrThrow = <T>(value: T, code: string): T => {
+  try {
+    return structuredClone(value);
+  } catch (cause) {
+    const path = findStructuredCloneFailurePath(value);
+    throw new Error(`${code}:path=${path}`, { cause });
+  }
 };
 
 /**
@@ -517,17 +504,7 @@ const cloneEntityStateWithPolicy = (
   forSnapshot: boolean,
   validateClone: boolean,
 ): EntityState => {
-  let cloned: EntityState;
-
-  // Use structuredClone for deep cloning with fallback.
-  try {
-    cloned = structuredClone(entityState);
-  } catch (error) {
-    const manual = manualCloneEntityState(entityState, forSnapshot);
-
-    // VALIDATE AT SOURCE: Guarantee type safety from manual clone path too.
-    return validateClone ? validateEntityState(manual, 'cloneEntityState.manual') : manual;
-  }
+  const cloned = structuredCloneOrThrow(entityState, 'ENTITY_STATE_STRUCTURED_CLONE_FAILED');
 
   // CRITICAL: Validate entityId was preserved correctly.
   if (!cloned.entityId || cloned.entityId !== entityState.entityId) {
@@ -592,237 +569,6 @@ export function cloneEntityState(entityState: EntityState, forSnapshot: boolean 
  */
 export function cloneTrustedEntityState(entityState: EntityState, forSnapshot: boolean = false): EntityState {
   return cloneEntityStateWithPolicy(entityState, forSnapshot, false);
-}
-
-/**
- * Manual entity state cloning with explicit jBlock preservation
- * Fallback for environments that don't support structuredClone
- */
-function manualCloneEntityState(entityState: EntityState, forSnapshot: boolean = false): EntityState {
-  return {
-    ...entityState,
-    entityId: entityState.entityId, // CRITICAL: Explicitly preserve entityId
-    nonces: cloneMap(entityState.nonces),
-    ...(entityState.entityCommandNonces
-      ? {
-          entityCommandNonces: {
-            ...entityState.entityCommandNonces,
-            bySigner: cloneMap(entityState.entityCommandNonces.bySigner),
-          },
-        }
-      : {}),
-    messages: cloneArray(entityState.messages),
-    proposals: new Map(
-      Array.from(entityState.proposals.entries()).map(([id, proposal]) => [
-        id,
-        { ...proposal, votes: cloneMap(proposal.votes) },
-      ]),
-    ),
-    reserves: cloneMap(entityState.reserves),
-    accounts: new Map(
-      Array.from(entityState.accounts.entries()).map(([id, account]) => [
-        id,
-        cloneAccountMachine(account, forSnapshot), // forSnapshot excludes clonedForValidation
-      ]),
-    ),
-    ...(entityState.externalWallet ? { externalWallet: cloneExternalWalletState(entityState.externalWallet) } : {}),
-    ...(entityState.deferredAccountProposals !== undefined
-      ? { deferredAccountProposals: cloneMap(entityState.deferredAccountProposals) }
-      : {}),
-    ...(entityState.accountInputQueue !== undefined
-      ? { accountInputQueue: cloneArray(entityState.accountInputQueue) }
-      : {}),
-    ...(entityState.jBatchState ? { jBatchState: cloneJBatchState(entityState.jBatchState) } : {}),
-    ...(entityState.entityProviderActionState
-      ? { entityProviderActionState: structuredClone(entityState.entityProviderActionState) }
-      : {}),
-    ...(Array.isArray(entityState.batchHistory)
-      ? { batchHistory: entityState.batchHistory.map((entry) => cloneBatchHistoryEntry(entry as CompletedBatch)) }
-      : {}),
-    // JBlock consensus state
-    lastFinalizedJHeight: entityState.lastFinalizedJHeight,
-    jBlockChain: cloneArray(entityState.jBlockChain || []),
-    ...(entityState.jHistoryFinality
-      ? { jHistoryFinality: structuredClone(entityState.jHistoryFinality) }
-      : {}),
-    ...(entityState.certifiedBoardState
-      ? { certifiedBoardState: { ...entityState.certifiedBoardState } }
-      : {}),
-    // Crontab state is part of entity state, but it remains declarative:
-    // task metadata + scheduled hooks only. Handlers are rebound from the static
-    // registry in entity-crontab.ts, so clone/persistence must preserve the data
-    // and never try to serialize executable functions.
-    ...(entityState.crontabState ? { crontabState: cloneCrontabState(entityState.crontabState) } : {}),
-    // HTLC routing table (deep clone)
-    htlcRoutes: new Map(
-      Array.from((entityState.htlcRoutes || new Map()).entries()).map(([hashlock, route]) => [
-        hashlock,
-        { ...route } // Clone route object
-      ])
-    ),
-    htlcNotes: new Map(Array.from((entityState.htlcNotes || new Map()).entries())),
-    htlcFeesEarned: entityState.htlcFeesEarned || 0n,
-    ...(entityState.outDebtsByToken ? { outDebtsByToken: cloneDebtLedger(entityState.outDebtsByToken) } : {}),
-    ...(entityState.inDebtsByToken ? { inDebtsByToken: cloneDebtLedger(entityState.inDebtsByToken) } : {}),
-    ...(entityState.lending ? { lending: cloneLendingState(entityState.lending) } : {}),
-    // Orderbook extension (hub-only, contains TypedArrays)
-    // Must manually clone since structuredClone failed (we're in fallback path)
-    ...(entityState.orderbookExt && { orderbookExt: cloneOrderbookExt(entityState.orderbookExt) }),
-    lockBook: new Map(
-      Array.from((entityState.lockBook || new Map()).entries()).map(([id, entry]) => [
-        id,
-        { ...entry }
-      ])
-    ),
-    ...(Array.isArray(entityState.swapTradingPairs)
-      ? { swapTradingPairs: entityState.swapTradingPairs.map((pair) => ({ ...pair })) }
-      : {}),
-    ...(entityState.crossJurisdictionSwaps
-      ? { crossJurisdictionSwaps: new Map(Array.from(entityState.crossJurisdictionSwaps.entries()).map(([id, route]) => [id, cloneCrossJurisdictionRoute(route)])) }
-      : {}),
-    ...(entityState.pendingCrossJurisdictionFillAcks
-      ? {
-          pendingCrossJurisdictionFillAcks: new Map(
-            Array.from(entityState.pendingCrossJurisdictionFillAcks.entries()).map(([id, pending]) => [
-              id,
-              {
-                ...pending,
-                tx: cloneAccountTxForState(pending.tx) as typeof pending.tx,
-              },
-            ]),
-          ),
-        }
-      : {}),
-    ...(entityState.crossJurisdictionBookAdmissions
-      ? { crossJurisdictionBookAdmissions: new Map(Array.from(entityState.crossJurisdictionBookAdmissions.entries()).map(([id, admission]) => [id, cloneCrossJurisdictionBookAdmission(admission)])) }
-      : {}),
-    ...(entityState.consumptionAccumulator
-      ? { consumptionAccumulator: { ...entityState.consumptionAccumulator } }
-      : {}),
-    ...(entityState.certifiedOutputSequences
-      ? {
-          certifiedOutputSequences: new Map(
-            Array.from(entityState.certifiedOutputSequences, ([target, frontier]) => [
-              target,
-              { ...frontier },
-            ]),
-          ),
-        }
-      : {}),
-  };
-}
-
-function cloneCrontabState(crontabState: CrontabState): CrontabState {
-  return {
-    tasks: new Map(
-      Array.from(crontabState.tasks.entries()).map(([method, task]) => [
-        method,
-        {
-          method: task.method,
-          intervalMs: task.intervalMs,
-          lastRun: task.lastRun,
-          enabled: task.enabled,
-          params: { ...task.params },
-        },
-      ]),
-    ),
-    hooks: new Map(
-      Array.from(crontabState.hooks.entries()).map(([hookId, hook]) => [
-        hookId,
-        cloneScheduledHook(hook),
-      ]),
-    ),
-  };
-}
-
-function cloneScheduledHook(hook: ScheduledHook): ScheduledHook {
-  switch (hook.type) {
-    case 'htlc_timeout':
-      return { ...hook, data: { ...hook.data } };
-    case 'dispute_deadline':
-      return { ...hook, data: { ...hook.data } };
-    case 'htlc_secret_ack_timeout':
-      return { ...hook, data: { ...hook.data } };
-    case 'settlement_window':
-      return { ...hook, data: {} };
-    case 'watchdog':
-      return { ...hook, data: {} };
-    case 'hub_rebalance_kick':
-      return { ...hook, data: { ...hook.data } };
-    case 'board_reseal':
-      return { ...hook, data: { ...hook.data } };
-    case 'cross_j_orderbook_sweep':
-      return { ...hook, data: { ...hook.data } };
-  }
-}
-
-/**
- * Manually clone OrderbookExtState for environments without structuredClone
- * TypedArrays must be explicitly copied via their constructors
- */
-function cloneOrderbookExt(ext: NonNullable<EntityState['orderbookExt']>): OrderbookExtState {
-  const clonedBooks = new Map<string, BookState>();
-  for (const [key, book] of ext.books) {
-    clonedBooks.set(key, cloneBookState(book));
-  }
-
-  const clonedOrderPairs = new Map<string, string[]>();
-  for (const [orderId, pairIds] of ext.orderPairs ?? []) {
-    clonedOrderPairs.set(orderId, [...pairIds]);
-  }
-
-  // Clone referrals Map
-  const clonedReferrals = new Map<string, OrderbookExtState['referrals'] extends Map<string, infer T> ? T : never>();
-  if (ext.referrals) {
-    for (const [key, referral] of ext.referrals) {
-      clonedReferrals.set(key, { ...referral });
-    }
-  }
-
-  // Clone hubProfile with nested arrays
-  const clonedHubProfile: HubProfile = {
-    ...ext.hubProfile,
-    supportedPairs: [...ext.hubProfile.supportedPairs],
-  };
-
-  return {
-    books: clonedBooks,
-    orderPairs: clonedOrderPairs,
-    referrals: clonedReferrals,
-    hubProfile: clonedHubProfile,
-  };
-}
-
-function cloneBookState(book: BookState): BookState {
-  const cloneBucketMap = (source: Map<string, PriceBucketState>): Map<string, PriceBucketState> => {
-    const cloned = new Map<string, PriceBucketState>();
-    for (const [key, bucket] of source.entries()) {
-      const clonedLevels = new Map<string, PriceLevelState>();
-      for (const [levelKey, level] of bucket.levels.entries()) {
-        clonedLevels.set(levelKey, {
-          priceTicks: level.priceTicks,
-          orderIds: [...level.orderIds],
-          totalQtyLots: level.totalQtyLots,
-        });
-      }
-      cloned.set(key, {
-        bucketId: bucket.bucketId,
-        pricesAsc: [...bucket.pricesAsc],
-        levels: clonedLevels,
-      });
-    }
-    return cloned;
-  };
-
-  return {
-    ...book,
-    params: { ...book.params },
-    orders: new Map<string, BookOrderState>(Array.from(book.orders.entries()).map(([orderId, order]) => [orderId, { ...order }])),
-    bidBuckets: cloneBucketMap(book.bidBuckets),
-    askBuckets: cloneBucketMap(book.askBuckets),
-    bidBucketIdsDesc: [...book.bidBucketIdsDesc],
-    askBucketIdsAsc: [...book.askBucketIdsAsc],
-  };
 }
 
 /**
@@ -929,293 +675,24 @@ export const cloneTrustedEntityReplica = (
  * Clone AccountMachine for validation (replaces dryRun pattern)
  */
 export function cloneAccountMachine(account: AccountMachine, forSnapshot: boolean = false): AccountMachine {
-  // For snapshots, exclude clonedForValidation to avoid cycles
+  // Snapshot state intentionally excludes the validation candidate. It is
+  // transient consensus work, not durable Account state.
   if (forSnapshot) {
     const { clonedForValidation, ...accountWithoutCloned } = account;
     void clonedForValidation;
-    try {
-      const cloned = structuredClone(accountWithoutCloned) as AccountMachine;
-      cloneDisputeEvidenceIntoAccount(cloned, account);
-      cloneCrossJurisdictionRoutesInAccount(cloned, account);
-      return cloned;
-    } catch {
-      return manualCloneAccountMachine(account, true);
-    }
+    const cloned = structuredCloneOrThrow(
+      accountWithoutCloned,
+      'ACCOUNT_SNAPSHOT_STRUCTURED_CLONE_FAILED',
+    ) as AccountMachine;
+    cloneDisputeEvidenceIntoAccount(cloned, account);
+    cloneCrossJurisdictionRoutesInAccount(cloned, account);
+    return cloned;
   }
 
-  // Normal clone - preserve clonedForValidation for consensus
-  try {
-      const cloned = structuredClone(account);
-      setAccountFrameHistoryView(cloned, getAccountFrameHistoryView(account));
-      cloneDisputeEvidenceIntoAccount(cloned, account);
-      cloneCrossJurisdictionRoutesInAccount(cloned, account);
-      forkAccountCommitmentCache(account, cloned);
-      return cloned;
-  } catch (error) {
-    if (HEAVY_LOGS) {
-      stateHelperLog.debug('clone.account_machine.structured_clone_failed', {
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-    return manualCloneAccountMachine(account, false);
-  }
-}
-
-/**
- * Manual AccountMachine cloning
- */
-function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidation: boolean = false): AccountMachine {
-  const proofBody = account.proofBody ?? { tokenIds: [], deltas: [] };
-  const result: AccountMachine = {
-    ...account,
-    mempool: Array.isArray(account.mempool) ? account.mempool.map(cloneAccountTxForState) : [],
-    currentFrame: cloneAccountFrame(account.currentFrame),
-    deltas: new Map(Array.from((account.deltas ?? new Map()).entries()).map(([key, delta]) => [key, { ...delta }])),
-    locks: new Map(Array.from((account.locks ?? new Map()).entries()).map(([key, lock]) => [key, { ...lock }])),
-    swapOffers: new Map(Array.from((account.swapOffers ?? new Map()).entries()).map(([key, offer]) => [key, { ...offer }])),
-    pulls: new Map(Array.from((account.pulls ?? new Map()).entries()).map(([key, pull]) => [key, { ...pull }])),
-    ...(account.lendingIntents instanceof Map
-      ? { lendingIntents: new Map(account.lendingIntents) }
-      : {}),
-    ...(account.swapOrderHistory instanceof Map
-      ? {
-          swapOrderHistory: new Map(
-            Array.from(account.swapOrderHistory.entries()).map(([key, entry]) => [
-              key,
-              {
-                ...entry,
-                resolves: Array.isArray(entry.resolves)
-                  ? entry.resolves.map((resolve) => ({ ...resolve }))
-                  : [],
-              },
-            ]),
-          ),
-        }
-      : {}),
-    ...(account.swapClosedOrders instanceof Map
-      ? {
-          swapClosedOrders: new Map(
-            Array.from(account.swapClosedOrders.entries()).map(([key, entry]) => [
-              key,
-              {
-                ...entry,
-                resolves: Array.isArray(entry.resolves)
-                  ? entry.resolves.map((resolve) => ({ ...resolve }))
-                  : [],
-              },
-            ]),
-          ),
-        }
-      : {}),
-    pendingSignatures: Array.isArray(account.pendingSignatures) ? [...account.pendingSignatures] : [],
-    globalCreditLimits: { ...(account.globalCreditLimits ?? {}) },
-    proofHeader: { ...(account.proofHeader ?? {}) },
-    proofBody: {
-      ...proofBody,
-      tokenIds: Array.isArray(proofBody.tokenIds) ? [...proofBody.tokenIds] : [],
-      deltas: Array.isArray(proofBody.deltas) ? [...proofBody.deltas] : [],
-    },
-    disputeConfig: { ...(account.disputeConfig ?? {}) },
-    ...(account.disputePrepare
-      ? {
-          disputePrepare: {
-            ...account.disputePrepare,
-            ...(account.disputePrepare.pendingOrderbookRemovalIds
-              ? { pendingOrderbookRemovalIds: [...account.disputePrepare.pendingOrderbookRemovalIds] }
-              : {}),
-            ...(account.disputePrepare.startIntent
-              ? { startIntent: { ...account.disputePrepare.startIntent } }
-              : {}),
-          },
-        }
-      : {}),
-    leftPendingJClaims: { ...account.leftPendingJClaims },
-    rightPendingJClaims: { ...account.rightPendingJClaims },
-    lastFinalizedJHeight: account.lastFinalizedJHeight,
-    ...(account.jNonce !== undefined ? { jNonce: account.jNonce } : {}),
-    pendingWithdrawals: new Map(account.pendingWithdrawals ?? []), // Phase 2: Clone withdrawal tracking
-    requestedRebalance: new Map(account.requestedRebalance ?? []), // Phase 3: Clone rebalance hints
-    requestedRebalanceFeeState: new Map(
-      Array.from(account.requestedRebalanceFeeState || []).map(([tokenId, feeState]) => [
-        tokenId,
-        { ...feeState },
-      ]),
-    ),
-    ...(account.rebalanceFeePolicies
-      ? {
-          rebalanceFeePolicies: new Map(
-            Array.from(account.rebalanceFeePolicies.entries()).map(([tokenId, policy]) => [
-              tokenId,
-              {
-                ...(policy.left ? { left: { ...policy.left } } : {}),
-                ...(policy.right ? { right: { ...policy.right } } : {}),
-              },
-            ]),
-          ),
-        }
-      : {}),
-    shadow: {
-      rebalance: {
-        policy: new Map(account.shadow.rebalance.policy),
-        submittedAtByToken: new Map(account.shadow.rebalance.submittedAtByToken),
-        ...(account.shadow.rebalance.activeQuote
-          ? { activeQuote: { ...account.shadow.rebalance.activeQuote } }
-          : {}),
-        ...(account.shadow.rebalance.pendingRequest
-          ? { pendingRequest: { ...account.shadow.rebalance.pendingRequest } }
-          : {}),
-      },
-      ...(account.shadow.rejectedFrameEvidence
-        ? { rejectedFrameEvidence: structuredClone(account.shadow.rejectedFrameEvidence) }
-        : {}),
-    },
-  };
-
-  if (account.pendingFrame) {
-    result.pendingFrame = cloneAccountFrame(account.pendingFrame);
-  }
-
-  if (account.pendingAccountInput) {
-    result.pendingAccountInput = cloneIsolatedAccountInput(account.pendingAccountInput);
-  }
-
-  if (account.clonedForValidation && !skipClonedForValidation) {
-    result.clonedForValidation = manualCloneAccountMachine(account.clonedForValidation, true);
-  }
-
-  if (!skipClonedForValidation) {
-    setAccountFrameHistoryView(result, getAccountFrameHistoryView(account));
-  }
-
-  if (skipClonedForValidation) {
-    delete result.clonedForValidation;
-  }
-
-  if (account.hankoSignature) {
-    result.hankoSignature = account.hankoSignature;
-  }
-  if (account.currentDisputeProofHanko) {
-    result.currentDisputeProofHanko = account.currentDisputeProofHanko;
-  }
-  if (account.currentDisputeProofNonce !== undefined) {
-    result.currentDisputeProofNonce = account.currentDisputeProofNonce;
-  }
-  if (account.currentDisputeProofBodyHash) {
-    result.currentDisputeProofBodyHash = account.currentDisputeProofBodyHash;
-  }
-  if (account.currentDisputeHash) {
-    result.currentDisputeHash = account.currentDisputeHash;
-  }
-  if (account.counterpartyDisputeProofHanko) {
-    result.counterpartyDisputeProofHanko = account.counterpartyDisputeProofHanko;
-  }
-  if (account.counterpartyDisputeProofNonce !== undefined) {
-    result.counterpartyDisputeProofNonce = account.counterpartyDisputeProofNonce;
-  }
-  if (account.counterpartyDisputeProofBodyHash) {
-    result.counterpartyDisputeProofBodyHash = account.counterpartyDisputeProofBodyHash;
-  }
-  if (account.counterpartyDisputeHash) {
-    result.counterpartyDisputeHash = account.counterpartyDisputeHash;
-  }
-  if (account.disputeProofNoncesByHash) {
-    result.disputeProofNoncesByHash = { ...account.disputeProofNoncesByHash };
-  }
-  cloneDisputeEvidenceIntoAccount(result, account);
-  if (account.currentFrameHanko) {
-    result.currentFrameHanko = account.currentFrameHanko;
-  }
-  if (account.counterpartyFrameHanko) {
-    result.counterpartyFrameHanko = account.counterpartyFrameHanko;
-  }
-  if (account.boardResealMigration) {
-    result.boardResealMigration = { ...account.boardResealMigration };
-  }
-  if (account.counterpartyBoardReseal) {
-    result.counterpartyBoardReseal = { ...account.counterpartyBoardReseal };
-  }
-  if (account.activeDispute) {
-    result.activeDispute = { ...account.activeDispute };
-  }
-  if (account.settlementWorkspace) {
-    result.settlementWorkspace = {
-      ...account.settlementWorkspace,
-      ops: account.settlementWorkspace.ops.map(op => ({ ...op })),
-      ...(account.settlementWorkspace.compiledDiffs && {
-        compiledDiffs: account.settlementWorkspace.compiledDiffs.map(d => ({ ...d })),
-      }),
-      ...(account.settlementWorkspace.compiledForgiveTokenIds && {
-        compiledForgiveTokenIds: [...account.settlementWorkspace.compiledForgiveTokenIds],
-      }),
-      ...(account.settlementWorkspace.postSettlementDisputeProof && {
-        postSettlementDisputeProof: { ...account.settlementWorkspace.postSettlementDisputeProof },
-      }),
-    };
-  }
-  if (account.pendingForwards) {
-    result.pendingForwards = account.pendingForwards.map(forward => ({
-      ...forward,
-      route: [...forward.route],
-    }));
-  }
-
-  // ABI-encoded proofBody for on-chain disputes
-  if (account.abiProofBody) {
-    result.abiProofBody = { ...account.abiProofBody };
-  }
-
-  // HTLC state (deep clone locks Map)
-  result.locks = new Map(
-    Array.from(account.locks.entries()).map(([lockId, lock]) => [
-      lockId,
-      { ...lock } // Clone lock object
-    ])
-  );
-
-  // Swap state (deep clone swapOffers Map)
-  result.swapOffers = new Map(
-    Array.from((account.swapOffers || new Map()).entries()).map(([offerId, offer]) => [
-      offerId,
-      { ...offer } // Clone offer object
-    ])
-  );
-
-  result.pulls = new Map(
-    Array.from((account.pulls || new Map()).entries()).map(([pullId, pull]) => [
-      pullId,
-      { ...pull },
-    ]),
-  );
-
-  if (account.swapOrderHistory instanceof Map) {
-    result.swapOrderHistory = new Map(
-      Array.from(account.swapOrderHistory.entries()).map(([offerId, entry]) => [
-        offerId,
-        {
-          ...entry,
-          resolves: Array.isArray(entry.resolves)
-            ? entry.resolves.map((resolve) => ({ ...resolve }))
-            : [],
-        },
-      ]),
-    );
-  }
-
-  if (account.swapClosedOrders instanceof Map) {
-    result.swapClosedOrders = new Map(
-      Array.from(account.swapClosedOrders.entries()).map(([offerId, entry]) => [
-        offerId,
-        {
-          ...entry,
-          resolves: Array.isArray(entry.resolves)
-            ? entry.resolves.map((resolve) => ({ ...resolve }))
-            : [],
-        },
-      ]),
-    );
-  }
-
-  cloneCrossJurisdictionRoutesInAccount(result, account);
-  if (!skipClonedForValidation) forkAccountCommitmentCache(account, result);
-  return result;
+  const cloned = structuredCloneOrThrow(account, 'ACCOUNT_STATE_STRUCTURED_CLONE_FAILED');
+  setAccountFrameHistoryView(cloned, getAccountFrameHistoryView(account));
+  cloneDisputeEvidenceIntoAccount(cloned, account);
+  cloneCrossJurisdictionRoutesInAccount(cloned, account);
+  forkAccountCommitmentCache(account, cloned);
+  return cloned;
 }
