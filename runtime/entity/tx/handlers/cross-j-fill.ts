@@ -95,7 +95,6 @@ export const handleCrossJurisdictionFillNoticeEntityTx = (
   const {
     orderId,
     routeHash,
-    previousFillSeq,
     fillSeq,
     incrementalSourceAmount,
     incrementalTargetAmount,

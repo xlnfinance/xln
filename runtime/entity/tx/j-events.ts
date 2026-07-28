@@ -60,9 +60,8 @@ import { getEntityLeaderState } from '../consensus/leader';
 import {
   advanceCertifiedBoardFinality,
 } from '../../jurisdiction/board-registry';
-import { clearFinalizedSettlementWorkspace } from '../../account/tx/handlers/settle-transition';
 import { validateJEventRangeEnvelope } from '../../jurisdiction/j-event-range-validation';
-import { invalidateAccountMapCommitment } from '../../account/map-commitment';
+import { applyAccountDisputeFinality } from '../../account/j-finality';
 import { applyCertifiedBoardJEvent } from './j-events-board';
 import { applyAccountSettledJEvent } from './j-events-account-settled';
 import {
@@ -77,16 +76,15 @@ const normalizeSignerId = (value: unknown): string => String(value || '').trim()
 
 const invalidateSettlementIntentAfterDisputeFinality = (
   state: EntityState,
-  account: AccountState,
   counterpartyId: string,
+  accountResult: ReturnType<typeof applyAccountDisputeFinality>,
 ): void => {
-  const hadWorkspace = Boolean(account.settlementWorkspace);
-  if (hadWorkspace) clearFinalizedSettlementWorkspace(account);
-  const beforeMempool = account.mempool.length;
-  account.mempool = account.mempool.filter((tx) => tx.type !== 'settle_transition');
   const removedDeferred = state.deferredAccountProposals?.delete(counterpartyId) ?? false;
-  const removedMempool = beforeMempool - account.mempool.length;
-  if (hadWorkspace || removedDeferred || removedMempool > 0) {
+  if (
+    accountResult.hadSettlementWorkspace ||
+    removedDeferred ||
+    accountResult.removedSettlementTxs > 0
+  ) {
     addMessage(
       state,
       `🧹 Invalidated stale settlement intent after dispute finality with ${counterpartyId.slice(-4)}`,
@@ -418,33 +416,6 @@ const requireFinalizedProofBodyEvidence = (
   return { finalProofbodyHash, proofbody, tokenIds };
 };
 
-const clearDisputeSettledDeltas = (
-  account: AccountState,
-  finalizedTokenIds: readonly number[],
-): void => {
-  for (const tokenId of finalizedTokenIds) {
-    const delta = account.deltas.get(tokenId);
-    if (!delta) continue;
-    const changed = delta.collateral !== 0n || delta.ondelta !== 0n || delta.offdelta !== 0n ||
-      delta.leftHold !== 0n || delta.rightHold !== 0n ||
-      delta.leftAllowance !== 0n || delta.rightAllowance !== 0n;
-    delta.collateral = 0n;
-    delta.ondelta = 0n;
-    delta.offdelta = 0n;
-    delta.leftHold = 0n;
-    delta.rightHold = 0n;
-    delta.leftAllowance = 0n;
-    delta.rightAllowance = 0n;
-    if (changed) invalidateAccountMapCommitment(account, 'deltas', tokenId);
-  }
-};
-
-const retireDisputeEvidenceEpoch = (account: AccountState): void => {
-  delete account.disputeProofBodiesByHash;
-  delete account.disputeProofNoncesByHash;
-  delete account.disputeArgumentSnapshotsByHash;
-};
-
 type DisputeStartedEventData = {
   sender: string;
   counterentity: string;
@@ -685,13 +656,11 @@ const resolveFinalizationEvidence = (
 
 const retireFinalizedDisputeState = (
   context: FinalizedJEventContext,
-  account: AccountState,
   counterpartyId: string,
   candidateCounterpartyId: string,
   senderStr: string,
   entityIdNorm: string,
   evidence: DisputeFinalizationEvidence[],
-  tokenIds: readonly number[],
 ): void => {
   const { newState, env, blockNumber, outputs } = context;
   const weAreFinalizer = senderStr === entityIdNorm;
@@ -731,16 +700,6 @@ const retireFinalizedDisputeState = (
       blockNumber,
     );
   }
-  clearDisputeSettledDeltas(account, tokenIds);
-  if (account.swapOffers.size > 0) {
-    account.swapOffers.clear();
-    invalidateAccountMapCommitment(account, 'swapOffers');
-  }
-  if (account.locks.size > 0) {
-    account.locks.clear();
-    invalidateAccountMapCommitment(account, 'locks');
-  }
-  retireDisputeEvidenceEpoch(account);
 };
 
 function applyDisputeFinalizedJEvent(
@@ -789,10 +748,13 @@ function applyDisputeFinalizedJEvent(
   // settlement drafted or sealed against the previous epoch is unusable even
   // when its numeric nonce is higher; retaining it would strand holds or let a
   // delayed retry resurrect pre-dispute state.
-  invalidateSettlementIntentAfterDisputeFinality(newState, account, counterpartyId);
-  account.jNonce = resolved.finalizedJNonce;
-  if (account.activeDispute) {
-    delete account.activeDispute;
+  const accountFinality = applyAccountDisputeFinality(
+    account,
+    resolved.finalizedJNonce,
+    finalizedProof.tokenIds,
+  );
+  invalidateSettlementIntentAfterDisputeFinality(newState, counterpartyId, accountFinality);
+  if (accountFinality.hadActiveDispute) {
     addMessage(
       newState,
       `✅ DISPUTE FINALIZED with ${counterpartyId.slice(-4)} ` +
@@ -804,14 +766,6 @@ function applyDisputeFinalizedJEvent(
   } else {
     jEventLog.warn('dispute_finalized.no_active_dispute', { counterparty: shortId(counterpartyId) });
   }
-  if (account.proofHeader.nextProofNonce <= resolved.finalizedJNonce) {
-    account.proofHeader.nextProofNonce = resolved.finalizedJNonce + 1;
-  }
-  account.status = 'disputed';
-  freezeAccountForDispute(account, false);
-  delete account.counterpartyDisputeProofHanko;
-  delete account.counterpartyDisputeProofNonce;
-  delete account.counterpartyDisputeProofBodyHash;
   if (senderStr !== entityIdNorm) {
     const ops = emptyOpBreakdown();
     ops.disputeFinalizations = 1;
@@ -832,13 +786,11 @@ function applyDisputeFinalizedJEvent(
   }
   retireFinalizedDisputeState(
     context,
-    account,
     counterpartyId,
     candidateCounterpartyId,
     senderStr,
     entityIdNorm,
     resolved.evidence,
-    finalizedProof.tokenIds,
   );
 }
 
