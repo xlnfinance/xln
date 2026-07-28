@@ -80,8 +80,6 @@ export const createCatchupFixtureState = (
     crontabState: initCrontab(),
     lastFinalizedJHeight: 0,
     jBlockChain: [],
-    entityEncPubKey: `0x${'11'.repeat(32)}`,
-    entityEncPrivKey: `0x${'22'.repeat(32)}`,
     profile: { name: 'SIGKILL catch-up validator', isHub: false, avatar: '', bio: '', website: '' },
     htlcRoutes: new Map(),
     htlcFeesEarned: 0n,
@@ -95,6 +93,8 @@ const installReplica = (env: RuntimeState, state: EntityState, signerId: string)
   const replica: EntityReplica = {
     entityId: state.entityId,
     signerId,
+    entityEncPubKey: '',
+    entityEncPrivKey: '',
     state: structuredClone(state),
     mempool: [],
     isProposer: false,
@@ -105,8 +105,8 @@ const installReplica = (env: RuntimeState, state: EntityState, signerId: string)
 
 const installFixtureEncryptionKeys = (env: RuntimeState, replica: EntityReplica): void => {
   const keys = deriveLocalEntityCryptoKeys(env, replica.entityId, replica.signerId);
-  replica.state.entityEncPubKey = keys.publicKey;
-  replica.state.entityEncPrivKey = keys.privateKey;
+  replica.entityEncPubKey = keys.publicKey;
+  replica.entityEncPrivKey = keys.privateKey;
 };
 
 export const prepareCatchupFixtureReplica = async (

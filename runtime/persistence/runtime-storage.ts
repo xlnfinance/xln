@@ -746,11 +746,18 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
           assertValidatorJHistoryIntegrity(persistedReplicaState, meta?.jHistory);
           const replicaState = cloneEntityState(persistedReplicaState, true);
           if (requiresExactReplica) {
-            assertPersistedLocalEntityCryptoKeys(env, entityId, signerId, replicaState);
+            assertPersistedLocalEntityCryptoKeys(env, entityId, signerId, meta!);
           }
+          // Historical replay between retained checkpoints reconstructs only
+          // consensus State. Validator-local crypto identity is required for a
+          // live head/checkpoint and intentionally absent from intermediate views.
+          const entityEncPubKey = meta ? meta.entityEncPubKey : '';
+          const entityEncPrivKey = meta ? meta.entityEncPrivKey : '';
           const restoredReplica: EntityReplica = {
             entityId,
             signerId,
+            entityEncPubKey,
+            entityEncPrivKey,
             state: replicaState,
             mempool: requiresExactReplica ? meta!.mempool : [],
             isProposer,

@@ -148,8 +148,6 @@ const makeEntityState = (entityId: string, config: ConsensusConfig): EntityState
   deferredAccountProposals: new Map(),
   lastFinalizedJHeight: 0,
   jBlockChain: [],
-  entityEncPubKey: '',
-  entityEncPrivKey: '',
   profile: {
     name: 'Atomicity entity',
     isHub: false,
@@ -177,6 +175,8 @@ const installValidatorReplica = (
   const replica: EntityReplica = {
     entityId,
     signerId: validator,
+    entityEncPubKey: '',
+    entityEncPrivKey: '',
     mempool: [],
     isProposer: false,
     state: makeEntityState(entityId, config),
@@ -538,6 +538,8 @@ describe('runtime frame atomicity', () => {
       {
         entityId: signerId,
         signerId,
+        entityEncPubKey: '',
+        entityEncPrivKey: '',
         mempool: [],
         isProposer: index === 0,
         state: {

@@ -474,6 +474,8 @@ const attachSigningReplica = (env: ReturnType<typeof createEmptyEnv>, entityId: 
   env.eReplicas.set(`${entityId}:${signerId}`, {
     entityId,
     signerId,
+    entityEncPubKey: '',
+    entityEncPrivKey: '',
     mempool: [],
     isProposer: true,
     state: {
@@ -581,6 +583,8 @@ const prepareJEventInput = (
 const makeReplicaMissingPrevFrameHash = (): EntityReplica => ({
   entityId: `0x${'11'.repeat(32)}`,
   signerId: '1',
+  entityEncPubKey: '',
+  entityEncPrivKey: '',
   mempool: [],
   isProposer: true,
   state: {
@@ -595,8 +599,6 @@ const makeReplicaMissingPrevFrameHash = (): EntityReplica => ({
     deferredAccountProposals: new Map(),
     lastFinalizedJHeight: 0,
     jBlockChain: [],
-    entityEncPubKey: `0x${'33'.repeat(32)}`,
-    entityEncPrivKey: `0x${'44'.repeat(32)}`,
     profile: {
       name: 'Audit Entity',
       isHub: false,
@@ -625,8 +627,6 @@ const makeEntityState = (entityId: string): EntityState => ({
   deferredAccountProposals: new Map(),
   lastFinalizedJHeight: 0,
   jBlockChain: [],
-  entityEncPubKey: `0x${'55'.repeat(32)}`,
-  entityEncPrivKey: `0x${'66'.repeat(32)}`,
   profile: {
     name: 'Audit Entity',
     isHub: false,
@@ -742,6 +742,8 @@ const sealAuditJSubmitAttempts = (env: RuntimeState, inputs: JInput[]): void => 
         ({
           entityId: jTx.entityId,
           signerId,
+          entityEncPubKey: '',
+          entityEncPrivKey: '',
           mempool: [],
           isProposer: true,
           state,
@@ -999,6 +1001,8 @@ describe('audit fail-fast regressions', () => {
     populated.eReplicas.set('stale-topology', {
       entityId: target.toUpperCase(),
       signerId: staleSigner,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       mempool: [],
       isProposer: true,
       state: {
@@ -1360,8 +1364,7 @@ describe('audit fail-fast regressions', () => {
     );
     const crypto = new NobleCryptoProvider();
     const keyPair = x25519.keygen();
-    hubState.entityEncPubKey = hexBytes(keyPair.publicKey);
-    hubState.entityEncPrivKey = hexBytes(keyPair.secretKey);
+    const hubEncryptionPublicKey = hexBytes(keyPair.publicKey);
     const signerPublicKey = new ethers.SigningKey(hexBytes(signerKey)).publicKey.toLowerCase();
     const attestationBody = {
       version: 'xln:validator-encryption-key:v1' as const,
@@ -1370,7 +1373,7 @@ describe('audit fail-fast regressions', () => {
       signer: signerId,
       publicKey: signerPublicKey,
       weight: 1,
-      encryptionPublicKey: hubState.entityEncPubKey,
+      encryptionPublicKey: hubEncryptionPublicKey,
     };
     const manifest = requireCompleteValidatorEncryptionManifest(
       {

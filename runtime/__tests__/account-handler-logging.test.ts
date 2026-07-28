@@ -36,8 +36,6 @@ const makeEntityState = (): EntityState => ({
   deferredAccountProposals: new Map(),
   lastFinalizedJHeight: 0,
   jBlockChain: [],
-  entityEncPubKey: `0x${'11'.repeat(32)}`,
-  entityEncPrivKey: `0x${'22'.repeat(32)}`,
   profile: {
     name: 'Account Handler Test Entity',
     isHub: false,
@@ -77,6 +75,8 @@ test('account input without frame or settlement action fails fast', async () => 
   env.eReplicas.set(`${counterpartyId}:counterparty-signer`, {
     entityId: counterpartyId,
     signerId: 'counterparty-signer',
+    entityEncPubKey: '',
+    entityEncPrivKey: '',
     isProposer: true,
     mempool: [],
     state: {

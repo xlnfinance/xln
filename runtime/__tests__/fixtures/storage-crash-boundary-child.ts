@@ -523,8 +523,6 @@ if (recoveryLagMode || recoveryBoardRootLagMode) {
       [buildCertifiedBoardRangeTx(certifiedHeightOne.state, [rotation])],
     );
     const laggingLocalIdentity = {
-      entityEncPubKey: laggingEntry[1].state.entityEncPubKey,
-      entityEncPrivKey: laggingEntry[1].state.entityEncPrivKey,
       htlcNotes: structuredClone(laggingEntry[1].state.htlcNotes),
     };
     laggingEntry[1].state = {

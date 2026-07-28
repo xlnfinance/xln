@@ -29,7 +29,6 @@ const buildProfile = (
   wsUrl,
   relays: [],
   metadata: {
-    entityEncPubKey: runtimeEncPubKey,
     isHub,
     routingFeePPM: 1,
     baseFee: 0n,

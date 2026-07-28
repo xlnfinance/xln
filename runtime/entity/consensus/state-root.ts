@@ -42,8 +42,6 @@ export const ENTITY_CONSENSUS_STATE_FIELDS = [
   'crontabState',
   'jBatchState',
   'entityProviderActionState',
-  'entityEncPubKey',
-  'entityEncPrivKey',
   'profileEncryptionManifest',
   'profile',
   'htlcRoutes',
@@ -71,8 +69,6 @@ export type EntityConsensusStateFieldCoverage = AssertNoMissingEntityStateField<
 export const ENTITY_STATE_ROOT_EXCLUDED_FIELDS = [
   'prevFrameHash',
   'jBlockChain',
-  'entityEncPubKey',
-  'entityEncPrivKey',
   'htlcNotes',
 ] as const satisfies readonly (keyof EntityState)[];
 
@@ -550,8 +546,6 @@ export const projectEntityConsensusState = (
   // These bounded event bodies are only a local display/audit cache and may be
   // absent after restore without changing the Entity consensus state.
   delete projected.jBlockChain;
-  delete projected.entityEncPubKey;
-  delete projected.entityEncPrivKey;
   delete projected.htlcNotes;
   const orderbookExt = projectOrderbookConsensusState(state.orderbookExt);
   return {

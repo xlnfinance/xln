@@ -61,8 +61,6 @@ const baseState = (env: RuntimeState): EntityState => {
     deferredAccountProposals: new Map(),
     lastFinalizedJHeight: 0,
     jBlockChain: [],
-    entityEncPubKey: `0x${'11'.repeat(32)}`,
-    entityEncPrivKey: `0x${'22'.repeat(32)}`,
     profile: { name: '', isHub: false, avatar: '', bio: '', website: '' },
     htlcRoutes: new Map(),
     htlcFeesEarned: 0n,
@@ -76,6 +74,8 @@ const baseState = (env: RuntimeState): EntityState => {
 const replica = (state: EntityState, signerId: string): EntityReplica => ({
   entityId: state.entityId,
   signerId,
+  entityEncPubKey: '',
+  entityEncPrivKey: '',
   state: structuredClone(state),
   mempool: [],
   isProposer: signerId === state.config.validators[0],
@@ -245,8 +245,8 @@ describe('leader timeout / old-view proposal ordering regression', () => {
     for (const signerId of fixture.state.config.validators) {
       const localReplica = replica(fixture.state, signerId);
       const keys = deriveLocalEntityCryptoKeys(fixture.env, fixture.state.entityId, signerId);
-      localReplica.state.entityEncPubKey = keys.publicKey;
-      localReplica.state.entityEncPrivKey = keys.privateKey;
+      localReplica.entityEncPubKey = keys.publicKey;
+      localReplica.entityEncPrivKey = keys.privateKey;
       fixture.env.eReplicas.set(`${fixture.state.entityId}:${signerId}`, localReplica);
     }
     fixture.env.runtimeState = { ...fixture.env.runtimeState, maxEntityInputsPerFrame: 1 };

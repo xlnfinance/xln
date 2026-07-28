@@ -62,12 +62,12 @@ describe('runtime entity crypto', () => {
     env.eReplicas.set(`${entityId}:${signerId}`, {
       entityId,
       signerId,
+      entityEncPubKey: keys.publicKey,
+      entityEncPrivKey: `0x${'00'.repeat(32)}`,
       isProposer: true,
       mempool: [],
       state: {
         entityId,
-        entityEncPubKey: keys.publicKey,
-        entityEncPrivKey: `0x${'00'.repeat(32)}`,
       },
       hankoWitness: new Map(),
     } as any);
@@ -75,8 +75,8 @@ describe('runtime entity crypto', () => {
     assertLocalEntityCryptoKeys(env);
 
     const replica = env.eReplicas.get(`${entityId}:${signerId}`);
-    expect(replica?.state.entityEncPubKey).toBe(keys.publicKey);
-    expect(replica?.state.entityEncPrivKey).toBe(keys.privateKey);
+    expect(replica?.entityEncPubKey).toBe(keys.publicKey);
+    expect(replica?.entityEncPrivKey).toBe(keys.privateKey);
   });
 
   test('rejects local replicas whose public encryption key belongs to another derivation', () => {
@@ -90,12 +90,12 @@ describe('runtime entity crypto', () => {
     env.eReplicas.set(`${entityId}:${signerId}`, {
       entityId,
       signerId,
+      entityEncPubKey: `0x${'11'.repeat(32)}`,
+      entityEncPrivKey: `0x${'22'.repeat(32)}`,
       isProposer: true,
       mempool: [],
       state: {
         entityId,
-        entityEncPubKey: `0x${'11'.repeat(32)}`,
-        entityEncPrivKey: `0x${'22'.repeat(32)}`,
       },
       hankoWitness: new Map(),
     } as any);
@@ -131,12 +131,12 @@ describe('runtime entity crypto', () => {
     env.eReplicas.set(`${entityId}:${signerId}`, {
       entityId,
       signerId,
+      entityEncPubKey: keys.publicKey,
+      entityEncPrivKey: `0x${'00'.repeat(32)}`,
       isProposer: true,
       mempool: [],
       state: {
         entityId,
-        entityEncPubKey: keys.publicKey,
-        entityEncPrivKey: `0x${'00'.repeat(32)}`,
         config: testConfig(signerId),
         swapTradingPairs: [],
       },
@@ -154,7 +154,7 @@ describe('runtime entity crypto', () => {
     });
 
     const replica = env.eReplicas.get(`${entityId}:${signerId}`);
-    expect(replica?.state.entityEncPubKey).toBe(keys.publicKey);
-    expect(replica?.state.entityEncPrivKey).toBe(keys.privateKey);
+    expect(replica?.entityEncPubKey).toBe(keys.publicKey);
+    expect(replica?.entityEncPrivKey).toBe(keys.privateKey);
   });
 });

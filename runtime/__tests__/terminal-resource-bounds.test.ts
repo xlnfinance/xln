@@ -95,8 +95,6 @@ const makeEntity = (): EntityState => ({
   accounts: new Map(),
   lastFinalizedJHeight: 0,
   jBlockChain: [],
-  entityEncPubKey: `0x${'77'.repeat(32)}`,
-  entityEncPrivKey: `0x${'88'.repeat(32)}`,
   profile: { name: 'bounds', isHub: false, avatar: '', bio: '', website: '' },
   htlcRoutes: new Map(),
   htlcFeesEarned: 0n,

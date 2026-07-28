@@ -129,8 +129,6 @@ const prefixState = (validators: string[]): EntityState => ({
     proposerSignature: '0xgenesis',
     entityHeight: 0,
   },
-  entityEncPubKey: 'pub',
-  entityEncPrivKey: 'priv',
   profile: { name: 'J budget', isHub: false, avatar: '', bio: '', website: '' },
   htlcRoutes: new Map(),
   htlcFeesEarned: 0n,
@@ -328,6 +326,8 @@ describe('budgeted exact J-prefix catch-up', () => {
     const proposerReplica: EntityReplica = {
       entityId: state.entityId,
       signerId: proposerId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: structuredClone(state),
       mempool: [],
       isProposer: true,

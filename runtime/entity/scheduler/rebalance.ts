@@ -1,7 +1,6 @@
 import type {
   AccountState,
   EntityInput,
-  EntityReplica,
   EntityTx,
   RuntimeState,
   SettlementOp,
@@ -20,6 +19,7 @@ import { batchAddReserveToCollateral, initJBatch } from '../../jurisdiction/batc
 import { hasPendingSettlementTransition } from '../../account/tx/handlers/settle-transition';
 import type {
   CrontabExecutionContext,
+  EntityTransitionContext,
   CrontabTaskState,
 } from '../scheduler-types';
 
@@ -34,7 +34,7 @@ type RebalanceDebug = (payload: Record<string, unknown>) => void;
 
 type RebalanceRun = {
   env: RuntimeState;
-  replica: EntityReplica;
+  replica: EntityTransitionContext;
   execution: CrontabExecutionContext;
   outputs: EntityInput[];
   localEntityTxs: EntityTx[];
@@ -69,7 +69,7 @@ const compareBigAsc = (left: bigint, right: bigint): number =>
 
 const createRebalanceRun = (
   env: RuntimeState,
-  replica: EntityReplica,
+  replica: EntityTransitionContext,
   execution: CrontabExecutionContext,
 ): RebalanceRun => {
   const config = replica.state.hubRebalanceConfig!;
@@ -595,7 +595,7 @@ const queueRebalanceBroadcast = (
 
 export async function hubRebalanceHandler(
   env: RuntimeState,
-  replica: EntityReplica,
+  replica: EntityTransitionContext,
   _task: CrontabTaskState,
   execution: CrontabExecutionContext,
 ): Promise<EntityInput[]> {

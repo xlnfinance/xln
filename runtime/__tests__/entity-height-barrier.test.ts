@@ -26,6 +26,8 @@ const installLane = (env: ReturnType<typeof createEmptyEnv>, entityId: string, s
   env.eReplicas.set(`${entityId}:${signerId}`, {
     entityId,
     signerId,
+    entityEncPubKey: '',
+    entityEncPrivKey: '',
     state: { entityId, height },
   } as unknown as EntityReplica);
 };

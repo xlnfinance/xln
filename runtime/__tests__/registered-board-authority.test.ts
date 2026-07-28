@@ -9,6 +9,7 @@ import {
   signDigestBytesWithPrivateKey,
 } from '../account/crypto';
 import { encodeBoard, generateLazyEntityId, generateNumberedEntityId, hashBoard } from '../entity/factory';
+import { deriveLocalEntityCryptoKeys } from '../entity/crypto';
 import { applyEntityInput, selectProposableEntityTxs } from '../entity/consensus';
 import {
   buildConsensusOutputOriginForState,
@@ -266,16 +267,19 @@ const buildRegisteredProfile = async (): Promise<{
   state.config = config;
   const localEnv = createEmptyEnv('registered-board-authority:local');
   localEnv.runtimeSeed = 'registered-board-authority:runtime';
+  registerSignerKey(localEnv, signer, privateKey);
+  const localKeys = deriveLocalEntityCryptoKeys(localEnv, registeredEntityId, signer);
   localEnv.eReplicas.set(`${registeredEntityId}:${signer}`, {
     entityId: registeredEntityId,
     signerId: signer,
+    entityEncPubKey: localKeys.publicKey,
+    entityEncPrivKey: localKeys.privateKey,
     state,
     mempool: [],
     isProposer: true,
   } as EntityReplica);
   const boardHash = hashBoard(encodeBoard(config)).toLowerCase();
   installEvents(localEnv, state, [event('FoundationBootstrapped', blockHash('31')), event('EntityRegistered', boardHash)]);
-  registerSignerKey(localEnv, signer, privateKey);
   const profile: Profile = {
     entityId: registeredEntityId,
     name: 'Registered remote',
@@ -321,7 +325,13 @@ const remoteObserverEnv = (boardHash: string): RuntimeState => {
   const state = makeState(entity('99'), signerId, jurisdiction);
   installEvents(env, state, [event('FoundationBootstrapped', blockHash('31')), event('EntityRegistered', boardHash)]);
   env.eReplicas.set(`${state.entityId}:${signerId}`, {
-    entityId: state.entityId, signerId, state, mempool: [], isProposer: true,
+    entityId: state.entityId,
+    signerId,
+    entityEncPubKey: '',
+    entityEncPrivKey: '',
+    state,
+    mempool: [],
+    isProposer: true,
   } as EntityReplica);
   return env;
 };
@@ -599,6 +609,8 @@ describe('registered Entity certified board authority', () => {
     const replica = {
       entityId: receiverEntityId,
       signerId: receiverSigner,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: receiver,
       mempool: [],
       isProposer: true,
@@ -735,6 +747,8 @@ describe('registered Entity certified board authority', () => {
     env.eReplicas.set(`${counterpartyEntityId}:${signerC}`, {
       entityId: counterpartyEntityId,
       signerId: signerC,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: counterpartyState,
       mempool: [],
       isProposer: true,
@@ -811,6 +825,8 @@ describe('registered Entity certified board authority', () => {
     const proposerReplica = {
       entityId: registeredEntityId,
       signerId: signerA,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: newProposerState,
       mempool: [],
       isProposer: true,
@@ -819,6 +835,8 @@ describe('registered Entity certified board authority', () => {
     const validatorReplica = {
       entityId: registeredEntityId,
       signerId: signerB,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: cloneEntityState(newProposerState),
       mempool: [],
       isProposer: false,
@@ -849,6 +867,8 @@ describe('registered Entity certified board authority', () => {
     const partial = await applyEntityInput(env, {
       entityId: registeredEntityId,
       signerId: signerB,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: oldValidatorState,
       mempool: [],
       isProposer: false,
@@ -867,6 +887,8 @@ describe('registered Entity certified board authority', () => {
     const prepared = await applyEntityInput(env, {
       entityId: registeredEntityId,
       signerId: signerB,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: updatedValidatorState,
       mempool: [],
       isProposer: false,
@@ -914,6 +936,8 @@ describe('registered Entity certified board authority', () => {
     const wakeValidatorReplica = {
       entityId: registeredEntityId,
       signerId: signerB,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: cloneEntityState(committed.workingReplica.state),
       mempool: [],
       isProposer: false,
@@ -1227,12 +1251,16 @@ describe('registered Entity certified board authority', () => {
     env.eReplicas.set('stale', {
       entityId: stale.entityId,
       signerId: addr('70'),
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: stale,
       mempool: [],
     } as EntityReplica);
     env.eReplicas.set('latest', {
       entityId: latest.entityId,
       signerId: addr('71'),
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: latest,
       mempool: [],
     } as EntityReplica);
@@ -1264,6 +1292,8 @@ describe('registered Entity certified board authority', () => {
     env.eReplicas.set('conflict', {
       entityId: conflict.entityId,
       signerId: addr('72'),
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: conflict,
       mempool: [],
     } as EntityReplica);

@@ -223,6 +223,8 @@ test('board reseal receipt is terminal and stable across Runtime restart', async
   const replica = {
     entityId: receiverEntityId,
     signerId: receiverSigner,
+    entityEncPubKey: '',
+    entityEncPrivKey: '',
     isProposer: true,
     mempool: [],
     state: {
@@ -310,6 +312,8 @@ test('board reseal routing is identical with sparse and populated validator topo
   populated.eReplicas.set(`${targetEntityId}:${targetSigner}`, {
     entityId: targetEntityId,
     signerId: targetSigner,
+    entityEncPubKey: '',
+    entityEncPrivKey: '',
     state: makeState(targetEntityId, targetSigner),
     mempool: [],
     isProposer: true,
@@ -377,6 +381,8 @@ test('one uncertified Account cannot block BoardActivated reseals for certified 
   env.eReplicas.set(`${certifiedId}:${signerId}`, {
     entityId: certifiedId,
     signerId,
+    entityEncPubKey: '',
+    entityEncPrivKey: '',
     state: {
       entityId: certifiedId,
       config: {
@@ -462,6 +468,8 @@ test('partial bilateral dispute evidence never emits a frame-only board reseal',
   env.eReplicas.set(`${counterpartyId}:${signerId}`, {
     entityId: counterpartyId,
     signerId,
+    entityEncPubKey: '',
+    entityEncPrivKey: '',
     state: {
       entityId: counterpartyId,
       config: {
@@ -532,6 +540,8 @@ test('one board reseal pass emits at most 32 deterministic Accounts', async () =
     env.eReplicas.set(`${counterpartyId}:${signerId}`, {
       entityId: counterpartyId,
       signerId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: {
         entityId: counterpartyId,
         config: {
@@ -635,6 +645,8 @@ test('two board rotations in one finalized J range collapse to the latest reseal
   env.eReplicas.set(`${counterpartyId}:${signerId}`, {
     entityId: counterpartyId,
     signerId,
+    entityEncPubKey: '',
+    entityEncPrivKey: '',
     state: makeState(counterpartyId, signerId, jurisdiction),
   } as unknown as EntityReplica);
 

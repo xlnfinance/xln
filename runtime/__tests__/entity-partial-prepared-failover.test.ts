@@ -35,8 +35,6 @@ const makeBaseState = (config: ConsensusConfig, entityId: string): EntityState =
   accounts: new Map(),
   lastFinalizedJHeight: 0,
   jBlockChain: [],
-  entityEncPubKey: 'pub',
-  entityEncPrivKey: 'priv',
   profile: { name: '', isHub: false, avatar: '', bio: '', website: '' },
   htlcRoutes: new Map(),
   htlcFeesEarned: 0n,
@@ -87,6 +85,8 @@ describe('partial prepared failover', () => {
     const proposer: EntityReplica = {
       entityId,
       signerId: proposerId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: structuredClone(base),
       mempool: [],
       isProposer: true,
@@ -104,6 +104,8 @@ describe('partial prepared failover', () => {
     const validator2: EntityReplica = {
       entityId,
       signerId: '2',
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: structuredClone(base),
       mempool: [nextCommand],
       isProposer: false,
@@ -120,6 +122,8 @@ describe('partial prepared failover', () => {
     const validator3: EntityReplica = {
       entityId,
       signerId: '3',
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: structuredClone(base),
       mempool: [],
       isProposer: false,

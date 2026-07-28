@@ -50,8 +50,6 @@ const makeEntityState = (): EntityState => ({
       submitAttempts: 1,
     },
   },
-  entityEncPubKey: `0x${'44'.repeat(32)}`,
-  entityEncPrivKey: `0x${'55'.repeat(32)}`,
   profile: { name: 'Batch identity', isHub: false, avatar: '', bio: '', website: '' },
   htlcRoutes: new Map(),
   htlcFeesEarned: 0n,

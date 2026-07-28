@@ -294,6 +294,8 @@ describe('canonical quorum Hanko construction', () => {
     fixture.env.eReplicas.set(`${registeredId}:${a}`, {
       entityId: registeredId,
       signerId: a!,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       mempool: [],
       isProposer: true,
       state: { entityId: registeredId, config: authoritative },

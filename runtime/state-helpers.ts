@@ -624,6 +624,8 @@ const cloneEntityReplicaWithPolicy = (
   const cloned = {
     entityId: replica.entityId,
     signerId: replica.signerId,
+    entityEncPubKey: replica.entityEncPubKey,
+    entityEncPrivKey: replica.entityEncPrivKey,
     state: validateClone
       ? cloneEntityState(replica.state, forSnapshot)
       : cloneTrustedEntityState(replica.state, forSnapshot),

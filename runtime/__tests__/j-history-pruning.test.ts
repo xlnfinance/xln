@@ -77,8 +77,6 @@ const makeState = (signerId: string, blockCount: number): EntityState => {
     accounts: new Map(),
     lastFinalizedJHeight: blockCount,
     jBlockChain: [],
-    entityEncPubKey: 'pub',
-    entityEncPrivKey: 'priv',
     profile: { name: 'J history pruning', isHub: false, avatar: '', bio: '', website: '' },
     htlcRoutes: new Map(),
     htlcFeesEarned: 0n,

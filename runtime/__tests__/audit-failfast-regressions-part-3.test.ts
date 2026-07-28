@@ -473,6 +473,8 @@ const attachSigningReplica = (env: ReturnType<typeof createEmptyEnv>, entityId: 
   env.eReplicas.set(`${entityId}:${signerId}`, {
     entityId,
     signerId,
+    entityEncPubKey: '',
+    entityEncPrivKey: '',
     mempool: [],
     isProposer: true,
     state: {
@@ -580,6 +582,8 @@ const prepareJEventInput = (
 const makeReplicaMissingPrevFrameHash = (): EntityReplica => ({
   entityId: `0x${'11'.repeat(32)}`,
   signerId: '1',
+  entityEncPubKey: '',
+  entityEncPrivKey: '',
   mempool: [],
   isProposer: true,
   state: {
@@ -594,8 +598,6 @@ const makeReplicaMissingPrevFrameHash = (): EntityReplica => ({
     deferredAccountProposals: new Map(),
     lastFinalizedJHeight: 0,
     jBlockChain: [],
-    entityEncPubKey: `0x${'33'.repeat(32)}`,
-    entityEncPrivKey: `0x${'44'.repeat(32)}`,
     profile: {
       name: 'Audit Entity',
       isHub: false,
@@ -624,8 +626,6 @@ const makeEntityState = (entityId: string): EntityState => ({
   deferredAccountProposals: new Map(),
   lastFinalizedJHeight: 0,
   jBlockChain: [],
-  entityEncPubKey: `0x${'55'.repeat(32)}`,
-  entityEncPrivKey: `0x${'66'.repeat(32)}`,
   profile: {
     name: 'Audit Entity',
     isHub: false,
@@ -741,6 +741,8 @@ const sealAuditJSubmitAttempts = (env: RuntimeState, inputs: JInput[]): void => 
         ({
           entityId: jTx.entityId,
           signerId,
+          entityEncPubKey: '',
+          entityEncPrivKey: '',
           mempool: [],
           isProposer: true,
           state,
@@ -802,6 +804,8 @@ describe('audit fail-fast regressions', () => {
     const replica = {
       entityId,
       signerId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       mempool: [],
       isProposer: true,
       state,
@@ -1040,6 +1044,8 @@ describe('audit fail-fast regressions', () => {
     env.eReplicas.set(`${entityId}:1`, {
       entityId,
       signerId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       mempool: [],
       isProposer: true,
       state,
@@ -1155,6 +1161,8 @@ describe('audit fail-fast regressions', () => {
     env.eReplicas.set(`${entityId}:1`, {
       entityId,
       signerId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       mempool: [],
       isProposer: true,
       state,
@@ -1435,6 +1443,8 @@ describe('audit fail-fast regressions', () => {
     env.eReplicas.set(`${entityId}:1`, {
       entityId,
       signerId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       mempool: [],
       isProposer: true,
       state,
@@ -1888,6 +1898,8 @@ describe('audit fail-fast regressions', () => {
     env.eReplicas.set(`${hubId}:hub`, {
       entityId: hubId,
       signerId: 'hub',
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: hubState,
     } as never);
 
@@ -2158,6 +2170,8 @@ describe('audit fail-fast regressions', () => {
     withSibling.eReplicas.set(`${entityId}:misleading`, {
       entityId,
       signerId: 'misleading',
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: misleadingOwner,
     } as never);
 
@@ -2463,6 +2477,8 @@ describe('audit fail-fast regressions', () => {
     const replica = {
       entityId,
       signerId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       mempool: [],
       isProposer: false,
       state: makeEntityState(entityId),

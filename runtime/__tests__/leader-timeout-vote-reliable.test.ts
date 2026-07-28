@@ -14,6 +14,7 @@ import {
   hashEntityLeaderVoteBody,
 } from '../entity/consensus/leader';
 import { generateLazyEntityId } from '../entity/factory';
+import { deriveLocalEntityCryptoKeys } from '../entity/crypto';
 import { initCrontab } from '../entity/scheduler';
 import {
   createDueScheduledWakeInputs,
@@ -91,8 +92,6 @@ const installVoteTarget = (
     crontabState: initCrontab(),
     lastFinalizedJHeight: 0,
     jBlockChain: [],
-    entityEncPubKey: `0x${'11'.repeat(32)}`,
-    entityEncPrivKey: `0x${'22'.repeat(32)}`,
     profile: { name: 'reliable leader vote', isHub: false, avatar: '', bio: '', website: '' },
     htlcRoutes: new Map(),
     htlcFeesEarned: 0n,
@@ -100,9 +99,12 @@ const installVoteTarget = (
     lockBook: new Map(),
     swapTradingPairs: [],
   };
+  const localKeys = deriveLocalEntityCryptoKeys(env, entityId, signerId);
   const replica: EntityReplica = {
     entityId,
     signerId,
+    entityEncPubKey: localKeys.publicKey,
+    entityEncPrivKey: localKeys.privateKey,
     state,
     mempool: [],
     isProposer: false,

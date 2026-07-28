@@ -4,6 +4,7 @@ import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from 
 import { TIMING } from '../constants';
 import { initCrontab, scheduleHook } from '../entity/scheduler';
 import { generateLazyEntityId } from '../entity/factory';
+import { deriveLocalEntityCryptoKeys, hasLocalSignerKey } from '../entity/crypto';
 import { processEventBatch } from '../jadapter/watcher';
 import { createRuntimeIngressReceiptStore } from '../server/ingress-receipts';
 import { buildJEventRangeData } from './helpers/j-history';
@@ -64,10 +65,20 @@ const addTestJurisdiction = (env: RuntimeState, name = TEST_JURISDICTION.name, j
   });
 };
 
-const makeReplica = (entityId: string, timestamp: number, signerId = '1'): EntityReplica =>
-  ({
+const makeReplica = (
+  entityId: string,
+  timestamp: number,
+  signerId = '1',
+  env?: RuntimeState,
+): EntityReplica => {
+  const keys = env && hasLocalSignerKey(env, signerId)
+    ? deriveLocalEntityCryptoKeys(env, entityId, signerId)
+    : { publicKey: '', privateKey: '' };
+  return {
     entityId,
     signerId,
+    entityEncPubKey: keys.publicKey,
+    entityEncPrivKey: keys.privateKey,
     mempool: [],
     isProposer: true,
     state: {
@@ -88,8 +99,6 @@ const makeReplica = (entityId: string, timestamp: number, signerId = '1'): Entit
       deferredAccountProposals: new Map(),
       lastFinalizedJHeight: 0,
       jBlockChain: [],
-      entityEncPubKey: `${'0x'}${'11'.repeat(32)}`,
-      entityEncPrivKey: `${'0x'}${'22'.repeat(32)}`,
       profile: {
         name: 'Replica',
         isHub: false,
@@ -104,7 +113,8 @@ const makeReplica = (entityId: string, timestamp: number, signerId = '1'): Entit
       swapTradingPairs: [],
       crontabState: initCrontab(),
     },
-  }) as EntityReplica;
+  } as EntityReplica;
+};
 
 const addSignableReplica = (
   env: RuntimeState,
@@ -115,6 +125,9 @@ const addSignableReplica = (
   registerSignerKey(env, signerId, deriveSignerKeySync(env.runtimeSeed!, signerLabel));
   const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
   const replica = makeReplica(entityId, timestamp, signerId);
+  const keys = deriveLocalEntityCryptoKeys(env, entityId, signerId);
+  replica.entityEncPubKey = keys.publicKey;
+  replica.entityEncPrivKey = keys.privateKey;
   env.eReplicas.set(`${entityId}:${signerId}`, replica);
   return { entityId, signerId, replica };
 };
@@ -190,7 +203,7 @@ describe('runtime ingress timestamp', () => {
     const replicas = ['cap-1', 'cap-2', 'cap-3'].map((label) => {
       const signerId = deriveSignerAddressSync(env.runtimeSeed!, label).toLowerCase();
       const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
-      env.eReplicas.set(`${entityId}:${signerId}`, makeReplica(entityId, 1_000, signerId));
+      env.eReplicas.set(`${entityId}:${signerId}`, makeReplica(entityId, 1_000, signerId, env));
       return { entityId, signerId };
     });
     const entityIds = replicas.map(({ entityId }) => entityId);
@@ -236,7 +249,7 @@ describe('runtime ingress timestamp', () => {
       const signerId = deriveSignerAddressSync(env.runtimeSeed!, label).toLowerCase();
       registerSignerKey(env, signerId, deriveSignerKeySync(env.runtimeSeed!, label));
       const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
-      env.eReplicas.set(`${entityId}:${signerId}`, makeReplica(entityId, 1_000, signerId));
+      env.eReplicas.set(`${entityId}:${signerId}`, makeReplica(entityId, 1_000, signerId, env));
       return { entityId, signerId };
     });
     enqueueRuntimeInput(env, {
@@ -279,7 +292,7 @@ describe('runtime ingress timestamp', () => {
     registerSignerKey(env, signerAddress, deriveSignerKeySync(env.runtimeSeed!, signerLabel));
     const signerId = signerAddress;
     const entityId = generateLazyEntityId([signerAddress], 1n);
-    env.eReplicas.set(`${entityId}:${signerId}`, makeReplica(entityId, 1_000, signerId));
+    env.eReplicas.set(`${entityId}:${signerId}`, makeReplica(entityId, 1_000, signerId, env));
     const txs = Array.from({ length: 5 }, (_, index) => ({
       type: 'profile-update' as const,
       data: {
@@ -340,8 +353,14 @@ describe('runtime ingress timestamp', () => {
     registerSignerKey(env, jEventSignerId, deriveSignerKeySync(env.runtimeSeed!, jEventSignerLabel));
     const normalEntityId = generateLazyEntityId([normalSignerId], 1n);
     const jEventEntityId = generateLazyEntityId([jEventSignerId], 1n);
-    env.eReplicas.set(`${normalEntityId}:${normalSignerId}`, makeReplica(normalEntityId, 1_000, normalSignerId));
-    env.eReplicas.set(`${jEventEntityId}:${jEventSignerId}`, makeReplica(jEventEntityId, 1_000, jEventSignerId));
+    env.eReplicas.set(
+      `${normalEntityId}:${normalSignerId}`,
+      makeReplica(normalEntityId, 1_000, normalSignerId, env),
+    );
+    env.eReplicas.set(
+      `${jEventEntityId}:${jEventSignerId}`,
+      makeReplica(jEventEntityId, 1_000, jEventSignerId, env),
+    );
     const jEvent: JurisdictionEvent = {
       type: 'ReserveUpdated',
       data: { entity: jEventEntityId, tokenId: 1, newBalance: '100' },
@@ -488,7 +507,7 @@ describe('runtime ingress timestamp', () => {
     const signerId = deriveSignerAddressSync(env.runtimeSeed!, '1').toLowerCase();
     registerSignerKey(env, signerId, deriveSignerKeySync(env.runtimeSeed!, '1'));
     const entityId = generateLazyEntityId([signerId], 1n);
-    const replica = makeReplica(entityId, 1_000, signerId);
+    const replica = makeReplica(entityId, 1_000, signerId, env);
     env.eReplicas.set(`${entityId}:${signerId}`, replica);
     let committedInput: RuntimeState['runtimeInput'] | null = null;
     registerRuntimeFrameCommitCallback(env, ({ runtimeInput }) => {
@@ -534,7 +553,7 @@ describe('runtime ingress timestamp', () => {
       const signerId = deriveSignerAddressSync(env.runtimeSeed!, '1').toLowerCase();
       registerSignerKey(env, signerId, deriveSignerKeySync(env.runtimeSeed!, '1'));
       const entityId = generateLazyEntityId([signerId], 1n);
-      env.eReplicas.set(`${entityId}:${signerId}`, makeReplica(entityId, 1_000, signerId));
+      env.eReplicas.set(`${entityId}:${signerId}`, makeReplica(entityId, 1_000, signerId, env));
       return { env, entityId, signerId };
     };
     const submit = async (env: RuntimeState, entityId: string, signerId: string): Promise<string> => {
@@ -923,7 +942,7 @@ describe('runtime ingress timestamp', () => {
 
     const signerId = deriveSignerAddressSync(seed, '1').toLowerCase();
     const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
-    const replica = makeReplica(entityId, 1_000, signerId);
+    const replica = makeReplica(entityId, 1_000, signerId, env);
     replica.isProposer = true;
     env.eReplicas.set(`${entityId}:${signerId}`, replica);
 

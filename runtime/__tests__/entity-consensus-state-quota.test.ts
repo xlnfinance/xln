@@ -32,8 +32,6 @@ const baseState = (): EntityState => ({
     finalizedJBlockHash: `0x${'03'.repeat(32)}`,
     eventHistoryRoot: `0x${'04'.repeat(32)}`,
   },
-  entityEncPubKey: 'local-public-key',
-  entityEncPrivKey: 'local-private-key',
   profile: { name: 'quota', isHub: false, avatar: '', bio: '', website: '' },
   htlcRoutes: new Map(),
   htlcFeesEarned: 0n,

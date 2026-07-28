@@ -1895,6 +1895,14 @@ export function validateEntityReplica(value: unknown, context = 'EntityReplica')
   const obj = validateObject(value, context);
   const entityId = validateString(obj['entityId'], `${context}.entityId`);
   validateString(obj['signerId'], `${context}.signerId`);
+  const entityEncPubKey = obj['entityEncPubKey'];
+  const entityEncPrivKey = obj['entityEncPrivKey'];
+  if (typeof entityEncPubKey !== 'string' || typeof entityEncPrivKey !== 'string') {
+    throw new FinancialDataCorruptionError(`${context} encryption keypair must be strings`);
+  }
+  if (Boolean(entityEncPubKey) !== Boolean(entityEncPrivKey)) {
+    throw new FinancialDataCorruptionError(`${context} encryption keypair must be both present or both absent`);
+  }
   const state = validateEntityState(obj['state'], `${context}.state`);
   if (state.entityId !== entityId) {
     throw new FinancialDataCorruptionError(`${context}.state.entityId must match replica.entityId`, {

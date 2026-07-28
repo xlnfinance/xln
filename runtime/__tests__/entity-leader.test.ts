@@ -80,8 +80,6 @@ const state = (leaderState?: EntityState['leaderState']): EntityState => ({
   accounts: new Map(),
   lastFinalizedJHeight: 0,
   jBlockChain: [],
-  entityEncPubKey: 'pub',
-  entityEncPrivKey: 'priv',
   profile: { name: '', isHub: false, avatar: '', bio: '', website: '' },
   htlcRoutes: new Map(),
   htlcFeesEarned: 0n,
@@ -139,6 +137,8 @@ describe('entity leader policy', () => {
     const replica: EntityReplica = {
       entityId: 'entity',
       signerId: 'ceo',
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: state(),
       mempool: [],
       isProposer: true,
@@ -177,6 +177,8 @@ describe('entity leader policy', () => {
       replicas.set(signerId, {
         entityId: base.entityId,
         signerId,
+        entityEncPubKey: '',
+        entityEncPrivKey: '',
         state: structuredClone(base),
         mempool: signerId === proposerId ? [] : [command],
         isProposer: signerId === proposerId,
@@ -292,6 +294,8 @@ describe('entity leader policy', () => {
     const replica: EntityReplica = {
       entityId: committedState.entityId,
       signerId: 'ceo',
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: committedState,
       mempool: [],
       proposal: nextFrame,
@@ -388,6 +392,8 @@ describe('entity leader policy', () => {
     const replicaFor = (signerId: string): EntityReplica => ({
       entityId: base.entityId,
       signerId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: structuredClone(base),
       mempool: [],
       isProposer: signerId === proposerId,
@@ -618,6 +624,8 @@ describe('entity leader policy', () => {
     const replica: EntityReplica = {
       entityId: base.entityId,
       signerId: '2',
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: structuredClone(base),
       mempool: [signedEntityCommandTx(buildSignedEntityCommand(env, base, '2', [{
         type: 'chat',

@@ -15,6 +15,8 @@ describe('lending API boundary', () => {
       eReplicas: new Map([[`${HUB}:${SIGNER}`, {
         entityId: HUB,
         signerId: SIGNER,
+        entityEncPubKey: '',
+        entityEncPrivKey: '',
         state: {
           entityId: HUB,
           lending: { pools: new Map(), loans: new Map() },

@@ -105,12 +105,10 @@ export const canonicalizeStorageAuditValue = (value: unknown): unknown =>
 
 export const computeCanonicalEntityHash = (replica: EntityReplica): CanonicalFrameEntityHash => {
   const entityId = normalizeEntityId(replica.entityId || replica.state?.entityId || '');
-  // Remove only the top-level validator-local identity fields. A recursive
+  // Remove only the top-level validator-local note collection. A recursive
   // name blacklist would also hide identically named fields nested inside
   // signed txs or other consensus payloads.
   const consensusState = { ...replica.state } as Partial<EntityReplica['state']>;
-  delete consensusState.entityEncPubKey;
-  delete consensusState.entityEncPrivKey;
   delete consensusState.htlcNotes;
   // Frame events are signed history derived during one reducer pass, not live
   // Entity state. The enumerable carrier survives immutable object spreads,

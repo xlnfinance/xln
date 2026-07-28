@@ -228,8 +228,8 @@ describe('real process storage crash recovery', () => {
         ));
         expect(replica?.state.height).toBe(0);
         expect(replica && Object.hasOwn(replica.state, 'messages')).toBeFalse();
-        expect(replica?.state.entityEncPubKey).toBe(expectedKeysB.publicKey);
-        expect(replica?.state.entityEncPrivKey).toBe(expectedKeysB.privateKey);
+        expect(replica?.entityEncPubKey).toBe(expectedKeysB.publicKey);
+        expect(replica?.entityEncPrivKey).toBe(expectedKeysB.privateKey);
         expect(replica?.state.htlcNotes).toEqual(new Map([
           [`lock:0x${'ef'.repeat(32)}`, `private-note:${signerB}`],
         ]));
@@ -285,8 +285,8 @@ describe('real process storage crash recovery', () => {
         expect(submitReplica?.certifiedFrameAnchor?.height).toBe(1);
         expect(submitReplica?.certifiedFrameAnchor?.runtimeCheckpoint)
           .toEqual(replica?.certifiedFrameAnchor?.runtimeCheckpoint);
-        expect(submitReplica?.state.entityEncPubKey).toBe(expectedKeysA.publicKey);
-        expect(submitReplica?.state.entityEncPrivKey).toBe(expectedKeysA.privateKey);
+        expect(submitReplica?.entityEncPubKey).toBe(expectedKeysA.publicKey);
+        expect(submitReplica?.entityEncPrivKey).toBe(expectedKeysA.privateKey);
         expect(submitReplica?.state.htlcNotes).toEqual(new Map([
           [`lock:0x${'ef'.repeat(32)}`, `private-note:${signerA}`],
         ]));
@@ -497,8 +497,6 @@ describe('real process storage crash recovery', () => {
       const restoredState = buildCertifiedEntityLineagePlan(restored).lookup.get(entityId)?.state;
       const expectedSharedState = restoredState ? { ...restoredState } : restoredState;
       if (expectedSharedState) {
-        expectedSharedState.entityEncPubKey = '';
-        expectedSharedState.entityEncPrivKey = '';
         delete expectedSharedState.htlcNotes;
         delete (expectedSharedState as Record<string, unknown>)[ENTITY_FRAME_EVENT_COLLECTOR];
       }

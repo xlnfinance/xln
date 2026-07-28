@@ -91,8 +91,6 @@ const state = (): EntityState => ({
   accounts: new Map(),
   lastFinalizedJHeight: 0,
   jBlockChain: [],
-  entityEncPubKey: 'pub',
-  entityEncPrivKey: 'priv',
   profile: { name: 'J history', isHub: false, avatar: '', bio: '', website: '' },
   htlcRoutes: new Map(),
   htlcFeesEarned: 0n,
@@ -505,6 +503,8 @@ describe('J validator-local history and Entity-finalized ranges', () => {
     const replica: EntityReplica = {
       entityId: validatorState.entityId,
       signerId: validatorId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: validatorState,
       mempool: [],
       isProposer: false,
@@ -610,6 +610,8 @@ describe('J validator-local history and Entity-finalized ranges', () => {
     const replica: EntityReplica = {
       entityId,
       signerId: leaderId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: entityState,
       mempool: [],
       isProposer: true,
@@ -648,6 +650,8 @@ describe('J validator-local history and Entity-finalized ranges', () => {
     const replica: EntityReplica = {
       entityId,
       signerId: leaderId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: entityState,
       mempool: [],
       isProposer: true,
@@ -713,6 +717,8 @@ describe('J validator-local history and Entity-finalized ranges', () => {
     const replica: EntityReplica = {
       entityId,
       signerId: validatorId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: entityState,
       mempool: [],
       isProposer: false,
@@ -762,6 +768,8 @@ describe('J validator-local history and Entity-finalized ranges', () => {
     const replica: EntityReplica = {
       entityId,
       signerId: leaderId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: entityState,
       mempool: [],
       isProposer: true,
@@ -810,6 +818,8 @@ describe('J validator-local history and Entity-finalized ranges', () => {
     const replica: EntityReplica = {
       entityId,
       signerId: leaderId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: entityState,
       mempool: [],
       isProposer: true,
@@ -856,6 +866,8 @@ describe('J validator-local history and Entity-finalized ranges', () => {
     const replica: EntityReplica = {
       entityId,
       signerId: leaderId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: entityState,
       mempool: [],
       isProposer: true,
@@ -906,6 +918,8 @@ describe('J validator-local history and Entity-finalized ranges', () => {
     const replica: EntityReplica = {
       entityId,
       signerId: leaderId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: entityState,
       mempool: [],
       isProposer: true,
@@ -952,6 +966,8 @@ describe('J validator-local history and Entity-finalized ranges', () => {
     const replica: EntityReplica = {
       entityId,
       signerId: leaderId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: entityState,
       mempool: [],
       isProposer: true,
@@ -1021,6 +1037,8 @@ describe('J validator-local history and Entity-finalized ranges', () => {
     const replica: EntityReplica = {
       entityId,
       signerId: leaderId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: entityState,
       mempool: [],
       isProposer: true,
@@ -1154,6 +1172,8 @@ describe('J validator-local history and Entity-finalized ranges', () => {
     const replica: EntityReplica = {
       entityId,
       signerId: validatorId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: entityState,
       mempool: [],
       isProposer: false,

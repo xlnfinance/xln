@@ -63,6 +63,8 @@ test('committed credit stays usable while an offline peer leaves durable Account
   env.eReplicas = new Map([[`${leftEntity}:1`, {
     entityId: leftEntity,
     signerId: '1',
+    entityEncPubKey: '',
+    entityEncPrivKey: '',
     state: { entityId: leftEntity, accounts: new Map([[rightEntity, account]]) },
   } as unknown as EntityReplica]]);
 

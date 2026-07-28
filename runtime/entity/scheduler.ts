@@ -50,11 +50,12 @@
 import type {
   AccountInput,
   EntityInput,
-  EntityReplica,
+  EntityState,
   RuntimeState,
 } from '../types';
 import type {
   CrontabExecutionContext,
+  EntityTransitionContext,
   CrontabState,
   CrontabTaskMethod,
   CrontabTaskState,
@@ -101,8 +102,8 @@ const accountInputProposedFrameHeight = (input: AccountInput): number => {
 
 /** Emit liveness diagnostics only from the canonical post-frame state. */
 export const emitCommittedPendingFrameWarnings = (
-  previousState: EntityReplica['state'],
-  committedState: EntityReplica['state'],
+  previousState: EntityState,
+  committedState: EntityState,
 ): void => {
   const previousRun = previousState.crontabState?.tasks.get('maintainPendingAccounts')?.lastRun;
   const committedRun = committedState.crontabState?.tasks.get('maintainPendingAccounts')?.lastRun;
@@ -126,7 +127,7 @@ export const emitCommittedPendingFrameWarnings = (
 
 type CrontabTaskHandler = (
   env: RuntimeState,
-  replica: EntityReplica,
+  replica: EntityTransitionContext,
   task: CrontabTaskState,
   context: CrontabExecutionContext,
 ) => Promise<EntityInput[]>;
@@ -156,11 +157,11 @@ export function initCrontab(): CrontabState {
   };
 }
 
-const accountNeedsMaintenance = (state: EntityReplica['state']): boolean =>
+const accountNeedsMaintenance = (state: EntityState): boolean =>
   [...state.accounts.values()].some(account => Boolean(account.pendingFrame));
 
 const accountNeedsHubRebalanceTask = (
-  state: EntityReplica['state'],
+  state: EntityState,
   counterpartyId: string,
 ): boolean => {
   const account = state.accounts.get(counterpartyId);
@@ -197,7 +198,7 @@ const accountNeedsHubRebalanceTask = (
 
 /** Only schedule periodic consensus work when its handler can change state or emit output. */
 export const crontabTaskHasPendingWork = (
-  state: EntityReplica['state'],
+  state: EntityState,
   method: CrontabTaskMethod,
 ): boolean => {
   if (method === 'maintainPendingAccounts') return accountNeedsMaintenance(state);
@@ -221,7 +222,7 @@ const CRONTAB_TASK_HANDLERS: Record<CrontabTaskMethod, CrontabTaskHandler> = {
  */
 export async function executeCrontab(
   env: RuntimeState,
-  replica: EntityReplica,
+  replica: EntityTransitionContext,
   crontabState: CrontabState,
   context: CrontabExecutionContext,
 ): Promise<EntityInput[]> {
@@ -276,7 +277,7 @@ export async function executeCrontab(
  */
 async function maintainPendingAccounts(
   _env: RuntimeState,
-  replica: EntityReplica,
+  replica: EntityTransitionContext,
   _task: CrontabTaskState,
   _context: CrontabExecutionContext,
 ): Promise<EntityInput[]> {

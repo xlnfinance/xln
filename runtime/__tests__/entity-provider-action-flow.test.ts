@@ -21,6 +21,7 @@ import {
   applyEntityProviderActionExecuted,
 } from '../entity/tx/j-events-entity-provider-action';
 import { encodeBoard, hashBoard } from '../entity/factory';
+import { deriveLocalEntityCryptoKeys } from '../entity/crypto';
 import { buildQuorumHanko, verifyHankoForHash } from '../hanko/signing';
 import { buildSingleSignerHanko } from '../hanko/batch';
 import {
@@ -75,8 +76,6 @@ const baseState = (entityId: string, config: ConsensusConfig, timestamp: number)
   accounts: new Map(),
   lastFinalizedJHeight: 0,
   jBlockChain: [],
-  entityEncPubKey: `0x${'01'.repeat(32)}`,
-  entityEncPrivKey: `0x${'02'.repeat(32)}`,
   profile: { name: '', isHub: false, avatar: '', bio: '', website: '' },
   htlcRoutes: new Map(),
   htlcFeesEarned: 0n,
@@ -156,7 +155,16 @@ const setup = (label = 'single') => {
   };
   const state = baseState(numberedEntityId(2n), config, env.timestamp);
   installCertifiedBoardAuthority(env, state);
-  const replica: EntityReplica = { entityId: state.entityId, signerId, state, mempool: [], isProposer: true };
+  const localKeys = deriveLocalEntityCryptoKeys(env, state.entityId, signerId);
+  const replica: EntityReplica = {
+    entityId: state.entityId,
+    signerId,
+    entityEncPubKey: localKeys.publicKey,
+    entityEncPrivKey: localKeys.privateKey,
+    state,
+    mempool: [],
+    isProposer: true,
+  };
   env.eReplicas.set(`${state.entityId}:${signerId}`, replica);
   env.jReplicas.set('EntityProviderActions', {
     name: 'EntityProviderActions',
@@ -870,6 +878,8 @@ describe('EntityProvider action flow', () => {
       const replica: EntityReplica = {
         entityId,
         signerId,
+        entityEncPubKey: '',
+        entityEncPrivKey: '',
         state: structuredClone(twoVotes.newState),
         mempool: [],
         isProposer: index === 0,

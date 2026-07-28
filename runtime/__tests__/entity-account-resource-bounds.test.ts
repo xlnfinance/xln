@@ -11,6 +11,7 @@ import { LIMITS } from '../constants';
 import { applyEntityInput } from '../entity/consensus';
 import { assertEntityAccountInsertionCapacity } from '../entity/account-capacity';
 import { encodeBoard, generateLazyEntityId, hashBoard } from '../entity/factory';
+import { deriveLocalEntityCryptoKeys } from '../entity/crypto';
 import { isLeftEntity } from '../entity/id';
 import { applyAccountInputToEntity } from '../entity/tx/handlers/account';
 import { handleOpenAccountEntityTx } from '../entity/tx/handlers/open-account';
@@ -99,8 +100,6 @@ const makeState = (): EntityState => ({
   accounts: new Map(),
   lastFinalizedJHeight: 0,
   jBlockChain: [],
-  entityEncPubKey: `0x${'66'.repeat(32)}`,
-  entityEncPrivKey: `0x${'77'.repeat(32)}`,
   profile: { name: 'bounds', isHub: false, avatar: '', bio: '', website: '' },
   htlcRoutes: new Map(),
   htlcFeesEarned: 0n,
@@ -179,6 +178,8 @@ test('local account opening rejects capacity overflow before cloning or insertio
   env.eReplicas.set(`${counterpartyId}:peer`, {
     entityId: counterpartyId,
     signerId: 'peer',
+    entityEncPubKey: '',
+    entityEncPrivKey: '',
     isProposer: true,
     mempool: [],
     state: { ...makeState(), entityId: counterpartyId },
@@ -206,6 +207,8 @@ test('inbound mirrored-account insertion rejects capacity overflow before state 
   env.eReplicas.set(`${counterpartyId}:peer`, {
     entityId: counterpartyId,
     signerId: 'peer',
+    entityEncPubKey: '',
+    entityEncPrivKey: '',
     isProposer: true,
     mempool: [],
     state: { ...makeState(), entityId: counterpartyId },
@@ -263,6 +266,8 @@ test('only an accepted signed genesis can reserve an Account slot', async () => 
   env.eReplicas.set(`${sourceEntityId}:${sourceSignerId}`, {
     entityId: sourceEntityId,
     signerId: sourceSignerId,
+    entityEncPubKey: '',
+    entityEncPrivKey: '',
     isProposer: true,
     mempool: [],
     state: sourceState,
@@ -270,6 +275,8 @@ test('only an accepted signed genesis can reserve an Account slot', async () => 
   env.eReplicas.set(`${targetEntityId}:${targetSignerId}`, {
     entityId: targetEntityId,
     signerId: targetSignerId,
+    entityEncPubKey: '',
+    entityEncPrivKey: '',
     isProposer: true,
     mempool: [],
     state: targetState,
@@ -355,9 +362,12 @@ test('every committed Entity transition emits a size measurement without consump
     shares: { [signerId]: 1n },
   };
   state.entityId = hashBoard(encodeBoard(state.config)).toLowerCase();
+  const localKeys = deriveLocalEntityCryptoKeys(env, state.entityId, signerId);
   const replica: EntityReplica = {
     entityId: state.entityId,
     signerId,
+    entityEncPubKey: localKeys.publicKey,
+    entityEncPrivKey: localKeys.privateKey,
     state,
     mempool: [],
     isProposer: true,

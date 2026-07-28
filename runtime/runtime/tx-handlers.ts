@@ -316,7 +316,7 @@ const applyReplicaLocalMetadata = (
     env,
     identity.entityId,
     identity.signerId,
-    replica.state,
+    replica,
   );
 };
 
@@ -371,12 +371,12 @@ const buildCheckpointReplica = (
     resolveImportCheckpointState(env, identity.entityId, identity.signerId, config),
     true,
   );
-  state.entityEncPubKey = replicaKeys.publicKey;
-  state.entityEncPrivKey = replicaKeys.privateKey;
   state.htlcNotes = new Map();
   return {
     entityId: identity.entityId,
     signerId: identity.signerId,
+    entityEncPubKey: replicaKeys.publicKey,
+    entityEncPrivKey: replicaKeys.privateKey,
     mempool: [],
     isProposer: runtimeTx.data.isProposer,
     state,
@@ -403,6 +403,8 @@ const buildGenesisReplica = (
   const replica: EntityReplica = {
     entityId: identity.entityId,
     signerId: identity.signerId,
+    entityEncPubKey: replicaKeys.publicKey,
+    entityEncPrivKey: replicaKeys.privateKey,
     mempool: [],
     isProposer: runtimeTx.data.isProposer,
     state: {
@@ -417,8 +419,6 @@ const buildGenesisReplica = (
       deferredAccountProposals: new Map(),
       lastFinalizedJHeight: getJHistoryRegistrationBaseHeight(config.jurisdiction),
       jBlockChain: [],
-      entityEncPubKey: replicaKeys.publicKey,
-      entityEncPrivKey: replicaKeys.privateKey,
       profile: {
         name:
           typeof runtimeTx.data.profileName === 'string' &&

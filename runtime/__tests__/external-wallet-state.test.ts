@@ -78,8 +78,6 @@ const makeState = (entityId: string, signerId: string): EntityState => ({
   deferredAccountProposals: new Map(),
   lastFinalizedJHeight: 0,
   jBlockChain: [],
-  entityEncPubKey: `${'0x'}${'11'.repeat(32)}`,
-  entityEncPrivKey: `${'0x'}${'22'.repeat(32)}`,
   profile: {
     name: 'External wallet test',
     isHub: false,
@@ -276,6 +274,8 @@ describe('external wallet observed state', () => {
     const seededReplica: EntityReplica = {
       entityId,
       signerId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       isProposer: true,
       state: makeState(entityId, signerId),
       mempool: [],

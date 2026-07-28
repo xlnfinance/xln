@@ -293,6 +293,8 @@ const addReplica = (
   env.eReplicas.set(`${entityId}:${signerId}`, {
     entityId,
     signerId,
+    entityEncPubKey: '',
+    entityEncPrivKey: '',
     mempool: [],
     isProposer: true,
     state: {

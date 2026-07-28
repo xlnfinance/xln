@@ -30,6 +30,7 @@ import {
   type HankoWitnessEntry,
 } from '../entity/consensus/hanko-witness';
 import { generateLazyEntityId } from '../entity/factory';
+import { deriveLocalEntityCryptoKeys } from '../entity/crypto';
 import { handleExtendCreditEntityTx } from '../entity/tx/handlers/account-admin';
 import { buildQuorumHanko, verifyHankoForHash } from '../hanko/signing';
 import { createEmptyEnv } from '../runtime';
@@ -226,8 +227,6 @@ const createMultisigAccountState = (
     deferredAccountProposals: new Map(),
     lastFinalizedJHeight: 0,
     jBlockChain: [],
-    entityEncPubKey: `0x${'11'.repeat(32)}`,
-    entityEncPrivKey: `0x${'22'.repeat(32)}`,
     profile: { name: 'Multisig entity', isHub: false, avatar: '', bio: '', website: '' },
     htlcRoutes: new Map(),
     htlcFeesEarned: 0n,
@@ -235,9 +234,12 @@ const createMultisigAccountState = (
     lockBook: new Map(),
     swapTradingPairs: [],
   } as EntityState;
+  const localKeys = deriveLocalEntityCryptoKeys(env, entityId, localSignerId);
   const replica: EntityReplica = {
     entityId,
     signerId: localSignerId,
+    entityEncPubKey: localKeys.publicKey,
+    entityEncPrivKey: localKeys.privateKey,
     mempool: [],
     isProposer: localSignerId === authority.validators[0],
     state,
@@ -246,6 +248,8 @@ const createMultisigAccountState = (
   env.eReplicas.set(`${counterpartyId}:${counterpartySigner}`, {
     entityId: counterpartyId,
     signerId: counterpartySigner,
+    entityEncPubKey: '',
+    entityEncPrivKey: '',
     mempool: [],
     isProposer: true,
     state: {
@@ -680,7 +684,7 @@ describe('multisig secondary Hanko production', () => {
     if (!outbound) throw new Error('TEST_OUTBOUND_ENTITY_PROPOSAL_MISSING');
 
     const wireJson = safeStringify(outbound);
-    expect(wireJson).not.toContain(setup.state.entityEncPrivKey);
+    expect(wireJson).not.toContain(setup.replica.entityEncPrivKey);
     expect(wireJson).not.toContain('entityEncPrivKey');
     expect(wireJson).not.toContain('"newState"');
     expect(wireJson).not.toContain('"outputs"');
@@ -721,7 +725,9 @@ describe('multisig secondary Hanko production', () => {
       signerId: validators[1]!,
       proposedFrame: {
         ...structuredClone(proposal),
-        entityEncPrivKey: validator.state.entityEncPrivKey,
+        // Replica-local secrets are never valid Entity frame fields. Inject one
+        // explicitly so transport validation proves it cannot cross consensus.
+        entityEncPrivKey: validator.replica.entityEncPrivKey,
       } as never,
     });
     expect(secretRejected.outcome).toEqual({ kind: 'rejected', code: 'ENTITY_INPUT_INVALID' });
@@ -1123,6 +1129,8 @@ describe('multisig secondary Hanko production', () => {
     const targetLeader: EntityReplica = {
       entityId: targetEntityId,
       signerId: targetValidators[0]!,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: structuredClone(targetTemplate),
       mempool: [],
       isProposer: true,
@@ -1130,6 +1138,8 @@ describe('multisig secondary Hanko production', () => {
     const targetFollower: EntityReplica = {
       entityId: targetEntityId,
       signerId: targetValidators[1]!,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: structuredClone(targetTemplate),
       mempool: [],
       isProposer: false,

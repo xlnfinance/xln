@@ -474,6 +474,8 @@ const attachSigningReplica = (env: ReturnType<typeof createEmptyEnv>, entityId: 
   env.eReplicas.set(`${entityId}:${signerId}`, {
     entityId,
     signerId,
+    entityEncPubKey: '',
+    entityEncPrivKey: '',
     mempool: [],
     isProposer: true,
     state: {
@@ -581,6 +583,8 @@ const prepareJEventInput = (
 const makeReplicaMissingPrevFrameHash = (): EntityReplica => ({
   entityId: `0x${'11'.repeat(32)}`,
   signerId: '1',
+  entityEncPubKey: '',
+  entityEncPrivKey: '',
   mempool: [],
   isProposer: true,
   state: {
@@ -595,8 +599,6 @@ const makeReplicaMissingPrevFrameHash = (): EntityReplica => ({
     deferredAccountProposals: new Map(),
     lastFinalizedJHeight: 0,
     jBlockChain: [],
-    entityEncPubKey: `0x${'33'.repeat(32)}`,
-    entityEncPrivKey: `0x${'44'.repeat(32)}`,
     profile: {
       name: 'Audit Entity',
       isHub: false,
@@ -625,8 +627,6 @@ const makeEntityState = (entityId: string): EntityState => ({
   deferredAccountProposals: new Map(),
   lastFinalizedJHeight: 0,
   jBlockChain: [],
-  entityEncPubKey: `0x${'55'.repeat(32)}`,
-  entityEncPrivKey: `0x${'66'.repeat(32)}`,
   profile: {
     name: 'Audit Entity',
     isHub: false,
@@ -742,6 +742,8 @@ const sealAuditJSubmitAttempts = (env: RuntimeState, inputs: JInput[]): void => 
         ({
           entityId: jTx.entityId,
           signerId,
+          entityEncPubKey: '',
+          entityEncPrivKey: '',
           mempool: [],
           isProposer: true,
           state,
@@ -1602,6 +1604,8 @@ describe('audit fail-fast regressions', () => {
     const replica: EntityReplica = {
       entityId,
       signerId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state,
       mempool: [],
       isProposer: true,
@@ -1807,6 +1811,8 @@ describe('audit fail-fast regressions', () => {
     env.eReplicas.set(`${sourceHub}:${sourceSigner}`, {
       entityId: sourceHub,
       signerId: sourceSigner,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       mempool: [],
       isProposer: true,
       state: sourceState,
@@ -1814,6 +1820,8 @@ describe('audit fail-fast regressions', () => {
     env.eReplicas.set(`${targetHub}:${targetSigner}`, {
       entityId: targetHub,
       signerId: targetSigner,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       mempool: [],
       isProposer: true,
       state: targetState,
@@ -2079,6 +2087,8 @@ describe('audit fail-fast regressions', () => {
     env.eReplicas.set(`${collisionOwner}:${collisionSigner}`, {
       entityId: collisionOwner,
       signerId: collisionSigner,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       mempool: [],
       isProposer: true,
       state: collisionState,
@@ -2086,6 +2096,8 @@ describe('audit fail-fast regressions', () => {
     env.eReplicas.set(`${sourceHub}:${sourceHubSigner}`, {
       entityId: sourceHub,
       signerId: sourceHubSigner,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       mempool: [],
       isProposer: true,
       state: sourceState,
@@ -2093,6 +2105,8 @@ describe('audit fail-fast regressions', () => {
     env.eReplicas.set(`${bookOwnerHub}:${bookOwnerSigner}`, {
       entityId: bookOwnerHub,
       signerId: bookOwnerSigner,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       mempool: [],
       isProposer: true,
       state: bookOwnerState,

@@ -175,8 +175,6 @@ const makeEntityState = (
   accounts: new Map(),
   lastFinalizedJHeight: 0,
   jBlockChain: [],
-  entityEncPubKey: `0x${'aa'.repeat(32)}`,
-  entityEncPrivKey: `0x${'bb'.repeat(32)}`,
   profile: { name: 'bench', isHub: false, avatar: '', bio: '', website: '' },
   htlcRoutes: new Map(),
   htlcFeesEarned: 0n,
@@ -195,6 +193,8 @@ const addReplica = (
   env.eReplicas.set(`${entityId}:${signerId}`, {
     entityId,
     signerId,
+    entityEncPubKey: `0x${'aa'.repeat(32)}`,
+    entityEncPrivKey: `0x${'bb'.repeat(32)}`,
     mempool: [],
     isProposer: true,
     state: makeEntityState(entityId, signerId, jurisdiction),

@@ -315,6 +315,8 @@ const installStaleJPrefixAuthority = (
   receiver.eReplicas.set(`${output.entityId}:${output.signerId}`, {
     entityId: output.entityId,
     signerId: output.signerId,
+    entityEncPubKey: '',
+    entityEncPrivKey: '',
     isProposer: false,
     mempool: [],
     state: {
@@ -345,6 +347,8 @@ const ensureAppliedAuthority = (env: RuntimeState, output: DeliverableEntityInpu
   const replica = env.eReplicas.get(key) ?? ({
     entityId: output.entityId,
     signerId: output.signerId,
+    entityEncPubKey: '',
+    entityEncPrivKey: '',
     isProposer: false,
     mempool: [],
     state: {
@@ -660,8 +664,6 @@ describe('durable scoped reliable delivery receipts', () => {
         proposerSignature: '0xgenesis',
         entityHeight: 0,
       },
-      entityEncPubKey: 'pub',
-      entityEncPrivKey: 'priv',
       profile: { name: 'Reliable frozen prefix', isHub: false, avatar: '', bio: '', website: '' },
       htlcRoutes: new Map(),
       htlcFeesEarned: 0n,
@@ -677,6 +679,8 @@ describe('durable scoped reliable delivery receipts', () => {
     const replica: EntityReplica = {
       entityId: targetEntityId,
       signerId: validatorId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state,
       mempool: [],
       isProposer: true,

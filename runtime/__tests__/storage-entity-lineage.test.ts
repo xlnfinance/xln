@@ -79,8 +79,6 @@ const makeGenesis = (env: RuntimeState, signerId: string): EntityState => {
     crontabState: initCrontab(),
     lastFinalizedJHeight: 0,
     jBlockChain: [],
-    entityEncPubKey: `0x${'11'.repeat(32)}`,
-    entityEncPrivKey: `0x${'22'.repeat(32)}`,
     profile: { name: 'lineage', isHub: false, avatar: '', bio: '', website: '' },
     htlcRoutes: new Map(),
     htlcFeesEarned: 0n,
@@ -174,6 +172,7 @@ const installReplica = (
     lineage?: CertifiedEntityFrameLink[];
   } = {},
 ): EntityReplica => {
+  const keys = deriveLocalEntityCryptoKeys(env, state.entityId, signerId);
   const replica: EntityReplica = {
     entityId: state.entityId,
     signerId,
@@ -207,9 +206,6 @@ const installCertifiedImportFixture = async (
     entityProviderAddress: jurisdiction.entityProviderAddress,
   } as JReplica);
   genesis.config.jurisdiction = jurisdiction;
-  const keys = deriveLocalEntityCryptoKeys(env, genesis.entityId, signerId);
-  genesis.entityEncPubKey = keys.publicKey;
-  genesis.entityEncPrivKey = keys.privateKey;
   const certified = await certifyNextFrame(env, signerId, genesis, []);
   installReplica(env, signerId, certified.state, {
     anchor: genesisAnchor(genesis),
@@ -286,6 +282,8 @@ describe('certified Entity storage lineage', () => {
       [`${genesis.entityId}:${signerId}`, {
         entityId: genesis.entityId,
         signerId,
+        entityEncPubKey: '',
+        entityEncPrivKey: '',
         state: certified.state,
         mempool: [],
         isProposer: true,
@@ -295,6 +293,8 @@ describe('certified Entity storage lineage', () => {
       [`${genesis.entityId}:${observerId}`, {
         entityId: genesis.entityId,
         signerId: observerId,
+        entityEncPubKey: '',
+        entityEncPrivKey: '',
         state: observerState,
         mempool: [],
         isProposer: false,
@@ -330,6 +330,8 @@ describe('certified Entity storage lineage', () => {
     const idleReplica: EntityReplica = {
       entityId: idleState.entityId,
       signerId: idleSignerId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: idleState,
       mempool: [],
       isProposer: true,
@@ -501,9 +503,6 @@ describe('certified Entity storage lineage', () => {
       entityProviderAddress: jurisdiction.entityProviderAddress,
     } as JReplica);
     genesis.config.jurisdiction = jurisdiction;
-    const keys = deriveLocalEntityCryptoKeys(env, genesis.entityId, signerId);
-    genesis.entityEncPubKey = keys.publicKey;
-    genesis.entityEncPrivKey = keys.privateKey;
     const replica = installReplica(env, signerId, genesis, {
       anchor: genesisAnchor(genesis),
     });

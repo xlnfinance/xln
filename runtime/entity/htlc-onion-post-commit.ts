@@ -106,16 +106,16 @@ const decryptAdvance = async (
   if (proposerAttestations.length !== 1) {
     throw new Error(`HTLC_DEFAULT_PROPOSER_ATTESTATION_MATCH: matches=${proposerAttestations.length}`);
   }
-  if (proposerAttestations[0]!.encryptionPublicKey !== normalized(replica.state.entityEncPubKey)) {
+  if (proposerAttestations[0]!.encryptionPublicKey !== normalized(replica.entityEncPubKey)) {
     throw new Error('HTLC_DEFAULT_PROPOSER_ENCRYPTION_KEY_MISMATCH');
   }
-  if (!replica.state.entityEncPrivKey) throw new Error('HTLC_DEFAULT_PROPOSER_PRIVATE_KEY_MISSING');
+  if (!replica.entityEncPrivKey) throw new Error('HTLC_DEFAULT_PROPOSER_PRIVATE_KEY_MISSING');
   const plaintext = await decryptBytesForLocalValidator(
     layer,
     buildValidatorEncryptionBoard(env, replica.state),
     proposerSignerId,
-    replica.state.entityEncPubKey,
-    replica.state.entityEncPrivKey,
+    replica.entityEncPubKey,
+    replica.entityEncPrivKey,
     layer.contextHash,
     new NobleCryptoProvider(),
   );
@@ -139,13 +139,13 @@ const decryptSecretOfferPayload = async (
     lock.secretOffer!,
   );
   const proposerSignerId = normalized(replica.state.config.validators[0]);
-  if (!replica.state.entityEncPrivKey) throw new Error('HTLC_DEFAULT_PROPOSER_PRIVATE_KEY_MISSING');
+  if (!replica.entityEncPrivKey) throw new Error('HTLC_DEFAULT_PROPOSER_PRIVATE_KEY_MISSING');
   const plaintext = await decryptBytesForLocalValidator(
     offer,
     buildValidatorEncryptionBoard(env, replica.state),
     proposerSignerId,
-    replica.state.entityEncPubKey,
-    replica.state.entityEncPrivKey,
+    replica.entityEncPubKey,
+    replica.entityEncPrivKey,
     htlcSecretOfferContextHash(replica.entityId, accountId, lock),
     new NobleCryptoProvider(),
   );

@@ -12,6 +12,8 @@ const makeReplica = (entityId: string, signerId: string): EntityReplica =>
   ({
     entityId,
     signerId,
+    entityEncPubKey: '',
+    entityEncPrivKey: '',
     mempool: [],
     isProposer: true,
     state: {
@@ -31,8 +33,6 @@ const makeReplica = (entityId: string, signerId: string): EntityReplica =>
       deferredAccountProposals: new Map(),
       lastFinalizedJHeight: 0,
       jBlockChain: [],
-      entityEncPubKey: `${'0x'}${'11'.repeat(32)}`,
-      entityEncPrivKey: `${'0x'}${'22'.repeat(32)}`,
       profile: {
         name: 'BrowserVM Entity',
         isHub: false,

@@ -79,8 +79,6 @@ const makeState = (validators: string[]): EntityState => ({
     proposerSignature: '0xgenesis',
     entityHeight: 0,
   },
-  entityEncPubKey: 'pub',
-  entityEncPrivKey: 'priv',
   profile: { name: 'J prefix', isHub: false, avatar: '', bio: '', website: '' },
   htlcRoutes: new Map(),
   htlcFeesEarned: 0n,
@@ -239,6 +237,8 @@ describe('validator J-prefix consensus', () => {
     const replica: EntityReplica = {
       entityId,
       signerId: validatorId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state,
       mempool: [],
       isProposer: true,
@@ -285,6 +285,8 @@ describe('validator J-prefix consensus', () => {
     const replica: EntityReplica = {
       entityId,
       signerId: validatorId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state,
       mempool: [],
       isProposer: true,
@@ -343,6 +345,8 @@ describe('validator J-prefix consensus', () => {
     const replica: EntityReplica = {
       entityId,
       signerId: validatorId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state,
       mempool: [hubConfigTx(999)],
       isProposer: true,
@@ -405,6 +409,8 @@ describe('validator J-prefix consensus', () => {
     const replica: EntityReplica = {
       entityId,
       signerId: validatorId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state,
       mempool: [],
       isProposer: true,
@@ -458,6 +464,8 @@ describe('validator J-prefix consensus', () => {
     const makeReplica = (signerId: string, history: ValidatorJHistory, isProposer: boolean): EntityReplica => ({
       entityId,
       signerId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: structuredClone(state),
       mempool: [],
       isProposer,
@@ -502,6 +510,8 @@ describe('validator J-prefix consensus', () => {
     const makeReplica = (signerId: string, history: ValidatorJHistory, isProposer: boolean): EntityReplica => ({
       entityId,
       signerId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: structuredClone(baseState),
       mempool: [],
       isProposer,
@@ -553,6 +563,8 @@ describe('validator J-prefix consensus', () => {
     const makeReplica = (signerId: string, isProposer: boolean): EntityReplica => ({
       entityId,
       signerId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: structuredClone(baseState),
       mempool: [],
       isProposer,
@@ -679,6 +691,8 @@ describe('validator J-prefix consensus', () => {
     const replica = (signerId: string, history: ValidatorJHistory): EntityReplica => ({
       entityId,
       signerId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: structuredClone(baseState),
       mempool: [],
       isProposer: signerId === leftId,
@@ -731,6 +745,8 @@ describe('validator J-prefix consensus', () => {
     const leftReplica: EntityReplica = {
       entityId,
       signerId: leftId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: structuredClone(baseState),
       mempool: [],
       isProposer: true,
@@ -739,6 +755,8 @@ describe('validator J-prefix consensus', () => {
     const rightReplica: EntityReplica = {
       entityId,
       signerId: rightId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: structuredClone(baseState),
       mempool: [],
       isProposer: false,
@@ -800,6 +818,8 @@ describe('validator J-prefix consensus', () => {
     const replica: EntityReplica = {
       entityId,
       signerId: validatorId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state,
       mempool: [],
       isProposer: true,
@@ -831,6 +851,8 @@ describe('validator J-prefix consensus', () => {
     const sourceReplica: EntityReplica = {
       entityId,
       signerId: sourceId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: preState,
       mempool: [],
       isProposer: false,
@@ -845,6 +867,8 @@ describe('validator J-prefix consensus', () => {
     const receiverReplica: EntityReplica = {
       entityId,
       signerId: receiverId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: committedState,
       mempool: [],
       isProposer: true,
@@ -901,6 +925,8 @@ describe('validator J-prefix consensus', () => {
     const replica: EntityReplica = {
       entityId,
       signerId: validatorId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: baseState,
       mempool: [],
       isProposer: true,
@@ -1008,6 +1034,8 @@ describe('validator J-prefix consensus', () => {
         const attestation = buildLocalJPrefixAttestation(signerEnvs[index]!, {
           entityId,
           signerId,
+          entityEncPubKey: '',
+          entityEncPrivKey: '',
           state: structuredClone(state),
           mempool: [],
           isProposer: index === 0,
@@ -1063,6 +1091,8 @@ describe('validator J-prefix consensus', () => {
     const replica: EntityReplica = {
       entityId,
       signerId: validatorId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: baseState,
       mempool: [],
       isProposer: true,
@@ -1097,6 +1127,8 @@ describe('validator J-prefix consensus', () => {
     const replica: EntityReplica = {
       entityId,
       signerId: validatorId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state,
       mempool: [],
       isProposer: true,
@@ -1191,6 +1223,8 @@ describe('validator J-prefix consensus', () => {
     const replica: EntityReplica = {
       entityId,
       signerId: validatorId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state,
       mempool: [],
       isProposer: true,
@@ -1241,6 +1275,8 @@ describe('validator J-prefix consensus', () => {
     let replica: EntityReplica = {
       entityId,
       signerId: validatorId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state,
       mempool: [],
       isProposer: true,
@@ -1293,6 +1329,8 @@ describe('validator J-prefix consensus', () => {
     const proposerReplica: EntityReplica = {
       entityId,
       signerId: proposerId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: structuredClone(baseState),
       mempool: [],
       isProposer: true,
@@ -1301,6 +1339,8 @@ describe('validator J-prefix consensus', () => {
     const validatorReplica: EntityReplica = {
       entityId,
       signerId: validatorId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: structuredClone(baseState),
       mempool: [],
       isProposer: false,
@@ -1309,6 +1349,8 @@ describe('validator J-prefix consensus', () => {
     const laggingReplica: EntityReplica = {
       entityId,
       signerId: laggingId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: structuredClone(baseState),
       mempool: [],
       isProposer: false,

@@ -110,16 +110,17 @@ const setup = (label: string) => {
     accounts: new Map(),
     lastFinalizedJHeight: 0,
     jBlockChain: [],
-    entityEncPubKey: `0x${'01'.repeat(32)}`,
-    entityEncPrivKey: `0x${'02'.repeat(32)}`,
     profile: { name: '', isHub: false, avatar: '', bio: '', website: '' },
     htlcRoutes: new Map(),
     htlcFeesEarned: 0n,
     lockBook: new Map(),
   };
+  const keys = deriveLocalEntityCryptoKeys(env, id, signerId);
   const replica: EntityReplica = {
     entityId: id,
     signerId,
+    entityEncPubKey: keys.publicKey,
+    entityEncPrivKey: keys.privateKey,
     state,
     mempool: [],
     isProposer: true,
@@ -160,7 +161,9 @@ const setupNumericAliasBoard = () => {
     env.eReplicas.set(`${id}:${signerId}`, {
       entityId: id,
       signerId,
-      state: { ...structuredClone(state), entityEncPubKey: keys.publicKey, entityEncPrivKey: keys.privateKey },
+      entityEncPubKey: keys.publicKey,
+      entityEncPrivKey: keys.privateKey,
+      state: structuredClone(state),
       mempool: [],
       isProposer: signerId === proposer,
     });
@@ -524,6 +527,8 @@ describe('signed Entity command admission', () => {
     env.eReplicas.set(`${targetEntityId}:${proposer}`, {
       entityId: targetEntityId,
       signerId: proposer,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       isProposer: true,
       mempool: [],
       state,
@@ -613,6 +618,8 @@ describe('signed Entity command admission', () => {
     populated.eReplicas.set(`${targetEntityId}:${staleTopologySigner}`, {
       entityId: targetEntityId,
       signerId: staleTopologySigner,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       mempool: [],
       isProposer: true,
       state: {

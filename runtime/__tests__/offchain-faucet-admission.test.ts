@@ -60,6 +60,8 @@ const makeEnv = (
     [`${hubEntityId}:${hubSignerId}`, {
       entityId: hubEntityId,
       signerId: hubSignerId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       isProposer: true,
       mempool: [],
       state: {

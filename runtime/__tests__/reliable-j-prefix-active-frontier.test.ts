@@ -67,6 +67,8 @@ const installTargetReplica = (
   env.eReplicas.set(`${output.entityId}:${output.signerId}`, {
     entityId: output.entityId,
     signerId: output.signerId,
+    entityEncPubKey: '',
+    entityEncPrivKey: '',
     isProposer: false,
     mempool: [],
     state: {

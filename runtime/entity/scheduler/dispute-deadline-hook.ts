@@ -1,8 +1,6 @@
 import type {
-  EntityReplica,
-} from '../../types';
-import type {
   CrontabExecutionContext,
+  EntityTransitionContext,
   ScheduledHook,
 } from '../scheduler-types';
 import { createStructuredLogger, shortId } from '../../infra/logger';
@@ -12,7 +10,7 @@ import type { DueHookPlan } from './due-hook-types';
 const crontabLog = createStructuredLogger('entity.crontab');
 
 const retryDisputeDeadline = (
-  replica: EntityReplica,
+  replica: EntityTransitionContext,
   hook: ScheduledHook & { type: 'dispute_deadline' },
   retryMs: number,
 ): void => {
@@ -27,7 +25,7 @@ const retryDisputeDeadline = (
 
 export const processDisputeDeadlineHook = (
   hook: ScheduledHook & { type: 'dispute_deadline' },
-  replica: EntityReplica,
+  replica: EntityTransitionContext,
   context: CrontabExecutionContext,
   currentJBlock: number,
   plan: DueHookPlan,

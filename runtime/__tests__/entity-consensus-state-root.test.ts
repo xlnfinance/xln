@@ -34,8 +34,6 @@ const baseState = (): EntityState => ({
     finalizedJBlockHash: `0x${'03'.repeat(32)}`,
     eventHistoryRoot: `0x${'04'.repeat(32)}`,
   },
-  entityEncPubKey: 'validator-local-pub-a',
-  entityEncPrivKey: 'validator-local-priv-a',
   profile: { name: 'state-root', isHub: false, avatar: '', bio: '', website: '' },
   htlcRoutes: new Map(),
   htlcFeesEarned: 0n,
@@ -79,8 +77,6 @@ const mutators = {
     confirmedNonce: 1n,
     generation: 1,
   }; },
-  entityEncPubKey: state => { state.entityEncPubKey = 'validator-local-pub-b'; },
-  entityEncPrivKey: state => { state.entityEncPrivKey = 'validator-local-priv-b'; },
   profileEncryptionManifest: state => { state.profileEncryptionManifest = {
     entityId,
     threshold: 1,
@@ -459,7 +455,6 @@ test('Entity frame hash binds the complete shared post-replay state root', async
   expect(rightHash).not.toBe(leftHash);
 
   right.nonces.clear();
-  right.entityEncPrivKey = 'different-validator-local-secret';
   right.htlcNotes?.set('note' as never, 'different-validator-local-note');
   expect(await createEntityFrameHash('genesis', 1, 100, [], right)).toBe(leftHash);
   expect(await createEntityFrameHash('different-prev-frame', 1, 100, [], right)).not.toBe(leftHash);

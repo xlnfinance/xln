@@ -1,3 +1,15 @@
+import type { EntityCandidateEffect, EntityState, HashToSign } from '../types';
+
+/**
+ * One isolated Entity reducer pass only needs the candidate State and its id.
+ * Replica-local mempool, signatures, encryption keys, and delivery metadata
+ * intentionally remain outside deterministic scheduling.
+ */
+export type EntityTransitionContext = {
+  entityId: string;
+  state: EntityState;
+};
+
 export type CrontabTaskMethod = 'maintainPendingAccounts' | 'hubRebalance';
 
 export type CrontabTaskParam = string | number | boolean;
@@ -83,4 +95,3 @@ export type CrontabExecutionContext = {
   accountChanges: Set<string>;
   candidateEffects?: EntityCandidateEffect[];
 };
-import type { EntityCandidateEffect, HashToSign } from '../types';

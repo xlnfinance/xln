@@ -208,8 +208,6 @@ const projectEntityCoreDoc = (state: EntityState): Record<string, unknown> => ({
   lastFinalizedJHeight: state.lastFinalizedJHeight,
   crontabState: state.crontabState,
   jBatchState: state.jBatchState,
-  entityEncPubKey: state.entityEncPubKey,
-  entityEncPrivKey: state.entityEncPrivKey,
   profile: state.profile,
   htlcRoutes: state.htlcRoutes,
   htlcFeesEarned: state.htlcFeesEarned,

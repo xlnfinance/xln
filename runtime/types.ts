@@ -855,11 +855,6 @@ export interface EntityState {
   jBatchState?: JBatchState;
   /** Bounded current EntityProvider nonce plus at most one committed action. */
   entityProviderActionState?: EntityProviderActionState;
-  // 🔐 Deterministic entity-scoped X25519 keys for HTLC envelope encryption.
-  // These are derived exactly once at entity creation/import and are required
-  // for every locally-owned entity. Missing keys are a hard invariant failure.
-  entityEncPubKey: string;
-  entityEncPrivKey: string;
   /** Entity-consensus-certified public board key manifest; never contains private material. */
   profileEncryptionManifest?: import('./protocol/htlc/validator-encryption').ValidatorEncryptionManifest;
 
@@ -1115,6 +1110,13 @@ export interface ValidatorEntityFrameExecution {
 export interface EntityReplica {
   entityId: string;
   signerId: string;
+  /**
+   * Validator-local X25519 identity. The signed public-key manifest is Entity
+   * consensus state; this derived keypair belongs to one validator replica and
+   * must never enter an Entity frame, State root, or remote replica snapshot.
+   */
+  entityEncPubKey: string;
+  entityEncPrivKey: string;
   state: EntityState;
   mempool: EntityTx[];
   proposal?: ProposedEntityFrame;

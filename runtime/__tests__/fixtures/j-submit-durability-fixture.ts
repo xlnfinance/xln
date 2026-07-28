@@ -38,8 +38,6 @@ const makeState = (): EntityState => {
     lastFinalizedJHeight: 0,
     jBlockChain: [],
     profile: { name: 'j-submit', isHub: false, avatar: '', bio: '', website: '' },
-    entityEncPubKey: '',
-    entityEncPrivKey: '',
     htlcRoutes: new Map(),
     htlcFeesEarned: 0n,
     lockBook: new Map(),
@@ -71,6 +69,8 @@ export const makeJSubmitDurabilityFixture = () => {
   const replica: EntityReplica = {
     entityId,
     signerId,
+    entityEncPubKey: '',
+    entityEncPrivKey: '',
     state: makeState(),
     mempool: [],
     isProposer: true,

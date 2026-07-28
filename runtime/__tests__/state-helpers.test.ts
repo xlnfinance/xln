@@ -130,6 +130,8 @@ const makeManualFallbackAccount = () => ({
 const makeProjectionReplica = () => ({
   entityId: `0x${'aa'.repeat(32)}`,
   signerId: `0x${'11'.repeat(20)}`,
+  entityEncPubKey: '',
+  entityEncPrivKey: '',
   isProposer: false,
   state: {
     entityId: `0x${'aa'.repeat(32)}`,
@@ -148,8 +150,6 @@ const makeProjectionReplica = () => ({
     deferredAccountProposals: new Map(),
     lastFinalizedJHeight: 0,
     jBlockChain: [],
-    entityEncPubKey: '',
-    entityEncPrivKey: '',
     profile: { name: 'Projection', isHub: false, avatar: '', bio: '', website: '' },
     htlcRoutes: new Map(),
     htlcFeesEarned: 0n,

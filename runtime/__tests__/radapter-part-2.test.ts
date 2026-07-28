@@ -149,6 +149,8 @@ const makeEnv = (): RuntimeState =>
         {
           entityId,
           signerId: 'signer',
+          entityEncPubKey: 'pub',
+          entityEncPrivKey: 'priv',
           mempool: [],
           isProposer: true,
           state: {
@@ -218,8 +220,6 @@ const makeEnv = (): RuntimeState =>
             deferredAccountProposals: new Map(),
             lastFinalizedJHeight: 0,
             jBlockChain: [],
-            entityEncPubKey: 'pub',
-            entityEncPrivKey: 'priv',
             profile: { name: 'Adapter Test', isHub: false, avatar: '', bio: '', website: '' },
             htlcRoutes: new Map(),
             htlcFeesEarned: 0n,

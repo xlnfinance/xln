@@ -10,6 +10,7 @@ import {
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
 import { buildSignedEntityCommand } from '../entity/command';
 import { signedEntityCommandTx } from '../entity/command-codec';
+import { deriveLocalEntityCryptoKeys } from '../entity/crypto';
 import { generateLazyEntityId } from '../entity/factory';
 import { applyEntityFrame, applyEntityInput } from '../entity/consensus/index';
 import {
@@ -74,8 +75,6 @@ const makeState = (id: string, proposer: string, timestamp: number): EntityState
   lastFinalizedJHeight: 0,
   jBlockChain: [],
   profile: { name: 'wake-test', isHub: false, avatar: '', bio: '', website: '' },
-  entityEncPubKey: `0x${'11'.repeat(32)}`,
-  entityEncPrivKey: `0x${'22'.repeat(32)}`,
   htlcRoutes: new Map(),
   htlcFeesEarned: 0n,
   htlcNotes: new Map(),
@@ -87,10 +86,22 @@ const makeState = (id: string, proposer: string, timestamp: number): EntityState
 const makeReplica = (state: EntityState, signer: string, isProposer: boolean): EntityReplica => ({
   entityId: state.entityId,
   signerId: signer,
+  entityEncPubKey: '',
+  entityEncPrivKey: '',
   state,
   mempool: [],
   isProposer,
 });
+
+const attachLocalEntityKeys = (
+  env: ReturnType<typeof createEmptyEnv>,
+  replica: EntityReplica,
+): EntityReplica => {
+  const keys = deriveLocalEntityCryptoKeys(env, replica.entityId, replica.signerId);
+  replica.entityEncPubKey = keys.publicKey;
+  replica.entityEncPrivKey = keys.privateKey;
+  return replica;
+};
 
 describe('runtime scheduled wake', () => {
   test('rejects an Entity frame timestamp regression before applying transactions', async () => {
@@ -244,7 +255,7 @@ describe('runtime scheduled wake', () => {
     const proposer = deriveSignerAddressSync(seed, '1').toLowerCase();
     registerSignerKey(env, proposer, deriveSignerKeySync(seed, '1'));
     const id = generateLazyEntityId([proposer], 1n).toLowerCase();
-    const replica = makeReplica(makeState(id, proposer, 1), proposer, true);
+    const replica = attachLocalEntityKeys(env, makeReplica(makeState(id, proposer, 1), proposer, true));
     env.eReplicas.set(`${id}:${proposer}`, replica);
     collectLocalProfileEncryptionAnnouncements(env);
     const manifest = getCompleteProfileEncryptionManifest(env, replica.state);

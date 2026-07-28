@@ -283,8 +283,6 @@ const makeHubState = (entityId: string, height: number, timestamp: number): Enti
   deferredAccountProposals: new Map(),
   lastFinalizedJHeight: 0,
   jBlockChain: [],
-  entityEncPubKey: 'bench-pub',
-  entityEncPrivKey: 'bench-priv',
   profile: { name: 'H1 1M Hub Bench', isHub: true, avatar: '', bio: '', website: '' },
   htlcRoutes: new Map(),
   htlcFeesEarned: 0n,
@@ -334,6 +332,8 @@ const makeEnv = (seed: string, entityId: string, state: EntityState): RuntimeSta
       [`${entityId}:bench-signer`, {
         entityId,
         signerId: 'bench-signer',
+        entityEncPubKey: 'bench-pub',
+        entityEncPrivKey: 'bench-priv',
         mempool: [],
         isProposer: true,
         state,

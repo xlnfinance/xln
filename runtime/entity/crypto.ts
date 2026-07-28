@@ -42,18 +42,18 @@ export const canonicalizeLocalEntityCryptoKeys = (
   env: RuntimeState,
   entityId: string,
   signerId: string,
-  state: { entityEncPubKey?: string; entityEncPrivKey?: string },
+  replica: { entityEncPubKey?: string; entityEncPrivKey?: string },
 ): void => {
   if (!hasLocalSignerKey(env, signerId)) return;
   const { publicKey, privateKey } = deriveLocalEntityCryptoKeys(env, entityId, signerId);
-  if (state.entityEncPubKey && state.entityEncPubKey !== publicKey) {
+  if (replica.entityEncPubKey && replica.entityEncPubKey !== publicKey) {
     throw new Error(
       `ENTITY_CRYPTO_KEY_MISMATCH: entity=${entityId} signer=${signerId} ` +
-        `expectedPub=${publicKey} actualPub=${String(state.entityEncPubKey || '')}`,
+        `expectedPub=${publicKey} actualPub=${String(replica.entityEncPubKey || '')}`,
     );
   }
-  state.entityEncPubKey = publicKey;
-  state.entityEncPrivKey = privateKey;
+  replica.entityEncPubKey = publicKey;
+  replica.entityEncPrivKey = privateKey;
 };
 
 /**
@@ -65,18 +65,18 @@ export const assertPersistedLocalEntityCryptoKeys = (
   env: RuntimeState,
   entityId: string,
   signerId: string,
-  state: { entityEncPubKey?: string; entityEncPrivKey?: string },
+  replica: { entityEncPubKey?: string; entityEncPrivKey?: string },
 ): void => {
   if (!hasLocalSignerKey(env, signerId)) return;
   const expected = deriveLocalEntityCryptoKeys(env, entityId, signerId);
   if (
-    state.entityEncPubKey !== expected.publicKey ||
-    state.entityEncPrivKey !== expected.privateKey
+    replica.entityEncPubKey !== expected.publicKey ||
+    replica.entityEncPrivKey !== expected.privateKey
   ) {
     throw new Error(
       `ENTITY_CRYPTO_KEY_MISMATCH: entity=${entityId} signer=${signerId} ` +
-      `expectedPub=${expected.publicKey} actualPub=${String(state.entityEncPubKey || '')} ` +
-      `privateKeyMatch=${state.entityEncPrivKey === expected.privateKey}`,
+      `expectedPub=${expected.publicKey} actualPub=${String(replica.entityEncPubKey || '')} ` +
+      `privateKeyMatch=${replica.entityEncPrivKey === expected.privateKey}`,
     );
   }
 };
@@ -84,6 +84,6 @@ export const assertPersistedLocalEntityCryptoKeys = (
 export const assertLocalEntityCryptoKeys = (env: RuntimeState): void => {
   for (const [replicaKey, replica] of env.eReplicas.entries()) {
     const signerId = extractSignerId(replicaKey);
-    canonicalizeLocalEntityCryptoKeys(env, replica.entityId, signerId, replica.state);
+    canonicalizeLocalEntityCryptoKeys(env, replica.entityId, signerId, replica);
   }
 };

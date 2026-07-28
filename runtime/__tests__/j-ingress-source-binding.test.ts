@@ -55,6 +55,8 @@ const entityReplica = (
 ): EntityReplica => ({
   entityId: id,
   signerId,
+  entityEncPubKey: '',
+  entityEncPrivKey: '',
   mempool: [],
   isProposer: true,
   state: {
@@ -75,8 +77,6 @@ const entityReplica = (
     deferredAccountProposals: new Map(),
     lastFinalizedJHeight: 0,
     jBlockChain: [],
-    entityEncPubKey: `0x${'11'.repeat(32)}`,
-    entityEncPrivKey: `0x${'22'.repeat(32)}`,
     profile: { name: 'source-bound', isHub: false, avatar: '', bio: '', website: '' },
     htlcRoutes: new Map(),
     htlcFeesEarned: 0n,

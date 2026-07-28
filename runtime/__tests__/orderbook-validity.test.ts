@@ -84,8 +84,6 @@ const makeState = (book: BookState, offerId = 'offer-1', offer = makeOffer()): E
     accounts: new Map([['alice', makeAccount(offerId, offer)]]),
     lastFinalizedJHeight: 0,
     jBlockChain: [],
-    entityEncPubKey: '',
-    entityEncPrivKey: '',
     profile: { name: 'Hub', isHub: true, avatar: '', bio: '', website: '' },
     htlcRoutes: new Map(),
     htlcFeesEarned: 0n,

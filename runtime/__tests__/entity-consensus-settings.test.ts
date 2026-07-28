@@ -48,6 +48,8 @@ const proposal = (payment: EntityTx): Proposal => ({
 const replica = (payment: EntityTx): EntityReplica => ({
   entityId: `0x${'aa'.repeat(32)}`,
   signerId: signer,
+  entityEncPubKey: '',
+  entityEncPrivKey: '',
   isProposer: true,
   mempool: [],
   state: {
@@ -68,8 +70,6 @@ const replica = (payment: EntityTx): EntityReplica => ({
     accounts: new Map(),
     deferredAccountProposals: new Map(),
     jBlockChain: [],
-    entityEncPubKey: '',
-    entityEncPrivKey: '',
     profile: { name: 'Payment board', isHub: false, avatar: '', bio: '', website: '' },
     htlcRoutes: new Map(),
     htlcFeesEarned: 0n,

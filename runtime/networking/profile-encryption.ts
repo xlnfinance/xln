@@ -90,7 +90,7 @@ export const createLocalValidatorEncryptionAttestation = (
     throw new Error(`PROFILE_ENCRYPTION_SIGNER_IDENTITY_MISMATCH: signerId=${signerId}`);
   }
   const replica = findLocalReplica(env, state.entityId, signerId);
-  const encryptionPublicKey = replica?.state.entityEncPubKey;
+  const encryptionPublicKey = replica?.entityEncPubKey;
   if (!encryptionPublicKey) {
     throw new Error(`PROFILE_ENCRYPTION_LOCAL_X25519_KEY_REQUIRED: signerId=${signerId}`);
   }

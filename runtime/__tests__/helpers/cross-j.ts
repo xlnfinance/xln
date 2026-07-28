@@ -1,6 +1,7 @@
 import { deriveAccountWatchSeed } from '../../account/watch-seed';
 import { createEmptyAccountJClaimAccumulator } from '../../account/j-claim-accumulator';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../../account/crypto';
+import { deriveLocalEntityCryptoKeys, hasLocalSignerKey } from '../../entity/crypto';
 import { getJurisdictionStackId } from '../../jurisdiction/jurisdiction-runtime';
 import {
   canonicalDisputeFinalizationEvidenceHash,
@@ -163,8 +164,6 @@ export const makeState = (
     accounts,
     lastFinalizedJHeight: 0,
     jBlockChain: [],
-    entityEncPubKey: `0x${'aa'.repeat(32)}`,
-    entityEncPrivKey: `0x${'bb'.repeat(32)}`,
     profile: { name: '', isHub: false, avatar: '', bio: '', website: '' },
     htlcRoutes: new Map(),
     htlcFeesEarned: 0n,
@@ -175,9 +174,14 @@ export const makeState = (
 };
 
 export const addReplica = (env: RuntimeState, state: EntityState, signerId: string, isProposer = true): void => {
+  const keys = hasLocalSignerKey(env, signerId)
+    ? deriveLocalEntityCryptoKeys(env, state.entityId, signerId)
+    : { publicKey: '', privateKey: '' };
   env.eReplicas.set(`${state.entityId}:${signerId}`, {
     entityId: state.entityId,
     signerId,
+    entityEncPubKey: keys.publicKey,
+    entityEncPrivKey: keys.privateKey,
     state,
     mempool: [],
     isProposer,

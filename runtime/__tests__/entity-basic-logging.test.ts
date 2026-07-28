@@ -38,8 +38,6 @@ const makeEntityState = (validators: readonly [string, string], entityId: string
   deferredAccountProposals: new Map(),
   lastFinalizedJHeight: 0,
   jBlockChain: [],
-  entityEncPubKey: `0x${'11'.repeat(32)}`,
-  entityEncPrivKey: `0x${'22'.repeat(32)}`,
   profile: {
     name: 'Basic Test Entity',
     isHub: false,

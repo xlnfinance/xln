@@ -34,8 +34,6 @@ const makeState = (entityId: string, height: number): EntityState => ({
   accounts: new Map(),
   lastFinalizedJHeight: 0,
   jBlockChain: [],
-  entityEncPubKey: '',
-  entityEncPrivKey: '',
   profile: { name: `entity-${entityId.slice(-4)}`, isHub: false, avatar: '', bio: '', website: '' },
   htlcRoutes: new Map(),
   htlcFeesEarned: 0n,
@@ -46,6 +44,8 @@ const makeState = (entityId: string, height: number): EntityState => ({
 const canonicalHash = (state: EntityState): string => computeCanonicalEntityHash({
   entityId: state.entityId,
   signerId: 'signer',
+  entityEncPubKey: '',
+  entityEncPrivKey: '',
   mempool: [],
   isProposer: true,
   state,

@@ -35,8 +35,6 @@ const makeHubState = (frozenTimestamp: number, lastSubmittedAt: number): EntityS
   deferredAccountProposals: new Map(),
   lastFinalizedJHeight: 0,
   jBlockChain: [],
-  entityEncPubKey: `0x${'11'.repeat(32)}`,
-  entityEncPrivKey: `0x${'22'.repeat(32)}`,
   profile: { name: 'H1', isHub: true, avatar: '', bio: '', website: '' },
   htlcRoutes: new Map(),
   htlcFeesEarned: 0n,

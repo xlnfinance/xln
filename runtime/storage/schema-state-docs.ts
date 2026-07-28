@@ -79,7 +79,7 @@ export const validateStorageEntityCoreDocValue = (value: unknown): StorageEntity
   requireStorageMap(doc['lockBook'], `${code}_LOCK_BOOK`);
   validateDeferredAccountProposals(doc['deferredAccountProposals'], code);
   const { deferredAccountProposals: _splitAccountRefs, ...sharedCore } = doc;
-  validateEntityState({ ...sharedCore, accounts: new Map(), entityEncPubKey: '', entityEncPrivKey: '' }, code);
+  validateEntityState({ ...sharedCore, accounts: new Map() }, code);
   return doc as StorageEntityCoreDoc;
 };
 

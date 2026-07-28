@@ -1,10 +1,10 @@
 import type {
   EntityInput,
-  EntityReplica,
   RuntimeState,
 } from '../../types';
 import type {
   CrontabExecutionContext,
+  EntityTransitionContext,
   ScheduledHook,
 } from '../scheduler-types';
 import { getEntityCertifiedJurisdictionHeight } from '../../jurisdiction/height';
@@ -18,7 +18,7 @@ const crontabLog = createStructuredLogger('entity.crontab');
 
 const processSecretAckTimeout = (
   hook: Extract<ScheduledHook, { type: 'htlc_secret_ack_timeout' }>,
-  replica: EntityReplica,
+  replica: EntityTransitionContext,
   plan: DueHookPlan,
 ): void => {
   const { hashlock, counterpartyEntityId, inboundLockId } = hook.data;
@@ -41,7 +41,7 @@ const processSecretAckTimeout = (
 const processDueHook = (
   env: RuntimeState,
   hook: ScheduledHook,
-  replica: EntityReplica,
+  replica: EntityTransitionContext,
   context: CrontabExecutionContext,
   plan: DueHookPlan,
   firstValidator: string,
@@ -91,7 +91,7 @@ const processDueHook = (
 };
 
 const appendBatchedHookOutputs = (
-  replica: EntityReplica,
+  replica: EntityTransitionContext,
   context: CrontabExecutionContext,
   plan: DueHookPlan,
   firstValidator: string,
@@ -162,7 +162,7 @@ const appendBatchedHookOutputs = (
 export const processDueHooks = (
   env: RuntimeState,
   hooks: ScheduledHook[],
-  replica: EntityReplica,
+  replica: EntityTransitionContext,
   context: CrontabExecutionContext,
 ): EntityInput[] => {
   const firstValidator = replica.state.config.validators?.[0];

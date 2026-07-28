@@ -333,6 +333,8 @@ export type StorageReplicaMeta = {
   entityId: string;
   signerId: string;
   isProposer: boolean;
+  entityEncPubKey: string;
+  entityEncPrivKey: string;
   /**
    * Exact validator-local state for multi-validator or checkpoint records.
    * Intermediate single-signer metadata references the authoritative shared
@@ -340,7 +342,7 @@ export type StorageReplicaMeta = {
    */
   state?: EntityState;
   /** Entity-local fields intentionally excluded from shared Entity docs. */
-  localEntityState?: Pick<EntityState, 'entityEncPubKey' | 'entityEncPrivKey' | 'htlcNotes'>;
+  localEntityState?: Pick<EntityState, 'htlcNotes'>;
   mempool: EntityReplica['mempool'];
   position?: EntityReplica['position'];
   proposal?: EntityReplica['proposal'];
@@ -362,8 +364,6 @@ type AssertNoUnclassifiedPersistenceKeys<T extends never> = T;
 type EntityPersistenceSplitKeys =
   | 'accounts'
   | 'orderbookExt'
-  | 'entityEncPubKey'
-  | 'entityEncPrivKey'
   | 'htlcNotes';
 type ReplicaPersistenceSplitKeys = never;
 

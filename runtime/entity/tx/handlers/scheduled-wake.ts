@@ -1,6 +1,5 @@
 import type {
   EntityCandidateEffect,
-  EntityReplica,
   EntityState,
   EntityTx,
   RuntimeState,
@@ -20,17 +19,14 @@ export const handleScheduledWakeEntityTx = async (
 ) => {
   assertScheduledWakeMatchesState(state, tx);
   if (!state.crontabState) throw new Error('SCHEDULED_WAKE_CRONTAB_MISSING');
-  const replica: EntityReplica = {
+  const transition = {
     entityId: state.entityId,
-    signerId: tx.data.proposerSignerId,
     state,
-    mempool: [],
-    isProposer: true,
   };
   const hashesToSign: HashToSign[] = [];
   const accountChanges = new Set<string>();
   const candidateEffects: EntityCandidateEffect[] = [];
-  const outputs = await executeCrontab(env, replica, state.crontabState, {
+  const outputs = await executeCrontab(env, transition, state.crontabState, {
     manualBroadcastInInput,
     hashesToSign,
     accountChanges,
@@ -47,7 +43,7 @@ export const handleScheduledWakeEntityTx = async (
     return false;
   });
   return {
-    newState: replica.state,
+    newState: transition.state,
     outputs: externalOutputs,
     // A scheduled wake is already part of this Entity proposal. Its
     // deterministic self-actions therefore belong to the same signed frame;

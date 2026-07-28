@@ -1,9 +1,9 @@
 import type {
-  EntityReplica,
   RuntimeState,
 } from '../../types';
 import type {
   CrontabExecutionContext,
+  EntityTransitionContext,
   ScheduledHook,
 } from '../scheduler-types';
 import {
@@ -18,7 +18,7 @@ import type { DueHookPlan } from './due-hook-types';
 export const processBoardResealHook = (
   env: RuntimeState,
   hook: ScheduledHook & { type: 'board_reseal' },
-  replica: EntityReplica,
+  replica: EntityTransitionContext,
   context: CrontabExecutionContext,
   plan: DueHookPlan,
 ): void => {

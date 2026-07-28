@@ -182,11 +182,6 @@ export const hydrateEntityStateFromStorage = (options: {
     jBlockChain: core.jBlockChain,
     ...withProp('jHistoryFinality', core.jHistoryFinality),
     ...withProp('certifiedBoardState', core.certifiedBoardState),
-    // Entity encryption keys are validator-local identity material. Latest
-    // restore overlays the exact values from StorageReplicaMeta; historical
-    // shared state deliberately has no validator-local key owner.
-    entityEncPubKey: '',
-    entityEncPrivKey: '',
     ...withProp('profileEncryptionManifest', core.profileEncryptionManifest),
     profile: core.profile,
     htlcRoutes: core.htlcRoutes,

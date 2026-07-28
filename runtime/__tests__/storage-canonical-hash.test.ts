@@ -95,6 +95,8 @@ const makeEnv = (account: AccountState, reserves: Array<[number, bigint]>): Runt
       [`${entityId}:${signerIds[0]}`, {
         entityId,
         signerId: signerIds[0]!,
+        entityEncPubKey: '',
+        entityEncPrivKey: '',
         mempool: [],
         isProposer: true,
         state: {
@@ -109,8 +111,6 @@ const makeEnv = (account: AccountState, reserves: Array<[number, bigint]>): Runt
           deferredAccountProposals: new Map(),
           lastFinalizedJHeight: 0,
           jBlockChain: [],
-          entityEncPubKey: 'pub',
-          entityEncPrivKey: 'priv',
           profile: { name: 'canonical-test', isHub: false, avatar: '', bio: '', website: '' },
           htlcRoutes: new Map(),
           htlcFeesEarned: 0n,

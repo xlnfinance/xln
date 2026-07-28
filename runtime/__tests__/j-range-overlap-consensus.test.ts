@@ -65,8 +65,6 @@ const initialState = (): EntityState => ({
   accounts: new Map(),
   lastFinalizedJHeight: 0,
   jBlockChain: [],
-  entityEncPubKey: 'pub',
-  entityEncPrivKey: 'priv',
   profile: { name: 'test', isHub: false, avatar: '', bio: '', website: '' },
   htlcRoutes: new Map(),
   htlcFeesEarned: 0n,
@@ -87,6 +85,8 @@ describe('overlapping finalized J-range consensus', () => {
     const leader: EntityReplica = {
       entityId,
       signerId: leaderId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: initialState(),
       mempool: [],
       isProposer: true,
@@ -154,6 +154,8 @@ describe('overlapping finalized J-range consensus', () => {
     const initialValidator: EntityReplica = {
       entityId,
       signerId: validatorId,
+      entityEncPubKey: '',
+      entityEncPrivKey: '',
       state: initialState(),
       mempool: [],
       isProposer: false,

@@ -59,6 +59,8 @@ const makeReplica = (entityId: string, counterpartyId: string): EntityReplica =>
   return {
     entityId,
     signerId: '1',
+    entityEncPubKey: '',
+    entityEncPrivKey: '',
     mempool: [],
     isProposer: true,
     state: {
@@ -78,8 +80,6 @@ const makeReplica = (entityId: string, counterpartyId: string): EntityReplica =>
       deferredAccountProposals: new Map(),
       lastFinalizedJHeight: 0,
       jBlockChain: [],
-      entityEncPubKey: `${'0x'}${'11'.repeat(32)}`,
-      entityEncPrivKey: `${'0x'}${'22'.repeat(32)}`,
       profile: {
         name: 'Replica',
         isHub: false,

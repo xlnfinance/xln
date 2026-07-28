@@ -149,6 +149,8 @@ const makeEnv = (): RuntimeState =>
         {
           entityId,
           signerId: 'signer',
+          entityEncPubKey: 'pub',
+          entityEncPrivKey: 'priv',
           mempool: [],
           isProposer: true,
           state: {
@@ -218,8 +220,6 @@ const makeEnv = (): RuntimeState =>
             deferredAccountProposals: new Map(),
             lastFinalizedJHeight: 0,
             jBlockChain: [],
-            entityEncPubKey: 'pub',
-            entityEncPrivKey: 'priv',
             profile: { name: 'Adapter Test', isHub: false, avatar: '', bio: '', website: '' },
             htlcRoutes: new Map(),
             htlcFeesEarned: 0n,
@@ -696,7 +696,7 @@ test('runtime adapter direct read paths return compact read snapshots', async ()
   account.settlementWorkspace = { notes: 'w'.repeat(100_000) };
   account.swapOrderHistory = new Map([['history', { note: 'h'.repeat(100_000), resolves: [] }]]);
   account.swapClosedOrders = new Map([['closed', { note: 'c'.repeat(100_000), resolves: [] }]]);
-  replica.state.entityEncPrivKey = 'private-key';
+  replica.entityEncPrivKey = 'private-key';
   replica.state.nonces = new Map(
     Array.from({ length: 500 }, (_, index) => [`0x${index.toString(16).padStart(64, '0')}`, index]),
   );
@@ -876,7 +876,7 @@ test('current stored view frame overlays local identity without mixing a later l
         replica.state.prevFrameHash = 'frame-h8';
         replica.state.profile = { ...replica.state.profile, name: 'Later live frame' };
         replica.state.reserves = new Map([[1, 800n]]);
-        replica.state.entityEncPubKey = 'pub-h8';
+        replica.entityEncPubKey = 'pub-h8';
         replica.state.htlcNotes = new Map([['hashlock:local-h8', 'local note h8']]);
         return {
           core: storedCore,
@@ -1385,6 +1385,8 @@ test('runtime adapter view frame defaults to the live entity with real relations
     ...primary,
     entityId: emptyEntityId,
     signerId: 'empty-signer',
+    entityEncPubKey: '',
+    entityEncPrivKey: '',
     state: {
       ...primary.state,
       entityId: emptyEntityId,
@@ -1426,6 +1428,8 @@ test('runtime adapter historical batch without entityId defaults to live entity 
     ...primary,
     entityId: emptyEntityId,
     signerId: 'empty-signer',
+    entityEncPubKey: '',
+    entityEncPrivKey: '',
     state: {
       ...primary.state,
       entityId: emptyEntityId,
@@ -1747,6 +1751,8 @@ test('runtime adapter view frame honors the requested entity id', async () => {
     ...first,
     entityId: secondEntityId,
     signerId: 'other-signer',
+    entityEncPubKey: '',
+    entityEncPrivKey: '',
     state: {
       ...first.state,
       entityId: secondEntityId,
@@ -2596,7 +2602,7 @@ test('runtime adapter view-frame caps route-heavy core maps under wire budget', 
   const env = makeEnv();
   const replica = Array.from(env.eReplicas.values())[0]!;
   const largeNote = 'x'.repeat(4_000);
-  replica.state.entityEncPrivKey = 'secret-key-must-not-leave-server';
+  replica.entityEncPrivKey = 'secret-key-must-not-leave-server';
   replica.state.crossJurisdictionSwaps = new Map();
   for (let index = 0; index < 400; index += 1) {
     const id = `route-${index.toString().padStart(3, '0')}`;

@@ -252,8 +252,6 @@ const certificationState = (): EntityState => ({
   accounts: new Map(),
   lastFinalizedJHeight: 0,
   jBlockChain: [],
-  entityEncPubKey: first.encryptionPublicKey,
-  entityEncPrivKey: first.encryptionPrivateKey,
   profile: { name: 'certified-profile', isHub: false, avatar: '', bio: '', website: '' },
   htlcRoutes: new Map(),
   htlcFeesEarned: 0n,
@@ -272,8 +270,6 @@ const senderState = (): EntityState => ({
     validators: [SENDER_SIGNER],
     shares: { [SENDER_SIGNER]: 1n },
   },
-  entityEncPubKey: pubKeyToHex(SENDER_ENCRYPTION.publicKey),
-  entityEncPrivKey: hex(SENDER_ENCRYPTION.privateKey),
 });
 
 const processSenderState = (
@@ -295,8 +291,6 @@ const processSenderState = (
   },
   accounts: new Map(),
   deferredAccountProposals: new Map(),
-  entityEncPubKey: encryptionPublicKey,
-  entityEncPrivKey: encryptionPrivateKey,
   swapTradingPairs: [],
   crontabState: initCrontab(),
 });
@@ -711,10 +705,10 @@ describe('multisig HTLC validator encryption', () => {
       creationEnv.eReplicas.set(`${entityId}:${signerId}`, {
         entityId,
         signerId,
+        entityEncPubKey: keys.publicKey,
+        entityEncPrivKey: keys.privateKey,
         state: {
           ...structuredClone(state),
-          entityEncPubKey: keys.publicKey,
-          entityEncPrivKey: keys.privateKey,
         },
         mempool: [],
         isProposer: signerId === proposer,
@@ -1293,6 +1287,8 @@ describe('multisig HTLC validator encryption', () => {
     const replica = {
       entityId: SENDER_ID,
       signerId: SENDER_SIGNER,
+      entityEncPubKey: pubKeyToHex(SENDER_ENCRYPTION.publicKey),
+      entityEncPrivKey: hex(SENDER_ENCRYPTION.privateKey),
       isProposer: true,
       mempool: [],
       state,
@@ -1643,6 +1639,8 @@ describe('multisig HTLC validator encryption', () => {
     env.eReplicas.set(`${sourceEntityId}:${source.signer}`, {
       entityId: sourceEntityId,
       signerId: source.signer,
+      entityEncPubKey: pubKeyToHex(sourceEncryption.publicKey),
+      entityEncPrivKey: hex(sourceEncryption.privateKey),
       isProposer: true,
       mempool: [],
       state: structuredClone(initialState),
@@ -1732,6 +1730,8 @@ describe('multisig HTLC validator encryption', () => {
       validatorEnv.eReplicas.set(`${sourceEntityId}:${source.signer}`, {
         entityId: sourceEntityId,
         signerId: source.signer,
+        entityEncPubKey: '',
+        entityEncPrivKey: '',
         isProposer: true,
         mempool: [],
         state: structuredClone(initialState),
@@ -1793,6 +1793,8 @@ describe('multisig HTLC validator encryption', () => {
     env.eReplicas.set(`${entityId}:${signerId}`, {
       entityId,
       signerId,
+      entityEncPubKey: pubKeyToHex(encryption.publicKey),
+      entityEncPrivKey: hex(encryption.privateKey),
       isProposer: true,
       mempool: [],
       state,
@@ -1898,6 +1900,8 @@ describe('multisig HTLC validator encryption', () => {
     env.eReplicas.set(`${entityId}:${signerId}`, {
       entityId,
       signerId,
+      entityEncPubKey: pubKeyToHex(encryption.publicKey),
+      entityEncPrivKey: hex(encryption.privateKey),
       isProposer: true,
       mempool: [],
       state,
@@ -2084,8 +2088,6 @@ describe('multisig HTLC validator encryption', () => {
   test('cold-start gossip publishes partial self-attestations before a routable profile exists', async () => {
     const stateFor = (validator: typeof first) => ({
       entityId: ENTITY_ID,
-      entityEncPubKey: validator.encryptionPublicKey,
-      entityEncPrivKey: validator.encryptionPrivateKey,
       config: {
         threshold: 2n,
         validators: [first.signer, second.signer],
@@ -2098,6 +2100,8 @@ describe('multisig HTLC validator encryption', () => {
       eReplicas: new Map([[`${ENTITY_ID}:${validator.signer}`, {
         entityId: ENTITY_ID,
         signerId: validator.signer,
+        entityEncPubKey: validator.encryptionPublicKey,
+        entityEncPrivKey: validator.encryptionPrivateKey,
         state: stateFor(validator),
       }]]),
       gossip: { getProfiles: () => [] },
