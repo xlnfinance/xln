@@ -273,122 +273,140 @@ const resolveImportCheckpointState = (
   return selected.state;
 };
 
-const importReplicaRuntimeTx = (env: Env, runtimeTx: ImportReplicaRuntimeTx): string => {
-  const importedEntityId = String(runtimeTx.entityId || '').toLowerCase();
-  const importedSignerId =
+type ReplicaImportIdentity = {
+  entityId: string;
+  signerId: string;
+  replicaKey: string;
+};
+
+const normalizeReplicaImportIdentity = (
+  runtimeTx: ImportReplicaRuntimeTx,
+): ReplicaImportIdentity => {
+  const entityId = String(runtimeTx.entityId || '').toLowerCase();
+  const signerId =
     normalizeRuntimeId(String(runtimeTx.signerId || '')) ||
     String(runtimeTx.signerId || '').trim().toLowerCase();
-  if (!importedEntityId || !importedSignerId) {
-    throw new Error(`IMPORT_REPLICA_INVALID_ID: entity=${runtimeTx.entityId} signer=${runtimeTx.signerId}`);
+  if (!entityId || !signerId) {
+    throw new Error(
+      'IMPORT_REPLICA_INVALID_ID: entity=' + runtimeTx.entityId +
+      ' signer=' + runtimeTx.signerId,
+    );
   }
-  if (DEBUG) {
-    runtimeTxLog.debug('replica.import_start', {
-      entity: formatEntityDisplay(importedEntityId),
-      signer: formatSignerDisplay(importedSignerId),
-      isProposer: runtimeTx.data.isProposer,
-    });
-  }
+  return { entityId, signerId, replicaKey: entityId + ':' + signerId };
+};
 
-  const replicaKey = `${importedEntityId}:${importedSignerId}`;
-  const existingMatch = findExistingReplicaCaseInsensitive(env, importedEntityId, importedSignerId);
-  const config = requireBoundEntityConfig(env, importedEntityId, runtimeTx.data.config);
-  const liveSiblings = Array.from(env.eReplicas.values()).filter(candidate => (
-    String(candidate.entityId || candidate.state.entityId).toLowerCase() === importedEntityId
-  ));
-  const hasCertifiedCheckpoint = liveSiblings.some(candidate => (
-    candidate.state.height > 0 ||
-    Boolean(candidate.certifiedFrameAnchor) ||
-    Boolean(candidate.certifiedFrameLineage?.length)
-  ));
+const entityHasCertifiedCheckpoint = (
+  siblings: EntityReplica[],
+): boolean =>
+  siblings.some(replica =>
+    replica.state.height > 0 ||
+    Boolean(replica.certifiedFrameAnchor) ||
+    Boolean(replica.certifiedFrameLineage?.length));
 
-  if (existingMatch) {
-    const { key: existingReplicaKey, replica: existingReplica } = existingMatch;
-    if (hasCertifiedCheckpoint) {
-      resolveImportCheckpointState(env, importedEntityId, importedSignerId, config);
-      // Re-import is local routing metadata, never an Entity state transition.
-      // Re-normalizing swap pairs or replacing config here changes a certified
-      // state root without a quorum frame and poisons the lineage on this very
-      // RuntimeTx. Crypto keys are explicitly excluded validator-local state.
-      existingReplica.isProposer = runtimeTx.data.isProposer;
-      existingReplica.entityId = importedEntityId;
-      existingReplica.signerId = importedSignerId;
-      canonicalizeLocalEntityCryptoKeys(env, importedEntityId, importedSignerId, existingReplica.state);
-      if (existingReplicaKey !== replicaKey) env.eReplicas.delete(existingReplicaKey);
-      env.eReplicas.set(replicaKey, existingReplica);
-      return importedEntityId;
-    }
+const applyReplicaLocalMetadata = (
+  env: Env,
+  replica: EntityReplica,
+  identity: ReplicaImportIdentity,
+  isProposer: boolean,
+): void => {
+  replica.isProposer = isProposer;
+  replica.entityId = identity.entityId;
+  replica.signerId = identity.signerId;
+  canonicalizeLocalEntityCryptoKeys(
+    env,
+    identity.entityId,
+    identity.signerId,
+    replica.state,
+  );
+};
 
-    backfillEntityJurisdictionBinding(env, importedEntityId, config.jurisdiction!);
-    existingReplica.isProposer = runtimeTx.data.isProposer;
-    existingReplica.entityId = importedEntityId;
-    existingReplica.signerId = importedSignerId;
-    existingReplica.state.entityId = importedEntityId;
-    existingReplica.state.config = config;
+const reuseExistingReplica = (
+  env: Env,
+  runtimeTx: ImportReplicaRuntimeTx,
+  identity: ReplicaImportIdentity,
+  existingKey: string,
+  replica: EntityReplica,
+  config: EntityState['config'],
+  hasCertifiedCheckpoint: boolean,
+): string => {
+  if (hasCertifiedCheckpoint) {
+    resolveImportCheckpointState(env, identity.entityId, identity.signerId, config);
+    // Re-import changes validator-local routing metadata only. Mutating the
+    // certified Entity state here would change its root without a quorum frame.
+    applyReplicaLocalMetadata(env, replica, identity, runtimeTx.data.isProposer);
+  } else {
+    backfillEntityJurisdictionBinding(env, identity.entityId, config.jurisdiction!);
+    applyReplicaLocalMetadata(env, replica, identity, runtimeTx.data.isProposer);
+    replica.state.entityId = identity.entityId;
+    replica.state.config = config;
     if (
-      existingReplica.state.lastFinalizedJHeight === 0 &&
-      existingReplica.state.jBlockChain.length === 0 &&
-      !existingReplica.state.jHistoryFinality
+      replica.state.lastFinalizedJHeight === 0 &&
+      replica.state.jBlockChain.length === 0 &&
+      !replica.state.jHistoryFinality
     ) {
-      existingReplica.state.lastFinalizedJHeight = getJHistoryRegistrationBaseHeight(config.jurisdiction);
+      replica.state.lastFinalizedJHeight =
+        getJHistoryRegistrationBaseHeight(config.jurisdiction);
     }
-    canonicalizeLocalEntityCryptoKeys(env, importedEntityId, importedSignerId, existingReplica.state);
-    normalizeEntitySwapTradingPairs(existingReplica.state);
-    if (existingReplicaKey !== replicaKey) {
-      env.eReplicas.delete(existingReplicaKey);
-    }
-    env.eReplicas.set(replicaKey, existingReplica);
+    normalizeEntitySwapTradingPairs(replica.state);
     if (DEBUG) {
       runtimeTxLog.debug('replica.restored_reused', {
-        entity: formatEntityDisplay(importedEntityId),
-        signer: formatSignerDisplay(importedSignerId),
+        entity: formatEntityDisplay(identity.entityId),
+        signer: formatSignerDisplay(identity.signerId),
       });
     }
-    return importedEntityId;
   }
+  if (existingKey !== identity.replicaKey) env.eReplicas.delete(existingKey);
+  env.eReplicas.set(identity.replicaKey, replica);
+  return identity.entityId;
+};
 
-  const replicaKeys = resolveReplicaEntityCryptoKeys(env, importedEntityId, importedSignerId);
-  if (liveSiblings.length > 0) {
-    const checkpointState = cloneEntityState(
-      resolveImportCheckpointState(env, importedEntityId, importedSignerId, config),
-      true,
-    );
-    checkpointState.entityEncPubKey = replicaKeys.publicKey;
-    checkpointState.entityEncPrivKey = replicaKeys.privateKey;
-    checkpointState.htlcNotes = new Map();
-    const checkpointReplica: EntityReplica = {
-      entityId: importedEntityId,
-      signerId: importedSignerId,
-      mempool: [],
-      isProposer: runtimeTx.data.isProposer,
-      state: checkpointState,
-      ...(runtimeTx.data.position
-        ? {
-            position: {
-              ...runtimeTx.data.position,
-              ...((runtimeTx.data.position.jurisdiction || config.jurisdiction?.name)
-                ? { jurisdiction: runtimeTx.data.position.jurisdiction || config.jurisdiction!.name }
-                : {}),
-            },
-          }
-        : {}),
-    };
-    env.eReplicas.set(replicaKey, checkpointReplica);
-    runtimeTxLog.info('replica.imported_from_certified_checkpoint', {
-      entity: formatEntityDisplay(importedEntityId),
-      signer: formatSignerDisplay(importedSignerId),
-      height: checkpointState.height,
-      head: checkpointState.prevFrameHash ?? 'genesis',
-    });
-    return importedEntityId;
-  }
-  backfillEntityJurisdictionBinding(env, importedEntityId, config.jurisdiction!);
+const buildCheckpointReplica = (
+  env: Env,
+  runtimeTx: ImportReplicaRuntimeTx,
+  identity: ReplicaImportIdentity,
+  config: EntityState['config'],
+  replicaKeys: ReturnType<typeof resolveReplicaEntityCryptoKeys>,
+): EntityReplica => {
+  const state = cloneEntityState(
+    resolveImportCheckpointState(env, identity.entityId, identity.signerId, config),
+    true,
+  );
+  state.entityEncPubKey = replicaKeys.publicKey;
+  state.entityEncPrivKey = replicaKeys.privateKey;
+  state.htlcNotes = new Map();
+  return {
+    entityId: identity.entityId,
+    signerId: identity.signerId,
+    mempool: [],
+    isProposer: runtimeTx.data.isProposer,
+    state,
+    ...(runtimeTx.data.position
+      ? {
+          position: {
+            ...runtimeTx.data.position,
+            ...((runtimeTx.data.position.jurisdiction || config.jurisdiction?.name)
+              ? { jurisdiction: runtimeTx.data.position.jurisdiction || config.jurisdiction!.name }
+              : {}),
+          },
+        }
+      : {}),
+  };
+};
+
+const buildGenesisReplica = (
+  env: Env,
+  runtimeTx: ImportReplicaRuntimeTx,
+  identity: ReplicaImportIdentity,
+  config: EntityState['config'],
+  replicaKeys: ReturnType<typeof resolveReplicaEntityCryptoKeys>,
+): EntityReplica => {
   const replica: EntityReplica = {
-    entityId: importedEntityId,
-    signerId: importedSignerId,
+    entityId: identity.entityId,
+    signerId: identity.signerId,
     mempool: [],
     isProposer: runtimeTx.data.isProposer,
     state: {
-      entityId: importedEntityId,
+      entityId: identity.entityId,
       height: 0,
       timestamp: env.timestamp,
       nonces: new Map(),
@@ -404,9 +422,10 @@ const importReplicaRuntimeTx = (env: Env, runtimeTx: ImportReplicaRuntimeTx): st
       entityEncPrivKey: replicaKeys.privateKey,
       profile: {
         name:
-          typeof runtimeTx.data.profileName === 'string' && runtimeTx.data.profileName.trim().length > 0
+          typeof runtimeTx.data.profileName === 'string' &&
+          runtimeTx.data.profileName.trim().length > 0
             ? runtimeTx.data.profileName.trim()
-            : `Entity ${importedEntityId.slice(-4)}`,
+            : 'Entity ' + identity.entityId.slice(-4),
         isHub: false,
         avatar: '',
         bio: '',
@@ -417,13 +436,14 @@ const importReplicaRuntimeTx = (env: Env, runtimeTx: ImportReplicaRuntimeTx): st
       htlcNotes: new Map(),
       lockBook: new Map(),
       crontabState: initCrontab(),
-      swapTradingPairs: buildDefaultEntitySwapPairs(getTokenIdsForJurisdiction(config.jurisdiction)),
+      swapTradingPairs: buildDefaultEntitySwapPairs(
+        getTokenIdsForJurisdiction(config.jurisdiction),
+      ),
       pendingCrossJurisdictionFillAcks: new Map(),
       crossJurisdictionBookAdmissions: new Map(),
     },
   };
   normalizeEntitySwapTradingPairs(replica.state);
-
   if (runtimeTx.data.position) {
     replica.position = {
       ...runtimeTx.data.position,
@@ -434,17 +454,76 @@ const importReplicaRuntimeTx = (env: Env, runtimeTx: ImportReplicaRuntimeTx): st
         'default',
     };
   }
+  return replica;
+};
 
-  env.eReplicas.set(replicaKey, replica);
-  const createdReplica = env.eReplicas.get(replicaKey);
-  const actualJBlock = createdReplica?.state.lastFinalizedJHeight;
-  if (typeof actualJBlock !== 'number') {
+const assertCreatedReplicaJHeight = (
+  env: Env,
+  replicaKey: string,
+): void => {
+  const actual = env.eReplicas.get(replicaKey)?.state.lastFinalizedJHeight;
+  if (typeof actual !== 'number') {
     throw new Error(
-      `ENTITY_CREATION_INVALID_J_HEIGHT: replica=${replicaKey} ` +
-        `expected=number actualType=${typeof actualJBlock} actual=${String(actualJBlock)}`,
+      'ENTITY_CREATION_INVALID_J_HEIGHT: replica=' + replicaKey +
+      ' expected=number actualType=' + typeof actual + ' actual=' + String(actual),
     );
   }
-  return importedEntityId;
+};
+
+const importReplicaRuntimeTx = (env: Env, runtimeTx: ImportReplicaRuntimeTx): string => {
+  const identity = normalizeReplicaImportIdentity(runtimeTx);
+  if (DEBUG) {
+    runtimeTxLog.debug('replica.import_start', {
+      entity: formatEntityDisplay(identity.entityId),
+      signer: formatSignerDisplay(identity.signerId),
+      isProposer: runtimeTx.data.isProposer,
+    });
+  }
+  const existing = findExistingReplicaCaseInsensitive(
+    env,
+    identity.entityId,
+    identity.signerId,
+  );
+  const config = requireBoundEntityConfig(env, identity.entityId, runtimeTx.data.config);
+  const siblings = Array.from(env.eReplicas.values()).filter(replica =>
+    String(replica.entityId || replica.state.entityId).toLowerCase() === identity.entityId);
+  const hasCheckpoint = entityHasCertifiedCheckpoint(siblings);
+  if (existing) {
+    return reuseExistingReplica(
+      env,
+      runtimeTx,
+      identity,
+      existing.key,
+      existing.replica,
+      config,
+      hasCheckpoint,
+    );
+  }
+
+  const replicaKeys = resolveReplicaEntityCryptoKeys(
+    env,
+    identity.entityId,
+    identity.signerId,
+  );
+  if (siblings.length > 0) {
+    const replica = buildCheckpointReplica(env, runtimeTx, identity, config, replicaKeys);
+    env.eReplicas.set(identity.replicaKey, replica);
+    runtimeTxLog.info('replica.imported_from_certified_checkpoint', {
+      entity: formatEntityDisplay(identity.entityId),
+      signer: formatSignerDisplay(identity.signerId),
+      height: replica.state.height,
+      head: replica.state.prevFrameHash ?? 'genesis',
+    });
+    return identity.entityId;
+  }
+
+  backfillEntityJurisdictionBinding(env, identity.entityId, config.jurisdiction!);
+  env.eReplicas.set(
+    identity.replicaKey,
+    buildGenesisReplica(env, runtimeTx, identity, config, replicaKeys),
+  );
+  assertCreatedReplicaJHeight(env, identity.replicaKey);
+  return identity.entityId;
 };
 
 const findExistingReplicaCaseInsensitive = (
