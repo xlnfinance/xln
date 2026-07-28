@@ -10,6 +10,7 @@ import { mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { Level } from 'level';
 import { serializeTaggedJson } from '../protocol/serialization';
+import { decodeStoredPushRegistration } from './registration';
 import type { StoredPushRegistration } from './types';
 
 const DEFAULT_REGISTRATION_TTL_MS = 90 * 24 * 60 * 60 * 1000;
@@ -99,7 +100,7 @@ const registerToken = async (
   const key = registrationKey(registration);
   const existingRaw = await getStoredValue(context, key);
   if (existingRaw) {
-    const existing = JSON.parse(existingRaw) as StoredPushRegistration;
+    const existing = decodeStoredPushRegistration(existingRaw, key);
     if (Number(existing.signedAt || 0) > Number(registration.signedAt || 0)) {
       throw new Error('PUSH_REGISTRATION_STALE');
     }
@@ -119,7 +120,7 @@ const removeToken = async (
   const normalizedTokenHash = String(tokenHash).toLowerCase();
   const keys: string[] = [];
   for await (const [key, raw] of context.db.iterator({ gte: 'reg:', lte: 'reg:\xff' })) {
-    const registration = JSON.parse(String(raw)) as StoredPushRegistration;
+    const registration = decodeStoredPushRegistration(String(raw), key);
     if (
       registration.runtimeId.toLowerCase() === normalizedRuntimeId
       && registration.tokenHash.toLowerCase() === normalizedTokenHash
@@ -142,8 +143,8 @@ const listRegistrationsForTarget = async (
   const prefix = `reg:${normTarget(chainId, depository)}:`;
   const cutoff = context.now() - context.registrationTtlMs;
   const registrations: StoredPushRegistration[] = [];
-  for await (const [, raw] of context.db.iterator({ gte: prefix, lte: `${prefix}\xff` })) {
-    const registration = JSON.parse(String(raw)) as StoredPushRegistration;
+  for await (const [key, raw] of context.db.iterator({ gte: prefix, lte: `${prefix}\xff` })) {
+    const registration = decodeStoredPushRegistration(String(raw), key);
     if (Number(registration.updatedAt || 0) >= cutoff) registrations.push(registration);
   }
   return registrations;
@@ -155,8 +156,8 @@ const listWatchTargets = async (
   await ensureOpen(context);
   const cutoff = context.now() - context.registrationTtlMs;
   const targets = new Map<string, PushWatchTarget & { updatedAt: number }>();
-  for await (const [, raw] of context.db.iterator({ gte: 'reg:', lte: 'reg:\xff' })) {
-    const registration = JSON.parse(String(raw)) as StoredPushRegistration;
+  for await (const [storageKey, raw] of context.db.iterator({ gte: 'reg:', lte: 'reg:\xff' })) {
+    const registration = decodeStoredPushRegistration(String(raw), storageKey);
     if (Number(registration.updatedAt || 0) < cutoff) continue;
     const key = normTarget(registration.chainId, registration.depositoryAddress);
     const existing = targets.get(key);
@@ -220,9 +221,9 @@ const getStats = async (context: PushStoreContext): Promise<PushStoreStats> => {
   await ensureOpen(context);
   let registrationCount = 0;
   const targets = new Set<string>();
-  for await (const [, raw] of context.db.iterator({ gte: 'reg:', lte: 'reg:\xff' })) {
+  for await (const [key, raw] of context.db.iterator({ gte: 'reg:', lte: 'reg:\xff' })) {
     registrationCount += 1;
-    const registration = JSON.parse(String(raw)) as StoredPushRegistration;
+    const registration = decodeStoredPushRegistration(String(raw), key);
     targets.add(normTarget(registration.chainId, registration.depositoryAddress));
   }
   return { registrationCount, watchTargetCount: targets.size };
@@ -237,7 +238,7 @@ const pruneExpired = async (
   const keys: string[] = [];
   for await (const [key, raw] of context.db.iterator()) {
     if (key.startsWith('reg:')) {
-      const registration = JSON.parse(String(raw)) as StoredPushRegistration;
+      const registration = decodeStoredPushRegistration(String(raw), key);
       if (Number(registration.updatedAt || 0) < registrationCutoff) keys.push(key);
     } else if (key.startsWith('wake:')) {
       const timestamp = Number(raw);

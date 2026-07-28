@@ -7,6 +7,12 @@
  */
 
 import { ethers } from 'ethers';
+import {
+  requireBoundaryInteger,
+  requireBoundaryRecord,
+  requireExactBoundaryKeys,
+} from '../protocol/boundary-validation';
+import { deserializeTaggedJson } from '../protocol/serialization';
 import type {
   PushPlatformV1,
   PushRegistrationRequestV1,
@@ -79,6 +85,55 @@ const normalizeSignedAt = (value: unknown): number => {
   const signedAt = Math.floor(Number(value));
   if (!Number.isFinite(signedAt) || signedAt <= 0) throw new Error('PUSH_SIGNED_AT_INVALID');
   return signedAt;
+};
+
+const decodeStoredRegistrationValue = (raw: string): StoredPushRegistration => {
+  const value = requireBoundaryRecord(
+    deserializeTaggedJson<unknown>(raw),
+    'PUSH_STORED_REGISTRATION_OBJECT_INVALID',
+  );
+  requireExactBoundaryKeys(value, [
+    'runtimeId',
+    'entityId',
+    'tokenHash',
+    'token',
+    'platform',
+    'chainId',
+    'depositoryAddress',
+    'rpcUrl',
+    'signedAt',
+    'updatedAt',
+  ], [], 'PUSH_STORED_REGISTRATION_FIELDS_INVALID');
+  const token = normalizeToken(value['token']);
+  const tokenHash = normalizeTokenHash(value['tokenHash']);
+  if (hashPushToken(token) !== tokenHash) throw new Error('PUSH_STORED_REGISTRATION_TOKEN_HASH_MISMATCH');
+  return {
+    runtimeId: normalizeRuntimeId(value['runtimeId']),
+    entityId: normalizeEntityId(value['entityId']),
+    tokenHash,
+    token,
+    platform: normalizePlatform(value['platform']),
+    chainId: requireBoundaryInteger(value['chainId'], 'PUSH_STORED_REGISTRATION_CHAIN_ID_INVALID', 1),
+    depositoryAddress: normalizeAddress(value['depositoryAddress']),
+    rpcUrl: normalizeRpcUrl(value['rpcUrl']),
+    signedAt: requireBoundaryInteger(value['signedAt'], 'PUSH_STORED_REGISTRATION_SIGNED_AT_INVALID', 1),
+    updatedAt: requireBoundaryInteger(value['updatedAt'], 'PUSH_STORED_REGISTRATION_UPDATED_AT_INVALID'),
+  };
+};
+
+export const decodeStoredPushRegistration = (
+  raw: string,
+  storageKey: string,
+): StoredPushRegistration => {
+  try {
+    return decodeStoredRegistrationValue(raw);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `PUSH_STORED_REGISTRATION_INVALID:key=${storageKey}:reason=${reason}`,
+      { cause: error },
+    );
+  }
 };
 
 const assertFresh = (signedAt: number, options?: { now?: number; maxClockSkewMs?: number }): void => {

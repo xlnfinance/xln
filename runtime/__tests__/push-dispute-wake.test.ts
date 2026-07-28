@@ -4,6 +4,7 @@ import { mkdtemp } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Wallet, ZeroAddress, zeroPadValue } from 'ethers';
+import { Level } from 'level';
 import {
   buildPushRegistrationMessage,
   buildPushUnregisterMessage,
@@ -113,6 +114,23 @@ describe('push registration signature', () => {
 
       const remaining = await store.listRegistrationsForTarget(CHAIN_ID, DEPOSITORY);
       expect(remaining.map(registration => registration.runtimeId).sort()).toEqual([secondRuntime]);
+    } finally {
+      await store.close();
+    }
+  });
+
+  test('rejects a corrupt persisted registration with its exact storage key', async () => {
+    const dbPath = join(await mkdtemp(join(tmpdir(), 'xln-push-corrupt-')), 'push.level');
+    const storageKey = `reg:${CHAIN_ID}:${DEPOSITORY}:${entityId(1)}:${hashPushToken('corrupt')}`;
+    const rawDb = new Level<string, string>(dbPath, { valueEncoding: 'utf8' });
+    await rawDb.open();
+    await rawDb.put(storageKey, JSON.stringify({ runtimeId: ZeroAddress }));
+    await rawDb.close();
+
+    const store = createPushStore({ dbPath });
+    try {
+      await expect(store.listRegistrationsForTarget(CHAIN_ID, DEPOSITORY))
+        .rejects.toThrow(`PUSH_STORED_REGISTRATION_INVALID:key=${storageKey}`);
     } finally {
       await store.close();
     }
