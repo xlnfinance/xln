@@ -9,8 +9,8 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 ## 1. Core simplification and human auditability — P0/P1, owner-approved
 
 - [ ] Close the still-live findings from the GPT audit of
-  `main@fddcac8bab9420f48168b0453cc05419f858f392`, verified again against the
-  current tree instead of copying stale line numbers. Current-code inspection
+  `main@fddcac8bab9420f48168b0453cc05419f858f392`, reverified against
+  `main@5e30bcf47` instead of copying stale line numbers. Current-code inspection
   confirms the R→C duplicate lifecycle (`FIN-01/02`), unsafe dispute
   `uint256 → Number` conversion (`FIN-03`), fail-open rebalance construction
   (`FIN-04`), non-durable faucet admission (`SRV-01`), misplaced Account money
@@ -24,10 +24,14 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   `processRuntime` test imports (`TEST-01`) and exact `XLNModule` alias
   (`API-01`) now have source/test evidence; the AST file/function ratchet closes
   `ARCH-02` and must be tightened to zero debt rather than reimplemented.
-  Treat the audit's 278-LOC deletion table as candidates, not proof: recheck
-  current static imports, dynamic entrypoints, browser exports and owning tests
-  immediately before each deletion. The concrete open fixes remain decomposed
-  below so each gets its own L1 → L2 → L3 gate.
+  The audit's 278-LOC deletion table is stale: `getAccountTimeoutStats`,
+  `writeFrameDbPutsWithRetention`, `j-events-account-lookup.ts` and
+  `getFirstSignerForEntity` are already absent, while the current dispute
+  finalization scrubber, Hanko witness code and every exported Level helper
+  have production or owning-test call sites. Do not delete those live paths.
+  Recheck static imports, dynamic entrypoints, browser exports and owning tests
+  immediately before any further deletion. The concrete open fixes remain
+  decomposed below so each gets its own L1 → L2 → L3 gate.
 - [ ] Pass the human-audit completion gate for the three nested state
   machines. Baseline on `main@404851e82`: 35 functions over 150 lines and 89
   over 100 lines under `runtime/runtime`, `runtime/entity` and
@@ -132,10 +136,10 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   `runNumberedRegistrationIntent` is currently live scenario infrastructure,
   not dead code. Delete proven topology, ID/hash-ladder, validation/logger,
   wallet/helper, retention/hook, lookup/barrel and rename-only orphans.
-  Recheck the audited Hanko output-binding block, `getAccountTimeoutStats`,
-  `writeFrameDbPutsWithRetention`, dispute lookup/filter chain,
-  `j-events-account-lookup.ts`, `getFirstSignerForEntity` and unused Level
-  helpers first. Public API removals require an explicit compatibility decision.
+  The old audit's named deletion batch has been exhausted or disproved on the
+  current tree; discover the next candidates from current call sites instead
+  of carrying that stale list forward. Public API removals require an explicit
+  compatibility decision.
 - [ ] Remove duplicate policy and display code: use canonical Account
   `Delta`/`DerivedDelta` and `deriveDelta` in the dev visualizer and Graph3D;
   BigInt remains exact until the geometry/formatting boundary. Fix the stale
