@@ -20,7 +20,7 @@ import { getDefaultRebalanceBaseFeeForToken } from '../account/rebalance-default
 
 const faucetLog = createStructuredLogger('server.faucet');
 
-export const handleOffchainFaucet = async (input: {
+type OffchainFaucetHandlerInput = {
   req: Request;
   env: RuntimeState | null;
   headers: HeadersInit;
@@ -30,398 +30,419 @@ export const handleOffchainFaucet = async (input: {
   registerReceipt: (receipt: RegisterReceiptOptions) => RuntimeIngressReceipt;
   getCurrentRuntimeHeight: (env: RuntimeState | null) => number;
   buildRuntimeInputStatusUrl: (id: string) => string;
-}): Promise<Response> => {
-  const {
-    req,
-    env,
-    headers,
-    relayStore,
-    enqueueRuntimeInput,
-    validateRuntimeInputAdmission,
-    registerReceipt,
-    getCurrentRuntimeHeight,
-    buildRuntimeInputStatusUrl,
-  } = input;
+};
 
-    const requestStartedAt = Date.now();
-    try {
-      if (!env) {
-        return new Response(safeStringify(faucetFailureBody({
-          code: 'FAUCET_RUNTIME_NOT_INITIALIZED',
-          error: 'Runtime not initialized',
-        })), { status: 503, headers });
-      }
+type FaucetRequest = {
+  requestId: string;
+  userEntityId: string;
+  userRuntimeId: string;
+  requestedHubId: string;
+  tokenId: number;
+  amount: string;
+};
 
-      const body = await req.json();
-      const {
-        userEntityId,
-        userRuntimeId,
-        tokenId = 1,
-        amount = '100',
-        hubEntityId: requestedHubEntityId,
-      } = body;
-      const requestId = `offchain_${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`}`;
+type FaucetHub = {
+  entityId: string;
+  signerId: string;
+};
 
-      if (!userEntityId) {
-        return new Response(safeStringify(faucetFailureBody({
-          code: 'FAUCET_USER_ENTITY_ID_REQUIRED',
-          error: 'Missing userEntityId',
-        })), { status: 400, headers });
-      }
-      if (!isEntityId32(userEntityId)) {
-        return new Response(
-          safeStringify(faucetFailureBody({
-            error: `Invalid userEntityId: expected bytes32 hex, got "${String(userEntityId)}"`,
-            code: 'FAUCET_INVALID_USER_ENTITY_ID',
-          })),
-          { status: 400, headers },
-        );
-      }
-      if (
-        requestedHubEntityId !== undefined &&
-        requestedHubEntityId !== null &&
-        requestedHubEntityId !== '' &&
-        !isEntityId32(requestedHubEntityId)
-      ) {
-        return new Response(
-          safeStringify(faucetFailureBody({
-            error: `Invalid hubEntityId: expected bytes32 hex, got "${String(requestedHubEntityId)}"`,
-            code: 'FAUCET_INVALID_HUB_ENTITY_ID',
-          })),
-          { status: 400, headers },
-        );
-      }
-      const normalizedUserEntityId = String(userEntityId).toLowerCase();
-      let normalizedUserRuntimeId = normalizeRuntimeKey(userRuntimeId);
-      if (!normalizedUserRuntimeId) {
-        const allProfiles = env.gossip?.getProfiles() || [];
-        const userProfile = allProfiles.find(
-          (p: Profile) => String(p?.entityId || '').toLowerCase() === normalizedUserEntityId,
-        );
-        const profileRuntimeId = normalizeRuntimeKey(userProfile?.runtimeId);
-        if (profileRuntimeId) {
-          normalizedUserRuntimeId = profileRuntimeId;
-        }
-      }
-      if (!normalizedUserRuntimeId) {
-        return new Response(
-          safeStringify(faucetFailureBody({
-            success: false,
-            code: 'FAUCET_RUNTIME_REQUIRED',
-            error: 'Missing userRuntimeId',
-            extra: {
-              message: 'Runtime is offline or not initialized yet. Re-open runtime and retry faucet.',
-            },
-          })),
-          { status: 400, headers },
-        );
-      }
-      const normalizedRuntimeKey = normalizeRuntimeKey(normalizedUserRuntimeId);
-      faucetLog.info('offchain.request', {
-        requestId,
-        user: shortId(normalizedUserEntityId, 8),
-        runtime: shortId(normalizedUserRuntimeId, 10),
-      });
-      // Important: local relay client registry is authoritative only when faucet API
-      // and relay endpoint are the same node. With external relay (e.g. wss://xln.finance/relay),
-      // this process may not see the runtime socket directly. Treat local visibility as diagnostic,
-      // not a hard reject.
-      const runtimeSeenLocally = relayStore.clients.has(normalizedRuntimeKey);
-      const runtimePubKey = relayStore.runtimeEncryptionKeys.get(normalizedRuntimeKey);
-      if (!runtimeSeenLocally || !runtimePubKey) {
-        const activeRelayClients = Array.from(relayStore.clients.keys());
-        faucetLog.info('offchain.runtime_not_local', { requestId, runtime: shortId(normalizedUserRuntimeId, 10) });
-        pushDebugEvent(relayStore, {
-          event: 'debug_event',
-          status: 'info',
-          reason: !runtimeSeenLocally ? 'FAUCET_RUNTIME_NOT_LOCAL_RELAY_CLIENT' : 'FAUCET_RUNTIME_PUBKEY_MISSING_LOCAL',
-          details: {
-            endpoint: '/api/faucet/offchain',
-            userEntityId: normalizedUserEntityId,
-            userRuntimeId: normalizedUserRuntimeId,
-            runtimeSeenLocally,
-            hasRuntimePubKey: !!runtimePubKey,
-            activeRelayClients,
-          },
-        });
-      }
-      // Get hub from server-authoritative hub set + gossip
-      const activeHubCandidates = relayStore.activeHubEntityIds
-        .map(entityId => ({ entityId }))
-        .filter(hub => !!hub.entityId);
-      // Server authority first: if hubs are active on this server, faucet can always target them
-      // without depending on client gossip freshness.
-      const gossipHubs = activeHubCandidates.length > 0 ? [] : getFaucetHubProfiles(env, relayStore.activeHubEntityIds);
-      const hubs = activeHubCandidates.length > 0 ? activeHubCandidates : gossipHubs;
-      if (hubs.length === 0) {
-        const allProfiles = env.gossip?.getProfiles() || [];
-        pushDebugEvent(relayStore, {
-          event: 'error',
-          status: 'rejected',
-          reason: 'FAUCET_HUBS_EMPTY',
-          details: {
-            endpoint: '/api/faucet/offchain',
-            profiles: allProfiles.length,
-            activeHubEntityIds: relayStore.activeHubEntityIds,
-            gossipHubCount: gossipHubs.length,
-            hint: 'No faucet-capable hubs in server active set or gossip cache',
-          },
-        });
-        return new Response(
-          safeStringify(faucetFailureBody({
-            error: 'No faucet hub available in gossip',
-            code: 'FAUCET_HUBS_EMPTY',
-            extra: {
-              profiles: allProfiles.length,
-              activeHubEntityIds: relayStore.activeHubEntityIds,
-              gossipHubCount: gossipHubs.length,
-            },
-          })),
-          { status: 503, headers },
-        );
-      }
-      const requestedHubId =
-        typeof requestedHubEntityId === 'string' && requestedHubEntityId.length > 0
-          ? requestedHubEntityId.toLowerCase()
-          : '';
-      if (!requestedHubId) {
-        return new Response(
-          safeStringify(faucetFailureBody({
-            error: 'Missing hubEntityId for offchain faucet',
-            code: 'FAUCET_HUB_REQUIRED',
-            extra: { knownHubEntityIds: hubs.map(hub => hub.entityId) },
-          })),
-          { status: 400, headers },
-        );
-      }
-      const requestedHub = hubs.find(hub => hub.entityId.toLowerCase() === requestedHubId);
-      if (!requestedHub) {
-        return new Response(
-          safeStringify(faucetFailureBody({
-            error: `Requested hub not found: ${requestedHubId}`,
-            code: 'FAUCET_REQUESTED_HUB_NOT_FOUND',
-            extra: {
-              requestedHubEntityId: requestedHubId,
-              knownHubEntityIds: hubs.map(h => h.entityId),
-            },
-          })),
-          { status: 404, headers },
-        );
-      }
-      const hubEntityId = requestedHub.entityId;
-      if (!getEntityReplicaById(env, hubEntityId)) {
-        return new Response(
-          safeStringify(faucetFailureBody({
-            error: 'Faucet hub is not ready yet',
-            code: 'FAUCET_HUB_NOT_READY',
-            extra: { hubEntityId },
-          })),
-          { status: 503, headers },
-        );
-      }
-      // Get actual signerId from entity's validators (not runtimeId!)
-      let hubSignerId: string;
-      try {
-        hubSignerId = resolveEntityProposerId(env, hubEntityId, 'faucet-offchain');
-      } catch (error) {
-        return new Response(
-          safeStringify(faucetFailureBody({
-            error: 'Faucet hub signer is unavailable',
-            code: 'FAUCET_HUB_SIGNER_UNAVAILABLE',
-            extra: { hubEntityId, details: (error as Error).message },
-          })),
-          { status: 503, headers },
-        );
-      }
-      pushDebugEvent(relayStore, {
-        event: 'debug_event',
-        status: 'info',
-        reason: 'REB_STEP0_FAUCET_REQUEST',
-        details: {
-          requestId,
-          hubEntityId,
-          userEntityId: normalizedUserEntityId,
-          userRuntimeId: normalizedUserRuntimeId,
-          tokenId,
-          amount,
-        },
-      });
+type FaucetAccountAdmission = {
+  accountState: ReturnType<typeof describeOffchainFaucetAccountState>;
+  amountWei: bigint;
+  currentOutCapacity: bigint;
+};
 
-      const amountWei = ethers.parseUnits(amount, getTokenInfo(Number(tokenId)).decimals);
-      const account = getAccountState(env, hubEntityId, normalizedUserEntityId);
-      const hasHubAccount = hasAccount(env, hubEntityId, normalizedUserEntityId) || !!account;
-      const buildAccountPresence = () => hubs.map(hub => ({
+type FaucetFailure = { ok: false; response: Response };
+type FaucetPhase<T> = { ok: true; value: T } | FaucetFailure;
+
+const fail = (
+  headers: HeadersInit,
+  status: number,
+  body: Parameters<typeof faucetFailureBody>[0],
+): FaucetFailure => ({
+  ok: false,
+  response: new Response(safeStringify(faucetFailureBody(body)), { status, headers }),
+});
+
+const resolveUserRuntimeId = (
+  env: RuntimeState,
+  userEntityId: string,
+  runtimeId: unknown,
+): string => {
+  const explicit = normalizeRuntimeKey(runtimeId);
+  if (explicit) return explicit;
+  const profile = (env.gossip?.getProfiles() || []).find(
+    (candidate: Profile) => String(candidate?.entityId || '').toLowerCase() === userEntityId,
+  );
+  return normalizeRuntimeKey(profile?.runtimeId);
+};
+
+const parseFaucetRequest = async (
+  input: OffchainFaucetHandlerInput & { env: RuntimeState },
+): Promise<FaucetPhase<FaucetRequest>> => {
+  const body = await input.req.json() as Record<string, unknown>;
+  const userEntityId = body['userEntityId'];
+  const requestedHubEntityId = body['hubEntityId'];
+  if (!userEntityId) {
+    return fail(input.headers, 400, {
+      code: 'FAUCET_USER_ENTITY_ID_REQUIRED',
+      error: 'Missing userEntityId',
+    });
+  }
+  if (!isEntityId32(userEntityId)) {
+    return fail(input.headers, 400, {
+      error: `Invalid userEntityId: expected bytes32 hex, got "${String(userEntityId)}"`,
+      code: 'FAUCET_INVALID_USER_ENTITY_ID',
+    });
+  }
+  if (requestedHubEntityId && !isEntityId32(requestedHubEntityId)) {
+    return fail(input.headers, 400, {
+      error: `Invalid hubEntityId: expected bytes32 hex, got "${String(requestedHubEntityId)}"`,
+      code: 'FAUCET_INVALID_HUB_ENTITY_ID',
+    });
+  }
+  const tokenId = Number(body['tokenId'] ?? 1);
+  if (!Number.isSafeInteger(tokenId) || tokenId <= 0) {
+    return fail(input.headers, 400, {
+      error: `Invalid tokenId: expected positive safe integer, got "${String(body['tokenId'])}"`,
+      code: 'FAUCET_INVALID_TOKEN_ID',
+    });
+  }
+  const normalizedUserEntityId = String(userEntityId).toLowerCase();
+  const normalizedUserRuntimeId = resolveUserRuntimeId(input.env, normalizedUserEntityId, body['userRuntimeId']);
+  if (!normalizedUserRuntimeId) {
+    return fail(input.headers, 400, {
+      success: false,
+      code: 'FAUCET_RUNTIME_REQUIRED',
+      error: 'Missing userRuntimeId',
+      extra: { message: 'Runtime is offline or not initialized yet. Re-open runtime and retry faucet.' },
+    });
+  }
+  return {
+    ok: true,
+    value: {
+      requestId: `offchain_${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`}`,
+      userEntityId: normalizedUserEntityId,
+      userRuntimeId: normalizedUserRuntimeId,
+      requestedHubId: typeof requestedHubEntityId === 'string' ? requestedHubEntityId.toLowerCase() : '',
+      tokenId,
+      amount: String(body['amount'] ?? '100'),
+    },
+  };
+};
+
+const recordRuntimeVisibility = (
+  relayStore: RelayStore,
+  request: FaucetRequest,
+): void => {
+  const runtimeKey = normalizeRuntimeKey(request.userRuntimeId);
+  const runtimeSeenLocally = relayStore.clients.has(runtimeKey);
+  const runtimePubKey = relayStore.runtimeEncryptionKeys.get(runtimeKey);
+  if (runtimeSeenLocally && runtimePubKey) return;
+  faucetLog.info('offchain.runtime_not_local', {
+    requestId: request.requestId,
+    runtime: shortId(request.userRuntimeId, 10),
+  });
+  // The API may use an external relay, so local socket visibility is
+  // diagnostic evidence only and must never reject a valid faucet request.
+  pushDebugEvent(relayStore, {
+    event: 'debug_event',
+    status: 'info',
+    reason: !runtimeSeenLocally ? 'FAUCET_RUNTIME_NOT_LOCAL_RELAY_CLIENT' : 'FAUCET_RUNTIME_PUBKEY_MISSING_LOCAL',
+    details: {
+      endpoint: '/api/faucet/offchain',
+      userEntityId: request.userEntityId,
+      userRuntimeId: request.userRuntimeId,
+      runtimeSeenLocally,
+      hasRuntimePubKey: Boolean(runtimePubKey),
+      activeRelayClients: Array.from(relayStore.clients.keys()),
+    },
+  });
+};
+
+const resolveFaucetHub = (
+  input: OffchainFaucetHandlerInput & { env: RuntimeState },
+  request: FaucetRequest,
+): FaucetPhase<FaucetHub> => {
+  const activeHubs = input.relayStore.activeHubEntityIds.filter(Boolean).map(entityId => ({ entityId }));
+  const gossipHubs = activeHubs.length > 0 ? [] : getFaucetHubProfiles(input.env, input.relayStore.activeHubEntityIds);
+  const hubs = activeHubs.length > 0 ? activeHubs : gossipHubs;
+  if (hubs.length === 0) {
+    const profileCount = input.env.gossip?.getProfiles()?.length || 0;
+    pushDebugEvent(input.relayStore, {
+      event: 'error',
+      status: 'rejected',
+      reason: 'FAUCET_HUBS_EMPTY',
+      details: {
+        endpoint: '/api/faucet/offchain',
+        profiles: profileCount,
+        activeHubEntityIds: input.relayStore.activeHubEntityIds,
+        gossipHubCount: gossipHubs.length,
+        hint: 'No faucet-capable hubs in server active set or gossip cache',
+      },
+    });
+    return fail(input.headers, 503, {
+      error: 'No faucet hub available in gossip',
+      code: 'FAUCET_HUBS_EMPTY',
+      extra: {
+        profiles: profileCount,
+        activeHubEntityIds: input.relayStore.activeHubEntityIds,
+        gossipHubCount: gossipHubs.length,
+      },
+    });
+  }
+  if (!request.requestedHubId) {
+    return fail(input.headers, 400, {
+      error: 'Missing hubEntityId for offchain faucet',
+      code: 'FAUCET_HUB_REQUIRED',
+      extra: { knownHubEntityIds: hubs.map(hub => hub.entityId) },
+    });
+  }
+  const selected = hubs.find(hub => hub.entityId.toLowerCase() === request.requestedHubId);
+  if (!selected) {
+    return fail(input.headers, 404, {
+      error: `Requested hub not found: ${request.requestedHubId}`,
+      code: 'FAUCET_REQUESTED_HUB_NOT_FOUND',
+      extra: {
+        requestedHubEntityId: request.requestedHubId,
+        knownHubEntityIds: hubs.map(hub => hub.entityId),
+      },
+    });
+  }
+  if (!getEntityReplicaById(input.env, selected.entityId)) {
+    return fail(input.headers, 503, {
+      error: 'Faucet hub is not ready yet',
+      code: 'FAUCET_HUB_NOT_READY',
+      extra: { hubEntityId: selected.entityId },
+    });
+  }
+  try {
+    return {
+      ok: true,
+      value: {
+        entityId: selected.entityId,
+        signerId: resolveEntityProposerId(input.env, selected.entityId, 'faucet-offchain'),
+      },
+    };
+  } catch (error) {
+    return fail(input.headers, 503, {
+      error: 'Faucet hub signer is unavailable',
+      code: 'FAUCET_HUB_SIGNER_UNAVAILABLE',
+      extra: { hubEntityId: selected.entityId, details: getErrorMessage(error) },
+    });
+  }
+};
+
+const admitFaucetAccount = (
+  input: OffchainFaucetHandlerInput & { env: RuntimeState },
+  request: FaucetRequest,
+  hub: FaucetHub,
+): FaucetPhase<FaucetAccountAdmission> => {
+  const account = getAccountState(input.env, hub.entityId, request.userEntityId);
+  const knownHubIds = input.relayStore.activeHubEntityIds;
+  const accountPresence = knownHubIds.map(hubEntityId => ({
+    hubEntityId,
+    hasAccount: hasAccount(input.env, hubEntityId, request.userEntityId),
+  }));
+  // Faucet is an enqueue endpoint, not a settlement oracle. It never repairs
+  // bilateral state or waits for the peer replica inside the HTTP request.
+  if (!account && !hasAccount(input.env, hub.entityId, request.userEntityId)) {
+    pushDebugEvent(input.relayStore, {
+      event: 'error',
+      status: 'rejected',
+      reason: 'FAUCET_ACCOUNT_NOT_OPEN',
+      details: {
+        requestId: request.requestId,
         hubEntityId: hub.entityId,
-        hasAccount: hasAccount(env, hub.entityId, normalizedUserEntityId),
-      }));
+        userEntityId: request.userEntityId,
+        requestedHubEntityId: request.requestedHubId,
+        accountPresence,
+      },
+    });
+    return fail(input.headers, 409, {
+      success: false,
+      error: 'No bilateral account with selected hub. Open account first, then retry faucet.',
+      code: 'FAUCET_ACCOUNT_NOT_OPEN',
+      extra: {
+        requestId: request.requestId,
+        hubEntityId: hub.entityId,
+        userEntityId: request.userEntityId,
+        requestedHubEntityId: request.requestedHubId,
+        accountPresence,
+      },
+    });
+  }
+  const accountState = describeOffchainFaucetAccountState(account);
+  if (!accountState.settledCapacitySnapshot) {
+    pushDebugEvent(input.relayStore, {
+      event: 'debug_event',
+      status: 'queued',
+      reason: 'FAUCET_ACCOUNT_HAS_PENDING_SETUP',
+      details: {
+        requestId: request.requestId,
+        hubEntityId: hub.entityId,
+        userEntityId: request.userEntityId,
+        requestedHubEntityId: request.requestedHubId,
+        accountState,
+      },
+    });
+  }
+  const amountWei = ethers.parseUnits(request.amount, getTokenInfo(request.tokenId).decimals);
+  const currentOutCapacity = getEntityOutCapacity(account, hub.entityId, request.tokenId);
+  if (shouldRejectOffchainFaucetForSettledCapacity({
+    account,
+    senderOutCapacity: currentOutCapacity,
+    amount: amountWei,
+  })) {
+    return fail(input.headers, 409, {
+      success: false,
+      error: 'Selected hub does not have enough outbound capacity for offchain faucet.',
+      code: 'FAUCET_INSUFFICIENT_OUT_CAPACITY',
+      extra: {
+        requestId: request.requestId,
+        hubEntityId: hub.entityId,
+        userEntityId: request.userEntityId,
+        tokenId: request.tokenId,
+        requiredAmount: amountWei.toString(),
+        senderOutCapacity: currentOutCapacity.toString(),
+        accountState,
+      },
+    });
+  }
+  return { ok: true, value: { accountState, amountWei, currentOutCapacity } };
+};
 
-      // Explicit invariant:
-      // faucet is a one-way enqueue endpoint, not a synchronous settlement oracle.
-      // It never tries to "repair" credit/sync state and never waits for the
-      // counterparty side to materialize locally inside serverEnv.
-      if (!hasHubAccount) {
-        pushDebugEvent(relayStore, {
-          event: 'error',
-          status: 'rejected',
-          reason: 'FAUCET_ACCOUNT_NOT_OPEN',
-          details: {
-            requestId,
-            hubEntityId,
-            userEntityId: normalizedUserEntityId,
-            requestedHubEntityId: requestedHubId || null,
-            accountPresence: buildAccountPresence(),
-          },
-        });
-        const accountPresence = buildAccountPresence();
-        return new Response(
-          safeStringify(faucetFailureBody({
-            success: false,
-            error: 'No bilateral account with selected hub. Open account first, then retry faucet.',
-            code: 'FAUCET_ACCOUNT_NOT_OPEN',
-            extra: {
-              requestId,
-              hubEntityId,
-              userEntityId: normalizedUserEntityId,
-              requestedHubEntityId: requestedHubId || null,
-              accountPresence,
-            },
-          })),
-          { status: 409, headers },
-        );
-      }
-      const accountState = describeOffchainFaucetAccountState(account);
-      if (!accountState.settledCapacitySnapshot) {
-        pushDebugEvent(relayStore, {
-          event: 'debug_event',
-          status: 'queued',
-          reason: 'FAUCET_ACCOUNT_HAS_PENDING_SETUP',
-          details: {
-            requestId,
-            hubEntityId,
-            userEntityId: normalizedUserEntityId,
-            requestedHubEntityId: requestedHubId || null,
-            accountState,
-          },
-        });
-      }
-      const currentOutCapacity = getEntityOutCapacity(account, hubEntityId, tokenId);
-      if (shouldRejectOffchainFaucetForSettledCapacity({
-        account: account,
-        senderOutCapacity: currentOutCapacity,
-        amount: amountWei,
-      })) {
-        return new Response(
-          safeStringify(faucetFailureBody({
-            success: false,
-            error: 'Selected hub does not have enough outbound capacity for offchain faucet.',
-            code: 'FAUCET_INSUFFICIENT_OUT_CAPACITY',
-            extra: {
-              requestId,
-              hubEntityId,
-              userEntityId: normalizedUserEntityId,
-              tokenId,
-              requiredAmount: amountWei.toString(),
-              senderOutCapacity: currentOutCapacity.toString(),
-              accountState,
-            },
-          })),
-          { status: 409, headers },
-        );
-      }
+const buildFaucetRuntimeInput = (
+  env: RuntimeState,
+  request: FaucetRequest,
+  hub: FaucetHub,
+  amountWei: bigint,
+): RuntimeInput => {
+  const policy = getEntityReplicaById(env, hub.entityId)?.state?.hubRebalanceConfig;
+  const description = encodeRebalancePolicyMemo('faucet-offchain', {
+    policyVersion:
+      Number.isFinite(Number(policy?.policyVersion)) && Number(policy?.policyVersion) > 0
+        ? Number(policy?.policyVersion)
+        : 1,
+    baseFee: getDefaultRebalanceBaseFeeForToken(request.tokenId),
+    liquidityFeeBps: policy?.rebalanceLiquidityFeeBps ?? policy?.minFeeBps ?? 1n,
+    gasFee: 0n,
+  });
+  const entityTxs: EntityTx[] = [{
+    type: 'directPayment',
+    data: {
+      targetEntityId: request.userEntityId,
+      tokenId: request.tokenId,
+      amount: amountWei,
+      route: [hub.entityId, request.userEntityId],
+      description,
+    },
+  }];
+  return {
+    runtimeTxs: [],
+    entityInputs: [{ entityId: hub.entityId, signerId: hub.signerId, entityTxs }],
+  };
+};
 
-      // Single-writer invariant: enqueue only; runtime loop applies.
-      let receipt: RuntimeIngressReceipt | null = null;
-      try {
-        const hubPolicy = getEntityReplicaById(env, hubEntityId)?.state?.hubRebalanceConfig;
-        const faucetDescription = encodeRebalancePolicyMemo('faucet-offchain', {
-          policyVersion:
-            Number.isFinite(Number(hubPolicy?.policyVersion)) && Number(hubPolicy?.policyVersion) > 0
-              ? Number(hubPolicy?.policyVersion)
-              : 1,
-          baseFee: getDefaultRebalanceBaseFeeForToken(Number(tokenId)),
-          liquidityFeeBps: hubPolicy?.rebalanceLiquidityFeeBps ?? hubPolicy?.minFeeBps ?? 1n,
-          gasFee: 0n,
-        });
-        const entityTxs: EntityTx[] = [{
-          type: 'directPayment',
-          data: {
-            targetEntityId: normalizedUserEntityId,
-            tokenId,
-            amount: amountWei,
-            route: [hubEntityId, normalizedUserEntityId],
-            description: faucetDescription,
-          },
-        }];
-        const runtimeInput: RuntimeInput = {
-          runtimeTxs: [],
-          entityInputs: [
-            {
-              entityId: hubEntityId,
-              signerId: hubSignerId,
-              entityTxs,
-            },
-          ],
-        };
-        validateRuntimeInputAdmission(env, runtimeInput);
-        enqueueRuntimeInput(env, runtimeInput);
-        receipt = registerReceipt({
-          id: requestId,
-          kind: 'faucet-offchain',
-          counts: { runtimeTxs: 0, entityInputs: 1, jInputs: 0 },
-          enqueuedHeight: getCurrentRuntimeHeight(env),
-          runtimeInput,
-          note: 'Faucet payment was accepted into the runtime queue; poll statusUrl and account state for settlement.',
-        });
-      } catch (error) {
-        return new Response(
-          safeStringify(faucetFailureBody({
-            error: 'Failed to admit faucet payment into runtime',
-            code: 'FAUCET_PAYMENT_ADMISSION_FAILED',
-            extra: { details: (error as Error).message },
-          })),
-          { status: 503, headers },
-        );
-      }
-      if (!receipt) {
-        return new Response(
-          safeStringify(faucetFailureBody({
-            error: 'Failed to register faucet payment receipt',
-            code: 'FAUCET_PAYMENT_RECEIPT_FAILED',
-          })),
-          { status: 503, headers },
-        );
-      }
-      const serverDurationMs = Date.now() - requestStartedAt;
-      faucetLog.info('offchain.accepted', { requestId, durationMs: serverDurationMs });
+const enqueueFaucetPayment = (
+  input: OffchainFaucetHandlerInput & { env: RuntimeState },
+  request: FaucetRequest,
+  runtimeInput: RuntimeInput,
+): FaucetPhase<RuntimeIngressReceipt> => {
+  try {
+    input.validateRuntimeInputAdmission(input.env, runtimeInput);
+    input.enqueueRuntimeInput(input.env, runtimeInput);
+    return {
+      ok: true,
+      value: input.registerReceipt({
+        id: request.requestId,
+        kind: 'faucet-offchain',
+        counts: { runtimeTxs: 0, entityInputs: 1, jInputs: 0 },
+        enqueuedHeight: input.getCurrentRuntimeHeight(input.env),
+        runtimeInput,
+        note: 'Faucet payment was accepted into the runtime queue; poll statusUrl and account state for settlement.',
+      }),
+    };
+  } catch (error) {
+    return fail(input.headers, 503, {
+      error: 'Failed to admit faucet payment into runtime',
+      code: 'FAUCET_PAYMENT_ADMISSION_FAILED',
+      extra: { details: getErrorMessage(error) },
+    });
+  }
+};
 
-      return new Response(
-        JSON.stringify({
-          success: true,
-          type: 'offchain',
-          status: 'queued',
-          requestId,
-          receipt,
-          statusUrl: buildRuntimeInputStatusUrl(requestId),
-          amount,
-          tokenId,
-          from: hubEntityId.slice(0, 16) + '...',
-          to: normalizedUserEntityId.slice(0, 16) + '...',
-          accountReady: accountState.settledCapacitySnapshot,
-          accountState,
-          senderOutCapacity: currentOutCapacity.toString(),
-          serverDurationMs,
-        }),
-        { headers },
-      );
-    } catch (error: unknown) {
-      faucetLog.error('offchain.error', { error: getErrorMessage(error) });
-      const message = getErrorMessage(error, 'Unknown faucet error');
-      const status =
-        message.includes('SIGNER_RESOLUTION_FAILED') || message.includes('RUNTIME_REPLICA_NOT_FOUND') ? 503 : 500;
-      return new Response(safeStringify(faucetFailureBody({
-        code: status === 503 ? 'FAUCET_RUNTIME_UNAVAILABLE' : 'FAUCET_UNHANDLED_ERROR',
-        error: message,
-      })), { status, headers });
+const successResponse = (
+  input: OffchainFaucetHandlerInput,
+  request: FaucetRequest,
+  hub: FaucetHub,
+  admission: FaucetAccountAdmission,
+  receipt: RuntimeIngressReceipt,
+  requestStartedAt: number,
+): Response => {
+  const serverDurationMs = Date.now() - requestStartedAt;
+  faucetLog.info('offchain.accepted', { requestId: request.requestId, durationMs: serverDurationMs });
+  return new Response(JSON.stringify({
+    success: true,
+    type: 'offchain',
+    status: 'queued',
+    requestId: request.requestId,
+    receipt,
+    statusUrl: input.buildRuntimeInputStatusUrl(request.requestId),
+    amount: request.amount,
+    tokenId: request.tokenId,
+    from: `${hub.entityId.slice(0, 16)}...`,
+    to: `${request.userEntityId.slice(0, 16)}...`,
+    accountReady: admission.accountState.settledCapacitySnapshot,
+    accountState: admission.accountState,
+    senderOutCapacity: admission.currentOutCapacity.toString(),
+    serverDurationMs,
+  }), { headers: input.headers });
+};
+
+export const handleOffchainFaucet = async (
+  input: OffchainFaucetHandlerInput,
+): Promise<Response> => {
+  const requestStartedAt = Date.now();
+  try {
+    if (!input.env) {
+      return fail(input.headers, 503, {
+        code: 'FAUCET_RUNTIME_NOT_INITIALIZED',
+        error: 'Runtime not initialized',
+      }).response;
     }
-  
+    const initializedInput = { ...input, env: input.env };
+    const parsed = await parseFaucetRequest(initializedInput);
+    if (!parsed.ok) return parsed.response;
+    const request = parsed.value;
+    faucetLog.info('offchain.request', {
+      requestId: request.requestId,
+      user: shortId(request.userEntityId, 8),
+      runtime: shortId(request.userRuntimeId, 10),
+    });
+    recordRuntimeVisibility(input.relayStore, request);
+    const hub = resolveFaucetHub(initializedInput, request);
+    if (!hub.ok) return hub.response;
+    pushDebugEvent(input.relayStore, {
+      event: 'debug_event',
+      status: 'info',
+      reason: 'REB_STEP0_FAUCET_REQUEST',
+      details: { ...request, hubEntityId: hub.value.entityId },
+    });
+    const account = admitFaucetAccount(initializedInput, request, hub.value);
+    if (!account.ok) return account.response;
+    const runtimeInput = buildFaucetRuntimeInput(input.env, request, hub.value, account.value.amountWei);
+    const receipt = enqueueFaucetPayment(initializedInput, request, runtimeInput);
+    if (!receipt.ok) return receipt.response;
+    return successResponse(input, request, hub.value, account.value, receipt.value, requestStartedAt);
+  } catch (error: unknown) {
+    const message = getErrorMessage(error, 'Unknown faucet error');
+    faucetLog.error('offchain.error', { error: message });
+    const unavailable =
+      message.includes('SIGNER_RESOLUTION_FAILED') || message.includes('RUNTIME_REPLICA_NOT_FOUND');
+    return fail(input.headers, unavailable ? 503 : 500, {
+      code: unavailable ? 'FAUCET_RUNTIME_UNAVAILABLE' : 'FAUCET_UNHANDLED_ERROR',
+      error: message,
+    }).response;
+  }
 };
