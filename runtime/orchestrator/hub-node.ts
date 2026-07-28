@@ -26,7 +26,7 @@ import {
   RPC_MARKET_MAX_DEPTH,
 } from '../relay/market-snapshot';
 import { toPublicRpcUrl } from '../networking/loopback-url';
-import { startParentLivenessWatch } from './parent-watch';
+import { startParentLivenessWatch } from '../infra/parent-watch';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
 import { quiesceNodeRuntime } from './node-runtime-quiesce';
 import { applyJEventsToEnv } from '../jadapter/watcher';
@@ -46,7 +46,7 @@ import {
   type BootstrapProgressHealth,
 } from './bootstrap-progress-watchdog';
 import { restoredRuntimeRouteRelocated } from './restored-gossip-route';
-import { readInheritedChildSecrets, resolveChildSecret } from './child-secrets';
+import { readInheritedChildSecrets, resolveChildSecret } from '../infra/child-secrets';
 import { findMissingRpcContractCode } from './contract-readiness';
 import { readJurisdictionsFile } from './jurisdictions-file';
 import { getTokenIdsForJurisdiction } from '../account/utils';

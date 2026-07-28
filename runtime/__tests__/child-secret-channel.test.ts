@@ -8,7 +8,7 @@ import {
   childSecretFdEnv,
   parseChildSecretPayload,
   writeInheritedChildSecrets,
-} from '../orchestrator/child-secrets';
+} from '../infra/child-secrets';
 import { spawnBunChild } from '../orchestrator/custody-bootstrap';
 
 const readStream = async (stream: NodeJS.ReadableStream): Promise<string> => {
@@ -21,7 +21,7 @@ describe('orchestrator child secret channel', () => {
   test('passes secrets through inherited FD without exposing them in argv', async () => {
     const secret = 'fd-only-runtime-seed alpha beta gamma';
     const code = [
-      "import { readInheritedChildSecrets } from './runtime/orchestrator/child-secrets.ts';",
+      "import { readInheritedChildSecrets } from './runtime/infra/child-secrets.ts';",
       "process.stdout.write(JSON.stringify({ secrets: readInheritedChildSecrets(), argv: process.argv }));",
     ].join('');
     const child = spawn(process.execPath, ['-e', code], {
@@ -51,7 +51,7 @@ describe('orchestrator child secret channel', () => {
     const childSeed = 'derived-h1-runtime-seed';
     const childAuthSeed = 'derived-h1-radapter-auth-seed-32-bytes';
     const code = [
-      "import { readInheritedChildSecrets, resolveChildSecret } from './runtime/orchestrator/child-secrets.ts';",
+      "import { readInheritedChildSecrets, resolveChildSecret } from './runtime/infra/child-secrets.ts';",
       "import { registerRuntimeAdapterAuthSeed, resolveRuntimeAdapterAuthSeed } from './runtime/radapter/auth.ts';",
       'const secrets = readInheritedChildSecrets();',
       "const seed = resolveChildSecret(secrets, 'runtimeSeed', process.env['XLN_RUNTIME_SEED'] || '');",
@@ -115,7 +115,7 @@ describe('orchestrator child secret channel', () => {
 
   test('managed custody child reliably receives the exact startup signer through the FD', async () => {
     const code = [
-      "import { readInheritedChildSecrets } from './runtime/orchestrator/child-secrets.ts';",
+      "import { readInheritedChildSecrets } from './runtime/infra/child-secrets.ts';",
       'process.stdout.write(JSON.stringify(readInheritedChildSecrets()));',
     ].join('');
     for (let attempt = 0; attempt < 25; attempt += 1) {

@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { serializeTaggedJson } from '../protocol/serialization';
-import { readInheritedChildSecrets, resolveChildSecret } from '../orchestrator/child-secrets';
+import { readInheritedChildSecrets, resolveChildSecret } from '../infra/child-secrets';
 import {
   becomeHub,
   DaemonControlClient,

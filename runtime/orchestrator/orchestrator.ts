@@ -11,7 +11,7 @@ import { createStructuredLogger, registerStructuredLogSink } from '../infra/logg
 import { deriveSignerAddressSync } from '../account/crypto';
 import { deriveRuntimeAdapterCapabilityToken } from '../radapter/auth';
 import { sanitizeChildProcessEnv } from '../server/child-process-env';
-import { buildManagedRuntimeChildSecretEnv, writeInheritedChildSecrets } from './child-secrets';
+import { buildManagedRuntimeChildSecretEnv, writeInheritedChildSecrets } from '../infra/child-secrets';
 import {
   startCustodySupport,
   stopManagedChild,

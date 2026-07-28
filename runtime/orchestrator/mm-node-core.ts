@@ -41,7 +41,7 @@ import { registerRuntimeAdapterAuthSeed } from '../radapter/auth';
 import { type RuntimeAdapterSocket } from '../radapter/server';
 import { enqueueRuntimeInput } from '../runtime.ts';
 import type { AccountState, CrossJurisdictionSwapRoute, EntityInput, RuntimeState, SwapOffer } from '../types';
-import { readInheritedChildSecrets, resolveChildSecret } from './child-secrets';
+import { readInheritedChildSecrets, resolveChildSecret } from '../infra/child-secrets';
 import {
   BOOTSTRAP_POLL_MS,
   buildMarketMakerConsensusConfig,

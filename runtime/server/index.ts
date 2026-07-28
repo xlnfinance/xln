@@ -58,7 +58,7 @@ import { createHelloChallengeRegistry } from '../networking/hello-challenge';
 import { createLocalDeliveryHandler } from '../relay/local-delivery';
 import { resolveJurisdictionsJsonPath } from '../jurisdiction/jurisdictions-path';
 import { createStructuredLogger, registerStructuredLogSink, shortId } from '../infra/logger';
-import { startParentLivenessWatch } from '../orchestrator/parent-watch';
+import { startParentLivenessWatch } from '../infra/parent-watch';
 import {
   buildMarketSnapshotForReplica,
   type MarketSnapshotPayload,
@@ -117,7 +117,7 @@ import {
 } from './assistant-proxy';
 import { selectPredeployedJurisdiction } from './predeployed-jurisdiction';
 import { getJurisdictionIdentityRef } from '../jurisdiction/jurisdiction-runtime';
-import { readInheritedChildSecrets } from '../orchestrator/child-secrets';
+import { readInheritedChildSecrets } from '../infra/child-secrets';
 import { createLocalPairingController } from './local-pairing';
 import { deriveSignerAddressSync } from '../account/crypto';
 import { buildLocalRuntimeOwner, ensureLocalRuntimeOwner } from './local-runtime-owner';

@@ -596,7 +596,7 @@ for (const [path, markers] of [
     ["createStructuredLogger('orchestrator.managed_leases')", 'stale_processes.kill', 'lease.unreadable_ignored'],
   ],
   [
-    'runtime/orchestrator/parent-watch.ts',
+    'runtime/infra/parent-watch.ts',
     ["createStructuredLogger('orchestrator.parent_watch')", 'missing_parent_pid', 'parent_pid_missing'],
   ],
   [
@@ -690,7 +690,7 @@ assertNotIncludes(disputeWatch, '[PUSH-WATCH] target', disputeWatchPath);
 for (const orchestratorLifecyclePath of [
   'runtime/orchestrator/graceful-server.ts',
   'runtime/orchestrator/managed-runtime-leases.ts',
-  'runtime/orchestrator/parent-watch.ts',
+  'runtime/infra/parent-watch.ts',
 ]) {
   assertNotIncludes(readText(orchestratorLifecyclePath), 'console.', orchestratorLifecyclePath);
 }

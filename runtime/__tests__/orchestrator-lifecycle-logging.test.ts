@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { scheduler } from 'node:timers/promises';
 
 import { createHttpDrainTracker, stopServerGracefully } from '../orchestrator/graceful-server';
-import { startParentLivenessWatch } from '../orchestrator/parent-watch';
+import { startParentLivenessWatch } from '../infra/parent-watch';
 
 const withSuppressedStructuredLogs = async <T>(fn: () => T | Promise<T>): Promise<T> => {
   const previousScopes = process.env['XLN_LOG_SCOPES'];
@@ -22,7 +22,7 @@ test('orchestrator lifecycle helpers use structured logging without direct conso
   const files = [
     'runtime/orchestrator/graceful-server.ts',
     'runtime/orchestrator/managed-runtime-leases.ts',
-    'runtime/orchestrator/parent-watch.ts',
+    'runtime/infra/parent-watch.ts',
   ];
   const sources = files.map((file) => readFileSync(join(process.cwd(), file), 'utf8'));
 
