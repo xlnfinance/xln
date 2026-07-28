@@ -1,7 +1,7 @@
 import { keccak256, toUtf8Bytes } from 'ethers';
 
 import type {
-  AccountInput,
+  AccountPeerInput,
   CertifiedBoardAuthorityBinding,
   CertifiedBoardRecord,
   ConsensusOutputOrigin,
@@ -352,7 +352,7 @@ const canonicalCertifiedEntityTxs = (entityTxs: EntityTx[]): EntityTx[] => {
 };
 
 const accountInputLaneAndSequence = (
-  input: AccountInput,
+  input: AccountPeerInput,
 ): Pick<ConsensusOutputOrigin, 'lane' | 'sequence'> => {
   const proposal = accountInputProposal(input);
   const ack = accountInputAck(input);
@@ -553,7 +553,7 @@ const requiredWitness = (
   return { context, hash, hanko };
 };
 
-const collectAccountInputWitnesses = (input: AccountInput): OutputWitness[] => {
+const collectAccountInputWitnesses = (input: AccountPeerInput): OutputWitness[] => {
   const witnesses: OutputWitness[] = [];
   const ack = accountInputAck(input);
   if (ack) witnesses.push(requiredWitness('ack-frame', ack.frameHash, ack.frameHanko));

@@ -156,6 +156,8 @@ export type {
   AccountBoardResealMigration,
   AccountFrameProposal,
   AccountInput,
+  AccountLocalInput,
+  AccountPeerInput,
   AccountState,
   AccountDisputeSeal,
   AccountStateDomain,

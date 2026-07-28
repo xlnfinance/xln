@@ -1,5 +1,5 @@
 import type {
-  AccountInput,
+  AccountPeerInput,
   EntityState,
   EntityTx,
   RuntimeState,
@@ -122,7 +122,7 @@ export interface ApplyEntityTxResult {
   // Pure events for entity-level orchestration
   accountTxs?: AccountTxTarget[];
   /** Exact consensus response that the final Entity flush must preserve. */
-  requiredAccountResponse?: AccountInput;
+  requiredAccountResponse?: AccountPeerInput;
   accountJClaimNodeChanges?: AccountJClaimNodeChanges;
   swapOffersCreated?: SwapOfferEvent[];
   swapCancelRequests?: SwapCancelRequestEvent[];

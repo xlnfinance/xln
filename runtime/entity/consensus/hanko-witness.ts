@@ -96,7 +96,7 @@ export const isWitnessHashType = (type: HashType): type is HankoWitnessEntry['ty
  * attached. These exact Hanko fields are self-authenticating and cannot be
  * included in a digest signed by the same quorum without creating a cycle.
  */
-export const cloneAccountInputWithoutPostCommitHankos = (input: AccountInput): AccountInput => {
+export const cloneAccountInputWithoutPostCommitHankos = <T extends AccountInput>(input: T): T => {
   const unsigned = cloneIsolatedAccountInput(input);
   const ack = accountInputAck(unsigned);
   if (ack) {

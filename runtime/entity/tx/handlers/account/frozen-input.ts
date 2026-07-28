@@ -1,4 +1,4 @@
-import type { AccountInput, AccountState, EntityState } from '../../../../types';
+import type { AccountPeerInput, AccountState, EntityState } from '../../../../types';
 import {
   accountInputAck,
   accountInputProposal,
@@ -11,7 +11,7 @@ const accountHandlerLog = createStructuredLogger('account.handler');
 
 export const frozenAccountInputLogLevel = (
   account: Pick<AccountState, 'status' | 'activeDispute'>,
-  input: Pick<AccountInput, 'kind'>,
+  input: Pick<AccountPeerInput, 'kind'>,
 ): 'info' | 'warn' | 'error' => {
   // Reliable transport can legitimately retry a signed ACK after local
   // dispute preparation. Keep it visible without misclassifying the no-op as
@@ -41,7 +41,7 @@ export const canProcessFrozenAccountInput = (
 export const rejectFrozenAccountInput = (
   state: EntityState,
   account: AccountState,
-  input: AccountInput,
+  input: AccountPeerInput,
   counterpartyId: string,
 ): boolean => {
   if ((account.status ?? 'active') === 'active') return false;

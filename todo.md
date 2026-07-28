@@ -8,6 +8,14 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 
 ## 1. Core simplification and human auditability — P0/P1, owner-approved
 
+- [ ] Enforce the canonical Runtime → Entity → Account cascade documented at
+  the top of `AGENTS.md` as the first architecture gate. Use the same
+  `*Machine/*Replica`, `*State`, `*Input`, `*Tx`, `*Frame`, `*Output` and phase
+  vocabulary at every layer without a shared base class. Inputs control their
+  machine and contain that layer's transactions; outputs return to the parent;
+  only Runtime interprets committed outputs as post-WAL external effects.
+  Delete or correct docs, comments, types and helpers that blur local
+  `AccountTx[]` with signed bilateral `AccountInput`.
 - [ ] Close the still-live findings from the GPT audit of
   `main@fddcac8bab9420f48168b0453cc05419f858f392`, reverified against
   `main@f1de788d87619ff85a944df382cdb8b8ca02a979` instead of copying stale line
@@ -87,8 +95,8 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   WAL, Entity validator certification and Account bilateral ACK semantics
   explicit. Do not introduce inheritance or a generic reducer that hides those
   different trust boundaries.
-- [ ] Separate committed frame state from each machine/replica envelope before
-  optimizing clones. Target `RuntimeMachine = RuntimeFrameState + one ingress
+- [ ] Separate committed frame state from each replica envelope before
+  optimizing clones. Target `RuntimeReplica = RuntimeState + one ingress
   queue + WAL/outbox/lifecycle`, `EntityReplica = EntityState + mempool +
   candidate/certificate`, and `AccountReplica = AccountState + mempool +
   pending bilateral candidate/ACK/resend metadata`. `*State` must contain only
@@ -99,12 +107,30 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   and Account must retain isolated candidates until their respective
   certificate or bilateral ACK commits them. Keep single-signer Entity on the
   same candidate pipeline with an immediate local certificate.
+- [ ] Give every nested machine one explicit deterministic input boundary.
+  `RuntimeInput` owns `RuntimeTx[]` plus routed Entity inputs; `EntityInput`
+  owns `EntityTx[]` plus Entity-consensus evidence. `AccountInput` is the one
+  Account boundary: its local `txs` branch carries `AccountTx[]` destined for
+  a future Account frame, while its peer
+  `frame/ack/frame_ack/dispute/reseal/settle` branches carry bilateral
+  consensus evidence. The `accountInput` EntityTx commits the exact child
+  `AccountPeerInput`; Entity-owned financial transactions create the local
+  `AccountInput.txs` branch. Both paths enter one `applyAccountInput`
+  transition so Entity reducers never mutate an Account mempool directly.
+  Each replica transition
+  returns deterministic outputs to its parent; only Runtime may interpret
+  committed outputs as post-WAL external effects. Keep transaction order and
+  multiplicity byte-identical, especially identical separately authorized
+  payments, while lifecycle transactions retain exact-payload idempotency.
 - [ ] Standardize transition result naming (owner-approved):
   `outputs` are deterministic messages to another state machine; `effects` are
   post-commit external I/O only; queued child-machine inputs must be named for
   their destination instead of the implementation detail `mempoolOps`.
-  Entity reducers now expose addressed Account transactions as `accountTxs`;
-  keep that destination vocabulary when the machine envelopes are separated.
+  Entity reducers wrap local future-frame `AccountTx[]` in
+  `AccountInput { kind: 'txs' }`; peer AccountInput variants remain exact
+  bilateral protocol payloads.
+  Model candidate timeout/rollback as an explicit local AccountInput rather
+  than letting Entity delete `pendingFrame` or rewrite Account mempool.
   Evaluate a small structural `Transition<State, Output, Effect>` result type,
   but adopt it only where it removes duplicate result shapes without weakening
   the Runtime/Entity/Account ownership boundary.
@@ -133,7 +159,7 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   and prove identical keys/roots across add-delta, J-settlement and projection.
   Rename the soft consensus predicate and strict ingress assertion so two
   operations are not both called `validateEntityInput`; centralize
-  settlement-Hanko projection and Runtime Env symbols.
+  settlement-Hanko projection and RuntimeState symbols.
 - [ ] Restore a structurally enforceable money boundary. Move finalized
   Account J-event settlement/dispute mutations out of `entity/tx/` and into
   Account-owned handlers; Entity may authenticate and route, but only Account
@@ -141,7 +167,7 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   cache invalidation and state roots with settlement/dispute tests.
 - [ ] Turn Runtime execution into one visible pipeline:
   `take → validate/plan → isolated RJEA apply → WAL → install → dispatch`.
-  Keep exactly one live `Env.runtimeMempool`; `runtimeInput` names only the
+  Keep exactly one live `RuntimeReplica` mempool; `runtimeInput` names only the
   immutable input persisted in a committed frame, never a second live queue.
   Represent all frame disposition, rollback and reliable-delivery flags in one
   explicit `FrameExecutionState` instead of cross-stage locals or closures.
@@ -221,7 +247,7 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 - [ ] Remove the remaining proven pre-mainnet compatibility ABI/state:
   migrate V1 settlement `diffsToOps` and `position.xlnomy`, then delete unused
   contract `resolveEntityId` and ineffective `hashToBlock/cleanSecret`. Use one
-  schema/ABI change with no legacy decoder or fallback. `Env.browserVM` is
+  schema/ABI change with no legacy decoder or fallback. `RuntimeState.browserVM` is
   currently live infrastructure, not dead code; do not delete it as an audit
   shortcut.
 

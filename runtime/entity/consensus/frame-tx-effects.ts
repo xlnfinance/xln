@@ -8,7 +8,8 @@ import { normalizeEntityRef } from '../../orderbook/cross-j-orderbook';
 import { shortId, shortOrder } from '../../infra/logger';
 import { cancelHook, scheduleHook } from '../scheduler';
 import { accountHasProposableMempool } from './account-mempool-eligibility';
-import { queueAccountMempoolTx } from './account-mempool-queue';
+import { applyAccountInput } from '../../account/consensus';
+import { createLocalAccountInput } from '../../account/input';
 import {
   buildCrossJurisdictionFillNoticeOutput,
   drainCommittedCrossJurisdictionCancelAcks,
@@ -36,11 +37,11 @@ const recordAccountChange = (
   });
 };
 
-const applyReturnedMempoolOps = (
+const applyReturnedAccountTxs = async (
   context: ApplyEntityTxsInOrderContext,
   state: EntityState,
   accountTxs: Array<{ accountId: string; tx: AccountTx }>,
-): void => {
+): Promise<void> => {
   for (const { accountId, tx } of accountTxs) {
     const account = state.accounts.get(accountId);
     if (tx.type === 'cross_swap_fill_ack' && !account?.swapOffers?.has(tx.data.offerId)) {
@@ -82,7 +83,12 @@ const applyReturnedMempoolOps = (
       });
       continue;
     }
-    if (!queueAccountMempoolTx(account, tx)) continue;
+    const admission = await applyAccountInput(
+      context.env,
+      account,
+      createLocalAccountInput(account, state.entityId, [tx]),
+    );
+    if (admission.admittedAccountTxCount === 0) continue;
     context.proposableAccounts.add(accountId);
     recordAccountChange(context, state, accountId);
     if (tx.type === 'htlc_lock' && tx.data.timelock && tx.data.lockId && state.crontabState) {
@@ -145,7 +151,7 @@ const markTxAccountsProposable = (
   }
 };
 
-export const applyEntityTxReturnedEffects = (
+export const applyEntityTxReturnedEffects = async (
   context: ApplyEntityTxsInOrderContext,
   state: EntityState,
   entityTx: EntityTx,
@@ -156,9 +162,9 @@ export const applyEntityTxReturnedEffects = (
     swapCancelRequests?: SwapCancelRequestEvent[];
     swapOffersCancelled?: SwapCancelEvent[];
   },
-): void => {
+): Promise<void> => {
   if (effects.accountTxs?.length) {
-    applyReturnedMempoolOps(context, state, effects.accountTxs);
+    await applyReturnedAccountTxs(context, state, effects.accountTxs);
   }
   collectSwapEvents(
     context,
@@ -168,13 +174,14 @@ export const applyEntityTxReturnedEffects = (
     effects.swapOffersCancelled,
   );
   markTxAccountsProposable(context, state, entityTx);
-  drainPendingCrossJurisdictionFillAcks(
+  await drainPendingCrossJurisdictionFillAcks(
     context.env,
     state,
     context.proposableAccounts,
     context.storageChanges,
   );
-  drainCommittedCrossJurisdictionCancelAcks(
+  await drainCommittedCrossJurisdictionCancelAcks(
+    context.env,
     state,
     context.proposableAccounts,
     context.storageChanges,

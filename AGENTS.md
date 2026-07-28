@@ -5,6 +5,35 @@
 Mission: Fintech-grade, deterministic. J/E/A trilayer correctness before features. Pure functions only.
 ALWAYS: `bun run check` before push/merge/release. Test in browser F12 console. Never swallow errors.
 
+## CANONICAL RUNTIME → ENTITY → ACCOUNT CASCADE
+
+This vocabulary is a protocol invariant, not a stylistic preference:
+
+| Layer | Live replica | Committed state | Input | Transaction | Frame |
+|---|---|---|---|---|---|
+| Runtime | `RuntimeReplica` | `RuntimeState` | `RuntimeInput` | `RuntimeTx` | `RuntimeFrame` |
+| Entity | `EntityReplica` | `EntityState` | `EntityInput` | `EntityTx` | `EntityFrame` |
+| Account | `AccountReplica` | `AccountState` | `AccountInput` | `AccountTx` | `AccountFrame` |
+
+- Every replica has a deterministic machine transition:
+  `(replica, input) → { replica, outputs }`. Inputs control the replica and contain that layer's transactions plus its
+  consensus evidence. Outputs return to the parent machine; only Runtime turns
+  committed outputs into external effects after WAL commit.
+- `EntityInput` contains `EntityTx[]`. The `accountInput` EntityTx carries an
+  exact child `AccountPeerInput`. Entity-owned financial transactions create
+  the local `AccountInput.txs` branch. Both paths use one `applyAccountInput`
+  transition; the local branch must never enter routing or P2P.
+- `*State` is only deterministic data committed by the corresponding frame.
+  Mempools, candidates, precommits, ACK/resend metadata, transport, watchdogs,
+  WAL handles and retry state belong to the replica envelope.
+- `*Replica` names a live instance. `*Machine` names transition logic or its
+  module, never a data interface.
+- Keep prefixes/suffixes and phase names parallel across layers, but never add
+  a shared base class or generic reducer: Runtime single-writer WAL, Entity
+  validator certification and Account bilateral consensus have different trust
+  boundaries. If any cascade naming/ownership detail is less than 100% clear,
+  stop and ask the owner before editing it.
+
 ## FROZEN CORE
 
 - Never run `bun run frozen-core:approve`; only the project owner may approve a frozen-file change interactively.

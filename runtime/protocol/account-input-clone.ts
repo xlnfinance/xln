@@ -49,6 +49,8 @@ export function cloneIsolatedAccountInput(input: AccountInput): AccountInput {
     ...(input.watchSeed !== undefined ? { watchSeed: input.watchSeed } : {}),
   };
   switch (input.kind) {
+    case 'txs':
+      return { ...base, kind: input.kind, txs: input.txs.map(cloneIsolatedAccountTx) };
     case 'frame':
       return { ...base, kind: input.kind, proposal: cloneFrameProposal(input.proposal) };
     case 'ack':

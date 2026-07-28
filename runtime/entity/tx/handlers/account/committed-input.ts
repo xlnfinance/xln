@@ -1,5 +1,5 @@
 import type {
-  AccountInput,
+  AccountPeerInput,
   AccountState,
   EntityCandidateEffect,
   EntityInput,
@@ -56,7 +56,7 @@ export type CommittedAccountEffects = {
 type SuccessfulAccountInputContext = {
   env: RuntimeState;
   state: EntityState;
-  input: AccountInput;
+  input: AccountPeerInput;
   account: AccountState;
   counterpartyId: string;
   createdAccount: boolean;
@@ -253,7 +253,7 @@ const logCommittedSwapEffects = (effects: CommittedAccountEffects): void => {
 
 export const applySuccessfulAccountInput = async (
   context: SuccessfulAccountInputContext,
-): Promise<AccountInput | undefined> => {
+): Promise<AccountPeerInput | undefined> => {
   const { env, state, input, account, counterpartyId, createdAccount, result, effects } = context;
   effects.candidateEffects.push(...(result.candidateEffects ?? []));
   addMessages(state, result.events);

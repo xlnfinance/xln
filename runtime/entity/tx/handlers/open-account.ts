@@ -21,7 +21,8 @@ import {
   normalizeAccountStateDomain,
   sameAccountStateDomain,
 } from '../../../account/state-root';
-import { appendAccountMempoolTxs } from '../../../account/mempool';
+import { applyAccountInput } from '../../../account/consensus';
+import { createLocalAccountInput } from '../../../account/input';
 import { assertEntityAccountInsertionCapacity } from '../../account-capacity';
 import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claim-accumulator';
 import { resolveJurisdictionRebalanceDefaults } from '../../../account/rebalance-policy-defaults';
@@ -115,11 +116,12 @@ const insertLocalAccount = (
   });
 };
 
-const seedOpenAccountPolicies = (
+const seedOpenAccountPolicies = async (
+  env: RuntimeState,
   state: EntityState,
   tx: OpenAccountEntityTx,
   counterpartyId: string,
-): void => {
+): Promise<void> => {
   const account = state.accounts.get(counterpartyId);
   if (!account) throw new Error('OPEN_ACCOUNT_CREATED_MACHINE_MISSING');
   account.currentFrame.accountStateRoot = computeAccountStateRoot(account);
@@ -127,7 +129,7 @@ const seedOpenAccountPolicies = (
   const tokenId = tx.data.tokenId ?? 1;
   const tokenIds = Array.from(new Set([tokenId, ...DEFAULT_ACCOUNT_TOKEN_IDS]))
     .filter(id => Number.isFinite(id) && id > 0);
-  appendAccountMempoolTxs(account, [
+  const initialAccountTxs = [
     ...tokenIds.map(deltaTokenId => ({
       type: 'add_delta' as const,
       data: { tokenId: deltaTokenId },
@@ -138,7 +140,15 @@ const seedOpenAccountPolicies = (
     ...(tx.data.creditAmount && tx.data.creditAmount > 0n
       ? [{ type: 'set_credit_limit' as const, data: { tokenId, amount: tx.data.creditAmount } }]
       : []),
-  ], `openAccount:init:${state.entityId}:${counterpartyId}`);
+  ];
+  const admission = await applyAccountInput(
+    env,
+    account,
+    createLocalAccountInput(account, state.entityId, initialAccountTxs),
+  );
+  if (admission.admittedAccountTxCount !== initialAccountTxs.length) {
+    throw new Error(`OPEN_ACCOUNT_INITIAL_TXS_NOT_ADMITTED:${counterpartyId}`);
+  }
   if (tx.data.rebalancePolicy) assertRequestedRebalancePolicy(tokenId, tx.data.rebalancePolicy);
   for (const policyTokenId of tokenIds) {
     const policy = tx.data.rebalancePolicy && policyTokenId === tokenId
@@ -148,12 +158,12 @@ const seedOpenAccountPolicies = (
   }
 };
 
-export const handleOpenAccountEntityTx = (
-  _env: RuntimeState,
+export const handleOpenAccountEntityTx = async (
+  env: RuntimeState,
   entityState: EntityState,
   entityTx: OpenAccountEntityTx,
   candidateEffects: EntityCandidateEffect[] = [],
-): OpenAccountResult => {
+): Promise<OpenAccountResult> => {
   const targetEntityId = entityTx.data.targetEntityId;
   if (!isEntityId32(targetEntityId)) {
     throw new Error(
@@ -209,7 +219,7 @@ export const handleOpenAccountEntityTx = (
     watchSeed,
     candidateEffects,
   );
-  seedOpenAccountPolicies(newState, entityTx, counterpartyId);
+  await seedOpenAccountPolicies(env, newState, entityTx, counterpartyId);
 
   addMessage(newState, `✅ Account opening request sent to Entity ${formatEntityId(counterpartyId)}`);
 

@@ -60,27 +60,115 @@ Cross-Local Network enables entities to:
 
 ---
 
-## 🏗️ Architecture (J-E-A Layers)
+## 🏗️ Architecture: nested R → E → A replicas
 
-### J - Jurisdiction Layer (On-Chain)
-- **What:** Solidity contracts managing reserves, collateral, settlements
-- **Where:** `/jurisdictions/contracts/`
-- **Contracts:**
-  - `Depository.sol` - Implements `IDepository` (future ERC standard)
-  - `EntityProvider.sol` - Entity registration + quorum verification
-- **Deploy:** Ethereum, Polygon, Arbitrum, any EVM chain
+xln is three deterministic state machines nested inside one another. The
+fourth layer, Jurisdiction, is the on-chain settlement boundary.
 
-### E - Entity Layer (Off-Chain BFT Consensus)
-- **What:** Distributed organizations with threshold signatures
-- **Flow:** ADD_TX → PROPOSE → SIGN → COMMIT
-- **Source:** `/runtime/entity/consensus/index.ts`
-- **Deterministic:** Nonce-based ordering, Merkle state roots
+```text
+EXTERNAL WORLD
+  │ actions / peer messages / finalized J events
+  ▼
+┌──────────────────────────── RuntimeReplica ─────────────────────────────┐
+│ RuntimeInput[RuntimeTx, routed EntityInput]                             │
+│   applyRuntimeInput → RuntimeFrame → WAL commit                         │
+│                                                                        │
+│   ┌──────────────────────── EntityReplica ──────────────────────────┐   │
+│   │ EntityInput[EntityTx, proposal, precommit, certificate]         │   │
+│   │   applyEntityInput → EntityFrame → EntityOutput                 │   │
+│   │                                                                 │   │
+│   │   ┌────────────────── AccountReplica ────────────────────────┐   │   │
+│   │   │ AccountInput                                             │   │   │
+│   │   │   ├─ txs[AccountTx]                    local admission   │   │   │
+│   │   │   └─ frame/ack/dispute/...              peer consensus  │   │   │
+│   │   │   applyAccountInput → AccountFrame → AccountOutput       │   │   │
+│   │   └───────────────────────────────────────────────────────────┘   │   │
+│   └─────────────────────────────────────────────────────────────────┘   │
+│                                                                        │
+│ RuntimeOutput → dispatch only after WAL                               │
+└────────────────────────────────────────────────────────────────────────┘
+  │ settlement batches                              ▲ finalized events
+  ▼                                                 │
+┌──────────────────────── Jurisdiction ──────────────────────────────────┐
+│ Depository contracts: reserves, collateral, disputes and final truth  │
+└────────────────────────────────────────────────────────────────────────┘
+```
 
-### A - Account Layer (Bilateral Channels)
-- **What:** Payment channels between entity pairs
-- **Perspective:** Left/right with canonical ordering (entityA < entityB)
-- **Source:** `/runtime/account/consensus/index.ts`
-- **Settlement:** Bilateral state verification with Merkle proofs
+The same vocabulary repeats at every off-chain layer:
+
+| Layer | Live instance | Committed data | Entry | Requested change | Commitment | Result |
+|---|---|---|---|---|---|---|
+| Runtime | `RuntimeReplica` | `RuntimeState` | `RuntimeInput` | `RuntimeTx` | `RuntimeFrame` | `RuntimeOutput` |
+| Entity | `EntityReplica` | `EntityState` | `EntityInput` | `EntityTx` | `EntityFrame` | `EntityOutput` |
+| Account | `AccountReplica` | `AccountState` | `AccountInput` | `AccountTx` | `AccountFrame` | `AccountOutput` |
+
+`*Replica` is a live instance. `*State` is only the deterministic data
+committed by a frame. `*Machine` names transition logic, never a data type.
+
+```mermaid
+flowchart TB
+  EXT["External actions<br/>peer messages<br/>finalized J events"]
+
+  subgraph R["RuntimeReplica — single writer"]
+    RI["RuntimeInput<br/>RuntimeTx[] + routed EntityInput[]"]
+    AR["applyRuntimeInput(replica, input)"]
+    RF["RuntimeFrame<br/>next RuntimeState"]
+    WAL[("WAL<br/>only Runtime commit point")]
+    RO["RuntimeOutput<br/>post-commit effects"]
+    RI --> AR --> RF --> WAL --> RO
+
+    subgraph E["EntityReplica — validator consensus"]
+      EI["EntityInput<br/>EntityTx[] + consensus evidence"]
+      AE["applyEntityInput(replica, input)"]
+      EF["EntityFrame<br/>candidate → certificate"]
+      EO["EntityOutput"]
+      EI --> AE --> EF --> EO
+
+      subgraph A["AccountReplica — bilateral consensus"]
+        AI{"AccountInput"}
+        AT["txs<br/>AccountTx[]<br/>local only"]
+        AP["frame / ack / frame_ack<br/>dispute / reseal / settle<br/>peer evidence"]
+        AA["applyAccountInput(replica, input)"]
+        AF["AccountFrame<br/>candidate → bilateral ACK"]
+        AO["AccountOutput"]
+        AI --> AT --> AA
+        AI --> AP --> AA
+        AA --> AF --> AO
+      end
+    end
+  end
+
+  J["Jurisdiction contracts<br/>reserves · collateral · disputes · final truth"]
+
+  EXT --> RI
+  AR -- "route exact EntityInput" --> EI
+  AE -- "EntityTx.accountInput<br/>commits exact peer input" --> AI
+  EO -- "deterministic child outputs" --> AR
+  AO -- "deterministic child outputs" --> AE
+  RO -- "dispatch settlement batch" --> J
+  J -- "authenticated finalized event" --> EXT
+```
+
+### The transition law
+
+```text
+(previous replica, input) → { next replica, outputs }
+```
+
+- An input controls exactly one replica and contains that layer's transactions
+  plus any consensus evidence.
+- `EntityTx.accountInput` is the parent wrapper that commits the exact child
+  `AccountPeerInput` inside the Entity frame. Entity-owned financial txs create
+  the local `AccountInput.txs` branch without exposing it to P2P.
+- Every Account path enters `applyAccountInput`: local `txs` builds a future
+  Account frame; peer variants advance bilateral consensus.
+- Outputs move upward as deterministic data. External I/O starts only after
+  the enclosing Runtime frame is durable.
+- Runtime has one writer and WAL; Entity keeps a candidate until validator
+  certification; Account keeps a candidate until bilateral ACK.
+
+The detailed protocol guide is
+[Runtime → Entity → Account → Jurisdiction](docs/core/rjea-architecture.md).
 
 ---
 

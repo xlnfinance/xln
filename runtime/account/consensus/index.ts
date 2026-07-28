@@ -8,6 +8,7 @@ import type {
   AccountFrame,
   AccountTx,
   AccountInput,
+  AccountPeerInput,
   EntityCandidateEffect,
   RuntimeState,
   Delta,
@@ -41,6 +42,7 @@ import {
   summarizeDeltasForLog,
 } from './helpers';
 import { appendAccountMempoolTx, appendAccountMempoolTxs } from '../mempool';
+import { applyLocalAccountInput } from '../local-tx-admission';
 import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '../../protocol/dispute/arguments';
 import type {
   AccountConsensusHashToSign,
@@ -161,7 +163,7 @@ type ValidatedCounterpartyDisputeSeal = {
 async function validateCounterpartyDisputeSeal(
   env: RuntimeState,
   accountMachine: AccountState,
-  input: AccountInput,
+  input: AccountPeerInput,
   seal: ReturnType<typeof accountInputDisputeSeal>,
   context: string,
   securityContext: AccountInputSecurityContext,
@@ -318,7 +320,7 @@ const validateBoardResealMetadata = (
 const verifyBoardResealWitnesses = async (
   env: RuntimeState,
   account: AccountState,
-  input: AccountInput,
+  input: AccountPeerInput,
   reseal: BoardResealPayload,
   metadata: ValidatedBoardResealMetadata,
   securityContext: AccountInputSecurityContext,
@@ -373,7 +375,7 @@ const verifyBoardResealWitnesses = async (
 const handleBoardReseal = async (
   env: RuntimeState,
   accountMachine: AccountState,
-  input: AccountInput,
+  input: AccountPeerInput,
   securityContext: AccountInputSecurityContext,
 ): Promise<HandleAccountInputResult | undefined> => {
   const reseal = accountInputBoardReseal(input);
@@ -1989,9 +1991,9 @@ function storeAckDisputeState(
 }
 
 function buildIncomingFrameReturnPayload(
-  input: AccountInput,
+  input: AccountPeerInput,
   receivedFrame: AccountFrame,
-  response: AccountInput,
+  response: Extract<AccountPeerInput, { kind: 'ack' }>,
   validation: IncomingFrameValidation,
   proposeResult: ProposeAccountFrameResult | undefined,
   ackDisputeHash: string | undefined,
@@ -2042,7 +2044,7 @@ function buildIncomingFrameReturnPayload(
 async function buildAckResponseForIncomingFrame(
   env: RuntimeState,
   accountMachine: AccountState,
-  input: AccountInput,
+  input: AccountPeerInput,
   receivedFrame: AccountFrame,
   validation: IncomingFrameValidation,
   events: string[],
@@ -2138,7 +2140,7 @@ const classifyIncomingValidationFailure = (
 async function handleIncomingAccountFrame(
   env: RuntimeState,
   accountMachine: AccountState,
-  input: AccountInput,
+  input: AccountPeerInput,
   normalizedInputHeight: number | undefined,
   replayCurrentHeight: number,
   validatedCounterpartyDisputeSeal: ValidatedCounterpartyDisputeSeal | undefined,
@@ -2233,7 +2235,7 @@ async function handleIncomingAccountFrame(
 type AccountInputSession = {
   env: RuntimeState;
   accountMachine: AccountState;
-  input: AccountInput;
+  input: AccountPeerInput;
   securityContext: AccountInputSecurityContext;
   normalizedInputHeight: number;
   replay: ReturnType<typeof classifyAccountInputReplay>;
@@ -2413,21 +2415,32 @@ const handleAccountProposalPhase = async (
  * Bilateral Account input composition root. Protocol-specific validation and
  * mutation remain in the phase handlers above.
  */
+const resolveAccountInputSecurityContext = (
+  env: RuntimeState,
+  account: AccountState,
+  provided: AccountInputSecurityContext | undefined,
+): AccountInputSecurityContext => provided ?? {
+  entityTimestamp: env.timestamp,
+  owningEntityIsHub: false,
+  finalizedJHeight:
+    getReplicaByEntityId(env, account.proofHeader.fromEntity)?.state.lastFinalizedJHeight ??
+    account.lastFinalizedJHeight ??
+    0,
+};
+
 export async function applyAccountInput(
   env: RuntimeState,
   accountMachine: AccountState,
   input: AccountInput,
-  securityContext: AccountInputSecurityContext = {
-    entityTimestamp: env.timestamp,
-    owningEntityIsHub: false,
-    finalizedJHeight:
-      getReplicaByEntityId(env, accountMachine.proofHeader.fromEntity)?.state
-        .lastFinalizedJHeight ??
-      accountMachine.lastFinalizedJHeight ??
-      0,
-  },
+  providedSecurityContext?: AccountInputSecurityContext,
   accountJClaimNodeStore?: AccountJClaimNodeStore,
 ): Promise<HandleAccountInputResult> {
+  if (input.kind === 'txs') return applyLocalAccountInput(accountMachine, input);
+  const securityContext = resolveAccountInputSecurityContext(
+    env,
+    accountMachine,
+    providedSecurityContext,
+  );
   if (input.watchSeed !== undefined) {
     const inputWatchSeed = normalizeAccountWatchSeed(input.watchSeed, 'ACCOUNT_INPUT');
     if (accountMachine.watchSeed.toLowerCase() !== inputWatchSeed) {

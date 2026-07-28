@@ -48,6 +48,7 @@ import { nodeProcess } from '../../runtime/platform';
 import { recordRuntimeSecurityIncident, resolveRuntimeSecurityIncident } from '../../runtime/security-incidents';
 import type {
   AccountTx,
+  AccountState,
   CertifiedEntityFrameLink,
   ConsensusConfig,
   ConsensusOutputOrigin,
@@ -79,7 +80,8 @@ import { getConsumptionNodeStore } from '../consumption-store';
 import { selectCrossJCommitPhaseTxs } from '../cross-j-proposer-materialization';
 import { emitDefaultProposerHtlcOnionAdvances } from '../htlc-onion-post-commit';
 import { collectCommittedCrossJurisdictionCancelAcks } from '../tx/handlers/account';
-import { queueAccountMempoolTx } from './account-mempool-queue';
+import { applyAccountInput } from '../../account/consensus';
+import { createLocalAccountInput } from '../../account/input';
 import { createEntityFrameHashFromStateRoot, selectEntityFrameTxByteBudget } from './frame';
 import {
   assertEntityLeaderVoteMatchesState,
@@ -1111,12 +1113,26 @@ export const stashPendingCrossJurisdictionFillAck = (
   });
 };
 
-export const drainPendingCrossJurisdictionFillAcks = (
+const admitGeneratedAccountTx = async (
+  env: RuntimeState,
+  state: EntityState,
+  account: AccountState,
+  tx: AccountTx,
+): Promise<boolean> => {
+  const result = await applyAccountInput(
+    env,
+    account,
+    createLocalAccountInput(account, state.entityId, [tx]),
+  );
+  return result.admittedAccountTxCount === 1;
+};
+
+export const drainPendingCrossJurisdictionFillAcks = async (
   env: RuntimeState,
   currentEntityState: EntityState,
   proposableAccounts: Set<string>,
   storageChanges: RuntimeOverlayRecord[],
-): number => {
+): Promise<number> => {
   const pending = currentEntityState.pendingCrossJurisdictionFillAcks;
   if (!pending || pending.size === 0) return 0;
   const now = Number(currentEntityState.timestamp || env.timestamp || 0);
@@ -1178,7 +1194,7 @@ export const drainPendingCrossJurisdictionFillAcks = (
     }
     const account = currentEntityState.accounts.get(pendingAck.accountId);
     if (!account?.swapOffers?.has(pendingAck.tx.data.offerId)) continue;
-    if (queueAccountMempoolTx(account, pendingAck.tx)) {
+    if (await admitGeneratedAccountTx(env, currentEntityState, account, pendingAck.tx)) {
       proposableAccounts.add(pendingAck.accountId);
       storageChanges.push({
         family: 'account',
@@ -1211,11 +1227,12 @@ export const drainPendingCrossJurisdictionFillAcks = (
   return drained;
 };
 
-export const drainCommittedCrossJurisdictionCancelAcks = (
+export const drainCommittedCrossJurisdictionCancelAcks = async (
+  env: RuntimeState,
   currentEntityState: EntityState,
   proposableAccounts: Set<string>,
   storageChanges: RuntimeOverlayRecord[],
-): number => {
+): Promise<number> => {
   let queued = 0;
   for (const { accountId, tx } of collectCommittedCrossJurisdictionCancelAcks(currentEntityState)) {
     if (tx.type !== 'cross_swap_fill_ack') {
@@ -1225,7 +1242,7 @@ export const drainCommittedCrossJurisdictionCancelAcks = (
     if (!account) {
       throw new Error(`CROSS_J_CANCEL_ACK_ACCOUNT_MISSING:account=${accountId}:offer=${tx.data.offerId}`);
     }
-    if (!queueAccountMempoolTx(account, tx)) continue;
+    if (!await admitGeneratedAccountTx(env, currentEntityState, account, tx)) continue;
     proposableAccounts.add(accountId);
     storageChanges.push({
       family: 'account',

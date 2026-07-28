@@ -1,5 +1,5 @@
 import type {
-  AccountInput,
+  AccountPeerInput,
   EntityCandidateEffect,
   EntityInput,
   EntityState,
@@ -28,7 +28,7 @@ export type ApplyEntityTxsInOrderContext = {
   allJOutputs: JInput[];
   collectedHashes: Array<{ hash: string; type: HashType; context: string }>;
   proposableAccounts: Set<string>;
-  requiredAccountResponses: Map<string, AccountInput>;
+  requiredAccountResponses: Map<string, AccountPeerInput>;
   allSwapOffersCreated: SwapOfferEvent[];
   allSwapCancelRequests: SwapCancelRequestEvent[];
   allSwapOffersCancelled: SwapCancelEvent[];

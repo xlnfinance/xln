@@ -1,5 +1,5 @@
 import type {
-  AccountInput,
+  AccountPeerInput,
   EntityCandidateEffect,
   EntityInput,
   EntityState,
@@ -21,7 +21,7 @@ export interface AccountHandlerResult {
   swapCancelRequests: SwapCancelRequestEvent[];
   swapOffersCancelled: SwapCancelEvent[];
   /** Exact consensus response that the final Entity flush must preserve. */
-  requiredAccountResponse?: AccountInput;
+  requiredAccountResponse?: AccountPeerInput;
   /** Hashes that still require the Entity validator quorum. */
   hashesToSign?: Array<{
     hash: string;
@@ -35,7 +35,7 @@ export interface AccountHandlerResult {
 export const buildAccountHandlerResult = (
   newState: EntityState,
   effects: CommittedAccountEffects,
-  requiredAccountResponse?: AccountInput,
+  requiredAccountResponse?: AccountPeerInput,
   accountJClaimNodeChanges?: AccountJClaimNodeChanges,
 ): AccountHandlerResult => ({
   newState,

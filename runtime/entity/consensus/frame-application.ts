@@ -7,7 +7,6 @@ import { accountInputAck, accountInputProposal, accountInputReferenceHeight } fr
 import { proposeAccountFrame } from '../../account/consensus/propose';
 import { resolveCertifiedAccountCounterpartyProposer } from '../../account/counterparty-route';
 import { getAccountJClaimNodeStore } from '../../account/j-claim-store';
-import { appendAccountMempoolTx } from '../../account/mempool';
 import {
   assertCanonicalSettlementWorkspace,
   hasPendingSettlementTransition,
@@ -39,7 +38,7 @@ import {
 } from '../../state-helpers';
 import { mergeStorageOverlayRecords } from '../../storage/overlay';
 import type {
-  AccountInput,
+  AccountPeerInput,
   AccountState,
   AccountTx,
   EntityCandidateEffect,
@@ -91,7 +90,8 @@ import { pruneSettledOriginatedHtlcRoutes, terminateHtlcRoute } from '../tx/htlc
 import { MalformedEntityFrameInputError } from '../tx/invariant-errors';
 import { normalizeEntityProposalBoard } from '../tx/proposals';
 import { accountHasProposableMempool } from './account-mempool-eligibility';
-import { queueAccountMempoolTx } from './account-mempool-queue';
+import { applyAccountInput } from '../../account/consensus';
+import { createLocalAccountInput } from '../../account/input';
 import { assertEntityFrameTxByteBudget } from './frame';
 import { assignCertifiedOutputIdentities, verifyCertifiedEntityOutput } from './output-certification';
 import { invalidateEntityAccountCommitment } from './state-root';
@@ -319,7 +319,7 @@ const applyRegularEntityTx = async (
       authorizedRuntimeOutput: undefined,
     });
   }
-  applyEntityTxReturnedEffects(context, nextState, tx, txProfileStartMs, {
+  await applyEntityTxReturnedEffects(context, nextState, tx, txProfileStartMs, {
     ...(result.accountTxs ? { accountTxs: result.accountTxs } : {}),
     ...(result.swapOffersCreated ? { swapOffersCreated: result.swapOffersCreated } : {}),
     ...(result.swapCancelRequests ? { swapCancelRequests: result.swapCancelRequests } : {}),
@@ -355,14 +355,14 @@ type ProposePendingAccountFramesContext = {
   env: RuntimeState;
   currentEntityState: EntityState;
   proposableAccounts: Set<string>;
-  requiredAccountResponses: Map<string, AccountInput>;
+  requiredAccountResponses: Map<string, AccountPeerInput>;
   allOutputs: EntityInput[];
   collectedHashes: Array<{ hash: string; type: HashType; context: string }>;
   accountJClaimNodeStore: AccountJClaimNodeStore;
   storageChanges: RuntimeOverlayRecord[];
 };
 
-const certifiedAccountOutputSignerHint = (targetEntityId: string, input: AccountInput): string | null => {
+const certifiedAccountOutputSignerHint = (targetEntityId: string, input: AccountPeerInput): string | null => {
   const proposal = accountInputProposal(input);
   if (!proposal) return null;
   const target = targetEntityId.toLowerCase();
@@ -393,13 +393,13 @@ const certifiedAccountOutputSignerHint = (targetEntityId: string, input: Account
   return signerIds.values().next().value ?? null;
 };
 
-function materializeDeferredSettlementApprovals(
+async function materializeDeferredSettlementApprovals(
   env: RuntimeState,
   state: EntityState,
   proposableAccounts: Set<string>,
   collectedHashes: Array<{ hash: string; type: HashType; context: string }>,
   storageChanges: RuntimeOverlayRecord[],
-): void {
+): Promise<void> {
   const deferred = state.deferredAccountProposals;
   if (!deferred || deferred.size === 0) return;
   for (const [accountId, approvedHash] of [...deferred.entries()].sort(([left], [right]) =>
@@ -431,7 +431,14 @@ function materializeDeferredSettlementApprovals(
     // proposeAccountFrame skips them and applies the counter-seal unchanged.
     if (account.mempool.length > 0 && !peerSealPinsAccountState) continue;
     const draft = buildSettlementSealDraft(account, state, accountId, env);
-    appendAccountMempoolTx(account, draft.tx, `entityConsensus:settlementSeal:${accountId}`);
+    const admission = await applyAccountInput(
+      env,
+      account,
+      createLocalAccountInput(account, state.entityId, [draft.tx]),
+    );
+    if (admission.admittedAccountTxCount !== 1) {
+      throw new Error(`SETTLEMENT_DEFERRED_SEAL_NOT_ADMITTED:${accountId}`);
+    }
     recordFrameAccountChange(storageChanges, state.entityId, accountId);
     collectedHashes.push(...draft.hashesToSign);
     proposableAccounts.add(accountId);
@@ -518,14 +525,19 @@ const proposeAccountMachineFrame = async (
     if (route.inboundEntity && route.inboundLockId) {
       const inboundAccount = state.accounts.get(route.inboundEntity);
       if (inboundAccount) {
-        appendAccountMempoolTx(inboundAccount, {
+        const admission = await applyAccountInput(
+          env,
+          inboundAccount,
+          createLocalAccountInput(inboundAccount, state.entityId, [{
           type: 'htlc_resolve',
           data: {
             lockId: route.inboundLockId,
             outcome: 'error',
             reason: `forward_failed:${reason}`,
           },
-        }, `entityConsensus:failedHtlc:${route.inboundEntity}`);
+          }]),
+        );
+        if (admission.admittedAccountTxCount === 0) continue;
         recordFrameAccountChange(storageChanges, state.entityId, route.inboundEntity);
         proposableAccounts.add(route.inboundEntity);
       }
@@ -537,8 +549,8 @@ const proposeAccountMachineFrame = async (
 
 const assertRequiredAccountResponsePreserved = (
   accountKey: string,
-  required: AccountInput | undefined,
-  final: AccountInput,
+  required: AccountPeerInput | undefined,
+  final: AccountPeerInput,
 ): void => {
   if (!required) return;
   const requiredAck = accountInputAck(required);
@@ -558,7 +570,7 @@ const routeFinalAccountInput = async (
   accountKey: string,
   account: AccountState,
   counterpartyId: string,
-  input: AccountInput,
+  input: AccountPeerInput,
   proposal: AccountFrameProposal | undefined,
 ): Promise<void> => {
   const { env, currentEntityState: state, allOutputs } = context;
@@ -722,10 +734,10 @@ const collectOffersForMatching = (
 
 type OrderbookMatchResult = ReturnType<typeof processOrderbookSwaps>;
 
-const applyOrderbookMempoolOps = (
+const applyOrderbookAccountTxs = async (
   context: ApplyOrderbookMatchingContext,
   result: OrderbookMatchResult,
-): void => {
+): Promise<void> => {
   const { env, currentEntityState: state, allOutputs, proposableAccounts, storageChanges } = context;
   for (const { accountId, tx } of result.accountTxs) {
     const account = state.accounts.get(accountId);
@@ -768,7 +780,13 @@ const applyOrderbookMempoolOps = (
         `CROSS_J_FILL_ACK_OWNER_MISSING: account=${accountId} offer=${tx.data.offerId} current=${state.entityId}`,
       );
     }
-    if (!account || !queueAccountMempoolTx(account, tx)) continue;
+    if (!account) continue;
+    const admission = await applyAccountInput(
+      env,
+      account,
+      createLocalAccountInput(account, state.entityId, [tx]),
+    );
+    if (admission.admittedAccountTxCount === 0) continue;
     proposableAccounts.add(accountId);
     recordFrameAccountChange(storageChanges, state.entityId, accountId);
     entityLog.debug('orderbook.account_tx_queued', { account: shortId(accountId, 8), tx: tx.type });
@@ -805,7 +823,9 @@ const commitOrderbookMatchResult = (
   }
 };
 
-function applyOrderbookMatching(context: ApplyOrderbookMatchingContext): OrderbookFrameStats {
+async function applyOrderbookMatching(
+  context: ApplyOrderbookMatchingContext,
+): Promise<OrderbookFrameStats> {
   const { env, currentEntityState, allSwapOffersCreated } = context;
   const stats = emptyOrderbookFrameStats();
   stats.hasPersistedCrossJurisdictionBook = Boolean(
@@ -834,7 +854,7 @@ function applyOrderbookMatching(context: ApplyOrderbookMatchingContext): Orderbo
   stats.orderbookCrossFills = matchResult.crossJurisdictionFills.length;
 
   // Matching is pure; only these two stages mutate the isolated Entity frame.
-  applyOrderbookMempoolOps(context, matchResult);
+  await applyOrderbookAccountTxs(context, matchResult);
   commitOrderbookMatchResult(context, matchResult);
   return stats;
 }
@@ -848,7 +868,9 @@ type ApplySwapCancelRequestsContext = {
   storageChanges: RuntimeOverlayRecord[];
 };
 
-function applySwapCancelRequests(context: ApplySwapCancelRequestsContext): void {
+async function applySwapCancelRequests(
+  context: ApplySwapCancelRequestsContext,
+): Promise<void> {
   const { env, currentEntityState, allSwapCancelRequests, proposableAccounts, allOutputs, storageChanges } = context;
   if (allSwapCancelRequests.length === 0) return;
 
@@ -862,7 +884,12 @@ function applySwapCancelRequests(context: ApplySwapCancelRequestsContext): void 
     if (!account) {
       throw new Error(`CROSS_J_CANCEL_ACK_ACCOUNT_MISSING:account=${accountId}:offer=${tx.data.offerId}`);
     }
-    if (!queueAccountMempoolTx(account, tx)) continue;
+    const admission = await applyAccountInput(
+      env,
+      account,
+      createLocalAccountInput(account, currentEntityState.entityId, [tx]),
+    );
+    if (admission.admittedAccountTxCount === 0) continue;
     proposableAccounts.add(accountId);
     recordFrameAccountChange(storageChanges, currentEntityState.entityId, accountId);
   }
@@ -876,7 +903,12 @@ function applySwapCancelRequests(context: ApplySwapCancelRequestsContext): void 
     for (const { accountId, tx } of cancelResult.accountTxs) {
       const account = currentEntityState.accounts.get(accountId);
       if (!account) continue;
-      if (!queueAccountMempoolTx(account, tx)) {
+      const admission = await applyAccountInput(
+        env,
+        account,
+        createLocalAccountInput(account, currentEntityState.entityId, [tx]),
+      );
+      if (admission.admittedAccountTxCount === 0) {
         continue;
       }
       proposableAccounts.add(accountId);
@@ -904,12 +936,15 @@ function applySwapCancelRequests(context: ApplySwapCancelRequestsContext): void 
     // Fallback cancel resolution is synthesized by the orchestrator itself.
     // It must land in the same working-state mempool so the later account
     // proposal step sees it in this frame.
-    if (
-      !queueAccountMempoolTx(account, {
+    const admission = await applyAccountInput(
+      env,
+      account,
+      createLocalAccountInput(account, currentEntityState.entityId, [{
         type: 'swap_resolve',
         data: { offerId, fillRatio: 0, cancelRemainder: true },
-      })
-    ) {
+      }]),
+    );
+    if (admission.admittedAccountTxCount === 0) {
       continue;
     }
     proposableAccounts.add(accountId);
@@ -1007,13 +1042,14 @@ const prepareEntityFrameWorkingSet = async (
     storageChanges: [],
   };
   if (!authorityTransitionOnly) {
-    drainPendingCrossJurisdictionFillAcks(
+    await drainPendingCrossJurisdictionFillAcks(
       env,
       currentEntityState,
       context.proposableAccounts,
       context.storageChanges,
     );
-    drainCommittedCrossJurisdictionCancelAcks(
+    await drainCommittedCrossJurisdictionCancelAcks(
+      context.env,
       currentEntityState,
       context.proposableAccounts,
       context.storageChanges,
@@ -1088,7 +1124,7 @@ const applyPostEntityTxPhases = async (
       context.storageChanges,
     );
   }
-  applySwapCancelRequests({
+  await applySwapCancelRequests({
     env: context.env,
     currentEntityState,
     allSwapCancelRequests: context.allSwapCancelRequests,
@@ -1097,7 +1133,7 @@ const applyPostEntityTxPhases = async (
     storageChanges: context.storageChanges,
   });
   markFrameProfile('cancels');
-  const orderbookStats = applyOrderbookMatching({
+  const orderbookStats = await applyOrderbookMatching({
     env: context.env,
     currentEntityState,
     allSwapOffersCreated: context.allSwapOffersCreated,
@@ -1106,19 +1142,20 @@ const applyPostEntityTxPhases = async (
     storageChanges: context.storageChanges,
   });
   markFrameProfile('orderbook');
-  drainPendingCrossJurisdictionFillAcks(
+  await drainPendingCrossJurisdictionFillAcks(
     context.env,
     currentEntityState,
     context.proposableAccounts,
     context.storageChanges,
   );
-  drainCommittedCrossJurisdictionCancelAcks(
+  await drainCommittedCrossJurisdictionCancelAcks(
+    context.env,
     currentEntityState,
     context.proposableAccounts,
     context.storageChanges,
   );
   refreshStaleUncommittedSettlementSeals(currentEntityState, context.storageChanges);
-  materializeDeferredSettlementApprovals(
+  await materializeDeferredSettlementApprovals(
     context.env,
     currentEntityState,
     context.proposableAccounts,

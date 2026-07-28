@@ -1,4 +1,4 @@
-import type { AccountInput, AccountState, EntityState } from '../../../../types';
+import type { AccountPeerInput, AccountState, EntityState } from '../../../../types';
 import {
   accountStateDomainFromJurisdiction,
   computeAccountStateRoot,
@@ -40,7 +40,7 @@ const findAccountKey = (
 
 const assertAccountInputParticipants = (
   state: EntityState,
-  input: AccountInput,
+  input: AccountPeerInput,
 ): string => {
   if (normalizeEntityRef(input.toEntityId) !== normalizeEntityRef(state.entityId)) {
     throw new Error(
@@ -55,7 +55,7 @@ const assertAccountInputParticipants = (
 
 const resolveInboundAccountDomain = (
   state: EntityState,
-  input: AccountInput,
+  input: AccountPeerInput,
   counterpartyId: string,
   existing: AccountState | undefined,
 ): AccountState['domain'] => {
@@ -79,7 +79,7 @@ const resolveInboundAccountDomain = (
 
 const assertUnknownAccountGenesis = (
   state: EntityState,
-  input: AccountInput,
+  input: AccountPeerInput,
   counterpartyId: string,
   hasAck: boolean,
   hasProposal: boolean,
@@ -171,7 +171,7 @@ const createInboundAccountMachine = (
 
 export const resolveInboundAccount = (
   state: EntityState,
-  input: AccountInput,
+  input: AccountPeerInput,
   hasAck: boolean,
   hasProposal: boolean,
 ): InboundAccountResolution => {

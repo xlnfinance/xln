@@ -1,4 +1,4 @@
-import type { AccountInput, EntityState, RuntimeState } from '../../../types';
+import type { AccountPeerInput, EntityState, RuntimeState } from '../../../types';
 import { createStructuredLogger, shortId } from '../../../infra/logger';
 import {
   accountInputAck,
@@ -82,7 +82,7 @@ type AccountInputCheckpoint = (label: string) => void;
 
 const applyAccountInputPhases = async (
   state: EntityState,
-  input: AccountInput,
+  input: AccountPeerInput,
   env: RuntimeState,
   options: ApplyEntityTxOptions | undefined,
   checkpointProfile: AccountInputCheckpoint,
@@ -138,7 +138,7 @@ const applyAccountInputPhases = async (
 
 const logAccountInputProfile = (
   state: EntityState,
-  input: AccountInput,
+  input: AccountPeerInput,
   outcome: string,
   startedAt: number,
   marks: Record<string, number>,
@@ -159,7 +159,7 @@ const logAccountInputProfile = (
 
 export async function applyAccountInputToEntity(
   state: EntityState,
-  input: AccountInput,
+  input: AccountPeerInput,
   env: RuntimeState,
   options?: ApplyEntityTxOptions,
 ): Promise<AccountHandlerResult> {

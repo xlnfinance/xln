@@ -1,5 +1,5 @@
 import type {
-  AccountInput,
+  AccountPeerInput,
   AccountState,
   EntityInput,
   EntityState,
@@ -14,7 +14,7 @@ import type { CommittedAccountEffects } from './committed-input';
 type UnsafeFrameContext = {
   env: RuntimeState;
   state: EntityState;
-  input: AccountInput;
+  input: AccountPeerInput;
   account: AccountState;
   counterpartyId: string;
   createdAccount: boolean;

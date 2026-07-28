@@ -1,5 +1,5 @@
 import type {
-  AccountInput,
+  AccountPeerInput,
   AccountState,
   EntityState,
   RuntimeState,
@@ -34,7 +34,7 @@ const accountHandlerLog = createStructuredLogger('account.handler');
 export type AccountInputPhaseContext = {
   env: RuntimeState;
   state: EntityState;
-  input: AccountInput;
+  input: AccountPeerInput;
   account: AccountState;
   counterpartyId: string;
   createdAccount: boolean;
@@ -44,7 +44,7 @@ export type AccountInputPhaseContext = {
 };
 
 export type AccountConsensusOutcome = {
-  requiredAccountResponse?: AccountInput;
+  requiredAccountResponse?: AccountPeerInput;
   accountJClaimNodeChanges?: AccountJClaimNodeChanges;
   terminalResult?: AccountHandlerResult;
 };

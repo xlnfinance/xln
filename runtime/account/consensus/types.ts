@@ -1,4 +1,4 @@
-import type { AccountFrame, AccountInput, AccountTx, EntityCandidateEffect, HankoString } from '../../types';
+import type { AccountFrame, AccountPeerInput, AccountTx, EntityCandidateEffect, HankoString } from '../../types';
 import type { AccountJClaimNodeChanges } from '../../types/account-j-claims';
 
 export type AccountConsensusHashToSign = {
@@ -35,14 +35,16 @@ export type AccountConsensusFrameResult = {
 
 export type ProposeAccountFrameResult = AccountConsensusFrameResult & {
   accountChanged?: true;
-  accountInput?: AccountInput;
+  accountInput?: AccountPeerInput;
   failedHtlcLocks?: Array<{ hashlock: string; reason: string }>;
 };
 
 export type HandleAccountInputResult = AccountConsensusFrameResult & {
+  /** Number of local AccountTxs admitted to the next-frame mempool. */
+  admittedAccountTxCount?: number;
   /** Validator-computed CAS delta for Account frames committed by this input. */
   accountJClaimNodeChanges?: AccountJClaimNodeChanges;
-  response?: AccountInput;
+  response?: AccountPeerInput;
   approvalNeeded?: AccountTx;
   timedOutHashlocks?: string[];
   committedFrames?: Array<{ frame: AccountFrame; committedViaNewFrame: boolean }>;

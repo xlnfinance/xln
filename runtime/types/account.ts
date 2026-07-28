@@ -528,7 +528,16 @@ export type AccountFrameProposal = {
 // and propose the next frame. Each state epoch carries its own frame Hanko and
 // optional dispute seal. Sharing one seal across ACK + proposal is invalid
 // because the two parts commit different account states.
-export type AccountInput =
+export type AccountLocalInput = AccountInputBase & {
+  /**
+   * Locally authorized transactions for the next Account frame. This branch
+   * is committed inside the parent Entity frame and is never sent to a peer.
+   */
+  kind: 'txs';
+  txs: AccountTx[];
+};
+
+export type AccountPeerInput =
   | (AccountInputBase & {
       kind: 'frame';
       proposal: AccountFrameProposal;
@@ -555,6 +564,9 @@ export type AccountInput =
       settleAction: AccountSettleAction;
       newSettlementHanko?: HankoString;
     });
+
+/** Every command accepted by an Account replica enters this one boundary. */
+export type AccountInput = AccountLocalInput | AccountPeerInput;
 
 // Delta structure for per-token account state (based on old_src)
 export interface Delta {
