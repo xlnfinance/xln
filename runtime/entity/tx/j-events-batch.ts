@@ -57,6 +57,72 @@ function appendSelfBatchHistory(opts: {
   });
 }
 
+const handleNonPendingBatch = (
+  state: EntityState,
+  sentBatch: NonNullable<EntityState['jBatchState']>['sentBatch'],
+  nonce: number,
+  eventBatchHash: string,
+): void => {
+  syncEntityNonce(state, nonce);
+  if (!sentBatch || nonce < sentBatch.entityNonce) {
+    jEventBatchLog.warn('non_pending_batch_observed', {
+      nonce,
+      batchHash: eventBatchHash,
+      pendingNonce: sentBatch?.entityNonce,
+      pendingBatchHash: sentBatch?.batchHash,
+    });
+    return;
+  }
+  const pendingHash = normalizeBatchHash(sentBatch.batchHash, 'PENDING_BATCH_HASH');
+  const failureMessage =
+    `J_BATCH_NONCE_CONSUMED_BY_DIFFERENT_HASH:${eventBatchHash}:` +
+    `pending=${pendingHash}:pendingNonce=${sentBatch.entityNonce}:finalizedNonce=${nonce}`;
+  sentBatch.terminalFailure = { message: failureMessage, failedAt: state.timestamp };
+  state.jBatchState!.status = 'failed';
+  jEventBatchLog.error('pending_batch_nonce_consumed', {
+    nonce,
+    batchHash: eventBatchHash,
+    pendingNonce: sentBatch.entityNonce,
+    pendingBatchHash: sentBatch.batchHash,
+  });
+  addMessage(
+    state,
+    `❌ Pending jBatch nonce ${sentBatch.entityNonce} quarantined: ` +
+      `chain finalized different batch ${eventBatchHash} at nonce ${nonce}`,
+  );
+};
+
+const finalizePendingBatch = (
+  state: EntityState,
+  sentBatch: NonNullable<NonNullable<EntityState['jBatchState']>['sentBatch']>,
+  nonce: number,
+  blockNumber: number,
+  transactionHash: string,
+  outputs: EntityInput[],
+): void => {
+  appendSelfBatchHistory({
+    state,
+    sentBatch,
+    opCount: batchOpCount(sentBatch.batch),
+    opBreakdown: batchOpBreakdown(sentBatch.batch),
+    nonce,
+    blockNumber,
+    transactionHash,
+    status: 'confirmed',
+  });
+  delete state.jBatchState!.sentBatch;
+  state.jBatchState!.status = isBatchEmpty(state.jBatchState!.batch) ? 'empty' : 'accumulating';
+  syncEntityNonce(state, nonce);
+  if (!state.jBatchState!.autoBroadcastDraft || isBatchEmpty(state.jBatchState!.batch)) return;
+  const signerId = state.config.validators[0];
+  if (!signerId) throw new Error('J_BATCH_AUTO_BROADCAST_SIGNER_MISSING');
+  outputs.push({
+    entityId: state.entityId,
+    signerId,
+    entityTxs: [{ type: 'j_broadcast', data: {} }],
+  });
+};
+
 export async function applyHankoBatchProcessedEvent(opts: {
   newState: EntityState;
   event: JurisdictionEvent;
@@ -102,66 +168,17 @@ export async function applyHankoBatchProcessedEvent(opts: {
   // Preserve that payload for forensic/operator review, but quarantine it so
   // validator-local retry machinery cannot keep submitting an impossible tx.
   if (!matchesPending) {
-    if (newState.jBatchState) syncEntityNonce(newState, nonce);
-    if (sentBatch && nonce >= sentBatch.entityNonce) {
-      const failureMessage =
-        `J_BATCH_NONCE_CONSUMED_BY_DIFFERENT_HASH:${eventBatchHash}:` +
-        `pending=${normalizeBatchHash(sentBatch.batchHash, 'PENDING_BATCH_HASH')}:` +
-        `pendingNonce=${sentBatch.entityNonce}:finalizedNonce=${nonce}`;
-      sentBatch.terminalFailure = {
-        message: failureMessage,
-        failedAt: newState.timestamp,
-      };
-      if (newState.jBatchState) newState.jBatchState.status = 'failed';
-      jEventBatchLog.error('pending_batch_nonce_consumed', {
-        nonce,
-        batchHash: eventBatchHash,
-        pendingNonce: sentBatch.entityNonce,
-        pendingBatchHash: sentBatch.batchHash,
-      });
-      addMessage(
-        newState,
-        `❌ Pending jBatch nonce ${sentBatch.entityNonce} quarantined: ` +
-          `chain finalized different batch ${eventBatchHash} at nonce ${nonce}`,
-      );
-      return;
-    }
-    jEventBatchLog.warn('non_pending_batch_observed', {
-      nonce,
-      batchHash: eventBatchHash,
-      pendingNonce: sentBatch?.entityNonce,
-      pendingBatchHash: sentBatch?.batchHash,
-    });
+    handleNonPendingBatch(newState, sentBatch, nonce, eventBatchHash);
     return;
   }
 
-  if (newState.jBatchState) {
-    const opCount = sentBatch ? batchOpCount(sentBatch.batch) : 0;
-    const opBreakdown = sentBatch ? batchOpBreakdown(sentBatch.batch) : undefined;
-
-    appendSelfBatchHistory({
-      state: newState,
-      sentBatch,
-      opCount,
-      opBreakdown,
-      nonce,
-      blockNumber,
-      transactionHash,
-      status: 'confirmed',
-    });
-
-    delete newState.jBatchState.sentBatch;
-    newState.jBatchState.status = isBatchEmpty(newState.jBatchState.batch) ? 'empty' : 'accumulating';
-    syncEntityNonce(newState, nonce);
-    if (newState.jBatchState.autoBroadcastDraft && !isBatchEmpty(newState.jBatchState.batch)) {
-      const signerId = newState.config.validators[0];
-      if (!signerId) throw new Error('J_BATCH_AUTO_BROADCAST_SIGNER_MISSING');
-      outputs.push({
-        entityId: newState.entityId,
-        signerId,
-        entityTxs: [{ type: 'j_broadcast', data: {} }],
-      });
-    }
-  }
+  finalizePendingBatch(
+    newState,
+    sentBatch!,
+    nonce,
+    blockNumber,
+    transactionHash,
+    outputs,
+  );
   addMessage(newState, `✅ jBatch finalized (nonce ${nonce}) | Block ${blockNumber}`);
 }

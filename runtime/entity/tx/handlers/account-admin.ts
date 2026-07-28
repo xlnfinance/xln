@@ -40,6 +40,86 @@ export const buildHubRebalancePolicyTx = (
   },
 });
 
+type SetHubConfigTx = EntityTxOf<'setHubConfig'>;
+type HubRebalanceConfig = NonNullable<EntityState['hubRebalanceConfig']>;
+
+const resolveHubPolicyVersion = (
+  requestedRaw: number | undefined,
+  previous: HubRebalanceConfig | undefined,
+  feePolicyChanged: boolean,
+): number => {
+  if (
+    requestedRaw !== undefined &&
+    (!Number.isSafeInteger(requestedRaw) || Number(requestedRaw) <= 0)
+  ) {
+    throw new Error(`HUB_REBALANCE_POLICY_VERSION_INVALID:${String(requestedRaw)}`);
+  }
+  const previousVersion = previous?.policyVersion ?? 0;
+  if (requestedRaw !== undefined) {
+    const requested = Number(requestedRaw);
+    if (requested < previousVersion) {
+      throw new Error(`HUB_REBALANCE_POLICY_VERSION_STALE:${requested}<${previousVersion}`);
+    }
+    if (requested === previousVersion && feePolicyChanged) {
+      throw new Error(`HUB_REBALANCE_POLICY_EQUIVOCATION:version=${requested}`);
+    }
+    return requested;
+  }
+  if (previousVersion <= 0) return 1;
+  return feePolicyChanged ? previousVersion + 1 : previousVersion;
+};
+
+const buildHubConfig = (
+  previous: HubRebalanceConfig | undefined,
+  data: SetHubConfigTx['data'],
+): { config: HubRebalanceConfig; feePolicyChanged: boolean } => {
+  assertNoTokenlessHubRawOverrides(data);
+  const liquidityFeeBps = data.rebalanceLiquidityFeeBps ?? 1n;
+  if (liquidityFeeBps < 0n || liquidityFeeBps > 10_000n) {
+    throw new Error(`HUB_REBALANCE_LIQUIDITY_FEE_BPS_INVALID:${liquidityFeeBps}`);
+  }
+  const feePolicyChanged =
+    !previous ||
+    (previous.rebalanceLiquidityFeeBps ?? previous.minFeeBps ?? 1n) !== liquidityFeeBps;
+  const hubName = typeof data.hubName === 'string' && data.hubName.trim()
+    ? data.hubName.trim()
+    : previous?.hubName;
+  return {
+    feePolicyChanged,
+    config: {
+      ...(hubName ? { hubName } : {}),
+      matchingStrategy: normalizeRebalanceMatchingStrategy(data.matchingStrategy ?? 'amount'),
+      policyVersion: resolveHubPolicyVersion(data.policyVersion, previous, feePolicyChanged),
+      routingFeePPM: data.routingFeePPM ?? 1,
+      baseFee: data.baseFee ?? 0n,
+      swapTakerFeeBps: Math.max(
+        0,
+        Math.min(10_000, Math.floor(Number(data.swapTakerFeeBps ?? 0) || 0)),
+      ),
+      disputeAutoFinalizeMode: data.disputeAutoFinalizeMode ?? 'auto',
+      minCollateralThreshold: data.minCollateralThreshold ?? 0n,
+      minFeeBps: data.minFeeBps ?? 1n,
+      rebalanceLiquidityFeeBps: liquidityFeeBps,
+      rebalanceTimeoutMs: data.rebalanceTimeoutMs ?? 10 * 60 * 1000,
+    },
+  };
+};
+
+const buildHubPolicyTargets = (
+  state: EntityState,
+  config: HubRebalanceConfig,
+): AccountTxTarget[] =>
+  Array.from(state.accounts.entries())
+    .sort(([left], [right]) => left.localeCompare(right))
+    .flatMap(([accountId, account]) =>
+      Array.from(account.deltas.keys())
+        .sort((left, right) => left - right)
+        .map(tokenId => ({
+          accountId,
+          tx: buildHubRebalancePolicyTx(config, tokenId),
+        })),
+    );
+
 export const handleExtendCreditEntityTx = (
   entityState: EntityState,
   entityTx: EntityTxOf<'extendCredit'>,
@@ -75,103 +155,31 @@ export const handleSetHubConfigEntityTx = (
   entityState: EntityState,
   entityTx: EntityTxOf<'setHubConfig'>,
 ): AccountAdminResult => {
-  assertNoTokenlessHubRawOverrides(entityTx.data);
   const newState = cloneEntityState(entityState);
-  const {
-    hubName: hubNameRaw,
-    matchingStrategy: matchingStrategyRaw = 'amount',
-    policyVersion: policyVersionRaw,
-    routingFeePPM = 1,
-    baseFee = 0n,
-    swapTakerFeeBps = 0,
-    disputeAutoFinalizeMode = 'auto',
-    minCollateralThreshold = 0n,
-    minFeeBps = 1n,
-    rebalanceLiquidityFeeBps = 1n,
-    rebalanceTimeoutMs = 10 * 60 * 1000,
-  } = entityTx.data;
-
-  const matchingStrategy = normalizeRebalanceMatchingStrategy(matchingStrategyRaw);
-  const previousConfig = entityState.hubRebalanceConfig;
-  const hubName = typeof hubNameRaw === 'string' && hubNameRaw.trim().length > 0
-    ? hubNameRaw.trim()
-    : previousConfig?.hubName;
-  const previousVersion = previousConfig?.policyVersion ?? 0;
-  const feePolicyChanged = !previousConfig ||
-    (previousConfig.rebalanceLiquidityFeeBps ?? previousConfig.minFeeBps ?? 1n) !== rebalanceLiquidityFeeBps;
-  if (
-    policyVersionRaw !== undefined &&
-    (!Number.isSafeInteger(policyVersionRaw) || Number(policyVersionRaw) <= 0)
-  ) {
-    throw new Error(`HUB_REBALANCE_POLICY_VERSION_INVALID:${String(policyVersionRaw)}`);
-  }
-  const requestedPolicyVersion = policyVersionRaw === undefined
-    ? undefined
-    : Number(policyVersionRaw);
-
-  if (rebalanceLiquidityFeeBps < 0n || rebalanceLiquidityFeeBps > 10_000n) {
-    throw new Error(`HUB_REBALANCE_LIQUIDITY_FEE_BPS_INVALID:${rebalanceLiquidityFeeBps}`);
-  }
-
-  let policyVersion: number;
-  if (requestedPolicyVersion !== undefined) {
-    if (requestedPolicyVersion < previousVersion) {
-      throw new Error(`HUB_REBALANCE_POLICY_VERSION_STALE:${requestedPolicyVersion}<${previousVersion}`);
-    } else if (requestedPolicyVersion === previousVersion && feePolicyChanged) {
-      throw new Error(`HUB_REBALANCE_POLICY_EQUIVOCATION:version=${requestedPolicyVersion}`);
-    } else {
-      policyVersion = requestedPolicyVersion;
-    }
-  } else if (previousVersion <= 0) {
-    policyVersion = 1;
-  } else {
-    policyVersion = feePolicyChanged ? previousVersion + 1 : previousVersion;
-  }
-
-  const normalizedSwapTakerFeeBps = Math.max(0, Math.min(10_000, Math.floor(Number(swapTakerFeeBps) || 0)));
-
-  newState.hubRebalanceConfig = {
-    ...(hubName ? { hubName } : {}),
-    matchingStrategy,
-    policyVersion,
-    routingFeePPM,
-    baseFee,
-    swapTakerFeeBps: normalizedSwapTakerFeeBps,
-    disputeAutoFinalizeMode,
-    minCollateralThreshold,
-    minFeeBps,
-    rebalanceLiquidityFeeBps,
-    rebalanceTimeoutMs,
-  };
-  newState.profile = {
-    ...newState.profile,
-    isHub: true,
-  };
+  const { config, feePolicyChanged } = buildHubConfig(
+    entityState.hubRebalanceConfig,
+    entityTx.data,
+  );
+  newState.hubRebalanceConfig = config;
+  newState.profile = { ...newState.profile, isHub: true };
 
   addMessage(
     newState,
-    `🏦 Hub config activated: ${matchingStrategy} strategy v${policyVersion}, ${routingFeePPM}ppm routing fee, ` +
-    `swapTakerFee=${normalizedSwapTakerFeeBps}bps, ` +
-    `rebalance(base=token-default, liqBps=${rebalanceLiquidityFeeBps}, gas=token-default, ` +
+    `🏦 Hub config activated: ${config.matchingStrategy} strategy v${config.policyVersion}, ` +
+    `${config.routingFeePPM}ppm routing fee, swapTakerFee=${config.swapTakerFeeBps}bps, ` +
+    `rebalance(base=token-default, liqBps=${config.rebalanceLiquidityFeeBps}, gas=token-default, ` +
     'c2rWithdrawSoftLimit=token-default)',
   );
   log.info('hub_config.updated', {
     entity: shortId(newState.entityId),
-    matchingStrategy,
-    policyVersion,
-    routingFeePPM,
-    swapTakerFeeBps: normalizedSwapTakerFeeBps,
+    matchingStrategy: config.matchingStrategy,
+    policyVersion: config.policyVersion,
+    routingFeePPM: config.routingFeePPM,
+    swapTakerFeeBps: config.swapTakerFeeBps,
     feePolicyChanged,
   });
 
-  const accountTxs = Array.from(newState.accounts.entries())
-    .sort(([left], [right]) => left.localeCompare(right))
-    .flatMap(([accountId, account]) => Array.from(account.deltas.keys())
-      .sort((left, right) => left - right)
-      .map((tokenId) => ({
-        accountId,
-        tx: buildHubRebalancePolicyTx(newState.hubRebalanceConfig!, tokenId),
-      })));
+  const accountTxs = buildHubPolicyTargets(newState, config);
 
   return {
     newState,
