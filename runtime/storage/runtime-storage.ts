@@ -1,20 +1,10 @@
 import { runtimeIsBrowser } from '../runtime/platform';
-import {
-  buildReplayVerifiableRuntimeMachineSnapshot,
-} from './wal/snapshot';
 import { setAccountFrameHistoryView } from '../runtime/env-events';
 import { ensureRuntimeState } from '../runtime/runtime-state';
 import { safeStringify } from '../protocol/serialization';
-import {
-  computeCanonicalEntityHashesFromEnv,
-  computeCanonicalStateHashFromEnv,
-} from './canonical-hash';
-import {
-  buildRuntimeCheckpointLineagePlan,
-} from './entity-lineage';
+import { computeCanonicalEntityHashesFromEnv } from './canonical-hash';
 import { assertCertifiedRegistrationEvidenceStore } from '../jurisdiction/registration-evidence';
 import {
-  computeStoragePostStateHash,
   listStorageSnapshotHeights,
   readHistoryViewAccountFrames,
   reconcileHistoryViews,
@@ -22,10 +12,6 @@ import {
   readStorageFrameRecord,
   type StorageFrameRecord,
 } from '.';
-import {
-  buildStorageLiveReplicaMetaCommitment,
-  buildStorageReplicaMetaCommitmentFromCheckpointPlan,
-} from './replicas';
 import { assertStorageSafetyOverridesAllowed } from './safety';
 import type { RuntimeState } from '../types';
 import { buildRecoveryJournalFromStorageFrame } from './queries';
@@ -35,6 +21,10 @@ import type { RuntimeStorageApiDeps } from './runtime-storage-deps';
 import { createRuntimeStorageCommitApi } from './commit';
 import { createPersistedStorageReadApi } from './persisted-read';
 import { loadPersistedRuntime } from './recovery/load';
+import {
+  createRuntimeChainVerifier,
+  verifyPersistedFrameState,
+} from './recovery/verify';
 
 export type { RuntimeStorageApiDeps } from './runtime-storage-deps';
 
@@ -97,18 +87,6 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
 
   const commitApi = createRuntimeStorageCommitApi(deps);
 
-  type VerifyRuntimeChainResult = {
-    ok: boolean;
-    latestHeight: number;
-    checkpointHeight: number;
-    selectedSnapshotHeight: number;
-    restoredHeight: number;
-    expectedStateHash: string;
-    actualStateHash: string;
-    expectedCanonicalStateHash?: string;
-    actualCanonicalStateHash?: string;
-  };
-
   const persistedReadApi = createPersistedStorageReadApi(deps);
   const {
     createPersistedStorageEnv,
@@ -165,132 +143,11 @@ export const createRuntimeStorageApi = (deps: RuntimeStorageApiDeps) => {
     }
   };
 
-  const verifyPersistedFrameState = (
-    env: RuntimeState,
-    persistedFrame: StorageFrameRecord,
-  ): {
-    expectedStateHash: string;
-    actualStateHash: string;
-    expectedCanonicalStateHash: string;
-    actualCanonicalStateHash: string;
-    ok: boolean;
-  } => {
-    const expectedStateHash = persistedFrame.postStateHash;
-    const storageHashMode = persistedFrame.hashMode === 'storage-merkle-v1';
-    const replayCheckpointLineagePlan = persistedFrame.replicaMetaCheckpoint
-      ? buildRuntimeCheckpointLineagePlan(env)
-      : null;
-    const actualReplicaMetaDigest = replayCheckpointLineagePlan
-      ? buildStorageReplicaMetaCommitmentFromCheckpointPlan(env, replayCheckpointLineagePlan, {
-          omitIntermediateSingleSignerState: persistedFrame.replicaMetaStateMode === 'shared-entity-state',
-        }).digest
-      : buildStorageLiveReplicaMetaCommitment(env).digest;
-    const actualStateHash = computeStoragePostStateHash({
-      height: persistedFrame.height,
-      timestamp: persistedFrame.timestamp,
-      replicaMetaDigest: actualReplicaMetaDigest,
-      runtimeMachine: buildReplayVerifiableRuntimeMachineSnapshot(env, {
-        pendingNetworkOutputs: env.pendingNetworkOutputs ?? [],
-        excludePersistedHistoryRecords: true,
-      }),
-    });
-    const expectedCanonicalStateHash = storageHashMode
-      ? String(persistedFrame.canonicalStateHash || '')
-      : expectedStateHash;
-    const actualCanonicalStateHash = storageHashMode
-      ? expectedCanonicalStateHash
-        ? computeCanonicalStateHashFromEnv(env)
-        : ''
-      : actualStateHash;
-    return {
-      expectedStateHash,
-      actualStateHash,
-      expectedCanonicalStateHash,
-      actualCanonicalStateHash,
-      ok: expectedStateHash === actualStateHash && expectedCanonicalStateHash === actualCanonicalStateHash,
-    };
-  };
-
-  const verifyRuntimeChain = async (
-    runtimeId?: string | null,
-    runtimeSeed?: string | null,
-    options?: { fromSnapshotHeight?: number },
-  ): Promise<VerifyRuntimeChainResult> => {
-    const bootstrapEnv = createPersistedStorageEnv(runtimeId, runtimeSeed);
-    const latestHeight = await resolvePersistedLatestHeight(bootstrapEnv);
-    if (latestHeight <= 0) {
-      throw new Error('REPLAY_INVARIANT_FAILED: no persisted runtime state');
-    }
-    const requestedFromHeight = Number.isFinite(Number(options?.fromSnapshotHeight))
-      ? Math.max(1, Math.floor(Number(options?.fromSnapshotHeight)))
-      : latestHeight;
-    if (requestedFromHeight > latestHeight) {
-      throw new Error(
-        `REPLAY_INVARIANT_FAILED: requested height ${requestedFromHeight} exceeds latest ${latestHeight}`,
-      );
-    }
-    const selectedSnapshotHeight = await resolvePersistedSnapshotHeight(bootstrapEnv, requestedFromHeight);
-    const checkpointHeight = await resolvePersistedSnapshotHeight(bootstrapEnv, latestHeight);
-    let expectedStateHash = '';
-    let actualStateHash = '';
-    let expectedCanonicalStateHash = '';
-    let actualCanonicalStateHash = '';
-    let restoredHeight = selectedSnapshotHeight;
-    let replayed: Awaited<ReturnType<typeof loadEnvFromStorage>> = null;
-    try {
-      await closeRuntimeDb(bootstrapEnv);
-      await closeInfraDb(bootstrapEnv);
-      replayed = await loadEnvFromStorage(runtimeId, runtimeSeed, selectedSnapshotHeight);
-      if (!replayed) {
-        throw new Error(`REPLAY_INVARIANT_FAILED: failed to restore checkpoint at height ${selectedSnapshotHeight}`);
-      }
-      for (let height = selectedSnapshotHeight; height <= latestHeight; height += 1) {
-        const persistedFrame = await readPersistedStorageFrameRecord(replayed.env, height);
-        if (!persistedFrame) {
-          throw new Error(`REPLAY_INVARIANT_FAILED: missing persisted frame at height ${height}`);
-        }
-        if (height > selectedSnapshotHeight) {
-          await replayRecoveryFrameJournals(replayed.env, [buildRecoveryJournalFromStorageFrame(persistedFrame)]);
-        }
-        if (height < requestedFromHeight) continue;
-        const verification = verifyPersistedFrameState(replayed.env, persistedFrame);
-        ({ expectedStateHash, actualStateHash, expectedCanonicalStateHash, actualCanonicalStateHash } = verification);
-        restoredHeight = height;
-        if (!verification.ok) {
-          return {
-            ok: false,
-            latestHeight,
-            checkpointHeight,
-            selectedSnapshotHeight,
-            restoredHeight,
-            expectedStateHash,
-            actualStateHash,
-            expectedCanonicalStateHash,
-            actualCanonicalStateHash,
-          };
-        }
-      }
-    } finally {
-      if (replayed) {
-        await closeRuntimeDb(replayed.env);
-        await closeInfraDb(replayed.env);
-      }
-      await closeRuntimeDb(bootstrapEnv);
-      await closeInfraDb(bootstrapEnv);
-    }
-
-    return {
-      ok: true,
-      latestHeight,
-      checkpointHeight,
-      selectedSnapshotHeight,
-      restoredHeight,
-      expectedStateHash,
-      actualStateHash,
-      expectedCanonicalStateHash,
-      actualCanonicalStateHash,
-    };
-  };
+  const verifyRuntimeChain = createRuntimeChainVerifier(
+    deps,
+    persistedReadApi,
+    loadEnvFromStorage,
+  );
 
   type PersistedReplayTarget = {
     latestHeight: number;
