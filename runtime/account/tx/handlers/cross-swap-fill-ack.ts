@@ -1,280 +1,42 @@
-import type { AccountMachine, AccountTx, CrossJurisdictionSwapRoute } from '../../../types';
-import type { SwapOfferEvent } from '../../../entity/tx/handlers/account';
-import { getSwapLotScale } from '../../../orderbook';
+import type { AccountMachine } from '../../../types';
 import {
-  CROSS_J_MAX_FILL_RATIO,
-  assertCrossJurisdictionPriceImprovementMode,
-  buildCommittedCrossJurisdictionPullBinding,
-  getCrossJurisdictionCommittedFillAmounts,
-  getCrossJurisdictionCommittedProofRatio,
-  requireCrossJurisdictionFillProgress,
-  transitionCrossJurisdictionRouteStatus,
-  withCrossJurisdictionFillProgress,
-} from '../../../extensions/cross-j/index';
-import { recordSwapClosedLifecycle, recordSwapResolveLifecycle } from './swap-history';
+  prepareCrossSwapFillAck,
+} from './cross-swap-fill-ack-admission';
+import {
+  applyUnfilledCrossSwapCancellation,
+  validateCrossSwapFillProgress,
+} from './cross-swap-fill-ack-commit';
+import { commitCrossSwapFillProgress } from './cross-swap-fill-ack-projection';
+import type {
+  CrossSwapFillAckResult,
+  CrossSwapFillAckTx,
+} from './cross-swap-fill-ack-types';
 
-type CrossSwapFillAckTx = Extract<AccountTx, { type: 'cross_swap_fill_ack' }>;
-
-const syncSourcePullBinding = (accountMachine: AccountMachine, route: CrossJurisdictionSwapRoute): void => {
-  const sourcePullId = route?.sourcePull?.pullId;
-  if (!sourcePullId) return;
-  const pull = accountMachine.pulls?.get(sourcePullId);
-  if (!pull) return;
-  pull.crossJurisdiction = buildCommittedCrossJurisdictionPullBinding(route, 'source');
-};
-
+/**
+ * Commits a book-owner fill acknowledgement into bilateral Account state.
+ * Admission and exact amount proofs run before any route or history mutation.
+ */
 export async function handleCrossSwapFillAck(
-  accountMachine: AccountMachine,
-  accountTx: CrossSwapFillAckTx,
+  account: AccountMachine,
+  tx: CrossSwapFillAckTx,
   byLeft: boolean,
-  currentTimestamp: number,
-  currentHeight: number,
-): Promise<{
-  success: boolean;
-  events: string[];
-  error?: string;
-  swapOfferCreated?: SwapOfferEvent;
-  swapOfferCancelled?: { offerId: string; accountId: string };
-}> {
-  const rawPriceImprovementMode = (accountTx.data as { priceImprovementMode?: unknown }).priceImprovementMode;
-  try {
-    assertCrossJurisdictionPriceImprovementMode(rawPriceImprovementMode, accountTx.data.offerId);
-  } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : String(error),
-      events: [],
-    };
-  }
-  const {
-    offerId,
-    routeHash,
-    previousFillSeq,
-    fillSeq,
-    cumulativeFillRatio,
-    incrementalSourceAmount,
-    incrementalTargetAmount,
-    cumulativeSourceAmount,
-    cumulativeTargetAmount,
-    executionSourceAmount,
-    executionTargetAmount,
-    fillNumerator,
-    fillDenominator,
-    priceImprovementAmount = 0n,
-    priceImprovementTokenId,
-    cancelRemainder = false,
-    comment,
-    priceTicks,
-    pairId,
-  } = accountTx.data;
-  const events: string[] = [];
-  const offer = accountMachine.swapOffers?.get(offerId);
-  if (!offer) return { success: false, error: `Offer ${offerId} not found`, events };
-  if (!offer.crossJurisdiction) {
-    return { success: false, error: `Offer ${offerId} is not cross-jurisdictional`, events };
-  }
-
-  const callerIsLeft = byLeft;
-  if (callerIsLeft === offer.makerIsLeft) {
-    return { success: false, error: `Only counterparty can ack cross-j fill`, events };
-  }
-
-  const route = offer.crossJurisdiction;
-  if (
-    routeHash &&
-    route.routeHash &&
-    routeHash.toLowerCase() !== route.routeHash.toLowerCase()
-  ) {
-    return { success: false, error: `Cross-j route hash mismatch: ${routeHash} != ${route.routeHash}`, events };
-  }
-  const committedFill = getCrossJurisdictionCommittedFillAmounts(route);
-  const currentRatio = committedFill.fillRatio;
-  const ackProofRatio = getCrossJurisdictionCommittedProofRatio({
-    orderId: offerId,
-    cumulativeFillRatio,
-    fillNumerator,
-    fillDenominator,
-  });
-  const currentFillSeq = Math.max(0, Math.floor(Number(route.fillSeq ?? 0) || 0));
-  if (
-    previousFillSeq !== undefined &&
-    Math.floor(Number(previousFillSeq)) !== currentFillSeq &&
-    !(cancelRemainder && ackProofRatio === currentRatio)
-  ) {
-    return {
-      success: false,
-      error: `Cross-j previous fill seq mismatch: expected ${currentFillSeq}, got ${previousFillSeq}`,
-      events,
-    };
-  }
-  if (cancelRemainder && ackProofRatio === currentRatio) {
-    const currentSource = committedFill.filledSourceAmount;
-    const currentTarget = committedFill.filledTargetAmount;
-    if (cumulativeSourceAmount === undefined || cumulativeSourceAmount !== currentSource) {
-      return { success: false, error: `Cross-j cancel source mismatch: expected ${currentSource}, got ${cumulativeSourceAmount}`, events };
-    }
-    if (cumulativeTargetAmount === undefined || cumulativeTargetAmount !== currentTarget) {
-      return { success: false, error: `Cross-j cancel target mismatch: expected ${currentTarget}, got ${cumulativeTargetAmount}`, events };
-    }
-    transitionCrossJurisdictionRouteStatus(route, 'clear_requested', currentTimestamp);
-    route.clearingPolicy = 'cancel_and_clear';
-    offer.crossJurisdiction = route;
-    syncSourcePullBinding(accountMachine, route);
-    // Closed-order history is a user-facing projection of the committed account
-    // proof. Record the terminal resolve before copying into swapClosedOrders; a
-    // previous ordering copied the row first, which made closed cross-j orders
-    // look unfilled even though the ACK had already committed.
-    recordSwapResolveLifecycle(accountMachine, offerId, currentHeight, {
-      fillRatio: currentRatio,
-      ...(route.fillNumerator !== undefined ? { fillNumerator: route.fillNumerator } : {}),
-      ...(route.fillDenominator !== undefined ? { fillDenominator: route.fillDenominator } : {}),
-      cancelRemainder: true,
-      height: currentHeight,
-      executionGiveAmount: 0n,
-      executionWantAmount: 0n,
-      ...(comment ? { comment } : {}),
-    });
-    accountMachine.swapOffers?.delete(offerId);
-    recordSwapClosedLifecycle(accountMachine, offerId);
-    events.push(`🌉 Cross-j offer ${offerId.slice(0, 8)} cancel requested at ${currentRatio}/${CROSS_J_MAX_FILL_RATIO}`);
-    return {
-      success: true,
-      events,
-      swapOfferCancelled: { offerId, accountId: offer.makerIsLeft ? accountMachine.leftEntity : accountMachine.rightEntity },
-    };
-  }
-
-  let fill;
-  try {
-    fill = requireCrossJurisdictionFillProgress(route, {
-      fillSeq,
-      cumulativeFillRatio,
-      fillNumerator,
-      fillDenominator,
-      incrementalSourceAmount,
-      incrementalTargetAmount,
-      cumulativeSourceAmount,
-      cumulativeTargetAmount,
-    }, 'Cross-j fill ack invalid');
-  } catch (error) {
-    return { success: false, error: error instanceof Error ? error.message : String(error), events };
-  }
-  const expectedExecutionSource = priceImprovementAmount > 0n
-    ? fill.incrementalSourceAmount - priceImprovementAmount
-    : fill.incrementalSourceAmount;
-  const expectedExecutionTarget = fill.incrementalTargetAmount;
-  if (priceImprovementAmount < 0n) {
-    return { success: false, error: `Cross-j price improvement must be non-negative`, events };
-  }
-  if (priceImprovementAmount > 0n && priceImprovementTokenId !== route.source.tokenId) {
-    return { success: false, error: `Cross-j source savings token mismatch`, events };
-  }
-  if (expectedExecutionSource <= 0n || expectedExecutionTarget <= 0n) {
-    return { success: false, error: `Cross-j execution amount after improvement must be positive`, events };
-  }
-  if (executionSourceAmount !== undefined && executionSourceAmount !== expectedExecutionSource) {
-    return { success: false, error: `Cross-j source execution mismatch: expected ${expectedExecutionSource}, got ${executionSourceAmount}`, events };
-  }
-  if (executionTargetAmount !== undefined && executionTargetAmount !== expectedExecutionTarget) {
-    return { success: false, error: `Cross-j target execution mismatch: expected ${expectedExecutionTarget}, got ${executionTargetAmount}`, events };
-  }
-  const sourceTotal = BigInt(route.source.amount);
-
-  const nextRoute = withCrossJurisdictionFillProgress(
-    route,
-    fill,
-    currentTimestamp,
+  timestamp: number,
+  height: number,
+): Promise<CrossSwapFillAckResult> {
+  const admission = prepareCrossSwapFillAck(account, tx, byLeft);
+  if (!admission.ok) return admission.result;
+  const cancelled = applyUnfilledCrossSwapCancellation(
+    admission.prepared,
+    timestamp,
+    height,
   );
-  Object.assign(route, nextRoute);
-  if (priceImprovementAmount > 0n) {
-    route.priceImprovementSourceAmount = (route.priceImprovementSourceAmount ?? 0n) + priceImprovementAmount;
-  }
-  if (priceTicks !== undefined) route.priceTicks = priceTicks;
-  if (pairId) route.venueId ||= pairId;
-
-  const targetTotal = BigInt(route.target.amount);
-  const full = fill.nextRatio >= CROSS_J_MAX_FILL_RATIO ||
-    fill.cumulativeSourceAmount >= sourceTotal ||
-    fill.cumulativeTargetAmount >= targetTotal;
-  const shouldClose = full || cancelRemainder;
-  const remainingSource = sourceTotal - fill.cumulativeSourceAmount;
-  const remainingTarget = targetTotal - fill.cumulativeTargetAmount;
-  const sourceLotScale = getSwapLotScale(route.source.tokenId);
-  const targetLotScale = getSwapLotScale(route.target.tokenId);
-  const lotSizedRoute = sourceTotal >= sourceLotScale && targetTotal >= targetLotScale;
-  const closedByDust = !shouldClose && (
-    remainingSource <= 0n ||
-    remainingTarget <= 0n ||
-    (lotSizedRoute && (remainingSource < sourceLotScale || remainingTarget < targetLotScale))
+  if (cancelled) return cancelled;
+  const validated = validateCrossSwapFillProgress(admission.prepared);
+  if (!validated.ok) return validated.result;
+  return commitCrossSwapFillProgress(
+    admission.prepared,
+    validated.fill,
+    timestamp,
+    height,
   );
-  const terminalClose = shouldClose || closedByDust;
-  if (terminalClose) {
-    transitionCrossJurisdictionRouteStatus(route, 'clear_requested', currentTimestamp);
-    route.clearingPolicy =
-      cancelRemainder || closedByDust || fill.nextRatio < CROSS_J_MAX_FILL_RATIO
-        ? 'cancel_and_clear'
-        : 'full_fill';
-  }
-  offer.crossJurisdiction = route;
-  syncSourcePullBinding(accountMachine, route);
-  let remainingOfferEvent: SwapOfferEvent | undefined;
-  const resolveHistory = {
-    fillRatio: fill.nextRatio,
-    ...(fill.fillNumerator !== undefined ? { fillNumerator: fill.fillNumerator } : {}),
-    ...(fill.fillDenominator !== undefined ? { fillDenominator: fill.fillDenominator } : {}),
-    cancelRemainder: terminalClose,
-    height: currentHeight,
-    executionGiveAmount: executionSourceAmount ?? fill.incrementalSourceAmount,
-    executionWantAmount: executionTargetAmount ?? fill.incrementalTargetAmount,
-    ...(comment ? { comment } : {}),
-  };
-  // The account ACK is the canonical committed swap progress. Persist the
-  // resolve before any close/copy projection so both open and closed histories
-  // carry the same final economics.
-  recordSwapResolveLifecycle(accountMachine, offerId, currentHeight, resolveHistory, {
-    giveTokenId: offer.giveTokenId,
-    giveAmount: sourceTotal,
-    wantTokenId: offer.wantTokenId,
-    wantAmount: targetTotal,
-    ...(offer.priceTicks !== undefined ? { priceTicks: offer.priceTicks } : {}),
-    createdHeight: offer.createdHeight,
-  });
-  if (terminalClose) {
-    accountMachine.swapOffers?.delete(offerId);
-    recordSwapClosedLifecycle(accountMachine, offerId);
-    events.push(shouldClose
-      ? `🌉 Cross-j offer ${offerId.slice(0, 8)} closed at ${fill.nextRatio}/${CROSS_J_MAX_FILL_RATIO}`
-      : `🌉 Cross-j offer ${offerId.slice(0, 8)} closed after dust remainder`);
-  } else {
-    offer.giveAmount = remainingSource;
-    offer.wantAmount = remainingTarget;
-    offer.quantizedGive = remainingSource;
-    offer.quantizedWant = remainingTarget;
-    const nextPriceTicks = route.priceTicks ?? offer.priceTicks;
-    if (nextPriceTicks !== undefined) offer.priceTicks = nextPriceTicks;
-    remainingOfferEvent = {
-      offerId,
-      makerIsLeft: offer.makerIsLeft,
-      fromEntity: accountMachine.leftEntity,
-      toEntity: accountMachine.rightEntity,
-      createdHeight: offer.createdHeight,
-      giveTokenId: offer.giveTokenId,
-      giveAmount: offer.giveAmount,
-      wantTokenId: offer.wantTokenId,
-      wantAmount: offer.wantAmount,
-      ...(offer.priceTicks !== undefined ? { priceTicks: offer.priceTicks } : {}),
-      ...(offer.timeInForce !== undefined ? { timeInForce: offer.timeInForce } : {}),
-      crossJurisdiction: offer.crossJurisdiction,
-    };
-    events.push(`🌉 Cross-j offer ${offerId.slice(0, 8)} filled to ${fill.nextRatio}/${CROSS_J_MAX_FILL_RATIO}, ${remainingSource} source remaining`);
-  }
-
-  return {
-    success: true,
-    events,
-    ...(remainingOfferEvent ? { swapOfferCreated: remainingOfferEvent } : {}),
-    ...(terminalClose
-      ? { swapOfferCancelled: { offerId, accountId: offer.makerIsLeft ? accountMachine.leftEntity : accountMachine.rightEntity } }
-      : {}),
-  };
 }

@@ -37,8 +37,8 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   over 100 lines under `runtime/runtime`, `runtime/entity` and
   `runtime/account`. Reduce every coordinator to at most 150 lines and every
   pure/helper function to at most 100 lines, with no file above 3000 lines;
-  `check:state-machine-size` now ratchets the current debt at 16 functions over
-  150 lines and 71 over 100, rejects any new/growing allowance and rejects
+  `check:state-machine-size` now ratchets the current debt at 15 functions over
+  150 lines and 70 over 100, rejects any new/growing allowance and rejects
   files over 3000 lines. Keep reducing both counts to zero, deleting each exact
   allowance as its function is split.
   Keep Runtime-machine logic under `runtime/runtime/`, Entity-machine logic
@@ -46,9 +46,7 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   `runtime/account/`; adapters, storage, transport, UI and QA remain separate
   infrastructure rather than being mislabeled as a state machine. The current
   first structural targets are:
-  `submitRuntimeJOutbox` (259),
-  `handleCrossSwapFillAck` (255),
-  and Runtime output plan/dispatch (189/201).
+  Runtime output plan/dispatch (189/201).
   Each split must follow protocol phase, owner and failure boundary—not
   arbitrary line chunks—and preserve byte-identical roots, failures and
   ordering through characterization tests.
