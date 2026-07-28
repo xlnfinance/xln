@@ -1,4 +1,3 @@
-import { isLeftEntity } from '../../id';
 import { FINANCIAL } from '../../../constants';
 import type {
   AccountTx,
@@ -16,6 +15,7 @@ import { requireTrustedPaymentGateway } from '../../../protocol/payments/deliver
 import { requireCommittedDirectPaymentRoute } from '../../../protocol/payments/route';
 
 type DirectPaymentEntityTx = Extract<EntityTx, { type: 'directPayment' }>;
+type DirectPaymentAccountTx = Extract<AccountTx, { type: 'direct_payment' }>;
 
 type DirectPaymentResult = {
   newState: EntityState;
@@ -28,15 +28,118 @@ const directPaymentInvariant = (code: string, detail: string): Error =>
 
 const directPaymentLog = createStructuredLogger('entity.payment');
 
+type PaymentTrace = (message: string, fields?: Record<string, unknown>) => void;
+
+const createPaymentTrace = (env: Env): PaymentTrace =>
+  (message, fields = {}) => {
+    if (env.quietRuntimeLogs !== true) directPaymentLog.debug(message, fields);
+  };
+
+const validateEntityPayment = (
+  state: EntityState,
+  tx: DirectPaymentEntityTx,
+  route: string[],
+  outputs: EntityInput[],
+): DirectPaymentResult | undefined => {
+  const { amount, deliveryMode, targetEntityId, trustedGatewayEntityId } = tx.data;
+  if (deliveryMode && deliveryMode !== 'trusted') {
+    throw directPaymentInvariant('DELIVERY_MODE_INVALID', String(deliveryMode));
+  }
+  if (amount < FINANCIAL.MIN_PAYMENT_AMOUNT || amount > FINANCIAL.MAX_PAYMENT_AMOUNT) {
+    logError(
+      'ENTITY_TX',
+      `❌ Payment amount out of bounds: ${amount.toString()} (min ${FINANCIAL.MIN_PAYMENT_AMOUNT.toString()}, max ${FINANCIAL.MAX_PAYMENT_AMOUNT.toString()})`,
+    );
+    addMessage(state, '❌ Payment failed: amount out of bounds');
+    return { newState: state, outputs };
+  }
+  if (deliveryMode === 'trusted') {
+    requireTrustedPaymentGateway(route, targetEntityId, trustedGatewayEntityId);
+  }
+  return undefined;
+};
+
+const emitPaymentInitiated = (
+  effects: EntityCandidateEffect[],
+  fromEntity: string,
+  tx: DirectPaymentEntityTx,
+  route: string[],
+): void => {
+  effects.push({
+    kind: 'runtimeEvent',
+    eventName: 'HtlcInitiated',
+    data: {
+      fromEntity,
+      toEntity: tx.data.targetEntityId,
+      tokenId: tx.data.tokenId,
+      amount: tx.data.amount.toString(),
+      route,
+    },
+  });
+};
+
+const finishReceivedPayment = (
+  state: EntityState,
+  tx: DirectPaymentEntityTx,
+  route: string[],
+  effects: EntityCandidateEffect[],
+  trace: PaymentTrace,
+): DirectPaymentResult | undefined => {
+  if (route.length !== 1 || route[0] !== tx.data.targetEntityId) return undefined;
+  emitPaymentInitiated(effects, state.entityId, tx, route);
+  trace('final_destination', {
+    entity: shortId(state.entityId),
+    tokenId: tx.data.tokenId,
+    amount: tx.data.amount.toString(),
+  });
+  addMessage(state, `💰 Received payment of ${tx.data.amount} (token ${tx.data.tokenId})`);
+  return { newState: state, outputs: [] };
+};
+
+const buildNextHopPayment = (
+  state: EntityState,
+  tx: DirectPaymentEntityTx,
+  route: string[],
+): { nextHop: string; accountTx: DirectPaymentAccountTx } => {
+  const nextHop = route[1];
+  if (!nextHop) {
+    throw directPaymentInvariant(
+      'NEXT_HOP_MISSING',
+      `entity=${state.entityId}:target=${tx.data.targetEntityId}:route=${route.join(',')}`,
+    );
+  }
+  if (!state.accounts.has(nextHop)) {
+    throw directPaymentInvariant(
+      'NEXT_HOP_ACCOUNT_MISSING',
+      `entity=${state.entityId}:nextHop=${nextHop}:target=${tx.data.targetEntityId}`,
+    );
+  }
+  const { targetEntityId, tokenId, amount, description, deliveryMode, trustedGatewayEntityId } = tx.data;
+  return {
+    nextHop,
+    accountTx: {
+      type: 'direct_payment',
+      data: {
+        tokenId,
+        amount,
+        route: route.slice(1),
+        description: description || `Payment to ${formatEntityId(targetEntityId)}`,
+        fromEntityId: state.entityId,
+        toEntityId: nextHop,
+        ...(deliveryMode ? { deliveryMode } : {}),
+        ...(trustedGatewayEntityId ? { trustedGatewayEntityId } : {}),
+      },
+    },
+  };
+};
+
 export const handleDirectPaymentEntityTx = async (
   env: Env,
   entityState: EntityState,
   entityTx: DirectPaymentEntityTx,
   candidateEffects: EntityCandidateEffect[] = [],
 ): Promise<DirectPaymentResult> => {
-  const trace = (message: string, fields: Record<string, unknown> = {}): void => {
-    if (env.quietRuntimeLogs !== true) directPaymentLog.debug(message, fields);
-  };
+  const trace = createPaymentTrace(env);
   const route = requireCommittedDirectPaymentRoute({
     sourceEntityId: entityState.entityId,
     targetEntityId: entityTx.data.targetEntityId,
@@ -54,105 +157,28 @@ export const handleDirectPaymentEntityTx = async (
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
   const mempoolOps: MempoolOp[] = [];
-  trace('initialized');
 
-  const { targetEntityId, tokenId, amount, description } = entityTx.data;
-  const deliveryMode = entityTx.data.deliveryMode;
-  const trustedGatewayEntityId = entityTx.data.trustedGatewayEntityId;
-  if (deliveryMode && deliveryMode !== 'trusted') {
-    throw directPaymentInvariant('DELIVERY_MODE_INVALID', String(deliveryMode));
-  }
-  if (amount < FINANCIAL.MIN_PAYMENT_AMOUNT || amount > FINANCIAL.MAX_PAYMENT_AMOUNT) {
-    logError(
-      'ENTITY_TX',
-      `❌ Payment amount out of bounds: ${amount.toString()} (min ${FINANCIAL.MIN_PAYMENT_AMOUNT.toString()}, max ${FINANCIAL.MAX_PAYMENT_AMOUNT.toString()})`,
-    );
-    addMessage(newState, `❌ Payment failed: amount out of bounds`);
-    return { newState, outputs: [] };
-  }
-
-  if (deliveryMode === 'trusted') {
-    requireTrustedPaymentGateway(route, targetEntityId, trustedGatewayEntityId);
-  }
-
-  if (route.length === 1 && route[0] === targetEntityId) {
-    candidateEffects.push({
-      kind: 'runtimeEvent',
-      eventName: 'HtlcInitiated',
-      data: {
-        fromEntity: entityState.entityId,
-        toEntity: targetEntityId,
-        tokenId,
-        amount: amount.toString(),
-        route,
-      },
-    });
-    trace('final_destination', { entity: shortId(entityState.entityId), tokenId, amount: amount.toString() });
-    addMessage(newState, `💰 Received payment of ${amount} (token ${tokenId})`);
-    return { newState, outputs: [] };
-  }
-
-  const nextHop = route[1];
-  if (!nextHop) {
-    throw directPaymentInvariant(
-      'NEXT_HOP_MISSING',
-      `entity=${entityState.entityId}:target=${targetEntityId}:route=${route.join(',')}`,
-    );
-  }
-
-  const accountMachine = newState.accounts.get(nextHop);
-  if (!accountMachine) {
-    throw directPaymentInvariant(
-      'NEXT_HOP_ACCOUNT_MISSING',
-      `entity=${entityState.entityId}:nextHop=${nextHop}:target=${targetEntityId}`,
-    );
-  }
-
-  const accountTx: AccountTx = {
-    type: 'direct_payment',
-    data: {
-      tokenId,
-      amount,
-      route: route.slice(1),
-      description: description || `Payment to ${formatEntityId(targetEntityId)}`,
-      fromEntityId: entityState.entityId,
-      toEntityId: nextHop,
-      ...(deliveryMode ? { deliveryMode } : {}),
-      ...(trustedGatewayEntityId ? { trustedGatewayEntityId } : {}),
-    },
-  };
-
+  const validationError = validateEntityPayment(newState, entityTx, route, []);
+  if (validationError) return validationError;
+  const received = finishReceivedPayment(newState, entityTx, route, candidateEffects, trace);
+  if (received) return received;
+  const { nextHop, accountTx } = buildNextHopPayment(newState, entityTx, route);
   mempoolOps.push({ accountId: nextHop, tx: accountTx });
   trace('mempool.queued', {
     account: shortId(nextHop),
     tx: accountTx.type,
-    amount: accountTx.data.amount.toString(),
+    amount: entityTx.data.amount.toString(),
     from: shortId(accountTx.data.fromEntityId),
     to: shortId(accountTx.data.toEntityId),
     route: accountTx.data.route?.map((entityId: string) => shortId(entityId)) ?? [],
     mempoolOps: mempoolOps.length,
   });
 
-  const isLeft = isLeftEntity(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
-  trace('account.state', { isLeft, hasPendingFrame: Boolean(accountMachine.pendingFrame) });
-
   addMessage(
     newState,
-    `💸 Sending ${amount} (token ${tokenId}) to ${formatEntityId(targetEntityId)} via ${route.length - 1} hops`,
+    `💸 Sending ${entityTx.data.amount} (token ${entityTx.data.tokenId}) to ${formatEntityId(entityTx.data.targetEntityId)} via ${route.length - 1} hops`,
   );
-  candidateEffects.push({
-    kind: 'runtimeEvent',
-    eventName: 'HtlcInitiated',
-    data: {
-      fromEntity: entityState.entityId,
-      toEntity: targetEntityId,
-      tokenId,
-      amount: amount.toString(),
-      route,
-    },
-  });
-
-  trace('bilateral.queued', { nextHop: shortId(nextHop) });
+  emitPaymentInitiated(candidateEffects, entityState.entityId, entityTx, route);
 
   const firstValidator = entityState.config.validators[0];
   if (firstValidator) {
@@ -161,9 +187,7 @@ export const handleDirectPaymentEntityTx = async (
       signerId: firstValidator,
       entityTxs: [],
     });
-    trace('processing_trigger.added', { outputs: outputs.length });
   }
-  trace('complete', { mempoolOps: mempoolOps.length, outputs: outputs.length });
 
   return { newState, outputs, mempoolOps };
 };

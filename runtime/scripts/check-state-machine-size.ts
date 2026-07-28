@@ -19,7 +19,7 @@ const TARGET_COORDINATOR_LINES = 150;
 const COORDINATOR_DEBT: Readonly<Record<string, number>> = {
 };
 
-const MAX_OVER_100_FUNCTIONS = 54;
+const MAX_OVER_100_FUNCTIONS = 50;
 
 type FunctionSize = {
   key: string;
@@ -88,6 +88,11 @@ for (const file of files) {
 }
 
 const over100 = functions.filter(entry => entry.lines > TARGET_HELPER_LINES);
+if (process.argv.includes('--list-over-100')) {
+  for (const entry of [...over100].sort((left, right) => right.lines - left.lines)) {
+    console.log(`${entry.lines}\t${entry.file}:${entry.start}\t${entry.name}`);
+  }
+}
 if (over100.length > MAX_OVER_100_FUNCTIONS) {
   errors.push(
     `FUNCTION_DEBT_GREW over${TARGET_HELPER_LINES}=${over100.length} > ${MAX_OVER_100_FUNCTIONS}`,

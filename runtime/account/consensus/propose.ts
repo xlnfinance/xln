@@ -29,6 +29,54 @@ const accountProposalProfileEnabled = (): boolean =>
 const accountProposalSlowMs = (): number =>
   readRuntimePerfSlowMs('XLN_ACCOUNT_PROPOSAL_SLOW_MS', ACCOUNT_PROPOSAL_SLOW_MS);
 
+type ProposalValidation = Awaited<ReturnType<typeof validateProposalTransactions>>;
+
+const finishEmptyProposal = (
+  account: AccountMachine,
+  validation: ProposalValidation,
+): ProposeAccountFrameResult | undefined => {
+  if (validation.validTxs.length > 0) return undefined;
+  const accountChanged = validation.txsToRemove.length > 0;
+  if (accountChanged) {
+    account.mempool = removeCommittedTxsFromMempool(account.mempool, validation.txsToRemove);
+  }
+  const result: ProposeAccountFrameResult = {
+    success: false,
+    error: validation.deferredTxCount > 0
+      ? `Transactions deferred until signed settlement finalizes: ${validation.deferredTxCount}`
+      : 'All transactions failed validation',
+    events: validation.events,
+    ...(validation.failedHtlcLocks.length > 0
+      ? { failedHtlcLocks: validation.failedHtlcLocks }
+      : {}),
+    ...(accountChanged ? { accountChanged: true } : {}),
+  };
+  return result;
+};
+
+const logProposalProfile = (
+  proof: Awaited<ReturnType<typeof prepareProposalProof>> & { success: true },
+  frame: Awaited<ReturnType<typeof buildProposalFrame>> & { success: true },
+  counterparty: string,
+  optimisticBatch: boolean,
+  profileCheckpoints: Record<string, number>,
+  profileStartMs: number,
+): void => {
+  const totalMs = Math.round(getPerfMs() - profileStartMs);
+  if (!accountProposalProfileEnabled() && totalMs < accountProposalSlowMs()) return;
+  accountLog.info('proposal.profile', {
+    entity: shortId(proof.signingEntityId, 8),
+    counterparty: shortId(counterparty, 8),
+    height: frame.frame.height,
+    txs: frame.frame.accountTxs.length,
+    txTypes: Array.from(new Set(frame.frame.accountTxs.map(tx => tx.type))).sort(),
+    optimisticBatch,
+    totalMs,
+    phases: cumulativeMarksToPhases(profileCheckpoints, totalMs),
+    stateRoot: frame.stateRootTiming,
+  });
+};
+
 export async function proposeAccountFrame(
   env: Env,
   accountMachine: AccountMachine,
@@ -87,35 +135,12 @@ export async function proposeAccountFrame(
     validTxs,
     validMempoolTxs,
     txsToRemove,
-    deferredTxCount,
-    events: validationEvents,
-    failedHtlcLocks,
     optimisticBatch,
   } = validation;
   checkpointProfile('validateTxs');
 
-  const accountChangedBeforeProposal = txsToRemove.length > 0;
-
-  if (validTxs.length === 0) {
-    if (accountChangedBeforeProposal) {
-      accountMachine.mempool = removeCommittedTxsFromMempool(accountMachine.mempool, txsToRemove);
-    }
-    const earlyResult: {
-      success: false;
-      error: string;
-      events: string[];
-      failedHtlcLocks?: Array<{ hashlock: string; reason: string }>;
-    } = {
-      success: false,
-      error:
-        deferredTxCount > 0
-          ? `Transactions deferred until signed settlement finalizes: ${deferredTxCount}`
-          : 'All transactions failed validation',
-      events: validationEvents,
-    };
-    if (failedHtlcLocks.length > 0) earlyResult.failedHtlcLocks = failedHtlcLocks;
-    return accountChangedBeforeProposal ? { ...earlyResult, accountChanged: true } : earlyResult;
-  }
+  const emptyProposal = finishEmptyProposal(accountMachine, validation);
+  if (emptyProposal) return emptyProposal;
 
   const frameBuild = await buildProposalFrame(
     accountMachine,
@@ -127,7 +152,7 @@ export async function proposeAccountFrame(
     checkpointProfile,
   );
   if (!frameBuild.success) return frameBuild.result;
-  const { frame: newFrame, stateRootTiming } = frameBuild;
+  const { frame: newFrame } = frameBuild;
 
   const proof = await prepareProposalProof(
     env,
@@ -151,21 +176,14 @@ export async function proposeAccountFrame(
     events,
     checkpointProfile,
   );
-  const profileTotalMs = Math.round(getPerfMs() - profileStartMs);
-  if (accountProposalProfileEnabled() || profileTotalMs >= accountProposalSlowMs()) {
-    const profile = {
-      entity: shortId(proof.signingEntityId, 8),
-      counterparty: shortId(counterparty, 8),
-      height: newFrame.height,
-      txs: newFrame.accountTxs.length,
-      txTypes: Array.from(new Set(newFrame.accountTxs.map(tx => tx.type))).sort(),
-      optimisticBatch,
-      totalMs: profileTotalMs,
-      phases: cumulativeMarksToPhases(profileCheckpoints, profileTotalMs),
-      stateRoot: stateRootTiming,
-    };
-    // Timing is operational telemetry, not a correctness warning.
-    accountLog.info('proposal.profile', profile);
-  }
+  // Timing is operational telemetry and never affects proposal validity.
+  logProposalProfile(
+    proof,
+    frameBuild,
+    counterparty,
+    optimisticBatch,
+    profileCheckpoints,
+    profileStartMs,
+  );
   return finalResult;
 }

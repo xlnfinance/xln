@@ -51,7 +51,7 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   `runtime/account`. Reduce every coordinator to at most 150 lines and every
   pure/helper function to at most 100 lines, with no file above 3000 lines;
   `check:state-machine-size` now reports zero functions over 150 lines and
-  ratchets the remaining 54 functions over 100 lines; it rejects any new debt
+  ratchets the remaining 50 functions over 100 lines; it rejects any new debt
   and every file over 3000 lines. Keep reducing the helper count to zero,
   tightening the exact ceiling after each phase split.
   Keep Runtime-machine logic under `runtime/runtime/`, Entity-machine logic
@@ -75,6 +75,24 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   invariant, WAL boundary, adversarial-input boundary and intentionally
   non-obvious ordering rule. Comments must explain why the tempting alternative
   is unsafe rather than restating the code.
+- [ ] Normalize the three nested state-machine vocabularies without pretending
+  their consensus protocols are identical. Preferred names are `RuntimeState`,
+  `EntityState`, `AccountState`; `RuntimeInput`, `EntityInput`, `AccountInput`;
+  `RuntimeFrame`, `EntityFrame`, `AccountFrame`; and matching `*Output` types.
+  Replace the historical `Env` and `AccountMachine` names only as a separately
+  reviewable, compile-checked migration after owner confirmation. Give each
+  machine the same narrow façade and phase vocabulary (`admission`, `apply`,
+  `frame`, `consensus`/`commit`, `output`, `state-root`) while keeping Runtime
+  WAL, Entity validator certification and Account bilateral ACK semantics
+  explicit. Do not introduce inheritance or a generic reducer that hides those
+  different trust boundaries.
+- [ ] Standardize transition result naming after the vocabulary decision:
+  `outputs` are deterministic messages to another state machine; `effects` are
+  post-commit external I/O only; queued child-machine inputs must be named for
+  their destination instead of the implementation detail `mempoolOps`.
+  Evaluate a small structural `Transition<State, Output, Effect>` result type,
+  but adopt it only where it removes duplicate result shapes without weakening
+  the Runtime/Entity/Account ownership boundary.
 - [ ] Pin the financial and durability baselines before structural changes.
   Add byte-identical roots for payment/HTLC/settlement/rebalance, durable
   reliable-frontier assertions on both peers, rollback ordering, and measured

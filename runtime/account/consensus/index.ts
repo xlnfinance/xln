@@ -226,6 +226,150 @@ async function validateCounterpartyDisputeSeal(
   };
 }
 
+type BoardResealPayload = NonNullable<ReturnType<typeof accountInputBoardReseal>>;
+type ValidatedBoardResealMetadata = {
+  expectedFrom: string;
+  activationJHeight: number;
+  activationLogIndex: number;
+  frameHeight: number;
+  currentFrameHash: string;
+};
+
+const rejectBoardReseal = (error: string, events: string[]): HandleAccountInputResult => ({
+  success: false,
+  error,
+  events,
+});
+
+const validateBoardResealMetadata = (
+  account: AccountMachine,
+  input: AccountInput,
+  reseal: BoardResealPayload,
+  events: string[],
+): HandleAccountInputResult | ValidatedBoardResealMetadata => {
+  const expectedFrom = account.proofHeader.toEntity.toLowerCase();
+  const expectedTo = account.proofHeader.fromEntity.toLowerCase();
+  if (input.fromEntityId.toLowerCase() !== expectedFrom || input.toEntityId.toLowerCase() !== expectedTo) {
+    return rejectBoardReseal(
+      `ACCOUNT_BOARD_RESEAL_PARTY_MISMATCH:${input.fromEntityId}:${input.toEntityId}`,
+      events,
+    );
+  }
+  const activationJHeight = Number(reseal.boardActivationJHeight);
+  const activationLogIndex = Number(reseal.boardActivationLogIndex);
+  if (!Number.isSafeInteger(activationJHeight) || activationJHeight < 1) {
+    return rejectBoardReseal(
+      `ACCOUNT_BOARD_RESEAL_ACTIVATION_HEIGHT_INVALID:${activationJHeight}`,
+      events,
+    );
+  }
+  if (!Number.isSafeInteger(activationLogIndex) || activationLogIndex < 0) {
+    return rejectBoardReseal(
+      `ACCOUNT_BOARD_RESEAL_ACTIVATION_LOG_INDEX_INVALID:${activationLogIndex}`,
+      events,
+    );
+  }
+  const frameHeight = Number(reseal.height);
+  const previous = account.counterpartyBoardReseal;
+  const notNewer = previous && (
+    activationJHeight < previous.activationJHeight ||
+    (activationJHeight === previous.activationJHeight && activationLogIndex <= previous.activationLogIndex)
+  );
+  const exactRetry = previous && (
+    activationJHeight === previous.activationJHeight &&
+    activationLogIndex === previous.activationLogIndex &&
+    frameHeight === previous.frameHeight &&
+    String(reseal.frameHash).toLowerCase() === previous.frameHash
+  );
+  if (notNewer && !exactRetry) {
+    return rejectBoardReseal(
+      `ACCOUNT_BOARD_RESEAL_ACTIVATION_ORDER_INVALID:` +
+        `${activationJHeight}:${activationLogIndex}:` +
+        `${previous.activationJHeight}:${previous.activationLogIndex}`,
+      events,
+    );
+  }
+  const currentHeight = Number(account.currentHeight);
+  if (
+    !Number.isSafeInteger(frameHeight) ||
+    frameHeight < 1 ||
+    frameHeight !== currentHeight ||
+    frameHeight !== Number(account.currentFrame.height)
+  ) {
+    return rejectBoardReseal(
+      `ACCOUNT_BOARD_RESEAL_HEIGHT_MISMATCH:${frameHeight}:${currentHeight}`,
+      events,
+    );
+  }
+  const currentFrameHash = String(account.currentFrame.stateHash || '').toLowerCase();
+  const resealFrameHash = String(reseal.frameHash || '').toLowerCase();
+  if (!/^0x[0-9a-f]{64}$/.test(resealFrameHash) || resealFrameHash !== currentFrameHash) {
+    return rejectBoardReseal(
+      `ACCOUNT_BOARD_RESEAL_FRAME_HASH_MISMATCH:${resealFrameHash || 'missing'}:${currentFrameHash || 'missing'}`,
+      events,
+    );
+  }
+  if (!reseal.frameHanko) {
+    return rejectBoardReseal('ACCOUNT_BOARD_RESEAL_FRAME_HANKO_MISSING', events);
+  }
+  return { expectedFrom, activationJHeight, activationLogIndex, frameHeight, currentFrameHash };
+};
+
+const verifyBoardResealWitnesses = async (
+  env: Env,
+  account: AccountMachine,
+  input: AccountInput,
+  reseal: BoardResealPayload,
+  metadata: ValidatedBoardResealMetadata,
+  securityContext: AccountInputSecurityContext,
+  events: string[],
+): Promise<HandleAccountInputResult | { verifiedDispute?: ValidatedCounterpartyDisputeSeal }> => {
+  const frameAuthority = securityContext.counterpartyCertifiedBoardHash
+    ? { registeredBoardHash: securityContext.counterpartyCertifiedBoardHash, allowPreviousBoard: false }
+    : undefined;
+  const verifiedFrame = await verifyHankoForHash(
+    reseal.frameHanko!,
+    metadata.currentFrameHash,
+    input.fromEntityId,
+    env,
+    frameAuthority,
+  );
+  if (!verifiedFrame.valid || verifiedFrame.entityId?.toLowerCase() !== metadata.expectedFrom) {
+    return rejectBoardReseal('ACCOUNT_BOARD_RESEAL_FRAME_HANKO_INVALID', events);
+  }
+  if (!reseal.disputeSeal) return {};
+
+  const expectedDisputeHash = account.counterpartyDisputeHash?.toLowerCase();
+  const expectedProofBodyHash = account.counterpartyDisputeProofBodyHash?.toLowerCase();
+  const expectedProofNonce = account.counterpartyDisputeProofNonce;
+  if (
+    !expectedDisputeHash ||
+    !expectedProofBodyHash ||
+    expectedProofNonce === undefined ||
+    reseal.disputeSeal.hash.toLowerCase() !== expectedDisputeHash ||
+    reseal.disputeSeal.proofBodyHash.toLowerCase() !== expectedProofBodyHash ||
+    reseal.disputeSeal.proofNonce !== expectedProofNonce
+  ) {
+    return rejectBoardReseal('ACCOUNT_BOARD_RESEAL_DISPUTE_MISMATCH', events);
+  }
+  try {
+    const verifiedDispute = await validateCounterpartyDisputeSeal(
+      env,
+      account,
+      input,
+      reseal.disputeSeal,
+      'ACCOUNT_BOARD_RESEAL',
+      securityContext,
+      false,
+    );
+    return {
+      ...(verifiedDispute ? { verifiedDispute } : {}),
+    };
+  } catch (error) {
+    return rejectBoardReseal((error as Error).message, events);
+  }
+};
+
 const handleBoardReseal = async (
   env: Env,
   accountMachine: AccountMachine,
@@ -235,139 +379,32 @@ const handleBoardReseal = async (
   const reseal = accountInputBoardReseal(input);
   if (!reseal) return undefined;
   const events: string[] = [];
-  const expectedFrom = accountMachine.proofHeader.toEntity.toLowerCase();
-  const expectedTo = accountMachine.proofHeader.fromEntity.toLowerCase();
-  if (input.fromEntityId.toLowerCase() !== expectedFrom || input.toEntityId.toLowerCase() !== expectedTo) {
-    return {
-      success: false,
-      error: `ACCOUNT_BOARD_RESEAL_PARTY_MISMATCH:${input.fromEntityId}:${input.toEntityId}`,
-      events,
-    };
-  }
-  const currentHeight = Number(accountMachine.currentHeight);
-  const frameHeight = Number(reseal.height);
-  const activationJHeight = Number(reseal.boardActivationJHeight);
-  const activationLogIndex = Number(reseal.boardActivationLogIndex);
-  if (!Number.isSafeInteger(activationJHeight) || activationJHeight < 1) {
-    return {
-      success: false,
-      error: `ACCOUNT_BOARD_RESEAL_ACTIVATION_HEIGHT_INVALID:${activationJHeight}`,
-      events,
-    };
-  }
-  if (!Number.isSafeInteger(activationLogIndex) || activationLogIndex < 0) {
-    return {
-      success: false,
-      error: `ACCOUNT_BOARD_RESEAL_ACTIVATION_LOG_INDEX_INVALID:${activationLogIndex}`,
-      events,
-    };
-  }
-  const previousReseal = accountMachine.counterpartyBoardReseal;
-  const precedesOrEqualsPrevious = previousReseal && (
-    activationJHeight < previousReseal.activationJHeight ||
-    (
-      activationJHeight === previousReseal.activationJHeight &&
-      activationLogIndex <= previousReseal.activationLogIndex
-    )
-  );
-  if (previousReseal && precedesOrEqualsPrevious) {
-    const exactRetry =
-      activationJHeight === previousReseal.activationJHeight &&
-      activationLogIndex === previousReseal.activationLogIndex &&
-      frameHeight === previousReseal.frameHeight &&
-      String(reseal.frameHash).toLowerCase() === previousReseal.frameHash;
-    if (!exactRetry) {
-      return {
-        success: false,
-        error: `ACCOUNT_BOARD_RESEAL_ACTIVATION_ORDER_INVALID:` +
-          `${activationJHeight}:${activationLogIndex}:` +
-          `${previousReseal.activationJHeight}:${previousReseal.activationLogIndex}`,
-        events,
-      };
-    }
-  }
-  if (
-    !Number.isSafeInteger(frameHeight) ||
-    frameHeight < 1 ||
-    frameHeight !== currentHeight ||
-    frameHeight !== Number(accountMachine.currentFrame.height)
-  ) {
-    return {
-      success: false,
-      error: `ACCOUNT_BOARD_RESEAL_HEIGHT_MISMATCH:${frameHeight}:${currentHeight}`,
-      events,
-    };
-  }
-  const currentFrameHash = String(accountMachine.currentFrame.stateHash || '').toLowerCase();
-  const resealFrameHash = String(reseal.frameHash || '').toLowerCase();
-  if (!/^0x[0-9a-f]{64}$/.test(resealFrameHash) || resealFrameHash !== currentFrameHash) {
-    return {
-      success: false,
-      error: `ACCOUNT_BOARD_RESEAL_FRAME_HASH_MISMATCH:${resealFrameHash || 'missing'}:${currentFrameHash || 'missing'}`,
-      events,
-    };
-  }
-  if (!reseal.frameHanko) {
-    return { success: false, error: 'ACCOUNT_BOARD_RESEAL_FRAME_HANKO_MISSING', events };
-  }
-  const frameAuthority = securityContext.counterpartyCertifiedBoardHash
-    ? {
-        registeredBoardHash: securityContext.counterpartyCertifiedBoardHash,
-        allowPreviousBoard: false,
-      }
-    : undefined;
-  const verifiedFrame = await verifyHankoForHash(
-    reseal.frameHanko,
-    currentFrameHash,
-    input.fromEntityId,
+  const metadata = validateBoardResealMetadata(accountMachine, input, reseal, events);
+  if ('success' in metadata) return metadata;
+  const witnesses = await verifyBoardResealWitnesses(
     env,
-    frameAuthority,
+    accountMachine,
+    input,
+    reseal,
+    metadata,
+    securityContext,
+    events,
   );
-  if (!verifiedFrame.valid || verifiedFrame.entityId?.toLowerCase() !== expectedFrom) {
-    return { success: false, error: 'ACCOUNT_BOARD_RESEAL_FRAME_HANKO_INVALID', events };
-  }
-
-  let verifiedDispute: ValidatedCounterpartyDisputeSeal | undefined;
-  if (reseal.disputeSeal) {
-    const expectedDisputeHash = accountMachine.counterpartyDisputeHash?.toLowerCase();
-    const expectedProofBodyHash = accountMachine.counterpartyDisputeProofBodyHash?.toLowerCase();
-    const expectedProofNonce = accountMachine.counterpartyDisputeProofNonce;
-    if (
-      !expectedDisputeHash ||
-      !expectedProofBodyHash ||
-      expectedProofNonce === undefined ||
-      reseal.disputeSeal.hash.toLowerCase() !== expectedDisputeHash ||
-      reseal.disputeSeal.proofBodyHash.toLowerCase() !== expectedProofBodyHash ||
-      reseal.disputeSeal.proofNonce !== expectedProofNonce
-    ) {
-      return { success: false, error: 'ACCOUNT_BOARD_RESEAL_DISPUTE_MISMATCH', events };
-    }
-    try {
-      verifiedDispute = await validateCounterpartyDisputeSeal(
-        env,
-        accountMachine,
-        input,
-        reseal.disputeSeal,
-        'ACCOUNT_BOARD_RESEAL',
-        securityContext,
-        false,
-      );
-    } catch (error) {
-      return { success: false, error: (error as Error).message, events };
-    }
-  }
+  if ('success' in witnesses) return witnesses;
 
   // The exact Account state and on-chain dispute nonce remain untouched. Only
   // replace cached authority witnesses after every supplied hash validates.
-  accountMachine.counterpartyFrameHanko = reseal.frameHanko;
-  if (verifiedDispute) accountMachine.counterpartyDisputeProofHanko = verifiedDispute.hanko;
+  accountMachine.counterpartyFrameHanko = reseal.frameHanko!;
+  if (witnesses.verifiedDispute) {
+    accountMachine.counterpartyDisputeProofHanko = witnesses.verifiedDispute.hanko;
+  }
   accountMachine.counterpartyBoardReseal = {
-    activationJHeight,
-    activationLogIndex,
-    frameHeight,
-    frameHash: currentFrameHash,
+    activationJHeight: metadata.activationJHeight,
+    activationLogIndex: metadata.activationLogIndex,
+    frameHeight: metadata.frameHeight,
+    frameHash: metadata.currentFrameHash,
   };
-  events.push(`🔐 Re-sealed Account frame ${frameHeight} under the current board`);
+  events.push(`🔐 Re-sealed Account frame ${metadata.frameHeight} under the current board`);
   return { success: true, events };
 };
 

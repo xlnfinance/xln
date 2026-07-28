@@ -9,56 +9,62 @@ import { deriveDelta } from '../../utils';
 import { deriveTransferOffdeltaChange } from '../../delta-movement';
 import { FINANCIAL } from '../../../constants';
 import { isLeftEntity } from '../../../entity/id';
-import { createStructuredLogger, shortId } from '../../../infra/logger';
+import { createStructuredLogger } from '../../../infra/logger';
 import { getAccountPerspective } from '../../../state-helpers';
 import { ensureDelta } from '../delta-utils';
 
 const directPaymentLog = createStructuredLogger('account.payment');
 
-export function handleDirectPayment(
-  accountMachine: AccountMachine,
-  accountTx: Extract<AccountTx, { type: 'direct_payment' }>,
-  byLeft: boolean
-): { success: boolean; events: string[]; error?: string } {
-  const { tokenId, amount, route, description, deliveryMode, trustedGatewayEntityId } = accountTx.data;
-  const events: string[] = [];
+type DirectPaymentTx = Extract<AccountTx, { type: 'direct_payment' }>;
+type DirectPaymentResult = { success: boolean; events: string[]; error?: string };
 
+const validatePaymentEnvelope = (
+  payment: DirectPaymentTx['data'],
+  events: string[],
+): DirectPaymentResult | undefined => {
+  const { tokenId, amount, route, deliveryMode, trustedGatewayEntityId } = payment;
   if (amount < FINANCIAL.MIN_PAYMENT_AMOUNT || amount > FINANCIAL.MAX_PAYMENT_AMOUNT) {
-    const error = `Invalid payment amount: ${amount.toString()} (min ${FINANCIAL.MIN_PAYMENT_AMOUNT.toString()}, max ${FINANCIAL.MAX_PAYMENT_AMOUNT.toString()})`;
     directPaymentLog.debug('invalid_amount', { tokenId, amount: amount.toString() });
-    return { success: false, error, events };
+    return {
+      success: false,
+      error: `Invalid payment amount: ${amount.toString()} (min ${FINANCIAL.MIN_PAYMENT_AMOUNT.toString()}, max ${FINANCIAL.MAX_PAYMENT_AMOUNT.toString()})`,
+      events,
+    };
   }
-
-  // H18 FIX: Validate route length to prevent DOS via excessive hops
   if (route && route.length > FINANCIAL.MAX_ROUTE_HOPS) {
-    const error = `Route too long: ${route.length} hops (max ${FINANCIAL.MAX_ROUTE_HOPS})`;
     directPaymentLog.debug('route_too_long', { hops: route.length, max: FINANCIAL.MAX_ROUTE_HOPS });
-    return { success: false, error, events };
+    return {
+      success: false,
+      error: `Route too long: ${route.length} hops (max ${FINANCIAL.MAX_ROUTE_HOPS})`,
+      events,
+    };
   }
-  if (deliveryMode === 'trusted') {
-    const finalTarget = route?.[route.length - 1];
-    if (!trustedGatewayEntityId || !finalTarget) {
-      return { success: false, error: 'Trusted payment requires a gateway and final recipient', events };
-    }
+  if (deliveryMode === 'trusted' && (!trustedGatewayEntityId || !route?.at(-1))) {
+    return { success: false, error: 'Trusted payment requires a gateway and final recipient', events };
   }
+  return undefined;
+};
 
-  const delta = ensureDelta(accountMachine, tokenId);
-
-  // Determine canonical direction relative to left/right entities
-  const leftEntity = isLeftEntity(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity)
-    ? accountMachine.proofHeader.fromEntity
-    : accountMachine.proofHeader.toEntity;
-  const rightEntity = leftEntity === accountMachine.proofHeader.fromEntity
-    ? accountMachine.proofHeader.toEntity
-    : accountMachine.proofHeader.fromEntity;
-
-  // The frame proposer is always the payer. Optional wire fields are assertions,
-  // never authority: accepting a different payer would let a proposer spend the
-  // counterparty's capacity merely by naming it in an AccountTx.
+const resolvePaymentParties = (
+  accountMachine: AccountMachine,
+  payment: DirectPaymentTx['data'],
+  byLeft: boolean,
+  events: string[],
+): DirectPaymentResult | {
+  leftEntity: string;
+  paymentFromEntity: string;
+  paymentToEntity: string;
+} => {
+  const { fromEntity, toEntity } = accountMachine.proofHeader;
+  const leftEntity = isLeftEntity(fromEntity, toEntity) ? fromEntity : toEntity;
+  const rightEntity = leftEntity === fromEntity ? toEntity : fromEntity;
   const paymentFromEntity = byLeft ? leftEntity : rightEntity;
   const paymentToEntity = byLeft ? rightEntity : leftEntity;
-  const assertedFrom = accountTx.data.fromEntityId?.toLowerCase();
-  const assertedTo = accountTx.data.toEntityId?.toLowerCase();
+  // The certified frame proposer is the payer. Wire-level entity ids are only
+  // assertions; treating them as authority would let a signer spend its peer's
+  // capacity by naming the opposite direction inside the transaction.
+  const assertedFrom = payment.fromEntityId?.toLowerCase();
+  const assertedTo = payment.toEntityId?.toLowerCase();
   if (
     (assertedFrom && assertedFrom !== paymentFromEntity.toLowerCase()) ||
     (assertedTo && assertedTo !== paymentToEntity.toLowerCase())
@@ -69,95 +75,100 @@ export function handleDirectPayment(
       events,
     };
   }
+  return { leftEntity, paymentFromEntity, paymentToEntity };
+};
 
-  // CRITICAL: ALWAYS check capacity from SENDER's perspective FIRST
-  // Determine if sender is left entity
-  const senderIsLeft = paymentFromEntity === leftEntity;
+const appendPaymentEvent = (
+  accountMachine: AccountMachine,
+  payment: DirectPaymentTx['data'],
+  parties: { leftEntity: string; paymentFromEntity: string },
+  byLeft: boolean,
+  events: string[],
+): string => {
+  const { amount, tokenId, description } = payment;
+  const { counterparty } = getAccountPerspective(accountMachine, accountMachine.proofHeader.fromEntity);
+  const isOurFrame = byLeft === (accountMachine.proofHeader.fromEntity === parties.leftEntity);
+  events.push(
+    isOurFrame
+      ? `💸 Sent ${amount.toString()} token ${tokenId} to Entity ${counterparty.slice(-4)} ${description ? `(${description})` : ''}`
+      : `💰 Received ${amount.toString()} token ${tokenId} from Entity ${parties.paymentFromEntity.slice(-4)} ${description ? `(${description})` : ''}`,
+  );
+  return counterparty;
+};
 
-  // Derive capacity from sender's perspective
-  const senderDerived = deriveDelta(delta, senderIsLeft);
+const queuePaymentForward = (
+  accountMachine: AccountMachine,
+  payment: DirectPaymentTx['data'],
+  paymentFromEntity: string,
+  counterparty: string,
+  events: string[],
+): DirectPaymentResult | undefined => {
+  const { route, tokenId, amount, description, deliveryMode, trustedGatewayEntityId } = payment;
+  const isOutgoing = paymentFromEntity === accountMachine.proofHeader.fromEntity;
+  if (!route?.length || isOutgoing) return undefined;
 
-  if (paymentFromEntity !== leftEntity && paymentFromEntity !== rightEntity) {
-    directPaymentLog.debug('entity_mismatch', {
-      accountLeft: shortId(leftEntity),
-      accountRight: shortId(rightEntity),
-      from: shortId(paymentFromEntity),
-      to: shortId(paymentToEntity),
-    });
-    return {
-      success: false,
-      error: 'FATAL: Payment entities must match account entities (no cross-account routing)',
-      events,
-    };
+  const [currentEntityInRoute, nextHop] = route;
+  const finalTarget = route.at(-1);
+  if (!currentEntityInRoute || !finalTarget) {
+    directPaymentLog.debug('empty_route', { routeLength: route.length });
+    return { success: false, error: 'Invalid payment route', events };
+  }
+  if (currentEntityInRoute !== accountMachine.proofHeader.fromEntity || currentEntityInRoute === finalTarget) {
+    return undefined;
+  }
+  if (!nextHop) {
+    directPaymentLog.debug('missing_next_hop', { routeLength: route.length });
+    return { success: false, error: 'Invalid route: no next hop', events };
+  }
+  if (counterparty === nextHop) {
+    directPaymentLog.debug('routing_loop', { nextHop: nextHop.slice(-4), counterparty: counterparty.slice(-4) });
+    return undefined;
   }
 
+  events.push(`↪️ Forwarding payment to ${finalTarget.slice(-4)} via ${route.length - 1} more hops`);
+  const pendingForwards = accountMachine.pendingForwards ?? [];
+  pendingForwards.push({
+    tokenId,
+    amount,
+    route: [...route],
+    ...(description ? { description } : {}),
+    ...(deliveryMode ? { deliveryMode } : {}),
+    ...(trustedGatewayEntityId ? { trustedGatewayEntityId } : {}),
+  });
+  accountMachine.pendingForwards = pendingForwards;
+  return undefined;
+};
+
+export function handleDirectPayment(
+  accountMachine: AccountMachine,
+  accountTx: DirectPaymentTx,
+  byLeft: boolean
+): DirectPaymentResult {
+  const { tokenId, amount } = accountTx.data;
+  const events: string[] = [];
+  const envelopeError = validatePaymentEnvelope(accountTx.data, events);
+  if (envelopeError) return envelopeError;
+  const parties = resolvePaymentParties(accountMachine, accountTx.data, byLeft, events);
+  if ('success' in parties) return parties;
+  const delta = ensureDelta(accountMachine, tokenId);
+  const senderIsLeft = parties.paymentFromEntity === parties.leftEntity;
+  const senderDerived = deriveDelta(delta, senderIsLeft);
   if (amount > senderDerived.outCapacity) {
     return {
       success: false,
-      error: `Insufficient capacity for sender ${paymentFromEntity.slice(-4)}: need ${amount.toString()}, available ${senderDerived.outCapacity.toString()}`,
+      error: `Insufficient capacity for sender ${parties.paymentFromEntity.slice(-4)}: need ${amount.toString()}, available ${senderDerived.outCapacity.toString()}`,
       events,
     };
   }
-
-  // Apply canonical delta (identical on both sides)
   delta.offdelta += deriveTransferOffdeltaChange(senderIsLeft, amount);
-
-  // Events differ by perspective but state is identical (derive from byLeft)
-  const { counterparty: cpForEvent } = getAccountPerspective(accountMachine, accountMachine.proofHeader.fromEntity);
-  const iAmLeft = accountMachine.proofHeader.fromEntity === leftEntity;
-  const isOurFrame = (byLeft === iAmLeft);
-  if (isOurFrame) {
-    events.push(`💸 Sent ${amount.toString()} token ${tokenId} to Entity ${cpForEvent.slice(-4)} ${description ? '(' + description + ')' : ''}`);
-  } else {
-    events.push(`💰 Received ${amount.toString()} token ${tokenId} from Entity ${paymentFromEntity.slice(-4)} ${description ? '(' + description + ')' : ''}`);
-  }
-
-  // Check if we need to forward the payment (multi-hop routing)
-  const isOutgoing = paymentFromEntity === accountMachine.proofHeader.fromEntity;
-
-  if (route && route.length > 0 && !isOutgoing) {
-    // Check if we're intermediate hop: route[0] should be current entity
-    const currentEntityInRoute = route[0];
-    const finalTarget = route[route.length - 1];
-
-    if (!currentEntityInRoute || !finalTarget) {
-      directPaymentLog.debug('empty_route', { routeLength: route.length });
-      return { success: false, error: 'Invalid payment route', events };
-    }
-
-    // If we're in the route but not the final destination, forward
-    if (currentEntityInRoute === accountMachine.proofHeader.fromEntity && currentEntityInRoute !== finalTarget) {
-      const nextHop = route[1]; // Next entity after us
-
-      if (!nextHop) {
-        directPaymentLog.debug('missing_next_hop', { routeLength: route.length });
-        return { success: false, error: 'Invalid route: no next hop', events };
-      }
-
-      if (cpForEvent === nextHop) {
-        directPaymentLog.debug('routing_loop', { nextHop: shortId(nextHop), counterparty: shortId(cpForEvent) });
-      } else {
-        // Add forwarding event
-        events.push(
-          `↪️ Forwarding payment to ${finalTarget.slice(-4)} via ${route.length - 1} more hops`
-        );
-
-        // Store forwarding info for entity-consensus to create next hop transaction
-        // NOTE: Route already sliced by entity/tx/apply (sender removed)
-        // So route[0] = current entity, route[1] = next hop
-        const pendingForwards = accountMachine.pendingForwards ?? [];
-        pendingForwards.push({
-          tokenId,
-          amount,
-          route: [...route], // Copy to prevent mutation
-          ...(description ? { description } : {}),
-          ...(deliveryMode ? { deliveryMode } : {}),
-          ...(trustedGatewayEntityId ? { trustedGatewayEntityId } : {}),
-        });
-        accountMachine.pendingForwards = pendingForwards;
-      }
-    }
-  }
-
+  const counterparty = appendPaymentEvent(accountMachine, accountTx.data, parties, byLeft, events);
+  const forwardingError = queuePaymentForward(
+    accountMachine,
+    accountTx.data,
+    parties.paymentFromEntity,
+    counterparty,
+    events,
+  );
+  if (forwardingError) return forwardingError;
   return { success: true, events };
 }
