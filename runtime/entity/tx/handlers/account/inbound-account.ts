@@ -102,7 +102,7 @@ const assertUnknownAccountGenesis = (
   throw new Error(error);
 };
 
-const createInboundAccountMachine = (
+const createInboundAccountState = (
   state: EntityState,
   counterpartyId: string,
   domain: AccountState['domain'],
@@ -199,7 +199,7 @@ export const resolveInboundAccount = (
   assertUnknownAccountGenesis(state, input, counterpartyId, hasAck, hasProposal);
   const watchSeed = normalizeAccountWatchSeed(inputWatchSeed, 'ACCOUNT_INPUT_GENESIS');
   accountHandlerLog.debug('machine.create', { counterparty: shortId(counterpartyId) });
-  const account = createInboundAccountMachine(state, counterpartyId, domain, watchSeed);
+  const account = createInboundAccountState(state, counterpartyId, domain, watchSeed);
   accountHandlerLog.debug('machine.candidate_created', { counterparty: shortId(counterpartyId) });
   return { account, counterpartyId, createdAccount: true };
 };

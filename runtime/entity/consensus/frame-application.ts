@@ -499,7 +499,7 @@ function refreshStaleUncommittedSettlementSeals(state: EntityState, storageChang
 
 type AccountFrameProposal = Awaited<ReturnType<typeof proposeAccountFrame>>;
 
-const proposeAccountMachineFrame = async (
+const proposeAccountFrameCandidate = async (
   context: ProposePendingAccountFramesContext,
   accountKey: string,
   account: AccountState,
@@ -648,7 +648,7 @@ async function proposePendingAccountFrames(context: ProposePendingAccountFramesC
 
     const requiredResponse = requiredAccountResponses.get(accountKey.toLowerCase());
 
-    const proposal = await proposeAccountMachineFrame(
+    const proposal = await proposeAccountFrameCandidate(
       context,
       accountKey,
       account,

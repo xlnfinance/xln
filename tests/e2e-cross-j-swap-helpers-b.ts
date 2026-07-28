@@ -332,7 +332,6 @@ export async function placeCrossOrder(
   const beforeHeight = beforeSubmit.currentHeight;
   const beforeRouteIds = new Set(beforeSubmit.routeSummaries.map(route => route.orderId));
   const beforeOfferIds = new Set(beforeSubmit.offerSummaries.map(offer => offer.offerId));
-  const beforeMessageCount = beforeSubmit.messages.length;
   if (params.amount !== undefined) {
     await amountInput.fill(params.amount);
     await expect
@@ -434,7 +433,6 @@ export async function placeCrossOrder(
           const state = await readCrossState(page, params.source, params.hubId);
           const newRoutes = state.routeSummaries.filter(route => !beforeRouteIds.has(route.orderId));
           const newOffers = state.offerSummaries.filter(offer => !beforeOfferIds.has(offer.offerId));
-          const newMessages = state.messages.slice(beforeMessageCount);
           const formError = await page
             .getByTestId('swap-ticket-error')
             .first()

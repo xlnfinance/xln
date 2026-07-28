@@ -62,26 +62,6 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   `addToAccountMempool`, `RuntimeSnapshot`, `EntityOutput`, and missing WAL
   rejection of routed local `AccountInput.txs` are already deleted or fenced
   with tests.
-- [ ] Pass the human-audit completion gate for the three nested state
-  machines. Baseline on `main@404851e82`: 35 functions over 150 lines and 89
-  over 100 lines under `runtime/runtime`, `runtime/entity` and
-  `runtime/account`. Reduce every coordinator to at most 150 lines and every
-  pure/helper function to at most 100 lines, with no file above 3000 lines;
-  `check:state-machine-size` now reports zero functions over 150 lines and
-  ratchets the remaining 42 functions over 100 lines; it rejects any new debt
-  and every file over 3000 lines. Keep reducing the helper count to zero,
-  tightening the exact ceiling after each phase split.
-  Keep Runtime-machine logic under `runtime/runtime/`, Entity-machine logic
-  under `runtime/entity/`, and Account money/consensus logic under
-  `runtime/account/`; adapters, storage, transport, UI and QA remain separate
-  infrastructure rather than being mislabeled as a state machine. Account
-  pending-ACK/preflight, committed lending follow-up, settlement execution/seal,
-  HTLC resolution, cross-J clear/progress, orderbook matching, R→C scheduling,
-  output authorization, Account proposal scheduling, open-account, delta
-  derivation and J broadcast are split and covered by targeted tests.
-  Each split must follow protocol phase, owner and failure boundary—not
-  arbitrary line chunks—and preserve byte-identical roots, failures and
-  ordering through characterization tests.
 - [ ] Make the audit surface mechanically legible after the function split.
   Delete rename-only import aliases where the canonical exported name can be
   used directly; retain namespace imports, `as const`, type assertions and
@@ -293,6 +273,14 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   pipeline, collapse DI factories that add navigation
   without providing a real swappable boundary. Add an AST gate for function
   budgets so future 600–2800-line coordinators cannot pass a file-only limit.
+  The R/E/A state-machine gate is already at zero functions over 100 lines;
+  extend the same ratchet to production infrastructure. Current read-only
+  baseline (excluding tests, QA, scenarios and scripts): 67 functions over
+  150 lines. Start with `jadapter/rpc-adapter.ts`,
+  `orchestrator/mm-node-run.ts`, `persistence/runtime-storage.ts`,
+  `orchestrator/hub-node.ts`, `recovery/restore.ts` and `storage/index.ts`;
+  split by lifecycle/ownership boundary, not arbitrary line ranges, and lower
+  the exact allowance after every verified extraction.
 - [ ] Enforce an acyclic browser-safe core dependency graph. Keep cloning,
   codecs and state helpers as leaf modules that never import reducers,
   Runtime routing or chain adapters; add a cycle budget that fails on any new

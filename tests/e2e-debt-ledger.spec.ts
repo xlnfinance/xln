@@ -340,7 +340,11 @@ async function readAllBatchSnapshots(page: Page): Promise<Array<{
     for (const [key, replica] of env.eReplicas.entries()) {
       const batch = replica?.state?.jBatchState?.batch;
       const sent = replica?.state?.jBatchState?.sentBatch?.batch;
-      const history = Array.isArray(replica?.state?.batchHistory) ? replica.state.batchHistory : [];
+      const history = Array.from(replica?.state?.jBlockChain || []).flatMap((block: any) =>
+        Array.from(block?.events || []).filter((event: any) =>
+          event?.type === 'HankoBatchProcessed'
+          && String(event?.data?.entityId || '').toLowerCase()
+            === String(replica?.state?.entityId || '').toLowerCase()));
       const pendingCount =
         Number(batch?.externalTokenToReserve?.length || 0) +
         Number(batch?.reserveToCollateral?.length || 0) +

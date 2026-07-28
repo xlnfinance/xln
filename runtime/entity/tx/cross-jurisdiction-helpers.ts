@@ -207,10 +207,10 @@ export const validateCrossJurisdictionLocalBinding = (
   return null;
 };
 
-type AccountMachineFromState = EntityState['accounts'] extends Map<string, infer T> ? T : never;
+type AccountStateFromEntity = EntityState['accounts'] extends Map<string, infer T> ? T : never;
 
 export const accountHasPullResolveQueued = (
-  account: AccountMachineFromState,
+  account: AccountStateFromEntity,
   pullId: string,
 ): boolean => {
   const isResolve = (tx: AccountTx): boolean =>
@@ -220,7 +220,7 @@ export const accountHasPullResolveQueued = (
 };
 
 export const accountHasCrossSwapAckQueued = (
-  account: AccountMachineFromState,
+  account: AccountStateFromEntity,
   offerId: string,
 ): boolean => {
   const isAck = (tx: AccountTx): boolean =>

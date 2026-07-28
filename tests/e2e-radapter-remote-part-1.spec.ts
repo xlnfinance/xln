@@ -783,7 +783,8 @@ test('remote /app opens an existing hub runtime through radapter', { tag: '@func
 
   await page.getByTestId('account-workspace-tab-history').first().click();
   await expect(page.locator('.settlement-panel')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
-  await expect(page.locator('.settlement-panel')).toContainText('On-Chain Batch History');
+  await expect(page.getByTestId('entity-history-panel').first()).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+  await expect(page.getByTestId('entity-history-event').first()).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
   await expect(page.locator('.settlement-panel')).not.toContainText('Settlement history requires a runtime frame');
 });
 

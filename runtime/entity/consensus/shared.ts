@@ -330,11 +330,11 @@ export const runLocalPostCommitHooks = async (
   await emitDefaultProposerHtlcOnionAdvances(env, replica, entityOutbox);
 };
 
-type EntityAccountMachine = EntityState['accounts'] extends Map<string, infer T> ? T : never;
+type EntityAccountState = EntityState['accounts'] extends Map<string, infer T> ? T : never;
 type CrossSwapFillAckTx = Extract<AccountTx, { type: 'cross_swap_fill_ack' }>;
 type CrossJurisdictionFillNoticeTx = Extract<EntityTx, { type: 'crossJurisdictionFillNotice' }>;
 
-const hasQueuedOrderLifecycleTx = (account: EntityAccountMachine, offerId: string): boolean => {
+const hasQueuedOrderLifecycleTx = (account: EntityAccountState, offerId: string): boolean => {
   for (const tx of account.mempool ?? []) {
     if (
       (tx.type === 'swap_resolve' || tx.type === 'cross_swap_fill_ack' || tx.type === 'swap_cancel_request') &&
@@ -1279,7 +1279,7 @@ export const drainCommittedCrossJurisdictionCancelAcks = async (
 const assertCommittedSwapOfferMatchesEvent = (
   state: EntityState,
   offer: NormalizedOrderbookOffer,
-): EntityAccountMachine => {
+): EntityAccountState => {
   const account = findAccountByCounterparty(state, offer.accountId);
   const committedOffer = account?.swapOffers?.get(offer.offerId);
   if (!account || !committedOffer) {
@@ -1304,7 +1304,7 @@ const assertCommittedSwapOfferMatchesEvent = (
 };
 
 const assertSameJurisdictionOrderHoldCommitted = (
-  account: EntityAccountMachine,
+  account: EntityAccountState,
   offer: NormalizedOrderbookOffer,
 ): void => {
   const committedOffer = account.swapOffers.get(offer.offerId);
