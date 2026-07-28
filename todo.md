@@ -275,8 +275,8 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   budgets so future 600–2800-line coordinators cannot pass a file-only limit.
   The R/E/A state-machine gate is already at zero functions over 100 lines;
   extend the same ratchet to production infrastructure. Current read-only
-  baseline (excluding tests, QA, scenarios and scripts): 63 functions over
-  150 lines after splitting the reserve-faucet, credit-request and HTTP routing pipelines. Start with
+  baseline (excluding tests, QA, scenarios and scripts): 62 functions over
+  150 lines after splitting the reserve-faucet, credit-request, HTTP routing and health pipelines. Start with
   `jadapter/rpc-adapter.ts`,
   `orchestrator/mm-node-run.ts`, `persistence/runtime-storage.ts`,
   `orchestrator/hub-node.ts`, `recovery/restore.ts` and `storage/index.ts`;
