@@ -124,6 +124,102 @@ const buildCommittedCrossJurisdictionOfferEvent = (
   };
 };
 
+type CrossJBookAdmission =
+  NonNullable<EntityState['crossJurisdictionBookAdmissions']> extends Map<string, infer Admission>
+    ? Admission
+    : never;
+
+const resolveExpiredBookFillIncident = (
+  env: Env,
+  state: EntityState,
+  admission: CrossJBookAdmission,
+  data: CrossJurisdictionBookProgressTx['data'],
+  routeHash: string,
+): void => {
+  if (admission.pendingFill?.ttlExpiredAt === undefined) return;
+  resolveRuntimeSecurityIncident(env, {
+    domain: 'cross-j',
+    code: 'CROSS_J_BOOK_FILL_TTL_EXPIRED',
+    source: 'local-consensus',
+    severity: 'critical',
+    summary: 'Book-owner fill is still waiting for its exact terminal sibling acknowledgement',
+    entityId: state.entityId,
+    accountId: data.sourceEntityId,
+    offerId: data.orderId,
+    routeHash,
+  });
+};
+
+const applyNewBookProgress = (
+  route: ReturnType<typeof withCanonicalCrossJurisdictionRouteHash>,
+  data: CrossJurisdictionBookProgressTx['data'],
+  now: number,
+): ReturnType<typeof withCanonicalCrossJurisdictionRouteHash> => {
+  const next = applyCrossJurisdictionFillProgress(route, {
+    fillSeq: data.fillSeq,
+    cumulativeFillRatio: data.cumulativeFillRatio,
+    fillNumerator: data.fillNumerator,
+    fillDenominator: data.fillDenominator,
+    incrementalSourceAmount: data.incrementalSourceAmount,
+    incrementalTargetAmount: data.incrementalTargetAmount,
+    cumulativeSourceAmount: data.cumulativeSourceAmount,
+    cumulativeTargetAmount: data.cumulativeTargetAmount,
+  }, now, 'CROSS_J_BOOK_PROGRESS_INVALID');
+  if ((data.priceImprovementAmount ?? 0n) > 0n) {
+    next.priceImprovementSourceAmount =
+      (next.priceImprovementSourceAmount ?? 0n) + data.priceImprovementAmount!;
+  }
+  if (data.cancelRemainder) {
+    transitionCrossJurisdictionRouteStatus(next, 'clear_requested', now);
+    next.clearingPolicy = 'cancel_and_clear';
+  }
+  return next;
+};
+
+const updateBookOrderForProgress = (
+  state: EntityState,
+  route: ReturnType<typeof withCanonicalCrossJurisdictionRouteHash>,
+  storageChanges: RuntimeOverlayRecord[],
+): void => {
+  if (route.status === 'partially_filled') {
+    const offer = buildCommittedCrossJurisdictionOfferEvent(state, route);
+    if (!offer) throw new Error(`CROSS_J_BOOK_PROGRESS_OFFER_MISSING: order=${route.orderId}`);
+    const market = buildCrossJurisdictionMarketOffer(
+      normalizeSwapOfferForOrderbook(offer, offer.accountId || route.source.entityId),
+      state.entityId,
+    );
+    if (!market) throw new Error(`CROSS_J_BOOK_PROGRESS_MARKET_INVALID: order=${route.orderId}`);
+    const qtyLots = crossBookQtyLots(market.baseTokenId, market.baseAmount);
+    if (resizeCrossJurisdictionBookOrderByRouteId(
+      state,
+      route.source.entityId,
+      route.orderId,
+      qtyLots,
+      storageChanges,
+    )) return;
+    const materialized = materializeCrossJurisdictionBookRemainder(state, {
+      pairId: market.pairId,
+      sourceEntityId: route.source.entityId,
+      orderId: route.orderId,
+      ownerId: market.makerId,
+      side: market.side,
+      priceTicks: market.priceTicks,
+      qtyLots,
+    }, storageChanges);
+    if (!materialized) throw new Error(`CROSS_J_BOOK_PROGRESS_ORDER_MISSING: order=${route.orderId}`);
+    return;
+  }
+  const removed = removeCrossJurisdictionBookOrderByRouteId(
+    state,
+    route.source.entityId,
+    route.orderId,
+    storageChanges,
+  );
+  if (!removed && !isCrossJurisdictionTerminalStatus(route.status)) {
+    throw new Error(`CROSS_J_BOOK_PROGRESS_ORDER_MISSING: order=${route.orderId}`);
+  }
+};
+
 export const handleAdmitCrossJurisdictionBookOrderEntityTx = (
   env: Env,
   entityState: EntityState,
@@ -220,19 +316,7 @@ export const applyCrossJurisdictionBookProgressToState = (
     throw new Error(`CROSS_J_BOOK_PROGRESS_WRONG_OWNER: order=${route.orderId} owner=${bookOwner} current=${newState.entityId}`);
   }
   if (isSameCommittedBookProgress(route, data)) {
-    if (admission.pendingFill?.ttlExpiredAt !== undefined) {
-      resolveRuntimeSecurityIncident(env, {
-        domain: 'cross-j',
-        code: 'CROSS_J_BOOK_FILL_TTL_EXPIRED',
-        source: 'local-consensus',
-        severity: 'critical',
-        summary: 'Book-owner fill is still waiting for its exact terminal sibling acknowledgement',
-        entityId: newState.entityId,
-        accountId: data.sourceEntityId,
-        offerId: data.orderId,
-        routeHash: route.routeHash || '',
-      });
-    }
+    resolveExpiredBookFillIncident(env, newState, admission, data, route.routeHash || '');
     delete admission.pendingFill;
     admission.updatedAt = now;
     if (
@@ -255,39 +339,10 @@ export const applyCrossJurisdictionBookProgressToState = (
     throw new Error(`CROSS_J_BOOK_PROGRESS_STALE: order=${route.orderId} seq=${data.fillSeq} current=${currentSeq}`);
   }
 
-  const nextRoute = applyCrossJurisdictionFillProgress(route, {
-    fillSeq: data.fillSeq,
-    cumulativeFillRatio: data.cumulativeFillRatio,
-    fillNumerator: data.fillNumerator,
-    fillDenominator: data.fillDenominator,
-    incrementalSourceAmount: data.incrementalSourceAmount,
-    incrementalTargetAmount: data.incrementalTargetAmount,
-    cumulativeSourceAmount: data.cumulativeSourceAmount,
-    cumulativeTargetAmount: data.cumulativeTargetAmount,
-  }, now, 'CROSS_J_BOOK_PROGRESS_INVALID');
-  if ((data.priceImprovementAmount ?? 0n) > 0n) {
-    nextRoute.priceImprovementSourceAmount =
-      (nextRoute.priceImprovementSourceAmount ?? 0n) + data.priceImprovementAmount!;
-  }
-  if (data.cancelRemainder) {
-    transitionCrossJurisdictionRouteStatus(nextRoute, 'clear_requested', now);
-    nextRoute.clearingPolicy = 'cancel_and_clear';
-  }
+  const nextRoute = applyNewBookProgress(route, data, now);
 
   admission.route = nextRoute;
-  if (admission.pendingFill?.ttlExpiredAt !== undefined) {
-    resolveRuntimeSecurityIncident(env, {
-      domain: 'cross-j',
-      code: 'CROSS_J_BOOK_FILL_TTL_EXPIRED',
-      source: 'local-consensus',
-      severity: 'critical',
-      summary: 'Book-owner fill is still waiting for its exact terminal sibling acknowledgement',
-      entityId: newState.entityId,
-      accountId: data.sourceEntityId,
-      offerId: data.orderId,
-      routeHash: route.routeHash || '',
-    });
-  }
+  resolveExpiredBookFillIncident(env, newState, admission, data, route.routeHash || '');
   delete admission.pendingFill;
   admission.updatedAt = now;
   const mirrorRoute = newState.crossJurisdictionSwaps?.get(route.orderId);
@@ -311,52 +366,7 @@ export const applyCrossJurisdictionBookProgressToState = (
     return true;
   }
 
-  if (nextRoute.status === 'partially_filled') {
-    const offerEvent = buildCommittedCrossJurisdictionOfferEvent(newState, nextRoute);
-    if (!offerEvent) throw new Error(`CROSS_J_BOOK_PROGRESS_OFFER_MISSING: order=${route.orderId}`);
-    const marketOffer = buildCrossJurisdictionMarketOffer(
-      normalizeSwapOfferForOrderbook(offerEvent, offerEvent.accountId || nextRoute.source.entityId),
-      newState.entityId,
-    );
-    if (!marketOffer) throw new Error(`CROSS_J_BOOK_PROGRESS_MARKET_INVALID: order=${route.orderId}`);
-    const qtyLots = crossBookQtyLots(marketOffer.baseTokenId, marketOffer.baseAmount);
-    const resized = resizeCrossJurisdictionBookOrderByRouteId(
-      newState,
-      nextRoute.source.entityId,
-      nextRoute.orderId,
-      qtyLots,
-      storageChanges,
-    );
-    if (!resized) {
-      const materialized = materializeCrossJurisdictionBookRemainder(
-        newState,
-        {
-          pairId: marketOffer.pairId,
-          sourceEntityId: nextRoute.source.entityId,
-          orderId: nextRoute.orderId,
-          ownerId: marketOffer.makerId,
-          side: marketOffer.side,
-          priceTicks: marketOffer.priceTicks,
-          qtyLots,
-        },
-        storageChanges,
-      );
-      if (!materialized) {
-        throw new Error(`CROSS_J_BOOK_PROGRESS_ORDER_MISSING: order=${route.orderId}`);
-      }
-    }
-    return true;
-  }
-
-  const removed = removeCrossJurisdictionBookOrderByRouteId(
-    newState,
-    nextRoute.source.entityId,
-    nextRoute.orderId,
-    storageChanges,
-  );
-  if (!removed && !isCrossJurisdictionTerminalStatus(nextRoute.status)) {
-    throw new Error(`CROSS_J_BOOK_PROGRESS_ORDER_MISSING: order=${route.orderId}`);
-  }
+  updateBookOrderForProgress(newState, nextRoute, storageChanges);
   return true;
 };
 

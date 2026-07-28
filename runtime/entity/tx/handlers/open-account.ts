@@ -52,6 +52,102 @@ const assertRequestedRebalancePolicy = (
   }
 };
 
+const insertLocalAccount = (
+  state: EntityState,
+  originalEntityId: string,
+  counterpartyId: string,
+  isLeft: boolean,
+  accountDomain: ReturnType<typeof normalizeAccountStateDomain>,
+  watchSeed: ReturnType<typeof normalizeAccountWatchSeed>,
+  candidateEffects: EntityCandidateEffect[],
+): void => {
+  candidateEffects.push({
+    kind: 'runtimeEvent',
+    eventName: 'AccountOpening',
+    data: { entityId: originalEntityId, counterpartyId },
+  });
+  const leftEntity = isLeft ? originalEntityId : counterpartyId;
+  const rightEntity = isLeft ? counterpartyId : originalEntityId;
+  upsertSortedStringMapEntry(state.accounts, counterpartyId, {
+    leftEntity,
+    rightEntity,
+    domain: accountDomain,
+    watchSeed,
+    status: 'active',
+    mempool: [],
+    currentFrame: {
+      height: 0,
+      timestamp: 0,
+      jHeight: 0,
+      accountTxs: [],
+      prevFrameHash: '',
+      accountStateRoot: EMPTY_ACCOUNT_STATE_ROOT,
+      deltas: [],
+      stateHash: '',
+      byLeft: isLeft,
+    },
+    deltas: new Map<number, Delta>(),
+    globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
+    currentHeight: 0,
+    pendingSignatures: [],
+    rollbackCount: 0,
+    proofHeader: { fromEntity: originalEntityId, toEntity: counterpartyId, nextProofNonce: 1 },
+    proofBody: { tokenIds: [], deltas: [] },
+    disputeConfig: { leftDisputeDelay: 576, rightDisputeDelay: 576 },
+    pendingWithdrawals: new Map(),
+    requestedRebalance: new Map(),
+    requestedRebalanceFeeState: new Map(),
+    shadow: {
+      rebalance: {
+        policy: new Map(),
+        submittedAtByToken: new Map(),
+      },
+    },
+    locks: new Map(),
+    swapOffers: new Map(),
+    pulls: new Map(),
+    swapOrderHistory: new Map(),
+    swapClosedOrders: new Map(),
+    leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+    rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
+    lastFinalizedJHeight: 0,
+    jNonce: 0,
+  });
+};
+
+const seedOpenAccountPolicies = (
+  state: EntityState,
+  tx: OpenAccountEntityTx,
+  counterpartyId: string,
+): void => {
+  const account = state.accounts.get(counterpartyId);
+  if (!account) throw new Error('OPEN_ACCOUNT_CREATED_MACHINE_MISSING');
+  account.currentFrame.accountStateRoot = computeAccountStateRoot(account);
+  account.currentFrame.stateHash = account.currentFrame.accountStateRoot;
+  const tokenId = tx.data.tokenId ?? 1;
+  const tokenIds = Array.from(new Set([tokenId, ...DEFAULT_ACCOUNT_TOKEN_IDS]))
+    .filter(id => Number.isFinite(id) && id > 0);
+  appendAccountMempoolTxs(account, [
+    ...tokenIds.map(deltaTokenId => ({
+      type: 'add_delta' as const,
+      data: { tokenId: deltaTokenId },
+    })),
+    ...(state.hubRebalanceConfig
+      ? tokenIds.map(policyTokenId => buildHubRebalancePolicyTx(state.hubRebalanceConfig!, policyTokenId))
+      : []),
+    ...(tx.data.creditAmount && tx.data.creditAmount > 0n
+      ? [{ type: 'set_credit_limit' as const, data: { tokenId, amount: tx.data.creditAmount } }]
+      : []),
+  ], `openAccount:init:${state.entityId}:${counterpartyId}`);
+  if (tx.data.rebalancePolicy) assertRequestedRebalancePolicy(tokenId, tx.data.rebalancePolicy);
+  for (const policyTokenId of tokenIds) {
+    const policy = tx.data.rebalancePolicy && policyTokenId === tokenId
+      ? tx.data.rebalancePolicy
+      : resolveJurisdictionRebalanceDefaults(state, policyTokenId);
+    account.shadow.rebalance.policy.set(policyTokenId, { ...policy });
+  }
+};
+
 export const handleOpenAccountEntityTx = (
   _env: Env,
   entityState: EntityState,
@@ -98,121 +194,22 @@ export const handleOpenAccountEntityTx = (
 
   addMessage(newState, `💳 Opening account with Entity ${formatEntityId(entityTx.data.targetEntityId)}...`);
 
-  const existingAccountKey = findAccountKey(newState, counterpartyId);
-  const createdLocalAccount = !existingAccountKey;
-  const accountKey = existingAccountKey ?? counterpartyId;
-  if (createdLocalAccount) {
-    candidateEffects.push({
-      kind: 'runtimeEvent',
-      eventName: 'AccountOpening',
-      data: {
-        entityId: entityState.entityId,
-        counterpartyId: targetEntityId,
-      },
-    });
-
-    const initialDeltas = new Map<number, Delta>();
-    const leftEntity = isLeft ? entityState.entityId : counterpartyId;
-    const rightEntity = isLeft ? counterpartyId : entityState.entityId;
-
-    upsertSortedStringMapEntry(newState.accounts, accountKey, {
-      leftEntity,
-      rightEntity,
-      domain: accountDomain,
-      watchSeed,
-      status: 'active',
-      mempool: [],
-      currentFrame: {
-        height: 0,
-        timestamp: 0,
-        jHeight: 0,
-        accountTxs: [],
-        prevFrameHash: '',
-        accountStateRoot: EMPTY_ACCOUNT_STATE_ROOT,
-        deltas: [],
-        stateHash: '',
-        byLeft: isLeft,
-      },
-      deltas: initialDeltas,
-      globalCreditLimits: {
-        ownLimit: 0n,
-        peerLimit: 0n,
-      },
-      currentHeight: 0,
-      pendingSignatures: [],
-      rollbackCount: 0,
-      proofHeader: {
-        fromEntity: entityState.entityId,
-        toEntity: counterpartyId,
-        nextProofNonce: 1,
-      },
-      proofBody: { tokenIds: [], deltas: [] },
-      disputeConfig: {
-        leftDisputeDelay: 576,
-        rightDisputeDelay: 576,
-      },
-      pendingWithdrawals: new Map(),
-      requestedRebalance: new Map(),
-      requestedRebalanceFeeState: new Map(),
-      shadow: {
-        rebalance: {
-          policy: new Map(),
-          submittedAtByToken: new Map(),
-        },
-      },
-      locks: new Map(),
-      swapOffers: new Map(),
-      pulls: new Map(),
-      swapOrderHistory: new Map(),
-      swapClosedOrders: new Map(),
-      leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
-      rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
-      lastFinalizedJHeight: 0,
-      jNonce: 0,
-    });
-  }
-
-  const localAccount = newState.accounts.get(accountKey);
-  if (!localAccount) {
-    throw new Error(`CRITICAL: Account machine not found after creation`);
-  }
-  localAccount.currentFrame.accountStateRoot = computeAccountStateRoot(localAccount);
-  localAccount.currentFrame.stateHash = localAccount.currentFrame.accountStateRoot;
-
-  const tokenId = entityTx.data.tokenId ?? 1;
-  const defaultTokenIds = Array.from(new Set([tokenId, ...DEFAULT_ACCOUNT_TOKEN_IDS]))
-    .filter((id) => Number.isFinite(id) && id > 0);
-  const creditAmount = entityTx.data.creditAmount;
-
-  if (!createdLocalAccount) {
+  if (findAccountKey(newState, counterpartyId)) {
     throw new Error(
       `OPEN_ACCOUNT_ALREADY_EXISTS_AFTER_CLONE: entity=${formatEntityId(entityState.entityId)} ` +
       `counterparty=${formatEntityId(counterpartyId)}`,
     );
   }
-
-  appendAccountMempoolTxs(localAccount, [
-    ...defaultTokenIds.map((deltaTokenId) => ({
-      type: 'add_delta' as const,
-      data: { tokenId: deltaTokenId },
-    })),
-    ...(newState.hubRebalanceConfig
-      ? defaultTokenIds.map((policyTokenId) =>
-          buildHubRebalancePolicyTx(newState.hubRebalanceConfig!, policyTokenId))
-      : []),
-    ...(creditAmount && creditAmount > 0n
-      ? [{ type: 'set_credit_limit' as const, data: { tokenId, amount: creditAmount } }]
-      : []),
-  ], `openAccount:init:${entityState.entityId}:${counterpartyId}`);
-
-  const requestedPolicy = entityTx.data.rebalancePolicy;
-  if (requestedPolicy) assertRequestedRebalancePolicy(tokenId, requestedPolicy);
-  for (const policyTokenId of defaultTokenIds) {
-    const policy = requestedPolicy && policyTokenId === tokenId
-      ? requestedPolicy
-      : resolveJurisdictionRebalanceDefaults(newState, policyTokenId);
-    localAccount.shadow.rebalance.policy.set(policyTokenId, { ...policy });
-  }
+  insertLocalAccount(
+    newState,
+    entityState.entityId,
+    counterpartyId,
+    isLeft,
+    accountDomain,
+    watchSeed,
+    candidateEffects,
+  );
+  seedOpenAccountPolicies(newState, entityTx, counterpartyId);
 
   addMessage(newState, `✅ Account opening request sent to Entity ${formatEntityId(counterpartyId)}`);
 

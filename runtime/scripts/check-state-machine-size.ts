@@ -17,14 +17,9 @@ const TARGET_COORDINATOR_LINES = 150;
 // fails the gate. Refactors therefore ratchet the list toward zero instead of
 // turning today's debt into a permanent global threshold.
 const COORDINATOR_DEBT: Readonly<Record<string, number>> = {
-  'runtime/entity/tx/handlers/cross-j-clear.ts::handleRequestCrossJurisdictionClearEntityTx': 179,
-  'runtime/entity/consensus/frame-application.ts::applyOrderbookMatching': 178,
-  'runtime/entity/consensus/frame-application.ts::proposePendingAccountFrames': 170,
-  'runtime/entity/tx/handlers/open-account.ts::handleOpenAccountEntityTx': 166,
-  'runtime/entity/tx/handlers/cross-j-book-order.ts::applyCrossJurisdictionBookProgressToState': 163,
 };
 
-const MAX_OVER_100_FUNCTIONS = 59;
+const MAX_OVER_100_FUNCTIONS = 54;
 
 type FunctionSize = {
   key: string;

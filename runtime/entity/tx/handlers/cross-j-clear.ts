@@ -54,6 +54,178 @@ const closeProofMatches = (
   left.binaryHash.toLowerCase() === right.binaryHash.toLowerCase() &&
   left.closeMode === right.closeMode;
 
+type ClearContext = {
+  env: Env;
+  entityState: EntityState;
+  newState: EntityState;
+  outputs: EntityInput[];
+  mempoolOps: MempoolOp[];
+  orderId: string;
+  cancelRemainder: boolean;
+};
+
+const requestClearThroughSourceAccount = (
+  context: ClearContext,
+  route: CrossJurisdictionSwapRoute,
+): CrossJurisdictionClearResult | undefined => {
+  const { env, newState, outputs, mempoolOps, orderId, cancelRemainder } = context;
+  const sourceHubId = normalizeEntityRef(route.source.counterpartyEntityId);
+  if (normalizeEntityRef(newState.entityId) === sourceHubId) return undefined;
+
+  const sourceUserId = normalizeEntityRef(route.source.entityId);
+  if (normalizeEntityRef(newState.entityId) !== sourceUserId) {
+    throw new Error(
+      `CROSS_J_CLEAR_SOURCE_PARTICIPANT_REQUIRED:${orderId}:${newState.entityId}:${sourceUserId}`,
+    );
+  }
+  const sourceAccountId = findAccountKey(newState, sourceHubId);
+  const sourceAccount = sourceAccountId ? newState.accounts.get(sourceAccountId) : undefined;
+  const sourceOffer = sourceAccount?.swapOffers?.get(orderId);
+  if (!sourceAccountId || !sourceAccount || !sourceOffer?.crossJurisdiction) {
+    throw new Error(`CROSS_J_CLEAR_SOURCE_OFFER_MISSING:${orderId}:${newState.entityId}:${sourceHubId}`);
+  }
+  if (!cancelRemainder && getCrossJurisdictionCommittedFillAmounts(route).fillRatio <= 0) {
+    addMessage(newState, `🌉 Cross-j clear ${orderId} ignored: no pending fill`);
+    return { newState, outputs, mempoolOps };
+  }
+
+  // The user cannot address the remote hub diagonally. Committing this request
+  // through the bilateral Account lets the source hub close the exact offer.
+  mempoolOps.push({
+    accountId: sourceAccountId,
+    tx: { type: 'swap_cancel_request', data: { offerId: orderId } },
+  });
+  const requestedAt = deterministicEntityTimestamp(newState, env);
+  transitionCrossJurisdictionRouteStatus(route, 'clear_requested', requestedAt);
+  route.pendingClearRequestedAt = requestedAt;
+  route.clearingPolicy = cancelRemainder ? 'cancel_and_clear' : 'manual';
+  newState.crossJurisdictionSwaps?.set(orderId, route);
+  addMessage(newState, `🌉 Cross-j clear ${orderId} queued through source Account`);
+  return { newState, outputs, mempoolOps };
+};
+
+const closeLiveSourceOffer = (
+  context: ClearContext,
+  route: CrossJurisdictionSwapRoute,
+  accountId: string | null,
+  storageChanges: RuntimeOverlayRecord[],
+): CrossJurisdictionClearResult | undefined => {
+  const { env, entityState, newState, outputs, mempoolOps, orderId, cancelRemainder } = context;
+  const account = accountId ? newState.accounts.get(accountId) : undefined;
+  const liveOffer = account?.swapOffers?.get(orderId);
+  const ratio = getCrossJurisdictionCommittedFillAmounts(route).fillRatio;
+  if (!liveOffer?.crossJurisdiction || (!cancelRemainder && ratio <= 0)) return undefined;
+  if (!accountId || !account) {
+    addMessage(newState, `❌ Cross-j clear ${orderId} blocked: no source account with ${formatEntityId(route.source.entityId)}`);
+    return { newState, outputs, mempoolOps };
+  }
+  if (accountHasCrossSwapAckQueued(account, orderId)) {
+    addMessage(newState, `🌉 Cross-j clear ${orderId} waiting for account offer close ack`);
+    return { newState, outputs, mempoolOps };
+  }
+
+  const removedFromBook = cancelOrderbookOfferIfPresent(newState, accountId, orderId, storageChanges);
+  mempoolOps.push({ accountId, tx: buildCrossJurisdictionCancelAck(orderId, route) });
+  const requestedAt = deterministicEntityTimestamp(newState, env);
+  transitionCrossJurisdictionRouteStatus(route, 'clear_requested', requestedAt);
+  route.pendingClearRequestedAt = requestedAt;
+  route.clearingPolicy = 'cancel_and_clear';
+  newState.crossJurisdictionSwaps?.set(orderId, route);
+  const firstValidator = entityState.config.validators[0];
+  if (firstValidator) outputs.push({ entityId: newState.entityId, signerId: firstValidator, entityTxs: [] });
+  addMessage(
+    newState,
+    removedFromBook
+      ? `🌉 Cross-j clear ${orderId} removed live book order and queued account offer close before pull reveal`
+      : `🌉 Cross-j clear ${orderId} queued account offer close before pull reveal`,
+  );
+  return { newState, outputs, mempoolOps };
+};
+
+const requestPureCancel = (
+  context: ClearContext,
+  route: CrossJurisdictionSwapRoute,
+  accountId: string | null,
+): CrossJurisdictionClearResult => {
+  const { env, entityState, newState, outputs, mempoolOps, orderId, cancelRemainder } = context;
+  const account = accountId ? newState.accounts.get(accountId) : undefined;
+  if (!cancelRemainder) {
+    addMessage(newState, `🌉 Cross-j clear ${orderId} ignored: no pending fill`);
+    return { newState, outputs, mempoolOps };
+  }
+  const proof = buildCrossJurisdictionCloseProof(route, '0x');
+  if (!accountId || !account?.pulls?.has(route.sourcePull!.pullId)) {
+    addMessage(newState, `🌉 Cross-j clear ${orderId} waiting for source close proof`);
+    return { newState, outputs, mempoolOps };
+  }
+  mempoolOps.push({
+    accountId,
+    tx: { type: 'cross_pull_close', data: { pullId: route.sourcePull!.pullId, binary: '0x', proof } },
+  });
+  const requestedAt = deterministicEntityTimestamp(newState, env);
+  const targetCommandRoute = cloneCrossJurisdictionRoute(route);
+  targetCommandRoute.sourceCloseProof = proof;
+  transitionCrossJurisdictionRouteStatus(targetCommandRoute, 'clearing', requestedAt);
+  pushCrossJurisdictionEntityOutput(
+    env,
+    outputs,
+    route.target.entityId,
+    [{
+      type: 'crossPullClose',
+      data: {
+        counterpartyEntityId: route.target.counterpartyEntityId,
+        pullId: route.targetPull!.pullId,
+        binary: '0x',
+        proof,
+        route: targetCommandRoute,
+        description: `Cross-j ${orderId} paired pure-cancel target close`,
+      },
+    }],
+    route.targetHubSignerId,
+  );
+  route.sourceCloseProof = proof;
+  transitionCrossJurisdictionRouteStatus(route, 'clearing', requestedAt);
+  route.pendingClearRequestedAt = requestedAt;
+  route.clearingPolicy = 'cancel_and_clear';
+  newState.crossJurisdictionSwaps?.set(orderId, route);
+  const firstValidator = entityState.config.validators[0];
+  if (firstValidator) outputs.push({ entityId: newState.entityId, signerId: firstValidator, entityTxs: [] });
+  addMessage(newState, `🌉 Cross-j clear ${orderId} queued atomic Hub pure-cancel close`);
+  return { newState, outputs, mempoolOps };
+};
+
+const requestFilledRouteReveal = (
+  context: ClearContext,
+  route: CrossJurisdictionSwapRoute,
+  accountId: string | null,
+  ratio: number,
+): CrossJurisdictionClearResult => {
+  const { env, entityState, newState, outputs, mempoolOps, orderId, cancelRemainder } = context;
+  const account = accountId ? newState.accounts.get(accountId) : undefined;
+  if (!accountId || !account) {
+    addMessage(newState, `❌ Cross-j clear ${orderId} blocked: no source account with ${formatEntityId(route.source.entityId)}`);
+    return { newState, outputs, mempoolOps };
+  }
+  if (!account.pulls?.has(route.sourcePull!.pullId)) {
+    addMessage(newState, `🌉 Cross-j clear ${orderId} ignored: source pull already closed`);
+    return { newState, outputs, mempoolOps };
+  }
+  if (accountHasPullResolveQueued(account, route.sourcePull!.pullId)) {
+    addMessage(newState, `🌉 Cross-j clear ${orderId} ignored: source pull resolve already queued`);
+    return { newState, outputs, mempoolOps };
+  }
+
+  const requestedAt = deterministicEntityTimestamp(newState, env);
+  transitionCrossJurisdictionRouteStatus(route, 'clear_requested', requestedAt);
+  route.pendingClearRequestedAt = requestedAt;
+  route.clearingPolicy = cancelRemainder || ratio < CROSS_J_MAX_FILL_RATIO ? 'cancel_and_clear' : 'full_fill';
+  newState.crossJurisdictionSwaps?.set(orderId, route);
+  const firstValidator = entityState.config.validators[0];
+  if (firstValidator) outputs.push({ entityId: newState.entityId, signerId: firstValidator, entityTxs: [] });
+  addMessage(newState, `🌉 Cross-j clear ${orderId} awaiting proposer reveal ratio=${ratio}/${CROSS_J_MAX_FILL_RATIO}`);
+  return { newState, outputs, mempoolOps };
+};
+
 export const handleRequestCrossJurisdictionClearEntityTx = (
   env: Env,
   entityState: EntityState,
@@ -79,40 +251,9 @@ export const handleRequestCrossJurisdictionClearEntityTx = (
     newState.crossJurisdictionSwaps.set(orderId, route);
   }
 
-  const sourceHubId = normalizeEntityRef(route.source.counterpartyEntityId);
-  if (normalizeEntityRef(newState.entityId) !== sourceHubId) {
-    const sourceUserId = normalizeEntityRef(route.source.entityId);
-    if (normalizeEntityRef(newState.entityId) !== sourceUserId) {
-      throw new Error(
-        `CROSS_J_CLEAR_SOURCE_PARTICIPANT_REQUIRED:${orderId}:${newState.entityId}:${sourceUserId}`,
-      );
-    }
-    const sourceAccountId = findAccountKey(newState, sourceHubId);
-    const sourceAccount = sourceAccountId ? newState.accounts.get(sourceAccountId) : undefined;
-    const sourceOffer = sourceAccount?.swapOffers?.get(orderId);
-    if (!sourceAccountId || !sourceAccount || !sourceOffer?.crossJurisdiction) {
-      throw new Error(`CROSS_J_CLEAR_SOURCE_OFFER_MISSING:${orderId}:${newState.entityId}:${sourceHubId}`);
-    }
-    if (!cancelRemainder && getCrossJurisdictionCommittedFillAmounts(route).fillRatio <= 0) {
-      addMessage(newState, `🌉 Cross-j clear ${orderId} ignored: no pending fill`);
-      return { newState, outputs, mempoolOps };
-    }
-    // User and hub are on different Runtimes and communicate only through their
-    // bilateral Account. The committed cancel request makes the source hub
-    // close the book row and enqueue the cross-j fill ACK; an Entity message to
-    // the hub would be a forbidden diagonal Runtime hop.
-    mempoolOps.push({
-      accountId: sourceAccountId,
-      tx: { type: 'swap_cancel_request', data: { offerId: orderId } },
-    });
-    const requestedAt = deterministicEntityTimestamp(newState, env);
-    transitionCrossJurisdictionRouteStatus(route, 'clear_requested', requestedAt);
-    route.pendingClearRequestedAt = requestedAt;
-    route.clearingPolicy = cancelRemainder ? 'cancel_and_clear' : 'manual';
-    newState.crossJurisdictionSwaps?.set(orderId, route);
-    addMessage(newState, `🌉 Cross-j clear ${orderId} queued through source Account`);
-    return { newState, outputs, mempoolOps };
-  }
+  const context = { env, entityState, newState, outputs, mempoolOps, orderId, cancelRemainder };
+  const sourceUserResult = requestClearThroughSourceAccount(context, route);
+  if (sourceUserResult) return sourceUserResult;
 
   const canonicalRoute: CrossJurisdictionSwapRoute = withCanonicalCrossJurisdictionRouteHash(route);
   if (!canonicalRoute.sourcePull || !canonicalRoute.targetPull) {
@@ -122,116 +263,10 @@ export const handleRequestCrossJurisdictionClearEntityTx = (
   const committedFill = getCrossJurisdictionCommittedFillAmounts(canonicalRoute);
   const ratio = committedFill.fillRatio;
   const accountId = findAccountKey(newState, canonicalRoute.source.entityId);
-  const account = accountId ? newState.accounts.get(accountId) : undefined;
-  const liveOffer = account?.swapOffers?.get(orderId);
-
-  if (liveOffer?.crossJurisdiction && (cancelRemainder || ratio > 0)) {
-    if (!accountId || !account) {
-      addMessage(newState, `❌ Cross-j clear ${orderId} blocked: no source account with ${formatEntityId(canonicalRoute.source.entityId)}`);
-      return { newState, outputs, mempoolOps };
-    }
-    if (accountHasCrossSwapAckQueued(account, orderId)) {
-      addMessage(newState, `🌉 Cross-j clear ${orderId} waiting for account offer close ack`);
-      return { newState, outputs, mempoolOps };
-    }
-    const removedFromBook = cancelOrderbookOfferIfPresent(newState, accountId, orderId, storageChanges);
-    mempoolOps.push({
-      accountId,
-      tx: buildCrossJurisdictionCancelAck(orderId, canonicalRoute),
-    });
-    const requestedAt = deterministicEntityTimestamp(newState, env);
-    transitionCrossJurisdictionRouteStatus(canonicalRoute, 'clear_requested', requestedAt);
-    canonicalRoute.pendingClearRequestedAt = requestedAt;
-    canonicalRoute.clearingPolicy = 'cancel_and_clear';
-    newState.crossJurisdictionSwaps?.set(orderId, canonicalRoute);
-    const firstValidator = entityState.config.validators[0];
-    if (firstValidator) outputs.push({ entityId: newState.entityId, signerId: firstValidator, entityTxs: [] });
-    addMessage(
-      newState,
-      removedFromBook
-        ? `🌉 Cross-j clear ${orderId} removed live book order and queued account offer close before pull reveal`
-        : `🌉 Cross-j clear ${orderId} queued account offer close before pull reveal`,
-    );
-    return { newState, outputs, mempoolOps };
-  }
-
-  if (ratio <= 0) {
-    if (!cancelRemainder) {
-      addMessage(newState, `🌉 Cross-j clear ${orderId} ignored: no pending fill`);
-      return { newState, outputs, mempoolOps };
-    }
-    const proof = buildCrossJurisdictionCloseProof(canonicalRoute, '0x');
-    if (accountId && account?.pulls?.has(canonicalRoute.sourcePull.pullId)) {
-      mempoolOps.push({
-        accountId,
-        tx: {
-          type: 'cross_pull_close',
-          data: {
-            pullId: canonicalRoute.sourcePull.pullId,
-            binary: '0x',
-            proof,
-          },
-        },
-      });
-    } else {
-      addMessage(newState, `🌉 Cross-j clear ${orderId} waiting for source close proof`);
-      return { newState, outputs, mempoolOps };
-    }
-    const requestedAt = deterministicEntityTimestamp(newState, env);
-    const targetCommandRoute = cloneCrossJurisdictionRoute(canonicalRoute);
-    targetCommandRoute.sourceCloseProof = proof;
-    transitionCrossJurisdictionRouteStatus(targetCommandRoute, 'clearing', requestedAt);
-    pushCrossJurisdictionEntityOutput(
-      env,
-      outputs,
-      canonicalRoute.target.entityId,
-      [{
-        type: 'crossPullClose',
-        data: {
-          counterpartyEntityId: canonicalRoute.target.counterpartyEntityId,
-          pullId: canonicalRoute.targetPull.pullId,
-          binary: '0x',
-          proof,
-          route: targetCommandRoute,
-          description: `Cross-j ${orderId} paired pure-cancel target close`,
-        },
-      }],
-      canonicalRoute.targetHubSignerId,
-    );
-    canonicalRoute.sourceCloseProof = proof;
-    transitionCrossJurisdictionRouteStatus(canonicalRoute, 'clearing', requestedAt);
-    canonicalRoute.pendingClearRequestedAt = requestedAt;
-    canonicalRoute.clearingPolicy = 'cancel_and_clear';
-    newState.crossJurisdictionSwaps?.set(orderId, canonicalRoute);
-    const firstValidator = entityState.config.validators[0];
-    if (firstValidator) outputs.push({ entityId: newState.entityId, signerId: firstValidator, entityTxs: [] });
-    addMessage(newState, `🌉 Cross-j clear ${orderId} queued atomic Hub pure-cancel close`);
-    return { newState, outputs, mempoolOps };
-  }
-
-  if (!accountId || !account) {
-    addMessage(newState, `❌ Cross-j clear ${orderId} blocked: no source account with ${formatEntityId(canonicalRoute.source.entityId)}`);
-    return { newState, outputs, mempoolOps };
-  }
-  if (!account.pulls?.has(canonicalRoute.sourcePull.pullId)) {
-    addMessage(newState, `🌉 Cross-j clear ${orderId} ignored: source pull already closed`);
-    return { newState, outputs, mempoolOps };
-  }
-  if (accountHasPullResolveQueued(account, canonicalRoute.sourcePull.pullId)) {
-    addMessage(newState, `🌉 Cross-j clear ${orderId} ignored: source pull resolve already queued`);
-    return { newState, outputs, mempoolOps };
-  }
-
-  const closeRemainder = cancelRemainder || ratio < CROSS_J_MAX_FILL_RATIO;
-  const requestedAt = deterministicEntityTimestamp(newState, env);
-  transitionCrossJurisdictionRouteStatus(canonicalRoute, 'clear_requested', requestedAt);
-  canonicalRoute.pendingClearRequestedAt = requestedAt;
-  canonicalRoute.clearingPolicy = closeRemainder ? 'cancel_and_clear' : ratio >= CROSS_J_MAX_FILL_RATIO ? 'full_fill' : 'manual';
-  newState.crossJurisdictionSwaps?.set(orderId, canonicalRoute);
-  const firstValidator = entityState.config.validators[0];
-  if (firstValidator) outputs.push({ entityId: newState.entityId, signerId: firstValidator, entityTxs: [] });
-  addMessage(newState, `🌉 Cross-j clear ${orderId} awaiting proposer reveal ratio=${ratio}/${CROSS_J_MAX_FILL_RATIO}`);
-  return { newState, outputs, mempoolOps };
+  const liveOfferResult = closeLiveSourceOffer(context, canonicalRoute, accountId, storageChanges);
+  if (liveOfferResult) return liveOfferResult;
+  if (ratio <= 0) return requestPureCancel(context, canonicalRoute, accountId);
+  return requestFilledRouteReveal(context, canonicalRoute, accountId, ratio);
 };
 
 /**

@@ -40,6 +40,7 @@ import {
 import { mergeStorageOverlayRecords } from '../../storage/overlay';
 import type {
   AccountInput,
+  AccountMachine,
   AccountTx,
   EntityCandidateEffect,
   EntityInput,
@@ -475,16 +476,123 @@ function refreshStaleUncommittedSettlementSeals(state: EntityState, storageChang
   }
 }
 
+type AccountFrameProposal = Awaited<ReturnType<typeof proposeAccountFrame>>;
+
+const proposeAccountMachineFrame = async (
+  context: ProposePendingAccountFramesContext,
+  accountKey: string,
+  account: AccountMachine,
+  crossJOpeningProposalTxs: AccountTx[] | undefined,
+): Promise<AccountFrameProposal | undefined> => {
+  const { env, currentEntityState: state, collectedHashes, proposableAccounts, storageChanges } = context;
+  if (!accountHasProposableMempool(account, state)) return undefined;
+  const proposal = await proposeAccountFrame(
+    env,
+    account,
+    state.timestamp,
+    state.lastFinalizedJHeight,
+    context.accountJClaimNodeStore,
+    crossJOpeningProposalTxs,
+  );
+  if (proposal.accountChanged) recordFrameAccountChange(storageChanges, state.entityId, accountKey);
+  if (proposal.swapOffersCancelled?.length) {
+    const cancels = proposal.swapOffersCancelled.map(({ offerId }) => ({ accountId: accountKey, offerId }));
+    applyCommittedSwapCancelsToOrderbook(env, state, cancels, storageChanges);
+  }
+  if (proposal.hashesToSign) collectedHashes.push(...proposal.hashesToSign);
+  for (const { hashlock, reason } of proposal.failedHtlcLocks ?? []) {
+    const route = state.htlcRoutes.get(hashlock);
+    if (!route) continue;
+    if (route.outboundLockId) state.lockBook.delete(route.outboundLockId);
+    if (route.inboundEntity && route.inboundLockId) {
+      const inboundAccount = state.accounts.get(route.inboundEntity);
+      if (inboundAccount) {
+        appendAccountMempoolTx(inboundAccount, {
+          type: 'htlc_resolve',
+          data: {
+            lockId: route.inboundLockId,
+            outcome: 'error',
+            reason: `forward_failed:${reason}`,
+          },
+        }, `entityConsensus:failedHtlc:${route.inboundEntity}`);
+        recordFrameAccountChange(storageChanges, state.entityId, route.inboundEntity);
+        proposableAccounts.add(route.inboundEntity);
+      }
+    }
+    terminateHtlcRoute(state, hashlock, state.timestamp);
+  }
+  return proposal;
+};
+
+const assertRequiredAccountResponsePreserved = (
+  accountKey: string,
+  required: AccountInput | undefined,
+  final: AccountInput,
+): void => {
+  if (!required) return;
+  const requiredAck = accountInputAck(required);
+  const requiredProposal = accountInputProposal(required);
+  const finalAck = accountInputAck(final);
+  const finalProposal = accountInputProposal(final);
+  if (requiredAck && (!finalAck || safeStringify(finalAck) !== safeStringify(requiredAck))) {
+    throw new Error(`ACCOUNT_REQUIRED_ACK_NOT_BUNDLED:${accountKey}:${requiredAck.height}`);
+  }
+  if (requiredProposal && (!finalProposal || safeStringify(finalProposal) !== safeStringify(requiredProposal))) {
+    throw new Error(`ACCOUNT_REQUIRED_PROPOSAL_NOT_PRESERVED:${accountKey}:${requiredProposal.frame.height}`);
+  }
+};
+
+const routeFinalAccountInput = async (
+  context: ProposePendingAccountFramesContext,
+  accountKey: string,
+  account: AccountMachine,
+  counterpartyId: string,
+  input: AccountInput,
+  proposal: AccountFrameProposal | undefined,
+): Promise<void> => {
+  const { env, currentEntityState: state, allOutputs } = context;
+  const encryptedSigner = certifiedAccountOutputSignerHint(input.toEntityId, input);
+  const certifiedSigner = await resolveCertifiedAccountCounterpartyProposer(env, account, input.toEntityId);
+  if (encryptedSigner && certifiedSigner && encryptedSigner !== certifiedSigner) {
+    throw new Error(
+      `ACCOUNT_OUTPUT_SIGNER_HINT_CONFLICT:${input.toEntityId}:${encryptedSigner}:${certifiedSigner}`,
+    );
+  }
+  const signerId = encryptedSigner ?? certifiedSigner ?? resolveEntityProposerId(
+    env,
+    input.toEntityId,
+    `account flush output ${state.entityId}->${input.toEntityId}`,
+  );
+  // Delivery metadata is validator-local and excluded from Entity roots.
+  if (accountInputProposal(input)) account.pendingAccountInputSignerId = signerId;
+  allOutputs.push({
+    entityId: input.toEntityId,
+    signerId,
+    entityTxs: [{ type: 'accountInput', data: input }],
+  });
+  if (!proposal) return;
+  addMessages(state, proposal.events);
+  emitScopedEvents(
+    env,
+    'account',
+    `E/A/${state.entityId.slice(-4)}:${counterpartyId.slice(-4)}/propose`,
+    proposal.events,
+    {
+      entityId: state.entityId,
+      counterpartyId,
+      frameHeight: accountInputReferenceHeight(input),
+      accountKey,
+    },
+    state.entityId,
+  );
+};
+
 async function proposePendingAccountFrames(context: ProposePendingAccountFramesContext): Promise<number> {
   const {
     env,
     currentEntityState,
     proposableAccounts,
     requiredAccountResponses,
-    allOutputs,
-    collectedHashes,
-    accountJClaimNodeStore,
-    storageChanges,
   } = context;
   const processedAccounts = new Set<string>();
   let proposedFrames = 0;
@@ -514,133 +622,25 @@ async function proposePendingAccountFrames(context: ProposePendingAccountFramesC
 
     const requiredResponse = requiredAccountResponses.get(accountKey.toLowerCase());
 
-    let proposal: Awaited<ReturnType<typeof proposeAccountFrame>> | undefined;
-    if (accountHasProposableMempool(accountMachine, currentEntityState)) {
-      proposal = await proposeAccountFrame(
-        env,
-        accountMachine,
-        currentEntityState.timestamp,
-        currentEntityState.lastFinalizedJHeight,
-        accountJClaimNodeStore,
-        crossJOpeningProposalTxs,
-      );
-      if (proposal.accountChanged) {
-        storageChanges.push({
-          family: 'account',
-          entityId: currentEntityState.entityId,
-          counterpartyId: accountKey,
-        });
-      }
-      proposedFrames += 1;
-      if (proposal.swapOffersCancelled && proposal.swapOffersCancelled.length > 0) {
-        const normalizedCancels = proposal.swapOffersCancelled.map(({ offerId }) => ({
-          accountId: accountKey,
-          offerId,
-        }));
-        applyCommittedSwapCancelsToOrderbook(env, currentEntityState, normalizedCancels, storageChanges);
-      }
-      if (proposal.hashesToSign) collectedHashes.push(...proposal.hashesToSign);
-
-      if (proposal.failedHtlcLocks && proposal.failedHtlcLocks.length > 0) {
-        for (const { hashlock, reason } of proposal.failedHtlcLocks) {
-          const route = currentEntityState.htlcRoutes.get(hashlock);
-          if (!route) continue;
-          if (route.outboundLockId) currentEntityState.lockBook.delete(route.outboundLockId);
-          if (route.inboundEntity && route.inboundLockId) {
-            const inboundAccount = currentEntityState.accounts.get(route.inboundEntity);
-            if (inboundAccount) {
-              appendAccountMempoolTx(
-                inboundAccount,
-                {
-                  type: 'htlc_resolve',
-                  data: {
-                    lockId: route.inboundLockId,
-                    outcome: 'error' as const,
-                    reason: `forward_failed:${reason}`,
-                  },
-                },
-                `entityConsensus:failedHtlc:${route.inboundEntity}`,
-              );
-              recordFrameAccountChange(storageChanges, currentEntityState.entityId, route.inboundEntity);
-              proposableAccounts.add(route.inboundEntity);
-            }
-          }
-          terminateHtlcRoute(currentEntityState, hashlock, currentEntityState.timestamp);
-        }
-      }
-    }
+    const proposal = await proposeAccountMachineFrame(
+      context,
+      accountKey,
+      accountMachine,
+      crossJOpeningProposalTxs,
+    );
+    if (proposal) proposedFrames += 1;
 
     const finalAccountInput = proposal?.success && proposal.accountInput ? proposal.accountInput : requiredResponse;
     if (!finalAccountInput) continue;
-    if (requiredResponse) {
-      const requiredAck = accountInputAck(requiredResponse);
-      const requiredProposal = accountInputProposal(requiredResponse);
-      const finalAck = accountInputAck(finalAccountInput);
-      const finalProposal = accountInputProposal(finalAccountInput);
-      if (requiredAck && (!finalAck || safeStringify(finalAck) !== safeStringify(requiredAck))) {
-        throw new Error(`ACCOUNT_REQUIRED_ACK_NOT_BUNDLED:${accountKey}:${requiredAck.height}`);
-      }
-      if (requiredProposal && (!finalProposal || safeStringify(finalProposal) !== safeStringify(requiredProposal))) {
-        throw new Error(`ACCOUNT_REQUIRED_PROPOSAL_NOT_PRESERVED:${accountKey}:${requiredProposal.frame.height}`);
-      }
-    }
-
-    {
-      const encryptedTargetSignerId = certifiedAccountOutputSignerHint(finalAccountInput.toEntityId, finalAccountInput);
-      const certifiedTargetSignerId = await resolveCertifiedAccountCounterpartyProposer(
-        env,
-        accountMachine,
-        finalAccountInput.toEntityId,
-      );
-      if (encryptedTargetSignerId && certifiedTargetSignerId && encryptedTargetSignerId !== certifiedTargetSignerId) {
-        throw new Error(
-          `ACCOUNT_OUTPUT_SIGNER_HINT_CONFLICT:${finalAccountInput.toEntityId}:` +
-            `${encryptedTargetSignerId}:${certifiedTargetSignerId}`,
-        );
-      }
-      const targetSignerId =
-        encryptedTargetSignerId ??
-        certifiedTargetSignerId ??
-        resolveEntityProposerId(
-          env,
-          finalAccountInput.toEntityId,
-          `account flush output ${currentEntityState.entityId}->${finalAccountInput.toEntityId}`,
-        );
-      // Persist validator-local delivery metadata beside the cached input so a
-      // post-checkpoint resend does not require gossip to be online first.
-      // The field is intentionally excluded from Entity consensus roots.
-      if (accountInputProposal(finalAccountInput)) {
-        accountMachine.pendingAccountInputSignerId = targetSignerId;
-      }
-      const outputEntityInput: EntityInput = {
-        entityId: finalAccountInput.toEntityId,
-        signerId: targetSignerId,
-        entityTxs: [
-          {
-            type: 'accountInput' as const,
-            data: finalAccountInput,
-          },
-        ],
-      };
-      allOutputs.push(outputEntityInput);
-
-      if (proposal) {
-        addMessages(currentEntityState, proposal.events);
-        emitScopedEvents(
-          env,
-          'account',
-          `E/A/${currentEntityState.entityId.slice(-4)}:${cpId.slice(-4)}/propose`,
-          proposal.events,
-          {
-            entityId: currentEntityState.entityId,
-            counterpartyId: cpId,
-            frameHeight: accountInputReferenceHeight(finalAccountInput),
-            accountKey,
-          },
-          currentEntityState.entityId,
-        );
-      }
-    }
+    assertRequiredAccountResponsePreserved(accountKey, requiredResponse, finalAccountInput);
+    await routeFinalAccountInput(
+      context,
+      accountKey,
+      accountMachine,
+      cpId,
+      finalAccountInput,
+      proposal,
+    );
   }
 
   return proposedFrames;
@@ -671,8 +671,131 @@ const emptyOrderbookFrameStats = (): OrderbookFrameStats => ({
   orderbookCrossFills: 0,
 });
 
+const collectOffersForMatching = (
+  env: Env,
+  state: EntityState,
+  created: SwapOfferEvent[],
+): WorkingOrderbookOffer[] => {
+  const hubEntity = normalizeEntityRef(state.entityId);
+  const enriched = created.map(offer => {
+    const fromEntity = normalizeEntityRef(offer.fromEntity);
+    const toEntity = normalizeEntityRef(offer.toEntity);
+    return normalizeSwapOfferForOrderbook(
+      offer,
+      fromEntity === hubEntity ? toEntity : fromEntity,
+    );
+  });
+  const seen = new Set<string>();
+  const admitted: WorkingOrderbookOffer[] = [];
+  for (const offer of enriched) {
+    const key = swapKey(offer.accountId, offer.offerId);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (
+      offer.crossJurisdiction &&
+      crossJurisdictionBookOwnerRef(offer.crossJurisdiction) !== hubEntity
+    ) {
+      entityLog.debug('crossj.orderbook.skip_non_owner', {
+        offer: shortOrder(offer.offerId, 8),
+        owner: shortId(crossJurisdictionBookOwnerRef(offer.crossJurisdiction), 8),
+        current: shortId(state.entityId, 8),
+      });
+      continue;
+    }
+    const candidate = admitOrderbookOfferForMatching(env, state, offer);
+    if (candidate) admitted.push(candidate);
+  }
+  entityLog.debug('orderbook.offers_enriched', { local: enriched.length, admitted: admitted.length });
+  return admitted;
+};
+
+type OrderbookMatchResult = ReturnType<typeof processOrderbookSwaps>;
+
+const applyOrderbookMempoolOps = (
+  context: ApplyOrderbookMatchingContext,
+  result: OrderbookMatchResult,
+): void => {
+  const { env, currentEntityState: state, allOutputs, proposableAccounts, storageChanges } = context;
+  for (const { accountId, tx } of result.mempoolOps) {
+    const account = state.accounts.get(accountId);
+    if (tx.type === 'swap_resolve') {
+      const offer = account?.swapOffers?.get(tx.data.offerId);
+      if (offer?.crossJurisdiction) {
+        entityLog.warn('crossj.block_plain_swap_resolve', {
+          offer: shortOrder(tx.data.offerId, 8),
+          account: shortId(accountId, 8),
+        });
+        continue;
+      }
+      if (!account?.swapOffers?.has(tx.data.offerId)) {
+        throw new Error(
+          `ORDERBOOK_SWAP_OWNER_NOT_LOCAL: account=${accountId} offer=${tx.data.offerId} entity=${state.entityId}`,
+        );
+      }
+    } else if (tx.type === 'cross_swap_fill_ack' && !account?.swapOffers?.has(tx.data.offerId)) {
+      const routed = buildCrossJurisdictionFillNoticeOutput(state, accountId, tx);
+      if (routed) {
+        allOutputs.push(routed);
+        entityLog.info('crossj.sibling_fill_notice_routed', {
+          owner: shortId(routed.entityId, 8),
+          account: shortId(accountId, 8),
+          offer: shortOrder(tx.data.offerId, 8),
+        });
+        continue;
+      }
+      if (ownsSourceHubRouteForFillAck(state, tx)) {
+        stashPendingCrossJurisdictionFillAck(
+          env,
+          state,
+          accountId,
+          tx,
+          account ? 'source_offer_not_committed' : 'source_account_not_committed',
+        );
+        continue;
+      }
+      throw new Error(
+        `CROSS_J_FILL_ACK_OWNER_MISSING: account=${accountId} offer=${tx.data.offerId} current=${state.entityId}`,
+      );
+    }
+    if (!account || !queueAccountMempoolTx(account, tx)) continue;
+    proposableAccounts.add(accountId);
+    recordFrameAccountChange(storageChanges, state.entityId, accountId);
+    entityLog.debug('orderbook.account_tx_queued', { account: shortId(accountId, 8), tx: tx.type });
+  }
+};
+
+const commitOrderbookMatchResult = (
+  context: ApplyOrderbookMatchingContext,
+  result: OrderbookMatchResult,
+): void => {
+  const { env, currentEntityState: state, storageChanges } = context;
+  if (result.debugProjectionRejects.length > 0) {
+    const detail = result.debugProjectionRejects
+      .map(({ accountId, offerId, reason }) => `${accountId.slice(-8)}:${offerId.slice(-8)}:${reason}`)
+      .join(', ');
+    throw new Error(`ORDERBOOK_LIVE_PROJECTION_REJECT: ${detail}`);
+  }
+  if (result.crossJurisdictionFills.length > 0) {
+    entityLog.info('crossj.firm_fills_recorded', { count: result.crossJurisdictionFills.length });
+    for (const fill of result.crossJurisdictionFills) {
+      if (fill.cancelRemainder) {
+        markCrossJurisdictionBookAdmissionResolving(
+          state,
+          fill.route,
+          deterministicEntityTimestamp(state, env),
+        );
+      }
+    }
+  }
+  const ext = state.orderbookExt as OrderbookExtState;
+  for (const { pairId, book } of result.bookUpdates) {
+    replaceOrderbookPair(ext, pairId, book);
+    recordFrameBookChange(storageChanges, state.entityId, pairId);
+  }
+};
+
 function applyOrderbookMatching(context: ApplyOrderbookMatchingContext): OrderbookFrameStats {
-  const { env, currentEntityState, allSwapOffersCreated, allOutputs, proposableAccounts, storageChanges } = context;
+  const { env, currentEntityState, allSwapOffersCreated } = context;
   const stats = emptyOrderbookFrameStats();
   stats.hasPersistedCrossJurisdictionBook = Boolean(
     currentEntityState.orderbookExt &&
@@ -692,161 +815,16 @@ function applyOrderbookMatching(context: ApplyOrderbookMatchingContext): Orderbo
     hasPersistedCrossJurisdictionBook: stats.hasPersistedCrossJurisdictionBook,
   });
 
-  const enrichedOffers = allSwapOffersCreated.map(offer => {
-    // The hub's account map is keyed by counterparty. The maker side can be
-    // either left or right, so derive accountId from the side opposite hub.
-    const hubId = currentEntityState.entityId;
-    const hubEntity = normalizeEntityRef(hubId);
-    const fromEntity = normalizeEntityRef(offer.fromEntity);
-    const toEntity = normalizeEntityRef(offer.toEntity);
-    const counterparty = fromEntity === hubEntity ? toEntity : fromEntity;
-    return normalizeSwapOfferForOrderbook(offer, counterparty);
-  });
-  const seenOfferKeys = new Set<string>();
-  const offersToMatch: WorkingOrderbookOffer[] = [];
-  for (const offer of enrichedOffers) {
-    const key = swapKey(offer.accountId, offer.offerId);
-    if (seenOfferKeys.has(key)) continue;
-    seenOfferKeys.add(key);
-    if (
-      offer.crossJurisdiction &&
-      crossJurisdictionBookOwnerRef(offer.crossJurisdiction) !== normalizeEntityRef(currentEntityState.entityId)
-    ) {
-      entityLog.debug('crossj.orderbook.skip_non_owner', {
-        offer: shortOrder(offer.offerId, 8),
-        owner: shortId(crossJurisdictionBookOwnerRef(offer.crossJurisdiction), 8),
-        current: shortId(currentEntityState.entityId, 8),
-      });
-      continue;
-    }
-    const admittedOffer = admitOrderbookOfferForMatching(env, currentEntityState, offer);
-    if (admittedOffer) offersToMatch.push(admittedOffer);
-  }
-  entityLog.debug('orderbook.offers_enriched', {
-    local: enrichedOffers.length,
-    admitted: offersToMatch.length,
-  });
-
+  const offersToMatch = collectOffersForMatching(env, currentEntityState, allSwapOffersCreated);
   const matchResult = processOrderbookSwaps(currentEntityState, offersToMatch, { runtimeEnv: env });
   stats.orderbookMatched = true;
   stats.orderbookMempoolOps = matchResult.mempoolOps.length;
   stats.orderbookBookUpdates = matchResult.bookUpdates.length;
   stats.orderbookCrossFills = matchResult.crossJurisdictionFills.length;
 
-  // Orderbook matching returns pure mempoolOps/book updates. Applying the
-  // returned account txs here is still orchestrator-owned mutation of the
-  // cloned working state, not handler-side in-place state injection.
-  for (const { accountId, tx } of matchResult.mempoolOps) {
-    const account = currentEntityState.accounts.get(accountId);
-
-    if (tx.type === 'swap_resolve') {
-      const localOwnsOffer = Boolean(account?.swapOffers?.has(tx.data.offerId));
-      const localOffer = account?.swapOffers?.get(tx.data.offerId);
-      if (localOffer?.crossJurisdiction) {
-        entityLog.warn('crossj.block_plain_swap_resolve', {
-          offer: shortOrder(tx.data.offerId, 8),
-          account: shortId(accountId, 8),
-        });
-        continue;
-      }
-      if (account && localOwnsOffer) {
-        if (!queueAccountMempoolTx(account, tx)) {
-          continue;
-        }
-        proposableAccounts.add(accountId);
-        recordFrameAccountChange(storageChanges, currentEntityState.entityId, accountId);
-        entityLog.debug('orderbook.account_tx_queued', { account: shortId(accountId, 8), tx: tx.type });
-      } else {
-        throw new Error(
-          `ORDERBOOK_SWAP_OWNER_NOT_LOCAL: account=${accountId} offer=${tx.data.offerId} ` +
-            `entity=${currentEntityState.entityId}`,
-        );
-      }
-      continue;
-    }
-
-    if (tx.type === 'cross_swap_fill_ack') {
-      const localOwnsOffer = Boolean(account?.swapOffers?.has(tx.data.offerId));
-      if (account && localOwnsOffer) {
-        if (!queueAccountMempoolTx(account, tx)) {
-          continue;
-        }
-        proposableAccounts.add(accountId);
-        recordFrameAccountChange(storageChanges, currentEntityState.entityId, accountId);
-        entityLog.debug('crossj.local_fill_ack_queued', {
-          account: shortId(accountId, 8),
-          offer: shortOrder(tx.data.offerId, 8),
-          ratio: tx.data.cumulativeFillRatio,
-          cancel: tx.data.cancelRemainder,
-        });
-        entityLog.debug('orderbook.account_tx_queued', { account: shortId(accountId, 8), tx: tx.type });
-        continue;
-      }
-
-      const routed = buildCrossJurisdictionFillNoticeOutput(currentEntityState, accountId, tx);
-      if (!routed) {
-        if (ownsSourceHubRouteForFillAck(currentEntityState, tx)) {
-          stashPendingCrossJurisdictionFillAck(
-            env,
-            currentEntityState,
-            accountId,
-            tx,
-            account ? 'source_offer_not_committed' : 'source_account_not_committed',
-          );
-          continue;
-        }
-        throw new Error(
-          `CROSS_J_FILL_ACK_OWNER_MISSING: account=${accountId} offer=${tx.data.offerId} current=${currentEntityState.entityId}`,
-        );
-      }
-      allOutputs.push(routed);
-      entityLog.info('crossj.sibling_fill_notice_routed', {
-        owner: shortId(routed.entityId, 8),
-        account: shortId(accountId, 8),
-        offer: shortOrder(tx.data.offerId, 8),
-      });
-      continue;
-    }
-
-    if (account) {
-      if (!queueAccountMempoolTx(account, tx)) {
-        continue;
-      }
-      proposableAccounts.add(accountId);
-      recordFrameAccountChange(storageChanges, currentEntityState.entityId, accountId);
-      entityLog.debug('orderbook.account_tx_queued', { account: shortId(accountId, 8), tx: tx.type });
-    }
-  }
-
-  if (matchResult.debugProjectionRejects.length > 0) {
-    const detail = matchResult.debugProjectionRejects
-      .map(({ accountId, offerId, reason }) => `${accountId.slice(-8)}:${offerId.slice(-8)}:${reason}`)
-      .join(', ');
-    throw new Error(`ORDERBOOK_LIVE_PROJECTION_REJECT: ${detail}`);
-  }
-
-  if (matchResult.crossJurisdictionFills.length > 0) {
-    entityLog.info('crossj.firm_fills_recorded', { count: matchResult.crossJurisdictionFills.length });
-    for (const fill of matchResult.crossJurisdictionFills) {
-      // Partial cross-j fills keep the original book row alive and matchable.
-      // Only a terminal fill/cancel removes the row and moves admission into
-      // resolving so the clear flow can claim/release the hash-ledger pulls.
-      if (fill.cancelRemainder) {
-        markCrossJurisdictionBookAdmissionResolving(
-          currentEntityState,
-          fill.route,
-          deterministicEntityTimestamp(currentEntityState, env),
-        );
-      }
-    }
-  }
-
-  const ext = currentEntityState.orderbookExt as OrderbookExtState;
-  for (const { pairId, book } of matchResult.bookUpdates) {
-    replaceOrderbookPair(ext, pairId, book);
-    recordFrameBookChange(storageChanges, currentEntityState.entityId, pairId);
-  }
-
+  // Matching is pure; only these two stages mutate the isolated Entity frame.
+  applyOrderbookMempoolOps(context, matchResult);
+  commitOrderbookMatchResult(context, matchResult);
   return stats;
 }
 

@@ -50,19 +50,18 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   over 100 lines under `runtime/runtime`, `runtime/entity` and
   `runtime/account`. Reduce every coordinator to at most 150 lines and every
   pure/helper function to at most 100 lines, with no file above 3000 lines;
-  `check:state-machine-size` now ratchets the current debt at 9 functions over
-  150 lines and 63 over 100, rejects any new/growing allowance and rejects
-  files over 3000 lines. Keep reducing both counts to zero, deleting each exact
-  allowance as its function is split.
+  `check:state-machine-size` now reports zero functions over 150 lines and
+  ratchets the remaining 54 functions over 100 lines; it rejects any new debt
+  and every file over 3000 lines. Keep reducing the helper count to zero,
+  tightening the exact ceiling after each phase split.
   Keep Runtime-machine logic under `runtime/runtime/`, Entity-machine logic
   under `runtime/entity/`, and Account money/consensus logic under
   `runtime/account/`; adapters, storage, transport, UI and QA remain separate
   infrastructure rather than being mislabeled as a state machine. Account
-  pending-ACK/preflight, committed lending follow-up, settlement execution/seal
-  and HTLC resolution are split and covered by targeted tests. The remaining
-  over-150 targets are cross-J clear, orderbook matching, R→C scheduling,
-  authorization, Account proposal scheduling, open-account, cross-J progress,
-  delta derivation and J broadcast.
+  pending-ACK/preflight, committed lending follow-up, settlement execution/seal,
+  HTLC resolution, cross-J clear/progress, orderbook matching, R→C scheduling,
+  output authorization, Account proposal scheduling, open-account, delta
+  derivation and J broadcast are split and covered by targeted tests.
   Each split must follow protocol phase, owner and failure boundary—not
   arbitrary line chunks—and preserve byte-identical roots, failures and
   ordering through characterization tests.
