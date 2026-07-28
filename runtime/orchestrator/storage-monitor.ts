@@ -27,6 +27,8 @@ export type StorageTrackedHealth = {
   scanEntries: number;
   scanMs: number;
   scanTruncated: boolean;
+  /** Files that LevelDB rotated after directory enumeration but before stat. */
+  scanMissingEntries: number;
   scanMode: 'shallow' | 'deep';
 };
 
@@ -100,8 +102,15 @@ type PathByteScan = {
   entries: number;
   ms: number;
   truncated: boolean;
+  missingEntries: number;
   mode: 'shallow' | 'deep';
 };
+
+export const isStoragePathMissingError = (error: unknown): boolean =>
+  typeof error === 'object' &&
+  error !== null &&
+  'code' in error &&
+  (error as { code?: unknown }).code === 'ENOENT';
 
 const scanPathBytes = (targetPath: string): PathByteScan => {
   const startedAt = Date.now();
@@ -109,6 +118,21 @@ const scanPathBytes = (targetPath: string): PathByteScan => {
   let bytes = 0;
   let entries = 0;
   let truncated = false;
+  let missingEntries = 0;
+
+  // LevelDB compaction atomically replaces .log/.sst files and writer locks.
+  // A child returned by readdir may therefore be gone by the following lstat.
+  // That is an expected observation race, not storage corruption. Expose it
+  // numerically and mark the sample partial; all other filesystem errors stay
+  // loud with their original stack.
+  const recordScanFailure = (path: string, phase: string, error: unknown): void => {
+    truncated = true;
+    if (isStoragePathMissingError(error)) {
+      missingEntries += 1;
+      return;
+    }
+    console.warn(`[storage-monitor] ${phase} scan failed path=${path}`, error);
+  };
 
   const deadlineReached = (): boolean => Date.now() - startedAt >= STORAGE_HEALTH_SCAN_MAX_MS;
   const canScanMore = (): boolean => entries < STORAGE_HEALTH_SCAN_MAX_ENTRIES && !deadlineReached();
@@ -128,31 +152,31 @@ const scanPathBytes = (targetPath: string): PathByteScan => {
       }
       if (stats.isDirectory()) truncated = true;
     } catch (error) {
-      console.warn(`[storage-monitor] path scan failed path=${path}`, error);
+      recordScanFailure(path, 'path', error);
     }
   };
 
   if (!existsSync(targetPath)) {
-    return { bytes: 0, entries: 0, ms: Date.now() - startedAt, truncated: false, mode };
+    return { bytes: 0, entries: 0, ms: Date.now() - startedAt, truncated: false, missingEntries, mode };
   }
 
   if (!STORAGE_HEALTH_DEEP_SCAN) {
     try {
       const stats = lstatSync(targetPath);
       entries += 1;
-      if (stats.isSymbolicLink()) return { bytes: 0, entries, ms: Date.now() - startedAt, truncated: false, mode };
-      if (stats.isFile()) return { bytes: stats.size, entries, ms: Date.now() - startedAt, truncated: false, mode };
-      if (!stats.isDirectory()) return { bytes: 0, entries, ms: Date.now() - startedAt, truncated: false, mode };
+      if (stats.isSymbolicLink()) return { bytes: 0, entries, ms: Date.now() - startedAt, truncated: false, missingEntries, mode };
+      if (stats.isFile()) return { bytes: stats.size, entries, ms: Date.now() - startedAt, truncated: false, missingEntries, mode };
+      if (!stats.isDirectory()) return { bytes: 0, entries, ms: Date.now() - startedAt, truncated: false, missingEntries, mode };
       const names = readdirSync(targetPath);
       if (names.length > STORAGE_HEALTH_SCAN_MAX_DIR_ENTRIES) truncated = true;
       for (const name of names.slice(0, STORAGE_HEALTH_SCAN_MAX_DIR_ENTRIES)) {
         addFileIfPresent(join(targetPath, name));
       }
     } catch (error) {
-      console.warn(`[storage-monitor] shallow scan failed path=${targetPath}`, error);
-      return { bytes, entries, ms: Date.now() - startedAt, truncated: true, mode };
+      recordScanFailure(targetPath, 'shallow', error);
+      return { bytes, entries, ms: Date.now() - startedAt, truncated, missingEntries, mode };
     }
-    return { bytes, entries, ms: Date.now() - startedAt, truncated, mode };
+    return { bytes, entries, ms: Date.now() - startedAt, truncated, missingEntries, mode };
   }
 
   const stack = [targetPath];
@@ -173,11 +197,11 @@ const scanPathBytes = (targetPath: string): PathByteScan => {
         stack.push(join(current, name));
       }
     } catch (error) {
-      console.warn(`[storage-monitor] deep scan failed path=${current}`, error);
+      recordScanFailure(current, 'deep', error);
     }
   }
   if (stack.length > 0 || !canScanMore()) truncated = true;
-  return { bytes, entries, ms: Date.now() - startedAt, truncated, mode };
+  return { bytes, entries, ms: Date.now() - startedAt, truncated, missingEntries, mode };
 };
 
 export const parseStorageHistory = (
@@ -234,7 +258,14 @@ const buildStorageHealth = (options: { writeHistory: boolean } = { writeHistory:
   if (options.writeHistory) writeStorageHistory(nextHistory);
 
   const tracked = TRACKED_STORAGE_PATHS.map((entry): StorageTrackedHealth => {
-    const scan = scans[entry.name] ?? { bytes: 0, entries: 0, ms: 0, truncated: true, mode: STORAGE_HEALTH_DEEP_SCAN ? 'deep' as const : 'shallow' as const };
+    const scan = scans[entry.name] ?? {
+      bytes: 0,
+      entries: 0,
+      ms: 0,
+      truncated: true,
+      missingEntries: 0,
+      mode: STORAGE_HEALTH_DEEP_SCAN ? 'deep' as const : 'shallow' as const,
+    };
     const currentBytes = currentTracked[entry.name] ?? 0;
     const baseline =
       nextHistory.find((sample) => sampledAt - sample.ts <= STORAGE_ONE_HOUR_MS && typeof sample.tracked[entry.name] === 'number')
@@ -257,6 +288,7 @@ const buildStorageHealth = (options: { writeHistory: boolean } = { writeHistory:
       scanEntries: scan.entries,
       scanMs: scan.ms,
       scanTruncated: scan.truncated,
+      scanMissingEntries: scan.missingEntries,
       scanMode: scan.mode,
     };
   });

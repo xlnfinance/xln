@@ -1,9 +1,13 @@
 import { describe, expect, test } from 'bun:test';
+import { lstatSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import {
   assertDiskFreeAtLeast,
   getDiskFreeShortfallBytes,
   getMinDiskFreeBytes,
+  isStoragePathMissingError,
   parseStorageHistory,
 } from '../orchestrator/storage-monitor';
 
@@ -31,5 +35,21 @@ describe('storage monitor disk guard', () => {
       .toThrow('STORAGE_HISTORY_INVALID:path=/tmp/corrupt-history.json');
     expect(() => parseStorageHistory('[{"ts":1}]', '/tmp/incomplete-history.json'))
       .toThrow('invalid entry at index 0');
+  });
+
+  test('classifies a real lstat deletion race without hiding other filesystem failures', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'xln-storage-monitor-'));
+    try {
+      let missingError: unknown;
+      try {
+        lstatSync(join(directory, 'already-rotated.log'));
+      } catch (error) {
+        missingError = error;
+      }
+      expect(isStoragePathMissingError(missingError)).toBe(true);
+      expect(isStoragePathMissingError(new Error('permission denied'))).toBe(false);
+    } finally {
+      rmSync(directory, { recursive: true });
+    }
   });
 });
