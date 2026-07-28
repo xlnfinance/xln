@@ -124,6 +124,15 @@ describe('reserve faucet failures', () => {
     expect(enqueued).toHaveLength(0);
   });
 
+  test('rejects fractional and unsafe token ids before reading state', async () => {
+    for (const tokenId of [1.5, Number.MAX_SAFE_INTEGER + 1, -1]) {
+      const { response, body, enqueued } = await callReserveFaucet({ tokenId });
+      expect(response.status).toBe(400);
+      expect(body.code).toBe('FAUCET_INVALID_TOKEN_ID');
+      expect(enqueued).toHaveLength(0);
+    }
+  });
+
   test('reports typed transient failure when no faucet hub is visible', async () => {
     const { response, body, enqueued } = await callReserveFaucet({
       activeHubEntityIds: [],
@@ -154,6 +163,22 @@ describe('reserve faucet failures', () => {
     expect(body.fatal).toBe(false);
     expect(body.have).toBe((99n * 10n ** 6n).toString());
     expect(body.need).toBe((100n * 10n ** 6n).toString());
+    expect(enqueued).toHaveLength(0);
+  });
+
+  test('never substitutes zero when the authoritative reserve read fails', async () => {
+    const adapter = makeAdapter();
+    adapter.getReserves = async () => {
+      throw new Error('RPC_READ_FAILED');
+    };
+    const { response, body, enqueued } = await callReserveFaucet({
+      adapter,
+      env: makeEnv({ hubReserve: 1_000n * 10n ** 6n }),
+    });
+
+    expect(response.status).toBe(500);
+    expect(body.code).toBe('FAUCET_RESERVE_UNHANDLED_ERROR');
+    expect(body.error).toBe('RPC_READ_FAILED');
     expect(enqueued).toHaveLength(0);
   });
 });

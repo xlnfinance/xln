@@ -1,175 +1,26 @@
-import { ethers } from 'ethers';
-import type { RuntimeState, RuntimeInput } from '../types';
+import type { RuntimeInput, RuntimeState } from '../types';
 import type { JAdapter } from '../jadapter';
-import { DEV_CHAIN_IDS } from '../jadapter';
 import { safeStringify } from '../protocol/serialization';
-import { createStructuredLogger, shortId } from '../infra/logger';
-import { resolveEntityProposerId } from '../state-helpers';
-import { formatTimingMs, getErrorMessage } from './utils';
-import { getEntityReplicaById } from './entity-lookup';
+import { createStructuredLogger } from '../infra/logger';
+import { getErrorMessage } from './utils';
 import { faucetFailureBody } from './faucet-failure';
-import { getFaucetHubProfiles } from './faucet-hubs';
 import {
-  findRecentReserveUpdatedEvent,
-  type RecentReserveUpdatedEvent,
-} from '../jurisdiction/event-evidence';
+  reserveFaucetLock,
+} from './reserve-faucet-waits';
+import {
+  runReserveFaucetRequest,
+} from './reserve-faucet-request';
+import type { TokenCatalogEntry } from './reserve-faucet-evidence';
 
 export {
   findRecentReserveUpdatedEvent,
-} from '../jurisdiction/event-evidence';
-
-type TokenCatalogEntry = {
-  tokenId?: number | string | null;
-  symbol?: string | null;
-  decimals?: number | null;
-};
+  parseReserveFaucetAmount,
+  waitForRecentReserveUpdatedEvent,
+} from './reserve-faucet-evidence';
 
 const faucetLog = createStructuredLogger('server.faucet');
 
-export const parseReserveFaucetAmount = (
-  amount: string,
-  tokenMeta: Pick<TokenCatalogEntry, 'tokenId' | 'decimals'>,
-): bigint => {
-  const decimals = tokenMeta.decimals;
-  if (typeof decimals !== 'number' || !Number.isSafeInteger(decimals) || decimals < 0 || decimals > 255) {
-    throw new Error(`FAUCET_TOKEN_DECIMALS_INVALID:${String(tokenMeta.tokenId)}:${String(tokenMeta.decimals)}`);
-  }
-  return ethers.parseUnits(amount, decimals);
-};
-
-export const waitForRecentReserveUpdatedEvent = async (
-  env: RuntimeState,
-  entityId: string,
-  tokenId: number,
-  expectedMin: bigint,
-  timeoutMs = 5000,
-  pollMs = 50,
-): Promise<RecentReserveUpdatedEvent | null> => {
-  const started = Date.now();
-  while (Date.now() - started < timeoutMs) {
-    const event = findRecentReserveUpdatedEvent(env, entityId, tokenId, expectedMin);
-    if (event) return event;
-    await new Promise(resolve => setTimeout(resolve, pollMs));
-  }
-  return findRecentReserveUpdatedEvent(env, entityId, tokenId, expectedMin);
-};
-
-const faucetLock = {
-  locked: false,
-  queue: [] as Array<() => void>,
-
-  async acquire(): Promise<void> {
-    if (!this.locked) {
-      this.locked = true;
-      return;
-    }
-    return new Promise(resolve => {
-      this.queue.push(resolve);
-    });
-  },
-
-  release(): void {
-    const next = this.queue.shift();
-    if (next) {
-      next();
-    } else {
-      this.locked = false;
-    }
-  },
-};
-
-const resolveRuntimeWaitPollMs = (adapter: JAdapter | null): number => {
-  if (!adapter) return 100;
-  if (adapter.mode === 'browservm') return 10;
-  if (DEV_CHAIN_IDS.has(adapter.chainId)) return 25;
-  return 100;
-};
-
-const resolveReserveWaitPollMs = (adapter: JAdapter | null): number => {
-  if (!adapter) return 300;
-  if (adapter.mode === 'browservm') return 10;
-  if (DEV_CHAIN_IDS.has(adapter.chainId)) return 50;
-  return 300;
-};
-
-const hasPendingRuntimeWork = (env: RuntimeState): boolean => {
-  if (env.pendingOutputs?.length) return true;
-  if (env.networkInbox?.length) return true;
-  if (env.runtimeMempool.runtimeTxs.length) return true;
-  if (env.runtimeMempool.entityInputs.length) return true;
-
-  if (env.jReplicas) {
-    for (const replica of env.jReplicas.values()) {
-      if ((replica.mempool?.length ?? 0) > 0) return true;
-    }
-  }
-
-  return false;
-};
-
-const waitForRuntimeIdle = async (env: RuntimeState, adapter: JAdapter | null, timeoutMs = 5000): Promise<boolean> => {
-  const started = Date.now();
-  const pollMs = resolveRuntimeWaitPollMs(adapter);
-  while (Date.now() - started < timeoutMs) {
-    if (!hasPendingRuntimeWork(env)) return true;
-    await new Promise(resolve => setTimeout(resolve, pollMs));
-  }
-  return false;
-};
-
-const waitForJBatchClear = async (env: RuntimeState, adapter: JAdapter | null, timeoutMs = 5000): Promise<boolean> => {
-  const started = Date.now();
-  const pollMs = resolveRuntimeWaitPollMs(adapter);
-  while (Date.now() - started < timeoutMs) {
-    const pendingJ = Array.from(env.jReplicas?.values?.() || []).some(j => (j.mempool?.length ?? 0) > 0);
-    if (!pendingJ && !hasPendingRuntimeWork(env)) return true;
-    await new Promise(resolve => setTimeout(resolve, pollMs));
-  }
-  return false;
-};
-
-const hasEntitySentBatchPending = (env: RuntimeState, entityId: string): boolean => {
-  const replica = getEntityReplicaById(env, entityId);
-  return Boolean(replica?.state?.jBatchState?.sentBatch);
-};
-
-const waitForEntityBroadcastWindow = async (
-  env: RuntimeState,
-  adapter: JAdapter | null,
-  entityId: string,
-  timeoutMs = 10000,
-): Promise<boolean> => {
-  const started = Date.now();
-  const pollMs = resolveRuntimeWaitPollMs(adapter);
-  while (Date.now() - started < timeoutMs) {
-    if (!hasEntitySentBatchPending(env, entityId)) return true;
-    await new Promise(resolve => setTimeout(resolve, pollMs));
-  }
-  return false;
-};
-
-const waitForReserveUpdate = async (
-  adapter: JAdapter,
-  entityId: string,
-  tokenId: number,
-  expectedMin: bigint,
-  timeoutMs = 10000,
-): Promise<bigint | null> => {
-  const started = Date.now();
-  const pollMs = resolveReserveWaitPollMs(adapter);
-  while (Date.now() - started < timeoutMs) {
-    try {
-      const current = await adapter.getReserves(entityId, tokenId);
-      if (current >= expectedMin) return current;
-    } catch (err) {
-      faucetLog.debug('reserve.poll_failed', { error: (err as Error).message });
-    }
-    await new Promise(resolve => setTimeout(resolve, pollMs));
-  }
-  return null;
-};
-
-export const handleReserveFaucet = async (input: {
+export type ReserveFaucetInput = {
   req: Request;
   env: RuntimeState | null;
   headers: HeadersInit;
@@ -177,249 +28,44 @@ export const handleReserveFaucet = async (input: {
   getJAdapter: () => JAdapter | null;
   ensureTokenCatalog: () => Promise<TokenCatalogEntry[]>;
   enqueueRuntimeInput: (env: RuntimeState, runtimeInput: RuntimeInput) => void;
-}): Promise<Response> => {
-  const { req, env, headers, relayStore, getJAdapter, ensureTokenCatalog, enqueueRuntimeInput } = input;
-  await faucetLock.acquire();
+};
+
+const unavailable = (
+  headers: HeadersInit,
+  code: string,
+  error: string,
+): Response => new Response(
+  safeStringify(faucetFailureBody({ code, error })),
+  { status: 503, headers },
+);
+
+export const handleReserveFaucet = async (input: ReserveFaucetInput): Promise<Response> => {
+  await reserveFaucetLock.acquire();
   try {
-    const adapter = getJAdapter();
+    const adapter = input.getJAdapter();
     if (!adapter) {
-      return new Response(safeStringify(faucetFailureBody({
-        code: 'FAUCET_J_ADAPTER_NOT_INITIALIZED',
-        error: 'J-adapter not initialized',
-      })), { status: 503, headers });
+      return unavailable(input.headers, 'FAUCET_J_ADAPTER_NOT_INITIALIZED', 'J-adapter not initialized');
     }
-    if (!env) {
-      return new Response(safeStringify(faucetFailureBody({
-        code: 'FAUCET_RUNTIME_NOT_INITIALIZED',
-        error: 'Runtime not initialized',
-      })), { status: 503, headers });
+    if (!input.env) {
+      return unavailable(input.headers, 'FAUCET_RUNTIME_NOT_INITIALIZED', 'Runtime not initialized');
     }
-
-    const body = await req.json();
-    const userEntityId = body?.userEntityId;
-    const rawTokenId = body?.tokenId ?? 1;
-    let tokenId = typeof rawTokenId === 'number' ? rawTokenId : Number(rawTokenId);
-    const tokenSymbol = typeof body?.tokenSymbol === 'string' ? body.tokenSymbol : undefined;
-    const amount = typeof body?.amount === 'string' ? body.amount : String(body?.amount ?? '100');
-    const requestId =
-      globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-
-    if (!userEntityId) {
-      return new Response(safeStringify(faucetFailureBody({
-        code: 'FAUCET_USER_ENTITY_ID_REQUIRED',
-        error: 'Missing userEntityId',
-      })), { status: 400, headers });
-    }
-    if (!Number.isFinite(tokenId)) {
-      return new Response(safeStringify(faucetFailureBody({
-        code: 'FAUCET_INVALID_TOKEN_ID',
-        error: 'Invalid tokenId',
-      })), { status: 400, headers });
-    }
-
-    const hubs = getFaucetHubProfiles(env, relayStore.activeHubEntityIds);
-    if (hubs.length === 0) {
-      return new Response(
-        safeStringify(faucetFailureBody({
-          error: 'No faucet hub available',
-          code: 'FAUCET_HUBS_EMPTY',
-          extra: {
-            profiles: env.gossip?.getProfiles?.()?.length || 0,
-            activeHubEntityIds: relayStore.activeHubEntityIds,
-          },
-        })),
-        { status: 503, headers },
-      );
-    }
-    const hubEntityId = hubs[0]!.entityId;
-
-    const hubSignerId = resolveEntityProposerId(env, hubEntityId, 'faucet-reserve');
-    const tokenCatalog = await ensureTokenCatalog();
-    let tokenMeta = tokenCatalog.find(t => Number(t.tokenId) === Number(tokenId));
-    if (!tokenMeta && tokenSymbol) {
-      tokenMeta = tokenCatalog.find(t => t.symbol?.toUpperCase?.() === tokenSymbol.toUpperCase());
-      if (tokenMeta?.tokenId !== undefined && tokenMeta?.tokenId !== null) {
-        tokenId = Number(tokenMeta.tokenId);
-      }
-    }
-    if (!tokenMeta) {
-      return new Response(safeStringify(faucetFailureBody({
-        code: 'FAUCET_TOKEN_UNKNOWN',
-        error: 'Unknown token for faucet',
-        extra: { tokenId, tokenSymbol },
-      })), {
-        status: 400,
-        headers,
-      });
-    }
-    const amountWei = parseReserveFaucetAmount(amount, tokenMeta);
-    const requestStartedAt = Date.now();
-    faucetLog.info('reserve.request', {
-      requestId,
-      hub: shortId(hubEntityId, 8),
-      user: shortId(userEntityId, 8),
-      tokenId,
-      amount,
+    return await runReserveFaucetRequest({
+      req: input.req,
+      env: input.env,
+      adapter,
+      headers: input.headers,
+      activeHubEntityIds: input.relayStore.activeHubEntityIds,
+      ensureTokenCatalog: input.ensureTokenCatalog,
+      enqueueRuntimeInput: input.enqueueRuntimeInput,
     });
-
-    const prevUserReserve = await adapter.getReserves(userEntityId, tokenId).catch(() => 0n);
-    const hubReplicaKey = Array.from(env.eReplicas?.keys?.() || []).find(key => key.startsWith(`${hubEntityId}:`));
-    const hubReplica = hubReplicaKey ? env.eReplicas?.get(hubReplicaKey) : null;
-    const hubReserve = hubReplica?.state?.reserves?.get(tokenId) ?? 0n;
-    if (hubReserve < amountWei) {
-      return new Response(
-        safeStringify(faucetFailureBody({
-          error: `Hub has insufficient reserves for token ${tokenId}`,
-          code: 'FAUCET_HUB_INSUFFICIENT_RESERVES',
-          extra: {
-            have: hubReserve.toString(),
-            need: amountWei.toString(),
-            requestId,
-          },
-        })),
-        { status: 409, headers },
-      );
-    }
-
-    const enqueueReserveTransfer = (): void => {
-      enqueueRuntimeInput(env, {
-        runtimeTxs: [],
-        entityInputs: [
-          {
-            entityId: hubEntityId,
-            signerId: hubSignerId,
-            entityTxs: [
-              {
-                type: 'r2r',
-                data: {
-                  toEntityId: userEntityId,
-                  tokenId,
-                  amount: amountWei,
-                },
-              },
-            ],
-          },
-        ],
-      });
-    };
-
-    const enqueueBatchBroadcast = (): void => {
-      enqueueRuntimeInput(env, {
-        runtimeTxs: [],
-        entityInputs: [
-          {
-            entityId: hubEntityId,
-            signerId: hubSignerId,
-            entityTxs: [{ type: 'j_broadcast', data: {} }],
-          },
-        ],
-      });
-    };
-
-    enqueueReserveTransfer();
-    const runtimeIdleStartedAt = Date.now();
-    const runtimeIdle = await waitForRuntimeIdle(env, adapter, 5000);
-    const runtimeIdleMs = Date.now() - runtimeIdleStartedAt;
-    if (!runtimeIdle) {
-      faucetLog.warn('reserve.runtime_idle_timeout', {
-        requestId,
-        ms: runtimeIdleMs,
-        pollMs: resolveRuntimeWaitPollMs(adapter),
-      });
-    }
-
-    const broadcastWindowReady = await waitForEntityBroadcastWindow(env, adapter, hubEntityId, 10000);
-    if (!broadcastWindowReady) {
-      return new Response(
-        safeStringify(faucetFailureBody({
-          error: 'Hub sentBatch did not clear in time',
-          code: 'FAUCET_SENT_BATCH_TIMEOUT',
-          extra: { requestId },
-        })),
-        { status: 504, headers },
-      );
-    }
-
-    enqueueBatchBroadcast();
-    const broadcastIdleStartedAt = Date.now();
-    const broadcastIdle = await waitForRuntimeIdle(env, adapter, 5000);
-    const broadcastIdleMs = Date.now() - broadcastIdleStartedAt;
-    if (!broadcastIdle) {
-      faucetLog.warn('reserve.broadcast_idle_timeout', {
-        requestId,
-        ms: broadcastIdleMs,
-        pollMs: resolveRuntimeWaitPollMs(adapter),
-      });
-    }
-
-    const jBatchCleared = await waitForJBatchClear(env, adapter, 10000);
-    if (!jBatchCleared) {
-      return new Response(
-        safeStringify(faucetFailureBody({
-          error: 'J-batch did not broadcast in time',
-          code: 'FAUCET_J_BATCH_TIMEOUT',
-          extra: { requestId },
-        })),
-        { status: 504, headers },
-      );
-    }
-
-    const expectedMin = prevUserReserve + amountWei;
-    const updatedReserve = await waitForReserveUpdate(adapter, userEntityId, tokenId, expectedMin, 10000);
-    if (updatedReserve === null) {
-      return new Response(
-        safeStringify(faucetFailureBody({
-          error: 'Reserve update not confirmed on-chain',
-          code: 'FAUCET_RESERVE_UPDATE_TIMEOUT',
-          extra: { requestId },
-        })),
-        { status: 504, headers },
-      );
-    }
-    const reserveEvent = await waitForRecentReserveUpdatedEvent(env, userEntityId, tokenId, expectedMin);
-    if (!reserveEvent) {
-      return new Response(
-        safeStringify(faucetFailureBody({
-          error: 'RESERVE_EVENT_MISSING',
-          code: 'FAUCET_RESERVE_EVENT_MISSING',
-          extra: {
-            requestId,
-            entityId: userEntityId,
-            tokenId,
-            expectedMin: expectedMin.toString(),
-            updatedReserve: updatedReserve.toString(),
-          },
-        })),
-        { status: 500, headers },
-      );
-    }
-    const totalMs = Date.now() - requestStartedAt;
-    faucetLog.info('reserve.accepted', {
-      requestId,
-      totalMs: formatTimingMs(totalMs),
-      updatedReserve: updatedReserve.toString(),
-    });
-
-    return new Response(
-      JSON.stringify({
-        success: true,
-        type: 'reserve',
-        amount,
-        tokenId,
-        from: hubEntityId.slice(0, 16) + '...',
-        to: userEntityId.slice(0, 16) + '...',
-        requestId,
-        events: [reserveEvent],
-      }),
-      { headers },
-    );
-  } catch (error: unknown) {
-    faucetLog.error('reserve.error', { error: getErrorMessage(error) });
+  } catch (error) {
+    const message = getErrorMessage(error);
+    faucetLog.error('reserve.error', { error: message });
     return new Response(safeStringify(faucetFailureBody({
       code: 'FAUCET_RESERVE_UNHANDLED_ERROR',
-      error: getErrorMessage(error),
-    })), { status: 500, headers });
+      error: message,
+    })), { status: 500, headers: input.headers });
   } finally {
-    faucetLock.release();
+    reserveFaucetLock.release();
   }
 };
