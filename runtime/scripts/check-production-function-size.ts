@@ -59,7 +59,6 @@ const COORDINATOR_DEBT: Readonly<Record<string, number>> = {
   "runtime/storage/index.ts::saveRuntimeFrameToStorage": 692,
   "runtime/storage/merkle.ts::buildRadixMerkleMaterialized": 181,
   "runtime/storage/restore-import.ts::replaceRestoredStorageBase": 152,
-  "runtime/validation-utils.ts::validateEntityState": 368,
   "runtime/watchtower/action.ts::runWatchtowerSweep": 159,
   "runtime/watchtower/store.ts::createWatchtowerStore": 372,
 };

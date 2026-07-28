@@ -1011,23 +1011,10 @@ export function validateAccountState(value: unknown, context = 'AccountState'): 
  * Validates EntityState objects - Complete entity state
  * CRITICAL: Entity integrity ensures consensus and routing safety
  */
-export function validateEntityState(value: unknown, context = 'EntityState'): EntityState {
-  const obj = validateObject(value, context);
-
-  // Basic validation - the interface is complex, so validate critical fields
-  if (!obj['entityId'] || typeof obj['entityId'] !== 'string') {
-    throw new FinancialDataCorruptionError(`${context}.entityId must be a string`);
-  }
-
-  if (typeof obj['height'] !== 'number') {
-    throw new FinancialDataCorruptionError(`${context}.height must be a number`);
-  }
-
-  if (typeof obj['timestamp'] !== 'number') {
-    throw new FinancialDataCorruptionError(`${context}.timestamp must be a number`);
-  }
-
-  validateConsensusConfig(obj['config'], `${context}.config`);
+const validateEntityCommandState = (
+  obj: Record<string, unknown>,
+  context: string,
+): void => {
   if (obj['entityCommandNonces'] !== undefined) {
     const commandNonces = validateObject(obj['entityCommandNonces'], `${context}.entityCommandNonces`);
     if (
@@ -1060,54 +1047,55 @@ export function validateEntityState(value: unknown, context = 'EntityState'): En
       }
     }
   }
-  if (obj['entityProviderActionState'] !== undefined) {
-    const actionState = validateObject(
-      obj['entityProviderActionState'],
-      `${context}.entityProviderActionState`,
-    );
-    if (
-      actionState['version'] !== 1 ||
-      typeof actionState['confirmedNonce'] !== 'bigint' ||
-      actionState['confirmedNonce'] < 0n ||
-      actionState['confirmedNonce'] > MAX_UINT256 ||
-      !Number.isSafeInteger(actionState['generation']) ||
-      Number(actionState['generation']) < 0
-    ) {
-      throw new FinancialDataCorruptionError(`${context}.entityProviderActionState header invalid`);
-    }
-    if (actionState['pending'] !== undefined) {
-      const pending = validateObject(
-        actionState['pending'],
-        `${context}.entityProviderActionState.pending`,
-      );
-      validateObject(pending['payload'], `${context}.entityProviderActionState.pending.payload`);
-      if (
-        typeof pending['actionNonce'] !== 'bigint' ||
-        pending['actionNonce'] !== actionState['confirmedNonce'] + 1n ||
-        pending['generation'] !== actionState['generation']
-      ) {
-        throw new FinancialDataCorruptionError(`${context}.entityProviderActionState.pending invalid`);
-      }
-      const jurisdiction = (obj['config'] as ConsensusConfig).jurisdiction;
-      if (!jurisdiction || !jurisdiction.chainId) {
-        throw new FinancialDataCorruptionError(`${context}.entityProviderActionState jurisdiction missing`);
-      }
-      try {
-        assertEntityProviderActionIntent(pending as unknown as EntityProviderActionIntent, {
-          chainId: jurisdiction.chainId,
-          entityProviderAddress: jurisdiction.entityProviderAddress,
-          depositoryAddress: jurisdiction.depositoryAddress,
-          entityId: String(obj['entityId']),
-        });
-      } catch (error) {
-        throw new FinancialDataCorruptionError(
-          `${context}.entityProviderActionState.pending cryptographic binding invalid`,
-          { cause: error instanceof Error ? error.message : String(error) },
-        );
-      }
-    }
+  if (obj['entityProviderActionState'] === undefined) return;
+  const actionState = validateObject(
+    obj['entityProviderActionState'],
+    `${context}.entityProviderActionState`,
+  );
+  if (
+    actionState['version'] !== 1 ||
+    typeof actionState['confirmedNonce'] !== 'bigint' ||
+    actionState['confirmedNonce'] < 0n ||
+    actionState['confirmedNonce'] > MAX_UINT256 ||
+    !Number.isSafeInteger(actionState['generation']) ||
+    Number(actionState['generation']) < 0
+  ) {
+    throw new FinancialDataCorruptionError(`${context}.entityProviderActionState header invalid`);
   }
-  const proposals = validateMapInstance(obj['proposals'], `${context}.proposals`);
+  if (actionState['pending'] === undefined) return;
+  const pending = validateObject(
+    actionState['pending'],
+    `${context}.entityProviderActionState.pending`,
+  );
+  validateObject(pending['payload'], `${context}.entityProviderActionState.pending.payload`);
+  if (
+    typeof pending['actionNonce'] !== 'bigint' ||
+    pending['actionNonce'] !== actionState['confirmedNonce'] + 1n ||
+    pending['generation'] !== actionState['generation']
+  ) {
+    throw new FinancialDataCorruptionError(`${context}.entityProviderActionState.pending invalid`);
+  }
+  const jurisdiction = (obj['config'] as ConsensusConfig).jurisdiction;
+  if (!jurisdiction || !jurisdiction.chainId) {
+    throw new FinancialDataCorruptionError(`${context}.entityProviderActionState jurisdiction missing`);
+  }
+  try {
+    assertEntityProviderActionIntent(pending as unknown as EntityProviderActionIntent, {
+      chainId: jurisdiction.chainId,
+      entityProviderAddress: jurisdiction.entityProviderAddress,
+      depositoryAddress: jurisdiction.depositoryAddress,
+      entityId: String(obj['entityId']),
+    });
+  } catch (error) {
+    throw new FinancialDataCorruptionError(
+      `${context}.entityProviderActionState.pending cryptographic binding invalid`,
+      { cause: error instanceof Error ? error.message : String(error) },
+    );
+  }
+};
+
+const validateEntityProposals = (value: unknown, context: string): void => {
+  const proposals = validateMapInstance(value, `${context}.proposals`);
   if (proposals.size > LIMITS.MAX_PROPOSALS_PER_ENTITY) {
     throw new FinancialDataCorruptionError(
       `${context}.proposals exceeds ${LIMITS.MAX_PROPOSALS_PER_ENTITY} bounded entries`,
@@ -1162,6 +1150,126 @@ export function validateEntityState(value: unknown, context = 'EntityState'): En
       { pendingProposalCount, terminalProposalCount },
     );
   }
+};
+
+const validateExternalWalletState = (value: unknown, context: string): void => {
+  if (value === undefined) return;
+  const externalWallet = validateObject(value, `${context}.externalWallet`);
+  validateMapInstance(externalWallet['balances'], `${context}.externalWallet.balances`);
+  validateMapInstance(externalWallet['allowances'], `${context}.externalWallet.allowances`);
+  for (const [owner, balances] of (externalWallet['balances'] as Map<unknown, unknown>).entries()) {
+    if (typeof owner !== 'string') {
+      throw new FinancialDataCorruptionError(`${context}.externalWallet.balances owner must be string`, { owner });
+    }
+    validateMapInstance(balances, `${context}.externalWallet.balances[${owner}]`);
+    for (const [tokenKey, record] of (balances as Map<unknown, unknown>).entries()) {
+      if (typeof tokenKey !== 'string') {
+        throw new FinancialDataCorruptionError(`${context}.externalWallet balance token key must be string`, { tokenKey });
+      }
+      const balanceRecord = validateObject(record, `${context}.externalWallet.balances[${owner}][${tokenKey}]`);
+      if (typeof balanceRecord['tokenAddress'] !== 'string') {
+        throw new FinancialDataCorruptionError(`${context}.externalWallet balance tokenAddress must be string`);
+      }
+      if (typeof balanceRecord['balance'] !== 'bigint') {
+        throw new FinancialDataCorruptionError(`${context}.externalWallet balance must be bigint`);
+      }
+      validateNumber(balanceRecord['jHeight'], `${context}.externalWallet balance jHeight`);
+    }
+  }
+  for (const [owner, allowances] of (externalWallet['allowances'] as Map<unknown, unknown>).entries()) {
+    if (typeof owner !== 'string') {
+      throw new FinancialDataCorruptionError(`${context}.externalWallet.allowances owner must be string`, { owner });
+    }
+    validateMapInstance(allowances, `${context}.externalWallet.allowances[${owner}]`);
+    for (const [allowanceKey, record] of (allowances as Map<unknown, unknown>).entries()) {
+      if (typeof allowanceKey !== 'string') {
+        throw new FinancialDataCorruptionError(`${context}.externalWallet allowance key must be string`, { allowanceKey });
+      }
+      const allowanceRecord = validateObject(record, `${context}.externalWallet.allowances[${owner}][${allowanceKey}]`);
+      if (typeof allowanceRecord['tokenAddress'] !== 'string' || typeof allowanceRecord['spender'] !== 'string') {
+        throw new FinancialDataCorruptionError(`${context}.externalWallet allowance addresses must be strings`);
+      }
+      if (typeof allowanceRecord['allowance'] !== 'bigint') {
+        throw new FinancialDataCorruptionError(`${context}.externalWallet allowance must be bigint`);
+      }
+      validateNumber(allowanceRecord['jHeight'], `${context}.externalWallet allowance jHeight`);
+    }
+  }
+};
+
+const validateEntityAccountMetadata = (
+  obj: Record<string, unknown>,
+  context: string,
+): void => {
+  if (obj['htlcNotes'] !== undefined) {
+    const notes = validateMapInstance(obj['htlcNotes'], `${context}.htlcNotes`);
+    if (notes.size > LIMITS.MAX_ENTITY_HTLC_NOTES) {
+      throw new FinancialDataCorruptionError(
+        `ENTITY_HTLC_NOTE_LIMIT_EXCEEDED:${context}:size=${notes.size}:max=${LIMITS.MAX_ENTITY_HTLC_NOTES}`,
+      );
+    }
+    for (const [key, note] of notes) {
+      if (
+        typeof key !== 'string' ||
+        key.length > LIMITS.MAX_ENTITY_HTLC_NOTE_LENGTH ||
+        (!key.startsWith('hashlock:') && !key.startsWith('lock:')) ||
+        key.endsWith(':')
+      ) {
+        throw new FinancialDataCorruptionError(`${context}.htlcNotes contains invalid key`);
+      }
+      if (
+        typeof note !== 'string' ||
+        note.length === 0 ||
+        note.length > LIMITS.MAX_ENTITY_HTLC_NOTE_LENGTH
+      ) {
+        throw new FinancialDataCorruptionError(`${context}.htlcNotes contains invalid note`);
+      }
+    }
+  }
+  if (obj['deferredAccountProposals'] === undefined) return;
+  const deferred = validateMapInstance(
+    obj['deferredAccountProposals'],
+    `${context}.deferredAccountProposals`,
+  );
+  if (deferred.size > LIMITS.MAX_ACCOUNTS_PER_ENTITY) {
+    throw new FinancialDataCorruptionError(
+      `${context}.deferredAccountProposals exceeds ${LIMITS.MAX_ACCOUNTS_PER_ENTITY}`,
+    );
+  }
+  for (const [rawAccountId, rawWorkspaceHash] of deferred) {
+    const accountId = String(rawAccountId ?? '');
+    const workspaceHash = String(rawWorkspaceHash ?? '');
+    if (!/^0x[0-9a-f]{64}$/.test(accountId) || accountId !== rawAccountId) {
+      throw new FinancialDataCorruptionError(`${context}.deferredAccountProposals account invalid`);
+    }
+    if (!(obj['accounts'] as Map<string, unknown>).has(accountId)) {
+      throw new FinancialDataCorruptionError(`${context}.deferredAccountProposals account missing`);
+    }
+    if (!/^0x[0-9a-f]{64}$/.test(workspaceHash) || workspaceHash !== rawWorkspaceHash) {
+      throw new FinancialDataCorruptionError(`${context}.deferredAccountProposals workspace hash invalid`);
+    }
+  }
+};
+
+export function validateEntityState(value: unknown, context = 'EntityState'): EntityState {
+  const obj = validateObject(value, context);
+
+  // Basic validation - the interface is complex, so validate critical fields
+  if (!obj['entityId'] || typeof obj['entityId'] !== 'string') {
+    throw new FinancialDataCorruptionError(`${context}.entityId must be a string`);
+  }
+
+  if (typeof obj['height'] !== 'number') {
+    throw new FinancialDataCorruptionError(`${context}.height must be a number`);
+  }
+
+  if (typeof obj['timestamp'] !== 'number') {
+    throw new FinancialDataCorruptionError(`${context}.timestamp must be a number`);
+  }
+
+  validateConsensusConfig(obj['config'], `${context}.config`);
+  validateEntityCommandState(obj, context);
+  validateEntityProposals(obj['proposals'], context);
   if (obj['profileEncryptionManifest'] !== undefined) {
     try {
       validatePersistedValidatorEncryptionManifest(
@@ -1200,55 +1308,7 @@ export function validateEntityState(value: unknown, context = 'EntityState'): En
     obj['accounts'] as Map<string, unknown>,
     `${context}.accounts`,
   );
-  if (obj['htlcNotes'] !== undefined) {
-    const notes = validateMapInstance(obj['htlcNotes'], `${context}.htlcNotes`);
-    if (notes.size > LIMITS.MAX_ENTITY_HTLC_NOTES) {
-      throw new FinancialDataCorruptionError(
-        `ENTITY_HTLC_NOTE_LIMIT_EXCEEDED:${context}:size=${notes.size}:max=${LIMITS.MAX_ENTITY_HTLC_NOTES}`,
-      );
-    }
-    for (const [key, note] of notes) {
-      if (
-        typeof key !== 'string' ||
-        key.length > LIMITS.MAX_ENTITY_HTLC_NOTE_LENGTH ||
-        (!key.startsWith('hashlock:') && !key.startsWith('lock:')) ||
-        key.endsWith(':')
-      ) {
-        throw new FinancialDataCorruptionError(`${context}.htlcNotes contains invalid key`);
-      }
-      if (
-        typeof note !== 'string' ||
-        note.length === 0 ||
-        note.length > LIMITS.MAX_ENTITY_HTLC_NOTE_LENGTH
-      ) {
-        throw new FinancialDataCorruptionError(`${context}.htlcNotes contains invalid note`);
-      }
-    }
-  }
-  if (obj['deferredAccountProposals'] !== undefined) {
-    const deferred = validateMapInstance(
-      obj['deferredAccountProposals'],
-      `${context}.deferredAccountProposals`,
-    );
-    if (deferred.size > LIMITS.MAX_ACCOUNTS_PER_ENTITY) {
-      throw new FinancialDataCorruptionError(
-        `${context}.deferredAccountProposals exceeds ${LIMITS.MAX_ACCOUNTS_PER_ENTITY}`,
-      );
-    }
-    for (const [rawAccountId, rawWorkspaceHash] of deferred) {
-      const accountId = String(rawAccountId ?? '');
-      const workspaceHash = String(rawWorkspaceHash ?? '');
-      if (!/^0x[0-9a-f]{64}$/.test(accountId) || accountId !== rawAccountId) {
-        throw new FinancialDataCorruptionError(`${context}.deferredAccountProposals account invalid`);
-      }
-      if (!(obj['accounts'] as Map<string, unknown>).has(accountId)) {
-        throw new FinancialDataCorruptionError(`${context}.deferredAccountProposals account missing`);
-      }
-      if (!/^0x[0-9a-f]{64}$/.test(workspaceHash) || workspaceHash !== rawWorkspaceHash) {
-        throw new FinancialDataCorruptionError(`${context}.deferredAccountProposals workspace hash invalid`);
-      }
-    }
-  }
+  validateEntityAccountMetadata(obj, context);
 
   if (obj['consumptionAccumulator'] !== undefined) {
     try {
@@ -1308,49 +1368,7 @@ export function validateEntityState(value: unknown, context = 'EntityState'): En
     }
   }
 
-  if (obj['externalWallet'] !== undefined) {
-    const externalWallet = validateObject(obj['externalWallet'], `${context}.externalWallet`);
-    validateMapInstance(externalWallet['balances'], `${context}.externalWallet.balances`);
-    validateMapInstance(externalWallet['allowances'], `${context}.externalWallet.allowances`);
-    for (const [owner, balances] of (externalWallet['balances'] as Map<unknown, unknown>).entries()) {
-      if (typeof owner !== 'string') {
-        throw new FinancialDataCorruptionError(`${context}.externalWallet.balances owner must be string`, { owner });
-      }
-      validateMapInstance(balances, `${context}.externalWallet.balances[${owner}]`);
-      for (const [tokenKey, record] of (balances as Map<unknown, unknown>).entries()) {
-        if (typeof tokenKey !== 'string') {
-          throw new FinancialDataCorruptionError(`${context}.externalWallet balance token key must be string`, { tokenKey });
-        }
-        const balanceRecord = validateObject(record, `${context}.externalWallet.balances[${owner}][${tokenKey}]`);
-        if (typeof balanceRecord['tokenAddress'] !== 'string') {
-          throw new FinancialDataCorruptionError(`${context}.externalWallet balance tokenAddress must be string`);
-        }
-        if (typeof balanceRecord['balance'] !== 'bigint') {
-          throw new FinancialDataCorruptionError(`${context}.externalWallet balance must be bigint`);
-        }
-        validateNumber(balanceRecord['jHeight'], `${context}.externalWallet balance jHeight`);
-      }
-    }
-    for (const [owner, allowances] of (externalWallet['allowances'] as Map<unknown, unknown>).entries()) {
-      if (typeof owner !== 'string') {
-        throw new FinancialDataCorruptionError(`${context}.externalWallet.allowances owner must be string`, { owner });
-      }
-      validateMapInstance(allowances, `${context}.externalWallet.allowances[${owner}]`);
-      for (const [allowanceKey, record] of (allowances as Map<unknown, unknown>).entries()) {
-        if (typeof allowanceKey !== 'string') {
-          throw new FinancialDataCorruptionError(`${context}.externalWallet allowance key must be string`, { allowanceKey });
-        }
-        const allowanceRecord = validateObject(record, `${context}.externalWallet.allowances[${owner}][${allowanceKey}]`);
-        if (typeof allowanceRecord['tokenAddress'] !== 'string' || typeof allowanceRecord['spender'] !== 'string') {
-          throw new FinancialDataCorruptionError(`${context}.externalWallet allowance addresses must be strings`);
-        }
-        if (typeof allowanceRecord['allowance'] !== 'bigint') {
-          throw new FinancialDataCorruptionError(`${context}.externalWallet allowance must be bigint`);
-        }
-        validateNumber(allowanceRecord['jHeight'], `${context}.externalWallet allowance jHeight`);
-      }
-    }
-  }
+  validateExternalWalletState(obj['externalWallet'], context);
 
   // Financial invariant: reserves must be keyed by numeric tokenId and valued by bigint.
   // Do not tolerate string token keys in live state; decode boundaries must canonicalize before this.
