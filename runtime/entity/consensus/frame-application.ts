@@ -67,7 +67,6 @@ import { isEntityCommandForbiddenTx } from '../command-codec';
 import {
   applyConsumptionOutput,
   createEmptyConsumptionAccumulator,
-  type ConsumptionNode,
 } from '../consumption-accumulator';
 import { type ConsumptionNodeChanges } from '../consumption-store';
 import {
@@ -75,14 +74,13 @@ import {
   entityTxContainsCrossJSetup,
   selectCrossJOpeningAccountProposalTxs,
 } from '../cross-j-proposer-materialization';
-import { cancelHook, initCrontab, scheduleHook } from '../scheduler';
+import { initCrontab } from '../scheduler';
 import { applyEntityTx } from '../tx';
 import {
   normalizeSwapOfferForOrderbook,
   processOrderbookCancels,
   processOrderbookSwaps,
   routeRemoteCrossJurisdictionBookCancels,
-  type SwapCancelEvent,
   type SwapCancelRequestEvent,
   type SwapOfferEvent,
 } from '../tx/handlers/account';
@@ -96,6 +94,8 @@ import { queueAccountMempoolTx } from './account-mempool-queue';
 import { assertEntityFrameTxByteBudget } from './frame';
 import { assignCertifiedOutputIdentities, verifyCertifiedEntityOutput } from './output-certification';
 import { invalidateEntityAccountCommitment } from './state-root';
+import type { ApplyEntityTxsInOrderContext } from './frame-application-types';
+import { applyEntityTxReturnedEffects } from './frame-tx-effects';
 
 import {
   admitOrderbookOfferForMatching,
@@ -110,36 +110,6 @@ import {
   ownsSourceHubRouteForFillAck,
   stashPendingCrossJurisdictionFillAck,
 } from './shared';
-
-type ApplyEntityTxsInOrderContext = {
-  env: Env;
-  entityTxs: EntityTx[];
-  currentEntityState: EntityState;
-  allOutputs: EntityInput[];
-  allJOutputs: JInput[];
-  collectedHashes: Array<{ hash: string; type: HashType; context: string }>;
-  proposableAccounts: Set<string>;
-  requiredAccountResponses: Map<string, AccountInput>;
-  allSwapOffersCreated: SwapOfferEvent[];
-  allSwapCancelRequests: SwapCancelRequestEvent[];
-  allSwapOffersCancelled: SwapCancelEvent[];
-  frameProfileTxTotals: Map<string, { count: number; elapsedMs: number }>;
-  consumptionNewNodes: Map<string, ConsumptionNode>;
-  consumptionReplacedNodeHashes: Set<string>;
-  accountJClaimNewNodes: Map<string, AccountJClaimNode>;
-  accountJClaimReplacedNodeHashes: Set<string>;
-  accountJClaimNodeStore: AccountJClaimNodeStore;
-  candidateEffects: EntityCandidateEffect[];
-  storageChanges: RuntimeOverlayRecord[];
-  /** Set only after the enclosing SignedEntityCommand has been fully verified. */
-  authorizedCommand?: true | undefined;
-  /** Set only when a signed proposal has reached real weighted board quorum. */
-  authorizedCollective?: true | undefined;
-  /** Exact source-board Hanko lane for cross-Entity certified outputs. */
-  authorizedCertifiedOutput?: true | undefined;
-  /** Runtime-local proposer trust lane for cross-j sibling effects. */
-  authorizedRuntimeOutput?: true | undefined;
-};
 
 const recordFrameAccountChange = (
   storageChanges: RuntimeOverlayRecord[],
@@ -245,10 +215,6 @@ async function applyEntityTxsInOrder(context: ApplyEntityTxsInOrderContext): Pro
     collectedHashes,
     proposableAccounts,
     requiredAccountResponses,
-    allSwapOffersCreated,
-    allSwapCancelRequests,
-    allSwapOffersCancelled,
-    frameProfileTxTotals,
   } = context;
   let currentEntityState = context.currentEntityState;
   const manualBroadcastInInput = entityTxs.some(tx => tx.type === 'j_broadcast');
@@ -356,137 +322,18 @@ async function applyEntityTxsInOrder(context: ApplyEntityTxsInOrderContext): Pro
       collectedHashes.push(...hashesToSign);
     }
 
-    // Entity handlers return mempoolOps; this orchestrator is the only place
-    // that mutates account.mempool during entity-frame application.
-    if (mempoolOps && mempoolOps.length > 0) {
-      for (const { accountId, tx } of mempoolOps) {
-        const account = currentEntityState.accounts.get(accountId);
-        if (tx.type === 'cross_swap_fill_ack' && !account?.swapOffers?.has(tx.data.offerId)) {
-          const routed = buildCrossJurisdictionFillNoticeOutput(currentEntityState, accountId, tx);
-          if (!routed) {
-            if (ownsSourceHubRouteForFillAck(currentEntityState, tx)) {
-              stashPendingCrossJurisdictionFillAck(
-                env,
-                currentEntityState,
-                accountId,
-                tx,
-                account ? 'source_offer_not_committed' : 'source_account_not_committed',
-              );
-              continue;
-            }
-            throw new Error(
-              `CROSS_J_FILL_ACK_ACCOUNT_OFFER_MISSING: account=${accountId} offer=${tx.data.offerId} ` +
-                `entity=${currentEntityState.entityId}`,
-            );
-          }
-          allOutputs.push(routed);
-          entityLog.info('crossj.sibling_fill_notice_routed', {
-            owner: shortId(routed.entityId, 8),
-            account: shortId(accountId, 8),
-            offer: shortOrder(tx.data.offerId, 8),
-          });
-          continue;
-        }
-        if (account) {
-          if (!queueAccountMempoolTx(account, tx)) {
-            continue;
-          }
-          proposableAccounts.add(accountId);
-          recordFrameAccountChange(context.storageChanges, currentEntityState.entityId, accountId);
-
-          if (tx.type === 'htlc_lock' && tx.data?.timelock && tx.data?.lockId) {
-            if (currentEntityState.crontabState) {
-              scheduleHook(currentEntityState.crontabState, {
-                id: `htlc-timeout:${tx.data.lockId}`,
-                triggerAt: Number(tx.data.timelock),
-                type: 'htlc_timeout',
-                data: { accountId, lockId: tx.data.lockId },
-              });
-            }
-          }
-
-          if (tx.type === 'htlc_resolve' && tx.data?.lockId) {
-            if (currentEntityState.crontabState) {
-              cancelHook(currentEntityState.crontabState, `htlc-timeout:${tx.data.lockId}`);
-            }
-          }
-        } else if (tx.type === 'cross_swap_fill_ack') {
-          throw new Error(
-            `CROSS_J_FILL_ACK_ACCOUNT_MISSING: account=${accountId} offer=${tx.data.offerId} entity=${currentEntityState.entityId}`,
-          );
-        } else {
-          entityLog.warn('mempool_op.account_missing', { account: shortId(accountId, 8), tx: tx.type });
-        }
-      }
-    }
-
-    if (swapOffersCreated) {
-      for (const offer of swapOffersCreated) {
-        // Every cross-j offer still passes through the canonical admission gate
-        // in applyOrderbookMatching: non-owners are ignored and incomplete
-        // source/target receipts remain pending. Do not filter by the outer
-        // EntityTx type here. When the canonical source hub commits its Account
-        // pull, the second receipt and swap_offer can become authoritative in
-        // this accountInput itself; dropping that pure event leaves an admitted
-        // route permanently absent from the shared book.
-        allSwapOffersCreated.push(offer);
-      }
-    }
-    if (swapCancelRequests) {
-      for (const cancel of swapCancelRequests) {
-        const offer = currentEntityState.accounts.get(cancel.accountId)?.swapOffers?.get(cancel.offerId);
-        if (
-          offer?.crossJurisdiction &&
-          normalizeEntityRef(currentEntityState.entityId) !==
-            normalizeEntityRef(offer.crossJurisdiction.source.counterpartyEntityId)
-        ) {
-          // Both Account replicas observe the committed request, but only the
-          // source hub owns the order lifecycle. The source user must not run a
-          // local orderbook fallback or send a diagonal Entity message.
-          continue;
-        }
-        allSwapCancelRequests.push(cancel);
-      }
-    }
-    if (swapOffersCancelled) allSwapOffersCancelled.push(...swapOffersCancelled);
-
-    if (entityTx.type === 'accountInput' && entityTx.data) {
-      const fromEntity = entityTx.data.fromEntityId;
-      const accountMachine = currentEntityState.accounts.get(fromEntity);
-
-      if (accountMachine) {
-        if (accountHasProposableMempool(accountMachine, currentEntityState)) {
-          proposableAccounts.add(fromEntity);
-        }
-      }
-    } else if (entityTx.type === 'directPayment' && entityTx.data) {
-      for (const [counterpartyId, accountMachine] of currentEntityState.accounts) {
-        if (accountHasProposableMempool(accountMachine, currentEntityState)) {
-          proposableAccounts.add(counterpartyId);
-        }
-      }
-    } else if (entityTx.type === 'openAccount' && entityTx.data) {
-      const targetEntity = entityTx.data.targetEntityId;
-      const accountMachine = currentEntityState.accounts.get(targetEntity);
-      if (accountMachine) {
-        if (accountHasProposableMempool(accountMachine, currentEntityState)) {
-          proposableAccounts.add(targetEntity);
-        }
-      }
-    } else if (entityTx.type === 'extendCredit' && entityTx.data) {
-      const counterpartyId = entityTx.data.counterpartyEntityId;
-      const accountMachine = currentEntityState.accounts.get(counterpartyId);
-      if (accountMachine && accountHasProposableMempool(accountMachine, currentEntityState)) {
-        proposableAccounts.add(counterpartyId);
-      }
-    }
-    drainPendingCrossJurisdictionFillAcks(env, currentEntityState, proposableAccounts, context.storageChanges);
-    drainCommittedCrossJurisdictionCancelAcks(currentEntityState, proposableAccounts, context.storageChanges);
-    const txElapsedMs = Math.round(getPerfMs() - txProfileStartMs);
-    const txProfile = frameProfileTxTotals.get(entityTx.type) ?? { count: 0, elapsedMs: 0 };
-    txProfile.count += 1;
-    txProfile.elapsedMs += txElapsedMs;
-    frameProfileTxTotals.set(entityTx.type, txProfile);
+    applyEntityTxReturnedEffects(
+      context,
+      currentEntityState,
+      entityTx,
+      txProfileStartMs,
+      {
+        ...(mempoolOps ? { mempoolOps } : {}),
+        ...(swapOffersCreated ? { swapOffersCreated } : {}),
+        ...(swapCancelRequests ? { swapCancelRequests } : {}),
+        ...(swapOffersCancelled ? { swapOffersCancelled } : {}),
+      },
+    );
   }
 
   return currentEntityState;
@@ -1081,31 +928,34 @@ function applySwapCancelRequests(context: ApplySwapCancelRequestsContext): void 
   }
 }
 
-export const applyEntityFrame = async (
-  env: Env,
-  entityState: EntityState,
-  entityTxs: EntityTx[],
-  // DETERMINISM: Validators pass proposedFrame.timestamp to match proposer's lockIds/timelocks.
-  // Proposers pass env.timestamp (their local time when creating the frame).
-  frameTimestamp?: number,
-): Promise<{
+type EntityFrameResult = {
   newState: EntityState;
-  // State snapshot BEFORE account proposals (deterministic across proposer + validators)
-  // Proposer must hash from this state to match validator verification
   deterministicState: EntityState;
   outputs: EntityInput[];
   jOutputs: JInput[];
   candidateEffects: EntityCandidateEffect[];
   storageChanges: RuntimeOverlayRecord[];
-  // Hashes emitted during frame processing that need entity-quorum signing
-  collectedHashes?: Array<{
-    hash: string;
-    type: HashType;
-    context: string;
-  }>;
+  collectedHashes?: Array<{ hash: string; type: HashType; context: string }>;
   consumptionNodeChanges?: ConsumptionNodeChanges;
   accountJClaimNodeChanges?: AccountJClaimNodeChanges;
-}> => {
+};
+
+type EntityFrameWorkingSet = {
+  authorityTransitionOnly: boolean;
+  crossJSetupPhase: boolean;
+  currentEntityState: EntityState;
+  context: ApplyEntityTxsInOrderContext;
+  frameProfileStartMs: number;
+  frameProfileMarks: Record<string, number>;
+  markFrameProfile: (label: string) => void;
+};
+
+const prepareEntityFrameWorkingSet = async (
+  env: Env,
+  entityState: EntityState,
+  entityTxs: EntityTx[],
+  frameTimestamp: number | undefined,
+): Promise<EntityFrameWorkingSet> => {
   assertEntityFrameTxByteBudget(entityTxs);
   assertEntityFrameJRangeBudget(entityTxs);
   assertScheduledWakeFrameOrder(entityTxs);
@@ -1113,259 +963,284 @@ export const applyEntityFrame = async (
   if (crossJSetupPhase && entityTxs.some(entityTxContainsAccountTransition)) {
     throw new Error('CROSS_J_SETUP_ACCOUNT_TRANSITION_MIXED');
   }
-  const authorityTransitionOnly = await isSelfBoardAuthorityTransitionFrame(env, entityState, entityTxs);
+  const authorityTransitionOnly = await isSelfBoardAuthorityTransitionFrame(
+    env,
+    entityState,
+    entityTxs,
+  );
   const frameProfileStartMs = getPerfMs();
   const frameProfileMarks: Record<string, number> = {};
-  const frameProfileTxTotals = new Map<string, { count: number; elapsedMs: number }>();
   const markFrameProfile = (label: string): void => {
     frameProfileMarks[label] = Math.round(getPerfMs() - frameProfileStartMs);
   };
   entityLog.debug('frame.apply', { txs: entityTxs.map(tx => tx.type) });
-
-  // Work on a clone so failed frame construction cannot leak mutations.
-  const authorityNormalizedState = normalizeEntityProposalBoard(
+  const normalized = normalizeEntityProposalBoard(
     env,
     normalizeEntityCommandNonceBoard(env, entityState),
   );
-  let currentEntityState = cloneEntityState(authorityNormalizedState);
-  // Legacy/manual states may omit the scheduler. Its deterministic default is
-  // consensus state, so initialize it only inside the proposed frame replay.
-  // Mutating one replica before a frame commits creates a same-height fork.
-  if (!currentEntityState.crontabState) currentEntityState.crontabState = initCrontab();
+  const currentEntityState = cloneEntityState(normalized);
+  currentEntityState.crontabState ??= initCrontab();
   markFrameProfile('clone');
-
-  // Validators receive the proposer's frame timestamp; proposers use env.timestamp.
-  // HTLC timelocks and lockIds must see this before handlers run.
-  const effectiveFrameTimestamp = frameTimestamp ?? env.timestamp;
-  if (!Number.isSafeInteger(effectiveFrameTimestamp) || effectiveFrameTimestamp < 0) {
-    throw new Error(`ENTITY_FRAME_TIMESTAMP_INVALID:${String(effectiveFrameTimestamp)}`);
+  const effectiveTimestamp = frameTimestamp ?? env.timestamp;
+  if (!Number.isSafeInteger(effectiveTimestamp) || effectiveTimestamp < 0) {
+    throw new Error(`ENTITY_FRAME_TIMESTAMP_INVALID:${String(effectiveTimestamp)}`);
   }
-  if (effectiveFrameTimestamp < currentEntityState.timestamp) {
+  if (effectiveTimestamp < currentEntityState.timestamp) {
     throw new Error(
-      `ENTITY_FRAME_TIMESTAMP_REGRESSION:previous=${currentEntityState.timestamp}:proposed=${effectiveFrameTimestamp}`,
+      `ENTITY_FRAME_TIMESTAMP_REGRESSION:previous=${currentEntityState.timestamp}:` +
+      `proposed=${effectiveTimestamp}`,
     );
   }
-  currentEntityState.timestamp = effectiveFrameTimestamp;
-  const allOutputs: EntityInput[] = [];
-  const allJOutputs: JInput[] = [];
-  const collectedHashes: Array<{
-    hash: string;
-    type: HashType;
-    context: string;
-  }> = [];
-  const consumptionNewNodes = new Map<string, ConsumptionNode>();
-  const consumptionReplacedNodeHashes = new Set<string>();
+  currentEntityState.timestamp = effectiveTimestamp;
   const accountJClaimNewNodes = new Map<string, AccountJClaimNode>();
-  const accountJClaimReplacedNodeHashes = new Set<string>();
-  const storageChanges: RuntimeOverlayRecord[] = [];
-  const candidateEffects: EntityCandidateEffect[] = [];
-  const committedAccountJClaimNodes = getAccountJClaimNodeStore(env);
-  const accountJClaimNodeStore: AccountJClaimNodeStore = {
-    get: hash => accountJClaimNewNodes.get(hash) ?? committedAccountJClaimNodes.get(hash),
-  };
-
-  const proposableAccounts = new Set<string>();
-  const requiredAccountResponses = new Map<string, AccountInput>();
-  if (!authorityTransitionOnly) {
-    drainPendingCrossJurisdictionFillAcks(env, currentEntityState, proposableAccounts, storageChanges);
-    drainCommittedCrossJurisdictionCancelAcks(currentEntityState, proposableAccounts, storageChanges);
-    for (const [accountId, accountMachine] of currentEntityState.accounts) {
-      if (accountHasProposableMempool(accountMachine, currentEntityState)) {
-        proposableAccounts.add(accountId);
-      }
-    }
-  }
-
-  const allSwapOffersCreated: SwapOfferEvent[] = [];
-  const allSwapCancelRequests: SwapCancelRequestEvent[] = [];
-  const allSwapOffersCancelled: SwapCancelEvent[] = [];
-
-  currentEntityState = await applyEntityTxsInOrder({
+  const committedClaimNodes = getAccountJClaimNodeStore(env);
+  const context: ApplyEntityTxsInOrderContext = {
     env,
     entityTxs,
     currentEntityState,
-    allOutputs,
-    allJOutputs,
-    collectedHashes,
-    proposableAccounts,
-    requiredAccountResponses,
-    allSwapOffersCreated,
-    allSwapCancelRequests,
-    allSwapOffersCancelled,
-    frameProfileTxTotals,
-    consumptionNewNodes,
-    consumptionReplacedNodeHashes,
+    allOutputs: [],
+    allJOutputs: [],
+    collectedHashes: [],
+    proposableAccounts: new Set(),
+    requiredAccountResponses: new Map(),
+    allSwapOffersCreated: [],
+    allSwapCancelRequests: [],
+    allSwapOffersCancelled: [],
+    frameProfileTxTotals: new Map(),
+    consumptionNewNodes: new Map(),
+    consumptionReplacedNodeHashes: new Set(),
     accountJClaimNewNodes,
-    accountJClaimReplacedNodeHashes,
-    accountJClaimNodeStore,
-    candidateEffects,
-    storageChanges,
-  });
-  markFrameProfile('entityTxLoop');
-
-  // A certified manifest makes the current public routing descriptor part of
-  // every Entity frame's unified Hanko map. Derive it only after the complete
-  // transaction list has applied: a certifyProfile followed by accountInput
-  // must sign the final Account capacities, never an intermediate descriptor.
-  const currentProfileHash = buildCurrentEntityProfileHashToSign(currentEntityState);
-  if (currentProfileHash) collectedHashes.push(currentProfileHash);
-
-  if (authorityTransitionOnly) {
-    currentEntityState = assignCertifiedOutputIdentities(currentEntityState, allOutputs);
-    entityLog.info('frame.board_authority_transition_only', {
-      entity: shortId(currentEntityState.entityId),
-      txs: entityTxs.length,
-      finalizedJHeight: currentEntityState.lastFinalizedJHeight,
-    });
-    return {
-      newState: currentEntityState,
-      deterministicState: cloneEntityState(currentEntityState),
-      outputs: allOutputs,
-      jOutputs: allJOutputs,
-      candidateEffects,
-      storageChanges: mergeStorageOverlayRecords(undefined, storageChanges),
-      collectedHashes,
-      ...(consumptionNewNodes.size > 0 || consumptionReplacedNodeHashes.size > 0
-        ? {
-            consumptionNodeChanges: {
-              newNodes: Array.from(consumptionNewNodes, ([hash, node]) => ({ hash, node })),
-              replacedNodeHashes: Array.from(consumptionReplacedNodeHashes).sort(),
-            },
-          }
-        : {}),
-      ...(accountJClaimNewNodes.size > 0 || accountJClaimReplacedNodeHashes.size > 0
-        ? {
-            accountJClaimNodeChanges: {
-              newNodes: Array.from(accountJClaimNewNodes, ([hash, node]) => ({ hash, node })),
-              replacedNodeHashes: Array.from(accountJClaimReplacedNodeHashes).sort(),
-            },
-          }
-        : {}),
-    };
+    accountJClaimReplacedNodeHashes: new Set(),
+    accountJClaimNodeStore: {
+      get: hash => accountJClaimNewNodes.get(hash) ?? committedClaimNodes.get(hash),
+    },
+    candidateEffects: [],
+    storageChanges: [],
+  };
+  if (!authorityTransitionOnly) {
+    drainPendingCrossJurisdictionFillAcks(
+      env,
+      currentEntityState,
+      context.proposableAccounts,
+      context.storageChanges,
+    );
+    drainCommittedCrossJurisdictionCancelAcks(
+      currentEntityState,
+      context.proposableAccounts,
+      context.storageChanges,
+    );
+    for (const [accountId, account] of currentEntityState.accounts) {
+      if (accountHasProposableMempool(account, currentEntityState)) {
+        context.proposableAccounts.add(accountId);
+      }
+    }
   }
-
-  // === APPLY AGGREGATED PURE EVENTS ===
-
-  // 1. MempoolOps now applied inline (see above in the loop) to fix simultaneous payment bug
-  // This section removed - mempoolOps are applied immediately after each applyEntityTx
-
-  // Committed account-level cancels must be reflected in the persisted book
-  // before the next matching pass. Otherwise a restored book can still expose
-  // an order that the account frame has already removed.
-  if (allSwapOffersCancelled.length > 0) {
-    applyCommittedSwapCancelsToOrderbook(env, currentEntityState, allSwapOffersCancelled, storageChanges);
-  }
-
-  // A committed cancel has priority over every offer created in the same
-  // Entity frame. Matching first permits a taker to fill liquidity after the
-  // maker's bilateral Account has already committed its cancellation.
-  applySwapCancelRequests({
-    env,
+  return {
+    authorityTransitionOnly,
+    crossJSetupPhase,
     currentEntityState,
-    allSwapCancelRequests,
-    proposableAccounts,
-    allOutputs,
-    storageChanges,
+    context,
+    frameProfileStartMs,
+    frameProfileMarks,
+    markFrameProfile,
+  };
+};
+
+const buildEntityFrameResult = (
+  currentEntityState: EntityState,
+  deterministicState: EntityState,
+  context: ApplyEntityTxsInOrderContext,
+): EntityFrameResult => ({
+  newState: currentEntityState,
+  deterministicState,
+  outputs: context.allOutputs,
+  jOutputs: context.allJOutputs,
+  candidateEffects: context.candidateEffects,
+  storageChanges: mergeStorageOverlayRecords(undefined, context.storageChanges),
+  collectedHashes: context.collectedHashes,
+  ...(context.consumptionNewNodes.size > 0 ||
+  context.consumptionReplacedNodeHashes.size > 0
+    ? {
+        consumptionNodeChanges: {
+          newNodes: Array.from(context.consumptionNewNodes, ([hash, node]) => ({ hash, node })),
+          replacedNodeHashes: Array.from(context.consumptionReplacedNodeHashes).sort(),
+        },
+      }
+    : {}),
+  ...(context.accountJClaimNewNodes.size > 0 ||
+  context.accountJClaimReplacedNodeHashes.size > 0
+    ? {
+        accountJClaimNodeChanges: {
+          newNodes: Array.from(context.accountJClaimNewNodes, ([hash, node]) => ({ hash, node })),
+          replacedNodeHashes: Array.from(context.accountJClaimReplacedNodeHashes).sort(),
+        },
+      }
+    : {}),
+});
+
+type PostEntityTxPhases = {
+  currentEntityState: EntityState;
+  deterministicState: EntityState;
+  orderbookStats: OrderbookFrameStats;
+  accountsToProposeFramesCount: number;
+  prunedOriginatedHtlcRoutes: number;
+};
+
+const applyPostEntityTxPhases = async (
+  working: EntityFrameWorkingSet,
+): Promise<PostEntityTxPhases> => {
+  const { context, crossJSetupPhase, markFrameProfile } = working;
+  let currentEntityState = working.currentEntityState;
+  if (context.allSwapOffersCancelled.length > 0) {
+    applyCommittedSwapCancelsToOrderbook(
+      context.env,
+      currentEntityState,
+      context.allSwapOffersCancelled,
+      context.storageChanges,
+    );
+  }
+  applySwapCancelRequests({
+    env: context.env,
+    currentEntityState,
+    allSwapCancelRequests: context.allSwapCancelRequests,
+    proposableAccounts: context.proposableAccounts,
+    allOutputs: context.allOutputs,
+    storageChanges: context.storageChanges,
   });
   markFrameProfile('cancels');
-
   const orderbookStats = applyOrderbookMatching({
-    env,
+    env: context.env,
     currentEntityState,
-    allSwapOffersCreated,
-    allOutputs,
-    proposableAccounts,
-    storageChanges,
+    allSwapOffersCreated: context.allSwapOffersCreated,
+    allOutputs: context.allOutputs,
+    proposableAccounts: context.proposableAccounts,
+    storageChanges: context.storageChanges,
   });
   markFrameProfile('orderbook');
-
-  // Hash before account proposals so proposer and validators commit to the same
-  // deterministic entity state.
-  drainPendingCrossJurisdictionFillAcks(env, currentEntityState, proposableAccounts, storageChanges);
-  drainCommittedCrossJurisdictionCancelAcks(currentEntityState, proposableAccounts, storageChanges);
-  refreshStaleUncommittedSettlementSeals(currentEntityState, storageChanges);
-  materializeDeferredSettlementApprovals(env, currentEntityState, proposableAccounts, collectedHashes, storageChanges);
-  for (const accountId of proposableAccounts) {
+  drainPendingCrossJurisdictionFillAcks(
+    context.env,
+    currentEntityState,
+    context.proposableAccounts,
+    context.storageChanges,
+  );
+  drainCommittedCrossJurisdictionCancelAcks(
+    currentEntityState,
+    context.proposableAccounts,
+    context.storageChanges,
+  );
+  refreshStaleUncommittedSettlementSeals(currentEntityState, context.storageChanges);
+  materializeDeferredSettlementApprovals(
+    context.env,
+    currentEntityState,
+    context.proposableAccounts,
+    context.collectedHashes,
+    context.storageChanges,
+  );
+  for (const accountId of context.proposableAccounts) {
     invalidateEntityAccountCommitment(currentEntityState, accountId);
   }
   const deterministicState = cloneEntityState(currentEntityState);
   markFrameProfile('deterministicClone');
-
-  // Runtime-local source/target registrations are sibling effects of one
-  // materialization frame. Flushing an Account proposal while only the first
-  // sibling Entity frame has committed exposes a one-legged proposal. Keep the
-  // Account mempool durable; the next ordinary wake observes both committed
-  // sibling registrations and flushes the exact matched cohort.
   const accountsToProposeFramesCount = crossJSetupPhase
     ? 0
     : await proposePendingAccountFrames({
-        env,
+        env: context.env,
         currentEntityState,
-        proposableAccounts,
-        requiredAccountResponses,
-        allOutputs,
-        collectedHashes,
-        accountJClaimNodeStore,
-        storageChanges,
+        proposableAccounts: context.proposableAccounts,
+        requiredAccountResponses: context.requiredAccountResponses,
+        allOutputs: context.allOutputs,
+        collectedHashes: context.collectedHashes,
+        accountJClaimNodeStore: context.accountJClaimNodeStore,
+        storageChanges: context.storageChanges,
       });
   markFrameProfile('accountProposals');
-  currentEntityState = assignCertifiedOutputIdentities(currentEntityState, allOutputs);
-
-  const prunedOriginatedHtlcRoutes = pruneSettledOriginatedHtlcRoutes(currentEntityState, currentEntityState.timestamp);
-
-  const frameElapsedMs = Math.round(getPerfMs() - frameProfileStartMs);
-  if (entityFrameProfileEnabled() || frameElapsedMs >= entityFrameSlowMs()) {
-    entityLog.info('frame.profile', {
-      entity: String(currentEntityState.entityId || '').slice(-8),
-      elapsedMs: frameElapsedMs,
-      txs: entityTxs.length,
-      txTypes: Array.from(new Set(entityTxs.map(tx => tx.type))).slice(0, 16),
-      accountsToPropose: accountsToProposeFramesCount,
-      outputs: allOutputs.length,
-      jOutputs: allJOutputs.length,
-      collectedHashes: collectedHashes.length,
-      swapOffersCreated: allSwapOffersCreated.length,
-      swapCancels: allSwapCancelRequests.length + allSwapOffersCancelled.length,
-      hasOrderbookExt: Boolean(currentEntityState.orderbookExt),
-      hasPersistedCrossJurisdictionBook: orderbookStats.hasPersistedCrossJurisdictionBook,
-      orderbookMatched: orderbookStats.orderbookMatched,
-      orderbookMempoolOps: orderbookStats.orderbookMempoolOps,
-      orderbookBookUpdates: orderbookStats.orderbookBookUpdates,
-      orderbookCrossFills: orderbookStats.orderbookCrossFills,
-      prunedOriginatedHtlcRoutes,
-      phases: cumulativeMarksToPhases(frameProfileMarks, frameElapsedMs),
-      txTypeTotals: Array.from(frameProfileTxTotals.entries())
-        .map(([type, value]) => ({ type, ...value }))
-        .sort((left, right) => right.elapsedMs - left.elapsedMs)
-        .slice(0, 16),
-    });
-  }
-
+  currentEntityState = assignCertifiedOutputIdentities(
+    currentEntityState,
+    context.allOutputs,
+  );
+  const prunedOriginatedHtlcRoutes = pruneSettledOriginatedHtlcRoutes(
+    currentEntityState,
+    currentEntityState.timestamp,
+  );
   return {
-    newState: currentEntityState,
+    currentEntityState,
     deterministicState,
-    outputs: allOutputs,
-    jOutputs: allJOutputs,
-    candidateEffects,
-    storageChanges: mergeStorageOverlayRecords(undefined, storageChanges),
-    collectedHashes,
-    ...(consumptionNewNodes.size > 0 || consumptionReplacedNodeHashes.size > 0
-      ? {
-          consumptionNodeChanges: {
-            newNodes: Array.from(consumptionNewNodes, ([hash, node]) => ({ hash, node })),
-            replacedNodeHashes: Array.from(consumptionReplacedNodeHashes).sort(),
-          },
-        }
-      : {}),
-    ...(accountJClaimNewNodes.size > 0 || accountJClaimReplacedNodeHashes.size > 0
-      ? {
-          accountJClaimNodeChanges: {
-            newNodes: Array.from(accountJClaimNewNodes, ([hash, node]) => ({ hash, node })),
-            replacedNodeHashes: Array.from(accountJClaimReplacedNodeHashes).sort(),
-          },
-        }
-      : {}),
+    orderbookStats,
+    accountsToProposeFramesCount,
+    prunedOriginatedHtlcRoutes,
   };
+};
+
+const logEntityFrameProfile = (
+  working: EntityFrameWorkingSet,
+  entityTxs: EntityTx[],
+  post: PostEntityTxPhases,
+): void => {
+  const { context, frameProfileStartMs, frameProfileMarks } = working;
+  const elapsedMs = Math.round(getPerfMs() - frameProfileStartMs);
+  if (!entityFrameProfileEnabled() && elapsedMs < entityFrameSlowMs()) return;
+  entityLog.info('frame.profile', {
+    entity: String(post.currentEntityState.entityId || '').slice(-8),
+    elapsedMs,
+    txs: entityTxs.length,
+    txTypes: Array.from(new Set(entityTxs.map(tx => tx.type))).slice(0, 16),
+    accountsToPropose: post.accountsToProposeFramesCount,
+    outputs: context.allOutputs.length,
+    jOutputs: context.allJOutputs.length,
+    collectedHashes: context.collectedHashes.length,
+    swapOffersCreated: context.allSwapOffersCreated.length,
+    swapCancels:
+      context.allSwapCancelRequests.length + context.allSwapOffersCancelled.length,
+    hasOrderbookExt: Boolean(post.currentEntityState.orderbookExt),
+    ...post.orderbookStats,
+    prunedOriginatedHtlcRoutes: post.prunedOriginatedHtlcRoutes,
+    phases: cumulativeMarksToPhases(frameProfileMarks, elapsedMs),
+    txTypeTotals: Array.from(context.frameProfileTxTotals.entries())
+      .map(([type, value]) => ({ type, ...value }))
+      .sort((left, right) => right.elapsedMs - left.elapsedMs)
+      .slice(0, 16),
+  });
+};
+
+export const applyEntityFrame = async (
+  env: Env,
+  entityState: EntityState,
+  entityTxs: EntityTx[],
+  frameTimestamp?: number,
+): Promise<EntityFrameResult> => {
+  const working = await prepareEntityFrameWorkingSet(
+    env,
+    entityState,
+    entityTxs,
+    frameTimestamp,
+  );
+  working.currentEntityState = await applyEntityTxsInOrder(working.context);
+  working.markFrameProfile('entityTxLoop');
+  const profileHash = buildCurrentEntityProfileHashToSign(working.currentEntityState);
+  if (profileHash) working.context.collectedHashes.push(profileHash);
+  if (working.authorityTransitionOnly) {
+    working.currentEntityState = assignCertifiedOutputIdentities(
+      working.currentEntityState,
+      working.context.allOutputs,
+    );
+    entityLog.info('frame.board_authority_transition_only', {
+      entity: shortId(working.currentEntityState.entityId),
+      txs: entityTxs.length,
+      finalizedJHeight: working.currentEntityState.lastFinalizedJHeight,
+    });
+    return buildEntityFrameResult(
+      working.currentEntityState,
+      cloneEntityState(working.currentEntityState),
+      working.context,
+    );
+  }
+  const post = await applyPostEntityTxPhases(working);
+  logEntityFrameProfile(working, entityTxs, post);
+  return buildEntityFrameResult(
+    post.currentEntityState,
+    post.deterministicState,
+    working.context,
+  );
 };
 
 // === HELPER FUNCTIONS ===
