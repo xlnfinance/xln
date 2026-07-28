@@ -296,7 +296,10 @@ async function readJBatchSnapshot(
     const rep = key ? env.eReplicas.get(key) : null;
     const pending = rep?.state?.jBatchState?.batch;
     const sent = rep?.state?.jBatchState?.sentBatch?.batch;
-    const history = Array.isArray(rep?.state?.batchHistory) ? rep.state.batchHistory : [];
+    const history = Array.from(rep?.state?.jBlockChain || []).flatMap((block: any) =>
+      Array.from(block?.events || []).filter((event: any) =>
+        event?.type === 'HankoBatchProcessed'
+        && String(event?.data?.entityId || '').toLowerCase() === String(entityId).toLowerCase()));
     const messages = Array.isArray(rep?.state?.messages) ? rep.state.messages.slice(-6) : [];
     const mempool = Array.isArray(rep?.mempool) ? rep.mempool : [];
     return {

@@ -275,7 +275,15 @@ async function readMoveBatchSnapshot(
     const pending = replica?.state?.jBatchState?.batch as Record<string, unknown> | undefined;
     const sentBatch = replica?.state?.jBatchState?.sentBatch;
     const sent = sentBatch?.batch as Record<string, unknown> | undefined;
-    const history = Array.isArray(replica?.state?.batchHistory) ? replica.state.batchHistory : [];
+    const history = Array.from(replica?.state?.jBlockChain || []).flatMap((block: any) =>
+      Array.from(block?.events || [])
+        .filter((event: any) =>
+          event?.type === 'HankoBatchProcessed'
+          && String(event?.data?.entityId || '').toLowerCase() === String(entityId).toLowerCase())
+        .map((event: any) => ({
+          entityNonce: Number(event?.data?.nonce || 0),
+          status: 'confirmed',
+        })));
     const lastHistory = history.length > 0 ? history[history.length - 1] : null;
     const recentMessages = Array.isArray(replica?.state?.messages)
       ? replica.state.messages.slice(-8).map((message) => String(message || ''))
