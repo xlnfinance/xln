@@ -78,7 +78,6 @@ const makeState = (book: BookState, offerId = 'offer-1', offer = makeOffer()): E
     height: 1,
     timestamp: 0,
     nonces: new Map(),
-    messages: [],
     proposals: new Map(),
     config: {} as EntityState['config'],
     reserves: new Map(),

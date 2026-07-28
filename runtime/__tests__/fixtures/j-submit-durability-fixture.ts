@@ -20,7 +20,6 @@ const makeState = (): EntityState => {
     height: 1,
     timestamp: 1_000,
     nonces: new Map(),
-    messages: [],
     proposals: new Map(),
     config: {
       mode: 'proposer-based',

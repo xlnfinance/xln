@@ -13,7 +13,6 @@ import type {
 } from './types/jurisdiction-events';
 import type { HankoString } from './types/hanko';
 import type {
-  AccountInput,
   AccountFrame,
   AccountState,
   AccountTx,
@@ -210,7 +209,7 @@ export type {
  */
 
 import type { GossipLayer, Profile } from './networking/gossip';
-import type { CompletedBatch, JBatchState } from './jurisdiction/batch';
+import type { JBatchState } from './jurisdiction/batch';
 import type { CrontabState } from './entity/scheduler-types';
 
 export type { Profile } from './networking/gossip';
@@ -823,7 +822,6 @@ export interface EntityState {
   nonces: Map<string, number>;
   /** Bounded exact-once namespace for independently signed board-member commands. */
   entityCommandNonces?: EntityCommandNonceState;
-  messages: string[];
   proposals: Map<string, Proposal>;
   config: ConsensusConfig;
   prevFrameHash?: string; // Chain linkage for BFT consensus (keccak256 of previous frame)
@@ -850,9 +848,6 @@ export interface EntityState {
   /** Entity-finalized active board authority for this exact jurisdiction stack. */
   certifiedBoardState?: CertifiedBoardRegistryState;
 
-  // 🔗 Account machine integration
-  accountInputQueue?: AccountInput[]; // Queue of settlement events to be processed by a-machine
-
   // ⏰ Declarative entity-local schedule. Persisted as pure data and rebound to handlers at runtime.
   crontabState?: CrontabState;
 
@@ -860,9 +855,6 @@ export interface EntityState {
   jBatchState?: JBatchState;
   /** Bounded current EntityProvider nonce plus at most one committed action. */
   entityProviderActionState?: EntityProviderActionState;
-  batchHistory?: CompletedBatch[]; // Last completed batch records for UI + replay diagnostics
-
-
   // 🔐 Deterministic entity-scoped X25519 keys for HTLC envelope encryption.
   // These are derived exactly once at entity creation/import and are required
   // for every locally-owned entity. Missing keys are a hard invariant failure.

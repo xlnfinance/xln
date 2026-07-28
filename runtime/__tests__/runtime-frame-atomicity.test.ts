@@ -141,7 +141,6 @@ const makeEntityState = (entityId: string, config: ConsensusConfig): EntityState
   height: 0,
   timestamp: 1_000,
   nonces: new Map(),
-  messages: [],
   proposals: new Map(),
   config,
   reserves: new Map(),

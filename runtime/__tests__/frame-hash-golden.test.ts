@@ -17,9 +17,9 @@ import type { AccountFrame, EntityState, EntityTx } from '../types';
 const ACCOUNT_FRAME_GOLDEN_HASH = '0x15cd826cf4c3d968ec506d1ec758c7529963079ca1fcaeb4b29a0fa1d4c0c7b0';
 // Independently calculated with a standalone tagged-tuple reference encoder.
 // Keep these literal so changing the production codec cannot bless itself.
-const ENTITY_STATE_ROOT_GOLDEN_HASH = '0x2550ac0a739bb13133109a83608fb9ea340931f861da85242b7d24a4bcc20095';
+const ENTITY_STATE_ROOT_GOLDEN_HASH = '0xd5737972115dcc26af6066c6dde7dc951eac8a431e84404f436efa6991602b07';
 const ENTITY_AUTHORITY_ROOT_GOLDEN_HASH = '0xa7c4fd7139d47d2567c6a97c7d7d06bc6d60fc4481acbe8155584f3573b520bd';
-const ENTITY_FRAME_GOLDEN_HASH = '0xb1cef6219d7b79d17f0bb40a830f7160b9ef2a7d5e116312ed601afa8c4fef63';
+const ENTITY_FRAME_GOLDEN_HASH = '0x4149450b4e8c93289fad414d4b4f7a7d418f75de4be23b08b891b72ef779ecd9';
 
 const makeAccountFrameFixture = (): AccountFrame => ({
   height: 7,
@@ -52,7 +52,6 @@ const makeEntityStateFixture = (accountHash: string): EntityState => ({
   height: 3,
   timestamp: 1_700_000_000_123,
   nonces: new Map(),
-  messages: [],
   proposals: new Map(),
   config: {
     mode: 'proposer-based',

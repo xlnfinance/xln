@@ -184,24 +184,18 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   Do not add a compatibility fallback: this is testnet, so make one canonical
   schema transition with explicit migration tooling if durable fixtures need
   conversion.
-- [ ] Remove confirmed vestigial or misplaced state only with root/storage
-  evidence. Owner decision: `EntityState.messages`, `batchHistory`, and
-  diagnostic activity are not consensus state. Persist certified Entity frames
-  as the permanent source of truth, and expose one typed, filterable Activity
-  projection whose disposable LevelDB index can be rebuilt exactly from that
-  frame history. Before removing the fields, prove that every current message
-  and event is represented in deterministic frame data or output; add an
-  explicit frame event when it is not. Use one testnet schema migration and no
-  fallback reader. A user message is the ordinary typed
-  `EntityEvent { kind: 'text', validatorId, ... }`, attributed to the specific
-  validator and certified as part of its Entity frame; it is not a special
-  State collection. Entity, Account, and authenticated J events share one
-  `ActivityEvent` projection with deterministic event id, source
-  machine/frame/hash/index, scopes, actor, kind, and payload so one UI history
-  panel can filter them without duplicating canonical history. Also investigate the unwritten
-  `EntityState.accountInputQueue` and hash-excluded `entityEncPrivKey`; delete
-  or relocate each only after dynamic/browser entrypoints, recovery hydration
-  and state-root fixtures prove its real ownership.
+- [ ] Finish the canonical Activity projection and local crypto ownership.
+  `EntityState.messages`, `batchHistory`, and the unwritten
+  `accountInputQueue` are gone: text and J finality are certified frame events,
+  durable history is read through the shared Activity panel, and no duplicate
+  UI cache remains in consensus State. Complete the exact typed
+  `ActivityEvent` projection for Entity, Account, and authenticated J events
+  with deterministic event id, source machine/frame/hash/index, scopes, actor,
+  kind, and payload. Keep the disposable LevelDB view exactly rebuildable from
+  the authoritative Runtime WAL and certified child frames. Relocate
+  hash-excluded `entityEncPrivKey` to validator-local `EntityReplica` storage
+  only after dynamic/browser entrypoints, recovery hydration, and root fixtures
+  prove its real ownership; use one testnet schema and no fallback reader.
 - [ ] Store Runtime, Entity, Account, and J histories across three explicit
   physical roles: rebuildable hot `current`, authoritative epoch-rolled
   `runtimeWal`, and rebuildable `historyViews`. Runtime WAL epochs are a
@@ -318,9 +312,9 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   wallet/helper, retention/hook, lookup/barrel and rename-only orphans.
   The old audit's named deletion batch has been exhausted or disproved on the
   current tree; discover the next candidates from current call sites instead
-  of carrying that stale list forward. Reverify and delete the unwritten
-  `accountInputQueue`, dead `RuntimeSnapshot`, zombie `EntityOutput`, and
-  zero-call-site tx/financial/hook/barrel exports. Do not invent empty
+  of carrying that stale list forward. Reverify and delete dead
+  `RuntimeSnapshot`, zombie `EntityOutput`, and zero-call-site
+  tx/financial/hook/barrel exports. Do not invent empty
   `RuntimeOutput` or `AccountOutput` aliases merely for naming symmetry;
   derive output unions only from real reducer results. Public API removals
   require an explicit compatibility decision.

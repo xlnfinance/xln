@@ -631,7 +631,6 @@ describe('durable scoped reliable delivery receipts', () => {
       prevFrameHash: 'genesis',
       timestamp: 1_000,
       nonces: new Map(),
-      messages: [],
       proposals: new Map(),
       config: {
         mode: 'proposer-based' as const,

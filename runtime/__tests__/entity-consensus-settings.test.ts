@@ -57,7 +57,6 @@ const replica = (payment: EntityTx): EntityReplica => ({
     prevFrameHash: `0x${'99'.repeat(32)}`,
     lastFinalizedJHeight: 42,
     nonces: new Map(),
-    messages: [],
     proposals: new Map([['prop-payment', proposal(payment)]]),
     config: {
       mode: 'proposer-based',

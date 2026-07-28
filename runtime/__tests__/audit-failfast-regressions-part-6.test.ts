@@ -1,4 +1,5 @@
 import { describe, expect, spyOn, test } from 'bun:test';
+import { readEntityFrameEventMessages } from '../state-helpers';
 
 import { x25519 } from '@noble/curves/ed25519.js';
 
@@ -587,7 +588,6 @@ const makeReplicaMissingPrevFrameHash = (): EntityReplica => ({
     height: 1,
     timestamp: 0,
     nonces: new Map(),
-    messages: [],
     proposals: new Map(),
     config: makeSingleSignerConfig(),
     reserves: new Map(),
@@ -618,7 +618,6 @@ const makeEntityState = (entityId: string): EntityState => ({
   height: 0,
   timestamp: 1_000,
   nonces: new Map(),
-  messages: [],
   proposals: new Map(),
   config: makeSingleSignerConfig(),
   reserves: new Map(),
@@ -1078,7 +1077,7 @@ describe('audit fail-fast regressions', () => {
 
     const nextBook = result.newState.orderbookExt?.books.get(pairId);
     expect(nextBook ? getBookOrder(nextBook, namespacedOrderId) : null).toBeNull();
-    expect(result.newState.messages.some(msg => msg.includes('Dispute removed 1 local orderbook row'))).toBe(true);
+    expect(readEntityFrameEventMessages(result.newState).some(msg => msg.includes('Dispute removed 1 local orderbook row'))).toBe(true);
   });
 
   test('prepareDispute routes remote cross-j removal from the committed book signer', async () => {
@@ -1170,7 +1169,7 @@ describe('audit fail-fast regressions', () => {
     });
     const preparedAccount = afterAck.newState.accounts.get(sourceUser)!;
     expect(preparedAccount.disputePrepare?.pendingOrderbookRemovalIds).toBeUndefined();
-    expect(afterAck.newState.messages.some(msg => msg.includes('Missing counterparty dispute hanko'))).toBe(true);
+    expect(readEntityFrameEventMessages(afterAck.newState).some(msg => msg.includes('Missing counterparty dispute hanko'))).toBe(true);
   });
 
   test('prepareDispute freezes account and removes orderbook rows without queuing on-chain disputeStart', async () => {
@@ -1293,8 +1292,8 @@ describe('audit fail-fast regressions', () => {
 
     const nextAccount = result.newState.accounts.get(userId)!;
     expect(result.newState.jBatchState?.batch.disputeStarts ?? []).toEqual([]);
-    expect(result.newState.messages.some(msg => msg.includes('htlcAwaitingSecret'))).toBe(false);
-    expect(result.newState.messages.some(msg => msg.includes('Missing counterparty dispute hanko'))).toBe(true);
+    expect(readEntityFrameEventMessages(result.newState).some(msg => msg.includes('htlcAwaitingSecret'))).toBe(false);
+    expect(readEntityFrameEventMessages(result.newState).some(msg => msg.includes('Missing counterparty dispute hanko'))).toBe(true);
     expect(nextAccount.pendingFrame).toBeUndefined();
     expect(nextAccount.mempool).toEqual([]);
   });
@@ -1329,8 +1328,8 @@ describe('audit fail-fast regressions', () => {
       env,
     );
 
-    expect(result.newState.messages.some(msg => msg.includes('htlcAwaitingSecret'))).toBe(false);
-    expect(result.newState.messages.some(msg => msg.includes('Missing counterparty dispute hanko'))).toBe(true);
+    expect(readEntityFrameEventMessages(result.newState).some(msg => msg.includes('htlcAwaitingSecret'))).toBe(false);
+    expect(readEntityFrameEventMessages(result.newState).some(msg => msg.includes('Missing counterparty dispute hanko'))).toBe(true);
   });
 
   test('committed HTLC forward enforces announced PPM fee, not only base fee', async () => {
@@ -1588,8 +1587,8 @@ describe('audit fail-fast regressions', () => {
     );
 
     expect(result.newState.jBatchState?.batch.disputeStarts ?? []).toEqual([]);
-    expect(result.newState.messages.some(msg => msg.includes('argumentMempool:swap_resolve'))).toBe(false);
-    expect(result.newState.messages.some(msg => msg.includes('Missing counterparty dispute hanko'))).toBe(true);
+    expect(readEntityFrameEventMessages(result.newState).some(msg => msg.includes('argumentMempool:swap_resolve'))).toBe(false);
+    expect(readEntityFrameEventMessages(result.newState).some(msg => msg.includes('Missing counterparty dispute hanko'))).toBe(true);
   });
 
   test('disputeStart allows matching pending pull_resolve when explicit starter pull args are supplied', async () => {
@@ -1673,8 +1672,8 @@ describe('audit fail-fast regressions', () => {
     );
 
     expect(result.newState.jBatchState?.batch.disputeStarts ?? []).toEqual([]);
-    expect(result.newState.messages.some(msg => msg.includes('argumentMempool:pull_resolve'))).toBe(false);
-    expect(result.newState.messages.some(msg => msg.includes('Missing counterparty dispute hanko'))).toBe(true);
+    expect(readEntityFrameEventMessages(result.newState).some(msg => msg.includes('argumentMempool:pull_resolve'))).toBe(false);
+    expect(readEntityFrameEventMessages(result.newState).some(msg => msg.includes('Missing counterparty dispute hanko'))).toBe(true);
   });
 
   test('disputeStart treats pending cross_pull_close as foldable dispute evidence', async () => {
@@ -1777,9 +1776,9 @@ describe('audit fail-fast regressions', () => {
     );
 
     expect(result.newState.jBatchState?.batch.disputeStarts ?? []).toEqual([]);
-    expect(result.newState.messages.some(msg => msg.includes(`pendingFrame:${pendingHeight}`))).toBe(false);
-    expect(result.newState.messages.some(msg => msg.includes('argumentMempool:cross_pull_close'))).toBe(false);
-    expect(result.newState.messages.some(msg => msg.includes('Missing counterparty dispute hanko'))).toBe(true);
+    expect(readEntityFrameEventMessages(result.newState).some(msg => msg.includes(`pendingFrame:${pendingHeight}`))).toBe(false);
+    expect(readEntityFrameEventMessages(result.newState).some(msg => msg.includes('argumentMempool:cross_pull_close'))).toBe(false);
+    expect(readEntityFrameEventMessages(result.newState).some(msg => msg.includes('Missing counterparty dispute hanko'))).toBe(true);
   });
 
   test('disputeFinalize queues the exact proof despite unknown HTLC evidence and stale optimistic traffic', async () => {
@@ -1874,7 +1873,7 @@ describe('audit fail-fast regressions', () => {
     expect(finalization?.finalProofbody).toEqual(initialProof.proofBodyStruct);
     expect(finalization?.starterArguments).toBe('0x');
     expect(finalization?.otherArguments).toBe('0x');
-    expect(result.newState.messages.some(msg => msg.includes('htlcAwaitingSecret'))).toBe(false);
+    expect(readEntityFrameEventMessages(result.newState).some(msg => msg.includes('htlcAwaitingSecret'))).toBe(false);
     expect(nextAccount.pendingFrame).toBeUndefined();
     expect(nextAccount.mempool).toEqual([]);
   });

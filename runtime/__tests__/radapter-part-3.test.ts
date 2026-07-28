@@ -155,7 +155,6 @@ const makeEnv = (): RuntimeState =>
             entityId,
             height: 7,
             timestamp: 700,
-            messages: [],
             nonces: new Map(),
             proposals: new Map(),
             config: {

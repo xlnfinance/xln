@@ -227,7 +227,7 @@ describe('real process storage crash recovery', () => {
           candidate.entityId === entityId && candidate.signerId === signerB
         ));
         expect(replica?.state.height).toBe(0);
-        expect(replica?.state.messages).toEqual([]);
+        expect(replica && Object.hasOwn(replica.state, 'messages')).toBeFalse();
         expect(replica?.state.entityEncPubKey).toBe(expectedKeysB.publicKey);
         expect(replica?.state.entityEncPrivKey).toBe(expectedKeysB.privateKey);
         expect(replica?.state.htlcNotes).toEqual(new Map([
@@ -285,14 +285,6 @@ describe('real process storage crash recovery', () => {
         expect(submitReplica?.certifiedFrameAnchor?.height).toBe(1);
         expect(submitReplica?.certifiedFrameAnchor?.runtimeCheckpoint)
           .toEqual(replica?.certifiedFrameAnchor?.runtimeCheckpoint);
-        expect(submitReplica?.state.messages).toEqual([
-          '🔐 BOARD AUTHORITY: FoundationBootstrapped | Block 1',
-          '🔐 BOARD AUTHORITY: EntityRegistered | Block 2',
-          '📊 RESERVE: USDC = 0.0001 | Block 3 | Tx 0x23232323...',
-          '📦 Queued R→R: 7 token 1 to cdcd (use jBroadcast to commit)',
-          '📤 Batch (1 ops) → hashesToSign [nonce=1]',
-          'certified-height-one',
-        ]);
         expect(submitReplica?.state.entityEncPubKey).toBe(expectedKeysA.publicKey);
         expect(submitReplica?.state.entityEncPrivKey).toBe(expectedKeysA.privateKey);
         expect(submitReplica?.state.htlcNotes).toEqual(new Map([

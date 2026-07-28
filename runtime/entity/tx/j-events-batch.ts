@@ -1,14 +1,9 @@
 import type { EntityInput, EntityState, JurisdictionEvent } from '../../types';
 import {
-  batchOpBreakdown,
-  batchOpCount,
-  cloneJBatch,
   initJBatch,
   isBatchEmpty,
-  type BatchOpBreakdown,
 } from '../../jurisdiction/batch';
 import { addMessage } from '../../state-helpers';
-import { appendBatchHistory } from './j-events-history';
 import { createStructuredLogger } from '../../infra/logger';
 
 const jEventBatchLog = createStructuredLogger('j.event.batch');
@@ -27,35 +22,6 @@ const syncEntityNonce = (state: EntityState, nonce: number): void => {
   const eventNonceNum = Number(nonce || 0);
   state.jBatchState.entityNonce = eventNonceNum > currentNonce ? eventNonceNum : currentNonce;
 };
-
-function appendSelfBatchHistory(opts: {
-  state: EntityState;
-  sentBatch: NonNullable<EntityState['jBatchState']>['sentBatch'];
-  opCount: number;
-  opBreakdown: BatchOpBreakdown | undefined;
-  nonce: number;
-  blockNumber: number;
-  transactionHash: string;
-  status: 'confirmed' | 'failed';
-}): void {
-  const { state, sentBatch, opCount, opBreakdown, nonce, blockNumber, transactionHash, status } = opts;
-  appendBatchHistory(state, {
-    batchHash: sentBatch?.batchHash || '',
-    txHash: sentBatch?.txHash || transactionHash || '',
-    status,
-    broadcastedAt: sentBatch?.lastSubmittedAt || state.jBatchState?.lastBroadcast || 0,
-    confirmedAt: state.timestamp,
-    opCount,
-    entityNonce: Number(nonce),
-    jBlockNumber: Number(blockNumber || 0),
-    ...(sentBatch?.batch ? { batch: cloneJBatch(sentBatch.batch) } : {}),
-    ...(opBreakdown ? { operations: opBreakdown } : {}),
-    ...(sentBatch?.skippedOperations
-      ? { skippedOperations: structuredClone(sentBatch.skippedOperations) }
-      : {}),
-    source: 'self-batch' as const,
-  });
-}
 
 const handleNonPendingBatch = (
   state: EntityState,
@@ -94,22 +60,9 @@ const handleNonPendingBatch = (
 
 const finalizePendingBatch = (
   state: EntityState,
-  sentBatch: NonNullable<NonNullable<EntityState['jBatchState']>['sentBatch']>,
   nonce: number,
-  blockNumber: number,
-  transactionHash: string,
   outputs: EntityInput[],
 ): void => {
-  appendSelfBatchHistory({
-    state,
-    sentBatch,
-    opCount: batchOpCount(sentBatch.batch),
-    opBreakdown: batchOpBreakdown(sentBatch.batch),
-    nonce,
-    blockNumber,
-    transactionHash,
-    status: 'confirmed',
-  });
   delete state.jBatchState!.sentBatch;
   state.jBatchState!.status = isBatchEmpty(state.jBatchState!.batch) ? 'empty' : 'accumulating';
   syncEntityNonce(state, nonce);
@@ -126,12 +79,10 @@ const finalizePendingBatch = (
 export async function applyHankoBatchProcessedEvent(opts: {
   newState: EntityState;
   event: JurisdictionEvent;
-  transactionHash: string;
   blockNumber: number;
-  dirtyAccounts: Set<string>;
   outputs?: EntityInput[];
 }): Promise<void> {
-  const { newState, event, transactionHash, blockNumber } = opts;
+  const { newState, event, blockNumber } = opts;
   const outputs = opts.outputs ?? [];
   const { entityId: batchEntityId, batchHash, nonce } = event.data as {
     entityId: string;
@@ -174,10 +125,7 @@ export async function applyHankoBatchProcessedEvent(opts: {
 
   finalizePendingBatch(
     newState,
-    sentBatch!,
     nonce,
-    blockNumber,
-    transactionHash,
     outputs,
   );
   addMessage(newState, `✅ jBatch finalized (nonce ${nonce}) | Block ${blockNumber}`);

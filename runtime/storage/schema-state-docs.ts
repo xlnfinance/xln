@@ -18,15 +18,15 @@ import {
 } from './schema-primitives';
 
 const ENTITY_REQUIRED = [
-  'entityId', 'height', 'timestamp', 'messages', 'nonces', 'proposals', 'config',
+  'entityId', 'height', 'timestamp', 'nonces', 'proposals', 'config',
   'reserves', 'lastFinalizedJHeight', 'jBlockChain', 'profile', 'htlcRoutes',
   'htlcFeesEarned', 'lockBook',
 ] as const;
 
 const ENTITY_OPTIONAL = [
   'entityCommandNonces', 'prevFrameHash', 'leaderState', 'externalWallet',
-  'deferredAccountProposals', 'jHistoryFinality', 'certifiedBoardState', 'batchHistory',
-  'accountInputQueue', 'crontabState', 'jBatchState', 'entityProviderActionState',
+  'deferredAccountProposals', 'jHistoryFinality', 'certifiedBoardState',
+  'crontabState', 'jBatchState', 'entityProviderActionState',
   'profileEncryptionManifest', 'consumptionAccumulator', 'certifiedOutputSequences',
   'outDebtsByToken', 'inDebtsByToken', 'swapTradingPairs',
   'crossJurisdictionSwaps', 'pendingCrossJurisdictionFillAcks',
@@ -63,7 +63,6 @@ export const validateStorageEntityCoreDocValue = (value: unknown): StorageEntity
   requireStorageString(doc['entityId'], `${code}_ENTITY_ID`);
   requireBoundaryInteger(doc['height'], `${code}_HEIGHT`);
   requireBoundaryInteger(doc['timestamp'], `${code}_TIMESTAMP`);
-  requireStorageArray(doc['messages'], `${code}_MESSAGES`);
   requireStorageMap(doc['nonces'], `${code}_NONCES`);
   requireStorageMap(doc['proposals'], `${code}_PROPOSALS`);
   requireStorageMap(doc['reserves'], `${code}_RESERVES`);

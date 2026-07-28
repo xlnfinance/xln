@@ -101,7 +101,6 @@ const makeEnv = (account: AccountState, reserves: Array<[number, bigint]>): Runt
           entityId,
           height: 0,
           timestamp: 1234,
-          messages: [],
           nonces: new Map([['1', 1]]),
           proposals: new Map(),
           config: consensusConfig,
@@ -348,7 +347,7 @@ test('canonical storage rejects conflicting validator replicas of one Entity', (
   const first = Array.from(env.eReplicas.values())[0]!;
   const conflicting = structuredClone(first);
   conflicting.signerId = signerIds[1]!;
-  conflicting.state.messages = ['validator-local-conflict'];
+  conflicting.state.profile = { ...conflicting.state.profile, name: 'validator-local-conflict' };
   env.eReplicas.set(`${entityId}:${signerIds[1]}`, conflicting);
 
   expect(() => computeCanonicalStateHashFromEnv(env))

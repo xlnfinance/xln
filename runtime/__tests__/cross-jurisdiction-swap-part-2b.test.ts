@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { readEntityFrameEventMessages } from '../state-helpers';
 
 import { ethers } from 'ethers';
 
@@ -1060,7 +1061,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(result.accountTxs ?? []).toHaveLength(0);
     expect(result.newState.crossJurisdictionSwaps?.get(route.orderId)?.status).toBe('partially_filled');
     expect(
-      result.newState.messages.some(message => message.includes('must clear through requestCrossJurisdictionClear')),
+      readEntityFrameEventMessages(result.newState).some(message => message.includes('must clear through requestCrossJurisdictionClear')),
     ).toBe(true);
   });
 
@@ -1206,7 +1207,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(result.accountTxs ?? []).toHaveLength(0);
     expect(result.newState.crossJurisdictionSwaps?.get(route.orderId)?.status).toBe(route.status);
     expect(
-      result.newState.messages.some(message => message.includes('must clear through requestCrossJurisdictionClear')),
+      readEntityFrameEventMessages(result.newState).some(message => message.includes('must clear through requestCrossJurisdictionClear')),
     ).toBe(true);
   });
 
@@ -1384,7 +1385,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     });
     expect(blocked.accountTxs ?? []).toHaveLength(0);
     expect(blocked.newState.crossJurisdictionSwaps?.get(route.orderId)?.status).toBe('resting');
-    expect(blocked.newState.messages.some(message => message.includes('only the Hub atomic close cohort'))).toBe(true);
+    expect(readEntityFrameEventMessages(blocked.newState).some(message => message.includes('only the Hub atomic close cohort'))).toBe(true);
 
     const ratio = 0x4567;
     const claimedRoute = {
@@ -1410,7 +1411,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     });
     expect(result.accountTxs ?? []).toEqual([]);
     expect(result.newState.crossJurisdictionSwaps?.get(route.orderId)?.status).toBe('resting');
-    expect(result.newState.messages.some(message => message.includes('only the Hub atomic close cohort'))).toBe(true);
+    expect(readEntityFrameEventMessages(result.newState).some(message => message.includes('only the Hub atomic close cohort'))).toBe(true);
   });
 
   test('source user routes cross-j clear through the source Account', async () => {

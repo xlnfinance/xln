@@ -54,7 +54,6 @@ const baseState = (env: RuntimeState): EntityState => {
     height: 0,
     timestamp: 0,
     nonces: new Map(),
-    messages: [],
     proposals: new Map(),
     config: board,
     reserves: new Map(),

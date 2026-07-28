@@ -26,6 +26,7 @@ import {
   hashEntityProposalAction,
 } from '../entity/authorization';
 import { applyEntityFrame, applyEntityInput } from '../entity/consensus';
+import { readEntityFrameEventMessages } from '../state-helpers';
 import {
   buildCertifiedEntityOutputHashes,
   hashCertifiedEntityOutputSemantic,
@@ -103,7 +104,6 @@ const setup = (label: string) => {
     height: 0,
     timestamp: 0,
     nonces: new Map(),
-    messages: [],
     proposals: new Map(),
     config,
     reserves: new Map(),
@@ -299,7 +299,8 @@ describe('signed Entity command admission', () => {
 
     const committed = env.eReplicas.get(`${state.entityId}:${signerId}`);
     expect(committed?.state.height).toBe(1);
-    expect(committed?.state.messages).toContain(`${signerId}: durable internal commit`);
+    expect(committed && readEntityFrameEventMessages(committed.state))
+      .toContain(`${signerId}: durable internal commit`);
     expect(env.height).toBe(1);
     expect(applied.appliedRuntimeInput.entityInputs).toEqual([{
       entityId: state.entityId,
@@ -927,14 +928,15 @@ describe('signed Entity command admission', () => {
       .toThrow('ENTITY_COMMAND_CERTIFIED_BOARD_REQUIRED');
   });
 
-  test('bounds chat and terminal proposal history to the deterministic newest 100', async () => {
+  test('keeps chat history out of state while signing every frame event', async () => {
     const { env, signerId, state } = setup('bounded-chat-proposals');
     const chats = Array.from({ length: 101 }, (_, index) => chatCommand(signerId, `chat-${index}`));
     const chatBatch = buildSignedEntityCommand(env, state, signerId, chats);
     const chatted = await applyEntityFrame(env, state, [signedEntityCommandTx(chatBatch)], 1_001);
-    expect(chatted.newState.messages).toHaveLength(100);
-    expect(chatted.newState.messages[0]).toContain('chat-1');
-    expect(chatted.newState.messages.at(-1)).toContain('chat-100');
+    const chatEvents = readEntityFrameEventMessages(chatted.newState);
+    expect(chatEvents).toHaveLength(101);
+    expect(chatEvents[0]).toContain('chat-0');
+    expect(chatEvents.at(-1)).toContain('chat-100');
     expect(chatted.newState.nonces.size).toBe(0);
 
     const proposalTxs: EntityTx[] = Array.from({ length: 101 }, (_, index) => ({
@@ -953,9 +955,10 @@ describe('signed Entity command admission', () => {
     );
     expect(proposed.newState.proposals.size).toBe(100);
     expect(Array.from(proposed.newState.proposals.values()).every(proposal => proposal.status === 'executed')).toBe(true);
-    expect(proposed.newState.messages).toHaveLength(100);
-    expect(proposed.newState.messages[0]).toContain('terminal-1');
-    expect(proposed.newState.messages.at(-1)).toContain('terminal-100');
+    const proposalEvents = readEntityFrameEventMessages(proposed.newState);
+    expect(proposalEvents).toHaveLength(101);
+    expect(proposalEvents[0]).toContain('terminal-0');
+    expect(proposalEvents.at(-1)).toContain('terminal-100');
   });
 
   test('limits each proposer to one pending proposal', async () => {

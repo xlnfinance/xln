@@ -169,7 +169,6 @@ const makeEntityState = (
   height: 1,
   timestamp: 1_000,
   nonces: new Map(),
-  messages: [],
   proposals: new Map(),
   config: makeConfig(signerId, jurisdiction),
   reserves: new Map(),

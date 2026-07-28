@@ -33,7 +33,14 @@ const percentile = (sorted: readonly number[], fraction: number): number => (
 
 const cleanupRuntimeStorage = (dbRoot: string, runtimeId: string): void => {
   const namespacePath = join(dbRoot, runtimeId);
-  for (const suffix of ['', '-storage-current', '-storage-previous', '-wal', '-events', '-infra']) {
+  for (const suffix of [
+    '',
+    '-storage-current',
+    '-storage-previous',
+    '-wal',
+    '-history-views',
+    '-infra',
+  ]) {
     rmSync(`${namespacePath}${suffix}`, { recursive: true, force: true });
   }
   mkdirSync(dbRoot, { recursive: true });

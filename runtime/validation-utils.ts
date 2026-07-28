@@ -1107,12 +1107,6 @@ export function validateEntityState(value: unknown, context = 'EntityState'): En
       }
     }
   }
-  const messages = validateArray(obj['messages'], `${context}.messages`);
-  if (messages.length > LIMITS.MESSAGE_HISTORY || messages.some(message => typeof message !== 'string')) {
-    throw new FinancialDataCorruptionError(
-      `${context}.messages must contain at most ${LIMITS.MESSAGE_HISTORY} strings`,
-    );
-  }
   const proposals = validateMapInstance(obj['proposals'], `${context}.proposals`);
   if (proposals.size > LIMITS.MAX_PROPOSALS_PER_ENTITY) {
     throw new FinancialDataCorruptionError(

@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { readEntityFrameEventMessages } from '../state-helpers';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -22,7 +23,6 @@ const makeEntityState = (): EntityState => ({
   height: 0,
   timestamp: 123,
   nonces: new Map(),
-  messages: [],
   proposals: new Map(),
   config: {
     mode: 'proposer-based',
@@ -109,7 +109,7 @@ test('account input without frame or settlement action fails fast', async () => 
         depositoryAddress: jurisdiction.depositoryAddress,
       },
     }, env)).rejects.toThrow('ACCOUNT_GENESIS_FRAME_REQUIRED');
-    expect(state.messages.at(-1)).toContain('ACCOUNT_GENESIS_FRAME_REQUIRED');
+    expect(readEntityFrameEventMessages(state).at(-1)).toContain('ACCOUNT_GENESIS_FRAME_REQUIRED');
   } finally {
     if (previousScopes === undefined) delete process.env['XLN_LOG_SCOPES'];
     else process.env['XLN_LOG_SCOPES'] = previousScopes;

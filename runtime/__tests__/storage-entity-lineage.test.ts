@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { readEntityFrameEventMessages } from '../state-helpers';
 
 import {
   deriveSignerAddressSync,
@@ -64,7 +65,6 @@ const makeGenesis = (env: RuntimeState, signerId: string): EntityState => {
     height: 0,
     timestamp: 0,
     nonces: new Map(),
-    messages: [],
     proposals: new Map(),
     config: {
       mode: 'proposer-based',
@@ -136,7 +136,7 @@ const certifyNextFrame = async (
     height,
     timestamp,
     txs,
-    [],
+    applied.events,
     preState.entityId,
     stateRoot,
     authorityRoot,
@@ -148,7 +148,7 @@ const certifyNextFrame = async (
     height,
     timestamp,
     txs,
-    events: [],
+    events: applied.events,
     hash,
     stateRoot,
     authorityRoot,
@@ -261,9 +261,9 @@ describe('certified Entity storage lineage', () => {
     });
 
     const plan = buildCertifiedEntityLineagePlan(env);
-    expect(plan.lookup.get(genesis.entityId)?.state.messages.some(message => (
-      message.endsWith(': certified-height-one')
-    ))).toBeTrue();
+    expect(certified.link.frame.events.some(event =>
+      event.type === 'text' && event.message === 'certified-height-one'
+    )).toBeTrue();
     expect(plan.lineageByReplicaKey.get(`${genesis.entityId}:${signerId}`)?.map(link => link.frame.height))
       .toEqual([1]);
   });
@@ -308,7 +308,7 @@ describe('certified Entity storage lineage', () => {
     expect(observerAnchor?.stateRoot).toBe(certified.link.frame.stateRoot);
     expect(observerAnchor?.runtimeCheckpoint).toEqual(proposerAnchor?.runtimeCheckpoint);
 
-    observerState.messages.push('tampered after certification');
+    observerState.profile = { ...observerState.profile, name: 'tampered after certification' };
     expect(() => buildRuntimeCheckpointLineagePlan(env))
       .toThrow('STORAGE_RUNTIME_CHECKPOINT_STATE_MISMATCH');
   });

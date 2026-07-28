@@ -29,6 +29,7 @@ import { drainJWatcherBacklog } from '../jadapter/backlog-drain';
 import { mineRpcToBlockExact } from './rpc-block-mining';
 import { withDeterministicHtlcTestSecret } from '../protocol/htlc/test-secret-capability';
 import { htlcRouteConvergenceCycleBudget } from './test-economy';
+import { readEntityFrameEventMessages } from '../state-helpers';
 
 const USDC_TOKEN_ID = 1;
 const HUB_INITIAL_RESERVE = usd(10_000_000);
@@ -789,7 +790,8 @@ export async function lockAhb(env: RuntimeState): Promise<void> {
       await syncChain(env, 4);
 
       const [, hubAfterReveal] = findReplica(env, hub.id);
-      const revealMessage = hubAfterReveal.state.messages.find(m => m.includes('HTLC reveal observed'));
+      const revealMessage = readEntityFrameEventMessages(hubAfterReveal.state)
+        .find(message => message.includes('HTLC reveal observed'));
       assert(revealMessage, 'HTLC reveal j-event not applied', env);
     } else {
       console.log('⚠️  No HTLC reveal queued for on-chain broadcast');

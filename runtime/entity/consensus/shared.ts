@@ -1715,7 +1715,7 @@ export const sortSignatures = (signatures: Map<string, string>, config: Consensu
  */
 export const getEntityStateSummary = (replica: EntityReplica): string => {
   const hasProposal = replica.proposal ? '✓' : '✗';
-  return `mempool=${replica.mempool.length}, messages=${replica.state.messages.length}, proposal=${hasProposal}`;
+  return `mempool=${replica.mempool.length}, proposal=${hasProposal}`;
 };
 
 /**

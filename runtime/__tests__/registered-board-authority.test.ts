@@ -604,7 +604,6 @@ describe('registered Entity certified board authority', () => {
       isProposer: true,
     } as EntityReplica;
     const initialHeight = receiver.height;
-    const initialMessages = structuredClone(receiver.messages);
 
     const result = await applyEntityInput(receiverEnv, replica, {
       entityId: receiverEntityId,
@@ -621,7 +620,6 @@ describe('registered Entity certified board authority', () => {
     });
     expect(result.outcome).toEqual({ kind: 'committed' });
     expect(result.workingReplica.state.height).toBe(initialHeight);
-    expect(result.workingReplica.state.messages).toEqual(initialMessages);
     expect(result.workingReplica.mempool.map((tx) => tx.type)).toEqual(['consensusOutput']);
     expect(result.outputs).toEqual([]);
   });

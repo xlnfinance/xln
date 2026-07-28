@@ -16,8 +16,6 @@
 export const UINT16_MAX = 0xffff;
 
 export const LIMITS = {
-  /** Maximum messages stored per entity (memory limit) */
-  MESSAGE_HISTORY: 100,
 
   /** Maximum transactions in entity mempool before rejection */
   MEMPOOL_SIZE: 1000,

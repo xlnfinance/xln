@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { readEntityFrameEventMessages } from '../state-helpers';
 
 import { getJEventJurisdictionRef } from '../jurisdiction/event-observation';
 import { decode, encode } from '../storage/snapshot-coder';
@@ -55,7 +56,6 @@ const makeState = (entityId: string, signerId: string): EntityState => ({
   height: 0,
   timestamp: 1_000,
   nonces: new Map(),
-  messages: [],
   proposals: new Map(),
   config: makeConfig(signerId),
   reserves: new Map(),
@@ -150,7 +150,7 @@ describe('debt ledger', () => {
       },
     };
     expect(() => applyDebtEnforced(state, event)).toThrow('DEBT_LEDGER_DIVERGENCE:DebtEnforced');
-    expect(state.messages).toEqual([]);
+    expect(readEntityFrameEventMessages(state)).toEqual([]);
   });
 
   test('keeps only active mirrored debt aggregates, survives restore, and rejects stale J replay', async () => {

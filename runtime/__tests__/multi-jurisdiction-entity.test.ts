@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { readEntityFrameEventMessages } from '../state-helpers';
 import { rmSync } from 'fs';
 
 import {
@@ -538,7 +539,7 @@ describe('multi-jurisdiction entity binding', () => {
     } as never);
 
     expect(result.skippedError).toContain('ACCOUNT_SYNC_REQUIRED');
-    expect(result.newState.messages.some((message) => message.includes('ACCOUNT_SYNC_REQUIRED'))).toBe(true);
+    expect(readEntityFrameEventMessages(result.newState).some((message) => message.includes('ACCOUNT_SYNC_REQUIRED'))).toBe(true);
     expect(result.newState.accounts.has(entityB.toLowerCase())).toBe(false);
     expect((env.overlay ?? []).slice(overlayStart).some((record) => record.family === 'account')).toBe(false);
   });

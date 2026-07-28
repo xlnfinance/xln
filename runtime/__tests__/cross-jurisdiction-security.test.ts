@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { readEntityFrameEventMessages } from '../state-helpers';
 import { ethers } from 'ethers';
 
 import { applyAccountTx } from '../account/tx/apply';
@@ -197,7 +198,7 @@ describe('cross-jurisdiction security invariants', () => {
     });
 
     expect(result.newState.jBatchState?.batch.disputeStarts).toHaveLength(0);
-    expect(result.newState.messages.at(-1)).toContain('Missing counterparty dispute hanko');
+    expect(readEntityFrameEventMessages(result.newState).at(-1)).toContain('Missing counterparty dispute hanko');
   });
 
   test('target-side prepareDispute preserves pull arguments through normal hanko preflight', async () => {
@@ -234,6 +235,6 @@ describe('cross-jurisdiction security invariants', () => {
       data: { counterpartyEntityId: route.target.entityId, starterInitialArguments },
     });
 
-    expect(result.newState.messages.at(-1)).toContain('Missing counterparty dispute hanko');
+    expect(readEntityFrameEventMessages(result.newState).at(-1)).toContain('Missing counterparty dispute hanko');
   });
 });

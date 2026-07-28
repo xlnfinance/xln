@@ -136,7 +136,6 @@ const makeProjectionReplica = () => ({
     height: 0,
     timestamp: 1,
     nonces: new Map(),
-    messages: [],
     proposals: new Map(),
     config: {
       mode: 'proposer-based',
@@ -325,7 +324,7 @@ describe('state helper cloning', () => {
   });
 
   test('runtime frame snapshot fails fast with the non-cloneable field path', () => {
-    for (const absentField of ['accountInputQueue', 'deferredAccountProposals'] as const) {
+    for (const absentField of ['deferredAccountProposals'] as const) {
       const replica = { ...makeProjectionReplica(), mempool: [] } as any;
       const account = makeManualFallbackAccount() as any;
       delete account.uncloneable;

@@ -2,7 +2,6 @@ import type { BookState, EntityReferral, HubProfile } from '../orderbook';
 import type { CrontabState } from '../entity/scheduler-types';
 import type { JBatchState } from '../jurisdiction/batch';
 import type {
-  AccountInput,
   AccountState,
   AccountStatus,
   ConsensusConfig,
@@ -104,7 +103,6 @@ export type StorageEntityCoreDoc = {
   entityId: string;
   height: number;
   timestamp: number;
-  messages: EntityState['messages'];
   nonces: Map<string, number>;
   entityCommandNonces?: EntityState['entityCommandNonces'];
   proposals: Map<string, Proposal>;
@@ -118,8 +116,6 @@ export type StorageEntityCoreDoc = {
   jBlockChain: EntityState['jBlockChain'];
   jHistoryFinality?: EntityState['jHistoryFinality'];
   certifiedBoardState?: EntityState['certifiedBoardState'];
-  batchHistory?: EntityState['batchHistory'];
-  accountInputQueue?: AccountInput[];
   crontabState?: CrontabState;
   jBatchState?: JBatchState;
   entityProviderActionState?: EntityState['entityProviderActionState'];

@@ -121,7 +121,6 @@ describe('incremental Account commitment', () => {
       height: 0,
       timestamp: 0,
       nonces: new Map(),
-      messages: [],
       proposals: new Map(),
       config: {
         mode: 'proposer-based',
@@ -169,7 +168,6 @@ describe('incremental Account commitment', () => {
       height: 0,
       timestamp: 0,
       nonces: new Map(),
-      messages: [],
       proposals: new Map(),
       config: {
         mode: 'proposer-based',

@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { readEntityFrameEventMessages } from '../state-helpers';
 
 import { ethers } from 'ethers';
 
@@ -1940,7 +1941,8 @@ describe('cross-jurisdiction hashledger swap', () => {
     const draftDisputeStarts = chainedState.jBatchState?.batch.disputeStarts ?? [];
     const sentDisputeStarts = chainedState.jBatchState?.sentBatch?.batch.disputeStarts ?? [];
     expect([...draftDisputeStarts, ...sentDisputeStarts]).toHaveLength(1);
-    expect(chainedState.messages.some(message => message.includes('blocked until evidence is stable'))).toBe(false);
+    expect(readEntityFrameEventMessages(chainedState)
+      .some(message => message.includes('blocked until evidence is stable'))).toBe(false);
   });
 
   test('crossJurisdictionSalvage ignores forged target pull binary', async () => {
@@ -2086,7 +2088,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       ),
     ).toBe(false);
     expect(outputs).toEqual([]);
-    expect(fixture.state.messages.at(-1)).toBe(
+    expect(readEntityFrameEventMessages(fixture.state).at(-1)).toBe(
       `⚠️ Cross-j target dispute route ambiguous for ${fixture.targetHub.slice(-4)}: ` +
         'a-active,z-active; no source dispute queued',
     );

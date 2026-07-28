@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { readEntityFrameEventMessages } from '../state-helpers';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -19,7 +20,6 @@ const makeEntityState = (): EntityState => ({
   height: 0,
   timestamp: 123,
   nonces: new Map(),
-  messages: [],
   proposals: new Map(),
   config: {
     mode: 'proposer-based',
@@ -71,7 +71,7 @@ test('entity j-batch operation handler state transitions are unchanged', async (
   const mintTx = { type: 'mintReserves', data: { tokenId: 1, amount: 5n } } satisfies EntityTx;
   const mintResult = await handleMintReserves(makeEntityState(), mintTx, {} as RuntimeState);
   expect(mintResult.jOutputs).toEqual([]);
-  expect(mintResult.newState.messages.at(-1)).toContain('Jurisdiction unavailable for mint');
+  expect(readEntityFrameEventMessages(mintResult.newState).at(-1)).toContain('Jurisdiction unavailable for mint');
 });
 
 test('r2r admission treats open debt as senior to reserve', async () => {

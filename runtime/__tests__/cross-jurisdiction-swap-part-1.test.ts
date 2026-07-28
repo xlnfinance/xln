@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { readEntityFrameEventMessages } from '../state-helpers';
 
 import { ethers } from 'ethers';
 
@@ -1984,7 +1985,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect((result.accountTxs?.[0]?.tx as any).data.cumulativeSourceAmount).toBe(500n);
     expect((result.accountTxs?.[0]?.tx as any).data.cumulativeTargetAmount).toBe(450n);
     expect(result.newState.crossJurisdictionSwaps?.get(route.orderId)?.status).toBe('clear_requested');
-    expect(result.newState.messages.at(-1)).not.toContain('no pending fill');
+    expect(readEntityFrameEventMessages(result.newState).at(-1)).not.toContain('no pending fill');
   });
 
   test('source pull resolve accepts exact-only committed binding proof ratio', async () => {

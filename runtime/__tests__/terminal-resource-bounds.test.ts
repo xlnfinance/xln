@@ -77,7 +77,6 @@ const makeEntity = (): EntityState => ({
   height: 0,
   timestamp: 1,
   nonces: new Map(),
-  messages: [],
   proposals: new Map(),
   config: {
     mode: 'proposer-based',

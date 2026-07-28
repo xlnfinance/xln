@@ -19,7 +19,6 @@ const baseState = (): EntityState => ({
   height: 1,
   timestamp: 100,
   nonces: new Map(),
-  messages: [],
   proposals: new Map(),
   config: { mode: 'proposer-based', threshold: 1n, validators: ['1'], shares: { '1': 1n } },
   reserves: new Map(),

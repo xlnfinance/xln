@@ -1,4 +1,5 @@
 import { describe, expect, spyOn, test } from 'bun:test';
+import { readEntityFrameEventMessages } from '../state-helpers';
 
 import { x25519 } from '@noble/curves/ed25519.js';
 
@@ -587,7 +588,6 @@ const makeReplicaMissingPrevFrameHash = (): EntityReplica => ({
     height: 1,
     timestamp: 0,
     nonces: new Map(),
-    messages: [],
     proposals: new Map(),
     config: makeSingleSignerConfig(),
     reserves: new Map(),
@@ -618,7 +618,6 @@ const makeEntityState = (entityId: string): EntityState => ({
   height: 0,
   timestamp: 1_000,
   nonces: new Map(),
-  messages: [],
   proposals: new Map(),
   config: makeSingleSignerConfig(),
   reserves: new Map(),
@@ -1748,7 +1747,7 @@ describe('audit fail-fast regressions', () => {
     const validator = await applyEntityTx(validatorEnv, makeState(), tx);
 
     expect(validator.newState).toEqual(proposer.newState);
-    expect(validator.newState.messages.some(message => message.includes('quote expired'))).toBe(false);
+    expect(readEntityFrameEventMessages(validator.newState).some(message => message.includes('quote expired'))).toBe(false);
   });
 
   test('openAccount rejects an unmaterialized watch seed and replays the signed seed identically', async () => {

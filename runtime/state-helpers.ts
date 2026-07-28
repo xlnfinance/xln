@@ -197,9 +197,6 @@ const cloneCrossJurisdictionRoutesInAccount = (account: AccountState, source: Ac
   }
 };
 
-// Message size limit for snapshot efficiency
-export const ENTITY_MESSAGE_HISTORY_LIMIT = 100;
-
 /**
  * CANONICAL ACCOUNT KEY: Bilateral accounts stored in sorted form (left < right)
  * Pattern from Channel.ts - ensures both entities reference SAME account object
@@ -227,15 +224,14 @@ export function getAccountPerspective(account: AccountState, myEntityId: string)
 }
 
 /**
- * Add message to EntityState with automatic size limiting
- * Prevents unbounded message array growth that causes snapshot bloat
+ * Record a signed frame event without retaining an ever-growing log in state.
+ *
+ * Events are part of the proposed Entity frame, verified by every validator,
+ * and persisted by the Runtime history writer after commit. EntityState keeps
+ * only data needed to derive the next transition.
  */
 export function addMessage(state: EntityState, message: string): void {
   mutableEntityFrameEvents(state).push({ type: 'status', message });
-  state.messages.push(message);
-  if (state.messages.length > ENTITY_MESSAGE_HISTORY_LIMIT) {
-    state.messages.shift(); // Remove oldest message
-  }
 }
 
 export function addTextMessage(state: EntityState, validatorId: string, message: string): void {
@@ -244,12 +240,15 @@ export function addTextMessage(state: EntityState, validatorId: string, message:
     validatorId: validatorId.trim().toLowerCase(),
     message,
   });
-  state.messages.push(`${validatorId}: ${message}`);
-  if (state.messages.length > ENTITY_MESSAGE_HISTORY_LIMIT) state.messages.shift();
 }
 
+export const readEntityFrameEventMessages = (state: EntityState): string[] =>
+  readEntityFrameEvents(state).map(event =>
+    event.type === 'text' ? `${event.validatorId}: ${event.message}` : event.message
+  );
+
 /**
- * Add multiple messages with size limiting
+ * Add multiple signed frame events in deterministic order.
  */
 export function addMessages(state: EntityState, messages: string[]): void {
   for (const msg of messages) {
@@ -320,7 +319,7 @@ const cloneJBatchState = (state: JBatchState): JBatchState => {
 
 /**
  * Emit structured events with a scoped path for time-travel debugging.
- * This keeps per-frame logs queryable without bloating state.messages.
+ * This keeps per-frame logs queryable without bloating EntityState.
  */
 export function emitScopedEvents(
   env: RuntimeState,

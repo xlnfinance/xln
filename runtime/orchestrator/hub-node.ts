@@ -1830,7 +1830,6 @@ const run = async (): Promise<void> => {
             mempool: (replica.mempool || []).map(tx => String(tx?.type || '')),
             proposalTxs: (replica.proposal?.txs || []).map(tx => String(tx?.type || '')),
             lockedFrameTxs: (replica.lockedFrame?.txs || []).map(tx => String(tx?.type || '')),
-            messages: (replica.state?.messages || []).slice(-10),
           } : null,
           directInput: {
             lastSeen: lastDirectEntityInput,

@@ -71,7 +71,6 @@ const makeState = (entityId: string, signerId: string): EntityState => ({
   height: 0,
   timestamp: 1_000,
   nonces: new Map(),
-  messages: [],
   proposals: new Map(),
   config: makeConfig(signerId),
   reserves: new Map(),

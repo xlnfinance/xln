@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { readEntityFrameEventMessages } from '../state-helpers';
 
 import { handleDisputeFinalize } from '../entity/tx/handlers/dispute';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
@@ -12,7 +13,6 @@ const makeEntityState = (): EntityState => ({
   height: 1,
   timestamp: 1,
   lastFinalizedJHeight: 0,
-  messages: [],
   proposals: new Map(),
   accounts: new Map([
     [HUB, {
@@ -87,7 +87,7 @@ describe('dispute quiet logging', () => {
         { quietRuntimeLogs: true } as RuntimeState,
       );
 
-      expect(result.newState.messages?.some((message) =>
+      expect(readEntityFrameEventMessages(result.newState)?.some((message) =>
         message.includes('cooperative=true rejected'),
       )).toBe(true);
       expect(consoleLines).toEqual([]);

@@ -22,7 +22,6 @@ const makeHubState = (frozenTimestamp: number, lastSubmittedAt: number): EntityS
   height: 0,
   timestamp: frozenTimestamp,
   nonces: new Map(),
-  messages: [],
   proposals: new Map(),
   config: {
     mode: 'proposer-based',

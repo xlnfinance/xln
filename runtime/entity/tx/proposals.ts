@@ -107,7 +107,7 @@ export const executeProposal = (entityState: EntityState, proposal: Proposal): E
     const message = `[COLLECTIVE] ${proposal.action.data.message}`;
     proposalLog.debug('proposal.execute_collective_message', { proposal: shortHash(proposal.id) });
 
-    const nextState = { ...entityState, messages: [...entityState.messages] };
+    const nextState = { ...entityState };
     addMessage(nextState, message);
     return nextState;
   }

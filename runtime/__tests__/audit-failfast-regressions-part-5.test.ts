@@ -1,4 +1,5 @@
 import { describe, expect, spyOn, test } from 'bun:test';
+import { readEntityFrameEventMessages } from '../state-helpers';
 
 import { x25519 } from '@noble/curves/ed25519.js';
 
@@ -587,7 +588,6 @@ const makeReplicaMissingPrevFrameHash = (): EntityReplica => ({
     height: 1,
     timestamp: 0,
     nonces: new Map(),
-    messages: [],
     proposals: new Map(),
     config: makeSingleSignerConfig(),
     reserves: new Map(),
@@ -618,7 +618,6 @@ const makeEntityState = (entityId: string): EntityState => ({
   height: 0,
   timestamp: 1_000,
   nonces: new Map(),
-  messages: [],
   proposals: new Map(),
   config: makeSingleSignerConfig(),
   reserves: new Map(),
@@ -1212,7 +1211,8 @@ describe('audit fail-fast regressions', () => {
 
     expect(newState.jBatchState?.batch.disputeFinalizations ?? []).toEqual([]);
     expect(newState.accounts.get(starterId)?.activeDispute?.finalizeQueued).toBe(false);
-    expect(newState.messages.join('\n')).toContain('blocked until DisputeStarted is observed on-chain');
+    expect(readEntityFrameEventMessages(newState).join('\n'))
+      .toContain('blocked until DisputeStarted is observed on-chain');
   });
 
   test('disputeFinalize uses signed counter-proof and incremented starter arguments when a newer proof is available', async () => {

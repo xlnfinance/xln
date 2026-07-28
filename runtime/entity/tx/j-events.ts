@@ -38,7 +38,6 @@ import {
 } from './j-events-htlc';
 import { mergeJEventClaimOps } from './j-events-account';
 import type { JEventApplyResult, JEventAccountTx } from './j-events-types';
-import { appendBatchHistory, emptyOpBreakdown } from './j-events-history';
 import { applyHankoBatchProcessedEvent } from './j-events-batch';
 import { applyBatchOperationSkippedEvent } from './j-events-batch-skip';
 import {
@@ -511,20 +510,17 @@ const initializeStartedDispute = (
 
 const applyStartedDisputeFollowups = (
   context: FinalizedJEventContext,
-  data: DisputeStartedEventData,
   dispute: StartedDispute,
 ): void => {
   const {
     newState,
     env,
     blockNumber,
-    transactionHash,
     accountTxs,
     outputs,
   } = context;
   const {
     counterpartyId,
-    senderStr,
     weAreStarter,
     starterInitialArguments,
     disputeTimeout,
@@ -564,25 +560,6 @@ const applyStartedDisputeFollowups = (
     `⚔️ DISPUTE ${weAreStarter ? 'STARTED' : 'vs us'} with ` +
       `${counterpartyId.slice(-4)}, timeout: block ${disputeTimeout}`,
   );
-  if (!weAreStarter) {
-    const ops = emptyOpBreakdown();
-    ops.disputeStarts = 1;
-    appendBatchHistory(newState, {
-      batchHash: `event:dispute-start:${String(data.proofbodyHash).slice(0, 12)}`,
-      txHash: transactionHash || '',
-      status: 'confirmed' as const,
-      broadcastedAt: newState.timestamp,
-      confirmedAt: newState.timestamp,
-      opCount: 1,
-      entityNonce: Number(data.nonce || 0),
-      jBlockNumber: Number(blockNumber || 0),
-      operations: ops,
-      source: 'counterparty-event' as const,
-      eventType: 'DisputeStarted' as const,
-      note: `Counterparty ${senderStr.slice(-4)} started dispute`,
-    });
-  }
-
   if (!newState.crontabState) return;
   const kickoffDelayMs = weAreStarter ? 1 : 5000;
   const timestamp = Number(newState.timestamp);
@@ -598,7 +575,7 @@ const applyStartedDisputeFollowups = (
 async function applyDisputeStartedJEvent(context: FinalizedJEventContext): Promise<void> {
   const data = context.event.data as DisputeStartedEventData;
   const dispute = initializeStartedDispute(context, data);
-  if (dispute) applyStartedDisputeFollowups(context, data, dispute);
+  if (dispute) applyStartedDisputeFollowups(context, dispute);
 }
 
 type DisputeFinalizedEventData = {
@@ -706,7 +683,7 @@ function applyDisputeFinalizedJEvent(
   context: FinalizedJEventContext,
   disputeFinalizationEvidence: DisputeFinalizationEvidence[],
 ): void {
-  const { newState, event, blockNumber, transactionHash, dirtyAccounts } = context;
+  const { newState, event, dirtyAccounts } = context;
   const data = event.data as DisputeFinalizedEventData;
   const accountContext = resolveDisputeAccountContext(
     newState,
@@ -765,24 +742,6 @@ function applyDisputeFinalizedJEvent(
     }
   } else {
     jEventLog.warn('dispute_finalized.no_active_dispute', { counterparty: shortId(counterpartyId) });
-  }
-  if (senderStr !== entityIdNorm) {
-    const ops = emptyOpBreakdown();
-    ops.disputeFinalizations = 1;
-    appendBatchHistory(newState, {
-      batchHash: `event:dispute-finalize:${String(data.initialProofbodyHash).slice(0, 12)}`,
-      txHash: transactionHash || '',
-      status: 'confirmed' as const,
-      broadcastedAt: newState.timestamp,
-      confirmedAt: newState.timestamp,
-      opCount: 1,
-      entityNonce: Number(data.initialNonce || 0),
-      jBlockNumber: Number(blockNumber || 0),
-      operations: ops,
-      source: 'counterparty-event' as const,
-      eventType: 'DisputeFinalized' as const,
-      note: `Counterparty ${senderStr.slice(-4)} finalized dispute`,
-    });
   }
   retireFinalizedDisputeState(
     context,
@@ -864,9 +823,7 @@ async function applyFinalizedJEvent(
       await applyHankoBatchProcessedEvent({
         newState,
         event,
-        transactionHash,
         blockNumber,
-        dirtyAccounts,
         outputs,
       });
       break;

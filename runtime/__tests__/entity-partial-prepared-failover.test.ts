@@ -29,7 +29,6 @@ const makeBaseState = (config: ConsensusConfig, entityId: string): EntityState =
   height: 0,
   timestamp: 0,
   nonces: new Map(),
-  messages: [],
   proposals: new Map(),
   config,
   reserves: new Map(),

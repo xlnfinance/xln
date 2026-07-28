@@ -72,7 +72,6 @@ const state = (leaderState?: EntityState['leaderState']): EntityState => ({
   height: 7,
   timestamp: 1_000,
   nonces: new Map(),
-  messages: [],
   proposals: new Map(),
   config: config(),
   prevFrameHash: '0xframe7',

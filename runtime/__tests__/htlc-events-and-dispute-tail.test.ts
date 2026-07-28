@@ -66,7 +66,6 @@ const makeReplica = (entityId: string, counterpartyId: string): EntityReplica =>
       height: 0,
       timestamp: 50_000,
       nonces: new Map(),
-      messages: [],
       proposals: new Map(),
       config: {
         mode: 'proposer-based',

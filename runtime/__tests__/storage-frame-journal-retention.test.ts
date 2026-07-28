@@ -1168,7 +1168,7 @@ describe('storage frame journal retention', () => {
     const snapshotKey = keySnapshotEntity(latestHeight, entityId);
     const raw = await getRuntimeWalDb(env).get(snapshotKey);
     const corrupted = decodeBuffer<StorageEntityCoreDoc>(raw);
-    corrupted.messages = [...(Array.isArray(corrupted.messages) ? corrupted.messages : []), 'corrupted snapshot body'];
+    corrupted.profile = { ...corrupted.profile, name: 'corrupted snapshot body' };
     await getRuntimeWalDb(env).put(snapshotKey, encodeBuffer(corrupted));
 
     await closeRuntimeDb(env);

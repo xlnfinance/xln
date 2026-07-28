@@ -1063,7 +1063,6 @@ const compactEntityCoreForRemote = (core: RuntimeAdapterEntityCoreDoc): RuntimeA
     profile: core.profile,
     config: core.config,
     nonces: compactMapTail(core.nonces, 100) ?? new Map(),
-    messages: core.messages.slice(-20),
     proposals: new Map(Array.from(core.proposals.entries()).slice(-20)),
     reserves: compactMapHead(core.reserves, 100) ?? new Map(),
     lastFinalizedJHeight: core.lastFinalizedJHeight,
@@ -1078,10 +1077,8 @@ const compactEntityCoreForRemote = (core: RuntimeAdapterEntityCoreDoc): RuntimeA
   if (externalWallet) compact.externalWallet = externalWallet;
   const deferredAccountProposals = compactMapTail(core.deferredAccountProposals, 20);
   if (deferredAccountProposals) compact.deferredAccountProposals = deferredAccountProposals;
-  if (core.batchHistory) compact.batchHistory = core.batchHistory.slice(-20);
   const jBatchState = compactJBatchStateForView(core.jBatchState);
   if (jBatchState) compact.jBatchState = jBatchState;
-  if (core.accountInputQueue) compact.accountInputQueue = core.accountInputQueue.slice(-20);
   const htlcNotes = compactMapTail(core.htlcNotes, 20);
   if (htlcNotes) compact.htlcNotes = htlcNotes;
   const outDebtsByToken = compactDebtLedgerForView(core.outDebtsByToken);

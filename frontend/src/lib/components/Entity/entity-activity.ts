@@ -22,10 +22,10 @@ export type EntityActivityRow = {
   id: string;
   height: number;
   timestamp: number;
-  source: 'frame' | 'batch';
+  source: 'frame';
   accountId: string;
   accountLabel: string;
-  kind: 'pending' | 'mempool' | 'confirmed' | 'batch';
+  kind: 'pending' | 'mempool' | 'confirmed';
   actor: 'you' | 'peer' | 'system';
   actorSide: 'L' | 'R' | '';
   actorLabel: string;
@@ -197,12 +197,6 @@ function activityTokenAmount(
   )} ${token.symbol || `#${tokenId}`}`;
 }
 
-function shortHash(value: unknown): string {
-  const text = String(value || '').trim();
-  if (!text) return '-';
-  return text.length > 18 ? `${text.slice(0, 10)}...${text.slice(-6)}` : text;
-}
-
 function describeClaimedEvents(eventsRaw: unknown): string {
   if (!Array.isArray(eventsRaw) || eventsRaw.length === 0) return 'no events';
   const grouped = new Map<string, number>();
@@ -282,69 +276,6 @@ function summarizeAccountTx(
     default:
       return entityTxTypeLabel(String(tx.type || 'unknown'));
   }
-}
-
-function batchCounterpartyId(entry: NonNullable<NonNullable<EntityReplica['state']['batchHistory']>[number]>): string {
-  const batch = entry.batch;
-  if (!batch) return '';
-  const fromStart = String(batch.disputeStarts?.[0]?.counterentity || '').trim();
-  if (fromStart) return fromStart;
-  const fromFinalize = String(batch.disputeFinalizations?.[0]?.counterentity || '').trim();
-  if (fromFinalize) return fromFinalize;
-  const fromR2C = String(batch.reserveToCollateral?.[0]?.receivingEntity || '').trim();
-  if (fromR2C) return fromR2C;
-  return '';
-}
-
-function batchActorMeta(
-  entry: NonNullable<NonNullable<EntityReplica['state']['batchHistory']>[number]>,
-  options: BuildEntityActivityRowsOptions,
-): Pick<EntityActivityRow, 'actor' | 'actorSide' | 'actorLabel' | 'actorEntityId' | 'actorName' | 'actorAvatar' | 'actorInitials'> {
-  if (entry.source === 'self-batch') {
-    const selfId = String(options.replica?.state?.entityId || options.tabEntityId || '').trim();
-    const selfName = activityEntityName(selfId, 'You', options);
-    return {
-      actor: 'you',
-      actorSide: '',
-      actorLabel: 'You · on-chain',
-      actorEntityId: selfId,
-      actorName: selfName,
-      actorAvatar: resolveEntityAvatar(options.activeXlnFunctions, selfId),
-      actorInitials: initialsFor(selfName, 'YO'),
-    };
-  }
-  const counterpartyId = batchCounterpartyId(entry);
-  const actorName = activityEntityName(counterpartyId, counterpartyId ? formatEntityId(counterpartyId) : 'Counterparty', options);
-  return {
-    actor: counterpartyId ? 'peer' : 'system',
-    actorSide: '',
-    actorLabel: counterpartyId ? 'Counterparty · on-chain' : 'System',
-    actorEntityId: counterpartyId,
-    actorName,
-    actorAvatar: counterpartyId ? resolveEntityAvatar(options.activeXlnFunctions, counterpartyId) : '',
-    actorInitials: initialsFor(actorName, 'CP'),
-  };
-}
-
-function summarizeBatchOperations(entry: NonNullable<NonNullable<EntityReplica['state']['batchHistory']>[number]>): string[] {
-  const ops = entry.operations;
-  if (!ops) return entry.opCount > 0 ? [`${entry.opCount} on-chain op${entry.opCount === 1 ? '' : 's'}`] : [];
-  const lines: string[] = [];
-  const push = (count: number | undefined, label: string) => {
-    const normalized = Number(count || 0);
-    if (normalized > 0) lines.push(`${normalized} ${label}${normalized === 1 ? '' : 's'}`);
-  };
-  push(ops.settlements, 'settlement');
-  push(ops.reserveToCollateral, 'reserve → collateral move');
-  push(ops.collateralToReserve, 'collateral → reserve move');
-  push(ops.reserveToReserve, 'reserve transfer');
-  push(ops.disputeStarts, 'dispute start');
-  push(ops.disputeFinalizations, 'dispute finalize');
-  push(ops.externalTokenToReserve, 'external deposit');
-  push(ops.reserveToExternalToken, 'reserve withdrawal');
-  push(ops.revealSecrets, 'secret reveal');
-  push(ops.flashloans, 'flashloan');
-  return lines;
 }
 
 export function buildEntityActivityRows(options: BuildEntityActivityRowsOptions): EntityActivityRow[] {
@@ -438,50 +369,6 @@ export function buildEntityActivityRows(options: BuildEntityActivityRowsOptions)
         );
       }
     }
-  }
-
-  const history = Array.isArray(options.replica?.state?.batchHistory) ? options.replica.state.batchHistory : [];
-  for (let index = 0; index < history.length; index += 1) {
-    const entry = history[index];
-    if (!entry) continue;
-    const actorMeta = batchActorMeta(entry, options);
-    const accountId = batchCounterpartyId(entry);
-    const accountLabel = accountId ? activityAccountLabel(accountId, options.activeEnv) : 'On-chain';
-    rows.push({
-      id: `entity-activity-batch-${entry.txHash || entry.batchHash || index}`,
-      height: Number(entry.entityNonce || 0),
-      timestamp: Number(entry.confirmedAt || entry.broadcastedAt || 0),
-      source: 'batch',
-      accountId,
-      accountLabel,
-      kind: 'batch',
-      actor: actorMeta.actor,
-      actorSide: actorMeta.actorSide,
-      actorLabel: actorMeta.actorLabel,
-      actorEntityId: actorMeta.actorEntityId,
-      actorName: actorMeta.actorName,
-      actorAvatar: actorMeta.actorAvatar,
-      actorInitials: actorMeta.actorInitials,
-      headline: entry.eventType === 'DisputeStarted'
-        ? 'Dispute started on-chain'
-        : entry.eventType === 'DisputeFinalized'
-          ? 'Dispute finalized on-chain'
-          : entry.status === 'confirmed'
-            ? 'On-chain batch confirmed'
-            : 'On-chain batch failed',
-      bodyLines: [
-        ...(entry.note ? [entry.note] : []),
-        ...summarizeBatchOperations(entry),
-      ],
-      chips: [
-        { label: entry.status === 'confirmed' ? 'On-chain' : 'Failed', tone: entry.status === 'confirmed' ? 'good' : 'danger' },
-        ...(accountId ? [{ label: accountLabel }] : []),
-        { label: `Nonce ${Number(entry.entityNonce || 0)}` },
-        ...(entry.jBlockNumber ? [{ label: `J#${Number(entry.jBlockNumber)}` }] : []),
-      ],
-      footerLeft: shortHash(entry.txHash || entry.batchHash),
-      footerRight: `Batch ${Number(entry.opCount || 0)} op${Number(entry.opCount || 0) === 1 ? '' : 's'}`,
-    });
   }
 
   return rows.sort((a, b) => {

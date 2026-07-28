@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { readEntityFrameEventMessages } from '../state-helpers';
 
 import { ethers } from 'ethers';
 
@@ -470,7 +471,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     } as any);
 
     expect(result.newState.crossJurisdictionSwaps?.get(baseRoute.orderId)?.status).toBe('settled');
-    expect(result.newState.messages.some(message => message.includes('terminal state settled'))).toBe(true);
+    expect(readEntityFrameEventMessages(result.newState).some(message => message.includes('terminal state settled'))).toBe(true);
   });
 
   test('route hash binds domain, settlement policy, and time policy', () => {
@@ -672,7 +673,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     } as any);
     expect(invalidTransition.newState.crossJurisdictionSwaps?.get(route.orderId)?.status).toBe('resting');
     expect(
-      invalidTransition.newState.messages.some(message => message.includes('invalid transition resting->settled')),
+      readEntityFrameEventMessages(invalidTransition.newState).some(message => message.includes('invalid transition resting->settled')),
     ).toBe(true);
 
     const outsiderState = makeState(entity('76'), signer, base, targetHub);
@@ -683,7 +684,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       data: { route: { ...route, status: 'target_prepared' } },
     } as any);
     expect(nonParticipant.newState.crossJurisdictionSwaps?.has(route.orderId)).toBe(false);
-    expect(nonParticipant.newState.messages.some(message => message.includes('non-participant entity'))).toBe(true);
+    expect(readEntityFrameEventMessages(nonParticipant.newState).some(message => message.includes('non-participant entity'))).toBe(true);
   });
 
   test('route hash ignores mutable clearing policy but still binds economic terms', () => {

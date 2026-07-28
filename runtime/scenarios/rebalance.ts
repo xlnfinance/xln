@@ -497,7 +497,8 @@ export async function runRebalanceScenario(): Promise<void> {
   }
 
   // ── Cycle 2: Hub crontab deposits R→C and broadcasts immediately ──
-  const batchHistoryBeforeCycle2 = findReplica(env, hub.id)[1].state.batchHistory?.length || 0;
+  const batchNonceBeforeCycle2 =
+    findReplica(env, hub.id)[1].state.jBatchState?.entityNonce ?? 0;
   advanceTime(3100);
   console.log('\n  [Cycle 2] Hub crontab: deposit + broadcast...');
   await process(env, [{
@@ -522,13 +523,9 @@ export async function runRebalanceScenario(): Promise<void> {
   }
 
   const hubAfterBroadcast = findReplica(env, hub.id)[1].state;
-  const batchHistoryAfter = hubAfterBroadcast.batchHistory || [];
-  const rebalanceBatchCount = batchHistoryAfter.length - batchHistoryBeforeCycle2;
-  const rebalanceExecuted = rebalanceBatchCount > 0;
+  const batchNonceAfterCycle2 = hubAfterBroadcast.jBatchState?.entityNonce ?? 0;
+  const rebalanceExecuted = batchNonceAfterCycle2 > batchNonceBeforeCycle2;
   if (rebalanceExecuted) {
-    const lastBatch = batchHistoryAfter[batchHistoryAfter.length - 1];
-    assert(lastBatch?.status === 'confirmed', `Expected last batch status=confirmed, got ${lastBatch?.status}`, env);
-    assert((lastBatch?.opCount || 0) > 0, `Expected confirmed batch opCount > 0, got ${lastBatch?.opCount || 0}`, env);
     assert(
       !hubAfterBroadcast.jBatchState?.sentBatch,
       'Expected hub sentBatch cleared after confirmed broadcast processing',

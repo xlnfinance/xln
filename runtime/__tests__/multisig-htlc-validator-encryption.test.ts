@@ -1,4 +1,5 @@
 import { describe, expect, spyOn, test } from 'bun:test';
+import { readEntityFrameEventMessages } from '../state-helpers';
 import { SigningKey, computeAddress, keccak256, recoverAddress } from 'ethers';
 import {
   clearSignerKeys,
@@ -240,7 +241,6 @@ const certificationState = (): EntityState => ({
   height: 4,
   timestamp: 400,
   nonces: new Map(),
-  messages: [],
   proposals: new Map(),
   config: {
     mode: 'proposer-based',
@@ -1521,7 +1521,7 @@ describe('multisig HTLC validator encryption', () => {
       const result = await handleHtlcPayment(state, prepared, env);
       expect(result.accountTxs).toHaveLength(0);
       expect(emitted).toEqual([]);
-      expect(result.newState.messages.at(-1)).toBe('❌ HTLC payment failed: insufficient capacity');
+      expect(readEntityFrameEventMessages(result.newState).at(-1)).toBe('❌ HTLC payment failed: insufficient capacity');
       expect(warn).toHaveBeenCalledTimes(0);
       expect(error).toHaveBeenCalledTimes(0);
       expect(log.mock.calls.some(([line]) =>

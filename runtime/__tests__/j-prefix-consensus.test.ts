@@ -48,7 +48,6 @@ const makeState = (validators: string[]): EntityState => ({
   prevFrameHash: 'genesis',
   timestamp: 1_000,
   nonces: new Map(),
-  messages: [],
   proposals: new Map(),
   config: {
     mode: 'proposer-based',

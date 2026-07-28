@@ -20,7 +20,6 @@ const makeEntityState = (): EntityState => ({
   height: 0,
   timestamp: 1_000,
   nonces: new Map(),
-  messages: [],
   proposals: new Map(),
   config: {
     mode: 'proposer-based',
@@ -75,9 +74,7 @@ test('finalized different batch at the pending nonce quarantines the now-unexecu
   await applyHankoBatchProcessedEvent({
     newState: state,
     event: staleEvent,
-    transactionHash: `0x${'66'.repeat(32)}`,
     blockNumber: 100,
-    dirtyAccounts: new Set(),
   });
 
   expect(state.jBatchState?.entityNonce).toBe(7);
@@ -85,7 +82,7 @@ test('finalized different batch at the pending nonce quarantines the now-unexecu
   expect(state.jBatchState?.sentBatch?.terminalFailure?.message)
     .toContain(`J_BATCH_NONCE_CONSUMED_BY_DIFFERENT_HASH:${STALE_BATCH_HASH}`);
   expect(state.jBatchState?.status).toBe('failed');
-  expect(state.batchHistory).toBeUndefined();
+  expect(Object.hasOwn(state, 'batchHistory')).toBeFalse();
 });
 
 test('finalized batch initializes lazy batch state and preserves its nonce for the first later submit', async () => {
@@ -102,9 +99,7 @@ test('finalized batch initializes lazy batch state and preserves its nonce for t
         nonce: 7,
       },
     },
-    transactionHash: `0x${'67'.repeat(32)}`,
     blockNumber: 100,
-    dirtyAccounts: new Set(),
   });
 
   expect(state.jBatchState?.entityNonce).toBe(7);
@@ -126,15 +121,12 @@ test('only an exact nonce and canonical batch hash finalizes the pending batch',
   await applyHankoBatchProcessedEvent({
     newState: state,
     event: matchingEvent,
-    transactionHash: `0x${'77'.repeat(32)}`,
     blockNumber: 101,
-    dirtyAccounts: new Set(),
   });
 
   expect(state.jBatchState?.sentBatch).toBeUndefined();
   expect(state.jBatchState?.entityNonce).toBe(7);
-  expect(state.batchHistory).toHaveLength(1);
-  expect(state.batchHistory?.[0]?.batchHash).toBe(PENDING_BATCH_HASH);
+  expect(Object.hasOwn(state, 'batchHistory')).toBeFalse();
 });
 
 test('finality releases a protocol-forced draft broadcast without mixing it into the pending batch', async () => {
@@ -157,9 +149,7 @@ test('finality releases a protocol-forced draft broadcast without mixing it into
         nonce: 7,
       },
     },
-    transactionHash: `0x${'78'.repeat(32)}`,
     blockNumber: 102,
-    dirtyAccounts: new Set(),
     outputs,
   });
 
@@ -186,15 +176,13 @@ test('an older stale event cannot mutate a newer pending batch', async () => {
   await applyHankoBatchProcessedEvent({
     newState: state,
     event: staleFailure,
-    transactionHash: `0x${'88'.repeat(32)}`,
     blockNumber: 102,
-    dirtyAccounts: new Set(),
   });
 
   expect(state.jBatchState?.sentBatch?.batchHash).toBe(PENDING_BATCH_HASH);
   expect(state.jBatchState?.status).toBe('sent');
   expect(state.jBatchState?.failedAttempts).toBe(0);
-  expect(state.batchHistory).toBeUndefined();
+  expect(Object.hasOwn(state, 'batchHistory')).toBeFalse();
 });
 
 test('adapter decoding and persistence normalization preserve canonical batchHash identity', () => {
@@ -224,7 +212,7 @@ test('adapter decoding and persistence normalization preserve canonical batchHas
   })).toBeNull();
 });
 
-test('skipped-operation event binds to the exact pending batch and enters history', async () => {
+test('skipped-operation event binds to the exact pending batch until finalization', async () => {
   const state = makeEntityState();
   const [decoded] = rawEventToJEvents({
     name: 'BatchOperationSkipped',
@@ -264,15 +252,10 @@ test('skipped-operation event binds to the exact pending batch and enters histor
         success: true,
       },
     },
-    transactionHash: `0x${'bc'.repeat(32)}`,
     blockNumber: 104,
-    dirtyAccounts: new Set(),
   });
-  expect(state.batchHistory?.[0]?.skippedOperations).toEqual([{
-    operationType: 'reserveToReserve',
-    operationIndex: 2,
-    reason: 'insufficientBalance',
-  }]);
+  expect(state.jBatchState?.sentBatch).toBeUndefined();
+  expect(Object.hasOwn(state, 'batchHistory')).toBeFalse();
 });
 
 test('BrowserVM production processBatch event finalizes only its exact runtime pending batch', async () => {
@@ -316,15 +299,13 @@ test('BrowserVM production processBatch event finalizes only its exact runtime p
     await applyHankoBatchProcessedEvent({
       newState: state,
       event,
-      transactionHash: receipt.txHash,
       blockNumber: receipt.blockNumber,
-      dirtyAccounts: new Set(),
     });
 
     expect(event.type).toBe('HankoBatchProcessed');
     expect(event.type === 'HankoBatchProcessed' ? event.data.batchHash : null).toBe(signed.batchHash);
     expect(state.jBatchState?.sentBatch).toBeUndefined();
-    expect(state.batchHistory?.[0]?.batchHash).toBe(signed.batchHash);
+    expect(Object.hasOwn(state, 'batchHistory')).toBeFalse();
   } finally {
     await adapter.close();
   }
@@ -383,20 +364,13 @@ test('BrowserVM skips an underfunded operation and still finalizes its exact bat
         await applyHankoBatchProcessedEvent({
           newState: state,
           event,
-          transactionHash: receipt.txHash,
           blockNumber: receipt.blockNumber,
-          dirtyAccounts: new Set(),
         });
       }
     }
 
     expect(state.jBatchState?.sentBatch).toBeUndefined();
-    expect(state.batchHistory?.[0]?.status).toBe('confirmed');
-    expect(state.batchHistory?.[0]?.skippedOperations).toEqual([{
-      operationType: 'reserveToReserve',
-      operationIndex: 0,
-      reason: 'insufficientBalance',
-    }]);
+    expect(Object.hasOwn(state, 'batchHistory')).toBeFalse();
   } finally {
     await adapter.close();
   }

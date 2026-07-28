@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { readEntityFrameEventMessages } from '../state-helpers';
 
 import {
   ACCOUNT_MAINTENANCE_INTERVAL_MS,
@@ -59,7 +60,6 @@ const makeState = (id: string, proposer: string, timestamp: number): EntityState
   height: 0,
   timestamp,
   nonces: new Map(),
-  messages: [],
   proposals: new Map(),
   config: {
     mode: 'proposer-based',
@@ -231,7 +231,7 @@ describe('runtime scheduled wake', () => {
     });
 
     expect(result.outcome.kind).toBe('committed');
-    expect(result.workingReplica.state.messages).toContain(`${proposer}: already waiting`);
+    expect(readEntityFrameEventMessages(result.workingReplica.state)).toContain(`${proposer}: already waiting`);
     expect(result.workingReplica.state.crontabState?.hooks.has('existing-mempool:due')).toBe(false);
   });
 
@@ -274,7 +274,8 @@ describe('runtime scheduled wake', () => {
 
     expect(env.height).toBe(1);
     expect(env.eReplicas.get(`${id}:${proposer}`)?.state.height).toBe(1);
-    expect(env.eReplicas.get(`${id}:${proposer}`)?.state.messages)
+    const committedReplica = env.eReplicas.get(`${id}:${proposer}`);
+    expect(committedReplica && readEntityFrameEventMessages(committedReplica.state))
       .toContain(`${proposer}: left after prior commit`);
     expect(env.eReplicas.get(`${id}:${proposer}`)?.mempool).toHaveLength(0);
     expect(committedInputs).toEqual([{
@@ -419,7 +420,7 @@ describe('runtime scheduled wake', () => {
     const result = await applyEntityFrame(env, state, [tx], env.timestamp);
 
     expect(result.outputs).toEqual([]);
-    expect(result.newState.messages).toContain(
+    expect(readEntityFrameEventMessages(result.newState)).toContain(
       '🌉 Cross-j orderbook sweep: scheduled-wake-self-action-test expired=0 closedOffers=0 waiting=0',
     );
   });

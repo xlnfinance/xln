@@ -107,7 +107,6 @@ const entityDoc = (height: number): StorageEntityCoreDoc => ({
   entityId,
   height,
   timestamp: height,
-  messages: [],
   nonces: new Map(),
   proposals: new Map(),
   config: {

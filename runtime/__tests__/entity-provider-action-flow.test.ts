@@ -69,7 +69,6 @@ const baseState = (entityId: string, config: ConsensusConfig, timestamp: number)
   height: 0,
   timestamp,
   nonces: new Map(),
-  messages: [],
   proposals: new Map(),
   config,
   reserves: new Map(),

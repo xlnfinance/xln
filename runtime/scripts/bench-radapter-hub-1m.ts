@@ -275,7 +275,6 @@ const makeHubState = (entityId: string, height: number, timestamp: number): Enti
   entityId,
   height,
   timestamp,
-  messages: [],
   nonces: new Map(),
   proposals: new Map(),
   config: { mode: 'proposer-based', threshold: 1n, validators: ['bench-signer'], shares: { 'bench-signer': 1n } },

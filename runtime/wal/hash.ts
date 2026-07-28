@@ -19,9 +19,6 @@ const buildPersistedEnvHashInput = (snapshot: Record<string, unknown>): Record<s
           replica && typeof replica === 'object' && replica['state'] && typeof replica['state'] === 'object'
             ? { ...(replica['state'] as Record<string, unknown>) }
             : undefined;
-        if (state && 'batchHistory' in state) {
-          delete state['batchHistory'];
-        }
         const entityId =
           typeof state?.['entityId'] === 'string' && state['entityId'].length > 0
             ? state['entityId']

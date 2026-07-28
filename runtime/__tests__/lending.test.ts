@@ -28,7 +28,6 @@ const makeState = (): EntityState => ({
   height: 0,
   timestamp: 1_000,
   nonces: new Map(),
-  messages: [],
   proposals: new Map(),
   config: makeConfig(),
   reserves: new Map(),

@@ -21,7 +21,6 @@ const baseState = (): EntityState => ({
   height: 1,
   timestamp: 100,
   nonces: new Map(),
-  messages: [],
   proposals: new Map(),
   config: { mode: 'proposer-based', threshold: 1n, validators: ['1'], shares: { '1': 1n } },
   reserves: new Map(),
@@ -57,7 +56,6 @@ const mutators = {
     boardEpoch: 0,
     bySigner: new Map([['1', { nonce: 1n, commandHash: `0x${'13'.repeat(32)}` }]]),
   }; },
-  messages: state => { state.messages.push('committed-message'); },
   proposals: state => { state.proposals.set('proposal', { provider: 'nested-consensus-value' } as never); },
   config: state => { state.config.threshold = 2n; },
   prevFrameHash: state => { state.prevFrameHash = `0x${'44'.repeat(32)}`; },
@@ -74,7 +72,6 @@ const mutators = {
   jBlockChain: state => { state.jBlockChain.push({ jHeight: 9, jBlockHash: `0x${'55'.repeat(32)}`, eventsHash: `0x${'66'.repeat(32)}` }); },
   jHistoryFinality: state => { state.jHistoryFinality = { scannedThroughHeight: 9, tipBlockHash: `0x${'55'.repeat(32)}`, eventHistoryRoot: `0x${'66'.repeat(32)}` }; },
   certifiedBoardState: state => { state.certifiedBoardState!.boardRegistryRoot = `0x${'77'.repeat(32)}`; },
-  accountInputQueue: state => { state.accountInputQueue = [{ kind: 'ack' } as never]; },
   crontabState: state => { state.crontabState = { marker: 'cron' } as never; },
   jBatchState: state => { state.jBatchState = { marker: 'jbatch' } as never; },
   entityProviderActionState: state => { state.entityProviderActionState = {
@@ -82,7 +79,6 @@ const mutators = {
     confirmedNonce: 1n,
     generation: 1,
   }; },
-  batchHistory: state => { state.batchHistory = [{ marker: 'batch-history' } as never]; },
   entityEncPubKey: state => { state.entityEncPubKey = 'validator-local-pub-b'; },
   entityEncPrivKey: state => { state.entityEncPrivKey = 'validator-local-priv-b'; },
   profileEncryptionManifest: state => { state.profileEncryptionManifest = {

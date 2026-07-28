@@ -65,7 +65,6 @@ const makeState = (signerId: string, blockCount: number): EntityState => {
     prevFrameHash: previousFrameHash,
     timestamp: 100,
     nonces: new Map(),
-    messages: [],
     proposals: new Map(),
     config: {
       mode: 'proposer-based',

@@ -8,6 +8,7 @@
   import { entityAvatar as resolveEntityAvatar } from '$lib/utils/avatar';
   import EntityInput from '../shared/EntityInput.svelte';
   import TokenSelect from '../shared/TokenSelect.svelte';
+  import ActivityHistoryPanel from './ActivityHistoryPanel.svelte';
   import { requireTokenDecimals } from './token-metadata';
 
   export let entityId: string;
@@ -28,8 +29,6 @@
   type RuntimeEnv = RuntimeState;
   type JBatchState = NonNullable<EntityState['jBatchState']>;
   type BatchShape = JBatchState['batch'];
-  type CompletedBatch = NonNullable<EntityState['batchHistory']>[number];
-  type BatchHistoryRow = { entry: CompletedBatch; details: BatchDetailOp[]; key: string };
   type ActiveDispute = NonNullable<AccountState['activeDispute']>;
   type FeeOverrides = { gasBumpBps?: number; maxFeePerGasWei?: string; maxPriorityFeePerGasWei?: string };
   type PendingSettleEntityTx = Extract<EntityTx, { type: 'r2r' }>;
@@ -62,8 +61,6 @@
   let customPriorityFeeGwei = '';
   let autoExecuteWorkspaceKey = '';
   let autoExecutingWorkspaceKey = '';
-  let expandedHistoryKeys = new Set<string>();
-  let historyExpansionInitialized = false;
 
   function normalizeEntityId(id: string | null | undefined): string {
     return String(id || '').trim().toLowerCase();
@@ -471,11 +468,6 @@
     return `${whole.toString()}.${frac2.toString().padStart(2, '0')}`;
   }
 
-  function formatDateTime(ms: number | undefined): string {
-    if (!ms || !Number.isFinite(ms)) return '—';
-    return new Date(ms).toLocaleString();
-  }
-
   function buildFeeOverrides(): { gasBumpBps?: number; maxFeePerGasWei?: string; maxPriorityFeePerGasWei?: string } | null {
     if (gasPreset !== 'custom') return null;
     const out: { maxFeePerGasWei?: string; maxPriorityFeePerGasWei?: string } = {};
@@ -550,11 +542,6 @@
   $: jBatchState = currentReplica?.state?.jBatchState ?? null;
   $: jBatch = jBatchState?.batch || null;
   $: sentBatch = jBatchState?.sentBatch || null;
-  $: batchHistory = (() => {
-    const history = currentReplica?.state?.batchHistory;
-    if (!Array.isArray(history)) return [] as CompletedBatch[];
-    return [...history].reverse();
-  })();
   $: pendingOps = countBatchOps(jBatch);
   $: sentOps = countBatchOps(sentBatch?.batch);
   $: hasSentBatch = !!sentBatch;
@@ -563,58 +550,6 @@
   $: canBroadcastDraft = !hasSentBatch && hasDraftBatch;
   $: pendingSummary = batchSummary(jBatch);
   $: draftDetailOps = buildBatchDetailOps(jBatch);
-  $: batchHistoryRows = batchHistory.map((entry, index): BatchHistoryRow => ({
-    entry,
-    details: buildBatchDetailOps(entry?.batch),
-    key: String(entry?.txHash || `${entry?.batchHash || 'batch'}-${index}`),
-  }));
-  $: {
-    const validKeys = new Set(batchHistoryRows.map((row) => row.key));
-    const nextExpandedKeys = new Set(Array.from(expandedHistoryKeys).filter((key) => validKeys.has(key)));
-    if (!historyExpansionInitialized && batchHistoryRows[0]?.key) {
-      nextExpandedKeys.add(batchHistoryRows[0].key);
-      historyExpansionInitialized = true;
-    }
-    const changed =
-      nextExpandedKeys.size !== expandedHistoryKeys.size
-      || Array.from(nextExpandedKeys).some((key) => !expandedHistoryKeys.has(key));
-    if (changed) {
-      expandedHistoryKeys = nextExpandedKeys;
-    }
-  }
-  function historySummary(entry: CompletedBatch | null | undefined): Array<{ label: string; count: number }> {
-    const operations = entry?.operations;
-    if (operations && typeof operations === 'object') {
-      return [
-        { label: 'Flashloan', count: Number(operations.flashloans || 0) },
-        { label: 'ExternalTokenToReserve', count: Number(operations.externalTokenToReserve || 0) },
-        { label: 'CollateralToReserve', count: Number(operations.collateralToReserve || 0) },
-        { label: 'Settlement', count: Number(operations.settlements || 0) },
-        { label: 'ReserveToReserve', count: Number(operations.reserveToReserve || 0) },
-        { label: 'ReserveToCollateral', count: Number(operations.reserveToCollateral || 0) },
-        { label: 'ReserveToExternalToken', count: Number(operations.reserveToExternalToken || 0) },
-        { label: 'DisputeStart', count: Number(operations.disputeStarts || 0) },
-        { label: 'DisputeFinalize', count: Number(operations.disputeFinalizations || 0) },
-        { label: 'RevealSecret', count: Number(operations.revealSecrets || 0) },
-      ].filter((entry) => entry.count > 0);
-    }
-    const opCount = Number(entry?.opCount || 0);
-    return opCount > 0 ? [{ label: 'Ops', count: opCount }] : [];
-  }
-
-  function historyOriginLabel(entry: CompletedBatch | null | undefined): string {
-    if (entry?.source === 'counterparty-event') return 'Counterparty Event';
-    return 'Self Batch';
-  }
-
-  function handleHistoryToggle(key: string, open: boolean): void {
-    const nextExpandedKeys = new Set(expandedHistoryKeys);
-    if (open) nextExpandedKeys.add(key);
-    else nextExpandedKeys.delete(key);
-    expandedHistoryKeys = nextExpandedKeys;
-    historyExpansionInitialized = true;
-  }
-
   $: selectedAccount = counterpartyEntityId ? currentReplica?.state?.accounts?.get?.(counterpartyEntityId) : null;
   $: selectedSettlementTransition = [
     ...(selectedAccount?.mempool ?? []),
@@ -975,7 +910,7 @@
           {/if}
         </div>
       </div>
-      <div class="batch-status-meta">History ({batchHistory.length})</div>
+      <div class="batch-status-meta">Durable history</div>
     </div>
 
     <div class="draft-batch" class:locked={hasSentBatch}>
@@ -1099,7 +1034,7 @@
       <button class="tab" class:active={action === 'r2c'} on:click={() => action = 'r2c'} disabled={sending}>Reserve → Collateral</button>
       <button class="tab" class:active={action === 'c2r'} on:click={() => action = 'c2r'} disabled={sending}>Collateral → Reserve</button>
       <button class="tab" class:active={action === 'transfer'} on:click={() => action = 'transfer'} disabled={sending}>Reserve → Reserve</button>
-      <button class="tab" class:active={action === 'history'} on:click={() => action = 'history'} disabled={sending}>History ({batchHistory.length})</button>
+      <button class="tab" class:active={action === 'history'} on:click={() => action = 'history'} disabled={sending}>History</button>
     </div>
 
     <p class="action-desc">
@@ -1108,7 +1043,7 @@
       {:else if action === 'c2r'}
         Queue collateral-to-reserve. Once the counterparty signs, it is added to your local draft batch.
       {:else if action === 'history'}
-        Review {batchHistory.length} finalized on-chain batch{batchHistory.length === 1 ? '' : 'es'} for this entity.
+        Review the durable Entity activity stream with on-chain and off-chain filters.
       {:else}
         Queue reserve-to-reserve transfer to another entity.
       {/if}
@@ -1116,100 +1051,7 @@
   {/if}
 
   {#if action === 'history'}
-    <div class="history-card">
-      <div class="history-header">
-        <div class="history-title">On-Chain Batch History</div>
-        <div class="history-subtitle">{batchHistory.length} finalized batch{batchHistory.length === 1 ? '' : 'es'}</div>
-      </div>
-
-      {#if batchHistory.length === 0}
-        <div class="batch-empty">No finalized batches yet.</div>
-      {:else}
-        <div class="history-list">
-          {#each batchHistoryRows as row, index (row.key)}
-            {@const entry = row.entry}
-            <details
-              class="history-item"
-              data-testid="settle-history-item"
-              open={expandedHistoryKeys.has(row.key)}
-              on:toggle={(event) => handleHistoryToggle(row.key, (event.currentTarget as HTMLDetailsElement).open)}
-            >
-              <summary>
-                <span class="history-status {entry.status === 'failed' ? 'failed' : 'confirmed'}">
-                  {entry.status === 'failed' ? 'Failed' : 'Confirmed'}
-                </span>
-                <span class="history-origin {entry.source === 'counterparty-event' ? 'counterparty' : ''}">
-                  {historyOriginLabel(entry)}
-                </span>
-                <span>Nonce #{Number(entry.entityNonce || 0)}</span>
-                <span>J#{Number(entry.jBlockNumber || 0)}</span>
-                <span>{Number(entry.opCount || 0)} ops</span>
-                {#if entry.txHash}
-                  <code>{String(entry.txHash || '').slice(0, 12)}...</code>
-                {/if}
-              </summary>
-              <div class="history-body">
-                <div class="history-meta">
-                  <span>Broadcast: {formatDateTime(Number(entry.broadcastedAt || 0))}</span>
-                  <span>Finalized: {formatDateTime(Number(entry.confirmedAt || 0))}</span>
-                  <span>Batch: {String(entry.batchHash || '').slice(0, 16)}...</span>
-                  {#if entry.eventType}
-                    <span>Event: {entry.eventType}</span>
-                  {/if}
-                </div>
-                {#if entry.note}
-                  <div class="history-note">{entry.note}</div>
-                {/if}
-                {#if row.details.length > 0}
-                  <div class="batch-ops-grid history-ops-grid">
-                    {#each row.details as op (op.key)}
-                      <article class="batch-op-card history-op-card">
-                        <div class="batch-op-title">{op.operation}</div>
-                        {#if op.entities.length > 0}
-                          <div class="batch-op-entities">
-                            {#each op.entities as opEntityId}
-                              {@const identity = {
-                                id: String(opEntityId || ''),
-                                short: formatShortId(String(opEntityId || '')),
-                                name: entityName(String(opEntityId || '')),
-                                avatar: entityAvatar(String(opEntityId || '')),
-                              }}
-                              <div class="entity-chip" title={identity.id}>
-                                {#if identity.avatar}
-                                  <img class="entity-chip-avatar" src={identity.avatar} alt="" />
-                                {:else}
-                                  <span class="entity-chip-avatar placeholder">{identity.name.slice(0, 1).toUpperCase()}</span>
-                                {/if}
-                                <span class="entity-chip-name">{identity.name}</span>
-                                <code class="entity-chip-id">{identity.short}</code>
-                              </div>
-                            {/each}
-                          </div>
-                        {/if}
-                        <div class="batch-op-details">
-                          {#each op.details as field}
-                            <div class="batch-op-field">
-                              <span class="batch-op-field-label">{field.label}</span>
-                              <span class="batch-op-field-value">{field.value}</span>
-                            </div>
-                          {/each}
-                        </div>
-                      </article>
-                    {/each}
-                  </div>
-                {:else if historySummary(entry).length > 0}
-                  <div class="batch-summary">
-                    {#each historySummary(entry) as item}
-                      <span class="summary-chip">{item.label}: {item.count}</span>
-                    {/each}
-                  </div>
-                {/if}
-              </div>
-            </details>
-          {/each}
-        </div>
-      {/if}
-    </div>
+    <ActivityHistoryPanel {entityId} runtimeId={activeEnv?.runtimeId} />
   {:else if action === 'r2c' || action === 'c2r'}
     <EntityInput
       label="Account"
@@ -1491,15 +1333,6 @@
     word-break: break-word;
   }
 
-  .history-ops-grid {
-    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-  }
-
-  .history-op-card {
-    background: #111111;
-    border-color: #2e2e2e;
-  }
-
   .preview-label {
     font-size: 10px;
     font-weight: 700;
@@ -1624,121 +1457,6 @@
     color: #a8a29e;
     padding: 10px;
     font-size: 12px;
-  }
-
-  .history-card {
-    margin-top: 12px;
-    border: 1px solid #292524;
-    border-radius: 10px;
-    background: #151310;
-    padding: 10px;
-  }
-
-  .history-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    gap: 8px;
-  }
-
-  .history-title {
-    font-size: 12px;
-    font-weight: 700;
-    color: #f3f4f6;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-  }
-
-  .history-subtitle {
-    font-size: 11px;
-    color: #9ca3af;
-  }
-
-  .history-list {
-    margin-top: 8px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .history-item {
-    border: 1px solid #292524;
-    border-radius: 8px;
-    background: #0c0a09;
-    overflow: hidden;
-  }
-
-  .history-item summary {
-    list-style: none;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    align-items: center;
-    cursor: pointer;
-    padding: 8px 10px;
-    font-size: 11px;
-    color: #d6d3d1;
-    font-family: 'JetBrains Mono', monospace;
-  }
-
-  .history-item summary::-webkit-details-marker {
-    display: none;
-  }
-
-  .history-status {
-    border-radius: 999px;
-    border: 1px solid rgba(74, 222, 128, 0.45);
-    color: #86efac;
-    background: rgba(20, 83, 45, 0.22);
-    padding: 2px 8px;
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-  }
-
-  .history-status.failed {
-    border-color: rgba(248, 113, 113, 0.45);
-    color: #fecaca;
-    background: rgba(127, 29, 29, 0.24);
-  }
-
-  .history-origin {
-    border-radius: 999px;
-    border: 1px solid rgba(234, 179, 8, 0.35);
-    color: #fde68a;
-    background: rgba(120, 53, 15, 0.2);
-    padding: 2px 8px;
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-  }
-
-  .history-origin.counterparty {
-    border-color: rgba(248, 113, 113, 0.45);
-    color: #fecaca;
-    background: rgba(127, 29, 29, 0.24);
-  }
-
-  .history-body {
-    border-top: 1px solid #292524;
-    padding: 8px 10px 10px;
-  }
-
-  .history-meta {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    font-size: 11px;
-    color: #a8a29e;
-    font-family: 'JetBrains Mono', monospace;
-  }
-
-  .history-note {
-    margin-top: 8px;
-    font-size: 12px;
-    color: #fca5a5;
   }
 
   .dispute-state {

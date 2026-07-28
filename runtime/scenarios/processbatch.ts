@@ -231,7 +231,7 @@ export async function runProcessBatchScenario(_existingEnv?: RuntimeState): Prom
     assert(Number(op.nonce) > 0, `C2R op has positive nonce (${op.counterparty.slice(-8)})`, env);
   }
 
-  const historyBefore = hubBeforeBroadcast.state.batchHistory?.length || 0;
+  const nonceBefore = hubBeforeBroadcast.state.jBatchState?.entityNonce ?? 0;
 
   await runProcess(env, [{
     entityId: hub.id,
@@ -243,7 +243,8 @@ export async function runProcessBatchScenario(_existingEnv?: RuntimeState): Prom
   const hubAfterBroadcast = findReplica(env, hub.id)[1];
   const batchHashBeforeFinalize = hubAfterBroadcast.state.jBatchState?.sentBatch?.batchHash;
   if (jadapter.mode === 'rpc' && !hubAfterBroadcast.state.jBatchState?.sentBatch) {
-    const alreadyConfirmed = (hubAfterBroadcast.state.batchHistory?.length || 0) > historyBefore;
+    const alreadyConfirmed =
+      (hubAfterBroadcast.state.jBatchState?.entityNonce ?? 0) > nonceBefore;
     assert(alreadyConfirmed, 'j_broadcast either latches sentBatch or confirms immediately', env);
   }
   if (hubAfterBroadcast.state.jBatchState?.sentBatch) {
@@ -258,16 +259,13 @@ export async function runProcessBatchScenario(_existingEnv?: RuntimeState): Prom
   const receiverAFinal = findReplica(env, receiverA.id)[1];
   const receiverBFinal = findReplica(env, receiverB.id)[1];
 
-  const historyAfter = hubFinal.state.batchHistory || [];
-  assert(historyAfter.length > historyBefore, `batchHistory grew (${historyBefore} -> ${historyAfter.length})`, env);
-
-  const lastBatch = historyAfter[historyAfter.length - 1];
-  assert(lastBatch?.status === 'confirmed', `last batch status=confirmed (got ${lastBatch?.status})`, env);
-  assert((lastBatch?.opCount || 0) >= 3, `last batch opCount >= 3 (got ${lastBatch?.opCount || 0})`, env);
-  assert((lastBatch?.entityNonce || 0) >= 1, `last batch entityNonce >= 1 (got ${lastBatch?.entityNonce || 0})`, env);
-
   assert(!hubFinal.state.jBatchState?.sentBatch, 'sentBatch cleared after confirmation', env);
   assert(hubFinal.state.jBatchState?.status === 'empty', `jBatchState.status=empty (got ${hubFinal.state.jBatchState?.status})`, env);
+  assert(
+    (hubFinal.state.jBatchState?.entityNonce ?? 0) > nonceBefore,
+    'finalized batch advances the canonical Entity nonce',
+    env,
+  );
   assert(hasFinalizedHankoBatch(hubFinal), 'hub finalized HankoBatchProcessed', env);
 
   assert(hasFinalizedEvent(hubFinal, 'AccountSettled'), 'hub finalized AccountSettled event', env);
@@ -306,7 +304,7 @@ export async function runProcessBatchScenario(_existingEnv?: RuntimeState): Prom
   console.log(`   Hub: ${hub.id}`);
   console.log(`   Spenders: ${spenderA.id}, ${spenderB.id}`);
   console.log(`   Receivers: ${receiverA.id}, ${receiverB.id}`);
-  console.log(`   Batch history entries: ${historyAfter.length}`);
+  console.log(`   Finalized batch nonce: ${hubFinal.state.jBatchState?.entityNonce ?? 0}`);
 
   await jadapter.close();
   return env;

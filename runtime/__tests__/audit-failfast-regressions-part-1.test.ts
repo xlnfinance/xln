@@ -1,4 +1,5 @@
 import { describe, expect, spyOn, test } from 'bun:test';
+import { readEntityFrameEventMessages } from '../state-helpers';
 
 import { x25519 } from '@noble/curves/ed25519.js';
 
@@ -587,7 +588,6 @@ const makeReplicaMissingPrevFrameHash = (): EntityReplica => ({
     height: 1,
     timestamp: 0,
     nonces: new Map(),
-    messages: [],
     proposals: new Map(),
     config: makeSingleSignerConfig(),
     reserves: new Map(),
@@ -618,7 +618,6 @@ const makeEntityState = (entityId: string): EntityState => ({
   height: 0,
   timestamp: 1_000,
   nonces: new Map(),
-  messages: [],
   proposals: new Map(),
   config: makeSingleSignerConfig(),
   reserves: new Map(),
@@ -2009,7 +2008,7 @@ describe('audit fail-fast regressions', () => {
       'ENTITY_FRAME_TX_FAILED: type=definitely_unknown_entity_tx',
     );
 
-    expect(state.messages).toHaveLength(0);
+    expect(readEntityFrameEventMessages(state)).toHaveLength(0);
     expect(state.nonces.has(signer)).toBe(false);
     expect(env.runtimeState?.currentStorageOverlayMarks ?? []).toEqual([]);
   });
@@ -2028,7 +2027,7 @@ describe('audit fail-fast regressions', () => {
 
     const applied = await applyEntityFrame(env, state, frameTxs, env.timestamp);
 
-    expect(applied.newState.messages).toHaveLength(1);
+    expect(readEntityFrameEventMessages(applied.newState)).toHaveLength(1);
     expect(applied.storageChanges).toContainEqual({ family: 'entity', entityId: state.entityId });
     expect(env.runtimeState?.currentStorageOverlayMarks ?? []).toEqual([]);
   });

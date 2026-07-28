@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { readEntityFrameEventMessages } from '../state-helpers';
 
 import { accountInputProposal } from '../account/consensus/flush';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
@@ -212,7 +213,6 @@ const createMultisigAccountState = (
     height: 0,
     timestamp: env.timestamp,
     nonces: new Map(),
-    messages: [],
     proposals: new Map(),
     config: {
       mode: 'proposer-based',
@@ -969,7 +969,8 @@ describe('multisig secondary Hanko production', () => {
     const firstDelivery = await applyEntityInput(proposer.env, targetReplica, structuredClone(certifiedInput));
     const accountAfterFirst = new Map(Array.from(firstDelivery.workingReplica.state.accounts.entries())
       .map(([counterpartyId, account]) => [counterpartyId, projectAccountDoc(account)]));
-    const messagesAfterFirst = structuredClone(firstDelivery.workingReplica.state.messages);
+    expect(readEntityFrameEventMessages(firstDelivery.workingReplica.state))
+      .toEqual(['🔐 Re-sealed Account frame 1 under the current board']);
     const restoredState = hydrateEntityStateFromStorage({
       core: projectEntityCoreDoc(firstDelivery.workingReplica.state),
       accounts: new Map(Array.from(firstDelivery.workingReplica.state.accounts.entries())
@@ -988,7 +989,7 @@ describe('multisig secondary Hanko production', () => {
     const accountAfterDuplicate = new Map(Array.from(duplicateDelivery.workingReplica.state.accounts.entries())
       .map(([counterpartyId, account]) => [counterpartyId, projectAccountDoc(account)]));
     expect(safeStringify(accountAfterDuplicate)).toBe(safeStringify(accountAfterFirst));
-    expect(safeStringify(duplicateDelivery.workingReplica.state.messages)).toBe(safeStringify(messagesAfterFirst));
+    expect(readEntityFrameEventMessages(duplicateDelivery.workingReplica.state)).toEqual([]);
     const quarantinedDelivery = await applyEntityInput(proposer.env, duplicateDelivery.workingReplica, {
       ...structuredClone(certifiedInput),
       entityTxs: [{
@@ -1003,7 +1004,7 @@ describe('multisig secondary Hanko production', () => {
     });
     expect(quarantinedDelivery.outcome.kind).toBe('committed');
     expect(safeStringify(quarantinedDelivery.workingReplica.state.accounts)).toBe(safeStringify(accountAfterFirst));
-    expect(safeStringify(quarantinedDelivery.workingReplica.state.messages)).toBe(safeStringify(messagesAfterFirst));
+    expect(readEntityFrameEventMessages(quarantinedDelivery.workingReplica.state)).toEqual([]);
     expect(quarantinedDelivery.workingReplica.state.consumptionAccumulator?.count).toBe(1n);
     const quarantinedAccumulator = quarantinedDelivery.workingReplica.state.consumptionAccumulator;
     if (!quarantinedAccumulator) throw new Error('TEST_QUARANTINED_ACCUMULATOR_MISSING');

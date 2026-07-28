@@ -6,6 +6,7 @@ import { handleProposeEntityTx, handleVoteEntityTx } from '../entity/tx/handlers
 import { deriveSignerAddressSync } from '../account/crypto';
 import { generateLazyEntityId } from '../entity/factory';
 import { createEmptyEnv } from '../runtime';
+import { readEntityFrameEventMessages } from '../state-helpers';
 import type { EntityState, EntityTx } from '../types';
 
 test('basic entity proposal and vote traces stay behind structured logging', () => {
@@ -25,7 +26,6 @@ const makeEntityState = (validators: readonly [string, string], entityId: string
   height: 0,
   timestamp: 123,
   nonces: new Map(),
-  messages: [],
   proposals: new Map(),
   config: {
     mode: 'proposer-based',
@@ -67,7 +67,7 @@ test('basic proposal and vote state transitions are unchanged', () => {
   const [proposalId, proposal] = Array.from(proposed.proposals.entries())[0]!;
 
   expect(initial.proposals.size).toBe(0);
-  expect(proposed.messages).toEqual([]);
+  expect(readEntityFrameEventMessages(proposed)).toEqual([]);
   expect(proposal.status).toBe('pending');
   expect(proposal.votes.get(validators[0])).toBe('yes');
 
@@ -75,6 +75,6 @@ test('basic proposal and vote state transitions are unchanged', () => {
   const voted = handleVoteEntityTx(env, proposed, voteTx).newState;
 
   expect(voted.proposals.get(proposalId)?.status).toBe('executed');
-  expect(voted.messages).toEqual(['[COLLECTIVE] ship mainnet discipline']);
+  expect(readEntityFrameEventMessages(voted)).toEqual(['[COLLECTIVE] ship mainnet discipline']);
   expect(voted.proposals.get(proposalId)?.votes.get(validators[1])).toBe('yes');
 });

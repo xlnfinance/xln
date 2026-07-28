@@ -29,6 +29,7 @@ import { formatRuntime } from '../qa/runtime-ascii';
 import { deriveDelta, isLeft } from '../account/utils';
 import { createGossipLayer } from '../networking/gossip';
 import { compareStableText, safeStringify } from '../protocol/serialization';
+import { readEntityFrameEventMessages } from '../state-helpers';
 import { ethers } from 'ethers';
 import {
   AHB_DEBUG,
@@ -2110,14 +2111,17 @@ export async function ahb(env: RuntimeState): Promise<void> {
   // Verify DebtCreated event received by entities
   // H14 AUDIT FIX: Verify actual debt amount, not just event existence
   const [, bobFinal] = findReplica(env, bob.id);
+  const bobFrameMessages = readEntityFrameEventMessages(bobFinal.state);
   if (AHB_DEBUG) {
     console.log('[AHB_DEBUG_DEBT]', safeStringify({
-      messages: bobFinal.state.messages.filter(message => message.includes('DEBT')),
+      messages: bobFrameMessages.filter(message => message.includes('DEBT')),
       inDebtsByToken: bobFinal.state.inDebtsByToken,
       outDebtsByToken: bobFinal.state.outDebtsByToken,
     }));
   }
-  const debtMessage = bobFinal.state.messages.find(m => m.includes('DEBT') && m.includes(hub.id.slice(-4)));
+  const debtMessage = bobFrameMessages.find(message =>
+    message.includes('DEBT') && message.includes(hub.id.slice(-4))
+  );
   assert(debtMessage, 'PHASE 7: Bob did not receive DebtCreated event');
 
   // H14: Parse and verify DebtCreated event fields

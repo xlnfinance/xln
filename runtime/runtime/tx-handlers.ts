@@ -410,7 +410,6 @@ const buildGenesisReplica = (
       height: 0,
       timestamp: env.timestamp,
       nonces: new Map(),
-      messages: [],
       proposals: new Map(),
       config,
       reserves: new Map(),

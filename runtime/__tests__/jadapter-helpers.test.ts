@@ -89,7 +89,6 @@ const makeReplica = (entityId: string, signerId: string, isProposer: boolean): E
       height: 0,
       timestamp: 1_000,
       nonces: new Map(),
-      messages: [],
       proposals: new Map(),
       config: {
         mode: 'proposer-based',

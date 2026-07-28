@@ -58,7 +58,6 @@ const installVoteTarget = (env: RuntimeState): {
     height: 0,
     timestamp: 0,
     nonces: new Map(),
-    messages: [],
     proposals: new Map(),
     config: {
       mode: 'proposer-based',
