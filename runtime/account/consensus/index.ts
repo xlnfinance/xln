@@ -52,7 +52,6 @@ import type {
 import { createDisputeProofHashWithNonce } from '../../protocol/dispute/proof-builder';
 import { getMinimumSafeSettlementNonce } from '../../protocol/settlement/operations';
 import { verifyHankoForHash } from '../../hanko/signing';
-import { getReplicaByEntityId } from '../../entity/replica';
 import {
   computeAccountCommitmentSectionDetail,
   computeAccountCommitmentSectionDetailCold,
@@ -2464,10 +2463,10 @@ const resolveAccountInputSecurityContext = (
 ): AccountInputSecurityContext => provided ?? {
   entityTimestamp: env.timestamp,
   owningEntityIsHub: false,
-  finalizedJHeight:
-    getReplicaByEntityId(env, account.proofHeader.fromEntity)?.state.lastFinalizedJHeight ??
-    account.lastFinalizedJHeight ??
-    0,
+  // Account never reaches upward into Entity replicas. Normal Entity routing
+  // supplies the current certified height explicitly; direct Account tooling
+  // can only rely on this Account's own committed observation.
+  finalizedJHeight: account.lastFinalizedJHeight ?? 0,
 };
 
 export async function applyAccountInput(

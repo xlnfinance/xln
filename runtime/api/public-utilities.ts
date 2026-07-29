@@ -51,7 +51,7 @@ export {
   formatTokenAmountEthers,
   parseTokenAmount,
 } from '../account/financial-utils';
-export { calculateSolvency, verifySolvency } from '../account/solvency';
+export { calculateSolvency, verifySolvency } from '../runtime/solvency';
 export { classifyBilateralState, getAccountBarVisual } from '../account/view-state';
 export { createDefaultDelta, isDelta, validateAccountDeltas, validateDelta } from '../validation-utils';
 export { decode, encode } from '../storage/snapshot-coder';

@@ -738,7 +738,7 @@ assertNotIncludes(
   'runtime/relay/standalone-server.ts',
 );
 
-const solvencyPath = 'runtime/account/solvency.ts';
+const solvencyPath = 'runtime/runtime/solvency.ts';
 const solvency = readText(solvencyPath);
 assertNotIncludes(solvency, 'console.', solvencyPath);
 
