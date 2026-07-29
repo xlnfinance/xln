@@ -44,7 +44,6 @@ const COORDINATOR_DEBT: Readonly<Record<string, number>> = {
   'runtime/radapter/server.ts::handleRuntimeAdapterMessage': 302,
   'runtime/server/index.ts::createHttpServer': 216,
   'runtime/server/index.ts::startXlnServer': 630,
-  'runtime/server/token-catalog.ts::createTokenCatalogController': 165,
   'runtime/storage/merkle.ts::buildRadixMerkleMaterialized': 181,
   'runtime/watchtower/action.ts::runWatchtowerSweep': 159,
   'runtime/watchtower/store.ts::createWatchtowerStore': 372,
