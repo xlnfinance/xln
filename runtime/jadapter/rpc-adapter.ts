@@ -46,7 +46,7 @@ import {
   parseReceiptLogsToJEvents,
 } from './helpers';
 import { DEV_CHAIN_IDS } from './index';
-import { normalizeReceiptHash, parseReceiptQuantity } from './receipt-codec';
+import { normalizeReceiptHash, parseReceiptQuantity } from '../jurisdiction/receipt-codec';
 import { readAuthenticatedReceiptRange, type RpcBatchCall } from './receipt-root';
 import { createRpcLifecycleMethods } from './rpc-lifecycle';
 import { readAndAssertRpcChainId } from './rpc-network';

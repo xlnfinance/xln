@@ -3,7 +3,7 @@ export type {
   CanonicalRpcLog,
   CanonicalRpcReceipt,
   CanonicalReceiptMptProof,
-} from './receipt-codec';
+} from '../jurisdiction/receipt-codec';
 
 export {
   assertCanonicalReceiptsRoot,
@@ -12,7 +12,7 @@ export {
   createCanonicalReceiptProofs,
   encodeCanonicalRpcReceipt,
   verifyCanonicalReceiptProof,
-} from './receipt-codec';
+} from '../jurisdiction/receipt-codec';
 
 export type {
   AuthenticatedReceiptRange,

@@ -11,7 +11,7 @@ import {
   type RawJEvent,
 } from './helpers';
 import type { BrowserVMProvider } from './browservm-provider';
-import type { AuthenticatedRpcLog } from './receipt-codec';
+import type { AuthenticatedRpcLog } from '../jurisdiction/receipt-codec';
 import {
   buildCertifiedRegistrationEvidence,
   markLocalJAuthorityRuntimeTx,

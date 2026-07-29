@@ -5,7 +5,7 @@ import { EntityProvider__factory } from '../../jurisdictions/typechain-types';
 import {
   verifyCanonicalReceiptProof,
   type AuthenticatedRpcLog,
-} from '../jadapter/receipt-codec';
+} from './receipt-codec';
 import { encodeCanonicalEntityConsensusValue } from '../entity/consensus/state-root';
 import type { CertifiedRegistrationEvidence, RuntimeState, JReplica, RuntimeTx } from '../types';
 import { getCertifiedBoardStackKey } from './board-registry';

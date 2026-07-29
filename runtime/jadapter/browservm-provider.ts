@@ -55,7 +55,7 @@ import {
   createCanonicalReceiptProofs,
   type AuthenticatedRpcLog,
   type CanonicalRpcReceipt,
-} from './receipt-codec';
+} from '../jurisdiction/receipt-codec';
 import {
   BROWSERVM_CONTRACT_VERSION,
   decodeBrowserVmStateRoot,

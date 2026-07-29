@@ -11,7 +11,7 @@ import {
   type CanonicalRpcLog,
   type CanonicalRpcReceipt,
   type CanonicalReceiptMptProof,
-} from './receipt-codec';
+} from '../jurisdiction/receipt-codec';
 
 type CanonicalRpcBlock = {
   number: string | number;
