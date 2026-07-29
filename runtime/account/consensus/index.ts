@@ -17,7 +17,7 @@ import { cloneAccountFrame, cloneAccountState, getAccountPerspective } from '../
 import { HEAVY_LOGS } from '../../utils';
 import { applyAccountTx } from '../tx/apply';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
-import { createFrameHash, getAccountFrameBoundsError } from './frame';
+import { createFrameHash } from './frame';
 import { normalizeAccountWatchSeed } from '../../protocol/account-watch-seed';
 import {
   assertNoUnilateralSettlementMutation,
@@ -40,7 +40,6 @@ import type {
 } from './types';
 import { createDisputeProofHashWithNonce } from '../../protocol/dispute/proof-builder';
 import { getMinimumSafeSettlementNonce } from '../../protocol/settlement/operations';
-import { verifyHankoForHash } from '../../hanko/signing';
 import { computeAccountStateRoot, computeAccountStateSectionHashes } from '../state-root';
 import { forkAccountCommitmentCache } from '../map-commitment';
 import { createAccountJClaimSession, type AccountJClaimSession } from '../j-claim-session';
@@ -62,19 +61,13 @@ import {
   validateCounterpartyDisputeSeal,
 } from './dispute-seal';
 import {
-  buildDuplicateCommittedFrameAck,
   classifyAccountInputReplay,
-  describeAccountState,
   getDisputeHankoShapeError,
   handleReplayOrObsoleteAccountInput,
   normalizeAccountInputHeight,
 } from './replay';
-import {
-  applySameHeightIncomingFrameRollback,
-  handleUnmatchedAck,
-  resolveAccountAckTarget,
-  resolveSameHeightIncomingFrame,
-} from './collision';
+import { applySameHeightIncomingFrameRollback, handleUnmatchedAck, resolveAccountAckTarget } from './collision';
+import { preflightIncomingAccountFrame } from './incoming-preflight';
 export { proposeAccountFrame } from './propose';
 export type {
   AccountConsensusFrameResult,
@@ -85,7 +78,6 @@ export type {
 } from './types';
 
 const accountLog = createStructuredLogger('account');
-const STALE_ACCOUNT_FRAME_WARNING_MS = 5 * 60_000;
 
 export { getIncomingAccountDeadlineViolation, HTLC_ENFORCEMENT_RESERVE_MS, isHtlcSecretEnforcementWindowClosed };
 export type { AccountInputSecurityContext };
@@ -98,16 +90,6 @@ export { computeFrameHash, isWithinAccountFrameBounds } from './frame';
 type AccountCommittedFrame = NonNullable<HandleAccountInputResult['committedFrames']>[number];
 type AccountRevealedSecret = { secret: string; hashlock: string };
 type AccountSwapCancelRequest = { offerId: string; accountId: string };
-
-type IncomingFramePreflightResult =
-  | {
-      kind: 'continue';
-      receivedFrame: AccountFrame;
-      ourEntityId: string;
-      frameJHeight: number;
-      rollbackPendingFrame: boolean;
-    }
-  | { kind: 'return'; result: HandleAccountInputResult };
 
 type IncomingFrameValidation = {
   clonedMachine: AccountState;
@@ -158,273 +140,6 @@ const isRefreshableStaleIncomingSettlementSeal = (
   );
   return matchingSeals.length === 1;
 };
-
-async function verifyIncomingFrameHanko(
-  env: RuntimeState,
-  input: AccountInput,
-  receivedFrame: AccountFrame,
-  events: string[],
-  securityContext: AccountInputSecurityContext,
-): Promise<HandleAccountInputResult | undefined> {
-  const hankoToVerify = accountInputProposal(input)?.frameHanko;
-  if (!hankoToVerify) {
-    return { success: false, error: 'SECURITY: Frame must have hanko signature', events };
-  }
-
-  accountLog.debug('hanko.frame.verify', { height: receivedFrame.height, from: shortId(input.fromEntityId) });
-
-  // Verify hanko - CRITICAL: Must verify fromEntityId is the signer with board validation
-  const { valid, entityId: recoveredEntityId } = await verifyHankoForHash(
-    hankoToVerify,
-    receivedFrame.stateHash,
-    input.fromEntityId,
-    env,
-    securityContext.counterpartyCertifiedBoardHash
-      ? { registeredBoardHash: securityContext.counterpartyCertifiedBoardHash }
-      : undefined,
-  );
-
-  if (!valid || !recoveredEntityId) {
-    return { success: false, error: `Invalid hanko signature from ${input.fromEntityId.slice(-4)}`, events };
-  }
-
-  accountLog.debug('hanko.frame.verified', { height: receivedFrame.height, from: shortId(recoveredEntityId) });
-  return undefined;
-}
-
-async function handleStaleIncomingFrame(
-  account: AccountState,
-  input: AccountInput,
-  receivedFrame: AccountFrame,
-  replayCurrentHeight: number,
-  events: string[],
-  committedFrames: AccountCommittedFrame[],
-): Promise<HandleAccountInputResult | undefined> {
-  if (Number(receivedFrame.height) > Number(account.currentHeight ?? 0)) {
-    return undefined;
-  }
-  const duplicateAck = await buildDuplicateCommittedFrameAck(
-    account,
-    input,
-    events,
-    replayCurrentHeight,
-    receivedFrame,
-  );
-  if (duplicateAck) return duplicateAck;
-  events.push(
-    `ℹ️ Ignored stale frame ${String(receivedFrame.height)} ` + `(current=${String(account.currentHeight ?? 0)})`,
-  );
-  return {
-    success: true,
-    events,
-    ...(committedFrames.length > 0 && { committedFrames }),
-  };
-}
-
-function validateIncomingFrameProposer(
-  account: AccountState,
-  input: AccountInput,
-  receivedFrame: AccountFrame,
-  events: string[],
-): HandleAccountInputResult | undefined {
-  const proposer = input.fromEntityId.toLowerCase();
-  const proposerIsLeft = proposer === account.leftEntity.toLowerCase();
-  if (!proposerIsLeft && proposer !== account.rightEntity.toLowerCase()) {
-    return {
-      success: false,
-      error: `Frame proposer is not an account party: ${input.fromEntityId.slice(-8)}`,
-      events,
-    };
-  }
-  if (receivedFrame.byLeft === proposerIsLeft) return undefined;
-  return {
-    success: false,
-    error:
-      `Frame proposer side mismatch: expected byLeft=${String(proposerIsLeft)} ` +
-      `for proposer ${input.fromEntityId.slice(-4)}, got ${String(receivedFrame.byLeft)}`,
-    events,
-  };
-}
-
-function validateIncomingFrameChain(
-  account: AccountState,
-  input: AccountInput,
-  receivedFrame: AccountFrame,
-  normalizedInputHeight: number | undefined,
-  securityContext: AccountInputSecurityContext,
-  events: string[],
-): HandleAccountInputResult | undefined {
-  const structureError = getAccountFrameBoundsError(receivedFrame, securityContext.entityTimestamp);
-  if (structureError) {
-    return {
-      success: false,
-      error: `Invalid frame structure: ${structureError}`,
-      events,
-    };
-  }
-
-  const previousTimestamp = account.currentFrame?.timestamp;
-  if (previousTimestamp !== undefined && receivedFrame.timestamp < previousTimestamp) {
-    accountLog.warn('frame.timestamp_regressed_accepted', {
-      accountHeight: account.currentHeight,
-      entityId: input.toEntityId,
-      counterpartyEntityId: input.fromEntityId,
-      previousTimestamp,
-      proposedTimestamp: receivedFrame.timestamp,
-      regressionMs: previousTimestamp - receivedFrame.timestamp,
-      entityTimestamp: securityContext.entityTimestamp,
-    });
-  }
-
-  const expectedPrevHash = account.currentHeight === 0 ? 'genesis' : account.currentFrame.stateHash || '';
-  if (receivedFrame.prevFrameHash !== expectedPrevHash) {
-    const mismatch = {
-      inputFromEntityId: input.fromEntityId,
-      inputToEntityId: input.toEntityId,
-      inputHeight: normalizedInputHeight ?? null,
-      receivedHeight: Number(receivedFrame.height ?? 0),
-      receivedStateHash: receivedFrame.stateHash ?? null,
-      receivedPrevFrameHash: receivedFrame.prevFrameHash ?? null,
-      receivedTxTypes: receivedFrame.accountTxs.map(tx => tx.type),
-      expectedPrevFrameHash: expectedPrevHash,
-      account: describeAccountState(account),
-    };
-    accountLog.warn('frame.prev_hash_mismatch', mismatch);
-    return {
-      success: false,
-      error:
-        `Frame chain broken: prevFrameHash mismatch ` +
-        `(expected ${expectedPrevHash.slice(0, 16)}..., ` +
-        `got ${String(receivedFrame.prevFrameHash).slice(0, 16)}..., ` +
-        `current=${account.currentHeight}, ` +
-        `pending=${Number(account.pendingFrame?.height ?? 0)})`,
-      events,
-    };
-  }
-
-  const expectedHeight = account.currentHeight + 1;
-  if (HEAVY_LOGS) {
-    accountLog.debug('frame.sequence_check', {
-      receivedHeight: receivedFrame.height,
-      currentHeight: account.currentHeight,
-      expectedHeight,
-    });
-  }
-  if (receivedFrame.height === expectedHeight) return undefined;
-  accountLog.warn('frame.sequence_mismatch', {
-    expectedHeight,
-    receivedHeight: receivedFrame.height,
-  });
-  return {
-    success: false,
-    error: `Frame sequence mismatch: expected ${expectedHeight}, got ${receivedFrame.height}`,
-    events,
-  };
-}
-
-function validateIncomingFrameDeadline(
-  account: AccountState,
-  input: AccountInput,
-  receivedFrame: AccountFrame,
-  securityContext: AccountInputSecurityContext,
-  events: string[],
-): HandleAccountInputResult | undefined {
-  const staleByMs = securityContext.entityTimestamp - receivedFrame.timestamp;
-  const collateralPriorityRisk = staleByMs > 0 && receivedFrame.accountTxs.some(tx => tx.type === 'request_collateral');
-  if (staleByMs > STALE_ACCOUNT_FRAME_WARNING_MS || collateralPriorityRisk) {
-    accountLog.warn('frame.stale_accepted', {
-      height: receivedFrame.height,
-      staleByMs,
-      txs: receivedFrame.accountTxs.map(tx => tx.type),
-      collateralPriorityRisk,
-    });
-  }
-
-  const violation = getIncomingAccountDeadlineViolation(account, receivedFrame, securityContext);
-  if (!violation) return undefined;
-  const proposal = accountInputProposal(input)!;
-  if (!proposal.frameHanko) {
-    throw new Error('INBOUND_ACCOUNT_FRAME_HANKO_MISSING_AFTER_PREFLIGHT');
-  }
-  return {
-    success: false,
-    error: violation.reason,
-    events,
-    disputeRequired: {
-      ...violation,
-      signedFrame: {
-        frame: structuredClone(receivedFrame),
-        frameHanko: proposal.frameHanko,
-      },
-    },
-  };
-}
-
-async function preflightIncomingAccountFrame(
-  env: RuntimeState,
-  account: AccountState,
-  input: AccountInput,
-  normalizedInputHeight: number | undefined,
-  replayCurrentHeight: number,
-  events: string[],
-  committedFrames: AccountCommittedFrame[],
-  securityContext: AccountInputSecurityContext,
-): Promise<IncomingFramePreflightResult> {
-  const receivedFrame = accountInputProposal(input)?.frame;
-  if (!receivedFrame) {
-    throw new Error('preflightIncomingAccountFrame called without newAccountFrame');
-  }
-
-  const staleResult = await handleStaleIncomingFrame(
-    account,
-    input,
-    receivedFrame,
-    replayCurrentHeight,
-    events,
-    committedFrames,
-  );
-  if (staleResult) return { kind: 'return', result: staleResult };
-
-  const proposerError = validateIncomingFrameProposer(account, input, receivedFrame, events);
-  if (proposerError) return { kind: 'return', result: proposerError };
-
-  const chainError = validateIncomingFrameChain(
-    account,
-    input,
-    receivedFrame,
-    normalizedInputHeight,
-    securityContext,
-    events,
-  );
-  if (chainError) return { kind: 'return', result: chainError };
-
-  const hankoError = await verifyIncomingFrameHanko(env, input, receivedFrame, events, securityContext);
-  if (hankoError) return { kind: 'return', result: hankoError };
-
-  const deadlineError = validateIncomingFrameDeadline(account, input, receivedFrame, securityContext, events);
-  if (deadlineError) return { kind: 'return', result: deadlineError };
-
-  // Resolve simultaneous proposals only after every rejecting preflight has
-  // authenticated the frame. RIGHT's rollback is deferred until deterministic
-  // replay on a clone succeeds, so a rejected peer frame cannot mutate live
-  // pending state or restore its transactions into the mempool.
-  const sameHeightResolution = resolveSameHeightIncomingFrame(account, receivedFrame, events, committedFrames);
-  if (sameHeightResolution !== true && sameHeightResolution) {
-    return { kind: 'return', result: sameHeightResolution };
-  }
-
-  const ourEntityId = account.proofHeader.fromEntity;
-  const currentJHeight = account.lastFinalizedJHeight ?? 0;
-  const frameJHeight = receivedFrame.jHeight ?? currentJHeight;
-
-  return {
-    kind: 'continue',
-    receivedFrame,
-    ourEntityId,
-    frameJHeight,
-    rollbackPendingFrame: sameHeightResolution === true,
-  };
-}
 
 function collectReceiverValidationDeltas(clonedMachine: AccountState): {
   tokenIds: number[];
