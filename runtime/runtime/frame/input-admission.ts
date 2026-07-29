@@ -14,7 +14,10 @@ import {
   getInputReliableIdentity,
   registerReliableIngress,
 } from '../reliable-delivery';
-import { RuntimeEntityInputApplyError } from '../entity-inputs';
+import {
+  preflightExternalEntityInputTargets,
+  RuntimeEntityInputApplyError,
+} from '../entity-inputs';
 import { splitRoutedOutputByDeliveryLane } from '../output-routing';
 import { assertScheduledWakeTxAuthorized } from '../scheduled-wake';
 import { validateRuntimeInputShapeAndLimits } from '../input-validation';
@@ -159,20 +162,34 @@ const registerReliableEntityInputs = (
   return { entityInputs, immediateReliableReceipts };
 };
 
+export const validateRuntimeInputIngress = (
+  env: RuntimeState,
+  runtimeInput: RuntimeInput,
+  isReplay: boolean,
+  deps: RuntimeInputAdmissionDeps,
+): Omit<PreparedRuntimeIngress, 'immediateReliableReceipts'> => {
+  validateRuntimeInputShapeAndLimits(env, runtimeInput, rejectRuntimeInput);
+  const jOutbox = collectJOutbox(env, runtimeInput);
+  const entityInputs = validateEntityInputs(env, runtimeInput, isReplay, deps);
+  preflightExternalEntityInputTargets(env, entityInputs, runtimeInput.runtimeTxs);
+  return {
+    runtimeTxs: [...runtimeInput.runtimeTxs],
+    entityInputs,
+    jOutbox,
+  };
+};
+
 export const prepareRuntimeInputIngress = (
   env: RuntimeState,
   runtimeInput: RuntimeInput,
   isReplay: boolean,
   deps: RuntimeInputAdmissionDeps,
 ): PreparedRuntimeIngress => {
-  validateRuntimeInputShapeAndLimits(env, runtimeInput, rejectRuntimeInput);
-  const jOutbox = collectJOutbox(env, runtimeInput);
-  const validated = validateEntityInputs(env, runtimeInput, isReplay, deps);
-  const reliable = registerReliableEntityInputs(env, validated, isReplay);
+  const validated = validateRuntimeInputIngress(env, runtimeInput, isReplay, deps);
+  const reliable = registerReliableEntityInputs(env, validated.entityInputs, isReplay);
   return {
-    runtimeTxs: [...runtimeInput.runtimeTxs],
+    ...validated,
     entityInputs: reliable.entityInputs,
-    jOutbox,
     immediateReliableReceipts: reliable.immediateReliableReceipts,
   };
 };

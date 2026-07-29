@@ -33,7 +33,7 @@ const readText = (path: string): string => {
       'runtime/runtime/frame/post-commit.ts',
       'runtime/runtime/frame/prepare.ts',
       'runtime/runtime/frame/process-profile.ts',
-      'runtime/runtime/frame/rollback.ts',
+      'runtime/runtime/frame/input-recovery.ts',
       'runtime/runtime/frame/snapshot.ts',
       'runtime/runtime/frame/start.ts',
       'runtime/runtime/frame/transaction.ts',

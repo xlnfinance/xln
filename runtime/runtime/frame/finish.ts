@@ -4,8 +4,9 @@ import {
   rollbackReliableIngressCommit,
 } from '../reliable-delivery';
 import { requireRuntimeMempool } from '../input-queue';
+import { transitionRuntimeLifecycle } from '../lifecycle';
+import { ensureRuntimeState } from '../runtime-state';
 import {
-  abortRuntimeFrameTransaction,
   prependOlderRuntimeInput,
 } from './transaction';
 import type { FrameExecutionState } from './execution-state';
@@ -24,6 +25,21 @@ export type RuntimeFrameFailure = {
   inputDropped: boolean;
 };
 
+const haltMutatedRuntime = (
+  env: RuntimeState,
+  error: unknown,
+): void => {
+  const state = ensureRuntimeState(env);
+  const cause = error instanceof Error ? error : new Error(String(error));
+  transitionRuntimeLifecycle(state, 'halted');
+  state.fatalDebugPayload = {
+    message: `RUNTIME_MUTATION_FAILED_RELOAD_REQUIRED:${cause.message}`,
+    height: Math.max(0, env.height),
+    timestamp: Math.max(0, env.timestamp),
+  };
+  state.stopLoop?.();
+};
+
 export const handleRuntimeFrameFailure = async (
   error: unknown,
   liveEnv: RuntimeState,
@@ -32,11 +48,25 @@ export const handleRuntimeFrameFailure = async (
 ): Promise<RuntimeFrameFailure> => {
   if (
     frame.commitDisposition === 'undurable' &&
-    !frame.rollbackHandled &&
-    frame.rollbackUndurable
+    frame.mutationStarted &&
+    !frame.failureHandled &&
+    frame.restoreUndurableInput
   ) {
-    frame.rollbackHandled = true;
-    const rollbackError = await frame.rollbackUndurable(error, {
+    frame.failureHandled = true;
+    const retainedError = await frame.restoreUndurableInput(error, {
+      discardMalformedRemoteInput: false,
+    });
+    haltMutatedRuntime(liveEnv, retainedError);
+    return { env: liveEnv, error: retainedError, inputDropped: false };
+  }
+
+  if (
+    frame.commitDisposition === 'undurable' &&
+    !frame.failureHandled &&
+    frame.restoreUndurableInput
+  ) {
+    frame.failureHandled = true;
+    const rollbackError = await frame.restoreUndurableInput(error, {
       discardMalformedRemoteInput: !deps.isStorageError(error),
     });
     return {
@@ -48,29 +78,17 @@ export const handleRuntimeFrameFailure = async (
 
   if (
     frame.commitDisposition === 'undurable' &&
-    !frame.rollbackHandled &&
+    !frame.failureHandled &&
     frame.transaction &&
     !frame.transaction.published
   ) {
-    frame.rollbackHandled = true;
-    const workingMempool = requireRuntimeMempool(frame.transaction.workingEnv);
-    const cleanupErrors = await abortRuntimeFrameTransaction(frame.transaction);
+    frame.failureHandled = true;
+    const workingMempool = frame.transaction.frameMempool;
     const restored = prependOlderRuntimeInput(
       workingMempool,
       requireRuntimeMempool(liveEnv),
     );
     liveEnv.runtimeMempool = restored;
-    if (cleanupErrors.length > 0) {
-      const original = error instanceof Error ? error : new Error(String(error));
-      return {
-        env: liveEnv,
-        error: new AggregateError(
-          [original, ...cleanupErrors],
-          'RUNTIME_FRAME_TRANSACTION_ABORT_FAILED',
-        ),
-        inputDropped: false,
-      };
-    }
   }
   return { env: liveEnv, error, inputDropped: false };
 };

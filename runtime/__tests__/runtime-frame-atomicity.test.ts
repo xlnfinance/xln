@@ -807,7 +807,7 @@ describe('runtime frame atomicity', () => {
     }
   });
 
-  test('second Entity failure restores the first mutation, route hint, lineage, and exact ingress bytes', async () => {
+  test('preflight rejects an unknown second Entity before the first mutation', async () => {
     const env = createEmptyEnv(`runtime apply atomicity ${TEST_RUN_ID}`);
     env.scenarioMode = true;
     env.quietRuntimeLogs = true;
@@ -862,9 +862,8 @@ describe('runtime frame atomicity', () => {
       entityInputs: ingress.entityInputs,
     });
 
-    // Prove the first item is a genuinely mutating fixture. Otherwise this
-    // regression could stay green if an earlier reject stopped creating the
-    // exact state, authenticated route hint, or H0 lineage we intend to undo.
+    // Prove the first item would mutate several Runtime-owned structures.
+    // The mixed batch below must reject before any of those writes begin.
     const control = createEmptyEnv(`runtime apply atomicity control ${TEST_RUN_ID}`);
     control.scenarioMode = true;
     control.quietRuntimeLogs = true;
@@ -910,7 +909,7 @@ describe('runtime frame atomicity', () => {
     expect(env.timestamp).toBe(1_000);
   });
 
-  test('pre-authoritative LevelDB failure restores state, clock, history, overlay, and exact input', async () => {
+  test('post-mutation LevelDB failure halts unreadable RAM and retains exact input', async () => {
     const seed = `runtime storage rollback ${TEST_RUN_ID}`;
     const env = createEmptyEnv(seed);
     env.scenarioMode = true;
@@ -928,12 +927,8 @@ describe('runtime frame atomicity', () => {
 
     const baselineReplica = env.eReplicas.get(`${baselineImport.entityId}:${baselineImport.signerId}`);
     if (!baselineReplica) throw new Error('TEST_BASELINE_REPLICA_MISSING');
-    const replicaBefore = safeStringify(buildCanonicalEntityReplicaSnapshot(baselineReplica));
     const heightBefore = env.height;
     const timestampBefore = env.timestamp;
-    const historyBefore = safeStringify(env.history);
-    const overlayBefore = safeStringify(env.overlay ?? []);
-    const overlayMarksBefore = safeStringify(env.runtimeState?.currentStorageOverlayMarks ?? []);
 
     await corruptCurrentHeadAhead(env);
 
@@ -952,24 +947,23 @@ describe('runtime frame atomicity', () => {
     try {
       await expect(processRuntime(env)).rejects.toThrow('STORAGE_CURRENT_AHEAD_OF_HISTORY');
 
-      expect(env.height).toBe(heightBefore);
-      expect(env.timestamp).toBe(timestampBefore);
-      expect(safeStringify(env.history)).toBe(historyBefore);
-      expect(safeStringify(env.overlay ?? [])).toBe(overlayBefore);
-      expect(safeStringify(env.runtimeState?.currentStorageOverlayMarks ?? [])).toBe(overlayMarksBefore);
-      expect(env.eReplicas.has(`${attemptedImport.entityId}:${attemptedImport.signerId}`)).toBe(false);
-      expect(safeStringify(env.eReplicas.get(
-        `${baselineImport.entityId}:${baselineImport.signerId}`,
-      ))).toBe(replicaBefore);
+      // Runtime owns its State and no longer pays O(total state) for a working
+      // clone. Once mutation starts, RAM is deliberately unreadable: only the
+      // durable WAL head below is authoritative until operator recovery.
+      expect(env.runtimeState?.halted).toBe(true);
+      expect(env.runtimeState?.fatalDebugPayload?.message)
+        .toContain('RUNTIME_MUTATION_FAILED_RELOAD_REQUIRED');
       expect(safeStringify(exactQueuedInput(env))).toBe(ingressBytes);
       expect(env.runtimeMempool?.queuedAt).toBe(timestampBefore);
-      expect(env.runtimeState?.halted).not.toBe(true);
+      const walHead = await readStorageHead(getRuntimeWalDb(env));
+      expect(walHead?.latestHeight).toBe(heightBefore);
+      await expect(processRuntime(env)).rejects.toThrow('RUNTIME_PROCESS_HALTED');
     } finally {
       await closeTestEnv(env);
     }
   });
 
-  test('later reliable ingress survives a pre-authoritative frame rollback', async () => {
+  test('later reliable ingress survives a post-mutation Runtime halt', async () => {
     const seed = `runtime later ingress rollback ${TEST_RUN_ID}`;
     const env = createEmptyEnv(seed);
     env.scenarioMode = true;
@@ -1022,14 +1016,17 @@ describe('runtime frame atomicity', () => {
         .toEqual({ kind: 'queued' });
       await expect(processPromise).rejects.toThrow('STORAGE_CURRENT_AHEAD_OF_HISTORY');
 
-      expect(env.height).toBe(heightBefore);
-      expect(env.timestamp).toBe(timestampBefore);
+      expect(env.runtimeState?.halted).toBe(true);
+      expect(env.runtimeState?.fatalDebugPayload?.message)
+        .toContain('RUNTIME_MUTATION_FAILED_RELOAD_REQUIRED');
       expect(env.runtimeMempool?.runtimeTxs).toEqual(frameA.runtimeTxs);
       expect(env.runtimeMempool?.entityInputs.filter(input => input.hashPrecommitFrame))
         .toEqual([{ ...frameB, from: sourceRuntimeId }]);
       // Transport admission only appends bytes. Reliable frontier state changes
       // when this input belongs to the next isolated Runtime frame.
       expect(env.runtimeState?.pendingReliableIngress?.size ?? 0).toBe(0);
+      const walHead = await readStorageHead(getRuntimeWalDb(env));
+      expect(walHead?.latestHeight).toBe(heightBefore);
     } finally {
       await closeTestEnv(env);
     }

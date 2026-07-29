@@ -30,6 +30,7 @@ import {
 } from './cross-j-evidence';
 import {
   prepareRuntimeInputIngress,
+  validateRuntimeInputIngress,
   type RuntimeInputAdmissionDeps,
 } from './input-admission';
 import {
@@ -67,6 +68,11 @@ export type AppliedRuntimeInput = {
     runtimeId: string;
     receipt: ReliableDeliveryReceipt;
   }>;
+};
+
+export type RuntimeInputReducer = {
+  (env: RuntimeState, runtimeInput: RuntimeInput): Promise<AppliedRuntimeInput>;
+  preflight(env: RuntimeState, runtimeInput: RuntimeInput): void;
 };
 
 type ApplyProfiler = {
@@ -304,37 +310,40 @@ const applyRuntimeInputPhases = async (
 
 export const createRuntimeInputReducer = (
   deps: RuntimeInputReducerDeps,
-) => async (
-  env: RuntimeState,
-  runtimeInput: RuntimeInput,
-): Promise<AppliedRuntimeInput> => {
-  deps.assertApplyAllowed(env);
-  if (!env.emit) attachEventEmitters(env);
-  const profile = createApplyProfiler();
-  const isReplay = deps.isReplay(env);
+): RuntimeInputReducer => {
+  const reducer: RuntimeInputReducer = async (env, runtimeInput) => {
+    deps.assertApplyAllowed(env);
+    if (!env.emit) attachEventEmitters(env);
+    const profile = createApplyProfiler();
+    const isReplay = deps.isReplay(env);
 
-  try {
-    if (isReplay) {
-      runtimeLog.debug('input.replay.apply', {
-        runtimeTxs: runtimeInput.runtimeTxs.length,
-        entityInputs: runtimeInput.entityInputs.length,
+    try {
+      if (isReplay) {
+        runtimeLog.debug('input.replay.apply', {
+          runtimeTxs: runtimeInput.runtimeTxs.length,
+          entityInputs: runtimeInput.entityInputs.length,
+        });
+      }
+      const { result, profiledRuntimeTxs } = await applyRuntimeInputPhases(
+        env,
+        runtimeInput,
+        deps,
+        profile,
+        isReplay,
+      );
+      profile.finish(env, result, profiledRuntimeTxs);
+      return result;
+    } catch (error) {
+      if (env.strictScenario) throw error;
+      runtimeLog.error('apply_input.failed', {
+        error: error instanceof Error ? error.message : String(error),
+        ...(error instanceof Error && error.stack ? { stack: error.stack } : {}),
       });
+      throw error;
     }
-    const { result, profiledRuntimeTxs } = await applyRuntimeInputPhases(
-      env,
-      runtimeInput,
-      deps,
-      profile,
-      isReplay,
-    );
-    profile.finish(env, result, profiledRuntimeTxs);
-    return result;
-  } catch (error) {
-    if (env.strictScenario) throw error;
-    runtimeLog.error('apply_input.failed', {
-      error: error instanceof Error ? error.message : String(error),
-      ...(error instanceof Error && error.stack ? { stack: error.stack } : {}),
-    });
-    throw error;
-  }
+  };
+  reducer.preflight = (env, runtimeInput): void => {
+    validateRuntimeInputIngress(env, runtimeInput, deps.isReplay(env), deps);
+  };
+  return reducer;
 };

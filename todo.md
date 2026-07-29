@@ -284,6 +284,11 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   owned State directly. Any exception or storage doubt after mutation makes
   the in-memory object unreadable: halt immediately and reload the last
   committed WAL frame. Never attempt in-memory rollback or soft repair.
+  Install one external read barrier from the first mutation through WAL commit:
+  server/radapter/API readers wait or return an explicit busy result, and UI
+  publishes only post-commit snapshots. The single writer prevents competing
+  transitions, not asynchronous reads during the WAL `await`; no caller may
+  observe speculative balances from the owned live object.
   Extract transaction, commit, recovery and dispatch modules; keep
   `runtime/core.ts` a short composition root with no alternate commit path.
   Precompute every expected throwing assertion before mutation; any doubt
@@ -296,13 +301,25 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 - [ ] Make candidate isolation explicit per nested machine instead of cloning
   the entire Runtime/Entity tree. Single-signer Entity execution mutates its
   Runtime-owned State directly and relies on the enclosing Runtime WAL:
-  programming faults halt and reload. Multi-signer Entity execution must keep
-  committed State unchanged until Hanko certification; replace its full clone
-  with a touched-only `EntityDraft` that shallow-forks the Entity shell and
-  clones only modified maps and Accounts. A malformed or root-mismatched remote
-  proposal discards only its draft and must never halt the Runtime. Install the
-  certified draft in O(1). Account remains the small bilateral transaction
-  boundary and keeps a full isolated clone. Pin all four policies with
+  programming faults halt that Entity and reload its last durable state while
+  unrelated Entities continue. Multi-signer Entity execution must keep
+  `replica.state` certified until Hanko. Keep speculative execution exclusively
+  in the existing `validatorExecution` phase; storage projections, API, UI,
+  routing and capacity checks must never treat it as certified. Replace the
+  full Entity clone used to build that candidate with a touched-only shell:
+  clone each changed small Account and only changed Entity/orderbook Map keys,
+  while untouched data references the immutable certified State. While locked,
+  accept only consensus progress for that proposal; never write candidate
+  Account/Entity frames to certified history or release financial outputs.
+  Matching quorum Hanko promotes the already-executed candidate without
+  re-execution. Root mismatch or certified timeout discards the candidate and
+  advances the consensus view; unknown damage halts only that Entity and reloads
+  its last certified frame. Persist a signing lock in every Runtime WAL frame
+  that may dispatch a local precommit, before that signature becomes externally
+  visible, so restart cannot double-sign. Validator removal remains governance.
+  Happy-path work must be O(touched state), never O(total Accounts/orderbook),
+  while unrelated Entities continue. Account remains
+  the small bilateral transaction boundary and keeps a full isolated clone. Pin all four policies with
   characterization tests, perf budgets (clone bytes/reducer/WAL latency), and
   a gate forbidding reintroduction of full Runtime or single-signer Entity
   clones.

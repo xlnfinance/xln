@@ -14,7 +14,7 @@ export type RuntimeReceiptDelivery = {
   receipt: ReliableDeliveryReceipt;
 };
 
-export type RuntimeFrameRollback = (
+export type RuntimeInputRestore = (
   error: unknown,
   options?: { discardMalformedRemoteInput?: boolean; requeue?: boolean },
 ) => Promise<Error>;
@@ -22,9 +22,9 @@ export type RuntimeFrameRollback = (
 /**
  * Mutable orchestration facts for one Runtime frame attempt.
  *
- * Consensus state stays inside the isolated RuntimeState. This object only makes the
- * commit/rollback boundary explicit so catch/finally cannot depend on a loose
- * collection of booleans with accidental combinations.
+ * Runtime State is owned and mutated in-place after preflight. This object
+ * records whether failure can still discard input normally or must halt and
+ * reload durable truth. It never represents a second speculative Runtime.
  */
 export type FrameExecutionState = {
   reliableIngressCommits: ReliableIngressCommit[];
@@ -33,10 +33,12 @@ export type FrameExecutionState = {
   immediateReliableReceiptDeliveries: RuntimeReceiptDelivery[];
   reliableReceiptStateDurable: boolean;
   commitDisposition: 'undurable' | 'committed' | 'conflict' | 'unknown';
-  rollbackHandled: boolean;
+  failureHandled: boolean;
   transaction: RuntimeFrameTransaction | undefined;
   pendingTraceSnapshot: EnvSnapshot | undefined;
-  rollbackUndurable: RuntimeFrameRollback | undefined;
+  restoreUndurableInput: RuntimeInputRestore | undefined;
+  /** True after preflight, when the owned Runtime State may have changed. */
+  mutationStarted: boolean;
   inputDrained: boolean;
   inputForRequeue: RuntimeInput | undefined;
 };
@@ -48,10 +50,11 @@ export const createFrameExecutionState = (): FrameExecutionState => ({
   immediateReliableReceiptDeliveries: [],
   reliableReceiptStateDurable: false,
   commitDisposition: 'undurable',
-  rollbackHandled: false,
+  failureHandled: false,
   transaction: undefined,
   pendingTraceSnapshot: undefined,
-  rollbackUndurable: undefined,
+  restoreUndurableInput: undefined,
+  mutationStarted: false,
   inputDrained: false,
   inputForRequeue: undefined,
 });

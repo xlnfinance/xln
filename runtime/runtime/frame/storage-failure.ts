@@ -4,7 +4,6 @@ import { ensureRuntimeState } from '../runtime-state';
 import type { RuntimeState } from '../../types';
 import type { FrameExecutionState } from './execution-state';
 import {
-  abortRuntimeFrameTransaction,
   publishRuntimeFrameTransaction,
 } from './transaction';
 
@@ -12,7 +11,7 @@ import type { RuntimeFrameCommitStatus } from '../../storage/commit-status';
 
 export type { RuntimeFrameCommitStatus } from '../../storage/commit-status';
 
-const haltRuntimeAtProvenState = (
+const haltRuntimeForRecovery = (
   runtime: RuntimeState,
   message: string,
 ): void => {
@@ -29,9 +28,9 @@ const haltRuntimeAtProvenState = (
 /**
  * Resolve a storage error without guessing whether an unknown WAL append won.
  *
- * A proven commit may be installed before halting. Unknown durability must
- * leave live RAM on its previous frame; recovery alone decides which durable
- * frame wins after restart.
+ * A proven commit keeps the in-place State and publishes its next-frame input.
+ * Unknown durability leaves the mutated State unreadable; recovery alone
+ * decides which WAL frame wins. No branch attempts an in-memory State rollback.
  */
 export const handleRuntimeFrameStorageFailure = async (
   status: RuntimeFrameCommitStatus,
@@ -47,19 +46,12 @@ export const handleRuntimeFrameStorageFailure = async (
   frame.commitDisposition = status;
   frame.reliableReceiptStateDurable = status === 'committed';
   if (status === 'committed') {
-    haltRuntimeAtProvenState(
+    haltRuntimeForRecovery(
       publishRuntimeFrameTransaction(frame.transaction),
       error.message,
     );
     return;
   }
 
-  const cleanupErrors = await abortRuntimeFrameTransaction(frame.transaction);
-  haltRuntimeAtProvenState(liveRuntime, error.message);
-  if (cleanupErrors.length > 0) {
-    throw new AggregateError(
-      [error, ...cleanupErrors],
-      'RUNTIME_FRAME_UNKNOWN_STORAGE_CANDIDATE_ABORT_FAILED',
-    );
-  }
+  haltRuntimeForRecovery(liveRuntime, error.message);
 };

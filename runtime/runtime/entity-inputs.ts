@@ -9,7 +9,15 @@ import {
 import { safeStringify } from '../protocol/serialization';
 import { getEffectiveEntityInputTxs } from '../entity/consensus/output-envelope';
 import { accountInputAck, accountInputProposal } from '../account/consensus/flush';
-import type { EntityInput, EntityReplica, EntityTx, RuntimeState, JInput, RoutedEntityInput } from '../types';
+import type {
+  EntityInput,
+  EntityReplica,
+  EntityTx,
+  RuntimeState,
+  JInput,
+  RoutedEntityInput,
+  RuntimeTx,
+} from '../types';
 import { resolveEntityProposerId } from './entity-output-signer';
 import { decodeRoutedEntityOutput } from './routing-validation';
 import { nodeProcess } from '../infra/runtime-process';
@@ -370,7 +378,7 @@ const drainImmediateCrossJurisdictionOutputs = async (
   }
 };
 
-const assertExternalEntityInputAllowed = (env: RuntimeState, entityInput: RoutedEntityInput): void => {
+const assertExternalEntityInputAllowed = (entityInput: RoutedEntityInput): void => {
   if (
     entityInput.localRuntimeProtocol === 'cross-j' ||
     (entityInput.entityTxs ?? []).some(tx => tx.type === 'runtimeOutput')
@@ -383,13 +391,78 @@ const assertExternalEntityInputAllowed = (env: RuntimeState, entityInput: Routed
     from: entityInput.from,
     txTypes: (entityInput.entityTxs || []).map(tx => tx.type),
   };
-  env.error('network', 'REJECT_CROSS_J_TOPOLOGY_INVALID', details, entityInput.entityId);
   assertRuntimeIngress(
     false,
     'RUNTIME_CROSS_J_EXTERNAL_INGRESS_FORBIDDEN',
     'Cross-j Entity inputs are runtime-private and cannot arrive from a remote runtime',
     details,
   );
+};
+
+const projectedReplicaKeys = (
+  env: RuntimeState,
+  runtimeTxs: readonly RuntimeTx[],
+): Map<string, Set<string>> => {
+  const projected = new Map<string, Set<string>>();
+  const remember = (entityId: string, signerId: string): void => {
+    const entity = entityId.trim().toLowerCase();
+    const signer = signerId.trim().toLowerCase();
+    if (!entity || !signer) return;
+    const signers = projected.get(entity) ?? new Set<string>();
+    signers.add(signer);
+    projected.set(entity, signers);
+  };
+  for (const replica of env.eReplicas.values()) {
+    remember(replica.entityId, replica.signerId);
+  }
+  for (const tx of runtimeTxs) {
+    if (tx.type === 'importReplica') remember(tx.entityId, tx.signerId);
+  }
+  return projected;
+};
+
+/**
+ * Prove that every external Entity input has a target before Runtime mutates.
+ *
+ * Imports in the same Runtime frame are included in the projected replica set.
+ * This is an admission proof only; the reducer still resolves the concrete
+ * replica after those imports have executed.
+ */
+export const preflightExternalEntityInputTargets = (
+  env: RuntimeState,
+  inputs: readonly RoutedEntityInput[],
+  runtimeTxs: readonly RuntimeTx[],
+): void => {
+  const projected = projectedReplicaKeys(env, runtimeTxs);
+  for (const input of inputs) {
+    try {
+      assertExternalEntityInputAllowed(input);
+      const entityId = input.entityId.trim().toLowerCase();
+      const signerId = input.signerId.trim().toLowerCase();
+      const signers = projected.get(entityId);
+      assertRuntimeIngress(
+        Boolean(signers?.size),
+        'RUNTIME_ENTITY_INPUT_UNKNOWN_TARGET',
+        'Entity input target does not exist in projected Runtime frame',
+        { entityId, signerId },
+      );
+      const mayRetargetEmptyProtocolInput =
+        signers?.size === 1 && (input.entityTxs?.length ?? 0) === 0;
+      assertRuntimeIngress(
+        signers?.has(signerId) === true || mayRetargetEmptyProtocolInput,
+        'RUNTIME_REPLICA_NOT_FOUND',
+        'Entity input target replica missing for projected signerId',
+        { entityId, signerId, knownSigners: [...(signers ?? [])] },
+      );
+    } catch (error) {
+      throw new RuntimeEntityInputApplyError(
+        input,
+        false,
+        error,
+        'unroutable-ingress',
+      );
+    }
+  }
 };
 
 const resolveEntityInputReplica = (
@@ -486,7 +559,7 @@ const applyExternalEntityInput = async (
   }
   let resolved: ReturnType<typeof resolveEntityInputReplica>;
   try {
-    assertExternalEntityInputAllowed(env, entityInput);
+    assertExternalEntityInputAllowed(entityInput);
     resolved = resolveEntityInputReplica(env, entityInput);
   } catch (error) {
     // Admission and replica resolution happen before the Entity reducer can

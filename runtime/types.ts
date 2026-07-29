@@ -1290,6 +1290,12 @@ export interface RuntimeState {
     maxEntityInputsPerFrame?: number;
     maxEntityTxsPerFrame?: number;
     processingPromise?: Promise<void> | null;
+    /** Infra-only read/write barrier; never part of deterministic Runtime State. */
+    activeCommittedReaders?: number;
+    committedReadersDrained?: Promise<void> | null;
+    resolveCommittedReadersDrained?: (() => void) | null;
+    /** True after owned-State mutation starts and until WAL-backed publish. */
+    stateMutationInFlight?: boolean;
     /** Entity inputs detached from the live mempool and owned by the active runtime frame. */
     inFlightEntityInputs?: number;
     p2p?: RuntimeP2P | null | undefined;

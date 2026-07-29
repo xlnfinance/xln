@@ -16,13 +16,13 @@ import type {
   RuntimeInput,
   RuntimeState,
 } from '../../types';
-import { getPerfMs, getWallClockMs } from '../../utils';
+import { getWallClockMs } from '../../utils';
 import { clearPendingAuditEvents, flushPendingAuditEvents } from '../env-events';
 import { acquireRuntimeFrameWriter, assertRuntimeWriterAcceptingIngress } from './writer-lock';
 import { createFrameExecutionState, type FrameExecutionState } from './execution-state';
 import { createRuntimeFrameTransaction, publishRuntimeFrameTransaction } from './transaction';
 import { createRuntimeProcessProfile, type RuntimeProcessProfile } from './process-profile';
-import { rollbackUndurableRuntimeFrame } from './rollback';
+import { restoreUndurableRuntimeInput } from './input-recovery';
 import { startRuntimeFrame } from './start';
 import { prepareRuntimeFrameInput } from './prepare';
 import { applyPreparedRuntimeFrame } from './apply';
@@ -31,8 +31,7 @@ import { prepareRuntimeFrameCommit } from './snapshot';
 import { handleRuntimeFrameStorageFailure } from './storage-failure';
 import { runCommittedRuntimeEffects } from './post-commit';
 import { finishRuntimeFrame, handleRuntimeFrameFailure } from './finish';
-import type { AppliedRuntimeInput } from './input-reducer';
-import { measureRuntimeFrameCloneBytes } from './clone';
+import type { RuntimeInputReducer } from './input-reducer';
 
 const runtimeLog = createStructuredLogger('runtime');
 
@@ -71,7 +70,7 @@ export type RuntimeProcessDeps = {
   recovery: RuntimeRecoveryProcessDeps;
   storage: RuntimeStorageProcessDeps;
   attachEventEmitters(env: RuntimeState): void;
-  applyRuntimeInput(env: RuntimeState, input: RuntimeInput): Promise<AppliedRuntimeInput>;
+  applyRuntimeInput: RuntimeInputReducer;
   setApplyAllowed(env: RuntimeState, allowed: boolean): void;
   getRuntimeOutputRoutingDeps(): ReturnType<
     ReturnType<typeof createRuntimeLoopApi>['getRuntimeOutputRoutingDeps']
@@ -153,7 +152,6 @@ const buildRuntimeFrameInput = (
   mempool: RuntimeInput,
   deps: RuntimeProcessDeps,
 ): RuntimeInput => {
-  deps.loop.generateHookPings(env);
   const automaticInputs = [
     ...deps.loop.collectEntityMempoolWakeInputs(env),
     ...deps.loop.collectAccountMempoolWakeInputs(env),
@@ -207,29 +205,44 @@ const advanceRuntimeFrameTimestamp = (
 const openRuntimeFrameCandidate = (
   liveEnv: RuntimeState,
   liveState: RuntimeLifecycleState,
+  frame: FrameExecutionState,
   profile: RuntimeProcessProfile,
   deps: RuntimeProcessDeps,
 ): RuntimeFrameCandidate => {
-  const mempoolQueuedAt = requireRuntimeMempool(liveEnv).queuedAt;
   const quietRuntimeLogs = liveEnv.quietRuntimeLogs === true;
-  if (profile.enabled) profile.metrics.cloneBytes = measureRuntimeFrameCloneBytes(liveEnv);
-  const cloneStartedAt = profile.enabled ? getPerfMs() : 0;
+  // Due scheduler work belongs to the frame being detached, not to arrivals
+  // that may race in while this single writer awaits storage or signatures.
+  deps.loop.generateHookPings(liveEnv);
+  const mempoolQueuedAt = requireRuntimeMempool(liveEnv).queuedAt;
   const transaction = createRuntimeFrameTransaction(liveEnv);
-  if (profile.enabled) profile.metrics.cloneMs = getPerfMs() - cloneStartedAt;
-  const env = transaction.workingEnv;
+  frame.transaction = transaction;
+  profile.metrics.cloneBytes = 0;
+  profile.metrics.cloneMs = 0;
+  const env = liveEnv;
   const state = ensureRuntimeState(env);
-  const mempool = requireRuntimeMempool(env);
+  const mempool = transaction.frameMempool;
   for (const replica of env.jReplicas.values()) {
     replica.jadapter?.setQuietLogs?.(quietRuntimeLogs);
   }
-  advanceRuntimeFrameTimestamp(env, mempoolQueuedAt);
-  for (const replica of env.jReplicas.values()) {
-    replica.jadapter?.setBlockTimestamp(env.timestamp);
-  }
-
   const runtimeInput = buildRuntimeFrameInput(env, mempool, deps);
   liveState.inFlightEntityInputs = runtimeInput.entityInputs.length;
   return { transaction, env, state, mempool, runtimeInput, mempoolQueuedAt, quietRuntimeLogs };
+};
+
+const beginRuntimeFrameMutation = (
+  candidate: RuntimeFrameCandidate,
+  frame: FrameExecutionState,
+  deps: RuntimeProcessDeps,
+): void => {
+  // All expected ingress rejection must happen while the durable State is
+  // still untouched. Past this line every exception requires halt + reload.
+  deps.applyRuntimeInput.preflight(candidate.env, candidate.runtimeInput);
+  frame.mutationStarted = true;
+  ensureRuntimeState(candidate.env).stateMutationInFlight = true;
+  advanceRuntimeFrameTimestamp(candidate.env, candidate.mempoolQueuedAt);
+  for (const replica of candidate.env.jReplicas.values()) {
+    replica.jadapter?.setBlockTimestamp(candidate.env.timestamp);
+  }
 };
 
 type RuntimeFrameCommitResult = {
@@ -244,9 +257,9 @@ const haltStaleRuntimeWriter = async (
   frameHeightBeforeTick: number,
   profile: RuntimeProcessProfile,
 ): Promise<RuntimeFrameCommitResult> => {
-  frame.rollbackHandled = true;
-  if (!frame.rollbackUndurable) throw new Error('RUNTIME_FRAME_ROLLBACK_MISSING');
-  const rollbackError = await frame.rollbackUndurable(new Error('STALE_RUNTIME_WRITER_STOPPED'), {
+  frame.failureHandled = true;
+  if (!frame.restoreUndurableInput) throw new Error('RUNTIME_FRAME_INPUT_RESTORE_MISSING');
+  const rollbackError = await frame.restoreUndurableInput(new Error('STALE_RUNTIME_WRITER_STOPPED'), {
     discardMalformedRemoteInput: false,
     requeue: false,
   });
@@ -404,15 +417,20 @@ const applyAndCommitRuntimeFrame = async (
   started: { frameHeightBeforeTick: number; frameTimestampBeforeTick: number },
   deps: RuntimeProcessDeps,
 ): Promise<{ env: RuntimeState; staleWriterStopped: boolean }> => {
-  const candidate = openRuntimeFrameCandidate(liveEnv, processState, profile, deps);
-  frame.transaction = candidate.transaction;
+  const candidate = openRuntimeFrameCandidate(
+    liveEnv,
+    processState,
+    frame,
+    profile,
+    deps,
+  );
   let env = candidate.env;
   let state = candidate.state;
-  frame.rollbackUndurable = async (
+  frame.restoreUndurableInput = async (
     error: unknown,
     options: { discardMalformedRemoteInput?: boolean; requeue?: boolean } = {},
   ): Promise<Error> => {
-    const rollback = await rollbackUndurableRuntimeFrame({
+    const rollback = await restoreUndurableRuntimeInput({
       frame,
       liveEnv,
       attemptedEnv: env,
@@ -428,6 +446,7 @@ const applyAndCommitRuntimeFrame = async (
     state = rollback.state;
     return rollback.error;
   };
+  beginRuntimeFrameMutation(candidate, frame, deps);
   const applied = await applyRuntimeFrameCandidate(env, state, candidate, frame, profile, deps);
   const routing = deps.getRuntimeOutputRoutingDeps();
   const outputPlan = planRuntimeFrameOutputs(

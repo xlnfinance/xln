@@ -9,6 +9,54 @@ export const assertRuntimeWriterAcceptingIngress = (state: RuntimeLifecycleState
   }
 };
 
+const waitForCommittedReaders = async (
+  state: RuntimeLifecycleState,
+): Promise<void> => {
+  while ((state.activeCommittedReaders ?? 0) > 0) {
+    const drained = state.committedReadersDrained;
+    if (!drained) throw new Error('RUNTIME_READ_BARRIER_PROMISE_MISSING');
+    await drained;
+  }
+};
+
+/**
+ * Hold a stable committed view across asynchronous API/storage reads.
+ *
+ * JavaScript's single event loop serializes the final check and increment, so
+ * a writer cannot appear between them. The writer performs the symmetric
+ * check before installing processingPromise.
+ */
+export const acquireRuntimeCommittedRead = async (
+  env: RuntimeState,
+): Promise<() => void> => {
+  const state = env.runtimeState ?? {};
+  while (state.processingPromise) await state.processingPromise;
+  if (state.stateMutationInFlight) {
+    throw new Error('RUNTIME_COMMITTED_STATE_UNAVAILABLE_RELOAD_REQUIRED');
+  }
+  state.activeCommittedReaders = (state.activeCommittedReaders ?? 0) + 1;
+  if (state.activeCommittedReaders === 1) {
+    let resolve!: () => void;
+    state.committedReadersDrained = new Promise<void>(done => {
+      resolve = done;
+    });
+    state.resolveCommittedReadersDrained = resolve;
+  }
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    state.activeCommittedReaders = Math.max(
+      0,
+      (state.activeCommittedReaders ?? 1) - 1,
+    );
+    if (state.activeCommittedReaders !== 0) return;
+    state.resolveCommittedReadersDrained?.();
+    state.committedReadersDrained = null;
+    state.resolveCommittedReadersDrained = null;
+  };
+};
+
 /**
  * Serializes Runtime frame construction around one process-local writer.
  * Rechecking halt after the wait is essential: the preceding writer may have
@@ -17,8 +65,15 @@ export const assertRuntimeWriterAcceptingIngress = (state: RuntimeLifecycleState
 export const acquireRuntimeFrameWriter = async (
   state: RuntimeLifecycleState,
 ): Promise<() => void> => {
-  assertRuntimeWriterAcceptingIngress(state);
-  while (state.processingPromise) await state.processingPromise;
+  for (;;) {
+    assertRuntimeWriterAcceptingIngress(state);
+    while (state.processingPromise) await state.processingPromise;
+    if ((state.activeCommittedReaders ?? 0) === 0) break;
+    await waitForCommittedReaders(state);
+    // Several writers may have awaited the same reader drain. Loop back so
+    // only the first installs processingPromise; every other writer queues
+    // behind it instead of overwriting its ownership token.
+  }
   assertRuntimeWriterAcceptingIngress(state);
 
   let unlock!: () => void;

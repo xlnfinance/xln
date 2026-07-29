@@ -57,6 +57,7 @@ import {
   type RuntimeIngressReceipt,
 } from '../server/ingress-receipts';
 import { calculateSolvency } from '../runtime/solvency';
+import { acquireRuntimeCommittedRead } from '../runtime/frame/writer-lock';
 
 export type RuntimeAdapterResolveContext = {
   env: RuntimeState;
@@ -1821,7 +1822,87 @@ const projectSolvencySummary = (
   };
 };
 
-export const resolveRuntimeAdapterRead = async <T = unknown>(
+const resolveScopedRuntimeAdapterRead = async <T>(
+  ctx: RuntimeAdapterResolveContext,
+  parts: string[],
+  query?: RuntimeAdapterReadQuery,
+): Promise<T> => {
+  if (parts[0] === 'entity' && parts.length >= 2) {
+    const entityId = parts[1];
+    if (!entityId) throw new RuntimeAdapterError('E_BAD_PATH', 'entity id is required');
+
+    if (parts.length === 3 && (parts[2] === 'accounts' || parts[2] === 'books' || parts[2] === 'book-docs')) {
+      const height = readAtHeight(query);
+      const targetHeight = height ?? envHeight(ctx.env);
+      if (targetHeight < 1) throw new RuntimeAdapterError('E_BAD_QUERY', 'paged entity reads require a persisted runtime height');
+      const accountId = normalizeEntityId(String(query?.accountId || ''));
+      if (parts[2] === 'accounts' && accountId) {
+        const limit = readBoundedLimit(query?.accountsLimit ?? query?.limit, 10);
+        const isCurrentHeight = height === null || targetHeight === envHeight(ctx.env);
+        if (isCurrentHeight) {
+          const replica = findReplica(ctx.env, entityId);
+          if (!replica) throw new RuntimeAdapterError('E_NOT_FOUND', `entity not found: ${normalizeEntityId(entityId)}`);
+          const account = replica.state.accounts.get(accountId);
+          const page = singleAccountPage(accountId, account ? compactAccountDocForView(projectAccountDoc(account)) : null, limit);
+          return { ...page, summary: accountPageSummaryForView(entityId, page) } as T;
+        }
+        if (!ctx.loadEntityAccountDoc) {
+          throw new RuntimeAdapterError('E_BAD_QUERY', 'historical account reads are unavailable for this adapter');
+        }
+        const account = await ctx.loadEntityAccountDoc(entityId, accountId, targetHeight);
+        const page = singleAccountPage(accountId, account ? compactAccountDocForView(account) : null, limit);
+        return { ...page, summary: accountPageSummaryForView(entityId, page) } as T;
+      }
+      const isCurrentHeight = height === null || targetHeight === envHeight(ctx.env);
+      const stored = await loadViewPageForHeight(ctx, entityId, targetHeight, isCurrentHeight, query);
+      const compactStored = compactViewPageForRemote(entityId, stored);
+      return (parts[2] === 'accounts' ? compactStored.accounts : compactStored.books) as T;
+    }
+
+    if (parts.length === 4 && parts[2] === 'account') {
+      const counterpartyId = normalizeEntityId(parts[3] ?? '');
+      const height = readAtHeight(query);
+      if (height !== null && height !== envHeight(ctx.env)) {
+        if (!ctx.loadEntityAccountDoc) {
+          throw new RuntimeAdapterError('E_BAD_QUERY', 'historical account reads are unavailable for this adapter');
+        }
+        const loaded = await ctx.loadEntityAccountDoc(entityId, counterpartyId, height);
+        if (!loaded) throw new RuntimeAdapterError('E_NOT_FOUND', `account not found at height ${height}: ${normalizeEntityId(entityId)}/${counterpartyId}`);
+        return compactAccountDocForView(loaded) as T;
+      }
+      const { state } = await resolveEntityState(ctx, entityId, query);
+      const account = state.accounts.get(counterpartyId);
+      if (!account) throw new RuntimeAdapterError('E_NOT_FOUND', `account not found: ${normalizeEntityId(entityId)}/${counterpartyId}`);
+      return compactAccountDocForView(projectAccountDoc(account)) as T;
+    }
+
+    const { state, replica } = await resolveEntityState(ctx, entityId, query);
+    if (parts.length === 2) {
+      const core = replica
+        ? projectEntityReplicaCoreView(state, replica)
+        : projectEntityCoreDoc(state);
+      return compactEntityCoreForRemote(core) as RuntimeAdapterEntityCoreDoc as T;
+    }
+  }
+
+  if (parts[0] === 'frame' && parts.length === 2) {
+    if (!ctx.readFrame) throw new RuntimeAdapterError('E_BAD_QUERY', 'frame reads are unavailable for this adapter');
+    const height = parts[1] === 'latest' ? envHeight(ctx.env) : Number(parts[1]);
+    if (!Number.isFinite(height) || height < 1) throw new RuntimeAdapterError('E_BAD_PATH', 'frame height must be a positive integer or latest');
+    const frame = await ctx.readFrame(Math.floor(height));
+    if (!frame) throw new RuntimeAdapterError('E_NOT_FOUND', `frame not found: ${Math.floor(height)}`);
+    return compactFrameRecordForRemote(frame) as T;
+  }
+
+  if (parts.length === 1 && parts[0] === 'checkpoints') {
+    const heights = ctx.listCheckpoints ? await ctx.listCheckpoints() : [];
+    return heights.map((height) => ({ height, timestamp: null })) as T;
+  }
+
+  throw new RuntimeAdapterError('E_BAD_PATH', `unsupported adapter path: ${parts.join('/')}`);
+};
+
+const resolveRuntimeAdapterReadFromCommittedState = async <T = unknown>(
   ctx: RuntimeAdapterResolveContext,
   path: string,
   query?: RuntimeAdapterReadQuery,
@@ -1899,79 +1980,25 @@ export const resolveRuntimeAdapterRead = async <T = unknown>(
     if (!receipt) throw new RuntimeAdapterError('E_NOT_FOUND', `receipt not found: ${receiptId}`);
     return projectRuntimeIngressReceiptForWire(receipt) as T;
   }
+  return resolveScopedRuntimeAdapterRead<T>(ctx, parts, query);
+};
 
-  if (parts[0] === 'entity' && parts.length >= 2) {
-    const entityId = parts[1];
-    if (!entityId) throw new RuntimeAdapterError('E_BAD_PATH', 'entity id is required');
-
-    if (parts.length === 3 && (parts[2] === 'accounts' || parts[2] === 'books' || parts[2] === 'book-docs')) {
-      const height = readAtHeight(query);
-      const targetHeight = height ?? envHeight(ctx.env);
-      if (targetHeight < 1) throw new RuntimeAdapterError('E_BAD_QUERY', 'paged entity reads require a persisted runtime height');
-      const accountId = normalizeEntityId(String(query?.accountId || ''));
-      if (parts[2] === 'accounts' && accountId) {
-        const limit = readBoundedLimit(query?.accountsLimit ?? query?.limit, 10);
-        const isCurrentHeight = height === null || targetHeight === envHeight(ctx.env);
-        if (isCurrentHeight) {
-          const replica = findReplica(ctx.env, entityId);
-          if (!replica) throw new RuntimeAdapterError('E_NOT_FOUND', `entity not found: ${normalizeEntityId(entityId)}`);
-          const account = replica.state.accounts.get(accountId);
-          const page = singleAccountPage(accountId, account ? compactAccountDocForView(projectAccountDoc(account)) : null, limit);
-          return { ...page, summary: accountPageSummaryForView(entityId, page) } as T;
-        }
-        if (!ctx.loadEntityAccountDoc) {
-          throw new RuntimeAdapterError('E_BAD_QUERY', 'historical account reads are unavailable for this adapter');
-        }
-        const account = await ctx.loadEntityAccountDoc(entityId, accountId, targetHeight);
-        const page = singleAccountPage(accountId, account ? compactAccountDocForView(account) : null, limit);
-        return { ...page, summary: accountPageSummaryForView(entityId, page) } as T;
-      }
-      const isCurrentHeight = height === null || targetHeight === envHeight(ctx.env);
-      const stored = await loadViewPageForHeight(ctx, entityId, targetHeight, isCurrentHeight, query);
-      const compactStored = compactViewPageForRemote(entityId, stored);
-      return (parts[2] === 'accounts' ? compactStored.accounts : compactStored.books) as T;
-    }
-
-    if (parts.length === 4 && parts[2] === 'account') {
-      const counterpartyId = normalizeEntityId(parts[3] ?? '');
-      const height = readAtHeight(query);
-      if (height !== null && height !== envHeight(ctx.env)) {
-        if (!ctx.loadEntityAccountDoc) {
-          throw new RuntimeAdapterError('E_BAD_QUERY', 'historical account reads are unavailable for this adapter');
-        }
-        const loaded = await ctx.loadEntityAccountDoc(entityId, counterpartyId, height);
-        if (!loaded) throw new RuntimeAdapterError('E_NOT_FOUND', `account not found at height ${height}: ${normalizeEntityId(entityId)}/${counterpartyId}`);
-        return compactAccountDocForView(loaded) as T;
-      }
-      const { state } = await resolveEntityState(ctx, entityId, query);
-      const account = state.accounts.get(counterpartyId);
-      if (!account) throw new RuntimeAdapterError('E_NOT_FOUND', `account not found: ${normalizeEntityId(entityId)}/${counterpartyId}`);
-      return compactAccountDocForView(projectAccountDoc(account)) as T;
-    }
-
-    const { state, replica } = await resolveEntityState(ctx, entityId, query);
-
-    if (parts.length === 2) {
-      const core = replica
-        ? projectEntityReplicaCoreView(state, replica)
-        : projectEntityCoreDoc(state);
-      return compactEntityCoreForRemote(core) as RuntimeAdapterEntityCoreDoc as T;
-    }
+/**
+ * Resolve one externally visible read against a stable committed Runtime view.
+ *
+ * Runtime mutates its owned State in place before the asynchronous WAL append.
+ * The lease prevents that writer from starting while a read is in progress and
+ * prevents a read from observing RAM between mutation and durable commit.
+ */
+export const resolveRuntimeAdapterRead = async <T = unknown>(
+  ctx: RuntimeAdapterResolveContext,
+  path: string,
+  query?: RuntimeAdapterReadQuery,
+): Promise<T> => {
+  const release = await acquireRuntimeCommittedRead(ctx.env);
+  try {
+    return await resolveRuntimeAdapterReadFromCommittedState<T>(ctx, path, query);
+  } finally {
+    release();
   }
-
-  if (parts[0] === 'frame' && parts.length === 2) {
-    if (!ctx.readFrame) throw new RuntimeAdapterError('E_BAD_QUERY', 'frame reads are unavailable for this adapter');
-    const height = parts[1] === 'latest' ? envHeight(ctx.env) : Number(parts[1]);
-    if (!Number.isFinite(height) || height < 1) throw new RuntimeAdapterError('E_BAD_PATH', 'frame height must be a positive integer or latest');
-    const frame = await ctx.readFrame(Math.floor(height));
-    if (!frame) throw new RuntimeAdapterError('E_NOT_FOUND', `frame not found: ${Math.floor(height)}`);
-    return compactFrameRecordForRemote(frame) as T;
-  }
-
-  if (parts.length === 1 && parts[0] === 'checkpoints') {
-    const heights = ctx.listCheckpoints ? await ctx.listCheckpoints() : [];
-    return heights.map((height) => ({ height, timestamp: null })) as T;
-  }
-
-  throw new RuntimeAdapterError('E_BAD_PATH', `unsupported adapter path: ${path}`);
 };

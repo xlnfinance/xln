@@ -3,12 +3,11 @@ import { requireRuntimeMempool } from '../input-queue';
 import { ensureRuntimeState } from '../runtime-state';
 import type { FrameExecutionState } from './execution-state';
 import {
-  abortRuntimeFrameTransaction,
   cloneRuntimeFrameMempool,
   prependOlderRuntimeInput,
 } from './transaction';
 
-export type RuntimeFrameRollbackContext = {
+export type UndurableRuntimeInputContext = {
   frame: FrameExecutionState;
   liveEnv: RuntimeState;
   attemptedEnv: RuntimeState;
@@ -24,14 +23,14 @@ export type RuntimeFrameRollbackContext = {
   discardedError(error: Error): Error;
 };
 
-export type RuntimeFrameRollbackResult = {
+export type UndurableRuntimeInputResult = {
   env: RuntimeState;
   state: NonNullable<RuntimeState['runtimeState']>;
   error: Error;
 };
 
 const restoreFailedInput = (
-  context: RuntimeFrameRollbackContext,
+  context: UndurableRuntimeInputContext,
   workingMempool: RuntimeInput,
   retainedInput?: RuntimeInput,
 ): void => {
@@ -50,19 +49,16 @@ const restoreFailedInput = (
   liveEnv.runtimeMempool = restored;
 };
 
-export const rollbackUndurableRuntimeFrame = async (
-  context: RuntimeFrameRollbackContext,
+export const restoreUndurableRuntimeInput = async (
+  context: UndurableRuntimeInputContext,
   cause: unknown,
   options: { discardMalformedRemoteInput?: boolean; requeue?: boolean } = {},
-): Promise<RuntimeFrameRollbackResult> => {
+): Promise<UndurableRuntimeInputResult> => {
   const originalError = cause instanceof Error ? cause : new Error(String(cause));
   const { frame, liveEnv } = context;
   const workingMempool = frame.transaction
-    ? requireRuntimeMempool(frame.transaction.workingEnv)
+    ? frame.transaction.frameMempool
     : requireRuntimeMempool(context.attemptedEnv);
-  const cleanupErrors = frame.transaction
-    ? await abortRuntimeFrameTransaction(frame.transaction)
-    : [];
   frame.reliableIngressCommits = [];
   frame.reliableReceiptSenderCheckpoint = undefined;
 
@@ -83,10 +79,8 @@ export const rollbackUndurableRuntimeFrame = async (
     restoreFailedInput(context, retainedWorkingMempool, retainedInput ?? undefined);
   }
 
-  const error = cleanupErrors.length
-    ? new AggregateError([originalError, ...cleanupErrors], 'RUNTIME_APPLY_ROLLBACK_FAILED')
-    : discarded
-      ? context.discardedError(originalError)
-      : originalError;
+  const error = discarded
+    ? context.discardedError(originalError)
+    : originalError;
   return { env: liveEnv, state: ensureRuntimeState(liveEnv), error };
 };
