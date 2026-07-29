@@ -20,10 +20,31 @@ const ROOT_FILE_DEBT = new Set([
 ]);
 
 // These directions violate the Runtime → Entity → Account cascade or make a
-// lower deterministic layer depend on external/operational infrastructure.
-// Existing counts are migration debt: every increase and every newly
-// introduced direction fails, while completed cleanup must remove its entry.
-const REVERSE_DEPENDENCY_DEBT: Readonly<Record<string, number>> = {};
+// deterministic machine depend on an operational adapter. They are permanent
+// bans, not a zero-sized debt allowance: once an edge reaches zero, the gate
+// must keep rejecting its reintroduction.
+//
+// Infrastructure adapters may import machine schemas and validators. The
+// reverse direction is forbidden because a pure machine must remain runnable
+// without storage, transport, API, or orchestration.
+const FORBIDDEN_DEPENDENCIES = new Set([
+  'account->entity',
+  'account->runtime',
+  'account->storage',
+  'entity->jadapter',
+  'entity->networking',
+  'entity->storage',
+  'protocol->account',
+  'protocol->entity',
+  'server->orchestrator',
+]);
+
+// Moving signer resolution out of the root god-file exposed three real
+// Entity→Runtime imports. Keep them visible and non-growing until Runtime
+// injects deterministic signer-routing evidence into Entity frame execution.
+const REVERSE_DEPENDENCY_DEBT: Readonly<Record<string, number>> = {
+  'entity->runtime': 3,
+};
 
 const collectFiles = (directory: string): string[] =>
   fs.readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
@@ -98,7 +119,11 @@ for (const file of files) {
       }
       const to = targetFile ? packageOwner(path.resolve(targetFile)) : null;
       const key = to ? `${from}->${to}` : '';
-      if (key && Object.hasOwn(REVERSE_DEPENDENCY_DEBT, key)) {
+      if (
+        key &&
+        (FORBIDDEN_DEPENDENCIES.has(key) ||
+          Object.hasOwn(REVERSE_DEPENDENCY_DEBT, key))
+      ) {
         const line = source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
         const occurrences = observed.get(key) ?? [];
         occurrences.push({ file, line, specifier });
@@ -122,6 +147,14 @@ for (const file of ROOT_ENTRYPOINTS) {
 for (const file of ROOT_FILE_DEBT) {
   if (!rootFiles.includes(file)) errors.push(`STALE_RUNTIME_ROOT_FILE_ALLOWANCE ${file}`);
 }
+for (const key of FORBIDDEN_DEPENDENCIES) {
+  const occurrences = observed.get(key) ?? [];
+  if (occurrences.length === 0) continue;
+  const additions = occurrences
+    .map(item => `${item.file}:${item.line}:${item.specifier}`)
+    .join(',');
+  errors.push(`FORBIDDEN_DEPENDENCY ${key} ${additions}`);
+}
 for (const [key, allowance] of Object.entries(REVERSE_DEPENDENCY_DEBT)) {
   const occurrences = observed.get(key) ?? [];
   if (occurrences.length === 0) {
@@ -133,7 +166,9 @@ for (const [key, allowance] of Object.entries(REVERSE_DEPENDENCY_DEBT)) {
     .slice(allowance)
     .map(item => `${item.file}:${item.line}:${item.specifier}`)
     .join(',');
-  errors.push(`REVERSE_DEPENDENCY_GREW ${key} ${occurrences.length} > ${allowance} ${additions}`);
+  errors.push(
+    `REVERSE_DEPENDENCY_GREW ${key} ${occurrences.length} > ${allowance} ${additions}`,
+  );
 }
 const valueComponents = findValueImportComponents(valueGraph);
 const largestValueComponent = valueComponents[0] ?? [];
@@ -158,7 +193,8 @@ if (errors.length > 0) {
 
 const debt = [...observed.values()].reduce((sum, occurrences) => sum + occurrences.length, 0);
 console.log(
-  `RUNTIME_DEPENDENCIES_OK files=${files.length} reverseImports=${debt}/` +
-    `${Object.values(REVERSE_DEPENDENCY_DEBT).reduce((sum, count) => sum + count, 0)} ` +
+  `RUNTIME_DEPENDENCIES_OK files=${files.length} forbiddenImports=0 ` +
+    `forbiddenEdges=${FORBIDDEN_DEPENDENCIES.size} ` +
+    `reverseImports=${debt}/${Object.values(REVERSE_DEPENDENCY_DEBT).reduce((sum, count) => sum + count, 0)} ` +
     `rootDebt=${ROOT_FILE_DEBT.size} maxValueScc=${largestValueComponent.length}`,
 );
