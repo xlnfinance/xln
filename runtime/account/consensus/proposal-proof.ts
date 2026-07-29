@@ -1,6 +1,5 @@
-import type { AccountFrame, AccountState, RuntimeState } from '../../types';
+import type { AccountState, RuntimeState } from '../../types';
 import { createDisputeProofHashWithNonce } from '../../protocol/dispute/proof-builder';
-import { signEntityHashes } from '../../hanko/signing';
 import {
   buildAccountProofBodyFromEnv,
   getAccountStateDomain,
@@ -10,11 +9,7 @@ import {
   captureDisputeArgumentSnapshot,
   storeDisputeArgumentSnapshot,
 } from '../../protocol/dispute/arguments';
-import { getReplicaByEntityId } from '../../entity/replica';
-import { createStructuredLogger, shortId } from '../../infra/logger';
 import type { ProposeAccountFrameResult } from './types';
-
-const accountLog = createStructuredLogger('account');
 
 type DisputeProjection = {
   proof: ReturnType<typeof buildAccountProofBodyFromEnv>;
@@ -25,8 +20,6 @@ type DisputeProjection = {
 export type PreparedProposalProof = {
   success: true;
   signingEntityId: string;
-  frameHanko?: string;
-  disputeHanko?: string;
   disputeHash?: string;
   signedProofNonce: number;
   proof: ReturnType<typeof buildAccountProofBodyFromEnv>;
@@ -74,10 +67,8 @@ const persistDisputeProjection = (
   account: AccountState,
   candidate: AccountState,
   projection: DisputeProjection,
-  disputeHanko: string | undefined,
 ): void => {
   if (!projection.hash) return;
-  if (disputeHanko) account.currentDisputeProofHanko = disputeHanko;
   account.currentDisputeProofNonce = projection.nonce;
   account.currentDisputeProofBodyHash = projection.proof.proofBodyHash;
   account.currentDisputeHash = projection.hash;
@@ -101,42 +92,10 @@ export const prepareProposalProof = async (
   env: RuntimeState,
   account: AccountState,
   candidate: AccountState,
-  frame: AccountFrame,
   events: string[],
-  quiet: boolean,
   checkpointProfile: (label: string) => void,
 ): Promise<ProposalProofResult> => {
   const signingEntityId = account.proofHeader.fromEntity;
-  const signingReplica = getReplicaByEntityId(env, signingEntityId);
-  if (!signingReplica) {
-    return {
-      success: false,
-      result: {
-        success: false,
-        error: `Cannot find replica for entity ${signingEntityId.slice(-4)}`,
-        events,
-      },
-    };
-  }
-  const signerId = signingReplica.state.config.validators[0];
-  if (!signerId) {
-    return {
-      success: false,
-      result: {
-        success: false,
-        error: `Entity ${signingEntityId.slice(-4)} has no validators`,
-        events,
-      },
-    };
-  }
-  const directSigner =
-    signingReplica.state.config.validators.length === 1 ? signerId : undefined;
-  if (!quiet) {
-    accountLog.debug(directSigner ? 'hanko.sign' : 'hanko.defer_to_entity_quorum', {
-      entity: shortId(signingEntityId),
-      ...(directSigner ? { signer: shortId(directSigner) } : {}),
-    });
-  }
   if (!isEntityId32(candidate.leftEntity) || !isEntityId32(candidate.rightEntity)) {
     return {
       success: false,
@@ -152,36 +111,15 @@ export const prepareProposalProof = async (
 
   const projection = buildDisputeProjection(env, account, candidate);
   checkpointProfile('disputeProof');
-  let frameHanko: string | undefined;
-  let disputeHanko: string | undefined;
-  if (directSigner) {
-    [frameHanko, disputeHanko] = await signEntityHashes(
-      env,
-      signingEntityId,
-      directSigner,
-      [frame.stateHash, ...(projection.hash ? [projection.hash] : [])],
-    );
-    if (!frameHanko) {
-      return {
-        success: false,
-        result: { success: false, error: 'Failed to build frame hanko', events },
-      };
-    }
-    if (projection.hash && !disputeHanko) {
-      return {
-        success: false,
-        result: { success: false, error: 'Failed to build dispute hanko', events },
-      };
-    }
-    account.currentFrameHanko = frameHanko;
-  }
-  checkpointProfile('signatures');
-  persistDisputeProjection(account, candidate, projection, disputeHanko);
+  // Account consensus is deliberately signer-blind. It commits the exact
+  // hashes that require authority; Entity consensus later creates either a
+  // single-validator or quorum Hanko and seals the Account output. Keeping one
+  // path prevents single-signer accounts from having stronger privileges than
+  // otherwise identical multi-validator entities.
+  persistDisputeProjection(account, candidate, projection);
   return {
     success: true,
     signingEntityId,
-    ...(frameHanko ? { frameHanko } : {}),
-    ...(disputeHanko ? { disputeHanko } : {}),
     ...(projection.hash ? { disputeHash: projection.hash } : {}),
     signedProofNonce: projection.nonce,
     proof: projection.proof,

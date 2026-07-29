@@ -1,6 +1,6 @@
 /**
  * Account frame proposal path. This module owns local mempool validation,
- * frame construction, frame hanko signing, and dispute-proof signing.
+ * frame construction, and the hash manifest that Entity consensus certifies.
  */
 
 import type { AccountState, AccountTx, RuntimeState } from '../../types';
@@ -116,7 +116,6 @@ export async function proposeAccountFrame(
   if (!admission.success) return admission.result;
   const {
     counterparty,
-    quiet,
     events,
     proposalWindow,
     frameTimestamp,
@@ -161,9 +160,7 @@ export async function proposeAccountFrame(
     env,
     account,
     clonedMachine,
-    newFrame,
     events,
-    quiet,
     checkpointProfile,
   );
   if (!proof.success) return proof.result;

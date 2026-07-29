@@ -485,6 +485,52 @@ const attachSigningReplica = (env: ReturnType<typeof createEmptyEnv>, entityId: 
   } satisfies EntityReplica);
 };
 
+const sealAccountDraftAsEntity = async (
+  env: RuntimeState,
+  entityId: string,
+  signerId: string,
+  draft: {
+    accountInput?: AccountInput;
+    hashesToSign?: Array<{ hash: string; type: 'accountFrame' | 'dispute'; context: string }>;
+  },
+): Promise<AccountInput> => {
+  if (!draft.accountInput || !draft.hashesToSign?.length) {
+    throw new Error('TEST_ACCOUNT_DRAFT_MANIFEST_REQUIRED');
+  }
+  const input = structuredClone(draft.accountInput);
+  const hankos = await signEntityHashes(
+    env,
+    entityId,
+    signerId,
+    draft.hashesToSign.map(entry => entry.hash),
+  );
+  const witness = new Map(
+    draft.hashesToSign.map((entry, index) => {
+      const hanko = hankos[index];
+      if (!hanko) throw new Error(`TEST_ACCOUNT_DRAFT_HANKO_MISSING:${entry.context}`);
+      return [entry.hash.toLowerCase(), hanko] as const;
+    }),
+  );
+  const requireWitness = (hash: string): NonNullable<ReturnType<typeof witness.get>> => {
+    const hanko = witness.get(hash.toLowerCase());
+    if (!hanko) throw new Error(`TEST_ACCOUNT_DRAFT_WITNESS_UNDECLARED:${hash}`);
+    return hanko;
+  };
+  if (input.kind === 'ack' || input.kind === 'frame_ack') {
+    input.ack.frameHanko = requireWitness(input.ack.frameHash);
+    if (input.ack.disputeSeal) {
+      input.ack.disputeSeal.hanko = requireWitness(input.ack.disputeSeal.hash);
+    }
+  }
+  if (input.kind === 'frame' || input.kind === 'frame_ack') {
+    input.proposal.frameHanko = requireWitness(input.proposal.frame.stateHash);
+    if (input.proposal.disputeSeal) {
+      input.proposal.disputeSeal.hanko = requireWitness(input.proposal.disputeSeal.hash);
+    }
+  }
+  return input;
+};
+
 const registerLazySigner = (seed: string, signerSlot: string): { signerId: string; entityId: string } => {
   const signerId = deriveSignerAddressSync(seed, signerSlot);
   const privateKey = deriveSignerKeySync(seed, signerSlot);
@@ -794,7 +840,8 @@ describe('audit fail-fast regressions', () => {
 
     const proposal = await proposeAccountFrame(env, proposer, env.timestamp, 9);
     if (!proposal.success || !proposal.accountInput) throw new Error(proposal.error || 'proposal failed');
-    const result = await applyAccountInput(env, receiver, proposal.accountInput, {
+    const sealedProposal = await sealAccountDraftAsEntity(env, left.entityId, left.signerId, proposal);
+    const result = await applyAccountInput(env, receiver, sealedProposal, {
       entityTimestamp: env.timestamp + 10 * 60_000,
       finalizedJHeight: 10,
     });
@@ -843,7 +890,8 @@ describe('audit fail-fast regressions', () => {
 
     const proposed = await proposeAccountFrame(env, proposer, env.timestamp, 7);
     if (!proposed.success || !proposed.accountInput) throw new Error(proposed.error || 'proposal failed');
-    const result = await applyAccountInput(env, receiver, proposed.accountInput, {
+    const sealedProposal = await sealAccountDraftAsEntity(env, left.entityId, left.signerId, proposed);
+    const result = await applyAccountInput(env, receiver, sealedProposal, {
       entityTimestamp: env.timestamp,
       finalizedJHeight: 7,
     });
@@ -985,6 +1033,7 @@ describe('audit fail-fast regressions', () => {
     }
     const proposal = await proposeAccountFrame(env, proposer, env.timestamp, 1);
     if (!proposal.success || !proposal.accountInput) throw new Error(proposal.error || 'proposal failed');
+    const sealedProposal = await sealAccountDraftAsEntity(env, left.entityId, left.signerId, proposal);
 
     const receiverState = makeEntityState(right.entityId);
     receiverState.config = makeSingleSignerConfigFor(right.signerId);
@@ -1003,7 +1052,7 @@ describe('audit fail-fast regressions', () => {
     });
     const applied = await applyEntityTx(env, receiverState, {
       type: 'accountInput',
-      data: proposal.accountInput,
+      data: sealedProposal,
     });
 
     const rejectedAccount = applied.newState.accounts.get(left.entityId)!;
@@ -2079,7 +2128,7 @@ describe('audit fail-fast regressions', () => {
         throw new Error(`SAME_CHAIN_PROPOSAL_FAILED:${proposed.error || 'missing input'}`);
       }
       return {
-        input: proposed.accountInput,
+        input: await sealAccountDraftAsEntity(env, identity.entityId, identity.signerId, proposed),
         hubAccount: fundedAccount(hub.entityId, identity.entityId),
       };
     };

@@ -12,7 +12,6 @@ import type {
   EntityCandidateEffect,
   RuntimeState,
   Delta,
-  HankoString,
 } from '../../types';
 import {
   cloneAccountFrame,
@@ -52,7 +51,7 @@ import type {
 } from './types';
 import { createDisputeProofHashWithNonce } from '../../protocol/dispute/proof-builder';
 import { getMinimumSafeSettlementNonce } from '../../protocol/settlement/operations';
-import { signEntityHashes, verifyHankoForHash } from '../../hanko/signing';
+import { verifyHankoForHash } from '../../hanko/signing';
 import { getReplicaByEntityId } from '../../entity/replica';
 import {
   computeAccountCommitmentSectionDetail,
@@ -1889,7 +1888,6 @@ type IncomingFrameAckMaterial = {
     response: Extract<AccountInput, { kind: 'ack' }>;
   };
   ackDisputeHash?: string;
-  ackDisputeHanko: string | undefined;
   ackProofBodyHash: string;
   ackSignedNonce: number;
   proofChanged: boolean;
@@ -1925,11 +1923,9 @@ const selectAckDisputeSeal = (
   signedNonce: number,
   proofChanged: boolean,
   disputeHash: string | undefined,
-  disputeHanko: HankoString | undefined,
 ): AccountDisputeSeal | undefined => {
   if (proofChanged && disputeHash) {
     return {
-      ...(disputeHanko ? { hanko: disputeHanko } : {}),
       hash: disputeHash,
       proofBodyHash,
       proofNonce: signedNonce,
@@ -1950,7 +1946,6 @@ const selectAckDisputeSeal = (
 };
 
 async function buildIncomingFrameAckMaterial(
-  env: RuntimeState,
   account: AccountState,
   input: AccountInput,
   receivedFrame: AccountFrame,
@@ -1958,16 +1953,8 @@ async function buildIncomingFrameAckMaterial(
   events: string[],
 ): Promise<IncomingFrameAckMaterialResult> {
   const ackEntityId = account.proofHeader.fromEntity;
-  const ackReplica = getReplicaByEntityId(env, ackEntityId);
-  const ackSignerId = ackReplica?.state.config.validators[0];
-  if (!ackSignerId) {
-    return { kind: 'return', result: { success: false, error: `Cannot find signerId for ACK from ${ackEntityId.slice(-4)}`, events } };
-  }
-
-  const directSigner = ackReplica?.state.config.validators.length === 1 ? ackSignerId : undefined;
-  accountLog.debug(directSigner ? 'hanko.ack.sign' : 'hanko.ack.defer_to_entity_quorum', {
+  accountLog.debug('hanko.ack.defer_to_entity_consensus', {
     entity: shortId(ackEntityId),
-    ...(directSigner ? { signer: shortId(directSigner) } : {}),
     height: receivedFrame.height,
   });
 
@@ -1987,20 +1974,8 @@ async function buildIncomingFrameAckMaterial(
       ackSignedNonce,
     )
     : undefined;
-  let confirmationHanko: HankoString | undefined;
-  let ackDisputeHanko: HankoString | undefined;
-  if (directSigner) {
-    [confirmationHanko, ackDisputeHanko] = await signEntityHashes(env, ackEntityId, directSigner, [
-      receivedFrame.stateHash,
-      ...(ackDisputeHash ? [ackDisputeHash] : []),
-    ]);
-    if (!confirmationHanko) {
-      return { kind: 'return', result: { success: false, error: 'Failed to build ACK hanko', events } };
-    }
-  }
-
   if (proofChanged) {
-    if (!ackDisputeHash || (directSigner && !ackDisputeHanko)) {
+    if (!ackDisputeHash) {
       return { kind: 'return', result: { success: false, error: 'Failed to build ACK dispute hanko', events } };
     }
     storeAckProofSnapshot(account, ackProofResult, ackSignedNonce);
@@ -2012,7 +1987,6 @@ async function buildIncomingFrameAckMaterial(
     ackSignedNonce,
     proofChanged,
     ackDisputeHash,
-    ackDisputeHanko,
   );
 
   const response: Extract<AccountInput, { kind: 'ack' }> = {
@@ -2024,7 +1998,6 @@ async function buildIncomingFrameAckMaterial(
     ack: {
       height: receivedFrame.height,
       frameHash: receivedFrame.stateHash,
-      ...(confirmationHanko ? { frameHanko: confirmationHanko } : {}),
       ...(ackDisputeSeal ? { disputeSeal: ackDisputeSeal } : {}),
     },
   };
@@ -2039,7 +2012,6 @@ async function buildIncomingFrameAckMaterial(
         response: structuredClone(response),
       },
       ...(ackDisputeHash ? { ackDisputeHash } : {}),
-      ackDisputeHanko,
       ackProofBodyHash: ackProofResult.proofBodyHash,
       ackSignedNonce,
       proofChanged,
@@ -2052,9 +2024,6 @@ function storeAckDisputeState(
   material: IncomingFrameAckMaterial,
 ): void {
   if (material.proofChanged && material.ackDisputeHash) {
-    if (material.ackDisputeHanko) {
-      account.currentDisputeProofHanko = material.ackDisputeHanko;
-    }
     account.currentDisputeProofNonce = material.ackSignedNonce;
     account.currentDisputeProofBodyHash = material.ackProofBodyHash;
     account.currentDisputeHash = material.ackDisputeHash;
@@ -2113,7 +2082,6 @@ function buildIncomingFrameReturnPayload(
 }
 
 async function buildAckResponseForIncomingFrame(
-  env: RuntimeState,
   account: AccountState,
   input: AccountPeerInput,
   receivedFrame: AccountFrame,
@@ -2123,7 +2091,6 @@ async function buildAckResponseForIncomingFrame(
   committedFrames: AccountCommittedFrame[],
 ): Promise<HandleAccountInputResult> {
   const ackMaterial = await buildIncomingFrameAckMaterial(
-    env,
     account,
     input,
     receivedFrame,
@@ -2290,7 +2257,6 @@ async function handleIncomingAccountFrame(
   return {
     kind: 'return',
     result: await buildAckResponseForIncomingFrame(
-      env,
       account,
       input,
       preflight.receivedFrame,

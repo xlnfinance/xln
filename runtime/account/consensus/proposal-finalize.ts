@@ -32,7 +32,6 @@ const resolveDisputeSeal = (
 ): DisputeSeal | undefined => {
   if (proof.disputeHash) {
     return {
-      ...(proof.disputeHanko ? { hanko: proof.disputeHanko } : {}),
       hash: proof.disputeHash,
       proofBodyHash: proof.proof.proofBodyHash,
       proofNonce: proof.signedProofNonce,
@@ -70,7 +69,6 @@ const buildOutboundAccountInput = (
   const disputeSeal = resolveDisputeSeal(account, candidate, proof);
   const proposal = {
     frame: cloneAccountFrame(frame),
-    ...(proof.frameHanko ? { frameHanko: proof.frameHanko } : {}),
     ...(disputeSeal ? { disputeSeal } : {}),
   };
   const shared = {
