@@ -1,11 +1,18 @@
 import type { ReliableDeliveryReceipt, RuntimeEntityInputsEnvelope } from '../types';
-import { deserializeWsMessage, hashHelloMessage, makeMessageId, serializeWsMessage, type RuntimeWsMessage } from './ws-protocol';
+import {
+  deserializeWsMessage,
+  hashHelloMessage,
+  makeMessageId,
+  serializeWsMessage,
+  type RuntimeWsMessage,
+} from './ws-protocol';
 import { signDigest } from '../account/crypto';
 import { encryptJSON, decryptJSON, pubKeyToHex } from '../protocol/p2p-crypto';
 import { asFailFastPayload, failfastAssert } from './failfast';
 import { isRuntimeId, normalizeRuntimeId } from './runtime-id';
 import { createStructuredLogger } from '../infra/logger';
 import { decodeRuntimeEntityInputsEnvelope } from './entity-input-envelope';
+import { isRetryableIngressBackpressure } from './ingress-backpressure';
 
 const NORMAL_CLOSE_CODES = new Set([1000, 1001]);
 const wsLog = createStructuredLogger('runtime.wsClient');
@@ -88,7 +95,7 @@ const waitForSocketClose = async (ws: WebSocketLike | null, timeoutMs = 1_000): 
 
     const browserWs = ws as BrowserWebSocket;
     const prevOnClose = browserWs.onclose;
-    browserWs.onclose = (event) => {
+    browserWs.onclose = event => {
       try {
         prevOnClose?.call(browserWs as WebSocket, event);
       } finally {
@@ -226,7 +233,7 @@ export class RuntimeWsClient {
     const attempt = this.connectForGeneration(generation);
     let tracked: Promise<void>;
     tracked = attempt
-      .catch((error) => {
+      .catch(error => {
         if (this.lifecycleGeneration === generation) this.connecting = false;
         throw error;
       })
@@ -253,7 +260,7 @@ export class RuntimeWsClient {
     if (this.closed || generation !== this.lifecycleGeneration) return;
 
     const isCurrent = () => !this.closed && generation === this.lifecycleGeneration;
-    const socket = await createWs(this.options.url, isCurrent, (created) => {
+    const socket = await createWs(this.options.url, isCurrent, created => {
       if (isCurrent()) this.ws = created;
     });
     if (!socket) return;
@@ -289,12 +296,7 @@ export class RuntimeWsClient {
     }
   }
 
-  private handleSocketClose(
-    generation: number,
-    codeInput: number,
-    reasonInput: string,
-    wasClean?: boolean,
-  ): void {
+  private handleSocketClose(generation: number, codeInput: number, reasonInput: string, wasClean?: boolean): void {
     if (generation !== this.lifecycleGeneration) return;
     this.connecting = false;
     this.rejectPendingRecoveryBundleRequests(new Error('RECOVERY_REQUEST_SOCKET_CLOSED'));
@@ -381,7 +383,7 @@ export class RuntimeWsClient {
     const capped = this.maxReconnectAttempts > 0;
     if (capped && this.reconnectAttempts > this.maxReconnectAttempts) {
       const err = new Error(
-        `WS_RECONNECT_EXHAUSTED: ${this.options.url} failed after ${this.maxReconnectAttempts} attempts`
+        `WS_RECONNECT_EXHAUSTED: ${this.options.url} failed after ${this.maxReconnectAttempts} attempts`,
       );
       console.error(`[WS] Reconnect exhausted for ${this.options.url}`);
       this.options.onError?.(err);
@@ -407,9 +409,9 @@ export class RuntimeWsClient {
       }
       console.info(
         `[WS] Duplicate runtime session for ${this.options.runtimeId} on ${this.options.url}; ` +
-        (browserStandby
-          ? 'entering standby until this tab is visible again'
-          : 'stopping auto-reconnect for this client'),
+          (browserStandby
+            ? 'entering standby until this tab is visible again'
+            : 'stopping auto-reconnect for this client'),
       );
       return false;
     }
@@ -438,11 +440,7 @@ export class RuntimeWsClient {
     }
   }
 
-  private settlePendingRecoveryBundleRequest(
-    id: string | undefined,
-    payload: unknown,
-    error?: string,
-  ): boolean {
+  private settlePendingRecoveryBundleRequest(id: string | undefined, payload: unknown, error?: string): boolean {
     if (!id) return false;
     const pending = this.pendingRecoveryBundleRequests.get(id);
     if (!pending) return false;
@@ -601,14 +599,10 @@ export class RuntimeWsClient {
       this.options.onError?.(new Error('P2P_NO_DECRYPTION: Cannot decrypt without keypair'));
       return true;
     }
+    let envelope: RuntimeEntityInputsEnvelope;
     try {
-      const envelope = decodeRuntimeEntityInputsEnvelope(
+      envelope = decodeRuntimeEntityInputsEnvelope(
         decryptJSON(msg.payload as string, this.options.encryptionKeyPair.privateKey),
-      );
-      await this.options.onEntityInputs?.(
-        msg.from,
-        envelope,
-        typeof msg.timestamp === 'number' ? msg.timestamp : undefined,
       );
     } catch (error) {
       console.error('❌ WS-CLIENT-DECRYPT-FAILED:', error);
@@ -619,6 +613,33 @@ export class RuntimeWsClient {
         from: msg.from,
       });
       this.options.onError?.(error as Error);
+      return true;
+    }
+
+    try {
+      await this.options.onEntityInputs?.(
+        msg.from,
+        envelope,
+        typeof msg.timestamp === 'number' ? msg.timestamp : undefined,
+      );
+    } catch (error) {
+      if (error instanceof Error && isRetryableIngressBackpressure(error)) {
+        wsLog.info('entity_inputs.retryable_backpressure', {
+          error: error.message,
+          from: msg.from,
+        });
+        this.options.onError?.(error);
+        return true;
+      }
+      const handlerError = error instanceof Error ? error : new Error(String(error));
+      console.error('❌ WS-CLIENT-ENTITY-INPUT-HANDLER-FAILED:', handlerError);
+      this.sendDebugEvent({
+        level: 'error',
+        code: 'ENTITY_INPUT_HANDLER_FAILED',
+        message: handlerError.message,
+        from: msg.from,
+      });
+      this.options.onError?.(handlerError);
     }
     return true;
   }
@@ -717,9 +738,7 @@ export class RuntimeWsClient {
       fromEncryptionPubKey: pubKeyToHex(this.options.encryptionKeyPair.publicKey),
       to,
       timestamp:
-        typeof ingressTimestamp === 'number' && Number.isFinite(ingressTimestamp)
-          ? ingressTimestamp
-          : nextTimestamp(),
+        typeof ingressTimestamp === 'number' && Number.isFinite(ingressTimestamp) ? ingressTimestamp : nextTimestamp(),
       payload,
       encrypted: true,
       ...(envelope.entityInputs.length === 1 && envelope.entityInputs[0]
@@ -813,9 +832,8 @@ export class RuntimeWsClient {
     if (!key) return Promise.reject(new Error('RECOVERY_LOOKUP_KEY_MISSING'));
     const targetRuntimeId = normalizeRuntimeId(to);
     if (!targetRuntimeId) return Promise.reject(new Error('RECOVERY_TARGET_RUNTIME_INVALID'));
-    const waitMs = Number.isFinite(timeoutMs) && timeoutMs > 0
-      ? Math.floor(timeoutMs)
-      : DEFAULT_RECOVERY_BUNDLE_REQUEST_TIMEOUT_MS;
+    const waitMs =
+      Number.isFinite(timeoutMs) && timeoutMs > 0 ? Math.floor(timeoutMs) : DEFAULT_RECOVERY_BUNDLE_REQUEST_TIMEOUT_MS;
     const id = makeMessageId();
 
     return new Promise<T>((resolve, reject) => {
@@ -877,7 +895,12 @@ export class RuntimeWsClient {
           }
         : msg;
     try {
-      failfastAssert(typeof outboundMsg.type === 'string', 'WS_SEND_TYPE_INVALID', 'Outgoing WS message type must be string', { msg: outboundMsg });
+      failfastAssert(
+        typeof outboundMsg.type === 'string',
+        'WS_SEND_TYPE_INVALID',
+        'Outgoing WS message type must be string',
+        { msg: outboundMsg },
+      );
       failfastAssert(
         typeof outboundMsg.from === 'string' && outboundMsg.from.length > 0,
         'WS_SEND_FROM_INVALID',
@@ -944,7 +967,7 @@ export class RuntimeWsClient {
     if (this.closePromise) return this.closePromise;
     const attempt = this.drainTerminalClose(timeoutMs);
     let tracked: Promise<void>;
-    tracked = attempt.catch((error) => {
+    tracked = attempt.catch(error => {
       if (this.closePromise === tracked) this.closePromise = null;
       throw error;
     });
@@ -971,14 +994,11 @@ export class RuntimeWsClient {
     this.terminalCloseTimeoutMs = timeoutMs;
     const socket = this.prepareSocketStop('RECOVERY_REQUEST_SOCKET_CLOSED', true);
     const connecting = this.connectPromise;
-    const results = await Promise.allSettled([
-      waitForSocketClose(socket, timeoutMs),
-      connecting ?? Promise.resolve(),
-    ]);
+    const results = await Promise.allSettled([waitForSocketClose(socket, timeoutMs), connecting ?? Promise.resolve()]);
     if (results[0]?.status === 'fulfilled' && this.ws === socket) this.ws = null;
     const errors = results
       .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
-      .map(result => result.reason instanceof Error ? result.reason : new Error(String(result.reason)));
+      .map(result => (result.reason instanceof Error ? result.reason : new Error(String(result.reason))));
     if (errors.length === 1) throw errors[0];
     if (errors.length > 1) throw new AggregateError(errors, 'WS_CLOSE_FAILED');
     if (this.ws) throw new Error('WS_CLOSE_LATE_SOCKET_RETAINED');

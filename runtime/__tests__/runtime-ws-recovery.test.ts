@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { deriveSignerAddressSync } from '../account/crypto';
@@ -116,10 +116,12 @@ describe('runtime websocket recovery requests', () => {
       websocket: {
         open(ws) {
           socket = ws;
-          ws.send(serializeWsMessage({
-            type: 'hello_challenge',
-            challenge: 'runtime-ws-auth-readiness',
-          }));
+          ws.send(
+            serializeWsMessage({
+              type: 'hello_challenge',
+              challenge: 'runtime-ws-auth-readiness',
+            }),
+          );
         },
         message(_ws, raw) {
           receivedTypes.push(deserializeWsMessage(raw).type);
@@ -204,12 +206,14 @@ describe('runtime websocket recovery requests', () => {
     await requester.connect();
     await waitUntil(() => relay.store.clients.has(RUNTIME_A), 'requester relay client');
 
-    await expect(requester.requestRecoveryBundles(RUNTIME_B, 'lookup/key', 1_000))
-      .rejects.toThrow('RECOVERY_TARGET_NOT_CONNECTED');
+    await expect(requester.requestRecoveryBundles(RUNTIME_B, 'lookup/key', 1_000)).rejects.toThrow(
+      'RECOVERY_TARGET_NOT_CONNECTED',
+    );
     expect(requesterErrors).toEqual([]);
   });
 
   test('reports a retryable inbound entity rejection without killing the websocket consumer', async () => {
+    const consoleError = spyOn(console, 'error').mockImplementation(() => undefined);
     const relay = startRelay();
     const url = `ws://127.0.0.1:${relay.server.port}`;
     const receiverErrors: string[] = [];
@@ -219,9 +223,7 @@ describe('runtime websocket recovery requests', () => {
       seed: SEED_A,
       runtimeId: RUNTIME_A,
       signerId: '1',
-      getTargetEncryptionKey: runtimeId => (
-        runtimeId === RUNTIME_B ? deriveEncryptionKeyPair(SEED_B).publicKey : null
-      ),
+      getTargetEncryptionKey: runtimeId => (runtimeId === RUNTIME_B ? deriveEncryptionKeyPair(SEED_B).publicKey : null),
     });
     const receiver = makeClient({
       url,
@@ -238,21 +240,29 @@ describe('runtime websocket recovery requests', () => {
     await receiver.connect();
     await waitUntil(() => relay.store.clients.has(RUNTIME_A) && relay.store.clients.has(RUNTIME_B), 'relay clients');
 
-    expect(sender.sendEntityInputsRaw(RUNTIME_B, {
-      sourceRuntimeId: RUNTIME_A,
-      sourceRuntimeHeight: 7,
-      sourceRuntimeTimestamp: 7000,
-      entityInputs: [{
-        entityId: `0x${'44'.repeat(32)}`,
-        signerId: '2',
-        runtimeId: RUNTIME_B,
-        entityTxs: [],
-      }],
-    })).toBe(true);
+    expect(
+      sender.sendEntityInputsRaw(RUNTIME_B, {
+        sourceRuntimeId: RUNTIME_A,
+        sourceRuntimeHeight: 7,
+        sourceRuntimeTimestamp: 7000,
+        entityInputs: [
+          {
+            entityId: `0x${'44'.repeat(32)}`,
+            signerId: '2',
+            runtimeId: RUNTIME_B,
+            entityTxs: [],
+          },
+        ],
+      }),
+    ).toBe(true);
     await waitUntil(() => receiverErrors.includes('INBOUND_ENTITY_RUNTIME_QUIESCING'), 'retryable rejection reported');
 
     expect(received).toBe(1);
     expect(receiver.isOpen()).toBe(true);
+    expect(
+      consoleError.mock.calls.some(call => call.some(value => String(value).includes('WS-CLIENT-DECRYPT-FAILED'))),
+    ).toBe(false);
+    consoleError.mockRestore();
   });
 
   test('requestRecoveryBundles times out when a connected peer never answers', async () => {
@@ -268,10 +278,12 @@ describe('runtime websocket recovery requests', () => {
       },
       websocket: {
         open(ws) {
-          ws.send(serializeWsMessage({
-            type: 'hello_challenge',
-            challenge: 'runtime-ws-recovery-timeout',
-          }));
+          ws.send(
+            serializeWsMessage({
+              type: 'hello_challenge',
+              challenge: 'runtime-ws-recovery-timeout',
+            }),
+          );
         },
         message(ws, raw) {
           const message = deserializeWsMessage(raw);
@@ -292,7 +304,8 @@ describe('runtime websocket recovery requests', () => {
     await client.connect();
     await waitUntil(() => client.isOpen(), 'dummy ws open');
 
-    await expect(client.requestRecoveryBundles(RUNTIME_B, 'lookup/key', 50))
-      .rejects.toThrow('RECOVERY_REQUEST_TIMEOUT');
+    await expect(client.requestRecoveryBundles(RUNTIME_B, 'lookup/key', 50)).rejects.toThrow(
+      'RECOVERY_REQUEST_TIMEOUT',
+    );
   });
 });

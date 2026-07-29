@@ -17,11 +17,7 @@ import { deriveEncryptionKeyPair, pubKeyToHex, hexToPubKey, type P2PKeyPair } fr
 import { asFailFastPayload, failfastAssert } from './failfast';
 import { normalizeRuntimeId, isRuntimeId } from './runtime-id';
 import { compareStableText } from '../protocol/serialization';
-import {
-  DEFAULT_GOSSIP_BATCH_LIMIT,
-  selectProfileBatch,
-  type GossipProfileBatchRequest,
-} from '../relay/profile-batch';
+import { DEFAULT_GOSSIP_BATCH_LIMIT, selectProfileBatch, type GossipProfileBatchRequest } from '../relay/profile-batch';
 import { createStructuredLogger, shortId } from '../infra/logger';
 import { isRuntimePerfProfileEnabled } from '../infra/perf-runtime-flags';
 import {
@@ -31,13 +27,19 @@ import {
   sameWsUrl,
   uniqueTransportValues,
 } from './p2p-endpoints';
-import { deliveryAccepted, deliveryFailure, isDeliveryDelivered, type DeliveryResult } from '../protocol/payments/delivery-result';
+import {
+  deliveryAccepted,
+  deliveryFailure,
+  isDeliveryDelivered,
+  type DeliveryResult,
+} from '../protocol/payments/delivery-result';
 import {
   acceptProfileEncryptionAnnouncement,
   collectLocalProfileEncryptionAnnouncements,
   getCompleteProfileEncryptionManifest,
   type ValidatorEncryptionAnnouncement,
 } from '../entity/profile-encryption';
+import { isRetryableIngressBackpressure } from './ingress-backpressure';
 
 const DEFAULT_RELAY_URL = 'wss://xln.finance/relay';
 const p2pLog = createStructuredLogger('p2p');
@@ -45,8 +47,6 @@ const MIN_GOSSIP_POLL_MS = 250;
 const SLOW_BROWSER_TIMER_MS = 32;
 const ENTITY_INPUT_TARGET_OFFLINE = 'ENTITY_INPUT_TARGET_NOT_CONNECTED';
 const RELIABLE_RECEIPT_TARGET_OFFLINE = 'ENTITY_INPUT_RECEIPT_TARGET_NOT_CONNECTED';
-const RETRYABLE_INGRESS_BACKPRESSURE = 'INBOUND_ENTITY_RUNTIME_QUIESCING:';
-
 export const reportRelayClientError = (env: RuntimeState, relay: string, error: Error): void => {
   if (error.message === ENTITY_INPUT_TARGET_OFFLINE) {
     env.info('network', 'ENTITY_INPUT_TARGET_OFFLINE', { relay, error: error.message });
@@ -56,7 +56,7 @@ export const reportRelayClientError = (env: RuntimeState, relay: string, error: 
     env.info('network', 'RELIABLE_RECEIPT_TARGET_OFFLINE', { relay, error: error.message });
     return;
   }
-  if (error.message.startsWith(RETRYABLE_INGRESS_BACKPRESSURE)) {
+  if (isRetryableIngressBackpressure(error)) {
     env.info('network', 'WS_CLIENT_RETRYABLE_BACKPRESSURE', { relay, error: error.message });
     return;
   }
@@ -69,7 +69,7 @@ export const reportDirectClientError = (
   targetRuntimeId: string,
   error: Error,
 ): 'retryable-backpressure' | 'transport-error' => {
-  if (error.message.startsWith(RETRYABLE_INGRESS_BACKPRESSURE)) {
+  if (isRetryableIngressBackpressure(error)) {
     env.info('network', 'WS_DIRECT_RETRYABLE_BACKPRESSURE', {
       endpoint,
       targetRuntimeId,
@@ -203,10 +203,7 @@ const p2pSendFalseDelivery = (transport: EntityInputDeliveryTransport): EntityIn
     transport,
   );
 
-const p2pNotDeliveredResult = (
-  transport: EntityInputDeliveryTransport,
-  message: string,
-): EntityInputDeliveryResult =>
+const p2pNotDeliveredResult = (transport: EntityInputDeliveryTransport, message: string): EntityInputDeliveryResult =>
   p2pDeliveryResult(
     deliveryFailure({
       category: 'TransientRace',
@@ -217,10 +214,7 @@ const p2pNotDeliveredResult = (
     transport,
   );
 
-const p2pSendThrowResult = (
-  transport: EntityInputDeliveryTransport,
-  message: string,
-): EntityInputDeliveryResult => {
+const p2pSendThrowResult = (transport: EntityInputDeliveryTransport, message: string): EntityInputDeliveryResult => {
   const code = message.includes('P2P_NO_PUBKEY') ? 'P2P_NO_PUBKEY' : 'P2P_SEND_THROW';
   return p2pDeliveryResult(
     deliveryFailure({
@@ -233,8 +227,7 @@ const p2pSendThrowResult = (
   );
 };
 
-const p2pShouldRefreshGossip = (delivery: DeliveryResult): boolean =>
-  delivery.code === 'P2P_NO_PUBKEY';
+const p2pShouldRefreshGossip = (delivery: DeliveryResult): boolean => delivery.code === 'P2P_NO_PUBKEY';
 
 const p2pSendThrowDebugCode = (delivery: DeliveryResult): string =>
   p2pShouldRefreshGossip(delivery) ? 'P2P_NO_PUBKEY_DELIVERY_FAILED' : 'P2P_SEND_THROW';
@@ -281,11 +274,14 @@ export class RuntimeP2P {
   private directClients = new Map<string, RuntimeWsClient>();
   private directClientUrls = new Map<string, string>();
   private directClientErrors = new Map<string, { at: number; error: string }>();
-  private verifiedProfileRoutes: Map<string, {
-    runtimeId: string;
-    runtimeEncPubKey: string;
-    lastUpdated: number;
-  }>;
+  private verifiedProfileRoutes: Map<
+    string,
+    {
+      runtimeId: string;
+      runtimeEncPubKey: string;
+      lastUpdated: number;
+    }
+  >;
   private bootstrapPollTimer: ReturnType<typeof setTimeout> | null = null;
   private pollInterval: ReturnType<typeof setInterval> | null = null;
   private visibilityHandler: (() => void) | null = null;
@@ -312,9 +308,11 @@ export class RuntimeP2P {
     this.advertiseEntityIds = options.advertiseEntityIds || null;
     this.gossipPollMs = normalizeGossipPollMs(options.gossipPollMs);
     this.onEntityInputs = options.onEntityInputs;
-    this.onReliableReceipt = options.onReliableReceipt ?? (() => {
-      throw new Error('P2P_RELIABLE_RECEIPT_HANDLER_MISSING');
-    });
+    this.onReliableReceipt =
+      options.onReliableReceipt ??
+      (() => {
+        throw new Error('P2P_RELIABLE_RECEIPT_HANDLER_MISSING');
+      });
     this.onGossipProfiles = options.onGossipProfiles;
     this.onEncryptionManifestComplete = options.onEncryptionManifestComplete;
     if (!this.env.runtimeState) this.env.runtimeState = {};
@@ -420,7 +418,7 @@ export class RuntimeP2P {
         onGossipAnnounce: (from, payload) => {
           if (!this.closing && !this.closed) this.handleGossipAnnounce(from, payload);
         },
-        onError: (error) => {
+        onError: error => {
           reportRelayClientError(this.env, url, error);
         },
         maxReconnectAttempts: 0,
@@ -449,7 +447,7 @@ export class RuntimeP2P {
       this.closed = true;
     });
     let tracked: Promise<void>;
-    tracked = attempt.catch((error) => {
+    tracked = attempt.catch(error => {
       if (this.closePromise === tracked) this.closePromise = null;
       throw error;
     });
@@ -544,7 +542,12 @@ export class RuntimeP2P {
     }
   }
 
-  getQueueState(): { targetCount: number; totalMessages: number; oldestEntryAge: number; perTarget: Record<string, number> } {
+  getQueueState(): {
+    targetCount: number;
+    totalMessages: number;
+    oldestEntryAge: number;
+    perTarget: Record<string, number>;
+  } {
     const pending = this.env.pendingNetworkOutputs ?? [];
     const perTarget: Record<string, number> = {};
     let oldestTimestamp = Number.POSITIVE_INFINITY;
@@ -604,8 +607,20 @@ export class RuntimeP2P {
     return this.clients.some(client => client.isConnecting());
   }
 
-  getDirectPeerState(): Array<{ runtimeId: string; endpoint: string; open: boolean; lastError?: string; lastErrorAt?: number }> {
-    const rows: Array<{ runtimeId: string; endpoint: string; open: boolean; lastError?: string; lastErrorAt?: number }> = [];
+  getDirectPeerState(): Array<{
+    runtimeId: string;
+    endpoint: string;
+    open: boolean;
+    lastError?: string;
+    lastErrorAt?: number;
+  }> {
+    const rows: Array<{
+      runtimeId: string;
+      endpoint: string;
+      open: boolean;
+      lastError?: string;
+      lastErrorAt?: number;
+    }> = [];
     for (const [runtimeId, client] of this.directClients.entries()) {
       const lastError = this.directClientErrors.get(runtimeId);
       rows.push({
@@ -631,10 +646,23 @@ export class RuntimeP2P {
       : p2pSendFalseDelivery(transport);
   }
 
-  enqueueEntityInputsDelivery(targetRuntimeId: string, envelope: RuntimeEntityInputsEnvelope, ingressTimestamp?: number): EntityInputDeliveryResult {
+  enqueueEntityInputsDelivery(
+    targetRuntimeId: string,
+    envelope: RuntimeEntityInputsEnvelope,
+    ingressTimestamp?: number,
+  ): EntityInputDeliveryResult {
     try {
-      failfastAssert(typeof targetRuntimeId === 'string' && targetRuntimeId.length > 0, 'P2P_TARGET_RUNTIME_INVALID', 'targetRuntimeId is required');
-      failfastAssert(Array.isArray(envelope?.entityInputs), 'P2P_ENTITY_INPUTS_INVALID', 'entity_inputs envelope is malformed', { targetRuntimeId });
+      failfastAssert(
+        typeof targetRuntimeId === 'string' && targetRuntimeId.length > 0,
+        'P2P_TARGET_RUNTIME_INVALID',
+        'targetRuntimeId is required',
+      );
+      failfastAssert(
+        Array.isArray(envelope?.entityInputs),
+        'P2P_ENTITY_INPUTS_INVALID',
+        'entity_inputs envelope is malformed',
+        { targetRuntimeId },
+      );
       const hasIntent = envelope.crossJurisdictionIntent !== undefined;
       failfastAssert(
         hasIntent ? envelope.entityInputs.length === 0 : envelope.entityInputs.length > 0,
@@ -660,12 +688,9 @@ export class RuntimeP2P {
     }
 
     const normalizedTargetRuntimeId = normalizeRuntimeId(targetRuntimeId);
-    failfastAssert(
-      !!normalizedTargetRuntimeId,
-      'P2P_TARGET_RUNTIME_INVALID',
-      'targetRuntimeId must be signer EOA',
-      { targetRuntimeId },
-    );
+    failfastAssert(!!normalizedTargetRuntimeId, 'P2P_TARGET_RUNTIME_INVALID', 'targetRuntimeId must be signer EOA', {
+      targetRuntimeId,
+    });
     const { client, transport } = this.resolveTransportClient(normalizedTargetRuntimeId);
     let delivery: EntityInputDeliveryResult | null = null;
     if (client && client.isOpen()) {
@@ -695,7 +720,7 @@ export class RuntimeP2P {
         }
         throw new Error(
           `P2P_ENTITY_INPUTS_SEND_THROW: runtime=${normalizedTargetRuntimeId} entities=${envelope.entityInputs.length} ` +
-          `transport=${transport} error=${message}`,
+            `transport=${transport} error=${message}`,
         );
       }
     }
@@ -715,14 +740,11 @@ export class RuntimeP2P {
     });
     throw new Error(
       `P2P_ENTITY_INPUTS_NOT_DELIVERED: runtime=${normalizedTargetRuntimeId} entities=${envelope.entityInputs.length} ` +
-      `transport=${transport}`,
+        `transport=${transport}`,
     );
   }
 
-  enqueueReliableReceiptDelivery(
-    targetRuntimeId: string,
-    receipt: ReliableDeliveryReceipt,
-  ): EntityInputDeliveryResult {
+  enqueueReliableReceiptDelivery(targetRuntimeId: string, receipt: ReliableDeliveryReceipt): EntityInputDeliveryResult {
     const normalizedTargetRuntimeId = normalizeRuntimeId(targetRuntimeId);
     failfastAssert(
       !!normalizedTargetRuntimeId,
@@ -885,8 +907,9 @@ export class RuntimeP2P {
   }
 
   private async ensureProfilesForInput(input: RoutedEntityInput): Promise<boolean> {
-    const missingEntities = this.collectProfileEntityIdsForInput(input)
-      .filter(entityId => !this.hasProfileForEntity(entityId));
+    const missingEntities = this.collectProfileEntityIdsForInput(input).filter(
+      entityId => !this.hasProfileForEntity(entityId),
+    );
     if (missingEntities.length === 0) return true;
     const resolved = await this.ensureProfiles(missingEntities);
     if (!resolved) {
@@ -907,9 +930,7 @@ export class RuntimeP2P {
   ): Promise<void> {
     if (this.closing || this.closed) return;
     const profileStartedAt = Date.now();
-    const profileResults = await Promise.all(
-      envelope.entityInputs.map(input => this.ensureProfilesForInput(input)),
-    );
+    const profileResults = await Promise.all(envelope.entityInputs.map(input => this.ensureProfilesForInput(input)));
     if (this.closing || this.closed) return;
     if (isRuntimePerfProfileEnabled('XLN_P2P_INGRESS_PROFILE')) {
       p2pLog.info('ingress.entity_inputs', {
@@ -925,8 +946,9 @@ export class RuntimeP2P {
   }
 
   private prefetchProfilesForInput(input: RoutedEntityInput): void {
-    const missingEntities = this.collectProfileEntityIdsForInput(input)
-      .filter(entityId => !this.hasProfileForEntity(entityId));
+    const missingEntities = this.collectProfileEntityIdsForInput(input).filter(
+      entityId => !this.hasProfileForEntity(entityId),
+    );
     if (missingEntities.length === 0) return;
     void this.ensureProfilesForInput(input).catch(error => {
       this.env.warn('network', 'P2P_FETCH_PROFILE_FAILED', { error: (error as Error).message });
@@ -978,7 +1000,7 @@ export class RuntimeP2P {
   private getProfileByEntity(entityId: string): Profile | null {
     const targetEntityId = normalizeId(entityId);
     const profiles = this.env.gossip?.getProfiles?.() || [];
-    return profiles.find((profile) => normalizeId(profile.entityId) === targetEntityId) || null;
+    return profiles.find(profile => normalizeId(profile.entityId) === targetEntityId) || null;
   }
 
   private expandRequiredProfileIds(entityIds: string[]): string[] {
@@ -1016,7 +1038,7 @@ export class RuntimeP2P {
   private waitForActiveDelay(delayMs: number): Promise<boolean> {
     const signal = this.shutdownController.signal;
     if (signal.aborted) return Promise.resolve(false);
-    return new Promise((resolve) => {
+    return new Promise(resolve => {
       const finish = (active: boolean) => {
         clearTimeout(timer);
         signal.removeEventListener('abort', onAbort);
@@ -1049,9 +1071,10 @@ export class RuntimeP2P {
       } else {
         this.requestSeedGossip('full');
       }
-      if (!await this.waitForActiveDelay(waitMs)) return false;
+      if (!(await this.waitForActiveDelay(waitMs))) return false;
       const profiles = this.env.gossip?.getProfiles?.() || [];
-      const hasAllMissing = missingEntityIds.length > 0 && missingEntityIds.every((entityId) => this.hasProfileForEntity(entityId));
+      const hasAllMissing =
+        missingEntityIds.length > 0 && missingEntityIds.every(entityId => this.hasProfileForEntity(entityId));
       if (profiles.length > startCount || hasAllMissing) {
         return missingEntityIds.length === 0 ? profiles.length > startCount : hasAllMissing;
       }
@@ -1166,24 +1189,25 @@ export class RuntimeP2P {
   }
 
   private getLocalEncryptionAnnouncements(entityIds?: string[]): ValidatorEncryptionAnnouncement[] {
-    const requested = entityIds && entityIds.length > 0
-      ? new Set(entityIds.map(normalizeId))
-      : null;
-    const advertised = this.advertiseEntityIds && this.advertiseEntityIds.length > 0
-      ? new Set(this.advertiseEntityIds.map(normalizeId))
-      : null;
-    const target = requested && advertised
-      ? new Set([...requested].filter((entityId) => advertised.has(entityId)))
-      : requested ?? advertised ?? undefined;
+    const requested = entityIds && entityIds.length > 0 ? new Set(entityIds.map(normalizeId)) : null;
+    const advertised =
+      this.advertiseEntityIds && this.advertiseEntityIds.length > 0
+        ? new Set(this.advertiseEntityIds.map(normalizeId))
+        : null;
+    const target =
+      requested && advertised
+        ? new Set([...requested].filter(entityId => advertised.has(entityId)))
+        : (requested ?? advertised ?? undefined);
     return collectLocalProfileEncryptionAnnouncements(this.env, target);
   }
 
   private async getLocalProfilesForEntities(entityIds?: string[]): Promise<Profile[]> {
     if (!this.env.eReplicas || this.env.eReplicas.size === 0) return [];
     const targetSet = entityIds && entityIds.length > 0 ? new Set(entityIds.map(normalizeId)) : null;
-    const advertisedSet = this.advertiseEntityIds && this.advertiseEntityIds.length > 0
-      ? new Set(this.advertiseEntityIds.map(normalizeId))
-      : null;
+    const advertisedSet =
+      this.advertiseEntityIds && this.advertiseEntityIds.length > 0
+        ? new Set(this.advertiseEntityIds.map(normalizeId))
+        : null;
     const profiles: Profile[] = [];
     const seen = new Set<string>();
     for (const [replicaKey, replica] of this.env.eReplicas.entries()) {
@@ -1213,7 +1237,7 @@ export class RuntimeP2P {
 
       // MONOTONIC TIMESTAMP: Ensure timestamp grows even if env.timestamp doesn't change
       // Get last announced timestamp for this entity from gossip
-      const existingProfile = this.env.gossip?.getProfiles?.().find((profile) => profile.entityId === entityId);
+      const existingProfile = this.env.gossip?.getProfiles?.().find(profile => profile.entityId === entityId);
       const lastTimestamp = existingProfile?.lastUpdated || 0;
       const monotonicTimestamp = Math.max(lastTimestamp + 1, this.env.timestamp);
       const profile = buildLocalEntityProfile(this.env, replica.state, monotonicTimestamp);
@@ -1277,14 +1301,11 @@ export class RuntimeP2P {
     });
   }
 
-  private applyIncomingEncryptionAnnouncements(
-    from: string,
-    announcements: ValidatorEncryptionAnnouncement[],
-  ): void {
+  private applyIncomingEncryptionAnnouncements(from: string, announcements: ValidatorEncryptionAnnouncement[]): void {
     if (this.closing || this.closed) return;
     if (announcements.length === 0) return;
     const localEntities = new Map(
-      [...this.env.eReplicas.values()].map((replica) => [normalizeId(replica.entityId), replica.state] as const),
+      [...this.env.eReplicas.values()].map(replica => [normalizeId(replica.entityId), replica.state] as const),
     );
     for (const announcement of announcements) {
       if (this.closing || this.closed) return;
@@ -1332,9 +1353,10 @@ export class RuntimeP2P {
     for (const profile of profiles) {
       const { profile: sanitized, error: malformedReason } = sanitizeIncomingProfile(profile);
       if (!sanitized) {
-        const entityId = typeof profile === 'object' && profile !== null && 'entityId' in profile
-          ? String((profile as { entityId?: unknown }).entityId || 'unknown')
-          : 'unknown';
+        const entityId =
+          typeof profile === 'object' && profile !== null && 'entityId' in profile
+            ? String((profile as { entityId?: unknown }).entityId || 'unknown')
+            : 'unknown';
         p2pLog.warn('profile.dropped_malformed', {
           from: shortId(from),
           entity: shortId(entityId),
@@ -1343,7 +1365,7 @@ export class RuntimeP2P {
         continue;
       }
       const existingProfiles = this.env.gossip?.getProfiles?.() || [];
-      const existing = existingProfiles.find((existingProfile) => existingProfile.entityId === sanitized.entityId);
+      const existing = existingProfiles.find(existingProfile => existingProfile.entityId === sanitized.entityId);
       const verifiedRoute = this.getVerifiedRuntimeRoute(sanitized.entityId);
       if (verifiedRoute && verifiedRoute.lastUpdated >= sanitized.lastUpdated) {
         if (
@@ -1382,7 +1404,7 @@ export class RuntimeP2P {
         if (this.closing || this.closed) return;
         if (!result.valid) {
           const boardValidators = sanitized.metadata.board.validators;
-          const hasBoardKey = boardValidators.some((validator) => typeof validator.publicKey === 'string');
+          const hasBoardKey = boardValidators.some(validator => typeof validator.publicKey === 'string');
           const entityPublicKey = getBoardPrimaryPublicKey(sanitized.metadata.board, sanitized.entityId);
           let hankoInspect:
             | {
@@ -1414,7 +1436,9 @@ export class RuntimeP2P {
             entityPublicKey: `${entityPublicKey.slice(0, 20)}..`,
             boardPublicKey: hasBoardKey,
             validators: boardValidators.length,
-            boardSigners: boardValidators.map((validator) => String(validator.signerId || validator.signer)).filter(Boolean),
+            boardSigners: boardValidators
+              .map(validator => String(validator.signerId || validator.signer))
+              .filter(Boolean),
             recoveredAddresses: hankoInspect?.recoveredAddresses ?? [],
             reconstructedBoardHash: hankoInspect?.reconstructedBoardHash,
             runtimeId: sanitized.runtimeId,
@@ -1462,21 +1486,18 @@ export class RuntimeP2P {
 
   private async drainAllClients(timeoutMs: number): Promise<void> {
     const entries = [
-      ...this.clients.map((client) => ({ kind: 'relay' as const, key: '', client })),
+      ...this.clients.map(client => ({ kind: 'relay' as const, key: '', client })),
       ...[...this.directClients.entries()].map(([key, client]) => ({ kind: 'direct' as const, key, client })),
     ];
-    const results = await Promise.allSettled(
-      entries.map(({ client }) => client.closeAndWait(timeoutMs)),
-    );
+    const results = await Promise.allSettled(entries.map(({ client }) => client.closeAndWait(timeoutMs)));
     const errors: Error[] = [];
     results.forEach((result, index) => {
       const entry = entries[index]!;
       if (result.status === 'rejected') {
         const cause = result.reason instanceof Error ? result.reason : new Error(String(result.reason));
-        errors.push(new Error(
-          `P2P_${entry.kind.toUpperCase()}_CLOSE_FAILED:${entry.key || index}:${cause.message}`,
-          { cause },
-        ));
+        errors.push(
+          new Error(`P2P_${entry.kind.toUpperCase()}_CLOSE_FAILED:${entry.key || index}:${cause.message}`, { cause }),
+        );
         return;
       }
       if (entry.kind === 'relay') this.clients = this.clients.filter(client => client !== entry.client);
@@ -1598,9 +1619,11 @@ export class RuntimeP2P {
       onReliableReceipt: (from, receipt) => {
         if (!this.closing && !this.closed) this.onReliableReceipt(from, receipt);
       },
-      onError: (error) => {
+      onError: error => {
         if (this.closing || this.closed) return;
-        if (reportDirectClientError(this.env, endpoint, normalizedTargetRuntimeId, error) === 'retryable-backpressure') {
+        if (
+          reportDirectClientError(this.env, endpoint, normalizedTargetRuntimeId, error) === 'retryable-backpressure'
+        ) {
           return;
         }
         this.directClientErrors.set(normalizedTargetRuntimeId, {
@@ -1645,5 +1668,4 @@ export class RuntimeP2P {
       this.directClientUrls.delete(runtimeId);
     }
   }
-
 }
