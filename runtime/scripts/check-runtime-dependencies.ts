@@ -1,11 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import ts from 'typescript';
+import { findValueImportComponents, isValueModuleReference } from './import-cycle-analysis';
 
 const RUNTIME_ROOT = path.resolve('runtime');
 const EXCLUDED_PATH = /\/(?:__tests__|qa|scenarios|scripts)\//;
 
 const ROOT_ENTRYPOINTS = new Set(['runtime/runtime.ts']);
+const MAX_VALUE_IMPORT_SCC_SIZE = 13;
 
 // Root files obscure ownership and attract cross-layer imports. This is
 // migration debt, not a stable public layout; only runtime.ts is the intended
@@ -52,7 +54,7 @@ const packageOwner = (file: string): string => {
   return parts.length === 1 ? '(root)' : (parts[0] ?? '(root)');
 };
 
-const resolvedRuntimeOwner = (specifier: string, importer: string): string | null => {
+const resolveRuntimeFile = (specifier: string, importer: string): string | null => {
   if (!specifier.startsWith('.')) return null;
   const resolved = ts.resolveModuleName(
     specifier,
@@ -66,7 +68,7 @@ const resolvedRuntimeOwner = (specifier: string, importer: string): string | nul
   if (!resolved) return null;
   const absolute = path.resolve(resolved);
   if (absolute !== RUNTIME_ROOT && !absolute.startsWith(`${RUNTIME_ROOT}${path.sep}`)) return null;
-  return packageOwner(absolute);
+  return path.relative(process.cwd(), absolute);
 };
 
 const literalModuleSpecifier = (node: ts.Node): string | null => {
@@ -93,6 +95,8 @@ const literalModuleSpecifier = (node: ts.Node): string | null => {
 
 const observed = new Map<string, Array<{ file: string; line: number; specifier: string }>>();
 const files = collectFiles('runtime').sort();
+const fileSet = new Set(files);
+const valueGraph = new Map<string, Set<string>>(files.map(file => [file, new Set()]));
 const rootFiles = files.filter(file => packageOwner(path.resolve(file)) === '(root)');
 
 for (const file of files) {
@@ -101,7 +105,11 @@ for (const file of files) {
   const visit = (node: ts.Node): void => {
     const specifier = literalModuleSpecifier(node);
     if (specifier) {
-      const to = resolvedRuntimeOwner(specifier, path.resolve(file));
+      const targetFile = resolveRuntimeFile(specifier, path.resolve(file));
+      if (targetFile && fileSet.has(targetFile) && isValueModuleReference(node)) {
+        valueGraph.get(file)?.add(targetFile);
+      }
+      const to = targetFile ? packageOwner(path.resolve(targetFile)) : null;
       const key = to ? `${from}->${to}` : '';
       if (key && Object.hasOwn(REVERSE_DEPENDENCY_DEBT, key)) {
         const line = source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
@@ -140,6 +148,20 @@ for (const [key, allowance] of Object.entries(REVERSE_DEPENDENCY_DEBT)) {
     .join(',');
   errors.push(`REVERSE_DEPENDENCY_GREW ${key} ${occurrences.length} > ${allowance} ${additions}`);
 }
+const valueComponents = findValueImportComponents(valueGraph);
+const largestValueComponent = valueComponents[0] ?? [];
+if (largestValueComponent.length > MAX_VALUE_IMPORT_SCC_SIZE) {
+  errors.push(
+    `VALUE_IMPORT_SCC_GREW ${largestValueComponent.length} > ${MAX_VALUE_IMPORT_SCC_SIZE} ` +
+      largestValueComponent.join(','),
+  );
+}
+if (largestValueComponent.length < MAX_VALUE_IMPORT_SCC_SIZE) {
+  errors.push(
+    `STALE_VALUE_IMPORT_SCC_ALLOWANCE ${largestValueComponent.length} < ${MAX_VALUE_IMPORT_SCC_SIZE} ` +
+      largestValueComponent.join(','),
+  );
+}
 
 if (errors.length > 0) {
   console.error('Runtime dependency direction invariant failed:\n');
@@ -151,5 +173,5 @@ const debt = [...observed.values()].reduce((sum, occurrences) => sum + occurrenc
 console.log(
   `RUNTIME_DEPENDENCIES_OK files=${files.length} reverseImports=${debt}/` +
     `${Object.values(REVERSE_DEPENDENCY_DEBT).reduce((sum, count) => sum + count, 0)} ` +
-    `rootDebt=${ROOT_FILE_DEBT.size}`,
+    `rootDebt=${ROOT_FILE_DEBT.size} maxValueScc=${largestValueComponent.length}`,
 );
