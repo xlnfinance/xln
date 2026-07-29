@@ -11,50 +11,49 @@ const EXCLUDED_PATH = /\/(?:__tests__|qa|scenarios|scripts)\//;
 // large function, or a completed refactor whose allowance was not removed
 // fails the gate. The only healthy direction is toward an empty object.
 const COORDINATOR_DEBT: Readonly<Record<string, number>> = {
-  "runtime/api/external-wallet-api.ts::createExternalWalletApi": 331,
-  "runtime/jadapter/browservm-ethers-provider.ts::_perform": 158,
-  "runtime/jadapter/browservm.ts::createBrowserVMAdapter": 581,
-  "runtime/jadapter/helpers.ts::buildRawJEventsRuntimeInput": 228,
-  "runtime/jadapter/helpers.ts::rawEventToJEventPayloads": 297,
-  "runtime/jadapter/rpc-adapter.ts::createRpcAdapter": 2880,
-  "runtime/jadapter/rpc-adapter.ts::deployStack": 167,
-  "runtime/jadapter/rpc-adapter.ts::doPoll": 525,
-  "runtime/jadapter/rpc-adapter.ts::pollInFlight callback": 436,
-  "runtime/jadapter/rpc-adapter.ts::reconcileWatcherCanonicalTip": 171,
-  "runtime/jadapter/rpc-adapter.ts::runSerializedBatch callback": 280,
-  "runtime/jadapter/rpc-adapter.ts::startWatching": 1040,
-  "runtime/jadapter/rpc-adapter.ts::submitTx": 489,
-  "runtime/jadapter/rpc-reads.ts::createRpcReadMethods": 275,
-  "runtime/jadapter/rpc-reads.ts::readWalletSnapshot": 155,
-  "runtime/jadapter/rpc-wallet-writes.ts::createRpcWalletWriteMethods": 160,
-  "runtime/jurisdiction/event-normalization.ts::normalizeJurisdictionEvent": 399,
-  "runtime/orchestrator/bootstrap-timeline.ts::buildBootstrapTimeline": 206,
-  "runtime/orchestrator/bootstrap-timeline.ts::createBootstrapTimelineTools": 339,
-  "runtime/orchestrator/hub-node.ts::driveMeshBootstrap": 208,
-  "runtime/orchestrator/hub-node.ts::fetch": 323,
-  "runtime/orchestrator/hub-node.ts::run": 1064,
-  "runtime/orchestrator/mm-node-core.ts::buildMarketMakerCrossOfferSpecs": 151,
-  "runtime/orchestrator/mm-node-health.ts::maintainMarketMakerCrossQuotes": 409,
-  "runtime/orchestrator/mm-node-run.ts::driveQuotes": 334,
-  "runtime/orchestrator/mm-node-run.ts::runMarketMakerNode": 1707,
-  "runtime/orchestrator/mm-node-run.ts::waitForBootstrapOffers": 207,
-  "runtime/orchestrator/orchestrator.ts::computeAggregatedHealth": 270,
-  "runtime/orchestrator/orchestrator.ts::fetch": 388,
-  "runtime/orchestrator/orchestrator.ts::runReset": 156,
-  "runtime/orchestrator/orchestrator.ts::spawnMarketMaker": 159,
-  "runtime/protocol/dispute/proof-builder.ts::buildAccountProofBody": 172,
-  "runtime/protocol/htlc/onion-advance.ts::validateHtlcOnionAdvanceTx": 213,
-  "runtime/radapter/resolve.ts::projectGraphFrame": 175,
-  "runtime/radapter/resolve.ts::resolveRuntimeAdapterRead": 154,
-  "runtime/radapter/server.ts::handleRuntimeAdapterMessage": 302,
-  "runtime/recovery/restore.ts::createRuntimeRecoveryApi": 924,
-  "runtime/server/index.ts::createHttpServer": 216,
-  "runtime/server/index.ts::startXlnServer": 630,
-  "runtime/server/token-catalog.ts::createTokenCatalogController": 165,
-  "runtime/storage/merkle.ts::buildRadixMerkleMaterialized": 181,
-  "runtime/storage/restore-import.ts::replaceRestoredStorageBase": 152,
-  "runtime/watchtower/action.ts::runWatchtowerSweep": 159,
-  "runtime/watchtower/store.ts::createWatchtowerStore": 372,
+  'runtime/api/external-wallet-api.ts::createExternalWalletApi': 331,
+  'runtime/jadapter/browservm-ethers-provider.ts::_perform': 158,
+  'runtime/jadapter/browservm.ts::createBrowserVMAdapter': 581,
+  'runtime/jadapter/helpers.ts::buildRawJEventsRuntimeInput': 228,
+  'runtime/jadapter/helpers.ts::rawEventToJEventPayloads': 297,
+  'runtime/jadapter/rpc-adapter.ts::createRpcAdapter': 2880,
+  'runtime/jadapter/rpc-adapter.ts::deployStack': 167,
+  'runtime/jadapter/rpc-adapter.ts::doPoll': 525,
+  'runtime/jadapter/rpc-adapter.ts::pollInFlight callback': 436,
+  'runtime/jadapter/rpc-adapter.ts::reconcileWatcherCanonicalTip': 171,
+  'runtime/jadapter/rpc-adapter.ts::runSerializedBatch callback': 280,
+  'runtime/jadapter/rpc-adapter.ts::startWatching': 1040,
+  'runtime/jadapter/rpc-adapter.ts::submitTx': 489,
+  'runtime/jadapter/rpc-reads.ts::createRpcReadMethods': 275,
+  'runtime/jadapter/rpc-reads.ts::readWalletSnapshot': 155,
+  'runtime/jadapter/rpc-wallet-writes.ts::createRpcWalletWriteMethods': 160,
+  'runtime/jurisdiction/event-normalization.ts::normalizeJurisdictionEvent': 399,
+  'runtime/orchestrator/bootstrap-timeline.ts::buildBootstrapTimeline': 206,
+  'runtime/orchestrator/bootstrap-timeline.ts::createBootstrapTimelineTools': 339,
+  'runtime/orchestrator/hub-node.ts::driveMeshBootstrap': 208,
+  'runtime/orchestrator/hub-node.ts::fetch': 323,
+  'runtime/orchestrator/hub-node.ts::run': 1064,
+  'runtime/orchestrator/mm-node-core.ts::buildMarketMakerCrossOfferSpecs': 151,
+  'runtime/orchestrator/mm-node-health.ts::maintainMarketMakerCrossQuotes': 409,
+  'runtime/orchestrator/mm-node-run.ts::driveQuotes': 334,
+  'runtime/orchestrator/mm-node-run.ts::runMarketMakerNode': 1707,
+  'runtime/orchestrator/mm-node-run.ts::waitForBootstrapOffers': 207,
+  'runtime/orchestrator/orchestrator.ts::computeAggregatedHealth': 270,
+  'runtime/orchestrator/orchestrator.ts::fetch': 388,
+  'runtime/orchestrator/orchestrator.ts::runReset': 156,
+  'runtime/orchestrator/orchestrator.ts::spawnMarketMaker': 159,
+  'runtime/protocol/dispute/proof-builder.ts::buildAccountProofBody': 172,
+  'runtime/protocol/htlc/onion-advance.ts::validateHtlcOnionAdvanceTx': 213,
+  'runtime/radapter/resolve.ts::projectGraphFrame': 175,
+  'runtime/radapter/resolve.ts::resolveRuntimeAdapterRead': 154,
+  'runtime/radapter/server.ts::handleRuntimeAdapterMessage': 302,
+  'runtime/server/index.ts::createHttpServer': 216,
+  'runtime/server/index.ts::startXlnServer': 630,
+  'runtime/server/token-catalog.ts::createTokenCatalogController': 165,
+  'runtime/storage/merkle.ts::buildRadixMerkleMaterialized': 181,
+  'runtime/storage/restore-import.ts::replaceRestoredStorageBase': 152,
+  'runtime/watchtower/action.ts::runWatchtowerSweep': 159,
+  'runtime/watchtower/store.ts::createWatchtowerStore': 372,
 };
 
 type FunctionSize = {
@@ -90,11 +89,7 @@ const callbackOwner = (node: ts.FunctionLikeDeclaration, source: ts.SourceFile):
   return null;
 };
 
-const functionName = (
-  node: ts.FunctionLikeDeclaration,
-  source: ts.SourceFile,
-  start: number,
-): string => {
+const functionName = (node: ts.FunctionLikeDeclaration, source: ts.SourceFile, start: number): string => {
   if (node.name && ts.isIdentifier(node.name)) return node.name.text;
   if (ts.isVariableDeclaration(node.parent) && ts.isIdentifier(node.parent.name)) return node.parent.name.text;
   if (ts.isMethodDeclaration(node) && node.name) return node.name.getText(source);
@@ -135,7 +130,8 @@ for (const entry of functions.filter(item => item.lines > MAX_COORDINATOR_LINES)
   currentDebt.set(entry.key, entry);
   const allowance = COORDINATOR_DEBT[entry.key];
   if (allowance === undefined) errors.push(`NEW_LARGE_FUNCTION ${entry.key}:${entry.start} lines=${entry.lines}`);
-  else if (entry.lines > allowance) errors.push(`LARGE_FUNCTION_GREW ${entry.key}:${entry.start} ${entry.lines} > ${allowance}`);
+  else if (entry.lines > allowance)
+    errors.push(`LARGE_FUNCTION_GREW ${entry.key}:${entry.start} ${entry.lines} > ${allowance}`);
 }
 
 for (const key of Object.keys(COORDINATOR_DEBT)) {
@@ -150,5 +146,5 @@ if (errors.length > 0) {
 
 console.log(
   `PRODUCTION_FUNCTION_SIZE_OK files=${files.length} maxFile=${MAX_FILE_LINES} ` +
-  `over150=${currentDebt.size}/${Object.keys(COORDINATOR_DEBT).length}`,
+    `over150=${currentDebt.size}/${Object.keys(COORDINATOR_DEBT).length}`,
 );

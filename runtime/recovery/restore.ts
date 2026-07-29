@@ -1,39 +1,5 @@
 import { Level } from 'level';
-import { runtimeIsBrowser } from '../runtime/platform';
-import {
-  cloneIsolatedRuntimeSnapshot,
-} from './../protocol/runtime-input-clone';
-import { requireBoundaryInteger } from './../protocol/boundary-validation';
-import {
-  buildDurableRuntimeMachineSnapshot,
-  normalizePersistedSnapshotInPlace,
-  restoreDurableRuntimeSnapshot,
-} from '../storage/wal/snapshot';
-import { setBrowserVMJurisdiction } from './../jadapter';
-import {
-  assertCertifiedBoardRootsAvailable,
-  collectReachableCertifiedBoardNodes,
-  getCertifiedBoardNodeStore,
-} from './../jurisdiction/board-registry';
-import {
-  assertConsumptionRootsAvailable,
-  collectReachableConsumptionNodes,
-  getConsumptionNodeStore,
-  getLiveConsumptionAccumulatorStates,
-} from './../entity/consumption-store';
-import { collectReachableAccountJClaimNodes } from './../account/j-claim-accumulator';
-import {
-  assertAccountJClaimRootsAvailable,
-  getAccountJClaimNodeStore,
-  getLiveAccountJClaimAccumulatorStates,
-} from './../account/j-claim-store';
-import type { Profile } from './../networking/gossip';
-import { normalizeRuntimeId } from './../networking/runtime-id';
-import {
-  markRestoredReliableOutputsDue,
-  type RuntimeOutputRoutingDeps,
-} from '../runtime/output-routing';
-import { ensureRuntimeState } from '../runtime/runtime-state';
+import { type RuntimeOutputRoutingDeps } from '../runtime/output-routing';
 import {
   applyCommittedLocalReliableReceipts,
   applyRecoveryRuntimeOutputPlan,
@@ -44,40 +10,15 @@ import {
   reconcileRecoveryInfraEffects,
   registerCommittedSingleSignerWallets,
 } from '../runtime/recovery-infra';
-import {
-  computeCanonicalEntityHash,
-  computeCanonicalRuntimeStateHash,
-} from './../storage/canonical-hash';
 import { replayPersistedRuntimeJournals } from '../storage/recovery/journal';
-import {
-  buildCertifiedEntityLineagePlan,
-} from './../storage/entity-lineage';
-import { assertCertifiedRegistrationEvidenceStore } from './../jurisdiction/registration-evidence';
-import { replaceRestoredStorageBase } from './../storage';
-import {
-  DEFAULT_ACCOUNT_MERKLE_RADIX,
-  DEFAULT_EPOCH_MAX_BYTES,
-  DEFAULT_RETAIN_SNAPSHOTS,
-  DEFAULT_SNAPSHOT_PERIOD_FRAMES,
-  STORAGE_SCHEMA_VERSION,
-} from './../storage/keys';
-import { hydrateEntityStateFromStorage, projectAccountDoc, projectEntityCoreDoc } from './../storage/projections';
-import {
-  buildStorageReplicaMetaCommitment,
-} from './../storage/replicas';
-import type { StorageDoc, StoragePersistenceBoundaryHook } from './../storage/types';
-import {
-  assertCertifiedJHistoryIntegrity,
-  assertValidatorJHistoryMatchesCertifiedAnchor,
-} from './../jurisdiction/local-history';
 import type { RuntimeState, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeTx } from './../types';
-import { clearDatabase } from './../utils';
 import type { PersistedFrameJournal } from './../storage/types';
-import { assertRuntimeRecoveryBundleAuthenticity } from './../recovery/bundle';
 import type { RuntimeRecoveryBundleV1 } from './../recovery/types';
-import { rehydrateRestoredRuntimeInfra } from '../runtime/infra';
 import { loadGossipProfilesFromInfraDb } from '../runtime/infra-gossip-store';
-import { normalizeDbNamespace, type StorageDbRole, withStorageWriterLock } from './../storage/runtime-dbs';
+import type { StorageDbRole } from './../storage/runtime-dbs';
+import { restoreCheckpointSnapshot } from '../storage/recovery/checkpoint';
+import { persistRestoredRuntimeState, type PersistRestoredRuntimeOptions } from '../storage/recovery/import';
+import { restoreRuntimeFromBundles, type RuntimeBundleRestoreOptions } from './bundle-restore';
 
 type RuntimeModule = typeof import('../runtime');
 
@@ -123,127 +64,23 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
     applyRuntimeInput,
   } = deps;
 
-  const normalizeCheckpointReplicaMap = (raw: unknown): Map<string, unknown> => {
-    if (raw instanceof Map) return new Map(raw.entries());
-    if (!Array.isArray(raw)) return new Map();
-    return new Map(
-      raw
-        .filter((entry): entry is [string, unknown] => Array.isArray(entry) && entry.length >= 2)
-        .map(([key, value]) => [String(key), value]),
-    );
-  };
-
-  // Recovery bundles deliberately reuse the canonical checkpoint snapshot. That keeps
-  // the restore path aligned with the storage replay oracle instead of inventing a
-  // second persistence format that would drift over time.
-  const restoreEnvFromCheckpointSnapshot = async (
+  const restoreEnvFromCheckpointSnapshot = (
     snapshot: Record<string, unknown>,
-    options?: {
-      runtimeSeed?: string | null;
-      runtimeId?: string | null;
-      readOnly?: boolean;
-    },
-  ): Promise<RuntimeState> => {
-    if (!snapshot || typeof snapshot !== 'object') {
-      throw new Error('RECOVERY_CHECKPOINT_INVALID');
-    }
+    options?: Parameters<typeof restoreCheckpointSnapshot>[2],
+  ) => restoreCheckpointSnapshot({ createEmptyEnv, infraGossipDbAccess }, snapshot, options);
 
-    const normalizedSnapshot = cloneIsolatedRuntimeSnapshot(snapshot);
-    normalizePersistedSnapshotInPlace(normalizedSnapshot, {
-      normalizeReplicaMap: normalizeCheckpointReplicaMap,
-      normalizeJReplicaMap: normalizeCheckpointReplicaMap,
-    });
-
-    const snapshotRuntimeSeed =
-      typeof normalizedSnapshot['runtimeSeed'] === 'string' ? normalizedSnapshot['runtimeSeed'] : null;
-    const runtimeSeed = options?.runtimeSeed !== undefined ? options.runtimeSeed : snapshotRuntimeSeed;
-    const env = createEmptyEnv(runtimeSeed ?? null);
-
-    const snapshotRuntimeId = normalizeRuntimeId(
-      options?.runtimeId ?? String(normalizedSnapshot['runtimeId'] || env.runtimeId || ''),
+  const replayRecoveryFrameJournals = (env: RuntimeState, frames: PersistedFrameJournal[]): Promise<void> =>
+    replayPersistedRuntimeJournals(
+      {
+        ensureRuntimeConfig,
+        applyRuntimeInput,
+        applyRuntimeOutputPlan: applyDeterministicRuntimeOutputPlan,
+        getRuntimeOutputRoutingDeps,
+        generateHookPings,
+      },
+      env,
+      frames,
     );
-    if (!snapshotRuntimeId) {
-      throw new Error('RECOVERY_CHECKPOINT_RUNTIME_ID_REQUIRED');
-    }
-
-    env.runtimeId = snapshotRuntimeId;
-    env.dbNamespace = normalizeDbNamespace(snapshotRuntimeId);
-    env.height = requireBoundaryInteger(normalizedSnapshot['height'], 'RECOVERY_CHECKPOINT_HEIGHT_INVALID');
-    env.timestamp = requireBoundaryInteger(normalizedSnapshot['timestamp'], 'RECOVERY_CHECKPOINT_TIMESTAMP_INVALID');
-    env.eReplicas =
-      normalizedSnapshot['eReplicas'] instanceof Map
-        ? new Map(
-            Array.from(normalizedSnapshot['eReplicas'].entries()).map(([key, value]) => [String(key), value as never]),
-          )
-        : new Map();
-    env.jReplicas =
-      normalizedSnapshot['jReplicas'] instanceof Map
-        ? new Map(
-            Array.from(normalizedSnapshot['jReplicas'].entries()).map(([key, value]) => [String(key), value as never]),
-          )
-        : new Map();
-    env.activeJurisdiction =
-      typeof normalizedSnapshot['activeJurisdiction'] === 'string'
-        ? String(normalizedSnapshot['activeJurisdiction'])
-        : env.activeJurisdiction;
-    const browserVMState = normalizedSnapshot['browserVMState'];
-    if (browserVMState !== undefined) {
-      Object.assign(env, {
-        browserVMState: structuredClone(browserVMState) as RuntimeState['browserVMState'],
-      });
-    }
-    const snapshotGossip =
-      normalizedSnapshot['gossip'] && typeof normalizedSnapshot['gossip'] === 'object'
-        ? (normalizedSnapshot['gossip'] as { profiles?: unknown })
-        : null;
-    const snapshotGossipProfiles = Array.isArray(snapshotGossip?.profiles)
-      ? (snapshotGossip.profiles as Profile[])
-      : [];
-    env.runtimeMempool = { runtimeTxs: [], entityInputs: [] };
-    env.frameLogs = [];
-    env.networkInbox = [];
-    env.pendingNetworkOutputs = [];
-    env.overlay = [];
-    restoreDurableRuntimeSnapshot(env, normalizedSnapshot);
-    for (const replica of env.eReplicas.values()) {
-      assertCertifiedJHistoryIntegrity(replica.state);
-      assertValidatorJHistoryMatchesCertifiedAnchor(replica.state, replica.jHistory);
-    }
-    assertCertifiedBoardRootsAvailable(env);
-    assertConsumptionRootsAvailable(env);
-    assertAccountJClaimRootsAvailable(env);
-    await assertCertifiedRegistrationEvidenceStore(env);
-
-    if (!options?.readOnly) {
-      await rehydrateRestoredRuntimeInfra(env, {
-        isBrowser: runtimeIsBrowser,
-        loadGossipProfiles: targetEnv => loadGossipProfilesFromInfraDb(targetEnv, infraGossipDbAccess),
-        assertPersistedContractConfigReady,
-        setBrowserVMJurisdiction,
-      });
-    }
-    registerCommittedSingleSignerWallets(env);
-    for (const profile of snapshotGossipProfiles) {
-      env.gossip?.announce?.(profile);
-    }
-
-    return env;
-  };
-
-  const replayRecoveryFrameJournals = (
-    env: RuntimeState,
-    frames: PersistedFrameJournal[],
-  ): Promise<void> => replayPersistedRuntimeJournals(
-    {
-      ensureRuntimeConfig,
-      applyRuntimeInput,
-      applyRuntimeOutputPlan: applyDeterministicRuntimeOutputPlan,
-      getRuntimeOutputRoutingDeps,
-      generateHookPings,
-    },
-    env,
-    frames,
-  );
   const failRecoveryRestoreAfterCleanup = async (env: RuntimeState, error: unknown): Promise<never> => {
     const originalError = error instanceof Error ? error : new Error(String(error));
     const cleanup = await Promise.allSettled([closeRuntimeDb(env), closeInfraDb(env)]);
@@ -258,256 +95,32 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
 
   const restoreEnvFromRecoveryBundles = async (
     bundles: RuntimeRecoveryBundleV1[],
-    options?: {
-      runtimeSeed?: string | null;
-      runtimeId?: string | null;
-      targetHeight?: number;
-      readOnly?: boolean;
-    },
-  ): Promise<RuntimeState> => {
-    const trustedRuntimeSeed = options?.runtimeSeed;
-    if (!trustedRuntimeSeed) throw new Error('RECOVERY_BUNDLE_TRUSTED_SEED_REQUIRED');
-    const validated = (bundles || []).map(bundle =>
-      assertRuntimeRecoveryBundleAuthenticity(bundle, trustedRuntimeSeed, options?.runtimeId),
-    );
-    const snapshots = validated.filter(bundle => (bundle.kind ?? 'snapshot') === 'snapshot');
-    if (snapshots.length === 0) {
-      throw new Error('RECOVERY_BUNDLE_SNAPSHOT_REQUIRED');
-    }
-    const requestedTarget = options?.targetHeight;
-    if (requestedTarget !== undefined && (!Number.isSafeInteger(requestedTarget) || requestedTarget < 0)) {
-      throw new Error(`RECOVERY_BUNDLE_TARGET_HEIGHT_INVALID:${String(requestedTarget)}`);
-    }
-    const candidates = snapshots
-      .flatMap(snapshot => {
-        if (requestedTarget !== undefined && snapshot.runtimeHeight > requestedTarget) return [];
-        const snapshotHash = String(snapshot.checkpointHash || '').toLowerCase();
-        const tail = validated
-          .filter(
-            bundle =>
-              bundle.kind === 'journal_tail' &&
-              bundle.baseRuntimeHeight === snapshot.runtimeHeight &&
-              String(bundle.baseCheckpointHash || '').toLowerCase() === snapshotHash &&
-              bundle.runtimeHeight > snapshot.runtimeHeight,
-          )
-          .filter(bundle => requestedTarget === undefined || bundle.runtimeHeight >= requestedTarget)
-          .sort((left, right) => right.runtimeHeight - left.runtimeHeight)[0];
-        if (requestedTarget !== undefined && snapshot.runtimeHeight < requestedTarget && !tail) return [];
-        return {
-          snapshot,
-          tail,
-          height: requestedTarget ?? tail?.runtimeHeight ?? snapshot.runtimeHeight,
-        };
-      })
-      .sort((left, right) => {
-        if (right.height !== left.height) return right.height - left.height;
-        return right.snapshot.runtimeHeight - left.snapshot.runtimeHeight;
-      });
-    if (candidates.length === 0) {
-      throw new Error(`RECOVERY_BUNDLE_TARGET_HEIGHT_UNAVAILABLE:${String(requestedTarget)}`);
-    }
-    const best = candidates[0]!;
-    const env = await restoreEnvFromCheckpointSnapshot(best.snapshot.checkpoint!, options);
-    if (best.tail && best.height > best.snapshot.runtimeHeight) {
-      try {
-        await replayRecoveryFrameJournals(
-          env,
-          (best.tail.frames || []).filter(frame => frame.height <= best.height),
-        );
-      } catch (error) {
-        if (options?.readOnly) throw error;
-        return failRecoveryRestoreAfterCleanup(env, error);
-      }
-    }
-    if (env.height !== best.height) {
-      const mismatch = new Error(`RECOVERY_BUNDLE_TARGET_HEIGHT_MISMATCH:expected=${best.height}:actual=${env.height}`);
-      if (options?.readOnly) throw mismatch;
-      return failRecoveryRestoreAfterCleanup(env, mismatch);
-    }
-    if (!options?.readOnly) markRestoredReliableOutputsDue(env);
-    return env;
-  };
-
-  const collectCertifiedStorageDocs = (
-    lineagePlan: ReturnType<typeof buildCertifiedEntityLineagePlan>,
-  ): { docs: StorageDoc[]; canonicalEntityHashes: ReturnType<typeof computeCanonicalEntityHash>[] } => {
-    const docs: StorageDoc[] = [];
-    const canonicalEntityHashes: ReturnType<typeof computeCanonicalEntityHash>[] = [];
-
-    for (const [entityId, selected] of lineagePlan.lookup.entries()) {
-      const core = projectEntityCoreDoc(selected.state);
-      const accounts = new Map(
-        Array.from(
-          selected.state.accounts.entries(),
-          ([counterpartyId, account]) =>
-            [String(counterpartyId || '').toLowerCase(), projectAccountDoc(account)] as const,
-        ),
-      );
-      const books = new Map(
-        Array.from(
-          selected.state.orderbookExt?.books?.entries?.() ?? [],
-          ([pairId, book]) => [String(pairId || '').trim(), book] as const,
-        ),
-      );
-      const projectedState = hydrateEntityStateFromStorage({ core, accounts, books });
-      const expectedHash = computeCanonicalEntityHash(selected.replica);
-      const projectedHash = computeCanonicalEntityHash({ ...selected.replica, state: projectedState });
-      if (projectedHash.hash !== expectedHash.hash) {
-        throw new Error(
-          `RECOVERY_IMPORT_PROJECTED_ENTITY_HASH_MISMATCH:entity=${entityId}:` +
-            `expected=${expectedHash.hash}:projected=${projectedHash.hash}`,
-        );
-      }
-      canonicalEntityHashes.push(expectedHash);
-      docs.push({ family: 'entity', entityId, value: core });
-
-      for (const [counterpartyId, account] of accounts.entries()) {
-        const normalizedCounterparty = String(counterpartyId || '').toLowerCase();
-        if (!normalizedCounterparty || !account) continue;
-        docs.push({
-          family: 'account',
-          entityId,
-          counterpartyId: normalizedCounterparty,
-          value: account,
-        });
-      }
-
-      for (const [pairId, book] of books.entries()) {
-        const normalizedPairId = String(pairId || '').trim();
-        if (!normalizedPairId || !book) continue;
-        docs.push({
-          family: 'book',
-          entityId,
-          pairId: normalizedPairId,
-          value: book,
-        });
-      }
-    }
-
-    return { docs, canonicalEntityHashes };
-  };
-
-  // Recovery checkpoint imports are not an append to the local WAL. They seed a new
-  // local persistence base at the recovered runtime height, anchored by a materialized
-  // snapshot and a synthetic frame at that same height.
-  const persistRestoredEnvToDBUnlocked = async (
-    env: RuntimeState,
-    options: { onPersistenceBoundary?: StoragePersistenceBoundaryHook } = {},
-  ): Promise<void> => {
-    const restoredHeight = Number(env.height);
-    const restoredTimestamp = Number(env.timestamp);
-    if (!Number.isSafeInteger(restoredHeight) || restoredHeight <= 0) {
-      throw new Error('RECOVERY_PERSIST_HEIGHT_REQUIRED');
-    }
-    if (!Number.isSafeInteger(restoredTimestamp) || restoredTimestamp < 0) {
-      throw new Error('RECOVERY_PERSIST_TIMESTAMP_INVALID');
-    }
-    for (const replica of env.eReplicas.values()) {
-      assertCertifiedJHistoryIntegrity(replica.state);
-      assertValidatorJHistoryMatchesCertifiedAnchor(replica.state, replica.jHistory);
-    }
-    const lineagePlan = buildCertifiedEntityLineagePlan(env);
-    const materialized = collectCertifiedStorageDocs(lineagePlan);
-    const certifiedBoardNodes = collectReachableCertifiedBoardNodes(
-      getCertifiedBoardNodeStore(env),
-      Array.from(env.eReplicas.values(), ({ state }) => state.certifiedBoardState?.boardRegistryRoot).filter(
-        (root): root is string => Boolean(root),
-      ),
-    );
-    const consumptionNodes = collectReachableConsumptionNodes(
-      getConsumptionNodeStore(env),
-      getLiveConsumptionAccumulatorStates(env),
-    );
-    const accountJClaimNodes = collectReachableAccountJClaimNodes(
-      getAccountJClaimNodeStore(env),
-      getLiveAccountJClaimAccumulatorStates(env),
-    );
-    const runtimeMachine = buildDurableRuntimeMachineSnapshot(env);
-    const canonicalStateHash = computeCanonicalRuntimeStateHash(
-      restoredHeight,
-      restoredTimestamp,
-      materialized.canonicalEntityHashes,
-      runtimeMachine,
-    );
-
-    if (!(await tryOpenStorageDb(env, 'current'))) {
-      throw new Error('RECOVERY_PERSIST_STORAGE_OPEN_FAILED');
-    }
-    if (!(await tryOpenRuntimeWalDb(env))) {
-      throw new Error('RECOVERY_PERSIST_RUNTIME_WAL_OPEN_FAILED');
-    }
-
-    const currentDb = getStorageDb(env, 'current');
-    const walDb = getRuntimeWalDb(env);
-    const puts = materialized.docs;
-    const replicaMetas = buildStorageReplicaMetaCommitment(env, lineagePlan).entries;
-    const replacement = await replaceRestoredStorageBase({
-      currentDb,
-      walDb,
-      height: restoredHeight,
-      timestamp: restoredTimestamp,
-      docs: puts,
-      replicaMetas,
-      headConfig: {
-        schemaVersion: STORAGE_SCHEMA_VERSION,
-        snapshotPeriodFrames: Math.max(
-          1,
-          Number(env.runtimeConfig?.storage?.snapshotPeriodFrames ?? DEFAULT_SNAPSHOT_PERIOD_FRAMES),
-        ),
-        retainSnapshots: Math.max(1, Number(env.runtimeConfig?.storage?.retainSnapshots ?? DEFAULT_RETAIN_SNAPSHOTS)),
-        epochMaxBytes: Math.max(1, Number(env.runtimeConfig?.storage?.epochMaxBytes ?? DEFAULT_EPOCH_MAX_BYTES)),
-        accountMerkleRadix: env.runtimeConfig?.storage?.accountMerkleRadix === 256 ? 256 : DEFAULT_ACCOUNT_MERKLE_RADIX,
+    options: RuntimeBundleRestoreOptions = {},
+  ): Promise<RuntimeState> =>
+    restoreRuntimeFromBundles(
+      {
+        restoreCheckpoint: restoreEnvFromCheckpointSnapshot,
+        replayJournals: replayRecoveryFrameJournals,
+        failAfterCleanup: failRecoveryRestoreAfterCleanup,
       },
-      canonicalEntityHashes: materialized.canonicalEntityHashes,
-      canonicalStateHash,
-      runtimeMachine,
-      certifiedBoardNodes: Array.from(certifiedBoardNodes, ([hash, node]) => ({ hash, node })),
-      consumptionNodes: Array.from(consumptionNodes, ([hash, node]) => ({ hash, node })),
-      accountJClaimNodes: Array.from(accountJClaimNodes, ([hash, node]) => ({ hash, node })),
-      ...(options.onPersistenceBoundary ? { onPersistenceBoundary: options.onPersistenceBoundary } : {}),
-    });
-
-    if (await tryOpenStorageDb(env, 'previous')) {
-      await clearDatabase(getStorageDb(env, 'previous'));
-    }
-
-    const state = ensureRuntimeState(env);
-    state.storageEntityHashDocs = replacement.entityHashDocs;
-    state.currentStorageOverlayMarks = [];
-  };
+      bundles,
+      options,
+    );
 
   const persistRestoredEnvToDB = async (
     env: RuntimeState,
-    options: { onPersistenceBoundary?: StoragePersistenceBoundaryHook } = {},
-  ): Promise<void> => {
-    if (!Number.isSafeInteger(Number(env.height)) || Number(env.height) <= 0) {
-      throw new Error('RECOVERY_PERSIST_HEIGHT_REQUIRED');
-    }
-    if (!Number.isSafeInteger(Number(env.timestamp)) || Number(env.timestamp) < 0) {
-      throw new Error('RECOVERY_PERSIST_TIMESTAMP_INVALID');
-    }
-    await withStorageWriterLock(env, () => persistRestoredEnvToDBUnlocked(env, options));
-  };
+    options: PersistRestoredRuntimeOptions = {},
+  ): Promise<void> =>
+    persistRestoredRuntimeState({ getStorageDb, getRuntimeWalDb, tryOpenStorageDb, tryOpenRuntimeWalDb }, env, options);
 
-  const reconcileCommittedRuntimeInfraEffects = (
-    env: RuntimeState,
-    runtimeTxs: readonly RuntimeTx[],
-  ) => reconcileRecoveryInfraEffects(
-    env,
-    runtimeTxs,
-    startJurisdictionWatchers,
-  );
+  const reconcileCommittedRuntimeInfraEffects = (env: RuntimeState, runtimeTxs: readonly RuntimeTx[]) =>
+    reconcileRecoveryInfraEffects(env, runtimeTxs, startJurisdictionWatchers);
 
   const applyDeterministicRuntimeOutputPlan = (
     env: RuntimeState,
     entityOutbox: readonly RoutedEntityInput[],
     outputRoutingDeps: RuntimeOutputRoutingDeps,
-  ) => applyRecoveryRuntimeOutputPlan(
-    env,
-    entityOutbox,
-    outputRoutingDeps,
-    enqueueRuntimeContinuation,
-  );
+  ) => applyRecoveryRuntimeOutputPlan(env, entityOutbox, outputRoutingDeps, enqueueRuntimeContinuation);
 
   return {
     restoreEnvFromCheckpointSnapshot,
