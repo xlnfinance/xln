@@ -904,7 +904,7 @@ const buildJEventReplicaDelivery = (
   };
 };
 
-export function buildJEventIngressRuntimeInput(
+export function buildJEventObservationInput(
   env: RuntimeState,
   rawEvents: JEventIngress[],
   options: JEventsRuntimeInputOptions,
@@ -1391,7 +1391,7 @@ export function buildJEventsRuntimeInput(
     if (groupedEvents.some((event) => event.blockHash?.toLowerCase() !== blockHash.toLowerCase())) {
       throw new Error(`J_EVENT_MANUAL_BLOCK_HASH_MISMATCH:${label}:${blockNumber}`);
     }
-    const built = buildJEventIngressRuntimeInput(env, groupedEvents.filter(isCanonicalEvent), {
+    const built = buildJEventObservationInput(env, groupedEvents.filter(isCanonicalEvent), {
       blockNumber,
       blockHash,
       adapterLabel: label,
@@ -1517,7 +1517,7 @@ export function processEventBatch(
     }
   }
 
-  const built = buildJEventIngressRuntimeInput(env, ingressBatch.events, {
+  const built = buildJEventObservationInput(env, ingressBatch.events, {
     blockNumber: ingressBatch.blockNumber,
     blockHash: ingressBatch.blockHash,
     adapterLabel,

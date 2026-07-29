@@ -11,7 +11,7 @@ export {
   applyWatcherJurisdictionCursor,
   applyJBlockHeadersIngressTransform,
   buildJEventsRuntimeInput,
-  buildJEventIngressRuntimeInput,
+  buildJEventObservationInput,
   collectRelevantJEventReplicaKeys,
   enqueueJHistoryRewind,
   enqueueJHistoryRewindForReplicaKeys,

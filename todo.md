@@ -105,11 +105,9 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   transport DTO can enter consensus directly and that required block/hash/tx
   coordinates cannot become `0`/`0x` defaults after the witnessed boundary.
 - [ ] Delete the remaining jurisdiction-event representation and conversion
-  debt. Merge `buildJEventsRuntimeInput` with
-  `buildJEventIngressRuntimeInput` if they are the same pipeline, and derive
-  decoder registry/type linkage from one event catalog only where this reduces
-  net LOC. Every surviving `normalize*`, `decode*`, `to*Event*` and
-  `from*Event*` must own a documented validation or trust transition.
+  debt. Derive decoder registry/type linkage from one event catalog only where
+  this reduces net LOC. Every surviving `normalize*`, `decode*`, `to*Event*`
+  and `from*Event*` must own a documented validation or trust transition.
   Remove `RecentJEvent` from live Runtime state once the rebuildable history
   view supplies the same receipt evidence without a second archive.
 - [ ] Split `jadapter/helpers.ts` and `createRpcAdapter` by real I/O and failure

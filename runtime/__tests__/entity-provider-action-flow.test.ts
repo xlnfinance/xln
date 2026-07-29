@@ -14,6 +14,7 @@ import { buildCollectiveEntityProposalTx } from '../entity/authorization';
 import { buildSignedEntityCommand } from '../entity/command';
 import { signedEntityCommandTx } from '../entity/command-codec';
 import { applyEntityFrame, applyEntityInput } from '../entity/consensus';
+import { commitEntityFrameCandidateState } from '../entity/state-clone';
 import { applyEntityTx } from '../entity/tx/apply';
 import { handleEntityProviderTransfer } from '../entity/tx/handlers/entity-provider-action';
 import {
@@ -838,6 +839,9 @@ describe('EntityProvider action flow', () => {
       [signedEntityCommandTx(proposalCommand)],
       5_001,
     );
+    // These two setup frames model already-certified history. Promote each
+    // touched candidate before using it as the parent of another frame.
+    commitEntityFrameCandidateState(proposalFrame.newState);
     const proposalId = Array.from(proposalFrame.newState.proposals.keys())[0];
     if (!proposalId) throw new Error('TEST_ACTION_PROPOSAL_ID_MISSING');
     const secondVote = buildSignedEntityCommand(
@@ -852,6 +856,7 @@ describe('EntityProvider action flow', () => {
       [signedEntityCommandTx(secondVote)],
       5_002,
     );
+    commitEntityFrameCandidateState(twoVotes.newState);
     expect(twoVotes.newState.proposals.get(proposalId)?.status).toBe('pending');
 
     const makeIsolated = (index: number) => {

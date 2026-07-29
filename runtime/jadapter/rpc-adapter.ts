@@ -106,6 +106,7 @@ import {
   type JEventIngress,
 } from './watcher';
 import { shouldAuditCanonicalWatcherState } from './watcher-poll-policy';
+import { submitDebtEnforcement, submitMint } from './rpc-submit-basic';
 import {
   applyGasHeadroom,
   asFactoryRunner,
@@ -1285,21 +1286,11 @@ export async function createRpcAdapter(
       console.log(`📤 [JAdapter:rpc] submitTx type=${jTx.type} entity=${jTx.entityId.slice(-4)}`);
 
       if (jTx.type === 'debtEnforcement') {
-        const entityId = String(jTx.entityId || '').toLowerCase();
-        const tokenId = Number(jTx.data.tokenId);
-        const maxIterations = BigInt(jTx.data.maxIterations);
-        if (!entityId || !Number.isInteger(tokenId) || tokenId < 0 || maxIterations <= 0n) {
-          return { success: false, error: 'Invalid debt enforcement payload' };
-        }
-        try {
-          await adapter.enforceDebts(entityId, tokenId, maxIterations);
-          console.log(`✅ [JAdapter:rpc] Debt enforcement submitted token=${tokenId} entity=${entityId.slice(-4)}`);
-          return { success: true };
-        } catch (error) {
-          const msg = error instanceof Error ? error.message : String(error);
-          rpcLog.error('debt_enforcement.failed', { entityId, tokenId, error: msg });
-          return makeJAdapterFailureResult(error);
-        }
+        return submitDebtEnforcement(
+          jTx,
+          (entityId, tokenId, maxIterations) =>
+            adapter.enforceDebts(entityId, tokenId, maxIterations),
+        );
       }
 
       if (
@@ -1729,26 +1720,12 @@ export async function createRpcAdapter(
       }
 
       if (jTx.type === 'mint') {
-        const entityId = String(jTx.data.entityId || jTx.entityId || '');
-        const tokenId = Number(jTx.data.tokenId);
-        const amount = jTx.data.amount;
-        if (!entityId || !Number.isFinite(tokenId) || amount <= 0n) {
-          return { success: false, error: 'Invalid mint payload' };
-        }
-        if (!DEV_CHAIN_IDS.has(config.chainId)) {
-          console.warn(`⚠️ [JAdapter:rpc] Mint only allowed on configured dev chains`);
-          return { success: false, error: 'Mint not supported on non-dev RPC chains' };
-        }
-        try {
-          const events = await adapter.debugFundReserves(entityId, tokenId, amount);
-          const blockNumber = events[events.length - 1]?.blockNumber;
-          console.log(`✅ [JAdapter:rpc] Minted ${amount} token=${tokenId} to ${entityId.slice(-4)}`);
-          return { success: true, events, ...(typeof blockNumber === 'number' ? { blockNumber } : {}) };
-        } catch (error) {
-          const msg = error instanceof Error ? error.message : String(error);
-          rpcLog.error('mint.failed', { entityId, tokenId, error: msg });
-          return makeJAdapterFailureResult(error);
-        }
+        return submitMint(
+          jTx,
+          DEV_CHAIN_IDS.has(config.chainId),
+          (entityId, tokenId, amount) =>
+            adapter.debugFundReserves(entityId, tokenId, amount),
+        );
       }
 
       const unhandledType: never = jTx;
