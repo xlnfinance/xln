@@ -9,7 +9,7 @@ import type {
 } from '../../../types';
 import { formatEntityId } from '../../../utils';
 import { upsertSortedStringMapEntry } from '../../../infra/sorted-map-index';
-import { cloneEntityState } from '../../state-clone';
+import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import { findAccountKey, normalizeEntityRef } from '../account-key';
 import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../../../account/default-tokens';
@@ -164,6 +164,7 @@ export const handleOpenAccountEntityTx = async (
   entityState: EntityState,
   entityTx: OpenAccountEntityTx,
   candidateEffects: EntityCandidateEffect[] = [],
+  mutableFrameState = false,
 ): Promise<OpenAccountResult> => {
   const targetEntityId = entityTx.data.targetEntityId;
   if (!isEntityId32(targetEntityId)) {
@@ -200,7 +201,7 @@ export const handleOpenAccountEntityTx = async (
     `openAccount:${entityState.entityId}`,
   );
 
-  const newState = cloneEntityState(entityState);
+  const newState = prepareEntityTxState(entityState, mutableFrameState);
   const outputs: EntityInput[] = [];
 
   addMessage(newState, `💳 Opening account with Entity ${formatEntityId(entityTx.data.targetEntityId)}...`);

@@ -1749,15 +1749,13 @@ describe('multisig HTLC validator encryption', () => {
       replay('multisig-htlc-validator-replay-a'),
       replay('multisig-htlc-validator-replay-b'),
     ]);
-    expect(serializeTaggedJson(firstReplay.deterministicState)).toBe(
-      serializeTaggedJson(secondReplay.deterministicState),
+    expect(serializeTaggedJson(firstReplay.newState)).toBe(
+      serializeTaggedJson(secondReplay.newState),
     );
-    const route = firstReplay.deterministicState.htlcRoutes.values().next().value;
+    const route = firstReplay.newState.htlcRoutes.values().next().value;
     expect(route?.amount).toBe(25n);
-    const queued = firstReplay.deterministicState.accounts.get(destination.entityId)?.mempool;
-    expect(queued).toHaveLength(1);
-    expect(queued?.[0]?.type).toBe('htlc_lock');
     const proposedAccount = firstReplay.newState.accounts.get(destination.entityId);
+    expect(proposedAccount?.mempool).toHaveLength(0);
     expect(proposedAccount?.pendingFrame?.accountTxs[0]?.type).toBe('htlc_lock');
     expect(proposedAccount?.pendingAccountInput?.kind).toBe('frame');
     const pendingFrameHash = proposedAccount?.pendingFrame?.stateHash;

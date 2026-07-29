@@ -161,6 +161,16 @@ export const cloneEntityState = (
 ): EntityState => cloneEntityStateWithPolicy(state, forSnapshot, true);
 
 /**
+ * Entity frame replay already owns an isolated candidate. Reducers mutate that
+ * candidate directly; standalone callers retain the pure clone-on-entry API.
+ */
+export const prepareEntityTxState = (
+  state: EntityState,
+  mutableFrameState = false,
+): EntityState =>
+  mutableFrameState ? state : cloneEntityState(state);
+
+/**
  * Clone State that already crossed a validation or consensus boundary.
  * External decode and proposal validation must use cloneEntityState().
  */

@@ -2,7 +2,7 @@ import { createOrderbookExtState, validateSpreadDistribution } from '../../../or
 import type { EntityInput, EntityState, EntityTx, RuntimeState, Proposal } from '../../../types';
 import { formatEntityId, log } from '../../../utils';
 import { normalizeEntityName } from '../../profile-name';
-import { cloneEntityState } from '../../state-clone';
+import { prepareEntityTxState } from '../../state-clone';
 import { addMessage, addTextMessage } from '../../frame-events';
 import {
   assertEntityProposalCapacity,
@@ -31,7 +31,11 @@ type BasicEntityTxResult = {
 
 type EntityTxOf<T extends EntityTx['type']> = Extract<EntityTx, { type: T }>;
 
-export const handleChatEntityTx = (entityState: EntityState, entityTx: EntityTxOf<'chat'>): BasicEntityTxResult => {
+export const handleChatEntityTx = (
+  entityState: EntityState,
+  entityTx: EntityTxOf<'chat'>,
+  mutableFrameState = false,
+): BasicEntityTxResult => {
   const { from, message } = entityTx.data;
 
   if (!validateMessage(message)) {
@@ -39,15 +43,19 @@ export const handleChatEntityTx = (entityState: EntityState, entityTx: EntityTxO
     return { newState: entityState, outputs: [] };
   }
 
-  const newEntityState = cloneEntityState(entityState);
+  const newEntityState = prepareEntityTxState(entityState, mutableFrameState);
   addTextMessage(newEntityState, from, message);
 
   return { newState: newEntityState, outputs: [] };
 };
 
-export const handleChatMessageEntityTx = (entityState: EntityState, entityTx: EntityTxOf<'chatMessage'>): BasicEntityTxResult => {
+export const handleChatMessageEntityTx = (
+  entityState: EntityState,
+  entityTx: EntityTxOf<'chatMessage'>,
+  mutableFrameState = false,
+): BasicEntityTxResult => {
   const { message } = entityTx.data;
-  const newEntityState = cloneEntityState(entityState);
+  const newEntityState = prepareEntityTxState(entityState, mutableFrameState);
 
   addMessage(newEntityState, message);
 
@@ -58,6 +66,7 @@ export const handleProposeEntityTx = (
   env: RuntimeState,
   entityState: EntityState,
   entityTx: EntityTxOf<'propose'>,
+  mutableFrameState = false,
 ): BasicEntityTxResult => {
   const proposer = entityTx.data.proposer.trim().toLowerCase();
   const shares = resolveCanonicalEntityBoardShares(entityState.config);
@@ -90,7 +99,7 @@ export const handleProposeEntityTx = (
   };
 
   const shouldExecuteImmediately = proposerPower >= entityState.config.threshold;
-  let newEntityState = cloneEntityState(entityState);
+  let newEntityState = prepareEntityTxState(entityState, mutableFrameState);
 
   if (shouldExecuteImmediately) {
     proposal.status = 'executed';
@@ -125,6 +134,7 @@ export const handleVoteEntityTx = (
   env: RuntimeState,
   entityState: EntityState,
   entityTx: EntityTxOf<'vote'>,
+  mutableFrameState = false,
 ): BasicEntityTxResult => {
   const { proposalId, choice, comment } = entityTx.data;
   const voter = entityTx.data.voter.trim().toLowerCase();
@@ -145,7 +155,7 @@ export const handleVoteEntityTx = (
 
   basicLog.debug('vote.received', { proposal: shortHash(proposalId), voter: shortId(voter), choice });
 
-  const newEntityState = cloneEntityState(entityState);
+  const newEntityState = prepareEntityTxState(entityState, mutableFrameState);
   const updatedProposal = {
     ...proposal,
     votes: new Map(proposal.votes),
@@ -257,12 +267,13 @@ export const handleProfileUpdateEntityTx = (
   _env: RuntimeState,
   entityState: EntityState,
   entityTx: EntityTxOf<'profile-update'>,
+  mutableFrameState = false,
 ): BasicEntityTxResult => {
   const profileData = entityTx.data.profile;
   if (!profileData || profileData.entityId !== entityState.entityId) {
     throw new Error(`PROFILE_UPDATE_INVALID_ENTITY: expected=${entityState.entityId} got=${String(profileData?.entityId || '')}`);
   }
-  const newState = cloneEntityState(entityState);
+  const newState = prepareEntityTxState(entityState, mutableFrameState);
   newState.profile = {
     name: normalizeEntityName(profileData.name ?? newState.profile?.name, newState.entityId),
     isHub: newState.profile.isHub,
@@ -278,6 +289,7 @@ export const handleProfileUpdateEntityTx = (
 export const handleInitOrderbookExtEntityTx = (
   entityState: EntityState,
   entityTx: EntityTxOf<'initOrderbookExt'>,
+  mutableFrameState = false,
 ): BasicEntityTxResult => {
   if (entityState.orderbookExt) {
     return { newState: entityState, outputs: [] };
@@ -297,7 +309,7 @@ export const handleInitOrderbookExtEntityTx = (
     supportedPairs: [...entityTx.data.supportedPairs],
   };
 
-  const newState = cloneEntityState(entityState);
+  const newState = prepareEntityTxState(entityState, mutableFrameState);
   newState.orderbookExt = createOrderbookExtState(hubProfile);
 
   return { newState, outputs: [] };

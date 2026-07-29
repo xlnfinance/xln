@@ -401,8 +401,8 @@ describe('runtime scheduled wake', () => {
     const proposerResult = await applyEntityFrame(env, state, [tx], env.timestamp);
     const validatorResult = await applyEntityFrame(env, state, [tx], env.timestamp);
 
-    expect(safeStringify(validatorResult.deterministicState)).toBe(
-      safeStringify(proposerResult.deterministicState),
+    expect(safeStringify(validatorResult.newState)).toBe(
+      safeStringify(proposerResult.newState),
     );
     expect(proposerResult.newState.crontabState?.hooks.has('watchdog:deterministic')).toBe(false);
   });

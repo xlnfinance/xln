@@ -9,7 +9,7 @@ import type {
 } from '../../../types';
 import { formatEntityId } from '../../../utils';
 import { createStructuredLogger, logError, shortId } from '../../../infra/logger';
-import { cloneEntityState } from '../../state-clone';
+import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import type { AccountTxTarget } from './account';
 import { requireTrustedPaymentGateway } from '../../../protocol/payments/delivery';
@@ -139,6 +139,7 @@ export const handleDirectPaymentEntityTx = async (
   entityState: EntityState,
   entityTx: DirectPaymentEntityTx,
   candidateEffects: EntityCandidateEffect[] = [],
+  mutableFrameState = false,
 ): Promise<DirectPaymentResult> => {
   const trace = createPaymentTrace(env);
   const route = requireCommittedDirectPaymentRoute({
@@ -155,7 +156,7 @@ export const handleDirectPaymentEntityTx = async (
     hasDescription: Boolean(entityTx.data.description),
   });
 
-  const newState = cloneEntityState(entityState);
+  const newState = prepareEntityTxState(entityState, mutableFrameState);
   const outputs: EntityInput[] = [];
   const accountTxs: AccountTxTarget[] = [];
 

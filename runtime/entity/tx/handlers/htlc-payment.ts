@@ -16,7 +16,7 @@ import type {
   EntityTx,
   RuntimeState,
 } from '../../../types';
-import { cloneEntityState } from '../../state-clone';
+import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import { deriveDelta } from '../../../account/utils';
 import { validatePreparedHtlcPayment } from '../../htlc/payment-admission';
@@ -145,6 +145,7 @@ export async function handleHtlcPayment(
   entityTx: Extract<EntityTx, { type: 'htlcPayment' }>,
   env: RuntimeState,
   candidateEffects: EntityCandidateEffect[] = [],
+  mutableFrameState = false,
 ): Promise<HtlcPaymentResult> {
   const prepared = await validatePreparedHtlcPayment(env, entityState, entityTx);
   const trace = (message: string, fields: Record<string, unknown> = {}): void => {
@@ -157,7 +158,7 @@ export async function handleHtlcPayment(
     amount: formatAmount(prepared.recipientAmount),
     route: prepared.route.map(shortId),
   });
-  const newState = cloneEntityState(entityState);
+  const newState = prepareEntityTxState(entityState, mutableFrameState);
   const account = requireOutboundCapacity(newState, prepared);
   if ('newState' in account) return account;
 
