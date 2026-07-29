@@ -8,6 +8,13 @@ type FeeOverrides = { maxFeePerGas?: bigint; maxPriorityFeePerGas?: bigint };
 type TxOverrides = FeeOverrides & { gasLimit?: bigint; nonce?: number };
 type RpcReceipt = { hash: string; blockNumber: number; blockHash: string; logs: readonly ApprovalReceiptLog[] };
 type WalletMethods = Pick<JAdapter, 'getErc20Allowance' | 'approveErc20' | 'transferErc20' | 'transferNative'>;
+type ApprovalDeltaContext = {
+  entityId?: string;
+  tokenId?: number;
+  tokenAddress: string;
+  owner: string;
+  spender: string;
+};
 
 type RpcWalletWriteDeps = {
   provider: Provider;
@@ -21,6 +28,37 @@ type RpcWalletWriteDeps = {
     label: string,
     send: (nonce: number, feeOverrides: FeeOverrides) => Promise<unknown>,
   ): Promise<RpcReceipt>;
+};
+
+const buildApprovalDelta = (receipt: RpcReceipt, allowance: bigint, context: ApprovalDeltaContext): JEvent[] => {
+  const entityId = normalizeEntityId(context.entityId || '');
+  const tokenId = Number(context.tokenId);
+  if (!entityId || !Number.isInteger(tokenId) || tokenId < 0) return [];
+  const logIndex = resolveApprovalReceiptLogIndex({
+    receiptHash: receipt.hash,
+    logs: receipt.logs,
+    tokenAddress: context.tokenAddress,
+    owner: context.owner,
+    spender: context.spender,
+    allowance,
+  });
+  return [
+    {
+      name: 'ExternalWalletDelta',
+      args: {
+        entityId,
+        owner: context.owner.toLowerCase(),
+        tokenAddress: context.tokenAddress.toLowerCase(),
+        tokenId,
+        spender: context.spender.toLowerCase(),
+        allowance: allowance.toString(),
+      },
+      blockNumber: receipt.blockNumber,
+      blockHash: receipt.blockHash,
+      transactionHash: receipt.hash,
+      logIndex,
+    },
+  ];
 };
 
 /** External-wallet writes are serialized per signer to prevent EOA nonce races. */
@@ -87,35 +125,11 @@ export const createRpcWalletWriteMethods = (deps: RpcWalletWriteDeps): WalletMet
       }
       const currentAllowance = await allowanceFn(signerAddress, spender);
       if (currentAllowance === amount) return [];
-      const toApprovalDelta = (receipt: RpcReceipt, allowance: bigint): JEvent[] => {
-        const entityId = normalizeEntityId(options?.entityId || '');
-        const tokenId = Number(options?.tokenId);
-        if (!entityId || !Number.isInteger(tokenId) || tokenId < 0) return [];
-        const logIndex = resolveApprovalReceiptLogIndex({
-          receiptHash: receipt.hash,
-          logs: receipt.logs,
-          tokenAddress,
-          owner: signerAddress,
-          spender,
-          allowance,
-        });
-        return [
-          {
-            name: 'ExternalWalletDelta',
-            args: {
-              entityId,
-              owner: signerAddress.toLowerCase(),
-              tokenAddress: tokenAddress.toLowerCase(),
-              tokenId,
-              spender: spender.toLowerCase(),
-              allowance: allowance.toString(),
-            },
-            blockNumber: receipt.blockNumber,
-            blockHash: receipt.blockHash,
-            transactionHash: receipt.hash,
-            logIndex,
-          },
-        ];
+      const approvalContext: ApprovalDeltaContext = {
+        ...options,
+        tokenAddress,
+        owner: signerAddress,
+        spender,
       };
       try {
         return await runSerializedBatchFor(signerWallet, async () => {
@@ -130,7 +144,7 @@ export const createRpcWalletWriteMethods = (deps: RpcWalletWriteDeps): WalletMet
                   nonce,
                 }),
             );
-            events.push(...toApprovalDelta(resetReceipt, 0n));
+            events.push(...buildApprovalDelta(resetReceipt, 0n, approvalContext));
           }
           const receipt = await sendSignerTxWithExplicitNonce(signerWallet, 'approveErc20', (nonce, feeOverrides) =>
             approveFn(spender, amount, {
@@ -138,7 +152,7 @@ export const createRpcWalletWriteMethods = (deps: RpcWalletWriteDeps): WalletMet
               nonce,
             }),
           );
-          events.push(...toApprovalDelta(receipt, amount));
+          events.push(...buildApprovalDelta(receipt, amount, approvalContext));
           return events;
         });
       } catch (error) {
