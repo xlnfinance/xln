@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 
 import { assertAccountFrameDeltaIntegrity, deriveAccountFrameOffdeltas, deriveAccountFrameTokenIds } from '../account/frame';
+import { canonicalAccountTxForFrameHash } from '../account/consensus/frame';
 import type { AccountFrame, Delta } from '../types';
 import { validateAccountFrame } from '../validation-utils';
 
@@ -48,4 +49,17 @@ test('AccountFrame validation rejects malformed delta entries', () => {
   const broken = frame([delta(1, 5n)]);
   (broken.deltas[0] as unknown as { tokenId: string }).tokenId = '1';
   expect(() => validateAccountFrame(broken)).toThrow('Delta validation failed');
+});
+
+test('Account frame hashing rejects a malformed J-claim height', () => {
+  expect(() => canonicalAccountTxForFrameHash({
+    type: 'j_event_claim',
+    data: {
+      jHeight: Number.NaN,
+      jBlockHash: `0x${'22'.repeat(32)}`,
+      events: [],
+      leftProof: {},
+      rightProof: {},
+    },
+  })).toThrow('ACCOUNT_FRAME_J_EVENT_CLAIM_HEIGHT_INVALID');
 });

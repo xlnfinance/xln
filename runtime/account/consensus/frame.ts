@@ -68,9 +68,12 @@ const toRecord = (value: unknown): Record<string, unknown> =>
     ? value as Record<string, unknown>
     : {};
 
-const toInt = (value: unknown): number => {
-  const n = Number(value ?? 0);
-  return Number.isFinite(n) ? Math.floor(n) : 0;
+const requireNonNegativeSafeInteger = (value: unknown, label: string): number => {
+  const number = Number(value);
+  if (!Number.isSafeInteger(number) || number < 0) {
+    throw new Error(`ACCOUNT_FRAME_${label}_INVALID:${String(value)}`);
+  }
+  return number;
 };
 
 const canonicalJEventClaimForFrameHash = (value: unknown): Record<string, unknown> => {
@@ -81,7 +84,7 @@ const canonicalJEventClaimForFrameHash = (value: unknown): Record<string, unknow
   // and both independently verified Patricia witnesses. None are local hints.
   return {
     version: 'xln:account-j-event-claim-frame:v1',
-    jHeight: toInt(data['jHeight']),
+    jHeight: requireNonNegativeSafeInteger(data['jHeight'], 'J_EVENT_CLAIM_HEIGHT'),
     jBlockHash: String(data['jBlockHash'] ?? '').toLowerCase(),
     eventsHash: canonicalJurisdictionEventsHash(events),
     events,
