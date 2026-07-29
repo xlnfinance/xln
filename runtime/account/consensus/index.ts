@@ -75,11 +75,17 @@ import {
 } from './deadline-policy';
 import {
   accountInputAck,
-  accountInputBoardReseal,
   accountInputDisputeSeal,
   accountInputProposal,
   accountInputReferenceHeight,
 } from './flush';
+import { handleBoardReseal } from './board-reseal';
+import {
+  getDisputeSealRequirementError,
+  storeCounterpartyDisputeSeal,
+  type ValidatedCounterpartyDisputeSeal,
+  validateCounterpartyDisputeSeal,
+} from './dispute-seal';
 export { proposeAccountFrame } from './propose';
 export type {
   AccountConsensusFrameResult,
@@ -156,295 +162,6 @@ export { computeFrameHash, isWithinAccountFrameBounds } from './frame';
 
 // Counter-based replay protection was intentionally replaced by the frame chain
 // (height + prevFrameHash). Nonces remain only for on-chain proof material.
-
-type ValidatedCounterpartyDisputeSeal = {
-  hanko: string;
-  nonce: number;
-  hash: string;
-  proofBodyHash: string;
-};
-
-async function validateCounterpartyDisputeSeal(
-  env: RuntimeState,
-  account: AccountState,
-  input: AccountPeerInput,
-  seal: ReturnType<typeof accountInputDisputeSeal>,
-  context: string,
-  securityContext: AccountInputSecurityContext,
-  allowPreviousBoard = true,
-): Promise<ValidatedCounterpartyDisputeSeal | undefined> {
-  if (!seal) return undefined;
-  if (!seal.hanko) {
-    throw new Error(`${context}:DISPUTE_SEAL_HANKO_MISSING`);
-  }
-
-  const hankoDomain = getAccountStateDomain(account);
-
-  // A dispute Hanko is only useful if it signs the exact Solidity message:
-  // (MessageType.DisputeProof, chainId, depository, canonical accountKey, nonce,
-  // proofbodyHash). Verifying a peer-supplied `newDisputeHash` alone is not
-  // enough: a malicious peer can sign any random hash, attach a plausible
-  // proofbodyHash, and make us store metadata that later fails on-chain.
-  const expectedHash = createDisputeProofHashWithNonce(
-    account,
-    seal.proofBodyHash,
-    hankoDomain,
-    seal.proofNonce,
-  );
-  if (String(seal.hash).toLowerCase() !== expectedHash.toLowerCase()) {
-    throw new Error(`${context}:DISPUTE_SEAL_HASH_MISMATCH:${safeStringify({
-      kind: input.kind,
-      currentHeight: account.currentHeight,
-      pendingHeight: account.pendingFrame?.height ?? null,
-      inputHeight: accountInputAck(input)?.height ?? null,
-      newFrameHeight: accountInputProposal(input)?.frame.height ?? null,
-      localNonce: account.proofHeader.nextProofNonce,
-      signedNonce: seal.proofNonce,
-      proofBodyHash: seal.proofBodyHash,
-      expected: expectedHash,
-      received: seal.hash,
-      from: shortId(input.fromEntityId),
-      to: shortId(input.toEntityId),
-    })}`);
-  }
-
-  const { valid } = await verifyHankoForHash(
-    seal.hanko,
-    expectedHash,
-    input.fromEntityId,
-    env,
-    securityContext.counterpartyCertifiedBoardHash
-      ? {
-          registeredBoardHash: securityContext.counterpartyCertifiedBoardHash,
-          allowPreviousBoard,
-        }
-      : undefined,
-  );
-  if (!valid) {
-    throw new Error(`${context}:DISPUTE_SEAL_HANKO_INVALID`);
-  }
-
-  return {
-    hanko: seal.hanko,
-    nonce: seal.proofNonce,
-    hash: expectedHash,
-    proofBodyHash: seal.proofBodyHash,
-  };
-}
-
-type BoardResealPayload = NonNullable<ReturnType<typeof accountInputBoardReseal>>;
-type ValidatedBoardResealMetadata = {
-  expectedFrom: string;
-  activationJHeight: number;
-  activationLogIndex: number;
-  frameHeight: number;
-  currentFrameHash: string;
-};
-
-const rejectBoardReseal = (error: string, events: string[]): HandleAccountInputResult => ({
-  success: false,
-  error,
-  events,
-});
-
-const validateBoardResealMetadata = (
-  account: AccountState,
-  input: AccountInput,
-  reseal: BoardResealPayload,
-  events: string[],
-): HandleAccountInputResult | ValidatedBoardResealMetadata => {
-  const expectedFrom = account.proofHeader.toEntity.toLowerCase();
-  const expectedTo = account.proofHeader.fromEntity.toLowerCase();
-  if (input.fromEntityId.toLowerCase() !== expectedFrom || input.toEntityId.toLowerCase() !== expectedTo) {
-    return rejectBoardReseal(
-      `ACCOUNT_BOARD_RESEAL_PARTY_MISMATCH:${input.fromEntityId}:${input.toEntityId}`,
-      events,
-    );
-  }
-  const activationJHeight = Number(reseal.boardActivationJHeight);
-  const activationLogIndex = Number(reseal.boardActivationLogIndex);
-  if (!Number.isSafeInteger(activationJHeight) || activationJHeight < 1) {
-    return rejectBoardReseal(
-      `ACCOUNT_BOARD_RESEAL_ACTIVATION_HEIGHT_INVALID:${activationJHeight}`,
-      events,
-    );
-  }
-  if (!Number.isSafeInteger(activationLogIndex) || activationLogIndex < 0) {
-    return rejectBoardReseal(
-      `ACCOUNT_BOARD_RESEAL_ACTIVATION_LOG_INDEX_INVALID:${activationLogIndex}`,
-      events,
-    );
-  }
-  const frameHeight = Number(reseal.height);
-  const previous = account.counterpartyBoardReseal;
-  const notNewer = previous && (
-    activationJHeight < previous.activationJHeight ||
-    (activationJHeight === previous.activationJHeight && activationLogIndex <= previous.activationLogIndex)
-  );
-  const exactRetry = previous && (
-    activationJHeight === previous.activationJHeight &&
-    activationLogIndex === previous.activationLogIndex &&
-    frameHeight === previous.frameHeight &&
-    String(reseal.frameHash).toLowerCase() === previous.frameHash
-  );
-  if (notNewer && !exactRetry) {
-    return rejectBoardReseal(
-      `ACCOUNT_BOARD_RESEAL_ACTIVATION_ORDER_INVALID:` +
-        `${activationJHeight}:${activationLogIndex}:` +
-        `${previous.activationJHeight}:${previous.activationLogIndex}`,
-      events,
-    );
-  }
-  const currentHeight = Number(account.currentHeight);
-  if (
-    !Number.isSafeInteger(frameHeight) ||
-    frameHeight < 1 ||
-    frameHeight !== currentHeight ||
-    frameHeight !== Number(account.currentFrame.height)
-  ) {
-    return rejectBoardReseal(
-      `ACCOUNT_BOARD_RESEAL_HEIGHT_MISMATCH:${frameHeight}:${currentHeight}`,
-      events,
-    );
-  }
-  const currentFrameHash = String(account.currentFrame.stateHash || '').toLowerCase();
-  const resealFrameHash = String(reseal.frameHash || '').toLowerCase();
-  if (!/^0x[0-9a-f]{64}$/.test(resealFrameHash) || resealFrameHash !== currentFrameHash) {
-    return rejectBoardReseal(
-      `ACCOUNT_BOARD_RESEAL_FRAME_HASH_MISMATCH:${resealFrameHash || 'missing'}:${currentFrameHash || 'missing'}`,
-      events,
-    );
-  }
-  if (!reseal.frameHanko) {
-    return rejectBoardReseal('ACCOUNT_BOARD_RESEAL_FRAME_HANKO_MISSING', events);
-  }
-  return { expectedFrom, activationJHeight, activationLogIndex, frameHeight, currentFrameHash };
-};
-
-const verifyBoardResealWitnesses = async (
-  env: RuntimeState,
-  account: AccountState,
-  input: AccountPeerInput,
-  reseal: BoardResealPayload,
-  metadata: ValidatedBoardResealMetadata,
-  securityContext: AccountInputSecurityContext,
-  events: string[],
-): Promise<HandleAccountInputResult | { verifiedDispute?: ValidatedCounterpartyDisputeSeal }> => {
-  const frameAuthority = securityContext.counterpartyCertifiedBoardHash
-    ? { registeredBoardHash: securityContext.counterpartyCertifiedBoardHash, allowPreviousBoard: false }
-    : undefined;
-  const verifiedFrame = await verifyHankoForHash(
-    reseal.frameHanko!,
-    metadata.currentFrameHash,
-    input.fromEntityId,
-    env,
-    frameAuthority,
-  );
-  if (!verifiedFrame.valid || verifiedFrame.entityId?.toLowerCase() !== metadata.expectedFrom) {
-    return rejectBoardReseal('ACCOUNT_BOARD_RESEAL_FRAME_HANKO_INVALID', events);
-  }
-  if (!reseal.disputeSeal) return {};
-
-  const expectedDisputeHash = account.counterpartyDisputeHash?.toLowerCase();
-  const expectedProofBodyHash = account.counterpartyDisputeProofBodyHash?.toLowerCase();
-  const expectedProofNonce = account.counterpartyDisputeProofNonce;
-  if (
-    !expectedDisputeHash ||
-    !expectedProofBodyHash ||
-    expectedProofNonce === undefined ||
-    reseal.disputeSeal.hash.toLowerCase() !== expectedDisputeHash ||
-    reseal.disputeSeal.proofBodyHash.toLowerCase() !== expectedProofBodyHash ||
-    reseal.disputeSeal.proofNonce !== expectedProofNonce
-  ) {
-    return rejectBoardReseal('ACCOUNT_BOARD_RESEAL_DISPUTE_MISMATCH', events);
-  }
-  try {
-    const verifiedDispute = await validateCounterpartyDisputeSeal(
-      env,
-      account,
-      input,
-      reseal.disputeSeal,
-      'ACCOUNT_BOARD_RESEAL',
-      securityContext,
-      false,
-    );
-    return {
-      ...(verifiedDispute ? { verifiedDispute } : {}),
-    };
-  } catch (error) {
-    return rejectBoardReseal((error as Error).message, events);
-  }
-};
-
-const handleBoardReseal = async (
-  env: RuntimeState,
-  account: AccountState,
-  input: AccountPeerInput,
-  securityContext: AccountInputSecurityContext,
-): Promise<HandleAccountInputResult | undefined> => {
-  const reseal = accountInputBoardReseal(input);
-  if (!reseal) return undefined;
-  const events: string[] = [];
-  const metadata = validateBoardResealMetadata(account, input, reseal, events);
-  if ('success' in metadata) return metadata;
-  const witnesses = await verifyBoardResealWitnesses(
-    env,
-    account,
-    input,
-    reseal,
-    metadata,
-    securityContext,
-    events,
-  );
-  if ('success' in witnesses) return witnesses;
-
-  // The exact Account state and on-chain dispute nonce remain untouched. Only
-  // replace cached authority witnesses after every supplied hash validates.
-  account.counterpartyFrameHanko = reseal.frameHanko!;
-  if (witnesses.verifiedDispute) {
-    account.counterpartyDisputeProofHanko = witnesses.verifiedDispute.hanko;
-  }
-  account.counterpartyBoardReseal = {
-    activationJHeight: metadata.activationJHeight,
-    activationLogIndex: metadata.activationLogIndex,
-    frameHeight: metadata.frameHeight,
-    frameHash: metadata.currentFrameHash,
-  };
-  events.push(`🔐 Re-sealed Account frame ${metadata.frameHeight} under the current board`);
-  return { success: true, events };
-};
-
-function storeCounterpartyDisputeSeal(
-  account: AccountState,
-  seal: ValidatedCounterpartyDisputeSeal | undefined,
-): void {
-  if (!seal) return;
-  account.counterpartyDisputeProofHanko = seal.hanko;
-  account.counterpartyDisputeProofNonce = seal.nonce;
-  account.counterpartyDisputeHash = seal.hash;
-  account.counterpartyDisputeProofBodyHash = seal.proofBodyHash;
-  account.disputeProofNoncesByHash ??= {};
-  account.disputeProofNoncesByHash[seal.proofBodyHash] = seal.nonce;
-}
-
-const disputeSealRequirementError = (
-  expectedProofBodyHash: string | undefined,
-  previousCounterpartyProofBodyHash: string | undefined,
-  previousCounterpartyProofNonce: number | undefined,
-  jNonce: number,
-  seal: ValidatedCounterpartyDisputeSeal | undefined,
-): string | undefined => {
-  if (!expectedProofBodyHash) return seal ? 'DISPUTE_SEAL_UNEXPECTED_WITHOUT_LOCAL_PROOF' : undefined;
-  if (seal && seal.proofBodyHash.toLowerCase() !== expectedProofBodyHash.toLowerCase()) {
-    return `DISPUTE_SEAL_PROOFBODY_MISMATCH: expected=${expectedProofBodyHash} received=${seal.proofBodyHash}`;
-  }
-  const proofChanged = expectedProofBodyHash.toLowerCase() !== previousCounterpartyProofBodyHash?.toLowerCase();
-  const proofNonceConsumed = Number(previousCounterpartyProofNonce ?? 0) <= jNonce;
-  if ((proofChanged || proofNonceConsumed) && !seal) {
-    return `DISPUTE_SEAL_REQUIRED: proofBodyHash=${expectedProofBodyHash} jNonce=${jNonce}`;
-  }
-  return undefined;
-};
 
 type AccountInputHeightNormalization =
   | { normalizedInputHeight: number | undefined; error?: undefined }
@@ -676,7 +393,7 @@ async function verifyPendingAckCertificate(
   events: string[],
   securityContext: AccountInputSecurityContext,
 ): Promise<PendingAckCertificateResult> {
-  const sealError = disputeSealRequirementError(
+  const sealError = getDisputeSealRequirementError(
     account.currentDisputeProofBodyHash,
     account.counterpartyDisputeProofBodyHash,
     account.counterpartyDisputeProofNonce,
@@ -1731,7 +1448,7 @@ async function validateIncomingFrameOnClone(
   }
   const proofResult = buildAccountProofBodyFromEnv(env, clonedMachine);
   const localProofBodyHash = proofResult.proofBodyHash;
-  const frameSealError = disputeSealRequirementError(
+  const frameSealError = getDisputeSealRequirementError(
     localProofBodyHash,
     account.counterpartyDisputeProofBodyHash,
     account.counterpartyDisputeProofNonce,
