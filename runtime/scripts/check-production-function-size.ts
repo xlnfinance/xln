@@ -16,7 +16,6 @@ const COORDINATOR_DEBT: Readonly<Record<string, number>> = {
   'runtime/jadapter/rpc-adapter.ts::pollInFlight callback': 436,
   'runtime/jadapter/rpc-adapter.ts::startWatching': 1040,
   'runtime/orchestrator/hub-node.ts::run': 1064,
-  'runtime/orchestrator/mm-node-health.ts::maintainMarketMakerCrossQuotes': 409,
   'runtime/orchestrator/mm-node-run.ts::runMarketMakerNode': 1707,
 };
 

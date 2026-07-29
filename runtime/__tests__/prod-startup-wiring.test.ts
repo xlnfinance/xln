@@ -847,7 +847,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('const MARKET_MAKER_BOOTSTRAP_DEFAULT_CROSS_OFFERS_PER_ACCOUNT_PER_TICK = 45;');
     expect(mmNode).toContain('const MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_CROSS_OFFERS_PER_TICK = 135;');
     expect(mmNode).not.toContain('const selectedPairs = new Set<string>();');
-    expect(mmNode).toContain('const selectedCandidates = missingCandidates.slice(0, allowedNewOffers);');
+    expect(mmNode).toContain('for (const spec of candidates.slice(0, allowedNewOffers)) {');
     expect(mmNode).toContain('String(MARKET_MAKER_BOOTSTRAP_DEFAULT_CROSS_OFFERS_PER_ACCOUNT_PER_TICK)');
     expect(mmNode).toContain('String(MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_CROSS_OFFERS_PER_TICK)');
     expect(mmNode).toContain('const MARKET_MAKER_LEVELS_PER_SIDE = 10;');
@@ -1035,7 +1035,7 @@ describe('production startup wiring', () => {
     expect(mmNode).not.toContain('(finalizedByPair.get(spec.pairId) || 0) === 0');
     expect(mmNode).not.toContain('const selectedPairs = new Set<string>();');
     expect(mmNode).not.toContain('if (selectedPairs.has(spec.pairId)) continue;');
-    expect(mmNode).toContain('const selectedCandidates = missingCandidates.slice(0, allowedNewOffers);');
+    expect(mmNode).toContain('for (const spec of candidates.slice(0, allowedNewOffers)) {');
     expect(mmNode).toContain('cross.routes.every((route) => route.depthReady)');
     expect(mmNode).toContain('ok: hubsDepthReady && crossDepthReady');
     expect(mmNode).toContain('countCommittedMarketMakerOffersForHub(env, mmEntityId, hubEntityId)');
@@ -1736,8 +1736,8 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('const orderedSourceHubs = [...sourceHubs].sort');
     expect(mmNode).not.toContain('const sourceHubScans = [...sourceHubs]');
     const bootstrapCrossBranch = mmNode.slice(
-      mmNode.indexOf('if (emitBootstrapWaveEvents) {'),
-      mmNode.indexOf('const desiredOffers = buildMarketMakerCrossOfferSpecs('),
+      mmNode.indexOf('const maintainBootstrapCrossQuotes = async ('),
+      mmNode.indexOf('const maintainSteadyCrossQuotes = async ('),
     );
     expect(bootstrapCrossBranch.indexOf("emitMarketMakerCrossBootstrapWaveEvent('cross-wave-start'")).toBeLessThan(
       bootstrapCrossBranch.indexOf('const sourceHubSpecs = buildMarketMakerCrossOfferSpecs('),
