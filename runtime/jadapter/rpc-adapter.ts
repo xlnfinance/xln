@@ -39,8 +39,8 @@ import {
   buildExternalTokenToReserveBatch,
   computeAccountKey,
   packTokenReference,
-  parseReceiptLogsToJEvents,
 } from './helpers';
+import { parseReceiptLogsToJEvents } from './j-event-log-decoder';
 import { CANONICAL_J_EVENTS } from '../jurisdiction/event-catalog';
 import { DEV_CHAIN_IDS } from './index';
 import { normalizeReceiptHash, parseReceiptQuantity } from '../jurisdiction/receipt-codec';

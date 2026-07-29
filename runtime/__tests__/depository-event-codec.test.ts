@@ -4,6 +4,7 @@ import {
   extractCanonicalDepositoryEventArgs,
   parseKnownDepositoryLog,
 } from '../jadapter/depository-event-codec';
+import { parseReceiptLogsToJEvents } from '../jadapter/j-event-log-decoder';
 
 const iface = Depository__factory.createInterface();
 const word = (suffix: string): string => `0x${suffix.padStart(64, '0')}`;
@@ -44,5 +45,30 @@ describe('Depository watcher event codec', () => {
     const args = extractCanonicalDepositoryEventArgs(parsed);
     expect(args['nonce']).toBe(7n);
     expect(args['initialNonce']).toBe(7n);
+  });
+
+  test('uses the same canonical DisputeFinalized payload for receipt ingestion', () => {
+    const encoded = encode(
+      'DisputeFinalized',
+      [word('1'), word('2'), 7n, word('3'), word('4')],
+    );
+    const events = parseReceiptLogsToJEvents(
+      {
+        logs: [{
+          address: '0x0000000000000000000000000000000000000001',
+          topics: encoded.topics,
+          data: encoded.data,
+          index: 0,
+        }],
+        blockNumber: 1,
+        blockHash: word('5'),
+        hash: word('6'),
+      },
+      [{
+        address: '0x0000000000000000000000000000000000000001',
+        interface: iface,
+      }],
+    );
+    expect(events[0]?.args['initialNonce']).toBe(7n);
   });
 });

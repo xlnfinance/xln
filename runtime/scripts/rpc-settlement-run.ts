@@ -15,7 +15,8 @@ import { createEmptyBatch } from '../jurisdiction/batch';
 import { prepareSignedBatch } from '../hanko/batch';
 import { generateLazyEntityId } from '../entity/factory';
 import { canonicalJurisdictionEventsHash } from '../jurisdiction/event-observation';
-import { parseReceiptLogsToJEvents, rawEventToJEvents } from '../jadapter/helpers';
+import { rawEventToJEvents } from '../jadapter/helpers';
+import { parseReceiptLogsToJEvents } from '../jadapter/j-event-log-decoder';
 
 export type ParityRunOptions = {
   mode: string;

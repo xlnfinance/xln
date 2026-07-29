@@ -8,7 +8,7 @@ import {
 } from '../../jurisdictions/typechain-types/index.ts';
 import { nodeProcess, runtimeIsBrowser } from '../infra/runtime-process';
 import { safeStringify } from '../protocol/serialization';
-import { parseReceiptLogsToJEvents } from './helpers';
+import { parseReceiptLogsToJEvents } from './j-event-log-decoder';
 
 export type RpcReceipt = Parameters<typeof parseReceiptLogsToJEvents>[0] & {
   gasUsed?: bigint;

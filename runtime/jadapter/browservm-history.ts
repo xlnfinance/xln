@@ -16,8 +16,8 @@ import {
   buildCertifiedRegistrationEvidence,
   markLocalJAuthorityRuntimeTx,
 } from '../jurisdiction/registration-evidence';
-import { extractCanonicalDepositoryEventArgs } from './depository-event-codec';
 import { CANONICAL_J_EVENTS } from '../jurisdiction/event-catalog';
+import { decodeJEventLog } from './j-event-log-decoder';
 
 type BrowserVmHistoryOptions = {
   chainId: number;
@@ -42,25 +42,19 @@ const decodeHistoricalLog = (options: BrowserVmHistoryOptions, log: Authenticate
         ? options.entityProvider
         : null;
   if (!carrier) throw new Error(`BROWSERVM_HISTORICAL_LOG_ADDRESS_UNEXPECTED:${address}`);
-  let parsed;
-  try {
-    parsed = carrier.interface.parseLog({ topics: log.topics, data: log.data });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(
-      `BROWSERVM_HISTORICAL_LOG_DECODE_FAILED:block=${log.blockNumber}` +
-        `:tx=${log.transactionHash}:index=${log.logIndex}:${message}`,
-    );
-  }
-  if (!parsed || !CANONICAL_J_EVENTS.some(name => name === parsed.name)) return null;
-  return {
-    name: parsed.name,
-    args: extractCanonicalDepositoryEventArgs(parsed),
-    blockNumber: log.blockNumber,
-    blockHash: log.blockHash,
-    transactionHash: log.transactionHash,
-    logIndex: log.index,
-  };
+  const event = decodeJEventLog(
+    log,
+    carrier.interface,
+    {
+      blockNumber: log.blockNumber,
+      blockHash: log.blockHash,
+      transactionHash: log.transactionHash,
+      logIndex: log.index,
+    },
+    `BROWSERVM_HISTORICAL_LOG_DECODE_FAILED:block=${log.blockNumber}` +
+      `:tx=${log.transactionHash}:index=${log.logIndex}`,
+  );
+  return CANONICAL_J_EVENTS.some(name => name === event.name) ? event : null;
 };
 
 const buildHistoryHeaders = (

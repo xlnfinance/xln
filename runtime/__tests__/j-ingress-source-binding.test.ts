@@ -7,8 +7,8 @@ import { createJAdapter } from '../jadapter';
 import {
   applyJEventsToEnv,
   buildJEventsRuntimeInput,
-  parseReceiptLogsToJEvents,
 } from '../jadapter/helpers';
+import { parseReceiptLogsToJEvents } from '../jadapter/j-event-log-decoder';
 import { bindLocalJEventIngressSource } from '../jadapter/local-ingress-source';
 import { resolveApprovalReceiptLogIndex } from '../jadapter/rpc';
 import { createEmptyEnv } from '../runtime';
