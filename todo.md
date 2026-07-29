@@ -115,11 +115,11 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   removal, oversized-function ratchet and history-view migration are already
   owned by the more specific tasks below. Stale-settlement control flow now
   uses an exhaustive typed rejection instead of parsing an error message.
-  The additional open work is: eliminate consensus non-null assertions by
-  returning refined decoded/preflight types; make audit-event severity explicit instead
-  of classifying `message.includes(...)`; replace per-append canonical
-  re-encoding of every pending audit event with a frame-local deterministic
-  key set; and treat every certified human-readable event string as frozen
+  Runtime events now enter history uniformly without name-based severity
+  guesses, and their frame-local exact dedupe is one canonical-keyed Map
+  instead of quadratic re-encoding. The additional open work is: eliminate
+  consensus non-null assertions by returning refined decoded/preflight types;
+  and treat every certified human-readable event string as frozen
   protocol bytes until the typed `ActivityEvent` projection separates
   consensus facts from localized display copy. Measure receiver Account-frame
   clone plus double execution before considering any optimization, and retain
@@ -129,11 +129,9 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   owner subdirectories only when the move removes navigation and does not add
   barrels or compatibility re-exports. Delete closed audit claims from this
   file as their owning regression turns green.
-  The follow-up GLM audit adds one verified type-safety item: replace
-  `entityTxDispatchers: Record<string, ...>` with an exact mapping over
-  `EntityTx['type']` (or an exhaustive owner-split switch) so every new Entity
-  transaction fails compilation until it has one dispatcher. Do not trade the
-  current small handler modules for a new giant switch. Its claim that every
+  The follow-up GLM audit's exact EntityTx dispatcher is complete: the map is
+  exhaustive over reducer-owned EntityTx variants, while the three parent
+  wrappers fail if they reach the reducer. Its claim that every
   `Number(account.jNonce)` is another chain-boundary vulnerability is
   overstated: those fields are already typed Account safe integers; remove
   redundant coercions after persisted-state validation is proven, but keep

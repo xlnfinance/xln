@@ -57,34 +57,6 @@ const addCleanLog = (env: RuntimeState, level: string, msg: string): void => {
   if (buffer.length > MAX_CLEAN_LOGS) buffer.shift();
 };
 
-const HIGH_SIGNAL_EVENTS = new Set([
-  'HtlcInitiated',
-  'HtlcFailed',
-  'HtlcReceived',
-  'HtlcFinalized',
-  // J-event ingress is the canonical source-of-truth signal that an on-chain event
-  // actually reached the runtime state machine. Keep it in the relay debug timeline.
-  'JEventReceived',
-  // J-batch submission is the matching source signal for entity -> chain transitions.
-  'JBatchQueued',
-  'BilateralFrameCommitted',
-  'EntityFrameCommitted',
-  'AccountOpening',
-]);
-
-const isCriticalMessage = (message: string): boolean => {
-  const m = message.toLowerCase();
-  return (
-    m.includes('error') ||
-    m.includes('fail') ||
-    m.includes('mismatch') ||
-    m.includes('decrypt') ||
-    m.includes('secret') ||
-    m.includes('timeout') ||
-    m.includes('route-defer')
-  );
-};
-
 const forwardDebugEvent = (env: RuntimeState, payload: Record<string, unknown>): void => {
   const p2p = env.runtimeState?.p2p as { sendDebugEvent?: (data: unknown) => boolean } | undefined;
   try {
@@ -96,17 +68,16 @@ const forwardDebugEvent = (env: RuntimeState, payload: Record<string, unknown>):
   }
 };
 
-const getPendingAuditEvents = (env: RuntimeState): Array<Record<string, unknown>> => {
+const getPendingAuditEvents = (env: RuntimeState): Map<string, Record<string, unknown>> => {
   if (!env.runtimeState) env.runtimeState = {};
-  if (!env.runtimeState.pendingAuditEvents) env.runtimeState.pendingAuditEvents = [];
+  if (!env.runtimeState.pendingAuditEvents) env.runtimeState.pendingAuditEvents = new Map();
   return env.runtimeState.pendingAuditEvents;
 };
 
 const queuePendingAuditEvent = (env: RuntimeState, payload: Record<string, unknown>): void => {
   const pending = getPendingAuditEvents(env);
-  const encoded = encodeCanonicalConsensusValue(payload);
-  if (pending.some(candidate => encodeCanonicalConsensusValue(candidate) === encoded)) return;
-  pending.push(structuredClone(payload));
+  const key = encodeCanonicalConsensusValue(payload);
+  if (!pending.has(key)) pending.set(key, structuredClone(payload));
 };
 
 const appendFrameLog = (
@@ -166,17 +137,17 @@ const attachStructuredLogger =
 
 export const flushPendingAuditEvents = (env: RuntimeState): void => {
   const pending = env.runtimeState?.pendingAuditEvents;
-  if (!Array.isArray(pending) || pending.length === 0) return;
-  for (const payload of pending) {
+  if (!(pending instanceof Map) || pending.size === 0) return;
+  for (const payload of pending.values()) {
     forwardDebugEvent(env, payload);
   }
-  pending.length = 0;
+  pending.clear();
 };
 
 export const clearPendingAuditEvents = (env: RuntimeState): void => {
   const pending = env.runtimeState?.pendingAuditEvents;
-  if (!Array.isArray(pending) || pending.length === 0) return;
-  pending.length = 0;
+  if (!(pending instanceof Map) || pending.size === 0) return;
+  pending.clear();
 };
 
 const getPendingHistoryRecords = (env: RuntimeState): RuntimeHistoryRecord[] => {
@@ -479,15 +450,17 @@ export function attachEventEmitters(env: RuntimeState): void {
       },
       'EVENT',
     );
-    if (HIGH_SIGNAL_EVENTS.has(eventName) || isCriticalMessage(eventName)) {
-      queuePendingAuditEvent(env, {
-        level: 'event',
-        eventName,
-        data,
-        runtimeId: env.runtimeId,
-        at: env.timestamp,
-      });
-    }
+    // `emit` means a committed machine fact, so every event belongs in the
+    // Runtime event stream. Importance-by-name heuristics are both lossy and
+    // brittle: adding a new event must not require updating a second table.
+    // Operational debug logs use the structured logger methods instead.
+    queuePendingAuditEvent(env, {
+      level: 'event',
+      eventName,
+      data,
+      runtimeId: env.runtimeId,
+      at: env.timestamp,
+    });
   };
 }
 

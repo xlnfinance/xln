@@ -1355,7 +1355,8 @@ export interface RuntimeState {
       nextId: number;
       mirrorToConsole?: boolean;
     };
-    pendingAuditEvents?: Array<Record<string, unknown>>;
+    /** Exact frame-local event set keyed by canonical bytes; preserves insertion order. */
+    pendingAuditEvents?: Map<string, Record<string, unknown>>;
     /** Bounded, replayable wallet security status. Never stores untrusted payload bodies. */
     securityIncidents?: Map<string, RuntimeSecurityIncident>;
     recentJEvents?: Array<{

@@ -145,10 +145,12 @@ export const validateDurableRuntimeState = (value: unknown, code: string): void 
     if (state[field] !== undefined) requireBoundaryInteger(state[field], `${code}_${field.toUpperCase()}`, 1);
   }
   if (state['pendingAuditEvents'] !== undefined) {
-    requireArray(state['pendingAuditEvents'], `${code}_PENDING_AUDIT_EVENTS`).forEach((event, index) => {
-      requireBoundaryRecord(event, `${code}_PENDING_AUDIT_EVENT_${index}`);
-      validateStorageSafeValue(event, `${code}_PENDING_AUDIT_EVENT_${index}`);
-    });
+    const events = requireMap(state['pendingAuditEvents'], `${code}_PENDING_AUDIT_EVENTS`);
+    for (const [key, event] of events) {
+      requireString(key, `${code}_PENDING_AUDIT_EVENT_KEY`);
+      requireBoundaryRecord(event, `${code}_PENDING_AUDIT_EVENT`);
+      validateStorageSafeValue(event, `${code}_PENDING_AUDIT_EVENT`);
+    }
   }
   if (state['securityIncidents'] !== undefined) {
     const incidents = requireMap(state['securityIncidents'], `${code}_SECURITY_INCIDENTS`);
