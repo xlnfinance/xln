@@ -9,6 +9,10 @@ import { invalidateAccountMapCommitment, type AccountCommittedMap } from '../map
 import type { ApplyAccountTxResult } from './apply-types';
 import { applyAccountTxMutation } from './mutation';
 
+const missingCommitmentInvalidation = (_tx: never): never => {
+  throw new Error('ACCOUNT_TX_COMMITMENT_INVALIDATION_MISSING');
+};
+
 const swapDeltaKeys = (account: AccountState, tx: AccountTx): number[] => {
   if (tx.type === 'swap_offer') return [tx.data.giveTokenId, tx.data.wantTokenId];
   if (tx.type === 'swap_resolve') {
@@ -75,11 +79,22 @@ const invalidateCommittedMapsForTx = (
       invalidate('pulls');
       invalidate('swapOffers', tx.data.offerId);
       return;
+    case 'swap_cancel_request':
+      // The request emits parent orchestration output and updates only
+      // non-committed lifecycle history; the bilateral committed maps stay
+      // byte-identical until a later swap_resolve applies the cancellation.
+      return;
     case 'rebalance_policy':
     case 'reopen_disputed':
     case 'account_frame':
     case 'account_settle':
       return;
+    default:
+      // This is a financial cache-safety boundary, not merely a TypeScript
+      // nicety. Every new AccountTx must explicitly declare which committed
+      // maps it can mutate. Otherwise the incremental root can stay stale
+      // until the expensive cold-root oracle catches it at commit time.
+      return missingCommitmentInvalidation(tx);
   }
 };
 

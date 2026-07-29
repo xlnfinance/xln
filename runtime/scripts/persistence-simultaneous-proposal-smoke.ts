@@ -10,6 +10,8 @@ import {
 } from '../runtime.ts';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
 import { generateLazyEntityId } from '../entity/factory';
+import { createJAdapter } from '../jadapter';
+import type { JReplica, JurisdictionConfig } from '../types';
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`ASSERT: ${message}`);
@@ -50,6 +52,37 @@ async function main() {
   env.scenarioMode = true;
   env.timestamp = 1000;
 
+  // The collision proof is Account-only, but every Entity replica still binds
+  // to an explicit jurisdiction domain. This deterministic real domain fixture
+  // keeps the harness on production admission without starting an EVM or
+  // weakening the mandatory jurisdiction invariant.
+  const chainId = 31337;
+  const adapter = await createJAdapter({ mode: 'browservm', chainId });
+  const contracts = { ...adapter.addresses };
+  await adapter.close();
+  const jurisdiction: JurisdictionConfig = {
+    name: 'collision-smoke',
+    address: 'browservm://collision-smoke',
+    chainId,
+    depositoryAddress: contracts.depository,
+    entityProviderAddress: contracts.entityProvider,
+  };
+  env.activeJurisdiction = jurisdiction.name;
+  env.jReplicas.set(jurisdiction.name, {
+    name: jurisdiction.name,
+    rpcs: [jurisdiction.address],
+    chainId,
+    blockNumber: 0n,
+    stateRoot: new Uint8Array(32),
+    mempool: [],
+    blockDelayMs: 0,
+    lastBlockTimestamp: 0,
+    depositoryAddress: jurisdiction.depositoryAddress,
+    entityProviderAddress: jurisdiction.entityProviderAddress,
+    position: { x: 0, y: 0, z: 0 },
+    contracts,
+  } as JReplica);
+
   const signerA = deriveSignerAddressSync(seed, '1');
   const signerB = deriveSignerAddressSync(seed, '2');
   const signerAKey = deriveSignerKeySync(seed, '1');
@@ -74,6 +107,7 @@ async function main() {
             threshold: 1n,
             validators: [signerA],
             shares: { [signerA]: 1n },
+            jurisdiction,
           },
         },
       },
@@ -88,6 +122,7 @@ async function main() {
             threshold: 1n,
             validators: [signerB],
             shares: { [signerB]: 1n },
+            jurisdiction,
           },
         },
       },
@@ -171,8 +206,7 @@ async function main() {
 
   for (const baseline of before) {
     const restoredAccount = after.find(
-      candidate =>
-        candidate.replicaKey === baseline.replicaKey && candidate.counterpartyId === baseline.counterpartyId,
+      candidate => candidate.replicaKey === baseline.replicaKey && candidate.counterpartyId === baseline.counterpartyId,
     );
     assert(restoredAccount, `restored account exists for ${baseline.replicaKey} -> ${baseline.counterpartyId}`);
     assert(

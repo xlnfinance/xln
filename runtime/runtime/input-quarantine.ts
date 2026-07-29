@@ -13,9 +13,6 @@ const QUARANTINABLE_ERROR_MARKERS = [
   'Invalid entityInputs:',
   'Too many runtime transactions:',
   'Too many entity inputs:',
-  'RUNTIME_ENTITY_INPUT_UNKNOWN_TARGET',
-  'RUNTIME_REPLICA_NOT_FOUND',
-  'RUNTIME_SIGNER_MISSING',
   // Broad CROSS_J_/ORDERBOOK_ matching would also swallow internal invariant
   // failures. Only this exact authenticated-ingress rejection is droppable.
   'RUNTIME_CROSS_J_EXTERNAL_INGRESS_FORBIDDEN',
@@ -75,8 +72,7 @@ export const quarantineLiveRuntimeInput = (
     action: 'dropped' as const,
     ...summary,
   };
-  state.quarantinedRuntimeInputs = [...(state.quarantinedRuntimeInputs ?? []), record]
-    .slice(-MAX_QUARANTINE_RECORDS);
+  state.quarantinedRuntimeInputs = [...(state.quarantinedRuntimeInputs ?? []), record].slice(-MAX_QUARANTINE_RECORDS);
   if (reason === 'RUNTIME_CROSS_J_EXTERNAL_INGRESS_FORBIDDEN') {
     recordRuntimeSecurityIncident(env, {
       domain: 'cross-j',

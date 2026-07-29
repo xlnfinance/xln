@@ -181,6 +181,7 @@ import {
 import { createJReplica } from '../scenarios/boot';
 
 import { applyMergedEntityInputs, RuntimeEntityInputApplyError } from '../runtime/entity-inputs';
+import { quarantineLiveRuntimeInput } from '../runtime/input-quarantine';
 
 import { MalformedEntityFrameInputError } from '../entity/tx/invariant-errors';
 
@@ -976,7 +977,7 @@ describe('audit fail-fast regressions', () => {
     ).rejects.toThrow('RUNTIME_REPLICA_NOT_FOUND');
   });
 
-  test('live runtime drops stale signer tx-bearing inputs without halting', async () => {
+  test('live runtime drops a remote stale-signer input without halting', async () => {
     const env = createEmptyEnv('stale-signer-live-drop');
     env.scenarioMode = false;
     env.quietRuntimeLogs = true;
@@ -998,6 +999,7 @@ describe('audit fail-fast regressions', () => {
     await expect(
       processRuntime(env, [
         {
+          from: `0x${'94'.repeat(20)}`,
           entityId,
           signerId: staleSignerId,
           entityTxs: [
@@ -1015,6 +1017,30 @@ describe('audit fail-fast regressions', () => {
     ).resolves.toBe(env);
     expect(env.runtimeState?.quarantinedRuntimeInputs?.[0]?.action).toBe('dropped');
     expect(env.eReplicas.get(`${entityId}:${actualSignerId}`)?.state.accounts.size).toBe(0);
+  });
+
+  test('runtime quarantine uses typed transport provenance instead of message matching', () => {
+    const entityInput = {
+      entityId: `0x${'98'.repeat(32)}`,
+      signerId: `0x${'99'.repeat(20)}`,
+      entityTxs: [],
+    };
+    const runtimeInput = { runtimeTxs: [], entityInputs: [entityInput] };
+    const localEnv = createEmptyEnv('local-provenance-must-not-quarantine');
+    localEnv.scenarioMode = false;
+    const cause = new MalformedEntityFrameInputError('openAccount', 'RUNTIME_REPLICA_NOT_FOUND: test');
+    const localError = new RuntimeEntityInputApplyError(entityInput, false, cause);
+    expect(quarantineLiveRuntimeInput(localEnv, runtimeInput, localError, true)).toBe(false);
+    expect(localEnv.runtimeState?.quarantinedRuntimeInputs).toBeUndefined();
+
+    const remoteEntityInput = { ...entityInput, from: `0x${'97'.repeat(20)}` };
+    const remoteEnv = createEmptyEnv('remote-provenance-may-quarantine');
+    remoteEnv.scenarioMode = false;
+    const remoteError = new RuntimeEntityInputApplyError(remoteEntityInput, false, cause);
+    expect(
+      quarantineLiveRuntimeInput(remoteEnv, { runtimeTxs: [], entityInputs: [remoteEntityInput] }, remoteError, true),
+    ).toBe(true);
+    expect(remoteEnv.runtimeState?.quarantinedRuntimeInputs).toHaveLength(1);
   });
 
   test('live runtime quarantines invalid ingress once instead of requeueing a crash loop', async () => {

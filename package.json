@@ -48,6 +48,7 @@
     "test:e2e:coverage": "bun runtime/scripts/check-flow-e2e-coverage.ts",
     "test:cleanup": "bun runtime/scripts/test-artifact-cleanup.ts",
     "test:persistence:cli": "bun runtime/scripts/run-with-test-cleanup.ts --reason=persistence-cli -- bun runtime/scripts/persistence-wal-smoke.ts",
+    "test:consensus:collision": "bun runtime/scripts/run-with-test-cleanup.ts --reason=consensus-collision -- bun runtime/scripts/persistence-simultaneous-proposal-smoke.ts",
     "test:watchtower:smoke": "bun runtime/scripts/run-with-test-cleanup.ts --reason=watchtower-smoke -- bun runtime/scripts/watchtower-smoke.ts",
     "test:rpc-settlement": "bun runtime/scripts/run-with-test-cleanup.ts --reason=rpc-settlement -- bun runtime/scripts/rpc-settlement-parity.ts",
     "test:tron:nile": "bun runtime/scripts/tron-nile-smoke.ts",

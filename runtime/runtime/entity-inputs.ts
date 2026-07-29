@@ -1,8 +1,6 @@
 import { applyEntityInput } from '../entity/consensus/index';
 import type { EntityInputOutcome } from '../entity/consensus/index';
-import {
-  entityInputHasCrossJurisdictionIntraRuntimeTx,
-} from '../extensions/cross-j/boundary';
+import { entityInputHasCrossJurisdictionIntraRuntimeTx } from '../extensions/cross-j/boundary';
 import {
   collectCrossJurisdictionRemoteEntityHints,
   registerEntityRuntimeHintWithDeps,
@@ -18,27 +16,18 @@ import { nodeProcess } from './platform';
 import { isRuntimePerfProfileEnabled, readRuntimePerfSlowMs } from '../infra/perf-runtime-flags';
 import { DEBUG, getPerfMs } from '../utils';
 import { createStructuredLogger, logError, shortId } from '../infra/logger';
-import {
-  classifyEntityInputApplyFailure,
-  type EntityInputApplyFailureKind,
-} from '../entity/tx/invariant-errors';
+import { classifyEntityInputApplyFailure, type EntityInputApplyFailureKind } from '../entity/tx/invariant-errors';
 
 const entityInputLog = createStructuredLogger('runtime.entity_inputs');
 
-const isCommittedEntityInput = (outcome: EntityInputOutcome): boolean =>
-  outcome.kind === 'committed';
+const isCommittedEntityInput = (outcome: EntityInputOutcome): boolean => outcome.kind === 'committed';
 
 const ENTITY_INPUT_PROFILE =
-  nodeProcess?.env?.['XLN_ENTITY_INPUT_PROFILE'] === '1' ||
-  nodeProcess?.env?.['XLN_RUNTIME_PROCESS_PROFILE'] === '1';
-const ENTITY_INPUT_SLOW_MS = Math.max(
-  0,
-  Number(nodeProcess?.env?.['XLN_ENTITY_INPUT_SLOW_MS'] || '1000'),
-);
+  nodeProcess?.env?.['XLN_ENTITY_INPUT_PROFILE'] === '1' || nodeProcess?.env?.['XLN_RUNTIME_PROCESS_PROFILE'] === '1';
+const ENTITY_INPUT_SLOW_MS = Math.max(0, Number(nodeProcess?.env?.['XLN_ENTITY_INPUT_SLOW_MS'] || '1000'));
 const entityInputProfileEnabled = (): boolean =>
   ENTITY_INPUT_PROFILE || isRuntimePerfProfileEnabled('XLN_ENTITY_INPUT_PROFILE');
-const entityInputSlowMs = (): number =>
-  readRuntimePerfSlowMs('XLN_ENTITY_INPUT_SLOW_MS', ENTITY_INPUT_SLOW_MS);
+const entityInputSlowMs = (): number => readRuntimePerfSlowMs('XLN_ENTITY_INPUT_SLOW_MS', ENTITY_INPUT_SLOW_MS);
 
 export interface RuntimeEntityInputApplyResult {
   entityOutbox: RoutedEntityInput[];
@@ -77,6 +66,7 @@ export class RuntimeEntityInputApplyError extends Error {
     input: RoutedEntityInput,
     trustedLocalCrossJurisdiction: boolean,
     cause: unknown,
+    failureKind: EntityInputApplyFailureKind = classifyEntityInputApplyFailure(cause),
   ) {
     const message = cause instanceof Error ? cause.message : String(cause);
     super(
@@ -92,7 +82,7 @@ export class RuntimeEntityInputApplyError extends Error {
     this.sourceRuntimeHeight = input.sourceRuntimeFrame?.height;
     this.sourceRuntimeTimestamp = input.sourceRuntimeFrame?.timestamp;
     this.trustedLocalCrossJurisdiction = trustedLocalCrossJurisdiction;
-    this.failureKind = classifyEntityInputApplyFailure(cause);
+    this.failureKind = failureKind;
   }
 
   get isRemoteIngress(): boolean {
@@ -138,12 +128,7 @@ const assertRuntimeIngress: (
   code: string,
   message: string,
   details?: Record<string, unknown>,
-) => asserts condition = (
-  condition: unknown,
-  code: string,
-  message: string,
-  details?: Record<string, unknown>,
-) => {
+) => asserts condition = (condition: unknown, code: string, message: string, details?: Record<string, unknown>) => {
   if (condition) return;
   const detailText = details ? ` ${safeStringify(details)}` : '';
   throw new Error(`${code}: ${message}${detailText}`);
@@ -163,9 +148,7 @@ type RuntimeEntityInputBatchContext = {
   immediateCrossJApplyMs: number;
 };
 
-const createRuntimeEntityInputBatchContext = (
-  initialJOutbox: JInput[],
-): RuntimeEntityInputBatchContext => ({
+const createRuntimeEntityInputBatchContext = (initialJOutbox: JInput[]): RuntimeEntityInputBatchContext => ({
   entityOutbox: [],
   appliedEntityInputs: [],
   inputOutcomes: [],
@@ -184,13 +167,13 @@ const collectCommittedAccountFrames = (
   replica: EntityReplica,
 ): RuntimeEntityInputApplyResult['inputOutcomes'][number]['committedAccountFrames'] => {
   const accountInputs = getEffectiveEntityInputTxs(input).flatMap(tx =>
-    tx.type === 'accountInput' && (accountInputProposal(tx.data) || accountInputAck(tx.data))
-      ? [tx.data]
-      : []);
+    tx.type === 'accountInput' && (accountInputProposal(tx.data) || accountInputAck(tx.data)) ? [tx.data] : [],
+  );
   return accountInputs.flatMap(accountInput => {
     const counterpartyEntityId = accountInput.fromEntityId.toLowerCase();
-    const account = [...replica.state.accounts.entries()].find(([entityId]) =>
-      entityId.toLowerCase() === counterpartyEntityId)?.[1];
+    const account = [...replica.state.accounts.entries()].find(
+      ([entityId]) => entityId.toLowerCase() === counterpartyEntityId,
+    )?.[1];
     // A rejected genesis frame commits no Account while the surrounding
     // Entity input may still commit its warning. Absence is negative evidence
     // for atomic cross-J admission, not a Runtime invariant failure.
@@ -199,26 +182,33 @@ const collectCommittedAccountFrames = (
     const finalStateHash = String(account.currentFrame.stateHash || '').toLowerCase();
     const proposal = accountInputProposal(accountInput);
     const ack = accountInputAck(accountInput);
-    const proposalCommitted = proposal?.frame.height === finalHeight &&
-      String(proposal.frame.stateHash || '').toLowerCase() === finalStateHash;
-    const ackCommitted = ack && (
-      (ack.height === finalHeight && String(ack.frameHash || '').toLowerCase() === finalStateHash) ||
-      (proposalCommitted &&
-        proposal.frame.height === ack.height + 1 &&
-        String(proposal.frame.prevFrameHash || '').toLowerCase() ===
-          String(ack.frameHash || '').toLowerCase())
-    );
+    const proposalCommitted =
+      proposal?.frame.height === finalHeight && String(proposal.frame.stateHash || '').toLowerCase() === finalStateHash;
+    const ackCommitted =
+      ack &&
+      ((ack.height === finalHeight && String(ack.frameHash || '').toLowerCase() === finalStateHash) ||
+        (proposalCommitted &&
+          proposal.frame.height === ack.height + 1 &&
+          String(proposal.frame.prevFrameHash || '').toLowerCase() === String(ack.frameHash || '').toLowerCase()));
     return [
-      ...(ackCommitted ? [{
-        counterpartyEntityId,
-        height: ack.height,
-        stateHash: String(ack.frameHash || '').toLowerCase(),
-      }] : []),
-      ...(proposalCommitted ? [{
-        counterpartyEntityId,
-        height: proposal.frame.height,
-        stateHash: String(proposal.frame.stateHash || '').toLowerCase(),
-      }] : []),
+      ...(ackCommitted
+        ? [
+            {
+              counterpartyEntityId,
+              height: ack.height,
+              stateHash: String(ack.frameHash || '').toLowerCase(),
+            },
+          ]
+        : []),
+      ...(proposalCommitted
+        ? [
+            {
+              counterpartyEntityId,
+              height: proposal.frame.height,
+              stateHash: String(proposal.frame.stateHash || '').toLowerCase(),
+            },
+          ]
+        : []),
     ];
   });
 };
@@ -308,17 +298,11 @@ const drainImmediateCrossJurisdictionOutputs = async (
         `RUNTIME_CROSS_J_EVENT_CASCADE_LIMIT:rounds=${localEventRound}:events=${context.localEventCount}`,
       );
     }
-    const actualSignerId = resolveEntityProposerId(
-      env,
-      command.targetEntityId,
-      'cross-j local command',
-    ).trim();
+    const actualSignerId = resolveEntityProposerId(env, command.targetEntityId, 'cross-j local command').trim();
     const entityInput = crossJCommandToEntityInput(command, actualSignerId);
     const fingerprint = safeStringify(command);
     if (localEventFingerprints.has(fingerprint)) {
-      throw new Error(
-        `RUNTIME_CROSS_J_EVENT_CYCLE:round=${localEventRound}:entity=${entityInput.entityId}`,
-      );
+      throw new Error(`RUNTIME_CROSS_J_EVENT_CYCLE:round=${localEventRound}:entity=${entityInput.entityId}`);
     }
     localEventFingerprints.add(fingerprint);
     const startedAt = getPerfMs();
@@ -352,9 +336,7 @@ const drainImmediateCrossJurisdictionOutputs = async (
     );
     context.localCrossJurisdictionEventTrace.push(result.appliedInput);
     if (result.outcome.kind !== 'committed') {
-      const detail = result.outcome.kind === 'rejected'
-        ? result.outcome.code
-        : result.outcome.reason;
+      const detail = result.outcome.kind === 'rejected' ? result.outcome.code : result.outcome.reason;
       entityInputLog.error('crossj.local_event_not_applied', {
         entity: entityInput.entityId,
         signer: actualSignerId,
@@ -371,29 +353,17 @@ const drainImmediateCrossJurisdictionOutputs = async (
     context.entityFrameCommitted ||= result.entityFrameCommitted;
     const elapsedMs = Math.round(getPerfMs() - startedAt);
     context.immediateCrossJApplyMs += elapsedMs;
-    recordEntityInputProfile(
-      context,
-      entityInput,
-      actualSignerId,
-      elapsedMs,
-      result,
-      { localEventRound },
-    );
+    recordEntityInputProfile(context, entityInput, actualSignerId, elapsedMs, result, { localEventRound });
     collectCommittedEntityResult(env, replicaKey, result, context);
   }
 };
 
-const assertExternalEntityInputAllowed = (
-  env: RuntimeState,
-  entityInput: RoutedEntityInput,
-): void => {
+const assertExternalEntityInputAllowed = (env: RuntimeState, entityInput: RoutedEntityInput): void => {
   if (
     entityInput.localRuntimeProtocol === 'cross-j' ||
     (entityInput.entityTxs ?? []).some(tx => tx.type === 'runtimeOutput')
   ) {
-    throw new Error(
-      `RUNTIME_CROSS_J_EXTERNAL_INGRESS_FORBIDDEN:entity=${entityInput.entityId}`,
-    );
+    throw new Error(`RUNTIME_CROSS_J_EXTERNAL_INGRESS_FORBIDDEN:entity=${entityInput.entityId}`);
   }
   if (!entityInput.from || !entityInputHasCrossJurisdictionIntraRuntimeTx(entityInput)) return;
   const details = {
@@ -415,18 +385,14 @@ const resolveEntityInputReplica = (
   entityInput: RoutedEntityInput,
 ): { signerId: string; replicaKey: string; replica: EntityReplica } => {
   const signerId = entityInput.signerId.trim();
-  assertRuntimeIngress(
-    signerId.length > 0,
-    'RUNTIME_SIGNER_MISSING',
-    'Entity input missing mandatory signerId',
-    { entityId: entityInput.entityId, providedSignerId: entityInput.signerId },
-  );
+  assertRuntimeIngress(signerId.length > 0, 'RUNTIME_SIGNER_MISSING', 'Entity input missing mandatory signerId', {
+    entityId: entityInput.entityId,
+    providedSignerId: entityInput.signerId,
+  });
 
   let replicaKey = `${entityInput.entityId}:${signerId}`;
   let replica = env.eReplicas.get(replicaKey);
-  const localReplicaKeys = replica
-    ? []
-    : findReplicaKeysForEntityInsensitive(env, entityInput.entityId);
+  const localReplicaKeys = replica ? [] : findReplicaKeysForEntityInsensitive(env, entityInput.entityId);
   if (!replica) {
     const signerNorm = signerId.toLowerCase();
     const match = localReplicaKeys.find(key => {
@@ -460,12 +426,17 @@ const resolveEntityInputReplica = (
   if (!replica && localReplicaKeys.length === 1 && txTypes.length === 0) {
     replicaKey = localReplicaKeys[0]!;
     replica = env.eReplicas.get(replicaKey);
-    env.warn('network', 'ENTITY_INPUT_SIGNER_HINT_RETARGETED', {
-      entityId: entityInput.entityId,
-      inputSignerId: entityInput.signerId,
-      resolvedReplicaKey: replicaKey,
-      txTypes,
-    }, entityInput.entityId);
+    env.warn(
+      'network',
+      'ENTITY_INPUT_SIGNER_HINT_RETARGETED',
+      {
+        entityId: entityInput.entityId,
+        inputSignerId: entityInput.signerId,
+        resolvedReplicaKey: replicaKey,
+        txTypes,
+      },
+      entityInput.entityId,
+    );
   }
   if (!replica) {
     const details = {
@@ -492,7 +463,6 @@ const applyExternalEntityInput = async (
   options: RuntimeEntityInputApplyOptions,
   context: RuntimeEntityInputBatchContext,
 ): Promise<void> => {
-  assertExternalEntityInputAllowed(env, entityInput);
   const startedAt = getPerfMs();
   if (options.isReplay) {
     entityInputLog.debug('replay.merged_input', {
@@ -502,16 +472,25 @@ const applyExternalEntityInput = async (
       types: (entityInput.entityTxs ?? []).map(tx => tx.type),
     });
   }
-  const { signerId, replicaKey, replica } = resolveEntityInputReplica(env, entityInput);
+  let resolved: ReturnType<typeof resolveEntityInputReplica>;
+  try {
+    assertExternalEntityInputAllowed(env, entityInput);
+    resolved = resolveEntityInputReplica(env, entityInput);
+  } catch (error) {
+    // Admission and replica resolution are part of the authenticated Entity
+    // input boundary. Preserve the input's transport provenance here: a
+    // malformed remote envelope may be quarantined, while the identical error
+    // from locally generated work is an invariant failure and must halt.
+    throw new RuntimeEntityInputApplyError(
+      entityInput,
+      false,
+      error,
+      entityInput.from ? 'malformed-ingress' : 'local-bug',
+    );
+  }
+  const { signerId, replicaKey, replica } = resolved;
   options.beforeEntityApply?.(entityInput.entityId);
-  const result = await applyEntityInputToReplica(
-    env,
-    replica,
-    replicaKey,
-    entityInput,
-    signerId,
-    options.isReplay,
-  );
+  const result = await applyEntityInputToReplica(env, replica, replicaKey, entityInput, signerId, options.isReplay);
   context.inputOutcomes.push({
     inputIndex,
     outcome: result.outcome,
@@ -524,20 +503,10 @@ const applyExternalEntityInput = async (
   if (isCommittedEntityInput(result.outcome) && entityInput.from) {
     const routeHints = new Set([
       ...collectAppliedAccountSenderHints(entityInput),
-      ...collectCrossJurisdictionRemoteEntityHints(
-        env,
-        entityInput,
-        entityInput.from,
-        options.routingDeps,
-      ),
+      ...collectCrossJurisdictionRemoteEntityHints(env, entityInput, entityInput.from, options.routingDeps),
     ]);
     for (const hintedEntityId of routeHints) {
-      registerEntityRuntimeHintWithDeps(
-        env,
-        hintedEntityId,
-        entityInput.from,
-        options.routingDeps,
-      );
+      registerEntityRuntimeHintWithDeps(env, hintedEntityId, entityInput.from, options.routingDeps);
     }
   }
   const elapsedMs = Math.round(getPerfMs() - startedAt);
@@ -563,9 +532,7 @@ export const applyMergedEntityInputs = async (
     const currentPair = entityInput.atomicCrossJurisdictionPair;
     const nextPair = mergedInputs[inputIndex + 1]?.atomicCrossJurisdictionPair;
     const nextInputCompletesCurrentPair = Boolean(
-      currentPair &&
-      nextPair?.phase === currentPair.phase &&
-      nextPair.pairKey === currentPair.pairKey,
+      currentPair && nextPair?.phase === currentPair.phase && nextPair.pairKey === currentPair.pairKey,
     );
     // Both signed Account legs must exist in scratch state before matching or
     // any other immediate cross-j effect can observe either leg. Runtime has
@@ -587,10 +554,7 @@ export const applyMergedEntityInputs = async (
       phaseTotals: {
         externalApply: context.externalApplyMs,
         immediateCrossJApply: context.immediateCrossJApplyMs,
-        remainder: Math.max(
-          0,
-          elapsedMs - context.externalApplyMs - context.immediateCrossJApplyMs,
-        ),
+        remainder: Math.max(0, elapsedMs - context.externalApplyMs - context.immediateCrossJApplyMs),
       },
       slowInputs: context.profiledInputs
         .sort((left, right) => Number(right['elapsedMs'] || 0) - Number(left['elapsedMs'] || 0))
@@ -610,11 +574,7 @@ const didCommitEntityFrame = (
   const priorHeight = Number(priorReplica.state.height);
   const nextHeight = Number(nextReplica.state.height);
   if (nextHeight === priorHeight) return false;
-  if (
-    !Number.isSafeInteger(priorHeight) ||
-    !Number.isSafeInteger(nextHeight) ||
-    nextHeight !== priorHeight + 1
-  ) {
+  if (!Number.isSafeInteger(priorHeight) || !Number.isSafeInteger(nextHeight) || nextHeight !== priorHeight + 1) {
     throw new Error(`ENTITY_FRAME_HEIGHT_TRANSITION_INVALID:${priorHeight}:${nextHeight}`);
   }
   return true;
@@ -629,44 +589,35 @@ const preserveAppliedRoutedProvenance = (
   signerId,
   ...(routedInput.runtimeId !== undefined ? { runtimeId: routedInput.runtimeId } : {}),
   ...(routedInput.from !== undefined ? { from: routedInput.from } : {}),
-  ...(routedInput.sourceRuntimeFrame
-    ? { sourceRuntimeFrame: { ...routedInput.sourceRuntimeFrame } }
-    : {}),
+  ...(routedInput.sourceRuntimeFrame ? { sourceRuntimeFrame: { ...routedInput.sourceRuntimeFrame } } : {}),
   ...(routedInput.atomicCrossJurisdictionPair
     ? { atomicCrossJurisdictionPair: { ...routedInput.atomicCrossJurisdictionPair } }
     : {}),
 });
 
-const normalizeEntityInputForReplica = (
-  entityInput: RoutedEntityInput,
-  signerId: string,
-): EntityInput => ({
+const normalizeEntityInputForReplica = (entityInput: RoutedEntityInput, signerId: string): EntityInput => ({
   entityId: entityInput.entityId,
   signerId,
   ...(entityInput.entityTxs ? { entityTxs: entityInput.entityTxs } : {}),
   ...(entityInput.proposedFrame ? { proposedFrame: entityInput.proposedFrame } : {}),
   ...(entityInput.hashPrecommitFrame ? { hashPrecommitFrame: entityInput.hashPrecommitFrame } : {}),
   ...(entityInput.hashPrecommits ? { hashPrecommits: entityInput.hashPrecommits } : {}),
-  ...(entityInput.jPrefixAttestations
-    ? { jPrefixAttestations: entityInput.jPrefixAttestations }
-    : {}),
+  ...(entityInput.jPrefixAttestations ? { jPrefixAttestations: entityInput.jPrefixAttestations } : {}),
   ...(entityInput.leaderTimeoutVote ? { leaderTimeoutVote: entityInput.leaderTimeoutVote } : {}),
 });
 
-const decodeEntityOutputs = (
-  outputs: unknown[],
-  replicaKey: string,
-): RoutedEntityInput[] => outputs.map((output, index) => {
-  try {
-    return decodeRoutedEntityOutput(output);
-  } catch (error) {
-    logError('RUNTIME_TICK', `🚨 CRITICAL FINANCIAL ERROR: Invalid EntityOutput[${index}] from ${replicaKey}!`, {
-      error: (error as Error).message,
-      output,
-    });
-    throw error;
-  }
-});
+const decodeEntityOutputs = (outputs: unknown[], replicaKey: string): RoutedEntityInput[] =>
+  outputs.map((output, index) => {
+    try {
+      return decodeRoutedEntityOutput(output);
+    } catch (error) {
+      logError('RUNTIME_TICK', `🚨 CRITICAL FINANCIAL ERROR: Invalid EntityOutput[${index}] from ${replicaKey}!`, {
+        error: (error as Error).message,
+        output,
+      });
+      throw error;
+    }
+  });
 
 const applyEntityInputToReplica = async (
   env: RuntimeState,
@@ -707,16 +658,10 @@ const applyEntityInputToReplica = async (
       env,
       entityReplica,
       normalizedInput,
-      trustedLocalCrossJurisdiction
-        ? { trustedLocalRuntimeProtocol: 'cross-j' }
-        : undefined,
+      trustedLocalCrossJurisdiction ? { trustedLocalRuntimeProtocol: 'cross-j' } : undefined,
     );
   } catch (error) {
-    throw new RuntimeEntityInputApplyError(
-      entityInput,
-      trustedLocalCrossJurisdiction,
-      error,
-    );
+    throw new RuntimeEntityInputApplyError(entityInput, trustedLocalCrossJurisdiction, error);
   }
   const { outcome, newState, outputs, jOutputs, workingReplica, canonicalAppliedInput } = applied;
   // Consensus may canonicalize the applied body (for example, signing a local
@@ -730,10 +675,12 @@ const applyEntityInputToReplica = async (
     actualSignerId,
   );
   const committed = isCommittedEntityInput(outcome);
-  const nextReplica: EntityReplica = committed ? {
-    ...workingReplica,
-    state: newState,
-  } : entityReplica;
+  const nextReplica: EntityReplica = committed
+    ? {
+        ...workingReplica,
+        state: newState,
+      }
+    : entityReplica;
   const entityFrameCommitted = didCommitEntityFrame(entityReplica, nextReplica, outcome);
 
   return {
@@ -764,27 +711,29 @@ const findReplicaKeyInsensitive = (env: RuntimeState, entityId: string, signerId
 
 const findReplicaKeysForEntityInsensitive = (env: RuntimeState, entityId: string): string[] => {
   const entityNorm = String(entityId || '').toLowerCase();
-  return Array.from(env.eReplicas.keys()).filter((key) => {
+  return Array.from(env.eReplicas.keys()).filter(key => {
     const [repEntityId] = String(key).split(':');
     return Boolean(repEntityId && String(repEntityId).toLowerCase() === entityNorm);
   });
 };
 
-const normalizeRuntimeRef = (value: unknown): string => String(value || '').trim().toLowerCase();
+const normalizeRuntimeRef = (value: unknown): string =>
+  String(value || '')
+    .trim()
+    .toLowerCase();
 
 type CrossJCommandEnvelope = RoutedEntityInput & {
   entityTxs: [Extract<EntityTx, { type: 'runtimeOutput' }>];
 };
 
-const isCrossJCommandEnvelope = (output: RoutedEntityInput): output is CrossJCommandEnvelope => (
+const isCrossJCommandEnvelope = (output: RoutedEntityInput): output is CrossJCommandEnvelope =>
   !output.proposedFrame &&
   !output.hashPrecommits &&
   !output.leaderTimeoutVote &&
   Array.isArray(output.entityTxs) &&
   output.entityTxs.length === 1 &&
   output.entityTxs[0]?.type === 'runtimeOutput' &&
-  output.entityTxs[0].data.protocol === 'cross-j'
-);
+  output.entityTxs[0].data.protocol === 'cross-j';
 
 const decodeCrossJCommand = (env: RuntimeState, output: RoutedEntityInput): CrossJCommand => {
   if (!isCrossJCommandEnvelope(output)) {
@@ -800,8 +749,12 @@ const decodeCrossJCommand = (env: RuntimeState, output: RoutedEntityInput): Cros
     throw new Error(`RUNTIME_CROSS_J_COMMAND_REMOTE_SOURCE_FORBIDDEN:${fromRuntimeId}`);
   }
   const wrapper = output.entityTxs[0];
-  const sourceEntityId = String(wrapper.data.sourceEntityId || '').trim().toLowerCase();
-  const targetEntityId = String(wrapper.data.targetEntityId || '').trim().toLowerCase();
+  const sourceEntityId = String(wrapper.data.sourceEntityId || '')
+    .trim()
+    .toLowerCase();
+  const targetEntityId = String(wrapper.data.targetEntityId || '')
+    .trim()
+    .toLowerCase();
   if (!sourceEntityId || !targetEntityId || targetEntityId !== String(output.entityId || '').toLowerCase()) {
     throw new Error(
       `RUNTIME_CROSS_J_COMMAND_ROUTE_INVALID:source=${sourceEntityId || 'missing'}:` +
@@ -821,19 +774,18 @@ const decodeCrossJCommand = (env: RuntimeState, output: RoutedEntityInput): Cros
   };
 };
 
-const crossJCommandToEntityInput = (
-  command: CrossJCommand,
-  proposerSignerId: string,
-): RoutedEntityInput => ({
+const crossJCommandToEntityInput = (command: CrossJCommand, proposerSignerId: string): RoutedEntityInput => ({
   entityId: command.targetEntityId,
   signerId: proposerSignerId,
-  entityTxs: [{
-    type: 'runtimeOutput',
-    data: {
-      protocol: 'cross-j',
-      sourceEntityId: command.sourceEntityId,
-      targetEntityId: command.targetEntityId,
-      entityTxs: structuredClone(command.entityTxs),
+  entityTxs: [
+    {
+      type: 'runtimeOutput',
+      data: {
+        protocol: 'cross-j',
+        sourceEntityId: command.sourceEntityId,
+        targetEntityId: command.targetEntityId,
+        entityTxs: structuredClone(command.entityTxs),
+      },
     },
-  }],
+  ],
 });

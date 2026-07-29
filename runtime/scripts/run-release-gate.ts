@@ -85,6 +85,11 @@ const quickSteps: GateStep[] = [
   { name: 'release integrity tests', command: 'bun run test:release-integrity', timeoutMs: 30_000 },
   { name: 'runtime core unit tests', command: `bun test ${RUNTIME_CORE_TESTS}`, timeoutMs: 180_000 },
   {
+    name: 'bilateral same-height collision',
+    command: 'bun run test:consensus:collision',
+    timeoutMs: 120_000,
+  },
+  {
     name: 'runtime soundcheck',
     command: `bun tools/soundcheck.ts --skip-tests ${SOUNDCHECK_TARGETS}`,
     timeoutMs: 180_000,
@@ -135,8 +140,9 @@ const profileSteps: Record<GateProfile, GateStep[]> = {
 
 function parseProfile(): GateProfile {
   const args = process.argv.slice(2);
-  const explicit = args.find(arg => arg.startsWith('--profile='))?.split('=')[1]
-    || args.find(arg => arg === '--quick' || arg === '--ci' || arg === '--release')?.slice(2);
+  const explicit =
+    args.find(arg => arg.startsWith('--profile='))?.split('=')[1] ||
+    args.find(arg => arg === '--quick' || arg === '--ci' || arg === '--release')?.slice(2);
   if (explicit === 'quick' || explicit === 'ci' || explicit === 'release') return explicit;
   if (process.env['CI'] === 'true') return 'ci';
   return 'quick';
@@ -233,7 +239,7 @@ async function main(): Promise<void> {
   printSummary(profile, results);
 }
 
-main().catch((error) => {
+main().catch(error => {
   console.error('Release gate runner failed:', error instanceof Error ? error.stack || error.message : String(error));
   process.exit(1);
 });
