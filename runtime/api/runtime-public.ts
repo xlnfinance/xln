@@ -15,10 +15,10 @@ export type {
 } from '../account/swap-inbound-plan';
 export {
   assertCrossJurisdictionSwapTargetReady,
-  assertCrossJurisdictionSwapTargetReadyInEnv,
   buildDeterministicSwapOfferId,
   planSwapCommand,
 } from '../account/swap-command-plan';
+export { assertCrossJurisdictionSwapTargetReadyInEnv } from '../runtime/swap-target-readiness';
 export type {
   CrossJurisdictionSwapCommandPlan,
   SameJurisdictionSwapCommandPlan,

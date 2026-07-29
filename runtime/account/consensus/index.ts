@@ -5,7 +5,7 @@
 
 import type { AccountReplica, AccountDisputeSeal, AccountFrame, AccountInput, AccountPeerInput, Delta } from '../../types/account';
 import type { AccountOutput } from '../../types/account';
-import type { RuntimeState } from '../../types';
+import type { AccountConsensusContext } from './context';
 import { cloneAccountFrame, cloneAccountState } from '../state-clone';
 import { getAccountPerspective } from '../perspective';
 import { HEAVY_LOGS } from '../../infra/debug-flags';
@@ -16,7 +16,7 @@ import { createFrameHash } from './frame';
 import { normalizeAccountWatchSeed } from '../../protocol/account-watch-seed';
 import {
   assertNoUnilateralSettlementMutation,
-  buildAccountProofBodyFromEnv,
+  buildAccountProofBodyFromJurisdictions,
   captureSettlementVector,
   getAccountStateDomain,
   runPostFrameAutoRebalanceCheck,
@@ -90,7 +90,7 @@ type AccountSwapCancelRequest = { offerId: string; accountId: string };
 
 type IncomingFrameValidation = {
   clonedMachine: AccountReplica;
-  proofResult: ReturnType<typeof buildAccountProofBodyFromEnv>;
+  proofResult: ReturnType<typeof buildAccountProofBodyFromJurisdictions>;
   processEvents: string[];
   revealedSecrets: AccountRevealedSecret[];
   swapOffersCreated: AccountSwapOfferCreated[];
@@ -210,7 +210,7 @@ type IncomingFrameReplayResult =
   { kind: 'continue'; replay: IncomingFrameReplay } | { kind: 'return'; result: HandleAccountInputResult };
 
 const replayIncomingFrameOnClone = async (
-  env: RuntimeState,
+  context: AccountConsensusContext,
   clonedMachine: AccountReplica,
   input: AccountInput,
   receivedFrame: AccountFrame,
@@ -236,7 +236,7 @@ const replayIncomingFrameOnClone = async (
       receivedFrame.timestamp,
       frameJHeight,
       true,
-      env,
+      context,
       jClaimSession,
       securityContext.counterpartyCertifiedBoardHash,
     );
@@ -273,7 +273,7 @@ const replayIncomingFrameOnClone = async (
 };
 
 async function validateIncomingFrameOnClone(
-  env: RuntimeState,
+  context: AccountConsensusContext,
   account: AccountReplica,
   input: AccountInput,
   receivedFrame: AccountFrame,
@@ -285,14 +285,14 @@ async function validateIncomingFrameOnClone(
   securityContext: AccountInputSecurityContext,
 ): Promise<IncomingFrameValidationResult> {
   const clonedMachine = cloneAccountState(account);
-  const jClaimSession = createAccountJClaimSession(env, accountJClaimNodeStore);
+  const jClaimSession = createAccountJClaimSession(accountJClaimNodeStore);
 
   accountLog.debug('frame.receiver_validate', {
     height: receivedFrame.height,
     txs: receivedFrame.accountTxs.map(tx => tx.type),
   });
   const replayResult = await replayIncomingFrameOnClone(
-    env,
+    context,
     clonedMachine,
     input,
     receivedFrame,
@@ -327,7 +327,7 @@ async function validateIncomingFrameOnClone(
     });
     return { kind: 'return', result: { success: false, error: 'Bilateral account state root mismatch', events } };
   }
-  const proofResult = buildAccountProofBodyFromEnv(env, clonedMachine);
+  const proofResult = buildAccountProofBodyFromJurisdictions(context, clonedMachine);
   const localProofBodyHash = proofResult.proofBodyHash;
   const frameSealError = getDisputeSealRequirementError(
     localProofBodyHash,
@@ -357,7 +357,7 @@ async function validateIncomingFrameOnClone(
 }
 
 const reexecuteIncomingFrame = async (
-  env: RuntimeState,
+  context: AccountConsensusContext,
   account: AccountReplica,
   receivedFrame: AccountFrame,
   frameJHeight: number,
@@ -374,7 +374,7 @@ const reexecuteIncomingFrame = async (
       receivedFrame.timestamp,
       frameJHeight,
       false,
-      env,
+      context,
       committedJClaims,
       securityContext.counterpartyCertifiedBoardHash,
     );
@@ -392,7 +392,7 @@ const reexecuteIncomingFrame = async (
 };
 
 async function commitIncomingFrameOnRealState(
-  env: RuntimeState,
+  context: AccountConsensusContext,
   account: AccountReplica,
   input: AccountInput,
   receivedFrame: AccountFrame,
@@ -415,7 +415,7 @@ async function commitIncomingFrameOnRealState(
   }
 
   await reexecuteIncomingFrame(
-    env,
+    context,
     account,
     receivedFrame,
     frameJHeight,
@@ -465,7 +465,6 @@ async function commitIncomingFrameOnRealState(
   events.push(`🤝 Accepted frame ${receivedFrame.height} from Entity ${input.fromEntityId.slice(-4)}`);
 
   const postCommitAutoRebalanceTxs = await runPostFrameAutoRebalanceCheck(
-    env,
     account,
     ourEntityId,
     input.fromEntityId,
@@ -497,7 +496,7 @@ type IncomingFrameAckMaterialResult =
 
 const storeAckProofSnapshot = (
   account: AccountReplica,
-  proofResult: ReturnType<typeof buildAccountProofBodyFromEnv>,
+  proofResult: ReturnType<typeof buildAccountProofBodyFromJurisdictions>,
   signedNonce: number,
 ): void => {
   account.disputeProofNoncesByHash ??= {};
@@ -542,7 +541,7 @@ async function buildIncomingFrameAckMaterial(
   account: AccountReplica,
   input: AccountInput,
   receivedFrame: AccountFrame,
-  ackProofResult: ReturnType<typeof buildAccountProofBodyFromEnv>,
+  ackProofResult: ReturnType<typeof buildAccountProofBodyFromJurisdictions>,
   events: string[],
 ): Promise<IncomingFrameAckMaterialResult> {
   const ackEntityId = account.proofHeader.fromEntity;
@@ -767,7 +766,7 @@ const classifyIncomingValidationFailure = (
 };
 
 async function handleIncomingAccountFrame(
-  env: RuntimeState,
+  context: AccountConsensusContext,
   account: AccountReplica,
   input: AccountPeerInput,
   normalizedInputHeight: number | undefined,
@@ -785,7 +784,6 @@ async function handleIncomingAccountFrame(
   }
 
   const preflight = await preflightIncomingAccountFrame(
-    env,
     account,
     input,
     normalizedInputHeight,
@@ -799,7 +797,7 @@ async function handleIncomingAccountFrame(
   }
 
   const validationResult = await validateIncomingFrameOnClone(
-    env,
+    context,
     account,
     input,
     preflight.receivedFrame,
@@ -819,7 +817,7 @@ async function handleIncomingAccountFrame(
   }
 
   await commitIncomingFrameOnRealState(
-    env,
+    context,
     account,
     input,
     preflight.receivedFrame,
@@ -849,7 +847,7 @@ async function handleIncomingAccountFrame(
 }
 
 type AccountInputSession = {
-  env: RuntimeState;
+  context: AccountConsensusContext;
   account: AccountReplica;
   input: AccountPeerInput;
   securityContext: AccountInputSecurityContext;
@@ -881,7 +879,7 @@ const handleAccountAckPhase = async (
   session: AccountInputSession,
 ): Promise<{ kind: 'continue'; ackProcessed: boolean } | { kind: 'return'; result: HandleAccountInputResult }> => {
   const {
-    env,
+    context,
     account,
     input,
     normalizedInputHeight,
@@ -895,7 +893,6 @@ const handleAccountAckPhase = async (
   let disputeSeal: ValidatedCounterpartyDisputeSeal | undefined;
   try {
     disputeSeal = await validateCounterpartyDisputeSeal(
-      env,
       account,
       input,
       accountInputAck(input)?.disputeSeal,
@@ -910,7 +907,7 @@ const handleAccountAckPhase = async (
   }
   const { ackHeight } = resolveAccountAckTarget(account, input, normalizedInputHeight);
   const pending = await handlePendingFrameAck(
-    env,
+    context,
     account,
     input,
     ackHeight,
@@ -937,13 +934,12 @@ const handleAccountAckPhase = async (
 };
 
 const handleStandaloneDispute = async (session: AccountInputSession): Promise<HandleAccountInputResult> => {
-  const { env, account, input, securityContext, events } = session;
+  const { account, input, securityContext, events } = session;
   if (input.kind !== 'dispute') {
     throw new Error(`ACCOUNT_DISPUTE_PHASE_KIND_INVALID:${input.kind}`);
   }
   try {
     const seal = await validateCounterpartyDisputeSeal(
-      env,
       account,
       input,
       input.disputeSeal,
@@ -962,7 +958,7 @@ const handleAccountProposalPhase = async (
   ackProcessed: boolean,
 ): Promise<HandleAccountInputResult | null> => {
   const {
-    env,
+    context,
     account,
     input,
     normalizedInputHeight,
@@ -977,7 +973,6 @@ const handleAccountProposalPhase = async (
   let disputeSeal: ValidatedCounterpartyDisputeSeal | undefined;
   try {
     disputeSeal = await validateCounterpartyDisputeSeal(
-      env,
       account,
       input,
       accountInputProposal(input)?.disputeSeal,
@@ -989,7 +984,7 @@ const handleAccountProposalPhase = async (
   }
   if (input.kind === 'dispute') return handleStandaloneDispute(session);
   const incoming = await handleIncomingAccountFrame(
-    env,
+    context,
     account,
     input,
     normalizedInputHeight,
@@ -1014,25 +1009,26 @@ const handleAccountProposalPhase = async (
  * mutation remain in the phase handlers above.
  */
 const resolveAccountInputSecurityContext = (
-  env: RuntimeState,
+  context: AccountConsensusContext,
   account: AccountReplica,
   provided: AccountInputSecurityContext | undefined,
 ): AccountInputSecurityContext =>
-  provided ?? {
-    entityTimestamp: env.timestamp,
-    owningEntityIsHub: false,
-    // Account never reaches upward into Entity replicas. Normal Entity routing
-    // supplies the current certified height explicitly; direct Account tooling
-    // can only rely on this Account's own committed observation.
-    finalizedJHeight: account.lastFinalizedJHeight ?? 0,
-  };
+  ({
+    ...(provided ?? {
+      entityTimestamp: context.runtimeTimestamp,
+      owningEntityIsHub: false,
+      // Account never reaches upward into Entity replicas. Normal Entity
+      // routing supplies the current certified height explicitly.
+      finalizedJHeight: account.lastFinalizedJHeight ?? 0,
+    }),
+    verifyHanko: context.verifyHanko,
+  });
 
 export async function applyAccountInput(
-  env: RuntimeState,
+  context: AccountConsensusContext,
   account: AccountReplica,
   input: AccountInput,
   providedSecurityContext?: AccountInputSecurityContext,
-  accountJClaimNodeStore?: AccountJClaimNodeStore,
 ): Promise<HandleAccountInputResult> {
   const envelopeError = getAccountInputEnvelopeError(account, input);
   if (envelopeError) {
@@ -1051,7 +1047,8 @@ export async function applyAccountInput(
       ),
     };
   }
-  const securityContext = resolveAccountInputSecurityContext(env, account, providedSecurityContext);
+  const accountJClaimNodeStore = context.jClaimNodeStore;
+  const securityContext = resolveAccountInputSecurityContext(context, account, providedSecurityContext);
   if (input.watchSeed !== undefined) {
     const inputWatchSeed = normalizeAccountWatchSeed(input.watchSeed, 'ACCOUNT_INPUT');
     if (account.watchSeed.toLowerCase() !== inputWatchSeed) {
@@ -1071,10 +1068,10 @@ export async function applyAccountInput(
   if (disputeHankoShapeError) {
     return { success: false, error: disputeHankoShapeError, events };
   }
-  const boardReseal = await handleBoardReseal(env, account, input, securityContext);
+  const boardReseal = await handleBoardReseal(account, input, securityContext);
   if (boardReseal) {
     const session = {
-      env,
+      context,
       account,
       input,
       securityContext,
@@ -1083,7 +1080,7 @@ export async function applyAccountInput(
       events,
       timedOutHashlocks: [],
       committedFrames: [],
-      committedJClaims: createAccountJClaimSession(env, accountJClaimNodeStore),
+      committedJClaims: createAccountJClaimSession(accountJClaimNodeStore),
       candidateEffects: [],
     };
     return finishAccountInput(session, boardReseal);
@@ -1092,7 +1089,7 @@ export async function applyAccountInput(
   const replayGateResult = await handleReplayOrObsoleteAccountInput(account, input, replay, events);
   if (replayGateResult) return replayGateResult;
   const session: AccountInputSession = {
-    env,
+    context,
     account,
     input,
     securityContext,
@@ -1101,7 +1098,7 @@ export async function applyAccountInput(
     events,
     timedOutHashlocks: [],
     committedFrames: [],
-    committedJClaims: createAccountJClaimSession(env, accountJClaimNodeStore),
+    committedJClaims: createAccountJClaimSession(accountJClaimNodeStore),
     candidateEffects: [],
   };
   const ack = await handleAccountAckPhase(session);

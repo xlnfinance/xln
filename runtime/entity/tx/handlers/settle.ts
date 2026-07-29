@@ -39,7 +39,7 @@ import {
   hasPendingSettlementTransition,
 } from '../../../account/tx/handlers/settle-transition';
 import { projectAccountAfterSettlement } from '../../../account/settlement-projection';
-import { buildAccountProofBodyFromEnv } from '../../../account/consensus/helpers';
+import { buildAccountProofBodyFromJurisdictions } from '../../../account/consensus/helpers';
 
 import type { AccountReplica } from '../../../types/account';
 
@@ -57,7 +57,7 @@ const buildPostSettlementDisputeProof = (
   if (!jurisdiction?.depositoryAddress) throw new Error('POST_SETTLEMENT_JURISDICTION_MISSING');
   const nonce = settlementNonce + 1;
   const projected = projectAccountAfterSettlement(account, diffs, forgiveTokenIds);
-  const { proofBodyHash } = buildAccountProofBodyFromEnv(env, projected);
+  const { proofBodyHash } = buildAccountProofBodyFromJurisdictions(env, projected);
   const disputeHash = createDisputeProofHashWithNonce(
     account,
     proofBodyHash,

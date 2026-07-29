@@ -1,11 +1,9 @@
-import type { RuntimeState } from '../types';
 import type {
   AccountJClaimMutationResult,
   AccountJClaimNode,
   AccountJClaimNodeChanges,
   AccountJClaimNodeStore,
 } from '../types/account-j-claims';
-import { getAccountJClaimNodeStore } from './j-claim-store';
 
 export type AccountJClaimSession = {
   readonly store: AccountJClaimNodeStore;
@@ -14,8 +12,7 @@ export type AccountJClaimSession = {
 };
 
 export const createAccountJClaimSession = (
-  env: RuntimeState,
-  base: AccountJClaimNodeStore = getAccountJClaimNodeStore(env),
+  base: AccountJClaimNodeStore,
 ): AccountJClaimSession => {
   const overlay = new Map<string, AccountJClaimNode>();
   const publishable = new Map<string, AccountJClaimNode>();

@@ -11,7 +11,7 @@ import {
   createDisputeProofHashWithNonce,
   hashProofBodyStruct,
 } from '../../../../protocol/dispute/proof-builder';
-import { buildAccountProofBodyFromEnv } from '../../../../account/consensus/helpers';
+import { buildAccountProofBodyFromJurisdictions } from '../../../../account/consensus/helpers';
 import {
   buildDisputeArgumentsForSnapshot,
   type DisputeArgumentSide,
@@ -56,7 +56,7 @@ export const selectFinalProof = (
   env: RuntimeState,
 ): FinalProofSelection | null => {
   const activeDispute = account.activeDispute!;
-  const currentProof = buildAccountProofBodyFromEnv(env, account);
+  const currentProof = buildAccountProofBodyFromJurisdictions(env, account);
   const counterHash = account.counterpartyDisputeProofBodyHash;
   const counterNonce = account.counterpartyDisputeProofNonce;
   const counterHanko = account.counterpartyDisputeProofHanko;

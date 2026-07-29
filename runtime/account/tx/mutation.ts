@@ -1,6 +1,6 @@
 import type { AccountReplica, AccountTx } from '../../types/account';
 import type { AccountOutput } from '../../types/account';
-import type { RuntimeState } from '../../types';
+import type { AccountConsensusContext } from '../consensus/context';
 import { getAccountPerspective } from '../perspective';
 import type { AccountJClaimSession } from '../j-claim-session';
 import { canProcessAccountTxForDisputeStatus } from '../consensus/dispute-policy';
@@ -42,7 +42,7 @@ type MutationContext = {
   timestamp: number;
   height: number;
   isValidation: boolean;
-  env?: RuntimeState;
+  consensusContext?: AccountConsensusContext;
   jClaimSession?: AccountJClaimSession;
   counterpartyCertifiedBoardHash?: string;
   candidateEffects: AccountOutput[];
@@ -93,7 +93,7 @@ const applyCollateralRequest = (context: MutationContext): ApplyAccountTxResult 
     prepaidFee: String(feeState?.feePaidUpfront ?? 0n),
     requestedAt: Number(feeState?.requestedAt ?? context.timestamp),
   };
-  if (context.env && !context.isValidation) {
+  if (context.consensusContext?.emitRuntimeEvents && !context.isValidation) {
     context.candidateEffects.push({
       kind: 'runtimeEvent',
       eventName: 'request_collateral_committed',
@@ -140,7 +140,7 @@ const applyJEventClaim = (context: MutationContext): ApplyAccountTxResult => {
   if (context.tx.type !== 'j_event_claim') {
     throw new Error('ACCOUNT_TX_ROUTE_MISMATCH:j_event_claim');
   }
-  if (!context.env || !context.jClaimSession) {
+  if (!context.consensusContext || !context.jClaimSession) {
     throw new Error('ACCOUNT_J_CLAIM_EXECUTION_CONTEXT_REQUIRED');
   }
   return handleJEventClaim(
@@ -151,7 +151,7 @@ const applyJEventClaim = (context: MutationContext): ApplyAccountTxResult => {
     context.isValidation,
     context.myEntityId,
     context.candidateEffects,
-    context.env,
+    context.consensusContext,
     context.jClaimSession,
   );
 };
@@ -179,7 +179,7 @@ export const applyAccountTxMutation = async (
   timestamp: number,
   height: number,
   isValidation: boolean,
-  env: RuntimeState | undefined,
+  consensusContext: AccountConsensusContext | undefined,
   jClaimSession: AccountJClaimSession | undefined,
   counterpartyCertifiedBoardHash: string | undefined,
   candidateEffects: AccountOutput[],
@@ -193,7 +193,7 @@ export const applyAccountTxMutation = async (
     timestamp,
     height,
     isValidation,
-    ...(env ? { env } : {}),
+    ...(consensusContext ? { consensusContext } : {}),
     ...(jClaimSession ? { jClaimSession } : {}),
     ...(counterpartyCertifiedBoardHash ? { counterpartyCertifiedBoardHash } : {}),
     candidateEffects,
@@ -251,7 +251,7 @@ export const applyAccountTxMutation = async (
         tx,
         byLeft,
         timestamp,
-        env,
+        consensusContext,
         counterpartyCertifiedBoardHash,
       );
     case 'account_frame': return rejectFrameOnlyTx(context);

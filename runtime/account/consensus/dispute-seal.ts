@@ -1,6 +1,4 @@
 import type { AccountPeerInput, AccountReplica } from '../../types/account';
-import type { RuntimeState } from '../../types';
-import { verifyHankoForHash } from '../../hanko/signing';
 import { createDisputeProofHashWithNonce } from '../../protocol/dispute/proof-builder';
 import { safeStringify } from '../../protocol/serialization';
 import { shortId } from '../../infra/logger';
@@ -52,7 +50,6 @@ export const replaceLocalDisputeDraft = (
  * domain and nonce before any witness is retained.
  */
 export const validateCounterpartyDisputeSeal = async (
-  env: RuntimeState,
   account: AccountReplica,
   input: AccountPeerInput,
   seal: ReturnType<typeof accountInputDisputeSeal>,
@@ -86,11 +83,10 @@ export const validateCounterpartyDisputeSeal = async (
     })}`);
   }
 
-  const { valid } = await verifyHankoForHash(
+  const { valid } = await securityContext.verifyHanko(
     seal.hanko,
     expectedHash,
     input.fromEntityId,
-    env,
     securityContext.counterpartyCertifiedBoardHash
       ? {
           registeredBoardHash: securityContext.counterpartyCertifiedBoardHash,

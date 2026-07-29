@@ -108,19 +108,19 @@ describe('account J-event validate/commit parity', () => {
   test('independently verifies both proofs, applies once, and retains no finalized body', () => {
     const runtime = env();
     const initial = machine();
-    const firstSession = createAccountJClaimSession(runtime);
+    const firstSession = createAccountJClaimSession(getAccountJClaimNodeStore(runtime));
     const leftClaim = prepareAccountJClaimTx(initial, rawClaim(), DOMAIN, firstSession);
     expect(handleJEventClaim(initial, leftClaim, true, 99, false, LEFT, [], runtime, firstSession).success)
       .toBe(true);
     cacheCommittedAccountJClaimNodeChanges(runtime, firstSession.changes());
     expect(initial.leftPendingJClaims.count).toBe(1n);
 
-    const proofSession = createAccountJClaimSession(runtime);
+    const proofSession = createAccountJClaimSession(getAccountJClaimNodeStore(runtime));
     const rightClaim = prepareAccountJClaimTx(initial, rawClaim(), DOMAIN, proofSession);
     const validation = structuredClone(initial);
     const commit = structuredClone(initial);
-    const validationSession = createAccountJClaimSession(runtime);
-    const commitSession = createAccountJClaimSession(runtime);
+    const validationSession = createAccountJClaimSession(getAccountJClaimNodeStore(runtime));
+    const commitSession = createAccountJClaimSession(getAccountJClaimNodeStore(runtime));
     const validationResult = handleJEventClaim(
       validation, rightClaim, false, 100, true, LEFT, [], runtime, validationSession,
     );

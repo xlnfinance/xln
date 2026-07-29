@@ -18,6 +18,7 @@ import type { RuntimeState } from '../types';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import { getPerfMs } from '../infra/time';
 import { createDefaultDelta } from '../account/delta';
+import { createAccountConsensusContext } from '../entity/account-consensus-context';
 
 type Cli = {
   swaps: number;
@@ -480,18 +481,28 @@ const expectInput = (input: AccountInput | undefined, context: string): AccountI
 
 const runConsensusRoundTrip = async (benchCase: BenchAccountCase, stages?: StageTotals): Promise<void> => {
   benchCase.proposer.mempool.push(...benchCase.txs);
+  const proposerContext = createAccountConsensusContext(benchCase.proposerEnv);
+  const receiverContext = createAccountConsensusContext(benchCase.receiverEnv);
   const proposeStartedAt = getPerfMs();
   const proposed = await proposeAccountFrame(
-    benchCase.proposerEnv,
+    proposerContext,
     benchCase.proposer,
     benchCase.proposerEnv.timestamp,
   );
   const receiveStartedAt = getPerfMs();
   if (!proposed.success) throw new Error(`${benchCase.kind}:propose_failed:${proposed.error}`);
-  const received = await applyAccountInput(benchCase.receiverEnv, benchCase.receiver, expectInput(proposed.accountInput, benchCase.kind));
+  const received = await applyAccountInput(
+    receiverContext,
+    benchCase.receiver,
+    expectInput(proposed.accountInput, benchCase.kind),
+  );
   const commitStartedAt = getPerfMs();
   if (!received.success) throw new Error(`${benchCase.kind}:receive_failed:${received.error}`);
-  const committed = await applyAccountInput(benchCase.proposerEnv, benchCase.proposer, expectInput(received.response, benchCase.kind));
+  const committed = await applyAccountInput(
+    proposerContext,
+    benchCase.proposer,
+    expectInput(received.response, benchCase.kind),
+  );
   const committedAt = getPerfMs();
   if (stages) {
     stages.propose += receiveStartedAt - proposeStartedAt;

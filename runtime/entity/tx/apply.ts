@@ -4,6 +4,8 @@ import type { RuntimeState } from '../../types';
 import type { JInput } from '../../jurisdiction/input';
 import type { EntityTx } from '../../types/entity-tx';
 import type { AccountJClaimNodeStore } from '../../types/account-j-claims';
+import type { AccountConsensusContext } from '../../account/consensus/context';
+import { createAccountConsensusContext } from '../account-consensus-context';
 import {
   applyAccountInputToEntity,
   type AccountTxTarget,
@@ -127,6 +129,7 @@ export interface ApplyEntityTxResult {
 }
 
 export interface ApplyEntityTxOptions {
+  accountConsensusContext?: AccountConsensusContext;
   mutableFrameState?: boolean;
   manualBroadcastInInput?: boolean;
   accountJClaimNodeStore?: AccountJClaimNodeStore;
@@ -135,6 +138,10 @@ export interface ApplyEntityTxOptions {
   /** Notification collector bound to the same candidate frame. */
   candidateEffects?: EntityCandidateEffect[];
 }
+
+type EntityTxExecutionOptions = ApplyEntityTxOptions & {
+  accountConsensusContext: AccountConsensusContext;
+};
 
 export type EntityTxReducerResult = Omit<ApplyEntityTxResult, 'storageChanges' | 'candidateEffects'> & {
   accountChanges?: string[];
@@ -145,7 +152,7 @@ type EntityTxDispatcher = (
   env: RuntimeState,
   entityState: EntityState,
   entityTx: EntityTx,
-  options?: ApplyEntityTxOptions,
+  options: EntityTxExecutionOptions,
 ) => Promise<EntityTxReducerResult> | EntityTxReducerResult;
 
 type ReducibleEntityTx = Exclude<
@@ -195,6 +202,7 @@ const handleJEventEntityTx: EntityTxDispatcher = async (
     entityState,
     entityTx.data,
     env,
+    options.accountConsensusContext,
     candidateEffects,
     options?.mutableFrameState,
   );
@@ -210,7 +218,13 @@ const handleJEventEntityTx: EntityTxDispatcher = async (
 
 const handleAccountInputEntityTx: EntityTxDispatcher = async (env, entityState, entityTx, options) => {
   if (entityTx.type !== 'accountInput') throw new Error(`ENTITY_TX_DISPATCH_MISMATCH: ${entityTx.type}`);
-  const result = await applyAccountInputToEntity(entityState, entityTx.data, env, options);
+  const result = await applyAccountInputToEntity(
+    entityState,
+    entityTx.data,
+    env,
+    options.accountConsensusContext,
+    options,
+  );
   return {
     newState: result.newState,
     outputs: result.outputs,
@@ -327,10 +341,10 @@ const entityTxDispatchers = {
   ),
   j_event: handleJEventEntityTx,
   accountInput: handleAccountInputEntityTx,
-  openAccount: (env, state, tx, options) => handleOpenAccountEntityTx(
-    env,
+  openAccount: (_env, state, tx, options) => handleOpenAccountEntityTx(
     state,
     tx as Extract<EntityTx, { type: 'openAccount' }>,
+    options.accountConsensusContext,
     options?.candidateEffects ?? [],
     options?.mutableFrameState,
   ),
@@ -539,6 +553,7 @@ export const applyEntityTx = async (
     const reducerCandidateEffects: EntityCandidateEffect[] = [];
     const { accountChanges = [], ...result } = await dispatcher(env, entityState, entityTx, {
       ...options,
+      accountConsensusContext: options?.accountConsensusContext ?? createAccountConsensusContext(env),
       storageChanges: reducerStorageChanges,
       candidateEffects: reducerCandidateEffects,
     });

@@ -10,7 +10,11 @@ import {
 } from '../account/consensus/dispute-policy';
 import { LIMITS } from '../config/constants';
 import type { AccountState, AccountTx } from '../types/account';
-import type { RuntimeState } from '../types';
+import { createEmptyEnv } from '../runtime';
+import { createAccountConsensusContext } from '../entity/account-consensus-context';
+
+const accountContext = () =>
+  createAccountConsensusContext(createEmptyEnv('account-local-tx-admission'));
 
 const PAYMENT: Extract<AccountTx, { type: 'direct_payment' }> = {
   type: 'direct_payment',
@@ -56,7 +60,7 @@ describe('account mempool multiplicity', () => {
     const input = createLocalAccountInput(account, '0xsender', [
       structuredClone(PAYMENT),
     ]);
-    const result = await applyAccountInput({} as RuntimeState, account, input, {
+    const result = await applyAccountInput(accountContext(), account, input, {
       entityTimestamp: 1,
       finalizedJHeight: 0,
       owningEntityIsHub: false,
@@ -132,7 +136,7 @@ describe('account mempool multiplicity', () => {
       structuredClone(PAYMENT),
     ]);
 
-    await expect(applyAccountInput({} as RuntimeState, account, input))
+    await expect(applyAccountInput(accountContext(), account, input))
       .rejects.toThrow('ACCOUNT_MEMPOOL_LIMIT_EXCEEDED');
     expect(account.mempool).toEqual(before);
   });
@@ -148,7 +152,7 @@ describe('account mempool multiplicity', () => {
       toEntityId: '0xthird-party',
     };
 
-    const result = await applyAccountInput({} as RuntimeState, account, input);
+    const result = await applyAccountInput(accountContext(), account, input);
     expect(result.success).toBe(false);
     expect(result.error).toContain('ACCOUNT_INPUT_PARTY_MISMATCH');
     expect(account.mempool).toEqual([]);

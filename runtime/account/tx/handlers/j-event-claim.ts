@@ -1,11 +1,14 @@
 import type { AccountReplica, AccountTx } from '../../../types/account';
 import type { AccountOutput } from '../../../types/account';
-import type { RuntimeState } from '../../../types';
 import type { AccountJClaimSession } from '../../j-claim-session';
 import { getAccountPerspective } from '../../perspective';
 import { applyAccountJClaimTransition } from '../../j-claim-transition';
 import { applyFinalizedAccountJEvents } from './j-event-finality';
-import { getAccountStateDomain, requireAccountDeltaTransformerAddress } from '../../consensus/helpers';
+import {
+  getAccountStateDomain,
+  requireAccountDeltaTransformerAddress,
+  type AccountJurisdictionView,
+} from '../../consensus/helpers';
 import { createStructuredLogger, shortHash } from '../../../infra/logger';
 
 const jEventClaimLog = createStructuredLogger('account.j_event');
@@ -18,7 +21,7 @@ export function handleJEventClaim(
   isValidation: boolean,
   myEntityId: string,
   candidateEffects: AccountOutput[],
-  env: RuntimeState,
+  jurisdictions: AccountJurisdictionView,
   session: AccountJClaimSession,
 ): { success: boolean; events: string[]; error?: string } {
   const { jHeight, jBlockHash } = accountTx.data;
@@ -49,7 +52,7 @@ export function handleJEventClaim(
     staged,
     counterparty,
     transition.events,
-    requireAccountDeltaTransformerAddress(env, staged),
+    requireAccountDeltaTransformerAddress(jurisdictions, staged),
   );
   staged.lastFinalizedJHeight = jHeight;
   Object.assign(account, staged);

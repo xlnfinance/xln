@@ -2164,8 +2164,8 @@ describe('audit fail-fast regressions', () => {
     } as never);
 
     const [withResult, withoutResult] = await Promise.all([
-      runPostFrameAutoRebalanceCheck(withSibling, structuredClone(account), entityId, hubId, 1, false),
-      runPostFrameAutoRebalanceCheck(withoutSibling, structuredClone(account), entityId, hubId, 1, false),
+      runPostFrameAutoRebalanceCheck(structuredClone(account), entityId, hubId, 1, false),
+      runPostFrameAutoRebalanceCheck(structuredClone(account), entityId, hubId, 1, false),
     ]);
 
     expect(withResult).toEqual(withoutResult);

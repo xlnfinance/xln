@@ -1,6 +1,7 @@
 import type { EntityCandidateEffect, EntityInput, EntityState, HashToSign } from '../types';
 import type { RuntimeState } from '../../types';
 import type { AccountReplica } from '../../types/account';
+import type { AccountConsensusContext } from '../../account/consensus/context';
 import type { DisputeFinalizationEvidence, JurisdictionEvent, JurisdictionEventData } from '../../types/jurisdiction-events';
 import type { ProofBodyStruct } from '../../protocol/dispute/proof-body';
 import { prepareEntityTxState } from '../state-clone';
@@ -13,7 +14,7 @@ import {
 } from '../../jurisdiction/event-observation';
 import { verifyAccountSignature } from '../../account/crypto';
 import { hashProofBodyStruct } from '../../protocol/dispute/proof-builder';
-import { buildAccountProofBodyFromEnv } from '../../account/consensus/helpers';
+import { buildAccountProofBodyFromJurisdictions } from '../../account/consensus/helpers';
 import {
   assertDisputeProofBodyWithinContractLimits,
   cloneJBatch,
@@ -167,6 +168,7 @@ const applyJRangeBlocks = async (
   signerId: string,
   signature: string,
   env: RuntimeState,
+  accountConsensusContext: AccountConsensusContext,
   candidateEffects: EntityCandidateEffect[],
   mutableFrameState: boolean,
 ): Promise<AppliedJRange> => {
@@ -208,6 +210,7 @@ const applyJRangeBlocks = async (
         state,
         event,
         env,
+        accountConsensusContext,
         block.disputeFinalizationEvidence ?? [],
         candidateEffects,
         true,
@@ -261,6 +264,7 @@ export const applyJEvent = async (
   entityState: EntityState,
   data: JurisdictionEventData,
   env: RuntimeState,
+  accountConsensusContext: AccountConsensusContext,
   candidateEffects: EntityCandidateEffect[] = [],
   mutableFrameState = false,
 ): Promise<JEventApplyResult> => {
@@ -300,6 +304,7 @@ export const applyJEvent = async (
     signerId,
     signature,
     env,
+    accountConsensusContext,
     candidateEffects,
     mutableFrameState,
   );
@@ -338,6 +343,7 @@ export type FinalizedJEventContext = {
   newState: EntityState;
   event: JurisdictionEvent;
   env: RuntimeState;
+  accountConsensusContext: AccountConsensusContext;
   blockNumber: number;
   transactionHash: string;
   accountTxs: JEventAccountTx[];
@@ -521,7 +527,7 @@ const initializeStartedDispute = (
   };
   account.jNonce = Math.max(account.jNonce, jNonce);
 
-  const localProof = buildAccountProofBodyFromEnv(env, account);
+  const localProof = buildAccountProofBodyFromJurisdictions(env, account);
   const onChainProofHash = String(account.activeDispute.initialProofbodyHash || '').toLowerCase();
   const storedProofKnown = Object.keys(account.disputeProofBodiesByHash ?? {})
     .some((hash) => hash.toLowerCase() === onChainProofHash);
@@ -725,7 +731,7 @@ async function applyDisputeFinalizedJEvent(
   context: FinalizedJEventContext,
   disputeFinalizationEvidence: DisputeFinalizationEvidence[],
 ): Promise<void> {
-  const { env, newState, event, dirtyAccounts } = context;
+  const { accountConsensusContext, newState, event, dirtyAccounts } = context;
   const data = event.data as DisputeFinalizedEventData;
   const accountContext = resolveDisputeAccountContext(
     newState,
@@ -773,7 +779,11 @@ async function applyDisputeFinalizedJEvent(
     resolved.finalizedJNonce,
     finalizedProof.tokenIds,
   );
-  const accountInputResult = await applyAccountInput(env, account, accountInput);
+  const accountInputResult = await applyAccountInput(
+    accountConsensusContext,
+    account,
+    accountInput,
+  );
   if (!accountInputResult.success || !accountInputResult.externalFinality) {
     throw new Error(
       `ACCOUNT_DISPUTE_FINALITY_INPUT_FAILED:${counterpartyId}:` +
@@ -808,6 +818,7 @@ async function applyFinalizedJEvent(
   entityState: EntityState,
   event: JurisdictionEvent,
   env: RuntimeState,
+  accountConsensusContext: AccountConsensusContext,
   disputeFinalizationEvidence: DisputeFinalizationEvidence[] = [],
   candidateEffects: EntityCandidateEffect[] = [],
   mutableFrameState = false,
@@ -831,6 +842,7 @@ async function applyFinalizedJEvent(
     newState,
     event,
     env,
+    accountConsensusContext,
     blockNumber,
     transactionHash,
     accountTxs,

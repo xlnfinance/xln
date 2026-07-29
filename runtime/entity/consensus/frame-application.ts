@@ -33,6 +33,7 @@ import { addMessages, clearEntityFrameEvents, readEntityFrameEvents } from '../f
 import type { AccountPeerInput, AccountReplica, AccountTx, RuntimeOverlayRecord } from '../../types/account';
 import type { EntityCandidateEffect, EntityFrameEvent, EntityOutput, EntityState, HashType } from '../types';
 import type { RuntimeState } from '../../types';
+import type { AccountConsensusContext } from '../../account/consensus/context';
 import type { JInput } from '../../jurisdiction/input';
 import type { EntityTx } from '../../types/entity-tx';
 import type { AccountJClaimNode, AccountJClaimNodeChanges, AccountJClaimNodeStore } from '../../types/account-j-claims';
@@ -81,6 +82,7 @@ import {
   refreshAccountWorkIndex,
 } from './account-work-index';
 import { applyAccountInput } from '../../account/consensus';
+import { createAccountConsensusContext } from '../account-consensus-context';
 import { createLocalAccountInput } from '../../account/input';
 import { assertEntityFrameTxByteBudget } from './frame';
 import { assignCertifiedOutputIdentities, verifyCertifiedEntityOutput } from './output-certification';
@@ -289,6 +291,7 @@ const applyRegularEntityTx = async (
     mutableFrameState: true,
     manualBroadcastInInput,
     accountJClaimNodeStore: context.accountJClaimNodeStore,
+    accountConsensusContext: context.accountConsensusContext,
   });
   if (result.skippedError) {
     throw new MalformedEntityFrameInputError(String(tx.type), result.skippedError);
@@ -341,6 +344,7 @@ async function applyEntityTxsInOrder(context: ApplyEntityTxsInOrderContext): Pro
 
 type ProposePendingAccountFramesContext = {
   env: RuntimeState;
+  accountConsensusContext: AccountConsensusContext;
   currentEntityState: EntityState;
   proposableAccounts: Set<string>;
   requiredAccountResponses: Map<string, AccountPeerInput>;
@@ -352,6 +356,7 @@ type ProposePendingAccountFramesContext = {
 
 async function materializeDeferredSettlementApprovals(
   env: RuntimeState,
+  accountConsensusContext: AccountConsensusContext,
   state: EntityState,
   proposableAccounts: Set<string>,
   collectedHashes: Array<{ hash: string; type: HashType; context: string }>,
@@ -389,7 +394,7 @@ async function materializeDeferredSettlementApprovals(
     if (account.mempool.length > 0 && !peerSealPinsAccountState) continue;
     const draft = buildSettlementSealDraft(account, state, accountId, env);
     const admission = await applyAccountInput(
-      env,
+      accountConsensusContext,
       account,
       createLocalAccountInput(account, state.entityId, [draft.tx]),
     );
@@ -462,11 +467,10 @@ const proposeAccountFrameCandidate = async (
   const { env, currentEntityState: state, collectedHashes, proposableAccounts, storageChanges } = context;
   if (!accountHasProposableMempool(account, state)) return undefined;
   const proposal = await proposeAccountFrame(
-    env,
+    context.accountConsensusContext,
     account,
     state.timestamp,
     state.lastFinalizedJHeight,
-    context.accountJClaimNodeStore,
     crossJOpeningProposalTxs,
   );
   if (proposal.accountChanged) recordFrameAccountChange(storageChanges, state.entityId, accountKey);
@@ -483,7 +487,7 @@ const proposeAccountFrameCandidate = async (
       const inboundAccount = state.accounts.get(route.inboundEntity);
       if (inboundAccount) {
         const admission = await applyAccountInput(
-          env,
+          context.accountConsensusContext,
           inboundAccount,
           createLocalAccountInput(inboundAccount, state.entityId, [{
           type: 'htlc_resolve',
@@ -615,6 +619,7 @@ async function proposePendingAccountFrames(context: ProposePendingAccountFramesC
 
 type ApplyOrderbookMatchingContext = {
   env: RuntimeState;
+  accountConsensusContext: AccountConsensusContext;
   currentEntityState: EntityState;
   allSwapOffersCreated: SwapOfferEvent[];
   allOutputs: EntityOutput[];
@@ -683,7 +688,14 @@ const applyOrderbookAccountTxs = async (
   context: ApplyOrderbookMatchingContext,
   result: OrderbookMatchResult,
 ): Promise<void> => {
-  const { env, currentEntityState: state, allOutputs, proposableAccounts, storageChanges } = context;
+  const {
+    env,
+    accountConsensusContext,
+    currentEntityState: state,
+    allOutputs,
+    proposableAccounts,
+    storageChanges,
+  } = context;
   for (const { accountId, tx } of result.accountTxs) {
     const account = state.accounts.get(accountId);
     if (tx.type === 'swap_resolve') {
@@ -727,7 +739,7 @@ const applyOrderbookAccountTxs = async (
     }
     if (!account) continue;
     const admission = await applyAccountInput(
-      env,
+      accountConsensusContext,
       account,
       createLocalAccountInput(account, state.entityId, [tx]),
     );
@@ -808,6 +820,7 @@ async function applyOrderbookMatching(
 
 type ApplySwapCancelRequestsContext = {
   env: RuntimeState;
+  accountConsensusContext: AccountConsensusContext;
   currentEntityState: EntityState;
   allSwapCancelRequests: SwapCancelRequestEvent[];
   proposableAccounts: Set<string>;
@@ -818,7 +831,15 @@ type ApplySwapCancelRequestsContext = {
 async function applySwapCancelRequests(
   context: ApplySwapCancelRequestsContext,
 ): Promise<void> {
-  const { env, currentEntityState, allSwapCancelRequests, proposableAccounts, allOutputs, storageChanges } = context;
+  const {
+    env,
+    accountConsensusContext,
+    currentEntityState,
+    allSwapCancelRequests,
+    proposableAccounts,
+    allOutputs,
+    storageChanges,
+  } = context;
   if (allSwapCancelRequests.length === 0) return;
 
   const routedCancels = routeRemoteCrossJurisdictionBookCancels(env, currentEntityState, allSwapCancelRequests);
@@ -832,7 +853,7 @@ async function applySwapCancelRequests(
       throw new Error(`CROSS_J_CANCEL_ACK_ACCOUNT_MISSING:account=${accountId}:offer=${tx.data.offerId}`);
     }
     const admission = await applyAccountInput(
-      env,
+      accountConsensusContext,
       account,
       createLocalAccountInput(account, currentEntityState.entityId, [tx]),
     );
@@ -851,7 +872,7 @@ async function applySwapCancelRequests(
       const account = currentEntityState.accounts.get(accountId);
       if (!account) continue;
       const admission = await applyAccountInput(
-        env,
+        accountConsensusContext,
         account,
         createLocalAccountInput(account, currentEntityState.entityId, [tx]),
       );
@@ -884,7 +905,7 @@ async function applySwapCancelRequests(
     // It must land in the same working-state mempool so the later account
     // proposal step sees it in this frame.
     const admission = await applyAccountInput(
-      env,
+      accountConsensusContext,
       account,
       createLocalAccountInput(account, currentEntityState.entityId, [{
         type: 'swap_resolve',
@@ -974,8 +995,12 @@ const createEntityFrameApplyContext = (
 ): ApplyEntityTxsInOrderContext => {
   const accountJClaimNewNodes = new Map<string, AccountJClaimNode>();
   const committedClaimNodes = getAccountJClaimNodeStore(env);
+  const accountJClaimNodeStore: AccountJClaimNodeStore = {
+    get: hash => accountJClaimNewNodes.get(hash) ?? committedClaimNodes.get(hash),
+  };
   return {
     env,
+    accountConsensusContext: createAccountConsensusContext(env, accountJClaimNodeStore),
     entityTxs,
     currentEntityState,
     allOutputs: [],
@@ -991,9 +1016,7 @@ const createEntityFrameApplyContext = (
     consumptionReplacedNodeHashes: new Set(),
     accountJClaimNewNodes,
     accountJClaimReplacedNodeHashes: new Set(),
-    accountJClaimNodeStore: {
-      get: hash => accountJClaimNewNodes.get(hash) ?? committedClaimNodes.get(hash),
-    },
+    accountJClaimNodeStore,
     candidateEffects: [],
     storageChanges: [],
     verifiedCertifiedOutputs,
@@ -1006,13 +1029,14 @@ const primeEntityFrameAccountWork = async (
   const state = context.currentEntityState;
   await drainPendingCrossJurisdictionFillAcks(
     context.env,
+    context.accountConsensusContext,
     state,
     context.proposableAccounts,
     context.storageChanges,
     context.candidateEffects,
   );
   await drainCommittedCrossJurisdictionCancelAcks(
-    context.env,
+    context.accountConsensusContext,
     state,
     context.proposableAccounts,
     context.storageChanges,
@@ -1140,6 +1164,7 @@ const applyPostEntityTxPhases = async (
   }
   await applySwapCancelRequests({
     env: context.env,
+    accountConsensusContext: context.accountConsensusContext,
     currentEntityState,
     allSwapCancelRequests: context.allSwapCancelRequests,
     proposableAccounts: context.proposableAccounts,
@@ -1149,6 +1174,7 @@ const applyPostEntityTxPhases = async (
   markFrameProfile('cancels');
   const orderbookStats = await applyOrderbookMatching({
     env: context.env,
+    accountConsensusContext: context.accountConsensusContext,
     currentEntityState,
     allSwapOffersCreated: context.allSwapOffersCreated,
     allOutputs: context.allOutputs,
@@ -1159,13 +1185,14 @@ const applyPostEntityTxPhases = async (
   markFrameProfile('orderbook');
   await drainPendingCrossJurisdictionFillAcks(
     context.env,
+    context.accountConsensusContext,
     currentEntityState,
     context.proposableAccounts,
     context.storageChanges,
     context.candidateEffects,
   );
   await drainCommittedCrossJurisdictionCancelAcks(
-    context.env,
+    context.accountConsensusContext,
     currentEntityState,
     context.proposableAccounts,
     context.storageChanges,
@@ -1173,6 +1200,7 @@ const applyPostEntityTxPhases = async (
   refreshStaleUncommittedSettlementSeals(currentEntityState, context.storageChanges);
   await materializeDeferredSettlementApprovals(
     context.env,
+    context.accountConsensusContext,
     currentEntityState,
     context.proposableAccounts,
     context.collectedHashes,
@@ -1182,6 +1210,7 @@ const applyPostEntityTxPhases = async (
     ? 0
     : await proposePendingAccountFrames({
         env: context.env,
+        accountConsensusContext: context.accountConsensusContext,
         currentEntityState,
         proposableAccounts: context.proposableAccounts,
         requiredAccountResponses: context.requiredAccountResponses,

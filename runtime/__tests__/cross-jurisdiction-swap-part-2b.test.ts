@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { createAccountConsensusContext } from '../entity/account-consensus-context';
 import { readEntityFrameEventMessages } from '../entity/frame-events';
 
 import { ethers } from 'ethers';
@@ -751,7 +752,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     };
     invalidProposalAccount.mempool = [invalidClose];
     await expect(
-      proposeAccountFrame(env, invalidProposalAccount, env.timestamp, state.lastFinalizedJHeight),
+      proposeAccountFrame(createAccountConsensusContext(env), invalidProposalAccount, env.timestamp, state.lastFinalizedJHeight),
     ).rejects.toThrow('CROSS_J_PULL_CLOSE_PROPOSAL_FAILED');
     expect(invalidProposalAccount.mempool).toEqual([invalidClose]);
     expect(invalidProposalAccount.pendingFrame).toBeUndefined();

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { deriveAccountWatchSeed } from '../protocol/account-watch-seed';
 import { applyAccountInputToEntity } from '../entity/tx/handlers/account';
 import { createEmptyEnv } from '../runtime';
+import { createAccountConsensusContext } from '../entity/account-consensus-context';
 import type { EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
 
 const entityId = `0x${'aa'.repeat(32)}`;
@@ -108,7 +109,7 @@ test('account input without frame or settlement action fails fast', async () => 
         chainId: jurisdiction.chainId!,
         depositoryAddress: jurisdiction.depositoryAddress,
       },
-    }, env)).rejects.toThrow('ACCOUNT_GENESIS_FRAME_REQUIRED');
+    }, env, createAccountConsensusContext(env))).rejects.toThrow('ACCOUNT_GENESIS_FRAME_REQUIRED');
     expect(readEntityFrameEventMessages(state).at(-1)).toContain('ACCOUNT_GENESIS_FRAME_REQUIRED');
   } finally {
     if (previousScopes === undefined) delete process.env['XLN_LOG_SCOPES'];

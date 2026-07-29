@@ -2,6 +2,7 @@ import { HASHLADDER_MAX_FILL_RATIO, verifyHashLadderBinary } from '../../protoco
 import { hashHtlcSecret } from '../../protocol/htlc/utils';
 import { hashEncryptedHtlcLayer } from '../../protocol/htlc/onion-layer';
 import type { AccountFrame, AccountState, HtlcLock, PullCommitment } from '../../types/account';
+import type { HankoString } from '../../types/hanko';
 import { isHtlcTimelockExpired } from '../htlc-deadline';
 import { isPullRevealExpired } from '../pull-deadline';
 import { ACCOUNT_NETWORK_ALLOWANCE_MS } from './constants';
@@ -14,6 +15,13 @@ export type AccountInputSecurityContext = {
   owningEntityIsHub: boolean;
   /** Counterparty board from the consuming Entity's own finalized registry. */
   counterpartyCertifiedBoardHash?: string;
+  /** Parent-provided Hanko authority; Account never reads Runtime/Entity state. */
+  verifyHanko(
+    hanko: HankoString,
+    hash: string,
+    expectedEntityId: string,
+    authority?: { registeredBoardHash?: string; allowPreviousBoard?: boolean },
+  ): Promise<{ valid: boolean; entityId: string | null }>;
 };
 
 export type IncomingDeadlineViolation = {

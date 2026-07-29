@@ -114,7 +114,7 @@ assertOrder(accountConsensus, accountConsensusPath, [
   'const localAccountStateRoot = computeAccountStateRoot(clonedMachine);',
   'localAccountStateRoot !== receivedFrame.accountStateRoot',
   '!accountFrameDeltasEqual(ourFinalDeltas, receivedFrame.deltas)',
-  'const proofResult = buildAccountProofBodyFromEnv(env, clonedMachine);',
+  'const proofResult = buildAccountProofBodyFromJurisdictions(env, clonedMachine);',
   'const localProofBodyHash = proofResult.proofBodyHash;',
   'const frameSealError = getDisputeSealRequirementError(',
 ]);

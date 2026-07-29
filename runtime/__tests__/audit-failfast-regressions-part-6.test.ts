@@ -1,4 +1,5 @@
 import { describe, expect, spyOn, test } from 'bun:test';
+import { createAccountConsensusContext } from '../entity/account-consensus-context';
 import { readEntityFrameEventMessages } from '../entity/frame-events';
 
 import { x25519 } from '@noble/curves/ed25519.js';
@@ -1745,7 +1746,7 @@ describe('audit fail-fast regressions', () => {
     const delta = createDefaultDelta(route.sourcePull!.tokenId);
     delta.rightHold = BigInt(route.sourcePull!.amount);
     account.deltas.set(route.sourcePull!.tokenId, delta);
-    const proposed = await proposeAccountFrame(env, account, env.timestamp);
+    const proposed = await proposeAccountFrame(createAccountConsensusContext(env), account, env.timestamp);
     expect(proposed.success).toBe(true);
     const pendingHeight = proposed.accountInput!.proposal.frame.height;
     hubState.accounts.set(userId, account);

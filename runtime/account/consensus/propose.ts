@@ -4,13 +4,12 @@
  */
 
 import type { AccountReplica, AccountTx } from '../../types/account';
-import type { RuntimeState } from '../../types';
+import type { AccountConsensusContext } from './context';
 import { removeCommittedTxsFromMempool } from '../../protocol/tx-multiset';
 import { getPerfMs } from '../../infra/time';
 import { HEAVY_LOGS } from '../../infra/debug-flags';
 import { createStructuredLogger, shortId } from '../../infra/logger';
 import type { ProposeAccountFrameResult } from './types';
-import type { AccountJClaimNodeStore } from '../../types/account-j-claims';
 import { cumulativeMarksToPhases } from '../../infra/perf-profile';
 import { isRuntimePerfProfileEnabled, readRuntimePerfSlowMs } from '../../infra/perf-runtime-flags';
 import { validateProposalTransactions } from './proposal-transactions';
@@ -96,11 +95,10 @@ const logProposalAdmission = (
 };
 
 export async function proposeAccountFrame(
-  env: RuntimeState,
+  context: AccountConsensusContext,
   account: AccountReplica,
   entityFrameTimestamp: number,
   entityJHeight?: number, // Optional: J-height from entity state for HTLC consensus
-  accountJClaimNodeStore?: AccountJClaimNodeStore,
   selectedMempoolTxs?: readonly AccountTx[],
 ): Promise<ProposeAccountFrameResult> {
   const profileStartMs = getPerfMs();
@@ -109,7 +107,10 @@ export async function proposeAccountFrame(
     profileCheckpoints[label] = Math.round(getPerfMs() - profileStartMs);
   };
   const admission = prepareProposalAdmission(
-    env,
+    {
+      runtimeTimestamp: context.runtimeTimestamp,
+      quietLogs: context.quietLogs,
+    },
     account,
     entityFrameTimestamp,
     entityJHeight,
@@ -126,12 +127,12 @@ export async function proposeAccountFrame(
   checkpointProfile('admission');
   logProposalAdmission(account, proposalWindow);
   const validation = await validateProposalTransactions({
-    env,
+    consensusContext: context,
     account: account,
     proposalWindow,
     frameTimestamp,
     frameJHeight,
-    ...(accountJClaimNodeStore ? { jClaimNodeStore: accountJClaimNodeStore } : {}),
+    jClaimNodeStore: context.jClaimNodeStore,
   });
 
   const {
@@ -159,7 +160,7 @@ export async function proposeAccountFrame(
   const { frame: newFrame } = frameBuild;
 
   const proof = await prepareProposalProof(
-    env,
+    context,
     account,
     clonedMachine,
     events,

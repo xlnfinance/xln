@@ -2,7 +2,10 @@ import { describe, expect, test } from 'bun:test';
 
 import { applyAccountTx } from '../account/tx/apply';
 import { createAccountJClaimSession } from '../account/j-claim-session';
-import { cacheCommittedAccountJClaimNodeChanges } from '../account/j-claim-store';
+import {
+  cacheCommittedAccountJClaimNodeChanges,
+  getAccountJClaimNodeStore,
+} from '../account/j-claim-store';
 import { prepareAccountJClaimTx } from '../account/j-claim-transition';
 import { handleJEventClaim } from '../account/tx/handlers/j-event-claim';
 import { createSettlementWorkspaceHash } from '../account/tx/handlers/settle-transition';
@@ -45,6 +48,7 @@ import {
   getCertifiedBoardNodeStore,
 } from '../jurisdiction/board-registry';
 import { createEmptyEnv } from '../runtime';
+import { createAccountConsensusContext } from '../entity/account-consensus-context';
 import { cloneAccountState } from '../account/state-clone';
 import type { AccountTx, SettlementOp } from '../types/account';
 import type { EntityState, HashToSign, JurisdictionConfig } from '../entity/types';
@@ -513,7 +517,7 @@ describe('atomic settlement Account transition', () => {
 
     materialized.newState.accounts.get(counterparty)!.proofHeader.nextProofNonce = 7;
     await expect(proposeAccountFrame(
-      env,
+      createAccountConsensusContext(env),
       materialized.newState.accounts.get(counterparty)!,
       2_001,
     )).resolves.toMatchObject({
@@ -566,7 +570,15 @@ describe('atomic settlement Account transition', () => {
       peerDraft.hashesToSign,
       1,
     );
-    expect((await applyAccountTx(leftAccount, peerSeal, false, 2_000, 0, false, env)).success).toBe(true);
+    expect((await applyAccountTx(
+      leftAccount,
+      peerSeal,
+      false,
+      2_000,
+      0,
+      false,
+      createAccountConsensusContext(env),
+    )).success).toBe(true);
     expect(leftAccount.settlementWorkspace?.rightHanko).toBeDefined();
     expect(leftAccount.settlementWorkspace?.postSettlementDisputeProof?.rightHanko).toBeDefined();
 
@@ -995,9 +1007,23 @@ describe('atomic settlement Account transition', () => {
     expect(sealedRightTx.data.settlementHanko).toBeDefined();
     expect(sealedRightTx.data.postProof.hanko).toBeDefined();
     expect((await applyAccountTx(
-      rightSealingState.accounts.get(leftEntity)!, sealedRightTx, false, 2_000, 0, false, rightEnv,
+      rightSealingState.accounts.get(leftEntity)!,
+      sealedRightTx,
+      false,
+      2_000,
+      0,
+      false,
+      createAccountConsensusContext(rightEnv),
     )).success).toBe(true);
-    expect((await applyAccountTx(leftAccount, sealedRightTx, false, 2_000, 0, false, rightEnv)).success).toBe(true);
+    expect((await applyAccountTx(
+      leftAccount,
+      sealedRightTx,
+      false,
+      2_000,
+      0,
+      false,
+      createAccountConsensusContext(rightEnv),
+    )).success).toBe(true);
 
     const leftApproval = await handleSettleApprove(
       leftState,
@@ -1031,10 +1057,22 @@ describe('atomic settlement Account transition', () => {
     expect(sealedLeftTx.data.settlementHanko).toBeUndefined();
     expect(sealedLeftTx.data.postProof.hanko).toBeDefined();
     expect((await applyAccountTx(
-      leftSealingState.accounts.get(rightEntity)!, sealedLeftTx, true, 3_000, 0, false, rightEnv,
+      leftSealingState.accounts.get(rightEntity)!,
+      sealedLeftTx,
+      true,
+      3_000,
+      0,
+      false,
+      createAccountConsensusContext(rightEnv),
     )).success).toBe(true);
     expect((await applyAccountTx(
-      rightSealingState.accounts.get(leftEntity)!, sealedLeftTx, true, 3_000, 0, false, rightEnv,
+      rightSealingState.accounts.get(leftEntity)!,
+      sealedLeftTx,
+      true,
+      3_000,
+      0,
+      false,
+      createAccountConsensusContext(rightEnv),
     )).success).toBe(true);
 
     const finalizedLeftWorkspace = leftSealingState.accounts.get(rightEntity)!.settlementWorkspace!;
@@ -1114,7 +1152,7 @@ describe('atomic settlement Account transition', () => {
       2_000,
       0,
       false,
-      env,
+      createAccountConsensusContext(env),
     );
     expect(result).toMatchObject({ success: true });
     expect(sealingState.accounts.get(rightEntity)!.settlementWorkspace?.leftHanko).toBeDefined();
@@ -1125,7 +1163,7 @@ describe('atomic settlement Account transition', () => {
       2_000,
       0,
       true,
-      env,
+      createAccountConsensusContext(env),
       undefined,
       registeredBoardHash,
     );
@@ -1460,13 +1498,13 @@ describe('atomic settlement Account transition', () => {
       chainId: Number(jurisdiction.chainId),
       depositoryAddress: jurisdiction.depositoryAddress,
     };
-    const firstSession = createAccountJClaimSession(env);
+    const firstSession = createAccountJClaimSession(getAccountJClaimNodeStore(env));
     const leftClaim = prepareAccountJClaimTx(account, rawClaim, domain, firstSession);
     expect(handleJEventClaim(
       account, leftClaim, true, 2_000, false, LEFT, [], env, firstSession,
     ).success).toBe(true);
     cacheCommittedAccountJClaimNodeChanges(env, firstSession.changes());
-    const secondSession = createAccountJClaimSession(env);
+    const secondSession = createAccountJClaimSession(getAccountJClaimNodeStore(env));
     const rightClaim = prepareAccountJClaimTx(account, rawClaim, domain, secondSession);
     expect(handleJEventClaim(
       account, rightClaim, false, 2_001, false, LEFT, [], env, secondSession,

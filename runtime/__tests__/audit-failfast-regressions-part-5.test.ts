@@ -1,4 +1,5 @@
 import { describe, expect, spyOn, test } from 'bun:test';
+import { createAccountConsensusContext } from '../entity/account-consensus-context';
 import { readEntityFrameEventMessages } from '../entity/frame-events';
 
 import { x25519 } from '@noble/curves/ed25519.js';
@@ -797,8 +798,8 @@ describe('audit fail-fast regressions', () => {
       nextProofNonce: 0,
     };
 
-    const leftProposal = await proposeAccountFrame(env, leftAccount, env.timestamp);
-    const rightProposal = await proposeAccountFrame(env, rightAccount, env.timestamp);
+    const leftProposal = await proposeAccountFrame(createAccountConsensusContext(env), leftAccount, env.timestamp);
+    const rightProposal = await proposeAccountFrame(createAccountConsensusContext(env), rightAccount, env.timestamp);
     if (!leftProposal.success || !leftProposal.accountInput) {
       throw new Error(`LEFT_SIMULTANEOUS_PROPOSAL_FAILED:${leftProposal.error ?? 'missing input'}`);
     }
@@ -865,7 +866,7 @@ describe('audit fail-fast regressions', () => {
       accountMachine.mempool.push(lateTx);
     });
 
-    await expect(proposeAccountFrame(env, accountMachine, env.timestamp)).rejects.toThrow(
+    await expect(proposeAccountFrame(createAccountConsensusContext(env), accountMachine, env.timestamp)).rejects.toThrow(
       'DISPUTE_PROOF_BUILD_FAILED: JURISDICTION_DURABLE_STACK_DELTA_TRANSFORMER_MISSING',
     );
     expect(accountMachine.pendingFrame).toBeUndefined();

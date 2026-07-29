@@ -63,7 +63,12 @@ const commandPlanPath = 'runtime/account/swap-command-plan.ts';
 const commandPlan = readText(commandPlanPath);
 assertIncludes(commandPlan, 'readSwapAccountCapacity({', commandPlanPath);
 assertIncludes(commandPlan, 'planSwapInboundCapacity({', commandPlanPath);
-assertIncludes(commandPlan, 'assertCrossJurisdictionSwapTargetReadyInEnv', commandPlanPath);
+const targetReadinessPath = 'runtime/runtime/swap-target-readiness.ts';
+assertIncludes(
+  readText(targetReadinessPath),
+  'assertCrossJurisdictionSwapTargetReadyInEnv',
+  targetReadinessPath,
+);
 const commandRoutePath = 'runtime/account/swap-command-route.ts';
 assertIncludes(readText(commandRoutePath), 'withCanonicalCrossJurisdictionRouteHash({', commandRoutePath);
 

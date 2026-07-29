@@ -1,5 +1,4 @@
 import type { AccountReplica, AccountTx } from '../../types/account';
-import type { RuntimeState } from '../../types';
 import { getAccountPerspective } from '../perspective';
 import { safeStringify } from '../../protocol/serialization';
 import { createStructuredLogger, shortId } from '../../infra/logger';
@@ -23,6 +22,11 @@ export type ProposalAdmission = {
 export type ProposalAdmissionResult =
   | ProposalAdmission
   | { success: false; result: ProposeAccountFrameResult };
+
+export type AccountProposalAdmissionContext = Readonly<{
+  runtimeTimestamp: number;
+  quietLogs: boolean;
+}>;
 
 const selectProposalWindow = (
   account: AccountReplica,
@@ -50,7 +54,7 @@ const selectProposalWindow = (
 };
 
 const validateProposalTimestamp = (
-  env: RuntimeState,
+  context: AccountProposalAdmissionContext,
   account: AccountReplica,
   timestamp: number,
   myEntityId: string,
@@ -68,7 +72,7 @@ const validateProposalTimestamp = (
     previousTimestamp: previous,
     proposedTimestamp: timestamp,
     regressionMs: previous - timestamp,
-    runtimeTimestamp: env.timestamp,
+    runtimeTimestamp: context.runtimeTimestamp,
   });
 };
 
@@ -102,7 +106,7 @@ const rejectUnavailableProposal = (
 };
 
 export const prepareProposalAdmission = (
-  env: RuntimeState,
+  context: AccountProposalAdmissionContext,
   account: AccountReplica,
   entityFrameTimestamp: number,
   entityJHeight: number | undefined,
@@ -110,7 +114,7 @@ export const prepareProposalAdmission = (
 ): ProposalAdmissionResult => {
   const myEntityId = account.proofHeader.fromEntity;
   const { counterparty } = getAccountPerspective(account, myEntityId);
-  const quiet = env.quietRuntimeLogs === true;
+  const quiet = context.quietLogs;
   if (!quiet) {
     accountLog.debug('proposal.start', {
       counterparty: shortId(counterparty),
@@ -134,7 +138,7 @@ export const prepareProposalAdmission = (
       frameMax: MAX_ACCOUNT_FRAME_TXS,
     });
   }
-  validateProposalTimestamp(env, account, entityFrameTimestamp, myEntityId, counterparty);
+  validateProposalTimestamp(context, account, entityFrameTimestamp, myEntityId, counterparty);
   return {
     success: true,
     myEntityId,

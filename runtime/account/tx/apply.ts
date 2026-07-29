@@ -5,7 +5,7 @@
 
 import type { AccountReplica, AccountTx } from '../../types/account';
 import type { AccountOutput } from '../../types/account';
-import type { RuntimeState } from '../../types';
+import type { AccountConsensusContext } from '../consensus/context';
 import type { AccountJClaimSession } from '../j-claim-session';
 import { invalidateAccountMapCommitment, type AccountCommittedMap } from '../map-commitment';
 import type { ApplyAccountTxResult } from './apply-types';
@@ -107,7 +107,7 @@ export async function applyAccountTx(
   currentTimestamp: number = 0,
   currentHeight: number = 0,
   isValidation: boolean = false,
-  env?: RuntimeState,
+  consensusContext?: AccountConsensusContext,
   jClaimSession?: AccountJClaimSession,
   counterpartyCertifiedBoardHash?: string,
 ): Promise<ApplyAccountTxResult> {
@@ -120,7 +120,7 @@ export async function applyAccountTx(
     currentTimestamp,
     currentHeight,
     isValidation,
-    env,
+    consensusContext,
     jClaimSession,
     counterpartyCertifiedBoardHash,
     candidateEffects,

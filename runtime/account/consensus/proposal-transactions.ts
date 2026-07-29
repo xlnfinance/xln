@@ -1,5 +1,5 @@
 import type { AccountReplica, AccountTx } from '../../types/account';
-import type { RuntimeState } from '../../types';
+import type { AccountConsensusContext } from './context';
 import { cloneAccountState } from '../state-clone';
 import { isLeft } from '../utils';
 import { HEAVY_LOGS } from '../../infra/debug-flags';
@@ -38,7 +38,7 @@ export type ValidatedProposalTransactions = ProposalTransactionEffects & {
 };
 
 type ProposalTransactionContext = {
-  env: RuntimeState;
+  consensusContext: AccountConsensusContext;
   account: AccountReplica;
   proposalWindow: readonly AccountTx[];
   frameTimestamp: number;
@@ -127,7 +127,7 @@ const applyProposalTransaction = async (
     context.frameTimestamp,
     context.frameJHeight,
     true,
-    context.env,
+    context.consensusContext,
     jClaimSession,
   );
   if (result.success) {
@@ -247,12 +247,15 @@ const validateOptimisticBatch = async (
 export const validateProposalTransactions = async (
   context: ProposalTransactionContext,
 ): Promise<ValidatedProposalTransactions> => {
+  if (!context.jClaimNodeStore) {
+    throw new Error('ACCOUNT_J_CLAIM_NODE_STORE_REQUIRED');
+  }
   const effects = createTransactionEffects();
   const validTxs: AccountTx[] = [];
   const validMempoolTxs: AccountTx[] = [];
   const txsToRemove: AccountTx[] = [];
   let deferredTxCount = 0;
-  const jClaimSession = createAccountJClaimSession(context.env, context.jClaimNodeStore);
+  const jClaimSession = createAccountJClaimSession(context.jClaimNodeStore);
   const optimistic = await validateOptimisticBatch(context, jClaimSession);
   if (optimistic) {
     for (const applied of optimistic.applied) {

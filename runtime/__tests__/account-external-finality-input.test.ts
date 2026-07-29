@@ -4,6 +4,7 @@ import { applyAccountInput } from '../account/consensus';
 import { createAccountDisputeFinalityInput } from '../account/input';
 import { cloneIsolatedAccountInput } from '../protocol/account-input-clone';
 import { createEmptyEnv } from '../runtime';
+import { createAccountConsensusContext } from '../entity/account-consensus-context';
 import { addr, makeAccount } from './helpers/cross-j';
 
 test('authenticated J finality enters the canonical AccountInput boundary', async () => {
@@ -32,8 +33,9 @@ test('authenticated J finality enters the canonical AccountInput boundary', asyn
     input.finality.finalizedTokenIds,
   );
 
+  const env = createEmptyEnv('account-external-finality');
   const result = await applyAccountInput(
-    createEmptyEnv('account-external-finality'),
+    createAccountConsensusContext(env),
     account,
     cloned,
   );

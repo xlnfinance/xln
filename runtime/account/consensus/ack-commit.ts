@@ -1,9 +1,8 @@
 import type { AccountFrame, AccountInput, AccountReplica } from '../../types/account';
 import type { AccountOutput } from '../../types/account';
-import type { RuntimeState } from '../../types';
+import type { AccountConsensusContext } from './context';
 import { HEAVY_LOGS } from '../../infra/debug-flags';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
-import { verifyHankoForHash } from '../../hanko/signing';
 import { cloneAccountFrame } from '../state-clone';
 import { getAccountPerspective } from '../perspective';
 import { applyAccountTx } from '../tx/apply';
@@ -48,7 +47,6 @@ type PendingAckCertificateResult =
   | { kind: 'return'; result: HandleAccountInputResult };
 
 const verifyPendingAckCertificate = async (
-  env: RuntimeState,
   account: AccountReplica,
   ack: AccountFrameAck,
   ackHeight: number,
@@ -91,11 +89,10 @@ const verifyPendingAckCertificate = async (
 
   const expectedEntity = account.proofHeader.toEntity;
   ackLog.debug('hanko.verify', { height: ackHeight, frame: shortHash(frameHash) });
-  const verified = await verifyHankoForHash(
+  const verified = await securityContext.verifyHanko(
     ack.frameHanko,
     frameHash,
     expectedEntity,
-    env,
     securityContext.counterpartyCertifiedBoardHash
       ? { registeredBoardHash: securityContext.counterpartyCertifiedBoardHash }
       : undefined,
@@ -129,7 +126,7 @@ const verifyPendingAckCertificate = async (
 };
 
 const applyPendingFrameTransactions = async (
-  env: RuntimeState,
+  context: AccountConsensusContext,
   account: AccountReplica,
   pendingFrame: AccountFrame,
   committedJClaims: AccountJClaimSession,
@@ -146,7 +143,7 @@ const applyPendingFrameTransactions = async (
       pendingFrame.timestamp,
       jHeight,
       false,
-      env,
+      context,
       committedJClaims,
     );
     candidateEffects.push(...(result.candidateEffects ?? []));
@@ -218,7 +215,6 @@ const installPendingFrameCommit = (
 };
 
 const queuePostAckWork = async (
-  env: RuntimeState,
   account: AccountReplica,
   input: AccountInput,
   committedHeight: number,
@@ -228,7 +224,6 @@ const queuePostAckWork = async (
 ): Promise<void> => {
   // Rebalance sees committed state only after pendingFrame has been cleared.
   const txs = await runPostFrameAutoRebalanceCheck(
-    env,
     account,
     account.proofHeader.fromEntity,
     input.fromEntityId,
@@ -242,7 +237,7 @@ const queuePostAckWork = async (
 };
 
 export const handlePendingFrameAck = async (
-  env: RuntimeState,
+  context: AccountConsensusContext,
   account: AccountReplica,
   input: AccountInput,
   ackHeight: number | undefined,
@@ -267,7 +262,6 @@ export const handlePendingFrameAck = async (
     });
   }
   const certificate = await verifyPendingAckCertificate(
-    env,
     account,
     ack,
     ackHeight,
@@ -289,7 +283,7 @@ export const handlePendingFrameAck = async (
     account.proofHeader.fromEntity,
   );
   await applyPendingFrameTransactions(
-    env,
+    context,
     account,
     pendingFrame,
     committedJClaims,
@@ -313,7 +307,6 @@ export const handlePendingFrameAck = async (
   );
   events.push(`✅ Frame ${ackHeight} confirmed and committed`);
   await queuePostAckWork(
-    env,
     account,
     input,
     committedHeight,

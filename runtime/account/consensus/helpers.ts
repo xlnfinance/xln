@@ -1,6 +1,6 @@
 import type { AccountReplica, AccountTx, Delta } from '../../types/account';
 import type { AccountOutput } from '../../types/account';
-import type { RuntimeState } from '../../types';
+import type { JReplica } from '../../types/jurisdiction-runtime';
 import { createStructuredLogger } from '../../infra/logger';
 import { txFingerprint } from '../../protocol/tx-multiset';
 import {
@@ -38,6 +38,10 @@ type AccountDomainSubject = Readonly<{
   domain: AccountStateDomain;
 }>;
 
+export type AccountJurisdictionView = Readonly<{
+  jReplicas: ReadonlyMap<string, JReplica>;
+}>;
+
 export function getAccountStateDomain(account: AccountDomainSubject): AccountStateDomain {
   return normalizeAccountStateDomain(account.domain);
 }
@@ -49,12 +53,12 @@ export function getAccountStateDomain(account: AccountDomainSubject): AccountSta
  * `(chainId, Depository) -> contracts` record is proof authority.
  */
 export function requireAccountDeltaTransformerAddress(
-  env: RuntimeState,
+  jurisdictions: AccountJurisdictionView,
   account: AccountDomainSubject,
 ): string {
   const domain = getAccountStateDomain(account);
   const depository = domain.depositoryAddress.toLowerCase();
-  const matches = Array.from(env.jReplicas.values()).flatMap((replica) => {
+  const matches = Array.from(jurisdictions.jReplicas.values()).flatMap((replica) => {
     if (Number(replica.chainId) !== domain.chainId) return [];
     const canonicalDepository = firstUsableContractAddress(replica.contracts?.depository)?.toLowerCase();
     const aliasDepository = firstUsableContractAddress(replica.depositoryAddress)?.toLowerCase();
@@ -71,10 +75,13 @@ export function requireAccountDeltaTransformerAddress(
   return matches[0]!.deltaTransformer;
 }
 
-export const buildAccountProofBodyFromEnv = (env: RuntimeState, account: AccountReplica) =>
+export const buildAccountProofBodyFromJurisdictions = (
+  jurisdictions: AccountJurisdictionView,
+  account: AccountReplica,
+) =>
   buildAccountProofBody(
     account,
-    requireAccountDeltaTransformerAddress(env, account),
+    requireAccountDeltaTransformerAddress(jurisdictions, account),
   );
 
 export function shouldIncludeToken(delta: Delta, totalDelta: bigint): boolean {
@@ -154,7 +161,6 @@ type TokenizedAccountTx = AccountTx & {
 export { resolveAutoRebalanceFeePolicy };
 
 export async function runPostFrameAutoRebalanceCheck(
-  _env: RuntimeState,
   account: AccountReplica,
   ourEntityId: string,
   counterpartyEntityId: string,

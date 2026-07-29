@@ -1,4 +1,5 @@
 import { describe, expect, spyOn, test } from 'bun:test';
+import { createAccountConsensusContext } from '../entity/account-consensus-context';
 import { sealAccountDraftAsEntity } from './helpers/account-draft';
 
 import { x25519 } from '@noble/curves/ed25519.js';
@@ -1068,7 +1069,7 @@ describe('audit fail-fast regressions', () => {
     const accountMachine = makeProposalAccount(mempool, left.entityId, right.entityId);
     attachSigningReplica(env, accountMachine.proofHeader.fromEntity, left.signerId);
 
-    const result = await proposeAccountFrame(env, accountMachine, env.timestamp);
+    const result = await proposeAccountFrame(createAccountConsensusContext(env), accountMachine, env.timestamp);
 
     expect(result.success).toBe(true);
     expect(result.accountInput?.proposal.frame.accountTxs).toHaveLength(MAX_ACCOUNT_FRAME_TXS);
@@ -1115,7 +1116,7 @@ describe('audit fail-fast regressions', () => {
     };
     attachSigningReplica(env, accountMachine.proofHeader.fromEntity, left.signerId);
 
-    const result = await proposeAccountFrame(env, accountMachine, env.timestamp);
+    const result = await proposeAccountFrame(createAccountConsensusContext(env), accountMachine, env.timestamp);
 
     expect(result.success).toBe(true);
     expect(result.accountInput?.kind).toBe('frame_ack');
@@ -1154,7 +1155,7 @@ describe('audit fail-fast regressions', () => {
     const nonceBefore = accountMachine.proofHeader.nextProofNonce;
     attachSigningReplica(env, left.entityId, left.signerId);
 
-    const result = await proposeAccountFrame(env, accountMachine, env.timestamp);
+    const result = await proposeAccountFrame(createAccountConsensusContext(env), accountMachine, env.timestamp);
 
     expect(result.success).toBe(true);
     expect(result.accountInput?.kind === 'frame' ? result.accountInput.proposal.disputeSeal : undefined).toEqual({
@@ -1189,7 +1190,7 @@ describe('audit fail-fast regressions', () => {
     accountMachine.disputeArgumentSnapshotsByHash = undefined;
     attachSigningReplica(env, left.entityId, left.signerId);
 
-    const result = await proposeAccountFrame(env, accountMachine, env.timestamp);
+    const result = await proposeAccountFrame(createAccountConsensusContext(env), accountMachine, env.timestamp);
 
     expect(result.success).toBe(true);
     expect(result.accountInput?.kind === 'frame' ? result.accountInput.proposal.disputeSeal : undefined).toMatchObject({
@@ -1260,7 +1261,7 @@ describe('audit fail-fast regressions', () => {
       };
       proposerAccount.deltas.set(1, makeFundedDelta());
 
-      const proposed = await proposeAccountFrame(env, proposerAccount, env.timestamp, 0);
+      const proposed = await proposeAccountFrame(createAccountConsensusContext(env), proposerAccount, env.timestamp, 0);
       if (!proposed.success) throw new Error(`ZERO_JHEIGHT_PROPOSAL_FAILED:${proposed.error}`);
       expect(proposed.success).toBe(true);
       expect(proposed.accountInput?.proposal.frame.jHeight).toBe(0);
@@ -1284,8 +1285,8 @@ describe('audit fail-fast regressions', () => {
       receiverAccount.deltas.set(1, makeFundedDelta());
       const replayedReceiverAccount = hydrateAccountDocFromStorage(structuredClone(projectAccountDoc(receiverAccount)));
 
-      const result = await applyAccountInput(env, receiverAccount, sealedProposal);
-      const replayResult = await applyAccountInput(env, replayedReceiverAccount, sealedProposal);
+      const result = await applyAccountInput(createAccountConsensusContext(env), receiverAccount, sealedProposal);
+      const replayResult = await applyAccountInput(createAccountConsensusContext(env), replayedReceiverAccount, sealedProposal);
 
       if (!result.success) throw new Error(`ZERO_JHEIGHT_RECEIVE_FAILED:${result.error}`);
       if (!replayResult.success) throw new Error(`ZERO_JHEIGHT_REPLAY_FAILED:${replayResult.error}`);
@@ -1311,11 +1312,11 @@ describe('audit fail-fast regressions', () => {
           throw new Error('ZERO_JHEIGHT_ACK_KIND_INVALID');
         }
         tamperedResponse.ack.frameHash = `0x${'ff'.repeat(32)}`;
-        const tamperedResult = await applyAccountInput(env, structuredClone(proposerAccount), tamperedResponse);
+        const tamperedResult = await applyAccountInput(createAccountConsensusContext(env), structuredClone(proposerAccount), tamperedResponse);
         expect(tamperedResult.success).toBe(false);
         expect(tamperedResult.error).toContain('ACK frameHash mismatch');
       }
-      const ackResult = await applyAccountInput(env, proposerAccount, sealedResponse);
+      const ackResult = await applyAccountInput(createAccountConsensusContext(env), proposerAccount, sealedResponse);
       expect(ackResult.success).toBe(true);
       expect(proposerAccount.currentHeight).toBe(accountHeight + 1);
       expect(proposerAccount.currentFrame.jHeight).toBe(0);
@@ -1616,7 +1617,7 @@ describe('audit fail-fast regressions', () => {
       },
     };
 
-    const result = await applyAccountInput(env, accountMachine, {
+    const result = await applyAccountInput(createAccountConsensusContext(env), accountMachine, {
       kind: 'frame',
       fromEntityId: right.entityId,
       toEntityId: left.entityId,
@@ -1661,7 +1662,7 @@ describe('audit fail-fast regressions', () => {
     const receiver = makeProposalAccount([{ type: 'add_delta', data: { tokenId: 2 } }], left.entityId, right.entityId);
     receiver.proofHeader = { fromEntity: right.entityId, toEntity: left.entityId, nextProofNonce: 0 };
 
-    const proposed = await proposeAccountFrame(env, proposer, env.timestamp);
+    const proposed = await proposeAccountFrame(createAccountConsensusContext(env), proposer, env.timestamp);
     if (!proposed.success || !proposed.accountInput) {
       throw new Error(`BUNDLED_ACK_SOURCE_PROPOSAL_FAILED:${proposed.error ?? 'missing input'}`);
     }
@@ -1671,7 +1672,7 @@ describe('audit fail-fast regressions', () => {
       left.signerId,
       proposed,
     );
-    const accepted = await applyAccountInput(env, receiver, sealedProposal);
+    const accepted = await applyAccountInput(createAccountConsensusContext(env), receiver, sealedProposal);
 
     expect(accepted.success).toBe(true);
     expect(accepted.response?.kind).toBe('ack');
@@ -1679,7 +1680,7 @@ describe('audit fail-fast regressions', () => {
     expect(receiver.pendingFrame).toBeUndefined();
     expect(receiver.lastOutboundFrameAck?.height).toBe(1);
     expect(liveHubTasks.map(task => task.lastRun)).toEqual([500, 500]);
-    const flushed = await proposeAccountFrame(env, receiver, env.timestamp);
+    const flushed = await proposeAccountFrame(createAccountConsensusContext(env), receiver, env.timestamp);
     if (!flushed.success || flushed.accountInput?.kind !== 'frame_ack') {
       throw new Error('ENTITY_FLUSHED_ACK_RESPONSE_MISSING');
     }
@@ -1724,7 +1725,7 @@ describe('audit fail-fast regressions', () => {
     expect(
       new Set([...(accepted.hashesToSign ?? []), ...(flushed.hashesToSign ?? [])].map(({ hash }) => hash)).size,
     ).toBe(4);
-    const committedBundled = await applyAccountInput(env, proposer, sealedFlushed);
+    const committedBundled = await applyAccountInput(createAccountConsensusContext(env), proposer, sealedFlushed);
     expect(committedBundled.success).toBe(true);
     expect(liveHubTasks.map(task => task.lastRun)).toEqual([500, 500]);
     expect(proposer.currentHeight).toBe(2);
@@ -1736,7 +1737,7 @@ describe('audit fail-fast regressions', () => {
     // simultaneous-frame tiebreaker). The ACK for committed height 1 remains.
     delete receiver.pendingFrame;
     delete receiver.pendingAccountInput;
-    const retried = await applyAccountInput(env, receiver, sealedProposal);
+    const retried = await applyAccountInput(createAccountConsensusContext(env), receiver, sealedProposal);
 
     expect(retried.success).toBe(true);
     expect(retried.response).toEqual(retainedAck);
@@ -1779,7 +1780,7 @@ describe('audit fail-fast regressions', () => {
     };
     delete accountMachine.lastOutboundFrameAck;
 
-    const result = await applyAccountInput(env, accountMachine, {
+    const result = await applyAccountInput(createAccountConsensusContext(env), accountMachine, {
       kind: 'frame',
       fromEntityId: right.entityId,
       toEntityId: left.entityId,
@@ -1818,7 +1819,7 @@ describe('audit fail-fast regressions', () => {
     };
     delete accountMachine.lastOutboundFrameAck;
 
-    const result = await applyAccountInput(env, accountMachine, {
+    const result = await applyAccountInput(createAccountConsensusContext(env), accountMachine, {
       kind: 'frame',
       fromEntityId: right.entityId,
       toEntityId: left.entityId,
@@ -1855,7 +1856,7 @@ describe('audit fail-fast regressions', () => {
     delete accountMachine.pendingFrame;
     delete accountMachine.pendingAccountInput;
 
-    const result = await applyAccountInput(env, accountMachine, {
+    const result = await applyAccountInput(createAccountConsensusContext(env), accountMachine, {
       kind: 'ack',
       fromEntityId: right.entityId,
       toEntityId: left.entityId,
@@ -1886,7 +1887,7 @@ describe('audit fail-fast regressions', () => {
     delete accountMachine.pendingFrame;
     delete accountMachine.pendingAccountInput;
 
-    const result = await applyAccountInput(env, accountMachine, {
+    const result = await applyAccountInput(createAccountConsensusContext(env), accountMachine, {
       kind: 'ack',
       fromEntityId: right.entityId,
       toEntityId: left.entityId,
@@ -1951,7 +1952,7 @@ describe('audit fail-fast regressions', () => {
     maliciousFrame.stateHash = await createFrameHash(maliciousFrame);
     const [newHanko] = await signEntityHashes(env, left.entityId, left.signerId, [maliciousFrame.stateHash]);
 
-    const result = await applyAccountInput(env, receiverAccount, {
+    const result = await applyAccountInput(createAccountConsensusContext(env), receiverAccount, {
       kind: 'frame',
       fromEntityId: left.entityId,
       toEntityId: right.entityId,
@@ -2015,7 +2016,7 @@ describe('audit fail-fast regressions', () => {
     const poisonedHash = `0x${'ab'.repeat(32)}`;
     const [newDisputeHanko] = await signEntityHashes(env, left.entityId, left.signerId, [poisonedHash]);
 
-    const result = await applyAccountInput(env, receiverAccount, {
+    const result = await applyAccountInput(createAccountConsensusContext(env), receiverAccount, {
       kind: 'frame',
       fromEntityId: left.entityId,
       toEntityId: right.entityId,
@@ -2069,8 +2070,8 @@ describe('audit fail-fast regressions', () => {
       nextProofNonce: 0,
     };
 
-    const leftProposal = await proposeAccountFrame(env, leftAccount, env.timestamp);
-    const rightProposal = await proposeAccountFrame(env, rightAccount, env.timestamp);
+    const leftProposal = await proposeAccountFrame(createAccountConsensusContext(env), leftAccount, env.timestamp);
+    const rightProposal = await proposeAccountFrame(createAccountConsensusContext(env), rightAccount, env.timestamp);
     if (!leftProposal.success || !leftProposal.accountInput || leftProposal.accountInput.kind !== 'frame') {
       throw new Error(`LEFT_SIMULTANEOUS_PROPOSAL_FAILED:${leftProposal.error ?? 'missing frame'}`);
     }
@@ -2087,13 +2088,13 @@ describe('audit fail-fast regressions', () => {
     const invalidInput = structuredClone(sealedLeftProposal);
     invalidInput.proposal.frameHanko = `0x${'ff'.repeat(65)}`;
     const stateBefore = safeStringify(rightAccount);
-    const result = await applyAccountInput(env, rightAccount, invalidInput);
+    const result = await applyAccountInput(createAccountConsensusContext(env), rightAccount, invalidInput);
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('Invalid hanko signature');
     expect(safeStringify(rightAccount)).toBe(stateBefore);
 
-    const accepted = await applyAccountInput(env, rightAccount, sealedLeftProposal);
+    const accepted = await applyAccountInput(createAccountConsensusContext(env), rightAccount, sealedLeftProposal);
     expect(accepted.success).toBe(true);
     expect(rightAccount.currentHeight).toBe(1);
     // Account apply only commits the winning frame and restores the losing
@@ -2148,7 +2149,7 @@ describe('audit fail-fast regressions', () => {
       toEntity: left.entityId,
       nextProofNonce: 0,
     };
-    const rightProposal = await proposeAccountFrame(env, rightAccount, env.timestamp);
+    const rightProposal = await proposeAccountFrame(createAccountConsensusContext(env), rightAccount, env.timestamp);
     if (
       !rightProposal.success ||
       !rightProposal.accountInput ||
@@ -2165,7 +2166,7 @@ describe('audit fail-fast regressions', () => {
       rightProposal,
     );
 
-    const result = await applyAccountInput(env, leftAccount, sealedRightProposal);
+    const result = await applyAccountInput(createAccountConsensusContext(env), leftAccount, sealedRightProposal);
     expect(result.success).toBe(true);
     expect(result.events).toContainEqual(expect.stringContaining('LEFT-WINS'));
     expect(result.response).toEqual(leftAccount.pendingAccountInput);
@@ -2217,7 +2218,7 @@ describe('audit fail-fast regressions', () => {
       createdHeight: 0,
     });
 
-    const localPending = await proposeAccountFrame(env, receiver, env.timestamp);
+    const localPending = await proposeAccountFrame(createAccountConsensusContext(env), receiver, env.timestamp);
     if (!localPending.success || !localPending.accountInput) {
       throw new Error(`TEST_LOCAL_PENDING_PROPOSAL_FAILED:${localPending.error ?? 'missing input'}`);
     }
@@ -2274,7 +2275,7 @@ describe('audit fail-fast regressions', () => {
     frame.stateHash = await createFrameHash(frame);
     const [frameHanko] = await signEntityHashes(env, left.entityId, left.signerId, [frame.stateHash]);
     const rejected = await applyAccountInput(
-      env,
+      createAccountConsensusContext(env),
       receiver,
       {
         kind: 'frame',

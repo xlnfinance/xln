@@ -1,7 +1,7 @@
 import { isLeftEntity } from '../../id';
 import type { Delta } from '../../../types/account';
 import type { EntityCandidateEffect, EntityInput, EntityState } from '../../types';
-import type { RuntimeState } from '../../../types';
+import type { AccountConsensusContext } from '../../../account/consensus/context';
 import type { EntityTx } from '../../../types/entity-tx';
 import { formatEntityId } from '../../../presentation/identity-display';
 import { upsertSortedStringMapEntry } from '../../../infra/sorted-map-index';
@@ -114,7 +114,7 @@ const insertLocalAccount = (
 };
 
 const seedOpenAccountPolicies = async (
-  env: RuntimeState,
+  accountConsensusContext: AccountConsensusContext,
   state: EntityState,
   tx: OpenAccountEntityTx,
   counterpartyId: string,
@@ -139,7 +139,7 @@ const seedOpenAccountPolicies = async (
       : []),
   ];
   const admission = await applyAccountInput(
-    env,
+    accountConsensusContext,
     account,
     createLocalAccountInput(account, state.entityId, initialAccountTxs),
   );
@@ -156,9 +156,9 @@ const seedOpenAccountPolicies = async (
 };
 
 export const handleOpenAccountEntityTx = async (
-  env: RuntimeState,
   entityState: EntityState,
   entityTx: OpenAccountEntityTx,
+  accountConsensusContext: AccountConsensusContext,
   candidateEffects: EntityCandidateEffect[] = [],
   mutableFrameState = false,
 ): Promise<OpenAccountResult> => {
@@ -217,7 +217,7 @@ export const handleOpenAccountEntityTx = async (
     watchSeed,
     candidateEffects,
   );
-  await seedOpenAccountPolicies(env, newState, entityTx, counterpartyId);
+  await seedOpenAccountPolicies(accountConsensusContext, newState, entityTx, counterpartyId);
 
   addMessage(newState, `✅ Account opening request sent to Entity ${formatEntityId(counterpartyId)}`);
 

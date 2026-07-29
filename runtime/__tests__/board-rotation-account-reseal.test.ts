@@ -22,6 +22,7 @@ import {
 } from '../runtime/reliable-delivery';
 import { buildPendingNetworkOutputs, getReliableOutputIdentity } from '../runtime/output-routing';
 import { createEmptyEnv } from '../runtime';
+import { createAccountConsensusContext } from '../entity/account-consensus-context';
 import { hydrateAccountDocFromStorage } from '../storage/hydration';
 import { projectAccountDoc } from '../storage/projections';
 import type { AccountInput } from '../types/account';
@@ -88,7 +89,7 @@ test('board reseal replaces only the exact current counterparty Hanko', async ()
     logIndex: 2,
     frameHash,
   }));
-  const applied = await applyAccountInput(env, account, input);
+  const applied = await applyAccountInput(createAccountConsensusContext(env), account, input);
 
   expect(applied.success, applied.error).toBe(true);
   expect(account.counterpartyFrameHanko).toBe(frameHanko);
@@ -106,12 +107,12 @@ test('board reseal replaces only the exact current counterparty Hanko', async ()
   expect(restored.counterpartyFrameHanko).toBe(frameHanko);
 
   const beforeExactRetry = structuredClone(account);
-  expect((await applyAccountInput(env, account, structuredClone(input))).success).toBe(true);
+  expect((await applyAccountInput(createAccountConsensusContext(env), account, structuredClone(input))).success).toBe(true);
   expect(account).toEqual(beforeExactRetry);
 
   const sameBlockSuccessor = structuredClone(input);
   sameBlockSuccessor.reseal.boardActivationLogIndex = 3;
-  expect((await applyAccountInput(env, account, sameBlockSuccessor)).success).toBe(true);
+  expect((await applyAccountInput(createAccountConsensusContext(env), account, sameBlockSuccessor)).success).toBe(true);
   expect(account.counterpartyBoardReseal).toEqual({
     activationJHeight: 19,
     activationLogIndex: 3,
@@ -123,7 +124,7 @@ test('board reseal replaces only the exact current counterparty Hanko', async ()
   const tampered = structuredClone(input);
   tampered.reseal.boardActivationJHeight = 20;
   tampered.reseal.frameHash = digest('a2');
-  const rejected = await applyAccountInput(env, account, tampered);
+  const rejected = await applyAccountInput(createAccountConsensusContext(env), account, tampered);
   expect(rejected.success).toBe(false);
   expect(rejected.error).toContain('ACCOUNT_BOARD_RESEAL_FRAME_HASH_MISMATCH');
   expect(account).toEqual(beforeRejected);
@@ -156,7 +157,7 @@ test('ACK commit retains the counterparty Hanko needed for later board reseal', 
     stateHash: frameHash,
   };
 
-  const result = await applyAccountInput(env, account, {
+  const result = await applyAccountInput(createAccountConsensusContext(env), account, {
     kind: 'ack',
     fromEntityId: peerEntityId,
     toEntityId: localEntityId,
@@ -214,7 +215,7 @@ test('board reseal receipt is terminal and stable across Runtime restart', async
   };
 
   expect(registerReliableIngress(receiver, senderRuntimeId, output).kind).toBe('enqueue');
-  const appliedReseal = await applyAccountInput(receiver, account, reseal);
+  const appliedReseal = await applyAccountInput(createAccountConsensusContext(receiver), account, reseal);
   expect(appliedReseal.success, appliedReseal.error).toBe(true);
   const replica = {
     entityId: receiverEntityId,
@@ -255,7 +256,7 @@ test('board reseal receipt is terminal and stable across Runtime restart', async
   expect(buildPendingNetworkOutputs([sameBlockOutput, output]).map(candidate =>
     getReliableOutputIdentity(candidate)?.logIndex)).toEqual([5, 6]);
   expect(registerReliableIngress(receiver, senderRuntimeId, sameBlockOutput).kind).toBe('enqueue');
-  expect((await applyAccountInput(receiver, account, sameBlockReseal)).success).toBe(true);
+  expect((await applyAccountInput(createAccountConsensusContext(receiver), account, sameBlockReseal)).success).toBe(true);
   const sameBlockCommits = commitReliableIngress(receiver, [sameBlockOutput]);
   expect(sameBlockCommits).toHaveLength(1);
   expect(sameBlockCommits[0]?.receipt?.body.identity).toMatchObject({

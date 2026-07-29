@@ -1120,8 +1120,8 @@ export async function swapWithOrderbook(env: RuntimeState): Promise<RuntimeState
   const hubAccountAfterStart = requireAccount(hubAfterStart.state.accounts.get(alice.id), 'hub/alice after dispute start');
   const hubActiveDispute = hubAccountAfterStart.activeDispute;
   if (!hubActiveDispute) throw new Error('SWAP_MISSING_HUB_ACTIVE_DISPUTE');
-  const { buildAccountProofBodyFromEnv } = await import('../account/consensus/helpers');
-  const hubProofAfterStart = buildAccountProofBodyFromEnv(env, hubAccountAfterStart);
+  const { buildAccountProofBodyFromJurisdictions } = await import('../account/consensus/helpers');
+  const hubProofAfterStart = buildAccountProofBodyFromJurisdictions(env, hubAccountAfterStart);
   assert(
     hubProofAfterStart.proofBodyHash === hubActiveDispute.initialProofbodyHash,
     'Hub dispute proofBodyHash matches on-chain start hash'
@@ -1130,7 +1130,7 @@ export async function swapWithOrderbook(env: RuntimeState): Promise<RuntimeState
   const aliceAccountAfterStart = requireAccount(aliceAfterStart.state.accounts.get(hub.id), 'alice/hub after dispute start');
   const aliceActiveDispute = aliceAccountAfterStart.activeDispute;
   if (!aliceActiveDispute) throw new Error('SWAP_MISSING_ALICE_ACTIVE_DISPUTE');
-  const aliceProofAfterStart = buildAccountProofBodyFromEnv(env, aliceAccountAfterStart);
+  const aliceProofAfterStart = buildAccountProofBodyFromJurisdictions(env, aliceAccountAfterStart);
   assert(
     aliceProofAfterStart.proofBodyHash === aliceActiveDispute.initialProofbodyHash,
     'Counterparty dispute proofBodyHash matches on-chain start hash'

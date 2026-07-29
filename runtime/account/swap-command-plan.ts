@@ -4,7 +4,7 @@ import {
 import type { AccountState } from '../types/account';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { EntityTx } from '../types/entity-tx';
-import type { RuntimeState, RuntimeInput } from '../types';
+import type { RuntimeInput } from '../types';
 import {
   planSwapInboundCapacity,
   readSwapAccountCapacity,
@@ -276,21 +276,4 @@ export const assertCrossJurisdictionSwapTargetReady = (
         `current=${plan.currentInboundCapacity}`,
     );
   }
-};
-
-export const assertCrossJurisdictionSwapTargetReadyInEnv = (
-  env: RuntimeState,
-  route: CrossJurisdictionSwapRoute,
-): void => {
-  const targetEntityId = normalizeId(route.target.counterpartyEntityId);
-  const targetSignerId = normalizeId(route.targetSignerId || '');
-  const hubEntityId = normalizeId(route.target.entityId);
-  const replica = [...env.eReplicas.values()].find((candidate) => (
-    normalizeId(candidate.entityId || candidate.state?.entityId || '') === targetEntityId
-    && (!targetSignerId || normalizeId(candidate.signerId || '') === targetSignerId)
-  ));
-  assertCrossJurisdictionSwapTargetReady(
-    route,
-    replica?.state?.accounts?.get(hubEntityId) ?? null,
-  );
 };

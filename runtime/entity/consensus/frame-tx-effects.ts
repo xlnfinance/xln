@@ -82,7 +82,7 @@ const applyReturnedAccountTxs = async (
       continue;
     }
     const admission = await applyAccountInput(
-      context.env,
+      context.accountConsensusContext,
       account,
       createLocalAccountInput(account, state.entityId, [tx]),
     );
@@ -172,13 +172,14 @@ export const applyEntityTxReturnedEffects = async (
   markTxAccountsProposable(context, state, entityTx);
   await drainPendingCrossJurisdictionFillAcks(
     context.env,
+    context.accountConsensusContext,
     state,
     context.proposableAccounts,
     context.storageChanges,
     context.candidateEffects,
   );
   await drainCommittedCrossJurisdictionCancelAcks(
-    context.env,
+    context.accountConsensusContext,
     state,
     context.proposableAccounts,
     context.storageChanges,

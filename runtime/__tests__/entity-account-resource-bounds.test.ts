@@ -1,4 +1,5 @@
 import { expect, spyOn, test } from 'bun:test';
+import { createAccountConsensusContext } from '../entity/account-consensus-context';
 
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
 import { applyAccountInput, proposeAccountFrame } from '../account/consensus';
@@ -182,7 +183,7 @@ test('local account opening rejects capacity overflow before cloning or insertio
     state: { ...makeState(), entityId: counterpartyId },
   } as EntityReplica);
 
-  expect(() => handleOpenAccountEntityTx(env, state, {
+  expect(() => handleOpenAccountEntityTx(state, {
     type: 'openAccount',
     data: {
       targetEntityId: counterpartyId,
@@ -192,7 +193,7 @@ test('local account opening rejects capacity overflow before cloning or insertio
         depositoryAddress: jurisdiction.depositoryAddress,
       },
     },
-  })).toThrow('ENTITY_ACCOUNT_LIMIT_EXCEEDED');
+  }, createAccountConsensusContext(env))).toThrow('ENTITY_ACCOUNT_LIMIT_EXCEEDED');
   expect(state.accounts.size).toBe(LIMITS.MAX_ACCOUNTS_PER_ENTITY);
   expect(state.accounts.has(counterpartyId)).toBe(false);
 });
@@ -215,7 +216,7 @@ test('inbound mirrored-account insertion rejects capacity overflow before state 
     fromEntityId: counterpartyId,
     toEntityId: entityId,
     watchSeed,
-  }, env)).rejects.toThrow('ENTITY_ACCOUNT_LIMIT_EXCEEDED');
+  }, env, createAccountConsensusContext(env))).rejects.toThrow('ENTITY_ACCOUNT_LIMIT_EXCEEDED');
   expect(state.accounts.size).toBe(LIMITS.MAX_ACCOUNTS_PER_ENTITY);
   expect(state.accounts.has(counterpartyId)).toBe(false);
 });
@@ -289,7 +290,7 @@ test('only an accepted signed genesis can reserve an Account slot', async () => 
   proposer.currentFrame.accountStateRoot = computeAccountStateRoot(proposer);
   proposer.currentFrame.stateHash = proposer.currentFrame.accountStateRoot;
 
-  const proposed = await proposeAccountFrame(env, proposer, env.timestamp, 0);
+  const proposed = await proposeAccountFrame(createAccountConsensusContext(env), proposer, env.timestamp, 0);
   if (!proposed.success || !proposed.accountInput?.proposal) {
     throw new Error(proposed.error || 'TEST_ACCOUNT_GENESIS_PROPOSAL_REQUIRED');
   }
@@ -310,11 +311,22 @@ test('only an accepted signed genesis can reserve an Account slot', async () => 
   );
   invalidInput.proposal.frameHanko = frameHanko!;
 
-  await applyAccountInputToEntity(targetState, invalidInput, env).catch(() => undefined);
+  const accountConsensusContext = createAccountConsensusContext(env);
+  await applyAccountInputToEntity(
+    targetState,
+    invalidInput,
+    env,
+    accountConsensusContext,
+  ).catch(() => undefined);
   expect(targetState.accounts.has(sourceEntityId)).toBe(false);
   expect(targetState.accounts.size).toBe(0);
 
-  await applyAccountInputToEntity(targetState, sealedProposal, env);
+  await applyAccountInputToEntity(
+    targetState,
+    sealedProposal,
+    env,
+    accountConsensusContext,
+  );
   expect(targetState.accounts.get(sourceEntityId)?.currentHeight).toBe(1);
   expect(targetState.accounts.size).toBe(1);
 });
@@ -337,7 +349,7 @@ test('single and batch Account mempool enqueue reject atomically at the shared c
   );
   const env = createEmptyEnv('account-resource-bounds');
   await expect(applyAccountInput(
-    env,
+    createAccountConsensusContext(env),
     full,
     createLocalAccountInput(full, entityId, [memoTx(20_000)]),
   )).rejects.toThrow('ACCOUNT_MEMPOOL_LIMIT_EXCEEDED');

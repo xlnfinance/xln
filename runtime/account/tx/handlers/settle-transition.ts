@@ -1,7 +1,6 @@
 import { ethers } from 'ethers';
 
 import type { AccountReplica, AccountTx, SettlementDiff, SettlementOp, SettlementWorkspace } from '../../../types/account';
-import type { RuntimeState } from '../../../types';
 import { cloneAccountState } from '../../state-clone';
 import { computeCanonicalMerkleRoot } from '../../state-root';
 import { deriveDelta } from '../../utils';
@@ -12,9 +11,8 @@ import {
   createDisputeProofHashWithNonce,
   createSettlementHashWithNonce,
 } from '../../../protocol/dispute/proof-builder';
-import { getEntityConfigBoardHash, verifyHankoForHash } from '../../../hanko/signing';
-import { buildAccountProofBodyFromEnv, getAccountStateDomain } from '../../consensus/helpers';
-import { resolveSigningCertifiedBoardHash } from '../../../jurisdiction/board-registry';
+import { buildAccountProofBodyFromJurisdictions, getAccountStateDomain } from '../../consensus/helpers';
+import type { AccountConsensusContext } from '../../consensus/context';
 import {
   captureDisputeArgumentSnapshot,
   storeDisputeArgumentSnapshot,
@@ -236,41 +234,6 @@ const assertSameOptionalHanko = (
   }
 };
 
-const resolveSettlementSealBoardAuthority = async (
-  env: RuntimeState,
-  sourceEntity: string,
-  certifiedCounterpartyBoardHash?: string,
-): Promise<string | undefined> => {
-  if (certifiedCounterpartyBoardHash) return certifiedCounterpartyBoardHash;
-  const localStates = [...env.eReplicas.values()]
-    .map((replica) => replica.state)
-    .filter((state) => state.entityId.toLowerCase() === sourceEntity.toLowerCase());
-  if (localStates.length === 0) return undefined;
-  const configuredBoardHashes = new Set(
-    await Promise.all(localStates.map(async (state) => (
-      await getEntityConfigBoardHash(env, state.config)
-    ).toLowerCase())),
-  );
-  if (configuredBoardHashes.size !== 1) {
-    throw new Error(`SETTLEMENT_SEAL_LOCAL_BOARD_DIVERGENCE:${sourceEntity}`);
-  }
-  const configuredBoardHash = [...configuredBoardHashes][0]!;
-  if (configuredBoardHash === sourceEntity.toLowerCase()) return undefined;
-  const localState = localStates[0]!;
-  const certifiedBoardHash = resolveSigningCertifiedBoardHash(
-    env,
-    sourceEntity,
-    localState.config.jurisdiction,
-  );
-  if (!certifiedBoardHash) throw new Error(`SETTLEMENT_SEAL_BOARD_AUTHORITY_MISSING:${sourceEntity}`);
-  if (certifiedBoardHash.toLowerCase() !== configuredBoardHash) {
-    throw new Error(
-      `SETTLEMENT_SEAL_BOARD_AUTHORITY_MISMATCH:${sourceEntity}:${certifiedBoardHash}:${configuredBoardHash}`,
-    );
-  }
-  return certifiedBoardHash;
-};
-
 const assertSettlementSealNonce = (
   draft: AccountReplica,
   workspace: SettlementWorkspace,
@@ -307,7 +270,7 @@ const assertSettlementSealNonce = (
 const prepareSettlementSeal = (
   draft: AccountReplica,
   transition: Extract<SettleTransitionTx['data'], { kind: 'seal' }>,
-  env: RuntimeState,
+  context: AccountConsensusContext,
 ) => {
   const workspace = assertCurrentWorkspace(draft, transition.revision, transition.workspaceHash);
   if (workspace.status === 'submitted') throw new Error('SETTLEMENT_SEAL_SUBMITTED_FORBIDDEN');
@@ -352,7 +315,10 @@ const prepareSettlementSeal = (
     diffs,
     forgiveTokenIds,
   );
-  const { proofBodyHash, proofBodyStruct } = buildAccountProofBodyFromEnv(env, projectedPostSettlement);
+  const { proofBodyHash, proofBodyStruct } = buildAccountProofBodyFromJurisdictions(
+    context,
+    projectedPostSettlement,
+  );
   if (transition.postProof.proofBodyHash.toLowerCase() !== proofBodyHash.toLowerCase()) {
     throw new Error(
       `POST_SETTLEMENT_PROOF_BODY_HASH_MISMATCH:${transition.postProof.proofBodyHash}:${proofBodyHash}`,
@@ -401,13 +367,12 @@ const verifySettlementSealHankos = async (
   draft: AccountReplica,
   transition: Extract<SettleTransitionTx['data'], { kind: 'seal' }>,
   byLeft: boolean,
-  env: RuntimeState,
+  context: AccountConsensusContext,
   prepared: PreparedSettlementSeal,
   registeredBoardHash?: string,
 ): Promise<{ postHanko: string; settlementHanko?: string }> => {
   const sourceEntity = byLeft ? draft.leftEntity : draft.rightEntity;
-  const sealBoardHash = await resolveSettlementSealBoardAuthority(
-    env,
+  const sealBoardHash = await context.resolveSettlementBoardAuthority(
     sourceEntity,
     registeredBoardHash,
   );
@@ -415,11 +380,10 @@ const verifySettlementSealHankos = async (
     transition.postProof.hanko,
     'POST_SETTLEMENT_PROOF_HANKO_MISSING',
   );
-  const verifiedPost = await verifyHankoForHash(
+  const verifiedPost = await context.verifyHanko(
     postHanko,
     prepared.expectedDisputeHash,
     sourceEntity,
-    env,
     sealBoardHash ? { registeredBoardHash: sealBoardHash } : undefined,
   );
   if (!verifiedPost.valid || verifiedPost.entityId?.toLowerCase() !== sourceEntity.toLowerCase()) {
@@ -437,11 +401,10 @@ const verifySettlementSealHankos = async (
       transition.settlementHanko,
       'SETTLEMENT_NONEXECUTOR_HANKO_MISSING',
     );
-    const verifiedSettlement = await verifyHankoForHash(
+    const verifiedSettlement = await context.verifyHanko(
       settlementHanko,
       prepared.expectedSettlementHash,
       sourceEntity,
-      env,
       sealBoardHash ? { registeredBoardHash: sealBoardHash } : undefined,
     );
     if (!verifiedSettlement.valid || verifiedSettlement.entityId?.toLowerCase() !== sourceEntity.toLowerCase()) {
@@ -525,16 +488,16 @@ const applySettlementSeal = async (
   transition: Extract<SettleTransitionTx['data'], { kind: 'seal' }>,
   byLeft: boolean,
   timestamp: number,
-  env: RuntimeState | undefined,
+  context: AccountConsensusContext | undefined,
   registeredBoardHash?: string,
 ): Promise<void> => {
-  if (!env) throw new Error('SETTLEMENT_SEAL_ENV_MISSING');
-  const prepared = prepareSettlementSeal(draft, transition, env);
+  if (!context) throw new Error('SETTLEMENT_SEAL_CONTEXT_MISSING');
+  const prepared = prepareSettlementSeal(draft, transition, context);
   const verified = await verifySettlementSealHankos(
     draft,
     transition,
     byLeft,
-    env,
+    context,
     prepared,
     registeredBoardHash,
   );
@@ -640,7 +603,7 @@ export async function handleSettleTransition(
   tx: SettleTransitionTx,
   byLeft: boolean,
   timestamp: number,
-  env?: RuntimeState,
+  context?: AccountConsensusContext,
   registeredBoardHash?: string,
 ): Promise<ApplyAccountTxResult> {
   try {
@@ -661,7 +624,7 @@ export async function handleSettleTransition(
     }
 
     if (transition.kind === 'seal') {
-      await applySettlementSeal(draft, transition, byLeft, timestamp, env, registeredBoardHash);
+      await applySettlementSeal(draft, transition, byLeft, timestamp, context, registeredBoardHash);
       commitDraft(account, draft, changed);
       account.disputeProofBodiesByHash = structuredClone(draft.disputeProofBodiesByHash ?? {});
       account.disputeProofNoncesByHash = { ...(draft.disputeProofNoncesByHash ?? {}) };

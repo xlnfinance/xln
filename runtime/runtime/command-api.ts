@@ -1,4 +1,4 @@
-import { assertCrossJurisdictionSwapTargetReadyInEnv } from '../account/swap-command-plan';
+import { assertCrossJurisdictionSwapTargetReadyInEnv } from './swap-target-readiness';
 import { withCanonicalCrossJurisdictionRouteHash } from '../extensions/cross-j';
 import { normalizeRuntimeId } from '../networking/runtime-id';
 import { isDeliveryDelivered, requireDeliveryResult } from '../protocol/payments/delivery-result';

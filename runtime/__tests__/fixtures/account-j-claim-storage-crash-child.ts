@@ -12,6 +12,7 @@ import {
 } from '../../runtime';
 import { applyAccountInput } from '../../account/consensus';
 import { proposeAccountFrame } from '../../account/consensus/propose';
+import { createAccountConsensusContext } from '../../entity/account-consensus-context';
 import {
   deriveSignerAddressSync,
   deriveSignerKeySync,
@@ -125,27 +126,27 @@ await processRuntime(env, []);
 
 const replica = Array.from(env.eReplicas.values()).find((candidate) => candidate.entityId === entityId);
 if (!replica) throw new Error('ACCOUNT_J_CRASH_REPLICA_MISSING');
-const opened = await handleOpenAccountEntityTx(env, replica.state, {
+const opened = await handleOpenAccountEntityTx(replica.state, {
   type: 'openAccount',
   data: {
     targetEntityId: counterpartyId,
     accountDomain: accountStateDomainFromJurisdiction(jurisdiction),
     watchSeed: `0x${'33'.repeat(32)}`,
   },
-});
+}, createAccountConsensusContext(env));
 replica.state = opened.newState;
 const counterpartyReplica = Array.from(env.eReplicas.values()).find((candidate) => (
   candidate.entityId === counterpartyId
 ));
 if (!counterpartyReplica) throw new Error('ACCOUNT_J_CRASH_COUNTERPARTY_REPLICA_MISSING');
-const counterpartyOpened = await handleOpenAccountEntityTx(env, counterpartyReplica.state, {
+const counterpartyOpened = await handleOpenAccountEntityTx(counterpartyReplica.state, {
   type: 'openAccount',
   data: {
     targetEntityId: entityId,
     accountDomain: accountStateDomainFromJurisdiction(jurisdiction),
     watchSeed: `0x${'33'.repeat(32)}`,
   },
-});
+}, createAccountConsensusContext(env));
 counterpartyReplica.state = counterpartyOpened.newState;
 env.runtimeConfig = { ...env.runtimeConfig, storage: { enabled: true, ...storageConfig } };
 
@@ -186,11 +187,10 @@ account.mempool = [{
   },
 }];
 const proposed = await proposeAccountFrame(
-  env,
+  createAccountConsensusContext(env),
   account,
   env.timestamp,
   7,
-  getAccountJClaimNodeStore(env),
 );
 if (!proposed.success || !proposed.accountInput) {
   throw new Error(`ACCOUNT_J_CRASH_PROPOSAL_FAILED:${proposed.error ?? 'unknown'}`);
@@ -201,11 +201,10 @@ if (sealedProposal.kind !== 'frame') throw new Error('ACCOUNT_J_CRASH_FRAME_PROP
 account.currentFrameHanko = sealedProposal.proposal.frameHanko;
 account.currentDisputeProofHanko = sealedProposal.proposal.disputeSeal?.hanko;
 const peerValidation = await applyAccountInput(
-  env,
+  createAccountConsensusContext(env, new Map()),
   structuredClone(counterpartyAccount),
   sealedProposal,
   { entityTimestamp: env.timestamp, finalizedJHeight: 7 },
-  new Map(),
 );
 if (!peerValidation.success || !peerValidation.response) {
   throw new Error(`ACCOUNT_J_CRASH_ACK_FAILED:${peerValidation.error ?? 'missing-response'}`);

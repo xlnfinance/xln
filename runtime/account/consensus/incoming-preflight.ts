@@ -4,8 +4,6 @@
  */
 
 import type { AccountFrame, AccountInput, AccountReplica } from '../../types/account';
-import type { RuntimeState } from '../../types';
-import { verifyHankoForHash } from '../../hanko/signing';
 import { createStructuredLogger, shortId } from '../../infra/logger';
 import { HEAVY_LOGS } from '../../infra/debug-flags';
 import { getAccountFrameBoundsError } from './frame';
@@ -31,7 +29,6 @@ export type IncomingFramePreflightResult =
   | { kind: 'return'; result: HandleAccountInputResult };
 
 const verifyIncomingFrameHanko = async (
-  env: RuntimeState,
   input: AccountInput,
   receivedFrame: AccountFrame,
   events: string[],
@@ -50,11 +47,10 @@ const verifyIncomingFrameHanko = async (
     height: receivedFrame.height,
     from: shortId(input.fromEntityId),
   });
-  const { valid, entityId: recoveredEntityId } = await verifyHankoForHash(
+  const { valid, entityId: recoveredEntityId } = await securityContext.verifyHanko(
     hankoToVerify,
     receivedFrame.stateHash,
     input.fromEntityId,
-    env,
     securityContext.counterpartyCertifiedBoardHash
       ? { registeredBoardHash: securityContext.counterpartyCertifiedBoardHash }
       : undefined,
@@ -242,7 +238,6 @@ const validateIncomingFrameDeadline = (
 };
 
 export const preflightIncomingAccountFrame = async (
-  env: RuntimeState,
   account: AccountReplica,
   input: AccountInput,
   normalizedInputHeight: number | undefined,
@@ -279,7 +274,7 @@ export const preflightIncomingAccountFrame = async (
   );
   if (chainError) return { kind: 'return', result: chainError };
 
-  const hankoError = await verifyIncomingFrameHanko(env, input, receivedFrame, events, securityContext);
+  const hankoError = await verifyIncomingFrameHanko(input, receivedFrame, events, securityContext);
   if (hankoError) return { kind: 'return', result: hankoError };
 
   const deadlineError = validateIncomingFrameDeadline(account, input, receivedFrame, securityContext, events);

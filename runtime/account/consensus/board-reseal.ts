@@ -1,6 +1,4 @@
 import type { AccountInput, AccountPeerInput, AccountReplica } from '../../types/account';
-import type { RuntimeState } from '../../types';
-import { verifyHankoForHash } from '../../hanko/signing';
 import type { AccountInputSecurityContext } from './deadline-policy';
 import { accountInputBoardReseal } from './flush';
 import type { HandleAccountInputResult } from './types';
@@ -121,7 +119,6 @@ const validateBoardResealMetadata = (
 };
 
 const verifyBoardResealWitnesses = async (
-  env: RuntimeState,
   account: AccountReplica,
   input: AccountPeerInput,
   reseal: BoardResealPayload,
@@ -138,11 +135,10 @@ const verifyBoardResealWitnesses = async (
         allowPreviousBoard: false,
       }
     : undefined;
-  const verifiedFrame = await verifyHankoForHash(
+  const verifiedFrame = await securityContext.verifyHanko(
     reseal.frameHanko!,
     metadata.currentFrameHash,
     input.fromEntityId,
-    env,
     frameAuthority,
   );
   if (
@@ -168,7 +164,6 @@ const verifyBoardResealWitnesses = async (
   }
   try {
     const verifiedDispute = await validateCounterpartyDisputeSeal(
-      env,
       account,
       input,
       reseal.disputeSeal,
@@ -183,7 +178,6 @@ const verifyBoardResealWitnesses = async (
 };
 
 export const handleBoardReseal = async (
-  env: RuntimeState,
   account: AccountReplica,
   input: AccountPeerInput,
   securityContext: AccountInputSecurityContext,
@@ -194,7 +188,6 @@ export const handleBoardReseal = async (
   const metadata = validateBoardResealMetadata(account, input, reseal, events);
   if ('success' in metadata) return metadata;
   const witnesses = await verifyBoardResealWitnesses(
-    env,
     account,
     input,
     reseal,

@@ -1,6 +1,7 @@
 import type { AccountPeerInput, AccountReplica } from '../../../../types/account';
 import type { EntityState } from '../../../types';
 import type { RuntimeState } from '../../../../types';
+import type { AccountConsensusContext } from '../../../../account/consensus/context';
 import { applyAccountInput } from '../../../../account/consensus';
 import {
   accountInputAck,
@@ -13,6 +14,7 @@ import {
   getCertifiedBoardNodeStore,
   resolveObserverCertifiedBoardHash,
 } from '../../../../jurisdiction/board-registry';
+import { verifyHankoForHash } from '../../../../hanko/signing';
 import type { AccountJClaimNodeChanges } from '../../../../types/account-j-claims';
 import type { ApplyEntityTxOptions } from '../../apply';
 import {
@@ -29,6 +31,7 @@ const accountHandlerLog = createStructuredLogger('account.handler');
 
 export type AccountInputPhaseContext = {
   env: RuntimeState;
+  accountConsensusContext: AccountConsensusContext;
   state: EntityState;
   input: AccountPeerInput;
   account: AccountReplica;
@@ -88,10 +91,9 @@ const rejectEmptyAccountInput = (context: AccountInputPhaseContext): never => {
   throw new Error(error);
 };
 
-export const applyAccountConsensusInput = async (
-  context: AccountInputPhaseContext,
-): Promise<AccountConsensusOutcome> => {
-  const { env, state, input, account, counterpartyId, createdAccount, effects, options } = context;
+export const applyAccountConsensusInput = async (context: AccountInputPhaseContext): Promise<AccountConsensusOutcome> => {
+  const { env, accountConsensusContext, state, input, account } = context;
+  const { counterpartyId, createdAccount, effects, options } = context;
   const incomingAck = accountInputAck(input);
   const incomingProposal = accountInputProposal(input);
   const hasConsensusInput =
@@ -114,12 +116,14 @@ export const applyAccountConsensusInput = async (
     getCertifiedBoardNodeStore(env),
     input.fromEntityId,
   );
-  const result = await applyAccountInput(env, account, input, {
+  const result = await applyAccountInput(accountConsensusContext, account, input, {
     entityTimestamp: state.timestamp,
     finalizedJHeight: state.lastFinalizedJHeight ?? 0,
     owningEntityIsHub: Boolean(state.hubRebalanceConfig),
+    verifyHanko: (hanko, hash, expectedEntityId, authority) =>
+      verifyHankoForHash(hanko, hash, expectedEntityId, env, authority),
     ...(boardHash ? { counterpartyCertifiedBoardHash: boardHash } : {}),
-  }, options?.accountJClaimNodeStore);
+  });
   context.checkpointProfile('consensus');
   logCrossFillAckResult(context, result, pendingBeforeTxs, inputFrameTxs);
 

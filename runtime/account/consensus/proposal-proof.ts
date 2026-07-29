@@ -1,10 +1,10 @@
 import type { AccountReplica } from '../../types/account';
-import type { RuntimeState } from '../../types';
 import { createDisputeProofHashWithNonce } from '../../protocol/dispute/proof-builder';
 import {
-  buildAccountProofBodyFromEnv,
+  buildAccountProofBodyFromJurisdictions,
   getAccountStateDomain,
   isEntityId32,
+  type AccountJurisdictionView,
 } from './helpers';
 import {
   captureDisputeArgumentSnapshot,
@@ -14,7 +14,7 @@ import type { ProposeAccountFrameResult } from './types';
 import { replaceLocalDisputeDraft } from './dispute-seal';
 
 type DisputeProjection = {
-  proof: ReturnType<typeof buildAccountProofBodyFromEnv>;
+  proof: ReturnType<typeof buildAccountProofBodyFromJurisdictions>;
   hash?: string;
   nonce: number;
 };
@@ -24,7 +24,7 @@ export type PreparedProposalProof = {
   signingEntityId: string;
   disputeHash?: string;
   signedProofNonce: number;
-  proof: ReturnType<typeof buildAccountProofBodyFromEnv>;
+  proof: ReturnType<typeof buildAccountProofBodyFromJurisdictions>;
 };
 
 export type ProposalProofResult =
@@ -32,12 +32,12 @@ export type ProposalProofResult =
   | { success: false; result: ProposeAccountFrameResult };
 
 const buildDisputeProjection = (
-  env: RuntimeState,
+  jurisdictions: AccountJurisdictionView,
   account: AccountReplica,
   candidate: AccountReplica,
 ): DisputeProjection => {
   try {
-    const proof = buildAccountProofBodyFromEnv(env, candidate);
+    const proof = buildAccountProofBodyFromJurisdictions(jurisdictions, candidate);
     const bodyChanged =
       proof.proofBodyHash.toLowerCase() !==
       account.currentDisputeProofBodyHash?.toLowerCase();
@@ -93,7 +93,7 @@ const persistDisputeProjection = (
 };
 
 export const prepareProposalProof = async (
-  env: RuntimeState,
+  jurisdictions: AccountJurisdictionView,
   account: AccountReplica,
   candidate: AccountReplica,
   events: string[],
@@ -113,7 +113,7 @@ export const prepareProposalProof = async (
     };
   }
 
-  const projection = buildDisputeProjection(env, account, candidate);
+  const projection = buildDisputeProjection(jurisdictions, account, candidate);
   checkpointProfile('disputeProof');
   // Account consensus is deliberately signer-blind. It commits the exact
   // hashes that require authority; Entity consensus later creates either a

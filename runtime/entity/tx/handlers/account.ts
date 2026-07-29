@@ -8,6 +8,7 @@ import {
   accountInputReferenceHeight,
 } from '../../../account/consensus/flush';
 import type { ApplyEntityTxOptions } from '../apply';
+import type { AccountConsensusContext } from '../../../account/consensus/context';
 import { cumulativeMarksToPhases } from '../../../infra/perf-profile';
 import { getPerfMs } from '../../../infra/time';
 import { resolveInboundAccount } from './account/inbound-account';
@@ -80,6 +81,7 @@ const applyAccountInputPhases = async (
   state: EntityState,
   input: AccountPeerInput,
   env: RuntimeState,
+  accountConsensusContext: AccountConsensusContext,
   options: ApplyEntityTxOptions | undefined,
   checkpointProfile: AccountInputCheckpoint,
 ): Promise<AccountHandlerResult> => {
@@ -109,6 +111,7 @@ const applyAccountInputPhases = async (
 
   const context: AccountInputPhaseContext = {
     env,
+    accountConsensusContext,
     state,
     input,
     account: account,
@@ -156,6 +159,7 @@ export async function applyAccountInputToEntity(
   state: EntityState,
   input: AccountPeerInput,
   env: RuntimeState,
+  accountConsensusContext: AccountConsensusContext,
   options?: ApplyEntityTxOptions,
 ): Promise<AccountHandlerResult> {
   const startedAt = getPerfMs();
@@ -165,7 +169,14 @@ export async function applyAccountInputToEntity(
   };
   let outcome = 'returned';
   try {
-    return await applyAccountInputPhases(state, input, env, options, checkpoint);
+    return await applyAccountInputPhases(
+      state,
+      input,
+      env,
+      accountConsensusContext,
+      options,
+      checkpoint,
+    );
   } catch (error) {
     outcome = 'threw';
     throw error;

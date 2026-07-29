@@ -3,7 +3,7 @@ import type { EntityState } from '../../../types';
 import type { RuntimeState } from '../../../../types';
 import { addMessage } from '../../../frame-events';
 import { createDisputeProofHashWithNonce } from '../../../../protocol/dispute/proof-builder';
-import { buildAccountProofBodyFromEnv } from '../../../../account/consensus/helpers';
+import { buildAccountProofBodyFromJurisdictions } from '../../../../account/consensus/helpers';
 import { verifyHankoForHash } from '../../../../hanko/signing';
 import {
   getCertifiedBoardNodeStore,
@@ -53,7 +53,7 @@ export const verifyStartHanko = async (
     boardHash ? { registeredBoardHash: boardHash } : undefined,
   );
   if (verification.valid) return true;
-  const currentProof = buildAccountProofBodyFromEnv(env, account);
+  const currentProof = buildAccountProofBodyFromJurisdictions(env, account);
   addMessage(
     state,
     `❌ Counterparty dispute proof invalid for current account snapshot; ` +

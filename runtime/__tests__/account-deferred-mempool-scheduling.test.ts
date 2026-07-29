@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { createAccountConsensusContext } from '../entity/account-consensus-context';
 
 import { proposeAccountFrame } from '../account/consensus/propose';
 import { createSettlementWorkspaceHash } from '../account/tx/handlers/settle-transition';
@@ -74,7 +75,7 @@ describe('deferred Account mempool scheduling', () => {
   test('a frozen-only mempool remains durable without waking empty Entity frames', async () => {
     const { env, replica, account, entityId, signerId } = frozenRepaymentReplica();
 
-    const proposal = await proposeAccountFrame(env, account, env.timestamp);
+    const proposal = await proposeAccountFrame(createAccountConsensusContext(env), account, env.timestamp);
     expect(proposal.success).toBe(false);
     expect(proposal.error).toContain('deferred');
     expect(account.mempool.map((tx) => tx.type)).toEqual(['lending_repay']);

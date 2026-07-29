@@ -1,4 +1,5 @@
 import { describe, expect, spyOn, test } from 'bun:test';
+import { createAccountConsensusContext } from '../entity/account-consensus-context';
 import { readEntityFrameEventMessages } from '../entity/frame-events';
 
 import { x25519 } from '@noble/curves/ed25519.js';
@@ -781,10 +782,10 @@ describe('audit fail-fast regressions', () => {
     receiver.mempool = [];
     receiver.proofHeader = { fromEntity: right.entityId, toEntity: left.entityId, nextProofNonce: 0 };
 
-    const proposal = await proposeAccountFrame(env, proposer, env.timestamp, 9);
+    const proposal = await proposeAccountFrame(createAccountConsensusContext(env), proposer, env.timestamp, 9);
     if (!proposal.success || !proposal.accountInput) throw new Error(proposal.error || 'proposal failed');
     const sealedProposal = await sealAccountDraftAsEntity(env, left.entityId, left.signerId, proposal);
-    const result = await applyAccountInput(env, receiver, sealedProposal, {
+    const result = await applyAccountInput(createAccountConsensusContext(env), receiver, sealedProposal, {
       entityTimestamp: env.timestamp + 10 * 60_000,
       finalizedJHeight: 10,
     });
@@ -831,10 +832,10 @@ describe('audit fail-fast regressions', () => {
     receiver.mempool = [structuredClone(claim)];
     receiver.proofHeader = { fromEntity: right.entityId, toEntity: left.entityId, nextProofNonce: 0 };
 
-    const proposed = await proposeAccountFrame(env, proposer, env.timestamp, 7);
+    const proposed = await proposeAccountFrame(createAccountConsensusContext(env), proposer, env.timestamp, 7);
     if (!proposed.success || !proposed.accountInput) throw new Error(proposed.error || 'proposal failed');
     const sealedProposal = await sealAccountDraftAsEntity(env, left.entityId, left.signerId, proposed);
-    const result = await applyAccountInput(env, receiver, sealedProposal, {
+    const result = await applyAccountInput(createAccountConsensusContext(env), receiver, sealedProposal, {
       entityTimestamp: env.timestamp,
       finalizedJHeight: 7,
     });
@@ -844,9 +845,12 @@ describe('audit fail-fast regressions', () => {
     const newClaimNodes = new Map(
       result.accountJClaimNodeChanges?.newNodes.map(({ hash, node }) => [hash, node]) ?? [],
     );
-    const flushed = await proposeAccountFrame(env, receiver, env.timestamp, 7, {
-      get: hash => newClaimNodes.get(hash),
-    });
+    const flushed = await proposeAccountFrame(
+      createAccountConsensusContext(env, { get: hash => newClaimNodes.get(hash) }),
+      receiver,
+      env.timestamp,
+      7,
+    );
     expect(flushed.success).toBe(true);
     expect(flushed.accountInput?.kind).toBe('frame_ack');
     if (flushed.accountInput?.kind !== 'frame_ack') throw new Error('expected Entity-flushed frame_ack');
@@ -974,7 +978,7 @@ describe('audit fail-fast regressions', () => {
         createdTimestamp: 0,
       });
     }
-    const proposal = await proposeAccountFrame(env, proposer, env.timestamp, 1);
+    const proposal = await proposeAccountFrame(createAccountConsensusContext(env), proposer, env.timestamp, 1);
     if (!proposal.success || !proposal.accountInput) throw new Error(proposal.error || 'proposal failed');
     const sealedProposal = await sealAccountDraftAsEntity(env, left.entityId, left.signerId, proposal);
 
@@ -1083,7 +1087,7 @@ describe('audit fail-fast regressions', () => {
       proposal: { frame: invalidFrame, frameHanko },
     };
 
-    const accountResult = await applyAccountInput(env, cloneAccountState(receiver), accountInput, {
+    const accountResult = await applyAccountInput(createAccountConsensusContext(env), cloneAccountState(receiver), accountInput, {
       entityTimestamp: env.timestamp,
       finalizedJHeight: 0,
     });
@@ -1177,7 +1181,7 @@ describe('audit fail-fast regressions', () => {
     };
     const before = safeStringify(receiver);
 
-    const accountResult = await applyAccountInput(env, receiver, accountInput, {
+    const accountResult = await applyAccountInput(createAccountConsensusContext(env), receiver, accountInput, {
       entityTimestamp: env.timestamp,
       finalizedJHeight: 0,
     });
@@ -1599,7 +1603,7 @@ describe('audit fail-fast regressions', () => {
       rightHold: 0n,
     });
 
-    const result = await proposeAccountFrame(env, account, env.timestamp);
+    const result = await proposeAccountFrame(createAccountConsensusContext(env), account, env.timestamp);
 
     expect(result.success).toBe(true);
     expect(result.accountInput?.proposal.frame?.accountTxs.map(tx => tx.type)).toEqual(['set_credit_limit']);
@@ -1640,7 +1644,7 @@ describe('audit fail-fast regressions', () => {
     const receiver = cloneAccountState(proposer);
     receiver.proofHeader = { fromEntity: right, toEntity: left, nextProofNonce: 0 };
 
-    const proposed = await proposeAccountFrame(env, proposer, env.timestamp);
+    const proposed = await proposeAccountFrame(createAccountConsensusContext(env), proposer, env.timestamp);
     if (!proposed.success) throw new Error(proposed.error || 'proposal failed');
     const frame = proposed.accountInput!.proposal.frame;
     expect(frame.timestamp).toBe(env.timestamp);
@@ -1670,8 +1674,8 @@ describe('audit fail-fast regressions', () => {
     base.deltas.set(1, createDefaultDelta(1));
     const committedEntityTimestamp = 1_777;
 
-    const proposer = await proposeAccountFrame(proposerEnv, cloneAccountState(base), committedEntityTimestamp);
-    const validator = await proposeAccountFrame(validatorEnv, cloneAccountState(base), committedEntityTimestamp);
+    const proposer = await proposeAccountFrame(createAccountConsensusContext(proposerEnv), cloneAccountState(base), committedEntityTimestamp);
+    const validator = await proposeAccountFrame(createAccountConsensusContext(validatorEnv), cloneAccountState(base), committedEntityTimestamp);
 
     expect(proposer.success).toBe(true);
     expect(validator.success).toBe(true);
@@ -1828,7 +1832,7 @@ describe('audit fail-fast regressions', () => {
       right,
     );
 
-    await expect(proposeAccountFrame(env, account, env.timestamp)).rejects.toThrow(/CROSS_J_FILL_ACK_PROPOSAL_FAILED/);
+    await expect(proposeAccountFrame(createAccountConsensusContext(env), account, env.timestamp)).rejects.toThrow(/CROSS_J_FILL_ACK_PROPOSAL_FAILED/);
     expect(account.mempool).toHaveLength(1);
   });
 
@@ -1876,7 +1880,7 @@ describe('audit fail-fast regressions', () => {
       ],
     ]);
 
-    await expect(proposeAccountFrame(env, account, env.timestamp)).rejects.toThrow(
+    await expect(proposeAccountFrame(createAccountConsensusContext(env), account, env.timestamp)).rejects.toThrow(
       /CROSS_J_PULL_RESOLVE_PROPOSAL_FAILED/,
     );
     expect(account.mempool).toHaveLength(1);
@@ -1949,7 +1953,7 @@ describe('audit fail-fast regressions', () => {
       right,
     );
 
-    await expect(proposeAccountFrame(env, account, env.timestamp)).rejects.toThrow(
+    await expect(proposeAccountFrame(createAccountConsensusContext(env), account, env.timestamp)).rejects.toThrow(
       /CROSS_J_SWAP_OFFER_PROPOSAL_FAILED/,
     );
     expect(account.mempool).toHaveLength(1);
@@ -2025,7 +2029,7 @@ describe('audit fail-fast regressions', () => {
       quantizedWant: wantAmount,
     });
 
-    const result = await proposeAccountFrame(env, account, env.timestamp);
+    const result = await proposeAccountFrame(createAccountConsensusContext(env), account, env.timestamp);
 
     expect(result.success).toBe(true);
     expect(result.accountInput?.proposal.frame.accountTxs).toEqual([validTx]);
@@ -2066,7 +2070,7 @@ describe('audit fail-fast regressions', () => {
     ): Promise<{ input: AccountInput; hubAccount: AccountState }> => {
       const proposerAccount = fundedAccount(identity.entityId, hub.entityId);
       proposerAccount.mempool.push(tx);
-      const proposed = await proposeAccountFrame(env, proposerAccount, env.timestamp, 0);
+      const proposed = await proposeAccountFrame(createAccountConsensusContext(env), proposerAccount, env.timestamp, 0);
       if (!proposed.success || !proposed.accountInput) {
         throw new Error(`SAME_CHAIN_PROPOSAL_FAILED:${proposed.error || 'missing input'}`);
       }
