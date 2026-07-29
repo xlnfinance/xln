@@ -13,6 +13,32 @@ import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/index.ts
 
 const serverLog = createStructuredLogger('server');
 const TOKEN_CATALOG_TIMEOUT_MS = Math.max(1000, Number(process.env['TOKEN_CATALOG_TIMEOUT_MS'] || '6000'));
+type DepositoryRunner = Parameters<JAdapter['depository']['connect']>[0];
+type DeployedTokenContract = {
+  waitForDeployment(): Promise<unknown>;
+  getAddress(): Promise<string>;
+  approve(spender: string, amount: bigint): Promise<{ wait(): Promise<unknown> }>;
+};
+
+const requireDepositoryRunner = (value: unknown): DepositoryRunner => {
+  if (!value || typeof value !== 'object') {
+    throw new Error('TOKEN_CATALOG_DEPOSITORY_RUNNER_INVALID');
+  }
+  return value as DepositoryRunner;
+};
+
+const requireDeployedTokenContract = (value: unknown): DeployedTokenContract => {
+  if (!value || typeof value !== 'object') throw new Error('TOKEN_CATALOG_DEPLOY_RESULT_INVALID');
+  const candidate = value as Record<string, unknown>;
+  if (
+    typeof candidate['waitForDeployment'] !== 'function' ||
+    typeof candidate['getAddress'] !== 'function' ||
+    typeof candidate['approve'] !== 'function'
+  ) {
+    throw new Error('TOKEN_CATALOG_DEPLOY_RESULT_INVALID');
+  }
+  return value as DeployedTokenContract;
+};
 
 const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> => {
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -91,23 +117,14 @@ const deployDefaultTokensOnRpc = async (adapter: JAdapter): Promise<void> => {
 
   for (const token of tokens) {
     if (existingSymbols.has(token.symbol.trim().toUpperCase())) continue;
-    const contract = (await factory.deploy(
-      token.name,
-      token.symbol,
-      token.decimals,
-      getDefaultTokenSupply(token.decimals),
-    )) as unknown as {
-      waitForDeployment(): Promise<unknown>;
-      getAddress(): Promise<string>;
-      approve(spender: string, amount: bigint): Promise<{ wait(): Promise<unknown> }>;
-    };
+    const contract = requireDeployedTokenContract(
+      await factory.deploy(token.name, token.symbol, token.decimals, getDefaultTokenSupply(token.decimals)),
+    );
     await contract.waitForDeployment();
     const tokenAddress = await contract.getAddress();
     serverLog.info('tokens.deployed', { symbol: token.symbol, address: shortId(tokenAddress, 10) });
     await (await contract.approve(depositoryAddress, TOKEN_REGISTRATION_AMOUNT)).wait();
-    const depository = adapter.depository.connect(
-      adapter.signer as unknown as Parameters<typeof adapter.depository.connect>[0],
-    );
+    const depository = adapter.depository.connect(requireDepositoryRunner(adapter.signer));
     await (
       await depository.adminRegisterExternalToken({
         entity: ethers.ZeroHash,
