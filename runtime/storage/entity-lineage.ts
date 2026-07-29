@@ -1,3 +1,4 @@
+import { encodeCanonicalConsensusValue } from '../protocol/canonical-consensus-value';
 import { ethers } from 'ethers';
 
 import { verifyAccountSignature } from '../account/crypto';
@@ -12,7 +13,6 @@ import {
   buildEntityFrameAuthority,
   computeCanonicalEntityConsensusStateHash,
   computeEntityFrameAuthorityRoot,
-  encodeCanonicalEntityConsensusValue,
 } from '../entity/consensus/state-root';
 import { encodeBoard, hashBoard } from '../entity/factory';
 import { getCertifiedBoardStackKey } from '../jurisdiction/board-registry';
@@ -52,7 +52,7 @@ const replicaHead = (replica: EntityReplica): string => {
   if (!head) {
     throw new Error(
       `STORAGE_ENTITY_LINEAGE_HEAD_MISSING:entity=${replica.entityId}:signer=${replica.signerId}:` +
-      `height=${replica.state.height}`,
+        `height=${replica.state.height}`,
     );
   }
   return head;
@@ -63,27 +63,25 @@ const assertValidHeight = (entry: ReplicaEntry): void => {
   if (!Number.isSafeInteger(height) || height < 0) {
     throw new Error(
       `STORAGE_ENTITY_REPLICA_HEIGHT_INVALID:entity=${entry.replica.entityId}:` +
-      `signer=${entry.replica.signerId}:height=${String(entry.replica.state.height)}`,
+        `signer=${entry.replica.signerId}:height=${String(entry.replica.state.height)}`,
     );
   }
 };
 
-const assertSameHeightState = (
-  entityId: string,
-  expected: ReplicaEntry,
-  actual: ReplicaEntry,
-): void => {
+const assertSameHeightState = (entityId: string, expected: ReplicaEntry, actual: ReplicaEntry): void => {
   const expectedHash = computeCanonicalEntityConsensusStateHash(expected.replica.state);
   const actualHash = computeCanonicalEntityConsensusStateHash(actual.replica.state);
   if (expectedHash === actualHash) return;
   throw new Error(
     `STORAGE_ENTITY_REPLICA_STATE_DIVERGENCE:entity=${entityId}:height=${actual.replica.state.height}:` +
-    `expectedSigner=${expected.replica.signerId}:actualSigner=${actual.replica.signerId}:` +
-    `expected=${expectedHash}:actual=${actualHash}`,
+      `expectedSigner=${expected.replica.signerId}:actualSigner=${actual.replica.signerId}:` +
+      `expected=${expectedHash}:actual=${actualHash}`,
   );
 };
 
-const normalizeConfigSigners = (config: ConsensusConfig): {
+const normalizeConfigSigners = (
+  config: ConsensusConfig,
+): {
   validators: Set<string>;
   shares: Map<string, bigint>;
   totalPower: bigint;
@@ -105,13 +103,7 @@ const normalizeConfigSigners = (config: ConsensusConfig): {
   const shares = new Map<string, bigint>();
   for (const [rawSignerId, share] of Object.entries(config.shares)) {
     const signerId = normalizeEntityId(rawSignerId);
-    if (
-      !signerId ||
-      shares.has(signerId) ||
-      typeof share !== 'bigint' ||
-      share <= 0n ||
-      share > BigInt(UINT16_MAX)
-    ) {
+    if (!signerId || shares.has(signerId) || typeof share !== 'bigint' || share <= 0n || share > BigInt(UINT16_MAX)) {
       throw new Error(`STORAGE_ENTITY_LINEAGE_BOARD_SHARE_INVALID:${rawSignerId}:${String(share)}`);
     }
     shares.set(signerId, share);
@@ -131,18 +123,12 @@ const normalizeConfigSigners = (config: ConsensusConfig): {
   }
   const totalPower = Array.from(shares.values()).reduce((sum, share) => sum + share, 0n);
   if (config.threshold > totalPower || config.threshold > BigInt(UINT16_MAX)) {
-    throw new Error(
-      `STORAGE_ENTITY_LINEAGE_BOARD_THRESHOLD_EXCEEDS_POWER:${config.threshold}:${totalPower}`,
-    );
+    throw new Error(`STORAGE_ENTITY_LINEAGE_BOARD_THRESHOLD_EXCEEDS_POWER:${config.threshold}:${totalPower}`);
   }
   return { validators, shares, totalPower };
 };
 
-const assertAuthorityShape = (
-  authority: EntityFrameAuthority,
-  height: number,
-  context: string,
-): void => {
+const assertAuthorityShape = (authority: EntityFrameAuthority, height: number, context: string): void => {
   const { validators } = normalizeConfigSigners(authority.config);
   const leader = authority.leaderState;
   const activeValidatorId = normalizeEntityId(leader.activeValidatorId);
@@ -185,22 +171,18 @@ const assertLeaderTransition = (
     throw new Error(`STORAGE_ENTITY_LINEAGE_RELAY_CERT_INVALID:${frame.height}`);
   }
   const expectedPostLeader = expectedCommittedLeaderState(preState, frame);
-  if (encodeCanonicalEntityConsensusValue(postAuthority.leaderState) !==
-      encodeCanonicalEntityConsensusValue(expectedPostLeader)) {
+  if (encodeCanonicalConsensusValue(postAuthority.leaderState) !== encodeCanonicalConsensusValue(expectedPostLeader)) {
     throw new Error(`STORAGE_ENTITY_LINEAGE_POST_LEADER_MISMATCH:${frame.height}`);
   }
 };
 
-const assertFrameBody = (
-  entityId: string,
-  link: CertifiedEntityFrameLink,
-): ProposedEntityFrame => {
+const assertFrameBody = (entityId: string, link: CertifiedEntityFrameLink): ProposedEntityFrame => {
   const frame = validateProposedEntityFrame(link.frame, 'StorageCertifiedEntityFrame');
   const postAuthorityRoot = computeEntityFrameAuthorityRoot(link.postAuthority);
   if (postAuthorityRoot !== frame.authorityRoot) {
     throw new Error(
       `STORAGE_ENTITY_LINEAGE_AUTHORITY_ROOT_MISMATCH:height=${frame.height}:` +
-      `expected=${postAuthorityRoot}:received=${frame.authorityRoot}`,
+        `expected=${postAuthorityRoot}:received=${frame.authorityRoot}`,
     );
   }
   const bodyHash = createEntityFrameHashFromStateRoot(
@@ -217,7 +199,7 @@ const assertFrameBody = (
   if (bodyHash !== frame.hash) {
     throw new Error(
       `STORAGE_ENTITY_LINEAGE_FRAME_HASH_MISMATCH:height=${frame.height}:` +
-      `expected=${bodyHash}:received=${frame.hash}`,
+        `expected=${bodyHash}:received=${frame.hash}`,
     );
   }
   const frameManifest = frame.hashesToSign?.[0];
@@ -255,7 +237,7 @@ const assertCertificateVariant = (
     if (!Array.isArray(signatures) || signatures.length !== manifest.length) {
       throw new Error(
         `STORAGE_ENTITY_LINEAGE_SIGNATURE_COUNT_MISMATCH:signer=${rawSignerId}:` +
-        `actual=${Array.isArray(signatures) ? signatures.length : 'invalid'}:expected=${manifest.length}`,
+          `actual=${Array.isArray(signatures) ? signatures.length : 'invalid'}:expected=${manifest.length}`,
       );
     }
     for (let index = 0; index < manifest.length; index += 1) {
@@ -272,28 +254,23 @@ const assertCertificateVariant = (
   if (power < preAuthority.config.threshold) {
     throw new Error(
       `STORAGE_ENTITY_LINEAGE_QUORUM_INSUFFICIENT:height=${frame.height}:` +
-      `power=${power}:threshold=${preAuthority.config.threshold}`,
+        `power=${power}:threshold=${preAuthority.config.threshold}`,
     );
   }
 };
 
-const linkFingerprint = (link: CertifiedEntityFrameLink): string =>
-  encodeCanonicalEntityConsensusValue(link);
+const linkFingerprint = (link: CertifiedEntityFrameLink): string => encodeCanonicalConsensusValue(link);
 
 const immutableFrameMetadataFingerprint = (frame: ProposedEntityFrame): string => {
-  const {
-    collectedSigs: _collectedSigs,
-    hankos: _hankos,
-    ...immutableMetadata
-  } = frame;
-  return encodeCanonicalEntityConsensusValue(immutableMetadata);
+  const { collectedSigs: _collectedSigs, hankos: _hankos, ...immutableMetadata } = frame;
+  return encodeCanonicalConsensusValue(immutableMetadata);
 };
 
 const collectCandidates = (entries: ReplicaEntry[]): CertifiedEntityFrameLink[] =>
   entries.flatMap(entry => entry.replica.certifiedFrameLineage ?? []);
 
 const anchorIdentity = (anchor: CertifiedEntityLineageAnchor): string =>
-  encodeCanonicalEntityConsensusValue({
+  encodeCanonicalConsensusValue({
     entityId: normalizeEntityId(anchor.entityId),
     height: anchor.height,
     frameHash: anchor.frameHash,
@@ -320,16 +297,20 @@ const checkpointAnchorIdentity = (
 const computeRuntimeCheckpointReplicaSetRoot = (
   runtimeHeight: number,
   anchors: Array<{ entry: ReplicaEntry; anchor: CertifiedEntityLineageAnchor }>,
-): string => ethers.keccak256(ethers.toUtf8Bytes(encodeCanonicalEntityConsensusValue({
-  kind: 'xln.local-runtime-lineage-checkpoint.v1',
-  runtimeHeight,
-  replicas: anchors
-    .map(({ entry, anchor }) => checkpointAnchorIdentity(entry, anchor))
-    .sort((left, right) => compareStableText(
-      encodeCanonicalEntityConsensusValue(left),
-      encodeCanonicalEntityConsensusValue(right),
-    )),
-})));
+): string =>
+  ethers.keccak256(
+    ethers.toUtf8Bytes(
+      encodeCanonicalConsensusValue({
+        kind: 'xln.local-runtime-lineage-checkpoint.v1',
+        runtimeHeight,
+        replicas: anchors
+          .map(({ entry, anchor }) => checkpointAnchorIdentity(entry, anchor))
+          .sort((left, right) =>
+            compareStableText(encodeCanonicalConsensusValue(left), encodeCanonicalConsensusValue(right)),
+          ),
+      }),
+    ),
+  );
 
 const assertGenesisBoardAuthority = (
   env: RuntimeState,
@@ -365,17 +346,13 @@ const assertGenesisBoardAuthority = (
   if (evidence.boardHash !== boardHash) {
     throw new Error(
       `STORAGE_ENTITY_LINEAGE_GENESIS_BOARD_MISMATCH:${entityId}:` +
-      `expected=${evidence.boardHash}:received=${boardHash}`,
+        `expected=${evidence.boardHash}:received=${boardHash}`,
     );
   }
   return computeRegistrationEvidenceHash(evidence);
 };
 
-const assertGenesisAnchor = (
-  env: RuntimeState,
-  entityId: string,
-  anchor: CertifiedEntityLineageAnchor,
-): void => {
+const assertGenesisAnchor = (env: RuntimeState, entityId: string, anchor: CertifiedEntityLineageAnchor): void => {
   if (
     normalizeEntityId(anchor.entityId) !== entityId ||
     anchor.height !== 0 ||
@@ -388,16 +365,12 @@ const assertGenesisAnchor = (
   if (anchor.authorityEvidenceHash !== expectedEvidenceHash) {
     throw new Error(
       `STORAGE_ENTITY_LINEAGE_ANCHOR_AUTHORITY_EVIDENCE_MISMATCH:${entityId}:` +
-      `expected=${expectedEvidenceHash ?? 'none'}:received=${anchor.authorityEvidenceHash ?? 'none'}`,
+        `expected=${expectedEvidenceHash ?? 'none'}:received=${anchor.authorityEvidenceHash ?? 'none'}`,
     );
   }
 };
 
-const assertLineageAnchor = (
-  env: RuntimeState,
-  entityId: string,
-  anchor: CertifiedEntityLineageAnchor,
-): void => {
+const assertLineageAnchor = (env: RuntimeState, entityId: string, anchor: CertifiedEntityLineageAnchor): void => {
   if (
     normalizeEntityId(anchor.entityId) !== entityId ||
     !Number.isSafeInteger(anchor.height) ||
@@ -415,18 +388,15 @@ const assertLineageAnchor = (
     if (anchor.authorityEvidenceHash !== undefined) {
       throw new Error(`STORAGE_ENTITY_LINEAGE_CHECKPOINT_GENESIS_EVIDENCE_FORBIDDEN:${entityId}`);
     }
-    assertAuthorityShape(
-      anchor.authority,
-      anchor.height,
-      'STORAGE_ENTITY_LINEAGE_CHECKPOINT_AUTHORITY',
-    );
+    assertAuthorityShape(anchor.authority, anchor.height, 'STORAGE_ENTITY_LINEAGE_CHECKPOINT_AUTHORITY');
   }
   const checkpoint = anchor.runtimeCheckpoint;
-  if (checkpoint && (
-    !Number.isSafeInteger(checkpoint.runtimeHeight) ||
-    checkpoint.runtimeHeight < 0 ||
-    !/^0x[0-9a-f]{64}$/i.test(checkpoint.replicaSetRoot)
-  )) {
+  if (
+    checkpoint &&
+    (!Number.isSafeInteger(checkpoint.runtimeHeight) ||
+      checkpoint.runtimeHeight < 0 ||
+      !/^0x[0-9a-f]{64}$/i.test(checkpoint.replicaSetRoot))
+  ) {
     throw new Error(`STORAGE_ENTITY_LINEAGE_RUNTIME_CHECKPOINT_INVALID:${entityId}`);
   }
 };
@@ -458,18 +428,19 @@ const resolveGenesisAnchor = (
   entityId: string,
   entries: ReplicaEntry[],
 ): CertifiedEntityLineageAnchor => {
-  const persisted = entries.flatMap(entry => (
-    entry.replica.certifiedFrameAnchor ? [entry.replica.certifiedFrameAnchor] : []
-  ));
+  const persisted = entries.flatMap(entry =>
+    entry.replica.certifiedFrameAnchor ? [entry.replica.certifiedFrameAnchor] : [],
+  );
   const genesisEntry = entries.find(entry => entry.replica.state.height === 0);
   const candidates = [...persisted];
   if (genesisEntry) candidates.push(createGenesisAnchor(env, entityId, genesisEntry));
   if (candidates.length === 0) {
     const replicas = entries
-      .map(({ replicaKey, replica }) => (
-        `${replicaKey}@h${replica.state.height}:head=${replicaHead(replica)}:` +
-        `lineage=${replica.certifiedFrameLineage?.length ?? 0}`
-      ))
+      .map(
+        ({ replicaKey, replica }) =>
+          `${replicaKey}@h${replica.state.height}:head=${replicaHead(replica)}:` +
+          `lineage=${replica.certifiedFrameLineage?.length ?? 0}`,
+      )
       .sort(compareStableText)
       .join(',');
     throw new Error(`STORAGE_ENTITY_LINEAGE_ANCHOR_MISSING:entity=${entityId}:replicas=[${replicas}]`);
@@ -479,16 +450,13 @@ const resolveGenesisAnchor = (
   if (identities.size !== 1) {
     throw new Error(
       `STORAGE_ENTITY_LINEAGE_ANCHOR_CONFLICT:entity=${entityId}:` +
-      `identities=${Array.from(identities).sort(compareStableText).join('|')}`,
+        `identities=${Array.from(identities).sort(compareStableText).join('|')}`,
     );
   }
   return structuredClone(candidates[0]!);
 };
 
-const assertReplicaMatchesAnchor = (
-  entry: ReplicaEntry,
-  anchor: CertifiedEntityLineageAnchor,
-): void => {
+const assertReplicaMatchesAnchor = (entry: ReplicaEntry, anchor: CertifiedEntityLineageAnchor): void => {
   const stateRoot = computeCanonicalEntityConsensusStateHash(entry.replica.state);
   const authorityRoot = computeEntityFrameAuthorityRoot(buildEntityFrameAuthority(entry.replica.state));
   if (
@@ -499,21 +467,17 @@ const assertReplicaMatchesAnchor = (
   ) {
     throw new Error(
       `STORAGE_ENTITY_LINEAGE_ANCHOR_REPLICA_MISMATCH:entity=${entry.replica.entityId}:` +
-      `signer=${entry.replica.signerId}`,
+        `signer=${entry.replica.signerId}`,
     );
   }
 };
 
-const selectCanonicalVariant = (
-  variants: CertifiedEntityFrameLink[],
-): CertifiedEntityFrameLink => variants
-  .map(link => structuredClone(link))
-  .sort((left, right) => compareStableText(linkFingerprint(left), linkFingerprint(right)))[0]!;
+const selectCanonicalVariant = (variants: CertifiedEntityFrameLink[]): CertifiedEntityFrameLink =>
+  variants
+    .map(link => structuredClone(link))
+    .sort((left, right) => compareStableText(linkFingerprint(left), linkFingerprint(right)))[0]!;
 
-const assertReplicaMatchesCertifiedHeight = (
-  entry: ReplicaEntry,
-  link: CertifiedEntityFrameLink,
-): void => {
+const assertReplicaMatchesCertifiedHeight = (entry: ReplicaEntry, link: CertifiedEntityFrameLink): void => {
   const frame = link.frame;
   const state = entry.replica.state;
   const stateRoot = computeCanonicalEntityConsensusStateHash(state);
@@ -526,10 +490,10 @@ const assertReplicaMatchesCertifiedHeight = (
   ) {
     throw new Error(
       `STORAGE_ENTITY_LINEAGE_REPLICA_HEAD_MISMATCH:entity=${entry.replica.entityId}:` +
-      `signer=${entry.replica.signerId}:height=${state.height}:frameHeight=${frame.height}:` +
-      `stateHead=${replicaHead(entry.replica)}:frameHash=${frame.hash}:` +
-      `stateRoot=${stateRoot}:frameStateRoot=${frame.stateRoot}:` +
-      `authorityRoot=${authorityRoot}:frameAuthorityRoot=${frame.authorityRoot}`,
+        `signer=${entry.replica.signerId}:height=${state.height}:frameHeight=${frame.height}:` +
+        `stateHead=${replicaHead(entry.replica)}:frameHash=${frame.hash}:` +
+        `stateRoot=${stateRoot}:frameStateRoot=${frame.stateRoot}:` +
+        `authorityRoot=${authorityRoot}:frameAuthorityRoot=${frame.authorityRoot}`,
     );
   }
 };
@@ -545,10 +509,11 @@ const buildLegacyEntityPlan = (
   anchor: CertifiedEntityLineageAnchor;
 } => {
   entries.forEach(assertValidHeight);
-  entries.sort((left, right) => (
-    left.replica.state.height - right.replica.state.height ||
-    compareStableText(left.replicaKey.toLowerCase(), right.replicaKey.toLowerCase())
-  ));
+  entries.sort(
+    (left, right) =>
+      left.replica.state.height - right.replica.state.height ||
+      compareStableText(left.replicaKey.toLowerCase(), right.replicaKey.toLowerCase()),
+  );
   for (let index = 1; index < entries.length; index += 1) {
     const previous = entries[index - 1]!;
     const current = entries[index]!;
@@ -558,8 +523,9 @@ const buildLegacyEntityPlan = (
   }
   const maxHeight = entries.at(-1)!.replica.state.height;
   const selectedCandidates = entries.filter(entry => entry.replica.state.height === maxHeight);
-  const selected = [...selectedCandidates]
-    .sort((left, right) => compareStableText(left.replicaKey.toLowerCase(), right.replicaKey.toLowerCase()))[0]!;
+  const selected = [...selectedCandidates].sort((left, right) =>
+    compareStableText(left.replicaKey.toLowerCase(), right.replicaKey.toLowerCase()),
+  )[0]!;
   const anchor = resolveGenesisAnchor(env, entityId, entries);
   const candidates = collectCandidates(entries);
   const variantsByHeight = new Map<number, CertifiedEntityFrameLink[]>();
@@ -585,22 +551,18 @@ const buildLegacyEntityPlan = (
     if (frameHashes.size !== 1) {
       throw new Error(
         `STORAGE_ENTITY_LINEAGE_FORK:entity=${entityId}:height=${height}:` +
-        `hashes=${Array.from(frameHashes).sort(compareStableText).join(',')}`,
+          `hashes=${Array.from(frameHashes).sort(compareStableText).join(',')}`,
       );
     }
-    const metadataVariants = new Set(
-      variants.map(variant => immutableFrameMetadataFingerprint(variant.frame)),
-    );
+    const metadataVariants = new Set(variants.map(variant => immutableFrameMetadataFingerprint(variant.frame)));
     if (metadataVariants.size !== 1) {
-      throw new Error(
-        `STORAGE_ENTITY_LINEAGE_CERT_VARIANT_CONFLICT:entity=${entityId}:height=${height}`,
-      );
+      throw new Error(`STORAGE_ENTITY_LINEAGE_CERT_VARIANT_CONFLICT:entity=${entityId}:height=${height}`);
     }
     for (const variant of variants) {
       if (variant.frame.parentFrameHash !== currentHead) {
         throw new Error(
           `STORAGE_ENTITY_LINEAGE_PARENT_MISMATCH:entity=${entityId}:height=${height}:` +
-          `expected=${currentHead}:received=${variant.frame.parentFrameHash}`,
+            `expected=${currentHead}:received=${variant.frame.parentFrameHash}`,
         );
       }
       assertCertificateVariant(env, entityId, variant, currentAuthority);
@@ -613,18 +575,17 @@ const buildLegacyEntityPlan = (
   if (currentHead !== replicaHead(selected.replica)) {
     throw new Error(
       `STORAGE_ENTITY_LINEAGE_SELECTED_HEAD_MISMATCH:entity=${entityId}:` +
-      `expected=${replicaHead(selected.replica)}:actual=${currentHead}`,
+        `expected=${replicaHead(selected.replica)}:actual=${currentHead}`,
     );
   }
   const selectedStateRoot = computeCanonicalEntityConsensusStateHash(selected.replica.state);
   const selectedAuthorityRoot = computeEntityFrameAuthorityRoot(buildEntityFrameAuthority(selected.replica.state));
   const expectedStateRoot = selectedLinks.at(-1)?.frame.stateRoot ?? anchor.stateRoot;
   const expectedAuthorityRoot = computeEntityFrameAuthorityRoot(currentAuthority);
-  if (selectedStateRoot !== expectedStateRoot ||
-      selectedAuthorityRoot !== expectedAuthorityRoot) {
+  if (selectedStateRoot !== expectedStateRoot || selectedAuthorityRoot !== expectedAuthorityRoot) {
     throw new Error(
       `STORAGE_ENTITY_LINEAGE_SELECTED_STATE_MISMATCH:entity=${entityId}:height=${maxHeight}:` +
-      `state=${selectedStateRoot}/${expectedStateRoot}:authority=${selectedAuthorityRoot}/${expectedAuthorityRoot}`,
+        `state=${selectedStateRoot}/${expectedStateRoot}:authority=${selectedAuthorityRoot}/${expectedAuthorityRoot}`,
     );
   }
   for (const entry of entries) {
@@ -640,9 +601,9 @@ const buildLegacyEntityPlan = (
     }
     assertReplicaMatchesCertifiedHeight(entry, link);
   }
-  const ownerKey = [...entries]
-    .sort((left, right) => compareStableText(left.replicaKey.toLowerCase(), right.replicaKey.toLowerCase()))[0]!
-    .replicaKey;
+  const ownerKey = [...entries].sort((left, right) =>
+    compareStableText(left.replicaKey.toLowerCase(), right.replicaKey.toLowerCase()),
+  )[0]!.replicaKey;
   return { selected, ownerKey, lineage: selectedLinks, anchor };
 };
 
@@ -663,7 +624,7 @@ const buildCheckpointedReplicaLineage = (
   if (entry.replica.state.height < anchor.height) {
     throw new Error(
       `STORAGE_ENTITY_LINEAGE_REPLICA_BEFORE_CHECKPOINT:entity=${entityId}:` +
-      `signer=${entry.replica.signerId}:state=${entry.replica.state.height}:anchor=${anchor.height}`,
+        `signer=${entry.replica.signerId}:state=${entry.replica.state.height}:anchor=${anchor.height}`,
     );
   }
   const variantsByHeight = new Map<number, CertifiedEntityFrameLink[]>();
@@ -681,7 +642,7 @@ const buildCheckpointedReplicaLineage = (
     if (frame.height > entry.replica.state.height) {
       throw new Error(
         `STORAGE_ENTITY_LINEAGE_CERT_HEIGHT_INVALID:${entityId}:${frame.height}:` +
-        `${anchor.height}:${entry.replica.state.height}`,
+          `${anchor.height}:${entry.replica.state.height}`,
       );
     }
     const variants = variantsByHeight.get(frame.height) ?? [];
@@ -703,22 +664,18 @@ const buildCheckpointedReplicaLineage = (
     if (frameHashes.size !== 1) {
       throw new Error(
         `STORAGE_ENTITY_LINEAGE_FORK:entity=${entityId}:height=${height}:` +
-        `hashes=${Array.from(frameHashes).sort(compareStableText).join(',')}`,
+          `hashes=${Array.from(frameHashes).sort(compareStableText).join(',')}`,
       );
     }
-    const metadataVariants = new Set(
-      variants.map(variant => immutableFrameMetadataFingerprint(variant.frame)),
-    );
+    const metadataVariants = new Set(variants.map(variant => immutableFrameMetadataFingerprint(variant.frame)));
     if (metadataVariants.size !== 1) {
-      throw new Error(
-        `STORAGE_ENTITY_LINEAGE_CERT_VARIANT_CONFLICT:entity=${entityId}:height=${height}`,
-      );
+      throw new Error(`STORAGE_ENTITY_LINEAGE_CERT_VARIANT_CONFLICT:entity=${entityId}:height=${height}`);
     }
     for (const variant of variants) {
       if (variant.frame.parentFrameHash !== currentHead) {
         throw new Error(
           `STORAGE_ENTITY_LINEAGE_PARENT_MISMATCH:entity=${entityId}:height=${height}:` +
-          `expected=${currentHead}:received=${variant.frame.parentFrameHash}`,
+            `expected=${currentHead}:received=${variant.frame.parentFrameHash}`,
         );
       }
       assertCertificateVariant(env, entityId, variant, currentAuthority);
@@ -752,7 +709,7 @@ const assertCheckpointSet = (
   if (expectedRoot !== receivedRoot) {
     throw new Error(
       `STORAGE_ENTITY_LINEAGE_RUNTIME_CHECKPOINT_ROOT_MISMATCH:${entityId}:` +
-      `expected=${expectedRoot}:received=${receivedRoot}`,
+        `expected=${expectedRoot}:received=${receivedRoot}`,
     );
   }
 };
@@ -763,10 +720,11 @@ const buildCheckpointedEntityPlan = (
   entries: ReplicaEntry[],
 ): EntityLineagePlan => {
   entries.forEach(assertValidHeight);
-  entries.sort((left, right) => (
-    left.replica.state.height - right.replica.state.height ||
-    compareStableText(left.replicaKey.toLowerCase(), right.replicaKey.toLowerCase())
-  ));
+  entries.sort(
+    (left, right) =>
+      left.replica.state.height - right.replica.state.height ||
+      compareStableText(left.replicaKey.toLowerCase(), right.replicaKey.toLowerCase()),
+  );
   for (let index = 1; index < entries.length; index += 1) {
     const previous = entries[index - 1]!;
     const current = entries[index]!;
@@ -782,13 +740,11 @@ const buildCheckpointedEntityPlan = (
   if (anchored.length === 0) {
     throw new Error(`STORAGE_ENTITY_LINEAGE_RUNTIME_CHECKPOINT_MISSING:${entityId}`);
   }
-  const legacyAnchor = entries.find(entry => (
-    entry.replica.certifiedFrameAnchor && !entry.replica.certifiedFrameAnchor.runtimeCheckpoint
-  ));
+  const legacyAnchor = entries.find(
+    entry => entry.replica.certifiedFrameAnchor && !entry.replica.certifiedFrameAnchor.runtimeCheckpoint,
+  );
   if (legacyAnchor) {
-    throw new Error(
-      `STORAGE_ENTITY_LINEAGE_RUNTIME_CHECKPOINT_LEGACY_MIX:${entityId}:${legacyAnchor.replicaKey}`,
-    );
+    throw new Error(`STORAGE_ENTITY_LINEAGE_RUNTIME_CHECKPOINT_LEGACY_MIX:${entityId}:${legacyAnchor.replicaKey}`);
   }
   for (const { anchor } of anchored) assertLineageAnchor(env, entityId, anchor);
   assertCheckpointSet(entityId, anchored);
@@ -809,14 +765,15 @@ const buildCheckpointedEntityPlan = (
     if ((entry.replica.certifiedFrameLineage?.length ?? 0) > 0) {
       throw new Error(`STORAGE_ENTITY_LINEAGE_UNANCHORED_CERTIFICATES:${entityId}:${entry.replicaKey}`);
     }
-    const donor = anchored.find(({ entry: candidate }) => (
-      candidate.replica.state.height === entry.replica.state.height &&
-      replicaHead(candidate.replica) === replicaHead(entry.replica) &&
-      computeCanonicalEntityConsensusStateHash(candidate.replica.state) ===
-        computeCanonicalEntityConsensusStateHash(entry.replica.state) &&
-      computeEntityFrameAuthorityRoot(buildEntityFrameAuthority(candidate.replica.state)) ===
-        computeEntityFrameAuthorityRoot(buildEntityFrameAuthority(entry.replica.state))
-    ));
+    const donor = anchored.find(
+      ({ entry: candidate }) =>
+        candidate.replica.state.height === entry.replica.state.height &&
+        replicaHead(candidate.replica) === replicaHead(entry.replica) &&
+        computeCanonicalEntityConsensusStateHash(candidate.replica.state) ===
+          computeCanonicalEntityConsensusStateHash(entry.replica.state) &&
+        computeEntityFrameAuthorityRoot(buildEntityFrameAuthority(candidate.replica.state)) ===
+          computeEntityFrameAuthorityRoot(buildEntityFrameAuthority(entry.replica.state)),
+    );
     if (!donor) {
       throw new Error(`STORAGE_ENTITY_LINEAGE_RUNTIME_CHECKPOINT_MEMBER_MISSING:${entityId}:${entry.replicaKey}`);
     }
@@ -824,29 +781,18 @@ const buildCheckpointedEntityPlan = (
   }
 
   const headsByHeight = new Map<number, { hash: string; stateRoot: string; authorityRoot: string }>();
-  const registerHead = (
-    height: number,
-    hash: string,
-    stateRoot: string,
-    authorityRoot: string,
-  ): void => {
+  const registerHead = (height: number, hash: string, stateRoot: string, authorityRoot: string): void => {
     const existing = headsByHeight.get(height);
-    if (existing && (
-      existing.hash !== hash ||
-      existing.stateRoot !== stateRoot ||
-      existing.authorityRoot !== authorityRoot
-    )) {
+    if (
+      existing &&
+      (existing.hash !== hash || existing.stateRoot !== stateRoot || existing.authorityRoot !== authorityRoot)
+    ) {
       throw new Error(`STORAGE_ENTITY_LINEAGE_FORK:entity=${entityId}:height=${height}`);
     }
     headsByHeight.set(height, { hash, stateRoot, authorityRoot });
   };
   for (const { anchor } of anchored) {
-    registerHead(
-      anchor.height,
-      anchor.frameHash,
-      anchor.stateRoot,
-      computeEntityFrameAuthorityRoot(anchor.authority),
-    );
+    registerHead(anchor.height, anchor.frameHash, anchor.stateRoot, computeEntityFrameAuthorityRoot(anchor.authority));
   }
   for (const links of lineages.values()) {
     for (const { frame } of links) {
@@ -861,11 +807,7 @@ const buildCheckpointedEntityPlan = (
   return { selected, lineages, anchors };
 };
 
-const buildEntityPlan = (
-  env: RuntimeState,
-  entityId: string,
-  entries: ReplicaEntry[],
-): EntityLineagePlan => {
+const buildEntityPlan = (env: RuntimeState, entityId: string, entries: ReplicaEntry[]): EntityLineagePlan => {
   const checkpointed = entries.some(entry => Boolean(entry.replica.certifiedFrameAnchor?.runtimeCheckpoint));
   if (checkpointed) return buildCheckpointedEntityPlan(env, entityId, entries);
   const legacy = buildLegacyEntityPlan(env, entityId, entries);
@@ -889,9 +831,9 @@ export const buildCertifiedEntityLineagePlan = (env: RuntimeState): CertifiedEnt
   const lookup: StorageReplicaLookup = new Map();
   const lineageByReplicaKey = new Map<string, CertifiedEntityFrameLink[]>();
   const anchorByReplicaKey = new Map<string, CertifiedEntityLineageAnchor>();
-  for (const [entityId, entries] of Array.from(byEntity.entries()).sort(([left], [right]) => (
-    compareStableText(left, right)
-  ))) {
+  for (const [entityId, entries] of Array.from(byEntity.entries()).sort(([left], [right]) =>
+    compareStableText(left, right),
+  )) {
     const plan = buildEntityPlan(env, entityId, entries);
     lookup.set(entityId, {
       replicaKey: plan.selected.replicaKey,
@@ -962,9 +904,7 @@ export const rebaseCertifiedEntityLineageAtRuntimeCheckpoint = (
       const frameHash = replicaHead(entry.replica);
       const evidence = endpointEvidence.get(endpointKey(entityId, state.height, frameHash));
       if (!evidence) {
-        throw new Error(
-          `STORAGE_ENTITY_LINEAGE_CHECKPOINT_ENDPOINT_MISSING:${entityId}:${state.height}:${frameHash}`,
-        );
+        throw new Error(`STORAGE_ENTITY_LINEAGE_CHECKPOINT_ENDPOINT_MISSING:${entityId}:${state.height}:${frameHash}`);
       }
       const base: CertifiedEntityLineageAnchor = {
         entityId,
@@ -972,9 +912,7 @@ export const rebaseCertifiedEntityLineageAtRuntimeCheckpoint = (
         frameHash,
         stateRoot: evidence.stateRoot,
         authority: structuredClone(evidence.authority),
-        ...(evidence.authorityEvidenceHash
-          ? { authorityEvidenceHash: evidence.authorityEvidenceHash }
-          : {}),
+        ...(evidence.authorityEvidenceHash ? { authorityEvidenceHash: evidence.authorityEvidenceHash } : {}),
       };
       return { entry, anchor: base };
     });
@@ -1012,9 +950,7 @@ export const rebaseCertifiedEntityLineageAtRuntimeCheckpoint = (
  * test gates. Repeating it synchronously every 100 R-frames turns a derived
  * LevelDB checkpoint into user-visible latency without adding new authority.
  */
-export const buildRuntimeCheckpointLineagePlan = (
-  env: RuntimeState,
-): CertifiedEntityLineagePlan => {
+export const buildRuntimeCheckpointLineagePlan = (env: RuntimeState): CertifiedEntityLineagePlan => {
   const entriesByEntity = new Map<string, ReplicaEntry[]>();
   for (const [rawReplicaKey, replica] of env.eReplicas) {
     if (!replica?.state) continue;
@@ -1038,11 +974,11 @@ export const buildRuntimeCheckpointLineagePlan = (
   const registerEndpointEvidence = (evidence: CertifiedEntityLineageAnchor): void => {
     const key = endpointKey(evidence.entityId, evidence.height, evidence.frameHash);
     const existing = endpointEvidence.get(key);
-    if (existing && (
-      existing.stateRoot.toLowerCase() !== evidence.stateRoot.toLowerCase() ||
-      computeEntityFrameAuthorityRoot(existing.authority) !==
-        computeEntityFrameAuthorityRoot(evidence.authority)
-    )) {
+    if (
+      existing &&
+      (existing.stateRoot.toLowerCase() !== evidence.stateRoot.toLowerCase() ||
+        computeEntityFrameAuthorityRoot(existing.authority) !== computeEntityFrameAuthorityRoot(evidence.authority))
+    ) {
       throw new Error(`STORAGE_RUNTIME_CHECKPOINT_ENDPOINT_CONFLICT:${key}`);
     }
     if (!existing) endpointEvidence.set(key, evidence);
@@ -1070,13 +1006,14 @@ export const buildRuntimeCheckpointLineagePlan = (
   const lookup: StorageReplicaLookup = new Map();
   const lineageByReplicaKey = new Map<string, CertifiedEntityFrameLink[]>();
   const anchorByReplicaKey = new Map<string, CertifiedEntityLineageAnchor>();
-  for (const [entityId, entries] of Array.from(entriesByEntity.entries()).sort(([left], [right]) => (
-    compareStableText(left, right)
-  ))) {
-    const ordered = [...entries].sort((left, right) => (
-      right.replica.state.height - left.replica.state.height ||
-      compareStableText(left.replicaKey.toLowerCase(), right.replicaKey.toLowerCase())
-    ));
+  for (const [entityId, entries] of Array.from(entriesByEntity.entries()).sort(([left], [right]) =>
+    compareStableText(left, right),
+  )) {
+    const ordered = [...entries].sort(
+      (left, right) =>
+        right.replica.state.height - left.replica.state.height ||
+        compareStableText(left.replicaKey.toLowerCase(), right.replicaKey.toLowerCase()),
+    );
     const selected = ordered[0]!;
     lookup.set(entityId, {
       replicaKey: selected.replicaKey,
@@ -1084,21 +1021,19 @@ export const buildRuntimeCheckpointLineagePlan = (
       state: selected.replica.state,
     });
 
-    const pending = entries.map((entry) => {
+    const pending = entries.map(entry => {
       const height = entry.replica.state.height;
       const frameHash = replicaHead(entry.replica);
-      const genesisAnchor = height === 0 && frameHash === 'genesis'
-        ? createGenesisAnchor(env, entityId, entry)
-        : undefined;
+      const genesisAnchor =
+        height === 0 && frameHash === 'genesis' ? createGenesisAnchor(env, entityId, entry) : undefined;
       const evidence = endpointEvidence.get(endpointKey(entityId, height, frameHash));
       if (!genesisAnchor && !evidence) {
         const existingAnchor = entry.replica.certifiedFrameAnchor;
-        const anchorEndpoint = existingAnchor
-          ? `${existingAnchor.height}@${existingAnchor.frameHash}`
-          : 'none';
-        const lineageEndpoints = (entry.replica.certifiedFrameLineage ?? [])
-          .map((link) => `${link.frame.height}@${link.frame.hash}`)
-          .join(',') || 'none';
+        const anchorEndpoint = existingAnchor ? `${existingAnchor.height}@${existingAnchor.frameHash}` : 'none';
+        const lineageEndpoints =
+          (entry.replica.certifiedFrameLineage ?? [])
+            .map(link => `${link.frame.height}@${link.frame.hash}`)
+            .join(',') || 'none';
         throw new Error(
           `STORAGE_RUNTIME_CHECKPOINT_ENDPOINT_MISSING:${entityId}:${entry.replica.signerId}:` +
             `head=${height}@${frameHash}:anchor=${anchorEndpoint}:lineage=${lineageEndpoints}`,
@@ -1110,16 +1045,11 @@ export const buildRuntimeCheckpointLineagePlan = (
         frameHash,
         stateRoot: evidence!.stateRoot,
         authority: structuredClone(evidence!.authority),
-        ...(evidence!.authorityEvidenceHash
-          ? { authorityEvidenceHash: evidence!.authorityEvidenceHash }
-          : {}),
+        ...(evidence!.authorityEvidenceHash ? { authorityEvidenceHash: evidence!.authorityEvidenceHash } : {}),
       };
       const stateRoot = computeCanonicalEntityConsensusStateHash(entry.replica.state);
       const authorityRoot = computeEntityFrameAuthorityRoot(buildEntityFrameAuthority(entry.replica.state));
-      if (
-        stateRoot !== anchor.stateRoot ||
-        authorityRoot !== computeEntityFrameAuthorityRoot(anchor.authority)
-      ) {
+      if (stateRoot !== anchor.stateRoot || authorityRoot !== computeEntityFrameAuthorityRoot(anchor.authority)) {
         throw new Error(
           `STORAGE_RUNTIME_CHECKPOINT_STATE_MISMATCH:${entityId}:${entry.replica.signerId}:` +
             `head=${height}@${frameHash}:state=${stateRoot}/${anchor.stateRoot}:` +
@@ -1151,14 +1081,12 @@ export const buildRuntimeCheckpointLineagePlan = (
  * Untouched Entity anchors stay byte-identical; a later full storage
  * checkpoint still validates and republishes the complete replica set.
  */
-export const refreshRuntimeCheckpointLineageForEntity = (
-  env: RuntimeState,
-  rawEntityId: string,
-): void => {
+export const refreshRuntimeCheckpointLineageForEntity = (env: RuntimeState, rawEntityId: string): void => {
   const entityId = normalizeEntityId(rawEntityId);
   const replicas = new Map(
-    [...env.eReplicas.entries()].filter(([, replica]) =>
-      normalizeEntityId(replica.entityId || replica.state.entityId || '') === entityId),
+    [...env.eReplicas.entries()].filter(
+      ([, replica]) => normalizeEntityId(replica.entityId || replica.state.entityId || '') === entityId,
+    ),
   );
   if (replicas.size === 0) {
     throw new Error(`STORAGE_RUNTIME_CHECKPOINT_ENTITY_MISSING:${entityId}`);
@@ -1190,18 +1118,13 @@ export const beginRuntimeCheckpointLineageRefresh = (
 ): RuntimeCheckpointLineageRefreshGuard => {
   const entityId = normalizeEntityId(rawEntityId);
   const snapshots = [...env.eReplicas.entries()]
-    .filter(([, replica]) =>
-      normalizeEntityId(replica.entityId || replica.state.entityId || '') === entityId)
+    .filter(([, replica]) => normalizeEntityId(replica.entityId || replica.state.entityId || '') === entityId)
     .map(([replicaKey, replica]) => ({
       replicaKey,
       height: replica.state.height,
       frameHash: replicaHead(replica),
-      certifiedFrameLineage: replica.certifiedFrameLineage
-        ? structuredClone(replica.certifiedFrameLineage)
-        : undefined,
-      certifiedFrameAnchor: replica.certifiedFrameAnchor
-        ? structuredClone(replica.certifiedFrameAnchor)
-        : undefined,
+      certifiedFrameLineage: replica.certifiedFrameLineage ? structuredClone(replica.certifiedFrameLineage) : undefined,
+      certifiedFrameAnchor: replica.certifiedFrameAnchor ? structuredClone(replica.certifiedFrameAnchor) : undefined,
     }));
   if (snapshots.length === 0) {
     throw new Error(`STORAGE_RUNTIME_CHECKPOINT_ENTITY_MISSING:${entityId}`);
@@ -1235,10 +1158,7 @@ export const beginRuntimeCheckpointLineageRefresh = (
   };
 };
 
-export const applyCertifiedEntityLineagePlan = (
-  env: RuntimeState,
-  plan: CertifiedEntityLineagePlan,
-): void => {
+export const applyCertifiedEntityLineagePlan = (env: RuntimeState, plan: CertifiedEntityLineagePlan): void => {
   for (const [replicaKey, replica] of env.eReplicas.entries()) {
     const lineage = plan.lineageByReplicaKey.get(String(replicaKey));
     if (lineage && lineage.length > 0) {

@@ -1,12 +1,10 @@
+import { encodeCanonicalConsensusValue } from '../protocol/canonical-consensus-value';
 import { ethers } from 'ethers';
 
 import { signAccountFrame, verifyAccountSignature } from '../account/crypto';
 import { EntityProvider__factory } from '../../jurisdictions/typechain-types';
-import {
-  verifyCanonicalReceiptProof,
-  type AuthenticatedRpcLog,
-} from './receipt-codec';
-import { encodeCanonicalEntityConsensusValue } from '../entity/consensus/state-root';
+import { verifyCanonicalReceiptProof, type AuthenticatedRpcLog } from './receipt-codec';
+
 import type { CertifiedRegistrationEvidence, RuntimeState, JReplica, RuntimeTx } from '../types';
 import { getCertifiedBoardStackKey } from './board-registry';
 
@@ -21,7 +19,9 @@ const MAX_PROOF_NODE_BYTES = 1_048_576;
 const MAX_TOTAL_PROOF_BYTES = 2_097_152;
 
 const bytes32 = (value: unknown, label: string): string => {
-  const normalized = String(value ?? '').trim().toLowerCase();
+  const normalized = String(value ?? '')
+    .trim()
+    .toLowerCase();
   if (!/^0x[0-9a-f]{64}$/.test(normalized)) {
     throw new Error(`J_AUTHORITY_${label}_INVALID:${normalized || 'missing'}`);
   }
@@ -56,10 +56,9 @@ const canonicalHex = (value: unknown, label: string, maxBytes: number): string =
   return candidate;
 };
 
-const evidenceBody = (evidence: CertifiedRegistrationEvidence): Omit<
-  CertifiedRegistrationEvidence,
-  'witnessSignature'
-> => {
+const evidenceBody = (
+  evidence: CertifiedRegistrationEvidence,
+): Omit<CertifiedRegistrationEvidence, 'witnessSignature'> => {
   const { witnessSignature: _witnessSignature, ...body } = evidence;
   return body;
 };
@@ -67,57 +66,81 @@ const evidenceBody = (evidence: CertifiedRegistrationEvidence): Omit<
 export const registrationEvidenceKey = (stackKey: string, entityId: string): string =>
   `${bytes32(stackKey, 'STACK_KEY')}:${bytes32(entityId, 'ENTITY_ID')}`;
 
-export const buildRegistrationEvidenceRawLogDigest = (value: Pick<
-  CertifiedRegistrationEvidence,
-  'emitter' | 'topics' | 'data' | 'activationHeight' | 'blockHash' |
-  'transactionHash' | 'transactionIndex' | 'logIndex'
->): string => ethers.keccak256(ethers.toUtf8Bytes(encodeCanonicalEntityConsensusValue({
-  domain: 'xln.j-authority.raw-log.v1',
-  emitter: address(value.emitter, 'EMITTER'),
-  topics: value.topics.map((topic, index) => bytes32(topic, `TOPIC_${index}`)),
-  data: ethers.hexlify(ethers.getBytes(value.data)).toLowerCase(),
-  activationHeight: safeInt(value.activationHeight, 'ACTIVATION_HEIGHT'),
-  blockHash: bytes32(value.blockHash, 'BLOCK_HASH'),
-  transactionHash: bytes32(value.transactionHash, 'TRANSACTION_HASH'),
-  transactionIndex: safeInt(value.transactionIndex, 'TRANSACTION_INDEX'),
-  logIndex: safeInt(value.logIndex, 'LOG_INDEX'),
-})));
+export const buildRegistrationEvidenceRawLogDigest = (
+  value: Pick<
+    CertifiedRegistrationEvidence,
+    | 'emitter'
+    | 'topics'
+    | 'data'
+    | 'activationHeight'
+    | 'blockHash'
+    | 'transactionHash'
+    | 'transactionIndex'
+    | 'logIndex'
+  >,
+): string =>
+  ethers.keccak256(
+    ethers.toUtf8Bytes(
+      encodeCanonicalConsensusValue({
+        domain: 'xln.j-authority.raw-log.v1',
+        emitter: address(value.emitter, 'EMITTER'),
+        topics: value.topics.map((topic, index) => bytes32(topic, `TOPIC_${index}`)),
+        data: ethers.hexlify(ethers.getBytes(value.data)).toLowerCase(),
+        activationHeight: safeInt(value.activationHeight, 'ACTIVATION_HEIGHT'),
+        blockHash: bytes32(value.blockHash, 'BLOCK_HASH'),
+        transactionHash: bytes32(value.transactionHash, 'TRANSACTION_HASH'),
+        transactionIndex: safeInt(value.transactionIndex, 'TRANSACTION_INDEX'),
+        logIndex: safeInt(value.logIndex, 'LOG_INDEX'),
+      }),
+    ),
+  );
 
 export const buildRegistrationEvidenceDigest = (evidence: CertifiedRegistrationEvidence): string =>
-  ethers.keccak256(ethers.toUtf8Bytes(encodeCanonicalEntityConsensusValue({
-    domain: 'xln.j-authority.witness.v1',
-    evidence: evidenceBody(evidence),
-  })));
+  ethers.keccak256(
+    ethers.toUtf8Bytes(
+      encodeCanonicalConsensusValue({
+        domain: 'xln.j-authority.witness.v1',
+        evidence: evidenceBody(evidence),
+      }),
+    ),
+  );
 
 export const computeRegistrationEvidenceHash = (evidence: CertifiedRegistrationEvidence): string =>
-  ethers.keccak256(ethers.toUtf8Bytes(encodeCanonicalEntityConsensusValue({
-    domain: 'xln.j-authority.evidence.v1',
-    evidence,
-  })));
+  ethers.keccak256(
+    ethers.toUtf8Bytes(
+      encodeCanonicalConsensusValue({
+        domain: 'xln.j-authority.evidence.v1',
+        evidence,
+      }),
+    ),
+  );
 
-export const computeRegistrationEvidenceClaimHash = (
-  evidence: CertifiedRegistrationEvidence,
-): string => ethers.keccak256(ethers.toUtf8Bytes(encodeCanonicalEntityConsensusValue({
-  domain: 'xln.j-authority.receipt-claim.v1',
-  version: evidence.version,
-  source: evidence.source,
-  stackKey: evidence.stackKey,
-  entityId: evidence.entityId,
-  boardHash: evidence.boardHash,
-  activationHeight: evidence.activationHeight,
-  blockHash: evidence.blockHash,
-  transactionHash: evidence.transactionHash,
-  transactionIndex: evidence.transactionIndex,
-  logIndex: evidence.logIndex,
-  emitter: evidence.emitter,
-  topics: evidence.topics,
-  data: evidence.data,
-  rawLogDigest: evidence.rawLogDigest,
-  receiptsRoot: evidence.receiptsRoot,
-  encodedReceipt: evidence.encodedReceipt,
-  receiptProofNodes: evidence.receiptProofNodes,
-  receiptLogIndex: evidence.receiptLogIndex,
-})));
+export const computeRegistrationEvidenceClaimHash = (evidence: CertifiedRegistrationEvidence): string =>
+  ethers.keccak256(
+    ethers.toUtf8Bytes(
+      encodeCanonicalConsensusValue({
+        domain: 'xln.j-authority.receipt-claim.v1',
+        version: evidence.version,
+        source: evidence.source,
+        stackKey: evidence.stackKey,
+        entityId: evidence.entityId,
+        boardHash: evidence.boardHash,
+        activationHeight: evidence.activationHeight,
+        blockHash: evidence.blockHash,
+        transactionHash: evidence.transactionHash,
+        transactionIndex: evidence.transactionIndex,
+        logIndex: evidence.logIndex,
+        emitter: evidence.emitter,
+        topics: evidence.topics,
+        data: evidence.data,
+        rawLogDigest: evidence.rawLogDigest,
+        receiptsRoot: evidence.receiptsRoot,
+        encodedReceipt: evidence.encodedReceipt,
+        receiptProofNodes: evidence.receiptProofNodes,
+        receiptLogIndex: evidence.receiptLogIndex,
+      }),
+    ),
+  );
 
 const jReplicaStackKey = (replica: JReplica): string | null => {
   const chainId = replica.chainId ?? replica.jadapter?.chainId;
@@ -149,12 +172,11 @@ export const buildCertifiedRegistrationEvidence = (
   if (!parsed || parsed.name !== source) {
     throw new Error(`J_AUTHORITY_EVENT_TYPE_MISMATCH:${source}:${parsed?.name ?? 'unknown'}`);
   }
-  const entityId = source === 'EntityRegistered'
-    ? bytes32(parsed.args[0], 'EVENT_ENTITY_ID')
-    : FOUNDATION_ENTITY_ID;
-  const boardHash = source === 'EntityRegistered'
-    ? bytes32(parsed.args[2], 'EVENT_BOARD_HASH')
-    : bytes32(parsed.args[1], 'EVENT_BOARD_HASH');
+  const entityId = source === 'EntityRegistered' ? bytes32(parsed.args[0], 'EVENT_ENTITY_ID') : FOUNDATION_ENTITY_ID;
+  const boardHash =
+    source === 'EntityRegistered'
+      ? bytes32(parsed.args[2], 'EVENT_BOARD_HASH')
+      : bytes32(parsed.args[1], 'EVENT_BOARD_HASH');
   const unsigned: CertifiedRegistrationEvidence = {
     version: 1,
     source,
@@ -192,9 +214,7 @@ export const buildCertifiedRegistrationEvidence = (
 };
 
 const assertExactLocalStack = (env: RuntimeState, evidence: CertifiedRegistrationEvidence): JReplica => {
-  const matches = Array.from(env.jReplicas.values()).filter(replica => (
-    jReplicaStackKey(replica) === evidence.stackKey
-  ));
+  const matches = Array.from(env.jReplicas.values()).filter(replica => jReplicaStackKey(replica) === evidence.stackKey);
   if (matches.length !== 1) {
     throw new Error(`J_AUTHORITY_STACK_LOCAL_MATCH_INVALID:${evidence.stackKey}:${matches.length}`);
   }
@@ -211,12 +231,12 @@ const assertDecodedRegistrationLog = (evidence: CertifiedRegistrationEvidence): 
   if (!parsed || parsed.name !== evidence.source) {
     throw new Error(`J_AUTHORITY_EVENT_TYPE_MISMATCH:${evidence.source}:${parsed?.name ?? 'unknown'}`);
   }
-  const entityId = evidence.source === 'EntityRegistered'
-    ? bytes32(parsed.args[0], 'EVENT_ENTITY_ID')
-    : FOUNDATION_ENTITY_ID;
-  const boardHash = evidence.source === 'EntityRegistered'
-    ? bytes32(parsed.args[2], 'EVENT_BOARD_HASH')
-    : bytes32(parsed.args[1], 'EVENT_BOARD_HASH');
+  const entityId =
+    evidence.source === 'EntityRegistered' ? bytes32(parsed.args[0], 'EVENT_ENTITY_ID') : FOUNDATION_ENTITY_ID;
+  const boardHash =
+    evidence.source === 'EntityRegistered'
+      ? bytes32(parsed.args[2], 'EVENT_BOARD_HASH')
+      : bytes32(parsed.args[1], 'EVENT_BOARD_HASH');
   if (evidence.source === 'EntityRegistered') {
     const entityNumber = BigInt(parsed.args[1]);
     if (entityNumber <= 0n || entityNumber !== BigInt(entityId)) {
@@ -226,7 +246,7 @@ const assertDecodedRegistrationLog = (evidence: CertifiedRegistrationEvidence): 
   if (entityId !== evidence.entityId || boardHash !== evidence.boardHash) {
     throw new Error(
       `J_AUTHORITY_EVENT_BODY_MISMATCH:entity=${entityId}:${evidence.entityId}:` +
-      `board=${boardHash}:${evidence.boardHash}`,
+        `board=${boardHash}:${evidence.boardHash}`,
     );
   }
 };
@@ -251,7 +271,8 @@ export const assertRegistrationEvidenceEnvelope = (
   const encodedReceipt = canonicalHex(evidence.encodedReceipt, 'ENCODED_RECEIPT', MAX_RECEIPT_BYTES);
   const data = canonicalHex(evidence.data, 'EVENT_DATA', MAX_RECEIPT_DATA_BYTES);
   const receiptProofNodes = evidence.receiptProofNodes.map((node, index) =>
-    canonicalHex(node, `PROOF_NODE_${index}`, MAX_PROOF_NODE_BYTES));
+    canonicalHex(node, `PROOF_NODE_${index}`, MAX_PROOF_NODE_BYTES),
+  );
   const totalProofBytes = receiptProofNodes.reduce((total, node) => total + (node.length - 2) / 2, 0);
   if (totalProofBytes > MAX_TOTAL_PROOF_BYTES) {
     throw new Error(`J_AUTHORITY_PROOF_OVERSIZED:${totalProofBytes}:${MAX_TOTAL_PROOF_BYTES}`);
@@ -283,7 +304,7 @@ export const assertRegistrationEvidenceEnvelope = (
   };
   for (const [field, value] of Object.entries(canonical)) {
     const actual = evidence[field as keyof CertifiedRegistrationEvidence];
-    if (encodeCanonicalEntityConsensusValue(actual) !== encodeCanonicalEntityConsensusValue(value)) {
+    if (encodeCanonicalConsensusValue(actual) !== encodeCanonicalConsensusValue(value)) {
       throw new Error(`J_AUTHORITY_NON_CANONICAL_FIELD:${field}`);
     }
   }
@@ -300,32 +321,29 @@ export const assertRegistrationEvidenceEnvelope = (
   ) {
     throw new Error(
       `J_AUTHORITY_FINALITY_INSUFFICIENT:${canonical.activationHeight}:` +
-      `${canonical.observedThroughHeight}:${canonical.observedHeadHeight}:${canonical.confirmationDepth}`,
+        `${canonical.observedThroughHeight}:${canonical.observedHeadHeight}:${canonical.confirmationDepth}`,
     );
   }
   if (!env.runtimeId || canonical.witnessRuntimeId !== address(env.runtimeId, 'RUNTIME_ID')) {
     throw new Error(`J_AUTHORITY_WITNESS_RUNTIME_MISMATCH:${canonical.witnessRuntimeId}:${env.runtimeId ?? 'missing'}`);
   }
   const localReplica = assertExactLocalStack(env, evidence);
-  const trustedConfirmationDepth = safeInt(
-    localReplica.watcherConfirmationDepth,
-    'LOCAL_CONFIRMATION_DEPTH',
-  );
+  const trustedConfirmationDepth = safeInt(localReplica.watcherConfirmationDepth, 'LOCAL_CONFIRMATION_DEPTH');
   if (canonical.confirmationDepth !== trustedConfirmationDepth) {
-    throw new Error(
-      `J_AUTHORITY_FINALITY_POLICY_MISMATCH:${canonical.confirmationDepth}:${trustedConfirmationDepth}`,
-    );
+    throw new Error(`J_AUTHORITY_FINALITY_POLICY_MISMATCH:${canonical.confirmationDepth}:${trustedConfirmationDepth}`);
   }
   if (buildRegistrationEvidenceRawLogDigest(evidence) !== evidence.rawLogDigest) {
     throw new Error(`J_AUTHORITY_RAW_LOG_DIGEST_MISMATCH:${evidence.entityId}`);
   }
   assertDecodedRegistrationLog(evidence);
-  if (!verifyAccountSignature(
-    env,
-    evidence.witnessRuntimeId,
-    buildRegistrationEvidenceDigest(evidence),
-    evidence.witnessSignature,
-  )) {
+  if (
+    !verifyAccountSignature(
+      env,
+      evidence.witnessRuntimeId,
+      buildRegistrationEvidenceDigest(evidence),
+      evidence.witnessSignature,
+    )
+  ) {
     throw new Error(`J_AUTHORITY_WITNESS_SIGNATURE_INVALID:${evidence.witnessRuntimeId}`);
   }
 };
@@ -344,11 +362,12 @@ const assertReceiptContainsRawLog = async (evidence: CertifiedRegistrationEviden
   }
   const receiptAddress = address(ethers.hexlify(rawLog[0] as Uint8Array), 'RECEIPT_LOG_EMITTER');
   const receiptTopics = (rawLog[1] as Uint8Array[]).map((topic, index) =>
-    bytes32(ethers.hexlify(topic), `RECEIPT_TOPIC_${index}`));
+    bytes32(ethers.hexlify(topic), `RECEIPT_TOPIC_${index}`),
+  );
   const receiptData = ethers.hexlify(rawLog[2] as Uint8Array).toLowerCase();
   if (
     receiptAddress !== evidence.emitter ||
-    encodeCanonicalEntityConsensusValue(receiptTopics) !== encodeCanonicalEntityConsensusValue(evidence.topics) ||
+    encodeCanonicalConsensusValue(receiptTopics) !== encodeCanonicalConsensusValue(evidence.topics) ||
     receiptData !== evidence.data.toLowerCase()
   ) {
     throw new Error(`J_AUTHORITY_RECEIPT_LOG_MISMATCH:${evidence.transactionHash}:${evidence.logIndex}`);
@@ -390,23 +409,19 @@ export const assertCertifiedRegistrationEvidenceStore = async (env: RuntimeState
   }
 };
 
-type LocalJAuthorityRuntimeTx = Extract<RuntimeTx, {
-  type:
-    | 'recordAuthenticatedJAuthority'
-    | 'observeJRange'
-    | 'advanceJWatcherCursor'
-    | 'rewindJHistory';
-}>;
+type LocalJAuthorityRuntimeTx = Extract<
+  RuntimeTx,
+  {
+    type: 'recordAuthenticatedJAuthority' | 'observeJRange' | 'advanceJWatcherCursor' | 'rewindJHistory';
+  }
+>;
 
 export const markLocalJAuthorityRuntimeTx = <T extends LocalJAuthorityRuntimeTx>(tx: T): T => {
   Object.defineProperty(tx, LOCAL_J_AUTHORITY_RUNTIME_TX, { value: true, enumerable: false });
   return tx;
 };
 
-export const copyLocalJAuthorityRuntimeTxAuthorization = (
-  source: RuntimeTx,
-  target: RuntimeTx,
-): void => {
+export const copyLocalJAuthorityRuntimeTxAuthorization = (source: RuntimeTx, target: RuntimeTx): void => {
   if (
     (source.type === 'recordAuthenticatedJAuthority' ||
       source.type === 'observeJRange' ||
@@ -426,7 +441,8 @@ export const markRestoredJAuthorityRuntimeTxs = (runtimeTxs: RuntimeTx[]): void 
       runtimeTx.type === 'observeJRange' ||
       runtimeTx.type === 'advanceJWatcherCursor' ||
       runtimeTx.type === 'rewindJHistory'
-    ) markLocalJAuthorityRuntimeTx(runtimeTx);
+    )
+      markLocalJAuthorityRuntimeTx(runtimeTx);
   }
 };
 
@@ -436,10 +452,9 @@ export const assertJAuthorityRuntimeTxAuthorized = (runtimeTx: RuntimeTx, replay
     runtimeTx.type !== 'observeJRange' &&
     runtimeTx.type !== 'advanceJWatcherCursor' &&
     runtimeTx.type !== 'rewindJHistory'
-  ) return;
-  if (
-    replay ||
-    (runtimeTx as RuntimeTx & { [LOCAL_J_AUTHORITY_RUNTIME_TX]?: boolean })[LOCAL_J_AUTHORITY_RUNTIME_TX]
-  ) return;
+  )
+    return;
+  if (replay || (runtimeTx as RuntimeTx & { [LOCAL_J_AUTHORITY_RUNTIME_TX]?: boolean })[LOCAL_J_AUTHORITY_RUNTIME_TX])
+    return;
   throw new Error(`J_AUTHORITY_RUNTIME_TX_EXTERNAL_INGRESS_REJECTED:${runtimeTx.type}`);
 };

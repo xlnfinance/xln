@@ -1,3 +1,4 @@
+import { encodeCanonicalConsensusValue } from '../protocol/canonical-consensus-value';
 /**
  * XLN Event Emission System (EVM-style)
  *
@@ -21,13 +22,10 @@ import type {
   RuntimeHistoryRecord,
   RuntimeOverlayRecord,
 } from '../types';
-import { encodeCanonicalEntityConsensusValue } from '../entity/consensus/state-root';
+
 import { storageOverlayRecordKey } from '../protocol/overlay';
 import { invalidateEntityAccountCommitment } from '../entity/consensus/state-root';
-import {
-  recordRuntimeSecurityIncident,
-  resolveRuntimeSecurityIncident,
-} from './security-incidents';
+import { recordRuntimeSecurityIncident, resolveRuntimeSecurityIncident } from './security-incidents';
 
 const getLogState = (env: RuntimeState) => {
   if (!env.runtimeState) env.runtimeState = {};
@@ -105,8 +103,8 @@ const getPendingAuditEvents = (env: RuntimeState): Array<Record<string, unknown>
 
 const queuePendingAuditEvent = (env: RuntimeState, payload: Record<string, unknown>): void => {
   const pending = getPendingAuditEvents(env);
-  const encoded = encodeCanonicalEntityConsensusValue(payload);
-  if (pending.some((candidate) => encodeCanonicalEntityConsensusValue(candidate) === encoded)) return;
+  const encoded = encodeCanonicalConsensusValue(payload);
+  if (pending.some(candidate => encodeCanonicalConsensusValue(candidate) === encoded)) return;
   pending.push(structuredClone(payload));
 };
 
@@ -143,30 +141,27 @@ const queueStructuredAuditEvent = (
   });
 };
 
-const attachStructuredLogger = (
-  env: RuntimeState,
-  level: 'info' | 'warn' | 'error',
-  cleanLevel: 'INFO' | 'WARN' | 'ERR',
-) => (
-  category: LogCategory,
-  message: string,
-  data?: Record<string, unknown>,
-  entityId?: string,
-): void => {
-  appendFrameLog(env, {
-    level,
-    category,
-    message,
-    ...(entityId && { entityId }),
-    ...(data && { data }),
-  }, cleanLevel);
+const attachStructuredLogger =
+  (env: RuntimeState, level: 'info' | 'warn' | 'error', cleanLevel: 'INFO' | 'WARN' | 'ERR') =>
+  (category: LogCategory, message: string, data?: Record<string, unknown>, entityId?: string): void => {
+    appendFrameLog(
+      env,
+      {
+        level,
+        category,
+        message,
+        ...(entityId && { entityId }),
+        ...(data && { data }),
+      },
+      cleanLevel,
+    );
 
-  if (level === 'warn') console.warn(`[${category}]`, message, data || '');
-  if (level === 'error') console.error(`[${category}]`, message, data || '');
-  if (level !== 'info' || message.startsWith('REB_')) {
-    queueStructuredAuditEvent(env, level, category, message, data, entityId);
-  }
-};
+    if (level === 'warn') console.warn(`[${category}]`, message, data || '');
+    if (level === 'error') console.error(`[${category}]`, message, data || '');
+    if (level !== 'info' || message.startsWith('REB_')) {
+      queueStructuredAuditEvent(env, level, category, message, data, entityId);
+    }
+  };
 
 export const flushPendingAuditEvents = (env: RuntimeState): void => {
   const pending = env.runtimeState?.pendingAuditEvents;
@@ -197,7 +192,7 @@ const getOverlay = (env: RuntimeState): RuntimeOverlayRecord[] => {
 const pushOverlayRecord = (env: RuntimeState, record: RuntimeOverlayRecord): void => {
   const overlay = getOverlay(env);
   const key = storageOverlayRecordKey(record);
-  const existingIndex = overlay.findIndex((candidate) => storageOverlayRecordKey(candidate) === key);
+  const existingIndex = overlay.findIndex(candidate => storageOverlayRecordKey(candidate) === key);
   if (existingIndex >= 0) {
     overlay[existingIndex] = record;
   } else {
@@ -206,7 +201,7 @@ const pushOverlayRecord = (env: RuntimeState, record: RuntimeOverlayRecord): voi
 
   const runtimeState = env.runtimeState ?? (env.runtimeState = {});
   const currentMarks = runtimeState.currentStorageOverlayMarks ?? (runtimeState.currentStorageOverlayMarks = []);
-  const currentIndex = currentMarks.findIndex((candidate) => storageOverlayRecordKey(candidate) === key);
+  const currentIndex = currentMarks.findIndex(candidate => storageOverlayRecordKey(candidate) === key);
   if (currentIndex >= 0) {
     currentMarks[currentIndex] = { ...record };
     return;
@@ -238,12 +233,7 @@ const markStorageAccountDirty = (env: RuntimeState, entityId: string, counterpar
   pushOverlayRecord(env, record);
 };
 
-const markStorageBookDirty = (
-  env: RuntimeState,
-  entityId: string,
-  pairId: string,
-  deleted = false,
-): void => {
+const markStorageBookDirty = (env: RuntimeState, entityId: string, pairId: string, deleted = false): void => {
   const normalizedEntityId = String(entityId || '').toLowerCase();
   const normalizedPairId = String(pairId || '').trim();
   if (!normalizedEntityId || !normalizedPairId) return;
@@ -256,10 +246,7 @@ const markStorageBookDirty = (
   pushOverlayRecord(env, record);
 };
 
-export const applyRuntimeStorageChanges = (
-  env: RuntimeState,
-  changes: readonly RuntimeOverlayRecord[],
-): void => {
+export const applyRuntimeStorageChanges = (env: RuntimeState, changes: readonly RuntimeOverlayRecord[]): void => {
   for (const change of changes) {
     if (change.family === 'entity') {
       markStorageEntityDirty(env, change.entityId);
@@ -300,9 +287,7 @@ export const setAccountFrameHistoryView = (
   limit = ACCOUNT_FRAME_HISTORY_VIEW_LIMIT,
 ): void => {
   const boundedLimit = Math.max(0, Math.floor(Number(limit || 0)));
-  const view = boundedLimit > 0
-    ? frames.slice(-boundedLimit).map((frame) => cloneFrameForView(frame))
-    : [];
+  const view = boundedLimit > 0 ? frames.slice(-boundedLimit).map(frame => cloneFrameForView(frame)) : [];
   Object.defineProperty(account, ACCOUNT_FRAME_HISTORY_VIEW, {
     value: view,
     enumerable: false,
@@ -313,7 +298,7 @@ export const setAccountFrameHistoryView = (
 
 export const getAccountFrameHistoryView = (account: AccountState): AccountFrame[] => {
   const view = (account as AccountWithFrameHistoryView)[ACCOUNT_FRAME_HISTORY_VIEW];
-  return Array.isArray(view) ? view.map((frame) => cloneFrameForView(frame)) : [];
+  return Array.isArray(view) ? view.map(frame => cloneFrameForView(frame)) : [];
 };
 
 export const appendAccountFrameHistoryView = (
@@ -340,18 +325,16 @@ export const recordAccountFrameHistory = (
   const accountHeight = Number(record.accountHeight || record.frame?.height || 0);
   if (!entityId || !counterpartyId || !Number.isFinite(accountHeight) || accountHeight <= 0) return;
   const pending = getPendingHistoryRecords(env);
-  const existing = pending.find((candidate): candidate is Extract<RuntimeHistoryRecord, { kind: 'accountFrame' }> => (
-    candidate.kind === 'accountFrame' &&
-    candidate.entityId === entityId &&
-    candidate.counterpartyId === counterpartyId &&
-    candidate.accountHeight === Math.floor(accountHeight) &&
-    candidate.source === record.source
-  ));
+  const existing = pending.find(
+    (candidate): candidate is Extract<RuntimeHistoryRecord, { kind: 'accountFrame' }> =>
+      candidate.kind === 'accountFrame' &&
+      candidate.entityId === entityId &&
+      candidate.counterpartyId === counterpartyId &&
+      candidate.accountHeight === Math.floor(accountHeight) &&
+      candidate.source === record.source,
+  );
   if (existing) {
-    if (
-      encodeCanonicalEntityConsensusValue(existing.frame) !==
-      encodeCanonicalEntityConsensusValue(record.frame)
-    ) {
+    if (encodeCanonicalConsensusValue(existing.frame) !== encodeCanonicalConsensusValue(record.frame)) {
       throw new Error(
         `HISTORY_VIEW_ACCOUNT_FRAME_FORK:entity=${entityId}:counterparty=${counterpartyId}:height=${accountHeight}`,
       );
@@ -369,10 +352,7 @@ export const recordAccountFrameHistory = (
   applyRuntimeStorageChanges(env, [{ family: 'account', entityId, counterpartyId }]);
 };
 
-export const publishEntityCandidateEffects = (
-  env: RuntimeState,
-  effects: readonly EntityCandidateEffect[],
-): void => {
+export const publishEntityCandidateEffects = (env: RuntimeState, effects: readonly EntityCandidateEffect[]): void => {
   for (const effect of effects) {
     if (effect.kind === 'entityFrameHistory') {
       recordEntityFrameHistory(env, effect);
@@ -400,22 +380,18 @@ export const recordEntityFrameHistory = (
     throw new Error(`HISTORY_VIEW_ENTITY_FRAME_IDENTITY_INVALID:${entityId}:${String(entityHeight)}`);
   }
   const pending = getPendingHistoryRecords(env);
-  const existing = pending.find((candidate): candidate is Extract<RuntimeHistoryRecord, { kind: 'entityFrame' }> => (
-    candidate.kind === 'entityFrame' &&
-    candidate.entityId === entityId &&
-    candidate.entityHeight === entityHeight
-  ));
+  const existing = pending.find(
+    (candidate): candidate is Extract<RuntimeHistoryRecord, { kind: 'entityFrame' }> =>
+      candidate.kind === 'entityFrame' && candidate.entityId === entityId && candidate.entityHeight === entityHeight,
+  );
   if (existing) {
     if (existing.link.frame.hash !== record.link.frame.hash) {
       throw new Error(
         `HISTORY_VIEW_ENTITY_FRAME_FORK:entity=${entityId}:height=${entityHeight}:` +
-        `existing=${existing.link.frame.hash}:incoming=${record.link.frame.hash}`,
+          `existing=${existing.link.frame.hash}:incoming=${record.link.frame.hash}`,
       );
     }
-    if (
-      encodeCanonicalEntityConsensusValue(record.link) <
-      encodeCanonicalEntityConsensusValue(existing.link)
-    ) {
+    if (encodeCanonicalConsensusValue(record.link) < encodeCanonicalConsensusValue(existing.link)) {
       existing.link = structuredClone(record.link);
     }
     return;
@@ -436,17 +412,13 @@ export const peekPendingHistoryRecords = (
 ): RuntimeHistoryRecord[] => {
   const pending = env.runtimeState?.pendingHistoryRecords;
   if (!Array.isArray(pending) || pending.length === 0) return [];
-  const stampedHeight = Number.isFinite(runtimeHeight)
-    ? Math.max(0, Math.floor(Number(runtimeHeight)))
-    : null;
-  const stampedTimestamp = Number.isFinite(timestamp)
-    ? Math.max(0, Math.floor(Number(timestamp)))
-    : null;
+  const stampedHeight = Number.isFinite(runtimeHeight) ? Math.max(0, Math.floor(Number(runtimeHeight))) : null;
+  const stampedTimestamp = Number.isFinite(timestamp) ? Math.max(0, Math.floor(Number(timestamp))) : null;
   for (const record of pending) {
     if (record.runtimeHeight === undefined && stampedHeight !== null) record.runtimeHeight = stampedHeight;
     if (record.timestamp === undefined && stampedTimestamp !== null) record.timestamp = stampedTimestamp;
   }
-  return pending.map((record) => structuredClone(record));
+  return pending.map(record => structuredClone(record));
 };
 
 export const dropPendingHistoryRecords = (env: RuntimeState, count: number): void => {
@@ -471,11 +443,15 @@ export const dropOverlay = (env: RuntimeState, count: number): void => {
  */
 export function attachEventEmitters(env: RuntimeState): void {
   env.log = (message: string) => {
-    appendFrameLog(env, {
-      level: 'info',
-      category: 'system',
-      message,
-    }, 'LOG');
+    appendFrameLog(
+      env,
+      {
+        level: 'info',
+        category: 'system',
+        message,
+      },
+      'LOG',
+    );
   };
 
   env.info = attachStructuredLogger(env, 'info', 'INFO');
@@ -483,12 +459,16 @@ export function attachEventEmitters(env: RuntimeState): void {
   env.error = attachStructuredLogger(env, 'error', 'ERR');
 
   env.emit = (eventName: string, data: Record<string, unknown>) => {
-    appendFrameLog(env, {
-      level: 'info',
-      category: 'system',
-      message: eventName,
-      data,
-    }, 'EVENT');
+    appendFrameLog(
+      env,
+      {
+        level: 'info',
+        category: 'system',
+        message: eventName,
+        data,
+      },
+      'EVENT',
+    );
     if (HIGH_SIGNAL_EVENTS.has(eventName) || isCriticalMessage(eventName)) {
       queuePendingAuditEvent(env, {
         level: 'event',

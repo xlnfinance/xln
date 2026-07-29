@@ -1,19 +1,11 @@
+import { encodeCanonicalConsensusValue } from '../../protocol/canonical-consensus-value';
 import { ethers } from 'ethers';
 
 import type { JAdapter } from '../../jadapter/types';
 import { getCertifiedBoardStackKey } from '../../jurisdiction/board-registry';
-import { encodeCanonicalEntityConsensusValue } from '../../entity/consensus/state-root';
-import type {
-  RuntimeState,
-  NumberedRegistrationRequest,
-  PendingNumberedRegistration,
-} from '../../types';
-import {
-  createLazyEntity,
-  encodeBoard,
-  hashBoard,
-  type BoardMemberInput,
-} from '../../entity/factory';
+
+import type { RuntimeState, NumberedRegistrationRequest, PendingNumberedRegistration } from '../../types';
+import { createLazyEntity, encodeBoard, hashBoard, type BoardMemberInput } from '../../entity/factory';
 
 export type NumberedRegistrationDefinition = Readonly<{
   name: string;
@@ -38,18 +30,21 @@ const address = (value: string, label: string): string => {
 };
 
 export const computeNumberedRegistrationRequestHash = (request: NumberedRegistrationRequest): string =>
-  ethers.keccak256(ethers.toUtf8Bytes(encodeCanonicalEntityConsensusValue({
-    domain: 'xln.numbered-registration.intent.v1',
-    request,
-  }))).toLowerCase();
+  ethers
+    .keccak256(
+      ethers.toUtf8Bytes(
+        encodeCanonicalConsensusValue({
+          domain: 'xln.numbered-registration.intent.v1',
+          request,
+        }),
+      ),
+    )
+    .toLowerCase();
 
-export const encodeNumberedRegistrationCalldata = (
-  adapter: JAdapter,
-  request: NumberedRegistrationRequest,
-): string => adapter.entityProvider.interface.encodeFunctionData(
-  'registerNumberedEntitiesBatch',
-  [request.entities.map(entity => entity.boardHash)],
-).toLowerCase();
+export const encodeNumberedRegistrationCalldata = (adapter: JAdapter, request: NumberedRegistrationRequest): string =>
+  adapter.entityProvider.interface
+    .encodeFunctionData('registerNumberedEntitiesBatch', [request.entities.map(entity => entity.boardHash)])
+    .toLowerCase();
 
 export const assertNumberedRegistrationRequest = (env: RuntimeState, request: NumberedRegistrationRequest): void => {
   if (request.version !== 1) throw new Error('NUMBERED_REGISTRATION_INTENT_VERSION_INVALID');
@@ -64,7 +59,10 @@ export const assertNumberedRegistrationRequest = (env: RuntimeState, request: Nu
     if (getCertifiedBoardStackKey(entity.config.jurisdiction) !== request.stackKey) {
       throw new Error(`NUMBERED_REGISTRATION_STACK_MISMATCH:${index}`);
     }
-    if (address(entity.config.jurisdiction.entityProviderAddress, 'CONFIG_ENTITY_PROVIDER') !== request.entityProviderAddress) {
+    if (
+      address(entity.config.jurisdiction.entityProviderAddress, 'CONFIG_ENTITY_PROVIDER') !==
+      request.entityProviderAddress
+    ) {
       throw new Error(`NUMBERED_REGISTRATION_ENTITY_PROVIDER_MISMATCH:${index}`);
     }
     const expectedBoard = numberedRegistrationBytes32(entity.boardHash, 'BOARD_HASH');
@@ -77,10 +75,7 @@ export const assertNumberedRegistrationRequest = (env: RuntimeState, request: Nu
   }
 };
 
-export const parseNumberedRegistrationIntentTransaction = (
-  adapter: JAdapter,
-  pending: PendingNumberedRegistration,
-) => {
+export const parseNumberedRegistrationIntentTransaction = (adapter: JAdapter, pending: PendingNumberedRegistration) => {
   if (!/^0x[0-9a-f]+$/i.test(pending.rawTransaction) || pending.rawTransaction.length > 524_290) {
     throw new Error('NUMBERED_REGISTRATION_RAW_TX_INVALID');
   }
@@ -120,13 +115,7 @@ export const buildNumberedRegistrationRequest = (
     payerSignerId: address(input.payerSignerId, 'PAYER'),
     entityProviderAddress: address(input.jurisdiction.entityProviderAddress, 'ENTITY_PROVIDER'),
     entities: input.entities.map(entity => {
-      const config = createLazyEntity(
-        entity.name,
-        entity.validators,
-        entity.threshold,
-        input.jurisdiction,
-        env,
-      ).config;
+      const config = createLazyEntity(entity.name, entity.validators, entity.threshold, input.jurisdiction, env).config;
       return {
         name: entity.name,
         boardHash: hashBoard(encodeBoard(config, env)).toLowerCase(),

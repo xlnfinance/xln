@@ -1,3 +1,4 @@
+import { encodeCanonicalConsensusValue } from '../../protocol/canonical-consensus-value';
 import type {
   DeliverableEntityInput,
   RuntimeState,
@@ -10,15 +11,9 @@ import { normalizeRuntimeId } from '../../networking/runtime-id';
 import { compareStableText, safeStringify } from '../../protocol/serialization';
 import { getWallClockMs } from '../../utils';
 import { validateDeliverableEntityInput } from '../../validation-utils';
-import { encodeCanonicalEntityConsensusValue } from '../../entity/consensus/state-root';
-import {
-  getEffectiveEntityInputTxs,
-  orderCertifiedOutputsBySequence,
-} from '../../entity/consensus/output-envelope';
-import {
-  accountInputAck,
-  accountInputProposal,
-} from '../../account/consensus/flush';
+
+import { getEffectiveEntityInputTxs, orderCertifiedOutputsBySequence } from '../../entity/consensus/output-envelope';
+import { accountInputAck, accountInputProposal } from '../../account/consensus/flush';
 import {
   deliveryAccepted,
   deliveryDeferred,
@@ -26,11 +21,7 @@ import {
   requireDeliveryResult,
   type DeliveryResult,
 } from '../../protocol/payments/delivery-result';
-import {
-  reliableReceiptCoversIdentity,
-  senderFrontierKey,
-  senderFrontierKeyForIdentity,
-} from '../reliable-frontier';
+import { reliableReceiptCoversIdentity, senderFrontierKey, senderFrontierKeyForIdentity } from '../reliable-frontier';
 import { selectPotentialCrossJAccountInputPairs } from '../entity-routing';
 import {
   accountProposalCommittedBySender,
@@ -67,33 +58,37 @@ const clearRestoredReliableOutputsDue = (env: RuntimeState): void => {
   delete (env as RestoredReliableDueEnv)[RESTORED_RELIABLE_OUTPUTS_DUE];
 };
 
-const isAccountAckIdentity = (identity: ReliableOutputIdentity): boolean =>
-  identity.kind === 'account-ack';
+const isAccountAckIdentity = (identity: ReliableOutputIdentity): boolean => identity.kind === 'account-ack';
 
 export const isCrossJAdmissionSourceProposal = (output: RoutedEntityInput): boolean =>
-  getEffectiveEntityInputTxs(output).some((tx) => {
+  getEffectiveEntityInputTxs(output).some(tx => {
     if (tx.type !== 'accountInput') return false;
     const proposal = accountInputProposal(tx.data);
     if (!proposal) return false;
-    const sourcePull = proposal.frame.accountTxs.find(accountTx =>
-      accountTx.type === 'pull_lock' &&
-      accountTx.data.crossJurisdiction?.leg === 'source');
+    const sourcePull = proposal.frame.accountTxs.find(
+      accountTx => accountTx.type === 'pull_lock' && accountTx.data.crossJurisdiction?.leg === 'source',
+    );
     const binding = sourcePull?.type === 'pull_lock' ? sourcePull.data.crossJurisdiction : undefined;
     if (!binding) return false;
-    return proposal.frame.accountTxs.some(accountTx =>
-      accountTx.type === 'swap_offer' &&
-      accountTx.data.crossJurisdiction?.orderId === binding.orderId &&
-      String(accountTx.data.crossJurisdiction.routeHash || '').toLowerCase() ===
-        String(binding.routeHash || '').toLowerCase());
+    return proposal.frame.accountTxs.some(
+      accountTx =>
+        accountTx.type === 'swap_offer' &&
+        accountTx.data.crossJurisdiction?.orderId === binding.orderId &&
+        String(accountTx.data.crossJurisdiction.routeHash || '').toLowerCase() ===
+          String(binding.routeHash || '').toLowerCase(),
+    );
   });
 
 const isCrossJAdmissionProposal = (output: RoutedEntityInput): boolean =>
   getEffectiveEntityInputTxs(output).some(tx => {
     if (tx.type !== 'accountInput') return false;
     const proposal = accountInputProposal(tx.data);
-    return Boolean(proposal?.frame.accountTxs.some(accountTx =>
-      (accountTx.type === 'pull_lock' && accountTx.data.crossJurisdiction) ||
-      accountTx.type === 'cross_pull_close'));
+    return Boolean(
+      proposal?.frame.accountTxs.some(
+        accountTx =>
+          (accountTx.type === 'pull_lock' && accountTx.data.crossJurisdiction) || accountTx.type === 'cross_pull_close',
+      ),
+    );
   });
 
 export const summarizeAccountEnvelopeOutputs = (outputs: readonly RoutedEntityInput[]) =>
@@ -105,21 +100,27 @@ export const summarizeAccountEnvelopeOutputs = (outputs: readonly RoutedEntityIn
       if (tx.type !== 'accountInput') return [];
       const ack = accountInputAck(tx.data);
       const proposal = accountInputProposal(tx.data);
-      return [{
-        kind: tx.data.kind,
-        fromEntityId: tx.data.fromEntityId,
-        toEntityId: tx.data.toEntityId,
-        ackHeight: ack?.height ?? null,
-        proposalHeight: proposal?.frame.height ?? null,
-        crossPulls: proposal?.frame.accountTxs.flatMap(accountTx =>
-          accountTx.type === 'pull_lock' && accountTx.data.crossJurisdiction
-            ? [{
-                leg: accountTx.data.crossJurisdiction.leg,
-                orderId: accountTx.data.crossJurisdiction.orderId,
-                routeHash: accountTx.data.crossJurisdiction.routeHash,
-              }]
-            : []) ?? [],
-      }];
+      return [
+        {
+          kind: tx.data.kind,
+          fromEntityId: tx.data.fromEntityId,
+          toEntityId: tx.data.toEntityId,
+          ackHeight: ack?.height ?? null,
+          proposalHeight: proposal?.frame.height ?? null,
+          crossPulls:
+            proposal?.frame.accountTxs.flatMap(accountTx =>
+              accountTx.type === 'pull_lock' && accountTx.data.crossJurisdiction
+                ? [
+                    {
+                      leg: accountTx.data.crossJurisdiction.leg,
+                      orderId: accountTx.data.crossJurisdiction.orderId,
+                      routeHash: accountTx.data.crossJurisdiction.routeHash,
+                    },
+                  ]
+                : [],
+            ) ?? [],
+        },
+      ];
     }),
   }));
 
@@ -198,15 +199,11 @@ const overwriteRoutedEntityOutput = <T extends RoutedEntityInput>(target: T, sou
 };
 
 const selectCanonicalReliableOutput = <T extends RoutedEntityInput>(existing: T, incoming: T): T =>
-  compareStableText(
-    encodeCanonicalEntityConsensusValue(existing),
-    encodeCanonicalEntityConsensusValue(incoming),
-  ) <= 0 ? existing : incoming;
+  compareStableText(encodeCanonicalConsensusValue(existing), encodeCanonicalConsensusValue(incoming)) <= 0
+    ? existing
+    : incoming;
 
-const assertReliableMergeIdentity = (
-  existing: ReliableOutputIdentity,
-  incoming: ReliableOutputIdentity,
-): void => {
+const assertReliableMergeIdentity = (existing: ReliableOutputIdentity, incoming: ReliableOutputIdentity): void => {
   assertReliableEvidenceCompatible(existing, incoming);
   if (
     existing.laneKey === incoming.laneKey &&
@@ -229,17 +226,12 @@ const requireRetainedRuntimeId = (
   const existingRuntimeId = normalizeRuntimeId(existing.runtimeId);
   const incomingRuntimeId = normalizeRuntimeId(incoming.runtimeId);
   if (existingRuntimeId && incomingRuntimeId && existingRuntimeId !== incomingRuntimeId) {
-    throw new Error(
-      `ROUTE_RELIABLE_RUNTIME_BINDING_CONFLICT:${identity.kind}:${identity.order}`,
-    );
+    throw new Error(`ROUTE_RELIABLE_RUNTIME_BINDING_CONFLICT:${identity.kind}:${identity.order}`);
   }
   return existingRuntimeId || incomingRuntimeId;
 };
 
-const normalizePrecommitBundles = (
-  bundles: Map<string, string[]>,
-  source: string,
-): Map<string, string[]> => {
+const normalizePrecommitBundles = (bundles: Map<string, string[]>, source: string): Map<string, string[]> => {
   const normalized = new Map<string, string[]>();
   for (const [rawSignerId, signatures] of bundles) {
     const signerId = normalizeRouteText(rawSignerId);
@@ -251,27 +243,19 @@ const normalizePrecommitBundles = (
   return normalized;
 };
 
-const mergePrecommitBundles = (
-  existing: RoutedEntityInput,
-  incoming: RoutedEntityInput,
-): void => {
+const mergePrecommitBundles = (existing: RoutedEntityInput, incoming: RoutedEntityInput): void => {
   const merged = normalizePrecommitBundles(existing.hashPrecommits!, 'existing');
-  for (const [signerId, signatures] of normalizePrecommitBundles(
-    incoming.hashPrecommits!,
-    'incoming',
-  )) {
+  for (const [signerId, signatures] of normalizePrecommitBundles(incoming.hashPrecommits!, 'incoming')) {
     const previous = merged.get(signerId);
     if (previous) {
-      const exactDuplicate = previous.length === signatures.length &&
-        previous.every((signature, index) => signature === signatures[index]);
+      const exactDuplicate =
+        previous.length === signatures.length && previous.every((signature, index) => signature === signatures[index]);
       if (!exactDuplicate) throw new Error(`ROUTE_PRECOMMIT_EQUIVOCATION:${signerId}`);
     } else {
       merged.set(signerId, [...signatures]);
     }
   }
-  existing.hashPrecommits = new Map(
-    [...merged.entries()].sort(([left], [right]) => compareStableText(left, right)),
-  );
+  existing.hashPrecommits = new Map([...merged.entries()].sort(([left], [right]) => compareStableText(left, right)));
 };
 
 const mergeReliableOutput = <T extends RoutedEntityInput>(
@@ -295,35 +279,29 @@ const mergeReliableOutput = <T extends RoutedEntityInput>(
     const existingIsCommit = carriesEntityCommitNotification(existing);
     const incomingIsCommit = carriesEntityCommitNotification(incoming);
     if (existingIsCommit !== incomingIsCommit) {
-      return retainRuntimeBinding(
-        incomingIsCommit ? overwriteRoutedEntityOutput(existing, incoming) : existing,
-      );
+      return retainRuntimeBinding(incomingIsCommit ? overwriteRoutedEntityOutput(existing, incoming) : existing);
     }
   }
   const canonical = selectCanonicalReliableOutput(existing, incoming);
-  return retainRuntimeBinding(
-    canonical === existing ? existing : overwriteRoutedEntityOutput(existing, incoming),
-  );
+  return retainRuntimeBinding(canonical === existing ? existing : overwriteRoutedEntityOutput(existing, incoming));
 };
 
-const mergeAccountProposalOutput = <T extends RoutedEntityInput>(
-  existing: T,
-  incoming: T,
-): T | null => {
+const mergeAccountProposalOutput = <T extends RoutedEntityInput>(existing: T, incoming: T): T | null => {
   const identity = accountProposalOutputIdentity(existing);
   if (!identity || identity !== accountProposalOutputIdentity(incoming)) return null;
 
-  const evidenceDelta =
-    accountProposalEvidenceRank(incoming) - accountProposalEvidenceRank(existing);
+  const evidenceDelta = accountProposalEvidenceRank(incoming) - accountProposalEvidenceRank(existing);
   if (evidenceDelta !== 0) {
     return evidenceDelta > 0 ? overwriteRoutedEntityOutput(existing, incoming) : existing;
   }
   const existingFrame = existing.sourceRuntimeFrame;
   const incomingFrame = incoming.sourceRuntimeFrame;
-  const incomingIsNewer = Boolean(incomingFrame && (!existingFrame ||
-    incomingFrame.height > existingFrame.height ||
-    (incomingFrame.height === existingFrame.height &&
-      incomingFrame.timestamp > existingFrame.timestamp)));
+  const incomingIsNewer = Boolean(
+    incomingFrame &&
+    (!existingFrame ||
+      incomingFrame.height > existingFrame.height ||
+      (incomingFrame.height === existingFrame.height && incomingFrame.timestamp > existingFrame.timestamp)),
+  );
   if (incomingIsNewer) return overwriteRoutedEntityOutput(existing, incoming);
   const canonical = selectCanonicalReliableOutput(existing, incoming);
   return canonical === existing ? existing : overwriteRoutedEntityOutput(existing, incoming);
@@ -332,12 +310,10 @@ const mergeAccountProposalOutput = <T extends RoutedEntityInput>(
 const mergeOrdinaryOutput = <T extends RoutedEntityInput>(existing: T, incoming: T): T => {
   if (
     (incoming.leaderTimeoutVote || existing.leaderTimeoutVote) &&
-    encodeCanonicalEntityConsensusValue(incoming.leaderTimeoutVote) !==
-      encodeCanonicalEntityConsensusValue(existing.leaderTimeoutVote)
+    encodeCanonicalConsensusValue(incoming.leaderTimeoutVote) !==
+      encodeCanonicalConsensusValue(existing.leaderTimeoutVote)
   ) {
-    throw new Error(
-      `ROUTE_LEADER_VOTE_EQUIVOCATION:${incoming.leaderTimeoutVote?.voterId ?? 'missing'}`,
-    );
+    throw new Error(`ROUTE_LEADER_VOTE_EQUIVOCATION:${incoming.leaderTimeoutVote?.voterId ?? 'missing'}`);
   }
   if (incoming.entityTxs?.length) {
     existing.entityTxs = [...(existing.entityTxs || []), ...incoming.entityTxs];
@@ -352,10 +328,7 @@ const mergeOrdinaryOutput = <T extends RoutedEntityInput>(existing: T, incoming:
   return existing;
 };
 
-export const mergeRoutedEntityOutput = <T extends RoutedEntityInput>(
-  existing: T,
-  incoming: T,
-): T => {
+export const mergeRoutedEntityOutput = <T extends RoutedEntityInput>(existing: T, incoming: T): T => {
   const existingReliable = getReliableOutputIdentity(existing);
   const incomingReliable = getReliableOutputIdentity(incoming);
   if (existingReliable || incomingReliable) {
@@ -364,8 +337,7 @@ export const mergeRoutedEntityOutput = <T extends RoutedEntityInput>(
     }
     return mergeReliableOutput(existing, incoming, existingReliable, incomingReliable);
   }
-  return mergeAccountProposalOutput(existing, incoming) ??
-    mergeOrdinaryOutput(existing, incoming);
+  return mergeAccountProposalOutput(existing, incoming) ?? mergeOrdinaryOutput(existing, incoming);
 };
 
 export type PlannedRemoteOutput = {
@@ -374,7 +346,11 @@ export type PlannedRemoteOutput = {
 };
 
 type RuntimeP2PDispatch = {
-  enqueueEntityInputsDelivery(targetRuntimeId: string, envelope: RuntimeEntityInputsEnvelope, ingressTimestamp?: number): DeliveryResult;
+  enqueueEntityInputsDelivery(
+    targetRuntimeId: string,
+    envelope: RuntimeEntityInputsEnvelope,
+    ingressTimestamp?: number,
+  ): DeliveryResult;
   getVerifiedRuntimeRoute?(entityId: string): { runtimeId: string; lastUpdated: number } | null;
 };
 
@@ -462,8 +438,7 @@ export const isTriggerOnlyOutput = (output: RoutedEntityInput): boolean =>
   (!output.jPrefixAttestations || output.jPrefixAttestations.size === 0) &&
   (!output.hashPrecommits || output.hashPrecommits.size === 0);
 
-export const isTxBearingOutput = (output: RoutedEntityInput): boolean =>
-  (output.entityTxs?.length ?? 0) > 0;
+export const isTxBearingOutput = (output: RoutedEntityInput): boolean => (output.entityTxs?.length ?? 0) > 0;
 
 export const buildRoutingDeliveryResult = (input: {
   remoteCount: number;
@@ -512,10 +487,15 @@ const readBoardValidatorSignerId = (validator: unknown): string => {
 };
 
 export const resolveGossipBoardSignerIds = (env: RuntimeState, entityId: string): string[] => {
-  const targetEntityId = String(entityId || '').trim().toLowerCase();
+  const targetEntityId = String(entityId || '')
+    .trim()
+    .toLowerCase();
   if (!targetEntityId || !env.gossip?.getProfiles) return [];
-  const profile = env.gossip.getProfiles().find(candidate =>
-    String(candidate?.entityId || '').trim().toLowerCase() === targetEntityId,
+  const profile = env.gossip.getProfiles().find(
+    candidate =>
+      String(candidate?.entityId || '')
+        .trim()
+        .toLowerCase() === targetEntityId,
   );
   const validators = profile?.metadata?.board?.validators;
   if (!Array.isArray(validators) || validators.length === 0) return [];
@@ -558,12 +538,14 @@ export const splitPendingOutputsByRetryWindow = (
         .map(output => getReliableOutputIdentity(output)!)
         .filter((identity): identity is ReliableOutputIdentity => identity !== null);
       const retryFenceOutputs = reliableOutputs.length > 0 ? reliableOutputs : unit.outputs;
-      const manuallyPaused = retryFenceOutputs.some(output =>
-        meta.get(buildRouteOutputKey(output))?.manual === true);
-      const due = !manuallyPaused && ((restoredReliableDue && reliable.length > 0) || retryFenceOutputs.some(output => {
-        const entry = meta.get(buildRouteOutputKey(output));
-        return !entry || entry.nextRetryAt <= nowMs;
-      }));
+      const manuallyPaused = retryFenceOutputs.some(output => meta.get(buildRouteOutputKey(output))?.manual === true);
+      const due =
+        !manuallyPaused &&
+        ((restoredReliableDue && reliable.length > 0) ||
+          retryFenceOutputs.some(output => {
+            const entry = meta.get(buildRouteOutputKey(output));
+            return !entry || entry.nextRetryAt <= nowMs;
+          }));
       if (due) {
         ready.push(...unit.outputs);
       } else {
@@ -574,11 +556,7 @@ export const splitPendingOutputsByRetryWindow = (
     }
     const output = unit.outputs[0]!;
     const reliable = getReliableOutputIdentity(output);
-    if (
-      reliable &&
-      reliable.kind !== 'account-ack' &&
-      blockedReliableLanes.has(reliable.laneKey)
-    ) {
+    if (reliable && reliable.kind !== 'account-ack' && blockedReliableLanes.has(reliable.laneKey)) {
       waiting.push(output);
       continue;
     }
@@ -602,34 +580,29 @@ export const splitPendingOutputsByRetryWindow = (
   return { ready, waiting };
 };
 
-export const getNextNetworkRetryTimestamp = (
-  env: RuntimeState,
-  deps: RuntimeOutputRoutingDeps,
-): number | null => {
+export const getNextNetworkRetryTimestamp = (env: RuntimeState, deps: RuntimeOutputRoutingDeps): number | null => {
   const pending = env.pendingNetworkOutputs ?? [];
   if (pending.length === 0) return null;
   const meta = getDeferredNetworkMeta(env, deps);
   if (
     hasRestoredReliableOutputsDue(env) &&
-    pending.some(output =>
-      getReliableOutputIdentity(output) !== null &&
-      meta.get(buildRouteOutputKey(output))?.manual !== true)
-  ) return 0;
+    pending.some(
+      output => getReliableOutputIdentity(output) !== null && meta.get(buildRouteOutputKey(output))?.manual !== true,
+    )
+  )
+    return 0;
   let nextRetryAt = Infinity;
   const blockedUntilByReliableLane = new Map<string, number>();
-  const retryScheduledOutputs = groupAtomicCrossJAdmissionOutputs(buildPendingNetworkOutputs(pending))
-    .flatMap((unit) => {
-      if (!unit.atomic) return unit.outputs;
-      if (!unit.complete) return [];
-      const reliableOutputs = unit.outputs.filter(
-        output => getReliableOutputIdentity(output) !== null,
-      );
-      // The ordinary source proposal is inseparable from its reliable target
-      // ACK. It deliberately has no independent retry metadata: using its
-      // implicit deadline=0 here made hasRuntimeWork() spin while the atomic
-      // splitter correctly kept the whole envelope in its waiting set.
-      return reliableOutputs.length > 0 ? reliableOutputs : unit.outputs;
-    });
+  const retryScheduledOutputs = groupAtomicCrossJAdmissionOutputs(buildPendingNetworkOutputs(pending)).flatMap(unit => {
+    if (!unit.atomic) return unit.outputs;
+    if (!unit.complete) return [];
+    const reliableOutputs = unit.outputs.filter(output => getReliableOutputIdentity(output) !== null);
+    // The ordinary source proposal is inseparable from its reliable target
+    // ACK. It deliberately has no independent retry metadata: using its
+    // implicit deadline=0 here made hasRuntimeWork() spin while the atomic
+    // splitter correctly kept the whole envelope in its waiting set.
+    return reliableOutputs.length > 0 ? reliableOutputs : unit.outputs;
+  });
   for (const output of retryScheduledOutputs) {
     const retry = meta.get(buildRouteOutputKey(output));
     if (retry?.manual) continue;
@@ -639,9 +612,10 @@ export const getNextNetworkRetryTimestamp = (
       nextRetryAt = Math.min(nextRetryAt, ownRetryAt);
       continue;
     }
-    const effectiveRetryAt = reliable.kind === 'account-ack'
-      ? ownRetryAt
-      : Math.max(ownRetryAt, blockedUntilByReliableLane.get(reliable.laneKey) ?? 0);
+    const effectiveRetryAt =
+      reliable.kind === 'account-ack'
+        ? ownRetryAt
+        : Math.max(ownRetryAt, blockedUntilByReliableLane.get(reliable.laneKey) ?? 0);
     if (reliable.kind !== 'account-ack') {
       blockedUntilByReliableLane.set(reliable.laneKey, effectiveRetryAt);
     }
@@ -675,14 +649,18 @@ const compareEntityFrameDelivery = (left: RoutedEntityInput, right: RoutedEntity
   const rightIdentity = getEntityFrameIdentity(right);
   if (!leftIdentity) return rightIdentity ? 1 : 0;
   if (!rightIdentity) return -1;
-  return compareStableText(left.runtimeId ?? '', right.runtimeId ?? '') ||
+  return (
+    compareStableText(left.runtimeId ?? '', right.runtimeId ?? '') ||
     compareStableText(leftIdentity.entityId, rightIdentity.entityId) ||
     compareStableText(left.signerId, right.signerId) ||
     leftIdentity.height - rightIdentity.height ||
-    compareStableText(leftIdentity.frameHash, rightIdentity.frameHash);
+    compareStableText(leftIdentity.frameHash, rightIdentity.frameHash)
+  );
 };
 
-const certifiedOutputDeliveryOrder = (output: RoutedEntityInput): {
+const certifiedOutputDeliveryOrder = (
+  output: RoutedEntityInput,
+): {
   sourceEntityId: string;
   targetEntityId: string;
   lane: string;
@@ -698,37 +676,40 @@ const certifiedOutputDeliveryOrder = (output: RoutedEntityInput): {
   };
 };
 
-const compareCertifiedOutputDelivery = (
-  left: RoutedEntityInput,
-  right: RoutedEntityInput,
-): number => {
+const compareCertifiedOutputDelivery = (left: RoutedEntityInput, right: RoutedEntityInput): number => {
   const leftOrder = certifiedOutputDeliveryOrder(left);
   const rightOrder = certifiedOutputDeliveryOrder(right);
   if (!leftOrder || !rightOrder) return 0;
-  return compareStableText(left.runtimeId ?? '', right.runtimeId ?? '') ||
+  return (
+    compareStableText(left.runtimeId ?? '', right.runtimeId ?? '') ||
     compareStableText(leftOrder.sourceEntityId, rightOrder.sourceEntityId) ||
     compareStableText(leftOrder.targetEntityId, rightOrder.targetEntityId) ||
     compareStableText(leftOrder.lane, rightOrder.lane) ||
-    (leftOrder.sequence < rightOrder.sequence ? -1 : leftOrder.sequence > rightOrder.sequence ? 1 : 0);
+    (leftOrder.sequence < rightOrder.sequence ? -1 : leftOrder.sequence > rightOrder.sequence ? 1 : 0)
+  );
 };
 
 export const compareOutputDelivery = (left: RoutedEntityInput, right: RoutedEntityInput): number => {
   const leftReliable = getReliableOutputIdentity(left);
   const rightReliable = getReliableOutputIdentity(right);
   if (leftReliable && rightReliable) {
-    return compareStableText(leftReliable.laneKey, rightReliable.laneKey) ||
+    return (
+      compareStableText(leftReliable.laneKey, rightReliable.laneKey) ||
       leftReliable.order - rightReliable.order ||
       leftReliable.variantOrder - rightReliable.variantOrder ||
       compareStableText(leftReliable.evidenceKind, rightReliable.evidenceKind) ||
       compareStableText(leftReliable.evidenceDigest, rightReliable.evidenceDigest) ||
-      compareStableText(leftReliable.logicalKey, rightReliable.logicalKey);
+      compareStableText(leftReliable.logicalKey, rightReliable.logicalKey)
+    );
   }
   if (leftReliable) return -1;
   if (rightReliable) return 1;
-  return compareCertifiedOutputDelivery(left, right) ||
+  return (
+    compareCertifiedOutputDelivery(left, right) ||
     outputDeliveryPriority(left) - outputDeliveryPriority(right) ||
     compareEntityFrameDelivery(left, right) ||
-    compareStableText(buildRouteOutputKey(left), buildRouteOutputKey(right));
+    compareStableText(buildRouteOutputKey(left), buildRouteOutputKey(right))
+  );
 };
 
 export const buildPendingNetworkOutputs = (outputs: RoutedEntityInput[]): RoutedEntityInput[] => {
@@ -756,28 +737,32 @@ export const buildPendingNetworkOutputs = (outputs: RoutedEntityInput[]): Routed
     else deduped.set(key, cloneRoutedOutputWithCachedIdentity(output));
   }
   const pending = [...deduped.values()]
-    .map(output => output.entityTxs
-      ? { ...output, entityTxs: orderCertifiedOutputsBySequence(output.entityTxs) }
-      : output)
+    .map(output =>
+      output.entityTxs ? { ...output, entityTxs: orderCertifiedOutputsBySequence(output.entityTxs) } : output,
+    )
     .sort(compareOutputDelivery);
   const certifiedEntityFrames = new Set<string>();
   for (const output of pending) {
     const identity = getReliableOutputIdentity(output);
     if (identity?.kind !== 'entity-frame' || identity.evidenceKind !== 'entity-certificate') continue;
-    certifiedEntityFrames.add(safeStringify({
-      runtimeId: normalizeRuntimeId(output.runtimeId),
-      laneKey: identity.laneKey,
-      logicalKey: identity.logicalKey,
-    }));
+    certifiedEntityFrames.add(
+      safeStringify({
+        runtimeId: normalizeRuntimeId(output.runtimeId),
+        laneKey: identity.laneKey,
+        logicalKey: identity.logicalKey,
+      }),
+    );
   }
   const superseded = pending.filter(output => {
     const identity = getReliableOutputIdentity(output);
     if (identity?.kind !== 'entity-frame' || identity.evidenceKind !== 'entity-proposal') return true;
-    return !certifiedEntityFrames.has(safeStringify({
-      runtimeId: normalizeRuntimeId(output.runtimeId),
-      laneKey: identity.laneKey,
-      logicalKey: identity.logicalKey,
-    }));
+    return !certifiedEntityFrames.has(
+      safeStringify({
+        runtimeId: normalizeRuntimeId(output.runtimeId),
+        laneKey: identity.laneKey,
+        logicalKey: identity.logicalKey,
+      }),
+    );
   });
   if (superseded.length > MAX_PENDING_NETWORK_OUTPUTS) {
     throw new Error(
@@ -824,9 +809,12 @@ export const pruneReceiptedReliableOutputs = (
   // keep no transport retry state: retaining the original proposal envelope
   // would either leak outbox entries forever or invite a manual duplicate.
   const uncommittedOutputs = groupAtomicCrossJAdmissionOutputs(outputs).flatMap(unit => {
-    const committedProposalCohort = unit.atomic && unit.complete &&
-      unit.outputs.every(output =>
-        getReliableOutputIdentity(output) === null && accountProposalCommittedBySender(env, output));
+    const committedProposalCohort =
+      unit.atomic &&
+      unit.complete &&
+      unit.outputs.every(
+        output => getReliableOutputIdentity(output) === null && accountProposalCommittedBySender(env, output),
+      );
     if (!committedProposalCohort) return unit.outputs;
     for (const output of unit.outputs) {
       env.runtimeState?.deferredNetworkMeta?.delete(buildRouteOutputKey(output));
@@ -850,12 +838,9 @@ export const pruneReceiptedReliableOutputs = (
     const receiverRuntimeId = normalizeRuntimeId(output.runtimeId);
     if (!identity || !receiverRuntimeId) return false;
     const frontierKey = senderFrontierKeyForIdentity(receiverRuntimeId, identity);
-    return [
-      active?.get(frontierKey),
-      terminal?.get(frontierKey),
-      ...(receiptsByFrontier.get(frontierKey) ?? []),
-    ]
-      .some(receipt => receipt && reliableReceiptCoversIdentity(receipt, identity));
+    return [active?.get(frontierKey), terminal?.get(frontierKey), ...(receiptsByFrontier.get(frontierKey) ?? [])].some(
+      receipt => receipt && reliableReceiptCoversIdentity(receipt, identity),
+    );
   };
   const retained: RoutedEntityInput[] = [];
   for (const unit of groupAtomicCrossJAdmissionOutputs(uncommittedOutputs)) {
@@ -864,11 +849,7 @@ export const pruneReceiptedReliableOutputs = (
       continue;
     }
     const reliableOutputs = unit.outputs.filter(output => getReliableOutputIdentity(output) !== null);
-    if (
-      unit.atomic &&
-      reliableOutputs.length > 0 &&
-      reliableOutputs.every(isReceipted)
-    ) {
+    if (unit.atomic && reliableOutputs.length > 0 && reliableOutputs.every(isReceipted)) {
       for (const output of unit.outputs) {
         env.runtimeState?.deferredNetworkMeta?.delete(buildRouteOutputKey(output));
       }
@@ -918,19 +899,14 @@ export const rescheduleDeferredOutputs = (
     const retryOutputs = unit.outputs;
     for (const output of retryOutputs) {
       const reliable = getReliableOutputIdentity(output);
-      if (
-        !unit.atomic
-        && reliable
-        && reliable.kind !== 'account-ack'
-        && retriedReliableLanes.has(reliable.laneKey)
-      ) {
+      if (!unit.atomic && reliable && reliable.kind !== 'account-ack' && retriedReliableLanes.has(reliable.laneKey)) {
         meta.delete(buildRouteOutputKey(output));
         continue;
       }
       const key = buildRouteOutputKey(output);
       const attempts = (meta.get(key)?.attempts ?? 0) + 1;
       const retryMaxMs = reliable ? RELIABLE_NETWORK_RETRY_MAX_MS : NETWORK_RETRY_MAX_MS;
-      const delayMs = Math.min(retryMaxMs, NETWORK_RETRY_BASE_MS * (2 ** Math.min(attempts - 1, 5)));
+      const delayMs = Math.min(retryMaxMs, NETWORK_RETRY_BASE_MS * 2 ** Math.min(attempts - 1, 5));
       meta.set(key, {
         attempts,
         nextRetryAt: unit.atomic ? nowMs : nowMs + delayMs,
@@ -956,9 +932,7 @@ export const markPendingCrossJAdmissionOutputsReady = (
   const meta = getDeferredNetworkMeta(env, deps);
   const nowMs = getNetworkRetryNowMs(env);
   let readyEnvelopes = 0;
-  for (const unit of groupAtomicCrossJAdmissionOutputs(
-    buildPendingNetworkOutputs(env.pendingNetworkOutputs ?? []),
-  )) {
+  for (const unit of groupAtomicCrossJAdmissionOutputs(buildPendingNetworkOutputs(env.pendingNetworkOutputs ?? []))) {
     if (!unit.atomic || !unit.complete) continue;
     if (normalizedTarget && unit.outputs.some(output => normalizeRuntimeId(output.runtimeId) !== normalizedTarget)) {
       continue;

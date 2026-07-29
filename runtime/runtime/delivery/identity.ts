@@ -1,3 +1,4 @@
+import { encodeCanonicalConsensusValue } from '../../protocol/canonical-consensus-value';
 import type {
   EntityTx,
   RuntimeState,
@@ -10,17 +11,11 @@ import { hasEntityCommitCertificate } from '../../protocol/signatures';
 import { normalizeRuntimeId } from '../../networking/runtime-id';
 import { txFingerprint } from '../../state-helpers';
 import { compareStableText, safeStringify } from '../../protocol/serialization';
-import {
-  buildPreparedFrameEvidence,
-  hashEntityLeaderVoteBody,
-} from '../../entity/consensus/leader';
+import { buildPreparedFrameEvidence, hashEntityLeaderVoteBody } from '../../entity/consensus/leader';
 import { hashJPrefixAttestation } from '../../jurisdiction/j-prefix-consensus';
-import { encodeCanonicalEntityConsensusValue } from '../../entity/consensus/state-root';
+
 import { assertCertifiedOutputSemanticIdentity } from '../../entity/consensus/output-certification';
-import {
-  getCertifiedOutputNestedTxs,
-  getEffectiveEntityInputTxs,
-} from '../../entity/consensus/output-envelope';
+import { getCertifiedOutputNestedTxs, getEffectiveEntityInputTxs } from '../../entity/consensus/output-envelope';
 import { accountInputProposal } from '../../account/consensus/flush';
 
 export const carriesEntityCommitNotification = (output: RoutedEntityInput): boolean =>
@@ -42,7 +37,10 @@ export const cloneRoutedOutputWithCachedIdentity = <T extends RoutedEntityInput>
   return structuredClone(output) as T;
 };
 
-export const normalizeRouteText = (value: unknown): string => String(value ?? '').trim().toLowerCase();
+export const normalizeRouteText = (value: unknown): string =>
+  String(value ?? '')
+    .trim()
+    .toLowerCase();
 
 const requireReliableOrder = (value: unknown, code: string): number => {
   if (!Number.isSafeInteger(value) || Number(value) < 0) {
@@ -58,7 +56,7 @@ const requireReliableHash = (value: unknown, code: string): string => {
 };
 
 const reliableEvidenceDigest = (value: unknown): string =>
-  keccak256(toUtf8Bytes(encodeCanonicalEntityConsensusValue(value))).toLowerCase();
+  keccak256(toUtf8Bytes(encodeCanonicalConsensusValue(value))).toLowerCase();
 
 const getEntityFrameBodyDigest = (output: RoutedEntityInput): string => {
   const frame = buildPreparedFrameEvidence(output.proposedFrame);
@@ -74,9 +72,7 @@ const getEntityFrameBodyDigest = (output: RoutedEntityInput): string => {
   });
 };
 
-const getPrecommitEvidenceBindings = (
-  bundles: Map<string, string[]>,
-): ReliableDeliveryEvidenceBinding[] => {
+const getPrecommitEvidenceBindings = (bundles: Map<string, string[]>): ReliableDeliveryEvidenceBinding[] => {
   const bySigner = new Map<string, ReliableDeliveryEvidenceBinding>();
   for (const [rawSignerId, signatures] of bundles) {
     const subject = normalizeRouteText(rawSignerId);
@@ -92,16 +88,13 @@ const getPrecommitEvidenceBindings = (
   return [...bySigner.values()].sort((left, right) => compareStableText(left.subject, right.subject));
 };
 
-const reliableLaneKey = (
-  kind: ReliableOutputIdentity['kind'],
-  output: RoutedEntityInput,
-  scope?: unknown,
-): string => safeStringify({
-  kind,
-  entityId: normalizeRouteText(output.entityId),
-  signerId: normalizeRouteText(output.signerId),
-  ...(scope === undefined ? {} : { scope }),
-});
+const reliableLaneKey = (kind: ReliableOutputIdentity['kind'], output: RoutedEntityInput, scope?: unknown): string =>
+  safeStringify({
+    kind,
+    entityId: normalizeRouteText(output.entityId),
+    signerId: normalizeRouteText(output.signerId),
+    ...(scope === undefined ? {} : { scope }),
+  });
 
 export const getEntityFrameIdentity = (output: RoutedEntityInput): EntityFrameIdentity | null => {
   if (!output.proposedFrame) return null;
@@ -117,9 +110,7 @@ const getEntityFrameReliableIdentity = (output: RoutedEntityInput): ReliableOutp
   if (!frame) return null;
   const order = requireReliableOrder(frame.height, 'ROUTE_ENTITY_FRAME_HEIGHT_INVALID');
   const frameHash = requireReliableHash(frame.frameHash, 'ROUTE_ENTITY_FRAME_HASH_MISSING');
-  const evidenceKind = carriesEntityCommitNotification(output)
-    ? 'entity-certificate'
-    : 'entity-proposal';
+  const evidenceKind = carriesEntityCommitNotification(output) ? 'entity-certificate' : 'entity-proposal';
   const evidenceDigest = reliableEvidenceDigest({
     leader: output.proposedFrame?.leader ?? null,
     hashesToSign: output.proposedFrame?.hashesToSign ?? [],
@@ -173,9 +164,7 @@ const getHashPrecommitReliableIdentity = (output: RoutedEntityInput): ReliableOu
   };
 };
 
-const getLeaderTimeoutVoteReliableIdentity = (
-  output: RoutedEntityInput,
-): ReliableOutputIdentity | null => {
+const getLeaderTimeoutVoteReliableIdentity = (output: RoutedEntityInput): ReliableOutputIdentity | null => {
   const vote = output.leaderTimeoutVote;
   if (!vote) return null;
   const entityId = normalizeRouteText(output.entityId);
@@ -190,10 +179,7 @@ const getLeaderTimeoutVoteReliableIdentity = (
     vote.previousFrameHash,
     'ROUTE_LEADER_VOTE_PREVIOUS_FRAME_HASH_MISSING',
   );
-  const previousLeaderId = requireReliableHash(
-    vote.previousLeaderId,
-    'ROUTE_LEADER_VOTE_PREVIOUS_LEADER_MISSING',
-  );
+  const previousLeaderId = requireReliableHash(vote.previousLeaderId, 'ROUTE_LEADER_VOTE_PREVIOUS_LEADER_MISSING');
   const nextLeaderId = requireReliableHash(vote.nextLeaderId, 'ROUTE_LEADER_VOTE_NEXT_LEADER_MISSING');
   const voterId = requireReliableHash(vote.voterId, 'ROUTE_LEADER_VOTE_VOTER_MISSING');
   const signature = requireReliableHash(vote.signature, 'ROUTE_LEADER_VOTE_SIGNATURE_MISSING');
@@ -231,9 +217,7 @@ const getLeaderTimeoutVoteReliableIdentity = (
   };
 };
 
-const getJPrefixAttestationReliableIdentity = (
-  output: RoutedEntityInput,
-): ReliableOutputIdentity | null => {
+const getJPrefixAttestationReliableIdentity = (output: RoutedEntityInput): ReliableOutputIdentity | null => {
   const bundle = output.jPrefixAttestations;
   if (!bundle || bundle.size === 0) return null;
   if (bundle.size !== 1) throw new Error('ROUTE_J_PREFIX_ATTESTATION_MUST_BE_SPLIT');
@@ -244,10 +228,7 @@ const getJPrefixAttestationReliableIdentity = (
   if (!sourceValidatorId || sourceValidatorId !== normalizeRouteText(attestation.validatorId)) {
     throw new Error('ROUTE_J_PREFIX_SOURCE_VALIDATOR_MISMATCH');
   }
-  const order = requireReliableOrder(
-    attestation.targetEntityHeight,
-    'ROUTE_J_PREFIX_TARGET_HEIGHT_INVALID',
-  );
+  const order = requireReliableOrder(attestation.targetEntityHeight, 'ROUTE_J_PREFIX_TARGET_HEIGHT_INVALID');
   const jurisdictionRef = normalizeRouteText(attestation.jurisdictionRef);
   if (!jurisdictionRef) throw new Error('ROUTE_J_PREFIX_JURISDICTION_MISSING');
   const { signature, ...unsigned } = attestation;
@@ -294,14 +275,8 @@ const getBoardResealIdentity = (
     data.reseal.boardActivationLogIndex,
     'ROUTE_ACCOUNT_BOARD_RESEAL_ACTIVATION_LOG_INDEX_INVALID',
   );
-  const frameHeight = requireReliableOrder(
-    data.reseal.height,
-    'ROUTE_ACCOUNT_BOARD_RESEAL_FRAME_HEIGHT_INVALID',
-  );
-  const frameHash = requireReliableHash(
-    data.reseal.frameHash,
-    'ROUTE_ACCOUNT_BOARD_RESEAL_FRAME_HASH_MISSING',
-  );
+  const frameHeight = requireReliableOrder(data.reseal.height, 'ROUTE_ACCOUNT_BOARD_RESEAL_FRAME_HEIGHT_INVALID');
+  const frameHash = requireReliableHash(data.reseal.frameHash, 'ROUTE_ACCOUNT_BOARD_RESEAL_FRAME_HASH_MISSING');
   const fromEntityId = normalizeRouteText(data.fromEntityId);
   const toEntityId = normalizeRouteText(data.toEntityId);
   const watchSeed = normalizeRouteText(data.watchSeed);
@@ -350,12 +325,13 @@ const getAccountAckIdentity = (
   const toEntityId = normalizeRouteText(data.toEntityId);
   const watchSeed = normalizeRouteText(data.watchSeed);
   const account = [fromEntityId, toEntityId].sort(compareStableText);
-  const proposalIdentity = data.kind === 'frame_ack'
-    ? {
-        frame: data.proposal.frame,
-        disputeSeal: withoutDisputeHanko(data.proposal.disputeSeal),
-      }
-    : null;
+  const proposalIdentity =
+    data.kind === 'frame_ack'
+      ? {
+          frame: data.proposal.frame,
+          disputeSeal: withoutDisputeHanko(data.proposal.disputeSeal),
+        }
+      : null;
   const bodyDigest = reliableEvidenceDigest({
     domain: 'xln.reliable.account-ack-body.v1',
     route: { fromEntityId, toEntityId, watchSeed },
@@ -402,10 +378,7 @@ const getJFinalityIdentity = (
   output: RoutedEntityInput,
   data: Extract<EntityTx, { type: 'j_event' }>['data'],
 ): ReliableOutputIdentity => {
-  const order = requireReliableOrder(
-    data.scannedThroughHeight,
-    'ROUTE_J_FINALITY_HEIGHT_INVALID',
-  );
+  const order = requireReliableOrder(data.scannedThroughHeight, 'ROUTE_J_FINALITY_HEIGHT_INVALID');
   const { signature: _signature, observedAt: _observedAt, ...unsignedRange } = data;
   const jurisdictionRef = normalizeRouteText(data.jurisdictionRef);
   if (!jurisdictionRef) throw new Error('ROUTE_J_FINALITY_JURISDICTION_MISSING');
@@ -428,10 +401,7 @@ const getJFinalityIdentity = (
   };
 };
 
-const getDirectReliableTxIdentity = (
-  output: RoutedEntityInput,
-  tx: EntityTx,
-): ReliableOutputIdentity | null => {
+const getDirectReliableTxIdentity = (output: RoutedEntityInput, tx: EntityTx): ReliableOutputIdentity | null => {
   if (tx.type === 'accountInput' && tx.data.kind === 'board_reseal') {
     return getBoardResealIdentity(output, tx.data);
   }
@@ -442,27 +412,21 @@ const getDirectReliableTxIdentity = (
 };
 
 const requireCertifiedSequence = (value: unknown): bigint => {
-  const sequence = typeof value === 'bigint'
-    ? value
-    : typeof value === 'number' && Number.isSafeInteger(value)
-      ? BigInt(value)
-      : -1n;
-  if (sequence < 0n || sequence > ((1n << 64n) - 1n)) {
+  const sequence =
+    typeof value === 'bigint' ? value : typeof value === 'number' && Number.isSafeInteger(value) ? BigInt(value) : -1n;
+  if (sequence < 0n || sequence > (1n << 64n) - 1n) {
     throw new Error(`ROUTE_CERTIFIED_SEQUENCE_INVALID:${String(value)}`);
   }
   return sequence;
 };
 
-const getReliableTxIdentity = (
-  output: RoutedEntityInput,
-  tx: EntityTx,
-): ReliableOutputIdentity | null => {
+const getReliableTxIdentity = (output: RoutedEntityInput, tx: EntityTx): ReliableOutputIdentity | null => {
   const direct = getDirectReliableTxIdentity(output, tx);
   if (direct) return direct;
   const nested = getCertifiedOutputNestedTxs(tx);
   if (!nested) return null;
   const nestedIdentities = nested
-    .map((candidate) => getDirectReliableTxIdentity(output, candidate))
+    .map(candidate => getDirectReliableTxIdentity(output, candidate))
     .filter((identity): identity is ReliableOutputIdentity => identity !== null);
   if (nestedIdentities.length === 0) return null;
   if (nested.length !== 1 || nestedIdentities.length !== 1) {
@@ -474,21 +438,16 @@ const getReliableTxIdentity = (
     throw new Error('ROUTE_CERTIFIED_TARGET_ENTITY_MISMATCH');
   }
   const origin = tx.data.origin;
-  const sourceEntityId = requireReliableHash(
-    origin.sourceEntityId,
-    'ROUTE_CERTIFIED_SOURCE_ENTITY_MISSING',
-  );
-  const semanticHash = requireReliableHash(
-    origin.semanticHash,
-    'ROUTE_CERTIFIED_SEMANTIC_HASH_MISSING',
-  );
+  const sourceEntityId = requireReliableHash(origin.sourceEntityId, 'ROUTE_CERTIFIED_SOURCE_ENTITY_MISSING');
+  const semanticHash = requireReliableHash(origin.semanticHash, 'ROUTE_CERTIFIED_SEMANTIC_HASH_MISSING');
   const sequence = requireCertifiedSequence(origin.sequence);
   assertCertifiedOutputSemanticIdentity(origin, targetEntityId, tx.data.entityTxs);
   const payload = nested[0]!;
-  if (payload.type === 'accountInput' && (
-    normalizeRouteText(payload.data.fromEntityId) !== sourceEntityId ||
-    normalizeRouteText(payload.data.toEntityId) !== targetEntityId
-  )) {
+  if (
+    payload.type === 'accountInput' &&
+    (normalizeRouteText(payload.data.fromEntityId) !== sourceEntityId ||
+      normalizeRouteText(payload.data.toEntityId) !== targetEntityId)
+  ) {
     throw new Error('ROUTE_CERTIFIED_ACCOUNT_PARTICIPANT_MISMATCH');
   }
   const inner = nestedIdentities[0]!;
@@ -508,9 +467,7 @@ const getReliableTxIdentity = (
   };
 };
 
-const computeReliableOutputIdentity = (
-  output: RoutedEntityInput,
-): ReliableOutputIdentity | null => {
+const computeReliableOutputIdentity = (output: RoutedEntityInput): ReliableOutputIdentity | null => {
   const reliableTxIdentities = (output.entityTxs ?? []).map(tx => getReliableTxIdentity(output, tx));
   const identities = [
     getEntityFrameReliableIdentity(output),
@@ -528,9 +485,8 @@ const computeReliableOutputIdentity = (
   return identities[0]!;
 };
 
-export const getReliableOutputIdentity = (
-  output: RoutedEntityInput,
-): ReliableOutputIdentity | null => computeReliableOutputIdentity(output);
+export const getReliableOutputIdentity = (output: RoutedEntityInput): ReliableOutputIdentity | null =>
+  computeReliableOutputIdentity(output);
 
 export const assertReliableEvidenceCompatible = (
   existing: ReliableOutputIdentity,
@@ -540,11 +496,9 @@ export const assertReliableEvidenceCompatible = (
     existing.laneKey !== incoming.laneKey ||
     existing.order !== incoming.order ||
     existing.variantOrder !== incoming.variantOrder
-  ) return;
-  if (
-    existing.logicalKey !== incoming.logicalKey ||
-    existing.frameHash !== incoming.frameHash
-  ) {
+  )
+    return;
+  if (existing.logicalKey !== incoming.logicalKey || existing.frameHash !== incoming.frameHash) {
     throw new Error(`ROUTE_RELIABLE_LANE_ORDER_CONFLICT:${incoming.kind}:${incoming.order}`);
   }
   if (
@@ -558,10 +512,7 @@ export const assertReliableEvidenceCompatible = (
     if (existing.bodyDigest !== incoming.bodyDigest) {
       throw new Error(`ROUTE_ACCOUNT_ACK_BODY_CONFLICT:${incoming.order}`);
     }
-    if (
-      existing.evidenceKind === incoming.evidenceKind &&
-      existing.evidenceDigest !== incoming.evidenceDigest
-    ) {
+    if (existing.evidenceKind === incoming.evidenceKind && existing.evidenceDigest !== incoming.evidenceDigest) {
       throw new Error(`ROUTE_ACCOUNT_ACK_EVIDENCE_CONFLICT:${incoming.order}`);
     }
     return;
@@ -589,9 +540,7 @@ export const assertReliableEvidenceCompatible = (
     return;
   }
   if (existing.kind !== 'hash-precommit' || incoming.kind !== 'hash-precommit') return;
-  const existingBindings = new Map(
-    (existing.evidenceBindings ?? []).map(binding => [binding.subject, binding.digest]),
-  );
+  const existingBindings = new Map((existing.evidenceBindings ?? []).map(binding => [binding.subject, binding.digest]));
   for (const binding of incoming.evidenceBindings ?? []) {
     const priorDigest = existingBindings.get(binding.subject);
     if (priorDigest && priorDigest !== binding.digest) {
@@ -613,9 +562,9 @@ export const splitRoutedOutputByDeliveryLane = <T extends RoutedEntityInput>(out
   const split: RoutedEntityInput[] = [];
   const routeInput = route as RoutedEntityInput;
 
-  const appendSplit = (
-    candidate: RoutedEntityInput,
-  ): void => { split.push(candidate); };
+  const appendSplit = (candidate: RoutedEntityInput): void => {
+    split.push(candidate);
+  };
 
   if (proposedFrame) {
     const candidate = { ...routeInput, proposedFrame };
@@ -685,24 +634,26 @@ export const accountProposalEvidenceRank = (output: RoutedEntityInput): number =
     return rank + Number(Boolean(proposal.frameHanko)) + Number(Boolean(proposal.disputeSeal));
   }, 0);
 
-export const accountProposalCommittedBySender = (
-  env: RuntimeState,
-  output: RoutedEntityInput,
-): boolean => {
+export const accountProposalCommittedBySender = (env: RuntimeState, output: RoutedEntityInput): boolean => {
   const proposals = getEffectiveEntityInputTxs(output).flatMap(tx => {
     if (tx.type !== 'accountInput') return [];
     const proposal = accountInputProposal(tx.data);
     return proposal ? [{ accountInput: tx.data, proposal }] : [];
   });
   if (proposals.length === 0) return false;
-  return proposals.every(({ accountInput, proposal }) => [...env.eReplicas.values()].some(replica => {
-    if (replica.entityId.toLowerCase() !== accountInput.fromEntityId.toLowerCase()) return false;
-    const targetCounterparty = accountInput.toEntityId.toLowerCase();
-    const account = [...replica.state.accounts.entries()].find(([counterpartyId]) =>
-      counterpartyId.toLowerCase() === targetCounterparty)?.[1];
-    return account?.currentFrame.height === proposal.frame.height &&
-      account.currentFrame.stateHash.toLowerCase() === proposal.frame.stateHash.toLowerCase();
-  }));
+  return proposals.every(({ accountInput, proposal }) =>
+    [...env.eReplicas.values()].some(replica => {
+      if (replica.entityId.toLowerCase() !== accountInput.fromEntityId.toLowerCase()) return false;
+      const targetCounterparty = accountInput.toEntityId.toLowerCase();
+      const account = [...replica.state.accounts.entries()].find(
+        ([counterpartyId]) => counterpartyId.toLowerCase() === targetCounterparty,
+      )?.[1];
+      return (
+        account?.currentFrame.height === proposal.frame.height &&
+        account.currentFrame.stateHash.toLowerCase() === proposal.frame.stateHash.toLowerCase()
+      );
+    }),
+  );
 };
 
 export const buildRouteOutputKey = (output: RoutedEntityInput): string => {

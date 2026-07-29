@@ -1,10 +1,11 @@
+import { encodeCanonicalConsensusValue } from '../../protocol/canonical-consensus-value';
 import {
   getJPrefixAttestationTemporalDisposition,
   hasDueLocalJPrefixAdvance,
   mergeJPrefixAttestations,
   verifyOutOfRoundJPrefixAttestation,
 } from '../../jurisdiction/j-prefix-consensus';
-import { encodeCanonicalEntityConsensusValue } from './state-root';
+
 import {
   commitEntityConsensusInput,
   deferEntityConsensusInput,
@@ -14,38 +15,24 @@ import {
 } from './input-types';
 import { ensureLocalJPrefixAttestation, entityLog } from './shared';
 
-const verifyAttestationRound = (
-  context: ApplyEntityInputContext,
-): 'stale' | 'current' | 'future' => {
+const verifyAttestationRound = (context: ApplyEntityInputContext): 'stale' | 'current' | 'future' => {
   const { env, entityInput, workingReplica } = context;
   const incoming = entityInput.jPrefixAttestations!;
   const authorityConfigs = [
     workingReplica.state.config,
-    ...(workingReplica.certifiedFrameAnchor
-      ? [workingReplica.certifiedFrameAnchor.authority.config]
-      : []),
-    ...(workingReplica.certifiedFrameLineage ?? []).map(
-      link => link.postAuthority.config,
-    ),
+    ...(workingReplica.certifiedFrameAnchor ? [workingReplica.certifiedFrameAnchor.authority.config] : []),
+    ...(workingReplica.certifiedFrameLineage ?? []).map(link => link.postAuthority.config),
   ];
   const dispositions = new Set(
     [...incoming.values()].map(attestation =>
-      getJPrefixAttestationTemporalDisposition(
-        workingReplica.state,
-        attestation,
-      ),
+      getJPrefixAttestationTemporalDisposition(workingReplica.state, attestation),
     ),
   );
   if (dispositions.size !== 1) throw new Error('J_PREFIX_MIXED_TARGET_HEIGHTS');
   const disposition = dispositions.values().next().value!;
   if (disposition === 'current') return disposition;
   for (const [rawSignerId, rawAttestation] of incoming) {
-    const attestation = verifyOutOfRoundJPrefixAttestation(
-      env,
-      workingReplica.state,
-      rawAttestation,
-      authorityConfigs,
-    );
+    const attestation = verifyOutOfRoundJPrefixAttestation(env, workingReplica.state, rawAttestation, authorityConfigs);
     if (rawSignerId.trim().toLowerCase() !== attestation.validatorId) {
       throw new Error(`J_PREFIX_MAP_SIGNER_MISMATCH:${rawSignerId}`);
     }
@@ -53,9 +40,7 @@ const verifyAttestationRound = (
   return disposition;
 };
 
-const rebroadcastLocalAttestation = (
-  context: ApplyEntityInputContext,
-): void => {
+const rebroadcastLocalAttestation = (context: ApplyEntityInputContext): void => {
   const { entityInput, entityOutbox, workingReplica } = context;
   const incoming = entityInput.jPrefixAttestations!;
   for (const [signerId, attestation] of incoming) {
@@ -63,14 +48,8 @@ const rebroadcastLocalAttestation = (
     if (normalizedSignerId !== workingReplica.signerId.trim().toLowerCase()) {
       continue;
     }
-    const previous = workingReplica.jPrefixRound?.attestations.get(
-      normalizedSignerId,
-    );
-    if (
-      previous &&
-      encodeCanonicalEntityConsensusValue(previous) ===
-        encodeCanonicalEntityConsensusValue(attestation)
-    ) {
+    const previous = workingReplica.jPrefixRound?.attestations.get(normalizedSignerId);
+    if (previous && encodeCanonicalConsensusValue(previous) === encodeCanonicalConsensusValue(attestation)) {
       continue;
     }
     for (const validatorId of workingReplica.state.config.validators) {
@@ -78,17 +57,13 @@ const rebroadcastLocalAttestation = (
       entityOutbox.push({
         entityId: workingReplica.entityId,
         signerId: validatorId,
-        jPrefixAttestations: new Map([
-          [normalizedSignerId, structuredClone(attestation)],
-        ]),
+        jPrefixAttestations: new Map([[normalizedSignerId, structuredClone(attestation)]]),
       });
     }
   }
 };
 
-export const handleJPrefixAttestations = (
-  context: ApplyEntityInputContext,
-): ApplyEntityInputResult | null => {
+export const handleJPrefixAttestations = (context: ApplyEntityInputContext): ApplyEntityInputResult | null => {
   const { env, entityInput, workingReplica, entityOutbox } = context;
   const incoming = entityInput.jPrefixAttestations;
   if (!incoming) return null;
@@ -117,12 +92,7 @@ export const handleJPrefixAttestations = (
     // the observed J obligation by deriving a fresh vote for the current parent.
     if (
       hasDueLocalJPrefixAdvance(workingReplica.state, workingReplica.jHistory) &&
-      ensureLocalJPrefixAttestation(
-        env,
-        workingReplica,
-        entityOutbox,
-        false,
-      )
+      ensureLocalJPrefixAttestation(env, workingReplica, entityOutbox, false)
     ) {
       return null;
     }
@@ -130,25 +100,17 @@ export const handleJPrefixAttestations = (
   }
 
   const priorRound = workingReplica.jPrefixRound;
-  const priorHeads = encodeCanonicalEntityConsensusValue(
-    priorRound?.attestations ?? new Map(),
-  );
+  const priorHeads = encodeCanonicalConsensusValue(priorRound?.attestations ?? new Map());
   let merged;
   try {
-    merged = mergeJPrefixAttestations(
-      env,
-      workingReplica.state,
-      priorRound,
-      incoming,
-    );
+    merged = mergeJPrefixAttestations(env, workingReplica.state, priorRound, incoming);
   } catch (error) {
     entityLog.error('j_prefix.attestation_rejected', {
       error: error instanceof Error ? error.message : String(error),
     });
     return rejectEntityConsensusInput(context, 'J_PREFIX_ATTESTATION_REJECTED');
   }
-  const changed =
-    priorHeads !== encodeCanonicalEntityConsensusValue(merged.attestations);
+  const changed = priorHeads !== encodeCanonicalConsensusValue(merged.attestations);
   if (changed && (workingReplica.proposal || workingReplica.lockedFrame)) {
     // A signed/locked frame freezes its J round. A later head belongs to the
     // next Entity height or the validator could authorize two maximum prefixes.

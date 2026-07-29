@@ -1,3 +1,4 @@
+import { encodeCanonicalConsensusValue } from '../../protocol/canonical-consensus-value';
 import { ethers } from 'ethers';
 import type { AccountTx, EntityFrameEvent, EntityState, EntityTx, JPrefixCertificate } from '../../types';
 import { HEAVY_LOGS } from '../../utils';
@@ -10,7 +11,6 @@ import {
   computeCanonicalEntityConsensusStateHash,
   buildEntityFrameAuthority,
   computeEntityFrameAuthorityRoot,
-  encodeCanonicalEntityConsensusValue,
 } from './state-root';
 import { LIMITS } from '../../constants';
 import { assertNoConsensusVisibleHtlcPaymentSecrets } from '../../protocol/htlc/consensus-secret-guard';
@@ -49,9 +49,7 @@ export function setEntityFrameHashDebugRecorder(
 }
 
 const toRecord = (value: unknown): Record<string, unknown> =>
-  value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {};
+  value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 
 const toInt = (value: unknown): number => {
   const n = Number(value ?? 0);
@@ -59,14 +57,10 @@ const toInt = (value: unknown): number => {
 };
 
 const rawJEvents = (data: Record<string, unknown>): unknown[] =>
-  Array.isArray(data['events'])
-    ? data['events']
-    : data['event'] !== undefined
-      ? [data['event']]
-      : [];
+  Array.isArray(data['events']) ? data['events'] : data['event'] !== undefined ? [data['event']] : [];
 
 const canonicalEventsForFrameHash = (data: Record<string, unknown>): Array<Record<string, unknown>> =>
-  normalizeJurisdictionEvents(rawJEvents(data)).map((event) => ({
+  normalizeJurisdictionEvents(rawJEvents(data)).map(event => ({
     blockNumber: event.blockNumber ?? null,
     blockHash: event.blockHash?.toLowerCase() ?? null,
     transactionHash: event.transactionHash?.toLowerCase() ?? null,
@@ -82,7 +76,7 @@ const canonicalJEventDataForFrameHash = (value: unknown): Record<string, unknown
     throw new Error('ENTITY_FRAME_J_EVENT_RANGE_REQUIRED');
   }
   const blocks = Array.isArray(data['blocks'])
-    ? data['blocks'].map((rawBlock) => {
+    ? data['blocks'].map(rawBlock => {
         const block = toRecord(rawBlock);
         const blockEvents = canonicalEventsForFrameHash({ events: block['events'] });
         return {
@@ -97,7 +91,9 @@ const canonicalJEventDataForFrameHash = (value: unknown): Record<string, unknown
   return {
     version: 'xln:j-event-range-frame:v1',
     from: String(data['from'] ?? '').toLowerCase(),
-    jurisdictionRef: String(data['jurisdictionRef'] ?? '').trim().toLowerCase(),
+    jurisdictionRef: String(data['jurisdictionRef'] ?? '')
+      .trim()
+      .toLowerCase(),
     baseHeight: toInt(data['baseHeight']),
     scannedThroughHeight: toInt(data['scannedThroughHeight']),
     tipBlockHash: String(data['tipBlockHash'] ?? '').toLowerCase(),
@@ -128,7 +124,7 @@ const canonicalNestedAccountFrameForFrameHash = (value: unknown): unknown => {
   if (!Array.isArray(frame['accountTxs'])) return value;
   return {
     ...frame,
-    accountTxs: frame['accountTxs'].map((tx) => canonicalAccountTxForFrameHash(tx as AccountTx)),
+    accountTxs: frame['accountTxs'].map(tx => canonicalAccountTxForFrameHash(tx as AccountTx)),
   };
 };
 
@@ -165,10 +161,12 @@ export const canonicalEntityTxForFrameHash = (tx: EntityTx): Record<string, unkn
 };
 
 export const getEntityFrameTxByteLength = (txs: EntityTx[]): number =>
-  new TextEncoder().encode(encodeCanonicalEntityConsensusValue({
-    domain: 'xln:entity-frame-txs:v1',
-    txs: txs.map(canonicalEntityTxForFrameHash),
-  })).byteLength;
+  new TextEncoder().encode(
+    encodeCanonicalConsensusValue({
+      domain: 'xln:entity-frame-txs:v1',
+      txs: txs.map(canonicalEntityTxForFrameHash),
+    }),
+  ).byteLength;
 
 export const assertEntityFrameTxByteBudget = (txs: EntityTx[]): void => {
   const byteLength = getEntityFrameTxByteLength(txs);
@@ -226,7 +224,7 @@ export function createEntityFrameHashFromStateRoot(
     authorityRoot: authorityRoot.toLowerCase(),
     jPrefixCertificate: jPrefixCertificate ?? null,
   };
-  const encoded = encodeCanonicalEntityConsensusValue(frameData);
+  const encoded = encodeCanonicalConsensusValue(frameData);
   const hash = ethers.keccak256(ethers.toUtf8Bytes(encoded));
   if (frameHashDebugRecorder) {
     frameHashDebugRecorder({

@@ -1,5 +1,5 @@
+import { encodeCanonicalConsensusValue } from '../protocol/canonical-consensus-value';
 import type { EntityTx, JurisdictionEventData } from '../types';
-import { encodeCanonicalEntityConsensusValue } from '../entity/consensus/state-root';
 
 export const MAX_ENTITY_FRAME_J_RANGE_BYTES = 10 * 1024 * 1024;
 
@@ -28,32 +28,30 @@ const jRangeBody = (data: JRangeBody): JRangeBody => ({
   blocks: data.blocks,
 });
 
-const jRangeTxs = (
-  txs: readonly EntityTx[],
-): Array<Extract<EntityTx, { type: 'j_event' }>> => txs.filter(
-  (tx): tx is Extract<EntityTx, { type: 'j_event' }> => tx.type === 'j_event',
-);
+const jRangeTxs = (txs: readonly EntityTx[]): Array<Extract<EntityTx, { type: 'j_event' }>> =>
+  txs.filter((tx): tx is Extract<EntityTx, { type: 'j_event' }> => tx.type === 'j_event');
 
 /** Body-only measurement is exposed for boundary tests and pre-sign analysis. */
-export const canonicalJRangeBodiesByteLength = (
-  ranges: readonly JRangeBody[],
-): number => utf8Encoder.encode(encodeCanonicalEntityConsensusValue({
-  domain: J_RANGE_FRAME_PAYLOAD_DOMAIN,
-  version: 1,
-  ranges: ranges.map(jRangeBody),
-})).byteLength;
+export const canonicalJRangeBodiesByteLength = (ranges: readonly JRangeBody[]): number =>
+  utf8Encoder.encode(
+    encodeCanonicalConsensusValue({
+      domain: J_RANGE_FRAME_PAYLOAD_DOMAIN,
+      version: 1,
+      ranges: ranges.map(jRangeBody),
+    }),
+  ).byteLength;
 
-export const canonicalJEventDataPayloadByteLength = (
-  ranges: readonly JurisdictionEventData[],
-): number => utf8Encoder.encode(encodeCanonicalEntityConsensusValue({
-  domain: J_RANGE_FRAME_PAYLOAD_DOMAIN,
-  version: 1,
-  ranges,
-})).byteLength;
+export const canonicalJEventDataPayloadByteLength = (ranges: readonly JurisdictionEventData[]): number =>
+  utf8Encoder.encode(
+    encodeCanonicalConsensusValue({
+      domain: J_RANGE_FRAME_PAYLOAD_DOMAIN,
+      version: 1,
+      ranges,
+    }),
+  ).byteLength;
 
-export const canonicalEntityFrameJRangePayloadByteLength = (
-  txs: readonly EntityTx[],
-): number => canonicalJEventDataPayloadByteLength(jRangeTxs(txs).map((tx) => tx.data));
+export const canonicalEntityFrameJRangePayloadByteLength = (txs: readonly EntityTx[]): number =>
+  canonicalJEventDataPayloadByteLength(jRangeTxs(txs).map(tx => tx.data));
 
 const assertValidRangeSpan = (range: JRangeBody): void => {
   const baseHeight = Number(range.baseHeight);
@@ -72,9 +70,7 @@ const assertValidRangeSpans = (ranges: readonly JRangeBody[]): void => {
   }
 };
 
-export const getJEventDataBudgetError = (
-  ranges: readonly JurisdictionEventData[],
-): string | null => {
+export const getJEventDataBudgetError = (ranges: readonly JurisdictionEventData[]): string | null => {
   assertValidRangeSpans(ranges);
   const byteLength = canonicalJEventDataPayloadByteLength(ranges);
   return byteLength > MAX_ENTITY_FRAME_J_RANGE_BYTES
@@ -82,10 +78,7 @@ export const getJEventDataBudgetError = (
     : null;
 };
 
-const signedRangeCandidate = (
-  claim: JRangeBody,
-  proposerSignerId: string,
-): JurisdictionEventData => ({
+const signedRangeCandidate = (claim: JRangeBody, proposerSignerId: string): JurisdictionEventData => ({
   from: proposerSignerId.trim().toLowerCase(),
   signature: ZERO_ACCOUNT_SIGNATURE,
   observedAt: claim.scannedThroughHeight,
@@ -106,22 +99,21 @@ export const getJRangeClaimsProposableBudgetError = (
   if (proposerSignerIds.length === 0) throw new Error('J_RANGE_FRAME_PROPOSER_SET_EMPTY');
   // Only `from` varies by proposer. Select its largest exact canonical string
   // once; re-encoding a near-10-MiB body for every validator is avoidable DoS.
-  const signerByteLength = (signerId: string): number => utf8Encoder.encode(
-    encodeCanonicalEntityConsensusValue(signerId.trim().toLowerCase()),
-  ).byteLength;
+  const signerByteLength = (signerId: string): number =>
+    utf8Encoder.encode(encodeCanonicalConsensusValue(signerId.trim().toLowerCase())).byteLength;
   const longestSigner = proposerSignerIds.reduce((selected, candidate) =>
-    signerByteLength(candidate) > signerByteLength(selected) ? candidate : selected);
+    signerByteLength(candidate) > signerByteLength(selected) ? candidate : selected,
+  );
   const maxByteLength = canonicalJEventDataPayloadByteLength(
-    claims.map((claim) => signedRangeCandidate(claim, longestSigner)),
+    claims.map(claim => signedRangeCandidate(claim, longestSigner)),
   );
   return maxByteLength > MAX_ENTITY_FRAME_J_RANGE_BYTES
     ? `J_RANGE_FRAME_BYTE_LIMIT_EXCEEDED:${maxByteLength}:${MAX_ENTITY_FRAME_J_RANGE_BYTES}`
     : null;
 };
 
-export const getEntityFrameJRangeBudgetError = (
-  txs: readonly EntityTx[],
-): string | null => getJEventDataBudgetError(jRangeTxs(txs).map((tx) => tx.data));
+export const getEntityFrameJRangeBudgetError = (txs: readonly EntityTx[]): string | null =>
+  getJEventDataBudgetError(jRangeTxs(txs).map(tx => tx.data));
 
 export const assertEntityFrameJRangeBudget = (txs: readonly EntityTx[]): void => {
   const error = getEntityFrameJRangeBudgetError(txs);
@@ -141,9 +133,7 @@ export type JRangeBudgetedEntityTxSelection = {
  * cannot fit an otherwise empty frame, retrying it can never make progress, so
  * fail loud.
  */
-export const selectEntityTxsWithinJRangeBudget = (
-  txs: readonly EntityTx[],
-): JRangeBudgetedEntityTxSelection => {
+export const selectEntityTxsWithinJRangeBudget = (txs: readonly EntityTx[]): JRangeBudgetedEntityTxSelection => {
   const selected: EntityTx[] = [];
   const selectedRanges: Array<Extract<EntityTx, { type: 'j_event' }>> = [];
   let deferTransactionSuffix = false;

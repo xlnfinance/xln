@@ -1,3 +1,4 @@
+import { encodeCanonicalConsensusValue } from '../../protocol/canonical-consensus-value';
 /**
  * Entity consensus: validator replicas agree on entity frames, then route
  * committed account/J-layer side effects back into the runtime.
@@ -106,7 +107,6 @@ import {
   buildEntityFrameAuthority,
   computeCanonicalEntityConsensusStateHash,
   computeEntityFrameAuthorityRoot,
-  encodeCanonicalEntityConsensusValue,
 } from './state-root';
 
 export { CROSS_J_PENDING_FILL_ACK_TTL_MS } from '../../extensions/cross-j/fill-ack';
@@ -181,7 +181,11 @@ export const entityFrameProfileEnabled = (): boolean =>
 export const entityFrameSlowMs = (): number => readRuntimePerfSlowMs('XLN_ENTITY_FRAME_SLOW_MS', ENTITY_FRAME_SLOW_MS);
 export const entityLog = createStructuredLogger('entity');
 
-export const getReplicaJRangeValidationError = (env: RuntimeState, replica: EntityReplica, txs: EntityTx[]): string | null => {
+export const getReplicaJRangeValidationError = (
+  env: RuntimeState,
+  replica: EntityReplica,
+  txs: EntityTx[],
+): string | null => {
   try {
     const budgetError = getEntityFrameJRangeBudgetError(txs);
     if (budgetError) return budgetError;
@@ -204,7 +208,11 @@ export const getReplicaJRangeValidationError = (env: RuntimeState, replica: Enti
   return null;
 };
 
-export const assertProposerJRangesMatchLocalHistory = (env: RuntimeState, replica: EntityReplica, txs: EntityTx[]): void => {
+export const assertProposerJRangesMatchLocalHistory = (
+  env: RuntimeState,
+  replica: EntityReplica,
+  txs: EntityTx[],
+): void => {
   const error = getReplicaJRangeValidationError(env, replica, txs);
   if (error) throw new Error(`ENTITY_PROPOSER_J_RANGE_INVALID:${error}`);
 };
@@ -304,7 +312,11 @@ export const ensureLocalJPrefixAttestation = (
  * An empty suffix remains local and is certified by the next real Entity frame
  * instead of creating one itself.
  */
-const advanceLocalJPrefixRoundAfterCommit = (env: RuntimeState, replica: EntityReplica, entityOutbox: EntityInput[]): void => {
+const advanceLocalJPrefixRoundAfterCommit = (
+  env: RuntimeState,
+  replica: EntityReplica,
+  entityOutbox: EntityInput[],
+): void => {
   clearCommittedJPrefixRound(replica);
   if (!hasDueLocalJPrefixAdvance(replica.state, replica.jHistory)) return;
   if (!ensureLocalJPrefixAttestation(env, replica, entityOutbox, false)) return;
@@ -574,15 +586,17 @@ const validatePreparedFrameEvidence = (
     'ENTITY_PREPARED_EVIDENCE',
   );
   for (const [signerId, signatures] of normalized) {
-    if (!verifyHashPrecommitSignatures(
-      env,
-      signerId,
-      hashes,
-      evidence.hash,
-      evidence.height,
-      signatures,
-      'ENTITY_PREPARED_EVIDENCE',
-    )) {
+    if (
+      !verifyHashPrecommitSignatures(
+        env,
+        signerId,
+        hashes,
+        evidence.hash,
+        evidence.height,
+        signatures,
+        'ENTITY_PREPARED_EVIDENCE',
+      )
+    ) {
       throw new Error(`ENTITY_PREPARED_SIGNATURE_INVALID:${evidence.hash}:${signerId}`);
     }
   }
@@ -599,8 +613,8 @@ const mergePreparedFrameEvidence = (
     signatures: new Map<string, string[]>(),
   };
   if (
-    encodeCanonicalEntityConsensusValue({ ...group.frame, collectedSigs: undefined }) !==
-    encodeCanonicalEntityConsensusValue({ ...evidence, collectedSigs: undefined })
+    encodeCanonicalConsensusValue({ ...group.frame, collectedSigs: undefined }) !==
+    encodeCanonicalConsensusValue({ ...evidence, collectedSigs: undefined })
   ) {
     throw new Error(`ENTITY_PREPARED_BODY_CONFLICT:${evidence.hash}`);
   }
@@ -737,7 +751,11 @@ export const buildConsumptionOutputIdentity = (
  * proposer adds a witness from its own pre-state; validators never trust a
  * proof supplied by the source or transport.
  */
-export const attachTargetConsumptionProofs = (env: RuntimeState, state: EntityState, txs: readonly EntityTx[]): EntityTx[] => {
+export const attachTargetConsumptionProofs = (
+  env: RuntimeState,
+  state: EntityState,
+  txs: readonly EntityTx[],
+): EntityTx[] => {
   let accumulator = state.consumptionAccumulator ?? createEmptyConsumptionAccumulator();
   const overlay = new Map<string, ConsumptionNode>(getConsumptionNodeStore(env));
   const selected: EntityTx[] = [];
@@ -999,7 +1017,11 @@ export const isSelfBoardAuthorityTransitionFrame = async (
   return finalTarget === configBoardHash;
 };
 
-export const validateProposedFrameLeader = (env: RuntimeState, state: EntityState, frame: ProposedEntityFrame): boolean => {
+export const validateProposedFrameLeader = (
+  env: RuntimeState,
+  state: EntityState,
+  frame: ProposedEntityFrame,
+): boolean => {
   return Boolean(
     frame.leader && verifyEntityLeaderCertificate(env, state, frame) && verifyEntityRelayCertificate(env, state, frame),
   );
@@ -1140,18 +1162,12 @@ const admitGeneratedAccountTx = async (
   account: AccountState,
   tx: AccountTx,
 ): Promise<boolean> => {
-  const result = await applyAccountInput(
-    env,
-    account,
-    createLocalAccountInput(account, state.entityId, [tx]),
-  );
+  const result = await applyAccountInput(env, account, createLocalAccountInput(account, state.entityId, [tx]));
   return result.admittedAccountTxCount === 1;
 };
 
 type PendingCrossJurisdictionFillAck =
-  NonNullable<EntityState['pendingCrossJurisdictionFillAcks']> extends Map<string, infer Value>
-    ? Value
-    : never;
+  NonNullable<EntityState['pendingCrossJurisdictionFillAcks']> extends Map<string, infer Value> ? Value : never;
 
 const queueCrossJFillAckIncidentEffect = (
   candidateEffects: EntityCandidateEffect[],
@@ -1228,12 +1244,7 @@ export const drainPendingCrossJurisdictionFillAcks = async (
         },
       };
       pendingAck.ttlExpiredAt = now;
-      queueCrossJFillAckIncidentEffect(
-        candidateEffects,
-        'securityIncidentRecord',
-        currentEntityState,
-        pendingAck,
-      );
+      queueCrossJFillAckIncidentEffect(candidateEffects, 'securityIncidentRecord', currentEntityState, pendingAck);
       entityLog.warn('crossj.fill_ack_ttl_expired_preserved', payload);
     }
     const account = currentEntityState.accounts.get(pendingAck.accountId);
@@ -1247,12 +1258,7 @@ export const drainPendingCrossJurisdictionFillAcks = async (
       });
     }
     if (pendingAck.ttlExpiredAt !== undefined) {
-      queueCrossJFillAckIncidentEffect(
-        candidateEffects,
-        'securityIncidentResolve',
-        currentEntityState,
-        pendingAck,
-      );
+      queueCrossJFillAckIncidentEffect(candidateEffects, 'securityIncidentResolve', currentEntityState, pendingAck);
     }
     pending.delete(key);
     drained++;
@@ -1281,7 +1287,7 @@ export const drainCommittedCrossJurisdictionCancelAcks = async (
     if (!account) {
       throw new Error(`CROSS_J_CANCEL_ACK_ACCOUNT_MISSING:account=${accountId}:offer=${tx.data.offerId}`);
     }
-    if (!await admitGeneratedAccountTx(env, currentEntityState, account, tx)) continue;
+    if (!(await admitGeneratedAccountTx(env, currentEntityState, account, tx))) continue;
     proposableAccounts.add(accountId);
     storageChanges.push({
       family: 'account',
@@ -1473,8 +1479,8 @@ export const appendCertifiedEntityFrameLink = (
         `existing=${fork.frame.hash}:incoming=${link.frame.hash}`,
     );
   }
-  const fingerprint = encodeCanonicalEntityConsensusValue(link);
-  if (sameHeight.some(candidate => encodeCanonicalEntityConsensusValue(candidate) === fingerprint)) return;
+  const fingerprint = encodeCanonicalConsensusValue(link);
+  if (sameHeight.some(candidate => encodeCanonicalConsensusValue(candidate) === fingerprint)) return;
   candidateEffects.push({
     kind: 'entityFrameHistory',
     entityId: replica.entityId,

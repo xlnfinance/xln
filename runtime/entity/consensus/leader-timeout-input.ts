@@ -1,13 +1,11 @@
+import { encodeCanonicalConsensusValue } from '../../protocol/canonical-consensus-value';
 import { signAccountFrame, verifyAccountSignature } from '../../account/crypto';
 import { shortId } from '../../infra/logger';
 import {
   cloneIsolatedEntityLeaderCertificate,
   cloneIsolatedEntityLeaderTimeoutVote,
 } from '../../protocol/runtime-input-clone';
-import type {
-  EntityLeaderTimeoutVote,
-  ProposedEntityFrame,
-} from '../../types';
+import type { EntityLeaderTimeoutVote, ProposedEntityFrame } from '../../types';
 import {
   assertEntityLeaderVoteMatchesState,
   buildEntityLeaderCertificate,
@@ -15,12 +13,8 @@ import {
   isLocalEntityLeaderTimeoutVote,
   leaderVoteCollectionKey,
 } from './leader';
-import {
-  rejectEntityConsensusInput,
-  type ApplyEntityInputContext,
-  type ApplyEntityInputResult,
-} from './input-types';
-import { encodeCanonicalEntityConsensusValue } from './state-root';
+import { rejectEntityConsensusInput, type ApplyEntityInputContext, type ApplyEntityInputResult } from './input-types';
+
 import {
   calculateQuorumPower,
   entityLog,
@@ -35,19 +29,12 @@ const signAndBroadcastLocalVote = async (
 ): Promise<EntityLeaderTimeoutVote | null> => {
   const { env, entityInput, entityOutbox, workingReplica } = context;
   const voterId = incoming.voterId.toLowerCase();
-  if (
-    voterId !== workingReplica.signerId.toLowerCase() ||
-    incoming.signature
-  ) {
+  if (voterId !== workingReplica.signerId.toLowerCase() || incoming.signature) {
     return null;
   }
   const vote = {
     ...incoming,
-    signature: await signAccountFrame(
-      env,
-      workingReplica.signerId,
-      voteHash,
-    ),
+    signature: await signAccountFrame(env, workingReplica.signerId, voteHash),
   };
   // The scheduler emits a local unsigned intent. Persist the signed protocol
   // value so WAL replay never depends on process-local authorization markers.
@@ -75,22 +62,11 @@ const selectPreparedFrame = (
 ): ProposedEntityFrame | null => {
   const { env, workingReplica } = context;
   const localLockHasPreparedQuorum = workingReplica.lockedFrame
-    ? hasVerifiedPreparedQuorum(
-        env,
-        workingReplica.state,
-        workingReplica.lockedFrame,
-        'ENTITY_PREPARED_LOCAL_LOCK',
-      )
+    ? hasVerifiedPreparedQuorum(env, workingReplica.state, workingReplica.lockedFrame, 'ENTITY_PREPARED_LOCAL_LOCK')
     : false;
-  const preparedFrame = selectPreparedFrameFromCertificate(
-    env,
-    workingReplica.state,
-    certificate,
-  );
+  const preparedFrame = selectPreparedFrameFromCertificate(env, workingReplica.state, certificate);
   if (!preparedFrame && localLockHasPreparedQuorum && workingReplica.lockedFrame) {
-    throw new Error(
-      `ENTITY_PREPARED_LOCAL_LOCK_OMITTED:${workingReplica.lockedFrame.hash}`,
-    );
+    throw new Error(`ENTITY_PREPARED_LOCAL_LOCK_OMITTED:${workingReplica.lockedFrame.hash}`);
   }
   if (
     preparedFrame &&
@@ -100,8 +76,7 @@ const selectPreparedFrame = (
     workingReplica.lockedFrame.leader.view >= preparedFrame.leader.view
   ) {
     throw new Error(
-      `ENTITY_PREPARED_LOCK_CONFLICT:local=${workingReplica.lockedFrame.hash}:` +
-        `selected=${preparedFrame.hash}`,
+      `ENTITY_PREPARED_LOCK_CONFLICT:local=${workingReplica.lockedFrame.hash}:` + `selected=${preparedFrame.hash}`,
     );
   }
   if (!preparedFrame && workingReplica.lockedFrame && !localLockHasPreparedQuorum) {
@@ -131,10 +106,7 @@ const installLeaderCertificate = (
     entityLog.error('leader.prepared_certificate_rejected', {
       error: error instanceof Error ? error.message : String(error),
     });
-    return rejectEntityConsensusInput(
-      context,
-      'LEADER_PREPARED_CERTIFICATE_REJECTED',
-    );
+    return rejectEntityConsensusInput(context, 'LEADER_PREPARED_CERTIFICATE_REJECTED');
   }
   if (preparedFrame) {
     certificate.preparedFrameHash = preparedFrame.hash;
@@ -148,8 +120,7 @@ const installLeaderCertificate = (
     if (
       workingReplica.validatorExecution &&
       (workingReplica.validatorExecution.height !== preparedFrame.height ||
-        workingReplica.validatorExecution.frameHash.toLowerCase() !==
-          preparedFrame.hash.toLowerCase())
+        workingReplica.validatorExecution.frameHash.toLowerCase() !== preparedFrame.hash.toLowerCase())
     ) {
       delete workingReplica.validatorExecution;
     }
@@ -181,11 +152,7 @@ export const handleLeaderTimeoutVote = async (
     return rejectEntityConsensusInput(context);
   }
   const voterId = incoming.voterId.toLowerCase();
-  if (
-    !workingReplica.state.config.validators.some(
-      validator => validator.toLowerCase() === voterId,
-    )
-  ) {
+  if (!workingReplica.state.config.validators.some(validator => validator.toLowerCase() === voterId)) {
     return rejectEntityConsensusInput(context);
   }
   const voteHash = hashEntityLeaderVoteBody(incoming);
@@ -204,15 +171,9 @@ export const handleLeaderTimeoutVote = async (
   if (!workingReplica.leaderVotes) workingReplica.leaderVotes = new Map();
   const previousVote = workingReplica.leaderVotes.get(voterId);
   if (previousVote) {
-    if (
-      encodeCanonicalEntityConsensusValue(previousVote) !==
-      encodeCanonicalEntityConsensusValue(vote)
-    ) {
+    if (encodeCanonicalConsensusValue(previousVote) !== encodeCanonicalConsensusValue(vote)) {
       entityLog.error('leader.vote_equivocation', { voter: shortId(voterId) });
-      return rejectEntityConsensusInput(
-        context,
-        'ENTITY_LEADER_VOTE_EQUIVOCATION',
-      );
+      return rejectEntityConsensusInput(context, 'ENTITY_LEADER_VOTE_EQUIVOCATION');
     }
     return null;
   }

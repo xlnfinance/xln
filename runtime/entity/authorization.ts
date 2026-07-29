@@ -1,18 +1,10 @@
+import { encodeCanonicalConsensusValue } from '../protocol/canonical-consensus-value';
 import { ethers } from 'ethers';
 
 import { LIMITS } from '../constants';
-import type {
-  ConsensusConfig,
-  CrossJurisdictionSwapRoute,
-  EntityState,
-  EntityTx,
-  ProposalAction,
-} from '../types';
-import {
-  buildCrossJurisdictionPullBinding,
-  isCrossJurisdictionTerminalStatus,
-} from '../extensions/cross-j';
-import { encodeCanonicalEntityConsensusValue } from './consensus/state-root';
+import type { ConsensusConfig, CrossJurisdictionSwapRoute, EntityState, EntityTx, ProposalAction } from '../types';
+import { buildCrossJurisdictionPullBinding, isCrossJurisdictionTerminalStatus } from '../extensions/cross-j';
+
 import { assertNoConsensusVisibleHtlcPaymentSecrets } from '../protocol/htlc/consensus-secret-guard';
 import { isCrossJurisdictionSiblingPair } from '../extensions/cross-j/boundary';
 
@@ -22,7 +14,9 @@ export const canonicalEntityBoardSignerId = (
   value: unknown,
   missingCode = 'ENTITY_BOARD_SIGNER_ID_REQUIRED',
 ): string => {
-  const signerId = String(value ?? '').trim().toLowerCase();
+  const signerId = String(value ?? '')
+    .trim()
+    .toLowerCase();
   if (!signerId) throw new Error(missingCode);
   return signerId;
 };
@@ -86,23 +80,17 @@ const individualTxTypes = new Set<EntityTx['type']>([
   'vote',
 ]);
 
-const crossEntityCertifiedTxTypes = new Set<EntityTx['type']>([
-  'accountInput',
-]);
+const crossEntityCertifiedTxTypes = new Set<EntityTx['type']>(['accountInput']);
 
 export const isEntityProtocolTx = (tx: EntityTx): boolean => protocolTxTypes.has(tx.type);
 
 /** Security allowlist: new EntityTx variants are collective until explicitly reviewed. */
-export const isIndividualEntityCommandTx = (tx: EntityTx): boolean =>
-  individualTxTypes.has(tx.type);
+export const isIndividualEntityCommandTx = (tx: EntityTx): boolean => individualTxTypes.has(tx.type);
 
 export const isCollectiveEntityActionTx = (tx: EntityTx): boolean =>
   !isEntityProtocolTx(tx) && !isIndividualEntityCommandTx(tx);
 
-const assertTxBatchShape: (
-  txs: unknown,
-  code: string,
-) => asserts txs is EntityTx[] = (txs, code) => {
+const assertTxBatchShape: (txs: unknown, code: string) => asserts txs is EntityTx[] = (txs, code) => {
   if (!Array.isArray(txs) || txs.length === 0 || txs.length > LIMITS.MEMPOOL_SIZE) {
     throw new Error(`${code}_TX_COUNT_INVALID:${Array.isArray(txs) ? txs.length : 'not-array'}`);
   }
@@ -111,10 +99,12 @@ const assertTxBatchShape: (
       throw new Error(`${code}_TX_INVALID`);
     }
   }
-  const byteLength = new TextEncoder().encode(encodeCanonicalEntityConsensusValue({
-    domain: ENTITY_PROPOSAL_ACTION_DOMAIN,
-    txs,
-  })).byteLength;
+  const byteLength = new TextEncoder().encode(
+    encodeCanonicalConsensusValue({
+      domain: ENTITY_PROPOSAL_ACTION_DOMAIN,
+      txs,
+    }),
+  ).byteLength;
   if (byteLength > LIMITS.MAX_FRAME_SIZE_BYTES) {
     throw new Error(`${code}_BYTE_LIMIT_EXCEEDED:${byteLength}:${LIMITS.MAX_FRAME_SIZE_BYTES}`);
   }
@@ -128,11 +118,17 @@ export const hashCollectiveEntityActionTxs = (txs: EntityTx[]): string => {
       throw new Error(`ENTITY_COLLECTIVE_ACTION_TX_FORBIDDEN:${tx.type}`);
     }
   }
-  return ethers.keccak256(ethers.toUtf8Bytes(encodeCanonicalEntityConsensusValue({
-    domain: ENTITY_PROPOSAL_ACTION_DOMAIN,
-    version: 1,
-    txs,
-  }))).toLowerCase();
+  return ethers
+    .keccak256(
+      ethers.toUtf8Bytes(
+        encodeCanonicalConsensusValue({
+          domain: ENTITY_PROPOSAL_ACTION_DOMAIN,
+          version: 1,
+          txs,
+        }),
+      ),
+    )
+    .toLowerCase();
 };
 
 export const buildEntityTransactionProposalAction = (
@@ -178,7 +174,9 @@ export const assertEntityProposalAction = (value: unknown): ProposalAction => {
   }
   assertTxBatchShape(txData['txs'], 'ENTITY_COLLECTIVE_ACTION');
   const txs = structuredClone(txData['txs']);
-  const actionHash = String(txData['actionHash'] ?? '').trim().toLowerCase();
+  const actionHash = String(txData['actionHash'] ?? '')
+    .trim()
+    .toLowerCase();
   const computed = hashCollectiveEntityActionTxs(txs);
   if (actionHash !== computed) {
     throw new Error(`ENTITY_PROPOSAL_ACTION_HASH_MISMATCH:${actionHash || 'missing'}:${computed}`);
@@ -188,10 +186,16 @@ export const assertEntityProposalAction = (value: unknown): ProposalAction => {
 
 export const hashEntityProposalAction = (value: unknown): string => {
   const action = assertEntityProposalAction(value);
-  return ethers.keccak256(ethers.toUtf8Bytes(encodeCanonicalEntityConsensusValue({
-    domain: ENTITY_PROPOSAL_ACTION_DOMAIN,
-    action,
-  }))).toLowerCase();
+  return ethers
+    .keccak256(
+      ethers.toUtf8Bytes(
+        encodeCanonicalConsensusValue({
+          domain: ENTITY_PROPOSAL_ACTION_DOMAIN,
+          action,
+        }),
+      ),
+    )
+    .toLowerCase();
 };
 
 export const assertIndividualEntityCommandTxs = (txs: EntityTx[]): void => {
@@ -203,20 +207,18 @@ export const assertIndividualEntityCommandTxs = (txs: EntityTx[]): void => {
   }
 };
 
-export const buildCollectiveEntityProposalTx = (
-  proposer: string,
-  txs: EntityTx[],
-): EntityTx => ({
+export const buildCollectiveEntityProposalTx = (proposer: string, txs: EntityTx[]): EntityTx => ({
   type: 'propose',
   data: { proposer, action: buildEntityTransactionProposalAction(txs) },
 });
 
-const normalizeEntityRef = (value: unknown): string => String(value ?? '').trim().toLowerCase();
+const normalizeEntityRef = (value: unknown): string =>
+  String(value ?? '')
+    .trim()
+    .toLowerCase();
 
 const routeBookOwner = (route: CrossJurisdictionSwapRoute): string =>
-  normalizeEntityRef(
-    route.bookOwnerEntityId || route.source.counterpartyEntityId || route.hubEntityId,
-  );
+  normalizeEntityRef(route.bookOwnerEntityId || route.source.counterpartyEntityId || route.hubEntityId);
 
 const requireSemanticRoute = (
   state: EntityState,
@@ -233,17 +235,15 @@ const requireSemanticRoute = (
     const storedHash = normalizeEntityRef(stored.routeHash);
     const suppliedHash = normalizeEntityRef(supplied.routeHash);
     if (!storedHash || !suppliedHash || storedHash !== suppliedHash) {
-      throw new Error(`CONSENSUS_OUTPUT_ROUTE_HASH_MISMATCH:${canonicalOrderId}:${suppliedHash || 'missing'}:${storedHash || 'missing'}`);
+      throw new Error(
+        `CONSENSUS_OUTPUT_ROUTE_HASH_MISMATCH:${canonicalOrderId}:${suppliedHash || 'missing'}:${storedHash || 'missing'}`,
+      );
     }
   }
   return route;
 };
 
-const assertSemanticSource = (
-  txType: string,
-  source: string,
-  expected: readonly string[],
-): void => {
+const assertSemanticSource = (txType: string, source: string, expected: readonly string[]): void => {
   const allowed = new Set(expected.map(normalizeEntityRef).filter(Boolean));
   if (!allowed.has(source)) {
     throw new Error(
@@ -303,8 +303,7 @@ const assertCertifiedCrossJTargetPull = (
     normalizeEntityRef(tx.data.fullHash) === normalizeEntityRef(pull.fullHash) &&
     normalizeEntityRef(tx.data.partialRoot) === normalizeEntityRef(pull.partialRoot);
   const expectedBinding = buildCrossJurisdictionPullBinding(route, 'target');
-  const exactBinding = encodeCanonicalEntityConsensusValue(binding) ===
-    encodeCanonicalEntityConsensusValue(expectedBinding);
+  const exactBinding = encodeCanonicalConsensusValue(binding) === encodeCanonicalConsensusValue(expectedBinding);
   if (!exactPull || !exactBinding) {
     throw new Error(`CONSENSUS_OUTPUT_CROSS_J_TARGET_PULL_MISMATCH:${route.orderId}`);
   }
@@ -320,18 +319,13 @@ const assertCertifiedCrossJSourceDispute = (
   if (!routeId) throw new Error('CONSENSUS_OUTPUT_CROSS_J_DISPUTE_ROUTE_REQUIRED');
   const route = requireSemanticRoute(currentState, routeId);
   const allowedFields = new Set(['counterpartyEntityId', 'crossJurisdictionRouteId']);
-  if (Object.keys(tx.data).some((field) => !allowedFields.has(field))) {
+  if (Object.keys(tx.data).some(field => !allowedFields.has(field))) {
     throw new Error('CONSENSUS_OUTPUT_CROSS_J_DISPUTE_DATA_FORBIDDEN');
   }
   if (isCrossJurisdictionTerminalStatus(route.status) || !route.targetPull) {
-    throw new Error(
-      `CONSENSUS_OUTPUT_CROSS_J_DISPUTE_ROUTE_INACTIVE:${route.orderId}:${route.status}`,
-    );
+    throw new Error(`CONSENSUS_OUTPUT_CROSS_J_DISPUTE_ROUTE_INACTIVE:${route.orderId}:${route.status}`);
   }
-  if (
-    normalizeEntityRef(tx.data.counterpartyEntityId) !==
-    normalizeEntityRef(route.source.counterpartyEntityId)
-  ) {
+  if (normalizeEntityRef(tx.data.counterpartyEntityId) !== normalizeEntityRef(route.source.counterpartyEntityId)) {
     throw new Error(
       `CONSENSUS_OUTPUT_CROSS_J_DISPUTE_COUNTERPARTY_MISMATCH:` +
         `${tx.data.counterpartyEntityId}:${route.source.counterpartyEntityId}`,
@@ -356,11 +350,11 @@ const assertCertifiedBookOutputAuthority = (
       return true;
     }
     case 'applyCrossJurisdictionBookProgress': {
-      const admission = Array.from(currentState.crossJurisdictionBookAdmissions?.values() ?? [])
-        .find(candidate =>
+      const admission = Array.from(currentState.crossJurisdictionBookAdmissions?.values() ?? []).find(
+        candidate =>
           candidate.orderId === tx.data.orderId &&
           normalizeEntityRef(candidate.sourceEntityId) === normalizeEntityRef(tx.data.sourceEntityId),
-        );
+      );
       if (!admission) {
         throw new Error(`CONSENSUS_OUTPUT_BOOK_ADMISSION_MISSING:${tx.data.sourceEntityId}:${tx.data.orderId}`);
       }
@@ -390,9 +384,7 @@ const assertCertifiedBookOutputAuthority = (
       } else if (target === sourceHub) {
         assertSemanticSource(tx.type, source, [route.target.entityId]);
       } else {
-        throw new Error(
-          `CONSENSUS_OUTPUT_SEMANTIC_TARGET_MISMATCH:${tx.type}:${target}:${sourceUser},${sourceHub}`,
-        );
+        throw new Error(`CONSENSUS_OUTPUT_SEMANTIC_TARGET_MISMATCH:${tx.type}:${target}:${sourceUser},${sourceHub}`);
       }
       return true;
     }
@@ -412,13 +404,10 @@ const assertCertifiedBookLifecycleAuthority = (
       const route = requireSemanticRoute(currentState, tx.data.proof.orderId, tx.data.route);
       assertSemanticSource(tx.type, source, [route.source.counterpartyEntityId]);
       assertSemanticTarget(tx.type, target, route.target.entityId);
-      if (
-        normalizeEntityRef(tx.data.counterpartyEntityId) !==
-        normalizeEntityRef(route.target.counterpartyEntityId)
-      ) {
+      if (normalizeEntityRef(tx.data.counterpartyEntityId) !== normalizeEntityRef(route.target.counterpartyEntityId)) {
         throw new Error(
           `CONSENSUS_OUTPUT_CROSS_PULL_COUNTERPARTY_MISMATCH:` +
-          `${tx.data.counterpartyEntityId}:${route.target.counterpartyEntityId}`,
+            `${tx.data.counterpartyEntityId}:${route.target.counterpartyEntityId}`,
         );
       }
       return true;
@@ -480,8 +469,7 @@ const assertCertifiedCrossJRecoveryAuthority = (
         );
       }
       if (
-        normalizeEntityRef(tx.data.sourceCounterpartyEntityId) !==
-        normalizeEntityRef(route.source.counterpartyEntityId)
+        normalizeEntityRef(tx.data.sourceCounterpartyEntityId) !== normalizeEntityRef(route.source.counterpartyEntityId)
       ) {
         throw new Error(
           `CONSENSUS_OUTPUT_SALVAGE_SOURCE_COUNTERPARTY_MISMATCH:` +
@@ -538,9 +526,7 @@ export const assertCertifiedOutputSemanticAuthority = (
       const sourceHub = normalizeEntityRef(route.source.counterpartyEntityId);
       const targetHub = normalizeEntityRef(route.target.entityId);
       if (target !== sourceHub && target !== targetHub) {
-        throw new Error(
-          `CONSENSUS_OUTPUT_SEMANTIC_TARGET_MISMATCH:${tx.type}:${target}:${sourceHub},${targetHub}`,
-        );
+        throw new Error(`CONSENSUS_OUTPUT_SEMANTIC_TARGET_MISMATCH:${tx.type}:${target}:${sourceHub},${targetHub}`);
       }
       return;
     }
@@ -566,9 +552,10 @@ export const assertRuntimeOutputAuthorization = (
   if (txs.length === 0) throw new Error('RUNTIME_OUTPUT_TXS_MISSING');
   if (
     source === target &&
-    !txs.every(tx =>
-      tx.type === 'registerCrossJurisdictionSwap' &&
-      normalizeEntityRef(tx.data.route.source.counterpartyEntityId) === source
+    !txs.every(
+      tx =>
+        tx.type === 'registerCrossJurisdictionSwap' &&
+        normalizeEntityRef(tx.data.route.source.counterpartyEntityId) === source,
     )
   ) {
     throw new Error(`RUNTIME_OUTPUT_SELF_FORBIDDEN:${source}`);
@@ -577,7 +564,8 @@ export const assertRuntimeOutputAuthorization = (
     if (protocolTxTypes.has(tx.type)) {
       throw new Error(`RUNTIME_OUTPUT_NESTED_PROTOCOL_TX_FORBIDDEN:${tx.type}`);
     }
-    const suppliedRoute = tx.type === 'crossJurisdictionFillNotice' ||
+    const suppliedRoute =
+      tx.type === 'crossJurisdictionFillNotice' ||
       tx.type === 'crossJurisdictionSettled' ||
       tx.type === 'applyCrossJurisdictionBookProgress' ||
       tx.type === 'removeCrossJurisdictionBookOrder' ||
@@ -585,38 +573,43 @@ export const assertRuntimeOutputAuthorization = (
       tx.type === 'crossJurisdictionSalvage' ||
       tx.type === 'resolveHtlcLock' ||
       tx.type === 'disputeStart'
-      ? undefined
-      : 'data' in tx && tx.data && typeof tx.data === 'object' && 'route' in tx.data
-        ? (tx.data as { route?: CrossJurisdictionSwapRoute }).route
+        ? undefined
+        : 'data' in tx && tx.data && typeof tx.data === 'object' && 'route' in tx.data
+          ? (tx.data as { route?: CrossJurisdictionSwapRoute }).route
+          : undefined;
+    const pairedPullRoute =
+      tx.type === 'pullLock' && tx.data.crossJurisdiction
+        ? txs.find(
+            (candidate): candidate is Extract<EntityTx, { type: 'registerCrossJurisdictionSwap' }> =>
+              candidate.type === 'registerCrossJurisdictionSwap' &&
+              candidate.data.route.orderId === tx.data.crossJurisdiction?.orderId,
+          )?.data.route
         : undefined;
-    const pairedPullRoute = tx.type === 'pullLock' && tx.data.crossJurisdiction
-      ? txs.find((candidate): candidate is Extract<EntityTx, { type: 'registerCrossJurisdictionSwap' }> =>
-          candidate.type === 'registerCrossJurisdictionSwap' &&
-          candidate.data.route.orderId === tx.data.crossJurisdiction?.orderId)?.data.route
-      : undefined;
-    const semanticRoute = suppliedRoute ?? pairedPullRoute ?? (() => {
-      const orderId = tx.type === 'crossJurisdictionFillNotice' ||
-        tx.type === 'crossJurisdictionSettled' ||
-        tx.type === 'applyCrossJurisdictionBookProgress'
-        ? tx.data.orderId
-        : tx.type === 'removeCrossJurisdictionBookOrder' || tx.type === 'requestCrossJurisdictionClear'
-          ? tx.data.orderId
-          : tx.type === 'crossJurisdictionSalvage'
-            ? tx.data.routeId
-            : tx.type === 'resolveHtlcLock'
-              ? tx.data.crossJurisdictionRouteId
-              : tx.type === 'disputeStart'
-                ? tx.data.crossJurisdictionRouteId
-                : undefined;
-      return orderId ? currentState.crossJurisdictionSwaps?.get(orderId) : undefined;
-    })();
-    const selfSourceRegistration = source === target &&
+    const semanticRoute =
+      suppliedRoute ??
+      pairedPullRoute ??
+      (() => {
+        const orderId =
+          tx.type === 'crossJurisdictionFillNotice' ||
+          tx.type === 'crossJurisdictionSettled' ||
+          tx.type === 'applyCrossJurisdictionBookProgress'
+            ? tx.data.orderId
+            : tx.type === 'removeCrossJurisdictionBookOrder' || tx.type === 'requestCrossJurisdictionClear'
+              ? tx.data.orderId
+              : tx.type === 'crossJurisdictionSalvage'
+                ? tx.data.routeId
+                : tx.type === 'resolveHtlcLock'
+                  ? tx.data.crossJurisdictionRouteId
+                  : tx.type === 'disputeStart'
+                    ? tx.data.crossJurisdictionRouteId
+                    : undefined;
+        return orderId ? currentState.crossJurisdictionSwaps?.get(orderId) : undefined;
+      })();
+    const selfSourceRegistration =
+      source === target &&
       tx.type === 'registerCrossJurisdictionSwap' &&
       normalizeEntityRef(semanticRoute?.source.counterpartyEntityId) === source;
-    if (
-      !semanticRoute ||
-      (!selfSourceRegistration && !isCrossJurisdictionSiblingPair(semanticRoute, source, target))
-    ) {
+    if (!semanticRoute || (!selfSourceRegistration && !isCrossJurisdictionSiblingPair(semanticRoute, source, target))) {
       throw new Error(`RUNTIME_OUTPUT_NON_SIBLING_FORBIDDEN:${tx.type}:${source}:${target}`);
     }
     assertCertifiedOutputSemanticAuthority(source, target, tx, currentState, txs);

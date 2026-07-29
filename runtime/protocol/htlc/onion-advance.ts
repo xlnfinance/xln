@@ -1,12 +1,10 @@
+import { encodeCanonicalConsensusValue } from '../canonical-consensus-value';
 import { keccak256 } from 'ethers';
 
 import { HTLC } from '../../constants';
 import type { AccountState, AccountTx, EntityState, EntityTx, RuntimeState, HtlcLock } from '../../types';
-import { encodeCanonicalEntityConsensusValue } from '../../entity/consensus/state-root';
-import {
-  getCertifiedBoardNodeStore,
-  resolveObserverCertifiedBoardHash,
-} from '../../jurisdiction/board-registry';
+
+import { getCertifiedBoardNodeStore, resolveObserverCertifiedBoardHash } from '../../jurisdiction/board-registry';
 import { verifyHankoForHash } from '../../hanko/signing';
 import {
   computeHtlcEnvelopeContextHash,
@@ -24,15 +22,11 @@ import { hashHtlcSecret } from './utils';
 export type HtlcOnionAdvanceTx = Extract<EntityTx, { type: 'htlcOnionAdvance' }>;
 export type HtlcEncryptedEnvelope = HtlcEnvelope | MultiRecipientCiphertext | string | undefined;
 
-export const committedHtlcLockEnvelope = (
-  account: AccountState,
-  lockId: string,
-): HtlcEncryptedEnvelope => {
+export const committedHtlcLockEnvelope = (account: AccountState, lockId: string): HtlcEncryptedEnvelope => {
   for (const frame of [account.pendingFrame, account.currentFrame]) {
-    const tx = frame?.accountTxs.find(candidate =>
-      candidate.type === 'htlc_lock' && candidate.data.lockId === lockId) as
-      | Extract<AccountTx, { type: 'htlc_lock' }>
-      | undefined;
+    const tx = frame?.accountTxs.find(
+      candidate => candidate.type === 'htlc_lock' && candidate.data.lockId === lockId,
+    ) as Extract<AccountTx, { type: 'htlc_lock' }> | undefined;
     if (tx?.data.envelope !== undefined) return tx.data.envelope;
   }
   return undefined;
@@ -41,19 +35,23 @@ export const committedHtlcLockEnvelope = (
 const exactKeys = (value: object, expected: readonly string[], code: string): void => {
   const actual = Object.keys(value).sort();
   const canonicalExpected = [...expected].sort();
-  if (encodeCanonicalEntityConsensusValue(actual) !== encodeCanonicalEntityConsensusValue(canonicalExpected)) {
+  if (encodeCanonicalConsensusValue(actual) !== encodeCanonicalConsensusValue(canonicalExpected)) {
     throw new Error(code);
   }
 };
 
 const normalizeEntityId = (value: unknown, code: string): string => {
-  const normalized = String(value ?? '').trim().toLowerCase();
+  const normalized = String(value ?? '')
+    .trim()
+    .toLowerCase();
   if (!/^0x[0-9a-f]{64}$/.test(normalized)) throw new Error(code);
   return normalized;
 };
 
 const normalizeBytes32 = (value: unknown, code: string): string => {
-  const normalized = String(value ?? '').trim().toLowerCase();
+  const normalized = String(value ?? '')
+    .trim()
+    .toLowerCase();
   if (!/^0x[0-9a-f]{64}$/.test(normalized)) throw new Error(code);
   return normalized;
 };
@@ -78,19 +76,17 @@ export const encryptedHtlcLayer = (envelope: HtlcEncryptedEnvelope): MultiRecipi
 };
 
 export const hashEncryptedHtlcLayer = (layer: MultiRecipientCiphertext): string =>
-  keccak256(new TextEncoder().encode(encodeCanonicalEntityConsensusValue(layer))).toLowerCase();
+  keccak256(new TextEncoder().encode(encodeCanonicalConsensusValue(layer))).toLowerCase();
 
 const requireDefaultProposer = (state: EntityState): string => {
-  const signerId = String(state.config.validators[0] ?? '').trim().toLowerCase();
+  const signerId = String(state.config.validators[0] ?? '')
+    .trim()
+    .toLowerCase();
   if (!signerId) throw new Error('HTLC_ONION_DEFAULT_PROPOSER_REQUIRED');
   return signerId;
 };
 
-const accountAndLock = (
-  state: EntityState,
-  inboundEntityId: string,
-  inboundLockId: string,
-): HtlcLock => {
+const accountAndLock = (state: EntityState, inboundEntityId: string, inboundLockId: string): HtlcLock => {
   const account = state.accounts.get(inboundEntityId);
   if (!account) throw new Error('HTLC_ONION_ADVANCE_INBOUND_ACCOUNT_MISSING');
   const lock = account.locks.get(inboundLockId);
@@ -113,17 +109,18 @@ export const htlcSecretOfferContextHash = (
   payerEntityId: string,
   beneficiaryEntityId: string,
   lock: HtlcLock,
-): string => computeHtlcSecretOfferContextHash({
-  payerEntityId,
-  beneficiaryEntityId,
-  entityId: beneficiaryEntityId,
-  lockId: lock.lockId,
-  hashlock: lock.hashlock,
-  tokenId: lock.tokenId,
-  amount: lock.amount,
-  timelock: lock.timelock,
-  revealBeforeHeight: lock.revealBeforeHeight,
-});
+): string =>
+  computeHtlcSecretOfferContextHash({
+    payerEntityId,
+    beneficiaryEntityId,
+    entityId: beneficiaryEntityId,
+    lockId: lock.lockId,
+    hashlock: lock.hashlock,
+    tokenId: lock.tokenId,
+    amount: lock.amount,
+    timelock: lock.timelock,
+    revealBeforeHeight: lock.revealBeforeHeight,
+  });
 
 export const validateHtlcSecretOfferForLock = async (
   env: RuntimeState,
@@ -133,9 +130,12 @@ export const validateHtlcSecretOfferForLock = async (
   lock: HtlcLock,
   offer: MultiRecipientCiphertext,
 ): Promise<MultiRecipientCiphertext> => {
-  const recipientSignerId = observerState.entityId.toLowerCase() === payerEntityId.toLowerCase()
-    ? requireDefaultProposer(observerState)
-    : String(offer.recipients[0]?.signerId ?? '').trim().toLowerCase();
+  const recipientSignerId =
+    observerState.entityId.toLowerCase() === payerEntityId.toLowerCase()
+      ? requireDefaultProposer(observerState)
+      : String(offer.recipients[0]?.signerId ?? '')
+          .trim()
+          .toLowerCase();
   if (!recipientSignerId) throw new Error('HTLC_SECRET_OFFER_DEFAULT_PROPOSER_REQUIRED');
   const normalized = validateMultiRecipientCiphertext(
     offer,
@@ -167,18 +167,9 @@ export const validateLocalCommittedHtlcLayer = async (
 ): Promise<MultiRecipientCiphertext> => {
   const layer = encryptedHtlcLayer(envelope);
   if (!layer) throw new Error(`HTLC_ENCRYPTED_LAYER_REQUIRED:${lock.lockId}`);
-  validateMultiRecipientCiphertext(
-    layer,
-    state.entityId,
-    layerContextHash(state, lock),
-    requireDefaultProposer(state),
-  );
+  validateMultiRecipientCiphertext(layer, state.entityId, layerContextHash(state, lock), requireDefaultProposer(state));
   const certification = layer.profileCertification;
-  const registeredBoardHash = resolveObserverCertifiedBoardHash(
-    state,
-    getCertifiedBoardNodeStore(env),
-    state.entityId,
-  );
+  const registeredBoardHash = resolveObserverCertifiedBoardHash(state, getCertifiedBoardNodeStore(env), state.entityId);
   const certified = await verifyHankoForHash(
     certification.hanko,
     certification.profileHash,
@@ -297,32 +288,224 @@ export const buildHtlcOnionRevealAcceptedTx = (
   },
 });
 
+type HtlcOnionAdvance = HtlcOnionAdvanceTx['data']['advance'];
+
+const requireCommittedLayerHash = (
+  lock: HtlcLock,
+  encryptedLayerHash: string,
+): void => {
+  if (!lock.envelopeHash) throw new Error('HTLC_ONION_ADVANCE_LAYER_HASH_MISSING');
+  if (encryptedLayerHash !== lock.envelopeHash.toLowerCase()) {
+    throw new Error('HTLC_ONION_ADVANCE_LAYER_HASH_MISMATCH');
+  }
+};
+
+const validateFinalAdvance = async (
+  env: RuntimeState,
+  state: EntityState,
+  inboundEntityId: string,
+  lock: HtlcLock,
+  encryptedLayerHash: string,
+  advance: Extract<HtlcOnionAdvance, { kind: 'final' }>,
+): Promise<Extract<HtlcOnionAdvance, { kind: 'final' }>> => {
+  exactKeys(
+    advance,
+    [
+      'kind',
+      'secretOffer',
+      ...(advance.description !== undefined ? ['description'] : []),
+      ...(advance.startedAtMs !== undefined ? ['startedAtMs'] : []),
+    ],
+    'HTLC_ONION_ADVANCE_FINAL_FIELDS_INVALID',
+  );
+  requireCommittedLayerHash(lock, encryptedLayerHash);
+  const secretOffer = await validateHtlcSecretOfferForLock(
+    env,
+    state,
+    inboundEntityId,
+    state.entityId,
+    lock,
+    advance.secretOffer,
+  );
+  const envelope: HtlcEnvelope = {
+    finalRecipient: true,
+    secretOffer,
+    ...(advance.description !== undefined ? { description: advance.description } : {}),
+    ...(advance.startedAtMs !== undefined ? { startedAtMs: advance.startedAtMs } : {}),
+  };
+  validateEnvelope(envelope);
+  return {
+    kind: 'final',
+    secretOffer,
+    ...(envelope.description !== undefined ? { description: envelope.description } : {}),
+    ...(envelope.startedAtMs !== undefined ? { startedAtMs: envelope.startedAtMs } : {}),
+  };
+};
+
+const validateAcceptedOfferAdvance = async (
+  env: RuntimeState,
+  state: EntityState,
+  inboundEntityId: string,
+  inboundLockId: string,
+  encryptedLayerHash: string,
+  hashlock: string,
+  lock: HtlcLock,
+  advance: Extract<HtlcOnionAdvance, { kind: 'acceptOffer' }>,
+): Promise<Extract<HtlcOnionAdvance, { kind: 'acceptOffer' }>> => {
+  exactKeys(advance, ['kind', 'offerHash'], 'HTLC_ONION_ADVANCE_ACCEPT_FIELDS_INVALID');
+  const offer = lock.secretOffer;
+  if (!offer) throw new Error('HTLC_ONION_ADVANCE_COMMITTED_SECRET_OFFER_REQUIRED');
+  await validateHtlcSecretOfferForLock(env, state, state.entityId, inboundEntityId, lock, offer);
+  const offerHash = normalizeBytes32(advance.offerHash, 'HTLC_ONION_ADVANCE_OFFER_HASH_INVALID');
+  if (offerHash !== hashEncryptedHtlcLayer(offer) || encryptedLayerHash !== offerHash) {
+    throw new Error('HTLC_ONION_ADVANCE_OFFER_HASH_MISMATCH');
+  }
+  const route = state.htlcRoutes.get(hashlock);
+  if (
+    !route
+    || route.outboundEntity?.toLowerCase() !== inboundEntityId
+    || route.outboundLockId !== inboundLockId
+  ) {
+    throw new Error('HTLC_ONION_ADVANCE_OUTBOUND_ROUTE_MISMATCH');
+  }
+  return { kind: 'acceptOffer', offerHash };
+};
+
+const validateRevealAcceptedAdvance = (
+  state: EntityState,
+  tx: HtlcOnionAdvanceTx,
+  inboundEntityId: string,
+  inboundLockId: string,
+  encryptedLayerHash: string,
+  hashlock: string,
+  amount: bigint,
+  advance: Extract<HtlcOnionAdvance, { kind: 'revealAccepted' }>,
+): Extract<HtlcOnionAdvance, { kind: 'revealAccepted' }> => {
+  exactKeys(
+    advance,
+    ['kind', 'offerHash', 'accountFrameHash', 'accountFrameHeight', 'secret'],
+    'HTLC_ONION_ADVANCE_REVEAL_FIELDS_INVALID',
+  );
+  const route = state.htlcRoutes.get(hashlock);
+  if (
+    !route
+    || route.outboundEntity?.toLowerCase() !== inboundEntityId
+    || route.outboundLockId !== inboundLockId
+  ) {
+    throw new Error('HTLC_ONION_ADVANCE_REVEAL_ROUTE_MISMATCH');
+  }
+  // The route stores gross inbound value; its accepted downstream lock is net.
+  const expectedAmount = route.amount === undefined
+    ? undefined
+    : route.amount - (route.pendingFee ?? 0n);
+  if (
+    (route.tokenId !== undefined && route.tokenId !== tx.data.tokenId)
+    || (expectedAmount !== undefined && expectedAmount !== amount)
+  ) {
+    throw new Error(
+      `HTLC_ONION_ADVANCE_REVEAL_ROUTE_BINDING_MISMATCH:` +
+        `hashlock=${hashlock}:expectedToken=${String(route.tokenId ?? 'missing')}:` +
+        `receivedToken=${tx.data.tokenId}:expectedAmount=${String(expectedAmount ?? 'missing')}:` +
+        `receivedAmount=${amount}`,
+    );
+  }
+  const offerHash = normalizeBytes32(advance.offerHash, 'HTLC_ONION_ADVANCE_OFFER_HASH_INVALID');
+  const accountFrameHash = normalizeBytes32(
+    advance.accountFrameHash,
+    'HTLC_ONION_ADVANCE_ACCOUNT_FRAME_HASH_INVALID',
+  );
+  const accountFrameHeight = Number(advance.accountFrameHeight);
+  if (!Number.isSafeInteger(accountFrameHeight) || accountFrameHeight < 1) {
+    throw new Error('HTLC_ONION_ADVANCE_ACCOUNT_FRAME_HEIGHT_INVALID');
+  }
+  if (
+    route.acceptedOfferHash !== offerHash
+    || route.acceptedAccountFrameHash !== accountFrameHash
+    || route.acceptedAccountFrameHeight !== accountFrameHeight
+  ) {
+    throw new Error('HTLC_ONION_ADVANCE_REVEAL_ACK_BINDING_MISMATCH');
+  }
+  const secret = String(advance.secret ?? '').toLowerCase();
+  if (hashHtlcSecret(secret).toLowerCase() !== hashlock) {
+    throw new Error('HTLC_ONION_ADVANCE_REVEAL_PREIMAGE_MISMATCH');
+  }
+  if (encryptedLayerHash !== offerHash) {
+    throw new Error('HTLC_ONION_ADVANCE_OFFER_HASH_MISMATCH');
+  }
+  return { kind: 'revealAccepted', offerHash, accountFrameHash, accountFrameHeight, secret };
+};
+
+const validateForwardAdvance = (
+  lock: HtlcLock,
+  encryptedLayerHash: string,
+  hashlock: string,
+  advance: Extract<HtlcOnionAdvance, { kind: 'forward' }>,
+): Extract<HtlcOnionAdvance, { kind: 'forward' }> => {
+  exactKeys(
+    advance,
+    ['kind', 'nextHop', 'forwardAmount', 'innerEnvelope'],
+    'HTLC_ONION_ADVANCE_FORWARD_FIELDS_INVALID',
+  );
+  requireCommittedLayerHash(lock, encryptedLayerHash);
+  const nextHop = normalizeEntityId(advance.nextHop, 'HTLC_ONION_ADVANCE_NEXT_HOP_INVALID');
+  const forwardAmount = normalizePositiveBigInt(
+    advance.forwardAmount,
+    'HTLC_ONION_ADVANCE_FORWARD_AMOUNT_INVALID',
+  );
+  if (forwardAmount > lock.amount) throw new Error('HTLC_ONION_ADVANCE_FORWARD_AMOUNT_INVALID');
+  const contextHash = computeHtlcEnvelopeContextHash({
+    entityId: nextHop,
+    lockId: `${lock.lockId}-fwd`,
+    hashlock,
+    tokenId: lock.tokenId,
+    amount: forwardAmount,
+    timelock: lock.timelock - BigInt(HTLC.MIN_TIMELOCK_DELTA_MS),
+    revealBeforeHeight: lock.revealBeforeHeight - HTLC.MIN_REVEAL_HEIGHT_DELTA_BLOCKS,
+  });
+  const innerEnvelope = validateMultiRecipientCiphertext(
+    advance.innerEnvelope,
+    nextHop,
+    contextHash,
+  );
+  return { kind: 'forward', nextHop, forwardAmount, innerEnvelope };
+};
+
 export const validateHtlcOnionAdvanceTx = async (
   env: RuntimeState,
   state: EntityState,
   tx: HtlcOnionAdvanceTx,
 ): Promise<{ tx: HtlcOnionAdvanceTx }> => {
   exactKeys(tx, ['type', 'data'], 'HTLC_ONION_ADVANCE_TX_FIELDS_INVALID');
-  exactKeys(tx.data, [
-    'version', 'proposerSignerId', 'inboundEntityId', 'inboundLockId', 'encryptedLayerHash',
-    'hashlock', 'tokenId', 'amount', 'timelock', 'revealBeforeHeight', 'advance',
-  ], 'HTLC_ONION_ADVANCE_FIELDS_INVALID');
+  exactKeys(
+    tx.data,
+    [
+      'version',
+      'proposerSignerId',
+      'inboundEntityId',
+      'inboundLockId',
+      'encryptedLayerHash',
+      'hashlock',
+      'tokenId',
+      'amount',
+      'timelock',
+      'revealBeforeHeight',
+      'advance',
+    ],
+    'HTLC_ONION_ADVANCE_FIELDS_INVALID',
+  );
   if (tx.data.version !== 1) throw new Error('HTLC_ONION_ADVANCE_VERSION_INVALID');
-  const proposerSignerId = String(tx.data.proposerSignerId ?? '').trim().toLowerCase();
+  const proposerSignerId = String(tx.data.proposerSignerId ?? '')
+    .trim()
+    .toLowerCase();
   if (proposerSignerId !== requireDefaultProposer(state)) {
     throw new Error('HTLC_ONION_ADVANCE_PROPOSER_MISMATCH');
   }
   const inboundEntityId = normalizeEntityId(tx.data.inboundEntityId, 'HTLC_ONION_ADVANCE_INBOUND_ENTITY_INVALID');
   const inboundLockId = String(tx.data.inboundLockId ?? '');
   if (!inboundLockId) throw new Error('HTLC_ONION_ADVANCE_INBOUND_LOCK_ID_INVALID');
-  const live = tx.data.advance.kind === 'revealAccepted'
-    ? null
-    : accountAndLock(state, inboundEntityId, inboundLockId);
+  const live = tx.data.advance.kind === 'revealAccepted' ? null : accountAndLock(state, inboundEntityId, inboundLockId);
   const lock = live;
-  const encryptedLayerHash = normalizeBytes32(
-    tx.data.encryptedLayerHash,
-    'HTLC_ONION_ADVANCE_LAYER_HASH_INVALID',
-  );
+  const encryptedLayerHash = normalizeBytes32(tx.data.encryptedLayerHash, 'HTLC_ONION_ADVANCE_LAYER_HASH_INVALID');
   const hashlock = normalizeBytes32(tx.data.hashlock, 'HTLC_ONION_ADVANCE_HASHLOCK_INVALID');
   const amount = normalizePositiveBigInt(tx.data.amount, 'HTLC_ONION_ADVANCE_AMOUNT_INVALID');
   const timelock = normalizePositiveBigInt(tx.data.timelock, 'HTLC_ONION_ADVANCE_TIMELOCK_INVALID');
@@ -335,156 +518,58 @@ export const validateHtlcOnionAdvanceTx = async (
   }
   if (lock) {
     if (
-      hashlock !== lock.hashlock.toLowerCase()
-      || tx.data.tokenId !== lock.tokenId
-      || amount !== lock.amount
-      || timelock !== lock.timelock
-      || revealBeforeHeight !== lock.revealBeforeHeight
+      hashlock !== lock.hashlock.toLowerCase() ||
+      tx.data.tokenId !== lock.tokenId ||
+      amount !== lock.amount ||
+      timelock !== lock.timelock ||
+      revealBeforeHeight !== lock.revealBeforeHeight
     ) {
       throw new Error('HTLC_ONION_ADVANCE_LOCK_BINDING_MISMATCH');
     }
   }
 
-  // The proposer decrypts the committed AccountTx onion once and publishes a
-  // signed deterministic advance. Validators bind that advance to the exact
-  // ciphertext through the hash retained in bilateral Account state; keeping
-  // the full nested onion in every subsequent Account snapshot is unnecessary.
-  const validateCommittedLayerHash = (): void => {
-    if (!lock?.envelopeHash) throw new Error('HTLC_ONION_ADVANCE_LAYER_HASH_MISSING');
-    if (encryptedLayerHash !== lock.envelopeHash.toLowerCase()) {
-      throw new Error('HTLC_ONION_ADVANCE_LAYER_HASH_MISMATCH');
-    }
-  };
-
   let advance: HtlcOnionAdvanceTx['data']['advance'];
   if (tx.data.advance.kind === 'final') {
     if (!lock) throw new Error('HTLC_ONION_ADVANCE_INBOUND_LOCK_MISSING');
-    exactKeys(tx.data.advance, [
-      'kind', 'secretOffer',
-      ...(tx.data.advance.description !== undefined ? ['description'] : []),
-      ...(tx.data.advance.startedAtMs !== undefined ? ['startedAtMs'] : []),
-    ], 'HTLC_ONION_ADVANCE_FINAL_FIELDS_INVALID');
-    validateCommittedLayerHash();
-    const secretOffer = await validateHtlcSecretOfferForLock(
+    advance = await validateFinalAdvance(
       env,
       state,
       inboundEntityId,
-      state.entityId,
       lock,
-      tx.data.advance.secretOffer,
+      encryptedLayerHash,
+      tx.data.advance,
     );
-    const finalEnvelope: HtlcEnvelope = {
-      finalRecipient: true,
-      secretOffer,
-      ...(tx.data.advance.description !== undefined ? { description: tx.data.advance.description } : {}),
-      ...(tx.data.advance.startedAtMs !== undefined ? { startedAtMs: tx.data.advance.startedAtMs } : {}),
-    };
-    validateEnvelope(finalEnvelope);
-    advance = {
-      kind: 'final',
-      secretOffer,
-      ...(finalEnvelope.description !== undefined ? { description: finalEnvelope.description } : {}),
-      ...(finalEnvelope.startedAtMs !== undefined ? { startedAtMs: finalEnvelope.startedAtMs } : {}),
-    };
   } else if (tx.data.advance.kind === 'acceptOffer') {
     if (!lock) throw new Error('HTLC_ONION_ADVANCE_INBOUND_LOCK_MISSING');
-    exactKeys(
+    advance = await validateAcceptedOfferAdvance(
+      env,
+      state,
+      inboundEntityId,
+      inboundLockId,
+      encryptedLayerHash,
+      hashlock,
+      lock,
       tx.data.advance,
-      ['kind', 'offerHash'],
-      'HTLC_ONION_ADVANCE_ACCEPT_FIELDS_INVALID',
     );
-    const offer = lock.secretOffer;
-    if (!offer) throw new Error('HTLC_ONION_ADVANCE_COMMITTED_SECRET_OFFER_REQUIRED');
-    await validateHtlcSecretOfferForLock(env, state, state.entityId, inboundEntityId, lock, offer);
-    const offerHash = normalizeBytes32(tx.data.advance.offerHash, 'HTLC_ONION_ADVANCE_OFFER_HASH_INVALID');
-    if (offerHash !== hashEncryptedHtlcLayer(offer) || encryptedLayerHash !== offerHash) {
-      throw new Error('HTLC_ONION_ADVANCE_OFFER_HASH_MISMATCH');
-    }
-    const route = state.htlcRoutes.get(hashlock);
-    if (!route || route.outboundEntity?.toLowerCase() !== inboundEntityId || route.outboundLockId !== inboundLockId) {
-      throw new Error('HTLC_ONION_ADVANCE_OUTBOUND_ROUTE_MISMATCH');
-    }
-    advance = { kind: 'acceptOffer', offerHash };
   } else if (tx.data.advance.kind === 'revealAccepted') {
-    exactKeys(
+    advance = validateRevealAcceptedAdvance(
+      state,
+      tx,
+      inboundEntityId,
+      inboundLockId,
+      encryptedLayerHash,
+      hashlock,
+      amount,
       tx.data.advance,
-      ['kind', 'offerHash', 'accountFrameHash', 'accountFrameHeight', 'secret'],
-      'HTLC_ONION_ADVANCE_REVEAL_FIELDS_INVALID',
     );
-    const route = state.htlcRoutes.get(hashlock);
-    if (!route || route.outboundEntity?.toLowerCase() !== inboundEntityId || route.outboundLockId !== inboundLockId) {
-      throw new Error('HTLC_ONION_ADVANCE_REVEAL_ROUTE_MISMATCH');
-    }
-    // A forwarding route stores the gross inbound amount and the earned fee.
-    // The accepted downstream Account lock is bound to the net amount.
-    const expectedOutboundAmount = route.amount === undefined
-      ? undefined
-      : route.amount - (route.pendingFee ?? 0n);
-    if (
-      route.tokenId !== undefined && route.tokenId !== tx.data.tokenId
-      || expectedOutboundAmount !== undefined && expectedOutboundAmount !== amount
-    ) {
-      throw new Error(
-        `HTLC_ONION_ADVANCE_REVEAL_ROUTE_BINDING_MISMATCH:` +
-        `hashlock=${hashlock}:expectedToken=${String(route.tokenId ?? 'missing')}:` +
-        `receivedToken=${tx.data.tokenId}:expectedAmount=${String(expectedOutboundAmount ?? 'missing')}:` +
-        `receivedAmount=${amount}`,
-      );
-    }
-    const offerHash = normalizeBytes32(tx.data.advance.offerHash, 'HTLC_ONION_ADVANCE_OFFER_HASH_INVALID');
-    const accountFrameHash = normalizeBytes32(
-      tx.data.advance.accountFrameHash,
-      'HTLC_ONION_ADVANCE_ACCOUNT_FRAME_HASH_INVALID',
-    );
-    const accountFrameHeight = Number(tx.data.advance.accountFrameHeight);
-    if (!Number.isSafeInteger(accountFrameHeight) || accountFrameHeight < 1) {
-      throw new Error('HTLC_ONION_ADVANCE_ACCOUNT_FRAME_HEIGHT_INVALID');
-    }
-    if (
-      route.acceptedOfferHash !== offerHash
-      || route.acceptedAccountFrameHash !== accountFrameHash
-      || route.acceptedAccountFrameHeight !== accountFrameHeight
-    ) {
-      throw new Error('HTLC_ONION_ADVANCE_REVEAL_ACK_BINDING_MISMATCH');
-    }
-    const secret = String(tx.data.advance.secret ?? '').toLowerCase();
-    if (hashHtlcSecret(secret).toLowerCase() !== hashlock) {
-      throw new Error('HTLC_ONION_ADVANCE_REVEAL_PREIMAGE_MISMATCH');
-    }
-    if (encryptedLayerHash !== offerHash) throw new Error('HTLC_ONION_ADVANCE_OFFER_HASH_MISMATCH');
-    advance = { kind: 'revealAccepted', offerHash, accountFrameHash, accountFrameHeight, secret };
   } else if (tx.data.advance.kind === 'forward') {
     if (!lock) throw new Error('HTLC_ONION_ADVANCE_INBOUND_LOCK_MISSING');
-    exactKeys(
-      tx.data.advance,
-      ['kind', 'nextHop', 'forwardAmount', 'innerEnvelope'],
-      'HTLC_ONION_ADVANCE_FORWARD_FIELDS_INVALID',
-    );
-    validateCommittedLayerHash();
-    const nextHop = normalizeEntityId(tx.data.advance.nextHop, 'HTLC_ONION_ADVANCE_NEXT_HOP_INVALID');
-    const forwardAmount = normalizePositiveBigInt(
-      tx.data.advance.forwardAmount,
-      'HTLC_ONION_ADVANCE_FORWARD_AMOUNT_INVALID',
-    );
-    if (forwardAmount > lock.amount) throw new Error('HTLC_ONION_ADVANCE_FORWARD_AMOUNT_INVALID');
-    const forwardTimelock = lock.timelock - BigInt(HTLC.MIN_TIMELOCK_DELTA_MS);
-    const forwardRevealBeforeHeight = lock.revealBeforeHeight
-      - HTLC.MIN_REVEAL_HEIGHT_DELTA_BLOCKS;
-    const forwardContextHash = computeHtlcEnvelopeContextHash({
-      entityId: nextHop,
-      lockId: `${lock.lockId}-fwd`,
+    advance = validateForwardAdvance(
+      lock,
+      encryptedLayerHash,
       hashlock,
-      tokenId: lock.tokenId,
-      amount: forwardAmount,
-      timelock: forwardTimelock,
-      revealBeforeHeight: forwardRevealBeforeHeight,
-    });
-    const innerEnvelope = validateMultiRecipientCiphertext(
-      tx.data.advance.innerEnvelope,
-      nextHop,
-      forwardContextHash,
+      tx.data.advance,
     );
-    advance = { kind: 'forward', nextHop, forwardAmount, innerEnvelope };
   } else {
     throw new Error('HTLC_ONION_ADVANCE_KIND_INVALID');
   }
@@ -505,7 +590,7 @@ export const validateHtlcOnionAdvanceTx = async (
       advance,
     },
   };
-  if (encodeCanonicalEntityConsensusValue(tx) !== encodeCanonicalEntityConsensusValue(normalized)) {
+  if (encodeCanonicalConsensusValue(tx) !== encodeCanonicalConsensusValue(normalized)) {
     throw new Error('HTLC_ONION_ADVANCE_NON_CANONICAL');
   }
   return { tx: normalized };

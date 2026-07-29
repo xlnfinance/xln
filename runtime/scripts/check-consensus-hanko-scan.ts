@@ -197,7 +197,7 @@ assertOrder(entityFrame, entityFramePath, [
   'txs: txs.map(canonicalEntityTxForFrameHash),',
   'stateRoot: stateRoot.toLowerCase(),',
   'authorityRoot: authorityRoot.toLowerCase(),',
-  'const encoded = encodeCanonicalEntityConsensusValue(frameData);',
+  'const encoded = encodeCanonicalConsensusValue(frameData);',
   'const hash = ethers.keccak256(ethers.toUtf8Bytes(encoded));',
   'return hash;',
 ]);

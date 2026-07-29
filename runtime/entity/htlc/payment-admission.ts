@@ -1,3 +1,4 @@
+import { encodeCanonicalConsensusValue } from '../../protocol/canonical-consensus-value';
 import { NobleCryptoProvider } from '../../protocol/crypto/noble';
 import type { EntityInput, EntityState, EntityTx, RuntimeState } from '../../types';
 import type { Profile } from '../../entity/profile';
@@ -19,22 +20,12 @@ import {
   generateLockId,
   hashHtlcSecret,
 } from '../../protocol/htlc/utils';
-import {
-  computeHtlcEnvelopeContextHash,
-  createOnionEnvelopes,
-  type HtlcEnvelope,
-} from '../../protocol/htlc/envelope';
-import {
-  isMultiRecipientCiphertext,
-  validateMultiRecipientCiphertext,
-} from '../../protocol/htlc/multi-recipient';
+import { computeHtlcEnvelopeContextHash, createOnionEnvelopes, type HtlcEnvelope } from '../../protocol/htlc/envelope';
+import { isMultiRecipientCiphertext, validateMultiRecipientCiphertext } from '../../protocol/htlc/multi-recipient';
 import type { CertifiedValidatorEncryptionManifest } from '../../protocol/htlc/validator-encryption';
 import { verifyHankoForHash } from '../../hanko/signing';
-import { encodeCanonicalEntityConsensusValue } from '../consensus/state-root';
-import {
-  getCertifiedBoardNodeStore,
-  resolveObserverCertifiedBoardHash,
-} from '../../jurisdiction/board-registry';
+
+import { getCertifiedBoardNodeStore, resolveObserverCertifiedBoardHash } from '../../jurisdiction/board-registry';
 import { assertNoConsensusVisibleHtlcPaymentSecrets } from '../../protocol/htlc/consensus-secret-guard';
 import { getDeterministicHtlcTestSecret } from '../../protocol/htlc/test-secret-capability';
 
@@ -63,7 +54,9 @@ export type ValidatedPreparedHtlcPayment = Readonly<{
 }>;
 
 const normalizeEntityId = (value: unknown, code: string): string => {
-  const normalized = String(value || '').trim().toLowerCase();
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase();
   if (!/^0x[0-9a-f]{64}$/.test(normalized)) throw new Error(code);
   return normalized;
 };
@@ -92,16 +85,17 @@ const parseNonNegativeBigInt = (value: unknown, code: string): bigint => {
 
 const normalizeRoute = (route: unknown, senderId: string, targetId: string): string[] => {
   if (!Array.isArray(route) || route.length < 2) throw new Error('HTLC_PAYMENT_ROUTE_INVALID');
-  const normalized = route.map((entry) => normalizeEntityId(entry, 'HTLC_PAYMENT_ROUTE_ENTITY_INVALID'));
+  const normalized = route.map(entry => normalizeEntityId(entry, 'HTLC_PAYMENT_ROUTE_ENTITY_INVALID'));
   if (normalized[0] !== senderId) throw new Error('HTLC_PAYMENT_ROUTE_SENDER_MISMATCH');
   if (normalized[normalized.length - 1] !== targetId) throw new Error('HTLC_PAYMENT_ROUTE_TARGET_MISMATCH');
   if (normalized.length - 1 > HTLC.MAX_HOPS) throw new Error('HTLC_PAYMENT_ROUTE_TOO_LONG');
   const selfRoute = senderId === targetId;
   const intermediaries = normalized.slice(1, -1);
-  const validSelfRoute = selfRoute
-    && intermediaries.length >= 2
-    && new Set(intermediaries).size === intermediaries.length
-    && !intermediaries.includes(senderId);
+  const validSelfRoute =
+    selfRoute &&
+    intermediaries.length >= 2 &&
+    new Set(intermediaries).size === intermediaries.length &&
+    !intermediaries.includes(senderId);
   if ((!selfRoute && new Set(normalized).size !== normalized.length) || (selfRoute && !validSelfRoute)) {
     throw new Error('HTLC_PAYMENT_ROUTE_LOOP');
   }
@@ -131,7 +125,9 @@ const normalizePreparationHeight = (value: unknown, code: string): number => {
 };
 
 const normalizeSecret = (value: unknown): string => {
-  const secret = String(value ?? '').trim().toLowerCase();
+  const secret = String(value ?? '')
+    .trim()
+    .toLowerCase();
   if (!/^0x[0-9a-f]{64}$/.test(secret)) throw new Error('HTLC_PAYMENT_SECRET_INVALID');
   return secret;
 };
@@ -139,11 +135,13 @@ const normalizeSecret = (value: unknown): string => {
 const generateIngressSecret = (): string => {
   if (!globalThis.crypto?.getRandomValues) throw new Error('HTLC_PAYMENT_SECURE_RANDOM_UNAVAILABLE');
   const bytes = globalThis.crypto.getRandomValues(new Uint8Array(32));
-  return `0x${Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+  return `0x${Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')}`;
 };
 
 const normalizeHashlock = (value: unknown): string => {
-  const hashlock = String(value ?? '').trim().toLowerCase();
+  const hashlock = String(value ?? '')
+    .trim()
+    .toLowerCase();
   if (!/^0x[0-9a-f]{64}$/.test(hashlock)) throw new Error('HTLC_PAYMENT_HASHLOCK_INVALID');
   return hashlock;
 };
@@ -171,17 +169,14 @@ const PREPARED_PAYMENT_FIELDS = [
   'tokenId',
 ] as const;
 
-const assertExactPaymentFields = (
-  data: HtlcPaymentTx['data'],
-  mode: 'raw' | 'prepared',
-): void => {
+const assertExactPaymentFields = (data: HtlcPaymentTx['data'], mode: 'raw' | 'prepared'): void => {
   const actual = Object.keys(data).sort();
   if (mode === 'prepared') {
     if (Object.prototype.hasOwnProperty.call(data, 'secret')) {
       throw new Error('HTLC_PAYMENT_SECRET_CONSENSUS_FORBIDDEN');
     }
     const expected = [...PREPARED_PAYMENT_FIELDS].sort();
-    if (encodeCanonicalEntityConsensusValue(actual) !== encodeCanonicalEntityConsensusValue(expected)) {
+    if (encodeCanonicalConsensusValue(actual) !== encodeCanonicalConsensusValue(expected)) {
       throw new Error('HTLC_PAYMENT_PREPARED_FIELDS_INVALID');
     }
     return;
@@ -190,8 +185,8 @@ const assertExactPaymentFields = (
     throw new Error('HTLC_PAYMENT_EXPLICIT_SECRET_FORBIDDEN');
   }
   const allowed = new Set<string>([...RAW_PAYMENT_REQUIRED_FIELDS, ...RAW_PAYMENT_OPTIONAL_FIELDS]);
-  if (actual.some((field) => !allowed.has(field))) throw new Error('HTLC_PAYMENT_RAW_FIELDS_INVALID');
-  if (RAW_PAYMENT_REQUIRED_FIELDS.some((field) => !Object.prototype.hasOwnProperty.call(data, field))) {
+  if (actual.some(field => !allowed.has(field))) throw new Error('HTLC_PAYMENT_RAW_FIELDS_INVALID');
+  if (RAW_PAYMENT_REQUIRED_FIELDS.some(field => !Object.prototype.hasOwnProperty.call(data, field))) {
     throw new Error('HTLC_PAYMENT_RAW_FIELDS_INVALID');
   }
 };
@@ -204,7 +199,7 @@ const requireProfiles = (env: RuntimeState): Profile[] => {
 };
 
 const uniqueProfile = <T extends { entityId: string }>(profiles: T[], entityId: string): T => {
-  const matches = profiles.filter((profile) => profile.entityId.toLowerCase() === entityId);
+  const matches = profiles.filter(profile => profile.entityId.toLowerCase() === entityId);
   if (matches.length !== 1) {
     throw new Error(`HTLC_PAYMENT_PROFILE_MATCH_COUNT: entity=${entityId} matches=${matches.length}`);
   }
@@ -227,12 +222,8 @@ const resolveRoute = async (
   return normalizeRoute(selected, state.entityId.toLowerCase(), targetEntityId);
 };
 
-const feeForHop = (
-  profile: RoutingProfile,
-  nextHop: string,
-  tokenId: number,
-): { feePpm: number; baseFee: bigint } => {
-  const account = profile.accounts.find((candidate) => candidate.counterpartyId.toLowerCase() === nextHop);
+const feeForHop = (profile: RoutingProfile, nextHop: string, tokenId: number): { feePpm: number; baseFee: bigint } => {
+  const account = profile.accounts.find(candidate => candidate.counterpartyId.toLowerCase() === nextHop);
   const capacity = getTokenCapacity(account?.tokenCapacities, tokenId);
   return {
     feePpm: calculateDirectionalFeePPM(
@@ -262,11 +253,10 @@ const quoteRoute = (
   return { senderLockAmount: inbound, hopForwardAmounts: forwards };
 };
 
-const certifiedDefaultProposerSignerId = (
-  board: Profile['metadata']['board'],
-  entityId: string,
-): string => {
-  const signerId = String(board.validators[0]?.signerId ?? '').trim().toLowerCase();
+const certifiedDefaultProposerSignerId = (board: Profile['metadata']['board'], entityId: string): string => {
+  const signerId = String(board.validators[0]?.signerId ?? '')
+    .trim()
+    .toLowerCase();
   if (!signerId) throw new Error(`HTLC_PAYMENT_DEFAULT_PROPOSER_REQUIRED: entity=${entityId}`);
   return signerId;
 };
@@ -285,10 +275,15 @@ const certifyRouteProfiles = async (
     const profile = uniqueProfile(profiles, entityId);
     const verification = await verifyProfileSignature(profile, env);
     if (!verification.valid) {
-      throw new Error(`HTLC_PAYMENT_PROFILE_HANKO_INVALID: entity=${entityId} reason=${verification.reason || 'unknown'}`);
+      throw new Error(
+        `HTLC_PAYMENT_PROFILE_HANKO_INVALID: entity=${entityId} reason=${verification.reason || 'unknown'}`,
+      );
     }
     const canonicalProfile = canonicalizeProfile(profile);
-    const manifest = getValidatorEncryptionManifestFromBoard(canonicalProfile.entityId, canonicalProfile.metadata.board);
+    const manifest = getValidatorEncryptionManifestFromBoard(
+      canonicalProfile.entityId,
+      canonicalProfile.metadata.board,
+    );
     const descriptor = profileToEntityProfileDescriptor(canonicalProfile);
     const components = computeEntityProfileCertificationComponents(descriptor);
     const hanko = canonicalProfile.metadata.profileHanko;
@@ -334,11 +329,12 @@ const paymentDeadlines = (
 const forwardAmountEntries = (
   route: string[],
   amounts: ReadonlyMap<string, bigint>,
-): Array<{ entityId: string; amount: string }> => route.slice(1, -1).map((entityId) => {
-  const amount = amounts.get(entityId);
-  if (amount === undefined) throw new Error(`HTLC_PAYMENT_FORWARD_AMOUNT_MISSING:${entityId}`);
-  return { entityId, amount: amount.toString() };
-});
+): Array<{ entityId: string; amount: string }> =>
+  route.slice(1, -1).map(entityId => {
+    const amount = amounts.get(entityId);
+    if (amount === undefined) throw new Error(`HTLC_PAYMENT_FORWARD_AMOUNT_MISSING:${entityId}`);
+    return { entityId, amount: amount.toString() };
+  });
 
 const validateCanonicalProfileDescriptor = (raw: unknown): EntityProfileDescriptor => {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
@@ -350,23 +346,22 @@ const validateCanonicalProfileDescriptor = (raw: unknown): EntityProfileDescript
   }
   let canonical: EntityProfileDescriptor;
   try {
-    canonical = profileToEntityProfileDescriptor(canonicalizeProfile({
-      ...profileFields,
-      lastUpdated: 1,
-      runtimeId: 'descriptor-validation',
-      runtimeEncPubKey: `0x${'11'.repeat(32)}`,
-      wsUrl: null,
-      relays: [],
-    } as unknown as Profile));
+    canonical = profileToEntityProfileDescriptor(
+      canonicalizeProfile({
+        ...profileFields,
+        lastUpdated: 1,
+        runtimeId: 'descriptor-validation',
+        runtimeEncPubKey: `0x${'11'.repeat(32)}`,
+        wsUrl: null,
+        relays: [],
+      } as unknown as Profile),
+    );
   } catch (error) {
     throw new Error(
       `HTLC_PAYMENT_PREPARED_ROUTE_PROFILE_DESCRIPTOR_INVALID:${error instanceof Error ? error.message : String(error)}`,
     );
   }
-  if (
-    encodeCanonicalEntityConsensusValue(raw)
-    !== encodeCanonicalEntityConsensusValue(canonical)
-  ) {
+  if (encodeCanonicalConsensusValue(raw) !== encodeCanonicalConsensusValue(canonical)) {
     throw new Error('HTLC_PAYMENT_PREPARED_ROUTE_PROFILE_DESCRIPTOR_NON_CANONICAL');
   }
   return canonical;
@@ -392,14 +387,15 @@ const validatePreparedRouteProfiles = async (
     const entry = routeProfiles[index] as Partial<PreparedRouteProfile>;
     const descriptor = validateCanonicalProfileDescriptor(entry?.descriptor);
     const expectedEntityId = route[index + 1]!;
-    if (normalizeEntityId(descriptor.entityId, 'HTLC_PAYMENT_PREPARED_ROUTE_PROFILE_ENTITY_INVALID') !== expectedEntityId) {
+    if (
+      normalizeEntityId(descriptor.entityId, 'HTLC_PAYMENT_PREPARED_ROUTE_PROFILE_ENTITY_INVALID') !== expectedEntityId
+    ) {
       throw new Error('HTLC_PAYMENT_PREPARED_ROUTE_PROFILE_ORDER_MISMATCH');
     }
-    const profileHanko = String(entry.profileHanko || '').trim().toLowerCase();
-    if (
-      encodeCanonicalEntityConsensusValue(entry)
-      !== encodeCanonicalEntityConsensusValue({ descriptor, profileHanko })
-    ) {
+    const profileHanko = String(entry.profileHanko || '')
+      .trim()
+      .toLowerCase();
+    if (encodeCanonicalConsensusValue(entry) !== encodeCanonicalConsensusValue({ descriptor, profileHanko })) {
       throw new Error('HTLC_PAYMENT_PREPARED_ROUTE_PROFILE_NON_CANONICAL');
     }
     const components = computeEntityProfileCertificationComponents(descriptor);
@@ -453,8 +449,8 @@ const validatePreparedForwardAmounts = (
     return { entityId, amount: amount.toString() };
   });
   if (
-    encodeCanonicalEntityConsensusValue(normalized) !== encodeCanonicalEntityConsensusValue(canonical)
-    || encodeCanonicalEntityConsensusValue(raw) !== encodeCanonicalEntityConsensusValue(canonical)
+    encodeCanonicalConsensusValue(normalized) !== encodeCanonicalConsensusValue(canonical) ||
+    encodeCanonicalConsensusValue(raw) !== encodeCanonicalConsensusValue(canonical)
   ) {
     throw new Error('HTLC_PAYMENT_PREPARED_FORWARD_AMOUNT_MISMATCH');
   }
@@ -480,83 +476,91 @@ type EnvelopeBuildInput = Readonly<{
   hopForwardAmounts: Map<string, bigint>;
 }>;
 
-const canonicalEnvelopeSeed = (input: EnvelopeBuildInput): string => encodeCanonicalEntityConsensusValue({
-  domain: 'xln:htlc-onion-deterministic-replay:v1',
-  route: input.route,
-  secret: input.secret,
-  hashlock: input.hashlock,
-  tokenId: input.tokenId,
-  recipientAmount: input.recipientAmount,
-  senderLockAmount: input.senderLockAmount,
-  totalFee: input.totalFee,
-  description: input.description,
-  deliveryMode: input.deliveryMode,
-  startedAtMs: input.startedAtMs,
-  lockId: input.lockId,
-  timelock: input.timelock,
-  revealBeforeHeight: input.revealBeforeHeight,
-  hopForwardAmounts: forwardAmountEntries(input.route, input.hopForwardAmounts),
-  routeProfiles: input.routeProfiles.map(({ descriptor, profileHanko }) => {
-    const components = computeEntityProfileCertificationComponents(descriptor);
-    return {
-      entityId: descriptor.entityId,
-      manifestHash: components.manifestHash,
-      profileHash: components.profileHash,
-      routingStateHash: components.routingStateHash,
-      profileHanko,
-    };
-  }),
-});
-
-const buildPreparedEnvelope = (input: EnvelopeBuildInput): Promise<HtlcEnvelope> => createOnionEnvelopes(
-  input.route,
-  input.secret,
-  input.manifests,
-  new NobleCryptoProvider({ deterministicSeed: canonicalEnvelopeSeed(input) }),
-  input.hopForwardAmounts,
-  input.description || undefined,
-  input.startedAtMs,
-  {
-    rootLockId: input.lockId,
+const canonicalEnvelopeSeed = (input: EnvelopeBuildInput): string =>
+  encodeCanonicalConsensusValue({
+    domain: 'xln:htlc-onion-deterministic-replay:v1',
+    route: input.route,
+    secret: input.secret,
     hashlock: input.hashlock,
     tokenId: input.tokenId,
+    recipientAmount: input.recipientAmount,
     senderLockAmount: input.senderLockAmount,
+    totalFee: input.totalFee,
+    description: input.description,
+    deliveryMode: input.deliveryMode,
+    startedAtMs: input.startedAtMs,
+    lockId: input.lockId,
     timelock: input.timelock,
     revealBeforeHeight: input.revealBeforeHeight,
-  },
-);
+    hopForwardAmounts: forwardAmountEntries(input.route, input.hopForwardAmounts),
+    routeProfiles: input.routeProfiles.map(({ descriptor, profileHanko }) => {
+      const components = computeEntityProfileCertificationComponents(descriptor);
+      return {
+        entityId: descriptor.entityId,
+        manifestHash: components.manifestHash,
+        profileHash: components.profileHash,
+        routingStateHash: components.routingStateHash,
+        profileHanko,
+      };
+    }),
+  });
 
-const hasAnyPreparedField = (tx: HtlcPaymentTx): boolean => [
-  tx.data.preparedEnvelope,
-  tx.data.preparedSenderLockAmount,
-  tx.data.preparedTotalFee,
-  tx.data.preparedLockId,
-  tx.data.preparedTimelock,
-  tx.data.preparedRevealBeforeHeight,
-  tx.data.preparedAtEntityHeight,
-  tx.data.preparedAtJHeight,
-  tx.data.preparedRouteProfiles,
-  tx.data.preparedHopForwardAmounts,
-].some((value) => value !== undefined);
+const buildPreparedEnvelope = (input: EnvelopeBuildInput): Promise<HtlcEnvelope> =>
+  createOnionEnvelopes(
+    input.route,
+    input.secret,
+    input.manifests,
+    new NobleCryptoProvider({ deterministicSeed: canonicalEnvelopeSeed(input) }),
+    input.hopForwardAmounts,
+    input.description || undefined,
+    input.startedAtMs,
+    {
+      rootLockId: input.lockId,
+      hashlock: input.hashlock,
+      tokenId: input.tokenId,
+      senderLockAmount: input.senderLockAmount,
+      timelock: input.timelock,
+      revealBeforeHeight: input.revealBeforeHeight,
+    },
+  );
 
-const hasEveryPreparedField = (tx: HtlcPaymentTx): boolean => [
-  tx.data.preparedEnvelope,
-  tx.data.preparedSenderLockAmount,
-  tx.data.preparedTotalFee,
-  tx.data.preparedLockId,
-  tx.data.preparedTimelock,
-  tx.data.preparedRevealBeforeHeight,
-  tx.data.preparedAtEntityHeight,
-  tx.data.preparedAtJHeight,
-  tx.data.preparedRouteProfiles,
-  tx.data.preparedHopForwardAmounts,
-].every((value) => value !== undefined);
+const hasAnyPreparedField = (tx: HtlcPaymentTx): boolean =>
+  [
+    tx.data.preparedEnvelope,
+    tx.data.preparedSenderLockAmount,
+    tx.data.preparedTotalFee,
+    tx.data.preparedLockId,
+    tx.data.preparedTimelock,
+    tx.data.preparedRevealBeforeHeight,
+    tx.data.preparedAtEntityHeight,
+    tx.data.preparedAtJHeight,
+    tx.data.preparedRouteProfiles,
+    tx.data.preparedHopForwardAmounts,
+  ].some(value => value !== undefined);
+
+const hasEveryPreparedField = (tx: HtlcPaymentTx): boolean =>
+  [
+    tx.data.preparedEnvelope,
+    tx.data.preparedSenderLockAmount,
+    tx.data.preparedTotalFee,
+    tx.data.preparedLockId,
+    tx.data.preparedTimelock,
+    tx.data.preparedRevealBeforeHeight,
+    tx.data.preparedAtEntityHeight,
+    tx.data.preparedAtJHeight,
+    tx.data.preparedRouteProfiles,
+    tx.data.preparedHopForwardAmounts,
+  ].every(value => value !== undefined);
 
 const findIngressEntityState = (env: RuntimeState, input: EntityInput): EntityState => {
-  const entityId = String(input.entityId || '').trim().toLowerCase();
-  const signerId = String(input.signerId || '').trim().toLowerCase();
-  const exact = [...env.eReplicas.values()].filter((replica) =>
-    replica.entityId.toLowerCase() === entityId && replica.signerId.toLowerCase() === signerId
+  const entityId = String(input.entityId || '')
+    .trim()
+    .toLowerCase();
+  const signerId = String(input.signerId || '')
+    .trim()
+    .toLowerCase();
+  const exact = [...env.eReplicas.values()].filter(
+    replica => replica.entityId.toLowerCase() === entityId && replica.signerId.toLowerCase() === signerId,
   );
   if (exact.length !== 1) {
     throw new Error(
@@ -586,9 +590,10 @@ export const prepareHtlcPaymentEntityTx = async (
   if (tx.data.hashlock !== undefined && normalizeHashlock(tx.data.hashlock) !== hashlock) {
     throw new Error('HTLC_PAYMENT_SECRET_HASH_MISMATCH');
   }
-  const startedAtMs = tx.data.startedAtMs === undefined
-    ? normalizePreparedTimestamp(state.timestamp, state.timestamp)
-    : normalizePreparedTimestamp(tx.data.startedAtMs, state.timestamp);
+  const startedAtMs =
+    tx.data.startedAtMs === undefined
+      ? normalizePreparedTimestamp(state.timestamp, state.timestamp)
+      : normalizePreparedTimestamp(tx.data.startedAtMs, state.timestamp);
   if (startedAtMs !== state.timestamp) throw new Error('HTLC_PAYMENT_STARTED_AT_NOT_CURRENT');
   const preparedAtEntityHeight = normalizePreparationHeight(
     state.height,
@@ -660,24 +665,18 @@ const requirePreparedEnvelope = async (
     throw new Error('HTLC_PAYMENT_PREPARED_ENVELOPE_REQUIRED');
   }
   const keys = Object.keys(envelope).sort();
-  if (encodeCanonicalEntityConsensusValue(keys) !== encodeCanonicalEntityConsensusValue(['innerEnvelope', 'nextHop'])) {
+  if (encodeCanonicalConsensusValue(keys) !== encodeCanonicalConsensusValue(['innerEnvelope', 'nextHop'])) {
     throw new Error('HTLC_PAYMENT_PREPARED_ENVELOPE_SHAPE_INVALID');
   }
   const typed = envelope as HtlcEnvelope;
   if (String(typed.nextHop || '').toLowerCase() !== nextHop || !isMultiRecipientCiphertext(typed.innerEnvelope)) {
     throw new Error('HTLC_PAYMENT_PREPARED_ENVELOPE_NEXT_HOP_MISMATCH');
   }
-  validateMultiRecipientCiphertext(
-    typed.innerEnvelope,
-    nextHop,
-    contextHash,
-    expected.recipientSignerId,
-  );
+  validateMultiRecipientCiphertext(typed.innerEnvelope, nextHop, contextHash, expected.recipientSignerId);
   if (
-    encodeCanonicalEntityConsensusValue(typed.innerEnvelope.manifest)
-      !== encodeCanonicalEntityConsensusValue(expected.manifest)
-    || encodeCanonicalEntityConsensusValue(typed.innerEnvelope.profileCertification)
-      !== encodeCanonicalEntityConsensusValue(expected.profileCertification)
+    encodeCanonicalConsensusValue(typed.innerEnvelope.manifest) !== encodeCanonicalConsensusValue(expected.manifest) ||
+    encodeCanonicalConsensusValue(typed.innerEnvelope.profileCertification) !==
+      encodeCanonicalConsensusValue(expected.profileCertification)
   ) {
     throw new Error('HTLC_PAYMENT_PREPARED_ENVELOPE_CERTIFICATION_MISMATCH');
   }
@@ -696,10 +695,7 @@ type PreparedPaymentBasics = Readonly<{
   preparedAtJHeight: number;
 }>;
 
-const validatePreparedPaymentBasics = (
-  state: EntityState,
-  tx: HtlcPaymentTx,
-): PreparedPaymentBasics => {
+const validatePreparedPaymentBasics = (state: EntityState, tx: HtlcPaymentTx): PreparedPaymentBasics => {
   assertExactPaymentFields(tx.data, 'prepared');
   const targetEntityId = normalizeEntityId(tx.data.targetEntityId, 'HTLC_PAYMENT_TARGET_INVALID');
   const route = normalizeRoute(tx.data.route, state.entityId.toLowerCase(), targetEntityId);
@@ -756,13 +752,16 @@ export const validatePreparedHtlcPayment = async (
   } = basics;
   const certified = await validatePreparedRouteProfiles(env, state, route, tx.data.preparedRouteProfiles);
   const quote = quoteRoute(certified.routingProfiles, route, tx.data.tokenId, recipientAmount);
-  const senderLockAmount = parsePositiveBigInt(tx.data.preparedSenderLockAmount, 'HTLC_PAYMENT_PREPARED_AMOUNT_INVALID');
+  const senderLockAmount = parsePositiveBigInt(
+    tx.data.preparedSenderLockAmount,
+    'HTLC_PAYMENT_PREPARED_AMOUNT_INVALID',
+  );
   const totalFee = parseNonNegativeBigInt(tx.data.preparedTotalFee, 'HTLC_PAYMENT_PREPARED_FEE_INVALID');
   if (
-    typeof tx.data.preparedSenderLockAmount !== 'string'
-    || typeof tx.data.preparedTotalFee !== 'string'
-    || senderLockAmount !== quote.senderLockAmount
-    || totalFee !== quote.senderLockAmount - recipientAmount
+    typeof tx.data.preparedSenderLockAmount !== 'string' ||
+    typeof tx.data.preparedTotalFee !== 'string' ||
+    senderLockAmount !== quote.senderLockAmount ||
+    totalFee !== quote.senderLockAmount - recipientAmount
   ) {
     throw new Error('HTLC_PAYMENT_PREPARED_QUOTE_MISMATCH');
   }
@@ -775,9 +774,9 @@ export const validatePreparedHtlcPayment = async (
   const timelock = parsePositiveBigInt(tx.data.preparedTimelock, 'HTLC_PAYMENT_PREPARED_TIMELOCK_INVALID');
   const revealBeforeHeight = Number(tx.data.preparedRevealBeforeHeight);
   if (
-    typeof tx.data.preparedTimelock !== 'string'
-    || !Number.isSafeInteger(revealBeforeHeight)
-    || revealBeforeHeight <= 0
+    typeof tx.data.preparedTimelock !== 'string' ||
+    !Number.isSafeInteger(revealBeforeHeight) ||
+    revealBeforeHeight <= 0
   ) {
     throw new Error('HTLC_PAYMENT_PREPARED_REVEAL_HEIGHT_INVALID');
   }
@@ -791,13 +790,12 @@ export const validatePreparedHtlcPayment = async (
   // recipient still has a future reveal block; every preceding hop then keeps
   // the fixed multi-block upstream enforcement reserve. Never extend/rewrite
   // ciphertext after admission.
-  const finalRecipientRevealHeight = revealBeforeHeight
-    - Math.max(0, route.length - 2) * HTLC.MIN_REVEAL_HEIGHT_DELTA_BLOCKS;
+  const finalRecipientRevealHeight =
+    revealBeforeHeight - Math.max(0, route.length - 2) * HTLC.MIN_REVEAL_HEIGHT_DELTA_BLOCKS;
   if (finalRecipientRevealHeight <= (state.lastFinalizedJHeight || 0)) {
     throw new Error('HTLC_PAYMENT_PREPARED_DEADLINE_UNSAFE');
   }
-  const finalRecipientTimelock = timelock
-    - BigInt(Math.max(0, route.length - 2) * HTLC.MIN_TIMELOCK_DELTA_MS);
+  const finalRecipientTimelock = timelock - BigInt(Math.max(0, route.length - 2) * HTLC.MIN_TIMELOCK_DELTA_MS);
   if (finalRecipientTimelock <= BigInt(state.timestamp) + BigInt(HTLC.MIN_FORWARD_TIMELOCK_MS)) {
     throw new Error('HTLC_PAYMENT_PREPARED_TIMELOCK_UNSAFE');
   }
@@ -837,19 +835,24 @@ export const validatePreparedHtlcPayment = async (
 export const prepareHtlcPaymentEntityInputs = async (
   env: RuntimeState,
   inputs: readonly EntityInput[],
-): Promise<EntityInput[]> => Promise.all(inputs.map(async (input) => {
-  const paymentTxs = input.entityTxs?.filter((tx): tx is HtlcPaymentTx => tx.type === 'htlcPayment') ?? [];
-  const state = paymentTxs.length > 0 ? findIngressEntityState(env, input) : null;
-  const entityTxs = await Promise.all((input.entityTxs ?? []).map(async (tx) => {
-    if (tx.type !== 'htlcPayment') return tx;
-    if (!state) throw new Error('HTLC_PAYMENT_INGRESS_STATE_MISSING');
-    const anyPrepared = hasAnyPreparedField(tx);
-    if (anyPrepared && !hasEveryPreparedField(tx)) throw new Error('HTLC_PAYMENT_PREPARED_PAYLOAD_PARTIAL');
-    const prepared = anyPrepared ? tx : await prepareHtlcPaymentEntityTx(env, state, tx);
-    await validatePreparedHtlcPayment(env, state, prepared);
-    return prepared;
-  }));
-  assertNoConsensusVisibleHtlcPaymentSecrets(entityTxs);
-  if (input.entityTxs === undefined) return input;
-  return { ...input, entityTxs };
-}));
+): Promise<EntityInput[]> =>
+  Promise.all(
+    inputs.map(async input => {
+      const paymentTxs = input.entityTxs?.filter((tx): tx is HtlcPaymentTx => tx.type === 'htlcPayment') ?? [];
+      const state = paymentTxs.length > 0 ? findIngressEntityState(env, input) : null;
+      const entityTxs = await Promise.all(
+        (input.entityTxs ?? []).map(async tx => {
+          if (tx.type !== 'htlcPayment') return tx;
+          if (!state) throw new Error('HTLC_PAYMENT_INGRESS_STATE_MISSING');
+          const anyPrepared = hasAnyPreparedField(tx);
+          if (anyPrepared && !hasEveryPreparedField(tx)) throw new Error('HTLC_PAYMENT_PREPARED_PAYLOAD_PARTIAL');
+          const prepared = anyPrepared ? tx : await prepareHtlcPaymentEntityTx(env, state, tx);
+          await validatePreparedHtlcPayment(env, state, prepared);
+          return prepared;
+        }),
+      );
+      assertNoConsensusVisibleHtlcPaymentSecrets(entityTxs);
+      if (input.entityTxs === undefined) return input;
+      return { ...input, entityTxs };
+    }),
+  );

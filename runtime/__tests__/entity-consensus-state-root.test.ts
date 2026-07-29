@@ -1,3 +1,4 @@
+import { encodeCanonicalConsensusValue } from '../protocol/canonical-consensus-value';
 import { expect, test } from 'bun:test';
 
 import {
@@ -5,7 +6,6 @@ import {
   computeCanonicalEntityConsensusStateHash,
   computeCanonicalEntityConsensusStateHashCold,
   computeEntityFrameAuthorityRoot,
-  encodeCanonicalEntityConsensusValue,
   ENTITY_CONSENSUS_STATE_FIELDS,
   ENTITY_STATE_ROOT_EXCLUDED_FIELDS,
   invalidateEntityAccountCommitment,
@@ -44,82 +44,157 @@ const baseState = (): EntityState => ({
 type StateMutator = (state: EntityState) => void;
 
 const mutators = {
-  entityId: state => { state.entityId = `0x${'33'.repeat(32)}`; },
-  height: state => { state.height = 2; },
-  timestamp: state => { state.timestamp = 101; },
-  nonces: state => { state.nonces.set('alice', 1); },
-  entityCommandNonces: state => { state.entityCommandNonces = {
-    version: 1,
-    boardHash: `0x${'12'.repeat(32)}`,
-    boardEpoch: 0,
-    bySigner: new Map([['1', { nonce: 1n, commandHash: `0x${'13'.repeat(32)}` }]]),
-  }; },
-  proposals: state => { state.proposals.set('proposal', { provider: 'nested-consensus-value' } as never); },
-  config: state => { state.config.threshold = 2n; },
-  prevFrameHash: state => { state.prevFrameHash = `0x${'44'.repeat(32)}`; },
-  leaderState: state => { state.leaderState = { activeValidatorId: '2', view: 1, changedAtHeight: 1 }; },
-  reserves: state => { state.reserves.set(1, 10n); },
+  entityId: state => {
+    state.entityId = `0x${'33'.repeat(32)}`;
+  },
+  height: state => {
+    state.height = 2;
+  },
+  timestamp: state => {
+    state.timestamp = 101;
+  },
+  nonces: state => {
+    state.nonces.set('alice', 1);
+  },
+  entityCommandNonces: state => {
+    state.entityCommandNonces = {
+      version: 1,
+      boardHash: `0x${'12'.repeat(32)}`,
+      boardEpoch: 0,
+      bySigner: new Map([['1', { nonce: 1n, commandHash: `0x${'13'.repeat(32)}` }]]),
+    };
+  },
+  proposals: state => {
+    state.proposals.set('proposal', { provider: 'nested-consensus-value' } as never);
+  },
+  config: state => {
+    state.config.threshold = 2n;
+  },
+  prevFrameHash: state => {
+    state.prevFrameHash = `0x${'44'.repeat(32)}`;
+  },
+  leaderState: state => {
+    state.leaderState = { activeValidatorId: '2', view: 1, changedAtHeight: 1 };
+  },
+  reserves: state => {
+    state.reserves.set(1, 10n);
+  },
   accounts: state => {
     state.accounts.set(counterpartyId, { status: 'active', mempool: [], pendingWithdrawals: new Map() } as never);
   },
-  externalWallet: state => { state.externalWallet = { balances: new Map(), allowances: new Map() }; },
+  externalWallet: state => {
+    state.externalWallet = { balances: new Map(), allowances: new Map() };
+  },
   deferredAccountProposals: state => {
     state.deferredAccountProposals = new Map([[counterpartyId, `0x${'34'.repeat(32)}`]]);
   },
-  lastFinalizedJHeight: state => { state.lastFinalizedJHeight = 9; },
-  jBlockChain: state => { state.jBlockChain.push({ jHeight: 9, jBlockHash: `0x${'55'.repeat(32)}`, eventsHash: `0x${'66'.repeat(32)}` }); },
-  jHistoryFinality: state => { state.jHistoryFinality = { scannedThroughHeight: 9, tipBlockHash: `0x${'55'.repeat(32)}`, eventHistoryRoot: `0x${'66'.repeat(32)}` }; },
-  certifiedBoardState: state => { state.certifiedBoardState!.boardRegistryRoot = `0x${'77'.repeat(32)}`; },
-  crontabState: state => { state.crontabState = { marker: 'cron' } as never; },
-  jBatchState: state => { state.jBatchState = { marker: 'jbatch' } as never; },
-  entityProviderActionState: state => { state.entityProviderActionState = {
-    version: 1,
-    confirmedNonce: 1n,
-    generation: 1,
-  }; },
-  profileEncryptionManifest: state => { state.profileEncryptionManifest = {
-    entityId,
-    threshold: 1,
-    attestations: [{
-      version: 'xln:validator-encryption-key:v1',
+  lastFinalizedJHeight: state => {
+    state.lastFinalizedJHeight = 9;
+  },
+  jBlockChain: state => {
+    state.jBlockChain.push({ jHeight: 9, jBlockHash: `0x${'55'.repeat(32)}`, eventsHash: `0x${'66'.repeat(32)}` });
+  },
+  jHistoryFinality: state => {
+    state.jHistoryFinality = {
+      scannedThroughHeight: 9,
+      tipBlockHash: `0x${'55'.repeat(32)}`,
+      eventHistoryRoot: `0x${'66'.repeat(32)}`,
+    };
+  },
+  certifiedBoardState: state => {
+    state.certifiedBoardState!.boardRegistryRoot = `0x${'77'.repeat(32)}`;
+  },
+  crontabState: state => {
+    state.crontabState = { marker: 'cron' } as never;
+  },
+  jBatchState: state => {
+    state.jBatchState = { marker: 'jbatch' } as never;
+  },
+  entityProviderActionState: state => {
+    state.entityProviderActionState = {
+      version: 1,
+      confirmedNonce: 1n,
+      generation: 1,
+    };
+  },
+  profileEncryptionManifest: state => {
+    state.profileEncryptionManifest = {
       entityId,
-      signer: '0x0000000000000000000000000000000000000001',
-      signerId: '1',
-      weight: 1,
-      publicKey: `0x${'77'.repeat(32)}`,
-      encryptionPublicKey: `0x${'99'.repeat(32)}`,
-      signature: `0x${'11'.repeat(65)}`,
-    }],
-    hash: `0x${'88'.repeat(32)}`,
-  }; },
-  profile: state => { state.profile.bio = 'consensus-profile'; },
-  htlcRoutes: state => { state.htlcRoutes.set('route', { marker: 'route' } as never); },
-  htlcFeesEarned: state => { state.htlcFeesEarned = 1n; },
-  htlcNotes: state => { state.htlcNotes = new Map([['note' as never, 'validator-local-note']]); },
-  consumptionAccumulator: state => { state.consumptionAccumulator = {
-    version: 1,
-    root: `0x${'ab'.repeat(32)}`,
-    count: 1n,
-  }; },
-  certifiedOutputSequences: state => { state.certifiedOutputSequences = new Map([[
-    counterpartyId,
-    { lastSequence: 1n, lastSemanticHash: `0x${'bc'.repeat(32)}` },
-  ]]); },
-  outDebtsByToken: state => { state.outDebtsByToken = new Map([[1, new Map([[counterpartyId, { marker: 'out-debt' } as never]])]]); },
-  inDebtsByToken: state => { state.inDebtsByToken = new Map([[1, new Map([[counterpartyId, { marker: 'in-debt' } as never]])]]); },
-  orderbookExt: state => { state.orderbookExt = {
-    books: new Map(),
-    orderPairs: new Map(),
-    referrals: new Map(),
-    hubProfile: { marker: 'orderbook' },
-  } as never; },
-  lockBook: state => { state.lockBook.set('lock', { marker: 'lock' } as never); },
-  swapTradingPairs: state => { state.swapTradingPairs = [{ baseTokenId: 1, quoteTokenId: 2, pairId: '1:2' }]; },
-  crossJurisdictionSwaps: state => { state.crossJurisdictionSwaps = new Map([['swap', { marker: 'cross-swap' } as never]]); },
-  pendingCrossJurisdictionFillAcks: state => { state.pendingCrossJurisdictionFillAcks = new Map([['ack', { marker: 'cross-ack' } as never]]); },
-  crossJurisdictionBookAdmissions: state => { state.crossJurisdictionBookAdmissions = new Map([['admission', { marker: 'cross-admission' } as never]]); },
-  hubRebalanceConfig: state => { state.hubRebalanceConfig = { marker: 'rebalance' } as never; },
-  lending: state => { state.lending = { marker: 'lending' } as never; },
+      threshold: 1,
+      attestations: [
+        {
+          version: 'xln:validator-encryption-key:v1',
+          entityId,
+          signer: '0x0000000000000000000000000000000000000001',
+          signerId: '1',
+          weight: 1,
+          publicKey: `0x${'77'.repeat(32)}`,
+          encryptionPublicKey: `0x${'99'.repeat(32)}`,
+          signature: `0x${'11'.repeat(65)}`,
+        },
+      ],
+      hash: `0x${'88'.repeat(32)}`,
+    };
+  },
+  profile: state => {
+    state.profile.bio = 'consensus-profile';
+  },
+  htlcRoutes: state => {
+    state.htlcRoutes.set('route', { marker: 'route' } as never);
+  },
+  htlcFeesEarned: state => {
+    state.htlcFeesEarned = 1n;
+  },
+  htlcNotes: state => {
+    state.htlcNotes = new Map([['note' as never, 'validator-local-note']]);
+  },
+  consumptionAccumulator: state => {
+    state.consumptionAccumulator = {
+      version: 1,
+      root: `0x${'ab'.repeat(32)}`,
+      count: 1n,
+    };
+  },
+  certifiedOutputSequences: state => {
+    state.certifiedOutputSequences = new Map([
+      [counterpartyId, { lastSequence: 1n, lastSemanticHash: `0x${'bc'.repeat(32)}` }],
+    ]);
+  },
+  outDebtsByToken: state => {
+    state.outDebtsByToken = new Map([[1, new Map([[counterpartyId, { marker: 'out-debt' } as never]])]]);
+  },
+  inDebtsByToken: state => {
+    state.inDebtsByToken = new Map([[1, new Map([[counterpartyId, { marker: 'in-debt' } as never]])]]);
+  },
+  orderbookExt: state => {
+    state.orderbookExt = {
+      books: new Map(),
+      orderPairs: new Map(),
+      referrals: new Map(),
+      hubProfile: { marker: 'orderbook' },
+    } as never;
+  },
+  lockBook: state => {
+    state.lockBook.set('lock', { marker: 'lock' } as never);
+  },
+  swapTradingPairs: state => {
+    state.swapTradingPairs = [{ baseTokenId: 1, quoteTokenId: 2, pairId: '1:2' }];
+  },
+  crossJurisdictionSwaps: state => {
+    state.crossJurisdictionSwaps = new Map([['swap', { marker: 'cross-swap' } as never]]);
+  },
+  pendingCrossJurisdictionFillAcks: state => {
+    state.pendingCrossJurisdictionFillAcks = new Map([['ack', { marker: 'cross-ack' } as never]]);
+  },
+  crossJurisdictionBookAdmissions: state => {
+    state.crossJurisdictionBookAdmissions = new Map([['admission', { marker: 'cross-admission' } as never]]);
+  },
+  hubRebalanceConfig: state => {
+    state.hubRebalanceConfig = { marker: 'rebalance' } as never;
+  },
+  lending: state => {
+    state.lending = { marker: 'lending' } as never;
+  },
 } satisfies Record<keyof EntityState, StateMutator>;
 
 const stateRootExcludedFields = new Set<keyof EntityState>(ENTITY_STATE_ROOT_EXCLUDED_FIELDS);
@@ -138,18 +213,21 @@ test('Entity consensus root covers every shared EntityState field', () => {
 
 test('bounded J event bodies are a deletable display cache, not consensus authority', () => {
   const withDisplayBody = baseState();
-  withDisplayBody.jBlockChain = [{
-    jurisdictionRef: 'evm:31337',
-    jHeight: 9,
-    jBlockHash: `0x${'55'.repeat(32)}`,
-    eventsHash: `0x${'66'.repeat(32)}`,
-    events: [],
-  }];
+  withDisplayBody.jBlockChain = [
+    {
+      jurisdictionRef: 'evm:31337',
+      jHeight: 9,
+      jBlockHash: `0x${'55'.repeat(32)}`,
+      eventsHash: `0x${'66'.repeat(32)}`,
+      events: [],
+    },
+  ];
   const withoutDisplayBody = structuredClone(withDisplayBody);
   withoutDisplayBody.jBlockChain = [];
 
-  expect(computeCanonicalEntityConsensusStateHash(withDisplayBody))
-    .toBe(computeCanonicalEntityConsensusStateHash(withoutDisplayBody));
+  expect(computeCanonicalEntityConsensusStateHash(withDisplayBody)).toBe(
+    computeCanonicalEntityConsensusStateHash(withoutDisplayBody),
+  );
 });
 
 test('Entity commitments exclude validator-local jurisdiction locators but bind stack identity and policy', () => {
@@ -179,13 +257,27 @@ test('Entity commitments exclude validator-local jurisdiction locators but bind 
   expect(computeEntityFrameAuthorityRoot(buildEntityFrameAuthority(right))).toBe(authorityRoot);
 
   const mutateCanonical = [
-    (state: EntityState) => { state.config.jurisdiction!.chainId = 31_338; },
-    (state: EntityState) => { state.config.jurisdiction!.depositoryAddress = `0x${'ef'.repeat(20)}`; },
-    (state: EntityState) => { state.config.jurisdiction!.entityProviderAddress = `0x${'01'.repeat(20)}`; },
-    (state: EntityState) => { state.config.jurisdiction!.registrationBlock = 18; },
-    (state: EntityState) => { state.config.jurisdiction!.entityProviderDeploymentBlock = 4; },
-    (state: EntityState) => { state.config.jurisdiction!.blockTimeMs = 2_000; },
-    (state: EntityState) => { state.config.jurisdiction!.rebalancePolicyUsd!.maxFee = 6; },
+    (state: EntityState) => {
+      state.config.jurisdiction!.chainId = 31_338;
+    },
+    (state: EntityState) => {
+      state.config.jurisdiction!.depositoryAddress = `0x${'ef'.repeat(20)}`;
+    },
+    (state: EntityState) => {
+      state.config.jurisdiction!.entityProviderAddress = `0x${'01'.repeat(20)}`;
+    },
+    (state: EntityState) => {
+      state.config.jurisdiction!.registrationBlock = 18;
+    },
+    (state: EntityState) => {
+      state.config.jurisdiction!.entityProviderDeploymentBlock = 4;
+    },
+    (state: EntityState) => {
+      state.config.jurisdiction!.blockTimeMs = 2_000;
+    },
+    (state: EntityState) => {
+      state.config.jurisdiction!.rebalancePolicyUsd!.maxFee = 6;
+    },
   ];
   for (const mutate of mutateCanonical) {
     const changed = structuredClone(left);
@@ -198,8 +290,9 @@ test('Entity commitments exclude validator-local jurisdiction locators but bind 
 test('Entity config commitment rejects unmodelled fields instead of silently omitting them', () => {
   const configExtension = baseState();
   (configExtension.config as unknown as Record<string, unknown>)['hiddenConsensusRule'] = true;
-  expect(() => computeCanonicalEntityConsensusStateHash(configExtension))
-    .toThrow('ENTITY_STATE_ROOT_EXTRA_PROPERTY:hiddenConsensusRule');
+  expect(() => computeCanonicalEntityConsensusStateHash(configExtension)).toThrow(
+    'ENTITY_STATE_ROOT_EXTRA_PROPERTY:hiddenConsensusRule',
+  );
 
   const jurisdictionExtension = baseState();
   jurisdictionExtension.config.jurisdiction = {
@@ -210,8 +303,9 @@ test('Entity config commitment rejects unmodelled fields instead of silently omi
     entityProviderAddress: `0x${'cd'.repeat(20)}`,
   };
   (jurisdictionExtension.config.jurisdiction as unknown as Record<string, unknown>)['consensusExtension'] = 1;
-  expect(() => computeCanonicalEntityConsensusStateHash(jurisdictionExtension))
-    .toThrow('ENTITY_STATE_ROOT_EXTRA_PROPERTY:consensusExtension');
+  expect(() => computeCanonicalEntityConsensusStateHash(jurisdictionExtension)).toThrow(
+    'ENTITY_STATE_ROOT_EXTRA_PROPERTY:consensusExtension',
+  );
 });
 
 test('Entity config commitment fails loudly when a jurisdiction stack identity is incomplete', () => {
@@ -223,23 +317,28 @@ test('Entity config commitment fails loudly when a jurisdiction stack identity i
     depositoryAddress: `0x${'ab'.repeat(20)}`,
     entityProviderAddress: '',
   };
-  expect(() => computeCanonicalEntityConsensusStateHash(incomplete))
-    .toThrow('ENTITY_STATE_ROOT_JURISDICTION_FIELD_REQUIRED:entityProviderAddress');
+  expect(() => computeCanonicalEntityConsensusStateHash(incomplete)).toThrow(
+    'ENTITY_STATE_ROOT_JURISDICTION_FIELD_REQUIRED:entityProviderAddress',
+  );
 });
 
 test('Entity consensus root is insertion-order independent without recursive key blacklists', () => {
   const left = baseState();
-  left.nonces = new Map([['b', 2], ['a', 1]]);
+  left.nonces = new Map([
+    ['b', 2],
+    ['a', 1],
+  ]);
   left.proposals.set('nested', { provider: 'consensus-a' } as never);
   const right = baseState();
-  right.nonces = new Map([['a', 1], ['b', 2]]);
+  right.nonces = new Map([
+    ['a', 1],
+    ['b', 2],
+  ]);
   right.proposals.set('nested', { provider: 'consensus-a' } as never);
 
-  expect(computeCanonicalEntityConsensusStateHash(left))
-    .toBe(computeCanonicalEntityConsensusStateHash(right));
+  expect(computeCanonicalEntityConsensusStateHash(left)).toBe(computeCanonicalEntityConsensusStateHash(right));
   (right.proposals.get('nested') as unknown as { provider: string }).provider = 'consensus-b';
-  expect(computeCanonicalEntityConsensusStateHash(left))
-    .not.toBe(computeCanonicalEntityConsensusStateHash(right));
+  expect(computeCanonicalEntityConsensusStateHash(left)).not.toBe(computeCanonicalEntityConsensusStateHash(right));
 });
 
 test('Entity consensus root excludes only typed Account replica caches', () => {
@@ -257,13 +356,11 @@ test('Entity consensus root excludes only typed Account replica caches', () => {
     pendingWithdrawals: new Map(),
     frameHistory: [{ stateHash: 'right-cache' }],
   } as never);
-  expect(computeCanonicalEntityConsensusStateHash(left))
-    .toBe(computeCanonicalEntityConsensusStateHash(right));
+  expect(computeCanonicalEntityConsensusStateHash(left)).toBe(computeCanonicalEntityConsensusStateHash(right));
 
   (right.accounts.get(counterpartyId) as unknown as { status: string }).status = 'disputed';
   invalidateEntityAccountCommitment(right, counterpartyId);
-  expect(computeCanonicalEntityConsensusStateHash(left))
-    .not.toBe(computeCanonicalEntityConsensusStateHash(right));
+  expect(computeCanonicalEntityConsensusStateHash(left)).not.toBe(computeCanonicalEntityConsensusStateHash(right));
 
   (right.accounts.get(counterpartyId) as unknown as { status: string }).status = 'active';
   (right.accounts.get(counterpartyId) as unknown as Record<string, unknown>).boardResealMigration = {
@@ -272,8 +369,7 @@ test('Entity consensus root excludes only typed Account replica caches', () => {
     reason: 'bilateral-frame-uncertified',
   };
   invalidateEntityAccountCommitment(right, counterpartyId);
-  expect(computeCanonicalEntityConsensusStateHash(left))
-    .not.toBe(computeCanonicalEntityConsensusStateHash(right));
+  expect(computeCanonicalEntityConsensusStateHash(left)).not.toBe(computeCanonicalEntityConsensusStateHash(right));
 });
 
 test('Entity Account commitment cache has a cold oracle for missed invalidation', () => {
@@ -288,41 +384,46 @@ test('Entity Account commitment cache has a cold oracle for missed invalidation'
   expect(computeCanonicalEntityConsensusStateHash(state)).toBe(before);
   expect(computeCanonicalEntityConsensusStateHashCold(state)).not.toBe(before);
   invalidateEntityAccountCommitment(state, counterpartyId);
-  expect(computeCanonicalEntityConsensusStateHash(state))
-    .toBe(computeCanonicalEntityConsensusStateHashCold(state));
+  expect(computeCanonicalEntityConsensusStateHash(state)).toBe(computeCanonicalEntityConsensusStateHashCold(state));
 });
 
 test('Entity consensus root binds incremental book commitments but not the derived cancel index', () => {
-  const makeOrderbookExt = () => ({
-    books: new Map([['1/2', {
-      params: { bucketWidthTicks: 100n, maxOrders: 10, stpPolicy: 1 },
-      orders: new Map(),
-      bidBuckets: new Map(),
-      askBuckets: new Map(),
-      bidBucketIdsDesc: [],
-      askBucketIdsAsc: [],
-      nextSeq: 1,
-      tradeCount: 0,
-      tradeQtySum: 0n,
-      eventHash: 0n,
-    }]]),
-    orderPairs: new Map(),
-    referrals: new Map(),
-    hubProfile: {
-      entityId,
-      name: 'hub',
-      spreadDistribution: {
-        makerBps: 0,
-        takerBps: 10_000,
-        hubBps: 0,
-        makerReferrerBps: 0,
-        takerReferrerBps: 0,
+  const makeOrderbookExt = () =>
+    ({
+      books: new Map([
+        [
+          '1/2',
+          {
+            params: { bucketWidthTicks: 100n, maxOrders: 10, stpPolicy: 1 },
+            orders: new Map(),
+            bidBuckets: new Map(),
+            askBuckets: new Map(),
+            bidBucketIdsDesc: [],
+            askBucketIdsAsc: [],
+            nextSeq: 1,
+            tradeCount: 0,
+            tradeQtySum: 0n,
+            eventHash: 0n,
+          },
+        ],
+      ]),
+      orderPairs: new Map(),
+      referrals: new Map(),
+      hubProfile: {
+        entityId,
+        name: 'hub',
+        spreadDistribution: {
+          makerBps: 0,
+          takerBps: 10_000,
+          hubBps: 0,
+          makerReferrerBps: 0,
+          takerReferrerBps: 0,
+        },
+        referenceTokenId: 1,
+        minTradeSize: 0n,
+        supportedPairs: ['1/2'],
       },
-      referenceTokenId: 1,
-      minTradeSize: 0n,
-      supportedPairs: ['1/2'],
-    },
-  }) as NonNullable<EntityState['orderbookExt']>;
+    }) as NonNullable<EntityState['orderbookExt']>;
 
   const baseline = baseState();
   baseline.orderbookExt = makeOrderbookExt();
@@ -359,91 +460,89 @@ test('Entity consensus root strips only typed post-hash Account witnesses', () =
       deltas: [],
       byLeft: true,
     };
-    return ({
-    status: 'active',
-    mempool: [],
-    currentFrameHanko: hanko,
-    counterpartyFrameHanko: hanko,
-    currentDisputeProofHanko: hanko,
-    counterpartyDisputeProofHanko: hanko,
-    counterpartySettlementHanko: hanko,
-    hankoSignature: hanko,
-    pendingWithdrawals: new Map([['withdrawal', {
-      requestId: 'withdrawal',
-      tokenId: 1,
-      amount: 1n,
-      requestedAt: 100,
-      direction: 'outgoing',
-      status: 'approved',
-      signature: hanko,
-    }]]),
-    pendingFrame,
-    pendingAccountInput: {
-      kind: 'frame',
-      fromEntityId: entityId,
-      toEntityId: counterpartyId,
-      proposal: { frame: pendingFrame, frameHanko: hanko },
-    },
-    pendingAccountInputSignerId: 'target-signer',
-    lastOutboundFrameAck: {
-      height: 1,
-      counterpartyEntityId: counterpartyId,
-      response: {
-        kind: 'ack',
+    return {
+      status: 'active',
+      mempool: [],
+      currentFrameHanko: hanko,
+      counterpartyFrameHanko: hanko,
+      currentDisputeProofHanko: hanko,
+      counterpartyDisputeProofHanko: hanko,
+      counterpartySettlementHanko: hanko,
+      hankoSignature: hanko,
+      pendingWithdrawals: new Map([
+        [
+          'withdrawal',
+          {
+            requestId: 'withdrawal',
+            tokenId: 1,
+            amount: 1n,
+            requestedAt: 100,
+            direction: 'outgoing',
+            status: 'approved',
+            signature: hanko,
+          },
+        ],
+      ]),
+      pendingFrame,
+      pendingAccountInput: {
+        kind: 'frame',
         fromEntityId: entityId,
         toEntityId: counterpartyId,
-        ack: { height: 1, frameHash, frameHanko: hanko },
+        proposal: { frame: pendingFrame, frameHanko: hanko },
       },
-    },
-    settlementWorkspace: {
-      ops: [],
-      leftHanko: hanko,
-      rightHanko: hanko,
-      settlementHash: `0x${'77'.repeat(32)}`,
-      lastModifiedByLeft: true,
-      status: 'ready_to_submit',
-      version: 1,
-      createdAt: 100,
-      lastUpdatedAt: 100,
-      executorIsLeft: true,
-      postSettlementDisputeProof: {
+      pendingAccountInputSignerId: 'target-signer',
+      lastOutboundFrameAck: {
+        height: 1,
+        counterpartyEntityId: counterpartyId,
+        response: {
+          kind: 'ack',
+          fromEntityId: entityId,
+          toEntityId: counterpartyId,
+          ack: { height: 1, frameHash, frameHanko: hanko },
+        },
+      },
+      settlementWorkspace: {
+        ops: [],
         leftHanko: hanko,
         rightHanko: hanko,
-        disputeHash: `0x${'88'.repeat(32)}`,
-        proofBodyHash: `0x${'99'.repeat(32)}`,
-        nonce: 1,
+        settlementHash: `0x${'77'.repeat(32)}`,
+        lastModifiedByLeft: true,
+        status: 'ready_to_submit',
+        version: 1,
+        createdAt: 100,
+        lastUpdatedAt: 100,
+        executorIsLeft: true,
+        postSettlementDisputeProof: {
+          leftHanko: hanko,
+          rightHanko: hanko,
+          disputeHash: `0x${'88'.repeat(32)}`,
+          proofBodyHash: `0x${'99'.repeat(32)}`,
+          nonce: 1,
+        },
       },
-    },
-    });
+    };
   };
   const left = baseState();
   const right = baseState();
   const frameHash = `0x${'aa'.repeat(32)}`;
   left.accounts.set(counterpartyId, makeAccount('0xleft-witness', frameHash) as never);
   right.accounts.set(counterpartyId, makeAccount('0xright-witness', frameHash) as never);
-  expect(computeCanonicalEntityConsensusStateHash(left))
-    .toBe(computeCanonicalEntityConsensusStateHash(right));
+  expect(computeCanonicalEntityConsensusStateHash(left)).toBe(computeCanonicalEntityConsensusStateHash(right));
 
-  right.accounts.set(
-    counterpartyId,
-    makeAccount('0xright-witness', `0x${'bb'.repeat(32)}`) as never,
-  );
-  expect(computeCanonicalEntityConsensusStateHash(left))
-    .not.toBe(computeCanonicalEntityConsensusStateHash(right));
+  right.accounts.set(counterpartyId, makeAccount('0xright-witness', `0x${'bb'.repeat(32)}`) as never);
+  expect(computeCanonicalEntityConsensusStateHash(left)).not.toBe(computeCanonicalEntityConsensusStateHash(right));
 });
 
 test('Entity consensus root rejects non-finite and cyclic state instead of omitting it', () => {
   const nonFinite = baseState();
   nonFinite.timestamp = Number.NaN;
-  expect(() => computeCanonicalEntityConsensusStateHash(nonFinite))
-    .toThrow('ENTITY_STATE_ROOT_NON_FINITE_NUMBER');
+  expect(() => computeCanonicalEntityConsensusStateHash(nonFinite)).toThrow('ENTITY_STATE_ROOT_NON_FINITE_NUMBER');
 
   const cyclic = baseState();
   const value: Record<string, unknown> = {};
   value['self'] = value;
   cyclic.proposals.set('cycle', value as never);
-  expect(() => computeCanonicalEntityConsensusStateHash(cyclic))
-    .toThrow('ENTITY_STATE_ROOT_CYCLE');
+  expect(() => computeCanonicalEntityConsensusStateHash(cyclic)).toThrow('ENTITY_STATE_ROOT_CYCLE');
 });
 
 test('Entity frame hash binds the complete shared post-replay state root', async () => {
@@ -476,33 +575,28 @@ test('Entity frame strict codec binds arbitrary transaction metadata keys', asyn
 });
 
 test('strict Entity codec is injective across tagged and adversarial values', () => {
-  expect(encodeCanonicalEntityConsensusValue(new Map()))
-    .not.toBe(encodeCanonicalEntityConsensusValue({ __xlnType: 'Map', value: [] }));
-  expect(encodeCanonicalEntityConsensusValue(1n))
-    .not.toBe(encodeCanonicalEntityConsensusValue({ __xlnType: 'BigInt', value: '1' }));
-  expect(encodeCanonicalEntityConsensusValue({ x: undefined }))
-    .not.toBe(encodeCanonicalEntityConsensusValue({}));
-  expect(encodeCanonicalEntityConsensusValue(-0))
-    .not.toBe(encodeCanonicalEntityConsensusValue(0));
+  expect(encodeCanonicalConsensusValue(new Map())).not.toBe(
+    encodeCanonicalConsensusValue({ __xlnType: 'Map', value: [] }),
+  );
+  expect(encodeCanonicalConsensusValue(1n)).not.toBe(
+    encodeCanonicalConsensusValue({ __xlnType: 'BigInt', value: '1' }),
+  );
+  expect(encodeCanonicalConsensusValue({ x: undefined })).not.toBe(encodeCanonicalConsensusValue({}));
+  expect(encodeCanonicalConsensusValue(-0)).not.toBe(encodeCanonicalConsensusValue(0));
 
   const protoKey = Object.create(null) as Record<string, unknown>;
   Object.defineProperty(protoKey, '__proto__', { value: 'bound', enumerable: true });
-  expect(encodeCanonicalEntityConsensusValue(protoKey))
-    .not.toBe(encodeCanonicalEntityConsensusValue(Object.create(null)));
+  expect(encodeCanonicalConsensusValue(protoKey)).not.toBe(encodeCanonicalConsensusValue(Object.create(null)));
 });
 
 test('strict Entity codec rejects sparse, symbolic, hidden and accessor state', () => {
-  expect(() => encodeCanonicalEntityConsensusValue(Array(1)))
-    .toThrow('ENTITY_STATE_ROOT_SPARSE_ARRAY');
-  expect(() => encodeCanonicalEntityConsensusValue({ [Symbol('hidden')]: 1 }))
-    .toThrow('ENTITY_STATE_ROOT_SYMBOL_KEY');
+  expect(() => encodeCanonicalConsensusValue(Array(1))).toThrow('ENTITY_STATE_ROOT_SPARSE_ARRAY');
+  expect(() => encodeCanonicalConsensusValue({ [Symbol('hidden')]: 1 })).toThrow('ENTITY_STATE_ROOT_SYMBOL_KEY');
 
   const hidden = {};
   Object.defineProperty(hidden, 'value', { value: 1, enumerable: false });
-  expect(() => encodeCanonicalEntityConsensusValue(hidden))
-    .toThrow('ENTITY_STATE_ROOT_OBJECT_DESCRIPTOR_INVALID');
+  expect(() => encodeCanonicalConsensusValue(hidden)).toThrow('ENTITY_STATE_ROOT_OBJECT_DESCRIPTOR_INVALID');
   const accessor = {};
   Object.defineProperty(accessor, 'value', { get: () => 1, enumerable: true });
-  expect(() => encodeCanonicalEntityConsensusValue(accessor))
-    .toThrow('ENTITY_STATE_ROOT_OBJECT_DESCRIPTOR_INVALID');
+  expect(() => encodeCanonicalConsensusValue(accessor)).toThrow('ENTITY_STATE_ROOT_OBJECT_DESCRIPTOR_INVALID');
 });

@@ -31,7 +31,6 @@ const COORDINATOR_DEBT: Readonly<Record<string, number>> = {
   'runtime/orchestrator/orchestrator.ts::computeAggregatedHealth': 270,
   'runtime/orchestrator/orchestrator.ts::fetch': 388,
   'runtime/protocol/dispute/proof-builder.ts::buildAccountProofBody': 172,
-  'runtime/protocol/htlc/onion-advance.ts::validateHtlcOnionAdvanceTx': 213,
   'runtime/radapter/resolve.ts::projectGraphFrame': 175,
   'runtime/radapter/resolve.ts::resolveRuntimeAdapterRead': 154,
   'runtime/radapter/server.ts::handleRuntimeAdapterMessage': 302,

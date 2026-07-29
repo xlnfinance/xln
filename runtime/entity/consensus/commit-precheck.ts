@@ -1,3 +1,4 @@
+import { encodeCanonicalConsensusValue } from '../../protocol/canonical-consensus-value';
 import { verifyAccountSignature } from '../../account/crypto';
 import type {
   ConsensusConfig,
@@ -9,9 +10,11 @@ import type {
 } from '../../types';
 import { createEntityFrameHashFromStateRoot, isCanonicalEntityFrameDigest } from './frame';
 import { getEntityHashManifestMismatch } from './hanko-witness';
-import { encodeCanonicalEntityConsensusValue } from './state-root';
 
-const normalize = (value: unknown): string => String(value ?? '').trim().toLowerCase();
+const normalize = (value: unknown): string =>
+  String(value ?? '')
+    .trim()
+    .toLowerCase();
 
 const exactReplica = (env: RuntimeState, input: RoutedEntityInput): EntityReplica | null => {
   const entityId = normalize(input.entityId);
@@ -24,11 +27,10 @@ const exactReplica = (env: RuntimeState, input: RoutedEntityInput): EntityReplic
   return null;
 };
 
-const locallyValidatedFrame = (
-  replica: EntityReplica,
-  frame: ProposedEntityFrame,
-): ProposedEntityFrame | null => [replica.lockedFrame, replica.proposal].find(candidate =>
-  candidate?.height === frame.height && candidate.hash === frame.hash) ?? null;
+const locallyValidatedFrame = (replica: EntityReplica, frame: ProposedEntityFrame): ProposedEntityFrame | null =>
+  [replica.lockedFrame, replica.proposal].find(
+    candidate => candidate?.height === frame.height && candidate.hash === frame.hash,
+  ) ?? null;
 
 const frameBodyAndLeaderMatchesLocalReplay = (
   replica: EntityReplica,
@@ -39,7 +41,8 @@ const frameBodyAndLeaderMatchesLocalReplay = (
     !isCanonicalEntityFrameDigest(candidate.hash) ||
     !isCanonicalEntityFrameDigest(candidate.stateRoot) ||
     !isCanonicalEntityFrameDigest(candidate.authorityRoot)
-  ) return false;
+  )
+    return false;
   try {
     const recomputed = createEntityFrameHashFromStateRoot(
       candidate.parentFrameHash,
@@ -59,8 +62,7 @@ const frameBodyAndLeaderMatchesLocalReplay = (
   // Leader certificates are not part of the frame hash. Require the exact
   // metadata this validator already accepted; otherwise public frame QC bytes
   // could be attached to a forged proposer/view and steal the capped slot.
-  return encodeCanonicalEntityConsensusValue(candidate.leader) ===
-    encodeCanonicalEntityConsensusValue(localFrame.leader);
+  return encodeCanonicalConsensusValue(candidate.leader) === encodeCanonicalConsensusValue(localFrame.leader);
 };
 
 const signerShares = (config: ConsensusConfig, signerId: string): bigint | null => {
@@ -73,10 +75,7 @@ const signerShares = (config: ConsensusConfig, signerId: string): bigint | null 
  * Scheduling precheck only: proves that a real configured quorum signed the
  * claimed manifest. Consensus still replays state and recomputes every hash.
  */
-export const hasVerifiedEntityCommitPrecertificate = (
-  env: RuntimeState,
-  input: RoutedEntityInput,
-): boolean => {
+export const hasVerifiedEntityCommitPrecertificate = (env: RuntimeState, input: RoutedEntityInput): boolean => {
   const frame = input.proposedFrame;
   const replica = frame ? exactReplica(env, input) : null;
   const config = replica?.state.config;
@@ -107,8 +106,12 @@ export const hasVerifiedEntityCommitPrecertificate = (
       return false;
     }
     seen.add(signerId);
-    if (hashes.some((hash, index) => !signatures[index] ||
-      !verifyAccountSignature(env, signerId, hash.hash, signatures[index]!))) return false;
+    if (
+      hashes.some(
+        (hash, index) => !signatures[index] || !verifyAccountSignature(env, signerId, hash.hash, signatures[index]!),
+      )
+    )
+      return false;
     power += shares;
   }
   return power >= config.threshold;

@@ -1,14 +1,15 @@
+import { encodeCanonicalConsensusValue } from '../protocol/canonical-consensus-value';
 import { ethers } from 'ethers';
 
 import { LIMITS } from '../constants';
-import { encodeCanonicalEntityConsensusValue } from './consensus/state-root';
+
 import type { EntityTx, SignedEntityCommandV1 } from '../types';
 import { canonicalEntityBoardSignerId, isEntityProtocolTx } from './authorization';
 
 export const ENTITY_COMMAND_DOMAIN = 'xln:entity-command:v1' as const;
-export const UNREGISTERED_ENTITY_COMMAND_STACK_KEY = ethers.id(
-  'xln:entity-command:unregistered-stack:v1',
-).toLowerCase();
+export const UNREGISTERED_ENTITY_COMMAND_STACK_KEY = ethers
+  .id('xln:entity-command:unregistered-stack:v1')
+  .toLowerCase();
 export const MAX_ENTITY_COMMAND_BYTES = LIMITS.MAX_FRAME_SIZE_BYTES;
 const ADDRESS = /^0x[0-9a-f]{40}$/;
 const BYTES32 = /^0x[0-9a-f]{64}$/;
@@ -19,13 +20,17 @@ export const canonicalEntityCommandSignerId = (value: unknown): string =>
   canonicalEntityBoardSignerId(value, 'ENTITY_COMMAND_AUTHOR_SIGNER_ID_REQUIRED');
 
 export const canonicalEntityCommandAddress = (value: unknown, code: string): string => {
-  const address = String(value ?? '').trim().toLowerCase();
+  const address = String(value ?? '')
+    .trim()
+    .toLowerCase();
   if (!ADDRESS.test(address)) throw new Error(`${code}:${address || 'missing'}`);
   return address;
 };
 
 export const canonicalEntityCommandBytes32 = (value: unknown, code: string): string => {
-  const hash = String(value ?? '').trim().toLowerCase();
+  const hash = String(value ?? '')
+    .trim()
+    .toLowerCase();
   if (!BYTES32.test(hash)) throw new Error(`${code}:${hash || 'missing'}`);
   return hash;
 };
@@ -41,8 +46,7 @@ export const canonicalEntityCommandBoardEpoch = (value: unknown): number => {
 };
 
 /** User commands cannot smuggle protocol messages under an author signature. */
-export const isEntityCommandForbiddenTx = (tx: EntityTx): boolean =>
-  isEntityProtocolTx(tx);
+export const isEntityCommandForbiddenTx = (tx: EntityTx): boolean => isEntityProtocolTx(tx);
 
 export function assertEntityCommandTxs(txs: unknown): asserts txs is EntityTx[] {
   if (!Array.isArray(txs) || txs.length === 0 || txs.length > LIMITS.MEMPOOL_SIZE) {
@@ -56,10 +60,12 @@ export function assertEntityCommandTxs(txs: unknown): asserts txs is EntityTx[] 
       throw new Error(`ENTITY_COMMAND_PROTOCOL_TX_FORBIDDEN:${String((tx as { type: unknown }).type)}`);
     }
   }
-  const byteLength = new TextEncoder().encode(encodeCanonicalEntityConsensusValue({
-    version: ENTITY_COMMAND_DOMAIN,
-    txs,
-  })).byteLength;
+  const byteLength = new TextEncoder().encode(
+    encodeCanonicalConsensusValue({
+      version: ENTITY_COMMAND_DOMAIN,
+      txs,
+    }),
+  ).byteLength;
   if (byteLength > MAX_ENTITY_COMMAND_BYTES) {
     throw new Error(`ENTITY_COMMAND_BYTE_LIMIT_EXCEEDED:${byteLength}:${MAX_ENTITY_COMMAND_BYTES}`);
   }
@@ -70,13 +76,12 @@ export function assertEntityCommandTxs(txs: unknown): asserts txs is EntityTx[] 
  * author. Frame quorum authorizes collective effects; it cannot turn one
  * member's signature into another member's chat/governance identity.
  */
-export const assertEntityCommandAuthorBindings = (
-  authorSignerId: string,
-  txs: EntityTx[],
-): void => {
+export const assertEntityCommandAuthorBindings = (authorSignerId: string, txs: EntityTx[]): void => {
   const author = canonicalEntityCommandSignerId(authorSignerId);
   const assertBound = (field: string, value: unknown): void => {
-    const claimed = String(value ?? '').trim().toLowerCase();
+    const claimed = String(value ?? '')
+      .trim()
+      .toLowerCase();
     if (claimed !== author) {
       throw new Error(`ENTITY_COMMAND_AUTHOR_FIELD_MISMATCH:${field}:${claimed || 'missing'}:${author}`);
     }
@@ -99,10 +104,16 @@ export const assertEntityCommandAuthorBindings = (
 
 export const hashEntityCommandTxs = (txs: EntityTx[]): string => {
   assertEntityCommandTxs(txs);
-  return ethers.keccak256(ethers.toUtf8Bytes(encodeCanonicalEntityConsensusValue({
-    version: ENTITY_COMMAND_DOMAIN,
-    txs,
-  }))).toLowerCase();
+  return ethers
+    .keccak256(
+      ethers.toUtf8Bytes(
+        encodeCanonicalConsensusValue({
+          version: ENTITY_COMMAND_DOMAIN,
+          txs,
+        }),
+      ),
+    )
+    .toLowerCase();
 };
 
 export const normalizeEntityCommandBody = (command: EntityCommandBody): EntityCommandBody => {
@@ -132,23 +143,38 @@ export const normalizeEntityCommandBody = (command: EntityCommandBody): EntityCo
 
 export const hashEntityCommand = (command: EntityCommandBody): string => {
   const body = normalizeEntityCommandBody(command);
-  return ethers.keccak256(ethers.toUtf8Bytes(encodeCanonicalEntityConsensusValue({
-    domain: ENTITY_COMMAND_DOMAIN,
-    version: body.version,
-    entityId: body.entityId,
-    stackKey: body.stackKey,
-    boardHash: body.boardHash,
-    boardEpoch: body.boardEpoch,
-    authorSignerId: body.authorSignerId,
-    authorSigner: body.authorSigner,
-    nonce: body.nonce,
-    txsHash: body.txsHash,
-  }))).toLowerCase();
+  return ethers
+    .keccak256(
+      ethers.toUtf8Bytes(
+        encodeCanonicalConsensusValue({
+          domain: ENTITY_COMMAND_DOMAIN,
+          version: body.version,
+          entityId: body.entityId,
+          stackKey: body.stackKey,
+          boardHash: body.boardHash,
+          boardEpoch: body.boardEpoch,
+          authorSignerId: body.authorSignerId,
+          authorSigner: body.authorSigner,
+          nonce: body.nonce,
+          txsHash: body.txsHash,
+        }),
+      ),
+    )
+    .toLowerCase();
 };
 
 const exactCommandKeys = new Set([
-  'version', 'entityId', 'stackKey', 'boardHash', 'boardEpoch', 'authorSignerId',
-  'authorSigner', 'nonce', 'txsHash', 'txs', 'signature',
+  'version',
+  'entityId',
+  'stackKey',
+  'boardHash',
+  'boardEpoch',
+  'authorSignerId',
+  'authorSigner',
+  'nonce',
+  'txsHash',
+  'txs',
+  'signature',
 ]);
 
 export const normalizeSignedEntityCommand = (value: unknown): SignedEntityCommandV1 => {
@@ -172,7 +198,9 @@ export const normalizeSignedEntityCommand = (value: unknown): SignedEntityComman
     txsHash: String(raw['txsHash'] ?? ''),
     txs: raw['txs'],
   });
-  const signature = String(raw['signature'] ?? '').trim().toLowerCase();
+  const signature = String(raw['signature'] ?? '')
+    .trim()
+    .toLowerCase();
   if (!/^0x[0-9a-f]{130}$/.test(signature)) throw new Error('ENTITY_COMMAND_SIGNATURE_INVALID');
   return { ...body, signature };
 };
@@ -192,7 +220,7 @@ export const mergeEntityCommandTransactions = (txs: EntityTx[]): EntityTx[] => {
       continue;
     }
     const command = normalizeSignedEntityCommand(tx.data);
-    const slot = encodeCanonicalEntityConsensusValue({
+    const slot = encodeCanonicalConsensusValue({
       entityId: command.entityId,
       stackKey: command.stackKey,
       boardHash: command.boardHash,
@@ -200,13 +228,11 @@ export const mergeEntityCommandTransactions = (txs: EntityTx[]): EntityTx[] => {
       authorSignerId: command.authorSignerId,
       nonce: command.nonce,
     });
-    const identity = encodeCanonicalEntityConsensusValue(command);
+    const identity = encodeCanonicalConsensusValue(command);
     const prior = commands.get(slot);
     if (prior === identity) continue;
     if (prior !== undefined) {
-      throw new Error(
-        `ENTITY_COMMAND_NONCE_EQUIVOCATION:${command.authorSignerId}:${command.nonce.toString()}`,
-      );
+      throw new Error(`ENTITY_COMMAND_NONCE_EQUIVOCATION:${command.authorSignerId}:${command.nonce.toString()}`);
     }
     commands.set(slot, identity);
     merged.push({ type: 'entityCommand', data: command });

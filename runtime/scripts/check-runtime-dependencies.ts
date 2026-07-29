@@ -27,9 +27,7 @@ const ROOT_FILE_DEBT = new Set([
 // lower deterministic layer depend on external/operational infrastructure.
 // Existing counts are migration debt: every increase and every newly
 // introduced direction fails, while completed cleanup must remove its entry.
-const REVERSE_DEPENDENCY_DEBT: Readonly<Record<string, number>> = {
-  'protocol->entity': 1,
-};
+const REVERSE_DEPENDENCY_DEBT: Readonly<Record<string, number>> = {};
 
 const collectFiles = (directory: string): string[] =>
   fs.readdirSync(directory, { withFileTypes: true }).flatMap(entry => {

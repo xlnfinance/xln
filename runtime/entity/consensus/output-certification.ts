@@ -1,3 +1,4 @@
+import { encodeCanonicalConsensusValue } from '../../protocol/canonical-consensus-value';
 import { keccak256, toUtf8Bytes } from 'ethers';
 
 import type {
@@ -11,7 +12,7 @@ import type {
   HashToSign,
 } from '../../types';
 import { cloneAccountInputWithoutPostCommitHankos } from './hanko-witness';
-import { encodeCanonicalEntityConsensusValue } from './state-root';
+
 import {
   accountInputAck,
   accountInputBoardReseal,
@@ -41,26 +42,27 @@ const assertCertifiableOutput = (output: EntityInput, outputIndex: number): Enti
   ) {
     throw new Error(`CONSENSUS_OUTPUT_RECEIVER_DEDUP_UNAVAILABLE:index=${outputIndex}`);
   }
-  if (output.entityTxs.some(tx =>
-    tx.type === 'entityCommand' ||
-    tx.type === 'consensusOutput' ||
-    tx.type === 'reissueCertifiedOutput' ||
-    tx.type === 'scheduledWake')) {
+  if (
+    output.entityTxs.some(
+      tx =>
+        tx.type === 'entityCommand' ||
+        tx.type === 'consensusOutput' ||
+        tx.type === 'reissueCertifiedOutput' ||
+        tx.type === 'scheduledWake',
+    )
+  ) {
     throw new Error(`CONSENSUS_OUTPUT_NESTED_PROTOCOL_TX_FORBIDDEN:index=${outputIndex}`);
   }
   assertReliableCertifiedPayloadIsAtomic(output.entityTxs);
   return output.entityTxs;
 };
 
-export const isLocalRuntimeProtocolOutput = (output: EntityInput): boolean =>
-  output.localRuntimeProtocol === 'cross-j';
+export const isLocalRuntimeProtocolOutput = (output: EntityInput): boolean => output.localRuntimeProtocol === 'cross-j';
 
 export type NonMutatingEntityWakeOutput = EntityInput & { entityTxs: [] };
 
 /** Empty EntityInput wakes the already-addressed replica but carries no state mutation. */
-export const isNonMutatingEntityWakeOutput = (
-  output: EntityInput,
-): output is NonMutatingEntityWakeOutput =>
+export const isNonMutatingEntityWakeOutput = (output: EntityInput): output is NonMutatingEntityWakeOutput =>
   Array.isArray(output.entityTxs) &&
   output.entityTxs.length === 0 &&
   output.proposedFrame === undefined &&
@@ -93,17 +95,20 @@ export const buildConsensusOutputOriginForState = (
   frameHash: string,
   outputIndex: number,
   semanticIdentity: Pick<ConsensusOutputOrigin, 'lane' | 'sequence' | 'semanticHash'>,
-): ConsensusOutputOrigin => buildConsensusOutputOrigin(
-  sourceState.entityId,
-  height,
-  frameHash,
-  outputIndex,
-  semanticIdentity,
-  createCertifiedBoardAuthorityBinding(sourceState, getCertifiedBoardNodeStore(env)) ?? undefined,
-);
+): ConsensusOutputOrigin =>
+  buildConsensusOutputOrigin(
+    sourceState.entityId,
+    height,
+    frameHash,
+    outputIndex,
+    semanticIdentity,
+    createCertifiedBoardAuthorityBinding(sourceState, getCertifiedBoardNodeStore(env)) ?? undefined,
+  );
 
 const normalizeBytes32 = (value: unknown, code: string): string => {
-  const normalized = String(value ?? '').trim().toLowerCase();
+  const normalized = String(value ?? '')
+    .trim()
+    .toLowerCase();
   if (!/^0x[0-9a-f]{64}$/.test(normalized)) throw new Error(`${code}:${normalized || 'missing'}`);
   return normalized;
 };
@@ -155,7 +160,7 @@ export const normalizeConsensusOutputBoardAuthority = (
   }
   const isRotation = source === 'BoardActivated';
   const boardEpoch = Number(rawRecord['boardEpoch']);
-  if (!Number.isSafeInteger(boardEpoch) || boardEpoch < 0 || isRotation !== (boardEpoch > 0)) {
+  if (!Number.isSafeInteger(boardEpoch) || boardEpoch < 0 || isRotation !== boardEpoch > 0) {
     throw new Error('CONSENSUS_OUTPUT_BOARD_EPOCH_INVALID');
   }
   if (isRotation !== (previousBoardHash !== `0x${'00'.repeat(32)}` && previousBoardValidUntil > 0)) {
@@ -202,12 +207,7 @@ export const normalizeConsensusOutputOrigin = (value: unknown): ConsensusOutputO
     .toLowerCase();
   const outputIndex = Number(origin['outputIndex']);
   if (!sourceEntityId) throw new Error('CONSENSUS_OUTPUT_SOURCE_ENTITY_MISSING');
-  if (
-    lane !== 'generic' &&
-    lane !== 'account-frame' &&
-    lane !== 'account-ack' &&
-    lane !== 'account-dispute'
-  ) {
+  if (lane !== 'generic' && lane !== 'account-frame' && lane !== 'account-ack' && lane !== 'account-dispute') {
     throw new Error(`CONSENSUS_OUTPUT_LANE_INVALID:${lane || 'missing'}`);
   }
   if (typeof sequence !== 'bigint' || sequence < 0n || sequence > (1n << 64n) - 1n) {
@@ -237,10 +237,7 @@ export type ConsensusOutputBoardAuthorityResolution =
   | { kind: 'lazy' }
   | { kind: 'registered'; record: CertifiedBoardRecord };
 
-const sameCertifiedBoardRecord = (
-  left: CertifiedBoardRecord,
-  right: CertifiedBoardRecord,
-): boolean =>
+const sameCertifiedBoardRecord = (left: CertifiedBoardRecord, right: CertifiedBoardRecord): boolean =>
   left.stackKey === right.stackKey &&
   left.entityId === right.entityId &&
   left.boardHash === right.boardHash &&
@@ -253,15 +250,9 @@ const sameCertifiedBoardRecord = (
   left.transactionHash === right.transactionHash &&
   left.source === right.source;
 
-const certifiedBoardRecordPrecedes = (
-  older: CertifiedBoardRecord,
-  newer: CertifiedBoardRecord,
-): boolean =>
+const certifiedBoardRecordPrecedes = (older: CertifiedBoardRecord, newer: CertifiedBoardRecord): boolean =>
   older.activatedAtJHeight < newer.activatedAtJHeight ||
-  (
-    older.activatedAtJHeight === newer.activatedAtJHeight &&
-    older.logIndex < newer.logIndex
-  );
+  (older.activatedAtJHeight === newer.activatedAtJHeight && older.logIndex < newer.logIndex);
 
 const isImmediatePreviousBoardAuthorityLive = (
   bound: CertifiedBoardRecord,
@@ -271,11 +262,13 @@ const isImmediatePreviousBoardAuthorityLive = (
   if (!Number.isSafeInteger(observerTimestampMs) || observerTimestampMs < 0) {
     throw new Error(`CONSENSUS_OUTPUT_OBSERVER_TIMESTAMP_INVALID:${observerTimestampMs}`);
   }
-  return latest.source === 'BoardActivated' &&
+  return (
+    latest.source === 'BoardActivated' &&
     certifiedBoardRecordPrecedes(bound, latest) &&
     bound.boardEpoch + 1 === latest.boardEpoch &&
     bound.boardHash === latest.previousBoardHash &&
-    Math.floor(observerTimestampMs / 1_000) < latest.previousBoardValidUntil;
+    Math.floor(observerTimestampMs / 1_000) < latest.previousBoardValidUntil
+  );
 };
 
 /** Compare the complete bound record with the receiver's current local authority. */
@@ -319,19 +312,17 @@ export const resolveConsensusOutputBoardAuthority = (
     if (isImmediatePreviousBoardAuthorityLive(binding.record, latestRecord, observerState.timestamp)) {
       return { kind: 'registered', record: latestRecord };
     }
-    if (
-      certifiedBoardRecordPrecedes(binding.record, latestRecord)
-    ) {
+    if (certifiedBoardRecordPrecedes(binding.record, latestRecord)) {
       throw new Error(
         `CONSENSUS_OUTPUT_BOARD_AUTHORITY_STALE:source=${origin.sourceEntityId}:` +
-        `bound=${binding.record.activatedAtJHeight}:${binding.record.logIndex}:${binding.record.boardHash}:` +
-        `latest=${latestRecord.activatedAtJHeight}:${latestRecord.logIndex}:${latestRecord.boardHash}`,
+          `bound=${binding.record.activatedAtJHeight}:${binding.record.logIndex}:${binding.record.boardHash}:` +
+          `latest=${latestRecord.activatedAtJHeight}:${latestRecord.logIndex}:${latestRecord.boardHash}`,
       );
     }
     throw new Error(
       `CONSENSUS_OUTPUT_BOARD_RECORD_CONFLICT:source=${origin.sourceEntityId}:` +
-      `bound=${binding.record.activatedAtJHeight}:${binding.record.logIndex}:${binding.record.boardHash}:` +
-      `local=${latestRecord.activatedAtJHeight}:${latestRecord.logIndex}:${latestRecord.boardHash}`,
+        `bound=${binding.record.activatedAtJHeight}:${binding.record.logIndex}:${binding.record.boardHash}:` +
+        `local=${latestRecord.activatedAtJHeight}:${latestRecord.logIndex}:${latestRecord.boardHash}`,
     );
   }
   return { kind: 'registered', record: latestRecord };
@@ -345,14 +336,12 @@ export const resolveConsensusOutputBoardAuthority = (
  */
 const canonicalCertifiedEntityTxs = (entityTxs: EntityTx[]): EntityTx[] => {
   const canonical = structuredClone(entityTxs);
-  return canonical.map(tx => tx.type === 'accountInput'
-    ? { ...tx, data: cloneAccountInputWithoutPostCommitHankos(tx.data) }
-    : tx);
+  return canonical.map(tx =>
+    tx.type === 'accountInput' ? { ...tx, data: cloneAccountInputWithoutPostCommitHankos(tx.data) } : tx,
+  );
 };
 
-const accountInputLaneAndSequence = (
-  input: AccountPeerInput,
-): Pick<ConsensusOutputOrigin, 'lane' | 'sequence'> => {
+const accountInputLaneAndSequence = (input: AccountPeerInput): Pick<ConsensusOutputOrigin, 'lane' | 'sequence'> => {
   const proposal = accountInputProposal(input);
   const ack = accountInputAck(input);
   if (proposal) {
@@ -380,15 +369,13 @@ const accountInputLaneAndSequence = (
   throw new Error(`CONSENSUS_OUTPUT_ACCOUNT_LANE_INVALID:${String((input as { kind?: unknown }).kind)}`);
 };
 
-const nativeOutputIdentity = (
-  entityTxs: EntityTx[],
-): Pick<ConsensusOutputOrigin, 'lane' | 'sequence'> | null => {
-  const native = entityTxs.flatMap((tx) => tx.type === 'accountInput' && tx.data.kind !== 'board_reseal'
-    ? [accountInputLaneAndSequence(tx.data)]
-    : []);
+const nativeOutputIdentity = (entityTxs: EntityTx[]): Pick<ConsensusOutputOrigin, 'lane' | 'sequence'> | null => {
+  const native = entityTxs.flatMap(tx =>
+    tx.type === 'accountInput' && tx.data.kind !== 'board_reseal' ? [accountInputLaneAndSequence(tx.data)] : [],
+  );
   if (native.length === 0) return null;
   const first = native[0]!;
-  if (native.some((entry) => entry.lane !== first.lane || entry.sequence !== first.sequence)) {
+  if (native.some(entry => entry.lane !== first.lane || entry.sequence !== first.sequence)) {
     throw new Error('CONSENSUS_OUTPUT_ACCOUNT_SEQUENCE_AMBIGUOUS');
   }
   return first;
@@ -400,14 +387,19 @@ export const hashCertifiedEntityOutputSemantic = (
   lane: ConsensusOutputOrigin['lane'],
   sequence: bigint,
   entityTxs: EntityTx[],
-): string => keccak256(toUtf8Bytes(encodeCanonicalEntityConsensusValue({
-  version: 'xln:certified-entity-output-semantic:v1',
-  sourceEntityId: sourceEntityId.toLowerCase(),
-  targetEntityId: targetEntityId.toLowerCase(),
-  lane,
-  sequence,
-  entityTxs: canonicalCertifiedEntityTxs(entityTxs),
-})));
+): string =>
+  keccak256(
+    toUtf8Bytes(
+      encodeCanonicalConsensusValue({
+        version: 'xln:certified-entity-output-semantic:v1',
+        sourceEntityId: sourceEntityId.toLowerCase(),
+        targetEntityId: targetEntityId.toLowerCase(),
+        lane,
+        sequence,
+        entityTxs: canonicalCertifiedEntityTxs(entityTxs),
+      }),
+    ),
+  );
 
 export const assertCertifiedOutputSemanticIdentity = (
   origin: ConsensusOutputOrigin,
@@ -419,7 +411,7 @@ export const assertCertifiedOutputSemanticIdentity = (
     if (origin.lane !== native.lane || origin.sequence !== native.sequence) {
       throw new Error(
         `CONSENSUS_OUTPUT_NATIVE_IDENTITY_MISMATCH:${origin.lane}:${origin.sequence}:` +
-        `${native.lane}:${native.sequence}`,
+          `${native.lane}:${native.sequence}`,
       );
     }
   } else if (origin.lane !== 'generic') {
@@ -444,10 +436,7 @@ export const assertCertifiedOutputSemanticIdentity = (
  * A pre-tagged generic output is a governance reissue and must match the exact
  * bounded last-issued source frontier.
  */
-export const assignCertifiedOutputIdentities = (
-  sourceState: EntityState,
-  outputs: EntityInput[],
-): EntityState => {
+export const assignCertifiedOutputIdentities = (sourceState: EntityState, outputs: EntityInput[]): EntityState => {
   const sourceEntityId = sourceState.entityId.toLowerCase();
   const sequences = new Map(sourceState.certifiedOutputSequences ?? []);
   if (sequences.size > LIMITS.MAX_ACCOUNTS_PER_ENTITY) {
@@ -477,11 +466,12 @@ export const assignCertifiedOutputIdentities = (
         native.sequence,
         entityTxs,
       );
-      if (supplied && (
-        supplied.lane !== native.lane ||
-        supplied.sequence !== native.sequence ||
-        supplied.semanticHash.toLowerCase() !== semanticHash
-      )) {
+      if (
+        supplied &&
+        (supplied.lane !== native.lane ||
+          supplied.sequence !== native.sequence ||
+          supplied.semanticHash.toLowerCase() !== semanticHash)
+      ) {
         throw new Error(`CONSENSUS_OUTPUT_NATIVE_IDENTITY_MISMATCH:index=${outputIndex}`);
       }
       output.certifiedOutputIdentity = { ...native, semanticHash };
@@ -535,11 +525,7 @@ export const assignCertifiedOutputIdentities = (
 
 type OutputWitness = { context: string; hash: string; hanko: string };
 
-const requiredWitness = (
-  context: string,
-  hash: string | undefined,
-  hanko: string | undefined,
-): OutputWitness => {
+const requiredWitness = (context: string, hash: string | undefined, hanko: string | undefined): OutputWitness => {
   if (!hash) throw new Error(`CONSENSUS_OUTPUT_WITNESS_HASH_MISSING:${context}`);
   if (!hanko) throw new Error(`CONSENSUS_OUTPUT_WITNESS_HANKO_MISSING:${context}:${hash}`);
   return { context, hash, hanko };
@@ -570,12 +556,12 @@ export const assertCertifiedEntityOutputWitnesses = async (
   observerState?: EntityState,
   authorityBoardHash?: string,
 ): Promise<void> => {
-  const registeredBoardHash = authorityBoardHash ?? (observerState
-    ? resolveObserverCertifiedBoardHash(observerState, getCertifiedBoardNodeStore(env), sourceEntityId)
-    : null);
-  const witnesses = entityTxs.flatMap(tx => tx.type === 'accountInput'
-    ? collectAccountInputWitnesses(tx.data)
-    : []);
+  const registeredBoardHash =
+    authorityBoardHash ??
+    (observerState
+      ? resolveObserverCertifiedBoardHash(observerState, getCertifiedBoardNodeStore(env), sourceEntityId)
+      : null);
+  const witnesses = entityTxs.flatMap(tx => (tx.type === 'accountInput' ? collectAccountInputWitnesses(tx.data) : []));
   for (const witness of witnesses) {
     const verified = await verifyHankoForHash(
       witness.hanko,
@@ -594,12 +580,17 @@ export const hashCertifiedEntityOutput = (
   origin: ConsensusOutputOrigin,
   targetEntityId: string,
   entityTxs: EntityTx[],
-): string => keccak256(toUtf8Bytes(encodeCanonicalEntityConsensusValue({
-  version: 'xln:certified-entity-output:v1',
-  origin,
-  targetEntityId: targetEntityId.toLowerCase(),
-  entityTxs: canonicalCertifiedEntityTxs(entityTxs),
-})));
+): string =>
+  keccak256(
+    toUtf8Bytes(
+      encodeCanonicalConsensusValue({
+        version: 'xln:certified-entity-output:v1',
+        origin,
+        targetEntityId: targetEntityId.toLowerCase(),
+        entityTxs: canonicalCertifiedEntityTxs(entityTxs),
+      }),
+    ),
+  );
 
 export type VerifiedCertifiedEntityOutput = {
   origin: ConsensusOutputOrigin;
@@ -644,12 +635,7 @@ export const verifyCertifiedEntityOutput = async (
     throw new Error('CONSENSUS_OUTPUT_NESTED_PROTOCOL_TX_FORBIDDEN');
   }
   const entityTxs = tx.data.entityTxs;
-  assertCertifiedEntityOutputAuthorization(
-    origin.sourceEntityId,
-    targetEntityId,
-    entityTxs,
-    observerState,
-  );
+  assertCertifiedEntityOutputAuthorization(origin.sourceEntityId, targetEntityId, entityTxs, observerState);
   const outputHash = hashCertifiedEntityOutput(origin, targetEntityId, entityTxs);
   assertCertifiedOutputSemanticIdentity(origin, targetEntityId, entityTxs);
   const authority = resolveConsensusOutputBoardAuthority(origin, observerState, env);
@@ -670,13 +656,7 @@ export const verifyCertifiedEntityOutput = async (
   if (!verified.valid) {
     throw new Error(`CONSENSUS_OUTPUT_HANKO_INVALID:${origin.sourceEntityId}:${origin.height}:${origin.outputIndex}`);
   }
-  await assertCertifiedEntityOutputWitnesses(
-    entityTxs,
-    origin.sourceEntityId,
-    env,
-    observerState,
-    registeredBoardHash,
-  );
+  await assertCertifiedEntityOutputWitnesses(entityTxs, origin.sourceEntityId, env, observerState, registeredBoardHash);
   return { origin, targetEntityId, entityTxs, outputHash };
 };
 
@@ -686,33 +666,36 @@ export const buildCertifiedEntityOutputHashes = (
   height: number,
   frameHash: string,
   outputs: EntityInput[],
-): HashToSign[] => outputs.flatMap((output, outputIndex) => {
-  if (isNonMutatingEntityWakeOutput(output)) return [];
-  if (isLocalRuntimeProtocolOutput(output)) return [];
-  const entityTxs = assertCertifiableOutput(output, outputIndex);
-  const semanticIdentity = output.certifiedOutputIdentity;
-  if (!semanticIdentity) throw new Error(`CONSENSUS_OUTPUT_SEMANTIC_IDENTITY_MISSING:index=${outputIndex}`);
-  const semanticHash = hashCertifiedEntityOutputSemantic(
-    sourceState.entityId,
-    output.entityId,
-    semanticIdentity.lane,
-    semanticIdentity.sequence,
-    entityTxs,
-  );
-  if (semanticHash !== semanticIdentity.semanticHash.toLowerCase()) {
-    throw new Error(`CONSENSUS_OUTPUT_SEMANTIC_HASH_MISMATCH:index=${outputIndex}`);
-  }
-  const origin = buildConsensusOutputOriginForState(
-    sourceState,
-    env,
-    height,
-    frameHash,
-    outputIndex,
-    semanticIdentity,
-  );
-  return [{
-    hash: hashCertifiedEntityOutput(origin, output.entityId, entityTxs),
-    type: 'entityOutput',
-    context: `entity-output:${height}:${outputIndex}`,
-  }];
-});
+): HashToSign[] =>
+  outputs.flatMap((output, outputIndex) => {
+    if (isNonMutatingEntityWakeOutput(output)) return [];
+    if (isLocalRuntimeProtocolOutput(output)) return [];
+    const entityTxs = assertCertifiableOutput(output, outputIndex);
+    const semanticIdentity = output.certifiedOutputIdentity;
+    if (!semanticIdentity) throw new Error(`CONSENSUS_OUTPUT_SEMANTIC_IDENTITY_MISSING:index=${outputIndex}`);
+    const semanticHash = hashCertifiedEntityOutputSemantic(
+      sourceState.entityId,
+      output.entityId,
+      semanticIdentity.lane,
+      semanticIdentity.sequence,
+      entityTxs,
+    );
+    if (semanticHash !== semanticIdentity.semanticHash.toLowerCase()) {
+      throw new Error(`CONSENSUS_OUTPUT_SEMANTIC_HASH_MISMATCH:index=${outputIndex}`);
+    }
+    const origin = buildConsensusOutputOriginForState(
+      sourceState,
+      env,
+      height,
+      frameHash,
+      outputIndex,
+      semanticIdentity,
+    );
+    return [
+      {
+        hash: hashCertifiedEntityOutput(origin, output.entityId, entityTxs),
+        type: 'entityOutput',
+        context: `entity-output:${height}:${outputIndex}`,
+      },
+    ];
+  });

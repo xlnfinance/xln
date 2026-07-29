@@ -1,13 +1,9 @@
+import { encodeCanonicalConsensusValue } from '../protocol/canonical-consensus-value';
 import { keccak256, toUtf8Bytes } from 'ethers';
 
-import { encodeCanonicalEntityConsensusValue } from '../entity/consensus/state-root';
 import { normalizeRuntimeId } from '../networking/runtime-id';
 import { compareStableText, safeStringify } from '../protocol/serialization';
-import type {
-  ReliableDeliveryEvidenceBinding,
-  ReliableDeliveryIdentity,
-  ReliableDeliveryReceipt,
-} from '../types';
+import type { ReliableDeliveryEvidenceBinding, ReliableDeliveryIdentity, ReliableDeliveryReceipt } from '../types';
 
 const CANONICAL_DIGEST_PATTERN = /^0x[0-9a-f]{64}$/;
 
@@ -70,44 +66,32 @@ export const reliableIdentityExactKey = (identity: ReliableDeliveryIdentity): st
     evidenceBindings: identity.evidenceBindings ?? null,
   });
 
-export const receiverFrontierKey = (
-  sourceRuntimeIdRaw: string,
-  identity: ReliableDeliveryIdentity,
-): string => {
+export const receiverFrontierKey = (sourceRuntimeIdRaw: string, identity: ReliableDeliveryIdentity): string => {
   const sourceRuntimeId = normalizeRuntimeId(sourceRuntimeIdRaw);
   if (!sourceRuntimeId) throw new Error('RELIABLE_INGRESS_SENDER_RUNTIME_INVALID');
   return safeStringify({ sourceRuntimeId, laneKey: identity.laneKey });
 };
 
-export const assertReliableIngressSourceLaneCapacity = (
-  existingKeys: Iterable<string>,
-  candidateKey: string,
-): void => {
+export const assertReliableIngressSourceLaneCapacity = (existingKeys: Iterable<string>, candidateKey: string): void => {
   const keys = existingKeys instanceof Set ? existingKeys : new Set(existingKeys);
   if (keys.size > MAX_RELIABLE_INGRESS_SOURCE_LANES) {
     throw new Error(
-      `RELIABLE_INGRESS_SOURCE_LANE_BOUND_CORRUPTION:` +
-      `${keys.size}:${MAX_RELIABLE_INGRESS_SOURCE_LANES}`,
+      `RELIABLE_INGRESS_SOURCE_LANE_BOUND_CORRUPTION:` + `${keys.size}:${MAX_RELIABLE_INGRESS_SOURCE_LANES}`,
     );
   }
   if (keys.has(candidateKey)) return;
   if (keys.size >= MAX_RELIABLE_INGRESS_SOURCE_LANES) {
     throw new Error(
       `RELIABLE_INGRESS_SOURCE_LANE_CAPACITY_EXCEEDED:` +
-      `${keys.size}:${MAX_RELIABLE_INGRESS_SOURCE_LANES}:${candidateKey}`,
+        `${keys.size}:${MAX_RELIABLE_INGRESS_SOURCE_LANES}:${candidateKey}`,
     );
   }
 };
 
-export const assertReliableIngressSourceLaneBound = (
-  existingKeys: Iterable<string>,
-): void => {
+export const assertReliableIngressSourceLaneBound = (existingKeys: Iterable<string>): void => {
   const count = new Set(existingKeys).size;
   if (count > MAX_RELIABLE_INGRESS_SOURCE_LANES) {
-    throw new Error(
-      `RELIABLE_INGRESS_SOURCE_LANE_BOUND_CORRUPTION:` +
-      `${count}:${MAX_RELIABLE_INGRESS_SOURCE_LANES}`,
-    );
+    throw new Error(`RELIABLE_INGRESS_SOURCE_LANE_BOUND_CORRUPTION:` + `${count}:${MAX_RELIABLE_INGRESS_SOURCE_LANES}`);
   }
 };
 
@@ -134,7 +118,7 @@ export const reliableReceiptExactKey = (receipt: ReliableDeliveryReceipt): strin
 const validateBindings = (bindings: unknown): boolean => {
   if (!Array.isArray(bindings) || bindings.length === 0) return false;
   let previousSubject = '';
-  return bindings.every((binding) => {
+  return bindings.every(binding => {
     if (!binding || typeof binding !== 'object') return false;
     const candidate = binding as Partial<ReliableDeliveryEvidenceBinding>;
     const valid =
@@ -254,10 +238,7 @@ export const assertReliableLaneCompatible = (
     if (existing.bodyDigest !== incoming.bodyDigest) {
       throw new Error(`${code.replace('LANE_ORDER', 'ACCOUNT_ACK_BODY')}:${incoming.height}`);
     }
-    if (
-      existing.evidenceKind === incoming.evidenceKind &&
-      existing.evidenceDigest !== incoming.evidenceDigest
-    ) {
+    if (existing.evidenceKind === incoming.evidenceKind && existing.evidenceDigest !== incoming.evidenceDigest) {
       throw new Error(`${code.replace('LANE_ORDER', 'EVIDENCE')}:${incoming.height}`);
     }
   }
@@ -269,10 +250,7 @@ export const assertReliableLaneCompatible = (
       throw new Error(`${code.replace('LANE_ORDER', 'EVIDENCE')}:${incoming.height}`);
     }
   }
-  if (
-    existing.kind === 'j-prefix-attestation' &&
-    existing.evidenceDigest !== incoming.evidenceDigest
-  ) {
+  if (existing.kind === 'j-prefix-attestation' && existing.evidenceDigest !== incoming.evidenceDigest) {
     throw new Error(`${code.replace('LANE_ORDER', 'EVIDENCE')}:${incoming.height}`);
   }
   if (existing.kind === 'leader-timeout-vote') {
@@ -338,7 +316,7 @@ export const reliableReceiptCoversIdentity = (
 };
 
 const digestBindings = (bindings: readonly ReliableDeliveryEvidenceBinding[]): string =>
-  keccak256(toUtf8Bytes(encodeCanonicalEntityConsensusValue(bindings))).toLowerCase();
+  keccak256(toUtf8Bytes(encodeCanonicalConsensusValue(bindings))).toLowerCase();
 
 const mergePrecommitFrontier = (
   existing: ReliableDeliveryIdentity,

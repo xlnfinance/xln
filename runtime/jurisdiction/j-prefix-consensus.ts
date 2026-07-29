@@ -1,7 +1,8 @@
+import { encodeCanonicalConsensusValue } from '../protocol/canonical-consensus-value';
 import { ethers } from 'ethers';
 
 import { signAccountFrame, verifyAccountSignature } from '../account/crypto';
-import { encodeCanonicalEntityConsensusValue } from '../entity/consensus/state-root';
+
 import { compareStableText } from '../protocol/serialization';
 import type {
   ConsensusConfig,
@@ -16,9 +17,7 @@ import type {
   JurisdictionEventBlock,
   ValidatorJHistory,
 } from '../types';
-import {
-  getJEventJurisdictionRef,
-} from './event-observation';
+import { getJEventJurisdictionRef } from './event-observation';
 import { buildJEventRangeDigest, canonicalJEventRangeHash, foldJHistoryRoot } from './history-consensus';
 import { normalizeStrictJEventBlock } from './j-event-range-validation';
 import {
@@ -58,13 +57,8 @@ const normalizeClaimEnvelope = (expectedJurisdictionRef: string, raw: JPrefixCla
   const scannedThroughHeight = normalizeHeight(raw.scannedThroughHeight, 'SCANNED_HEIGHT');
   if (scannedThroughHeight < baseHeight) throw new Error('J_PREFIX_BEHIND_BASE');
   let priorHeight = baseHeight;
-  const blocks = raw.blocks.map((block) => {
-    const normalized = normalizeStrictJEventBlock(
-      block,
-      priorHeight,
-      scannedThroughHeight,
-      'J_PREFIX',
-    );
+  const blocks = raw.blocks.map(block => {
+    const normalized = normalizeStrictJEventBlock(block, priorHeight, scannedThroughHeight, 'J_PREFIX');
     priorHeight = normalized.blockNumber;
     return normalized;
   });
@@ -109,7 +103,7 @@ const normalizeClaim = (state: EntityState, raw: JPrefixClaim): JPrefixClaim => 
   if (scannedThroughHeight === baseHeight) {
     if (!state.jHistoryFinality) throw new Error('J_PREFIX_BASE_ATTESTATION_WITHOUT_CERTIFIED_ANCHOR');
     const certifiedBase = buildCertifiedBaseClaim(state);
-    if (encodeCanonicalEntityConsensusValue(anchoredClaim) !== encodeCanonicalEntityConsensusValue(certifiedBase)) {
+    if (encodeCanonicalConsensusValue(anchoredClaim) !== encodeCanonicalConsensusValue(certifiedBase)) {
       throw new Error('J_PREFIX_BASE_ATTESTATION_CONFLICT');
     }
   }
@@ -137,7 +131,7 @@ const attestationBody = (attestation: Omit<JPrefixAttestation, 'signature'>): un
 });
 
 export const hashJPrefixAttestation = (attestation: Omit<JPrefixAttestation, 'signature'>): string =>
-  ethers.keccak256(ethers.toUtf8Bytes(encodeCanonicalEntityConsensusValue(attestationBody(attestation))));
+  ethers.keccak256(ethers.toUtf8Bytes(encodeCanonicalConsensusValue(attestationBody(attestation))));
 
 const currentParentFrameHash = (state: EntityState): string =>
   state.height === 0 ? 'genesis' : String(state.prevFrameHash || '');
@@ -210,10 +204,7 @@ const isolatedEventBlockClaim = (claim: JPrefixClaim, block: JurisdictionEventBl
  * A later event remains durable while its missing predecessor headers are
  * fetched, but it must not strand an already-complete earlier prefix.
  */
-export const getLocalJPrefixAttestableHeight = (
-  state: EntityState,
-  history: ValidatorJHistory,
-): number | null => {
+export const getLocalJPrefixAttestableHeight = (state: EntityState, history: ValidatorJHistory): number | null => {
   const baseHeight = state.lastFinalizedJHeight;
   const contiguousHeight = getValidatorJContiguousThroughHeight(state, history);
   if (contiguousHeight > baseHeight) return contiguousHeight;
@@ -426,7 +417,11 @@ export const verifyOutOfRoundJPrefixAttestation = (
   return attestation;
 };
 
-export const verifyJPrefixAttestation = (env: RuntimeState, state: EntityState, raw: JPrefixAttestation): JPrefixAttestation => {
+export const verifyJPrefixAttestation = (
+  env: RuntimeState,
+  state: EntityState,
+  raw: JPrefixAttestation,
+): JPrefixAttestation => {
   const attestation = normalizeJPrefixAttestation(state, raw);
   assertBoardSigner(state.config, attestation.validatorId);
   const { signature, ...unsigned } = attestation;
@@ -512,7 +507,7 @@ const clipAttestation = (
   };
 };
 
-const claimKey = (claim: JPrefixClaim): string => encodeCanonicalEntityConsensusValue(claim);
+const claimKey = (claim: JPrefixClaim): string => encodeCanonicalConsensusValue(claim);
 
 export const calculateJPrefixQuorumPower = (config: ConsensusConfig, rawSigners: readonly string[]): bigint => {
   const signers = new Set<string>();
@@ -622,11 +617,11 @@ export const verifyJPrefixCertificate = (
   if (claimKey(rebuilt.selected) !== claimKey(normalizeClaim(state, certificate.selected))) {
     throw new Error('J_PREFIX_CERTIFICATE_NOT_HIGHEST_COMMON');
   }
-  const expectedEnvelope = encodeCanonicalEntityConsensusValue({
+  const expectedEnvelope = encodeCanonicalConsensusValue({
     ...rebuilt,
     attestations: undefined,
   });
-  const receivedEnvelope = encodeCanonicalEntityConsensusValue({
+  const receivedEnvelope = encodeCanonicalConsensusValue({
     ...certificate,
     entityId: normalizeText(certificate.entityId),
     parentFrameHash: normalizeText(certificate.parentFrameHash),
@@ -669,7 +664,7 @@ export const mergeJPrefixAttestations = (
       attestations.set(signerId, attestation);
       continue;
     }
-    if (encodeCanonicalEntityConsensusValue(previous) === encodeCanonicalEntityConsensusValue(attestation)) continue;
+    if (encodeCanonicalConsensusValue(previous) === encodeCanonicalConsensusValue(attestation)) continue;
     // In this minimal protocol the signed head is also the validator's vote for
     // the round. A later local scan is retained in jHistory and attested only
     // after this Entity height commits; signing two heads would authorize two
@@ -691,13 +686,13 @@ export const mergeJPrefixAttestations = (
 export const restoreJPrefixRound = (env: RuntimeState, state: EntityState, persisted: JPrefixRound): JPrefixRound => {
   if (!(persisted.attestations instanceof Map)) throw new Error('J_PREFIX_RESTORE_ATTESTATIONS_INVALID');
   const rebuilt = mergeJPrefixAttestations(env, state, undefined, persisted.attestations);
-  const persistedEnvelope = encodeCanonicalEntityConsensusValue({
+  const persistedEnvelope = encodeCanonicalConsensusValue({
     targetEntityHeight: persisted.targetEntityHeight,
     parentFrameHash: normalizeText(persisted.parentFrameHash),
     jurisdictionRef: normalizeText(persisted.jurisdictionRef),
     baseHeight: persisted.baseHeight,
   });
-  const rebuiltEnvelope = encodeCanonicalEntityConsensusValue({
+  const rebuiltEnvelope = encodeCanonicalConsensusValue({
     targetEntityHeight: rebuilt.targetEntityHeight,
     parentFrameHash: rebuilt.parentFrameHash,
     jurisdictionRef: rebuilt.jurisdictionRef,
@@ -708,7 +703,7 @@ export const restoreJPrefixRound = (env: RuntimeState, state: EntityState, persi
     const verified = verifyJPrefixCertificate(env, state, persisted.certificate);
     if (
       !rebuilt.certificate ||
-      encodeCanonicalEntityConsensusValue(verified) !== encodeCanonicalEntityConsensusValue(rebuilt.certificate)
+      encodeCanonicalConsensusValue(verified) !== encodeCanonicalConsensusValue(rebuilt.certificate)
     ) {
       throw new Error('J_PREFIX_RESTORE_CERTIFICATE_MISMATCH');
     }
@@ -799,10 +794,8 @@ export const hasAttestablePendingLocalJEvent = (
  * input or hook. Chain liveness is transport evidence, not Entity consensus
  * state, so it must never manufacture financial history on its own.
  */
-export const hasDueLocalJPrefixAdvance = (
-  state: EntityState,
-  history: ValidatorJHistory | undefined,
-): boolean => hasAttestablePendingLocalJEvent(state, history);
+export const hasDueLocalJPrefixAdvance = (state: EntityState, history: ValidatorJHistory | undefined): boolean =>
+  hasAttestablePendingLocalJEvent(state, history);
 
 /**
  * A validator that already signed the certified base cannot replace that vote
@@ -829,7 +822,7 @@ export const isFrozenBaseJPrefixRollAuthorized = (
     ([rawSignerId]) => normalizeText(rawSignerId) === signerId,
   )?.[1];
   if (!local || !certified) return false;
-  return encodeCanonicalEntityConsensusValue(local) === encodeCanonicalEntityConsensusValue(certified);
+  return encodeCanonicalConsensusValue(local) === encodeCanonicalConsensusValue(certified);
 };
 
 const isEmptyBaseJPrefixRollFrame = (certificate: JPrefixCertificate, txs: readonly EntityTx[]): boolean =>
