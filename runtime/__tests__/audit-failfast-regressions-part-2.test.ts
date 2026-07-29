@@ -9,7 +9,7 @@ import {
   HTLC_ENFORCEMENT_RESERVE_MS,
   isHtlcSecretEnforcementWindowClosed,
   proposeAccountFrame,
-  validateAccountFrame,
+  isWithinAccountFrameBounds,
 } from '../account/consensus/index';
 
 import { computeAccountStateRoot, computeAccountStateRootCold } from '../account/state-root';
@@ -931,9 +931,9 @@ describe('audit fail-fast regressions', () => {
     const futureFrame = { ...oldFrame, timestamp: 130_001 };
     const regressedFrame = { ...oldFrame, timestamp: 999 };
 
-    expect(validateAccountFrame(oldFrame, 100_000)).toBe(true);
-    expect(validateAccountFrame(futureFrame, 100_000)).toBe(false);
-    expect(validateAccountFrame(regressedFrame, 100_000)).toBe(true);
+    expect(isWithinAccountFrameBounds(oldFrame, 100_000)).toBe(true);
+    expect(isWithinAccountFrameBounds(futureFrame, 100_000)).toBe(false);
+    expect(isWithinAccountFrameBounds(regressedFrame, 100_000)).toBe(true);
   });
 
   test('HTLC secret enforcement reserve closes on either entity time or finalized J-height', () => {

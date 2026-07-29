@@ -26,7 +26,7 @@ import { deriveAccountFrameTokenIds } from '../frame';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import {
   createFrameHash,
-  getAccountFrameValidationError,
+  getAccountFrameBoundsError,
 } from './frame';
 import { normalizeAccountWatchSeed } from '../watch-seed';
 import {
@@ -152,7 +152,7 @@ export {
 };
 export type { AccountInputSecurityContext };
 
-export { computeFrameHash, validateAccountFrame } from './frame';
+export { computeFrameHash, isWithinAccountFrameBounds } from './frame';
 
 // Counter-based replay protection was intentionally replaced by the frame chain
 // (height + prevFrameHash). Nonces remain only for on-chain proof material.
@@ -1340,7 +1340,7 @@ function validateIncomingFrameChain(
   securityContext: AccountInputSecurityContext,
   events: string[],
 ): HandleAccountInputResult | undefined {
-  const structureError = getAccountFrameValidationError(
+  const structureError = getAccountFrameBoundsError(
     receivedFrame,
     securityContext.entityTimestamp,
   );

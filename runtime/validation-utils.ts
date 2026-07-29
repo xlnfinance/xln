@@ -781,7 +781,7 @@ function validateCrontabState(value: unknown, fieldName: string): CrontabState {
  * Validates AccountFrame objects - Consensus frames for bilateral accounts
  * CRITICAL: Frame integrity ensures consensus safety
  */
-export function validateAccountFrame(value: unknown, context = 'AccountFrame'): AccountFrame {
+export function decodeAccountFrame(value: unknown, context = 'AccountFrame'): AccountFrame {
   const obj = validateObject(value, context);
   const height = validateNumber(obj['height'], `${context}.height`);
   const prevFrameHashRaw = obj['prevFrameHash'];
@@ -852,8 +852,8 @@ const validatePendingAccountResend = (
     throw new FinancialDataCorruptionError(`${context}.pendingAccountInput must carry a frame proposal`);
   }
   const proposal = validateObject(input['proposal'], `${context}.pendingAccountInput.proposal`);
-  const storedFrame = validateAccountFrame(pendingFrame, `${context}.pendingFrame`);
-  const proposedFrame = validateAccountFrame(proposal['frame'], `${context}.pendingAccountInput.proposal.frame`);
+  const storedFrame = decodeAccountFrame(pendingFrame, `${context}.pendingFrame`);
+  const proposedFrame = decodeAccountFrame(proposal['frame'], `${context}.pendingAccountInput.proposal.frame`);
   if (safeStringify(proposedFrame) !== safeStringify(storedFrame)) {
     throw new FinancialDataCorruptionError(
       `${context}.pendingAccountInput proposal must exactly match pendingFrame`,
@@ -903,7 +903,7 @@ export function validateAccountState(value: unknown, context = 'AccountState'): 
     obj as unknown as Pick<AccountState, 'mempool'>,
     `${context}.mempool`,
   );
-  validateAccountFrame(obj['currentFrame'], `${context}.currentFrame`);
+  decodeAccountFrame(obj['currentFrame'], `${context}.currentFrame`);
   validateMapInstance(obj['deltas'], `${context}.deltas`);
   validateMapInstance(obj['locks'], `${context}.locks`);
   validateMapInstance(obj['swapOffers'], `${context}.swapOffers`);

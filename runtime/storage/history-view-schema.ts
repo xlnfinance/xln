@@ -1,5 +1,5 @@
 import {
-  validateAccountFrame,
+  decodeAccountFrame,
   validateConsensusConfig,
   validateProposedEntityFrame,
 } from '../validation-utils';
@@ -144,7 +144,7 @@ export const validateStoredAccountFrameValue = (
   );
   return {
     source: record['source'],
-    frame: validateAccountFrame(frameRecord, `HistoryView.AccountFrame[${accountHeight}]`),
+    frame: decodeAccountFrame(frameRecord, `HistoryView.AccountFrame[${accountHeight}]`),
     runtimeHeight: requireBoundaryInteger(
       record['runtimeHeight'],
       `HISTORY_VIEW_ACCOUNT_FRAME_RUNTIME_HEIGHT_INVALID:height=${accountHeight}`,

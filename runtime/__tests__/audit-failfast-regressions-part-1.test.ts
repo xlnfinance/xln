@@ -9,7 +9,7 @@ import {
   HTLC_ENFORCEMENT_RESERVE_MS,
   isHtlcSecretEnforcementWindowClosed,
   proposeAccountFrame,
-  validateAccountFrame,
+  isWithinAccountFrameBounds,
 } from '../account/consensus/index';
 
 import { computeAccountStateRoot, computeAccountStateRootCold } from '../account/state-root';

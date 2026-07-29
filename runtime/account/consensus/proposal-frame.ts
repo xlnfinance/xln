@@ -1,7 +1,7 @@
 import type { AccountFrame, AccountState, AccountTx } from '../../types';
 import { HEAVY_LOGS } from '../../utils';
 import { safeStringify } from '../../protocol/serialization';
-import { validateAccountFrame } from '../../validation-utils';
+import { decodeAccountFrame } from '../../validation-utils';
 import { createStructuredLogger } from '../../infra/logger';
 import {
   createFrameHash,
@@ -115,7 +115,7 @@ export const buildProposalFrame = async (
 
   let frame: AccountFrame;
   try {
-    frame = validateAccountFrame(frameData, 'proposeAccountFrame');
+    frame = decodeAccountFrame(frameData, 'proposeAccountFrame');
   } catch (error) {
     accountLog.warn('frame.validation_failed', {
       error: error instanceof Error ? error.message : String(error),

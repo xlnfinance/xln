@@ -3,7 +3,7 @@ import { expect, test } from 'bun:test';
 import { assertAccountFrameDeltaIntegrity, deriveAccountFrameOffdeltas, deriveAccountFrameTokenIds } from '../account/frame';
 import { canonicalAccountTxForFrameHash } from '../account/consensus/frame';
 import type { AccountFrame, Delta } from '../types';
-import { validateAccountFrame } from '../validation-utils';
+import { decodeAccountFrame } from '../validation-utils';
 
 const delta = (tokenId: number, offdelta: bigint): Delta => ({
   tokenId,
@@ -14,6 +14,8 @@ const delta = (tokenId: number, offdelta: bigint): Delta => ({
   rightCreditLimit: 0n,
   leftAllowance: 0n,
   rightAllowance: 0n,
+  leftHold: 0n,
+  rightHold: 0n,
 });
 
 const frame = (deltas: Delta[]): AccountFrame => ({
@@ -48,7 +50,7 @@ test('AccountFrame rejects malformed delta entries', () => {
 test('AccountFrame validation rejects malformed delta entries', () => {
   const broken = frame([delta(1, 5n)]);
   (broken.deltas[0] as unknown as { tokenId: string }).tokenId = '1';
-  expect(() => validateAccountFrame(broken)).toThrow('Delta validation failed');
+  expect(() => decodeAccountFrame(broken)).toThrow('Delta validation failed');
 });
 
 test('Account frame hashing rejects a malformed J-claim height', () => {

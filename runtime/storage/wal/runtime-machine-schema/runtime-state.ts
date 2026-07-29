@@ -1,4 +1,4 @@
-import { validateAccountFrame } from '../../../validation-utils';
+import { decodeAccountFrame } from '../../../validation-utils';
 import { validateJInputs } from './j';
 import {
   validateNumberedRecord,
@@ -79,7 +79,7 @@ const validatePendingIngress = (value: unknown, code: string): void => {
   }
 };
 
-const validateAccountFrameRecord = (value: unknown, code: string): void => {
+const assertAccountFrameRecord = (value: unknown, code: string): void => {
   const record = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(
     record,
@@ -97,7 +97,7 @@ const validateAccountFrameRecord = (value: unknown, code: string): void => {
     'height', 'timestamp', 'jHeight', 'accountTxs', 'prevFrameHash',
     'accountStateRoot', 'stateHash', 'deltas',
   ], ['byLeft'], `${code}_FRAME_FIELDS`);
-  validateAccountFrame(frame, code);
+  decodeAccountFrame(frame, code);
   if (record['runtimeHeight'] !== undefined) requireBoundaryInteger(record['runtimeHeight'], `${code}_RUNTIME_HEIGHT`);
   if (record['timestamp'] !== undefined) requireBoundaryInteger(record['timestamp'], `${code}_TIMESTAMP`);
 };
@@ -169,7 +169,7 @@ export const validateDurableRuntimeState = (value: unknown, code: string): void 
       if (stored['id'] !== id) throw new Error(`${code}_SECURITY_INCIDENT_KEY_MISMATCH`);
     }
   }
-  if (state['pendingHistoryRecords'] !== undefined) requireArray(state['pendingHistoryRecords'], `${code}_HISTORY_VIEW`).forEach((entry, index) => validateAccountFrameRecord(entry, `${code}_HISTORY_VIEW_${index}`));
+  if (state['pendingHistoryRecords'] !== undefined) requireArray(state['pendingHistoryRecords'], `${code}_HISTORY_VIEW`).forEach((entry, index) => assertAccountFrameRecord(entry, `${code}_HISTORY_VIEW_${index}`));
   if (state['deferredNetworkMeta'] !== undefined) validateStringMap(state['deferredNetworkMeta'], `${code}_DEFERRED_NETWORK`, (entry, entryCode) => {
     const meta = requireBoundaryRecord(entry, entryCode);
     requireExactBoundaryKeys(meta, ['attempts', 'nextRetryAt'], ['manual'], `${entryCode}_FIELDS`);

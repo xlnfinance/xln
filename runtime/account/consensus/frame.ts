@@ -17,14 +17,14 @@ export const MAX_ACCOUNT_FRAME_TXS = LIMITS.ACCOUNT_MEMPOOL_SIZE;
 export const MAX_FRAME_FUTURE_SKEW_MS = ACCOUNT_NETWORK_ALLOWANCE_MS;
 export const MAX_FRAME_SIZE_BYTES = 10_000_000;
 
-export function validateAccountFrame(
+export function isWithinAccountFrameBounds(
   frame: AccountFrame,
   currentTimestamp?: number,
 ): boolean {
-  return getAccountFrameValidationError(frame, currentTimestamp) === '';
+  return getAccountFrameBoundsError(frame, currentTimestamp) === '';
 }
 
-export function getAccountFrameValidationError(
+export function getAccountFrameBoundsError(
   frame: AccountFrame,
   currentTimestamp?: number,
 ): string {
