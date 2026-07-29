@@ -260,8 +260,7 @@ export const applyRuntimeStorageChanges = (env: RuntimeState, changes: readonly 
   }
 };
 
-export const applyStorageChanges = (
-  env: RuntimeState,
+export const applyEntityStorageChanges = (
   state: EntityState,
   changes: readonly RuntimeOverlayRecord[],
 ): void => {
@@ -271,6 +270,14 @@ export const applyStorageChanges = (
       refreshQueuedAccountIndex(state, change.counterpartyId);
     }
   }
+};
+
+export const applyStorageChanges = (
+  env: RuntimeState,
+  state: EntityState,
+  changes: readonly RuntimeOverlayRecord[],
+): void => {
+  applyEntityStorageChanges(state, changes);
   applyRuntimeStorageChanges(env, changes);
 };
 

@@ -21,7 +21,7 @@ import {
 import { splitRoutedOutputByDeliveryLane } from '../output-routing';
 import { assertScheduledWakeTxAuthorized } from '../scheduled-wake';
 import { validateRuntimeInputShapeAndLimits } from '../input-validation';
-import { selectPotentialAtomicCrossJInputIndexes } from './cross-j-preflight';
+import { selectPotentialAtomicCrossJInputIndexes } from './cross-j-atomic-admission';
 
 const runtimeLog = createStructuredLogger('runtime');
 

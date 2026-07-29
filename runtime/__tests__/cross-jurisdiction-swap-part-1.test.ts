@@ -35,7 +35,7 @@ import { prepareLocallyAuthoredEntityTxs } from '../entity/command';
 import {
   createEmptyEnv,
   handleInboundP2PEntityInputs,
-  prepareAtomicCrossJAccountInputs,
+  admitAtomicCrossJAccountInputs,
   submitCrossJurisdictionIntent,
   submitCrossJurisdictionSwap,
 } from '../runtime';
@@ -942,6 +942,7 @@ describe('cross-jurisdiction hashledger swap', () => {
 
     const saturated = await applyMergedEntityInputs(saturatedEnv, [sourceInput], [], {
       isReplay: false,
+      mode: 'commit',
       routingDeps: makeLocalCrossJRoutingDeps(),
     });
     expect(saturated.appliedEntityInputs.map(input => input.entityId)).toEqual([sourceHub]);
@@ -954,6 +955,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     targetState.crossJurisdictionSwaps?.set(reverseIntent.orderId, reverseIntent);
     const pass = await applyMergedEntityInputs(env, [sourceInput, reverseInput], [], {
       isReplay: false,
+      mode: 'commit',
       routingDeps: makeLocalCrossJRoutingDeps(),
     });
 
@@ -1001,7 +1003,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         { entityId: targetHub, signerId: targetHubSigner, entityTxs: [] },
       ],
       [],
-      { isReplay: false, routingDeps: makeLocalCrossJRoutingDeps() },
+      { isReplay: false, mode: 'commit', routingDeps: makeLocalCrossJRoutingDeps() },
     );
     const sourceAccount = env.eReplicas.get(`${sourceHub}:${sourceHubSigner}`)!.state.accounts.get(sourceUser)!;
     const targetAccount = env.eReplicas.get(`${targetHub}:${targetHubSigner}`)!.state.accounts.get(targetUser)!;
@@ -1153,7 +1155,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         },
       ],
       [],
-      { isReplay: false, routingDeps: makeLocalCrossJRoutingDeps() },
+      { isReplay: false, mode: 'commit', routingDeps: makeLocalCrossJRoutingDeps() },
     );
     expect(hubProposalPass.entityOutbox).toEqual([]);
     const hubWakePass = await applyMergedEntityInputs(
@@ -1163,7 +1165,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         { entityId: targetHub, signerId: targetHubSigner, entityTxs: [] },
       ],
       [],
-      { isReplay: false, routingDeps: makeLocalCrossJRoutingDeps() },
+      { isReplay: false, mode: 'commit', routingDeps: makeLocalCrossJRoutingDeps() },
     );
     expect(hubWakePass.entityOutbox.map(output => output.entityId).sort()).toEqual([sourceUser, targetUser].sort());
 
@@ -1346,7 +1348,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         (sum, incident) => sum + incident.occurrences,
         0,
       );
-      const rejected = await prepareAtomicCrossJAccountInputs(
+      const rejected = await admitAtomicCrossJAccountInputs(
         userEnv,
         [...corrupted, ordinaryUserInput],
         [],
@@ -1369,7 +1371,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     );
     if (!corruptNewestTarget) throw new Error('TEST_CROSS_J_NEWEST_TARGET_COHORT_MISSING');
     corruptNewestTarget.sourceRuntimeFrame!.height += 1;
-    const retainedOlderCohort = await prepareAtomicCrossJAccountInputs(
+    const retainedOlderCohort = await admitAtomicCrossJAccountInputs(
       userEnv,
       validThenCorruptCohorts,
       [],
@@ -1380,7 +1382,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(retainedOlderCohort.inputs).toHaveLength(2);
     expect(retainedOlderCohort.inputs.every(input => input.sourceRuntimeFrame?.height === 41)).toBe(true);
 
-    const preparedUserInputs = await prepareAtomicCrossJAccountInputs(
+    const preparedUserInputs = await admitAtomicCrossJAccountInputs(
       userEnv,
       proposals,
       [],
@@ -1389,6 +1391,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     );
     const userAckPass = await applyMergedEntityInputs(userEnv, mergeEntityInputs(preparedUserInputs.inputs), [], {
       isReplay: false,
+      mode: 'commit',
       routingDeps: makeLocalCrossJRoutingDeps(),
     });
     expect(userAckPass.entityOutbox.map(output => output.entityId).sort()).toEqual([sourceHub, targetHub].sort());
@@ -1476,7 +1479,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         (sum, incident) => sum + incident.occurrences,
         0,
       );
-      const rejected = await prepareAtomicCrossJAccountInputs(
+      const rejected = await admitAtomicCrossJAccountInputs(
         hubEnv,
         [...corrupted, ordinaryHubInput],
         [],
@@ -1536,7 +1539,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(
       dueWake.entityTxs?.flatMap(tx => (tx.type === 'scheduledWake' ? tx.data.jobs.map(job => job.id) : [])),
     ).toContain('maintainPendingAccounts');
-    const preparedHubInputsWithWake = await prepareAtomicCrossJAccountInputs(
+    const preparedHubInputsWithWake = await admitAtomicCrossJAccountInputs(
       hubEnv,
       mergeEntityInputs([...acknowledgements, dueWake]),
       [],
@@ -1552,7 +1555,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       preparedHubInputsWithWake.inputs.some(input => input.entityTxs?.some(tx => tx.type === 'scheduledWake')),
     ).toBe(true);
 
-    const preparedHubInputs = await prepareAtomicCrossJAccountInputs(
+    const preparedHubInputs = await admitAtomicCrossJAccountInputs(
       hubEnv,
       acknowledgements,
       [],
@@ -1561,6 +1564,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     );
     const hubAckPass = await applyMergedEntityInputs(hubEnv, mergeEntityInputs(preparedHubInputs.inputs), [], {
       isReplay: false,
+      mode: 'commit',
       routingDeps: makeLocalCrossJRoutingDeps(),
     });
     expect(

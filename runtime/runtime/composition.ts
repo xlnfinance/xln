@@ -32,8 +32,8 @@ import {
   runtimeInputHasQueuedWork,
 } from './frame/transaction';
 import {
-  prepareAtomicCrossJAccountInputs,
-} from './frame/cross-j-preflight';
+  admitAtomicCrossJAccountInputs,
+} from './frame/cross-j-atomic-admission';
 import { createRuntimeInputReducer } from './frame/input-reducer';
 import { createRuntimeProcessor } from './frame/process';
 import { clearRuntimeDatabases } from './storage-admin';
@@ -52,7 +52,7 @@ import {
   notifyRuntimeStateChanged,
 } from './frame/notifications';
 
-export { prepareAtomicCrossJAccountInputs };
+export { admitAtomicCrossJAccountInputs };
 
 let processRuntimeImpl: ReturnType<typeof createRuntimeProcessor> | undefined;
 

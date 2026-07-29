@@ -26,6 +26,7 @@ import { DEBUG, getPerfMs } from '../utils';
 import { createStructuredLogger, logError, shortId } from '../infra/logger';
 import { classifyEntityInputApplyFailure, type EntityInputApplyFailureKind } from '../entity/tx/invariant-errors';
 import {
+  applyEntityStorageChanges,
   applyStorageChanges,
   publishEntityCandidateEffects,
 } from './env-events';
@@ -121,6 +122,7 @@ type CrossJCommand = {
 
 export interface RuntimeEntityInputApplyOptions {
   isReplay: boolean;
+  mode: 'commit' | 'scratch';
   routingDeps: RuntimeEntityRoutingDeps;
   beforeEntityApply?: (entityId: string) => void;
 }
@@ -285,14 +287,21 @@ const collectCommittedEntityResult = (
   env: RuntimeState,
   replicaKey: string,
   result: Awaited<ReturnType<typeof applyEntityInputToReplica>>,
+  mode: RuntimeEntityInputApplyOptions['mode'],
   context: RuntimeEntityInputBatchContext,
 ): void => {
   env.eReplicas.set(replicaKey, result.nextReplica);
   // Entity consensus only describes committed effects. Runtime owns the live
   // aggregate state and is therefore the sole layer allowed to materialize
   // storage invalidations, history records, and host-visible notifications.
-  applyStorageChanges(env, result.nextReplica.state, result.storageChanges);
-  publishEntityCandidateEffects(env, result.candidateEffects);
+  if (mode === 'commit') {
+    applyStorageChanges(env, result.nextReplica.state, result.storageChanges);
+    publishEntityCandidateEffects(env, result.candidateEffects);
+  } else {
+    // Scratch validation executes the exact reducer but publishes no Runtime-owned
+    // history, overlay, security, or routing effects.
+    applyEntityStorageChanges(result.nextReplica.state, result.storageChanges);
+  }
   routeCommittedEntityOutputs(env, result.outputs, context);
   if (result.jOutputs.length === 0) return;
   entityInputLog.debug('j_outputs.collected', {
@@ -374,7 +383,7 @@ const drainImmediateCrossJurisdictionOutputs = async (
     const elapsedMs = Math.round(getPerfMs() - startedAt);
     context.immediateCrossJApplyMs += elapsedMs;
     recordEntityInputProfile(context, entityInput, actualSignerId, elapsedMs, result, { localEventRound });
-    collectCommittedEntityResult(env, replicaKey, result, context);
+    collectCommittedEntityResult(env, replicaKey, result, options.mode, context);
   }
 };
 
@@ -566,7 +575,7 @@ const applyExternalEntityInput = async (
       : [],
   });
   context.entityFrameCommitted ||= result.entityFrameCommitted;
-  if (isCommittedEntityInput(result.outcome) && entityInput.from) {
+  if (options.mode === 'commit' && isCommittedEntityInput(result.outcome) && entityInput.from) {
     const routeHints = new Set([
       ...collectAppliedAccountSenderHints(entityInput),
       ...collectCrossJurisdictionRemoteEntityHints(env, entityInput, entityInput.from, options.routingDeps),
@@ -581,7 +590,7 @@ const applyExternalEntityInput = async (
   if (isCommittedEntityInput(result.outcome)) {
     context.appliedEntityInputs.push(result.appliedInput);
   }
-  collectCommittedEntityResult(env, replicaKey, result, context);
+  collectCommittedEntityResult(env, replicaKey, result, options.mode, context);
 };
 
 export const applyMergedEntityInputs = async (

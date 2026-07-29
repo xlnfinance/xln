@@ -50,6 +50,7 @@ import { enableStrictScenario } from '../scenarios/helpers';
 import { cloneAccountInputWithoutPostCommitHankos } from '../entity/consensus/hanko-witness';
 import { markLocalJAuthorityRuntimeTx } from '../jurisdiction/registration-evidence';
 import { readStorageFrameRecord } from '../storage/read';
+import { forkRuntimeEntityScratchEnv } from '../runtime/frame/clone';
 
 const TEST_RUN_ID = `${process.pid}-${Date.now()}`;
 const cleanupNamespaces: string[] = [];
@@ -289,6 +290,40 @@ describe('runtime frame atomicity', () => {
     await expect(waitingProcess).rejects.toThrow('RUNTIME_PROCESS_HALTED');
     expect(env.height).toBe(heightBefore);
     expect(env.runtimeState?.processingPromise).toBeNull();
+  });
+
+  test('cross-j admission scratch forks only the Runtime envelope and replica map', () => {
+    const env = createEmptyEnv(`runtime cross-j admission scratch ${TEST_RUN_ID}`);
+    const replica = installValidatorReplica(env, address('41'), address('42'));
+    env.frameLogs.push({
+      id: 0,
+      timestamp: env.timestamp,
+      level: 'info',
+      category: 'system',
+      message: 'committed',
+    });
+    env.runtimeState!.cleanLogs = ['committed'];
+    env.runtimeState!.pendingAuditEvents = [{ message: 'committed' }];
+
+    const scratch = forkRuntimeEntityScratchEnv(env);
+    const replicaKey = `${replica.entityId}:${replica.signerId}`;
+
+    expect(scratch.eReplicas).not.toBe(env.eReplicas);
+    expect(scratch.eReplicas.get(replicaKey)).toBe(replica);
+    expect(scratch.eReplicas.get(replicaKey)?.state).toBe(replica.state);
+    expect(scratch.runtimeState).not.toBe(env.runtimeState);
+    expect(scratch.runtimeState?.cleanLogs).not.toBe(env.runtimeState?.cleanLogs);
+    expect(scratch.runtimeState?.pendingAuditEvents).not.toBe(
+      env.runtimeState?.pendingAuditEvents,
+    );
+
+    scratch.eReplicas.delete(replicaKey);
+    scratch.warn('network', 'SCRATCH_ONLY_WARNING');
+
+    expect(env.eReplicas.get(replicaKey)).toBe(replica);
+    expect(env.frameLogs).toHaveLength(1);
+    expect(env.runtimeState?.cleanLogs).toEqual(['committed']);
+    expect(env.runtimeState?.pendingAuditEvents).toEqual([{ message: 'committed' }]);
   });
 
   test('frame input cloning preserves every shared board config without cross-message aliases', () => {

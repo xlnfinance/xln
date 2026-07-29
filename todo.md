@@ -474,17 +474,16 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   Remove only measured full scans/clones/duplicate crypto; publish deterministic
   1/1,000-tx and growing-hub median/p95/MAD budgets from a clean Bun cache.
   Measure the duplicate Account wake scan, per-frame verified-profile clone and
-  repeated cross-J preview application; replace them only with dirty/versioned
+  repeated cross-J atomic-admission scratch execution; replace them only with dirty/versioned
   indexes or structural preflight proven byte-identical. The first indexes are
   one ephemeral `proposableAccountKeys` queue and a canonical
   `(entityId, signerId) → replicaKey` map rebuilt on restore/import. Record
   `frameCloneMs`, cloned replica/account/profile counts, estimated cloned bytes
-  and cross-J preview clone time. A frame touching one account must not scale
+  and cross-J scratch execution time. A frame touching one account must not scale
   linearly when untouched accounts grow from 10,000 to 100,000.
-  Remove the remaining full Runtime clone in atomic cross-J preflight, replace
-  the full settlement refresh and cross-book/order scans with explicit dirty
-  indexes, and benchmark signature/verification/Hanko throughput separately
-  from reducers before claiming 100k tx/s.
+  Replace the full settlement refresh and cross-book/order scans with explicit
+  dirty indexes, and benchmark signature/verification/Hanko throughput
+  separately from reducers before claiming 100k tx/s.
 - [ ] Replace case-insensitive Account scans and repeated signer/pair lookups
   with canonical direct indexes, including exact cross-J replica/account
   descriptors; then introduce Runtime→Entity→Account COW only behind

@@ -11,7 +11,7 @@ import {
   selectPotentialCrossJAccountInputPairs,
   type RuntimeEntityRoutingDeps,
 } from '../entity-routing';
-import { cloneRuntimeFrameWorkingEnv } from './clone';
+import { forkRuntimeEntityScratchEnv } from './clone';
 import {
   recordRejectedAtomicCrossJInputs,
   summarizeAtomicCrossJAccountInput,
@@ -108,43 +108,46 @@ const groupAtomicPairsFirst = (
   return grouped;
 };
 
-const describeFailedPreview = (
-  preview: Awaited<ReturnType<typeof applyMergedEntityInputs>>,
+const describeFailedScratchValidation = (
+  scratchResult: Awaited<ReturnType<typeof applyMergedEntityInputs>>,
   failedIndexes: Set<number>,
 ): string =>
   failedIndexes.size === 0 ? '' : safeStringify({
-    outcomes: preview.inputOutcomes.map(entry => ({
+    outcomes: scratchResult.inputOutcomes.map(entry => ({
       inputIndex: entry.inputIndex,
       kind: entry.outcome.kind,
       entityFrameCommitted: entry.entityFrameCommitted,
       committedAccountFrames: entry.committedAccountFrames,
     })),
-    localCrossJurisdictionEvents: preview.localCrossJurisdictionEventTrace.map(input => ({
+    localCrossJurisdictionEvents: scratchResult.localCrossJurisdictionEventTrace.map(input => ({
       entityId: input.entityId,
       txTypes: getEffectiveEntityInputTxs(input).map(tx => tx.type),
     })),
   });
 
-const previewAtomicPairs = async (
+const validateAtomicPairsInScratchState = async (
   env: RuntimeState,
   selection: CrossJSelection,
   initialJOutbox: JInput[],
   routingDeps: RuntimeEntityRoutingDeps,
 ): Promise<{ failedIndexes: Set<number>; failureDetail: string }> => {
   try {
-    const preview = await applyMergedEntityInputs(
-      cloneRuntimeFrameWorkingEnv(env),
+    const scratchResult = await applyMergedEntityInputs(
+      forkRuntimeEntityScratchEnv(env),
       selection.inputs,
       initialJOutbox,
-      { isReplay: false, routingDeps },
+      { isReplay: false, mode: 'scratch', routingDeps },
     );
     const failedIndexes = atomicCrossJPairIndexesThatDidNotCommit(
       selection.pairs,
-      preview.inputOutcomes,
+      scratchResult.inputOutcomes,
     );
     return {
       failedIndexes,
-      failureDetail: describeFailedPreview(preview, failedIndexes),
+      failureDetail: describeFailedScratchValidation(
+        scratchResult,
+        failedIndexes,
+      ),
     };
   } catch (error) {
     if (!(error instanceof RuntimeEntityInputApplyError) || !error.isRemoteIngress) throw error;
@@ -194,7 +197,7 @@ const rejectedPairIndexes = (
     return indexes.some(inputIndex => failedIndexes.has(inputIndex)) ? indexes : [];
   });
 
-export const prepareAtomicCrossJAccountInputs = async (
+export const admitAtomicCrossJAccountInputs = async (
   env: RuntimeState,
   inputs: readonly RoutedEntityInput[],
   initialJOutbox: JInput[],
@@ -203,7 +206,7 @@ export const prepareAtomicCrossJAccountInputs = async (
 ): Promise<{ inputs: RoutedEntityInput[]; pairs: CrossJSelection['pairs'] }> => {
   const initial = selectMatchedCrossJAccountInputPairs(env, inputs);
   if (initial.pairs.length > 0) {
-    runtimeLog.info('crossj.atomic_pair_preflight', {
+    runtimeLog.info('crossj.atomic_pair_admission', {
       inputCount: inputs.length,
       pairCount: initial.pairs.length,
       pairs: initial.pairs.map(pair => ({
@@ -241,26 +244,31 @@ export const prepareAtomicCrossJAccountInputs = async (
     const pairedCount = selection.pairs.length * 2;
     const paired = selectMatchedCrossJAccountInputPairs(env, selection.inputs.slice(0, pairedCount));
     if (paired.droppedInputIndexes.length > 0 || paired.pairs.length !== selection.pairs.length) {
-      throw new Error('RUNTIME_CROSS_J_ACCOUNT_PAIR_PREFLIGHT_GROUP_INVALID');
+      throw new Error('RUNTIME_CROSS_J_ACCOUNT_PAIR_ADMISSION_GROUP_INVALID');
     }
-    const preview = await previewAtomicPairs(env, paired, initialJOutbox, routingDeps);
-    addAlreadyCommittedPairIndexes(env, paired, preview.failedIndexes);
-    if (preview.failedIndexes.size === 0) return selection;
+    const validation = await validateAtomicPairsInScratchState(
+      env,
+      paired,
+      initialJOutbox,
+      routingDeps,
+    );
+    addAlreadyCommittedPairIndexes(env, paired, validation.failedIndexes);
+    if (validation.failedIndexes.size === 0) return selection;
 
-    env.warn('network', 'CROSS_J_ACCOUNT_PAIR_PREVIEW_REJECTED', {
+    env.warn('network', 'CROSS_J_ACCOUNT_PAIR_ADMISSION_REJECTED', {
       attempt,
       pairCount: paired.pairs.length,
-      droppedInputIndexes: [...preview.failedIndexes].sort((left, right) => left - right),
-      failureDetail: preview.failureDetail,
+      droppedInputIndexes: [...validation.failedIndexes].sort((left, right) => left - right),
+      failureDetail: validation.failureDetail,
     });
     recordRejectedAtomicCrossJInputs(
       env,
       paired.inputs,
-      rejectedPairIndexes(paired, preview.failedIndexes),
-      'CROSS_J_ACCOUNT_PAIR_PREVIEW_REJECTED',
+      rejectedPairIndexes(paired, validation.failedIndexes),
+      'CROSS_J_ACCOUNT_PAIR_ADMISSION_REJECTED',
       'A signed cross-j Account pair failed atomic scratch-state validation and was ignored',
     );
-    retained = selection.inputs.filter((_input, inputIndex) => !preview.failedIndexes.has(inputIndex));
+    retained = selection.inputs.filter((_input, inputIndex) => !validation.failedIndexes.has(inputIndex));
   }
-  throw new Error('RUNTIME_CROSS_J_ACCOUNT_PAIR_PREFLIGHT_DID_NOT_CONVERGE');
+  throw new Error('RUNTIME_CROSS_J_ACCOUNT_PAIR_ADMISSION_DID_NOT_CONVERGE');
 };

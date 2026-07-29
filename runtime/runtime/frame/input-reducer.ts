@@ -22,8 +22,8 @@ import { applyReliableDeliveryReceipts, type ReliableIngressCommit } from '../re
 import { applyRuntimeTx } from '../tx-handlers';
 import {
   atomicCrossJPairIndexesThatDidNotCommit,
-  prepareAtomicCrossJAccountInputs,
-} from './cross-j-preflight';
+  admitAtomicCrossJAccountInputs,
+} from './cross-j-atomic-admission';
 import {
   markCommittedAtomicCrossJAckOutputs,
   summarizeAtomicCrossJAccountInput,
@@ -155,7 +155,7 @@ const applyRuntimeTransactions = async (
 };
 
 const logAtomicCrossJCommit = (
-  prepared: Awaited<ReturnType<typeof prepareAtomicCrossJAccountInputs>>,
+  prepared: Awaited<ReturnType<typeof admitAtomicCrossJAccountInputs>>,
   batch: Awaited<ReturnType<typeof applyMergedEntityInputs>>,
 ): void => {
   if (prepared.pairs.length === 0) return;
@@ -177,7 +177,7 @@ const logAtomicCrossJCommit = (
 
 type PreparedRuntimeIngress = ReturnType<typeof prepareRuntimeInputIngress>;
 type AppliedEntityBatch = Awaited<ReturnType<typeof applyMergedEntityInputs>>;
-type PreparedAtomicCrossJ = Awaited<ReturnType<typeof prepareAtomicCrossJAccountInputs>>;
+type PreparedAtomicCrossJ = Awaited<ReturnType<typeof admitAtomicCrossJAccountInputs>>;
 
 const applyRuntimeEntityBatch = async (
   env: RuntimeState,
@@ -199,16 +199,17 @@ const applyRuntimeEntityBatch = async (
 
   const initialJOutbox = [...ingress.jOutbox, ...runtimeJOutbox];
   const routingDeps = deps.getRoutingDeps();
-  const prepared = await prepareAtomicCrossJAccountInputs(
+  const prepared = await admitAtomicCrossJAccountInputs(
     env,
     mergedInputs,
     initialJOutbox,
     isReplay,
     routingDeps,
   );
-  profile.mark('atomicCrossJPreflight');
+  profile.mark('atomicCrossJAdmission');
   const batch = await applyMergedEntityInputs(env, prepared.inputs, initialJOutbox, {
     isReplay,
+    mode: 'commit',
     routingDeps,
     beforeEntityApply: lineage.beforeEntityApply,
   });

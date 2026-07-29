@@ -2418,6 +2418,7 @@ describe('audit fail-fast regressions', () => {
       [],
       {
         isReplay: false,
+        mode: 'commit',
         routingDeps: {
           ensureRuntimeState: targetEnv => targetEnv.runtimeState!,
           enqueueRuntimeInputs: () => {},

@@ -149,6 +149,44 @@ export const cloneRuntimeFrameWorkingEnv = (source: RuntimeState): RuntimeState 
 };
 
 /**
+ * Build the tiny scratch overlay used by cross-j atomic admission.
+ *
+ * Entity input application replaces replica references instead of mutating
+ * certified Entity State. Admission therefore needs its own replica map, not
+ * a clone of every Entity and Account in the Runtime. Runtime-local log buffers
+ * are copied because malformed remote input may emit diagnostics while being
+ * rejected. Every other shared field is read-only in scratch mode.
+ */
+export const forkRuntimeEntityScratchEnv = (source: RuntimeState): RuntimeState => {
+  const runtimeState = source.runtimeState
+    ? {
+        ...source.runtimeState,
+        ...(source.runtimeState.logState
+          ? { logState: { ...source.runtimeState.logState } }
+          : {}),
+        ...(source.runtimeState.cleanLogs
+          ? { cleanLogs: [...source.runtimeState.cleanLogs] }
+          : {}),
+        ...(source.runtimeState.pendingAuditEvents
+          ? {
+              pendingAuditEvents: source.runtimeState.pendingAuditEvents.map(
+                event => structuredClone(event),
+              ),
+            }
+          : {}),
+      }
+    : {};
+  const scratch: RuntimeState = {
+    ...source,
+    eReplicas: new Map(source.eReplicas),
+    runtimeState,
+    frameLogs: structuredClone(source.frameLogs),
+  };
+  attachEventEmitters(scratch);
+  return scratch;
+};
+
+/**
  * Operational estimate of the deterministic payload copied for a frame.
  * It is intentionally opt-in because encoding the canonical snapshot adds
  * measurement cost. Shared process handles are excluded by the snapshot.

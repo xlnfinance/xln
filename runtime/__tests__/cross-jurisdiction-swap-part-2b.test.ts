@@ -35,7 +35,7 @@ import { prepareLocallyAuthoredEntityTxs } from '../entity/command';
 import {
   createEmptyEnv,
   handleInboundP2PEntityInputs,
-  prepareAtomicCrossJAccountInputs,
+  admitAtomicCrossJAccountInputs,
   submitCrossJurisdictionIntent,
   submitCrossJurisdictionSwap,
 } from '../runtime';
