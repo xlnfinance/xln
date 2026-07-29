@@ -4,14 +4,9 @@ import { assertSealedJBatchBinding } from '../jurisdiction/sealed-batch';
 import { assertEntityProviderActionJTxBinding } from '../entity/entity-provider-action';
 import type { JTx } from '../types';
 import type { BrowserVMProvider } from './browservm-provider';
-import type {
-  JAdapter,
-  JAdapterAddresses,
-  JBatchReceipt,
-  JEvent,
-  JSubmitResult,
-} from './types';
+import type { JAdapter, JAdapterAddresses, JBatchReceipt, JEvent, JSubmitResult } from './types';
 import { makeJAdapterFailureResult } from './failure';
+import { submitDebtEnforcement, submitMint } from './rpc-submit-basic';
 
 type BrowserVmSubmitContext = {
   chainId: number;
@@ -21,38 +16,16 @@ type BrowserVmSubmitContext = {
 
 type SubmitOptions = Parameters<JAdapter['submitTx']>[1];
 
-export const receiptFromEvents = (events: JEvent[]): JBatchReceipt => ({
-  txHash: events.find(event => event.transactionHash && event.transactionHash !== '0x')?.transactionHash ?? '0x',
-  blockNumber: events.reduce((maximum, event) => Math.max(maximum, Number(event.blockNumber || 0)), 0),
-  events,
-});
-
-const submitMint = async (
-  context: BrowserVmSubmitContext,
-  jTx: Extract<JTx, { type: 'mint' }>,
-): Promise<JSubmitResult> => {
-  const entityId = String(jTx.data.entityId || jTx.entityId || '');
-  const tokenId = Number(jTx.data.tokenId);
-  const amount = jTx.data.amount;
-  if (!entityId || !Number.isFinite(tokenId) || amount <= 0n) {
-    return { success: false, error: 'Invalid mint payload' };
+export const receiptFromEvents = (events: JEvent[]): JBatchReceipt => {
+  if (events.length === 0) {
+    throw new Error('J_ADAPTER_RECEIPT_EVENTS_EMPTY');
   }
-  const events = await context.browserVM.debugFundReserves(entityId, tokenId, amount);
-  return { success: true, events, blockNumber: receiptFromEvents(events).blockNumber };
-};
-
-const submitDebtEnforcement = async (
-  context: BrowserVmSubmitContext,
-  jTx: Extract<JTx, { type: 'debtEnforcement' }>,
-): Promise<JSubmitResult> => {
-  const entityId = String(jTx.entityId || '').toLowerCase();
-  const tokenId = Number(jTx.data.tokenId);
-  const maxIterations = BigInt(jTx.data.maxIterations);
-  if (!entityId || !Number.isInteger(tokenId) || tokenId < 0 || maxIterations <= 0n) {
-    return { success: false, error: 'Invalid debt enforcement payload' };
+  const txHash = events[0]!.transactionHash;
+  const blockNumber = events.reduce((maximum, event) => Math.max(maximum, event.blockNumber), 0);
+  if (!txHash || txHash === '0x' || blockNumber < 1) {
+    throw new Error(`J_ADAPTER_RECEIPT_COORDINATES_INVALID:${txHash}:${blockNumber}`);
   }
-  await context.browserVM.enforceDebts(entityId, tokenId, maxIterations);
-  return { success: true };
+  return { txHash, blockNumber, events };
 };
 
 type EntityProviderJTx = Extract<
@@ -78,16 +51,15 @@ const submitEntityProviderAction = async (
       entityProviderAddress: context.addresses.entityProvider,
       depositoryAddress: context.addresses.depository,
     });
-    const events =
-      await context.browserVM.submitEntityProviderAction(jTx.data.intent, jTx.data.hankoSignature, {
-        entityId: normalizeEntityId(jTx.entityId),
-        kind:
-          jTx.type === 'entityProviderTransfer'
-            ? 'entityTransferTokens'
-            : jTx.type === 'entityProviderReleaseControlShares'
-              ? 'releaseControlShares'
-              : 'cancelPendingAction',
-      });
+    const events = await context.browserVM.submitEntityProviderAction(jTx.data.intent, jTx.data.hankoSignature, {
+      entityId: normalizeEntityId(jTx.entityId),
+      kind:
+        jTx.type === 'entityProviderTransfer'
+          ? 'entityTransferTokens'
+          : jTx.type === 'entityProviderReleaseControlShares'
+            ? 'releaseControlShares'
+            : 'cancelPendingAction',
+    });
     const receipt = receiptFromEvents(events);
     return {
       success: true,
@@ -121,15 +93,15 @@ const submitBatch = async (
     const events =
       externalBatch && options.signerPrivateKey
         ? await context.browserVM.processBatchAs(
-            batchData.encodedBatch!,
-            batchData.hankoSignature!,
-            BigInt(batchData.entityNonce!),
+            batchData.encodedBatch,
+            batchData.hankoSignature,
+            BigInt(batchData.entityNonce),
             options.signerPrivateKey,
           )
         : await context.browserVM.processBatch(
-            batchData.encodedBatch!,
-            batchData.hankoSignature!,
-            BigInt(batchData.entityNonce!),
+            batchData.encodedBatch,
+            batchData.hankoSignature,
+            BigInt(batchData.entityNonce),
           );
     const receipt = receiptFromEvents(events);
     console.log(`✅ [JAdapter:browservm] Batch executed (${getBatchSize(batch)} ops) block=${receipt.blockNumber}`);
@@ -150,9 +122,15 @@ export const createBrowserVmSubmitTx =
     if (typeof options.timestamp === 'number') {
       context.browserVM.setBlockTimestamp(options.timestamp);
     }
-    if (jTx.type === 'mint') return submitMint(context, jTx);
+    if (jTx.type === 'mint') {
+      return submitMint(jTx, true, (entityId, tokenId, amount) =>
+        context.browserVM.debugFundReserves(entityId, tokenId, amount),
+      );
+    }
     if (jTx.type === 'debtEnforcement') {
-      return submitDebtEnforcement(context, jTx);
+      return submitDebtEnforcement(jTx, (entityId, tokenId, maxIterations) =>
+        context.browserVM.enforceDebts(entityId, tokenId, maxIterations),
+      );
     }
     if (
       jTx.type === 'entityProviderTransfer' ||

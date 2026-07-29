@@ -26,16 +26,10 @@ export type UntypedNonPayableMethod = {
   estimateGas: (...args: unknown[]) => Promise<bigint>;
   (...args: unknown[]): Promise<unknown>;
 };
-export type UntypedActionMethod = UntypedNonPayableMethod & {
-  staticCall: (...args: unknown[]) => Promise<unknown>;
-};
 
-export const watcherErrorMessage = (error: unknown): string =>
-  error instanceof Error ? error.message : String(error);
+export const watcherErrorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
-export const watcherErrorDetails = (
-  error: unknown,
-): Record<string, unknown> => {
+export const watcherErrorDetails = (error: unknown): Record<string, unknown> => {
   if (!(error instanceof Error)) return { raw: String(error) };
   const details = error as Error & {
     code?: unknown;
@@ -50,18 +44,12 @@ export const watcherErrorDetails = (
     shortMessage: details.shortMessage,
     info: details.info,
     cause:
-      details.cause instanceof Error
-        ? { name: details.cause.name, message: details.cause.message }
-        : details.cause,
+      details.cause instanceof Error ? { name: details.cause.name, message: details.cause.message } : details.cause,
   };
 };
 
-export const haltProcessForFatalWatcherError = (
-  fatalPayload: Record<string, unknown>,
-): void => {
-  const error = new Error(
-    `JADAPTER_WATCHER_FATAL:${safeStringify(fatalPayload)}`,
-  );
+export const haltProcessForFatalWatcherError = (fatalPayload: Record<string, unknown>): void => {
+  const error = new Error(`JADAPTER_WATCHER_FATAL:${safeStringify(fatalPayload)}`);
   if (runtimeIsBrowser) {
     setTimeout(() => {
       throw error;
@@ -75,24 +63,17 @@ export const haltProcessForFatalWatcherError = (
   throw error;
 };
 
-export const asFactoryRunner = (
-  runner: unknown,
-): Parameters<typeof Account__factory.connect>[1] =>
+export const asFactoryRunner = (runner: unknown): Parameters<typeof Account__factory.connect>[1] =>
   runner as Parameters<typeof Account__factory.connect>[1];
 
 const asFactorySigner = (runner: unknown): Signer => runner as Signer;
 
-export const makeAccountFactory = (runner: unknown): Account__factory =>
-  new Account__factory(asFactorySigner(runner));
+export const makeAccountFactory = (runner: unknown): Account__factory => new Account__factory(asFactorySigner(runner));
 
-export const makeHankoVerifierFactory = (
-  runner: unknown,
-): HankoVerifier__factory =>
+export const makeHankoVerifierFactory = (runner: unknown): HankoVerifier__factory =>
   new HankoVerifier__factory(asFactorySigner(runner));
 
-export const makeDeltaTransformerFactory = (
-  runner: unknown,
-): DeltaTransformer__factory =>
+export const makeDeltaTransformerFactory = (runner: unknown): DeltaTransformer__factory =>
   new DeltaTransformer__factory(asFactorySigner(runner));
 
 export const makeErc20MockFactory = (runner: unknown): ERC20Mock__factory =>
@@ -106,16 +87,12 @@ export const eventCarriers = (
     interface: contract.interface as ethers.Interface,
   }));
 
-export const asRpcTxResponse = (tx: unknown): RpcTxResponse =>
-  tx as RpcTxResponse;
+export const asRpcTxResponse = (tx: unknown): RpcTxResponse => tx as RpcTxResponse;
 
-export const asRpcReceipt = (receipt: unknown): RpcReceipt =>
-  receipt as RpcReceipt;
+export const asRpcReceipt = (receipt: unknown): RpcReceipt => receipt as RpcReceipt;
 
-export const applyGasHeadroom = (
-  value: bigint,
-  headroomBps: number,
-): bigint => (value * BigInt(headroomBps) + 9_999n) / 10_000n;
+export const applyGasHeadroom = (value: bigint, headroomBps: number): bigint =>
+  (value * BigInt(headroomBps) + 9_999n) / 10_000n;
 
 type ErrorWithMessage = { message?: unknown };
 

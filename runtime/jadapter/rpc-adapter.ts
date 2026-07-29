@@ -15,8 +15,7 @@ import {
 import { BLOCKCHAIN } from '../constants';
 import { normalizeEntityId } from '../entity/id';
 import { prepareSignedBatch } from '../hanko/batch';
-import { hashDisputeProofHankoPayload } from '../hanko/onchain-domain';
-import { decodeJBatch, getBatchSize, isBatchEmpty, preflightBatchForE2 } from '../jurisdiction/batch';
+import { decodeJBatch } from '../jurisdiction/batch';
 import { getCertifiedBoardStackKey } from '../jurisdiction/board-registry';
 import { requireUsableContractAddress } from '../jurisdiction/contract-address';
 import { getEntityCertifiedJAnchor, getValidatorJExpectedBlockHash } from '../jurisdiction/local-history';
@@ -24,9 +23,7 @@ import {
   buildCertifiedRegistrationEvidence,
   markLocalJAuthorityRuntimeTx,
 } from '../jurisdiction/registration-evidence';
-import { assertSealedJBatchBinding } from '../jurisdiction/sealed-batch';
 import { compareStableText, safeStringify } from '../protocol/serialization';
-import { resolveEntityProposerId } from '../runtime/entity-output-signer';
 import type { DisputeFinalizationEvidence, RuntimeState, JTx, RuntimeInput, RuntimeTx } from '../types';
 import {
   TOKEN_REGISTRATION_AMOUNT,
@@ -34,8 +31,8 @@ import {
   getDefaultTokenSupply,
 } from '../jurisdiction/default-tokens';
 import { extractCanonicalDepositoryEventArgs, parseKnownDepositoryLog } from './depository-event-codec';
-import { classifyJAdapterFailure, makeJAdapterFailureResult } from './failure';
-import { buildExternalTokenToReserveBatch, computeAccountKey, packTokenReference } from './helpers';
+import { makeJAdapterFailureResult } from './failure';
+import { buildExternalTokenToReserveBatch, packTokenReference } from './helpers';
 import { parseReceiptLogsToJEvents } from './j-event-log-decoder';
 import { CANONICAL_J_EVENTS } from '../jurisdiction/event-catalog';
 import { DEV_CHAIN_IDS } from './index';
@@ -47,12 +44,10 @@ import {
   PROCESS_BATCH_GAS_FLOOR,
   applyProcessBatchGasFloor,
   decodeDisputeFinalizationEvidenceCalldata,
-  decodeStandardSolidityRevertData,
   isTransientRpcUnavailableError,
   isTronChainId,
   prepareAuthenticatedWatcherIngress,
   resolveWatcherPollToBlock,
-  rpcErrorText,
   rpcLog,
   shouldEmitExternalWalletAllowanceDelta,
   shouldEmitExternalWalletBalanceDelta,
@@ -62,6 +57,7 @@ import {
   type TxFinalizationEvidence,
 } from './rpc-public';
 import { createRpcReadMethods } from './rpc-reads';
+import { createRpcTransactionSequencer } from './rpc-transaction-sequencer';
 import {
   firstAddress,
   isDebugEventEmitter,
@@ -103,6 +99,12 @@ import {
 } from './watcher';
 import { shouldAuditCanonicalWatcherState } from './watcher-poll-policy';
 import { submitDebtEnforcement, submitMint } from './rpc-submit-basic';
+import {
+  applyBatchFeeOverrides,
+  planRpcBatchSubmission,
+} from './rpc-batch-plan';
+import { buildDisputeStartDebug } from './rpc-batch-dispute-debug';
+import { preflightProcessBatch } from './rpc-batch-preflight';
 import { submitEntityProviderAction } from './rpc-submit-entity-provider';
 import {
   applyGasHeadroom,
@@ -111,7 +113,6 @@ import {
   asRpcTxResponse,
   eventCarriers,
   haltProcessForFatalWatcherError,
-  isNonceSyncError,
   makeAccountFactory,
   makeDeltaTransformerFactory,
   makeErc20MockFactory,
@@ -254,7 +255,7 @@ export async function createRpcAdapter(
     batchSignerPrivateKey?: string,
   ): Promise<JBatchReceipt> => {
     const activeSigner = txSigner ?? signer;
-    return runSerializedBatchFor(activeSigner, async () => {
+    return transactionSequencer.runFor(activeSigner, async () => {
       try {
         const chainId = BigInt(config.chainId);
         const depositoryAddress = await depository.getAddress();
@@ -279,7 +280,7 @@ export async function createRpcAdapter(
 
         const tx = await depositoryWithSigner.processBatch(encodedBatch, hankoData, nextNonce, {
           gasLimit,
-          nonce: await allocateSerializedSignerNonceFor(activeSigner),
+          nonce: await transactionSequencer.allocateFor(activeSigner),
           ...feeOverrides,
         });
         const receipt = await waitForReceipt(tx, 'processBatch');
@@ -291,7 +292,7 @@ export async function createRpcAdapter(
           events,
         };
       } catch (error) {
-        await resetSerializedSignerNonceFor(activeSigner);
+        await transactionSequencer.resetFor(activeSigner);
         throw error;
       }
     });
@@ -338,7 +339,7 @@ export async function createRpcAdapter(
         ? options.minimumGasLimit
         : estimatedGasLimit;
     if (options.resetSignerNonce) {
-      maybeResetSignerNonce();
+      await transactionSequencer.reset();
     }
     const feeOverrides = await buildFeeOverrides();
     const overrides: TxOverrides =
@@ -522,110 +523,13 @@ export async function createRpcAdapter(
     );
   };
 
-  // Serialize batch submissions per signer EOA to avoid nonce races across concurrent entity batches.
-  const batchSubmitQueues = new Map<string, Promise<unknown>>();
-  const nextSerializedSignerNonces = new Map<string, number>();
-  const getSerializedSignerKey = async (activeSigner: Signer): Promise<string> => {
-    return (await activeSigner.getAddress()).toLowerCase();
-  };
-  const runSerializedBatchFor = async <T>(activeSigner: Signer, work: () => Promise<T>): Promise<T> => {
-    const signerKey = await getSerializedSignerKey(activeSigner);
-    const previous = batchSubmitQueues.get(signerKey) ?? Promise.resolve();
-    const next = previous.catch(() => undefined).then(work);
-    batchSubmitQueues.set(
-      signerKey,
-      next.finally(() => {
-        if (batchSubmitQueues.get(signerKey) === next) {
-          batchSubmitQueues.delete(signerKey);
-        }
-      }),
-    );
-    return next;
-  };
-  const runSerializedBatch = async <T>(work: () => Promise<T>): Promise<T> => {
-    return runSerializedBatchFor(signer, work);
-  };
-
-  type NonceResettableSigner = {
-    resetNonce(): void;
-  };
-  const maybeResetSignerNonceFor = (activeSigner: Signer): void => {
-    const candidate = activeSigner as unknown as Partial<NonceResettableSigner>;
-    if (typeof candidate.resetNonce === 'function') {
-      try {
-        candidate.resetNonce();
-      } catch (error) {
-        rpcLog.warn('signer.nonce_reset_failed', {
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
-  };
-  const maybeResetSignerNonce = (): void => {
-    maybeResetSignerNonceFor(signer);
-  };
-
-  const resetSerializedSignerNonceFor = async (activeSigner: Signer): Promise<void> => {
-    const signerKey = await getSerializedSignerKey(activeSigner);
-    nextSerializedSignerNonces.delete(signerKey);
-    maybeResetSignerNonceFor(activeSigner);
-  };
-  const resetSerializedSignerNonce = async (): Promise<void> => {
-    await resetSerializedSignerNonceFor(signer);
-  };
-
-  const readSignerTxNonceFor = async (activeSigner: Signer): Promise<number> => {
-    const signerAddress = await activeSigner.getAddress();
-    return Math.max(
-      await provider.getTransactionCount(signerAddress, 'latest'),
-      await provider.getTransactionCount(signerAddress, 'pending'),
-    );
-  };
-  const allocateSerializedSignerNonceFor = async (activeSigner: Signer): Promise<number> => {
-    if (config.mode === 'tron') return 0;
-    const signerKey = await getSerializedSignerKey(activeSigner);
-    const chainNonce = await readSignerTxNonceFor(activeSigner);
-    const cachedNonce = nextSerializedSignerNonces.has(signerKey)
-      ? (nextSerializedSignerNonces.get(signerKey) ?? null)
-      : null;
-    let nextNonce = cachedNonce;
-    if (nextNonce === null || chainNonce > nextNonce) {
-      nextNonce = chainNonce;
-    }
-    const nonce = nextNonce;
-    nextSerializedSignerNonces.set(signerKey, nonce + 1);
-    return nonce;
-  };
-  const allocateSerializedSignerNonce = async (): Promise<number> => {
-    return allocateSerializedSignerNonceFor(signer);
-  };
-
-  const sendSignerTxWithExplicitNonce = async (
-    activeSigner: Signer,
-    label: string,
-    send: (nonce: number, feeOverrides: FeeOverrides) => Promise<unknown>,
-  ): Promise<RpcReceipt> => {
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      try {
-        if (attempt > 1) {
-          await resetSerializedSignerNonceFor(activeSigner);
-          console.warn(`⚠️ [JAdapter:rpc] retrying ${label} after nonce sync (attempt ${attempt}/2)`);
-        }
-        const nonce = await allocateSerializedSignerNonceFor(activeSigner);
-        const feeOverrides = await buildFeeOverrides();
-        console.log(`🔐 [JAdapter:rpc] ${label} nonce=${nonce}`);
-        const tx = await send(nonce, feeOverrides);
-        return await waitForReceipt(tx, label);
-      } catch (error) {
-        if (attempt < 2 && isNonceSyncError(error)) {
-          continue;
-        }
-        await resetSerializedSignerNonceFor(activeSigner);
-        throw error;
-      }
-    }
-    throw new Error(`${label} failed after nonce retry`);
-  };
+  const transactionSequencer = createRpcTransactionSequencer({
+    provider,
+    primarySigner: signer,
+    usesEvmNonce: config.mode !== 'tron',
+    buildFeeOverrides,
+    waitForReceipt,
+  });
 
   const addresses: JAdapterAddresses = {
     account: '',
@@ -820,6 +724,145 @@ export async function createRpcAdapter(
       throw new Error(`HANKO_BATCH_RECEIPT_DUPLICATE:${normalizedEntityId}:${batchHash}:${entityNonce.toString()}`);
     }
     return exact.length === 1;
+  };
+
+  const submitRpcBatch = async (
+    jTx: Extract<JTx, { type: 'batch' }>,
+    options: Parameters<JAdapter['submitTx']>[1],
+  ): Promise<JSubmitResult> => {
+    let planned: ReturnType<typeof planRpcBatchSubmission>;
+    try {
+      planned = planRpcBatchSubmission(
+        jTx,
+        options.env,
+        options.signerId,
+        config.chainId,
+        addresses.depository,
+      );
+    } catch (error) {
+      return makeJAdapterFailureResult(error);
+    }
+    if (planned.kind === 'skip') return { success: true };
+    if (planned.kind === 'reject') {
+      return { success: false, error: planned.error };
+    }
+    const {
+      batch,
+      expectedExternalSignerId,
+      normalizedEntityId,
+      preflightIssues,
+      requiresExternalSubmitter,
+    } = planned.plan;
+    if (preflightIssues.length > 0) {
+      rpcLog.warn('process_batch.preflight_issues', {
+        entityId: normalizedEntityId,
+        issues: preflightIssues,
+      });
+    }
+    return transactionSequencer.run(async () => {
+      const { signerPrivateKey } = options;
+      if (watchOnly && !signerPrivateKey) {
+        throw new Error(
+          `JADAPTER_WATCH_ONLY_SIGNER_REQUIRED:batch:${normalizedEntityId}`,
+        );
+      }
+      const submitter =
+        signerPrivateKey && (watchOnly || requiresExternalSubmitter)
+          ? await signerForPrivateKey(ethers.hexlify(signerPrivateKey))
+          : null;
+      if (requiresExternalSubmitter) {
+        if (!submitter) {
+          throw new Error(
+            `EXTERNAL_BATCH_SIGNER_KEY_MISSING:${normalizedEntityId}`,
+          );
+        }
+        const walletAddress = await submitter.getAddress();
+        if (
+          walletAddress.toLowerCase() !==
+          expectedExternalSignerId.toLowerCase()
+        ) {
+          throw new Error(
+            `EXTERNAL_BATCH_EOA_MISMATCH:${normalizedEntityId}:` +
+              `expected=${expectedExternalSignerId}:wallet=${walletAddress}`,
+          );
+        }
+      }
+      const submittingDepository = submitter
+        ? depository.connect(
+            submitter as unknown as Parameters<typeof depository.connect>[0],
+          )
+        : depository;
+      const batchData = planned.plan.jTx.data;
+      const encodedBatch = batchData.encodedBatch;
+      const hankoData = batchData.hankoSignature;
+      const entityNonce = BigInt(batchData.entityNonce);
+      const disputeDebug = await buildDisputeStartDebug(
+        batch,
+        normalizedEntityId,
+        {
+          chainId: config.chainId,
+          depositoryAddress: await getLiveDepositoryAddress(),
+        },
+      );
+      try {
+        const gasEstimate = await estimateProcessBatchGas(() =>
+          submittingDepository.processBatch.estimateGas(
+            encodedBatch,
+            hankoData,
+            entityNonce,
+          ),
+        );
+        const gasLimit = resolveProcessBatchGasLimit(
+          gasEstimate.gasLimit,
+          batch.disputeFinalizations.length > 0,
+        );
+        const preflightFailure = await preflightProcessBatch({
+          depository: submittingDepository,
+          encodedBatch,
+          hankoData,
+          entityNonce,
+          gasLimit,
+          gasEstimateUsedFallback: gasEstimate.usedFallback,
+          disputeStartDebug: disputeDebug,
+          isLocalSnapshotRace: isLocalLatestStateStaticCallRace,
+        });
+        if (preflightFailure) return preflightFailure;
+
+        const receipt = await transactionSequencer.send(
+          submitter ?? signer,
+          'submitTx:processBatch',
+          (nonce, feeOverrides) =>
+            submittingDepository.processBatch(
+              encodedBatch,
+              hankoData,
+              entityNonce,
+              {
+                gasLimit,
+                nonce,
+                ...applyBatchFeeOverrides(
+                  feeOverrides,
+                  batchData.feeOverrides,
+                ),
+              },
+            ),
+        );
+        return {
+          success: true,
+          txHash: receipt.hash,
+          blockNumber: receipt.blockNumber ?? 0,
+          events: parseReceiptLogsToJEvents(
+            receipt,
+            eventCarriers(depository, entityProvider),
+          ),
+        };
+      } catch (error) {
+        rpcLog.error('process_batch.failed', {
+          entityId: normalizedEntityId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return makeJAdapterFailureResult(error);
+      }
+    });
   };
 
   const adapter: JAdapter = {
@@ -1045,7 +1088,7 @@ export async function createRpcAdapter(
     // === WRITE METHODS ===
 
     async processBatch(encodedBatch: string, hankoData: string, nonce: bigint): Promise<JBatchReceipt> {
-      return runSerializedBatch(async () => {
+      return transactionSequencer.run(async () => {
         try {
           const batch = decodeJBatch(encodedBatch);
           const receipt = await sendTypedTx('processBatch', depository.processBatch, [encodedBatch, hankoData, nonce], {
@@ -1053,7 +1096,7 @@ export async function createRpcAdapter(
             ...(config.mode === 'tron' || batch.disputeFinalizations.length === 0
               ? {}
               : { minimumGasLimit: PROCESS_BATCH_GAS_FLOOR }),
-            txNonce: await allocateSerializedSignerNonce(),
+            txNonce: await transactionSequencer.allocate(),
             resetSignerNonce: true,
           });
           const events = parseReceiptLogsToJEvents(receipt, eventCarriers(depository, entityProvider));
@@ -1064,23 +1107,23 @@ export async function createRpcAdapter(
             events,
           };
         } catch (error) {
-          await resetSerializedSignerNonce();
+          await transactionSequencer.reset();
           throw error;
         }
       });
     },
 
     async enforceDebts(entityId: string, tokenId: number, maxIterations: number | bigint = 100n): Promise<void> {
-      await runSerializedBatch(async () => {
+      await transactionSequencer.run(async () => {
         try {
           const iterationCap = BigInt(maxIterations);
           await sendTypedTx('enforceDebts', depository.enforceDebts, [entityId, BigInt(tokenId), iterationCap], {
             gasFallback: 500_000n,
-            txNonce: await allocateSerializedSignerNonce(),
+            txNonce: await transactionSequencer.allocate(),
             resetSignerNonce: false,
           });
         } catch (error) {
-          await resetSerializedSignerNonce();
+          await transactionSequencer.reset();
           throw error;
         }
       });
@@ -1089,16 +1132,16 @@ export async function createRpcAdapter(
     async debugFundReserves(entityId: string, tokenId: number, amount: bigint): Promise<JEvent[]> {
       // For dev chains (anvil), allow debug funding for testnet
       if (DEV_CHAIN_IDS.has(config.chainId)) {
-        return runSerializedBatch(async () => {
+        return transactionSequencer.run(async () => {
           try {
             const receipt = await sendTypedTx('mintToReserve', depository.mintToReserve, [entityId, tokenId, amount], {
               gasFallback: 1_000_000n,
-              txNonce: await allocateSerializedSignerNonce(),
+              txNonce: await transactionSequencer.allocate(),
               resetSignerNonce: false,
             });
             return parseReceiptLogsToJEvents(receipt, eventCarriers(depository));
           } catch (error) {
-            await resetSerializedSignerNonce();
+            await transactionSequencer.reset();
             throw error;
           }
         });
@@ -1119,7 +1162,7 @@ export async function createRpcAdapter(
             `first=${formatReserveMintDebug(mints[0])}`,
         );
       }
-      return runSerializedBatch(async () => {
+      return transactionSequencer.run(async () => {
         try {
           const events: JEvent[] = [];
           for (const mint of mints) {
@@ -1129,7 +1172,7 @@ export async function createRpcAdapter(
               [mint.entityId, BigInt(mint.tokenId), mint.amount],
               {
                 gasFallback: 1_000_000n,
-                txNonce: await allocateSerializedSignerNonce(),
+                txNonce: await transactionSequencer.allocate(),
                 resetSignerNonce: false,
               },
             );
@@ -1137,7 +1180,7 @@ export async function createRpcAdapter(
           }
           return events;
         } catch (error) {
-          await resetSerializedSignerNonce();
+          await transactionSequencer.reset();
           throw error;
         }
       });
@@ -1199,16 +1242,16 @@ export async function createRpcAdapter(
           amount: bigint,
           overrides?: TxOverrides,
         ) => Promise<unknown>;
-        await runSerializedBatchFor(signerWallet, async () => {
+        await transactionSequencer.runFor(signerWallet, async () => {
           if (allowance > 0n) {
-            await sendSignerTxWithExplicitNonce(signerWallet, 'erc20ApproveReset', (nonce, feeOverrides) =>
+            await transactionSequencer.send(signerWallet, 'erc20ApproveReset', (nonce, feeOverrides) =>
               approveFn(liveDepositoryAddress, 0n, {
                 ...feeOverrides,
                 nonce,
               }),
             );
           }
-          await sendSignerTxWithExplicitNonce(signerWallet, 'erc20ApproveMax', (nonce, feeOverrides) =>
+          await transactionSequencer.send(signerWallet, 'erc20ApproveMax', (nonce, feeOverrides) =>
             approveFn(liveDepositoryAddress, ethers.MaxUint256, {
               ...feeOverrides,
               nonce,
@@ -1257,8 +1300,8 @@ export async function createRpcAdapter(
       buildFeeOverrides,
       waitForReceipt,
       asRpcTxResponse,
-      runSerializedBatchFor,
-      sendSignerTxWithExplicitNonce,
+      runSerializedBatchFor: transactionSequencer.runFor,
+      sendSignerTxWithExplicitNonce: transactionSequencer.send,
     }),
 
     // === High-level J-tx submission ===
@@ -1266,18 +1309,7 @@ export async function createRpcAdapter(
       jTx: JTx,
       options: { env: RuntimeState; signerId?: string; signerPrivateKey?: Uint8Array; timestamp?: number },
     ): Promise<JSubmitResult> {
-      const { env, signerId, signerPrivateKey, timestamp } = options;
-
-      if (jTx.type === 'batch') {
-        try {
-          assertSealedJBatchBinding(jTx, {
-            chainId: config.chainId,
-            depositoryAddress: addresses.depository,
-          });
-        } catch (error) {
-          return makeJAdapterFailureResult(error);
-        }
-      }
+      const { signerPrivateKey } = options;
 
       console.log(`📤 [JAdapter:rpc] submitTx type=${jTx.type} entity=${jTx.entityId.slice(-4)}`);
 
@@ -1303,9 +1335,9 @@ export async function createRpcAdapter(
             getEntityProviderAddress: getLiveEntityProviderAddress,
             signerForPrivateKey,
             readActionReceipt: readEntityProviderActionReceipt,
-            runSerialized: runSerializedBatch,
+            runSerialized: transactionSequencer.run,
             estimateGas: estimateGasWithHeadroom,
-            send: sendSignerTxWithExplicitNonce,
+            send: transactionSequencer.send,
           },
           jTx,
           signerPrivateKey,
@@ -1313,310 +1345,7 @@ export async function createRpcAdapter(
       }
 
       if (jTx.type === 'batch') {
-        const batchData = jTx.data;
-        const batch = batchData.batch;
-        const effectiveTimestamp = typeof timestamp === 'number' ? timestamp : env.timestamp;
-
-        if (isBatchEmpty(batch)) {
-          console.log(`📦 [JAdapter:rpc] Empty batch, skipping`);
-          return { success: true };
-        }
-
-        const normalizedId = normalizeEntityId(jTx.entityId);
-        const preflightIssues = preflightBatchForE2(normalizedId, batch, Math.floor(Number(effectiveTimestamp) / 1000));
-        if (preflightIssues.length > 0) {
-          console.warn(
-            `⚠️ [JAdapter:rpc] batch preflight issues (${normalizedId.slice(-4)}): ${preflightIssues.join(' | ')}`,
-          );
-        }
-
-        // Validate bilateral settlement signatures before submission.
-        for (const settlement of batch.settlements) {
-          if (settlement.diffs.length > 0 && settlement.sig === '0x') {
-            return { success: false, error: `Settlement missing hanko sig` };
-          }
-        }
-
-        return runSerializedBatch(async () => {
-          const depositoryAddr = await getLiveDepositoryAddress();
-          const batchRequiresExternalSubmitter = batch.externalTokenToReserve.length > 0;
-          const expectedExternalSignerId = batchRequiresExternalSubmitter
-            ? resolveEntityProposerId(env, normalizedId, 'jadapter.rpc.submitTx.external-batch')
-            : '';
-          const effectiveExternalSignerId = batchRequiresExternalSubmitter
-            ? String(signerId || batchData.signerId || '').trim()
-            : '';
-          if (batchRequiresExternalSubmitter && !effectiveExternalSignerId) {
-            return {
-              success: false,
-              error: `EXTERNAL_BATCH_SIGNER_MISSING:${normalizedId}`,
-            };
-          }
-          if (
-            batchRequiresExternalSubmitter &&
-            expectedExternalSignerId.toLowerCase() !== effectiveExternalSignerId.toLowerCase()
-          ) {
-            return {
-              success: false,
-              error:
-                `EXTERNAL_BATCH_SIGNER_MISMATCH:${normalizedId}` +
-                `:expected=${expectedExternalSignerId}` +
-                `:got=${effectiveExternalSignerId}`,
-            };
-          }
-          if (watchOnly && !signerPrivateKey) {
-            throw new Error(`JADAPTER_WATCH_ONLY_SIGNER_REQUIRED:batch:${normalizedId}`);
-          }
-          const submitterWallet =
-            signerPrivateKey && (watchOnly || batchRequiresExternalSubmitter)
-              ? await signerForPrivateKey(`0x${Buffer.from(signerPrivateKey).toString('hex')}`)
-              : null;
-          if (batchRequiresExternalSubmitter) {
-            if (!submitterWallet) {
-              throw new Error(
-                `Missing signer private key for externalTokenToReserve batch from ${jTx.entityId.slice(-4)}`,
-              );
-            }
-            const walletAddress = await submitterWallet.getAddress();
-            if (walletAddress.toLowerCase() !== expectedExternalSignerId.toLowerCase()) {
-              throw new Error(
-                `EXTERNAL_BATCH_EOA_MISMATCH:${normalizedId}:expected=${expectedExternalSignerId}:wallet=${walletAddress}`,
-              );
-            }
-          }
-          const submitterDepository = submitterWallet
-            ? depository.connect(submitterWallet as unknown as Parameters<typeof depository.connect>[0])
-            : depository;
-          // Consensus batches must arrive fully sealed by entity consensus.
-          // Do not fall back to reading the live chain nonce and locally signing here:
-          // this submit path runs after an R-frame is already durable, so a local-sign
-          // fallback can desync side effects from the committed entity frame.
-          let encodedBatch: string;
-          let hankoData: string;
-          let nextNonce: bigint;
-
-          if (batchData.hankoSignature && batchData.encodedBatch && typeof batchData.entityNonce === 'number') {
-            // Entity consensus already signed — use pre-provided hanko
-            encodedBatch = batchData.encodedBatch;
-            hankoData = batchData.hankoSignature;
-            nextNonce = BigInt(batchData.entityNonce);
-            console.log(`🔐 [JAdapter:rpc] Using consensus hanko: nonce=${nextNonce}`);
-          } else {
-            const missing = [
-              batchData.hankoSignature ? '' : 'hankoSignature',
-              batchData.encodedBatch ? '' : 'encodedBatch',
-              typeof batchData.entityNonce === 'number' ? '' : 'entityNonce',
-            ]
-              .filter(Boolean)
-              .join(',');
-            return {
-              success: false,
-              error: `J_BATCH_CONSENSUS_HANKO_MISSING:${normalizedId}:missing=${missing || 'unknown'}`,
-            };
-          }
-
-          let disputeStartDebug: Array<Record<string, unknown>> = [];
-          if (batch.disputeStarts.length > 0) {
-            const { inspectHankoForHash } = await import('../hanko/signing');
-            disputeStartDebug = await Promise.all(
-              batch.disputeStarts.map(async start => {
-                const accountKey = computeAccountKey(normalizedId, start.counterentity);
-                const disputeHash = hashDisputeProofHankoPayload(
-                  { chainId: config.chainId, depositoryAddress: depositoryAddr },
-                  accountKey,
-                  start.nonce,
-                  start.proofbodyHash,
-                  start.watchSeed,
-                );
-                const hankoDebug = await inspectHankoForHash(start.sig, disputeHash);
-                const matchingClaim = hankoDebug.claims.find(
-                  claim => String(claim.entityId).toLowerCase() === String(start.counterentity).toLowerCase(),
-                );
-                return {
-                  contractGuard: 'EntityProvider.sol:469 require(entityId == boardHash)',
-                  senderEntityId: normalizedId,
-                  counterentity: start.counterentity,
-                  nonce: start.nonce,
-                  proofbodyHash: start.proofbodyHash,
-                  starterInitialArgumentsBytes: Math.max(start.starterInitialArguments.length - 2, 0) / 2,
-                  starterIncrementedArgumentsBytes: Math.max(start.starterIncrementedArguments.length - 2, 0) / 2,
-                  disputeHash,
-                  accountKey,
-                  sigBytes: Math.max(start.sig.length - 2, 0) / 2,
-                  recoveredAddresses: hankoDebug.recoveredAddresses,
-                  matchingClaim: matchingClaim
-                    ? {
-                        entityId: matchingClaim.entityId,
-                        threshold: matchingClaim.threshold,
-                        entityIndexes: matchingClaim.entityIndexes,
-                        weights: matchingClaim.weights,
-                        boardEntityIds: matchingClaim.boardEntityIds,
-                        reconstructedBoardHash: matchingClaim.reconstructedBoardHash,
-                        entityMatchesBoardHash:
-                          String(matchingClaim.entityId).toLowerCase() ===
-                          String(matchingClaim.reconstructedBoardHash).toLowerCase(),
-                      }
-                    : null,
-                };
-              }),
-            );
-            console.log(`🧾 [JAdapter:rpc] disputeStart.batch ${safeStringify(disputeStartDebug)}`);
-          }
-
-          try {
-            console.log(`📦 [JAdapter:rpc] processBatch (${getBatchSize(batch)} ops) nonce=${nextNonce}`);
-            // ERC20 approvals are explicit user actions handled before batching.
-            // submitTx must not mutate external allowances as a hidden side effect.
-            const gasEstimate = await estimateProcessBatchGas(() =>
-              submitterDepository.processBatch.estimateGas(encodedBatch, hankoData, nextNonce),
-            );
-            const gasLimit = resolveProcessBatchGasLimit(gasEstimate.gasLimit, batch.disputeFinalizations.length > 0);
-            const resolvedFeeOverrides = await buildFeeOverrides();
-            const requestedFeeOverrides = batchData.feeOverrides;
-            if (requestedFeeOverrides?.maxFeePerGasWei) {
-              resolvedFeeOverrides['maxFeePerGas'] = BigInt(requestedFeeOverrides.maxFeePerGasWei);
-            }
-            if (requestedFeeOverrides?.maxPriorityFeePerGasWei) {
-              resolvedFeeOverrides['maxPriorityFeePerGas'] = BigInt(requestedFeeOverrides.maxPriorityFeePerGasWei);
-            }
-            if (requestedFeeOverrides?.gasBumpBps && requestedFeeOverrides.gasBumpBps > 0) {
-              const bumpBps = BigInt(Math.floor(requestedFeeOverrides.gasBumpBps));
-              const factor = 10_000n + bumpBps;
-              if (resolvedFeeOverrides['maxFeePerGas']) {
-                resolvedFeeOverrides['maxFeePerGas'] =
-                  (resolvedFeeOverrides['maxFeePerGas'] * factor + 9_999n) / 10_000n;
-              }
-              if (resolvedFeeOverrides['maxPriorityFeePerGas']) {
-                resolvedFeeOverrides['maxPriorityFeePerGas'] =
-                  (resolvedFeeOverrides['maxPriorityFeePerGas'] * factor + 9_999n) / 10_000n;
-              }
-            }
-
-            // Pre-flight: staticCall to decode revert reason before sending real tx
-            try {
-              await submitterDepository.processBatch.staticCall(encodedBatch, hankoData, nextNonce, {
-                gasLimit,
-              });
-            } catch (simErr: unknown) {
-              const simFailure = classifyJAdapterFailure(simErr);
-              // Decode revert data using contract ABI (typechain-connected interface).
-              const revertSource =
-                typeof simErr === 'object' && simErr !== null
-                  ? (simErr as {
-                      data?: unknown;
-                      error?: { data?: unknown };
-                      info?: { error?: { data?: unknown } };
-                      reason?: unknown;
-                      message?: unknown;
-                    })
-                  : null;
-              const revertData = revertSource?.data ?? revertSource?.error?.data ?? revertSource?.info?.error?.data;
-              let errDetail = '';
-              let localSnapshotRaceAfterGasEstimate = false;
-              if (revertData && revertData !== '0x') {
-                const sig = typeof revertData === 'string' ? revertData.slice(0, 10) : '';
-                const payloadBytes =
-                  typeof revertData === 'string' ? Math.max(0, Math.floor((revertData.length - 2) / 2)) : 0;
-                let errName = `unknown(${sig})`;
-                let decoded = '';
-                if (typeof revertData === 'string' && sig !== '0x08c379a0' && sig !== '0x4e487b71') {
-                  try {
-                    const parsedError = depository.interface.parseError(revertData);
-                    if (parsedError) {
-                      const args = Array.from(parsedError.args ?? []);
-                      const argStr = args.length > 0 ? ` args=${JSON.stringify(args.map(v => String(v)))}` : '';
-                      errName = `${parsedError.name}()`;
-                      decoded = argStr;
-                    }
-                  } catch (error) {
-                    rpcLog.warn('revert.contract_error_decode_failed', {
-                      selector: sig,
-                      payloadBytes,
-                      error: rpcErrorText(error),
-                    });
-                  }
-                }
-                if (typeof revertData === 'string') {
-                  decoded = decodeStandardSolidityRevertData(revertData);
-                }
-                errDetail = `${errName}${decoded}`;
-              } else {
-                errDetail = String(revertSource?.reason ?? revertSource?.message ?? simErr);
-                localSnapshotRaceAfterGasEstimate =
-                  !gasEstimate.usedFallback && isLocalLatestStateStaticCallRace(simErr);
-              }
-              if (!localSnapshotRaceAfterGasEstimate && disputeStartDebug.length > 0) {
-                errDetail += ` disputeStart=${safeStringify(disputeStartDebug)}`;
-              }
-              if (localSnapshotRaceAfterGasEstimate) {
-                console.warn(
-                  '⚠️ [JAdapter:rpc] processBatch preflight hit local dev-chain latest-state snapshot race ' +
-                    'after successful gas estimate; continuing to submit the already-estimated batch',
-                );
-              } else {
-                // Bail — do NOT submit a known-bad batch on-chain
-                if (!revertData && simFailure.category === 'transient') {
-                  return makeJAdapterFailureResult(simErr);
-                }
-                return makeJAdapterFailureResult(simErr, {
-                  category: 'terminal',
-                  code: simFailure.code === 'J_ADAPTER_TERMINAL' ? 'CALL_EXCEPTION' : simFailure.code,
-                  message: `staticCall revert: ${errDetail}`,
-                });
-              }
-            }
-
-            for (let attempt = 1; attempt <= 2; attempt++) {
-              try {
-                if (attempt > 1) {
-                  if (submitterWallet) {
-                    await resetSerializedSignerNonceFor(submitterWallet);
-                  } else {
-                    await resetSerializedSignerNonce();
-                  }
-                  console.warn(`⚠️ [JAdapter:rpc] retrying processBatch after nonce sync (attempt ${attempt}/2)`);
-                }
-                const tx = submitterWallet
-                  ? await submitterDepository.processBatch(encodedBatch, hankoData, nextNonce, {
-                      gasLimit,
-                      nonce: await allocateSerializedSignerNonceFor(submitterWallet),
-                      ...resolvedFeeOverrides,
-                    })
-                  : await depository.processBatch(encodedBatch, hankoData, nextNonce, {
-                      gasLimit,
-                      nonce: await allocateSerializedSignerNonce(),
-                      ...resolvedFeeOverrides,
-                    });
-                const minedReceipt = await waitForReceipt(tx, 'submitTx:processBatch');
-                const txHash = minedReceipt.hash ?? tx.hash;
-                const blockNum = minedReceipt.blockNumber ?? 0;
-                const events = parseReceiptLogsToJEvents(
-                  asRpcReceipt(minedReceipt),
-                  eventCarriers(depository, entityProvider),
-                );
-                console.log(`✅ [JAdapter:rpc] Batch executed: block=${blockNum} gas=${minedReceipt.gasUsed}`);
-                return { success: true, txHash, blockNumber: blockNum, events };
-              } catch (error) {
-                if (attempt < 2 && isNonceSyncError(error)) {
-                  continue;
-                }
-                await resetSerializedSignerNonce();
-                const msg = error instanceof Error ? error.message : String(error);
-                rpcLog.error('process_batch.failed', {
-                  entityId: normalizedId,
-                  attempt,
-                  error: msg,
-                });
-                return makeJAdapterFailureResult(error);
-              }
-            }
-            return { success: false, error: 'processBatch failed after nonce retry' };
-          } catch (error) {
-            const msg = error instanceof Error ? error.message : String(error);
-            rpcLog.error('process_batch.failed', { entityId: normalizedId, error: msg });
-            return makeJAdapterFailureResult(error);
-          }
-        });
+        return submitRpcBatch(jTx, options);
       }
 
       if (jTx.type === 'mint') {

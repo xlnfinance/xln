@@ -10,6 +10,15 @@ import { keccak256 } from 'ethers';
 
 type BatchJTx = Extract<JTx, { type: 'batch' }>;
 
+export type SealedBatchJTx = BatchJTx & {
+  data: BatchJTx['data'] & {
+    hankoSignature: string;
+    batchHash: string;
+    encodedBatch: string;
+    entityNonce: number;
+  };
+};
+
 export type SealedJBatchDomain = Readonly<{
   chainId: number | bigint;
   depositoryAddress: string;
@@ -23,10 +32,7 @@ const normalizedHex = (value: string): string => value.trim().toLowerCase();
  * so restored or mutated state cannot make the adapter inspect different bytes
  * from the bytes authorized by Hanko.
  */
-export const assertSealedJBatchBinding = (
-  jTx: BatchJTx,
-  domain: SealedJBatchDomain,
-): void => {
+export function assertSealedJBatchBinding(jTx: BatchJTx, domain: SealedJBatchDomain): asserts jTx is SealedBatchJTx {
   const { data } = jTx;
   const missing: string[] = [];
   if (!data.hankoSignature) missing.push('hankoSignature');
@@ -50,11 +56,11 @@ export const assertSealedJBatchBinding = (
   if (normalizedHex(data.encodedBatch!) !== normalizedHex(expectedEncodedBatch)) {
     throw new Error(
       `J_BATCH_ENCODING_MISMATCH:` +
-      `storedHash=${keccak256(data.encodedBatch!)}:` +
-      `encodedHash=${keccak256(expectedEncodedBatch)}:` +
-      `storedBytes=${(data.encodedBatch!.length - 2) / 2}:` +
-      `encodedBytes=${(expectedEncodedBatch.length - 2) / 2}:` +
-      `ops=${batchOpCount(data.batch)}`,
+        `storedHash=${keccak256(data.encodedBatch!)}:` +
+        `encodedHash=${keccak256(expectedEncodedBatch)}:` +
+        `storedBytes=${(data.encodedBatch!.length - 2) / 2}:` +
+        `encodedBytes=${(expectedEncodedBatch.length - 2) / 2}:` +
+        `ops=${batchOpCount(data.batch)}`,
     );
   }
 
@@ -67,4 +73,4 @@ export const assertSealedJBatchBinding = (
   if (normalizedHex(data.batchHash!) !== normalizedHex(expectedBatchHash)) {
     throw new Error(`J_BATCH_HASH_MISMATCH:${data.batchHash}:${expectedBatchHash}`);
   }
-};
+}

@@ -11,14 +11,12 @@ const EXCLUDED_PATH = /\/(?:__tests__|qa|scenarios|scripts)\//;
 // large function, or a completed refactor whose allowance was not removed
 // fails the gate. The only healthy direction is toward an empty object.
 const COORDINATOR_DEBT: Readonly<Record<string, number>> = {
-  'runtime/jadapter/rpc-adapter.ts::createRpcAdapter': 2880,
+  'runtime/jadapter/rpc-adapter.ts::createRpcAdapter': 2394,
   'runtime/jadapter/rpc-adapter.ts::deployStack': 167,
   'runtime/jadapter/rpc-adapter.ts::doPoll': 525,
   'runtime/jadapter/rpc-adapter.ts::pollInFlight callback': 436,
   'runtime/jadapter/rpc-adapter.ts::reconcileWatcherCanonicalTip': 171,
-  'runtime/jadapter/rpc-adapter.ts::runSerializedBatch callback': 280,
   'runtime/jadapter/rpc-adapter.ts::startWatching': 1040,
-  'runtime/jadapter/rpc-adapter.ts::submitTx': 489,
   'runtime/orchestrator/hub-node.ts::driveMeshBootstrap': 208,
   'runtime/orchestrator/hub-node.ts::fetch': 323,
   'runtime/orchestrator/hub-node.ts::run': 1064,

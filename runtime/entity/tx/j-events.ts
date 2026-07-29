@@ -838,6 +838,12 @@ async function applyFinalizedJEvent(
     case 'EntityProviderActionCancelled':
       applyEntityProviderActionCancelled(newState, event.data, blockNumber);
       break;
+    default: {
+      const unhandledEvent: never = event;
+      throw new Error(
+        `FINALIZED_J_EVENT_HANDLER_MISSING:${String(unhandledEvent)}`,
+      );
+    }
   }
 
   return done();
