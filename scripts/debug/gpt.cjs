@@ -215,7 +215,7 @@ const CORE_FILES = {
     'src/lib/view/panels/ArchitectPanel.svelte', // Architect modes + workflows
     'src/lib/view/panels/JurisdictionPanel.svelte', // On-chain state viewer
     'src/lib/view/utils/panelBridge.ts',    // Panel-to-panel messaging
-    'src/lib/network3d/EntityManager.ts',   // 3D graph entity orchestration
+    'src/lib/network3d/networkMachine.ts',  // 3D graph scene orchestration
   ]
 };
 
@@ -417,6 +417,13 @@ const RUNTIME_FILES = {
     'entity/consensus/hanko-witness.ts',
     'entity/consensus/input-merge.ts',
     'account/consensus/index.ts',
+    'account/consensus/incoming-preflight.ts',
+    'account/consensus/collision.ts',
+    'account/consensus/replay.ts',
+    'account/consensus/ack-commit.ts',
+    'account/consensus/board-reseal.ts',
+    'account/consensus/dispute-seal.ts',
+    'account/consensus/commit-root.ts',
     'account/input.ts',
     'account/j-finality.ts',
     'account/consensus/frame.ts',
@@ -437,7 +444,6 @@ const RUNTIME_FILES = {
     'entity/tx/j-events-account.ts',
     'entity/tx/j-events-batch.ts',
     'entity/tx/j-events-debt.ts',
-    'entity/tx/j-events-history.ts',
     'entity/tx/j-events-htlc.ts',
     'entity/tx/j-events-types.ts',
     'entity/tx/handlers/account.ts',
@@ -465,7 +471,7 @@ const RUNTIME_FILES = {
     'runtime/jurisdiction-api.ts',
     'storage/canonical-hash.ts',
     'storage/hashes.ts',
-    'wal/hash.ts',
+    'storage/wal/hash.ts',
   ]),
   docs: [
     'readme.md',
@@ -1242,7 +1248,7 @@ ${includeFrontend ? `
     src/lib/view/panels/ArchitectPanel.svelte ${fileSizes['frontend/src/lib/view/panels/ArchitectPanel.svelte'] || '?'} lines - Architect workflows
     src/lib/view/panels/JurisdictionPanel.svelte ${fileSizes['frontend/src/lib/view/panels/JurisdictionPanel.svelte'] || '?'} lines - Jurisdiction viewer
     src/lib/view/utils/panelBridge.ts   ${fileSizes['frontend/src/lib/view/utils/panelBridge.ts'] || '?'} lines - Panel messaging
-    src/lib/network3d/EntityManager.ts  ${fileSizes['frontend/src/lib/network3d/EntityManager.ts'] || '?'} lines - 3D entity orchestration
+    src/lib/network3d/networkMachine.ts ${fileSizes['frontend/src/lib/network3d/networkMachine.ts'] || '?'} lines - 3D graph scene orchestration
 ` : ''}
 
 Reading Guide:
