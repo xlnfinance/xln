@@ -157,6 +157,28 @@ const publishRuntimeState = (transaction: RuntimeFrameTransaction): void => {
   liveState.logState.nextId = Math.max(liveState.logState.nextId, workingState.logState?.nextId ?? 0);
 };
 
+const copyOptionalFrameProperty = <Key extends keyof RuntimeState>(
+  live: RuntimeState,
+  working: RuntimeState,
+  key: Key,
+): void => {
+  const value = working[key];
+  if (value === undefined) delete live[key];
+  else live[key] = value;
+};
+
+const copyOptionalFrameState = (live: RuntimeState, working: RuntimeState): void => {
+  copyOptionalFrameProperty(live, working, 'activeJurisdiction');
+  copyOptionalFrameProperty(live, working, 'browserVM');
+  copyOptionalFrameProperty(live, working, 'browserVMState');
+  copyOptionalFrameProperty(live, working, 'jAdapter');
+  copyOptionalFrameProperty(live, working, 'overlay');
+  copyOptionalFrameProperty(live, working, 'pendingOutputs');
+  copyOptionalFrameProperty(live, working, 'networkInbox');
+  copyOptionalFrameProperty(live, working, 'pendingNetworkOutputs');
+  copyOptionalFrameProperty(live, working, 'extra');
+};
+
 export const publishRuntimeFrameTransaction = (transaction: RuntimeFrameTransaction): RuntimeState => {
   if (transaction.published) return transaction.liveEnv;
   const { liveEnv, workingEnv } = transaction;
@@ -168,20 +190,7 @@ export const publishRuntimeFrameTransaction = (transaction: RuntimeFrameTransact
   liveEnv.timestamp = workingEnv.timestamp;
   liveEnv.eReplicas = workingEnv.eReplicas;
   liveEnv.jReplicas = workingEnv.jReplicas;
-  for (const key of [
-    'activeJurisdiction',
-    'browserVM',
-    'browserVMState',
-    'jAdapter',
-    'overlay',
-    'pendingOutputs',
-    'networkInbox',
-    'pendingNetworkOutputs',
-    'extra',
-  ] as const) {
-    if (workingEnv[key] === undefined) delete liveEnv[key];
-    else (liveEnv as unknown as Record<string, unknown>)[key] = workingEnv[key];
-  }
+  copyOptionalFrameState(liveEnv, workingEnv);
   liveEnv.history = [];
   liveEnv.frameLogs = liveEnv.frameLogs.slice(transaction.liveFrameLogBaseLength);
   const mergedMempool = prependOlderRuntimeInput(workingMempool, activeMempool);
