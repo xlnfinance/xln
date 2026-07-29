@@ -37,6 +37,25 @@ type RoutingProfile = Pick<Profile, 'entityId' | 'accounts'> & {
   metadata: Pick<Profile['metadata'], 'routingFeePPM' | 'baseFee'>;
 };
 
+/**
+ * Process-local route discovery used only before an HTLC enters Entity
+ * consensus. Keeping it out of EntityRuntimeContext makes the boundary
+ * enforceable: deterministic Entity transitions cannot inspect gossip.
+ */
+export interface HtlcPaymentIngressContext extends EntityRuntimeContext {
+  gossip: {
+    getProfiles: () => Profile[];
+    getNetworkGraph: () => {
+      findPaths: (
+        source: string,
+        target: string,
+        amount?: bigint,
+        tokenId?: number,
+      ) => Promise<Readonly<{ path: string[] }>[]>;
+    };
+  };
+}
+
 export type ValidatedPreparedHtlcPayment = Readonly<{
   targetEntityId: string;
   tokenId: number;
@@ -193,7 +212,7 @@ const assertExactPaymentFields = (data: HtlcPaymentTx['data'], mode: 'raw' | 'pr
   }
 };
 
-const requireProfiles = (env: EntityRuntimeContext): Profile[] => {
+const requireProfiles = (env: HtlcPaymentIngressContext): Profile[] => {
   if (!env.gossip || typeof env.gossip.getProfiles !== 'function') {
     throw new Error('HTLC_PAYMENT_GOSSIP_UNAVAILABLE');
   }
@@ -209,7 +228,7 @@ const uniqueProfile = <T extends { entityId: string }>(profiles: T[], entityId: 
 };
 
 const resolveRoute = async (
-  env: EntityRuntimeContext,
+  env: HtlcPaymentIngressContext,
   state: EntityState,
   tx: HtlcPaymentTx,
   amount: bigint,
@@ -573,7 +592,7 @@ const findIngressEntityState = (env: EntityRuntimeContext, input: EntityInput): 
 };
 
 export const prepareHtlcPaymentEntityTx = async (
-  env: EntityRuntimeContext,
+  env: HtlcPaymentIngressContext,
   state: EntityState,
   tx: HtlcPaymentTx,
 ): Promise<HtlcPaymentTx> => {
@@ -835,7 +854,7 @@ export const validatePreparedHtlcPayment = async (
 
 /** Seal every raw local HTLC before consensus admission and WAL persistence. */
 export const prepareHtlcPaymentEntityInputs = async (
-  env: EntityRuntimeContext,
+  env: HtlcPaymentIngressContext,
   inputs: readonly EntityInput[],
 ): Promise<EntityInput[]> =>
   Promise.all(

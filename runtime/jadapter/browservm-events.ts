@@ -47,7 +47,6 @@ export const decodeBrowserVmEvents = (
   interfaces: Array<ethers.Interface | null>,
   blockNumber: number,
   blockHash: string,
-  timestamp: number,
   transactionHash: string,
 ): JEvent[] => {
   const parsers = interfaces.filter((iface): iface is ethers.Interface => iface !== null);
@@ -72,7 +71,6 @@ export const decodeBrowserVmEvents = (
           blockHash,
           transactionHash,
           logIndex,
-          timestamp,
         });
         break;
       } catch {

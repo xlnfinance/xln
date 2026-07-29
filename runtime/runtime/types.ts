@@ -781,6 +781,3 @@ export interface EnvSnapshot {
   // Frame-specific structured logs
   logs?: FrameLogEntry[];
 }
-
-// Constants
-export const ENC = 'hex' as const;

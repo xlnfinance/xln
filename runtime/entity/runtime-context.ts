@@ -2,13 +2,10 @@ import type { AccountJClaimNodeStore } from '../types/account-j-claims';
 import type { CertifiedBoardNodeStore } from '../types/entity-board-registry';
 import type { JReplica } from '../types/jurisdiction-runtime';
 import type { LogCategory } from '../types/logging';
-import type { Profile } from './profile';
 import type {
   ConsumptionNodeStore,
 } from './consumption-accumulator-types';
 import type { EntityReplica } from './types';
-
-type EntityRoute = Readonly<{ path: string[] }>;
 
 /**
  * Runtime-owned capabilities visible during one Entity transition.
@@ -43,17 +40,6 @@ export interface EntityRuntimeContext {
     certifiedBoardNodes?: CertifiedBoardNodeStore;
     pendingCertifiedBoardNodes?: CertifiedBoardNodeStore;
   } | undefined;
-  gossip: {
-    getProfiles: () => Profile[];
-    getNetworkGraph: () => {
-      findPaths: (
-        source: string,
-        target: string,
-        amount?: bigint,
-        tokenId?: number,
-      ) => Promise<EntityRoute[]>;
-    };
-  };
   error: (
     category: LogCategory,
     message: string,

@@ -53,7 +53,6 @@ export interface JEventIngress {
   blockHash?: string;
   transactionHash?: string;
   logIndex?: number;
-  timestamp?: number;
   disputeFinalizationEvidence?: DisputeFinalizationEvidence;
 }
 

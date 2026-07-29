@@ -805,7 +805,6 @@ export class BrowserVMProvider {
           [this.depositoryInterface, this.accountInterface, this.entityProviderInterface],
           this.blockHeight,
           this.blockHash,
-          this.blockTimestamp,
           bytesToHex(tx.hash()),
         );
         for (const ev of events) {
@@ -1876,7 +1875,6 @@ export class BrowserVMProvider {
       blockHash: log.blockHash,
       transactionHash: log.transactionHash,
       logIndex: log.logIndex,
-      timestamp: this.blockTimestamp,
     };
   }
 
@@ -1960,7 +1958,6 @@ export class BrowserVMProvider {
       [this.depositoryInterface, this.accountInterface, this.entityProviderInterface],
       this.blockHeight,
       this.blockHash,
-      this.blockTimestamp,
       transactionHash,
     );
     this.log(`🔊 [BrowserVM] emitEvents: parsed ${events.length} events`);
