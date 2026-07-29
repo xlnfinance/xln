@@ -1,5 +1,4 @@
 import { Level } from 'level';
-import { ethers } from 'ethers';
 import { nodeProcess, runtimeIsBrowser } from '../runtime/platform';
 import {
   cloneIsolatedRoutedEntityInputs,
@@ -12,7 +11,6 @@ import {
   buildReplayVerifiableRuntimeMachineSnapshot,
   authorizeRestoredRuntimeInput,
   normalizePersistedSnapshotInPlace,
-  projectReplayVerifiableRuntimeMachine,
   restoreDurableRuntimeSnapshot,
 } from '../storage/wal/snapshot';
 import { setBrowserVMJurisdiction } from './../jadapter';
@@ -61,11 +59,14 @@ import { registerPendingCommittedJOutbox, splitJOutboxForDurableSubmit } from '.
 import { clearReplayOutputSignerHints, installReplayOutputSignerHints } from './../state-helpers';
 import { safeStringify } from './../protocol/serialization';
 import {
-  canonicalizeStorageAuditValue,
   computeCanonicalEntityHash,
   computeCanonicalRuntimeStateHash,
   computeCanonicalStateHashFromEnv,
 } from './../storage/canonical-hash';
+import {
+  assertRecoveryRuntimeMachineMatches,
+  listRecoveryRuntimeMachineMismatchFields,
+} from '../storage/recovery/machine';
 import {
   applyCertifiedEntityLineagePlan,
   buildCertifiedEntityLineagePlan,
@@ -261,103 +262,6 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
     return env;
   };
 
-  const normalizeEmptyRecoveryIngressState = (machine: Record<string, unknown>): Record<string, unknown> => {
-    const runtimeState = machine['runtimeState'];
-    if (!runtimeState || typeof runtimeState !== 'object') return machine;
-    const normalizedState = { ...(runtimeState as Record<string, unknown>) };
-    for (const key of ['pendingReliableIngress', 'reliableIngressCommitting'] as const) {
-      const value = normalizedState[key];
-      if ((value instanceof Map || value instanceof Set) && value.size === 0) delete normalizedState[key];
-    }
-    const normalized = { ...machine };
-    if (Object.keys(normalizedState).length > 0) normalized['runtimeState'] = normalizedState;
-    else delete normalized['runtimeState'];
-    return normalized;
-  };
-
-  const canonicalRecoveryMachine = (machine: Record<string, unknown>): string =>
-    safeStringify(canonicalizeStorageAuditValue(normalizeEmptyRecoveryIngressState(machine)));
-
-  const recoveryMachineMismatchFields = (
-    expected: Record<string, unknown>,
-    actual: Record<string, unknown>,
-  ): string[] => {
-    const fields = new Set([...Object.keys(expected), ...Object.keys(actual)]);
-    const mismatches: string[] = [];
-    for (const field of [...fields].sort()) {
-      const expectedHasField = Object.prototype.hasOwnProperty.call(expected, field);
-      const actualHasField = Object.prototype.hasOwnProperty.call(actual, field);
-      if (expectedHasField !== actualHasField) {
-        mismatches.push(field);
-        continue;
-      }
-      if (canonicalRecoveryMachine({ value: expected[field] }) === canonicalRecoveryMachine({ value: actual[field] }))
-        continue;
-      if (field !== 'runtimeState') {
-        mismatches.push(field);
-        continue;
-      }
-      const expectedState =
-        expected[field] && typeof expected[field] === 'object' ? (expected[field] as Record<string, unknown>) : {};
-      const actualState =
-        actual[field] && typeof actual[field] === 'object' ? (actual[field] as Record<string, unknown>) : {};
-      const stateFields = new Set([...Object.keys(expectedState), ...Object.keys(actualState)]);
-      for (const stateField of [...stateFields].sort()) {
-        const expectedHasStateField = Object.prototype.hasOwnProperty.call(expectedState, stateField);
-        const actualHasStateField = Object.prototype.hasOwnProperty.call(actualState, stateField);
-        if (expectedHasStateField !== actualHasStateField) {
-          mismatches.push(`runtimeState.${stateField}`);
-          continue;
-        }
-        if (
-          canonicalRecoveryMachine({ value: expectedState[stateField] }) !==
-          canonicalRecoveryMachine({ value: actualState[stateField] })
-        ) {
-          mismatches.push(`runtimeState.${stateField}`);
-        }
-      }
-    }
-    return mismatches;
-  };
-
-  const readRecoveryMachineField = (machine: Record<string, unknown>, field: string): unknown => {
-    if (!field.startsWith('runtimeState.')) return machine[field];
-    const runtimeState = machine['runtimeState'];
-    if (!runtimeState || typeof runtimeState !== 'object') return undefined;
-    return (runtimeState as Record<string, unknown>)[field.slice('runtimeState.'.length)];
-  };
-
-  const assertRecoveryRuntimeMachineMatches = (
-    env: RuntimeState,
-    expectedMachine: Record<string, unknown>,
-    height: number,
-    options?: { includeIngressWorkingState?: boolean },
-  ): void => {
-    const actualMachine = buildReplayVerifiableRuntimeMachineSnapshot(env, {
-      includeIngressWorkingState: options?.includeIngressWorkingState === true,
-    });
-    const expectedReplayMachine = projectReplayVerifiableRuntimeMachine(expectedMachine);
-    const actual = canonicalRecoveryMachine(actualMachine);
-    const expected = canonicalRecoveryMachine(expectedReplayMachine);
-    if (actual !== expected) {
-      const expectedHash = ethers.keccak256(ethers.toUtf8Bytes(expected));
-      const actualHash = ethers.keccak256(ethers.toUtf8Bytes(actual));
-      const mismatchFields = recoveryMachineMismatchFields(expectedReplayMachine, actualMachine);
-      const firstField = mismatchFields[0] || 'unknown';
-      const expectedValue = readRecoveryMachineField(expectedReplayMachine, firstField);
-      const actualValue = readRecoveryMachineField(actualMachine, firstField);
-      const detail = canonicalRecoveryMachine({
-        actual: actualValue === undefined ? { present: false } : { present: true, value: actualValue },
-        expected: expectedValue === undefined ? { present: false } : { present: true, value: expectedValue },
-      }).slice(0, 5_000);
-      throw new Error(
-        `RECOVERY_JOURNAL_RUNTIME_MACHINE_MISMATCH:height=${height}:` +
-          `fields=${mismatchFields.join(',') || 'unknown'}:` +
-          `expected=${expectedHash}:actual=${actualHash}:detail=${detail}`,
-      );
-    }
-  };
-
   const replayRecoveryFrameJournals = async (env: RuntimeState, frames: PersistedFrameJournal[]): Promise<void> => {
     // Live process() normalizes operational defaults before every reducer pass;
     // replay must enter the reducer with the same deterministic configuration.
@@ -518,7 +422,7 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
               const expectedMachine = frame.runtimeMachine;
               const actualMachine = buildDurableRuntimeMachineSnapshot(env);
               const differingMachineKeys = expectedMachine
-                ? recoveryMachineMismatchFields(expectedMachine, actualMachine)
+                ? listRecoveryRuntimeMachineMismatchFields(expectedMachine, actualMachine)
                 : ['runtimeMachine'];
               throw new Error(
                 `RECOVERY_JOURNAL_STATE_HASH_MISMATCH:height=${frameHeight}:` +
