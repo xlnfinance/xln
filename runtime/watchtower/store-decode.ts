@@ -11,6 +11,27 @@ import type {
   StoredTowerMetaStats,
 } from './store-types';
 
+export type WatchtowerStoredSchema = 'lookup' | 'action-receipt' | 'meta-stats';
+
+/**
+ * LevelDB corruption must identify both the physical key and the schema that
+ * rejected it. The original decoder error remains the cause so operators get
+ * precise forensic evidence without letting storage code invent defaults.
+ */
+export const decodeWatchtowerStoredValue = <T>(
+  schema: WatchtowerStoredSchema,
+  key: string,
+  raw: string,
+  decode: (value: string) => T,
+): T => {
+  try {
+    return decode(raw);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`TOWER_STORED_RECORD_INVALID:schema=${schema}:key=${key}:${detail}`, { cause: error });
+  }
+};
+
 const record = (value: unknown, code: string): Record<string, unknown> => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(code);
   return value as Record<string, unknown>;

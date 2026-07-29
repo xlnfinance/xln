@@ -8,7 +8,11 @@ import {
   readMetaStats,
   STATS_CACHE_TTL_MS,
 } from './store-db';
-import { decodeStoredActionReceipt, decodeStoredLookupDoc } from './store-decode';
+import {
+  decodeStoredActionReceipt,
+  decodeStoredLookupDoc,
+  decodeWatchtowerStoredValue,
+} from './store-decode';
 import type {
   StoredTowerActionReceipt,
   StoredTowerMetaStats,
@@ -62,12 +66,14 @@ export const listActionReceipts = async (
   await ensureWatchtowerStoreOpen(context);
   const prefix = actionReceiptPrefix(lookupKey);
   const receipts: StoredTowerActionReceipt[] = [];
-  for await (const [, raw] of context.db.iterator({
+  for await (const [key, raw] of context.db.iterator({
     gte: prefix,
     lte: `${prefix}\xff`,
     reverse: true,
   })) {
-    receipts.push(decodeStoredActionReceipt(String(raw)));
+    receipts.push(
+      decodeWatchtowerStoredValue('action-receipt', String(key), String(raw), decodeStoredActionReceipt),
+    );
   }
   return receipts;
 };
@@ -80,9 +86,9 @@ export const getStats = async (context: WatchtowerStoreContext): Promise<Watchto
   }
   let lookupCount = 0;
   let lastResortAppointmentCount = 0;
-  for await (const [, raw] of context.db.iterator({ gte: 'lookup:', lte: 'lookup:\xff' })) {
+  for await (const [key, raw] of context.db.iterator({ gte: 'lookup:', lte: 'lookup:\xff' })) {
     lookupCount += 1;
-    const doc = decodeStoredLookupDoc(String(raw));
+    const doc = decodeWatchtowerStoredValue('lookup', String(key), String(raw), decodeStoredLookupDoc);
     if (doc.bundles.some(entry => entry.towerMode === 'delayed_last_resort' && !!entry.lastResortPayload)) {
       lastResortAppointmentCount += 1;
     }

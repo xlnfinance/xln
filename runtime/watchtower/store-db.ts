@@ -9,7 +9,11 @@ import type {
   WatchtowerStoreContext,
   WatchtowerStoreOptions,
 } from './store-types';
-import { decodeStoredLookupDoc, decodeStoredMetaStats } from './store-decode';
+import {
+  decodeStoredLookupDoc,
+  decodeStoredMetaStats,
+  decodeWatchtowerStoredValue,
+} from './store-decode';
 
 const DEFAULT_MAX_BUNDLES = 3;
 const DEFAULT_MAX_STORED_BYTES = 4 * 1024 * 1024;
@@ -96,7 +100,8 @@ const isMissingLevelKey = (error: unknown): boolean =>
 export const readMetaStats = async (context: WatchtowerStoreContext): Promise<StoredTowerMetaStats> => {
   await ensureWatchtowerStoreOpen(context);
   try {
-    return decodeStoredMetaStats(await context.db.get(META_STATS_KEY));
+    const raw = await context.db.get(META_STATS_KEY);
+    return decodeWatchtowerStoredValue('meta-stats', META_STATS_KEY, raw, decodeStoredMetaStats);
   } catch (error) {
     if (isMissingLevelKey(error)) return emptyMetaStats();
     throw error;
@@ -109,8 +114,14 @@ export const readLookup = async (
 ): Promise<StoredLookupDoc | null> => {
   await ensureWatchtowerStoreOpen(context);
   try {
-    const raw = await context.db.get(lookupKeyFor(lookupKey));
-    return decodeStoredLookupDoc(raw, normalizeLookupKey(lookupKey));
+    const storageKey = lookupKeyFor(lookupKey);
+    const raw = await context.db.get(storageKey);
+    return decodeWatchtowerStoredValue(
+      'lookup',
+      storageKey,
+      raw,
+      value => decodeStoredLookupDoc(value, normalizeLookupKey(lookupKey)),
+    );
   } catch (error) {
     if (isMissingLevelKey(error)) return null;
     throw error;

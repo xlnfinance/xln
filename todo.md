@@ -425,10 +425,6 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   restore and dispute recovery before removing plaintext duplication.
 
 ## 4. Crash, corruption and load evidence — P1, open
-- [ ] Prove the new strict watchtower LevelDB schema decoders with real
-  corruption/reopen tests for lookup documents, action receipts and metadata.
-  Every persisted read is decoded once and now fails closed; finish the disk
-  evidence, including the exact key and schema name in every corruption error.
 - [ ] Add one real Anvil contract-event dispute E2E after payment, HTLC,
   same-J/cross-J swap and pull state. Exercise malformed/oversized optional
   transformer arguments, compare final Depository reserves/debts to the

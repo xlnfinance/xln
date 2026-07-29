@@ -17,7 +17,7 @@ import {
   writeLookup,
 } from './store-db';
 import type { LastResortTowerAppointment, StoredLookupDoc, WatchtowerStoreContext } from './store-types';
-import { decodeStoredLookupDoc } from './store-decode';
+import { decodeStoredLookupDoc, decodeWatchtowerStoredValue } from './store-decode';
 
 const towerModeOf = (appointment: TowerAppointmentV1): TowerModeV1 => normalizeTowerModeV1(appointment.towerMode);
 
@@ -225,8 +225,8 @@ export const listLatestLastResortAppointments = async (
 ): Promise<LastResortTowerAppointment[]> => {
   await ensureWatchtowerStoreOpen(context);
   const appointments: LastResortTowerAppointment[] = [];
-  for await (const [, raw] of context.db.iterator({ gte: 'lookup:', lte: 'lookup:\xff' })) {
-    const doc = decodeStoredLookupDoc(String(raw));
+  for await (const [key, raw] of context.db.iterator({ gte: 'lookup:', lte: 'lookup:\xff' })) {
+    const doc = decodeWatchtowerStoredValue('lookup', String(key), String(raw), decodeStoredLookupDoc);
     const entry = doc.bundles
       .filter(candidate => candidate.towerMode === 'delayed_last_resort' && !!candidate.lastResortPayload)
       .sort(compareLastResortBundles)[0];
