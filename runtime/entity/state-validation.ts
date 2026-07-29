@@ -1,5 +1,5 @@
 import { validateAccountState } from '../account/state-validation';
-import { LIMITS } from '../constants';
+import { LIMITS } from '../config/constants';
 import {
   FinancialDataCorruptionError,
   validateMapInstance,

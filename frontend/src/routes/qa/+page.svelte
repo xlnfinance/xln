@@ -48,7 +48,7 @@
     type QaAdminHealthSnapshot,
   } from '$lib/qa/adminEvidence';
   import type { QaSeverity } from '@xln/runtime/qa/severity';
-  import { DISPLAY, QA } from '@xln/runtime/constants';
+  import { DISPLAY, QA } from '@xln/runtime/config/constants';
   import type {
     QaArtifact,
     QaAuthInfo,

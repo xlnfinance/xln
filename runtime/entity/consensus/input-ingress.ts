@@ -2,7 +2,9 @@ import { shortId } from '../../infra/logger';
 import { cloneIsolatedEntityInput } from '../../protocol/runtime-input-clone';
 import { forkEntityReplicaForInput } from '../replica-clone';
 import type { EntityInput, EntityReplica, RuntimeState } from '../../types';
-import { formatEntityDisplay, HEAVY_LOGS, log } from '../../utils';
+import { formatEntityDisplay } from '../../presentation/identity-display';
+import { HEAVY_LOGS } from '../../infra/debug-flags';
+import { log } from '../../infra/diagnostics';
 import { copyLocalEntityLeaderTimeoutVoteAuthorization } from './leader';
 import { normalizeProposedFrameCollectedSigs } from './hanko-witness';
 import {

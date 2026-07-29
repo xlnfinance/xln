@@ -1,4 +1,4 @@
-import { LIMITS } from '../constants';
+import { LIMITS } from '../config/constants';
 import type { AccountReplica, AccountTx } from '../types';
 
 type AccountMempoolSubject = Pick<AccountReplica, 'mempool'> & {

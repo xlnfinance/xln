@@ -7,7 +7,7 @@
 
 import type { EntityTx, RuntimeState, NameSearchResult, ProfileUpdateTx } from '../types';
 import { compareStableText } from '../protocol/serialization';
-import { formatEntityDisplay, generateEntityAvatar } from '../utils';
+import { formatEntityDisplay, generateEntityAvatar } from '../presentation/identity-display';
 
 type DisplayProfile = {
   entityId: string;

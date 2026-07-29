@@ -7,7 +7,7 @@ import {
 } from '../../../account/consensus/flush';
 import type { ApplyEntityTxOptions } from '../apply';
 import { cumulativeMarksToPhases } from '../../../infra/perf-profile';
-import { getPerfMs } from '../../../utils';
+import { getPerfMs } from '../../../infra/time';
 import { resolveInboundAccount } from './account/inbound-account';
 import { rejectFrozenAccountInput } from './account/frozen-input';
 import type { CommittedAccountEffects } from './account/committed-input';

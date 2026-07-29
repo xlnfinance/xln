@@ -36,11 +36,8 @@ import {
 } from './entity-provider-action-submit-state';
 import { assertEntityProviderActionRuntimeTxAuthorized } from './entity-provider-action-submit-auth';
 import { applyRecordEntityProviderActionResultRuntimeTx } from './entity-provider-action-submit-result';
-import {
-  DEBUG,
-  formatEntityDisplay,
-  formatSignerDisplay,
-} from '../utils';
+import { DEBUG } from '../infra/debug-flags';
+import { formatEntityDisplay, formatSignerDisplay } from '../presentation/identity-display';
 import { createStructuredLogger } from '../infra/logger';
 import { cloneEntityState } from '../entity/state-clone';
 import { buildRuntimeCheckpointLineagePlan } from '../storage/entity-lineage';

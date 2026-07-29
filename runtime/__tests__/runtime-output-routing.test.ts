@@ -14,7 +14,7 @@ import {
 } from '../runtime/output-routing';
 import { deliveryAccepted, deliveryDeferred, deliveryFailure } from '../protocol/payments/delivery-result';
 import type { DeliverableEntityInput, EntityLeaderTimeoutVote, RuntimeState, RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../types';
-import { getWallClockMs } from '../utils';
+import { getWallClockMs } from '../infra/time';
 
 const runtimeId = (byte: string): string => `0x${byte.repeat(20)}`;
 const entityId = (byte: string): string => `0x${byte.repeat(32)}`;

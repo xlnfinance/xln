@@ -14,7 +14,8 @@ import type {
   RuntimeInput,
   RuntimeTx,
 } from '../../types';
-import { DEBUG, getPerfMs } from '../../utils';
+import { DEBUG } from '../../infra/debug-flags';
+import { getPerfMs } from '../../infra/time';
 import { attachEventEmitters } from '../env-events';
 import { applyMergedEntityInputs } from '../entity-inputs';
 import type { RuntimeEntityRoutingDeps } from '../entity-routing';

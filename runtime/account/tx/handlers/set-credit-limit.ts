@@ -7,7 +7,7 @@
  */
 
 import type { AccountState, AccountTx } from '../../../types';
-import { FINANCIAL } from '../../../constants';
+import { FINANCIAL } from '../../../config/constants';
 import { ensureDelta } from '../delta-utils';
 
 // Maximum credit limit (prevents overflow attacks)

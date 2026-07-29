@@ -24,7 +24,7 @@ import type {
   RuntimeState,
   JurisdictionConfig,
 } from '../types';
-import { getPerfMs } from '../utils';
+import { getPerfMs } from '../infra/time';
 import { createDefaultDelta } from '../account/delta';
 
 type Cli = {

@@ -14,7 +14,7 @@ import type {
 import { compareStableText, safeStringify } from '../protocol/serialization';
 import { deriveSignerAddressSync, getSignerAddress, getSignerPrivateKeyIfAvailable, getSignerPublicKey } from '../account/crypto';
 import { deriveEncryptionKeyPair, pubKeyToHex } from '../protocol/p2p-crypto';
-import { UINT16_MAX } from '../constants';
+import { UINT16_MAX } from '../config/constants';
 import { requireCompleteValidatorEncryptionManifest } from '../protocol/htlc/validator-encryption';
 import { getProfileEncryptionAttestations } from '../entity/profile-encryption';
 import { buildEntityProfileDescriptor } from '../entity/profile-descriptor';

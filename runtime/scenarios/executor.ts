@@ -579,7 +579,7 @@ async function handleLazyGrid(
   context: ScenarioExecutionContext,
   env: RuntimeState
 ): Promise<void> {
-  const { cryptoHash } = await import('../utils.js');
+  const { cryptoHash } = await import('../infra/platform-crypto.js');
 
   const total = X * Y * Z;
   console.log(`  ⚡ LAZY MODE: Creating ${total} in-browser entities (no blockchain)`);

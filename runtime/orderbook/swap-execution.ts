@@ -1,7 +1,7 @@
 import { asOfferId, compareCanonicalText, swapKey, type OfferId, type SwapKey } from './swap-keys.ts';
 import { deriveSide } from './types.ts';
 import type { CrossJurisdictionSwapRoute } from '../types';
-import { UINT16_MAX } from '../constants.ts';
+import { UINT16_MAX } from '../config/constants.ts';
 import { deriveTransferOffdeltaChange } from '../protocol/delta-movement.ts';
 import { computeSwapPriceTicks } from './types.ts';
 

@@ -1,4 +1,4 @@
-import { HTLC } from '../../constants';
+import { HTLC } from '../../config/constants';
 import {
   ASYNC_PAYMENT_EXPIRY_BLOCKS,
   ASYNC_PAYMENT_EXPIRY_MS,

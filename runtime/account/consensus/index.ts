@@ -15,7 +15,7 @@ import type {
 } from '../../types';
 import { cloneAccountFrame, cloneAccountState } from '../state-clone';
 import { getAccountPerspective } from '../perspective';
-import { HEAVY_LOGS } from '../../utils';
+import { HEAVY_LOGS } from '../../infra/debug-flags';
 import { applyAccountTx } from '../tx/apply';
 import type { AccountTxRejection } from '../tx/apply-types';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';

@@ -3,7 +3,7 @@
   import { type Writable, type Readable } from 'svelte/store';
   import type { RuntimeState, EnvSnapshot, JReplica, RuntimeAdapterViewFrame, XLNModule } from '@xln/runtime/api/runtime-module';
   import type { JAdapter } from '@xln/runtime/jadapter';
-  import { DISPLAY, TIME_MACHINE } from '@xln/runtime/constants';
+  import { DISPLAY, TIME_MACHINE } from '@xln/runtime/config/constants';
   import FrameSubtitle from '../../components/TimeMachine/FrameSubtitle.svelte';
   import NetworkMachineTimeline from './NetworkMachineTimeline.svelte';
   import { runtimeGraphScope } from '$lib/stores/runtimeGraphControlStore';

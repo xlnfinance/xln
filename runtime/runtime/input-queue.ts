@@ -1,4 +1,4 @@
-import { TIMING } from '../constants';
+import { TIMING } from '../config/constants';
 import type {
   EntityInput,
   RuntimeState,
@@ -7,7 +7,7 @@ import type {
   RuntimeInput,
   RuntimeTx,
 } from '../types';
-import { getWallClockMs } from '../utils';
+import { getWallClockMs } from '../infra/time';
 import { createStructuredLogger } from '../infra/logger';
 import { ensureRuntimeState } from './runtime-state';
 

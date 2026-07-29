@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { DISPLAY, QA } from '@xln/runtime/constants';
+  import { DISPLAY, QA } from '@xln/runtime/config/constants';
   import { consumeQaTokenFromUrl, qaFetch, readQaToken, writeQaToken } from '$lib/qa/apiClient';
 
   type QaBenchmarkStatus = 'ok' | 'faster' | 'slower' | 'mixed' | 'failed' | 'insufficient';

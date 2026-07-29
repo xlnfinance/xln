@@ -33,7 +33,7 @@ import { drainJWatcherBacklog } from '../jadapter/backlog-drain';
 import { createRelayStore } from '../relay/store';
 import { safeStringify } from '../protocol/serialization';
 import { createStructuredLogger } from '../infra/logger';
-import { getPerfMs } from '../utils';
+import { getPerfMs } from '../infra/time';
 import { handleMeshBootstrapLoopError } from './mesh-bootstrap-fail-fast';
 import { reportManagedChildFatal } from './managed-child-fatal-ipc';
 import {

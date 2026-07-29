@@ -1,5 +1,5 @@
 import type { AccountFrame, AccountReplica, AccountTx } from '../../types';
-import { HEAVY_LOGS } from '../../utils';
+import { HEAVY_LOGS } from '../../infra/debug-flags';
 import { safeStringify } from '../../protocol/serialization';
 import { decodeAccountFrame } from '../frame-validation';
 import { createStructuredLogger } from '../../infra/logger';

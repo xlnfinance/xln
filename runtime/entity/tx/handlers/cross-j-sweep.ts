@@ -22,7 +22,7 @@ import type {
   RuntimeState,
   RuntimeOverlayRecord,
 } from '../../../types';
-import { formatEntityId } from '../../../utils';
+import { formatEntityId } from '../../../presentation/identity-display';
 import { findAccountKey } from '../account-key';
 import {
   accountHasCrossSwapAckQueued,

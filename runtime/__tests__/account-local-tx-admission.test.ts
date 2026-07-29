@@ -8,7 +8,7 @@ import {
   freezeAccountForDispute,
   isDisputeStartedByLeft,
 } from '../account/consensus/dispute-policy';
-import { LIMITS } from '../constants';
+import { LIMITS } from '../config/constants';
 import type { AccountState, AccountTx, RuntimeState } from '../types';
 
 const PAYMENT: Extract<AccountTx, { type: 'direct_payment' }> = {

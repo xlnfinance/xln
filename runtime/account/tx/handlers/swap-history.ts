@@ -8,7 +8,7 @@ import {
   cloneCrossJurisdictionRoute,
   cloneCrossJurisdictionSwapHistoryRoute,
 } from '../../../extensions/cross-j/index';
-import { LIMITS } from '../../../constants';
+import { LIMITS } from '../../../config/constants';
 
 function ensureSwapOrderHistory(account: AccountReplica): Map<string, SwapOrderHistoryEntry> {
   if (!(account.swapOrderHistory instanceof Map)) {

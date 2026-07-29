@@ -45,7 +45,7 @@ import type {
   RuntimeOverlayRecord,
 } from '../../types';
 import type { AccountJClaimNode, AccountJClaimNodeChanges, AccountJClaimNodeStore } from '../../types/account-j-claims';
-import { getPerfMs } from '../../utils';
+import { getPerfMs } from '../../infra/time';
 import {
   assertRuntimeOutputAuthorization,
   isCollectiveEntityActionTx,

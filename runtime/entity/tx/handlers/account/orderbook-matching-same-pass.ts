@@ -8,7 +8,7 @@ import {
   type BookState,
   type OrderbookExtState,
 } from '../../../../orderbook';
-import { SWAP_CONSTANTS } from '../../../../constants';
+import { SWAP_CONSTANTS } from '../../../../config/constants';
 import type { SwapPairPolicy } from '../../../../account/utils';
 import { createStructuredLogger, shortId, shortOrder } from '../../../../infra/logger';
 import type {

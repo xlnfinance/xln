@@ -37,7 +37,7 @@ import {
   type StoragePersistenceBoundary,
 } from '../../storage';
 import type { EntityReplica, JReplica, JurisdictionConfig } from '../../types';
-import { getPerfMs } from '../../utils';
+import { getPerfMs } from '../../infra/time';
 import { buildRuntimeCheckpointSnapshot } from '../../storage/wal/snapshot';
 import { sealAccountDraftAsEntity } from '../helpers/account-draft';
 

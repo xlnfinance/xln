@@ -1,6 +1,6 @@
 import { computeIntegrityDigest } from '../infra/integrity-checksum';
 import { compareStableText } from '../protocol/serialization';
-import { LIMITS } from '../constants';
+import { LIMITS } from '../config/constants';
 import { decodeBuffer, encodeBuffer } from './codec';
 import { keyLiveAccountField } from './keys';
 import { readRawOrNull } from './level';

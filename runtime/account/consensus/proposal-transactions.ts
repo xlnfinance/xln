@@ -1,7 +1,7 @@
 import type { AccountReplica, AccountTx, RuntimeState } from '../../types';
 import { cloneAccountState } from '../state-clone';
 import { isLeft } from '../utils';
-import { HEAVY_LOGS } from '../../utils';
+import { HEAVY_LOGS } from '../../infra/debug-flags';
 import { applyAccountTx } from '../tx/apply';
 import { createStructuredLogger, shortHash } from '../../infra/logger';
 import {

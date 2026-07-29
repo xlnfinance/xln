@@ -9,7 +9,7 @@ import type {
   EntityReplica,
   RuntimeState,
 } from '../../types';
-import { getPerfMs } from '../../utils';
+import { getPerfMs } from '../../infra/time';
 import { hasProposableAccount } from './account-work-index';
 import { isCanonicalEntityFrameDigest } from './frame';
 import {

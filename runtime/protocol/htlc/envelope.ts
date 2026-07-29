@@ -19,7 +19,7 @@
 
 import { keccak256 } from 'ethers';
 import type { CryptoProvider } from '../crypto/provider';
-import { HTLC, LIMITS } from '../../constants';
+import { HTLC, LIMITS } from '../../config/constants';
 import { safeStringify } from '../serialization';
 import { encryptBytesForValidatorManifest, type MultiRecipientCiphertext } from './multi-recipient';
 import { decodeOnionLayer, encodeHtlcSecretOffer, encodeOnionLayer } from './onion-codec';

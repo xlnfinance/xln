@@ -2,7 +2,7 @@ import type {
   AccountState,
   AccountTx,
 } from '../../../../types';
-import { FINANCIAL, LIMITS } from '../../../../constants';
+import { FINANCIAL, LIMITS } from '../../../../config/constants';
 import { getAccountSwapMarketLimitError } from '../../../swap-limits';
 
 export type SwapOfferTx = Extract<AccountTx, { type: 'swap_offer' }>;

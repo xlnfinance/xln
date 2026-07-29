@@ -1,11 +1,11 @@
 import type { EntityState, RuntimeState, Proposal, ProposalAction } from '../../types';
-import { createHash } from '../../utils';
+import { createHash } from '../../infra/platform-crypto';
 import { safeStringify } from '../../protocol/serialization';
 import { createStructuredLogger, shortHash } from '../../infra/logger';
 import { canonicalEntityBoardSignerId, hashEntityProposalAction } from '../authorization';
 import { addMessage } from '../frame-events';
 import { nextEntityCommandNonce, resolveEntityCommandBoard } from '../command';
-import { LIMITS } from '../../constants';
+import { LIMITS } from '../../config/constants';
 
 const proposalLog = createStructuredLogger('entity.basic');
 

@@ -13,7 +13,7 @@ import {
 } from '../../jurisdiction/local-history';
 import { ensureRuntimeState } from '../../runtime/runtime-state';
 import type { RuntimeState } from '../../types';
-import { clearDatabase } from '../../utils';
+import { clearDatabase } from '../clear-database';
 import { computeCanonicalEntityHash, computeCanonicalRuntimeStateHash } from '../canonical-hash';
 import { buildCertifiedEntityLineagePlan } from '../entity-lineage';
 import {

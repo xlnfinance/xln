@@ -1,5 +1,6 @@
 import { shortHash, shortId } from '../../infra/logger';
-import { DEBUG, log } from '../../utils';
+import { DEBUG } from '../../infra/debug-flags';
+import { log } from '../../infra/diagnostics';
 import { finalizeCommitNotification } from './commit-finalization';
 import { getEntityHashManifestMismatch } from './hanko-witness';
 import {

@@ -1,4 +1,4 @@
-import { LIMITS } from '../constants';
+import { LIMITS } from '../config/constants';
 
 const normalizedAccountId = (value: unknown): string => String(value ?? '').trim().toLowerCase();
 

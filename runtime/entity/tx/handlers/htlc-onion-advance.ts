@@ -1,5 +1,5 @@
 import { deriveDelta, isLeft } from '../../../account/utils';
-import { HTLC } from '../../../constants';
+import { HTLC } from '../../../config/constants';
 import { createStructuredLogger } from '../../../infra/logger';
 import {
   validateHtlcOnionAdvanceTx,

@@ -30,7 +30,7 @@ import {
   summarizeRuntimeAccountCausality,
   type EntityInputCausalTrace,
 } from '../infra/account-causal-trace';
-import { getPerfMs } from '../utils';
+import { getPerfMs } from '../infra/time';
 
 let _process: ((env: RuntimeState, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<RuntimeState>) | null = null;
 let _processWithStep: ((env: RuntimeState, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<RuntimeState>) | null = null;

@@ -1,4 +1,4 @@
-import { LIMITS, SWAP_CONSTANTS } from '../../../../constants';
+import { LIMITS, SWAP_CONSTANTS } from '../../../../config/constants';
 import {
   baseAmountFromLots,
   canonicalPair,

@@ -1,5 +1,5 @@
 import { computeIntegrityChecksum, computeIntegrityDigest, integrityChecksumFromHex } from '../infra/integrity-checksum';
-import { LIMITS } from '../constants';
+import { LIMITS } from '../config/constants';
 import { notFound } from './codec';
 import { KEY_REBRANCH_NODE, hexBytes } from './keys';
 import {

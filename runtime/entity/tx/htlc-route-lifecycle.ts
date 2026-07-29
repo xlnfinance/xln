@@ -1,5 +1,5 @@
 import type { AccountTx, EntityState, HtlcLock, HtlcNoteKey, HtlcRoute } from '../../types';
-import { LIMITS } from '../../constants';
+import { LIMITS } from '../../config/constants';
 import { cancelHook, scheduleHook } from '../scheduler/hook-state';
 
 /** Auto-dispute when the upstream peer never acknowledges a returned secret. */

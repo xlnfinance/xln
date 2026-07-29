@@ -36,7 +36,7 @@ import { handleExtendCreditEntityTx } from '../entity/tx/handlers/account-admin'
 import { buildQuorumHanko, verifyHankoForHash } from '../hanko/signing';
 import { createEmptyEnv } from '../runtime';
 import { safeStringify } from '../protocol/serialization';
-import { LIMITS } from '../constants';
+import { LIMITS } from '../config/constants';
 import {
   hydrateEntityStateFromStorage,
   projectAccountDoc,

@@ -12,7 +12,7 @@ import type {
   RuntimeInput,
   RuntimeTx,
 } from '../../types';
-import { getPerfMs } from '../../utils';
+import { getPerfMs } from '../../infra/time';
 import {
   captureReliableReceiptSenderCheckpoint,
   type ReliableIngressCommit,

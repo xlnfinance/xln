@@ -1,6 +1,6 @@
 import { ethers } from 'ethers';
 
-import { LIMITS } from '../constants';
+import { LIMITS } from '../config/constants';
 import type {
   ConsumptionAccumulatorState,
   ConsumptionApplyResult,

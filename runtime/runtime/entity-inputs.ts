@@ -20,7 +20,7 @@ import {
   atomicPairInputsMatch,
 } from './entity-input-atomic';
 import { drainImmediateCrossJurisdictionOutputs } from './entity-input-output';
-import { getPerfMs } from '../utils';
+import { getPerfMs } from '../infra/time';
 
 export {
   RuntimeEntityInputApplyError,

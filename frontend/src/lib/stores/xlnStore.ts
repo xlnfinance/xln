@@ -95,7 +95,7 @@ import type {
   CrossJurisdictionSwapRoute,
   Profile as GossipProfile,
 } from '@xln/runtime/api/runtime-module';
-import { REMOTE_RUNTIME } from '@xln/runtime/constants';
+import { REMOTE_RUNTIME } from '@xln/runtime/config/constants';
 
 let unregisterEnvChange: (() => void) | null = null;
 let unregisterRuntimeControllerChange: (() => void) | null = null;

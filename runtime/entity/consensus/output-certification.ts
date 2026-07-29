@@ -29,7 +29,7 @@ import {
   resolveObserverCertifiedBoardHash,
   resolveObserverCertifiedBoardRecord,
 } from '../../jurisdiction/board-registry';
-import { LIMITS } from '../../constants';
+import { LIMITS } from '../../config/constants';
 import { assertReliableCertifiedPayloadIsAtomic } from './output-envelope';
 import { assertCertifiedEntityOutputAuthorization } from '../authorization';
 

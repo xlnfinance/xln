@@ -7,7 +7,7 @@ import {
   hasPendingLocalJEvent,
   isFrozenBaseJPrefixRollAuthorized,
 } from '../jurisdiction/j-prefix-consensus';
-import { getWallClockMs } from '../utils';
+import { getWallClockMs } from '../infra/time';
 import {
   getNextNetworkRetryTimestamp,
   hasReadyPendingNetworkOutputs,

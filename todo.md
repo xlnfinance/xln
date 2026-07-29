@@ -53,7 +53,7 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   reach upward into process orchestration. Move the shared primitive to its
   canonical owner or pass a narrow dependency explicitly—never hide a reverse
   edge behind a re-export.
-  Drive the remaining root-surface debt from `3` to zero. The production
+  Drive the remaining root-surface debt from `1` to zero. The production
   value-import graph is now acyclic and permanently ratcheted at SCC size one.
 - [ ] Close only current, reproduced audit findings. The accepted remainder is
   decomposed below: durable/idempotent off-chain faucet admission, the

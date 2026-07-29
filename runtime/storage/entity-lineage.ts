@@ -2,7 +2,7 @@ import { encodeCanonicalConsensusValue } from '../protocol/canonical-consensus-v
 import { ethers } from 'ethers';
 
 import { verifyAccountSignature } from '../account/crypto';
-import { LIMITS, UINT16_MAX } from '../constants';
+import { LIMITS, UINT16_MAX } from '../config/constants';
 import {
   expectedCommittedLeaderState,
   verifyEntityLeaderCertificate,

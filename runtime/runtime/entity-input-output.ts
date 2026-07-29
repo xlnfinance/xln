@@ -5,7 +5,7 @@ import type {
 } from '../types';
 import { safeStringify } from '../protocol/serialization';
 import { resolveEntityProposerId } from './entity-output-signer';
-import { getPerfMs } from '../utils';
+import { getPerfMs } from '../infra/time';
 import { shortId } from '../infra/logger';
 import {
   assertRuntimeEntityIngress,

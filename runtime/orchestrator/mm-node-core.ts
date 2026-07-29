@@ -12,7 +12,7 @@ import {
   isLiquidSwapToken,
 } from '../account/utils';
 import { deriveAccountWatchSeed } from '../protocol/account-watch-seed';
-import { LIMITS, SWAP_CONSTANTS } from '../constants';
+import { LIMITS, SWAP_CONSTANTS } from '../config/constants';
 import { resolveCrossJurisdictionRuntimeTopology } from '../extensions/cross-j/boundary';
 import {
   deriveCanonicalCrossJurisdictionBookOwnerForLegs,

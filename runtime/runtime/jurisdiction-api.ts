@@ -3,7 +3,7 @@ import { withCanonicalCrossJurisdictionRouteHash } from '../extensions/cross-j/i
 import { getJurisdictionStackId, requireEntityRuntimeJurisdictionConfig } from '../jurisdiction/jurisdiction-runtime';
 import { resolveEntityProposerId } from './entity-output-signer';
 import type { AccountState, CrossJurisdictionSwapRoute, EntityState, RuntimeState, RuntimeInput } from '../types';
-import { getWallClockMs } from '../utils';
+import { getWallClockMs } from '../infra/time';
 import { buildDebtEnforcementRuntimeInputFromProjection } from '../protocol/payments/debt-enforcement';
 import type { DebtEnforcementProjectionRuntimeInputParams } from '../protocol/payments/debt-enforcement';
 import { deriveCanonicalCrossJurisdictionBookOwnerForLegs } from '../extensions/cross-j/market';

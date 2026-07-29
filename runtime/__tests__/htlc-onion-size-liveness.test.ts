@@ -5,7 +5,7 @@ import {
   deriveSignerKeySync,
   signDigestBytesWithPrivateKey,
 } from '../account/crypto';
-import { HTLC, LIMITS } from '../constants';
+import { HTLC, LIMITS } from '../config/constants';
 import { generateLazyEntityId } from '../entity/factory';
 import { buildQuorumHanko } from '../hanko/signing';
 import { deriveEncryptionKeyPair, pubKeyToHex } from '../protocol/p2p-crypto';

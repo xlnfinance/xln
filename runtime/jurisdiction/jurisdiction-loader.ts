@@ -5,7 +5,7 @@
  */
 
 // Browser-compatible: Use isBrowser check instead of fs
-import { isBrowser } from '../utils';
+import { isBrowser } from '../infra/platform-crypto';
 import { resolveJurisdictionsJsonPath } from './jurisdictions-path';
 import { createStructuredLogger } from '../infra/logger';
 

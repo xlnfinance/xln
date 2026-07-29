@@ -68,7 +68,7 @@ import {
 } from '../../storage';
 import { encodeBuffer } from '../../storage/codec';
 import { KEY_HEAD } from '../../storage/keys';
-import { getPerfMs } from '../../utils';
+import { getPerfMs } from '../../infra/time';
 import type {
   CertifiedRegistrationEvidence,
   CertifiedEntityFrameLink,

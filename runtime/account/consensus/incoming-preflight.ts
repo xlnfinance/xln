@@ -6,7 +6,7 @@
 import type { AccountFrame, AccountInput, AccountReplica, RuntimeState } from '../../types';
 import { verifyHankoForHash } from '../../hanko/signing';
 import { createStructuredLogger, shortId } from '../../infra/logger';
-import { HEAVY_LOGS } from '../../utils';
+import { HEAVY_LOGS } from '../../infra/debug-flags';
 import { getAccountFrameBoundsError } from './frame';
 import { accountInputProposal } from './flush';
 import { getIncomingAccountDeadlineViolation, type AccountInputSecurityContext } from './deadline-policy';

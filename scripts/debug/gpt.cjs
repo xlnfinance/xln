@@ -402,7 +402,7 @@ const RUNTIME_FILES = {
     'types/jurisdiction-events.ts',
     'types/jurisdiction-runtime.ts',
     'protocol/identity.ts',
-    'constants.ts',
+    'config/constants.ts',
     'runtime.ts',
     'runtime/composition.ts',
     'runtime/frame/process.ts',

@@ -5,7 +5,7 @@ import {
   normalizeAccountStateDomain,
   sameAccountStateDomain,
 } from '../account/state-root';
-import { LIMITS } from '../constants';
+import { LIMITS } from '../config/constants';
 import {
   getCertifiedBoardNodeStore,
   getCertifiedBoardStackKey,

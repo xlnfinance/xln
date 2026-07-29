@@ -1,7 +1,7 @@
 import { encodeCanonicalConsensusValue } from '../protocol/canonical-consensus-value';
 import { ethers } from 'ethers';
 
-import { LIMITS } from '../constants';
+import { LIMITS } from '../config/constants';
 
 import type { EntityTx, SignedEntityCommandV1 } from '../types';
 import { canonicalEntityBoardSignerId, isEntityProtocolTx } from './authorization';

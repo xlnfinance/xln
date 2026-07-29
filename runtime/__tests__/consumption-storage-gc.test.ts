@@ -25,7 +25,7 @@ import { keyConsumptionNode } from '../storage/keys';
 import { hydrateConsumptionRootNodesFromStorage } from '../storage/read';
 import type { RuntimeDbLike } from '../storage/types';
 import type { EntityReplica, JReplica, JurisdictionConfig } from '../types';
-import { getPerfMs } from '../utils';
+import { getPerfMs } from '../infra/time';
 
 type RecordedDb = RuntimeDbLike & { writes: string[][] };
 

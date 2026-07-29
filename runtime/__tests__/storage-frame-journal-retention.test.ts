@@ -33,7 +33,7 @@ import {
   saveRuntimeFrameToStorage,
   verifyStorageTailIntegrity,
 } from '../storage';
-import { getPerfMs } from '../utils';
+import { getPerfMs } from '../infra/time';
 import { decodeBuffer, encodeBuffer, writeBatch } from '../storage/codec';
 import { readRawOrNull } from '../storage/level';
 import {

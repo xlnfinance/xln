@@ -9,7 +9,7 @@ import type {
 import { createStructuredLogger } from '../../infra/logger';
 import { normalizeRuntimeId } from '../../networking/runtime-id';
 import { compareStableText, safeStringify } from '../../protocol/serialization';
-import { getWallClockMs } from '../../utils';
+import { getWallClockMs } from '../../infra/time';
 import { validateDeliverableEntityInput } from '../routing-validation';
 
 import { getEffectiveEntityInputTxs, orderCertifiedOutputsBySequence } from '../../entity/consensus/output-envelope';

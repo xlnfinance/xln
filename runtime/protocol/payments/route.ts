@@ -1,4 +1,4 @@
-import { FINANCIAL } from '../../constants';
+import { FINANCIAL } from '../../config/constants';
 
 type DirectPaymentRouteInput = Readonly<{
   sourceEntityId: string;

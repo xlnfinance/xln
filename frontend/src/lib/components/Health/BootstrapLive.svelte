@@ -20,7 +20,7 @@
     Wifi,
   } from 'lucide-svelte';
   import { makeQaSeveritySignal, type QaSeverity, type QaSeveritySignal } from '@xln/runtime/qa/severity';
-  import { QA } from '@xln/runtime/constants';
+  import { QA } from '@xln/runtime/config/constants';
 
   type IconComponent = typeof Activity;
 

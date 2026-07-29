@@ -14,7 +14,7 @@ import { cloneAccountInputWithoutPostCommitHankos, cloneAccountTxWithoutPostComm
 import { computeBookCommitmentHash } from '../../orderbook/commitment';
 import { createStructuredLogger } from '../../infra/logger';
 import { isRuntimePerfProfileEnabled } from '../../infra/perf-runtime-flags';
-import { getPerfMs } from '../../utils';
+import { getPerfMs } from '../../infra/time';
 import { computeIntegrityDigest } from '../../infra/integrity-checksum';
 import { ENTITY_FRAME_EVENT_COLLECTOR } from '../frame-event-collector';
 import {

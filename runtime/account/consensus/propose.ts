@@ -5,7 +5,8 @@
 
 import type { AccountReplica, AccountTx, RuntimeState } from '../../types';
 import { removeCommittedTxsFromMempool } from '../../protocol/tx-multiset';
-import { getPerfMs, HEAVY_LOGS } from '../../utils';
+import { getPerfMs } from '../../infra/time';
+import { HEAVY_LOGS } from '../../infra/debug-flags';
 import { createStructuredLogger, shortId } from '../../infra/logger';
 import type { ProposeAccountFrameResult } from './types';
 import type { AccountJClaimNodeStore } from '../../types/account-j-claims';

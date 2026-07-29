@@ -17,7 +17,7 @@ import {
 } from './map-commitment';
 import { createStructuredLogger } from '../infra/logger';
 import { isRuntimePerfProfileEnabled } from '../infra/perf-runtime-flags';
-import { getPerfMs } from '../utils';
+import { getPerfMs } from '../infra/time';
 
 const accountRootLog = createStructuredLogger('account.state-root');
 

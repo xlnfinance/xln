@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { LIMITS } from '../constants';
+import { LIMITS } from '../config/constants';
 import {
   accountSwapMarketKey,
   getAccountSwapMarketLimitError,

@@ -1,4 +1,4 @@
-import { TIMING } from '../../constants';
+import { TIMING } from '../../config/constants';
 import { collectDueLocalProfileCertificationInputs } from '../../networking/local-profile-lifecycle';
 import { requireBoundaryInteger } from '../../protocol/boundary-validation';
 import { recordRuntimeHistoryTraceForTesting } from '../history-retention';
@@ -16,7 +16,7 @@ import type {
   RuntimeInput,
   RuntimeState,
 } from '../../types';
-import { getWallClockMs } from '../../utils';
+import { getWallClockMs } from '../../infra/time';
 import { clearPendingAuditEvents, flushPendingAuditEvents } from '../env-events';
 import { acquireRuntimeFrameWriter, assertRuntimeWriterAcceptingIngress } from './writer-lock';
 import { createFrameExecutionState, type FrameExecutionState } from './execution-state';

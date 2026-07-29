@@ -12,7 +12,7 @@ import { removeBookOrderById } from '../../../orderbook/cross-j';
 import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import type { CrossJurisdictionSwapRoute, EntityInput, EntityState, EntityTx, RuntimeState, RuntimeOverlayRecord } from '../../../types';
-import { formatEntityId } from '../../../utils';
+import { formatEntityId } from '../../../presentation/identity-display';
 import { findAccountKey, normalizeEntityRef } from '../account-key';
 import {
   accountHasCrossSwapAckQueued,

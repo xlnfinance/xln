@@ -5,7 +5,7 @@ import { encodeCanonicalConsensusValue } from '../../protocol/canonical-consensu
  */
 
 import { verifyAccountSignature } from '../../account/crypto';
-import { LIMITS } from '../../constants';
+import { LIMITS } from '../../config/constants';
 import { buildCrossJurisdictionFillId, CROSS_J_PENDING_FILL_ACK_TTL_MS } from '../../extensions/cross-j/fill-ack';
 import { cloneCrossJurisdictionAccountTxRoute } from '../../extensions/cross-j/index';
 import { getEntityConfigBoardHash } from '../../hanko/signing';
@@ -67,7 +67,7 @@ import type {
   RuntimeOverlayRecord,
   EntityCandidate,
 } from '../../types';
-import { log } from '../../utils';
+import { log } from '../../infra/diagnostics';
 import { validateProposedEntityFrame } from './frame-validation';
 import {
   applyConsumptionOutput,

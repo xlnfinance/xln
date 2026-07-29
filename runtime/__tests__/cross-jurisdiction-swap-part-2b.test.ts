@@ -169,7 +169,7 @@ import { buildLocalEntityProfile } from '../networking/gossip-helper';
 
 import { collectLocalProfileEncryptionAnnouncements } from '../entity/profile-encryption';
 
-import { LIMITS } from '../constants';
+import { LIMITS } from '../config/constants';
 
 import { getEffectiveEntityInputTxs } from '../entity/consensus/output-envelope';
 

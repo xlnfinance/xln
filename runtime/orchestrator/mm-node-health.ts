@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import {
 buildDefaultEntitySwapPairs
 } from '../account/utils';
-import { LIMITS } from '../constants';
+import { LIMITS } from '../config/constants';
 import { crossJurisdictionBookOwnerRef } from '../extensions/cross-j/orderbook';
 import { hasCrossJurisdictionBookOrder } from '../orderbook/cross-j';
 import { compareStableText,safeStringify } from '../protocol/serialization';

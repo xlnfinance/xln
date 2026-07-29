@@ -7,7 +7,7 @@
     runtimeViewFrameMatchesAtHeight,
   } from '$lib/stores/runtimeViewStore';
   import type { RuntimeAdapterViewFrame } from '@xln/runtime/api/runtime-module';
-  import { REMOTE_RUNTIME } from '@xln/runtime/constants';
+  import { REMOTE_RUNTIME } from '@xln/runtime/config/constants';
   import type { Tab } from '$lib/types/ui';
   import EntityPanelTabs from './EntityPanelTabs.svelte';
   import {

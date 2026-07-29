@@ -13,9 +13,7 @@ const MAX_VALUE_IMPORT_SCC_SIZE = 1;
 // migration debt, not a stable public layout; only runtime.ts is the intended
 // root entrypoint.
 const ROOT_FILE_DEBT = new Set([
-  'runtime/constants.ts',
   'runtime/types.ts',
-  'runtime/utils.ts',
 ]);
 
 // These directions violate the Runtime → Entity → Account cascade or make a

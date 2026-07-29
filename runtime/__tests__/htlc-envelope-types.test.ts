@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { LIMITS } from '../constants';
+import { LIMITS } from '../config/constants';
 import { NobleCryptoProvider } from '../protocol/crypto/noble';
 import { createOnionEnvelopes, validateEnvelope } from '../protocol/htlc/envelope';
 

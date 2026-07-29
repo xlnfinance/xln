@@ -14,7 +14,7 @@ import { isUsableContractAddress } from './contract-address';
 import { loadJurisdictions } from './jurisdiction-loader';
 import { createStructuredLogger } from '../infra/logger';
 import { parseRebalancePolicyUsd } from '../extensions/rebalance/usd';
-import { isBrowser } from '../utils';
+import { isBrowser } from '../infra/platform-crypto';
 
 const jurisdictionConfigLog = createStructuredLogger('runtime.jurisdiction_config');
 

@@ -37,7 +37,7 @@ import { measurePrefixBytes } from '../storage/level';
 import { hydrateCertifiedBoardRootNodesFromStorage, readStorageHead } from '../storage/read';
 import type { RuntimeDbLike } from '../storage/types';
 import type { CertifiedBoardRecord, EntityReplica, JReplica, JurisdictionConfig } from '../types';
-import { getPerfMs } from '../utils';
+import { getPerfMs } from '../infra/time';
 
 const isMissing = async (db: RuntimeDbLike, key: Buffer): Promise<boolean> => {
   try {

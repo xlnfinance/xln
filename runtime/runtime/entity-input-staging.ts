@@ -13,7 +13,7 @@ import type {
   RuntimeState,
 } from '../types';
 import { commitEntityFrameCandidateState } from '../entity/state-clone';
-import { getPerfMs } from '../utils';
+import { getPerfMs } from '../infra/time';
 import { shortId } from '../infra/logger';
 import {
   assertExternalEntityInputAllowed,

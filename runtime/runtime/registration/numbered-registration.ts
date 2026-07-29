@@ -12,7 +12,7 @@ import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import { canonicalJStackAddress } from '../../jadapter/stack-binding';
 import type { JAdapter } from '../../jadapter/types';
 import type { ConsensusConfig, JurisdictionConfig, RuntimeState } from '../../types';
-import { DEBUG } from '../../utils';
+import { DEBUG } from '../../infra/debug-flags';
 
 const registrationLog = createStructuredLogger('runtime.numbered-registration');
 

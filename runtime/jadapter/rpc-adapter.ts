@@ -14,7 +14,7 @@ import {
   EntityProvider__factory,
   HankoVerifier__factory,
 } from '../../jurisdictions/typechain-types/index.ts';
-import { BLOCKCHAIN } from '../constants';
+import { BLOCKCHAIN } from '../config/constants';
 import { normalizeEntityId } from '../entity/id';
 import { prepareSignedBatch } from '../hanko/batch';
 import { decodeJBatch } from '../jurisdiction/batch';

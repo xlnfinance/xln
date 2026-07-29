@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
-import { TIMING } from '../constants';
+import { TIMING } from '../config/constants';
 import { initCrontab, scheduleHook } from '../entity/scheduler';
 import { generateLazyEntityId } from '../entity/factory';
 import { deriveLocalEntityCryptoKeys, hasLocalSignerKey } from '../entity/crypto';
@@ -20,7 +20,7 @@ import {
 } from '../runtime';
 import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
 import type { AccountState, EntityReplica, RuntimeState, JurisdictionConfig, JurisdictionEvent } from '../types';
-import { getWallClockMs } from '../utils';
+import { getWallClockMs } from '../infra/time';
 
 const TEST_JURISDICTION = {
   address: `0x${'22'.repeat(20)}`,

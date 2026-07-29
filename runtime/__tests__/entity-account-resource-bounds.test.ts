@@ -7,7 +7,7 @@ import { prependUniqueMempoolTxs } from '../account/consensus/helpers';
 import { createLocalAccountInput } from '../account/input';
 import { computeAccountStateRoot, EMPTY_ACCOUNT_STATE_ROOT } from '../account/state-root';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
-import { LIMITS } from '../constants';
+import { LIMITS } from '../config/constants';
 import { applyEntityInput } from '../entity/consensus';
 import { assertEntityAccountInsertionCapacity } from '../entity/account-capacity';
 import { encodeBoard, generateLazyEntityId, hashBoard } from '../entity/factory';

@@ -6,7 +6,7 @@ import { computeCanonicalMerkleRoot } from '../state-root';
 import { canonicalJurisdictionEventsHash } from '../../jurisdiction/event-observation';
 import { normalizeJurisdictionEvents } from '../../jurisdiction/event-normalization';
 import { ACCOUNT_NETWORK_ALLOWANCE_MS } from './constants';
-import { LIMITS } from '../../constants';
+import { LIMITS } from '../../config/constants';
 
 export const MAX_ACCOUNT_FRAME_TXS = LIMITS.ACCOUNT_MEMPOOL_SIZE;
 // A peer controls its proposed timestamp. Reject future time because it could

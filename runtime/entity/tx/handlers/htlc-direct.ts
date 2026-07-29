@@ -1,7 +1,7 @@
 import { getEntityCertifiedJurisdictionHeight } from '../../../jurisdiction/height';
 import { generateLockId, hashHtlcSecret } from '../../../protocol/htlc/utils';
 import type { EntityInput, EntityState, EntityTx, RuntimeState } from '../../../types';
-import { formatEntityId } from '../../../utils';
+import { formatEntityId } from '../../../presentation/identity-display';
 import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import { findAccountKey } from '../account-key';

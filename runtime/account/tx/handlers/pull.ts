@@ -6,7 +6,7 @@ import type {
   PullCommitment,
 } from '../../../types';
 import { deriveDelta } from '../../utils';
-import { FINANCIAL, LIMITS } from '../../../constants';
+import { FINANCIAL, LIMITS } from '../../../config/constants';
 import {
   buildCommittedCrossJurisdictionPullBinding,
   buildCrossJurisdictionPullBinding,

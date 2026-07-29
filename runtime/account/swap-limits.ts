@@ -1,4 +1,4 @@
-import { LIMITS } from '../constants';
+import { LIMITS } from '../config/constants';
 import { deriveCanonicalCrossJurisdictionMarket } from '../extensions/cross-j';
 import type { SwapOffer } from '../types';
 

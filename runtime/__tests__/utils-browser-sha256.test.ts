@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { createHash } from '../utils';
+import { createHash } from '../infra/platform-crypto';
 
 const ABC_SHA256 = 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad';
 
@@ -16,7 +16,7 @@ test('createHash uses the exact SHA-256 bytes for incremental input', () => {
 
 test('browser bundle produces a full cryptographic SHA-256 digest', async () => {
   const build = await Bun.build({
-    entrypoints: [new URL('../utils.ts', import.meta.url).pathname],
+    entrypoints: [new URL('../infra/platform-crypto.ts', import.meta.url).pathname],
     target: 'browser',
     format: 'esm',
     minify: true,

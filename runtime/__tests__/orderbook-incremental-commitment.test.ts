@@ -6,7 +6,7 @@ import {
   verifyAndWarmBookCommitment,
 } from '../orderbook/commitment';
 import { applyCommand, createBook } from '../orderbook/core';
-import { getPerfMs } from '../utils';
+import { getPerfMs } from '../infra/time';
 import { computeIntegrityChecksum, computeIntegrityDigest } from '../infra/integrity-checksum';
 
 const buildFatBook = (orderCount: number) => {

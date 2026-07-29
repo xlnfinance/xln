@@ -61,7 +61,7 @@ import type {
   CrontabTaskState,
   ScheduledHook,
 } from './scheduler-types';
-import { TIMING } from '../constants';
+import { TIMING } from '../config/constants';
 import { createStructuredLogger, shortId } from '../infra/logger';
 import { accountInputProposal, accountInputReferenceHeight } from '../account/consensus/flush';
 import { hubRebalanceHandler } from './scheduler/rebalance';

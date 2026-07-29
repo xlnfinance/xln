@@ -7,7 +7,7 @@ import {
   type BookEvent,
   type BookState,
 } from '../orderbook';
-import { getPerfMs } from '../utils';
+import { getPerfMs } from '../infra/time';
 
 type Cli = {
   swaps: number;

@@ -31,10 +31,10 @@ import { decodeBuffer } from '../storage/codec';
 import { KEY_HEAD, keyConsumptionNode, keyDiff, keyLiveEntity } from '../storage/keys';
 import type { RuntimeDbLike, StorageEntityCoreDoc, StorageHead } from '../storage/types';
 import type { JReplica, JurisdictionConfig } from '../types';
-import { getPerfMs } from '../utils';
+import { getPerfMs } from '../infra/time';
 import { buildRuntimeCheckpointSnapshot } from '../storage/wal/snapshot';
 import { hydrateEntityStateFromStorage, projectEntityCoreDoc } from '../storage/projections';
-import { LIMITS } from '../constants';
+import { LIMITS } from '../config/constants';
 
 type RecordedDb = RuntimeDbLike & { writes: string[][] };
 

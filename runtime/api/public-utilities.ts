@@ -100,16 +100,8 @@ export {
   createLazyJId,
   jIdFromChainId,
 } from '../protocol/jurisdiction-identity';
-export {
-  clearDatabase,
-  formatEntityDisplay,
-  formatSignerDisplay,
-  generateEntityAvatar,
-  generateSignerAvatar,
-  getEntityDisplayInfo,
-  getSignerDisplayInfo,
-  hashToAvatar,
-} from '../utils';
-export { formatEntityId, getEntityShortId } from '../utils';
+export { clearDatabase } from '../storage/clear-database';
+export { formatEntityDisplay, formatSignerDisplay, generateEntityAvatar, generateSignerAvatar, getEntityDisplayInfo, getSignerDisplayInfo, hashToAvatar } from '../presentation/identity-display';
+export { formatEntityId, getEntityShortId } from '../presentation/identity-display';
 export { safeStringify } from '../protocol/serialization';
 export { resolveEntityProposerId } from '../runtime/entity-output-signer';

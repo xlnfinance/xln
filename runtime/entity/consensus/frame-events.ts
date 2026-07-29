@@ -1,4 +1,4 @@
-import { LIMITS } from '../../constants';
+import { LIMITS } from '../../config/constants';
 import { safeStringify } from '../../protocol/serialization';
 import type { EntityFrameEvent } from '../../types';
 

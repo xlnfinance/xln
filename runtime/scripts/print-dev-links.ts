@@ -2,7 +2,7 @@
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { REMOTE_RUNTIME } from '../constants';
+import { REMOTE_RUNTIME } from '../config/constants';
 
 type DevRadapterKeys = {
   importUrl?: string;

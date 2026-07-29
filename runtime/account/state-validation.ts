@@ -1,4 +1,4 @@
-import { LIMITS } from '../constants';
+import { LIMITS } from '../config/constants';
 import { isLeftEntity } from '../protocol/entity-id';
 import {
   FinancialDataCorruptionError,

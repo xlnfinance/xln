@@ -3,7 +3,7 @@
 import { chmodSync, mkdirSync, writeFileSync } from 'fs';
 import { dirname, resolve } from 'path';
 import { randomBytes } from 'crypto';
-import { REMOTE_RUNTIME } from '../constants';
+import { REMOTE_RUNTIME } from '../config/constants';
 
 type DevRuntime = {
   name: 'H1' | 'H2' | 'H3' | 'MM';

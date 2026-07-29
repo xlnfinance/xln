@@ -1,5 +1,5 @@
 import type { RuntimeState, JInput, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../types';
-import { getWallClockMs } from '../utils';
+import { getWallClockMs } from '../infra/time';
 import {
   createDueScheduledWakeInputs,
   entityNeedsPeriodicWake,

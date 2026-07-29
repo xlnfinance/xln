@@ -4,7 +4,7 @@ import { createWriteStream, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 import { Database } from 'bun:sqlite';
 import { compareStableText, safeStringify } from '../protocol/serialization';
-import { DISPLAY, QA } from '../constants';
+import { DISPLAY, QA } from '../config/constants';
 import { makeQaSeveritySignal, type QaSeveritySignal } from './severity';
 import {
   QA_HISTORY_DB_PATH,

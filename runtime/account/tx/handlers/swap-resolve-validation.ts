@@ -1,5 +1,5 @@
 import type { AccountState, SwapOffer } from '../../../types';
-import { FINANCIAL } from '../../../constants';
+import { FINANCIAL } from '../../../config/constants';
 import {
   deriveExactSwapFillRatio,
   exactFillRatioToUint16,

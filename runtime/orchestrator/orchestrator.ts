@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { scheduler } from 'node:timers/promises';
 import { compareStableText, safeStringify } from '../protocol/serialization';
-import { REMOTE_RUNTIME } from '../constants';
+import { REMOTE_RUNTIME } from '../config/constants';
 import { createStructuredLogger, registerStructuredLogSink } from '../infra/logger';
 import { deriveSignerAddressSync } from '../account/crypto';
 import { deriveRuntimeAdapterCapabilityToken } from '../radapter/auth';

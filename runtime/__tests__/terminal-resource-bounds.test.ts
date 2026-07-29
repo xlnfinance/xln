@@ -7,7 +7,7 @@ import {
   recordSwapOfferLifecycle,
   recordSwapResolveLifecycle,
 } from '../account/tx/handlers/swap-history';
-import { LIMITS } from '../constants';
+import { LIMITS } from '../config/constants';
 import { setHtlcRouteNote, terminateHtlcRoute } from '../entity/tx/htlc-route-lifecycle';
 import { applyHtlcTimeoutFollowups } from '../entity/tx/handlers/account/committed-htlc-followups';
 import { createEmptyEnv } from '../runtime';

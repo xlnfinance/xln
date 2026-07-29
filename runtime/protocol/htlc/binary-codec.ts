@@ -1,4 +1,4 @@
-import { LIMITS } from '../../constants';
+import { LIMITS } from '../../config/constants';
 
 export const MAX_HTLC_BINARY_LAYER_BYTES = Math.floor(
   (LIMITS.MAX_FRAME_SIZE_BYTES - 1_000_000) * 3 / 4,

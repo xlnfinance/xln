@@ -7,7 +7,7 @@ import type {
   EntityTx,
   RuntimeState,
 } from '../../../types';
-import { formatEntityId } from '../../../utils';
+import { formatEntityId } from '../../../presentation/identity-display';
 import { upsertSortedStringMapEntry } from '../../../infra/sorted-map-index';
 import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';

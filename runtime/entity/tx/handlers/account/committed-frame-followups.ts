@@ -7,7 +7,7 @@ import type {
   HtlcNoteKey,
   HtlcRoute,
 } from '../../../../types';
-import { HEAVY_LOGS } from '../../../../utils';
+import { HEAVY_LOGS } from '../../../../infra/debug-flags';
 import { cancelHook } from '../../../scheduler';
 import { pruneSettledOriginatedHtlcRoutes, terminateHtlcRoute } from '../../htlc-route-lifecycle';
 import { buildHtlcFinalizedEventPayload, buildHtlcReceivedEventPayload } from '../../../../protocol/htlc/events';

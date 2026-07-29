@@ -1,5 +1,5 @@
 import type { RuntimeState } from '../types';
-import { getWallClockMs } from '../utils';
+import { getWallClockMs } from '../infra/time';
 import { inferRuntimeLifecyclePhase, transitionRuntimeLifecycle } from './lifecycle';
 import { requestRuntimeLoopWake, requireRuntimeMempool } from './input-queue';
 import {

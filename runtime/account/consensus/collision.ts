@@ -1,5 +1,5 @@
 import type { AccountFrame, AccountInput, AccountReplica } from '../../types';
-import { HEAVY_LOGS } from '../../utils';
+import { HEAVY_LOGS } from '../../infra/debug-flags';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import { isLeft } from '../utils';
 import { discardStagedAccountCommitmentCache } from '../map-commitment';

@@ -10,7 +10,7 @@
  */
 
 import type { RuntimeState } from '../types';
-import { getPerfMs } from '../utils';
+import { getPerfMs } from '../infra/time';
 import { scenarioRegistry, type ScenarioEntry } from './index';
 import { assertRuntimeIdle } from './helpers';
 

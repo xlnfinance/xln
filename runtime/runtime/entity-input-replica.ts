@@ -10,7 +10,7 @@ import type {
 } from '../types';
 import { resolveEntityOutputSignerId } from './entity-output-signer';
 import { decodeEntityOutput } from './routing-validation';
-import { DEBUG } from '../utils';
+import { DEBUG } from '../infra/debug-flags';
 import { logError, shortId } from '../infra/logger';
 import {
   entityInputLog,

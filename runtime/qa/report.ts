@@ -4,7 +4,7 @@ import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { basename, extname, join, resolve } from 'node:path';
 import { Database } from 'bun:sqlite';
 import { compareStableText } from '../protocol/serialization';
-import { DISPLAY, QA } from '../constants';
+import { DISPLAY, QA } from '../config/constants';
 import {
   assertQaSeveritySignal,
   makeQaSeveritySignal,

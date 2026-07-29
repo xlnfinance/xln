@@ -9,7 +9,7 @@
  */
 
 import type { RuntimeState, EntityState, AccountReplica } from '../types';
-import { getWallClockMs } from '../utils';
+import { getWallClockMs } from '../infra/time';
 import { listOpenSwapOffers } from '../orderbook/open-swap-offers';
 
 export interface FormatOptions {

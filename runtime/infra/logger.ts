@@ -1,14 +1,14 @@
 /**
  * XLN Logging System
  *
- * Feature-flagged logging controlled by runtime/constants.ts PERFORMANCE flags.
+ * Feature-flagged logging controlled by config/constants.ts PERFORMANCE flags.
  * In production, set all DEBUG_* flags to false for 10x faster performance.
  *
  * @license AGPL-3.0
  * Copyright (C) 2025 XLN Finance
  */
 
-import { PERFORMANCE } from '../constants';
+import { PERFORMANCE } from '../config/constants';
 import { safeStringify } from '../protocol/serialization';
 import { redactTelemetryValue } from './telemetry-redaction';
 
@@ -30,7 +30,7 @@ export interface LogConfig {
   ACCOUNT_STATE: boolean;
 }
 
-// Default log config - derived from constants.ts PERFORMANCE flags
+// Default log config - derived from config/constants.ts PERFORMANCE flags
 // Individual categories can be toggled at runtime via window.logConfig.set()
 export const LOG_CONFIG: LogConfig = {
   ENTITY_TX: PERFORMANCE.DEBUG_CONSENSUS,        // Entity-level consensus

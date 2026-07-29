@@ -3,7 +3,7 @@ import type {
   EntityState,
   EntityTx,
 } from '../../types';
-import { getPerfMs } from '../../utils';
+import { getPerfMs } from '../../infra/time';
 import { normalizeEntityRef } from '../../orderbook/cross-j-orderbook';
 import { shortId, shortOrder } from '../../infra/logger';
 import { cancelHook, scheduleHook } from '../scheduler';

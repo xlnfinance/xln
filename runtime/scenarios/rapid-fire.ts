@@ -18,7 +18,7 @@
  */
 
 import type { RuntimeState, EntityInput } from '../types';
-import { getPerfMs } from '../utils';
+import { getPerfMs } from '../infra/time';
 import {
   bindScenarioJReplica,
   ensureJAdapter,

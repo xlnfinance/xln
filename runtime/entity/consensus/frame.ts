@@ -1,7 +1,7 @@
 import { encodeCanonicalConsensusValue } from '../../protocol/canonical-consensus-value';
 import { ethers } from 'ethers';
 import type { AccountTx, EntityFrameEvent, EntityState, EntityTx, JPrefixCertificate } from '../../types';
-import { HEAVY_LOGS } from '../../utils';
+import { HEAVY_LOGS } from '../../infra/debug-flags';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import { compareCanonicalText } from '../../orderbook/swap-execution';
 import { normalizeJurisdictionEvents } from '../../jurisdiction/event-normalization';
@@ -11,7 +11,7 @@ import {
   buildEntityFrameAuthority,
   computeEntityFrameAuthorityRoot,
 } from './state-root';
-import { LIMITS } from '../../constants';
+import { LIMITS } from '../../config/constants';
 import { assertNoConsensusVisibleHtlcPaymentSecrets } from '../../protocol/htlc/consensus-secret-guard';
 import { readEntityFrameEvents } from '../frame-events';
 import { assertEntityFrameEventByteBudget } from './frame-events';

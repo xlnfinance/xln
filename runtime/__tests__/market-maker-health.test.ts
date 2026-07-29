@@ -27,7 +27,7 @@ import { getBootstrapCreditAmount, HUB_DEFAULT_MIN_TRADE_SIZE } from '../orchest
 import { createEmptyEnv } from '../runtime';
 import type { AccountState, EntityReplica, RuntimeState } from '../types';
 import { createDefaultDelta } from '../account/delta';
-import { LIMITS } from '../constants';
+import { LIMITS } from '../config/constants';
 import { encodeBuffer } from '../storage/codec';
 
 const entity = (byte: string): string => `0x${byte.repeat(32)}`;

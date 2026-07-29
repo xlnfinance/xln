@@ -1,5 +1,5 @@
 /**
- * XLN System Constants
+ * xln system constants
  *
  * All magic numbers, limits, and tuneable parameters in one place.
  * These values are chosen for production safety - adjust for testnets.

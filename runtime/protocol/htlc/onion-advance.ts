@@ -1,7 +1,7 @@
 import { encodeCanonicalConsensusValue } from '../canonical-consensus-value';
 import { keccak256 } from 'ethers';
 
-import { HTLC } from '../../constants';
+import { HTLC } from '../../config/constants';
 import type { AccountReplica, AccountTx, EntityState, EntityTx, RuntimeState, HtlcLock } from '../../types';
 
 import { getCertifiedBoardNodeStore, resolveObserverCertifiedBoardHash } from '../../jurisdiction/board-registry';

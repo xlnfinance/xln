@@ -1,4 +1,4 @@
-import { TOKENS } from '../constants';
+import { TOKENS } from '../config/constants';
 import {
   FinancialDataCorruptionError,
   validateMapInstance,

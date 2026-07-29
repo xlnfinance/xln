@@ -6,7 +6,7 @@ import {
 } from '../extensions/cross-j/index';
 import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../orderbook';
 import type { AccountReplica, AccountTx, CrossJurisdictionSwapRoute, Delta } from '../types';
-import { getPerfMs } from '../utils';
+import { getPerfMs } from '../infra/time';
 import { createDefaultDelta } from '../account/delta';
 
 type Cli = {

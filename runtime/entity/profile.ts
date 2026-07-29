@@ -7,7 +7,7 @@
 
 import { computeAddress, getAddress } from 'ethers';
 import { compareCanonicalText } from '../orderbook/swap-keys';
-import { UINT16_MAX } from '../constants';
+import { UINT16_MAX } from '../config/constants';
 import {
   requireCompleteValidatorEncryptionManifest,
   type ValidatorEncryptionAttestation,

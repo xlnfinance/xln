@@ -14,7 +14,7 @@ import { ethers } from 'ethers';
 
 import { Depository__factory } from '../../jurisdictions/typechain-types/index.ts';
 
-import { BLOCKCHAIN } from '../constants';
+import { BLOCKCHAIN } from '../config/constants';
 import { createStructuredLogger } from '../infra/logger';
 import { decodeJBatch } from '../jurisdiction/batch';
 import type { DisputeFinalizationEvidence } from '../types';

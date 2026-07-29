@@ -46,7 +46,7 @@ import { createFrameHash, MAX_ACCOUNT_FRAME_TXS } from '../account/consensus/fra
 
 import { resolveAutoRebalanceFeePolicy, runPostFrameAutoRebalanceCheck } from '../account/consensus/helpers';
 
-import { HTLC, LIMITS } from '../constants';
+import { HTLC, LIMITS } from '../config/constants';
 
 import {
   ACCOUNT_PENDING_RESEND_AFTER_MS,

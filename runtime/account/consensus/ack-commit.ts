@@ -5,7 +5,7 @@ import type {
   EntityCandidateEffect,
   RuntimeState,
 } from '../../types';
-import { HEAVY_LOGS } from '../../utils';
+import { HEAVY_LOGS } from '../../infra/debug-flags';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import { verifyHankoForHash } from '../../hanko/signing';
 import { cloneAccountFrame } from '../state-clone';

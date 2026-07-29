@@ -1,7 +1,7 @@
 import { encodeCanonicalConsensusValue } from '../protocol/canonical-consensus-value';
 import { ethers } from 'ethers';
 
-import { LIMITS } from '../constants';
+import { LIMITS } from '../config/constants';
 import type { ConsensusConfig, CrossJurisdictionSwapRoute, EntityState, EntityTx, ProposalAction } from '../types';
 import { buildCrossJurisdictionPullBinding, isCrossJurisdictionTerminalStatus } from '../extensions/cross-j';
 

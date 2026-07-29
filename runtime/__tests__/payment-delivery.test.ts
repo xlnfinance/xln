@@ -3,7 +3,7 @@ import {
   requireTrustedPaymentGateway,
   resolvePaymentDeadlineWindow,
 } from '../protocol/payments/delivery';
-import { HTLC } from '../constants';
+import { HTLC } from '../config/constants';
 import { calculateHopRevealHeight } from '../protocol/htlc/utils';
 import { ASYNC_PAYMENT_EXPIRY_BLOCKS, ASYNC_PAYMENT_EXPIRY_MS } from '../types/payment';
 

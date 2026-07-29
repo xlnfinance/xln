@@ -3,7 +3,7 @@ import { cumulativeMarksToPhases } from '../../infra/perf-profile';
 import { isRuntimePerfProfileEnabled, readRuntimePerfSlowMs } from '../../infra/perf-runtime-flags';
 import { createStructuredLogger } from '../../infra/logger';
 import type { RuntimeState } from '../../types';
-import { getPerfMs } from '../../utils';
+import { getPerfMs } from '../../infra/time';
 import { nodeProcess } from '../../infra/runtime-process';
 
 const runtimeLog = createStructuredLogger('runtime');

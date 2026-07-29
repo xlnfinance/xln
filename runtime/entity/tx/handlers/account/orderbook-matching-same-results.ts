@@ -1,6 +1,6 @@
 import type { BookState } from '../../../../orderbook';
 import { createStructuredLogger, shortId, shortOrder } from '../../../../infra/logger';
-import { HEAVY_LOGS } from '../../../../utils';
+import { HEAVY_LOGS } from '../../../../infra/debug-flags';
 import {
   aggregateSameTradeFills,
   buildSameFillResolvePlan,

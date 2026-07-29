@@ -12,7 +12,7 @@ import { computeProfileHash, verifyProfileSignature } from '../../entity/profile
 import { calculateDirectionalFeePPM, sanitizeBaseFee, sanitizeFeePPM } from '../../routing/fees';
 import { getTokenCapacity } from '../../routing/capacity';
 import { resolvePaymentDeadlineWindow } from '../../protocol/payments/delivery';
-import { HTLC } from '../../constants';
+import { HTLC } from '../../config/constants';
 import {
   calculateHopRevealHeight,
   calculateHopTimelock,

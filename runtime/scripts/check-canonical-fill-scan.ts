@@ -13,7 +13,7 @@ import {
 import { buildCrossJurisdictionPendingFillFromAck } from '../extensions/cross-j/fill-ack';
 import { HASHLADDER_MAX_FILL_RATIO } from '../protocol/htlc/hash-ladder';
 import { MAX_SWAP_FILL_RATIO, exactFillRatioToUint16 } from '../orderbook/swap-execution';
-import { UINT16_MAX } from '../constants';
+import { UINT16_MAX } from '../config/constants';
 import type { AccountTx, CrossJurisdictionSwapRoute } from '../types';
 
 const readText = (path: string): string => {

@@ -13,7 +13,7 @@
 
 import type { AccountReplica, AccountTx, HtlcLock } from '../../../types';
 import { deriveDelta } from '../../utils';
-import { FINANCIAL, LIMITS } from '../../../constants';
+import { FINANCIAL, LIMITS } from '../../../config/constants';
 import { ensureDelta } from '../delta-utils';
 import { addHold } from '../hold-utils';
 import { isHtlcTimelockExpired } from '../../htlc-deadline';

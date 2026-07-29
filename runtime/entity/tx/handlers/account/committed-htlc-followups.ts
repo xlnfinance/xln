@@ -8,7 +8,7 @@ import type {
   RuntimeState,
   HtlcNoteKey,
 } from '../../../../types';
-import { HEAVY_LOGS } from '../../../../utils';
+import { HEAVY_LOGS } from '../../../../infra/debug-flags';
 import {
   encryptedHtlcLayer,
   validateLocalCommittedHtlcLayer,
