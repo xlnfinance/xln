@@ -13,10 +13,13 @@ describe('network machine demo playback', () => {
     expect(clampDemoSpeed(undefined)).toBe(1);
   });
 
-  test('autoplay is opt-in and speed is always usable', () => {
-    expect(normalizeDemo({ autoplay: true, speed: 2 })).toEqual({ autoplay: true, speed: 2 });
-    expect(normalizeDemo({})).toEqual({ autoplay: false, speed: 1 });
-    expect(normalizeDemo({ autoplay: 'yes' as never, speed: 0 })).toEqual({ autoplay: false, speed: 1 });
+  test('autoplay is opt-in, speed is always usable, and the stage defaults to 3d', () => {
+    expect(normalizeDemo({ autoplay: true, speed: 2 })).toEqual({ autoplay: true, speed: 2, stage: '3d' });
+    expect(normalizeDemo({})).toEqual({ autoplay: false, speed: 1, stage: '3d' });
+    expect(normalizeDemo({ autoplay: 'yes' as never, speed: 0 })).toEqual({ autoplay: false, speed: 1, stage: '3d' });
+    // Only the exact opt-in switches renderers; anything else keeps the spatial graph.
+    expect(normalizeDemo({ stage: '2d' }).stage).toBe('2d');
+    expect(normalizeDemo({ stage: 'flat' as never }).stage).toBe('3d');
   });
 
   test('autoplay is consumed once so a recompile does not restart the demo', () => {

@@ -34,6 +34,9 @@
   $: trailName = $page.url.searchParams.get('trail')?.trim() ?? '';
   $: autoplay = $page.url.searchParams.get('autoplay') === '1';
   $: speed = Number($page.url.searchParams.get('speed') || 1) || 1;
+  // `?stage=2d` swaps the spatial graph for the account-first stage. Same data, same
+  // player, different picture — the two are meant to be compared on one demo.
+  $: stage = $page.url.searchParams.get('stage') ?? '';
 
   const trailFromHash = (hash: string): string =>
     new URLSearchParams(hash.replace(/^#/, '')).get('trail')?.trim() ?? '';
@@ -57,7 +60,7 @@
     // Technical R-frames (consensus bookkeeping) carry no story. A demo scrubs the steps
     // that changed the network.
     networkMachineOperations.setTimelineMode('graph-changes');
-    networkMachineDemo.set({ autoplay, speed });
+    networkMachineDemo.set({ autoplay, speed, stage: stage as '2d' | '3d' });
 
     const fail = (error: unknown): void => {
       scenarioError = error instanceof Error ? error.message : String(error || 'demo failed');
