@@ -33,9 +33,6 @@ import {
 import { createBrowserVmStateMethods } from './browservm-state-methods';
 import { createBrowserVmIoMethods } from './browservm-io';
 
-const asFactoryRunner = (runner: unknown): Parameters<typeof Account__factory.connect>[1] =>
-  runner as Parameters<typeof Account__factory.connect>[1];
-
 export async function createBrowserVMAdapter(
   config: JAdapterConfig,
   provider: Provider,
@@ -53,10 +50,10 @@ export async function createBrowserVMAdapter(
     deltaTransformer: browserVM.getDeltaTransformerAddress(),
   };
 
-  const account = Account__factory.connect(addresses.account, asFactoryRunner(signer));
-  const depository = Depository__factory.connect(addresses.depository, asFactoryRunner(signer));
-  const entityProvider = EntityProvider__factory.connect(addresses.entityProvider, asFactoryRunner(signer));
-  const deltaTransformer = DeltaTransformer__factory.connect(addresses.deltaTransformer, asFactoryRunner(signer));
+  const account = Account__factory.connect(addresses.account, signer);
+  const depository = Depository__factory.connect(addresses.depository, signer);
+  const entityProvider = EntityProvider__factory.connect(addresses.entityProvider, signer);
+  const deltaTransformer = DeltaTransformer__factory.connect(addresses.deltaTransformer, signer);
 
   let stackBindingVerified = false;
   const verifyStackBinding = async (context: string): Promise<void> => {

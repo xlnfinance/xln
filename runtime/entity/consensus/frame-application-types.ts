@@ -19,6 +19,7 @@ import type {
   SwapCancelRequestEvent,
   SwapOfferEvent,
 } from '../tx/handlers/account';
+import type { VerifiedCertifiedEntityOutput } from './output-certification';
 
 export type ApplyEntityTxsInOrderContext = {
   env: RuntimeState;
@@ -40,6 +41,10 @@ export type ApplyEntityTxsInOrderContext = {
   accountJClaimNodeStore: AccountJClaimNodeStore;
   candidateEffects: EntityCandidateEffect[];
   storageChanges: RuntimeOverlayRecord[];
+  verifiedCertifiedOutputs: Map<
+    Extract<EntityTx, { type: 'consensusOutput' }>,
+    VerifiedCertifiedEntityOutput
+  >;
   authorizedCommand?: true | undefined;
   authorizedCollective?: true | undefined;
   authorizedCertifiedOutput?: true | undefined;

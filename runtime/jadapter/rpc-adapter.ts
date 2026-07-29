@@ -10,7 +10,9 @@ import {
   Account__factory,
   DeltaTransformer__factory,
   Depository__factory,
+  ERC20Mock__factory,
   EntityProvider__factory,
+  HankoVerifier__factory,
 } from '../../jurisdictions/typechain-types/index.ts';
 import { BLOCKCHAIN } from '../constants';
 import { normalizeEntityId } from '../entity/id';
@@ -44,6 +46,7 @@ import {
   PROCESS_BATCH_GAS_FLOOR,
   applyProcessBatchGasFloor,
   decodeDisputeFinalizationEvidenceCalldata,
+  resolveDisputeFinalizationEvidence,
   isTransientRpcUnavailableError,
   isTronChainId,
   prepareAuthenticatedWatcherIngress,
@@ -51,8 +54,6 @@ import {
   rpcLog,
   shouldEmitExternalWalletAllowanceDelta,
   shouldEmitExternalWalletBalanceDelta,
-  toFinalizationDecimal,
-  toFinalizationHex,
   type ExternalWalletTrackedOwnerCursor,
   type TxFinalizationEvidence,
 } from './rpc-public';
@@ -108,15 +109,10 @@ import { preflightProcessBatch } from './rpc-batch-preflight';
 import { submitEntityProviderAction } from './rpc-submit-entity-provider';
 import {
   applyGasHeadroom,
-  asFactoryRunner,
   asRpcReceipt,
   asRpcTxResponse,
   eventCarriers,
   haltProcessForFatalWatcherError,
-  makeAccountFactory,
-  makeDeltaTransformerFactory,
-  makeErc20MockFactory,
-  makeHankoVerifierFactory,
   watcherErrorDetails,
   watcherErrorMessage,
   type FeeOverrides,
@@ -618,10 +614,10 @@ export async function createRpcAdapter(
     } else {
       trace('fromReplica.connect:start');
       // Use any cast to handle ethers version mismatch between root and jurisdictions
-      account = Account__factory.connect(addresses.account, asFactoryRunner(signer));
-      depository = Depository__factory.connect(addresses.depository, asFactoryRunner(signer));
-      entityProvider = EntityProvider__factory.connect(addresses.entityProvider, asFactoryRunner(signer));
-      deltaTransformer = DeltaTransformer__factory.connect(addresses.deltaTransformer, asFactoryRunner(signer));
+      account = Account__factory.connect(addresses.account, signer);
+      depository = Depository__factory.connect(addresses.depository, signer);
+      entityProvider = EntityProvider__factory.connect(addresses.entityProvider, signer);
+      deltaTransformer = DeltaTransformer__factory.connect(addresses.deltaTransformer, signer);
       trace('fromReplica.connect:done');
       trace('fromReplica.getAddress:start');
       addresses.account = await account.getAddress();
@@ -865,6 +861,57 @@ export async function createRpcAdapter(
     });
   };
 
+  const deployBootstrapTokens = async (): Promise<string[]> => {
+    const factory = new ERC20Mock__factory(signer);
+    const tokens = defaultTokensForJurisdiction({ chainId: config.chainId });
+    for (const token of tokens) {
+      const supply = getDefaultTokenSupply(token.decimals);
+      const contract = await factory.deploy(token.name, token.symbol, token.decimals, supply);
+      await contract.waitForDeployment();
+      const tokenAddress = await contract.getAddress();
+
+      // Internal reserve accounting is not custody: pre-fund withdrawals.
+      const prefund = await contract.mint(
+        addresses.depository,
+        supply,
+        await buildFeeOverrides(),
+      );
+      await waitForReceipt(prefund, `erc20.mint-to-depository.${token.symbol}`);
+      const approval = await contract.approve(
+        addresses.depository,
+        TOKEN_REGISTRATION_AMOUNT,
+        await buildFeeOverrides(),
+      );
+      await waitForReceipt(approval, `erc20.approve.${token.symbol}`);
+      const registration = await depository.adminRegisterExternalToken(
+        {
+          entity: ethers.ZeroHash,
+          contractAddress: tokenAddress,
+          externalTokenId: 0,
+          tokenType: 0,
+          internalTokenId: 0,
+          amount: TOKEN_REGISTRATION_AMOUNT,
+        },
+        await buildFeeOverrides(),
+      );
+      await waitForReceipt(registration, `depository.externalTokenToReserve.${token.symbol}`);
+      const tokenId = await depository.tokenToId(packTokenReference(0, tokenAddress, 0n));
+      if (tokenId === 0n) {
+        throw new Error(
+          `JADAPTER_BOOTSTRAP_TOKEN_REGISTRATION_FAILED:${token.symbol}`,
+        );
+      }
+      rpcLog.debug('contracts.deploy.token_registered', {
+        chainId: config.chainId,
+        symbol: token.symbol,
+        tokenId: tokenId.toString(),
+        address: tokenAddress,
+        supply: ethers.formatUnits(supply, token.decimals),
+      });
+    }
+    return tokens.map(token => token.symbol);
+  };
+
   const adapter: JAdapter = {
     mode: config.mode,
     chainId: config.chainId,
@@ -902,9 +949,8 @@ export async function createRpcAdapter(
 
       rpcLog.info('contracts.deploy.start', { chainId: config.chainId });
 
-      // Deploy Account library
-      // Use any cast to handle ethers version mismatch between root and jurisdictions
-      const accountFactory = makeAccountFactory(signer);
+      // Deploy Account library.
+      const accountFactory = new Account__factory(signer);
       const accountContract = await accountFactory.deploy();
       await accountContract.waitForDeployment();
       addresses.account = await accountContract.getAddress();
@@ -912,7 +958,7 @@ export async function createRpcAdapter(
       rpcLog.debug('contracts.deploy.account', { chainId: config.chainId, account: addresses.account });
 
       // Deploy and link the bounded Hanko verifier before EntityProvider.
-      const hankoVerifierFactory = makeHankoVerifierFactory(signer);
+      const hankoVerifierFactory = new HankoVerifier__factory(signer);
       const hankoVerifierContract = await hankoVerifierFactory.deploy();
       await hankoVerifierContract.waitForDeployment();
       const hankoVerifierAddress = await hankoVerifierContract.getAddress();
@@ -978,12 +1024,12 @@ export async function createRpcAdapter(
       );
       await depositoryContract.waitForDeployment();
       addresses.depository = await depositoryContract.getAddress();
-      depository = Depository__factory.connect(addresses.depository, asFactoryRunner(signer));
+      depository = Depository__factory.connect(addresses.depository, signer);
       await verifyStackBinding('rpc_deploy');
       rpcLog.debug('contracts.deploy.depository', { chainId: config.chainId, depository: addresses.depository });
 
       // Deploy DeltaTransformer
-      const deltaTransformerFactory = makeDeltaTransformerFactory(signer);
+      const deltaTransformerFactory = new DeltaTransformer__factory(signer);
       const deltaTransformerContract = await deltaTransformerFactory.deploy();
       await deltaTransformerContract.waitForDeployment();
       addresses.deltaTransformer = await deltaTransformerContract.getAddress();
@@ -993,67 +1039,13 @@ export async function createRpcAdapter(
         deltaTransformer: addresses.deltaTransformer,
       });
 
-      // Deploy bootstrap ERC20 test tokens. The first three IDs stay stable
-      // across dev chains (USDC=1, WETH=2, USDT=3); Tron-like local chains
-      // receive extra jurisdiction-specific tokens after those IDs.
-      const erc20Factory = makeErc20MockFactory(signer);
-      const bootstrapTokens = defaultTokensForJurisdiction({ chainId: config.chainId });
-      for (const token of bootstrapTokens) {
-        const tokenSupply = getDefaultTokenSupply(token.decimals);
-        const erc20Contract = await erc20Factory.deploy(token.name, token.symbol, token.decimals, tokenSupply);
-        await erc20Contract.waitForDeployment();
-        const erc20Address = await erc20Contract.getAddress();
-        rpcLog.debug('contracts.deploy.erc20', {
-          chainId: config.chainId,
-          symbol: token.symbol,
-          address: erc20Address,
-        });
-
-        // Pre-fund Depository with ERC20 so withdrawals (reserveToExternalToken) work.
-        // mintToReserve only updates internal accounting — the Depository needs real ERC20 balance.
-        const prefundTx = await erc20Contract.mint(addresses.depository, tokenSupply, await buildFeeOverrides());
-        await waitForReceipt(prefundTx, `erc20.mint-to-depository.${token.symbol}`);
-        rpcLog.debug('contracts.deploy.erc20_prefunded', {
-          chainId: config.chainId,
-          symbol: token.symbol,
-          amount: ethers.formatUnits(tokenSupply, token.decimals),
-        });
-
-        const approveTx = await erc20Contract.approve(
-          addresses.depository,
-          TOKEN_REGISTRATION_AMOUNT,
-          await buildFeeOverrides(),
-        );
-        await waitForReceipt(approveTx, `erc20.approve.${token.symbol}`);
-        const registerTx = await depository.adminRegisterExternalToken(
-          {
-            entity: ethers.ZeroHash,
-            contractAddress: erc20Address,
-            externalTokenId: 0,
-            tokenType: 0,
-            internalTokenId: 0,
-            amount: TOKEN_REGISTRATION_AMOUNT,
-          },
-          await buildFeeOverrides(),
-        );
-        await waitForReceipt(registerTx, `depository.externalTokenToReserve.${token.symbol}`);
-        const packed = packTokenReference(0, erc20Address, 0n);
-        const tokenId = await depository.tokenToId(packed);
-        if (tokenId === 0n) {
-          throw new Error(`[JAdapter:rpc] Failed to register bootstrap ERC20 token ${token.symbol}`);
-        }
-        rpcLog.debug('contracts.deploy.token_registered', {
-          chainId: config.chainId,
-          symbol: token.symbol,
-          tokenId: tokenId.toString(),
-        });
-      }
+      const bootstrapTokenSymbols = await deployBootstrapTokens();
 
       deployed = true;
 
       rpcLog.info('contracts.deploy.ready', {
         chainId: config.chainId,
-        tokens: bootstrapTokens.map(token => token.symbol),
+        tokens: bootstrapTokenSymbols,
         account: addresses.account,
         depository: addresses.depository,
         entityProvider: addresses.entityProvider,
@@ -1564,34 +1556,11 @@ export async function createRpcAdapter(
         txHash: string,
         args: Record<string, unknown>,
       ): Promise<DisputeFinalizationEvidence | undefined> => {
-        const candidates = await readTxFinalizationEvidence(txHash);
-        if (candidates.length === 0) {
-          throw new Error(`J_DISPUTE_FINALIZATION_EVIDENCE_EMPTY:${String(txHash).toLowerCase()}`);
-        }
-        const counterentity = String(args['counterentity'] ?? '').toLowerCase();
-        const initialNonce = toFinalizationDecimal(args['initialNonce']);
-        const initialProofbodyHash = String(args['initialProofbodyHash'] ?? '').toLowerCase();
-        const matched = candidates.find(
-          candidate =>
-            candidate.counterentity.toLowerCase() === counterentity &&
-            candidate.initialNonce === initialNonce &&
-            candidate.initialProofbodyHash.toLowerCase() === initialProofbodyHash,
+        return resolveDisputeFinalizationEvidence(
+          await readTxFinalizationEvidence(txHash),
+          txHash,
+          args,
         );
-        if (!matched) {
-          throw new Error(`J_DISPUTE_FINALIZATION_EVIDENCE_NOT_FOUND:${String(txHash).toLowerCase()}`);
-        }
-        return {
-          sender: toFinalizationHex(args['sender']),
-          counterentity: matched.counterentity,
-          initialNonce: matched.initialNonce,
-          finalNonce: matched.finalNonce,
-          initialProofbodyHash: matched.initialProofbodyHash,
-          finalProofbodyHash: toFinalizationHex(args['finalProofbodyHash']),
-          leftArguments: matched.leftArguments,
-          rightArguments: matched.rightArguments,
-          startedByLeft: matched.startedByLeft,
-          sig: matched.sig,
-        };
       };
 
       const emitWatcherDebug = (payload: Record<string, unknown>) => {

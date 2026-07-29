@@ -6,7 +6,7 @@
 
 import { ethers } from 'ethers';
 import type { JEvent, JEventIngress } from './types';
-import type { DisputeFinalizationEvidence, EntityInput, EntityReplica, RuntimeState, JPrefixAttestation, JReplica, JurisdictionConfig, RuntimeInput, RuntimeTx, ValidatorJBlockHeader, ValidatorJEventBlock } from '../types';
+import type { DisputeFinalizationEvidence, EntityInput, RuntimeState, JPrefixAttestation, JReplica, JurisdictionConfig, RuntimeInput, RuntimeTx, ValidatorJBlockHeader, ValidatorJEventBlock } from '../types';
 import { createEmptyBatch, type JBatch } from '../jurisdiction/batch';
 import { enqueueRuntimeInput } from '../runtime/input-queue';
 import { createStructuredLogger, shortId } from '../infra/logger';
@@ -632,7 +632,6 @@ export type JEventsRuntimeInputOptions = {
   watcherDepositoryAddress?: string;
   watcherChainId?: number;
   localSourceReplica?: JReplica;
-  emitRange?: boolean;
 };
 
 const resolveJEventObservedAt = (blockNumber: number): number => {
@@ -783,47 +782,6 @@ const emitSettledDeliveryDebug = (
 
 type ObserveJRangeTx = Extract<RuntimeTx, { type: 'observeJRange' }>;
 
-const buildJPrefixAttestationInput = (
-  env: RuntimeState,
-  replica: EntityReplica,
-  observeTx: ObserveJRangeTx,
-): EntityInput | null => {
-  const { entityId, signerId, scannedThroughHeight } = observeTx.data;
-  const history = recordValidatorJHistory(
-    replica.jHistory,
-    observeTx.data,
-    replica.state,
-  );
-  if (hasCurrentRoundJPrefixAttestation(replica)) {
-    jadapterHelperLog.debug('j_prefix.attestation_deferred', {
-      entity: shortId(entityId),
-      targetEntityHeight: replica.state.height + 1,
-      reason: 'current_round_already_signed',
-    });
-    return null;
-  }
-  if (!hasDueLocalJPrefixAdvance(replica.state, history)) {
-    jadapterHelperLog.debug('j_prefix.attestation_deferred', {
-      entity: shortId(entityId),
-      baseHeight: replica.state.lastFinalizedJHeight,
-      scannedThroughHeight: history.scannedThroughHeight,
-      reason: 'semantic_event_not_yet_contiguous',
-    });
-    return null;
-  }
-  const attestation = buildLocalJPrefixAttestation(env, replica, history);
-  if (!attestation) {
-    throw new Error(
-      `J_PREFIX_ATTESTATION_NOT_AHEAD:${entityId}:${scannedThroughHeight}`,
-    );
-  }
-  return {
-    entityId,
-    signerId,
-    jPrefixAttestations: new Map([[signerId, attestation]]),
-  };
-};
-
 type BuiltJEventReplicaDelivery = {
   runtimeTx: RuntimeTx;
   entityInput: EntityInput | null;
@@ -843,7 +801,6 @@ const buildJEventEvidenceEntries = (
 
 const buildJEventReplicaDelivery = (
   env: RuntimeState,
-  replica: EntityReplica,
   delivery: JEventReplicaDelivery,
   options: JEventsRuntimeInputOptions,
 ): BuiltJEventReplicaDelivery | null => {
@@ -897,9 +854,10 @@ const buildJEventReplicaDelivery = (
   }
   return {
     runtimeTx: markLocalJAuthorityRuntimeTx(observeTx),
-    entityInput: options.emitRange === false
-      ? null
-      : buildJPrefixAttestationInput(env, replica, observeTx),
+    // Observing authenticated J history is a Runtime transaction. Entity
+    // consensus signs the due prefix later, from its committed local history;
+    // ingress must never synthesize a second Entity input for the same range.
+    entityInput: null,
     evidenceEvents: buildJEventEvidenceEntries(events, options.blockHash),
   };
 };
@@ -927,10 +885,8 @@ export function buildJEventObservationInput(
   const runtimeTxs: RuntimeTx[] = [];
   const entityInputs: EntityInput[] = [];
   const evidenceEventsByLog = new Map<string, JEventIngress>();
-  for (const [replicaKey, delivery] of deliveries) {
-    const replica = env.eReplicas.get(replicaKey);
-    if (!replica) throw new Error(`J_HISTORY_LOCAL_REPLICA_MISSING:${replicaKey}`);
-    const built = buildJEventReplicaDelivery(env, replica, delivery, options);
+  for (const delivery of deliveries.values()) {
+    const built = buildJEventReplicaDelivery(env, delivery, options);
     if (!built) continue;
     runtimeTxs.push(built.runtimeTx);
     if (built.entityInput) entityInputs.push(built.entityInput);
@@ -1342,7 +1298,7 @@ export function applyJEventsToEnv(
   if (!events || events.length === 0) return;
   assertJEventIngressOpen(env, label);
   const rawEvents = normalizeManualJEvents(events, label);
-  const input = buildJEventsRuntimeInput(env, events, label, source);
+  const input = buildJEventsRuntimeInputFromIngress(env, rawEvents, label, source);
   if (!input) return;
   for (const event of rawEvents) {
     if (event.name !== 'ExternalWalletSnapshot') continue;
@@ -1364,16 +1320,15 @@ export function applyJEventsToEnv(
   enqueueRuntimeInput(env, input);
 }
 
-export function buildJEventsRuntimeInput(
+const buildJEventsRuntimeInputFromIngress = (
   env: RuntimeState,
-  events: JEvent[],
+  rawEvents: JEventIngress[],
   label: string,
   source: LocalJEventIngressSource,
-): RuntimeInput | null {
-  if (!events || events.length === 0) return null;
+): RuntimeInput | null => {
+  if (rawEvents.length === 0) return null;
   assertJEventIngressOpen(env, label);
   const boundSource = bindLocalJEventIngressSource(env, source, label);
-  const rawEvents = normalizeManualJEvents(events, label);
 
   const blockGroups = new Map<number, JEventIngress[]>();
   for (const event of rawEvents) {
@@ -1399,7 +1354,6 @@ export function buildJEventsRuntimeInput(
       logBatch: false,
       emitSettledDebugEvents: false,
       localSourceReplica: boundSource.replica,
-      emitRange: false,
     });
     if (built?.input.runtimeTxs?.length) {
       runtimeTxs.push(...built.input.runtimeTxs);
@@ -1424,6 +1378,21 @@ export function buildJEventsRuntimeInput(
     'observed',
   );
   return appendJHistoryRange(observedInput, range?.input ?? null);
+};
+
+export function buildJEventsRuntimeInput(
+  env: RuntimeState,
+  events: JEvent[],
+  label: string,
+  source: LocalJEventIngressSource,
+): RuntimeInput | null {
+  if (!events || events.length === 0) return null;
+  return buildJEventsRuntimeInputFromIngress(
+    env,
+    normalizeManualJEvents(events, label),
+    label,
+    source,
+  );
 }
 
 /**
@@ -1526,7 +1495,6 @@ export function processEventBatch(
     emitSettledDebugEvents: true,
     ...(watcherDepositoryAddress ? { watcherDepositoryAddress } : {}),
     ...(watcherChainId !== undefined ? { watcherChainId } : {}),
-    emitRange: false,
   });
   if (!built && localRuntimeTxs.length === 0) return null;
   if (built) rememberRecentJEvents(env, built.evidenceEvents);

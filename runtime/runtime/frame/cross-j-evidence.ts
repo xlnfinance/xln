@@ -75,7 +75,10 @@ export const recordRejectedAtomicCrossJInputs = (
   env: RuntimeState,
   inputs: readonly RoutedEntityInput[],
   inputIndexes: Iterable<number>,
-  code: 'CROSS_J_ACCOUNT_PAIR_STRUCTURAL_MISMATCH' | 'CROSS_J_ACCOUNT_PAIR_ADMISSION_REJECTED',
+  code:
+    | 'CROSS_J_ACCOUNT_PAIR_STRUCTURAL_MISMATCH'
+    | 'CROSS_J_ACCOUNT_PAIR_PROTOCOL_REJECTED'
+    | 'CROSS_J_ACCOUNT_PAIR_NOT_COMMITTED',
   summary: string,
 ): void => {
   for (const inputIndex of inputIndexes) {

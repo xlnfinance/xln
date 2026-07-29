@@ -1,7 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 
 import { Depository__factory } from '../../jurisdictions/typechain-types';
-import { decodeDisputeFinalizationEvidenceCalldata } from '../jadapter/rpc';
+import {
+  decodeDisputeFinalizationEvidenceCalldata,
+  resolveDisputeFinalizationEvidence,
+} from '../jadapter/rpc-public';
 import { createEmptyBatch, encodeJBatch } from '../jurisdiction/batch';
 
 const bytes32 = (byte: string): string => `0x${byte.repeat(32)}`;
@@ -57,6 +60,24 @@ describe('J watcher DisputeFinalized calldata evidence', () => {
     );
 
     expect(decodeDisputeFinalizationEvidenceCalldata(calldata)).toEqual([expectedEvidence]);
+  });
+
+  test('binds calldata evidence to the exact emitted finalization', () => {
+    expect(resolveDisputeFinalizationEvidence(
+      [expectedEvidence],
+      bytes32('55'),
+      {
+        sender: bytes32('11'),
+        counterentity: params.counterentity,
+        initialNonce: params.initialNonce,
+        initialProofbodyHash: params.initialProofbodyHash,
+        finalProofbodyHash: bytes32('66'),
+      },
+    )).toEqual({
+      sender: bytes32('11'),
+      ...expectedEvidence,
+      finalProofbodyHash: bytes32('66'),
+    });
   });
 
   test('fails loudly for malformed or unrelated Depository calldata', () => {

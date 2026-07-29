@@ -1,11 +1,4 @@
 import { ethers } from 'ethers';
-import type { Signer } from 'ethers';
-import {
-  Account__factory,
-  DeltaTransformer__factory,
-  ERC20Mock__factory,
-  HankoVerifier__factory,
-} from '../../jurisdictions/typechain-types/index.ts';
 import { nodeProcess, runtimeIsBrowser } from '../infra/runtime-process';
 import { safeStringify } from '../protocol/serialization';
 import { parseReceiptLogsToJEvents } from './j-event-log-decoder';
@@ -62,22 +55,6 @@ export const haltProcessForFatalWatcherError = (fatalPayload: Record<string, unk
   }
   throw error;
 };
-
-export const asFactoryRunner = (runner: unknown): Parameters<typeof Account__factory.connect>[1] =>
-  runner as Parameters<typeof Account__factory.connect>[1];
-
-const asFactorySigner = (runner: unknown): Signer => runner as Signer;
-
-export const makeAccountFactory = (runner: unknown): Account__factory => new Account__factory(asFactorySigner(runner));
-
-export const makeHankoVerifierFactory = (runner: unknown): HankoVerifier__factory =>
-  new HankoVerifier__factory(asFactorySigner(runner));
-
-export const makeDeltaTransformerFactory = (runner: unknown): DeltaTransformer__factory =>
-  new DeltaTransformer__factory(asFactorySigner(runner));
-
-export const makeErc20MockFactory = (runner: unknown): ERC20Mock__factory =>
-  new ERC20Mock__factory(asFactorySigner(runner));
 
 export const eventCarriers = (
   ...contracts: Array<{ interface: unknown; target: unknown }>

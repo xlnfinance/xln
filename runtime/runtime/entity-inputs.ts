@@ -4,6 +4,7 @@ import { entityInputHasCrossJurisdictionIntraRuntimeTx } from '../extensions/cro
 import {
   collectCrossJurisdictionRemoteEntityHints,
   registerEntityRuntimeHintWithDeps,
+  removeRejectedCrossJAccountInputsByIndex,
   type RuntimeEntityRoutingDeps,
 } from './entity-routing';
 import { safeStringify } from '../protocol/serialization';
@@ -25,8 +26,8 @@ import { isRuntimePerfProfileEnabled, readRuntimePerfSlowMs } from '../infra/per
 import { DEBUG, getPerfMs } from '../utils';
 import { createStructuredLogger, logError, shortId } from '../infra/logger';
 import { classifyEntityInputApplyFailure, type EntityInputApplyFailureKind } from '../entity/tx/invariant-errors';
+import { commitEntityFrameCandidateState } from '../entity/state-clone';
 import {
-  applyEntityStorageChanges,
   applyStorageChanges,
   publishEntityCandidateEffects,
 } from './env-events';
@@ -56,6 +57,13 @@ export interface RuntimeEntityInputApplyResult {
     }>;
   }>;
   localCrossJurisdictionEventTrace: RoutedEntityInput[];
+  rejectedAtomicPairs: Array<{
+    inputIndexes: [number, number];
+    code:
+      | 'CROSS_J_ACCOUNT_PAIR_PROTOCOL_REJECTED'
+      | 'CROSS_J_ACCOUNT_PAIR_NOT_COMMITTED';
+    detail: string;
+  }>;
   entityFrameCommitted: boolean;
   jOutbox: JInput[];
 }
@@ -122,7 +130,6 @@ type CrossJCommand = {
 
 export interface RuntimeEntityInputApplyOptions {
   isReplay: boolean;
-  mode: 'commit' | 'scratch';
   routingDeps: RuntimeEntityRoutingDeps;
   beforeEntityApply?: (entityId: string) => void;
 }
@@ -156,6 +163,7 @@ type RuntimeEntityInputBatchContext = {
   appliedEntityInputs: RoutedEntityInput[];
   inputOutcomes: RuntimeEntityInputApplyResult['inputOutcomes'];
   localCrossJurisdictionEventTrace: RoutedEntityInput[];
+  rejectedAtomicPairs: RuntimeEntityInputApplyResult['rejectedAtomicPairs'];
   entityFrameCommitted: boolean;
   jOutbox: JInput[];
   profiledInputs: Array<Record<string, unknown>>;
@@ -170,6 +178,7 @@ const createRuntimeEntityInputBatchContext = (initialJOutbox: JInput[]): Runtime
   appliedEntityInputs: [],
   inputOutcomes: [],
   localCrossJurisdictionEventTrace: [],
+  rejectedAtomicPairs: [],
   entityFrameCommitted: false,
   jOutbox: [...initialJOutbox],
   profiledInputs: [],
@@ -287,21 +296,14 @@ const collectCommittedEntityResult = (
   env: RuntimeState,
   replicaKey: string,
   result: Awaited<ReturnType<typeof applyEntityInputToReplica>>,
-  mode: RuntimeEntityInputApplyOptions['mode'],
   context: RuntimeEntityInputBatchContext,
 ): void => {
   env.eReplicas.set(replicaKey, result.nextReplica);
   // Entity consensus only describes committed effects. Runtime owns the live
   // aggregate state and is therefore the sole layer allowed to materialize
   // storage invalidations, history records, and host-visible notifications.
-  if (mode === 'commit') {
-    applyStorageChanges(env, result.nextReplica.state, result.storageChanges);
-    publishEntityCandidateEffects(env, result.candidateEffects);
-  } else {
-    // Scratch validation executes the exact reducer but publishes no Runtime-owned
-    // history, overlay, security, or routing effects.
-    applyEntityStorageChanges(result.nextReplica.state, result.storageChanges);
-  }
+  applyStorageChanges(env, result.nextReplica.state, result.storageChanges);
+  publishEntityCandidateEffects(env, result.candidateEffects);
   routeCommittedEntityOutputs(env, result.outputs, context);
   if (result.jOutputs.length === 0) return;
   entityInputLog.debug('j_outputs.collected', {
@@ -361,7 +363,7 @@ const drainImmediateCrossJurisdictionOutputs = async (
       entityInput,
       actualSignerId,
       options.isReplay,
-      options.mode === 'commit',
+      true,
       true,
     );
     context.localCrossJurisdictionEventTrace.push(result.appliedInput);
@@ -384,7 +386,7 @@ const drainImmediateCrossJurisdictionOutputs = async (
     const elapsedMs = Math.round(getPerfMs() - startedAt);
     context.immediateCrossJApplyMs += elapsedMs;
     recordEntityInputProfile(context, entityInput, actualSignerId, elapsedMs, result, { localEventRound });
-    collectCommittedEntityResult(env, replicaKey, result, options.mode, context);
+    collectCommittedEntityResult(env, replicaKey, result, context);
   }
 };
 
@@ -532,13 +534,22 @@ const resolveEntityInputReplica = (
   return { signerId, replicaKey, replica };
 };
 
-const applyExternalEntityInput = async (
+type StagedEntityInput = {
+  input: RoutedEntityInput;
+  inputIndex: number;
+  signerId: string;
+  replicaKey: string;
+  result: Awaited<ReturnType<typeof applyEntityInputToReplica>>;
+  elapsedMs: number;
+};
+
+const stageExternalEntityInput = async (
   env: RuntimeState,
   entityInput: RoutedEntityInput,
   inputIndex: number,
   options: RuntimeEntityInputApplyOptions,
-  context: RuntimeEntityInputBatchContext,
-): Promise<void> => {
+  promoteCandidateState: boolean,
+): Promise<StagedEntityInput> => {
   const startedAt = getPerfMs();
   if (options.isReplay) {
     entityInputLog.debug('replay.merged_input', {
@@ -573,33 +584,305 @@ const applyExternalEntityInput = async (
     entityInput,
     signerId,
     options.isReplay,
-    options.mode === 'commit',
+    promoteCandidateState,
   );
+  return {
+    input: entityInput,
+    inputIndex,
+    signerId,
+    replicaKey,
+    result,
+    elapsedMs: Math.round(getPerfMs() - startedAt),
+  };
+};
+
+const registerCommittedInputRoutes = (
+  env: RuntimeState,
+  staged: StagedEntityInput,
+  options: RuntimeEntityInputApplyOptions,
+): void => {
+  if (!isCommittedEntityInput(staged.result.outcome) || !staged.input.from) return;
+  const routeHints = new Set([
+    ...collectAppliedAccountSenderHints(staged.input),
+    ...collectCrossJurisdictionRemoteEntityHints(
+      env,
+      staged.input,
+      staged.input.from,
+      options.routingDeps,
+    ),
+  ]);
+  for (const hintedEntityId of routeHints) {
+    registerEntityRuntimeHintWithDeps(
+      env,
+      hintedEntityId,
+      staged.input.from,
+      options.routingDeps,
+    );
+  }
+};
+
+const collectStagedEntityInput = (
+  env: RuntimeState,
+  staged: StagedEntityInput,
+  options: RuntimeEntityInputApplyOptions,
+  context: RuntimeEntityInputBatchContext,
+): void => {
+  const { input, inputIndex, signerId, replicaKey, result, elapsedMs } = staged;
   context.inputOutcomes.push({
     inputIndex,
     outcome: result.outcome,
     entityFrameCommitted: result.entityFrameCommitted,
     committedAccountFrames: isCommittedEntityInput(result.outcome)
-      ? collectCommittedAccountFrames(entityInput, result.nextReplica)
+      ? collectCommittedAccountFrames(input, result.nextReplica)
       : [],
   });
   context.entityFrameCommitted ||= result.entityFrameCommitted;
-  if (options.mode === 'commit' && isCommittedEntityInput(result.outcome) && entityInput.from) {
-    const routeHints = new Set([
-      ...collectAppliedAccountSenderHints(entityInput),
-      ...collectCrossJurisdictionRemoteEntityHints(env, entityInput, entityInput.from, options.routingDeps),
-    ]);
-    for (const hintedEntityId of routeHints) {
-      registerEntityRuntimeHintWithDeps(env, hintedEntityId, entityInput.from, options.routingDeps);
-    }
-  }
-  const elapsedMs = Math.round(getPerfMs() - startedAt);
+  registerCommittedInputRoutes(env, staged, options);
   context.externalApplyMs += elapsedMs;
-  recordEntityInputProfile(context, entityInput, signerId, elapsedMs, result);
+  recordEntityInputProfile(context, input, signerId, elapsedMs, result);
   if (isCommittedEntityInput(result.outcome)) {
     context.appliedEntityInputs.push(result.appliedInput);
   }
-  collectCommittedEntityResult(env, replicaKey, result, options.mode, context);
+  collectCommittedEntityResult(env, replicaKey, result, context);
+};
+
+const applyExternalEntityInput = async (
+  env: RuntimeState,
+  entityInput: RoutedEntityInput,
+  inputIndex: number,
+  options: RuntimeEntityInputApplyOptions,
+  context: RuntimeEntityInputBatchContext,
+): Promise<void> => {
+  const stagesUntrustedRemoteInput = Boolean(entityInput.from);
+  const staged = await stageExternalEntityInput(
+    env,
+    entityInput,
+    inputIndex,
+    options,
+    !stagesUntrustedRemoteInput,
+  );
+  if (
+    stagesUntrustedRemoteInput &&
+    isCommittedEntityInput(staged.result.outcome)
+  ) {
+    // A remote Runtime can submit protocol-valid bytes that still fail deep in
+    // an Entity reducer. Keep its touched candidate detached until the complete
+    // transition succeeds; local inputs retain the zero-copy fast path.
+    commitEntityFrameCandidateState(staged.result.nextReplica.state);
+  }
+  collectStagedEntityInput(env, staged, options, context);
+};
+
+const discardMalformedRemoteEntityInput = (
+  env: RuntimeState,
+  error: unknown,
+  inputIndex: number,
+  context: RuntimeEntityInputBatchContext,
+  options: RuntimeEntityInputApplyOptions,
+): boolean => {
+  if (
+    env.scenarioMode ||
+    options.isReplay ||
+    !(error instanceof RuntimeEntityInputApplyError) ||
+    !error.isDiscardableIngress
+  ) {
+    return false;
+  }
+  context.inputOutcomes.push({
+    inputIndex,
+    outcome: { kind: 'rejected', code: error.failureKind },
+    entityFrameCommitted: false,
+    committedAccountFrames: [],
+  });
+  entityInputLog.info('entity_input.discarded', {
+    entityId: error.entityId,
+    signerId: error.signerId,
+    sourceRuntimeId: error.sourceRuntimeId,
+    cause: error.cause instanceof Error ? error.cause.message : String(error.cause),
+  });
+  return true;
+};
+
+const atomicPairInputsMatch = (
+  first: RoutedEntityInput,
+  second: RoutedEntityInput | undefined,
+): second is RoutedEntityInput => {
+  const left = first.atomicCrossJurisdictionPair;
+  const right = second?.atomicCrossJurisdictionPair;
+  return Boolean(
+    left &&
+    right &&
+    left.phase === right.phase &&
+    left.pairKey === right.pairKey,
+  );
+};
+
+const expectedAtomicAccountFrame = (
+  input: RoutedEntityInput,
+): { counterpartyEntityId: string; height: number; stateHash: string } | null => {
+  const phase = input.atomicCrossJurisdictionPair?.phase;
+  const expected = getEffectiveEntityInputTxs(input).flatMap(tx => {
+    if (tx.type !== 'accountInput') return [];
+    if (phase === 'proposal') {
+      const frame = accountInputProposal(tx.data)?.frame;
+      return frame ? [{
+          counterpartyEntityId: tx.data.fromEntityId.toLowerCase(),
+          height: frame.height,
+          stateHash: String(frame.stateHash || '').toLowerCase(),
+        }] : [];
+    }
+    const ack = accountInputAck(tx.data);
+    return ack ? [{
+      counterpartyEntityId: tx.data.fromEntityId.toLowerCase(),
+      height: ack.height,
+      stateHash: String(ack.frameHash || '').toLowerCase(),
+    }] : [];
+  });
+  return expected.length === 1 ? expected[0]! : null;
+};
+
+const stagedAtomicLegCommitted = (staged: StagedEntityInput): boolean => {
+  if (
+    !isCommittedEntityInput(staged.result.outcome) ||
+    !staged.result.entityFrameCommitted
+  ) {
+    return false;
+  }
+  const expected = expectedAtomicAccountFrame(staged.input);
+  if (!expected) return false;
+  return collectCommittedAccountFrames(staged.input, staged.result.nextReplica)
+    .some(frame =>
+      frame.counterpartyEntityId === expected.counterpartyEntityId &&
+      frame.height === expected.height &&
+      frame.stateHash === expected.stateHash);
+};
+
+const atomicPairProtocolRejection = (
+  error: unknown,
+): RuntimeEntityInputApplyError | null => {
+  if (!(error instanceof RuntimeEntityInputApplyError) || !error.isRemoteIngress) {
+    return null;
+  }
+  if (error.failureKind === 'malformed-ingress') return error;
+  const detail = error.cause instanceof Error
+    ? error.cause.message
+    : String(error.cause ?? '');
+  const authenticatedInvalidPrefixes = [
+    'CONSENSUS_OUTPUT_WITNESS_HANKO_INVALID',
+    'CONSENSUS_OUTPUT_HANKO_INVALID',
+    'CONSENSUS_OUTPUT_SEMANTIC_HASH_MISMATCH',
+    'CONSENSUS_OUTPUT_SEMANTIC_SOURCE_MISMATCH',
+  ];
+  return authenticatedInvalidPrefixes.some(prefix => detail.startsWith(prefix))
+    ? error
+    : null;
+};
+
+const recordAtomicPairRejection = (
+  context: RuntimeEntityInputBatchContext,
+  inputIndexes: [number, number],
+  code: RuntimeEntityInputApplyResult['rejectedAtomicPairs'][number]['code'],
+  detail: string,
+): void => {
+  context.rejectedAtomicPairs.push({ inputIndexes, code, detail });
+  for (const inputIndex of inputIndexes) {
+    context.inputOutcomes.push({
+      inputIndex,
+      outcome: { kind: 'rejected', code },
+      entityFrameCommitted: false,
+      committedAccountFrames: [],
+    });
+  }
+};
+
+const applyRetainedNonAtomicInputs = async (
+  env: RuntimeState,
+  pair: readonly [RoutedEntityInput, RoutedEntityInput],
+  inputIndexes: readonly [number, number],
+  options: RuntimeEntityInputApplyOptions,
+  context: RuntimeEntityInputBatchContext,
+): Promise<void> => {
+  for (const [pairIndex, input] of pair.entries()) {
+    const retained = removeRejectedCrossJAccountInputsByIndex(
+      env,
+      [input],
+      new Set([0]),
+    )[0];
+    if (!retained) continue;
+    await applyExternalEntityInput(
+      env,
+      retained,
+      inputIndexes[pairIndex]!,
+      options,
+      context,
+    );
+  }
+};
+
+const applyAtomicEntityInputPair = async (
+  env: RuntimeState,
+  pair: readonly [RoutedEntityInput, RoutedEntityInput],
+  firstInputIndex: number,
+  options: RuntimeEntityInputApplyOptions,
+  context: RuntimeEntityInputBatchContext,
+): Promise<void> => {
+  const inputIndexes: [number, number] = [firstInputIndex, firstInputIndex + 1];
+  let staged: [StagedEntityInput, StagedEntityInput];
+  try {
+    const first = await stageExternalEntityInput(
+      env,
+      pair[0],
+      inputIndexes[0],
+      options,
+      false,
+    );
+    const second = await stageExternalEntityInput(
+      env,
+      pair[1],
+      inputIndexes[1],
+      options,
+      false,
+    );
+    staged = [first, second];
+  } catch (error) {
+    const rejection = atomicPairProtocolRejection(error);
+    if (!rejection || options.isReplay) throw error;
+    recordAtomicPairRejection(
+      context,
+      inputIndexes,
+      'CROSS_J_ACCOUNT_PAIR_PROTOCOL_REJECTED',
+      rejection.message,
+    );
+    await applyRetainedNonAtomicInputs(env, pair, inputIndexes, options, context);
+    return;
+  }
+
+  if (staged[0].replicaKey === staged[1].replicaKey) {
+    throw new Error(`RUNTIME_CROSS_J_ATOMIC_PAIR_REPLICA_COLLISION:${staged[0].replicaKey}`);
+  }
+  if (!staged.every(stagedAtomicLegCommitted)) {
+    if (options.isReplay) {
+      throw new Error('RUNTIME_REPLAY_CROSS_J_ACCOUNT_PAIR_NOT_COMMITTED');
+    }
+    recordAtomicPairRejection(
+      context,
+      inputIndexes,
+      'CROSS_J_ACCOUNT_PAIR_NOT_COMMITTED',
+      'One or both signed Account legs were stale or rejected by Account consensus',
+    );
+    await applyRetainedNonAtomicInputs(env, pair, inputIndexes, options, context);
+    return;
+  }
+
+  // Both reducers finished against touched-only candidates. Promotion is the
+  // only live mutation point; no output, route hint, or storage effect can
+  // escape before both Account legs are proven committable.
+  for (const entry of staged) {
+    commitEntityFrameCandidateState(entry.result.nextReplica.state);
+  }
+  for (const entry of staged) {
+    collectStagedEntityInput(env, entry, options, context);
+  }
 };
 
 export const applyMergedEntityInputs = async (
@@ -611,19 +894,28 @@ export const applyMergedEntityInputs = async (
   const context = createRuntimeEntityInputBatchContext(initialJOutbox);
   const profileStartedAt = getPerfMs();
 
-  for (const [inputIndex, entityInput] of mergedInputs.entries()) {
-    await applyExternalEntityInput(env, entityInput, inputIndex, options, context);
-    const currentPair = entityInput.atomicCrossJurisdictionPair;
-    const nextPair = mergedInputs[inputIndex + 1]?.atomicCrossJurisdictionPair;
-    const nextInputCompletesCurrentPair = Boolean(
-      currentPair && nextPair?.phase === currentPair.phase && nextPair.pairKey === currentPair.pairKey,
-    );
-    // Both signed Account legs must exist in scratch state before matching or
-    // any other immediate cross-j effect can observe either leg. Runtime has
-    // already validated that an atomic cohort contains exactly two inputs.
-    if (!nextInputCompletesCurrentPair) {
-      await drainImmediateCrossJurisdictionOutputs(env, options, context);
+  for (let inputIndex = 0; inputIndex < mergedInputs.length; inputIndex += 1) {
+    const entityInput = mergedInputs[inputIndex]!;
+    const nextInput = mergedInputs[inputIndex + 1];
+    if (atomicPairInputsMatch(entityInput, nextInput)) {
+      await applyAtomicEntityInputPair(
+        env,
+        [entityInput, nextInput],
+        inputIndex,
+        options,
+        context,
+      );
+      inputIndex += 1;
+    } else {
+      try {
+        await applyExternalEntityInput(env, entityInput, inputIndex, options, context);
+      } catch (error) {
+        if (!discardMalformedRemoteEntityInput(env, error, inputIndex, context, options)) {
+          throw error;
+        }
+      }
     }
+    await drainImmediateCrossJurisdictionOutputs(env, options, context);
   }
 
   const elapsedMs = Math.round(getPerfMs() - profileStartedAt);

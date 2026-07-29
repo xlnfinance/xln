@@ -1111,7 +1111,7 @@ describe('audit fail-fast regressions', () => {
     expect(
       remoteRetryInputs.flatMap(input => input.entityTxs?.map(tx => tx.type) ?? []),
     ).not.toContain('definitely_unknown_entity_tx');
-    expect(remoteRetryInputs).toHaveLength(1);
+    expect(remoteRetryInputs).toHaveLength(0);
 
     const local = makeRuntime('local-handler-failure-fatal');
     await expect(
@@ -1182,7 +1182,7 @@ describe('audit fail-fast regressions', () => {
       failure: Error,
     ): Promise<RuntimeEntityInputApplyError> => {
       const broken = makeRuntime(seed);
-      Object.defineProperty(broken.state, 'height', {
+      Object.defineProperty(broken.state, 'accounts', {
         configurable: true,
         get: () => {
           throw failure;
@@ -1202,7 +1202,6 @@ describe('audit fail-fast regressions', () => {
           [],
           {
             isReplay: false,
-            mode: 'commit',
             routingDeps: {
               ensureRuntimeState: targetEnv => targetEnv.runtimeState!,
               enqueueRuntimeInputs: () => {},

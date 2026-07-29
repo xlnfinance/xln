@@ -26,6 +26,7 @@ import {
 } from './cross-j-atomic-admission';
 import {
   markCommittedAtomicCrossJAckOutputs,
+  recordRejectedAtomicCrossJInputs,
   summarizeAtomicCrossJAccountInput,
 } from './cross-j-evidence';
 import {
@@ -199,24 +200,43 @@ const applyRuntimeEntityBatch = async (
 
   const initialJOutbox = [...ingress.jOutbox, ...runtimeJOutbox];
   const routingDeps = deps.getRoutingDeps();
-  const prepared = await admitAtomicCrossJAccountInputs(
+  const prepared = admitAtomicCrossJAccountInputs(
     env,
     mergedInputs,
-    initialJOutbox,
     isReplay,
-    routingDeps,
   );
   profile.mark('atomicCrossJAdmission');
   const batch = await applyMergedEntityInputs(env, prepared.inputs, initialJOutbox, {
     isReplay,
-    mode: 'commit',
     routingDeps,
     beforeEntityApply: lineage.beforeEntityApply,
   });
+  const rejectedIndexes = new Set(
+    batch.rejectedAtomicPairs.flatMap(rejection => rejection.inputIndexes),
+  );
+  for (const rejection of batch.rejectedAtomicPairs) {
+    env.warn('network', rejection.code, {
+      rejectedInputIndexes: rejection.inputIndexes,
+      detail: rejection.detail,
+    });
+    recordRejectedAtomicCrossJInputs(
+      env,
+      prepared.inputs,
+      rejection.inputIndexes,
+      rejection.code,
+      rejection.detail,
+    );
+  }
+  const accepted = {
+    ...prepared,
+    pairs: prepared.pairs.filter(pair =>
+      !rejectedIndexes.has(pair.sourceInputIndex) &&
+      !rejectedIndexes.has(pair.targetInputIndex)),
+  };
   lineage.finalize();
-  logAtomicCrossJCommit(prepared, batch);
+  logAtomicCrossJCommit(accepted, batch);
   profile.mark('entityApply');
-  return { prepared, batch };
+  return { prepared: accepted, batch };
 };
 
 const finalizeRuntimeInputApply = (
@@ -266,7 +286,7 @@ const finalizeRuntimeInputApply = (
   profile.mark('durableReceiptInputs');
   return {
     entityOutbox: batch.entityOutbox,
-    mergedInputs: prepared.inputs,
+    mergedInputs: batch.appliedEntityInputs,
     jOutbox: batch.jOutbox,
     appliedRuntimeInput,
     reliableIngressCommits: commits,

@@ -220,7 +220,9 @@ describe('BrowserVM JAdapter boundary', () => {
       const transferReceipt = browserVM.getTransactionReceipt(transferHash);
       const registrationReceipt = browserVM.getTransactionReceipt(registrationHash);
       expect(transferReceipt?.logs).toHaveLength(0);
+      expect(transferReceipt?.data).toBe('0x');
       expect(transferReceipt?.transactionIndex).toBe(0);
+      expect(registrationReceipt?.data).toMatch(/^0x[0-9a-f]+$/);
       expect(registrationReceipt?.transactionIndex).toBe(1);
       expect(BigInt(registrationReceipt?.cumulativeGasUsed ?? 0n))
         .toBeGreaterThan(BigInt(transferReceipt?.cumulativeGasUsed ?? 0n));

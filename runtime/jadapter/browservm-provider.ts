@@ -147,6 +147,9 @@ const checkpointReceipts = (
       'BROWSERVM_CHECKPOINT_RECEIPT_TRANSACTION_HASH_INVALID',
     );
     if (transactionHash !== key) throw new Error(`BROWSERVM_CHECKPOINT_RECEIPT_KEY_MISMATCH:${key}`);
+    if (!ethers.isHexString(rawReceipt.data)) {
+      throw new Error(`BROWSERVM_CHECKPOINT_RECEIPT_CALLDATA_INVALID:${key}`);
+    }
     if (!Number.isSafeInteger(rawReceipt.blockNumber) || rawReceipt.blockNumber < 1) {
       throw new Error(`BROWSERVM_CHECKPOINT_RECEIPT_BLOCK_INVALID:${key}`);
     }
@@ -843,6 +846,7 @@ export class BrowserVMProvider {
   private async recordTransactionReceipt(
     rawLogs: readonly EthereumLog[],
     transactionHash: string,
+    data: string,
     receipt: BrowserVmRunTxResult['receipt'],
     transactionType: number,
     metadata?: { from?: string; to?: string | null; contractAddress?: string | null },
@@ -853,11 +857,15 @@ export class BrowserVMProvider {
     if (this.txReceipts.has(transactionHash)) {
       throw new Error(`BROWSERVM_RECEIPT_DUPLICATE_TRANSACTION:${transactionHash}`);
     }
+    if (!ethers.isHexString(data)) {
+      throw new Error(`BROWSERVM_RECEIPT_CALLDATA_INVALID:${transactionHash}`);
+    }
     const transactionIndex = Array.from(this.txReceipts.values())
       .filter(candidate => candidate.blockNumber === this.blockHeight).length;
     const logs = toBrowserVmReceiptLogs([...rawLogs], transactionHash, this.blockHeight);
     this.txReceipts.set(transactionHash, {
       transactionHash,
+      data: data.toLowerCase(),
       blockNumber: this.blockHeight,
       blockHash: this.blockHash,
       from: metadata?.from ?? this.deployerAddress.toString(),
@@ -2432,6 +2440,7 @@ export class BrowserVMProvider {
     await this.recordTransactionReceipt(
       result.execResult.logs || [],
       transactionHash,
+      bytesToHex(tx.data),
       result.receipt,
       tx.type,
       {

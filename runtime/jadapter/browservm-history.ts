@@ -18,6 +18,10 @@ import {
 } from '../jurisdiction/registration-evidence';
 import { CANONICAL_J_EVENTS } from '../jurisdiction/event-catalog';
 import { decodeJEventLog } from './j-event-log-decoder';
+import {
+  decodeDisputeFinalizationEvidenceCalldata,
+  resolveDisputeFinalizationEvidence,
+} from './rpc-public';
 
 type BrowserVmHistoryOptions = {
   chainId: number;
@@ -54,6 +58,17 @@ const decodeHistoricalLog = (options: BrowserVmHistoryOptions, log: Authenticate
     `BROWSERVM_HISTORICAL_LOG_DECODE_FAILED:block=${log.blockNumber}` +
       `:tx=${log.transactionHash}:index=${log.logIndex}`,
   );
+  if (event.name === 'DisputeFinalized') {
+    const receipt = options.browserVM.getTransactionReceipt(log.transactionHash);
+    if (!receipt) {
+      throw new Error(`BROWSERVM_FINALIZATION_RECEIPT_MISSING:${log.transactionHash}`);
+    }
+    event.disputeFinalizationEvidence = resolveDisputeFinalizationEvidence(
+      decodeDisputeFinalizationEvidenceCalldata(receipt.data),
+      log.transactionHash,
+      event.args,
+    );
+  }
   return CANONICAL_J_EVENTS.some(name => name === event.name) ? event : null;
 };
 

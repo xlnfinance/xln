@@ -1629,6 +1629,17 @@ export async function selectContextEntity(page: Page, identity: RuntimeIdentity)
 }
 
 export async function dismissSwapCompletionModal(page: Page): Promise<void> {
+  if (page.isClosed()) return;
+  // The terminal Account frame and Svelte dialog are observed on different
+  // microtasks. Let two paint cycles publish the dialog before deciding it is
+  // absent; otherwise the next navigation click can race a freshly mounted
+  // modal for the rest of the Playwright timeout.
+  await page.evaluate(
+    () =>
+      new Promise<void>(resolve => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      }),
+  );
   const completionClose = page.getByTestId('swap-completion-close').first();
   if (await completionClose.isVisible({ timeout: 1_000 }).catch(() => false)) {
     await completionClose.click();

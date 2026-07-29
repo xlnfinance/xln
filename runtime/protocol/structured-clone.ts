@@ -38,7 +38,18 @@ const findStructuredCloneFailurePath = (
     }
   }
 
-  if (!mapEntries) return path;
+  if (!mapEntries) {
+    // Some runtimes fail only when otherwise cloneable fields are combined
+    // (usually because two fields share a host-backed object). Build the object
+    // incrementally so the diagnostic names the field that introduces the
+    // non-cloneable relationship instead of reporting the useless root `$`.
+    const prefix: Record<string, unknown> = {};
+    for (const [key, child] of Object.entries(value)) {
+      prefix[key] = child;
+      if (!structuredCloneWorks(prefix)) return `${path}.${key}`;
+    }
+    return path;
+  }
   const prefix = new Map<unknown, unknown>();
   for (const [index, entry] of mapEntries.entries()) {
     prefix.set(entry[0], entry[1]);

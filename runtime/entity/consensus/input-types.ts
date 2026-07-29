@@ -34,7 +34,7 @@ export type ApplyEntityInputContext = {
   candidateEffects: EntityCandidateEffect[];
   storageChanges: RuntimeOverlayRecord[];
   frameHash: string;
-  /** False only for Runtime atomic-admission scratch execution. */
+  /** False while Runtime stages one touched-only Entity candidate. */
   promoteCandidateState: boolean;
   canonicalAppliedInput?: EntityInput;
 };

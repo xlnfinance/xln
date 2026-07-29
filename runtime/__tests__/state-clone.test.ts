@@ -242,6 +242,28 @@ describe('state cloning', () => {
     expect(source.accounts.get(counterpartyId)?.deltas.get(1)?.offdelta).toBe(25n);
   });
 
+  test('a planner flattens a prior candidate without linking commit to certified state', () => {
+    const source = makeProjectionReplica().state as EntityState;
+    const counterpartyId = `0x${'cd'.repeat(32)}`;
+    const accountFixture = makeManualFallbackAccount();
+    delete accountFixture.uncloneable;
+    const account = accountFixture as unknown as AccountState;
+    account.leftEntity = source.entityId;
+    account.rightEntity = counterpartyId;
+    source.accounts.set(counterpartyId, account);
+
+    const first = createEntityFrameCandidateState(source);
+    first.accounts.get(counterpartyId)!.deltas.get(1)!.collateral = 11n;
+    const second = createEntityFrameCandidateState(first);
+    second.accounts.get(counterpartyId)!.deltas.get(1)!.collateral = 22n;
+    second.accounts = commitEntityAccountCandidate(second.accounts);
+
+    expect(source.accounts.get(counterpartyId)?.deltas.get(1)?.collateral).toBe(0n);
+    expect(first.accounts.get(counterpartyId)?.deltas.get(1)?.collateral).toBe(11n);
+    expect(second.accounts.get(counterpartyId)?.deltas.get(1)?.collateral).toBe(22n);
+    expect(second.accounts).not.toBe(source.accounts);
+  });
+
   test('Entity frame candidate isolates only the touched Orderbook pair', () => {
     const source = makeProjectionReplica().state as EntityState;
     const firstPair = '1/2';

@@ -385,7 +385,7 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   coordinators below 100–150 lines, and every file below 3000 lines. After the
   pipeline, collapse DI factories that add navigation
   without providing a real swappable boundary. The R/E/A gate is already at
-  zero functions over 100 lines. The production ratchet now owns 17 exact
+  zero functions over 100 lines. The production ratchet now owns 16 exact
   allowances over 150 lines and rejects every new/growing coordinator plus
   every file over 3000 lines; delete each allowance with its verified split.
   Start with

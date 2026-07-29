@@ -15,10 +15,12 @@ export class EntityCandidateMap<K, V> extends Map<K, V> {
     cloneOnIteration: boolean,
   ) {
     super();
-    if (base instanceof EntityCandidateMap) {
-      throw new Error('ENTITY_CANDIDATE_MAP_NESTED');
-    }
-    this.#base = base;
+    // Pure planners may feed one uncommitted candidate into the next frame
+    // simulation. Never retain an overlay chain: flatten its visible view into
+    // a private Map so later commit cannot reach or mutate an earlier base.
+    this.#base = base instanceof EntityCandidateMap
+      ? base.snapshot()
+      : base;
     this.#cloneValue = cloneValue;
     this.#cloneOnIteration = cloneOnIteration;
   }

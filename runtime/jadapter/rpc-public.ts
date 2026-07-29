@@ -103,6 +103,39 @@ export const decodeDisputeFinalizationEvidenceCalldata = (data: string): TxFinal
   }
 };
 
+export const resolveDisputeFinalizationEvidence = (
+  candidates: readonly TxFinalizationEvidence[],
+  txHash: string,
+  args: Record<string, unknown>,
+): DisputeFinalizationEvidence => {
+  const normalizedHash = String(txHash || '').toLowerCase();
+  if (candidates.length === 0) {
+    throw new Error(`J_DISPUTE_FINALIZATION_EVIDENCE_EMPTY:${normalizedHash}`);
+  }
+  const counterentity = String(args['counterentity'] ?? '').toLowerCase();
+  const initialNonce = toFinalizationDecimal(args['initialNonce']);
+  const initialProofbodyHash = String(args['initialProofbodyHash'] ?? '').toLowerCase();
+  const matched = candidates.find(candidate =>
+    candidate.counterentity.toLowerCase() === counterentity &&
+    candidate.initialNonce === initialNonce &&
+    candidate.initialProofbodyHash.toLowerCase() === initialProofbodyHash);
+  if (!matched) {
+    throw new Error(`J_DISPUTE_FINALIZATION_EVIDENCE_NOT_FOUND:${normalizedHash}`);
+  }
+  return {
+    sender: toFinalizationHex(args['sender']),
+    counterentity: matched.counterentity,
+    initialNonce: matched.initialNonce,
+    finalNonce: matched.finalNonce,
+    initialProofbodyHash: matched.initialProofbodyHash,
+    finalProofbodyHash: toFinalizationHex(args['finalProofbodyHash']),
+    leftArguments: matched.leftArguments,
+    rightArguments: matched.rightArguments,
+    startedByLeft: matched.startedByLeft,
+    sig: matched.sig,
+  };
+};
+
 export const isTronChainId = (chainId: number): boolean => TRON_CHAIN_IDS.has(chainId);
 
 export const resolveWatcherPollToBlock = (

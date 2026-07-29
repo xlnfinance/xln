@@ -1728,6 +1728,23 @@ async function executeOrderbookClickFill(
       )
       .toBe(true);
     const clickToClosedStateMs = Date.now() - swapClickStartedAt;
+    // Account consensus can expose the closed order before the async click
+    // handler publishes its terminal UI receipt. Keep the observer alive
+    // until that receipt exists; stopping it at the state transition races
+    // the user-visible completion signal on fast local runtimes.
+    await expect
+      .poll(
+        async () => await page.evaluate(() => {
+          const messages = (window as any).__xlnSwapFeedbackMessages as string[] | undefined;
+          return (messages ?? []).filter(message =>
+            message === 'Swap offer submitted'
+            || message === 'Order placed'
+            || message.startsWith('Order placed and fully filled'),
+          ).length;
+        }),
+        { timeout: 10_000, intervals: [16, 32, 64, 128] },
+      )
+      .toBeGreaterThanOrEqual(1);
     const swapObservation = await page.evaluate(() => {
       ((window as any).__xlnSwapFeedbackObserver as MutationObserver | undefined)?.disconnect();
       const messages = [...((window as any).__xlnSwapFeedbackMessages as string[] || [])];

@@ -369,7 +369,6 @@ describe('ordered reliable Entity catch-up', () => {
     expect(registerReliableIngress(receiver, sender.runtimeId!, h2).kind).toBe('pending');
     const futureAttempt = await applyMergedEntityInputs(receiver, [h2], [], {
       isReplay: false,
-      mode: 'commit',
       routingDeps,
     });
     expect(futureAttempt.appliedEntityInputs).toEqual([]);
@@ -392,7 +391,6 @@ describe('ordered reliable Entity catch-up', () => {
     expect(registerReliableIngress(restarted, sender.runtimeId!, h1).kind).toBe('enqueue');
     const firstCommit = await applyMergedEntityInputs(restarted, [h1], [], {
       isReplay: false,
-      mode: 'commit',
       routingDeps,
     });
     expect(firstCommit.appliedEntityInputs).toHaveLength(1);
@@ -411,7 +409,6 @@ describe('ordered reliable Entity catch-up', () => {
     expect(registerReliableIngress(restarted, sender.runtimeId!, h2).kind).toBe('enqueue');
     const secondCommit = await applyMergedEntityInputs(restarted, [h2], [], {
       isReplay: false,
-      mode: 'commit',
       routingDeps,
     });
     expect(secondCommit.appliedEntityInputs).toHaveLength(1);
@@ -490,7 +487,6 @@ describe('ordered reliable Entity catch-up', () => {
           if (registration.kind !== 'enqueue') return;
           const result = await applyMergedEntityInputs(receiver, [input], [], {
             isReplay: false,
-            mode: 'commit',
             routingDeps,
           });
           const commits = commitReliableIngress(receiver, result.appliedEntityInputs);

@@ -143,19 +143,25 @@ const cloneEntityStateWithPolicy = (
   forSnapshot: boolean,
   validateClone: boolean,
 ): EntityState => {
-  const cloneSource = source.accounts instanceof Map
-    ? {
-        ...source,
-        accounts: snapshotEntityAccountMap(source.accounts),
-        ...(source.orderbookExt
-          ? {
-              orderbookExt: snapshotEntityOrderbookCandidate(
-                source.orderbookExt,
-              ),
-            }
-          : {}),
-      }
-    : source;
+  const cloneSource = {
+    ...source,
+    accounts: snapshotEntityAccountMap(source.accounts),
+    ...(source.orderbookExt
+      ? {
+          orderbookExt: snapshotEntityOrderbookCandidate(
+            source.orderbookExt,
+          ),
+        }
+      : {}),
+  };
+  // These sections have stricter clone policies below. Keeping them in the
+  // bulk structuredClone duplicates work and can fail on aliased Cross-J route
+  // carriers even though the canonical field clone is valid.
+  delete cloneSource.jBatchState;
+  delete cloneSource.lending;
+  delete cloneSource.crossJurisdictionSwaps;
+  delete cloneSource.pendingCrossJurisdictionFillAcks;
+  delete cloneSource.crossJurisdictionBookAdmissions;
   const cloned = structuredCloneOrThrow(
     cloneSource,
     'ENTITY_STATE_STRUCTURED_CLONE_FAILED',

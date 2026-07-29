@@ -6,6 +6,8 @@ export const BROWSERVM_CONTRACT_VERSION = 1;
 
 export type BrowserVmStoredReceipt = {
   transactionHash: string;
+  /** Canonical transaction calldata required to reconstruct event sidecars. */
+  data: string;
   blockNumber: number;
   blockHash: string;
   from: string;

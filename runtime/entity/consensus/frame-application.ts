@@ -153,11 +153,9 @@ const applyCertifiedConsensusOutput = async (
   currentEntityState: EntityState,
   tx: Extract<EntityTx, { type: 'consensusOutput' }>,
 ): Promise<EntityState> => {
-  const { origin, targetEntityId, entityTxs, outputHash } = await verifyCertifiedEntityOutput(
-    context.env,
-    currentEntityState,
-    tx,
-  );
+  const verified = context.verifiedCertifiedOutputs.get(tx) ??
+    await verifyCertifiedEntityOutput(context.env, currentEntityState, tx);
+  const { origin, targetEntityId, entityTxs, outputHash } = verified;
 
   const identity = buildConsumptionOutputIdentity(origin, targetEntityId, outputHash, tx.data.outputHanko);
   const consumption = applyConsumptionOutput(
@@ -981,55 +979,60 @@ type EntityFrameWorkingSet = {
   markFrameProfile: (label: string) => void;
 };
 
-const prepareEntityFrameWorkingSet = async (
+const verifyCertifiedFrameInputs = async (
   env: RuntimeState,
-  entityState: EntityState,
-  entityTxs: EntityTx[],
-  frameTimestamp: number | undefined,
-  isolateState: boolean,
-): Promise<EntityFrameWorkingSet> => {
-  assertEntityFrameTxByteBudget(entityTxs);
-  assertEntityFrameJRangeBudget(entityTxs);
-  assertScheduledWakeFrameOrder(entityTxs);
-  const crossJSetupPhase = entityTxs.some(entityTxContainsCrossJSetup);
-  if (crossJSetupPhase && entityTxs.some(entityTxContainsAccountTransition)) {
-    throw new Error('CROSS_J_SETUP_ACCOUNT_TRANSITION_MIXED');
+  state: EntityState,
+  txs: readonly EntityTx[],
+): Promise<ApplyEntityTxsInOrderContext['verifiedCertifiedOutputs']> => {
+  const verified: ApplyEntityTxsInOrderContext['verifiedCertifiedOutputs'] =
+    new Map();
+  for (const tx of txs) {
+    if (tx.type !== 'consensusOutput') continue;
+    try {
+      verified.set(tx, await verifyCertifiedEntityOutput(env, state, tx));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!message.startsWith('CONSENSUS_OUTPUT_')) throw error;
+      throw new MalformedEntityFrameInputError(tx.type, message);
+    }
   }
-  const authorityTransitionOnly = await isSelfBoardAuthorityTransitionFrame(
-    env,
-    entityState,
-    entityTxs,
-  );
-  const frameProfileStartMs = getPerfMs();
-  const frameProfileMarks: Record<string, number> = {};
-  const markFrameProfile = (label: string): void => {
-    frameProfileMarks[label] = Math.round(getPerfMs() - frameProfileStartMs);
-  };
-  entityLog.debug('frame.apply', { txs: entityTxs.map(tx => tx.type) });
-  const normalized = normalizeEntityProposalBoard(
-    env,
-    normalizeEntityCommandNonceBoard(env, entityState),
-  );
-  const currentEntityState = isolateState
+  return verified;
+};
+
+const initializeEntityFrameState = (
+  env: RuntimeState,
+  normalized: EntityState,
+  isolateState: boolean,
+  frameTimestamp: number | undefined,
+): EntityState => {
+  const state = isolateState
     ? createEntityFrameCandidateState(normalized)
     : normalized;
-  clearEntityFrameEvents(currentEntityState);
-  currentEntityState.crontabState ??= initCrontab();
-  markFrameProfile('clone');
-  const effectiveTimestamp = frameTimestamp ?? env.timestamp;
-  if (!Number.isSafeInteger(effectiveTimestamp) || effectiveTimestamp < 0) {
-    throw new Error(`ENTITY_FRAME_TIMESTAMP_INVALID:${String(effectiveTimestamp)}`);
+  clearEntityFrameEvents(state);
+  state.crontabState ??= initCrontab();
+  const timestamp = frameTimestamp ?? env.timestamp;
+  if (!Number.isSafeInteger(timestamp) || timestamp < 0) {
+    throw new Error(`ENTITY_FRAME_TIMESTAMP_INVALID:${String(timestamp)}`);
   }
-  if (effectiveTimestamp < currentEntityState.timestamp) {
+  if (timestamp < state.timestamp) {
     throw new Error(
-      `ENTITY_FRAME_TIMESTAMP_REGRESSION:previous=${currentEntityState.timestamp}:` +
-      `proposed=${effectiveTimestamp}`,
+      `ENTITY_FRAME_TIMESTAMP_REGRESSION:previous=${state.timestamp}:` +
+        `proposed=${timestamp}`,
     );
   }
-  currentEntityState.timestamp = effectiveTimestamp;
+  state.timestamp = timestamp;
+  return state;
+};
+
+const createEntityFrameApplyContext = (
+  env: RuntimeState,
+  entityTxs: EntityTx[],
+  currentEntityState: EntityState,
+  verifiedCertifiedOutputs: ApplyEntityTxsInOrderContext['verifiedCertifiedOutputs'],
+): ApplyEntityTxsInOrderContext => {
   const accountJClaimNewNodes = new Map<string, AccountJClaimNode>();
   const committedClaimNodes = getAccountJClaimNodeStore(env);
-  const context: ApplyEntityTxsInOrderContext = {
+  return {
     env,
     entityTxs,
     currentEntityState,
@@ -1051,24 +1054,85 @@ const prepareEntityFrameWorkingSet = async (
     },
     candidateEffects: [],
     storageChanges: [],
+    verifiedCertifiedOutputs,
   };
+};
+
+const primeEntityFrameAccountWork = async (
+  context: ApplyEntityTxsInOrderContext,
+): Promise<void> => {
+  const state = context.currentEntityState;
+  await drainPendingCrossJurisdictionFillAcks(
+    context.env,
+    state,
+    context.proposableAccounts,
+    context.storageChanges,
+    context.candidateEffects,
+  );
+  await drainCommittedCrossJurisdictionCancelAcks(
+    context.env,
+    state,
+    context.proposableAccounts,
+    context.storageChanges,
+  );
+  for (const accountId of getProposableAccountIds(state)) {
+    context.proposableAccounts.add(accountId);
+  }
+};
+
+const prepareEntityFrameWorkingSet = async (
+  env: RuntimeState,
+  entityState: EntityState,
+  entityTxs: EntityTx[],
+  frameTimestamp: number | undefined,
+  isolateState: boolean,
+): Promise<EntityFrameWorkingSet> => {
+  assertEntityFrameTxByteBudget(entityTxs);
+  assertEntityFrameJRangeBudget(entityTxs);
+  assertScheduledWakeFrameOrder(entityTxs);
+  const crossJSetupPhase = entityTxs.some(entityTxContainsCrossJSetup);
+  if (crossJSetupPhase && entityTxs.some(entityTxContainsAccountTransition)) {
+    throw new Error('CROSS_J_SETUP_ACCOUNT_TRANSITION_MIXED');
+  }
+  const normalized = normalizeEntityProposalBoard(
+    env,
+    normalizeEntityCommandNonceBoard(env, entityState),
+  );
+  // Certified output bytes are adversarial transport input. Verify them before
+  // touching the Runtime-owned single-signer State, then reuse the proof during
+  // execution. Invalid Hanko therefore drops only this input in production;
+  // reducer/storage faults still halt and reload durable WAL truth.
+  const verifiedCertifiedOutputs = await verifyCertifiedFrameInputs(
+    env,
+    normalized,
+    entityTxs,
+  );
+  const authorityTransitionOnly = await isSelfBoardAuthorityTransitionFrame(
+    env,
+    normalized,
+    entityTxs,
+  );
+  const frameProfileStartMs = getPerfMs();
+  const frameProfileMarks: Record<string, number> = {};
+  const markFrameProfile = (label: string): void => {
+    frameProfileMarks[label] = Math.round(getPerfMs() - frameProfileStartMs);
+  };
+  entityLog.debug('frame.apply', { txs: entityTxs.map(tx => tx.type) });
+  const currentEntityState = initializeEntityFrameState(
+    env,
+    normalized,
+    isolateState,
+    frameTimestamp,
+  );
+  markFrameProfile('clone');
+  const context = createEntityFrameApplyContext(
+    env,
+    entityTxs,
+    currentEntityState,
+    verifiedCertifiedOutputs,
+  );
   if (!authorityTransitionOnly) {
-    await drainPendingCrossJurisdictionFillAcks(
-      env,
-      currentEntityState,
-      context.proposableAccounts,
-      context.storageChanges,
-      context.candidateEffects,
-    );
-    await drainCommittedCrossJurisdictionCancelAcks(
-      context.env,
-      currentEntityState,
-      context.proposableAccounts,
-      context.storageChanges,
-    );
-    for (const accountId of getProposableAccountIds(currentEntityState)) {
-      context.proposableAccounts.add(accountId);
-    }
+    await primeEntityFrameAccountWork(context);
   }
   return {
     authorityTransitionOnly,
@@ -1308,7 +1372,7 @@ export const applyEntityFrame = (
  * is held. The sole signer needs no speculative copy: success is persisted by
  * the same Runtime WAL commit, while any exception after mutation halts the
  * Runtime and reloads durable truth. Never use this for multi-signer proposal
- * validation or scratch admission.
+ * validation or touched-only Runtime candidate staging.
  */
 export const applyRuntimeOwnedEntityFrame = (
   env: RuntimeState,
