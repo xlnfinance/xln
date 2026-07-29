@@ -1,4 +1,5 @@
 import { deriveDelta } from '@xln/runtime/account/utils';
+import { createDefaultDelta } from '@xln/runtime/account/delta';
 import type { Delta, DerivedDelta } from '@xln/runtime/types';
 import {
   deriveDisputeTokenFinalization,
@@ -48,14 +49,12 @@ function visualLerp(from: bigint, to: bigint, progress: number): bigint {
 
 function accountDelta(token: RcpanMicroscopeToken, collateral: bigint, offdelta: bigint): Delta {
   return {
-    tokenId: token.tokenId,
+    ...createDefaultDelta(token.tokenId, {
+      left: token.grossAmount,
+      right: token.grossAmount,
+    }),
     collateral,
-    ondelta: 0n,
     offdelta,
-    leftCreditLimit: token.grossAmount,
-    rightCreditLimit: token.grossAmount,
-    leftAllowance: 0n,
-    rightAllowance: 0n,
   };
 }
 

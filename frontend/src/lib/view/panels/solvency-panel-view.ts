@@ -1,4 +1,4 @@
-import { calculateSolvency } from '@xln/runtime/account/solvency';
+import { calculateSolvency } from '@xln/runtime/api/public-utilities';
 import type { RuntimeState, RuntimeAdapterSolvencySummary } from '@xln/runtime/xln-api';
 
 export type SolvencyProjection = Pick<RuntimeAdapterSolvencySummary, 'assets' | 'isValid'>;
