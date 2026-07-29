@@ -15,6 +15,7 @@ import { applyCrossJurisdictionBookProgressToState } from '../entity/tx/handlers
 import { handleSwapResolve } from '../account/tx/handlers/swap-resolve';
 
 import { createEmptyEnv } from '../runtime';
+import { publishEntityCandidateEffects } from '../runtime/env-events';
 
 import { CROSS_J_PENDING_FILL_ACK_TTL_MS } from '../extensions/cross-j/fill-ack';
 
@@ -24,7 +25,7 @@ import {
   type NormalizedOrderbookOffer,
 } from '../orderbook/swap-execution';
 
-import type { AccountState, AccountTx, SwapOffer } from '../types';
+import type { AccountState, AccountTx, EntityCandidateEffect, SwapOffer } from '../types';
 
 import { createDefaultDelta } from '../account/delta';
 
@@ -1245,11 +1246,18 @@ describe('orderbook matching fallback execution mapping', () => {
     const runtimeEnv = createEmptyEnv('cross-j-expired-book-fill-security-status');
     runtimeEnv.timestamp = entityState.timestamp;
     runtimeEnv.error = () => undefined;
-    expect(() => processCommittedOrderbookSwaps(entityState, [takerOffer] as any, { runtimeEnv })).not.toThrow();
+    const candidateEffects: EntityCandidateEffect[] = [];
+    expect(() => processCommittedOrderbookSwaps(
+      entityState,
+      [takerOffer] as any,
+      { candidateEffects },
+    )).not.toThrow();
     const admission = entityState.crossJurisdictionBookAdmissions.get(
       'remote-maker:maker-cross-expired-pending-progress',
     );
     expect(admission?.pendingFill?.ttlExpiredAt).toBe(entityState.timestamp);
+    expect(runtimeEnv.runtimeState?.securityIncidents).toBeUndefined();
+    publishEntityCandidateEffects(runtimeEnv, candidateEffects);
     expect([...runtimeEnv.runtimeState!.securityIncidents!.values()]).toContainEqual(
       expect.objectContaining({
         code: 'CROSS_J_BOOK_FILL_TTL_EXPIRED',

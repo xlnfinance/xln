@@ -1,4 +1,3 @@
-import { recordRuntimeSecurityIncident } from '../../../../runtime/security-incidents';
 import type { BookState } from '../../../../orderbook';
 import { createStructuredLogger } from '../../../../infra/logger';
 import {
@@ -82,8 +81,12 @@ export const assertPendingBookFillAckLive = (
   const routeHash = admission.routeHash || admission.route?.routeHash || '';
   pendingFill.ttlExpiredAt = now;
   admission.updatedAt = now || admission.updatedAt;
-  if (pass.runtimeEnv) {
-    recordRuntimeSecurityIncident(pass.runtimeEnv, {
+  if (!pass.candidateEffects) {
+    throw new Error('CROSS_J_BOOK_FILL_TTL_EFFECT_COLLECTOR_REQUIRED');
+  }
+  pass.candidateEffects.push({
+    kind: 'securityIncidentRecord',
+    identity: {
       domain: 'cross-j',
       code: 'CROSS_J_BOOK_FILL_TTL_EXPIRED',
       source: 'local-consensus',
@@ -94,8 +97,8 @@ export const assertPendingBookFillAckLive = (
       accountId,
       offerId,
       routeHash,
-    });
-  }
+    },
+  });
   orderbookCrossLog.warn('pending_fill_ack_ttl_expired_preserved', {
     entityId: pass.hubState.entityId,
     accountId,

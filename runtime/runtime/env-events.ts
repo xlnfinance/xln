@@ -24,6 +24,10 @@ import type {
 import { encodeCanonicalEntityConsensusValue } from '../entity/consensus/state-root';
 import { storageOverlayRecordKey } from '../protocol/overlay';
 import { invalidateEntityAccountCommitment } from '../entity/consensus/state-root';
+import {
+  recordRuntimeSecurityIncident,
+  resolveRuntimeSecurityIncident,
+} from './security-incidents';
 
 const getLogState = (env: RuntimeState) => {
   if (!env.runtimeState) env.runtimeState = {};
@@ -376,6 +380,10 @@ export const publishEntityCandidateEffects = (
       recordAccountFrameHistory(env, effect);
     } else if (effect.kind === 'runtimeEvent') {
       env.emit(effect.eventName, effect.data);
+    } else if (effect.kind === 'securityIncidentRecord') {
+      recordRuntimeSecurityIncident(env, effect.identity);
+    } else if (effect.kind === 'securityIncidentResolve') {
+      resolveRuntimeSecurityIncident(env, effect.identity);
     } else {
       queuePendingAuditEvent(env, effect.payload);
     }

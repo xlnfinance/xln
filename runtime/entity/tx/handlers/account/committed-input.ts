@@ -174,7 +174,8 @@ const applyCommittedFrameTransactions = async (
         effects.outputs,
         frame.timestamp,
         effects.swapOffersCreated,
-        options?.storageChanges,
+        options?.storageChanges ?? [],
+        effects.candidateEffects,
       );
       if (!crossJurisdictionHandled) {
         await applyCommittedHtlcLockFollowup(

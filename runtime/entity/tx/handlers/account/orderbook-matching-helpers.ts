@@ -34,14 +34,14 @@ import {
   getCrossJurisdictionRouteRemainingAmounts,
   type CrossMarketOffer,
 } from '../../../../extensions/cross-j/orderbook';
-import type { EntityState, RuntimeState } from '../../../../types';
+import type { EntityCandidateEffect, EntityState } from '../../../../types';
 import { normalizeSwapOfferForOrderbook } from '../../../../orderbook/swap-execution';
 import { resolveStoredOfferEntityRefs } from './orderbook-offers';
 import type { SwapResolveEnqueueData } from './orderbook-queue';
 
 export type OrderbookProcessOptions = {
   debugRebuildProjectionOnly?: boolean;
-  runtimeEnv?: RuntimeState;
+  candidateEffects?: EntityCandidateEffect[];
 };
 
 type NamespacedOrderRef = {

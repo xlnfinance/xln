@@ -29,7 +29,7 @@ import { encryptedHtlcLayer } from '../../protocol/htlc/onion-advance';
 import { mergeStorageOverlayRecords } from '../../protocol/overlay';
 import { compareStableText, safeStringify } from '../../protocol/serialization';
 import { getNextSettlementNonce } from '../../protocol/settlement/operations';
-import { assertScheduledWakeFrameOrder } from '../../runtime/scheduled-wake';
+import { assertScheduledWakeFrameOrder } from '../scheduled-wake-validation';
 import {
   addMessages,
   clearEntityFrameEvents,
@@ -678,6 +678,7 @@ type ApplyOrderbookMatchingContext = {
   allSwapOffersCreated: SwapOfferEvent[];
   allOutputs: EntityInput[];
   proposableAccounts: Set<string>;
+  candidateEffects: EntityCandidateEffect[];
   storageChanges: RuntimeOverlayRecord[];
 };
 
@@ -850,7 +851,9 @@ async function applyOrderbookMatching(
   });
 
   const offersToMatch = collectOffersForMatching(env, currentEntityState, allSwapOffersCreated);
-  const matchResult = processOrderbookSwaps(currentEntityState, offersToMatch, { runtimeEnv: env });
+  const matchResult = processOrderbookSwaps(currentEntityState, offersToMatch, {
+    candidateEffects: context.candidateEffects,
+  });
   stats.orderbookMatched = true;
   stats.orderbookMempoolOps = matchResult.accountTxs.length;
   stats.orderbookBookUpdates = matchResult.bookUpdates.length;
@@ -1052,6 +1055,7 @@ const prepareEntityFrameWorkingSet = async (
       currentEntityState,
       context.proposableAccounts,
       context.storageChanges,
+      context.candidateEffects,
     );
     await drainCommittedCrossJurisdictionCancelAcks(
       context.env,
@@ -1145,6 +1149,7 @@ const applyPostEntityTxPhases = async (
     allSwapOffersCreated: context.allSwapOffersCreated,
     allOutputs: context.allOutputs,
     proposableAccounts: context.proposableAccounts,
+    candidateEffects: context.candidateEffects,
     storageChanges: context.storageChanges,
   });
   markFrameProfile('orderbook');
@@ -1153,6 +1158,7 @@ const applyPostEntityTxPhases = async (
     currentEntityState,
     context.proposableAccounts,
     context.storageChanges,
+    context.candidateEffects,
   );
   await drainCommittedCrossJurisdictionCancelAcks(
     context.env,

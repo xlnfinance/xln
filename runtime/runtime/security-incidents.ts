@@ -1,12 +1,11 @@
-import type { RuntimeState, RuntimeSecurityIncident } from '../types';
+import type {
+  RuntimeState,
+  RuntimeSecurityIncident,
+  RuntimeSecurityIncidentIdentity,
+} from '../types';
 
 export const MAX_RUNTIME_SECURITY_INCIDENTS = 256;
 const OVERFLOW_INCIDENT_ID = 'cross-j:incident-capacity';
-
-type RuntimeSecurityIncidentIdentity = Pick<
-  RuntimeSecurityIncident,
-  'domain' | 'code' | 'source' | 'severity' | 'summary' | 'entityId'
-> & Pick<RuntimeSecurityIncident, 'accountId' | 'offerId' | 'routeHash'>;
 
 const canonicalPart = (value: string | undefined): string =>
   encodeURIComponent(String(value ?? '').trim().toLowerCase());

@@ -179,6 +179,7 @@ export const applyEntityTxReturnedEffects = async (
     state,
     context.proposableAccounts,
     context.storageChanges,
+    context.candidateEffects,
   );
   await drainCommittedCrossJurisdictionCancelAcks(
     context.env,

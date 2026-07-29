@@ -97,7 +97,7 @@ export function processOrderbookSwaps(
   };
 
   processCrossJurisdictionOrderbookOffers({
-    ...(options.runtimeEnv ? { runtimeEnv: options.runtimeEnv } : {}),
+    ...(options.candidateEffects ? { candidateEffects: options.candidateEffects } : {}),
     hubState,
     ext,
     crossJurisdictionSwapOffers,

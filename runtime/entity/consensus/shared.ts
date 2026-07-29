@@ -44,7 +44,6 @@ import {
 import { cloneIsolatedProposedEntityFrame } from '../../protocol/runtime-input-clone';
 import { compareStableText, safeStringify } from '../../protocol/serialization';
 import { nodeProcess } from '../../infra/runtime-process';
-import { recordRuntimeSecurityIncident, resolveRuntimeSecurityIncident } from '../../runtime/security-incidents';
 import type {
   AccountTx,
   AccountState,
@@ -1149,11 +1148,39 @@ const admitGeneratedAccountTx = async (
   return result.admittedAccountTxCount === 1;
 };
 
+type PendingCrossJurisdictionFillAck =
+  NonNullable<EntityState['pendingCrossJurisdictionFillAcks']> extends Map<string, infer Value>
+    ? Value
+    : never;
+
+const queueCrossJFillAckIncidentEffect = (
+  candidateEffects: EntityCandidateEffect[],
+  kind: 'securityIncidentRecord' | 'securityIncidentResolve',
+  state: EntityState,
+  pendingAck: PendingCrossJurisdictionFillAck,
+): void => {
+  candidateEffects.push({
+    kind,
+    identity: {
+      domain: 'cross-j',
+      code: 'CROSS_J_FILL_ACK_TTL_EXPIRED',
+      source: 'local-consensus',
+      severity: 'critical',
+      summary: 'A committed sibling fill acknowledgement has no matching local source offer',
+      entityId: state.entityId,
+      accountId: pendingAck.accountId,
+      offerId: pendingAck.tx.data.offerId,
+      routeHash: pendingAck.tx.data.routeHash || '',
+    },
+  });
+};
+
 export const drainPendingCrossJurisdictionFillAcks = async (
   env: RuntimeState,
   currentEntityState: EntityState,
   proposableAccounts: Set<string>,
   storageChanges: RuntimeOverlayRecord[],
+  candidateEffects: EntityCandidateEffect[],
 ): Promise<number> => {
   const pending = currentEntityState.pendingCrossJurisdictionFillAcks;
   if (!pending || pending.size === 0) return 0;
@@ -1201,17 +1228,12 @@ export const drainPendingCrossJurisdictionFillAcks = async (
         },
       };
       pendingAck.ttlExpiredAt = now;
-      recordRuntimeSecurityIncident(env, {
-        domain: 'cross-j',
-        code: 'CROSS_J_FILL_ACK_TTL_EXPIRED',
-        source: 'local-consensus',
-        severity: 'critical',
-        summary: 'A committed sibling fill acknowledgement has no matching local source offer',
-        entityId: currentEntityState.entityId,
-        accountId: pendingAck.accountId,
-        offerId: pendingAck.tx.data.offerId,
-        routeHash: pendingAck.tx.data.routeHash || '',
-      });
+      queueCrossJFillAckIncidentEffect(
+        candidateEffects,
+        'securityIncidentRecord',
+        currentEntityState,
+        pendingAck,
+      );
       entityLog.warn('crossj.fill_ack_ttl_expired_preserved', payload);
     }
     const account = currentEntityState.accounts.get(pendingAck.accountId);
@@ -1225,17 +1247,12 @@ export const drainPendingCrossJurisdictionFillAcks = async (
       });
     }
     if (pendingAck.ttlExpiredAt !== undefined) {
-      resolveRuntimeSecurityIncident(env, {
-        domain: 'cross-j',
-        code: 'CROSS_J_FILL_ACK_TTL_EXPIRED',
-        source: 'local-consensus',
-        severity: 'critical',
-        summary: 'A committed sibling fill acknowledgement has no matching local source offer',
-        entityId: currentEntityState.entityId,
-        accountId: pendingAck.accountId,
-        offerId: pendingAck.tx.data.offerId,
-        routeHash: pendingAck.tx.data.routeHash || '',
-      });
+      queueCrossJFillAckIncidentEffect(
+        candidateEffects,
+        'securityIncidentResolve',
+        currentEntityState,
+        pendingAck,
+      );
     }
     pending.delete(key);
     drained++;

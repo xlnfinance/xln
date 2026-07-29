@@ -257,6 +257,11 @@ export type RuntimeSecurityIncident = {
   occurrences: number;
 };
 
+export type RuntimeSecurityIncidentIdentity = Pick<
+  RuntimeSecurityIncident,
+  'domain' | 'code' | 'source' | 'severity' | 'summary' | 'entityId'
+> & Pick<RuntimeSecurityIncident, 'accountId' | 'offerId' | 'routeHash'>;
+
 export interface JurisdictionConfig {
   address: string;
   name: string;
@@ -1080,6 +1085,14 @@ export type EntityCandidateEffect =
       kind: 'runtimeEvent';
       eventName: string;
       data: Record<string, unknown>;
+    }
+  | {
+      kind: 'securityIncidentRecord';
+      identity: RuntimeSecurityIncidentIdentity;
+    }
+  | {
+      kind: 'securityIncidentResolve';
+      identity: RuntimeSecurityIncidentIdentity;
     }
   | {
       kind: 'debug';

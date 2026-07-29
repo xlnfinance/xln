@@ -22,8 +22,14 @@ import {
   markCrossJurisdictionBookRemovalCommitted,
   mergeCrossJurisdictionBookAdmission,
 } from '../../../extensions/cross-j/orderbook';
-import { resolveRuntimeSecurityIncident } from '../../../runtime/security-incidents';
-import type { CrossJurisdictionSwapRoute, EntityState, EntityTx, RuntimeState, RuntimeOverlayRecord } from '../../../types';
+import type {
+  CrossJurisdictionSwapRoute,
+  EntityCandidateEffect,
+  EntityState,
+  EntityTx,
+  RuntimeState,
+  RuntimeOverlayRecord,
+} from '../../../types';
 import { getSwapLotScale } from '../../../orderbook';
 import {
   materializeCrossJurisdictionBookRemainder,
@@ -128,23 +134,29 @@ type CrossJBookAdmission =
     : never;
 
 const resolveExpiredBookFillIncident = (
-  env: RuntimeState,
+  candidateEffects: EntityCandidateEffect[] | undefined,
   state: EntityState,
   admission: CrossJBookAdmission,
   data: CrossJurisdictionBookProgressTx['data'],
   routeHash: string,
 ): void => {
   if (admission.pendingFill?.ttlExpiredAt === undefined) return;
-  resolveRuntimeSecurityIncident(env, {
-    domain: 'cross-j',
-    code: 'CROSS_J_BOOK_FILL_TTL_EXPIRED',
-    source: 'local-consensus',
-    severity: 'critical',
-    summary: 'Book-owner fill is still waiting for its exact terminal sibling acknowledgement',
-    entityId: state.entityId,
-    accountId: data.sourceEntityId,
-    offerId: data.orderId,
-    routeHash,
+  if (!candidateEffects) {
+    throw new Error('CROSS_J_BOOK_FILL_RESOLVE_EFFECT_COLLECTOR_REQUIRED');
+  }
+  candidateEffects.push({
+    kind: 'securityIncidentResolve',
+    identity: {
+      domain: 'cross-j',
+      code: 'CROSS_J_BOOK_FILL_TTL_EXPIRED',
+      source: 'local-consensus',
+      severity: 'critical',
+      summary: 'Book-owner fill is still waiting for its exact terminal sibling acknowledgement',
+      entityId: state.entityId,
+      accountId: data.sourceEntityId,
+      offerId: data.orderId,
+      routeHash,
+    },
   });
 };
 
@@ -295,6 +307,7 @@ export const applyCrossJurisdictionBookProgressToState = (
   newState: EntityState,
   data: CrossJurisdictionBookProgressTx['data'],
   storageChanges: RuntimeOverlayRecord[] = [],
+  candidateEffects?: EntityCandidateEffect[],
 ): boolean => {
   assertCrossJurisdictionPriceImprovementMode(data.priceImprovementMode, data.orderId);
   const now = deterministicEntityTimestamp(newState, env);
@@ -314,7 +327,7 @@ export const applyCrossJurisdictionBookProgressToState = (
     throw new Error(`CROSS_J_BOOK_PROGRESS_WRONG_OWNER: order=${route.orderId} owner=${bookOwner} current=${newState.entityId}`);
   }
   if (isSameCommittedBookProgress(route, data)) {
-    resolveExpiredBookFillIncident(env, newState, admission, data, route.routeHash || '');
+    resolveExpiredBookFillIncident(candidateEffects, newState, admission, data, route.routeHash || '');
     delete admission.pendingFill;
     admission.updatedAt = now;
     if (
@@ -340,7 +353,7 @@ export const applyCrossJurisdictionBookProgressToState = (
   const nextRoute = applyNewBookProgress(route, data, now);
 
   admission.route = nextRoute;
-  resolveExpiredBookFillIncident(env, newState, admission, data, route.routeHash || '');
+  resolveExpiredBookFillIncident(candidateEffects, newState, admission, data, route.routeHash || '');
   delete admission.pendingFill;
   admission.updatedAt = now;
   const mirrorRoute = newState.crossJurisdictionSwaps?.get(route.orderId);
@@ -380,6 +393,7 @@ export const handleApplyCrossJurisdictionBookProgressEntityTx = (
     newState,
     entityTx.data,
     options?.storageChanges,
+    options?.candidateEffects,
   );
   if (changed) {
     addMessage(newState, `🌉 Cross-j book progress ${entityTx.data.orderId}${entityTx.data.reason ? `: ${entityTx.data.reason}` : ''}`);

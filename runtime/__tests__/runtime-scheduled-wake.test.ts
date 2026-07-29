@@ -26,10 +26,12 @@ import {
   createDueScheduledWakeInputs,
   entityNeedsPeriodicWake,
   getNextScheduledWakeTimestamp,
-  MAX_SCHEDULED_WAKE_DIAGNOSTIC_JOBS,
   refreshScheduledWakeIndex,
-  type ScheduledWakeTx,
 } from '../runtime/scheduled-wake';
+import {
+  MAX_SCHEDULED_WAKE_DIAGNOSTIC_JOBS,
+  type ScheduledWakeTx,
+} from '../entity/scheduled-wake-validation';
 import { safeStringify } from '../protocol/serialization';
 import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
 import { computeCanonicalEntityHash } from '../storage/canonical-hash';

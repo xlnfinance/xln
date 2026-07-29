@@ -30,7 +30,6 @@ const ROOT_FILE_DEBT = new Set([
 const REVERSE_DEPENDENCY_DEBT: Readonly<Record<string, number>> = {
   'entity->jadapter': 5,
   'entity->networking': 6,
-  'entity->runtime': 5,
   'protocol->account': 5,
   'protocol->entity': 2,
 };

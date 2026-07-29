@@ -1,4 +1,13 @@
-import type { AccountTx, CrossJurisdictionSwapRoute, EntityInput, EntityState, EntityTx, RuntimeState, RuntimeOverlayRecord } from '../../../types';
+import type {
+  AccountTx,
+  CrossJurisdictionSwapRoute,
+  EntityCandidateEffect,
+  EntityInput,
+  EntityState,
+  EntityTx,
+  RuntimeState,
+  RuntimeOverlayRecord,
+} from '../../../types';
 import {
   buildCrossJurisdictionCloseProof,
   cloneCrossJurisdictionRoute,
@@ -312,6 +321,7 @@ const applyOrRouteCrossJurisdictionBookProgress = (
   accountTx: Extract<AccountTx, { type: 'cross_swap_fill_ack' }>,
   outputs: EntityInput[],
   storageChanges: RuntimeOverlayRecord[],
+  candidateEffects: EntityCandidateEffect[],
 ): void => {
   const tx = buildCrossJurisdictionBookProgressTx(route, accountTx, 'fill_ack_committed');
   const owner = resolveLocalBookOwner(newState, route);
@@ -319,7 +329,13 @@ const applyOrRouteCrossJurisdictionBookProgress = (
     // Source account consensus has committed the ACK in this same entity frame.
     // Apply the book-owner projection immediately; waiting for a self-output
     // would leave one matcher tick with updated account state and stale book qty.
-    applyCrossJurisdictionBookProgressToState(env, newState, tx.data, storageChanges);
+    applyCrossJurisdictionBookProgressToState(
+      env,
+      newState,
+      tx.data,
+      storageChanges,
+      candidateEffects,
+    );
     return;
   }
   outputs.push(buildCrossJurisdictionEntityOutput(
@@ -766,12 +782,21 @@ const closeOrProgressCrossJurisdictionBook = (
   ratio: number,
   outputs: EntityInput[],
   storageChanges: RuntimeOverlayRecord[],
+  candidateEffects: EntityCandidateEffect[],
 ): void => {
   if (normalizeEntityRef(state.entityId) !== normalizeEntityRef(route.source.counterpartyEntityId)) {
     return;
   }
   if (ratio < CROSS_J_MAX_FILL_RATIO && !accountTx.data.cancelRemainder) {
-    applyOrRouteCrossJurisdictionBookProgress(env, state, route, accountTx, outputs, storageChanges);
+    applyOrRouteCrossJurisdictionBookProgress(
+      env,
+      state,
+      route,
+      accountTx,
+      outputs,
+      storageChanges,
+      candidateEffects,
+    );
     return;
   }
   const admission = state.crossJurisdictionBookAdmissions?.get(
@@ -812,6 +837,7 @@ const applyFillAckFollowup = (
   accountTx: Extract<AccountTx, { type: 'cross_swap_fill_ack' }>,
   outputs: EntityInput[],
   storageChanges: RuntimeOverlayRecord[],
+  candidateEffects: EntityCandidateEffect[],
 ): boolean => {
   assertCrossJurisdictionPriceImprovementMode(
     accountTx.data.priceImprovementMode,
@@ -855,6 +881,7 @@ const applyFillAckFollowup = (
     ratio,
     outputs,
     storageChanges,
+    candidateEffects,
   );
   return true;
 };
@@ -867,7 +894,8 @@ export function applyCommittedCrossJurisdictionAccountTxFollowup(
   outputs: EntityInput[],
   committedAt: number,
   swapOffersCreated: SwapOfferEvent[],
-  storageChanges: RuntimeOverlayRecord[] = [],
+  storageChanges: RuntimeOverlayRecord[],
+  candidateEffects: EntityCandidateEffect[],
 ): boolean {
   if (accountTx.type === 'pull_lock') {
     return queueBookAdmissionOnCommittedPull(
@@ -888,7 +916,14 @@ export function applyCommittedCrossJurisdictionAccountTxFollowup(
     return applyCrossPullCloseFollowup(env, newState, counterpartyId, accountTx, outputs, storageChanges);
   }
   if (accountTx.type === 'cross_swap_fill_ack') {
-    return applyFillAckFollowup(env, newState, accountTx, outputs, storageChanges);
+    return applyFillAckFollowup(
+      env,
+      newState,
+      accountTx,
+      outputs,
+      storageChanges,
+      candidateEffects,
+    );
   }
   return false;
 }
