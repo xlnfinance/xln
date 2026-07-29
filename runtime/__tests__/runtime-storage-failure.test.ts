@@ -14,6 +14,9 @@ import { handleRuntimeFrameStorageFailure } from '../runtime/frame/storage-failu
 import { createRuntimeFrameTransaction } from '../runtime/frame/transaction';
 import { dbRootPath } from '../runtime/platform';
 import { ensureRuntimeState } from '../runtime/runtime-state';
+import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
+import { classifyRuntimeFrameCommitProof } from '../storage/commit';
+import { buildDurableRuntimeMachineSnapshot } from '../storage/wal/snapshot';
 
 const fixture = join(import.meta.dir, 'fixtures/runtime-storage-timeout-child.ts');
 
@@ -42,6 +45,38 @@ const prepareFrame = (seed: string) => {
 };
 
 describe('Runtime WAL storage failure boundary', () => {
+  test('requires complete Runtime proof before classifying a timed-out write as committed', () => {
+    const env = createEmptyEnv('wal-commit-proof');
+    const runtimeInput = { runtimeTxs: [], entityInputs: [] };
+    const runtimeMachine = buildDurableRuntimeMachineSnapshot(env);
+    const runtimeStateHash = computeCanonicalStateHashFromEnv(env);
+
+    expect(classifyRuntimeFrameCommitProof(
+      { runtimeInput },
+      runtimeInput,
+      runtimeMachine,
+      runtimeStateHash,
+    )).toBe('unknown');
+    expect(classifyRuntimeFrameCommitProof(
+      { runtimeInput, runtimeMachine },
+      runtimeInput,
+      runtimeMachine,
+      runtimeStateHash,
+    )).toBe('unknown');
+    expect(classifyRuntimeFrameCommitProof(
+      { runtimeInput, runtimeMachine, runtimeStateHash },
+      runtimeInput,
+      runtimeMachine,
+      runtimeStateHash,
+    )).toBe('committed');
+    expect(classifyRuntimeFrameCommitProof(
+      { runtimeInput, runtimeMachine, runtimeStateHash: `0x${'00'.repeat(32)}` },
+      runtimeInput,
+      runtimeMachine,
+      runtimeStateHash,
+    )).toBe('conflict');
+  });
+
   test('leaves a not-committed candidate for the normal rollback path', async () => {
     const { live, transaction, frame, stopped } = prepareFrame('wal-not-committed');
 

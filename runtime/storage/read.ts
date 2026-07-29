@@ -53,6 +53,7 @@ import {
   radixMerklePathSlots,
 } from './merkle';
 import { hydrateEntityStateFromStorage } from './projections';
+import { requireStorageDbOpen } from './availability';
 import {
   EMPTY_CERTIFIED_BOARD_ROOT,
   getCertifiedBoardNodeStore,
@@ -1118,8 +1119,10 @@ export const loadEntityViewPageFromStorage = async (options: {
   bookQuery?: StoragePageQuery;
   liveStateReadable?: boolean;
 }): Promise<StorageEntityViewPage | null> => {
-  const opened = await options.tryOpenDb(options.env);
-  if (!opened) return null;
+  await requireStorageDbOpen(
+    () => options.tryOpenDb(options.env),
+    'entity-view',
+  );
   const db = options.getRuntimeDb(options.env);
   const head = await readStorageHead(db);
   if (!head) return null;
@@ -1162,8 +1165,10 @@ export const loadEntityAccountDocFromStorage = async (options: {
   height?: number;
   liveStateReadable?: boolean;
 }): Promise<StorageAccountDoc | null> => {
-  const opened = await options.tryOpenDb(options.env);
-  if (!opened) return null;
+  await requireStorageDbOpen(
+    () => options.tryOpenDb(options.env),
+    'account-document',
+  );
   const db = options.getRuntimeDb(options.env);
   const head = await readStorageHead(db);
   if (!head) return null;
@@ -1194,8 +1199,10 @@ export const loadEntityStateFromStorage = async (options: {
   height?: number;
   liveStateReadable?: boolean;
 }): Promise<EntityState | null> => {
-  const opened = await options.tryOpenDb(options.env);
-  if (!opened) return null;
+  await requireStorageDbOpen(
+    () => options.tryOpenDb(options.env),
+    'entity-state',
+  );
   const db = options.getRuntimeDb(options.env);
   const head = await readStorageHead(db);
   if (!head) return null;
@@ -1306,7 +1313,10 @@ export const loadEntityStatesAtHeightFromStorage = async (options: {
   getRuntimeDb: (env: RuntimeState) => RuntimeDbLike;
   height?: number;
 }): Promise<Map<string, EntityState>> => {
-  if (!(await options.tryOpenDb(options.env))) return new Map();
+  await requireStorageDbOpen(
+    () => options.tryOpenDb(options.env),
+    'entity-states',
+  );
   const db = options.getRuntimeDb(options.env);
   const head = await readStorageHead(db);
   if (!head) return new Map();

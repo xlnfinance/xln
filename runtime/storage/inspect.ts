@@ -23,14 +23,17 @@ import { measurePrefixBytes } from './level';
 import { listSnapshotHeights } from './lifecycle';
 import { readStorageHead } from './read';
 import type { RuntimeDbLike, StorageDebugStats } from './types';
+import { requireStorageDbOpen } from './availability';
 
 export const inspectStorage = async (options: {
   env: RuntimeState;
   tryOpenDb: (env: RuntimeState) => Promise<boolean>;
   getRuntimeDb: (env: RuntimeState) => RuntimeDbLike;
 }): Promise<StorageDebugStats | null> => {
-  const opened = await options.tryOpenDb(options.env);
-  if (!opened) return null;
+  await requireStorageDbOpen(
+    () => options.tryOpenDb(options.env),
+    'storage-inspection',
+  );
   const db = options.getRuntimeDb(options.env);
   // Reject incompatible durable bytes before scanning any storage namespace.
   const head = await readStorageHead(db);

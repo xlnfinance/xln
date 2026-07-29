@@ -20,6 +20,7 @@ import {
   readStorageFrameRecord,
   readStorageHead,
   saveRuntimeFrameToStorage,
+  type StorageFrameRecord,
 } from '.';
 import { withStorageWriterLock } from './runtime-dbs';
 import type { RuntimeFrameCommitStatus } from './commit-status';
@@ -54,6 +55,25 @@ export class RuntimeFrameStorageError extends Error {
   }
 }
 
+type RuntimeFrameCommitProof = Pick<
+  StorageFrameRecord,
+  'runtimeInput' | 'runtimeMachine' | 'runtimeStateHash'
+>;
+
+export const classifyRuntimeFrameCommitProof = (
+  frame: RuntimeFrameCommitProof,
+  expectedInput: RuntimeInput,
+  expectedRuntimeMachine: ReturnType<typeof buildDurableRuntimeMachineSnapshot>,
+  expectedRuntimeStateHash: string,
+): RuntimeFrameCommitStatus => {
+  if (!frame.runtimeMachine || !frame.runtimeStateHash) return 'unknown';
+  const inputMatches = safeStringify(frame.runtimeInput) === safeStringify(expectedInput);
+  const runtimeMachineMatches =
+    safeStringify(frame.runtimeMachine) === safeStringify(expectedRuntimeMachine);
+  const stateMatches = frame.runtimeStateHash === expectedRuntimeStateHash;
+  return inputMatches && runtimeMachineMatches && stateMatches ? 'committed' : 'conflict';
+};
+
 const resolveAuthoritativeFrameCommitStatus = async (
   deps: RuntimeStorageApiDeps,
   env: RuntimeState,
@@ -64,27 +84,22 @@ const resolveAuthoritativeFrameCommitStatus = async (
   const head = await readStorageHead(walDb);
   const frame = await readStorageFrameRecord(walDb, env.height);
   if (frame) {
+    // A frame body without its committed Runtime snapshot and hash can prove
+    // neither success nor conflict. Treating absent proof fields as wildcards
+    // could install an unproven candidate after a timed-out WAL write.
     const expectedInputValue = expectedInput ?? {
       runtimeTxs: [],
       entityInputs: [],
     };
-    const inputMatches =
-      safeStringify(frame.runtimeInput) === safeStringify(expectedInputValue);
-    const runtimeMachineMatches =
-      !frame.runtimeMachine ||
-      safeStringify(frame.runtimeMachine) ===
-        safeStringify(
-          buildDurableRuntimeMachineSnapshot(env, {
-            pendingNetworkOutputs: env.pendingNetworkOutputs ?? [],
-            excludePersistedHistoryRecords: true,
-          }),
-        );
-    const stateMatches =
-      !frame.runtimeStateHash ||
-      frame.runtimeStateHash === computeCanonicalStateHashFromEnv(env);
-    return inputMatches && runtimeMachineMatches && stateMatches
-      ? 'committed'
-      : 'conflict';
+    return classifyRuntimeFrameCommitProof(
+      frame,
+      expectedInputValue,
+      buildDurableRuntimeMachineSnapshot(env, {
+        pendingNetworkOutputs: env.pendingNetworkOutputs ?? [],
+        excludePersistedHistoryRecords: true,
+      }),
+      computeCanonicalStateHashFromEnv(env),
+    );
   }
   if (!head) return 'unknown';
   if (head.latestHeight >= env.height) return 'conflict';

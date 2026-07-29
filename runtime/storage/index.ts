@@ -948,23 +948,11 @@ const prepareStorageFrameSave = async (options: StorageFrameSaveOptions) => {
   }
   const openStartedAt = options.getPerfMs();
   if (!(await options.tryOpenDb(options.env))) {
-    return {
-      skipped: {
-        materialized: false,
-        materializedOverlayRecords: 0,
-        historyViewsMaterialized: false,
-      } satisfies StorageFrameSaveResult,
-    };
+    throw new Error('STORAGE_CURRENT_DB_UNAVAILABLE');
   }
   const db = options.getRuntimeDb(options.env);
   if (!(await options.tryOpenRuntimeWalDb(options.env))) {
-    return {
-      skipped: {
-        materialized: false,
-        materializedOverlayRecords: 0,
-        historyViewsMaterialized: false,
-      } satisfies StorageFrameSaveResult,
-    };
+    throw new Error('STORAGE_RUNTIME_WAL_UNAVAILABLE');
   }
   const walDb = options.getRuntimeWalDb(options.env);
   const recovered = await recoverStorageDbFromHistory({

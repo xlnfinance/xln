@@ -15,6 +15,7 @@ import { assertCertifiedJHistoryIntegrity } from '../../jurisdiction/local-histo
 import type { RuntimeAdapterReadQuery } from '../../radapter';
 import type { EntityState, RuntimeState } from '../../types';
 import type { PersistenceQueryDeps } from './deps';
+import { requireStorageDbOpen } from '../availability';
 
 const inspectRuntimeStorage = async (
   deps: PersistenceQueryDeps,
@@ -160,7 +161,10 @@ export const createPersistenceEntityQueries = (deps: PersistenceQueryDeps) => {
     deps.resolvePersistedCheckpointHeights(env);
 
   const readPersistedStorageHead = async (env: RuntimeState): Promise<StorageHead | null> => {
-    if (!(await deps.tryOpenRuntimeWalDb(env))) return null;
+    await requireStorageDbOpen(
+      () => deps.tryOpenRuntimeWalDb(env),
+      'runtime-wal:head',
+    );
     return readStorageHead(deps.getRuntimeWalDb(env));
   };
 

@@ -369,7 +369,10 @@ export const replaceRestoredStorageBase = async (
     { key: KEY_HEAD, value: encodeBuffer(head) },
   ];
   const walBatch = await queueHistoryReplacement(options.walDb, walEntries);
-  await writeBatch(walBatch);
+  // This swap establishes the authoritative restore point. Match the normal
+  // Runtime WAL commit boundary explicitly; process exit after this await must
+  // never acknowledge bytes that only reached an OS cache.
+  await writeBatch(walBatch, { sync: true });
   await options.onPersistenceBoundary?.('after-restore-authoritative-swap');
   await verifyStorageSnapshotIntegrity(options.walDb, head);
 

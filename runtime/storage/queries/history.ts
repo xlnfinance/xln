@@ -26,6 +26,7 @@ import type {
 } from '../../types';
 import type { PersistedFrameJournal } from '../types';
 import type { PersistenceQueryDeps } from './deps';
+import { requireStorageDbOpen } from '../availability';
 
 export const buildRecoveryJournalFromStorageFrame = (
   frame: StorageFrameRecord,
@@ -78,9 +79,10 @@ const readRuntimeActivityJournal = async (
   if (targetHeight <= 0) {
     throw new Error(`STORAGE_ACTIVITY_JOURNAL_HEIGHT_INVALID:${String(height)}`);
   }
-  if (!(await deps.tryOpenHistoryViewDb(env))) {
-    throw new Error(`STORAGE_ACTIVITY_JOURNAL_DB_OPEN_FAILED:height=${targetHeight}`);
-  }
+  await requireStorageDbOpen(
+    () => deps.tryOpenHistoryViewDb(env),
+    `history-view:runtime-activity:${targetHeight}`,
+  );
   try {
     const activity = await readHistoryViewRuntimeActivity(deps.getHistoryViewDb(env), targetHeight);
     if (!activity) return null;
@@ -106,15 +108,23 @@ const readRuntimeActivityJournal = async (
   }
 };
 
-const readAccountFrameHistory = async (
-  deps: PersistenceQueryDeps,
+type HistoryViewReadDeps = Pick<
+  PersistenceQueryDeps,
+  'tryOpenHistoryViewDb' | 'getHistoryViewDb'
+>;
+
+export const readAccountFrameHistory = async (
+  deps: HistoryViewReadDeps,
   env: RuntimeState,
   entityId: string,
   counterpartyId: string,
   limit = 50,
   opts?: { maxRuntimeHeight?: number; maxAccountHeight?: number },
 ): Promise<AccountFrame[]> => {
-  if (!(await deps.tryOpenHistoryViewDb(env))) return [];
+  await requireStorageDbOpen(
+    () => deps.tryOpenHistoryViewDb(env),
+    'history-view:account-frames',
+  );
   const maxRuntimeHeight = Number.isFinite(Number(opts?.maxRuntimeHeight))
     ? Math.max(0, Math.floor(Number(opts?.maxRuntimeHeight)))
     : Number.POSITIVE_INFINITY;
@@ -163,7 +173,10 @@ export const createPersistenceHistoryQueries = (deps: PersistenceQueryDeps) => {
     limit = 50,
     opts?: { maxRuntimeHeight?: number; maxEntityHeight?: number },
   ): Promise<CertifiedEntityFrameLink[]> => {
-    if (!(await deps.tryOpenHistoryViewDb(env))) return [];
+    await requireStorageDbOpen(
+      () => deps.tryOpenHistoryViewDb(env),
+      'history-view:entity-frames',
+    );
     const maxRuntimeHeight = Number.isFinite(Number(opts?.maxRuntimeHeight))
       ? Math.max(0, Math.floor(Number(opts?.maxRuntimeHeight)))
       : Number.POSITIVE_INFINITY;

@@ -20,6 +20,7 @@ import {
 import { storageOverlayRecordKey } from './overlay';
 import { normalizeDbNamespace } from './runtime-dbs';
 import type { RuntimeStorageApiDeps } from './runtime-storage-deps';
+import { requireStorageDbOpen } from './availability';
 
 export type PersistedStorageHandle = {
   role: 'history';
@@ -52,7 +53,10 @@ const createPersistedStorageNavigationApi = (
   const listPersistedStorageHandles = async (
     env: RuntimeState,
   ): Promise<PersistedStorageHandle[]> => {
-    if (!(await deps.tryOpenRuntimeWalDb(env))) return [];
+    await requireStorageDbOpen(
+      () => deps.tryOpenRuntimeWalDb(env),
+      'runtime-wal:list-persisted-handles',
+    );
     const db = deps.getRuntimeWalDb(env);
     const head = await readStorageHead(db);
     if (!head || head.latestHeight <= 0) return [];
@@ -175,9 +179,11 @@ const createPersistedStorageEntityReadApi = (
     sharedState?: EntityState,
   ): Promise<Awaited<ReturnType<typeof listStorageReplicaMetas>>> => {
     const normalizedEntityId = String(entityId || '').toLowerCase();
-    if (!normalizedEntityId || !(await deps.tryOpenRuntimeWalDb(env))) {
-      return [];
-    }
+    if (!normalizedEntityId) return [];
+    await requireStorageDbOpen(
+      () => deps.tryOpenRuntimeWalDb(env),
+      'runtime-wal:replica-metadata',
+    );
     return listStorageReplicaMetas(
       deps.getRuntimeWalDb(env),
       normalizedEntityId,
@@ -191,13 +197,11 @@ const createPersistedStorageEntityReadApi = (
     entityId: string,
   ): Promise<Awaited<ReturnType<typeof listStorageSnapshotReplicaMetas>>> => {
     const normalizedEntityId = String(entityId || '').toLowerCase();
-    if (
-      !normalizedEntityId ||
-      snapshotHeight <= 0 ||
-      !(await deps.tryOpenRuntimeWalDb(env))
-    ) {
-      return [];
-    }
+    if (!normalizedEntityId || snapshotHeight <= 0) return [];
+    await requireStorageDbOpen(
+      () => deps.tryOpenRuntimeWalDb(env),
+      'runtime-wal:snapshot-replica-metadata',
+    );
     return listStorageSnapshotReplicaMetas(
       deps.getRuntimeWalDb(env),
       snapshotHeight,
