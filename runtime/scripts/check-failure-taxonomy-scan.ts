@@ -896,7 +896,7 @@ for (const [path, markers] of [
   ['runtime/__tests__/prod-health-smoke.test.ts', ['getFatalHealthFailures']],
   [
     'runtime/__tests__/entity-factory-logging.test.ts',
-    ['entity factory uses structured logging without direct console output', 'entity.factory'],
+    ['entity creation owners use structured logging without direct console output', 'entity.factory'],
   ],
   [
     'runtime/__tests__/entity-consensus-logging.test.ts',

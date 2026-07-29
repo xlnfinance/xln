@@ -25,14 +25,22 @@ test('createLazyEntity is silent when runtime DEBUG is disabled', () => {
   expect(messages).toEqual([]);
 });
 
-test('entity factory uses structured logging without direct console output', () => {
-  const source = readFileSync(join(process.cwd(), 'runtime/entity/factory.ts'), 'utf8');
+test('entity creation owners use structured logging without direct console output', () => {
+  const factorySource = readFileSync(join(process.cwd(), 'runtime/entity/factory.ts'), 'utf8');
+  const registrationSource = readFileSync(
+    join(process.cwd(), 'runtime/runtime/registration/numbered-registration.ts'),
+    'utf8',
+  );
 
-  expect(source).toContain("const factoryLog = createStructuredLogger('entity.factory');");
-  expect(source).toContain("factoryLog.debug('lazy.create'");
-  expect(source).toContain("factoryLog.debug('numbered.create'");
-  expect(source).toContain("factoryLog.error('numbered.register_failed'");
-  expect(source).not.toContain('console.');
+  expect(factorySource).toContain("const factoryLog = createStructuredLogger('entity.factory');");
+  expect(factorySource).toContain("factoryLog.debug('lazy.create'");
+  expect(factorySource).not.toContain('console.');
+  expect(registrationSource).toContain(
+    "const registrationLog = createStructuredLogger('runtime.numbered-registration');",
+  );
+  expect(registrationSource).toContain("registrationLog.debug('create'");
+  expect(registrationSource).toContain("registrationLog.error('register_failed'");
+  expect(registrationSource).not.toContain('console.');
 });
 
 test('lazy entity identity preserves governance and leader order', () => {
