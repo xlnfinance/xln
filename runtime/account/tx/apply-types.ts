@@ -28,10 +28,18 @@ export interface SwapCancelRequestEvent {
   accountId: string;
 }
 
+export type AccountTxRejection = {
+  kind: 'settlement_seal_nonce_mismatch';
+  suppliedNonce: number;
+  requiredNonce: number;
+  basis: 'workspace' | 'account';
+};
+
 export type ApplyAccountTxResult = {
   success: boolean;
   events: string[];
   error?: string;
+  rejection?: AccountTxRejection;
   secret?: string;
   hashlock?: string;
   timedOutHashlock?: string;

@@ -1,5 +1,6 @@
 import type { AccountFrame, AccountPeerInput, AccountTx, EntityCandidateEffect, HankoString } from '../../types';
 import type { AccountJClaimNodeChanges } from '../../types/account-j-claims';
+import type { AccountTxRejection } from '../tx/apply-types';
 
 export type AccountConsensusHashToSign = {
   hash: string;
@@ -25,6 +26,7 @@ export type AccountConsensusFrameResult = {
   success: boolean;
   events: string[];
   error?: string;
+  txRejection?: AccountTxRejection;
   revealedSecrets?: Array<{ secret: string; hashlock: string }>;
   swapOffersCreated?: AccountSwapOfferCreated[];
   swapCancelRequests?: Array<{ offerId: string; accountId: string }>;

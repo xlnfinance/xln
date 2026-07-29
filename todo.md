@@ -129,6 +129,18 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   owner subdirectories only when the move removes navigation and does not add
   barrels or compatibility re-exports. Delete closed audit claims from this
   file as their owning regression turns green.
+  The follow-up GLM audit adds one verified type-safety item: replace
+  `entityTxDispatchers: Record<string, ...>` with an exact mapping over
+  `EntityTx['type']` (or an exhaustive owner-split switch) so every new Entity
+  transaction fails compilation until it has one dispatcher. Do not trade the
+  current small handler modules for a new giant switch. Its claim that every
+  `Number(account.jNonce)` is another chain-boundary vulnerability is
+  overstated: those fields are already typed Account safe integers; remove
+  redundant coercions after persisted-state validation is proven, but keep
+  FIN-03 scoped to unknown/string `uint256` ingress. Its ownership-gate idea is
+  accepted below, while its claim that calling an Account-owned finality
+  reducer from Entity is itself a money-boundary violation is rejected:
+  authenticated parent routing into the child reducer is the intended cascade.
 - [ ] Make the audit surface mechanically legible after the function split.
   Keep production runtime at zero explicit `any` and zero TypeScript
   suppressions; drive the exact `as unknown as` debt to zero through typed
@@ -346,10 +358,12 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   Account J-event settlement/dispute mutations out of `entity/tx/` and into
   Account-owned handlers; Entity may authenticate and route, but only Account
   code may change delta, collateral, holds or credit. This does not make
-  dispute finality bilateral: the Account-owned J-finality handler is applied
-  immediately and unilaterally from authenticated chain history, without an
-  Account mempool, proposal, or peer ACK. The returning peer independently
-  consumes the same finalized J-event and converges byte-identically. Preserve
+  dispute finality bilateral: Entity constructs one explicit canonical
+  external-finality `AccountInput` and routes it through `applyAccountInput`;
+  the Account-owned J-finality branch applies immediately and unilaterally
+  from authenticated chain history, without an Account mempool, proposal, or
+  peer ACK. The returning peer independently consumes the same finalized
+  J-event and converges byte-identically. Preserve
   proof gating, cache invalidation and state roots with settlement/dispute
   tests, and add an ownership gate forbidding Entity/Runtime writes to Account
   money fields outside calls into Account-owned handlers.
@@ -521,10 +535,14 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 
 ## 3. Transport and secret persistence — P0/P1, owner-approved
 
-- [ ] Make off-chain faucet admission durable and idempotent. Require a client
-  idempotency key bound to the exact payload, persist the admission result
-  before returning `200 queued`, and prove lost-response retry plus process
-  crash/restart cannot enqueue a second direct payment.
+- [ ] Make off-chain faucet admission durable without adding production-style
+  friction to the intentionally open testnet faucet. The server assigns a
+  request id, waits until the Runtime command has a durable WAL receipt before
+  returning success, and exposes that receipt for polling/recovery. Do not
+  require authentication, rate limits, or a client idempotency key: repeated
+  calls are intentionally new faucet grants. Prove a crash before durability
+  never returns success and a crash after durability never loses the accepted
+  grant.
 - [ ] Derive AEAD keys from X25519 with domain-separated HKDF-SHA256 and bind
   protocol/from/to/type/source-frame/message-id as AAD. Replace Base64 with one
   binary wire atomically, reject low-order/shared-zero keys, keep strict

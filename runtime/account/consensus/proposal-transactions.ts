@@ -14,6 +14,7 @@ import { prepareAccountJClaimTx } from '../j-claim-transition';
 import type { AccountJClaimNodeStore } from '../../types/account-j-claims';
 import { getNextSettlementNonce } from '../../protocol/settlement/operations';
 import type { AccountSwapOfferCreated } from './types';
+import type { AccountTxRejection } from '../tx/apply-types';
 
 const accountLog = createStructuredLogger('account');
 
@@ -86,19 +87,25 @@ const isCrossJurisdictionPullResolveTx = (
 const isRefreshableStaleSettlementSeal = (
   account: AccountState,
   tx: AccountTx,
-  error: string | undefined,
+  rejection: AccountTxRejection | undefined,
 ): boolean => {
   if (tx.type !== 'settle_transition' || tx.data.kind !== 'seal') return false;
-  if (!error?.startsWith(`SETTLEMENT_SEAL_NONCE_MISMATCH:${tx.data.settlementNonce}:`)) {
+  if (
+    rejection?.kind !== 'settlement_seal_nonce_mismatch' ||
+    rejection.basis !== 'account'
+  ) {
     return false;
   }
   const workspace = account.settlementWorkspace;
+  const requiredNonce = getNextSettlementNonce(account);
   return Boolean(
     workspace &&
     workspace.nonceAtSign === undefined &&
     tx.data.revision === workspace.revision &&
     tx.data.workspaceHash.toLowerCase() === workspace.workspaceHash.toLowerCase() &&
-    tx.data.settlementNonce !== getNextSettlementNonce(account),
+    rejection.suppliedNonce === tx.data.settlementNonce &&
+    rejection.requiredNonce === requiredNonce &&
+    rejection.suppliedNonce !== requiredNonce,
   );
 };
 
@@ -202,7 +209,7 @@ const classifyFailedTransaction = (
   const { tx, result } = applied;
   if (
     result.error?.startsWith('SETTLEMENT_SIGNED_ACCOUNT_FROZEN:') ||
-    isRefreshableStaleSettlementSeal(machine, tx, result.error)
+    isRefreshableStaleSettlementSeal(machine, tx, result.rejection)
   ) {
     effects.events.push(...result.events);
     accountLog.info('tx.deferred', { type: tx.type, reason: result.error });

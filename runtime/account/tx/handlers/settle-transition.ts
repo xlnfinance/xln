@@ -26,6 +26,10 @@ import {
   storeDisputeArgumentSnapshot,
 } from '../../../protocol/dispute/arguments';
 import { projectAccountAfterSettlement } from '../../settlement-projection';
+import type {
+  AccountTxRejection,
+  ApplyAccountTxResult,
+} from '../apply-types';
 
 type SettleTransitionTx = Extract<AccountTx, { type: 'settle_transition' }>;
 type UpsertTransition = Extract<SettleTransitionTx['data'], { kind: 'upsert' }>;
@@ -44,6 +48,25 @@ type HoldPlan = Readonly<{
 
 const transitionLog = createStructuredLogger('account.settle');
 const WORKSPACE_DOMAIN = 'xln:settlement-workspace:v1';
+
+class SettlementSealNonceMismatchError extends Error {
+  readonly rejection: AccountTxRejection;
+
+  constructor(
+    message: string,
+    suppliedNonce: number,
+    requiredNonce: number,
+    basis: AccountTxRejection['basis'],
+  ) {
+    super(message);
+    this.rejection = {
+      kind: 'settlement_seal_nonce_mismatch',
+      suppliedNonce,
+      requiredNonce,
+      basis,
+    };
+  }
+}
 
 const assertVersion = (revision: number): void => {
   if (!Number.isSafeInteger(revision) || revision < 1) {
@@ -262,8 +285,11 @@ const assertSettlementSealNonce = (
   const minimumSafeNonce = getMinimumSafeSettlementNonce(draft);
   if (workspace.nonceAtSign !== undefined) {
     if (workspace.nonceAtSign !== settlementNonce) {
-      throw new Error(
+      throw new SettlementSealNonceMismatchError(
         `SETTLEMENT_SEAL_NONCE_MISMATCH:${workspace.nonceAtSign}:${settlementNonce}`,
+        settlementNonce,
+        workspace.nonceAtSign,
+        'workspace',
       );
     }
     return;
@@ -271,12 +297,15 @@ const assertSettlementSealNonce = (
   // A bilateral seal must use the exact locally derived nonce. Tolerance here
   // would turn a replica/catch-up bug into two valid on-chain authorizations.
   if (settlementNonce !== minimumSafeNonce) {
-    throw new Error(
+    throw new SettlementSealNonceMismatchError(
       `SETTLEMENT_SEAL_NONCE_MISMATCH:${settlementNonce}:${minimumSafeNonce}` +
       `:j=${Number(draft.jNonce ?? 0)}` +
       `:next=${Number(draft.proofHeader.nextProofNonce ?? 0)}` +
       `:local=${Number(draft.currentDisputeProofNonce ?? 0)}` +
       `:peer=${Number(draft.counterpartyDisputeProofNonce ?? 0)}`,
+      settlementNonce,
+      minimumSafeNonce,
+      'account',
     );
   }
 };
@@ -619,7 +648,7 @@ export async function handleSettleTransition(
   timestamp: number,
   env?: RuntimeState,
   registeredBoardHash?: string,
-): Promise<{ success: boolean; events: string[]; error?: string }> {
+): Promise<ApplyAccountTxResult> {
   try {
     const draft = cloneAccountState(account);
     const changed = new Set<number>();
@@ -680,6 +709,13 @@ export async function handleSettleTransition(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     transitionLog.warn('workspace.transition_rejected', { kind: tx.data.kind, error: message });
-    return { success: false, events: [], error: message };
+    return {
+      success: false,
+      events: [],
+      error: message,
+      ...(error instanceof SettlementSealNonceMismatchError
+        ? { rejection: error.rejection }
+        : {}),
+    };
   }
 }

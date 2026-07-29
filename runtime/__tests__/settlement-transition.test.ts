@@ -631,6 +631,12 @@ describe('atomic settlement Account transition', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('SETTLEMENT_SEAL_NONCE_MISMATCH:6:5');
+    expect(result.rejection).toEqual({
+      kind: 'settlement_seal_nonce_mismatch',
+      suppliedNonce: 6,
+      requiredNonce: 5,
+      basis: 'account',
+    });
     expect(account.settlementWorkspace?.nonceAtSign).toBeUndefined();
     expect(account.settlementWorkspace?.leftHanko).toBeUndefined();
     expect(account.settlementWorkspace?.postSettlementDisputeProof).toBeUndefined();

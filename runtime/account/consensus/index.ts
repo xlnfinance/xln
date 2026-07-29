@@ -17,6 +17,7 @@ import { cloneAccountFrame, cloneAccountState } from '../state-clone';
 import { getAccountPerspective } from '../perspective';
 import { HEAVY_LOGS } from '../../utils';
 import { applyAccountTx } from '../tx/apply';
+import type { AccountTxRejection } from '../tx/apply-types';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import { createFrameHash } from './frame';
 import { normalizeAccountWatchSeed } from '../../protocol/account-watch-seed';
@@ -111,21 +112,13 @@ type IncomingFrameResult = { kind: 'not_applicable' } | { kind: 'return'; result
 const isRefreshableStaleIncomingSettlementSeal = (
   account: AccountState,
   frame: AccountFrame,
-  error: string | undefined,
+  rejection: AccountTxRejection | undefined,
 ): boolean => {
-  const match =
-    /^Frame application failed: SETTLEMENT_SEAL_NONCE_MISMATCH:(\d+):(\d+):j=\d+:next=\d+:local=\d+:peer=\d+$/.exec(
-      error ?? '',
-    );
-  if (!match) return false;
-
-  const suppliedNonce = Number(match[1]);
-  const requiredNonce = Number(match[2]);
   if (
-    !Number.isSafeInteger(suppliedNonce) ||
-    !Number.isSafeInteger(requiredNonce) ||
-    suppliedNonce >= requiredNonce ||
-    requiredNonce !== getMinimumSafeSettlementNonce(account)
+    rejection?.kind !== 'settlement_seal_nonce_mismatch' ||
+    rejection.basis !== 'account' ||
+    rejection.suppliedNonce >= rejection.requiredNonce ||
+    rejection.requiredNonce !== getMinimumSafeSettlementNonce(account)
   ) {
     return false;
   }
@@ -136,7 +129,7 @@ const isRefreshableStaleIncomingSettlementSeal = (
     tx =>
       tx.type === 'settle_transition' &&
       tx.data.kind === 'seal' &&
-      tx.data.settlementNonce === suppliedNonce &&
+      tx.data.settlementNonce === rejection.suppliedNonce &&
       tx.data.revision === workspace.revision &&
       tx.data.workspaceHash.toLowerCase() === workspace.workspaceHash.toLowerCase(),
   );
@@ -256,7 +249,12 @@ const replayIncomingFrameOnClone = async (
     if (!result.success) {
       return {
         kind: 'return',
-        result: { success: false, error: `Frame application failed: ${result.error}`, events },
+        result: {
+          success: false,
+          error: `Frame application failed: ${result.error}`,
+          events,
+          ...(result.rejection ? { txRejection: result.rejection } : {}),
+        },
       };
     }
     assertNoUnilateralSettlementMutation(clonedMachine, beforeSettlement, accountTx, 'receiver/validate');
@@ -735,7 +733,13 @@ const classifyIncomingValidationFailure = (
   result: HandleAccountInputResult,
 ): IncomingFrameResult => {
   if (result.success) return { kind: 'return', result };
-  if (isRefreshableStaleIncomingSettlementSeal(account, receivedFrame, result.error)) {
+  if (
+    isRefreshableStaleIncomingSettlementSeal(
+      account,
+      receivedFrame,
+      result.txRejection,
+    )
+  ) {
     accountLog.warn('frame.stale_settlement_seal_rejected', {
       height: receivedFrame.height,
       error: result.error,
