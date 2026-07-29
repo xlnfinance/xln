@@ -32,7 +32,6 @@ const COORDINATOR_DEBT: Readonly<Record<string, number>> = {
   'runtime/orchestrator/hub-node.ts::driveMeshBootstrap': 208,
   'runtime/orchestrator/hub-node.ts::fetch': 323,
   'runtime/orchestrator/hub-node.ts::run': 1064,
-  'runtime/orchestrator/mm-node-core.ts::buildMarketMakerCrossOfferSpecs': 151,
   'runtime/orchestrator/mm-node-health.ts::maintainMarketMakerCrossQuotes': 409,
   'runtime/orchestrator/mm-node-run.ts::driveQuotes': 334,
   'runtime/orchestrator/mm-node-run.ts::runMarketMakerNode': 1707,

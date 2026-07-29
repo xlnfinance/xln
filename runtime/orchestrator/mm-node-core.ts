@@ -1243,7 +1243,11 @@ export const mergeMarketMakerEntityInputs = (
 export const countMarketMakerEntityInputTxs = (inputsByEntitySigner: ReadonlyMap<string, EntityInput>): number =>
   Array.from(inputsByEntitySigner.values()).reduce((sum, input) => sum + Number(input.entityTxs?.length || 0), 0);
 
-const resolveEntityRuntimeIdForCrossJ = (env: RuntimeState, routeEntityIds: string[], entityId: string): string | null => {
+const resolveEntityRuntimeIdForCrossJ = (
+  env: RuntimeState,
+  routeEntityIds: string[],
+  entityId: string,
+): string | null => {
   const target = normalizeEntityRef(entityId);
   const localRuntimeId = String(env.runtimeId || '')
     .trim()
@@ -1284,6 +1288,14 @@ const canonicalizeLocalCrossJurisdictionRoute = (
   return isCrossJurisdictionRouteTwoRuntime(env, canonical) ? canonical : null;
 };
 
+const requireMarketMakerQuoteTimestamp = (env: RuntimeState): number => {
+  const timestamp = Math.floor(Number(env.timestamp));
+  if (!Number.isFinite(timestamp) || timestamp <= 0) {
+    throw new Error(`MARKET_MAKER_CROSS_TIMESTAMP_INVALID:${String(env.timestamp)}`);
+  }
+  return timestamp;
+};
+
 export const buildMarketMakerCrossOfferSpecs = (
   env: RuntimeState,
   sourceContext: MarketMakerEntityContext,
@@ -1300,10 +1312,7 @@ export const buildMarketMakerCrossOfferSpecs = (
   const specs: MarketMakerOfferSpec[] = [];
   const crossPairs = buildMarketMakerCrossTokenPairs(sourceTokenIds, targetTokenIds);
   const targetByBaseName = new Map(targetHubs.map(hub => [hubRoleName(hub), hub] as const));
-  const now = Math.floor(Number(env.timestamp));
-  if (!Number.isFinite(now) || now <= 0) {
-    throw new Error(`MARKET_MAKER_CROSS_TIMESTAMP_INVALID:${String(env.timestamp)}`);
-  }
+  const now = requireMarketMakerQuoteTimestamp(env);
 
   for (const sourceHub of sourceHubs) {
     const targetHub = targetByBaseName.get(hubRoleName(sourceHub));
@@ -1463,7 +1472,11 @@ const countMarketMakerOffersForHub = (env: RuntimeState, mmEntityId: string, hub
   return count;
 };
 
-export const countCommittedMarketMakerOffersForHub = (env: RuntimeState, mmEntityId: string, hubEntityId: string): number => {
+export const countCommittedMarketMakerOffersForHub = (
+  env: RuntimeState,
+  mmEntityId: string,
+  hubEntityId: string,
+): number => {
   const account = getAccountState(env, mmEntityId, hubEntityId);
   if (!account) return 0;
   const prefix = `mm-${hubEntityId.slice(-6).toLowerCase()}-`;
@@ -1532,7 +1545,10 @@ export const countCrossSpecBootstrapProgressByPair = (
   return counts;
 };
 
-export const countCrossSpecVisibleOffersByPair = (env: RuntimeState, specs: MarketMakerOfferSpec[]): Map<string, number> => {
+export const countCrossSpecVisibleOffersByPair = (
+  env: RuntimeState,
+  specs: MarketMakerOfferSpec[],
+): Map<string, number> => {
   const counts = new Map<string, number>();
   for (const spec of specs) {
     if (!spec.crossJurisdiction || !hasMarketMakerCrossOffer(env, spec)) continue;
@@ -1820,7 +1836,10 @@ const hasSourceAccountCrossOffer = (env: RuntimeState, route: CrossJurisdictionS
   );
 };
 
-export const getCommittedSourceAccountCrossOffer = (env: RuntimeState, route: CrossJurisdictionSwapRoute): SwapOffer | null => {
+export const getCommittedSourceAccountCrossOffer = (
+  env: RuntimeState,
+  route: CrossJurisdictionSwapRoute,
+): SwapOffer | null => {
   const account = getAccountState(env, route.source.entityId, route.source.counterpartyEntityId);
   const committed = account?.swapOffers?.get(route.orderId);
   return isMatchingCrossOfferRoute(committed?.crossJurisdiction, route) ? committed! : null;
