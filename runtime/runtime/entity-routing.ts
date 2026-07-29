@@ -183,9 +183,9 @@ const findInputReplica = (
   env: RuntimeState,
   input: RoutedEntityInput,
 ): EntityReplica | null =>
-  ([...env.eReplicas.values()].find(candidate =>
-    normalizeEntityKey(candidate.entityId) === normalizeEntityKey(input.entityId) &&
-    normalizeEntityKey(candidate.signerId) === normalizeEntityKey(input.signerId)) ?? null);
+  env.eReplicas.get(
+    `${normalizeEntityKey(input.entityId)}:${normalizeEntityKey(input.signerId)}`,
+  ) ?? null;
 
 const findReplicaAccount = (
   env: RuntimeState,
@@ -194,8 +194,7 @@ const findReplicaAccount = (
 ) => {
   const replica = findInputReplica(env, input);
   if (!replica) return null;
-  const target = normalizeEntityKey(counterpartyId);
-  return [...replica.state.accounts.entries()].find(([key]) => normalizeEntityKey(key) === target)?.[1] ?? null;
+  return replica.state.accounts.get(normalizeEntityKey(counterpartyId)) ?? null;
 };
 
 const proposalAlreadyCommitted = (

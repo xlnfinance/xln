@@ -399,26 +399,21 @@ const assertExternalEntityInputAllowed = (entityInput: RoutedEntityInput): void 
   );
 };
 
-const projectedReplicaKeys = (
-  env: RuntimeState,
+const importedReplicaKeys = (
   runtimeTxs: readonly RuntimeTx[],
-): Map<string, Set<string>> => {
-  const projected = new Map<string, Set<string>>();
-  const remember = (entityId: string, signerId: string): void => {
-    const entity = entityId.trim().toLowerCase();
-    const signer = signerId.trim().toLowerCase();
-    if (!entity || !signer) return;
-    const signers = projected.get(entity) ?? new Set<string>();
-    signers.add(signer);
-    projected.set(entity, signers);
-  };
-  for (const replica of env.eReplicas.values()) {
-    remember(replica.entityId, replica.signerId);
-  }
-  for (const tx of runtimeTxs) {
-    if (tx.type === 'importReplica') remember(tx.entityId, tx.signerId);
-  }
-  return projected;
+): Set<string> =>
+  new Set(runtimeTxs.flatMap(tx =>
+    tx.type === 'importReplica'
+      ? [`${tx.entityId.trim().toLowerCase()}:${tx.signerId.trim().toLowerCase()}`]
+      : []));
+
+const replicaKeysForEntity = (
+  env: RuntimeState,
+  entityId: string,
+  imports: ReadonlySet<string>,
+): string[] => {
+  const prefix = `${entityId}:`;
+  return [...env.eReplicas.keys(), ...imports].filter(key => key.startsWith(prefix));
 };
 
 /**
@@ -433,26 +428,24 @@ export const preflightExternalEntityInputTargets = (
   inputs: readonly RoutedEntityInput[],
   runtimeTxs: readonly RuntimeTx[],
 ): void => {
-  const projected = projectedReplicaKeys(env, runtimeTxs);
+  const imports = importedReplicaKeys(runtimeTxs);
   for (const input of inputs) {
     try {
       assertExternalEntityInputAllowed(input);
       const entityId = input.entityId.trim().toLowerCase();
       const signerId = input.signerId.trim().toLowerCase();
-      const signers = projected.get(entityId);
+      const replicaKey = `${entityId}:${signerId}`;
+      if (env.eReplicas.has(replicaKey) || imports.has(replicaKey)) continue;
+      const siblingKeys = replicaKeysForEntity(env, entityId, imports);
+      const mayRetargetEmptyProtocolInput = siblingKeys.length === 1 &&
+        (input.entityTxs?.length ?? 0) === 0;
       assertRuntimeIngress(
-        Boolean(signers?.size),
-        'RUNTIME_ENTITY_INPUT_UNKNOWN_TARGET',
-        'Entity input target does not exist in projected Runtime frame',
-        { entityId, signerId },
-      );
-      const mayRetargetEmptyProtocolInput =
-        signers?.size === 1 && (input.entityTxs?.length ?? 0) === 0;
-      assertRuntimeIngress(
-        signers?.has(signerId) === true || mayRetargetEmptyProtocolInput,
-        'RUNTIME_REPLICA_NOT_FOUND',
-        'Entity input target replica missing for projected signerId',
-        { entityId, signerId, knownSigners: [...(signers ?? [])] },
+        mayRetargetEmptyProtocolInput,
+        siblingKeys.length === 0
+          ? 'RUNTIME_ENTITY_INPUT_UNKNOWN_TARGET'
+          : 'RUNTIME_REPLICA_NOT_FOUND',
+        'Entity input target replica missing from projected Runtime frame',
+        { entityId, signerId, siblingKeys },
       );
     } catch (error) {
       throw new RuntimeEntityInputApplyError(
@@ -469,42 +462,30 @@ const resolveEntityInputReplica = (
   env: RuntimeState,
   entityInput: RoutedEntityInput,
 ): { signerId: string; replicaKey: string; replica: EntityReplica } => {
-  const signerId = entityInput.signerId.trim();
+  const entityId = entityInput.entityId.trim().toLowerCase();
+  const signerId = entityInput.signerId.trim().toLowerCase();
   assertRuntimeIngress(signerId.length > 0, 'RUNTIME_SIGNER_MISSING', 'Entity input missing mandatory signerId', {
     entityId: entityInput.entityId,
     providedSignerId: entityInput.signerId,
   });
 
-  let replicaKey = `${entityInput.entityId}:${signerId}`;
+  let replicaKey = `${entityId}:${signerId}`;
   let replica = env.eReplicas.get(replicaKey);
-  const localReplicaKeys = replica ? [] : findReplicaKeysForEntityInsensitive(env, entityInput.entityId);
-  if (!replica) {
-    const signerNorm = signerId.toLowerCase();
-    const match = localReplicaKeys.find(key => {
-      const [, candidateSignerId] = String(key).split(':');
-      return String(candidateSignerId || '').toLowerCase() === signerNorm;
-    });
-    if (match) {
-      replicaKey = match;
-      replica = env.eReplicas.get(match);
-    }
-  }
-
   const txTypes = (entityInput.entityTxs || []).map(tx => tx.type);
-  if (!replica && localReplicaKeys.length === 0) {
+  const localReplicaKeys = replica || txTypes.length > 0
+    ? []
+    : findReplicaKeysForEntityInsensitive(env, entityId);
+  if (!replica && txTypes.length > 0) {
     const details = {
-      entityId: entityInput.entityId,
+      entityId,
       signerId: entityInput.signerId,
       txTypes,
-      knownEntities: Array.from(env.eReplicas.keys())
-        .map(key => String(key).split(':')[0])
-        .filter(Boolean),
     };
-    env.error('network', 'REJECT_ENTITY_INPUT_UNKNOWN_ENTITY', details, entityInput.entityId);
+    env.error('network', 'REJECT_ENTITY_INPUT_UNKNOWN_ENTITY', details, entityId);
     assertRuntimeIngress(
       false,
-      'RUNTIME_ENTITY_INPUT_UNKNOWN_TARGET',
-      'Entity input target does not exist in local runtime',
+      'RUNTIME_REPLICA_NOT_FOUND',
+      'Entity input target replica missing for exact canonical key',
       details,
     );
   }

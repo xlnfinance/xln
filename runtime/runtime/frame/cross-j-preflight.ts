@@ -67,14 +67,12 @@ const accountFrameMatches = (
   env: RuntimeState,
   expected: CrossJPair['sourceAccountFrame'],
 ): boolean => {
-  const replica = [...env.eReplicas.values()].find(
-    candidate =>
-      candidate.entityId.toLowerCase() === expected.entityId.toLowerCase() &&
-      candidate.signerId.toLowerCase() === expected.signerId.toLowerCase(),
+  const replica = env.eReplicas.get(
+    `${expected.entityId.toLowerCase()}:${expected.signerId.toLowerCase()}`,
   );
-  const account = [...(replica?.state.accounts.entries() ?? [])].find(
-    ([counterpartyId]) => counterpartyId.toLowerCase() === expected.counterpartyEntityId.toLowerCase(),
-  )?.[1];
+  const account = replica?.state.accounts.get(
+    expected.counterpartyEntityId.toLowerCase(),
+  );
   return (
     account?.currentFrame.height === expected.height &&
     String(account.currentFrame.stateHash || '').toLowerCase() === expected.stateHash.toLowerCase()
