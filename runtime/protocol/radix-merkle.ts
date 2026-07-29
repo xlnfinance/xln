@@ -207,13 +207,6 @@ type MerkleItem = {
   hash: string;
 };
 
-type MerkleSummaryNode = {
-  hash: string;
-  branchCount: number;
-  extensionCount: number;
-  maxDepth: number;
-};
-
 type MerkleMaterializedNode =
   | {
       kind: 'leaf';
@@ -241,6 +234,156 @@ const commonPrefixLength = (items: MerkleItem[], offset: number, depth: number):
     length += 1;
   }
   return length;
+};
+
+type MerkleBuildContext = {
+  radix: RadixMerkleRadix;
+  hashAlgorithm: RadixMerkleHashAlgorithm;
+  depth: number;
+};
+
+const normalizeMerkleItems = (
+  leaves: RadixMerkleLeaf[],
+  radix: RadixMerkleRadix,
+  hashAlgorithm: RadixMerkleHashAlgorithm,
+): { items: MerkleItem[]; depth: number } => {
+  const deduped = new Map<string, MerkleItem>();
+  for (const leaf of leaves) {
+    const keyHex = bytesToHex(leaf.key);
+    if (deduped.has(keyHex)) {
+      // Last-write-wins would hide a storage namespace collision and make the
+      // committed root depend on caller order.
+      throw new Error(`RADIX_MERKLE_DUPLICATE_KEY:${keyHex}`);
+    }
+    deduped.set(keyHex, {
+      keyHex,
+      key: leaf.key,
+      value: leaf.value,
+      path: pathSlots(leaf.key, radix),
+      hash: leafHash(leaf, hashAlgorithm),
+    });
+  }
+  const items = Array.from(deduped.values());
+  const depth = items[0]?.path.length ?? 0;
+  for (const item of items) {
+    if (item.path.length !== depth) {
+      throw new Error(
+        `RADIX_MERKLE_MIXED_KEY_LENGTHS: expected=${depth} actual=${item.path.length}`,
+      );
+    }
+  }
+  return { items, depth };
+};
+
+const bucketMerkleItems = (
+  items: MerkleItem[],
+  offset: number,
+): Map<number, MerkleItem[]> => {
+  const buckets = new Map<number, MerkleItem[]>();
+  for (const item of items) {
+    const slot = item.path[offset] ?? 0;
+    const bucket = buckets.get(slot);
+    if (bucket) bucket.push(item);
+    else buckets.set(slot, [item]);
+  }
+  return buckets;
+};
+
+type MerkleMaterializationContext = MerkleBuildContext & {
+  branches: RadixMerkleMaterializedBranch[];
+  leaves: RadixMerkleMaterializedLeaf[];
+  branchCount: number;
+  extensionCount: number;
+  maxDepth: number;
+};
+
+const materializedEdgeHash = (
+  context: MerkleBuildContext,
+  parentPath: number[],
+  child: MerkleMaterializedNode,
+): string => {
+  if (child.kind === 'leaf') return child.hash;
+  const segment = child.path.slice(parentPath.length + 1);
+  return segment.length > 0
+    ? extensionHash(
+        context.radix,
+        segment,
+        child.hash,
+        context.hashAlgorithm,
+      )
+    : child.hash;
+};
+
+const materializeLeaf = (
+  context: MerkleMaterializationContext,
+  item: MerkleItem,
+): MerkleMaterializedNode => {
+  const leaf: MerkleMaterializedNode = {
+    kind: 'leaf',
+    path: [...item.path],
+    keyHex: `0x${item.keyHex}`,
+    valueHash: `0x${bytesToHex(item.value)}`,
+    hash: item.hash,
+  };
+  context.leaves.push({
+    path: [...leaf.path],
+    key: leaf.keyHex,
+    valueHash: leaf.valueHash,
+    hash: leaf.hash,
+  });
+  return leaf;
+};
+
+const buildMaterializedMerkleNode = (
+  context: MerkleMaterializationContext,
+  offset: number,
+  group: MerkleItem[],
+): MerkleMaterializedNode => {
+  if (group.length === 1 || offset >= context.depth) {
+    const item = group[0];
+    if (!item) throw new Error('RADIX_MERKLE_EMPTY_MATERIALIZED_NODE');
+    context.maxDepth = Math.max(context.maxDepth, offset);
+    return materializeLeaf(context, item);
+  }
+  const shared = commonPrefixLength(group, offset, context.depth);
+  context.branchCount += 1;
+  if (shared > 0) context.extensionCount += 1;
+  const branchOffset = offset + shared;
+  const branchPath = group[0]?.path.slice(0, branchOffset) ?? [];
+  const children = Array.from(bucketMerkleItems(group, branchOffset).entries())
+    .sort(([left], [right]) => left - right)
+    .map(([slot, bucket]) => ({
+      slot,
+      node: buildMaterializedMerkleNode(
+        context,
+        branchOffset + 1,
+        bucket,
+      ),
+    }));
+  const branch: MerkleMaterializedNode = {
+    kind: 'branch',
+    path: branchPath,
+    hash: branchHash(
+      context.radix,
+      children.map(child => [
+        child.slot,
+        materializedEdgeHash(context, branchPath, child.node),
+      ]),
+      context.hashAlgorithm,
+    ),
+    children,
+  };
+  context.branches.push({
+    path: [...branch.path],
+    hash: branch.hash,
+    children: children.map(child => ({
+      slot: child.slot,
+      kind: child.node.kind,
+      path: [...child.node.path],
+      hash: materializedEdgeHash(context, branch.path, child.node),
+    })),
+  });
+  return branch;
 };
 
 export const buildRadixMerkle = (
@@ -281,148 +424,27 @@ export const buildRadixMerkleMaterialized = (
     };
   }
 
-  const deduped = new Map<string, MerkleItem>();
-  for (const leaf of leaves) {
-    const keyHex = bytesToHex(leaf.key);
-    if (deduped.has(keyHex)) {
-      // Callers construct authoritative leaves from independently normalized
-      // storage paths. Last-write-wins would hide a namespace/key collision
-      // and make the committed root depend on input order.
-      throw new Error(`RADIX_MERKLE_DUPLICATE_KEY:${keyHex}`);
-    }
-    deduped.set(keyHex, {
-      keyHex,
-      key: leaf.key,
-      value: leaf.value,
-      path: pathSlots(leaf.key, radix),
-      hash: leafHash(leaf, hashAlgorithm),
-    });
-  }
-
-  const items = Array.from(deduped.values());
-  const depth = items[0]?.path.length ?? 0;
-  for (const item of items) {
-    if (item.path.length !== depth) {
-      throw new Error(`RADIX_MERKLE_MIXED_KEY_LENGTHS: expected=${depth} actual=${item.path.length}`);
-    }
-  }
-
-  const buildSummaryNode = (offset: number, group: MerkleItem[]): MerkleSummaryNode => {
-    if (group.length === 0) return { hash: EMPTY_RADIX_MERKLE_ROOT, branchCount: 0, extensionCount: 0, maxDepth: offset };
-    if (group.length === 1 || offset >= depth) {
-      return { hash: group[0]?.hash ?? EMPTY_RADIX_MERKLE_ROOT, branchCount: 0, extensionCount: 0, maxDepth: offset };
-    }
-
-    const shared = commonPrefixLength(group, offset, depth);
-    if (shared > 0) {
-      const child = buildSummaryNode(offset + shared, group);
-      return {
-        hash: extensionHash(
-          radix,
-          group[0]?.path.slice(offset, offset + shared) ?? [],
-          child.hash,
-          hashAlgorithm,
-        ),
-        branchCount: child.branchCount,
-        extensionCount: child.extensionCount + 1,
-        maxDepth: child.maxDepth,
-      };
-    }
-
-    const buckets = new Map<number, MerkleItem[]>();
-    for (const item of group) {
-      const slot = item.path[offset] ?? 0;
-      const existing = buckets.get(slot);
-      if (existing) existing.push(item);
-      else buckets.set(slot, [item]);
-    }
-
-    const children = Array.from(buckets.entries()).map(([slot, bucket]) => [slot, buildSummaryNode(offset + 1, bucket)] as const);
-    return {
-      hash: branchHash(
-        radix,
-        children.map(([slot, child]) => [slot, child.hash]),
-        hashAlgorithm,
-      ),
-      branchCount: children.reduce((sum, [, child]) => sum + child.branchCount, 1),
-      extensionCount: children.reduce((sum, [, child]) => sum + child.extensionCount, 0),
-      maxDepth: children.reduce((max, [, child]) => Math.max(max, child.maxDepth), offset + 1),
-    };
+  const { items, depth } = normalizeMerkleItems(
+    leaves,
+    radix,
+    hashAlgorithm,
+  );
+  const context: MerkleMaterializationContext = {
+    radix,
+    hashAlgorithm,
+    depth,
+    branches: [],
+    leaves: [],
+    branchCount: 0,
+    extensionCount: 0,
+    maxDepth: 0,
   };
-
-  const materializedLeaves: RadixMerkleMaterializedLeaf[] = [];
-  const materializedBranches: RadixMerkleMaterializedBranch[] = [];
-
-  const nodeHash = (node: MerkleMaterializedNode): string => node.hash;
-  const edgeHash = (parentPath: number[], child: MerkleMaterializedNode): string => {
-    if (child.kind === 'leaf') return child.hash;
-    const segment = child.path.slice(parentPath.length + 1);
-    return segment.length > 0 ? extensionHash(radix, segment, child.hash, hashAlgorithm) : child.hash;
-  };
-
-  const buildNode = (offset: number, group: MerkleItem[]): MerkleMaterializedNode => {
-    if (group.length === 1 || offset >= depth) {
-      const item = group[0]!;
-      const leaf: MerkleMaterializedNode = {
-        kind: 'leaf',
-        path: [...item.path],
-        keyHex: `0x${item.keyHex}`,
-        valueHash: `0x${bytesToHex(item.value)}`,
-        hash: item.hash,
-      };
-      materializedLeaves.push({
-        path: [...leaf.path],
-        key: leaf.keyHex,
-        valueHash: leaf.valueHash,
-        hash: leaf.hash,
-      });
-      return leaf;
-    }
-
-    const shared = commonPrefixLength(group, offset, depth);
-    const branchOffset = offset + shared;
-    const branchPath = group[0]?.path.slice(0, branchOffset) ?? [];
-    const buckets = new Map<number, MerkleItem[]>();
-    for (const item of group) {
-      const slot = item.path[branchOffset] ?? 0;
-      const existing = buckets.get(slot);
-      if (existing) existing.push(item);
-      else buckets.set(slot, [item]);
-    }
-
-    const children = Array.from(buckets.entries())
-      .sort((left, right) => left[0] - right[0])
-      .map(([slot, bucket]) => ({ slot, node: buildNode(branchOffset + 1, bucket) }));
-    const branch: MerkleMaterializedNode = {
-      kind: 'branch',
-      path: branchPath,
-      hash: branchHash(
-        radix,
-        children.map((child) => [child.slot, edgeHash(branchPath, child.node)]),
-        hashAlgorithm,
-      ),
-      children,
-    };
-    materializedBranches.push({
-      path: [...branch.path],
-      hash: branch.hash,
-      children: children.map((child) => ({
-        slot: child.slot,
-        kind: child.node.kind,
-        path: [...child.node.path],
-        hash: edgeHash(branch.path, child.node),
-      })),
-    });
-    return branch;
-  };
-
-  const summaryRoot = buildSummaryNode(0, items);
-  const materializedRoot = buildNode(0, items);
+  const materializedRoot = buildMaterializedMerkleNode(context, 0, items);
   const rootHash = computeRadixMerkleRootHash(
     radix,
     materializedRoot.kind,
     materializedRoot.path,
-    nodeHash(materializedRoot),
+    materializedRoot.hash,
     hashAlgorithm,
   );
 
@@ -430,14 +452,14 @@ export const buildRadixMerkleMaterialized = (
     radix,
     depth,
     leafCount: items.length,
-    branchCount: summaryRoot.branchCount,
-    extensionCount: summaryRoot.extensionCount,
-    maxDepth: summaryRoot.maxDepth,
+    branchCount: context.branchCount,
+    extensionCount: context.extensionCount,
+    maxDepth: context.maxDepth,
     root: rootHash,
     rootKind: materializedRoot.kind,
     rootPath: [...materializedRoot.path],
-    branches: materializedBranches,
-    leaves: materializedLeaves,
+    branches: context.branches,
+    leaves: context.leaves,
   };
 };
 

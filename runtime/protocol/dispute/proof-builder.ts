@@ -128,6 +128,157 @@ function buildTransformerAllowances(batch: RuntimeBatch): RuntimeAllowance[] {
     }));
 }
 
+type ProofDeltaIndex = {
+  tokenIds: number[];
+  offdeltas: bigint[];
+  byTokenId: Map<number, number>;
+};
+
+const buildProofDeltaIndex = (account: AccountState): ProofDeltaIndex => {
+  const tokenIds: number[] = [];
+  const offdeltas: bigint[] = [];
+  const byTokenId = new Map<number, number>();
+  const sorted = Array.from(account.deltas.entries())
+    .sort(([left], [right]) => left - right);
+  for (const [tokenId, delta] of sorted) {
+    assertFinalDeltaCanFinalize(tokenId, delta.ondelta ?? 0n, delta.offdelta);
+    byTokenId.set(tokenId, tokenIds.length);
+    tokenIds.push(tokenId);
+    // The contract combines this off-chain component with stored ondelta.
+    offdeltas.push(delta.offdelta);
+  }
+  return { tokenIds, offdeltas, byTokenId };
+};
+
+const requireProofDeltaIndex = (
+  index: ReadonlyMap<number, number>,
+  tokenId: number,
+  error: string,
+): number => {
+  const deltaIndex = index.get(tokenId);
+  if (deltaIndex === undefined) throw new Error(error);
+  return deltaIndex;
+};
+
+const buildProofPayments = (
+  account: AccountState,
+  deltaIndex: ReadonlyMap<number, number>,
+): RuntimePayment[] =>
+  sortTransformerEntries(account.locks.entries()).map(([lockId, lock]) => {
+    const revealedUntilTimestamp = Math.floor(Number(lock.timelock) / 1000);
+    if (!Number.isFinite(revealedUntilTimestamp) || revealedUntilTimestamp <= 0) {
+      throw new Error(`HTLC_LOCK_INVALID_TIMELOCK:${lockId}`);
+    }
+    return {
+      deltaIndex: requireProofDeltaIndex(
+        deltaIndex,
+        lock.tokenId,
+        `PROOF_BODY_LOCK_TOKEN_MISSING:${lockId}:${lock.tokenId}`,
+      ),
+      amount: deriveTransferOffdeltaChange(lock.senderIsLeft, lock.amount),
+      revealedUntilTimestamp,
+      hash: lock.hashlock,
+    };
+  });
+
+const buildProofSwaps = (
+  account: AccountState,
+  deltaIndex: ReadonlyMap<number, number>,
+): RuntimeSwap[] =>
+  sortTransformerEntries(account.swapOffers.entries()).flatMap(
+    ([offerId, offer]) => {
+      if (offer.crossJurisdiction) return [];
+      return [{
+        ownerIsLeft: offer.makerIsLeft,
+        addDeltaIndex: requireProofDeltaIndex(
+          deltaIndex,
+          offer.giveTokenId,
+          `PROOF_BODY_SWAP_TOKEN_MISSING:${offerId}:give=${offer.giveTokenId}:want=${offer.wantTokenId}`,
+        ),
+        addAmount: offer.giveAmount,
+        subDeltaIndex: requireProofDeltaIndex(
+          deltaIndex,
+          offer.wantTokenId,
+          `PROOF_BODY_SWAP_TOKEN_MISSING:${offerId}:give=${offer.giveTokenId}:want=${offer.wantTokenId}`,
+        ),
+        subAmount: offer.wantAmount,
+      }];
+    },
+  );
+
+const buildProofPulls = (
+  account: AccountState,
+  deltaIndex: ReadonlyMap<number, number>,
+): RuntimePull[] =>
+  sortTransformerEntries((account.pulls ?? new Map()).entries())
+    .map(([pullId, pull]) => ({
+      deltaIndex: requireProofDeltaIndex(
+        deltaIndex,
+        pull.tokenId,
+        `PROOF_BODY_PULL_TOKEN_MISSING:${pullId}:${pull.tokenId}`,
+      ),
+      amount: pull.amount,
+      claimedRatio: Math.max(
+        0,
+        Math.min(
+          HASHLADDER_MAX_FILL_RATIO,
+          Math.floor(Number(pull.claimedRatio ?? 0)),
+        ),
+      ),
+      revealedUntilTimestamp: pull.revealedUntilTimestamp,
+      fullHash: pull.fullHash,
+      partialRoot: pull.partialRoot,
+    }));
+
+const buildSubcontractTransformers = (
+  account: AccountState,
+): RuntimeTransformerClause[] =>
+  Array.from(account.subcontracts ?? [])
+    .sort(([left], [right]) => compareStableText(left, right))
+    .map(([subcontractId, subcontract]) => {
+      const transformerAddress = requireContractAddress(
+        `subcontract_${subcontractId}`,
+        subcontract.transformerAddress,
+      );
+      if (!ethers.isHexString(subcontract.encodedBatch)) {
+        throw new Error(`SUBCONTRACT_ENCODED_BATCH_INVALID:${subcontractId}`);
+      }
+      const allowances = subcontract.allowances
+        .map(allowance => ({ ...allowance }))
+        .sort((left, right) => left.deltaIndex - right.deltaIndex);
+      return {
+        transformerAddress,
+        encodedBatch: subcontract.encodedBatch,
+        allowances,
+      };
+    });
+
+const buildProofTransformers = (
+  account: AccountState,
+  deltaIndex: ReadonlyMap<number, number>,
+  deltaTransformerAddress: string,
+): RuntimeTransformerClause[] => {
+  const batch: RuntimeBatch = {
+    payments: buildProofPayments(account, deltaIndex),
+    swaps: buildProofSwaps(account, deltaIndex),
+    pulls: buildProofPulls(account, deltaIndex),
+  };
+  const hasBatch = batch.payments.length > 0 ||
+    batch.swaps.length > 0 ||
+    batch.pulls.length > 0;
+  const batchTransformers: RuntimeTransformerClause[] = hasBatch
+    ? [{
+        transformerAddress: requireContractAddress(
+          'delta_transformer',
+          deltaTransformerAddress,
+        ),
+        batch,
+        allowances: buildTransformerAllowances(batch),
+      }]
+    : [];
+  return [...batchTransformers, ...buildSubcontractTransformers(account)];
+};
+
 /**
  * Build ABI-encoded ProofBody from AccountState state
  *
@@ -145,172 +296,27 @@ export function buildAccountProofBody(
   account: AccountState,
   deltaTransformerAddress: string,
 ): ProofBodyResult {
-  const watchSeed = normalizeAccountWatchSeed(account.watchSeed, 'PROOF_BODY');
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // Step 1: Extract and sort deltas (DETERMINISTIC ordering by tokenId)
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  const sortedDeltas = Array.from(account.deltas.entries())
-    .sort((a, b) => a[0] - b[0]); // Sort by tokenId ascending
-
-  const tokenIds: number[] = [];
-  const offdeltas: bigint[] = [];
-
-  for (const [tokenId, delta] of sortedDeltas) {
-    assertFinalDeltaCanFinalize(tokenId, delta.ondelta ?? 0n, delta.offdelta);
-    tokenIds.push(tokenId);
-    // proofbody.offdeltas = ONLY the off-chain component
-    // Contract adds on-chain ondelta separately from storage
-    offdeltas.push(delta.offdelta);
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // Step 2: Build transformer batch (HTLCs + Swaps)
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  const payments: RuntimePayment[] = [];
-  const swaps: RuntimeSwap[] = [];
-  const pulls: RuntimePull[] = [];
-
-  // Convert HTLC locks to Payment structs
-  // DETERMINISTIC: Sort by lockId for consistent ordering
-  const sortedLocks = sortTransformerEntries(account.locks.entries());
-
-  for (const [lockId, lock] of sortedLocks) {
-    const deltaIndex = tokenIds.indexOf(lock.tokenId);
-    if (deltaIndex === -1) {
-      // A live commitment without a delta slot is signed-state corruption. Do
-      // not omit it from ProofBody: that would underclaim on-chain and make the
-      // signed hash look valid while silently dropping money-affecting logic.
-      throw new Error(`PROOF_BODY_LOCK_TOKEN_MISSING:${lockId}:${lock.tokenId}`);
-    }
-
-    const signedAmount = deriveTransferOffdeltaChange(lock.senderIsLeft, lock.amount);
-    // HTLC lock timelocks are stored in runtime milliseconds; the on-chain
-    // transformer compares seconds, so payments enter RuntimeBatch in seconds.
-    const revealedUntilTimestamp = Math.floor(Number(lock.timelock) / 1000);
-    if (!Number.isFinite(revealedUntilTimestamp) || revealedUntilTimestamp <= 0) {
-      throw new Error(`HTLC_LOCK_INVALID_TIMELOCK:${lockId}`);
-    }
-
-    payments.push({
-      deltaIndex,
-      amount: signedAmount,
-      revealedUntilTimestamp,
-      hash: lock.hashlock,
-    });
-  }
-
-  // Convert SwapOffers to Swap structs
-  // DETERMINISTIC: Sort by offerId for consistent ordering
-  const sortedSwaps = sortTransformerEntries(account.swapOffers.entries());
-
-  for (const [offerId, offer] of sortedSwaps) {
-    if (offer.crossJurisdiction) continue;
-    const addDeltaIndex = tokenIds.indexOf(offer.giveTokenId);
-    const subDeltaIndex = tokenIds.indexOf(offer.wantTokenId);
-
-    if (addDeltaIndex === -1 || subDeltaIndex === -1) {
-      // Same invariant as HTLCs: every resting same-j swap must have both token
-      // deltas in the proof. Missing one side means upstream state is corrupt.
-      throw new Error(
-        `PROOF_BODY_SWAP_TOKEN_MISSING:${offerId}:give=${offer.giveTokenId}:want=${offer.wantTokenId}`,
-      );
-    }
-
-    swaps.push({
-      ownerIsLeft: offer.makerIsLeft,
-      addDeltaIndex,
-      addAmount: offer.giveAmount,
-      subDeltaIndex,
-      subAmount: offer.wantAmount,
-    });
-  }
-
-  const sortedPulls = sortTransformerEntries((account.pulls ?? new Map()).entries());
-  for (const [pullId, pull] of sortedPulls) {
-    const deltaIndex = tokenIds.indexOf(pull.tokenId);
-    if (deltaIndex === -1) {
-      // Pulls include hash-ladder claims. Skipping a missing token would let a
-      // dispute proof omit the very claim that protects cross-j/salvage safety.
-      throw new Error(`PROOF_BODY_PULL_TOKEN_MISSING:${pullId}:${pull.tokenId}`);
-    }
-    pulls.push({
-      deltaIndex,
-      amount: pull.amount,
-      claimedRatio: Math.max(0, Math.min(HASHLADDER_MAX_FILL_RATIO, Math.floor(Number(pull.claimedRatio ?? 0)))),
-      revealedUntilTimestamp: pull.revealedUntilTimestamp,
-      fullHash: pull.fullHash,
-      partialRoot: pull.partialRoot,
-    });
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // Step 3: Build RuntimeBatch and RuntimeTransformerClause
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  const batch: RuntimeBatch = {
-    payments,
-    swaps,
-    pulls,
-  };
-
-  // Only include transformer if there are active programmable commitments.
-  const transformers: RuntimeTransformerClause[] = [];
-  if (payments.length > 0 || swaps.length > 0 || pulls.length > 0) {
-    const transformerAddress = requireContractAddress('delta_transformer', deltaTransformerAddress);
-    transformers.push({
-      transformerAddress,
-      batch,
-      allowances: buildTransformerAllowances(batch),
-    });
-  }
-  for (const [subcontractId, subcontract] of Array.from(account.subcontracts ?? [])
-    .sort(([left], [right]) => compareStableText(left, right))) {
-    const transformerAddress = requireContractAddress(`subcontract_${subcontractId}`, subcontract.transformerAddress);
-    if (!ethers.isHexString(subcontract.encodedBatch)) {
-      throw new Error(`SUBCONTRACT_ENCODED_BATCH_INVALID:${subcontractId}`);
-    }
-    const allowances = subcontract.allowances
-      .map((allowance) => ({ ...allowance }))
-      .sort((left, right) => left.deltaIndex - right.deltaIndex);
-    transformers.push({ transformerAddress, encodedBatch: subcontract.encodedBatch, allowances });
-  }
-
+  const deltaIndex = buildProofDeltaIndex(account);
   const runtimeProofBody: RuntimeProofBody = {
-    watchSeed,
-    offdeltas,
-    tokenIds,
-    transformers,
+    watchSeed: normalizeAccountWatchSeed(account.watchSeed, 'PROOF_BODY'),
+    offdeltas: deltaIndex.offdeltas,
+    tokenIds: deltaIndex.tokenIds,
+    transformers: buildProofTransformers(
+      account,
+      deltaIndex.byTokenId,
+      deltaTransformerAddress,
+    ),
   };
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // Step 4: Convert to ABI-compatible structs
-  // ═══════════════════════════════════════════════════════════════════════════
-
   const proofBodyStruct = runtimeToProofBodyStruct(runtimeProofBody);
-
-  // This is the last boundary before proofBodyHash enters a validator's Hanko
-  // map. J-submit validation is necessarily later and cannot rescue a body
-  // that an honest board has already certified but the contract will reject.
+  // This is the final boundary before the hash enters a validator's Hanko.
+  // Later J-submit validation cannot repair an already-certified invalid body.
   assertDisputeProofBodyWithinContractLimits(proofBodyStruct, 'account.signing');
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // Step 5: ABI-encode and hash
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  // Encode ProofBody struct
   const encodedProofBody = encodeProofBodyStruct(proofBodyStruct);
-
-  // Hash for signing
-  const proofBodyHash = ethers.keccak256(encodedProofBody);
-
   return {
     runtimeProofBody,
     proofBodyStruct,
     encodedProofBody,
-    proofBodyHash,
+    proofBodyHash: ethers.keccak256(encodedProofBody),
   };
 }
 
