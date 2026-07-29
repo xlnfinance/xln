@@ -31,6 +31,7 @@ const MECHANIC_BY_TYPE: Record<string, string> = {
   cross_swap: 'Atomic across jurisdictions: both legs commit, or neither does.',
   settlement: 'Both sides sign the netted result; only the difference reaches the chain.',
   account: 'Account capacity changes — credit is granted, not deposited.',
+  dispute: 'Unilateral exit — the last signed frame is enough to reclaim funds.',
   j_event: 'Observed on-chain: the jurisdiction confirmed what the account already knew.',
   j_batch: 'Batched to the jurisdiction — many account changes, one on-chain transaction.',
   system: 'Runtime bookkeeping — no value moved.',
@@ -42,13 +43,29 @@ const mechanicFor = (event: RuntimeActivityEvent): string => {
   // Raw types arrive in mixed conventions (`set_credit_limit`, `reserveToCollateral`),
   // so compare on letters alone.
   const rawType = text(event.rawType).toLowerCase().replace(/[^a-z0-9]/g, '');
-  if (rawType.includes('creditlimit')) {
+  if (rawType.includes('creditlimit') || rawType === 'extendcredit') {
     return 'Unsecured credit extended — capacity without locking collateral.';
   }
-  if (rawType.includes('reserve') && rawType.includes('collateral')) {
+  // `r2c` is the canonical spelling of reserve→collateral; the long forms appear in
+  // j-events and settlement rows for the same movement.
+  if (rawType === 'r2c' || (rawType.includes('reserve') && rawType.includes('collateral'))) {
     return 'Reserves become collateral: this is the step that costs a J-transaction.';
   }
+  if (rawType === 'r2r') {
+    return 'Reserve-to-reserve on the jurisdiction — no account, no counterparty risk, but a chain fee.';
+  }
+  // The dispute is a sequence, and each step proves something different: freeze, claim,
+  // payout, resume. One line for all four would waste the most interesting act.
   if (rawType.includes('dispute')) {
+    if (rawType.includes('reopen')) {
+      return 'The lane resumes — a dispute settles the account, it does not end the relationship.';
+    }
+    if (rawType.includes('finalize')) {
+      return 'Timeout expired: collateral pays out, and any shortfall takes the debtor’s reserves and then becomes on-chain debt.';
+    }
+    if (rawType.includes('start')) {
+      return 'The claim is on chain: the counterparty now has until the timeout to answer with a newer signed frame.';
+    }
     return 'Unilateral exit — the last signed frame is enough to reclaim funds.';
   }
   if (rawType.includes('openaccount')) {

@@ -27,6 +27,7 @@ import type { JAdapter } from '../jadapter/types';
 import { snap, checkSolvency, assertRuntimeIdle, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, requireRuntimeSeed, formatUSD, syncChain, commitRuntimeInput } from './helpers';
 import { formatRuntime } from '../qa/runtime-ascii';
 import { deriveDelta, isLeft } from '../account/utils';
+import { mineRpcToBlockExact } from './rpc-block-mining';
 import { createGossipLayer } from '../networking/gossip';
 import { compareStableText, safeStringify } from '../protocol/serialization';
 import { readEntityFrameEventMessages } from '../state-helpers';
@@ -219,6 +220,9 @@ export async function ahb(env: RuntimeState): Promise<void> {
         signerId: signer,
         data: {
           isProposer: true,
+          // Without this the replica falls back to "Entity 7ad4"; the cast is already
+          // named here, and every viewer of these frames reads that name.
+          profileName: name,
           position, // Explicit position for proper AHB triangle layout
           config: {
             mode: 'proposer-based' as const,
@@ -1703,11 +1707,19 @@ export async function ahb(env: RuntimeState): Promise<void> {
   console.log('\n⚖️ PHASE 7: Dispute enforcement (Bob vs Hub)');
 
   const disputeCollateralTarget = usd(100_000);
+  const disputeDebtTarget = usd(50_000);
   const hubIsLeft = isLeft(hub.id, bob.id);
-  // To trigger debt: delta must exceed collateral
-  // derived.delta = +$150K (collateral only $100K), so position is undercollateralized
-  // → Bob gets all $100K collateral, Hub owes $50K extra (becomes debt when Hub has $0 reserves)
-  const disputeOffdeltaTarget = hubIsLeft ? -usd(150_000) : usd(150_000);
+  // Target position, stated once and identical from both sides: Bob holds the entire
+  // $100K collateral and Hub has drawn $50K of Bob's credit, so finalization pays Bob
+  // the collateral and leaves Hub owing $50K (debt, since Hub's reserves are drained).
+  //
+  // Δ — the total delta deriveDelta() reports — is LEFT's allocation on the RCPAN axis,
+  // not a symmetric "amount owed", so mirroring the position across the left/right
+  // boundary is NOT a sign flip. Per deriveDelta(), the debt Hub owes Bob is:
+  //   Bob LEFT: outPeerCredit = Δ − collateral  → Δ = collateral + debt
+  //   Hub LEFT: inOwnCredit   = −Δ              → Δ = −debt
+  // Depository._applyAccountDelta branches on exactly the same two cases.
+  const disputeOffdeltaTarget = hubIsLeft ? -disputeDebtTarget : disputeCollateralTarget + disputeDebtTarget;
   const disputeOndeltaTarget = 0n;
   const leftActor = hubIsLeft ? hub : bob;
   const rightActor = hubIsLeft ? bob : hub;
@@ -1876,6 +1888,19 @@ export async function ahb(env: RuntimeState): Promise<void> {
   assert(bobDeltaTarget.ondelta === disputeOndeltaTarget, 'PHASE 7: ondelta mismatch');
   assert(bobDeltaTarget.offdelta === disputeOffdeltaTarget, 'PHASE 7: offdelta mismatch');
 
+  // Raw Δ is orientation-dependent; the derived position is not. Assert the position the
+  // dispute is supposed to settle, so a left/right flip can never quietly change the
+  // amount at stake: Bob holds all collateral, and Hub has drawn $50K of Bob's credit.
+  const bobDerivedAtTarget = deriveDelta(bobDeltaTarget, !hubIsLeft);
+  assert(
+    bobDerivedAtTarget.outCollateral === disputeCollateralTarget,
+    `PHASE 7: Bob should hold the whole collateral, holds ${bobDerivedAtTarget.outCollateral}`,
+  );
+  assert(
+    bobDerivedAtTarget.ownCreditUsed === disputeDebtTarget,
+    `PHASE 7: Hub should owe ${disputeDebtTarget} of Bob's credit, owes ${bobDerivedAtTarget.ownCreditUsed}`,
+  );
+
   const hubReserveBeforeDrain = await jadapter.getReserves(hub.id, USDC_TOKEN_ID);
   if (hubReserveBeforeDrain > 0n) {
     console.log(`🧹 Draining Hub reserves to force debt: ${hubReserveBeforeDrain}`);
@@ -1986,6 +2011,37 @@ export async function ahb(env: RuntimeState): Promise<void> {
   if (typeof providerAny.send !== 'function') {
     throw new Error('AHB dispute timeout mining requires RPC provider with evm_mine support');
   }
+  /**
+   * Advance the chain to a block height.
+   *
+   * Mining is chain-only work and must not cost a runtime frame per block: a dispute
+   * period is 5760 blocks, so a frame per block makes the wait dominate the entire run.
+   * anvil mines the whole range in one call; BrowserVM only implements `evm_mine`, which
+   * is cheap enough to loop as long as nothing else runs alongside it.
+   */
+  const mineToBlock = async (rawTarget: bigint | number, label: string): Promise<void> => {
+    const target = BigInt(rawTarget);
+    const startBlock = BigInt(await jadapter.provider.getBlockNumber());
+    if (startBlock >= target) {
+      console.log(`   ${label}: already at block ${startBlock} (target ${target})`);
+      return;
+    }
+    console.log(`   ${label}: mining ${target - startBlock} blocks (${startBlock} → ${target})...`);
+    if (jadapter.mode === 'browservm') {
+      for (let block = startBlock; block < target; block += 1n) {
+        await providerAny.send!('evm_mine', []);
+      }
+    } else {
+      await mineRpcToBlockExact(providerAny as { send: (method: string, params: unknown[]) => Promise<unknown> }, target);
+    }
+    const finalBlock = BigInt(await jadapter.provider.getBlockNumber());
+    if (finalBlock < target) {
+      throw new Error(`AHB ${label}: chain stalled at block ${finalBlock} < target ${target}`);
+    }
+    await process(env);
+    console.log(`✅ ${label}: reached block ${finalBlock}`);
+  };
+
   const waitForRuntimeVisibleJBlock = async (
     target: bigint | number | (() => bigint | number | undefined | Promise<bigint | number | undefined>),
     label: string,
@@ -2036,18 +2092,7 @@ export async function ahb(env: RuntimeState): Promise<void> {
     );
   };
 
-  while (true) {
-    const currentBlock = BigInt(await jadapter.provider.getBlockNumber());
-    console.log(`   Current block: ${currentBlock}, target: ${targetBlock}`);
-
-    if (currentBlock >= targetBlock) {
-      console.log(`✅ Timeout reached at block ${currentBlock}`);
-      break;
-    }
-
-    await providerAny.send('evm_mine', []);
-    await process(env);
-  }
+  await mineToBlock(targetBlock, 'phase7 timeout');
   await waitForRuntimeVisibleJBlock(
     async () => {
       const runtimeTimeout = findReplica(env, bob.id)[1].state.accounts.get(hub.id)?.activeDispute?.disputeTimeout ?? targetBlock;
@@ -2099,8 +2144,8 @@ export async function ahb(env: RuntimeState): Promise<void> {
   console.log(`   Dispute cleared in runtime ✅`);
 
   const bobReserveAfterDispute = await jadapter.getReserves(bob.id, USDC_TOKEN_ID);
-  // Bob gets full $100K collateral. The additional $50K owed (delta > collateral)
-  // becomes debt because Hub has $0 reserves.
+  // Bob gets the full $100K collateral. The additional $50K Hub drew from Bob's credit
+  // becomes debt rather than a reserve transfer, because Hub's reserves are drained.
   const expectedBobReserve = bobReserveBeforeDispute + disputeCollateralTarget;
   assert(
     bobReserveAfterDispute === expectedBobReserve,
@@ -2128,7 +2173,8 @@ export async function ahb(env: RuntimeState): Promise<void> {
   // Format: "🔴 DEBT: {debtor} owes {amount} USDC to {creditor} | Block {block}"
   const debtAmountMatch = debtMessage?.match(/owes\s+([\d.]+)\s+USDC/);
   const debtAmount = debtAmountMatch ? parseFloat(debtAmountMatch[1] ?? '0') : 0;
-  const expectedDebtAmount = 50000; // $50K debt (delta $150K - collateral $100K)
+  // Same number the dispute was set up to produce — never a second, hand-copied constant.
+  const expectedDebtAmount = Number(disputeDebtTarget) / Number(usd(1));
   assert(
     Math.abs(debtAmount - expectedDebtAmount) < 1, // Allow small float tolerance
     `H14: DebtCreated amount mismatch: got ${debtAmount}, expected ${expectedDebtAmount}`
@@ -2210,12 +2256,32 @@ export async function ahb(env: RuntimeState): Promise<void> {
     }]
   }]);
 
-  await processUntil(env, () => {
-    const jRep = env.jReplicas?.get('AHB Demo');
-    return jRep ? jRep.mempool.length === 0 : false;
-  }, 40, 'J-machine process edge disputeStart');
-
-  await processJEvents(env);
+  // The J mempool is already empty at this point, so draining it proves nothing — the
+  // batch reaches the chain asynchronously (seal → submit → block). Wait for the effect,
+  // the way STEP 3 of PHASE 7 waits for DisputeStarted: drive the runtime until the
+  // dispute is live both on chain and in Bob's account.
+  {
+    const processRuntime = await getProcess();
+    let edgeDisputeLive = false;
+    for (let round = 0; round < 40; round++) {
+      const onChain = await jadapter.getAccountInfo(bob.id, hub.id);
+      const started = findReplica(env, bob.id)[1].state.accounts.get(hub.id)?.activeDispute;
+      if (onChain.disputeTimeout > 0n && started) {
+        edgeDisputeLive = true;
+        break;
+      }
+      await processRuntime(env);
+      await processJEvents(env);
+      advanceScenarioTime(env);
+    }
+    if (!edgeDisputeLive) {
+      const onChain = await jadapter.getAccountInfo(bob.id, hub.id);
+      throw new Error(
+        `PHASE 8: edge disputeStart never went live (onChainTimeout=${onChain.disputeTimeout}, ` +
+          `activeDispute=${Boolean(findReplica(env, bob.id)[1].state.accounts.get(hub.id)?.activeDispute)})`,
+      );
+    }
+  }
 
   const [, bobEdgeStart] = findReplica(env, bob.id);
   const bobEdgeAccount = bobEdgeStart.state.accounts.get(hub.id);
@@ -2223,7 +2289,9 @@ export async function ahb(env: RuntimeState): Promise<void> {
 
   // Starter tries to finalize before timeout (should fail)
   console.log('🧪 STEP 8a: Bob attempts early finalize (should fail)...');
-  const edgeInfoBeforeFail = vm?.getAccountInfo ? await vm.getAccountInfo(bob.id, hub.id) : null;
+  // Read through the adapter, not the BrowserVM handle: getBrowserVM() is null in rpc
+  // mode, which silently turned every on-chain check below into a no-op there.
+  const edgeInfoBeforeFail = await jadapter.getAccountInfo(bob.id, hub.id);
   const jRepEarly = env.jReplicas?.get('AHB Demo');
   if (!jRepEarly) {
     throw new Error('PHASE 8: J-Machine not found for early finalize check');
@@ -2237,22 +2305,18 @@ export async function ahb(env: RuntimeState): Promise<void> {
   if (senderIsCounterparty) {
     throw new Error('PHASE 8: early finalize test expects starter (not counterparty)');
   }
-  if (edgeInfoBeforeFail) {
-    if (edgeInfoBeforeFail.disputeTimeout === 0n) {
-      throw new Error('PHASE 8: disputeTimeout missing on-chain (early finalize check)');
-    }
-    if (currentBlock >= edgeInfoBeforeFail.disputeTimeout) {
-      throw new Error(`PHASE 8: expected pre-timeout (block=${currentBlock}, timeout=${edgeInfoBeforeFail.disputeTimeout})`);
-    }
+  if (edgeInfoBeforeFail.disputeTimeout === 0n) {
+    throw new Error('PHASE 8: disputeTimeout missing on-chain (early finalize check)');
+  }
+  if (currentBlock >= edgeInfoBeforeFail.disputeTimeout) {
+    throw new Error(`PHASE 8: expected pre-timeout (block=${currentBlock}, timeout=${edgeInfoBeforeFail.disputeTimeout})`);
   }
   console.log('✅ Early finalize blocked by preflight (pre-timeout, starter) — skipping broadcast');
 
   await processJEvents(env);
 
-  const edgeInfoAfterFail = vm?.getAccountInfo ? await vm.getAccountInfo(bob.id, hub.id) : null;
-  if (edgeInfoAfterFail) {
-    assert(edgeInfoAfterFail.disputeHash !== zeroHash, 'PHASE 8: dispute cleared by early finalize (expected fail)');
-  }
+  const edgeInfoAfterFail = await jadapter.getAccountInfo(bob.id, hub.id);
+  assert(edgeInfoAfterFail.disputeHash !== zeroHash, 'PHASE 8: dispute cleared by early finalize (expected fail)');
   const [, bobEdgeAfterFail] = findReplica(env, bob.id);
   assert(bobEdgeAfterFail.state.accounts.get(hub.id)?.activeDispute, 'PHASE 8: activeDispute cleared after early finalize');
   console.log('✅ Early finalize failed as expected (dispute still active)');
@@ -2282,15 +2346,7 @@ export async function ahb(env: RuntimeState): Promise<void> {
   if (typeof providerAny.send !== 'function') {
     throw new Error('AHB counter-dispute timeout mining requires RPC provider with evm_mine support');
   }
-  while (true) {
-    const currentBlock = BigInt(await jadapter.provider.getBlockNumber());
-    if (currentBlock >= targetCounterTimeout) {
-      console.log(`✅ Dispute timeout reached at block ${currentBlock}`);
-      break;
-    }
-    await providerAny.send('evm_mine', []);
-    await process(env);
-  }
+  await mineToBlock(targetCounterTimeout, 'phase8 timeout');
   await waitForRuntimeVisibleJBlock(
     async () => {
       const runtimeTimeout =
@@ -2420,6 +2476,7 @@ export async function ahb(env: RuntimeState): Promise<void> {
         signerId: carol.signer,
         data: {
           isProposer: true,
+          profileName: carol.name,
           position: carolPosition,
           config: carolConfig
         }

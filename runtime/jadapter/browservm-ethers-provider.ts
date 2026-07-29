@@ -67,7 +67,11 @@ export class BrowserVMEthersProvider extends ethers.AbstractProvider {
   private _network: ethers.Network;
 
   constructor(browserVM: unknown) {
-    super();
+    // cacheTimeout: -1 disables ethers' 250ms response cache. That cache exists to spare a
+    // remote node duplicate requests; here the "node" is an in-memory VM one call away, so
+    // it buys nothing and lies: mine a block and read the height back inside the window and
+    // ethers answers with the pre-mine number. Chain reads must reflect the chain.
+    super(undefined, { cacheTimeout: -1 });
     this.browserVM = browserVM as BrowserVmEthersProviderTarget;
     const chainId = this.browserVM.getChainId?.() ?? 31337;
     this._network = new ethers.Network('browservm', chainId);

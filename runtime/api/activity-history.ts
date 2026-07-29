@@ -9,6 +9,7 @@ export type ActivityType =
   | 'htlc'
   | 'settlement'
   | 'account'
+  | 'dispute'
   | 'j_event'
   | 'j_batch'
   | 'system'
@@ -133,6 +134,8 @@ const normalizeType = (eventName: string): ActivityType => {
   if (key.includes('payment')) return 'payment';
   if (key.includes('htlc')) return 'htlc';
   if (key.includes('settle')) return 'settlement';
+  // Dispute before account: `reopenDisputedAccount` is a dispute step, not account admin.
+  if (key.includes('dispute')) return 'dispute';
   if (key.includes('account')) return 'account';
   if (key.includes('jbatch') || key.includes('j_batch')) return 'j_batch';
   if (key.includes('jevent') || key.includes('j_event')) return 'j_event';
@@ -481,6 +484,123 @@ const eventsFromAccountInput = (
   );
 };
 
+/**
+ * Reserve and credit movements.
+ *
+ * These read as "system" to a naive classifier, yet `r2c` is the one step that costs a
+ * jurisdiction transaction and `extendCredit` is capacity granted without collateral —
+ * the two facts the protocol exists to make visible.
+ */
+const eventFromTreasuryTx = (
+  journal: PersistedActivityJournal,
+  index: number,
+  inputEntityId: string,
+  txType: string,
+  data: RawRecord,
+  viewedEntityId: string,
+): RuntimeActivityEvent => {
+  const amount = bigintText(data['amount']) ?? '0';
+  const tokenId = numberValue(data['tokenId']);
+  const token = `${amount} token ${tokenId ?? '?'}`;
+  const entityId = viewedEntityId || inputEntityId;
+  const base = { source: 'runtime_input' as const, entityId, rawType: txType };
+
+  if (txType === 'j_broadcast') {
+    return makeEvent(journal, index, {
+      kind: 'onchain',
+      type: 'j_batch',
+      direction: 'out',
+      title: 'Batch sent to jurisdiction',
+      subtitle: 'Queued account changes submitted as one transaction',
+      status: 'broadcast',
+      ...base,
+    });
+  }
+
+  const counterpartyId = normalizeId(
+    txType === 'r2c' ? data['counterpartyId']
+      : txType === 'r2r' ? data['toEntityId']
+        : data['counterpartyEntityId'],
+  );
+  const amounts = { counterpartyId, tokenId, amount, ...base };
+
+  if (txType === 'r2c') {
+    return makeEvent(journal, index, {
+      kind: 'onchain',
+      type: 'account',
+      direction: 'out',
+      title: 'Reserves moved to collateral',
+      subtitle: `${token} into the account with ${shortId(counterpartyId)}`,
+      status: 'funded',
+      ...amounts,
+    });
+  }
+  if (txType === 'r2r') {
+    const direction = inferDirection(inputEntityId, counterpartyId, viewedEntityId);
+    return makeEvent(journal, index, {
+      kind: 'onchain',
+      type: 'payment',
+      direction,
+      title: 'Reserve transfer',
+      subtitle: `${token} ${direction === 'in' ? `from ${shortId(inputEntityId)}` : `to ${shortId(counterpartyId)}`}`,
+      status: 'queued',
+      ...amounts,
+    });
+  }
+  return makeEvent(journal, index, {
+    kind: 'offchain',
+    type: 'account',
+    direction: 'out',
+    title: 'Credit extended',
+    subtitle: `${token} to ${shortId(counterpartyId)}`,
+    status: 'updated',
+    ...amounts,
+  });
+};
+
+/** The four beats of a dispute: freeze, claim, payout, resume. */
+const eventFromDisputeTx = (
+  journal: PersistedActivityJournal,
+  index: number,
+  inputEntityId: string,
+  txType: string,
+  data: RawRecord,
+  viewedEntityId: string,
+): RuntimeActivityEvent => {
+  const counterpartyId = normalizeId(data['counterpartyEntityId']);
+  const wording: Record<string, { title: string; subtitle: string }> = {
+    prepareDispute: {
+      title: 'Dispute prepared',
+      subtitle: `Account frozen against ${shortId(counterpartyId)} — last signed frame becomes the claim`,
+    },
+    disputeStart: {
+      title: 'Dispute opened on-chain',
+      subtitle: `Claim submitted against ${shortId(counterpartyId)}, timeout running`,
+    },
+    disputeFinalize: {
+      title: 'Dispute finalized',
+      subtitle: `Collateral and debt settled with ${shortId(counterpartyId)}`,
+    },
+    reopenDisputedAccount: {
+      title: 'Account reopened',
+      subtitle: `Business resumed with ${shortId(counterpartyId)}`,
+    },
+  };
+  const words = wording[txType];
+  return makeEvent(journal, index, {
+    kind: txType === 'prepareDispute' ? 'offchain' : 'onchain',
+    type: 'dispute',
+    source: 'runtime_input',
+    direction: 'neutral',
+    title: words?.title ?? txType,
+    subtitle: words?.subtitle ?? `Account ${shortId(counterpartyId)}`,
+    status: txType,
+    entityId: viewedEntityId || inputEntityId,
+    counterpartyId,
+    rawType: txType,
+  });
+};
+
 const eventFromEntityTx = (
   journal: PersistedActivityJournal,
   index: number,
@@ -555,6 +675,16 @@ const eventFromEntityTx = (
         entityId: viewedEntityId || normalizeId(inputEntityId),
         rawType: txType,
       });
+    case 'r2c':
+    case 'r2r':
+    case 'extendCredit':
+    case 'j_broadcast':
+      return eventFromTreasuryTx(journal, index, normalizeId(inputEntityId), txType, data, viewedEntityId);
+    case 'prepareDispute':
+    case 'disputeStart':
+    case 'disputeFinalize':
+    case 'reopenDisputedAccount':
+      return eventFromDisputeTx(journal, index, normalizeId(inputEntityId), txType, data, viewedEntityId);
     case 'settle_propose':
     case 'settle_update':
     case 'settle_approve':

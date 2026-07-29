@@ -371,9 +371,17 @@ describe('network caption', () => {
     expect(mechanicOf('j_batch', 'jInput')).toContain('one on-chain transaction');
     // Raw type is sharper than the coarse category where it matters.
     expect(mechanicOf('account', 'set_credit_limit')).toContain('without locking collateral');
+    expect(mechanicOf('account', 'extendCredit')).toContain('without locking collateral');
     expect(mechanicOf('account', 'reserveToCollateral')).toContain('costs a J-transaction');
+    // The runtime spells reserve→collateral `r2c`; the demo must still explain it.
+    expect(mechanicOf('account', 'r2c')).toContain('costs a J-transaction');
+    expect(mechanicOf('payment', 'r2r')).toContain('no counterparty risk');
     expect(mechanicOf('account', 'openAccount')).toContain('no network-wide registration');
-    expect(mechanicOf('j_event', 'disputeStarted')).toContain('last signed frame');
+    // A dispute is four distinct beats, not one: freeze, claim, payout, resume.
+    expect(mechanicOf('dispute', 'prepareDispute')).toContain('last signed frame');
+    expect(mechanicOf('dispute', 'disputeStart')).toContain('until the timeout');
+    expect(mechanicOf('dispute', 'disputeFinalize')).toContain('on-chain debt');
+    expect(mechanicOf('dispute', 'reopenDisputedAccount')).toContain('does not end the relationship');
     expect(mechanicOf('unknown-type', 'whatever')).toBe('');
   });
 

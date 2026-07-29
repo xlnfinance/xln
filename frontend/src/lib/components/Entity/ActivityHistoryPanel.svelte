@@ -45,6 +45,7 @@
     { id: 'htlc', label: 'HTLC' },
     { id: 'settlement', label: 'Settlement' },
     { id: 'account', label: 'Accounts' },
+    { id: 'dispute', label: 'Disputes' },
     { id: 'j_event', label: 'J-events' },
     { id: 'j_batch', label: 'Batches' },
     { id: 'error', label: 'Errors' },
