@@ -11,7 +11,6 @@ const EXCLUDED_PATH = /\/(?:__tests__|qa|scenarios|scripts)\//;
 // large function, or a completed refactor whose allowance was not removed
 // fails the gate. The only healthy direction is toward an empty object.
 const COORDINATOR_DEBT: Readonly<Record<string, number>> = {
-  'runtime/api/external-wallet-api.ts::createExternalWalletApi': 331,
   'runtime/jadapter/browservm-ethers-provider.ts::_perform': 158,
   'runtime/jadapter/browservm.ts::createBrowserVMAdapter': 581,
   'runtime/jadapter/helpers.ts::buildRawJEventsRuntimeInput': 228,

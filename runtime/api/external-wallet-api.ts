@@ -68,17 +68,10 @@ const readPositiveIntEnv = (name: string, fallback: number): number => {
 };
 
 const FAUCET_TX_WAIT_TIMEOUT_MS = readPositiveIntEnv('XLN_FAUCET_TX_WAIT_TIMEOUT_MS', 20_000);
-const FAUCET_REFILL_THRESHOLD_BPS = Math.min(
-  10_000,
-  readPositiveIntEnv('XLN_FAUCET_REFILL_THRESHOLD_BPS', 5_000),
-);
+const FAUCET_REFILL_THRESHOLD_BPS = Math.min(10_000, readPositiveIntEnv('XLN_FAUCET_REFILL_THRESHOLD_BPS', 5_000));
 const externalWalletLog = createStructuredLogger('server.external_wallet');
 
-const createJsonResponse = (
-  headers: Record<string, string>,
-  payload: unknown,
-  status = 200,
-): Response =>
+const createJsonResponse = (headers: Record<string, string>, payload: unknown, status = 200): Response =>
   new Response(safeStringify(payload), {
     status,
     headers,
@@ -124,9 +117,7 @@ const readExternalWalletSnapshotSource = async (
   const finalityDepth = resolveSnapshotFinalityDepth(adapter);
   const sourceHeight = headBlockNumber - finalityDepth;
   if (sourceHeight < 0) {
-    throw new Error(
-      `EXTERNAL_WALLET_SNAPSHOT_FINALITY_UNAVAILABLE:head=${headBlockNumber}:depth=${finalityDepth}`,
-    );
+    throw new Error(`EXTERNAL_WALLET_SNAPSHOT_FINALITY_UNAVAILABLE:head=${headBlockNumber}:depth=${finalityDepth}`);
   }
   const block = await adapter.provider.getBlock(sourceHeight);
   if (!block?.hash) {
@@ -148,7 +139,7 @@ const createFaucetLock = (): FaucetLock => ({
       this.locked = true;
       return;
     }
-    await new Promise<void>((resolve) => {
+    await new Promise<void>(resolve => {
       this.queue.push(resolve);
     });
   },
@@ -166,35 +157,41 @@ const createFaucetLock = (): FaucetLock => ({
 });
 
 const readFaucetBody = async (request: Request): Promise<FaucetRequestBody> => {
-  const body = await request.json() as Record<string, unknown>;
+  const body = (await request.json()) as Record<string, unknown>;
   const userAddress = String(body['userAddress'] || '').trim();
-  const tokenSymbol = String(body['tokenSymbol'] || 'USDC').trim().toUpperCase();
+  const tokenSymbol = String(body['tokenSymbol'] || 'USDC')
+    .trim()
+    .toUpperCase();
   const amount = String(body['amount'] || '100').trim();
   return { userAddress, tokenSymbol, amount };
 };
 
 const readGasFaucetBody = async (request: Request): Promise<GasFaucetRequestBody> => {
-  const body = await request.json() as Record<string, unknown>;
+  const body = (await request.json()) as Record<string, unknown>;
   const userAddress = String(body['userAddress'] || '').trim();
   const amount = String(body['amount'] || '0.1').trim();
   return { userAddress, amount };
 };
 
 const readWalletSnapshotBody = async (request: Request): Promise<WalletSnapshotRequestBody> => {
-  const body = await request.json() as Record<string, unknown>;
-  const entityId = String(body['entityId'] || '').trim().toLowerCase();
+  const body = (await request.json()) as Record<string, unknown>;
+  const entityId = String(body['entityId'] || '')
+    .trim()
+    .toLowerCase();
   const owner = String(body['owner'] || '').trim();
   const tokenAddresses = Array.isArray(body['tokenAddresses'])
-    ? body['tokenAddresses'].map((value) => String(value || '').trim()).filter(Boolean)
+    ? body['tokenAddresses'].map(value => String(value || '').trim()).filter(Boolean)
     : undefined;
   const allowances = Array.isArray(body['allowances'])
-    ? body['allowances'].map((value) => {
-        const entry = value && typeof value === 'object' ? value as Record<string, unknown> : {};
-        return {
-          tokenAddress: String(entry['tokenAddress'] || '').trim(),
-          spender: String(entry['spender'] || '').trim(),
-        };
-      }).filter((entry) => ethers.isAddress(entry.tokenAddress) && ethers.isAddress(entry.spender))
+    ? body['allowances']
+        .map(value => {
+          const entry = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+          return {
+            tokenAddress: String(entry['tokenAddress'] || '').trim(),
+            spender: String(entry['spender'] || '').trim(),
+          };
+        })
+        .filter(entry => ethers.isAddress(entry.tokenAddress) && ethers.isAddress(entry.spender))
     : undefined;
   return {
     entityId,
@@ -235,15 +232,10 @@ const resolveProviderIdentity = (provider: ethers.Provider): string => {
   return identity;
 };
 
-const resolveFaucetWalletStateKey = (
-  adapter: JAdapter,
-  faucetAddress: string,
-): string => [
-  adapter.mode,
-  String(adapter.chainId),
-  resolveProviderIdentity(adapter.provider),
-  faucetAddress.toLowerCase(),
-].join(':');
+const resolveFaucetWalletStateKey = (adapter: JAdapter, faucetAddress: string): string =>
+  [adapter.mode, String(adapter.chainId), resolveProviderIdentity(adapter.provider), faucetAddress.toLowerCase()].join(
+    ':',
+  );
 
 const getFaucetWalletState = (context: ExternalWalletApiContext, adapter: JAdapter): FaucetWalletState => {
   const privateKeyBytes = deriveSignerKeySync(context.faucetSeed, context.faucetSignerLabel);
@@ -296,19 +288,21 @@ const waitForFaucetTx = async (
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`FAUCET_TX_WAIT_FAILED:${safeStringify({
-      label,
-      hash: tx.hash,
-      timeoutMs: FAUCET_TX_WAIT_TIMEOUT_MS,
-      error: message,
-      ...details,
-    })}`);
+    throw new Error(
+      `FAUCET_TX_WAIT_FAILED:${safeStringify({
+        label,
+        hash: tx.hash,
+        timeoutMs: FAUCET_TX_WAIT_TIMEOUT_MS,
+        error: message,
+        ...details,
+      })}`,
+    );
   }
 };
 
 const refillThresholdFor = (target: bigint): bigint => {
   if (target <= 0n) return 0n;
-  const threshold = target * BigInt(FAUCET_REFILL_THRESHOLD_BPS) / 10_000n;
+  const threshold = (target * BigInt(FAUCET_REFILL_THRESHOLD_BPS)) / 10_000n;
   return threshold > 0n ? threshold : 1n;
 };
 
@@ -320,8 +314,8 @@ const provisionFaucetWalletFunding = async (
     ensureEth: boolean;
     ensureTokens: boolean;
   },
-) : Promise<ethers.NonceManager> => {
-  return withFaucetWalletLock(context, adapter, async (faucetWallet) => {
+): Promise<ethers.NonceManager> => {
+  return withFaucetWalletLock(context, adapter, async faucetWallet => {
     const faucetAddress = await faucetWallet.getAddress();
     const deployerAddress = await adapter.signer.getAddress().catch(() => '');
 
@@ -354,10 +348,7 @@ const provisionFaucetWalletFunding = async (
           token: token.symbol,
           deployerAddress: deployerAddress || 'unknown',
         });
-        const refillTx = await tokenContract.transfer(
-          faucetAddress,
-          targetBalance - currentBalance,
-        );
+        const refillTx = await tokenContract.transfer(faucetAddress, targetBalance - currentBalance);
         externalWalletLog.debug('faucet.provision.token_transfer_tx', {
           token: token.symbol,
           txHash: refillTx.hash,
@@ -420,7 +411,7 @@ const requireFaucetWalletBalances = async (
     requiredTokenAddress?: string;
     requiredTokenAmount?: bigint;
   },
-) : Promise<ethers.NonceManager> => {
+): Promise<ethers.NonceManager> => {
   const faucetWallet = getFaucetWallet(context, adapter);
   const faucetAddress = await faucetWallet.getAddress();
 
@@ -436,8 +427,8 @@ const requireFaucetWalletBalances = async (
   }
 
   if (options.requiredTokenAddress && options.requiredTokenAmount && options.requiredTokenAmount > 0n) {
-    const tokenInfo = tokenCatalog.find((token) =>
-      String(token.address || '').toLowerCase() === String(options.requiredTokenAddress || '').toLowerCase(),
+    const tokenInfo = tokenCatalog.find(
+      token => String(token.address || '').toLowerCase() === String(options.requiredTokenAddress || '').toLowerCase(),
     );
     if (!tokenInfo) {
       throw new Error(`FAUCET_TOKEN_UNKNOWN address=${options.requiredTokenAddress}`);
@@ -457,145 +448,69 @@ const requireFaucetWalletBalances = async (
   return faucetWallet;
 };
 
-export const createExternalWalletApi = (context: ExternalWalletApiContext) => {
-  const handleTokens = async (): Promise<Response> => {
+const handleTokens = async (context: ExternalWalletApiContext): Promise<Response> => {
+  const adapter = context.getJAdapter();
+  if (!adapter) {
+    return createJsonResponse(context.jsonHeaders, { error: 'J-adapter not initialized' }, 503);
+  }
+
+  try {
+    const tokens = await context.getTokenCatalog();
+    return createJsonResponse(context.jsonHeaders, { tokens });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return createJsonResponse(context.jsonHeaders, { error: message }, 500);
+  }
+};
+
+const handleErc20Faucet = async (context: ExternalWalletApiContext, request: Request): Promise<Response> => {
+  try {
     const adapter = context.getJAdapter();
     if (!adapter) {
       return createJsonResponse(context.jsonHeaders, { error: 'J-adapter not initialized' }, 503);
     }
 
-    try {
-      const tokens = await context.getTokenCatalog();
-      return createJsonResponse(context.jsonHeaders, { tokens });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return createJsonResponse(context.jsonHeaders, { error: message }, 500);
+    const requestId = crypto.randomUUID();
+    const { userAddress, tokenSymbol, amount } = await readFaucetBody(request);
+    externalWalletLog.debug('faucet.erc20.request', { requestId, userAddress, tokenSymbol, amount });
+    if (!ethers.isAddress(userAddress)) {
+      return createJsonResponse(context.jsonHeaders, { error: 'Invalid userAddress' }, 400);
     }
-  };
 
-  const handleErc20Faucet = async (request: Request): Promise<Response> => {
-    try {
-      const adapter = context.getJAdapter();
-      if (!adapter) {
-        return createJsonResponse(context.jsonHeaders, { error: 'J-adapter not initialized' }, 503);
-      }
+    context.emitDebugEvent({
+      event: 'debug_event',
+      runtimeId: context.getRuntimeId(),
+      status: 'info',
+      reason: 'FAUCET_ERC20_REQUEST',
+      details: { requestId, userAddress, tokenSymbol, amount },
+    });
 
-      const requestId = crypto.randomUUID();
-      const { userAddress, tokenSymbol, amount } = await readFaucetBody(request);
-      externalWalletLog.debug('faucet.erc20.request', { requestId, userAddress, tokenSymbol, amount });
-      if (!ethers.isAddress(userAddress)) {
-        return createJsonResponse(context.jsonHeaders, { error: 'Invalid userAddress' }, 400);
-      }
+    const tokens = await context.getTokenCatalog();
+    const tokenInfo = tokens.find(token => token.symbol.toUpperCase() === tokenSymbol);
+    if (!tokenInfo) {
+      return createJsonResponse(context.jsonHeaders, { error: `Token ${tokenSymbol} not found` }, 404);
+    }
+    if (!Number.isSafeInteger(tokenInfo.decimals) || tokenInfo.decimals < 0 || tokenInfo.decimals > 255) {
+      throw new Error(`FAUCET_TOKEN_DECIMALS_INVALID:${tokenInfo.symbol}:${String(tokenInfo.decimals)}`);
+    }
+    const amountWei = ethers.parseUnits(amount, tokenInfo.decimals);
 
-      context.emitDebugEvent({
-        event: 'debug_event',
-        runtimeId: context.getRuntimeId(),
-        status: 'info',
-        reason: 'FAUCET_ERC20_REQUEST',
-        details: { requestId, userAddress, tokenSymbol, amount },
-      });
-
-      const tokens = await context.getTokenCatalog();
-      const tokenInfo = tokens.find((token) => token.symbol.toUpperCase() === tokenSymbol);
-      if (!tokenInfo) {
-        return createJsonResponse(context.jsonHeaders, { error: `Token ${tokenSymbol} not found` }, 404);
-      }
-      if (!Number.isSafeInteger(tokenInfo.decimals) || tokenInfo.decimals < 0 || tokenInfo.decimals > 255) {
-        throw new Error(`FAUCET_TOKEN_DECIMALS_INVALID:${tokenInfo.symbol}:${String(tokenInfo.decimals)}`);
-      }
-      const amountWei = ethers.parseUnits(amount, tokenInfo.decimals);
-
-      if (adapter.mode === 'browservm') {
-        return await withFaucetWalletLock(context, adapter, async () => {
-          externalWalletLog.debug('faucet.erc20.browservm_fund', {
-            requestId,
-            amountWei: amountWei.toString(),
-          });
-          const funded = await context.fundBrowserVmWallet(userAddress, amountWei, tokenInfo.symbol);
-          if (!funded) {
-            return createJsonResponse(context.jsonHeaders, { error: 'BrowserVM faucet unavailable' }, 503);
-          }
-          context.emitDebugEvent({
-            event: 'debug_event',
-            runtimeId: context.getRuntimeId(),
-            status: 'delivered',
-            reason: 'FAUCET_ERC20_BROWSER_VM_OK',
-            details: { requestId, userAddress, tokenSymbol, amount },
-          });
-          return createJsonResponse(context.jsonHeaders, {
-            success: true,
-            type: 'erc20',
-            amount,
-            tokenSymbol,
-            userAddress,
-            requestId,
-          });
-        });
-      }
-
+    if (adapter.mode === 'browservm') {
       return await withFaucetWalletLock(context, adapter, async () => {
-        externalWalletLog.debug('faucet.erc20.token_catalog', { requestId, tokenCount: tokens.length });
-        let ethTxHash = '';
-        const userEth = await adapter.provider.getBalance(userAddress);
-        const minBalance = ethers.parseEther('0.01');
-        const targetBalance = ethers.parseEther('0.1');
-        const userTopupAmount = userEth < minBalance ? targetBalance - userEth : 0n;
-
-        externalWalletLog.debug('faucet.erc20.balance_check', { requestId });
-        const faucetWallet = await requireFaucetWalletBalances(context, adapter, tokens, {
-          requiredEth: ethers.parseEther('0.02') + userTopupAmount,
-          requiredTokenAddress: tokenInfo.address,
-          requiredTokenAmount: amountWei,
-        });
-        externalWalletLog.debug('faucet.erc20.transfer_start', {
+        externalWalletLog.debug('faucet.erc20.browservm_fund', {
           requestId,
-          token: tokenInfo.symbol,
           amountWei: amountWei.toString(),
         });
-        const tokenContract = ERC20Mock__factory.connect(
-          tokenInfo.address,
-          toErc20ContractRunner(faucetWallet, 'faucetWallet'),
-        );
-        const transferTx = await tokenContract.transfer(userAddress, amountWei);
-        externalWalletLog.debug('faucet.erc20.transfer_tx', { requestId, txHash: transferTx.hash });
-        let topupTx: WaitableTransaction | null = null;
-        if (userEth < minBalance) {
-          externalWalletLog.debug('faucet.erc20.gas_topup_start', {
-            requestId,
-            currentEth: userEth.toString(),
-          });
-          topupTx = await faucetWallet.sendTransaction({
-            to: userAddress,
-            value: targetBalance - userEth,
-          });
-          externalWalletLog.debug('faucet.erc20.gas_topup_tx', { requestId, txHash: topupTx.hash });
-          ethTxHash = topupTx.hash;
+        const funded = await context.fundBrowserVmWallet(userAddress, amountWei, tokenInfo.symbol);
+        if (!funded) {
+          return createJsonResponse(context.jsonHeaders, { error: 'BrowserVM faucet unavailable' }, 503);
         }
-
-        await Promise.all([
-          waitForFaucetTx(transferTx, 'user-token-transfer', { requestId, userAddress, tokenSymbol }),
-          ...(topupTx
-            ? [waitForFaucetTx(topupTx, 'user-gas-topup', { requestId, userAddress })]
-            : []),
-        ]);
-        externalWalletLog.debug('faucet.erc20.transfer_mined', { requestId, txHash: transferTx.hash });
-        if (topupTx) {
-          externalWalletLog.debug('faucet.erc20.gas_topup_mined', { requestId, txHash: topupTx.hash });
-        }
-
         context.emitDebugEvent({
           event: 'debug_event',
           runtimeId: context.getRuntimeId(),
           status: 'delivered',
-          reason: 'FAUCET_ERC20_OK',
-          details: {
-            requestId,
-            userAddress,
-            tokenSymbol,
-            amount,
-            txHash: transferTx.hash,
-            ethTxHash,
-          },
+          reason: 'FAUCET_ERC20_BROWSER_VM_OK',
+          details: { requestId, userAddress, tokenSymbol, amount },
         });
         return createJsonResponse(context.jsonHeaders, {
           success: true,
@@ -603,188 +518,260 @@ export const createExternalWalletApi = (context: ExternalWalletApiContext) => {
           amount,
           tokenSymbol,
           userAddress,
-          txHash: transferTx.hash,
-          ethTxHash,
           requestId,
         });
       });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      externalWalletLog.error('faucet.erc20.failed', { error: message });
-      context.emitDebugEvent({
-        event: 'error',
-        runtimeId: context.getRuntimeId(),
-        status: 'failed',
-        reason: 'FAUCET_ERC20_FAILED',
-        details: { error: message },
-      });
-      return createJsonResponse(context.jsonHeaders, { error: message }, 500);
     }
-  };
 
-  const handleWalletSnapshot = async (request: Request): Promise<Response> => {
-    try {
-      const adapter = context.getJAdapter();
-      if (!adapter) {
-        return createJsonResponse(context.jsonHeaders, { error: 'J-adapter not initialized' }, 503);
-      }
+    return await withFaucetWalletLock(context, adapter, async () => {
+      externalWalletLog.debug('faucet.erc20.token_catalog', { requestId, tokenCount: tokens.length });
+      let ethTxHash = '';
+      const userEth = await adapter.provider.getBalance(userAddress);
+      const minBalance = ethers.parseEther('0.01');
+      const targetBalance = ethers.parseEther('0.1');
+      const userTopupAmount = userEth < minBalance ? targetBalance - userEth : 0n;
 
-      const { entityId, owner, tokenAddresses, allowances } = await readWalletSnapshotBody(request);
-      if (!entityId.startsWith('0x') || entityId.length !== 66) {
-        return createJsonResponse(context.jsonHeaders, { error: 'Invalid entityId' }, 400);
-      }
-      if (!ethers.isAddress(owner)) {
-        return createJsonResponse(context.jsonHeaders, { error: 'Invalid owner' }, 400);
-      }
-
-      const tokenCatalog = await context.getTokenCatalog();
-      const requestedTokenAddresses = (tokenAddresses && tokenAddresses.length > 0
-        ? tokenAddresses
-        : tokenCatalog.map((token) => token.address)
-      ).filter((address) => ethers.isAddress(address));
-      const normalizedOwner = ethers.getAddress(owner).toLowerCase();
-      const source = await readExternalWalletSnapshotSource(adapter);
-      const snapshot = await adapter.readWalletSnapshot({
-        owner: normalizedOwner,
-        tokenAddresses: requestedTokenAddresses,
-        allowances: allowances ?? [],
-        includeNativeBalance: true,
-        blockTag: source.sourceHeight,
+      externalWalletLog.debug('faucet.erc20.balance_check', { requestId });
+      const faucetWallet = await requireFaucetWalletBalances(context, adapter, tokens, {
+        requiredEth: ethers.parseEther('0.02') + userTopupAmount,
+        requiredTokenAddress: tokenInfo.address,
+        requiredTokenAmount: amountWei,
       });
-      assertSnapshotArrayLength(snapshot.tokenBalances, requestedTokenAddresses.length, 'tokenBalances');
-      assertSnapshotArrayLength(snapshot.allowances, (allowances ?? []).length, 'allowances');
-      const nativeBalance = requireSnapshotBigInt(snapshot.nativeBalance, 'nativeBalance');
-      const transactionHash = [
-        'external-wallet-snapshot',
-        source.sourceHeight,
-        entityId,
-        normalizedOwner,
-      ].join(':');
-      const tokenIdByAddress = new Map(
-        tokenCatalog
-          .filter((token) => ethers.isAddress(token.address))
-          .map((token) => [token.address.toLowerCase(), token.tokenId]),
-      );
-      const tokenErrorByAddress = new Map(
-        (snapshot.tokenErrors ?? []).map((entry) => [
-          String(entry.tokenAddress || '').trim().toLowerCase(),
-          String(entry.error || 'EXTERNAL_WALLET_SNAPSHOT_TOKEN_READ_FAILED'),
-        ]),
-      );
-      const allowanceErrorByKey = new Map(
-        (snapshot.allowanceErrors ?? []).map((entry) => [
-          `${String(entry.tokenAddress || '').trim().toLowerCase()}:${String(entry.spender || '').trim().toLowerCase()}`,
-          String(entry.error || 'EXTERNAL_WALLET_SNAPSHOT_ALLOWANCE_READ_FAILED'),
-        ]),
-      );
-      const tokenBalances = requestedTokenAddresses.map((tokenAddress, index) => {
-        const normalizedAddress = ethers.getAddress(tokenAddress).toLowerCase();
-        const tokenId = tokenIdByAddress.get(normalizedAddress);
-        const tokenError = tokenErrorByAddress.get(normalizedAddress);
-        return {
-          tokenAddress: normalizedAddress,
-          ...(typeof tokenId === 'number' ? { tokenId } : {}),
-          balance: requireSnapshotBigInt(snapshot.tokenBalances[index], `tokenBalance:${normalizedAddress}`).toString(),
-          ...(tokenError ? { error: tokenError } : {}),
-        };
+      externalWalletLog.debug('faucet.erc20.transfer_start', {
+        requestId,
+        token: tokenInfo.symbol,
+        amountWei: amountWei.toString(),
       });
-      const allowancePayload = (allowances ?? []).map((entry, index) => {
-        const tokenAddress = ethers.getAddress(entry.tokenAddress).toLowerCase();
-        const spender = ethers.getAddress(entry.spender).toLowerCase();
-        const allowanceError = allowanceErrorByKey.get(`${tokenAddress}:${spender}`);
-        return {
-          tokenAddress,
-          spender,
-          allowance: requireSnapshotBigInt(
-            snapshot.allowances[index],
-            `allowance:${entry.tokenAddress}:${entry.spender}`,
-          ).toString(),
-          ...(allowanceError ? { error: allowanceError } : {}),
-        };
+      const tokenContract = ERC20Mock__factory.connect(
+        tokenInfo.address,
+        toErc20ContractRunner(faucetWallet, 'faucetWallet'),
+      );
+      const transferTx = await tokenContract.transfer(userAddress, amountWei);
+      externalWalletLog.debug('faucet.erc20.transfer_tx', { requestId, txHash: transferTx.hash });
+      let topupTx: WaitableTransaction | null = null;
+      if (userEth < minBalance) {
+        externalWalletLog.debug('faucet.erc20.gas_topup_start', {
+          requestId,
+          currentEth: userEth.toString(),
+        });
+        topupTx = await faucetWallet.sendTransaction({
+          to: userAddress,
+          value: targetBalance - userEth,
+        });
+        externalWalletLog.debug('faucet.erc20.gas_topup_tx', { requestId, txHash: topupTx.hash });
+        ethTxHash = topupTx.hash;
+      }
+
+      await Promise.all([
+        waitForFaucetTx(transferTx, 'user-token-transfer', { requestId, userAddress, tokenSymbol }),
+        ...(topupTx ? [waitForFaucetTx(topupTx, 'user-gas-topup', { requestId, userAddress })] : []),
+      ]);
+      externalWalletLog.debug('faucet.erc20.transfer_mined', { requestId, txHash: transferTx.hash });
+      if (topupTx) {
+        externalWalletLog.debug('faucet.erc20.gas_topup_mined', { requestId, txHash: topupTx.hash });
+      }
+
+      context.emitDebugEvent({
+        event: 'debug_event',
+        runtimeId: context.getRuntimeId(),
+        status: 'delivered',
+        reason: 'FAUCET_ERC20_OK',
+        details: {
+          requestId,
+          userAddress,
+          tokenSymbol,
+          amount,
+          txHash: transferTx.hash,
+          ethTxHash,
+        },
       });
       return createJsonResponse(context.jsonHeaders, {
         success: true,
-        entityId,
-        owner: normalizedOwner,
-        blockNumber: source.sourceHeight,
-        blockHash: source.sourceHash,
-        headBlockNumber: source.headBlockNumber,
-        sourceHeight: source.sourceHeight,
-        sourceHash: source.sourceHash,
-        finalityDepth: source.finalityDepth,
-        transactionHash,
-        nativeBalance: nativeBalance.toString(),
-        tokenBalances,
-        allowances: allowancePayload,
-        ...(snapshot.tokenErrors?.length ? { tokenErrors: snapshot.tokenErrors } : {}),
-        ...(snapshot.allowanceErrors?.length ? { allowanceErrors: snapshot.allowanceErrors } : {}),
+        type: 'erc20',
+        amount,
+        tokenSymbol,
+        userAddress,
+        txHash: transferTx.hash,
+        ethTxHash,
+        requestId,
       });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      externalWalletLog.error('snapshot.failed', { error: message });
-      return createJsonResponse(context.jsonHeaders, { error: message }, 500);
-    }
-  };
-
-  const handleGasFaucet = async (request: Request): Promise<Response> => {
-    try {
-      const adapter = context.getJAdapter();
-      if (!adapter) {
-        return createJsonResponse(context.jsonHeaders, { error: 'J-adapter not initialized' }, 503);
-      }
-
-      const requestId = crypto.randomUUID();
-      const { userAddress, amount } = await readGasFaucetBody(request);
-      externalWalletLog.debug('faucet.gas.request', { requestId, userAddress, amount });
-      if (!ethers.isAddress(userAddress)) {
-        return createJsonResponse(context.jsonHeaders, { error: 'Invalid userAddress' }, 400);
-      }
-
-      const topupAmount = ethers.parseEther(amount);
-      return await withFaucetWalletLock(context, adapter, async () => {
-        const faucetWallet = await requireFaucetWalletBalances(context, adapter, [], {
-          requiredEth: topupAmount + ethers.parseEther('0.01'),
-        });
-        externalWalletLog.debug('faucet.gas.topup_start', {
-          requestId,
-          topupWei: topupAmount.toString(),
-        });
-        const tx = await faucetWallet.sendTransaction({
-          to: userAddress,
-          value: topupAmount,
-        });
-        externalWalletLog.debug('faucet.gas.topup_tx', { requestId, txHash: tx.hash });
-        await tx.wait();
-        externalWalletLog.debug('faucet.gas.topup_mined', { requestId, txHash: tx.hash });
-        return createJsonResponse(context.jsonHeaders, {
-          success: true,
-          type: 'gas',
-          amount,
-          userAddress,
-          txHash: tx.hash,
-          requestId,
-        });
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      externalWalletLog.error('faucet.gas.failed', { error: message });
-      return createJsonResponse(context.jsonHeaders, { error: message }, 500);
-    }
-  };
-
-  return {
-    provisionFaucetWallet: async (): Promise<void> => {
-      const adapter = context.getJAdapter();
-      if (!adapter) throw new Error('J-adapter not initialized');
-      const tokens = await context.getTokenCatalog();
-      await provisionFaucetWalletFunding(context, adapter, tokens, {
-        ensureEth: true,
-        ensureTokens: adapter.mode !== 'browservm',
-      });
-    },
-    handleTokens,
-    handleWalletSnapshot,
-    handleErc20Faucet,
-    handleGasFaucet,
-  };
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    externalWalletLog.error('faucet.erc20.failed', { error: message });
+    context.emitDebugEvent({
+      event: 'error',
+      runtimeId: context.getRuntimeId(),
+      status: 'failed',
+      reason: 'FAUCET_ERC20_FAILED',
+      details: { error: message },
+    });
+    return createJsonResponse(context.jsonHeaders, { error: message }, 500);
+  }
 };
+
+const handleWalletSnapshot = async (context: ExternalWalletApiContext, request: Request): Promise<Response> => {
+  try {
+    const adapter = context.getJAdapter();
+    if (!adapter) {
+      return createJsonResponse(context.jsonHeaders, { error: 'J-adapter not initialized' }, 503);
+    }
+
+    const { entityId, owner, tokenAddresses, allowances } = await readWalletSnapshotBody(request);
+    if (!entityId.startsWith('0x') || entityId.length !== 66) {
+      return createJsonResponse(context.jsonHeaders, { error: 'Invalid entityId' }, 400);
+    }
+    if (!ethers.isAddress(owner)) {
+      return createJsonResponse(context.jsonHeaders, { error: 'Invalid owner' }, 400);
+    }
+
+    const tokenCatalog = await context.getTokenCatalog();
+    const requestedTokenAddresses = (
+      tokenAddresses && tokenAddresses.length > 0 ? tokenAddresses : tokenCatalog.map(token => token.address)
+    ).filter(address => ethers.isAddress(address));
+    const normalizedOwner = ethers.getAddress(owner).toLowerCase();
+    const source = await readExternalWalletSnapshotSource(adapter);
+    const snapshot = await adapter.readWalletSnapshot({
+      owner: normalizedOwner,
+      tokenAddresses: requestedTokenAddresses,
+      allowances: allowances ?? [],
+      includeNativeBalance: true,
+      blockTag: source.sourceHeight,
+    });
+    assertSnapshotArrayLength(snapshot.tokenBalances, requestedTokenAddresses.length, 'tokenBalances');
+    assertSnapshotArrayLength(snapshot.allowances, (allowances ?? []).length, 'allowances');
+    const nativeBalance = requireSnapshotBigInt(snapshot.nativeBalance, 'nativeBalance');
+    const transactionHash = ['external-wallet-snapshot', source.sourceHeight, entityId, normalizedOwner].join(':');
+    const tokenIdByAddress = new Map(
+      tokenCatalog
+        .filter(token => ethers.isAddress(token.address))
+        .map(token => [token.address.toLowerCase(), token.tokenId]),
+    );
+    const tokenErrorByAddress = new Map(
+      (snapshot.tokenErrors ?? []).map(entry => [
+        String(entry.tokenAddress || '')
+          .trim()
+          .toLowerCase(),
+        String(entry.error || 'EXTERNAL_WALLET_SNAPSHOT_TOKEN_READ_FAILED'),
+      ]),
+    );
+    const allowanceErrorByKey = new Map(
+      (snapshot.allowanceErrors ?? []).map(entry => [
+        `${String(entry.tokenAddress || '')
+          .trim()
+          .toLowerCase()}:${String(entry.spender || '')
+          .trim()
+          .toLowerCase()}`,
+        String(entry.error || 'EXTERNAL_WALLET_SNAPSHOT_ALLOWANCE_READ_FAILED'),
+      ]),
+    );
+    const tokenBalances = requestedTokenAddresses.map((tokenAddress, index) => {
+      const normalizedAddress = ethers.getAddress(tokenAddress).toLowerCase();
+      const tokenId = tokenIdByAddress.get(normalizedAddress);
+      const tokenError = tokenErrorByAddress.get(normalizedAddress);
+      return {
+        tokenAddress: normalizedAddress,
+        ...(typeof tokenId === 'number' ? { tokenId } : {}),
+        balance: requireSnapshotBigInt(snapshot.tokenBalances[index], `tokenBalance:${normalizedAddress}`).toString(),
+        ...(tokenError ? { error: tokenError } : {}),
+      };
+    });
+    const allowancePayload = (allowances ?? []).map((entry, index) => {
+      const tokenAddress = ethers.getAddress(entry.tokenAddress).toLowerCase();
+      const spender = ethers.getAddress(entry.spender).toLowerCase();
+      const allowanceError = allowanceErrorByKey.get(`${tokenAddress}:${spender}`);
+      return {
+        tokenAddress,
+        spender,
+        allowance: requireSnapshotBigInt(
+          snapshot.allowances[index],
+          `allowance:${entry.tokenAddress}:${entry.spender}`,
+        ).toString(),
+        ...(allowanceError ? { error: allowanceError } : {}),
+      };
+    });
+    return createJsonResponse(context.jsonHeaders, {
+      success: true,
+      entityId,
+      owner: normalizedOwner,
+      blockNumber: source.sourceHeight,
+      blockHash: source.sourceHash,
+      headBlockNumber: source.headBlockNumber,
+      sourceHeight: source.sourceHeight,
+      sourceHash: source.sourceHash,
+      finalityDepth: source.finalityDepth,
+      transactionHash,
+      nativeBalance: nativeBalance.toString(),
+      tokenBalances,
+      allowances: allowancePayload,
+      ...(snapshot.tokenErrors?.length ? { tokenErrors: snapshot.tokenErrors } : {}),
+      ...(snapshot.allowanceErrors?.length ? { allowanceErrors: snapshot.allowanceErrors } : {}),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    externalWalletLog.error('snapshot.failed', { error: message });
+    return createJsonResponse(context.jsonHeaders, { error: message }, 500);
+  }
+};
+
+const handleGasFaucet = async (context: ExternalWalletApiContext, request: Request): Promise<Response> => {
+  try {
+    const adapter = context.getJAdapter();
+    if (!adapter) {
+      return createJsonResponse(context.jsonHeaders, { error: 'J-adapter not initialized' }, 503);
+    }
+
+    const requestId = crypto.randomUUID();
+    const { userAddress, amount } = await readGasFaucetBody(request);
+    externalWalletLog.debug('faucet.gas.request', { requestId, userAddress, amount });
+    if (!ethers.isAddress(userAddress)) {
+      return createJsonResponse(context.jsonHeaders, { error: 'Invalid userAddress' }, 400);
+    }
+
+    const topupAmount = ethers.parseEther(amount);
+    return await withFaucetWalletLock(context, adapter, async () => {
+      const faucetWallet = await requireFaucetWalletBalances(context, adapter, [], {
+        requiredEth: topupAmount + ethers.parseEther('0.01'),
+      });
+      externalWalletLog.debug('faucet.gas.topup_start', {
+        requestId,
+        topupWei: topupAmount.toString(),
+      });
+      const tx = await faucetWallet.sendTransaction({
+        to: userAddress,
+        value: topupAmount,
+      });
+      externalWalletLog.debug('faucet.gas.topup_tx', { requestId, txHash: tx.hash });
+      await tx.wait();
+      externalWalletLog.debug('faucet.gas.topup_mined', { requestId, txHash: tx.hash });
+      return createJsonResponse(context.jsonHeaders, {
+        success: true,
+        type: 'gas',
+        amount,
+        userAddress,
+        txHash: tx.hash,
+        requestId,
+      });
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    externalWalletLog.error('faucet.gas.failed', { error: message });
+    return createJsonResponse(context.jsonHeaders, { error: message }, 500);
+  }
+};
+
+export const createExternalWalletApi = (context: ExternalWalletApiContext) => ({
+  provisionFaucetWallet: async (): Promise<void> => {
+    const adapter = context.getJAdapter();
+    if (!adapter) throw new Error('J-adapter not initialized');
+    const tokens = await context.getTokenCatalog();
+    await provisionFaucetWalletFunding(context, adapter, tokens, {
+      ensureEth: true,
+      ensureTokens: adapter.mode !== 'browservm',
+    });
+  },
+  handleTokens: () => handleTokens(context),
+  handleWalletSnapshot: (request: Request) => handleWalletSnapshot(context, request),
+  handleErc20Faucet: (request: Request) => handleErc20Faucet(context, request),
+  handleGasFaucet: (request: Request) => handleGasFaucet(context, request),
+});
