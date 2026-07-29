@@ -243,6 +243,8 @@ export const applyEntityInput = async (
     outputs: entityOutbox,
     jOutputs: jOutbox,
     workingReplica,
+    candidateEffects: phaseContext.candidateEffects,
+    storageChanges: phaseContext.storageChanges,
     ...(phaseContext.canonicalAppliedInput ? { canonicalAppliedInput: phaseContext.canonicalAppliedInput } : {}),
   };
 };

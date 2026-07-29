@@ -1064,6 +1064,11 @@ export interface CertifiedEntityLineageAnchor {
 
 export type EntityCandidateEffect =
   | {
+      kind: 'entityFrameHistory';
+      entityId: string;
+      link: CertifiedEntityFrameLink;
+    }
+  | {
       kind: 'accountFrameHistory';
       entityId: string;
       counterpartyId: string;

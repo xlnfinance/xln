@@ -1,9 +1,11 @@
 import type {
   EntityInput,
+  EntityCandidateEffect,
   EntityReplica,
   EntityState,
   RuntimeState,
   JInput,
+  RuntimeOverlayRecord,
 } from '../../types';
 
 export type EntityInputOutcome =
@@ -18,6 +20,8 @@ export type ApplyEntityInputResult = {
   outputs: EntityInput[];
   jOutputs: JInput[];
   workingReplica: EntityReplica;
+  candidateEffects: EntityCandidateEffect[];
+  storageChanges: RuntimeOverlayRecord[];
   canonicalAppliedInput?: EntityInput;
 };
 
@@ -27,6 +31,8 @@ export type ApplyEntityInputContext = {
   workingReplica: EntityReplica;
   entityOutbox: EntityInput[];
   jOutbox: JInput[];
+  candidateEffects: EntityCandidateEffect[];
+  storageChanges: RuntimeOverlayRecord[];
   frameHash: string;
   canonicalAppliedInput?: EntityInput;
 };
@@ -39,6 +45,8 @@ export const commitEntityConsensusInput = (
   outputs: context.entityOutbox,
   jOutputs: context.jOutbox,
   workingReplica: context.workingReplica,
+  candidateEffects: context.candidateEffects,
+  storageChanges: context.storageChanges,
   ...(context.canonicalAppliedInput
     ? { canonicalAppliedInput: context.canonicalAppliedInput }
     : {}),
@@ -53,6 +61,8 @@ export const noopEntityConsensusInput = (
   outputs: [],
   jOutputs: [],
   workingReplica: context.workingReplica,
+  candidateEffects: [],
+  storageChanges: [],
 });
 
 export const deferEntityConsensusInput = (
@@ -64,6 +74,8 @@ export const deferEntityConsensusInput = (
   outputs: [],
   jOutputs: [],
   workingReplica: context.workingReplica,
+  candidateEffects: [],
+  storageChanges: [],
 });
 
 export const rejectEntityConsensusInput = (
@@ -75,4 +87,6 @@ export const rejectEntityConsensusInput = (
   outputs: [],
   jOutputs: [],
   workingReplica: context.workingReplica,
+  candidateEffects: [],
+  storageChanges: [],
 });

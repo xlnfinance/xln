@@ -1,7 +1,6 @@
 import { cacheCommittedAccountJClaimNodeChanges } from '../../account/j-claim-store';
 import { buildQuorumHanko } from '../../hanko/signing';
 import { logError, shortHash, shortId } from '../../infra/logger';
-import { applyStorageChanges, publishEntityCandidateEffects } from '../../runtime/env-events';
 import { removeCommittedTxsFromMempool } from '../../state-helpers';
 import type {
   EntityState,
@@ -174,7 +173,7 @@ const installCommittedState = (
   execution: ValidatorEntityFrameExecution,
   hankos: HankoString[],
 ): void => {
-  const { env, workingReplica } = context;
+  const { env, workingReplica, candidateEffects, storageChanges } = context;
   const previousState = workingReplica.state;
   const committedState = {
     ...execution.state,
@@ -193,23 +192,23 @@ const installCommittedState = (
     execution.accountJClaimNodeChanges,
   );
   workingReplica.state = committedState;
-  applyStorageChanges(env, committedState, [
+  storageChanges.push(
     ...execution.storageChanges,
     { family: 'entity', entityId: committedState.entityId },
-  ]);
+  );
   emitCommittedPendingFrameWarnings(previousState, committedState);
   emitCommittedEntitySizeLog(entitySizeLog);
   frame.hankos = hankos;
   appendCertifiedEntityFrameLink(
-    env,
     workingReplica,
     buildCertifiedEntityFrameLink(
       committedState.entityId,
       frame,
       committedState,
     ),
+    candidateEffects,
   );
-  publishEntityCandidateEffects(env, execution.candidateEffects);
+  candidateEffects.push(...execution.candidateEffects);
   pruneReplicaFinalizedJHistory(workingReplica);
   if (frame.txs.length > 0) {
     workingReplica.mempool = removeCommittedTxsFromMempool(

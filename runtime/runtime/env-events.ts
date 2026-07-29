@@ -370,7 +370,9 @@ export const publishEntityCandidateEffects = (
   effects: readonly EntityCandidateEffect[],
 ): void => {
   for (const effect of effects) {
-    if (effect.kind === 'accountFrameHistory') {
+    if (effect.kind === 'entityFrameHistory') {
+      recordEntityFrameHistory(env, effect);
+    } else if (effect.kind === 'accountFrameHistory') {
       recordAccountFrameHistory(env, effect);
     } else if (effect.kind === 'runtimeEvent') {
       env.emit(effect.eventName, effect.data);

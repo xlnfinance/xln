@@ -37,6 +37,8 @@ const rejectIngress = (
     outputs: [],
     jOutputs: [],
     workingReplica: replica,
+    candidateEffects: [],
+    storageChanges: [],
   },
 });
 
@@ -139,6 +141,8 @@ export const prepareEntityInputIngress = (
       workingReplica,
       entityOutbox: [],
       jOutbox: [],
+      candidateEffects: [],
+      storageChanges: [],
       frameHash,
     },
     entityDisplay,

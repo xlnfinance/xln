@@ -17,6 +17,10 @@ import { isRuntimePerfProfileEnabled, readRuntimePerfSlowMs } from '../infra/per
 import { DEBUG, getPerfMs } from '../utils';
 import { createStructuredLogger, logError, shortId } from '../infra/logger';
 import { classifyEntityInputApplyFailure, type EntityInputApplyFailureKind } from '../entity/tx/invariant-errors';
+import {
+  applyStorageChanges,
+  publishEntityCandidateEffects,
+} from './env-events';
 
 const entityInputLog = createStructuredLogger('runtime.entity_inputs');
 
@@ -273,6 +277,11 @@ const collectCommittedEntityResult = (
   context: RuntimeEntityInputBatchContext,
 ): void => {
   env.eReplicas.set(replicaKey, result.nextReplica);
+  // Entity consensus only describes committed effects. Runtime owns the live
+  // aggregate state and is therefore the sole layer allowed to materialize
+  // storage invalidations, history records, and host-visible notifications.
+  applyStorageChanges(env, result.nextReplica.state, result.storageChanges);
+  publishEntityCandidateEffects(env, result.candidateEffects);
   routeCommittedEntityOutputs(env, result.outputs, context);
   if (result.jOutputs.length === 0) return;
   entityInputLog.debug('j_outputs.collected', {
@@ -634,6 +643,8 @@ const applyEntityInputToReplica = async (
   nextReplica: EntityReplica;
   outputs: RoutedEntityInput[];
   jOutputs: JInput[];
+  candidateEffects: Awaited<ReturnType<typeof applyEntityInput>>['candidateEffects'];
+  storageChanges: Awaited<ReturnType<typeof applyEntityInput>>['storageChanges'];
 }> => {
   if (DEBUG) {
     entityInputLog.debug('input.processing', {
@@ -663,7 +674,16 @@ const applyEntityInputToReplica = async (
   } catch (error) {
     throw new RuntimeEntityInputApplyError(entityInput, trustedLocalCrossJurisdiction, error);
   }
-  const { outcome, newState, outputs, jOutputs, workingReplica, canonicalAppliedInput } = applied;
+  const {
+    outcome,
+    newState,
+    outputs,
+    jOutputs,
+    workingReplica,
+    candidateEffects,
+    storageChanges,
+    canonicalAppliedInput,
+  } = applied;
   // Consensus may canonicalize the applied body (for example, signing a local
   // leader vote), while Runtime routing provenance must remain byte-identical
   // to the authenticated envelope. Dropping the origin here makes WAL replay
@@ -690,6 +710,8 @@ const applyEntityInputToReplica = async (
     nextReplica,
     outputs: decodeEntityOutputs(outputs, replicaKey),
     jOutputs: jOutputs || [],
+    candidateEffects,
+    storageChanges,
   };
 };
 

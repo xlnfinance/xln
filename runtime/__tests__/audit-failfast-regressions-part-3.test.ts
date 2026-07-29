@@ -876,9 +876,9 @@ describe('audit fail-fast regressions', () => {
     });
     expect(applied.outcome).toEqual({ kind: 'committed' });
     expect(applied.newState.lastFinalizedJHeight).toBe(rangeData.scannedThroughHeight);
-    const marks = env.runtimeState?.currentStorageOverlayMarks ?? [];
+    expect(env.runtimeState?.currentStorageOverlayMarks ?? []).toEqual([]);
     expect(
-      marks.some(
+      applied.storageChanges.some(
         record =>
           record.family === 'account' &&
           record.entityId === entityId &&

@@ -43,7 +43,6 @@ import {
 } from '../../orderbook/swap-execution';
 import { cloneIsolatedProposedEntityFrame } from '../../protocol/runtime-input-clone';
 import { compareStableText, safeStringify } from '../../protocol/serialization';
-import { recordEntityFrameHistory } from '../../runtime/env-events';
 import { nodeProcess } from '../../infra/runtime-process';
 import { recordRuntimeSecurityIncident, resolveRuntimeSecurityIncident } from '../../runtime/security-incidents';
 import type {
@@ -53,6 +52,7 @@ import type {
   ConsensusConfig,
   ConsensusOutputOrigin,
   EntityFrameAuthority,
+  EntityCandidateEffect,
   EntityInput,
   EntityLeaderCertificate,
   EntityLeaderTimeoutVote,
@@ -1443,9 +1443,9 @@ export const buildCertifiedEntityFrameLink = (
 };
 
 export const appendCertifiedEntityFrameLink = (
-  env: RuntimeState,
   replica: EntityReplica,
   link: CertifiedEntityFrameLink,
+  candidateEffects: EntityCandidateEffect[],
 ): void => {
   const lineage = replica.certifiedFrameLineage ?? [];
   const sameHeight = lineage.filter(candidate => candidate.frame.height === link.frame.height);
@@ -1458,7 +1458,11 @@ export const appendCertifiedEntityFrameLink = (
   }
   const fingerprint = encodeCanonicalEntityConsensusValue(link);
   if (sameHeight.some(candidate => encodeCanonicalEntityConsensusValue(candidate) === fingerprint)) return;
-  recordEntityFrameHistory(env, { entityId: replica.entityId, link });
+  candidateEffects.push({
+    kind: 'entityFrameHistory',
+    entityId: replica.entityId,
+    link: structuredClone(link),
+  });
   // The exact old history is durable in the Runtime/frame WAL. Keep only the
   // contiguous links produced after this R-frame's rolling anchor: a cross-j
   // cascade may certify the same Entity more than once before the R-frame is

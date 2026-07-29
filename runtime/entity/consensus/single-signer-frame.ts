@@ -3,7 +3,6 @@ import { cacheCommittedAccountJClaimNodeChanges } from '../../account/j-claim-st
 import { signEntityHashes } from '../../hanko/signing';
 import { cumulativeMarksToPhases } from '../../infra/perf-profile';
 import { assertFrameJPrefix } from '../../jurisdiction/j-prefix-consensus';
-import { applyStorageChanges, publishEntityCandidateEffects } from '../../runtime/env-events';
 import { removeCommittedTxsFromMempool } from '../../state-helpers';
 import type { ProposedEntityFrame } from '../../types';
 import { getPerfMs } from '../../utils';
@@ -233,7 +232,14 @@ const installSingleSignerFrame = async (
   options: SingleSignerFrameOptions,
   execution: Awaited<ReturnType<typeof buildSingleSignerFrame>>,
 ): Promise<void> => {
-  const { env, entityOutbox, jOutbox, workingReplica } = context;
+  const {
+    env,
+    entityOutbox,
+    jOutbox,
+    workingReplica,
+    candidateEffects,
+    storageChanges,
+  } = context;
   const committedState = {
     ...execution.state,
     prevFrameHash: execution.frame.hash,
@@ -256,14 +262,13 @@ const installSingleSignerFrame = async (
   cacheCommittedAccountJClaimNodeChanges(env, execution.accountJClaimNodeChanges);
   const priorState = workingReplica.state;
   workingReplica.state = committedState;
-  applyStorageChanges(env, committedState, [
+  storageChanges.push(
     ...execution.storageChanges,
     { family: 'entity', entityId: committedState.entityId },
-  ]);
+  );
   emitCommittedPendingFrameWarnings(priorState, committedState);
   emitCommittedEntitySizeLog(sizeLog);
   appendCertifiedEntityFrameLink(
-    env,
     workingReplica,
     buildCertifiedEntityFrameLink(
       workingReplica.state.entityId,
@@ -274,8 +279,9 @@ const installSingleSignerFrame = async (
         authority: execution.authority,
       },
     ),
+    candidateEffects,
   );
-  publishEntityCandidateEffects(env, execution.candidateEffects);
+  candidateEffects.push(...execution.candidateEffects);
   pruneReplicaFinalizedJHistory(workingReplica);
   await runLocalPostCommitHooks(env, workingReplica, entityOutbox);
   workingReplica.lastConsensusProgressAt = env.timestamp;

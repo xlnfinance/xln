@@ -2180,7 +2180,7 @@ describe('audit fail-fast regressions', () => {
     } as EntityReplica;
     replica.state.config = makeSingleSignerConfigFor(signerId);
 
-    await applyEntityInput(env, replica, {
+    const result = await applyEntityInput(env, replica, {
       entityId,
       signerId,
       entityTxs: [
@@ -2195,8 +2195,10 @@ describe('audit fail-fast regressions', () => {
         } as any,
       ],
     });
-    const marks = env.runtimeState?.currentStorageOverlayMarks ?? [];
-    expect(marks.some(record => record.family === 'entity' && record.entityId === entityId)).toBe(true);
+    expect(env.runtimeState?.currentStorageOverlayMarks ?? []).toEqual([]);
+    expect(
+      result.storageChanges.some(record => record.family === 'entity' && record.entityId === entityId),
+    ).toBe(true);
   });
 
   test('entity reducers return exact storage changes and invalidate account Merkle cache only after success', async () => {

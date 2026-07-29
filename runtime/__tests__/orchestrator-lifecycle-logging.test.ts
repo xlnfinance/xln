@@ -73,8 +73,8 @@ test('managed custody children terminate when their spawning process is replaced
   const custody = readFileSync(join(process.cwd(), 'custody/server.ts'), 'utf8');
 
   expect(bootstrap).toContain("XLN_MANAGED_PARENT_PID: String(process.pid)");
-  expect(daemon).toContain("startParentLivenessWatch('runtime-server'");
-  expect(custody).toContain("startParentLivenessWatch('custody-service'");
+  expect(daemon).toMatch(/startParentLivenessWatch\(\s*'runtime-server'/);
+  expect(custody).toMatch(/startParentLivenessWatch\(\s*'custody-service'/);
 });
 
 test('managed child survives with its parent and exits after the exact parent is killed', async () => {
