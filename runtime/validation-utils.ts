@@ -16,7 +16,7 @@ import {
   validateObject,
   validateString,
 } from './protocol/validation-primitives';
-import { safeStringify } from './protocol/serialization';
+import { validateAccountState } from './account/state-validation';
 export {
   FinancialDataCorruptionError,
   TypeSafetyViolationError,
@@ -24,27 +24,19 @@ export {
   safeMapGet,
   validateEntityId,
 } from './protocol/validation-primitives';
-import { isLeftEntity } from './entity/id';
-import { decodeAccountFrame } from './account/frame-validation';
-import { validateDelta } from './account/delta-validation';
-import { validateSwapHistoryMap } from './account/swap-history-validation';
 import type {
   ConsensusConfig,
   RoutedEntityInput,
   EntityReplica,
   EntityState,
-  AccountState,
   EntityLeaderTimeoutVote,
   ProposedEntityFrame,
 } from './types';
-import { assertAccountJClaimAccumulatorState } from './account/j-claim-accumulator';
 import type { CrontabState, CrontabTaskMethod, CrontabTaskState, ScheduledHook, ScheduledHookType } from './entity/scheduler-types';
 import { validatePersistedValidatorEncryptionManifest } from './protocol/htlc/validator-encryption';
-import { LIMITS, TOKENS } from './constants';
+import { LIMITS } from './constants';
 import { assertConsumptionAccumulatorState } from './entity/consumption-accumulator';
 import { assertEntityAccountCountWithinLimit } from './entity/account-capacity';
-import { assertAccountMempoolWithinLimit } from './account/mempool';
-import { normalizeAccountStateDomain, sameAccountStateDomain } from './account/state-root';
 import { assertEntityProviderActionIntent } from './entity/entity-provider-action';
 import type { EntityProviderActionIntent } from './types/entity-provider-actions';
 import { isRuntimeFailureSignal } from './protocol/failure-taxonomy';
@@ -139,75 +131,6 @@ export function decodeRoutedEntityInput(input: unknown): RoutedEntityInput {
   }
 
   return obj as unknown as RoutedEntityInput;
-}
-
-function validateBigIntMapValues(value: unknown, fieldName: string): void {
-  const map = validateMapInstance(value, fieldName);
-  for (const [key, entryValue] of map.entries()) {
-    if (typeof entryValue !== 'bigint') {
-      throw new FinancialDataCorruptionError(`${fieldName}[${String(key)}] must be bigint`, {
-        key: String(key),
-        value: entryValue,
-      });
-    }
-  }
-}
-
-function validateRebalanceFeeStateMap(value: unknown, fieldName: string): void {
-  const map = validateMapInstance(value, fieldName);
-  for (const [tokenId, rawFeeState] of map.entries()) {
-    const feeState = validateObject(rawFeeState, `${fieldName}[${String(tokenId)}]`);
-    validateNumber(feeState['feeTokenId'], `${fieldName}[${String(tokenId)}].feeTokenId`);
-    if (typeof feeState['feePaidUpfront'] !== 'bigint') {
-      throw new FinancialDataCorruptionError(`${fieldName}[${String(tokenId)}].feePaidUpfront must be bigint`);
-    }
-    if (typeof feeState['requestedAmount'] !== 'bigint') {
-      throw new FinancialDataCorruptionError(`${fieldName}[${String(tokenId)}].requestedAmount must be bigint`);
-    }
-    validateNumber(feeState['policyVersion'], `${fieldName}[${String(tokenId)}].policyVersion`);
-    validateNumber(feeState['requestedAt'], `${fieldName}[${String(tokenId)}].requestedAt`);
-    if (typeof feeState['requestedByLeft'] !== 'boolean') {
-      throw new FinancialDataCorruptionError(`${fieldName}[${String(tokenId)}].requestedByLeft must be boolean`);
-    }
-  }
-}
-
-const REBALANCE_POLICY_SIDES = new Set(['left', 'right']);
-const REBALANCE_POLICY_FIELDS = new Set([
-  'policyVersion', 'baseFee', 'liquidityFeeBps', 'gasFee', 'updatedAt',
-]);
-
-function validateRebalanceFeePolicies(value: unknown, fieldName: string): void {
-  const policies = validateMapInstance(value, fieldName);
-  for (const [tokenId, rawSides] of policies) {
-    if (!Number.isSafeInteger(tokenId) || Number(tokenId) <= 0 || Number(tokenId) > TOKENS.MAX_TOKEN_ID) {
-      throw new FinancialDataCorruptionError(`${fieldName} contains invalid tokenId ${String(tokenId)}`);
-    }
-    const sides = validateObject(rawSides, `${fieldName}[${String(tokenId)}]`);
-    assertExactFields(sides, REBALANCE_POLICY_SIDES, `${fieldName}[${String(tokenId)}]`);
-    if (sides['left'] === undefined && sides['right'] === undefined) {
-      throw new FinancialDataCorruptionError(`${fieldName}[${String(tokenId)}] must contain left or right policy`);
-    }
-    for (const side of ['left', 'right'] as const) {
-      if (sides[side] === undefined) continue;
-      const policy = validateObject(sides[side], `${fieldName}[${String(tokenId)}].${side}`);
-      assertExactFields(policy, REBALANCE_POLICY_FIELDS, `${fieldName}[${String(tokenId)}].${side}`);
-      if (!Number.isSafeInteger(policy['policyVersion']) || Number(policy['policyVersion']) <= 0) {
-        throw new FinancialDataCorruptionError(`${fieldName}[${String(tokenId)}].${side}.policyVersion is invalid`);
-      }
-      if (!Number.isSafeInteger(policy['updatedAt']) || Number(policy['updatedAt']) < 0) {
-        throw new FinancialDataCorruptionError(`${fieldName}[${String(tokenId)}].${side}.updatedAt is invalid`);
-      }
-      for (const fee of ['baseFee', 'liquidityFeeBps', 'gasFee'] as const) {
-        if (typeof policy[fee] !== 'bigint' || policy[fee] < 0n) {
-          throw new FinancialDataCorruptionError(`${fieldName}[${String(tokenId)}].${side}.${fee} is invalid`);
-        }
-      }
-      if ((policy['liquidityFeeBps'] as bigint) > 10_000n) {
-        throw new FinancialDataCorruptionError(`${fieldName}[${String(tokenId)}].${side}.liquidityFeeBps exceeds 10000`);
-      }
-    }
-  }
 }
 
 function validateBigIntRecordValues(value: unknown, fieldName: string): Record<string, bigint> {
@@ -412,162 +335,6 @@ function validateCrontabState(value: unknown, fieldName: string): CrontabState {
 // =============================================================================
 // COMPREHENSIVE VALIDATORS - Complete Type Safety
 // =============================================================================
-
-const validatePendingAccountResend = (
-  account: Record<string, unknown>,
-  context: string,
-): void => {
-  const pendingFrame = account['pendingFrame'];
-  const pendingInput = account['pendingAccountInput'];
-  const targetSigner = account['pendingAccountInputSignerId'];
-  const present = [pendingFrame, pendingInput, targetSigner].map(value => value !== undefined);
-  if (present.every(value => !value)) return;
-  if (!present.every(Boolean)) {
-    throw new FinancialDataCorruptionError(
-      `${context}.pendingFrame, pendingAccountInput and pendingAccountInputSignerId must be present together`,
-    );
-  }
-  if (typeof targetSigner !== 'string' || targetSigner.trim().length === 0) {
-    throw new FinancialDataCorruptionError(`${context}.pendingAccountInputSignerId must be a non-empty string`);
-  }
-  const input = validateObject(pendingInput, `${context}.pendingAccountInput`);
-  if (input['kind'] !== 'frame' && input['kind'] !== 'frame_ack') {
-    throw new FinancialDataCorruptionError(`${context}.pendingAccountInput must carry a frame proposal`);
-  }
-  const proposal = validateObject(input['proposal'], `${context}.pendingAccountInput.proposal`);
-  const storedFrame = decodeAccountFrame(pendingFrame, `${context}.pendingFrame`);
-  const proposedFrame = decodeAccountFrame(proposal['frame'], `${context}.pendingAccountInput.proposal.frame`);
-  if (safeStringify(proposedFrame) !== safeStringify(storedFrame)) {
-    throw new FinancialDataCorruptionError(
-      `${context}.pendingAccountInput proposal must exactly match pendingFrame`,
-    );
-  }
-  const proofHeader = validateObject(account['proofHeader'], `${context}.proofHeader`);
-  if (input['fromEntityId'] !== proofHeader['fromEntity'] || input['toEntityId'] !== proofHeader['toEntity']) {
-    throw new FinancialDataCorruptionError(`${context}.pendingAccountInput endpoints must match proofHeader`);
-  }
-  if (!sameAccountStateDomain(
-    normalizeAccountStateDomain(account['domain'] as AccountState['domain']),
-    normalizeAccountStateDomain(input['domain'] as AccountState['domain']),
-  )) {
-    throw new FinancialDataCorruptionError(`${context}.pendingAccountInput domain must match Account domain`);
-  }
-};
-
-/**
- * Validates AccountState objects - Bilateral account state machines
- * CRITICAL: Account integrity ensures payment routing safety
- */
-export function validateAccountState(value: unknown, context = 'AccountState'): AccountState {
-  const obj = validateObject(value, context);
-
-  // CANONICAL REPRESENTATION: Validate leftEntity/rightEntity (not counterpartyEntityId)
-  if (!obj['leftEntity'] || typeof obj['leftEntity'] !== 'string') {
-    throw new FinancialDataCorruptionError(`${context}.leftEntity must be a string`);
-  }
-  if (!obj['rightEntity'] || typeof obj['rightEntity'] !== 'string') {
-    throw new FinancialDataCorruptionError(`${context}.rightEntity must be a string`);
-  }
-  // Validate canonical ordering: leftEntity < rightEntity
-  if (!isLeftEntity(obj['leftEntity'], obj['rightEntity'])) {
-    throw new FinancialDataCorruptionError(`${context} canonical order violated: leftEntity must be < rightEntity`);
-  }
-  try {
-    normalizeAccountStateDomain(obj['domain'] as AccountState['domain']);
-  } catch (error) {
-    throw new FinancialDataCorruptionError(`${context}.domain is invalid`, {
-      cause: error instanceof Error ? error.message : String(error),
-    });
-  }
-
-  validateString(obj['status'], `${context}.status`);
-  validateArray(obj['mempool'], `${context}.mempool`);
-  assertAccountMempoolWithinLimit(
-    obj as unknown as Pick<AccountState, 'mempool'>,
-    `${context}.mempool`,
-  );
-  decodeAccountFrame(obj['currentFrame'], `${context}.currentFrame`);
-  validateMapInstance(obj['deltas'], `${context}.deltas`);
-  validateMapInstance(obj['locks'], `${context}.locks`);
-  validateMapInstance(obj['swapOffers'], `${context}.swapOffers`);
-  if (obj['pulls'] !== undefined) {
-    validateMapInstance(obj['pulls'], `${context}.pulls`);
-  }
-  if (obj['swapOrderHistory'] !== undefined) {
-    validateSwapHistoryMap(
-      obj['swapOrderHistory'],
-      `${context}.swapOrderHistory`,
-      LIMITS.MAX_ACCOUNT_SWAP_OFFERS + LIMITS.MAX_ACCOUNT_TERMINAL_SWAP_HISTORY,
-      'ACCOUNT_SWAP_HISTORY_LIMIT_EXCEEDED',
-    );
-  }
-  if (obj['swapClosedOrders'] !== undefined) {
-    validateSwapHistoryMap(
-      obj['swapClosedOrders'],
-      `${context}.swapClosedOrders`,
-      LIMITS.MAX_ACCOUNT_TERMINAL_SWAP_HISTORY,
-      'ACCOUNT_TERMINAL_SWAP_HISTORY_LIMIT_EXCEEDED',
-    );
-  }
-  if (obj['lendingIntents'] !== undefined) {
-    validateMapInstance(obj['lendingIntents'], `${context}.lendingIntents`);
-    const allowedIntents = new Set([
-      'fund',
-      'borrow',
-      'repay',
-      'credit-grant',
-      'credit-revoke',
-      'close-request',
-      'close-payout',
-    ]);
-    for (const [intentId, kind] of (obj['lendingIntents'] as Map<unknown, unknown>).entries()) {
-      if (typeof intentId !== 'string' || typeof kind !== 'string' || !allowedIntents.has(kind)) {
-        throw new FinancialDataCorruptionError(`${context}.lendingIntents contains invalid receipt`, {
-          intentId,
-          kind,
-        });
-      }
-    }
-  }
-  const globalCreditLimits = validateObject(obj['globalCreditLimits'], `${context}.globalCreditLimits`);
-  if (typeof globalCreditLimits['ownLimit'] !== 'bigint') {
-    throw new FinancialDataCorruptionError(`${context}.globalCreditLimits.ownLimit must be bigint`);
-  }
-  if (typeof globalCreditLimits['peerLimit'] !== 'bigint') {
-    throw new FinancialDataCorruptionError(`${context}.globalCreditLimits.peerLimit must be bigint`);
-  }
-  validateNumber(obj['currentHeight'], `${context}.currentHeight`);
-  validatePendingAccountResend(obj, context);
-  if (obj['pendingSignatures'] === undefined || obj['pendingSignatures'] === null) {
-    obj['pendingSignatures'] = [];
-  } else if (!Array.isArray(obj['pendingSignatures'])) {
-    obj['pendingSignatures'] = [];
-  } else {
-    validateArray(obj['pendingSignatures'], `${context}.pendingSignatures`);
-  }
-  validateNumber(obj['rollbackCount'], `${context}.rollbackCount`);
-  assertAccountJClaimAccumulatorState(obj['leftPendingJClaims'] as AccountState['leftPendingJClaims']);
-  assertAccountJClaimAccumulatorState(obj['rightPendingJClaims'] as AccountState['rightPendingJClaims']);
-  validateNumber(obj['lastFinalizedJHeight'], `${context}.lastFinalizedJHeight`);
-  validateMapInstance(obj['pendingWithdrawals'], `${context}.pendingWithdrawals`);
-  validateBigIntMapValues(obj['requestedRebalance'], `${context}.requestedRebalance`);
-  validateRebalanceFeeStateMap(obj['requestedRebalanceFeeState'], `${context}.requestedRebalanceFeeState`);
-  if (obj['rebalanceFeePolicies'] !== undefined) {
-    validateRebalanceFeePolicies(obj['rebalanceFeePolicies'], `${context}.rebalanceFeePolicies`);
-  }
-  const shadow = validateObject(obj['shadow'], `${context}.shadow`);
-  const rebalanceShadow = validateObject(shadow['rebalance'], `${context}.shadow.rebalance`);
-  validateMapInstance(rebalanceShadow['policy'], `${context}.shadow.rebalance.policy`);
-  validateMapInstance(rebalanceShadow['submittedAtByToken'], `${context}.shadow.rebalance.submittedAtByToken`);
-
-  // Validate all deltas in the map
-  const deltas = obj['deltas'] as Map<unknown, unknown>;
-  for (const [tokenId, delta] of deltas.entries()) {
-    validateDelta(delta, `${context}.deltas[${tokenId}]`);
-  }
-
-  return obj as unknown as AccountState; // Cast after validation boundary
-}
 
 /**
  * Validates EntityState objects - Complete entity state

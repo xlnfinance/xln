@@ -12,7 +12,8 @@ import { setHtlcRouteNote, terminateHtlcRoute } from '../entity/tx/htlc-route-li
 import { applyHtlcTimeoutFollowups } from '../entity/tx/handlers/account/committed-htlc-followups';
 import { createEmptyEnv } from '../runtime';
 import type { AccountState, EntityState, SwapOffer } from '../types';
-import { validateAccountState, validateEntityState } from '../validation-utils';
+import { validateAccountState } from '../account/state-validation';
+import { validateEntityState } from '../validation-utils';
 
 const leftEntity = `0x${'11'.repeat(32)}`;
 const rightEntity = `0x${'22'.repeat(32)}`;

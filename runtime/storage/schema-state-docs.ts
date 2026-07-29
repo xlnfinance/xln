@@ -1,7 +1,8 @@
 import type { BookState } from '../orderbook';
 import { validateBookStructure } from '../orderbook/validity';
 import { verifyAndWarmBookCommitment } from '../orderbook/commitment';
-import { validateAccountState, validateEntityState } from '../validation-utils';
+import { validateAccountState } from '../account/state-validation';
+import { validateEntityState } from '../validation-utils';
 import { LIMITS } from '../constants';
 import type { StorageAccountDoc, StorageEntityCoreDoc } from './types';
 import { normalizeAccountStateDomain } from '../account/state-root';
