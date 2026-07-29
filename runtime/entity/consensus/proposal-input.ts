@@ -12,12 +12,14 @@ import {
 import { replayProposedEntityFrame } from './proposal-replay';
 import {
   entityLog,
-  getFrameJPrefixValidationError,
-  getReplicaJRangeValidationError,
-  isJPrefixLocalFreshnessRace,
   normalizePrecommitBundles,
   verifyHashPrecommitSignatures,
 } from './shared';
+import {
+  getFrameJPrefixValidationError,
+  getReplicaJRangeValidationError,
+  isJPrefixLocalFreshnessRace,
+} from './j-prefix-round';
 import { assertFrameParentMatchesState } from './frame-lineage';
 import { validateProposedFrameLeader } from './proposal-policy';
 

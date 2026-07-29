@@ -11,10 +11,12 @@ import {
   emitCommittedEntitySizeLog,
   entityLog,
   prepareCommittedEntitySizeLog,
-  pruneReplicaFinalizedJHistory,
-  runLocalPostCommitHooks,
   verifyHashPrecommitSignatures,
 } from './shared';
+import {
+  pruneReplicaFinalizedJHistory,
+  runLocalPostCommitHooks,
+} from './j-prefix-round';
 import { wrapCertifiedEntityOutputs } from './consumption-output';
 import {
   appendCertifiedEntityFrameLink,

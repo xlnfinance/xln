@@ -13,7 +13,8 @@ import {
   type ApplyEntityInputContext,
   type ApplyEntityInputResult,
 } from './input-types';
-import { ensureLocalJPrefixAttestation, entityLog } from './shared';
+import { entityLog } from './shared';
+import { ensureLocalJPrefixAttestation } from './j-prefix-round';
 
 const verifyAttestationRound = (context: ApplyEntityInputContext): 'stale' | 'current' | 'future' => {
   const { env, entityInput, workingReplica } = context;

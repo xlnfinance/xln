@@ -19,11 +19,13 @@ import { getReplicaProposalLeader } from './leader';
 import { buildCertifiedEntityOutputHashes } from './output-certification';
 import type { EntityProposalSelection } from './proposal-selection';
 import {
-  assertProposerJRangesMatchLocalHistory,
   entityLog,
   expectedCommittedLeaderState,
-  getReplicaJRangeValidationError,
 } from './shared';
+import {
+  assertProposerJRangesMatchLocalHistory,
+  getReplicaJRangeValidationError,
+} from './j-prefix-round';
 import {
   assertFrameParentMatchesState,
   getPrevFrameHash,

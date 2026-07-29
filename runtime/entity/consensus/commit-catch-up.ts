@@ -18,11 +18,13 @@ import {
 import {
   entityLog,
   expectedCommittedLeaderState,
+  getValidatorExecutionForFrame,
+} from './shared';
+import {
   getFrameJPrefixValidationError,
   getReplicaJRangeValidationError,
-  getValidatorExecutionForFrame,
   isJPrefixLocalFreshnessRace,
-} from './shared';
+} from './j-prefix-round';
 import { getPrevFrameHash } from './frame-lineage';
 
 export type CommitExecutionResolution =

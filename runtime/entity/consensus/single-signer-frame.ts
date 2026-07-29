@@ -31,15 +31,17 @@ import { getEntityLeaderState } from './leader';
 import { buildCertifiedEntityOutputHashes } from './output-certification';
 import type { EntityProposalSelection } from './proposal-selection';
 import {
-  assertProposerJRangesMatchLocalHistory,
   emitCommittedEntitySizeLog,
   entityFrameProfileEnabled,
   entityFrameSlowMs,
   entityLog,
   prepareCommittedEntitySizeLog,
+} from './shared';
+import {
+  assertProposerJRangesMatchLocalHistory,
   pruneReplicaFinalizedJHistory,
   runLocalPostCommitHooks,
-} from './shared';
+} from './j-prefix-round';
 import { wrapCertifiedEntityOutputs } from './consumption-output';
 import {
   appendCertifiedEntityFrameLink,

@@ -20,10 +20,10 @@ import { prepareEntityInputIngress } from './input-ingress';
 import { admitEntityTransactions } from './input-admission';
 
 import {
-  ensureLocalJPrefixAttestation,
   entityLog,
   normalizePrecommitBundles,
 } from './shared';
+import { ensureLocalJPrefixAttestation } from './j-prefix-round';
 import { assertFrameParentMatchesState } from './frame-lineage';
 import { validateProposedFrameLeader } from './proposal-policy';
 import { calculateQuorumPower } from './replica-validation';
