@@ -17,9 +17,7 @@ import {
 } from '../../jurisdictions/typechain-types/index.ts';
 
 import { normalizeEntityId } from '../entity/id';
-import { getBatchSize, isBatchEmpty } from '../jurisdiction/batch';
-import { assertSealedJBatchBinding } from '../jurisdiction/sealed-batch';
-import type { BrowserVMState, RuntimeState, JTx } from '../types';
+import type { BrowserVMState, RuntimeState } from '../types';
 import {
   normalizeAdapterEvents,
 } from './helpers';
@@ -29,29 +27,28 @@ import type {
   JBatchReceipt,
   JEvent,
   JReserveMint,
-  JSubmitResult,
   JTokenInfo,
   JWalletSnapshot,
   JWalletSnapshotRequest,
   SnapshotId,
 } from './types';
-import { makeJAdapterFailureResult } from './failure';
-import type { BrowserVmChainCheckpoint, BrowserVMProvider } from './browservm-provider';
+import type {
+  BrowserVmChainCheckpoint,
+  BrowserVMProvider,
+  EVMEvent,
+} from './browservm-provider';
 import {
   assertDepositoryEntityProviderBinding,
   assertJStackAddressMatch,
 } from './stack-binding';
-import { assertEntityProviderActionJTxBinding } from '../entity/entity-provider-action';
 import { createBrowserVmHistoryWatcher } from './browservm-history';
+import {
+  createBrowserVmSubmitTx,
+  receiptFromEvents,
+} from './browservm-submit';
 
 const asFactoryRunner = (runner: unknown): Parameters<typeof Account__factory.connect>[1] =>
   runner as Parameters<typeof Account__factory.connect>[1];
-
-const receiptFromEvents = (events: JEvent[]): JBatchReceipt => ({
-  txHash: events.find((event) => event.transactionHash && event.transactionHash !== '0x')?.transactionHash ?? '0x',
-  blockNumber: events.reduce((max, event) => Math.max(max, Number(event.blockNumber || 0)), 0),
-  events,
-});
 
 const requireBrowserVmState = (state: BrowserVMState | string): BrowserVMState => {
   if (typeof state !== 'string') return state;
@@ -105,14 +102,7 @@ export async function createBrowserVMAdapter(
   let snapshotCounter = 0;
   const snapshots = new Map<SnapshotId, { root: Uint8Array; chain: BrowserVmChainCheckpoint }>();
 
-  const toJEvents = (events: Array<{
-    name: string;
-    args?: Record<string, unknown>;
-    blockNumber?: number;
-    blockHash?: string;
-    transactionHash?: string;
-    logIndex?: number;
-  }>): JEvent[] => normalizeAdapterEvents(events);
+  const toJEvents = (events: EVMEvent[]): JEvent[] => normalizeAdapterEvents(events);
 
   const historyWatcher = createBrowserVmHistoryWatcher({
     chainId: config.chainId,
@@ -121,6 +111,12 @@ export async function createBrowserVMAdapter(
     depository,
     entityProvider,
     browserVM,
+  });
+  const submitTx = createBrowserVmSubmitTx({
+    chainId: config.chainId,
+    addresses,
+    browserVM,
+    toJEvents,
   });
 
   const adapter: JAdapter = {
@@ -288,113 +284,7 @@ export async function createBrowserVMAdapter(
       await browserVM.fundSignerWallet(address, amount, tokenSymbol);
     },
 
-    async submitTx(jTx: JTx, options: { env: RuntimeState; signerId?: string; signerPrivateKey?: Uint8Array; timestamp?: number }): Promise<JSubmitResult> {
-      if (jTx.type === 'batch') {
-        try {
-          assertSealedJBatchBinding(jTx, {
-            chainId: config.chainId,
-            depositoryAddress: addresses.depository,
-          });
-        } catch (error) {
-          return makeJAdapterFailureResult(error);
-        }
-      }
-      if (typeof options.timestamp === 'number') browserVM.setBlockTimestamp(options.timestamp);
-
-      if (jTx.type === 'mint') {
-        const entityId = String(jTx.data.entityId || jTx.entityId || '');
-        const tokenId = Number(jTx.data.tokenId);
-        const amount = jTx.data.amount;
-        if (!entityId || !Number.isFinite(tokenId) || amount <= 0n) {
-          return { success: false, error: 'Invalid mint payload' };
-        }
-        const events = await adapter.debugFundReserves(entityId, tokenId, amount);
-        return { success: true, events, blockNumber: receiptFromEvents(events).blockNumber };
-      }
-
-      if (jTx.type === 'debtEnforcement') {
-        const entityId = String(jTx.entityId || '').toLowerCase();
-        const tokenId = Number(jTx.data.tokenId);
-        const maxIterations = BigInt(jTx.data.maxIterations);
-        if (!entityId || !Number.isInteger(tokenId) || tokenId < 0 || maxIterations <= 0n) {
-          return { success: false, error: 'Invalid debt enforcement payload' };
-        }
-        await adapter.enforceDebts(entityId, tokenId, maxIterations);
-        return { success: true };
-      }
-
-      if (
-        jTx.type === 'entityProviderTransfer' ||
-        jTx.type === 'entityProviderReleaseControlShares' ||
-        jTx.type === 'entityProviderCancelAction'
-      ) {
-        if (!jTx.data.hankoSignature) {
-          return {
-            success: false,
-            error: `ENTITY_PROVIDER_ACTION_CONSENSUS_HANKO_MISSING:${normalizeEntityId(jTx.entityId)}`,
-          };
-        }
-        try {
-          assertEntityProviderActionJTxBinding(jTx, {
-            chainId: config.chainId,
-            entityProviderAddress: addresses.entityProvider,
-            depositoryAddress: addresses.depository,
-          });
-          const events = toJEvents(await browserVM.submitEntityProviderAction(
-            jTx.data.intent,
-            jTx.data.hankoSignature,
-            {
-              entityId: normalizeEntityId(jTx.entityId),
-              kind: jTx.type === 'entityProviderTransfer'
-                ? 'entityTransferTokens'
-                : jTx.type === 'entityProviderReleaseControlShares'
-                  ? 'releaseControlShares'
-                  : 'cancelPendingAction',
-            },
-          ));
-          const receipt = receiptFromEvents(events);
-          return {
-            success: true,
-            txHash: receipt.txHash,
-            blockNumber: receipt.blockNumber,
-            events,
-          };
-        } catch (error) {
-          return makeJAdapterFailureResult(error);
-        }
-      }
-
-      if (jTx.type === 'batch') {
-        const batchData = jTx.data;
-        const batch = batchData.batch;
-        if (isBatchEmpty(batch)) return { success: true };
-
-        try {
-          const externalBatch = batch.externalTokenToReserve.length > 0;
-          const rawEvents = externalBatch && options.signerPrivateKey
-            ? await browserVM.processBatchAs(
-                batchData.encodedBatch!,
-                batchData.hankoSignature!,
-                BigInt(batchData.entityNonce!),
-                options.signerPrivateKey,
-              )
-            : await browserVM.processBatch(
-                batchData.encodedBatch!,
-                batchData.hankoSignature!,
-                BigInt(batchData.entityNonce!),
-              );
-          const events = toJEvents(rawEvents);
-          const receipt = receiptFromEvents(events);
-          console.log(`✅ [JAdapter:browservm] Batch executed (${getBatchSize(batch)} ops) block=${receipt.blockNumber}`);
-          return { success: true, txHash: receipt.txHash, blockNumber: receipt.blockNumber, events };
-        } catch (error) {
-          return makeJAdapterFailureResult(error);
-        }
-      }
-
-      const unhandled: never = jTx;
-      return { success: false, error: `Unhandled JTx type: ${(unhandled as { type?: string }).type}` };
-    },
+    submitTx,
 
     startWatching(env: RuntimeState): void {
       if (!stackBindingVerified) {
