@@ -10,7 +10,6 @@ import type {
   EntityCandidateEffect,
 } from '../../types';
 import type { AccountJClaimNodeStore } from '../../types/account-j-claims';
-// import { addToReserves, subtractFromReserves } from './financial'; // Currently unused
 import {
   applyAccountInputToEntity,
   type AccountTxTarget,

@@ -64,7 +64,7 @@ export function calculatePercentage(amount: bigint | null | undefined, total: bi
 }
 
 /**
- * Format asset balance using ethers (for AssetBalance type)
+ * Format an exact token amount for display.
  */
 export function formatAssetAmount(balance: { amount: bigint | null | undefined; decimals: number; symbol: string }): string {
   // Handle null/undefined amounts

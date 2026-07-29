@@ -88,10 +88,8 @@ const CORE_FILES = {
     'protocol/serialization.ts', // BigInt serialization (common bug source)
 
     // Transaction processing (how txs are applied)
-    'entity/tx/index.ts',    // Entity transaction types
     'entity/tx/apply.ts',    // Entity transaction dispatcher
     'entity/tx/validation.ts', // Transaction validation
-    'entity/tx/financial.ts', // Financial accounting (addToReserves, subtractFromReserves)
     'entity/tx/proposals.ts', // Proposal logic
     'entity/tx/j-events.ts',  // Jurisdiction event handling
     'entity/tx/handlers/account.ts',         // Account operations (openAccount, extendCredit)
@@ -290,7 +288,6 @@ const CROSS_FILES = {
     'extensions/cross-j/market.ts',
     'extensions/cross-j/orderbook.ts',
     'extensions/cross-j/boundary.ts',
-    'entity/tx/index.ts',
     'entity/tx/apply.ts',
     'entity/tx/financial.ts',
     'entity/tx/j-events.ts',
@@ -437,7 +434,6 @@ const RUNTIME_FILES = {
     'jurisdiction/height.ts',
     'jurisdiction/event-normalization.ts',
     'jurisdiction/event-observation.ts',
-    'entity/tx/index.ts',
     'entity/tx/apply.ts',
     'entity/tx/validation.ts',
     'entity/tx/financial.ts',
@@ -1193,7 +1189,6 @@ xln/
       server/lending.ts           ${fileSizes['runtime/server/lending.ts'] || '?'} lines - Lending API handlers
 
     entity/tx/
-      index.ts                   ${fileSizes['runtime/entity/tx/index.ts'] || '?'} lines - Entity transaction types
       apply.ts                   ${fileSizes['runtime/entity/tx/apply.ts'] || '?'} lines - Entity tx dispatcher
       validation.ts              ${fileSizes['runtime/entity/tx/validation.ts'] || '?'} lines - Transaction validation
       financial.ts               ${fileSizes['runtime/entity/tx/financial.ts'] || '?'} lines - Financial accounting

@@ -74,7 +74,7 @@ import {
   selectCrossJOpeningAccountProposalTxs,
 } from '../cross-j-proposer-materialization';
 import { initCrontab } from '../scheduler';
-import { applyEntityTx, type ApplyEntityTxResult } from '../tx';
+import { applyEntityTx, type ApplyEntityTxResult } from '../tx/apply';
 import {
   processOrderbookCancels,
   processOrderbookSwaps,

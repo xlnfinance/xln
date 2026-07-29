@@ -11,11 +11,6 @@ import type {
 } from './rebalance';
 import type { AccountJClaimAccumulatorState, AccountJClaimProof } from './account-j-claims';
 
-export interface AssetBalance {
-  amount: bigint; // Balance in smallest unit (wei, cents, shares)
-  // Note: symbol, decimals, contractAddress come from token registry, not stored here
-}
-
 // Account machine structures for signed and collateralized accounts between entities
 export interface AccountDelta {
   tokenId: number;

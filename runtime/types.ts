@@ -164,7 +164,6 @@ export type {
   AccountStatus,
   AccountTx,
   AccountHistoryRecord,
-  AssetBalance,
   CrossJurisdictionSecretRelay,
   Delta,
   DerivedDelta,
