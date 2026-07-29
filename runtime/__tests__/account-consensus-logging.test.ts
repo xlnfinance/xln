@@ -3,11 +3,16 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 test('account consensus core uses structured logging only', () => {
-  const source = readFileSync(join(process.cwd(), 'runtime/account/consensus/index.ts'), 'utf8');
+  const source = [
+    'runtime/account/consensus/index.ts',
+    'runtime/account/consensus/incoming-preflight.ts',
+  ]
+    .map(path => readFileSync(join(process.cwd(), path), 'utf8'))
+    .join('\n');
 
   expect(source).toContain("createStructuredLogger('account')");
   expect(source).toContain("accountLog.error('frame.commit.failed'");
-  expect(source).toContain("accountLog.warn('frame.prev_hash_mismatch'");
+  expect(source).toContain("preflightLog.warn('frame.prev_hash_mismatch'");
   expect(source).toContain("accountLog.warn('frame.state_root_mismatch'");
   expect(source).toContain("accountLog.debug('return.no_response'");
   expect(source).not.toContain('console.');
