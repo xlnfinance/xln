@@ -133,6 +133,37 @@ export const describeEvent = (
   return parts.length > 0 ? parts.join('  ·  ') : text(event.subtitle);
 };
 
+/**
+ * The event a step is about: what moved value, not what consensus recorded.
+ *
+ * A frame that both paid someone and emitted bookkeeping reads as the payment.
+ */
+export const headlineEventForStep = (
+  step: NetworkCaptionStep,
+  events: readonly RuntimeActivityEvent[],
+): RuntimeActivityEvent | null => {
+  const stepEvents = activityForStep(events, step);
+  return stepEvents.find((event) => text(event.title) && event.type !== 'system')
+    ?? stepEvents.find((event) => text(event.title))
+    ?? null;
+};
+
+/**
+ * Whom this step is about — the pair the camera should frame.
+ *
+ * Empty when the step names nobody, which the caller reads as "keep the current framing"
+ * rather than "frame nothing".
+ */
+export const focusEntityIdsForStep = (
+  step: NetworkCaptionStep,
+  events: readonly RuntimeActivityEvent[],
+): string[] => {
+  const headline = headlineEventForStep(step, events);
+  if (!headline) return [];
+  return [text(headline.entityId).toLowerCase(), text(headline.counterpartyId).toLowerCase()]
+    .filter((entityId) => entityId.length > 0);
+};
+
 export const captionForStep = (
   step: NetworkCaptionStep,
   events: readonly RuntimeActivityEvent[],
@@ -151,10 +182,7 @@ export const captionForStep = (
   }
 
   const stepEvents = activityForStep(events, step);
-  // Prefer what happened over what the consensus recorded: a frame that both moved money
-  // and emitted bookkeeping should read as the payment.
-  const headline = stepEvents.find((event) => text(event.title) && event.type !== 'system')
-    ?? stepEvents.find((event) => text(event.title));
+  const headline = headlineEventForStep(step, events);
   if (!headline) {
     return {
       title: `Frame ${Math.floor(Number(step.height || 0))}`,

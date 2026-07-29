@@ -28,6 +28,14 @@ export type NetworkMachineRuntimeState = {
   frames: Map<string, RuntimeAdapterGraphFrame>;
   /** Activity events of the selected step, ordered — the caption source. */
   activity: RuntimeActivityEvent[];
+  /**
+   * Activity across every step of the machine.
+   *
+   * The caption only ever needs the current step, but a chapter track has to know the
+   * whole story before the viewer plays any of it — otherwise the acts appear one by one
+   * as playback discovers them, which is the opposite of a table of contents.
+   */
+  storyActivity: RuntimeActivityEvent[];
 };
 
 const emptyState = (): NetworkMachineRuntimeState => ({
@@ -39,6 +47,7 @@ const emptyState = (): NetworkMachineRuntimeState => ({
   selectedStep: null,
   frames: new Map(),
   activity: [],
+  storyActivity: [],
 });
 
 const message = (error: unknown): string => error instanceof Error ? error.message : String(error || 'NetworkMachine failed');
@@ -192,6 +201,7 @@ export const networkMachineRuntimeOperations = {
         selectedStep: step,
         frames,
         activity,
+        storyActivity: current.storyActivity,
       });
       return step;
     } catch (error) {
@@ -210,6 +220,37 @@ export const networkMachineRuntimeOperations = {
       activity: [],
       error: null,
     }));
+  },
+
+  /**
+   * Read the activity behind every step of the machine, once.
+   *
+   * Bounded by the steps the machine already compiled, so a live runtime with a long
+   * history is never asked for more than the viewer can scrub to. Failure is not fatal:
+   * without it the player simply has no chapter track.
+   */
+  async loadStoryActivity(): Promise<void> {
+    const current = get(networkMachineRuntime);
+    const steps = current.machine?.steps ?? [];
+    if (steps.length === 0) return;
+    const spanByRuntime = new Map<string, { from: number; to: number }>();
+    for (const step of steps) {
+      const height = Math.floor(Number(step.event.height || 0));
+      const span = spanByRuntime.get(step.activeRuntimeId);
+      if (!span) {
+        spanByRuntime.set(step.activeRuntimeId, { from: height, to: height });
+        continue;
+      }
+      span.from = Math.min(span.from, height);
+      span.to = Math.max(span.to, height);
+    }
+    const storyActivity: RuntimeActivityEvent[] = [];
+    for (const [runtimeId, span] of spanByRuntime) {
+      const source = activeSources.get(runtimeId);
+      if (!source) continue;
+      storyActivity.push(...await source.readActivity(span.from, span.to));
+    }
+    networkMachineRuntime.update((state) => ({ ...state, storyActivity }));
   },
 
   recompile(): NetworkMachine {

@@ -50,10 +50,17 @@ export interface AccountSegments {
   inPeerCredit: number;     // their unused credit (pink wireframe)
 }
 
+/**
+ * One colour per economic meaning, not per shade of alarm.
+ *
+ * Unused credit was a light red, which reads as a weaker version of debt when it is the
+ * opposite: headroom nobody has drawn. Amber is capacity, teal is posted collateral, red
+ * is what someone owes — so the bar can be read without a legend.
+ */
 const BAR_COLORS = {
-  availableCredit: 0xff9c9c,  // light red - unused credit
-  secured: 0x5cb85c,          // green - collateral
-  unsecured: 0xdc3545         // red - used credit
+  availableCredit: 0xef9f27,  // amber - credit granted, not yet drawn
+  secured: 0x35d6c3,          // teal - collateral posted on the jurisdiction
+  unsecured: 0xe24b4a         // red - credit drawn, i.e. debt
 } as const;
 
 /**
@@ -77,8 +84,14 @@ export function createAccountBars(
 ): THREE.Group {
   const group = new THREE.Group();
 
-  // Sort tokens for consistent ordering across all accounts
-  const sortedTokenIds = Array.from(deltas.keys()).sort((a, b) => a - b);
+  // Sort tokens for consistent ordering across all accounts.
+  //
+  // A token lane the account never used has no capacity, no collateral and no delta —
+  // nothing to draw except its delta separator, which then floats on the edge as a second
+  // marker with no bar behind it. An empty lane is not part of the account's story.
+  const sortedTokenIds = Array.from(deltas.keys())
+    .filter((tokenId) => accountLaneIsUsed(deltas.get(tokenId)))
+    .sort((a, b) => a - b);
   if (sortedTokenIds.length === 0) {
     console.warn('[AccountBars] No tokens in account deltas');
     return group; // Empty group
@@ -147,6 +160,28 @@ export function createAccountBars(
 
   parent.add(group);
   return group;
+}
+
+/**
+ * Has this token lane ever been used?
+ *
+ * Reads the stored delta rather than a derived view: collateral, either credit limit, or a
+ * non-zero balance each mean the lane carries state worth showing.
+ */
+function accountLaneIsUsed(delta: unknown): boolean {
+  if (!delta || typeof delta !== 'object') return false;
+  const lane = delta as Record<string, unknown>;
+  const amount = (key: string): bigint => {
+    const value = lane[key];
+    return typeof value === 'bigint' ? (value < 0n ? -value : value) : 0n;
+  };
+  return (
+    amount('collateral') > 0n ||
+    amount('leftCreditLimit') > 0n ||
+    amount('rightCreditLimit') > 0n ||
+    amount('ondelta') > 0n ||
+    amount('offdelta') > 0n
+  );
 }
 
 /**

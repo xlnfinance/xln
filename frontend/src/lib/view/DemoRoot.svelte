@@ -13,7 +13,7 @@
   import type { RuntimeState } from '@xln/runtime/xln-api';
   import type { EnvSnapshot } from '$types';
   import Graph3DPanel from './panels/Graph3DPanel.svelte';
-  import TimeMachine from './core/TimeMachine.svelte';
+  import NetworkPlayer from './core/NetworkPlayer.svelte';
 
   export let runtimeFrameEnv: Writable<RuntimeState | null>;
   export let runtimeFrameHistory: Writable<EnvSnapshot[]>;
@@ -24,46 +24,28 @@
 </script>
 
 <div class="demo-root">
-  <div class="demo-stage">
-    <Graph3DPanel
-      {runtimeFrameEnv}
-      {runtimeFrameHistory}
-      {runtimeFrameTimeIndex}
-      {runtimeFrameIsLive}
-      {graphInitSignal}
-      demoMode
-    />
-  </div>
-  <div class="demo-narration">
-    <TimeMachine
-      history={runtimeFrameHistory}
-      timeIndex={runtimeFrameTimeIndex}
-      isLive={runtimeFrameIsLive}
-      env={runtimeFrameEnv}
-      dockMode
-      demoMode
-    />
-  </div>
+  <Graph3DPanel
+    {runtimeFrameEnv}
+    {runtimeFrameHistory}
+    {runtimeFrameTimeIndex}
+    {runtimeFrameIsLive}
+    {graphInitSignal}
+    demoMode
+  />
+  <NetworkPlayer />
 </div>
 
 <style>
+  /*
+   * The scene fills the frame and the player draws on top of it. A chrome strip below the
+   * graph would take its height from the only thing worth looking at.
+   */
   .demo-root {
-    display: flex;
-    flex-direction: column;
+    position: relative;
     width: 100%;
     height: 100dvh;
-    background: #000;
+    background: #08090b;
     color: var(--theme-text-primary, #e4e4e7);
-  }
-
-  .demo-stage {
-    position: relative;
-    flex: 1;
-    min-height: 0;
-  }
-
-  .demo-narration {
-    flex: 0 0 auto;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    overflow: hidden;
   }
 </style>

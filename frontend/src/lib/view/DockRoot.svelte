@@ -649,7 +649,6 @@
         isLive={runtimeFrameIsLive}
         env={runtimeFrameEnv}
         dockMode
-        {demoMode}
       />
       {#if !embedMode}
         <button class="collapse-btn" on:click={() => collapsed = !collapsed}>

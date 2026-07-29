@@ -31,6 +31,12 @@
   } = { visible: false, x: 0, y: 0, leftContent: '', rightContent: '', leftEntity: '', rightEntity: '' };
   /** Operator-only source/reference pickers. A demo shows one network, not a debug view. */
   export let showProjectionControls = true;
+  /**
+   * Which runtime the highlighted step belongs to. Operator information: a demo already
+   * names its source in the player, and its wall clock reads 1970 because scenario time
+   * starts at zero.
+   */
+  export let showTimelineBadge = true;
   export let runtimeScope = 'merged';
   export let runtimeScopeOptions: Array<{ value: string; label: string }> = [];
   export let canonicity: RuntimeGraphCanonicity = 'timestamp';
@@ -91,14 +97,14 @@
   </div>
   {/if}
 
-  {#if projectionError || timelineRuntimeId}
+  {#if projectionError || (timelineRuntimeId && showTimelineBadge)}
     <div class="runtime-status-stack">
       {#if projectionError}
         <div class="projection-error" role="alert" data-testid="graph-projection-error">
           {projectionError}
         </div>
       {/if}
-      {#if timelineRuntimeId}
+      {#if timelineRuntimeId && showTimelineBadge}
         <div
           class="timeline-runtime-highlight"
           data-testid="network-machine-runtime-highlight"

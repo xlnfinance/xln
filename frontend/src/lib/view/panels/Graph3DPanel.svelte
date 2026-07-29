@@ -22,6 +22,7 @@ import { networkMachineRuntime } from "$lib/stores/networkMachineRuntimeStore";
 import { mergeRuntimeGraphProjections, requireActionableGraphNodeRuntimeId, type MergedRuntimeGraph, type RuntimeGraphCanonicity, type RuntimeGraphProjection } from "$lib/network3d/runtimeGraphProjection";
 import { materializeRuntimeGraphReplicas } from "$lib/network3d/runtimeGraphRender";
 import { connectedRuntimeGraphEntityIds, resolveRuntimeGraphLayout, type RuntimeGraphLayoutCache } from "$lib/network3d/runtimeGraphLayout";
+import { focusEntityIdsForStep } from "$lib/network3d/networkCaption";
 import { readGraphPositionOverrides, writeGraphPositionOverride } from "$lib/network3d/graphPositionOverrides";
 import {
   buildGraphAvailableRoutes,
@@ -1181,6 +1182,16 @@ async function exitVR() {
     }
   }
 }
+/** Whom the selected demo step is about, as a stable key; empty when it names nobody. */
+function demoStepFocusEntityIds(): string {
+  const step = $networkMachineRuntime.selectedStep;
+  if (!step) return "";
+  const ids = focusEntityIdsForStep(
+    { runtimeId: step.activeRuntimeId, height: step.event.height, cues: step.cues },
+    $networkMachineRuntime.activity,
+  ).filter((entityId) => entities.some((entity) => entity.id === entityId));
+  return ids.length >= 2 ? [...ids].sort().join(",") : "";
+}
 function fitCameraToEntities(preferredEntityIds: ReadonlySet<string> = new Set()) {
   if (!camera || !controls || entities.length === 0) return;
   const preferredEntities = entities.filter((entity) => preferredEntityIds.has(entity.id));
@@ -1200,10 +1211,34 @@ function fitCameraToEntities(preferredEntityIds: ReadonlySet<string> = new Set()
   const fitWidth = size.x / (2 * horizontalTangent);
   const fitHeight = projectedHeight / (2 * verticalTangent);
   const distance = Math.max(fitWidth, fitHeight, 36) * 1.65;
-  const viewDirection = new THREE.Vector3(0, 1, 1).normalize();
-  camera.position.copy(center).addScaledVector(viewDirection, distance);
+  camera.position.copy(center).addScaledVector(broadsideViewDirection(focusEntities), distance);
   controls.target.copy(center);
   controls.update();
+}
+/**
+ * A viewing direction that looks across the subjects rather than along them.
+ *
+ * A fixed direction collapses any pair — or any row of nodes — that happens to lie along
+ * it: two entities render as one sphere with two labels stacked on it, which is exactly
+ * the case a demo frames most often. Looking perpendicular to the spread puts the widest
+ * separation on screen, and the tilt keeps it a 3D view rather than a flat elevation.
+ */
+function broadsideViewDirection(focusEntities: ReadonlyArray<{ position: THREE.Vector3 }>): THREE.Vector3 {
+  const fallback = new THREE.Vector3(0, 1, 1).normalize();
+  if (focusEntities.length < 2) return fallback;
+  const spread = new THREE.Vector3();
+  const first = focusEntities[0]?.position;
+  if (!first) return fallback;
+  for (const entity of focusEntities) {
+    const offset = entity.position.clone().sub(first);
+    if (offset.lengthSq() > spread.lengthSq()) spread.copy(offset);
+  }
+  if (spread.lengthSq() < 1e-6) return fallback;
+  const up = new THREE.Vector3(0, 1, 0);
+  const across = new THREE.Vector3().crossVectors(spread.normalize(), up);
+  // The spread is vertical: any horizontal direction already looks across it.
+  if (across.lengthSq() < 1e-6) return fallback;
+  return across.normalize().multiplyScalar(0.85).addScaledVector(up, 0.55).normalize();
 }
 function updateNetworkData() {
   if (!scene) return;
@@ -1270,11 +1305,16 @@ function updateNetworkData() {
     createEntityNode(profile, index, entityData.length, forceLayoutPositions, isHub, currentReplicas);
   });
   const graphSignature = [...mergedRuntimeGraph.sources.map((source) => source.runtimeId), ...mergedRuntimeGraph.nodes.map((node) => node.entityId), ...mergedRuntimeGraph.accounts.map((account) => account.accountId)].join("|");
-  // A demo must always frame its network: a camera saved from an earlier session would
-  // leave the graph half off-screen for every viewer.
-  if ((demoMode || !savedSettings.camera) && graphSignature && graphSignature !== autoFittedGraphSignature) {
-    fitCameraToEntities(connectedRuntimeGraphEntityIds(mergedRuntimeGraph));
-    autoFittedGraphSignature = graphSignature;
+  // A demo follows the story: each step frames the parties it is about, so the pair being
+  // discussed is the pair on screen. Everything else falls back to framing the whole
+  // network, because a camera saved from an earlier session would leave the graph half
+  // off-screen for every viewer.
+  const demoFocus = demoMode ? demoStepFocusEntityIds() : "";
+  const cameraSignature = demoMode ? `${graphSignature}|${demoFocus}` : graphSignature;
+  if ((demoMode || !savedSettings.camera) && graphSignature && cameraSignature !== autoFittedGraphSignature) {
+    const focusIds = demoFocus ? new Set(demoFocus.split(",")) : connectedRuntimeGraphEntityIds(mergedRuntimeGraph);
+    fitCameraToEntities(focusIds.size >= 2 ? focusIds : connectedRuntimeGraphEntityIds(mergedRuntimeGraph));
+    autoFittedGraphSignature = cameraSignature;
   }
   if (connections.length > 0) {
     connections.forEach(detachConnectionVisuals);
@@ -1300,7 +1340,11 @@ function removeRuntimeHighlight(parent: THREE.Object3D): void {
 }
 function applyNetworkMachineRuntimeHighlight(): void {
   const step = $networkMachineRuntime.selectedStep;
-  const activeRuntimeId = step?.activeRuntimeId || "";
+  // The highlight answers "which runtime does this node come from", so it only carries
+  // information when there is more than one to tell apart. With a single source it wraps
+  // every node in a wireframe shell forever — a sphere inside a sphere that means nothing.
+  const multipleSources = mergedRuntimeGraph.sources.length > 1;
+  const activeRuntimeId = multipleSources ? step?.activeRuntimeId || "" : "";
   const activeColor = step?.activeRuntimeColor || "#ffffff";
   for (const entity of entities) {
     removeRuntimeHighlight(entity.mesh);
@@ -2822,7 +2866,7 @@ function handleVrAutoRotateClick(): void {
   {showMiniPanel} {miniPanelEntityId} {miniPanelEntityName} {miniPanelPosition} {runtimeFrameEnv} {runtimeFrameHistory} {runtimeFrameTimeIndex} {showFpsOverlay}
   {renderFps} {frameTime}
   entityCount={entities.length} connectionCount={connections.length} particleCount={particles.length}
-  {barsMode} {isVRActive} {tooltip} {dualTooltip} showProjectionControls={!demoMode}
+  {barsMode} {isVRActive} {tooltip} {dualTooltip} showProjectionControls={!demoMode} showTimelineBadge={!demoMode}
   runtimeScope={$runtimeGraphScope} runtimeScopeOptions={graphRuntimeOptions} canonicity={$runtimeGraphCanonicity} sourceCount={mergedRuntimeGraph.sources.length}
   desyncCount={graphDesyncCount} projectionError={graphProjectionError} runtimeNodeLabels={mergedRuntimeGraph.nodes.map((node) => node.selected.label)} timelineRuntimeId={$networkMachineRuntime.selectedStep?.activeRuntimeId ?? ''}
   timelineRuntimeColor={$networkMachineRuntime.selectedStep?.activeRuntimeColor ?? ''} timelineHeight={$networkMachineRuntime.selectedStep?.event.height ?? 0} timelineTimestamp={$networkMachineRuntime.selectedStep?.event.timestamp ?? 0}

@@ -33,7 +33,9 @@ const buildBars = (parent: THREE.Object3D) =>
     parent,
     endpoint('a', 0),
     endpoint('b', 40),
-    new Map([[1, { tokenId: 1 }]]),
+    // A used lane: the stubbed deriveDelta above reports collateral, so the stored delta
+    // has to carry it too — an empty lane is skipped before any bar is built.
+    new Map([[1, { tokenId: 1, collateral: 500_000n, ondelta: 0n, offdelta: 0n, leftCreditLimit: 1_000_000n, rightCreditLimit: 1_000_000n }]]),
     true,
     { barsMode: 'close', portfolioScale: 5000 },
     () => 1,

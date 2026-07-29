@@ -13,9 +13,6 @@
   import { captionForStep } from '$lib/network3d/networkCaption';
   import { xlnFunctions } from '$lib/stores/xlnStore';
 
-  /** Embedded demo: hide workspace chrome that has nothing to do with the story. */
-  export let demoMode = false;
-
   let playing = false;
   let playbackInterval: number | null = null;
   let speed = 1;
@@ -184,7 +181,7 @@
   </select>
   <select aria-label="NetworkMachine playback speed" value={speed} on:change={updateSpeed}><option value="0.5">0.5×</option><option value="1">1×</option><option value="2">2×</option><option value="5">5×</option></select>
   <button class="refresh" data-testid="network-machine-refresh" title="Reload runtime indexes" disabled={$networkMachineRuntime.loading} on:click={() => void refresh()}><RefreshCw size={13} /></button>
-  {#if !demoMode}<button class="dock" data-testid="network-machine-mode-toggle" on:click={() => appStateOperations.setMode($appState.mode === 'dev' ? 'user' : 'dev')}>{$appState.mode === 'dev' ? 'User' : 'Dock'}</button>{/if}
+  <button class="dock" data-testid="network-machine-mode-toggle" on:click={() => appStateOperations.setMode($appState.mode === 'dev' ? 'user' : 'dev')}>{$appState.mode === 'dev' ? 'User' : 'Dock'}</button>
 </div>
 {#if localError || $networkMachineRuntime.error}<div class="network-error" role="alert">{localError || $networkMachineRuntime.error}</div>{/if}
 

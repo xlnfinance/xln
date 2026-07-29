@@ -39,8 +39,6 @@
   export let env: Writable<RuntimeState | null> | Readable<RuntimeState | null>; // For state export
   /** Rendered inside the dock workspace. The wallet keeps its own single-runtime controls. */
   export let dockMode = false;
-  /** Embedded demo playback: chrome-free narration. */
-  export let demoMode = false;
 
   // Type guard to check if store is writable
   function isWritable<T>(store: Writable<T> | Readable<T>): store is Writable<T> {
@@ -683,7 +681,7 @@
   workspace renders the dock while the app mode is still 'user'.
 -->
 {#if dockMode && $runtimeGraphScope === 'merged'}
-  <NetworkMachineTimeline {demoMode} />
+  <NetworkMachineTimeline />
 {:else}
 <div class="time-machine">
   <!-- Frame Navigation (LEFT - most used) -->
