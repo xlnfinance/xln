@@ -49,11 +49,9 @@ const DOUBLE_ASSERTION_DEBT: Readonly<Record<string, number>> = {
   'runtime/watchtower/dispute-watch.ts': 1,
 };
 
-// These suppressions bridge third-party declaration gaps. They remain visible
-// debt because a suppression can hide unrelated errors on the same line.
-const TS_SUPPRESSION_DEBT: Readonly<Record<string, number>> = {
-  'runtime/networking/p2p-crypto.ts': 3,
-};
+// Suppressions can hide unrelated errors on the same line. The empty ratchet
+// makes their removal permanent.
+const TS_SUPPRESSION_DEBT: Readonly<Record<string, number>> = {};
 
 type UnsafeTypeCounts = {
   explicitAnyLines: number[];

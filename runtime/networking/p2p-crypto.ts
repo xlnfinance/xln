@@ -7,11 +7,8 @@
  * Wire format: ephemeralPub (32) + nonce (12) + ciphertext (data + 16 tag)
  */
 
-// @ts-ignore - Bun requires .js extension for noble imports
 import { x25519 } from '@noble/curves/ed25519.js';
-// @ts-ignore - Bun requires .js extension for noble imports
 import { chacha20poly1305 } from '@noble/ciphers/chacha.js';
-// @ts-ignore - Bun requires .js extension for noble imports
 import { sha256 } from '@noble/hashes/sha2.js';
 import { safeStringify, safeParse } from '../protocol/serialization';
 

@@ -79,8 +79,8 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   ownership task below. Do not copy stale path counts or reintroduce a second
   audit backlog.
 - [ ] Make the audit surface mechanically legible after the function split.
-  Keep production runtime at zero explicit `any`; drive the exact
-  `as unknown as` debt and TypeScript suppression debt to zero through typed
+  Keep production runtime at zero explicit `any` and zero TypeScript
+  suppressions; drive the exact `as unknown as` debt to zero through typed
   boundary decoders/adapters. The AST ratchet must reject every new occurrence
   and every increase. Decode untrusted WAL/P2P/RPC/LevelDB data exactly once,
   then pass canonical types through reducers instead of scattering defensive
