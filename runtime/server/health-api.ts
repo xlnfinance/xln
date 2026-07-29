@@ -17,6 +17,7 @@ import {
 } from './hub-health';
 import type { MarketMakerServerState } from './market-maker-health';
 import { getMarketMakerHealth } from './market-maker-health';
+import { withRuntimeCommittedRead } from '../runtime/frame/writer-lock';
 
 export type RuntimeHealthCacheEntry = {
   fullBody: string;
@@ -186,7 +187,10 @@ export const handleRuntimeHealth = async (
   // RUNTIME_HEALTH_INFLIGHT_MISSING and 500'd /api/health under concurrent polling).
   let inFlight = deps.cachedHealthInFlight;
   if (!inFlight) {
-    inFlight = buildHealthBodies(deps)
+    const build = () => buildHealthBodies(deps);
+    inFlight = (deps.env
+      ? withRuntimeCommittedRead(deps.env, build)
+      : build())
       .then(body => {
         deps.setCachedHealthResponse({ ...body, expiresAt: Date.now() + deps.healthCacheTtlMs });
         return body;

@@ -3,6 +3,7 @@ import type { JAdapter } from '../jadapter';
 import { DEV_CHAIN_IDS } from '../jadapter';
 import { createStructuredLogger } from '../infra/logger';
 import { getEntityReplicaById } from './entity-lookup';
+import { withRuntimeCommittedRead } from '../runtime/frame/writer-lock';
 
 const faucetLog = createStructuredLogger('server.faucet');
 
@@ -46,31 +47,39 @@ const hasPendingRuntimeWork = (env: RuntimeState): boolean => {
 };
 
 const pollUntil = async (
-  predicate: () => boolean,
+  predicate: () => boolean | Promise<boolean>,
   pollMs: number,
   timeoutMs: number,
 ): Promise<boolean> => {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
-    if (predicate()) return true;
+    if (await predicate()) return true;
     await new Promise(resolve => setTimeout(resolve, pollMs));
   }
-  return predicate();
+  return await predicate();
 };
 
 export const waitForRuntimeIdle = (
   env: RuntimeState,
   adapter: JAdapter,
   timeoutMs = 5000,
-): Promise<boolean> => pollUntil(() => !hasPendingRuntimeWork(env), runtimePollMs(adapter), timeoutMs);
+): Promise<boolean> => pollUntil(
+  () => withRuntimeCommittedRead(env, () => !hasPendingRuntimeWork(env)),
+  runtimePollMs(adapter),
+  timeoutMs,
+);
 
 export const waitForJBatchClear = (
   env: RuntimeState,
   adapter: JAdapter,
   timeoutMs = 10000,
 ): Promise<boolean> => pollUntil(
-  () => !Array.from(env.jReplicas?.values() ?? []).some(j => (j.mempool?.length ?? 0) > 0)
-    && !hasPendingRuntimeWork(env),
+  () => withRuntimeCommittedRead(
+    env,
+    () => !Array.from(env.jReplicas?.values() ?? [])
+      .some(j => (j.mempool?.length ?? 0) > 0) &&
+      !hasPendingRuntimeWork(env),
+  ),
   runtimePollMs(adapter),
   timeoutMs,
 );
@@ -81,7 +90,10 @@ export const waitForEntityBroadcastWindow = (
   entityId: string,
   timeoutMs = 10000,
 ): Promise<boolean> => pollUntil(
-  () => !getEntityReplicaById(env, entityId)?.state?.jBatchState?.sentBatch,
+  () => withRuntimeCommittedRead(
+    env,
+    () => !getEntityReplicaById(env, entityId)?.state?.jBatchState?.sentBatch,
+  ),
   runtimePollMs(adapter),
   timeoutMs,
 );

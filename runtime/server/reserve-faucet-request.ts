@@ -17,6 +17,7 @@ import {
   waitForReserveUpdate,
   waitForRuntimeIdle,
 } from './reserve-faucet-waits';
+import { withRuntimeCommittedRead } from '../runtime/frame/writer-lock';
 
 const faucetLog = createStructuredLogger('server.faucet');
 
@@ -109,33 +110,55 @@ const admitRequest = async (
   deps: ReserveFaucetDependencies,
   request: ReserveRequest,
 ): Promise<AdmittedReserveRequest | Response> => {
-  const hubs = getFaucetHubProfiles(deps.env, deps.activeHubEntityIds);
-  if (hubs.length === 0) {
-    return failure(deps.headers, 503, 'FAUCET_HUBS_EMPTY', 'No faucet hub available', {
-      profiles: deps.env.gossip?.getProfiles?.()?.length || 0,
-      activeHubEntityIds: deps.activeHubEntityIds,
-    });
-  }
   const token = resolveToken(request, await deps.ensureTokenCatalog(), deps.headers);
   if (token instanceof Response) return token;
-  const hubEntityId = hubs[0]!.entityId;
-  const hubSignerId = resolveEntityProposerId(deps.env, hubEntityId, 'faucet-reserve');
-  const previousUserReserve = await deps.adapter.getReserves(request.userEntityId, token.tokenId);
-  const hubReplica = Array.from(deps.env.eReplicas.values()).find(replica => replica.entityId === hubEntityId);
-  const hubReserve = hubReplica?.state.reserves.get(token.tokenId) ?? 0n;
-  if (hubReserve < token.amountWei) {
-    return failure(deps.headers, 409, 'FAUCET_HUB_INSUFFICIENT_RESERVES',
-      `Hub has insufficient reserves for token ${token.tokenId}`, {
-        have: hubReserve.toString(),
-        need: token.amountWei.toString(),
-        requestId: request.requestId,
-      });
-  }
+  const localAdmission = await withRuntimeCommittedRead(deps.env, () => {
+    const hubs = getFaucetHubProfiles(deps.env, deps.activeHubEntityIds);
+    if (hubs.length === 0) {
+      return failure(
+        deps.headers,
+        503,
+        'FAUCET_HUBS_EMPTY',
+        'No faucet hub available',
+        {
+          profiles: deps.env.gossip?.getProfiles?.()?.length || 0,
+          activeHubEntityIds: deps.activeHubEntityIds,
+        },
+      );
+    }
+    const hubEntityId = hubs[0]!.entityId;
+    const hubSignerId = resolveEntityProposerId(
+      deps.env,
+      hubEntityId,
+      'faucet-reserve',
+    );
+    const hubReplica = Array.from(deps.env.eReplicas.values())
+      .find(replica => replica.entityId === hubEntityId);
+    const hubReserve = hubReplica?.state.reserves.get(token.tokenId) ?? 0n;
+    if (hubReserve < token.amountWei) {
+      return failure(
+        deps.headers,
+        409,
+        'FAUCET_HUB_INSUFFICIENT_RESERVES',
+        `Hub has insufficient reserves for token ${token.tokenId}`,
+        {
+          have: hubReserve.toString(),
+          need: token.amountWei.toString(),
+          requestId: request.requestId,
+        },
+      );
+    }
+    return { hubEntityId, hubSignerId };
+  });
+  if (localAdmission instanceof Response) return localAdmission;
+  const previousUserReserve = await deps.adapter.getReserves(
+    request.userEntityId,
+    token.tokenId,
+  );
   return {
     ...request,
     ...token,
-    hubEntityId,
-    hubSignerId,
+    ...localAdmission,
     previousUserReserve,
     startedAt: Date.now(),
   };

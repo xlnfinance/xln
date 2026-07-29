@@ -8,6 +8,7 @@ import { encodeRebalancePolicyMemo } from '../extensions/rebalance/policy';
 import { resolveEntityProposerId } from '../runtime/entity-output-signer';
 import { getErrorMessage, isEntityId32 } from './utils';
 import { getAccountState, getEntityOutCapacity, getEntityReplicaById, hasAccount } from './entity-lookup';
+import { withRuntimeCommittedRead } from '../runtime/frame/writer-lock';
 import { getFaucetHubProfiles } from './faucet-hubs';
 import type { RegisterReceiptOptions, RuntimeIngressReceipt } from './ingress-receipts';
 import {
@@ -421,20 +422,38 @@ export const handleOffchainFaucet = async (
       runtime: shortId(request.userRuntimeId, 10),
     });
     recordRuntimeVisibility(input.relayStore, request);
-    const hub = resolveFaucetHub(initializedInput, request);
-    if (!hub.ok) return hub.response;
-    pushDebugEvent(input.relayStore, {
-      event: 'debug_event',
-      status: 'info',
-      reason: 'REB_STEP0_FAUCET_REQUEST',
-      details: { ...request, hubEntityId: hub.value.entityId },
+    return await withRuntimeCommittedRead(initializedInput.env, () => {
+      const hub = resolveFaucetHub(initializedInput, request);
+      if (!hub.ok) return hub.response;
+      pushDebugEvent(input.relayStore, {
+        event: 'debug_event',
+        status: 'info',
+        reason: 'REB_STEP0_FAUCET_REQUEST',
+        details: { ...request, hubEntityId: hub.value.entityId },
+      });
+      const account = admitFaucetAccount(initializedInput, request, hub.value);
+      if (!account.ok) return account.response;
+      const runtimeInput = buildFaucetRuntimeInput(
+        initializedInput.env,
+        request,
+        hub.value,
+        account.value.amountWei,
+      );
+      const receipt = enqueueFaucetPayment(
+        initializedInput,
+        request,
+        runtimeInput,
+      );
+      if (!receipt.ok) return receipt.response;
+      return successResponse(
+        input,
+        request,
+        hub.value,
+        account.value,
+        receipt.value,
+        requestStartedAt,
+      );
     });
-    const account = admitFaucetAccount(initializedInput, request, hub.value);
-    if (!account.ok) return account.response;
-    const runtimeInput = buildFaucetRuntimeInput(input.env, request, hub.value, account.value.amountWei);
-    const receipt = enqueueFaucetPayment(initializedInput, request, runtimeInput);
-    if (!receipt.ok) return receipt.response;
-    return successResponse(input, request, hub.value, account.value, receipt.value, requestStartedAt);
   } catch (error: unknown) {
     const message = getErrorMessage(error, 'Unknown faucet error');
     faucetLog.error('offchain.error', { error: message });

@@ -4,6 +4,7 @@ import { createEmptyEnv } from '../runtime';
 import {
   acquireRuntimeCommittedRead,
   acquireRuntimeFrameWriter,
+  withRuntimeCommittedRead,
 } from '../runtime/frame/writer-lock';
 
 describe('runtime committed read barrier', () => {
@@ -82,5 +83,15 @@ describe('runtime committed read barrier', () => {
     await expect(acquireRuntimeCommittedRead(env)).rejects.toThrow(
       'RUNTIME_COMMITTED_STATE_UNAVAILABLE_RELOAD_REQUIRED',
     );
+  });
+
+  test('scoped committed reads always release their writer fence', async () => {
+    const env = createEmptyEnv('scoped read releases fence');
+    await expect(withRuntimeCommittedRead(env, () => {
+      throw new Error('READ_PROJECTION_FAILED');
+    })).rejects.toThrow('READ_PROJECTION_FAILED');
+
+    const releaseWriter = await acquireRuntimeFrameWriter(env.runtimeState!);
+    releaseWriter();
   });
 });

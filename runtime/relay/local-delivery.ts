@@ -23,6 +23,7 @@ import {
 } from './store';
 import { createStructuredLogger } from '../infra/logger';
 import { isDeliveryDelivered } from '../protocol/payments/delivery-result';
+import { withRuntimeCommittedRead } from '../runtime/frame/writer-lock';
 
 const relayLocalDeliveryLog = createStructuredLogger('relay.local_delivery');
 const relayLog = process.env['RELAY_VERBOSE_LOGS'] === '1'
@@ -83,17 +84,23 @@ export const createLocalDeliveryHandler = (
     if (!from) throw new Error('Missing source runtimeId for local delivery');
 
     if (msg.type === 'entity_input_receipt') {
-      const receiptResult = handleInboundReliableReceipt(env, from, payload as ReliableDeliveryReceipt);
-      pushDebugEvent(store, {
-        event: 'delivery',
-        from,
-        to: toKey,
-        msgType: 'entity_input_receipt',
-        status: receiptResult === 'queued'
-          ? 'delivered-local-queued'
-          : receiptResult === 'duplicate'
-            ? 'delivered-local-duplicate'
-            : 'deferred-local-quiescing',
+      await withRuntimeCommittedRead(env, () => {
+        const receiptResult = handleInboundReliableReceipt(
+          env,
+          from,
+          payload as ReliableDeliveryReceipt,
+        );
+        pushDebugEvent(store, {
+          event: 'delivery',
+          from,
+          to: toKey,
+          msgType: 'entity_input_receipt',
+          status: receiptResult === 'queued'
+            ? 'delivered-local-queued'
+            : receiptResult === 'duplicate'
+              ? 'delivered-local-duplicate'
+              : 'deferred-local-quiescing',
+        });
       });
       return;
     }
@@ -108,10 +115,51 @@ export const createLocalDeliveryHandler = (
     const envelope = decryptJSON<RuntimeEntityInputsEnvelope>(payload, activeKeyPair.privateKey);
     relayLog(`[RELAY] → decrypted entity_inputs: inputs=${envelope.entityInputs?.length ?? 0}`);
 
-    const missingEntityIds = (envelope.entityInputs || [])
-      .map(input => String(input.entityId || ''))
-      .filter(entityId => !getEntityReplicaById(env, entityId));
-    if (missingEntityIds.length > 0) {
+    await withRuntimeCommittedRead(env, () => {
+      const missingEntityIds = (envelope.entityInputs || [])
+        .map(input => String(input.entityId || ''))
+        .filter(entityId => !getEntityReplicaById(env, entityId));
+      if (missingEntityIds.length === 0) {
+        const result = handleInboundP2PEntityInputs(
+          env,
+          from,
+          envelope,
+          typeof msg.timestamp === 'number' ? msg.timestamp : undefined,
+        );
+        for (const receipt of result.receipts) {
+          const delivery =
+            env.runtimeState?.p2p?.enqueueReliableReceiptDelivery(from, receipt);
+          if (!delivery || !isDeliveryDelivered(delivery)) {
+            throw new Error(
+              `RELIABLE_RECEIPT_SEND_DEFERRED:${delivery?.code ?? 'P2P_UNAVAILABLE'}`,
+            );
+          }
+        }
+        if (result.kind === 'ignored' && result.receipts.length === 0) {
+          throw new Error('INBOUND_ENTITY_INPUTS_IGNORED');
+        }
+        const queueSize = env.runtimeMempool.entityInputs.length;
+        relayLog(
+          `[RELAY] → local entity_inputs result=${result.kind} (queue=${queueSize})`,
+        );
+        pushDebugEvent(store, {
+          event: 'delivery',
+          from,
+          to: toKey,
+          msgType: 'entity_inputs',
+          encrypted: msg.encrypted === true,
+          status: 'delivered-local-queued',
+          details: {
+            entityIds: envelope.entityInputs.map(input => input.entityId),
+            txs: envelope.entityInputs.reduce(
+              (count, input) => count + (input.entityTxs?.length ?? 0),
+              0,
+            ),
+            queueSize,
+          },
+        });
+        return;
+      }
       pushDebugEvent(store, {
         event: 'delivery',
         from,
@@ -125,37 +173,6 @@ export const createLocalDeliveryHandler = (
         },
       });
       throw new Error(`NO_LOCAL_REPLICA: entityIds=${missingEntityIds.join(',')} runtimeId=${toKey}`);
-    }
-
-    const result = handleInboundP2PEntityInputs(
-      env,
-      from,
-      envelope,
-      typeof msg.timestamp === 'number' ? msg.timestamp : undefined,
-    );
-    for (const receipt of result.receipts) {
-      const delivery = env.runtimeState?.p2p?.enqueueReliableReceiptDelivery(from, receipt);
-      if (!delivery || !isDeliveryDelivered(delivery)) {
-        throw new Error(`RELIABLE_RECEIPT_SEND_DEFERRED:${delivery?.code ?? 'P2P_UNAVAILABLE'}`);
-      }
-    }
-    if (result.kind === 'ignored' && result.receipts.length === 0) {
-      throw new Error('INBOUND_ENTITY_INPUTS_IGNORED');
-    }
-    const queueSize = env.runtimeMempool.entityInputs.length;
-    relayLog(`[RELAY] → local entity_inputs result=${result.kind} (queue=${queueSize})`);
-    pushDebugEvent(store, {
-      event: 'delivery',
-      from,
-      to: toKey,
-      msgType: 'entity_inputs',
-      encrypted: msg.encrypted === true,
-      status: 'delivered-local-queued',
-      details: {
-        entityIds: envelope.entityInputs.map(input => input.entityId),
-        txs: envelope.entityInputs.reduce((count, input) => count + (input.entityTxs?.length ?? 0), 0),
-        queueSize,
-      },
     });
   };
 };

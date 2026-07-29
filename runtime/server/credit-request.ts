@@ -6,6 +6,7 @@ import { getFaucetHubProfiles } from './faucet-hubs';
 import { getRequestCreditCap } from './hub-health';
 import { isEntityId32 } from './utils';
 import type { RegisterReceiptOptions, RuntimeIngressReceipt } from './ingress-receipts';
+import { withRuntimeCommittedRead } from '../runtime/frame/writer-lock';
 
 type CreditRequestInput = {
   req: Request;
@@ -184,17 +185,33 @@ const queueCreditRequest = (
 
 export const handleCreditRequest = async (input: CreditRequestInput): Promise<Response> => {
   try {
-    if (!input.env) return json(input.headers, { error: 'Runtime not initialized' }, 503);
+    const env = input.env;
+    if (!env) return json(input.headers, { error: 'Runtime not initialized' }, 503);
     const parsed = await parseCreditRequest(input.req, input.headers);
     if (parsed instanceof Response) return parsed;
-    const admitted = admitCreditRequest(input.env, parsed, input.activeHubEntityIds, input.headers);
-    if (admitted instanceof Response) return admitted;
-    const satisfied = alreadySatisfied(input, input.env, admitted);
-    if (satisfied) return satisfied;
-    const signerId = resolveHubSigner(input.env, admitted.hubEntityId, input.headers);
-    if (signerId instanceof Response) return signerId;
-    const runtimeInput = buildCreditRuntimeInput(admitted, signerId);
-    return queueCreditRequest(input, input.env, admitted, runtimeInput);
+    return await withRuntimeCommittedRead(env, () => {
+      const admitted = admitCreditRequest(
+        env,
+        parsed,
+        input.activeHubEntityIds,
+        input.headers,
+      );
+      if (admitted instanceof Response) return admitted;
+      const satisfied = alreadySatisfied(input, env, admitted);
+      if (satisfied) return satisfied;
+      const signerId = resolveHubSigner(
+        env,
+        admitted.hubEntityId,
+        input.headers,
+      );
+      if (signerId instanceof Response) return signerId;
+      return queueCreditRequest(
+        input,
+        env,
+        admitted,
+        buildCreditRuntimeInput(admitted, signerId),
+      );
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return json(input.headers, { error: message }, 500);

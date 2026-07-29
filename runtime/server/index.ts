@@ -101,6 +101,7 @@ import { createLocalPairingController } from './local-pairing';
 import { deriveSignerAddressSync } from '../account/crypto';
 import { buildLocalRuntimeOwner, ensureLocalRuntimeOwner } from './local-runtime-owner';
 import { dbRootPath } from '../runtime/platform';
+import { withRuntimeCommittedRead } from '../runtime/frame/writer-lock';
 import type { Server } from 'bun';
 
 // Global J-adapter instance (set during startup)
@@ -360,10 +361,15 @@ const marketSubscriptionStack = createMarketSubscriptionStack<RelaySocket>({
   getClientIp: getRelayClientIp,
   isReady: () => Boolean(serverEnv),
   readyError: 'Runtime not ready',
-  fetchSnapshots: (hubEntityId, pairIds, depth) => {
+  fetchSnapshots: async (hubEntityId, pairIds, depth) => {
     const env = serverEnv;
     if (!env) throw new Error('Runtime not ready');
-    return pairIds.map(pairId => buildMarketSnapshot(env, hubEntityId, pairId, depth));
+    return await withRuntimeCommittedRead(
+      env,
+      () => pairIds.map(
+        pairId => buildMarketSnapshot(env, hubEntityId, pairId, depth),
+      ),
+    );
   },
   onHandlerError: (error, msg) => {
     pushDebugEvent(relayStore, {
@@ -728,7 +734,7 @@ const maybeHandleFinancialApi = (
   return null;
 };
 
-const handleApi = async (
+const handleApiAgainstCommittedState = async (
   req: Request,
   pathname: string,
   env: RuntimeState | null,
@@ -754,6 +760,27 @@ const handleApi = async (
   const financialResponse = maybeHandleFinancialApi(req, pathname, env, headers);
   if (financialResponse) return financialResponse;
   return new Response(safeStringify({ error: 'Not found' }), { status: 404, headers });
+};
+
+const handleApi = (
+  req: Request,
+  pathname: string,
+  env: RuntimeState | null,
+  clientId: string,
+  operatorAuthorized: boolean,
+): Promise<Response> => {
+  const handle = () => handleApiAgainstCommittedState(
+    req,
+    pathname,
+    env,
+    clientId,
+    operatorAuthorized,
+  );
+  // GET handlers may await storage or network projections after reading live
+  // objects. Keep one lease until the response owns its serialized result.
+  return env && req.method === 'GET'
+    ? withRuntimeCommittedRead(env, handle)
+    : handle();
 };
 
 type ServerSession = {

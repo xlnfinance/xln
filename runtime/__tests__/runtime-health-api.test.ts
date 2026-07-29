@@ -4,6 +4,7 @@ import { createRelayStore, storeVerifiedGossipProfile } from '../relay/store';
 import { createEmptyEnv } from '../runtime';
 import { handleRuntimeHealth, type RuntimeHealthCacheEntry, type RuntimeHealthDeps } from '../server/health-api';
 import { createMarketMakerServerState } from '../server/market-maker-health';
+import { acquireRuntimeFrameWriter } from '../runtime/frame/writer-lock';
 import {
   buildCryptographicProfileFixture,
   certifySingleSignerProfileFixture,
@@ -75,6 +76,28 @@ const createHealthDeps = () => {
 };
 
 describe('runtime health API handler', () => {
+  test('waits for the active Runtime writer before projecting health', async () => {
+    const { deps } = createHealthDeps();
+    deps.env = createEmptyEnv('runtime-health-read-barrier');
+    const releaseWriter = await acquireRuntimeFrameWriter(
+      deps.env.runtimeState!,
+    );
+    let settled = false;
+    const response = handleRuntimeHealth(
+      new Request('http://127.0.0.1:8080/api/health'),
+      { 'Content-Type': 'application/json' },
+      deps,
+      true,
+    ).finally(() => {
+      settled = true;
+    });
+
+    await Promise.resolve();
+    expect(settled).toBeFalse();
+    releaseWriter();
+    expect((await response).status).toBe(200);
+  });
+
   test('coalesces concurrent health requests through one in-flight computation', async () => {
     const { deps, getInFlightSetCount, getCachedResponseSetCount } = createHealthDeps();
     const req = new Request('http://127.0.0.1:8080/api/health');

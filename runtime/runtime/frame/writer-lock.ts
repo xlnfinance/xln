@@ -58,6 +58,25 @@ export const acquireRuntimeCommittedRead = async (
 };
 
 /**
+ * Run an external read while the Runtime's published State is durable.
+ *
+ * Callers that return references into Runtime State must keep the lease until
+ * those references have been projected into an owned response. A lease must
+ * never escape through the returned value.
+ */
+export const withRuntimeCommittedRead = async <T>(
+  env: RuntimeState,
+  read: () => T | Promise<T>,
+): Promise<T> => {
+  const release = await acquireRuntimeCommittedRead(env);
+  try {
+    return await read();
+  } finally {
+    release();
+  }
+};
+
+/**
  * Serializes Runtime frame construction around one process-local writer.
  * Rechecking halt after the wait is essential: the preceding writer may have
  * discovered an ambiguous WAL outcome while this caller was queued.
