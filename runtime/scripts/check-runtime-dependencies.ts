@@ -93,6 +93,7 @@ const literalModuleSpecifier = (node: ts.Node): string | null => {
 };
 
 const observed = new Map<string, Array<{ file: string; line: number; specifier: string }>>();
+const runtimeTypeBarrelExports: Array<{ line: number; specifier: string }> = [];
 const files = collectFiles('runtime').sort();
 const fileSet = new Set(files);
 const valueGraph = new Map<string, Set<string>>(files.map(file => [file, new Set()]));
@@ -103,6 +104,16 @@ for (const file of files) {
   const source = ts.createSourceFile(file, fs.readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
   const visit = (node: ts.Node): void => {
     const specifier = literalModuleSpecifier(node);
+    if (
+      file === 'runtime/runtime/types.ts' &&
+      ts.isExportDeclaration(node) &&
+      specifier
+    ) {
+      runtimeTypeBarrelExports.push({
+        line: source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1,
+        specifier,
+      });
+    }
     if (specifier) {
       const targetFile = resolveRuntimeFile(specifier, path.resolve(file));
       if (targetFile && fileSet.has(targetFile) && isValueModuleReference(node)) {
@@ -127,6 +138,9 @@ for (const file of files) {
 }
 
 const errors: string[] = [];
+for (const { line, specifier } of runtimeTypeBarrelExports) {
+  errors.push(`RUNTIME_TYPE_BARREL_EXPORT runtime/runtime/types.ts:${line}:${specifier}`);
+}
 for (const file of rootFiles) {
   if (!ROOT_ENTRYPOINTS.has(file) && !ROOT_FILE_DEBT.has(file)) {
     errors.push(`NEW_RUNTIME_ROOT_FILE ${file}`);

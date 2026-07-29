@@ -25,201 +25,16 @@ import type {
   EntityInput,
   EntityReplica,
 } from '../entity/types';
-export type {
-  CertifiedEntityFrameLink,
-  CertifiedEntityLineageAnchor,
-  ConsensusConfig,
-  EntityAddressedOutput,
-  EntityCandidate,
-  EntityCandidateEffect,
-  EntityFrameAuthority,
-  EntityFrameEvent,
-  EntityInput,
-  EntityLeaderCertificate,
-  EntityLeaderState,
-  EntityLeaderTimeoutVote,
-  EntityLeaderTimeoutVoteBody,
-  EntityOutput,
-  EntityReplica,
-  EntityState,
-  EntitySwapPair,
-  ExternalWalletAllowanceRecord,
-  ExternalWalletBalanceRecord,
-  ExternalWalletState,
-  HashToSign,
-  HashType,
-  LockBookEntry,
-  PendingCrossJurisdictionFillAck,
-  Proposal,
-  ProposalAction,
-  ProposedEntityFrame,
-  SwapBookEntry,
-  VoteData,
-} from '../entity/types';
-export type { JurisdictionConfig } from '../protocol/jurisdiction-config';
-export { JBLOCK_LIVENESS_INTERVAL } from '../entity/types';
-export type {
-  CrossJurisdictionBookAdmission,
-  CrossJurisdictionBookLeg,
-  CrossJurisdictionBookStatus,
-  CrossJurisdictionCloseProof,
-  CrossJurisdictionRouteDomain,
-  CrossJurisdictionSettlementPolicy,
-  CrossJurisdictionPendingFill,
-  CrossJurisdictionPullBinding,
-  CrossJurisdictionPullLeg,
-  CrossJurisdictionSwapLeg,
-  CrossJurisdictionSwapRoute,
-  CrossJurisdictionSwapStatus,
-  CrossJurisdictionTimePolicy,
-} from '../types/cross-jurisdiction';
-export type {
-  DebtEntry,
-  DebtEventType,
-  DebtStatus,
-} from '../types/debt';
-export type {
-  DisputeFinalizationEvidence,
-  JBlockFinalized,
-  JHistoryFinality,
-  JPrefixAttestation,
-  JPrefixCertificate,
-  JPrefixClaim,
-  JPrefixRound,
-  JurisdictionEvent,
-  JurisdictionEventBlock,
-  JurisdictionEventData,
-  ValidatorJBlockHeader,
-  ValidatorJEventBlock,
-  ValidatorJHistory,
-} from '../types/jurisdiction-events';
-export type {
-  FrameLogEntry,
-  LogCategory,
-  LogLevel,
-} from '../types/logging';
-export type {
-  JAdapterFailure,
-  JAdapterFailureCategory,
-  CertifiedRegistrationEvidence,
-  JReplica,
-  JTx,
-} from '../types/jurisdiction-runtime';
-export type {
-  HankoBoardDelays,
-  HankoBoardMemberClaim,
-  HankoEnvelope,
-  HankoHex,
-  HankoRecoveredSignature,
-  HankoSemanticClaim,
-  HankoString,
-  HankoWireClaim,
-  CanonicalHankoMergeResult,
-} from '../types/hanko';
-export type { PaymentDeliveryMode } from '../types/payment';
-export type {
-  EntityProviderActionCancelledData,
-  EntityProviderActionExecutedData,
-  EntityProviderExecutableActionKind,
-  EntityProviderActionIntent,
-  EntityProviderActionJTxData,
-  EntityProviderActionKind,
-  EntityProviderActionPayload,
-  EntityProviderActionState,
-  EntityProviderActionSubmitAttempt,
-  EntityProviderActionSubmitOutcome,
-  EntityProviderActionSubmitState,
-  EntityProviderReleaseControlSharesPayload,
-  EntityProviderTransferPayload,
-  RecordEntityProviderActionSubmitResultData,
-  RetryEntityProviderActionData,
-} from '../types/entity-provider-actions';
-export type {
-  CertifiedBoardBranchNode,
-  CertifiedBoardAuthorityBinding,
-  CertifiedBoardLeafNode,
-  CertifiedBoardNodeStore,
-  CertifiedBoardPatriciaNode,
-  CertifiedBoardProof,
-  CertifiedBoardRecord,
-  CertifiedBoardRegistryState,
-  CertifiedBoardSource,
-} from '../types/entity-board-registry';
-export type {
-  LendingLoan,
-  LendingLoanStatus,
-  LendingPoolPosition,
-  LendingPoolStatus,
-  LendingState,
-  LendingTermId,
-} from '../types/lending';
-export type {
-  AccountDelta,
-  AccountFrame,
-  AccountFrameAck,
-  AccountBoardReseal,
-  AccountBoardResealMigration,
-  AccountFrameProposal,
-  AccountExternalFinalityInput,
-  AccountInput,
-  AccountLocalInput,
-  AccountPeerInput,
-  AccountReplica,
-  AccountState,
-  AccountDisputeSeal,
-  AccountStateDomain,
-  AccountSnapshot,
-  AccountStatus,
-  AccountTx,
-  AccountHistoryRecord,
-  CrossJurisdictionSecretRelay,
-  Delta,
-  DerivedDelta,
-  HtlcLock,
-  HtlcNoteKey,
-  HtlcRoute,
-  PullCommitment,
-  RuntimeOverlayRecord,
-  SettlementDiff,
-  SettlementOp,
-  SettlementWorkspace,
-  SwapOffer,
-  SwapOrderHistoryEntry,
-  SwapOrderResolveHistoryEntry,
-} from '../types/account';
-export {
-  buildDefaultRebalanceBaseFee,
-  buildDefaultRebalancePolicy,
-  DEFAULT_HARD_LIMIT_WHOLE,
-  DEFAULT_MAX_FEE_WHOLE,
-  DEFAULT_SOFT_LIMIT_WHOLE,
-  QUOTE_EXPIRY_MS,
-  REFERENCE_TOKEN_ID,
-  scaleRawTokenAmount,
-  scaleWholeTokenAmount,
-} from '../types/rebalance';
-export type {
-  AccountRebalanceShadowState,
-  BilateralRebalanceFeePolicy,
-  HubRebalanceConfig,
-  RebalanceFeePolicySnapshot,
-  RebalancePolicy,
-  RebalanceQuote,
-  RebalanceRequestFeeState,
-} from '../types/rebalance';
-
 /**
- * Shared XLN wire/state type barrel.
+ * Runtime machine State, Input, Tx, routing envelopes, and local infrastructure.
  *
- * Keep new domain-specific types under runtime/types/* and re-export them here
- * only when older call sites still import from ./types. The runtime architecture
- * narrative lives in docs/architecture/runtime-reaj.md.
+ * Entity, Account, Jurisdiction, and protocol types stay in their owner
+ * modules. This file may import child-layer types to compose RuntimeState, but
+ * it must never re-export them as a neutral convenience barrel.
  */
 
 import type { GossipLayer } from '../networking/gossip';
 import type { Profile } from '../entity/profile';
-
-export type { Profile } from '../entity/profile';
 
 export type RuntimeP2PConfigLike = {
   relayUrls?: string[];
@@ -246,10 +61,6 @@ export type RuntimeP2PSurface = {
   announceProfilesForEntitiesNow(entityIds: string[], reason?: string, includePending?: boolean): Promise<void>;
 };
 
-export type {
-  RuntimeSecurityIncident,
-  RuntimeSecurityIncidentIdentity,
-} from '../protocol/security-incident';
 import type {
   RuntimeSecurityIncident,
 } from '../protocol/security-incident';
@@ -334,7 +145,6 @@ export type PendingReliableIngress = {
   targetRuntimeIds: Set<string>;
 };
 
-export type { JInput } from '../jurisdiction/input';
 import type { JInput } from '../jurisdiction/input';
 
 export type JurisdictionImportRequest = {
@@ -625,13 +435,6 @@ export interface RuntimeEntityInputsEnvelope {
 export interface DeliverableEntityInput extends RoutedEntityInput {
   runtimeId: string;
 }
-
-export type {
-  ConsensusOutputOrigin,
-  EntityCommandNonceState,
-  EntityTx,
-  SignedEntityCommandV1,
-} from '../types/entity-tx';
 
 export type RuntimeHistoryRecord = AccountHistoryRecord | {
   kind: 'entityFrame';
@@ -979,20 +782,5 @@ export interface EnvSnapshot {
   logs?: FrameLogEntry[];
 }
 
-// Entity types - canonical definition in ids.ts
-export { type EntityType } from '../protocol/identity';
-
 // Constants
 export const ENC = 'hex' as const;
-
-export type { EntityProfile, NameIndex, NameSearchResult, ProfileUpdateTx } from '../types/profile';
-
-export type {
-  ConnectionRules,
-  JurisdictionEVM,
-  TopologyLayer,
-  TopologyType,
-  Xlnomy,
-  XlnomySnapshot,
-  XlnomyTopology,
-} from '../types/xlnomy';

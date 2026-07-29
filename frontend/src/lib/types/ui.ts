@@ -2,31 +2,39 @@
  * UI-specific types for XLN frontend
  *
  * These types are frontend-only and not shared with backend.
- * For shared types (EntityState, AccountReplica, etc.), import from $types
+ * Shared machine types come directly from their Runtime, Entity, or Account
+ * owner. This module only gives frontend code one UI-oriented import surface.
  */
 
-import type { EnvSnapshot, EntityInput, RuntimeTx, LogLevel, LogCategory, FrameLogEntry } from '$types';
+import type { EnvSnapshot, RuntimeTx } from '@xln/runtime/runtime/types';
+import type { EntityInput } from '@xln/runtime/entity/types';
+import type { FrameLogEntry, LogCategory, LogLevel } from '@xln/runtime/types/logging';
 
 // Re-export commonly used backend types for convenience
 export type {
   EntityReplica,
+  EntityState,
+  EntityInput,
+} from '@xln/runtime/entity/types';
+export type { EntityTx } from '@xln/runtime/types/entity-tx';
+export type {
   AccountReplica,
   AccountState,
-  EntityState,
-  EntityTx,
-  EntityInput,
-  RuntimeInput,
-  RuntimeTx,
   Delta,
   DerivedDelta,
   AccountFrame,
   AccountTx,
+} from '@xln/runtime/types/account';
+export type {
+  RuntimeInput,
+  RuntimeTx,
   EnvSnapshot as Snapshot, // Frontend historically called this Snapshot
-  // Structured logging types (canonical definitions from backend)
+} from '@xln/runtime/runtime/types';
+export type {
   LogLevel,
   LogCategory,
   FrameLogEntry,
-} from '$types';
+} from '@xln/runtime/types/logging';
 
 // Tab management for multi-entity UI
 export interface Tab {
@@ -193,7 +201,7 @@ export interface EntityInfo {
 // =============================================================================
 // STRUCTURED LOGGING SYSTEM
 // =============================================================================
-// Core log types (LogLevel, LogCategory, FrameLogEntry) are imported from $types
+// Core log types are imported from their backend owner above.
 
 /** Log filter configuration (frontend-only) */
 export interface LogFilter {

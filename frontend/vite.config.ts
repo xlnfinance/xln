@@ -333,8 +333,6 @@ export default defineConfig({
 	},
 	resolve: {
 		alias: {
-			// Direct import from source types - single source of truth
-			'$types': '../src/types.ts',
 			// Runtime files are imported from multiple depths during SSR bundling.
 			// Keep TypeChain resolution anchored to the repo root instead of
 			// relying on fragile relative traversal from the importer path.

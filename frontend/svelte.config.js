@@ -34,7 +34,6 @@ const config = {
 			base: ''
 		},
 		alias: {
-			$types: '../runtime/runtime/types.ts',
 			'@xln/runtime': '../runtime',
 			'@xln/brainvault': '../brainvault'
 		}

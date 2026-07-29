@@ -113,7 +113,6 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      $types: '../src/types.ts',
       '../jurisdictions/typechain-types/index.ts': TYPECHAIN_INDEX,
       '../../jurisdictions/typechain-types/index.ts': TYPECHAIN_INDEX,
     },
