@@ -12,7 +12,7 @@ import {
   resolveWatcherPollToBlock,
   shouldEmitExternalWalletAllowanceDelta,
   shouldEmitExternalWalletBalanceDelta,
-} from '../jadapter/rpc';
+} from '../jadapter/rpc-public';
 import {
   applyJEventsToEnv,
   buildJEventsRuntimeInput,

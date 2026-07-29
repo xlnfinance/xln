@@ -1,6 +1,6 @@
 import { hashDisputeProofHankoPayload } from '../hanko/onchain-domain';
 import type { JBatch } from '../jurisdiction/batch';
-import { computeAccountKey } from './helpers';
+import { computeAccountKey } from './contract-codec';
 
 type DisputeDebugDomain = {
   chainId: number;

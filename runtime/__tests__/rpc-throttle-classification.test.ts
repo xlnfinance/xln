@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import { isTransientRpcUnavailableError } from '../jadapter/rpc';
+import { isTransientRpcUnavailableError } from '../jadapter/rpc-public';
 
 /**
  * A shared public RPC rate-limits by IP. Classifying that throttle as fatal

@@ -9,10 +9,8 @@
 export {
   applyJEventsToEnv,
   applyWatcherJurisdictionCursor,
-  applyJBlockHeadersIngressTransform,
   buildJEventsRuntimeInput,
   buildJEventObservationInput,
-  collectRelevantJEventReplicaKeys,
   enqueueJHistoryRewind,
   enqueueJHistoryRewindForReplicaKeys,
   getWatcherStartBlock,
@@ -26,17 +24,28 @@ export {
   rawEventToJEvents,
   rememberPendingWatcherJBlock,
   resolveCommittedWatcherCursor,
-  setJEventIngressTransform,
-  setJBlockHeadersIngressTransform,
-  setJHistoryRangeIngressTransform,
   updateWatcherJurisdictionCursor,
   type EventBatchCounter,
-  type JEventIngressBatch,
-  type JBlockHeadersIngress,
-  type JHistoryRangeIngress,
   type JEventsRuntimeInputBuildResult,
   type PendingWatcherJBlockMap,
   type PendingWatcherJHistoryRange,
 } from './helpers';
+
+export {
+  collectRelevantJEventReplicaKeys,
+  isCanonicalEvent,
+  isEventRelevantToEntity,
+  type CanonicalJEventIngress,
+} from './event-relevance';
+
+export {
+  applyJBlockHeadersIngressTransform,
+  setJBlockHeadersIngressTransform,
+  setJEventIngressTransform,
+  setJHistoryRangeIngressTransform,
+  type JBlockHeadersIngress,
+  type JEventIngressBatch,
+  type JHistoryRangeIngress,
+} from './ingress-transform';
 
 export type { JEventIngress } from './types';

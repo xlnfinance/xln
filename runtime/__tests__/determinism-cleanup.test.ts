@@ -2,17 +2,16 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 
 const repoRoot = new URL('../..', import.meta.url).pathname;
-const readSource = (path: string): string => {
-  if (path !== 'runtime/jadapter/rpc.ts') return readFileSync(`${repoRoot}/${path}`, 'utf8');
-  return [
-    'rpc.ts',
+const readSource = (path: string): string =>
+  path === 'runtime/jadapter/rpc-adapter.ts'
+    ? [
     'rpc-public.ts',
     'rpc-adapter.ts',
     'rpc-lifecycle.ts',
     'rpc-reads.ts',
     'rpc-wallet-writes.ts',
-  ].map(file => readFileSync(`${repoRoot}/runtime/jadapter/${file}`, 'utf8')).join('\n');
-};
+      ].map(file => readFileSync(`${repoRoot}/runtime/jadapter/${file}`, 'utf8')).join('\n')
+    : readFileSync(`${repoRoot}/${path}`, 'utf8');
 
 describe('determinism cleanup lifecycle', () => {
   test('determinism harness stops runtime loop and managed anvil after each run', () => {
@@ -37,7 +36,7 @@ describe('determinism cleanup lifecycle', () => {
   });
 
   test('rpc adapter close waits for an in-flight watcher poll before returning', () => {
-    const source = readSource('runtime/jadapter/rpc.ts');
+    const source = readSource('runtime/jadapter/rpc-adapter.ts');
 
     expect(source).toContain('const inFlightWatcherPoll = pollInFlight;');
     expect(source).toContain('adapter.stopWatching();');
@@ -46,7 +45,7 @@ describe('determinism cleanup lifecycle', () => {
   });
 
   test('rpc watcher cancellation keeps in-flight poll tracked and blocks late event ingress', () => {
-    const source = readSource('runtime/jadapter/rpc.ts');
+    const source = readSource('runtime/jadapter/rpc-adapter.ts');
     const stopStart = source.indexOf('stopWatching(): void {');
     const stopEnd = source.indexOf('getBrowserVM(): BrowserVMProvider | null', stopStart);
     const stopSource = source.slice(stopStart, stopEnd);
@@ -98,7 +97,7 @@ describe('determinism cleanup lifecycle', () => {
   });
 
   test('RPC scenarios use explicit polling and a wall-clock-independent chain', () => {
-    const rpcSource = readSource('runtime/jadapter/rpc.ts');
+    const rpcSource = readSource('runtime/jadapter/rpc-adapter.ts');
     const bootSource = readSource('runtime/scenarios/boot.ts');
 
     expect(rpcSource).toContain("const manualPolling = env.scenarioMode === true;");

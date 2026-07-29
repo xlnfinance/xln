@@ -8,15 +8,14 @@ describe('JAdapter dispute diagnostics', () => {
     expect(() => safeStringify(diagnostics)).not.toThrow();
 
     const source = await Promise.all([
-      'rpc.ts',
       'rpc-public.ts',
       'rpc-adapter.ts',
+      'rpc-batch-preflight.ts',
       'rpc-lifecycle.ts',
       'rpc-reads.ts',
       'rpc-wallet-writes.ts',
     ].map(file => Bun.file(new URL(`../jadapter/${file}`, import.meta.url)).text())).then(parts => parts.join('\n'));
-    expect(source).toContain('disputeStart.batch ${safeStringify(disputeStartDebug)}');
-    expect(source).toContain('disputeStart=${safeStringify(disputeStartDebug)}');
-    expect(source).not.toContain('JSON.stringify(disputeStartDebug)');
+    expect(source).toContain('disputeStart=${safeStringify(input.disputeStartDebug)}');
+    expect(source).not.toContain('JSON.stringify(input.disputeStartDebug)');
   });
 });

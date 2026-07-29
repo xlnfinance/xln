@@ -11,7 +11,6 @@ import { createRelayStore, pushDebugEvent } from '../relay/store';
 import { safeStringify } from '../protocol/serialization';
 
 const readRpcAdapterSource = (repoRoot: string): string => [
-  'rpc.ts',
   'rpc-public.ts',
   'rpc-adapter.ts',
   'rpc-lifecycle.ts',

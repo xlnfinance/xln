@@ -34,7 +34,7 @@ import {
   assertEntityProviderActionResolutionReceipt,
 } from '../entity/entity-provider-action';
 import { batchAddSettlement, createEmptyBatch, decodeJBatch, summarizeBatch } from '../jurisdiction/batch';
-import { buildExternalTokenToReserveBatch, packTokenReference } from './helpers';
+import { buildExternalTokenToReserveBatch, packTokenReference } from './contract-codec';
 import { buildSingleSignerHanko, prepareSignedBatch } from '../hanko/batch';
 import { decodeHankoEnvelope } from '../hanko/codec';
 import {

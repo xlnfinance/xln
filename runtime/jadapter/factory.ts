@@ -3,11 +3,14 @@ import { ethers } from 'ethers';
 import { normalizeLoopbackUrl } from '../networking/loopback-url';
 import { createBrowserVMAdapter } from './browservm';
 import { DEV_CHAIN_IDS, TRON_CHAIN_IDS } from './chain-ids';
-import { DEFAULT_PRIVATE_KEY } from './helpers';
 import { createRpcAdapter } from './rpc-adapter';
 import type { JAdapter, JAdapterConfig } from './types';
 
 const DEFAULT_RPC_POLLING_INTERVAL_MS = 1_000;
+
+/** Publicly known Hardhat account #0 key, allowed only on local dev chains. */
+export const DEFAULT_PRIVATE_KEY =
+  '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
 
 export const resolveJAdapterPrivateKey = (config: JAdapterConfig): string | undefined => {
   if (config.privateKey) return config.privateKey;

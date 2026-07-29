@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   applyProcessBatchGasFloor,
   PROCESS_BATCH_GAS_FLOOR,
-} from '../jadapter/rpc';
+} from '../jadapter/rpc-public';
 
 describe('processBatch transformer gas floor', () => {
   test('rejects the estimator cheap-success no-op path for dispute finalization', () => {

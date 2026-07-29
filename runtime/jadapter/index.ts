@@ -6,7 +6,6 @@
  * helpers, and Runtime API from forming a circular initialization graph.
  */
 export * from './types';
-export { DEFAULT_PRIVATE_KEY } from './helpers';
 export * from './browservm-registry';
 export * from './chain-ids';
 export * from './factory';

@@ -10,7 +10,6 @@ const readMarketMakerNodeSource = (): string => [
 ].map(file => readFileSync(join(process.cwd(), 'runtime/orchestrator', file), 'utf8')).join('\n');
 
 const readRpcAdapterSource = (): string => [
-  'rpc.ts',
   'rpc-public.ts',
   'rpc-adapter.ts',
   'rpc-lifecycle.ts',

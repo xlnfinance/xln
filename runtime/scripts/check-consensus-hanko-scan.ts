@@ -22,8 +22,17 @@ const assertOrder = (text: string, path: string, markers: string[]): void => {
   }
 };
 
-const accountConsensusPath = 'runtime/account/consensus/index.ts';
-const accountHandlerPath = 'runtime/entity/tx/handlers/account.ts';
+const accountConsensusPaths = [
+  'runtime/account/consensus/index.ts',
+  'runtime/account/consensus/ack-commit.ts',
+  'runtime/account/consensus/incoming-preflight.ts',
+];
+const accountConsensusPath = accountConsensusPaths.join(', ');
+const accountHandlerPaths = [
+  'runtime/entity/tx/handlers/account.ts',
+  'runtime/entity/tx/handlers/account/committed-input.ts',
+];
+const accountHandlerPath = accountHandlerPaths.join(', ');
 const accountProposePaths = [
   'runtime/account/consensus/propose.ts',
   'runtime/account/consensus/proposal-admission.ts',
@@ -32,11 +41,16 @@ const accountProposePath = accountProposePaths.join(', ');
 const accountFramePath = 'runtime/account/consensus/frame.ts';
 const entityConsensusPaths = [
   'runtime/entity/consensus/shared.ts',
+  'runtime/entity/consensus/input-ingress.ts',
+  'runtime/entity/consensus/input-admission.ts',
   'runtime/entity/consensus/input-consensus.ts',
   'runtime/entity/consensus/frame-application.ts',
+  'runtime/entity/consensus/commit-finalization.ts',
+  'runtime/entity/consensus/single-signer-frame.ts',
 ];
 const entityConsensusPath = entityConsensusPaths.join(', ');
 const envEventsPath = 'runtime/runtime/env-events.ts';
+const entityEffectPublicationPath = 'runtime/runtime/entity-input-output.ts';
 const entityFramePath = 'runtime/entity/consensus/frame.ts';
 const hankoSigningPath = 'runtime/hanko/signing.ts';
 const hankoCodecPath = 'runtime/hanko/codec.ts';
@@ -45,9 +59,9 @@ const hankoBatchPath = 'runtime/hanko/batch.ts';
 const onchainHankoDomainPath = 'runtime/hanko/onchain-domain.ts';
 const jBatchPath = 'runtime/jurisdiction/batch.ts';
 const rpcAdapterPaths = [
-  'runtime/jadapter/rpc.ts',
   'runtime/jadapter/rpc-public.ts',
   'runtime/jadapter/rpc-adapter.ts',
+  'runtime/jadapter/rpc-batch-dispute-debug.ts',
   'runtime/jadapter/rpc-lifecycle.ts',
   'runtime/jadapter/rpc-reads.ts',
   'runtime/jadapter/rpc-wallet-writes.ts',
@@ -57,12 +71,13 @@ const depositoryPath = 'jurisdictions/contracts/Depository.sol';
 const accountContractPath = 'jurisdictions/contracts/Account.sol';
 const auditDocPath = 'docs/security/consensus-hanko-scan.md';
 
-const accountConsensus = readText(accountConsensusPath);
-const accountHandler = readText(accountHandlerPath);
+const accountConsensus = accountConsensusPaths.map(readText).join('\n');
+const accountHandler = accountHandlerPaths.map(readText).join('\n');
 const accountPropose = accountProposePaths.map(readText).join('\n');
 const accountFrame = readText(accountFramePath);
 const entityConsensus = entityConsensusPaths.map(readText).join('\n');
 const envEvents = readText(envEventsPath);
+const entityEffectPublication = readText(entityEffectPublicationPath);
 const entityFrame = readText(entityFramePath);
 const hankoSigning = readText(hankoSigningPath);
 const hankoCodec = readText(hankoCodecPath);
@@ -82,35 +97,42 @@ assertIncludes(
   'frameJHeight: entityJHeight ?? account.lastFinalizedJHeight ?? 0,',
   accountProposePath,
 );
-assertIncludes(accountConsensus, 'const pendingJHeight = account.pendingFrame.jHeight ?? account.lastFinalizedJHeight ?? 0;', accountConsensusPath);
-assertIncludes(accountConsensus, 'const currentJHeight = account.lastFinalizedJHeight ?? 0;', accountConsensusPath);
-assertIncludes(accountConsensus, 'const frameJHeight = receivedFrame.jHeight ?? currentJHeight;', accountConsensusPath);
+assertIncludes(accountConsensus, 'const jHeight = pendingFrame.jHeight ?? account.lastFinalizedJHeight ?? 0;', accountConsensusPath);
+assertIncludes(
+  accountConsensus,
+  'frameJHeight: receivedFrame.jHeight ?? account.lastFinalizedJHeight ?? 0,',
+  accountConsensusPath,
+);
 assertIncludes(accountFrame, 'if (!Number.isSafeInteger(frame.jHeight) || frame.jHeight < 0)', accountFramePath);
 assertIncludes(accountFrame, 'jHeight: frame.jHeight,', accountFramePath);
 
 assertOrder(accountConsensus, accountConsensusPath, [
   'async function validateIncomingFrameOnClone',
   'const clonedMachine = cloneAccountState(account);',
-  'const result = await applyAccountTx(',
-  'clonedMachine,',
-  'true,',
-  "assertNoUnilateralSettlementMutation(clonedMachine, beforeSettlement, accountTx, 'receiver/validate');",
+  'const replayResult = await replayIncomingFrameOnClone(',
   'const frameHashMismatch = await verifySenderFrameHash',
   'const localAccountStateRoot = computeAccountStateRoot(clonedMachine);',
   'localAccountStateRoot !== receivedFrame.accountStateRoot',
   '!accountFrameDeltasEqual(ourFinalDeltas, receivedFrame.deltas)',
   'const proofResult = buildAccountProofBodyFromEnv(env, clonedMachine);',
   'const localProofBodyHash = proofResult.proofBodyHash;',
-  'const frameSealError = disputeSealRequirementError(',
+  'const frameSealError = getDisputeSealRequirementError(',
 ]);
 
 assertOrder(accountConsensus, accountConsensusPath, [
-  'async function commitIncomingFrameOnRealState',
+  'const reexecuteIncomingFrame = async (',
   'const commitResult = await applyAccountTx(',
   'account,',
   'false,',
   "throw new Error(`Frame ${receivedFrame.height} commit failed: ${tx.type} - ${commitResult.error}`);",
   "assertNoUnilateralSettlementMutation(account, beforeSettlement, tx, 'receiver/commit');",
+]);
+assertOrder(accountConsensus, accountConsensusPath, [
+  'async function commitIncomingFrameOnRealState',
+  'await reexecuteIncomingFrame(',
+  'forkAccountCommitmentCache(validation.clonedMachine, account);',
+  'assertLiveCommitMatchesFrame(',
+  'account.currentFrame = structuredClone(receivedFrame);',
   'const committedFrame = cloneAccountFrame(receivedFrame);',
   'committedFrames.push({ frame: committedFrame, committedViaNewFrame: true });',
 ]);
@@ -121,9 +143,8 @@ assertNotMatches(
   'speculative Account history publication',
 );
 assertOrder(accountHandler, accountHandlerPath, [
-  'const committedFrameEntries = result.committedFrames ?? [];',
-  'for (const { frame, committedViaNewFrame } of committedFrameEntries) {',
-  'candidateEffects.push({',
+  'for (const { frame, committedViaNewFrame } of result.committedFrames ?? []) {',
+  'effects.candidateEffects.push({',
   "kind: 'accountFrameHistory',",
 ]);
 assertOrder(envEvents, envEventsPath, [
@@ -131,57 +152,39 @@ assertOrder(envEvents, envEventsPath, [
   "if (effect.kind === 'accountFrameHistory') {",
   'recordAccountFrameHistory(env, effect);',
 ]);
-const candidatePublicationCount = entityConsensus.match(/publishEntityCandidateEffects\(env, /g)?.length ?? 0;
-if (candidatePublicationCount !== 3) {
+const candidatePublicationCount =
+  entityEffectPublication.match(/publishEntityCandidateEffects\(env, /g)?.length ?? 0;
+if (candidatePublicationCount !== 1) {
   throw new Error(
-    `${entityConsensusPath} must publish candidate effects in exactly three Entity commit paths; found ${candidatePublicationCount}`,
+    `${entityEffectPublicationPath} must publish candidate effects exactly once after Entity commit; found ${candidatePublicationCount}`,
   );
 }
-for (const publication of entityConsensus.matchAll(/publishEntityCandidateEffects\(env, /g)) {
-  const publicationIndex = publication.index;
-  const committedStateIndex = entityConsensus.lastIndexOf('workingReplica.state = committedState;', publicationIndex);
-  const certifiedFrameIndex = entityConsensus.lastIndexOf('appendCertifiedEntityFrameLink(', publicationIndex);
-  if (
-    committedStateIndex < 0 ||
-    certifiedFrameIndex < committedStateIndex ||
-    certifiedFrameIndex > publicationIndex
-  ) {
-    throw new Error(
-      `${entityConsensusPath} publishes candidate effects before committed state and certified Entity frame`,
-    );
-  }
-}
-
 assertOrder(entityConsensus, entityConsensusPath, [
   'const getEntityMempoolAdmissionError = (',
   'if (incoming > LIMITS.MEMPOOL_SIZE)',
   'if (next > LIMITS.MEMPOOL_SIZE)',
   'const admissionError = getEntityMempoolAdmissionError(',
-  'entityReplica,',
-  'entityInput,',
+  'replica,',
+  'ingressInput,',
   'trustedLocalCrossJurisdiction,',
   'if (admissionError) {',
-  'const ingressEntityInput = entityInput;',
-  'const workingReplica = cloneEntityReplica(entityReplica);',
-  'if (!isEntityInputWellFormed(ingressEntityInput)) {',
-  'entityInput = cloneIsolatedEntityInput(ingressEntityInput);',
-  'const suppliedEntityTxs = entityInput.entityTxs ?? [];',
-  'const secretAwareEntityTxs = localCanPropose && suppliedEntityTxs.length > 0',
-  '? await appendDefaultProposerAcceptedHtlcReveals(env, workingReplica, suppliedEntityTxs)',
-  ': suppliedEntityTxs;',
-  'const admittedEntityTxs = appendDefaultProposerCrossJMaterializations(',
-  'secretAwareEntityTxs,',
-  'workingReplica.mempool = prioritizeScheduledWakeTransactions(',
-  'prepareLocallyAuthoredEntityTxs(env, workingReplica.state, workingReplica.signerId, [',
-  '...workingReplica.mempool,',
-  '...admittedEntityTxs,',
+  'const workingReplica = forkEntityReplicaForInput(replica);',
+  'if (!isEntityInputWellFormed(ingressInput)) {',
+  'const input = cloneIsolatedEntityInput(ingressInput);',
+  'normalizeProposedFrameCollectedSigs(input.proposedFrame);',
+  'if (!isEntityInputWellFormed(input)) {',
 ]);
+assertIncludes(entityConsensus, 'const supplied = entityInput.entityTxs ?? [];', entityConsensusPath);
+assertIncludes(entityConsensus, 'const secretAware =', entityConsensusPath);
+assertIncludes(entityConsensus, 'await appendDefaultProposerAcceptedHtlcReveals(', entityConsensusPath);
+assertIncludes(entityConsensus, 'const admitted = appendDefaultProposerCrossJMaterializations(', entityConsensusPath);
+assertIncludes(entityConsensus, 'workingReplica.mempool = prioritizeScheduledWakeTransactions(', entityConsensusPath);
 assertIncludes(entityConsensus, 'if (!verifyHashPrecommitSignatures(', entityConsensusPath);
-assertIncludes(entityConsensus, 'const committedHankos: HankoString[] = [];', entityConsensusPath);
-assertIncludes(entityConsensus, 'const hanko = await buildQuorumHanko(', entityConsensusPath);
+assertIncludes(entityConsensus, 'const hankos: HankoString[] = [];', entityConsensusPath);
+assertIncludes(entityConsensus, 'await buildQuorumHanko(', entityConsensusPath);
 assertIncludes(entityConsensus, 'attachHankoWitnessToOutputs(', entityConsensusPath);
 assertIncludes(entityConsensus, 'entityOutbox.push(...commitOutputs);', entityConsensusPath);
-assertIncludes(entityConsensus, 'if (isFrameLeader) jOutbox.push(...execution.jOutputs);', entityConsensusPath);
+assertIncludes(entityConsensus, 'if (isEmitter) jOutbox.push(...execution.jOutputs);', entityConsensusPath);
 
 assertIncludes(accountFrame, 'canonicalJurisdictionEventsHash(events)', accountFramePath);
 assertOrder(accountFrame, accountFramePath, [

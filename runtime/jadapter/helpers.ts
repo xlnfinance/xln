@@ -4,10 +4,9 @@
  * @license AGPL-3.0
  */
 
-import { ethers } from 'ethers';
+import { isHexString } from 'ethers';
 import type { JEvent, JEventIngress } from './types';
-import type { DisputeFinalizationEvidence, EntityInput, RuntimeState, JPrefixAttestation, JReplica, JurisdictionConfig, RuntimeInput, RuntimeTx, ValidatorJBlockHeader, ValidatorJEventBlock } from '../types';
-import { createEmptyBatch, type JBatch } from '../jurisdiction/batch';
+import type { DisputeFinalizationEvidence, EntityInput, RuntimeState, JPrefixAttestation, JReplica, JurisdictionConfig, RuntimeInput, RuntimeTx, ValidatorJEventBlock } from '../types';
 import { enqueueRuntimeInput } from '../runtime/input-queue';
 import { createStructuredLogger, shortId } from '../infra/logger';
 import {
@@ -37,53 +36,16 @@ import {
 } from './local-ingress-source';
 import { rawEventToJEvents } from './j-event-payloads';
 import {
-  CANONICAL_J_EVENTS,
-} from '../jurisdiction/event-catalog';
+  isCanonicalEvent,
+  isEventRelevantToEntity,
+} from './event-relevance';
+import {
+  applyJEventIngressTransform,
+  applyJHistoryRangeIngressTransform,
+} from './ingress-transform';
 export { rawEventToJEvents } from './j-event-payloads';
 
-const CANONICAL_J_EVENT_SET = new Set<string>(CANONICAL_J_EVENTS);
 const jadapterHelperLog = createStructuredLogger('jadapter.helpers');
-
-// TEST-ONLY fallback signer (Hardhat account #0, publicly known key)
-export const DEFAULT_PRIVATE_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
-
-export function computeAccountKey(entity1: string, entity2: string): string {
-  const [left, right] = entity1.toLowerCase() < entity2.toLowerCase()
-    ? [entity1, entity2]
-    : [entity2, entity1];
-  return ethers.solidityPacked(['bytes32', 'bytes32'], [left, right]);
-}
-
-export function packTokenReference(
-  tokenType: number,
-  contractAddress: string,
-  externalTokenId: ethers.BigNumberish,
-): string {
-  return ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
-    ['uint8', 'address', 'uint96'],
-    [tokenType, contractAddress, externalTokenId],
-  ));
-}
-
-export function entityIdToAddress(entityId: string): string {
-  const normalized = entityId.toLowerCase().replace('0x', '').padStart(64, '0');
-  return ethers.getAddress('0x' + normalized.slice(-40));
-}
-
-export const buildExternalTokenToReserveBatch = (params: {
-  entityId: string; tokenAddress: string; amount: bigint; tokenType?: number; externalTokenId?: bigint; internalTokenId?: number;
-}): JBatch => {
-  const batch = createEmptyBatch();
-  batch.externalTokenToReserve.push({
-    entity: params.entityId,
-    contractAddress: params.tokenAddress,
-    externalTokenId: params.externalTokenId ?? 0n,
-    tokenType: params.tokenType ?? 0,
-    internalTokenId: params.internalTokenId ?? 0,
-    amount: params.amount,
-  });
-  return batch;
-};
 
 // ═══════════════════════════════════════════════════════════════════════════
 // SHARED EVENT CONVERSION — used by ALL JAdapter modes (browservm + rpc)
@@ -107,72 +69,6 @@ export type PendingWatcherJHistoryRange = {
   replicaKeys: Set<string>;
 };
 
-
-export type JEventIngressBatch = {
-  events: JEventIngress[];
-  blockNumber: number;
-  blockHash: string;
-};
-
-export type JHistoryRangeIngress = {
-  scannedThroughHeight: number;
-  tipBlockHash: string;
-  headers: ValidatorJBlockHeader[];
-};
-
-export type JBlockHeadersIngress = ValidatorJBlockHeader[];
-
-let jEventIngressTransform: ((batch: JEventIngressBatch) => JEventIngressBatch) | null = null;
-let jHistoryRangeIngressTransform:
-  ((range: JHistoryRangeIngress) => JHistoryRangeIngress) | null = null;
-let jBlockHeadersIngressTransform:
-  ((headers: JBlockHeadersIngress) => JBlockHeadersIngress) | null = null;
-
-export const setJEventIngressTransform = (
-  transform: ((batch: JEventIngressBatch) => JEventIngressBatch) | null,
-): (() => void) => {
-  const previous = jEventIngressTransform;
-  jEventIngressTransform = transform;
-  return () => {
-    jEventIngressTransform = previous;
-  };
-};
-
-export const setJHistoryRangeIngressTransform = (
-  transform: ((range: JHistoryRangeIngress) => JHistoryRangeIngress) | null,
-): (() => void) => {
-  const previous = jHistoryRangeIngressTransform;
-  jHistoryRangeIngressTransform = transform;
-  return () => {
-    jHistoryRangeIngressTransform = previous;
-  };
-};
-
-export const setJBlockHeadersIngressTransform = (
-  transform: ((headers: JBlockHeadersIngress) => JBlockHeadersIngress) | null,
-): (() => void) => {
-  const previous = jBlockHeadersIngressTransform;
-  jBlockHeadersIngressTransform = transform;
-  return () => {
-    jBlockHeadersIngressTransform = previous;
-  };
-};
-
-export const applyJBlockHeadersIngressTransform = (
-  headers: JBlockHeadersIngress,
-): JBlockHeadersIngress => {
-  const transformed = jBlockHeadersIngressTransform
-    ? jBlockHeadersIngressTransform(headers.map((header) => ({ ...header })))
-    : headers;
-  if (transformed.length !== headers.length) throw new Error('J_HISTORY_HEADER_TRACE_LENGTH_MISMATCH');
-  return transformed.map((header, index) => {
-    const expectedHeight = headers[index]?.jHeight;
-    if (header.jHeight !== expectedHeight || !String(header.jBlockHash || '').trim()) {
-      throw new Error(`J_HISTORY_HEADER_TRACE_INVALID:index=${index}`);
-    }
-    return { jHeight: header.jHeight, jBlockHash: header.jBlockHash.toLowerCase() };
-  });
-};
 
 const normalizeJurisdictionLabel = (value: unknown): string =>
   String(value || '').trim().toLowerCase();
@@ -394,101 +290,6 @@ const assertJEventIngressOpen = (env: RuntimeState, label: string): void => {
     throw new Error(`J_EVENT_INGRESS_QUIESCING:${label}`);
   }
 };
-
-/**
- * Check if a raw event is a canonical j-event.
- */
-export function isCanonicalEvent(event: JEventIngress): boolean {
-  return CANONICAL_J_EVENT_SET.has(event.name);
-}
-
-/**
- * Check if a raw event is relevant to a specific entity.
- * Shared between all adapter modes — same logic regardless of source.
- */
-export function isEventRelevantToEntity(event: JEventIngress, entityId: string): boolean {
-  const normalize = (id: unknown): string => String(id).toLowerCase();
-  const normalizedEntity = normalize(entityId);
-  const args = event.args;
-
-  switch (event.name) {
-    case 'FoundationBootstrapped':
-    case 'EntityRegistered':
-    case 'BoardActivated':
-      // Board authority is stack-global. Every Entity replica bound to this
-      // exact watcher stack must certify the identical ordered registry log.
-      return true;
-
-    case 'ReserveUpdated':
-      return normalize(args['entity']) === normalizedEntity;
-
-    case 'ExternalWalletSnapshot':
-      return normalize(args['entityId']) === normalizedEntity;
-
-    case 'ExternalWalletDelta':
-      return normalize(args['entityId']) === normalizedEntity;
-
-    case 'SecretRevealed':
-      return true; // Global: all entities with matching hashlock should observe
-
-    case 'AccountSettled': {
-      const settledRaw = args['settled'] ?? args[''] ?? args[0] ?? [];
-      const settled = Array.isArray(settledRaw) ? settledRaw : [];
-      for (const rawSettlement of settled) {
-        const s = rawSettlement as Record<string, unknown> & unknown[];
-        const left = normalize(s[0] ?? s['left']);
-        const right = normalize(s[1] ?? s['right']);
-        if (left === normalizedEntity || right === normalizedEntity) return true;
-      }
-      return false;
-    }
-
-    case 'DisputeStarted':
-      return normalize(args['sender']) === normalizedEntity || normalize(args['counterentity']) === normalizedEntity;
-
-    case 'DisputeFinalized':
-      return normalize(args['sender']) === normalizedEntity || normalize(args['counterentity']) === normalizedEntity;
-
-    case 'DebtCreated':
-      return normalize(args['debtor']) === normalizedEntity || normalize(args['creditor']) === normalizedEntity;
-
-    case 'DebtEnforced':
-      return normalize(args['debtor']) === normalizedEntity || normalize(args['creditor']) === normalizedEntity;
-
-    case 'DebtForgiven':
-      return normalize(args['debtor']) === normalizedEntity || normalize(args['creditor']) === normalizedEntity;
-
-    case 'HankoBatchProcessed':
-      return normalize(args['entityId']) === normalizedEntity;
-
-    case 'BatchOperationSkipped':
-      return normalize(args['entityId']) === normalizedEntity;
-
-    case 'EntityProviderActionExecuted':
-    case 'EntityProviderActionCancelled':
-      return normalize(args['entityId']) === normalizedEntity;
-
-    default:
-      return false;
-  }
-}
-
-export function collectRelevantJEventReplicaKeys(env: RuntimeState, rawEvents: JEventIngress[]): string[] {
-  const canonical = rawEvents.filter(isCanonicalEvent);
-  if (canonical.length === 0) return [];
-
-  const replicaKeys = new Set<string>();
-  for (const [replicaKey, replica] of env.eReplicas?.entries?.() || []) {
-    const [entityIdFromKey] = replicaKey.split(':');
-    const entityId = String(replica?.state?.entityId || replica?.entityId || entityIdFromKey || '').toLowerCase();
-    if (!entityId) continue;
-    if (canonical.some((event) => isEventRelevantToEntity(event, entityId))) {
-      replicaKeys.add(replicaKey);
-    }
-  }
-
-  return [...replicaKeys].sort();
-}
 
 export function areJEventReplicaKeysFinalizedThrough(env: RuntimeState, replicaKeys: Iterable<string>, blockNumber: number): boolean {
   const targetBlock = Math.floor(Number(blockNumber));
@@ -1130,9 +931,11 @@ export function enqueueJHistoryRange(
   // Outer poll cancellation checks reduce wasted I/O, but only this guard can
   // prove that no authenticated empty range is queued after quiesce begins.
   assertJEventIngressOpen(env, 'history-range');
-  const ingress = jHistoryRangeIngressTransform
-    ? jHistoryRangeIngressTransform({ scannedThroughHeight, tipBlockHash, headers })
-    : { scannedThroughHeight, tipBlockHash, headers };
+  const ingress = applyJHistoryRangeIngressTransform({
+    scannedThroughHeight,
+    tipBlockHash,
+    headers,
+  });
   const built = buildJHistoryRangeRuntimeInput(
     env,
     newlyObservedInputs,
@@ -1257,13 +1060,13 @@ export function enqueueJHistoryRewind(
 const normalizeManualJEvents = (events: JEvent[], label: string): JEventIngress[] => {
   if (!Array.isArray(events)) throw new Error(`J_EVENT_MANUAL_BATCH_INVALID:${label}`);
   return events.map((event, index) => {
-    if (!event || typeof event.name !== 'string' || !CANONICAL_J_EVENT_SET.has(event.name)) {
+    if (!event || typeof event.name !== 'string' || !isCanonicalEvent(event)) {
       throw new Error(`J_EVENT_MANUAL_EVENT_INVALID:${label}:${index}:${String(event?.name ?? 'missing')}`);
     }
     if (!Number.isSafeInteger(event.blockNumber) || event.blockNumber < 0) {
       throw new Error(`J_EVENT_MANUAL_BLOCK_NUMBER_INVALID:${label}:${index}:${String(event.blockNumber)}`);
     }
-    if (!ethers.isHexString(event.blockHash, 32)) {
+    if (!isHexString(event.blockHash, 32)) {
       throw new Error(`J_EVENT_MANUAL_BLOCK_HASH_INVALID:${label}:${index}:${String(event.blockHash)}`);
     }
     if (!String(event.transactionHash || '').trim()) {
@@ -1462,9 +1265,11 @@ export function processEventBatch(
   }
   if (deduped.length === 0) return null;
 
-  const ingressBatch = jEventIngressTransform
-    ? jEventIngressTransform({ events: deduped, blockNumber, blockHash })
-    : { events: deduped, blockNumber, blockHash };
+  const ingressBatch = applyJEventIngressTransform({
+    events: deduped,
+    blockNumber,
+    blockHash,
+  });
   if (
     !Number.isSafeInteger(ingressBatch.blockNumber) ||
     ingressBatch.blockNumber < 0 ||

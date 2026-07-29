@@ -2,7 +2,7 @@ import type { Provider } from 'ethers';
 import { ethers } from 'ethers';
 import type { Depository, EntityProvider } from '../../jurisdictions/typechain-types/index.ts';
 import { normalizeEntityId } from '../entity/id';
-import { computeAccountKey } from './helpers';
+import { computeAccountKey } from './contract-codec';
 import type { JAdapter, JEvent, JTokenInfo, JWalletSnapshot, JWalletSnapshotRequest } from './types';
 import { readRpcWalletSnapshot } from './rpc-wallet-snapshot';
 

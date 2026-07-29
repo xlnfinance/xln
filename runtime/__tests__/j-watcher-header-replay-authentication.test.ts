@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 
-import { prepareAuthenticatedWatcherIngress } from '../jadapter/rpc';
+import { prepareAuthenticatedWatcherIngress } from '../jadapter/rpc-public';
 import { setJBlockHeadersIngressTransform } from '../jadapter/watcher';
 import type { AuthenticatedReceiptRange } from '../jadapter/receipt-root';
 

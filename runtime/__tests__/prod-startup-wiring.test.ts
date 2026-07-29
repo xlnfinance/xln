@@ -16,7 +16,7 @@ const readMarketMakerNodeSource = (): string =>
   ['mm-node.ts', 'mm-node-core.ts', 'mm-node-health.ts', 'mm-node-run.ts'].map(readMarketMakerNodeModule).join('\n');
 
 const readRpcAdapterSource = (): string =>
-  ['rpc.ts', 'rpc-public.ts', 'rpc-adapter.ts', 'rpc-lifecycle.ts', 'rpc-reads.ts', 'rpc-wallet-writes.ts']
+  ['rpc-public.ts', 'rpc-adapter.ts', 'rpc-lifecycle.ts', 'rpc-reads.ts', 'rpc-wallet-writes.ts']
     .map(file => readFileSync(join(repoRoot, 'runtime/jadapter', file), 'utf8'))
     .join('\n');
 

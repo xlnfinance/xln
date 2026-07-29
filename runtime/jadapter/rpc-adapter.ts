@@ -29,7 +29,7 @@ import {
   getDefaultTokenSupply,
 } from '../jurisdiction/default-tokens';
 import { makeJAdapterFailureResult } from './failure';
-import { buildExternalTokenToReserveBatch, packTokenReference } from './helpers';
+import { buildExternalTokenToReserveBatch, packTokenReference } from './contract-codec';
 import { parseReceiptLogsToJEvents } from './j-event-log-decoder';
 import { DEV_CHAIN_IDS } from './chain-ids';
 import { normalizeReceiptHash, parseReceiptQuantity } from '../jurisdiction/receipt-codec';
