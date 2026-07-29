@@ -1,7 +1,7 @@
 import type { ReliableDeliveryReceipt, RuntimeEntityInputsEnvelope } from '../types';
 import { deserializeWsMessage, hashHelloMessage, makeMessageId, serializeWsMessage, type RuntimeWsMessage } from './ws-protocol';
 import { signDigest } from '../account/crypto';
-import { encryptJSON, decryptJSON, pubKeyToHex } from './p2p-crypto';
+import { encryptJSON, decryptJSON, pubKeyToHex } from '../protocol/p2p-crypto';
 import { asFailFastPayload, failfastAssert } from './failfast';
 import { isRuntimeId, normalizeRuntimeId } from './runtime-id';
 import { createStructuredLogger } from '../infra/logger';

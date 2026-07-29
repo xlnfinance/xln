@@ -1,6 +1,6 @@
 import { RemoteRuntimeAdapter } from '../../../../runtime/radapter/remote';
 import { RuntimeWsClient, type RuntimeWsClientOptions } from '../../../../runtime/networking/ws-client';
-import { deriveEncryptionKeyPair } from '../../../../runtime/networking/p2p-crypto';
+import { deriveEncryptionKeyPair } from '../../../../runtime/protocol/p2p-crypto';
 import { RuntimeQueryClient } from '$lib/stores/runtimeQueryClient';
 import {
   assertRemoteRuntimeTokenFresh,

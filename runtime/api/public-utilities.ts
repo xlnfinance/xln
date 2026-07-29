@@ -1,7 +1,5 @@
 export {
   createLazyEntity,
-  createNumberedEntitiesBatch,
-  createNumberedEntity,
   detectEntityType,
   encodeBoard,
   generateLazyEntityId,
@@ -12,6 +10,10 @@ export {
   requestNamedEntity,
   resolveEntityIdentifier,
 } from '../entity/factory';
+export {
+  createNumberedEntitiesBatch,
+  createNumberedEntity,
+} from '../runtime/registration/numbered-registration';
 export {
   debugFundReserves,
   getBrowserVMInstance,

@@ -5,7 +5,7 @@ import {
   collectLocalProfileEncryptionAnnouncements,
   getCompleteProfileEncryptionManifest,
   buildValidatorEncryptionBoard,
-} from './profile-encryption';
+} from '../entity/profile-encryption';
 import { buildLocalEntityProfile } from './gossip-helper';
 import { computeProfileHash, signProfileRuntimeRoute } from './profile-signing';
 import { compareStableText } from '../protocol/serialization';

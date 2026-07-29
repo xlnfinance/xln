@@ -8,7 +8,7 @@ import {
 import { HTLC, LIMITS } from '../constants';
 import { generateLazyEntityId } from '../entity/factory';
 import { buildQuorumHanko } from '../hanko/signing';
-import { deriveEncryptionKeyPair, pubKeyToHex } from '../networking/p2p-crypto';
+import { deriveEncryptionKeyPair, pubKeyToHex } from '../protocol/p2p-crypto';
 import { NobleCryptoProvider } from '../protocol/crypto/noble';
 import {
   computeHtlcEnvelopeContextHash,

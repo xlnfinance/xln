@@ -1,5 +1,5 @@
 import { createStructuredLogger } from '../infra/logger';
-import { buildValidatorEncryptionBoard } from '../networking/profile-encryption';
+import { buildValidatorEncryptionBoard } from './profile-encryption';
 import { NobleCryptoProvider } from '../protocol/crypto/noble';
 import { unwrapEnvelope, validateEnvelope } from '../protocol/htlc/envelope';
 import { decodeHtlcSecretOffer } from '../protocol/htlc/onion-codec';

@@ -13,11 +13,11 @@ import type {
 } from './gossip';
 import { compareStableText, safeStringify } from '../protocol/serialization';
 import { deriveSignerAddressSync, getSignerAddress, getSignerPrivateKeyIfAvailable, getSignerPublicKey } from '../account/crypto';
-import { deriveEncryptionKeyPair, pubKeyToHex } from './p2p-crypto';
+import { deriveEncryptionKeyPair, pubKeyToHex } from '../protocol/p2p-crypto';
 import { UINT16_MAX } from '../constants';
 import { requireCompleteValidatorEncryptionManifest } from '../protocol/htlc/validator-encryption';
-import { getProfileEncryptionAttestations } from './profile-encryption';
-import { buildEntityProfileDescriptor } from './profile-descriptor';
+import { getProfileEncryptionAttestations } from '../entity/profile-encryption';
+import { buildEntityProfileDescriptor } from '../entity/profile-descriptor';
 
 type BuiltProfile = Omit<Profile, 'runtimeId' | 'runtimeEncPubKey'>;
 

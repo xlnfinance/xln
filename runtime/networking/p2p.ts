@@ -13,7 +13,7 @@ import { extractEntityId } from '../ids';
 import { getSignerPrivateKeyIfAvailable, registerSignerPublicKey } from '../account/crypto';
 import { computeProfileHash, signProfileRuntimeRoute, verifyProfileSignature } from './profile-signing';
 import { inspectHankoForHash } from '../hanko/signing';
-import { deriveEncryptionKeyPair, pubKeyToHex, hexToPubKey, type P2PKeyPair } from './p2p-crypto';
+import { deriveEncryptionKeyPair, pubKeyToHex, hexToPubKey, type P2PKeyPair } from '../protocol/p2p-crypto';
 import { asFailFastPayload, failfastAssert } from './failfast';
 import { normalizeRuntimeId, isRuntimeId } from './runtime-id';
 import { compareStableText } from '../protocol/serialization';
@@ -37,7 +37,7 @@ import {
   collectLocalProfileEncryptionAnnouncements,
   getCompleteProfileEncryptionManifest,
   type ValidatorEncryptionAnnouncement,
-} from './profile-encryption';
+} from '../entity/profile-encryption';
 
 const DEFAULT_RELAY_URL = 'wss://xln.finance/relay';
 const p2pLog = createStructuredLogger('p2p');

@@ -1,4 +1,4 @@
-import { NobleCryptoProvider } from '../crypto/noble';
+import { NobleCryptoProvider } from '../../protocol/crypto/noble';
 import type { EntityInput, EntityState, EntityTx, RuntimeState } from '../../types';
 import type { Profile } from '../../networking/gossip';
 import { canonicalizeProfile, getValidatorEncryptionManifestFromBoard } from '../../networking/gossip';
@@ -6,11 +6,11 @@ import {
   computeEntityProfileCertificationComponents,
   profileToEntityProfileDescriptor,
   type EntityProfileDescriptor,
-} from '../../networking/profile-descriptor';
+} from '../profile-descriptor';
 import { computeProfileHash, verifyProfileSignature } from '../../networking/profile-signing';
 import { calculateDirectionalFeePPM, sanitizeBaseFee, sanitizeFeePPM } from '../../routing/fees';
 import { getTokenCapacity } from '../../routing/capacity';
-import { resolvePaymentDeadlineWindow } from '../payments/delivery';
+import { resolvePaymentDeadlineWindow } from '../../protocol/payments/delivery';
 import { HTLC } from '../../constants';
 import {
   calculateHopRevealHeight,
@@ -18,25 +18,25 @@ import {
   calculateRequiredInboundForDesiredForward,
   generateLockId,
   hashHtlcSecret,
-} from './utils';
+} from '../../protocol/htlc/utils';
 import {
   computeHtlcEnvelopeContextHash,
   createOnionEnvelopes,
   type HtlcEnvelope,
-} from './envelope';
+} from '../../protocol/htlc/envelope';
 import {
   isMultiRecipientCiphertext,
   validateMultiRecipientCiphertext,
-} from './multi-recipient';
-import type { CertifiedValidatorEncryptionManifest } from './validator-encryption';
+} from '../../protocol/htlc/multi-recipient';
+import type { CertifiedValidatorEncryptionManifest } from '../../protocol/htlc/validator-encryption';
 import { verifyHankoForHash } from '../../hanko/signing';
-import { encodeCanonicalEntityConsensusValue } from '../../entity/consensus/state-root';
+import { encodeCanonicalEntityConsensusValue } from '../consensus/state-root';
 import {
   getCertifiedBoardNodeStore,
   resolveObserverCertifiedBoardHash,
 } from '../../jurisdiction/board-registry';
-import { assertNoConsensusVisibleHtlcPaymentSecrets } from './consensus-secret-guard';
-import { getDeterministicHtlcTestSecret } from './test-secret-capability';
+import { assertNoConsensusVisibleHtlcPaymentSecrets } from '../../protocol/htlc/consensus-secret-guard';
+import { getDeterministicHtlcTestSecret } from '../../protocol/htlc/test-secret-capability';
 
 type HtlcPaymentTx = Extract<EntityTx, { type: 'htlcPayment' }>;
 type PreparedRouteProfile = NonNullable<HtlcPaymentTx['data']['preparedRouteProfiles']>[number];
@@ -684,11 +684,22 @@ const requirePreparedEnvelope = async (
   return typed;
 };
 
-export const validatePreparedHtlcPayment = async (
-  env: RuntimeState,
+type PreparedPaymentBasics = Readonly<{
+  targetEntityId: string;
+  route: string[];
+  recipientAmount: bigint;
+  deliveryMode: 'instant' | 'async';
+  description: string;
+  startedAtMs: number;
+  hashlock: string;
+  preparedAtEntityHeight: number;
+  preparedAtJHeight: number;
+}>;
+
+const validatePreparedPaymentBasics = (
   state: EntityState,
   tx: HtlcPaymentTx,
-): Promise<ValidatedPreparedHtlcPayment> => {
+): PreparedPaymentBasics => {
   assertExactPaymentFields(tx.data, 'prepared');
   const targetEntityId = normalizeEntityId(tx.data.targetEntityId, 'HTLC_PAYMENT_TARGET_INVALID');
   const route = normalizeRoute(tx.data.route, state.entityId.toLowerCase(), targetEntityId);
@@ -713,6 +724,36 @@ export const validatePreparedHtlcPayment = async (
   if (preparedAtJHeight > (state.lastFinalizedJHeight || 0)) {
     throw new Error('HTLC_PAYMENT_PREPARED_J_HEIGHT_FUTURE');
   }
+  return {
+    targetEntityId,
+    route,
+    recipientAmount,
+    deliveryMode,
+    description,
+    startedAtMs,
+    hashlock,
+    preparedAtEntityHeight,
+    preparedAtJHeight,
+  };
+};
+
+export const validatePreparedHtlcPayment = async (
+  env: RuntimeState,
+  state: EntityState,
+  tx: HtlcPaymentTx,
+): Promise<ValidatedPreparedHtlcPayment> => {
+  const basics = validatePreparedPaymentBasics(state, tx);
+  const {
+    targetEntityId,
+    route,
+    recipientAmount,
+    deliveryMode,
+    description,
+    startedAtMs,
+    hashlock,
+    preparedAtEntityHeight,
+    preparedAtJHeight,
+  } = basics;
   const certified = await validatePreparedRouteProfiles(env, state, route, tx.data.preparedRouteProfiles);
   const quote = quoteRoute(certified.routingProfiles, route, tx.data.tokenId, recipientAmount);
   const senderLockAmount = parsePositiveBigInt(tx.data.preparedSenderLockAmount, 'HTLC_PAYMENT_PREPARED_AMOUNT_INVALID');

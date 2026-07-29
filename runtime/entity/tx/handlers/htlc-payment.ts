@@ -18,7 +18,7 @@ import type {
 } from '../../../types';
 import { addMessage, cloneEntityState } from '../../../state-helpers';
 import { deriveDelta } from '../../../account/utils';
-import { validatePreparedHtlcPayment } from '../../../protocol/htlc/payment-admission';
+import { validatePreparedHtlcPayment } from '../../htlc/payment-admission';
 import { createStructuredLogger, formatAmount, shortHash, shortId } from '../../../infra/logger';
 import { setHtlcRouteNote } from '../htlc-route-lifecycle';
 

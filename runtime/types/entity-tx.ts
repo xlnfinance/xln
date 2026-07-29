@@ -6,7 +6,7 @@ import type { ProfileUpdateTx } from './profile';
 import type { ProposalAction } from '../types';
 import type { PaymentDeliveryMode } from './payment';
 import type { ValidatorEncryptionAttestation } from '../protocol/htlc/validator-encryption';
-import type { EntityProfileDescriptor } from '../networking/profile-descriptor';
+import type { EntityProfileDescriptor } from '../entity/profile-descriptor';
 import type { CertifiedBoardAuthorityBinding } from './entity-board-registry';
 import type { ConsumptionProof } from '../entity/consumption-accumulator-types';
 import type { MultiRecipientCiphertext } from '../protocol/htlc/multi-recipient';

@@ -16,7 +16,7 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   only Runtime interprets committed outputs as post-WAL external effects.
   Delete or correct docs, comments, types and helpers that blur local
   `AccountTx[]` with signed bilateral `AccountInput`.
-  Drive the AST-ratcheted reverse-import debt from the verified 9 edges to
+  Drive the AST-ratcheted reverse-import debt from the verified 5 edges to
   zero: lower Account code must
   not import Entity, Runtime, adapters or physical storage; Entity must not
   import Runtime, adapters, networking or physical storage; shared protocol

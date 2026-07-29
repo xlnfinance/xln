@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { deriveSignerAddressSync } from '../account/crypto';
 import { RuntimeP2P } from '../networking/p2p';
-import { hexToPubKey } from '../networking/p2p-crypto';
+import { hexToPubKey } from '../protocol/p2p-crypto';
 import type { Profile } from '../networking/gossip';
 import type { RuntimeState } from '../types';
 

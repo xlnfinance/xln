@@ -9,13 +9,13 @@ import {
   signDigestBytesWithPrivateKey,
 } from '../account/crypto';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
-import { deriveEncryptionKeyPair, pubKeyToHex } from '../networking/p2p-crypto';
+import { deriveEncryptionKeyPair, pubKeyToHex } from '../protocol/p2p-crypto';
 import { RuntimeP2P } from '../networking/p2p';
 import {
   collectLocalProfileEncryptionAnnouncements,
   getCompleteProfileEncryptionManifest,
   requireProfileEncryptionManifest,
-} from '../networking/profile-encryption';
+} from '../entity/profile-encryption';
 import { buildEntityProfile } from '../networking/gossip-helper';
 import { announceCertifiedLocalProfiles } from '../networking/local-profile-lifecycle';
 import { NobleCryptoProvider } from '../protocol/crypto/noble';
@@ -55,7 +55,7 @@ import {
   computeEntityProfileCertificationComponents,
   computeEntityProfileDescriptorHash,
   profileToEntityProfileDescriptor,
-} from '../networking/profile-descriptor';
+} from '../entity/profile-descriptor';
 import { createDefaultDelta } from '../account/delta';
 import { validateEntityState } from '../validation-utils';
 import { getValidatorEncryptionManifestFromBoard, parseProfile, type Profile } from '../networking/gossip';
@@ -68,7 +68,7 @@ import {
   prepareHtlcPaymentEntityInputs,
   prepareHtlcPaymentEntityTx,
   validatePreparedHtlcPayment,
-} from '../protocol/htlc/payment-admission';
+} from '../entity/htlc/payment-admission';
 import { serializeTaggedJson } from '../protocol/serialization';
 import {
   createEmptyEnv,

@@ -524,7 +524,11 @@ for (const [path, markers] of [
   ['runtime/entity/tx/proposals.ts', ["createStructuredLogger('entity.basic')"]],
   [
     'runtime/entity/factory.ts',
-    ["createStructuredLogger('entity.factory')", 'lazy.create', 'numbered.register_failed'],
+    ["createStructuredLogger('entity.factory')", 'lazy.create'],
+  ],
+  [
+    'runtime/runtime/registration/numbered-registration.ts',
+    ["createStructuredLogger('runtime.numbered-registration')", 'register_failed'],
   ],
   ['runtime/entity/consensus/shared.ts', ["createStructuredLogger('entity')"]],
   ['runtime/entity/consensus/frame-application.ts', ['frame.profile', 'frame.apply']],

@@ -18,9 +18,7 @@ import type {
 import { mergeAndSortEvents } from './parser.js';
 import { namedParamsToObject, getPositionalParams } from './types.js';
 import { getSignerAddress, getSignerPrivateKey } from '../account/crypto.js';
-import {
-  getTrustedRegistrationAdapter,
-} from '../entity/factory.js';
+import { getTrustedRegistrationAdapter } from '../runtime/registration/numbered-registration.js';
 import {
   buildNumberedRegistrationRequest,
   runNumberedRegistrationIntent,
@@ -436,7 +434,9 @@ async function handleGrid(
 
 
   // Batch create all entities
-  const { createNumberedEntitiesBatch } = await import('../entity/factory.js');
+  const { createNumberedEntitiesBatch } = await import(
+    '../runtime/registration/numbered-registration.js'
+  );
   const results = await createNumberedEntitiesBatch(entities, jurisdiction, env, payerSignerId);
 
   // Store mappings and build runtimeTxs with positions

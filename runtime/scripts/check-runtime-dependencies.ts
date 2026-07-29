@@ -28,9 +28,8 @@ const ROOT_FILE_DEBT = new Set([
 // Existing counts are migration debt: every increase and every newly
 // introduced direction fails, while completed cleanup must remove its entry.
 const REVERSE_DEPENDENCY_DEBT: Readonly<Record<string, number>> = {
-  'entity->jadapter': 2,
-  'entity->networking': 5,
-  'protocol->entity': 2,
+  'entity->networking': 4,
+  'protocol->entity': 1,
 };
 
 const collectFiles = (directory: string): string[] =>

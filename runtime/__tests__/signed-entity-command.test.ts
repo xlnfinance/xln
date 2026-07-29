@@ -49,7 +49,7 @@ import { routeInboundP2PEntityInput } from '../runtime/entity-routing';
 import {
   buildValidatorEncryptionBoard,
   createLocalValidatorEncryptionAttestation,
-} from '../networking/profile-encryption';
+} from '../entity/profile-encryption';
 import { requireCompleteValidatorEncryptionManifest } from '../protocol/htlc/validator-encryption';
 import {
   applyCertifiedBoardRegistryEvent,

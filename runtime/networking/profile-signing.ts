@@ -8,7 +8,7 @@ import { serializeTaggedJson } from '../protocol/serialization';
 import {
   computeEntityProfileDescriptorHash,
   profileToEntityProfileDescriptor,
-} from './profile-descriptor';
+} from '../entity/profile-descriptor';
 
 const PROFILE_ROUTE_DOMAIN = 'xln-profile-runtime-route-v1';
 const SECP256K1_HALF_ORDER = BigInt('0x7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0');

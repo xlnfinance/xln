@@ -10,7 +10,7 @@
 import { x25519 } from '@noble/curves/ed25519.js';
 import { chacha20poly1305 } from '@noble/ciphers/chacha.js';
 import { sha256 } from '@noble/hashes/sha2.js';
-import { safeStringify, safeParse } from '../protocol/serialization';
+import { safeStringify, safeParse } from './serialization';
 
 export type P2PKeyPair = {
   publicKey: Uint8Array;  // 32 bytes

@@ -12,7 +12,7 @@ import type {
   ProfileJurisdiction,
 } from '../../networking/gossip';
 import { canonicalizeProfile } from '../../networking/gossip';
-import { deriveEncryptionKeyPair, pubKeyToHex } from '../../networking/p2p-crypto';
+import { deriveEncryptionKeyPair, pubKeyToHex } from '../../protocol/p2p-crypto';
 import {
   computeProfileHash,
   computeProfileRouteHash,

@@ -9,7 +9,7 @@ import {
   handleInboundP2PEntityInputs,
   handleInboundReliableReceipt,
 } from '../runtime.ts';
-import { deriveEncryptionKeyPair, decryptJSON, type P2PKeyPair } from '../networking/p2p-crypto';
+import { deriveEncryptionKeyPair, decryptJSON, type P2PKeyPair } from '../protocol/p2p-crypto';
 import type {
   RuntimeState,
   EntityReplica,

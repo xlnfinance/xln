@@ -1,6 +1,6 @@
 import { getSignerPrivateKey, getSignerPrivateKeyIfAvailable } from '../account/crypto';
 import { extractSignerId } from '../ids';
-import { deriveEncryptionKeyPair, pubKeyToHex } from '../networking/p2p-crypto';
+import { deriveEncryptionKeyPair, pubKeyToHex } from '../protocol/p2p-crypto';
 import type { RuntimeState } from '../types';
 
 const bytesToHex = (bytes: Uint8Array): string =>

@@ -1,12 +1,14 @@
 import type { EntityState, EntityTx, RuntimeState, HashToSign } from '../../../types';
 import { cloneEntityState } from '../../../state-helpers';
-import { buildValidatorEncryptionBoard } from '../../../networking/profile-encryption';
-import { buildEntityProfileDescriptor, computeEntityProfileDescriptorHash } from '../../../networking/profile-descriptor';
+import { buildValidatorEncryptionBoard } from '../../profile-encryption';
+import {
+  buildEntityProfileDescriptor,
+  computeEntityProfileDescriptorHash,
+} from '../../profile-descriptor';
 import {
   requireCompleteValidatorEncryptionManifest,
   validatePersistedValidatorEncryptionManifest,
 } from '../../../protocol/htlc/validator-encryption';
-import type { BoardMetadata } from '../../../networking/gossip';
 
 type CertifyProfileTx = Extract<EntityTx, { type: 'certifyProfile' }>;
 
@@ -25,7 +27,7 @@ export const buildCurrentEntityProfileHashToSign = (
   const attestationsBySigner = new Map(
     manifest.attestations.map((attestation) => [signerKey(attestation.signerId), attestation]),
   );
-  const board: BoardMetadata = {
+  const board: Parameters<typeof buildEntityProfileDescriptor>[1] = {
     threshold: manifest.threshold,
     // Gossip descriptors preserve the consensus config's validator order.
     // The manifest attestations have their own canonical sort, so iterating

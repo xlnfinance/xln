@@ -44,8 +44,8 @@ export {
   decryptJSON,
   pubKeyToHex,
   hexToPubKey,
-} from './p2p-crypto';
-export type { P2PKeyPair } from './p2p-crypto';
+} from '../protocol/p2p-crypto';
+export type { P2PKeyPair } from '../protocol/p2p-crypto';
 
 // Profile signing (uses same Hanko mechanism as accountFrames)
 export {

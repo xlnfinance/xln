@@ -7,7 +7,7 @@ import {
   causalTraceContainsWork,
   summarizeRuntimeAccountCausality,
 } from '../../infra/account-causal-trace';
-import { prepareHtlcPaymentEntityInputs } from '../../protocol/htlc/payment-admission';
+import { prepareHtlcPaymentEntityInputs } from '../../entity/htlc/payment-admission';
 import type { RuntimeState, RuntimeInput } from '../../types';
 import { applyEntityHeightDurabilityBarrier } from '../entity-height-barrier';
 import { cloneRuntimeFrameMempool } from './clone';

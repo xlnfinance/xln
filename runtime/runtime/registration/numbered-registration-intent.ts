@@ -14,14 +14,13 @@ import type {
   ResolveNumberedRegistrationData,
   RuntimeTx,
 } from '../../types';
+import { encodeBoard, hashBoard } from '../../entity/factory';
 import {
-  encodeBoard,
   getNumberedRegistrationWallet,
   getTrustedRegistrationAdapter,
-  hashBoard,
   parseNumberedEntityRegistrationReceipt,
   type NumberedEntityRegistration,
-} from '../../entity/factory';
+} from './numbered-registration';
 import {
   assertNumberedRegistrationRequest,
   computeNumberedRegistrationRequestHash,

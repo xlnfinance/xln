@@ -3,12 +3,14 @@ import { ethers } from 'ethers';
 
 import { getSignerPrivateKey } from '../account/crypto';
 import {
-  createNumberedEntitiesBatch,
-  createNumberedEntity,
   hashBoard,
   encodeBoard,
-  parseNumberedEntityRegistrationReceipt,
 } from '../entity/factory';
+import {
+  createNumberedEntitiesBatch,
+  createNumberedEntity,
+  parseNumberedEntityRegistrationReceipt,
+} from '../runtime/registration/numbered-registration';
 import { createJAdapter } from '../jadapter';
 import { createEmptyEnv } from '../runtime';
 import type { JReplica, JurisdictionConfig } from '../types';

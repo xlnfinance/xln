@@ -6,7 +6,7 @@ import {
   type DeliveryResult,
 } from '../protocol/payments/delivery-result';
 import { compareCanonicalText } from '../orderbook/swap-keys';
-import { decryptJSON, deriveEncryptionKeyPair, encryptJSON, hexToPubKey, pubKeyToHex } from './p2p-crypto';
+import { decryptJSON, deriveEncryptionKeyPair, encryptJSON, hexToPubKey, pubKeyToHex } from '../protocol/p2p-crypto';
 import { deserializeWsMessage, makeMessageId, serializeWsMessage, type RuntimeWsMessage } from './ws-protocol';
 import { isRuntimeId, normalizeRuntimeId } from './runtime-id';
 import { verifyHelloAuth } from './hello-auth';

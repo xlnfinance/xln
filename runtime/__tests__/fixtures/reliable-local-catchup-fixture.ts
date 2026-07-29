@@ -22,7 +22,7 @@ import { buildLocalEntityProfile } from '../../networking/gossip-helper';
 import {
   collectLocalProfileEncryptionAnnouncements,
   getCompleteProfileEncryptionManifest,
-} from '../../networking/profile-encryption';
+} from '../../entity/profile-encryption';
 import { computeProfileHash } from '../../networking/profile-signing';
 import {
   applyCertifiedEntityLineagePlan,
