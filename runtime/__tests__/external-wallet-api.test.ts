@@ -2,41 +2,39 @@ import { describe, expect, test } from 'bun:test';
 import { ethers } from 'ethers';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import {
-  createExternalWalletApi,
-  type ExternalWalletApiContext,
-} from '../api/external-wallet-api';
+import { createExternalWalletApi, type ExternalWalletApiContext } from '../api/external-wallet-api';
 import { createXlnJsonRpcProvider } from '../jadapter';
 import type { JAdapter } from '../jadapter/types';
 
 const USER_ADDRESS = new ethers.Wallet(`0x${'22'.repeat(32)}`).address;
 const USDC_ADDRESS = '0x1111111111111111111111111111111111111111';
 
-const makeFaucetRequest = (): Request => new Request('http://localhost/api/faucet/erc20', {
-  method: 'POST',
-  headers: { 'content-type': 'application/json' },
-  body: JSON.stringify({
-    userAddress: USER_ADDRESS,
-    tokenSymbol: 'USDC',
-    amount: '1',
-  }),
-});
+const makeFaucetRequest = (): Request =>
+  new Request('http://localhost/api/faucet/erc20', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      userAddress: USER_ADDRESS,
+      tokenSymbol: 'USDC',
+      amount: '1',
+    }),
+  });
 
-const makeBrowserVmAdapter = (provider: ethers.JsonRpcProvider): JAdapter => ({
-  mode: 'browservm',
-  chainId: 31337,
-  provider,
-  signer: new ethers.Wallet(`0x${'11'.repeat(32)}`, provider),
-  addresses: {
-    account: '0x0000000000000000000000000000000000000001',
-    depository: '0x0000000000000000000000000000000000000002',
-    entityProvider: '0x0000000000000000000000000000000000000003',
-    deltaTransformer: '0x0000000000000000000000000000000000000004',
-  },
-} as unknown as JAdapter);
+const makeBrowserVmAdapter = (provider: ethers.JsonRpcProvider): JAdapter =>
+  ({
+    mode: 'browservm',
+    chainId: 31337,
+    provider,
+    signer: new ethers.Wallet(`0x${'11'.repeat(32)}`, provider),
+    addresses: {
+      account: '0x0000000000000000000000000000000000000001',
+      depository: '0x0000000000000000000000000000000000000002',
+      entityProvider: '0x0000000000000000000000000000000000000003',
+      deltaTransformer: '0x0000000000000000000000000000000000000004',
+    },
+  }) as unknown as JAdapter;
 
-const makeTestProvider = (): ethers.JsonRpcProvider =>
-  createXlnJsonRpcProvider('http://127.0.0.1:0', 31337);
+const makeTestProvider = (): ethers.JsonRpcProvider => createXlnJsonRpcProvider('http://127.0.0.1:0', 31337);
 
 const makeContext = (
   adapter: JAdapter,
@@ -44,13 +42,15 @@ const makeContext = (
 ): ExternalWalletApiContext => ({
   getJAdapter: () => adapter,
   getRuntimeId: () => 'runtime-test',
-  getTokenCatalog: async () => [{
-    tokenId: 1,
-    symbol: 'USDC',
-    name: 'USD Coin',
-    address: USDC_ADDRESS,
-    decimals: 6,
-  }],
+  getTokenCatalog: async () => [
+    {
+      tokenId: 1,
+      symbol: 'USDC',
+      name: 'USD Coin',
+      address: USDC_ADDRESS,
+      decimals: 6,
+    },
+  ],
   jsonHeaders: { 'content-type': 'application/json' },
   faucetSeed: 'external-wallet-api-test-seed',
   faucetSignerLabel: 'faucet-1',
@@ -66,10 +66,10 @@ const createBlockingFaucetFund = () => {
   let calls = 0;
   let resolveFirstStarted: (() => void) | null = null;
   let releaseFirst: (() => void) | null = null;
-  const firstStarted = new Promise<void>((resolve) => {
+  const firstStarted = new Promise<void>(resolve => {
     resolveFirstStarted = resolve;
   });
-  const firstRelease = new Promise<void>((resolve) => {
+  const firstRelease = new Promise<void>(resolve => {
     releaseFirst = resolve;
   });
 
@@ -103,24 +103,37 @@ describe('external wallet API faucet transaction gate', () => {
     const adapter = makeBrowserVmAdapter(provider);
     const calls: Array<{ address: string; amount: bigint; tokenSymbol?: string }> = [];
     try {
-      const api = createExternalWalletApi(makeContext(adapter, async (address, amount, tokenSymbol) => {
-        calls.push({ address, amount, ...(tokenSymbol ? { tokenSymbol } : {}) });
-        return true;
-      }));
+      const api = createExternalWalletApi(
+        makeContext(adapter, async (address, amount, tokenSymbol) => {
+          calls.push({ address, amount, ...(tokenSymbol ? { tokenSymbol } : {}) });
+          return true;
+        }),
+      );
       const response = await api.handleErc20Faucet(makeFaucetRequest());
       expect(response.status).toBe(200);
-      expect(calls).toEqual([{
-        address: USER_ADDRESS,
-        amount: 10n ** 6n,
-        tokenSymbol: 'USDC',
-      }]);
+      expect(calls).toEqual([
+        {
+          address: USER_ADDRESS,
+          amount: 10n ** 6n,
+          tokenSymbol: 'USDC',
+        },
+      ]);
     } finally {
       provider.destroy();
     }
   });
 
   test('external wallet API uses structured logging instead of raw console output', () => {
-    const source = readFileSync(join(process.cwd(), 'runtime/api/external-wallet-api.ts'), 'utf8');
+    const source = [
+      'runtime/api/external-wallet-api.ts',
+      'runtime/api/external-wallet/http.ts',
+      'runtime/api/external-wallet/faucet-wallet.ts',
+      'runtime/api/external-wallet/faucet-handlers.ts',
+      'runtime/api/external-wallet/snapshot-handler.ts',
+      'runtime/api/external-wallet/tokens-handler.ts',
+    ]
+      .map(file => readFileSync(join(process.cwd(), file), 'utf8'))
+      .join('\n');
     expect(source).toContain("createStructuredLogger('server.external_wallet')");
     expect(source).toContain("externalWalletLog.debug('faucet.provision.token_balance'");
     expect(source).toContain("externalWalletLog.error('faucet.erc20.failed'");
@@ -148,14 +161,14 @@ describe('external wallet API faucet transaction gate', () => {
       const first = apiA.handleErc20Faucet(makeFaucetRequest());
       await blockingFund.firstStarted;
       const second = apiB.handleErc20Faucet(makeFaucetRequest());
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await new Promise(resolve => setTimeout(resolve, 0));
 
       expect(blockingFund.calls()).toBe(1);
       expect(blockingFund.maxActive()).toBe(1);
 
       blockingFund.releaseFirst();
       const responses = await Promise.all([first, second]);
-      expect(responses.map((response) => response.status)).toEqual([200, 200]);
+      expect(responses.map(response => response.status)).toEqual([200, 200]);
       expect(blockingFund.calls()).toBe(2);
       expect(blockingFund.maxActive()).toBe(1);
     } finally {
@@ -175,7 +188,7 @@ describe('external wallet API faucet transaction gate', () => {
       const provision = provisionApi.provisionFaucetWallet();
       await blockingFund.firstStarted;
       const userFunding = userApi.handleErc20Faucet(makeFaucetRequest());
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await new Promise(resolve => setTimeout(resolve, 0));
 
       expect(blockingFund.calls()).toBe(1);
       expect(blockingFund.maxActive()).toBe(1);
@@ -210,10 +223,12 @@ describe('external wallet API faucet transaction gate', () => {
       }) => {
         expect(request.owner).toBe(USER_ADDRESS.toLowerCase());
         expect(request.tokenAddresses).toEqual(['0x1111111111111111111111111111111111111111']);
-        expect(request.allowances).toEqual([{
-          tokenAddress: '0x1111111111111111111111111111111111111111',
-          spender: '0x0000000000000000000000000000000000000002',
-        }]);
+        expect(request.allowances).toEqual([
+          {
+            tokenAddress: '0x1111111111111111111111111111111111111111',
+            spender: '0x0000000000000000000000000000000000000002',
+          },
+        ]);
         expect(request.blockTag).toBe(76);
         return {
           nativeBalance: 5n,
@@ -224,28 +239,34 @@ describe('external wallet API faucet transaction gate', () => {
     } as unknown as JAdapter;
     const api = createExternalWalletApi({
       ...makeContext(adapter, async () => false),
-      getTokenCatalog: async () => [{
-        symbol: 'USDC',
-        address: '0x1111111111111111111111111111111111111111',
-        decimals: 18,
-        tokenId: 3,
-      }],
+      getTokenCatalog: async () => [
+        {
+          symbol: 'USDC',
+          address: '0x1111111111111111111111111111111111111111',
+          decimals: 18,
+          tokenId: 3,
+        },
+      ],
     });
 
     try {
-      const response = await api.handleWalletSnapshot(new Request('http://localhost/api/external-wallet/snapshot', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          entityId: `0x${'44'.repeat(32)}`,
-          owner: USER_ADDRESS,
-          allowances: [{
-            tokenAddress: '0x1111111111111111111111111111111111111111',
-            spender: '0x0000000000000000000000000000000000000002',
-          }],
+      const response = await api.handleWalletSnapshot(
+        new Request('http://localhost/api/external-wallet/snapshot', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            entityId: `0x${'44'.repeat(32)}`,
+            owner: USER_ADDRESS,
+            allowances: [
+              {
+                tokenAddress: '0x1111111111111111111111111111111111111111',
+                spender: '0x0000000000000000000000000000000000000002',
+              },
+            ],
+          }),
         }),
-      }));
-      const body = await response.json() as {
+      );
+      const body = (await response.json()) as {
         success?: boolean;
         tokenBalances?: Array<{ balance?: string }>;
         sourceHeight?: number;
@@ -276,26 +297,31 @@ describe('external wallet API faucet transaction gate', () => {
       } as unknown as JAdapter;
       return createExternalWalletApi({
         ...makeContext(adapter, async () => false),
-        getTokenCatalog: async () => [{
-          symbol: 'USDC',
-          address: '0x1111111111111111111111111111111111111111',
-          decimals: 18,
-          tokenId: 3,
-        }],
+        getTokenCatalog: async () => [
+          {
+            symbol: 'USDC',
+            address: '0x1111111111111111111111111111111111111111',
+            decimals: 18,
+            tokenId: 3,
+          },
+        ],
       });
     };
-    const request = () => new Request('http://localhost/api/external-wallet/snapshot', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        entityId: `0x${'44'.repeat(32)}`,
-        owner: USER_ADDRESS,
-        allowances: [{
-          tokenAddress: '0x1111111111111111111111111111111111111111',
-          spender: '0x0000000000000000000000000000000000000002',
-        }],
-      }),
-    });
+    const request = () =>
+      new Request('http://localhost/api/external-wallet/snapshot', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          entityId: `0x${'44'.repeat(32)}`,
+          owner: USER_ADDRESS,
+          allowances: [
+            {
+              tokenAddress: '0x1111111111111111111111111111111111111111',
+              spender: '0x0000000000000000000000000000000000000002',
+            },
+          ],
+        }),
+      });
 
     try {
       const shortArrayResponse = await makeApi({
@@ -303,7 +329,7 @@ describe('external wallet API faucet transaction gate', () => {
         tokenBalances: [],
         allowances: [7n],
       }).handleWalletSnapshot(request());
-      const shortArrayBody = await shortArrayResponse.json() as { error?: string };
+      const shortArrayBody = (await shortArrayResponse.json()) as { error?: string };
       expect(shortArrayResponse.status).toBe(500);
       expect(shortArrayBody.error).toContain('EXTERNAL_WALLET_SNAPSHOT_FIELD_COUNT_MISMATCH:tokenBalances');
 
@@ -312,7 +338,7 @@ describe('external wallet API faucet transaction gate', () => {
         tokenBalances: [9n],
         allowances: [7n],
       }).handleWalletSnapshot(request());
-      const missingNativeBody = await missingNativeResponse.json() as { error?: string };
+      const missingNativeBody = (await missingNativeResponse.json()) as { error?: string };
       expect(missingNativeResponse.status).toBe(500);
       expect(missingNativeBody.error).toContain('EXTERNAL_WALLET_SNAPSHOT_FIELD_MISSING:nativeBalance');
     } finally {
@@ -333,10 +359,12 @@ describe('external wallet API faucet transaction gate', () => {
         nativeBalance: 5n,
         tokenBalances: [9n, 0n],
         allowances: [],
-        tokenErrors: [{
-          tokenAddress: badToken,
-          error: 'EXTERNAL_WALLET_SNAPSHOT_RPC_INVALID_BIGINT:balance',
-        }],
+        tokenErrors: [
+          {
+            tokenAddress: badToken,
+            error: 'EXTERNAL_WALLET_SNAPSHOT_RPC_INVALID_BIGINT:balance',
+          },
+        ],
       }),
     } as unknown as JAdapter;
     const api = createExternalWalletApi({
@@ -358,15 +386,17 @@ describe('external wallet API faucet transaction gate', () => {
     });
 
     try {
-      const response = await api.handleWalletSnapshot(new Request('http://localhost/api/external-wallet/snapshot', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          entityId: `0x${'44'.repeat(32)}`,
-          owner: USER_ADDRESS,
+      const response = await api.handleWalletSnapshot(
+        new Request('http://localhost/api/external-wallet/snapshot', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            entityId: `0x${'44'.repeat(32)}`,
+            owner: USER_ADDRESS,
+          }),
         }),
-      }));
-      const body = await response.json() as {
+      );
+      const body = (await response.json()) as {
         success?: boolean;
         tokenBalances?: Array<{ tokenAddress?: string; balance?: string; error?: string }>;
         tokenErrors?: Array<{ tokenAddress?: string; error?: string }>;
@@ -374,8 +404,9 @@ describe('external wallet API faucet transaction gate', () => {
       expect(response.status).toBe(200);
       expect(body.success).toBe(true);
       expect(body.tokenErrors?.[0]?.tokenAddress).toBe(badToken);
-      expect(body.tokenBalances?.find((entry) => entry.tokenAddress === badToken)?.error)
-        .toContain('EXTERNAL_WALLET_SNAPSHOT_RPC_INVALID_BIGINT');
+      expect(body.tokenBalances?.find(entry => entry.tokenAddress === badToken)?.error).toContain(
+        'EXTERNAL_WALLET_SNAPSHOT_RPC_INVALID_BIGINT',
+      );
     } finally {
       provider.destroy();
     }

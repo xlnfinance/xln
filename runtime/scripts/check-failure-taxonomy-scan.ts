@@ -78,6 +78,14 @@ const readText = (path: string): string => {
       'runtime/orchestrator/mm-node-health.ts',
       'runtime/orchestrator/mm-node-run.ts',
     ],
+    'runtime/api/external-wallet-api.ts': [
+      'runtime/api/external-wallet-api.ts',
+      'runtime/api/external-wallet/http.ts',
+      'runtime/api/external-wallet/faucet-wallet.ts',
+      'runtime/api/external-wallet/faucet-handlers.ts',
+      'runtime/api/external-wallet/snapshot-handler.ts',
+      'runtime/api/external-wallet/tokens-handler.ts',
+    ],
     'runtime/__tests__/audit-failfast-regressions.test.ts': [
       'runtime/__tests__/audit-failfast-regressions-part-1.test.ts',
       'runtime/__tests__/audit-failfast-regressions-part-2.test.ts',
