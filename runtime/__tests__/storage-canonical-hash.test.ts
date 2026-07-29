@@ -502,7 +502,7 @@ test('live replica metadata omits transient commitment caches at every in-flight
     enumerable: false,
     value: new Map(),
   });
-  replica.validatorExecution = {
+  replica.candidate = {
     frameHash: `0x${'ab'.repeat(32)}`,
     height: validatorState.height + 1,
     state: validatorState,

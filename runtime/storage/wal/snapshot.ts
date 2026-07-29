@@ -107,7 +107,7 @@ export const buildCanonicalEntityReplicaSnapshot = (
     snapshot.mempool = [];
     delete snapshot.proposal;
     delete snapshot.lockedFrame;
-    delete snapshot.validatorExecution;
+    delete snapshot.candidate;
   }
   return {
     ...snapshot,

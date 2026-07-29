@@ -18,6 +18,7 @@ const required = new Set([
   'RuntimeTx',
   'EntityState',
   'EntityReplica',
+  'EntityCandidate',
   'EntityInput',
   'EntityTx',
   'AccountState',
@@ -27,6 +28,7 @@ const required = new Set([
 ]);
 const discovered = new Set<string>();
 const violations: string[] = [];
+const legacyEntityCandidateName = ['validator', 'Execution'].join('');
 
 const listTypeScriptFiles = (directory: string): string[] => readdirSync(directory, {
   withFileTypes: true,
@@ -39,6 +41,9 @@ const listTypeScriptFiles = (directory: string): string[] => readdirSync(directo
 for (const path of listTypeScriptFiles('runtime')) {
   if (path.includes('/__tests__/') || path.includes('/generated/')) continue;
   const source = readFileSync(path, 'utf8');
+  if (source.includes(legacyEntityCandidateName)) {
+    violations.push(`${path}:legacy-entity-candidate-name:${legacyEntityCandidateName}`);
+  }
   const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true);
   const visit = (node: ts.Node): void => {
     if (ts.isImportSpecifier(node) && node.propertyName) {

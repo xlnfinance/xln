@@ -724,7 +724,7 @@ describe('J validator-local history and Entity-finalized ranges', () => {
       isProposer: false,
       jHistory: localHistory,
       lockedFrame,
-      validatorExecution: {
+      candidate: {
         frameHash: lockedFrame.hash,
         height: lockedFrame.height,
         state: { ...entityState, height: entityState.height + 1 },
@@ -748,7 +748,7 @@ describe('J validator-local history and Entity-finalized ranges', () => {
     }))).rejects.toThrow('J_HISTORY_SIGNED_LOCK_REORG');
     expect(replica.jHistory?.scannedThroughHeight).toBe(12);
     expect(replica.lockedFrame?.hash).toBe(lockedFrame.hash);
-    expect(replica.validatorExecution?.state.height).toBe(entityState.height + 1);
+    expect(replica.candidate?.state.height).toBe(entityState.height + 1);
   });
 
   test('treats the Entity-certified anchor as authoritative when local history is restored empty', async () => {

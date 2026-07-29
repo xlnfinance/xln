@@ -1101,13 +1101,15 @@ export type EntityCandidateEffect =
     };
 
 /**
- * Validator-private result of replaying one exact proposed frame.
+ * Validator-private candidate for one exact proposed Entity frame.
  *
- * The frame hash and height make the state and side effects indivisible: a
- * restored replica must never combine output from one proposal with state from
- * another. This bundle is durable local metadata, never protocol payload.
+ * Certified `EntityReplica.state` remains unchanged until the matching Hanko
+ * commits this bundle. The frame hash and height make its speculative state,
+ * outputs and storage delta indivisible: restore must never combine pieces
+ * from different proposals. This is durable local metadata, not protocol
+ * payload and never a second certified State.
  */
-export interface ValidatorEntityFrameExecution {
+export interface EntityCandidate {
   frameHash: string;
   height: number;
   state: EntityState;
@@ -1140,8 +1142,8 @@ export interface EntityReplica {
   mempool: EntityTx[];
   proposal?: ProposedEntityFrame;
   lockedFrame?: ProposedEntityFrame; // Frame this validator is locked/precommitted to
-  /** Validator-local replay result; commits never consume proposer-supplied state or outputs. */
-  validatorExecution?: ValidatorEntityFrameExecution;
+  /** One validator-local speculative frame; commits never trust proposer-supplied post-state. */
+  candidate?: EntityCandidate;
   /** Latest finalized certificate only; historical certificates live in the Runtime WAL and history views. */
   certifiedFrameLineage?: CertifiedEntityFrameLink[];
   certifiedFrameAnchor?: CertifiedEntityLineageAnchor;

@@ -95,8 +95,8 @@ const installPersistedEntityReplicas = async (
         hankoWitness: meta?.hankoWitness ?? new Map(),
         ...(meta?.proposal ? { proposal: meta.proposal } : {}),
         ...(meta?.lockedFrame ? { lockedFrame: meta.lockedFrame } : {}),
-        ...(meta?.validatorExecution
-          ? { validatorExecution: meta.validatorExecution }
+        ...(meta?.candidate
+          ? { candidate: meta.candidate }
           : {}),
         ...(meta?.certifiedFrameLineage
           ? { certifiedFrameLineage: meta.certifiedFrameLineage }

@@ -300,7 +300,7 @@ describe('leader timeout / old-view proposal ordering regression', () => {
     expect(uppercaseResult.workingReplica.state.height).toBe(0);
 
     const targetBeforeCommit = fixture.env.eReplicas.get(`${fixture.state.entityId}:2`)!;
-    const originalLocalManifest = structuredClone(targetBeforeCommit.validatorExecution!.hashesToSign);
+    const originalLocalManifest = structuredClone(targetBeforeCommit.candidate!.hashesToSign);
     const originalLockedManifest = structuredClone(targetBeforeCommit.lockedFrame!.hashesToSign!);
     const secondaryHash = {
       hash: `0x${'66'.repeat(32)}`,
@@ -318,7 +318,7 @@ describe('leader timeout / old-view proposal ordering regression', () => {
         [...signatures, signAccountFrame(fixture.env, signerId, secondaryHash.hash)],
       );
     }
-    targetBeforeCommit.validatorExecution!.hashesToSign = structuredClone(
+    targetBeforeCommit.candidate!.hashesToSign = structuredClone(
       fullManifestCommit.proposedFrame!.hashesToSign,
     );
     targetBeforeCommit.lockedFrame!.hashesToSign = structuredClone(
@@ -331,7 +331,7 @@ describe('leader timeout / old-view proposal ordering regression', () => {
       truncatedManifest.proposedFrame!.collectedSigs!.set(signerId, signatures.slice(0, 1));
     }
     expect(verifiedCommit(truncatedManifest)).toBe(false);
-    targetBeforeCommit.validatorExecution!.hashesToSign = originalLocalManifest;
+    targetBeforeCommit.candidate!.hashesToSign = originalLocalManifest;
     targetBeforeCommit.lockedFrame!.hashesToSign = originalLockedManifest;
     expect(mergeEntityInputs([vote, commit], verifiedCommit).map(inputKind)).toEqual(['commit', 'vote']);
 

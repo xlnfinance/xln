@@ -167,7 +167,7 @@ const buildReplicaMetaProjection = (
   ...withProp('position', replica.position),
   ...withProp('proposal', replica.proposal),
   ...withProp('lockedFrame', replica.lockedFrame),
-  ...withProp('validatorExecution', replica.validatorExecution),
+  ...withProp('candidate', replica.candidate),
   ...withProp(
     'certifiedFrameLineage',
     options ? options.certifiedFrameLineage : replica.certifiedFrameLineage,

@@ -40,41 +40,41 @@ const assertExactFields = (
   }
 };
 
-const validateExecution = (
+const validateEntityCandidate = (
   value: unknown,
   entityId: string,
   context: string,
 ): void => {
   if (value === undefined) return;
-  const execution = validateObject(value, `${context}.validatorExecution`);
-  validateString(execution['frameHash'], `${context}.validatorExecution.frameHash`);
+  const candidate = validateObject(value, `${context}.candidate`);
+  validateString(candidate['frameHash'], `${context}.candidate.frameHash`);
   const height = validateNumber(
-    execution['height'],
-    `${context}.validatorExecution.height`,
+    candidate['height'],
+    `${context}.candidate.height`,
   );
   if (!Number.isSafeInteger(height) || height <= 0) {
     throw new FinancialDataCorruptionError(
-      `${context}.validatorExecution.height must be a positive safe integer`,
+      `${context}.candidate.height must be a positive safe integer`,
     );
   }
   const state = validateEntityState(
-    execution['state'],
-    `${context}.validatorExecution.state`,
+    candidate['state'],
+    `${context}.candidate.state`,
   );
   if (state.entityId !== entityId || state.height !== height) {
     throw new FinancialDataCorruptionError(
-      `${context}.validatorExecution state identity or height mismatch`,
+      `${context}.candidate state identity or height mismatch`,
     );
   }
   for (const field of ['outputs', 'jOutputs', 'hashesToSign'] as const) {
-    validateArray(execution[field], `${context}.validatorExecution.${field}`);
+    validateArray(candidate[field], `${context}.candidate.${field}`);
   }
   const changes = validateArray<unknown>(
-    execution['storageChanges'],
-    `${context}.validatorExecution.storageChanges`,
+    candidate['storageChanges'],
+    `${context}.candidate.storageChanges`,
   );
   changes.forEach((value, index) => {
-    const item = `${context}.validatorExecution.storageChanges[${index}]`;
+    const item = `${context}.candidate.storageChanges[${index}]`;
     const change = validateObject(value, item);
     const family = validateString(change['family'], `${item}.family`);
     validateString(change['entityId'], `${item}.entityId`);
@@ -105,18 +105,18 @@ const validateExecution = (
     'consumptionNodeChanges',
     'accountJClaimNodeChanges',
   ] as const) {
-    if (execution[field] === undefined) continue;
+    if (candidate[field] === undefined) continue;
     const nodeChanges = validateObject(
-      execution[field],
-      `${context}.validatorExecution.${field}`,
+      candidate[field],
+      `${context}.candidate.${field}`,
     );
     validateArray(
       nodeChanges['newNodes'],
-      `${context}.validatorExecution.${field}.newNodes`,
+      `${context}.candidate.${field}.newNodes`,
     );
     validateArray(
       nodeChanges['replacedNodeHashes'],
-      `${context}.validatorExecution.${field}.replacedNodeHashes`,
+      `${context}.candidate.${field}.replacedNodeHashes`,
     );
   }
 };
@@ -247,7 +247,7 @@ function assertEntityReplica(
   if (replica['lockedFrame'] !== undefined) {
     validateProposedEntityFrame(replica['lockedFrame'], `${context}.lockedFrame`);
   }
-  validateExecution(replica['validatorExecution'], entityId, context);
+  validateEntityCandidate(replica['candidate'], entityId, context);
   validateReplicaLineageAndWitnesses(replica, context);
   validateCertifiedFrameAnchor(replica['certifiedFrameAnchor'], context);
   validatePosition(replica['position'], context);

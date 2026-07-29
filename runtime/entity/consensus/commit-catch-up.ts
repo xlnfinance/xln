@@ -2,7 +2,7 @@ import { logError, shortHash } from '../../infra/logger';
 import type {
   EntityState,
   ProposedEntityFrame,
-  ValidatorEntityFrameExecution,
+  EntityCandidate,
 } from '../../types';
 import { applyEntityFrame } from './frame-application';
 import { createEntityFrameHashFromStateRoot, entityFrameEventsEqual } from './frame';
@@ -30,7 +30,7 @@ import {
 } from './shared';
 
 export type CommitExecutionResolution =
-  | { kind: 'execution'; execution: ValidatorEntityFrameExecution }
+  | { kind: 'execution'; execution: EntityCandidate }
   | { kind: 'result'; result: ApplyEntityInputResult };
 
 type ReplayedCommitments =

@@ -304,7 +304,7 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   programming faults halt that Entity and reload its last durable state while
   unrelated Entities continue. Multi-signer Entity execution must keep
   `replica.state` certified until Hanko. Keep speculative execution exclusively
-  in the existing `validatorExecution` phase; storage projections, API, UI,
+  in the canonical `EntityReplica.candidate` phase; storage projections, API, UI,
   routing and capacity checks must never treat it as certified. Replace the
   full Entity clone used to build that candidate with a touched-only shell:
   clone each changed small Account and only changed Entity/orderbook Map keys,

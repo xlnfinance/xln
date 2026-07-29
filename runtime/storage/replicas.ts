@@ -138,7 +138,7 @@ export const buildStorageLiveReplicaMetaCommitment = (env: RuntimeState): {
         mempool: replica.mempool,
         ...(replica.proposal ? { proposal: replica.proposal } : {}),
         ...(replica.lockedFrame ? { lockedFrame: replica.lockedFrame } : {}),
-        ...(replica.validatorExecution ? { validatorExecution: replica.validatorExecution } : {}),
+        ...(replica.candidate ? { candidate: replica.candidate } : {}),
         ...(latestLineage ? { latestLineage } : {}),
         ...(replica.certifiedFrameAnchor ? { certifiedFrameAnchor: replica.certifiedFrameAnchor } : {}),
         ...(replica.leaderVotes ? { leaderVotes: replica.leaderVotes } : {}),

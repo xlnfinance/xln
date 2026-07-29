@@ -64,7 +64,7 @@ import type {
   HashToSign,
   ProposedEntityFrame,
   RuntimeOverlayRecord,
-  ValidatorEntityFrameExecution,
+  EntityCandidate,
 } from '../../types';
 import { log } from '../../utils';
 import { validateProposedEntityFrame } from './frame-validation';
@@ -715,8 +715,8 @@ export const expectedCommittedLeaderState = (
 export const getValidatorExecutionForFrame = (
   replica: EntityReplica,
   frame: ProposedEntityFrame,
-): ValidatorEntityFrameExecution | undefined => {
-  const execution = replica.validatorExecution;
+): EntityCandidate | undefined => {
+  const execution = replica.candidate;
   if (!execution) return undefined;
   if (
     execution.frameHash !== frame.hash ||

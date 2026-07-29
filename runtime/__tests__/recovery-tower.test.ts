@@ -330,7 +330,7 @@ describe('runtime recovery tower', () => {
     };
     replica!.proposal = pendingFrame;
     replica!.lockedFrame = structuredClone(pendingFrame);
-    replica!.validatorExecution = {
+    replica!.candidate = {
       frameHash: pendingHash,
       height: pendingHeight,
       state: bloatedState,
@@ -367,7 +367,7 @@ describe('runtime recovery tower', () => {
     const checkpointReplica = (bundle.checkpoint!['eReplicas'] as Array<[string, Record<string, unknown>]>)[0]?.[1];
     expect(checkpointReplica?.proposal).toBeDefined();
     expect(checkpointReplica?.lockedFrame).toBeDefined();
-    expect(checkpointReplica?.validatorExecution).toBeDefined();
+    expect(checkpointReplica?.candidate).toBeDefined();
     expect(serializeTaggedJson(bundle).length, 'test fixture must exceed the tower JSON body cap before compression').toBeGreaterThan(128 * 1024);
 
     const encrypted = await encryptRuntimeRecoveryBundle(bundle, runtimeSeed);

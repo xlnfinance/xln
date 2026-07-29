@@ -347,7 +347,7 @@ export type StorageReplicaMeta = {
   position?: EntityReplica['position'];
   proposal?: EntityReplica['proposal'];
   lockedFrame?: EntityReplica['lockedFrame'];
-  validatorExecution?: EntityReplica['validatorExecution'];
+  candidate?: EntityReplica['candidate'];
   certifiedFrameLineage?: EntityReplica['certifiedFrameLineage'];
   certifiedFrameAnchor?: EntityReplica['certifiedFrameAnchor'];
   hankoWitness?: EntityReplica['hankoWitness'];

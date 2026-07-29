@@ -11,7 +11,7 @@ import type {
   EntityState,
   RuntimeState,
   ProposedEntityFrame,
-  ValidatorEntityFrameExecution,
+  EntityCandidate,
 } from '../../types';
 import { createEntityFrameHashFromStateRoot, entityFrameEventsEqual } from './frame';
 import { applyEntityFrame } from './frame-application';
@@ -41,7 +41,7 @@ const replayPreparedFrameForRelay = async (
   env: RuntimeState,
   replica: EntityReplica,
   frame: ProposedEntityFrame,
-): Promise<ValidatorEntityFrameExecution> => {
+): Promise<EntityCandidate> => {
   assertFrameParentMatchesState(replica.state, frame, 'ENTITY_PREPARED_PARENT_MISMATCH');
   const jRangeError = getReplicaJRangeValidationError(env, replica, frame.txs);
   if (jRangeError) throw new Error(`ENTITY_PREPARED_J_RANGE_MISMATCH:${jRangeError}`);
@@ -140,7 +140,7 @@ export const relayPreparedFrameIfReady = async (
         `actual=${preparedFrame?.hash ?? 'none'}`,
     );
   }
-  workingReplica.validatorExecution = await replayPreparedFrameForRelay(
+  workingReplica.candidate = await replayPreparedFrameForRelay(
     env,
     workingReplica,
     preparedFrame,
@@ -279,7 +279,7 @@ const buildMultiSignerProposal = async (
     [...(applied.collectedHashes ?? []), ...outputHashes],
   );
   const selfSigs = await signProposalManifest(env, workingReplica, state, hashesToSign);
-  workingReplica.validatorExecution = {
+  workingReplica.candidate = {
     frameHash,
     height,
     state,

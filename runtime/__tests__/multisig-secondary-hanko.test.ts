@@ -894,7 +894,7 @@ describe('multisig secondary Hanko production', () => {
     );
     expect(caughtUp.workingReplica.state.height).toBe(1);
     expect(caughtUp.workingReplica.proposal).toBeUndefined();
-    expect(caughtUp.workingReplica.validatorExecution).toBeUndefined();
+    expect(caughtUp.workingReplica.candidate).toBeUndefined();
     const proposerSideEffect = caughtUp.outputs.find(output => output.entityTxs?.length);
     if (!proposerSideEffect) throw new Error('TEST_PROPOSER_SIDE_EFFECT_MISSING');
     expect(safeStringify(proposerSideEffect.entityTxs)).toBe(safeStringify(followerSideEffect.entityTxs));

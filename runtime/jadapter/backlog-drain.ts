@@ -242,7 +242,7 @@ const replicaConsensusSummary = (key: string, replica: EntityReplica): unknown =
   proposalHankos: replica.proposal?.hankos ?? [],
   lockedFrameHash: replica.lockedFrame?.hash ?? '',
   lockedFrameSignatures: replica.lockedFrame?.collectedSigs ?? new Map(),
-  validatorFrameHash: replica.validatorExecution?.frameHash ?? '',
+  validatorFrameHash: replica.candidate?.frameHash ?? '',
   leaderVotes: replica.leaderVotes ?? new Map(),
   pendingLeaderCertificate: replica.pendingLeaderCertificate ?? null,
   lastConsensusProgressAt: replica.lastConsensusProgressAt ?? null,

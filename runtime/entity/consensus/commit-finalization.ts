@@ -6,7 +6,7 @@ import type {
   EntityState,
   HankoString,
   ProposedEntityFrame,
-  ValidatorEntityFrameExecution,
+  EntityCandidate,
 } from '../../types';
 import { cacheCommittedConsumptionNodeChanges } from '../consumption-store';
 import { emitCommittedPendingFrameWarnings } from '../scheduler';
@@ -43,7 +43,7 @@ type HankoBuildResult =
 const buildCommitHankos = async (
   context: ApplyEntityInputContext,
   frame: ProposedEntityFrame,
-  execution: ValidatorEntityFrameExecution,
+  execution: EntityCandidate,
   signaturesBySigner: Map<string, string[]>,
 ): Promise<HankoBuildResult> => {
   const { env, workingReplica } = context;
@@ -116,7 +116,7 @@ const buildCommitHankos = async (
 const attachCommitProofsAndOutputs = (
   context: ApplyEntityInputContext,
   frame: ProposedEntityFrame,
-  execution: ValidatorEntityFrameExecution,
+  execution: EntityCandidate,
   hankos: HankoString[],
 ): void => {
   const { env, entityOutbox, jOutbox, workingReplica } = context;
@@ -170,7 +170,7 @@ const attachCommitProofsAndOutputs = (
 const installCommittedState = (
   context: ApplyEntityInputContext,
   frame: ProposedEntityFrame,
-  execution: ValidatorEntityFrameExecution,
+  execution: EntityCandidate,
   hankos: HankoString[],
 ): void => {
   const { env, workingReplica, candidateEffects, storageChanges } = context;
@@ -221,7 +221,7 @@ const installCommittedState = (
 export const finalizeCommitNotification = async (
   context: ApplyEntityInputContext,
   frame: ProposedEntityFrame,
-  execution: ValidatorEntityFrameExecution,
+  execution: EntityCandidate,
   signaturesBySigner: Map<string, string[]>,
   options: { broadcastCommit?: boolean } = {},
 ): Promise<ApplyEntityInputResult> => {
@@ -256,7 +256,7 @@ export const finalizeCommitNotification = async (
 
   delete workingReplica.proposal;
   delete workingReplica.lockedFrame;
-  delete workingReplica.validatorExecution;
+  delete workingReplica.candidate;
   if (frame.leader.relayCertificate?.preparedFrameHash === frame.hash) {
     workingReplica.pendingLeaderCertificate = structuredClone(
       frame.leader.relayCertificate,

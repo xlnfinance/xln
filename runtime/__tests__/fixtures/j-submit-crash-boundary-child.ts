@@ -66,7 +66,7 @@ const driveUntil = async (predicate: () => boolean, label: string): Promise<void
       mempool: replica.mempool,
       proposal: replica.proposal,
       lockedFrame: replica.lockedFrame,
-      validatorExecutionHeight: replica.validatorExecution?.height,
+      candidateHeight: replica.candidate?.height,
       leaderVotes: replica.leaderVotes,
     })),
   }, 2));

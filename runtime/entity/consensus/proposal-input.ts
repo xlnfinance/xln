@@ -201,7 +201,7 @@ const signAndLockProposal = async (
     hashesToSign: execution.hashesToSign,
     collectedSigs,
   };
-  workingReplica.validatorExecution = execution;
+  workingReplica.candidate = execution;
   workingReplica.lastConsensusProgressAt = env.timestamp;
   for (const validatorId of workingReplica.state.config.validators) {
     if (validatorId.toLowerCase() === localSignerId) continue;

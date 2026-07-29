@@ -231,7 +231,7 @@ describe('entity leader policy', () => {
     expect(certified.workingReplica.leaderVotes?.size).toBe(3);
     expect(certified.workingReplica.pendingLeaderCertificate?.nextLeaderId).toBe('2');
     expect(certified.workingReplica.proposal?.leader).toMatchObject({ proposerSignerId: '2', view: 1 });
-    expect(certified.workingReplica.validatorExecution?.state.leaderState).toEqual({
+    expect(certified.workingReplica.candidate?.state.leaderState).toEqual({
       activeValidatorId: '2',
       view: 1,
       changedAtHeight: 1,
@@ -464,7 +464,7 @@ describe('entity leader policy', () => {
     });
     const failoverReplica = replicaFor(failoverId);
     failoverReplica.lockedFrame = withPreparedSigners(proposerId, failoverId);
-    failoverReplica.validatorExecution = {
+    failoverReplica.candidate = {
       frameHash: preparedHash,
       height: 1,
       state: structuredClone(preparedState),
@@ -634,7 +634,7 @@ describe('entity leader policy', () => {
         data: { from: '2', message: 'must not create F1' },
       }]))],
       lockedFrame: withPreparedSigners(proposerId, '2'),
-      validatorExecution: {
+      candidate: {
         frameHash: preparedHash,
         height: 1,
         state: structuredClone(preparedState),
@@ -865,7 +865,7 @@ describe('entity leader policy', () => {
     const transitionProposal = transition.workingReplica.proposal;
     if (!transitionProposal?.hashesToSign) throw new Error('TEST_LEADER_TRANSITION_PROPOSAL_MISSING');
     expect(transitionProposal.height).toBe(2);
-    expect(transition.workingReplica.validatorExecution?.state.leaderState).toEqual({
+    expect(transition.workingReplica.candidate?.state.leaderState).toEqual({
       activeValidatorId: '2',
       view: 1,
       changedAtHeight: 2,

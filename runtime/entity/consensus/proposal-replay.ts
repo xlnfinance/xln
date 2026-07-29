@@ -1,5 +1,5 @@
 import { logError, shortHash } from '../../infra/logger';
-import type { EntityState, ProposedEntityFrame, ValidatorEntityFrameExecution } from '../../types';
+import type { EntityState, ProposedEntityFrame, EntityCandidate } from '../../types';
 import { applyEntityFrame } from './frame-application';
 import { createEntityFrameHashFromStateRoot, entityFrameEventsEqual } from './frame';
 import {
@@ -24,7 +24,7 @@ import {
 } from './shared';
 
 export type ProposalReplayResult =
-  | { accepted: true; execution: ValidatorEntityFrameExecution }
+  | { accepted: true; execution: EntityCandidate }
   | { accepted: false; result: ApplyEntityInputResult };
 
 const rejectProposal = (
@@ -86,9 +86,9 @@ const buildVerifiedProposalHashes = (
   context: ApplyEntityInputContext,
   frame: ProposedEntityFrame,
   state: EntityState,
-  outputs: ValidatorEntityFrameExecution['outputs'],
-  collectedHashes: NonNullable<ValidatorEntityFrameExecution['hashesToSign']>,
-): NonNullable<ValidatorEntityFrameExecution['hashesToSign']> | ProposalReplayResult => {
+  outputs: EntityCandidate['outputs'],
+  collectedHashes: NonNullable<EntityCandidate['hashesToSign']>,
+): NonNullable<EntityCandidate['hashesToSign']> | ProposalReplayResult => {
   const outputHashes = buildCertifiedEntityOutputHashes(
     state,
     context.env,

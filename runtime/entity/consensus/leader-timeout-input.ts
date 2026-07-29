@@ -83,7 +83,7 @@ const selectPreparedFrame = (
     // A sub-threshold local vote is not a QC and must not fence the newly
     // certified leader from proposing.
     delete workingReplica.lockedFrame;
-    delete workingReplica.validatorExecution;
+    delete workingReplica.candidate;
   }
   return preparedFrame;
 };
@@ -118,11 +118,11 @@ const installLeaderCertificate = (
       },
     };
     if (
-      workingReplica.validatorExecution &&
-      (workingReplica.validatorExecution.height !== preparedFrame.height ||
-        workingReplica.validatorExecution.frameHash.toLowerCase() !== preparedFrame.hash.toLowerCase())
+      workingReplica.candidate &&
+      (workingReplica.candidate.height !== preparedFrame.height ||
+        workingReplica.candidate.frameHash.toLowerCase() !== preparedFrame.hash.toLowerCase())
     ) {
-      delete workingReplica.validatorExecution;
+      delete workingReplica.candidate;
     }
   }
   workingReplica.pendingLeaderCertificate = certificate;

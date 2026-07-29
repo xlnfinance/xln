@@ -13,29 +13,29 @@ import {
 
 type CloneState = typeof cloneEntityState;
 
-const cloneValidatorExecution = (
-  execution: NonNullable<EntityReplica['validatorExecution']>,
+const cloneEntityCandidate = (
+  candidate: NonNullable<EntityReplica['candidate']>,
   cloneState: CloneState,
-): NonNullable<EntityReplica['validatorExecution']> => ({
-  frameHash: execution.frameHash,
-  height: execution.height,
-  state: cloneState(execution.state),
-  outputs: execution.outputs.map(cloneIsolatedEntityInput),
-  jOutputs: execution.jOutputs.map(output => structuredClone(output)),
-  hashesToSign: execution.hashesToSign.map(hash => ({ ...hash })),
-  candidateEffects: structuredClone(execution.candidateEffects),
-  storageChanges: execution.storageChanges.map(change => ({ ...change })),
-  ...(execution.consumptionNodeChanges
+): NonNullable<EntityReplica['candidate']> => ({
+  frameHash: candidate.frameHash,
+  height: candidate.height,
+  state: cloneState(candidate.state),
+  outputs: candidate.outputs.map(cloneIsolatedEntityInput),
+  jOutputs: candidate.jOutputs.map(output => structuredClone(output)),
+  hashesToSign: candidate.hashesToSign.map(hash => ({ ...hash })),
+  candidateEffects: structuredClone(candidate.candidateEffects),
+  storageChanges: candidate.storageChanges.map(change => ({ ...change })),
+  ...(candidate.consumptionNodeChanges
     ? {
         consumptionNodeChanges: structuredClone(
-          execution.consumptionNodeChanges,
+          candidate.consumptionNodeChanges,
         ),
       }
     : {}),
-  ...(execution.accountJClaimNodeChanges
+  ...(candidate.accountJClaimNodeChanges
     ? {
         accountJClaimNodeChanges: structuredClone(
-          execution.accountJClaimNodeChanges,
+          candidate.accountJClaimNodeChanges,
         ),
       }
     : {}),
@@ -80,9 +80,9 @@ const cloneEntityReplicaWithPolicy = (
     }),
     isProposer: replica.isProposer,
     ...(replica.position && { position: { ...replica.position } }),
-    ...(replica.validatorExecution && {
-      validatorExecution: cloneValidatorExecution(
-        replica.validatorExecution,
+    ...(replica.candidate && {
+      candidate: cloneEntityCandidate(
+        replica.candidate,
         cloneState,
       ),
     }),
