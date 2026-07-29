@@ -184,6 +184,8 @@ export function validateDelta(delta: unknown, source: string = 'unknown'): Delta
     'rightCreditLimit',
     'leftAllowance',
     'rightAllowance',
+    'leftHold',
+    'rightHold',
   ] as const;
 
   for (const field of bigintFields) {
@@ -218,8 +220,8 @@ export function validateDelta(delta: unknown, source: string = 'unknown'): Delta
     rightCreditLimit: obj['rightCreditLimit'] as bigint,
     leftAllowance: obj['leftAllowance'] as bigint,
     rightAllowance: obj['rightAllowance'] as bigint,
-    ...(obj['leftHold'] === undefined ? {} : { leftHold: validateOptionalBigInt(obj['leftHold'], `${source}.leftHold`) }),
-    ...(obj['rightHold'] === undefined ? {} : { rightHold: validateOptionalBigInt(obj['rightHold'], `${source}.rightHold`) }),
+    leftHold: obj['leftHold'] as bigint,
+    rightHold: obj['rightHold'] as bigint,
   };
 }
 
@@ -496,11 +498,6 @@ function validateNumber(value: unknown, fieldName: string): number {
     throw new TypeSafetyViolationError(`${fieldName} must be a finite number`, value);
   }
   return value;
-}
-
-function validateOptionalBigInt(value: unknown, fieldName: string): bigint {
-  if (typeof value === 'bigint') return value;
-  throw new TypeSafetyViolationError(`${fieldName} must be a bigint when present`, value);
 }
 
 function validateObject(value: unknown, fieldName: string): Record<string, unknown> {

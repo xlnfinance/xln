@@ -32,3 +32,17 @@ test('validateAccountDeltas fails loud for missing, malformed, or partial input'
     'Delta validation failed from bad-delta-test.Object[1]',
   );
 });
+
+test('validateAccountDeltas rejects omitted hold fields instead of restoring capacity', () => {
+  const missingLeftHold: Record<string, unknown> = { ...createDefaultDelta(1) };
+  delete missingLeftHold['leftHold'];
+  expect(() => validateAccountDeltas({ 1: missingLeftHold }, 'missing-left-hold')).toThrow(
+    'leftHold cannot be null/undefined',
+  );
+
+  const missingRightHold: Record<string, unknown> = { ...createDefaultDelta(1) };
+  delete missingRightHold['rightHold'];
+  expect(() => validateAccountDeltas({ 1: missingRightHold }, 'missing-right-hold')).toThrow(
+    'rightHold cannot be null/undefined',
+  );
+});

@@ -44,8 +44,8 @@ const deriveLeftPerspective = (delta: Delta, totalDelta: bigint, collateral: big
   const inPeerCredit = nonNegative(peerCreditLimit - outPeerCredit);
   const effectiveOwnCreditWindow = ownCreditLimit > inOwnCredit ? ownCreditLimit : inOwnCredit;
   const effectivePeerCreditWindow = peerCreditLimit > outPeerCredit ? peerCreditLimit : outPeerCredit;
-  const leftHold = delta.leftHold || 0n;
-  const rightHold = delta.rightHold || 0n;
+  const leftHold = delta.leftHold;
+  const rightHold = delta.rightHold;
   return {
     inCollateral,
     outCollateral,

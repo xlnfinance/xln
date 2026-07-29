@@ -3,7 +3,7 @@ import type { Delta } from '../../types';
 export type HoldSide = 'left' | 'right';
 
 export function getHold(delta: Delta, side: HoldSide): bigint {
-  return side === 'left' ? (delta.leftHold ?? 0n) : (delta.rightHold ?? 0n);
+  return side === 'left' ? delta.leftHold : delta.rightHold;
 }
 
 export function ensureHoldAdd(side: HoldSide, amount: bigint): string | undefined {
@@ -14,8 +14,8 @@ export function ensureHoldAdd(side: HoldSide, amount: bigint): string | undefine
 export function addHold(delta: Delta, side: HoldSide, amount: bigint): string | undefined {
   const error = ensureHoldAdd(side, amount);
   if (error) return error;
-  if (side === 'left') delta.leftHold = (delta.leftHold ?? 0n) + amount;
-  else delta.rightHold = (delta.rightHold ?? 0n) + amount;
+  if (side === 'left') delta.leftHold += amount;
+  else delta.rightHold += amount;
   return undefined;
 }
 

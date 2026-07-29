@@ -27,6 +27,8 @@ export function handleAddDelta(
     rightCreditLimit: 0n,
     leftAllowance: 0n,
     rightAllowance: 0n,
+    leftHold: 0n,
+    rightHold: 0n,
   };
 
   account.deltas.set(tokenId, newDelta);

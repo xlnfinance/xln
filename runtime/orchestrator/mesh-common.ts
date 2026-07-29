@@ -320,8 +320,8 @@ export const serializeAccountDelta = (delta: Delta | null | undefined): Record<s
         offdelta: String(delta.offdelta ?? 0n),
         leftCreditLimit: String(delta.leftCreditLimit ?? 0n),
         rightCreditLimit: String(delta.rightCreditLimit ?? 0n),
-        leftHold: String(delta.leftHold ?? 0n),
-        rightHold: String(delta.rightHold ?? 0n),
+        leftHold: String(delta.leftHold),
+        rightHold: String(delta.rightHold),
       }
     : null;
 

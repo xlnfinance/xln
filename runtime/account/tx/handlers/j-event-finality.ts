@@ -44,6 +44,8 @@ const applyAccountSettledEvent = (account: AccountState, event: JurisdictionEven
       rightCreditLimit: limit,
       leftAllowance: 0n,
       rightAllowance: 0n,
+      leftHold: 0n,
+      rightHold: 0n,
     };
     account.deltas.set(tokenIdNum, delta);
   }

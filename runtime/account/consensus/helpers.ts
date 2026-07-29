@@ -28,8 +28,8 @@ export const summarizeDeltasForLog = (deltas: Map<number, Delta>) =>
     offdelta: delta.offdelta?.toString(),
     leftCreditLimit: delta.leftCreditLimit?.toString(),
     rightCreditLimit: delta.rightCreditLimit?.toString(),
-    leftHold: delta.leftHold?.toString(),
-    rightHold: delta.rightHold?.toString(),
+    leftHold: delta.leftHold.toString(),
+    rightHold: delta.rightHold.toString(),
   }));
 
 type AccountDomainSubject = Readonly<{
@@ -76,9 +76,7 @@ export const buildAccountProofBodyFromEnv = (env: RuntimeState, account: Account
   );
 
 export function shouldIncludeToken(delta: Delta, totalDelta: bigint): boolean {
-  const hasHolds =
-    (delta.leftHold || 0n) !== 0n ||
-    (delta.rightHold || 0n) !== 0n;
+  const hasHolds = delta.leftHold !== 0n || delta.rightHold !== 0n;
 
   return !(totalDelta === 0n && delta.leftCreditLimit === 0n && delta.rightCreditLimit === 0n && !hasHolds);
 }

@@ -560,9 +560,11 @@ export interface Delta {
   rightAllowance: bigint;
 
   // Unified per-side holds across all transformers (HTLC/swap/settlement).
-  // This is the only hold model in Delta state.
-  leftHold?: bigint;
-  rightHold?: bigint;
+  // These fields are mandatory even when zero. Treating an absent hold as zero
+  // creates two encodings for one financial state and can silently restore
+  // spendable capacity to an incomplete payload.
+  leftHold: bigint;
+  rightHold: bigint;
 }
 
 // ═══════════════════════════════════════════════════════════════
