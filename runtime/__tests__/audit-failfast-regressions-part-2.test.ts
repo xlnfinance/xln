@@ -222,6 +222,7 @@ import { encodeSignedHanko } from '../hanko/codec';
 import { resolveHankoBoardDelays } from '../hanko/claims';
 
 import { signEntityHashes, verifyHankoForHash } from '../hanko/signing';
+import { sealAccountDraftAsEntity } from './helpers/account-draft';
 
 import { NobleCryptoProvider } from '../protocol/crypto/noble';
 
@@ -483,52 +484,6 @@ const attachSigningReplica = (env: ReturnType<typeof createEmptyEnv>, entityId: 
       config,
     },
   } satisfies EntityReplica);
-};
-
-const sealAccountDraftAsEntity = async (
-  env: RuntimeState,
-  entityId: string,
-  signerId: string,
-  draft: {
-    accountInput?: AccountInput;
-    hashesToSign?: Array<{ hash: string; type: 'accountFrame' | 'dispute'; context: string }>;
-  },
-): Promise<AccountInput> => {
-  if (!draft.accountInput || !draft.hashesToSign?.length) {
-    throw new Error('TEST_ACCOUNT_DRAFT_MANIFEST_REQUIRED');
-  }
-  const input = structuredClone(draft.accountInput);
-  const hankos = await signEntityHashes(
-    env,
-    entityId,
-    signerId,
-    draft.hashesToSign.map(entry => entry.hash),
-  );
-  const witness = new Map(
-    draft.hashesToSign.map((entry, index) => {
-      const hanko = hankos[index];
-      if (!hanko) throw new Error(`TEST_ACCOUNT_DRAFT_HANKO_MISSING:${entry.context}`);
-      return [entry.hash.toLowerCase(), hanko] as const;
-    }),
-  );
-  const requireWitness = (hash: string): NonNullable<ReturnType<typeof witness.get>> => {
-    const hanko = witness.get(hash.toLowerCase());
-    if (!hanko) throw new Error(`TEST_ACCOUNT_DRAFT_WITNESS_UNDECLARED:${hash}`);
-    return hanko;
-  };
-  if (input.kind === 'ack' || input.kind === 'frame_ack') {
-    input.ack.frameHanko = requireWitness(input.ack.frameHash);
-    if (input.ack.disputeSeal) {
-      input.ack.disputeSeal.hanko = requireWitness(input.ack.disputeSeal.hash);
-    }
-  }
-  if (input.kind === 'frame' || input.kind === 'frame_ack') {
-    input.proposal.frameHanko = requireWitness(input.proposal.frame.stateHash);
-    if (input.proposal.disputeSeal) {
-      input.proposal.disputeSeal.hanko = requireWitness(input.proposal.disputeSeal.hash);
-    }
-  }
-  return input;
 };
 
 const registerLazySigner = (seed: string, signerSlot: string): { signerId: string; entityId: string } => {

@@ -221,7 +221,8 @@ import { encodeSignedHanko } from '../hanko/codec';
 
 import { resolveHankoBoardDelays } from '../hanko/claims';
 
-import { signEntityHashes, verifyHankoForHash } from '../hanko/signing';
+import { verifyHankoForHash } from '../hanko/signing';
+import { sealAccountDraftAsEntity } from './helpers/account-draft';
 
 import { NobleCryptoProvider } from '../protocol/crypto/noble';
 
@@ -519,6 +520,12 @@ const ensureCanonicalCommandBoardAuthority = async (env: RuntimeState, state: En
     replica.depositoryAddress = jurisdiction.depositoryAddress;
     replica.entityProviderAddress = jurisdiction.entityProviderAddress;
   }
+  replica.contracts = {
+    depository: jurisdiction.depositoryAddress,
+    entityProvider: jurisdiction.entityProviderAddress,
+    account: replica.contracts?.account || hex20('98'),
+    deltaTransformer: replica.contracts?.deltaTransformer || hex20('99'),
+  };
   replica.watcherConfirmationDepth = 0;
   await installCanonicalRegisteredBoardAuthority(env, jurisdiction, state, boardHash);
 };
@@ -810,6 +817,15 @@ describe('audit fail-fast regressions', () => {
     if (!rightProposal.success || !rightProposal.accountInput) {
       throw new Error(`RIGHT_SIMULTANEOUS_PROPOSAL_FAILED:${rightProposal.error ?? 'missing input'}`);
     }
+    const leftInput = await sealAccountDraftAsEntity(env, left.entityId, left.signerId, leftProposal);
+    const rightInput = await sealAccountDraftAsEntity(env, right.entityId, right.signerId, rightProposal);
+    if (leftInput.kind !== 'frame') throw new Error('LEFT_SIMULTANEOUS_FRAME_REQUIRED');
+    // This collision begins after LEFT has already emitted its signed proposal.
+    // Persist the same witnesses that Entity finalization would attach before
+    // the peer's competing frame can arrive.
+    leftAccount.pendingAccountInput = structuredClone(leftInput);
+    leftAccount.currentFrameHanko = leftInput.proposal.frameHanko;
+    leftAccount.currentDisputeProofHanko = leftInput.proposal.disputeSeal?.hanko;
     leftAccount.pendingAccountInputSignerId = right.signerId;
 
     const leftState = makeEntityState(left.entityId);
@@ -821,7 +837,7 @@ describe('audit fail-fast regressions', () => {
       [
         {
           type: 'accountInput',
-          data: rightProposal.accountInput,
+          data: rightInput,
         },
       ],
       env.timestamp,
@@ -831,7 +847,7 @@ describe('audit fail-fast regressions', () => {
       .flatMap(output => output.entityTxs ?? [])
       .filter((tx): tx is Extract<EntityTx, { type: 'accountInput' }> => tx.type === 'accountInput');
     expect(accountOutputs).toHaveLength(1);
-    expect(accountOutputs[0]?.data).toEqual(leftProposal.accountInput);
+    expect(accountOutputs[0]?.data).toEqual(leftInput);
     expect(accountOutputs[0]?.data.kind).toBe('frame');
     expect(applied.newState.accounts.get(right.entityId)?.pendingFrame?.stateHash).toBe(
       leftAccount.pendingFrame?.stateHash,
@@ -2177,6 +2193,11 @@ describe('audit fail-fast regressions', () => {
     const wrongHub = `0x${'3a'.repeat(32)}`;
     const orderId = 'local-offer-admission-collision';
     const pairId = 'cross:base:2/tron:1';
+    const runtimeSeed = env.runtimeSeed;
+    if (!runtimeSeed) throw new Error('TEST_RUNTIME_SEED_REQUIRED');
+    const userSignerId = deriveSignerAddressSync(runtimeSeed, '2').toLowerCase();
+    registerSignerKey(runtimeSeed, userSignerId, deriveSignerKeySync(runtimeSeed, '2'));
+    attachSigningReplica(env, user, userSignerId);
     const route = buildPreparedCrossJurisdictionRoute(
       {
         orderId,
@@ -2184,7 +2205,7 @@ describe('audit fail-fast regressions', () => {
         hubEntityId: sourceHub,
         bookOwnerEntityId: sourceHub,
         venueId: pairId,
-        sourceSignerId: 'user-signer',
+        sourceSignerId: userSignerId,
         sourceHubSignerId: 'source-hub-signer',
         targetHubSignerId: 'target-hub-signer',
         targetSignerId: 'target-user-signer',
@@ -2236,7 +2257,7 @@ describe('audit fail-fast regressions', () => {
         hubEntityId: wrongHub,
         bookOwnerEntityId: wrongHub,
         venueId: pairId,
-        sourceSignerId: 'user-signer',
+        sourceSignerId: userSignerId,
         sourceHubSignerId: 'wrong-hub-signer',
         targetHubSignerId: 'target-hub-signer',
         targetSignerId: 'target-user-signer',
