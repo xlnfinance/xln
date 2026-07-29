@@ -20,9 +20,7 @@ import {
 } from '../../state-helpers';
 import { isLeft } from '../utils';
 import { HEAVY_LOGS } from '../../utils';
-import { safeStringify } from '../../protocol/serialization';
 import { applyAccountTx } from '../tx/apply';
-import { deriveAccountFrameTokenIds } from '../frame';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import {
   createFrameHash,
@@ -53,15 +51,10 @@ import { createDisputeProofHashWithNonce } from '../../protocol/dispute/proof-bu
 import { getMinimumSafeSettlementNonce } from '../../protocol/settlement/operations';
 import { verifyHankoForHash } from '../../hanko/signing';
 import {
-  computeAccountCommitmentSectionDetail,
-  computeAccountCommitmentSectionDetailCold,
   computeAccountStateRoot,
-  computeAccountStateRootCold,
   computeAccountStateSectionHashes,
-  computeAccountStateSectionHashesCold,
 } from '../state-root';
 import {
-  commitStagedAccountCommitmentCache,
   discardStagedAccountCommitmentCache,
   forkAccountCommitmentCache,
 } from '../map-commitment';
@@ -79,6 +72,8 @@ import {
   accountInputReferenceHeight,
 } from './flush';
 import { handleBoardReseal } from './board-reseal';
+import { handlePendingFrameAck } from './ack-commit';
+import { assertLiveCommitMatchesFrame } from './commit-root';
 import {
   getDisputeSealRequirementError,
   storeCounterpartyDisputeSeal,
@@ -105,59 +100,6 @@ export type {
 const accountLog = createStructuredLogger('account');
 const STALE_ACCOUNT_FRAME_WARNING_MS = 5 * 60_000;
 
-const assertLiveCommitMatchesFrame = (
-  account: AccountState,
-  expectedRoot: string,
-  side: 'proposer' | 'receiver',
-  height: number,
-  validatedMachine?: AccountState,
-): void => {
-  const incrementalRoot = computeAccountStateRoot(account);
-  // The signed frame root is the commit criterion. Every AccountTx variant is
-  // compile-time-exhaustive about commitment-cache invalidation, so a matching
-  // incremental root is sufficient on the hot path. Rebuilding every map here
-  // made one-leaf commits scale with the entire Account and erased the cache's
-  // benefit. We still run the independent cold oracle on any mismatch so the
-  // failure report identifies stale cache data versus a real state divergence.
-  if (incrementalRoot === expectedRoot) return;
-  const coldRoot = computeAccountStateRootCold(account);
-  const details = {
-    side,
-    height,
-    expectedRoot,
-    incrementalRoot,
-    coldRoot,
-    incrementalSectionHashes: computeAccountStateSectionHashes(account),
-    coldSectionHashes: computeAccountStateSectionHashesCold(account),
-    incrementalCommitments: computeAccountCommitmentSectionDetail(account),
-    coldCommitments: computeAccountCommitmentSectionDetailCold(account),
-    pendingFrameTxTypes: account.pendingFrame?.accountTxs.map((tx) => tx.type) ?? [],
-    commitmentEntryCounts: {
-      locks: account.locks.size,
-      pulls: account.pulls?.size ?? 0,
-      swapOffers: account.swapOffers.size,
-      subcontracts: account.subcontracts?.size ?? 0,
-      lendingIntents: account.lendingIntents?.size ?? 0,
-    },
-    liveFinancial: {
-      deltas: Array.from(account.deltas.entries()),
-      globalCreditLimits: account.globalCreditLimits,
-      jNonce: account.jNonce,
-      disputeConfig: account.disputeConfig,
-    },
-    ...(validatedMachine ? {
-      validatedFinancial: {
-        deltas: Array.from(validatedMachine.deltas.entries()),
-        globalCreditLimits: validatedMachine.globalCreditLimits,
-        jNonce: validatedMachine.jNonce,
-        disputeConfig: validatedMachine.disputeConfig,
-      },
-    } : {}),
-  };
-  accountLog.error('frame.live_commit_root_mismatch', details);
-  throw new Error(`ACCOUNT_LIVE_COMMIT_ROOT_MISMATCH:${safeStringify(details)}`);
-};
-
 export {
   getIncomingAccountDeadlineViolation,
   HTLC_ENFORCEMENT_RESERVE_MS,
@@ -169,305 +111,6 @@ export { computeFrameHash, isWithinAccountFrameBounds } from './frame';
 
 // Counter-based replay protection was intentionally replaced by the frame chain
 // (height + prevFrameHash). Nonces remain only for on-chain proof material.
-
-type PendingFrameAckResult =
-  | { kind: 'not_applicable' }
-  | { kind: 'fallthrough' }
-  | { kind: 'return'; result: HandleAccountInputResult };
-
-type AccountFrameAck = NonNullable<ReturnType<typeof accountInputAck>>;
-
-type PendingAckCertificateResult =
-  | {
-    kind: 'continue';
-    ack: AccountFrameAck;
-    ackHanko: string;
-    frameHash: string;
-  }
-  | { kind: 'return'; result: HandleAccountInputResult };
-
-async function verifyPendingAckCertificate(
-  env: RuntimeState,
-  account: AccountState,
-  ack: AccountFrameAck,
-  ackHeight: number,
-  validatedSeal: ValidatedCounterpartyDisputeSeal | undefined,
-  events: string[],
-  securityContext: AccountInputSecurityContext,
-): Promise<PendingAckCertificateResult> {
-  const sealError = getDisputeSealRequirementError(
-    account.currentDisputeProofBodyHash,
-    account.counterpartyDisputeProofBodyHash,
-    account.counterpartyDisputeProofNonce,
-    Number(account.jNonce ?? 0),
-    validatedSeal,
-  );
-  if (sealError) {
-    return { kind: 'return', result: { success: false, error: sealError, events } };
-  }
-
-  const pendingFrame = account.pendingFrame!;
-  const frameHash = pendingFrame.stateHash;
-  if (typeof ack.frameHash !== 'string' || ack.frameHash.toLowerCase() !== frameHash.toLowerCase()) {
-    return {
-      kind: 'return',
-      result: {
-        success: false,
-        error: `ACK frameHash mismatch: got ${String(ack.frameHash)}, expected ${frameHash}`,
-        events,
-      },
-    };
-  }
-  if (!ack.frameHanko) {
-    return {
-      kind: 'return',
-      result: { success: false, error: 'Missing ACK hanko', events },
-    };
-  }
-
-  const expectedEntity = account.proofHeader.toEntity;
-  accountLog.debug('hanko.ack.verify', { height: ackHeight, frame: shortHash(frameHash) });
-  const verified = await verifyHankoForHash(
-    ack.frameHanko,
-    frameHash,
-    expectedEntity,
-    env,
-    securityContext.counterpartyCertifiedBoardHash
-      ? { registeredBoardHash: securityContext.counterpartyCertifiedBoardHash }
-      : undefined,
-  );
-  if (!verified.valid) {
-    return {
-      kind: 'return',
-      result: { success: false, error: 'Invalid ACK hanko signature', events },
-    };
-  }
-  if (!verified.entityId || verified.entityId.toLowerCase() !== expectedEntity.toLowerCase()) {
-    return {
-      kind: 'return',
-      result: {
-        success: false,
-        error:
-          `ACK hanko entityId mismatch: got ${verified.entityId?.slice(-4)}, ` +
-          `expected ${expectedEntity.slice(-4)}`,
-        events,
-      },
-    };
-  }
-  accountLog.debug('hanko.ack.verified', {
-    from: shortId(verified.entityId),
-    height: ackHeight,
-  });
-  return { kind: 'continue', ack, ackHanko: ack.frameHanko, frameHash };
-}
-
-async function applyPendingFrameTransactions(
-  env: RuntimeState,
-  account: AccountState,
-  pendingFrame: AccountFrame,
-  committedJClaims: AccountJClaimSession,
-  timedOutHashlocks: string[],
-  candidateEffects: EntityCandidateEffect[],
-): Promise<void> {
-  const pendingJHeight = pendingFrame.jHeight ?? account.lastFinalizedJHeight ?? 0;
-  for (const tx of pendingFrame.accountTxs) {
-    const beforeSettlement = captureSettlementVector(account);
-    const result = await applyAccountTx(
-      account,
-      tx,
-      pendingFrame.byLeft!,
-      pendingFrame.timestamp,
-      pendingJHeight,
-      false,
-      env,
-      committedJClaims,
-    );
-    candidateEffects.push(...(result.candidateEffects ?? []));
-    if (!result.success) {
-      accountLog.error('frame.commit.failed', {
-        side: 'proposer',
-        type: tx.type,
-        error: result.error,
-      });
-      throw new Error(
-        `Frame ${pendingFrame.height} commit failed: ${tx.type} - ${result.error}`,
-      );
-    }
-    assertNoUnilateralSettlementMutation(
-      account,
-      beforeSettlement,
-      tx,
-      'proposer/commit',
-    );
-    if (result.timedOutHashlock) timedOutHashlocks.push(result.timedOutHashlock);
-  }
-  commitStagedAccountCommitmentCache(account);
-  assertLiveCommitMatchesFrame(
-    account,
-    pendingFrame.accountStateRoot,
-    'proposer',
-    pendingFrame.height,
-  );
-}
-
-function installPendingFrameCommit(
-  account: AccountState,
-  input: AccountInput,
-  pendingFrame: AccountFrame,
-  ack: AccountFrameAck,
-  ackHanko: string,
-  validatedSeal: ValidatedCounterpartyDisputeSeal | undefined,
-  committedFrames: Array<{ frame: AccountFrame; committedViaNewFrame: boolean }>,
-): number {
-  account.currentFrame = structuredClone(pendingFrame);
-  account.currentHeight = pendingFrame.height;
-  // The peer ACK is the second half of this exact bilateral certificate.
-  // Dropping it would make later board rotation unable to prove mutual commit.
-  account.counterpartyFrameHanko = ackHanko;
-  if (ack.disputeSeal) {
-    storeCounterpartyDisputeSeal(account, validatedSeal);
-    accountLog.debug('hanko.dispute_ack_stored', {
-      nonce: ack.disputeSeal.proofNonce,
-      from: shortId(input.fromEntityId),
-    });
-  }
-
-  const committedFrame = cloneAccountFrame(pendingFrame);
-  committedFrames.push({ frame: committedFrame, committedViaNewFrame: false });
-  accountLog.debug('frame.indexed', {
-    source: 'ackCommit',
-    height: pendingFrame.height,
-  });
-
-  delete account.pendingFrame;
-  delete account.pendingAccountInput;
-  delete account.pendingAccountInputSignerId;
-  discardStagedAccountCommitmentCache(account);
-  if (
-    account.lastOutboundFrameAck &&
-    Number(account.lastOutboundFrameAck.height) < Number(pendingFrame.height)
-  ) {
-    delete account.lastOutboundFrameAck;
-  }
-  account.rollbackCount = Math.max(0, account.rollbackCount - 1);
-  if (account.rollbackCount === 0) delete account.lastRollbackFrameHash;
-  return pendingFrame.height;
-}
-
-async function queuePostAckWork(
-  env: RuntimeState,
-  account: AccountState,
-  input: AccountInput,
-  committedHeight: number,
-  securityContext: AccountInputSecurityContext,
-  candidateEffects: EntityCandidateEffect[],
-  events: string[],
-): Promise<void> {
-  // Auto-rebalance must observe the committed state with pendingFrame cleared.
-  // Running it earlier silently suppresses the check as "frame still pending".
-  const txs = await runPostFrameAutoRebalanceCheck(
-    env,
-    account,
-    account.proofHeader.fromEntity,
-    input.fromEntityId,
-    committedHeight,
-    securityContext.owningEntityIsHub,
-    candidateEffects,
-  );
-  if (txs.length === 0) return;
-  appendAccountMempoolTxs(account, txs, 'accountConsensus:ackAutoRebalance');
-  events.push(`🔄 Auto-rebalance queued ${txs.length} tx(s) after ACK commit`);
-}
-
-async function handlePendingFrameAck(
-  env: RuntimeState,
-  account: AccountState,
-  input: AccountInput,
-  ackHeight: number | undefined,
-  validatedCounterpartyDisputeSeal: ValidatedCounterpartyDisputeSeal | undefined,
-  events: string[],
-  timedOutHashlocks: string[],
-  committedFrames: Array<{ frame: AccountFrame; committedViaNewFrame: boolean }>,
-  committedJClaims: AccountJClaimSession,
-  securityContext: AccountInputSecurityContext,
-  candidateEffects: EntityCandidateEffect[],
-): Promise<PendingFrameAckResult> {
-  const ack = accountInputAck(input);
-  const proposal = accountInputProposal(input);
-  const pendingFrame = account.pendingFrame;
-  if (!(pendingFrame && ackHeight === pendingFrame.height && ack)) {
-    return { kind: 'not_applicable' };
-  }
-  if (HEAVY_LOGS) accountLog.debug('ack.debug', { from: shortId(input.fromEntityId), to: shortId(input.toEntityId) });
-  const certificate = await verifyPendingAckCertificate(
-    env,
-    account,
-    ack,
-    ackHeight,
-    validatedCounterpartyDisputeSeal,
-    events,
-    securityContext,
-  );
-  if (certificate.kind === 'return') return certificate;
-
-  const tokenIds = deriveAccountFrameTokenIds(pendingFrame);
-  accountLog.debug('frame.commit', {
-    height: pendingFrame.height,
-    txs: pendingFrame.accountTxs.map(tx => tx.type),
-    tokens: tokenIds,
-    state: shortHash(certificate.frameHash),
-  });
-  const { counterparty: cpForLog } = getAccountPerspective(account, account.proofHeader.fromEntity);
-  accountLog.debug('frame.reexecute', {
-    height: pendingFrame.height,
-    counterparty: shortId(cpForLog),
-    txs: pendingFrame.accountTxs.length,
-  });
-  await applyPendingFrameTransactions(
-    env,
-    account,
-    pendingFrame,
-    committedJClaims,
-    timedOutHashlocks,
-    candidateEffects,
-  );
-  accountLog.debug('frame.commit.complete', {
-    side: 'proposer',
-    counterparty: shortId(cpForLog),
-    height: pendingFrame.height,
-    tokens: account.deltas.size,
-  });
-  const committedHeight = installPendingFrameCommit(
-    account,
-    input,
-    pendingFrame,
-    ack,
-    certificate.ackHanko,
-    validatedCounterpartyDisputeSeal,
-    committedFrames,
-  );
-  events.push(`✅ Frame ${ackHeight} confirmed and committed`);
-  await queuePostAckWork(
-    env,
-    account,
-    input,
-    committedHeight,
-    securityContext,
-    candidateEffects,
-    events,
-  );
-  // Entity consensus owns the only Account proposal flush. A pure ACK may
-  // unlock queued work, but proposing here would expose a half-finalized
-  // pendingFrame before the Entity pass binds its route and signer.
-  if (!proposal) {
-    if (HEAVY_LOGS) accountLog.debug('return.ack_only', { height: ackHeight });
-    return {
-      kind: 'return',
-      result: { success: true, events, timedOutHashlocks, ...(committedFrames.length > 0 && { committedFrames }) },
-    };
-  }
-  return { kind: 'fallthrough' };
-}
 
 type AccountCommittedFrame = NonNullable<HandleAccountInputResult['committedFrames']>[number];
 type AccountRevealedSecret = { secret: string; hashlock: string };
