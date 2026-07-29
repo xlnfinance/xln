@@ -29,8 +29,15 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   Runtime writer or durable WAL model. The release audit is complete only when
   every accepted finding is closed or explicitly owner-deferred outside the
   release scope; do not copy the report into a second permanent backlog.
-  Keep every source comment and repository document in English; Russian is
-  reserved for owner-agent conversation and never enters the codebase.
+  Require three executable reading traces: one unit of value from external
+  ingress through R→E→A, signed child frames, WAL, history view and UI; one
+  simultaneous same-height Account proposal proving rollback ordering and
+  LEFT-wins; and failures before mutation, after mutation/pre-WAL, post-WAL,
+  during RPC observation and during multi-signer root verification. For every
+  stage identify authoritative state, public visibility and retry/drop/halt
+  behavior. Keep source code, comments, errors and canonical documents in
+  English. Intentional localization and multilingual user content are allowed
+  only through the exact localization-assets allowlist.
 - [ ] Enforce the canonical Runtime → Entity → Account cascade documented at
   the top of `AGENTS.md` as the first architecture gate. Use the same
   `*Machine/*Replica`, `*State`, `*Input`, `*Tx`, `*Frame`, `*Output` and phase
@@ -396,12 +403,12 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   zero functions over 100 lines. The production ratchet now owns 6 exact
   allowances over 150 lines and rejects every new/growing coordinator plus
   every file over 3000 lines; delete each allowance with its verified split.
-  Start with
-  `jadapter/rpc-adapter.ts`,
-  `orchestrator/mm-node-run.ts`, `storage/runtime-storage.ts`,
-  `orchestrator/hub-node.ts`, `recovery/restore.ts` and `storage/index.ts`;
-  split by lifecycle/ownership boundary, not arbitrary line ranges, and lower
-  the exact allowance after every verified extraction.
+  The exact remaining owners are `jadapter/rpc-adapter.ts::{createRpcAdapter,
+  startWatching,doPoll,pollInFlight callback}`,
+  `orchestrator/mm-node-run.ts::runMarketMakerNode`, and
+  `orchestrator/hub-node.ts::run`. Split by lifecycle/ownership boundary, not
+  arbitrary line ranges, and delete each exact allowance after its verified
+  extraction.
 - [ ] Enforce an acyclic browser-safe core dependency graph. Keep cloning,
   codecs and state helpers as leaf modules that never import reducers,
   Runtime routing or chain adapters; add a cycle budget that fails on any new

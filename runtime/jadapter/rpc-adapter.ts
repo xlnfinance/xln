@@ -21,22 +21,16 @@ import { decodeJBatch } from '../jurisdiction/batch';
 import { getCertifiedBoardStackKey } from '../jurisdiction/board-registry';
 import { requireUsableContractAddress } from '../jurisdiction/contract-address';
 import { getEntityCertifiedJAnchor, getValidatorJExpectedBlockHash } from '../jurisdiction/local-history';
-import {
-  buildCertifiedRegistrationEvidence,
-  markLocalJAuthorityRuntimeTx,
-} from '../jurisdiction/registration-evidence';
 import { compareStableText, safeStringify } from '../protocol/serialization';
-import type { DisputeFinalizationEvidence, RuntimeState, JTx, RuntimeInput, RuntimeTx } from '../types';
+import type { DisputeFinalizationEvidence, RuntimeState, JTx, RuntimeInput } from '../types';
 import {
   TOKEN_REGISTRATION_AMOUNT,
   defaultTokensForJurisdiction,
   getDefaultTokenSupply,
 } from '../jurisdiction/default-tokens';
-import { extractCanonicalDepositoryEventArgs, parseKnownDepositoryLog } from './depository-event-codec';
 import { makeJAdapterFailureResult } from './failure';
 import { buildExternalTokenToReserveBatch, packTokenReference } from './helpers';
 import { parseReceiptLogsToJEvents } from './j-event-log-decoder';
-import { CANONICAL_J_EVENTS } from '../jurisdiction/event-catalog';
 import { DEV_CHAIN_IDS } from './index';
 import { normalizeReceiptHash, parseReceiptQuantity } from '../jurisdiction/receipt-codec';
 import { readAuthenticatedReceiptRange, type RpcBatchCall } from './receipt-root';
@@ -51,8 +45,6 @@ import {
   prepareAuthenticatedWatcherIngress,
   resolveWatcherPollToBlock,
   rpcLog,
-  shouldEmitExternalWalletAllowanceDelta,
-  shouldEmitExternalWalletBalanceDelta,
 } from './rpc-public';
 import { createRpcReadMethods } from './rpc-reads';
 import { createRpcTransactionSequencer } from './rpc-transaction-sequencer';
@@ -126,8 +118,8 @@ import {
   buildTrackedExternalOwners,
   createTxFinalizationEvidenceReader,
   createWatchedErc20TokenReader,
-  normalizeEvmAddress,
 } from './rpc-watcher-inputs';
+import { decodeAuthenticatedWatcherEvents } from './rpc-watcher-events';
 
 const requireWatcherBlockHash = (
   events: readonly JEventIngress[],
@@ -1412,11 +1404,6 @@ export async function createRpcAdapter(
         fromBlock: startBlock,
       });
 
-      const entityProviderIface = EntityProvider__factory.createInterface();
-      const erc20WatchIface = new ethers.Interface([
-        'event Transfer(address indexed from, address indexed to, uint256 value)',
-        'event Approval(address indexed owner, address indexed spender, uint256 value)',
-      ]);
       const emitWatcherDebug = (payload: Record<string, unknown>) => {
         const p2p = watcherEnv?.runtimeState?.p2p;
         if (isDebugEventEmitter(p2p)) {
@@ -1777,160 +1764,24 @@ export async function createRpcAdapter(
           const authenticatedLogs = authenticatedIngress.logs;
           const rangeTipHash = authenticatedIngress.tipBlockHash;
           const tokenByAddress = new Map(watchedTokens.map(token => [token.address, token]));
-          const logs = authenticatedLogs.map(log => ({
-            kind:
-              log.address.toLowerCase() === liveDepositoryAddress
-                ? ('depository' as const)
-                : log.address.toLowerCase() === liveEntityProviderAddress
-                  ? ('entityProvider' as const)
-                  : ('erc20' as const),
-            log,
-          }));
+          const decoded = await decodeAuthenticatedWatcherEvents({
+            env: activeEnv,
+            watcherReplica,
+            logs: authenticatedLogs,
+            depositoryAddress: liveDepositoryAddress,
+            entityProviderAddress: liveEntityProviderAddress,
+            tokenByAddress,
+            trackedOwners: buildTrackedExternalOwners(activeEnv),
+            observedThroughHeight: toBlock,
+            observedTipBlockHash: rangeTipHash,
+            observedHeadHeight: currentBlock,
+            confirmationDepth,
+            findDisputeFinalizationEvidence,
+          });
+          const rawEvents = decoded.events;
+          const authorityTxsByBlock = decoded.authorityTxsByBlock;
 
-          if (logs.length > 0) {
-            const rawEvents: JEventIngress[] = [];
-            const authorityTxsByBlock = new Map<number, RuntimeTx[]>();
-            const trackedExternalOwners = buildTrackedExternalOwners(activeEnv);
-            for (const { kind, log } of logs) {
-              try {
-                const parsed =
-                  kind === 'depository'
-                    ? parseKnownDepositoryLog(log)
-                    : kind === 'entityProvider'
-                      ? entityProviderIface.parseLog({ topics: log.topics as string[], data: log.data })
-                      : erc20WatchIface.parseLog({ topics: log.topics as string[], data: log.data });
-                if (!parsed) {
-                  throw new Error(
-                    `unrecognized ${kind} log at block=${String(log.blockNumber)} index=${String(log.index)}`,
-                  );
-                }
-                if (
-                  kind === 'entityProvider' &&
-                  (parsed.name === 'EntityRegistered' || parsed.name === 'FoundationBootstrapped')
-                ) {
-                  // Receipt/header authentication already happened against the
-                  // fresh RPC range. From this boundary onward every consumer,
-                  // including authority evidence, uses the same replay identity.
-                  const evidence = buildCertifiedRegistrationEvidence(activeEnv, watcherReplica, parsed.name, log, {
-                    observedThroughHeight: toBlock,
-                    observedTipBlockHash: rangeTipHash,
-                    observedHeadHeight: currentBlock,
-                    confirmationDepth,
-                  });
-                  const tx = markLocalJAuthorityRuntimeTx({
-                    type: 'recordAuthenticatedJAuthority',
-                    data: evidence,
-                  });
-                  authorityTxsByBlock.set(log.blockNumber, [...(authorityTxsByBlock.get(log.blockNumber) ?? []), tx]);
-                }
-                if (kind === 'erc20') {
-                  const tokenAddress = normalizeEvmAddress(log.address);
-                  const token = tokenByAddress.get(tokenAddress);
-                  if (!token) continue;
-                  if (parsed.name === 'Transfer') {
-                    const from = normalizeEvmAddress(parsed.args[0]);
-                    const to = normalizeEvmAddress(parsed.args[1]);
-                    if (from && to && from === to) continue;
-                    const amount = BigInt(parsed.args[2] ?? 0n);
-                    const deltas = [
-                      ...(from && from !== ethers.ZeroAddress
-                        ? [{ owner: from, balanceDelta: `-${amount.toString()}` }]
-                        : []),
-                      ...(to && to !== ethers.ZeroAddress ? [{ owner: to, balanceDelta: amount.toString() }] : []),
-                    ];
-                    for (const delta of deltas) {
-                      for (const tracked of trackedExternalOwners.get(delta.owner) ?? []) {
-                        if (
-                          !shouldEmitExternalWalletBalanceDelta(tracked, tokenAddress, Number(log.blockNumber || 0))
-                        ) {
-                          continue;
-                        }
-                        rawEvents.push({
-                          name: 'ExternalWalletDelta',
-                          args: {
-                            entityId: tracked.entityId,
-                            owner: delta.owner,
-                            tokenAddress,
-                            tokenId: token.tokenId,
-                            balanceDelta: delta.balanceDelta,
-                          },
-                          blockNumber: log.blockNumber,
-                          blockHash: log.blockHash,
-                          transactionHash: log.transactionHash,
-                          logIndex: log.index,
-                        });
-                      }
-                    }
-                  } else if (parsed.name === 'Approval') {
-                    const owner = normalizeEvmAddress(parsed.args[0]);
-                    const spender = normalizeEvmAddress(parsed.args[1]);
-                    const allowance = BigInt(parsed.args[2] ?? 0n).toString();
-                    if (!owner || !spender) continue;
-                    for (const tracked of trackedExternalOwners.get(owner) ?? []) {
-                      if (
-                        !shouldEmitExternalWalletAllowanceDelta(
-                          tracked,
-                          tokenAddress,
-                          spender,
-                          Number(log.blockNumber || 0),
-                        )
-                      ) {
-                        continue;
-                      }
-                      rawEvents.push({
-                        name: 'ExternalWalletDelta',
-                        args: {
-                          entityId: tracked.entityId,
-                          owner,
-                          tokenAddress,
-                          tokenId: token.tokenId,
-                          spender,
-                          allowance,
-                        },
-                        blockNumber: log.blockNumber,
-                        blockHash: log.blockHash,
-                        transactionHash: log.transactionHash,
-                        logIndex: log.index,
-                      });
-                    }
-                  }
-                  continue;
-                }
-                if (!CANONICAL_J_EVENTS.some(name => name === parsed.name)) continue;
-                // Extract named args from ethers v6 Result (array-like, named keys
-                // not enumerable via Object.keys). Use positional fallback for unnamed params.
-                const args: Record<string, unknown> = kind === 'depository' ? extractCanonicalDepositoryEventArgs(parsed) : {};
-                if (kind !== 'depository') {
-                  for (let idx = 0; idx < parsed.fragment.inputs.length; idx++) {
-                    const input = parsed.fragment.inputs[idx];
-                    if (!input) continue;
-                    const key = input.name || String(idx);
-                    args[key] = parsed.args[idx]; // Use positional index (always works)
-                    if (input.name) args[input.name] = parsed.args[idx];
-                  }
-                }
-                const disputeFinalizationEvidence =
-                  parsed.name === 'DisputeFinalized'
-                    ? await findDisputeFinalizationEvidence(log.transactionHash, args)
-                    : undefined;
-                rawEvents.push({
-                  name: parsed.name,
-                  args,
-                  blockNumber: log.blockNumber,
-                  blockHash: log.blockHash,
-                  transactionHash: log.transactionHash,
-                  logIndex: log.index,
-                  ...(disputeFinalizationEvidence ? { disputeFinalizationEvidence } : {}),
-                });
-              } catch (error) {
-                const message = error instanceof Error ? error.message : String(error);
-                throw new Error(
-                  `J_EVENT_LOG_DECODE_FAILED:block=${String(log.blockNumber)} ` +
-                    `tx=${String(log.transactionHash || 'unknown')} index=${String(log.index)}: ${message}`,
-                );
-              }
-            }
-
+          if (authenticatedLogs.length > 0) {
             if (watcherPollCancelled()) {
               emitWatcherDebug({
                 event: 'j_watch_shutdown_poll_aborted',
