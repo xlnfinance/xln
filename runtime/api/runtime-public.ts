@@ -43,8 +43,8 @@ export type {
   ReplicaKey,
   FullReplicaAddress,
   ReplicaUri,
-  JurisdictionInfo,
 } from '../protocol/identity';
+export type { JurisdictionInfo } from '../protocol/jurisdiction-identity';
 export {
   scenarios,
   scenarioKeys,

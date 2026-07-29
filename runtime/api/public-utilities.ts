@@ -60,28 +60,19 @@ export { isDelta, validateAccountDeltas, validateDelta } from '../validation-uti
 export { decode, encode } from '../storage/snapshot-coder';
 export {
   CHAIN_IDS,
-  createLazyJId,
-  createLocalUri,
   createReplicaKey,
   DEFAULT_RUNTIME_HOST,
-  EntityMap,
   extractEntityId,
   extractSignerId,
-  formatReplicaDisplay,
   formatReplicaKey,
-  formatReplicaUri,
-  getEntityDisplayNumber,
   isLazyEntity,
   isNumberedEntity,
   isValidEntityId,
   isValidEpAddress,
   isValidJId,
   isValidSignerId,
-  jIdFromChainId,
   MAX_NUMBERED_ENTITY,
   parseReplicaKey,
-  parseReplicaUri,
-  ReplicaMap,
   safeExtractEntityId,
   safeParseReplicaKey,
   toEpAddress,
@@ -91,6 +82,20 @@ export {
   XLN_COORDINATOR,
   XLN_URI_SCHEME,
 } from '../protocol/identity';
+export {
+  formatReplicaDisplay,
+  getEntityDisplayNumber,
+} from '../protocol/identity-display';
+export {
+  createLocalUri,
+  formatReplicaUri,
+  parseReplicaUri,
+} from '../protocol/identity-uri';
+export { EntityMap, ReplicaMap } from '../protocol/identity-collections';
+export {
+  createLazyJId,
+  jIdFromChainId,
+} from '../protocol/jurisdiction-identity';
 export {
   clearDatabase,
   formatEntityDisplay,

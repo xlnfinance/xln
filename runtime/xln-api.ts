@@ -19,8 +19,8 @@ export type {
   FullReplicaAddress,
   ReplicaUri,
   EntityType,
-  JurisdictionInfo,
 } from './protocol/identity';
+export type { JurisdictionInfo } from './protocol/jurisdiction-identity';
 
 // Re-export core types from types.ts
 export type {
@@ -144,9 +144,6 @@ export {
   extractSignerId,
   formatReplicaKey,
   createReplicaKey,
-  formatEntityDisplay,
-  formatSignerDisplay,
-  formatReplicaDisplay,
   isValidEntityId,
   isValidSignerId,
   isValidJId,
@@ -157,15 +154,19 @@ export {
   toEpAddress,
   isNumberedEntity,
   isLazyEntity,
-  getEntityDisplayNumber,
-  formatReplicaUri,
-  parseReplicaUri,
   safeParseReplicaKey,
   safeExtractEntityId,
   XLN_URI_SCHEME,
   DEFAULT_RUNTIME_HOST,
   MAX_NUMBERED_ENTITY,
 } from './protocol/identity';
+export {
+  formatEntityDisplay,
+  formatSignerDisplay,
+  formatReplicaDisplay,
+  getEntityDisplayNumber,
+} from './protocol/identity-display';
+export { formatReplicaUri, parseReplicaUri } from './protocol/identity-uri';
 
 import type {
   RuntimeAdapterAccountPage,

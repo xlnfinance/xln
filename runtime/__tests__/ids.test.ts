@@ -1,6 +1,6 @@
 /**
- * Unit tests for identity system (ids.ts)
- * Run with: bun test runtime/ids.test.ts
+ * Unit tests for the protocol-owned identity modules.
+ * Run with: bun test runtime/__tests__/ids.test.ts
  */
 
 import { describe, expect, test } from 'bun:test';
@@ -24,26 +24,26 @@ import {
   extractEntityId,
   extractSignerId,
 
-  // Display formatting
-  formatEntityDisplay,
-  formatSignerDisplay,
-  formatReplicaDisplay,
-
   // Entity type detection
   isNumberedEntity,
   isLazyEntity,
   detectEntityType,
-  getEntityDisplayNumber,
-
-  // URI operations
-  parseReplicaUri,
-  formatReplicaUri,
 
   // Constants
   XLN_URI_SCHEME,
   DEFAULT_RUNTIME_HOST,
   MAX_NUMBERED_ENTITY,
 } from '../protocol/identity.js';
+import {
+  formatEntityDisplay,
+  formatSignerDisplay,
+  formatReplicaDisplay,
+  getEntityDisplayNumber,
+} from '../protocol/identity-display.js';
+import {
+  parseReplicaUri,
+  formatReplicaUri,
+} from '../protocol/identity-uri.js';
 
 describe('Identity System - Type Constructors', () => {
   test('toEntityId creates branded EntityId', () => {
