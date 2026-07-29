@@ -986,6 +986,7 @@ const prepareEntityFrameWorkingSet = async (
   entityState: EntityState,
   entityTxs: EntityTx[],
   frameTimestamp: number | undefined,
+  isolateState: boolean,
 ): Promise<EntityFrameWorkingSet> => {
   assertEntityFrameTxByteBudget(entityTxs);
   assertEntityFrameJRangeBudget(entityTxs);
@@ -1009,7 +1010,9 @@ const prepareEntityFrameWorkingSet = async (
     env,
     normalizeEntityCommandNonceBoard(env, entityState),
   );
-  const currentEntityState = createEntityFrameCandidateState(normalized);
+  const currentEntityState = isolateState
+    ? createEntityFrameCandidateState(normalized)
+    : normalized;
   clearEntityFrameEvents(currentEntityState);
   currentEntityState.crontabState ??= initCrontab();
   markFrameProfile('clone');
@@ -1237,17 +1240,19 @@ const logEntityFrameProfile = (
   });
 };
 
-export const applyEntityFrame = async (
+const applyEntityFrameWithIsolation = async (
   env: RuntimeState,
   entityState: EntityState,
   entityTxs: EntityTx[],
-  frameTimestamp?: number,
+  frameTimestamp: number | undefined,
+  isolateState: boolean,
 ): Promise<EntityFrameResult> => {
   const working = await prepareEntityFrameWorkingSet(
     env,
     entityState,
     entityTxs,
     frameTimestamp,
+    isolateState,
   );
   working.currentEntityState = await applyEntityTxsInOrder(working.context);
   working.markFrameProfile('entityTxLoop');
@@ -1275,6 +1280,49 @@ export const applyEntityFrame = async (
     working.context,
   );
 };
+
+/**
+ * Execute against an isolated touched-state candidate.
+ *
+ * Multi-signer validators must retain the certified Entity State while a frame
+ * waits for quorum Hanko. Standalone reducer tests also use this pure boundary.
+ */
+export const applyEntityFrame = (
+  env: RuntimeState,
+  entityState: EntityState,
+  entityTxs: EntityTx[],
+  frameTimestamp?: number,
+): Promise<EntityFrameResult> =>
+  applyEntityFrameWithIsolation(
+    env,
+    entityState,
+    entityTxs,
+    frameTimestamp,
+    true,
+  );
+
+/**
+ * Execute a single-signer frame against Runtime-owned Entity State.
+ *
+ * This function is valid only while the enclosing Runtime writer/read barrier
+ * is held. The sole signer needs no speculative copy: success is persisted by
+ * the same Runtime WAL commit, while any exception after mutation halts the
+ * Runtime and reloads durable truth. Never use this for multi-signer proposal
+ * validation or scratch admission.
+ */
+export const applyRuntimeOwnedEntityFrame = (
+  env: RuntimeState,
+  entityState: EntityState,
+  entityTxs: EntityTx[],
+  frameTimestamp?: number,
+): Promise<EntityFrameResult> =>
+  applyEntityFrameWithIsolation(
+    env,
+    entityState,
+    entityTxs,
+    frameTimestamp,
+    false,
+  );
 
 // === HELPER FUNCTIONS ===
 

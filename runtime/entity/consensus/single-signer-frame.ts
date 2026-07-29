@@ -10,7 +10,10 @@ import { cacheCommittedConsumptionNodeChanges } from '../consumption-store';
 import { commitEntityFrameCandidateState } from '../state-clone';
 import { emitCommittedPendingFrameWarnings } from '../scheduler';
 import { createEntityFrameHashFromStateRoot } from './frame';
-import { applyEntityFrame } from './frame-application';
+import {
+  applyEntityFrame,
+  applyRuntimeOwnedEntityFrame,
+} from './frame-application';
 import {
   attachHankoWitnessToOutputs,
   buildEntityHashesToSign,
@@ -139,7 +142,10 @@ const buildSingleSignerFrame = async (
       ? { jPrefixCertificate: proposalJPrefixCertificate }
       : {}),
   });
-  const applied = await applyEntityFrame(
+  const applyFrame = context.promoteCandidateState
+    ? applyRuntimeOwnedEntityFrame
+    : applyEntityFrame;
+  const applied = await applyFrame(
     env,
     workingReplica.state,
     proposalTxs,

@@ -17,6 +17,10 @@ import {
   EntityAccountCandidateMap,
 } from '../entity/account-candidate-map';
 import { computeCanonicalEntityConsensusStateHash } from '../entity/consensus/state-root';
+import {
+  applyEntityFrame,
+  applyRuntimeOwnedEntityFrame,
+} from '../entity/consensus/frame-application';
 import { EntityCandidateMap } from '../entity/candidate-map';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
 import {
@@ -27,6 +31,7 @@ import {
 import { buildCanonicalEntityReplicaSnapshot } from '../storage/wal/snapshot';
 import { validateConsensusConfig } from '../entity/consensus/config-validation';
 import { validateEntityReplica } from '../entity/replica-validation';
+import { createEmptyEnv } from '../runtime';
 import type { AccountState, EntityState } from '../types';
 
 const makeCrossJurisdictionRoute = () => ({
@@ -308,6 +313,34 @@ describe('state cloning', () => {
     expect(candidate.orderbookExt?.books).toBe(source.orderbookExt.books);
     expect(source.orderbookExt.books.get(firstPair)?.orders.size).toBe(1);
     expect(source.orderbookExt.books.get(secondPair)?.orders.size).toBe(0);
+  });
+
+  test('single-signer Runtime ownership skips the Entity candidate shell', async () => {
+    const env = createEmptyEnv('single-signer owned Entity frame');
+    env.timestamp = 2;
+    const isolatedSource = makeProjectionReplica().state as EntityState;
+    const ownedSource = cloneTrustedEntityState(isolatedSource);
+
+    const isolated = await applyEntityFrame(
+      env,
+      isolatedSource,
+      [],
+      env.timestamp,
+    );
+    const owned = await applyRuntimeOwnedEntityFrame(
+      env,
+      ownedSource,
+      [],
+      env.timestamp,
+    );
+
+    expect(isolatedSource.timestamp).toBe(1);
+    expect(isolated.newState.accounts).toBeInstanceOf(EntityAccountCandidateMap);
+    expect(ownedSource.timestamp).toBe(env.timestamp);
+    expect(owned.newState.accounts).toBe(ownedSource.accounts);
+    expect(owned.newState.accounts).not.toBeInstanceOf(EntityAccountCandidateMap);
+    expect(computeCanonicalEntityConsensusStateHash(owned.newState))
+      .toBe(computeCanonicalEntityConsensusStateHash(isolated.newState));
   });
 
   test('clone diagnostics use structured logging only', () => {
