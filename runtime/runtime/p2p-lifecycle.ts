@@ -48,7 +48,11 @@ type P2Pish = {
 
 const p2pLifecycleLog = createStructuredLogger('p2p.lifecycle');
 const ENV_P2P_SINGLETON_KEY = Symbol.for('xln.runtime.env.p2p.singleton');
-const envRecord = (env: RuntimeState): Record<PropertyKey, unknown> => env as unknown as Record<PropertyKey, unknown>;
+type RuntimeStateWithP2PSingleton = RuntimeState & {
+  [ENV_P2P_SINGLETON_KEY]?: P2Pish;
+};
+
+const p2pState = (env: RuntimeState): RuntimeStateWithP2PSingleton => env;
 
 const reconnectP2P = (p2p: P2Pish): void => {
   const connecting = p2p.isConnecting?.() === true;
@@ -61,7 +65,7 @@ const reuseProcessP2P = (
   config: P2PConfig,
   runtimeId: string,
 ): RuntimeP2P | null => {
-  const singleton = envRecord(env)[ENV_P2P_SINGLETON_KEY] as P2Pish | undefined;
+  const singleton = p2pState(env)[ENV_P2P_SINGLETON_KEY];
   if (!singleton || singleton === state.p2p) return null;
   if (singleton.matchesIdentity?.(runtimeId, config.signerId) !== true) {
     throw new Error(
@@ -187,7 +191,7 @@ export const startRuntimeP2P = (
   if (reusable) return reusable;
 
   state.p2p = new RuntimeP2P(buildRuntimeP2POptions(env, state, config, resolvedRuntimeId, deps));
-  envRecord(env)[ENV_P2P_SINGLETON_KEY] = state.p2p;
+  p2pState(env)[ENV_P2P_SINGLETON_KEY] = state.p2p;
   enqueueDueProfileCertifications(env, deps);
   state.p2p.connect();
   return state.p2p;
@@ -239,8 +243,8 @@ export const stopRuntimeP2PAndWait = async (
     throw new Error('P2P_CLOSE_AND_WAIT_UNAVAILABLE');
   }
   await p2p.closeAndWait(timeoutMs);
-  const singleton = envRecord(env)[ENV_P2P_SINGLETON_KEY];
-  if (singleton === p2p) delete envRecord(env)[ENV_P2P_SINGLETON_KEY];
+  const singleton = p2pState(env)[ENV_P2P_SINGLETON_KEY];
+  if (singleton === p2p) delete p2pState(env)[ENV_P2P_SINGLETON_KEY];
   if (state.p2p === p2p) state.p2p = null;
   state.lastP2PConfig = null;
 };
@@ -255,9 +259,9 @@ export const detachRuntimeP2P = (env: RuntimeState, deps: RuntimeP2PLifecycleDep
       error: error instanceof Error ? error.message : String(error),
     });
   }
-  const singleton = envRecord(env)[ENV_P2P_SINGLETON_KEY];
+  const singleton = p2pState(env)[ENV_P2P_SINGLETON_KEY];
   if (singleton === state.p2p) {
-    delete envRecord(env)[ENV_P2P_SINGLETON_KEY];
+    delete p2pState(env)[ENV_P2P_SINGLETON_KEY];
   }
   state.p2p = null;
   deps.ensureRuntimeState(env);

@@ -14,22 +14,9 @@ export const probeLocalAnvilContractStack = async (adapter: JAdapter): Promise<{
     return { ok: false, reason: 'DEPOSITORY_CODE_MISSING' };
   }
 
-  const probe = new ethers.Contract(
-    depositoryAddress,
-    [
-      'function getTokensLength() view returns(uint256)',
-      'function mintToReserve(bytes32,uint256,uint256)',
-    ],
-    adapter.signer as ethers.ContractRunner,
-  );
-  const getTokensLength = probe.getFunction('getTokensLength') as unknown as () => Promise<bigint>;
-  const mintToReserve = probe.getFunction('mintToReserve') as unknown as {
-    estimateGas(entityId: string, tokenId: bigint, amount: bigint): Promise<bigint>;
-  };
-
   let tokensLength = 0n;
   try {
-    tokensLength = await getTokensLength();
+    tokensLength = await adapter.depository.getTokensLength();
   } catch (error) {
     return {
       ok: false,
@@ -42,7 +29,7 @@ export const probeLocalAnvilContractStack = async (adapter: JAdapter): Promise<{
   }
 
   try {
-    await mintToReserve.estimateGas(STACK_COMPATIBILITY_PROBE_ENTITY, 1n, 1n);
+    await adapter.depository.mintToReserve.estimateGas(STACK_COMPATIBILITY_PROBE_ENTITY, 1n, 1n);
   } catch (error) {
     return {
       ok: false,
