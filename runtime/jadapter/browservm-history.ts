@@ -17,7 +17,7 @@ import {
   markLocalJAuthorityRuntimeTx,
 } from '../jurisdiction/registration-evidence';
 import { extractCanonicalDepositoryEventArgs } from './depository-event-codec';
-import { CANONICAL_J_EVENTS } from './helpers';
+import { CANONICAL_J_EVENTS } from '../jurisdiction/event-catalog';
 
 type BrowserVmHistoryOptions = {
   chainId: number;

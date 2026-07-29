@@ -24,7 +24,7 @@ import {
 import {
   buildNumberedRegistrationRequest,
   runNumberedRegistrationIntent,
-} from '../entity/numbered-registration-intent.js';
+} from '../runtime/registration/numbered-registration-intent.js';
 import { resolveRuntimeJurisdictionConfig } from '../jurisdiction/jurisdiction-runtime.js';
 import { safeStringify } from '../protocol/serialization.js';
 import { commitRuntimeInput, processJEvents, waitScenario } from './helpers';

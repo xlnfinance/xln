@@ -4,13 +4,13 @@ import {
   type JBatch,
   type JBatchState,
 } from '../../jurisdiction/batch';
-import type { ProofBodyStruct } from './proof-body';
+import type { ProofBodyStruct } from '../../protocol/dispute/proof-body';
 import {
   accountInputAck,
   accountInputDisputeSeal,
   accountInputProposal,
-} from '../../account/consensus/flush';
-import { hashProofBodyStruct } from './proof-builder';
+} from '../consensus/flush';
+import { hashProofBodyStruct } from '../../protocol/dispute/proof-builder';
 
 const PROOF_HASH_PATTERN = /^0x[0-9a-f]{64}$/;
 

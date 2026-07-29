@@ -17,6 +17,7 @@ import {
   type ValidatorEncryptionAttestation,
   type ValidatorEncryptionManifest,
 } from '../protocol/htlc/validator-encryption';
+import { normalizeEntityName } from '../entity/profile-name';
 
 export type BoardValidator = {
   signer: string; // canonical recovered signer address (0x...)
@@ -622,11 +623,6 @@ export const parseProfile = (raw: unknown): Profile => {
     metadata,
     accounts: parseProfileAccounts(raw['accounts'], entityId),
   };
-};
-
-export const normalizeEntityName = (raw: unknown, entityId: string): string => {
-  if (typeof raw === 'string' && raw.trim().length > 0) return raw.trim();
-  return `Entity ${entityId.slice(-4)}`;
 };
 
 export const canonicalizeProfile = (

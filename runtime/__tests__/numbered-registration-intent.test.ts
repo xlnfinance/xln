@@ -8,7 +8,7 @@ import {
   getNumberedRegistrationRecord,
   prepareNumberedRegistrationIntent,
   submitNumberedRegistrationIntent,
-} from '../entity/numbered-registration-intent';
+} from '../runtime/registration/numbered-registration-intent';
 import { createJAdapter } from '../jadapter';
 import { createEmptyEnv } from '../runtime';
 import { commitRuntimeInput, processJEvents, setScenarioStorageEnabled } from '../scenarios/helpers';

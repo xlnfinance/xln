@@ -36,20 +36,11 @@ import {
   type LocalJEventIngressSource,
 } from './local-ingress-source';
 import { rawEventToJEvents } from './j-event-payloads';
+import {
+  CANONICAL_J_EVENTS,
+} from '../jurisdiction/event-catalog';
 export { rawEventToJEvents } from './j-event-payloads';
 
-// ═══════════════════════════════════════════════════════════════════════════
-// CANONICAL J-EVENTS (Single Source of Truth — must match Depository.sol)
-// ═══════════════════════════════════════════════════════════════════════════
-export const CANONICAL_J_EVENTS = [
-  'FoundationBootstrapped', 'EntityRegistered', 'BoardActivated',
-  'ReserveUpdated', 'SecretRevealed', 'AccountSettled',
-  'ExternalWalletSnapshot', 'ExternalWalletDelta',
-  'DisputeStarted', 'DisputeFinalized', 'DebtCreated', 'DebtEnforced', 'DebtForgiven', 'HankoBatchProcessed',
-  'BatchOperationSkipped',
-  'EntityProviderActionExecuted', 'EntityProviderActionCancelled',
-] as const;
-export type CanonicalJEvent = (typeof CANONICAL_J_EVENTS)[number];
 const CANONICAL_J_EVENT_SET = new Set<string>(CANONICAL_J_EVENTS);
 const jadapterHelperLog = createStructuredLogger('jadapter.helpers');
 

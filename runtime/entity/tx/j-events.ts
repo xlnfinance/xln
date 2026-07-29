@@ -11,7 +11,7 @@ import type {
 } from '../../types';
 import type { ProofBodyStruct } from '../../protocol/dispute/proof-body';
 import { cloneEntityState, addMessage } from '../../state-helpers';
-import { CANONICAL_J_EVENTS } from '../../jadapter/helpers';
+import { CANONICAL_J_EVENTS } from '../../jurisdiction/event-catalog';
 import { hashHtlcSecret } from '../../protocol/htlc/utils';
 import { cancelHook, scheduleHook } from '../scheduler';
 import { scrubDisputeFinalizationsForCounterparty } from './dispute-finalize-guards';

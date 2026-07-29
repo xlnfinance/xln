@@ -39,12 +39,12 @@ import { TOKEN_REGISTRATION_AMOUNT, defaultTokensForJurisdiction, getDefaultToke
 import { extractCanonicalDepositoryEventArgs, parseKnownDepositoryLog } from './depository-event-codec';
 import { classifyJAdapterFailure, makeJAdapterFailureResult } from './failure';
 import {
-  CANONICAL_J_EVENTS,
   buildExternalTokenToReserveBatch,
   computeAccountKey,
   packTokenReference,
   parseReceiptLogsToJEvents,
 } from './helpers';
+import { CANONICAL_J_EVENTS } from '../jurisdiction/event-catalog';
 import { DEV_CHAIN_IDS } from './index';
 import { normalizeReceiptHash, parseReceiptQuantity } from '../jurisdiction/receipt-codec';
 import { readAuthenticatedReceiptRange, type RpcBatchCall } from './receipt-root';

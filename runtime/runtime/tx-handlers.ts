@@ -60,7 +60,7 @@ import { applyWatcherJurisdictionCursor } from '../jadapter/helpers';
 import {
   applyNumberedRegistrationIntent,
   applyNumberedRegistrationResolution,
-} from '../entity/numbered-registration-intent';
+} from './registration/numbered-registration-intent';
 
 const runtimeTxLog = createStructuredLogger('runtime.tx');
 

@@ -5,7 +5,7 @@ import { initJBatch } from '../jurisdiction/batch';
 import {
   collectReachableDisputeEvidenceHashes,
   pruneUnreachableDisputeEvidence,
-} from '../protocol/dispute/evidence-retention';
+} from '../account/dispute/evidence-retention';
 import { hashProofBodyStruct } from '../protocol/dispute/proof-builder';
 import { hydrateAccountDocFromStorage, projectAccountDoc } from '../storage/projections';
 import type { AccountState } from '../types';

@@ -1,19 +1,19 @@
 import { ethers } from 'ethers';
 
-import type { JAdapter } from '../jadapter/types';
-import { getCertifiedBoardStackKey } from '../jurisdiction/board-registry';
-import { encodeCanonicalEntityConsensusValue } from './consensus/state-root';
+import type { JAdapter } from '../../jadapter/types';
+import { getCertifiedBoardStackKey } from '../../jurisdiction/board-registry';
+import { encodeCanonicalEntityConsensusValue } from '../../entity/consensus/state-root';
 import type {
   RuntimeState,
   NumberedRegistrationRequest,
   PendingNumberedRegistration,
-} from '../types';
+} from '../../types';
 import {
   createLazyEntity,
   encodeBoard,
   hashBoard,
   type BoardMemberInput,
-} from './factory';
+} from '../../entity/factory';
 
 export type NumberedRegistrationDefinition = Readonly<{
   name: string;

@@ -1,10 +1,10 @@
 import { ethers, type TransactionReceipt } from 'ethers';
 
-import type { JAdapter } from '../jadapter/types';
+import type { JAdapter } from '../../jadapter/types';
 import {
   computeRegistrationEvidenceHash,
   registrationEvidenceKey,
-} from '../jurisdiction/registration-evidence';
+} from '../../jurisdiction/registration-evidence';
 import type {
   CompletedNumberedRegistration,
   RuntimeState,
@@ -13,7 +13,7 @@ import type {
   PendingNumberedRegistration,
   ResolveNumberedRegistrationData,
   RuntimeTx,
-} from '../types';
+} from '../../types';
 import {
   encodeBoard,
   getNumberedRegistrationWallet,
@@ -21,7 +21,7 @@ import {
   hashBoard,
   parseNumberedEntityRegistrationReceipt,
   type NumberedEntityRegistration,
-} from './factory';
+} from '../../entity/factory';
 import {
   assertNumberedRegistrationRequest,
   computeNumberedRegistrationRequestHash,
