@@ -118,13 +118,6 @@ export type JurisdictionEvent =
       };
     })
   | (JEventMetadata & {
-      type: 'GovernanceEnabled';
-      data: {
-        entityId: string;
-        proposalThreshold: number;
-      };
-    })
-  | (JEventMetadata & {
       type: 'BatchOperationSkipped';
       data: {
         entityId: string;

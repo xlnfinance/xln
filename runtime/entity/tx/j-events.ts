@@ -12,7 +12,6 @@ import type {
 import type { ProofBodyStruct } from '../../protocol/dispute/proof-body';
 import { prepareEntityTxState } from '../state-clone';
 import { addMessage } from '../frame-events';
-import { CANONICAL_J_EVENTS } from '../../jurisdiction/event-catalog';
 import { hashHtlcSecret } from '../../protocol/htlc/utils';
 import { cancelHook, scheduleHook } from '../scheduler';
 import { scrubDisputeFinalizationsForCounterparty } from './dispute-finalize-guards';
@@ -839,9 +838,6 @@ async function applyFinalizedJEvent(
     case 'EntityProviderActionCancelled':
       applyEntityProviderActionCancelled(newState, event.data, blockNumber);
       break;
-    default:
-      addMessage(newState, `⚠️ Unknown j-event: ${event.type} | Block ${blockNumber}`);
-      jEventLog.warn('unknown_event', { type: event.type, canonical: CANONICAL_J_EVENTS });
   }
 
   return done();
