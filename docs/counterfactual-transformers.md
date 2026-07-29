@@ -288,9 +288,9 @@ Account → **Clauses** tab → New clause:
    - deploy to BrowserVM sandbox → call `paramsSchema()` etc.
 3. Auto-rendered below the textarea:
    - **Params form** (from `paramsSchema`) → fills `encodedBatch` live (hex + decoded view)
-   - **Dispute-args panel** (from `leftArgsSchema`/`rightArgsSchema`): "При диспуте вы
-     предоставляете: …; контрагент предоставляет: fillRatio — сколько исполнить;
-     secret — прообраз hash" (descriptions come from the `name:description` schema format)
+   - **Dispute-args panel** (from `leftArgsSchema`/`rightArgsSchema`): "In a dispute,
+     you provide: …; the counterparty provides: fillRatio — how much to execute;
+     secret — the hash preimage" (descriptions come from the `name:description` schema format)
    - **Simulation**: sliders per argument + timestamp scrubber → live delta before/after
      (real bytecode in BrowserVM, byte-identical to dispute execution)
    - **Envelope sweep** → suggested `allowances` (per-token min/max over argument space;
@@ -305,9 +305,9 @@ Same panels, read-only, plus a verification banner:
 
 - recompiled locally ✅ codeHash match ✅ CREATE2 address match ✅
 - `describe(params)` sentence
-- worst case in red: “максимум вы теряете: 2500 USDC” (= allowances against you)
-- AI audit button: plain-language explanation + adversarial sweep (“при каких args я
-  теряю максимум и когда”)
+- worst case in red: “maximum possible loss: 2500 USDC” (= allowances against you)
+- AI audit button: plain-language explanation + adversarial sweep (“which arguments
+  cause my maximum loss, and when?”)
 - Approve / Reject / Counter-propose (counter = reject + new propose with edited params)
 
 ### 4.3 Life & exit

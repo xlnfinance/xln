@@ -19,14 +19,14 @@
   <div class="vr-hud">
     <!-- Instructions Panel (Top-Left) -->
     <div class="vr-panel instructions">
-      <h2>👋 Привет!</h2>
+      <h2>👋 Welcome!</h2>
       <div class="instruction">
         <span class="icon">👆</span>
-        <span class="text">Нажми на банк → увидишь детали</span>
+        <span class="text">Select a bank → view details</span>
       </div>
       <div class="instruction">
         <span class="icon">🔄</span>
-        <span class="text">Pinch + drag → вращай сцену</span>
+        <span class="text">Pinch + drag → rotate the scene</span>
       </div>
       <div class="instruction">
         <span class="icon">🤏</span>
