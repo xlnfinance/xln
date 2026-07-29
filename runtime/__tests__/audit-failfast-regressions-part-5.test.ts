@@ -675,7 +675,7 @@ const makeDisputeFinalizedFixture = (seed: string, finalProofbody: ProofBodyStru
       data: {
         sender: entityId,
         counterentity: counterpartyId,
-        initialNonce: 7,
+        initialNonce: '7',
         initialProofbodyHash: finalProofbodyHash,
         finalProofbodyHash,
       },
@@ -1072,6 +1072,27 @@ describe('audit fail-fast regressions', () => {
     const stateBefore = safeStringify(fixture.state);
 
     await expect(applyDisputeFinalizedFixture(fixture)).rejects.toThrow('J_EVENT_DISPUTE_FINAL_PROOFBODY_MISSING');
+    expect(safeStringify(fixture.state)).toBe(stateBefore);
+  });
+
+  test('DisputeFinalized rejects an oversized nonce before mutating account state', async () => {
+    const finalProofbody: ProofBodyStruct = {
+      watchSeed: `0x${'f1'.repeat(32)}`,
+      offdeltas: [50n],
+      tokenIds: [1n],
+      transformers: [],
+    };
+    const fixture = makeDisputeFinalizedFixture(
+      'dispute-finalized-nonce-boundary',
+      finalProofbody,
+      true,
+    );
+    fixture.event.data.initialNonce = '9007199254740993';
+    const stateBefore = safeStringify(fixture.state);
+
+    await expect(applyDisputeFinalizedFixture(fixture)).rejects.toThrow(
+      'J_EVENT_DISPUTE_INITIAL_NONCE_INVALID:9007199254740993',
+    );
     expect(safeStringify(fixture.state)).toBe(stateBefore);
   });
 

@@ -72,6 +72,38 @@ import {
 
 const jEventLog = createStructuredLogger('j.event');
 const normalizeSignerId = (value: unknown): string => String(value || '').trim().toLowerCase();
+const MAX_SAFE_NONCE = BigInt(Number.MAX_SAFE_INTEGER);
+
+/**
+ * Solidity exposes dispute nonces as uint256 while AccountState deliberately
+ * uses JavaScript safe integers. Convert through BigInt so an adversarial
+ * value can never round to a different nonce before consensus compares it.
+ */
+const decodeAccountNonce = (value: unknown, code: string): number => {
+  let nonce: bigint;
+  try {
+    if (typeof value === 'bigint') {
+      nonce = value;
+    } else if (typeof value === 'number' && Number.isSafeInteger(value)) {
+      nonce = BigInt(value);
+    } else if (typeof value === 'string' && /^\d+$/.test(value)) {
+      nonce = BigInt(value);
+    } else {
+      throw new Error('invalid');
+    }
+  } catch {
+    throw new Error(`${code}:${String(value)}`);
+  }
+  if (nonce < 0n || nonce > MAX_SAFE_NONCE) {
+    throw new Error(`${code}:${String(value)}`);
+  }
+  return Number(nonce);
+};
+
+const incrementAccountNonce = (nonce: number, code: string): number => {
+  if (nonce >= Number.MAX_SAFE_INTEGER) throw new Error(`${code}:${nonce}`);
+  return nonce + 1;
+};
 
 const invalidateSettlementIntentAfterDisputeFinality = (
   state: EntityState,
@@ -454,16 +486,11 @@ const initializeStartedDispute = (
     counterpartyId,
     account,
   } = resolveDisputeAccountContext(newState, sender, counterentity);
-  syncJBatchEntityNonceFromEvent(newState, senderStr, entityIdNorm, data.batchNonce);
-
   if (!account) {
     jEventLog.warn('dispute_started.account_missing', { account: shortId(candidateCounterpartyId), entity: shortId(entityIdNorm) });
     return null;
   }
 
-  dirtyAccounts.add(counterpartyId.toLowerCase());
-  account.status = 'disputed';
-  freezeAccountForDispute(account, true);
   const weAreStarter = senderStr === entityIdNorm;
   const disputeTimeout = Number(data.disputeTimeout);
   if (!Number.isSafeInteger(disputeTimeout) || disputeTimeout <= Number(blockNumber || 0)) {
@@ -471,14 +498,23 @@ const initializeStartedDispute = (
       `J_EVENT_DISPUTE_TIMEOUT_INVALID:block=${String(blockNumber)}:timeout=${String(data.disputeTimeout)}`,
     );
   }
-  const jNonce = Number(data.jNonce ?? nonce);
+  const initialNonce = decodeAccountNonce(nonce, 'J_EVENT_DISPUTE_NONCE_INVALID');
+  const jNonce = decodeAccountNonce(
+    data.jNonce ?? nonce,
+    'J_EVENT_DISPUTE_J_NONCE_INVALID',
+  );
+
+  syncJBatchEntityNonceFromEvent(newState, senderStr, entityIdNorm, data.batchNonce);
+  dirtyAccounts.add(counterpartyId.toLowerCase());
+  account.status = 'disputed';
+  freezeAccountForDispute(account, true);
 
   // Unified nonce: initialNonce = the nonce used in disputeStart (from event).
   // jNonce defaults to the dispute nonce when no richer event payload exists.
   account.activeDispute = {
     startedByLeft: isDisputeStartedByLeft(senderStr, account.leftEntity, account.rightEntity),
     initialProofbodyHash: String(proofbodyHash),
-    initialNonce: Number(nonce),
+    initialNonce,
     disputeTimeout,
     jNonce,
     starterInitialArguments: data.starterInitialArguments || '0x',
@@ -598,7 +634,11 @@ const resolveFinalizationEvidence = (
   counterentityStr: string,
   finalProofbodyHash: string,
   evidenceList: DisputeFinalizationEvidence[],
-): { evidence: DisputeFinalizationEvidence[]; finalizedJNonce: number } => {
+): {
+  evidence: DisputeFinalizationEvidence[];
+  finalizedJNonce: number;
+  initialNonce: number;
+} => {
   const evidence = evidenceList.filter((item) =>
     normalizeEntityId(item.sender) === senderStr &&
     normalizeEntityId(item.counterentity) === counterentityStr &&
@@ -614,24 +654,32 @@ const resolveFinalizationEvidence = (
     );
   }
   const primary = evidence[0];
-  const initialNonce = Number(data.initialNonce || 0);
-  const evidenceFinalNonce = Number(primary?.finalNonce ?? NaN);
+  const initialNonce = decodeAccountNonce(
+    data.initialNonce,
+    'J_EVENT_DISPUTE_INITIAL_NONCE_INVALID',
+  );
   const evidenceSig = String(primary?.sig ?? '').toLowerCase();
   const evidenceIsUnsignedUnilateral = evidenceSig === '' || evidenceSig === '0x';
   const finalProofMatchesInitial =
     finalProofbodyHash.toLowerCase() === String(data.initialProofbodyHash || '').toLowerCase();
-  const eventJNonce = primary
-    ? evidenceIsUnsignedUnilateral
-      ? initialNonce + 1
-      : Number.isFinite(evidenceFinalNonce)
-        ? evidenceFinalNonce
-        : initialNonce
-    : finalProofMatchesInitial
-      ? initialNonce + 1
-      : initialNonce;
+  let eventJNonce = initialNonce;
+  if (primary) {
+    eventJNonce = evidenceIsUnsignedUnilateral
+      ? incrementAccountNonce(initialNonce, 'J_EVENT_DISPUTE_FINAL_NONCE_OVERFLOW')
+      : decodeAccountNonce(
+          primary.finalNonce,
+          'J_EVENT_DISPUTE_FINAL_NONCE_INVALID',
+        );
+  } else if (finalProofMatchesInitial) {
+    eventJNonce = incrementAccountNonce(
+      initialNonce,
+      'J_EVENT_DISPUTE_FINAL_NONCE_OVERFLOW',
+    );
+  }
   return {
     evidence,
     finalizedJNonce: Math.max(Number(account.jNonce ?? 0), eventJNonce),
+    initialNonce,
   };
 };
 
@@ -739,7 +787,7 @@ function applyDisputeFinalizedJEvent(
     addMessage(
       newState,
       `✅ DISPUTE FINALIZED with ${counterpartyId.slice(-4)} ` +
-      `(nonce ${Number(data.initialNonce)})`,
+      `(nonce ${resolved.initialNonce})`,
     );
     if (newState.crontabState) {
       cancelHook(newState.crontabState, `dispute-deadline:${counterpartyId.toLowerCase()}`);

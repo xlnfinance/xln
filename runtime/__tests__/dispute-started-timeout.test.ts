@@ -92,4 +92,40 @@ describe('canonical DisputeStarted timeout', () => {
     expect(computeCanonicalEntityConsensusStateHash(lagging.newState))
       .toBe(computeCanonicalEntityConsensusStateHash(leading.newState));
   });
+
+  test('oversized Solidity nonce cannot round or mutate Account state', async () => {
+    const privateKey = deriveSignerKeySync('dispute-nonce-boundary', '1');
+    const validatorId = computeAddress(new SigningKey(hex(privateKey)).compressedPublicKey).toLowerCase();
+    registerSignerKey('dispute-nonce-boundary-runtime', validatorId, privateKey);
+    const state = makeState(entityId, validatorId, jurisdiction, counterpartyId);
+    const before = computeCanonicalEntityConsensusStateHash(state);
+    const event = normalizeJurisdictionEvent({
+      type: 'DisputeStarted',
+      data: {
+        sender: entityId,
+        counterentity: counterpartyId,
+        nonce: '9007199254740993',
+        proofbodyHash: `0x${'55'.repeat(32)}`,
+        watchSeed: `0x${'66'.repeat(32)}`,
+        starterInitialArguments: '0x',
+        starterIncrementedArguments: '0x',
+        disputeTimeout: 5_761,
+      },
+    })!;
+    const env = envAt(110, 5);
+    env.runtimeSeed = 'dispute-nonce-boundary-runtime';
+
+    await expect(applyJEventRange(state, {
+      from: validatorId,
+      jurisdictionRef: jurisdiction.name,
+      event,
+      observedAt: 1,
+      blockNumber: 1,
+      blockHash: `0x${'77'.repeat(32)}`,
+      transactionHash: `0x${'88'.repeat(32)}`,
+    }, env)).rejects.toThrow(
+      'J_EVENT_DISPUTE_NONCE_INVALID:9007199254740993',
+    );
+    expect(computeCanonicalEntityConsensusStateHash(state)).toBe(before);
+  });
 });
