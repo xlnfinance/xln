@@ -9,7 +9,7 @@ import {
 import { verifyHashLadderBinary } from '../../../protocol/htlc/hash-ladder';
 import { buildCrossJurisdictionCancelAck } from '../../../extensions/cross-j/orderbook';
 import { removeBookOrderById } from '../../../orderbook/cross-j';
-import { cloneEntityState } from '../../state-clone';
+import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import type { CrossJurisdictionSwapRoute, EntityInput, EntityState, EntityTx, RuntimeState, RuntimeOverlayRecord } from '../../../types';
 import { formatEntityId } from '../../../utils';
@@ -232,9 +232,10 @@ export const handleRequestCrossJurisdictionClearEntityTx = (
   entityState: EntityState,
   entityTx: CrossJurisdictionClearTx,
   storageChanges: RuntimeOverlayRecord[] = [],
+  mutableFrameState = false,
 ): CrossJurisdictionClearResult => {
   const { orderId, cancelRemainder = false } = entityTx.data;
-  const newState = cloneEntityState(entityState);
+  const newState = prepareEntityTxState(entityState, mutableFrameState);
   const outputs: EntityInput[] = [];
   const accountTxs: AccountTxTarget[] = [];
   let route = newState.crossJurisdictionSwaps?.get(orderId);
@@ -376,9 +377,10 @@ export const handleMaterializeCrossJurisdictionClearEntityTx = (
   env: RuntimeState,
   entityState: EntityState,
   entityTx: CrossJurisdictionClearMaterializationTx,
+  mutableFrameState = false,
 ): CrossJurisdictionClearResult => {
   const { orderId, binary } = entityTx.data;
-  const newState = cloneEntityState(entityState);
+  const newState = prepareEntityTxState(entityState, mutableFrameState);
   const outputs: EntityInput[] = [];
   const { route, accountId, fillRatio, proof } = validateClearMaterialization(newState, entityTx);
   const accountTxs = buildSourceCloseAccountTxs(route, accountId, binary, proof);

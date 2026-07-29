@@ -6,7 +6,7 @@ import {
   type HtlcOnionAdvanceTx,
 } from '../../../protocol/htlc/onion-advance';
 import { calculateDirectionalFeePPM, calculateHopFee, sanitizeBaseFee, sanitizeFeePPM } from '../../../routing/fees';
-import { cloneEntityState } from '../../state-clone';
+import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import type {
   AccountTx,
@@ -201,10 +201,11 @@ export const handleHtlcOnionAdvance = async (
   entityState: EntityState,
   rawTx: HtlcOnionAdvanceTx,
   candidateEffects: EntityCandidateEffect[] = [],
+  mutableFrameState = false,
 ): Promise<Result> => {
   const validated = await validateHtlcOnionAdvanceTx(env, entityState, rawTx);
   const tx = validated.tx;
-  const newState = cloneEntityState(entityState);
+  const newState = prepareEntityTxState(entityState, mutableFrameState);
   const accountTxs: Result['accountTxs'] = [];
   const outputs: EntityInput[] = [];
   if (tx.data.advance.kind === 'final') applyFinalAdvance(env, newState, tx, accountTxs);

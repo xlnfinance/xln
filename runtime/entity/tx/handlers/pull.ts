@@ -7,7 +7,7 @@ import {
   transitionCrossJurisdictionRouteStatus,
 } from '../../../extensions/cross-j/index';
 import { verifyHashLadderBinary } from '../../../protocol/htlc/hash-ladder';
-import { cloneEntityState } from '../../state-clone';
+import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import type { EntityInput, EntityState, EntityTx, RuntimeState } from '../../../types';
 import { formatEntityId } from '../../../utils';
@@ -24,7 +24,7 @@ type PullResult = { newState: EntityState; outputs: EntityInput[]; accountTxs: A
 
 const now = (state: EntityState, env: RuntimeState): number => Number(state.timestamp || env.timestamp || 0);
 const createResult = (state: EntityState, options?: ApplyEntityTxOptions): PullResult => ({
-  newState: options?.mutableFrameState ? state : cloneEntityState(state),
+  newState: prepareEntityTxState(state, options?.mutableFrameState),
   outputs: [],
   accountTxs: [],
 });

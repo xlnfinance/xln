@@ -12,7 +12,7 @@
  */
 
 import type { EntityState, EntityTx, EntityInput } from '../../../types';
-import { cloneEntityState } from '../../state-clone';
+import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import { initJBatch, batchAddReserveToReserve } from '../../../jurisdiction/batch';
 import { createStructuredLogger, shortId } from '../../../infra/logger';
@@ -22,10 +22,11 @@ const jBatchActionLog = createStructuredLogger('entity.jbatch');
 
 export async function handleR2R(
   entityState: EntityState,
-  entityTx: Extract<EntityTx, { type: 'r2r' }>
+  entityTx: Extract<EntityTx, { type: 'r2r' }>,
+  mutableFrameState = false,
 ): Promise<{ newState: EntityState; outputs: EntityInput[] }> {
   const { toEntityId, tokenId, amount } = entityTx.data;
-  const newState = cloneEntityState(entityState);
+  const newState = prepareEntityTxState(entityState, mutableFrameState);
   const outputs: EntityInput[] = [];
 
   // Validate: Do we have enough reserve?

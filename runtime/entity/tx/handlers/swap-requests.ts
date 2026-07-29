@@ -1,5 +1,5 @@
 import type { AccountState, AccountTx, EntityInput, EntityState, EntityTx, RuntimeState } from '../../../types';
-import { cloneEntityState } from '../../state-clone';
+import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import {
   cloneCrossJurisdictionRoute,
@@ -23,7 +23,7 @@ const deterministicEntityTimestamp = (state: EntityState, env: RuntimeState): nu
   Number(state.timestamp || env.timestamp || 0);
 
 const stateForEntityTx = (entityState: EntityState, options?: ApplyEntityTxOptions): EntityState =>
-  options?.mutableFrameState ? entityState : cloneEntityState(entityState);
+  prepareEntityTxState(entityState, options?.mutableFrameState);
 
 const wakeEntity = (state: EntityState, outputs: EntityInput[]): void => {
   const firstValidator = state.config.validators[0];

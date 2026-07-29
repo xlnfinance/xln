@@ -2,18 +2,19 @@ import { ethers } from 'ethers';
 
 import type { EntityInput, EntityState, EntityTx } from '../../../types';
 import { initJBatch, batchAddExternalTokenToReserve } from '../../../jurisdiction/batch';
-import { cloneEntityState } from '../../state-clone';
+import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 
 export async function handleE2R(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'e2r' }>,
+  mutableFrameState = false,
 ): Promise<{ newState: EntityState; outputs: EntityInput[] }> {
   const { contractAddress, amount } = entityTx.data;
   const tokenType = typeof entityTx.data.tokenType === 'number' ? entityTx.data.tokenType : 0;
   const externalTokenId = typeof entityTx.data.externalTokenId === 'bigint' ? entityTx.data.externalTokenId : 0n;
   const internalTokenId = typeof entityTx.data.internalTokenId === 'number' ? entityTx.data.internalTokenId : 0;
-  const newState = cloneEntityState(entityState);
+  const newState = prepareEntityTxState(entityState, mutableFrameState);
   const outputs: EntityInput[] = [];
 
   if (!ethers.isAddress(contractAddress) || contractAddress === ethers.ZeroAddress) {

@@ -2,7 +2,7 @@ import { getEntityCertifiedJurisdictionHeight } from '../../../jurisdiction/heig
 import { generateLockId, hashHtlcSecret } from '../../../protocol/htlc/utils';
 import type { EntityInput, EntityState, EntityTx, RuntimeState } from '../../../types';
 import { formatEntityId } from '../../../utils';
-import { cloneEntityState } from '../../state-clone';
+import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import { findAccountKey } from '../account-key';
 import type { AccountTxTarget } from './account';
@@ -27,8 +27,9 @@ export const handleHashlockPaymentEntityTx = (
   _env: RuntimeState,
   entityState: EntityState,
   entityTx: EntityTxOf<'hashlockPayment'>,
+  mutableFrameState = false,
 ): HtlcEntityTxResult => {
-  const newState = cloneEntityState(entityState);
+  const newState = prepareEntityTxState(entityState, mutableFrameState);
   const outputs: EntityInput[] = [];
   const accountTxs: AccountTxTarget[] = [];
   const { targetEntityId, tokenId, amount, hashlock, description } = entityTx.data;
@@ -119,7 +120,6 @@ export const handleHashlockPaymentEntityTx = (
     setHtlcRouteNote(newState, hashlock, lockId, description);
   }
   addMessage(newState, `🔒 Hashlock payment locked ${amountBig} token ${tokenId} to ${formatEntityId(normalizedTarget)}`);
-
   wakeLocalProposer(entityState, outputs);
   return { newState, outputs, accountTxs };
 };
@@ -127,8 +127,9 @@ export const handleHashlockPaymentEntityTx = (
 export const handleResolveHtlcLockEntityTx = (
   entityState: EntityState,
   entityTx: EntityTxOf<'resolveHtlcLock'>,
+  mutableFrameState = false,
 ): HtlcEntityTxResult => {
-  const newState = cloneEntityState(entityState);
+  const newState = prepareEntityTxState(entityState, mutableFrameState);
   const outputs: EntityInput[] = [];
   const accountTxs: AccountTxTarget[] = [];
   const { counterpartyEntityId, lockId, secret } = entityTx.data;
@@ -174,8 +175,9 @@ export const handleResolveHtlcLockEntityTx = (
 export const handleProcessHtlcTimeoutsEntityTx = (
   entityState: EntityState,
   entityTx: EntityTxOf<'processHtlcTimeouts'>,
+  mutableFrameState = false,
 ): HtlcEntityTxResult => {
-  const newState = cloneEntityState(entityState);
+  const newState = prepareEntityTxState(entityState, mutableFrameState);
   const outputs: EntityInput[] = [];
   const accountTxs: AccountTxTarget[] = [];
 
@@ -195,8 +197,9 @@ export const handleProcessHtlcTimeoutsEntityTx = (
 export const handleManualHtlcLockEntityTx = (
   entityState: EntityState,
   entityTx: EntityTxOf<'manualHtlcLock'>,
+  mutableFrameState = false,
 ): HtlcEntityTxResult => {
-  const newState = cloneEntityState(entityState);
+  const newState = prepareEntityTxState(entityState, mutableFrameState);
   const outputs: EntityInput[] = [];
   const accountTxs: AccountTxTarget[] = [];
 

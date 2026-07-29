@@ -5,7 +5,7 @@ import {
   transitionCrossJurisdictionRouteStatus,
 } from '../../../extensions/cross-j/index';
 import { decodeHashLadderBinary } from '../../../protocol/htlc/hash-ladder';
-import { cloneEntityState } from '../../state-clone';
+import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import type { EntityInput, EntityState, EntityTx } from '../../../types';
 
@@ -16,8 +16,9 @@ const normalizeEntityRef = (value: string): string => String(value || '').trim()
 export const handleCrossJurisdictionSettledEntityTx = (
   entityState: EntityState,
   entityTx: CrossJurisdictionSettledTx,
+  mutableFrameState = false,
 ): { newState: EntityState; outputs: EntityInput[] } => {
-  const newState = cloneEntityState(entityState);
+  const newState = prepareEntityTxState(entityState, mutableFrameState);
   const route = newState.crossJurisdictionSwaps?.get(entityTx.data.orderId);
   if (!route) {
     throw new Error(`CROSS_J_SETTLED_ROUTE_MISSING: order=${entityTx.data.orderId}`);

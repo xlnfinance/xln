@@ -5,7 +5,7 @@ import type {
   EntityTx,
   RuntimeState,
 } from '../../../../types';
-import { cloneEntityState } from '../../../state-clone';
+import { prepareEntityTxState } from '../../../state-clone';
 import { addMessage } from '../../../frame-events';
 import {
   batchAddRevealSecret,
@@ -116,9 +116,10 @@ export const handleDisputeFinalize = async (
   entityState: EntityState,
   entityTx: FinalizeTx,
   env: RuntimeState,
+  mutableFrameState = false,
 ): Promise<{ newState: EntityState; outputs: EntityInput[] }> => {
   const counterpartyId = entityTx.data.counterpartyEntityId;
-  const newState = cloneEntityState(entityState);
+  const newState = prepareEntityTxState(entityState, mutableFrameState);
   const outputs: EntityInput[] = [];
   disputeLog.debug('finalize.begin', {
     entity: shortId(entityState.entityId),

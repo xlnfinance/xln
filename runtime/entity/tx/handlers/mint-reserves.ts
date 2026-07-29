@@ -11,7 +11,7 @@
  */
 
 import type { EntityState, EntityTx, EntityInput, JInput, JTx, RuntimeState } from '../../../types';
-import { cloneEntityState } from '../../state-clone';
+import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import {
   getJurisdictionConfigName,
@@ -24,10 +24,11 @@ const jBatchActionLog = createStructuredLogger('entity.jbatch');
 export async function handleMintReserves(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'mintReserves' }>,
-  env: RuntimeState
+  env: RuntimeState,
+  mutableFrameState = false,
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; jOutputs: JInput[] }> {
   const { tokenId, amount } = entityTx.data;
-  const newState = cloneEntityState(entityState);
+  const newState = prepareEntityTxState(entityState, mutableFrameState);
   const outputs: EntityInput[] = [];
 
   jBatchActionLog.debug('mint.requested', {

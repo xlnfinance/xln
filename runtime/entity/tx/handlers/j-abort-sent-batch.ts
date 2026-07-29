@@ -1,5 +1,5 @@
 import type { EntityInput, EntityState, EntityTx, RuntimeState, JInput } from '../../../types';
-import { cloneEntityState } from '../../state-clone';
+import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import { createEmptyBatch, getBatchSize, mergeBatchOps } from '../../../jurisdiction/batch';
 import { createStructuredLogger, shortId } from '../../../infra/logger';
@@ -73,8 +73,9 @@ export async function handleJAbortSentBatch(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'j_abort_sent_batch' }>,
   _env: RuntimeState,
+  mutableFrameState = false,
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; jOutputs: JInput[] }> {
-  const newState = cloneEntityState(entityState);
+  const newState = prepareEntityTxState(entityState, mutableFrameState);
   const outputs: EntityInput[] = [];
   const jOutputs: JInput[] = [];
 

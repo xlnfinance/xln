@@ -7,7 +7,7 @@ import {
   transitionCrossJurisdictionRouteStatus,
 } from '../../../extensions/cross-j/index';
 import { verifyHashLadderBinary } from '../../../protocol/htlc/hash-ladder';
-import { cloneEntityState } from '../../state-clone';
+import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import type {
   CrossJurisdictionSwapRoute,
@@ -92,9 +92,10 @@ export const handleCrossJurisdictionSalvageEntityTx = (
   env: RuntimeState,
   entityState: EntityState,
   entityTx: CrossJurisdictionSalvageTx,
+  mutableFrameState = false,
 ): CrossJurisdictionSalvageResult => {
   const { routeId, binary, fillRatio, sourceEntityId, sourceCounterpartyEntityId } = entityTx.data;
-  const newState = cloneEntityState(entityState);
+  const newState = prepareEntityTxState(entityState, mutableFrameState);
   const outputs: EntityInput[] = [];
   const claimedFillRatio = Math.floor(Number(fillRatio) || 0);
   if (!binary || binary === '0x' || claimedFillRatio <= 0) {

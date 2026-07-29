@@ -15,7 +15,7 @@ import type {
   RuntimeOverlayRecord,
   SwapOffer,
 } from '../../../types';
-import { cloneEntityState } from '../../state-clone';
+import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import { freezeAccountForDispute } from '../../../account/consensus/dispute-policy';
 import { removeBookOrderById } from '../../../orderbook/cross-j';
@@ -169,6 +169,7 @@ export const draftPreparedDisputeStartIfReady = async (
   counterpartyEntityId: string,
   env: RuntimeState,
   storageChanges: RuntimeOverlayRecord[] = [],
+  mutableFrameState = false,
 ): Promise<{ newState: EntityState; outputs: EntityInput[] }> => {
   const account = entityState.accounts.get(counterpartyEntityId);
   if (!account || (account.status ?? 'active') !== 'dispute_preparing') {
@@ -203,6 +204,7 @@ export const draftPreparedDisputeStartIfReady = async (
     },
     env,
     storageChanges,
+    mutableFrameState,
   );
 };
 
@@ -211,10 +213,11 @@ export const handlePrepareDispute = async (
   entityTx: Extract<EntityTx, { type: 'prepareDispute' }>,
   env: RuntimeState,
   storageChanges: RuntimeOverlayRecord[] = [],
+  mutableFrameState = false,
 ): Promise<{ newState: EntityState; outputs: EntityInput[] }> => {
   const counterpartyEntityId = entityTx.data.counterpartyEntityId;
   const description = entityTx.data.description ?? 'prepare-dispute';
-  const newState = cloneEntityState(entityState);
+  const newState = prepareEntityTxState(entityState, mutableFrameState);
   const outputs: EntityInput[] = [];
   const account = newState.accounts.get(counterpartyEntityId);
   if (!account) {
@@ -242,6 +245,7 @@ export const handlePrepareDispute = async (
         counterpartyEntityId,
         env,
         storageChanges,
+        true,
       );
     }
     addMessage(
@@ -284,6 +288,7 @@ export const handlePrepareDispute = async (
     counterpartyEntityId,
     env,
     storageChanges,
+    true,
   );
   return {
     newState: drafted.newState,

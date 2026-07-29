@@ -24,7 +24,7 @@ import {
   getJurisdictionConfigName,
   requireRuntimeJurisdictionConfigByName,
 } from '../../../jurisdiction/jurisdiction-runtime';
-import { cloneEntityState } from '../../state-clone';
+import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import { getEntityLeaderState } from '../../consensus/leader';
 import {
@@ -158,6 +158,7 @@ const handleAction = (
   entityState: EntityState,
   entityTx: TransferTx | ReleaseTx,
   env: RuntimeState,
+  mutableFrameState: boolean,
 ): EntityTxReducerResult => {
   const { jurisdiction, chainId, entityProviderAddress, depositoryAddress } =
     resolveActionDomain(entityState, env);
@@ -197,7 +198,7 @@ const handleAction = (
     ...unsignedIntent,
     actionHash: recomputeEntityProviderActionHash(unsignedIntent),
   };
-  const newState = cloneEntityState(entityState);
+  const newState = prepareEntityTxState(entityState, mutableFrameState);
   newState.config = { ...newState.config, jurisdiction };
   newState.entityProviderActionState = {
     version: 1,
@@ -232,18 +233,21 @@ export const handleEntityProviderTransfer = (
   entityState: EntityState,
   entityTx: TransferTx,
   env: RuntimeState,
-): EntityTxReducerResult => handleAction(entityState, entityTx, env);
+  mutableFrameState = false,
+): EntityTxReducerResult => handleAction(entityState, entityTx, env, mutableFrameState);
 
 export const handleEntityProviderReleaseControlShares = (
   entityState: EntityState,
   entityTx: ReleaseTx,
   env: RuntimeState,
-): EntityTxReducerResult => handleAction(entityState, entityTx, env);
+  mutableFrameState = false,
+): EntityTxReducerResult => handleAction(entityState, entityTx, env, mutableFrameState);
 
 export const handleEntityProviderCancelAction = (
   entityState: EntityState,
   entityTx: CancelTx,
   env: RuntimeState,
+  mutableFrameState = false,
 ): EntityTxReducerResult => {
   const { jurisdiction, chainId, entityProviderAddress, depositoryAddress } =
     resolveActionDomain(entityState, env);
@@ -301,7 +305,7 @@ export const handleEntityProviderCancelAction = (
     ...unsignedIntent,
     actionHash: recomputeEntityProviderActionHash(unsignedIntent),
   };
-  const newState = cloneEntityState(entityState);
+  const newState = prepareEntityTxState(entityState, mutableFrameState);
   newState.config = { ...newState.config, jurisdiction };
   newState.entityProviderActionState = {
     version: 1,

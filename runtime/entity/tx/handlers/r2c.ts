@@ -18,7 +18,7 @@
 
 import type { EntityState, EntityTx, EntityInput, AccountTx, JInput } from '../../../types';
 import { QUOTE_EXPIRY_MS } from '../../../types';
-import { cloneEntityState } from '../../state-clone';
+import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import { batchAddReserveToCollateral, initJBatch } from '../../../jurisdiction/batch';
 import { createStructuredLogger, formatAmount, shortId } from '../../../infra/logger';
@@ -116,6 +116,7 @@ const collectRebalanceFee = (
 export async function handleR2C(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'r2c' }>,
+  mutableFrameState = false,
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; jOutputs?: JInput[]; accountTxs?: AccountTxTarget[] }> {
   const { counterpartyId, receivingEntityId, tokenId, amount, rebalanceQuoteId } = entityTx.data;
   const receivingEntity = String(receivingEntityId || entityState.entityId || '').trim().toLowerCase();
@@ -128,7 +129,7 @@ export async function handleR2C(
     amount: formatAmount(amount),
     rebalanceQuoteId,
   });
-  const newState = cloneEntityState(entityState);
+  const newState = prepareEntityTxState(entityState, mutableFrameState);
   const outputs: EntityInput[] = [];
   const accountTxs: AccountTxTarget[] = [];
 

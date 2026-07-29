@@ -12,7 +12,7 @@ import {
   markCrossJurisdictionBookAdmissionClosed,
 } from '../../../extensions/cross-j/orderbook';
 import { removeBookOrderById } from '../../../orderbook/cross-j';
-import { cloneEntityState } from '../../state-clone';
+import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import type {
   CrossJurisdictionSwapRoute,
@@ -132,8 +132,9 @@ export const handleOrderbookSweepCrossJurisdictionEntityTx = (
   entityState: EntityState,
   entityTx: CrossJurisdictionSweepTx,
   storageChanges: RuntimeOverlayRecord[] = [],
+  mutableFrameState = false,
 ): CrossJurisdictionSweepResult => {
-  const newState = cloneEntityState(entityState);
+  const newState = prepareEntityTxState(entityState, mutableFrameState);
   const outputs: EntityInput[] = [];
   const accountTxs: AccountTxTarget[] = [];
   const now = deterministicEntityTimestamp(newState, env);

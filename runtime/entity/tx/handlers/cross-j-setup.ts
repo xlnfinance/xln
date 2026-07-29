@@ -17,7 +17,7 @@ import {
   validateCrossJurisdictionRouteTransition,
 } from '../cross-jurisdiction-helpers';
 import { normalizeEntityRef } from '../account-key';
-import { cloneEntityState } from '../../state-clone';
+import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import { safeStringify } from '../../../protocol/serialization';
 import type { CrossJurisdictionSwapRoute, EntityInput, EntityState, EntityTx, RuntimeState } from '../../../types';
@@ -37,7 +37,7 @@ const deterministicEntityTimestamp = (state: EntityState, env: RuntimeState): nu
   Number(state.timestamp || env.timestamp || 0);
 
 const stateForEntityTx = (entityState: EntityState, options?: ApplyEntityTxOptions): EntityState =>
-  options?.mutableFrameState ? entityState : cloneEntityState(entityState);
+  prepareEntityTxState(entityState, options?.mutableFrameState);
 
 const exactRouteBytes = (route: CrossJurisdictionSwapRoute): string =>
   safeStringify(cloneCrossJurisdictionRoute(route));

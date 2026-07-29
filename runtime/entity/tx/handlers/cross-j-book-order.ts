@@ -36,7 +36,7 @@ import {
   removeCrossJurisdictionBookOrderByRouteId,
   resizeCrossJurisdictionBookOrderByRouteId,
 } from '../../../orderbook/cross-j';
-import { cloneEntityState } from '../../state-clone';
+import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import { findAccountKey } from '../account-key';
 import {
@@ -56,7 +56,7 @@ import { draftPreparedDisputeStartIfReady } from './dispute';
 const deterministicEntityTimestamp = (state: EntityState, env: RuntimeState): number =>
   Number(state.timestamp || env.timestamp || 0);
 const stateForEntityTx = (entityState: EntityState, options?: ApplyEntityTxOptions): EntityState =>
-  options?.mutableFrameState ? entityState : cloneEntityState(entityState);
+  prepareEntityTxState(entityState, options?.mutableFrameState);
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 const crossBookQtyLots = (baseTokenId: number, baseAmount: bigint): bigint => {
@@ -476,6 +476,7 @@ export const handleCrossJurisdictionBookOrderRemovedEntityTx = async (
       entityTx.data.sourceAccountId,
       env,
       options?.storageChanges,
+      true,
     );
     return { newState: drafted.newState, outputs: drafted.outputs, accountTxs: [] };
   }

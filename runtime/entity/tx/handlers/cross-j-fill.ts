@@ -5,7 +5,7 @@ import {
   getCrossJurisdictionCommittedProofRatio,
   requireCrossJurisdictionFillProgress,
 } from '../../../extensions/cross-j/index';
-import { cloneEntityState } from '../../state-clone';
+import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import type { CrossJurisdictionSwapRoute, EntityInput, EntityState, EntityTx } from '../../../types';
 import { findAccountKey, normalizeEntityRef } from '../account-key';
@@ -92,6 +92,7 @@ const assertFillNoticeSequence = (
 export const handleCrossJurisdictionFillNoticeEntityTx = (
   entityState: EntityState,
   entityTx: CrossJurisdictionFillNoticeTx,
+  mutableFrameState = false,
 ): CrossJurisdictionFillResult => {
   const {
     orderId,
@@ -112,7 +113,7 @@ export const handleCrossJurisdictionFillNoticeEntityTx = (
     pairId,
   } = entityTx.data;
   assertCrossJurisdictionPriceImprovementMode(priceImprovementMode, orderId);
-  const newState = cloneEntityState(entityState);
+  const newState = prepareEntityTxState(entityState, mutableFrameState);
   const outputs: EntityInput[] = [];
   const accountTxs: AccountTxTarget[] = [];
   const route = requireSourceHubRoute(newState, orderId);

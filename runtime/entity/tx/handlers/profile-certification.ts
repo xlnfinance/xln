@@ -1,5 +1,5 @@
 import type { EntityState, EntityTx, RuntimeState, HashToSign } from '../../../types';
-import { cloneEntityState } from '../../state-clone';
+import { prepareEntityTxState } from '../../state-clone';
 import { buildValidatorEncryptionBoard } from '../../profile-encryption';
 import {
   buildEntityProfileDescriptor,
@@ -57,13 +57,14 @@ export const handleCertifyProfileEntityTx = (
   env: RuntimeState,
   entityState: EntityState,
   entityTx: CertifyProfileTx,
+  mutableFrameState = false,
 ) => {
   const trustedBoard = buildValidatorEncryptionBoard(env, entityState);
   const manifest = requireCompleteValidatorEncryptionManifest(
     trustedBoard,
     entityTx.data.encryptionAttestations,
   );
-  const newState = cloneEntityState(entityState);
+  const newState = prepareEntityTxState(entityState, mutableFrameState);
   newState.profileEncryptionManifest = manifest;
 
   // The transaction installs only the public encryption manifest. The frame

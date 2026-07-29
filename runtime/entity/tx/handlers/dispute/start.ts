@@ -6,7 +6,7 @@ import type {
   RuntimeState,
   RuntimeOverlayRecord,
 } from '../../../../types';
-import { cloneEntityState } from '../../../state-clone';
+import { prepareEntityTxState } from '../../../state-clone';
 import { addMessage } from '../../../frame-events';
 import {
   encodeJBatch,
@@ -103,13 +103,14 @@ export const handleDisputeStart = async (
   entityTx: StartTx,
   env: RuntimeState,
   _storageChanges: RuntimeOverlayRecord[] = [],
+  mutableFrameState = false,
 ): Promise<{ newState: EntityState; outputs: EntityInput[] }> => {
   if (entityTx.data.starterIncrementedArguments !== undefined) {
     throw new Error('DISPUTE_INCREMENTED_ARGUMENT_OVERRIDE_UNSUPPORTED');
   }
   validateCrossJurisdictionDisputeRoute(entityState, entityTx);
   const counterpartyId = entityTx.data.counterpartyEntityId;
-  const newState = cloneEntityState(entityState);
+  const newState = prepareEntityTxState(entityState, mutableFrameState);
   const outputs: EntityInput[] = [];
   disputeLog.debug('start.begin', {
     entity: shortId(entityState.entityId),

@@ -1,7 +1,7 @@
 import type { AccountTx, EntityInput, EntityState, EntityTx, RuntimeState } from '../../../types';
 import { createStructuredLogger, shortId } from '../../../infra/logger';
 import { normalizeRebalanceMatchingStrategy } from '../../../extensions/rebalance/policy';
-import { cloneEntityState } from '../../state-clone';
+import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import { checkAutoRebalance } from '../../../account/tx/handlers/request-collateral';
 import {
@@ -124,8 +124,9 @@ const buildHubPolicyTargets = (
 export const handleExtendCreditEntityTx = (
   entityState: EntityState,
   entityTx: EntityTxOf<'extendCredit'>,
+  mutableFrameState = false,
 ): AccountAdminResult => {
-  const newState = cloneEntityState(entityState);
+  const newState = prepareEntityTxState(entityState, mutableFrameState);
   const accountTxs: AccountTxTarget[] = [];
   const { counterpartyEntityId, tokenId, amount } = entityTx.data;
 
@@ -155,8 +156,9 @@ export const handleSetHubConfigEntityTx = (
   _env: RuntimeState,
   entityState: EntityState,
   entityTx: EntityTxOf<'setHubConfig'>,
+  mutableFrameState = false,
 ): AccountAdminResult => {
-  const newState = cloneEntityState(entityState);
+  const newState = prepareEntityTxState(entityState, mutableFrameState);
   const { config, feePolicyChanged } = buildHubConfig(
     entityState.hubRebalanceConfig,
     entityTx.data,
@@ -193,8 +195,9 @@ export const handleSetRebalancePolicyEntityTx = (
   _env: RuntimeState,
   entityState: EntityState,
   entityTx: EntityTxOf<'setRebalancePolicy'>,
+  mutableFrameState = false,
 ): AccountAdminResult => {
-  const newState = cloneEntityState(entityState);
+  const newState = prepareEntityTxState(entityState, mutableFrameState);
   const { counterpartyEntityId, tokenId, r2cRequestSoftLimit, hardLimit, maxAcceptableFee } = entityTx.data;
 
   if (!newState.accounts.has(counterpartyEntityId)) {
@@ -230,8 +233,9 @@ export const handleSetRebalancePolicyEntityTx = (
 export const handleRequestCollateralEntityTx = (
   entityState: EntityState,
   entityTx: EntityTxOf<'requestCollateral'>,
+  mutableFrameState = false,
 ): AccountAdminResult => {
-  const newState = cloneEntityState(entityState);
+  const newState = prepareEntityTxState(entityState, mutableFrameState);
   const { counterpartyEntityId, tokenId, amount, feeTokenId, feeAmount, policyVersion } = entityTx.data;
 
   if (!newState.accounts.has(counterpartyEntityId)) {
@@ -261,8 +265,9 @@ export const handleRequestCollateralEntityTx = (
 export const handleReopenDisputedAccountEntityTx = (
   entityState: EntityState,
   entityTx: EntityTxOf<'reopenDisputedAccount'>,
+  mutableFrameState = false,
 ): AccountAdminResult => {
-  const newState = cloneEntityState(entityState);
+  const newState = prepareEntityTxState(entityState, mutableFrameState);
   const { counterpartyEntityId } = entityTx.data;
   const account = newState.accounts.get(counterpartyEntityId);
 

@@ -20,7 +20,7 @@ import type {
   SettlementDiff,
   SettlementWorkspace,
 } from '../../../types';
-import { cloneEntityState } from '../../state-clone';
+import { prepareEntityTxState } from '../../state-clone';
 import { getAccountPerspective } from '../../../account/perspective';
 import { addMessage } from '../../frame-events';
 import { initJBatch, batchAddSettlement } from '../../../jurisdiction/batch';
@@ -175,10 +175,11 @@ const assertNoPendingSettlementTransition = (account: AccountState): void => {
 export async function handleSettlePropose(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'settle_propose' }>,
-  _env: RuntimeState
+  _env: RuntimeState,
+  mutableFrameState = false,
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; accountTxs: AccountTxTarget[] }> {
   const { counterpartyEntityId, executorIsLeft: execParam, memo, ops } = entityTx.data;
-  const newState = cloneEntityState(entityState);
+  const newState = prepareEntityTxState(entityState, mutableFrameState);
   const outputs: EntityInput[] = [];
   const accountTxs: AccountTxTarget[] = [];
 
@@ -228,10 +229,11 @@ export async function handleSettlePropose(
 export async function handleSettleUpdate(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'settle_update' }>,
-  _env: RuntimeState
+  _env: RuntimeState,
+  mutableFrameState = false,
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; accountTxs: AccountTxTarget[] }> {
   const { counterpartyEntityId, executorIsLeft: execParam, memo, ops } = entityTx.data;
-  const newState = cloneEntityState(entityState);
+  const newState = prepareEntityTxState(entityState, mutableFrameState);
   const outputs: EntityInput[] = [];
   const accountTxs: AccountTxTarget[] = [];
 
@@ -285,10 +287,11 @@ export async function handleSettleUpdate(
 export async function handleSettleApprove(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'settle_approve' }>,
-  _env: RuntimeState
+  _env: RuntimeState,
+  mutableFrameState = false,
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; accountTxs: AccountTxTarget[]; hashesToSign?: Array<{ hash: string; type: 'settlement' | 'dispute'; context: string }> }> {
   const { counterpartyEntityId, workspaceHash: requestedWorkspaceHash } = entityTx.data;
-  const newState = cloneEntityState(entityState);
+  const newState = prepareEntityTxState(entityState, mutableFrameState);
   const outputs: EntityInput[] = [];
   const accountTxs: AccountTxTarget[] = [];
 
@@ -541,10 +544,11 @@ const queueSettlementExecution = (
 export async function handleSettleExecute(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'settle_execute' }>,
-  env: RuntimeState
+  env: RuntimeState,
+  mutableFrameState = false,
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; accountTxs: AccountTxTarget[] }> {
   const { counterpartyEntityId, disableC2RShortcut = false } = entityTx.data;
-  const newState = cloneEntityState(entityState);
+  const newState = prepareEntityTxState(entityState, mutableFrameState);
   const outputs: EntityInput[] = [];
   const accountTxs: AccountTxTarget[] = [];
 
@@ -633,10 +637,11 @@ export async function handleSettleExecute(
 export async function handleSettleReject(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'settle_reject' }>,
-  _env: RuntimeState
+  _env: RuntimeState,
+  mutableFrameState = false,
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; accountTxs: AccountTxTarget[] }> {
   const { counterpartyEntityId, reason } = entityTx.data;
-  const newState = cloneEntityState(entityState);
+  const newState = prepareEntityTxState(entityState, mutableFrameState);
   const outputs: EntityInput[] = [];
   const accountTxs: AccountTxTarget[] = [];
 

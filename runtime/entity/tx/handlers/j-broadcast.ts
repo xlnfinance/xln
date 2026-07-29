@@ -15,7 +15,7 @@
 
 import type { EntityState, EntityTx, EntityInput, RuntimeState, JTx, JInput, HashType } from '../../../types';
 import { requireUsableContractAddress } from '../../../jurisdiction/contract-address';
-import { cloneEntityState } from '../../state-clone';
+import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import {
   isBatchEmpty, getBatchSize, cloneJBatch, encodeJBatch,
@@ -128,9 +128,10 @@ const commitBroadcast = (
 export async function handleJBroadcast(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'j_broadcast' }>,
-  env: RuntimeState
+  env: RuntimeState,
+  mutableFrameState = false,
 ): Promise<EntityTxReducerResult> {
-  const newState = cloneEntityState(entityState);
+  const newState = prepareEntityTxState(entityState, mutableFrameState);
   const outputs: EntityInput[] = [];
   const jOutputs: JInput[] = [];
 

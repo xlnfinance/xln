@@ -10,7 +10,7 @@ import type {
   HashToSign,
 } from '../../types';
 import type { ProofBodyStruct } from '../../protocol/dispute/proof-body';
-import { cloneEntityState } from '../state-clone';
+import { prepareEntityTxState } from '../state-clone';
 import { addMessage } from '../frame-events';
 import { CANONICAL_J_EVENTS } from '../../jurisdiction/event-catalog';
 import { hashHtlcSecret } from '../../protocol/htlc/utils';
@@ -142,8 +142,9 @@ const applyJRangeBlocks = async (
   signature: string,
   env: RuntimeState,
   candidateEffects: EntityCandidateEffect[],
+  mutableFrameState: boolean,
 ): Promise<AppliedJRange> => {
-  let state = cloneEntityState(entityState);
+  let state = prepareEntityTxState(entityState, mutableFrameState);
   const applied: AppliedJRange = {
     state,
     accountTxs: [],
@@ -183,6 +184,7 @@ const applyJRangeBlocks = async (
         env,
         block.disputeFinalizationEvidence ?? [],
         candidateEffects,
+        true,
       );
       state = applied.state = result.newState;
       applied.accountTxs.push(...result.accountTxs);
@@ -234,6 +236,7 @@ export const applyJEvent = async (
   data: JurisdictionEventData,
   env: RuntimeState,
   candidateEffects: EntityCandidateEffect[] = [],
+  mutableFrameState = false,
 ): Promise<JEventApplyResult> => {
   const activeProposerId = normalizeSignerId(getEntityLeaderState(entityState).activeValidatorId);
   // Reject unauthorized senders before canonicalizing attacker-controlled bytes.
@@ -272,6 +275,7 @@ export const applyJEvent = async (
     signature,
     env,
     candidateEffects,
+    mutableFrameState,
   );
   if (applied.certifiedPrefixRoot !== reconciled.eventHistoryRoot) {
     throw new Error(
@@ -760,10 +764,11 @@ async function applyFinalizedJEvent(
   env: RuntimeState,
   disputeFinalizationEvidence: DisputeFinalizationEvidence[] = [],
   candidateEffects: EntityCandidateEffect[] = [],
+  mutableFrameState = false,
 ): Promise<JEventApplyResult> {
   const blockNumber = event.blockNumber ?? 0;
   const transactionHash = event.transactionHash || 'unknown';
-  const newState = cloneEntityState(entityState);
+  const newState = prepareEntityTxState(entityState, mutableFrameState);
   const accountTxs: JEventAccountTx[] = [];
   const outputs: EntityInput[] = [];
   const hashesToSign: HashToSign[] = [];

@@ -7,7 +7,7 @@
  */
 
 import type { EntityInput, EntityState, EntityTx } from '../../../types';
-import { cloneEntityState } from '../../state-clone';
+import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import { batchAddReserveToExternal, initJBatch } from '../../../jurisdiction/batch';
 import { getReserveCandidateIssue } from './j-batch-reserve-admission';
@@ -15,9 +15,10 @@ import { getReserveCandidateIssue } from './j-batch-reserve-admission';
 export async function handleR2E(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'r2e' }>,
+  mutableFrameState = false,
 ): Promise<{ newState: EntityState; outputs: EntityInput[] }> {
   const { receivingEntity, tokenId, amount } = entityTx.data;
-  const newState = cloneEntityState(entityState);
+  const newState = prepareEntityTxState(entityState, mutableFrameState);
   const outputs: EntityInput[] = [];
 
   const reserveIssue = getReserveCandidateIssue(entityState, {

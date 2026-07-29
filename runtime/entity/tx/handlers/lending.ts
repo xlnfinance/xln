@@ -1,6 +1,6 @@
 import type { AccountTx, EntityInput, EntityState, EntityTx } from '../../../types';
 import { normalizeInterestBps, normalizeLendingTerm } from '../../../extensions/lending';
-import { cloneEntityState } from '../../state-clone';
+import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import type { AccountTxTarget } from './account';
 
@@ -47,8 +47,9 @@ const queueAccountTx = (
   hubEntityId: string,
   tx: AccountTx,
   message: string,
+  mutableFrameState: boolean,
 ): LendingResult => {
-  const newState = cloneEntityState(state);
+  const newState = prepareEntityTxState(state, mutableFrameState);
   addMessage(newState, message);
   return {
     newState,
@@ -60,6 +61,7 @@ const queueAccountTx = (
 export const handleLendingOfferEntityTx = (
   entityState: EntityState,
   entityTx: EntityTxOf<'lendingOffer'>,
+  mutableFrameState = false,
 ): LendingResult => {
   const hubEntityId = requireHubAccount(entityState, entityTx.data.hubEntityId);
   requireIntentId(entityTx.data.positionId, 'lend');
@@ -81,12 +83,13 @@ export const handleLendingOfferEntityTx = (
       termId,
       interestBps,
     },
-  }, `Lending pool funding requested: ${entityTx.data.amount} token=${entityTx.data.tokenId}`);
+  }, `Lending pool funding requested: ${entityTx.data.amount} token=${entityTx.data.tokenId}`, mutableFrameState);
 };
 
 export const handleLendingBorrowEntityTx = (
   entityState: EntityState,
   entityTx: EntityTxOf<'lendingBorrow'>,
+  mutableFrameState = false,
 ): LendingResult => {
   const hubEntityId = requireHubAccount(entityState, entityTx.data.hubEntityId);
   requireIntentId(entityTx.data.requestId, 'borrow');
@@ -104,12 +107,13 @@ export const handleLendingBorrowEntityTx = (
       termId,
       maxInterestBps,
     },
-  }, `Loan requested: ${entityTx.data.amount} token=${entityTx.data.tokenId}`);
+  }, `Loan requested: ${entityTx.data.amount} token=${entityTx.data.tokenId}`, mutableFrameState);
 };
 
 export const handleLendingRepayEntityTx = (
   entityState: EntityState,
   entityTx: EntityTxOf<'lendingRepay'>,
+  mutableFrameState = false,
 ): LendingResult => {
   const hubEntityId = requireHubAccount(entityState, entityTx.data.hubEntityId);
   requireIntentId(entityTx.data.loanId, 'loan');
@@ -123,12 +127,13 @@ export const handleLendingRepayEntityTx = (
       tokenId: entityTx.data.tokenId,
       amount: entityTx.data.amount,
     },
-  }, `Loan repayment requested: ${entityTx.data.loanId}`);
+  }, `Loan repayment requested: ${entityTx.data.loanId}`, mutableFrameState);
 };
 
 export const handleLendingClosePositionEntityTx = (
   entityState: EntityState,
   entityTx: EntityTxOf<'lendingClosePosition'>,
+  mutableFrameState = false,
 ): LendingResult => {
   const hubEntityId = requireHubAccount(entityState, entityTx.data.hubEntityId);
   requireIntentId(entityTx.data.positionId, 'lend');
@@ -139,5 +144,5 @@ export const handleLendingClosePositionEntityTx = (
       hubEntityId,
       lenderEntityId: normalized(entityState.entityId),
     },
-  }, `Lending position close requested: ${entityTx.data.positionId}`);
+  }, `Lending position close requested: ${entityTx.data.positionId}`, mutableFrameState);
 };
