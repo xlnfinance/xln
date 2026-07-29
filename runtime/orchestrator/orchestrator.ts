@@ -1314,6 +1314,19 @@ const buildRpcChildEnv = (): Record<string, string> => {
   return result;
 };
 
+const resetSupervisedChildForSpawn = (child: HubChild | MarketMakerChild): void => {
+  child.startedAt = Date.now();
+  child.exitedAt = null;
+  child.exitCode = null;
+  child.exitSignal = null;
+  child.restartCount += 1;
+  child.lastHealth = null;
+  child.lastInfo = null;
+  child.recentStdout = [];
+  child.recentStderr = [];
+  managedChildFatalRoot.delete(child.name);
+};
+
 const spawnHub = async (child: HubChild): Promise<void> => {
   await reapStaleHubProcess(child);
   mkdirSync(child.dbPath, { recursive: true });
@@ -1335,16 +1348,7 @@ const spawnHub = async (child: HubChild): Promise<void> => {
     '--db-path', child.dbPath,
     ...(child.deployTokens ? ['--deploy-tokens'] : []),
   ];
-  child.startedAt = Date.now();
-  child.exitedAt = null;
-  child.exitCode = null;
-  child.exitSignal = null;
-  child.restartCount += 1;
-  child.lastHealth = null;
-  child.lastInfo = null;
-  child.recentStdout = [];
-  child.recentStderr = [];
-  managedChildFatalRoot.delete(child.name);
+  resetSupervisedChildForSpawn(child);
   const proc = spawn('bun', cmd, {
     cwd: process.cwd(),
     stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
@@ -1442,17 +1446,8 @@ const spawnMarketMaker = async (): Promise<void> => {
     '--mesh-hub-names', getHubSpecsArg(),
     '--db-path', marketMakerChild.dbPath,
   ];
-  marketMakerChild.startedAt = Date.now();
-  marketMakerChild.exitedAt = null;
-  marketMakerChild.exitCode = null;
-  marketMakerChild.exitSignal = null;
-  marketMakerChild.restartCount += 1;
-  marketMakerChild.lastHealth = null;
-  marketMakerChild.lastInfo = null;
+  resetSupervisedChildForSpawn(marketMakerChild);
   marketMakerChild.lastStartupPhase = null;
-  marketMakerChild.recentStdout = [];
-  marketMakerChild.recentStderr = [];
-  managedChildFatalRoot.delete(marketMakerChild.name);
   const proc = spawn('bun', cmd, {
     cwd: process.cwd(),
     stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
