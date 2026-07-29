@@ -1342,7 +1342,11 @@ const buildJEventsRuntimeInputFromIngress = (
   let timestamp = 0;
   let tipBlockHash = '';
   for (const [blockNumber, groupedEvents] of blockGroups) {
-    const blockHash = groupedEvents[0]?.blockHash ?? '0x';
+    const firstEvent = groupedEvents[0];
+    if (!firstEvent?.blockHash) {
+      throw new Error(`J_EVENT_MANUAL_BLOCK_HASH_MISSING:${label}:${blockNumber}`);
+    }
+    const blockHash = firstEvent.blockHash;
     if (groupedEvents.some((event) => event.blockHash?.toLowerCase() !== blockHash.toLowerCase())) {
       throw new Error(`J_EVENT_MANUAL_BLOCK_HASH_MISMATCH:${label}:${blockNumber}`);
     }

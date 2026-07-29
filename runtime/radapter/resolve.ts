@@ -1480,6 +1480,120 @@ export const assertRuntimeAdapterGraphFrameWireBudget = (frame: RuntimeAdapterGr
   return encoded.byteLength;
 };
 
+type CapturedLiveGraph = {
+  summaries: RuntimeAdapterEntitySummary[];
+  entities: RuntimeAdapterGraphEntityFrame[];
+};
+
+const captureLiveGraph = (
+  ctx: RuntimeAdapterResolveContext,
+  query: RuntimeAdapterReadQuery | undefined,
+  entityLimit: number,
+  accountsLimit: number,
+): CapturedLiveGraph => {
+  const summaries = listLiveEntitySummaries(ctx);
+  if (summaries.length > entityLimit) {
+    throw new RuntimeAdapterError(
+      'E_BAD_QUERY',
+      `graph-frame has ${summaries.length} entities; limit is ${entityLimit}. Select a runtime/filter before rendering`,
+    );
+  }
+  const localEntityIds = new Set(
+    Array.from(ctx.env.eReplicas?.values?.() ?? [])
+      .map(replica => normalizeEntityId(replica.entityId)),
+  );
+  const entities: RuntimeAdapterGraphEntityFrame[] = [];
+  let accountObservationCount = 0;
+  for (const summary of summaries) {
+    const entityId = normalizeEntityId(summary.entityId);
+    if (!localEntityIds.has(entityId)) {
+      entities.push({
+        summary,
+        core: null,
+        accounts: { items: [], ...emptyPageMeta(accountsLimit) },
+      });
+      continue;
+    }
+    const replica = findReplica(ctx.env, entityId);
+    if (!replica) {
+      throw new RuntimeAdapterError(
+        'E_INTERNAL',
+        `live graph replica disappeared: ${entityId}`,
+      );
+    }
+    const totalAccounts = replica.state.accounts.size;
+    if (totalAccounts > accountsLimit) {
+      throw new RuntimeAdapterError(
+        'E_BAD_QUERY',
+        `graph-frame entity ${summary.entityId} has ${totalAccounts} accounts; limit is ${accountsLimit}. Select a runtime/filter before rendering`,
+      );
+    }
+    const live = projectLiveEntityViewPage(ctx, entityId, {
+      ...query,
+      accountsLimit,
+      booksLimit: 1,
+    });
+    accountObservationCount += live.accounts.items.length;
+    if (accountObservationCount > accountsLimit) {
+      throw new RuntimeAdapterError(
+        'E_BAD_QUERY',
+        `graph-frame has ${accountObservationCount} account observations; limit is ${accountsLimit}. Select a runtime/filter before rendering`,
+      );
+    }
+    const accountPage = { ...live.accounts };
+    delete accountPage.summary;
+    entities.push({
+      summary,
+      core: projectGraphEntityCore(live.core),
+      accounts: {
+        ...accountPage,
+        items: live.accounts.items.map(projectGraphAccount),
+      },
+    });
+  }
+  return { summaries, entities };
+};
+
+const appendGraphAccountEndpoints = (
+  entities: RuntimeAdapterGraphEntityFrame[],
+  entityLimit: number,
+  accountsLimit: number,
+  runtimeId: string,
+  height: number,
+): void => {
+  const knownEntityIds = new Set(
+    entities.map(entity => normalizeEntityId(entity.summary.entityId)),
+  );
+  for (const entity of [...entities]) {
+    for (const account of entity.accounts.items) {
+      for (const endpoint of [account.leftEntity, account.rightEntity]) {
+        const entityId = normalizeEntityId(endpoint);
+        if (!entityId || knownEntityIds.has(entityId)) continue;
+        if (entities.length >= entityLimit) {
+          throw new RuntimeAdapterError(
+            'E_BAD_QUERY',
+            `graph-frame has more than ${entityLimit} account endpoints. Select a runtime/filter before rendering`,
+          );
+        }
+        knownEntityIds.add(entityId);
+        entities.push({
+          summary: {
+            entityId,
+            ...(runtimeId ? { runtimeId } : {}),
+            label: entityId,
+            height,
+          },
+          core: null,
+          accounts: { items: [], ...emptyPageMeta(accountsLimit) },
+        });
+      }
+    }
+  }
+  entities.sort((left, right) =>
+    compareAscii(left.summary.entityId, right.summary.entityId),
+  );
+};
+
 const projectGraphFrame = async (
   ctx: RuntimeAdapterResolveContext,
   query?: RuntimeAdapterReadQuery,
@@ -1497,60 +1611,9 @@ const projectGraphFrame = async (
   // historical storage query. Capture every graph DTO before the first await:
   // snapshot publication may legitimately prune the old diff chain while this
   // request is in flight, and the live RuntimeState is replaced at each committed frame.
-  const capturedLive = isLiveQuery ? (() => {
-    const summaries = listLiveEntitySummaries(ctx);
-    if (summaries.length > entityLimit) {
-      throw new RuntimeAdapterError(
-        'E_BAD_QUERY',
-        `graph-frame has ${summaries.length} entities; limit is ${entityLimit}. Select a runtime/filter before rendering`,
-      );
-    }
-    const localEntityIds = new Set(
-      Array.from(ctx.env.eReplicas?.values?.() ?? []).map((replica) => normalizeEntityId(replica.entityId)),
-    );
-    const entities: RuntimeAdapterGraphEntityFrame[] = [];
-    let accountObservationCount = 0;
-    for (const summary of summaries) {
-      const normalizedEntityId = normalizeEntityId(summary.entityId);
-      if (!localEntityIds.has(normalizedEntityId)) {
-        entities.push({
-          summary,
-          core: null,
-          accounts: { items: [], ...emptyPageMeta(accountsLimit) },
-        });
-        continue;
-      }
-      const replica = findReplica(ctx.env, normalizedEntityId);
-      if (!replica) throw new RuntimeAdapterError('E_INTERNAL', `live graph replica disappeared: ${normalizedEntityId}`);
-      const totalAccounts = replica.state.accounts.size;
-      if (totalAccounts > accountsLimit) {
-        throw new RuntimeAdapterError(
-          'E_BAD_QUERY',
-          `graph-frame entity ${summary.entityId} has ${totalAccounts} accounts; limit is ${accountsLimit}. Select a runtime/filter before rendering`,
-        );
-      }
-      const live = projectLiveEntityViewPage(ctx, normalizedEntityId, {
-        ...query,
-        accountsLimit,
-        booksLimit: 1,
-      });
-      accountObservationCount += live.accounts.items.length;
-      if (accountObservationCount > accountsLimit) {
-        throw new RuntimeAdapterError(
-          'E_BAD_QUERY',
-          `graph-frame has ${accountObservationCount} account observations; limit is ${accountsLimit}. Select a runtime/filter before rendering`,
-        );
-      }
-      const accountPage = { ...live.accounts };
-      delete accountPage.summary;
-      entities.push({
-        summary,
-        core: projectGraphEntityCore(live.core),
-        accounts: { ...accountPage, items: live.accounts.items.map(projectGraphAccount) },
-      });
-    }
-    return { summaries, entities };
-  })() : null;
+  const capturedLive = isLiveQuery
+    ? captureLiveGraph(ctx, query, entityLimit, accountsLimit)
+    : null;
 
   if (!isLiveQuery && !ctx.readHead) {
     throw new RuntimeAdapterError('E_INTERNAL', 'storage head reader is required for historical graph reads');
@@ -1607,33 +1670,13 @@ const projectGraphFrame = async (
     }
   }
 
-  const knownEntityIds = new Set(entities.map((entity) => normalizeEntityId(entity.summary.entityId)));
-  for (const entity of [...entities]) {
-    for (const account of entity.accounts.items) {
-      for (const endpoint of [account.leftEntity, account.rightEntity]) {
-        const endpointId = normalizeEntityId(endpoint);
-        if (!endpointId || knownEntityIds.has(endpointId)) continue;
-        if (entities.length >= entityLimit) {
-          throw new RuntimeAdapterError(
-            'E_BAD_QUERY',
-            `graph-frame has more than ${entityLimit} account endpoints. Select a runtime/filter before rendering`,
-          );
-        }
-        knownEntityIds.add(endpointId);
-        entities.push({
-          summary: {
-            entityId: endpointId,
-            ...(capturedRuntimeId ? { runtimeId: capturedRuntimeId } : {}),
-            label: endpointId,
-            height,
-          },
-          core: null,
-          accounts: { items: [], ...emptyPageMeta(accountsLimit) },
-        });
-      }
-    }
-  }
-  entities.sort((left, right) => compareAscii(left.summary.entityId, right.summary.entityId));
+  appendGraphAccountEndpoints(
+    entities,
+    entityLimit,
+    accountsLimit,
+    capturedRuntimeId,
+    height,
+  );
 
   const record = ctx.readFrame ? await ctx.readFrame(height) : null;
   const fallbackTimestamp = entities.reduce(

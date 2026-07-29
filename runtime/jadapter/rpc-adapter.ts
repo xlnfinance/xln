@@ -121,6 +121,17 @@ import {
   type UntypedNonPayableMethod,
 } from './rpc-boundary';
 
+const requireWatcherBlockHash = (
+  events: readonly JEventIngress[],
+  blockNumber: number,
+): string => {
+  const blockHash = events[0]?.blockHash;
+  if (!blockHash) {
+    throw new Error(`J_EVENT_WATCHER_BLOCK_HASH_MISSING:${blockNumber}`);
+  }
+  return blockHash;
+};
+
 export async function createRpcAdapter(
   config: JAdapterConfig,
   provider: ethers.JsonRpcProvider,
@@ -2165,7 +2176,7 @@ export async function createRpcAdapter(
                 byBlock.get(bn)!.push(e);
               }
               for (const [blockNum, events] of byBlock) {
-                const blockHash = events[0]?.blockHash ?? '0x0';
+                const blockHash = requireWatcherBlockHash(events, blockNum);
                 pollStep = `processEventBatch:${blockNum}`;
                 const builtInput = processEventBatch(
                   events,

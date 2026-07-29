@@ -25,8 +25,6 @@ const COORDINATOR_DEBT: Readonly<Record<string, number>> = {
   'runtime/orchestrator/mm-node-run.ts::waitForBootstrapOffers': 207,
   'runtime/orchestrator/orchestrator.ts::computeAggregatedHealth': 270,
   'runtime/orchestrator/orchestrator.ts::fetch': 388,
-  'runtime/radapter/resolve.ts::projectGraphFrame': 175,
-  'runtime/radapter/server.ts::handleRuntimeAdapterMessage': 302,
 };
 
 type FunctionSize = {

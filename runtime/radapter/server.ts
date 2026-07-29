@@ -466,6 +466,552 @@ export const attachRuntimeAdapterTicker = (
   detachEnvChange = registerEnvChangeCallback(env, broadcastRuntimeAdapterTick);
 };
 
+type RuntimeAdapterRequestByOp<Op extends RuntimeAdapterRequest['op']> =
+  Extract<RuntimeAdapterRequest, { op: Op }>;
+
+type RuntimeAdapterDiagnostic = () => RuntimeAdapterResponseDiagnostic;
+
+const handleRuntimeAdapterAuth = (
+  ws: RuntimeAdapterSocket,
+  msg: RuntimeAdapterRequestByOp<'auth'>,
+  env: RuntimeState,
+  state: AdapterClientState,
+  diagnostic: RuntimeAdapterDiagnostic,
+): void => {
+  state.authLevel = null;
+  state.authExpiresAtMs = null;
+  state.commandLaneId = null;
+  state.commandLaneKind = null;
+  state.commandFrontierExpiresAtMs = null;
+  const auth = verifyRuntimeAdapterAuthCredential(
+    resolveRuntimeAdapterAuthSeed(env),
+    msg.key,
+    {
+      audience: resolveRuntimeAdapterAuthAudience(env),
+      revokedTokenIds: runtimeAdapterRevokedTokenIds(),
+    },
+  );
+  if (!auth) {
+    throw new RuntimeAdapterError(
+      'E_UNAUTHORIZED',
+      'invalid runtime adapter auth key',
+    );
+  }
+  let challenge: string;
+  try {
+    challenge = normalizeRuntimeAdapterIdentityChallenge(msg.challenge);
+  } catch {
+    throw new RuntimeAdapterError(
+      'E_BAD_QUERY',
+      'runtime adapter auth challenge must be 32-byte hex',
+    );
+  }
+  const identity = signRuntimeAdapterServerIdentity(env, challenge);
+  const ownerSignature =
+    typeof msg.ownerSignature === 'string' ? msg.ownerSignature.trim() : '';
+  if (
+    ownerSignature &&
+    !verifyRuntimeAdapterOwnerBinding(
+      identity.runtimeId,
+      challenge,
+      String(msg.key || ''),
+      ownerSignature,
+    )
+  ) {
+    throw new RuntimeAdapterError(
+      'E_UNAUTHORIZED',
+      'runtime adapter vault-owner binding is invalid',
+    );
+  }
+  const commandLaneKind = ownerSignature ? 'owner' : 'capability';
+  state.authLevel = auth.level;
+  state.authExpiresAtMs = auth.expiresAtMs;
+  state.commandLaneKind = commandLaneKind;
+  state.commandLaneId =
+    commandLaneKind === 'owner'
+      ? runtimeAdapterOwnerCommandLaneId(identity.runtimeId)
+      : runtimeAdapterCommandLaneId(auth.keyId, auth.tokenId);
+  state.commandFrontierExpiresAtMs =
+    commandLaneKind === 'owner' ? null : auth.expiresAtMs;
+  prunePendingCommands(env);
+  const commandFrontier = readRuntimeAdapterCommandFrontier(
+    env,
+    state.commandLaneId,
+  );
+  const readiness = getRuntimeCommandReadiness(env);
+  sendOk(
+    ws,
+    msg.id,
+    {
+      authLevel: auth.level,
+      commandLaneKind,
+      expiresAtMs: auth.expiresAtMs,
+      currentHeight: Math.max(0, Math.floor(Number(env.height ?? 0))),
+      commandReady: readiness.ready,
+      commandReadyReason: readiness.reason,
+      nextCommandSequence:
+        (commandFrontier?.lastContiguousSequence ?? 0) + 1,
+      ...identity,
+    },
+    diagnostic(),
+  );
+};
+
+const buildRuntimeAdapterReadContext = (
+  env: RuntimeState,
+  deps: RuntimeAdapterServerDeps,
+) => ({
+  env,
+  ...(deps.readHead
+    ? { readHead: () => deps.readHead?.(env) ?? Promise.resolve(null) }
+    : {}),
+  ...(deps.readFrame
+    ? {
+        readFrame: (height: number) =>
+          deps.readFrame?.(env, height) ?? Promise.resolve(null),
+      }
+    : {}),
+  ...(deps.listCheckpoints
+    ? {
+        listCheckpoints: () =>
+          deps.listCheckpoints?.(env) ?? Promise.resolve([]),
+      }
+    : {}),
+  ...(deps.loadEntityState
+    ? {
+        loadEntityState: (entityId: string, height: number) =>
+          deps.loadEntityState?.(env, entityId, height) ??
+          Promise.resolve(null),
+      }
+    : {}),
+  ...(deps.loadEntityAccountDoc
+    ? {
+        loadEntityAccountDoc: (
+          entityId: string,
+          counterpartyId: string,
+          height: number,
+        ) =>
+          deps.loadEntityAccountDoc?.(
+            env,
+            entityId,
+            counterpartyId,
+            height,
+          ) ?? Promise.resolve(null),
+      }
+    : {}),
+  ...(deps.loadEntityViewPage
+    ? {
+        loadEntityViewPage: (
+          entityId: string,
+          height: number,
+          query?: RuntimeAdapterReadQuery,
+        ) =>
+          deps.loadEntityViewPage?.(env, entityId, height, query) ??
+          Promise.resolve(null),
+      }
+    : {}),
+  ...(deps.listEntityIdsAtHeight
+    ? {
+        listEntityIdsAtHeight: (height: number) =>
+          deps.listEntityIdsAtHeight?.(env, height) ?? Promise.resolve([]),
+      }
+    : {}),
+  ...(deps.readActivityPage
+    ? {
+        readActivityPage: (
+          opts: RuntimeActivityFilters & {
+            beforeHeight?: number | undefined;
+            limit?: number | undefined;
+            scanLimit?: number | undefined;
+          },
+        ) =>
+          deps.readActivityPage?.(env, opts) ??
+          Promise.reject(
+            new RuntimeAdapterError(
+              'E_INTERNAL',
+              'activity reader did not return',
+            ),
+          ),
+      }
+    : {}),
+  ...(deps.readReceipt
+    ? { readReceipt: (id: string) => deps.readReceipt?.(id) ?? null }
+    : {}),
+  ...(deps.readFrameReceipts
+    ? {
+        readFrameReceipts: (query?: RuntimeAdapterReadQuery) =>
+          deps.readFrameReceipts?.(env, query) ??
+          Promise.reject(
+            new RuntimeAdapterError(
+              'E_INTERNAL',
+              'frame receipt reader did not return',
+            ),
+          ),
+      }
+    : {}),
+  ...(deps.findPaymentRoutes
+    ? {
+        findPaymentRoutes: (query?: RuntimeAdapterReadQuery) =>
+          deps.findPaymentRoutes?.(env, query) ??
+          Promise.reject(
+            new RuntimeAdapterError(
+              'E_INTERNAL',
+              'payment route reader did not return',
+            ),
+          ),
+      }
+    : {}),
+});
+
+const handleRuntimeAdapterRead = async (
+  ws: RuntimeAdapterSocket,
+  msg: RuntimeAdapterRequestByOp<'read'>,
+  env: RuntimeState,
+  state: AdapterClientState,
+  deps: RuntimeAdapterServerDeps,
+  diagnostic: RuntimeAdapterDiagnostic,
+): Promise<void> => {
+  requireAuth(state, 'inspect');
+  requireBucket(state.readBucket, 'read');
+  const startedAt = Date.now();
+  const readDiagnostic = {
+    path: msg.path,
+    query: compactReadQueryForLog(msg.query),
+    runtimeId: String(env.runtimeId || '') || null,
+    height: Math.max(0, Math.floor(Number(env.height ?? 0))),
+  };
+  const pendingTimer = setTimeout(() => {
+    runtimeAdapterLog.warn('read.pending', {
+      ...readDiagnostic,
+      elapsedMs: Date.now() - startedAt,
+    });
+  }, RUNTIME_ADAPTER_PENDING_READ_LOG_MS);
+  try {
+    const payload = await resolveRuntimeAdapterRead(
+      buildRuntimeAdapterReadContext(env, deps),
+      msg.path,
+      msg.query,
+    );
+    const resolvedAt = Date.now();
+    sendOk(ws, msg.id, payload, diagnostic());
+    const completedAt = Date.now();
+    if (completedAt - startedAt >= RUNTIME_ADAPTER_PENDING_READ_LOG_MS) {
+      runtimeAdapterLog.warn('read.slow', {
+        ...readDiagnostic,
+        resolveMs: resolvedAt - startedAt,
+        encodeSendMs: completedAt - resolvedAt,
+        totalMs: completedAt - startedAt,
+      });
+    }
+  } finally {
+    clearTimeout(pendingTimer);
+  }
+};
+
+const requireMutatingRuntimeAdapterReady = (
+  env: RuntimeState,
+  deps: RuntimeAdapterServerDeps,
+): void => {
+  requireRuntimeCommandReady(env);
+  if (deps.isMutatingIngressReady?.() === false) {
+    throw new RuntimeAdapterError(
+      'E_COMMAND_PENDING',
+      'RUNTIME_STARTUP_J_CATCHUP_PENDING',
+      true,
+      250,
+    );
+  }
+};
+
+const handleRuntimeAdapterCrossJIntent = async (
+  ws: RuntimeAdapterSocket,
+  msg: RuntimeAdapterRequestByOp<'cross-j-intent'>,
+  env: RuntimeState,
+  state: AdapterClientState,
+  deps: RuntimeAdapterServerDeps,
+  diagnostic: RuntimeAdapterDiagnostic,
+): Promise<void> => {
+  requireAuth(state, 'admin');
+  requireBucket(state.sendBucket, 'send');
+  requireMutatingRuntimeAdapterReady(env, deps);
+  if (!deps.submitCrossJurisdictionIntent) {
+    throw new RuntimeAdapterError(
+      'E_INTERNAL',
+      'cross-j intent transport is unavailable',
+    );
+  }
+  await deps.submitCrossJurisdictionIntent(env, msg.route);
+  sendOk(ws, msg.id, { delivered: true }, diagnostic());
+};
+
+const handleRuntimeAdapterControl = async (
+  ws: RuntimeAdapterSocket,
+  msg: RuntimeAdapterRequestByOp<'control'>,
+  env: RuntimeState,
+  state: AdapterClientState,
+  deps: RuntimeAdapterServerDeps,
+  diagnostic: RuntimeAdapterDiagnostic,
+): Promise<void> => {
+  requireAuth(state, 'admin');
+  requireBucket(state.sendBucket, 'control');
+  if (!deps.controlRuntime) {
+    throw new RuntimeAdapterError(
+      'E_INTERNAL',
+      'runtime admin control is unavailable',
+    );
+  }
+  sendOk(
+    ws,
+    msg.id,
+    await deps.controlRuntime(env, msg.action),
+    diagnostic(),
+  );
+};
+
+const sendCommittedRuntimeAdapterCommand = (
+  ws: RuntimeAdapterSocket,
+  msg: RuntimeAdapterRequestByOp<'send'>,
+  env: RuntimeState,
+  laneId: string,
+  commandId: string,
+  commandSequence: number,
+  inputHash: string,
+  diagnostic: RuntimeAdapterDiagnostic,
+): boolean => {
+  const committed = readRuntimeAdapterCommandFrontier(env, laneId);
+  const committedSequence = committed?.lastContiguousSequence ?? 0;
+  if (commandSequence > committedSequence) return false;
+  if (
+    commandSequence === committedSequence &&
+    (committed?.lastInputHash !== inputHash ||
+      committed.lastCommandId !== commandId)
+  ) {
+    throw new RuntimeAdapterError(
+      'E_BAD_QUERY',
+      'runtime adapter commandId was reused with a different payload',
+    );
+  }
+  sendOk(
+    ws,
+    msg.id,
+    {
+      height:
+        committed?.observedHeight ??
+        Math.max(0, Math.floor(Number(env.height ?? 0))),
+      status: 'observed',
+      commandSequence,
+    },
+    diagnostic(),
+  );
+  return true;
+};
+
+const sendPendingRuntimeAdapterCommand = (
+  ws: RuntimeAdapterSocket,
+  msg: RuntimeAdapterRequestByOp<'send'>,
+  pending: PendingRuntimeAdapterCommand | undefined,
+  commandId: string,
+  commandSequence: number,
+  inputHash: string,
+  diagnostic: RuntimeAdapterDiagnostic,
+): boolean => {
+  if (!pending) return false;
+  if (
+    pending.sequence === commandSequence &&
+    pending.commandId === commandId &&
+    pending.inputHash === inputHash
+  ) {
+    sendOk(ws, msg.id, structuredClone(pending.result), diagnostic());
+    return true;
+  }
+  if (pending.sequence === commandSequence) {
+    throw new RuntimeAdapterError(
+      'E_COMMAND_PENDING',
+      'runtime adapter command sequence is occupied by another pending command',
+      true,
+      250,
+    );
+  }
+  throw new RuntimeAdapterError(
+    'E_COMMAND_PENDING',
+    `runtime adapter command ${pending.sequence} is not durable yet`,
+    true,
+    250,
+  );
+};
+
+const assertRuntimeAdapterCommandCapacity = (
+  env: RuntimeState,
+  laneId: string,
+): void => {
+  if (readRuntimeAdapterCommandFrontier(env, laneId)) return;
+  const activeLaneCount = countActiveRuntimeAdapterCommandLanes(env);
+  const pendingLaneCount = countUncommittedPendingLanes(env);
+  if (
+    activeLaneCount + pendingLaneCount <
+    MAX_ACTIVE_RUNTIME_ADAPTER_COMMAND_LANES
+  ) {
+    return;
+  }
+  throw new RuntimeAdapterError(
+    'E_RATE_LIMITED',
+    `runtime adapter active command lane capacity exceeded: ${activeLaneCount + pendingLaneCount}`,
+    true,
+    1_000,
+  );
+};
+
+const enqueueRuntimeAdapterCommand = (
+  ws: RuntimeAdapterSocket,
+  msg: RuntimeAdapterRequestByOp<'send'>,
+  env: RuntimeState,
+  deps: RuntimeAdapterServerDeps,
+  laneId: string,
+  commandId: string,
+  commandSequence: number,
+  inputHash: string,
+  expiresAtMs: number | null,
+  diagnostic: RuntimeAdapterDiagnostic,
+): void => {
+  if (
+    msg.input.runtimeTxs.some(
+      tx => tx.type === 'recordRuntimeAdapterCommand',
+    )
+  ) {
+    throw new RuntimeAdapterError(
+      'E_BAD_QUERY',
+      'runtime adapter command marker is server-internal',
+    );
+  }
+  const markedInput = structuredClone(msg.input);
+  const commandMarker = markLocalRuntimeAdapterCommandTx({
+    type: 'recordRuntimeAdapterCommand',
+    data: {
+      laneId,
+      sequence: commandSequence,
+      commandId,
+      inputHash,
+      expiresAtMs,
+    },
+  });
+  markedInput.runtimeTxs.push(commandMarker);
+  deps.validateRuntimeInputAdmission?.(env, markedInput);
+  const acceptedHeight = Math.max(0, Math.floor(Number(env.height ?? 0)));
+  deps.enqueueRuntimeInput(env, markedInput);
+  // The marker shares the exact Runtime frame with the command. It is the
+  // durable idempotency authority even when an Entity reducer canonicalizes
+  // or replaces the original financial input before commit.
+  const registeredReceipt = deps.registerReceipt?.({
+    kind: 'radapter-runtime-input',
+    counts: countRuntimeInput(markedInput),
+    enqueuedHeight: acceptedHeight,
+    inputFingerprints: fingerprintRuntimeIngressInput({
+      runtimeTxs: [commandMarker],
+      entityInputs: [],
+    }),
+    note: 'Runtime adapter command accepted into the runtime queue; poll account/entity projections for semantic commit details.',
+  });
+  const receipt = registeredReceipt
+    ? projectRuntimeIngressReceiptForWire(registeredReceipt)
+    : undefined;
+  const result = {
+    height: acceptedHeight,
+    status: 'pending' as const,
+    commandSequence,
+    ...(receipt ? { receipt } : {}),
+    ...(receipt && deps.buildRuntimeInputStatusUrl
+      ? { statusUrl: deps.buildRuntimeInputStatusUrl(receipt.id) }
+      : {}),
+  };
+  pendingCommandsFor(env).set(laneId, {
+    sequence: commandSequence,
+    commandId,
+    inputHash,
+    expiresAtMs,
+    result: structuredClone(result),
+  });
+  sendOk(ws, msg.id, result, diagnostic());
+};
+
+const handleRuntimeAdapterSend = (
+  ws: RuntimeAdapterSocket,
+  msg: RuntimeAdapterRequestByOp<'send'>,
+  env: RuntimeState,
+  state: AdapterClientState,
+  deps: RuntimeAdapterServerDeps,
+  diagnostic: RuntimeAdapterDiagnostic,
+): void => {
+  requireAuth(state, 'admin');
+  requireBucket(state.sendBucket, 'send');
+  requireMutatingRuntimeAdapterReady(env, deps);
+  const laneId = state.commandLaneId;
+  const expiresAtMs = state.commandFrontierExpiresAtMs;
+  if (
+    !laneId ||
+    !state.commandLaneKind ||
+    (state.commandLaneKind === 'capability' && !expiresAtMs)
+  ) {
+    throw new RuntimeAdapterError(
+      'E_UNAUTHORIZED',
+      'runtime adapter command lane is unavailable',
+    );
+  }
+  const commandId = normalizeCommandId(msg.commandId);
+  const commandSequence = commandSequenceOrThrow(msg.commandSequence);
+  const inputHash = runtimeInputHash(msg.input);
+  if (
+    sendCommittedRuntimeAdapterCommand(
+      ws,
+      msg,
+      env,
+      laneId,
+      commandId,
+      commandSequence,
+      inputHash,
+      diagnostic,
+    )
+  ) {
+    return;
+  }
+  const committedSequence =
+    readRuntimeAdapterCommandFrontier(env, laneId)?.lastContiguousSequence ?? 0;
+  const expectedSequence = committedSequence + 1;
+  if (commandSequence !== expectedSequence) {
+    throw new RuntimeAdapterError(
+      'E_COMMAND_PENDING',
+      `runtime adapter command sequence gap: expected=${expectedSequence} actual=${commandSequence}`,
+      true,
+      250,
+    );
+  }
+  if (
+    sendPendingRuntimeAdapterCommand(
+      ws,
+      msg,
+      reconcilePendingCommand(env, laneId),
+      commandId,
+      commandSequence,
+      inputHash,
+      diagnostic,
+    )
+  ) {
+    return;
+  }
+  assertRuntimeAdapterCommandCapacity(env, laneId);
+  enqueueRuntimeAdapterCommand(
+    ws,
+    msg,
+    env,
+    deps,
+    laneId,
+    commandId,
+    commandSequence,
+    inputHash,
+    expiresAtMs,
+    diagnostic,
+  );
+};
+
 export const handleRuntimeAdapterMessage = async (
   ws: RuntimeAdapterSocket,
   msg: RuntimeAdapterRequest,
@@ -499,266 +1045,48 @@ export const handleRuntimeAdapterMessage = async (
 
   try {
     if (msg.op === 'auth') {
-      state.authLevel = null;
-      state.authExpiresAtMs = null;
-      state.commandLaneId = null;
-      state.commandLaneKind = null;
-      state.commandFrontierExpiresAtMs = null;
-      const authSeed = resolveRuntimeAdapterAuthSeed(env);
-      const auth = verifyRuntimeAdapterAuthCredential(authSeed, msg.key, {
-        audience: resolveRuntimeAdapterAuthAudience(env),
-        revokedTokenIds: runtimeAdapterRevokedTokenIds(),
-      });
-      if (!auth) throw new RuntimeAdapterError('E_UNAUTHORIZED', 'invalid runtime adapter auth key');
-      let challenge: string;
-      try {
-        challenge = normalizeRuntimeAdapterIdentityChallenge(msg.challenge);
-      } catch {
-        throw new RuntimeAdapterError('E_BAD_QUERY', 'runtime adapter auth challenge must be 32-byte hex');
-      }
-      const identity = signRuntimeAdapterServerIdentity(env, challenge);
-      const ownerSignature = typeof msg.ownerSignature === 'string'
-        ? msg.ownerSignature.trim()
-        : '';
-      if (ownerSignature && !verifyRuntimeAdapterOwnerBinding(
-        identity.runtimeId,
-        challenge,
-        String(msg.key || ''),
-        ownerSignature,
-      )) {
-        throw new RuntimeAdapterError('E_UNAUTHORIZED', 'runtime adapter vault-owner binding is invalid');
-      }
-      const commandLaneKind = ownerSignature ? 'owner' as const : 'capability' as const;
-      state.authLevel = auth.level;
-      state.authExpiresAtMs = auth.expiresAtMs;
-      state.commandLaneKind = commandLaneKind;
-      state.commandLaneId = commandLaneKind === 'owner'
-        ? runtimeAdapterOwnerCommandLaneId(identity.runtimeId)
-        : runtimeAdapterCommandLaneId(auth.keyId, auth.tokenId);
-      state.commandFrontierExpiresAtMs = commandLaneKind === 'owner' ? null : auth.expiresAtMs;
-      prunePendingCommands(env);
-      const commandFrontier = readRuntimeAdapterCommandFrontier(env, state.commandLaneId);
-      const readiness = getRuntimeCommandReadiness(env);
-      sendOk(ws, msg.id, {
-        authLevel: auth.level,
-        commandLaneKind,
-        expiresAtMs: auth.expiresAtMs,
-        currentHeight: Math.max(0, Math.floor(Number(env.height ?? 0))),
-        commandReady: readiness.ready,
-        commandReadyReason: readiness.reason,
-        nextCommandSequence: (commandFrontier?.lastContiguousSequence ?? 0) + 1,
-        ...identity,
-      }, diagnostic());
+      handleRuntimeAdapterAuth(ws, msg, env, state, diagnostic);
       return true;
     }
 
     if (msg.op === 'read') {
-      requireAuth(state, 'inspect');
-      requireBucket(state.readBucket, 'read');
-      const startedAt = Date.now();
-      const readDiagnostic = {
-        path: msg.path,
-        query: compactReadQueryForLog(msg.query),
-        runtimeId: String(env.runtimeId || '') || null,
-        height: Math.max(0, Math.floor(Number(env.height ?? 0))),
-      };
-      const pendingTimer = setTimeout(() => {
-        runtimeAdapterLog.warn('read.pending', {
-          ...readDiagnostic,
-          elapsedMs: Date.now() - startedAt,
-        });
-      }, RUNTIME_ADAPTER_PENDING_READ_LOG_MS);
-      try {
-        const payload = await resolveRuntimeAdapterRead({
-          env,
-          ...(deps.readHead ? { readHead: () => deps.readHead?.(env) ?? Promise.resolve(null) } : {}),
-          ...(deps.readFrame ? { readFrame: (height) => deps.readFrame?.(env, height) ?? Promise.resolve(null) } : {}),
-          ...(deps.listCheckpoints ? { listCheckpoints: () => deps.listCheckpoints?.(env) ?? Promise.resolve([]) } : {}),
-          ...(deps.loadEntityState ? { loadEntityState: (entityId, height) => deps.loadEntityState?.(env, entityId, height) ?? Promise.resolve(null) } : {}),
-          ...(deps.loadEntityAccountDoc ? { loadEntityAccountDoc: (entityId, counterpartyId, height) => deps.loadEntityAccountDoc?.(env, entityId, counterpartyId, height) ?? Promise.resolve(null) } : {}),
-          ...(deps.loadEntityViewPage ? { loadEntityViewPage: (entityId, height, query) => deps.loadEntityViewPage?.(env, entityId, height, query) ?? Promise.resolve(null) } : {}),
-          ...(deps.listEntityIdsAtHeight ? { listEntityIdsAtHeight: (height) => deps.listEntityIdsAtHeight?.(env, height) ?? Promise.resolve([]) } : {}),
-          ...(deps.readActivityPage ? { readActivityPage: (opts) => deps.readActivityPage?.(env, opts) ?? Promise.reject(new RuntimeAdapterError('E_INTERNAL', 'activity reader did not return')) } : {}),
-          ...(deps.readReceipt ? { readReceipt: (id) => deps.readReceipt?.(id) ?? null } : {}),
-          ...(deps.readFrameReceipts ? {
-            readFrameReceipts: (query?: RuntimeAdapterReadQuery) =>
-              deps.readFrameReceipts?.(env, query) ?? Promise.reject(new RuntimeAdapterError('E_INTERNAL', 'frame receipt reader did not return')),
-          } : {}),
-          ...(deps.findPaymentRoutes ? {
-            findPaymentRoutes: (query?: RuntimeAdapterReadQuery) =>
-              deps.findPaymentRoutes?.(env, query) ?? Promise.reject(new RuntimeAdapterError('E_INTERNAL', 'payment route reader did not return')),
-          } : {}),
-        }, msg.path, msg.query);
-        const resolvedAt = Date.now();
-        sendOk(ws, msg.id, payload, diagnostic());
-        const completedAt = Date.now();
-        if (completedAt - startedAt >= RUNTIME_ADAPTER_PENDING_READ_LOG_MS) {
-          runtimeAdapterLog.warn('read.slow', {
-            ...readDiagnostic,
-            resolveMs: resolvedAt - startedAt,
-            encodeSendMs: completedAt - resolvedAt,
-            totalMs: completedAt - startedAt,
-          });
-        }
-      } finally {
-        clearTimeout(pendingTimer);
-      }
+      await handleRuntimeAdapterRead(
+        ws,
+        msg,
+        env,
+        state,
+        deps,
+        diagnostic,
+      );
       return true;
     }
 
     if (msg.op === 'cross-j-intent') {
-      requireAuth(state, 'admin');
-      requireBucket(state.sendBucket, 'send');
-      requireRuntimeCommandReady(env);
-      if (deps.isMutatingIngressReady?.() === false) {
-        throw new RuntimeAdapterError(
-          'E_COMMAND_PENDING',
-          'RUNTIME_STARTUP_J_CATCHUP_PENDING',
-          true,
-          250,
-        );
-      }
-      if (!deps.submitCrossJurisdictionIntent) {
-        throw new RuntimeAdapterError('E_INTERNAL', 'cross-j intent transport is unavailable');
-      }
-      await deps.submitCrossJurisdictionIntent(env, msg.route);
-      sendOk(ws, msg.id, { delivered: true }, diagnostic());
+      await handleRuntimeAdapterCrossJIntent(
+        ws,
+        msg,
+        env,
+        state,
+        deps,
+        diagnostic,
+      );
       return true;
     }
 
     if (msg.op === 'control') {
-      requireAuth(state, 'admin');
-      requireBucket(state.sendBucket, 'control');
-      if (!deps.controlRuntime) {
-        throw new RuntimeAdapterError('E_INTERNAL', 'runtime admin control is unavailable');
-      }
-      sendOk(ws, msg.id, await deps.controlRuntime(env, msg.action), diagnostic());
+      await handleRuntimeAdapterControl(
+        ws,
+        msg,
+        env,
+        state,
+        deps,
+        diagnostic,
+      );
       return true;
     }
 
     if (msg.op === 'send') {
-      requireAuth(state, 'admin');
-      requireBucket(state.sendBucket, 'send');
-      requireRuntimeCommandReady(env);
-      if (deps.isMutatingIngressReady?.() === false) {
-        throw new RuntimeAdapterError(
-          'E_COMMAND_PENDING',
-          'RUNTIME_STARTUP_J_CATCHUP_PENDING',
-          true,
-          250,
-        );
-      }
-      const laneId = state.commandLaneId;
-      const expiresAtMs = state.commandFrontierExpiresAtMs;
-      if (!laneId || !state.commandLaneKind || (state.commandLaneKind === 'capability' && !expiresAtMs)) {
-        throw new RuntimeAdapterError('E_UNAUTHORIZED', 'runtime adapter command lane is unavailable');
-      }
-      const commandId = normalizeCommandId(msg.commandId);
-      const commandSequence = commandSequenceOrThrow(msg.commandSequence);
-      const inputHash = runtimeInputHash(msg.input);
-      const committed = readRuntimeAdapterCommandFrontier(env, laneId);
-      const committedSequence = committed?.lastContiguousSequence ?? 0;
-      if (commandSequence <= committedSequence) {
-        if (
-          commandSequence === committedSequence
-          && (committed?.lastInputHash !== inputHash || committed.lastCommandId !== commandId)
-        ) {
-          throw new RuntimeAdapterError('E_BAD_QUERY', 'runtime adapter commandId was reused with a different payload');
-        }
-        sendOk(ws, msg.id, {
-          height: committed?.observedHeight ?? Math.max(0, Math.floor(Number(env.height ?? 0))),
-          status: 'observed',
-          commandSequence,
-        }, diagnostic());
-        return true;
-      }
-      const expectedSequence = committedSequence + 1;
-      if (commandSequence !== expectedSequence) {
-        throw new RuntimeAdapterError(
-          'E_COMMAND_PENDING',
-          `runtime adapter command sequence gap: expected=${expectedSequence} actual=${commandSequence}`,
-          true,
-          250,
-        );
-      }
-      const pending = reconcilePendingCommand(env, laneId);
-      if (pending) {
-        if (
-          pending.sequence === commandSequence
-          && pending.commandId === commandId
-          && pending.inputHash === inputHash
-        ) {
-          sendOk(ws, msg.id, structuredClone(pending.result), diagnostic());
-          return true;
-        }
-        if (pending.sequence === commandSequence) {
-          throw new RuntimeAdapterError(
-            'E_COMMAND_PENDING',
-            'runtime adapter command sequence is occupied by another pending command',
-            true,
-            250,
-          );
-        }
-        throw new RuntimeAdapterError(
-          'E_COMMAND_PENDING',
-          `runtime adapter command ${pending.sequence} is not durable yet`,
-          true,
-          250,
-        );
-      }
-      const activeLaneCount = countActiveRuntimeAdapterCommandLanes(env);
-      const pendingLaneCount = countUncommittedPendingLanes(env);
-      if (!committed && activeLaneCount + pendingLaneCount >= MAX_ACTIVE_RUNTIME_ADAPTER_COMMAND_LANES) {
-        throw new RuntimeAdapterError(
-          'E_RATE_LIMITED',
-          `runtime adapter active command lane capacity exceeded: ${activeLaneCount + pendingLaneCount}`,
-          true,
-          1_000,
-        );
-      }
-      if (msg.input.runtimeTxs.some(tx => tx.type === 'recordRuntimeAdapterCommand')) {
-        throw new RuntimeAdapterError('E_BAD_QUERY', 'runtime adapter command marker is server-internal');
-      }
-      const markedInput = structuredClone(msg.input);
-      const commandMarker = markLocalRuntimeAdapterCommandTx({
-        type: 'recordRuntimeAdapterCommand',
-        data: { laneId, sequence: commandSequence, commandId, inputHash, expiresAtMs },
-      });
-      markedInput.runtimeTxs.push(commandMarker);
-      deps.validateRuntimeInputAdmission?.(env, markedInput);
-      const acceptedHeight = Math.max(0, Math.floor(Number(env.height ?? 0)));
-      deps.enqueueRuntimeInput(env, markedInput);
-      const registeredReceipt = deps.registerReceipt?.({
-        kind: 'radapter-runtime-input',
-        counts: countRuntimeInput(markedInput),
-        enqueuedHeight: acceptedHeight,
-        // HTLC ingress intentionally replaces the raw payment with its sealed
-        // proposer-authored envelope before commit. The server marker is in the
-        // same R-frame and is the immutable authority for observed/retry state.
-        inputFingerprints: fingerprintRuntimeIngressInput({
-          runtimeTxs: [commandMarker],
-          entityInputs: [],
-        }),
-        note: 'Runtime adapter command accepted into the runtime queue; poll account/entity projections for semantic commit details.',
-      });
-      const receipt = registeredReceipt
-        ? projectRuntimeIngressReceiptForWire(registeredReceipt)
-        : undefined;
-      const result = {
-        height: acceptedHeight,
-        status: 'pending' as const,
-        commandSequence,
-        ...(receipt ? { receipt } : {}),
-        ...(receipt && deps.buildRuntimeInputStatusUrl ? { statusUrl: deps.buildRuntimeInputStatusUrl(receipt.id) } : {}),
-      };
-      pendingCommandsFor(env).set(laneId, {
-        sequence: commandSequence,
-        commandId,
-        inputHash,
-        expiresAtMs,
-        result: structuredClone(result),
-      });
-      sendOk(ws, msg.id, result, diagnostic());
+      handleRuntimeAdapterSend(ws, msg, env, state, deps, diagnostic);
       return true;
     }
 
