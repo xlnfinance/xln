@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { readEntityFrameEventMessages } from '../state-helpers';
 
 import { accountInputProposal } from '../account/consensus/flush';
+import { replaceLocalDisputeDraft } from '../account/consensus/dispute-seal';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
 import { createSettlementWorkspaceHash } from '../account/tx/handlers/settle-transition';
 import {
@@ -343,6 +344,27 @@ const buildCertifiedBoardResealTx = async (
 };
 
 describe('multisig secondary Hanko production', () => {
+  test('invalidates the old Hanko when replacing a local dispute draft', () => {
+    const setup = createMultisigAccountState();
+    const account = setup.state.accounts.get(setup.counterpartyId);
+    if (!account) throw new Error('TEST_ACCOUNT_MISSING');
+    account.currentDisputeHash = digest('a');
+    account.currentDisputeProofBodyHash = digest('b');
+    account.currentDisputeProofNonce = 7;
+    account.currentDisputeProofHanko = '0xcafe';
+
+    replaceLocalDisputeDraft(account, {
+      hash: digest('c'),
+      proofBodyHash: digest('d'),
+      nonce: 8,
+    });
+
+    expect(account.currentDisputeHash).toBe(digest('c'));
+    expect(account.currentDisputeProofBodyHash).toBe(digest('d'));
+    expect(account.currentDisputeProofNonce).toBe(8);
+    expect(account.currentDisputeProofHanko).toBeUndefined();
+  });
+
   test('prepare cross-j output binds exact payload and requires real source-board quorum', async () => {
     const source = createMultisigAccountState(validators[0]);
     const route = {

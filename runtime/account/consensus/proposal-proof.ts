@@ -10,6 +10,7 @@ import {
   storeDisputeArgumentSnapshot,
 } from '../../protocol/dispute/arguments';
 import type { ProposeAccountFrameResult } from './types';
+import { replaceLocalDisputeDraft } from './dispute-seal';
 
 type DisputeProjection = {
   proof: ReturnType<typeof buildAccountProofBodyFromEnv>;
@@ -69,9 +70,11 @@ const persistDisputeProjection = (
   projection: DisputeProjection,
 ): void => {
   if (!projection.hash) return;
-  account.currentDisputeProofNonce = projection.nonce;
-  account.currentDisputeProofBodyHash = projection.proof.proofBodyHash;
-  account.currentDisputeHash = projection.hash;
+  replaceLocalDisputeDraft(account, {
+    hash: projection.hash,
+    nonce: projection.nonce,
+    proofBodyHash: projection.proof.proofBodyHash,
+  });
   account.disputeProofNoncesByHash ??= {};
   account.disputeProofNoncesByHash[projection.proof.proofBodyHash] = projection.nonce;
   account.disputeProofBodiesByHash ??= {};

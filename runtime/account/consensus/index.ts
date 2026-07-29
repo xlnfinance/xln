@@ -56,6 +56,7 @@ import { handlePendingFrameAck } from './ack-commit';
 import { assertLiveCommitMatchesFrame } from './commit-root';
 import {
   getDisputeSealRequirementError,
+  replaceLocalDisputeDraft,
   storeCounterpartyDisputeSeal,
   type ValidatedCounterpartyDisputeSeal,
   validateCounterpartyDisputeSeal,
@@ -612,9 +613,11 @@ async function buildIncomingFrameAckMaterial(
 
 function storeAckDisputeState(account: AccountState, material: IncomingFrameAckMaterial): void {
   if (material.proofChanged && material.ackDisputeHash) {
-    account.currentDisputeProofNonce = material.ackSignedNonce;
-    account.currentDisputeProofBodyHash = material.ackProofBodyHash;
-    account.currentDisputeHash = material.ackDisputeHash;
+    replaceLocalDisputeDraft(account, {
+      hash: material.ackDisputeHash,
+      nonce: material.ackSignedNonce,
+      proofBodyHash: material.ackProofBodyHash,
+    });
   }
 }
 

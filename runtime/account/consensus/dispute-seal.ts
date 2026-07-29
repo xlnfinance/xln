@@ -22,6 +22,30 @@ export type ValidatedCounterpartyDisputeSeal = {
   proofBodyHash: string;
 };
 
+export type LocalDisputeDraft = {
+  hash: string;
+  nonce: number;
+  proofBodyHash: string;
+};
+
+/**
+ * Replace the unsigned local dispute draft as one transition.
+ *
+ * A Hanko certifies one exact hash. Keeping the previous witness while
+ * replacing its hash/body/nonce would make the Account state claim that an old
+ * signature authorizes a new proof. Entity consensus attaches the replacement
+ * witness only after the new draft reaches quorum.
+ */
+export const replaceLocalDisputeDraft = (
+  account: AccountState,
+  draft: LocalDisputeDraft,
+): void => {
+  delete account.currentDisputeProofHanko;
+  account.currentDisputeHash = draft.hash;
+  account.currentDisputeProofBodyHash = draft.proofBodyHash;
+  account.currentDisputeProofNonce = draft.nonce;
+};
+
 /**
  * Verify the peer witness against the exact Solidity dispute message.
  *
