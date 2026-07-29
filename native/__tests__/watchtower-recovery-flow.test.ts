@@ -20,15 +20,27 @@ import {
 import { createDefaultDelta } from '../../runtime/account/delta';
 import type { AccountState } from '../../runtime/types';
 import { runWatchtowerSweep } from '../../runtime/watchtower/action';
-import { dbRootPath } from '../../runtime/runtime/platform';
+import {
+  resolveDbPath,
+  resolveHistoryViewDbPath,
+  resolveRuntimeWalDbPath,
+  resolveStorageDbPath,
+  resolveStorageWriterLockPath,
+} from '../../runtime/storage/runtime-dbs';
 
 const addr = (byte: string): string => `0x${byte.repeat(20)}`;
 const servers: StandaloneWatchtowerServer[] = [];
 const tempRoots: string[] = [];
-const resetRuntimeStorage = async (namespace: string): Promise<void> => {
-  const basePath = join(dbRootPath, namespace);
-  const paths = ['', '-storage-current', '-storage-previous', '-frames', '-events', '-infra']
-    .map((suffix) => `${basePath}${suffix}`);
+const resetRuntimeStorage = async (env: ReturnType<typeof xln.createEmptyEnv>): Promise<void> => {
+  const paths = [
+    resolveDbPath(env),
+    resolveDbPath(env, 'infra'),
+    resolveStorageDbPath(env, 'current'),
+    resolveStorageDbPath(env, 'previous'),
+    resolveRuntimeWalDbPath(env),
+    resolveHistoryViewDbPath(env),
+    resolveStorageWriterLockPath(env),
+  ];
   await Promise.all(paths.map((path) => rm(path, { recursive: true, force: true })));
   tempRoots.push(...paths);
 };
@@ -218,8 +230,11 @@ describe('watchtower recovery full flow', () => {
     env.runtimeId = runtimeId;
     const sourceDbNamespace = `${runtimeId}-${Date.now()}-restore-flow`;
     env.dbNamespace = sourceDbNamespace;
-    await resetRuntimeStorage(runtimeId);
-    await resetRuntimeStorage(sourceDbNamespace);
+    const restoreTarget = xln.createEmptyEnv(runtimeSeed);
+    restoreTarget.runtimeId = runtimeId;
+    restoreTarget.dbNamespace = runtimeId;
+    await resetRuntimeStorage(restoreTarget);
+    await resetRuntimeStorage(env);
     env.quietRuntimeLogs = true;
     const jurisdictionName = 'RestoreFlow';
     const entityId = xln.generateLazyEntityId([runtimeId], 1n).toLowerCase();

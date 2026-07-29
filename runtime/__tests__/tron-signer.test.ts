@@ -1,10 +1,15 @@
 import { describe, expect, test } from 'bun:test';
+import { createRequire } from 'node:module';
 import { ethers } from 'ethers';
-import { TronWeb } from 'tronweb';
 import { createXlnJsonRpcProvider, resolveJAdapterPrivateKey } from '../jadapter';
 import { createTronSigner, TronSigner } from '../jadapter/tron-signer';
 
 const PRIVATE_KEY = `0x${'11'.repeat(32)}`;
+// Match the production boundary. TronWeb 6.4's published ESM protobuf bundle
+// relies on undeclared global `proto`; its CommonJS export owns that bootstrap
+// correctly and remains deterministic when Bun loads the full test graph.
+const tronWebModule: typeof import('tronweb') = createRequire(import.meta.url)('tronweb');
+const { TronWeb } = tronWebModule;
 
 describe('TRON signer boundary', () => {
   test('requires an explicit watch-only boundary when a public-chain signer is absent', async () => {
