@@ -1,5 +1,3 @@
-import { ethers } from 'ethers';
-
 import type { JAdapter } from '../jadapter';
 import { withCanonicalCrossJurisdictionRouteHash } from '../extensions/cross-j/index';
 import { getJurisdictionStackId, requireEntityRuntimeJurisdictionConfig } from '../jurisdiction/jurisdiction-runtime';
@@ -23,7 +21,8 @@ export function getEntityJAdapter(env: RuntimeState, entityId: string, signerId?
 }
 
 export type CrossJurisdictionSwapSubmitParams = {
-  orderId?: string;
+  /** Caller-owned idempotency key. Retries must reuse the same identifier. */
+  orderId: string;
   sourceUserEntityId: string;
   sourceHubEntityId: string;
   targetHubEntityId: string;
@@ -61,6 +60,16 @@ export { buildDebtEnforcementRuntimeInputFromProjection };
 export type { DebtEnforcementProjectionRuntimeInputParams };
 
 const normalizeRuntimeEntityId = (entityId: string): string => String(entityId || '').toLowerCase();
+
+export const requireCrossJurisdictionOrderId = (value: string): string => {
+  const orderId = String(value).trim();
+  if (!orderId) throw new Error('CROSS_SWAP_ORDER_ID_REQUIRED');
+  if (orderId.includes('\0')) throw new Error('CROSS_SWAP_ORDER_ID_INVALID');
+  if (new TextEncoder().encode(orderId).byteLength > 256) {
+    throw new Error('CROSS_SWAP_ORDER_ID_TOO_LARGE');
+  }
+  return orderId;
+};
 
 const findEntityStateForRuntime = (env: RuntimeState, entityId: string, signerId?: string): EntityState | null => {
   const target = normalizeRuntimeEntityId(entityId);
@@ -146,7 +155,9 @@ const resolveCrossJurisdictionSwapContext = (
   }
   return {
     now,
-    orderId: params.orderId ?? `cross-${now}-${ethers.hexlify(ethers.randomBytes(4)).slice(2)}`,
+    // Runtime never invents a financial identity. The caller owns this
+    // idempotency key so an uncertain delivery can be retried safely.
+    orderId: requireCrossJurisdictionOrderId(params.orderId),
     sourceUserSignerId,
     sourceHubSignerId,
     targetHubSignerId,

@@ -72,11 +72,11 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   The later Claude audit of dirty `main@c4f9fab62836` was reverified on current
   `main`: its typed Runtime-ingress provenance bypass, non-exhaustive Account
   commitment invalidation, and orphaned same-height collision harness are
-  fixed with targeted evidence. Keep its remaining live findings in their
-  owning tasks below: per-offender quarantine granularity, the always-on cold
-  Account-root cost, an SCC-size ratchet, and typed Runtime frame/live field
-  ownership. Do not copy its stale path counts or reintroduce a second audit
-  backlog.
+  fixed with targeted evidence. Exact remote-input discard, exhaustive Account
+  commitment invalidation, hot-path root cost and the SCC-size ratchet now
+  have source/test evidence. Keep the remaining typed Runtime frame/live field
+  ownership task below. Do not copy stale path counts or reintroduce a second
+  audit backlog.
 - [ ] Make the audit surface mechanically legible after the function split.
   Keep production runtime at zero explicit `any`; drive the exact
   `as unknown as` debt and TypeScript suppression debt to zero through typed
@@ -241,8 +241,9 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   rebuildable; signed dispute/evidence records use an explicit longer
   retention class. Retain history forever by default. Pruning is an explicit
   local opt-in and requires a verified checkpoint before any frame body is
-  removed. The user-facing Activity stream contains committed facts only;
-  rejected/quarantined inputs belong to a separate Operations/Debug journal.
+  removed. The user-facing Activity stream contains committed facts only.
+  Rejected untrusted inputs are not durable data: emit bounded operational
+  metrics/logs without retaining their payloads in Runtime state or history.
 - [ ] Prove and fix the likely unilateral rebalance consensus wedge first.
   Reproduce bilateral request → reverse payment/self-pay → hub crontab and
   assert equal Account roots and pending state on both peers. Crontab must
@@ -299,14 +300,12 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   back frame may log locally but must be externally unobservable.
 - [ ] Make post-state Runtime ingress rejection explicit and deterministic.
   Inputs admitted against frame H may become stale after the single writer
-  commits H+1; classify authenticated terminal protocol rejection separately
-  from invariant/storage failure, consume or quarantine it exactly once, and
-  never turn an expected nonce/board/order conflict into a global Runtime
-  halt. A malformed authenticated remote `EntityInput` must quarantine only
-  that exact input; co-batched RuntimeTx/JInput/other EntityInput work remains
-  in original order and is committed or requeued normally. Locally generated
-  invariant failures must never enter the quarantine path. Keep failures loud
-  and add queued-writer stale-input/rotation and mixed-batch retention tests.
+  commits H+1. Classify expected authenticated nonce/board/order conflicts as
+  an explicit terminal protocol outcome, distinct from malformed ingress,
+  invariant faults and storage failure; consume the exact stale origin once
+  without halting Runtime. Add queued-writer stale-input and board-rotation
+  regressions. Malformed remote discard and mixed-batch retention are already
+  pinned and must remain unchanged.
 - [ ] Split remaining god-functions by protocol phase and failure boundary:
   `applyEntityInput`, `applyAccountInput`, Runtime scheduler/transport/storage,
   and RPC submit/watch/receipt. Target pure helpers below 50 lines,
