@@ -10,13 +10,14 @@ import { computeTowerLastResortPayloadDigest } from '../recovery/crypto';
 import { deserializeTaggedJson } from '../protocol/serialization';
 import {
   computeStoredLookupBytes,
+  emptyStoredDoc,
   ensureWatchtowerStoreOpen,
   normalizeLookupKey,
-  normalizeStoredDoc,
   readLookup,
   writeLookup,
 } from './store-db';
 import type { LastResortTowerAppointment, StoredLookupDoc, WatchtowerStoreContext } from './store-types';
+import { decodeStoredLookupDoc } from './store-decode';
 
 const towerModeOf = (appointment: TowerAppointmentV1): TowerModeV1 => normalizeTowerModeV1(appointment.towerMode);
 
@@ -88,7 +89,7 @@ export const upsertAppointment = async (
   const towerMode = towerModeOf(appointment);
   const slot = slotOf(appointment);
   validateAppointmentMode(appointment, towerMode);
-  const existing = normalizeStoredDoc(lookupKey, await readLookup(context, lookupKey));
+  const existing = await readLookup(context, lookupKey) ?? emptyStoredDoc(lookupKey);
   const runtimeId = String(appointment.bundle.runtimeId || '')
     .trim()
     .toLowerCase();
@@ -225,8 +226,7 @@ export const listLatestLastResortAppointments = async (
   await ensureWatchtowerStoreOpen(context);
   const appointments: LastResortTowerAppointment[] = [];
   for await (const [, raw] of context.db.iterator({ gte: 'lookup:', lte: 'lookup:\xff' })) {
-    const parsed = JSON.parse(String(raw)) as StoredLookupDoc;
-    const doc = normalizeStoredDoc(parsed.lookupKey, parsed);
+    const doc = decodeStoredLookupDoc(String(raw));
     const entry = doc.bundles
       .filter(candidate => candidate.towerMode === 'delayed_last_resort' && !!candidate.lastResortPayload)
       .sort(compareLastResortBundles)[0];

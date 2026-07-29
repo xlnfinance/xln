@@ -9,6 +9,7 @@ import type {
   WatchtowerStoreContext,
   WatchtowerStoreOptions,
 } from './store-types';
+import { decodeStoredLookupDoc, decodeStoredMetaStats } from './store-decode';
 
 const DEFAULT_MAX_BUNDLES = 3;
 const DEFAULT_MAX_STORED_BYTES = 4 * 1024 * 1024;
@@ -26,14 +27,12 @@ export const normalizeLookupKey = (lookupKey: string): string => {
   return normalized;
 };
 
-export const normalizeStoredDoc = (lookupKey: string, doc: StoredLookupDoc | null | undefined): StoredLookupDoc => ({
+export const emptyStoredDoc = (lookupKey: string): StoredLookupDoc => ({
   lookupKey,
-  runtimeId: String(doc?.runtimeId || '')
-    .trim()
-    .toLowerCase(),
-  updatedAt: Math.max(0, Math.floor(Number(doc?.updatedAt || 0))),
-  receipts: Array.isArray(doc?.receipts) ? doc.receipts : [],
-  bundles: Array.isArray(doc?.bundles) ? doc.bundles : [],
+  runtimeId: '',
+  updatedAt: 0,
+  receipts: [],
+  bundles: [],
 });
 
 export const computeStoredLookupBytes = (doc: StoredLookupDoc): number =>
@@ -89,9 +88,7 @@ export const invalidateWatchtowerStats = (context: WatchtowerStoreContext): void
 
 export const lookupKeyFor = (lookupKey: string): string => `lookup:${normalizeLookupKey(lookupKey)}`;
 
-export const normalizeMetaStats = (raw: StoredTowerMetaStats | null | undefined): StoredTowerMetaStats => ({
-  actionReceiptCount: Math.max(0, Math.floor(Number(raw?.actionReceiptCount || 0))),
-});
+export const emptyMetaStats = (): StoredTowerMetaStats => ({ actionReceiptCount: 0 });
 
 const isMissingLevelKey = (error: unknown): boolean =>
   /LEVEL_NOT_FOUND|NotFound/i.test(error instanceof Error ? error.message : String(error));
@@ -99,9 +96,9 @@ const isMissingLevelKey = (error: unknown): boolean =>
 export const readMetaStats = async (context: WatchtowerStoreContext): Promise<StoredTowerMetaStats> => {
   await ensureWatchtowerStoreOpen(context);
   try {
-    return normalizeMetaStats(JSON.parse(await context.db.get(META_STATS_KEY)) as StoredTowerMetaStats);
+    return decodeStoredMetaStats(await context.db.get(META_STATS_KEY));
   } catch (error) {
-    if (isMissingLevelKey(error)) return normalizeMetaStats(null);
+    if (isMissingLevelKey(error)) return emptyMetaStats();
     throw error;
   }
 };
@@ -113,7 +110,7 @@ export const readLookup = async (
   await ensureWatchtowerStoreOpen(context);
   try {
     const raw = await context.db.get(lookupKeyFor(lookupKey));
-    return normalizeStoredDoc(normalizeLookupKey(lookupKey), JSON.parse(raw) as StoredLookupDoc);
+    return decodeStoredLookupDoc(raw, normalizeLookupKey(lookupKey));
   } catch (error) {
     if (isMissingLevelKey(error)) return null;
     throw error;

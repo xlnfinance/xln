@@ -8,11 +8,23 @@ import { generateLazyEntityId } from '../entity/factory';
 import { createEmptyEnv, enqueueRuntimeInput, processRuntime } from '../runtime.ts';
 import { buildRuntimeRecoveryBundle } from '../recovery/bundle';
 import { buildTowerAppointmentOwnerMessage, encryptRuntimeRecoveryBundle } from '../recovery/crypto';
+import { serializeTaggedJson } from '../protocol/serialization';
 import type { JReplica, JurisdictionConfig, TowerAppointmentV1 } from '../xln-api';
+import { decodeStoredLookupDoc } from '../watchtower/store-decode';
 import { startStandaloneWatchtowerServer, type StandaloneWatchtowerServer } from '../watchtower/standalone-server';
 
 const addr = (byte: string): string => `0x${byte.repeat(20)}`;
 const servers: StandaloneWatchtowerServer[] = [];
+
+test('watchtower disk decoder rejects partial lookup records instead of defaulting fields', () => {
+  const partial = serializeTaggedJson({
+    lookupKey: `0x${'11'.repeat(32)}`,
+    runtimeId: addr('22'),
+    updatedAt: 0,
+    receipts: [],
+  });
+  expect(() => decodeStoredLookupDoc(partial)).toThrow('TOWER_STORED_BUNDLES_INVALID');
+});
 
 afterEach(async () => {
   while (servers.length > 0) {

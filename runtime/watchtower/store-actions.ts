@@ -5,12 +5,11 @@ import {
   invalidateWatchtowerStats,
   META_STATS_KEY,
   normalizeLookupKey,
-  normalizeStoredDoc,
   readMetaStats,
   STATS_CACHE_TTL_MS,
 } from './store-db';
+import { decodeStoredActionReceipt, decodeStoredLookupDoc } from './store-decode';
 import type {
-  StoredLookupDoc,
   StoredTowerActionReceipt,
   StoredTowerMetaStats,
   WatchtowerStoreContext,
@@ -68,7 +67,7 @@ export const listActionReceipts = async (
     lte: `${prefix}\xff`,
     reverse: true,
   })) {
-    receipts.push(JSON.parse(String(raw)) as StoredTowerActionReceipt);
+    receipts.push(decodeStoredActionReceipt(String(raw)));
   }
   return receipts;
 };
@@ -83,8 +82,7 @@ export const getStats = async (context: WatchtowerStoreContext): Promise<Watchto
   let lastResortAppointmentCount = 0;
   for await (const [, raw] of context.db.iterator({ gte: 'lookup:', lte: 'lookup:\xff' })) {
     lookupCount += 1;
-    const parsed = JSON.parse(String(raw)) as StoredLookupDoc;
-    const doc = normalizeStoredDoc(parsed.lookupKey, parsed);
+    const doc = decodeStoredLookupDoc(String(raw));
     if (doc.bundles.some(entry => entry.towerMode === 'delayed_last_resort' && !!entry.lastResortPayload)) {
       lastResortAppointmentCount += 1;
     }
