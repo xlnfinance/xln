@@ -6,25 +6,6 @@ fastest proof/fix to the hardest external gate. Completed work is deleted;
 long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 `docs/mainnet-engineering-principles.md`.
 
-## 0. Owner decisions required before consensus edits
-
-- [ ] Decide the certified event commitment: keep the canonical ordered
-  Entity/Account event receipts inline in their signed frame and covered by
-  its Hanko, without a second Merkle tree, unless measured frame sizes prove
-  that a separate event root is necessary.
-- [ ] Decide whether a multi-signer Entity candidate root mismatch merely
-  discards the touched candidate and records signed evidence for a later
-  governance input, or also advances the deterministic proposer immediately.
-  Validator removal remains an explicit governance action either way.
-- [ ] Decide the production forensic policy for malformed authenticated
-  ingress. The machine always consumes the rejected item without including it
-  in a frame; dev/test throws. Recommended production behavior is a bounded
-  infra-owned receipt containing only input hash, typed reason and source,
-  never the rejected payload or a consensus-state quarantine.
-- [ ] Confirm documentation language: source comments and canonical docs in
-  English; the owner-facing 60–120 minute reading guide also gets a concise
-  Russian walkthrough.
-
 ## 1. Core simplification and human auditability — P0/P1, owner-approved
 
 - [ ] Pass one final independent read-only audit on an immutable release
@@ -48,6 +29,8 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   Runtime writer or durable WAL model. The release audit is complete only when
   every accepted finding is closed or explicitly owner-deferred outside the
   release scope; do not copy the report into a second permanent backlog.
+  Keep every source comment and repository document in English; Russian is
+  reserved for owner-agent conversation and never enters the codebase.
 - [ ] Enforce the canonical Runtime → Entity → Account cascade documented at
   the top of `AGENTS.md` as the first architecture gate. Use the same
   `*Machine/*Replica`, `*State`, `*Input`, `*Tx`, `*Frame`, `*Output` and phase
@@ -264,7 +247,10 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   `EntityState.messages`, `batchHistory`, and the unwritten
   `accountInputQueue` are gone: text and J finality are certified frame events,
   durable history is read through the shared Activity panel, and no duplicate
-  UI cache remains in consensus State. Complete the exact typed
+  UI cache remains in consensus State. Keep canonical ordered Entity/Account
+  event receipts inline in their signed Frame and covered by its Hanko; do not
+  add a second Merkle tree unless measured frame sizes require one. Complete
+  the exact typed
   `ActivityEvent` projection for Entity, Account, and authenticated J events
   with deterministic event id, source machine/frame/hash/index, scopes, actor,
   kind, and payload. Keep the disposable LevelDB view exactly rebuildable from
@@ -379,8 +365,9 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   accept only consensus progress for that proposal; never write candidate
   Account/Entity frames to certified history or release financial outputs.
   Matching quorum Hanko promotes the already-executed candidate without
-  re-execution. Root mismatch or certified timeout discards the candidate and
-  advances the consensus view; unknown damage halts only that Entity and reloads
+  re-execution. Root mismatch discards the candidate and deterministically
+  advances the proposer/view without automatically removing a validator;
+  unknown damage halts only that Entity and reloads
   its last certified frame. Persist a signing lock in every Runtime WAL frame
   that may dispatch a local precommit, before that signature becomes externally
   visible, so restart cannot double-sign. Validator removal remains governance.
@@ -396,15 +383,17 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   an explicit terminal protocol outcome, distinct from malformed ingress,
   invariant faults and storage failure; consume the exact stale origin once
   without halting Runtime. Add queued-writer stale-input and board-rotation
-  regressions. Malformed remote discard and mixed-batch retention are already
-  pinned and must remain unchanged.
+  regressions. In production, malformed remote ingress is consumed and dropped
+  without a quarantine, forensic receipt or consensus-frame inclusion. In
+  dev/test it fails loudly so the defect is fixed. Mixed-batch retention is
+  already pinned and must remain unchanged.
 - [ ] Split remaining god-functions by protocol phase and failure boundary:
   `applyEntityInput`, `applyAccountInput`, Runtime scheduler/transport/storage,
   and RPC submit/watch/receipt. Target pure helpers below 50 lines,
   coordinators below 100–150 lines, and every file below 3000 lines. After the
   pipeline, collapse DI factories that add navigation
   without providing a real swappable boundary. The R/E/A gate is already at
-  zero functions over 100 lines. The production ratchet now owns 10 exact
+  zero functions over 100 lines. The production ratchet now owns 9 exact
   allowances over 150 lines and rejects every new/growing coordinator plus
   every file over 3000 lines; delete each allowance with its verified split.
   Start with

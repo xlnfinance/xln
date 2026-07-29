@@ -283,6 +283,15 @@ type LocalHealthResponse = {
   timings: TimingMap;
 };
 
+type DirectEntityInputDebug = {
+  at: number;
+  fromRuntimeId: string;
+  entityIds: string[];
+  signerIds: string[];
+  txTypes: string[];
+  error?: string;
+};
+
 type JurisdictionConfig = ResolvedMeshJurisdictionConfig;
 
 type JurisdictionsFile = {
@@ -1660,6 +1669,297 @@ const buildLocalHealth = (
   };
 };
 
+const summarizeRecentRuntimeInputs = (
+  inputs:
+    | Array<{
+        entityId?: string;
+        entityTxs?: Array<{ type?: string }>;
+      }>
+    | undefined,
+): Array<{ entityId: string; txs: string[] }> =>
+  (inputs || []).slice(-10).map(input => ({
+    entityId: String(input.entityId || '').slice(-8),
+    txs: (input.entityTxs || []).map(tx => String(tx?.type || '')),
+  }));
+
+const handleAccountStatusRequest = (
+  env: RuntimeState,
+  request: Request,
+  url: URL,
+  defaultHubEntityId: string | null,
+  directInput: {
+    lastSeen: DirectEntityInputDebug | null;
+    lastError: DirectEntityInputDebug | null;
+  },
+): Response | null => {
+  if (
+    url.pathname !== '/api/account/status' ||
+    request.method !== 'GET'
+  ) {
+    return null;
+  }
+  const hubEntityId = String(
+    url.searchParams.get('hubEntityId') || defaultHubEntityId || '',
+  ).toLowerCase();
+  const counterpartyEntityId = String(
+    url.searchParams.get('counterpartyEntityId') || '',
+  ).toLowerCase();
+  if (!hubEntityId || !counterpartyEntityId) {
+    return new Response(
+      safeStringify({
+        success: false,
+        code: 'ACCOUNT_STATUS_BAD_REQUEST',
+        error: 'hubEntityId and counterpartyEntityId are required',
+      }),
+      { status: 400, headers: JSON_HEADERS },
+    );
+  }
+  const account = getAccountState(env, hubEntityId, counterpartyEntityId);
+  const replica = getEntityReplicaById(env, hubEntityId);
+  const tokenIds = String(url.searchParams.get('tokenIds') || '')
+    .split(',')
+    .map(value => Number(value.trim()))
+    .filter(value => Number.isInteger(value) && value > 0);
+  return new Response(
+    safeStringify({
+      success: true,
+      hubEntityId,
+      counterpartyEntityId,
+      hasAccount:
+        hasAccount(env, hubEntityId, counterpartyEntityId) || Boolean(account),
+      ready: Boolean(
+        account?.currentFrame &&
+          Number(account.currentHeight ?? 0) > 0 &&
+          !account.pendingFrame &&
+          Number(account.mempool?.length ?? 0) === 0,
+      ),
+      currentHeight: Number(account?.currentHeight ?? 0),
+      pendingFrameHeight: account?.pendingFrame
+        ? Number(account.pendingFrame.height ?? 0)
+        : null,
+      mempool: Number(account?.mempool?.length ?? 0),
+      tokens: tokenIds.map(tokenId => ({
+        tokenId,
+        hasDelta: Boolean(account?.deltas?.has(tokenId)),
+        hubOutCapacity: account
+          ? getEntityOutCapacity(account, hubEntityId, tokenId).toString()
+          : '0',
+        delta: serializeAccountDelta(account?.deltas?.get(tokenId)),
+      })),
+      runtime: {
+        height: Number(env.height ?? 0),
+        timestamp: Number(env.timestamp ?? 0),
+        halted: Boolean(env.runtimeState?.halted),
+        fatalDebugPayload: env.runtimeState?.fatalDebugPayload ?? null,
+        loopActive: Boolean(env.runtimeState?.loopActive),
+        runtimeMempool: summarizeRecentRuntimeInputs(
+          env.runtimeMempool?.entityInputs,
+        ),
+      },
+      replica: replica
+        ? {
+            key: `${String(replica.entityId || '').toLowerCase()}:${String(
+              replica.signerId || '',
+            ).toLowerCase()}`,
+            entityId: replica.entityId,
+            signerId: replica.signerId,
+            mempool: (replica.mempool || []).map(tx => String(tx?.type || '')),
+            proposalTxs: (replica.proposal?.txs || []).map(tx =>
+              String(tx?.type || ''),
+            ),
+            lockedFrameTxs: (replica.lockedFrame?.txs || []).map(tx =>
+              String(tx?.type || ''),
+            ),
+          }
+        : null,
+      directInput,
+    }),
+    { headers: JSON_HEADERS },
+  );
+};
+
+const handleMarketSnapshotsRequest = (
+  env: RuntimeState,
+  request: Request,
+  url: URL,
+  defaultHubEntityId: string,
+): Response | null => {
+  if (
+    url.pathname !== '/api/market/snapshots' ||
+    request.method !== 'GET'
+  ) {
+    return null;
+  }
+  const pairIds = Array.from(
+    new Set(
+      url.searchParams
+        .getAll('pair')
+        .concat(url.searchParams.getAll('pairId'))
+        .map(normalizeMarketPairId)
+        .filter((value): value is string => Boolean(value)),
+    ),
+  );
+  if (pairIds.length === 0) {
+    return new Response(
+      safeStringify({ error: 'Missing valid pair query parameters' }),
+      { status: 400, headers: JSON_HEADERS },
+    );
+  }
+  const depthRaw = Number(
+    url.searchParams.get('depth') || String(RPC_MARKET_DEFAULT_DEPTH),
+  );
+  const depth = Number.isFinite(depthRaw)
+    ? Math.max(1, Math.min(Math.floor(depthRaw), RPC_MARKET_MAX_DEPTH))
+    : RPC_MARKET_DEFAULT_DEPTH;
+  const requestedRaw =
+    url.searchParams.get('hubEntityId') ||
+    url.searchParams.get('hub') ||
+    '';
+  const hubEntityId = requestedRaw
+    ? normalizeMarketEntityId(requestedRaw)
+    : defaultHubEntityId;
+  if (!hubEntityId) {
+    return new Response(
+      safeStringify({
+        error: 'Invalid hubEntityId query parameter',
+        code: 'E_BAD_QUERY',
+      }),
+      { status: 400, headers: JSON_HEADERS },
+    );
+  }
+  const replica = getEntityReplicaById(env, hubEntityId);
+  if (!replica) {
+    return new Response(
+      safeStringify({
+        error: `Unknown market hub: ${hubEntityId}`,
+        code: 'E_UNKNOWN_HUB',
+        hubEntityId,
+      }),
+      { status: 404, headers: JSON_HEADERS },
+    );
+  }
+  const snapshots = pairIds.map(pairId =>
+    buildMarketSnapshotForReplica(
+      replica,
+      hubEntityId,
+      pairId,
+      depth,
+    ),
+  );
+  return new Response(
+    safeStringify({ hubEntityId, depth, snapshots }),
+    { headers: JSON_HEADERS },
+  );
+};
+
+const handleDebugReserveRequest = async (
+  env: RuntimeState,
+  request: Request,
+  url: URL,
+): Promise<Response | null> => {
+  if (url.pathname !== '/api/debug/reserve' || request.method !== 'GET') {
+    return null;
+  }
+  const entityId = String(url.searchParams.get('entityId') || '').trim();
+  const tokenId = Number(url.searchParams.get('tokenId') || '1');
+  const jurisdictionRef = String(
+    url.searchParams.get('jurisdiction') || '',
+  ).trim();
+  if (!entityId) {
+    return new Response(safeStringify({ error: 'Missing entityId' }), {
+      status: 400,
+      headers: JSON_HEADERS,
+    });
+  }
+  if (!Number.isInteger(tokenId) || tokenId <= 0) {
+    return new Response(safeStringify({ error: 'Invalid tokenId' }), {
+      status: 400,
+      headers: JSON_HEADERS,
+    });
+  }
+  try {
+    const adapter = requireJAdapterForDebugReserve(
+      env,
+      entityId,
+      jurisdictionRef,
+    );
+    const reserve = await adapter.getReserves(entityId, tokenId);
+    return new Response(
+      safeStringify({
+        ok: true,
+        entityId,
+        tokenId,
+        ...(jurisdictionRef ? { jurisdiction: jurisdictionRef } : {}),
+        reserve: reserve.toString(),
+      }),
+      { headers: JSON_HEADERS },
+    );
+  } catch (error) {
+    return new Response(
+      safeStringify({
+        error: error instanceof Error ? error.message : String(error),
+      }),
+      { status: 500, headers: JSON_HEADERS },
+    );
+  }
+};
+
+const createHubControlRequestHandler = (dependencies: {
+  state: RuntimeState;
+  nodeName: string;
+  pauseBootstrap: () => Promise<void>;
+  markShuttingDown: () => void;
+}): ((request: Request, url: URL) => Promise<Response | null>) =>
+  async (request, url) => {
+    if (request.method !== 'POST') return null;
+    const stopP2P = url.pathname === '/api/control/p2p/stop';
+    const quiesceRuntime =
+      url.pathname === '/api/control/runtime/quiesce';
+    if (!stopP2P && !quiesceRuntime) return null;
+    dependencies.markShuttingDown();
+    try {
+      await dependencies.pauseBootstrap();
+      const result = await quiesceNodeRuntime(dependencies.state, {
+        workTimeoutMs: stopP2P ? 10_000 : 20_000,
+        loopTimeoutMs: 5_000,
+        ...(quiesceRuntime ? { quietMs: 750 } : {}),
+      });
+      return new Response(safeStringify({ ok: true, ...result }), {
+        headers: JSON_HEADERS,
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : String(error);
+      const operation = stopP2P ? 'p2p stop' : 'runtime quiesce';
+      console.error(
+        `[${dependencies.nodeName}] ${operation} failed: ${message}`,
+      );
+      return new Response(
+        safeStringify({ ok: false, error: message }),
+        { status: 503, headers: JSON_HEADERS },
+      );
+    }
+  };
+
+const handleHubJurisdictionsRequest = (
+  env: RuntimeState,
+  url: URL,
+): Response | null => {
+  if (url.pathname !== '/api/jurisdictions') return null;
+  const payload = buildRuntimeJurisdictionsPayload(env);
+  return payload
+    ? new Response(payload, {
+        headers: {
+          ...JSON_HEADERS,
+          'Cache-Control': 'no-store, no-cache, must-revalidate',
+        },
+      })
+    : new Response(
+        safeStringify({ error: 'JURISDICTION_PAYLOAD_UNAVAILABLE' }),
+        { status: 503, headers: JSON_HEADERS },
+      );
+};
+
 const run = async (): Promise<void> => {
   if (resolvedArgs.dbPath) {
     process.env['XLN_DB_PATH'] = resolvedArgs.dbPath;
@@ -1766,14 +2066,6 @@ const run = async (): Promise<void> => {
     }
   };
 
-  type DirectEntityInputDebug = {
-    at: number;
-    fromRuntimeId: string;
-    entityIds: string[];
-    signerIds: string[];
-    txTypes: string[];
-    error?: string;
-  };
   let lastDirectEntityInput: DirectEntityInputDebug | null = null;
   let lastDirectEntityInputError: DirectEntityInputDebug | null = null;
 
@@ -1882,6 +2174,58 @@ const run = async (): Promise<void> => {
   };
 
   const httpDrain = createHttpDrainTracker();
+  const handleHubControlRequest = createHubControlRequestHandler({
+    state: env,
+    nodeName: resolvedArgs.name,
+    pauseBootstrap: pauseMeshBootstrapProducerAndWait,
+    markShuttingDown: () => {
+      shuttingDown = true;
+    },
+  });
+  const handleHubStatusRequest = (
+    url: URL,
+    operatorAuthorized: boolean,
+  ): Response | null => {
+    if (url.pathname === '/api/info') {
+      return new Response(
+        safeStringify({
+          name: resolvedArgs.name,
+          entityId: bootstrap?.entityId ?? null,
+          hubEntities: hubBootstraps,
+          runtimeId: env.runtimeId,
+          apiUrl,
+          relayUrl: resolvedArgs.relayUrl,
+          directWsUrl,
+          storage: {
+            persistencePaused: Boolean(
+              env.runtimeState?.persistencePaused,
+            ),
+          },
+        }),
+        { headers: JSON_HEADERS },
+      );
+    }
+    if (url.pathname !== '/api/health') return null;
+    const health = buildLocalHealth(
+      env,
+      bootstrap?.entityId ?? null,
+      activeTokenCatalog,
+      activeJAdapter,
+      hubBootstraps,
+      buildBootstrapProgressHealth(
+        meshLoopProgress,
+        meshLoopInFlight,
+        bootstrapClockMs(),
+        MESH_BOOTSTRAP_STALL_TIMEOUT_MS,
+      ),
+    );
+    return new Response(
+      safeStringify(
+        operatorAuthorized ? health : publicLocalHubHealth(health),
+      ),
+      { headers: JSON_HEADERS },
+    );
+  };
   const server = Bun.serve({
     hostname: resolvedArgs.apiHost,
     port: resolvedArgs.apiPort,
@@ -1910,154 +2254,25 @@ const run = async (): Promise<void> => {
         });
       }
 
-      if (pathname === '/api/info') {
-        return new Response(safeStringify({
-          name: resolvedArgs.name,
-          entityId: bootstrap?.entityId ?? null,
-          hubEntities: hubBootstraps,
-          runtimeId: env.runtimeId,
-          apiUrl,
-          relayUrl: resolvedArgs.relayUrl,
-          directWsUrl,
-          storage: {
-            persistencePaused: Boolean(env.runtimeState?.persistencePaused),
-          },
-        }), { headers });
-      }
+      const statusResponse = handleHubStatusRequest(url, operatorAuthorized);
+      if (statusResponse) return statusResponse;
 
-      if (pathname === '/api/health') {
-        const health = buildLocalHealth(
-          env,
-          bootstrap?.entityId ?? null,
-          activeTokenCatalog,
-          activeJAdapter,
-          hubBootstraps,
-          buildBootstrapProgressHealth(
-            meshLoopProgress,
-            meshLoopInFlight,
-            bootstrapClockMs(),
-            MESH_BOOTSTRAP_STALL_TIMEOUT_MS,
-          ),
-        );
-        return new Response(safeStringify(operatorAuthorized ? health : publicLocalHubHealth(health)), {
-          headers,
-        });
-      }
+      const accountStatusResponse = handleAccountStatusRequest(
+        env,
+        request,
+        url,
+        bootstrap?.entityId ?? null,
+        {
+          lastSeen: lastDirectEntityInput,
+          lastError: lastDirectEntityInputError,
+        },
+      );
+      if (accountStatusResponse) return accountStatusResponse;
 
-      if (pathname === '/api/account/status' && request.method === 'GET') {
-        const hubEntityId = String(url.searchParams.get('hubEntityId') || bootstrap?.entityId || '').toLowerCase();
-        const counterpartyEntityId = String(url.searchParams.get('counterpartyEntityId') || '').toLowerCase();
-        if (!hubEntityId || !counterpartyEntityId) {
-          return new Response(safeStringify({
-            success: false,
-            code: 'ACCOUNT_STATUS_BAD_REQUEST',
-            error: 'hubEntityId and counterpartyEntityId are required',
-          }), { status: 400, headers });
-        }
-        const account = getAccountState(env, hubEntityId, counterpartyEntityId);
-        const replica = getEntityReplicaById(env, hubEntityId);
-        const runtimeState = env.runtimeState;
-        const summarizeRuntimeInputs = (inputs: Array<{ entityId?: string; entityTxs?: Array<{ type?: string }> }> | undefined) =>
-          (inputs || []).slice(-10).map(input => ({
-            entityId: String(input.entityId || '').slice(-8),
-            txs: (input.entityTxs || []).map(tx => String(tx?.type || '')),
-          }));
-        const tokenIds = String(url.searchParams.get('tokenIds') || '')
-          .split(',')
-          .map(value => Number(value.trim()))
-          .filter(value => Number.isInteger(value) && value > 0);
-        const status = {
-          success: true,
-          hubEntityId,
-          counterpartyEntityId,
-          hasAccount: hasAccount(env, hubEntityId, counterpartyEntityId) || Boolean(account),
-          ready: Boolean(
-            account?.currentFrame &&
-            Number(account.currentHeight ?? 0) > 0 &&
-            !account.pendingFrame &&
-            Number(account.mempool?.length ?? 0) === 0
-          ),
-          currentHeight: Number(account?.currentHeight ?? 0),
-          pendingFrameHeight: account?.pendingFrame ? Number(account.pendingFrame.height ?? 0) : null,
-          mempool: Number(account?.mempool?.length ?? 0),
-          tokens: tokenIds.map(tokenId => ({
-            tokenId,
-            hasDelta: Boolean(account?.deltas?.has(tokenId)),
-            hubOutCapacity: account ? getEntityOutCapacity(account, hubEntityId, tokenId).toString() : '0',
-            delta: serializeAccountDelta(account?.deltas?.get(tokenId)),
-          })),
-          runtime: {
-            height: Number(env.height ?? 0),
-            timestamp: Number(env.timestamp ?? 0),
-            halted: Boolean(runtimeState?.halted),
-            fatalDebugPayload: runtimeState?.fatalDebugPayload ?? null,
-            loopActive: Boolean(runtimeState?.loopActive),
-            runtimeMempool: summarizeRuntimeInputs(env.runtimeMempool?.entityInputs),
-          },
-          replica: replica ? {
-            key: `${String(replica.entityId || '').toLowerCase()}:${String(replica.signerId || '').toLowerCase()}`,
-            entityId: replica.entityId,
-            signerId: replica.signerId,
-            mempool: (replica.mempool || []).map(tx => String(tx?.type || '')),
-            proposalTxs: (replica.proposal?.txs || []).map(tx => String(tx?.type || '')),
-            lockedFrameTxs: (replica.lockedFrame?.txs || []).map(tx => String(tx?.type || '')),
-          } : null,
-          directInput: {
-            lastSeen: lastDirectEntityInput,
-            lastError: lastDirectEntityInputError,
-          },
-        };
-        return new Response(safeStringify(status), { headers });
-      }
-
-      if (pathname === '/api/control/p2p/stop' && request.method === 'POST') {
-        shuttingDown = true;
-        try {
-          await pauseMeshBootstrapProducerAndWait();
-          const result = await quiesceNodeRuntime(env, {
-            workTimeoutMs: 10_000,
-            loopTimeoutMs: 5_000,
-          });
-          return new Response(safeStringify({ ok: true, ...result }), { headers });
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          console.error(`[${resolvedArgs.name}] p2p stop failed: ${message}`);
-          return new Response(safeStringify({ ok: false, error: message }), { status: 503, headers });
-        }
-      }
-
-      if (pathname === '/api/control/runtime/quiesce' && request.method === 'POST') {
-        shuttingDown = true;
-        try {
-          await pauseMeshBootstrapProducerAndWait();
-          const result = await quiesceNodeRuntime(env, {
-            workTimeoutMs: 20_000,
-            loopTimeoutMs: 5_000,
-            quietMs: 750,
-          });
-          return new Response(safeStringify({ ok: true, ...result }), { headers });
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          console.error(`[${resolvedArgs.name}] runtime quiesce failed: ${message}`);
-          return new Response(safeStringify({ ok: false, error: message }), { status: 503, headers });
-        }
-      }
-
-      if (pathname === '/api/jurisdictions') {
-        const payload = buildRuntimeJurisdictionsPayload(env);
-        if (!payload) {
-          return new Response(safeStringify({ error: 'JURISDICTION_PAYLOAD_UNAVAILABLE' }), {
-            status: 503,
-            headers,
-          });
-        }
-        return new Response(payload, {
-          headers: {
-            ...headers,
-            'Cache-Control': 'no-store, no-cache, must-revalidate',
-          },
-        });
-      }
+      const controlResponse = await handleHubControlRequest(request, url);
+      if (controlResponse) return controlResponse;
+      const jurisdictionsResponse = handleHubJurisdictionsRequest(env, url);
+      if (jurisdictionsResponse) return jurisdictionsResponse;
 
       if (!bootstrap || !activeJAdapter) {
         return new Response(safeStringify({ error: 'HUB_NOT_READY' }), { status: 503, headers });
@@ -2065,51 +2280,13 @@ const run = async (): Promise<void> => {
       const readyBootstrap = bootstrap;
       const readyJAdapter = activeJAdapter;
 
-      if (pathname === '/api/market/snapshots' && request.method === 'GET') {
-        const pairIds = Array.from(new Set(
-          url.searchParams.getAll('pair').concat(url.searchParams.getAll('pairId'))
-            .map(normalizeMarketPairId)
-            .filter((value): value is string => Boolean(value)),
-        ));
-        if (pairIds.length === 0) {
-          return new Response(safeStringify({ error: 'Missing valid pair query parameters' }), {
-            status: 400,
-            headers,
-          });
-        }
-        const depthRaw = Number(url.searchParams.get('depth') || String(RPC_MARKET_DEFAULT_DEPTH));
-        const depth = Number.isFinite(depthRaw)
-          ? Math.max(1, Math.min(Math.floor(depthRaw), RPC_MARKET_MAX_DEPTH))
-          : RPC_MARKET_DEFAULT_DEPTH;
-        const requestedHubEntityIdRaw = url.searchParams.get('hubEntityId') || url.searchParams.get('hub') || '';
-        const requestedHubEntityId = requestedHubEntityIdRaw
-          ? normalizeMarketEntityId(requestedHubEntityIdRaw)
-          : readyBootstrap.entityId;
-        if (!requestedHubEntityId) {
-          return new Response(safeStringify({
-            error: 'Invalid hubEntityId query parameter',
-            code: 'E_BAD_QUERY',
-          }), {
-            status: 400,
-            headers,
-          });
-        }
-        const replica = getEntityReplicaById(env, requestedHubEntityId);
-        if (!replica) {
-          return new Response(safeStringify({
-            error: `Unknown market hub: ${requestedHubEntityId}`,
-            code: 'E_UNKNOWN_HUB',
-            hubEntityId: requestedHubEntityId,
-          }), {
-            status: 404,
-            headers,
-          });
-        }
-        const snapshots = pairIds.map((pairId) =>
-          buildMarketSnapshotForReplica(replica, requestedHubEntityId, pairId, depth),
-        );
-        return new Response(safeStringify({ hubEntityId: requestedHubEntityId, depth, snapshots }), { headers });
-      }
+      const marketSnapshotsResponse = handleMarketSnapshotsRequest(
+        env,
+        request,
+        url,
+        readyBootstrap.entityId,
+      );
+      if (marketSnapshotsResponse) return marketSnapshotsResponse;
 
       if (pathname === '/api/lending/state' && request.method === 'GET') {
         return handleLendingStateRequest({
@@ -2175,30 +2352,12 @@ const run = async (): Promise<void> => {
         });
       }
 
-      if (pathname === '/api/debug/reserve' && request.method === 'GET') {
-        const entityId = String(url.searchParams.get('entityId') || '').trim();
-        const tokenId = Number(url.searchParams.get('tokenId') || '1');
-        const jurisdictionRef = String(url.searchParams.get('jurisdiction') || '').trim();
-        if (!entityId) {
-          return new Response(safeStringify({ error: 'Missing entityId' }), { status: 400, headers });
-        }
-        if (!Number.isInteger(tokenId) || tokenId <= 0) {
-          return new Response(safeStringify({ error: 'Invalid tokenId' }), { status: 400, headers });
-        }
-        try {
-          const jadapter = requireJAdapterForDebugReserve(env, entityId, jurisdictionRef);
-          const reserve = await jadapter.getReserves(entityId, tokenId);
-          return new Response(safeStringify({
-            ok: true,
-            entityId,
-            tokenId,
-            ...(jurisdictionRef ? { jurisdiction: jurisdictionRef } : {}),
-            reserve: reserve.toString(),
-          }), { headers });
-        } catch (error) {
-          return new Response(safeStringify({ error: (error as Error).message }), { status: 500, headers });
-        }
-      }
+      const debugReserveResponse = await handleDebugReserveRequest(
+        env,
+        request,
+        url,
+      );
+      if (debugReserveResponse) return debugReserveResponse;
 
       if (pathname === '/api/debug/activity' && request.method === 'GET') {
         return await handleRuntimeActivityRequest(env, url, headers);

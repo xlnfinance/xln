@@ -51,9 +51,16 @@ describe('production startup wiring', () => {
     ]) {
       const upgrade = source.indexOf('const directUpgrade = directRuntimeWs.maybeUpgrade(request, serverRef);');
       const guard = source.indexOf('if (requiresLocalNodeOperator(url) && !operatorAuthorized)', upgrade);
-      const info = source.indexOf("if (pathname === '/api/info')", guard);
+      const statusRoute = source.includes(
+        'const statusResponse = handleHubStatusRequest(',
+      )
+        ? source.indexOf(
+            'const statusResponse = handleHubStatusRequest(',
+            guard,
+          )
+        : source.indexOf("if (pathname === '/api/info')", guard);
       expect(guard).toBeGreaterThan(upgrade);
-      expect(info).toBeGreaterThan(guard);
+      expect(statusRoute).toBeGreaterThan(guard);
     }
   });
 
@@ -1243,12 +1250,20 @@ describe('production startup wiring', () => {
     for (const source of sources) {
       expect(source).toContain("from './node-runtime-quiesce';");
       expect(source).toContain('quiesceNodeRuntime');
-      const quiesceBlock = extractSourceBlock(
-        source,
-        "if (pathname === '/api/control/runtime/quiesce' && request.method === 'POST') {",
-        "return new Response(safeStringify({ error: 'Not found' })",
-      );
-      expect(quiesceBlock).toContain('const result = await quiesceNodeRuntime(env, {');
+      const quiesceBlock = source.includes(
+        'const createHubControlRequestHandler = (',
+      )
+        ? extractSourceBlock(
+            source,
+            'const createHubControlRequestHandler = (',
+            'const handleHubJurisdictionsRequest = (',
+          )
+        : extractSourceBlock(
+            source,
+            "if (pathname === '/api/control/runtime/quiesce' && request.method === 'POST') {",
+            "return new Response(safeStringify({ error: 'Not found' })",
+          );
+      expect(quiesceBlock).toContain('quiesceNodeRuntime(');
       expect(quiesceBlock).toContain('status: 503');
       expect(quiesceBlock).toContain('safeStringify({ ok: false, error: message })');
 
