@@ -6,8 +6,8 @@ import type {
   SettlementOp,
 } from '../../types';
 import { isLeftEntity } from '../id';
+import { getEntityLeaderState } from '../consensus/leader';
 import { deriveDelta } from '../../account/utils';
-import { resolveEntityProposerId } from '../../runtime/entity-output-signer';
 import { normalizeRebalanceMatchingStrategy } from '../../extensions/rebalance/policy';
 import {
   assertNoTokenlessHubRawOverrides,
@@ -91,7 +91,10 @@ const createRebalanceRun = (
     execution,
     outputs: [],
     localEntityTxs: [],
-    signerId: resolveEntityProposerId(env, hubId, 'hub-rebalance'),
+    // A deterministic self-output targets the committed Entity leader. Looking
+    // at Runtime replicas or private keys here would make validator replay
+    // depend on local topology instead of the signed Entity authority.
+    signerId: getEntityLeaderState(replica.state).activeValidatorId,
     now: replica.state.timestamp,
     // `sentBatch.lastSubmittedAt` uses Runtime time. Comparing it with Entity
     // time would freeze age while the pending batch blocks Entity frames.

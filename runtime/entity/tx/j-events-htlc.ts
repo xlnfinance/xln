@@ -3,7 +3,6 @@ import type {
   CrossJurisdictionSwapRoute,
   EntityInput,
   EntityState,
-  RuntimeState,
 } from '../../types';
 import { addMessage } from '../frame-events';
 import { decodeHashLadderBinary } from '../../protocol/htlc/hash-ladder';
@@ -111,7 +110,6 @@ function findCrossJurisdictionRoutesForTargetDispute(
 }
 
 export function queueCrossJurisdictionSalvageFromDispute(
-  env: RuntimeState,
   state: EntityState,
   outputs: EntityInput[],
   counterpartyId: string,
@@ -122,7 +120,6 @@ export function queueCrossJurisdictionSalvageFromDispute(
   // committed for a possible counter-dispute and must not trigger source/target
   // salvage until that newer proof is actually used.
   return queueCrossJurisdictionSalvageFromArgumentList(
-    env,
     state,
     outputs,
     counterpartyId,
@@ -132,7 +129,6 @@ export function queueCrossJurisdictionSalvageFromDispute(
 }
 
 export function queueCrossJurisdictionSalvageFromArgumentList(
-  env: RuntimeState,
   state: EntityState,
   outputs: EntityInput[],
   counterpartyId: string,
@@ -160,7 +156,7 @@ export function queueCrossJurisdictionSalvageFromArgumentList(
   if (!route) return false;
 
   const best = pullBinaries.reduce((acc, item) => item.fillRatio > acc.fillRatio ? item : acc, pullBinaries[0]!);
-  pushCrossJurisdictionEntityOutput(env, outputs, route.target.counterpartyEntityId, [{
+  pushCrossJurisdictionEntityOutput(outputs, route.target.counterpartyEntityId, [{
       type: 'crossJurisdictionSalvage',
       data: {
         routeId: route.orderId,
@@ -176,7 +172,6 @@ export function queueCrossJurisdictionSalvageFromArgumentList(
 }
 
 export function queueCrossJurisdictionSourceDisputeFromTargetDispute(
-  env: RuntimeState,
   state: EntityState,
   outputs: EntityInput[],
   counterpartyId: string,
@@ -199,7 +194,7 @@ export function queueCrossJurisdictionSourceDisputeFromTargetDispute(
     throw new Error(`CROSS_J_SOURCE_DISPUTE_SIGNER_MISSING:${route.orderId}:${route.source.entityId}`);
   }
 
-  pushCrossJurisdictionEntityOutput(env, outputs, route.source.entityId, [
+  pushCrossJurisdictionEntityOutput(outputs, route.source.entityId, [
       {
         type: 'prepareDispute',
         data: {
@@ -247,7 +242,6 @@ function queueInboundResolvesByHashlock(
 }
 
 export function applyKnownHtlcSecret(
-  env: RuntimeState,
   newState: EntityState,
   accountTxs: JEventAccountTx[],
   outputs: EntityInput[],
@@ -306,7 +300,7 @@ export function applyKnownHtlcSecret(
     });
   } else if (route.crossJurisdictionRelay) {
     const relay = route.crossJurisdictionRelay;
-    pushCrossJurisdictionEntityOutput(env, outputs, relay.targetEntityId, [{
+    pushCrossJurisdictionEntityOutput(outputs, relay.targetEntityId, [{
         type: 'resolveHtlcLock',
         data: {
           counterpartyEntityId: relay.targetCounterpartyEntityId,

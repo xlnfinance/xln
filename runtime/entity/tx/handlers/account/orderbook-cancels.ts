@@ -95,7 +95,7 @@ export function routeRemoteCrossJurisdictionBookCancels(
       cancel.accountId,
       Number(sourceHubState.timestamp || env.timestamp || 0),
     );
-    outputs.push(buildCrossJurisdictionEntityOutput(env, bookOwnerEntityId, [{
+    outputs.push(buildCrossJurisdictionEntityOutput(bookOwnerEntityId, bookOwnerSignerId, [{
       type: 'removeCrossJurisdictionBookOrder',
       data: {
         orderId: cancel.offerId,
@@ -104,7 +104,7 @@ export function routeRemoteCrossJurisdictionBookCancels(
         route,
         reason: 'cancel_request',
       },
-    }], bookOwnerSignerId));
+    }]));
   }
 
   return { localBookCancels, accountTxs, outputs };

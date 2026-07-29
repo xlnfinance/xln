@@ -2014,7 +2014,6 @@ describe('cross-jurisdiction hashledger swap', () => {
 
     expect(
       queueCrossJurisdictionSourceDisputeFromTargetDispute(
-        fixture.env,
         fixture.state,
         outputs,
         fixture.targetHub,
@@ -2044,7 +2043,6 @@ describe('cross-jurisdiction hashledger swap', () => {
 
     expect(
       queueCrossJurisdictionSourceDisputeFromTargetDispute(
-        fixture.env,
         fixture.state,
         outputs,
         fixture.targetHub,
@@ -2062,7 +2060,6 @@ describe('cross-jurisdiction hashledger swap', () => {
 
     expect(
       queueCrossJurisdictionSourceDisputeFromTargetDispute(
-        fixture.env,
         fixture.state,
         outputs,
         fixture.targetHub,
@@ -2082,7 +2079,6 @@ describe('cross-jurisdiction hashledger swap', () => {
 
     expect(
       queueCrossJurisdictionSourceDisputeFromTargetDispute(
-        fixture.env,
         fixture.state,
         outputs,
         fixture.targetHub,
@@ -2104,7 +2100,6 @@ describe('cross-jurisdiction hashledger swap', () => {
 
     expect(
       queueCrossJurisdictionSourceDisputeFromTargetDispute(
-        fixture.env,
         fixture.state,
         outputs,
         fixture.targetHub,

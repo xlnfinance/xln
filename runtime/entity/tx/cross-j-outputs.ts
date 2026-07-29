@@ -1,5 +1,4 @@
-import type { CrossJurisdictionSwapRoute, EntityInput, EntityState, EntityTx, RuntimeState } from '../../types';
-import { resolveEntityProposerId } from '../../runtime/entity-output-signer';
+import type { CrossJurisdictionSwapRoute, EntityInput, EntityTx } from '../../types';
 import { deriveCanonicalCrossJurisdictionBookOwner } from '../../extensions/cross-j/market';
 
 const normalizeEntityRef = (value: string): string => String(value || '').trim().toLowerCase();
@@ -19,52 +18,24 @@ export const crossJurisdictionRouteSignerHint = (
   return null;
 };
 
-export const findLocalEntityState = (env: RuntimeState, entityId: string): EntityState | null => {
-  const target = normalizeEntityRef(entityId);
-  for (const replica of env.eReplicas?.values?.() || []) {
-    const state = replica?.state;
-    if (state && normalizeEntityRef(state.entityId) === target) return state;
-  }
-  return null;
-};
-
 export const buildCrossJurisdictionEntityOutput = (
-  env: RuntimeState,
   entityId: string,
+  signerId: string | null | undefined,
   entityTxs: EntityTx[],
-  signerIdHint?: string | null,
 ): EntityInput => {
   const normalizedEntityId = normalizeEntityRef(entityId);
-  const hintedSignerId = normalizeEntityRef(String(signerIdHint || ''));
-  if (hintedSignerId) {
-    // Route signers are committed before consensus. Never consult local
-    // topology when a committed route already identifies the recipient lane.
-    const replica = Array.from(env.eReplicas?.values?.() ?? []).find(candidate =>
-      normalizeEntityRef(candidate.entityId) === normalizedEntityId &&
-      normalizeEntityRef(candidate.signerId) === hintedSignerId);
-    if (!replica) {
-      throw new Error(`CROSS_J_SIBLING_TARGET_NOT_LOCAL:${normalizedEntityId}:${hintedSignerId}`);
-    }
-    return {
-      entityId: normalizedEntityId,
-      signerId: hintedSignerId,
-      entityTxs,
-      localRuntimeProtocol: 'cross-j',
-    };
+  const normalizedSignerId = normalizeEntityRef(signerId || '');
+  if (!normalizedEntityId || !normalizedSignerId) {
+    throw new Error(`CROSS_J_ENTITY_OUTPUT_ROUTE_MISSING:${normalizedEntityId || 'entity'}:${normalizedSignerId || 'signer'}`);
   }
-  const state = findLocalEntityState(env, normalizedEntityId);
-  let signerId: string;
-  try {
-    signerId = hintedSignerId || resolveEntityProposerId(env, state?.entityId || normalizedEntityId, 'cross-j entity output');
-  } catch (error) {
-    throw new Error(
-      `CROSS_J_ENTITY_OUTPUT_SIGNER_MISSING: entity=${normalizedEntityId} ` +
-      `reason=${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
+
+  // Cross-J routes commit every destination signer before either Account leg
+  // can settle. Entity consensus therefore emits only the exact certified
+  // lane; consulting Runtime topology here would make pure replay depend on
+  // validator-local replicas, gossip, or private keys.
   return {
-    entityId: state?.entityId || normalizedEntityId,
-    signerId,
+    entityId: normalizedEntityId,
+    signerId: normalizedSignerId,
     entityTxs,
     localRuntimeProtocol: 'cross-j',
   };
@@ -82,21 +53,10 @@ export const buildCertifiedEntityOutput = (
 });
 
 export const pushCrossJurisdictionEntityOutput = (
-  env: RuntimeState,
   outputs: EntityInput[],
   entityId: string,
   entityTxs: EntityTx[],
-  signerIdHint?: string | null,
+  signerId: string | null | undefined,
 ): void => {
-  const normalizedEntityId = normalizeEntityRef(entityId);
-  const normalizedSignerId = normalizeEntityRef(String(signerIdHint || ''));
-  if (!normalizedEntityId || !normalizedSignerId) {
-    throw new Error(`CROSS_J_ENTITY_OUTPUT_SIGNER_MISSING: entity=${normalizedEntityId || 'missing'}`);
-  }
-  outputs.push(buildCrossJurisdictionEntityOutput(
-    env,
-    normalizedEntityId,
-    entityTxs,
-    normalizedSignerId,
-  ));
+  outputs.push(buildCrossJurisdictionEntityOutput(entityId, signerId, entityTxs));
 };

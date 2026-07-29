@@ -54,16 +54,6 @@ const materializedIntentBytes = (
   return exactRouteBytes(intent);
 };
 
-const pushCrossJOutput = (
-  env: RuntimeState,
-  outputs: EntityInput[],
-  entityId: string,
-  entityTxs: EntityTx[],
-  signerIdHint?: string | null,
-): void => {
-  pushCrossJurisdictionEntityOutput(env, outputs, entityId, entityTxs, signerIdHint);
-};
-
 const prepareRawCrossJurisdictionIntent = (
   env: RuntimeState,
   state: EntityState,
@@ -116,7 +106,6 @@ const prepareRawCrossJurisdictionIntent = (
 };
 
 const prepareMaterializedCrossJurisdictionRoute = (
-  env: RuntimeState,
   state: EntityState,
   route: CrossJurisdictionSwapRoute,
   outputs: EntityInput[],
@@ -137,10 +126,10 @@ const prepareMaterializedCrossJurisdictionRoute = (
   const readyRoute = { ...cloneCrossJurisdictionRoute(publicPreparedRoute), status: 'resting' as const };
   // Both Account legs originate in one committed Entity frame. Routing them
   // together prevents one sibling from observing a half-created swap.
-  pushCrossJOutput(env, outputs, readyRoute.source.counterpartyEntityId, [
+  pushCrossJurisdictionEntityOutput(outputs, readyRoute.source.counterpartyEntityId, [
     { type: 'registerCrossJurisdictionSwap', data: { route: readyRoute } },
   ], readyRoute.sourceHubSignerId);
-  pushCrossJOutput(env, outputs, readyRoute.target.entityId, [
+  pushCrossJurisdictionEntityOutput(outputs, readyRoute.target.entityId, [
     { type: 'registerCrossJurisdictionSwap', data: { route: readyRoute } },
   ], readyRoute.targetHubSignerId);
   addMessage(state, `🌉 Cross-j swap ${preparedRoute.orderId} paired source and target proposals requested by hub`);
@@ -179,7 +168,7 @@ export const handlePrepareCrossJurisdictionSwapEntityTx = (
     throw new Error(`CROSS_J_PREPARED_PAYLOAD_PARTIAL:${route.orderId}`);
   }
   return hasSourcePull
-    ? prepareMaterializedCrossJurisdictionRoute(env, newState, route, outputs)
+    ? prepareMaterializedCrossJurisdictionRoute(newState, route, outputs)
     : prepareRawCrossJurisdictionIntent(env, newState, route, outputs);
 };
 

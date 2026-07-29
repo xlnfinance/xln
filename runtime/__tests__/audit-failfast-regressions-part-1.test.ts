@@ -1540,7 +1540,6 @@ describe('audit fail-fast regressions', () => {
 
     expect(
       queueCrossJurisdictionSalvageFromArgumentList(
-        env,
         sourceState,
         outputs,
         sourceHub,
@@ -1563,7 +1562,6 @@ describe('audit fail-fast regressions', () => {
       const peerOutputs: EntityInput[] = [];
       expect(
         queueCrossJurisdictionSalvageFromArgumentList(
-          env,
           peerObserver,
           peerOutputs,
           sourceUser,

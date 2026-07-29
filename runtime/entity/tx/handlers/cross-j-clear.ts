@@ -168,7 +168,6 @@ const requestPureCancel = (
   targetCommandRoute.sourceCloseProof = proof;
   transitionCrossJurisdictionRouteStatus(targetCommandRoute, 'clearing', requestedAt);
   pushCrossJurisdictionEntityOutput(
-    env,
     outputs,
     route.target.entityId,
     [{
@@ -394,7 +393,6 @@ export const handleMaterializeCrossJurisdictionClearEntityTx = (
     deterministicEntityTimestamp(newState, env),
   );
   pushCrossJurisdictionEntityOutput(
-    env,
     outputs,
     route.target.entityId,
     [{

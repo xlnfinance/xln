@@ -403,7 +403,6 @@ export const handleApplyCrossJurisdictionBookProgressEntityTx = (
 };
 
 const buildCrossJurisdictionBookRemovalAckOutput = (
-  env: RuntimeState,
   ownerState: EntityState,
   route: CrossJurisdictionSwapRoute,
   sourceAccountId: string,
@@ -420,7 +419,7 @@ const buildCrossJurisdictionBookRemovalAckOutput = (
       `CROSS_J_BOOK_REMOVAL_ACK_SIGNER_MISSING:order=${route.orderId}:target=${sourceHubEntityId}`,
     );
   }
-  return buildCrossJurisdictionEntityOutput(env, sourceHubEntityId, [{
+  return buildCrossJurisdictionEntityOutput(sourceHubEntityId, signerId, [{
     type: 'crossJurisdictionBookOrderRemoved',
     data: {
       orderId: route.orderId,
@@ -430,7 +429,7 @@ const buildCrossJurisdictionBookRemovalAckOutput = (
       removedAt,
       reason,
     },
-  }], signerId);
+  }]);
 };
 
 export const handleCrossJurisdictionBookOrderRemovedEntityTx = async (
@@ -520,7 +519,6 @@ export const handleRemoveCrossJurisdictionBookOrderEntityTx = (
   );
   const outputs = pendingCancel && route && entityTx.data.sourceAccountId
     ? [buildCrossJurisdictionBookRemovalAckOutput(
-        env,
         newState,
         route,
         entityTx.data.sourceAccountId,

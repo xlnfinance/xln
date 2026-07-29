@@ -556,7 +556,6 @@ const applyStartedDisputeFollowups = (
 ): void => {
   const {
     newState,
-    env,
     blockNumber,
     accountTxs,
     outputs,
@@ -571,7 +570,6 @@ const applyStartedDisputeFollowups = (
   for (const disputeSecret of disputeSecrets) {
     const hashlock = hashHtlcSecret(disputeSecret);
     applyKnownHtlcSecret(
-      env,
       newState,
       accountTxs,
       outputs,
@@ -582,7 +580,6 @@ const applyStartedDisputeFollowups = (
     );
   }
   queueCrossJurisdictionSalvageFromDispute(
-    env,
     newState,
     outputs,
     counterpartyId,
@@ -590,7 +587,6 @@ const applyStartedDisputeFollowups = (
     blockNumber,
   );
   queueCrossJurisdictionSourceDisputeFromTargetDispute(
-    env,
     newState,
     outputs,
     counterpartyId,
@@ -693,7 +689,7 @@ const retireFinalizedDisputeState = (
   entityIdNorm: string,
   evidence: DisputeFinalizationEvidence[],
 ): void => {
-  const { newState, env, blockNumber, outputs } = context;
+  const { newState, blockNumber, outputs } = context;
   const weAreFinalizer = senderStr === entityIdNorm;
   const removedDraft = scrubDisputeFinalizationsForCounterparty(
     newState.jBatchState?.batch,
@@ -723,7 +719,6 @@ const retireFinalizedDisputeState = (
   ]);
   if (argumentBlobs.length > 0) {
     queueCrossJurisdictionSalvageFromArgumentList(
-      env,
       newState,
       outputs,
       counterpartyId,

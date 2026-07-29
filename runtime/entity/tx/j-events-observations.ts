@@ -53,12 +53,11 @@ export const applyExternalWalletJEvent = (context: FinalizedJEventContext): void
 };
 
 export const applySecretRevealedJEvent = (context: FinalizedJEventContext): void => {
-  const { env, newState, event, blockNumber, accountTxs, outputs } = context;
+  const { newState, event, blockNumber, accountTxs, outputs } = context;
   if (event.type !== 'SecretRevealed') {
     throw new Error(`J_EVENT_SECRET_ROUTE_MISMATCH:${event.type}`);
   }
   applyKnownHtlcSecret(
-    env,
     newState,
     accountTxs,
     outputs,

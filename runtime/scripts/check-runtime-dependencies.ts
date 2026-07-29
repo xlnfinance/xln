@@ -38,11 +38,11 @@ const FORBIDDEN_DEPENDENCIES = new Set([
   'server->orchestrator',
 ]);
 
-// Moving signer resolution out of the root god-file exposed three real
-// Entity→Runtime imports. Keep them visible and non-growing until Runtime
-// injects deterministic signer-routing evidence into Entity frame execution.
+// Account frames created before the first counterparty Hanko still need
+// Runtime-local delivery routing. This final edge disappears only when
+// EntityOutput and routed EntityInput become distinct types.
 const REVERSE_DEPENDENCY_DEBT: Readonly<Record<string, number>> = {
-  'entity->runtime': 3,
+  'entity->runtime': 1,
 };
 
 const collectFiles = (directory: string): string[] =>
@@ -190,10 +190,10 @@ if (errors.length > 0) {
   process.exit(1);
 }
 
-const debt = [...observed.values()].reduce((sum, occurrences) => sum + occurrences.length, 0);
 console.log(
   `RUNTIME_DEPENDENCIES_OK files=${files.length} forbiddenImports=0 ` +
     `forbiddenEdges=${FORBIDDEN_DEPENDENCIES.size} ` +
-    `reverseImports=${debt}/${Object.values(REVERSE_DEPENDENCY_DEBT).reduce((sum, count) => sum + count, 0)} ` +
+    `reverseImports=${[...observed.values()].reduce((sum, occurrences) => sum + occurrences.length, 0)}` +
+    `/${Object.values(REVERSE_DEPENDENCY_DEBT).reduce((sum, count) => sum + count, 0)} ` +
     `rootDebt=${ROOT_FILE_DEBT.size} maxValueScc=${largestValueComponent.length}`,
 );

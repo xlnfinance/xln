@@ -137,7 +137,6 @@ const backfillCommittedFillFromResolvedPull = (
 };
 
 const settleTargetLegAndNotifySourceSibling = (
-  env: RuntimeState,
   newState: EntityState,
   route: CrossJurisdictionSwapRoute,
   fillRatio: number,
@@ -169,8 +168,8 @@ const settleTargetLegAndNotifySourceSibling = (
   }
   const proof = closeProof ?? buildCrossJurisdictionCloseProof(route, binary);
   outputs.push(buildCrossJurisdictionEntityOutput(
-    env,
     sourceSiblingId,
+    requireRouteSignerHint(route, sourceSiblingId),
     [{
       type: 'crossJurisdictionSettled',
       data: {
@@ -180,7 +179,6 @@ const settleTargetLegAndNotifySourceSibling = (
         proof,
       },
     }],
-    requireRouteSignerHint(route, sourceSiblingId),
   ));
   crossJFollowupLog.debug('pull.target_settled.notify_source', {
     route: shortOrder(route.orderId, 12),
@@ -252,7 +250,7 @@ const removeOrRouteCrossJurisdictionBookOrder = (
     return;
   }
 
-  outputs.push(buildCrossJurisdictionEntityOutput(env, owner.ownerId, [{
+  outputs.push(buildCrossJurisdictionEntityOutput(owner.ownerId, requireRouteSignerHint(route, owner.ownerId), [{
       type: 'removeCrossJurisdictionBookOrder',
       data: {
         orderId: route.orderId,
@@ -260,7 +258,7 @@ const removeOrRouteCrossJurisdictionBookOrder = (
         route,
         reason,
       },
-  }], requireRouteSignerHint(route, owner.ownerId)));
+  }]));
 };
 
 const requireCrossFillAckNumber = (
@@ -339,10 +337,9 @@ const applyOrRouteCrossJurisdictionBookProgress = (
     return;
   }
   outputs.push(buildCrossJurisdictionEntityOutput(
-    env,
     owner.ownerId,
-    [tx],
     requireRouteSignerHint(route, owner.ownerId),
+    [tx],
   ));
 };
 
@@ -427,10 +424,9 @@ const admitCommittedSourcePullToBook = (
     return;
   }
   outputs.push(buildCrossJurisdictionEntityOutput(
-    env,
     ownerId,
-    [admissionTx],
     requireRouteSignerHint(route, ownerId),
+    [admissionTx],
   ));
 };
 
@@ -547,7 +543,6 @@ const applySourcePullResolve = (
 };
 
 const applyTargetPullResolve = (
-  env: RuntimeState,
   state: EntityState,
   route: CrossJurisdictionSwapRoute,
   accountTx: Extract<AccountTx, { type: 'pull_resolve' }>,
@@ -573,7 +568,6 @@ const applyTargetPullResolve = (
   Object.assign(route, withCrossJurisdictionClaimProgress(route, fillRatio, state.timestamp));
   transitionTargetLegSettled(route, state.timestamp);
   settleTargetLegAndNotifySourceSibling(
-    env,
     state,
     route,
     fillRatio,
@@ -628,7 +622,6 @@ const applyPullResolveFollowup = (
       storageChanges,
     )) continue;
     applyTargetPullResolve(
-      env,
       newState,
       route,
       accountTx,

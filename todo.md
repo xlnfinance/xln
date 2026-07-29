@@ -451,11 +451,19 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   proposal construction and one Account open from the actual browser bundle,
   not only Bun source imports. Programming faults such as `TypeError` must
   preserve their source stack and halt, never be relabelled as rejected input.
-  Remove confirmed Account→Entity/Runtime ownership imports by moving pair
-  ordering into a neutral protocol module, moving graph-wide solvency
-  inspection under Runtime audit, and injecting signer/history/effect
-  dependencies into Account consensus. Entity may return deterministic
-  storage/effect descriptions but must not import Runtime mutation helpers.
+  The Entity→Runtime ratchet is now `1`, down from `3`: rebalance selects its
+  committed Entity leader and Cross-J emits the signer already committed by
+  the route. The final edge is first-frame Account output routing before a
+  counterparty Hanko exists. Remove it by introducing a real deterministic
+  `EntityOutput` distinct from routed `EntityInput`: Entity consensus commits
+  the target Entity and authenticated payload, Runtime resolves and persists
+  the exact local/remote delivery lane before WAL publication, and replay uses
+  that durable route without gossip or private-key discovery. Pin the output
+  hash, first Account frame, post-WAL replay and board-rotation behavior before
+  changing the signed field set. Do not hide this boundary behind a resolver
+  callback or move Runtime topology helpers into Entity. Entity may return
+  deterministic storage/effect descriptions but must not import Runtime
+  mutation helpers.
 - [ ] Remove only call-site-proven dead code in small module-owned batches.
   Reverify dynamic imports, scenario/CLI entrypoints and browser API first;
   `runNumberedRegistrationIntent` is currently live scenario infrastructure,
@@ -464,11 +472,11 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   The old audit's named deletion batch has been exhausted or disproved on the
   current tree; discover the next candidates from current call sites instead
   of carrying that stale list forward. Reverify and delete dead
-  `RuntimeSnapshot`, zombie `EntityOutput`, and zero-call-site
-  tx/financial/hook/barrel exports. Do not invent empty
-  `RuntimeOutput` or `AccountOutput` aliases merely for naming symmetry;
-  derive output unions only from real reducer results. Public API removals
-  require an explicit compatibility decision.
+  `RuntimeSnapshot` and zero-call-site tx/financial/hook/barrel exports.
+  Introduce `EntityOutput` only as the real reducer-to-parent boundary required
+  above; do not invent empty `RuntimeOutput` or `AccountOutput` aliases merely
+  for naming symmetry. Derive output unions only from real reducer results.
+  Public API removals require an explicit compatibility decision.
 - [ ] Remove duplicate policy and display code: use canonical Account
   `Delta`/`DerivedDelta` and `deriveDelta` in the dev visualizer and Graph3D;
   BigInt remains exact until the geometry/formatting boundary. Fix the stale

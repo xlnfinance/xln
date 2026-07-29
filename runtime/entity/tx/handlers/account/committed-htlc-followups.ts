@@ -181,7 +181,7 @@ export function applyHtlcSecretFollowups(ctx: HtlcSecretFollowupContext, reveale
 
     if (route.crossJurisdictionRelay) {
       const relay = route.crossJurisdictionRelay;
-      pushCrossJurisdictionEntityOutput(ctx.env, outputs, relay.targetEntityId, [{
+      pushCrossJurisdictionEntityOutput(outputs, relay.targetEntityId, [{
         type: 'resolveHtlcLock',
         data: {
           counterpartyEntityId: relay.targetCounterpartyEntityId,

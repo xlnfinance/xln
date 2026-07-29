@@ -1002,35 +1002,20 @@ describe('audit fail-fast regressions', () => {
     expect(findCrossJurisdictionBookAdmissionForAck(state, targetHub, orderId, routeHash)).toBe(admission);
   });
 
-  test('committed cross-j signer requires its local sibling and ignores unrelated topology', () => {
-    const missing = createEmptyEnv('cross-output-topology-missing');
-    const minimal = createEmptyEnv('cross-output-topology-minimal');
-    const populated = createEmptyEnv('cross-output-topology-populated');
+  test('committed cross-j output is independent of Runtime topology', () => {
     const target = `0x${'ab'.repeat(32)}`;
     const committedSigner = `0x${'cd'.repeat(20)}`;
-    const staleSigner = `0x${'ef'.repeat(20)}`;
     const txs: EntityTx[] = [{ type: 'j_broadcast', data: {} }];
-    attachSigningReplica(minimal, target, committedSigner);
-    attachSigningReplica(populated, target, committedSigner);
-    populated.eReplicas.set('stale-topology', {
-      entityId: target.toUpperCase(),
-      signerId: staleSigner,
-      entityEncPubKey: '',
-      entityEncPrivKey: '',
-      mempool: [],
-      isProposer: true,
-      state: {
-        ...makeEntityState(target.toUpperCase()),
-        config: makeSingleSignerConfigFor(staleSigner),
-      },
-    } satisfies EntityReplica);
-
-    expect(() => buildCrossJurisdictionEntityOutput(missing, target, txs, committedSigner)).toThrow(
-      'CROSS_J_SIBLING_TARGET_NOT_LOCAL',
+    expect(() => buildCrossJurisdictionEntityOutput(target, '', txs)).toThrow(
+      'CROSS_J_ENTITY_OUTPUT_ROUTE_MISSING',
     );
-    expect(buildCrossJurisdictionEntityOutput(minimal, target, txs, committedSigner)).toEqual(
-      buildCrossJurisdictionEntityOutput(populated, target, txs, committedSigner),
-    );
+    expect(buildCrossJurisdictionEntityOutput(target.toUpperCase(), committedSigner.toUpperCase(), txs))
+      .toEqual({
+        entityId: target,
+        signerId: committedSigner,
+        entityTxs: txs,
+        localRuntimeProtocol: 'cross-j',
+      });
   });
 
   test('cross-j rejects target-side bonus economics before route commitment', () => {
