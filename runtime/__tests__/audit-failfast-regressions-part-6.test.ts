@@ -519,6 +519,12 @@ const ensureCanonicalCommandBoardAuthority = async (env: RuntimeState, state: En
     replica.depositoryAddress = jurisdiction.depositoryAddress;
     replica.entityProviderAddress = jurisdiction.entityProviderAddress;
   }
+  replica.contracts = {
+    depository: jurisdiction.depositoryAddress,
+    entityProvider: jurisdiction.entityProviderAddress,
+    account: replica.contracts?.account || hex20('98'),
+    deltaTransformer: replica.contracts?.deltaTransformer || hex20('99'),
+  };
   replica.watcherConfirmationDepth = 0;
   await installCanonicalRegisteredBoardAuthority(env, jurisdiction, state, boardHash);
 };
@@ -783,6 +789,11 @@ describe('audit fail-fast regressions', () => {
     const targetUser = `0x${'33'.repeat(32)}`;
     const orderId = 'source-offer-race';
     const pairId = 'cross:base:2/tron:1';
+    const runtimeSeed = env.runtimeSeed;
+    if (!runtimeSeed) throw new Error('TEST_RUNTIME_SEED_REQUIRED');
+    const sourceUserSignerId = deriveSignerAddressSync(runtimeSeed, '2').toLowerCase();
+    registerSignerKey(runtimeSeed, sourceUserSignerId, deriveSignerKeySync(runtimeSeed, '2'));
+    attachSigningReplica(env, sourceUser, sourceUserSignerId);
     const route = buildPreparedCrossJurisdictionRoute(
       {
         orderId,
@@ -790,7 +801,7 @@ describe('audit fail-fast regressions', () => {
         hubEntityId: targetHub,
         bookOwnerEntityId: targetHub,
         venueId: pairId,
-        sourceSignerId: 'source-user-signer',
+        sourceSignerId: sourceUserSignerId,
         sourceHubSignerId: 'source-hub-signer',
         targetHubSignerId: 'target-hub-signer',
         targetSignerId: 'target-user-signer',

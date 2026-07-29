@@ -57,6 +57,8 @@ const makeAccount = (frameStateHash: string): AccountState =>
       rightCreditLimit: 0n,
       leftAllowance: 0n,
       rightAllowance: 0n,
+      leftHold: 0n,
+      rightHold: 0n,
     }]]),
     locks: new Map(),
     swapOffers: new Map(),

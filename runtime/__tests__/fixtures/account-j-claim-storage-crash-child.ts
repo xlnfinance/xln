@@ -39,6 +39,7 @@ import {
 import type { EntityReplica, JReplica, JurisdictionConfig } from '../../types';
 import { getPerfMs } from '../../utils';
 import { buildRuntimeCheckpointSnapshot } from '../../storage/wal/snapshot';
+import { sealAccountDraftAsEntity } from '../helpers/account-draft';
 
 const [seed, requestedBoundary] = Bun.argv.slice(2);
 if (!seed || !requestedBoundary) throw new Error('account J crash seed and boundary are required');
@@ -193,19 +194,31 @@ const proposed = await proposeAccountFrame(
 if (!proposed.success || !proposed.accountInput) {
   throw new Error(`ACCOUNT_J_CRASH_PROPOSAL_FAILED:${proposed.error ?? 'unknown'}`);
 }
-account.pendingAccountInput = proposed.accountInput;
+const sealedProposal = await sealAccountDraftAsEntity(env, entityId, signerA, proposed);
+account.pendingAccountInput = sealedProposal;
 account.pendingAccountInputSignerId = signerB;
+if (sealedProposal.kind !== 'frame') throw new Error('ACCOUNT_J_CRASH_FRAME_PROPOSAL_REQUIRED');
+account.currentFrameHanko = sealedProposal.proposal.frameHanko;
+account.currentDisputeProofHanko = sealedProposal.proposal.disputeSeal?.hanko;
 const peerValidation = await applyAccountInput(
   env,
   structuredClone(counterpartyAccount),
-  proposed.accountInput,
+  sealedProposal,
   { entityTimestamp: env.timestamp, finalizedJHeight: 7 },
   new Map(),
 );
 if (!peerValidation.success || !peerValidation.response) {
   throw new Error(`ACCOUNT_J_CRASH_ACK_FAILED:${peerValidation.error ?? 'missing-response'}`);
 }
-const claimAck = peerValidation.response;
+const claimAck = await sealAccountDraftAsEntity(
+  env,
+  counterpartyId,
+  signerB,
+  {
+    accountInput: peerValidation.response,
+    hashesToSign: peerValidation.hashesToSign,
+  },
+);
 applyRuntimeStorageChanges(env, [
   { family: 'account', entityId, counterpartyId },
   { family: 'account', entityId: counterpartyId, counterpartyId: entityId },

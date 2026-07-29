@@ -27,6 +27,7 @@ import type {
   JurisdictionConfig,
 } from '../types';
 import { validateAccountState, validateEntityState } from '../validation-utils';
+import { sealAccountDraftAsEntity } from './helpers/account-draft';
 
 const entityId = `0x${'11'.repeat(32)}`;
 const counterpartyId = `0x${'22'.repeat(32)}`;
@@ -296,7 +297,13 @@ test('only an accepted signed genesis can reserve an Account slot', async () => 
   if (!proposed.success || !proposed.accountInput?.proposal) {
     throw new Error(proposed.error || 'TEST_ACCOUNT_GENESIS_PROPOSAL_REQUIRED');
   }
-  const invalidInput = structuredClone(proposed.accountInput);
+  const sealedProposal = await sealAccountDraftAsEntity(
+    env,
+    sourceEntityId,
+    sourceSignerId,
+    proposed,
+  );
+  const invalidInput = structuredClone(sealedProposal);
   invalidInput.proposal.frame.accountStateRoot = `0x${'99'.repeat(32)}`;
   invalidInput.proposal.frame.stateHash = await createFrameHash(invalidInput.proposal.frame);
   const [frameHanko] = await signEntityHashes(
@@ -311,7 +318,7 @@ test('only an accepted signed genesis can reserve an Account slot', async () => 
   expect(targetState.accounts.has(sourceEntityId)).toBe(false);
   expect(targetState.accounts.size).toBe(0);
 
-  await applyAccountInputToEntity(targetState, proposed.accountInput, env);
+  await applyAccountInputToEntity(targetState, sealedProposal, env);
   expect(targetState.accounts.get(sourceEntityId)?.currentHeight).toBe(1);
   expect(targetState.accounts.size).toBe(1);
 });

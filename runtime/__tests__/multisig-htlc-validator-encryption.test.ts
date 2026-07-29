@@ -1760,7 +1760,23 @@ describe('multisig HTLC validator encryption', () => {
     const proposedAccount = firstReplay.newState.accounts.get(destination.entityId);
     expect(proposedAccount?.pendingFrame?.accountTxs[0]?.type).toBe('htlc_lock');
     expect(proposedAccount?.pendingAccountInput?.kind).toBe('frame');
-    expect(proposedAccount?.currentFrameHanko).toMatch(/^0x[0-9a-f]+$/);
+    const pendingFrameHash = proposedAccount?.pendingFrame?.stateHash;
+    if (!pendingFrameHash) throw new Error('HTLC_PREPARED_ACCOUNT_FRAME_HASH_MISSING');
+    expect(pendingFrameHash).toMatch(/^0x[0-9a-f]{64}$/);
+    // applyEntityFrame is the pure candidate reducer. It declares the Account
+    // hash but cannot sign it: only the enclosing Entity consensus may attach
+    // validator/quorum Hanko after this candidate becomes the chosen E-frame.
+    expect(proposedAccount?.currentFrameHanko).toBeUndefined();
+    expect(
+      proposedAccount?.pendingAccountInput?.kind === 'frame'
+        ? proposedAccount.pendingAccountInput.proposal.frameHanko
+        : undefined,
+    ).toBeUndefined();
+    expect(firstReplay.collectedHashes).toContainEqual({
+      hash: pendingFrameHash,
+      type: 'accountFrame',
+      context: expect.stringContaining(':frame:'),
+    });
     expect(firstReplay.outputs).toHaveLength(1);
     expect(serializeTaggedJson(firstReplay.outputs)).toBe(serializeTaggedJson(secondReplay.outputs));
     expect(firstReplay.outputs[0]?.entityId).toBe(destination.entityId);
