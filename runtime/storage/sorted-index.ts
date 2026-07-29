@@ -5,7 +5,7 @@ type SortedStringKeyCache = {
   keys: string[];
 };
 
-type IndexedStringMap = Map<string, unknown> & {
+type IndexedStringMap<T> = Map<string, T> & {
   [SORTED_STRING_KEYS]?: SortedStringKeyCache;
 };
 
@@ -24,7 +24,7 @@ const binarySearch = (keys: readonly string[], key: string): { found: boolean; i
   return { found: keys[lo] === key, index: lo };
 };
 
-const setCache = (map: Map<string, unknown>, cache: SortedStringKeyCache): void => {
+const setCache = <T>(map: Map<string, T>, cache: SortedStringKeyCache): void => {
   Object.defineProperty(map, SORTED_STRING_KEYS, {
     configurable: true,
     enumerable: false,
@@ -33,13 +33,13 @@ const setCache = (map: Map<string, unknown>, cache: SortedStringKeyCache): void 
   });
 };
 
-export const invalidateSortedStringMapKeys = (map: Map<string, unknown>): void => {
-  const indexed = map as IndexedStringMap;
+export const invalidateSortedStringMapKeys = <T>(map: Map<string, T>): void => {
+  const indexed: IndexedStringMap<T> = map;
   if (indexed[SORTED_STRING_KEYS]) delete indexed[SORTED_STRING_KEYS];
 };
 
-export const sortedStringMapKeys = (map: Map<string, unknown>): readonly string[] => {
-  const indexed = map as IndexedStringMap;
+export const sortedStringMapKeys = <T>(map: Map<string, T>): readonly string[] => {
+  const indexed: IndexedStringMap<T> = map;
   const cached = indexed[SORTED_STRING_KEYS];
   if (cached && cached.size === map.size) return cached.keys;
   const keys = Array.from(map.keys()).sort(compareAscii);
@@ -66,7 +66,7 @@ export const upsertSortedStringMapEntry = <T>(
 ): void => {
   const alreadyPresent = map.has(key);
   map.set(key, value);
-  if (!alreadyPresent) invalidateSortedStringMapKeys(map as unknown as Map<string, unknown>);
+  if (!alreadyPresent) invalidateSortedStringMapKeys(map);
 };
 
 export const removeSortedStringMapEntry = <T>(
@@ -74,6 +74,6 @@ export const removeSortedStringMapEntry = <T>(
   key: string,
 ): boolean => {
   const deleted = map.delete(key);
-  if (deleted) invalidateSortedStringMapKeys(map as unknown as Map<string, unknown>);
+  if (deleted) invalidateSortedStringMapKeys(map);
   return deleted;
 };

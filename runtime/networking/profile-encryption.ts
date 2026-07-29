@@ -18,9 +18,12 @@ export type ValidatorEncryptionAnnouncement = Readonly<{
 
 const PROFILE_ENCRYPTION_CACHE = Symbol.for('xln.runtime.profile-encryption-cache');
 type ProfileEncryptionCache = Map<string, Map<string, ValidatorEncryptionAttestation>>;
+type RuntimeStateWithProfileEncryptionCache = RuntimeState & {
+  [PROFILE_ENCRYPTION_CACHE]?: ProfileEncryptionCache;
+};
 
 const cacheForEnv = (env: RuntimeState): ProfileEncryptionCache => {
-  const record = env as unknown as Record<PropertyKey, unknown>;
+  const record: RuntimeStateWithProfileEncryptionCache = env;
   const existing = record[PROFILE_ENCRYPTION_CACHE];
   if (existing instanceof Map) return existing as ProfileEncryptionCache;
   const created: ProfileEncryptionCache = new Map();

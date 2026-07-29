@@ -90,7 +90,7 @@ const waitForSocketClose = async (ws: WebSocketLike | null, timeoutMs = 1_000): 
     const prevOnClose = browserWs.onclose;
     browserWs.onclose = (event) => {
       try {
-        prevOnClose?.call(browserWs as unknown as WebSocket, event);
+        prevOnClose?.call(browserWs as WebSocket, event);
       } finally {
         finish();
       }
