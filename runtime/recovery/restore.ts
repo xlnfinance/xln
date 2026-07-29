@@ -7,7 +7,6 @@ import {
   cloneIsolatedRuntimeSnapshot,
 } from './../protocol/runtime-input-clone';
 import { requireBoundaryInteger } from './../protocol/boundary-validation';
-import { requireDurableJurisdictionStack } from './../jurisdiction/contract-address';
 import {
   buildDurableRuntimeMachineSnapshot,
   buildReplayVerifiableRuntimeMachineSnapshot,
@@ -35,7 +34,7 @@ import {
   getLiveAccountJClaimAccumulatorStates,
 } from './../account/j-claim-store';
 import { clearPendingAuditEvents, dropPendingHistoryRecords, peekPendingHistoryRecords } from '../runtime/env-events';
-import { getCachedSignerPrivateKey, getLocalSignerPrivateKey } from './../account/crypto';
+import { getCachedSignerPrivateKey } from './../account/crypto';
 import type { Profile } from './../networking/gossip';
 import { normalizeRuntimeId } from './../networking/runtime-id';
 import {
@@ -52,6 +51,11 @@ import {
   applyRecoveryRuntimeOutputPlan,
   hasPendingLocalReliableOutput,
 } from '../runtime/recovery-output';
+import {
+  assertPersistedContractConfigReady,
+  reconcileRecoveryInfraEffects,
+  registerCommittedSingleSignerWallets,
+} from '../runtime/recovery-infra';
 import { restoreDurableOutputRetryState } from '../runtime/durable-output-retry';
 import { registerPendingCommittedJOutbox, splitJOutboxForDurableSubmit } from '../runtime/j-submit-state';
 import { clearReplayOutputSignerHints, installReplayOutputSignerHints } from './../state-helpers';
@@ -91,13 +95,12 @@ import {
   assertCertifiedJHistoryIntegrity,
   assertValidatorJHistoryMatchesCertifiedAnchor,
 } from './../jurisdiction/local-history';
-import type { EntityReplica, RuntimeState, JReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeTx } from './../types';
+import type { RuntimeState, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeTx } from './../types';
 import { clearDatabase } from './../utils';
 import type { PersistedFrameJournal } from './../storage/types';
 import { assertRuntimeRecoveryBundleAuthenticity } from './../recovery/bundle';
 import type { RuntimeRecoveryBundleV1 } from './../recovery/types';
-import { ensureLiveJAdapterForReplica, rehydrateRestoredRuntimeInfra } from '../runtime/infra';
-import { findWatcherJurisdictionReplica } from './../jadapter/helpers';
+import { rehydrateRestoredRuntimeInfra } from '../runtime/infra';
 import { loadGossipProfilesFromInfraDb } from '../runtime/infra-gossip-store';
 import { normalizeDbNamespace, type StorageDbRole, withStorageWriterLock } from './../storage/runtime-dbs';
 import { createStructuredLogger } from '../infra/logger';
@@ -788,133 +791,14 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
     await withStorageWriterLock(env, () => persistRestoredEnvToDBUnlocked(env, options));
   };
 
-  const assertPersistedContractConfigReady = (env: RuntimeState, label: string): void => {
-    for (const [name, replica] of env.jReplicas.entries()) {
-      try {
-        requireDurableJurisdictionStack(replica);
-      } catch (error) {
-        const reason = error instanceof Error ? error.message : String(error);
-        throw new Error(`${reason}:${label}:${name}`, { cause: error });
-      }
-    }
-  };
-
-  const findJurisdictionEntryByName = (env: RuntimeState, name: string): [string, JReplica] | null => {
-    const normalized = String(name || '')
-      .trim()
-      .toLowerCase();
-    for (const entry of env.jReplicas.entries()) {
-      if (
-        String(entry[0] || '')
-          .trim()
-          .toLowerCase() === normalized
-      )
-        return entry;
-    }
-    return null;
-  };
-
-  const registerCommittedSingleSignerWallet = (env: RuntimeState, replica: EntityReplica): void => {
-    const validators = replica.state.config.validators;
-    if (validators.length !== 1 || replica.state.config.threshold !== 1n) return;
-    const signerId = String(validators[0] || '')
-      .trim()
-      .toLowerCase();
-    if (!signerId) throw new Error(`ENTITY_SINGLE_SIGNER_MISSING:${replica.entityId}`);
-    if (
-      String(replica.signerId || '')
-        .trim()
-        .toLowerCase() !== signerId
-    ) {
-      throw new Error(`ENTITY_SINGLE_SIGNER_REPLICA_MISMATCH:${replica.entityId}:${replica.signerId}:${signerId}`);
-    }
-    const privateKey = getLocalSignerPrivateKey(env, signerId);
-    if (privateKey === null) return;
-    const jurisdiction = replica.state.config.jurisdiction;
-    if (!jurisdiction?.depositoryAddress || !jurisdiction.chainId) {
-      throw new Error(`ENTITY_JURISDICTION_BINDING_INCOMPLETE:${replica.entityId}`);
-    }
-    const jurisdictionReplica = findWatcherJurisdictionReplica(
-      env,
-      jurisdiction.depositoryAddress,
-      jurisdiction.chainId,
-    );
-    if (!jurisdictionReplica) {
-      throw new Error(
-        `ENTITY_JURISDICTION_REPLICA_MISSING:${replica.entityId}:${jurisdiction.chainId}:${jurisdiction.depositoryAddress}`,
-      );
-    }
-    const hasExternalRpc = (jurisdictionReplica.rpcs ?? []).some(rpc => {
-      const normalized = String(rpc || '')
-        .trim()
-        .toLowerCase();
-      return normalized.length > 0 && !normalized.startsWith('browservm:');
-    });
-    const liveAdapter = jurisdictionReplica.jadapter;
-    if (!liveAdapter) {
-      if (hasExternalRpc) {
-        // RPC submission carries an already assembled Hanko and is signed by the
-        // jurisdiction transaction sender. Entity private keys never belong in
-        // the RPC adapter, whose registerEntityWallet implementation is a no-op.
-        return;
-      }
-      runtimeLog.debug('browservm.wallet_bind_deferred', {
-        entityId: replica.entityId,
-        chainId: jurisdiction.chainId,
-        depositoryAddress: jurisdiction.depositoryAddress,
-      });
-      return;
-    }
-    if (liveAdapter.mode !== 'browservm' && hasExternalRpc) return;
-    const registerWallet = liveAdapter.registerEntityWallet;
-    if (!registerWallet) {
-      throw new Error(`ENTITY_JURISDICTION_WALLET_BINDER_MISSING:${replica.entityId}`);
-    }
-    registerWallet(replica.entityId, ethers.hexlify(privateKey));
-  };
-
-  const registerCommittedSingleSignerWallets = (env: RuntimeState, entityIds?: ReadonlySet<string>): void => {
-    for (const replica of env.eReplicas.values()) {
-      if (entityIds && !entityIds.has(replica.entityId.toLowerCase())) continue;
-      registerCommittedSingleSignerWallet(env, replica);
-    }
-  };
-
-  const reconcileCommittedRuntimeInfraEffects = async (env: RuntimeState, runtimeTxs: readonly RuntimeTx[]): Promise<void> => {
-    const jurisdictionNames = new Set<string>();
-    const importedEntityIds = new Set<string>();
-    for (const runtimeTx of runtimeTxs) {
-      if (runtimeTx.type === 'completeImportJ') jurisdictionNames.add(runtimeTx.data.name);
-      if (runtimeTx.type === 'importJ' && findJurisdictionEntryByName(env, runtimeTx.data.name)) {
-        jurisdictionNames.add(runtimeTx.data.name);
-      }
-      if (runtimeTx.type === 'importReplica') {
-        importedEntityIds.add(runtimeTx.entityId.toLowerCase());
-      }
-    }
-    for (const name of jurisdictionNames) {
-      const entry = findJurisdictionEntryByName(env, name);
-      if (!entry) throw new Error(`COMMITTED_JURISDICTION_REPLICA_MISSING:${name}`);
-      const adapter = await ensureLiveJAdapterForReplica(env, entry[0], {
-        allowBrowserVm: true,
-        context: `postcommit:${entry[0]}`,
-        attempts: typeof window !== 'undefined' ? 5 : 3,
-      });
-      if (!adapter) throw new Error(`COMMITTED_JURISDICTION_ADAPTER_MISSING:${entry[0]}`);
-      if (adapter.mode === 'browservm') {
-        const browserVM = adapter.getBrowserVM();
-        if (!browserVM) throw new Error(`COMMITTED_BROWSERVM_MISSING:${entry[0]}`);
-        setBrowserVMJurisdiction(env, adapter.addresses.depository, adapter.chainId, browserVM);
-      }
-    }
-    if (jurisdictionNames.size > 0) {
-      assertPersistedContractConfigReady(env, 'postcommit jurisdiction import');
-      registerCommittedSingleSignerWallets(env);
-      startJurisdictionWatchers(env);
-    } else if (importedEntityIds.size > 0) {
-      registerCommittedSingleSignerWallets(env, importedEntityIds);
-    }
-  };
+  const reconcileCommittedRuntimeInfraEffects = (
+    env: RuntimeState,
+    runtimeTxs: readonly RuntimeTx[],
+  ) => reconcileRecoveryInfraEffects(
+    env,
+    runtimeTxs,
+    startJurisdictionWatchers,
+  );
 
   const applyDeterministicRuntimeOutputPlan = (
     env: RuntimeState,
