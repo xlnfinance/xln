@@ -10,8 +10,24 @@ import type { RuntimeState, RuntimeInput } from '../types';
 export const ENV_APPLY_ALLOWED_KEY = Symbol.for('xln.runtime.env.apply.allowed');
 export const ENV_REPLAY_MODE_KEY = Symbol.for('xln.runtime.env.replay.mode');
 
-export const envRecord = (env: RuntimeState): Record<PropertyKey, unknown> =>
-  env as unknown as Record<PropertyKey, unknown>;
+export const readRuntimeMetadata = (env: RuntimeState, key: PropertyKey): unknown =>
+  Reflect.get(env, key);
+
+export const writeRuntimeMetadata = (
+  env: RuntimeState,
+  key: PropertyKey,
+  value: unknown,
+): void => {
+  if (!Reflect.set(env, key, value)) {
+    throw new Error(`RUNTIME_METADATA_WRITE_FAILED:${String(key)}`);
+  }
+};
+
+export const deleteRuntimeMetadata = (env: RuntimeState, key: PropertyKey): void => {
+  if (!Reflect.deleteProperty(env, key)) {
+    throw new Error(`RUNTIME_METADATA_DELETE_FAILED:${String(key)}`);
+  }
+};
 
 export const failfastAssert: (
   condition: unknown,

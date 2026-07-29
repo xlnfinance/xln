@@ -1,6 +1,6 @@
 import { assertCertifiedRegistrationEvidenceStore } from '../../jurisdiction/registration-evidence';
 import { safeStringify } from '../../protocol/serialization';
-import { envRecord } from '../../runtime/loop-environment';
+import { writeRuntimeMetadata } from '../../runtime/loop-environment';
 import type { RuntimeState } from '../../types';
 import {
   listStorageSnapshotHeights,
@@ -158,7 +158,7 @@ const finalizeReplay = async (
     target.targetHeight,
   );
   await assertCertifiedRegistrationEvidenceStore(restored.env);
-  envRecord(restored.env)['__replayMeta'] = {
+  writeRuntimeMetadata(restored.env, '__replayMeta', {
     checkpointHeight: target.selectedSnapshotHeight,
     selectedSnapshotHeight: target.selectedSnapshotHeight,
     selectedSnapshotLabel:
@@ -166,7 +166,7 @@ const finalizeReplay = async (
         ? 'genesis:1'
         : `checkpoint:${target.selectedSnapshotHeight}`,
     latestHeight: target.latestHeight,
-  };
+  });
   restored.env.history = [];
 };
 

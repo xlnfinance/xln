@@ -3,7 +3,7 @@ import {
   cloneIsolatedRuntimeInput,
 } from '../../protocol/runtime-input-clone';
 import { requireBoundaryInteger } from '../../protocol/boundary-validation';
-import { envRecord } from '../../runtime/loop-environment';
+import { writeRuntimeMetadata } from '../../runtime/loop-environment';
 import { restoreDurableOutputRetryState } from '../../runtime/durable-output-retry';
 import type { RuntimeState } from '../../types';
 import {
@@ -115,7 +115,7 @@ const installRestoredRuntimeFrame = async (
     await assertCertifiedRegistrationEvidenceStore(env);
   }
   assertRestoredCanonicalState(env, source);
-  envRecord(env)['__replayMeta'] = {
+  writeRuntimeMetadata(env, '__replayMeta', {
     checkpointHeight: selectedSnapshotHeight,
     selectedSnapshotHeight,
     selectedSnapshotLabel:
@@ -125,7 +125,7 @@ const installRestoredRuntimeFrame = async (
           ? `checkpoint:${selectedSnapshotHeight}`
           : `snapshot:${selectedSnapshotHeight}`,
     latestHeight,
-  };
+  });
   env.history = [];
 };
 

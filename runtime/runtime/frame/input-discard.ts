@@ -1,7 +1,7 @@
 import { createStructuredLogger } from '../../infra/logger';
 import type { RoutedEntityInput, RuntimeInput, RuntimeState } from '../../types';
 import { RuntimeEntityInputApplyError } from '../entity-inputs';
-import { ENV_REPLAY_MODE_KEY, envRecord } from '../loop-environment';
+import { ENV_REPLAY_MODE_KEY, readRuntimeMetadata } from '../loop-environment';
 import { cloneRuntimeFrameMempool } from './clone';
 
 const discardLog = createStructuredLogger('runtime.input_discard');
@@ -33,7 +33,7 @@ export const discardMalformedRemoteEntityInput = (
   error: unknown,
   quietLogs: boolean,
 ): RuntimeInput | null => {
-  if (env.scenarioMode || envRecord(env)[ENV_REPLAY_MODE_KEY] === true) return null;
+  if (env.scenarioMode || readRuntimeMetadata(env, ENV_REPLAY_MODE_KEY) === true) return null;
   if (!(error instanceof RuntimeEntityInputApplyError) || !error.isDiscardableRemoteIngress) {
     return null;
   }

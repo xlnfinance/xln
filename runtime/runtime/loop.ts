@@ -11,11 +11,12 @@ import {
   ENV_APPLY_ALLOWED_KEY,
   ENV_REPLAY_MODE_KEY,
   ensureRuntimeConfig,
-  envRecord,
   failfastAssert,
+  readRuntimeMetadata,
   registerEnvChangeCallback,
   registerRecoveryBackupBarrier,
   registerRuntimeFrameCommitCallback,
+  writeRuntimeMetadata,
 } from './loop-environment';
 import {
   clearCleanLogs,
@@ -133,7 +134,8 @@ export const createRuntimeLoopApi = (deps: RuntimeLoopApiDeps) => {
     registerRecoveryBackupBarrier,
     ENV_APPLY_ALLOWED_KEY,
     ENV_REPLAY_MODE_KEY,
-    envRecord,
+    readRuntimeMetadata,
+    writeRuntimeMetadata,
     failfastAssert,
     ensureRuntimeConfig,
     getRuntimeStorageDb,

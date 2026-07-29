@@ -5,7 +5,11 @@ import {
 } from '../../protocol/runtime-input-clone';
 import { requireBoundaryInteger } from '../../protocol/boundary-validation';
 import { getConsumptionNodeStore } from '../../entity/consumption-store';
-import { envRecord } from '../../runtime/loop-environment';
+import {
+  deleteRuntimeMetadata,
+  readRuntimeMetadata,
+  writeRuntimeMetadata,
+} from '../../runtime/loop-environment';
 import {
   clearPendingAuditEvents,
   dropPendingHistoryRecords,
@@ -124,7 +128,7 @@ const replayOneFrame = async (
     `RECOVERY_JOURNAL_TIMESTAMP_INVALID:height=${height}`,
   );
   installReplayOutputSignerHints(env, collectOutputSignerHints(frame, height));
-  envRecord(env)[APPLY_ALLOWED] = true;
+  writeRuntimeMetadata(env, APPLY_ALLOWED, true);
   try {
     if (nodeProcess?.env?.['XLN_STORAGE_DEBUG_REPLICA_META'] === '1') {
       runtimeLog.info('recovery.replica_meta.pre', {
@@ -172,7 +176,7 @@ const replayOneFrame = async (
     verifyRecoveryJournalFrame(env, frame, height, result);
   } finally {
     clearReplayOutputSignerHints(env);
-    envRecord(env)[APPLY_ALLOWED] = false;
+    writeRuntimeMetadata(env, APPLY_ALLOWED, false);
   }
 };
 
@@ -182,8 +186,8 @@ export const replayPersistedRuntimeJournals = async (
   frames: PersistedFrameJournal[],
 ): Promise<void> => {
   deps.ensureRuntimeConfig(env);
-  const previousReplayMode = envRecord(env)[REPLAY_MODE];
-  envRecord(env)[REPLAY_MODE] = true;
+  const previousReplayMode = readRuntimeMetadata(env, REPLAY_MODE);
+  writeRuntimeMetadata(env, REPLAY_MODE, true);
   try {
     let expectedHeight = requireBoundaryInteger(
       requireBoundaryInteger(
@@ -208,10 +212,10 @@ export const replayPersistedRuntimeJournals = async (
     }
   } finally {
     if (previousReplayMode === undefined) {
-      delete envRecord(env)[REPLAY_MODE];
+      deleteRuntimeMetadata(env, REPLAY_MODE);
     } else {
-      envRecord(env)[REPLAY_MODE] = previousReplayMode;
+      writeRuntimeMetadata(env, REPLAY_MODE, previousReplayMode);
     }
-    envRecord(env)[APPLY_ALLOWED] = false;
+    writeRuntimeMetadata(env, APPLY_ALLOWED, false);
   }
 };

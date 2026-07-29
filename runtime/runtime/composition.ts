@@ -82,7 +82,8 @@ const {
   registerRecoveryBackupBarrier,
   ENV_APPLY_ALLOWED_KEY,
   ENV_REPLAY_MODE_KEY,
-  envRecord,
+  readRuntimeMetadata,
+  writeRuntimeMetadata,
   ensureRuntimeConfig,
   getRuntimeStorageDb,
   getStorageDb,
@@ -204,13 +205,13 @@ export const initEnv = (seed?: string | null): RuntimeState => {
 const applyRuntimeInput = createRuntimeInputReducer({
   assertApplyAllowed: env => {
     failfastAssert(
-      env.scenarioMode === true || envRecord(env)[ENV_APPLY_ALLOWED_KEY] === true,
+      env.scenarioMode === true || readRuntimeMetadata(env, ENV_APPLY_ALLOWED_KEY) === true,
       'RUNTIME_APPLY_DIRECT_CALL',
       'applyRuntimeInput must be invoked via process()/WAL replay (non-scenario)',
       { runtimeId: env.runtimeId, height: env.height },
     );
   },
-  isReplay: env => envRecord(env)[ENV_REPLAY_MODE_KEY] === true,
+  isReplay: env => readRuntimeMetadata(env, ENV_REPLAY_MODE_KEY) === true,
   normalizeEntityInput: normalizeRuntimeEntityInput,
   getRoutingDeps: getRuntimeEntityRoutingDeps,
   applyCommittedLocalReceipts: (env, commits, options) =>
@@ -323,7 +324,7 @@ processRuntimeImpl = createRuntimeProcessor({
   attachEventEmitters,
   applyRuntimeInput,
   setApplyAllowed: (env, allowed) => {
-    envRecord(env)[ENV_APPLY_ALLOWED_KEY] = allowed;
+    writeRuntimeMetadata(env, ENV_APPLY_ALLOWED_KEY, allowed);
   },
   getRuntimeOutputRoutingDeps,
   notifyEnvChange: notifyRuntimeStateChanged,

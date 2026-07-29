@@ -7,7 +7,7 @@ import {
 } from '../runtime/env-events';
 import { transitionRuntimeLifecycle } from '../runtime/lifecycle';
 import { ensureRuntimeState } from '../runtime/runtime-state';
-import { envRecord } from '../runtime/loop-environment';
+import { readRuntimeMetadata } from '../runtime/loop-environment';
 import { safeStringify } from '../protocol/serialization';
 import type {
   RoutedEntityInput,
@@ -118,7 +118,7 @@ export const saveRuntimeEnvironment = async (
     ReturnType<typeof saveRuntimeFrameToStorage>
   >['persistencePerfMs'];
 }> => {
-  if (envRecord(env)[ENV_REPLAY_MODE_KEY] === true) {
+  if (readRuntimeMetadata(env, ENV_REPLAY_MODE_KEY) === true) {
     throw new Error('REPLAY_INVARIANT_FAILED: saveEnvToDB called during replay');
   }
   const pendingHistoryRecords = peekPendingHistoryRecords(
