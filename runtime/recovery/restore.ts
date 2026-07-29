@@ -1,15 +1,11 @@
 import { Level } from 'level';
-import { nodeProcess, runtimeIsBrowser } from '../runtime/platform';
+import { runtimeIsBrowser } from '../runtime/platform';
 import {
-  cloneIsolatedRoutedEntityInputs,
-  cloneIsolatedRuntimeInput,
   cloneIsolatedRuntimeSnapshot,
 } from './../protocol/runtime-input-clone';
 import { requireBoundaryInteger } from './../protocol/boundary-validation';
 import {
   buildDurableRuntimeMachineSnapshot,
-  buildReplayVerifiableRuntimeMachineSnapshot,
-  authorizeRestoredRuntimeInput,
   normalizePersistedSnapshotInPlace,
   restoreDurableRuntimeSnapshot,
 } from '../storage/wal/snapshot';
@@ -31,19 +27,13 @@ import {
   getAccountJClaimNodeStore,
   getLiveAccountJClaimAccumulatorStates,
 } from './../account/j-claim-store';
-import { clearPendingAuditEvents, dropPendingHistoryRecords, peekPendingHistoryRecords } from '../runtime/env-events';
-import { getCachedSignerPrivateKey } from './../account/crypto';
 import type { Profile } from './../networking/gossip';
 import { normalizeRuntimeId } from './../networking/runtime-id';
 import {
   markRestoredReliableOutputsDue,
   type RuntimeOutputRoutingDeps,
 } from '../runtime/output-routing';
-import { refreshScheduledWakeIndex } from '../runtime/scheduled-wake';
 import { ensureRuntimeState } from '../runtime/runtime-state';
-import {
-  finalizeReliableIngressCommit,
-} from '../runtime/reliable-delivery';
 import {
   applyCommittedLocalReliableReceipts,
   applyRecoveryRuntimeOutputPlan,
@@ -54,26 +44,16 @@ import {
   reconcileRecoveryInfraEffects,
   registerCommittedSingleSignerWallets,
 } from '../runtime/recovery-infra';
-import { restoreDurableOutputRetryState } from '../runtime/durable-output-retry';
-import { registerPendingCommittedJOutbox, splitJOutboxForDurableSubmit } from '../runtime/j-submit-state';
-import { clearReplayOutputSignerHints, installReplayOutputSignerHints } from './../state-helpers';
-import { safeStringify } from './../protocol/serialization';
 import {
   computeCanonicalEntityHash,
   computeCanonicalRuntimeStateHash,
-  computeCanonicalStateHashFromEnv,
 } from './../storage/canonical-hash';
+import { replayPersistedRuntimeJournals } from '../storage/recovery/journal';
 import {
-  assertRecoveryRuntimeMachineMatches,
-  listRecoveryRuntimeMachineMismatchFields,
-} from '../storage/recovery/machine';
-import {
-  applyCertifiedEntityLineagePlan,
   buildCertifiedEntityLineagePlan,
-  buildRuntimeCheckpointLineagePlan,
 } from './../storage/entity-lineage';
 import { assertCertifiedRegistrationEvidenceStore } from './../jurisdiction/registration-evidence';
-import { computeStoragePostStateHash, replaceRestoredStorageBase } from './../storage';
+import { replaceRestoredStorageBase } from './../storage';
 import {
   DEFAULT_ACCOUNT_MERKLE_RADIX,
   DEFAULT_EPOCH_MAX_BYTES,
@@ -83,13 +63,7 @@ import {
 } from './../storage/keys';
 import { hydrateEntityStateFromStorage, projectAccountDoc, projectEntityCoreDoc } from './../storage/projections';
 import {
-  buildStorageLiveReplicaMetaCommitment,
   buildStorageReplicaMetaCommitment,
-  buildStorageReplicaMetaCommitmentFromCheckpointPlan,
-  inspectStorageReplicaMetaEntries,
-  summarizeStorageReplicaMetaEntries,
-  summarizeStorageReplicaMetaFields,
-  summarizeStorageReplicaMetaHeads,
 } from './../storage/replicas';
 import type { StorageDoc, StoragePersistenceBoundaryHook } from './../storage/types';
 import {
@@ -104,7 +78,6 @@ import type { RuntimeRecoveryBundleV1 } from './../recovery/types';
 import { rehydrateRestoredRuntimeInfra } from '../runtime/infra';
 import { loadGossipProfilesFromInfraDb } from '../runtime/infra-gossip-store';
 import { normalizeDbNamespace, type StorageDbRole, withStorageWriterLock } from './../storage/runtime-dbs';
-import { createStructuredLogger } from '../infra/logger';
 
 type RuntimeModule = typeof import('../runtime');
 
@@ -131,11 +104,6 @@ export type RuntimeRecoveryDeps = Pick<
   getRuntimeOutputRoutingDeps(): RuntimeOutputRoutingDeps;
   applyRuntimeInput: RuntimeModule['applyRuntimeInput'];
 };
-
-const ENV_APPLY_ALLOWED_KEY = Symbol.for('xln.runtime.env.apply.allowed');
-const ENV_REPLAY_MODE_KEY = Symbol.for('xln.runtime.env.replay.mode');
-const envRecord = (env: RuntimeState): Record<PropertyKey, unknown> => env as unknown as Record<PropertyKey, unknown>;
-const runtimeLog = createStructuredLogger('runtime');
 
 export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
   const {
@@ -262,194 +230,20 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
     return env;
   };
 
-  const replayRecoveryFrameJournals = async (env: RuntimeState, frames: PersistedFrameJournal[]): Promise<void> => {
-    // Live process() normalizes operational defaults before every reducer pass;
-    // replay must enter the reducer with the same deterministic configuration.
-    ensureRuntimeConfig(env);
-    const previousReplayMode = envRecord(env)[ENV_REPLAY_MODE_KEY];
-    envRecord(env)[ENV_REPLAY_MODE_KEY] = true;
-    try {
-      let expectedHeight = requireBoundaryInteger(
-        requireBoundaryInteger(env.height, 'RECOVERY_JOURNAL_BASE_HEIGHT_INVALID') + 1,
-        'RECOVERY_JOURNAL_HEIGHT_OVERFLOW',
-      );
-      for (const frame of frames) {
-        const frameHeight = requireBoundaryInteger(frame.height, 'RECOVERY_JOURNAL_HEIGHT_INVALID');
-        if (frameHeight !== expectedHeight) {
-          throw new Error(`RECOVERY_JOURNAL_REPLAY_GAP: expected=${expectedHeight} actual=${frameHeight}`);
-        }
-        if (!/^0x[0-9a-f]{64}$/i.test(String(frame.replicaMetaDigest ?? ''))) {
-          throw new Error(`RECOVERY_JOURNAL_REPLICA_META_DIGEST_MISSING:height=${frameHeight}`);
-        }
-        if (!/^0x[0-9a-f]{64}$/i.test(String(frame.postStateHash ?? ''))) {
-          throw new Error(`RECOVERY_JOURNAL_POST_STATE_HASH_MISSING:height=${frameHeight}`);
-        }
-        env.timestamp = requireBoundaryInteger(
-          frame.timestamp,
-          `RECOVERY_JOURNAL_TIMESTAMP_INVALID:height=${frameHeight}`,
-        );
-        const outputSignerHints = new Map<string, string>();
-        for (const output of frame.runtimeOutputs ?? []) {
-          const carriesAccountInput = (output.entityTxs ?? []).some(
-            tx =>
-              tx.type === 'accountInput' ||
-              (tx.type === 'consensusOutput' && tx.data.entityTxs.some(inner => inner.type === 'accountInput')),
-          );
-          if (!carriesAccountInput) continue;
-          const entityId = String(output.entityId || '')
-            .trim()
-            .toLowerCase();
-          const signerId = String(output.signerId || '')
-            .trim()
-            .toLowerCase();
-          if (!entityId || !signerId) {
-            throw new Error(`RECOVERY_OUTPUT_SIGNER_HINT_INVALID:height=${frameHeight}`);
-          }
-          const existing = outputSignerHints.get(entityId);
-          if (existing && existing !== signerId) {
-            throw new Error(
-              `RECOVERY_OUTPUT_SIGNER_HINT_CONFLICT:height=${frameHeight}:` +
-                `entity=${entityId}:left=${existing}:right=${signerId}`,
-            );
-          }
-          outputSignerHints.set(entityId, signerId);
-        }
-        installReplayOutputSignerHints(env, outputSignerHints);
-        envRecord(env)[ENV_APPLY_ALLOWED_KEY] = true;
-        try {
-          if (nodeProcess?.env?.['XLN_STORAGE_DEBUG_REPLICA_META'] === '1') {
-            runtimeLog.info('recovery.replica_meta.pre', {
-              height: frameHeight,
-              consumptionNodes: getConsumptionNodeStore(env).size,
-              consumptionRoots: [...env.eReplicas.values()].map(replica => ({
-                entityId: replica.entityId,
-                root: replica.state.consumptionAccumulator?.root ?? null,
-                count: replica.state.consumptionAccumulator?.count?.toString() ?? null,
-                mempool: replica.mempool.map(tx =>
-                  tx.type === 'consensusOutput'
-                    ? `consensusOutput:${tx.data.origin.sourceEntityId}:${tx.data.origin.sequence.toString()}`
-                    : tx.type,
-                ),
-              })),
-            });
-          }
-          const replayResult = await applyRuntimeInput(env, frame.runtimeInput ?? { runtimeTxs: [], entityInputs: [] });
-          const splitJOutbox = splitJOutboxForDurableSubmit(replayResult.jOutbox);
-          registerPendingCommittedJOutbox(env, splitJOutbox.durable);
-          refreshScheduledWakeIndex(
-            env,
-            new Set(replayResult.appliedRuntimeInput.entityInputs.map(input => input.entityId.toLowerCase())),
-          );
-          applyDeterministicRuntimeOutputPlan(env, replayResult.entityOutbox, getRuntimeOutputRoutingDeps());
-          generateHookPings(env);
-          const replayHistoryViewRecords = peekPendingHistoryRecords(env, env.height, env.timestamp);
-          finalizeReliableIngressCommit(env, replayResult.reliableIngressCommits);
-          // Audit events are flushed only after the live WAL commit and are not
-          // consensus/recovery state. Replay must neither retain nor re-emit them.
-          clearPendingAuditEvents(env);
-          env.runtimeMempool = frame.pendingRuntimeInput
-            ? authorizeRestoredRuntimeInput(cloneIsolatedRuntimeInput(frame.pendingRuntimeInput))
-            : { runtimeTxs: [], entityInputs: [] };
-          env.pendingNetworkOutputs = cloneIsolatedRoutedEntityInputs(frame.runtimeOutputs ?? []);
-          restoreDurableOutputRetryState(env, frame.runtimeOutputRetryState ?? [], frame.runtimeOutputs ?? []);
-          // These activity records were consumed by the same atomic storage
-          // batch as the Runtime frame. Compare the committed post-state, not
-          // the writer's pre-commit buffer.
-          dropPendingHistoryRecords(env, replayHistoryViewRecords.length);
-          // A sparse checkpoint gives a field-level diagnostic; use it before
-          // the compact replica digest so recovery failures name the root cause.
-          if (frame.runtimeMachine) {
-            assertRecoveryRuntimeMachineMatches(env, frame.runtimeMachine, frameHeight);
-          }
-          // Rebuild the exact compact checkpoint shape used by the writer.
-          // The generic rebase helper intentionally retains the latest lineage
-          // link, while materialized Runtime checkpoints replace that link with
-          // a local endpoint anchor. Mixing the two encodings makes identical
-          // replay state fail its replica-meta digest at a checkpoint boundary.
-          const replayCheckpointLineagePlan = frame.replicaMetaCheckpoint
-            ? buildRuntimeCheckpointLineagePlan(env)
-            : null;
-          const actualReplicaMetaCommitment = replayCheckpointLineagePlan
-            ? buildStorageReplicaMetaCommitmentFromCheckpointPlan(env, replayCheckpointLineagePlan, {
-                omitIntermediateSingleSignerState: frame.replicaMetaStateMode === 'shared-entity-state',
-              })
-            : buildStorageLiveReplicaMetaCommitment(env);
-          const actualReplicaMetaDigest = actualReplicaMetaCommitment.digest;
-          if (actualReplicaMetaDigest !== frame.replicaMetaDigest) {
-            const inputSummary = frame.runtimeInput.entityInputs.map(input => ({
-              entityId: input.entityId,
-              signerId: input.signerId,
-              entityTxs: input.entityTxs?.map(tx => tx.type) ?? [],
-              proposalHeight: input.proposedFrame?.height ?? null,
-              hashPrecommits: input.hashPrecommits?.size ?? 0,
-              hasSignerKey: input.signerId ? getCachedSignerPrivateKey(env, input.signerId) !== null : false,
-            }));
-            const appliedInputSummary = replayResult.appliedRuntimeInput.entityInputs.map(input => ({
-              entityId: input.entityId,
-              entityTxs: input.entityTxs?.map(tx => tx.type) ?? [],
-              proposalHeight: input.proposedFrame?.height ?? null,
-            }));
-            throw new Error(
-              `RECOVERY_JOURNAL_REPLICA_META_DIGEST_MISMATCH:height=${frameHeight}:` +
-                `expected=${frame.replicaMetaDigest}:actual=${actualReplicaMetaDigest}:` +
-                `actualEntries=${safeStringify(summarizeStorageReplicaMetaEntries(actualReplicaMetaCommitment.entries))}:` +
-                `actualFields=${safeStringify(summarizeStorageReplicaMetaFields(actualReplicaMetaCommitment.entries))}:` +
-                `actualHeads=${safeStringify(summarizeStorageReplicaMetaHeads(actualReplicaMetaCommitment.entries))}:` +
-                `runtimeInput=${safeStringify(inputSummary)}:` +
-                `appliedInput=${safeStringify(appliedInputSummary)}:` +
-                `entityOutbox=${safeStringify(replayResult.entityOutbox.map(output => ({ entityId: output.entityId, txs: output.entityTxs?.map(tx => tx.type) ?? [] })))}:` +
-                `actualMeta=${safeStringify(inspectStorageReplicaMetaEntries(actualReplicaMetaCommitment.entries)).slice(0, 8_000)}`,
-            );
-          }
-          const actualPostStateHash = computeStoragePostStateHash({
-            height: frameHeight,
-            timestamp: env.timestamp,
-            replicaMetaDigest: actualReplicaMetaDigest,
-            runtimeMachine: buildReplayVerifiableRuntimeMachineSnapshot(env, {
-              pendingNetworkOutputs: env.pendingNetworkOutputs ?? [],
-              excludePersistedHistoryRecords: true,
-            }),
-          });
-          if (actualPostStateHash !== frame.postStateHash) {
-            throw new Error(
-              `RECOVERY_JOURNAL_POST_STATE_HASH_MISMATCH:height=${frameHeight}:` +
-                `expected=${frame.postStateHash}:actual=${actualPostStateHash}`,
-            );
-          }
-          if (frame.runtimeStateHash) {
-            const actualStateHash = computeCanonicalStateHashFromEnv(env);
-            if (actualStateHash !== frame.runtimeStateHash) {
-              const expectedMachine = frame.runtimeMachine;
-              const actualMachine = buildDurableRuntimeMachineSnapshot(env);
-              const differingMachineKeys = expectedMachine
-                ? listRecoveryRuntimeMachineMismatchFields(expectedMachine, actualMachine)
-                : ['runtimeMachine'];
-              throw new Error(
-                `RECOVERY_JOURNAL_STATE_HASH_MISMATCH:height=${frameHeight}:` +
-                  `expected=${frame.runtimeStateHash}:actual=${actualStateHash}:` +
-                  `runtimeMachineDiff=${differingMachineKeys.join(',') || 'none'}`,
-              );
-            }
-          }
-          if (replayCheckpointLineagePlan) {
-            applyCertifiedEntityLineagePlan(env, replayCheckpointLineagePlan);
-          }
-        } finally {
-          clearReplayOutputSignerHints(env);
-          envRecord(env)[ENV_APPLY_ALLOWED_KEY] = false;
-        }
-        if (env.height !== frameHeight) {
-          throw new Error(`RECOVERY_JOURNAL_REPLAY_HEIGHT_MISMATCH: expected=${frameHeight} actual=${env.height}`);
-        }
-        expectedHeight = requireBoundaryInteger(expectedHeight + 1, 'RECOVERY_JOURNAL_HEIGHT_OVERFLOW');
-      }
-    } finally {
-      if (previousReplayMode === undefined) delete envRecord(env)[ENV_REPLAY_MODE_KEY];
-      else envRecord(env)[ENV_REPLAY_MODE_KEY] = previousReplayMode;
-      envRecord(env)[ENV_APPLY_ALLOWED_KEY] = false;
-    }
-  };
-
+  const replayRecoveryFrameJournals = (
+    env: RuntimeState,
+    frames: PersistedFrameJournal[],
+  ): Promise<void> => replayPersistedRuntimeJournals(
+    {
+      ensureRuntimeConfig,
+      applyRuntimeInput,
+      applyRuntimeOutputPlan: applyDeterministicRuntimeOutputPlan,
+      getRuntimeOutputRoutingDeps,
+      generateHookPings,
+    },
+    env,
+    frames,
+  );
   const failRecoveryRestoreAfterCleanup = async (env: RuntimeState, error: unknown): Promise<never> => {
     const originalError = error instanceof Error ? error : new Error(String(error));
     const cleanup = await Promise.allSettled([closeRuntimeDb(env), closeInfraDb(env)]);

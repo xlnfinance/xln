@@ -48,7 +48,6 @@ const COORDINATOR_DEBT: Readonly<Record<string, number>> = {
   "runtime/radapter/resolve.ts::resolveRuntimeAdapterRead": 154,
   "runtime/radapter/server.ts::handleRuntimeAdapterMessage": 302,
   "runtime/recovery/restore.ts::createRuntimeRecoveryApi": 924,
-  "runtime/recovery/restore.ts::replayRecoveryFrameJournals": 187,
   "runtime/server/index.ts::createHttpServer": 216,
   "runtime/server/index.ts::startXlnServer": 630,
   "runtime/server/token-catalog.ts::createTokenCatalogController": 165,
