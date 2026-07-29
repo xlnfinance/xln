@@ -44,7 +44,7 @@ import { createRuntimeIngressReceiptStore } from '../server/ingress-receipts';
 import { requiresLocalNodeOperator } from '../server/node-http-access';
 import { handleRuntimeInputStatus } from '../server/runtime-input-control';
 import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
-import type { EntityInput, RuntimeState } from '../types';
+import type { RuntimeState } from '../types';
 import {
   evaluateBootstrapProgressDeadline,
   isBootstrapWorkWithinDeadline,
@@ -112,7 +112,6 @@ import {
   buildMarketMakerTokenIdsByContext,
   configureMarketMakerRuntimeLogging,
   countCommittedMarketMakerOffersForHub,
-  countMarketMakerEntityInputTxs,
   createMarketMakerEntityContext,
   directWsUrl,
   emitMarketMakerBootstrapDebugEvent,
@@ -147,7 +146,6 @@ import {
   buildMarketMakerCrossPlanSummary,
   buildPlannedMarketMakerCrossHealth,
   describeMarketMakerSameHubBlocker,
-  emitMarketMakerCrossBootstrapWaveEvent,
   getMarketMakerHealth,
   isMarketMakerCrossDepthComplete,
   isMarketMakerDepthComplete,
@@ -1421,15 +1419,10 @@ export const runMarketMakerNode = async (): Promise<void> => {
         }
         if (mode === 'steady') steadyCrossCursor = nextCursor;
       };
-      const deferredBootstrapCrossInputs = mode === 'bootstrap' ? new Map<string, EntityInput>() : null;
-      let deferredBootstrapCrossLastIndex = -1;
       for (const entry of selectedCrossQuoteJobs) {
         const job = entry.job;
         await yieldMarketMakerApi();
         if (!shouldContinue()) return false;
-        const deferredTxsBefore = deferredBootstrapCrossInputs
-          ? countMarketMakerEntityInputTxs(deferredBootstrapCrossInputs)
-          : 0;
         if (
           await maintainMarketMakerCrossQuotes(
             env,
@@ -1449,44 +1442,14 @@ export const runMarketMakerNode = async (): Promise<void> => {
             shouldContinue,
             mode === 'bootstrap' ? MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE : Number.MAX_SAFE_INTEGER,
             mode === 'bootstrap',
-            deferredBootstrapCrossInputs ?? undefined,
             attemptedBootstrapIntentOrderIds,
           )
         ) {
-          const deferredTxsAfter = deferredBootstrapCrossInputs
-            ? countMarketMakerEntityInputTxs(deferredBootstrapCrossInputs)
-            : 0;
-          if (mode === 'bootstrap' && deferredTxsAfter > deferredTxsBefore) {
-            deferredBootstrapCrossLastIndex = entry.index;
-            break;
-          }
           advanceCrossCursorAfterEnqueue(entry.index);
           await yieldMarketMakerApi();
           if (mode === 'steady') return true;
         }
-        if (mode === 'bootstrap' && deferredBootstrapCrossInputs && deferredBootstrapCrossInputs.size > 0) break;
         await yieldMarketMakerApi();
-      }
-      if (mode === 'bootstrap' && deferredBootstrapCrossInputs && deferredBootstrapCrossInputs.size > 0) {
-        const entityInputs = Array.from(deferredBootstrapCrossInputs.values()).filter(
-          input => (input.entityTxs?.length || 0) > 0,
-        );
-        if (entityInputs.length > 0) {
-          emitMarketMakerCrossBootstrapWaveEvent('cross-wave-enqueue', {
-            direction: 'bootstrap-batch',
-            enqueuedEntityInputs: entityInputs.length,
-            enqueuedEntityTxs: entityInputs.reduce((sum, input) => sum + (input.entityTxs?.length || 0), 0),
-          });
-          enqueueRuntimeInput(env, {
-            runtimeTxs: [],
-            entityInputs,
-          });
-          if (deferredBootstrapCrossLastIndex >= 0 && crossQuoteJobs.length > 0) {
-            bootstrapCrossCursor = (deferredBootstrapCrossLastIndex + 1) % crossQuoteJobs.length;
-          }
-          await yieldMarketMakerApi();
-          return true;
-        }
       }
       if (!shouldContinue()) return false;
       await yieldMarketMakerApi();

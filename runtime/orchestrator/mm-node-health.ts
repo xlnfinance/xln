@@ -9,11 +9,10 @@ import { crossJurisdictionBookOwnerRef } from '../extensions/cross-j/orderbook';
 import { hasCrossJurisdictionBookOrder } from '../orderbook/cross-j';
 import { compareStableText,safeStringify } from '../protocol/serialization';
 import {
-enqueueRuntimeInput,
 submitCrossJurisdictionIntent
 } from '../runtime.ts';
 import { computeCanonicalEntityHashesFromEnv } from '../storage/canonical-hash';
-import type { CrossJurisdictionSwapRoute,EntityInput,RuntimeState,SwapOffer } from '../types';
+import type { CrossJurisdictionSwapRoute,RuntimeState,SwapOffer } from '../types';
 import {
 HUB_REQUIRED_TOKEN_COUNT,
 getAccountState,
@@ -65,7 +64,6 @@ hasFinalizedMarketMakerCrossOffer,
 hasMarketMakerCrossOffer,
 hasMarketMakerRuntimeBacklog,
 hubRoleName,
-mergeMarketMakerEntityInputs,
 normalizeEntityRef,
 normalizePositiveTokenIds,
 sameJurisdiction,
@@ -517,7 +515,6 @@ export const maintainMarketMakerCrossQuotes = async (
   shouldContinue: () => boolean = () => true,
   maxSourceHubGroups = Number.MAX_SAFE_INTEGER,
   emitBootstrapWaveEvents = false,
-  deferredEntityInputsByEntitySigner?: Map<string, EntityInput>,
   attemptedBootstrapIntentOrderIds: Set<string> = new Set(),
 ): Promise<boolean> => {
   const startedAt = Date.now();
@@ -576,7 +573,6 @@ export const maintainMarketMakerCrossQuotes = async (
   if (!shouldContinue()) return false;
 
   if (emitBootstrapWaveEvents) {
-    const entityInputsByEntitySigner = new Map<string, EntityInput>();
     let submittedIntentCount = 0;
     const pendingCrossRequestOrderIdsBySourceEntity = new Map<string, Set<string>>();
     const getPendingCrossRequestOrderIds = (entityId: string): Set<string> => {
@@ -725,29 +721,7 @@ export const maintainMarketMakerCrossQuotes = async (
       }
     }
     if (desiredOffersSeen === 0) return false;
-    if (submittedIntentCount > 0) return true;
-    const entityInputs = Array.from(entityInputsByEntitySigner.values());
-    const nonEmptyEntityInputs = entityInputs.filter(input => (input.entityTxs?.length || 0) > 0);
-    if (nonEmptyEntityInputs.length > 0) {
-      if (!shouldContinue()) return false;
-      if (deferredEntityInputsByEntitySigner) {
-        mergeMarketMakerEntityInputs(deferredEntityInputsByEntitySigner, nonEmptyEntityInputs);
-        return true;
-      }
-      emitMarketMakerCrossBootstrapWaveEvent('cross-wave-enqueue', {
-        direction,
-        enqueuedEntityInputs: nonEmptyEntityInputs.length,
-        enqueuedEntityTxs: nonEmptyEntityInputs.reduce((sum, input) => sum + (input.entityTxs?.length || 0), 0),
-        durationMs: Date.now() - startedAt,
-      });
-      enqueueRuntimeInput(env, {
-        runtimeTxs: [],
-        entityInputs: nonEmptyEntityInputs,
-      });
-      await yieldMarketMakerApi();
-      return true;
-    }
-    return false;
+    return submittedIntentCount > 0;
   }
 
   const desiredOffers = buildMarketMakerCrossOfferSpecs(
@@ -768,7 +742,6 @@ export const maintainMarketMakerCrossQuotes = async (
     grouped.set(spec.hubEntityId, arr);
   }
 
-  const entityInputsByEntitySigner = new Map<string, EntityInput>();
   let submittedIntentCount = 0;
   const pendingCrossRequestOrderIdsBySourceEntity = new Map<string, Set<string>>();
   const getPendingCrossRequestOrderIds = (entityId: string): Set<string> => {
@@ -886,31 +859,7 @@ export const maintainMarketMakerCrossQuotes = async (
     if (remainingSourceHubGroups <= 0) break;
   }
 
-  if (submittedIntentCount > 0) return true;
-  const entityInputs = Array.from(entityInputsByEntitySigner.values());
-  const nonEmptyEntityInputs = entityInputs.filter(input => (input.entityTxs?.length || 0) > 0);
-  if (nonEmptyEntityInputs.length > 0) {
-    if (!shouldContinue()) return false;
-    if (deferredEntityInputsByEntitySigner) {
-      mergeMarketMakerEntityInputs(deferredEntityInputsByEntitySigner, nonEmptyEntityInputs);
-      return true;
-    }
-    if (emitBootstrapWaveEvents) {
-      emitMarketMakerCrossBootstrapWaveEvent('cross-wave-enqueue', {
-        direction,
-        enqueuedEntityInputs: nonEmptyEntityInputs.length,
-        enqueuedEntityTxs: nonEmptyEntityInputs.reduce((sum, input) => sum + (input.entityTxs?.length || 0), 0),
-        durationMs: Date.now() - startedAt,
-      });
-    }
-    enqueueRuntimeInput(env, {
-      runtimeTxs: [],
-      entityInputs: nonEmptyEntityInputs,
-    });
-    await yieldMarketMakerApi();
-    return true;
-  }
-  return false;
+  return submittedIntentCount > 0;
 };
 
 export const getMarketMakerHealth = (
@@ -1389,4 +1338,3 @@ export const assertMarketMakerBootstrapFinalized = (
   }
   return health;
 };
-
