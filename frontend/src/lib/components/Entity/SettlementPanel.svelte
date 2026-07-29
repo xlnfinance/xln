@@ -2,7 +2,7 @@
   import { getXLN, submitEntityInputs, xlnFunctions } from '../../stores/xlnStore';
   import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
   import type { EntityReplica, EntityTx, AccountState, EntityState } from '$lib/types/ui';
-  import type { RuntimeState, EnvSnapshot, Profile as GossipProfile } from '@xln/runtime/xln-api';
+  import type { RuntimeState, EnvSnapshot, Profile as GossipProfile } from '@xln/runtime/api/runtime-module';
   import { errorLog } from '../../stores/errorLogStore';
   import { toasts } from '../../stores/toastStore';
   import { entityAvatar as resolveEntityAvatar } from '$lib/utils/avatar';

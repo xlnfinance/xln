@@ -1,4 +1,4 @@
-import type { AccountState, EntityState } from '@xln/runtime/xln-api';
+import type { AccountState, EntityState } from '@xln/runtime/api/runtime-module';
 import { compareEntityAssetText } from './entity-asset-catalog';
 
 export type DisputedAccountView = {

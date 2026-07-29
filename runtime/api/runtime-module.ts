@@ -1,12 +1,12 @@
 /**
- * XLN API Types - Frontend-importable type definitions
+ * Browser Runtime module contract.
  *
  * This file defines the interface for the XLN runtime module as loaded by the browser.
  * Frontend can import these types for compile-time checking while runtime.js
  * is loaded dynamically at runtime.
  *
  * Usage in frontend:
- *   import type { XLNModule, RuntimeState } from '@xln/runtime/xln-api';
+ *   import type { XLNModule, RuntimeState } from '@xln/runtime/api/runtime-module';
  */
 
 // Re-export identity types from ids.ts
@@ -19,8 +19,8 @@ export type {
   FullReplicaAddress,
   ReplicaUri,
   EntityType,
-} from './protocol/identity';
-export type { JurisdictionInfo } from './protocol/jurisdiction-identity';
+} from '../protocol/identity';
+export type { JurisdictionInfo } from '../protocol/jurisdiction-identity';
 
 // Re-export core types from types.ts
 export type {
@@ -51,11 +51,11 @@ export type {
   SettlementDiff,
   CrossJurisdictionSwapRoute,
   PaymentDeliveryMode,
-} from './types';
-export type { PersistedFrameJournal } from './storage/types';
-export type { BoardMemberInput } from './entity/factory';
-export type { PersistedActivityJournal } from './api/activity-history';
-export type { StorageFrameRecord, StorageHead } from './storage/types';
+} from '../types';
+export type { PersistedFrameJournal } from '../storage/types';
+export type { BoardMemberInput } from '../entity/factory';
+export type { PersistedActivityJournal } from '../api/activity-history';
+export type { StorageFrameRecord, StorageHead } from '../storage/types';
 export type {
   EncryptedRuntimeRecoveryBundleV1,
   RuntimeRecording,
@@ -74,27 +74,27 @@ export type {
   TowerReceiptV1,
   TowerRestoreRequestV1,
   TowerRestoreResponseV1,
-} from './recovery/types';
+} from '../recovery/types';
 
-export type { GossipLayer } from './networking/gossip';
-export type { Profile } from './entity/profile';
-export type { PaymentRoute } from './routing/pathfinding';
-export type { CompletedBatch, JBatch, JBatchState } from './jurisdiction/batch';
-export type { JAdapter, JEvent } from './jadapter/types';
-export type { BookState, OrderbookExtState, PreparedSwapOrder } from './orderbook';
+export type { GossipLayer } from '../networking/gossip';
+export type { Profile } from '../entity/profile';
+export type { PaymentRoute } from '../routing/pathfinding';
+export type { CompletedBatch, JBatch, JBatchState } from '../jurisdiction/batch';
+export type { JAdapter, JEvent } from '../jadapter/types';
+export type { BookState, OrderbookExtState, PreparedSwapOrder } from '../orderbook';
 export type {
   SwapAccountCapacityView,
   SwapAccountCapacityViewInput,
   SwapInboundCapacityPlan,
   SwapInboundCapacityPlanInput,
-} from './account/swap-inbound-plan';
+} from '../account/swap-inbound-plan';
 export type {
   CrossJurisdictionSwapCommandPlan,
   SameJurisdictionSwapCommandPlan,
   SwapCommandPlan,
   SwapCommandPlanInput,
   SwapCommandPreparedOrder,
-} from './account/swap-command-plan';
+} from '../account/swap-command-plan';
 export type {
   MppChallenge,
   MppChallengeBindingInput,
@@ -102,10 +102,10 @@ export type {
   MppJsonRecord,
   MppJsonValue,
   MppReceipt,
-} from './protocol/payments/mpp';
-export type { RuntimeActivityEvent, RuntimeActivityFilters } from './api/activity-history';
-export type { DeliveryOutcome, DeliveryResult } from './protocol/payments/delivery-result';
-export type { RuntimeEntityInputRoutingResult } from './runtime/output-routing';
+} from '../protocol/payments/mpp';
+export type { RuntimeActivityEvent, RuntimeActivityFilters } from '../api/activity-history';
+export type { DeliveryOutcome, DeliveryResult } from '../protocol/payments/delivery-result';
+export type { RuntimeEntityInputRoutingResult } from '../runtime/output-routing';
 export type {
   RuntimeAdapter,
   RuntimeAdapterAuthLevel,
@@ -113,8 +113,8 @@ export type {
 	  RuntimeAdapterReadQuery,
 	  RuntimeAdapterSendResult,
 	  RuntimeAdapterStatus,
-	} from './radapter';
-export { getBestBid, getBestAsk, getBookSideLevels } from './orderbook';
+	} from '../radapter';
+export { getBestBid, getBestAsk, getBookSideLevels } from '../orderbook';
 export {
   buildMppChallengeHeader,
   buildMppCredentialHeader,
@@ -126,16 +126,16 @@ export {
   parseMppChallengeHeader,
   parseMppCredentialHeader,
   parseMppReceiptHeader,
-} from './protocol/payments/mpp';
+} from '../protocol/payments/mpp';
 export {
   deriveCanonicalCrossJurisdictionBookOwnerForLegs,
   deriveCanonicalCrossJurisdictionMarketForLegs,
   deriveCanonicalCrossJurisdictionVenueIdForLegs,
-} from './extensions/cross-j/market';
+} from '../extensions/cross-j/market';
 export {
   getJurisdictionStackId,
   isJurisdictionStackRef,
-} from './jurisdiction/jurisdiction-stack';
+} from '../jurisdiction/jurisdiction-stack';
 
 // Re-export identity functions types
 export {
@@ -159,14 +159,14 @@ export {
   XLN_URI_SCHEME,
   DEFAULT_RUNTIME_HOST,
   MAX_NUMBERED_ENTITY,
-} from './protocol/identity';
+} from '../protocol/identity';
 export {
   formatEntityDisplay,
   formatSignerDisplay,
   formatReplicaDisplay,
   getEntityDisplayNumber,
-} from './protocol/identity-display';
-export { formatReplicaUri, parseReplicaUri } from './protocol/identity-uri';
+} from '../protocol/identity-display';
+export { formatReplicaUri, parseReplicaUri } from '../protocol/identity-uri';
 
 import type {
   RuntimeAdapterAccountPage,
@@ -179,14 +179,14 @@ import type {
   RuntimeAdapterFrameSummary,
   RuntimeAdapterHistoryFrameBatch,
   RuntimeAdapterViewFrame,
-} from './radapter/resolve';
+} from '../radapter/resolve';
 import type {
 	  RuntimeAdapterActivityPage,
 	  RuntimeAdapterEntitySummary,
 	  RuntimeAdapterSolvencySummary,
 	  RuntimeAdapterTimelineIndexPage,
 	  RuntimeAdapterTimelineFrame,
-	} from './radapter/types';
+	} from '../radapter/types';
 
 export type QueueEntityInputPayload = {
   type: string;
@@ -232,11 +232,11 @@ export type {
 	  RuntimeAdapterTimelineFrame,
 	};
 
-export type { P2PConfig } from './networking/p2p';
+export type { P2PConfig } from '../networking/p2p';
 export type {
   CrossJurisdictionSwapSubmitParams,
   CrossJurisdictionSwapSubmitResult,
-} from './runtime/jurisdiction-api';
+} from '../runtime/jurisdiction-api';
 
 /**
  * Entity display info returned by getEntityDisplayInfo
@@ -258,9 +258,9 @@ export interface SignerDisplayInfo {
 
 /** Exact financial utility shapes exported by runtime. */
 export type FinancialConstants =
-  typeof import('./account/financial-utils').FINANCIAL_CONSTANTS;
+  typeof import('../account/financial-utils').FINANCIAL_CONSTANTS;
 export type BigIntMathUtils =
-  typeof import('./account/financial-utils').BigIntMath;
+  typeof import('../account/financial-utils').BigIntMath;
 
 /** Exact browser runtime module namespace; no handwritten mirror may drift. */
-export type XLNModule = typeof import('./runtime');
+export type XLNModule = typeof import('../runtime');

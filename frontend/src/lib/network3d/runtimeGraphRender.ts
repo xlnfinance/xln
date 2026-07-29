@@ -1,4 +1,4 @@
-import type { EntityReplica } from '@xln/runtime/xln-api';
+import type { EntityReplica } from '@xln/runtime/api/runtime-module';
 import type { MergedRuntimeGraph, RuntimeGraphNodeState } from './runtimeGraphProjection';
 
 const graphReplicaState = (node: RuntimeGraphNodeState): Record<string, unknown> => {

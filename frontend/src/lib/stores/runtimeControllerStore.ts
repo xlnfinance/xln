@@ -6,7 +6,7 @@ import type {
   RuntimeAdapterSendResult,
   RuntimeAdapterStatus,
   RuntimeInput,
-} from '@xln/runtime/xln-api';
+} from '@xln/runtime/api/runtime-module';
 import type { RuntimeAdapterSendOptions } from '@xln/runtime/radapter/types';
 import { RemoteRuntimeAdapter } from '../../../../runtime/radapter/remote';
 import { sameWsEndpoint } from '$lib/utils/wsUrl';

@@ -1,4 +1,4 @@
-import type { XLNModule } from './xln-api';
+import type { XLNModule } from './runtime-module';
 
 const REQUIRED_BOOTSTRAP_FUNCTIONS = [
   'main',

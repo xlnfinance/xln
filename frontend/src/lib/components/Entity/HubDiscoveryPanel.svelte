@@ -3,7 +3,7 @@
   Compact sortable list with expandable details.
 -->
 <script lang="ts">
-  import type { RuntimeState, RuntimeInput } from '@xln/runtime/xln-api';
+  import type { RuntimeState, RuntimeInput } from '@xln/runtime/api/runtime-module';
   import { errorLog } from '../../stores/errorLogStore';
   import { runtimeControllerHandle } from '../../stores/runtimeControllerStore';
   import { xlnFunctions } from '../../stores/xlnStore';

@@ -9,7 +9,7 @@
   } from '$lib/stores/xlnStore';
   import { timeOperations } from '$lib/stores/timeStore';
   import { errorLog } from '$lib/stores/errorLogStore';
-  import type { RuntimeState, EnvSnapshot, XLNModule } from '@xln/runtime/xln-api';
+  import type { RuntimeState, EnvSnapshot, XLNModule } from '@xln/runtime/api/runtime-module';
 
   type ScenarioOption = {
     id: string;

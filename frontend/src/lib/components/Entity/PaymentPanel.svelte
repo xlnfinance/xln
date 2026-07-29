@@ -11,7 +11,7 @@
     PaymentDeliveryMode,
     Profile as GossipProfile,
     RuntimeInput,
-  } from '@xln/runtime/xln-api';
+  } from '@xln/runtime/api/runtime-module';
   import {
     refreshPaymentRuntimeGossip,
     sendRuntimeDebugEvent,

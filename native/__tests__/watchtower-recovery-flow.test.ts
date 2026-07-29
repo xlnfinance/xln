@@ -10,7 +10,11 @@ import {
   decryptTowerPayloadWithWatchSeed,
   encryptRuntimeRecoveryBundle,
 } from '../../runtime/recovery/crypto';
-import type { JReplica, JurisdictionConfig, TowerAppointmentV1 } from '../../runtime/xln-api';
+import type {
+  JReplica,
+  JurisdictionConfig,
+  TowerAppointmentV1,
+} from '../../runtime/api/runtime-module';
 import {
   buildDelayedLastResortAppointmentsForTower,
   resolveDefaultRecoveryTowerUrls,

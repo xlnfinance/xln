@@ -1,4 +1,4 @@
-import type { RuntimeState, RoutedEntityInput } from '@xln/runtime/xln-api';
+import type { RuntimeState, RoutedEntityInput } from '@xln/runtime/api/runtime-module';
 import { buildPendingBatchActionTxs, type PendingBatchAction } from './pending-batch-preview';
 
 type PendingBatchActionRequest = {

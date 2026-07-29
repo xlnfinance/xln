@@ -1,5 +1,5 @@
 import { safeStringify } from '@xln/runtime/protocol/serialization';
-import type { EnvSnapshot, RuntimeInput } from '@xln/runtime/xln-api';
+import type { EnvSnapshot, RuntimeInput } from '@xln/runtime/api/runtime-module';
 
 type RuntimeInputPart = Readonly<{
   kind: string;

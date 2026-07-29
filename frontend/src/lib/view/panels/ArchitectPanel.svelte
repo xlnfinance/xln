@@ -17,7 +17,7 @@
   import settleScenarioCode from '../../../../../runtime/scenarios/settle.ts?raw';
   import { shortAddress } from '$lib/utils/format';
   import { getXLN, submitRuntimeInput } from '$lib/stores/xlnStore';
-  import type { RuntimeInput, XLNModule } from '@xln/runtime/xln-api';
+  import type { RuntimeInput, XLNModule } from '@xln/runtime/api/runtime-module';
   import type { JAdapter } from '@xln/runtime/jadapter';
   import { activeRuntime as activeRuntimeStore } from '$lib/stores/runtimeStore';
   import { activeRuntime as activeVaultRuntime } from '$lib/stores/vaultStore';

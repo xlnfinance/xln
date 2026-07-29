@@ -5,7 +5,7 @@
   import { amountToUsd } from '$lib/utils/assetPricing';
   import { getEntityDisplayName } from '$lib/utils/entityNaming';
   import { compareStableText } from '$lib/utils/stableSort';
-  import type { DebtEntry, EntityState } from '@xln/runtime/xln-api';
+  import type { DebtEntry, EntityState } from '@xln/runtime/api/runtime-module';
   import { requireTokenDecimals } from './token-metadata';
 
   export let entityStateOverride: EntityState | null = null;

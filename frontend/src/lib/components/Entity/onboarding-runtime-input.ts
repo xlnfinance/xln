@@ -1,4 +1,4 @@
-import type { RuntimeInput } from '@xln/runtime/xln-api';
+import type { RuntimeInput } from '@xln/runtime/api/runtime-module';
 
 import { normalizeEntityId } from '../../utils/entityReplica';
 import type { HubOpenAccountRebalancePolicy } from './hub-discovery-profile';

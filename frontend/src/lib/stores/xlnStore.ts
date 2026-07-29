@@ -94,7 +94,7 @@ import type {
   SwapBookEntry,
   CrossJurisdictionSwapRoute,
   Profile as GossipProfile,
-} from '@xln/runtime/xln-api';
+} from '@xln/runtime/api/runtime-module';
 import { REMOTE_RUNTIME } from '@xln/runtime/constants';
 
 let unregisterEnvChange: (() => void) | null = null;

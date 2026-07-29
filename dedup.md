@@ -78,7 +78,8 @@ Top 100 simplification targets:
 66. `runtime/types.ts` — split runtime, entity, account, batch, event, and adapter types into separate files.
 67. `runtime/types.ts` — move BrowserVM-only comments and deprecated fields out of core type file.
 68. `runtime/types.ts` — remove deprecated `env.browserVM` once registry migration is complete.
-69. `runtime/xln-api.ts` — shrink to public surface only; stop mirroring internal helpers and legacy names.
+69. `runtime/api/runtime-module.ts` — keep the public browser contract narrow;
+    do not mirror internal helpers or legacy names.
 70. `frontend/src/lib/components/Entity/EntityPanelTabs.svelte` — split Move, account tab content, and shared pickers.
 71. `frontend/src/lib/components/Entity/EntityPanelTabs.svelte` — delete legacy asset tabs after Move fully replaces them.
 72. `frontend/src/lib/components/Entity/SwapPanel.svelte` — split price form, order summary, and submit/review dialog.

@@ -1,4 +1,4 @@
-import type { RuntimeInput } from '@xln/runtime/xln-api';
+import type { RuntimeInput } from '@xln/runtime/api/runtime-module';
 import { safeParse, safeStringify } from '@xln/runtime/protocol/serialization';
 import {
   MAX_RECEIPT_ID_BYTES,

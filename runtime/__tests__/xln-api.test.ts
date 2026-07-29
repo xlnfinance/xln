@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import * as runtime from '../runtime';
-import { isXLNModuleLoaded } from '../xln-api-guard';
+import { isXLNModuleLoaded } from '../api/runtime-module-guard';
 
 describe('browser runtime API boundary', () => {
   test('accepts the actual runtime module', () => {

@@ -1,4 +1,4 @@
-import type { AccountState, EntityReplica, RuntimeState } from '@xln/runtime/xln-api';
+import type { AccountState, EntityReplica, RuntimeState } from '@xln/runtime/api/runtime-module';
 
 // These helpers operate on validated runtime state only.
 // The only nullable boundary is the outer env reference before a runtime is attached.

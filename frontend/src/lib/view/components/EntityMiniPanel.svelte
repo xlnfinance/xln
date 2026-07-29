@@ -7,7 +7,7 @@
    */
   import { createEventDispatcher } from 'svelte';
   import type { Writable } from 'svelte/store';
-  import type { RuntimeState, EnvSnapshot } from '@xln/runtime/xln-api';
+  import type { RuntimeState, EnvSnapshot } from '@xln/runtime/api/runtime-module';
   import { formatTokenAmount } from './entity/shared/formatters';
   import { getTokenInfo } from '@xln/runtime/account/utils';
 

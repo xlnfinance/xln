@@ -3,7 +3,7 @@ import type {
   RuntimeAdapter,
   RuntimeAdapterGraphFrame,
   RuntimeAdapterTimelineIndexPage,
-} from '@xln/runtime/xln-api';
+} from '@xln/runtime/api/runtime-module';
 import { RemoteRuntimeAdapter } from '../../../../runtime/radapter/remote';
 import type { Runtime } from '$lib/stores/runtimeStore';
 import { unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';

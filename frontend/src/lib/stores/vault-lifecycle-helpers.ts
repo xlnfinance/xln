@@ -1,4 +1,4 @@
-import type { RuntimeState, RuntimeInput } from '@xln/runtime/xln-api';
+import type { RuntimeState, RuntimeInput } from '@xln/runtime/api/runtime-module';
 
 export const runtimeInputWorkSummary = (input: RuntimeInput | undefined) => ({
   runtimeTxs: (input?.runtimeTxs ?? []).map(tx =>

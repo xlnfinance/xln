@@ -1,6 +1,6 @@
 <script lang="ts">
   import { get } from 'svelte/store';
-  import type { AccountState, RuntimeState, RuntimeInput } from '@xln/runtime/xln-api';
+  import type { AccountState, RuntimeState, RuntimeInput } from '@xln/runtime/api/runtime-module';
   import { xlnFunctions, error } from '../../stores/xlnStore';
   import { errorLog } from '../../stores/errorLogStore';
   import { runtimeControllerHandle } from '../../stores/runtimeControllerStore';

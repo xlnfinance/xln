@@ -5,7 +5,7 @@ import type {
   Profile as GossipProfile,
   RuntimeAdapterEntitySummary,
   RuntimeAdapterViewFrame,
-} from '@xln/runtime/xln-api';
+} from '@xln/runtime/api/runtime-module';
 import type { EntityReplica } from '$lib/types/ui';
 import { unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
 

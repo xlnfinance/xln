@@ -1,4 +1,4 @@
-import type { Profile as GossipProfile } from '@xln/runtime/xln-api';
+import type { Profile as GossipProfile } from '@xln/runtime/api/runtime-module';
 import { formatEntityId } from './format';
 
 type GossipSource = {

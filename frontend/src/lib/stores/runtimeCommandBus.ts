@@ -1,5 +1,5 @@
 import { get, writable } from 'svelte/store';
-import type { RuntimeInput } from '@xln/runtime/xln-api';
+import type { RuntimeInput } from '@xln/runtime/api/runtime-module';
 import { registerDebugSurface } from '$lib/utils/debugSurface';
 import {
   createRuntimeCommandId,

@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 const banned = [
   {
     symbol: 'processJBlockEvents',
-    files: ['runtime/runtime.ts', 'runtime/runtime/composition.ts', 'runtime/api/runtime-public.ts', 'runtime/xln-api.ts'],
+    files: ['runtime/runtime.ts', 'runtime/runtime/composition.ts', 'runtime/api/runtime-public.ts', 'runtime/api/runtime-module.ts'],
   },
   {
     symbol: 'evms:',

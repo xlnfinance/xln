@@ -1,7 +1,7 @@
 import type { AccountState } from '$lib/types/ui';
 import { amountToUsd } from '$lib/utils/assetPricing';
 import { requireTokenDecimals } from './token-metadata';
-import type { SwapBookEntry } from '@xln/runtime/xln-api';
+import type { SwapBookEntry } from '@xln/runtime/api/runtime-module';
 import { toBigIntSafe } from './swap-formatting';
 
 export type ClosedOrderStatus = 'filled' | 'partial' | 'canceled' | 'closed';

@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import type { RuntimeInput } from '@xln/runtime/xln-api';
+import type { RuntimeInput } from '@xln/runtime/api/runtime-module';
 import {
   clearRuntimeCommandReceipts,
   recordRuntimeIngressReceipt,

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import type { RuntimeAdapterEntitySummary } from '@xln/runtime/xln-api';
+  import type { RuntimeAdapterEntitySummary } from '@xln/runtime/api/runtime-module';
   import EntityIdentity from '$lib/components/shared/EntityIdentity.svelte';
   import { errorLog } from '$lib/stores/errorLogStore';
   import { runtimeAdapterHeight, runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';

@@ -9,7 +9,7 @@ import { createEmptyEnv, enqueueRuntimeInput, processRuntime } from '../runtime.
 import { buildRuntimeRecoveryBundle } from '../recovery/bundle';
 import { buildTowerAppointmentOwnerMessage, encryptRuntimeRecoveryBundle } from '../recovery/crypto';
 import { serializeTaggedJson } from '../protocol/serialization';
-import type { JReplica, JurisdictionConfig, TowerAppointmentV1 } from '../xln-api';
+import type { JReplica, JurisdictionConfig, TowerAppointmentV1 } from '../api/runtime-module';
 import { decodeStoredLookupDoc } from '../watchtower/store-decode';
 import { startStandaloneWatchtowerServer, type StandaloneWatchtowerServer } from '../watchtower/standalone-server';
 

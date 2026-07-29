@@ -1,4 +1,4 @@
-import type { AccountFrame, AccountState, AccountTx } from '@xln/runtime/xln-api';
+import type { AccountFrame, AccountState, AccountTx } from '@xln/runtime/api/runtime-module';
 import type { FrontendXlnFunctions } from '$lib/stores/xlnStore';
 import type { EntityReplica } from '$lib/types/ui';
 import { entityAvatar as resolveEntityAvatar } from '$lib/utils/avatar';

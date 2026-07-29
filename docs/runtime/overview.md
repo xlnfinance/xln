@@ -106,10 +106,11 @@ These files define correctness and are the first audit target:
 
 ### Generated or compatibility surface
 
-- `runtime/xln-api.ts`
+- `runtime/api/runtime-module.ts`
 - `runtime/types.ts`
 
-`runtime/xln-api.ts` is a frontend-facing compatibility/export surface.
+`runtime/api/runtime-module.ts` is the canonical frontend-facing Runtime module
+contract. It lives at the API boundary rather than in the Runtime source root.
 `runtime/types.ts` is a compatibility barrel while the codebase still migrates to
 domain types under `runtime/types/`.
 Contract bindings are generated under `jurisdictions/typechain-types/`; do not

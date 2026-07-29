@@ -1,5 +1,5 @@
 import { writable, derived, get } from 'svelte/store';
-import type { RuntimeState, RuntimeAdapterConfig } from '@xln/runtime/xln-api';
+import type { RuntimeState, RuntimeAdapterConfig } from '@xln/runtime/api/runtime-module';
 import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
 import { registerDebugSurface } from '$lib/utils/debugSurface';
 import {

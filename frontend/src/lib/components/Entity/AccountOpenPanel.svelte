@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { RuntimeState, Profile as GossipProfile, RuntimeInput } from '@xln/runtime/xln-api';
+  import type { RuntimeState, Profile as GossipProfile, RuntimeInput } from '@xln/runtime/api/runtime-module';
   import type { EntityReplica, Tab } from '$lib/types/ui';
   import type { DisputedAccountView } from './account-dispute-view';
   import EntityInput from '../shared/EntityInput.svelte';

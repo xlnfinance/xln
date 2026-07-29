@@ -1,4 +1,4 @@
-import type { RuntimeState, EnvSnapshot } from '@xln/runtime/xln-api';
+import type { RuntimeState, EnvSnapshot } from '@xln/runtime/api/runtime-module';
 
 export type EntityWorkspaceEmbeddedRuntimeContext = {
   env: RuntimeState | EnvSnapshot | null;

@@ -1,4 +1,4 @@
-import type { RuntimeState, RuntimeInput } from '@xln/runtime/xln-api';
+import type { RuntimeState, RuntimeInput } from '@xln/runtime/api/runtime-module';
 import {
   deriveJMachineCreatedAt,
   jmachineOperations,

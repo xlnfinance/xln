@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { RuntimeAdapterTimelineIndexPage, StorageHead } from '@xln/runtime/xln-api';
+  import type { RuntimeAdapterTimelineIndexPage, StorageHead } from '@xln/runtime/api/runtime-module';
   import type { RuntimeSecurityIncident } from '@xln/runtime/types';
   import { safeStringify } from '@xln/runtime/protocol/serialization';
   import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';

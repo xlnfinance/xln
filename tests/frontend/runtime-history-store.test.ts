@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { RuntimeAdapterViewFrame } from '@xln/runtime/xln-api';
+import type { RuntimeAdapterViewFrame } from '@xln/runtime/api/runtime-module';
 import {
   mergeRuntimeHistoryFrame,
   runtimeHistoryFrameFromViewFrame,

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Profile as GossipProfile } from '@xln/runtime/xln-api';
+  import type { Profile as GossipProfile } from '@xln/runtime/api/runtime-module';
   import type { EntityReplica } from '$lib/types/ui';
   import { createEventDispatcher } from 'svelte';
   import AccountPreview from './AccountPreview.svelte';

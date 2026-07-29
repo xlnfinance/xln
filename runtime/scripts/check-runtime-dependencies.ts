@@ -17,8 +17,6 @@ const ROOT_FILE_DEBT = new Set([
   'runtime/state-helpers.ts',
   'runtime/types.ts',
   'runtime/utils.ts',
-  'runtime/xln-api-guard.ts',
-  'runtime/xln-api.ts',
 ]);
 
 // These directions violate the Runtime → Entity → Account cascade or make a

@@ -1,8 +1,8 @@
-import type { BookState } from '@xln/runtime/xln-api';
+import type { BookState } from '@xln/runtime/api/runtime-module';
 import {
   deriveCanonicalCrossJurisdictionBookOwnerForLegs,
   deriveCanonicalCrossJurisdictionMarketForLegs,
-} from '@xln/runtime/xln-api';
+} from '@xln/runtime/api/runtime-module';
 
 export type BookSide = 'bid' | 'ask';
 

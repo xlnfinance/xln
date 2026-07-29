@@ -1,4 +1,4 @@
-import type { RuntimeState, RoutedEntityInput } from '@xln/runtime/xln-api';
+import type { RuntimeState, RoutedEntityInput } from '@xln/runtime/api/runtime-module';
 
 const DEFAULT_PROFILE_PREFETCH_TIMEOUT_MS = 1_200;
 

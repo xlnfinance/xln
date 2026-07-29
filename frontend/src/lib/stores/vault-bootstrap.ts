@@ -1,4 +1,4 @@
-import type { JurisdictionConfig } from '@xln/runtime/xln-api';
+import type { JurisdictionConfig } from '@xln/runtime/api/runtime-module';
 import { errorLog } from './errorLogStore';
 import {
   type FaucetResult,

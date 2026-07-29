@@ -1,5 +1,5 @@
 import { get, writable } from 'svelte/store';
-import type { RuntimeAdapterGraphFrame } from '@xln/runtime/xln-api';
+import type { RuntimeAdapterGraphFrame } from '@xln/runtime/api/runtime-module';
 import type { Runtime } from '$lib/stores/runtimeStore';
 import {
   invalidateNetworkGraphSubscription,

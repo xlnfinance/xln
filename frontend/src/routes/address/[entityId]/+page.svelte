@@ -3,7 +3,7 @@
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
   import { get } from 'svelte/store';
-  import type { RuntimeAdapterEntitySummary, RuntimeAdapterViewFrame } from '@xln/runtime/xln-api';
+  import type { RuntimeAdapterEntitySummary, RuntimeAdapterViewFrame } from '@xln/runtime/api/runtime-module';
   import ActivityHistoryPanel from '$lib/components/Entity/ActivityHistoryPanel.svelte';
   import EntityIdentity from '$lib/components/shared/EntityIdentity.svelte';
   import { errorLog } from '$lib/stores/errorLogStore';

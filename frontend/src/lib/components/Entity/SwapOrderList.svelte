@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { SwapBookEntry } from '@xln/runtime/xln-api';
+  import type { SwapBookEntry } from '@xln/runtime/api/runtime-module';
   import { toBigIntSafe } from './swap-formatting';
   import type { ClosedOrderStatus, ClosedOrderView, OfferLike, PairOrientation } from './swap-order-history';
 

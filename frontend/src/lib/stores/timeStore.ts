@@ -1,6 +1,6 @@
 import { writable, derived, get } from 'svelte/store';
 import type { TimeState } from '$lib/types/ui';
-import type { EnvSnapshot } from '@xln/runtime/xln-api';
+import type { EnvSnapshot } from '@xln/runtime/api/runtime-module';
 import { history } from './xlnStore';
 import { errorLog } from './errorLogStore';
 

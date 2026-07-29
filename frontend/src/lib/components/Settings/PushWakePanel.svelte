@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { RuntimeState } from '@xln/runtime/xln-api';
+  import type { RuntimeState } from '@xln/runtime/api/runtime-module';
   import type { RecoveryTowerConfig, Runtime } from '$lib/stores/vaultStore';
   import { vaultOperations } from '$lib/stores/vaultStore';
   import {

@@ -6,7 +6,7 @@ import type {
   RuntimeState,
   EnvSnapshot,
   Profile as GossipProfile,
-} from '@xln/runtime/xln-api';
+} from '@xln/runtime/api/runtime-module';
 
 export type TokenSymbolFormatter = (tokenIdValue: number) => string;
 export type HubCandidatePredicate = (entityIdValue: string) => boolean;

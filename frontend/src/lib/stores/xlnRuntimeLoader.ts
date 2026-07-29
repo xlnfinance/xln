@@ -1,6 +1,6 @@
 import { writable } from 'svelte/store';
-import type { XLNModule } from '@xln/runtime/xln-api';
-import { isXLNModuleLoaded } from '@xln/runtime/xln-api-guard';
+import type { XLNModule } from '@xln/runtime/api/runtime-module';
+import { isXLNModuleLoaded } from '@xln/runtime/api/runtime-module-guard';
 import { registerDebugSurface } from '$lib/utils/debugSurface';
 import '$lib/utils/wireDebug';
 
