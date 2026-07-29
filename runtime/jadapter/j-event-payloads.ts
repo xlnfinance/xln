@@ -1,4 +1,5 @@
 import type { JurisdictionEvent } from '../types';
+import { normalizeJurisdictionEvent } from '../jurisdiction/event-normalization';
 import type { RawJEvent } from './helpers';
 import { buildAccountSettledEvents, buildDebtEvent } from './j-event-financial-payloads';
 
@@ -278,12 +279,26 @@ const rawEventToJEventPayloads = (event: RawJEvent, entityId: string): Jurisdict
 
 export const rawEventToJEvents = (event: RawJEvent, entityId: string): JurisdictionEvent[] => {
   const events = rawEventToJEventPayloads(event, entityId);
-  return events.map((jEvent, eventIndex) => ({
-    ...jEvent,
-    ...(event.blockNumber !== undefined ? { blockNumber: event.blockNumber } : {}),
-    ...(event.blockHash ? { blockHash: event.blockHash } : {}),
-    ...(event.transactionHash ? { transactionHash: event.transactionHash } : {}),
-    ...(event.logIndex !== undefined ? { logIndex: event.logIndex } : {}),
-    ...(events.length > 1 ? { eventIndex } : {}),
-  }));
+  if (events.length === 0) {
+    throw new Error(`J_EVENT_CANONICAL_PAYLOAD_EMPTY:${event.name}`);
+  }
+  return events.map((jEvent, eventIndex) => {
+    const candidate = {
+      ...jEvent,
+      ...(event.blockNumber !== undefined ? { blockNumber: event.blockNumber } : {}),
+      ...(event.blockHash ? { blockHash: event.blockHash } : {}),
+      ...(event.transactionHash ? { transactionHash: event.transactionHash } : {}),
+      ...(event.logIndex !== undefined ? { logIndex: event.logIndex } : {}),
+      ...(events.length > 1 ? { eventIndex } : {}),
+    };
+    const normalized = normalizeJurisdictionEvent(candidate);
+    if (!normalized) {
+      throw new Error(
+        `J_EVENT_CANONICAL_PAYLOAD_INVALID:${event.name}` +
+          `:block=${String(event.blockNumber ?? 'unknown')}` +
+          `:tx=${String(event.transactionHash ?? 'unknown')}`,
+      );
+    }
+    return normalized;
+  });
 };
