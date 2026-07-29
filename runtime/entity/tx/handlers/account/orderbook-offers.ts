@@ -1,13 +1,7 @@
-import type {
-  AccountState,
-  CrossJurisdictionSwapRoute,
-  SwapOffer,
-} from '../../../../types';
+import type { AccountState, SwapOffer } from '../../../../types';
+import type { SwapCancelEvent, SwapCancelRequestEvent, SwapOfferEvent } from '../../../../account/tx/apply-types';
 import { computeSwapPriceTicks, type BookState } from '../../../../orderbook';
-import {
-  compareCanonicalText,
-  type NormalizedOrderbookOffer,
-} from '../../../../orderbook/swap-execution';
+import { compareCanonicalText, type NormalizedOrderbookOffer } from '../../../../orderbook/swap-execution';
 import type { CrossJurisdictionFillInstruction } from '../../../../extensions/cross-j/orderbook';
 import type { AccountTxTarget } from './orderbook-queue';
 
@@ -27,32 +21,7 @@ export const resolveStoredOfferEntityRefs = (
   };
 };
 
-// Events returned by account handlers and consumed by the entity orchestrator.
-export interface SwapOfferEvent {
-  offerId: string;
-  makerIsLeft: boolean;
-  fromEntity: string;
-  toEntity: string;
-  accountId?: string;
-  createdHeight?: number;
-  giveTokenId: number;
-  giveAmount: bigint;
-  wantTokenId: number;
-  wantAmount: bigint;
-  priceTicks?: bigint | undefined;
-  timeInForce?: 0 | 1 | 2 | undefined;
-  crossJurisdiction?: CrossJurisdictionSwapRoute;
-}
-
-export interface SwapCancelEvent {
-  offerId: string;
-  accountId: string;
-}
-
-export interface SwapCancelRequestEvent {
-  offerId: string;
-  accountId: string;
-}
+export type { SwapCancelEvent, SwapCancelRequestEvent, SwapOfferEvent };
 
 export interface MatchResult {
   accountTxs: AccountTxTarget[];
@@ -68,18 +37,11 @@ export interface MatchResult {
   }>;
 }
 
-export const normalizeSwapOfferForOrderbook = (
-  offer: SwapOfferEvent,
-  accountId: string,
-): NormalizedOrderbookOffer => {
-  const priceTicks = typeof offer.priceTicks === 'bigint' && offer.priceTicks > 0n
-    ? offer.priceTicks
-    : computeSwapPriceTicks(
-        offer.giveTokenId,
-        offer.wantTokenId,
-        offer.giveAmount,
-        offer.wantAmount,
-      );
+export const normalizeSwapOfferForOrderbook = (offer: SwapOfferEvent, accountId: string): NormalizedOrderbookOffer => {
+  const priceTicks =
+    typeof offer.priceTicks === 'bigint' && offer.priceTicks > 0n
+      ? offer.priceTicks
+      : computeSwapPriceTicks(offer.giveTokenId, offer.wantTokenId, offer.giveAmount, offer.wantAmount);
   if (priceTicks <= 0n) {
     throw new Error(`ORDERBOOK_NORMALIZE_INVALID_PRICE: offer=${offer.offerId}`);
   }

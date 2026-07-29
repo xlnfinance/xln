@@ -1,20 +1,8 @@
-import type {
-  AccountState,
-  AccountTx,
-  CrossJurisdictionSwapRoute,
-} from '../../../types';
-import type { SwapOfferEvent } from '../../../entity/tx/handlers/account';
+import type { AccountState, AccountTx, CrossJurisdictionSwapRoute } from '../../../types';
+import type { SwapOfferEvent } from '../apply-types';
 
-export type CrossSwapFillAckTx = Extract<
-  AccountTx,
-  { type: 'cross_swap_fill_ack' }
->;
-export type CrossSwapOffer = NonNullable<AccountState['swapOffers']> extends Map<
-  string,
-  infer Offer
->
-  ? Offer
-  : never;
+export type CrossSwapFillAckTx = Extract<AccountTx, { type: 'cross_swap_fill_ack' }>;
+export type CrossSwapOffer = NonNullable<AccountState['swapOffers']> extends Map<string, infer Offer> ? Offer : never;
 
 export type CrossSwapFillAckResult = {
   success: boolean;
@@ -35,5 +23,4 @@ export type PreparedCrossSwapFillAck = {
 };
 
 export type CrossSwapFillAckAdmission =
-  | { ok: true; prepared: PreparedCrossSwapFillAck }
-  | { ok: false; result: CrossSwapFillAckResult };
+  { ok: true; prepared: PreparedCrossSwapFillAck } | { ok: false; result: CrossSwapFillAckResult };

@@ -26,7 +26,7 @@ const ROOT_FILE_DEBT = new Set([
 // Existing counts are migration debt: every increase and every newly
 // introduced direction fails, while completed cleanup must remove its entry.
 const REVERSE_DEPENDENCY_DEBT: Readonly<Record<string, number>> = {
-  'account->entity': 6,
+  'account->entity': 3,
   'account->runtime': 1,
   'account->storage': 1,
   'entity->jadapter': 5,

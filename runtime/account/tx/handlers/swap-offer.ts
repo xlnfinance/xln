@@ -5,11 +5,8 @@
  * admission → deterministic quantization → cross-J lock binding → commit.
  */
 
-import type {
-  AccountState,
-  AccountTx,
-} from '../../../types';
-import type { SwapOfferEvent } from '../../../entity/tx/handlers/account';
+import type { AccountState, AccountTx } from '../../../types';
+import type { SwapOfferEvent } from '../apply-types';
 import { validateSwapOfferAdmission } from './swap-offer/admission';
 import { prepareSwapOfferAmounts } from './swap-offer/quantization';
 import { validateCrossJurisdictionSourceBinding } from './swap-offer/cross-j-binding';
@@ -44,11 +41,5 @@ export const handleSwapOffer = async (
   if (bindingError) {
     return { success: false, error: bindingError, events: [] };
   }
-  return commitSwapOffer(
-    account,
-    tx,
-    admissionResult.admission,
-    amountResult.prepared,
-    currentHeight,
-  );
+  return commitSwapOffer(account, tx, admissionResult.admission, amountResult.prepared, currentHeight);
 };
