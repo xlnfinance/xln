@@ -1116,6 +1116,67 @@ const createBootstrapSameQuoteDriver = (
   return false;
 };
 
+const buildMarketMakerCrossQuoteJobs = async (
+  env: RuntimeState,
+  contexts: readonly MarketMakerEntityContext[],
+  tokenIdsByContext: ReadonlyMap<string, number[]>,
+  mode: MarketMakerQuoteMode,
+  visibleHubs: readonly HubProfile[],
+  shouldContinue: () => boolean,
+): Promise<CrossQuoteJob[] | null> => {
+  const jobs: CrossQuoteJob[] = [];
+  for (const sourceContext of contexts) {
+    await yieldMarketMakerApi();
+    if (!shouldContinue()) return null;
+    const sourceHubs = selectMarketMakerHubsForContext(visibleHubs, sourceContext).filter(
+      profile => mode === 'bootstrap' || !hasMarketMakerAccountBacklog(env, sourceContext.entityId, profile.entityId),
+    );
+    if (sourceHubs.length === 0) continue;
+    const sourceTokenIds = getMarketMakerTokenIds(tokenIdsByContext, sourceContext);
+    for (const targetContext of contexts) {
+      await yieldMarketMakerApi();
+      if (!shouldContinue()) return null;
+      if (sourceContext.entityId === targetContext.entityId || sameJurisdiction(sourceContext, targetContext)) continue;
+      const targetHubs = selectMarketMakerHubsForContext(visibleHubs, targetContext).filter(
+        profile => mode === 'bootstrap' || !hasMarketMakerAccountBacklog(env, targetContext.entityId, profile.entityId),
+      );
+      if (targetHubs.length === 0) continue;
+      jobs.push({
+        sourceContext,
+        targetContext,
+        sourceHubs,
+        targetHubs,
+        sourceTokenIds,
+        targetTokenIds: getMarketMakerTokenIds(tokenIdsByContext, targetContext),
+      });
+    }
+  }
+  return jobs;
+};
+
+type SelectedCrossQuoteJobs = {
+  jobs: Array<{ index: number; job: CrossQuoteJob }>;
+  nextCursor: number;
+};
+
+const selectMarketMakerCrossQuoteJobs = (
+  jobs: readonly CrossQuoteJob[],
+  cursor: number,
+  limit: number,
+): SelectedCrossQuoteJobs => {
+  if (jobs.length === 0) return { jobs: [], nextCursor: cursor };
+  const selected: SelectedCrossQuoteJobs['jobs'] = [];
+  let nextCursor = cursor;
+  for (let offset = 0; offset < Math.min(limit, jobs.length); offset += 1) {
+    const index = (cursor + offset) % jobs.length;
+    const job = jobs[index];
+    if (!job) continue;
+    selected.push({ index, job });
+    nextCursor = (index + 1) % jobs.length;
+  }
+  return { jobs: selected, nextCursor };
+};
+
 export const runMarketMakerNode = async (): Promise<void> => {
   activateMarketMakerProcessArgs();
   if (resolvedArgs.dbPath) process.env['XLN_DB_PATH'] = resolvedArgs.dbPath;
@@ -1525,60 +1586,18 @@ export const runMarketMakerNode = async (): Promise<void> => {
     mode: MarketMakerQuoteMode,
     visibleHubs: HubProfile[],
     shouldContinue: () => boolean,
-  ): Promise<CrossQuoteJob[] | null> => {
-    const jobs: CrossQuoteJob[] = [];
-    for (const sourceContext of mmContexts) {
-      await yieldMarketMakerApi();
-      if (!shouldContinue()) return null;
-      const sourceHubs = hubsForContext(visibleHubs, sourceContext).filter(
-        profile =>
-          mode === 'bootstrap' ||
-          !hasMarketMakerAccountBacklog(env, sourceContext.entityId, profile.entityId),
-      );
-      if (sourceHubs.length === 0) continue;
-      const sourceTokenIds = getMarketMakerTokenIds(mmTokenIdsByContext, sourceContext);
-      for (const targetContext of mmContexts) {
-        await yieldMarketMakerApi();
-        if (!shouldContinue()) return null;
-        if (sourceContext.entityId === targetContext.entityId || sameJurisdiction(sourceContext, targetContext))
-          continue;
-        const targetHubs = hubsForContext(visibleHubs, targetContext).filter(
-          profile =>
-            mode === 'bootstrap' ||
-            !hasMarketMakerAccountBacklog(env, targetContext.entityId, profile.entityId),
-        );
-        if (targetHubs.length === 0) continue;
-        jobs.push({
-          sourceContext,
-          targetContext,
-          sourceHubs,
-          targetHubs,
-          sourceTokenIds,
-          targetTokenIds: getMarketMakerTokenIds(mmTokenIdsByContext, targetContext),
-        });
-      }
-    }
-    return jobs;
-  };
+  ): Promise<CrossQuoteJob[] | null> =>
+    buildMarketMakerCrossQuoteJobs(env, mmContexts, mmTokenIdsByContext, mode, visibleHubs, shouldContinue);
   const selectCrossQuoteJobs = (
     mode: MarketMakerQuoteMode,
     jobs: CrossQuoteJob[],
   ): Array<{ index: number; job: CrossQuoteJob }> => {
-    if (jobs.length === 0) return [];
     const cursor = mode === 'bootstrap' ? bootstrapCrossCursor : steadyCrossCursor;
-    const jobCount =
+    const limit =
       mode === 'bootstrap' ? jobs.length : Math.min(MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK, jobs.length);
-    const selected: Array<{ index: number; job: CrossQuoteJob }> = [];
-    let nextCursor = cursor;
-    for (let offset = 0; offset < jobCount; offset += 1) {
-      const index = (cursor + offset) % jobs.length;
-      const job = jobs[index];
-      if (!job) continue;
-      selected.push({ index, job });
-      nextCursor = (index + 1) % jobs.length;
-    }
-    if (mode === 'steady') steadyCrossCursor = nextCursor;
-    return selected;
+    const selection = selectMarketMakerCrossQuoteJobs(jobs, cursor, limit);
+    if (mode === 'steady') steadyCrossCursor = selection.nextCursor;
+    return selection.jobs;
   };
   const driveQuotes = async (mode: MarketMakerQuoteMode = 'steady'): Promise<boolean> => {
     if (shuttingDown) return false;

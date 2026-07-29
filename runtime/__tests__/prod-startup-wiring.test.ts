@@ -1001,8 +1001,8 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('advanceCrossCursorAfterEnqueue(entry.index)');
     expect(mmNode).not.toContain('deferredBootstrapCrossInputs');
     expect(mmNode).not.toContain("direction: 'bootstrap-batch'");
-    const crossJobPlanningStart = mmNode.indexOf('const buildCrossQuoteJobs = async (');
-    const crossSelectionStart = mmNode.indexOf('const selectCrossQuoteJobs = (');
+    const crossJobPlanningStart = mmNode.indexOf('const buildMarketMakerCrossQuoteJobs = async (');
+    const crossSelectionStart = mmNode.indexOf('type SelectedCrossQuoteJobs = {');
     expect(crossJobPlanningStart).toBeGreaterThan(0);
     expect(crossSelectionStart).toBeGreaterThan(crossJobPlanningStart);
     const crossJobPlanning = mmNode.slice(crossJobPlanningStart, crossSelectionStart);
@@ -1020,7 +1020,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain("startupPhase = 'bootstrap-cross';");
     expect(mmNode).toContain("if (mode === 'steady') return true;");
     expect(mmNode).toContain('bootstrapCrossCursor = nextCursor;');
-    expect(mmNode).toContain("if (mode === 'steady') steadyCrossCursor = nextCursor;");
+    expect(mmNode).toContain("if (mode === 'steady') steadyCrossCursor = selection.nextCursor;");
     expect(mmNode).not.toContain('deferredBootstrapCrossInputs');
     expect(mmNode).toContain('sourceHubs,');
     expect(mmNode).toContain('targetHubs,');
