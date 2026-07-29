@@ -6,7 +6,7 @@
 
 import { ethers } from 'ethers';
 import type { JEvent } from './types';
-import type { DisputeFinalizationEvidence, EntityInput, RuntimeState, JPrefixAttestation, JReplica, JurisdictionConfig, RuntimeInput, RuntimeTx, ValidatorJBlockHeader, ValidatorJEventBlock } from '../types';
+import type { DisputeFinalizationEvidence, EntityInput, EntityReplica, RuntimeState, JPrefixAttestation, JReplica, JurisdictionConfig, RuntimeInput, RuntimeTx, ValidatorJBlockHeader, ValidatorJEventBlock } from '../types';
 import { createEmptyBatch, type JBatch } from '../jurisdiction/batch';
 import { enqueueRuntimeInput } from '../runtime/input-queue';
 import { createStructuredLogger, shortId } from '../infra/logger';
@@ -741,6 +741,19 @@ export type JEventsRuntimeInputBuildResult = {
   evidenceEvents: RawJEvent[];
 };
 
+export type JEventsRuntimeInputOptions = {
+  blockNumber: number;
+  blockHash: string;
+  adapterLabel: string;
+  txCounter?: EventBatchCounter;
+  logBatch?: boolean;
+  emitSettledDebugEvents?: boolean;
+  watcherDepositoryAddress?: string;
+  watcherChainId?: number;
+  localSourceReplica?: JReplica;
+  emitRange?: boolean;
+};
+
 const resolveJEventObservedAt = (blockNumber: number): number => {
   // This field is part of hashable RuntimeInput/account-frame payloads. It must
   // be derived from canonical J-chain identity, not watcher delivery time or
@@ -750,228 +763,304 @@ const resolveJEventObservedAt = (blockNumber: number): number => {
   return Number.isFinite(height) && height > 0 ? Math.floor(height) : 0;
 };
 
-export function buildRawJEventsRuntimeInput(
-  env: RuntimeState,
-  rawEvents: RawJEvent[],
-  options: {
-    blockNumber: number;
-    blockHash: string;
-    adapterLabel: string;
-    txCounter?: EventBatchCounter;
-    logBatch?: boolean;
-    emitSettledDebugEvents?: boolean;
-    watcherDepositoryAddress?: string;
-    watcherChainId?: number;
-    localSourceReplica?: JReplica;
-    emitRange?: boolean;
-  },
-): JEventsRuntimeInputBuildResult | null {
-  if (rawEvents.length === 0) return null;
-
-  const {
-    blockNumber,
-    blockHash,
-    adapterLabel,
-    txCounter,
-    logBatch = false,
-    emitSettledDebugEvents = false,
-    watcherDepositoryAddress,
-    watcherChainId,
-    localSourceReplica,
-    emitRange = true,
-  } = options;
-
-  if (localSourceReplica && (watcherDepositoryAddress || watcherChainId !== undefined)) {
-    throw new Error(`J_EVENT_LOCAL_SOURCE_SELECTOR_CONFLICT:${adapterLabel}`);
-  }
-
-  if (logBatch) {
-    jadapterHelperLog.info('event_batch.canonical', {
-      adapterLabel,
-      blockNumber,
-      count: rawEvents.length,
-    });
-  }
-  const observedAt = resolveJEventObservedAt(blockNumber);
-
-  const hankoNonceByTxAndEntity = new Map<string, string>();
+const enrichDisputeBatchNonces = (rawEvents: RawJEvent[]): RawJEvent[] => {
+  const nonceByTxAndEntity = new Map<string, string>();
   for (const event of rawEvents) {
     if (event.name !== 'HankoBatchProcessed') continue;
     const txHash = String(event.transactionHash || '').toLowerCase();
-    const eventEntity = String(event.args['entityId'] ?? '').toLowerCase();
+    const entityId = String(event.args['entityId'] ?? '').toLowerCase();
     const nonce = event.args['nonce'];
-    if (!txHash || !eventEntity || nonce === undefined || nonce === null) continue;
-    hankoNonceByTxAndEntity.set(`${txHash}:${eventEntity}`, String(nonce));
+    if (!txHash || !entityId || nonce === undefined || nonce === null) continue;
+    nonceByTxAndEntity.set(`${txHash}:${entityId}`, String(nonce));
   }
-
-  const enrichedRawEvents = rawEvents.map((event) => {
+  return rawEvents.map(event => {
     if (event.name !== 'DisputeStarted' && event.name !== 'DisputeFinalized') {
       return event;
     }
     const txHash = String(event.transactionHash || '').toLowerCase();
     const sender = String(event.args['sender'] ?? '').toLowerCase();
-    const batchNonce = txHash && sender ? hankoNonceByTxAndEntity.get(`${txHash}:${sender}`) : undefined;
-    if (batchNonce === undefined) return event;
-    return {
-      ...event,
-      args: {
-        ...event.args,
-        batchNonce,
-      },
-    };
-  });
-
-  const eventsByReplica = new Map<string, { entityId: string; signerId: string; jurisdictionRef: string; events: RawJEvent[] }>();
-  const watcherReplica = localSourceReplica
-    ? bindLocalJEventIngressSource(env, localSourceReplica, `${adapterLabel}:event-batch`).replica
-    : watcherDepositoryAddress || watcherChainId !== undefined
-      ? requireWatcherJurisdictionReplica(env, watcherDepositoryAddress, watcherChainId, 'event-batch')
+    const batchNonce = txHash && sender
+      ? nonceByTxAndEntity.get(`${txHash}:${sender}`)
       : undefined;
-  const watcherJurisdictionRef = watcherReplica ? getJEventJurisdictionRef(watcherReplica) : '';
+    return batchNonce === undefined
+      ? event
+      : { ...event, args: { ...event.args, batchNonce } };
+  });
+};
 
-  for (const [replicaKey, replica] of env.eReplicas.entries()) {
-    if (watcherReplica && !isEntityReplicaRelevantToWatcher(env, replica, watcherReplica)) continue;
-    const jurisdictionRef = getJEventJurisdictionRef(replica.state.config.jurisdiction);
-    if (watcherReplica && jurisdictionRef !== watcherJurisdictionRef) {
+const resolveJEventWatcherReplica = (
+  env: RuntimeState,
+  options: JEventsRuntimeInputOptions,
+): JReplica | undefined => {
+  const {
+    adapterLabel,
+    localSourceReplica,
+    watcherDepositoryAddress,
+    watcherChainId,
+  } = options;
+  if (
+    localSourceReplica &&
+    (watcherDepositoryAddress || watcherChainId !== undefined)
+  ) {
+    throw new Error(`J_EVENT_LOCAL_SOURCE_SELECTOR_CONFLICT:${adapterLabel}`);
+  }
+  if (localSourceReplica) {
+    return bindLocalJEventIngressSource(
+      env,
+      localSourceReplica,
+      `${adapterLabel}:event-batch`,
+    ).replica;
+  }
+  return watcherDepositoryAddress || watcherChainId !== undefined
+    ? requireWatcherJurisdictionReplica(
+        env,
+        watcherDepositoryAddress,
+        watcherChainId,
+        'event-batch',
+      )
+    : undefined;
+};
+
+type JEventReplicaDelivery = {
+  entityId: string;
+  signerId: string;
+  jurisdictionRef: string;
+  events: RawJEvent[];
+};
+
+const collectJEventReplicaDeliveries = (
+  env: RuntimeState,
+  events: RawJEvent[],
+  blockNumber: number,
+  watcherReplica: JReplica | undefined,
+): Map<string, JEventReplicaDelivery> => {
+  const deliveries = new Map<string, JEventReplicaDelivery>();
+  const watcherRef = watcherReplica
+    ? getJEventJurisdictionRef(watcherReplica)
+    : '';
+  for (const [replicaKey, replica] of env.eReplicas) {
+    if (
+      watcherReplica &&
+      !isEntityReplicaRelevantToWatcher(env, replica, watcherReplica)
+    ) continue;
+    const jurisdictionRef = getJEventJurisdictionRef(
+      replica.state.config.jurisdiction,
+    );
+    if (watcherReplica && jurisdictionRef !== watcherRef) {
       throw new Error(
         `J_WATCHER_ENTITY_JURISDICTION_MISMATCH:event-batch` +
-        `:watcher=${watcherJurisdictionRef}:entity=${jurisdictionRef}:replica=${replicaKey}`,
+        `:watcher=${watcherRef}:entity=${jurisdictionRef}:replica=${replicaKey}`,
       );
     }
-    const [entityIdFromKey, signerIdFromKey] = replicaKey.split(':');
-    const entityId = String(replica.entityId || entityIdFromKey || '').toLowerCase();
-    const signerId = String(replica.signerId || signerIdFromKey || '');
-    if (!entityId || !signerId) continue;
-    if (blockNumber <= Number(replica.state.lastFinalizedJHeight || 0)) continue;
-
-    const relevant = enrichedRawEvents.filter((event) => isEventRelevantToEntity(event, entityId));
+    const [keyEntityId, keySignerId] = replicaKey.split(':');
+    const entityId = String(replica.entityId || keyEntityId || '').toLowerCase();
+    const signerId = String(replica.signerId || keySignerId || '');
+    if (
+      !entityId ||
+      !signerId ||
+      blockNumber <= Number(replica.state.lastFinalizedJHeight || 0)
+    ) continue;
+    const relevant = events.filter(event =>
+      isEventRelevantToEntity(event, entityId));
     if (relevant.length === 0) continue;
-
-    const existing = eventsByReplica.get(replicaKey);
-    if (existing) {
-      existing.events.push(...relevant);
-      continue;
-    }
-    eventsByReplica.set(replicaKey, {
+    deliveries.set(replicaKey, {
       entityId,
       signerId,
       jurisdictionRef,
-      events: [...relevant],
+      events: relevant,
     });
   }
+  return deliveries;
+};
 
+const emitSettledDeliveryDebug = (
+  env: RuntimeState,
+  entityId: string,
+  signerId: string,
+  blockNumber: number,
+  settledCount: number,
+): void => {
+  if (settledCount === 0) return;
+  jadapterHelperLog.info('j_event.deliver_settled', {
+    entityId: shortId(entityId, 8),
+    signerId: shortId(signerId, 8),
+    blockNumber,
+    accountSettled: settledCount,
+  });
+  env.runtimeState?.p2p?.sendDebugEvent?.({
+    level: 'info',
+    code: 'REB_STEP',
+    step: 4,
+    status: 'ok',
+    event: 'j_event_delivered',
+    entityId,
+    signerId,
+    blockNumber,
+    accountSettled: settledCount,
+  });
+};
+
+type ObserveJRangeTx = Extract<RuntimeTx, { type: 'observeJRange' }>;
+
+const buildJPrefixAttestationInput = (
+  env: RuntimeState,
+  replica: EntityReplica,
+  observeTx: ObserveJRangeTx,
+): EntityInput | null => {
+  const { entityId, signerId, scannedThroughHeight } = observeTx.data;
+  const history = recordValidatorJHistory(
+    replica.jHistory,
+    observeTx.data,
+    replica.state,
+  );
+  if (hasCurrentRoundJPrefixAttestation(replica)) {
+    jadapterHelperLog.debug('j_prefix.attestation_deferred', {
+      entity: shortId(entityId),
+      targetEntityHeight: replica.state.height + 1,
+      reason: 'current_round_already_signed',
+    });
+    return null;
+  }
+  if (!hasDueLocalJPrefixAdvance(replica.state, history)) {
+    jadapterHelperLog.debug('j_prefix.attestation_deferred', {
+      entity: shortId(entityId),
+      baseHeight: replica.state.lastFinalizedJHeight,
+      scannedThroughHeight: history.scannedThroughHeight,
+      reason: 'semantic_event_not_yet_contiguous',
+    });
+    return null;
+  }
+  const attestation = buildLocalJPrefixAttestation(env, replica, history);
+  if (!attestation) {
+    throw new Error(
+      `J_PREFIX_ATTESTATION_NOT_AHEAD:${entityId}:${scannedThroughHeight}`,
+    );
+  }
+  return {
+    entityId,
+    signerId,
+    jPrefixAttestations: new Map([[signerId, attestation]]),
+  };
+};
+
+type BuiltJEventReplicaDelivery = {
+  runtimeTx: RuntimeTx;
+  entityInput: EntityInput | null;
+  evidenceEvents: Array<[string, RawJEvent]>;
+};
+
+const buildJEventEvidenceEntries = (
+  events: RawJEvent[],
+  blockHash: string,
+): Array<[string, RawJEvent]> =>
+  events.map((event, index) => [
+    event.transactionHash
+      ? `${event.transactionHash.toLowerCase()}:${event.logIndex ?? event.name}:${index}`
+      : `${event.blockHash ?? blockHash}:${event.name}:${index}`,
+    event,
+  ]);
+
+const buildJEventReplicaDelivery = (
+  env: RuntimeState,
+  replica: EntityReplica,
+  delivery: JEventReplicaDelivery,
+  options: JEventsRuntimeInputOptions,
+): BuiltJEventReplicaDelivery | null => {
+  const { entityId, signerId, jurisdictionRef, events } = delivery;
+  const jEvents = events.flatMap(event => rawEventToJEvents(event, entityId));
+  if (jEvents.length === 0) return null;
+  if (options.emitSettledDebugEvents) {
+    emitSettledDeliveryDebug(
+      env,
+      entityId,
+      signerId,
+      options.blockNumber,
+      jEvents.filter(event => event.type === 'AccountSettled').length,
+    );
+  }
+  if (options.txCounter) options.txCounter.value += 1;
+  const evidence = events
+    .map(event => event.disputeFinalizationEvidence)
+    .filter(
+      (item): item is DisputeFinalizationEvidence => Boolean(item),
+    );
+  const evidenceHash = evidence.length > 0
+    ? canonicalDisputeFinalizationEvidenceHash(evidence)
+    : undefined;
+  const localBlock: ValidatorJEventBlock = {
+    jurisdictionRef,
+    jHeight: options.blockNumber,
+    jBlockHash: options.blockHash.toLowerCase(),
+    eventsHash: canonicalJurisdictionEventsHash(jEvents),
+    events: jEvents,
+    ...(evidenceHash ? { disputeFinalizationEvidenceHash: evidenceHash } : {}),
+    ...(evidence.length > 0 ? { disputeFinalizationEvidence: evidence } : {}),
+  };
+  const observeTx: ObserveJRangeTx = {
+    type: 'observeJRange',
+    data: {
+      entityId,
+      signerId,
+      jurisdictionRef,
+      scannedThroughHeight: options.blockNumber,
+      tipBlockHash: options.blockHash.toLowerCase(),
+      blocks: [localBlock],
+    },
+  };
+  if (options.logBatch) {
+    jadapterHelperLog.info('event_batch.delivered_to_entity', {
+      adapterLabel: options.adapterLabel,
+      entityId: shortId(entityId),
+      count: jEvents.length,
+    });
+  }
+  return {
+    runtimeTx: markLocalJAuthorityRuntimeTx(observeTx),
+    entityInput: options.emitRange === false
+      ? null
+      : buildJPrefixAttestationInput(env, replica, observeTx),
+    evidenceEvents: buildJEventEvidenceEntries(events, options.blockHash),
+  };
+};
+
+export function buildRawJEventsRuntimeInput(
+  env: RuntimeState,
+  rawEvents: RawJEvent[],
+  options: JEventsRuntimeInputOptions,
+): JEventsRuntimeInputBuildResult | null {
+  if (rawEvents.length === 0) return null;
+  if (options.logBatch) {
+    jadapterHelperLog.info('event_batch.canonical', {
+      adapterLabel: options.adapterLabel,
+      blockNumber: options.blockNumber,
+      count: rawEvents.length,
+    });
+  }
+  const watcherReplica = resolveJEventWatcherReplica(env, options);
+  const deliveries = collectJEventReplicaDeliveries(
+    env,
+    enrichDisputeBatchNonces(rawEvents),
+    options.blockNumber,
+    watcherReplica,
+  );
   const runtimeTxs: RuntimeTx[] = [];
   const entityInputs: EntityInput[] = [];
   const evidenceEventsByLog = new Map<string, RawJEvent>();
-  for (const [replicaKey, { entityId, signerId, jurisdictionRef, events }] of eventsByReplica) {
+  for (const [replicaKey, delivery] of deliveries) {
     const replica = env.eReplicas.get(replicaKey);
     if (!replica) throw new Error(`J_HISTORY_LOCAL_REPLICA_MISSING:${replicaKey}`);
-    const jEvents = events.flatMap((event) => rawEventToJEvents(event, entityId));
-    if (jEvents.length === 0) continue;
-    const firstJEvent = jEvents[0];
-    if (!firstJEvent) continue;
-    const disputeFinalizationEvidence = events
-      .map((event) => event.disputeFinalizationEvidence)
-      .filter((evidence): evidence is DisputeFinalizationEvidence => Boolean(evidence));
-
-    const settledCount = jEvents.filter((event) => event.type === 'AccountSettled').length;
-    if (emitSettledDebugEvents && settledCount > 0) {
-      jadapterHelperLog.info('j_event.deliver_settled', {
-        entityId: shortId(entityId, 8),
-        signerId: shortId(signerId, 8),
-        blockNumber,
-        accountSettled: settledCount,
-      });
-      const p2p = env?.runtimeState?.p2p;
-      if (p2p && typeof p2p.sendDebugEvent === 'function') {
-        p2p.sendDebugEvent({
-          level: 'info',
-          code: 'REB_STEP',
-          step: 4,
-          status: 'ok',
-          event: 'j_event_delivered',
-          entityId,
-          signerId,
-          blockNumber,
-          accountSettled: settledCount,
-        });
-      }
-    }
-
-    if (txCounter) txCounter.value += 1;
-    const eventsHash = canonicalJurisdictionEventsHash(jEvents);
-    const disputeFinalizationEvidenceHash = disputeFinalizationEvidence.length > 0
-      ? canonicalDisputeFinalizationEvidenceHash(disputeFinalizationEvidence)
-      : undefined;
-    const localBlock: ValidatorJEventBlock = {
-      jurisdictionRef,
-      jHeight: blockNumber,
-      jBlockHash: blockHash.toLowerCase(),
-      eventsHash,
-      events: jEvents,
-      ...(disputeFinalizationEvidenceHash ? { disputeFinalizationEvidenceHash } : {}),
-      ...(disputeFinalizationEvidence.length > 0 ? { disputeFinalizationEvidence } : {}),
-    };
-    const observeTx: Extract<RuntimeTx, { type: 'observeJRange' }> = {
-      type: 'observeJRange',
-      data: {
-        entityId,
-        signerId,
-        jurisdictionRef,
-        scannedThroughHeight: blockNumber,
-        tipBlockHash: blockHash.toLowerCase(),
-        blocks: [localBlock],
-      },
-    };
-    runtimeTxs.push(markLocalJAuthorityRuntimeTx(observeTx));
-
-    if (emitRange) {
-      const tentativeHistory = recordValidatorJHistory(replica.jHistory, observeTx.data, replica.state);
-      if (hasCurrentRoundJPrefixAttestation(replica)) {
-        jadapterHelperLog.debug('j_prefix.attestation_deferred', {
-          entity: shortId(entityId),
-          targetEntityHeight: replica.state.height + 1,
-          reason: 'current_round_already_signed',
-        });
-      } else if (!hasDueLocalJPrefixAdvance(replica.state, tentativeHistory)) {
-        jadapterHelperLog.debug('j_prefix.attestation_deferred', {
-          entity: shortId(entityId),
-          baseHeight: replica.state.lastFinalizedJHeight,
-          scannedThroughHeight: tentativeHistory.scannedThroughHeight,
-          reason: 'semantic_event_not_yet_contiguous',
-        });
-      } else {
-        const attestation = buildLocalJPrefixAttestation(env, replica, tentativeHistory);
-        if (!attestation) throw new Error(`J_PREFIX_ATTESTATION_NOT_AHEAD:${entityId}:${blockNumber}`);
-        entityInputs.push({
-          entityId,
-          signerId,
-          jPrefixAttestations: new Map([[signerId, attestation]]),
-        });
-      }
-    }
-
-    for (let index = 0; index < events.length; index += 1) {
-      const event = events[index]!;
-      const key = event.transactionHash
-        ? `${event.transactionHash.toLowerCase()}:${event.logIndex ?? event.name}:${index}`
-        : `${event.blockHash ?? blockHash}:${event.name}:${index}`;
+    const built = buildJEventReplicaDelivery(env, replica, delivery, options);
+    if (!built) continue;
+    runtimeTxs.push(built.runtimeTx);
+    if (built.entityInput) entityInputs.push(built.entityInput);
+    for (const [key, event] of built.evidenceEvents) {
       evidenceEventsByLog.set(key, event);
     }
-
-    if (logBatch) {
-      jadapterHelperLog.info('event_batch.delivered_to_entity', {
-        adapterLabel,
-        entityId: shortId(entityId),
-        count: jEvents.length,
-      });
-    }
   }
-
   if (runtimeTxs.length === 0) return null;
   return {
     input: {
-      timestamp: observedAt,
+      timestamp: resolveJEventObservedAt(options.blockNumber),
       runtimeTxs,
       entityInputs,
     },
