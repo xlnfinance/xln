@@ -14,8 +14,8 @@ import {
   pruneReplicaFinalizedJHistory,
   runLocalPostCommitHooks,
   verifyHashPrecommitSignatures,
-  wrapCertifiedEntityOutputs,
 } from './shared';
+import { wrapCertifiedEntityOutputs } from './consumption-output';
 import {
   appendCertifiedEntityFrameLink,
   buildCertifiedEntityFrameLink,

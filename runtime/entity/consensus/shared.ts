@@ -7,10 +7,8 @@ import { encodeCanonicalConsensusValue } from '../../protocol/canonical-consensu
 import { verifyAccountSignature } from '../../account/crypto';
 import { buildCrossJurisdictionFillId, CROSS_J_PENDING_FILL_ACK_TTL_MS } from '../../extensions/cross-j/fill-ack';
 import { cloneCrossJurisdictionAccountTxRoute } from '../../extensions/cross-j/index';
-import { getEntityConfigBoardHash } from '../../hanko/signing';
-import { createStructuredLogger, logError, shortId, shortOrder } from '../../infra/logger';
+import { createStructuredLogger, shortId, shortOrder } from '../../infra/logger';
 import { isRuntimePerfProfileEnabled, readRuntimePerfSlowMs } from '../../infra/perf-runtime-flags';
-import { getCertifiedBoardNodeStore, resolveObserverCertifiedBoardRecord } from '../../jurisdiction/board-registry';
 import {
   assertFrameJPrefix,
   buildLocalJPrefixAttestation,
@@ -27,7 +25,7 @@ import {
   isCertifiedJHistoryCorruption,
   pruneFinalizedValidatorJHistory,
 } from '../../jurisdiction/local-history';
-import { getEntityFrameJRangeBudgetError, selectEntityTxsWithinJRangeBudget } from '../../jurisdiction/range-budget';
+import { getEntityFrameJRangeBudgetError } from '../../jurisdiction/range-budget';
 import {
   deterministicEntityTimestamp,
   findAccountByCounterparty,
@@ -47,24 +45,13 @@ import type { AccountTx, AccountReplica, RuntimeOverlayRecord } from '../../type
 import type { ConsensusConfig, EntityCandidate, EntityCandidateEffect, EntityInput, EntityLeaderCertificate, EntityLeaderTimeoutVote, EntityOutput, EntityReplica, EntityState, HashToSign, ProposedEntityFrame } from '../types';
 import type { EntityRuntimeContext } from '../runtime-context';
 import type { AccountConsensusContext } from '../../account/consensus/context';
-import type { ConsensusOutputOrigin, EntityTx } from '../../types/entity-tx';
-import type { HankoString } from '../../types/hanko';
+import type { EntityTx } from '../../types/entity-tx';
 import { log } from '../../infra/diagnostics';
-import {
-  applyConsumptionOutput,
-  createConsumptionProof,
-  createEmptyConsumptionAccumulator,
-  getConsumptionKey,
-  type ConsumptionNode,
-  type ConsumptionOutputIdentity,
-} from '../consumption-accumulator';
-import { getConsumptionNodeStore } from '../consumption-store';
-import { selectCrossJCommitPhaseTxs } from '../cross-j-proposer-materialization';
 import { emitDefaultProposerHtlcOnionAdvances } from '../htlc-onion-post-commit';
 import { collectCommittedCrossJurisdictionCancelAcks } from '../tx/handlers/account';
 import { applyAccountInput } from '../../account/consensus';
 import { createLocalAccountInput } from '../../account/input';
-import { createEntityFrameHashFromStateRoot, selectEntityFrameTxByteBudget } from './frame';
+import { createEntityFrameHashFromStateRoot } from './frame';
 import {
   assertEntityLeaderVoteMatchesState,
   getEntityLeaderState,
@@ -73,17 +60,6 @@ import {
   leaderVoteCollectionKey,
   type EntityLeaderStateView,
 } from './leader';
-import {
-  assertCertifiedOutputSemanticIdentity,
-  buildCertifiedEntityOutputHashes,
-  buildConsensusOutputOriginForState,
-  hashCertifiedEntityOutput,
-  isLocalRuntimeProtocolOutput,
-  isNonMutatingEntityWakeOutput,
-  normalizeConsensusOutputOrigin,
-  resolveConsensusOutputBoardAuthority,
-} from './output-certification';
-import { orderCertifiedOutputsBySequence } from './output-envelope';
 import { classifyEntityConsensusStateQuotaTransition, measureEntityConsensusStateBytes } from './state-quota';
 import { calculateQuorumPower } from './replica-validation';
 
@@ -705,302 +681,6 @@ export const getValidatorExecutionForFrame = (
     );
   }
   return execution;
-};
-
-export const buildConsumptionOutputIdentity = (
-  origin: ConsensusOutputOrigin,
-  targetEntityId: string,
-  outputHash: string,
-  outputHanko: string,
-): ConsumptionOutputIdentity => ({
-  targetEntityId,
-  sourceEntityId: origin.sourceEntityId,
-  lane: origin.lane,
-  sequence: origin.sequence,
-  semanticHash: origin.semanticHash,
-  outputHash,
-  outputHanko,
-});
-
-/**
- * The source certifies only origin + target + nested effects. The target
- * proposer adds a witness from its own pre-state; validators never trust a
- * proof supplied by the source or transport.
- */
-export const attachTargetConsumptionProofs = (
-  env: EntityRuntimeContext,
-  state: EntityState,
-  txs: readonly EntityTx[],
-): EntityTx[] => {
-  let accumulator = state.consumptionAccumulator ?? createEmptyConsumptionAccumulator();
-  const overlay = new Map<string, ConsumptionNode>(getConsumptionNodeStore(env));
-  const selected: EntityTx[] = [];
-  for (const tx of orderCertifiedOutputsBySequence(txs)) {
-    if (tx.type !== 'consensusOutput') {
-      selected.push(tx);
-      continue;
-    }
-    const origin = normalizeConsensusOutputOrigin(tx.data.origin);
-    const targetEntityId = String(tx.data.targetEntityId ?? '')
-      .trim()
-      .toLowerCase();
-    const outputHash = hashCertifiedEntityOutput(origin, targetEntityId, tx.data.entityTxs);
-    assertCertifiedOutputSemanticIdentity(origin, targetEntityId, tx.data.entityTxs);
-    const identity = buildConsumptionOutputIdentity(origin, targetEntityId, outputHash, tx.data.outputHanko);
-    const key = getConsumptionKey(identity);
-    const proof = createConsumptionProof(overlay, accumulator.root, key);
-    const applied = applyConsumptionOutput(accumulator, identity, proof);
-    if (applied.status === 'gap') {
-      entityLog.warn('consensus_output.sequence_gap_deferred', {
-        sourceEntityId: origin.sourceEntityId,
-        targetEntityId,
-        lane: origin.lane,
-        received: origin.sequence.toString(),
-      });
-      continue;
-    }
-    if (applied.status === 'quarantined' && applied.newNodes.length === 0) {
-      logError('FRAME_CONSENSUS', 'Certified output excluded for quarantined relationship', {
-        sourceEntityId: origin.sourceEntityId,
-        targetEntityId,
-        lane: origin.lane,
-      });
-      continue;
-    }
-    for (const { hash, node } of applied.newNodes) overlay.set(hash, node);
-    for (const hash of applied.replacedNodeHashes) overlay.delete(hash);
-    accumulator = applied.state;
-    selected.push({
-      ...structuredClone(tx),
-      data: { ...structuredClone(tx.data), consumptionProof: proof },
-    });
-  }
-  return selected;
-};
-
-export const wrapCertifiedEntityOutputs = (
-  outputs: EntityOutput[],
-  frame: ProposedEntityFrame,
-  sourceState: EntityState,
-  env: EntityRuntimeContext,
-  hashesToSign: HashToSign[],
-  hankos: HankoString[],
-  emitLocalRuntimeOutputs: boolean,
-): EntityOutput[] => {
-  const outputHashes = buildCertifiedEntityOutputHashes(sourceState, env, frame.height, frame.hash, outputs);
-  return outputs.flatMap((output, outputIndex): EntityOutput[] => {
-    if (isNonMutatingEntityWakeOutput(output)) return [structuredClone(output)];
-    if (isLocalRuntimeProtocolOutput(output)) {
-      if (!emitLocalRuntimeOutputs) return [];
-      const targetEntityId = output.entityId.trim().toLowerCase();
-      const localTarget = Array.from(env.eReplicas.values()).some(
-        replica =>
-          replica.entityId.toLowerCase() === targetEntityId &&
-          replica.signerId.toLowerCase() === output.signerId.toLowerCase(),
-      );
-      if (!localTarget) {
-        throw new Error(`RUNTIME_OUTPUT_TARGET_NOT_LOCAL:${targetEntityId}:${output.signerId}`);
-      }
-      if (!output.entityTxs?.length) throw new Error(`RUNTIME_OUTPUT_ENTITY_TXS_MISSING:index=${outputIndex}`);
-      return [
-        {
-          entityId: targetEntityId,
-          signerId: output.signerId.toLowerCase(),
-          entityTxs: [
-            {
-              type: 'runtimeOutput',
-              data: {
-                protocol: 'cross-j',
-                sourceEntityId: sourceState.entityId.toLowerCase(),
-                targetEntityId,
-                entityTxs: structuredClone(output.entityTxs),
-              },
-            },
-          ],
-        },
-      ];
-    }
-    const outputHash = outputHashes.find(
-      hashInfo => hashInfo.context === `entity-output:${frame.height}:${outputIndex}`,
-    );
-    if (!outputHash) throw new Error(`CONSENSUS_OUTPUT_HASH_MISSING:index=${outputIndex}`);
-    const manifestIndex = hashesToSign.findIndex(
-      hashInfo =>
-        hashInfo.type === 'entityOutput' &&
-        hashInfo.hash.toLowerCase() === outputHash.hash.toLowerCase() &&
-        hashInfo.context === outputHash.context,
-    );
-    if (manifestIndex < 0) {
-      throw new Error(`CONSENSUS_OUTPUT_MANIFEST_ENTRY_MISSING:index=${outputIndex}:hash=${outputHash.hash}`);
-    }
-    const outputHanko = hankos[manifestIndex];
-    if (!outputHanko) {
-      throw new Error(`CONSENSUS_OUTPUT_HANKO_MISSING:index=${outputIndex}:hash=${outputHash.hash}`);
-    }
-    const semanticIdentity = output.certifiedOutputIdentity;
-    if (!semanticIdentity) throw new Error(`CONSENSUS_OUTPUT_SEMANTIC_IDENTITY_MISSING:index=${outputIndex}`);
-    const origin = buildConsensusOutputOriginForState(
-      sourceState,
-      env,
-      frame.height,
-      frame.hash,
-      outputIndex,
-      semanticIdentity,
-    );
-    const targetEntityId = output.entityId.toLowerCase();
-    const entityTxs = output.entityTxs;
-    if (!entityTxs) throw new Error(`CONSENSUS_OUTPUT_ENTITY_TXS_MISSING:index=${outputIndex}`);
-    const routedOutput = structuredClone(output);
-    delete routedOutput.certifiedOutputIdentity;
-    return [
-      {
-        ...routedOutput,
-        entityTxs: [
-          {
-            type: 'consensusOutput',
-            data: {
-              origin,
-              outputHanko,
-              targetEntityId,
-              entityTxs: structuredClone(entityTxs),
-            },
-          },
-        ],
-      },
-    ];
-  });
-};
-
-const FOUNDATION_ENTITY_ID = `0x${'0'.repeat(63)}1`;
-
-const getSelfAuthorityTargetFromJRange = (
-  tx: Extract<EntityTx, { type: 'j_event' }>,
-  entityId: string,
-): string | null => {
-  const normalizedEntityId = entityId.toLowerCase();
-  let target: string | null = null;
-  for (const block of tx.data.blocks) {
-    for (const event of block.events) {
-      if (event.type === 'FoundationBootstrapped' && normalizedEntityId === FOUNDATION_ENTITY_ID) {
-        target = event.data.boardHash.toLowerCase();
-      } else if (
-        (event.type === 'EntityRegistered' || event.type === 'BoardActivated') &&
-        event.data.entityId.toLowerCase() === normalizedEntityId
-      ) {
-        target = (event.type === 'EntityRegistered' ? event.data.boardHash : event.data.newBoardHash).toLowerCase();
-      }
-    }
-  }
-  return target;
-};
-
-export type ProposableEntityTxSelection = {
-  txs: EntityTx[];
-  currentAuthorityReady: boolean;
-  reason?: string;
-};
-
-const applyJRangeBudgetToSelection = (selection: ProposableEntityTxSelection): ProposableEntityTxSelection => {
-  const budgeted = selectEntityTxsWithinJRangeBudget(selection.txs);
-  const frameBudgetedTxs = selectEntityFrameTxByteBudget(budgeted.txs);
-  const deferredByFrameBytes = frameBudgetedTxs.length !== budgeted.txs.length;
-  if (budgeted.deferredJRangeCount === 0 && !deferredByFrameBytes) return selection;
-  return {
-    ...selection,
-    txs: frameBudgetedTxs,
-    ...(selection.reason
-      ? {}
-      : { reason: deferredByFrameBytes ? 'ENTITY_FRAME_BYTE_BUDGET_DEFERRED' : 'J_RANGE_FRAME_BUDGET_DEFERRED' }),
-  };
-};
-
-/**
- * Registered Entities cannot use their local config as bootstrap authority.
- * Before registration (and during rotation handover), only the exact J-range
- * whose post-state certifies that config may be proposed. An output waiting on
- * a remote authority prefix stays durable in this replica's mempool while a J
- * prerequisite frame advances independently.
- */
-export const selectProposableEntityTxs = async (
-  env: EntityRuntimeContext,
-  state: EntityState,
-  mempool: EntityTx[],
-): Promise<ProposableEntityTxSelection> => {
-  const configBoardHash = await getEntityConfigBoardHash(env, state.config);
-  const normalizedEntityId = state.entityId.toLowerCase();
-  const selfRecord = resolveObserverCertifiedBoardRecord(state, getCertifiedBoardNodeStore(env), normalizedEntityId);
-  const currentAuthorityReady = configBoardHash === normalizedEntityId || selfRecord?.boardHash === configBoardHash;
-  const jRanges = mempool.filter((tx): tx is Extract<EntityTx, { type: 'j_event' }> => tx.type === 'j_event');
-  const selfAuthorityRanges = jRanges
-    .map(tx => ({ tx, target: getSelfAuthorityTargetFromJRange(tx, normalizedEntityId) }))
-    .filter((entry): entry is { tx: Extract<EntityTx, { type: 'j_event' }>; target: string } => Boolean(entry.target));
-
-  if (selfAuthorityRanges.length > 0) {
-    const latestTarget = selfAuthorityRanges.at(-1)!.target;
-    if (latestTarget !== configBoardHash) {
-      return { txs: [], currentAuthorityReady, reason: 'SELF_BOARD_CONFIG_HANDOVER_REQUIRED' };
-    }
-    return applyJRangeBudgetToSelection({
-      txs: selfAuthorityRanges.map(entry => entry.tx),
-      currentAuthorityReady,
-      reason: currentAuthorityReady ? 'SELF_BOARD_ROTATION_PRIORITY' : 'SELF_BOARD_BOOTSTRAP_PRIORITY',
-    });
-  }
-
-  if (!currentAuthorityReady) {
-    return { txs: [], currentAuthorityReady: false, reason: 'SELF_BOARD_CERTIFICATION_REQUIRED' };
-  }
-
-  let blockedOutput = false;
-  for (const tx of mempool) {
-    if (tx.type !== 'consensusOutput') continue;
-    const origin = normalizeConsensusOutputOrigin(tx.data.origin);
-    const authority = resolveConsensusOutputBoardAuthority(origin, state, env);
-    if (authority.kind === 'defer') blockedOutput = true;
-  }
-  if (!blockedOutput) {
-    const phaseSelection = selectCrossJCommitPhaseTxs(mempool);
-    return applyJRangeBudgetToSelection({
-      txs: attachTargetConsumptionProofs(env, state, phaseSelection.txs),
-      currentAuthorityReady: true,
-      ...(phaseSelection.deferredCrossJSetup ? { reason: 'CROSS_J_ACCOUNT_COMMIT_PRIORITY' } : {}),
-    });
-  }
-  if (jRanges.length > 0) {
-    return applyJRangeBudgetToSelection({
-      txs: [jRanges[0]!],
-      currentAuthorityReady: true,
-      reason: 'OUTPUT_BOARD_CATCH_UP_PRIORITY',
-    });
-  }
-  return { txs: [], currentAuthorityReady: true, reason: 'OUTPUT_BOARD_CATCH_UP_REQUIRED' };
-};
-
-export const isSelfBoardAuthorityTransitionFrame = async (
-  env: EntityRuntimeContext,
-  state: EntityState,
-  entityTxs: EntityTx[],
-): Promise<boolean> => {
-  if (entityTxs.length === 0 || entityTxs.some(tx => tx.type !== 'j_event')) return false;
-  const configBoardHash = await getEntityConfigBoardHash(env, state.config);
-  if (configBoardHash === state.entityId.toLowerCase()) return false;
-  const current = resolveObserverCertifiedBoardRecord(state, getCertifiedBoardNodeStore(env), state.entityId);
-  if (current?.boardHash === configBoardHash) return false;
-  const finalTarget = entityTxs
-    .map(tx => getSelfAuthorityTargetFromJRange(tx as Extract<EntityTx, { type: 'j_event' }>, state.entityId))
-    .filter((target): target is string => Boolean(target))
-    .at(-1);
-  return finalTarget === configBoardHash;
-};
-
-export const validateProposedFrameLeader = (
-  env: EntityRuntimeContext,
-  state: EntityState,
-  frame: ProposedEntityFrame,
-): boolean => {
-  return Boolean(
-    frame.leader && verifyEntityLeaderCertificate(env, state, frame) && verifyEntityRelayCertificate(env, state, frame),
-  );
 };
 
 const buildCrossJurisdictionFillNoticeTx = (

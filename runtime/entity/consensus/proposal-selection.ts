@@ -14,9 +14,9 @@ import { prioritizeScheduledWakeTransactions } from './input-merge';
 import { getReplicaProposalLeader } from './leader';
 import {
   entityLog,
-  selectProposableEntityTxs,
 } from './shared';
 import { isSingleSignerEntity } from './replica-validation';
+import { selectProposableEntityTxs } from './proposal-policy';
 
 export type EntityProposalSelection = {
   hasProposableAccountMempool: boolean;

@@ -92,17 +92,17 @@ import { applyEntityTxReturnedEffects } from './frame-tx-effects';
 
 import {
   admitOrderbookOfferForMatching,
-  buildConsumptionOutputIdentity,
   buildCrossJurisdictionFillNoticeOutput,
   drainCommittedCrossJurisdictionCancelAcks,
   drainPendingCrossJurisdictionFillAcks,
   entityFrameProfileEnabled,
   entityFrameSlowMs,
   entityLog,
-  isSelfBoardAuthorityTransitionFrame,
   ownsSourceHubRouteForFillAck,
   stashPendingCrossJurisdictionFillAck,
 } from './shared';
+import { buildConsumptionOutputIdentity } from './consumption-output';
+import { isSelfBoardAuthorityTransitionFrame } from './proposal-policy';
 
 const recordFrameAccountChange = (
   storageChanges: RuntimeOverlayRecord[],

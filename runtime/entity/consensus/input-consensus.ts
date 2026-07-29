@@ -23,9 +23,9 @@ import {
   ensureLocalJPrefixAttestation,
   entityLog,
   normalizePrecommitBundles,
-  validateProposedFrameLeader,
 } from './shared';
 import { assertFrameParentMatchesState } from './frame-lineage';
+import { validateProposedFrameLeader } from './proposal-policy';
 import { calculateQuorumPower } from './replica-validation';
 import { selectEntityProposal } from './proposal-selection';
 import { commitSingleSignerFrameIfReady } from './single-signer-frame';

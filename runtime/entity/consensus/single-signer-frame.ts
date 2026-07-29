@@ -39,8 +39,8 @@ import {
   prepareCommittedEntitySizeLog,
   pruneReplicaFinalizedJHistory,
   runLocalPostCommitHooks,
-  wrapCertifiedEntityOutputs,
 } from './shared';
+import { wrapCertifiedEntityOutputs } from './consumption-output';
 import {
   appendCertifiedEntityFrameLink,
   buildCertifiedEntityFrameLink,

@@ -16,10 +16,10 @@ import {
   getReplicaJRangeValidationError,
   isJPrefixLocalFreshnessRace,
   normalizePrecommitBundles,
-  validateProposedFrameLeader,
   verifyHashPrecommitSignatures,
 } from './shared';
 import { assertFrameParentMatchesState } from './frame-lineage';
+import { validateProposedFrameLeader } from './proposal-policy';
 
 const validateProposalEnvelope = (
   context: ApplyEntityInputContext,
