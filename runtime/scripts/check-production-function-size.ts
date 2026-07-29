@@ -23,7 +23,6 @@ const COORDINATOR_DEBT: Readonly<Record<string, number>> = {
   'runtime/orchestrator/mm-node-run.ts::driveQuotes': 334,
   'runtime/orchestrator/mm-node-run.ts::runMarketMakerNode': 1707,
   'runtime/orchestrator/mm-node-run.ts::waitForBootstrapOffers': 207,
-  'runtime/orchestrator/orchestrator.ts::computeAggregatedHealth': 270,
   'runtime/orchestrator/orchestrator.ts::fetch': 388,
 };
 

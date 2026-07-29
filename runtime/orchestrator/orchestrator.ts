@@ -86,7 +86,18 @@ import {
   type ManagedProcessTableEntry,
 } from './managed-runtime-leases';
 import { buildPrometheusMetrics } from './prometheus';
-import { deriveHubRuntimeHealth, deriveResetHealthOk } from './health-model';
+import { deriveResetHealthOk } from './health-model';
+import {
+  buildAggregatedBootstrapReserveHealth,
+  buildAggregatedCustodyHealth,
+  buildAggregatedHubHealth,
+  buildAggregatedHubMeshHealth,
+  buildAggregatedRelayHealth,
+  collectAggregatedHubMesh,
+  collectBootstrapReserveEntities,
+  collectManagedRelayClients,
+  deriveAggregatedSystemStatus,
+} from './aggregated-health-projections';
 import {
   buildAggregatedMarketMakerHealth,
   countMarketSnapshotOrderDepth,
@@ -1654,134 +1665,119 @@ const {
   warnTailRead: warnBootstrapTailRead,
 });
 
-const computeAggregatedHealth = (options: {
-  marketMakerHealthOverride?: MarketMakerHealthPayload | null | undefined;
-} = {}): AggregatedHealth => {
-  const storage = getStorageHealthSnapshotSync();
-  const marketMakerHealth = normalizeMarketMakerHealthPayload(options.marketMakerHealthOverride ?? marketMakerChild.lastHealth);
-  const managedRuntimeIds = new Set<string>();
-  for (const child of hubChildren) {
-    const runtimeId = normalizeRuntimeKey(String(child.lastInfo?.runtimeId || child.lastHealth?.runtimeId || ''));
-    if (runtimeId) managedRuntimeIds.add(runtimeId);
-  }
-  const marketMakerRuntimeId = normalizeRuntimeKey(String(marketMakerChild.lastInfo?.runtimeId || marketMakerHealth?.runtimeId || ''));
-  if (marketMakerRuntimeId) managedRuntimeIds.add(marketMakerRuntimeId);
-  const relayClientIds = Array.from(relayStore.clients.keys()).map(normalizeRuntimeKey).filter(Boolean);
-  const externalClientIds = relayClientIds.filter((runtimeId) => !managedRuntimeIds.has(runtimeId));
-  const hubs = hubChildren.map((child) => {
-    const entityId = String(child.lastInfo?.entityId || child.lastHealth?.entityId || '');
-    const runtimeId = String(child.lastInfo?.runtimeId || child.lastHealth?.runtimeId || '');
-    const normalizedRuntimeId = normalizeRuntimeKey(runtimeId);
-    const relayOnline = normalizedRuntimeId ? relayStore.clients.has(normalizedRuntimeId) : false;
-    const hubRuntimeHealth = deriveHubRuntimeHealth({
-      processExitCode: child.exitSignal !== null ? 1 : child.proc?.exitCode,
-      hasHealth: Boolean(child.lastHealth),
-      hasSelfRelayPresence: relayOnline,
-      runtimeHalted: child.lastHealth?.runtime?.halted === true,
-    });
-    return {
-      entityId,
-      name: child.name,
-      online: hubRuntimeHealth.online,
-      runtimeId,
-      selfRelayPresence: hubRuntimeHealth.selfRelayPresence,
-      pid: child.proc?.pid ?? null,
-      apiPort: child.apiPort,
-      apiUrl: String(child.lastInfo?.apiUrl || `http://${args.host}:${child.apiPort}`),
-      dbPath: child.dbPath,
-      startedAt: child.startedAt,
-      exitedAt: child.exitedAt,
-      exitCode: child.exitCode,
-      exitSignal: child.exitSignal,
-      recoveryInProgress: child.recoveryInProgress,
-      restartCount: child.restartCount,
-      lastErrorLine: child.recentStderr.at(-1) ?? null,
-      quiescence: child.lastHealth?.quiescence ?? null,
-      bootstrapProgress: child.lastHealth?.bootstrapProgress ?? null,
-    };
+const buildCurrentBootstrapTimeline = (input: {
+  storageOk: boolean;
+  resetOk: boolean;
+  hubs: AggregatedHealth['hubs'];
+  hubsOnline: boolean;
+  hubMeshOk: boolean;
+  directOpenLinks: number;
+  capabilities: ReturnType<typeof resolveResetCapabilityHealth>;
+  marketMakerActive: boolean;
+  marketMaker: AggregatedHealth['marketMaker'];
+  marketMakerStartupPhase: string | null;
+  bootstrapReservesOk: boolean;
+  bootstrapReserveTargetsMet: boolean;
+  reserveEntityCount: number;
+}): AggregatedHealth['bootstrapTimeline'] => {
+  const mmHubs = input.marketMaker.hubs;
+  const mmCross = input.marketMaker.cross;
+  const mmOfferTotal = mmHubs.reduce(
+    (sum, hub) => sum + Number(hub.offers || 0),
+    0,
+  );
+  const mmExpectedTotal =
+    input.marketMaker.expectedOffersPerHub *
+    Math.max(1, mmHubs.length || HUB_NAMES.length);
+  const sameChainOk =
+    !input.capabilities.marketMakerEnabled ||
+    (mmHubs.length === HUB_NAMES.length &&
+      mmHubs.every(hub => hub.depthReady === true));
+  const crossOk =
+    !input.capabilities.marketMakerEnabled ||
+    !mmCross.applicable ||
+    mmCross.ok === true;
+  return buildBootstrapTimeline({
+    storageOk: input.storageOk,
+    resetOk: input.resetOk,
+    hubsOnline: input.hubsOnline,
+    onlineHubs: input.hubs.filter(hub => hub.online).length,
+    totalHubs: input.hubs.length,
+    hubMeshOk: input.hubMeshOk,
+    directOpenLinks: input.directOpenLinks,
+    mmEnabled: input.capabilities.marketMakerEnabled,
+    marketMakerActive: input.marketMakerActive,
+    sameChainOk,
+    crossOk,
+    mmOk: input.marketMaker.ok,
+    mmStartupPhase: input.marketMakerStartupPhase,
+    mmOfferTotal,
+    mmExpectedTotal,
+    crossRouteCount: Number(mmCross.routeCount || 0),
+    expectedCrossRoutes: mmCross.expectedRoutes,
+    custodyEnabled: input.capabilities.custodyEnabled,
+    custodyOk: input.capabilities.custodyOk,
+    bootstrapReservesOk: input.bootstrapReservesOk,
+    bootstrapReserveTargetsMet: input.bootstrapReserveTargetsMet,
+    reserveEntityCount: input.reserveEntityCount,
   });
+};
 
-  const hubIds = hubs
-    .map(hub => hub.entityId.toLowerCase())
-    .filter(entityId => entityId.length > 0);
-
-  const pairSet = new Map<string, { left: string; right: string; ok: boolean; expectedCreditAmount: string }>();
-  const directLinkMap = new Map<string, { fromRuntimeId: string; toRuntimeId: string; endpoint: string }>();
-  for (const child of hubChildren) {
-    const left = String(child.lastInfo?.entityId || child.lastHealth?.entityId || '').toLowerCase();
-    for (const pair of child.lastHealth?.mesh?.pairs ?? []) {
-      const right = String(pair.counterpartyId || '').toLowerCase();
-      if (!left || !right) continue;
-      const key = [left, right].sort().join(':');
-      pairSet.set(key, {
-        left: [left, right].sort()[0]!,
-        right: [left, right].sort()[1]!,
-        ok: pair.ready === true,
-        expectedCreditAmount: HUB_MESH_CREDIT_AMOUNT.toString(),
-      });
-    }
-    const fromRuntimeId = String(child.lastInfo?.runtimeId || child.lastHealth?.runtimeId || '').toLowerCase();
-    for (const peer of child.lastHealth?.p2p?.directPeers ?? []) {
-      const toRuntimeId = String(peer.runtimeId || '').toLowerCase();
-      const endpoint = String(peer.endpoint || '');
-      if (!fromRuntimeId || !toRuntimeId || !endpoint || peer.open !== true) continue;
-      directLinkMap.set(`${fromRuntimeId}->${toRuntimeId}`, {
-        fromRuntimeId,
-        toRuntimeId,
-        endpoint,
-      });
-    }
-  }
-
-  const reserveEntities = hubChildren
-    .flatMap((child) => {
-      const nestedEntities = child.lastHealth?.bootstrapReserves?.entities;
-      if (Array.isArray(nestedEntities) && nestedEntities.length > 0) {
-        return nestedEntities
-          .map((entity) => {
-            const entityId = String(entity.entityId || '').trim().toLowerCase();
-            if (!entityId) return null;
-            return {
-              entityId,
-              role: 'hub' as const,
-              ready: entity.ready === true,
-              targetMet: entity.targetMet === true,
-              tokens: entity.tokens ?? [],
-            };
-          })
-          .filter((value): value is NonNullable<typeof value> => value !== null);
-      }
-      const entityId = String(child.lastInfo?.entityId || child.lastHealth?.entityId || '');
-      if (!entityId) return null;
-      return {
-        entityId,
-        role: 'hub' as const,
-        ready: child.lastHealth?.bootstrapReserves?.ok === true,
-        targetMet: child.lastHealth?.bootstrapReserves?.targetMet === true,
-        tokens: child.lastHealth?.bootstrapReserves?.tokens ?? [],
-      };
-    })
-    .filter((value): value is NonNullable<typeof value> => value !== null);
-
-  const marketMakerOnline = marketMakerChild.proc?.exitCode === null &&
+const resolveCurrentCapabilityHealth = (): ReturnType<
+  typeof resolveResetCapabilityHealth
+> => {
+  const marketMakerOnline =
+    marketMakerChild.proc?.exitCode === null &&
     marketMakerChild.proc?.signalCode === null &&
     marketMakerChild.exitCode === null &&
     marketMakerChild.exitSignal === null &&
     marketMakerChild.lastHealth?.runtime?.halted !== true;
   const custodyOnline = Boolean(
-    custodySupport?.identity.entityId
-    && custodySupport.daemonChild.proc.exitCode === null
-    && custodySupport.custodyChild.proc.exitCode === null,
+    custodySupport?.identity.entityId &&
+      custodySupport.daemonChild.proc.exitCode === null &&
+      custodySupport.custodyChild.proc.exitCode === null,
   );
-  const healthResetOptions = resolveHealthResetOptions(
+  const resetOptions = resolveHealthResetOptions(
     activeResetOptions,
     pendingResetOptions,
     resetState.inProgress,
   );
-  const capabilityHealth = resolveResetCapabilityHealth(healthResetOptions, {
+  return resolveResetCapabilityHealth(resetOptions, {
     marketMakerOnline,
     custodyOnline,
   });
+};
+
+const computeAggregatedHealth = (options: {
+  marketMakerHealthOverride?: MarketMakerHealthPayload | null | undefined;
+} = {}): AggregatedHealth => {
+  const storage = getStorageHealthSnapshotSync();
+  const marketMakerHealth = normalizeMarketMakerHealthPayload(options.marketMakerHealthOverride ?? marketMakerChild.lastHealth);
+  const normalizedRelayClientIds = Array.from(relayStore.clients.keys())
+    .map(normalizeRuntimeKey)
+    .filter(Boolean);
+  const {
+    managedRuntimeIds,
+    relayClientIds,
+    externalClientIds,
+  } = collectManagedRelayClients(
+    hubChildren,
+    marketMakerChild,
+    marketMakerHealth,
+    normalizedRelayClientIds,
+  );
+  const hubs = buildAggregatedHubHealth(
+    hubChildren,
+    new Set(normalizedRelayClientIds),
+    args.host,
+  );
+  const hubIds = hubs
+    .map(hub => hub.entityId.toLowerCase())
+    .filter(entityId => entityId.length > 0);
+  const { pairs: pairSet, directLinks: directLinkMap } =
+    collectAggregatedHubMesh(hubChildren, HUB_MESH_CREDIT_AMOUNT);
+  const reserveEntities = collectBootstrapReserveEntities(hubChildren);
+  const capabilityHealth = resolveCurrentCapabilityHealth();
   const marketMakerActive = capabilityHealth.marketMakerActive;
   const marketMakerBootstrapEvent = readLastMarketMakerBootstrapEvent();
   const eventStartupPhase = String(marketMakerBootstrapEvent?.stage || '').trim() || null;
@@ -1798,9 +1794,6 @@ const computeAggregatedHealth = (options: {
     entityId: mmEntityId,
     startupPhase: mmStartupPhase,
   });
-  const mmExpectedOffersPerHub = aggregatedMarketMakerHealth.expectedOffersPerHub;
-  const mmHubs = aggregatedMarketMakerHealth.hubs;
-  const mmCross = aggregatedMarketMakerHealth.cross;
   const mmOk = aggregatedMarketMakerHealth.ok;
   const hubsOnline = hubs.length === HUB_NAMES.length && hubs.every((hub) => hub.online);
   const hubMeshOk =
@@ -1814,19 +1807,17 @@ const computeAggregatedHealth = (options: {
   const bootstrapReserveTargetsMet =
     reserveEntities.length >= HUB_NAMES.length &&
     reserveEntities.every((entity) => entity.targetMet);
-  const coreOk = storage.ok && hubsOnline && hubMeshOk;
   const resetOk = deriveResetHealthOk(resetState);
-  const systemOk = coreOk && resetOk && mmOk && custodyOk && bootstrapReservesOk;
-  const degraded = [
-    storage.ok ? null : 'storage',
-    hubsOnline ? null : 'hubs',
-    hubMeshOk ? null : 'hubMesh',
-    resetOk ? null : 'reset',
-    mmOk ? null : 'marketMaker',
-    custodyOk ? null : 'custody',
-    bootstrapReservesOk ? null : 'bootstrapReserves',
-    bootstrapReserveTargetsMet ? null : 'bootstrapReserveTargets',
-  ].filter((value): value is string => Boolean(value));
+  const { coreOk, systemOk, degraded } = deriveAggregatedSystemStatus({
+    storageOk: storage.ok,
+    hubsOnline,
+    hubMeshOk,
+    resetOk,
+    marketMakerOk: mmOk,
+    custodyOk,
+    bootstrapReservesOk,
+    bootstrapReserveTargetsMet,
+  });
   const failures = buildRuntimeHealthFailures(degraded).map(failure =>
     failure.code === 'MARKET_MAKER_NOT_READY' && aggregatedMarketMakerHealth.failure
       ? aggregatedMarketMakerHealth.failure
@@ -1836,35 +1827,45 @@ const computeAggregatedHealth = (options: {
     ...hubChildren.map(child => Number(child.lastHealth?.height || 0)),
     Number(marketMakerHealth?.height || 0),
   ].filter(height => Number.isFinite(height) && height > 0);
-  const mmOfferTotal = mmHubs.reduce((sum, hub) => sum + Number(hub.offers || 0), 0);
-  const mmExpectedTotal = mmExpectedOffersPerHub * Math.max(1, mmHubs.length || HUB_NAMES.length);
-  const sameChainOk = !capabilityHealth.marketMakerEnabled ||
-    (mmHubs.length === HUB_NAMES.length && mmHubs.every((hub) => hub.depthReady === true));
-  const crossOk = !capabilityHealth.marketMakerEnabled || !mmCross.applicable || mmCross.ok === true;
-  const bootstrapTimeline = buildBootstrapTimeline({
+  const bootstrapTimeline = buildCurrentBootstrapTimeline({
     storageOk: storage.ok,
     resetOk,
+    hubs,
     hubsOnline,
-    onlineHubs: hubs.filter((hub) => hub.online).length,
-    totalHubs: hubs.length,
     hubMeshOk,
     directOpenLinks: directLinkMap.size,
-    mmEnabled: capabilityHealth.marketMakerEnabled,
+    capabilities: capabilityHealth,
     marketMakerActive,
-    sameChainOk,
-    crossOk,
-    mmOk,
-    mmStartupPhase,
-    mmOfferTotal,
-    mmExpectedTotal,
-    crossRouteCount: Number(mmCross.routeCount || 0),
-    expectedCrossRoutes: mmCross.expectedRoutes,
-    custodyEnabled: capabilityHealth.custodyEnabled,
-    custodyOk,
+    marketMaker: aggregatedMarketMakerHealth,
+    marketMakerStartupPhase: mmStartupPhase,
     bootstrapReservesOk,
     bootstrapReserveTargetsMet,
     reserveEntityCount: reserveEntities.length,
   });
+  const relay = buildAggregatedRelayHealth(
+    relayClientIds,
+    managedRuntimeIds,
+    externalClientIds,
+    marketSubscriptionStack.snapshot(),
+  );
+  const hubMesh = buildAggregatedHubMeshHealth(
+    hubMeshOk,
+    hubIds,
+    { pairs: pairSet, directLinks: directLinkMap },
+  );
+  const custody = buildAggregatedCustodyHealth(
+    capabilityHealth.custodyEnabled,
+    custodyOk,
+    custodySupport?.identity.entityId ?? null,
+    args.custodyDaemonPort,
+    args.custodyPort,
+  );
+  const bootstrapReserves = buildAggregatedBootstrapReserveHealth(
+    bootstrapReservesOk,
+    bootstrapReserveTargetsMet,
+    HUB_REQUIRED_TOKEN_COUNT,
+    reserveEntities,
+  );
 
   return {
     timestamp: Date.now(),
@@ -1882,44 +1883,15 @@ const computeAggregatedHealth = (options: {
       runtime: true,
       relay: true,
     },
-    relay: {
-      clientCount: relayClientIds.length,
-      managedRuntimeIds: Array.from(managedRuntimeIds).sort(),
-      externalClientIds: externalClientIds.sort(),
-      marketSubscriptions: marketSubscriptionStack.snapshot(),
-    },
+    relay,
     process: buildProcessHealth(),
     disk: buildDiskSummary(storage),
     storage,
-    hubMesh: {
-      ok: hubMeshOk,
-      hubIds,
-      pairs: Array.from(pairSet.values()).sort((left, right) =>
-        compareStableText(`${left.left}:${left.right}`, `${right.left}:${right.right}`),
-      ),
-      direct: {
-        openLinkCount: directLinkMap.size,
-        links: Array.from(directLinkMap.values()).sort((left, right) =>
-          compareStableText(`${left.fromRuntimeId}:${left.toRuntimeId}`, `${right.fromRuntimeId}:${right.toRuntimeId}`),
-        ),
-      },
-    },
+    hubMesh,
     marketMaker: aggregatedMarketMakerHealth,
     bootstrapTimeline,
-    custody: {
-      enabled: capabilityHealth.custodyEnabled,
-      ok: custodyOk,
-      entityId: custodySupport?.identity.entityId ?? null,
-      daemonPort: capabilityHealth.custodyEnabled ? args.custodyDaemonPort : null,
-      servicePort: capabilityHealth.custodyEnabled ? args.custodyPort : null,
-    },
-    bootstrapReserves: {
-      ok: bootstrapReservesOk,
-      targetMet: bootstrapReserveTargetsMet,
-      requiredTokenCount: HUB_REQUIRED_TOKEN_COUNT,
-      entityCount: reserveEntities.length,
-      entities: reserveEntities,
-    },
+    custody,
+    bootstrapReserves,
     hubs,
     timings,
   };
