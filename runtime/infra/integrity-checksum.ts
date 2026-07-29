@@ -11,8 +11,12 @@ type NativeHasher = {
 
 type NativeHasherConstructor = new (algorithm: string) => NativeHasher;
 
-const nativeHasher = (): NativeHasherConstructor | undefined =>
-  (globalThis as unknown as { Bun?: { CryptoHasher?: NativeHasherConstructor } }).Bun?.CryptoHasher;
+const nativeHasher = (): NativeHasherConstructor | undefined => {
+  const bunRuntime: unknown = Reflect.get(globalThis, 'Bun');
+  if (!bunRuntime || typeof bunRuntime !== 'object') return undefined;
+  const constructor: unknown = Reflect.get(bunRuntime, 'CryptoHasher');
+  return typeof constructor === 'function' ? constructor as NativeHasherConstructor : undefined;
+};
 
 export const computeIntegrityDigestBytes = (bytes: Uint8Array): Uint8Array => {
   const Native = nativeHasher();

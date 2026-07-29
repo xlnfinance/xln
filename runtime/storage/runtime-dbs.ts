@@ -47,7 +47,7 @@ const formatStorageError = (error: unknown): string =>
   error instanceof Error ? `${error.name}: ${error.message}` : String(error);
 
 const createRebranchedLevel = (path: string): Level<Buffer, Buffer> => withRebranchedValues(
-  new Level(path, { valueEncoding: 'buffer', keyEncoding: 'binary' }) as unknown as Level<Buffer, Buffer>,
+  new Level<Buffer, Buffer>(path, { valueEncoding: 'buffer', keyEncoding: 'binary' }),
 );
 
 export type RuntimeStorageDbDeps = {
