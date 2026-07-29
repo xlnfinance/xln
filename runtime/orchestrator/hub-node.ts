@@ -1410,6 +1410,177 @@ const visibleDirectSupportPeers = (
     .filter((peer): peer is VisibleSupportPeer => peer !== null);
 };
 
+type HubMeshInputPlan = {
+  openInputs: EntityInput[];
+  creditInputs: EntityInput[];
+};
+
+const planSupportPeerInputs = (
+  env: RuntimeState,
+  owner: Pick<
+    HubBootstrapEntry,
+    'entityId' | 'signerId' | 'jurisdictionName' | 'chainId' | 'depositoryAddress'
+  >,
+  supportPeerIdentities: SupportPeerIdentity[],
+  visibleProfiles: ReturnType<
+    NonNullable<RuntimeState['gossip']>['getProfiles']
+  >,
+): HubMeshInputPlan => {
+  const openInputs: EntityInput[] = [];
+  const creditInputs: EntityInput[] = [];
+  const tokenIds = tokenIdsForHubJurisdiction(owner);
+  const [openTokenId = HUB_MESH_TOKEN_ID, ...extraTokenIds] = tokenIds;
+  const peers = visibleDirectSupportPeers(
+    supportPeerIdentities,
+    visibleProfiles,
+    owner.entityId,
+    owner,
+  );
+  for (const peer of peers) {
+    const account = getAccountState(env, owner.entityId, peer.entityId);
+    const canWrite =
+      !account?.pendingFrame && Number(account?.mempool?.length || 0) === 0;
+    if (
+      isCanonicalAccountOpener(owner.entityId, peer.entityId) &&
+      !hasAccount(env, owner.entityId, peer.entityId) &&
+      canWrite
+    ) {
+      if (hasQueuedOpenAccount(env, owner.entityId, peer.entityId)) continue;
+      openInputs.push({
+        entityId: owner.entityId,
+        signerId: owner.signerId,
+        entityTxs: [
+          {
+            type: 'openAccount',
+            data: {
+              targetEntityId: peer.entityId,
+              tokenId: openTokenId,
+              creditAmount: getBootstrapCreditAmount(openTokenId),
+            },
+          },
+          ...extraTokenIds.map(tokenId => ({
+            type: 'extendCredit' as const,
+            data: {
+              counterpartyEntityId: peer.entityId,
+              tokenId,
+              amount: getBootstrapCreditAmount(tokenId),
+            },
+          })),
+        ],
+      });
+      continue;
+    }
+    if (!account || !canWrite) continue;
+    const missingTokenIds = tokenIds.filter(
+      tokenId =>
+        getCreditGrantedByEntity(account, owner.entityId, tokenId) <
+        getBootstrapCreditAmount(tokenId),
+    );
+    if (missingTokenIds.length === 0) continue;
+    creditInputs.push({
+      entityId: owner.entityId,
+      signerId: owner.signerId,
+      entityTxs: missingTokenIds.map(tokenId => ({
+        type: 'extendCredit' as const,
+        data: {
+          counterpartyEntityId: peer.entityId,
+          tokenId,
+          amount: getBootstrapCreditAmount(tokenId),
+        },
+      })),
+    });
+  }
+  return { openInputs, creditInputs };
+};
+
+const planHubPeerInputs = (
+  env: RuntimeState,
+  bootstrap: Pick<HubBootstrapEntry, 'entityId' | 'signerId'>,
+  peers: VisibleHubProfile[],
+): HubMeshInputPlan => {
+  const openInputs: EntityInput[] = [];
+  const creditInputs: EntityInput[] = [];
+  for (const peer of peers) {
+    const account = getAccountState(env, bootstrap.entityId, peer.entityId);
+    const canWrite =
+      !account?.pendingFrame && Number(account?.mempool?.length || 0) === 0;
+    if (
+      isCanonicalAccountOpener(bootstrap.entityId, peer.entityId) &&
+      !hasAccount(env, bootstrap.entityId, peer.entityId) &&
+      !hasQueuedOpenAccount(env, bootstrap.entityId, peer.entityId) &&
+      canWrite
+    ) {
+      openInputs.push({
+        entityId: bootstrap.entityId,
+        signerId: bootstrap.signerId,
+        entityTxs: [
+          {
+            type: 'openAccount',
+            data: {
+              targetEntityId: peer.entityId,
+              tokenId: HUB_MESH_TOKEN_ID,
+              creditAmount: getBootstrapCreditAmount(HUB_MESH_TOKEN_ID),
+            },
+          },
+          ...DEFAULT_ACCOUNT_TOKEN_IDS.slice(1).map(tokenId => ({
+            type: 'extendCredit' as const,
+            data: {
+              counterpartyEntityId: peer.entityId,
+              tokenId,
+              amount: getBootstrapCreditAmount(tokenId),
+            },
+          })),
+        ],
+      });
+    }
+    if (!account || !canWrite) continue;
+    const missingTokenIds = DEFAULT_ACCOUNT_TOKEN_IDS.filter(
+      tokenId =>
+        getCreditGrantedByEntity(account, bootstrap.entityId, tokenId) <
+        getBootstrapCreditAmount(tokenId),
+    );
+    if (missingTokenIds.length === 0) continue;
+    creditInputs.push({
+      entityId: bootstrap.entityId,
+      signerId: bootstrap.signerId,
+      entityTxs: missingTokenIds.map(tokenId => ({
+        type: 'extendCredit' as const,
+        data: {
+          counterpartyEntityId: peer.entityId,
+          tokenId,
+          amount: getBootstrapCreditAmount(tokenId),
+        },
+      })),
+    });
+  }
+  return { openInputs, creditInputs };
+};
+
+const planMeshBootstrapInputs = (
+  env: RuntimeState,
+  bootstrap: Pick<HubBootstrapEntry, 'entityId' | 'signerId'>,
+  hubBootstraps: HubBootstrapEntry[],
+  peers: VisibleHubProfile[],
+  supportPeerIdentities: SupportPeerIdentity[],
+): HubMeshInputPlan => {
+  const visibleProfiles = env.gossip?.getProfiles?.() || [];
+  const plans = [
+    planHubPeerInputs(env, bootstrap, peers),
+    ...hubBootstraps.map(owner =>
+      planSupportPeerInputs(
+        env,
+        owner,
+        supportPeerIdentities,
+        visibleProfiles,
+      ),
+    ),
+  ];
+  return {
+    openInputs: plans.flatMap(plan => plan.openInputs),
+    creditInputs: plans.flatMap(plan => plan.creditInputs),
+  };
+};
+
 const buildPairHealth = (env: RuntimeState, selfEntityId: string, peers: Array<{ name: string; entityId: string }>): HubPairHealth[] => {
   return peers.map(peer => {
     const account = getAccountState(env, selfEntityId, peer.entityId);
@@ -2290,107 +2461,13 @@ const run = async (): Promise<void> => {
       if (!directHubPeersReady(env, peers)) {
         return;
       }
-      const visibleProfiles = env.gossip?.getProfiles?.() || [];
-
-      const openInputs: EntityInput[] = [];
-      const creditInputs: EntityInput[] = [];
-
-      const collectSupportPeerInputs = (
-        owner: Pick<HubBootstrapEntry, 'entityId' | 'signerId' | 'jurisdictionName' | 'chainId' | 'depositoryAddress'>,
-      ): void => {
-        const supportPeerTokenIds = tokenIdsForHubJurisdiction(owner);
-        const [openTokenId = HUB_MESH_TOKEN_ID, ...extraCreditTokenIds] = supportPeerTokenIds;
-        const visibleSupportPeers = visibleDirectSupportPeers(
-          supportPeerIdentities,
-          visibleProfiles,
-          owner.entityId,
-          owner,
-        );
-        for (const peer of visibleSupportPeers) {
-          const localAccount = getAccountState(env, owner.entityId, peer.entityId);
-          const canWrite = !localAccount?.pendingFrame && Number(localAccount?.mempool?.length || 0) === 0;
-          if (
-            isCanonicalAccountOpener(owner.entityId, peer.entityId) &&
-            !hasAccount(env, owner.entityId, peer.entityId) &&
-            canWrite
-          ) {
-            if (hasQueuedOpenAccount(env, owner.entityId, peer.entityId)) continue;
-            openInputs.push({
-              entityId: owner.entityId,
-              signerId: owner.signerId,
-              entityTxs: [
-                {
-                  type: 'openAccount',
-                  data: { targetEntityId: peer.entityId, tokenId: openTokenId, creditAmount: getBootstrapCreditAmount(openTokenId) },
-                },
-                ...extraCreditTokenIds.map((tokenId) => ({
-                  type: 'extendCredit' as const,
-                  data: { counterpartyEntityId: peer.entityId, tokenId, amount: getBootstrapCreditAmount(tokenId) },
-                })),
-              ],
-            });
-            continue;
-          }
-          if (!localAccount || !canWrite) continue;
-          const missingTokenIds = supportPeerTokenIds.filter((tokenId) =>
-            getCreditGrantedByEntity(localAccount, owner.entityId, tokenId) < getBootstrapCreditAmount(tokenId),
-          );
-          if (missingTokenIds.length > 0) {
-            creditInputs.push({
-              entityId: owner.entityId,
-              signerId: owner.signerId,
-              entityTxs: missingTokenIds.map((tokenId) => ({
-                type: 'extendCredit' as const,
-                data: { counterpartyEntityId: peer.entityId, tokenId, amount: getBootstrapCreditAmount(tokenId) },
-              })),
-            });
-          }
-        }
-      };
-
-      for (const peer of peers) {
-        const localAccount = getAccountState(env, bootstrap.entityId, peer.entityId);
-        const canWrite = !localAccount?.pendingFrame && Number(localAccount?.mempool?.length || 0) === 0;
-        if (
-          isCanonicalAccountOpener(bootstrap.entityId, peer.entityId) &&
-          !hasAccount(env, bootstrap.entityId, peer.entityId) &&
-          !hasQueuedOpenAccount(env, bootstrap.entityId, peer.entityId) &&
-          canWrite
-        ) {
-          openInputs.push({
-            entityId: bootstrap.entityId,
-            signerId: bootstrap.signerId,
-            entityTxs: [
-              {
-                type: 'openAccount',
-                data: { targetEntityId: peer.entityId, tokenId: HUB_MESH_TOKEN_ID, creditAmount: getBootstrapCreditAmount(HUB_MESH_TOKEN_ID) },
-              },
-              ...DEFAULT_ACCOUNT_TOKEN_IDS.slice(1).map((tokenId) => ({
-                type: 'extendCredit' as const,
-                data: { counterpartyEntityId: peer.entityId, tokenId, amount: getBootstrapCreditAmount(tokenId) },
-              })),
-            ],
-          });
-        }
-        if (!localAccount || !canWrite) continue;
-        const missingTokenIds = DEFAULT_ACCOUNT_TOKEN_IDS.filter((tokenId) =>
-          getCreditGrantedByEntity(localAccount, bootstrap.entityId, tokenId) < getBootstrapCreditAmount(tokenId),
-        );
-        if (missingTokenIds.length > 0) {
-          creditInputs.push({
-            entityId: bootstrap.entityId,
-            signerId: bootstrap.signerId,
-            entityTxs: missingTokenIds.map((tokenId) => ({
-              type: 'extendCredit' as const,
-              data: { counterpartyEntityId: peer.entityId, tokenId, amount: getBootstrapCreditAmount(tokenId) },
-            })),
-          });
-        }
-      }
-
-      for (const hubBootstrap of hubBootstraps) {
-        collectSupportPeerInputs(hubBootstrap);
-      }
+      const { openInputs, creditInputs } = planMeshBootstrapInputs(
+        env,
+        bootstrap,
+        hubBootstraps,
+        peers,
+        supportPeerIdentities,
+      );
 
       if (openInputs.length > 0) {
         markMeshBootstrapProgress(`open-accounts:${openInputs.length}`);

@@ -718,7 +718,9 @@ describe('production startup wiring', () => {
     expect(hubNode).toContain('const peerJurisdiction = profile.metadata?.jurisdiction || identity;');
     expect(hubNode).toContain('if (!sameJurisdictionRef(peerJurisdiction, jurisdiction)) return null;');
     expect(hubNode).not.toContain('sameJurisdictionIdentityOrNameOnlyFallback');
-    expect(hubNode).toContain('for (const hubBootstrap of hubBootstraps)');
+    expect(hubNode).toContain(
+      '...hubBootstraps.map(owner =>\n      planSupportPeerInputs(',
+    );
     expect(hubNode).not.toContain('if (!runtimeId || !openRuntimeIds.has(runtimeId)) return null;');
     expect(hubNode).toContain('entityAdapter = getEntityJAdapter(env, entityId);');
     expect(hubNode).toContain("if (!message.startsWith('ENTITY_JURISDICTION_MISSING')) throw error;");
@@ -2278,18 +2280,34 @@ describe('production startup wiring', () => {
     expect(hubNode).toContain('const tokenIdsForHubJurisdiction = (');
     expect(hubNode).toContain('const tokenCatalogForHubJurisdiction = (');
 
-    const collectSupportStart = hubNode.indexOf('const collectSupportPeerInputs = (');
-    const hubPeerStart = hubNode.indexOf('for (const peer of peers)', collectSupportStart);
-    expect(collectSupportStart).toBeGreaterThan(0);
-    expect(hubPeerStart).toBeGreaterThan(collectSupportStart);
-    const collectSupportPeerInputs = hubNode.slice(collectSupportStart, hubPeerStart);
-    expect(collectSupportPeerInputs).toContain('const supportPeerTokenIds = tokenIdsForHubJurisdiction(owner);');
-    expect(collectSupportPeerInputs).toContain(
-      'const [openTokenId = HUB_MESH_TOKEN_ID, ...extraCreditTokenIds] = supportPeerTokenIds;',
+    const planSupportStart = hubNode.indexOf(
+      'const planSupportPeerInputs = (',
     );
-    expect(collectSupportPeerInputs).toContain('...extraCreditTokenIds.map((tokenId) => ({');
-    expect(collectSupportPeerInputs).toContain('const missingTokenIds = supportPeerTokenIds.filter((tokenId) =>');
-    expect(collectSupportPeerInputs).not.toContain('DEFAULT_ACCOUNT_TOKEN_IDS');
+    const planHubStart = hubNode.indexOf(
+      'const planHubPeerInputs = (',
+      planSupportStart,
+    );
+    expect(planSupportStart).toBeGreaterThan(0);
+    expect(planHubStart).toBeGreaterThan(planSupportStart);
+    const planSupportPeerInputs = hubNode.slice(
+      planSupportStart,
+      planHubStart,
+    );
+    expect(planSupportPeerInputs).toContain(
+      'const tokenIds = tokenIdsForHubJurisdiction(owner);',
+    );
+    expect(planSupportPeerInputs).toContain(
+      'const [openTokenId = HUB_MESH_TOKEN_ID, ...extraTokenIds] = tokenIds;',
+    );
+    expect(planSupportPeerInputs).toContain(
+      '...extraTokenIds.map(tokenId => ({',
+    );
+    expect(planSupportPeerInputs).toContain(
+      'const missingTokenIds = tokenIds.filter(',
+    );
+    expect(planSupportPeerInputs).not.toContain(
+      'DEFAULT_ACCOUNT_TOKEN_IDS',
+    );
 
     const reserveStart = hubNode.indexOf('const getReserveHealth = (');
     const supportPeerReserveEnd = hubNode.indexOf('const getEntityJurisdictionName = (');
