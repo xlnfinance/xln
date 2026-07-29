@@ -91,7 +91,6 @@ import type { ApplyEntityTxsInOrderContext } from './frame-application-types';
 import { applyEntityTxReturnedEffects } from './frame-tx-effects';
 
 import {
-  admitOrderbookOfferForMatching,
   buildCrossJurisdictionFillNoticeOutput,
   drainCommittedCrossJurisdictionCancelAcks,
   drainPendingCrossJurisdictionFillAcks,
@@ -102,6 +101,7 @@ import {
   stashPendingCrossJurisdictionFillAck,
 } from './shared';
 import { buildConsumptionOutputIdentity } from './consumption-output';
+import { admitOrderbookOfferForMatching } from './orderbook-admission';
 import { isSelfBoardAuthorityTransitionFrame } from './proposal-policy';
 
 const recordFrameAccountChange = (
