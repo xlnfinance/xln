@@ -106,7 +106,7 @@ test.describe('runtime ingress debug loop guards', () => {
     for (const message of [
       /REJECT_ENTITY_INPUT_UNKNOWN_ENTITY/,
       /apply_input\.failed .*RUNTIME_ENTITY_INPUT_UNKNOWN_TARGET/,
-      /remote_entity_input\.discarded/,
+      /entity_input\.discarded/,
     ]) {
       allowBrowserIssue({ type: 'console', severity: 'error', message });
     }

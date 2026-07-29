@@ -52,7 +52,7 @@ export const discardRejectedEntityInput = (
     txTypes: rejected.flatMap(candidate => candidate.entityTxs?.map(tx => tx.type) ?? []),
     cause: error.cause instanceof Error ? error.cause.message : String(error.cause),
   };
-  if (!quietLogs) discardLog.warn('remote_entity_input.discarded', payload);
+  if (!quietLogs) discardLog.info('entity_input.discarded', payload);
   return remaining;
 };
 
