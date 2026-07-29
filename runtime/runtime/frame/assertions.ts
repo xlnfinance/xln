@@ -1,7 +1,7 @@
-import type { AccountFrame, AccountState, RuntimeState } from '../types';
-import { validateEntityState } from '../validation-utils';
-import { computeFrameHash } from '../account/consensus/index';
-import { assertAccountFrameDeltaIntegrity } from '../account/frame';
+import type { AccountFrame, AccountState, RuntimeState } from '../../types';
+import { validateEntityState } from '../../validation-utils';
+import { computeFrameHash } from '../../account/consensus/index';
+import { assertAccountFrameDeltaIntegrity } from '../../account/frame';
 
 const formatAccountLabel = (replicaKey: string, counterpartyId: string): string =>
   `${replicaKey.slice(-4)}↔${counterpartyId.slice(-4)}`;
@@ -23,13 +23,15 @@ const assertFrameHash = async (frame: AccountFrame, label: string): Promise<void
 const assertAccountFrames = async (
   account: AccountState,
   replicaKey: string,
-  counterpartyId: string
+  counterpartyId: string,
 ): Promise<void> => {
   const label = formatAccountLabel(replicaKey, counterpartyId);
   const { currentFrame } = account;
 
   if (currentFrame.height !== account.currentHeight) {
-    throw new Error(`[STRICT] ${label}: currentFrame.height ${currentFrame.height} != currentHeight ${account.currentHeight}`);
+    throw new Error(
+      `[STRICT] ${label}: currentFrame.height ${currentFrame.height} != currentHeight ${account.currentHeight}`,
+    );
   }
   // NOTE: proofHeader.nextProofNonce is the unified on-chain nonce (not tied to frame height).
   // Frame height tracking is via account.currentHeight only.

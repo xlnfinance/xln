@@ -30,10 +30,9 @@ export type CommittedRuntimeEffects = {
 };
 
 const countRuntimeInfraEffects = (input: RuntimeInput | undefined): number =>
-  (input?.runtimeTxs ?? []).filter(tx =>
-    tx.type === 'importJ' ||
-    tx.type === 'completeImportJ' ||
-    tx.type === 'importReplica').length;
+  (input?.runtimeTxs ?? []).filter(
+    tx => tx.type === 'importJ' || tx.type === 'completeImportJ' || tx.type === 'importReplica',
+  ).length;
 
 export const runCommittedRuntimeEffects = async (
   env: RuntimeState,
@@ -66,21 +65,10 @@ export const runCommittedRuntimeEffects = async (
 
   finalizeCommittedReceiptDeliveries(env, frame);
   if (effects.queuedJSubmitRetries.length > 0) {
-    deps.enqueueRuntimeInputs(
-      env,
-      undefined,
-      effects.queuedJSubmitRetries,
-      undefined,
-      env.timestamp,
-    );
+    deps.enqueueRuntimeInputs(env, undefined, effects.queuedJSubmitRetries, undefined, env.timestamp);
   }
 
-  await dispatchCommittedEntityOutputs(
-    env,
-    effects.changedEntityIds,
-    effects.outputPlan,
-    effects.routing,
-  );
+  await dispatchCommittedEntityOutputs(env, effects.changedEntityIds, effects.outputPlan, effects.routing);
   profile.mark('profileAnnounce');
   profile.metrics.pendingNetworkAfter = env.pendingNetworkOutputs?.length ?? 0;
   profile.metrics.deferredNetworkMeta = state.deferredNetworkMeta?.size ?? 0;
@@ -96,7 +84,7 @@ export const runCommittedRuntimeEffects = async (
 
   state.lastFrameAt = getWallClockMs();
   if (env.strictScenario) {
-    const { assertRuntimeStateStrict } = await import('../../protocol/assertions');
+    const { assertRuntimeStateStrict } = await import('./assertions');
     await assertRuntimeStateStrict(env);
     profile.mark('strict');
   }
