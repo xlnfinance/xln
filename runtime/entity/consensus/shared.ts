@@ -67,7 +67,7 @@ import type {
   ValidatorEntityFrameExecution,
 } from '../../types';
 import { log } from '../../utils';
-import { validateProposedEntityFrame } from '../../validation-utils';
+import { validateProposedEntityFrame } from './frame-validation';
 import {
   applyConsumptionOutput,
   createConsumptionProof,

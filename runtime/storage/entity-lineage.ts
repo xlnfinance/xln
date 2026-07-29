@@ -32,7 +32,7 @@ import type {
   ProposedEntityFrame,
 } from '../types';
 import { validateConsensusConfig } from '../entity/consensus/config-validation';
-import { validateProposedEntityFrame } from '../validation-utils';
+import { validateProposedEntityFrame } from '../entity/consensus/frame-validation';
 import { normalizeEntityId } from './keys';
 import type { StorageReplicaLookup } from './types';
 

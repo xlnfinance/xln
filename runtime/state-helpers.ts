@@ -20,7 +20,7 @@ import { cloneDisputeArgumentSnapshot } from './protocol/dispute/argument-snapsh
 import type { ProofBodyStruct } from '../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
 import { cloneProofBodyStruct } from './protocol/dispute/proof-body';
 import { validateEntityState } from './entity/state-validation';
-import { validateEntityReplica } from './validation-utils';
+import { validateEntityReplica } from './entity/replica-validation';
 import { safeStringify } from './protocol/serialization';
 import {
   cloneIsolatedEntityInput,

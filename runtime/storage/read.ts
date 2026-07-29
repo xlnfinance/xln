@@ -75,7 +75,7 @@ import {
   type AccountJClaimAccumulatorState,
 } from '../account/j-claim-accumulator';
 import { getAccountJClaimNodeStore } from '../account/j-claim-store';
-import { validateEntityReplica } from '../validation-utils';
+import { validateEntityReplica } from '../entity/replica-validation';
 import {
   assertStorageAccountDocBinding,
   assertStorageEntityDocBinding,

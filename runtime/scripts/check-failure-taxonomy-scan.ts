@@ -104,10 +104,6 @@ const readText = (path: string): string => {
       'runtime/__tests__/radapter-part-2.test.ts',
       'runtime/__tests__/radapter-part-3.test.ts',
     ],
-    'runtime/validation-utils.ts': [
-      'runtime/validation-utils.ts',
-      'runtime/account/delta-validation.ts',
-    ],
   };
   return (splitSources[path] ?? [path]).map(file => readFileSync(file, 'utf8')).join('\n');
 };
@@ -582,7 +578,7 @@ for (const [path, markers] of [
   ['runtime/entity/tx/handlers/settle.ts', ["createStructuredLogger('entity.settle')"]],
   ['runtime/entity/tx/j-events-debt.ts', ["createStructuredLogger('entity.debt')", 'ledger.divergence']],
   ['runtime/account/utils.ts', ["logDebug('ACCOUNT_STATE'", 'deriveDelta.return']],
-  ['runtime/validation-utils.ts', ['ACCOUNT_DELTAS_MISSING', 'ACCOUNT_DELTAS_INVALID_TOKEN_ID']],
+  ['runtime/account/delta-validation.ts', ['ACCOUNT_DELTAS_MISSING', 'ACCOUNT_DELTAS_INVALID_TOKEN_ID']],
   ['runtime/runtime.ts', ["createStructuredLogger('runtime')", 'apply.profile', 'process.profile', 'joutbox.incoming']],
   [
     'runtime/runtime/infra.ts',
@@ -850,9 +846,14 @@ const debtEventsPath = 'runtime/entity/tx/j-events-debt.ts';
 const debtEvents = readText(debtEventsPath);
 assertNotIncludes(debtEvents, 'console.', debtEventsPath);
 
-const validationUtilsPath = 'runtime/validation-utils.ts';
-const validationUtils = readText(validationUtilsPath);
-assertNotIncludes(validationUtils, 'console.', validationUtilsPath);
+for (const validationPath of [
+  'runtime/account/state-validation.ts',
+  'runtime/entity/state-validation.ts',
+  'runtime/entity/replica-validation.ts',
+  'runtime/runtime/routing-validation.ts',
+]) {
+  assertNotIncludes(readText(validationPath), 'console.', validationPath);
+}
 
 for (const marker of [
   'failureKind: EntityInputApplyFailureKind',

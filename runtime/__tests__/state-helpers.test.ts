@@ -5,7 +5,7 @@ import { cloneAccountState, cloneEntityReplica, cloneEntityState } from '../stat
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
 import { buildCanonicalEntityReplicaSnapshot } from '../storage/wal/snapshot';
 import { validateConsensusConfig } from '../entity/consensus/config-validation';
-import { validateEntityReplica } from '../validation-utils';
+import { validateEntityReplica } from '../entity/replica-validation';
 
 const makeCrossJurisdictionRoute = () => ({
   orderId: 'order-1',

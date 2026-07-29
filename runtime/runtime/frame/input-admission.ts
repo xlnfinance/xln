@@ -1,6 +1,6 @@
 import { createStructuredLogger, logError, shortId } from '../../infra/logger';
 import { normalizeRuntimeId } from '../../networking/runtime-id';
-import { decodeRoutedEntityInput } from '../../validation-utils';
+import { decodeRoutedEntityInput } from '../routing-validation';
 import { validateJInputs } from '../../storage/wal/runtime-machine-schema/j';
 import type {
   RuntimeState,

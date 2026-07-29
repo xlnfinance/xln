@@ -17,7 +17,6 @@ const ROOT_FILE_DEBT = new Set([
   'runtime/state-helpers.ts',
   'runtime/types.ts',
   'runtime/utils.ts',
-  'runtime/validation-utils.ts',
   'runtime/xln-api-guard.ts',
   'runtime/xln-api.ts',
 ]);

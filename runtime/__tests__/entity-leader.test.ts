@@ -51,7 +51,8 @@ import type {
   ValidatorJHistory,
 } from '../types';
 import { validateConsensusConfig } from '../entity/consensus/config-validation';
-import { decodeRoutedEntityInput, validateEntityReplica } from '../validation-utils';
+import { decodeRoutedEntityInput } from '../runtime/routing-validation';
+import { validateEntityReplica } from '../entity/replica-validation';
 
 const leaderTestJurisdiction = {
   name: 'entity-leader-test',

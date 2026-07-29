@@ -38,7 +38,7 @@ import {
 } from './input-validation';
 import { MAX_PENDING_NETWORK_OUTPUTS, sendEntityInputWithRouting } from './output-routing';
 import { normalizeDbNamespace } from '../storage/runtime-dbs';
-import { decodeRoutedEntityInput } from '../validation-utils';
+import { decodeRoutedEntityInput } from './routing-validation';
 import type {
   EntityInput,
   RuntimeState,

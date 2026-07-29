@@ -1,7 +1,7 @@
 import type { RoutedEntityInput, RuntimeInput } from '../../../types';
 import { validateRuntimeInputEnvelope } from '../../../protocol/boundary-validation';
 import { cloneIsolatedRuntimeSnapshot } from '../../../protocol/runtime-input-clone';
-import { decodeRoutedEntityInput } from '../../../validation-utils';
+import { decodeRoutedEntityInput } from '../../../runtime/routing-validation';
 import { validateBrowserVmState } from './browser';
 import { validateEntityTxs } from './entity-tx';
 import { validateJInputs, validateJReplicas } from './j';

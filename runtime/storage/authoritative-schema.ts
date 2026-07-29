@@ -3,7 +3,7 @@ import {
   validateRuntimeInputEnvelope,
 } from '../protocol/boundary-validation';
 import type { RoutedEntityInput } from '../types';
-import { decodeRoutedEntityInput } from '../validation-utils';
+import { decodeRoutedEntityInput } from '../runtime/routing-validation';
 import { assertStorageSchemaVersion, STORAGE_FRAME_FORMAT } from './keys';
 import type {
   StorageDiffRecord,
