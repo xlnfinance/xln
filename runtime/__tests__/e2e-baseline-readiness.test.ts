@@ -139,10 +139,10 @@ describe('e2e baseline readiness', () => {
 
   test('orchestrator health exposes pending reset capabilities while imports require successful activation', () => {
     const orchestrator = readFileSync('runtime/orchestrator/orchestrator.ts', 'utf8');
-    expect(orchestrator).toContain('const healthResetOptions = resolveHealthResetOptions(');
-    expect(orchestrator).toContain('resolveResetCapabilityHealth(healthResetOptions');
+    expect(orchestrator).toContain('const resetOptions = resolveHealthResetOptions(');
+    expect(orchestrator).toContain('resolveResetCapabilityHealth(resetOptions');
     expect(orchestrator).toContain('mmEnabled: capabilityHealth.marketMakerEnabled');
-    expect(orchestrator).toContain('enabled: capabilityHealth.custodyEnabled');
+    expect(orchestrator).toContain('capabilityHealth.custodyEnabled,');
     expect(orchestrator).toContain('activeResetOptions = resolveActiveResetOptions(configuredResetOptions, options)');
     expect(orchestrator).toContain('if (activeResetOptions.enableMarketMaker && marketMakerRuntimeId)');
     expect(orchestrator).toContain('if (activeResetOptions.enableCustody && custodySupport?.daemonAuthSeed');

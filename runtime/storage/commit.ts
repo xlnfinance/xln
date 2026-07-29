@@ -78,6 +78,7 @@ const resolveAuthoritativeFrameCommitStatus = async (
   deps: RuntimeStorageApiDeps,
   env: RuntimeState,
   expectedInput: RuntimeInput | undefined,
+  pendingRuntimeInput: RuntimeInput | undefined,
 ): Promise<RuntimeFrameCommitStatus> => {
   if (!(await deps.tryOpenRuntimeWalDb(env))) return 'unknown';
   const walDb = deps.getRuntimeWalDb(env);
@@ -96,9 +97,10 @@ const resolveAuthoritativeFrameCommitStatus = async (
       expectedInputValue,
       buildDurableRuntimeMachineSnapshot(env, {
         pendingNetworkOutputs: env.pendingNetworkOutputs ?? [],
+        ...(pendingRuntimeInput ? { runtimeInput: pendingRuntimeInput } : {}),
         excludePersistedHistoryRecords: true,
       }),
-      computeCanonicalStateHashFromEnv(env),
+      computeCanonicalStateHashFromEnv(env, pendingRuntimeInput),
     );
   }
   if (!head) return 'unknown';
@@ -112,6 +114,7 @@ export const saveRuntimeEnvironment = async (
   env: RuntimeState,
   currentFrameInput?: RuntimeInput,
   currentFrameOutputs?: RoutedEntityInput[],
+  pendingRuntimeInput?: RuntimeInput,
 ): Promise<{
   staleWriterStopped: boolean;
   persistencePerfMs?: Awaited<
@@ -149,6 +152,9 @@ export const saveRuntimeEnvironment = async (
           ...(currentFrameOutputs === undefined
             ? {}
             : { currentFrameOutputs }),
+          ...(pendingRuntimeInput === undefined
+            ? {}
+            : { pendingRuntimeInput }),
           onPersistenceProgress: markStorageProgress,
           onPersistenceBoundary: boundary =>
             markStorageProgress(`boundary:${boundary}`),
@@ -163,6 +169,7 @@ export const saveRuntimeEnvironment = async (
           deps,
           env,
           currentFrameInput,
+          pendingRuntimeInput,
         );
       } catch (probeError) {
         const writeFailure =
@@ -231,11 +238,13 @@ export const createRuntimeStorageCommitApi = (
     env: RuntimeState,
     currentFrameInput?: RuntimeInput,
     currentFrameOutputs?: RoutedEntityInput[],
+    pendingRuntimeInput?: RuntimeInput,
   ) =>
     saveRuntimeEnvironment(
       deps,
       env,
       currentFrameInput,
       currentFrameOutputs,
+      pendingRuntimeInput,
     ),
 });

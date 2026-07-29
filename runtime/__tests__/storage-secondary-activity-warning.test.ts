@@ -11,7 +11,8 @@ import {
 } from '../runtime';
 import { deriveSignerAddressSync } from '../account/crypto';
 import { encodeBuffer } from '../storage/codec';
-import { computeStorageFrameHash, computeStorageReplicaMetaDigest } from '../storage/hashes';
+import { computeStorageFrameHash } from '../storage/hashes';
+import { computeStorageReplicaMetaDigest } from '../storage/replica-meta-digest';
 import {
   KEY_HEAD,
   STORAGE_SCHEMA_VERSION,

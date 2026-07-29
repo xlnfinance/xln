@@ -21,7 +21,6 @@ import {
 import { generateLazyEntityId } from '../entity/factory';
 import { readHistoryViewRuntimeActivity } from '../storage/history-view';
 import { keyHistoryViewRuntimeActivity } from '../storage/keys';
-import { buildDurableRuntimeMachineSnapshot } from '../storage/wal/snapshot';
 import { readFrameReceipts } from '../server/rpc-ws';
 
 const recipientId = `0x${'bb'.repeat(32)}`;
@@ -131,7 +130,7 @@ test('activity remains queryable while snapshots retain the authoritative R-fram
             },
           }]
         : [];
-      await saveEnvToDB(env, runtimeInput, [], buildDurableRuntimeMachineSnapshot(env));
+      await saveEnvToDB(env, runtimeInput, []);
     }
 
     expect(await readPersistedFrameJournal(env, 3)).not.toBeNull();

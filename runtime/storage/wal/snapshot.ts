@@ -302,6 +302,7 @@ export const buildDurableRuntimeMachineSnapshot = (
   env: RuntimeState,
   options?: {
     pendingNetworkOutputs?: RoutedEntityInput[];
+    runtimeInput?: RuntimeInput;
     includeIngressWorkingState?: boolean;
     excludePersistedHistoryRecords?: boolean;
   },
@@ -316,7 +317,9 @@ export const buildDurableRuntimeMachineSnapshot = (
     ...(env.browserVMState ? { browserVMState: structuredClone(env.browserVMState) } : {}),
     ...(env.runtimeConfig ? { runtimeConfig: structuredClone(env.runtimeConfig) } : {}),
     ...(runtimeState ? { runtimeState } : {}),
-    runtimeInput: buildDurableRuntimeMempool(env.runtimeMempool),
+    runtimeInput: buildDurableRuntimeMempool(
+      options?.runtimeInput ?? env.runtimeMempool,
+    ),
     ...(env.pendingOutputs?.length ? { pendingOutputs: cloneRuntimeOutputs(env.pendingOutputs) } : {}),
     ...(env.networkInbox?.length ? { networkInbox: cloneRuntimeOutputs(env.networkInbox) } : {}),
     ...((options?.pendingNetworkOutputs ?? env.pendingNetworkOutputs)?.length
@@ -351,6 +354,7 @@ export const buildReplayVerifiableRuntimeMachineSnapshot = (
   env: RuntimeState,
   options?: {
     pendingNetworkOutputs?: RoutedEntityInput[];
+    runtimeInput?: RuntimeInput;
     includeIngressWorkingState?: boolean;
     excludePersistedHistoryRecords?: boolean;
   },

@@ -4,7 +4,10 @@ import { computeAccountStateRoot } from '../account/state-root';
 import { handleJEventClaim } from '../account/tx/handlers/j-event-claim';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
 import { createAccountJClaimSession } from '../account/j-claim-session';
-import { cacheCommittedAccountJClaimNodeChanges } from '../account/j-claim-store';
+import {
+  cacheCommittedAccountJClaimNodeChanges,
+  getAccountJClaimNodeStore,
+} from '../account/j-claim-store';
 import { prepareAccountJClaimTx } from '../account/j-claim-transition';
 import { mergeJEventClaimOps } from '../entity/tx/j-events-account';
 import type { JEventAccountTx } from '../entity/tx/j-events-types';

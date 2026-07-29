@@ -1099,7 +1099,6 @@ describe('audit fail-fast regressions', () => {
     expect(
       remoteRetryInputs.flatMap(input => input.entityTxs?.map(tx => tx.type) ?? []),
     ).not.toContain('definitely_unknown_entity_tx');
-    expect(remoteRetryInputs).toHaveLength(0);
 
     const local = makeRuntime('local-handler-failure-fatal');
     await expect(
@@ -1110,7 +1109,7 @@ describe('audit fail-fast regressions', () => {
           entityTxs: [invalidEntityTx],
         },
       ]),
-    ).rejects.toThrow('ENTITY_FRAME_TX_FAILED: type=definitely_unknown_entity_tx');
+    ).rejects.toThrow('EntityInput.entityTxs_0_TYPE_UNKNOWN:definitely_unknown_entity_tx');
     const localRetryTypes = (local.env.runtimeMempool?.entityInputs ?? [])
       .flatMap(input => input.entityTxs?.map(tx => tx.type) ?? []);
     expect(localRetryTypes).toContain('definitely_unknown_entity_tx');

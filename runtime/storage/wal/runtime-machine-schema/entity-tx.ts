@@ -1,6 +1,7 @@
 import { assertEntityProposalAction } from '../../../entity/authorization';
 import { normalizeSignedEntityCommand } from '../../../entity/command-codec';
 import { normalizeConsensusOutputBoardAuthority } from '../../../entity/consensus/output-certification';
+import { requireKnownEntityTxType } from '../../../entity/tx/catalog';
 import type { EntityTx } from '../../../types/entity-tx';
 import type { ProposalAction } from '../../../entity/types';
 import { assertExactMultiRecipientCiphertextSchema } from '../../../protocol/htlc/multi-recipient-schema';
@@ -15,35 +16,6 @@ import {
 } from './primitives';
 
 const ENTITY_TX_NESTING_LIMIT = 16;
-
-const ENTITY_TX_TYPES = [
-  'accountInput', 'admitCrossJurisdictionBookOrder', 'applyCrossJurisdictionBookProgress',
-  'cancelPull', 'certifyProfile', 'chat', 'chatMessage',
-  'consensusOutput', 'crossJurisdictionBookOrderRemoved', 'crossJurisdictionFillNotice',
-  'crossJurisdictionSalvage', 'crossJurisdictionSettled',
-  'crossPullClose', 'directPayment', 'disputeFinalize', 'disputeStart', 'e2r',
-  'entityCommand', 'entityProviderCancelAction', 'entityProviderReleaseControlShares',
-  'entityProviderTransfer', 'extendCredit', 'hashlockPayment', 'htlcOnionAdvance', 'htlcPayment',
-  'initOrderbookExt', 'j_abort_sent_batch', 'j_broadcast', 'j_clear_batch', 'j_event',
-  'j_rebroadcast', 'lendingBorrow', 'lendingClosePosition',
-  'lendingOffer', 'lendingRepay', 'manualHtlcLock', 'mintReserves', 'openAccount',
-  'orderbookSweepCrossJurisdiction', 'placeSwapOffer',
-  'prepareCrossJurisdictionSwap', 'prepareDispute', 'processHtlcTimeouts', 'profile-update',
-  'propose', 'proposeCancelSwap', 'pullCancelExpired', 'pullLock', 'r2c', 'r2e', 'r2r',
-  'registerCrossJurisdictionSwap', 'reissueCertifiedOutput', 'removeCrossJurisdictionBookOrder',
-  'reopenDisputedAccount', 'requestCollateral', 'requestCrossJurisdictionClear',
-  'materializeCrossJurisdictionClear', 'materializeCrossJurisdictionSwap',
-  'resolveHtlcLock', 'resolvePull', 'resolveSwap',
-  'runtimeOutput', 'scheduledWake', 'setHubConfig', 'setRebalancePolicy',
-  'settle_approve', 'settle_execute', 'settle_propose', 'settle_reject', 'settle_update', 'vote',
-] as const satisfies readonly EntityTx['type'][];
-
-type MissingEntityTxType = Exclude<EntityTx['type'], (typeof ENTITY_TX_TYPES)[number]>;
-type AssertNoMissingEntityTxType = MissingEntityTxType extends never ? true : never;
-const ENTITY_TX_TYPES_ARE_EXHAUSTIVE: AssertNoMissingEntityTxType = true;
-void ENTITY_TX_TYPES_ARE_EXHAUSTIVE;
-
-const KNOWN_ENTITY_TX_TYPES = new Set<string>(ENTITY_TX_TYPES);
 
 const validateOrigin = (value: unknown, code: string): void => {
   const origin = requireBoundaryRecord(value, code);
@@ -294,8 +266,7 @@ const validateEntityTxRecord = (value: unknown, code: string, depth: number): En
   if (depth > ENTITY_TX_NESTING_LIMIT) throw new Error(`${code}_NESTING_LIMIT`);
   const tx = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(tx, ['type', 'data'], [], `${code}_FIELDS`);
-  const type = requireString(tx['type'], `${code}_TYPE`);
-  if (!KNOWN_ENTITY_TX_TYPES.has(type)) throw new Error(`${code}_TYPE_UNKNOWN:${type}`);
+  const type = requireKnownEntityTxType(tx, code);
   requireBoundaryRecord(tx['data'], `${code}_DATA`);
   if (type === 'entityCommand') validateEntityCommand(tx['data'], `${code}_DATA`, depth);
   else if (type === 'propose') validateProposal(tx['data'], `${code}_DATA`, depth);

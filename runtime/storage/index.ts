@@ -769,6 +769,7 @@ export type StorageFrameSaveOptions = {
   stateHash?: string;
   currentFrameInput?: RuntimeInput;
   currentFrameOutputs?: RoutedEntityInput[];
+  pendingRuntimeInput?: RuntimeInput;
   historyRecords?: RuntimeHistoryRecord[];
   tryOpenDb: (env: RuntimeState) => Promise<boolean>;
   getRuntimeDb: (env: RuntimeState) => RuntimeDbLike;
@@ -1206,11 +1207,17 @@ const prepareStorageStateCommitments = async (
   const runtimeMachineForPostState =
     buildReplayVerifiableRuntimeMachineSnapshot(options.env, {
       pendingNetworkOutputs,
+      ...(options.pendingRuntimeInput
+        ? { runtimeInput: options.pendingRuntimeInput }
+        : {}),
       excludePersistedHistoryRecords: true,
     });
   const runtimeMachine = shouldMaterialize || canonicalHashDue
     ? buildDurableRuntimeMachineSnapshot(options.env, {
         pendingNetworkOutputs,
+        ...(options.pendingRuntimeInput
+          ? { runtimeInput: options.pendingRuntimeInput }
+          : {}),
         excludePersistedHistoryRecords: true,
       })
     : undefined;
@@ -1330,7 +1337,9 @@ const buildStorageFrameRecordPlan = (
   const touchedBookEntities =
     [...frameTouched.touchedBookEntities.values()].sort();
   const durablePendingInput =
-    buildDurableRuntimeMempool(options.env.runtimeMempool);
+    buildDurableRuntimeMempool(
+      options.pendingRuntimeInput ?? options.env.runtimeMempool,
+    );
   const hasPendingInput =
     durablePendingInput.runtimeTxs.length > 0 ||
     durablePendingInput.entityInputs.length > 0 ||

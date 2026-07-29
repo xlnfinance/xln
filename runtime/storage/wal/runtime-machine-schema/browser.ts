@@ -17,10 +17,10 @@ const validateNumberStringTuple = (value: unknown, code: string): void => {
 const validateReceipt = (value: unknown, code: string): void => {
   const receipt = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(receipt, [
-    'transactionHash', 'blockNumber', 'blockHash', 'from', 'to', 'contractAddress',
+    'transactionHash', 'data', 'blockNumber', 'blockHash', 'from', 'to', 'contractAddress',
     'status', 'type', 'transactionIndex', 'cumulativeGasUsed', 'logsBloom', 'logs',
   ], [], `${code}_FIELDS`);
-  for (const field of ['transactionHash', 'blockHash', 'from', 'cumulativeGasUsed', 'logsBloom']) {
+  for (const field of ['transactionHash', 'data', 'blockHash', 'from', 'cumulativeGasUsed', 'logsBloom']) {
     requireString(receipt[field], `${code}_${field.toUpperCase()}`);
   }
   for (const field of ['to', 'contractAddress']) {

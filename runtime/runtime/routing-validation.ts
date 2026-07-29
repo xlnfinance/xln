@@ -8,6 +8,7 @@ import {
   validateJPrefixAttestation,
 } from '../entity/consensus/j-prefix-validation';
 import { validateProposedEntityFrame } from '../entity/consensus/frame-validation';
+import { requireKnownEntityTxType } from '../entity/tx/catalog';
 
 const assertEntityMessagePayload = (
   input: Record<string, unknown>,
@@ -25,6 +26,11 @@ const assertEntityMessagePayload = (
   }
   if (input['entityTxs'] !== undefined && !Array.isArray(input['entityTxs'])) {
     throw new Error('FINANCIAL-SAFETY: entityTxs must be array');
+  }
+  if (input['entityTxs'] !== undefined) {
+    input['entityTxs'].forEach((tx, index) => {
+      requireKnownEntityTxType(tx, `EntityInput.entityTxs_${index}`);
+    });
   }
   if (
     input['leaderTimeoutVote'] !== undefined &&

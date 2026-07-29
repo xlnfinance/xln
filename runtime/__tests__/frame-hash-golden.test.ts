@@ -19,9 +19,12 @@ import type { EntityTx } from '../types/entity-tx';
 const ACCOUNT_FRAME_GOLDEN_HASH = '0x15cd826cf4c3d968ec506d1ec758c7529963079ca1fcaeb4b29a0fa1d4c0c7b0';
 // Independently calculated with a standalone tagged-tuple reference encoder.
 // Keep these literal so changing the production codec cannot bless itself.
-const ENTITY_STATE_ROOT_GOLDEN_HASH = '0xd5737972115dcc26af6066c6dde7dc951eac8a431e84404f436efa6991602b07';
+// Intentional testnet reset: Entity Accounts are committed through the
+// persistent radix-Merkle section. Every projected AccountReplica leaf remains
+// bound, while unchanged accounts no longer require O(total accounts) hashing.
+const ENTITY_STATE_ROOT_GOLDEN_HASH = '0x71ad20cd92f748524f8a14f447a24518465511fb6bfbc95d153d0181230b6509';
 const ENTITY_AUTHORITY_ROOT_GOLDEN_HASH = '0xa7c4fd7139d47d2567c6a97c7d7d06bc6d60fc4481acbe8155584f3573b520bd';
-const ENTITY_FRAME_GOLDEN_HASH = '0x4149450b4e8c93289fad414d4b4f7a7d418f75de4be23b08b891b72ef779ecd9';
+const ENTITY_FRAME_GOLDEN_HASH = '0x26f4b8223b76f72b13abadead0e98187d1f0cbd00b4215dc9fc310b5bcaa6c6d';
 
 const makeAccountFrameFixture = (): AccountFrame => ({
   height: 7,

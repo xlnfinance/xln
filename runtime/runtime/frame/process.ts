@@ -17,7 +17,11 @@ import { getWallClockMs } from '../../infra/time';
 import { clearPendingAuditEvents, flushPendingAuditEvents } from '../env-events';
 import { acquireRuntimeFrameWriter, assertRuntimeWriterAcceptingIngress } from './writer-lock';
 import { createFrameExecutionState, type FrameExecutionState } from './execution-state';
-import { createRuntimeFrameTransaction, publishRuntimeFrameTransaction } from './transaction';
+import {
+  createRuntimeFrameTransaction,
+  previewPublishedRuntimeInput,
+  publishRuntimeFrameTransaction,
+} from './transaction';
 import { createRuntimeProcessProfile, type RuntimeProcessProfile } from './process-profile';
 import { restoreUndurableRuntimeInput } from './input-recovery';
 import { startRuntimeFrame } from './start';
@@ -140,6 +144,7 @@ type RuntimeFrameCandidate = {
   state: RuntimeLifecycleState;
   mempool: RuntimeInput;
   runtimeInput: RuntimeInput;
+  frameTimestamp: number;
   mempoolQueuedAt: number | undefined;
   quietRuntimeLogs: boolean;
 };
@@ -173,16 +178,15 @@ const buildRuntimeFrameInput = (
   };
 };
 
-const advanceRuntimeFrameTimestamp = (
+const resolveRuntimeFrameTimestamp = (
   env: RuntimeState,
   mempoolQueuedAt: number | undefined,
-): void => {
+): number => {
   if (env.scenarioMode) {
-    env.timestamp = requireBoundaryInteger(
+    return requireBoundaryInteger(
       requireBoundaryInteger(env.timestamp, 'RUNTIME_TIMESTAMP_INVALID') + 100,
       'RUNTIME_TIMESTAMP_OVERFLOW',
     );
-    return;
   }
   const liveNow = getWallClockMs();
   const previousTimestamp = requireBoundaryInteger(env.timestamp, 'RUNTIME_TIMESTAMP_INVALID');
@@ -193,7 +197,7 @@ const advanceRuntimeFrameTimestamp = (
     mempoolQueuedAt ?? liveNow,
     'RUNTIME_MEMPOOL_TIMESTAMP_INVALID',
   );
-  env.timestamp = Math.max(
+  return Math.max(
     previousTimestamp,
     Math.min(queuedTimestamp, liveNow + TIMING.TIMESTAMP_DRIFT_MS),
   );
@@ -207,9 +211,16 @@ const openRuntimeFrameCandidate = (
   deps: RuntimeProcessDeps,
 ): RuntimeFrameCandidate => {
   const quietRuntimeLogs = liveEnv.quietRuntimeLogs === true;
+  const frameTimestamp = resolveRuntimeFrameTimestamp(
+    liveEnv,
+    requireRuntimeMempool(liveEnv).queuedAt,
+  );
   // Due scheduler work belongs to the frame being detached, not to arrivals
   // that may race in while this single writer awaits storage or signatures.
-  deps.loop.generateHookPings(liveEnv);
+  // Compute against the candidate timestamp without publishing that timestamp:
+  // public readers must continue to observe the committed frame until WAL
+  // accepts this candidate.
+  deps.loop.generateHookPings(liveEnv, frameTimestamp, frameTimestamp);
   const mempoolQueuedAt = requireRuntimeMempool(liveEnv).queuedAt;
   const transaction = createRuntimeFrameTransaction(liveEnv);
   frame.transaction = transaction;
@@ -223,7 +234,16 @@ const openRuntimeFrameCandidate = (
   }
   const runtimeInput = buildRuntimeFrameInput(env, mempool, deps);
   liveState.inFlightEntityInputs = runtimeInput.entityInputs.length;
-  return { transaction, env, state, mempool, runtimeInput, mempoolQueuedAt, quietRuntimeLogs };
+  return {
+    transaction,
+    env,
+    state,
+    mempool,
+    runtimeInput,
+    frameTimestamp,
+    mempoolQueuedAt,
+    quietRuntimeLogs,
+  };
 };
 
 const beginRuntimeFrameMutation = (
@@ -236,7 +256,7 @@ const beginRuntimeFrameMutation = (
   deps.applyRuntimeInput.validate(candidate.env, candidate.runtimeInput);
   frame.mutationStarted = true;
   ensureRuntimeState(candidate.env).stateMutationInFlight = true;
-  advanceRuntimeFrameTimestamp(candidate.env, candidate.mempoolQueuedAt);
+  candidate.env.timestamp = candidate.frameTimestamp;
   for (const replica of candidate.env.jReplicas.values()) {
     replica.jadapter?.setBlockTimestamp(candidate.env.timestamp);
   }
@@ -336,6 +356,7 @@ const commitRuntimeFrame = async (
       candidateEnv,
       options.appliedInput,
       candidateEnv.pendingNetworkOutputs,
+      previewPublishedRuntimeInput(frame.transaction),
     );
     profile.metrics.storageMs = outcome.persistencePerfMs;
     if (outcome.persistencePerfMs) {
