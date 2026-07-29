@@ -3,7 +3,7 @@ import type { CrontabState } from '../entity/scheduler-types';
 import type { JBatchState } from '../jurisdiction/batch';
 import type { AccountReplica, AccountStatus, Delta, HtlcLock, HtlcRoute, RuntimeOverlayRecord, SwapOffer } from '../types/account';
 import type { ConsensusConfig, EntityReplica, EntityState, EntitySwapPair, LockBookEntry, Proposal } from '../entity/types';
-import type { RoutedEntityInput, RuntimeInput, RuntimeHistoryRecord } from '../types';
+import type { RoutedEntityInput, RuntimeInput, RuntimeHistoryRecord } from '../runtime/types';
 import type { DebtEntry } from '../types/debt';
 import type { FrameLogEntry } from '../types/logging';
 import type { HubRebalanceConfig, RebalanceRequestFeeState } from '../types/rebalance';

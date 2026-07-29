@@ -23,7 +23,7 @@ import {
 } from '../jurisdiction/registration-evidence';
 import { compareStableText } from '../protocol/serialization';
 import type { CertifiedEntityFrameLink, CertifiedEntityLineageAnchor, ConsensusConfig, EntityFrameAuthority, EntityReplica, ProposedEntityFrame } from '../entity/types';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import { validateConsensusConfig } from '../entity/consensus/config-validation';
 import { validateProposedEntityFrame } from '../entity/consensus/frame-validation';
 import { normalizeEntityId } from './keys';

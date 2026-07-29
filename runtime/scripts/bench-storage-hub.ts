@@ -26,7 +26,7 @@ import {
 import { dbRootPath } from '../runtime/platform';
 import type { AccountReplica } from '../types/account';
 import type { EntityReplica, EntityState } from '../entity/types';
-import type { RuntimeState, RoutedEntityInput } from '../types';
+import type { RuntimeState, RoutedEntityInput } from '../runtime/types';
 import type { EntityTx } from '../types/entity-tx';
 import type { JReplica } from '../types/jurisdiction-runtime';
 import { getPerfMs } from '../infra/time';

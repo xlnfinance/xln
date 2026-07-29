@@ -1,7 +1,7 @@
 import { ethers } from 'ethers';
 import { computeIntegrityDigest } from '../infra/integrity-checksum';
 import { compareStableText } from '../protocol/serialization';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import { buildDurableRuntimeMachineSnapshot } from './wal/snapshot';
 import {
   computeCanonicalEntityHash,

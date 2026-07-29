@@ -1,6 +1,6 @@
 import type { CrossJurisdictionBookAdmission } from '../types/cross-jurisdiction';
 import type { EntityState } from '../entity/types';
-import type { RuntimeState } from '../types';
+import type { EntityRuntimeContext } from '../entity/runtime-context';
 import type { RuntimeOverlayRecord } from '../types/account';
 import { normalizeSwapOfferForOrderbook } from './swap-execution';
 import { type OrderbookExtState } from './index';
@@ -23,11 +23,11 @@ const crossJBookLog = createStructuredLogger('crossj.orderbook');
 
 export const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 
-export const deterministicEntityTimestamp = (state: EntityState, env?: RuntimeState): number =>
+export const deterministicEntityTimestamp = (state: EntityState, env?: EntityRuntimeContext): number =>
   Number(state.timestamp || env?.timestamp || 0);
 
 export const applyCommittedSwapCancelsToOrderbook = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   state: EntityState,
   cancels: readonly CommittedSwapCancel[],
   storageChanges: RuntimeOverlayRecord[] = [],

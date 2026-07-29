@@ -1,5 +1,5 @@
 import type { EntityState, Proposal, ProposalAction } from '../types';
-import type { RuntimeState } from '../../types';
+import type { EntityRuntimeContext } from '../runtime-context';
 import { createHash } from '../../infra/platform-crypto';
 import { safeStringify } from '../../protocol/serialization';
 import { createStructuredLogger, shortHash } from '../../infra/logger';
@@ -11,7 +11,7 @@ import { LIMITS } from '../../config/constants';
 const proposalLog = createStructuredLogger('entity.basic');
 
 export const generateProposalId = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   action: ProposalAction,
   proposer: string,
   entityState: EntityState,
@@ -78,7 +78,7 @@ export const pruneTerminalEntityProposals = (state: EntityState): EntityState =>
  * proposals must remain as terminal forensic evidence, but can never consume
  * capacity or be completed by the new board.
  */
-export const normalizeEntityProposalBoard = (env: RuntimeState, state: EntityState): EntityState => {
+export const normalizeEntityProposalBoard = (env: EntityRuntimeContext, state: EntityState): EntityState => {
   if (!Array.from(state.proposals.values()).some(proposal => proposal.status === 'pending')) {
     return pruneTerminalEntityProposals(state);
   }

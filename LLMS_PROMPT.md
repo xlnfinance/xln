@@ -17,7 +17,7 @@ Context you must respect:
 Read first:
 1. Semantic overview at the top of llms.txt.
 2. contracts/Depository.sol, Account.sol, DeltaTransformer.sol.
-3. runtime/types.ts, runtime/runtime.ts, runtime/entity/consensus/index.ts, runtime/account/consensus/index.ts.
+3. runtime/runtime/types.ts, runtime/runtime.ts, runtime/entity/consensus/index.ts, runtime/account/consensus/index.ts.
 4. runtime/cross-jurisdiction*.ts, runtime/orderbook/cross-j-orderbook.ts.
 5. runtime/entity/tx/handlers/cross-j-*.ts, swap-requests.ts, dispute.ts.
 6. runtime/entity/tx/handlers/account/orderbook-matching-*.ts.
@@ -149,7 +149,7 @@ FOCUS AREAS:
 5. **Module Boundaries**: Circular dependencies? Leaky abstractions?
 
 FILES TO SCAN:
-- runtime/types.ts (interface design)
+- runtime/runtime/types.ts (Runtime interface design)
 - runtime/account/state-clone.ts (Account candidate isolation)
 - runtime/entity/state-clone.ts (Entity candidate isolation)
 - runtime/entity/replica-clone.ts (validator-local replica isolation)

@@ -5,7 +5,7 @@
 
 import { accountInputAck, accountInputProposal, accountInputReferenceHeight } from '../../account/consensus/flush';
 import { proposeAccountFrame } from '../../account/consensus/propose';
-import { getAccountJClaimNodeStore } from '../../account/j-claim-store';
+import { getAccountJClaimNodeStore } from '../account-j-claim-node-store';
 import {
   assertCanonicalSettlementWorkspace,
   hasPendingSettlementTransition,
@@ -32,7 +32,7 @@ import { emitScopedEvents } from '../../infra/scoped-events';
 import { addMessages, clearEntityFrameEvents, readEntityFrameEvents } from '../frame-events';
 import type { AccountPeerInput, AccountReplica, AccountTx, RuntimeOverlayRecord } from '../../types/account';
 import type { EntityCandidateEffect, EntityFrameEvent, EntityOutput, EntityState, HashType } from '../types';
-import type { RuntimeState } from '../../types';
+import type { EntityRuntimeContext } from '../runtime-context';
 import type { AccountConsensusContext } from '../../account/consensus/context';
 import type { JInput } from '../../jurisdiction/input';
 import type { EntityTx } from '../../types/entity-tx';
@@ -343,7 +343,7 @@ async function applyEntityTxsInOrder(context: ApplyEntityTxsInOrderContext): Pro
 }
 
 type ProposePendingAccountFramesContext = {
-  env: RuntimeState;
+  env: EntityRuntimeContext;
   accountConsensusContext: AccountConsensusContext;
   currentEntityState: EntityState;
   proposableAccounts: Set<string>;
@@ -355,7 +355,7 @@ type ProposePendingAccountFramesContext = {
 };
 
 async function materializeDeferredSettlementApprovals(
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   accountConsensusContext: AccountConsensusContext,
   state: EntityState,
   proposableAccounts: Set<string>,
@@ -618,7 +618,7 @@ async function proposePendingAccountFrames(context: ProposePendingAccountFramesC
 }
 
 type ApplyOrderbookMatchingContext = {
-  env: RuntimeState;
+  env: EntityRuntimeContext;
   accountConsensusContext: AccountConsensusContext;
   currentEntityState: EntityState;
   allSwapOffersCreated: SwapOfferEvent[];
@@ -645,7 +645,7 @@ const emptyOrderbookFrameStats = (): OrderbookFrameStats => ({
 });
 
 const collectOffersForMatching = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   state: EntityState,
   created: SwapOfferEvent[],
 ): WorkingOrderbookOffer[] => {
@@ -819,7 +819,7 @@ async function applyOrderbookMatching(
 }
 
 type ApplySwapCancelRequestsContext = {
-  env: RuntimeState;
+  env: EntityRuntimeContext;
   accountConsensusContext: AccountConsensusContext;
   currentEntityState: EntityState;
   allSwapCancelRequests: SwapCancelRequestEvent[];
@@ -943,7 +943,7 @@ type EntityFrameWorkingSet = {
 };
 
 const verifyCertifiedFrameInputs = async (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   state: EntityState,
   txs: readonly EntityTx[],
 ): Promise<ApplyEntityTxsInOrderContext['verifiedCertifiedOutputs']> => {
@@ -963,7 +963,7 @@ const verifyCertifiedFrameInputs = async (
 };
 
 const initializeEntityFrameState = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   normalized: EntityState,
   isolateState: boolean,
   frameTimestamp: number | undefined,
@@ -988,7 +988,7 @@ const initializeEntityFrameState = (
 };
 
 const createEntityFrameApplyContext = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   entityTxs: EntityTx[],
   currentEntityState: EntityState,
   verifiedCertifiedOutputs: ApplyEntityTxsInOrderContext['verifiedCertifiedOutputs'],
@@ -1047,7 +1047,7 @@ const primeEntityFrameAccountWork = async (
 };
 
 const prepareEntityFrameWorkingSet = async (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   entityState: EntityState,
   entityTxs: EntityTx[],
   frameTimestamp: number | undefined,
@@ -1276,7 +1276,7 @@ const logEntityFrameProfile = (
 };
 
 const applyEntityFrameWithIsolation = async (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   entityState: EntityState,
   entityTxs: EntityTx[],
   frameTimestamp: number | undefined,
@@ -1323,7 +1323,7 @@ const applyEntityFrameWithIsolation = async (
  * waits for quorum Hanko. Standalone reducer tests also use this pure boundary.
  */
 export const applyEntityFrame = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   entityState: EntityState,
   entityTxs: EntityTx[],
   frameTimestamp?: number,
@@ -1346,7 +1346,7 @@ export const applyEntityFrame = (
  * validation or touched-only Runtime candidate staging.
  */
 export const applyRuntimeOwnedEntityFrame = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   entityState: EntityState,
   entityTxs: EntityTx[],
   frameTimestamp?: number,

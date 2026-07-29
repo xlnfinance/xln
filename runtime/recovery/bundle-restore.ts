@@ -1,5 +1,5 @@
 import { markRestoredReliableOutputsDue } from '../runtime/output-routing';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type { CheckpointRestoreOptions } from '../storage/recovery/checkpoint';
 import type { PersistedFrameJournal } from '../storage/types';
 import { assertRuntimeRecoveryBundleAuthenticity } from './bundle';

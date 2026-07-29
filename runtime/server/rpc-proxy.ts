@@ -1,4 +1,4 @@
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import { isLoopbackUrl } from '../networking/loopback-url';
 import { findForbiddenRpcProxyMethod } from './rpc-proxy-safety';
 import { pushDebugEvent, type RelayStore } from '../relay/store';

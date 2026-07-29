@@ -1,5 +1,5 @@
 import type { ConsensusConfig, EntityReplica, JurisdictionConfig } from '../entity/types';
-import type { RuntimeState } from '../types';
+import type { EntityRuntimeContext } from '../entity/runtime-context';
 import type { JReplica } from '../types/jurisdiction-runtime';
 import { firstUsableContractAddress } from './contract-address';
 import {
@@ -11,13 +11,6 @@ export {
   getJurisdictionStackId,
   isJurisdictionStackRef,
 } from './jurisdiction-stack';
-
-type BrowserVmLike = {
-  getDepositoryAddress?: () => string;
-  getEntityProviderAddress?: () => string;
-  getChainId?: () => bigint;
-  browserVM?: BrowserVmLike;
-};
 
 const firstDefined = <T>(...values: Array<T | undefined>): T | undefined => {
   for (const value of values) {
@@ -76,7 +69,7 @@ const getJReplicaStackId = (replica: JReplica | undefined): string => {
   });
 };
 
-export const getJReplicaByName = (env: RuntimeState, name?: string | null): JReplica | undefined => {
+export const getJReplicaByName = (env: EntityRuntimeContext, name?: string | null): JReplica | undefined => {
   const normalized = normalizeJurisdictionName(name);
   if (!normalized) return undefined;
   const exact = env.jReplicas?.get(name as string);
@@ -89,7 +82,7 @@ export const getJReplicaByName = (env: RuntimeState, name?: string | null): JRep
   return undefined;
 };
 
-export const getJReplicaByJurisdictionRef = (env: RuntimeState, ref?: string | null): JReplica | undefined => {
+export const getJReplicaByJurisdictionRef = (env: EntityRuntimeContext, ref?: string | null): JReplica | undefined => {
   const raw = String(ref || '').trim();
   if (!raw) return undefined;
   if (!isJurisdictionStackRef(raw)) return undefined;
@@ -100,7 +93,7 @@ export const getJReplicaByJurisdictionRef = (env: RuntimeState, ref?: string | n
   return undefined;
 };
 
-const getCandidateReplica = (env: RuntimeState, current?: JurisdictionConfig): JReplica | undefined => {
+const getCandidateReplica = (env: EntityRuntimeContext, current?: JurisdictionConfig): JReplica | undefined => {
   const named = getJReplicaByName(env, current?.name);
   if (named) return named;
   if (env.activeJurisdiction) {
@@ -114,11 +107,9 @@ const getCandidateReplica = (env: RuntimeState, current?: JurisdictionConfig): J
 };
 
 export function resolveRuntimeJurisdictionConfig(
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   current?: JurisdictionConfig,
 ): JurisdictionConfig | undefined {
-  const browserVmContainer = env.browserVM as BrowserVmLike | undefined;
-  const browserVm = browserVmContainer?.browserVM ?? browserVmContainer;
   const replica = getCandidateReplica(env, current);
 
   const depositoryAddress = firstUsableContractAddress(
@@ -126,21 +117,17 @@ export function resolveRuntimeJurisdictionConfig(
     replica?.depositoryAddress,
     replica?.contracts?.depository,
     current?.depositoryAddress,
-    browserVm?.getDepositoryAddress?.(),
   );
   const entityProviderAddress = firstUsableContractAddress(
     replica?.jadapter?.addresses?.entityProvider,
     replica?.entityProviderAddress,
     replica?.contracts?.entityProvider,
     current?.entityProviderAddress,
-    browserVm?.getEntityProviderAddress?.(),
   );
-  const browserVmChainId = browserVm?.getChainId?.();
   const rawChainId = firstDefined<number | bigint>(
     replica?.jadapter?.chainId,
     replica?.chainId,
     current?.chainId,
-    browserVmChainId,
   );
   const chainId =
     typeof rawChainId === 'bigint'
@@ -159,7 +146,6 @@ export function resolveRuntimeJurisdictionConfig(
   const address = firstDefined(
     currentAddress,
     replicaAddress,
-    browserVm ? 'browservm://' : undefined,
     name ? `jreplica://${name}` : undefined,
   );
 
@@ -179,7 +165,7 @@ export function resolveRuntimeJurisdictionConfig(
 }
 
 export function requireRuntimeJurisdictionConfigByName(
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   name: string | undefined | null,
   current?: JurisdictionConfig,
 ): JurisdictionConfig {
@@ -259,7 +245,7 @@ const sameSigner = (replica: EntityReplica, signerId?: string | null): boolean =
 };
 
 export function assertEntityJurisdictionBinding(
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   entityId: string,
   incomingJurisdiction?: JurisdictionConfig | null,
 ): void {
@@ -280,7 +266,7 @@ export function assertEntityJurisdictionBinding(
 }
 
 export function requireBoundEntityConfig(
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   entityId: string,
   config: ConsensusConfig,
 ): ConsensusConfig {
@@ -298,7 +284,7 @@ export function requireBoundEntityConfig(
 }
 
 export function backfillEntityJurisdictionBinding(
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   entityId: string,
   jurisdiction: JurisdictionConfig,
 ): void {
@@ -332,7 +318,7 @@ function sameAccountJurisdiction(sourceJurisdiction: unknown, targetJurisdiction
 }
 
 export function requireEntityRuntimeJurisdictionConfig(
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   entityId: string,
   signerId?: string | null,
 ): JurisdictionConfig {
@@ -365,7 +351,7 @@ export function requireEntityRuntimeJurisdictionConfig(
 
 export function mergeRuntimeJurisdictionConfig(
   config: ConsensusConfig,
-  env: RuntimeState,
+  env: EntityRuntimeContext,
 ): ConsensusConfig {
   const jurisdiction = resolveRuntimeJurisdictionConfig(env, config.jurisdiction);
   if (!jurisdiction) return config;

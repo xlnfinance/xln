@@ -10,7 +10,7 @@ import { verifyHashLadderBinary } from '../../../protocol/htlc/hash-ladder';
 import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import type { EntityInput, EntityState } from '../../types';
-import type { RuntimeState } from '../../../types';
+import type { EntityRuntimeContext } from '../../runtime-context';
 import type { EntityTx } from '../../../types/entity-tx';
 import { formatEntityId } from '../../../presentation/identity-display';
 import { findAccountKey, normalizeEntityRef } from '../account-key';
@@ -24,7 +24,7 @@ type CrossPullCloseTx = Extract<EntityTx, { type: 'crossPullClose' }>;
 type CancelPullTx = Extract<EntityTx, { type: 'cancelPull' | 'pullCancelExpired' }>;
 type PullResult = { newState: EntityState; outputs: EntityInput[]; accountTxs: AccountTxTarget[] };
 
-const now = (state: EntityState, env: RuntimeState): number => Number(state.timestamp || env.timestamp || 0);
+const now = (state: EntityState, env: EntityRuntimeContext): number => Number(state.timestamp || env.timestamp || 0);
 const createResult = (state: EntityState, options?: ApplyEntityTxOptions): PullResult => ({
   newState: prepareEntityTxState(state, options?.mutableFrameState),
   outputs: [],
@@ -45,7 +45,7 @@ const resolveCounterparty = (result: PullResult, counterpartyEntityId: string, a
   return accountId;
 };
 
-export const handlePullLockEntityTx = (_env: RuntimeState, state: EntityState, tx: PullLockTx, options?: ApplyEntityTxOptions): PullResult => {
+export const handlePullLockEntityTx = (_env: EntityRuntimeContext, state: EntityState, tx: PullLockTx, options?: ApplyEntityTxOptions): PullResult => {
   const result = createResult(state, options);
   const {
     counterpartyEntityId,
@@ -176,7 +176,7 @@ const proofRouteError = (
   return null;
 };
 
-export const handleResolvePullEntityTx = (_env: RuntimeState, state: EntityState, tx: ResolvePullTx, options?: ApplyEntityTxOptions): PullResult => {
+export const handleResolvePullEntityTx = (_env: EntityRuntimeContext, state: EntityState, tx: ResolvePullTx, options?: ApplyEntityTxOptions): PullResult => {
   const result = createResult(state, options);
   const { counterpartyEntityId, pullId, binary } = tx.data;
   const accountId = resolveCounterparty(result, counterpartyEntityId, 'resolve');
@@ -200,7 +200,7 @@ export const handleResolvePullEntityTx = (_env: RuntimeState, state: EntityState
   return result;
 };
 
-export const handleCrossPullCloseEntityTx = (env: RuntimeState, state: EntityState, tx: CrossPullCloseTx, options?: ApplyEntityTxOptions): PullResult => {
+export const handleCrossPullCloseEntityTx = (env: EntityRuntimeContext, state: EntityState, tx: CrossPullCloseTx, options?: ApplyEntityTxOptions): PullResult => {
   const result = createResult(state, options);
   const { counterpartyEntityId, pullId, binary, proof, route: commandRoute } = tx.data;
   const accountId = resolveCounterparty(result, counterpartyEntityId, 'resolve');
@@ -239,7 +239,7 @@ export const handleCrossPullCloseEntityTx = (env: RuntimeState, state: EntitySta
   return result;
 };
 
-export const handleCancelPullEntityTx = (_env: RuntimeState, state: EntityState, tx: CancelPullTx, options?: ApplyEntityTxOptions): PullResult => {
+export const handleCancelPullEntityTx = (_env: EntityRuntimeContext, state: EntityState, tx: CancelPullTx, options?: ApplyEntityTxOptions): PullResult => {
   const result = createResult(state, options);
   const { counterpartyEntityId, pullId } = tx.data;
   const accountId = resolveCounterparty(result, counterpartyEntityId, 'cancel');

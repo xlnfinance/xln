@@ -32,7 +32,7 @@ import {
   restoreEnvFromRecoveryBundles,
 } from '../runtime';
 import type { EntityLeaderTimeoutVote, EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type { JReplica } from '../types/jurisdiction-runtime';
 
 const cleanupRuntimeStorage = (runtimeId: string): void => {

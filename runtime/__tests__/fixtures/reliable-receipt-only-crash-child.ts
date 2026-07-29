@@ -6,7 +6,7 @@ import {
   enqueueRuntimeInput,
   processRuntime,
 } from '../../runtime';
-import type { DeliverableEntityInput } from '../../types';
+import type { DeliverableEntityInput } from '../../runtime/types';
 import {
   buildCatchupFixtureCertificate,
   catchupFixtureDeliverable,

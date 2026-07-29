@@ -1,6 +1,6 @@
 import type { AccountPeerInput, RuntimeOverlayRecord } from '../../types/account';
 import type { EntityCandidateEffect, EntityOutput, EntityState, HashType } from '../types';
-import type { RuntimeState } from '../../types';
+import type { EntityRuntimeContext } from '../runtime-context';
 import type { AccountConsensusContext } from '../../account/consensus/context';
 import type { JInput } from '../../jurisdiction/input';
 import type { EntityTx } from '../../types/entity-tx';
@@ -17,7 +17,7 @@ import type {
 import type { VerifiedCertifiedEntityOutput } from './output-certification';
 
 export type ApplyEntityTxsInOrderContext = {
-  env: RuntimeState;
+  env: EntityRuntimeContext;
   accountConsensusContext: AccountConsensusContext;
   entityTxs: EntityTx[];
   currentEntityState: EntityState;

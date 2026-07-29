@@ -1,5 +1,5 @@
 import type { EntityState } from '../entity/types';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import {
   getJReplicaByJurisdictionRef,
   getJReplicaByName,

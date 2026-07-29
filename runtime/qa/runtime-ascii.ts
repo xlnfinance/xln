@@ -8,7 +8,7 @@
  *   console.log(formatAccount(account, myEntityId));
  */
 
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type { EntityState } from '../entity/types';
 import type { AccountReplica } from '../types/account';
 import { getWallClockMs } from '../infra/time';

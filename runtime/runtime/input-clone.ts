@@ -1,5 +1,5 @@
 import { cloneIsolatedEntityInput } from '../entity/input-clone';
-import type { RoutedEntityInput, RuntimeInput, RuntimeTx } from '../types';
+import type { RoutedEntityInput, RuntimeInput, RuntimeTx } from './types';
 
 const cloneRuntimeTxValue = (value: unknown, active = new Set<object>()): unknown => {
   if (value === null || typeof value !== 'object') return value;

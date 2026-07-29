@@ -6,7 +6,7 @@
  */
 
 import type { EntityTx } from '../types/entity-tx';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type { NameSearchResult, ProfileUpdateTx } from '../types/profile';
 import { compareStableText } from '../protocol/serialization';
 import { formatEntityDisplay, generateEntityAvatar } from '../presentation/identity-display';

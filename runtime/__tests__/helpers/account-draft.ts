@@ -1,6 +1,6 @@
 import { signEntityHashes } from '../../hanko/signing';
 import type { AccountInput } from '../../types/account';
-import type { RuntimeState } from '../../types';
+import type { RuntimeState } from '../../runtime/types';
 
 type AccountDraft = {
   accountInput?: AccountInput;

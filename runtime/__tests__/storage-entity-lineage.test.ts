@@ -39,7 +39,7 @@ import {
 import { buildStorageReplicaMetaCommitment } from '../storage/replicas';
 import type { StorageReplicaMeta } from '../storage/types';
 import type { CertifiedEntityFrameLink, CertifiedEntityLineageAnchor, EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type { EntityTx } from '../types/entity-tx';
 import type { JReplica } from '../types/jurisdiction-runtime';
 

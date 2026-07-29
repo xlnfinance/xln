@@ -4,7 +4,7 @@
  * Verifies onion routing, fees cascade, secret propagation
  */
 
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import { createEconomy, connectEconomy, testHtlcRoute, type EconomyEntity } from './test-economy';
 import { usd, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed, findReplica } from './helpers';
 import { bindScenarioJReplica, ensureJAdapter, createJReplica, getScenarioJAdapter, isScenarioJAdapterMissingError } from './boot';

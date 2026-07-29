@@ -1,6 +1,6 @@
 import { createStructuredLogger } from '../../infra/logger';
 import { setAccountFrameHistoryView } from '../../runtime/env-events';
-import type { RuntimeState } from '../../types';
+import type { RuntimeState } from '../../runtime/types';
 import { readHistoryViewAccountFrames } from '..';
 import type { RuntimeStorageApiDeps } from '../runtime-storage-deps';
 

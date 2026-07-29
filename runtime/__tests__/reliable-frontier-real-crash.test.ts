@@ -14,7 +14,7 @@ import {
   senderFrontierKey,
 } from '../runtime/reliable-frontier';
 import { dbRootPath } from '../runtime/platform';
-import type { RuntimeState, ReliableDeliveryReceipt } from '../types';
+import type { RuntimeState, ReliableDeliveryReceipt } from '../runtime/types';
 
 const fixture = join(import.meta.dir, 'fixtures/reliable-frontier-crash-child.ts');
 let cleanupRuntimeId: string | null = null;

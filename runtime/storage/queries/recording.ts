@@ -12,7 +12,7 @@ import type {
   RuntimeRecoveryMetaV1,
   RuntimeRecoverySignerV1,
 } from '../../recovery/types';
-import type { RuntimeState } from '../../types';
+import type { RuntimeState } from '../../runtime/types';
 import type { PersistenceQueryDeps } from './deps';
 import type { createPersistenceEntityQueries } from './entity';
 import type { createPersistenceHistoryQueries } from './history';

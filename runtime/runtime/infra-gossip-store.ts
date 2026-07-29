@@ -3,7 +3,7 @@ import type { Profile } from '../entity/profile';
 import { canonicalizeProfile, parseProfile } from '../entity/profile';
 import { deserializeTaggedJson, serializeTaggedJson } from '../protocol/serialization';
 import { createStructuredLogger, shortId } from '../infra/logger';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from './types';
 
 type InfraDbAccess = {
   tryOpenInfraDb: (env: RuntimeState) => Promise<boolean>;

@@ -1,4 +1,4 @@
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 
 // ============================================================================
 // SCENARIO REGISTRY - Used by runtime.ts exports and all-scenarios.ts

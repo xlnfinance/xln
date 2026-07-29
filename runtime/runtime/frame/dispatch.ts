@@ -3,7 +3,7 @@ import { extractEntityId, extractSignerId } from '../../protocol/identity';
 import { createStructuredLogger } from '../../infra/logger';
 import { announceCertifiedLocalProfiles } from '../../networking/local-profile-lifecycle';
 import { isDeliveryDelivered } from '../../protocol/payments/delivery-result';
-import type { RuntimeState, RoutedEntityInput } from '../../types';
+import type { RuntimeState, RoutedEntityInput } from '../types';
 import {
   buildPendingNetworkOutputs,
   dispatchEntityOutputs,

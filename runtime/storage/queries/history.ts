@@ -19,7 +19,7 @@ import {
 } from '../../api/activity-history';
 import type { AccountFrame } from '../../types/account';
 import type { CertifiedEntityFrameLink, EntityInput } from '../../entity/types';
-import type { RuntimeState } from '../../types';
+import type { RuntimeState } from '../../runtime/types';
 import type { FrameLogEntry } from '../../types/logging';
 import type { PersistedFrameJournal } from '../types';
 import type { PersistenceQueryDeps } from './deps';

@@ -1,5 +1,5 @@
 import type { FrameLogEntry } from '../types/logging';
-import type { RuntimeInput } from '../types';
+import type { RuntimeInput } from '../runtime/types';
 
 const LOG_LEVELS = new Set(['trace', 'debug', 'info', 'warn', 'error']);
 const LOG_CATEGORIES = new Set([

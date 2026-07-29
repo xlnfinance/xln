@@ -47,7 +47,7 @@ import { compareStableText, safeStringify } from '../../protocol/serialization';
 import { nodeProcess } from '../../infra/runtime-process';
 import type { AccountTx, AccountReplica, RuntimeOverlayRecord } from '../../types/account';
 import type { CertifiedEntityFrameLink, ConsensusConfig, EntityFrameAuthority, EntityCandidateEffect, EntityInput, EntityOutput, EntityLeaderCertificate, EntityLeaderTimeoutVote, EntityReplica, EntityState, HashToSign, ProposedEntityFrame, EntityCandidate } from '../types';
-import type { RuntimeState } from '../../types';
+import type { EntityRuntimeContext } from '../runtime-context';
 import type { AccountConsensusContext } from '../../account/consensus/context';
 import type { ConsensusOutputOrigin, EntityTx } from '../../types/entity-tx';
 import type { HankoString } from '../../types/hanko';
@@ -111,7 +111,7 @@ type ConsumptionSizeLog = Readonly<{
 const ENTITY_SIZE_OBSERVATION_PERIOD_FRAMES = 100;
 
 export const prepareCommittedEntitySizeLog = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   preState: EntityState,
   postState: EntityState,
 ): ConsumptionSizeLog | null => {
@@ -167,7 +167,7 @@ export const entityFrameSlowMs = (): number => readRuntimePerfSlowMs('XLN_ENTITY
 export const entityLog = createStructuredLogger('entity');
 
 export const getReplicaJRangeValidationError = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   replica: EntityReplica,
   txs: EntityTx[],
 ): string | null => {
@@ -194,7 +194,7 @@ export const getReplicaJRangeValidationError = (
 };
 
 export const assertProposerJRangesMatchLocalHistory = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   replica: EntityReplica,
   txs: EntityTx[],
 ): void => {
@@ -203,7 +203,7 @@ export const assertProposerJRangesMatchLocalHistory = (
 };
 
 export const getFrameJPrefixValidationError = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   replica: EntityReplica,
   frame: ProposedEntityFrame,
 ): string | null => {
@@ -232,7 +232,7 @@ const clearCommittedJPrefixRound = (replica: EntityReplica): void => {
 };
 
 export const ensureLocalJPrefixAttestation = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   replica: EntityReplica,
   entityOutbox: EntityOutput[],
   force: boolean,
@@ -298,7 +298,7 @@ export const ensureLocalJPrefixAttestation = (
  * instead of creating one itself.
  */
 const advanceLocalJPrefixRoundAfterCommit = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   replica: EntityReplica,
   entityOutbox: EntityOutput[],
 ): void => {
@@ -318,7 +318,7 @@ const advanceLocalJPrefixRoundAfterCommit = (
 };
 
 export const runLocalPostCommitHooks = async (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   replica: EntityReplica,
   entityOutbox: EntityOutput[],
 ): Promise<void> => {
@@ -382,7 +382,7 @@ export const normalizePrecommitBundles = (
 };
 
 export const verifyHashPrecommitSignatures = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   signerId: string,
   hashesToSign: HashToSign[] | undefined,
   frameHash: string,
@@ -416,7 +416,7 @@ export const verifyHashPrecommitSignatures = (
 };
 
 export const hasVerifiedPreparedQuorum = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   state: EntityLeaderStateView,
   frame: ProposedEntityFrame,
   context: string,
@@ -476,7 +476,7 @@ const getCertificateSignedVotes = (certificate: EntityLeaderCertificate): Map<st
 };
 
 export const verifyEntityLeaderCertificate = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   state: EntityLeaderStateView,
   frame: ProposedEntityFrame,
 ): boolean => {
@@ -529,7 +529,7 @@ type PreparedFrameGroup = {
 };
 
 const validatePreparedFrameEvidence = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   state: EntityLeaderStateView,
   certificate: EntityLeaderCertificate,
   evidence: ProposedEntityFrame,
@@ -618,7 +618,7 @@ const mergePreparedFrameEvidence = (
 };
 
 export const selectPreparedFrameFromCertificate = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   state: EntityLeaderStateView,
   certificate: EntityLeaderCertificate,
 ): ProposedEntityFrame | null => {
@@ -654,7 +654,7 @@ export const selectPreparedFrameFromCertificate = (
 };
 
 export const verifyEntityRelayCertificate = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   state: EntityLeaderStateView,
   frame: ProposedEntityFrame,
 ): boolean => {
@@ -737,7 +737,7 @@ export const buildConsumptionOutputIdentity = (
  * proof supplied by the source or transport.
  */
 export const attachTargetConsumptionProofs = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   state: EntityState,
   txs: readonly EntityTx[],
 ): EntityTx[] => {
@@ -791,7 +791,7 @@ export const wrapCertifiedEntityOutputs = (
   outputs: EntityOutput[],
   frame: ProposedEntityFrame,
   sourceState: EntityState,
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   hashesToSign: HashToSign[],
   hankos: HankoString[],
   emitLocalRuntimeOutputs: boolean,
@@ -931,7 +931,7 @@ const applyJRangeBudgetToSelection = (selection: ProposableEntityTxSelection): P
  * prerequisite frame advances independently.
  */
 export const selectProposableEntityTxs = async (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   state: EntityState,
   mempool: EntityTx[],
 ): Promise<ProposableEntityTxSelection> => {
@@ -986,7 +986,7 @@ export const selectProposableEntityTxs = async (
 };
 
 export const isSelfBoardAuthorityTransitionFrame = async (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   state: EntityState,
   entityTxs: EntityTx[],
 ): Promise<boolean> => {
@@ -1003,7 +1003,7 @@ export const isSelfBoardAuthorityTransitionFrame = async (
 };
 
 export const validateProposedFrameLeader = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   state: EntityState,
   frame: ProposedEntityFrame,
 ): boolean => {
@@ -1112,7 +1112,7 @@ export const ownsSourceHubRouteForFillAck = (currentEntityState: EntityState, tx
 };
 
 export const stashPendingCrossJurisdictionFillAck = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   currentEntityState: EntityState,
   accountId: string,
   tx: CrossSwapFillAckTx,
@@ -1181,7 +1181,7 @@ const queueCrossJFillAckIncidentEffect = (
 };
 
 export const drainPendingCrossJurisdictionFillAcks = async (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   accountConsensusContext: AccountConsensusContext,
   currentEntityState: EntityState,
   proposableAccounts: Set<string>,
@@ -1336,7 +1336,7 @@ const assertSameJurisdictionOrderHoldCommitted = (
 };
 
 export const admitOrderbookOfferForMatching = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   state: EntityState,
   offer: NormalizedOrderbookOffer,
 ): WorkingOrderbookOffer | null => {

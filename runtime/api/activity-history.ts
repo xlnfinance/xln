@@ -1,7 +1,7 @@
 import type { EntityTx } from '../types/entity-tx';
 import type { FrameLogEntry } from '../types/logging';
 import type { JInput } from '../jurisdiction/input';
-import type { RuntimeTx } from '../types';
+import type { RuntimeTx } from '../runtime/types';
 import { compareStableText } from '../protocol/serialization';
 
 export type ActivityKind = 'onchain' | 'offchain';

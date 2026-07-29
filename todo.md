@@ -58,8 +58,8 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   capability required by each transition (for example timestamp, certified
   board node store, jurisdiction config, or signature verifier); never move
   parent types to a neutral barrel merely to satisfy the import graph.
-  Drive the remaining root-surface debt from `1` to zero. The production
-  value-import graph is now acyclic and permanently ratcheted at SCC size one.
+  Keep root-surface debt at zero. The production value-import graph is acyclic
+  and permanently ratcheted at SCC size one.
 - [ ] Close only current, reproduced audit findings. The accepted remainder is
   decomposed below: durable/idempotent off-chain faucet admission, the
   Replica/State split, Activity/history migration, exact Account-frame

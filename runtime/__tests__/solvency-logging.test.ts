@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { calculateSolvency, verifySolvency } from '../runtime/solvency';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 
 const ENTITY_A = `0x${'11'.repeat(32)}`;
 const ENTITY_B = `0x${'22'.repeat(32)}`;

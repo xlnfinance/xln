@@ -44,7 +44,7 @@ import { createRuntimeIngressReceiptStore } from '../server/ingress-receipts';
 import { requiresLocalNodeOperator } from '../server/node-http-access';
 import { handleRuntimeInputStatus } from '../server/runtime-input-control';
 import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import {
   evaluateBootstrapProgressDeadline,
   isBootstrapWorkWithinDeadline,
@@ -328,7 +328,7 @@ export const runMarketMakerNode = async (): Promise<void> => {
       : null;
 
   const summarizeReceiptLedger = (
-    ledger: Map<string, import('../types').ReliableDeliveryReceipt> | undefined,
+    ledger: Map<string, import('../runtime/types').ReliableDeliveryReceipt> | undefined,
   ): Record<string, unknown>[] =>
     [...(ledger?.values() ?? [])]
       .map(receipt => ({

@@ -43,7 +43,7 @@ import { enqueueRuntimeInput } from '../runtime.ts';
 import type { AccountReplica, SwapOffer } from '../types/account';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { EntityInput } from '../entity/types';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import { readInheritedChildSecrets, resolveChildSecret } from '../infra/child-secrets';
 import {
   BOOTSTRAP_POLL_MS,

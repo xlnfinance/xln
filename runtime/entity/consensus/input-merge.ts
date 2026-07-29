@@ -1,6 +1,6 @@
 import type { EntityTx } from '../../types/entity-tx';
 import type { JPrefixAttestation, JurisdictionEventData } from '../../types/jurisdiction-events';
-import type { RoutedEntityInput } from '../../types';
+import type { EntityConsensusInput } from './input-types';
 import { signatureMapSize } from '../signatures';
 import { compareStableText, safeStringify } from '../../protocol/serialization';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
@@ -57,7 +57,7 @@ export const prioritizeScheduledWakeTransactions = (txs: EntityTx[]): EntityTx[]
   return [wakes[0]!, ...txs.filter(tx => tx.type !== 'scheduledWake')];
 };
 
-const canonicalEntityInputSortKey = (input: RoutedEntityInput): string => safeStringify({
+const canonicalEntityInputSortKey = (input: EntityConsensusInput): string => safeStringify({
   entityId: String(input.entityId || '').toLowerCase(),
   signerId: String(input.signerId || '').toLowerCase(),
   from: String(input.from || '').toLowerCase(),
@@ -92,9 +92,9 @@ type ConsensusInputOrder = Readonly<{
   priority: number;
 }>;
 
-export type EntityCommitPriorityPredicate = (input: RoutedEntityInput) => boolean;
+export type EntityCommitPriorityPredicate = (input: EntityConsensusInput) => boolean;
 
-const isProtocolEntityInput = (input: RoutedEntityInput): boolean =>
+const isProtocolEntityInput = (input: EntityConsensusInput): boolean =>
   Boolean(
     input.proposedFrame ||
     input.leaderTimeoutVote ||
@@ -103,7 +103,7 @@ const isProtocolEntityInput = (input: RoutedEntityInput): boolean =>
   ) || getEffectiveEntityInputTxs(input).some(tx =>
     tx.type === 'accountInput' || tx.type === 'j_event');
 
-const hasCrossJurisdictionSourcePullProposal = (input: RoutedEntityInput): boolean =>
+const hasCrossJurisdictionSourcePullProposal = (input: EntityConsensusInput): boolean =>
   getEffectiveEntityInputTxs(input).some(tx =>
     tx.type === 'accountInput' &&
     accountInputProposal(tx.data)?.frame.accountTxs.some(accountTx =>
@@ -115,7 +115,7 @@ const hasCrossJurisdictionSourcePullProposal = (input: RoutedEntityInput): boole
  * reorders whole authenticated inputs, so it cannot alter a command or the
  * transaction order certified by its source Entity.
  */
-export const prioritizeProtocolEntityInputs = <T extends RoutedEntityInput>(
+export const prioritizeProtocolEntityInputs = <T extends EntityConsensusInput>(
   inputs: readonly T[],
 ): T[] => {
   const protocol: T[] = [];
@@ -129,7 +129,7 @@ export const prioritizeProtocolEntityInputs = <T extends RoutedEntityInput>(
 };
 
 const consensusInputOrder = (
-  input: RoutedEntityInput,
+  input: EntityConsensusInput,
   hasVerifiedCommit: EntityCommitPriorityPredicate,
 ): ConsensusInputOrder | null => {
   if (input.proposedFrame && hasVerifiedCommit(input)) {
@@ -152,7 +152,7 @@ const consensusInputOrder = (
  * scheduling. A later valid commit remains authoritative. Unrelated lanes
  * retain their exact order.
  */
-export const prioritizeEntityConsensusInputs = <T extends RoutedEntityInput>(
+export const prioritizeEntityConsensusInputs = <T extends EntityConsensusInput>(
   inputs: readonly T[],
   hasVerifiedCommit: EntityCommitPriorityPredicate = () => false,
 ): T[] => {
@@ -184,7 +184,7 @@ export const prioritizeEntityConsensusInputs = <T extends RoutedEntityInput>(
   return result;
 };
 
-const entityInputMergeKey = (input: RoutedEntityInput): string => {
+const entityInputMergeKey = (input: EntityConsensusInput): string => {
   const base = `${input.entityId.toLowerCase()}:${String(input.signerId || '').toLowerCase()}`;
   const atomicCrossJ = input.atomicCrossJurisdictionPair;
   if (atomicCrossJ) {
@@ -258,9 +258,9 @@ const mergePrecommitBundles = (
 };
 
 const sortMergedEntityInputs = (
-  inputs: RoutedEntityInput[],
+  inputs: EntityConsensusInput[],
   hasVerifiedCommit: EntityCommitPriorityPredicate,
-): RoutedEntityInput[] =>
+): EntityConsensusInput[] =>
   prioritizeEntityConsensusInputs([...inputs].sort((left, right) => {
     // Entity ids are not causal clocks. A lexicographically smaller source
     // Entity must not consume a source pull before a larger target Entity has
@@ -287,11 +287,11 @@ const sortMergedEntityInputs = (
   }), hasVerifiedCommit);
 
 export const mergeEntityInputs = (
-  inputs: RoutedEntityInput[],
+  inputs: EntityConsensusInput[],
   hasVerifiedCommit: EntityCommitPriorityPredicate = () => false,
-): RoutedEntityInput[] => {
-  const merged = new Map<string, RoutedEntityInput>();
-  const conflicts: RoutedEntityInput[] = [];
+): EntityConsensusInput[] => {
+  const merged = new Map<string, EntityConsensusInput>();
+  const conflicts: EntityConsensusInput[] = [];
   for (const input of inputs) {
     const key = entityInputMergeKey(input);
 

@@ -5,7 +5,7 @@ import { RuntimeWsClient } from '../networking/ws-client';
 import { deriveEncryptionKeyPair } from '../protocol/p2p-crypto';
 import { stopRuntimeP2P, stopRuntimeP2PAndWait } from '../runtime/p2p-lifecycle';
 import { createEmptyEnv } from '../runtime';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 
 const RUNTIME_ID = `0x${'11'.repeat(20)}`;
 

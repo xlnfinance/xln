@@ -3,7 +3,7 @@ import { deriveSignerAddressSync } from '../account/crypto';
 import { RuntimeP2P } from '../networking/p2p';
 import { hexToPubKey } from '../protocol/p2p-crypto';
 import type { Profile } from '../entity/profile';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 
 const key = (byte: string): string => `0x${byte.repeat(32)}`;
 

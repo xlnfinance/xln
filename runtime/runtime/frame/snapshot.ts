@@ -1,5 +1,5 @@
 import { hasRuntimeHistoryTraceForTesting } from '../history-retention';
-import type { RuntimeState, RuntimeInput } from '../../types';
+import type { RuntimeState, RuntimeInput } from '../types';
 import type { FrameLogEntry } from '../../types/logging';
 import { buildCanonicalEnvSnapshot } from '../../storage/wal/snapshot';
 import type { FrameExecutionState } from './execution-state';

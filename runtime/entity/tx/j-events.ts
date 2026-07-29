@@ -1,5 +1,5 @@
 import type { EntityCandidateEffect, EntityInput, EntityState, HashToSign } from '../types';
-import type { RuntimeState } from '../../types';
+import type { EntityRuntimeContext } from '../runtime-context';
 import type { AccountReplica } from '../../types/account';
 import type { AccountConsensusContext } from '../../account/consensus/context';
 import type { DisputeFinalizationEvidence, JurisdictionEvent, JurisdictionEventData } from '../../types/jurisdiction-events';
@@ -167,7 +167,7 @@ const applyJRangeBlocks = async (
   jurisdictionRef: string,
   signerId: string,
   signature: string,
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   accountConsensusContext: AccountConsensusContext,
   candidateEffects: EntityCandidateEffect[],
   mutableFrameState: boolean,
@@ -263,7 +263,7 @@ const commitJRangeFinality = (
 export const applyJEvent = async (
   entityState: EntityState,
   data: JurisdictionEventData,
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   accountConsensusContext: AccountConsensusContext,
   candidateEffects: EntityCandidateEffect[] = [],
   mutableFrameState = false,
@@ -342,7 +342,7 @@ export type FinalizedJEventContext = {
   entityState: EntityState;
   newState: EntityState;
   event: JurisdictionEvent;
-  env: RuntimeState;
+  env: EntityRuntimeContext;
   accountConsensusContext: AccountConsensusContext;
   blockNumber: number;
   transactionHash: string;
@@ -817,7 +817,7 @@ async function applyDisputeFinalizedJEvent(
 async function applyFinalizedJEvent(
   entityState: EntityState,
   event: JurisdictionEvent,
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   accountConsensusContext: AccountConsensusContext,
   disputeFinalizationEvidence: DisputeFinalizationEvidence[] = [],
   candidateEffects: EntityCandidateEffect[] = [],

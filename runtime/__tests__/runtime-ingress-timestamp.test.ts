@@ -21,7 +21,7 @@ import {
 import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
 import type { AccountState } from '../types/account';
 import type { EntityReplica, JurisdictionConfig } from '../entity/types';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type { JurisdictionEvent } from '../types/jurisdiction-events';
 import { getWallClockMs } from '../infra/time';
 

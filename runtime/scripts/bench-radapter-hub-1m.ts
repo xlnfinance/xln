@@ -56,7 +56,7 @@ import type {
 } from '../storage/types';
 import type { AccountReplica } from '../types/account';
 import type { EntityReplica, EntityState } from '../entity/types';
-import type { RuntimeState, RuntimeInput } from '../types';
+import type { RuntimeState, RuntimeInput } from '../runtime/types';
 
 type Cli = {
   accounts: number;

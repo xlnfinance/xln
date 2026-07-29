@@ -1,6 +1,6 @@
 import { getTokenInfo } from '../account/utils';
 import { scaleWholeTokenAmount } from '../types/rebalance';
-import { type RuntimeState } from '../types';
+import { type RuntimeState } from '../runtime/types';
 import type { JTokenInfo } from '../jadapter/types';
 import { getBootstrapTokenAmount } from '../jurisdiction/bootstrap-economy';
 import {

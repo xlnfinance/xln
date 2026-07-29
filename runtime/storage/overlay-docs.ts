@@ -1,5 +1,5 @@
 import { type RuntimeOverlayRecord } from '../types/account';
-import { type RuntimeState } from '../types';
+import { type RuntimeState } from '../runtime/types';
 import { docRefKey } from './doc-refs';
 import { keyDiff, normalizeEntityId } from './keys';
 import { readValidatedOrNull } from './level';

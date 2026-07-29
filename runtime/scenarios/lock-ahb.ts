@@ -15,7 +15,7 @@
  * - Griefing protection (timelock cascade)
  */
 
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type { EntityInput } from '../entity/types';
 import type { JAdapter } from '../jadapter/types';
 import { getProcess, usd, snap, assertRuntimeIdle, drainRuntime, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed, findReplica, assert, assertBilateralSync, getOffdelta, processJEvents, converge, syncChain, commitRuntimeInput, processWithOffline, convergeWithOffline, advanceScenarioToNextNetworkRetry } from './helpers';

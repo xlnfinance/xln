@@ -104,15 +104,16 @@ These files define correctness and are the first audit target:
 - `runtime/qa/runtime-ascii.ts`
 - `runtime/qa/`
 
-### Generated or compatibility surface
+### Public and machine-owned type surfaces
 
 - `runtime/api/runtime-module.ts`
-- `runtime/types.ts`
+- `runtime/runtime/types.ts`
 
 `runtime/api/runtime-module.ts` is the canonical frontend-facing Runtime module
 contract. It lives at the API boundary rather than in the Runtime source root.
-`runtime/types.ts` is a compatibility barrel while the codebase still migrates to
-domain types under `runtime/types/`.
+`runtime/runtime/types.ts` owns Runtime machine types. Entity and Account types
+remain in their owner folders; new code must import from the owning layer rather
+than recreating a root compatibility barrel.
 Contract bindings are generated under `jurisdictions/typechain-types/`; do not
 recreate a second runtime-local typechain copy.
 

@@ -27,7 +27,7 @@ import { hydrateAccountDocFromStorage } from '../storage/hydration';
 import { projectAccountDoc } from '../storage/projections';
 import type { AccountInput } from '../types/account';
 import type { EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
-import type { RoutedEntityInput } from '../types';
+import type { RoutedEntityInput } from '../runtime/types';
 import type { JurisdictionEvent } from '../types/jurisdiction-events';
 import {
   buildDurableRuntimeMachineSnapshot,

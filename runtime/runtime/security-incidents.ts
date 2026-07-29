@@ -1,4 +1,4 @@
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from './types';
 import type { RuntimeSecurityIncident, RuntimeSecurityIncidentIdentity } from '../protocol/security-incident';
 
 export const MAX_RUNTIME_SECURITY_INCIDENTS = 256;

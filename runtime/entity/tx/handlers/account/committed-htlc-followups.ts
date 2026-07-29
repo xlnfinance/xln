@@ -1,6 +1,6 @@
 import type { AccountPeerInput, AccountReplica, AccountTx, HtlcNoteKey } from '../../../../types/account';
 import type { EntityCandidateEffect, EntityInput, EntityState } from '../../../types';
-import type { RuntimeState } from '../../../../types';
+import type { EntityRuntimeContext } from '../../../runtime-context';
 import { HEAVY_LOGS } from '../../../../infra/debug-flags';
 import {
   validateLocalCommittedHtlcLayer,
@@ -19,7 +19,7 @@ import type { AccountTxTarget } from './orderbook-queue';
 const accountFollowupLog = createStructuredLogger('account.followup');
 
 type HtlcFollowupContext = {
-  env: RuntimeState;
+  env: EntityRuntimeContext;
   state: EntityState;
   newState: EntityState;
   input: AccountPeerInput;
@@ -35,7 +35,7 @@ type HtlcSecretFollowupContext = Pick<
   'env' | 'state' | 'newState' | 'outputs' | 'accountTxs' | 'candidateEffects'
 >;
 
-const getJurisdictionId = (state: EntityState, env: RuntimeState): string =>
+const getJurisdictionId = (state: EntityState, env: EntityRuntimeContext): string =>
   String(state.config?.jurisdiction?.name || env.activeJurisdiction || '').trim();
 
 /**

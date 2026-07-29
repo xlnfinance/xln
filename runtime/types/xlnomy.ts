@@ -1,4 +1,4 @@
-import type { EnvSnapshot } from '../types';
+import type { EnvSnapshot } from '../runtime/types';
 
 // === XLNOMY (JURISDICTION) SYSTEM ===
 

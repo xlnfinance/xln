@@ -3,7 +3,7 @@ import { keccak256, toUtf8Bytes } from 'ethers';
 
 import { normalizeRuntimeId } from '../networking/runtime-id';
 import { compareStableText, safeStringify } from '../protocol/serialization';
-import type { ReliableDeliveryEvidenceBinding, ReliableDeliveryIdentity, ReliableDeliveryReceipt } from '../types';
+import type { ReliableDeliveryEvidenceBinding, ReliableDeliveryIdentity, ReliableDeliveryReceipt } from './types';
 
 const CANONICAL_DIGEST_PATTERN = /^0x[0-9a-f]{64}$/;
 

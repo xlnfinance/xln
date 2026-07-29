@@ -31,7 +31,7 @@ import type { JAdapter } from '../jadapter/types';
 import { canonicalizeProfile, parseProfile } from '../entity/profile';
 import { computeValidatorEncryptionAttestationDigest } from '../protocol/htlc/validator-encryption';
 import type { ConsensusConfig, JurisdictionConfig } from '../entity/types';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type { JReplica } from '../types/jurisdiction-runtime';
 import { installCanonicalRegistrationEvidence } from './helpers/registration-evidence';
 import { resolveDbPath } from '../storage/runtime-dbs';

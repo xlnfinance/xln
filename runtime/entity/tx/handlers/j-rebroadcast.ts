@@ -1,5 +1,5 @@
 import type { EntityInput, EntityReplica, EntityState, HashType } from '../../types';
-import type { RuntimeState } from '../../../types';
+import type { EntityRuntimeContext } from '../../runtime-context';
 import type { JInput } from '../../../jurisdiction/input';
 import type { EntityTx } from '../../../types/entity-tx';
 import type { JTx } from '../../../types/jurisdiction-runtime';
@@ -57,7 +57,7 @@ function normalizeGasBumpBps(value: number | undefined): number | undefined {
 }
 
 const resolveRebroadcastJurisdiction = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   state: EntityState,
 ): { name: string; chainId: bigint; depositoryAddress: string } | undefined => {
   const configuredName = getJurisdictionConfigName(state.config.jurisdiction);
@@ -121,7 +121,7 @@ const buildRebroadcastJTx = (
 export async function handleJRebroadcast(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'j_rebroadcast' }>,
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   mutableFrameState = false,
 ): Promise<EntityTxReducerResult> {
   const newState = prepareEntityTxState(entityState, mutableFrameState);

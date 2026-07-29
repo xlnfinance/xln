@@ -1,4 +1,4 @@
-import type { RuntimeTx } from '../types';
+import type { RuntimeTx } from './types';
 
 type RetryActionTx = Extract<RuntimeTx, { type: 'retryEntityProviderAction' }>;
 type RecordActionResultTx = Extract<RuntimeTx, { type: 'recordEntityProviderActionSubmitResult' }>;

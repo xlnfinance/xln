@@ -1,4 +1,4 @@
-import type { EntityReplica, Proposal } from '@xln/runtime/types';
+import type { EntityReplica, Proposal } from '@xln/runtime/entity/types';
 import {
   projectConsensusPayments,
   type ConsensusPaymentProposalView,

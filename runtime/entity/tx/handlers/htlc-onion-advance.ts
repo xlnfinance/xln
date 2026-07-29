@@ -10,7 +10,7 @@ import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import type { AccountTx, HtlcRoute } from '../../../types/account';
 import type { EntityCandidateEffect, EntityInput, EntityState } from '../../types';
-import type { RuntimeState } from '../../../types';
+import type { EntityRuntimeContext } from '../../runtime-context';
 import { setHtlcRouteNote, terminateHtlcRoute } from '../htlc-route-lifecycle';
 import { applyHtlcSecretFollowups } from './account/committed-htlc-followups';
 
@@ -48,7 +48,7 @@ const cancelInbound = (
 };
 
 const applyFinalAdvance = (
-  _env: RuntimeState,
+  _env: EntityRuntimeContext,
   state: EntityState,
   tx: HtlcOnionAdvanceTx,
   accountTxs: Result['accountTxs'],
@@ -192,7 +192,7 @@ const applyForwardAdvance = (
 };
 
 export const handleHtlcOnionAdvance = async (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   entityState: EntityState,
   rawTx: HtlcOnionAdvanceTx,
   candidateEffects: EntityCandidateEffect[] = [],

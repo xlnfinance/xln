@@ -10,7 +10,7 @@ import { MAX_ACCOUNT_FRAME_TXS } from '../account/consensus/frame';
 import type { AccountReplica, AccountTx } from '../types/account';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { EntityReplica, EntityState } from './types';
-import type { RuntimeState } from '../types';
+import type { EntityRuntimeContext } from './runtime-context';
 import type { EntityTx } from '../types/entity-tx';
 import { findAccountKey, normalizeEntityRef } from './tx/account-key';
 import { accountHasPullResolveQueued } from './tx/cross-jurisdiction-helpers';
@@ -225,7 +225,7 @@ const fitOpeningCohort = (
  * cross-j opening exists but its reciprocal leg is not available yet.
  */
 export const selectCrossJOpeningAccountProposalTxs = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   state: EntityState,
   account: AccountReplica,
 ): AccountTx[] | null | undefined => {
@@ -296,7 +296,7 @@ export const selectCrossJOpeningAccountProposalTxs = (
  * bytes and never read validator-local seeds.
  */
 export const appendDefaultProposerCrossJMaterializations = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   replica: EntityReplica,
   txs: readonly EntityTx[],
 ): EntityTx[] => {

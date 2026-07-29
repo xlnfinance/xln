@@ -41,7 +41,7 @@ import { commitReliableIngress } from '../runtime/reliable-delivery';
 import { createDueScheduledWakeInputs, refreshScheduledWakeIndex } from '../runtime/scheduled-wake';
 import { applyRuntimeInput, createEmptyEnv } from '../runtime';
 import type { ConsensusConfig, EntityReplica, EntityState, ProposedEntityFrame } from '../entity/types';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type { EntityTx } from '../types/entity-tx';
 import type { JurisdictionEvent, ValidatorJHistory } from '../types/jurisdiction-events';
 import { validateConsensusConfig } from '../entity/consensus/config-validation';

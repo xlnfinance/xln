@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { prioritizeJEventFrame } from '../runtime';
 import type { EntityInput, ProposedEntityFrame } from '../entity/types';
-import type { RuntimeInput } from '../types';
+import type { RuntimeInput } from '../runtime/types';
 import type { EntityTx } from '../types/entity-tx';
 
 describe('Runtime J-event frame priority', () => {

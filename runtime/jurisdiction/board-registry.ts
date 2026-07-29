@@ -1,7 +1,7 @@
 import { ethers } from 'ethers';
 
 import type { EntityState, JurisdictionConfig } from '../entity/types';
-import type { RuntimeState } from '../types';
+import type { EntityRuntimeContext } from '../entity/runtime-context';
 import type { JurisdictionEvent } from '../types/jurisdiction-events';
 import type {
   CertifiedBoardAuthorityBinding,
@@ -444,13 +444,13 @@ export const advanceCertifiedBoardFinality = (
   };
 };
 
-export const getCertifiedBoardNodeStore = (env: RuntimeState): CertifiedBoardNodeStore => {
+export const getCertifiedBoardNodeStore = (env: EntityRuntimeContext): CertifiedBoardNodeStore => {
   env.runtimeState ??= {};
   env.runtimeState.certifiedBoardNodes ??= new Map();
   return env.runtimeState.certifiedBoardNodes;
 };
 
-export const cacheCertifiedBoardNodes = (env: RuntimeState, nodes: ReadonlyMap<string, CertifiedBoardPatriciaNode>): void => {
+export const cacheCertifiedBoardNodes = (env: EntityRuntimeContext, nodes: ReadonlyMap<string, CertifiedBoardPatriciaNode>): void => {
   const store = getCertifiedBoardNodeStore(env);
   env.runtimeState ??= {};
   env.runtimeState.pendingCertifiedBoardNodes ??= new Map();
@@ -483,7 +483,7 @@ export const resolveObserverCertifiedBoardHash = (
 ): string | null => resolveObserverCertifiedBoardRecord(observerState, store, entityId)?.boardHash ?? null;
 
 export const resolveSigningCertifiedBoardHash = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   entityId: string,
   requestedJurisdiction?: Pick<JurisdictionConfig, 'chainId' | 'depositoryAddress' | 'entityProviderAddress'>,
   candidateState?: EntityState,
@@ -520,7 +520,7 @@ export const resolveSigningCertifiedBoardHash = (
  * in exactly one stack. Consensus mutation paths must use observer-root lookup.
  */
 export const resolveUniqueCertifiedRegisteredBoardRecord = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   entityId: string,
 ): CertifiedBoardRecord | null => {
   const normalizedEntityId = normalizeBytes32(entityId, 'ENTITY_ID');
@@ -568,7 +568,7 @@ export const resolveUniqueCertifiedRegisteredBoardRecord = (
 };
 
 export const resolveCertifiedRegisteredBoardHash = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   entityId: string,
   claimedJurisdiction: Pick<JurisdictionConfig, 'chainId' | 'depositoryAddress' | 'entityProviderAddress'>,
 ): string | null => {
@@ -686,7 +686,7 @@ export const collectReachableCertifiedBoardNodes = (
   return reachable;
 };
 
-export const assertCertifiedBoardRootsAvailable = (env: RuntimeState): void => {
+export const assertCertifiedBoardRootsAvailable = (env: EntityRuntimeContext): void => {
   const roots = [...env.eReplicas.values()]
     .map((replica) => replica.state.certifiedBoardState?.boardRegistryRoot)
     .filter((root): root is string => Boolean(root));

@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import { createDefaultDelta } from '../account/delta';
 import { handleCreditRequest } from '../server/credit-request';
 import type { AccountState } from '../types/account';
-import type { RuntimeState, RuntimeInput } from '../types';
+import type { RuntimeState, RuntimeInput } from '../runtime/types';
 
 const entity = (byte: string): string => `0x${byte.repeat(32)}`;
 const signer = (byte: string): string => `0x${byte.repeat(20)}`;

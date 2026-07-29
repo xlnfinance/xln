@@ -90,7 +90,7 @@ import {
   validateRuntimeInputAdmission,
 } from '../runtime.ts';
 import type { EntityInput } from '../entity/types';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type { JReplica } from '../types/jurisdiction-runtime';
 import {
   BOOTSTRAP_POLL_MS,

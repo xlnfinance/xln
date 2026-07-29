@@ -5,7 +5,7 @@ import type { AccountPeerInput } from '../../types/account';
 import type { CertifiedBoardAuthorityBinding, CertifiedBoardRecord } from '../../types/entity-board-registry';
 import type { ConsensusOutputOrigin, EntityTx } from '../../types/entity-tx';
 import type { EntityInput, EntityOutput, HashToSign } from '../types';
-import type { RuntimeState } from '../../types';
+import type { EntityRuntimeContext } from '../runtime-context';
 import { cloneAccountInputWithoutPostCommitHankos } from './hanko-witness';
 
 import {
@@ -88,7 +88,7 @@ export const buildConsensusOutputOrigin = (
 
 export const buildConsensusOutputOriginForState = (
   sourceState: EntityState,
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   height: number,
   frameHash: string,
   outputIndex: number,
@@ -273,7 +273,7 @@ const isImmediatePreviousBoardAuthorityLive = (
 export const resolveConsensusOutputBoardAuthority = (
   origin: ConsensusOutputOrigin,
   observerState: EntityState,
-  env: RuntimeState,
+  env: EntityRuntimeContext,
 ): ConsensusOutputBoardAuthorityResolution => {
   const binding = origin.boardAuthority;
   const store = getCertifiedBoardNodeStore(env);
@@ -550,7 +550,7 @@ const collectAccountInputWitnesses = (input: AccountPeerInput): OutputWitness[] 
 export const assertCertifiedEntityOutputWitnesses = async (
   entityTxs: EntityTx[],
   sourceEntityId: string,
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   observerState?: EntityState,
   authorityBoardHash?: string,
 ): Promise<void> => {
@@ -604,7 +604,7 @@ export type VerifiedCertifiedEntityOutput = {
  * that the other validators would later reject.
  */
 export const verifyCertifiedEntityOutput = async (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   observerState: EntityState,
   tx: Extract<EntityTx, { type: 'consensusOutput' }>,
 ): Promise<VerifiedCertifiedEntityOutput> => {
@@ -660,7 +660,7 @@ export const verifyCertifiedEntityOutput = async (
 
 export const buildCertifiedEntityOutputHashes = (
   sourceState: EntityState,
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   height: number,
   frameHash: string,
   outputs: EntityOutput[],

@@ -1,7 +1,7 @@
 import type { BookState, BookOrderState, PriceBucketState, PriceLevelState } from '../orderbook';
 import type { AccountTx } from '../types/account';
 import type { EntityReplica, EntityState, ExternalWalletState } from '../entity/types';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type { JBatch, JBatchState, SentJBatch } from '../jurisdiction/batch';
 import {
   DEFAULT_ACCOUNT_MERKLE_RADIX,

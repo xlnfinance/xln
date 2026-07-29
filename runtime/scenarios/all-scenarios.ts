@@ -9,7 +9,7 @@
  * Run with: bun runtime/scenarios/all-scenarios.ts
  */
 
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import { getPerfMs } from '../infra/time';
 import { scenarioRegistry, type ScenarioEntry } from './index';
 import { assertRuntimeIdle } from './helpers';

@@ -52,7 +52,7 @@ import type { AccountState, AccountInput, AccountTx } from '../types/account';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { ConsensusOutputOrigin, EntityTx } from '../types/entity-tx';
 import type { EntityInput, EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type { JReplica } from '../types/jurisdiction-runtime';
 
 const seed = 'multisig-secondary-hanko alpha beta gamma';

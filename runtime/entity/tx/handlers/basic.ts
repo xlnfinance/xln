@@ -1,6 +1,6 @@
 import { createOrderbookExtState, validateSpreadDistribution } from '../../../orderbook';
 import type { EntityInput, EntityState, Proposal } from '../../types';
-import type { RuntimeState } from '../../../types';
+import type { EntityRuntimeContext } from '../../runtime-context';
 import type { EntityTx } from '../../../types/entity-tx';
 import { formatEntityId } from '../../../presentation/identity-display';
 import { log } from '../../../infra/diagnostics';
@@ -66,7 +66,7 @@ export const handleChatMessageEntityTx = (
 };
 
 export const handleProposeEntityTx = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   entityState: EntityState,
   entityTx: EntityTxOf<'propose'>,
   mutableFrameState = false,
@@ -134,7 +134,7 @@ export const handleProposeEntityTx = (
 };
 
 export const handleVoteEntityTx = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   entityState: EntityState,
   entityTx: EntityTxOf<'vote'>,
   mutableFrameState = false,
@@ -215,7 +215,7 @@ export const handleVoteEntityTx = (
 };
 
 export const handleReissueCertifiedOutputEntityTx = (
-  _env: RuntimeState,
+  _env: EntityRuntimeContext,
   entityState: EntityState,
   entityTx: EntityTxOf<'reissueCertifiedOutput'>,
 ): BasicEntityTxResult => {
@@ -267,7 +267,7 @@ export const handleReissueCertifiedOutputEntityTx = (
 };
 
 export const handleProfileUpdateEntityTx = (
-  _env: RuntimeState,
+  _env: EntityRuntimeContext,
   entityState: EntityState,
   entityTx: EntityTxOf<'profile-update'>,
   mutableFrameState = false,

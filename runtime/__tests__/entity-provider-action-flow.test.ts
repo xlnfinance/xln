@@ -60,7 +60,7 @@ import {
 import { hydrateEntityStateFromStorage } from '../storage/hydration';
 import { projectEntityCoreDoc } from '../storage/projections';
 import type { ConsensusConfig, EntityReplica, EntityState } from '../entity/types';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type { EntityTx } from '../types/entity-tx';
 import type { JTx } from '../types/jurisdiction-runtime';
 import { applyJEventRange } from './helpers/j-history';

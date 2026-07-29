@@ -11,7 +11,7 @@ import {
 import { serializeTaggedJson } from '../protocol/serialization';
 import { clearGossip, closeInfraDb, createEmptyEnv } from '../runtime';
 import { resolveDbPath } from '../storage/runtime-dbs';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import {
   buildCryptographicProfileFixture,
   deriveSingleSignerFixtureEntityId,

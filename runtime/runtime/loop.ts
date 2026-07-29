@@ -5,7 +5,7 @@ import {
   MAX_RUNTIME_J_TXS_PER_JURISDICTION,
 } from './input-validation';
 import { ensureRuntimeState } from './runtime-state';
-import type { RuntimeState, RuntimeInput } from '../types';
+import type { RuntimeState, RuntimeInput } from './types';
 import { closeRuntimeWalDb, closeHistoryViewDb, closeInfraDb, closeStorageDb } from '../storage/runtime-dbs';
 import {
   ENV_APPLY_ALLOWED_KEY,

@@ -1,6 +1,6 @@
 import { resolveEntityProposerId } from '../runtime/entity-output-signer';
 import { compareStableText } from '../protocol/serialization';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 
 export type ControlEntitySummary = {
   entityId: string;

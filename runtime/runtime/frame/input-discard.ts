@@ -1,5 +1,5 @@
 import { createStructuredLogger } from '../../infra/logger';
-import type { RoutedEntityInput, RuntimeInput, RuntimeState } from '../../types';
+import type { RoutedEntityInput, RuntimeInput, RuntimeState } from '../types';
 import { RuntimeEntityInputApplyError } from '../entity-inputs';
 import { ENV_REPLAY_MODE_KEY, readRuntimeMetadata } from '../loop-environment';
 import { cloneRuntimeFrameMempool } from './clone';

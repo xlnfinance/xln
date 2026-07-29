@@ -24,7 +24,7 @@ import { buildQuorumHanko, getEntityConfigBoardHash, verifyHankoForHash } from '
 import type { AccountState } from '../types/account';
 import type { CertifiedRegistrationEvidence } from '../types/jurisdiction-runtime';
 import type { EntityCandidateEffect, EntityState, JurisdictionConfig } from '../entity/types';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type { JurisdictionEvent } from '../types/jurisdiction-events';
 import {
   computeEntityProfileCertificationHash,

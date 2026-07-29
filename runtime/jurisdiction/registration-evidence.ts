@@ -6,7 +6,7 @@ import { EntityProvider__factory } from '../../jurisdictions/typechain-types';
 import { verifyCanonicalReceiptProof, type AuthenticatedRpcLog } from './receipt-codec';
 
 import type { CertifiedRegistrationEvidence, JReplica } from '../types/jurisdiction-runtime';
-import type { RuntimeState, RuntimeTx } from '../types';
+import type { RuntimeState, RuntimeTx } from '../runtime/types';
 import { getCertifiedBoardStackKey } from './board-registry';
 
 const FOUNDATION_ENTITY_ID = ethers.toBeHex(1n, 32).toLowerCase();

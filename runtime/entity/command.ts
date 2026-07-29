@@ -15,7 +15,7 @@ import { validatePersistedValidatorEncryptionManifest } from '../protocol/htlc/v
 import { requireCommittedDirectPaymentRoute } from '../protocol/payments/route';
 import type { EntityCommandNonceState, EntityTx, SignedEntityCommandV1 } from '../types/entity-tx';
 import type { EntityState } from './types';
-import type { RuntimeState } from '../types';
+import type { EntityRuntimeContext } from './runtime-context';
 import {
   assertEntityCommandTxs,
   assertEntityCommandAuthorBindings,
@@ -62,7 +62,7 @@ type ResolvedEntityCommandAuthor = Readonly<{
 }>;
 
 export const resolveEntityCommandBoard = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   state: EntityState,
 ): ResolvedEntityCommandBoard => {
   const canonicalShares = resolveCanonicalEntityBoardShares(state.config);
@@ -126,7 +126,7 @@ export const resolveEntityCommandBoard = (
  * nonce fence, or validator replay path.
  */
 export const resolveEntityCommandAuthor = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   state: EntityState,
   rawSignerId: string,
   board: ResolvedEntityCommandBoard = resolveEntityCommandBoard(env, state),
@@ -194,7 +194,7 @@ const canonicalCommandNonceState = (
 };
 
 export const normalizeEntityCommandNonceBoard = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   state: EntityState,
 ): EntityState => {
   if (!state.entityCommandNonces) return state;
@@ -256,7 +256,7 @@ export const getEntityCommandDisposition = (
 };
 
 export const assertSignedEntityCommand = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   state: EntityState,
   value: unknown,
 ): SignedEntityCommandV1 => {
@@ -313,7 +313,7 @@ export const advanceEntityCommandNonce = (
 };
 
 export const buildSignedEntityCommand = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   state: EntityState,
   authorSignerId: string,
   txs: EntityTx[],
@@ -343,7 +343,7 @@ export const buildSignedEntityCommand = (
 };
 
 const materializeLocallyAuthoredEntityTx = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   state: EntityState,
   tx: EntityTx,
 ): EntityTx => {
@@ -383,7 +383,7 @@ const materializeLocallyAuthoredEntityTx = (
  * Protocol transactions remain on their dedicated authorization lanes.
  */
 export const prepareLocallyAuthoredEntityTxs = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   state: EntityState,
   authorSignerId: string,
   txs: EntityTx[],

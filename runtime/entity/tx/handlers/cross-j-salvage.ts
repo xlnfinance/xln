@@ -11,7 +11,7 @@ import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
 import type { EntityInput, EntityState } from '../../types';
-import type { RuntimeState } from '../../../types';
+import type { EntityRuntimeContext } from '../../runtime-context';
 import type { EntityTx } from '../../../types/entity-tx';
 import { normalizeEntityRef } from '../account-key';
 
@@ -22,7 +22,7 @@ type CrossJurisdictionSalvageResult = {
   outputs: EntityInput[];
 };
 
-const deterministicEntityTimestamp = (state: EntityState, env: RuntimeState): number =>
+const deterministicEntityTimestamp = (state: EntityState, env: EntityRuntimeContext): number =>
   Number(state.timestamp || env.timestamp || 0);
 
 const buildCrossJurisdictionStarterPullArguments = (binary: string): string => {
@@ -86,7 +86,7 @@ const resolveSalvageAccount = (
 };
 
 export const handleCrossJurisdictionSalvageEntityTx = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   entityState: EntityState,
   entityTx: CrossJurisdictionSalvageTx,
   mutableFrameState = false,

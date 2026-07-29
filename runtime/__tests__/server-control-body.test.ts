@@ -6,7 +6,7 @@ import {
 } from '../server/auth';
 import { handleRuntimeInputControl } from '../server/runtime-input-control';
 import { deserializeTaggedJson, serializeTaggedJson } from '../protocol/serialization';
-import type { RuntimeState, RuntimeInput } from '../types';
+import type { RuntimeState, RuntimeInput } from '../runtime/types';
 
 test('control body parser rejects oversized request bodies before deserializing', async () => {
   const request = new Request('http://localhost/api/control/runtime-input', {

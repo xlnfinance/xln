@@ -22,7 +22,7 @@ import { addMessage } from '../../frame-events';
 import { safeStringify } from '../../../protocol/serialization';
 import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
 import type { EntityInput, EntityState } from '../../types';
-import type { RuntimeState } from '../../../types';
+import type { EntityRuntimeContext } from '../../runtime-context';
 import type { EntityTx } from '../../../types/entity-tx';
 import type { ApplyEntityTxOptions } from '../apply';
 import type { AccountTxTarget } from './account';
@@ -36,7 +36,7 @@ type CrossJSetupResult = {
   accountTxs?: AccountTxTarget[];
 };
 
-const deterministicEntityTimestamp = (state: EntityState, env: RuntimeState): number =>
+const deterministicEntityTimestamp = (state: EntityState, env: EntityRuntimeContext): number =>
   Number(state.timestamp || env.timestamp || 0);
 
 const stateForEntityTx = (entityState: EntityState, options?: ApplyEntityTxOptions): EntityState =>
@@ -58,7 +58,7 @@ const materializedIntentBytes = (
 };
 
 const prepareRawCrossJurisdictionIntent = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   state: EntityState,
   route: CrossJurisdictionSwapRoute,
   outputs: EntityInput[],
@@ -140,7 +140,7 @@ const prepareMaterializedCrossJurisdictionRoute = (
 };
 
 export const handlePrepareCrossJurisdictionSwapEntityTx = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   entityState: EntityState,
   entityTx: EntityTxOf<'prepareCrossJurisdictionSwap'>,
   options?: ApplyEntityTxOptions,
@@ -176,7 +176,7 @@ export const handlePrepareCrossJurisdictionSwapEntityTx = (
 };
 
 export const handleMaterializeCrossJurisdictionSwapEntityTx = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   entityState: EntityState,
   entityTx: EntityTxOf<'materializeCrossJurisdictionSwap'>,
   options?: ApplyEntityTxOptions,
@@ -272,7 +272,7 @@ const buildTargetRegistrationTxs = (
 };
 
 export const handleRegisterCrossJurisdictionSwapEntityTx = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   entityState: EntityState,
   entityTx: EntityTxOf<'registerCrossJurisdictionSwap'>,
   options?: ApplyEntityTxOptions,

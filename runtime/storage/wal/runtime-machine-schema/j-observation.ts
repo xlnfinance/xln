@@ -1,6 +1,6 @@
 import { normalizeJurisdictionEvent } from '../../../jurisdiction/event-normalization';
 import { recordValidatorJHistory } from '../../../jurisdiction/local-history';
-import type { RuntimeTx } from '../../../types';
+import type { RuntimeTx } from '../../../runtime/types';
 import {
   requireArray,
   requireBoolean,

@@ -3,7 +3,7 @@ import { registerSignerKey } from '../account/crypto';
 import { serializeTaggedJson } from '../protocol/serialization';
 import { getControlBodyErrorStatus } from './auth';
 import type { parseTaggedControlBody } from './auth';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 
 type SignerControlDeps = {
   parseTaggedControlBody: typeof parseTaggedControlBody;

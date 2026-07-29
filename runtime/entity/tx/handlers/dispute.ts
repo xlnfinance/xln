@@ -8,7 +8,7 @@
 
 import type { AccountReplica, RuntimeOverlayRecord, SwapOffer } from '../../../types/account';
 import type { EntityInput, EntityState } from '../../types';
-import type { RuntimeState } from '../../../types';
+import type { EntityRuntimeContext } from '../../runtime-context';
 import type { EntityTx } from '../../../types/entity-tx';
 import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
@@ -162,7 +162,7 @@ const buildDisputeStartIntent = (
 export const draftPreparedDisputeStartIfReady = async (
   entityState: EntityState,
   counterpartyEntityId: string,
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   storageChanges: RuntimeOverlayRecord[] = [],
   mutableFrameState = false,
 ): Promise<{ newState: EntityState; outputs: EntityInput[] }> => {
@@ -206,7 +206,7 @@ export const draftPreparedDisputeStartIfReady = async (
 export const handlePrepareDispute = async (
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'prepareDispute' }>,
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   storageChanges: RuntimeOverlayRecord[] = [],
   mutableFrameState = false,
 ): Promise<{ newState: EntityState; outputs: EntityInput[] }> => {

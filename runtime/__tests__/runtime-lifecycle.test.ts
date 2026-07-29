@@ -13,7 +13,7 @@ import {
   stopRuntimeLoopAndWait,
   waitForRuntimeProcessingIdle,
 } from '../runtime';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 
 describe('runtime lifecycle', () => {
   test('uses one explicit phase as the lifecycle source of truth', () => {

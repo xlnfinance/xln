@@ -61,7 +61,7 @@ import { buildQuorumHanko, verifyHankoForHash } from '../hanko/signing';
 import { hydrateEntityStateFromStorage } from '../storage/hydration';
 import { projectEntityCoreDoc } from '../storage/projections';
 import type { ConsensusConfig, EntityReplica, EntityState, Proposal } from '../entity/types';
-import type { RuntimeState, RoutedEntityInput } from '../types';
+import type { RuntimeState, RoutedEntityInput } from '../runtime/types';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { EntityTx } from '../types/entity-tx';
 import type { JurisdictionEvent } from '../types/jurisdiction-events';

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { getHealthStatus } from '../server/health';
 import { startJurisdictionWatchers } from '../runtime';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type { JReplica } from '../types/jurisdiction-runtime';
 
 const makeEnv = (replicas: Array<[string, JReplica]>): RuntimeState => ({

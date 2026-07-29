@@ -1,6 +1,6 @@
 import { createStructuredLogger } from '../../infra/logger';
 import { safeStringify } from '../../protocol/serialization';
-import type { RuntimeState, RoutedEntityInput } from '../../types';
+import type { RuntimeState, RoutedEntityInput } from '../types';
 import type { RuntimeEntityInputApplyResult } from '../entity-inputs';
 import {
   selectMatchedCrossJAccountInputPairs,

@@ -2,7 +2,7 @@ import type { Level } from 'level';
 
 import { normalizeRuntimeId } from '../networking/runtime-id';
 import type { EntityState } from '../entity/types';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type { RuntimeOverlayRecord } from '../types/account';
 import {
   findStorageLatestSnapshotAtOrBelow,

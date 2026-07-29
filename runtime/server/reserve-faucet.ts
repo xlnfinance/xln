@@ -1,4 +1,4 @@
-import type { RuntimeInput, RuntimeState } from '../types';
+import type { RuntimeInput, RuntimeState } from '../runtime/types';
 import type { JAdapter } from '../jadapter';
 import { safeStringify } from '../protocol/serialization';
 import { createStructuredLogger } from '../infra/logger';

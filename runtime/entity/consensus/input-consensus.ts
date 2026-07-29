@@ -5,7 +5,7 @@
 
 import { logError, shortHash } from '../../infra/logger';
 import type { EntityInput, EntityReplica } from '../types';
-import type { RuntimeState } from '../../types';
+import type { EntityRuntimeContext } from '../runtime-context';
 import { getPerfMs } from '../../infra/time';
 import { hasProposableAccount } from './account-work-index';
 import { isCanonicalEntityFrameDigest } from './frame';
@@ -160,7 +160,7 @@ const advanceEntityProposal = async (
  * Main entity input processor - handles consensus, proposals, and state transitions
  */
 export const applyEntityInput = async (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   entityReplica: EntityReplica,
   entityInput: EntityInput,
   options: {

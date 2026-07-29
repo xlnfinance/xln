@@ -1,4 +1,4 @@
-import type { BrowserVMState } from '../types';
+import type { BrowserVMState } from '../runtime/types';
 import type { BrowserVmChainCheckpoint, BrowserVMProvider } from './browservm-provider';
 import type { JAdapter, SnapshotId } from './types';
 

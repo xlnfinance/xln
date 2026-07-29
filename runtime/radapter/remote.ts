@@ -1,5 +1,5 @@
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
-import type { RuntimeInput } from '../types';
+import type { RuntimeInput } from '../runtime/types';
 import {
   decodeRuntimeAdapterBrowserMessage,
   decodeRuntimeAdapterMessage,

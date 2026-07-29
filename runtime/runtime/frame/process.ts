@@ -12,7 +12,7 @@ import type { createRuntimeRecoveryApi } from '../../recovery/restore';
 import type { createRuntimeStorageApi } from '../../storage/runtime-storage';
 import { notifyRuntimeSyncAfterCommit } from '../../storage/runtime-storage';
 import type { EntityInput } from '../../entity/types';
-import type { RuntimeInput, RuntimeState } from '../../types';
+import type { RuntimeInput, RuntimeState } from '../types';
 import { getWallClockMs } from '../../infra/time';
 import { clearPendingAuditEvents, flushPendingAuditEvents } from '../env-events';
 import { acquireRuntimeFrameWriter, assertRuntimeWriterAcceptingIngress } from './writer-lock';

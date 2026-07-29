@@ -1,5 +1,5 @@
 import type { EntityCandidateEffect, EntityState, HashToSign } from '../../types';
-import type { RuntimeState } from '../../../types';
+import type { EntityRuntimeContext } from '../../runtime-context';
 import type { EntityTx } from '../../../types/entity-tx';
 import { executeCrontab } from '../../scheduler';
 import { assertScheduledWakeMatchesState } from '../../scheduled-wake-validation';
@@ -8,7 +8,7 @@ import { isCollectiveEntityActionTx } from '../../authorization';
 type ScheduledWakeTx = Extract<EntityTx, { type: 'scheduledWake' }>;
 
 export const handleScheduledWakeEntityTx = async (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   state: EntityState,
   tx: ScheduledWakeTx,
   manualBroadcastInInput: boolean,

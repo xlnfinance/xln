@@ -1,4 +1,4 @@
-import type { RuntimeState, RuntimeInput } from '../types';
+import type { RuntimeState, RuntimeInput } from '../runtime/types';
 import { serializeTaggedJson } from '../protocol/serialization';
 import { getControlBodyErrorStatus } from './auth';
 import type { createRuntimeIngressReceiptStore } from './ingress-receipts';

@@ -5,7 +5,7 @@ import {
 } from '../../account/crypto';
 import { registerReliableIngress } from '../../runtime/reliable-delivery';
 import { createEmptyEnv } from '../../runtime';
-import type { DeliverableEntityInput } from '../../types';
+import type { DeliverableEntityInput } from '../../runtime/types';
 
 const [receiverSeed, senderRuntimeId, encodedOutput] = Bun.argv.slice(2);
 if (!receiverSeed || !senderRuntimeId || !encodedOutput) {

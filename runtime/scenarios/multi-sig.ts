@@ -16,7 +16,7 @@
  */
 
 import type { ConsensusConfig, EntityReplica } from '../entity/types';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type { EntityTx } from '../types/entity-tx';
 import { buildEntityTransactionProposalAction, hashEntityProposalAction } from '../entity/authorization';
 import { prepareLocallyAuthoredEntityTxs } from '../entity/command';

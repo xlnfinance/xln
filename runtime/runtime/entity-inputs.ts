@@ -1,5 +1,5 @@
 import type { JInput } from '../jurisdiction/input';
-import type { RoutedEntityInput, RuntimeState } from '../types';
+import type { RoutedEntityInput, RuntimeState } from './types';
 import {
   createRuntimeEntityInputBatchContext,
   entityInputLog,

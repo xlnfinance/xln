@@ -1,5 +1,5 @@
 import type { EntityReplica } from '../entity/types';
-import type { RuntimeState, RoutedEntityInput, RuntimeInput } from '../types';
+import type { RuntimeState, RoutedEntityInput, RuntimeInput } from './types';
 
 const normalize = (value: unknown): string => String(value ?? '').trim().toLowerCase();
 

@@ -1,7 +1,7 @@
 import { assertCertifiedRegistrationEvidenceStore } from '../../jurisdiction/registration-evidence';
 import { safeStringify } from '../../protocol/serialization';
 import { writeRuntimeMetadata } from '../../runtime/loop-environment';
-import type { RuntimeState } from '../../types';
+import type { RuntimeState } from '../../runtime/types';
 import {
   listStorageSnapshotHeights,
   readStorageFrameRecord,

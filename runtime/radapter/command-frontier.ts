@@ -1,5 +1,5 @@
 import { keccak256, toUtf8Bytes } from 'ethers';
-import type { RuntimeState, RuntimeTx } from '../types';
+import type { RuntimeState, RuntimeTx } from '../runtime/types';
 
 export const MAX_ACTIVE_RUNTIME_ADAPTER_COMMAND_LANES = 1_024;
 

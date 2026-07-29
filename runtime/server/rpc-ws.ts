@@ -22,7 +22,7 @@ import type {
   RuntimeAdapterReadQuery,
 } from '../radapter/types';
 import type { RuntimeAdapterRequest } from '../radapter/types';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type { RelaySocket } from './relay-direct';
 import type { RegisterReceiptOptions, RuntimeIngressReceipt } from './ingress-receipts';
 

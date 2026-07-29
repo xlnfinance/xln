@@ -1,4 +1,4 @@
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from './types';
 import {
   assertReliableIngressSourceLaneBound,
   assertReliableIngressSourceLaneCapacity,

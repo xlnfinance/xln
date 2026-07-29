@@ -1,4 +1,4 @@
-import type { RuntimeState, RoutedEntityInput } from '../types';
+import type { RuntimeState, RoutedEntityInput } from './types';
 import { keccak256, toUtf8Bytes } from 'ethers';
 import { buildRouteOutputKey } from './output-routing';
 

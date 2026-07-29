@@ -17,7 +17,7 @@
  * Run with: bun runtime/scenarios/rapid-fire.ts
  */
 
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type { EntityInput } from '../entity/types';
 import { getPerfMs } from '../infra/time';
 import {

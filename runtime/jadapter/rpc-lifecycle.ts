@@ -1,6 +1,6 @@
 import { ethers } from 'ethers';
 
-import type { BrowserVMState } from '../types';
+import type { BrowserVMState } from '../runtime/types';
 import { rpcLog } from './rpc-public';
 import type { JAdapter, JEvent, SnapshotId } from './types';
 

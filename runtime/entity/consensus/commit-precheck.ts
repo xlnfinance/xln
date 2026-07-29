@@ -1,7 +1,8 @@
 import { encodeCanonicalConsensusValue } from '../../protocol/canonical-consensus-value';
 import { verifyAccountSignature } from '../../account/crypto';
 import type { ConsensusConfig, EntityReplica, HashToSign, ProposedEntityFrame } from '../types';
-import type { RuntimeState, RoutedEntityInput } from '../../types';
+import type { EntityRuntimeContext } from '../runtime-context';
+import type { EntityConsensusInput } from './input-types';
 import { createEntityFrameHashFromStateRoot, isCanonicalEntityFrameDigest } from './frame';
 import { getEntityHashManifestMismatch } from './hanko-witness';
 
@@ -10,7 +11,7 @@ const normalize = (value: unknown): string =>
     .trim()
     .toLowerCase();
 
-const exactReplica = (env: RuntimeState, input: RoutedEntityInput): EntityReplica | null => {
+const exactReplica = (env: EntityRuntimeContext, input: EntityConsensusInput): EntityReplica | null => {
   const entityId = normalize(input.entityId);
   const signerId = normalize(input.signerId);
   for (const replica of env.eReplicas.values()) {
@@ -69,7 +70,10 @@ const signerShares = (config: ConsensusConfig, signerId: string): bigint | null 
  * Scheduling precheck only: proves that a real configured quorum signed the
  * claimed manifest. Consensus still replays state and recomputes every hash.
  */
-export const hasVerifiedEntityCommitPrecertificate = (env: RuntimeState, input: RoutedEntityInput): boolean => {
+export const hasVerifiedEntityCommitPrecertificate = (
+  env: EntityRuntimeContext,
+  input: EntityConsensusInput,
+): boolean => {
   const frame = input.proposedFrame;
   const replica = frame ? exactReplica(env, input) : null;
   const config = replica?.state.config;

@@ -460,7 +460,7 @@ Both sides compute identically because the feeAmount comes from the stored quote
 
 | file | change |
 |------|--------|
-| `runtime/types.ts` | RebalancePolicy, RebalanceQuote, AccountMachine fields, accountTx types |
+| `runtime/types/account.ts` | RebalancePolicy, RebalanceQuote, Account state fields |
 | `runtime/account/tx/apply.ts` | wire 4 new handlers |
 | `runtime/account/tx/handlers/set-rebalance-policy.ts` | new handler |
 | `runtime/account/tx/handlers/rebalance-request.ts` | refactored from request-quote |

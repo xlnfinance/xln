@@ -50,7 +50,7 @@ import { generateLazyEntityId } from '../entity/factory';
 import { buildRouteOutputKey } from '../runtime/output-routing';
 import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
 import type { StorageEntityCoreDoc, StorageFrameRecord } from '../storage/types';
-import type { DeliverableEntityInput } from '../types';
+import type { DeliverableEntityInput } from '../runtime/types';
 import type { JurisdictionConfig } from '../entity/types';
 import type { JReplica } from '../types/jurisdiction-runtime';
 import {

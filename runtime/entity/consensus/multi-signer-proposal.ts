@@ -7,7 +7,7 @@ import {
   cloneIsolatedProposedEntityFrame,
 } from '../input-clone';
 import type { EntityReplica, EntityState, ProposedEntityFrame, EntityCandidate } from '../types';
-import type { RuntimeState } from '../../types';
+import type { EntityRuntimeContext } from '../runtime-context';
 import { createEntityFrameHashFromStateRoot, entityFrameEventsEqual } from './frame';
 import { applyEntityFrame } from './frame-application';
 import {
@@ -33,7 +33,7 @@ import {
 } from './state-root';
 
 const replayPreparedFrameForRelay = async (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   replica: EntityReplica,
   frame: ProposedEntityFrame,
 ): Promise<EntityCandidate> => {
@@ -201,7 +201,7 @@ const buildProposalState = (
 });
 
 const signProposalManifest = async (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   replica: EntityReplica,
   state: EntityState,
   hashesToSign: ReturnType<typeof buildEntityHashesToSign>,

@@ -16,7 +16,7 @@ import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
 import type { EntityInput, EntityState } from '../../types';
-import type { RuntimeState } from '../../../types';
+import type { EntityRuntimeContext } from '../../runtime-context';
 import type { EntityTx } from '../../../types/entity-tx';
 import type { RuntimeOverlayRecord } from '../../../types/account';
 import { formatEntityId } from '../../../presentation/identity-display';
@@ -36,7 +36,7 @@ type CrossJurisdictionSweepResult = {
   accountTxs?: AccountTxTarget[];
 };
 
-const deterministicEntityTimestamp = (state: EntityState, env: RuntimeState): number =>
+const deterministicEntityTimestamp = (state: EntityState, env: EntityRuntimeContext): number =>
   Number(state.timestamp || env.timestamp || 0);
 
 const cancelOrderbookOfferIfPresent = (
@@ -125,7 +125,7 @@ const transitionExpiredRoute = (
 };
 
 export const handleOrderbookSweepCrossJurisdictionEntityTx = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   entityState: EntityState,
   entityTx: CrossJurisdictionSweepTx,
   storageChanges: RuntimeOverlayRecord[] = [],

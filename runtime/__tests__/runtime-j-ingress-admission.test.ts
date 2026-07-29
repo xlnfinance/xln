@@ -8,7 +8,7 @@ import {
   validateRuntimeInputAdmission,
 } from '../runtime';
 import type { JTx } from '../types/jurisdiction-runtime';
-import type { RuntimeInput } from '../types';
+import type { RuntimeInput } from '../runtime/types';
 
 const jurisdiction = 'Testnet';
 const tx = (): JTx => ({

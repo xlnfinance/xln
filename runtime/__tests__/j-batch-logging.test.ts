@@ -12,7 +12,7 @@ import { hydrateEntityStateFromStorage } from '../storage/hydration';
 import { projectEntityCoreDoc } from '../storage/projections';
 import type { DebtEntry } from '../types/debt';
 import type { EntityState } from '../entity/types';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type { EntityTx } from '../types/entity-tx';
 
 const entityId = `0x${'aa'.repeat(32)}`;

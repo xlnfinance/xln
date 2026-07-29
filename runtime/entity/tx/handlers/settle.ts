@@ -19,7 +19,7 @@ import { getAccountPerspective } from '../../../account/perspective';
 import { addMessage } from '../../frame-events';
 import { initJBatch, batchAddSettlement } from '../../../jurisdiction/batch';
 import { isLeftEntity } from '../../id';
-import type { RuntimeState } from '../../../types';
+import type { EntityRuntimeContext } from '../../runtime-context';
 import type { HashToSign } from '../../types';
 import { createSettlementHashWithNonce, createDisputeProofHashWithNonce } from '../../../protocol/dispute/proof-builder';
 import { verifyHankoForHash } from '../../../hanko/signing';
@@ -46,7 +46,7 @@ import type { AccountReplica } from '../../../types/account';
 const settleLog = createStructuredLogger('entity.settle');
 
 const buildPostSettlementDisputeProof = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   entityState: EntityState,
   account: AccountReplica,
   settlementNonce: number,
@@ -83,7 +83,7 @@ export const buildSettlementSealDraft = (
   account: AccountReplica,
   entityState: EntityState,
   counterpartyEntityId: string,
-  env: RuntimeState,
+  env: EntityRuntimeContext,
 ): SettlementSealDraft => {
   const workspace = account.settlementWorkspace;
   if (!workspace) throw new Error('SETTLEMENT_WORKSPACE_MISSING');
@@ -170,7 +170,7 @@ const assertNoPendingSettlementTransition = (account: AccountReplica): void => {
 export async function handleSettlePropose(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'settle_propose' }>,
-  _env: RuntimeState,
+  _env: EntityRuntimeContext,
   mutableFrameState = false,
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; accountTxs: AccountTxTarget[] }> {
   const { counterpartyEntityId, executorIsLeft: execParam, memo, ops } = entityTx.data;
@@ -224,7 +224,7 @@ export async function handleSettlePropose(
 export async function handleSettleUpdate(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'settle_update' }>,
-  _env: RuntimeState,
+  _env: EntityRuntimeContext,
   mutableFrameState = false,
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; accountTxs: AccountTxTarget[] }> {
   const { counterpartyEntityId, executorIsLeft: execParam, memo, ops } = entityTx.data;
@@ -282,7 +282,7 @@ export async function handleSettleUpdate(
 export async function handleSettleApprove(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'settle_approve' }>,
-  _env: RuntimeState,
+  _env: EntityRuntimeContext,
   mutableFrameState = false,
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; accountTxs: AccountTxTarget[]; hashesToSign?: Array<{ hash: string; type: 'settlement' | 'dispute'; context: string }> }> {
   const { counterpartyEntityId, workspaceHash: requestedWorkspaceHash } = entityTx.data;
@@ -353,7 +353,7 @@ const assertCompiledSettlementDiffs = (
 };
 
 const prepareSettlementExecution = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   entityState: EntityState,
   account: AccountReplica,
   workspace: SettlementWorkspace,
@@ -433,7 +433,7 @@ const prepareSettlementExecution = (
 type PreparedSettlementExecution = ReturnType<typeof prepareSettlementExecution>;
 
 const verifySettlementHanko = async (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   entityState: EntityState,
   hanko: string,
   hash: string,
@@ -458,7 +458,7 @@ const verifySettlementHanko = async (
 };
 
 const verifySettlementExecutionHankos = async (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   entityState: EntityState,
   account: AccountReplica,
   counterpartyEntityId: string,
@@ -539,7 +539,7 @@ const queueSettlementExecution = (
 export async function handleSettleExecute(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'settle_execute' }>,
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   mutableFrameState = false,
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; accountTxs: AccountTxTarget[] }> {
   const { counterpartyEntityId, disableC2RShortcut = false } = entityTx.data;
@@ -632,7 +632,7 @@ export async function handleSettleExecute(
 export async function handleSettleReject(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'settle_reject' }>,
-  _env: RuntimeState,
+  _env: EntityRuntimeContext,
   mutableFrameState = false,
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; accountTxs: AccountTxTarget[] }> {
   const { counterpartyEntityId, reason } = entityTx.data;
@@ -694,7 +694,7 @@ export async function processCommittedSettlementTransitionFollowup(
   committedFrame: AccountFrame,
   counterpartyEntityId: string,
   entityState: EntityState,
-  _env: RuntimeState,
+  _env: EntityRuntimeContext,
 ): Promise<CommittedSettlementFollowup> {
   const empty = (): CommittedSettlementFollowup => ({ outputs: [], accountTxs: [], hashesToSign: [] });
   if (

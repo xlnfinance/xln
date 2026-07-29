@@ -1,5 +1,5 @@
 import type { Depository, EntityProvider } from '../../jurisdictions/typechain-types/index.ts';
-import type { RuntimeState, RuntimeTx } from '../types';
+import type { RuntimeState, RuntimeTx } from '../runtime/types';
 import {
   enqueueJHistoryRange,
   findWatcherJurisdictionReplica,

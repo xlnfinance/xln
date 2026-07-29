@@ -30,7 +30,7 @@ import type {
   RuntimeInput,
   RuntimeState,
   RoutedEntityInput,
-} from '../../types';
+} from '../../runtime/types';
 import type { RuntimeInputApplyResult } from '../../runtime/frame/apply';
 import type { RuntimeOutputRoutingDeps } from '../../runtime/output-routing';
 import type { PersistedFrameJournal } from '../types';

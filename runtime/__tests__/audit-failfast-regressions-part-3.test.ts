@@ -254,7 +254,7 @@ import { QUOTE_EXPIRY_MS } from '../types/rebalance';
 
 import type { AccountFrame, AccountInput, AccountState, AccountTx } from '../types/account';
 import type { ConsensusConfig, EntityInput, EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
-import type { RuntimeState, RuntimeTx } from '../types';
+import type { RuntimeState, RuntimeTx } from '../runtime/types';
 import type { JInput } from '../jurisdiction/input';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { DisputeFinalizationEvidence, JurisdictionEvent } from '../types/jurisdiction-events';

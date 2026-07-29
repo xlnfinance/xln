@@ -1,5 +1,5 @@
 import type { EntityInput } from '../../entity/types';
-import type { RuntimeState } from '../../types';
+import type { RuntimeState } from '../types';
 import type { RuntimeProcessProfile } from './process-profile';
 
 type RuntimeLifecycleState = NonNullable<RuntimeState['runtimeState']>;

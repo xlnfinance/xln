@@ -11,7 +11,7 @@ import {
   registerCommittedSingleSignerWallets,
 } from '../runtime/recovery-infra';
 import { replayPersistedRuntimeJournals } from '../storage/recovery/journal';
-import type { RuntimeState, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeTx } from '../types';
+import type { RuntimeState, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeTx } from '../runtime/types';
 import type { PersistedFrameJournal } from './../storage/types';
 import type { RuntimeRecoveryBundleV1 } from './../recovery/types';
 import { loadGossipProfilesFromInfraDb } from '../runtime/infra-gossip-store';

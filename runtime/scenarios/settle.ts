@@ -10,7 +10,7 @@
  * Also tests auto-approve logic and conservation law validation.
  */
 
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type { SettlementDiff, SettlementOp } from '../types/account';
 import { compileOps } from '../protocol/settlement/operations';
 import { snap, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, getProcess, syncChain, findReplica, setScenarioStorageEnabled, converge, processUntil, processJEvents } from './helpers';

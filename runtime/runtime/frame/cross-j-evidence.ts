@@ -1,6 +1,6 @@
 import { accountInputAck, accountInputProposal } from '../../account/consensus/flush';
 import { getEffectiveEntityInputTxs } from '../../entity/consensus/output-envelope';
-import type { RuntimeState, RoutedEntityInput } from '../../types';
+import type { RuntimeState, RoutedEntityInput } from '../types';
 import { selectMatchedCrossJAccountInputPairs } from '../entity-routing';
 import { recordRuntimeSecurityIncident } from '../security-incidents';
 

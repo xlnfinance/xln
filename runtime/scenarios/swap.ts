@@ -17,7 +17,7 @@
  */
 
 import type { AccountReplica } from '../types/account';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type { EntityInput } from '../entity/types';
 import { ethers } from 'ethers';
 import { getBestAsk, SWAP_LOT_SCALE } from '../orderbook';

@@ -34,7 +34,7 @@ import {
 } from '../storage/wal/snapshot';
 import type { AccountInput } from '../types/account';
 import type { ConsensusConfig, EntityInput, EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
-import type { RuntimeState, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../types';
+import type { RuntimeState, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../runtime/types';
 import type { JReplica } from '../types/jurisdiction-runtime';
 import { enableStrictScenario } from '../scenarios/helpers';
 import { cloneAccountInputWithoutPostCommitHankos } from '../entity/consensus/hanko-witness';

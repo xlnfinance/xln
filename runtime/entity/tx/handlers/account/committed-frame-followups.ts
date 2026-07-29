@@ -1,6 +1,6 @@
 import type { AccountFrame, AccountTx, HtlcNoteKey, HtlcRoute } from '../../../../types/account';
 import type { EntityCandidateEffect, EntityState } from '../../../types';
-import type { RuntimeState } from '../../../../types';
+import type { EntityRuntimeContext } from '../../../runtime-context';
 import { HEAVY_LOGS } from '../../../../infra/debug-flags';
 import { cancelHook } from '../../../scheduler';
 import { pruneSettledOriginatedHtlcRoutes, terminateHtlcRoute } from '../../htlc-route-lifecycle';
@@ -11,11 +11,11 @@ import { applyCommittedLendingFollowup } from './committed-lending-followup';
 
 const accountFollowupLog = createStructuredLogger('account.followup');
 
-const jurisdictionIdFor = (state: EntityState, env?: RuntimeState): string =>
+const jurisdictionIdFor = (state: EntityState, env?: EntityRuntimeContext): string =>
   String(state.config?.jurisdiction?.name || env?.activeJurisdiction || '').trim();
 
 function emitOriginatedHtlcFinalized(
-  env: RuntimeState | undefined,
+  env: EntityRuntimeContext | undefined,
   state: EntityState,
   route: HtlcRoute,
   accountTx: Extract<AccountTx, { type: 'htlc_resolve' }>,
@@ -52,7 +52,7 @@ export function applyCommittedAccountFrameFollowups(
   counterpartyId: string,
   committedFrame: AccountFrame,
   accountTxs: AccountTxTarget[],
-  env: RuntimeState | undefined,
+  env: EntityRuntimeContext | undefined,
   candidateEffects: EntityCandidateEffect[],
 ): void {
   if (HEAVY_LOGS) {

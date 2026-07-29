@@ -95,7 +95,7 @@ import type {
 import type { AccountTx, Delta } from '../types/account';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { EntityReplica } from '../entity/types';
-import type { RuntimeState, RuntimeInput } from '../types';
+import type { RuntimeState, RuntimeInput } from '../runtime/types';
 
 import type { BookState } from '../orderbook';
 

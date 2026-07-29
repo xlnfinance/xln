@@ -6,7 +6,7 @@ import {
   resolveRuntimeAdapterAuthSeed,
 } from '../radapter/auth';
 import { safeStringify } from '../protocol/serialization';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 
 const DEFAULT_PAIRING_TTL_MS = 60_000;
 const DEFAULT_CAPABILITY_TTL_MS = 60 * 60 * 1_000;

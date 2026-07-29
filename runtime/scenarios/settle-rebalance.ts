@@ -17,7 +17,7 @@
  * - Never trigger from (outCollateral + outPeerCredit), otherwise post-topup spam appears.
  */
 
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type { SettlementDiff, SettlementOp } from '../types/account';
 import {
   getProcess, advanceScenarioTime, enableStrictScenario, converge, syncChain,

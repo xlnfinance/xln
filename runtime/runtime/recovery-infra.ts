@@ -4,7 +4,7 @@ import { setBrowserVMJurisdiction } from '../jadapter';
 import { findWatcherJurisdictionReplica } from '../jadapter/helpers';
 import { requireDurableJurisdictionStack } from '../jurisdiction/contract-address';
 import type { EntityReplica } from '../entity/types';
-import type { RuntimeState, RuntimeTx } from '../types';
+import type { RuntimeState, RuntimeTx } from './types';
 import type { JReplica } from '../types/jurisdiction-runtime';
 import { createStructuredLogger } from '../infra/logger';
 import { ensureLiveJAdapterForReplica } from './infra';

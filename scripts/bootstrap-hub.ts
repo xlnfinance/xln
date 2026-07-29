@@ -16,7 +16,7 @@ import { encodeBoard, hashBoard } from '../runtime/entity/factory';
 import { createStructuredLogger } from '../runtime/infra/logger';
 import { requireJurisdictionBlockTimeMs } from '../runtime/orchestrator/mesh-jurisdictions';
 import type { ConsensusConfig } from '../runtime/entity/types';
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeState } from '../runtime/runtime/types';
 
 const args = process.argv.slice(2);
 

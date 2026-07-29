@@ -1,4 +1,4 @@
-import type { RuntimeState, RuntimeInput } from '../../types';
+import type { RuntimeState, RuntimeInput } from '../types';
 import { requireRuntimeMempool } from '../input-queue';
 import { ensureRuntimeState } from '../runtime-state';
 import type { FrameExecutionState } from './execution-state';

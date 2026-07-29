@@ -27,7 +27,7 @@ import { getBootstrapCreditAmount, HUB_DEFAULT_MIN_TRADE_SIZE } from '../orchest
 import { createEmptyEnv } from '../runtime';
 import type { AccountState } from '../types/account';
 import type { EntityReplica } from '../entity/types';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import { createDefaultDelta } from '../account/delta';
 import { LIMITS } from '../config/constants';
 import { encodeBuffer } from '../storage/codec';

@@ -8,7 +8,7 @@ import type {
   ReliableDeliveryIdentity,
   ReliableDeliveryReceipt,
   RoutedEntityInput,
-} from '../types';
+} from './types';
 import { getReliableIdentityValidationError } from './reliable-frontier';
 import { getReliableOutputIdentity } from './output-routing';
 

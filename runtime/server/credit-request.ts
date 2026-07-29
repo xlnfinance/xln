@@ -1,5 +1,5 @@
 import type { AccountState } from '../types/account';
-import type { RuntimeInput, RuntimeState } from '../types';
+import type { RuntimeInput, RuntimeState } from '../runtime/types';
 import { safeStringify } from '../protocol/serialization';
 import { resolveEntityProposerId } from '../runtime/entity-output-signer';
 import { getAccountState, getEntityOutCapacity, hasAccount } from './entity-lookup';

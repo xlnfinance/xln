@@ -1,5 +1,5 @@
 import type { EntityTx } from '../types/entity-tx';
-import type { RoutedEntityInput } from '../types';
+import type { RoutedEntityInput } from './types';
 
 const OUTBOX_BACKPRESSURE_EXEMPT_TXS = new Set<EntityTx['type']>([
   'scheduledWake',

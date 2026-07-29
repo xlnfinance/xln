@@ -1,4 +1,4 @@
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import { summarizeLendingState } from '../extensions/lending';
 import { safeStringify } from '../protocol/serialization';
 import { isEntityId32 } from './utils';

@@ -37,7 +37,7 @@ import {
 import { deliveryAccepted, deliveryFailure } from '../protocol/payments/delivery-result';
 import { applyRuntimeInput, createEmptyEnv } from '../runtime';
 import { buildDurableRuntimeMachineSnapshot, restoreDurableRuntimeSnapshot } from '../storage/wal/snapshot';
-import type { DeliverableEntityInput, RuntimeState, RuntimeEntityInputsEnvelope } from '../types';
+import type { DeliverableEntityInput, RuntimeState, RuntimeEntityInputsEnvelope } from '../runtime/types';
 import type { EntityLeaderTimeoutVote, EntityReplica, EntityState } from '../entity/types';
 
 const runtime = (seed: string): RuntimeState => {

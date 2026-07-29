@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from 'bun:test';
 import { requireRuntimeSeed, setScenarioStorageEnabled } from '../scenarios/helpers';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 
 const originalXlnRuntimeSeed = process.env['XLN_RUNTIME_SEED'];
 const originalRuntimeSeed = process.env['RUNTIME_SEED'];

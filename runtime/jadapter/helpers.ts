@@ -8,7 +8,7 @@ import { isHexString } from 'ethers';
 import type { JEvent, JEventIngress } from './types';
 import type { DisputeFinalizationEvidence, JPrefixAttestation, ValidatorJEventBlock } from '../types/jurisdiction-events';
 import type { EntityInput, JurisdictionConfig } from '../entity/types';
-import type { RuntimeState, RuntimeInput, RuntimeTx } from '../types';
+import type { RuntimeState, RuntimeInput, RuntimeTx } from '../runtime/types';
 import type { JReplica } from '../types/jurisdiction-runtime';
 import { enqueueRuntimeInput } from '../runtime/input-queue';
 import { createStructuredLogger, shortId } from '../infra/logger';

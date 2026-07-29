@@ -1,6 +1,6 @@
 import { ethers } from 'ethers';
 import type { EntityTx } from '../types/entity-tx';
-import type { RuntimeState, RuntimeInput } from '../types';
+import type { RuntimeState, RuntimeInput } from '../runtime/types';
 import { safeStringify } from '../protocol/serialization';
 import type { Profile } from '../entity/profile';
 import { normalizeRuntimeKey, pushDebugEvent, type RelayStore } from '../relay/store';

@@ -3,7 +3,7 @@ import { deriveSignerAddressSync } from '../account/crypto';
 import { decodeRuntimeAdapterRequest, encodeRuntimeAdapterMessageForBrowser } from '../radapter/codec';
 import { signRuntimeAdapterServerIdentity } from '../radapter/server-identity-signer';
 import type { RuntimeAdapterRequest } from '../radapter/types';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import { DaemonRpcClient } from '../../custody/daemon-client';
 
 const originalWebSocket = globalThis.WebSocket;

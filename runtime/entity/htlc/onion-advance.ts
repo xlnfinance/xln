@@ -1,7 +1,7 @@
 import { HTLC } from '../../config/constants';
 import type { HtlcLock } from '../../types/account';
 import type { EntityState } from '../types';
-import type { RuntimeState } from '../../types';
+import type { EntityRuntimeContext } from '../runtime-context';
 import type { EntityTx } from '../../types/entity-tx';
 
 import { getCertifiedBoardNodeStore, resolveObserverCertifiedBoardHash } from '../../jurisdiction/board-registry';
@@ -88,7 +88,7 @@ const layerContextHash = (state: EntityState, lock: HtlcLock): string =>
   });
 
 export const validateHtlcSecretOfferForLock = async (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   observerState: EntityState,
   payerEntityId: string,
   beneficiaryEntityId: string,
@@ -125,7 +125,7 @@ export const validateHtlcSecretOfferForLock = async (
 };
 
 export const validateLocalCommittedHtlcLayer = async (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   state: EntityState,
   lock: HtlcLock,
   envelope: HtlcEncryptedEnvelope,
@@ -266,7 +266,7 @@ const requireCommittedLayerHash = (
 };
 
 const validateFinalAdvance = async (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   state: EntityState,
   inboundEntityId: string,
   lock: HtlcLock,
@@ -308,7 +308,7 @@ const validateFinalAdvance = async (
 };
 
 const validateAcceptedOfferAdvance = async (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   state: EntityState,
   inboundEntityId: string,
   inboundLockId: string,
@@ -505,7 +505,7 @@ const validateOnionFields = (
 };
 
 const validateOnionAdvance = async (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   state: EntityState,
   tx: HtlcOnionAdvanceTx,
   fields: ValidatedOnionFields,
@@ -549,7 +549,7 @@ const validateOnionAdvance = async (
 };
 
 export const validateHtlcOnionAdvanceTx = async (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   state: EntityState,
   tx: HtlcOnionAdvanceTx,
 ): Promise<{ tx: HtlcOnionAdvanceTx }> => {

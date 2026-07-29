@@ -1,4 +1,4 @@
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type { JAdapter } from '../jadapter';
 import { DEV_CHAIN_IDS } from '../jadapter';
 import { createStructuredLogger } from '../infra/logger';

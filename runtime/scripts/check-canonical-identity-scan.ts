@@ -7,7 +7,7 @@ import {
   getJurisdictionIdentityRef,
   sameJurisdictionIdentity,
 } from '../jurisdiction/jurisdiction-runtime';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type { JReplica } from '../types/jurisdiction-runtime';
 
 const readText = (path: string): string => {

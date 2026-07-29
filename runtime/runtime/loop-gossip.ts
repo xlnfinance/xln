@@ -1,4 +1,4 @@
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from './types';
 import { clearInfraGossipProfiles } from './infra-gossip-store';
 import {
   drainInfraDbWrites,

@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   assertCrossJurisdictionSwapTargetReady,
   planSwapCommand,
-} from '../account/swap-command-plan';
+} from '../runtime/swap-command-plan';
 import { createDefaultDelta } from '../account/delta';
 import { entity, makeAccount } from './helpers/cross-j';
 

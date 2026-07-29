@@ -82,7 +82,7 @@ import { createStructuredLogger } from '../infra/logger';
 import { cumulativeMarksToDurations } from '../infra/perf-profile';
 import type { CertifiedBoardPatriciaNode } from '../types/entity-board-registry';
 import type { EntityState } from '../entity/types';
-import type { RuntimeState, RoutedEntityInput, RuntimeInput, RuntimeHistoryRecord } from '../types';
+import type { RuntimeState, RoutedEntityInput, RuntimeInput, RuntimeHistoryRecord } from '../runtime/types';
 import { cloneIsolatedRoutedEntityInputs } from '../runtime/input-clone';
 import {
   collectReachableCertifiedBoardNodes,
@@ -111,7 +111,7 @@ import {
   finalizePersistedAccountJClaimNodes,
   getLiveAccountJClaimAccumulatorStates,
   getSafePendingAccountJClaimDeletes,
-} from '../account/j-claim-store';
+} from '../entity/account-j-claim-node-store';
 import {
   buildDurableRuntimeMempool,
   buildDurableRuntimeMachineSnapshot,

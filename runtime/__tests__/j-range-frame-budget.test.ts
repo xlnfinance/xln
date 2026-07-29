@@ -25,7 +25,7 @@ import { EMPTY_J_HISTORY_ROOT } from '../jurisdiction/history-consensus';
 import { recordValidatorJHistory } from '../jurisdiction/local-history';
 import { createEmptyEnv } from '../runtime';
 import type { EntityReplica, EntityState } from '../entity/types';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type { EntityTx } from '../types/entity-tx';
 import type { JurisdictionEventBlock, JurisdictionEventData, ValidatorJEventBlock, ValidatorJHistory } from '../types/jurisdiction-events';
 

@@ -1,6 +1,6 @@
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import { dirname } from 'path';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type { JAdapter } from '../jadapter';
 import { normalizeJurisdictionKey, selectWritableJurisdictionKey, type WritableJurisdictionEntry } from '../jurisdiction/jurisdiction-key';
 import { resolveJurisdictionsJsonPath } from '../jurisdiction/jurisdictions-path';

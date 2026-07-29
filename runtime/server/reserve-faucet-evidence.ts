@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import {
   findReserveUpdatedEvidence,
   type ReserveUpdatedEvidence,

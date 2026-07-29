@@ -11,7 +11,7 @@ import {
 } from '../jurisdiction/registration-evidence';
 import type { DisputeFinalizationEvidence } from '../types/jurisdiction-events';
 import type { JReplica } from '../types/jurisdiction-runtime';
-import type { RuntimeState, RuntimeTx } from '../types';
+import type { RuntimeState, RuntimeTx } from '../runtime/types';
 import { decodeJEventLog } from './j-event-log-decoder';
 import {
   shouldEmitExternalWalletAllowanceDelta,

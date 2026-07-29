@@ -1,5 +1,5 @@
 import type { EntityTx } from '../types/entity-tx';
-import type { RoutedEntityInput, RuntimeState } from '../types';
+import type { RoutedEntityInput, RuntimeState } from './types';
 import { safeStringify } from '../protocol/serialization';
 import { resolveEntityProposerId } from './entity-output-signer';
 import { getPerfMs } from '../infra/time';

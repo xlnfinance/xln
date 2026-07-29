@@ -17,7 +17,7 @@ import {
 } from '../radapter/command-frontier-auth';
 import { projectRuntimeIngressReceiptForWire } from '../server/ingress-receipts';
 import { encodeBinaryPayload } from '../storage/binary-codec';
-import type { RuntimeTx } from '../types';
+import type { RuntimeTx } from '../runtime/types';
 import type { RuntimeAdapterWireMessage } from '../radapter/wire-schema';
 
 const previousWsMax = process.env['XLN_WS_MAX_MESSAGE_BYTES'];

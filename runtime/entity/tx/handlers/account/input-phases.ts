@@ -1,6 +1,6 @@
 import type { AccountPeerInput, AccountReplica } from '../../../../types/account';
 import type { EntityState } from '../../../types';
-import type { RuntimeState } from '../../../../types';
+import type { EntityRuntimeContext } from '../../../runtime-context';
 import type { AccountConsensusContext } from '../../../../account/consensus/context';
 import { applyAccountInput } from '../../../../account/consensus';
 import {
@@ -30,7 +30,7 @@ import {
 const accountHandlerLog = createStructuredLogger('account.handler');
 
 export type AccountInputPhaseContext = {
-  env: RuntimeState;
+  env: EntityRuntimeContext;
   accountConsensusContext: AccountConsensusContext;
   state: EntityState;
   input: AccountPeerInput;

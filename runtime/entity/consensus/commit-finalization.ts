@@ -1,4 +1,4 @@
-import { cacheCommittedAccountJClaimNodeChanges } from '../../account/j-claim-store';
+import { cacheCommittedAccountJClaimNodeChanges } from '../account-j-claim-node-store';
 import { buildQuorumHanko } from '../../hanko/signing';
 import { logError, shortHash, shortId } from '../../infra/logger';
 import { removeCommittedTxsFromMempool } from '../../protocol/tx-multiset';

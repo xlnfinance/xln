@@ -14,7 +14,7 @@ import type {
   StoredRuntimeActivityValue,
 } from './history-view';
 import type { StorageHistoryViewHead } from './types';
-import type { RuntimeHistoryRecord } from '../types';
+import type { RuntimeHistoryRecord } from '../runtime/types';
 
 const requireStringArray = (value: unknown, code: string): string[] => {
   if (!Array.isArray(value) || value.some(entry => typeof entry !== 'string' || entry.length === 0)) {

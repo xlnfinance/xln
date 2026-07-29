@@ -13,7 +13,7 @@ import {
   verifyRuntimeChain,
 } from '../runtime';
 import { deserializeTaggedJson } from '../protocol/serialization';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type {
   EncryptedRuntimeRecoveryBundleV1,
   RuntimeRecoveryBundleV1,

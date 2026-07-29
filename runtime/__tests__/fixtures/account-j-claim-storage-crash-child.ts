@@ -24,7 +24,7 @@ import {
 } from '../../account/state-root';
 import {
   getAccountJClaimNodeStore,
-} from '../../account/j-claim-store';
+} from '../../entity/account-j-claim-node-store';
 import {
   buildEntityFrameAuthority,
   computeCanonicalEntityConsensusStateHash,

@@ -1,4 +1,4 @@
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from './types';
 import { runtimeIsBrowser } from '../infra/runtime-process';
 
 export type RuntimeCleanLogDeps = {

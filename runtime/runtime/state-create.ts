@@ -9,7 +9,7 @@ import { createGossipLayer } from '../networking/gossip';
 import type { Profile } from '../entity/profile';
 import { buildLocalEntityProfile } from '../networking/gossip-helper';
 import { deriveRuntimeIdFromSeed, normalizeDbNamespace } from '../storage/runtime-dbs';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from './types';
 
 const runtimeLog = createStructuredLogger('runtime');
 

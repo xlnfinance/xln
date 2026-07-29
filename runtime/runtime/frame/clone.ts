@@ -1,6 +1,6 @@
 import { copyLocalEntityLeaderTimeoutVoteAuthorization } from '../../entity/consensus/leader';
 import { cloneTrustedEntityReplica } from '../../entity/replica-clone';
-import type { RuntimeState, RuntimeInput } from '../../types';
+import type { RuntimeState, RuntimeInput } from '../types';
 import type { JReplica } from '../../types/jurisdiction-runtime';
 import { copyLocalJAuthorityRuntimeTxAuthorization } from '../../jurisdiction/registration-evidence';
 import { createGossipLayer } from '../../networking/gossip';

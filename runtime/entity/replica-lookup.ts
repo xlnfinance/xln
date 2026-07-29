@@ -1,7 +1,7 @@
 import type { EntityReplica } from './types';
-import type { RuntimeState } from '../types';
+import type { EntityRuntimeContext } from './runtime-context';
 
-export const getEntityReplicaById = (env: RuntimeState, entityId: string): EntityReplica | null => {
+export const getEntityReplicaById = (env: EntityRuntimeContext, entityId: string): EntityReplica | null => {
   const target = String(entityId || '').trim().toLowerCase();
   if (!target || !env.eReplicas) return null;
   for (const [key, replica] of env.eReplicas.entries()) {

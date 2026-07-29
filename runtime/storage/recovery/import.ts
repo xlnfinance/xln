@@ -1,6 +1,6 @@
 import { Level } from 'level';
 import { collectReachableAccountJClaimNodes } from '../../account/j-claim-accumulator';
-import { getAccountJClaimNodeStore, getLiveAccountJClaimAccumulatorStates } from '../../account/j-claim-store';
+import { getAccountJClaimNodeStore, getLiveAccountJClaimAccumulatorStates } from '../../entity/account-j-claim-node-store';
 import {
   collectReachableConsumptionNodes,
   getConsumptionNodeStore,
@@ -12,7 +12,7 @@ import {
   assertValidatorJHistoryMatchesCertifiedAnchor,
 } from '../../jurisdiction/local-history';
 import { ensureRuntimeState } from '../../runtime/runtime-state';
-import type { RuntimeState } from '../../types';
+import type { RuntimeState } from '../../runtime/types';
 import { clearDatabase } from '../clear-database';
 import { computeCanonicalEntityHash, computeCanonicalRuntimeStateHash } from '../canonical-hash';
 import { buildCertifiedEntityLineagePlan } from '../entity-lineage';

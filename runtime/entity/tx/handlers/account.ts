@@ -1,6 +1,6 @@
 import type { AccountPeerInput } from '../../../types/account';
 import type { EntityState } from '../../types';
-import type { RuntimeState } from '../../../types';
+import type { EntityRuntimeContext } from '../../runtime-context';
 import { createStructuredLogger, shortId } from '../../../infra/logger';
 import {
   accountInputAck,
@@ -80,7 +80,7 @@ type AccountInputCheckpoint = (label: string) => void;
 const applyAccountInputPhases = async (
   state: EntityState,
   input: AccountPeerInput,
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   accountConsensusContext: AccountConsensusContext,
   options: ApplyEntityTxOptions | undefined,
   checkpointProfile: AccountInputCheckpoint,
@@ -158,7 +158,7 @@ const logAccountInputProfile = (
 export async function applyAccountInputToEntity(
   state: EntityState,
   input: AccountPeerInput,
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   accountConsensusContext: AccountConsensusContext,
   options?: ApplyEntityTxOptions,
 ): Promise<AccountHandlerResult> {

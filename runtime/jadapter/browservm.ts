@@ -16,7 +16,7 @@ import {
   EntityProvider__factory,
 } from '../../jurisdictions/typechain-types/index.ts';
 
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type {
   JAdapter,
   JAdapterConfig,

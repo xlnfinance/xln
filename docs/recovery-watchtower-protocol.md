@@ -31,7 +31,7 @@ Sources are listed at the end.
 
 XLN already has most of the raw material:
 
-- `AccountMachine.currentFrame`, `pendingFrame`, `currentHeight`, `currentFrameHanko`, and `counterpartyFrameHanko` in `runtime/types.ts`.
+- Account frame, height, and Hanko state in `runtime/types/account.ts`.
 - Dispute proof state: `abiProofBody`, `currentDisputeProofHanko`, `counterpartyDisputeProofHanko`, `disputeProofNoncesByHash`, and `disputeProofBodiesByHash`.
 - `buildAccountProofBody()` and `createDisputeProofHash()` in `runtime/protocol/dispute/proof-builder.ts`.
 - durable account frame history via `RuntimeHistoryRecord` materialized by

@@ -6,7 +6,7 @@ import { computeCanonicalEntityConsensusStateHash } from '../entity/consensus/st
 import { rawEventToJEvents } from '../jadapter/helpers';
 import { normalizeJurisdictionEvent } from '../jurisdiction/event-normalization';
 import { createEmptyEnv } from '../runtime';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import {
   entity,
   installJurisdictions,

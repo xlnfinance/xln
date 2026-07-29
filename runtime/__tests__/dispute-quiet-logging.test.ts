@@ -4,7 +4,7 @@ import { readEntityFrameEventMessages } from '../entity/frame-events';
 import { handleDisputeFinalize } from '../entity/tx/handlers/dispute';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
 import type { EntityState } from '../entity/types';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type { EntityTx } from '../types/entity-tx';
 
 const ALICE = `0x${'11'.repeat(32)}`;

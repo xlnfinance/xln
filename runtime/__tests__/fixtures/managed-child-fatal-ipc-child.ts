@@ -4,7 +4,7 @@ import {
   startRuntimeLoop,
 } from '../../runtime';
 import { reportManagedChildFatal } from '../../orchestrator/managed-child-fatal-ipc';
-import type { RuntimeTx } from '../../types';
+import type { RuntimeTx } from '../../runtime/types';
 
 const env = createEmptyEnv(`managed-child-fatal-ipc-${process.pid}`);
 enqueueRuntimeInput(env, {

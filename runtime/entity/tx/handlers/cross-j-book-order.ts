@@ -24,7 +24,7 @@ import {
 } from '../../../extensions/cross-j/orderbook';
 import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
 import type { EntityCandidateEffect, EntityState } from '../../types';
-import type { RuntimeState } from '../../../types';
+import type { EntityRuntimeContext } from '../../runtime-context';
 import type { EntityTx } from '../../../types/entity-tx';
 import type { RuntimeOverlayRecord } from '../../../types/account';
 import { getSwapLotScale } from '../../../orderbook';
@@ -50,7 +50,7 @@ import {
 import { hasQueuedCrossSwapAckForEntityState } from './account/orderbook-queue';
 import { draftPreparedDisputeStartIfReady } from './dispute';
 
-const deterministicEntityTimestamp = (state: EntityState, env: RuntimeState): number =>
+const deterministicEntityTimestamp = (state: EntityState, env: EntityRuntimeContext): number =>
   Number(state.timestamp || env.timestamp || 0);
 const stateForEntityTx = (entityState: EntityState, options?: ApplyEntityTxOptions): EntityState =>
   prepareEntityTxState(entityState, options?.mutableFrameState);
@@ -229,7 +229,7 @@ const updateBookOrderForProgress = (
 };
 
 export const handleAdmitCrossJurisdictionBookOrderEntityTx = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   entityState: EntityState,
   entityTx: EntityTx & { type: 'admitCrossJurisdictionBookOrder' },
   options?: ApplyEntityTxOptions,
@@ -301,7 +301,7 @@ export const handleAdmitCrossJurisdictionBookOrderEntityTx = (
 };
 
 export const applyCrossJurisdictionBookProgressToState = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   newState: EntityState,
   data: CrossJurisdictionBookProgressTx['data'],
   storageChanges: RuntimeOverlayRecord[] = [],
@@ -380,7 +380,7 @@ export const applyCrossJurisdictionBookProgressToState = (
 };
 
 export const handleApplyCrossJurisdictionBookProgressEntityTx = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   entityState: EntityState,
   entityTx: CrossJurisdictionBookProgressTx,
   options?: ApplyEntityTxOptions,
@@ -430,7 +430,7 @@ const buildCrossJurisdictionBookRemovalAckOutput = (
 };
 
 export const handleCrossJurisdictionBookOrderRemovedEntityTx = async (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'crossJurisdictionBookOrderRemoved' }>,
   options?: ApplyEntityTxOptions,
@@ -489,7 +489,7 @@ export const handleCrossJurisdictionBookOrderRemovedEntityTx = async (
 };
 
 export const handleRemoveCrossJurisdictionBookOrderEntityTx = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   entityState: EntityState,
   entityTx: EntityTx & { type: 'removeCrossJurisdictionBookOrder' },
   options?: ApplyEntityTxOptions,

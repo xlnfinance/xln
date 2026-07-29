@@ -6,7 +6,7 @@ import {
   validateDurableOutputRetryState,
 } from '../runtime/durable-output-retry';
 import { buildRouteOutputKey } from '../runtime/output-routing';
-import type { RuntimeState, RoutedEntityInput } from '../types';
+import type { RuntimeState, RoutedEntityInput } from '../runtime/types';
 
 describe('durable output retry', () => {
   test('bounds a large live route key and restores retry metadata by exact output', () => {

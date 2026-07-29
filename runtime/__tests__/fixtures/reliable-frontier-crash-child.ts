@@ -26,7 +26,7 @@ import type {
   RuntimeState,
   ReliableDeliveryIdentity,
   ReliableDeliveryReceipt,
-} from '../../types';
+} from '../../runtime/types';
 
 const [seed] = Bun.argv.slice(2);
 if (!seed) throw new Error('reliable frontier crash seed is required');

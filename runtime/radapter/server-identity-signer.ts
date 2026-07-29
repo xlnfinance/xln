@@ -1,6 +1,6 @@
 import { SigningKey, computeAddress, hexlify, keccak256 } from 'ethers';
 import { deriveSignerKeySync } from '../account/crypto';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import {
   buildRuntimeAdapterServerIdentityDigest,
   type RuntimeAdapterServerIdentityProof,

@@ -1,4 +1,4 @@
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type { EntityInput, EntityReplica } from '../entity/types';
 import type { Delta } from '../types/account';
 import type { FrameLogEntry } from '../types/logging';

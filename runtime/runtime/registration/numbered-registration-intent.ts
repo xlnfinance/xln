@@ -13,7 +13,7 @@ import type {
   PendingNumberedRegistration,
   ResolveNumberedRegistrationData,
   RuntimeTx,
-} from '../../types';
+} from '../types';
 import { encodeBoard, hashBoard } from '../../entity/factory';
 import {
   getNumberedRegistrationWallet,

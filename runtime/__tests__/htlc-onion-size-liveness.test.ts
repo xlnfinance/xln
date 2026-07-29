@@ -22,7 +22,7 @@ import {
   requireCompleteValidatorEncryptionManifest,
   type CertifiedValidatorEncryptionManifest,
 } from '../protocol/htlc/validator-encryption';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 
 const bytesHex = (bytes: Uint8Array): string => `0x${Buffer.from(bytes).toString('hex')}`;
 const bytes32 = (value: number): string => `0x${value.toString(16).padStart(64, '0')}`;

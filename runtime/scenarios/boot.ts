@@ -3,7 +3,7 @@
  * Single entry point for all scenarios — configurable backend (browservm | rpc)
  */
 
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type { JurisdictionConfig } from '../entity/types';
 import type { JReplica, JTx } from '../types/jurisdiction-runtime';
 import type { JAdapter, JAdapterMode } from '../jadapter/types';

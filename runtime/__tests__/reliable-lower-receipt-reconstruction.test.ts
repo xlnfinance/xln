@@ -17,7 +17,7 @@ import {
   restoreDurableRuntimeSnapshot,
 } from '../storage/wal/snapshot';
 import { createEmptyEnv, processRuntime } from '../runtime';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import {
   buildCatchupFixtureCertificate,
   catchupFixtureDeliverable,

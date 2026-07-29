@@ -1,5 +1,5 @@
 import type { EntityTx } from '../types/entity-tx';
-import type { RuntimeInput, RuntimeState } from '../types';
+import type { RuntimeInput, RuntimeState } from '../runtime/types';
 import type { JAdapter } from '../jadapter';
 import { safeStringify } from '../protocol/serialization';
 import { createStructuredLogger, shortId } from '../infra/logger';

@@ -1,5 +1,5 @@
 import type { EntityState, HashToSign } from '../../types';
-import type { RuntimeState } from '../../../types';
+import type { EntityRuntimeContext } from '../../runtime-context';
 import type { EntityTx } from '../../../types/entity-tx';
 import { prepareEntityTxState } from '../../state-clone';
 import { buildValidatorEncryptionBoard } from '../../profile-encryption';
@@ -56,7 +56,7 @@ export const buildCurrentEntityProfileHashToSign = (
 };
 
 export const handleCertifyProfileEntityTx = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   entityState: EntityState,
   entityTx: CertifyProfileTx,
   mutableFrameState = false,

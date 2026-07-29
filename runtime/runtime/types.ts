@@ -1,30 +1,30 @@
 import type { Level } from 'level';
-import type { RuntimeP2P } from './networking/p2p';
-import type { CrossJurisdictionSwapRoute } from './types/cross-jurisdiction';
+import type { RuntimeP2P } from '../networking/p2p';
+import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type {
   AccountHistoryRecord,
   RuntimeOverlayRecord,
-} from './types/account';
-import type { FrameLogEntry, LogCategory } from './types/logging';
+} from '../types/account';
+import type { FrameLogEntry, LogCategory } from '../types/logging';
 import type {
   CertifiedRegistrationEvidence,
   JAdapterFailure,
   JReplica,
   JTx,
-} from './types/jurisdiction-runtime';
-import type { CertifiedBoardNodeStore } from './types/entity-board-registry';
-import type { ConsumptionNodeStore } from './entity/consumption-accumulator-types';
-import type { AccountJClaimNodeStore } from './types/account-j-claims';
+} from '../types/jurisdiction-runtime';
+import type { CertifiedBoardNodeStore } from '../types/entity-board-registry';
+import type { ConsumptionNodeStore } from '../entity/consumption-accumulator-types';
+import type { AccountJClaimNodeStore } from '../types/account-j-claims';
 import type {
   RecordEntityProviderActionSubmitResultData,
   RetryEntityProviderActionData,
-} from './types/entity-provider-actions';
+} from '../types/entity-provider-actions';
 import type {
   CertifiedEntityFrameLink,
   ConsensusConfig,
   EntityInput,
   EntityReplica,
-} from './entity/types';
+} from '../entity/types';
 export type {
   CertifiedEntityFrameLink,
   CertifiedEntityLineageAnchor,
@@ -55,9 +55,9 @@ export type {
   ProposedEntityFrame,
   SwapBookEntry,
   VoteData,
-} from './entity/types';
-export type { JurisdictionConfig } from './protocol/jurisdiction-config';
-export { JBLOCK_LIVENESS_INTERVAL } from './entity/types';
+} from '../entity/types';
+export type { JurisdictionConfig } from '../protocol/jurisdiction-config';
+export { JBLOCK_LIVENESS_INTERVAL } from '../entity/types';
 export type {
   CrossJurisdictionBookAdmission,
   CrossJurisdictionBookLeg,
@@ -72,12 +72,12 @@ export type {
   CrossJurisdictionSwapRoute,
   CrossJurisdictionSwapStatus,
   CrossJurisdictionTimePolicy,
-} from './types/cross-jurisdiction';
+} from '../types/cross-jurisdiction';
 export type {
   DebtEntry,
   DebtEventType,
   DebtStatus,
-} from './types/debt';
+} from '../types/debt';
 export type {
   DisputeFinalizationEvidence,
   JBlockFinalized,
@@ -92,19 +92,19 @@ export type {
   ValidatorJBlockHeader,
   ValidatorJEventBlock,
   ValidatorJHistory,
-} from './types/jurisdiction-events';
+} from '../types/jurisdiction-events';
 export type {
   FrameLogEntry,
   LogCategory,
   LogLevel,
-} from './types/logging';
+} from '../types/logging';
 export type {
   JAdapterFailure,
   JAdapterFailureCategory,
   CertifiedRegistrationEvidence,
   JReplica,
   JTx,
-} from './types/jurisdiction-runtime';
+} from '../types/jurisdiction-runtime';
 export type {
   HankoBoardDelays,
   HankoBoardMemberClaim,
@@ -115,8 +115,8 @@ export type {
   HankoString,
   HankoWireClaim,
   CanonicalHankoMergeResult,
-} from './types/hanko';
-export type { PaymentDeliveryMode } from './types/payment';
+} from '../types/hanko';
+export type { PaymentDeliveryMode } from '../types/payment';
 export type {
   EntityProviderActionCancelledData,
   EntityProviderActionExecutedData,
@@ -133,7 +133,7 @@ export type {
   EntityProviderTransferPayload,
   RecordEntityProviderActionSubmitResultData,
   RetryEntityProviderActionData,
-} from './types/entity-provider-actions';
+} from '../types/entity-provider-actions';
 export type {
   CertifiedBoardBranchNode,
   CertifiedBoardAuthorityBinding,
@@ -144,7 +144,7 @@ export type {
   CertifiedBoardRecord,
   CertifiedBoardRegistryState,
   CertifiedBoardSource,
-} from './types/entity-board-registry';
+} from '../types/entity-board-registry';
 export type {
   LendingLoan,
   LendingLoanStatus,
@@ -152,7 +152,7 @@ export type {
   LendingPoolStatus,
   LendingState,
   LendingTermId,
-} from './types/lending';
+} from '../types/lending';
 export type {
   AccountDelta,
   AccountFrame,
@@ -186,7 +186,7 @@ export type {
   SwapOffer,
   SwapOrderHistoryEntry,
   SwapOrderResolveHistoryEntry,
-} from './types/account';
+} from '../types/account';
 export {
   buildDefaultRebalanceBaseFee,
   buildDefaultRebalancePolicy,
@@ -197,7 +197,7 @@ export {
   REFERENCE_TOKEN_ID,
   scaleRawTokenAmount,
   scaleWholeTokenAmount,
-} from './types/rebalance';
+} from '../types/rebalance';
 export type {
   AccountRebalanceShadowState,
   BilateralRebalanceFeePolicy,
@@ -206,7 +206,7 @@ export type {
   RebalancePolicy,
   RebalanceQuote,
   RebalanceRequestFeeState,
-} from './types/rebalance';
+} from '../types/rebalance';
 
 /**
  * Shared XLN wire/state type barrel.
@@ -216,10 +216,10 @@ export type {
  * narrative lives in docs/architecture/runtime-reaj.md.
  */
 
-import type { GossipLayer } from './networking/gossip';
-import type { Profile } from './entity/profile';
+import type { GossipLayer } from '../networking/gossip';
+import type { Profile } from '../entity/profile';
 
-export type { Profile } from './entity/profile';
+export type { Profile } from '../entity/profile';
 
 export type RuntimeP2PConfigLike = {
   relayUrls?: string[];
@@ -249,10 +249,10 @@ export type RuntimeP2PSurface = {
 export type {
   RuntimeSecurityIncident,
   RuntimeSecurityIncidentIdentity,
-} from './protocol/security-incident';
+} from '../protocol/security-incident';
 import type {
   RuntimeSecurityIncident,
-} from './protocol/security-incident';
+} from '../protocol/security-incident';
 
 export interface RuntimeInput {
   runtimeTxs: RuntimeTx[];
@@ -334,8 +334,8 @@ export type PendingReliableIngress = {
   targetRuntimeIds: Set<string>;
 };
 
-export type { JInput } from './jurisdiction/input';
-import type { JInput } from './jurisdiction/input';
+export type { JInput } from '../jurisdiction/input';
+import type { JInput } from '../jurisdiction/input';
 
 export type JurisdictionImportRequest = {
   name: string;
@@ -494,8 +494,8 @@ export type RuntimeTx =
         jurisdictionRef: string;
         scannedThroughHeight: number;
         tipBlockHash: string;
-        headers?: import('./types/jurisdiction-events').ValidatorJBlockHeader[];
-        blocks: import('./types/jurisdiction-events').ValidatorJEventBlock[];
+        headers?: import('../types/jurisdiction-events').ValidatorJBlockHeader[];
+        blocks: import('../types/jurisdiction-events').ValidatorJEventBlock[];
       };
     }
   | {
@@ -631,7 +631,7 @@ export type {
   EntityCommandNonceState,
   EntityTx,
   SignedEntityCommandV1,
-} from './types/entity-tx';
+} from '../types/entity-tx';
 
 export type RuntimeHistoryRecord = AccountHistoryRecord | {
   kind: 'entityFrame';
@@ -642,7 +642,7 @@ export type RuntimeHistoryRecord = AccountHistoryRecord | {
   timestamp?: number;
 };
 
-export type BrowserVMState = import('./jadapter/browservm-state').BrowserVmSerializedState;
+export type BrowserVMState = import('../jadapter/browservm-state').BrowserVmSerializedState;
 
 export interface RuntimeState {
   eReplicas: Map<string, EntityReplica>;  // Entity replicas (E-layer state machines)
@@ -836,16 +836,16 @@ export interface RuntimeState {
       seenAt: number;
     }>;
     externalWalletWatchOwners?: Map<string, Map<string, number>>;
-    watcherDedupCounter?: import('./jadapter/watcher').EventBatchCounter;
+    watcherDedupCounter?: import('../jadapter/watcher').EventBatchCounter;
     directEntityInputsDispatch?: ((
       targetRuntimeId: string,
       envelope: RuntimeEntityInputsEnvelope,
       ingressTimestamp?: number,
-    ) => import('./runtime/output-routing').RuntimeDirectEntityInputDispatchResult) | null;
+    ) => import('../runtime/output-routing').RuntimeDirectEntityInputDispatchResult) | null;
     directReliableReceiptDispatch?: ((
       targetRuntimeId: string,
       receipt: ReliableDeliveryReceipt,
-    ) => import('./protocol/payments/delivery-result').DeliveryResult) | null;
+    ) => import('../protocol/payments/delivery-result').DeliveryResult) | null;
     /**
      * True only when the target runtime is already attached to this same
      * server/relay process with a cached encryption key. This is local socket
@@ -873,7 +873,7 @@ export interface RuntimeState {
     numberedRegistrationIntents?: Map<string, NumberedRegistrationRecord>;
     runtimeAdapterCommandFrontiers?: Map<
       string,
-      import('./radapter/command-frontier').RuntimeAdapterCommandFrontier
+      import('../radapter/command-frontier').RuntimeAdapterCommandFrontier
     >;
   } | undefined;
   /** Bounded local/debug timeline. Authoritative history lives in the storage WAL. */
@@ -881,12 +881,12 @@ export interface RuntimeState {
   gossip: GossipLayer;
 
   // Isolated BrowserVM instance per runtime (prevents cross-runtime state leakage)
-  browserVM?: import('./jadapter/types').BrowserVMProvider | null; // BrowserVMProvider instance for this runtime (DEPRECATED: use jAdapter)
+  browserVM?: import('../jadapter/types').BrowserVMProvider | null; // BrowserVMProvider instance for this runtime (DEPRECATED: use jAdapter)
   browserVMState?: BrowserVMState; // Serialized BrowserVM state for time travel
 
   // Unified J-Machine adapter (preferred over the BrowserVM compatibility field)
   // Use: const jAdapter = env.jAdapter ?? await createJAdapter({ mode: 'browservm', chainId: 31337 })
-  jAdapter?: import('./jadapter/types').JAdapter;
+  jAdapter?: import('../jadapter/types').JAdapter;
 
   // Active jurisdiction
   activeJurisdiction?: string | undefined; // Currently active J-replica name
@@ -895,7 +895,7 @@ export interface RuntimeState {
   scenarioMode?: boolean; // When true, runtime doesn't auto-update timestamp
   // Explicit dependency injection for scenario execution. Visual previews use the
   // real in-process EVM so they never depend on or flood an external RPC endpoint.
-  scenarioJAdapterMode?: import('./jadapter/types').JAdapterMode;
+  scenarioJAdapterMode?: import('../jadapter/types').JAdapterMode;
   quietRuntimeLogs?: boolean; // When true, suppress noisy runtime console logs
   debugJWatcherBatches?: boolean; // Enables verbose J watcher batch routing diagnostics
   scenarioLogLevel?: 'debug' | 'info' | 'warn' | 'error'; // Scenario log verbosity
@@ -980,12 +980,12 @@ export interface EnvSnapshot {
 }
 
 // Entity types - canonical definition in ids.ts
-export { type EntityType } from './protocol/identity';
+export { type EntityType } from '../protocol/identity';
 
 // Constants
 export const ENC = 'hex' as const;
 
-export type { EntityProfile, NameIndex, NameSearchResult, ProfileUpdateTx } from './types/profile';
+export type { EntityProfile, NameIndex, NameSearchResult, ProfileUpdateTx } from '../types/profile';
 
 export type {
   ConnectionRules,
@@ -995,4 +995,4 @@ export type {
   Xlnomy,
   XlnomySnapshot,
   XlnomyTopology,
-} from './types/xlnomy';
+} from '../types/xlnomy';

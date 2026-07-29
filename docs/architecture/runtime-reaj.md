@@ -34,4 +34,6 @@ Naming conventions:
   messages.
 - Replay protection is the frame chain (`height + prevFrameHash`) and signed hankos. On-chain nonces are only for settlement ordering.
 
-The type barrel at `runtime/types.ts` should stay navigable. Put new domain-specific types under `runtime/types/*` and re-export them from the barrel only for compatibility with existing imports.
+Runtime machine types live at `runtime/runtime/types.ts`. Entity and Account
+types belong to their owner folders. Import from the owner directly; a neutral
+root barrel would hide the Runtime → Entity → Account cascade.

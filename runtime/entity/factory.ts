@@ -9,7 +9,7 @@ import { getSignerAddress } from '../account/crypto';
 import { DEBUG } from '../infra/debug-flags';
 import { createStructuredLogger, shortId } from '../infra/logger';
 import type { ConsensusConfig, JurisdictionConfig } from './types';
-import type { RuntimeState } from '../types';
+import type { EntityRuntimeContext } from './runtime-context';
 import type { EntityType } from '../protocol/identity';
 
 // Extend globalThis to include our entity counter
@@ -22,7 +22,7 @@ let namedRequestCounter = 0;
 const factoryLog = createStructuredLogger('entity.factory');
 
 // Entity encoding utilities
-type BoardSignerContext = Pick<RuntimeState, 'runtimeSeed'>;
+type BoardSignerContext = Pick<EntityRuntimeContext, 'runtimeSeed'>;
 
 export type BoardMemberInput = string | Readonly<{
   name: string;
@@ -74,7 +74,7 @@ const resolveValidatorAddress = (validator: string, env?: BoardSignerContext): s
   if (!derived) {
     throw new Error(
       `BOARD_VALIDATOR_ADDRESS_REQUIRED:${validator}` +
-        (env ? '' : ':numeric aliases require explicit RuntimeState'),
+        (env ? '' : ':numeric aliases require explicit EntityRuntimeContext'),
     );
   }
   return ethers.getAddress(derived);

@@ -23,7 +23,7 @@ export type {
 export type { JurisdictionInfo } from '../protocol/jurisdiction-identity';
 
 // Re-export core types from types.ts
-export type { RuntimeState, EnvSnapshot, RuntimeInput, RoutedEntityInput } from '../types';
+export type { RuntimeState, EnvSnapshot, RuntimeInput, RoutedEntityInput } from '../runtime/types';
 export type { EntityReplica, EntityState, SwapBookEntry, JurisdictionConfig, ConsensusConfig, EntityInput } from '../entity/types';
 export type { JReplica } from '../types/jurisdiction-runtime';
 export type { EntityTx } from '../types/entity-tx';
@@ -76,7 +76,7 @@ export type {
   SwapCommandPlan,
   SwapCommandPlanInput,
   SwapCommandPreparedOrder,
-} from '../account/swap-command-plan';
+} from '../runtime/swap-command-plan';
 export type {
   MppChallenge,
   MppChallengeBindingInput,

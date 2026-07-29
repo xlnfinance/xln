@@ -54,7 +54,7 @@ import { buildRuntimeCheckpointSnapshot } from '../storage/wal/snapshot';
 import { cloneEntityState } from '../entity/state-clone';
 import type { ConsensusOutputOrigin, EntityTx } from '../types/entity-tx';
 import type { EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
-import type { RuntimeState, RoutedEntityInput } from '../types';
+import type { RuntimeState, RoutedEntityInput } from '../runtime/types';
 import type { JurisdictionEvent } from '../types/jurisdiction-events';
 import { addr, entity, makeAccount, makeState } from './helpers/cross-j';
 import { buildJEventRangeData } from './helpers/j-history';

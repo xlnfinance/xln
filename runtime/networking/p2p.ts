@@ -5,7 +5,7 @@
  * Durable retry ownership belongs to the runtime outbox, never this adapter.
  */
 
-import type { RuntimeState, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../types';
+import type { RuntimeState, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../runtime/types';
 import { canonicalizeProfile, getBoardPrimaryPublicKey, parseProfile, type Profile } from '../entity/profile';
 import { RuntimeWsClient } from './ws-client';
 import { buildLocalEntityProfile } from './gossip-helper';

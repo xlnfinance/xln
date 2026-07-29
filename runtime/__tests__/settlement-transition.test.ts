@@ -5,7 +5,7 @@ import { createAccountJClaimSession } from '../account/j-claim-session';
 import {
   cacheCommittedAccountJClaimNodeChanges,
   getAccountJClaimNodeStore,
-} from '../account/j-claim-store';
+} from '../entity/account-j-claim-node-store';
 import { prepareAccountJClaimTx } from '../account/j-claim-transition';
 import { handleJEventClaim } from '../account/tx/handlers/j-event-claim';
 import { createSettlementWorkspaceHash } from '../account/tx/handlers/settle-transition';
@@ -52,7 +52,7 @@ import { createAccountConsensusContext } from '../entity/account-consensus-conte
 import { cloneAccountState } from '../account/state-clone';
 import type { AccountTx, SettlementOp } from '../types/account';
 import type { EntityState, HashToSign, JurisdictionConfig } from '../entity/types';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type { JurisdictionEvent } from '../types/jurisdiction-events';
 import { createDefaultDelta } from '../account/delta';
 import {

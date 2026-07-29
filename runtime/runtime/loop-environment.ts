@@ -7,7 +7,7 @@ import {
 } from '../infra/runtime-process';
 import { safeStringify } from '../protocol/serialization';
 import { ensureRuntimeState } from './runtime-state';
-import type { RuntimeState, RuntimeInput } from '../types';
+import type { RuntimeState, RuntimeInput } from './types';
 
 export const ENV_APPLY_ALLOWED_KEY = Symbol.for('xln.runtime.env.apply.allowed');
 export const ENV_REPLAY_MODE_KEY = Symbol.for('xln.runtime.env.replay.mode');

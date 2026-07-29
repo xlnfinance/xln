@@ -1,4 +1,4 @@
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type { Profile } from '../entity/profile';
 import { getAllGossipProfiles } from '../relay/store';
 import { normalizeRuntimeKey, type RelayStore } from '../relay/store';

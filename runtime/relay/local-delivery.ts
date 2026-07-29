@@ -10,7 +10,7 @@ import {
   handleInboundReliableReceipt,
 } from '../runtime.ts';
 import { deriveEncryptionKeyPair, decryptJSON, type P2PKeyPair } from '../protocol/p2p-crypto';
-import type { RuntimeState, ReliableDeliveryReceipt, RuntimeEntityInputsEnvelope } from '../types';
+import type { RuntimeState, ReliableDeliveryReceipt, RuntimeEntityInputsEnvelope } from '../runtime/types';
 import type { EntityReplica } from '../entity/types';
 import {
   type RelayStore,

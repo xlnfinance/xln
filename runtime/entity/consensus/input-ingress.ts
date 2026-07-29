@@ -2,7 +2,7 @@ import { shortId } from '../../infra/logger';
 import { cloneIsolatedEntityInput } from '../input-clone';
 import { forkEntityReplicaForInput } from '../replica-clone';
 import type { EntityInput, EntityReplica } from '../types';
-import type { RuntimeState } from '../../types';
+import type { EntityRuntimeContext } from '../runtime-context';
 import { formatEntityDisplay } from '../../presentation/identity-display';
 import { HEAVY_LOGS } from '../../infra/debug-flags';
 import { log } from '../../infra/diagnostics';
@@ -46,7 +46,7 @@ const rejectIngress = (
 });
 
 const logEntityInput = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   input: EntityInput,
   replica: EntityReplica,
   entityDisplay: string,
@@ -81,7 +81,7 @@ const logEntityInput = (
 };
 
 export const prepareEntityInputIngress = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   replica: EntityReplica,
   ingressInput: EntityInput,
   trustedLocalCrossJurisdiction: boolean,

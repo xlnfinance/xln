@@ -14,7 +14,7 @@ import { seedFreshStorageEpoch } from '../storage/lifecycle';
 import { readStorageHead } from '../storage/read';
 import type { RuntimeDbLike, StorageHistoryViewHead, StorageHead, StorageRuntimeConfig } from '../storage/types';
 import { verifyStorageTailIntegrity } from '../storage/verify';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 
 const currentHead = (schemaVersion: number): StorageHead => ({
   schemaVersion,

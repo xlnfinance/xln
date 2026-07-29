@@ -3,7 +3,7 @@ import { deriveSignerAddressSync } from '../account/crypto';
 import { createStructuredLogger } from '../infra/logger';
 import { nodeProcess } from '../infra/runtime-process';
 import { dbRootPath } from '../runtime/platform';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import {
   readStorageHead,
   seedFreshStorageEpoch,

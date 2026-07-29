@@ -1,4 +1,4 @@
-import type { RoutedEntityInput, RuntimeInput } from '../../../types';
+import type { RoutedEntityInput, RuntimeInput } from '../../../runtime/types';
 import { validateRuntimeInputEnvelope } from '../../../protocol/boundary-validation';
 import { cloneIsolatedRuntimeSnapshot } from '../../../runtime/input-clone';
 import { decodeRoutedEntityInput } from '../../../runtime/routing-validation';

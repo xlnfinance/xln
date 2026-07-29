@@ -5,7 +5,7 @@
  * compares the complete runtime history hash sequence plus final state hash.
  */
 
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import { createHash } from 'node:crypto';
 import { safeStringify } from '../protocol/serialization';
 import { clearSignerKeys } from '../account/crypto';

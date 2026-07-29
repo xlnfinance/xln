@@ -1,4 +1,4 @@
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import { runSwapOrderbookBenchmark } from '../scripts/bench-swap-orderbook-tps';
 import { runSwapRuntimeBenchmark } from '../scripts/bench-swap-runtime-tps';
 

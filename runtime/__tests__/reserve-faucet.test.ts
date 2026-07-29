@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import type { JAdapter } from '../jadapter';
 import { handleReserveFaucet, parseReserveFaucetAmount } from '../server/reserve-faucet';
-import type { RuntimeState, RuntimeInput } from '../types';
+import type { RuntimeState, RuntimeInput } from '../runtime/types';
 
 const entity = (byte: string): string => `0x${byte.repeat(32)}`;
 const signer = (byte: string): string => `0x${byte.repeat(20)}`;

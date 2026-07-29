@@ -3,7 +3,7 @@ import type { Level } from 'level';
 import type { RuntimeRecoveryBundleV1 } from '../../recovery/types';
 import type { StorageFrameRecord } from '..';
 import type { StorageDbRole } from '../runtime-dbs';
-import type { RuntimeState } from '../../types';
+import type { RuntimeState } from '../../runtime/types';
 
 type RuntimeDb = Level<Buffer, Buffer>;
 

@@ -4,17 +4,17 @@ import {
 import type { AccountState } from '../types/account';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { EntityTx } from '../types/entity-tx';
-import type { RuntimeInput } from '../types';
+import type { RuntimeInput } from './types';
 import {
   planSwapInboundCapacity,
   readSwapAccountCapacity,
   type SwapInboundCapacityPlan,
-} from './swap-inbound-plan';
+} from '../account/swap-inbound-plan';
 import {
   buildCrossJurisdictionSwapIntent,
   buildDeterministicSwapOfferId,
-} from './swap-command-route';
-export { buildDeterministicSwapOfferId } from './swap-command-route';
+} from '../account/swap-command-route';
+export { buildDeterministicSwapOfferId } from '../account/swap-command-route';
 
 type SwapCommandParty = Readonly<{
   entityId: string;

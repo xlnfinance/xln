@@ -5,7 +5,7 @@ import { resolveEntityProposerId } from './entity-output-signer';
 import type { AccountState } from '../types/account';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { EntityState } from '../entity/types';
-import type { RuntimeState, RuntimeInput } from '../types';
+import type { RuntimeState, RuntimeInput } from './types';
 import { getWallClockMs } from '../infra/time';
 import { buildDebtEnforcementRuntimeInputFromProjection } from '../protocol/payments/debt-enforcement';
 import type { DebtEnforcementProjectionRuntimeInputParams } from '../protocol/payments/debt-enforcement';

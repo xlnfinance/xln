@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { RuntimeInput } from '../types';
+import type { RuntimeInput } from '../runtime/types';
 import { serializeTaggedJson } from '../protocol/serialization';
 import { requireBoundaryInteger } from '../protocol/boundary-validation';
 

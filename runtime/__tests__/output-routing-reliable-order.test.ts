@@ -32,7 +32,7 @@ import {
   saveEnvToDB,
 } from '../runtime';
 import { deliveryAccepted, deliveryFailure } from '../protocol/payments/delivery-result';
-import type { DeliverableEntityInput, RuntimeState, RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../types';
+import type { DeliverableEntityInput, RuntimeState, RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../runtime/types';
 import type { JPrefixAttestation } from '../types/jurisdiction-events';
 
 const runtimeId = (byte: string): string => `0x${byte.repeat(20)}`;

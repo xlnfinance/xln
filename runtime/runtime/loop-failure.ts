@@ -1,6 +1,6 @@
 import { createStructuredLogger } from '../infra/logger';
 import { normalizeRuntimeFailureCode } from '../protocol/failure-taxonomy';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from './types';
 import { transitionRuntimeLifecycle } from './lifecycle';
 
 type RuntimeLifecycleState = NonNullable<RuntimeState['runtimeState']>;

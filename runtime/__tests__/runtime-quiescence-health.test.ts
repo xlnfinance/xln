@@ -7,7 +7,7 @@ import {
   summarizeRuntimeQuiescence,
 } from '../orchestrator/mesh-common';
 import type { AccountState } from '../types/account';
-import type { DeliverableEntityInput } from '../types';
+import type { DeliverableEntityInput } from '../runtime/types';
 import type { EntityReplica } from '../entity/types';
 
 test('bootstrap quiescence counts only reliable outbox and live Account work', () => {

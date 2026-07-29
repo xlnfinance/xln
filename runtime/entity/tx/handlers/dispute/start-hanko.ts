@@ -1,6 +1,6 @@
 import type { AccountReplica } from '../../../../types/account';
 import type { EntityState } from '../../../types';
-import type { RuntimeState } from '../../../../types';
+import type { EntityRuntimeContext } from '../../../runtime-context';
 import { addMessage } from '../../../frame-events';
 import { createDisputeProofHashWithNonce } from '../../../../protocol/dispute/proof-builder';
 import { buildAccountProofBodyFromJurisdictions } from '../../../../account/consensus/helpers';
@@ -18,7 +18,7 @@ export const verifyStartHanko = async (
   account: AccountReplica,
   counterpartyId: string,
   evidence: StartEvidence,
-  env: RuntimeState,
+  env: EntityRuntimeContext,
 ): Promise<boolean> => {
   const domain = resolveDepositoryHankoDomain(sourceState);
   if (!domain) {

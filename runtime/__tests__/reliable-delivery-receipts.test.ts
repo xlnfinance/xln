@@ -50,7 +50,7 @@ import { readStorageFrameRecord } from '../storage';
 import { buildRouteOutputKey, getReliableOutputIdentity } from '../runtime/output-routing';
 import { computeAccountStateRoot } from '../account/state-root';
 import type { AccountState } from '../types/account';
-import type { DeliverableEntityInput, RuntimeState, ReliableDeliveryReceipt } from '../types';
+import type { DeliverableEntityInput, RuntimeState, ReliableDeliveryReceipt } from '../runtime/types';
 import type { EntityReplica } from '../entity/types';
 import type { EntityTx } from '../types/entity-tx';
 import type { JPrefixAttestation } from '../types/jurisdiction-events';

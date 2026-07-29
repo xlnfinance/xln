@@ -47,7 +47,7 @@ import { hashHtlcSecret } from '../protocol/htlc/utils';
 import type { AccountTx } from '../types/account';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { EntityInput, EntityReplica } from '../entity/types';
-import type { RuntimeEntityInputsEnvelope, RoutedEntityInput } from '../types';
+import type { RuntimeEntityInputsEnvelope, RoutedEntityInput } from '../runtime/types';
 import type { EntityTx } from '../types/entity-tx';
 import type { JurisdictionEvent } from '../types/jurisdiction-events';
 

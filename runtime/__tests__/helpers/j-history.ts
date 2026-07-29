@@ -9,7 +9,7 @@ import { canonicalJurisdictionEventsHash, getJEventJurisdictionRef } from '../..
 import { finalizedJHistoryRoot } from '../../jurisdiction/local-history';
 import type { DisputeFinalizationEvidence, JurisdictionEvent, JurisdictionEventData } from '../../types/jurisdiction-events';
 import type { EntityState } from '../../entity/types';
-import type { RuntimeState } from '../../types';
+import type { RuntimeState } from '../../runtime/types';
 import type { JEventApplyResult } from '../../entity/tx/j-events-types';
 
 export type LegacyJEventInput = {

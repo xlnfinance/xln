@@ -1,6 +1,6 @@
 import type { AccountReplica } from '../../../../types/account';
 import type { EntityState } from '../../../types';
-import type { RuntimeState } from '../../../../types';
+import type { EntityRuntimeContext } from '../../../runtime-context';
 import type { ProofBodyStruct } from '../../../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
 import { isUsableContractAddress } from '../../../../jurisdiction/contract-address';
 import {
@@ -14,7 +14,7 @@ import { createStructuredLogger, shortId } from '../../../../infra/logger';
 export const disputeLog = createStructuredLogger('entity.dispute');
 
 export const warnDisputeUnlessQuiet = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   message: string,
   fields: Record<string, unknown>,
 ): void => {
@@ -23,7 +23,7 @@ export const warnDisputeUnlessQuiet = (
 };
 
 export const reportOptionalArgumentWarnings = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   counterpartyEntityId: string,
   warnings: readonly OptionalDisputeArgumentWarning[],
 ): void => {

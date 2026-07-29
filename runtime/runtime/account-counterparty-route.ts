@@ -1,5 +1,5 @@
 import type { AccountReplica } from '../types/account';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from './types';
 import { resolveHankoDefaultProposerSignerId } from '../hanko/signing';
 
 const normalize = (value: string): string => String(value || '').trim().toLowerCase();

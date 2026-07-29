@@ -4,7 +4,7 @@ import { ethers } from 'ethers';
 import type { JAdapter } from '../../jadapter/types';
 import { getCertifiedBoardStackKey } from '../../jurisdiction/board-registry';
 
-import type { RuntimeState, NumberedRegistrationRequest, PendingNumberedRegistration } from '../../types';
+import type { RuntimeState, NumberedRegistrationRequest, PendingNumberedRegistration } from '../types';
 import { createLazyEntity, encodeBoard, hashBoard, type BoardMemberInput } from '../../entity/factory';
 
 export type NumberedRegistrationDefinition = Readonly<{

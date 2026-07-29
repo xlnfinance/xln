@@ -1,4 +1,4 @@
-import type { ReliableDeliveryReceipt, RuntimeEntityInputsEnvelope } from '../types';
+import type { ReliableDeliveryReceipt, RuntimeEntityInputsEnvelope } from '../runtime/types';
 import {
   deliveryAccepted,
   deliveryDeferred,

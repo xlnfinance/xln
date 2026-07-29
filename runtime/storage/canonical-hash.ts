@@ -2,7 +2,7 @@ import { ethers } from 'ethers';
 import { ENTITY_FRAME_EVENT_COLLECTOR } from '../entity/frame-event-collector';
 import { compareStableText } from '../protocol/serialization';
 import type { EntityReplica } from '../entity/types';
-import type { RuntimeInput, RuntimeState } from '../types';
+import type { RuntimeInput, RuntimeState } from '../runtime/types';
 import { buildDurableRuntimeMachineSnapshot } from './wal/snapshot';
 import { buildCertifiedEntityLineagePlan } from './entity-lineage';
 

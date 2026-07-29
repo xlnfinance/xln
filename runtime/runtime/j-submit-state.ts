@@ -1,5 +1,5 @@
 import type { EntityReplica } from '../entity/types';
-import type { RuntimeState, RuntimeTx } from '../types';
+import type { RuntimeState, RuntimeTx } from './types';
 import type { JInput } from '../jurisdiction/input';
 import type { JTx } from '../types/jurisdiction-runtime';
 import { keccak256, toUtf8Bytes } from 'ethers';

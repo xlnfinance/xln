@@ -12,9 +12,7 @@ const MAX_VALUE_IMPORT_SCC_SIZE = 1;
 // Root files obscure ownership and attract cross-layer imports. This is
 // migration debt, not a stable public layout; only runtime.ts is the intended
 // root entrypoint.
-const ROOT_FILE_DEBT = new Set([
-  'runtime/types.ts',
-]);
+const ROOT_FILE_DEBT = new Set<string>();
 
 // These directions violate the Runtime → Entity → Account cascade or make a
 // deterministic machine depend on an operational adapter. They are permanent

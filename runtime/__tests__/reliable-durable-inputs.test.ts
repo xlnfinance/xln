@@ -5,7 +5,7 @@ import { getInputReliableIdentity } from '../runtime/reliable-receipt';
 import { reliableIdentityExactKey } from '../runtime/reliable-frontier';
 import { splitRoutedOutputByDeliveryLane } from '../runtime/output-routing';
 import { safeStringify } from '../protocol/serialization';
-import type { RoutedEntityInput } from '../types';
+import type { RoutedEntityInput } from '../runtime/types';
 
 const entityId = (value: number): string =>
   `0x${value.toString(16).padStart(64, '0')}`;

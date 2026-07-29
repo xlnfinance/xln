@@ -20,7 +20,7 @@ import { hashHtlcSecret } from '../protocol/htlc/utils';
 import { accountInputAck } from '../account/consensus/flush';
 import type { AccountTx, HtlcLock } from '../types/account';
 import type { EntityOutput, EntityReplica } from './types';
-import type { RuntimeState } from '../types';
+import type { EntityRuntimeContext } from './runtime-context';
 import type { EntityTx } from '../types/entity-tx';
 import { verifyCertifiedEntityOutput } from './consensus/output-certification';
 
@@ -91,7 +91,7 @@ const candidateSecretOffers = (replica: EntityReplica): Array<{ accountId: strin
 };
 
 const decryptAdvance = async (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   replica: EntityReplica,
   accountId: string,
   lock: HtlcLock,
@@ -130,7 +130,7 @@ const decryptAdvance = async (
 };
 
 const decryptSecretOfferPayload = async (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   replica: EntityReplica,
   accountId: string,
   lock: HtlcLock,
@@ -162,7 +162,7 @@ const decryptSecretOfferPayload = async (
 };
 
 const decryptSecretOffer = async (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   replica: EntityReplica,
   accountId: string,
   lock: HtlcLock,
@@ -207,7 +207,7 @@ const carriesAcceptedHtlcAck = (
  * preimage through the Entity lockbook without an idle follow-up frame.
  */
 export const appendDefaultProposerAcceptedHtlcReveals = async (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   replica: EntityReplica,
   txs: readonly EntityTx[],
 ): Promise<EntityTx[]> => {
@@ -263,7 +263,7 @@ export const appendDefaultProposerAcceptedHtlcReveals = async (
  * next-frame input, so every validator applies the same public transition.
  */
 export const emitDefaultProposerHtlcOnionAdvances = async (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   replica: EntityReplica,
   outbox: EntityOutput[],
 ): Promise<void> => {

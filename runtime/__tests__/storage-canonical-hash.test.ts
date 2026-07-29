@@ -16,7 +16,7 @@ import { cloneEntityState } from '../entity/state-clone';
 import type { StorageFrameRecord } from '../storage/types';
 import type { AccountState } from '../types/account';
 import type { EntityReplica } from '../entity/types';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import {
   buildReplayVerifiableRuntimeMachineSnapshot,
   projectReplayVerifiableRuntimeMachine,

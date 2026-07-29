@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { detachRuntimeP2P } from '../runtime/p2p-lifecycle';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 
 test('runtime p2p lifecycle diagnostics use structured logging', () => {
   const source = readFileSync(join(process.cwd(), 'runtime/runtime/p2p-lifecycle.ts'), 'utf8');

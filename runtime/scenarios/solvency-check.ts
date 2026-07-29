@@ -3,7 +3,7 @@
  * Verifies total reserves + collateral equals expected value
  */
 
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import { isLeftEntity } from '../entity/id';
 
 export function checkSolvency(env: RuntimeState, expected: bigint, label: string, optional: boolean = false): void {

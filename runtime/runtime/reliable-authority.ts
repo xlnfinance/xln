@@ -1,5 +1,5 @@
 import type { EntityLeaderCertificate, EntityLeaderTimeoutVote, EntityReplica } from '../entity/types';
-import type { RuntimeState, ReliableDeliveryIdentity, RoutedEntityInput } from '../types';
+import type { RuntimeState, ReliableDeliveryIdentity, RoutedEntityInput } from './types';
 import type { EntityTx } from '../types/entity-tx';
 import type { JurisdictionEventData } from '../types/jurisdiction-events';
 import { getEntityLeaderState } from '../entity/consensus/leader';

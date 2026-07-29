@@ -1,4 +1,4 @@
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from './types';
 import { inferRuntimeLifecyclePhase } from './lifecycle';
 
 export const ensureRuntimeState = (env: RuntimeState): NonNullable<RuntimeState['runtimeState']> => {

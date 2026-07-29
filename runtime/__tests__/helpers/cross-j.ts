@@ -10,7 +10,7 @@ import {
 } from '../../jurisdiction/event-observation';
 import type { AccountState } from '../../types/account';
 import type { ConsensusConfig, EntityReplica, EntityState, JurisdictionConfig } from '../../entity/types';
-import type { RuntimeState } from '../../types';
+import type { RuntimeState } from '../../runtime/types';
 import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
 import type { DisputeFinalizationEvidence, JurisdictionEvent } from '../../types/jurisdiction-events';
 import { createDefaultDelta } from '../../account/delta';

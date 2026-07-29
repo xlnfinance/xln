@@ -28,7 +28,7 @@ import {
 import { recordValidatorJHistory } from '../jurisdiction/local-history';
 import { createEmptyEnv, hasRuntimeWork } from '../runtime';
 import type { EntityReplica, EntityState, ProposedEntityFrame } from '../entity/types';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type { EntityTx } from '../types/entity-tx';
 import type { JurisdictionEvent, ValidatorJHistory } from '../types/jurisdiction-events';
 

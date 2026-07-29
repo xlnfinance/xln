@@ -1,6 +1,6 @@
 import type { AccountReplica } from '../../../../types/account';
 import type { EntityInput, EntityState } from '../../../types';
-import type { RuntimeState } from '../../../../types';
+import type { EntityRuntimeContext } from '../../../runtime-context';
 import type { EntityTx } from '../../../../types/entity-tx';
 import { prepareEntityTxState } from '../../../state-clone';
 import { addMessage } from '../../../frame-events';
@@ -33,7 +33,7 @@ const collectRegistryPublication = (
   account: AccountReplica,
   counterpartyId: string,
   finalProofbodyHash: string,
-  env: RuntimeState,
+  env: EntityRuntimeContext,
 ): { secrets: string[]; transformerAddress: string } => {
   const secrets = tx.data.useOnchainRegistry
     ? collectKnownDisputeSecretsForSnapshot(
@@ -57,7 +57,7 @@ const isFinalizeTimingAllowed = (
   account: AccountReplica,
   counterpartyId: string,
   selection: FinalProofSelection,
-  env: RuntimeState,
+  env: EntityRuntimeContext,
 ): boolean => {
   const activeDispute = account.activeDispute!;
   const callerIsLeft = account.leftEntity === state.entityId;
@@ -112,7 +112,7 @@ const queueDisputeFinalize = (
 export const handleDisputeFinalize = async (
   entityState: EntityState,
   entityTx: FinalizeTx,
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   mutableFrameState = false,
 ): Promise<{ newState: EntityState; outputs: EntityInput[] }> => {
   const counterpartyId = entityTx.data.counterpartyEntityId;

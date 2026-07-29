@@ -8,7 +8,7 @@ import { validateMultiRecipientCiphertext } from '../protocol/htlc/multi-recipie
 import { encryptedHtlcLayer } from '../protocol/htlc/onion-layer';
 import type { AccountPeerInput } from '../types/account';
 import type { EntityOutput, EntityReplica } from '../entity/types';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from './types';
 import type { EntityTx } from '../types/entity-tx';
 
 const REPLAY_OUTPUT_SIGNER_HINTS = Symbol.for('xln.runtime.replay.output-signer-hints');

@@ -6,7 +6,7 @@ import {
 } from '../radapter/auth';
 import type { RuntimeAdapterAuthLevel } from '../radapter/types';
 import { safeStringify, deserializeTaggedJson, serializeTaggedJson } from '../protocol/serialization';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 
 type RpcSocket = { send(data: string): unknown };
 

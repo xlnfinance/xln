@@ -2,7 +2,7 @@ import type { Provider } from 'ethers';
 import { ethers } from 'ethers';
 import type { Depository } from '../../jurisdictions/typechain-types';
 import { compareStableText } from '../protocol/serialization';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import {
   decodeDisputeFinalizationEvidenceCalldata,
   type ExternalWalletTrackedOwnerCursor,

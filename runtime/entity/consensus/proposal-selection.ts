@@ -7,7 +7,7 @@ import {
 } from '../../jurisdiction/j-prefix-consensus';
 import { nodeProcess } from '../../infra/runtime-process';
 import type { EntityReplica } from '../types';
-import type { RuntimeState } from '../../types';
+import type { EntityRuntimeContext } from '../runtime-context';
 import type { EntityTx } from '../../types/entity-tx';
 import { hasProposableAccount } from './account-work-index';
 import { prioritizeScheduledWakeTransactions } from './input-merge';
@@ -35,7 +35,7 @@ export type EntityProposalSelectionOptions = {
 };
 
 const addCertifiedJRange = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   replica: EntityReplica,
   trustedLocalCrossJurisdiction: boolean,
   certificate: NonNullable<ReturnType<typeof buildJPrefixCertificate>>,
@@ -61,7 +61,7 @@ const addCertifiedJRange = (
 };
 
 export const selectEntityProposal = async (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   replica: EntityReplica,
   options: EntityProposalSelectionOptions,
 ): Promise<EntityProposalSelection> => {

@@ -1,6 +1,6 @@
 import { runtimeIsBrowser } from '../infra/runtime-process';
 import { ensureRuntimeState } from '../runtime/runtime-state';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type { RuntimeStorageApiDeps } from './runtime-storage-deps';
 import { createRuntimeStorageCommitApi } from './commit';
 import { createPersistedStorageReadApi } from './persisted-read';

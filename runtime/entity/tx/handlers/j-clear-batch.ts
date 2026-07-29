@@ -10,7 +10,7 @@
  */
 
 import type { EntityState, EntityInput } from '../../types';
-import type { RuntimeState } from '../../../types';
+import type { EntityRuntimeContext } from '../../runtime-context';
 import type { JInput } from '../../../jurisdiction/input';
 import type { EntityTx } from '../../../types/entity-tx';
 import { prepareEntityTxState } from '../../state-clone';
@@ -23,7 +23,7 @@ const jBatchActionLog = createStructuredLogger('entity.jbatch');
 export async function handleJClearBatch(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'j_clear_batch' }>,
-  _env: RuntimeState,
+  _env: EntityRuntimeContext,
   mutableFrameState = false,
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; jOutputs: JInput[] }> {
   const { reason } = entityTx.data;

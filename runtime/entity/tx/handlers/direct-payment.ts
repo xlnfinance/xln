@@ -1,7 +1,7 @@
 import { FINANCIAL } from '../../../config/constants';
 import type { AccountTx } from '../../../types/account';
 import type { EntityCandidateEffect, EntityInput, EntityState } from '../../types';
-import type { RuntimeState } from '../../../types';
+import type { EntityRuntimeContext } from '../../runtime-context';
 import type { EntityTx } from '../../../types/entity-tx';
 import { formatEntityId } from '../../../presentation/identity-display';
 import { createStructuredLogger, logError, shortId } from '../../../infra/logger';
@@ -27,7 +27,7 @@ const directPaymentLog = createStructuredLogger('entity.payment');
 
 type PaymentTrace = (message: string, fields?: Record<string, unknown>) => void;
 
-const createPaymentTrace = (env: RuntimeState): PaymentTrace =>
+const createPaymentTrace = (env: EntityRuntimeContext): PaymentTrace =>
   (message, fields = {}) => {
     if (env.quietRuntimeLogs !== true) directPaymentLog.debug(message, fields);
   };
@@ -131,7 +131,7 @@ const buildNextHopPayment = (
 };
 
 export const handleDirectPaymentEntityTx = async (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   entityState: EntityState,
   entityTx: DirectPaymentEntityTx,
   candidateEffects: EntityCandidateEffect[] = [],

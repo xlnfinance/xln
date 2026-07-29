@@ -15,7 +15,7 @@ import {
 } from '../../scenarios/boot';
 import { formatRuntime } from '../../qa/runtime-ascii';
 import { safeStringify } from '../../protocol/serialization';
-import type { RuntimeState, JAdapter } from '../../types';
+import type { RuntimeState, JAdapter } from '../../runtime/types';
 
 type Phase = 'crash' | 'recover';
 

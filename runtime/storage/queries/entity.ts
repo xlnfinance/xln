@@ -14,7 +14,7 @@ import { verifyStorageTailIntegrity } from '../verify';
 import { assertCertifiedJHistoryIntegrity } from '../../jurisdiction/local-history';
 import type { RuntimeAdapterReadQuery } from '../../radapter';
 import type { EntityState } from '../../entity/types';
-import type { RuntimeState } from '../../types';
+import type { RuntimeState } from '../../runtime/types';
 import type { PersistenceQueryDeps } from './deps';
 import { requireStorageDbOpen } from '../availability';
 

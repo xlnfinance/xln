@@ -25,7 +25,7 @@ import {
   submitCrossJurisdictionIntent,
   validateRuntimeInputAdmission,
 } from '../runtime.ts';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 
 export type HubServerSocket = DirectWebSocket &
   RuntimeAdapterSocket & { data?: { type?: string } };

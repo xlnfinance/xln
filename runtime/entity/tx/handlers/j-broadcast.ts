@@ -14,7 +14,7 @@
  */
 
 import type { EntityState, EntityInput, HashType } from '../../types';
-import type { RuntimeState } from '../../../types';
+import type { EntityRuntimeContext } from '../../runtime-context';
 import type { JInput } from '../../../jurisdiction/input';
 import type { EntityTx } from '../../../types/entity-tx';
 import type { JTx } from '../../../types/jurisdiction-runtime';
@@ -38,7 +38,7 @@ const jBatchActionLog = createStructuredLogger('entity.jbatch');
 
 const resolveBroadcastJurisdiction = (
   state: EntityState,
-  env: RuntimeState,
+  env: EntityRuntimeContext,
 ): ReturnType<typeof requireRuntimeJurisdictionConfigByName> | null => {
   const configuredName = getJurisdictionConfigName(state.config.jurisdiction);
   if (!configuredName) {
@@ -132,7 +132,7 @@ const commitBroadcast = (
 export async function handleJBroadcast(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'j_broadcast' }>,
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   mutableFrameState = false,
 ): Promise<EntityTxReducerResult> {
   const newState = prepareEntityTxState(entityState, mutableFrameState);

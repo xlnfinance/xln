@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { RuntimeInput } from '../types';
+import type { RuntimeInput } from '../runtime/types';
 import {
   createRuntimeIngressReceiptStore,
   fingerprintRuntimeIngressInput,

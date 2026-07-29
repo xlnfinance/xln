@@ -14,7 +14,7 @@ import {
 } from '../runtime.ts';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
 import { generateLazyEntityId } from '../entity/factory';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 
 function hasPendingBilateralState(env: RuntimeState): boolean {
   for (const replica of env.eReplicas.values()) {

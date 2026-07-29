@@ -13,7 +13,7 @@ submitCrossJurisdictionIntent
 } from '../runtime.ts';
 import { computeCanonicalEntityHashesFromEnv } from '../storage/canonical-hash';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type { SwapOffer } from '../types/account';
 import {
 HUB_REQUIRED_TOKEN_COUNT,

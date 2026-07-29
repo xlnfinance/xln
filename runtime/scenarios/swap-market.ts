@@ -15,7 +15,7 @@
  * Run with: bun runtime/scenarios/swap-market.ts
  */
 
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type { EntityInput } from '../entity/types';
 import {
   bindScenarioJReplica,

@@ -6,7 +6,7 @@ import {
   accountInputAck,
   accountInputProposal,
 } from '../account/consensus/flush';
-import type { RoutedEntityInput, RuntimeState } from '../types';
+import type { RoutedEntityInput, RuntimeState } from './types';
 import { commitEntityFrameCandidateState } from '../entity/state-clone';
 import {
   isCommittedEntityInput,

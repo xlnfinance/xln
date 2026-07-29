@@ -5,7 +5,7 @@ import {
 import { requireBoundaryInteger } from '../../protocol/boundary-validation';
 import { writeRuntimeMetadata } from '../../runtime/loop-environment';
 import { restoreDurableOutputRetryState } from '../../runtime/durable-output-retry';
-import type { RuntimeState } from '../../types';
+import type { RuntimeState } from '../../runtime/types';
 import {
   authorizeRestoredRuntimeInput,
   restoreDurableRuntimeSnapshot,

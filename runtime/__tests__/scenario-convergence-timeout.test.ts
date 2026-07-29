@@ -9,7 +9,7 @@ import {
 } from '../scenarios/helpers';
 import { buildRouteOutputKey } from '../runtime/output-routing';
 import { registerReliableIngress } from '../runtime/reliable-delivery';
-import type { DeliverableEntityInput } from '../types';
+import type { DeliverableEntityInput } from '../runtime/types';
 import type { JPrefixAttestation } from '../types/jurisdiction-events';
 import { htlcRouteConvergenceCycleBudget } from '../scenarios/test-economy';
 

@@ -4,7 +4,7 @@
  * Executes parsed scenarios by feeding events to the XLN runtime
  */
 
-import type { RuntimeState, RuntimeTx } from '../types.js';
+import type { RuntimeState, RuntimeTx } from '../runtime/types.js';
 import type { EntityInput, ConsensusConfig } from '../entity/types.js';
 import { ethers } from 'ethers';
 import type {

@@ -1,5 +1,5 @@
 import { normalizeRuntimeId } from '../networking/runtime-id';
-import type { RoutedEntityInput } from '../types';
+import type { RoutedEntityInput } from './types';
 import { reliableIdentityExactKey } from './reliable-frontier';
 import { getInputReliableIdentity } from './reliable-receipt';
 import { splitRoutedOutputByDeliveryLane } from './output-routing';

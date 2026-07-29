@@ -16,7 +16,7 @@
  * - Result: O(1) per node - unlimited horizontal scaling
  */
 
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type { JAdapter } from '../jadapter/types';
 import { createEmptyBatch, batchAddReserveToReserve } from '../jurisdiction/batch';
 import {

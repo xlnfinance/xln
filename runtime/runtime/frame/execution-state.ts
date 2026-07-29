@@ -2,7 +2,7 @@ import type {
   EnvSnapshot,
   ReliableDeliveryReceipt,
   RuntimeInput,
-} from '../../types';
+} from '../types';
 import type {
   ReliableIngressCommit,
   ReliableReceiptSenderCheckpoint,

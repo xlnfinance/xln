@@ -2,7 +2,7 @@ import { createStructuredLogger } from '../infra/logger';
 import type { createRuntimeLoopApi } from './loop';
 import { nodeProcess, runtimeIsBrowser } from '../infra/runtime-process';
 import { dbRootPath } from './platform';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from './types';
 
 const runtimeLog = createStructuredLogger('runtime');
 

@@ -1,6 +1,6 @@
 import type { AccountReplica, SettlementOp } from '../../types/account';
 import type { EntityInput } from '../types';
-import type { RuntimeState } from '../../types';
+import type { EntityRuntimeContext } from '../runtime-context';
 import type { EntityTx } from '../../types/entity-tx';
 import { isLeftEntity } from '../id';
 import { getEntityLeaderState } from '../consensus/leader';
@@ -35,7 +35,7 @@ export const HUB_MAX_C2R_PER_TICK = 10;
 type RebalanceDebug = (payload: Record<string, unknown>) => void;
 
 type RebalanceRun = {
-  env: RuntimeState;
+  env: EntityRuntimeContext;
   replica: EntityTransitionContext;
   execution: CrontabExecutionContext;
   outputs: EntityInput[];
@@ -70,7 +70,7 @@ const compareBigAsc = (left: bigint, right: bigint): number =>
   left === right ? 0 : left < right ? -1 : 1;
 
 const createRebalanceRun = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   replica: EntityTransitionContext,
   execution: CrontabExecutionContext,
 ): RebalanceRun => {
@@ -598,7 +598,7 @@ const queueRebalanceBroadcast = (
 };
 
 export async function hubRebalanceHandler(
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   replica: EntityTransitionContext,
   _task: CrontabTaskState,
   execution: CrontabExecutionContext,

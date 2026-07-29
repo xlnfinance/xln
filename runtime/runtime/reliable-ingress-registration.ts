@@ -4,7 +4,7 @@ import type {
   ReliableDeliveryIdentity,
   ReliableDeliveryReceipt,
   RoutedEntityInput,
-} from '../types';
+} from './types';
 import {
   assertTerminalReceiptCoversInput,
   canReissueTerminalAccountFrameAck,

@@ -1,6 +1,6 @@
 import type { AccountReplica, Delta } from '../types/account';
 import type { EntityTx } from '../types/entity-tx';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import { deriveDelta, getTokenInfo } from '../account/utils';
 import { encodeBoard, hashBoard } from '../entity/factory';
 import { compareStableText } from '../protocol/serialization';

@@ -1,6 +1,6 @@
 import type { RuntimeActivityEvent, RuntimeActivityFilters } from '../api/activity-history';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
-import type { RuntimeInput } from '../types';
+import type { RuntimeInput } from '../runtime/types';
 import type { XlnProtocolVersion } from '../protocol/version';
 import type { RuntimeIngressReceipt } from '../server/ingress-receipts';
 

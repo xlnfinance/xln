@@ -1,6 +1,6 @@
 import type { AccountReplica } from '../../../../types/account';
 import type { EntityState } from '../../../types';
-import type { RuntimeState } from '../../../../types';
+import type { EntityRuntimeContext } from '../../../runtime-context';
 import type { EntityTx } from '../../../../types/entity-tx';
 import { addMessage } from '../../../frame-events';
 import { initJBatch } from '../../../../jurisdiction/batch';
@@ -17,7 +17,7 @@ type FinalizeTx = Extract<EntityTx, { type: 'disputeFinalize' }>;
 export const admitDisputeFinalize = (
   state: EntityState,
   tx: FinalizeTx,
-  env: RuntimeState,
+  env: EntityRuntimeContext,
 ): AccountReplica | null => {
   const counterpartyId = tx.data.counterpartyEntityId;
   state.jBatchState ??= initJBatch();

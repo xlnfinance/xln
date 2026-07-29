@@ -1,6 +1,6 @@
 import type { AccountPeerInput, RuntimeOverlayRecord } from '../../types/account';
 import type { EntityState, EntityOutput, HashType, EntityCandidateEffect } from '../types';
-import type { RuntimeState } from '../../types';
+import type { EntityRuntimeContext } from '../runtime-context';
 import type { JInput } from '../../jurisdiction/input';
 import type { EntityTx } from '../../types/entity-tx';
 import type { AccountJClaimNodeStore } from '../../types/account-j-claims';
@@ -149,7 +149,7 @@ export type EntityTxReducerResult = Omit<ApplyEntityTxResult, 'storageChanges' |
 };
 
 type EntityTxDispatcher = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   entityState: EntityState,
   entityTx: EntityTx,
   options: EntityTxExecutionOptions,
@@ -519,7 +519,7 @@ const entityTxDispatchers = {
 } satisfies Record<ReducibleEntityTx['type'], EntityTxDispatcher>;
 
 export const applyEntityTx = async (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   entityState: EntityState,
   entityTx: EntityTx,
   options?: ApplyEntityTxOptions,

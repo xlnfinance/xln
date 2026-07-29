@@ -1,7 +1,7 @@
 import { encodeCanonicalConsensusValue } from '../../protocol/canonical-consensus-value';
 import { NobleCryptoProvider } from '../../protocol/crypto/noble';
 import type { EntityInput, EntityState } from '../types';
-import type { RuntimeState } from '../../types';
+import type { EntityRuntimeContext } from '../runtime-context';
 import type { EntityTx } from '../../types/entity-tx';
 import type { Profile } from '../../entity/profile';
 import { canonicalizeProfile, getValidatorEncryptionManifestFromBoard } from '../../entity/profile';
@@ -193,7 +193,7 @@ const assertExactPaymentFields = (data: HtlcPaymentTx['data'], mode: 'raw' | 'pr
   }
 };
 
-const requireProfiles = (env: RuntimeState): Profile[] => {
+const requireProfiles = (env: EntityRuntimeContext): Profile[] => {
   if (!env.gossip || typeof env.gossip.getProfiles !== 'function') {
     throw new Error('HTLC_PAYMENT_GOSSIP_UNAVAILABLE');
   }
@@ -209,7 +209,7 @@ const uniqueProfile = <T extends { entityId: string }>(profiles: T[], entityId: 
 };
 
 const resolveRoute = async (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   state: EntityState,
   tx: HtlcPaymentTx,
   amount: bigint,
@@ -264,7 +264,7 @@ const certifiedDefaultProposerSignerId = (board: Profile['metadata']['board'], e
 };
 
 const certifyRouteProfiles = async (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   profiles: Profile[],
   route: string[],
 ): Promise<{
@@ -370,7 +370,7 @@ const validateCanonicalProfileDescriptor = (raw: unknown): EntityProfileDescript
 };
 
 const validatePreparedRouteProfiles = async (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   observerState: EntityState,
   route: string[],
   routeProfiles: unknown,
@@ -554,7 +554,7 @@ const hasEveryPreparedField = (tx: HtlcPaymentTx): boolean =>
     tx.data.preparedHopForwardAmounts,
   ].every(value => value !== undefined);
 
-const findIngressEntityState = (env: RuntimeState, input: EntityInput): EntityState => {
+const findIngressEntityState = (env: EntityRuntimeContext, input: EntityInput): EntityState => {
   const entityId = String(input.entityId || '')
     .trim()
     .toLowerCase();
@@ -573,7 +573,7 @@ const findIngressEntityState = (env: RuntimeState, input: EntityInput): EntitySt
 };
 
 export const prepareHtlcPaymentEntityTx = async (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   state: EntityState,
   tx: HtlcPaymentTx,
 ): Promise<HtlcPaymentTx> => {
@@ -736,7 +736,7 @@ const validatePreparedPaymentBasics = (state: EntityState, tx: HtlcPaymentTx): P
 };
 
 export const validatePreparedHtlcPayment = async (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   state: EntityState,
   tx: HtlcPaymentTx,
 ): Promise<ValidatedPreparedHtlcPayment> => {
@@ -835,7 +835,7 @@ export const validatePreparedHtlcPayment = async (
 
 /** Seal every raw local HTLC before consensus admission and WAL persistence. */
 export const prepareHtlcPaymentEntityInputs = async (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   inputs: readonly EntityInput[],
 ): Promise<EntityInput[]> =>
   Promise.all(

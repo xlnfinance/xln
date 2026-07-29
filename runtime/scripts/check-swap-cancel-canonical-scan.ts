@@ -59,7 +59,7 @@ assertNotIncludes(frontend, "type: 'cancelSwapOffer'", frontendPath);
 assertNotIncludes(frontend, 'buildDeterministicSwapOfferId', frontendPath);
 assertNotIncludes(frontend, 'satisfies CrossJurisdictionSwapRoute', frontendPath);
 
-const commandPlanPath = 'runtime/account/swap-command-plan.ts';
+const commandPlanPath = 'runtime/runtime/swap-command-plan.ts';
 const commandPlan = readText(commandPlanPath);
 assertIncludes(commandPlan, 'readSwapAccountCapacity({', commandPlanPath);
 assertIncludes(commandPlan, 'planSwapInboundCapacity({', commandPlanPath);

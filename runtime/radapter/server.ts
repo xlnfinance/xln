@@ -1,7 +1,7 @@
 import type { RuntimeActivityFilters } from '../api/activity-history';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { EntityState } from '../entity/types';
-import type { RuntimeState, RuntimeInput } from '../types';
+import type { RuntimeState, RuntimeInput } from '../runtime/types';
 import {
   assertRuntimeAdapterMessageSize,
   encodeRuntimeAdapterMessageForBrowser,

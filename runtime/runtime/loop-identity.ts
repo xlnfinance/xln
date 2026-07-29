@@ -2,7 +2,7 @@ import { deriveSignerAddressSync, getSignerPrivateKeyIfAvailable } from '../acco
 import { extractEntityId, extractSignerId } from '../protocol/identity';
 import { createStructuredLogger } from '../infra/logger';
 import { normalizeRuntimeId } from '../networking/runtime-id';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from './types';
 
 const identityLog = createStructuredLogger('runtime.identity');
 

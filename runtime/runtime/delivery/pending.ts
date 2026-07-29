@@ -5,7 +5,7 @@ import type {
   ReliableDeliveryReceipt,
   RoutedEntityInput,
   RuntimeEntityInputsEnvelope,
-} from '../../types';
+} from '../types';
 import { createStructuredLogger } from '../../infra/logger';
 import { normalizeRuntimeId } from '../../networking/runtime-id';
 import { compareStableText, safeStringify } from '../../protocol/serialization';

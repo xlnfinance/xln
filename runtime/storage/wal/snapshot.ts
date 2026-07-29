@@ -1,5 +1,5 @@
 import type { EntityReplica } from '../../entity/types';
-import type { RuntimeState, EnvSnapshot, RoutedEntityInput, RuntimeInput } from '../../types';
+import type { RuntimeState, EnvSnapshot, RoutedEntityInput, RuntimeInput } from '../../runtime/types';
 import type { JReplica } from '../../types/jurisdiction-runtime';
 import type { Profile } from '../../entity/profile';
 import { cloneEntityReplica } from '../../entity/replica-clone';
@@ -22,7 +22,7 @@ import {
 import {
   getAccountJClaimNodeStore,
   getLiveAccountJClaimAccumulatorStates,
-} from '../../account/j-claim-store';
+} from '../../entity/account-j-claim-node-store';
 import {
   cloneIsolatedRoutedEntityInputs,
   cloneIsolatedRuntimeInput,

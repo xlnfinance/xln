@@ -1,6 +1,6 @@
 import type { AccountReplica } from '../../../../types/account';
 import type { EntityState } from '../../../types';
-import type { RuntimeState } from '../../../../types';
+import type { EntityRuntimeContext } from '../../../runtime-context';
 import type { ProofBodyStruct } from '../../../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
 import { addMessage } from '../../../frame-events';
 import {
@@ -151,7 +151,7 @@ export const buildStarterArguments = (
   proofBodyHash: string,
   signedNonce: number,
   overrideInitial: string | undefined,
-  env: RuntimeState,
+  env: EntityRuntimeContext,
 ): Pick<StartEvidence, 'starterInitialArguments' | 'starterIncrementedArguments'> => {
   const starterIsLeft = account.leftEntity === state.entityId;
   const starterSide: DisputeArgumentSide = starterIsLeft ? 'left' : 'right';

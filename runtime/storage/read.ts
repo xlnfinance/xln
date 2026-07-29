@@ -1,6 +1,6 @@
 import type { BookState } from '../orderbook';
 import type { EntityState } from '../entity/types';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import { computeIntegrityDigest } from '../infra/integrity-checksum';
 import { decodeBuffer, decodeValidatedBuffer } from './codec';
 import { docRefCellKey, docRefKey, docValueKey } from './doc-refs';
@@ -75,7 +75,7 @@ import {
   hashAccountJClaimNode,
   type AccountJClaimAccumulatorState,
 } from '../account/j-claim-accumulator';
-import { getAccountJClaimNodeStore } from '../account/j-claim-store';
+import { getAccountJClaimNodeStore } from '../entity/account-j-claim-node-store';
 import { validateEntityReplica } from '../entity/replica-validation';
 import {
   assertStorageAccountDocBinding,

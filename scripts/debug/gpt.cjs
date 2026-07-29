@@ -1157,7 +1157,7 @@ xln/
     DeltaTransformer.sol       ${fileSizes['contracts/DeltaTransformer.sol'] || '?'} lines - Delta transformations: HTLCs, swaps, limit orders
 
   runtime/
-    types.ts                     ${fileSizes['runtime/types.ts'] || '?'} lines - All TypeScript interfaces (START HERE)
+    runtime/types.ts             ${fileSizes['runtime/runtime/types.ts'] || '?'} lines - Runtime machine interfaces
     protocol/identity.ts         ${fileSizes['runtime/protocol/identity.ts'] || '?'} lines - Identity system: EntityId, SignerId, JId, ReplicaKey
     runtime.ts                   ${fileSizes['runtime/runtime.ts'] || '?'} lines - Main coordinator, 100ms ticks, R->E->A routing
     entity/consensus/index.ts          ${fileSizes['runtime/entity/consensus/index.ts'] || '?'} lines - BFT consensus (ADD_TX -> PROPOSE -> SIGN -> COMMIT)

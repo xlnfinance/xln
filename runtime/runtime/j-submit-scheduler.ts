@@ -1,5 +1,5 @@
 import type { EntityReplica } from '../entity/types';
-import type { RuntimeState, RuntimeTx } from '../types';
+import type { RuntimeState, RuntimeTx } from './types';
 import { getLocalSignerPrivateKey } from '../account/crypto';
 import { ENTITY_J_SUBMIT_FALLBACK_MS, isEntityActiveLeader } from '../entity/consensus/leader';
 import { isBatchEmpty } from '../jurisdiction/batch';

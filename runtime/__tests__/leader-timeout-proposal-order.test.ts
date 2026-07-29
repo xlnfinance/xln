@@ -16,7 +16,7 @@ import { encodeBoard, hashBoard } from '../entity/factory';
 import { initCrontab } from '../entity/scheduler';
 import { applyRuntimeInput, createEmptyEnv, processRuntime } from '../runtime';
 import type { ConsensusConfig, EntityInput, EntityLeaderTimeoutVote, EntityReplica, EntityState, ProposedEntityFrame } from '../entity/types';
-import type { RuntimeState, RoutedEntityInput } from '../types';
+import type { RuntimeState, RoutedEntityInput } from '../runtime/types';
 
 const RUN_ID = `${process.pid}-${Date.now()}`;
 

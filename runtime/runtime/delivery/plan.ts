@@ -1,4 +1,4 @@
-import type { RuntimeState, RoutedEntityInput } from '../../types';
+import type { RuntimeState, RoutedEntityInput } from '../types';
 import { entityInputHasCrossJurisdictionIntraRuntimeTx } from '../../extensions/cross-j/boundary';
 import { createStructuredLogger, shortId } from '../../infra/logger';
 import { normalizeRuntimeId } from '../../networking/runtime-id';

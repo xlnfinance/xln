@@ -1,4 +1,4 @@
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 
 export type ReserveUpdatedEvidence = {
   name: 'ReserveUpdated';

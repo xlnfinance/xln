@@ -92,7 +92,7 @@ import type {
   StorageSnapshotManifest,
 } from '../storage/types';
 
-import type { AccountTx, CrossJurisdictionSwapRoute, Delta, EntityReplica, RuntimeState, RuntimeInput } from '../types';
+import type { AccountTx, CrossJurisdictionSwapRoute, Delta, EntityReplica, RuntimeState, RuntimeInput } from '../runtime/types';
 
 import type { BookState } from '../orderbook';
 

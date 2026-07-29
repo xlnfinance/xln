@@ -1,4 +1,4 @@
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from './types';
 import { inferRuntimeLifecyclePhase } from './lifecycle';
 import { requestRuntimeLoopWake } from './input-queue';
 import { getRemainingRuntimeFrameDelayMs } from './loop-work';

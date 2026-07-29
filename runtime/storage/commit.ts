@@ -13,7 +13,7 @@ import type {
   RoutedEntityInput,
   RuntimeInput,
   RuntimeState,
-} from '../types';
+} from '../runtime/types';
 import { buildDurableRuntimeMachineSnapshot } from './wal/snapshot';
 import { computeCanonicalStateHashFromEnv } from './canonical-hash';
 import {

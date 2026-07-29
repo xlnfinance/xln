@@ -1,6 +1,6 @@
 import type { AccountReplica } from '../../../../types/account';
 import type { EntityState } from '../../../types';
-import type { RuntimeState } from '../../../../types';
+import type { EntityRuntimeContext } from '../../../runtime-context';
 import type { ProofBodyStruct } from '../../../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
 import { addMessage } from '../../../frame-events';
 import {
@@ -53,7 +53,7 @@ export const selectFinalProof = (
   state: EntityState,
   account: AccountReplica,
   counterpartyId: string,
-  env: RuntimeState,
+  env: EntityRuntimeContext,
 ): FinalProofSelection | null => {
   const activeDispute = account.activeDispute!;
   const currentProof = buildAccountProofBodyFromJurisdictions(env, account);
@@ -154,7 +154,7 @@ export const buildFinalProofPayload = (
   account: AccountReplica,
   counterpartyId: string,
   selection: FinalProofSelection,
-  env: RuntimeState,
+  env: EntityRuntimeContext,
 ): FinalProofPayload => {
   const activeDispute = account.activeDispute!;
   const builtArguments = buildDisputeArgumentsForSnapshot(

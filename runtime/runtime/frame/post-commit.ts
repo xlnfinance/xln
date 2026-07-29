@@ -1,7 +1,7 @@
 import { materializePendingJurisdictionImportResults } from '../jurisdiction-import';
 import { submitRuntimeJOutbox, type RuntimeJOutboxQueue } from '../j-submit';
 import { ensureRuntimeState } from '../runtime-state';
-import type { RuntimeState, RuntimeInput, RuntimeTx } from '../../types';
+import type { RuntimeState, RuntimeInput, RuntimeTx } from '../types';
 import type { JInput } from '../../jurisdiction/input';
 import { getWallClockMs } from '../../infra/time';
 import {

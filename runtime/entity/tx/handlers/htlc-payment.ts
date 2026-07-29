@@ -9,7 +9,7 @@
 
 import type { AccountState, AccountTx } from '../../../types/account';
 import type { EntityCandidateEffect, EntityInput, EntityState } from '../../types';
-import type { RuntimeState } from '../../../types';
+import type { EntityRuntimeContext } from '../../runtime-context';
 import type { EntityTx } from '../../../types/entity-tx';
 import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
@@ -138,7 +138,7 @@ const recordOriginatedHtlc = (
 export async function handleHtlcPayment(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'htlcPayment' }>,
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   candidateEffects: EntityCandidateEffect[] = [],
   mutableFrameState = false,
 ): Promise<HtlcPaymentResult> {

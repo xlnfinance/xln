@@ -7,13 +7,13 @@ import { createAccountJClaimSession } from '../account/j-claim-session';
 import {
   cacheCommittedAccountJClaimNodeChanges,
   getAccountJClaimNodeStore,
-} from '../account/j-claim-store';
+} from '../entity/account-j-claim-node-store';
 import { prepareAccountJClaimTx } from '../account/j-claim-transition';
 import { mergeJEventClaimOps } from '../entity/tx/j-events-account';
 import type { JEventAccountTx } from '../entity/tx/j-events-types';
 import { createEmptyEnv } from '../runtime';
 import type { AccountState, AccountTx } from '../types/account';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type { JurisdictionEvent } from '../types/jurisdiction-events';
 import { createDefaultDelta } from '../account/delta';
 

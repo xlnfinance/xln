@@ -2,7 +2,7 @@ import { ethers } from 'ethers';
 import { isLeftEntity } from '../../entity/id';
 import type { AccountFrame, AccountInput, AccountTx, SwapOffer, SwapOrderHistoryEntry } from '../../types/account';
 import type { CrossJurisdictionBookAdmission, CrossJurisdictionCloseProof, CrossJurisdictionRouteDomain, CrossJurisdictionSettlementPolicy, CrossJurisdictionPendingFill, CrossJurisdictionPullBinding, CrossJurisdictionPullLeg, CrossJurisdictionSwapLeg, CrossJurisdictionSwapRoute, CrossJurisdictionSwapStatus, CrossJurisdictionTimePolicy } from '../../types/cross-jurisdiction';
-import type { RuntimeState } from '../../types';
+import type { RuntimeState } from '../../runtime/types';
 import {
   buildHashLadderProof,
   revealHashLadder,

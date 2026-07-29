@@ -3,7 +3,7 @@ import type {
   RuntimeState,
   RoutedEntityInput,
   RuntimeEntityInputsEnvelope,
-} from '../../types';
+} from '../types';
 import { createStructuredLogger, shortId } from '../../infra/logger';
 import { normalizeRuntimeId } from '../../networking/runtime-id';
 import { compareStableText, safeStringify } from '../../protocol/serialization';

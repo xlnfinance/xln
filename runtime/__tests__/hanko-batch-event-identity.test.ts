@@ -136,7 +136,7 @@ test('finality releases a protocol-forced draft broadcast without mixing it into
     tokenId: 1,
     amount: 4n,
   });
-  const outputs: import('../types').EntityInput[] = [];
+  const outputs: import('../runtime/types').EntityInput[] = [];
 
   await applyHankoBatchProcessedEvent({
     newState: state,

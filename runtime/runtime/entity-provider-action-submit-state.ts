@@ -17,7 +17,7 @@ import {
 } from '../jurisdiction/jurisdiction-runtime';
 import { safeStringify } from '../protocol/serialization';
 import type { EntityReplica } from '../entity/types';
-import type { RuntimeState, RuntimeTx } from '../types';
+import type { RuntimeState, RuntimeTx } from './types';
 import type { JInput } from '../jurisdiction/input';
 import type { JTx } from '../types/jurisdiction-runtime';
 

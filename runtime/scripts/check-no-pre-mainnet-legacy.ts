@@ -8,7 +8,7 @@ const banned = [
   },
   {
     symbol: 'evms:',
-    files: ['runtime/types.ts', 'runtime/runtime.ts', 'runtime/runtime/composition.ts', 'runtime/scenarios/settle.ts'],
+    files: ['runtime/runtime/types.ts', 'runtime/runtime.ts', 'runtime/runtime/composition.ts', 'runtime/scenarios/settle.ts'],
   },
   {
     symbol: '.evms',

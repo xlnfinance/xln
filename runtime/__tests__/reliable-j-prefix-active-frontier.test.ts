@@ -8,7 +8,7 @@ import {
 } from '../runtime/reliable-delivery';
 import { buildDurableRuntimeMachineSnapshot, restoreDurableRuntimeSnapshot } from '../storage/wal/snapshot';
 import { createEmptyEnv } from '../runtime';
-import type { DeliverableEntityInput, RuntimeState } from '../types';
+import type { DeliverableEntityInput, RuntimeState } from '../runtime/types';
 import type { EntityReplica } from '../entity/types';
 import type { JPrefixAttestation } from '../types/jurisdiction-events';
 

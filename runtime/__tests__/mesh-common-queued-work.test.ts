@@ -9,7 +9,7 @@ import {
 import { buildCollectiveEntityProposalTx } from '../entity/authorization';
 import { hashEntityCommandTxs } from '../entity/command-codec';
 import type { EntityTx } from '../types/entity-tx';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 
 const entityId = '0x1111111111111111111111111111111111111111111111111111111111111111';
 const counterpartyId = '0x2222222222222222222222222222222222222222222222222222222222222222';

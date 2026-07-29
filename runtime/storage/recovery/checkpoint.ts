@@ -2,7 +2,7 @@ import type { Profile } from '../../entity/profile';
 import { normalizeRuntimeId } from '../../networking/runtime-id';
 import { requireBoundaryInteger } from '../../protocol/boundary-validation';
 import { cloneIsolatedRuntimeSnapshot } from '../../runtime/input-clone';
-import { assertAccountJClaimRootsAvailable } from '../../account/j-claim-store';
+import { assertAccountJClaimRootsAvailable } from '../../entity/account-j-claim-node-store';
 import { assertConsumptionRootsAvailable } from '../../entity/consumption-store';
 import { setBrowserVMJurisdiction } from '../../jadapter';
 import { assertCertifiedBoardRootsAvailable } from '../../jurisdiction/board-registry';
@@ -15,7 +15,7 @@ import { rehydrateRestoredRuntimeInfra } from '../../runtime/infra';
 import { loadGossipProfilesFromInfraDb } from '../../runtime/infra-gossip-store';
 import { assertPersistedContractConfigReady, registerCommittedSingleSignerWallets } from '../../runtime/recovery-infra';
 import { runtimeIsBrowser } from '../../infra/runtime-process';
-import type { RuntimeState } from '../../types';
+import type { RuntimeState } from '../../runtime/types';
 import { normalizeDbNamespace } from '../runtime-dbs';
 import { normalizePersistedSnapshotInPlace, restoreDurableRuntimeSnapshot } from '../wal/snapshot';
 

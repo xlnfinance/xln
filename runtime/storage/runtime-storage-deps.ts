@@ -1,6 +1,6 @@
 import type { Level } from 'level';
 
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type { PersistedFrameJournal } from './types';
 import type { StorageDbRole } from './runtime-dbs';
 

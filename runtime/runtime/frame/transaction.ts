@@ -1,4 +1,4 @@
-import type { RuntimeInput, RuntimeState } from '../../types';
+import type { RuntimeInput, RuntimeState } from '../types';
 import { requireRuntimeMempool } from '../input-queue';
 import { ensureRuntimeState } from '../runtime-state';
 import { rebuildScheduledWakeIndex } from '../scheduled-wake';

@@ -1,5 +1,5 @@
 import { createStructuredLogger } from '../../infra/logger';
-import type { RuntimeState, RoutedEntityInput } from '../../types';
+import type { RuntimeState, RoutedEntityInput } from '../types';
 import type {
   PlannedRemoteOutput,
   RuntimeOutputRoutingDeps,

@@ -1,5 +1,5 @@
 import type { EntityInput, EntityState } from '../../../types';
-import type { RuntimeState } from '../../../../types';
+import type { EntityRuntimeContext } from '../../../runtime-context';
 import {
   applyCommand,
   getBookOrder,
@@ -47,7 +47,7 @@ const normalizeEntityRef = (value: string): string => String(value || '').trim()
  * proposal as an external side effect.
  */
 export function routeRemoteCrossJurisdictionBookCancels(
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   sourceHubState: EntityState,
   cancels: SwapCancelRequestEvent[],
 ): RoutedOrderbookCancels {

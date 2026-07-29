@@ -1,5 +1,5 @@
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
-import type { RuntimeEntityInputsEnvelope } from '../types';
+import type { RuntimeEntityInputsEnvelope } from '../runtime/types';
 import { validateDeliverableEntityInput } from '../runtime/routing-validation';
 import { normalizeRuntimeId } from './runtime-id';
 

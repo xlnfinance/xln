@@ -1,6 +1,6 @@
-import { assertCrossJurisdictionSwapTargetReady } from '../account/swap-command-plan';
+import { assertCrossJurisdictionSwapTargetReady } from './swap-command-plan';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from './types';
 
 const normalizeId = (value: string): string => value.trim().toLowerCase();
 

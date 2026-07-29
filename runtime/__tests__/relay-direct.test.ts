@@ -8,7 +8,7 @@ import {
   hasConnectedEncryptedRelayClient,
   sendEntityInputDirectViaRelaySocketDelivery,
 } from '../server/relay-direct';
-import type { DeliverableEntityInput, RuntimeState, RuntimeEntityInputsEnvelope } from '../types';
+import type { DeliverableEntityInput, RuntimeState, RuntimeEntityInputsEnvelope } from '../runtime/types';
 
 type SentMessage = {
   type?: string;

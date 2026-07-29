@@ -1,12 +1,12 @@
 import type { AccountConsensusContext } from '../account/consensus/context';
 import { getEntityConfigBoardHash, verifyHankoForHash } from '../hanko/signing';
 import { resolveSigningCertifiedBoardHash } from '../jurisdiction/board-registry';
-import type { RuntimeState } from '../types';
-import { getAccountJClaimNodeStore } from '../account/j-claim-store';
+import type { EntityRuntimeContext } from './runtime-context';
+import { getAccountJClaimNodeStore } from './account-j-claim-node-store';
 import type { AccountJClaimNodeStore } from '../types/account-j-claims';
 
 const resolveSettlementBoardAuthority = async (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   sourceEntityId: string,
   certifiedBoardHash?: string,
 ): Promise<string | undefined> => {
@@ -45,7 +45,7 @@ const resolveSettlementBoardAuthority = async (
 };
 
 export const createAccountConsensusContext = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   jClaimNodeStore: AccountJClaimNodeStore = getAccountJClaimNodeStore(env),
 ): AccountConsensusContext => ({
   runtimeTimestamp: env.timestamp,

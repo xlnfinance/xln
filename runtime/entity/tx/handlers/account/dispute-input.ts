@@ -1,6 +1,6 @@
 import type { AccountPeerInput, AccountReplica } from '../../../../types/account';
 import type { EntityInput, EntityState } from '../../../types';
-import type { RuntimeState } from '../../../../types';
+import type { EntityRuntimeContext } from '../../../runtime-context';
 import type { HandleAccountInputResult } from '../../../../account/consensus/types';
 import { addMessage } from '../../../frame-events';
 import { armHtlcSecretAckTimeout, persistVerifiedHtlcSecret } from '../../htlc-route-lifecycle';
@@ -8,7 +8,7 @@ import { handlePrepareDispute } from '../dispute';
 import type { CommittedAccountEffects } from './committed-input';
 
 type UnsafeFrameContext = {
-  env: RuntimeState;
+  env: EntityRuntimeContext;
   state: EntityState;
   input: AccountPeerInput;
   account: AccountReplica;

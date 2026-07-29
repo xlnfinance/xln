@@ -1,6 +1,6 @@
 import type { AccountReplica, RuntimeOverlayRecord } from '../../../../types/account';
 import type { EntityInput, EntityState } from '../../../types';
-import type { RuntimeState } from '../../../../types';
+import type { EntityRuntimeContext } from '../../../runtime-context';
 import type { EntityTx } from '../../../../types/entity-tx';
 import { prepareEntityTxState } from '../../../state-clone';
 import { addMessage } from '../../../frame-events';
@@ -97,7 +97,7 @@ const queueDisputeStart = (
 export const handleDisputeStart = async (
   entityState: EntityState,
   entityTx: StartTx,
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   _storageChanges: RuntimeOverlayRecord[] = [],
   mutableFrameState = false,
 ): Promise<{ newState: EntityState; outputs: EntityInput[] }> => {

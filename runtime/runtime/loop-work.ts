@@ -24,7 +24,7 @@ import { ensureRuntimeConfig } from './loop-environment';
 import { enqueueRuntimeInputs } from './loop-infrastructure';
 import { ensureRuntimeState } from './runtime-state';
 import type { EntityInput, EntityReplica } from '../entity/types';
-import type { RuntimeState, RuntimeInput } from '../types';
+import type { RuntimeState, RuntimeInput } from './types';
 
 export type RuntimeWorkDeps = {
   runtimeInputHasQueuedWork(input: RuntimeInput): boolean;

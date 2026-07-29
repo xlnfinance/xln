@@ -1,6 +1,6 @@
 import { safeStringify } from '../protocol/serialization';
 import type { EntityReplica } from '../entity/types';
-import type { RuntimeState, RuntimeTx } from '../types';
+import type { RuntimeState, RuntimeTx } from './types';
 import type { EntityProviderActionSubmitState } from '../types/entity-provider-actions';
 import {
   type ActionJTx,

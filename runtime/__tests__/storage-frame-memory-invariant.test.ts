@@ -22,7 +22,7 @@ import {
   getAccountFrameHistoryView,
 } from '../runtime/env-events';
 import type { AccountState } from '../types/account';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type { JReplica } from '../types/jurisdiction-runtime';
 
 const created: RuntimeState[] = [];

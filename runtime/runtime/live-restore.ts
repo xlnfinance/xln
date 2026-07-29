@@ -1,7 +1,7 @@
 import { createStructuredLogger } from '../infra/logger';
 import { markRestoredReliableOutputsDue } from './output-routing';
 import type { TrustedJurisdictionRpcBinding } from './infra';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from './types';
 
 const runtimeLog = createStructuredLogger('runtime');
 

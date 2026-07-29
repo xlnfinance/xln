@@ -8,7 +8,7 @@ import {
   type RuntimeLoopConfig,
 } from '../runtime';
 import { transitionRuntimeLifecycle } from '../runtime/lifecycle';
-import type { RuntimeState, RuntimeP2PConfigLike } from '../types';
+import type { RuntimeState, RuntimeP2PConfigLike } from '../runtime/types';
 
 export type NodeRuntimeQuiesceOptions = {
   workTimeoutMs: number;

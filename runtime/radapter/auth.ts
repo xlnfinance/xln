@@ -1,5 +1,5 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type { RuntimeAdapterAuthLevel, RuntimeAdapterAuthRole } from './types';
 
 const AUTH_DOMAIN = 'xln-radapter-v1';

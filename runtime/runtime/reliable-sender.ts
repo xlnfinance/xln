@@ -3,7 +3,7 @@ import type {
   RuntimeState,
   ReliableDeliveryReceipt,
   RoutedEntityInput,
-} from '../types';
+} from './types';
 import {
   assertReliableLaneCompatible,
   compareReliableIdentityPosition,

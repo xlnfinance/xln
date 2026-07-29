@@ -49,7 +49,7 @@
 
 import type { AccountInput } from '../types/account';
 import type { EntityOutput, EntityState } from './types';
-import type { RuntimeState } from '../types';
+import type { EntityRuntimeContext } from './runtime-context';
 import type {
   CrontabExecutionContext,
   EntityTransitionContext,
@@ -122,7 +122,7 @@ export const emitCommittedPendingFrameWarnings = (
 };
 
 type CrontabTaskHandler = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   replica: EntityTransitionContext,
   task: CrontabTaskState,
   context: CrontabExecutionContext,
@@ -178,7 +178,7 @@ const CRONTAB_TASK_HANDLERS: Record<CrontabTaskMethod, CrontabTaskHandler> = {
  * Uses entity-specific timestamp for determinism (each entity has own clock from frames)
  */
 export async function executeCrontab(
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   replica: EntityTransitionContext,
   crontabState: CrontabState,
   context: CrontabExecutionContext,
@@ -234,7 +234,7 @@ export async function executeCrontab(
  * identity and strictly increasing dispute nonces.
  */
 async function maintainPendingAccounts(
-  _env: RuntimeState,
+  _env: EntityRuntimeContext,
   replica: EntityTransitionContext,
   _task: CrontabTaskState,
   _context: CrontabExecutionContext,

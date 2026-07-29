@@ -6,7 +6,7 @@ import {
 } from '../account/crypto';
 import { serializeTaggedJson } from '../protocol/serialization';
 import { buildRuntimeRecoveryCheckpointSnapshot } from '../storage/wal';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type {
   RuntimeRecoveryBundleV1,
   RuntimeRecoveryMetaV1,

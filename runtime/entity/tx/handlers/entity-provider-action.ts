@@ -1,7 +1,7 @@
 import { ethers } from 'ethers';
 
 import type { EntityInput, EntityState, HashType } from '../../types';
-import type { RuntimeState } from '../../../types';
+import type { EntityRuntimeContext } from '../../runtime-context';
 import type { JInput } from '../../../jurisdiction/input';
 import type { EntityTx } from '../../../types/entity-tx';
 import type { JTx } from '../../../types/jurisdiction-runtime';
@@ -64,7 +64,7 @@ const requireNumberedEntity = (entityId: string): bigint => {
   return value;
 };
 
-const requireCertifiedBoardEpoch = (state: EntityState, env: RuntimeState): bigint => {
+const requireCertifiedBoardEpoch = (state: EntityState, env: EntityRuntimeContext): bigint => {
   const record = resolveObserverCertifiedBoardRecord(
     state,
     getCertifiedBoardNodeStore(env),
@@ -126,7 +126,7 @@ const releasePayload = (
   };
 };
 
-const resolveActionDomain = (state: EntityState, env: RuntimeState) => {
+const resolveActionDomain = (state: EntityState, env: EntityRuntimeContext) => {
   const configuredName = getJurisdictionConfigName(state.config.jurisdiction);
   if (!configuredName) throw new Error('ENTITY_PROVIDER_ACTION_JURISDICTION_MISSING');
   const jurisdiction = requireRuntimeJurisdictionConfigByName(
@@ -153,7 +153,7 @@ const resolveActionDomain = (state: EntityState, env: RuntimeState) => {
 const handleAction = (
   entityState: EntityState,
   entityTx: TransferTx | ReleaseTx,
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   mutableFrameState: boolean,
 ): EntityTxReducerResult => {
   const { jurisdiction, chainId, entityProviderAddress, depositoryAddress } =
@@ -228,21 +228,21 @@ const handleAction = (
 export const handleEntityProviderTransfer = (
   entityState: EntityState,
   entityTx: TransferTx,
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   mutableFrameState = false,
 ): EntityTxReducerResult => handleAction(entityState, entityTx, env, mutableFrameState);
 
 export const handleEntityProviderReleaseControlShares = (
   entityState: EntityState,
   entityTx: ReleaseTx,
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   mutableFrameState = false,
 ): EntityTxReducerResult => handleAction(entityState, entityTx, env, mutableFrameState);
 
 export const handleEntityProviderCancelAction = (
   entityState: EntityState,
   entityTx: CancelTx,
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   mutableFrameState = false,
 ): EntityTxReducerResult => {
   const { jurisdiction, chainId, entityProviderAddress, depositoryAddress } =

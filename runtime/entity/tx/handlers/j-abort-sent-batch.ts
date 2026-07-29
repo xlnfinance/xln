@@ -1,5 +1,5 @@
 import type { EntityInput, EntityState } from '../../types';
-import type { RuntimeState } from '../../../types';
+import type { EntityRuntimeContext } from '../../runtime-context';
 import type { JInput } from '../../../jurisdiction/input';
 import type { EntityTx } from '../../../types/entity-tx';
 import { prepareEntityTxState } from '../../state-clone';
@@ -75,7 +75,7 @@ const releaseAbortedBatchLatches = (
 export async function handleJAbortSentBatch(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'j_abort_sent_batch' }>,
-  _env: RuntimeState,
+  _env: EntityRuntimeContext,
   mutableFrameState = false,
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; jOutputs: JInput[] }> {
   const newState = prepareEntityTxState(entityState, mutableFrameState);

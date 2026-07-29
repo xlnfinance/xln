@@ -8,7 +8,7 @@ import {
   withStorageWriterLock,
   type StorageWriterLockBoundary,
 } from '../storage/runtime-dbs';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 
 const waitForReadyWorkers = async (directory: string, count: number): Promise<void> => {
   const deadline = Date.now() + 10_000;

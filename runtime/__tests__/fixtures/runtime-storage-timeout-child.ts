@@ -7,7 +7,7 @@ import { deriveSignerAddressSync } from '../../account/crypto';
 import { generateLazyEntityId } from '../../entity/factory';
 import { ensureRuntimeState } from '../../runtime/runtime-state';
 import type { ConsensusConfig, JurisdictionConfig } from '../../entity/types';
-import type { RuntimeTx } from '../../types';
+import type { RuntimeTx } from '../../runtime/types';
 
 const [seed] = Bun.argv.slice(2);
 if (!seed) throw new Error('runtime storage timeout fixture requires a seed');

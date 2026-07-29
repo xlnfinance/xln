@@ -1,5 +1,5 @@
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
-import type { RuntimeInput, RuntimeState } from '../types';
+import type { RuntimeInput, RuntimeState } from '../runtime/types';
 import type {
   RuntimeAdapter,
   RuntimeAdapterAuthLevel,

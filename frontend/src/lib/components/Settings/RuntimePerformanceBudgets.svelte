@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Writable } from 'svelte/store';
-  import type { RuntimeState } from '@xln/runtime/types';
+  import type { RuntimeState } from '@xln/runtime/runtime/types';
 
   const MIB = 1024 ** 2;
   export let runtimeFrameEnv: Writable<RuntimeState | null>;

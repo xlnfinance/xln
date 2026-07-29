@@ -3,7 +3,7 @@ import type {
   ReliableDeliveryIdentity,
   ReliableDeliveryReceipt,
   RoutedEntityInput,
-} from '../types';
+} from './types';
 import { isLocalEntityLeaderTimeoutVote } from '../entity/consensus/leader';
 import { normalizeRuntimeId } from '../networking/runtime-id';
 import {

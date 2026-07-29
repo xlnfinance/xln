@@ -18,7 +18,7 @@ import {
   resolveDbPath,
   tryOpenStorageDb,
 } from '../storage/runtime-dbs';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 
 const fixture = join(import.meta.dir, 'fixtures/storage-marker-crash-child.ts');
 const tempRoots: string[] = [];

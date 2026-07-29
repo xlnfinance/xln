@@ -13,7 +13,7 @@ import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
 import type { EntityInput, EntityState } from '../../types';
-import type { RuntimeState } from '../../../types';
+import type { EntityRuntimeContext } from '../../runtime-context';
 import type { EntityTx } from '../../../types/entity-tx';
 import type { RuntimeOverlayRecord } from '../../../types/account';
 import { formatEntityId } from '../../../presentation/identity-display';
@@ -36,7 +36,7 @@ type CrossJurisdictionClearResult = {
   accountTxs?: AccountTxTarget[];
 };
 
-const deterministicEntityTimestamp = (state: EntityState, env: RuntimeState): number =>
+const deterministicEntityTimestamp = (state: EntityState, env: EntityRuntimeContext): number =>
   Number(state.timestamp || env.timestamp || 0);
 
 const cancelOrderbookOfferIfPresent = (
@@ -60,7 +60,7 @@ const closeProofMatches = (
   left.closeMode === right.closeMode;
 
 type ClearContext = {
-  env: RuntimeState;
+  env: EntityRuntimeContext;
   entityState: EntityState;
   newState: EntityState;
   outputs: EntityInput[];
@@ -231,7 +231,7 @@ const requestFilledRouteReveal = (
 };
 
 export const handleRequestCrossJurisdictionClearEntityTx = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   entityState: EntityState,
   entityTx: CrossJurisdictionClearTx,
   storageChanges: RuntimeOverlayRecord[] = [],
@@ -377,7 +377,7 @@ const buildSourceCloseAccountTxs = (
  * exact binary and proof against the already-committed source pull hashes.
  */
 export const handleMaterializeCrossJurisdictionClearEntityTx = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   entityState: EntityState,
   entityTx: CrossJurisdictionClearMaterializationTx,
   mutableFrameState = false,

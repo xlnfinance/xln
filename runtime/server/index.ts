@@ -27,7 +27,7 @@ import {
 } from '../runtime.ts';
 import { readFileSync } from 'node:fs';
 import { safeStringify, serializeTaggedJson } from '../protocol/serialization';
-import type { RuntimeState, RuntimeEntityInputsEnvelope } from '../types';
+import type { RuntimeState, RuntimeEntityInputsEnvelope } from '../runtime/types';
 import { createExternalWalletApi } from '../api/external-wallet-api';
 import { maybeHandleQaRequest } from '../qa/api';
 import { createJAdapter, createXlnJsonRpcProvider, type JAdapter } from '../jadapter';

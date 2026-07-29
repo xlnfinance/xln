@@ -12,7 +12,7 @@ import { encodeCanonicalConsensusValue } from '../protocol/canonical-consensus-v
 
 import type { AccountFrame, AccountState, RuntimeOverlayRecord } from '../types/account';
 import type { CertifiedEntityFrameLink, EntityState, EntityCandidateEffect } from '../entity/types';
-import type { RuntimeState, RuntimeHistoryRecord } from '../types';
+import type { RuntimeState, RuntimeHistoryRecord } from './types';
 import type { LogCategory, FrameLogEntry } from '../types/logging';
 
 import { storageOverlayRecordKey } from '../protocol/overlay';

@@ -20,7 +20,7 @@ import { deriveRuntimeAdapterCapabilityToken } from '../runtime/radapter/auth';
 
 import type { RuntimeAdapterRequest } from '../runtime/radapter/types';
 
-import type { RuntimeState } from '../runtime/types';
+import type { RuntimeState } from '../runtime/runtime/types';
 
 import { captureLocatorScreenshot } from './utils/e2e-screenshots';
 

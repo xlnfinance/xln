@@ -1,4 +1,4 @@
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import { evaluateStorageProgressDeadline } from './progress-deadline';
 import type { RuntimeStorageApiDeps } from './runtime-storage-deps';
 

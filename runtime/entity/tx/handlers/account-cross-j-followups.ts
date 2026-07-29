@@ -1,7 +1,7 @@
 import type { AccountTx, RuntimeOverlayRecord } from '../../../types/account';
 import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
 import type { EntityCandidateEffect, EntityInput, EntityState } from '../../types';
-import type { RuntimeState } from '../../../types';
+import type { EntityRuntimeContext } from '../../runtime-context';
 import type { EntityTx } from '../../../types/entity-tx';
 import {
   buildCrossJurisdictionCloseProof,
@@ -225,7 +225,7 @@ const requireRouteSignerHint = (
 };
 
 const removeOrRouteCrossJurisdictionBookOrder = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   newState: EntityState,
   route: CrossJurisdictionSwapRoute,
   outputs: EntityInput[],
@@ -308,7 +308,7 @@ const buildCrossJurisdictionBookProgressTx = (
 });
 
 const applyOrRouteCrossJurisdictionBookProgress = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   newState: EntityState,
   route: CrossJurisdictionSwapRoute,
   accountTx: Extract<AccountTx, { type: 'cross_swap_fill_ack' }>,
@@ -392,7 +392,7 @@ const getCommittedPullRole = (
 };
 
 const admitCommittedSourcePullToBook = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   state: EntityState,
   route: CrossJurisdictionSwapRoute,
   outputs: EntityInput[],
@@ -426,7 +426,7 @@ const admitCommittedSourcePullToBook = (
 };
 
 const queueBookAdmissionOnCommittedPull = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   newState: EntityState,
   counterpartyId: string,
   accountTx: Extract<AccountTx, { type: 'pull_lock' }>,
@@ -496,7 +496,7 @@ const queueBookAdmissionOnCommittedPull = (
 };
 
 const applySourcePullResolve = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   state: EntityState,
   route: CrossJurisdictionSwapRoute,
   accountTx: Extract<AccountTx, { type: 'pull_resolve' }>,
@@ -579,7 +579,7 @@ const applyTargetPullResolve = (
 };
 
 const applyPullResolveFollowup = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   newState: EntityState,
   counterpartyId: string,
   accountTx: Extract<AccountTx, { type: 'pull_resolve' }>,
@@ -630,7 +630,7 @@ const applyPullResolveFollowup = (
 };
 
 const applyCrossPullCloseFollowup = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   newState: EntityState,
   counterpartyId: string,
   accountTx: Extract<AccountTx, { type: 'cross_pull_close' }>,
@@ -763,7 +763,7 @@ const applyCommittedFillAckProgress = (
 };
 
 const closeOrProgressCrossJurisdictionBook = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   state: EntityState,
   route: CrossJurisdictionSwapRoute,
   accountTx: Extract<AccountTx, { type: 'cross_swap_fill_ack' }>,
@@ -820,7 +820,7 @@ const closeOrProgressCrossJurisdictionBook = (
 };
 
 const applyFillAckFollowup = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   newState: EntityState,
   accountTx: Extract<AccountTx, { type: 'cross_swap_fill_ack' }>,
   outputs: EntityInput[],
@@ -875,7 +875,7 @@ const applyFillAckFollowup = (
 };
 
 export function applyCommittedCrossJurisdictionAccountTxFollowup(
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   newState: EntityState,
   counterpartyId: string,
   accountTx: AccountTx,

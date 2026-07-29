@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { enqueueRuntimeInputsWithDeps } from '../runtime/input-queue';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 
 const makeEnv = (): RuntimeState => ({
   eReplicas: new Map(),

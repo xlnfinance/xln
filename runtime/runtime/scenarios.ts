@@ -1,4 +1,4 @@
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from './types';
 
 export const scenarios = {
   ahb: async (env: RuntimeState): Promise<RuntimeState> => {

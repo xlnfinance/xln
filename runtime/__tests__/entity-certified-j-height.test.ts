@@ -26,7 +26,7 @@ import { hashHtlcSecret } from '../protocol/htlc/utils';
 import { createEmptyEnv } from '../runtime';
 import { cloneEntityState } from '../entity/state-clone';
 import type { EntityState } from '../entity/types';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type { EntityTx } from '../types/entity-tx';
 import { signEntityHashes } from '../hanko/signing';
 import {

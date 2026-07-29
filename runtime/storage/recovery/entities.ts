@@ -1,4 +1,4 @@
-import { getLiveAccountJClaimAccumulatorStates } from '../../account/j-claim-store';
+import { getLiveAccountJClaimAccumulatorStates } from '../../entity/account-j-claim-node-store';
 import { getLiveConsumptionAccumulatorStates } from '../../entity/consumption-store';
 import { assertPersistedLocalEntityCryptoKeys } from '../../entity/crypto';
 import { createReplicaKey, formatReplicaKey } from '../../protocol/identity';
@@ -10,7 +10,7 @@ import { assertCertifiedRegistrationEvidenceStore } from '../../jurisdiction/reg
 import { restoreJPrefixRound } from '../../jurisdiction/j-prefix-consensus';
 import { cloneEntityState } from '../../entity/state-clone';
 import type { EntityReplica, EntityState } from '../../entity/types';
-import type { RuntimeState } from '../../types';
+import type { RuntimeState } from '../../runtime/types';
 import {
   applyCertifiedEntityLineagePlan,
   buildCertifiedEntityLineagePlan,

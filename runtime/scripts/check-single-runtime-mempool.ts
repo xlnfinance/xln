@@ -1,6 +1,6 @@
 import ts from 'typescript';
 
-const typesPath = 'runtime/types.ts';
+const typesPath = 'runtime/runtime/types.ts';
 const source = await Bun.file(typesPath).text();
 const file = ts.createSourceFile(typesPath, source, ts.ScriptTarget.Latest, true);
 const env = file.statements.find(

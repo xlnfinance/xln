@@ -1,5 +1,5 @@
 import { safeStringify } from '../protocol/serialization';
-import type { RuntimeState, RuntimeInput } from '../types';
+import type { RuntimeState, RuntimeInput } from './types';
 
 export const MAX_RUNTIME_J_INPUTS = 256;
 export const MAX_RUNTIME_J_TXS = 1_024;

@@ -2,7 +2,7 @@ import {
   CANONICAL_J_EVENTS,
   type CanonicalJEvent,
 } from '../jurisdiction/event-catalog';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type { JEventIngress } from './types';
 
 export type CanonicalJEventIngress = JEventIngress & {

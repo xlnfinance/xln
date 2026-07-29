@@ -7,7 +7,7 @@ import { createStructuredLogger } from '../infra/logger';
 import { attachEventEmitters } from './env-events';
 import { nodeProcess, runtimeIsBrowser } from '../infra/runtime-process';
 import type { EntityTx } from '../types/entity-tx';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from './types';
 import type { TrustedJurisdictionRpcBinding } from './infra';
 
 const runtimeLog = createStructuredLogger('runtime');

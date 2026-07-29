@@ -16,7 +16,7 @@ import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/index.ts
 import { hashHtlcSecret } from '../protocol/htlc/utils';
 import type { AccountReplica, Delta } from '../types/account';
 import type { EntityInput, JurisdictionConfig } from '../entity/types';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type { JAdapter, JTokenInfo } from '../jadapter/types';
 import type { Profile } from '../entity/profile';
 import { ethers } from 'ethers';

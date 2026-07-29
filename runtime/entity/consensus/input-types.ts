@@ -1,7 +1,25 @@
 import type { EntityInput, EntityOutput, EntityCandidateEffect, EntityReplica, EntityState } from '../types';
-import type { RuntimeState } from '../../types';
+import type { EntityRuntimeContext } from '../runtime-context';
 import type { JInput } from '../../jurisdiction/input';
 import type { RuntimeOverlayRecord } from '../../types/account';
+
+/**
+ * Entity-facing view of one Runtime-routed input.
+ *
+ * Runtime owns transport and durability. Entity sees only provenance required
+ * to order or atomically pair already-admitted inputs; it cannot inspect the
+ * parent Runtime queue or transport implementation.
+ */
+export interface EntityConsensusInput extends EntityInput {
+  sourceRuntimeFrame?: {
+    height: number;
+    timestamp: number;
+  };
+  atomicCrossJurisdictionPair?: {
+    phase: 'proposal' | 'ack';
+    pairKey: string;
+  };
+}
 
 export type EntityInputOutcome =
   | { kind: 'committed' }
@@ -21,7 +39,7 @@ export type ApplyEntityInputResult = {
 };
 
 export type ApplyEntityInputContext = {
-  env: RuntimeState;
+  env: EntityRuntimeContext;
   entityInput: EntityInput;
   workingReplica: EntityReplica;
   entityOutbox: EntityOutput[];

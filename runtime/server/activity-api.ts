@@ -1,6 +1,6 @@
 import { readPersistedRuntimeActivityPage } from '../runtime';
 import { safeStringify } from '../protocol/serialization';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 
 const parseCsv = (value: string | null): string[] =>
   String(value || '')

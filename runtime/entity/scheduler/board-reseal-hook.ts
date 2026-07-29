@@ -1,6 +1,6 @@
 import type {
-  RuntimeState,
-} from '../../types';
+  EntityRuntimeContext,
+} from '../runtime-context';
 import type {
   CrontabExecutionContext,
   EntityTransitionContext,
@@ -17,7 +17,7 @@ import { scheduleHook } from './hook-state';
 import type { DueHookPlan } from './due-hook-types';
 
 export const processBoardResealHook = (
-  env: RuntimeState,
+  env: EntityRuntimeContext,
   hook: ScheduledHook & { type: 'board_reseal' },
   replica: EntityTransitionContext,
   context: CrontabExecutionContext,

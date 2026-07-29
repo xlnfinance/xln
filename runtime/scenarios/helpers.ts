@@ -2,7 +2,7 @@
  * Shared scenario helpers
  */
 
-import type { RuntimeState, RoutedEntityInput, RuntimeInput } from '../types';
+import type { RuntimeState, RoutedEntityInput, RuntimeInput } from '../runtime/types';
 import type { EntityInput, EntityReplica } from '../entity/types';
 import type { Delta } from '../types/account';
 import { formatRuntime } from '../qa/runtime-ascii';

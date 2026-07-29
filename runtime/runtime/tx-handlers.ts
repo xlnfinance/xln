@@ -24,7 +24,7 @@ import {
 import { getJEventJurisdictionRef } from '../jurisdiction/event-observation';
 import { normalizeRuntimeId } from '../networking/runtime-id';
 import type { EntityReplica, EntityState } from '../entity/types';
-import type { RuntimeState, RuntimeTx } from '../types';
+import type { RuntimeState, RuntimeTx } from './types';
 import type { JInput } from '../jurisdiction/input';
 import { applyRuntimeAdapterCommandMarker } from '../radapter/command-frontier';
 import { assertRuntimeAdapterCommandTxAuthorized } from '../radapter/command-frontier-auth';

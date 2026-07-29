@@ -1,4 +1,4 @@
-import type { DeliverableEntityInput, RoutedEntityInput } from '../types';
+import type { DeliverableEntityInput, RoutedEntityInput } from './types';
 import type { EntityOutput } from '../entity/types';
 import {
   validateMapInstance,

@@ -5,7 +5,7 @@ import { computeFrameHash } from '../account/consensus/frame';
 import { applyPendingForwardFollowup } from '../entity/tx/handlers/account/committed-htlc-followups';
 import type { AccountFrame, AccountInput, AccountState, AccountTx } from '../types/account';
 import type { EntityState } from '../entity/types';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import { createDefaultDelta } from '../account/delta';
 
 const LEFT = `0x${'11'.repeat(32)}`;

@@ -8,7 +8,7 @@ import { ethers } from 'ethers';
 
 import type { AccountFrame, AccountInput, AccountReplica } from '../types/account';
 import type { EntityTx } from '../types/entity-tx';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import type { JAdapter } from '../jadapter/types';
 import { deriveDisputeTokenFinalization } from '../protocol/dispute/finalization';
 import { generateLockId, hashHtlcSecret } from '../protocol/htlc/utils';

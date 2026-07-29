@@ -1,7 +1,7 @@
 import { clearPendingAuditEvents } from '../env-events';
 import { transitionRuntimeLifecycle } from '../lifecycle';
 import { ensureRuntimeState } from '../runtime-state';
-import type { RuntimeState } from '../../types';
+import type { RuntimeState } from '../types';
 import type { FrameExecutionState } from './execution-state';
 import {
   publishRuntimeFrameTransaction,

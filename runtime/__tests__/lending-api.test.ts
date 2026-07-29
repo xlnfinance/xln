@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 
 import { handleLendingStateRequest } from '../server/lending';
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 
 const entity = (byte: string): string => `0x${byte.repeat(32)}`;
 const HUB = entity('11');

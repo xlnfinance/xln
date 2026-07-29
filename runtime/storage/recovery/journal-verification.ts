@@ -1,7 +1,7 @@
 import { getCachedSignerPrivateKey } from '../../account/crypto';
 import { safeStringify } from '../../protocol/serialization';
 import type { RuntimeInputApplyResult } from '../../runtime/frame/apply';
-import type { RuntimeState } from '../../types';
+import type { RuntimeState } from '../../runtime/types';
 import { computeStoragePostStateHash } from '..';
 import { computeCanonicalStateHashFromEnv } from '../canonical-hash';
 import {

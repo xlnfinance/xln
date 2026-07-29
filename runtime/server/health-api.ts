@@ -1,4 +1,4 @@
-import type { RuntimeState } from '../types';
+import type { RuntimeState } from '../runtime/types';
 import { getHealthStatus, type HealthStatus, type HubHealth } from './health';
 import type { JTokenInfo } from '../jadapter/types';
 import { getStorageHealthSnapshotSync } from '../infra/storage-monitor';
