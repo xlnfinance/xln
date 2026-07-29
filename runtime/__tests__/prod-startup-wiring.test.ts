@@ -1306,21 +1306,28 @@ describe('production startup wiring', () => {
     expect(hubLoopStart).toBeGreaterThan(hubP2PReady);
 
     const mmSource = readMarketMakerNodeSource();
+    const mmInitialization = mmSource.indexOf('const initializeMarketMakerContexts = async (');
     const mmLoopStart = mmSource.indexOf('startRuntimeLoop(env, {');
     const mmPrimaryContext = mmSource.indexOf(
-      'const primaryMmContext = await createMarketMakerEntityContext(',
-      mmLoopStart,
+      'const primaryContext = await createMarketMakerEntityContext(',
+      mmInitialization,
     );
     const mmSecondaryContexts = mmSource.indexOf(
-      'for (const [index, secondary] of secondaryJurisdictions.entries())',
+      'for (const [index, secondary] of resolveSecondaryJurisdictions(jurisdiction.rpc).entries())',
       mmPrimaryContext,
     );
-    const mmP2PStart = mmSource.indexOf('const p2p = startP2P(env, {', mmSecondaryContexts);
+    const mmInitializationCall = mmSource.indexOf(
+      'mmTokenIdsByContext = await initializeMarketMakerContexts({',
+      mmLoopStart,
+    );
+    const mmP2PStart = mmSource.indexOf('const p2p = startP2P(env, {', mmInitializationCall);
     const mmP2PReady = mmSource.indexOf("if (!p2p) throw new Error('P2P_START_FAILED');", mmP2PStart);
-    expect(mmLoopStart).toBeGreaterThan(0);
-    expect(mmPrimaryContext).toBeGreaterThan(mmLoopStart);
+    expect(mmInitialization).toBeGreaterThan(0);
+    expect(mmPrimaryContext).toBeGreaterThan(mmInitialization);
     expect(mmSecondaryContexts).toBeGreaterThan(mmPrimaryContext);
-    expect(mmP2PStart).toBeGreaterThan(mmSecondaryContexts);
+    expect(mmLoopStart).toBeGreaterThan(0);
+    expect(mmInitializationCall).toBeGreaterThan(mmLoopStart);
+    expect(mmP2PStart).toBeGreaterThan(mmInitializationCall);
     expect(mmP2PReady).toBeGreaterThan(mmP2PStart);
 
     const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');

@@ -846,6 +846,81 @@ const createMarketMakerWebSocketHandler = (
   },
 });
 
+type MarketMakerContextInitialization = {
+  env: RuntimeState;
+  jurisdiction: ReturnType<typeof resolveJurisdictionConfig>;
+  contexts: MarketMakerEntityContext[];
+  setStartupPhase: (phase: string) => void;
+  setActiveEntityId: (entityId: string) => void;
+};
+
+const initializeMarketMakerContexts = async (
+  input: MarketMakerContextInitialization,
+): Promise<Map<string, number[]>> => {
+  const { env, jurisdiction, contexts, setStartupPhase, setActiveEntityId } = input;
+  setStartupPhase('import-jurisdiction');
+  enqueueRuntimeInput(env, {
+    runtimeTxs: [{
+      type: 'importJ',
+      data: {
+        name: jurisdiction.name,
+        chainId: jurisdiction.chainId,
+        ticker: 'XLN',
+        rpcs: [resolveImportedJurisdictionRpc(jurisdiction)],
+        entityProviderDeploymentBlock: jurisdiction.entityProviderDeploymentBlock,
+        blockTimeMs: requireJurisdictionBlockTimeMs(jurisdiction),
+        contracts: jurisdiction.contracts,
+        startAtCurrentBlock: false,
+      },
+    }],
+    entityInputs: [],
+  });
+  await settleRuntimeFor(env, 35);
+  const jadapter = await waitForJurisdictionAdapter(env, jurisdiction);
+  ensureJurisdictionReplica(env, jadapter, resolveImportedJurisdictionRpc(jurisdiction));
+  setStartupPhase('token-catalog');
+  const tokenCatalog = await waitForTokenCatalog(jadapter);
+  setStartupPhase('import-replica');
+  const primaryContext = await createMarketMakerEntityContext(
+    env,
+    jurisdiction,
+    resolvedArgs.signerLabel,
+    resolvedArgs.name,
+    { x: 0, y: -40, z: 120, jurisdiction: jurisdiction.name },
+  );
+  setActiveEntityId(primaryContext.entityId);
+  contexts.push(primaryContext);
+
+  for (const [index, secondary] of resolveSecondaryJurisdictions(jurisdiction.rpc).entries()) {
+    const secondaryName = String(secondary.name || `Secondary ${index + 1}`).trim();
+    if (!secondaryName) continue;
+    const secondaryDisplayName = formatJurisdictionDisplayName(secondaryName) || secondaryName;
+    setStartupPhase(`import-jurisdiction-${secondaryName}`);
+    await importJurisdictionIfNeeded(env, secondary);
+    setStartupPhase(`import-replica-${secondaryName}`);
+    const context = await createMarketMakerEntityContext(
+      env,
+      secondary,
+      `${resolvedArgs.signerLabel}:${secondaryName}`,
+      `${resolvedArgs.name} ${secondaryDisplayName}`,
+      { x: 160 + index * 80, y: -40, z: 120, jurisdiction: secondaryName },
+    );
+    contexts.push(context);
+    nodeLog.debug('sibling_mm.ready', {
+      jurisdiction: secondaryName,
+      entityId: context.entityId,
+    });
+  }
+  const tokenIdsByContext = buildMarketMakerTokenIdsByContext(tokenCatalog, contexts);
+  nodeLog.debug('token_universe.ready', {
+    jurisdictions: contexts.map(context => ({
+      jurisdiction: formatJurisdictionDisplayName(context.jurisdictionName) || context.jurisdictionName,
+      tokenIds: getMarketMakerTokenIds(tokenIdsByContext, context),
+    })),
+  });
+  return tokenIdsByContext;
+};
+
 export const runMarketMakerNode = async (): Promise<void> => {
   activateMarketMakerProcessArgs();
   if (resolvedArgs.dbPath) process.env['XLN_DB_PATH'] = resolvedArgs.dbPath;
@@ -1113,70 +1188,21 @@ export const runMarketMakerNode = async (): Promise<void> => {
     websocket: createMarketMakerWebSocketHandler(env, directRuntimeWs, handleRuntimeAdapterWsMessage),
   });
 
-  startupPhase = 'import-jurisdiction';
-  enqueueRuntimeInput(env, {
-    runtimeTxs: [
-      {
-        type: 'importJ',
-        data: {
-          name: jurisdiction.name,
-          chainId: jurisdiction.chainId,
-          ticker: 'XLN',
-          rpcs: [resolveImportedJurisdictionRpc(jurisdiction)],
-          entityProviderDeploymentBlock: jurisdiction.entityProviderDeploymentBlock,
-          blockTimeMs: requireJurisdictionBlockTimeMs(jurisdiction),
-          contracts: jurisdiction.contracts,
-          startAtCurrentBlock: false,
-        },
-      },
-    ],
-    entityInputs: [],
-  });
-  await settleRuntimeFor(env, 35);
-
-  const jadapter = await waitForJurisdictionAdapter(env, jurisdiction);
-  ensureJurisdictionReplica(env, jadapter, resolveImportedJurisdictionRpc(jurisdiction));
-  startupPhase = 'token-catalog';
-  const tokenCatalog = await waitForTokenCatalog(jadapter);
-  startupPhase = 'import-replica';
-  const primaryMmContext = await createMarketMakerEntityContext(
+  mmTokenIdsByContext = await initializeMarketMakerContexts({
     env,
     jurisdiction,
-    resolvedArgs.signerLabel,
-    resolvedArgs.name,
-    { x: 0, y: -40, z: 120, jurisdiction: jurisdiction.name },
-  );
-  activeMmEntityId = primaryMmContext.entityId;
-  mmContexts = [primaryMmContext];
-
-  const secondaryJurisdictions = resolveSecondaryJurisdictions(jurisdiction.rpc);
-  for (const [index, secondary] of secondaryJurisdictions.entries()) {
-    const secondaryName = String(secondary.name || `Secondary ${index + 1}`).trim();
-    const secondaryDisplayName = formatJurisdictionDisplayName(secondaryName) || secondaryName;
-    if (!secondaryName) continue;
-    startupPhase = `import-jurisdiction-${secondaryName}`;
-    await importJurisdictionIfNeeded(env, secondary);
-    startupPhase = `import-replica-${secondaryName}`;
-    const siblingContext = await createMarketMakerEntityContext(
-      env,
-      secondary,
-      `${resolvedArgs.signerLabel}:${secondaryName}`,
-      `${resolvedArgs.name} ${secondaryDisplayName}`,
-      { x: 160 + index * 80, y: -40, z: 120, jurisdiction: secondaryName },
-    );
-    mmContexts.push(siblingContext);
-    nodeLog.debug('sibling_mm.ready', {
-      jurisdiction: secondaryName,
-      entityId: siblingContext.entityId,
-    });
-  }
-  mmTokenIdsByContext = buildMarketMakerTokenIdsByContext(tokenCatalog, mmContexts);
-  nodeLog.debug('token_universe.ready', {
-    jurisdictions: mmContexts.map(context => ({
-      jurisdiction: formatJurisdictionDisplayName(context.jurisdictionName) || context.jurisdictionName,
-      tokenIds: getMarketMakerTokenIds(mmTokenIdsByContext, context),
-    })),
+    contexts: mmContexts,
+    setStartupPhase: phase => {
+      startupPhase = phase;
+    },
+    setActiveEntityId: entityId => {
+      activeMmEntityId = entityId;
+    },
   });
+  const primaryMmContext = mmContexts[0];
+  if (!primaryMmContext) {
+    throw new Error('MARKET_MAKER_PRIMARY_CONTEXT_MISSING');
+  }
 
   startupPhase = 'j-catchup';
   startJurisdictionWatchers(env);
