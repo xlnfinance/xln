@@ -24,6 +24,7 @@ import {
 import { addHold, releaseHold } from '../hold-utils';
 import { ensureDelta } from '../delta-utils';
 import { isPullRevealExpired } from '../../pull-deadline';
+import { deriveTransferOffdeltaChange } from '../../delta-movement';
 
 type PullLockTx = Extract<AccountTx, { type: 'pull_lock' }>;
 type PullResolveTx = Extract<AccountTx, { type: 'pull_resolve' }>;
@@ -357,8 +358,7 @@ export async function handlePullResolve(
   if (holdError) return { success: false, error: holdError, events };
 
   if (applied > 0n) {
-    if (pull.amount > 0n) delta.offdelta += applied;
-    else delta.offdelta -= applied;
+    delta.offdelta += deriveTransferOffdeltaChange(loserIsLeft, applied);
   }
   if (ratio >= HASHLADDER_MAX_FILL_RATIO) {
     account.pulls?.delete(pullId);
@@ -444,8 +444,7 @@ export async function handleCrossPullClose(
   );
   if (holdError) return { success: false, error: holdError, events };
   if (applied > 0n) {
-    if (pull.amount > 0n) delta.offdelta += applied;
-    else delta.offdelta -= applied;
+    delta.offdelta += deriveTransferOffdeltaChange(payerIsLeft, applied);
   }
 
   account.pulls?.delete(pullId);

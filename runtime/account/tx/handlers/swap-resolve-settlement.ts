@@ -4,6 +4,7 @@ import { createDefaultDelta } from '../../../validation-utils';
 import { deriveSwapOffdeltaChanges } from '../../../orderbook/swap-execution';
 import { getHold, releaseHold } from '../hold-utils';
 import { ensureDelta } from '../delta-utils';
+import { deriveTransferOffdeltaChange } from '../../delta-movement';
 import type {
   AppliedSwapResolve,
   SwapResolveFailure,
@@ -67,9 +68,10 @@ export const applySwapResolveFinancials = (
     );
   }
   if (resolve.feeAmount > 0n) {
-    wantDelta.offdelta += resolve.offer.makerIsLeft
-      ? -resolve.feeAmount
-      : resolve.feeAmount;
+    wantDelta.offdelta += deriveTransferOffdeltaChange(
+      resolve.offer.makerIsLeft,
+      resolve.feeAmount,
+    );
     events.push(`💸 Swap taker fee: ${resolve.feeAmount} token${resolve.effectiveFeeTokenId}`);
   }
   const releaseError = releaseHold(

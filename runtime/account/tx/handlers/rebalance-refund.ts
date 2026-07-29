@@ -1,5 +1,6 @@
 import type { AccountState, AccountTx } from '../../../types';
 import { deriveDelta } from '../../utils';
+import { deriveTransferOffdeltaChange } from '../../delta-movement';
 
 type RebalanceRefundTx = Extract<AccountTx, { type: 'rebalance_refund' }>;
 
@@ -38,8 +39,7 @@ export function handleRebalanceRefund(
     return { success: false, events: [], error: `rebalance_refund: insufficient capacity (${capacity} < ${amount})` };
   }
 
-  if (byLeft) feeDelta.offdelta -= amount;
-  else feeDelta.offdelta += amount;
+  feeDelta.offdelta += deriveTransferOffdeltaChange(byLeft, amount);
   const nextRefunded = refundedAmount + amount;
   if (nextRefunded === feeState.feePaidUpfront) {
     account.requestedRebalance.delete(requestTokenId);

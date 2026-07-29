@@ -20,6 +20,7 @@
 import type { AccountState, AccountTx } from '../../../types';
 import { isLeftEntity } from '../../../protocol/entity-id';
 import { deriveDelta } from '../../utils';
+import { deriveTransferOffdeltaChange } from '../../delta-movement';
 import { getDefaultRebalanceBaseFeeForToken } from '../../rebalance-defaults';
 
 type RequestCollateralTx = Extract<AccountTx, { type: 'request_collateral' }>;
@@ -124,8 +125,7 @@ export function handleRequestCollateral(
   // Convention: positive offdelta means LEFT has more.
   // requester pays hub upfront here. All no-op exits are above this mutation.
   if (effectiveFeeTarget > 0n) {
-    if (requesterIsLeft) feeDelta.offdelta -= effectiveFeeTarget;
-    else feeDelta.offdelta += effectiveFeeTarget;
+    feeDelta.offdelta += deriveTransferOffdeltaChange(requesterIsLeft, effectiveFeeTarget);
   }
 
   // Hub crontab consumes this immutable request. A later request must not top
