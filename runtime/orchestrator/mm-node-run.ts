@@ -156,6 +156,78 @@ import {
   maintainMarketMakerCrossQuotes,
 } from './mm-node-health';
 
+type DirectEntityInputDebug = {
+  at: number;
+  fromRuntimeId: string;
+  entityIds: string[];
+  signerIds: string[];
+  txTypes: string[];
+  error?: string;
+};
+
+type BootstrapStallCapsuleArgs = {
+  env: RuntimeState;
+  phase: string;
+  idleMs: number;
+  lastProgressReason: string;
+  lastProgressSignature: string;
+  lastProgressCheckpoint: unknown;
+  currentCheckpoint: unknown;
+  summarizedHealth: Record<string, unknown> | null;
+  visibleHubs: readonly HubProfile[];
+  lastDirectEntityInput: DirectEntityInputDebug | null;
+  lastDirectEntityInputError: DirectEntityInputDebug | null;
+};
+
+const buildBootstrapStallCapsule = ({
+  env,
+  phase,
+  idleMs,
+  lastProgressReason,
+  lastProgressSignature,
+  lastProgressCheckpoint,
+  currentCheckpoint,
+  summarizedHealth,
+  visibleHubs,
+  lastDirectEntityInput,
+  lastDirectEntityInputError,
+}: BootstrapStallCapsuleArgs): Record<string, unknown> => {
+  const p2p = getP2PState(env);
+  return {
+    phase,
+    idleMs,
+    timeoutMs: MARKET_MAKER_BOOTSTRAP_STALL_TIMEOUT_MS,
+    lastProgressReason,
+    lastProgressSignatureHash: createHash('sha256').update(lastProgressSignature).digest('hex'),
+    lastProgressCheckpoint,
+    currentCheckpoint,
+    health: summarizedHealth,
+    backlog: getMarketMakerRuntimeBacklogSnapshot(env, { includeQueuedEntityInputs: true }),
+    activeProcess: env.runtimeState?.processingPromise
+      ? {
+          enteredAt: env.lastProcessEnteredAt,
+          progressAt: env.activeProcessProgressAt,
+          progressStep: env.activeProcessProgressStep,
+        }
+      : null,
+    p2p: {
+      connected: p2p.connected,
+      reconnect: p2p.reconnect,
+      queue: p2p.queue,
+      directPeers: p2p.directPeers ?? [],
+    },
+    directInput: {
+      lastSeen: lastDirectEntityInput,
+      lastError: lastDirectEntityInputError,
+    },
+    visibleHubs: visibleHubs.map(profile => ({
+      name: profile.name,
+      entityId: profile.entityId,
+      runtimeId: profile.runtimeId,
+    })),
+  };
+};
+
 export const runMarketMakerNode = async (): Promise<void> => {
   activateMarketMakerProcessArgs();
   if (resolvedArgs.dbPath) process.env['XLN_DB_PATH'] = resolvedArgs.dbPath;
@@ -210,14 +282,6 @@ export const runMarketMakerNode = async (): Promise<void> => {
   let bootstrapCrossStarted = false;
   let bootstrapCrossPlanJobCount: number | null = null;
   let bootstrapCrossProducerAttempted = false;
-  type DirectEntityInputDebug = {
-    at: number;
-    fromRuntimeId: string;
-    entityIds: string[];
-    signerIds: string[];
-    txTypes: string[];
-    error?: string;
-  };
   let lastDirectEntityInput: DirectEntityInputDebug | null = null;
   let lastDirectEntityInputError: DirectEntityInputDebug | null = null;
 
@@ -1521,6 +1585,29 @@ export const runMarketMakerNode = async (): Promise<void> => {
     return true;
   };
 
+  const refreshBootstrapPhase = (health: MarketMakerHealth | null): void => {
+    if (isBootstrapDepthComplete(health)) return;
+    const previousPhase = startupPhase;
+    if (bootstrapCrossStarted) {
+      startupPhase = 'bootstrap-cross';
+    } else {
+      const visibleHubs = readVisibleHubProfiles(env, true);
+      const sameReady = isAllSameQuoteDepthReady(visibleHubs) && isMarketMakerSameDepthComplete(health);
+      if (sameReady) {
+        bootstrapCrossStarted = true;
+        startupPhase = 'bootstrap-cross';
+      } else {
+        startupPhase = 'bootstrap-same-chain';
+      }
+    }
+    if (startupPhase === previousPhase) return;
+    emitBootstrapDebugEvent('phase', {
+      phase: startupPhase,
+      health: summarizeMarketMakerHealthForDebug(health),
+    });
+    rebuildCachedHealthResponseJson();
+  };
+
   const waitForBootstrapOffers = async (): Promise<MarketMakerHealth | null> => {
     let lastProgressAt = Date.now();
     let lastProgressSignature = '';
@@ -1574,40 +1661,19 @@ export const runMarketMakerNode = async (): Promise<void> => {
         return;
       const visibleHubs = readVisibleHubProfiles(env).filter(profile => sameJurisdiction(primaryMmContext, profile));
       const currentCheckpoint = buildBootstrapCausalCheckpoint();
-      const p2p = getP2PState(env);
-      const capsule = {
+      const capsule = buildBootstrapStallCapsule({
+        env,
         phase: startupPhase,
         idleMs,
-        timeoutMs: MARKET_MAKER_BOOTSTRAP_STALL_TIMEOUT_MS,
         lastProgressReason,
-        lastProgressSignatureHash: createHash('sha256').update(lastProgressSignature).digest('hex'),
+        lastProgressSignature,
         lastProgressCheckpoint,
         currentCheckpoint,
-        health: summarizeMarketMakerHealthForDebug(health),
-        backlog: getMarketMakerRuntimeBacklogSnapshot(env, { includeQueuedEntityInputs: true }),
-        activeProcess: env.runtimeState?.processingPromise
-          ? {
-              enteredAt: env.lastProcessEnteredAt,
-              progressAt: env.activeProcessProgressAt,
-              progressStep: env.activeProcessProgressStep,
-            }
-          : null,
-        p2p: {
-          connected: p2p.connected,
-          reconnect: p2p.reconnect,
-          queue: p2p.queue,
-          directPeers: p2p.directPeers ?? [],
-        },
-        directInput: {
-          lastSeen: lastDirectEntityInput,
-          lastError: lastDirectEntityInputError,
-        },
-        visibleHubs: visibleHubs.map(profile => ({
-          name: profile.name,
-          entityId: profile.entityId,
-          runtimeId: profile.runtimeId,
-        })),
-      };
+        summarizedHealth: summarizeMarketMakerHealthForDebug(health),
+        visibleHubs,
+        lastDirectEntityInput,
+        lastDirectEntityInputError,
+      });
       console.error(`[MESH-MM] BOOTSTRAP_STALLED capsule=${safeStringify(capsule)}`);
       emitBootstrapDebugEvent('timeout', {
         capsule,
@@ -1616,48 +1682,6 @@ export const runMarketMakerNode = async (): Promise<void> => {
         `MARKET_MAKER_BOOTSTRAP_STALLED:phase=${startupPhase}:idleMs=${idleMs}:` +
           `pendingReliable=${summarizeRuntimeQuiescence(env).pendingReliableOutputs}`,
       );
-    };
-    const refreshBootstrapPhase = (health: MarketMakerHealth | null): void => {
-      if (isBootstrapDepthComplete(health)) return;
-      if (bootstrapCrossStarted) {
-        const previousPhase = startupPhase;
-        startupPhase = 'bootstrap-cross';
-        if (startupPhase !== previousPhase) {
-          emitBootstrapDebugEvent('phase', {
-            phase: startupPhase,
-            health: summarizeMarketMakerHealthForDebug(health),
-          });
-          rebuildCachedHealthResponseJson();
-        }
-        return;
-      }
-      const visibleHubs = readVisibleHubProfiles(env, true);
-      const sameReady = isAllSameQuoteDepthReady(visibleHubs) && isMarketMakerSameDepthComplete(health);
-      const previousPhase = startupPhase;
-      if (sameReady) {
-        bootstrapCrossStarted = true;
-        if (startupPhase !== 'bootstrap-cross') {
-          startupPhase = 'bootstrap-cross';
-          emitBootstrapDebugEvent('phase', {
-            phase: startupPhase,
-            health: summarizeMarketMakerHealthForDebug(health),
-          });
-        } else {
-          startupPhase = 'bootstrap-cross';
-        }
-        if (startupPhase !== previousPhase) rebuildCachedHealthResponseJson();
-        return;
-      }
-      if (startupPhase !== 'bootstrap-same-chain') {
-        startupPhase = 'bootstrap-same-chain';
-        emitBootstrapDebugEvent('phase', {
-          phase: startupPhase,
-          health: summarizeMarketMakerHealthForDebug(health),
-        });
-      } else {
-        startupPhase = 'bootstrap-same-chain';
-      }
-      if (startupPhase !== previousPhase) rebuildCachedHealthResponseJson();
     };
     while (!shuttingDown) {
       const bootstrapLoopNow = Date.now();
