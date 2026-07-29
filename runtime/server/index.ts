@@ -122,6 +122,7 @@ import { createLocalPairingController } from './local-pairing';
 import { deriveSignerAddressSync } from '../account/crypto';
 import { buildLocalRuntimeOwner, ensureLocalRuntimeOwner } from './local-runtime-owner';
 import { dbRootPath } from '../runtime/platform';
+import type { Server } from 'bun';
 
 // Global J-adapter instance (set during startup)
 let globalJAdapter: JAdapter | null = null;
@@ -759,6 +760,226 @@ const handleApi = async (
   return new Response(safeStringify({ error: 'Not found' }), { status: 404, headers });
 };
 
+type ServerSession = {
+  env: RuntimeState | null;
+  routerConfig: RelayRouterConfig | null;
+  relayHelloChallenges: ReturnType<typeof createHelloChallengeRegistry>;
+};
+
+const handleHttpRequest = async (
+  options: XlnServerOptions,
+  session: ServerSession,
+  req: Request,
+  server: Server,
+): Promise<Response | undefined> => {
+  const pathname = new URL(req.url).pathname;
+  const localPairingResponse = await localPairingController.handle(req, pathname, session.env);
+  if (localPairingResponse) return localPairingResponse;
+
+  if (req.headers.get('upgrade') === 'websocket') {
+    const wsType = pathname === '/relay' ? 'relay' : pathname === '/rpc' ? 'rpc' : null;
+    if (wsType && server.upgrade(req, { data: { type: wsType, clientIp: resolveRequestClientIp(req) } })) {
+      return undefined;
+    }
+    return new Response('WebSocket upgrade failed', { status: 400 });
+  }
+
+  if (pathname.startsWith('/api/') || pathname === '/rpc') {
+    try {
+      const directClientIp = resolveAssistantDirectClientIp(server, req);
+      const clientId = resolveAssistantRateClientId(req, directClientIp);
+      const peerAddress = resolveSocketPeerAddress(server, req);
+      const operatorAuthorized = isLocalOperatorRequest(req, peerAddress) || hasDaemonControlAuth(req, session.env);
+      return await handleApi(req, pathname, session.env, clientId, operatorAuthorized);
+    } catch (error) {
+      const message = getErrorMessage(error, 'API handler failed');
+      serverLog.error('api.unhandled_route_error', { pathname, message });
+      pushDebugEvent(relayStore, {
+        event: 'error',
+        reason: 'API_HANDLER_EXCEPTION',
+        details: { pathname, message },
+      });
+      return new Response(safeStringify({ error: message, code: 'API_HANDLER_EXCEPTION' }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+  }
+
+  if (options.staticDir) {
+    if (pathname === '/runtime.js') {
+      const runtimeBundle = await serveRuntimeBundle();
+      if (runtimeBundle) return runtimeBundle;
+    }
+    if (pathname === '/') {
+      const index = await serveStatic('/index.html', options.staticDir);
+      if (index) return index;
+    }
+    const file = await serveStatic(pathname, options.staticDir);
+    if (file) return file;
+    const fallback = await serveStatic('/index.html', options.staticDir);
+    if (fallback) return fallback;
+  }
+
+  return new Response('Not found', { status: 404 });
+};
+
+const routeRelaySocketMessage = (
+  session: ServerSession,
+  ws: RelaySocket,
+  peerMessage: RuntimeWsMessage,
+): void => {
+  const routerConfig = session.routerConfig;
+  if (!routerConfig) {
+    ws.send(serializeWsMessage({ type: 'error', error: 'Runtime transport not ready' }));
+    return;
+  }
+  Promise.resolve(relayRoute(routerConfig, ws, peerMessage)).catch(error => {
+    const reason = getErrorMessage(error, 'relay handler error');
+    serverLog.error('ws.relay_handler_error', { reason, type: peerMessage.type });
+    pushDebugEvent(relayStore, {
+      event: 'error',
+      reason: 'RELAY_HANDLER_EXCEPTION',
+      details: {
+        error: reason,
+        msgType: peerMessage.type,
+        from: peerMessage.from,
+        to: peerMessage.to,
+      },
+    });
+    try {
+      ws.send(serializeWsMessage({ type: 'error', error: 'Relay handler exception' }));
+    } catch (sendError) {
+      serverLog.debug('ws.relay_error_response_failed', {
+        error: getErrorMessage(sendError),
+      });
+    }
+  });
+};
+
+const handleWebSocketMessage = (
+  session: ServerSession,
+  ws: RelaySocket,
+  message: string | Uint8Array | ArrayBuffer,
+): void => {
+  const messageText = (): string => typeof message === 'string'
+    ? message
+    : new TextDecoder().decode(message instanceof ArrayBuffer ? new Uint8Array(message) : message);
+  const wsType = ws.data.type;
+  try {
+    if (wsType === 'rpc') {
+      const request = decodeRuntimeAdapterRequest(message);
+      Promise.resolve(handleRpcMessage(ws, request, session.env)).catch(error => {
+        const reason = getErrorMessage(error);
+        serverLog.error('ws.rpc_handler_error', { reason, op: request.op });
+        pushDebugEvent(relayStore, {
+          event: 'error',
+          reason: 'RPC_HANDLER_EXCEPTION',
+          details: { error: reason, op: request.op },
+        });
+        closeInvalidRuntimeAdapterMessage(ws, error);
+      });
+      return;
+    }
+
+    let peerMessage: RuntimeWsMessage | null = null;
+    let marketMessage: MarketWireRequest | null = null;
+    try {
+      peerMessage = deserializeWsMessage(message);
+    } catch (binaryError) {
+      try {
+        marketMessage = decodeMarketWireRequest(messageText());
+      } catch {
+        throw binaryError;
+      }
+    }
+    if (marketMessage) {
+      Promise.resolve(marketSubscriptionStack.handleMessage(ws, marketMessage)).catch(error => {
+        const reason = getErrorMessage(error);
+        serverLog.error('ws.market_handler_error', { reason, type: marketMessage?.type });
+        pushDebugEvent(relayStore, {
+          event: 'error',
+          reason: 'MARKET_HANDLER_EXCEPTION',
+          details: { error: reason, msgType: marketMessage?.type },
+        });
+        ws.send(encodeMarketWireMessage({ type: 'error', error: reason }));
+      });
+      return;
+    }
+    if (!peerMessage) throw new Error('RELAY_MESSAGE_DECODE_INVARIANT');
+
+    if (!session.routerConfig && isServerBootInProgress()) {
+      void serverStartupBarrier.then(() => routeRelaySocketMessage(session, ws, peerMessage));
+      return;
+    }
+    routeRelaySocketMessage(session, ws, peerMessage);
+  } catch (error) {
+    const byteLength = wsType === 'rpc' ? runtimeAdapterMessageByteLength(message) : messageText().length;
+    const errorMessage = getErrorMessage(error);
+    serverLog.error('ws.parse_error', { type: wsType, len: byteLength, error: errorMessage });
+    pushDebugEvent(relayStore, {
+      event: 'error',
+      reason: wsType === 'rpc' ? 'Invalid runtime adapter message' : 'Invalid relay message',
+      details: { wsType, len: byteLength, error: errorMessage },
+    });
+    if (wsType === 'rpc') {
+      closeInvalidRuntimeAdapterMessage(ws, error);
+    } else {
+      ws.send(serializeWsMessage({ type: 'error', error: 'Invalid relay message' }));
+    }
+  }
+};
+
+const handleWebSocketClose = (
+  session: ServerSession,
+  ws: RelaySocket,
+  code: number,
+  reason: string | Buffer,
+): void => {
+  session.relayHelloChallenges.forget(ws);
+  cleanupRpcMarketSubscription(ws);
+  forgetRuntimeAdapterClient(ws);
+  forgetRelaySocketRuntimeId(ws);
+  const removedId = removeClient(relayStore, ws);
+  const reasonText = typeof reason === 'string' ? reason : reason.toString();
+  serverLog.warn('ws.close', {
+    type: ws.data.type,
+    runtime: removedId ? shortId(removedId, 10) : 'unknown',
+    code: Number(code || 0),
+    reason: reasonText || null,
+  });
+  if (removedId) {
+    pushDebugEvent(relayStore, {
+      event: 'ws_close',
+      runtimeId: removedId,
+      from: removedId,
+      details: {
+        wsType: ws.data.type,
+        code: Number(code || 0),
+        reason: reasonText || null,
+      },
+    });
+  }
+};
+
+const createHttpServer = (options: XlnServerOptions, session: ServerSession) => Bun.serve({
+  port: options.port,
+  hostname: options.host ?? '127.0.0.1',
+  fetch: (req, server) => handleHttpRequest(options, session, req, server),
+  websocket: {
+    open(ws: RelaySocket) {
+      serverLog.info('ws.open', { type: ws.data.type });
+      if (ws.data.type === 'rpc' && session.env) {
+        attachRuntimeAdapterTicker(session.env, registerEnvChangeCallback);
+      }
+      if (ws.data.type === 'relay') session.relayHelloChallenges.issue(ws);
+      pushDebugEvent(relayStore, { event: 'ws_open', details: { wsType: ws.data.type } });
+    },
+    message: (ws, message) => handleWebSocketMessage(session, ws, message),
+    close: (ws, code, reason) => handleWebSocketClose(session, ws, code, reason),
+  },
+});
+
 export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Promise<void> {
   const options = { ...DEFAULT_OPTIONS, ...opts };
   const incidentJournalPath = String(
@@ -784,226 +1005,12 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
   });
 
   let env: RuntimeState | null = null;
-  let routerConfig: RelayRouterConfig | null = null;
-  const relayHelloChallenges = createHelloChallengeRegistry();
-
-  const createHttpServer = () => Bun.serve({
-    port: options.port,
-    hostname: options.host ?? '127.0.0.1',
-
-    async fetch(req, server) {
-      const url = new URL(req.url);
-      const pathname = url.pathname;
-
-      const localPairingResponse = await localPairingController.handle(req, pathname, env);
-      if (localPairingResponse) return localPairingResponse;
-
-      if (req.headers.get('upgrade') === 'websocket') {
-        const wsType = pathname === '/relay' ? 'relay' : pathname === '/rpc' ? 'rpc' : null;
-        if (wsType) {
-          const upgraded = server.upgrade(req, { data: { type: wsType, clientIp: resolveRequestClientIp(req) } });
-          if (upgraded) return;
-        }
-        return new Response('WebSocket upgrade failed', { status: 400 });
-      }
-
-      if (
-        pathname.startsWith('/api/') ||
-        pathname === '/rpc'
-      ) {
-        try {
-          const directClientIp = resolveAssistantDirectClientIp(server, req);
-          const clientId = resolveAssistantRateClientId(req, directClientIp);
-          const peerAddress = resolveSocketPeerAddress(server, req);
-          const operatorAuthorized = isLocalOperatorRequest(req, peerAddress) || hasDaemonControlAuth(req, env);
-          return await handleApi(req, pathname, env, clientId, operatorAuthorized);
-        } catch (error) {
-          const message = (error as Error)?.message || 'API handler failed';
-          serverLog.error('api.unhandled_route_error', { pathname, message });
-          pushDebugEvent(relayStore, {
-            event: 'error',
-            reason: 'API_HANDLER_EXCEPTION',
-            details: { pathname, message },
-          });
-          return new Response(safeStringify({ error: message, code: 'API_HANDLER_EXCEPTION' }), {
-            status: 500,
-            headers: { 'Content-Type': 'application/json' },
-          });
-        }
-      }
-
-      if (options.staticDir) {
-        if (pathname === '/runtime.js') {
-          const runtimeBundle = await serveRuntimeBundle();
-          if (runtimeBundle) return runtimeBundle;
-        }
-
-        if (pathname === '/') {
-          const index = await serveStatic('/index.html', options.staticDir);
-          if (index) return index;
-        }
-
-        const file = await serveStatic(pathname, options.staticDir);
-        if (file) return file;
-
-        const fallback = await serveStatic('/index.html', options.staticDir);
-        if (fallback) return fallback;
-      }
-
-      return new Response('Not found', { status: 404 });
-    },
-
-    websocket: {
-      open(ws: RelaySocket) {
-        const data = ws.data;
-        serverLog.info('ws.open', { type: data.type });
-        if (data.type === 'rpc' && env) {
-          attachRuntimeAdapterTicker(env, registerEnvChangeCallback);
-        }
-        if (data.type === 'relay') relayHelloChallenges.issue(ws);
-        pushDebugEvent(relayStore, {
-          event: 'ws_open',
-          details: { wsType: data.type },
-        });
-      },
-
-      message(ws: RelaySocket, message) {
-        const data = ws.data;
-        try {
-          if (data.type === 'rpc') {
-            const request = decodeRuntimeAdapterRequest(message);
-            Promise.resolve(handleRpcMessage(ws, request, env)).catch(error => {
-              const reason = getErrorMessage(error);
-              serverLog.error('ws.rpc_handler_error', { reason, op: request.op });
-              pushDebugEvent(relayStore, {
-                event: 'error',
-                reason: 'RPC_HANDLER_EXCEPTION',
-                details: { error: reason, op: request.op },
-              });
-              closeInvalidRuntimeAdapterMessage(ws, error);
-            });
-            return;
-          }
-          let peerMessage: RuntimeWsMessage | null = null;
-          let marketMessage: MarketWireRequest | null = null;
-          try {
-            peerMessage = deserializeWsMessage(message as string | Buffer | ArrayBuffer);
-          } catch (binaryError) {
-            try {
-              marketMessage = decodeMarketWireRequest(message.toString());
-            } catch {
-              throw binaryError;
-            }
-          }
-          if (marketMessage) {
-            Promise.resolve(marketSubscriptionStack.handleMessage(ws, marketMessage)).catch(error => {
-              const reason = getErrorMessage(error);
-              serverLog.error('ws.market_handler_error', { reason, type: marketMessage?.type });
-              pushDebugEvent(relayStore, {
-                event: 'error',
-                reason: 'MARKET_HANDLER_EXCEPTION',
-                details: { error: reason, msgType: marketMessage?.type },
-              });
-              ws.send(encodeMarketWireMessage({ type: 'error', error: reason }));
-            });
-            return;
-          }
-          if (!peerMessage) throw new Error('RELAY_MESSAGE_DECODE_INVARIANT');
-          const routeRelayMessage = () => {
-            if (!routerConfig) {
-              ws.send(serializeWsMessage({ type: 'error', error: 'Runtime transport not ready' }));
-              return;
-            }
-            Promise.resolve(relayRoute(routerConfig, ws, peerMessage)).catch(error => {
-              const reason = (error as Error).message || 'relay handler error';
-              serverLog.error('ws.relay_handler_error', { reason, type: peerMessage?.type });
-              pushDebugEvent(relayStore, {
-                event: 'error',
-                reason: 'RELAY_HANDLER_EXCEPTION',
-                details: {
-                  error: reason,
-                  msgType: peerMessage?.type,
-                  from: peerMessage?.from,
-                  to: peerMessage?.to,
-                },
-              });
-              try {
-                ws.send(serializeWsMessage({ type: 'error', error: 'Relay handler exception' }));
-              } catch (sendError) {
-                serverLog.debug('ws.relay_error_response_failed', {
-                  error: sendError instanceof Error ? sendError.message : String(sendError),
-                });
-              }
-            });
-          };
-          if (data.type === 'relay') {
-            if (!routerConfig) {
-              if (isServerBootInProgress()) {
-                void serverStartupBarrier.then(() => {
-                  routeRelayMessage();
-                });
-                return;
-              }
-              ws.send(serializeWsMessage({ type: 'error', error: 'Runtime transport not ready' }));
-              return;
-            }
-            routeRelayMessage();
-          }
-        } catch (error) {
-          const byteLength = data.type === 'rpc' ? runtimeAdapterMessageByteLength(message) : message.toString().length;
-          serverLog.error('ws.parse_error', {
-            type: data.type,
-            len: byteLength,
-            error: getErrorMessage(error),
-          });
-          pushDebugEvent(relayStore, {
-            event: 'error',
-            reason: data.type === 'rpc' ? 'Invalid runtime adapter message' : 'Invalid relay message',
-            details: { wsType: data.type, len: byteLength, error: (error as Error).message },
-          });
-          if (data.type === 'rpc') {
-            closeInvalidRuntimeAdapterMessage(ws, error);
-          } else {
-            ws.send(serializeWsMessage({ type: 'error', error: 'Invalid relay message' }));
-          }
-        }
-      },
-
-      close(ws: RelaySocket, code, reason) {
-        relayHelloChallenges.forget(ws);
-        cleanupRpcMarketSubscription(ws);
-        forgetRuntimeAdapterClient(ws);
-        forgetRelaySocketRuntimeId(ws);
-        const removedId = removeClient(relayStore, ws);
-        const wsType = ws.data.type;
-        const reasonText =
-          typeof reason === 'string'
-            ? reason
-            : reason
-              ? String(reason)
-              : '';
-        serverLog.warn('ws.close', {
-          type: wsType,
-          runtime: removedId ? shortId(removedId, 10) : 'unknown',
-          code: Number(code || 0),
-          reason: reasonText || null,
-        });
-        if (removedId) {
-          pushDebugEvent(relayStore, {
-            event: 'ws_close',
-            runtimeId: removedId,
-            from: removedId,
-            details: {
-              wsType,
-              code: Number(code || 0),
-              reason: reasonText || null,
-            },
-          });
-        }
-      },
-    },
-  });
-  const server = createHttpServer();
+  const serverSession: ServerSession = {
+    env: null,
+    routerConfig: null,
+    relayHelloChallenges: createHelloChallengeRegistry(),
+  };
+  const server = createHttpServer(options, serverSession);
 
   const closeFailedStartup = async (startupError: unknown): Promise<never> => {
     stopMarketMakerLoop();
@@ -1016,7 +1023,8 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     ]);
     globalJAdapter = null;
     serverEnv = null;
-    routerConfig = null;
+    serverSession.env = null;
+    serverSession.routerConfig = null;
     const cleanupErrors = cleanup
       .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
       .map(result => result.reason instanceof Error ? result.reason : new Error(String(result.reason)));
@@ -1037,6 +1045,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       ],
     });
     serverEnv = env;
+    serverSession.env = env;
     registerRuntimeFrameCommitCallback(env, ({ height, runtimeInput }) => {
       runtimeIngressReceipts.observeRuntimeInput(height, runtimeInput);
     });
@@ -1326,12 +1335,12 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     // Wire relay-router + local delivery as soon as env exists.
     // Relay WS can receive early hello/gossip traffic during bootstrap.
     const localDeliver = createLocalDeliveryHandler(env, relayStore, getEntityReplicaById);
-    routerConfig = {
+    serverSession.routerConfig = {
       store: relayStore,
       localRuntimeId: String(env.runtimeId),
       localDeliver,
       send: (ws, data) => ws.send(data),
-      consumeHelloChallenge: (ws, challenge) => relayHelloChallenges.consume(ws, challenge),
+      consumeHelloChallenge: (ws, challenge) => serverSession.relayHelloChallenges.consume(ws, challenge),
       onGossipStore: profile => {
         try {
           runtimeEnv.gossip?.announce?.(profile);
