@@ -4,7 +4,7 @@ import { createDefaultDelta } from '../../delta';
 import { deriveSwapOffdeltaChanges } from '../../../orderbook/swap-execution';
 import { getHold, releaseHold } from '../hold-utils';
 import { ensureDelta } from '../delta-utils';
-import { deriveTransferOffdeltaChange } from '../../delta-movement';
+import { deriveTransferOffdeltaChange } from '../../../protocol/delta-movement';
 import type {
   AppliedSwapResolve,
   SwapResolveFailure,

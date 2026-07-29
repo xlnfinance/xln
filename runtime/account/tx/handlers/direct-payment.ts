@@ -6,7 +6,7 @@
 
 import type { AccountState, AccountTx } from '../../../types';
 import { deriveDelta } from '../../utils';
-import { deriveTransferOffdeltaChange } from '../../delta-movement';
+import { deriveTransferOffdeltaChange } from '../../../protocol/delta-movement';
 import { FINANCIAL } from '../../../constants';
 import { isLeftEntity } from '../../../protocol/entity-id';
 import { createStructuredLogger } from '../../../infra/logger';

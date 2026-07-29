@@ -1,6 +1,6 @@
 import type { AccountState, AccountTx } from '../../../types';
 import { deriveDelta } from '../../utils';
-import { deriveTransferOffdeltaChange } from '../../delta-movement';
+import { deriveTransferOffdeltaChange } from '../../../protocol/delta-movement';
 
 type RebalanceRefundTx = Extract<AccountTx, { type: 'rebalance_refund' }>;
 

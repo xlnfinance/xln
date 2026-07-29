@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { deriveTransferOffdeltaChange } from '../account/delta-movement';
+import { deriveTransferOffdeltaChange } from '../protocol/delta-movement';
 import { deriveSwapOffdeltaChanges } from '../orderbook/swap-execution';
 
 describe('canonical Account delta movement', () => {

@@ -27,12 +27,12 @@ import type { ProofBodyStruct, TransformerClauseStruct } from '../../../jurisdic
 import type { DeltaTransformer } from '../../../jurisdictions/typechain-types/contracts/DeltaTransformer.ts';
 import { PROOF_BODY_ABI, BATCH_ABI } from './proof-body.ts';
 import { sortTransformerEntries } from '../transformer-ordering.ts';
-import { normalizeAccountWatchSeed } from '../../account/watch-seed.ts';
+import { normalizeAccountWatchSeed } from '../account-watch-seed.ts';
 import { HASHLADDER_MAX_FILL_RATIO } from '../htlc/hash-ladder.ts';
 import { assertDisputeProofBodyWithinContractLimits } from '../../jurisdiction/batch.ts';
 import { compareStableText } from '../serialization.ts';
 import { deriveSwapOffdeltaChanges } from '../../orderbook/swap-execution.ts';
-import { deriveTransferOffdeltaChange } from '../../account/delta-movement.ts';
+import { deriveTransferOffdeltaChange } from '../delta-movement.ts';
 import {
   encodeDisputeProofHankoPayload,
   hashCooperativeDisputeProofHankoPayload,

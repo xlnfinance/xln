@@ -12,7 +12,7 @@ import { upsertSortedStringMapEntry } from '../../../storage/sorted-index';
 import { cloneEntityState, addMessage } from '../../../state-helpers';
 import { findAccountKey, normalizeEntityRef } from '../account-key';
 import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../../../account/default-tokens';
-import { normalizeAccountWatchSeed } from '../../../account/watch-seed';
+import { normalizeAccountWatchSeed } from '../../../protocol/account-watch-seed';
 import { createStructuredLogger, shortId } from '../../../infra/logger';
 import {
   accountStateDomainFromJurisdiction,

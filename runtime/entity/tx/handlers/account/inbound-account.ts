@@ -6,7 +6,7 @@ import {
   normalizeAccountStateDomain,
   sameAccountStateDomain,
 } from '../../../../account/state-root';
-import { normalizeAccountWatchSeed } from '../../../../account/watch-seed';
+import { normalizeAccountWatchSeed } from '../../../../protocol/account-watch-seed';
 import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../../../../account/default-tokens';
 import { resolveJurisdictionRebalanceDefaults } from '../../../../account/rebalance-policy-defaults';
 import { createEmptyAccountJClaimAccumulator } from '../../../../account/j-claim-accumulator';

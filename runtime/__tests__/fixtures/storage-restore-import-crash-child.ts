@@ -13,7 +13,7 @@ import {
 } from '../../account/crypto';
 import { createEmptyAccountJClaimAccumulator } from '../../account/j-claim-accumulator';
 import { EMPTY_ACCOUNT_STATE_ROOT } from '../../account/state-root';
-import { deriveAccountWatchSeed } from '../../account/watch-seed';
+import { deriveAccountWatchSeed } from '../../protocol/account-watch-seed';
 import { createEntityFrameHashFromStateRoot } from '../../entity/consensus/frame';
 import { getEntityLeaderState } from '../../entity/consensus/leader';
 import { generateLazyEntityId } from '../../entity/factory';

@@ -155,12 +155,12 @@ describe('production startup wiring', () => {
 
   test('canonical runtime commit persists the durable outbox before backup and dispatch', () => {
     const process = readFileSync(join(repoRoot, 'runtime/runtime/frame/process.ts'), 'utf8');
-    const recovery = readFileSync(join(repoRoot, 'runtime/recovery/restore.ts'), 'utf8');
+    const recoveryOutput = readFileSync(join(repoRoot, 'runtime/runtime/recovery-output.ts'), 'utf8');
     const postCommit = readFileSync(
       join(repoRoot, 'runtime/runtime/frame/post-commit.ts'),
       'utf8',
     );
-    const durableOutbox = recovery.indexOf('env.pendingNetworkOutputs = buildPendingNetworkOutputs([');
+    const durableOutbox = recoveryOutput.indexOf('env.pendingNetworkOutputs = buildPendingNetworkOutputs([');
     const save = process.indexOf('const outcome = await deps.storage.saveEnvToDB(');
     const plan = process.indexOf('const outputPlan = planRuntimeFrameOutputs(');
     const commit = process.indexOf('const commit = await commitRuntimeFrame(', plan);
@@ -1410,7 +1410,10 @@ describe('production startup wiring', () => {
     const appLayout = readFileSync(join(repoRoot, 'frontend/src/routes/app/+layout.svelte'), 'utf8');
     const importFlow = readFileSync(join(repoRoot, 'frontend/src/lib/utils/remoteRuntimeImportFlow.ts'), 'utf8');
     const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
-    const bootstrapTimeline = readFileSync(join(repoRoot, 'runtime/orchestrator/bootstrap-timeline.ts'), 'utf8');
+    const bootstrapTimeline = readFileSync(
+      join(repoRoot, 'runtime/orchestrator/bootstrap-timeline-stages.ts'),
+      'utf8',
+    );
     const isolatedRunner = readFileSync(join(repoRoot, 'runtime/scripts/run-e2e-parallel-isolated.ts'), 'utf8');
 
     expect(baseline).toContain('allowAutoReset?: boolean;');
@@ -2223,7 +2226,7 @@ describe('production startup wiring', () => {
     expect(readyStart).toBeGreaterThan(ensureStart);
 
     const ensureConnectivity = mmNode.slice(ensureStart, readyStart);
-    expect(mmNode).toContain("import { deriveAccountWatchSeed } from '../account/watch-seed';");
+    expect(mmNode).toContain("import { deriveAccountWatchSeed } from '../protocol/account-watch-seed';");
     expect(ensureConnectivity).toContain(
       'const deriveMarketMakerAccountWatchSeed = (counterpartyId: string): string =>',
     );

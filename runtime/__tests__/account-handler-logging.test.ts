@@ -3,7 +3,7 @@ import { readEntityFrameEventMessages } from '../state-helpers';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { deriveAccountWatchSeed } from '../account/watch-seed';
+import { deriveAccountWatchSeed } from '../protocol/account-watch-seed';
 import { applyAccountInputToEntity } from '../entity/tx/handlers/account';
 import { createEmptyEnv } from '../runtime';
 import type { EntityReplica, EntityState, JurisdictionConfig } from '../types';

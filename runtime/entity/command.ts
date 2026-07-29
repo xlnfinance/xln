@@ -1,5 +1,5 @@
 import { getSignerAddress, signAccountFrame, verifyAccountSignature } from '../account/crypto';
-import { deriveAccountWatchSeed, normalizeAccountWatchSeed } from '../account/watch-seed';
+import { deriveAccountWatchSeed, normalizeAccountWatchSeed } from '../protocol/account-watch-seed';
 import {
   accountStateDomainFromJurisdiction,
   normalizeAccountStateDomain,

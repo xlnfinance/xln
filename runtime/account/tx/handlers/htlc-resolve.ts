@@ -16,7 +16,7 @@ import { validateMultiRecipientCiphertext } from '../../../protocol/htlc/multi-r
 import { createStructuredLogger, shortHash } from '../../../infra/logger';
 import { releaseHold } from '../hold-utils';
 import { isHtlcTimelockExpired } from '../../htlc-deadline';
-import { deriveTransferOffdeltaChange } from '../../delta-movement';
+import { deriveTransferOffdeltaChange } from '../../../protocol/delta-movement';
 
 const htlcResolveLog = createStructuredLogger('account.htlc');
 

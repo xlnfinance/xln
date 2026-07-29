@@ -28,7 +28,7 @@ import {
   createFrameHash,
   getAccountFrameBoundsError,
 } from './frame';
-import { normalizeAccountWatchSeed } from '../watch-seed';
+import { normalizeAccountWatchSeed } from '../../protocol/account-watch-seed';
 import {
   assertNoUnilateralSettlementMutation,
   buildAccountProofBodyFromEnv,

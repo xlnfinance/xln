@@ -24,7 +24,7 @@ import {
 import { addHold, releaseHold } from '../hold-utils';
 import { ensureDelta } from '../delta-utils';
 import { isPullRevealExpired } from '../../pull-deadline';
-import { deriveTransferOffdeltaChange } from '../../delta-movement';
+import { deriveTransferOffdeltaChange } from '../../../protocol/delta-movement';
 
 type PullLockTx = Extract<AccountTx, { type: 'pull_lock' }>;
 type PullResolveTx = Extract<AccountTx, { type: 'pull_resolve' }>;

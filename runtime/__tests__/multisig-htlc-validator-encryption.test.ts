@@ -76,7 +76,7 @@ import {
   startP2P,
   stopP2PAndWait,
 } from '../runtime';
-import { deriveAccountWatchSeed } from '../account/watch-seed';
+import { deriveAccountWatchSeed } from '../protocol/account-watch-seed';
 import { buildCollectiveEntityProposalTx } from '../entity/authorization';
 import { buildSignedEntityCommand } from '../entity/command';
 import { signedEntityCommandTx } from '../entity/command-codec';

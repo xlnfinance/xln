@@ -20,7 +20,7 @@
 import type { AccountState, AccountTx } from '../../../types';
 import { isLeftEntity } from '../../../protocol/entity-id';
 import { deriveDelta } from '../../utils';
-import { deriveTransferOffdeltaChange } from '../../delta-movement';
+import { deriveTransferOffdeltaChange } from '../../../protocol/delta-movement';
 import { getDefaultRebalanceBaseFeeForToken } from '../../rebalance-defaults';
 
 type RequestCollateralTx = Extract<AccountTx, { type: 'request_collateral' }>;
