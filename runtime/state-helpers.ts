@@ -19,7 +19,8 @@ import type {
 import { cloneDisputeArgumentSnapshot } from './protocol/dispute/argument-snapshot';
 import type { ProofBodyStruct } from '../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
 import { cloneProofBodyStruct } from './protocol/dispute/proof-body';
-import { validateEntityReplica, validateEntityState } from './validation-utils';
+import { validateEntityState } from './entity/state-validation';
+import { validateEntityReplica } from './validation-utils';
 import { safeStringify } from './protocol/serialization';
 import {
   cloneIsolatedEntityInput,

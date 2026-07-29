@@ -57,7 +57,7 @@ import {
   profileToEntityProfileDescriptor,
 } from '../entity/profile-descriptor';
 import { createDefaultDelta } from '../account/delta';
-import { validateEntityState } from '../validation-utils';
+import { validateEntityState } from '../entity/state-validation';
 import { getValidatorEncryptionManifestFromBoard, parseProfile, type Profile } from '../entity/profile';
 import {
   computeProfileHash,

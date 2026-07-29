@@ -27,7 +27,7 @@ import type {
   JurisdictionConfig,
 } from '../types';
 import { validateAccountState } from '../account/state-validation';
-import { validateEntityState } from '../validation-utils';
+import { validateEntityState } from '../entity/state-validation';
 import { sealAccountDraftAsEntity } from './helpers/account-draft';
 
 const entityId = `0x${'11'.repeat(32)}`;

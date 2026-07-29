@@ -1,5 +1,5 @@
 import type { AccountFrame, AccountState, RuntimeState } from '../../types';
-import { validateEntityState } from '../../validation-utils';
+import { validateEntityState } from '../../entity/state-validation';
 import { computeFrameHash } from '../../account/consensus/index';
 import { assertAccountFrameDeltaIntegrity } from '../../account/frame';
 

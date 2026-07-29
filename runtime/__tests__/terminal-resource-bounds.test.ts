@@ -13,7 +13,7 @@ import { applyHtlcTimeoutFollowups } from '../entity/tx/handlers/account/committ
 import { createEmptyEnv } from '../runtime';
 import type { AccountState, EntityState, SwapOffer } from '../types';
 import { validateAccountState } from '../account/state-validation';
-import { validateEntityState } from '../validation-utils';
+import { validateEntityState } from '../entity/state-validation';
 
 const leftEntity = `0x${'11'.repeat(32)}`;
 const rightEntity = `0x${'22'.repeat(32)}`;

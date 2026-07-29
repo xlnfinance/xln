@@ -203,12 +203,15 @@ export const recomputeEntityProviderActionHash = (
 };
 
 export const assertEntityProviderActionIntent = (
-  intent: EntityProviderActionIntent,
+  value: unknown,
   trusted: TrustedEntityProviderDomain,
 ): void => {
-  if (!intent || typeof intent !== 'object' || Array.isArray(intent)) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('ENTITY_PROVIDER_ACTION_INTENT_INVALID');
   }
+  // This is the sole untrusted boundary for the intent. Every field is checked
+  // below before the candidate can escape into consensus or J submission.
+  const intent = value as EntityProviderActionIntent;
   const domain = normalizeTrustedDomain(trusted);
   assertIntentEnvelope(intent, trusted, domain);
   if (trusted.expectedKind && intent.payload.kind !== trusted.expectedKind) {

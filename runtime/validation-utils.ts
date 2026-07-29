@@ -16,11 +16,7 @@ import {
   validateObject,
   validateString,
 } from './protocol/validation-primitives';
-import { validateAccountState } from './account/state-validation';
-import { validateConsensusConfig } from './entity/consensus/config-validation';
-import { validateEntityProposals } from './entity/proposal-validation';
-import { validateExternalWalletState } from './entity/external-wallet-validation';
-import { validateEntityAccountMetadata } from './entity/account-metadata-validation';
+import { validateEntityState } from './entity/state-validation';
 export {
   FinancialDataCorruptionError,
   TypeSafetyViolationError,
@@ -29,20 +25,11 @@ export {
   validateEntityId,
 } from './protocol/validation-primitives';
 import type {
-  ConsensusConfig,
   RoutedEntityInput,
   EntityReplica,
-  EntityState,
   EntityLeaderTimeoutVote,
   ProposedEntityFrame,
 } from './types';
-import type { CrontabState, CrontabTaskMethod, CrontabTaskState, ScheduledHook, ScheduledHookType } from './entity/scheduler-types';
-import { validatePersistedValidatorEncryptionManifest } from './protocol/htlc/validator-encryption';
-import { LIMITS } from './constants';
-import { assertConsumptionAccumulatorState } from './entity/consumption-accumulator';
-import { assertEntityAccountCountWithinLimit } from './entity/account-capacity';
-import { assertEntityProviderActionIntent } from './entity/entity-provider-action';
-import type { EntityProviderActionIntent } from './types/entity-provider-actions';
 import { isRuntimeFailureSignal } from './protocol/failure-taxonomy';
 import { assertEntityFrameEventByteBudget } from './entity/consensus/frame-events';
 
@@ -52,6 +39,20 @@ const assertExactFields = (value: Record<string, unknown>, allowed: Set<string>,
   const unexpected = Object.keys(value).filter((field) => !allowed.has(field));
   if (unexpected.length > 0) {
     throw new FinancialDataCorruptionError(`${context} contains unexpected fields: ${unexpected.sort().join(',')}`);
+  }
+};
+
+const rejectUnexpectedKeys = (
+  value: Record<string, unknown>,
+  allowed: readonly string[],
+  context: string,
+): void => {
+  for (const key of Object.keys(value)) {
+    if (!allowed.includes(key)) {
+      throw new FinancialDataCorruptionError(
+        `${context} has unexpected key "${key}"`,
+      );
+    }
   }
 };
 
@@ -137,195 +138,6 @@ export function decodeRoutedEntityInput(input: unknown): RoutedEntityInput {
   return obj as unknown as RoutedEntityInput;
 }
 
-function isValidCrontabTaskMethod(value: unknown): value is CrontabTaskMethod {
-  return value === 'maintainPendingAccounts' || value === 'hubRebalance';
-}
-
-function isValidScheduledHookType(value: unknown): value is ScheduledHookType {
-  return (
-    value === 'htlc_timeout' ||
-    value === 'dispute_deadline' ||
-    value === 'htlc_secret_ack_timeout' ||
-	    value === 'settlement_window' ||
-	    value === 'watchdog' ||
-	    value === 'hub_rebalance_kick' ||
-	    value === 'board_reseal' ||
-	    value === 'cross_j_orderbook_sweep'
-	  );
-	}
-
-function rejectUnexpectedKeys(
-  obj: Record<string, unknown>,
-  allowedKeys: readonly string[],
-  fieldName: string,
-): void {
-  for (const key of Object.keys(obj)) {
-    if (!allowedKeys.includes(key)) {
-      throw new FinancialDataCorruptionError(`${fieldName} has unexpected key "${key}"`);
-    }
-  }
-}
-
-function validateCrontabTaskState(value: unknown, fieldName: string): CrontabTaskState {
-  const obj = validateObject(value, fieldName);
-  if (!isValidCrontabTaskMethod(obj['method'])) {
-    throw new FinancialDataCorruptionError(`${fieldName}.method must be a known crontab task method`);
-  }
-  validateNumber(obj['intervalMs'], `${fieldName}.intervalMs`);
-  validateNumber(obj['lastRun'], `${fieldName}.lastRun`);
-  if (typeof obj['enabled'] !== 'boolean') {
-    throw new FinancialDataCorruptionError(`${fieldName}.enabled must be a boolean`);
-  }
-  const params = validateObject(obj['params'], `${fieldName}.params`);
-  for (const [paramKey, paramValue] of Object.entries(params)) {
-    if (typeof paramValue !== 'string' && typeof paramValue !== 'number' && typeof paramValue !== 'boolean') {
-      throw new FinancialDataCorruptionError(`${fieldName}.params.${paramKey} must be string | number | boolean`);
-    }
-  }
-  return obj as unknown as CrontabTaskState;
-}
-
-function validateScheduledHook(value: unknown, fieldName: string): ScheduledHook {
-  const obj = validateObject(value, fieldName);
-  const id = validateString(obj['id'], `${fieldName}.id`);
-  const triggerAt = validateNumber(obj['triggerAt'], `${fieldName}.triggerAt`);
-  const hookType = obj['type'];
-  if (!isValidScheduledHookType(hookType)) {
-    throw new FinancialDataCorruptionError(`${fieldName}.type must be a known crontab hook type`);
-  }
-  const data = validateObject(obj['data'], `${fieldName}.data`);
-
-  switch (hookType) {
-    case 'htlc_timeout': {
-      rejectUnexpectedKeys(data, ['accountId', 'lockId'], `${fieldName}.data`);
-      return {
-        id,
-        triggerAt,
-        type: hookType,
-        data: {
-          accountId: validateString(data['accountId'], `${fieldName}.data.accountId`),
-          lockId: validateString(data['lockId'], `${fieldName}.data.lockId`),
-        },
-      };
-    }
-    case 'dispute_deadline': {
-      rejectUnexpectedKeys(data, ['accountId'], `${fieldName}.data`);
-      return {
-        id,
-        triggerAt,
-        type: hookType,
-        data: {
-          accountId: validateString(data['accountId'], `${fieldName}.data.accountId`),
-        },
-      };
-    }
-    case 'htlc_secret_ack_timeout': {
-      rejectUnexpectedKeys(data, ['hashlock', 'counterpartyEntityId', 'inboundLockId'], `${fieldName}.data`);
-      return {
-        id,
-        triggerAt,
-        type: hookType,
-        data: {
-          hashlock: validateString(data['hashlock'], `${fieldName}.data.hashlock`),
-          counterpartyEntityId: validateString(data['counterpartyEntityId'], `${fieldName}.data.counterpartyEntityId`),
-          inboundLockId: validateString(data['inboundLockId'], `${fieldName}.data.inboundLockId`),
-        },
-      };
-    }
-    case 'settlement_window':
-    case 'watchdog': {
-      rejectUnexpectedKeys(data, [], `${fieldName}.data`);
-      return {
-        id,
-        triggerAt,
-        type: hookType,
-        data: {},
-      };
-    }
-	    case 'hub_rebalance_kick': {
-	      rejectUnexpectedKeys(data, ['reason', 'counterpartyId'], `${fieldName}.data`);
-	      return {
-        id,
-        triggerAt,
-        type: hookType,
-        data: {
-          reason: validateString(data['reason'], `${fieldName}.data.reason`),
-          counterpartyId: validateString(data['counterpartyId'], `${fieldName}.data.counterpartyId`),
-	        },
-	      };
-	    }
-	    case 'board_reseal': {
-	      rejectUnexpectedKeys(
-	        data,
-	        ['activationJHeight', 'activationLogIndex', 'afterCounterpartyId'],
-	        `${fieldName}.data`,
-	      );
-	      const activationJHeight = validateNumber(
-	        data['activationJHeight'],
-	        `${fieldName}.data.activationJHeight`,
-	      );
-	      const activationLogIndex = validateNumber(
-	        data['activationLogIndex'],
-	        `${fieldName}.data.activationLogIndex`,
-	      );
-	      if (
-	        !Number.isSafeInteger(activationJHeight) ||
-	        activationJHeight < 1 ||
-	        !Number.isSafeInteger(activationLogIndex) ||
-	        activationLogIndex < 0
-	      ) {
-	        throw new FinancialDataCorruptionError(`${fieldName}.data board activation position is invalid`);
-	      }
-	      const afterCounterpartyId = data['afterCounterpartyId'];
-	      if (typeof afterCounterpartyId !== 'string') {
-	        throw new FinancialDataCorruptionError(`${fieldName}.data.afterCounterpartyId must be a string`);
-	      }
-	      return {
-	        id,
-	        triggerAt,
-	        type: hookType,
-	        data: { activationJHeight, activationLogIndex, afterCounterpartyId },
-	      };
-	    }
-	    case 'cross_j_orderbook_sweep': {
-	      rejectUnexpectedKeys(data, ['reason'], `${fieldName}.data`);
-	      return {
-	        id,
-	        triggerAt,
-	        type: hookType,
-	        data: {
-	          reason: validateString(data['reason'], `${fieldName}.data.reason`),
-	        },
-	      };
-	    }
-	  }
-	}
-
-function validateCrontabState(value: unknown, fieldName: string): CrontabState {
-  const obj = validateObject(value, fieldName);
-  const tasks = validateMapInstance(obj['tasks'], `${fieldName}.tasks`);
-  const hooks = validateMapInstance(obj['hooks'], `${fieldName}.hooks`);
-  for (const [taskKey, taskValue] of tasks.entries()) {
-    if (!isValidCrontabTaskMethod(taskKey)) {
-      throw new FinancialDataCorruptionError(`${fieldName}.tasks key must be a known crontab task method`);
-    }
-    const task = validateCrontabTaskState(taskValue, `${fieldName}.tasks[${String(taskKey)}]`);
-    if (task.method !== taskKey) {
-      throw new FinancialDataCorruptionError(`${fieldName}.tasks[${String(taskKey)}].method must match task key`);
-    }
-  }
-  for (const [hookId, hookValue] of hooks.entries()) {
-    if (typeof hookId !== 'string' || hookId.length === 0) {
-      throw new FinancialDataCorruptionError(`${fieldName}.hooks key must be a non-empty string`);
-    }
-    const hook = validateScheduledHook(hookValue, `${fieldName}.hooks[${hookId}]`);
-    if (hook.id !== hookId) {
-      throw new FinancialDataCorruptionError(`${fieldName}.hooks[${hookId}].id must match hook key`);
-    }
-  }
-  return obj as unknown as CrontabState;
-}
-
 // =============================================================================
 // COMPREHENSIVE VALIDATORS - Complete Type Safety
 // =============================================================================
@@ -334,236 +146,6 @@ function validateCrontabState(value: unknown, fieldName: string): CrontabState {
  * Validates EntityState objects - Complete entity state
  * CRITICAL: Entity integrity ensures consensus and routing safety
  */
-const validateEntityCommandState = (
-  obj: Record<string, unknown>,
-  context: string,
-): void => {
-  if (obj['entityCommandNonces'] !== undefined) {
-    const commandNonces = validateObject(obj['entityCommandNonces'], `${context}.entityCommandNonces`);
-    if (
-      commandNonces['version'] !== 1 ||
-      !/^0x[0-9a-f]{64}$/.test(String(commandNonces['boardHash'] ?? '')) ||
-      !Number.isSafeInteger(commandNonces['boardEpoch']) ||
-      Number(commandNonces['boardEpoch']) < 0
-    ) {
-      throw new FinancialDataCorruptionError(`${context}.entityCommandNonces header invalid`);
-    }
-    const bySigner = validateMapInstance(commandNonces['bySigner'], `${context}.entityCommandNonces.bySigner`);
-    if (bySigner.size > LIMITS.MAX_VALIDATORS) {
-      throw new FinancialDataCorruptionError(`${context}.entityCommandNonces exceeds bounded signer slots`);
-    }
-    for (const [rawSignerId, rawRecord] of bySigner) {
-      const signerId = typeof rawSignerId === 'string' ? rawSignerId.trim().toLowerCase() : '';
-      const record = rawRecord && typeof rawRecord === 'object'
-        ? rawRecord as { nonce?: unknown; commandHash?: unknown }
-        : null;
-      if (
-        !signerId ||
-        Object.keys(record ?? {}).sort().join(',') !== 'commandHash,nonce' ||
-        typeof record?.nonce !== 'bigint' ||
-        record.nonce < 1n ||
-        !/^0x[0-9a-f]{64}$/.test(String(record.commandHash ?? ''))
-      ) {
-        throw new FinancialDataCorruptionError(
-          `${context}.entityCommandNonces contains invalid signer, nonce, or command hash`,
-        );
-      }
-    }
-  }
-  if (obj['entityProviderActionState'] === undefined) return;
-  const actionState = validateObject(
-    obj['entityProviderActionState'],
-    `${context}.entityProviderActionState`,
-  );
-  if (
-    actionState['version'] !== 1 ||
-    typeof actionState['confirmedNonce'] !== 'bigint' ||
-    actionState['confirmedNonce'] < 0n ||
-    actionState['confirmedNonce'] > MAX_UINT256 ||
-    !Number.isSafeInteger(actionState['generation']) ||
-    Number(actionState['generation']) < 0
-  ) {
-    throw new FinancialDataCorruptionError(`${context}.entityProviderActionState header invalid`);
-  }
-  if (actionState['pending'] === undefined) return;
-  const pending = validateObject(
-    actionState['pending'],
-    `${context}.entityProviderActionState.pending`,
-  );
-  validateObject(pending['payload'], `${context}.entityProviderActionState.pending.payload`);
-  if (
-    typeof pending['actionNonce'] !== 'bigint' ||
-    pending['actionNonce'] !== actionState['confirmedNonce'] + 1n ||
-    pending['generation'] !== actionState['generation']
-  ) {
-    throw new FinancialDataCorruptionError(`${context}.entityProviderActionState.pending invalid`);
-  }
-  const jurisdiction = (obj['config'] as ConsensusConfig).jurisdiction;
-  if (!jurisdiction || !jurisdiction.chainId) {
-    throw new FinancialDataCorruptionError(`${context}.entityProviderActionState jurisdiction missing`);
-  }
-  try {
-    assertEntityProviderActionIntent(pending as unknown as EntityProviderActionIntent, {
-      chainId: jurisdiction.chainId,
-      entityProviderAddress: jurisdiction.entityProviderAddress,
-      depositoryAddress: jurisdiction.depositoryAddress,
-      entityId: String(obj['entityId']),
-    });
-  } catch (error) {
-    throw new FinancialDataCorruptionError(
-      `${context}.entityProviderActionState.pending cryptographic binding invalid`,
-      { cause: error instanceof Error ? error.message : String(error) },
-    );
-  }
-};
-
-export function validateEntityState(value: unknown, context = 'EntityState'): EntityState {
-  const obj = validateObject(value, context);
-
-  // Basic validation - the interface is complex, so validate critical fields
-  if (!obj['entityId'] || typeof obj['entityId'] !== 'string') {
-    throw new FinancialDataCorruptionError(`${context}.entityId must be a string`);
-  }
-
-  if (typeof obj['height'] !== 'number') {
-    throw new FinancialDataCorruptionError(`${context}.height must be a number`);
-  }
-
-  if (typeof obj['timestamp'] !== 'number') {
-    throw new FinancialDataCorruptionError(`${context}.timestamp must be a number`);
-  }
-
-  validateConsensusConfig(obj['config'], `${context}.config`);
-  validateEntityCommandState(obj, context);
-  validateEntityProposals(obj['proposals'], context);
-  if (obj['profileEncryptionManifest'] !== undefined) {
-    try {
-      validatePersistedValidatorEncryptionManifest(
-        obj['entityId'] as string,
-        obj['config'] as ConsensusConfig,
-        obj['profileEncryptionManifest'] as never,
-      );
-    } catch (error) {
-      throw new FinancialDataCorruptionError(
-        `${context}.profileEncryptionManifest invalid: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-  }
-  if (obj['leaderState'] !== undefined) {
-    const leader = validateObject(obj['leaderState'], `${context}.leaderState`);
-    const activeValidatorId = validateString(leader['activeValidatorId'], `${context}.leaderState.activeValidatorId`).toLowerCase();
-    const view = validateNumber(leader['view'], `${context}.leaderState.view`);
-    const changedAtHeight = validateNumber(leader['changedAtHeight'], `${context}.leaderState.changedAtHeight`);
-    const config = obj['config'] as ConsensusConfig;
-    if (!Number.isSafeInteger(view) || view < 0 || !Number.isSafeInteger(changedAtHeight) || changedAtHeight < 0) {
-      throw new FinancialDataCorruptionError(`${context}.leaderState counters must be non-negative safe integers`);
-    }
-    if (!config.validators.some((validator) => validator.toLowerCase() === activeValidatorId)) {
-      throw new FinancialDataCorruptionError(`${context}.leaderState.activeValidatorId must be a board validator`);
-    }
-  }
-
-  if (!(obj['reserves'] instanceof Map)) {
-    throw new FinancialDataCorruptionError(`${context}.reserves must be a Map`);
-  }
-
-  if (!(obj['accounts'] instanceof Map)) {
-    throw new FinancialDataCorruptionError(`${context}.accounts must be a Map`);
-  }
-  assertEntityAccountCountWithinLimit(
-    obj['accounts'] as Map<string, unknown>,
-    `${context}.accounts`,
-  );
-  validateEntityAccountMetadata(obj, context);
-
-  if (obj['consumptionAccumulator'] !== undefined) {
-    try {
-      assertConsumptionAccumulatorState(
-        obj['consumptionAccumulator'] as NonNullable<EntityState['consumptionAccumulator']>,
-      );
-    } catch (error) {
-      throw new FinancialDataCorruptionError(
-        `${context}.consumptionAccumulator invalid: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-  }
-  if (obj['certifiedOutputSequences'] !== undefined) {
-    const sequences = obj['certifiedOutputSequences'];
-    if (!(sequences instanceof Map)) {
-      throw new FinancialDataCorruptionError(`${context}.certifiedOutputSequences must be a Map`);
-    }
-    if (sequences.size > LIMITS.MAX_ACCOUNTS_PER_ENTITY) {
-      throw new FinancialDataCorruptionError(
-        `${context}.certifiedOutputSequences exceeds ${LIMITS.MAX_ACCOUNTS_PER_ENTITY}`,
-      );
-    }
-    for (const [rawTarget, rawFrontier] of sequences) {
-      const target = String(rawTarget ?? '').toLowerCase();
-      if (!/^0x[0-9a-f]{64}$/.test(target) || target !== rawTarget) {
-        throw new FinancialDataCorruptionError(`${context}.certifiedOutputSequences target invalid`);
-      }
-      const frontier = validateObject(rawFrontier, `${context}.certifiedOutputSequences.${target}`);
-      if (Object.keys(frontier).sort().join(',') !== 'lastSemanticHash,lastSequence') {
-        throw new FinancialDataCorruptionError(`${context}.certifiedOutputSequences.${target} fields invalid`);
-      }
-      if (typeof frontier['lastSequence'] !== 'bigint' || frontier['lastSequence'] < 1n) {
-        throw new FinancialDataCorruptionError(`${context}.certifiedOutputSequences.${target} sequence invalid`);
-      }
-      if (!/^0x[0-9a-f]{64}$/.test(String(frontier['lastSemanticHash'] ?? ''))) {
-        throw new FinancialDataCorruptionError(`${context}.certifiedOutputSequences.${target} hash invalid`);
-      }
-    }
-  }
-
-  if (obj['certifiedBoardState'] !== undefined) {
-    const registry = validateObject(obj['certifiedBoardState'], `${context}.certifiedBoardState`);
-    const stackKey = String(registry['stackKey'] ?? '');
-    const root = String(registry['boardRegistryRoot'] ?? '');
-    const blockHash = String(registry['finalizedJBlockHash'] ?? '');
-    const historyRoot = String(registry['eventHistoryRoot'] ?? '');
-    const height = validateNumber(registry['finalizedJHeight'], `${context}.certifiedBoardState.finalizedJHeight`);
-    if (
-      !/^0x[0-9a-f]{64}$/.test(stackKey) ||
-      !/^0x[0-9a-f]{64}$/.test(root) ||
-      !/^0x[0-9a-f]{64}$/.test(blockHash) ||
-      !/^0x[0-9a-f]{64}$/.test(historyRoot) ||
-      !Number.isSafeInteger(height) ||
-      height < 0
-    ) {
-      throw new FinancialDataCorruptionError(`${context}.certifiedBoardState invalid`);
-    }
-  }
-
-  validateExternalWalletState(obj['externalWallet'], context);
-
-  // Financial invariant: reserves must be keyed by numeric tokenId and valued by bigint.
-  // Do not tolerate string token keys in live state; decode boundaries must canonicalize before this.
-  for (const [tokenId, amount] of obj['reserves'].entries()) {
-    if (typeof tokenId !== 'number' || !Number.isInteger(tokenId) || tokenId <= 0) {
-      throw new FinancialDataCorruptionError(`Reserve token key must be a positive integer`, { tokenId });
-    }
-    if (typeof amount !== 'bigint') {
-      throw new FinancialDataCorruptionError(`Reserve amount for token ${tokenId} must be bigint`, { tokenId, amount });
-    }
-  }
-
-  for (const [accountId, account] of obj['accounts'].entries()) {
-    validateAccountState(account, `${context}.accounts[${String(accountId)}]`);
-  }
-
-  if (obj['crontabState'] !== undefined) {
-    validateCrontabState(obj['crontabState'], `${context}.crontabState`);
-  }
-
-  if (obj['lending'] !== undefined) {
-    const lending = validateObject(obj['lending'], `${context}.lending`);
-    validateMapInstance(lending['pools'], `${context}.lending.pools`);
-    validateMapInstance(lending['loans'], `${context}.lending.loans`);
-  }
-
-  return obj as unknown as EntityState; // Cast after validation boundary
-}
-
 const validateEntityLeaderVoteBody = (value: unknown, context: string): Record<string, unknown> => {
   const vote = validateObject(value, context);
   validateString(vote['entityId'], `${context}.entityId`);
