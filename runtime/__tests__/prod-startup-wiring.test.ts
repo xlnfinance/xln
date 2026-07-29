@@ -1798,7 +1798,7 @@ describe('production startup wiring', () => {
     );
     expect(mmNode).toContain('const health = buildMarketMakerHealthSnapshot({ includeCross: true });');
     expect(mmNode).toContain("pathname === '/api/account/status'");
-    expect(mmNode).toContain('pendingFrameTxs: (account?.pendingFrame?.accountTxs || []).map');
+    expect(mmNode).toContain('pendingFrameTxs: (account?.pendingFrame?.accountTxs ?? []).map');
     expect(smoke).toContain('const shouldFetchMarketMakerHealth = (health: HealthPayload): boolean =>');
     expect(smoke).toContain("'bootstrap-same-chain'");
     expect(smoke).toContain("'bootstrap-cross'");

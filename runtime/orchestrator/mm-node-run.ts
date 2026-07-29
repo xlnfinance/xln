@@ -370,6 +370,116 @@ const emitNodeBootstrapDebugEvent = (
   });
 };
 
+type MarketMakerHealthSnapshot = {
+  health: MarketMakerHealth | null;
+  visibleHubs: HubProfile[];
+  allVisibleHubs: HubProfile[];
+};
+
+const computeMarketMakerHealthSnapshot = (
+  env: RuntimeState,
+  contexts: readonly MarketMakerEntityContext[],
+  activeEntityId: string | null,
+  tokenIdsByContext: ReadonlyMap<string, number[]>,
+  options: {
+    includeCross?: boolean;
+    crossOverride?: MarketMakerHealth['cross'];
+  } = {},
+): MarketMakerHealthSnapshot => {
+  const primaryContext = contexts[0] ?? null;
+  if (!activeEntityId || !primaryContext) {
+    return { health: null, visibleHubs: [], allVisibleHubs: [] };
+  }
+  const visibleHubs = readVisibleHubProfiles(env).filter(profile => sameJurisdiction(primaryContext, profile));
+  const allVisibleHubs = readVisibleHubProfiles(env, true);
+  const crossOverride = options.crossOverride;
+  const includeCross = !crossOverride && options.includeCross !== false;
+  const crossApplicable =
+    contexts.length > 1 &&
+    allVisibleHubs.some(
+      profile =>
+        contexts.some(context => sameJurisdiction(context, profile)) &&
+        !sameJurisdiction(primaryContext, profile),
+    );
+  const health = getMarketMakerHealth(
+    env,
+    primaryContext.entityId,
+    visibleHubs.map(profile => profile.entityId),
+    getMarketMakerTokenIds(tokenIdsByContext, primaryContext),
+    includeCross
+      ? {
+          contexts: [...contexts],
+          visibleHubs: allVisibleHubs,
+          tokenIdsByContext: new Map(tokenIdsByContext),
+        }
+      : undefined,
+    crossOverride ?? (includeCross ? undefined : buildDeferredMarketMakerCrossHealth(crossApplicable)),
+  );
+  return { health, visibleHubs, allVisibleHubs };
+};
+
+const summarizeRuntimeInputs = (
+  inputs: Array<{ entityId?: string; entityTxs?: Array<{ type?: string }> }> | undefined,
+) =>
+  (inputs ?? []).slice(-10).map(input => ({
+    entityId: String(input.entityId || '').slice(-8),
+    txs: (input.entityTxs ?? []).map(tx => String(tx?.type || '')),
+  }));
+
+const buildMarketMakerAccountStatusDebug = (
+  env: RuntimeState,
+  entityId: string,
+  counterpartyEntityId: string,
+  tokenIds: number[],
+  lastDirectEntityInput: DirectEntityInputDebug | null,
+  lastDirectEntityInputError: DirectEntityInputDebug | null,
+): Record<string, unknown> => {
+  const account = getAccountState(env, entityId, counterpartyEntityId);
+  const replica = getEntityReplicaById(env, entityId);
+  return {
+    success: true,
+    entityId,
+    counterpartyEntityId,
+    hasAccount: Boolean(account),
+    ready: Boolean(account && isAccountConsensusReady(account)),
+    currentHeight: Number(account?.currentHeight ?? 0),
+    pendingFrameHeight: account?.pendingFrame ? Number(account.pendingFrame.height ?? 0) : null,
+    pendingFrameTxs: (account?.pendingFrame?.accountTxs ?? []).map(tx => String(tx?.type || '')),
+    mempool: Number(account?.mempool?.length ?? 0),
+    mempoolTxs: (account?.mempool ?? []).map(tx => String(tx?.type || '')),
+    swapOffers: Number(account?.swapOffers?.size || 0),
+    tokens: tokenIds.map(tokenId => ({
+      tokenId,
+      hasDelta: Boolean(account?.deltas?.has(tokenId)),
+      outCapacity: account ? getEntityOutCapacity(account, entityId, tokenId).toString() : '0',
+      delta: serializeAccountDelta(account?.deltas?.get(tokenId)),
+    })),
+    runtime: {
+      height: Number(env.height ?? 0),
+      timestamp: Number(env.timestamp ?? 0),
+      halted: Boolean(env.runtimeState?.halted),
+      fatalDebugPayload: env.runtimeState?.fatalDebugPayload ?? null,
+      loopActive: Boolean(env.runtimeState?.loopActive),
+      backlog: getMarketMakerRuntimeBacklogSnapshot(env, { includeQueuedEntityInputs: true }),
+      runtimeMempool: summarizeRuntimeInputs(env.runtimeMempool?.entityInputs),
+    },
+    replica: replica
+      ? {
+          key: `${String(replica.entityId || '').toLowerCase()}:${String(replica.signerId || '').toLowerCase()}`,
+          entityId: replica.entityId,
+          signerId: replica.signerId,
+          mempool: (replica.mempool ?? []).map(tx => String(tx?.type || '')),
+          proposalTxs: (replica.proposal?.txs ?? []).map(tx => String(tx?.type || '')),
+          lockedFrameTxs: (replica.lockedFrame?.txs ?? []).map(tx => String(tx?.type || '')),
+        }
+      : null,
+    directInput: {
+      lastSeen: lastDirectEntityInput,
+      lastError: lastDirectEntityInputError,
+    },
+  };
+};
+
 export const runMarketMakerNode = async (): Promise<void> => {
   activateMarketMakerProcessArgs();
   if (resolvedArgs.dbPath) process.env['XLN_DB_PATH'] = resolvedArgs.dbPath;
@@ -439,35 +549,16 @@ export const runMarketMakerNode = async (): Promise<void> => {
       crossOverride?: MarketMakerHealth['cross'];
     } = {},
   ): MarketMakerHealth | null => {
-    const primaryContext = mmContexts[0] ?? null;
-    const activeEntityId = activeMmEntityId;
-    if (!activeEntityId || !primaryContext) return null;
-    const visibleHubs = readVisibleHubProfiles(env).filter(profile => sameJurisdiction(primaryContext, profile));
-    const allVisibleHubs = readVisibleHubProfiles(env, true);
-    cachedVisibleHubProfiles = visibleHubs;
-    cachedAllVisibleHubProfiles = allVisibleHubs;
-    const crossOverride = options.crossOverride;
-    const includeCross = !crossOverride && options.includeCross !== false;
-    const crossApplicable =
-      mmContexts.length > 1 &&
-      allVisibleHubs.some(
-        profile =>
-          mmContexts.some(context => sameJurisdiction(context, profile)) && !sameJurisdiction(primaryContext, profile),
-      );
-    return getMarketMakerHealth(
+    const snapshot = computeMarketMakerHealthSnapshot(
       env,
-      primaryContext.entityId,
-      visibleHubs.map(profile => profile.entityId),
-      getMarketMakerTokenIds(mmTokenIdsByContext, primaryContext),
-      includeCross
-        ? {
-            contexts: mmContexts,
-            visibleHubs: allVisibleHubs,
-            tokenIdsByContext: mmTokenIdsByContext,
-          }
-        : undefined,
-      crossOverride ?? (includeCross ? undefined : buildDeferredMarketMakerCrossHealth(crossApplicable)),
+      mmContexts,
+      activeMmEntityId,
+      mmTokenIdsByContext,
+      options,
     );
+    cachedVisibleHubProfiles = snapshot.visibleHubs;
+    cachedAllVisibleHubProfiles = snapshot.allVisibleHubs;
+    return snapshot.health;
   };
 
   const buildInfoResponseJson = (includeCrossDebug = false): string => {
@@ -661,57 +752,14 @@ export const runMarketMakerNode = async (): Promise<void> => {
     counterpartyEntityId: string,
     tokenIds: number[],
   ): Record<string, unknown> => {
-    const account = getAccountState(env, entityId, counterpartyEntityId);
-    const replica = getEntityReplicaById(env, entityId);
-    const summarizeRuntimeInputs = (
-      inputs: Array<{ entityId?: string; entityTxs?: Array<{ type?: string }> }> | undefined,
-    ) =>
-      (inputs || []).slice(-10).map(input => ({
-        entityId: String(input.entityId || '').slice(-8),
-        txs: (input.entityTxs || []).map(tx => String(tx?.type || '')),
-      }));
-    return {
-      success: true,
+    return buildMarketMakerAccountStatusDebug(
+      env,
       entityId,
       counterpartyEntityId,
-      hasAccount: Boolean(account),
-      ready: Boolean(account && isAccountConsensusReady(account)),
-      currentHeight: Number(account?.currentHeight ?? 0),
-      pendingFrameHeight: account?.pendingFrame ? Number(account.pendingFrame.height ?? 0) : null,
-      pendingFrameTxs: (account?.pendingFrame?.accountTxs || []).map(tx => String(tx?.type || '')),
-      mempool: Number(account?.mempool?.length ?? 0),
-      mempoolTxs: (account?.mempool || []).map(tx => String(tx?.type || '')),
-      swapOffers: Number(account?.swapOffers?.size || 0),
-      tokens: tokenIds.map(tokenId => ({
-        tokenId,
-        hasDelta: Boolean(account?.deltas?.has(tokenId)),
-        outCapacity: account ? getEntityOutCapacity(account, entityId, tokenId).toString() : '0',
-        delta: serializeAccountDelta(account?.deltas?.get(tokenId)),
-      })),
-      runtime: {
-        height: Number(env.height ?? 0),
-        timestamp: Number(env.timestamp ?? 0),
-        halted: Boolean(env.runtimeState?.halted),
-        fatalDebugPayload: env.runtimeState?.fatalDebugPayload ?? null,
-        loopActive: Boolean(env.runtimeState?.loopActive),
-        backlog: getMarketMakerRuntimeBacklogSnapshot(env, { includeQueuedEntityInputs: true }),
-        runtimeMempool: summarizeRuntimeInputs(env.runtimeMempool?.entityInputs),
-      },
-      replica: replica
-        ? {
-            key: `${String(replica.entityId || '').toLowerCase()}:${String(replica.signerId || '').toLowerCase()}`,
-            entityId: replica.entityId,
-            signerId: replica.signerId,
-            mempool: (replica.mempool || []).map(tx => String(tx?.type || '')),
-            proposalTxs: (replica.proposal?.txs || []).map(tx => String(tx?.type || '')),
-            lockedFrameTxs: (replica.lockedFrame?.txs || []).map(tx => String(tx?.type || '')),
-          }
-        : null,
-      directInput: {
-        lastSeen: lastDirectEntityInput,
-        lastError: lastDirectEntityInputError,
-      },
-    };
+      tokenIds,
+      lastDirectEntityInput,
+      lastDirectEntityInputError,
+    );
   };
 
   const jurisdiction = resolveJurisdictionConfig(resolvedArgs.rpcUrl);
