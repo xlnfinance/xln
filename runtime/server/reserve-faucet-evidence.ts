@@ -1,8 +1,8 @@
 import { ethers } from 'ethers';
 import type { RuntimeState } from '../types';
 import {
-  findRecentReserveUpdatedEvent,
-  type RecentReserveUpdatedEvent,
+  findReserveUpdatedEvidence,
+  type ReserveUpdatedEvidence,
 } from '../jurisdiction/event-evidence';
 
 export type TokenCatalogEntry = {
@@ -22,21 +22,21 @@ export const parseReserveFaucetAmount = (
   return ethers.parseUnits(amount, decimals);
 };
 
-export const waitForRecentReserveUpdatedEvent = async (
+export const waitForReserveUpdatedEvidence = async (
   env: RuntimeState,
   entityId: string,
   tokenId: number,
   expectedMin: bigint,
   timeoutMs = 5000,
   pollMs = 50,
-): Promise<RecentReserveUpdatedEvent | null> => {
+): Promise<ReserveUpdatedEvidence | null> => {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
-    const event = findRecentReserveUpdatedEvent(env, entityId, tokenId, expectedMin);
+    const event = findReserveUpdatedEvidence(env, entityId, tokenId, expectedMin);
     if (event) return event;
     await new Promise(resolve => setTimeout(resolve, pollMs));
   }
-  return findRecentReserveUpdatedEvent(env, entityId, tokenId, expectedMin);
+  return findReserveUpdatedEvidence(env, entityId, tokenId, expectedMin);
 };
 
-export { findRecentReserveUpdatedEvent };
+export { findReserveUpdatedEvidence };

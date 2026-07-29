@@ -8,7 +8,7 @@ import { faucetFailureBody } from './faucet-failure';
 import { getFaucetHubProfiles } from './faucet-hubs';
 import {
   parseReserveFaucetAmount,
-  waitForRecentReserveUpdatedEvent,
+  waitForReserveUpdatedEvidence,
   type TokenCatalogEntry,
 } from './reserve-faucet-evidence';
 import {
@@ -234,7 +234,7 @@ const confirmReserve = async (
     return failure(deps.headers, 504, 'FAUCET_RESERVE_UPDATE_TIMEOUT',
       'Reserve update not confirmed on-chain', { requestId: request.requestId });
   }
-  const event = await waitForRecentReserveUpdatedEvent(
+  const event = await waitForReserveUpdatedEvidence(
     deps.env,
     request.userEntityId,
     request.tokenId,

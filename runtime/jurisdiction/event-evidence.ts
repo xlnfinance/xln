@@ -1,19 +1,13 @@
 import type { RuntimeState } from '../types';
 
-export type RecentJEvent = {
-  name: string;
+export type ReserveUpdatedEvidence = {
+  name: 'ReserveUpdated';
   args: Record<string, unknown>;
   blockNumber: number;
   blockHash: string;
   transactionHash: string;
   observedAt: number;
 };
-
-export type RecentReserveUpdatedEvent = RecentJEvent & {
-  name: 'ReserveUpdated';
-};
-
-const RECENT_J_EVENT_LIMIT = 1_000;
 
 const normalizeArgValue = (value: unknown): unknown => {
   if (typeof value === 'bigint') return value.toString();
@@ -33,7 +27,7 @@ const readDecimalBigInt = (value: unknown): bigint | null => {
   return null;
 };
 
-const toRecentJEvent = (
+const toReserveUpdatedEvidence = (
   env: RuntimeState,
   event: {
     name?: string;
@@ -42,9 +36,9 @@ const toRecentJEvent = (
     blockHash?: string;
     transactionHash?: string;
   },
-): RecentJEvent | null => {
+): ReserveUpdatedEvidence | null => {
   if (
-    typeof event.name !== 'string' ||
+    event.name !== 'ReserveUpdated' ||
     event.args === undefined ||
     typeof event.blockNumber !== 'number' ||
     typeof event.blockHash !== 'string' ||
@@ -72,13 +66,13 @@ const reserveIndexKeyFromArgs = (args: Record<string, unknown>): string | null =
   return `${entity}:${tokenId}`;
 };
 
-const ensureReserveUpdatedIndex = (env: RuntimeState): Map<string, RecentReserveUpdatedEvent> => {
+const ensureReserveUpdatedIndex = (env: RuntimeState): Map<string, ReserveUpdatedEvidence> => {
   if (!env.runtimeState) env.runtimeState = {};
   const current = env.runtimeState.recentReserveUpdatedEvents;
   if (current instanceof Map) return current;
-  const next = new Map<string, RecentReserveUpdatedEvent>();
+  const next = new Map<string, ReserveUpdatedEvidence>();
   if (current && typeof current === 'object') {
-    for (const [key, value] of Object.entries(current as Record<string, RecentReserveUpdatedEvent>)) {
+    for (const [key, value] of Object.entries(current as Record<string, ReserveUpdatedEvidence>)) {
       if (value?.name === 'ReserveUpdated') next.set(key, value);
     }
   }
@@ -86,12 +80,12 @@ const ensureReserveUpdatedIndex = (env: RuntimeState): Map<string, RecentReserve
   return next;
 };
 
-const copyRecentJEvent = <T extends RecentJEvent>(event: T): T => ({
+const copyReserveUpdatedEvidence = (event: ReserveUpdatedEvidence): ReserveUpdatedEvidence => ({
   ...event,
   args: { ...event.args },
 });
 
-export const rememberRecentJEvents = (
+export const indexReserveUpdatedEvents = (
   env: RuntimeState,
   events: Array<{
     name?: string;
@@ -104,29 +98,25 @@ export const rememberRecentJEvents = (
   if (!events || events.length === 0) return;
   if (!env.runtimeState) env.runtimeState = {};
 
-  const canonicalEvents = events
-    .map((event) => toRecentJEvent(env, event))
-    .filter((event): event is RecentJEvent => event !== null);
-  if (canonicalEvents.length === 0) return;
-
-  const previous = env.runtimeState.recentJEvents ?? [];
-  env.runtimeState.recentJEvents = [...previous, ...canonicalEvents].slice(-RECENT_J_EVENT_LIMIT);
+  const evidence = events
+    .map((event) => toReserveUpdatedEvidence(env, event))
+    .filter((event): event is ReserveUpdatedEvidence => event !== null);
+  if (evidence.length === 0) return;
 
   const reserveIndex = ensureReserveUpdatedIndex(env);
-  for (const event of canonicalEvents) {
-    if (event.name !== 'ReserveUpdated') continue;
+  for (const event of evidence) {
     const key = reserveIndexKeyFromArgs(event.args);
     if (!key) continue;
-    reserveIndex.set(key, event as RecentReserveUpdatedEvent);
+    reserveIndex.set(key, event);
   }
 };
 
-export const findRecentReserveUpdatedEvent = (
+export const findReserveUpdatedEvidence = (
   env: RuntimeState,
   entityId: string,
   tokenId: number,
   expectedMin: bigint,
-): RecentReserveUpdatedEvent | null => {
+): ReserveUpdatedEvidence | null => {
   const normalizedEntityId = String(entityId || '').trim().toLowerCase();
   const normalizedTokenId = Number(tokenId);
   const reserveIndex = env.runtimeState?.recentReserveUpdatedEvents;
@@ -135,21 +125,9 @@ export const findRecentReserveUpdatedEvent = (
     : undefined;
   if (indexedEvent) {
     const indexedBalance = readDecimalBigInt(indexedEvent.args['newBalance']);
-    return indexedBalance !== null && indexedBalance >= expectedMin ? copyRecentJEvent(indexedEvent) : null;
-  }
-
-  const events = env.runtimeState?.recentJEvents ?? [];
-  for (let index = events.length - 1; index >= 0; index--) {
-    const event = events[index];
-    if (!event || event.name !== 'ReserveUpdated') continue;
-    const args = event.args ?? {};
-    const eventEntity = String(args['entity'] ?? '').trim().toLowerCase();
-    const eventTokenId = Number(args['tokenId']);
-    const newBalance = readDecimalBigInt(args['newBalance']);
-    if (eventEntity !== normalizedEntityId) continue;
-    if (eventTokenId !== normalizedTokenId) continue;
-    if (newBalance === null || newBalance < expectedMin) continue;
-    return copyRecentJEvent(event as RecentReserveUpdatedEvent);
+    return indexedBalance !== null && indexedBalance >= expectedMin
+      ? copyReserveUpdatedEvidence(indexedEvent)
+      : null;
   }
   return null;
 };

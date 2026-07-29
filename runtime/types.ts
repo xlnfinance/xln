@@ -1362,14 +1362,6 @@ export interface RuntimeState {
     pendingAuditEvents?: Map<string, Record<string, unknown>>;
     /** Bounded, replayable wallet security status. Never stores untrusted payload bodies. */
     securityIncidents?: Map<string, RuntimeSecurityIncident>;
-    recentJEvents?: Array<{
-      name: string;
-      args: Record<string, unknown>;
-      blockNumber: number;
-      blockHash: string;
-      transactionHash: string;
-      observedAt: number;
-    }>;
     recentReserveUpdatedEvents?: Map<string, {
       name: 'ReserveUpdated';
       args: Record<string, unknown>;

@@ -95,8 +95,6 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   debt. Derive decoder registry/type linkage from one event catalog only where
   this reduces net LOC. Every surviving `normalize*`, `decode*`, `to*Event*`
   and `from*Event*` must own a documented validation or trust transition.
-  Remove `RecentJEvent` from live Runtime state once the rebuildable history
-  view supplies the same receipt evidence without a second archive.
 - [ ] Split `jadapter/helpers.ts` and `createRpcAdapter` by real I/O and failure
   boundaries, with no barrel or dependency-bag replacement. Canonical owners
   are receipt decode, event relevance/fan-out, certified history range,

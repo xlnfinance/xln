@@ -33,7 +33,7 @@ import {
   setJHistoryRangeIngressTransform,
   updateWatcherJurisdictionCursor,
 } from '../jadapter/watcher';
-import { findRecentReserveUpdatedEvent } from '../jurisdiction/event-evidence';
+import { findReserveUpdatedEvidence } from '../jurisdiction/event-evidence';
 import { canonicalJurisdictionEventsHash } from '../jurisdiction/event-observation';
 import {
   buildLocalJPrefixAttestation,
@@ -1293,9 +1293,9 @@ describe('jadapter helper cursors', () => {
       'jurisdiction-b',
     );
 
-    const reserveEvent = findRecentReserveUpdatedEvent(env, entityA, 2, 500n);
+    const reserveEvent = findReserveUpdatedEvidence(env, entityA, 2, 500n);
     expect(reserveEvent?.transactionHash).toBe(`0x${'ab'.repeat(32)}`);
-    expect(findRecentReserveUpdatedEvent(env, entityA, 2, 501n)).toBeNull();
+    expect(findReserveUpdatedEvidence(env, entityA, 2, 501n)).toBeNull();
   });
 
   test('malformed standard Solidity reverts log selector and payload length', () => {

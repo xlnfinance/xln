@@ -15,7 +15,7 @@ import {
   canonicalJurisdictionEventsHash,
   getJEventJurisdictionRef,
 } from '../jurisdiction/event-observation';
-import { rememberRecentJEvents } from '../jurisdiction/event-evidence';
+import { indexReserveUpdatedEvents } from '../jurisdiction/event-evidence';
 import { JBLOCK_LIVENESS_INTERVAL } from '../types';
 import {
   assertValidatorJHistoryMatchesCertifiedAnchor,
@@ -1316,7 +1316,7 @@ export function applyJEventsToEnv(
     owners.set(owner, Math.max(owners.get(owner) ?? 0, Number.isFinite(blockNumber) ? blockNumber : 0));
     env.runtimeState.externalWalletWatchOwners.set(entityId, owners);
   }
-  rememberRecentJEvents(env, rawEvents);
+  indexReserveUpdatedEvents(env, rawEvents);
   enqueueRuntimeInput(env, input);
 }
 
@@ -1501,7 +1501,7 @@ export function processEventBatch(
     ...(watcherChainId !== undefined ? { watcherChainId } : {}),
   });
   if (!built && localRuntimeTxs.length === 0) return null;
-  if (built) rememberRecentJEvents(env, built.evidenceEvents);
+  if (built) indexReserveUpdatedEvents(env, built.evidenceEvents);
   const baseInput: RuntimeInput = built?.input ?? {
     timestamp: ingressBatch.blockNumber,
     runtimeTxs: [],

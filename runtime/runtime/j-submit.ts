@@ -10,7 +10,7 @@ import type {
 import type { JAdapter, JSubmitResult } from '../jadapter/types';
 import { getLocalSignerPrivateKey } from '../account/crypto';
 import { isBatchEmpty } from '../jurisdiction/batch';
-import { rememberRecentJEvents } from '../jurisdiction/event-evidence';
+import { indexReserveUpdatedEvents } from '../jurisdiction/event-evidence';
 import { classifyJAdapterFailure } from '../jadapter/failure';
 import { ensureLiveJAdapterForReplica } from './infra';
 import { createStructuredLogger, shortId } from '../infra/logger';
@@ -417,7 +417,7 @@ const recordSuccessfulSubmit = async (
   jTx: JTx,
   result: JSubmitResult,
 ): Promise<void> => {
-  rememberRecentJEvents(env, result.events);
+  indexReserveUpdatedEvents(env, result.events);
   jSubmitLog.debug('tx.submit_ok', {
     type: jTx.type,
     entityId: shortId(jTx.entityId),
