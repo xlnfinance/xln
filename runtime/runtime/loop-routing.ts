@@ -6,8 +6,8 @@ import { runtimeInputRequiresOutboxCapacity } from './admission';
 import {
   createRuntimeOutputRoutingDeps,
   registerEntityRuntimeHintWithDeps,
-  validateInboundP2PEntityInput,
-  validateInboundP2PEntityInputsEnvelope,
+  routeInboundP2PEntityInput,
+  routeInboundP2PEntityInputs,
   type RuntimeInboundEntityInputOptions,
   type RuntimeInboundEntityInputsResult,
   type RuntimeEntityRoutingDeps,
@@ -99,10 +99,7 @@ const handleInboundP2PEntityInput = (
   ingressTimestamp?: number,
 ) => {
   const deps = getRuntimeEntityRoutingDeps(apiDeps);
-  const validation = validateInboundP2PEntityInput(env, from, input, deps);
-  if (validation.kind === 'ignored') return validation;
-  deps.enqueueRuntimeInputs(env, [{ ...input, from }], undefined, undefined, ingressTimestamp);
-  return { kind: 'queued' } as const;
+  return routeInboundP2PEntityInput(env, from, input, deps, ingressTimestamp);
 };
 
 const handleInboundP2PEntityInputs = (
@@ -113,13 +110,7 @@ const handleInboundP2PEntityInputs = (
   ingressTimestamp?: number,
 ): RuntimeInboundEntityInputsResult => {
   const deps = getRuntimeEntityRoutingDeps(apiDeps);
-  const inputs = validateInboundP2PEntityInputsEnvelope(env, from, envelope, deps);
-  if (inputs.length > 0) {
-    // Authenticated provenance is already stamped by validation. Reapplying
-    // `from` would misclassify a synthesized local cross-J command as remote.
-    deps.enqueueRuntimeInputs(env, inputs, undefined, undefined, ingressTimestamp);
-  }
-  return { kind: 'queued' as const, receipts: [] as ReliableDeliveryReceipt[] };
+  return routeInboundP2PEntityInputs(env, from, envelope, deps, ingressTimestamp);
 };
 
 const handleInboundReliableReceipt = (

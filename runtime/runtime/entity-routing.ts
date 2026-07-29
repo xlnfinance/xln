@@ -16,19 +16,15 @@ import type { RuntimeOutputRoutingDeps } from './output-routing';
 import { extractCrossJurisdictionRouteFromTx } from '../extensions/cross-j/boundary';
 import { getEffectiveEntityInputTxs } from '../entity/consensus/output-envelope';
 import { normalizeRuntimeId } from '../networking/runtime-id';
-import { registerReliableIngress } from './reliable-delivery';
 import { advanceEntityCommandNonce, assertSignedEntityCommand } from '../entity/command';
 import { validateDeliverableEntityInput } from '../validation-utils';
 import { accountInputAck, accountInputProposal } from '../account/consensus/flush';
-import { createStructuredLogger } from '../infra/logger';
 import { safeStringify } from '../protocol/serialization';
 import {
   cloneCrossJurisdictionRoute,
   withCanonicalCrossJurisdictionRouteHash,
 } from '../extensions/cross-j';
 import { recordRuntimeSecurityIncident } from './security-incidents';
-
-const routingLog = createStructuredLogger('network.entity-routing');
 
 type RuntimeLifecycleState = NonNullable<RuntimeState['runtimeState']>;
 
@@ -56,12 +52,10 @@ export type RuntimeEntityRoutingDeps = {
 
 export type RuntimeInboundEntityInputResult =
   | { kind: 'queued' }
-  | { kind: 'pending' }
-  | { kind: 'ignored' }
-  | { kind: 'receipt'; receipt: ReliableDeliveryReceipt };
+  | { kind: 'ignored' };
 
 export type RuntimeInboundEntityInputsResult = {
-  kind: 'queued' | 'pending' | 'ignored';
+  kind: 'queued' | 'ignored';
   receipts: ReliableDeliveryReceipt[];
 };
 
@@ -955,11 +949,8 @@ export const routeInboundP2PEntityInput = (
   const validation = validateInboundP2PEntityInput(env, from, input, deps, options);
   if (validation.kind === 'ignored') return validation;
 
-  const reliableIngress = registerReliableIngress(env, from, input);
-  if (reliableIngress.kind === 'pending') return { kind: 'pending' };
-  if (reliableIngress.kind === 'receipt') {
-    return { kind: 'receipt', receipt: reliableIngress.receipt };
-  }
+  // Transport admission only appends authenticated bytes. Reliable frontier
+  // registration is a Runtime-frame mutation and must happen inside isolation.
   // `from` is trusted transport provenance. Never retain a peer-supplied value.
   deps.enqueueRuntimeInputs(
     env,
@@ -1194,52 +1185,20 @@ export const routeInboundP2PEntityInputs = (
   ingressTimestamp?: number,
   options: RuntimeInboundEntityInputOptions = {},
 ): RuntimeInboundEntityInputsResult => {
-  // Validate the complete envelope before mutating reliable ledgers or queues.
+  // Validate the complete envelope before appending any bytes. Reliable
+  // registration is deferred to the isolated Runtime frame for atomic rollback.
   const inputs = validateInboundP2PEntityInputsEnvelope(env, from, envelope, deps, options);
-  const atomicCrossJInputIndexes = new Set(
-    selectPotentialCrossJAccountInputPairs(inputs)
-      .flatMap(pair => [pair.sourceInputIndex, pair.targetInputIndex]),
-  );
-  const queued: RoutedEntityInput[] = [];
-  const receipts: ReliableDeliveryReceipt[] = [];
-  const registrationTrace: Array<{ inputIndex: number; entityId: string; kind: string }> = [];
-  let pending = false;
-  for (const [inputIndex, input] of inputs.entries()) {
-    const registration = registerReliableIngress(env, from, input, {
-      allowContiguousPendingAccountAck: atomicCrossJInputIndexes.has(inputIndex),
-    });
-    if (atomicCrossJInputIndexes.size > 0) {
-      registrationTrace.push({ inputIndex, entityId: input.entityId, kind: registration.kind });
-    }
-    if (registration.kind === 'pending') {
-      pending = true;
-      continue;
-    }
-    if (registration.kind === 'receipt') {
-      receipts.push(registration.receipt);
-      continue;
-    }
-    queued.push(input);
-  }
-  if (atomicCrossJInputIndexes.size > 0) {
-    routingLog.info('crossj.atomic_envelope_ingress', {
-      sourceRuntimeId: envelope.sourceRuntimeId,
-      sourceRuntimeHeight: envelope.sourceRuntimeHeight,
-      inputCount: inputs.length,
-      registrationTrace,
-    });
-  }
-  if (queued.length > 0) {
-    deps.enqueueRuntimeInputs(env, queued, undefined, undefined, ingressTimestamp, options);
+  if (inputs.length > 0) {
+    deps.enqueueRuntimeInputs(env, inputs, undefined, undefined, ingressTimestamp, options);
     env.info('network', 'INBOUND_ENTITY_INPUTS', {
       fromRuntimeId: from,
       sourceRuntimeHeight: envelope.sourceRuntimeHeight,
-      inputCount: queued.length,
+      inputCount: inputs.length,
     });
   }
   return {
-    kind: queued.length > 0 ? 'queued' : pending ? 'pending' : 'ignored',
-    receipts,
+    kind: inputs.length > 0 ? 'queued' : 'ignored',
+    receipts: [],
   };
 };
 

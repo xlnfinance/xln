@@ -150,7 +150,7 @@ export const createLocalDeliveryHandler = (
       to: toKey,
       msgType: 'entity_inputs',
       encrypted: msg.encrypted === true,
-      status: result.kind === 'pending' ? 'delivered-local-pending' : 'delivered-local-queued',
+      status: 'delivered-local-queued',
       details: {
         entityIds: envelope.entityInputs.map(input => input.entityId),
         txs: envelope.entityInputs.reduce((count, input) => count + (input.entityTxs?.length ?? 0), 0),

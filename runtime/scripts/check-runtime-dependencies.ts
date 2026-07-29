@@ -7,7 +7,7 @@ const RUNTIME_ROOT = path.resolve('runtime');
 const EXCLUDED_PATH = /\/(?:__tests__|qa|scenarios|scripts)\//;
 
 const ROOT_ENTRYPOINTS = new Set(['runtime/runtime.ts']);
-const MAX_VALUE_IMPORT_SCC_SIZE = 13;
+const MAX_VALUE_IMPORT_SCC_SIZE = 5;
 
 // Root files obscure ownership and attract cross-layer imports. This is
 // migration debt, not a stable public layout; only runtime.ts is the intended
