@@ -8,7 +8,23 @@
  * - Zero tolerance for undefined/null in financial flows
  */
 
+import {
+  FinancialDataCorruptionError,
+  TypeSafetyViolationError,
+  validateArray,
+  validateMapInstance,
+  validateNumber,
+  validateObject,
+  validateString,
+} from './protocol/validation-primitives';
 import { safeStringify } from './protocol/serialization';
+export {
+  FinancialDataCorruptionError,
+  TypeSafetyViolationError,
+  safeArrayGet,
+  safeMapGet,
+  validateEntityId,
+} from './protocol/validation-primitives';
 import { isLeftEntity } from './entity/id';
 import { assertAccountFrameDeltaIntegrity } from './account/frame';
 import type {
@@ -419,90 +435,6 @@ export function validatePaymentRoute(route: unknown): string[] {
   }
 
   return route as string[];
-}
-
-/**
- * CRITICAL: Safe Map.get() for financial data
- * Replace all financial Map.get(id)! with null-safe patterns
- */
-export function safeMapGet<K, V>(map: Map<K, V>, key: K, context: string): V {
-  const value = map.get(key);
-  if (value === undefined) {
-    throw new Error(`FINANCIAL-SAFETY: ${context} not found for key: ${key}`);
-  }
-  return value;
-}
-
-// =============================================================================
-// ENHANCED ERROR CLASSES - Fail Fast, Fail Loud
-// =============================================================================
-
-export class FinancialDataCorruptionError extends Error {
-  constructor(message: string, context?: Record<string, unknown>) {
-    super(`🚨 FINANCIAL-SAFETY VIOLATION: ${message}`);
-    this.name = 'FinancialDataCorruptionError';
-    if (context) {
-      try {
-        this.message += `\nContext: ${safeStringify(context)}`;
-      } catch (error) {
-        const detail = error instanceof Error ? error.message : String(error);
-        this.message += `\nContext: [Unserializable: ${detail}]`;
-      }
-    }
-  }
-}
-
-export class TypeSafetyViolationError extends Error {
-  constructor(message: string, value?: unknown) {
-    super(`🛡️ TYPE-SAFETY VIOLATION: ${message}`);
-    this.name = 'TypeSafetyViolationError';
-    if (value !== undefined) {
-      this.message += `\nReceived: ${typeof value} = ${String(value)}`;
-    }
-  }
-}
-
-// =============================================================================
-// PRIMITIVE VALIDATORS - Building Blocks for Complex Types
-// =============================================================================
-
-function validateString(value: unknown, fieldName: string): string {
-  if (typeof value !== 'string' || value.length === 0) {
-    throw new TypeSafetyViolationError(`${fieldName} must be a non-empty string`, value);
-  }
-  return value;
-}
-
-// Removed unused validateBigInt function
-
-function validateNumber(value: unknown, fieldName: string): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
-    throw new TypeSafetyViolationError(`${fieldName} must be a finite number`, value);
-  }
-  return value;
-}
-
-function validateObject(value: unknown, fieldName: string): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new TypeSafetyViolationError(`${fieldName} must be a non-null object`, value);
-  }
-  return value as Record<string, unknown>;
-}
-
-function validateArray<T>(value: unknown, fieldName: string): T[] {
-  if (!Array.isArray(value)) {
-    throw new TypeSafetyViolationError(`${fieldName} must be an array`, value);
-  }
-  return value;
-}
-
-// Removed unused validateMap function
-
-function validateMapInstance(value: unknown, fieldName: string): Map<unknown, unknown> {
-  if (!(value instanceof Map)) {
-    throw new TypeSafetyViolationError(`${fieldName} must be a Map`, value);
-  }
-  return value;
 }
 
 function validateBigIntMapValues(value: unknown, fieldName: string): void {
@@ -2167,25 +2099,4 @@ export function safeMapGetFinancial<K, V>(
     throw new FinancialDataCorruptionError(`Missing financial data in ${context}`, { key: String(key) });
   }
   return validator(value, `${context}[${String(key)}]`);
-}
-
-/**
- * Safe array access with bounds checking
- */
-export function safeArrayGet<T>(array: T[], index: number, context: string): T {
-  if (index < 0 || index >= array.length) {
-    throw new TypeSafetyViolationError(`Array index out of bounds in ${context}`, { index, length: array.length });
-  }
-  return array[index]!; // Add non-null assertion to fix TypeScript issue
-}
-
-/**
- * Validates an entity ID string
- */
-export function validateEntityId(value: unknown, context: string): string {
-  const entityId = validateString(value, context);
-  if (entityId.includes('undefined')) {
-    throw new FinancialDataCorruptionError(`${context} contains 'undefined' - routing corruption detected`, { entityId });
-  }
-  return entityId;
 }
