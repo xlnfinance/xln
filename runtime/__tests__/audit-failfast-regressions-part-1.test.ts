@@ -181,7 +181,7 @@ import {
 import { createJReplica } from '../scenarios/boot';
 
 import { applyMergedEntityInputs, RuntimeEntityInputApplyError } from '../runtime/entity-inputs';
-import { quarantineLiveRuntimeInput } from '../runtime/input-quarantine';
+import { discardMalformedRemoteEntityInput } from '../runtime/frame/input-discard';
 
 import { MalformedEntityFrameInputError } from '../entity/tx/invariant-errors';
 
@@ -871,7 +871,7 @@ describe('audit fail-fast regressions', () => {
     ).toThrow('CROSS_J_REMOTE_OUTPUT_FORBIDDEN');
   });
 
-  test('live runtime drops remote cross-j ingress and records a bounded warning without halting', async () => {
+  test('live runtime discards remote cross-j ingress without retaining attacker bytes', async () => {
     const env = createEmptyEnv('cross-j-live-ingress-drop');
     env.scenarioMode = false;
     env.quietRuntimeLogs = true;
@@ -895,16 +895,8 @@ describe('audit fail-fast regressions', () => {
 
     expect(env.runtimeState?.halted).not.toBe(true);
     expect(env.runtimeState?.lifecyclePhase).not.toBe('halted');
-    expect(env.runtimeState?.quarantinedRuntimeInputs?.at(-1)?.action).toBe('dropped');
-    expect([...env.runtimeState!.securityIncidents!.values()]).toContainEqual(
-      expect.objectContaining({
-        code: 'CROSS_J_REMOTE_INPUT_REJECTED',
-        source: 'remote-ingress',
-        severity: 'warning',
-        status: 'active',
-        occurrences: 1,
-      }),
-    );
+    expect(env.runtimeMempool?.entityInputs).toHaveLength(0);
+    expect(env.runtimeState?.securityIncidents).toBeUndefined();
   });
 
   test('runtime ingress retargets stale signer hints only when the local target entity has one replica', async () => {
@@ -1015,36 +1007,43 @@ describe('audit fail-fast regressions', () => {
         },
       ]),
     ).resolves.toBe(env);
-    expect(env.runtimeState?.quarantinedRuntimeInputs?.[0]?.action).toBe('dropped');
+    expect(env.runtimeMempool?.entityInputs).toHaveLength(0);
     expect(env.eReplicas.get(`${entityId}:${actualSignerId}`)?.state.accounts.size).toBe(0);
   });
 
-  test('runtime quarantine uses typed transport provenance instead of message matching', () => {
+  test('runtime discards only the malformed remote origin lane', () => {
     const entityInput = {
       entityId: `0x${'98'.repeat(32)}`,
       signerId: `0x${'99'.repeat(20)}`,
       entityTxs: [],
     };
     const runtimeInput = { runtimeTxs: [], entityInputs: [entityInput] };
-    const localEnv = createEmptyEnv('local-provenance-must-not-quarantine');
+    const localEnv = createEmptyEnv('local-provenance-must-not-discard');
     localEnv.scenarioMode = false;
     const cause = new MalformedEntityFrameInputError('openAccount', 'RUNTIME_REPLICA_NOT_FOUND: test');
     const localError = new RuntimeEntityInputApplyError(entityInput, false, cause);
-    expect(quarantineLiveRuntimeInput(localEnv, runtimeInput, localError, true)).toBe(false);
-    expect(localEnv.runtimeState?.quarantinedRuntimeInputs).toBeUndefined();
+    expect(discardMalformedRemoteEntityInput(localEnv, runtimeInput, localError, true)).toBeNull();
 
     const remoteEntityInput = { ...entityInput, from: `0x${'97'.repeat(20)}` };
-    const remoteEnv = createEmptyEnv('remote-provenance-may-quarantine');
+    const unrelatedInput = {
+      ...entityInput,
+      entityId: `0x${'96'.repeat(32)}`,
+      from: `0x${'95'.repeat(20)}`,
+    };
+    const remoteEnv = createEmptyEnv('remote-provenance-may-discard');
     remoteEnv.scenarioMode = false;
     const remoteError = new RuntimeEntityInputApplyError(remoteEntityInput, false, cause);
-    expect(
-      quarantineLiveRuntimeInput(remoteEnv, { runtimeTxs: [], entityInputs: [remoteEntityInput] }, remoteError, true),
-    ).toBe(true);
-    expect(remoteEnv.runtimeState?.quarantinedRuntimeInputs).toHaveLength(1);
+    const retained = discardMalformedRemoteEntityInput(
+      remoteEnv,
+      { runtimeTxs: [], entityInputs: [remoteEntityInput, unrelatedInput] },
+      remoteError,
+      true,
+    );
+    expect(retained?.entityInputs).toEqual([unrelatedInput]);
   });
 
-  test('live runtime quarantines invalid ingress once instead of requeueing a crash loop', async () => {
-    const env = createEmptyEnv('invalid-live-ingress-quarantine');
+  test('invalid locally-authored ingress remains fail-fast', async () => {
+    const env = createEmptyEnv('invalid-local-ingress-fail-fast');
     env.scenarioMode = false;
     env.quietRuntimeLogs = true;
     const entityId = `0x${'98'.repeat(32)}`;
@@ -1066,18 +1065,8 @@ describe('audit fail-fast regressions', () => {
           ],
         },
       ]),
-    ).resolves.toBe(env);
-
-    const quarantine = env.runtimeState?.quarantinedRuntimeInputs ?? [];
-    expect(quarantine.length).toBe(1);
-    expect(quarantine[0]?.reason).toBe('FINANCIAL-SAFETY:');
-    expect(quarantine[0]?.action).toBe('dropped');
-    expect(quarantine[0]?.counts.entityInputs).toBe(1);
-    expect(env.runtimeMempool?.entityInputs.length).toBe(0);
-
-    await expect(processRuntime(env)).resolves.toBe(env);
-    expect(env.runtimeState?.quarantinedRuntimeInputs?.length).toBe(1);
-    expect(env.runtimeMempool?.entityInputs.length).toBe(0);
+    ).rejects.toThrow();
+    expect(env.runtimeMempool?.entityInputs).toHaveLength(1);
   });
 
   test('remote Entity handler failures are dropped but the same local failure is fatal', async () => {
@@ -1118,7 +1107,11 @@ describe('audit fail-fast regressions', () => {
         } as any,
       ]),
     ).resolves.toBe(remote.env);
-    expect(remote.env.runtimeState?.quarantinedRuntimeInputs?.at(-1)?.reason).toBe('REMOTE_ENTITY_INPUT_APPLY_FAILED');
+    const remoteRetryInputs = remote.env.runtimeMempool?.entityInputs ?? [];
+    expect(
+      remoteRetryInputs.flatMap(input => input.entityTxs?.map(tx => tx.type) ?? []),
+    ).not.toContain('definitely_unknown_entity_tx');
+    expect(remoteRetryInputs).toHaveLength(1);
 
     const local = makeRuntime('local-handler-failure-fatal');
     await expect(
@@ -1130,7 +1123,10 @@ describe('audit fail-fast regressions', () => {
         },
       ]),
     ).rejects.toThrow('ENTITY_FRAME_TX_FAILED: type=definitely_unknown_entity_tx');
-    expect(local.env.runtimeState?.quarantinedRuntimeInputs ?? []).toHaveLength(0);
+    const localRetryTypes = (local.env.runtimeMempool?.entityInputs ?? [])
+      .flatMap(input => input.entityTxs?.map(tx => tx.type) ?? []);
+    expect(localRetryTypes).toContain('definitely_unknown_entity_tx');
+    expect(localRetryTypes).toContain('certifyProfile');
 
     const malformed = new RuntimeEntityInputApplyError(
       {
@@ -1143,7 +1139,7 @@ describe('audit fail-fast regressions', () => {
       new MalformedEntityFrameInputError('definitely_unknown_entity_tx', 'ENTITY_TX_UNHANDLED'),
     );
     expect(malformed.failureKind).toBe('malformed-ingress');
-    expect(malformed.isQuarantinableRemoteIngress).toBe(true);
+    expect(malformed.isDiscardableRemoteIngress).toBe(true);
 
     const storage = new RuntimeEntityInputApplyError(
       {
@@ -1155,7 +1151,7 @@ describe('audit fail-fast regressions', () => {
       new Error('STORAGE_NODE_HASH_MISMATCH'),
     );
     expect(storage.failureKind).toBe('storage');
-    expect(storage.isQuarantinableRemoteIngress).toBe(false);
+    expect(storage.isDiscardableRemoteIngress).toBe(false);
 
     const localBug = new RuntimeEntityInputApplyError(
       {
@@ -1167,7 +1163,7 @@ describe('audit fail-fast regressions', () => {
       new TypeError('unexpected undefined state'),
     );
     expect(localBug.failureKind).toBe('local-bug');
-    expect(localBug.isQuarantinableRemoteIngress).toBe(false);
+    expect(localBug.isDiscardableRemoteIngress).toBe(false);
 
     const applyRemoteAgainstBrokenState = async (
       seed: string,
@@ -1242,7 +1238,10 @@ describe('audit fail-fast regressions', () => {
         },
       ]),
     ).rejects.toThrow('DIRECT_PAYMENT_ROUTE_REQUIRED');
-    expect(invariant.env.runtimeState?.quarantinedRuntimeInputs ?? []).toHaveLength(0);
+    const invariantRetryTypes = (invariant.env.runtimeMempool?.entityInputs ?? [])
+      .flatMap(input => input.entityTxs?.map(tx => tx.type) ?? []);
+    expect(invariantRetryTypes).toContain('entityCommand');
+    expect(invariantRetryTypes).toContain('certifyProfile');
   });
 
   test('local signer resolution prefers an available local signer over stale config validator fallback', () => {

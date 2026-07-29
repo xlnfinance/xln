@@ -16,7 +16,7 @@ export type RuntimeReceiptDelivery = {
 
 export type RuntimeFrameRollback = (
   error: unknown,
-  options?: { quarantine?: boolean; requeue?: boolean },
+  options?: { discardMalformedRemoteInput?: boolean; requeue?: boolean },
 ) => Promise<Error>;
 
 /**

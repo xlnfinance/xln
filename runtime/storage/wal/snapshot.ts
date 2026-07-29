@@ -219,7 +219,6 @@ const DURABLE_RUNTIME_STATE_KEYS = [
   'maxEntityInputsPerFrame',
   'maxEntityTxsPerFrame',
   'securityIncidents',
-  'quarantinedRuntimeInputs',
   'pendingHistoryRecords',
   'deferredNetworkMeta',
   'reliableIngressReceiptLedger',
@@ -251,7 +250,6 @@ const buildDurableRuntimeStateSnapshot = (
     ...(state.maxEntityInputsPerFrame !== undefined ? { maxEntityInputsPerFrame: state.maxEntityInputsPerFrame } : {}),
     ...(state.maxEntityTxsPerFrame !== undefined ? { maxEntityTxsPerFrame: state.maxEntityTxsPerFrame } : {}),
     ...(hasDurableEntries(state.securityIncidents) ? { securityIncidents: structuredClone(state.securityIncidents) } : {}),
-    ...(hasDurableEntries(state.quarantinedRuntimeInputs) ? { quarantinedRuntimeInputs: structuredClone(state.quarantinedRuntimeInputs) } : {}),
     ...(!options?.excludePersistedHistoryRecords && hasDurableEntries(state.pendingHistoryRecords)
       ? { pendingHistoryRecords: structuredClone(state.pendingHistoryRecords) }
       : {}),

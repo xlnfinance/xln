@@ -49,9 +49,9 @@ import {
   type RuntimeWorkDeps,
 } from './loop-work';
 import {
-  quarantineLiveRuntimeInput,
-  RuntimeInputQuarantinedError,
-} from './input-quarantine';
+  discardMalformedRemoteEntityInput,
+  RuntimeInputDiscardedError,
+} from './frame/input-discard';
 import { createRuntimeRoutingApi } from './loop-routing';
 import {
   createRuntimeLifecycleApi,
@@ -164,8 +164,8 @@ export const createRuntimeLoopApi = (deps: RuntimeLoopApiDeps) => {
     applyEntityTxFrameCap,
     generateHookPings,
     isRuntimeFrameReady,
-    quarantineLiveRuntimeInput,
-    RuntimeInputQuarantinedError,
+    discardMalformedRemoteEntityInput,
+    RuntimeInputDiscardedError,
     waitForPromiseBeforeTimeout,
     ...lifecycle,
     ...routing,

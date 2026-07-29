@@ -50,7 +50,7 @@ export interface RuntimeEntityInputApplyResult {
 /**
  * Preserves authenticated transport provenance across the consensus boundary.
  * Runtime uses this typed error instead of message substring matching: an
- * untrusted remote input may be quarantined, while the same failure in a
+ * malformed untrusted remote input may be discarded, while the same failure in a
  * locally generated command is a deterministic runtime bug and must halt.
  */
 export class RuntimeEntityInputApplyError extends Error {
@@ -89,7 +89,7 @@ export class RuntimeEntityInputApplyError extends Error {
     return this.sourceRuntimeId.length > 0 && !this.trustedLocalCrossJurisdiction;
   }
 
-  get isQuarantinableRemoteIngress(): boolean {
+  get isDiscardableRemoteIngress(): boolean {
     return this.isRemoteIngress && this.failureKind === 'malformed-ingress';
   }
 }
@@ -479,7 +479,7 @@ const applyExternalEntityInput = async (
   } catch (error) {
     // Admission and replica resolution are part of the authenticated Entity
     // input boundary. Preserve the input's transport provenance here: a
-    // malformed remote envelope may be quarantined, while the identical error
+    // malformed remote envelope may be discarded, while the identical error
     // from locally generated work is an invariant failure and must halt.
     throw new RuntimeEntityInputApplyError(
       entityInput,

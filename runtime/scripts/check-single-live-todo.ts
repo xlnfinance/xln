@@ -5,6 +5,7 @@ const ROOT = process.cwd();
 const REQUIRED_LIVE_TODO = 'todo.md';
 const LIVE_TODO_MARKER = 'only live TODO/NEXT file';
 const GENERATED_OR_VENDOR_DIRS = new Set([
+  '.claude',
   '.git',
   '.logs',
   '.svelte-kit',

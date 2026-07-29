@@ -1347,29 +1347,6 @@ export interface RuntimeState {
       transactionHash: string;
       observedAt: number;
     }>;
-    quarantinedRuntimeInputs?: Array<{
-      id: string;
-      height: number;
-      timestamp: number;
-      reason: string;
-      message: string;
-      action: 'dropped';
-      counts: {
-        runtimeTxs: number;
-        entityInputs: number;
-        jInputs: number;
-      };
-      entityInputs: Array<{
-        entityId: string;
-        signerId: string;
-        txTypes: string[];
-      }>;
-      runtimeTxTypes: string[];
-      jInputs: Array<{
-        jurisdictionName: string;
-        jTxCount: number;
-      }>;
-    }>;
     pendingHistoryRecords?: RuntimeHistoryRecord[];
     cleanLogs?: string[];
     routeDeferState?: Map<string, {

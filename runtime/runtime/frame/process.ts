@@ -49,8 +49,8 @@ type RuntimeLoopProcessDeps = Pick<
   | 'prioritizeJEventFrame'
   | 'applyEntityInputFrameCap'
   | 'applyEntityTxFrameCap'
-  | 'quarantineLiveRuntimeInput'
-  | 'RuntimeInputQuarantinedError'
+  | 'discardMalformedRemoteEntityInput'
+  | 'RuntimeInputDiscardedError'
   | 'getRuntimeWorkReason'
 >;
 
@@ -247,7 +247,7 @@ const haltStaleRuntimeWriter = async (
   frame.rollbackHandled = true;
   if (!frame.rollbackUndurable) throw new Error('RUNTIME_FRAME_ROLLBACK_MISSING');
   const rollbackError = await frame.rollbackUndurable(new Error('STALE_RUNTIME_WRITER_STOPPED'), {
-    quarantine: false,
+    discardMalformedRemoteInput: false,
     requeue: false,
   });
   const state = ensureRuntimeState(liveEnv);
@@ -410,7 +410,7 @@ const applyAndCommitRuntimeFrame = async (
   let state = candidate.state;
   frame.rollbackUndurable = async (
     error: unknown,
-    options: { quarantine?: boolean; requeue?: boolean } = {},
+    options: { discardMalformedRemoteInput?: boolean; requeue?: boolean } = {},
   ): Promise<Error> => {
     const rollback = await rollbackUndurableRuntimeFrame({
       frame,
@@ -420,9 +420,9 @@ const applyAndCommitRuntimeFrame = async (
       mempoolQueuedAt: candidate.mempoolQueuedAt,
       frameTimestampBeforeTick: started.frameTimestampBeforeTick,
       quietRuntimeLogs: candidate.quietRuntimeLogs,
-      quarantine: (input, cause, quiet) =>
-        deps.loop.quarantineLiveRuntimeInput(liveEnv, input, cause, quiet),
-      quarantinedError: cause => new deps.loop.RuntimeInputQuarantinedError(cause),
+      discardMalformedRemoteInput: (input, cause, quiet) =>
+        deps.loop.discardMalformedRemoteEntityInput(liveEnv, input, cause, quiet),
+      discardedError: cause => new deps.loop.RuntimeInputDiscardedError(cause),
     }, error, options);
     env = rollback.env;
     state = rollback.state;
@@ -524,11 +524,11 @@ export const createRuntimeProcessor = (deps: RuntimeProcessDeps) => async (
   } catch (error) {
     const failure = await handleRuntimeFrameFailure(error, liveEnv, frame, {
       isStorageError: candidate => candidate instanceof deps.storage.RuntimeFrameStorageError,
-      isQuarantinedError: candidate => candidate instanceof deps.loop.RuntimeInputQuarantinedError,
+      isDiscardedInputError: candidate => candidate instanceof deps.loop.RuntimeInputDiscardedError,
     });
     env = failure.env;
     if (!failure.inputDropped) throw failure.error;
-    profile.outcome = 'input-dropped';
+    profile.outcome = 'input-discarded';
     return liveEnv;
   } finally {
     finishRuntimeFrame(env, liveEnv, processState, frame, profile, releaseProcessLock);

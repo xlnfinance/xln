@@ -54,10 +54,8 @@ async function readRuntimeIngressDiagnostics(page: Page): Promise<{
   halted: boolean;
   queuedRejectedInputs: number;
   rejectReplicaEvents: number;
-  quarantinedEvents: number;
   loopErrorEvents: number;
   loopHaltedEvents: number;
-  quarantineRecords: number;
 }> {
   return await page.evaluate(() => {
     const env = (window as typeof window & {
@@ -65,7 +63,6 @@ async function readRuntimeIngressDiagnostics(page: Page): Promise<{
         runtimeState?: {
           loopActive?: boolean;
           halted?: boolean;
-          quarantinedRuntimeInputs?: unknown[];
         };
         runtimeMempool?: {
           entityInputs?: Array<{ signerId?: string }>;
@@ -82,28 +79,20 @@ async function readRuntimeIngressDiagnostics(page: Page): Promise<{
         ? env.runtimeMempool.entityInputs.filter((input) => String(input?.signerId || '').toLowerCase() === `0x${'ef'.repeat(20)}`).length
         : 0,
       rejectReplicaEvents: countMessage('REJECT_ENTITY_INPUT_REPLICA_NOT_FOUND'),
-      quarantinedEvents: countMessage('RUNTIME_INPUT_QUARANTINED'),
       loopErrorEvents: countMessage('RUNTIME_LOOP_ERROR'),
       loopHaltedEvents: countMessage('RUNTIME_LOOP_HALTED'),
-      quarantineRecords: Array.isArray(env?.runtimeState?.quarantinedRuntimeInputs)
-        ? env.runtimeState.quarantinedRuntimeInputs.length
-        : 0,
     };
   });
 }
 
 function runtimeIngressGuardSatisfied(snapshot: {
   rejectReplicaEvents: number;
-  quarantinedEvents: number;
-  quarantineRecords?: number;
   queuedRejectedInputs?: number;
   halted?: boolean;
   loopErrorEvents: number;
   loopHaltedEvents: number;
 }): boolean {
   return snapshot.rejectReplicaEvents <= 1 &&
-    snapshot.quarantinedEvents === 1 &&
-    (snapshot.quarantineRecords === undefined || snapshot.quarantineRecords === 1) &&
     (snapshot.queuedRejectedInputs === undefined || snapshot.queuedRejectedInputs === 0) &&
     snapshot.halted !== true &&
     snapshot.loopErrorEvents === 0 &&
@@ -113,12 +102,11 @@ function runtimeIngressGuardSatisfied(snapshot: {
 test.describe('runtime ingress debug loop guards', () => {
   test.setTimeout(TEST_TIMEOUT_MS);
 
-  test('bad entity inputs are quarantined once while the runtime remains live', { tag: '@resilience' }, async ({ page }) => {
+  test('bad entity inputs are discarded while the runtime remains live', { tag: '@resilience' }, async ({ page }) => {
     for (const message of [
       /REJECT_ENTITY_INPUT_UNKNOWN_ENTITY/,
       /apply_input\.failed .*RUNTIME_ENTITY_INPUT_UNKNOWN_TARGET/,
-      /RUNTIME_INPUT_QUARANTINED .*RUNTIME_ENTITY_INPUT_UNKNOWN_TARGET/,
-      /input\.quarantined .*RUNTIME_ENTITY_INPUT_UNKNOWN_TARGET/,
+      /remote_entity_input\.discarded/,
     ]) {
       allowBrowserIssue({ type: 'console', severity: 'error', message });
     }
@@ -142,17 +130,15 @@ test.describe('runtime ingress debug loop guards', () => {
       }, {
         timeout: 20_000,
         intervals: [100, 250, 500],
-        message: 'stale signer input must be quarantined once without a runtime error loop',
+        message: 'stale signer input must be discarded without a runtime error loop',
       })
       .toMatchObject({
         guardSatisfied: true,
         loopActive: true,
         halted: false,
         queuedRejectedInputs: 0,
-        quarantinedEvents: 1,
         loopErrorEvents: 0,
         loopHaltedEvents: 0,
-        quarantineRecords: 1,
       });
 
     const stableLocal = await readRuntimeIngressDiagnostics(page);

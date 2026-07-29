@@ -189,7 +189,6 @@ async function readAccountProgress(
   pendingInputKind?: string;
   proposals?: Array<{ status: string; txs: string[] }>;
   lastMessages?: string[];
-  lastQuarantine?: string;
 }> {
   return page.evaluate(({ entityId, signerId, counterpartyId }) => {
     const env = (window as any).isolatedEnv;
@@ -224,7 +223,6 @@ async function readAccountProgress(
       lastMessages: Array.isArray(rep?.state?.messages)
         ? rep.state.messages.slice(-5).map((message: unknown) => String(message))
         : [],
-      lastQuarantine: String(env?.runtimeState?.quarantinedRuntimeInputs?.at?.(-1)?.message || ''),
     };
   }, { entityId, signerId, counterpartyId });
 }

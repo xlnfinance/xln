@@ -521,7 +521,6 @@ async function readLocalConnectRuntimeDiagnostic(page: Page, hubId: string): Pro
           halted?: boolean;
           fatalDebugPayload?: unknown;
           loopActive?: boolean;
-          quarantinedRuntimeInputs?: Array<unknown>;
         };
         runtimeInput?: { entityInputs?: Array<{ entityId?: string; entityTxs?: Array<{ type?: string }> }> };
         runtimeMempool?: { entityInputs?: Array<{ entityId?: string; entityTxs?: Array<{ type?: string }> }> };
@@ -660,7 +659,6 @@ async function readLocalConnectRuntimeDiagnostic(page: Page, hubId: string): Pro
         halted: Boolean(env.runtimeState.halted),
         loopActive: Boolean(env.runtimeState.loopActive),
         fatalDebugPayload: env.runtimeState.fatalDebugPayload ?? null,
-        quarantinedRuntimeInputs: (env.runtimeState.quarantinedRuntimeInputs || []).slice(-10),
       } : null,
       uiErrors: Array.from(document.querySelectorAll('.hub-panel .error-banner, [role="alert"], .toast'))
         .map((entry) => String(entry.textContent || '').trim())

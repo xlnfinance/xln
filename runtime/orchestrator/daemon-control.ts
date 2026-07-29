@@ -51,7 +51,6 @@ type ControlRuntimeStatusResponse = {
   runtime?: {
     halted?: boolean;
     fatalDebugPayload?: unknown;
-    latestQuarantine?: unknown;
   } | null;
   error?: string;
 };
@@ -310,8 +309,7 @@ const waitForQueuedRuntimeInputObserved = async (
     const status = await client.getRuntimeInputStatus(statusUrl);
     lastStatus = status;
     const runtime = status.runtime;
-    const quarantine = runtime?.latestQuarantine;
-    if (runtime?.halted === true || quarantine) {
+    if (runtime?.halted === true) {
       throw new Error(
         `CONTROL_RUNTIME_INPUT_FAILED: ${label} status=${summarizeRuntimeInputStatus(status)}`,
       );

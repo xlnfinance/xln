@@ -15,7 +15,7 @@ type RuntimeLifecycleState = NonNullable<RuntimeState['runtimeState']>;
 
 export type RuntimeFrameFailureDeps = {
   isStorageError(error: unknown): boolean;
-  isQuarantinedError(error: unknown): boolean;
+  isDiscardedInputError(error: unknown): boolean;
 };
 
 export type RuntimeFrameFailure = {
@@ -37,12 +37,12 @@ export const handleRuntimeFrameFailure = async (
   ) {
     frame.rollbackHandled = true;
     const rollbackError = await frame.rollbackUndurable(error, {
-      quarantine: !deps.isStorageError(error),
+      discardMalformedRemoteInput: !deps.isStorageError(error),
     });
     return {
       env: liveEnv,
       error: rollbackError,
-      inputDropped: deps.isQuarantinedError(rollbackError),
+      inputDropped: deps.isDiscardedInputError(rollbackError),
     };
   }
 

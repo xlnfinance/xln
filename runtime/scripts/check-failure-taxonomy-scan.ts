@@ -41,7 +41,7 @@ const readText = (path: string): string => {
     ],
     'runtime/runtime/loop.ts': [
       'runtime/runtime/loop.ts',
-      'runtime/runtime/input-quarantine.ts',
+      'runtime/runtime/frame/input-discard.ts',
       'runtime/runtime/loop-lifecycle.ts',
       'runtime/runtime/loop-failure.ts',
     ],
@@ -859,9 +859,9 @@ for (const marker of [
   assertIncludes(runtimeEntityInputs, marker, runtimeEntityInputsPath);
 }
 
-const runtimeSourcePath = 'runtime/runtime/input-quarantine.ts';
+const runtimeSourcePath = 'runtime/runtime/frame/input-discard.ts';
 const runtimeSource = readText(runtimeSourcePath);
-assertIncludes(runtimeSource, 'error.isQuarantinableRemoteIngress', runtimeSourcePath);
+assertIncludes(runtimeSource, 'error.isDiscardableRemoteIngress', runtimeSourcePath);
 assertNotIncludes(
   runtimeSource,
   'error instanceof RuntimeEntityInputApplyError && error.isRemoteIngress',

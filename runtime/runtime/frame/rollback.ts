@@ -16,8 +16,12 @@ export type RuntimeFrameRollbackContext = {
   mempoolQueuedAt: number | undefined;
   frameTimestampBeforeTick: number;
   quietRuntimeLogs: boolean;
-  quarantine(input: RuntimeInput, error: Error, quiet: boolean): boolean;
-  quarantinedError(error: Error): Error;
+  discardMalformedRemoteInput(
+    input: RuntimeInput,
+    error: Error,
+    quiet: boolean,
+  ): RuntimeInput | null;
+  discardedError(error: Error): Error;
 };
 
 export type RuntimeFrameRollbackResult = {
@@ -29,11 +33,15 @@ export type RuntimeFrameRollbackResult = {
 const restoreFailedInput = (
   context: RuntimeFrameRollbackContext,
   workingMempool: RuntimeInput,
+  retainedInput?: RuntimeInput,
 ): void => {
   const { frame, liveEnv } = context;
-  const retry = frame.inputDrained
+  const retry = frame.inputDrained || retainedInput
     ? (() => {
-        const attempted = frame.inputForRequeue ?? cloneRuntimeFrameMempool(context.runtimeInput);
+        const attempted =
+          retainedInput ??
+          frame.inputForRequeue ??
+          cloneRuntimeFrameMempool(context.runtimeInput);
         attempted.queuedAt ??= context.mempoolQueuedAt ?? context.frameTimestampBeforeTick;
         return prependOlderRuntimeInput(attempted, workingMempool);
       })()
@@ -45,7 +53,7 @@ const restoreFailedInput = (
 export const rollbackUndurableRuntimeFrame = async (
   context: RuntimeFrameRollbackContext,
   cause: unknown,
-  options: { quarantine?: boolean; requeue?: boolean } = {},
+  options: { discardMalformedRemoteInput?: boolean; requeue?: boolean } = {},
 ): Promise<RuntimeFrameRollbackResult> => {
   const originalError = cause instanceof Error ? cause : new Error(String(cause));
   const { frame, liveEnv } = context;
@@ -58,16 +66,27 @@ export const rollbackUndurableRuntimeFrame = async (
   frame.reliableIngressCommits = [];
   frame.reliableReceiptSenderCheckpoint = undefined;
 
-  const quarantined =
-    options.quarantine === false
-      ? false
-      : context.quarantine(context.runtimeInput, originalError, context.quietRuntimeLogs);
-  if (!quarantined && options.requeue !== false) restoreFailedInput(context, workingMempool);
+  const attemptedInput = frame.inputForRequeue ?? context.runtimeInput;
+  const retainedInput =
+    options.discardMalformedRemoteInput === false
+      ? null
+      : context.discardMalformedRemoteInput(
+          attemptedInput,
+          originalError,
+          context.quietRuntimeLogs,
+        );
+  const discarded = retainedInput !== null;
+  const retainedWorkingMempool = discarded
+    ? context.discardMalformedRemoteInput(workingMempool, originalError, true) ?? workingMempool
+    : workingMempool;
+  if (options.requeue !== false) {
+    restoreFailedInput(context, retainedWorkingMempool, retainedInput ?? undefined);
+  }
 
   const error = cleanupErrors.length
     ? new AggregateError([originalError, ...cleanupErrors], 'RUNTIME_APPLY_ROLLBACK_FAILED')
-    : quarantined
-      ? context.quarantinedError(originalError)
+    : discarded
+      ? context.discardedError(originalError)
       : originalError;
   return { env: liveEnv, state: ensureRuntimeState(liveEnv), error };
 };

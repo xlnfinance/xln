@@ -14,7 +14,6 @@ import {
   requireMap,
   requireSet,
   requireString,
-  requireStringArray,
   validateStorageSafeValue,
   validateStringMap,
 } from './primitives';
@@ -103,35 +102,6 @@ const validateAccountFrameRecord = (value: unknown, code: string): void => {
   if (record['timestamp'] !== undefined) requireBoundaryInteger(record['timestamp'], `${code}_TIMESTAMP`);
 };
 
-const validateQuarantine = (value: unknown, code: string): void => {
-  const item = requireBoundaryRecord(value, code);
-  requireExactBoundaryKeys(item, [
-    'id', 'height', 'timestamp', 'reason', 'message', 'action', 'counts',
-    'entityInputs', 'runtimeTxTypes', 'jInputs',
-  ], [], `${code}_FIELDS`);
-  for (const field of ['id', 'reason', 'message']) requireString(item[field], `${code}_${field.toUpperCase()}`);
-  requireBoundaryInteger(item['height'], `${code}_HEIGHT`);
-  requireBoundaryInteger(item['timestamp'], `${code}_TIMESTAMP`);
-  if (item['action'] !== 'dropped') throw new Error(`${code}_ACTION`);
-  const counts = requireBoundaryRecord(item['counts'], `${code}_COUNTS`);
-  requireExactBoundaryKeys(counts, ['runtimeTxs', 'entityInputs', 'jInputs'], [], `${code}_COUNTS_FIELDS`);
-  for (const field of ['runtimeTxs', 'entityInputs', 'jInputs']) requireBoundaryInteger(counts[field], `${code}_COUNT_${field}`);
-  for (const [index, raw] of requireArray(item['entityInputs'], `${code}_ENTITY_INPUTS`).entries()) {
-    const input = requireBoundaryRecord(raw, `${code}_ENTITY_INPUT_${index}`);
-    requireExactBoundaryKeys(input, ['entityId', 'signerId', 'txTypes'], [], `${code}_ENTITY_INPUT_${index}_FIELDS`);
-    requireString(input['entityId'], `${code}_ENTITY_INPUT_${index}_ENTITY`);
-    requireString(input['signerId'], `${code}_ENTITY_INPUT_${index}_SIGNER`);
-    requireStringArray(input['txTypes'], `${code}_ENTITY_INPUT_${index}_TX_TYPES`);
-  }
-  requireStringArray(item['runtimeTxTypes'], `${code}_RUNTIME_TX_TYPES`);
-  for (const [index, raw] of requireArray(item['jInputs'], `${code}_J_INPUTS`).entries()) {
-    const input = requireBoundaryRecord(raw, `${code}_J_INPUT_${index}`);
-    requireExactBoundaryKeys(input, ['jurisdictionName', 'jTxCount'], [], `${code}_J_INPUT_${index}_FIELDS`);
-    requireString(input['jurisdictionName'], `${code}_J_INPUT_${index}_JURISDICTION`);
-    requireBoundaryInteger(input['jTxCount'], `${code}_J_INPUT_${index}_COUNT`);
-  }
-};
-
 const validateSecurityIncident = (value: unknown, code: string): void => {
   const incident = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(incident, [
@@ -164,7 +134,7 @@ export const validateDurableRuntimeState = (value: unknown, code: string): void 
   const state = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(state, [], [
     'halted', 'fatalDebugPayload', 'maxEntityInputsPerFrame', 'maxEntityTxsPerFrame',
-    'pendingAuditEvents', 'securityIncidents', 'quarantinedRuntimeInputs', 'pendingHistoryRecords', 'deferredNetworkMeta',
+    'pendingAuditEvents', 'securityIncidents', 'pendingHistoryRecords', 'deferredNetworkMeta',
     'reliableIngressReceiptLedger', 'reliableIngressTerminalWatermarks',
     'receivedReliableReceiptLedger', 'receivedReliableTerminalWatermarks',
     'pendingReliableIngress', 'reliableIngressCommitting',
@@ -199,7 +169,6 @@ export const validateDurableRuntimeState = (value: unknown, code: string): void 
       if (stored['id'] !== id) throw new Error(`${code}_SECURITY_INCIDENT_KEY_MISMATCH`);
     }
   }
-  if (state['quarantinedRuntimeInputs'] !== undefined) requireArray(state['quarantinedRuntimeInputs'], `${code}_QUARANTINE`).forEach((entry, index) => validateQuarantine(entry, `${code}_QUARANTINE_${index}`));
   if (state['pendingHistoryRecords'] !== undefined) requireArray(state['pendingHistoryRecords'], `${code}_HISTORY_VIEW`).forEach((entry, index) => validateAccountFrameRecord(entry, `${code}_HISTORY_VIEW_${index}`));
   if (state['deferredNetworkMeta'] !== undefined) validateStringMap(state['deferredNetworkMeta'], `${code}_DEFERRED_NETWORK`, (entry, entryCode) => {
     const meta = requireBoundaryRecord(entry, entryCode);

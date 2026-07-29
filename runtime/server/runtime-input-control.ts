@@ -94,7 +94,6 @@ export const handleRuntimeInputStatus = (
         ? {
             halted: env.runtimeState.halted === true,
             fatalDebugPayload: env.runtimeState.fatalDebugPayload ?? null,
-            latestQuarantine: env.runtimeState.quarantinedRuntimeInputs?.at(-1) ?? null,
           }
         : null,
     }),

@@ -14,6 +14,7 @@ import {
   getInputReliableIdentity,
   registerReliableIngress,
 } from '../reliable-delivery';
+import { RuntimeEntityInputApplyError } from '../entity-inputs';
 import { splitRoutedOutputByDeliveryLane } from '../output-routing';
 import { assertScheduledWakeTxAuthorized } from '../scheduled-wake';
 import { validateRuntimeInputShapeAndLimits } from '../input-validation';
@@ -96,6 +97,14 @@ const validateEntityInputs = (
             : [],
         },
       );
+      if (!isReplay && String(input?.from || '').trim()) {
+        throw new RuntimeEntityInputApplyError(
+          input,
+          false,
+          error,
+          'malformed-ingress',
+        );
+      }
       throw error;
     }
   });
