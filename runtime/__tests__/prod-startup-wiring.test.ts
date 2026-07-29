@@ -965,7 +965,7 @@ describe('production startup wiring', () => {
       /const runnableHubEntityIdsFor = \(entry: \{\s*context: MarketMakerEntityContext;\s*jobs: SameQuoteJob\[\];\s*\}\): string\[\] =>/,
     );
     expect(mmNode).toContain(
-      '.filter(hubEntityId => !hasMarketMakerAccountBacklog(env, entry.context.entityId, hubEntityId))',
+      '.filter(hubEntityId => !hasMarketMakerAccountBacklog(deps.env, entry.context.entityId, hubEntityId))',
     );
     expect(mmNode).toMatch(/\.slice\(\s*0,\s*MARKET_MAKER_BOOTSTRAP_SAME_QUOTE_HUB_GROUPS_PER_WAVE,\s*\)/);
     expect(mmNode).not.toContain(
@@ -2205,7 +2205,7 @@ describe('production startup wiring', () => {
     const meshCommon = readFileSync(join(repoRoot, 'runtime/orchestrator/mesh-common.ts'), 'utf8');
     const ensureStart = mmNode.indexOf('const ensureMarketMakerHubConnectivity = async (');
     const readyStart = mmNode.indexOf('const isMarketMakerConnectivityReady = (');
-    const quotePipelineStart = mmNode.indexOf('const driveBootstrapSameQuotes = async (');
+    const quotePipelineStart = mmNode.indexOf('const createBootstrapSameQuoteDriver = (');
     const driveStart = mmNode.indexOf('const driveQuotes = async (');
     const markReadyStart = mmNode.indexOf('const markOffersReady = async (): Promise<boolean> => {');
     expect(ensureStart).toBeGreaterThan(0);
