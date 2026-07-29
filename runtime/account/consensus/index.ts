@@ -13,26 +13,17 @@ import type {
   RuntimeState,
   Delta,
 } from '../../types';
-import {
-  cloneAccountFrame,
-  cloneAccountState,
-  getAccountPerspective,
-} from '../../state-helpers';
-import { isLeft } from '../utils';
+import { cloneAccountFrame, cloneAccountState, getAccountPerspective } from '../../state-helpers';
 import { HEAVY_LOGS } from '../../utils';
 import { applyAccountTx } from '../tx/apply';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
-import {
-  createFrameHash,
-  getAccountFrameBoundsError,
-} from './frame';
+import { createFrameHash, getAccountFrameBoundsError } from './frame';
 import { normalizeAccountWatchSeed } from '../../protocol/account-watch-seed';
 import {
   assertNoUnilateralSettlementMutation,
   buildAccountProofBodyFromEnv,
   captureSettlementVector,
   getAccountStateDomain,
-  prependUniqueMempoolTxs,
   runPostFrameAutoRebalanceCheck,
   shouldIncludeToken,
   summarizeDeltasForLog,
@@ -50,14 +41,8 @@ import type {
 import { createDisputeProofHashWithNonce } from '../../protocol/dispute/proof-builder';
 import { getMinimumSafeSettlementNonce } from '../../protocol/settlement/operations';
 import { verifyHankoForHash } from '../../hanko/signing';
-import {
-  computeAccountStateRoot,
-  computeAccountStateSectionHashes,
-} from '../state-root';
-import {
-  discardStagedAccountCommitmentCache,
-  forkAccountCommitmentCache,
-} from '../map-commitment';
+import { computeAccountStateRoot, computeAccountStateSectionHashes } from '../state-root';
+import { forkAccountCommitmentCache } from '../map-commitment';
 import { createAccountJClaimSession, type AccountJClaimSession } from '../j-claim-session';
 import type { AccountJClaimNodeStore } from '../../types/account-j-claims';
 import {
@@ -66,11 +51,7 @@ import {
   isHtlcSecretEnforcementWindowClosed,
   type AccountInputSecurityContext,
 } from './deadline-policy';
-import {
-  accountInputAck,
-  accountInputProposal,
-  accountInputReferenceHeight,
-} from './flush';
+import { accountInputAck, accountInputProposal, accountInputReferenceHeight } from './flush';
 import { handleBoardReseal } from './board-reseal';
 import { handlePendingFrameAck } from './ack-commit';
 import { assertLiveCommitMatchesFrame } from './commit-root';
@@ -88,6 +69,12 @@ import {
   handleReplayOrObsoleteAccountInput,
   normalizeAccountInputHeight,
 } from './replay';
+import {
+  applySameHeightIncomingFrameRollback,
+  handleUnmatchedAck,
+  resolveAccountAckTarget,
+  resolveSameHeightIncomingFrame,
+} from './collision';
 export { proposeAccountFrame } from './propose';
 export type {
   AccountConsensusFrameResult,
@@ -100,11 +87,7 @@ export type {
 const accountLog = createStructuredLogger('account');
 const STALE_ACCOUNT_FRAME_WARNING_MS = 5 * 60_000;
 
-export {
-  getIncomingAccountDeadlineViolation,
-  HTLC_ENFORCEMENT_RESERVE_MS,
-  isHtlcSecretEnforcementWindowClosed,
-};
+export { getIncomingAccountDeadlineViolation, HTLC_ENFORCEMENT_RESERVE_MS, isHtlcSecretEnforcementWindowClosed };
 export type { AccountInputSecurityContext };
 
 export { computeFrameHash, isWithinAccountFrameBounds } from './frame';
@@ -118,12 +101,12 @@ type AccountSwapCancelRequest = { offerId: string; accountId: string };
 
 type IncomingFramePreflightResult =
   | {
-    kind: 'continue';
-    receivedFrame: AccountFrame;
-    ourEntityId: string;
-    frameJHeight: number;
-    rollbackPendingFrame: boolean;
-  }
+      kind: 'continue';
+      receivedFrame: AccountFrame;
+      ourEntityId: string;
+      frameJHeight: number;
+      rollbackPendingFrame: boolean;
+    }
   | { kind: 'return'; result: HandleAccountInputResult };
 
 type IncomingFrameValidation = {
@@ -137,20 +120,19 @@ type IncomingFrameValidation = {
 };
 
 type IncomingFrameValidationResult =
-  | { kind: 'continue'; validation: IncomingFrameValidation }
-  | { kind: 'return'; result: HandleAccountInputResult };
+  { kind: 'continue'; validation: IncomingFrameValidation } | { kind: 'return'; result: HandleAccountInputResult };
 
-type IncomingFrameResult =
-  | { kind: 'not_applicable' }
-  | { kind: 'return'; result: HandleAccountInputResult };
+type IncomingFrameResult = { kind: 'not_applicable' } | { kind: 'return'; result: HandleAccountInputResult };
 
 const isRefreshableStaleIncomingSettlementSeal = (
   account: AccountState,
   frame: AccountFrame,
   error: string | undefined,
 ): boolean => {
-  const match = /^Frame application failed: SETTLEMENT_SEAL_NONCE_MISMATCH:(\d+):(\d+):j=\d+:next=\d+:local=\d+:peer=\d+$/
-    .exec(error ?? '');
+  const match =
+    /^Frame application failed: SETTLEMENT_SEAL_NONCE_MISMATCH:(\d+):(\d+):j=\d+:next=\d+:local=\d+:peer=\d+$/.exec(
+      error ?? '',
+    );
   if (!match) return false;
 
   const suppliedNonce = Number(match[1]);
@@ -166,245 +148,16 @@ const isRefreshableStaleIncomingSettlementSeal = (
 
   const workspace = account.settlementWorkspace;
   if (!workspace || workspace.nonceAtSign !== undefined) return false;
-  const matchingSeals = frame.accountTxs.filter((tx) =>
-    tx.type === 'settle_transition' &&
-    tx.data.kind === 'seal' &&
-    tx.data.settlementNonce === suppliedNonce &&
-    tx.data.revision === workspace.revision &&
-    tx.data.workspaceHash.toLowerCase() === workspace.workspaceHash.toLowerCase()
+  const matchingSeals = frame.accountTxs.filter(
+    tx =>
+      tx.type === 'settle_transition' &&
+      tx.data.kind === 'seal' &&
+      tx.data.settlementNonce === suppliedNonce &&
+      tx.data.revision === workspace.revision &&
+      tx.data.workspaceHash.toLowerCase() === workspace.workspaceHash.toLowerCase(),
   );
   return matchingSeals.length === 1;
 };
-
-type AccountAckTarget = {
-  pendingHeight: number;
-  bundledNewFrameHeight: number | undefined;
-  ackHeight: number | undefined;
-};
-
-function resolveAccountAckTarget(
-  account: AccountState,
-  input: AccountInput,
-  normalizedInputHeight: number | undefined,
-): AccountAckTarget {
-  const ack = accountInputAck(input);
-  const proposal = accountInputProposal(input);
-  const pendingHeight = Number(account.pendingFrame?.height ?? 0);
-  const bundledNewFrameHeight =
-    proposal?.frame === undefined || proposal.frame === null
-      ? undefined
-      : Number(proposal.frame.height);
-  const ackTargetsPendingFrame =
-    Boolean(ack) &&
-    Boolean(account.pendingFrame) &&
-    // Normal ACK-only message.
-    (normalizedInputHeight === pendingHeight ||
-      // BATCHED message: ACK for pending frame + next proposed frame.
-      (bundledNewFrameHeight !== undefined && bundledNewFrameHeight === pendingHeight + 1));
-  return {
-    pendingHeight,
-    bundledNewFrameHeight,
-    ackHeight: ackTargetsPendingFrame ? pendingHeight : normalizedInputHeight,
-  };
-}
-
-function isSameHeightSimultaneousProposalAck(
-  account: AccountState,
-  input: AccountInput,
-  normalizedInputHeight: number | undefined,
-): boolean {
-  const ack = accountInputAck(input);
-  const proposal = accountInputProposal(input);
-  const pendingFrameHeight = Number(account.pendingFrame?.height ?? 0);
-  return (
-    Boolean(ack) &&
-    Boolean(proposal) &&
-    pendingFrameHeight > 0 &&
-    Number(proposal?.frame.height ?? 0) === pendingFrameHeight &&
-    Number(normalizedInputHeight ?? 0) === pendingFrameHeight - 1
-  );
-}
-
-function handleUnmatchedAck(
-  account: AccountState,
-  input: AccountInput,
-  normalizedInputHeight: number | undefined,
-  ackProcessed: boolean,
-  events: string[],
-  committedFrames: AccountCommittedFrame[],
-  phase: 'before_frame' | 'after_frame',
-): HandleAccountInputResult | undefined {
-  const ack = accountInputAck(input);
-  const proposal = accountInputProposal(input);
-  if (!ack || ackProcessed) return undefined;
-  if (phase === 'before_frame') {
-    if (!account.pendingFrame || isSameHeightSimultaneousProposalAck(account, input, normalizedInputHeight)) {
-      return undefined;
-    }
-    const pending = account.pendingFrame.height;
-    const staleAck =
-      normalizedInputHeight !== undefined &&
-      Number(normalizedInputHeight) > 0 &&
-      Number(normalizedInputHeight) <= Number(account.currentHeight ?? 0);
-    if (staleAck) {
-      events.push(
-        `ℹ️ Ignored stale ACK for frame ${String(normalizedInputHeight)} (current=${String(account.currentHeight ?? 0)}, pending=${String(pending)})`,
-      );
-      return { success: true, events, ...(committedFrames.length > 0 && { committedFrames }) };
-    }
-    return {
-      success: false,
-      error:
-        `Unmatched ACK with pending frame: ` +
-        `inputHeight=${String(normalizedInputHeight ?? 'none')} ` +
-        `pending=${String(pending)} ` +
-        `newFrame=${String(proposal?.frame.height ?? 'none')}`,
-      events,
-    };
-  }
-
-  if (proposal) return undefined;
-  const pending = account.pendingFrame?.height ?? 'none';
-  const nextHeightAckWithoutPending =
-    normalizedInputHeight !== undefined &&
-    Number(normalizedInputHeight) === Number(account.currentHeight ?? 0) + 1 &&
-    !account.pendingFrame;
-  const staleAck =
-    normalizedInputHeight !== undefined &&
-    Number(normalizedInputHeight) > 0 &&
-    Number(normalizedInputHeight) <= Number(account.currentHeight ?? 0);
-  if (staleAck) {
-    events.push(
-      `ℹ️ Ignored stale ACK for frame ${String(normalizedInputHeight)} (current=${String(account.currentHeight ?? 0)}, pending=${String(pending)})`,
-    );
-    return { success: true, events, ...(committedFrames.length > 0 && { committedFrames }) };
-  }
-  if (nextHeightAckWithoutPending) {
-    // Remote delivery is only ordered per transport, not across the local
-    // frame-install tick. A pure ACK for the next frame cannot advance state
-    // without the matching pending frame, so keep it non-mutating and rely on
-    // the account pending resend path to recover the ACK deterministically.
-    events.push(
-      `Ignored early ACK for frame ${String(normalizedInputHeight)} (current=${String(account.currentHeight ?? 0)}, pending=none)`,
-    );
-    return { success: true, events, ...(committedFrames.length > 0 && { committedFrames }) };
-  }
-  return {
-    success: false,
-    error: `Unmatched ACK: height=${String(normalizedInputHeight ?? 'none')} pending=${String(pending)}`,
-    events,
-  };
-}
-
-function resolveSameHeightIncomingFrame(
-  account: AccountState,
-  receivedFrame: AccountFrame,
-  events: string[],
-  committedFrames: AccountCommittedFrame[],
-): HandleAccountInputResult | true | undefined {
-  if (!(account.pendingFrame && receivedFrame.height === account.pendingFrame.height)) {
-    return undefined;
-  }
-
-  /*
-   * One Account height permits one proposal from each side. If both proposals
-   * race, the valid LEFT proposal is canonical.
-   *
-   * Why fixed LEFT:
-   * - Depository.sol uses the same equal-height winner, so off-chain recovery
-   *   and an adversarial on-chain dispute cannot disagree.
-   * - A selected proposer would need timeout/view-change state when it is
-   *   offline, turning bilateral consensus into a leader-election protocol.
-   * - Alternating LEFT/RIGHT by height would either disagree with Depository
-   *   or require a contract-level protocol migration.
-   *
-   * Time, retry count, HTLC expiry and settlement evidence deliberately do
-   * not affect this choice. They cannot create a higher Account proposal in
-   * the same round.
-   */
-  const isLeftEntity = isLeft(account.proofHeader.fromEntity, account.proofHeader.toEntity);
-  if (HEAVY_LOGS) {
-    accountLog.debug('frame.tiebreaker', {
-      from: shortId(account.proofHeader.fromEntity),
-      to: shortId(account.proofHeader.toEntity),
-      isLeft: isLeftEntity,
-    });
-  }
-
-  if (isLeftEntity) {
-    events.push(`📤 LEFT-WINS: Ignored RIGHT's frame ${receivedFrame.height} (waiting for their ACK)`);
-    if (account.mempool.length > 0) {
-      events.push(`⚠️ LEFT has ${account.mempool.length} pending txs while waiting for RIGHT's ACK`);
-    }
-    const pendingResponse = account.pendingAccountInput;
-    const pendingProposal = pendingResponse ? accountInputProposal(pendingResponse) : undefined;
-    if (
-      !pendingResponse ||
-      !pendingProposal ||
-      pendingProposal.frame.stateHash !== account.pendingFrame.stateHash
-    ) {
-      throw new Error(`ACCOUNT_COLLISION_PENDING_RESPONSE_MISSING:${receivedFrame.height}`);
-    }
-    // LEFT did not accept the peer proposal, so it owes no ACK. It must resend
-    // the exact already-signed proposal that won the deterministic collision;
-    // rebuilding it would risk changing bytes, nonce, or Hanko.
-    return {
-      success: true,
-      response: structuredClone(pendingResponse),
-      events,
-      ...(committedFrames.length > 0 && { committedFrames }),
-    };
-  }
-
-  const receivedHash = receivedFrame.stateHash;
-  if (account.lastRollbackFrameHash === receivedHash) {
-    accountLog.debug('rollback.duplicate', { frame: shortHash(receivedHash) });
-    return undefined;
-  }
-
-  return true;
-}
-
-function applySameHeightIncomingFrameRollback(
-  _env: RuntimeState,
-  account: AccountState,
-  _input: AccountInput,
-  receivedFrame: AccountFrame,
-  events: string[],
-): void {
-  /*
-   * Only RIGHT reaches this rollback. Its signed frame was never committed,
-   * and the contract-level LEFT tie-break proves it cannot beat the accepted
-   * frame at this height. Restore the losing intentions exactly once so the
-   * normal proposer can apply them above the newly committed frame.
-   *
-   * Never call this because a clock elapsed. A Hanko already sent to the peer
-   * does not expire, and deleting it locally would create two incompatible
-   * views of still-valid signed evidence.
-   */
-  const receivedHash = receivedFrame.stateHash;
-  let restoredTxCount = 0;
-  if (account.pendingFrame) {
-    restoredTxCount = account.pendingFrame.accountTxs.length;
-    const uniqueRestored = prependUniqueMempoolTxs(account, account.pendingFrame.accountTxs);
-
-    events.push(
-      `🔄 ROLLBACK: Discarded our frame ${account.pendingFrame.height}, restored ${uniqueRestored}/${restoredTxCount} txs to mempool`,
-    );
-  }
-
-  delete account.pendingFrame;
-  delete account.pendingAccountInput;
-  delete account.pendingAccountInputSignerId;
-  discardStagedAccountCommitmentCache(account);
-  account.rollbackCount = Math.max(1, account.rollbackCount + 1);
-  account.lastRollbackFrameHash = receivedHash; // Track this rollback
-  if (account.rollbackCount > 1) {
-    accountLog.warn('rollback.retry', { count: account.rollbackCount, frame: shortHash(receivedHash) });
-  }
-
-  events.push(`📥 Accepted LEFT's frame ${receivedFrame.height} (we are RIGHT, deterministic tiebreaker)`);
-}
 
 async function verifyIncomingFrameHanko(
   env: RuntimeState,
@@ -459,8 +212,7 @@ async function handleStaleIncomingFrame(
   );
   if (duplicateAck) return duplicateAck;
   events.push(
-    `ℹ️ Ignored stale frame ${String(receivedFrame.height)} ` +
-    `(current=${String(account.currentHeight ?? 0)})`,
+    `ℹ️ Ignored stale frame ${String(receivedFrame.height)} ` + `(current=${String(account.currentHeight ?? 0)})`,
   );
   return {
     success: true,
@@ -502,10 +254,7 @@ function validateIncomingFrameChain(
   securityContext: AccountInputSecurityContext,
   events: string[],
 ): HandleAccountInputResult | undefined {
-  const structureError = getAccountFrameBoundsError(
-    receivedFrame,
-    securityContext.entityTimestamp,
-  );
+  const structureError = getAccountFrameBoundsError(receivedFrame, securityContext.entityTimestamp);
   if (structureError) {
     return {
       success: false,
@@ -527,8 +276,7 @@ function validateIncomingFrameChain(
     });
   }
 
-  const expectedPrevHash =
-    account.currentHeight === 0 ? 'genesis' : account.currentFrame.stateHash || '';
+  const expectedPrevHash = account.currentHeight === 0 ? 'genesis' : account.currentFrame.stateHash || '';
   if (receivedFrame.prevFrameHash !== expectedPrevHash) {
     const mismatch = {
       inputFromEntityId: input.fromEntityId,
@@ -537,7 +285,7 @@ function validateIncomingFrameChain(
       receivedHeight: Number(receivedFrame.height ?? 0),
       receivedStateHash: receivedFrame.stateHash ?? null,
       receivedPrevFrameHash: receivedFrame.prevFrameHash ?? null,
-      receivedTxTypes: receivedFrame.accountTxs.map((tx) => tx.type),
+      receivedTxTypes: receivedFrame.accountTxs.map(tx => tx.type),
       expectedPrevFrameHash: expectedPrevHash,
       account: describeAccountState(account),
     };
@@ -582,23 +330,17 @@ function validateIncomingFrameDeadline(
   events: string[],
 ): HandleAccountInputResult | undefined {
   const staleByMs = securityContext.entityTimestamp - receivedFrame.timestamp;
-  const collateralPriorityRisk =
-    staleByMs > 0 &&
-    receivedFrame.accountTxs.some((tx) => tx.type === 'request_collateral');
+  const collateralPriorityRisk = staleByMs > 0 && receivedFrame.accountTxs.some(tx => tx.type === 'request_collateral');
   if (staleByMs > STALE_ACCOUNT_FRAME_WARNING_MS || collateralPriorityRisk) {
     accountLog.warn('frame.stale_accepted', {
       height: receivedFrame.height,
       staleByMs,
-      txs: receivedFrame.accountTxs.map((tx) => tx.type),
+      txs: receivedFrame.accountTxs.map(tx => tx.type),
       collateralPriorityRisk,
     });
   }
 
-  const violation = getIncomingAccountDeadlineViolation(
-    account,
-    receivedFrame,
-    securityContext,
-  );
+  const violation = getIncomingAccountDeadlineViolation(account, receivedFrame, securityContext);
   if (!violation) return undefined;
   const proposal = accountInputProposal(input)!;
   if (!proposal.frameHanko) {
@@ -643,12 +385,7 @@ async function preflightIncomingAccountFrame(
   );
   if (staleResult) return { kind: 'return', result: staleResult };
 
-  const proposerError = validateIncomingFrameProposer(
-    account,
-    input,
-    receivedFrame,
-    events,
-  );
+  const proposerError = validateIncomingFrameProposer(account, input, receivedFrame, events);
   if (proposerError) return { kind: 'return', result: proposerError };
 
   const chainError = validateIncomingFrameChain(
@@ -664,25 +401,14 @@ async function preflightIncomingAccountFrame(
   const hankoError = await verifyIncomingFrameHanko(env, input, receivedFrame, events, securityContext);
   if (hankoError) return { kind: 'return', result: hankoError };
 
-  const deadlineError = validateIncomingFrameDeadline(
-    account,
-    input,
-    receivedFrame,
-    securityContext,
-    events,
-  );
+  const deadlineError = validateIncomingFrameDeadline(account, input, receivedFrame, securityContext, events);
   if (deadlineError) return { kind: 'return', result: deadlineError };
 
   // Resolve simultaneous proposals only after every rejecting preflight has
   // authenticated the frame. RIGHT's rollback is deferred until deterministic
   // replay on a clone succeeds, so a rejected peer frame cannot mutate live
   // pending state or restore its transactions into the mempool.
-  const sameHeightResolution = resolveSameHeightIncomingFrame(
-    account,
-    receivedFrame,
-    events,
-    committedFrames,
-  );
+  const sameHeightResolution = resolveSameHeightIncomingFrame(account, receivedFrame, events, committedFrames);
   if (sameHeightResolution !== true && sameHeightResolution) {
     return { kind: 'return', result: sameHeightResolution };
   }
@@ -731,7 +457,8 @@ const accountFrameDeltasEqual = (left: readonly Delta[], right: readonly Delta[]
   if (left.length !== right.length) return false;
   return left.every((delta, index) => {
     const peer = right[index];
-    return peer !== undefined &&
+    return (
+      peer !== undefined &&
       delta.tokenId === peer.tokenId &&
       delta.collateral === peer.collateral &&
       delta.ondelta === peer.ondelta &&
@@ -741,7 +468,8 @@ const accountFrameDeltasEqual = (left: readonly Delta[], right: readonly Delta[]
       delta.leftAllowance === peer.leftAllowance &&
       delta.rightAllowance === peer.rightAllowance &&
       delta.leftHold === peer.leftHold &&
-      delta.rightHold === peer.rightHold;
+      delta.rightHold === peer.rightHold
+    );
   });
 };
 
@@ -775,8 +503,7 @@ async function verifySenderFrameHash(
 
 type IncomingFrameReplay = Omit<IncomingFrameValidation, 'clonedMachine' | 'proofResult'>;
 type IncomingFrameReplayResult =
-  | { kind: 'continue'; replay: IncomingFrameReplay }
-  | { kind: 'return'; result: HandleAccountInputResult };
+  { kind: 'continue'; replay: IncomingFrameReplay } | { kind: 'return'; result: HandleAccountInputResult };
 
 const replayIncomingFrameOnClone = async (
   env: RuntimeState,
@@ -1038,11 +765,7 @@ async function commitIncomingFrameOnRealState(
     candidateEffects,
   );
   if (postCommitAutoRebalanceTxs.length > 0) {
-    appendAccountMempoolTxs(
-      account,
-      postCommitAutoRebalanceTxs,
-      'accountConsensus:postCommitAutoRebalance',
-    );
+    appendAccountMempoolTxs(account, postCommitAutoRebalanceTxs, 'accountConsensus:postCommitAutoRebalance');
     events.push(`🔄 Auto-rebalance queued ${postCommitAutoRebalanceTxs.length} tx(s) after frame commit`);
   }
 }
@@ -1061,8 +784,7 @@ type IncomingFrameAckMaterial = {
 };
 
 type IncomingFrameAckMaterialResult =
-  | { kind: 'continue'; material: IncomingFrameAckMaterial }
-  | { kind: 'return'; result: HandleAccountInputResult };
+  { kind: 'continue'; material: IncomingFrameAckMaterial } | { kind: 'return'; result: HandleAccountInputResult };
 
 const storeAckProofSnapshot = (
   account: AccountState,
@@ -1075,12 +797,7 @@ const storeAckProofSnapshot = (
   account.disputeProofBodiesByHash[proofResult.proofBodyHash] = proofResult.proofBodyStruct;
   storeDisputeArgumentSnapshot(
     account,
-    captureDisputeArgumentSnapshot(
-      account,
-      proofResult.proofBodyHash,
-      signedNonce,
-      proofResult.proofBodyStruct,
-    ),
+    captureDisputeArgumentSnapshot(account, proofResult.proofBodyHash, signedNonce, proofResult.proofBodyStruct),
   );
 };
 
@@ -1129,17 +846,9 @@ async function buildIncomingFrameAckMaterial(
   const proofChanged =
     ackProofResult.proofBodyHash.toLowerCase() !== account.currentDisputeProofBodyHash?.toLowerCase() ||
     Number(account.currentDisputeProofNonce ?? 0) <= Number(account.jNonce ?? 0);
-  const ackSignedNonce = Math.max(
-    Number(account.proofHeader.nextProofNonce ?? 0),
-    Number(account.jNonce ?? 0) + 1,
-  );
+  const ackSignedNonce = Math.max(Number(account.proofHeader.nextProofNonce ?? 0), Number(account.jNonce ?? 0) + 1);
   const ackDisputeHash = proofChanged
-    ? createDisputeProofHashWithNonce(
-      account,
-      ackProofResult.proofBodyHash,
-      ackHankoDomain,
-      ackSignedNonce,
-    )
+    ? createDisputeProofHashWithNonce(account, ackProofResult.proofBodyHash, ackHankoDomain, ackSignedNonce)
     : undefined;
   if (proofChanged) {
     if (!ackDisputeHash) {
@@ -1186,10 +895,7 @@ async function buildIncomingFrameAckMaterial(
   };
 }
 
-function storeAckDisputeState(
-  account: AccountState,
-  material: IncomingFrameAckMaterial,
-): void {
+function storeAckDisputeState(account: AccountState, material: IncomingFrameAckMaterial): void {
   if (material.proofChanged && material.ackDisputeHash) {
     account.currentDisputeProofNonce = material.ackSignedNonce;
     account.currentDisputeProofBodyHash = material.ackProofBodyHash;
@@ -1208,10 +914,7 @@ function buildIncomingFrameReturnPayload(
   timedOutHashlocks: string[],
   committedFrames: AccountCommittedFrame[],
 ): HandleAccountInputResult {
-  const allRevealedSecrets = [
-    ...validation.revealedSecrets,
-    ...(proposeResult?.revealedSecrets || []),
-  ];
+  const allRevealedSecrets = [...validation.revealedSecrets, ...(proposeResult?.revealedSecrets || [])];
   const allSwapOffersCreated = [...validation.swapOffersCreated, ...(proposeResult?.swapOffersCreated || [])];
   const allSwapCancelRequests = [...validation.swapCancelRequests, ...(proposeResult?.swapCancelRequests || [])];
   const allSwapOffersCancelled = [...validation.swapOffersCancelled, ...(proposeResult?.swapOffersCancelled || [])];
@@ -1222,7 +925,13 @@ function buildIncomingFrameReturnPayload(
       context: `account:${input.fromEntityId.slice(-8)}:ack:${receivedFrame.height}`,
     },
     ...(ackDisputeHash
-      ? [{ hash: ackDisputeHash, type: 'dispute' as const, context: `account:${input.fromEntityId.slice(-8)}:ack-dispute` }]
+      ? [
+          {
+            hash: ackDisputeHash,
+            type: 'dispute' as const,
+            context: `account:${input.fromEntityId.slice(-8)}:ack-dispute`,
+          },
+        ]
       : []),
     ...(proposeResult?.hashesToSign || []),
   ];
@@ -1289,9 +998,7 @@ async function buildAckResponseForIncomingFrame(
   );
 }
 
-const classifyPreflightReturn = (
-  result: HandleAccountInputResult,
-): IncomingFrameResult => {
+const classifyPreflightReturn = (result: HandleAccountInputResult): IncomingFrameResult => {
   if (result.success || result.disputeRequired) return { kind: 'return', result };
   return {
     kind: 'return',
@@ -1387,22 +1094,11 @@ async function handleIncomingAccountFrame(
     securityContext,
   );
   if (validationResult.kind === 'return') {
-    return classifyIncomingValidationFailure(
-      account,
-      input,
-      preflight.receivedFrame,
-      validationResult.result,
-    );
+    return classifyIncomingValidationFailure(account, input, preflight.receivedFrame, validationResult.result);
   }
 
   if (preflight.rollbackPendingFrame) {
-    applySameHeightIncomingFrameRollback(
-      env,
-      account,
-      input,
-      preflight.receivedFrame,
-      events,
-    );
+    applySameHeightIncomingFrameRollback(account, preflight.receivedFrame, events);
   }
 
   await commitIncomingFrameOnRealState(
@@ -1459,19 +1155,14 @@ const finishAccountInput = (
   const accountJClaimNodeChanges = session.committedJClaims.changes();
   return {
     ...result,
-    ...(session.candidateEffects.length > 0
-      ? { candidateEffects: session.candidateEffects }
-      : {}),
+    ...(session.candidateEffects.length > 0 ? { candidateEffects: session.candidateEffects } : {}),
     ...(accountJClaimNodeChanges ? { accountJClaimNodeChanges } : {}),
   };
 };
 
 const handleAccountAckPhase = async (
   session: AccountInputSession,
-): Promise<
-  | { kind: 'continue'; ackProcessed: boolean }
-  | { kind: 'return'; result: HandleAccountInputResult }
-> => {
+): Promise<{ kind: 'continue'; ackProcessed: boolean } | { kind: 'return'; result: HandleAccountInputResult }> => {
   const {
     env,
     account,
@@ -1500,11 +1191,7 @@ const handleAccountAckPhase = async (
       result: { success: false, error: (error as Error).message, events },
     };
   }
-  const { ackHeight } = resolveAccountAckTarget(
-    account,
-    input,
-    normalizedInputHeight,
-  );
+  const { ackHeight } = resolveAccountAckTarget(account, input, normalizedInputHeight);
   const pending = await handlePendingFrameAck(
     env,
     account,
@@ -1529,14 +1216,10 @@ const handleAccountAckPhase = async (
     committedFrames,
     'before_frame',
   );
-  return unmatched
-    ? { kind: 'return', result: unmatched }
-    : { kind: 'continue', ackProcessed };
+  return unmatched ? { kind: 'return', result: unmatched } : { kind: 'continue', ackProcessed };
 };
 
-const handleStandaloneDispute = async (
-  session: AccountInputSession,
-): Promise<HandleAccountInputResult> => {
+const handleStandaloneDispute = async (session: AccountInputSession): Promise<HandleAccountInputResult> => {
   const { env, account, input, securityContext, events } = session;
   if (input.kind !== 'dispute') {
     throw new Error(`ACCOUNT_DISPUTE_PHASE_KIND_INVALID:${input.kind}`);
@@ -1603,15 +1286,10 @@ const handleAccountProposalPhase = async (
     candidateEffects,
   );
   if (incoming.kind === 'return') return incoming.result;
-  return handleUnmatchedAck(
-    account,
-    input,
-    normalizedInputHeight,
-    ackProcessed,
-    events,
-    committedFrames,
-    'after_frame',
-  ) ?? null;
+  return (
+    handleUnmatchedAck(account, input, normalizedInputHeight, ackProcessed, events, committedFrames, 'after_frame') ??
+    null
+  );
 };
 
 /**
@@ -1622,14 +1300,15 @@ const resolveAccountInputSecurityContext = (
   env: RuntimeState,
   account: AccountState,
   provided: AccountInputSecurityContext | undefined,
-): AccountInputSecurityContext => provided ?? {
-  entityTimestamp: env.timestamp,
-  owningEntityIsHub: false,
-  // Account never reaches upward into Entity replicas. Normal Entity routing
-  // supplies the current certified height explicitly; direct Account tooling
-  // can only rely on this Account's own committed observation.
-  finalizedJHeight: account.lastFinalizedJHeight ?? 0,
-};
+): AccountInputSecurityContext =>
+  provided ?? {
+    entityTimestamp: env.timestamp,
+    owningEntityIsHub: false,
+    // Account never reaches upward into Entity replicas. Normal Entity routing
+    // supplies the current certified height explicitly; direct Account tooling
+    // can only rely on this Account's own committed observation.
+    finalizedJHeight: account.lastFinalizedJHeight ?? 0,
+  };
 
 export async function applyAccountInput(
   env: RuntimeState,
@@ -1643,11 +1322,7 @@ export async function applyAccountInput(
     return { success: false, error: envelopeError, events: [] };
   }
   if (input.kind === 'txs') return applyLocalAccountInput(account, input);
-  const securityContext = resolveAccountInputSecurityContext(
-    env,
-    account,
-    providedSecurityContext,
-  );
+  const securityContext = resolveAccountInputSecurityContext(env, account, providedSecurityContext);
   if (input.watchSeed !== undefined) {
     const inputWatchSeed = normalizeAccountWatchSeed(input.watchSeed, 'ACCOUNT_INPUT');
     if (account.watchSeed.toLowerCase() !== inputWatchSeed) {
@@ -1685,12 +1360,7 @@ export async function applyAccountInput(
     return finishAccountInput(session, boardReseal);
   }
   const replay = classifyAccountInputReplay(account, input);
-  const replayGateResult = await handleReplayOrObsoleteAccountInput(
-    account,
-    input,
-    replay,
-    events,
-  );
+  const replayGateResult = await handleReplayOrObsoleteAccountInput(account, input, replay, events);
   if (replayGateResult) return replayGateResult;
   const session: AccountInputSession = {
     env,
@@ -1707,10 +1377,7 @@ export async function applyAccountInput(
   };
   const ack = await handleAccountAckPhase(session);
   if (ack.kind === 'return') return finishAccountInput(session, ack.result);
-  const proposalResult = await handleAccountProposalPhase(
-    session,
-    ack.ackProcessed,
-  );
+  const proposalResult = await handleAccountProposalPhase(session, ack.ackProcessed);
   if (proposalResult) return finishAccountInput(session, proposalResult);
   if (HEAVY_LOGS) accountLog.debug('return.no_response');
   return finishAccountInput(session, {
