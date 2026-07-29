@@ -39,25 +39,19 @@ import { getCachedSignerPrivateKey, getLocalSignerPrivateKey } from './../accoun
 import type { Profile } from './../networking/gossip';
 import { normalizeRuntimeId } from './../networking/runtime-id';
 import {
-  buildPendingNetworkOutputs,
-  getReliableOutputIdentity,
   markRestoredReliableOutputsDue,
-  planEntityOutputs,
-  pruneReceiptedReliableOutputs,
-  splitRoutedOutputByDeliveryLane,
-  splitPendingOutputsByRetryWindow,
   type RuntimeOutputRoutingDeps,
 } from '../runtime/output-routing';
 import { refreshScheduledWakeIndex } from '../runtime/scheduled-wake';
 import { ensureRuntimeState } from '../runtime/runtime-state';
 import {
-  applyReliableDeliveryReceipts,
   finalizeReliableIngressCommit,
-  registerReliableIngress,
-  registerReliableReceiptIngress,
-  matchReceiptsToOutputs,
-  type ReliableIngressCommit,
 } from '../runtime/reliable-delivery';
+import {
+  applyCommittedLocalReliableReceipts,
+  applyRecoveryRuntimeOutputPlan,
+  hasPendingLocalReliableOutput,
+} from '../runtime/recovery-output';
 import { restoreDurableOutputRetryState } from '../runtime/durable-output-retry';
 import { registerPendingCommittedJOutbox, splitJOutboxForDurableSubmit } from '../runtime/j-submit-state';
 import { clearReplayOutputSignerHints, installReplayOutputSignerHints } from './../state-helpers';
@@ -922,133 +916,16 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
     }
   };
 
-  const hasPendingLocalReliableOutput = (env: RuntimeState): boolean => {
-    const runtimeId = normalizeRuntimeId(env.runtimeId);
-    if (!runtimeId) return false;
-    return (env.pendingNetworkOutputs ?? []).some(
-      output => normalizeRuntimeId(output.runtimeId) === runtimeId && getReliableOutputIdentity(output) !== null,
-    );
-  };
-
-  const queueLocalOutputsWithReliability = (
-    env: RuntimeState,
-    localOutputs: readonly RoutedEntityInput[],
-  ): RoutedEntityInput[] => {
-    const runtimeId = normalizeRuntimeId(env.runtimeId);
-    if (!runtimeId && localOutputs.some(output => getReliableOutputIdentity(output) !== null)) {
-      throw new Error('RELIABLE_LOCAL_RUNTIME_ID_MISSING');
-    }
-    const inputs: RoutedEntityInput[] = [];
-    const receipts: ReliableDeliveryReceipt[] = [];
-    const retained: RoutedEntityInput[] = [];
-    for (const originatedOutput of localOutputs) {
-      const { sourceRuntimeFrame: _sourceRuntimeFrame, ...output } = originatedOutput;
-      if (!getReliableOutputIdentity(output)) {
-        inputs.push(output);
-        continue;
-      }
-      const deliverable = { ...output, runtimeId: runtimeId! };
-      retained.push(deliverable);
-      const registration = registerReliableIngress(env, runtimeId!, deliverable);
-      if (registration.kind === 'enqueue') inputs.push(deliverable);
-      if (registration.kind === 'receipt') {
-        registerReliableReceiptIngress(env, registration.receipt);
-        receipts.push(registration.receipt);
-      }
-    }
-    enqueueRuntimeContinuation(env, inputs, undefined, undefined, env.timestamp, receipts);
-    return retained;
-  };
-
   const applyDeterministicRuntimeOutputPlan = (
     env: RuntimeState,
     entityOutbox: readonly RoutedEntityInput[],
     outputRoutingDeps: RuntimeOutputRoutingDeps,
-  ) => {
-    const originatedEntityOutbox = entityOutbox.map(output =>
-      output.sourceRuntimeFrame
-        ? output
-        : {
-            ...output,
-            sourceRuntimeFrame: {
-              height: env.height,
-              timestamp: env.timestamp,
-            },
-          },
-    );
-    const pendingBeforePlan = buildPendingNetworkOutputs(
-      pruneReceiptedReliableOutputs(env, [...(env.pendingNetworkOutputs ?? []), ...originatedEntityOutbox]),
-    );
-    const { ready, waiting } = splitPendingOutputsByRetryWindow(env, pendingBeforePlan, outputRoutingDeps);
-    const plan = planEntityOutputs(env, ready, outputRoutingDeps);
-    const retainedLocalReliableOutputs = queueLocalOutputsWithReliability(env, plan.localOutputs);
-    env.pendingNetworkOutputs = buildPendingNetworkOutputs([
-      ...waiting,
-      ...plan.deferredOutputs,
-      ...plan.remoteOutputs.map(({ output }) => output),
-      ...retainedLocalReliableOutputs,
-    ]);
-    return { ...plan, readyPendingOutputs: ready, waitingPendingOutputs: waiting, retainedLocalReliableOutputs };
-  };
-
-  const applyCommittedLocalReliableReceipts = (
-    env: RuntimeState,
-    commits: ReliableIngressCommit[],
-    options: {
-      isReplay?: boolean;
-      replayInputs?: readonly RoutedEntityInput[];
-    } = {},
-  ): void => {
-    const runtimeId = normalizeRuntimeId(env.runtimeId);
-    if (!runtimeId) return;
-    const localCommits: ReliableIngressCommit[] = [];
-    for (const commit of commits) {
-      if (!commit.receipt || !commit.targetRuntimeIds.includes(runtimeId)) continue;
-      // Live execution proves sender ownership through the exact durable outbox
-      // item. Sparse-WAL replay intentionally does not retain pre-frame state;
-      // its authenticated `from === runtimeId` input is the equivalent proof and
-      // the frame's post-state outputs are installed after reducer replay.
-      localCommits.push(commit);
-    }
-    const pendingOutputs = env.pendingNetworkOutputs ?? [];
-    const pendingMatches = matchReceiptsToOutputs(
-      pendingOutputs,
-      localCommits.flatMap(commit => (commit.receipt ? [commit.receipt] : [])),
-    );
-    const selected = new Map<ReliableDeliveryReceipt, RoutedEntityInput>(pendingMatches);
-    if (options.isReplay) {
-      const uncovered = localCommits.filter(commit => commit.receipt && !selected.has(commit.receipt));
-      if (uncovered.length > 0) {
-        const replayInputs = options.replayInputs?.flatMap(splitRoutedOutputByDeliveryLane) ?? [];
-        const replayMatches = matchReceiptsToOutputs(
-          replayInputs,
-          uncovered.flatMap(commit => (commit.receipt ? [commit.receipt] : [])),
-        );
-        for (const commit of uncovered) {
-          const receipt = commit.receipt!;
-          const replayOutput = replayMatches.get(receipt);
-          if (!replayOutput) {
-            throw new Error(
-              `RELIABLE_LOCAL_REPLAY_OUTPUT_PROOF_MISSING:` +
-                `${receipt.body.identity.kind}:${receipt.body.identity.height}`,
-            );
-          }
-          env.pendingNetworkOutputs = [...(env.pendingNetworkOutputs ?? []), replayOutput];
-          selected.set(receipt, replayOutput);
-        }
-      }
-    }
-    const receipts = [...selected.keys()];
-    const selectedSignatures = new Set(receipts.map(receipt => receipt.signature));
-    for (const commit of localCommits) {
-      if (!commit.receipt || !selectedSignatures.has(commit.receipt.signature)) continue;
-      commit.targetRuntimeIds = commit.targetRuntimeIds.filter(target => target !== runtimeId);
-    }
-    if (receipts.length > 0) {
-      const unique = [...new Map(receipts.map(receipt => [receipt.signature, receipt])).values()];
-      applyReliableDeliveryReceipts(env, unique);
-    }
-  };
+  ) => applyRecoveryRuntimeOutputPlan(
+    env,
+    entityOutbox,
+    outputRoutingDeps,
+    enqueueRuntimeContinuation,
+  );
 
   return {
     restoreEnvFromCheckpointSnapshot,
