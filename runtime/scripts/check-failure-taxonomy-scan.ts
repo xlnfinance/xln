@@ -86,6 +86,10 @@ const readText = (path: string): string => {
       'runtime/api/external-wallet/snapshot-handler.ts',
       'runtime/api/external-wallet/tokens-handler.ts',
     ],
+    'runtime/orchestrator/bootstrap-timeline.ts': [
+      'runtime/orchestrator/bootstrap-timeline.ts',
+      'runtime/orchestrator/bootstrap-timeline-stages.ts',
+    ],
     'runtime/__tests__/audit-failfast-regressions.test.ts': [
       'runtime/__tests__/audit-failfast-regressions-part-1.test.ts',
       'runtime/__tests__/audit-failfast-regressions-part-2.test.ts',

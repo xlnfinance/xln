@@ -2129,7 +2129,10 @@ describe('production startup wiring', () => {
   });
 
   test('bootstrap timeline stages expose typed failure metadata', () => {
-    const bootstrapTimeline = readFileSync(join(repoRoot, 'runtime/orchestrator/bootstrap-timeline.ts'), 'utf8');
+    const bootstrapTimeline = [
+      'bootstrap-timeline.ts',
+      'bootstrap-timeline-stages.ts',
+    ].map(file => readFileSync(join(repoRoot, 'runtime/orchestrator', file), 'utf8')).join('\n');
     const types = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator-types.ts'), 'utf8');
     const healthRedaction = readFileSync(join(repoRoot, 'runtime/server/health-redaction.ts'), 'utf8');
 
@@ -2139,7 +2142,8 @@ describe('production startup wiring', () => {
     expect(bootstrapTimeline).toContain(
       'failure: classifyRuntimeBootstrapStageFailure(stage.key, stage.status, stage.reason)',
     );
-    expect(bootstrapTimeline).toContain('].map(withBootstrapStageFailure),');
+    expect(bootstrapTimeline).toContain('].map(');
+    expect(bootstrapTimeline).toContain('withBootstrapStageFailure,');
     expect(healthRedaction).toContain("failure: publicFailureSignal(valueOf(stage, 'failure'))");
   });
 

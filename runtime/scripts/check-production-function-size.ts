@@ -23,8 +23,6 @@ const COORDINATOR_DEBT: Readonly<Record<string, number>> = {
   'runtime/jadapter/rpc-adapter.ts::startWatching': 1040,
   'runtime/jadapter/rpc-adapter.ts::submitTx': 489,
   'runtime/jurisdiction/event-normalization.ts::normalizeJurisdictionEvent': 399,
-  'runtime/orchestrator/bootstrap-timeline.ts::buildBootstrapTimeline': 206,
-  'runtime/orchestrator/bootstrap-timeline.ts::createBootstrapTimelineTools': 339,
   'runtime/orchestrator/hub-node.ts::driveMeshBootstrap': 208,
   'runtime/orchestrator/hub-node.ts::fetch': 323,
   'runtime/orchestrator/hub-node.ts::run': 1064,
