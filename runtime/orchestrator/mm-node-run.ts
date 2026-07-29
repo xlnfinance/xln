@@ -480,6 +480,67 @@ const buildMarketMakerAccountStatusDebug = (
   };
 };
 
+type MarketMakerInfoProjection = {
+  env: RuntimeState;
+  contexts: readonly MarketMakerEntityContext[];
+  tokenIdsByContext: ReadonlyMap<string, number[]>;
+  currentHealth: MarketMakerHealth | null;
+  activeEntityId: string | null;
+  startupPhase: string;
+  readyHash: string | null;
+  runtimeStateHash: string | null;
+  entityStateHash: string | null;
+  restoredEntityStateHash: string | null;
+  readyAt: number | null;
+};
+
+const buildMarketMakerInfoResponseJson = (
+  input: MarketMakerInfoProjection,
+  includeCrossDebug = false,
+): string =>
+  safeStringify({
+    name: resolvedArgs.name,
+    entityId: input.activeEntityId,
+    runtimeId: input.env.runtimeId,
+    apiUrl,
+    relayUrl: resolvedArgs.relayUrl,
+    directWsUrl,
+    startupPhase: input.startupPhase,
+    runtimeBacklog: getMarketMakerRuntimeBacklogSnapshot(input.env, {
+      includeQueuedEntityInputs: includeCrossDebug,
+    }),
+    bootstrap: {
+      readyHash: input.readyHash,
+      runtimeStateHash: input.runtimeStateHash,
+      entityStateHash: input.entityStateHash,
+      restoredEntityStateHash: input.restoredEntityStateHash,
+      readyAt: input.readyAt,
+    },
+    currentHealth: input.currentHealth
+      ? {
+          ok: input.currentHealth.ok,
+          depthComplete: isMarketMakerDepthComplete(input.currentHealth),
+          sameDepthComplete: isMarketMakerSameDepthComplete(input.currentHealth),
+          offers: input.currentHealth.hubs.map(hub => hub.offers),
+          hubBlockers: input.currentHealth.hubs.map(hub => hub.blockers.length),
+          crossOk: input.currentHealth.cross.ok,
+          crossExpectedRoutes: input.currentHealth.cross.expectedRoutes,
+          crossOffers: input.currentHealth.cross.routes.map(route => route.offers),
+          crossBlockers: input.currentHealth.cross.routes.map(route => route.blockers.length),
+        }
+      : null,
+    ...(includeCrossDebug
+      ? {
+          crossDebug: buildMarketMakerCrossDebugSummary(
+            input.env,
+            [...input.contexts],
+            readVisibleHubProfiles(input.env, true),
+            new Map(input.tokenIdsByContext),
+          ),
+        }
+      : {}),
+  });
+
 export const runMarketMakerNode = async (): Promise<void> => {
   activateMarketMakerProcessArgs();
   if (resolvedArgs.dbPath) process.env['XLN_DB_PATH'] = resolvedArgs.dbPath;
@@ -562,49 +623,19 @@ export const runMarketMakerNode = async (): Promise<void> => {
   };
 
   const buildInfoResponseJson = (includeCrossDebug = false): string => {
-    const currentHealth = cachedMarketMakerHealth;
-    return safeStringify({
-      name: resolvedArgs.name,
-      entityId: activeMmEntityId,
-      runtimeId: env.runtimeId,
-      apiUrl,
-      relayUrl: resolvedArgs.relayUrl,
-      directWsUrl,
+    return buildMarketMakerInfoResponseJson({
+      env,
+      contexts: mmContexts,
+      tokenIdsByContext: mmTokenIdsByContext,
+      currentHealth: cachedMarketMakerHealth,
+      activeEntityId: activeMmEntityId,
       startupPhase,
-      runtimeBacklog: getMarketMakerRuntimeBacklogSnapshot(env, {
-        includeQueuedEntityInputs: includeCrossDebug,
-      }),
-      bootstrap: {
-        readyHash: bootstrapReadyHash,
-        runtimeStateHash: bootstrapRuntimeStateHash,
-        entityStateHash: bootstrapEntityStateHash,
-        restoredEntityStateHash,
-        readyAt: bootstrapReadyAt,
-      },
-      currentHealth: currentHealth
-        ? {
-            ok: currentHealth.ok,
-            depthComplete: isMarketMakerDepthComplete(currentHealth),
-            sameDepthComplete: isMarketMakerSameDepthComplete(currentHealth),
-            offers: currentHealth.hubs.map(hub => hub.offers),
-            hubBlockers: currentHealth.hubs.map(hub => hub.blockers.length),
-            crossOk: currentHealth.cross.ok,
-            crossExpectedRoutes: currentHealth.cross.expectedRoutes,
-            crossOffers: currentHealth.cross.routes.map(route => route.offers),
-            crossBlockers: currentHealth.cross.routes.map(route => route.blockers.length),
-          }
-        : null,
-      ...(includeCrossDebug
-        ? {
-            crossDebug: buildMarketMakerCrossDebugSummary(
-              env,
-              mmContexts,
-              readVisibleHubProfiles(env, true),
-              mmTokenIdsByContext,
-            ),
-          }
-        : {}),
-    });
+      readyHash: bootstrapReadyHash,
+      runtimeStateHash: bootstrapRuntimeStateHash,
+      entityStateHash: bootstrapEntityStateHash,
+      restoredEntityStateHash,
+      readyAt: bootstrapReadyAt,
+    }, includeCrossDebug);
   };
 
   const rebuildCachedInfoResponseJson = (): void => {

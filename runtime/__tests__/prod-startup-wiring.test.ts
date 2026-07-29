@@ -1630,8 +1630,9 @@ describe('production startup wiring', () => {
     expect(infoRoute).not.toContain('getMarketMakerRuntimeBacklogSnapshot(env');
     expect(infoRoute).not.toContain('buildMarketMakerCrossDebugSummary(');
     expect(mmNode).toContain('const buildInfoResponseJson = (includeCrossDebug = false): string => {');
-    expect(mmNode).toContain('const currentHealth = cachedMarketMakerHealth;');
-    expect(mmNode).toContain('runtimeBacklog: getMarketMakerRuntimeBacklogSnapshot(env, {');
+    expect(mmNode).toContain('const buildMarketMakerInfoResponseJson = (');
+    expect(mmNode).toContain('currentHealth: input.currentHealth');
+    expect(mmNode).toContain('runtimeBacklog: getMarketMakerRuntimeBacklogSnapshot(input.env, {');
     expect(mmNode).toContain('includeQueuedEntityInputs: includeCrossDebug');
     expect(mmNode).toContain('crossDebug: buildMarketMakerCrossDebugSummary(');
     expect(mmNode).toContain('cachedInfoResponseJson = buildInfoResponseJson(false);');
