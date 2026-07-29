@@ -69,6 +69,14 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   `addToAccountMempool`, `RuntimeSnapshot`, `EntityOutput`, and missing WAL
   rejection of routed local `AccountInput.txs` are already deleted or fenced
   with tests.
+  The later Claude audit of dirty `main@c4f9fab62836` was reverified on current
+  `main`: its typed Runtime-ingress provenance bypass, non-exhaustive Account
+  commitment invalidation, and orphaned same-height collision harness are
+  fixed with targeted evidence. Keep its remaining live findings in their
+  owning tasks below: per-offender quarantine granularity, the always-on cold
+  Account-root cost, an SCC-size ratchet, and typed Runtime frame/live field
+  ownership. Do not copy its stale path counts or reintroduce a second audit
+  backlog.
 - [ ] Make the audit surface mechanically legible after the function split.
   Keep production runtime at zero explicit `any`; drive the exact
   `as unknown as` debt and TypeScript suppression debt to zero through typed
@@ -216,6 +224,12 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   not a new epoch of the existing network. Epoch rotation is a separate local
   history-compaction mechanism for reducing Hub storage weight; it must
   preserve network identity and continuous certified Entity/Account chains.
+  Use one canonical `EncryptedRecoveryBundle` for local files, remote
+  watchtowers, and machine-to-machine transfer. `storage/recovery` owns its
+  deterministic codec and restore; `api/recovery` exposes import/export;
+  `watchtower/recovery` stores and transports the same opaque encrypted bytes.
+  Live WAL/checkpoints are internal working storage, not a competing portable
+  bundle format. Add no versioned compatibility reader or fallback codec.
 - [ ] Make long-term history retention independent per replica. Add certified
   checkpoints containing machine id, height, state root, previous checkpoint
   hash, and certificate; permit each Entity validator/Account peer to prune
@@ -288,7 +302,11 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   commits H+1; classify authenticated terminal protocol rejection separately
   from invariant/storage failure, consume or quarantine it exactly once, and
   never turn an expected nonce/board/order conflict into a global Runtime
-  halt. Keep failures loud and add queued-writer stale-input/rotation tests.
+  halt. A malformed authenticated remote `EntityInput` must quarantine only
+  that exact input; co-batched RuntimeTx/JInput/other EntityInput work remains
+  in original order and is committed or requeued normally. Locally generated
+  invariant failures must never enter the quarantine path. Keep failures loud
+  and add queued-writer stale-input/rotation and mixed-batch retention tests.
 - [ ] Split remaining god-functions by protocol phase and failure boundary:
   `applyEntityInput`, `applyAccountInput`, Runtime scheduler/transport/storage,
   and RPC submit/watch/receipt. Target pure helpers below 50 lines,
@@ -307,7 +325,11 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 - [ ] Enforce an acyclic browser-safe core dependency graph. Keep cloning,
   codecs and state helpers as leaf modules that never import reducers,
   Runtime routing or chain adapters; add a cycle budget that fails on any new
-  cycle crossing Runtime/Entity/Account/J boundaries. Execute SHA-256,
+  cycle crossing Runtime/Entity/Account/J boundaries. Extend the AST gate with
+  a value-import Tarjan SCC ratchet seeded from the current verified maximum,
+  then drive it to one while reverse imports are removed; a folder-direction
+  allowlist alone does not see the current Account/Orderbook/Entity cycle.
+  Execute SHA-256,
   proposal construction and one Account open from the actual browser bundle,
   not only Bun source imports. Programming faults such as `TypeError` must
   preserve their source stack and halt, never be relabelled as rejected input.

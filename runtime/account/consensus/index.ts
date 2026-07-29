@@ -23,7 +23,6 @@ import { isLeft } from '../utils';
 import { HEAVY_LOGS } from '../../utils';
 import { safeStringify } from '../../protocol/serialization';
 import { applyAccountTx } from '../tx/apply';
-import { appendAccountFrameHistoryView, getAccountFrameHistoryView } from '../../runtime/env-events';
 import { deriveAccountFrameTokenIds } from '../frame';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import {
@@ -480,11 +479,6 @@ function describeAccountState(account: AccountState): Record<string, unknown> {
     pendingHash: account.pendingFrame?.stateHash ?? null,
     pendingPrev: account.pendingFrame?.prevFrameHash ?? null,
     pendingTimestamp: Number(account.pendingFrame?.timestamp ?? 0),
-    frameHistoryTail: getAccountFrameHistoryView(account).slice(-3).map((frame) => ({
-      height: Number(frame?.height ?? 0),
-      stateHash: frame?.stateHash ?? null,
-      prevFrameHash: frame?.prevFrameHash ?? null,
-    })),
   };
 }
 
@@ -817,7 +811,6 @@ function installPendingFrameCommit(
 
   const committedFrame = cloneAccountFrame(pendingFrame);
   committedFrames.push({ frame: committedFrame, committedViaNewFrame: false });
-  appendAccountFrameHistoryView(account, committedFrame);
   accountLog.debug('frame.indexed', {
     source: 'ackCommit',
     height: pendingFrame.height,
@@ -1864,7 +1857,6 @@ async function commitIncomingFrameOnRealState(
 
   const committedFrame = cloneAccountFrame(receivedFrame);
   committedFrames.push({ frame: committedFrame, committedViaNewFrame: true });
-  appendAccountFrameHistoryView(account, committedFrame);
   accountLog.debug('frame.indexed', { source: 'peerCommit', height: receivedFrame.height });
 
   events.push(...validation.processEvents);

@@ -7,6 +7,7 @@ import {
   enqueueRuntimeInput,
   loadEnvFromDB,
   processRuntime,
+  readPersistedAccountFrameHistory,
 } from '../runtime.ts';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
 import { generateLazyEntityId } from '../entity/factory';
@@ -224,6 +225,24 @@ async function main() {
     assert(
       restoredAccount.pendingHash === baseline.pendingHash,
       `pendingHash preserved for ${baseline.replicaKey} -> ${baseline.counterpartyId}`,
+    );
+  }
+
+  // Account consensus returns committed frames upward; only Runtime WAL/view
+  // infrastructure persists them. Verify both local replicas materialized the
+  // complete certified chain after reload without any Account-layer DB write.
+  for (const account of after) {
+    const [entityId] = account.replicaKey.split(':');
+    assert(entityId, `entityId missing from replica key ${account.replicaKey}`);
+    const history = await readPersistedAccountFrameHistory(
+      restored,
+      entityId,
+      account.counterpartyId,
+      100,
+    );
+    assert(
+      history.at(-1)?.height === account.currentHeight,
+      `persisted account history reaches H=${account.currentHeight} for ${account.replicaKey}`,
     );
   }
 

@@ -27,7 +27,6 @@ const ROOT_FILE_DEBT = new Set([
 // introduced direction fails, while completed cleanup must remove its entry.
 const REVERSE_DEPENDENCY_DEBT: Readonly<Record<string, number>> = {
   'account->entity': 3,
-  'account->runtime': 1,
   'account->storage': 1,
   'entity->jadapter': 5,
   'entity->networking': 6,
