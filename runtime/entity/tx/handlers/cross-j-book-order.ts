@@ -36,7 +36,8 @@ import {
   removeCrossJurisdictionBookOrderByRouteId,
   resizeCrossJurisdictionBookOrderByRouteId,
 } from '../../../orderbook/cross-j';
-import { cloneEntityState, addMessage } from '../../../state-helpers';
+import { cloneEntityState } from '../../../state-helpers';
+import { addMessage } from '../../frame-events';
 import { findAccountKey } from '../account-key';
 import {
   mergeCrossJurisdictionRoute,

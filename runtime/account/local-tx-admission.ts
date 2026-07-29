@@ -1,5 +1,5 @@
 import { appendAccountMempoolTxs } from './mempool';
-import { txFingerprint } from '../state-helpers';
+import { txFingerprint } from '../protocol/tx-multiset';
 import type { AccountLocalInput, AccountState, AccountTx } from '../types';
 import type { HandleAccountInputResult } from './consensus/types';
 

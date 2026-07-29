@@ -10,7 +10,8 @@
  */
 
 import type { EntityState, EntityTx, EntityInput, RuntimeState, JInput } from '../../../types';
-import { cloneEntityState, addMessage } from '../../../state-helpers';
+import { cloneEntityState } from '../../../state-helpers';
+import { addMessage } from '../../frame-events';
 import { createEmptyBatch, getBatchSize } from '../../../jurisdiction/batch';
 import { createStructuredLogger, shortId } from '../../../infra/logger';
 

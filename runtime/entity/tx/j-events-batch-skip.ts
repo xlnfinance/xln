@@ -1,6 +1,6 @@
 import type { EntityState, JurisdictionEvent } from '../../types';
 import type { BatchOperationSkip, BatchOperationType } from '../../jurisdiction/batch';
-import { addMessage } from '../../state-helpers';
+import { addMessage } from '../frame-events';
 
 const OPERATION_TYPES: readonly BatchOperationType[] = [
   'reserveToReserve',

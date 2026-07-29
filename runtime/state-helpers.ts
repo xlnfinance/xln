@@ -7,7 +7,6 @@ import type {
   AccountFrame,
   AccountState,
   AccountTx,
-  EntityFrameEvent,
   EntityReplica,
   EntityState,
   RuntimeState,
@@ -21,7 +20,7 @@ import type { ProofBodyStruct } from '../jurisdictions/typechain-types/contracts
 import { cloneProofBodyStruct } from './protocol/dispute/proof-body';
 import { validateEntityState } from './entity/state-validation';
 import { validateEntityReplica } from './entity/replica-validation';
-import { safeStringify } from './protocol/serialization';
+import { copyEntityFrameEvents } from './entity/frame-events';
 import {
   cloneIsolatedEntityInput,
   cloneIsolatedEntityLeaderCertificate,
@@ -31,7 +30,6 @@ import {
 import {
   cloneIsolatedAccountFrame,
 } from './protocol/account-input-clone';
-import { isLeftEntity } from './entity/id';
 import { getAccountFrameHistoryView, setAccountFrameHistoryView } from './runtime/env-events';
 import { getLocalSignerPrivateKey } from './account/crypto';
 import { cloneJBatch, type JBatchState } from './jurisdiction/batch';
@@ -50,45 +48,11 @@ import { createStructuredLogger } from './infra/logger';
 import { getEntityLeaderState, isEntityActiveLeader } from './entity/consensus/leader';
 import { forkAccountCommitmentCache } from './account/map-commitment';
 import { forkEntityAccountCommitmentCache } from './entity/consensus/state-root';
-import { ENTITY_FRAME_EVENT_COLLECTOR } from './entity/frame-event-collector';
 
 const stateHelperLog = createStructuredLogger('state.helpers');
 const REPLAY_OUTPUT_SIGNER_HINTS = Symbol.for('xln.runtime.replay.output-signer-hints');
-type EntityStateWithFrameEvents = EntityState & {
-  [ENTITY_FRAME_EVENT_COLLECTOR]?: EntityFrameEvent[];
-};
 type RuntimeStateWithReplaySignerHints = RuntimeState & {
   [REPLAY_OUTPUT_SIGNER_HINTS]?: ReadonlyMap<string, string>;
-};
-
-const mutableEntityFrameEvents = (state: EntityState): EntityFrameEvent[] => {
-  const transient = state as EntityStateWithFrameEvents;
-  if (!transient[ENTITY_FRAME_EVENT_COLLECTOR]) {
-    /*
-     * This frame-local field is deliberately enumerable while the reducer is
-     * running. Entity handlers use ordinary immutable object spreads; a Symbol
-     * or non-enumerable property silently vanished at those boundaries and
-     * could make validators derive different signed event lists. Storage and
-     * state-root projections use explicit field allowlists, so this collector
-     * is never durable consensus state. The next frame clears it before apply.
-     */
-    transient[ENTITY_FRAME_EVENT_COLLECTOR] = [];
-  }
-  return transient[ENTITY_FRAME_EVENT_COLLECTOR]!;
-};
-
-export const readEntityFrameEvents = (state: EntityState): EntityFrameEvent[] =>
-  structuredClone(mutableEntityFrameEvents(state));
-
-export const clearEntityFrameEvents = (state: EntityState): void => {
-  const events = (state as EntityStateWithFrameEvents)[ENTITY_FRAME_EVENT_COLLECTOR];
-  if (events) events.length = 0;
-};
-
-const copyEntityFrameEvents = (source: EntityState, target: EntityState): void => {
-  const events = (source as EntityStateWithFrameEvents)[ENTITY_FRAME_EVENT_COLLECTOR];
-  if (!events) return;
-  (target as EntityStateWithFrameEvents)[ENTITY_FRAME_EVENT_COLLECTOR] = structuredClone(events);
 };
 
 export const installReplayOutputSignerHints = (
@@ -204,14 +168,6 @@ const cloneCrossJurisdictionRoutesInAccount = (account: AccountState, source: Ac
 };
 
 /**
- * CANONICAL ACCOUNT KEY: Bilateral accounts stored in sorted form (left < right)
- * Pattern from Channel.ts - ensures both entities reference SAME account object
- */
-export function canonicalAccountKey(entity1: string, entity2: string): string {
-  return isLeftEntity(entity1, entity2) ? `${entity1}:${entity2}` : `${entity2}:${entity1}`;
-}
-
-/**
  * Get account perspective: Am I left or right? Derive from/to for current operation.
  */
 export function getAccountPerspective(account: AccountState, myEntityId: string): {
@@ -227,76 +183,6 @@ export function getAccountPerspective(account: AccountState, myEntityId: string)
     to: iAmLeft ? account.rightEntity : account.leftEntity,
     counterparty: iAmLeft ? account.rightEntity : account.leftEntity,
   };
-}
-
-/**
- * Record a signed frame event without retaining an ever-growing log in state.
- *
- * Events are part of the proposed Entity frame, verified by every validator,
- * and persisted by the Runtime history writer after commit. EntityState keeps
- * only data needed to derive the next transition.
- */
-export function addMessage(state: EntityState, message: string): void {
-  mutableEntityFrameEvents(state).push({ type: 'status', message });
-}
-
-export function addTextMessage(state: EntityState, validatorId: string, message: string): void {
-  mutableEntityFrameEvents(state).push({
-    type: 'text',
-    validatorId: validatorId.trim().toLowerCase(),
-    message,
-  });
-}
-
-export const readEntityFrameEventMessages = (state: EntityState): string[] =>
-  readEntityFrameEvents(state).map(event =>
-    event.type === 'text' ? `${event.validatorId}: ${event.message}` : event.message
-  );
-
-/**
- * Add multiple signed frame events in deterministic order.
- */
-export function addMessages(state: EntityState, messages: string[]): void {
-  for (const msg of messages) {
-    addMessage(state, msg);
-  }
-}
-
-type FingerprintableTx = {
-  type: string;
-  data?: unknown;
-};
-
-export function txFingerprint(tx: FingerprintableTx): string {
-  if (tx.type !== 'consensusOutput' || !tx.data || typeof tx.data !== 'object' || Array.isArray(tx.data)) {
-    return `${tx.type}:${safeStringify(tx.data)}`;
-  }
-  // consumptionProof is a target-proposer witness over the target pre-state.
-  // It is deliberately absent from the transported mempool item and added only
-  // to the proposed frame. Including it would make a committed output impossible
-  // to remove from the mempool, causing an endless idempotent replay loop.
-  const { consumptionProof: _targetWitness, ...certifiedOutput } = tx.data as Record<string, unknown>;
-  return `${tx.type}:${safeStringify(certifiedOutput)}`;
-}
-
-export function removeCommittedTxsFromMempool<T extends FingerprintableTx>(
-  mempool: T[],
-  committedTxs: readonly T[],
-): T[] {
-  if (committedTxs.length === 0 || mempool.length === 0) return mempool;
-  const pendingRemovals = new Map<string, number>();
-  for (const tx of committedTxs) {
-    const fp = txFingerprint(tx);
-    pendingRemovals.set(fp, (pendingRemovals.get(fp) ?? 0) + 1);
-  }
-  return mempool.filter((tx) => {
-    const fp = txFingerprint(tx);
-    const remaining = pendingRemovals.get(fp) ?? 0;
-    if (remaining <= 0) return true;
-    if (remaining === 1) pendingRemovals.delete(fp);
-    else pendingRemovals.set(fp, remaining - 1);
-    return false;
-  });
 }
 
 const cloneJBatchState = (state: JBatchState): JBatchState => {
@@ -396,10 +282,6 @@ export function resolveEntityProposerId(env: RuntimeState, entityId: string, con
 
   throw new Error(`SIGNER_RESOLUTION_FAILED: ${context} entityId=${entityId}`);
 }
-
-// === CLONING UTILITIES ===
-export const cloneMap = <K, V>(map: Map<K, V>) => new Map(map);
-export const cloneArray = <T>(arr: T[]) => [...arr];
 
 const cloneLendingPoolPosition = (position: LendingPoolPosition): LendingPoolPosition => ({
   ...position,
@@ -635,7 +517,7 @@ const cloneEntityReplicaWithPolicy = (
     state: validateClone
       ? cloneEntityState(replica.state, forSnapshot)
       : cloneTrustedEntityState(replica.state, forSnapshot),
-    mempool: Array.isArray(replica.mempool) ? cloneArray(replica.mempool) : [],
+    mempool: Array.isArray(replica.mempool) ? [...replica.mempool] : [],
     ...(replica.proposal && { proposal: cloneIsolatedProposedEntityFrame(replica.proposal) }),
     ...(replica.lockedFrame && { lockedFrame: cloneIsolatedProposedEntityFrame(replica.lockedFrame) }),
     isProposer: replica.isProposer,

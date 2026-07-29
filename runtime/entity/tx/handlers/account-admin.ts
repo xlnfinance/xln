@@ -1,7 +1,8 @@
 import type { AccountTx, EntityInput, EntityState, EntityTx, RuntimeState } from '../../../types';
 import { createStructuredLogger, shortId } from '../../../infra/logger';
 import { normalizeRebalanceMatchingStrategy } from '../../../extensions/rebalance/policy';
-import { cloneEntityState, addMessage } from '../../../state-helpers';
+import { cloneEntityState } from '../../../state-helpers';
+import { addMessage } from '../../frame-events';
 import { checkAutoRebalance } from '../../../account/tx/handlers/request-collateral';
 import {
   assertNoTokenlessHubRawOverrides,

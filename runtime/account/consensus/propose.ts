@@ -4,7 +4,7 @@
  */
 
 import type { AccountState, AccountTx, RuntimeState } from '../../types';
-import { removeCommittedTxsFromMempool } from '../../state-helpers';
+import { removeCommittedTxsFromMempool } from '../../protocol/tx-multiset';
 import { getPerfMs, HEAVY_LOGS } from '../../utils';
 import { createStructuredLogger, shortId } from '../../infra/logger';
 import type { ProposeAccountFrameResult } from './types';

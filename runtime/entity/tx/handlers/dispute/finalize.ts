@@ -5,7 +5,8 @@ import type {
   EntityTx,
   RuntimeState,
 } from '../../../../types';
-import { addMessage, cloneEntityState } from '../../../../state-helpers';
+import { cloneEntityState } from '../../../../state-helpers';
+import { addMessage } from '../../../frame-events';
 import {
   batchAddRevealSecret,
   encodeJBatch,

@@ -9,7 +9,7 @@ import type {
 import { keccak256, toUtf8Bytes } from 'ethers';
 import { hasEntityCommitCertificate } from '../../protocol/signatures';
 import { normalizeRuntimeId } from '../../networking/runtime-id';
-import { txFingerprint } from '../../state-helpers';
+import { txFingerprint } from '../../protocol/tx-multiset';
 import { compareStableText, safeStringify } from '../../protocol/serialization';
 import { buildPreparedFrameEvidence, hashEntityLeaderVoteBody } from '../../entity/consensus/leader';
 import { hashJPrefixAttestation } from '../../jurisdiction/j-prefix-consensus';

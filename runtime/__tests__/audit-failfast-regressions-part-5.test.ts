@@ -1,5 +1,5 @@
 import { describe, expect, spyOn, test } from 'bun:test';
-import { readEntityFrameEventMessages } from '../state-helpers';
+import { readEntityFrameEventMessages } from '../entity/frame-events';
 
 import { x25519 } from '@noble/curves/ed25519.js';
 

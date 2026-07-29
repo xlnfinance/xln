@@ -1,5 +1,6 @@
 import type { AccountState, AccountTx, EntityInput, EntityState, EntityTx, RuntimeState } from '../../../types';
-import { cloneEntityState, addMessage } from '../../../state-helpers';
+import { cloneEntityState } from '../../../state-helpers';
+import { addMessage } from '../../frame-events';
 import {
   cloneCrossJurisdictionRoute,
   isCrossJurisdictionRouteExpired,

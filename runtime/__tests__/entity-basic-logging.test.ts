@@ -6,7 +6,7 @@ import { handleProposeEntityTx, handleVoteEntityTx } from '../entity/tx/handlers
 import { deriveSignerAddressSync } from '../account/crypto';
 import { generateLazyEntityId } from '../entity/factory';
 import { createEmptyEnv } from '../runtime';
-import { readEntityFrameEventMessages } from '../state-helpers';
+import { readEntityFrameEventMessages } from '../entity/frame-events';
 import type { EntityState, EntityTx } from '../types';
 
 test('basic entity proposal and vote traces stay behind structured logging', () => {

@@ -5,7 +5,7 @@ import {
   accountInputReferenceHeight,
 } from '../../../../account/consensus/flush';
 import { createStructuredLogger, shortId } from '../../../../infra/logger';
-import { addMessage } from '../../../../state-helpers';
+import { addMessage } from '../../../frame-events';
 
 const accountHandlerLog = createStructuredLogger('account.handler');
 

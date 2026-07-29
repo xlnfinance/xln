@@ -1,5 +1,6 @@
 import type { EntityInput, EntityState, EntityTx, RuntimeState, JInput } from '../../../types';
-import { addMessage, cloneEntityState } from '../../../state-helpers';
+import { cloneEntityState } from '../../../state-helpers';
+import { addMessage } from '../../frame-events';
 import { createEmptyBatch, getBatchSize, mergeBatchOps } from '../../../jurisdiction/batch';
 import { createStructuredLogger, shortId } from '../../../infra/logger';
 

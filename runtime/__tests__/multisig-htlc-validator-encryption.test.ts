@@ -1,5 +1,5 @@
 import { describe, expect, spyOn, test } from 'bun:test';
-import { readEntityFrameEventMessages } from '../state-helpers';
+import { readEntityFrameEventMessages } from '../entity/frame-events';
 import { SigningKey, computeAddress, keccak256, recoverAddress } from 'ethers';
 import {
   clearSignerKeys,

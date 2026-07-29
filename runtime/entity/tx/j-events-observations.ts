@@ -1,4 +1,4 @@
-import { addMessage } from '../../state-helpers';
+import { addMessage } from '../frame-events';
 import { getTokenInfo } from '../../account/utils';
 import {
   applySignerEntityExternalWalletDelta,

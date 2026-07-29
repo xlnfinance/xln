@@ -4,7 +4,7 @@ import type {
   EntityTx,
   RuntimeState,
 } from '../../../../types';
-import { addMessage } from '../../../../state-helpers';
+import { addMessage } from '../../../frame-events';
 import { initJBatch } from '../../../../jurisdiction/batch';
 import { freezeAccountForDispute } from '../../../../account/consensus/dispute-policy';
 import {

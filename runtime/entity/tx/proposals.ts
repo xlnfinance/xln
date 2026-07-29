@@ -3,7 +3,7 @@ import { createHash } from '../../utils';
 import { safeStringify } from '../../protocol/serialization';
 import { createStructuredLogger, shortHash } from '../../infra/logger';
 import { canonicalEntityBoardSignerId, hashEntityProposalAction } from '../authorization';
-import { addMessage } from '../../state-helpers';
+import { addMessage } from '../frame-events';
 import { nextEntityCommandNonce, resolveEntityCommandBoard } from '../command';
 import { LIMITS } from '../../constants';
 

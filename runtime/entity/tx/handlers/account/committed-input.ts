@@ -12,7 +12,8 @@ import {
   accountInputProposal,
   accountInputReferenceHeight,
 } from '../../../../account/consensus/flush';
-import { addMessages, emitScopedEvents } from '../../../../state-helpers';
+import { emitScopedEvents } from '../../../../state-helpers';
+import { addMessages } from '../../../frame-events';
 import { createStructuredLogger, shortId } from '../../../../infra/logger';
 import { scheduleHook } from '../../../scheduler';
 import { upsertSortedStringMapEntry } from '../../../../infra/sorted-map-index';

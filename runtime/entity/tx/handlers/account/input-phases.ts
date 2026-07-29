@@ -10,7 +10,7 @@ import {
   accountInputProposal,
   accountInputReferenceHeight,
 } from '../../../../account/consensus/flush';
-import { addMessage } from '../../../../state-helpers';
+import { addMessage } from '../../../frame-events';
 import { createStructuredLogger, shortId } from '../../../../infra/logger';
 import {
   getCertifiedBoardNodeStore,

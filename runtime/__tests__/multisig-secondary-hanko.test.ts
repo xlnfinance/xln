@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { readEntityFrameEventMessages } from '../state-helpers';
+import { readEntityFrameEventMessages } from '../entity/frame-events';
 
 import { accountInputProposal } from '../account/consensus/flush';
 import { replaceLocalDisputeDraft } from '../account/consensus/dispute-seal';

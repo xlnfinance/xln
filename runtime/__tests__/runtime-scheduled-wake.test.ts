@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { readEntityFrameEventMessages } from '../state-helpers';
+import { readEntityFrameEventMessages } from '../entity/frame-events';
 
 import {
   ACCOUNT_MAINTENANCE_INTERVAL_MS,

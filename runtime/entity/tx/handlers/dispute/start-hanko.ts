@@ -3,7 +3,7 @@ import type {
   EntityState,
   RuntimeState,
 } from '../../../../types';
-import { addMessage } from '../../../../state-helpers';
+import { addMessage } from '../../../frame-events';
 import { createDisputeProofHashWithNonce } from '../../../../protocol/dispute/proof-builder';
 import { buildAccountProofBodyFromEnv } from '../../../../account/consensus/helpers';
 import { verifyHankoForHash } from '../../../../hanko/signing';

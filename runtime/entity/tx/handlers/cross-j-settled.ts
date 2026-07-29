@@ -5,7 +5,8 @@ import {
   transitionCrossJurisdictionRouteStatus,
 } from '../../../extensions/cross-j/index';
 import { decodeHashLadderBinary } from '../../../protocol/htlc/hash-ladder';
-import { addMessage, cloneEntityState } from '../../../state-helpers';
+import { cloneEntityState } from '../../../state-helpers';
+import { addMessage } from '../../frame-events';
 import type { EntityInput, EntityState, EntityTx } from '../../../types';
 
 type CrossJurisdictionSettledTx = Extract<EntityTx, { type: 'crossJurisdictionSettled' }>;

@@ -4,7 +4,7 @@ import type {
   RuntimeState,
 } from '../../../../types';
 import type { ProofBodyStruct } from '../../../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
-import { addMessage } from '../../../../state-helpers';
+import { addMessage } from '../../../frame-events';
 import {
   assertDisputeArgumentsWithinContractLimits,
   assertDisputeProofBodyWithinContractLimits,

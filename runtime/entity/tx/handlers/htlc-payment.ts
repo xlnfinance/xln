@@ -16,7 +16,8 @@ import type {
   EntityTx,
   RuntimeState,
 } from '../../../types';
-import { addMessage, cloneEntityState } from '../../../state-helpers';
+import { cloneEntityState } from '../../../state-helpers';
+import { addMessage } from '../../frame-events';
 import { deriveDelta } from '../../../account/utils';
 import { validatePreparedHtlcPayment } from '../../htlc/payment-admission';
 import { createStructuredLogger, formatAmount, shortHash, shortId } from '../../../infra/logger';

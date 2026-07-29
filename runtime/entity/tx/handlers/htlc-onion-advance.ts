@@ -6,7 +6,8 @@ import {
   type HtlcOnionAdvanceTx,
 } from '../../../protocol/htlc/onion-advance';
 import { calculateDirectionalFeePPM, calculateHopFee, sanitizeBaseFee, sanitizeFeePPM } from '../../../routing/fees';
-import { addMessage, cloneEntityState } from '../../../state-helpers';
+import { cloneEntityState } from '../../../state-helpers';
+import { addMessage } from '../../frame-events';
 import type {
   AccountTx,
   EntityCandidateEffect,

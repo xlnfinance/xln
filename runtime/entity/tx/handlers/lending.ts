@@ -1,6 +1,7 @@
 import type { AccountTx, EntityInput, EntityState, EntityTx } from '../../../types';
 import { normalizeInterestBps, normalizeLendingTerm } from '../../../extensions/lending';
-import { addMessage, cloneEntityState } from '../../../state-helpers';
+import { cloneEntityState } from '../../../state-helpers';
+import { addMessage } from '../../frame-events';
 import type { AccountTxTarget } from './account';
 
 type EntityTxOf<T extends EntityTx['type']> = Extract<EntityTx, { type: T }>;

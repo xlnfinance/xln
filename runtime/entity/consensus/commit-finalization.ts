@@ -1,7 +1,7 @@
 import { cacheCommittedAccountJClaimNodeChanges } from '../../account/j-claim-store';
 import { buildQuorumHanko } from '../../hanko/signing';
 import { logError, shortHash, shortId } from '../../infra/logger';
-import { removeCommittedTxsFromMempool } from '../../state-helpers';
+import { removeCommittedTxsFromMempool } from '../../protocol/tx-multiset';
 import type {
   EntityState,
   HankoString,

@@ -5,7 +5,7 @@ import type {
   EntityState,
   RuntimeState,
 } from '../../types';
-import { addMessage } from '../../state-helpers';
+import { addMessage } from '../frame-events';
 import { decodeHashLadderBinary } from '../../protocol/htlc/hash-ladder';
 import { CROSS_J_MAX_FILL_RATIO, isCrossJurisdictionTerminalStatus } from '../../extensions/cross-j/index';
 import { createStructuredLogger, shortHash } from '../../infra/logger';

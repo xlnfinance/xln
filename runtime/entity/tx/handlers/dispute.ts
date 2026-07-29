@@ -15,7 +15,8 @@ import type {
   RuntimeOverlayRecord,
   SwapOffer,
 } from '../../../types';
-import { addMessage, cloneEntityState } from '../../../state-helpers';
+import { cloneEntityState } from '../../../state-helpers';
+import { addMessage } from '../../frame-events';
 import { freezeAccountForDispute } from '../../../account/consensus/dispute-policy';
 import { removeBookOrderById } from '../../../orderbook/cross-j';
 import { swapKey } from '../../../orderbook/swap-keys';

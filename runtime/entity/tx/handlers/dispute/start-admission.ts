@@ -3,7 +3,7 @@ import type {
   EntityState,
   EntityTx,
 } from '../../../../types';
-import { addMessage } from '../../../../state-helpers';
+import { addMessage } from '../../../frame-events';
 import { initJBatch } from '../../../../jurisdiction/batch';
 import { isCrossJurisdictionTerminalStatus } from '../../../../extensions/cross-j';
 import { freezeAccountForDispute } from '../../../../account/consensus/dispute-policy';

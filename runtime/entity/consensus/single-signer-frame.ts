@@ -3,7 +3,7 @@ import { cacheCommittedAccountJClaimNodeChanges } from '../../account/j-claim-st
 import { signEntityHashes } from '../../hanko/signing';
 import { cumulativeMarksToPhases } from '../../infra/perf-profile';
 import { assertFrameJPrefix } from '../../jurisdiction/j-prefix-consensus';
-import { removeCommittedTxsFromMempool } from '../../state-helpers';
+import { removeCommittedTxsFromMempool } from '../../protocol/tx-multiset';
 import type { ProposedEntityFrame } from '../../types';
 import { getPerfMs } from '../../utils';
 import { cacheCommittedConsumptionNodeChanges } from '../consumption-store';

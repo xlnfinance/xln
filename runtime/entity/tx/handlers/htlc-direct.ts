@@ -2,7 +2,8 @@ import { getEntityCertifiedJurisdictionHeight } from '../../../jurisdiction/heig
 import { generateLockId, hashHtlcSecret } from '../../../protocol/htlc/utils';
 import type { EntityInput, EntityState, EntityTx, RuntimeState } from '../../../types';
 import { formatEntityId } from '../../../utils';
-import { cloneEntityState, addMessage } from '../../../state-helpers';
+import { cloneEntityState } from '../../../state-helpers';
+import { addMessage } from '../../frame-events';
 import { findAccountKey } from '../account-key';
 import type { AccountTxTarget } from './account';
 import { persistVerifiedHtlcSecret, setHtlcRouteNote } from '../htlc-route-lifecycle';

@@ -30,15 +30,8 @@ import { mergeStorageOverlayRecords } from '../../protocol/overlay';
 import { compareStableText, safeStringify } from '../../protocol/serialization';
 import { getNextSettlementNonce } from '../../protocol/settlement/operations';
 import { assertScheduledWakeFrameOrder } from '../scheduled-wake-validation';
-import {
-  addMessages,
-  clearEntityFrameEvents,
-  cloneEntityState,
-  emitScopedEvents,
-  getAccountPerspective,
-  readEntityFrameEvents,
-  resolveEntityProposerId,
-} from '../../state-helpers';
+import { cloneEntityState, emitScopedEvents, getAccountPerspective, resolveEntityProposerId } from '../../state-helpers';
+import { addMessages, clearEntityFrameEvents, readEntityFrameEvents } from '../frame-events';
 import type {
   AccountPeerInput,
   AccountState,

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { readEntityFrameEventMessages } from '../state-helpers';
+import { readEntityFrameEventMessages } from '../entity/frame-events';
 
 import { getJEventJurisdictionRef } from '../jurisdiction/event-observation';
 import { decode, encode } from '../storage/snapshot-coder';

@@ -1,5 +1,5 @@
 import type { EntityCandidateEffect } from '../../types';
-import { addMessage } from '../../state-helpers';
+import { addMessage } from '../frame-events';
 import { getTokenInfo } from '../../account/utils';
 import { normalizeJurisdictionEvents } from '../../jurisdiction/event-normalization';
 import { createStructuredLogger, shortId } from '../../infra/logger';

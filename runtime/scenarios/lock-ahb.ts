@@ -29,7 +29,7 @@ import { drainJWatcherBacklog } from '../jadapter/backlog-drain';
 import { mineRpcToBlockExact } from './rpc-block-mining';
 import { withDeterministicHtlcTestSecret } from '../protocol/htlc/test-secret-capability';
 import { htlcRouteConvergenceCycleBudget } from './test-economy';
-import { readEntityFrameEventMessages } from '../state-helpers';
+import { readEntityFrameEventMessages } from '../entity/frame-events';
 
 const USDC_TOKEN_ID = 1;
 const HUB_INITIAL_RESERVE = usd(10_000_000);

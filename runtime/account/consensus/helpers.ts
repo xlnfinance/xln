@@ -1,6 +1,6 @@
 import type { AccountState, AccountTx, Delta, EntityCandidateEffect, RuntimeState } from '../../types';
 import { createStructuredLogger } from '../../infra/logger';
-import { txFingerprint } from '../../state-helpers';
+import { txFingerprint } from '../../protocol/tx-multiset';
 import {
   checkAutoRebalance,
   resolveAutoRebalanceFeePolicy,

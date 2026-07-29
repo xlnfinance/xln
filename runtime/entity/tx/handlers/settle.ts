@@ -20,7 +20,8 @@ import type {
   SettlementDiff,
   SettlementWorkspace,
 } from '../../../types';
-import { cloneEntityState, addMessage, getAccountPerspective } from '../../../state-helpers';
+import { cloneEntityState, getAccountPerspective } from '../../../state-helpers';
+import { addMessage } from '../../frame-events';
 import { initJBatch, batchAddSettlement } from '../../../jurisdiction/batch';
 import { isLeftEntity } from '../../id';
 import type { RuntimeState, HashToSign } from '../../../types';

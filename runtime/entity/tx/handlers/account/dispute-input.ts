@@ -6,7 +6,7 @@ import type {
   RuntimeState,
 } from '../../../../types';
 import type { HandleAccountInputResult } from '../../../../account/consensus/types';
-import { addMessage } from '../../../../state-helpers';
+import { addMessage } from '../../../frame-events';
 import { armHtlcSecretAckTimeout, persistVerifiedHtlcSecret } from '../../htlc-route-lifecycle';
 import { handlePrepareDispute } from '../dispute';
 import type { CommittedAccountEffects } from './committed-input';

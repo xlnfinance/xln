@@ -5,7 +5,8 @@ import {
   getCrossJurisdictionCommittedProofRatio,
   requireCrossJurisdictionFillProgress,
 } from '../../../extensions/cross-j/index';
-import { cloneEntityState, addMessage } from '../../../state-helpers';
+import { cloneEntityState } from '../../../state-helpers';
+import { addMessage } from '../../frame-events';
 import type { CrossJurisdictionSwapRoute, EntityInput, EntityState, EntityTx } from '../../../types';
 import { findAccountKey, normalizeEntityRef } from '../account-key';
 import type { AccountTxTarget } from './account';

@@ -3,7 +3,7 @@ import {
   initJBatch,
   isBatchEmpty,
 } from '../../jurisdiction/batch';
-import { addMessage } from '../../state-helpers';
+import { addMessage } from '../frame-events';
 import { createStructuredLogger } from '../../infra/logger';
 
 const jEventBatchLog = createStructuredLogger('j.event.batch');

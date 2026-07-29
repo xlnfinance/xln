@@ -9,7 +9,8 @@ import {
 import { verifyHashLadderBinary } from '../../../protocol/htlc/hash-ladder';
 import { buildCrossJurisdictionCancelAck } from '../../../extensions/cross-j/orderbook';
 import { removeBookOrderById } from '../../../orderbook/cross-j';
-import { cloneEntityState, addMessage } from '../../../state-helpers';
+import { cloneEntityState } from '../../../state-helpers';
+import { addMessage } from '../../frame-events';
 import type { CrossJurisdictionSwapRoute, EntityInput, EntityState, EntityTx, RuntimeState, RuntimeOverlayRecord } from '../../../types';
 import { formatEntityId } from '../../../utils';
 import { findAccountKey, normalizeEntityRef } from '../account-key';

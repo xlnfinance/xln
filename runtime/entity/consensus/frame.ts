@@ -14,7 +14,7 @@ import {
 } from './state-root';
 import { LIMITS } from '../../constants';
 import { assertNoConsensusVisibleHtlcPaymentSecrets } from '../../protocol/htlc/consensus-secret-guard';
-import { readEntityFrameEvents } from '../../state-helpers';
+import { readEntityFrameEvents } from '../frame-events';
 import { assertEntityFrameEventByteBudget } from './frame-events';
 
 export const MAX_ENTITY_FRAME_TX_BYTES = LIMITS.MAX_FRAME_SIZE_BYTES;

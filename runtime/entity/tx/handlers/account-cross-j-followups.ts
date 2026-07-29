@@ -30,7 +30,7 @@ import {
 import { decodeHashLadderBinary } from '../../../protocol/htlc/hash-ladder';
 import { createStructuredLogger, shortId, shortOrder } from '../../../infra/logger';
 import { removeCrossJurisdictionBookOrder } from '../../../orderbook/cross-j';
-import { addMessage } from '../../../state-helpers';
+import { addMessage } from '../../frame-events';
 import {
   buildCrossJurisdictionEntityOutput,
   crossJurisdictionRouteSignerHint,

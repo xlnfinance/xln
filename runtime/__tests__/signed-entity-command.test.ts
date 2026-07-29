@@ -26,7 +26,7 @@ import {
   hashEntityProposalAction,
 } from '../entity/authorization';
 import { applyEntityFrame, applyEntityInput } from '../entity/consensus';
-import { readEntityFrameEventMessages } from '../state-helpers';
+import { readEntityFrameEventMessages } from '../entity/frame-events';
 import {
   buildCertifiedEntityOutputHashes,
   hashCertifiedEntityOutputSemantic,

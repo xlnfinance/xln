@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { readEntityFrameEventMessages } from '../state-helpers';
+import { readEntityFrameEventMessages } from '../entity/frame-events';
 
 import { handleDisputeFinalize } from '../entity/tx/handlers/dispute';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';

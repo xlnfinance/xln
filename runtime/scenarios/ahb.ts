@@ -29,7 +29,7 @@ import { formatRuntime } from '../qa/runtime-ascii';
 import { deriveDelta, isLeft } from '../account/utils';
 import { createGossipLayer } from '../networking/gossip';
 import { compareStableText, safeStringify } from '../protocol/serialization';
-import { readEntityFrameEventMessages } from '../state-helpers';
+import { readEntityFrameEventMessages } from '../entity/frame-events';
 import { ethers } from 'ethers';
 import {
   AHB_DEBUG,

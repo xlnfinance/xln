@@ -5,7 +5,7 @@ import type {
   EntityProviderActionIntent,
   EntityProviderActionState,
 } from '../../types/entity-provider-actions';
-import { addMessage } from '../../state-helpers';
+import { addMessage } from '../frame-events';
 import { entityProviderActionKindCode } from '../entity-provider-action';
 
 const MAX_UINT256 = (1n << 256n) - 1n;
