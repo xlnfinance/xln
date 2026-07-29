@@ -2385,24 +2385,17 @@ const runReset = async (options: OrchestratorResetOptions = configuredResetOptio
     await waitForHubBaseline();
     finishTiming('reset_wait_hubs', waitStartedAt);
 
-    let marketMakerBootstrapError: unknown = null;
     const shouldStartMarketMaker = args.mmEnabled && options.enableMarketMaker;
-    const marketMakerReady = shouldStartMarketMaker ? (async (): Promise<void> => {
+    if (shouldStartMarketMaker) {
       const marketMakerStartedAt = startTiming('reset_market_maker');
       try {
         await spawnMarketMaker();
         await waitForMarketMakerReady();
-      } catch (error) {
-        marketMakerBootstrapError = error;
       } finally {
         finishTiming('reset_market_maker', marketMakerStartedAt);
       }
-    })() : null;
+    }
 
-    if (marketMakerReady) await marketMakerReady;
-    if (marketMakerBootstrapError) throw marketMakerBootstrapError;
-
-    let custodyBootstrapError: unknown = null;
     if (args.custodyEnabled && options.enableCustody) {
       const custodyStartedAt = startTiming('reset_custody');
       try {
@@ -2424,14 +2417,12 @@ const runReset = async (options: OrchestratorResetOptions = configuredResetOptio
           jurisdictionId: primaryJurisdiction.key,
         });
       } catch (error) {
-        custodyBootstrapError = error;
         meshLog.error('custody.bootstrap_failed', { error: serializeError(error) });
+        throw error;
       } finally {
         finishTiming('reset_custody', custodyStartedAt);
       }
     }
-
-    if (custodyBootstrapError) throw custodyBootstrapError;
 
     activeResetOptions = resolveActiveResetOptions(configuredResetOptions, options);
     finishTiming('reset_total', resetTotalStartedAt);

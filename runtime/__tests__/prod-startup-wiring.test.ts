@@ -2351,7 +2351,7 @@ describe('production startup wiring', () => {
   test('custody bootstrap waits until market maker readiness completes', () => {
     const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
     const custodyBootstrapSource = readFileSync(join(repoRoot, 'runtime/orchestrator/custody-bootstrap.ts'), 'utf8');
-    const marketMakerAwait = orchestrator.indexOf('if (marketMakerReady) await marketMakerReady;');
+    const marketMakerAwait = orchestrator.indexOf('await waitForMarketMakerReady();');
     const custodyBootstrap = orchestrator.indexOf('custodySupport = await startCustodySupport({');
     expect(marketMakerAwait).toBeGreaterThan(0);
     expect(custodyBootstrap).toBeGreaterThan(marketMakerAwait);
