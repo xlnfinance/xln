@@ -30,7 +30,6 @@ import { assertAccountFrameDeltaIntegrity } from './account/frame';
 import type {
   ConsensusConfig,
   Delta,
-  DeliverableEntityInput,
   RoutedEntityInput,
   EntityReplica,
   EntityState,
@@ -378,63 +377,6 @@ export function decodeRoutedEntityInput(input: unknown): RoutedEntityInput {
   }
 
   return obj as unknown as RoutedEntityInput;
-}
-
-/**
- * Decode an Entity reducer output into the same routed input envelope consumed
- * by the destination Entity replica. "Output" is a direction, not a second
- * wire type: the bytes remain one canonical RoutedEntityInput.
- */
-export function decodeRoutedEntityOutput(output: unknown): RoutedEntityInput {
-  const obj = validateObject(output, 'RoutedEntityOutput');
-
-  if (typeof obj['entityId'] !== 'string' || obj['entityId'].length === 0) {
-    throw new Error(`FINANCIAL-SAFETY: EntityOutput entityId is missing - routing corruption`);
-  }
-
-  if (typeof obj['signerId'] !== 'string' || obj['signerId'].trim().length === 0) {
-    throw new Error(
-      `FINANCIAL-SAFETY: EntityOutput signerId is missing - routed outputs must target an exact signer replica`,
-    );
-  }
-
-  return obj as unknown as RoutedEntityInput;
-}
-
-/**
- * CRITICAL: Validate a network-deliverable entity input.
- * These inputs must already have a resolved runtimeId before leaving the local runtime.
- */
-export function validateDeliverableEntityInput(output: unknown): DeliverableEntityInput {
-  const validated = decodeRoutedEntityOutput(output);
-  if (typeof validated.runtimeId !== 'string' || validated.runtimeId.trim().length === 0) {
-    throw new Error('FINANCIAL-SAFETY: Deliverable EntityOutput missing runtimeId');
-  }
-  return validated as DeliverableEntityInput;
-}
-
-/**
- * CRITICAL: Validate payment route integrity
- * Ensure payment routing paths are complete and valid
- * @param route - Unvalidated array claiming to be a payment route
- */
-export function validatePaymentRoute(route: unknown): string[] {
-  if (!route || !Array.isArray(route)) {
-    throw new Error(`FINANCIAL-SAFETY: Payment route must be a valid array`);
-  }
-
-  if (route.length === 0) {
-    throw new Error(`FINANCIAL-SAFETY: Payment route cannot be empty`);
-  }
-
-  for (let i = 0; i < route.length; i++) {
-    const entityId = route[i];
-    if (!entityId || typeof entityId !== 'string') {
-      throw new Error(`FINANCIAL-SAFETY: Route[${i}] is invalid - entity ID required for financial routing`);
-    }
-  }
-
-  return route as string[];
 }
 
 function validateBigIntMapValues(value: unknown, fieldName: string): void {

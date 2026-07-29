@@ -10,7 +10,7 @@ import { createStructuredLogger } from '../../infra/logger';
 import { normalizeRuntimeId } from '../../networking/runtime-id';
 import { compareStableText, safeStringify } from '../../protocol/serialization';
 import { getWallClockMs } from '../../utils';
-import { validateDeliverableEntityInput } from '../../validation-utils';
+import { validateDeliverableEntityInput } from '../routing-validation';
 
 import { getEffectiveEntityInputTxs, orderCertifiedOutputsBySequence } from '../../entity/consensus/output-envelope';
 import { accountInputAck, accountInputProposal } from '../../account/consensus/flush';

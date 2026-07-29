@@ -17,7 +17,7 @@ import { extractCrossJurisdictionRouteFromTx } from '../extensions/cross-j/bound
 import { getEffectiveEntityInputTxs } from '../entity/consensus/output-envelope';
 import { normalizeRuntimeId } from '../networking/runtime-id';
 import { advanceEntityCommandNonce, assertSignedEntityCommand } from '../entity/command';
-import { validateDeliverableEntityInput } from '../validation-utils';
+import { validateDeliverableEntityInput } from './routing-validation';
 import { accountInputAck, accountInputProposal } from '../account/consensus/flush';
 import { safeStringify } from '../protocol/serialization';
 import {

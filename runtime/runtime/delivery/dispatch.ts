@@ -8,7 +8,7 @@ import { createStructuredLogger, shortId } from '../../infra/logger';
 import { normalizeRuntimeId } from '../../networking/runtime-id';
 import { compareStableText, safeStringify } from '../../protocol/serialization';
 import { getWallClockMs } from '../../utils';
-import { validateDeliverableEntityInput } from '../../validation-utils';
+import { validateDeliverableEntityInput } from '../routing-validation';
 import {
   isDeliveryDelivered,
   requireDeliveryDelivered,

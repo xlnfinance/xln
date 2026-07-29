@@ -11,7 +11,7 @@ import { getEffectiveEntityInputTxs } from '../entity/consensus/output-envelope'
 import { accountInputAck, accountInputProposal } from '../account/consensus/flush';
 import type { EntityInput, EntityReplica, EntityTx, RuntimeState, JInput, RoutedEntityInput } from '../types';
 import { resolveEntityProposerId } from '../state-helpers';
-import { decodeRoutedEntityOutput } from '../validation-utils';
+import { decodeRoutedEntityOutput } from './routing-validation';
 import { nodeProcess } from '../infra/runtime-process';
 import { isRuntimePerfProfileEnabled, readRuntimePerfSlowMs } from '../infra/perf-runtime-flags';
 import { DEBUG, getPerfMs } from '../utils';

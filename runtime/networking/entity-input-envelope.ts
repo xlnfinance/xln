@@ -2,7 +2,7 @@ import type {
   CrossJurisdictionSwapRoute,
   RuntimeEntityInputsEnvelope,
 } from '../types';
-import { validateDeliverableEntityInput } from '../validation-utils';
+import { validateDeliverableEntityInput } from '../runtime/routing-validation';
 import { normalizeRuntimeId } from './runtime-id';
 
 const requireFrameCoordinate = (value: unknown, field: string): number => {
