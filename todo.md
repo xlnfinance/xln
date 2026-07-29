@@ -53,9 +53,8 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   reach upward into process orchestration. Move the shared primitive to its
   canonical owner or pass a narrow dependency explicitly—never hide a reverse
   edge behind a re-export.
-  Drive the remaining measured dependency debt from root-surface `3` and
-  largest value-import SCC `5` to zero/one respectively, tightening both
-  ratchets after every reduction.
+  Drive the remaining root-surface debt from `3` to zero. The production
+  value-import graph is now acyclic and permanently ratcheted at SCC size one.
 - [ ] Close only current, reproduced audit findings. The accepted remainder is
   decomposed below: durable/idempotent off-chain faucet admission, the
   Replica/State split, Activity/history migration, exact Account-frame
@@ -106,9 +105,9 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   duplicate gas/nonce/RPC-error policies and BrowserVM/RPC event logic as each
   owner is extracted. Record before/after LOC, converter count and import
   edges; require negative net LOC or a proven trust-boundary/type-safety gain.
-  The public facade/factory cycle is gone and the global value-import SCC
-  ratchet is now 3. Keep `rpc-adapter.ts` below 3000 throughout and drive its
-  exact oversized function allowances to zero.
+  The public facade/factory cycle is gone and the global value-import graph is
+  acyclic. Keep `rpc-adapter.ts` below 3000 throughout and drive its exact
+  oversized function allowances to zero.
 - [ ] Replace technical-history top-level folders with an owner-first tree,
   preserving the distinct guarantees as named subfolders rather than unrelated
   roots: `storage/{wal,state,views,queries,recovery}`,

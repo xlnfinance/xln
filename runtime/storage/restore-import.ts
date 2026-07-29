@@ -11,9 +11,9 @@ import { docValueKey, liveKeyForDoc } from './doc-refs';
 import {
   computeStorageFrameHash,
   computeStoragePostStateHash,
-  computeStorageReplicaMetaDigest,
   prepareStorageStateHashes,
 } from './hashes';
+import { computeStorageReplicaMetaDigest } from './replica-meta-digest';
 import { deleteKeyRange, iterateKeys } from './level';
 import {
   KEY_HEAD,

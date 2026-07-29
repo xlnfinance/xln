@@ -6,9 +6,9 @@
 import { ethers } from 'ethers';
 
 import { getSignerAddress } from '../account/crypto';
+import { DEBUG } from '../infra/debug-flags';
 import { createStructuredLogger, shortId } from '../infra/logger';
 import type { ConsensusConfig, EntityType, RuntimeState, JurisdictionConfig } from '../types';
-import { DEBUG } from '../utils';
 
 // Extend globalThis to include our entity counter
 declare global {

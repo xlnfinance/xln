@@ -87,7 +87,6 @@ const crontabLog = createStructuredLogger('entity.crontab');
 
 // Configuration constants
 export const ACCOUNT_PENDING_STALE_WARNING_MS = 30_000;
-export const HTLC_SECRET_ACK_TIMEOUT_MS = 30000; // auto-dispute if secret-return ACK missing
 export const ACCOUNT_MAINTENANCE_INTERVAL_MS = 10_000;
 export const ACCOUNT_PENDING_RESEND_AFTER_MS = 8000; // Resend pending frame input after 8s without ACK
 export const HUB_REBALANCE_INTERVAL_MS = TIMING.CRONTAB_INTERVAL_MS; // Keep hub rebalance aligned with the canonical 1s runtime cadence.

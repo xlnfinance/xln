@@ -5,7 +5,7 @@ import {
   rebaseCertifiedEntityLineageAtRuntimeCheckpoint,
   type CertifiedEntityLineagePlan,
 } from './entity-lineage';
-import { computeStorageReplicaMetaDigest } from './hashes';
+import { computeStorageReplicaMetaDigest } from './replica-meta-digest';
 import { keyLiveReplicaMeta, normalizeEntityId } from './keys';
 import { encodeReplicaMeta } from './projections';
 import { decodeBuffer, encodeBuffer } from './codec';

@@ -84,31 +84,6 @@ const hashBuffer = (value: Buffer | Uint8Array): string =>
 
 const hashStable = (value: unknown): string => computeIntegrityDigest(encodeBinaryPayload(value, 'msgpack'));
 
-export type StorageReplicaMetaDigestEntry = {
-  key: Uint8Array;
-  value: Uint8Array;
-};
-
-/**
- * Commits validator-local recovery state without making it Entity consensus
- * state. Keys are sorted explicitly, and values are independently hashed so
- * no key/value concatenation ambiguity can produce the same digest.
- */
-export const computeStorageReplicaMetaDigest = (
-  entries: readonly StorageReplicaMetaDigestEntry[],
-): string => hashStable({
-  kind: 'xln.storage.replicaMeta.v1',
-  entries: entries
-    .map((entry) => ({
-      key: ethers.hexlify(entry.key).toLowerCase(),
-      valueHash: computeIntegrityDigest(entry.value),
-    }))
-    .sort((left, right) => {
-      const byKey = compareStableText(left.key, right.key);
-      return byKey !== 0 ? byKey : compareStableText(left.valueHash, right.valueHash);
-    }),
-});
-
 const hashToBytes = (hash: string): Buffer => hexBytes(hash);
 
 const merkleCellPathBytes = (path: string): Buffer => {

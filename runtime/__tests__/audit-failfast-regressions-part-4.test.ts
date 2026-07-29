@@ -53,9 +53,9 @@ import {
   ACCOUNT_PENDING_STALE_WARNING_MS,
   emitCommittedPendingFrameWarnings,
   executeCrontab,
-  HTLC_SECRET_ACK_TIMEOUT_MS,
   initCrontab,
 } from '../entity/scheduler';
+import { HTLC_SECRET_ACK_TIMEOUT_MS } from '../entity/tx/htlc-route-lifecycle';
 
 import { encodeBoard, generateLazyEntityId, generateNumberedEntityId, hashBoard } from '../entity/factory';
 

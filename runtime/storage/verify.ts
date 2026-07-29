@@ -3,11 +3,11 @@ import {
   assertEntityHashesEqual,
   computeStorageEntityHashesFromDocs,
   computeStorageFrameHash,
-  computeStorageReplicaMetaDigest,
   computeStorageStateRoot,
   readAllEntityHashDocs,
   toFrameEntityHashes,
 } from './hashes';
+import { computeStorageReplicaMetaDigest } from './replica-meta-digest';
 import { readSnapshotDocs } from './lifecycle';
 import { verifyLiveStorageIntegrity } from './live-integrity';
 import {

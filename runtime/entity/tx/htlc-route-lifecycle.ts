@@ -1,10 +1,9 @@
 import type { AccountTx, EntityState, HtlcLock, HtlcNoteKey, HtlcRoute } from '../../types';
 import { LIMITS } from '../../constants';
-import {
-  cancelHook,
-  HTLC_SECRET_ACK_TIMEOUT_MS,
-  scheduleHook,
-} from '../scheduler';
+import { cancelHook, scheduleHook } from '../scheduler/hook-state';
+
+/** Auto-dispute when the upstream peer never acknowledges a returned secret. */
+export const HTLC_SECRET_ACK_TIMEOUT_MS = 30_000;
 
 const assertEndpoint = (
   actual: readonly [string | undefined, string | undefined],

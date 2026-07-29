@@ -8,6 +8,7 @@ import * as buffer from 'buffer';
 import { sha256 } from '@noble/hashes/sha2.js';
 
 import { extractNumberFromEntityId } from './entity/factory';
+export { DEBUG, HEAVY_LOGS } from './infra/debug-flags';
 
 type RuntimePerformance = Pick<Performance, 'now' | 'timeOrigin'>;
 type RuntimeGlobal = typeof globalThis & {
@@ -154,10 +155,6 @@ export const hash = (data: Buffer | string): Buffer => {
   // Ensure we always return a Buffer, regardless of what digest() returns
   return typeof result === 'string' ? Buffer.from(result) : Buffer.from(result);
 };
-
-// Global debug flags (disable for production-clean output)
-export const DEBUG = false; // General debug info (consensus checkpoints, critical events)
-export const HEAVY_LOGS = false; // Verbose traces (input details, signature checks, every frame step)
 
 // Function to clear the database and reset in-memory history
 type ClearableDb = {
