@@ -79,10 +79,12 @@ export const isDisputeStartedByLeft = (
   const starter = String(starterEntityId || '').toLowerCase();
   const left = String(leftEntityId || '').toLowerCase();
   const right = String(rightEntityId || '').toLowerCase();
-  if (!starter || !left || !right) return false;
+  if (!starter || !left || !right) throw new Error('DISPUTE_PARTY_ID_MISSING');
   if (starter === left) return true;
   if (starter === right) return false;
-  return starter < right;
+  // Depository disputes are bilateral. Inferring a side for a third-party id
+  // creates a second ordering rule unrelated to the signed Account parties.
+  throw new Error(`DISPUTE_STARTER_NOT_A_PARTY:${starter}`);
 };
 
 export const canProcessAccountTxForDisputeStatus = (

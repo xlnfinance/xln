@@ -4,7 +4,10 @@ import { admitLocalAccountTx } from '../account/local-tx-admission';
 import { applyAccountInput } from '../account/consensus/index';
 import { createLocalAccountInput } from '../account/input';
 import { prependUniqueMempoolTxs } from '../account/consensus/helpers';
-import { freezeAccountForDispute } from '../account/consensus/dispute-policy';
+import {
+  freezeAccountForDispute,
+  isDisputeStartedByLeft,
+} from '../account/consensus/dispute-policy';
 import { LIMITS } from '../constants';
 import type { AccountState, AccountTx, RuntimeState } from '../types';
 
@@ -35,6 +38,13 @@ const accountWithPending = (tx: AccountTx): Pick<AccountState, 'mempool' | 'pend
 });
 
 describe('account mempool multiplicity', () => {
+  test('accepts only an exact bilateral dispute starter', () => {
+    expect(isDisputeStartedByLeft('0x01', '0x01', '0x02')).toBe(true);
+    expect(isDisputeStartedByLeft('0x02', '0x01', '0x02')).toBe(false);
+    expect(() => isDisputeStartedByLeft('0x00', '0x01', '0x02'))
+      .toThrow('DISPUTE_STARTER_NOT_A_PARTY');
+  });
+
   test('routes local transactions through the canonical AccountInput boundary', async () => {
     const account = accountWithPending(PAYMENT) as AccountState;
     account.leftEntity = '0xsender';
