@@ -8,7 +8,7 @@ import type {
   RuntimeState,
 } from '../../../types';
 import { formatEntityId } from '../../../utils';
-import { upsertSortedStringMapEntry } from '../../../storage/sorted-index';
+import { upsertSortedStringMapEntry } from '../../../infra/sorted-map-index';
 import { cloneEntityState, addMessage } from '../../../state-helpers';
 import { findAccountKey, normalizeEntityRef } from '../account-key';
 import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../../../account/default-tokens';

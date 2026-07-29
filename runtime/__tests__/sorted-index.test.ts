@@ -1,6 +1,10 @@
 import { expect, test } from 'bun:test';
 
-import { removeSortedStringMapEntry, sortedStringMapKeys, upsertSortedStringMapEntry } from '../storage/sorted-index';
+import {
+  removeSortedStringMapEntry,
+  sortedStringMapKeys,
+  upsertSortedStringMapEntry,
+} from '../infra/sorted-map-index';
 
 test('sorted string map index tracks delete plus insert without stale keys', () => {
   const map = new Map<string, number>([

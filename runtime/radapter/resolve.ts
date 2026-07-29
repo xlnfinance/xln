@@ -20,7 +20,7 @@ import type {
   StorageFrameRecord,
   StorageHead,
 } from '../storage/types';
-import { compareAscii, sortedStringMapKeys, sortedStringMapStartIndex } from '../storage/sorted-index';
+import { compareAscii, sortedStringMapKeys, sortedStringMapStartIndex } from '../infra/sorted-map-index';
 import { RuntimeAdapterError } from './errors';
 import { encodeRuntimeAdapterMessage, runtimeAdapterMaxMessageBytes } from './codec';
 import { XLN_PROTOCOL_VERSION } from '../protocol/version';

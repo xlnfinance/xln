@@ -15,7 +15,7 @@ import {
 import { addMessages, emitScopedEvents } from '../../../../state-helpers';
 import { createStructuredLogger, shortId } from '../../../../infra/logger';
 import { scheduleHook } from '../../../scheduler';
-import { upsertSortedStringMapEntry } from '../../../../storage/sorted-index';
+import { upsertSortedStringMapEntry } from '../../../../infra/sorted-map-index';
 import { pruneUnreachableDisputeEvidence } from '../../../../protocol/dispute/evidence-retention';
 import type { ApplyEntityTxOptions } from '../../apply';
 import { buildHubRebalancePolicyTx } from '../account-admin';

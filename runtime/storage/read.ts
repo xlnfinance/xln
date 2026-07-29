@@ -44,7 +44,7 @@ import {
 import { readAccountStorageLayout } from './account-layout';
 import { iterateKeys, readRawOrNull, readValidatedOrNull } from './level';
 import { listSnapshotHeights } from './lifecycle';
-import { compareAscii } from './sorted-index';
+import { compareAscii } from '../infra/sorted-map-index';
 import {
   buildHexKeyedMerkle,
   computeRadixMerkleBranchHash,
