@@ -72,7 +72,7 @@ export type AppliedRuntimeInput = {
 
 export type RuntimeInputReducer = {
   (env: RuntimeState, runtimeInput: RuntimeInput): Promise<AppliedRuntimeInput>;
-  preflight(env: RuntimeState, runtimeInput: RuntimeInput): void;
+  validate(env: RuntimeState, runtimeInput: RuntimeInput): void;
 };
 
 type ApplyProfiler = {
@@ -230,7 +230,7 @@ const finalizeRuntimeInputApply = (
   profile: ApplyProfiler,
 ): AppliedRuntimeInput => {
   if (atomicCrossJPairIndexesThatDidNotCommit(prepared.pairs, batch.inputOutcomes).size) {
-    throw new Error('RUNTIME_CROSS_J_ACCOUNT_PAIR_COMMIT_DIVERGED_FROM_PREFLIGHT');
+    throw new Error('RUNTIME_CROSS_J_ACCOUNT_PAIR_COMMIT_DIVERGED_FROM_ADMISSION');
   }
   markCommittedAtomicCrossJAckOutputs(batch.entityOutbox, prepared.pairs);
   const commits = commitRuntimeReliableIngress(
@@ -343,7 +343,7 @@ export const createRuntimeInputReducer = (
       throw error;
     }
   };
-  reducer.preflight = (env, runtimeInput): void => {
+  reducer.validate = (env, runtimeInput): void => {
     validateRuntimeInputIngress(env, runtimeInput, deps.isReplay(env), deps);
   };
   return reducer;

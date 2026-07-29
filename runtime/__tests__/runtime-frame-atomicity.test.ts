@@ -842,7 +842,7 @@ describe('runtime frame atomicity', () => {
     }
   });
 
-  test('preflight rejects an unknown second Entity before the first mutation', async () => {
+  test('ingress validation rejects an unknown second Entity before the first mutation', async () => {
     const env = createEmptyEnv(`runtime apply atomicity ${TEST_RUN_ID}`);
     env.scenarioMode = true;
     env.quietRuntimeLogs = true;

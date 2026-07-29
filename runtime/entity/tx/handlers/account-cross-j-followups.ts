@@ -482,7 +482,7 @@ const queueBookAdmissionOnCommittedPull = (
     newState.crossJurisdictionSwaps?.set(route.orderId, route);
 
     // Opening is admitted only from the source Hub's committed Account frame.
-    // That frame can reach this point only after Runtime preflight accepted the
+    // That frame can reach this point only after Runtime atomic admission accepted the
     // exact source+target proposal pair at the User Runtime and the exact two
     // resulting ACKs at the Hub Runtime. Re-encoding that fact as a receipt is
     // redundant and was the source of the old extra protocol round trip.

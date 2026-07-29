@@ -6,11 +6,21 @@ import {
   cloneEntityReplica,
   forkEntityReplicaForInput,
 } from '../entity/replica-clone';
-import { cloneEntityState } from '../entity/state-clone';
+import {
+  cloneEntityState,
+  cloneTrustedEntityState,
+  createEntityFrameCandidateState,
+} from '../entity/state-clone';
+import {
+  commitEntityAccountCandidate,
+  EntityAccountCandidateMap,
+} from '../entity/account-candidate-map';
+import { computeCanonicalEntityConsensusStateHash } from '../entity/consensus/state-root';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
 import { buildCanonicalEntityReplicaSnapshot } from '../storage/wal/snapshot';
 import { validateConsensusConfig } from '../entity/consensus/config-validation';
 import { validateEntityReplica } from '../entity/replica-validation';
+import type { AccountState, EntityState } from '../types';
 
 const makeCrossJurisdictionRoute = () => ({
   orderId: 'order-1',
@@ -165,6 +175,61 @@ const makeProjectionReplica = () => ({
 });
 
 describe('state cloning', () => {
+  test('Entity frame candidate clones only an Account it touches', () => {
+    const source = makeProjectionReplica().state as EntityState;
+    const counterpartyId = `0x${'bb'.repeat(32)}`;
+    const accountFixture = makeManualFallbackAccount();
+    delete accountFixture.uncloneable;
+    const account = accountFixture as unknown as AccountState;
+    account.leftEntity = source.entityId;
+    account.rightEntity = counterpartyId;
+    source.accounts.set(counterpartyId, account);
+
+    const candidate = createEntityFrameCandidateState(source);
+    expect(candidate.accounts).toBeInstanceOf(EntityAccountCandidateMap);
+    expect((candidate.accounts as EntityAccountCandidateMap).stats()).toEqual({
+      base: 1,
+      changed: 0,
+      deleted: 0,
+    });
+
+    const candidateAccount = candidate.accounts.get(counterpartyId);
+    if (!candidateAccount) throw new Error('TEST_ENTITY_CANDIDATE_ACCOUNT_MISSING');
+    candidateAccount.deltas.get(1)!.collateral = 99n;
+
+    expect(source.accounts.get(counterpartyId)?.deltas.get(1)?.collateral).toBe(0n);
+    expect((candidate.accounts as EntityAccountCandidateMap).stats().changed).toBe(1);
+  });
+
+  test('Entity Account candidate preserves the full-clone root and promotes only at commit', () => {
+    const source = makeProjectionReplica().state as EntityState;
+    const counterpartyId = `0x${'cc'.repeat(32)}`;
+    const accountFixture = makeManualFallbackAccount();
+    delete accountFixture.uncloneable;
+    const account = accountFixture as unknown as AccountState;
+    account.leftEntity = source.entityId;
+    account.rightEntity = counterpartyId;
+    source.accounts.set(counterpartyId, account);
+
+    const fullClone = cloneTrustedEntityState(source);
+    const candidate = createEntityFrameCandidateState(source);
+    const fullAccount = fullClone.accounts.get(counterpartyId);
+    const candidateAccount = candidate.accounts.get(counterpartyId);
+    if (!fullAccount || !candidateAccount) {
+      throw new Error('TEST_ENTITY_CANDIDATE_ACCOUNT_MISSING');
+    }
+    fullAccount.deltas.get(1)!.offdelta = 25n;
+    candidateAccount.deltas.get(1)!.offdelta = 25n;
+
+    expect(computeCanonicalEntityConsensusStateHash(candidate))
+      .toBe(computeCanonicalEntityConsensusStateHash(fullClone));
+    expect(source.accounts.get(counterpartyId)?.deltas.get(1)?.offdelta).toBe(0n);
+
+    candidate.accounts = commitEntityAccountCandidate(candidate.accounts);
+    expect(candidate.accounts).toBe(source.accounts);
+    expect(source.accounts.get(counterpartyId)?.deltas.get(1)?.offdelta).toBe(25n);
+  });
+
   test('clone diagnostics use structured logging only', () => {
     const source = [
       readFileSync('runtime/account/state-clone.ts', 'utf8'),

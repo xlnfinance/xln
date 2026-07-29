@@ -7,6 +7,7 @@ import { removeCommittedTxsFromMempool } from '../../protocol/tx-multiset';
 import type { ProposedEntityFrame } from '../../types';
 import { getPerfMs } from '../../utils';
 import { cacheCommittedConsumptionNodeChanges } from '../consumption-store';
+import { commitEntityAccountCandidate } from '../account-candidate-map';
 import { emitCommittedPendingFrameWarnings } from '../scheduler';
 import { createEntityFrameHashFromStateRoot } from './frame';
 import { applyEntityFrame } from './frame-application';
@@ -261,12 +262,15 @@ const installSingleSignerFrame = async (
   cacheCommittedConsumptionNodeChanges(env, execution.consumptionNodeChanges);
   cacheCommittedAccountJClaimNodeChanges(env, execution.accountJClaimNodeChanges);
   const priorState = workingReplica.state;
+  emitCommittedPendingFrameWarnings(priorState, committedState);
+  committedState.accounts = commitEntityAccountCandidate(
+    committedState.accounts,
+  );
   workingReplica.state = committedState;
   storageChanges.push(
     ...execution.storageChanges,
     { family: 'entity', entityId: committedState.entityId },
   );
-  emitCommittedPendingFrameWarnings(priorState, committedState);
   emitCommittedEntitySizeLog(sizeLog);
   appendCertifiedEntityFrameLink(
     workingReplica,

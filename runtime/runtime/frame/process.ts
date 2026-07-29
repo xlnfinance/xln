@@ -236,7 +236,7 @@ const beginRuntimeFrameMutation = (
 ): void => {
   // All expected ingress rejection must happen while the durable State is
   // still untouched. Past this line every exception requires halt + reload.
-  deps.applyRuntimeInput.preflight(candidate.env, candidate.runtimeInput);
+  deps.applyRuntimeInput.validate(candidate.env, candidate.runtimeInput);
   frame.mutationStarted = true;
   ensureRuntimeState(candidate.env).stateMutationInFlight = true;
   advanceRuntimeFrameTimestamp(candidate.env, candidate.mempoolQueuedAt);

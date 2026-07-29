@@ -1171,7 +1171,7 @@ export const validateInboundP2PEntityInputsEnvelope = (
   // transport may still be queued immediately before this envelope. Filtering
   // here would inspect stale Account pendingFrame state and destroy one leg of
   // an otherwise valid atomic admission. Runtime apply performs the two-phase
-  // preflight after earlier inputs have advanced state, then commits both legs
+  // atomic admission after earlier inputs have advanced state, then commits both legs
   // or ignores both with a security incident.
   return validatedInputs;
 };

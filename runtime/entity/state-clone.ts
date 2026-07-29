@@ -1,4 +1,5 @@
 import type {
+  AccountState,
   EntityState,
   LendingLoan,
   LendingPoolPosition,
@@ -18,6 +19,10 @@ import { validateEntityState } from './state-validation';
 import { forkEntityAccountCommitmentCache } from './consensus/state-root';
 import { forkAccountWorkIndexes } from './consensus/account-work-index';
 import { forkCrossJurisdictionBookAdmissionIndex } from '../extensions/cross-j/orderbook';
+import {
+  createEntityAccountCandidateMap,
+  snapshotEntityAccountMap,
+} from './account-candidate-map';
 
 const cloneLog = createStructuredLogger('entity.state_clone');
 
@@ -132,8 +137,14 @@ const cloneEntityStateWithPolicy = (
   forSnapshot: boolean,
   validateClone: boolean,
 ): EntityState => {
+  const cloneSource = source.accounts instanceof Map
+    ? {
+        ...source,
+        accounts: snapshotEntityAccountMap(source.accounts),
+      }
+    : source;
   const cloned = structuredCloneOrThrow(
-    source,
+    cloneSource,
     'ENTITY_STATE_STRUCTURED_CLONE_FAILED',
   );
   copyEntityFrameEvents(source, cloned);
@@ -180,3 +191,27 @@ export const cloneTrustedEntityState = (
   state: EntityState,
   forSnapshot = false,
 ): EntityState => cloneEntityStateWithPolicy(state, forSnapshot, false);
+
+/**
+ * Build an Entity-frame candidate without copying the potentially million-entry
+ * Account map. Every other Entity section remains isolated by structuredClone;
+ * Account isolation is provided lazily by EntityAccountCandidateMap.
+ */
+export const createEntityFrameCandidateState = (
+  source: EntityState,
+): EntityState => {
+  if (!(source.accounts instanceof Map)) {
+    throw new Error('ENTITY_FRAME_CANDIDATE_ACCOUNTS_INVALID');
+  }
+  const shellSource = {
+    ...source,
+    accounts: new Map<string, AccountState>(),
+  };
+  const candidate = cloneEntityStateWithPolicy(shellSource, false, false);
+  candidate.accounts = createEntityAccountCandidateMap(source.accounts);
+  copyEntityFrameEvents(source, candidate);
+  forkEntityAccountCommitmentCache(source, candidate);
+  forkAccountWorkIndexes(source, candidate);
+  forkCrossJurisdictionBookAdmissionIndex(source, candidate);
+  return candidate;
+};

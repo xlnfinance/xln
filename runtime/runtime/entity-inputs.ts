@@ -432,7 +432,7 @@ const replicaKeysForEntity = (
  * This is an admission proof only; the reducer still resolves the concrete
  * replica after those imports have executed.
  */
-export const preflightExternalEntityInputTargets = (
+export const validateExternalEntityInputTargets = (
   env: RuntimeState,
   inputs: readonly RoutedEntityInput[],
   runtimeTxs: readonly RuntimeTx[],

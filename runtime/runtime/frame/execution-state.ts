@@ -22,7 +22,7 @@ export type RuntimeInputRestore = (
 /**
  * Mutable orchestration facts for one Runtime frame attempt.
  *
- * Runtime State is owned and mutated in-place after preflight. This object
+ * Runtime State is owned and mutated in-place after ingress validation. This object
  * records whether failure can still discard input normally or must halt and
  * reload durable truth. It never represents a second speculative Runtime.
  */
@@ -37,7 +37,7 @@ export type FrameExecutionState = {
   transaction: RuntimeFrameTransaction | undefined;
   pendingTraceSnapshot: EnvSnapshot | undefined;
   restoreUndurableInput: RuntimeInputRestore | undefined;
-  /** True after preflight, when the owned Runtime State may have changed. */
+  /** True after ingress validation, when the owned Runtime State may have changed. */
   mutationStarted: boolean;
   inputDrained: boolean;
   inputForRequeue: RuntimeInput | undefined;

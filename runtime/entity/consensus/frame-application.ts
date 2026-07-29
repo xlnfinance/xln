@@ -30,7 +30,7 @@ import { mergeStorageOverlayRecords } from '../../protocol/overlay';
 import { compareStableText, safeStringify } from '../../protocol/serialization';
 import { getNextSettlementNonce } from '../../protocol/settlement/operations';
 import { assertScheduledWakeFrameOrder } from '../scheduled-wake-validation';
-import { cloneEntityState } from '../state-clone';
+import { createEntityFrameCandidateState } from '../state-clone';
 import { getAccountPerspective } from '../../account/perspective';
 import { emitScopedEvents } from '../../infra/scoped-events';
 import { resolveEntityProposerId } from '../../runtime/entity-output-signer';
@@ -1009,7 +1009,7 @@ const prepareEntityFrameWorkingSet = async (
     env,
     normalizeEntityCommandNonceBoard(env, entityState),
   );
-  const currentEntityState = cloneEntityState(normalized);
+  const currentEntityState = createEntityFrameCandidateState(normalized);
   clearEntityFrameEvents(currentEntityState);
   currentEntityState.crontabState ??= initCrontab();
   markFrameProfile('clone');

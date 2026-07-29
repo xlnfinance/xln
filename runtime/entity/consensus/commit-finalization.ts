@@ -8,6 +8,7 @@ import type {
   ProposedEntityFrame,
   EntityCandidate,
 } from '../../types';
+import { commitEntityAccountCandidate } from '../account-candidate-map';
 import { cacheCommittedConsumptionNodeChanges } from '../consumption-store';
 import { emitCommittedPendingFrameWarnings } from '../scheduler';
 import {
@@ -191,12 +192,15 @@ const installCommittedState = (
     env,
     execution.accountJClaimNodeChanges,
   );
+  emitCommittedPendingFrameWarnings(previousState, committedState);
+  committedState.accounts = commitEntityAccountCandidate(
+    committedState.accounts,
+  );
   workingReplica.state = committedState;
   storageChanges.push(
     ...execution.storageChanges,
     { family: 'entity', entityId: committedState.entityId },
   );
-  emitCommittedPendingFrameWarnings(previousState, committedState);
   emitCommittedEntitySizeLog(entitySizeLog);
   frame.hankos = hankos;
   appendCertifiedEntityFrameLink(

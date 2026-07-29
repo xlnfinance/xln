@@ -15,7 +15,7 @@ import {
   registerReliableIngress,
 } from '../reliable-delivery';
 import {
-  preflightExternalEntityInputTargets,
+  validateExternalEntityInputTargets,
   RuntimeEntityInputApplyError,
 } from '../entity-inputs';
 import { splitRoutedOutputByDeliveryLane } from '../output-routing';
@@ -171,7 +171,7 @@ export const validateRuntimeInputIngress = (
   validateRuntimeInputShapeAndLimits(env, runtimeInput, rejectRuntimeInput);
   const jOutbox = collectJOutbox(env, runtimeInput);
   const entityInputs = validateEntityInputs(env, runtimeInput, isReplay, deps);
-  preflightExternalEntityInputTargets(env, entityInputs, runtimeInput.runtimeTxs);
+  validateExternalEntityInputTargets(env, entityInputs, runtimeInput.runtimeTxs);
   return {
     runtimeTxs: [...runtimeInput.runtimeTxs],
     entityInputs,
