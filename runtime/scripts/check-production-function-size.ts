@@ -23,8 +23,6 @@ const COORDINATOR_DEBT: Readonly<Record<string, number>> = {
   'runtime/jadapter/rpc-adapter.ts::runSerializedBatch callback': 280,
   'runtime/jadapter/rpc-adapter.ts::startWatching': 1040,
   'runtime/jadapter/rpc-adapter.ts::submitTx': 489,
-  'runtime/jadapter/rpc-reads.ts::createRpcReadMethods': 275,
-  'runtime/jadapter/rpc-reads.ts::readWalletSnapshot': 155,
   'runtime/jadapter/rpc-wallet-writes.ts::createRpcWalletWriteMethods': 160,
   'runtime/jurisdiction/event-normalization.ts::normalizeJurisdictionEvent': 399,
   'runtime/orchestrator/bootstrap-timeline.ts::buildBootstrapTimeline': 206,
