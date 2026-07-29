@@ -18,6 +18,7 @@
   import { networkMachineRuntime, networkMachineRuntimeOperations } from '$lib/stores/networkMachineRuntimeStore';
   import { captionForStep } from '$lib/network3d/networkCaption';
   import { deriveNetworkActs, actIndexOfStep } from '$lib/network3d/networkActs';
+  import { summarizeNetwork, percent, type VitalsAccount } from '$lib/network3d/networkVitals';
   import { xlnFunctions } from '$lib/stores/xlnStore';
 
   const SPEEDS = [1, 2, 4] as const;
@@ -57,6 +58,45 @@
   // The chapter track is built from the whole story, loaded once. Using the selected
   // step's activity would grow the track act by act as playback discovers it.
   $: storyActivity = $networkMachineRuntime.storyActivity;
+  // Vitals come from the frames the scene is drawing, so the headline and the picture can
+  // never disagree about the same moment.
+  $: vitals = (() => {
+    const frames = Array.from($networkMachineRuntime.frames.values());
+    const entities = frames.flatMap((frame) => frame.entities);
+    const tokenId = 1;
+    const reserves = entities.map((entity) => {
+      const held = entity.core?.reserves;
+      return held instanceof Map ? (held.get(tokenId) ?? 0n) : 0n;
+    });
+    const seen = new Set<string>();
+    const accounts: VitalsAccount[] = [];
+    for (const entity of entities) {
+      for (const item of entity.accounts?.items ?? []) {
+        const record = item as {
+          leftEntity?: string; rightEntity?: string;
+          deltas?: Map<number, unknown>; activeDispute?: unknown;
+        };
+        const key = `${String(record.leftEntity ?? '')}|${String(record.rightEntity ?? '')}`.toLowerCase();
+        if (seen.has(key)) continue;
+        const delta = record.deltas instanceof Map ? record.deltas.get(tokenId) : undefined;
+        if (!delta || !$xlnFunctions.isReady) continue;
+        seen.add(key);
+        const derived = $xlnFunctions.deriveDelta(delta as never, true);
+        accounts.push({
+          collateral: derived.collateral,
+          delta: derived.delta,
+          creditExtended: derived.ownCreditLimit + derived.peerCreditLimit,
+          creditDrawn: derived.ownCreditUsed + derived.peerCreditUsed,
+          disputed: Boolean(record.activeDispute),
+        });
+      }
+    }
+    return summarizeNetwork(reserves, accounts);
+  })();
+
+  const compact = (amount: bigint): string =>
+    $xlnFunctions.isReady ? $xlnFunctions.formatTokenAmount(1, amount) : String(amount);
+
   $: acts = deriveNetworkActs(
     steps.map((step) => ({ index: step.index, runtimeId: step.activeRuntimeId, height: step.event.height })),
     storyActivity.length > 0 ? storyActivity : activity,
@@ -115,6 +155,10 @@
     if (signature !== storyLoadedFor) {
       storyLoadedFor = signature;
       void networkMachineRuntimeOperations.loadStoryActivity();
+      // Land on the first step. "Live" means no frame is selected and none is loaded, so a
+      // demo that opens there shows an empty stage until someone thinks to drag the
+      // scrubber — the machine has a whole story and starts by showing none of it.
+      if ($networkMachineRuntime.selectedStepIndex < 0) void selectStep(0);
     }
   }
 
@@ -155,6 +199,17 @@
       </span>
     {/if}
   </div>
+
+  {#if vitals.accounts > 0}
+    <div class="vitals" data-testid="network-player-vitals">
+      <span><em>{percent(vitals.offChainShare)}</em>off-chain</span>
+      <span><em>{compact(vitals.inAccounts)}</em>in accounts</span>
+      <span><em>{compact(vitals.onChain)}</em>on chain</span>
+      <span><em>{percent(vitals.deltaUtilisation)}</em>Δ used</span>
+      <span><em>{compact(vitals.creditDrawn)}</em>credit drawn</span>
+      <span class:alert={vitals.disputes > 0}><em>{vitals.disputes}</em>disputes</span>
+    </div>
+  {/if}
 
   {#if caption}
     {#key selectedIndex}
@@ -245,6 +300,17 @@
   .source { display: inline-flex; align-items: center; gap: 6px; }
   .source i { width: 6px; height: 6px; border-radius: 50%; background: var(--runtime-color); }
   .act { color: #8b95a5; letter-spacing: .09em; }
+
+  /* Under the source line, above the scene: read before you look, like a ticker. */
+  .vitals {
+    position: absolute; top: 42px; left: 18px; right: 18px;
+    display: flex; flex-wrap: wrap; gap: 22px;
+    font: 11px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: #5f6875;
+  }
+  .vitals span { display: inline-flex; align-items: baseline; gap: 6px; }
+  .vitals em { font-style: normal; font-size: 15px; color: #cfd6df; }
+  .vitals span.alert em { color: #e24b4a; }
 
   .caption {
     padding: 0 18px 14px;

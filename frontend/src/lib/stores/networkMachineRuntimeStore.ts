@@ -192,7 +192,10 @@ export const networkMachineRuntimeOperations = {
         activity.push(...await source.readActivity(selected.height, selected.height));
       }
       if (requestId !== selectionRequestId) return step;
-      networkMachineRuntime.set({
+      // Read storyActivity from the live state, not from the snapshot taken before the
+      // awaits: a story load running alongside this selection would otherwise be
+      // overwritten by a value that was already stale when it was captured.
+      networkMachineRuntime.update((state) => ({
         loading: false,
         error: null,
         indexes: current.indexes,
@@ -201,8 +204,8 @@ export const networkMachineRuntimeOperations = {
         selectedStep: step,
         frames,
         activity,
-        storyActivity: current.storyActivity,
-      });
+        storyActivity: state.storyActivity,
+      }));
       return step;
     } catch (error) {
       if (requestId === selectionRequestId) networkMachineRuntime.update((state) => ({ ...state, loading: false, error: message(error) }));

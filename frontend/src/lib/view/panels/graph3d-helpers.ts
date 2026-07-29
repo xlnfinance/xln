@@ -190,16 +190,28 @@ export function formatGraphFinancialAmount(amount: bigint, decimals: number): st
   return `${isNegative ? '-' : ''}${wholePart.toLocaleString()}.${formatted}`;
 }
 
+/**
+ * Money on a node badge.
+ *
+ * Read at a glance, next to a name, so it wants one significant decimal at most and a
+ * middot to separate it from the name — never a bare space, which lets "Alice 2M USDC"
+ * read as three words instead of a name and an amount. Thousands are grouped below the
+ * K threshold so a four-figure balance still looks like money.
+ */
 export function formatGraphReserveBadge(amount: bigint, decimals: number, symbol: string): string {
   const reserveValue = Number(amount) / 10 ** decimals;
-  const suffix = ` ${symbol}`;
-  if (reserveValue >= 1000000) {
-    const millions = reserveValue / 1000000;
-    return ` ${millions % 1 === 0 ? millions.toFixed(0) : millions.toFixed(1)}M${suffix}`;
-  }
-  if (reserveValue >= 1000) return ` ${(reserveValue / 1000).toFixed(0)}K${suffix}`;
-  if (reserveValue > 0) return ` ${reserveValue.toFixed(0)}${suffix}`;
-  return ` 0 ${symbol}`;
+  const short = (value: number, unit: string): string =>
+    `${value >= 100 || value % 1 === 0 ? value.toFixed(0) : value.toFixed(1)}${unit}`;
+  const figure = reserveValue >= 1_000_000_000
+    ? short(reserveValue / 1_000_000_000, 'B')
+    : reserveValue >= 1_000_000
+      ? short(reserveValue / 1_000_000, 'M')
+      : reserveValue >= 1_000
+        ? short(reserveValue / 1_000, 'K')
+        : reserveValue > 0
+          ? reserveValue.toLocaleString('en-US', { maximumFractionDigits: 2 })
+          : '0';
+  return `  ·  ${figure} ${symbol}`;
 }
 
 export function formatGraphEntityReserveBalances(input: {

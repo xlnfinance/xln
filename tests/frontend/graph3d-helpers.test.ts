@@ -88,8 +88,14 @@ describe('graph3d helpers', () => {
     expect(formatGraphFinancialAmount(0n, USDC_DECIMALS)).toBe('0');
     expect(formatGraphFinancialAmount(1_234_567n, USDC_DECIMALS)).toBe('1.2345');
     expect(formatGraphFinancialAmount(-2_000_000n, USDC_DECIMALS)).toBe('-2');
-    expect(formatGraphReserveBadge(2_500_000n * 10n ** 6n, USDC_DECIMALS, 'USDC')).toBe(' 2.5M USDC');
-    expect(formatGraphReserveBadge(25_000n * 10n ** 6n, USDC_DECIMALS, 'USDC')).toBe(' 25K USDC');
+    // A middot separates the name from the amount: "Alice 2M USDC" reads as three words,
+    // "Alice · 2.5M USDC" as a name and a balance.
+    expect(formatGraphReserveBadge(2_500_000n * 10n ** 6n, USDC_DECIMALS, 'USDC')).toBe('  ·  2.5M USDC');
+    expect(formatGraphReserveBadge(25_000n * 10n ** 6n, USDC_DECIMALS, 'USDC')).toBe('  ·  25K USDC');
+    expect(formatGraphReserveBadge(1_234n * 10n ** 6n, USDC_DECIMALS, 'USDC')).toBe('  ·  1.2K USDC');
+    // Four figures and under keep grouped digits rather than becoming "1K".
+    expect(formatGraphReserveBadge(940n * 10n ** 6n, USDC_DECIMALS, 'USDC')).toBe('  ·  940 USDC');
+    expect(formatGraphReserveBadge(0n, USDC_DECIMALS, 'USDC')).toBe('  ·  0 USDC');
   });
 
   test('formats entity reserve tooltip lines', () => {

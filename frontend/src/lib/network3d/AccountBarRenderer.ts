@@ -39,6 +39,17 @@ export interface AccountBarSettings {
   desyncDetected?: boolean | undefined; // Bilateral consensus in progress
   bilateralState?: AccountBarVisual | null | undefined; // Visual state from consensus
   dispute?: DisputeInfo | null | undefined; // Active dispute info
+  /**
+   * Stretch each account's bar across the gap between its two entities instead of scaling
+   * it by absolute value.
+   *
+   * The absolute scale ("1M tokens → 10 units") is what an operator wants: two accounts
+   * side by side are comparable at a glance. But bar length and node spacing then have
+   * nothing to do with each other, so a $500K account on a 40-unit edge renders as a
+   * 5-unit stub whose seven regions cannot be told apart. Filling the edge trades
+   * cross-account comparison for being able to read one account at all.
+   */
+  fitToEdge?: boolean | undefined;
 }
 
 export interface AccountSegments {
@@ -51,15 +62,16 @@ export interface AccountSegments {
 }
 
 /**
- * One colour per economic meaning, not per shade of alarm.
+ * Two colours carry meaning; the third state carries none on purpose.
  *
- * Unused credit was a light red, which reads as a weaker version of debt when it is the
- * opposite: headroom nobody has drawn. Amber is capacity, teal is posted collateral, red
- * is what someone owes — so the bar can be read without a legend.
+ * Green is money — collateral in an account, and the reserves the nodes are made of. Red is
+ * credit that has been drawn: someone owes it. Credit that has *not* been drawn is neither,
+ * so it gets no hue of its own: a translucent gradient at full volume, showing how far the
+ * delta could still travel without claiming any of it is held.
  */
 const BAR_COLORS = {
-  availableCredit: 0xef9f27,  // amber - credit granted, not yet drawn
-  secured: 0x35d6c3,          // teal - collateral posted on the jurisdiction
+  availableCredit: 0xd7c2cf,  // translucent gradient - room the delta can still travel
+  secured: 0x2ee6a8,          // green - collateral posted on the jurisdiction
   unsecured: 0xe24b4a         // red - credit drawn, i.e. debt
 } as const;
 
@@ -107,7 +119,17 @@ export function createAccountBars(
 
   // Auto-scale bar radius for many tokens
   const tokenCount = sortedTokenIds.length;
-  const baseRadius = barHeight * 2.5;  // Original barRadius = 0.2
+  // A bar stretched across the edge also has to be thick enough to see from the distance
+  // that fits the network on screen. Girth follows the entities it connects, not the edge:
+  // tying it to length would make a long edge a pipe and a short one a thread, when both
+  // carry the same kind of thing.
+  const endpointSize = Math.min(
+    getEntitySize(fromEntity.id, sortedTokenIds[0] ?? 1),
+    getEntitySize(toEntity.id, sortedTokenIds[0] ?? 1),
+  );
+  const baseRadius = settings.fitToEdge
+    ? Math.max(barHeight * 2.5, endpointSize * 0.62)
+    : barHeight * 2.5;  // Original barRadius = 0.2
   const adjustedRadius = tokenCount > 4 ? baseRadius * Math.min(1.0, 4 / tokenCount) : baseRadius;
   const adjustedDiameter = adjustedRadius * 2;
 
@@ -203,9 +225,27 @@ function createTokenBars(
 ): THREE.Group {
   const tokenGroup = new THREE.Group();
 
+  // Get entity sizes to avoid collision, and to know how much room the bar actually has.
+  const fromEntitySize = getEntitySize(fromEntity.id, tokenId);
+  const toEntitySize = getEntitySize(toEntity.id, tokenId);
+
   // Scale bars based on token value (1px = $1 invariant)
   const tokensToVisualUnits = 0.00001; // 1M tokens → 10 visual units
-  const barScale = (tokensToVisualUnits / Math.pow(10, tokenDecimals)) * (settings.portfolioScale / 5000);
+  const absoluteScale = (tokensToVisualUnits / Math.pow(10, tokenDecimals)) * (settings.portfolioScale / 5000);
+  /**
+   * Everything the bar is made of, before scaling. Both sides together span the account's
+   * whole capacity, so this is what has to fit between the two entities.
+   */
+  const rawSpan =
+    fromDerived.outOwnCredit + fromDerived.outCollateral + fromDerived.outPeerCredit +
+    toDerived.outOwnCredit + toDerived.outCollateral + toDerived.outPeerCredit;
+  const edgeSpan = Math.max(
+    0,
+    fromEntity.position.distanceTo(toEntity.position) - fromEntitySize - toEntitySize - 1.6,
+  );
+  const barScale = settings.fitToEdge && rawSpan > 0 && edgeSpan > 0
+    ? edgeSpan / rawSpan
+    : absoluteScale;
 
   // Compute CREDIT DEBT segment (how much I borrowed from peer's CREDIT line)
   // RED = using peer's credit (actual debt, risky)
@@ -296,10 +336,6 @@ function createTokenBars(
     outCollateral: toDerived.outCollateral * barScale,
     outPeerCredit: toDerived.outPeerCredit * barScale
   };
-
-  // Get entity sizes to avoid collision
-  const fromEntitySize = getEntitySize(fromEntity.id, tokenId);
-  const toEntitySize = getEntitySize(toEntity.id, tokenId);
 
   if (settings.barsMode === 'spread') {
     renderSpreadMode(
@@ -524,18 +560,29 @@ function createBarCylinder(
   barSide: 'left' | 'right',
   bilateralState: AccountBarVisual | null | undefined
 ): THREE.Mesh {
-  const geometry = new THREE.CylinderGeometry(radius, radius, length, 16);
   const isUnusedCredit = colorType === 'availableCredit';
+  // Undrawn credit keeps its full volume: it is how far the delta can still travel, and
+  // shrinking it would understate the room the account actually has. What changes is the
+  // material — a translucent gradient that fades toward the far end, so the eye reads
+  // "possible" instead of "held" without spending a third colour on it. The old wireframe
+  // read as a rendering artefact and fought the two colours that carry meaning.
+  const geometry = new THREE.CylinderGeometry(radius, radius, length, 16, 1);
+  if (isUnusedCredit) applyCreditGradient(geometry, barSide);
 
-  // Bar glow disabled - just show base color (no orange/gold/yellow glow nonsense)
-  const material = new THREE.MeshLambertMaterial({
-    color,
-    transparent: true,
-    opacity: isUnusedCredit ? 0.2 : 1.0,
-    emissive: new THREE.Color(color).multiplyScalar(0.1), // Subtle emissive, same color
-    emissiveIntensity: isUnusedCredit ? 0.2 : 0.1,
-    wireframe: isUnusedCredit
-  });
+  const material = isUnusedCredit
+    ? new THREE.MeshLambertMaterial({
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.42,
+        depthWrite: false,
+      })
+    : new THREE.MeshLambertMaterial({
+        color,
+        transparent: true,
+        opacity: 1.0,
+        emissive: new THREE.Color(color).multiplyScalar(0.1), // Subtle emissive, same color
+        emissiveIntensity: 0.1,
+      });
 
   const mesh = new THREE.Mesh(geometry, material);
 
@@ -545,8 +592,46 @@ function createBarCylinder(
   return mesh;
 }
 
+/** Where undrawn credit is nearest to being used, and where it fades out. */
+const CREDIT_NEAR = new THREE.Color(0xd7c2cf);
+const CREDIT_FAR = new THREE.Color(0x2d2731);
+
 /**
- * Create yellow disk separator marking delta (zero point)
+ * Fade an undrawn-credit segment along its own axis.
+ *
+ * Bright where it meets the money — the end the delta would reach first — and falling away
+ * toward the limit, which is the part least likely to ever be used. The two ends are
+ * mirrored per side so both halves of an account fade outward from the middle rather than
+ * both fading the same way.
+ */
+function applyCreditGradient(geometry: THREE.CylinderGeometry, barSide: 'left' | 'right'): void {
+  const position = geometry.getAttribute('position');
+  const colors = new Float32Array(position.count * 3);
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (let index = 0; index < position.count; index += 1) {
+    const y = position.getY(index);
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+  const span = maxY - minY || 1;
+  const shade = new THREE.Color();
+  for (let index = 0; index < position.count; index += 1) {
+    const along = (position.getY(index) - minY) / span;
+    const toward = barSide === 'left' ? along : 1 - along;
+    shade.copy(CREDIT_FAR).lerp(CREDIT_NEAR, toward);
+    colors[index * 3] = shade.r;
+    colors[index * 3 + 1] = shade.g;
+    colors[index * 3 + 2] = shade.b;
+  }
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+}
+
+/**
+ * The delta: the one cut that divides the account.
+ *
+ * White, not a colour — it is not a kind of money, it is the line telling you which side
+ * of the pipe belongs to whom. A hue here would compete with the two that carry meaning.
  */
 function createDeltaSeparator(barHeight: number, direction: THREE.Vector3): THREE.Mesh {
   const diskRadius = barHeight * 12; // 3x bigger for visibility
@@ -554,11 +639,11 @@ function createDeltaSeparator(barHeight: number, direction: THREE.Vector3): THRE
 
   const geometry = new THREE.CylinderGeometry(diskRadius, diskRadius, diskThickness, 32);
   const material = new THREE.MeshLambertMaterial({
-    color: 0xffff00, // YELLOW separator for visibility
+    color: 0xffffff,
     transparent: true,
     opacity: 0.95,
-    emissive: 0xffff00,
-    emissiveIntensity: 0.5
+    emissive: 0xffffff,
+    emissiveIntensity: 0.35
   });
 
   const separator = new THREE.Mesh(geometry, material);

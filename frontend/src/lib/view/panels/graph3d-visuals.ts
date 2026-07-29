@@ -222,7 +222,9 @@ export function positionEntityLabel(label: THREE.Sprite, entitySize: number): vo
   if (!Number.isFinite(entitySize) || entitySize <= 0) throw new Error(`GRAPH_ENTITY_SIZE_INVALID:${entitySize}`);
   if (!Number.isFinite(worldHeight) || worldHeight <= 0) throw new Error(`GRAPH_LABEL_HEIGHT_INVALID:${worldHeight}`);
   label.scale.set((worldHeight * 4) / entitySize, worldHeight / entitySize, 1);
-  label.position.set(0, (entitySize + worldHeight / 2 + 1) / entitySize, 0);
+  // Clear the sphere by the label's own half-height plus a margin. A fixed margin was
+  // enough while labels were large; a smaller label sat down onto the node it names.
+  label.position.set(0, (entitySize + worldHeight / 2 + 1.9) / entitySize, 0);
 }
 
 export function createEntityLabel(
@@ -240,18 +242,34 @@ export function createEntityLabel(
   context.textBaseline = 'middle';
   context.strokeStyle = '#000000';
   context.lineWidth = 5;
+  /**
+   * Shrink until it fits.
+   *
+   * The sprite is a fixed-size canvas, so a name plus a formatted amount runs off its
+   * right edge and the balance ends mid-digit — the one part of the label a reader
+   * actually needs. Sizing down to the box keeps the whole figure at the cost of a few
+   * points of type.
+   */
+  const fitFont = (text: string, weight: string, maxSize: number): string => {
+    const usable = canvas.width - 24;
+    for (let size = maxSize; size > 18; size -= 2) {
+      context.font = `${weight} ${size}px sans-serif`;
+      if (context.measureText(text).width <= usable) return context.font;
+    }
+    return context.font;
+  };
   if (content.flag) {
     context.font = '56px sans-serif';
     context.fillStyle = '#ffffff';
     context.fillText(content.flag, 256, 32);
-    context.font = 'bold 32px sans-serif';
+    context.font = fitFont(content.labelText, 'bold', 32);
     context.strokeText(content.labelText, 256, 90);
     context.fillStyle = '#FFD700';
     context.fillText(content.labelText, 256, 90);
   } else {
-    context.font = 'bold 64px sans-serif';
+    context.font = fitFont(content.labelText, 'bold', 64);
     context.strokeText(content.labelText, 256, 64);
-    context.fillStyle = '#00ff88';
+    context.fillStyle = '#7ef2c2';
     context.fillText(content.labelText, 256, 64);
   }
   const texture = new THREE.CanvasTexture(canvas);
@@ -262,6 +280,10 @@ export function createEntityLabel(
   const sprite = new THREE.Sprite(
     new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false, sizeAttenuation: true }),
   );
+  // Names must survive the geometry they label. Bars now span whole edges and pass right
+  // through where a label sits, and depthTest alone does not decide who wins — draw order
+  // does, so the label is drawn last.
+  sprite.renderOrder = 999;
   sprite.userData['worldHeight'] = 2.2 * labelScale * (isVrActive ? 3 : 1);
   sprite.userData['contentKey'] = content.key;
   return sprite;
@@ -318,6 +340,8 @@ type GraphConnectionOptions = {
   theme: string;
   barsMode: 'close' | 'spread';
   portfolioScale: number;
+  /** Demo playback: stretch each bar across its edge so its regions can be read. */
+  fitToEdge?: boolean;
   getEntitySize(entityId: string, tokenId: number): number;
 };
 
@@ -403,6 +427,7 @@ export function buildGraphAccountVisuals(options: GraphConnectionOptions): {
     {
       barsMode: options.barsMode,
       portfolioScale: options.portfolioScale,
+      ...(options.fitToEdge ? { fitToEdge: true } : {}),
       desyncDetected,
       bilateralState: barVisual,
       dispute: dispute

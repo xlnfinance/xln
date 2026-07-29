@@ -291,7 +291,11 @@ let rotationY: number = savedSettings.rotationY; // 0-10000 (0 = stopped, 10000 
 let rotationZ: number = savedSettings.rotationZ; // 0-10000 (0 = stopped, 10000 = fast)
 let availableTokens: number[] = []; // Will be populated from actual token data
 let rendererMode: GraphRendererMode = "webgl";
-let labelScale: number = 2.0;
+/** Money is green wherever it appears — reserves in a node, collateral in a bar. */
+const MONEY_GREEN = 0x2ee6a8;
+// An operator zooms in on one node and wants its label legible from there; a demo frames
+// the whole network, where a label two node-diameters tall covers the network it names.
+let labelScale: number = demoMode ? 1.35 : 2.0;
 let entitySizeMultiplier: number = 1.0;
 let lightningSpeed: number = 100;
 let forceLayoutEnabled: boolean = true;
@@ -808,6 +812,9 @@ function readViewportSize(): { width: number; height: number } {
 }
 function createGrid() {
   if (!scene) return;
+  // The grid is an operator's floor reference. In a demo it is lines cutting across the
+  // network for no reason the viewer can use.
+  if (demoMode) return;
   gridHelper = createGraphGrid(gridColor, gridOpacity, gridSize, gridDivisions);
   graphWorld.add(gridHelper);
 }
@@ -1182,15 +1189,28 @@ async function exitVR() {
     }
   }
 }
-/** Whom the selected demo step is about, as a stable key; empty when it names nobody. */
+/**
+ * Whom the selected demo step is about, as a stable key; empty when it names nobody.
+ *
+ * The named parties are not the whole subject: a routed payment names its payer and payee,
+ * and the hop that carries it sits between them. Framing only the two would push the
+ * account that actually moved off screen, so every direct counterparty comes along.
+ */
 function demoStepFocusEntityIds(): string {
   const step = $networkMachineRuntime.selectedStep;
   if (!step) return "";
-  const ids = focusEntityIdsForStep(
+  const named = focusEntityIdsForStep(
     { runtimeId: step.activeRuntimeId, height: step.event.height, cues: step.cues },
     $networkMachineRuntime.activity,
   ).filter((entityId) => entities.some((entity) => entity.id === entityId));
-  return ids.length >= 2 ? [...ids].sort().join(",") : "";
+  if (named.length < 2) return "";
+  const framed = new Set(named);
+  for (const account of mergedRuntimeGraph.accounts) {
+    const { leftEntityId, rightEntityId } = account.selected;
+    if (named.includes(leftEntityId)) framed.add(rightEntityId);
+    if (named.includes(rightEntityId)) framed.add(leftEntityId);
+  }
+  return [...framed].sort().join(",");
 }
 function fitCameraToEntities(preferredEntityIds: ReadonlySet<string> = new Set()) {
   if (!camera || !controls || entities.length === 0) return;
@@ -1210,7 +1230,9 @@ function fitCameraToEntities(preferredEntityIds: ReadonlySet<string> = new Set()
   const projectedHeight = Math.hypot(size.y, size.z);
   const fitWidth = size.x / (2 * horizontalTangent);
   const fitHeight = projectedHeight / (2 * verticalTangent);
-  const distance = Math.max(fitWidth, fitHeight, 36) * 1.65;
+  // A workspace leaves room to pan and drop panels over the graph; a demo has the whole
+  // frame and should use it.
+  const distance = Math.max(fitWidth, fitHeight, 36) * (demoMode ? 1.18 : 1.65);
   camera.position.copy(center).addScaledVector(broadsideViewDirection(focusEntities), distance);
   controls.target.copy(center);
   controls.update();
@@ -1364,6 +1386,40 @@ function applyNetworkMachineRuntimeHighlight(): void {
     glow.name = "network-machine-runtime-highlight";
     glow.userData["runtimeId"] = activeRuntimeId;
     connection.line.add(glow);
+  }
+  if (demoMode) applyDemoStepEmphasis();
+}
+/**
+ * Fade everything the current step is not about.
+ *
+ * A demo answers "who is this happening to" with the picture, not with the caption alone.
+ * Faded, not hidden: the rest of the network is the context that makes the step mean
+ * something, and a node that vanished would read as a node that left.
+ */
+function applyDemoStepEmphasis(): void {
+  // Same set the camera frames: a routed payment is as much about the hop that carried it
+  // as about the two ends it names, and dimming the hop would deny the picture the party
+  // doing the work.
+  const focus = new Set(demoStepFocusEntityIds().split(",").filter(Boolean));
+  const setOpacity = (object: THREE.Object3D, opacity: number): void => {
+    object.traverse((child) => {
+      const material = (child as THREE.Mesh).material;
+      if (!material) return;
+      for (const entry of Array.isArray(material) ? material : [material]) {
+        entry.transparent = true;
+        entry.opacity = opacity;
+        entry.needsUpdate = true;
+      }
+    });
+  };
+  for (const entity of entities) {
+    setOpacity(entity.mesh, focus.size === 0 || focus.has(entity.id) ? 1 : 0.22);
+    if (entity.label) entity.label.material.opacity = focus.size === 0 || focus.has(entity.id) ? 1 : 0.3;
+  }
+  for (const connection of connections) {
+    const live = focus.size === 0 || focus.has(connection.from) || focus.has(connection.to);
+    setOpacity(connection.line, live ? 1 : 0.16);
+    if (connection.progressBars) setOpacity(connection.progressBars, live ? 1 : 0.16);
   }
 }
 function clearNetwork() {
@@ -1580,6 +1636,7 @@ function createConnectionLine(fromEntity: any, toEntity: any, fromId: string, to
       theme: settings.theme,
       barsMode,
       portfolioScale: settings.portfolioScale || 5000,
+      fitToEdge: demoMode,
       getEntitySize: getEntitySizeForToken,
     }),
   );
@@ -1596,6 +1653,7 @@ function createAccountBarsForConnection(fromEntity: any, toEntity: any, fromId: 
     theme: settings.theme,
     barsMode,
     portfolioScale: settings.portfolioScale || 5000,
+      fitToEdge: demoMode,
     getEntitySize: getEntitySizeForToken,
   });
 }
@@ -1708,16 +1766,14 @@ function updateEntityLabels() {
         material.transparent = false;
         material.opacity = 1.0;
         material.depthWrite = true;
-        if (reserveAmount <= 0n) {
-          material.color.setHex(0x666666);
-          material.emissive.setHex(0x333333);
-          material.emissiveIntensity = 0.1;
-        } else {
-          material.color.setHex(0x5cb85c); // Collateral green
-          const baseColor = new THREE.Color(0x5cb85c);
-          material.emissive.copy(baseColor.multiplyScalar(0.1));
-          material.emissiveIntensity = entity.isHub ? 0.2 : 0.1; // Subtle glow
-        }
+        // One green for money, everywhere. An entity holding nothing is not a different
+        // kind of entity — it is a smaller one, and size already says so. Greying it out
+        // added a colour that meant "empty" while green meant "money", so the palette
+        // needed a legend to answer a question the geometry had already answered.
+        material.color.setHex(MONEY_GREEN);
+        const baseColor = new THREE.Color(MONEY_GREEN);
+        material.emissive.copy(baseColor.multiplyScalar(0.1));
+        material.emissiveIntensity = reserveAmount <= 0n ? 0.05 : entity.isHub ? 0.2 : 0.1;
       }
     }
   });
@@ -1999,13 +2055,9 @@ function animateEntityPulses() {
       const newScale = currentScale + (targetScale - currentScale) * lerpSpeed;
       entity.mesh.scale.setScalar(newScale);
       const hasReserves = checkEntityHasReserves(entityId);
-      if (hasReserves) {
-        material.color.setHex(0x00ff88); // Bright green - has funds
-        material.emissive.setRGB(0, 0.15, 0.05);
-      } else {
-        material.color.setHex(0xcccccc); // Light white/grey - empty (visible)
-        material.emissive.setRGB(0.1, 0.1, 0.1);
-      }
+      material.color.setHex(MONEY_GREEN);
+      if (hasReserves) material.emissive.setRGB(0, 0.15, 0.05);
+      else material.emissive.setRGB(0, 0.04, 0.02);
       if (entity.activityRing) {
         entity.mesh.remove(entity.activityRing);
         entity.activityRing.geometry.dispose();
