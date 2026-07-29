@@ -54,6 +54,7 @@ import type {
   EntityFrameAuthority,
   EntityCandidateEffect,
   EntityInput,
+  EntityOutput,
   EntityLeaderCertificate,
   EntityLeaderTimeoutVote,
   EntityReplica,
@@ -249,7 +250,7 @@ const clearCommittedJPrefixRound = (replica: EntityReplica): void => {
 export const ensureLocalJPrefixAttestation = (
   env: RuntimeState,
   replica: EntityReplica,
-  entityOutbox: EntityInput[],
+  entityOutbox: EntityOutput[],
   force: boolean,
 ): boolean => {
   if (hasCurrentRoundJPrefixAttestation(replica)) return false;
@@ -315,7 +316,7 @@ export const ensureLocalJPrefixAttestation = (
 const advanceLocalJPrefixRoundAfterCommit = (
   env: RuntimeState,
   replica: EntityReplica,
-  entityOutbox: EntityInput[],
+  entityOutbox: EntityOutput[],
 ): void => {
   clearCommittedJPrefixRound(replica);
   if (!hasDueLocalJPrefixAdvance(replica.state, replica.jHistory)) return;
@@ -335,7 +336,7 @@ const advanceLocalJPrefixRoundAfterCommit = (
 export const runLocalPostCommitHooks = async (
   env: RuntimeState,
   replica: EntityReplica,
-  entityOutbox: EntityInput[],
+  entityOutbox: EntityOutput[],
 ): Promise<void> => {
   advanceLocalJPrefixRoundAfterCommit(env, replica, entityOutbox);
   await emitDefaultProposerHtlcOnionAdvances(env, replica, entityOutbox);
@@ -803,16 +804,16 @@ export const attachTargetConsumptionProofs = (
 };
 
 export const wrapCertifiedEntityOutputs = (
-  outputs: EntityInput[],
+  outputs: EntityOutput[],
   frame: ProposedEntityFrame,
   sourceState: EntityState,
   env: RuntimeState,
   hashesToSign: HashToSign[],
   hankos: HankoString[],
   emitLocalRuntimeOutputs: boolean,
-): EntityInput[] => {
+): EntityOutput[] => {
   const outputHashes = buildCertifiedEntityOutputHashes(sourceState, env, frame.height, frame.hash, outputs);
-  return outputs.flatMap((output, outputIndex): EntityInput[] => {
+  return outputs.flatMap((output, outputIndex): EntityOutput[] => {
     if (isNonMutatingEntityWakeOutput(output)) return [structuredClone(output)];
     if (isLocalRuntimeProtocolOutput(output)) {
       if (!emitLocalRuntimeOutputs) return [];

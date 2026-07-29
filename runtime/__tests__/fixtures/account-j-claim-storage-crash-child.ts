@@ -196,7 +196,6 @@ if (!proposed.success || !proposed.accountInput) {
 }
 const sealedProposal = await sealAccountDraftAsEntity(env, entityId, signerA, proposed);
 account.pendingAccountInput = sealedProposal;
-account.pendingAccountInputSignerId = signerB;
 if (sealedProposal.kind !== 'frame') throw new Error('ACCOUNT_J_CRASH_FRAME_PROPOSAL_REQUIRED');
 account.currentFrameHanko = sealedProposal.proposal.frameHanko;
 account.currentDisputeProofHanko = sealedProposal.proposal.disputeSeal?.hanko;

@@ -5,7 +5,6 @@
 
 import { accountInputAck, accountInputProposal, accountInputReferenceHeight } from '../../account/consensus/flush';
 import { proposeAccountFrame } from '../../account/consensus/propose';
-import { resolveCertifiedAccountCounterpartyProposer } from '../../account/counterparty-route';
 import { getAccountJClaimNodeStore } from '../../account/j-claim-store';
 import {
   assertCanonicalSettlementWorkspace,
@@ -23,9 +22,6 @@ import {
   normalizeEntityRef,
 } from '../../orderbook/cross-j-orderbook';
 import { swapKey, type WorkingOrderbookOffer } from '../../orderbook/swap-execution';
-import { computeHtlcEnvelopeContextHash } from '../../protocol/htlc/envelope';
-import { validateMultiRecipientCiphertext } from '../../protocol/htlc/multi-recipient';
-import { encryptedHtlcLayer } from '../../protocol/htlc/onion-advance';
 import { mergeStorageOverlayRecords } from '../../protocol/overlay';
 import { compareStableText, safeStringify } from '../../protocol/serialization';
 import { getNextSettlementNonce } from '../../protocol/settlement/operations';
@@ -33,7 +29,6 @@ import { assertScheduledWakeFrameOrder } from '../scheduled-wake-validation';
 import { createEntityFrameCandidateState } from '../state-clone';
 import { getAccountPerspective } from '../../account/perspective';
 import { emitScopedEvents } from '../../infra/scoped-events';
-import { resolveEntityProposerId } from '../../runtime/entity-output-signer';
 import { addMessages, clearEntityFrameEvents, readEntityFrameEvents } from '../frame-events';
 import type {
   AccountPeerInput,
@@ -41,7 +36,7 @@ import type {
   AccountTx,
   EntityCandidateEffect,
   EntityFrameEvent,
-  EntityInput,
+  EntityOutput,
   EntityState,
   EntityTx,
   RuntimeState,
@@ -358,41 +353,10 @@ type ProposePendingAccountFramesContext = {
   currentEntityState: EntityState;
   proposableAccounts: Set<string>;
   requiredAccountResponses: Map<string, AccountPeerInput>;
-  allOutputs: EntityInput[];
+  allOutputs: EntityOutput[];
   collectedHashes: Array<{ hash: string; type: HashType; context: string }>;
   accountJClaimNodeStore: AccountJClaimNodeStore;
   storageChanges: RuntimeOverlayRecord[];
-};
-
-const certifiedAccountOutputSignerHint = (targetEntityId: string, input: AccountPeerInput): string | null => {
-  const proposal = accountInputProposal(input);
-  if (!proposal) return null;
-  const target = targetEntityId.toLowerCase();
-  const signerIds = new Set<string>();
-  for (const tx of proposal.frame.accountTxs) {
-    if (tx.type !== 'htlc_lock') continue;
-    const encryptedLayer = encryptedHtlcLayer(tx.data.envelope);
-    if (!encryptedLayer) continue;
-    const expectedContextHash = computeHtlcEnvelopeContextHash({
-      entityId: target,
-      lockId: tx.data.lockId,
-      hashlock: tx.data.hashlock,
-      tokenId: tx.data.tokenId,
-      amount: tx.data.amount,
-      timelock: tx.data.timelock,
-      revealBeforeHeight: tx.data.revealBeforeHeight,
-    });
-    const canonicalLayer = validateMultiRecipientCiphertext(encryptedLayer, target, expectedContextHash);
-    const signerId = String(canonicalLayer.recipients[0]?.signerId || '')
-      .trim()
-      .toLowerCase();
-    if (!signerId) throw new Error(`ACCOUNT_OUTPUT_CERTIFIED_SIGNER_MISSING:${tx.data.lockId}`);
-    signerIds.add(signerId);
-  }
-  if (signerIds.size > 1) {
-    throw new Error(`ACCOUNT_OUTPUT_CERTIFIED_SIGNER_CONFLICT:${target}:${[...signerIds].sort().join(',')}`);
-  }
-  return signerIds.values().next().value ?? null;
 };
 
 async function materializeDeferredSettlementApprovals(
@@ -567,32 +531,20 @@ const assertRequiredAccountResponsePreserved = (
   }
 };
 
-const routeFinalAccountInput = async (
+const routeFinalAccountInput = (
   context: ProposePendingAccountFramesContext,
   accountKey: string,
-  account: AccountReplica,
   counterpartyId: string,
   input: AccountPeerInput,
   proposal: AccountFrameProposal | undefined,
-): Promise<void> => {
+): void => {
   const { env, currentEntityState: state, allOutputs } = context;
-  const encryptedSigner = certifiedAccountOutputSignerHint(input.toEntityId, input);
-  const certifiedSigner = await resolveCertifiedAccountCounterpartyProposer(env, account, input.toEntityId);
-  if (encryptedSigner && certifiedSigner && encryptedSigner !== certifiedSigner) {
-    throw new Error(
-      `ACCOUNT_OUTPUT_SIGNER_HINT_CONFLICT:${input.toEntityId}:${encryptedSigner}:${certifiedSigner}`,
-    );
-  }
-  const signerId = encryptedSigner ?? certifiedSigner ?? resolveEntityProposerId(
-    env,
-    input.toEntityId,
-    `account flush output ${state.entityId}->${input.toEntityId}`,
-  );
-  // Delivery metadata is validator-local and excluded from Entity roots.
-  if (accountInputProposal(input)) account.pendingAccountInputSignerId = signerId;
+  // Entity consensus commits the destination Entity and exact Account payload.
+  // It deliberately does not choose a validator replica: validator topology,
+  // local keys and recovery hints belong to the parent Runtime. Runtime binds
+  // this output to an exact signer before committing its own frame.
   allOutputs.push({
     entityId: input.toEntityId,
-    signerId,
     entityTxs: [{ type: 'accountInput', data: input }],
   });
   if (!proposal) return;
@@ -658,10 +610,9 @@ async function proposePendingAccountFrames(context: ProposePendingAccountFramesC
     const finalAccountInput = proposal?.success && proposal.accountInput ? proposal.accountInput : requiredResponse;
     if (!finalAccountInput) continue;
     assertRequiredAccountResponsePreserved(accountKey, requiredResponse, finalAccountInput);
-    await routeFinalAccountInput(
+    routeFinalAccountInput(
       context,
       accountKey,
-      account,
       cpId,
       finalAccountInput,
       proposal,
@@ -675,7 +626,7 @@ type ApplyOrderbookMatchingContext = {
   env: RuntimeState;
   currentEntityState: EntityState;
   allSwapOffersCreated: SwapOfferEvent[];
-  allOutputs: EntityInput[];
+  allOutputs: EntityOutput[];
   proposableAccounts: Set<string>;
   candidateEffects: EntityCandidateEffect[];
   storageChanges: RuntimeOverlayRecord[];
@@ -869,7 +820,7 @@ type ApplySwapCancelRequestsContext = {
   currentEntityState: EntityState;
   allSwapCancelRequests: SwapCancelRequestEvent[];
   proposableAccounts: Set<string>;
-  allOutputs: EntityInput[];
+  allOutputs: EntityOutput[];
   storageChanges: RuntimeOverlayRecord[];
 };
 
@@ -959,7 +910,7 @@ async function applySwapCancelRequests(
 
 type EntityFrameResult = {
   newState: EntityState;
-  outputs: EntityInput[];
+  outputs: EntityOutput[];
   jOutputs: JInput[];
   candidateEffects: EntityCandidateEffect[];
   storageChanges: RuntimeOverlayRecord[];

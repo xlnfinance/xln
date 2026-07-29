@@ -49,7 +49,7 @@
 
 import type {
   AccountInput,
-  EntityInput,
+  EntityOutput,
   EntityState,
   RuntimeState,
 } from '../types';
@@ -130,7 +130,7 @@ type CrontabTaskHandler = (
   replica: EntityTransitionContext,
   task: CrontabTaskState,
   context: CrontabExecutionContext,
-) => Promise<EntityInput[]>;
+) => Promise<EntityOutput[]>;
 
 const createTaskState = (
   method: CrontabTaskMethod,
@@ -186,9 +186,9 @@ export async function executeCrontab(
   replica: EntityTransitionContext,
   crontabState: CrontabState,
   context: CrontabExecutionContext,
-): Promise<EntityInput[]> {
+): Promise<EntityOutput[]> {
   const now = replica.state.timestamp; // DETERMINISTIC: Use entity's own timestamp
-  const allOutputs: EntityInput[] = [];
+  const allOutputs: EntityOutput[] = [];
 
   // ── 1. Process scheduled hooks (setTimeout-like, fires once) ──
   if (crontabState.hooks && crontabState.hooks.size > 0) {
@@ -233,16 +233,17 @@ export async function executeCrontab(
  * Do not add a local timeout rollback here. Once the signature leaves this
  * replica, the peer may accept or submit it later. Liveness comes from exact
  * resend and, ultimately, the dispute protocol. Same-height collision rollback
- * belongs exclusively to Account consensus, where the fixed LEFT winner is
- * identical to Depository.sol.
+ * belongs exclusively to Account consensus, where the fixed LEFT winner does
+ * not depend on arrival time. Depository separately enforces canonical pair
+ * identity and strictly increasing dispute nonces.
  */
 async function maintainPendingAccounts(
   _env: RuntimeState,
   replica: EntityTransitionContext,
   _task: CrontabTaskState,
   _context: CrontabExecutionContext,
-): Promise<EntityInput[]> {
-  const outputs: EntityInput[] = [];
+): Promise<EntityOutput[]> {
+  const outputs: EntityOutput[] = [];
   const now = replica.state.timestamp; // DETERMINISTIC: Use entity's own timestamp
 
   for (const counterpartyId of getPendingAccountIds(replica.state)) {
@@ -261,17 +262,8 @@ async function maintainPendingAccounts(
       cachedInputHeight !== account.pendingFrame.height
     ) continue;
 
-    const targetSignerId = account.pendingAccountInputSignerId;
-    if (!targetSignerId) {
-      throw new Error(
-        `ACCOUNT_PENDING_INPUT_SIGNER_MISSING: entity=${replica.entityId}` +
-        ` counterparty=${account.pendingAccountInput.toEntityId}` +
-        ` height=${account.pendingFrame.height}`,
-      );
-    }
     outputs.push({
       entityId: account.pendingAccountInput.toEntityId,
-      signerId: targetSignerId,
       entityTxs: [{ type: 'accountInput', data: account.pendingAccountInput }],
     });
     crontabLog.debug('pending_frame.resend', {

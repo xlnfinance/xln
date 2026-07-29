@@ -406,7 +406,6 @@ const setSyntheticPendingAccountProposal = (
   account: AccountState,
   accountTxs: AccountTx[],
   timestamp: number,
-  targetSignerId = 'fixture-counterparty-signer',
 ): void => {
   const pendingFrame = {
     ...account.currentFrame,
@@ -424,7 +423,6 @@ const setSyntheticPendingAccountProposal = (
     domain: structuredClone(account.domain),
     proposal: { frame: structuredClone(pendingFrame) },
   };
-  account.pendingAccountInputSignerId = targetSignerId;
 };
 
 const makeIncomingAccountFrame = (

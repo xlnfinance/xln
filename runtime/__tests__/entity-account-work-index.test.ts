@@ -59,7 +59,6 @@ describe('Entity Account work indexes', () => {
         },
       },
     };
-    account.pendingAccountInputSignerId = 'validator';
     account.requestedRebalance.set(1, 10n);
     refreshAccountWorkIndex(state, counterparty);
     expect([...getPendingAccountIds(state)]).toEqual([counterparty]);
@@ -69,7 +68,6 @@ describe('Entity Account work indexes', () => {
     candidate.accounts.get(counterparty)!.mempool = [];
     candidate.accounts.get(counterparty)!.pendingFrame = undefined;
     candidate.accounts.get(counterparty)!.pendingAccountInput = undefined;
-    candidate.accounts.get(counterparty)!.pendingAccountInputSignerId = undefined;
     candidate.accounts.get(counterparty)!.requestedRebalance.clear();
     refreshAccountWorkIndex(candidate, counterparty);
 

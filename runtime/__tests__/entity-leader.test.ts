@@ -51,7 +51,10 @@ import type {
   ValidatorJHistory,
 } from '../types';
 import { validateConsensusConfig } from '../entity/consensus/config-validation';
-import { decodeRoutedEntityInput } from '../runtime/routing-validation';
+import {
+  decodeEntityOutput,
+  decodeRoutedEntityInput,
+} from '../runtime/routing-validation';
 import { validateEntityReplica } from '../entity/replica-validation';
 
 const leaderTestJurisdiction = {
@@ -123,6 +126,21 @@ describe('entity leader policy', () => {
       signerId: 'alice',
       leaderTimeoutVote: vote,
     }).leaderTimeoutVote).toEqual(vote);
+  });
+
+  test('separates Entity-addressed output from Runtime-routed input', () => {
+    const output = {
+      entityId: 'destination',
+      entityTxs: [{ type: 'scheduledWake' as const, data: { reason: 'test' } }],
+    };
+    expect(decodeEntityOutput(output)).toEqual(output);
+    expect(() => decodeRoutedEntityInput(output)).toThrow(
+      'signerId is missing',
+    );
+    expect(() => decodeEntityOutput({
+      ...output,
+      runtimeId: 'transport-without-signer',
+    })).toThrow('cannot contain Runtime transport routing');
   });
 
   test('uses linear timeout backoff capped at sixty seconds', () => {

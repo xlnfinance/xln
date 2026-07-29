@@ -66,7 +66,6 @@ export const freezeAccountForDispute = (
   // the last signed ProofBody; late proposal/ACK traffic is rejected at ingress.
   delete account.pendingFrame;
   delete account.pendingAccountInput;
-  delete account.pendingAccountInputSignerId;
   account.rollbackCount = 0;
   delete account.lastRollbackFrameHash;
 };

@@ -1393,7 +1393,6 @@ describe('multisig secondary Hanko production', () => {
     };
     account.pendingFrame = structuredClone(combined.proposal.frame);
     account.pendingAccountInput = combined;
-    account.pendingAccountInputSignerId = counterpartySigner;
 
     const hankos = new Map<string, HankoWitnessEntry>();
     for (const [hash, type] of [

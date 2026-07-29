@@ -408,7 +408,6 @@ const setSyntheticPendingAccountProposal = (
   account: AccountState,
   accountTxs: AccountTx[],
   timestamp: number,
-  targetSignerId = 'fixture-counterparty-signer',
 ): void => {
   const pendingFrame = {
     ...account.currentFrame,
@@ -426,7 +425,6 @@ const setSyntheticPendingAccountProposal = (
     domain: structuredClone(account.domain),
     proposal: { frame: structuredClone(pendingFrame) },
   };
-  account.pendingAccountInputSignerId = targetSignerId;
 };
 
 const makeIncomingAccountFrame = (
@@ -1760,7 +1758,6 @@ describe('audit fail-fast regressions', () => {
     const proposed = await proposeAccountFrame(env, account, env.timestamp);
     expect(proposed.success).toBe(true);
     const pendingHeight = proposed.accountInput!.proposal.frame.height;
-    account.pendingAccountInputSignerId = 'fixture-counterparty-signer';
     hubState.accounts.set(userId, account);
 
     const prepared = await handlePrepareDispute(

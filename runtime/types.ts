@@ -681,12 +681,36 @@ export interface EntityInput {
 }
 
 /**
+ * A committed Entity may address an application message to another Entity
+ * without choosing that Entity's validator replica.
+ *
+ * The destination Entity and payload are consensus bytes. The validator and
+ * Runtime route are local delivery decisions made by the parent Runtime before
+ * its frame is committed. Keeping those fields unrepresentable here prevents
+ * validator topology from leaking into Entity consensus.
+ */
+export type EntityAddressedOutput = Omit<
+  EntityInput,
+  'signerId' | 'runtimeId' | 'from'
+> & {
+  signerId?: never;
+  runtimeId?: never;
+  from?: never;
+};
+
+/**
+ * Entity consensus emits either an exact validator-to-validator protocol
+ * message or an application message addressed only to its destination Entity.
+ */
+export type EntityOutput = EntityInput | EntityAddressedOutput;
+
+/**
  * Transport envelope for REA-bound entity inputs.
  *
  * signerId is mandatory once an input enters runtime queues/outbox/network. The
  * older "entityId only, resolve later" shape can silently route to a stale
- * read-only replica or the wrong validator; raw EntityInput is the only place
- * where shorthand is allowed.
+ * read-only replica or the wrong validator. Only `EntityAddressedOutput` may
+ * omit it, and Runtime must resolve that output before it becomes an input.
  */
 export interface RoutedEntityInput extends EntityInput {
   signerId: string;
@@ -1116,7 +1140,7 @@ export interface EntityCandidate {
   frameHash: string;
   height: number;
   state: EntityState;
-  outputs: EntityInput[];
+  outputs: EntityOutput[];
   jOutputs: JInput[];
   hashesToSign: HashToSign[];
   /** Notifications interpreted only after this exact frame commits. */

@@ -1,7 +1,7 @@
 import type {
   AccountPeerInput,
   EntityCandidateEffect,
-  EntityInput,
+  EntityOutput,
   EntityState,
   EntityTx,
   RuntimeState,
@@ -25,7 +25,7 @@ export type ApplyEntityTxsInOrderContext = {
   env: RuntimeState;
   entityTxs: EntityTx[];
   currentEntityState: EntityState;
-  allOutputs: EntityInput[];
+  allOutputs: EntityOutput[];
   allJOutputs: JInput[];
   collectedHashes: Array<{ hash: string; type: HashType; context: string }>;
   proposableAccounts: Set<string>;

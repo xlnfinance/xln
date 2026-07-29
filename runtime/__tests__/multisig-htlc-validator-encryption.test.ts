@@ -1778,7 +1778,9 @@ describe('multisig HTLC validator encryption', () => {
     expect(firstReplay.outputs).toHaveLength(1);
     expect(serializeTaggedJson(firstReplay.outputs)).toBe(serializeTaggedJson(secondReplay.outputs));
     expect(firstReplay.outputs[0]?.entityId).toBe(destination.entityId);
-    expect(firstReplay.outputs[0]?.signerId).toBe(first.signerId);
+    // Pure Entity replay commits destination + payload only. Runtime binds the
+    // encrypted recipient to an exact validator before its own WAL commit.
+    expect(firstReplay.outputs[0]?.signerId).toBeUndefined();
     expect(firstReplay.outputs[0]?.entityTxs?.[0]?.type).toBe('accountInput');
     expect(firstReplay.outputs.some((output) => output.entityTxs?.length === 0)).toBe(false);
     historyTrace.stop();

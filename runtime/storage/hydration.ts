@@ -91,7 +91,6 @@ export const hydrateAccountDocFromStorage = (doc: StorageAccountDoc): AccountRep
   ...withProp('swapClosedOrders', publicSwapHistory(doc.swapClosedOrders)),
   ...withProp('pendingFrame', doc.pendingFrame ? cloneCrossJurisdictionAccountFrameRoute(doc.pendingFrame) : undefined),
   ...withProp('pendingAccountInput', doc.pendingAccountInput ? cloneCrossJurisdictionAccountInputRoute(doc.pendingAccountInput) : undefined),
-  ...withProp('pendingAccountInputSignerId', doc.pendingAccountInputSignerId),
   ...withProp('lastOutboundFrameAck', doc.lastOutboundFrameAck),
   ...withProp('pendingForwards', doc.pendingForwards),
   ...withProp('hankoSignature', doc.hankoSignature),

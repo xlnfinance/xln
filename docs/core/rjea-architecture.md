@@ -29,6 +29,12 @@ The common shape is:
 - Only Runtime interprets committed outputs as external effects.
 - External effects run only after the Runtime frame is durable in WAL.
 
+Entity application outputs commit destination Entity plus payload, not
+validator topology. Runtime converts them to exact signer-addressed
+`EntityInput` values inside the Runtime candidate and publishes them only after
+the WAL commit. Validator-consensus messages that already target a specific
+replica keep that exact signer.
+
 The shared vocabulary does not imply a shared base class or generic reducer.
 Runtime, Entity and Account have different consensus and failure boundaries.
 

@@ -1,5 +1,6 @@
 import type {
   DeliverableEntityInput,
+  EntityOutput,
   RoutedEntityInput,
 } from '../types';
 import {
@@ -11,22 +12,9 @@ import {
 } from '../entity/consensus/j-prefix-validation';
 import { validateProposedEntityFrame } from '../entity/consensus/frame-validation';
 
-function assertRoutedEntityInput(
+const assertEntityMessagePayload = (
   input: Record<string, unknown>,
-): asserts input is Record<string, unknown> & RoutedEntityInput {
-  if (typeof input['entityId'] !== 'string' || input['entityId'].length === 0) {
-    throw new Error(
-      'FINANCIAL-SAFETY: entityId is missing or invalid - financial routing corruption detected',
-    );
-  }
-  if (
-    typeof input['signerId'] !== 'string' ||
-    input['signerId'].trim().length === 0
-  ) {
-    throw new Error(
-      'FINANCIAL-SAFETY: signerId is missing - entity input must target an exact signer replica',
-    );
-  }
+): void => {
   if (
     input['entityTxs'] === undefined &&
     input['proposedFrame'] === undefined &&
@@ -98,6 +86,25 @@ function assertRoutedEntityInput(
       );
     }
   }
+};
+
+function assertRoutedEntityInput(
+  input: Record<string, unknown>,
+): asserts input is Record<string, unknown> & RoutedEntityInput {
+  if (typeof input['entityId'] !== 'string' || input['entityId'].length === 0) {
+    throw new Error(
+      'FINANCIAL-SAFETY: entityId is missing or invalid - financial routing corruption detected',
+    );
+  }
+  if (
+    typeof input['signerId'] !== 'string' ||
+    input['signerId'].trim().length === 0
+  ) {
+    throw new Error(
+      'FINANCIAL-SAFETY: signerId is missing - entity input must target an exact signer replica',
+    );
+  }
+  assertEntityMessagePayload(input);
 }
 
 export const decodeRoutedEntityInput = (value: unknown): RoutedEntityInput => {
@@ -106,35 +113,36 @@ export const decodeRoutedEntityInput = (value: unknown): RoutedEntityInput => {
   return input;
 };
 
-/**
- * Entity outputs and destination inputs share one canonical wire shape.
- * Direction is routing metadata, not a second schema.
- */
-export const decodeRoutedEntityOutput = (
+/** Decode a committed Entity output before Runtime adds transport routing. */
+export const decodeEntityOutput = (
   output: unknown,
-): RoutedEntityInput => {
+): EntityOutput => {
   const value = validateObject(output, 'RoutedEntityOutput');
   if (typeof value['entityId'] !== 'string' || value['entityId'].length === 0) {
     throw new Error(
       'FINANCIAL-SAFETY: EntityOutput entityId is missing - routing corruption',
     );
   }
-  if (
-    typeof value['signerId'] !== 'string' ||
-    value['signerId'].trim().length === 0
-  ) {
+  if (value['runtimeId'] !== undefined || value['from'] !== undefined) {
     throw new Error(
-      'FINANCIAL-SAFETY: EntityOutput signerId is missing - routed outputs must target an exact signer replica',
+      'FINANCIAL-SAFETY: EntityOutput cannot contain Runtime transport routing',
     );
   }
-  return output as RoutedEntityInput;
+  if (value['signerId'] !== undefined) {
+    assertRoutedEntityInput(value);
+    return output as RoutedEntityInput;
+  }
+  assertEntityMessagePayload(value);
+  return output as EntityOutput;
 };
 
 /** Network delivery additionally requires an already resolved Runtime. */
 export const validateDeliverableEntityInput = (
   output: unknown,
 ): DeliverableEntityInput => {
-  const input = decodeRoutedEntityOutput(output);
+  const value = validateObject(output, 'DeliverableEntityInput');
+  assertRoutedEntityInput(value);
+  const input = output as RoutedEntityInput;
   if (typeof input.runtimeId !== 'string' || input.runtimeId.trim().length === 0) {
     throw new Error(
       'FINANCIAL-SAFETY: Deliverable EntityOutput missing runtimeId',

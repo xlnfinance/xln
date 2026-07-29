@@ -20,6 +20,7 @@ const required = new Set([
   'EntityReplica',
   'EntityCandidate',
   'EntityInput',
+  'EntityOutput',
   'EntityTx',
   'AccountState',
   'AccountReplica',

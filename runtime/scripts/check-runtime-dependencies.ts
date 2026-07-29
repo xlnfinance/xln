@@ -30,6 +30,7 @@ const FORBIDDEN_DEPENDENCIES = new Set([
   'account->entity',
   'account->runtime',
   'account->storage',
+  'entity->runtime',
   'entity->jadapter',
   'entity->networking',
   'entity->storage',
@@ -38,12 +39,7 @@ const FORBIDDEN_DEPENDENCIES = new Set([
   'server->orchestrator',
 ]);
 
-// Account frames created before the first counterparty Hanko still need
-// Runtime-local delivery routing. This final edge disappears only when
-// EntityOutput and routed EntityInput become distinct types.
-const REVERSE_DEPENDENCY_DEBT: Readonly<Record<string, number>> = {
-  'entity->runtime': 1,
-};
+const REVERSE_DEPENDENCY_DEBT: Readonly<Record<string, number>> = {};
 
 const collectFiles = (directory: string): string[] =>
   fs.readdirSync(directory, { withFileTypes: true }).flatMap(entry => {

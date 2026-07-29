@@ -105,6 +105,12 @@ The same vocabulary repeats at every off-chain layer:
 `*Replica` is a live instance. `*State` is only the deterministic data
 committed by a frame. `*Machine` names transition logic, never a data type.
 
+An application `EntityOutput` certifies only its destination Entity and exact
+payload. It does not certify validator topology. Runtime resolves that output
+to an exact signer replica, records the routed `EntityInput` in its candidate
+frame, commits WAL, and only then permits delivery. Validator-to-validator
+consensus messages may already name their exact signer.
+
 ```mermaid
 flowchart TB
   EXT["External actions<br/>peer messages<br/>finalized J events"]
@@ -141,6 +147,7 @@ flowchart TB
   J["Jurisdiction contracts<br/>reserves · collateral · disputes · final truth"]
 
   EXT --> RI
+  EO -- "Runtime resolves signer<br/>before RuntimeFrame commit" --> AR
   AR -- "route exact EntityInput" --> EI
   AE -- "EntityTx.accountInput<br/>commits exact peer input" --> AI
   EO -- "deterministic child outputs" --> AR

@@ -5,7 +5,7 @@ export const STORAGE_ACCOUNT_FIELD_TAG = {
   mempool: 6, currentFrame: 7, deltas: 8, locks: 9, swapOffers: 10,
   pulls: 11, subcontracts: 12, lendingIntents: 13, globalCreditLimits: 14,
   currentHeight: 15, pendingFrame: 16, pendingSignatures: 17,
-  pendingAccountInput: 18, pendingAccountInputSignerId: 19, lastOutboundFrameAck: 20,
+  pendingAccountInput: 18, lastOutboundFrameAck: 20,
   pendingForwards: 21, hankoSignature: 22, rollbackCount: 23, lastRollbackFrameHash: 24,
   leftPendingJClaims: 25, rightPendingJClaims: 26, lastFinalizedJHeight: 27,
   proofHeader: 28, proofBody: 29, abiProofBody: 30, disputeConfig: 31,

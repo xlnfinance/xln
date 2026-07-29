@@ -627,7 +627,6 @@ describe('durable scoped reliable delivery receipts', () => {
         frameHanko: `0x${'33'.repeat(65)}`,
       },
     };
-    account.pendingAccountInputSignerId = sender.runtimeId!;
 
     const state = {
       entityId: targetEntityId,

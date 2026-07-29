@@ -53,10 +53,13 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   reach upward into process orchestration. Move the shared primitive to its
   canonical owner or pass a narrow dependency explicitly—never hide a reverse
   edge behind a re-export.
+  Drive the remaining measured dependency debt from root-surface `3` and
+  largest value-import SCC `5` to zero/one respectively, tightening both
+  ratchets after every reduction.
 - [ ] Close only current, reproduced audit findings. The accepted remainder is
   decomposed below: durable/idempotent off-chain faucet admission, the
-  Replica/State split, Activity/history migration, the last Entity→Runtime
-  reverse edge, exact Account-frame validation names, canonical financial
+  Replica/State split, Activity/history migration, exact Account-frame
+  validation names, canonical financial
   construction, oversized infrastructure functions and load/recovery proof.
   Eliminate consensus non-null assertions by returning refined
   decoded/preflight types. Treat certified human-readable event strings as
@@ -268,6 +271,10 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   `requestId → batchHash/opIndex/outcome` owner: withholding the bilateral
   claim must never let the hub spend reserve twice, and abort/requeue must
   rebroadcast or rebuild exactly once rather than doubling the draft amount.
+  First prove whether `handleR2C` and `queueR2CTargets` are two legitimate
+  phases of one lifecycle or two producers. Keep both only if a trace proves
+  that the Entity transaction creates the canonical bilateral request while
+  crontab exclusively materializes that same request into one J batch.
 - [ ] Finish canonical financial construction and naming. Empty Deltas now use
   the Account-owned constructor, hold fields are mandatory, and strict versus
   boolean Account-frame validation is named `decodeAccountFrame` versus

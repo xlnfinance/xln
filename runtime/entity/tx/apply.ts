@@ -3,7 +3,7 @@ import type {
   EntityState,
   EntityTx,
   RuntimeState,
-  EntityInput,
+  EntityOutput,
   JInput,
   HashType,
   RuntimeOverlayRecord,
@@ -113,7 +113,7 @@ const entityTxLog = createStructuredLogger('entity.tx');
 // Extended return type including pure events from handlers
 export interface ApplyEntityTxResult {
   newState: EntityState;
-  outputs: EntityInput[];
+  outputs: EntityOutput[];
   storageChanges: RuntimeOverlayRecord[];
   candidateEffects: EntityCandidateEffect[];
   jOutputs?: JInput[];

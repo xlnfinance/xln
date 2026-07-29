@@ -188,7 +188,6 @@ const ACCOUNT_ENTITY_COMMITTED_FIELDS = [
  * honest validators or create a circular commitment.
  */
 const ACCOUNT_ENTITY_LOCAL_FIELDS = [
-  'pendingAccountInputSignerId',
   'hankoSignature',
   'currentFrameHanko',
   'counterpartyFrameHanko',

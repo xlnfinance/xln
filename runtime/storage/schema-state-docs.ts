@@ -45,7 +45,6 @@ const ACCOUNT_REQUIRED = [
 
 const ACCOUNT_OPTIONAL = [
   'pulls', 'subcontracts', 'lendingIntents', 'pendingFrame', 'pendingAccountInput',
-  'pendingAccountInputSignerId',
   'lastOutboundFrameAck', 'pendingForwards', 'hankoSignature', 'lastRollbackFrameHash',
   'abiProofBody', 'currentFrameHanko', 'counterpartyFrameHanko', 'boardResealMigration',
   'counterpartyBoardReseal', 'currentDisputeProofHanko', 'currentDisputeProofNonce',

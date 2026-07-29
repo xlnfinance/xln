@@ -7,6 +7,7 @@ import type {
   CertifiedBoardRecord,
   ConsensusOutputOrigin,
   EntityInput,
+  EntityOutput,
   EntityTx,
   RuntimeState,
   HashToSign,
@@ -32,7 +33,7 @@ import { LIMITS } from '../../constants';
 import { assertReliableCertifiedPayloadIsAtomic } from './output-envelope';
 import { assertCertifiedEntityOutputAuthorization } from '../authorization';
 
-const assertCertifiableOutput = (output: EntityInput, outputIndex: number): EntityTx[] => {
+const assertCertifiableOutput = (output: EntityOutput, outputIndex: number): EntityTx[] => {
   if (
     !Array.isArray(output.entityTxs) ||
     output.entityTxs.length === 0 ||
@@ -57,12 +58,15 @@ const assertCertifiableOutput = (output: EntityInput, outputIndex: number): Enti
   return output.entityTxs;
 };
 
-export const isLocalRuntimeProtocolOutput = (output: EntityInput): boolean => output.localRuntimeProtocol === 'cross-j';
+export const isLocalRuntimeProtocolOutput = (
+  output: EntityOutput,
+): output is EntityInput & { localRuntimeProtocol: 'cross-j' } =>
+  output.localRuntimeProtocol === 'cross-j';
 
 export type NonMutatingEntityWakeOutput = EntityInput & { entityTxs: [] };
 
 /** Empty EntityInput wakes the already-addressed replica but carries no state mutation. */
-export const isNonMutatingEntityWakeOutput = (output: EntityInput): output is NonMutatingEntityWakeOutput =>
+export const isNonMutatingEntityWakeOutput = (output: EntityOutput): output is NonMutatingEntityWakeOutput =>
   Array.isArray(output.entityTxs) &&
   output.entityTxs.length === 0 &&
   output.proposedFrame === undefined &&
@@ -436,7 +440,7 @@ export const assertCertifiedOutputSemanticIdentity = (
  * A pre-tagged generic output is a governance reissue and must match the exact
  * bounded last-issued source frontier.
  */
-export const assignCertifiedOutputIdentities = (sourceState: EntityState, outputs: EntityInput[]): EntityState => {
+export const assignCertifiedOutputIdentities = (sourceState: EntityState, outputs: EntityOutput[]): EntityState => {
   const sourceEntityId = sourceState.entityId.toLowerCase();
   const sequences = new Map(sourceState.certifiedOutputSequences ?? []);
   if (sequences.size > LIMITS.MAX_ACCOUNTS_PER_ENTITY) {
@@ -665,7 +669,7 @@ export const buildCertifiedEntityOutputHashes = (
   env: RuntimeState,
   height: number,
   frameHash: string,
-  outputs: EntityInput[],
+  outputs: EntityOutput[],
 ): HashToSign[] =>
   outputs.flatMap((output, outputIndex) => {
     if (isNonMutatingEntityWakeOutput(output)) return [];

@@ -1,7 +1,18 @@
+import { accountInputProposal } from '../account/consensus/flush';
+import { resolveCertifiedAccountCounterpartyProposer } from '../account/counterparty-route';
 import { getLocalSignerPrivateKey } from '../account/crypto';
 import { getEntityLeaderState, isEntityActiveLeader } from '../entity/consensus/leader';
 import type { Profile } from '../entity/profile';
-import type { RuntimeState } from '../types';
+import { computeHtlcEnvelopeContextHash } from '../protocol/htlc/envelope';
+import { validateMultiRecipientCiphertext } from '../protocol/htlc/multi-recipient';
+import { encryptedHtlcLayer } from '../protocol/htlc/onion-advance';
+import type {
+  AccountPeerInput,
+  EntityOutput,
+  EntityReplica,
+  EntityTx,
+  RuntimeState,
+} from '../types';
 
 const REPLAY_OUTPUT_SIGNER_HINTS = Symbol.for('xln.runtime.replay.output-signer-hints');
 
@@ -96,4 +107,122 @@ export const resolveEntityProposerId = (env: RuntimeState, entityId: string, con
   if (configFallback) return configFallback;
 
   throw new Error(`SIGNER_RESOLUTION_FAILED: ${context} entityId=${entityId}`);
+};
+
+const nestedAccountInputs = (txs: readonly EntityTx[]): AccountPeerInput[] =>
+  txs.flatMap((tx): AccountPeerInput[] => {
+    if (tx.type === 'accountInput') return [tx.data];
+    if (tx.type !== 'consensusOutput') return [];
+    return tx.data.entityTxs.flatMap(nested =>
+      nested.type === 'accountInput' ? [nested.data] : [],
+    );
+  });
+
+const entityOutputAccountInput = (output: EntityOutput): AccountPeerInput | null => {
+  const inputs = output.entityTxs ? nestedAccountInputs(output.entityTxs) : [];
+  if (inputs.length > 1) {
+    throw new Error(
+      `ENTITY_OUTPUT_ACCOUNT_ROUTE_AMBIGUOUS:${output.entityId}:${inputs.length}`,
+    );
+  }
+  return inputs[0] ?? null;
+};
+
+const encryptedAccountSignerHint = (
+  targetEntityId: string,
+  input: AccountPeerInput,
+): string | null => {
+  const proposal = accountInputProposal(input);
+  if (!proposal) return null;
+  const target = targetEntityId.toLowerCase();
+  const signerIds = new Set<string>();
+  for (const tx of proposal.frame.accountTxs) {
+    if (tx.type !== 'htlc_lock') continue;
+    const encryptedLayer = encryptedHtlcLayer(tx.data.envelope);
+    if (!encryptedLayer) continue;
+    const contextHash = computeHtlcEnvelopeContextHash({
+      entityId: target,
+      lockId: tx.data.lockId,
+      hashlock: tx.data.hashlock,
+      tokenId: tx.data.tokenId,
+      amount: tx.data.amount,
+      timelock: tx.data.timelock,
+      revealBeforeHeight: tx.data.revealBeforeHeight,
+    });
+    const layer = validateMultiRecipientCiphertext(
+      encryptedLayer,
+      target,
+      contextHash,
+    );
+    const signerId = String(layer.recipients[0]?.signerId ?? '')
+      .trim()
+      .toLowerCase();
+    if (!signerId) {
+      throw new Error(
+        `ACCOUNT_OUTPUT_CERTIFIED_SIGNER_MISSING:${tx.data.lockId}`,
+      );
+    }
+    signerIds.add(signerId);
+  }
+  if (signerIds.size > 1) {
+    throw new Error(
+      `ACCOUNT_OUTPUT_CERTIFIED_SIGNER_CONFLICT:${target}:` +
+        [...signerIds].sort().join(','),
+    );
+  }
+  return signerIds.values().next().value ?? null;
+};
+
+/**
+ * Bind a committed Entity output to one validator replica.
+ *
+ * Entity consensus has already certified destination Entity plus payload.
+ * Runtime may use local keys, certified Account evidence, encrypted-recipient
+ * hints or replay metadata to choose the transport route. The chosen signer is
+ * then stored in the Runtime frame and remains invisible externally until that
+ * frame's WAL commit succeeds.
+ */
+export const resolveEntityOutputSignerId = async (
+  env: RuntimeState,
+  sourceReplica: EntityReplica,
+  output: EntityOutput,
+): Promise<string> => {
+  if (output.signerId !== undefined) return output.signerId.toLowerCase();
+
+  const accountInput = entityOutputAccountInput(output);
+  if (accountInput) {
+    const sourceAccount = sourceReplica.state.accounts.get(output.entityId);
+    if (!sourceAccount) {
+      throw new Error(
+        `ENTITY_OUTPUT_SOURCE_ACCOUNT_MISSING:${sourceReplica.entityId}:${output.entityId}`,
+      );
+    }
+    const encryptedSigner = encryptedAccountSignerHint(
+      output.entityId,
+      accountInput,
+    );
+    const certifiedSigner = await resolveCertifiedAccountCounterpartyProposer(
+      env,
+      sourceAccount,
+      output.entityId,
+    );
+    if (
+      encryptedSigner &&
+      certifiedSigner &&
+      encryptedSigner !== certifiedSigner
+    ) {
+      throw new Error(
+        `ACCOUNT_OUTPUT_SIGNER_HINT_CONFLICT:${output.entityId}:` +
+          `${encryptedSigner}:${certifiedSigner}`,
+      );
+    }
+    const evidenceSigner = encryptedSigner ?? certifiedSigner;
+    if (evidenceSigner) return evidenceSigner;
+  }
+
+  return resolveEntityProposerId(
+    env,
+    output.entityId,
+    `Entity output ${sourceReplica.entityId}->${output.entityId}`,
+  );
 };

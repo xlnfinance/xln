@@ -408,7 +408,6 @@ const setSyntheticPendingAccountProposal = (
   account: AccountState,
   accountTxs: AccountTx[],
   timestamp: number,
-  targetSignerId = 'fixture-counterparty-signer',
 ): void => {
   const pendingFrame = {
     ...account.currentFrame,
@@ -426,7 +425,6 @@ const setSyntheticPendingAccountProposal = (
     domain: structuredClone(account.domain),
     proposal: { frame: structuredClone(pendingFrame) },
   };
-  account.pendingAccountInputSignerId = targetSignerId;
 };
 
 const makeIncomingAccountFrame = (
@@ -826,7 +824,6 @@ describe('audit fail-fast regressions', () => {
     leftAccount.pendingAccountInput = structuredClone(leftInput);
     leftAccount.currentFrameHanko = leftInput.proposal.frameHanko;
     leftAccount.currentDisputeProofHanko = leftInput.proposal.disputeSeal?.hanko;
-    leftAccount.pendingAccountInputSignerId = right.signerId;
 
     const leftState = makeEntityState(left.entityId);
     leftState.config = makeSingleSignerConfigFor(left.signerId);

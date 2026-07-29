@@ -1,5 +1,6 @@
 import type {
   EntityInput,
+  EntityOutput,
   EntityCandidateEffect,
   EntityReplica,
   EntityState,
@@ -17,7 +18,7 @@ export type EntityInputOutcome =
 export type ApplyEntityInputResult = {
   outcome: EntityInputOutcome;
   newState: EntityState;
-  outputs: EntityInput[];
+  outputs: EntityOutput[];
   jOutputs: JInput[];
   workingReplica: EntityReplica;
   candidateEffects: EntityCandidateEffect[];
@@ -29,7 +30,7 @@ export type ApplyEntityInputContext = {
   env: RuntimeState;
   entityInput: EntityInput;
   workingReplica: EntityReplica;
-  entityOutbox: EntityInput[];
+  entityOutbox: EntityOutput[];
   jOutbox: JInput[];
   candidateEffects: EntityCandidateEffect[];
   storageChanges: RuntimeOverlayRecord[];

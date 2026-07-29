@@ -209,7 +209,6 @@ const installPendingFrameCommit = (
 
   delete account.pendingFrame;
   delete account.pendingAccountInput;
-  delete account.pendingAccountInputSignerId;
   discardStagedAccountCommitmentCache(account);
   if (
     account.lastOutboundFrameAck

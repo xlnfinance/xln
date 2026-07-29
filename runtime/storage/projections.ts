@@ -243,7 +243,6 @@ const projectAccountDocFull = (account: AccountReplica): StorageAccountDoc => ({
   shadow: account.shadow,
   ...withProp('pendingFrame', account.pendingFrame ? cloneCrossJurisdictionAccountFrameRoute(account.pendingFrame) : undefined),
   ...withProp('pendingAccountInput', account.pendingAccountInput ? cloneCrossJurisdictionAccountInputRoute(account.pendingAccountInput) : undefined),
-  ...withProp('pendingAccountInputSignerId', account.pendingAccountInputSignerId),
   ...withProp('lastOutboundFrameAck', account.lastOutboundFrameAck),
   ...withProp('pendingForwards', account.pendingForwards),
   ...withProp('hankoSignature', account.hankoSignature),

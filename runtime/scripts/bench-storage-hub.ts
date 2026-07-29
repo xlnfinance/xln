@@ -234,7 +234,6 @@ const projectAccountDoc = (account: AccountReplica): Record<string, unknown> => 
   pendingFrame: account.pendingFrame,
   pendingSignatures: account.pendingSignatures,
   pendingAccountInput: account.pendingAccountInput,
-  pendingAccountInputSignerId: account.pendingAccountInputSignerId,
   rollbackCount: account.rollbackCount,
   lastRollbackFrameHash: account.lastRollbackFrameHash,
   lastFinalizedJHeight: account.lastFinalizedJHeight,

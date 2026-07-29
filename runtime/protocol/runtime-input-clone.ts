@@ -1,5 +1,6 @@
 import type {
   EntityInput,
+  EntityOutput,
   EntityLeaderCertificate,
   EntityLeaderTimeoutVote,
   EntityTx,
@@ -160,7 +161,7 @@ export const cloneIsolatedEntityLeaderCertificate = (
  * spans several protocol values. Runtime inputs never assign meaning to JS
  * object identity, so isolate every EntityInput field and every EntityTx.
  */
-export const cloneIsolatedEntityInput = <T extends EntityInput>(input: T): T => {
+export const cloneIsolatedEntityInput = <T extends EntityOutput>(input: T): T => {
   const cloned: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(input)) {
     if (key === 'entityTxs') {

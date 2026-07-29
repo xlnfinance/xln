@@ -131,7 +131,6 @@ describe('reachable-only dispute evidence retention', () => {
         },
       },
     };
-    account.pendingAccountInputSignerId = 'pending-evidence-signer';
     account.lastOutboundFrameAck = {
       height: 7,
       counterpartyEntityId: counterparty,

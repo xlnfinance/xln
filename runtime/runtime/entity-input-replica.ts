@@ -1,13 +1,15 @@
 import { applyEntityInput } from '../entity/consensus/index';
 import type { EntityInputOutcome } from '../entity/consensus/index';
 import type {
+  EntityOutput,
   EntityInput,
   EntityReplica,
   JInput,
   RoutedEntityInput,
   RuntimeState,
 } from '../types';
-import { decodeRoutedEntityOutput } from './routing-validation';
+import { resolveEntityOutputSignerId } from './entity-output-signer';
+import { decodeEntityOutput } from './routing-validation';
 import { DEBUG } from '../utils';
 import { logError, shortId } from '../infra/logger';
 import {
@@ -99,13 +101,21 @@ const normalizeEntityInputForReplica = (
     : {}),
 });
 
-const decodeEntityOutputs = (
+const routeEntityOutputs = async (
+  env: RuntimeState,
+  sourceReplica: EntityReplica,
   outputs: unknown[],
   replicaKey: string,
-): RoutedEntityInput[] =>
-  outputs.map((output, index) => {
+): Promise<RoutedEntityInput[]> =>
+  Promise.all(outputs.map(async (output, index) => {
     try {
-      return decodeRoutedEntityOutput(output);
+      const decoded: EntityOutput = decodeEntityOutput(output);
+      const signerId = await resolveEntityOutputSignerId(
+        env,
+        sourceReplica,
+        decoded,
+      );
+      return { ...decoded, signerId };
     } catch (error) {
       logError(
         'RUNTIME_TICK',
@@ -114,7 +124,7 @@ const decodeEntityOutputs = (
       );
       throw error;
     }
-  });
+  }));
 
 /**
  * Apply exactly one EntityInput to one resolved EntityReplica.
@@ -187,7 +197,12 @@ export const applyEntityInputToReplica = async (
       applied.outcome,
     ),
     nextReplica,
-    outputs: decodeEntityOutputs(applied.outputs, replicaKey),
+    outputs: await routeEntityOutputs(
+      env,
+      nextReplica,
+      applied.outputs,
+      replicaKey,
+    ),
     jOutputs: applied.jOutputs || [],
     candidateEffects: applied.candidateEffects,
     storageChanges: applied.storageChanges,

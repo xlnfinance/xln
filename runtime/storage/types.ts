@@ -157,7 +157,6 @@ export type StorageAccountDoc = {
   pendingFrame?: AccountReplica['pendingFrame'];
   pendingSignatures: string[];
   pendingAccountInput?: AccountReplica['pendingAccountInput'];
-  pendingAccountInputSignerId?: AccountReplica['pendingAccountInputSignerId'];
   lastOutboundFrameAck?: AccountReplica['lastOutboundFrameAck'];
   pendingForwards?: AccountReplica['pendingForwards'];
   hankoSignature?: AccountReplica['hankoSignature'];

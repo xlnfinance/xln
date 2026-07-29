@@ -408,7 +408,6 @@ const setSyntheticPendingAccountProposal = (
   account: AccountState,
   accountTxs: AccountTx[],
   timestamp: number,
-  targetSignerId = 'fixture-counterparty-signer',
 ): void => {
   const pendingFrame = {
     ...account.currentFrame,
@@ -426,7 +425,6 @@ const setSyntheticPendingAccountProposal = (
     domain: structuredClone(account.domain),
     proposal: { frame: structuredClone(pendingFrame) },
   };
-  account.pendingAccountInputSignerId = targetSignerId;
 };
 
 const makeIncomingAccountFrame = (
@@ -1404,7 +1402,6 @@ describe('audit fail-fast regressions', () => {
       ack: { height: 10, frameHash: pendingFrame.prevFrameHash, frameHanko: `0x${'12'.repeat(65)}` },
       proposal: { frame: pendingFrame, frameHanko: `0x${'34'.repeat(65)}` },
     };
-    accountMachine.pendingAccountInputSignerId = counterpartySignerId;
     replica.state.accounts.set(counterpartyId, accountMachine);
 
     const outputs = await executeCrontab(env, replica, replica.state.crontabState!, {
@@ -1414,7 +1411,7 @@ describe('audit fail-fast regressions', () => {
 
     expect(outputs).toHaveLength(1);
     expect(outputs[0]?.entityId).toBe(counterpartyId);
-    expect(outputs[0]?.signerId).toBe(counterpartySignerId);
+    expect(outputs[0]?.signerId).toBeUndefined();
     expect(outputs[0]?.entityTxs).toEqual([{ type: 'accountInput', data: accountMachine.pendingAccountInput }]);
   });
 
@@ -1492,7 +1489,7 @@ describe('audit fail-fast regressions', () => {
     expect(await resolveCertifiedAccountCounterpartyProposer(env, account, counterpartyId)).toBe(counterpartySignerId);
   });
 
-  test('crontab resends a restored pending frame from its durable exact signer route', async () => {
+  test('crontab resends a restored pending frame without persisting transport routing', async () => {
     const env = createEmptyEnv('account-frame-restored-resend');
     env.quietRuntimeLogs = true;
     const replica = makeReplicaMissingPrevFrameHash();
@@ -1519,7 +1516,6 @@ describe('audit fail-fast regressions', () => {
       domain: structuredClone(accountMachine.domain),
       proposal: { frame: pendingFrame, frameHanko: `0x${'34'.repeat(65)}` },
     };
-    accountMachine.pendingAccountInputSignerId = counterpartySignerId;
     const persistedAccount = projectAccountDoc(accountMachine);
     const restoredAccount = hydrateAccountDocFromStorage(
       decodeValidatedBuffer(encodeBuffer(persistedAccount), validateStorageAccountDocValue),
@@ -1548,11 +1544,6 @@ describe('audit fail-fast regressions', () => {
       'pendingAccountInput domain must match Account domain',
     );
     replica.state.accounts.set(counterpartyId, restoredAccount);
-    const rootBeforeRouteChange = computeCanonicalEntityConsensusStateHash(replica.state);
-    restoredAccount.pendingAccountInputSignerId = hex20('27');
-    expect(computeCanonicalEntityConsensusStateHash(replica.state)).toBe(rootBeforeRouteChange);
-    restoredAccount.pendingAccountInputSignerId = counterpartySignerId;
-
     const outputs = await executeCrontab(env, replica, replica.state.crontabState!, {
       manualBroadcastInInput: false,
       accountChanges: new Set(),
@@ -1560,7 +1551,7 @@ describe('audit fail-fast regressions', () => {
 
     expect(outputs).toHaveLength(1);
     expect(outputs[0]?.entityId).toBe(counterpartyId);
-    expect(outputs[0]?.signerId).toBe(counterpartySignerId);
+    expect(outputs[0]?.signerId).toBeUndefined();
     expect(outputs[0]?.entityTxs).toEqual([{ type: 'accountInput', data: restoredAccount.pendingAccountInput }]);
   });
 
@@ -1796,7 +1787,6 @@ describe('audit fail-fast regressions', () => {
       },
       proposal: { frame: pendingFrame, frameHanko: `0x${'34'.repeat(65)}` },
     };
-    accountMachine.pendingAccountInputSignerId = right.signerId;
     delete accountMachine.lastOutboundFrameAck;
 
     const result = await applyAccountInput(env, accountMachine, {

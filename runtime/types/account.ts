@@ -261,10 +261,6 @@ export interface AccountReplica {
   pendingFrame?: AccountFrame;
   pendingSignatures: string[];
   pendingAccountInput?: Extract<AccountInput, { kind: 'frame' | 'frame_ack' }>; // Cached outbound frame input for resend/nudge
-  // Validator-local exact replica route chosen when pendingAccountInput was
-  // emitted. It is persisted for restart-safe resend but excluded from Entity
-  // consensus roots because local key/profile availability can differ.
-  pendingAccountInputSignerId?: string;
   lastOutboundFrameAck?: {
     height: number;
     counterpartyEntityId: string;

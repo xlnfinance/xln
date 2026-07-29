@@ -490,7 +490,6 @@ test('Entity consensus root strips only typed post-hash Account witnesses', () =
         toEntityId: counterpartyId,
         proposal: { frame: pendingFrame, frameHanko: hanko },
       },
-      pendingAccountInputSignerId: 'target-signer',
       lastOutboundFrameAck: {
         height: 1,
         counterpartyEntityId: counterpartyId,

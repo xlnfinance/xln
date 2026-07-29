@@ -16,7 +16,7 @@ import {
 } from '../protocol/htlc/onion-advance';
 import { hashHtlcSecret } from '../protocol/htlc/utils';
 import { accountInputAck } from '../account/consensus/flush';
-import type { AccountTx, EntityInput, EntityReplica, EntityTx, RuntimeState, HtlcLock } from '../types';
+import type { AccountTx, EntityOutput, EntityReplica, EntityTx, RuntimeState, HtlcLock } from '../types';
 import { verifyCertifiedEntityOutput } from './consensus/output-certification';
 
 const log = createStructuredLogger('entity.htlc_onion_post_commit');
@@ -260,7 +260,7 @@ export const appendDefaultProposerAcceptedHtlcReveals = async (
 export const emitDefaultProposerHtlcOnionAdvances = async (
   env: RuntimeState,
   replica: EntityReplica,
-  outbox: EntityInput[],
+  outbox: EntityOutput[],
 ): Promise<void> => {
   const defaultProposer = normalized(replica.state.config.validators[0]);
   if (!defaultProposer || normalized(replica.signerId) !== defaultProposer) return;

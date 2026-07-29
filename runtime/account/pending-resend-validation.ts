@@ -12,8 +12,10 @@ import {
 
 /**
  * A resend is a durable copy of one exact proposal, not a second proposal lane.
- * Keeping all three fields coupled prevents recovery from sending a frame with
- * stale routing metadata or a different signed payload.
+ * Keeping the signed frame and cached wire input coupled prevents recovery
+ * from sending a different payload. Runtime resolves the current validator
+ * route when it durably admits each output; transport metadata is not Account
+ * state.
  */
 export const validatePendingAccountResend = (
   account: Record<string, unknown>,
@@ -21,19 +23,13 @@ export const validatePendingAccountResend = (
 ): void => {
   const pendingFrame = account['pendingFrame'];
   const pendingInput = account['pendingAccountInput'];
-  const targetSigner = account['pendingAccountInputSignerId'];
-  const present = [pendingFrame, pendingInput, targetSigner].map(
+  const present = [pendingFrame, pendingInput].map(
     (value) => value !== undefined,
   );
   if (present.every((value) => !value)) return;
   if (!present.every(Boolean)) {
     throw new FinancialDataCorruptionError(
-      `${context}.pendingFrame, pendingAccountInput and pendingAccountInputSignerId must be present together`,
-    );
-  }
-  if (typeof targetSigner !== 'string' || targetSigner.trim().length === 0) {
-    throw new FinancialDataCorruptionError(
-      `${context}.pendingAccountInputSignerId must be a non-empty string`,
+      `${context}.pendingFrame and pendingAccountInput must be present together`,
     );
   }
 

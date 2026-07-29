@@ -2,7 +2,7 @@ import type {
   AccountInput,
   AccountReplica,
   AccountTx,
-  EntityInput,
+  EntityOutput,
   EntityState,
   HankoString,
   HashToSign,
@@ -327,7 +327,7 @@ export const accountTxAwaitsPostCommitHanko = (
 };
 
 export const attachHankoWitnessToOutputs = (
-  outputs: EntityInput[],
+  outputs: EntityOutput[],
   jOutputs: JInput[],
   hankoWitness: Map<string, HankoWitnessEntry>,
   entityHeight: number,
