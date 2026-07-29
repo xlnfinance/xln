@@ -125,6 +125,7 @@ import {
   type OrchestratorJurisdictionsConfig,
 } from './jurisdictions';
 import { createOrchestratorProxyHandlers, resolveRpcProxyIndex } from './proxy';
+import { createHubApiRoutes } from './hub-api-routes';
 import {
   findMissingRpcContractCode,
   type RpcContractAddresses,
@@ -2431,9 +2432,276 @@ const {
   getHubChildByEntityId,
   getHealthyHub: getHealthyHubChild,
 });
+const { handleHubApiRequest, handleHubAccountRequest } = createHubApiRoutes({
+  host: args.host,
+  getHubChildByEntityId,
+  pollAllHubHealth,
+  proxyHubApi,
+});
+
+const handleHealthRequest = async (
+  url: URL,
+  operatorAuthorized: boolean,
+  headers: Record<string, string>,
+): Promise<Response | null> => {
+  const { pathname } = url;
+  const fullHealth =
+    pathname === '/api/health/full' ||
+    (pathname === '/api/health' && url.searchParams.get('full') === '1');
+  if (fullHealth) {
+    void getStorageHealth().catch(() => {});
+    await refreshChildHealthForResponse();
+    const marketMakerHealthOverride = activeResetOptions.enableMarketMaker
+      ? await fetchMarketMakerFullHealthForResponse()
+      : null;
+    const health = await buildAggregatedHealthResponse({
+      marketMakerHealthOverride,
+      includeMarketSnapshots:
+        url.searchParams.get('marketSnapshots') === '1',
+    });
+    return new Response(
+      safeStringify(
+        operatorAuthorized ? health : publicAggregatedHealth(health),
+      ),
+      { headers },
+    );
+  }
+  if (pathname === '/api/health') {
+    void getStorageHealth().catch(() => {});
+    await refreshChildHealthForResponse();
+    const health = await buildAggregatedHealthResponse();
+    return new Response(
+      safeStringify(
+        operatorAuthorized ? health : publicAggregatedHealth(health),
+      ),
+      { headers },
+    );
+  }
+  if (pathname === '/api/metrics') {
+    void getStorageHealth().catch(() => {});
+    await refreshChildHealthForResponse();
+    const health = await buildAggregatedHealthResponse();
+    return new Response(buildPrometheusMetrics(health), {
+      headers: {
+        ...headers,
+        'Content-Type': 'text/plain; version=0.0.4; charset=utf-8',
+      },
+    });
+  }
+  return null;
+};
+
+const unavailableRuntimeImportManifest = {
+  issuedAt: 0,
+  expiresAt: 0,
+  entries: [],
+};
+
+const handleRuntimeImportRequest = async (
+  request: Request,
+  url: URL,
+  operatorAuthorized: boolean,
+  headers: Record<string, string>,
+): Promise<Response | null> => {
+  if (
+    url.pathname !== '/api/runtime-import' ||
+    request.method !== 'GET'
+  ) {
+    return null;
+  }
+  void getStorageHealth().catch(() => {});
+  await refreshChildHealthForResponse();
+  const readiness = resolveRuntimeImportReadiness(
+    await buildAggregatedHealthResponse(),
+  );
+  if (!readiness.ok) {
+    const allowPartial =
+      url.searchParams.get('allowPartial') === '1' && operatorAuthorized;
+    const partialManifest = allowPartial
+      ? buildRuntimeImportManifest()
+      : null;
+    if (partialManifest) {
+      return new Response(
+        safeStringify({
+          ok: true,
+          ready: false,
+          partial: true,
+          error: readiness.error,
+          reason: readiness.reason,
+          category: readiness.category,
+          code: readiness.code,
+          retryable: readiness.retryable,
+          fatal: readiness.fatal,
+          failure: readiness.failure,
+          degraded: readiness.degraded,
+          importUrl: buildRuntimeImportUrl(),
+          manifest: partialManifest,
+        }),
+        { headers: { ...headers, 'Retry-After': '2' } },
+      );
+    }
+    return new Response(
+      safeStringify({
+        ok: false,
+        ready: false,
+        error: readiness.error,
+        reason: readiness.reason,
+        category: readiness.category,
+        code: readiness.code,
+        retryable: readiness.retryable,
+        fatal: readiness.fatal,
+        failure: readiness.failure,
+        degraded: readiness.degraded,
+        manifest: unavailableRuntimeImportManifest,
+      }),
+      { headers: { ...headers, 'Retry-After': '2' } },
+    );
+  }
+  const manifest = buildRuntimeImportManifest();
+  return manifest
+    ? new Response(
+        safeStringify({
+          ok: true,
+          ready: true,
+          importUrl: buildRuntimeImportUrl(),
+          manifest,
+        }),
+        { headers },
+      )
+    : new Response(
+        safeStringify({
+          ok: false,
+          ready: false,
+          error: 'RUNTIME_IMPORT_NOT_READY',
+          manifest: unavailableRuntimeImportManifest,
+        }),
+        { headers: { ...headers, 'Retry-After': '2' } },
+      );
+};
+
+const handleResetRequest = async (
+  request: Request,
+  pathname: string,
+  headers: Record<string, string>,
+): Promise<Response | null> => {
+  if (pathname !== '/api/reset' || request.method !== 'POST') return null;
+  try {
+    const body = await request
+      .json()
+      .catch(() => null) as OrchestratorResetBody | null;
+    assertOrchestratorResetAllowed(request, body, {
+      resetAllowed: args.resetAllowed,
+      bindHost: args.host,
+      resetToken: args.resetToken,
+    });
+    const requestedMarketMaker =
+      body?.enableMarketMaker ?? body?.requireMarketMaker;
+    const enableMarketMaker =
+      typeof requestedMarketMaker === 'boolean'
+        ? requestedMarketMaker
+        : args.mmEnabled;
+    const requestedCustody = body?.enableCustody ?? body?.requireCustody;
+    const enableCustody =
+      typeof requestedCustody === 'boolean'
+        ? requestedCustody
+        : args.custodyEnabled;
+    await ensureResetWithOptions({ enableMarketMaker, enableCustody });
+    await pollAllHubHealth();
+    if (enableMarketMaker) await pollMarketMakerHealth();
+    return new Response(
+      safeStringify(await buildAggregatedHealthResponse()),
+      { headers },
+    );
+  } catch (error) {
+    if (error instanceof OrchestratorResetRejectedError) {
+      return new Response(
+        safeStringify({
+          error: error.code,
+          ...(error.code === 'RESET_CONFIRMATION_REQUIRED'
+            ? { requiredConfirmation: ORCHESTRATOR_RESET_CONFIRMATION }
+            : {}),
+        }),
+        { status: error.status, headers },
+      );
+    }
+    let health: AggregatedHealth | null = null;
+    let healthError: string | null = null;
+    try {
+      health = await buildAggregatedHealthResponse();
+    } catch (healthBuildError) {
+      healthError = serializeError(healthBuildError);
+    }
+    return new Response(
+      safeStringify({
+        error: serializeError(error),
+        ...(health ? { health } : {}),
+        ...(healthError ? { healthError } : {}),
+      }),
+      { status: 500, headers },
+    );
+  }
+};
+
+const handleMetadataRequest = (
+  url: URL,
+  headers: Record<string, string>,
+): Response | null => {
+  if (url.pathname === '/api/info') {
+    return new Response(
+      safeStringify({
+        name: 'mesh-control',
+        relayUrl,
+        rpcUrl: args.rpcUrl,
+        host: args.host,
+        port: args.port,
+        mmEnabled: args.mmEnabled,
+        resetAllowed: args.resetAllowed,
+      }),
+      { headers },
+    );
+  }
+  if (url.pathname !== '/api/jurisdictions') return null;
+  try {
+    const payload = toPublicJurisdictionsPayload(
+      jurisdictionsConfig,
+      readShardJurisdictions(jurisdictionsConfig),
+    );
+    return new Response(payload, {
+      headers: {
+        ...headers,
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-store, no-cache, must-revalidate',
+      },
+    });
+  } catch (error) {
+    return new Response(safeStringify({ error: serializeError(error) }), {
+      status: 500,
+      headers,
+    });
+  }
+};
 
 const httpDrain = createHttpDrainTracker();
 const FRONTEND_STATIC_DIR = './frontend/build';
+const handleStaticRequest = async (
+  request: Request,
+  pathname: string,
+): Promise<Response | null> => {
+  if (request.method !== 'GET' && request.method !== 'HEAD') return null;
+  if (pathname === '/runtime.js') {
+    const runtimeBundle = await serveRuntimeBundle();
+    if (runtimeBundle) return runtimeBundle;
+  }
+  if (pathname === '/') {
+    const index = await serveStatic('/index.html', FRONTEND_STATIC_DIR);
+    if (index) return index;
+  }
+  return (
+    (await serveStatic(pathname, FRONTEND_STATIC_DIR)) ??
+    (await serveStatic('/index.html', FRONTEND_STATIC_DIR))
+  );
+};
+
 const server = Bun.serve({
   hostname: args.host,
   port: args.port,
@@ -2480,90 +2748,14 @@ const server = Bun.serve({
       return await proxyRpc(request, args.rpcUrls[rpcProxyIndex] || '', operatorAuthorized);
     }
 
-    const hubRuntimeInputStatusMatch = pathname.match(/^\/api\/hub\/runtime-input\/([^/]+)\/status$/);
-    if (hubRuntimeInputStatusMatch && request.method === 'GET') {
-      const hubEntityId = String(url.searchParams.get('hubEntityId') || '').toLowerCase();
-      if (!hubEntityId) {
-        return new Response(safeStringify({
-          ok: false,
-          error: 'hubEntityId is required',
-          code: 'HUB_RUNTIME_INPUT_STATUS_HUB_REQUIRED',
-        }), { status: 400, headers });
-      }
-      let child = getHubChildByEntityId(hubEntityId);
-      if (!child) {
-        await pollAllHubHealth();
-        child = getHubChildByEntityId(hubEntityId);
-      }
-      if (!child) {
-        return new Response(safeStringify({
-          ok: false,
-          error: `Hub not found for hubEntityId=${hubEntityId}`,
-          code: 'HUB_RUNTIME_INPUT_STATUS_HUB_NOT_FOUND',
-        }), { status: 404, headers });
-      }
-      const receiptId = encodeURIComponent(decodeURIComponent(hubRuntimeInputStatusMatch[1] || ''));
-      try {
-        const response = await fetch(`http://${args.host}:${child.apiPort}/api/control/runtime-input/${receiptId}/status`);
-        const text = await response.text();
-        return new Response(text, {
-          status: response.status,
-          headers: {
-            ...headers,
-            'content-type': response.headers.get('content-type') || 'application/json',
-          },
-        });
-      } catch (error) {
-        return new Response(safeStringify({
-          ok: false,
-          error: error instanceof Error ? error.message : String(error),
-          code: 'HUB_RUNTIME_INPUT_STATUS_PROXY_FAILED',
-        }), { status: 502, headers });
-      }
-    }
-
-    if (pathname === '/api/faucet/offchain' && request.method === 'POST') {
-      return await proxyHubApi(request, '/api/faucet/offchain');
-    }
-
-    if (pathname === '/api/hub/account-status' && request.method === 'GET') {
-      const hubEntityId = String(url.searchParams.get('hubEntityId') || '').toLowerCase();
-      const counterpartyEntityId = String(url.searchParams.get('counterpartyEntityId') || '').toLowerCase();
-      let child = getHubChildByEntityId(hubEntityId);
-      if (!child) {
-        await pollAllHubHealth();
-        child = getHubChildByEntityId(hubEntityId);
-      }
-      if (!child) {
-        return new Response(safeStringify({
-          success: false,
-          code: 'HUB_ACCOUNT_STATUS_HUB_NOT_FOUND',
-          error: `Hub not found for hubEntityId=${hubEntityId || 'missing'}`,
-        }), { status: 404, headers });
-      }
-      const childUrl = new URL(`http://${args.host}:${child.apiPort}/api/account/status`);
-      childUrl.searchParams.set('hubEntityId', hubEntityId);
-      childUrl.searchParams.set('counterpartyEntityId', counterpartyEntityId);
-      const tokenIds = String(url.searchParams.get('tokenIds') || '').trim();
-      if (tokenIds) childUrl.searchParams.set('tokenIds', tokenIds);
-      try {
-        const response = await fetch(childUrl);
-        const text = await response.text();
-        return new Response(text, {
-          status: response.status,
-          headers: {
-            ...headers,
-            'content-type': response.headers.get('content-type') || 'application/json',
-          },
-        });
-      } catch (error) {
-        return new Response(safeStringify({
-          success: false,
-          code: 'HUB_ACCOUNT_STATUS_PROXY_FAILED',
-          error: error instanceof Error ? error.message : String(error),
-        }), { status: 502, headers });
-      }
-    }
+    const hubApiResponse = await handleHubApiRequest(request, url, headers);
+    if (hubApiResponse) return hubApiResponse;
+    const hubAccountResponse = await handleHubAccountRequest(
+      request,
+      url,
+      headers,
+    );
+    if (hubAccountResponse) return hubAccountResponse;
 
     if (pathname === '/api/lending/state' && request.method === 'GET') {
       return await proxyAnyHubGet(request, `${pathname}${url.search}`);
@@ -2584,98 +2776,19 @@ const server = Bun.serve({
       return await proxyEntityHubApi(request, '/api/external-wallet/snapshot');
     }
 
-    if (pathname === '/api/health/full' || (pathname === '/api/health' && url.searchParams.get('full') === '1')) {
-      void getStorageHealth().catch(() => {});
-      await refreshChildHealthForResponse();
-      const marketMakerHealthOverride = activeResetOptions.enableMarketMaker
-        ? await fetchMarketMakerFullHealthForResponse()
-        : null;
-      const health = await buildAggregatedHealthResponse({
-        marketMakerHealthOverride,
-        includeMarketSnapshots: url.searchParams.get('marketSnapshots') === '1',
-      });
-      return new Response(safeStringify(operatorAuthorized ? health : publicAggregatedHealth(health)), { headers });
-    }
-
-    if (pathname === '/api/health') {
-      void getStorageHealth().catch(() => {});
-      await refreshChildHealthForResponse();
-      const health = await buildAggregatedHealthResponse();
-      return new Response(safeStringify(operatorAuthorized ? health : publicAggregatedHealth(health)), { headers });
-    }
-
-    if (pathname === '/api/runtime-import' && request.method === 'GET') {
-      void getStorageHealth().catch(() => {});
-      await refreshChildHealthForResponse();
-      const health = await buildAggregatedHealthResponse();
-      const readiness = resolveRuntimeImportReadiness(health);
-      if (!readiness.ok) {
-        const allowPartial = url.searchParams.get('allowPartial') === '1' && operatorAuthorized;
-        if (allowPartial) {
-          const partialManifest = buildRuntimeImportManifest();
-          if (partialManifest) {
-            return new Response(safeStringify({
-              ok: true,
-              ready: false,
-              partial: true,
-              error: readiness.error,
-              reason: readiness.reason,
-              category: readiness.category,
-              code: readiness.code,
-              retryable: readiness.retryable,
-              fatal: readiness.fatal,
-              failure: readiness.failure,
-              degraded: readiness.degraded,
-              importUrl: buildRuntimeImportUrl(),
-              manifest: partialManifest,
-            }), { headers: { ...headers, 'Retry-After': '2' } });
-          }
-        }
-        return new Response(safeStringify({
-          ok: false,
-          ready: false,
-          error: readiness.error,
-          reason: readiness.reason,
-          category: readiness.category,
-          code: readiness.code,
-          retryable: readiness.retryable,
-          fatal: readiness.fatal,
-          failure: readiness.failure,
-          degraded: readiness.degraded,
-          manifest: {
-            issuedAt: 0,
-            expiresAt: 0,
-            entries: [],
-          },
-        }), { headers: { ...headers, 'Retry-After': '2' } });
-      }
-      const manifest = buildRuntimeImportManifest();
-      if (!manifest) {
-        return new Response(safeStringify({
-          ok: false,
-          ready: false,
-          error: 'RUNTIME_IMPORT_NOT_READY',
-          manifest: {
-            issuedAt: 0,
-            expiresAt: 0,
-            entries: [],
-          },
-        }), { headers: { ...headers, 'Retry-After': '2' } });
-      }
-      return new Response(safeStringify({ ok: true, ready: true, importUrl: buildRuntimeImportUrl(), manifest }), { headers });
-    }
-
-    if (pathname === '/api/metrics') {
-      void getStorageHealth().catch(() => {});
-      await refreshChildHealthForResponse();
-      const health = await buildAggregatedHealthResponse();
-      return new Response(buildPrometheusMetrics(health), {
-        headers: {
-          ...headers,
-          'Content-Type': 'text/plain; version=0.0.4; charset=utf-8',
-        },
-      });
-    }
+    const healthResponse = await handleHealthRequest(
+      url,
+      operatorAuthorized,
+      headers,
+    );
+    if (healthResponse) return healthResponse;
+    const runtimeImportResponse = await handleRuntimeImportRequest(
+      request,
+      url,
+      operatorAuthorized,
+      headers,
+    );
+    if (runtimeImportResponse) return runtimeImportResponse;
 
     const qaResponse = await maybeHandleQaRequest(request, pathname, headers, { operatorAuthorized });
     if (qaResponse) return qaResponse;
@@ -2705,86 +2818,14 @@ const server = Bun.serve({
     });
     if (debugResponse) return debugResponse;
 
-    if (pathname === '/api/reset' && request.method === 'POST') {
-      try {
-        const body = await request.json().catch(() => null) as OrchestratorResetBody | null;
-        assertOrchestratorResetAllowed(request, body, {
-          resetAllowed: args.resetAllowed,
-          bindHost: args.host,
-          resetToken: args.resetToken,
-        });
-        const requestedMarketMaker = body?.enableMarketMaker ?? body?.requireMarketMaker;
-        const enableMarketMaker = typeof requestedMarketMaker === 'boolean'
-          ? requestedMarketMaker
-          : args.mmEnabled;
-        const requestedCustody = body?.enableCustody ?? body?.requireCustody;
-        const enableCustody = typeof requestedCustody === 'boolean'
-          ? requestedCustody
-          : args.custodyEnabled;
-        await ensureResetWithOptions({ enableMarketMaker, enableCustody });
-        await pollAllHubHealth();
-        if (enableMarketMaker) await pollMarketMakerHealth();
-        return new Response(safeStringify(await buildAggregatedHealthResponse()), { headers });
-      } catch (error) {
-        if (error instanceof OrchestratorResetRejectedError) {
-          return new Response(
-            safeStringify({
-              error: error.code,
-              ...(error.code === 'RESET_CONFIRMATION_REQUIRED' ? { requiredConfirmation: ORCHESTRATOR_RESET_CONFIRMATION } : {}),
-            }),
-            { status: error.status, headers },
-          );
-        }
-        let health: AggregatedHealth | null = null;
-        let healthError: string | null = null;
-        try {
-          health = await buildAggregatedHealthResponse();
-        } catch (healthBuildError) {
-          healthError = serializeError(healthBuildError);
-        }
-        return new Response(
-          safeStringify({
-            error: serializeError(error),
-            ...(health ? { health } : {}),
-            ...(healthError ? { healthError } : {}),
-          }),
-          { status: 500, headers },
-        );
-      }
-    }
-
-    if (pathname === '/api/info') {
-      return new Response(safeStringify({
-        name: 'mesh-control',
-        relayUrl,
-        rpcUrl: args.rpcUrl,
-        host: args.host,
-        port: args.port,
-        mmEnabled: args.mmEnabled,
-        resetAllowed: args.resetAllowed,
-      }), { headers });
-    }
-
-    if (pathname === '/api/jurisdictions') {
-      try {
-        const payload = toPublicJurisdictionsPayload(
-          jurisdictionsConfig,
-          readShardJurisdictions(jurisdictionsConfig),
-        );
-        return new Response(payload, {
-          headers: {
-            ...headers,
-            'Content-Type': 'application/json',
-            'Cache-Control': 'no-store, no-cache, must-revalidate',
-          },
-        });
-      } catch (error) {
-        return new Response(safeStringify({ error: serializeError(error) }), {
-          status: 500,
-          headers,
-        });
-      }
-    }
+    const resetResponse = await handleResetRequest(
+      request,
+      pathname,
+      headers,
+    );
+    if (resetResponse) return resetResponse;
+    const metadataResponse = handleMetadataRequest(url, headers);
+    if (metadataResponse) return metadataResponse;
 
     if (pathname === '/api/tokens' && request.method === 'GET') {
       return await proxyAnyHubRequest(request, `${pathname}${url.search}`);
@@ -2798,23 +2839,8 @@ const server = Bun.serve({
       return await proxyAnyHubRequest(request, `${pathname}${url.search}`);
     }
 
-    if (request.method === 'GET' || request.method === 'HEAD') {
-      if (pathname === '/runtime.js') {
-        const runtimeBundle = await serveRuntimeBundle();
-        if (runtimeBundle) return runtimeBundle;
-      }
-
-      if (pathname === '/') {
-        const index = await serveStatic('/index.html', FRONTEND_STATIC_DIR);
-        if (index) return index;
-      }
-
-      const file = await serveStatic(pathname, FRONTEND_STATIC_DIR);
-      if (file) return file;
-
-      const fallback = await serveStatic('/index.html', FRONTEND_STATIC_DIR);
-      if (fallback) return fallback;
-    }
+    const staticResponse = await handleStaticRequest(request, pathname);
+    if (staticResponse) return staticResponse;
 
     return new Response(safeStringify({
       error: `Unhandled mesh-control route: ${request.method} ${pathname}`,

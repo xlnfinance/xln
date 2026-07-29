@@ -1429,9 +1429,8 @@ describe('production startup wiring', () => {
     expect(orchestrator).toContain('custodyBootstrapPending,');
     expect(orchestrator).toContain('const readiness = resolveRuntimeImportReadiness(health);');
     expect(orchestrator).toContain('if (!readiness.ok) {');
-    expect(orchestrator).toContain(
-      "const allowPartial = url.searchParams.get('allowPartial') === '1' && operatorAuthorized;",
-    );
+    expect(orchestrator).toContain("url.searchParams.get('allowPartial') === '1'");
+    expect(orchestrator).toContain('&& operatorAuthorized;');
     expect(orchestrator).toContain('partial: true,');
     expect(orchestrator).toContain('ready: false,');
     expect(orchestrator).toContain('category: readiness.category,');
@@ -2118,17 +2117,26 @@ describe('production startup wiring', () => {
     expect(orchestrator).not.toContain('[MESH] market snapshot enrichment unavailable');
 
     const fullHealthRouteStart = orchestrator.indexOf(
-      "if (pathname === '/api/health/full' || (pathname === '/api/health' && url.searchParams.get('full') === '1'))",
+      'const handleHealthRequest = async (',
     );
-    const healthRouteStart = orchestrator.indexOf("if (pathname === '/api/health')", fullHealthRouteStart + 1);
-    const metricsRouteStart = orchestrator.indexOf("if (pathname === '/api/metrics')");
+    const healthRouteStart = orchestrator.indexOf(
+      "if (pathname === '/api/health')",
+      fullHealthRouteStart,
+    );
+    const metricsRouteStart = orchestrator.indexOf(
+      "if (pathname === '/api/metrics')",
+      healthRouteStart,
+    );
     expect(fullHealthRouteStart).toBeGreaterThan(0);
     expect(healthRouteStart).toBeGreaterThan(0);
     expect(metricsRouteStart).toBeGreaterThan(healthRouteStart);
     const fullHealthRoute = orchestrator.slice(fullHealthRouteStart, healthRouteStart);
     expect(fullHealthRoute).toContain('const marketMakerHealthOverride = activeResetOptions.enableMarketMaker');
     expect(fullHealthRoute).toContain('? await fetchMarketMakerFullHealthForResponse()');
-    expect(fullHealthRoute).toContain("includeMarketSnapshots: url.searchParams.get('marketSnapshots') === '1',");
+    expect(fullHealthRoute).toContain('includeMarketSnapshots:');
+    expect(fullHealthRoute).toContain(
+      "url.searchParams.get('marketSnapshots') === '1',",
+    );
     const healthRoute = orchestrator.slice(healthRouteStart, metricsRouteStart);
     expect(healthRoute).toContain('const health = await buildAggregatedHealthResponse();');
     expect(healthRoute).not.toContain('includeMarketSnapshots');
@@ -2698,19 +2706,25 @@ describe('production startup wiring', () => {
   });
 
   test('hub account-status proxy skips health polling when cached child mapping is known', () => {
-    const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
-    const routeStart = orchestrator.indexOf("if (pathname === '/api/hub/account-status' && request.method === 'GET')");
-    const nextRouteStart = orchestrator.indexOf("if (pathname === '/api/lending/state'", routeStart);
-    expect(routeStart).toBeGreaterThan(0);
-    expect(nextRouteStart).toBeGreaterThan(routeStart);
-
-    const route = orchestrator.slice(routeStart, nextRouteStart);
-    expect(route).toContain('let child = getHubChildByEntityId(hubEntityId);');
-    expect(route).toContain(
-      'if (!child) {\n        await pollAllHubHealth();\n        child = getHubChildByEntityId(hubEntityId);\n      }',
+    const routes = readFileSync(
+      join(repoRoot, 'runtime/orchestrator/hub-api-routes.ts'),
+      'utf8',
     );
-    expect(route.indexOf('let child = getHubChildByEntityId(hubEntityId);')).toBeLessThan(
-      route.indexOf('await pollAllHubHealth();'),
+    const findHubStart = routes.indexOf('const findHub = async (');
+    const accountRouteStart = routes.indexOf(
+      'const handleHubAccountRequest = async (',
+    );
+    expect(findHubStart).toBeGreaterThan(0);
+    expect(accountRouteStart).toBeGreaterThan(findHubStart);
+
+    const findHub = routes.slice(findHubStart, accountRouteStart);
+    expect(findHub).toContain(
+      'const cached = dependencies.getHubChildByEntityId(entityId);',
+    );
+    expect(findHub).toContain('if (cached) return cached;');
+    expect(findHub).toContain('await dependencies.pollAllHubHealth();');
+    expect(findHub.indexOf('if (cached) return cached;')).toBeLessThan(
+      findHub.indexOf('await dependencies.pollAllHubHealth();'),
     );
   });
 

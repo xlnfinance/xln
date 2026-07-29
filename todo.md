@@ -6,6 +6,25 @@ fastest proof/fix to the hardest external gate. Completed work is deleted;
 long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 `docs/mainnet-engineering-principles.md`.
 
+## 0. Owner decisions required before consensus edits
+
+- [ ] Decide the certified event commitment: keep the canonical ordered
+  Entity/Account event receipts inline in their signed frame and covered by
+  its Hanko, without a second Merkle tree, unless measured frame sizes prove
+  that a separate event root is necessary.
+- [ ] Decide whether a multi-signer Entity candidate root mismatch merely
+  discards the touched candidate and records signed evidence for a later
+  governance input, or also advances the deterministic proposer immediately.
+  Validator removal remains an explicit governance action either way.
+- [ ] Decide the production forensic policy for malformed authenticated
+  ingress. The machine always consumes the rejected item without including it
+  in a frame; dev/test throws. Recommended production behavior is a bounded
+  infra-owned receipt containing only input hash, typed reason and source,
+  never the rejected payload or a consensus-state quarantine.
+- [ ] Confirm documentation language: source comments and canonical docs in
+  English; the owner-facing 60–120 minute reading guide also gets a concise
+  Russian walkthrough.
+
 ## 1. Core simplification and human auditability — P0/P1, owner-approved
 
 - [ ] Pass one final independent read-only audit on an immutable release
@@ -385,7 +404,7 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   coordinators below 100–150 lines, and every file below 3000 lines. After the
   pipeline, collapse DI factories that add navigation
   without providing a real swappable boundary. The R/E/A gate is already at
-  zero functions over 100 lines. The production ratchet now owns 16 exact
+  zero functions over 100 lines. The production ratchet now owns 12 exact
   allowances over 150 lines and rejects every new/growing coordinator plus
   every file over 3000 lines; delete each allowance with its verified split.
   Start with
