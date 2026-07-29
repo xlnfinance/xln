@@ -769,7 +769,7 @@ export type StoragePersistencePerf = {
   total: number;
 };
 
-export const saveRuntimeFrameToStorage = async (options: {
+export type StorageFrameSaveOptions = {
   env: RuntimeState;
   stateHash?: string;
   currentFrameInput?: RuntimeInput;
@@ -785,498 +785,36 @@ export const saveRuntimeFrameToStorage = async (options: {
   stopStaleWriterOnHeadAhead?: boolean;
   onPersistenceBoundary?: StoragePersistenceBoundaryHook;
   onPersistenceProgress?: StoragePersistenceProgressHook;
-} & PerfDeps): Promise<StorageFrameSaveResult> => {
-  const config = resolveStorageRuntimeConfig(options.env);
-  if (!config.enabled) return { materialized: false, materializedOverlayRecords: 0, historyViewsMaterialized: true };
+} & PerfDeps;
 
-  const state = options.env.runtimeState ?? {};
-  if (state.persistencePaused) return { materialized: false, materializedOverlayRecords: 0, historyViewsMaterialized: true };
+type StorageSnapshotLifecycleResult = {
+  snapshotMs: number;
+  snapshotDocs: number;
+  snapshotBytes: number;
+  prunedBytes: number;
+  epochRotated: boolean;
+  epochDbRotated: boolean;
+  retainedHistoryBytes: number;
+  latestSnapshotHeight: number;
+};
 
-  const openStartedAt = options.getPerfMs();
-  const opened = await options.tryOpenDb(options.env);
-  if (!opened) return { materialized: false, materializedOverlayRecords: 0, historyViewsMaterialized: false };
-  const db = options.getRuntimeDb(options.env);
-  const walOpened = await options.tryOpenRuntimeWalDb(options.env);
-  if (!walOpened) return { materialized: false, materializedOverlayRecords: 0, historyViewsMaterialized: false };
-  const walDb = options.getRuntimeWalDb(options.env);
-  const recoveredStorage = await recoverStorageDbFromHistory({
-    db,
-    walDb,
-    config,
-    ...(options.onPersistenceProgress
-      ? { onPersistenceProgress: options.onPersistenceProgress }
-      : {}),
-  });
-  if (recoveredStorage.entityHashDocs) {
-    state.storageEntityHashDocs = recoveredStorage.entityHashDocs;
-  }
-  options.onPersistenceProgress?.('opened');
-  const openMs = options.getPerfMs() - openStartedAt;
-  const head = await readHead(walDb, config);
-  const appliedRuntimeInput = options.currentFrameInput ?? { runtimeTxs: [], entityInputs: [] };
-  const snapshotDue =
-    options.env.height === 1 ||
-    options.env.height % config.snapshotPeriodFrames === 0;
-  // Byte pressure may move the next checkpoint forward. Checking the retained
-  // prefix before appending permits at most one WAL frame of overshoot while
-  // keeping ordinary frames free of full-state projection work.
-  const snapshotRequiredByBytes =
-    head.epochReplayBytes + encodeBuffer(appliedRuntimeInput).byteLength >= config.epochMaxBytes;
-  const shouldMaterialize =
-    options.env.height === 1 ||
-    options.env.height % config.materializePeriodFrames === 0 ||
-    snapshotDue ||
-    snapshotRequiredByBytes;
-
-  const planningStartedAt = options.getPerfMs();
-  const planningMarks: Record<string, number> = {};
-  const checkpointPlanning = (label: string): void => {
-    planningMarks[label] = options.getPerfMs() - planningStartedAt;
-  };
-  const frameOverlayRecords = Array.isArray(state.currentStorageOverlayMarks)
-    ? state.currentStorageOverlayMarks.map((record) => ({ ...record }))
-    : [];
-  const overlayRecords = mergeOverlayRecordsIntoEnv(options.env, []);
-  const frameTouched = storageRefsFromOverlay(frameOverlayRecords);
-  checkpointPlanning('overlay');
-  const checkpointedLineagePlan = shouldMaterialize
-    ? buildRuntimeCheckpointLineagePlan(options.env)
-    : null;
-  const lineagePlan = checkpointedLineagePlan ?? buildLiveReplicaMetaPlan(options.env);
-  const replicaLookup = checkpointedLineagePlan?.lookup ?? buildLiveReplicaLookup(options.env);
-  checkpointPlanning('lineage');
-  const planningMs = options.getPerfMs() - planningStartedAt;
-  const planningStages = cumulativeMarksToDurations(planningMarks, planningMs);
-  const diffBuildStartedAt = options.getPerfMs();
-  const framePuts = buildDocPuts(options.env, frameTouched, replicaLookup);
-  const frameBookDels = buildBookDeletionsFromOverlay(frameOverlayRecords);
-  const diff = buildDiffRecord(options.env.height, framePuts, frameBookDels);
-  options.onPersistenceProgress?.('diff-built');
-  const diffBuildMs = options.getPerfMs() - diffBuildStartedAt;
-
-  const writeStartedAt = options.getPerfMs();
-  const prepareMarks: Record<string, number> = {};
-  const checkpointPrepare = (label: string): void => {
-    prepareMarks[label] = options.getPerfMs() - writeStartedAt;
-  };
-  if (options.stopStaleWriterOnHeadAhead) {
-    if (head.latestHeight > options.env.height) {
-      return {
-        materialized: false,
-        materializedOverlayRecords: 0,
-        historyViewsMaterialized: false,
-        staleWriterStopped: true,
-      };
-    }
-    if (head.latestHeight === options.env.height) {
-      const persistedFrame = await readStorageFrameRecord(walDb, options.env.height);
-      if (persistedFrame) {
-        return {
-          materialized: false,
-          materializedOverlayRecords: 0,
-          historyViewsMaterialized: false,
-          staleWriterStopped: true,
-        };
-      }
-    }
-  }
-  if (head.latestHeight !== options.env.height - 1) {
-    throw new Error(
-      `STORAGE_APPEND_INVARIANT_FAILED: refusing to write frame ${options.env.height} after persisted head ${head.latestHeight}`,
-    );
-  }
-  const previousFrame = head.latestHeight > 0 ? await readStorageFrameRecord(walDb, head.latestHeight) : null;
-  if (head.latestHeight > 0 && !previousFrame) {
-    throw new Error(`STORAGE_PREV_FRAME_MISSING: height=${head.latestHeight}`);
-  }
-  const prevFrameHash = previousFrame ? previousFrame.frameHash ?? computeStorageFrameHash(previousFrame) : ZERO_FRAME_HASH;
-  options.onPersistenceProgress?.('history-read');
-  checkpointPrepare('historyRead');
-  const frameKey = keyFrame(options.env.height);
-  const diffKey = keyDiff(options.env.height);
-  const diffBuffer = encodeBuffer(diff);
-  const pendingBoardNodes = state.pendingCertifiedBoardNodes instanceof Map
-    ? state.pendingCertifiedBoardNodes
-    : new Map<string, CertifiedBoardPatriciaNode>();
-  const pendingBoardEntries: Array<{ key: Buffer; value: Buffer }> = [];
-  let pendingBoardHistoryBytes = 0;
-  for (const [hash, node] of pendingBoardNodes) {
-    if (hashCertifiedBoardNode(node) !== hash) throw new Error(`CERTIFIED_BOARD_NODE_CORRUPT:${hash}`);
-    const key = keyCertifiedBoardNode(hash);
-    const value = encodeBuffer(node);
-    pendingBoardEntries.push({ key, value });
-    pendingBoardHistoryBytes += key.byteLength + value.byteLength;
-  }
-  const pendingConsumptionNodes = state.pendingConsumptionNodes ?? new Map();
-  let pendingConsumptionHistoryBytes = 0;
-  for (const [hash, node] of pendingConsumptionNodes) {
-    if (hashConsumptionNode(node) !== hash) throw new Error(`CONSUMPTION_NODE_CORRUPT:${hash}`);
-    pendingConsumptionHistoryBytes += keyConsumptionNode(hash).byteLength + encodeBuffer(node).byteLength;
-  }
-  const pendingAccountJClaimNodes = state.pendingAccountJClaimNodes instanceof Map
-    ? state.pendingAccountJClaimNodes
-    : new Map<string, AccountJClaimNode>();
-  let pendingAccountJClaimHistoryBytes = 0;
-  for (const [hash, node] of pendingAccountJClaimNodes) {
-    if (hashAccountJClaimNode(node) !== hash) throw new Error(`ACCOUNT_J_CLAIM_NODE_CORRUPT:${hash}`);
-    pendingAccountJClaimHistoryBytes += keyAccountJClaimNode(hash).byteLength + encodeBuffer(node).byteLength;
-  }
-  const frameLogs = Array.isArray(options.env.frameLogs) ? options.env.frameLogs.map((entry) => ({ ...entry })) : [];
-  const touchedEntities = Array.from(frameTouched.touchedEntities.values()).sort();
-  const touchedAccounts = Array.from(frameTouched.touchedAccounts.values())
-    .filter((ref): ref is Extract<StorageDocRef, { family: 'account' }> => ref.family === 'account')
-    .map((ref) => ({ entityId: ref.entityId, counterpartyId: ref.counterpartyId }));
-  const touchedBookEntities = Array.from(frameTouched.touchedBookEntities.values()).sort();
-  checkpointPrepare('pendingNodes');
-
-  const materializedTouched = shouldMaterialize
-    ? storageRefsFromOverlay(overlayRecords)
-    : null;
-  const materializedPuts = materializedTouched
-    ? buildDocPuts(options.env, materializedTouched, replicaLookup)
-    : [];
-  const materializedDels = shouldMaterialize
-    ? buildBookDeletionsFromOverlay(overlayRecords)
-    : [];
-  const cachedEntityHashDocs = state.storageEntityHashDocs instanceof Map
-    ? state.storageEntityHashDocs as Map<string, StorageEntityHashDoc>
-    : undefined;
-  const preparedHashes = shouldMaterialize
-    ? await prepareStorageStateHashes({
-        db,
-        puts: materializedPuts,
-        dels: materializedDels,
-        ...(cachedEntityHashDocs ? { entityHashDocs: cachedEntityHashDocs } : {}),
-      })
-    : null;
-  options.onPersistenceProgress?.('materialized-hashes-built');
-  checkpointPrepare('materializedHashes');
-  const canonicalHashDue = config.canonicalHashPeriodFrames > 0 && (
-    options.env.height === 1 ||
-    options.env.height % config.canonicalHashPeriodFrames === 0
-  );
-  const runtimeMachineForPostState = buildReplayVerifiableRuntimeMachineSnapshot(options.env, {
-    pendingNetworkOutputs: options.currentFrameOutputs ?? options.env.pendingNetworkOutputs ?? [],
-    excludePersistedHistoryRecords: true,
-  });
-  const runtimeMachine = shouldMaterialize || canonicalHashDue
-    ? buildDurableRuntimeMachineSnapshot(options.env, {
-        pendingNetworkOutputs: options.currentFrameOutputs ?? options.env.pendingNetworkOutputs ?? [],
-        excludePersistedHistoryRecords: true,
-      })
-    : undefined;
-  checkpointPrepare('runtimeMachine');
-  const runtimeStateHashes = canonicalHashDue
-    ? prepareStorageCanonicalStateHashes(
-        options.env,
-        [],
-        previousFrame,
-        replicaLookup,
-        runtimeMachine!,
-      )
-    : null;
-  options.onPersistenceProgress?.('canonical-hashes-built');
-  checkpointPrepare('canonicalHashes');
-  const replicaMetaStateMode: StorageFrameRecord['replicaMetaStateMode'] = checkpointedLineagePlan
-    ? snapshotDue || snapshotRequiredByBytes
-      ? 'full'
-      : 'shared-entity-state'
-    : 'live-head';
-  const replicaMetaCommitment = checkpointedLineagePlan
-    ? buildStorageReplicaMetaCommitmentFromCheckpointPlan(options.env, lineagePlan, {
-        omitIntermediateSingleSignerState: replicaMetaStateMode === 'shared-entity-state',
-      })
-    : buildStorageLiveReplicaMetaCommitment(options.env);
-  // Full replica metadata is a checkpoint body. Ordinary WAL frames commit a
-  // compact replay checksum but write only their Runtime input/state-machine
-  // fence; replay deterministically regenerates the intermediate metadata.
-  const replicaMetaEntries = checkpointedLineagePlan ? replicaMetaCommitment.entries : [];
-  if (process.env['XLN_STORAGE_DEBUG_REPLICA_META'] === '1') {
-    storageLog.info('replica_meta.debug', {
-      height: options.env.height,
-      digest: replicaMetaCommitment.digest,
-      checkpoint: checkpointedLineagePlan !== null,
-      consumptionNodes: getConsumptionNodeStore(options.env).size,
-      consumptionRoots: [...options.env.eReplicas.values()].map(replica => ({
-        entityId: replica.entityId,
-        root: replica.state.consumptionAccumulator?.root ?? null,
-        count: replica.state.consumptionAccumulator?.count?.toString() ?? null,
-        mempool: replica.mempool.map(tx => tx.type === 'consensusOutput'
-          ? `consensusOutput:${tx.data.origin.sourceEntityId}:${tx.data.origin.sequence.toString()}`
-          : tx.type),
-      })),
-      heads: summarizeStorageReplicaMetaHeads(replicaMetaCommitment.entries),
-    });
-  }
-  const liveReplicaMetaKeys = checkpointedLineagePlan
-    ? new Set(replicaMetaEntries.map(entry => entry.key.toString('hex')))
-    : state.storageReplicaMetaKeys instanceof Set
-      ? new Set(state.storageReplicaMetaKeys)
-      : new Set<string>();
-  checkpointPrepare('replicaCommitment');
-  const staleHistoryReplicaMetaKeys: Buffer[] = [];
-  const cachedReplicaMetaKeys = state.storageReplicaMetaKeys instanceof Set
-    ? state.storageReplicaMetaKeys
-    : null;
-  if (!checkpointedLineagePlan) {
-    // Intermediate frames never rewrite/delete the checkpoint metadata.
-  } else if (cachedReplicaMetaKeys) {
-    for (const keyHex of cachedReplicaMetaKeys) {
-      if (!liveReplicaMetaKeys.has(keyHex)) staleHistoryReplicaMetaKeys.push(Buffer.from(keyHex, 'hex'));
-    }
-  } else {
-    // A process restart pays one authoritative scan. Subsequent appends use
-    // the writer-local key set published only after both DB batches commit.
-    for await (const key of iterateKeys(walDb, { prefix: keyLiveReplicaMetaPrefix() })) {
-      if (!liveReplicaMetaKeys.has(key.toString('hex'))) staleHistoryReplicaMetaKeys.push(Buffer.from(key));
-    }
-  }
-  checkpointPrepare('replicaHistoryScan');
-  options.onPersistenceProgress?.('replica-metadata-read');
-  const runtimeOutputRetryState = buildDurableOutputRetryState(
-    options.env,
-    options.currentFrameOutputs ?? [],
-  );
-  const durablePendingRuntimeInput = buildDurableRuntimeMempool(options.env.runtimeMempool);
-  const hasDurablePendingRuntimeInput =
-    durablePendingRuntimeInput.runtimeTxs.length > 0 ||
-    durablePendingRuntimeInput.entityInputs.length > 0 ||
-    (durablePendingRuntimeInput.jInputs?.length ?? 0) > 0 ||
-    (durablePendingRuntimeInput.reliableReceipts?.length ?? 0) > 0;
-  const frameRecordBase: StorageFrameRecord = {
-    height: options.env.height,
-    timestamp: options.env.timestamp,
-    prevFrameHash,
-    replicaMetaDigest: replicaMetaCommitment.digest,
-    replicaMetaCheckpoint: checkpointedLineagePlan !== null,
-    replicaMetaStateMode,
-    postStateHash: computeStoragePostStateHash({
-      height: options.env.height,
-      timestamp: options.env.timestamp,
-      replicaMetaDigest: replicaMetaCommitment.digest,
-      runtimeMachine: runtimeMachineForPostState,
-    }),
-    stateHash: preparedHashes?.stateHash ?? '',
-    hashMode: STORAGE_FRAME_FORMAT.hashMode,
-    materializedState: shouldMaterialize,
-    ...(preparedHashes ? { entityHashes: preparedHashes.entityHashes } : {}),
-    ...(runtimeStateHashes ? {
-      canonicalStateHash: runtimeStateHashes.canonicalStateHash,
-      canonicalEntityHashes: runtimeStateHashes.canonicalEntityHashes,
-      runtimeStateHash: runtimeStateHashes.canonicalStateHash,
-    } : {}),
-    runtimeInput: appliedRuntimeInput,
-    historyRecords: (options.historyRecords ?? []).map(record => structuredClone(record)),
-    activityLogs: frameLogs.map(log => structuredClone(log)),
-    ...(hasDurablePendingRuntimeInput
-      ? { pendingRuntimeInput: durablePendingRuntimeInput }
-      : {}),
-    ...(runtimeMachine ? { runtimeMachine } : {}),
-    ...(options.currentFrameOutputs && options.currentFrameOutputs.length > 0
-      ? { runtimeOutputs: cloneIsolatedRoutedEntityInputs(options.currentFrameOutputs) }
-      : {}),
-    ...(runtimeOutputRetryState.length > 0
-      ? { runtimeOutputRetryState }
-      : {}),
-    ...(shouldMaterialize && overlayRecords.length > 0
-      ? { overlayRecords: overlayRecords.map((record) => ({ ...record })) }
-      : {}),
-    touchedEntities,
-    touchedAccounts,
-    touchedBookEntities,
-  };
-  const frameRecord: StorageFrameRecord = {
-    ...frameRecordBase,
-    frameHash: computeStorageFrameHash(frameRecordBase),
-  };
-  const historyViewPuts = buildHistoryViewPuts({
-    height: options.env.height,
-    timestamp: options.env.timestamp,
-    runtimeInput: appliedRuntimeInput,
-    logs: frameLogs,
-    touchedEntities,
-    touchedAccounts,
-    touchedBookEntities,
-    historyRecords: options.historyRecords ?? [],
-  });
-  const highSignalEvents = frameLogs
-    .map((entry) => (typeof entry?.message === 'string' ? entry.message : ''))
-    .filter((message) =>
-      message === 'HtlcReceived' ||
-      message === 'HtlcFinalized' ||
-      message === 'HtlcFailed' ||
-      message === 'JEventReceived' ||
-      message === 'JBatchQueued',
-    );
-
-  const frameBuffer = encodeBuffer(frameRecord);
-  options.onPersistenceProgress?.('frame-encoded');
-  checkpointPrepare('frameEncode');
-  const projectedReplayBytes =
-    head.retainedHistoryBytes +
-    frameKey.byteLength +
-    frameBuffer.byteLength +
-    diffKey.byteLength +
-    diffBuffer.byteLength +
-    pendingBoardHistoryBytes +
-    pendingConsumptionHistoryBytes +
-    pendingAccountJClaimHistoryBytes;
-  const projectedEpochReplayBytes =
-    head.epochReplayBytes +
-    frameKey.byteLength +
-    frameBuffer.byteLength +
-    diffKey.byteLength +
-    diffBuffer.byteLength +
-    pendingBoardHistoryBytes +
-    pendingConsumptionHistoryBytes +
-    pendingAccountJClaimHistoryBytes;
-  let historyViewBytes = 0;
-  let historyViewPrunedBytes = 0;
-  let historyViewRetainedBytes = 0;
-  let historyViewPrunedKeys = 0;
-  let historyViewLatestPrunedHeight = 0;
-  let historyViewsMaterialized = historyViewPuts.length === 0;
-  let viewMaterializedThrough = 0;
-  const walBatch = walDb.batch();
-  if (staleHistoryReplicaMetaKeys.length > 0 && typeof walBatch.del !== 'function') {
-    throw new Error('STORAGE_HISTORY_REPLICA_META_DELETE_UNSUPPORTED');
-  }
-  for (const key of staleHistoryReplicaMetaKeys) walBatch.del!(key);
-  for (const { key, value } of pendingBoardEntries) {
-    // Root-bearing entity docs and all newly referenced nodes share both
-    // atomic batches. History is authoritative; current is a rebuildable cache.
-    walBatch.put(key, value);
-  }
-  const safeConsumptionDeletes = getSafePendingConsumptionDeletes(options.env);
-  const safeAccountJClaimDeletes = getSafePendingAccountJClaimDeletes(options.env);
-  for (const [hash, node] of pendingConsumptionNodes) {
-    if (hashConsumptionNode(node) !== hash) throw new Error(`CONSUMPTION_NODE_CORRUPT:${hash}`);
-    walBatch.put(keyConsumptionNode(hash), encodeBuffer(node));
-  }
-  for (const [hash, node] of pendingAccountJClaimNodes) {
-    if (hashAccountJClaimNode(node) !== hash) throw new Error(`ACCOUNT_J_CLAIM_NODE_CORRUPT:${hash}`);
-    walBatch.put(keyAccountJClaimNode(hash), encodeBuffer(node));
-  }
-  walBatch.put(frameKey, frameBuffer);
-  walBatch.put(diffKey, diffBuffer);
-  options.onPersistenceProgress?.('history-view-plan-built');
-  const batch = db.batch();
-  for (const { key, value } of pendingBoardEntries) {
-    batch.put(key, value);
-  }
-  if (safeConsumptionDeletes.length > 0 && typeof batch.del !== 'function') {
-    throw new Error('STORAGE_CURRENT_CONSUMPTION_DELETE_UNSUPPORTED');
-  }
-  if (safeAccountJClaimDeletes.length > 0 && typeof batch.del !== 'function') {
-    throw new Error('STORAGE_CURRENT_ACCOUNT_J_CLAIM_DELETE_UNSUPPORTED');
-  }
-  for (const [hash, node] of pendingConsumptionNodes) {
-    batch.put(keyConsumptionNode(hash), encodeBuffer(node));
-  }
-  for (const hash of safeConsumptionDeletes) batch.del!(keyConsumptionNode(hash));
-  for (const [hash, node] of pendingAccountJClaimNodes) {
-    batch.put(keyAccountJClaimNode(hash), encodeBuffer(node));
-  }
-  for (const hash of safeAccountJClaimDeletes) batch.del!(keyAccountJClaimNode(hash));
-  if (preparedHashes) {
-    for (const key of preparedHashes.docDels) {
-      if (typeof batch.del === 'function') batch.del(key);
-    }
-    for (const item of preparedHashes.docPuts) batch.put(item.key, item.value);
-    for (const key of preparedHashes.merkleDels) {
-      if (typeof batch.del === 'function') batch.del(key);
-    }
-    for (const item of preparedHashes.merklePuts) {
-      batch.put(item.key, item.value);
-    }
-  }
-  for (const entry of replicaMetaEntries) {
-    // Replica metadata is authoritative recovery state. Keep one copy in the
-    // same atomic history batch as frame, diff, and HEAD.
-    walBatch.put(entry.key, entry.value);
-  }
-
-  const nextHead: StorageHead = {
-    schemaVersion: STORAGE_SCHEMA_VERSION,
-    latestHeight: options.env.height,
-    latestMaterializedHeight: shouldMaterialize
-      ? options.env.height
-      : Math.max(0, Math.floor(Number(head.latestMaterializedHeight ?? 0))),
-    latestSnapshotHeight: head.latestSnapshotHeight,
-    snapshotPeriodFrames: config.snapshotPeriodFrames,
-    retainSnapshots: config.retainSnapshots,
-    epochMaxBytes: config.epochMaxBytes,
-    accountMerkleRadix: config.accountMerkleRadix,
-    epochReplayBytes: projectedEpochReplayBytes,
-    retainedHistoryBytes: projectedReplayBytes,
-  };
-  walBatch.put(KEY_HEAD, encodeBuffer(nextHead));
-  batch.put(KEY_HEAD, encodeBuffer(nextHead));
-  checkpointPrepare('batchPlan');
-  const authoritativeWriteStartedAt = options.getPerfMs();
-  const prepareMs = authoritativeWriteStartedAt - writeStartedAt;
-  const prepareStages = cumulativeMarksToDurations(prepareMarks, prepareMs);
-  options.onPersistenceProgress?.('authoritative-write-start');
-  await writeBatch(walBatch, { sync: true });
-  const authoritativeWriteMs = options.getPerfMs() - authoritativeWriteStartedAt;
-  options.onPersistenceProgress?.('authoritative-write-done');
-  await options.onPersistenceBoundary?.('after-authoritative-history-commit');
-  if (historyViewPuts.length > 0) {
-    if (!(await options.tryOpenHistoryViewDb(options.env))) {
-      throw new Error(`HISTORY_VIEW_DB_OPEN_FAILED:height=${options.env.height}`);
-    }
-    const viewDb = options.getHistoryViewDb(options.env);
-    const retainedSnapshotHeights = await listSnapshotHeights(walDb);
-    const reconciled = await reconcileHistoryViews({
-      viewDb,
-      firstWalHeight: retainedSnapshotHeights[0] ?? 1,
-      latestWalHeight: options.env.height,
-      readWalFrame: height => readStorageFrameRecord(walDb, height),
-      config,
-    });
-    historyViewBytes = reconciled.writtenBytes;
-    viewMaterializedThrough = reconciled.materializedThroughRuntimeHeight;
-    historyViewsMaterialized = true;
-    await options.onPersistenceBoundary?.('after-history-view-commit');
-  }
-  const currentCacheWriteStartedAt = options.getPerfMs();
-  options.onPersistenceProgress?.('current-cache-write-start');
-  await writeBatch(batch, { sync: false });
-  const currentCacheWriteMs = options.getPerfMs() - currentCacheWriteStartedAt;
-  options.onPersistenceProgress?.('current-cache-write-done');
-  await options.onPersistenceBoundary?.('after-current-cache-commit');
-  if (checkpointedLineagePlan) applyCertifiedEntityLineagePlan(options.env, checkpointedLineagePlan);
-  if (state) {
-    state.currentStorageOverlayMarks = [];
-    state.pendingCertifiedBoardNodes = new Map();
-    if (checkpointedLineagePlan) state.storageReplicaMetaKeys = new Set(liveReplicaMetaKeys);
-    finalizePersistedConsumptionNodes(options.env, safeConsumptionDeletes);
-    finalizePersistedAccountJClaimNodes(options.env, safeAccountJClaimDeletes);
-  }
-  if (preparedHashes) {
-    state.storageEntityHashDocs = preparedHashes.entityHashDocs;
-  }
-  if (viewMaterializedThrough > 0) {
-    const historyViewResult = await pruneHistoryViewRetention({
-      db: options.getHistoryViewDb(options.env),
-      height: options.env.height,
-      head: await readHistoryViewHead(options.getHistoryViewDb(options.env), config),
-      config,
-      ...(options.onPersistenceBoundary
-        ? { onPersistenceBoundary: options.onPersistenceBoundary }
-        : {}),
-    });
-    historyViewPrunedBytes = historyViewResult.prunedBytes;
-    historyViewRetainedBytes = historyViewResult.retainedBytes;
-    historyViewPrunedKeys = historyViewResult.prunedKeys;
-    historyViewLatestPrunedHeight = historyViewResult.latestPrunedRuntimeHeight;
-    historyViewsMaterialized = true;
-  }
-  const postCommitMs = options.getPerfMs() - currentCacheWriteStartedAt - currentCacheWriteMs;
-  const writeMs = options.getPerfMs() - writeStartedAt;
-
+/**
+ * Snapshot publication is a second durability protocol after the frame WAL
+ * commit. The new snapshot HEAD is published only after its body and manifest
+ * are durable; pruning and epoch rotation happen strictly afterwards.
+ */
+const runStorageSnapshotLifecycle = async (
+  options: StorageFrameSaveOptions,
+  db: RuntimeDbLike,
+  walDb: RuntimeDbLike,
+  config: Required<StorageRuntimeConfig>,
+  head: StorageHead,
+  nextHead: StorageHead,
+  snapshotDue: boolean,
+  snapshotRequiredByBytes: boolean,
+): Promise<StorageSnapshotLifecycleResult> => {
   let snapshotMs = 0;
-  let snapDocs = 0;
+  let snapshotDocs = 0;
   let snapshotBytes = 0;
   let prunedBytes = 0;
   const epochRotated = snapshotRequiredByBytes;
@@ -1286,24 +824,18 @@ export const saveRuntimeFrameToStorage = async (options: {
 
   if (snapshotDue || snapshotRequiredByBytes) {
     options.onPersistenceProgress?.('snapshot-start');
-    const snapshotStartedAt = options.getPerfMs();
-    const snapshotResult = await createSnapshot(
+    const startedAt = options.getPerfMs();
+    const snapshot = await createSnapshot(
       db,
       walDb,
       options.env.height,
       options.env.timestamp,
       options.onPersistenceBoundary,
     );
-    snapDocs = snapshotResult.docCount;
-    snapshotBytes = snapshotResult.bytes;
+    snapshotDocs = snapshot.docCount;
+    snapshotBytes = snapshot.bytes;
     retainedHistoryBytes += snapshotBytes;
     latestSnapshotHeight = options.env.height;
-
-    // The history head is the recovery fence. Publish it only after every
-    // snapshot body and the manifest are durable, and before deleting any
-    // older recovery base. A killed process therefore sees either the old
-    // snapshot plus replay diffs, or the complete new snapshot, never a head
-    // whose base was already pruned.
     const publishedHead = {
       ...(await readHead(walDb, config)),
       latestSnapshotHeight,
@@ -1314,150 +846,1032 @@ export const saveRuntimeFrameToStorage = async (options: {
     publishBatch.put(KEY_HEAD, encodeBuffer(publishedHead));
     await writeBatch(publishBatch);
     await options.onPersistenceBoundary?.('after-snapshot-history-publish');
-
     prunedBytes += await maybeRotateSnapshots(
       walDb,
       config.retainSnapshots,
       options.onPersistenceBoundary,
     );
-    snapshotMs = options.getPerfMs() - snapshotStartedAt;
+    snapshotMs = options.getPerfMs() - startedAt;
     options.onPersistenceProgress?.('snapshot-done');
   }
 
-  if (snapDocs > 0) {
-    if (latestSnapshotHeight > 0) {
-      const retainedSnapshotHeights = await listSnapshotHeights(walDb);
-      const oldestRetainedSnapshotHeight = retainedSnapshotHeights[0] ?? latestSnapshotHeight;
-      // Every retained snapshot advertises a usable historical base. Keep the
-      // contiguous diff suffix after the oldest base; pruning through the newest
-      // snapshot leaves older retained snapshots present but unreplayable.
-      prunedBytes += await pruneHistoryBeforeHeight(
-        walDb,
-        oldestRetainedSnapshotHeight,
-        options.onPersistenceBoundary,
-      );
-    }
-    prunedBytes += await pruneUnreachableCertifiedBoardHistoryNodes(options.env, walDb, db);
+  if (snapshotDocs > 0) {
+    const retainedSnapshots = await listSnapshotHeights(walDb);
+    const oldestRetained = retainedSnapshots[0] ?? latestSnapshotHeight;
+    prunedBytes += await pruneHistoryBeforeHeight(
+      walDb,
+      oldestRetained,
+      options.onPersistenceBoundary,
+    );
+    prunedBytes += await pruneUnreachableCertifiedBoardHistoryNodes(
+      options.env,
+      walDb,
+      db,
+    );
     options.onPersistenceProgress?.('snapshot-board-gc-done');
-    prunedBytes += await pruneUnreachableConsumptionHistoryNodes(options.env, walDb);
+    prunedBytes += await pruneUnreachableConsumptionHistoryNodes(
+      options.env,
+      walDb,
+    );
     options.onPersistenceProgress?.('snapshot-consumption-gc-done');
-    prunedBytes += await pruneUnreachableAccountJClaimHistoryNodes(options.env, walDb);
+    prunedBytes += await pruneUnreachableAccountJClaimHistoryNodes(
+      options.env,
+      walDb,
+    );
     options.onPersistenceProgress?.('snapshot-account-j-gc-done');
   }
 
   retainedHistoryBytes = Math.max(0, retainedHistoryBytes - prunedBytes);
-
-  if (snapDocs > 0 || prunedBytes > 0) {
+  if (snapshotDocs > 0 || prunedBytes > 0) {
     const latest = await readHead(walDb, config);
-    const walUpdate = walDb.batch();
-    const stateUpdate = db.batch();
     const updatedHead = {
       ...latest,
       latestSnapshotHeight,
       retainedHistoryBytes,
     } satisfies StorageHead;
-    walUpdate.put(
-      KEY_HEAD,
-      encodeBuffer(updatedHead),
-    );
-    stateUpdate.put(KEY_HEAD, encodeBuffer(updatedHead));
+    const walUpdate = walDb.batch();
+    walUpdate.put(KEY_HEAD, encodeBuffer(updatedHead));
     await writeBatch(walUpdate);
     await options.onPersistenceBoundary?.('after-snapshot-history-head');
+    const stateUpdate = db.batch();
+    stateUpdate.put(KEY_HEAD, encodeBuffer(updatedHead));
     await writeBatch(stateUpdate);
     await options.onPersistenceBoundary?.('after-snapshot-current-head');
   }
 
-  if (epochRotated && snapDocs > 0 && options.rotateEpochDb) {
-    const rotated = await options.rotateEpochDb(options.env, latestSnapshotHeight, options.env.timestamp);
+  if (epochRotated && snapshotDocs > 0 && options.rotateEpochDb) {
+    const rotated = await options.rotateEpochDb(
+      options.env,
+      latestSnapshotHeight,
+      options.env.timestamp,
+    );
     epochDbRotated = rotated !== false;
     if (epochDbRotated) {
-      const rotatedHistoryHead = {
+      const rotatedHead = {
         ...(await readHead(walDb, config)),
         epochReplayBytes: 0,
       } satisfies StorageHead;
-      const resetEpochBatch = walDb.batch();
-      resetEpochBatch.put(KEY_HEAD, encodeBuffer(rotatedHistoryHead));
-      await writeBatch(resetEpochBatch, { sync: true });
+      const batch = walDb.batch();
+      batch.put(KEY_HEAD, encodeBuffer(rotatedHead));
+      await writeBatch(batch, { sync: true });
       await options.onPersistenceBoundary?.('after-epoch-history-head-reset');
     }
     options.onPersistenceProgress?.('snapshot-epoch-rotation-done');
   }
 
-  const verboseStorageLogs =
-    String(process.env['XLN_STORAGE_VERBOSE'] ?? '').toLowerCase() === '1' ||
-    String(process.env['XLN_STORAGE_VERBOSE'] ?? '').toLowerCase() === 'true';
-  const persistencePerfMs: StoragePersistencePerf = {
-    open: openMs,
-    planning: planningMs,
-    planningStages,
-    diff: diffBuildMs,
-    prepare: prepareMs,
-    prepareStages,
-    authoritativeWrite: authoritativeWriteMs,
-    currentCacheWrite: currentCacheWriteMs,
-    postCommit: postCommitMs,
-    snapshot: snapshotMs,
-    total: options.getPerfMs() - openStartedAt,
+  return {
+    snapshotMs,
+    snapshotDocs,
+    snapshotBytes,
+    prunedBytes,
+    epochRotated,
+    epochDbRotated,
+    retainedHistoryBytes,
+    latestSnapshotHeight,
   };
-  if (verboseStorageLogs && options.env.quietRuntimeLogs !== true) {
+};
+
+/**
+ * Resolve databases and build the deterministic frame diff before any write.
+ * Everything returned here is still pre-commit and may be discarded safely.
+ */
+const prepareStorageFrameSave = async (options: StorageFrameSaveOptions) => {
+  const config = resolveStorageRuntimeConfig(options.env);
+  if (!config.enabled || options.env.runtimeState?.persistencePaused) {
+    return {
+      skipped: {
+        materialized: false,
+        materializedOverlayRecords: 0,
+        historyViewsMaterialized: true,
+      } satisfies StorageFrameSaveResult,
+    };
+  }
+  const openStartedAt = options.getPerfMs();
+  if (!(await options.tryOpenDb(options.env))) {
+    return {
+      skipped: {
+        materialized: false,
+        materializedOverlayRecords: 0,
+        historyViewsMaterialized: false,
+      } satisfies StorageFrameSaveResult,
+    };
+  }
+  const db = options.getRuntimeDb(options.env);
+  if (!(await options.tryOpenRuntimeWalDb(options.env))) {
+    return {
+      skipped: {
+        materialized: false,
+        materializedOverlayRecords: 0,
+        historyViewsMaterialized: false,
+      } satisfies StorageFrameSaveResult,
+    };
+  }
+  const walDb = options.getRuntimeWalDb(options.env);
+  const recovered = await recoverStorageDbFromHistory({
+    db,
+    walDb,
+    config,
+    ...(options.onPersistenceProgress
+      ? { onPersistenceProgress: options.onPersistenceProgress }
+      : {}),
+  });
+  const state = options.env.runtimeState ?? {};
+  if (recovered.entityHashDocs) {
+    state.storageEntityHashDocs = recovered.entityHashDocs;
+  }
+  options.onPersistenceProgress?.('opened');
+  const openMs = options.getPerfMs() - openStartedAt;
+  const head = await readHead(walDb, config);
+  const appliedRuntimeInput =
+    options.currentFrameInput ?? { runtimeTxs: [], entityInputs: [] };
+  const snapshotDue =
+    options.env.height === 1 ||
+    options.env.height % config.snapshotPeriodFrames === 0;
+  const snapshotRequiredByBytes =
+    head.epochReplayBytes + encodeBuffer(appliedRuntimeInput).byteLength >=
+    config.epochMaxBytes;
+  const shouldMaterialize =
+    options.env.height === 1 ||
+    options.env.height % config.materializePeriodFrames === 0 ||
+    snapshotDue ||
+    snapshotRequiredByBytes;
+
+  const planningStartedAt = options.getPerfMs();
+  const planningMarks: Record<string, number> = {};
+  const checkpoint = (label: string): void => {
+    planningMarks[label] = options.getPerfMs() - planningStartedAt;
+  };
+  const frameOverlayRecords = Array.isArray(state.currentStorageOverlayMarks)
+    ? state.currentStorageOverlayMarks.map(record => ({ ...record }))
+    : [];
+  const overlayRecords = mergeOverlayRecordsIntoEnv(options.env, []);
+  const frameTouched = storageRefsFromOverlay(frameOverlayRecords);
+  checkpoint('overlay');
+  const checkpointedLineagePlan = shouldMaterialize
+    ? buildRuntimeCheckpointLineagePlan(options.env)
+    : null;
+  const lineagePlan =
+    checkpointedLineagePlan ?? buildLiveReplicaMetaPlan(options.env);
+  const replicaLookup =
+    checkpointedLineagePlan?.lookup ?? buildLiveReplicaLookup(options.env);
+  checkpoint('lineage');
+  const planningMs = options.getPerfMs() - planningStartedAt;
+  const planningStages = cumulativeMarksToDurations(planningMarks, planningMs);
+  const diffStartedAt = options.getPerfMs();
+  const framePuts = buildDocPuts(options.env, frameTouched, replicaLookup);
+  const frameBookDels = buildBookDeletionsFromOverlay(frameOverlayRecords);
+  const diff = buildDiffRecord(options.env.height, framePuts, frameBookDels);
+  options.onPersistenceProgress?.('diff-built');
+
+  return {
+    config,
+    state,
+    db,
+    walDb,
+    head,
+    appliedRuntimeInput,
+    snapshotDue,
+    snapshotRequiredByBytes,
+    shouldMaterialize,
+    openStartedAt,
+    openMs,
+    planningMs,
+    planningStages,
+    diffBuildMs: options.getPerfMs() - diffStartedAt,
+    overlayRecords,
+    frameTouched,
+    checkpointedLineagePlan,
+    lineagePlan,
+    replicaLookup,
+    diff,
+  };
+};
+
+type PreparedStorageFrameSave = Exclude<
+  Awaited<ReturnType<typeof prepareStorageFrameSave>>,
+  { skipped: StorageFrameSaveResult }
+>;
+
+const resolveStorageAppendPosition = async (
+  options: StorageFrameSaveOptions,
+  walDb: RuntimeDbLike,
+  head: StorageHead,
+): Promise<
+  | { staleWriterStopped: true }
+  | { previousFrame: StorageFrameRecord | null; prevFrameHash: string }
+> => {
+  if (options.stopStaleWriterOnHeadAhead) {
+    if (head.latestHeight > options.env.height) {
+      return { staleWriterStopped: true };
+    }
+    if (head.latestHeight === options.env.height) {
+      const persisted = await readStorageFrameRecord(
+        walDb,
+        options.env.height,
+      );
+      if (persisted) return { staleWriterStopped: true };
+    }
+  }
+  if (head.latestHeight !== options.env.height - 1) {
+    throw new Error(
+      `STORAGE_APPEND_INVARIANT_FAILED: refusing to write frame ` +
+      `${options.env.height} after persisted head ${head.latestHeight}`,
+    );
+  }
+  const previous =
+    head.latestHeight > 0
+      ? await readStorageFrameRecord(walDb, head.latestHeight)
+      : null;
+  if (head.latestHeight > 0 && !previous) {
+    throw new Error(`STORAGE_PREV_FRAME_MISSING: height=${head.latestHeight}`);
+  }
+  return {
+    previousFrame: previous,
+    prevFrameHash: previous
+      ? previous.frameHash ?? computeStorageFrameHash(previous)
+      : ZERO_FRAME_HASH,
+  };
+};
+
+const collectPendingStorageNodes = (env: RuntimeState) => {
+  const state = env.runtimeState ?? {};
+  const boardNodes =
+    state.pendingCertifiedBoardNodes instanceof Map
+      ? state.pendingCertifiedBoardNodes
+      : new Map<string, CertifiedBoardPatriciaNode>();
+  const boardEntries: Array<{ key: Buffer; value: Buffer }> = [];
+  let boardHistoryBytes = 0;
+  for (const [hash, node] of boardNodes) {
+    if (hashCertifiedBoardNode(node) !== hash) {
+      throw new Error(`CERTIFIED_BOARD_NODE_CORRUPT:${hash}`);
+    }
+    const key = keyCertifiedBoardNode(hash);
+    const value = encodeBuffer(node);
+    boardEntries.push({ key, value });
+    boardHistoryBytes += key.byteLength + value.byteLength;
+  }
+
+  const consumptionNodes = state.pendingConsumptionNodes ?? new Map();
+  let consumptionHistoryBytes = 0;
+  for (const [hash, node] of consumptionNodes) {
+    if (hashConsumptionNode(node) !== hash) {
+      throw new Error(`CONSUMPTION_NODE_CORRUPT:${hash}`);
+    }
+    consumptionHistoryBytes +=
+      keyConsumptionNode(hash).byteLength + encodeBuffer(node).byteLength;
+  }
+
+  const accountJClaimNodes =
+    state.pendingAccountJClaimNodes instanceof Map
+      ? state.pendingAccountJClaimNodes
+      : new Map<string, AccountJClaimNode>();
+  let accountJClaimHistoryBytes = 0;
+  for (const [hash, node] of accountJClaimNodes) {
+    if (hashAccountJClaimNode(node) !== hash) {
+      throw new Error(`ACCOUNT_J_CLAIM_NODE_CORRUPT:${hash}`);
+    }
+    accountJClaimHistoryBytes +=
+      keyAccountJClaimNode(hash).byteLength + encodeBuffer(node).byteLength;
+  }
+  return {
+    boardEntries,
+    boardHistoryBytes,
+    consumptionNodes,
+    consumptionHistoryBytes,
+    accountJClaimNodes,
+    accountJClaimHistoryBytes,
+  };
+};
+
+const logReplicaMetaDebug = (
+  env: RuntimeState,
+  checkpointed: boolean,
+  commitment: ReturnType<typeof buildStorageLiveReplicaMetaCommitment>,
+): void => {
+  if (process.env['XLN_STORAGE_DEBUG_REPLICA_META'] !== '1') return;
+  storageLog.info('replica_meta.debug', {
+    height: env.height,
+    digest: commitment.digest,
+    checkpoint: checkpointed,
+    consumptionNodes: getConsumptionNodeStore(env).size,
+    consumptionRoots: [...env.eReplicas.values()].map(replica => ({
+      entityId: replica.entityId,
+      root: replica.state.consumptionAccumulator?.root ?? null,
+      count: replica.state.consumptionAccumulator?.count?.toString() ?? null,
+      mempool: replica.mempool.map(tx =>
+        tx.type === 'consensusOutput'
+          ? `consensusOutput:${tx.data.origin.sourceEntityId}:` +
+            tx.data.origin.sequence.toString()
+          : tx.type,
+      ),
+    })),
+    heads: summarizeStorageReplicaMetaHeads(commitment.entries),
+  });
+};
+
+const prepareStorageStateCommitments = async (
+  options: StorageFrameSaveOptions,
+  prepared: PreparedStorageFrameSave,
+  previousFrame: StorageFrameRecord | null,
+  checkpoint: (label: string) => void,
+) => {
+  const {
+    db,
+    walDb,
+    state,
+    config,
+    shouldMaterialize,
+    snapshotDue,
+    snapshotRequiredByBytes,
+    overlayRecords,
+    checkpointedLineagePlan,
+    lineagePlan,
+    replicaLookup,
+  } = prepared;
+  const materializedTouched = shouldMaterialize
+    ? storageRefsFromOverlay(overlayRecords)
+    : null;
+  const materializedPuts = materializedTouched
+    ? buildDocPuts(options.env, materializedTouched, replicaLookup)
+    : [];
+  const materializedDels = shouldMaterialize
+    ? buildBookDeletionsFromOverlay(overlayRecords)
+    : [];
+  const cachedEntityHashDocs =
+    state.storageEntityHashDocs instanceof Map
+      ? state.storageEntityHashDocs as Map<string, StorageEntityHashDoc>
+      : undefined;
+  const preparedHashes = shouldMaterialize
+    ? await prepareStorageStateHashes({
+        db,
+        puts: materializedPuts,
+        dels: materializedDels,
+        ...(cachedEntityHashDocs
+          ? { entityHashDocs: cachedEntityHashDocs }
+          : {}),
+      })
+    : null;
+  options.onPersistenceProgress?.('materialized-hashes-built');
+  checkpoint('materializedHashes');
+
+  const canonicalHashDue =
+    config.canonicalHashPeriodFrames > 0 &&
+    (options.env.height === 1 ||
+      options.env.height % config.canonicalHashPeriodFrames === 0);
+  const pendingNetworkOutputs =
+    options.currentFrameOutputs ?? options.env.pendingNetworkOutputs ?? [];
+  const runtimeMachineForPostState =
+    buildReplayVerifiableRuntimeMachineSnapshot(options.env, {
+      pendingNetworkOutputs,
+      excludePersistedHistoryRecords: true,
+    });
+  const runtimeMachine = shouldMaterialize || canonicalHashDue
+    ? buildDurableRuntimeMachineSnapshot(options.env, {
+        pendingNetworkOutputs,
+        excludePersistedHistoryRecords: true,
+      })
+    : undefined;
+  checkpoint('runtimeMachine');
+  const runtimeStateHashes = canonicalHashDue
+    ? prepareStorageCanonicalStateHashes(
+        options.env,
+        [],
+        previousFrame,
+        replicaLookup,
+        runtimeMachine!,
+      )
+    : null;
+  options.onPersistenceProgress?.('canonical-hashes-built');
+  checkpoint('canonicalHashes');
+
+  const replicaMetaStateMode: StorageFrameRecord['replicaMetaStateMode'] =
+    checkpointedLineagePlan
+      ? snapshotDue || snapshotRequiredByBytes
+        ? 'full'
+        : 'shared-entity-state'
+      : 'live-head';
+  const replicaMetaCommitment = checkpointedLineagePlan
+    ? buildStorageReplicaMetaCommitmentFromCheckpointPlan(
+        options.env,
+        lineagePlan,
+        {
+          omitIntermediateSingleSignerState:
+            replicaMetaStateMode === 'shared-entity-state',
+        },
+      )
+    : buildStorageLiveReplicaMetaCommitment(options.env);
+  const replicaMetaEntries = checkpointedLineagePlan
+    ? replicaMetaCommitment.entries
+    : [];
+  logReplicaMetaDebug(
+    options.env,
+    checkpointedLineagePlan !== null,
+    replicaMetaCommitment,
+  );
+  const liveReplicaMetaKeys = checkpointedLineagePlan
+    ? new Set(replicaMetaEntries.map(entry => entry.key.toString('hex')))
+    : state.storageReplicaMetaKeys instanceof Set
+      ? new Set(state.storageReplicaMetaKeys)
+      : new Set<string>();
+  checkpoint('replicaCommitment');
+  const staleReplicaMetaKeys: Buffer[] = [];
+  const cachedReplicaMetaKeys =
+    state.storageReplicaMetaKeys instanceof Set
+      ? state.storageReplicaMetaKeys
+      : null;
+  if (checkpointedLineagePlan && cachedReplicaMetaKeys) {
+    for (const keyHex of cachedReplicaMetaKeys) {
+      if (!liveReplicaMetaKeys.has(keyHex)) {
+        staleReplicaMetaKeys.push(Buffer.from(keyHex, 'hex'));
+      }
+    }
+  } else if (checkpointedLineagePlan) {
+    for await (
+      const key of iterateKeys(walDb, {
+        prefix: keyLiveReplicaMetaPrefix(),
+      })
+    ) {
+      if (!liveReplicaMetaKeys.has(key.toString('hex'))) {
+        staleReplicaMetaKeys.push(Buffer.from(key));
+      }
+    }
+  }
+  checkpoint('replicaHistoryScan');
+  options.onPersistenceProgress?.('replica-metadata-read');
+  return {
+    preparedHashes,
+    runtimeMachineForPostState,
+    runtimeMachine,
+    runtimeStateHashes,
+    replicaMetaStateMode,
+    replicaMetaCommitment,
+    replicaMetaEntries,
+    liveReplicaMetaKeys,
+    staleReplicaMetaKeys,
+  };
+};
+
+type PreparedStorageCommitments = Awaited<
+  ReturnType<typeof prepareStorageStateCommitments>
+>;
+
+const buildStorageFrameRecordPlan = (
+  options: StorageFrameSaveOptions,
+  prepared: PreparedStorageFrameSave,
+  commitments: PreparedStorageCommitments,
+  pendingNodes: ReturnType<typeof collectPendingStorageNodes>,
+  prevFrameHash: string,
+) => {
+  const {
+    head,
+    diff,
+    appliedRuntimeInput,
+    shouldMaterialize,
+    overlayRecords,
+    frameTouched,
+    checkpointedLineagePlan,
+  } = prepared;
+  const frameLogs = Array.isArray(options.env.frameLogs)
+    ? options.env.frameLogs.map(entry => ({ ...entry }))
+    : [];
+  const touchedEntities = [...frameTouched.touchedEntities.values()].sort();
+  const touchedAccounts = [...frameTouched.touchedAccounts.values()]
+    .filter(
+      (ref): ref is Extract<StorageDocRef, { family: 'account' }> =>
+        ref.family === 'account',
+    )
+    .map(ref => ({
+      entityId: ref.entityId,
+      counterpartyId: ref.counterpartyId,
+    }));
+  const touchedBookEntities =
+    [...frameTouched.touchedBookEntities.values()].sort();
+  const durablePendingInput =
+    buildDurableRuntimeMempool(options.env.runtimeMempool);
+  const hasPendingInput =
+    durablePendingInput.runtimeTxs.length > 0 ||
+    durablePendingInput.entityInputs.length > 0 ||
+    (durablePendingInput.jInputs?.length ?? 0) > 0 ||
+    (durablePendingInput.reliableReceipts?.length ?? 0) > 0;
+  const retryState = buildDurableOutputRetryState(
+    options.env,
+    options.currentFrameOutputs ?? [],
+  );
+  const frameBase: StorageFrameRecord = {
+    height: options.env.height,
+    timestamp: options.env.timestamp,
+    prevFrameHash,
+    replicaMetaDigest: commitments.replicaMetaCommitment.digest,
+    replicaMetaCheckpoint: checkpointedLineagePlan !== null,
+    replicaMetaStateMode: commitments.replicaMetaStateMode,
+    postStateHash: computeStoragePostStateHash({
+      height: options.env.height,
+      timestamp: options.env.timestamp,
+      replicaMetaDigest: commitments.replicaMetaCommitment.digest,
+      runtimeMachine: commitments.runtimeMachineForPostState,
+    }),
+    stateHash: commitments.preparedHashes?.stateHash ?? '',
+    hashMode: STORAGE_FRAME_FORMAT.hashMode,
+    materializedState: shouldMaterialize,
+    ...(commitments.preparedHashes
+      ? { entityHashes: commitments.preparedHashes.entityHashes }
+      : {}),
+    ...(commitments.runtimeStateHashes
+      ? {
+          canonicalStateHash:
+            commitments.runtimeStateHashes.canonicalStateHash,
+          canonicalEntityHashes:
+            commitments.runtimeStateHashes.canonicalEntityHashes,
+          runtimeStateHash:
+            commitments.runtimeStateHashes.canonicalStateHash,
+        }
+      : {}),
+    runtimeInput: appliedRuntimeInput,
+    historyRecords: (options.historyRecords ?? []).map(record =>
+      structuredClone(record),
+    ),
+    activityLogs: frameLogs.map(log => structuredClone(log)),
+    ...(hasPendingInput ? { pendingRuntimeInput: durablePendingInput } : {}),
+    ...(commitments.runtimeMachine
+      ? { runtimeMachine: commitments.runtimeMachine }
+      : {}),
+    ...(options.currentFrameOutputs?.length
+      ? {
+          runtimeOutputs: cloneIsolatedRoutedEntityInputs(
+            options.currentFrameOutputs,
+          ),
+        }
+      : {}),
+    ...(retryState.length > 0 ? { runtimeOutputRetryState: retryState } : {}),
+    ...(shouldMaterialize && overlayRecords.length > 0
+      ? { overlayRecords: overlayRecords.map(record => ({ ...record })) }
+      : {}),
+    touchedEntities,
+    touchedAccounts,
+    touchedBookEntities,
+  };
+  const frameRecord = {
+    ...frameBase,
+    frameHash: computeStorageFrameHash(frameBase),
+  } satisfies StorageFrameRecord;
+  const frameKey = keyFrame(options.env.height);
+  const diffKey = keyDiff(options.env.height);
+  const frameBuffer = encodeBuffer(frameRecord);
+  const diffBuffer = encodeBuffer(diff);
+  const nodeBytes =
+    pendingNodes.boardHistoryBytes +
+    pendingNodes.consumptionHistoryBytes +
+    pendingNodes.accountJClaimHistoryBytes;
+  const frameBytes =
+    frameKey.byteLength +
+    frameBuffer.byteLength +
+    diffKey.byteLength +
+    diffBuffer.byteLength +
+    nodeBytes;
+  return {
+    frameKey,
+    diffKey,
+    frameBuffer,
+    diffBuffer,
+    frameLogs,
+    touchedEntities,
+    touchedAccounts,
+    touchedBookEntities,
+    historyViewPuts: buildHistoryViewPuts({
+      height: options.env.height,
+      timestamp: options.env.timestamp,
+      runtimeInput: appliedRuntimeInput,
+      logs: frameLogs,
+      touchedEntities,
+      touchedAccounts,
+      touchedBookEntities,
+      historyRecords: options.historyRecords ?? [],
+    }),
+    highSignalEvents: frameLogs
+      .map(entry => typeof entry?.message === 'string' ? entry.message : '')
+      .filter(message => [
+        'HtlcReceived',
+        'HtlcFinalized',
+        'HtlcFailed',
+        'JEventReceived',
+        'JBatchQueued',
+      ].includes(message)),
+    projectedReplayBytes: head.retainedHistoryBytes + frameBytes,
+    projectedEpochReplayBytes: head.epochReplayBytes + frameBytes,
+  };
+};
+
+type StorageFrameRecordPlan = ReturnType<typeof buildStorageFrameRecordPlan>;
+
+const buildStorageCommitBatches = (
+  options: StorageFrameSaveOptions,
+  prepared: PreparedStorageFrameSave,
+  commitments: PreparedStorageCommitments,
+  pendingNodes: ReturnType<typeof collectPendingStorageNodes>,
+  frame: StorageFrameRecordPlan,
+) => {
+  const walBatch = prepared.walDb.batch();
+  if (
+    commitments.staleReplicaMetaKeys.length > 0 &&
+    typeof walBatch.del !== 'function'
+  ) {
+    throw new Error('STORAGE_HISTORY_REPLICA_META_DELETE_UNSUPPORTED');
+  }
+  for (const key of commitments.staleReplicaMetaKeys) walBatch.del!(key);
+  for (const entry of pendingNodes.boardEntries) {
+    walBatch.put(entry.key, entry.value);
+  }
+  for (const [hash, node] of pendingNodes.consumptionNodes) {
+    walBatch.put(keyConsumptionNode(hash), encodeBuffer(node));
+  }
+  for (const [hash, node] of pendingNodes.accountJClaimNodes) {
+    walBatch.put(keyAccountJClaimNode(hash), encodeBuffer(node));
+  }
+  walBatch.put(frame.frameKey, frame.frameBuffer);
+  walBatch.put(frame.diffKey, frame.diffBuffer);
+  for (const entry of commitments.replicaMetaEntries) {
+    // Recovery metadata shares the authoritative batch with frame, diff, HEAD.
+    walBatch.put(entry.key, entry.value);
+  }
+
+  const currentBatch = prepared.db.batch();
+  for (const entry of pendingNodes.boardEntries) {
+    currentBatch.put(entry.key, entry.value);
+  }
+  const safeConsumptionDeletes =
+    getSafePendingConsumptionDeletes(options.env);
+  const safeAccountJClaimDeletes =
+    getSafePendingAccountJClaimDeletes(options.env);
+  if (
+    safeConsumptionDeletes.length > 0 &&
+    typeof currentBatch.del !== 'function'
+  ) {
+    throw new Error('STORAGE_CURRENT_CONSUMPTION_DELETE_UNSUPPORTED');
+  }
+  if (
+    safeAccountJClaimDeletes.length > 0 &&
+    typeof currentBatch.del !== 'function'
+  ) {
+    throw new Error('STORAGE_CURRENT_ACCOUNT_J_CLAIM_DELETE_UNSUPPORTED');
+  }
+  for (const [hash, node] of pendingNodes.consumptionNodes) {
+    currentBatch.put(keyConsumptionNode(hash), encodeBuffer(node));
+  }
+  for (const hash of safeConsumptionDeletes) {
+    currentBatch.del!(keyConsumptionNode(hash));
+  }
+  for (const [hash, node] of pendingNodes.accountJClaimNodes) {
+    currentBatch.put(keyAccountJClaimNode(hash), encodeBuffer(node));
+  }
+  for (const hash of safeAccountJClaimDeletes) {
+    currentBatch.del!(keyAccountJClaimNode(hash));
+  }
+  const hashes = commitments.preparedHashes;
+  if (hashes) {
+    for (const key of hashes.docDels) currentBatch.del?.(key);
+    for (const item of hashes.docPuts) currentBatch.put(item.key, item.value);
+    for (const key of hashes.merkleDels) currentBatch.del?.(key);
+    for (const item of hashes.merklePuts) {
+      currentBatch.put(item.key, item.value);
+    }
+  }
+
+  const nextHead: StorageHead = {
+    schemaVersion: STORAGE_SCHEMA_VERSION,
+    latestHeight: options.env.height,
+    latestMaterializedHeight: prepared.shouldMaterialize
+      ? options.env.height
+      : Math.max(
+          0,
+          Math.floor(Number(prepared.head.latestMaterializedHeight ?? 0)),
+        ),
+    latestSnapshotHeight: prepared.head.latestSnapshotHeight,
+    snapshotPeriodFrames: prepared.config.snapshotPeriodFrames,
+    retainSnapshots: prepared.config.retainSnapshots,
+    epochMaxBytes: prepared.config.epochMaxBytes,
+    accountMerkleRadix: prepared.config.accountMerkleRadix,
+    epochReplayBytes: frame.projectedEpochReplayBytes,
+    retainedHistoryBytes: frame.projectedReplayBytes,
+  };
+  const encodedHead = encodeBuffer(nextHead);
+  walBatch.put(KEY_HEAD, encodedHead);
+  currentBatch.put(KEY_HEAD, encodedHead);
+  options.onPersistenceProgress?.('history-view-plan-built');
+  return {
+    walBatch,
+    currentBatch,
+    nextHead,
+    safeConsumptionDeletes,
+    safeAccountJClaimDeletes,
+  };
+};
+
+type StorageCommitBatches = ReturnType<typeof buildStorageCommitBatches>;
+
+const commitStorageFrame = async (
+  options: StorageFrameSaveOptions,
+  prepared: PreparedStorageFrameSave,
+  commitments: PreparedStorageCommitments,
+  frame: StorageFrameRecordPlan,
+  batches: StorageCommitBatches,
+  writeStartedAt: number,
+  prepareMarks: Record<string, number>,
+) => {
+  const prepareStartedAt = options.getPerfMs();
+  const prepareMs = prepareStartedAt - writeStartedAt;
+  const prepareStages = cumulativeMarksToDurations(prepareMarks, prepareMs);
+  options.onPersistenceProgress?.('authoritative-write-start');
+  // This synced WAL batch is the only frame commit point. Everything before it
+  // is discardable planning; everything after it must recover forward.
+  await writeBatch(batches.walBatch, { sync: true });
+  const authoritativeWriteMs = options.getPerfMs() - prepareStartedAt;
+  options.onPersistenceProgress?.('authoritative-write-done');
+  await options.onPersistenceBoundary?.('after-authoritative-history-commit');
+
+  let historyViewBytes = 0;
+  let historyViewsMaterialized = frame.historyViewPuts.length === 0;
+  let viewMaterializedThrough = 0;
+  if (frame.historyViewPuts.length > 0) {
+    if (!(await options.tryOpenHistoryViewDb(options.env))) {
+      throw new Error(
+        `HISTORY_VIEW_DB_OPEN_FAILED:height=${options.env.height}`,
+      );
+    }
+    const snapshots = await listSnapshotHeights(prepared.walDb);
+    const reconciled = await reconcileHistoryViews({
+      viewDb: options.getHistoryViewDb(options.env),
+      firstWalHeight: snapshots[0] ?? 1,
+      latestWalHeight: options.env.height,
+      readWalFrame: height =>
+        readStorageFrameRecord(prepared.walDb, height),
+      config: prepared.config,
+    });
+    historyViewBytes = reconciled.writtenBytes;
+    viewMaterializedThrough =
+      reconciled.materializedThroughRuntimeHeight;
+    historyViewsMaterialized = true;
+    await options.onPersistenceBoundary?.('after-history-view-commit');
+  }
+
+  const currentWriteStartedAt = options.getPerfMs();
+  options.onPersistenceProgress?.('current-cache-write-start');
+  await writeBatch(batches.currentBatch, { sync: false });
+  const currentCacheWriteMs = options.getPerfMs() - currentWriteStartedAt;
+  options.onPersistenceProgress?.('current-cache-write-done');
+  await options.onPersistenceBoundary?.('after-current-cache-commit');
+  if (prepared.checkpointedLineagePlan) {
+    applyCertifiedEntityLineagePlan(
+      options.env,
+      prepared.checkpointedLineagePlan,
+    );
+  }
+  const state = prepared.state;
+  state.currentStorageOverlayMarks = [];
+  state.pendingCertifiedBoardNodes = new Map();
+  if (prepared.checkpointedLineagePlan) {
+    state.storageReplicaMetaKeys = new Set(commitments.liveReplicaMetaKeys);
+  }
+  finalizePersistedConsumptionNodes(
+    options.env,
+    batches.safeConsumptionDeletes,
+  );
+  finalizePersistedAccountJClaimNodes(
+    options.env,
+    batches.safeAccountJClaimDeletes,
+  );
+  if (commitments.preparedHashes) {
+    state.storageEntityHashDocs =
+      commitments.preparedHashes.entityHashDocs;
+  }
+
+  let historyViewPrunedBytes = 0;
+  let historyViewRetainedBytes = 0;
+  let historyViewPrunedKeys = 0;
+  let historyViewLatestPrunedHeight = 0;
+  if (viewMaterializedThrough > 0) {
+    const viewDb = options.getHistoryViewDb(options.env);
+    const result = await pruneHistoryViewRetention({
+      db: viewDb,
+      height: options.env.height,
+      head: await readHistoryViewHead(viewDb, prepared.config),
+      config: prepared.config,
+      ...(options.onPersistenceBoundary
+        ? { onPersistenceBoundary: options.onPersistenceBoundary }
+        : {}),
+    });
+    historyViewPrunedBytes = result.prunedBytes;
+    historyViewRetainedBytes = result.retainedBytes;
+    historyViewPrunedKeys = result.prunedKeys;
+    historyViewLatestPrunedHeight = result.latestPrunedRuntimeHeight;
+    historyViewsMaterialized = true;
+  }
+  const postCommitMs =
+    options.getPerfMs() - currentWriteStartedAt - currentCacheWriteMs;
+  return {
+    prepareMs,
+    prepareStages,
+    authoritativeWriteMs,
+    currentCacheWriteMs,
+    postCommitMs,
+    writeMs: options.getPerfMs() - writeStartedAt,
+    historyViewBytes,
+    historyViewsMaterialized,
+    historyViewPrunedBytes,
+    historyViewRetainedBytes,
+    historyViewPrunedKeys,
+    historyViewLatestPrunedHeight,
+  };
+};
+
+type CommittedStorageFrame = Awaited<ReturnType<typeof commitStorageFrame>>;
+
+const finishStorageFrameSave = (
+  options: StorageFrameSaveOptions,
+  prepared: PreparedStorageFrameSave,
+  frame: StorageFrameRecordPlan,
+  committed: CommittedStorageFrame,
+  snapshot: StorageSnapshotLifecycleResult,
+): StorageFrameSaveResult => {
+  const persistencePerfMs: StoragePersistencePerf = {
+    open: prepared.openMs,
+    planning: prepared.planningMs,
+    planningStages: prepared.planningStages,
+    diff: prepared.diffBuildMs,
+    prepare: committed.prepareMs,
+    prepareStages: committed.prepareStages,
+    authoritativeWrite: committed.authoritativeWriteMs,
+    currentCacheWrite: committed.currentCacheWriteMs,
+    postCommit: committed.postCommitMs,
+    snapshot: snapshot.snapshotMs,
+    total: options.getPerfMs() - prepared.openStartedAt,
+  };
+  const verbose =
+    ['1', 'true'].includes(
+      String(process.env['XLN_STORAGE_VERBOSE'] ?? '').toLowerCase(),
+    ) && options.env.quietRuntimeLogs !== true;
+  if (verbose) {
     storageLog.info('persist.frame', {
       runtimeId: String(options.env.runtimeId || '').slice(0, 12),
       frame: options.env.height,
-      puts: diff.puts.length,
-      dels: diff.dels.length,
-      frameBytes: frameBuffer.byteLength,
-      diffBytes: diffBuffer.byteLength,
-      historyViewBytes,
-      historyViewRetainedBytes,
-      historyViewPrunedBytes,
-      historyViewPrunedKeys,
-      historyViewLatestPrunedHeight,
-      snapshotBytes,
-      retainedHistoryBytes,
-      entities: frameTouched.touchedEntities.size,
-      accounts: frameTouched.touchedAccounts.size,
-      books: frameTouched.touchedBookEntities.size,
-      materialized: shouldMaterialize,
-      overlayRecords: overlayRecords.length,
-      highSignals: highSignalEvents,
-      snapDocs,
-      epochRotated,
-      epochDbRotated,
+      puts: prepared.diff.puts.length,
+      dels: prepared.diff.dels.length,
+      frameBytes: frame.frameBuffer.byteLength,
+      diffBytes: frame.diffBuffer.byteLength,
+      historyViewBytes: committed.historyViewBytes,
+      historyViewRetainedBytes: committed.historyViewRetainedBytes,
+      historyViewPrunedBytes: committed.historyViewPrunedBytes,
+      historyViewPrunedKeys: committed.historyViewPrunedKeys,
+      historyViewLatestPrunedHeight:
+        committed.historyViewLatestPrunedHeight,
+      snapshotBytes: snapshot.snapshotBytes,
+      retainedHistoryBytes: snapshot.retainedHistoryBytes,
+      entities: prepared.frameTouched.touchedEntities.size,
+      accounts: prepared.frameTouched.touchedAccounts.size,
+      books: prepared.frameTouched.touchedBookEntities.size,
+      materialized: prepared.shouldMaterialize,
+      overlayRecords: prepared.overlayRecords.length,
+      highSignals: frame.highSignalEvents,
+      snapDocs: snapshot.snapshotDocs,
+      epochRotated: snapshot.epochRotated,
+      epochDbRotated: snapshot.epochDbRotated,
       perfMs: {
         open: options.formatPerfMs(persistencePerfMs.open),
         planning: options.formatPerfMs(persistencePerfMs.planning),
         planningStages: Object.fromEntries(
-          Object.entries(persistencePerfMs.planningStages)
-            .map(([stage, durationMs]) => [stage, options.formatPerfMs(durationMs)]),
+          Object.entries(persistencePerfMs.planningStages).map(
+            ([stage, duration]) => [
+              stage,
+              options.formatPerfMs(duration),
+            ],
+          ),
         ),
         diff: options.formatPerfMs(persistencePerfMs.diff),
         prepare: options.formatPerfMs(persistencePerfMs.prepare),
         prepareStages: Object.fromEntries(
-          Object.entries(persistencePerfMs.prepareStages)
-            .map(([stage, durationMs]) => [stage, options.formatPerfMs(durationMs)]),
+          Object.entries(persistencePerfMs.prepareStages).map(
+            ([stage, duration]) => [
+              stage,
+              options.formatPerfMs(duration),
+            ],
+          ),
         ),
-        authoritativeWrite: options.formatPerfMs(persistencePerfMs.authoritativeWrite),
-        currentCacheWrite: options.formatPerfMs(persistencePerfMs.currentCacheWrite),
+        authoritativeWrite: options.formatPerfMs(
+          persistencePerfMs.authoritativeWrite,
+        ),
+        currentCacheWrite: options.formatPerfMs(
+          persistencePerfMs.currentCacheWrite,
+        ),
         postCommit: options.formatPerfMs(persistencePerfMs.postCommit),
-        write: options.formatPerfMs(writeMs),
+        write: options.formatPerfMs(committed.writeMs),
         snap: options.formatPerfMs(persistencePerfMs.snapshot),
         total: options.formatPerfMs(persistencePerfMs.total),
       },
     });
   }
   return {
-    materialized: shouldMaterialize,
-    materializedOverlayRecords: shouldMaterialize ? overlayRecords.length : 0,
-    historyViewsMaterialized,
-    latestSnapshotHeight,
-    retainedHistoryBytes,
-    snapshotCreated: snapDocs > 0,
-    snapshotBytes,
-    historyPrunedBytes: prunedBytes,
-    epochRotated,
-    epochDbRotated,
-    historyViewRetainedBytes,
-    historyViewPrunedBytes,
+    materialized: prepared.shouldMaterialize,
+    materializedOverlayRecords: prepared.shouldMaterialize
+      ? prepared.overlayRecords.length
+      : 0,
+    historyViewsMaterialized: committed.historyViewsMaterialized,
+    latestSnapshotHeight: snapshot.latestSnapshotHeight,
+    retainedHistoryBytes: snapshot.retainedHistoryBytes,
+    snapshotCreated: snapshot.snapshotDocs > 0,
+    snapshotBytes: snapshot.snapshotBytes,
+    historyPrunedBytes: snapshot.prunedBytes,
+    epochRotated: snapshot.epochRotated,
+    epochDbRotated: snapshot.epochDbRotated,
+    historyViewRetainedBytes: committed.historyViewRetainedBytes,
+    historyViewPrunedBytes: committed.historyViewPrunedBytes,
     persistencePerfMs,
   };
+};
+
+export const saveRuntimeFrameToStorage = async (
+  options: StorageFrameSaveOptions,
+): Promise<StorageFrameSaveResult> => {
+  const prepared = await prepareStorageFrameSave(options);
+  if ('skipped' in prepared) return prepared.skipped;
+  const {
+    config,
+    db,
+    walDb,
+    head,
+    snapshotDue,
+    snapshotRequiredByBytes,
+  } = prepared;
+
+  const writeStartedAt = options.getPerfMs();
+  const prepareMarks: Record<string, number> = {};
+  const checkpointPrepare = (label: string): void => {
+    prepareMarks[label] = options.getPerfMs() - writeStartedAt;
+  };
+  const appendPosition = await resolveStorageAppendPosition(
+    options,
+    walDb,
+    head,
+  );
+  if ('staleWriterStopped' in appendPosition) {
+    return {
+      materialized: false,
+      materializedOverlayRecords: 0,
+      historyViewsMaterialized: false,
+      staleWriterStopped: true,
+    };
+  }
+  const { previousFrame, prevFrameHash } = appendPosition;
+  options.onPersistenceProgress?.('history-read');
+  checkpointPrepare('historyRead');
+  const pendingNodes = collectPendingStorageNodes(options.env);
+  checkpointPrepare('pendingNodes');
+
+  const commitments = await prepareStorageStateCommitments(
+    options,
+    prepared,
+    previousFrame,
+    checkpointPrepare,
+  );
+  const framePlan = buildStorageFrameRecordPlan(
+    options,
+    prepared,
+    commitments,
+    pendingNodes,
+    prevFrameHash,
+  );
+  options.onPersistenceProgress?.('frame-encoded');
+  checkpointPrepare('frameEncode');
+  const batches = buildStorageCommitBatches(
+    options,
+    prepared,
+    commitments,
+    pendingNodes,
+    framePlan,
+  );
+  checkpointPrepare('batchPlan');
+  const committed = await commitStorageFrame(
+    options,
+    prepared,
+    commitments,
+    framePlan,
+    batches,
+    writeStartedAt,
+    prepareMarks,
+  );
+  const snapshot = await runStorageSnapshotLifecycle(
+    options,
+    db,
+    walDb,
+    config,
+    head,
+    batches.nextHead,
+    snapshotDue,
+    snapshotRequiredByBytes,
+  );
+  return finishStorageFrameSave(
+    options,
+    prepared,
+    framePlan,
+    committed,
+    snapshot,
+  );
 };

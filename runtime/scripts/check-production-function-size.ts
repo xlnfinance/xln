@@ -52,7 +52,6 @@ const COORDINATOR_DEBT: Readonly<Record<string, number>> = {
   "runtime/server/index.ts::createHttpServer": 216,
   "runtime/server/index.ts::startXlnServer": 630,
   "runtime/server/token-catalog.ts::createTokenCatalogController": 165,
-  "runtime/storage/index.ts::saveRuntimeFrameToStorage": 692,
   "runtime/storage/merkle.ts::buildRadixMerkleMaterialized": 181,
   "runtime/storage/restore-import.ts::replaceRestoredStorageBase": 152,
   "runtime/watchtower/action.ts::runWatchtowerSweep": 159,
