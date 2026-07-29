@@ -7,7 +7,7 @@ import {
 import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../orderbook';
 import type { AccountState, AccountTx, CrossJurisdictionSwapRoute, Delta } from '../types';
 import { getPerfMs } from '../utils';
-import { createDefaultDelta } from '../validation-utils';
+import { createDefaultDelta } from '../account/delta';
 
 type Cli = {
   swaps: number;

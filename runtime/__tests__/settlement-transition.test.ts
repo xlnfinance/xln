@@ -43,7 +43,7 @@ import {
 import { createEmptyEnv } from '../runtime';
 import { cloneAccountState } from '../state-helpers';
 import type { AccountTx, EntityState, RuntimeState, HashToSign, JurisdictionConfig, JurisdictionEvent, SettlementOp } from '../types';
-import { createDefaultDelta } from '../validation-utils';
+import { createDefaultDelta } from '../account/delta';
 import {
   addReplica,
   addr,

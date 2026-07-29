@@ -25,7 +25,7 @@ import {
   captureDisputeArgumentSnapshot,
   storeDisputeArgumentSnapshot,
 } from '../../../protocol/dispute/arguments';
-import { projectAccountAfterSettlement } from '../../../protocol/settlement/projection';
+import { projectAccountAfterSettlement } from '../../settlement-projection';
 
 type SettleTransitionTx = Extract<AccountTx, { type: 'settle_transition' }>;
 type UpsertTransition = Extract<SettleTransitionTx['data'], { kind: 'upsert' }>;

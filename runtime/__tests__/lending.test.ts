@@ -5,7 +5,7 @@ import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumula
 import { createEntityFrameHash } from '../entity/consensus/frame';
 import { applyCommittedAccountFrameFollowups, type AccountTxTarget } from '../entity/tx/handlers/account';
 import type { AccountFrame, AccountState, AccountTx, ConsensusConfig, EntityState } from '../types';
-import { createDefaultDelta } from '../validation-utils';
+import { createDefaultDelta } from '../account/delta';
 
 const entity = (byte: string): string => `0x${byte.repeat(32)}`;
 const HUB = entity('10');

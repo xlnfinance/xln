@@ -270,24 +270,6 @@ export function validateAccountDeltas(deltas: unknown, source: string = 'unknown
 }
 
 /**
- * Create a safe default Delta object with proper BigInt values
- */
-export function createDefaultDelta(tokenId: number): Delta {
-  return {
-    tokenId,
-    collateral: 0n,
-    ondelta: 0n,
-    offdelta: 0n,
-    leftCreditLimit: 0n, // Require explicit extendCredit
-    rightCreditLimit: 0n,
-    leftAllowance: 0n,
-    rightAllowance: 0n,
-    leftHold: 0n,
-    rightHold: 0n,
-  };
-}
-
-/**
  * Type guard for Delta objects
  * @param obj - Value to check if it's a valid Delta
  */

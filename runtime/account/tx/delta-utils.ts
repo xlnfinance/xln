@@ -1,5 +1,5 @@
 import type { AccountState, Delta } from '../../types';
-import { createDefaultDelta } from '../../validation-utils';
+import { createDefaultDelta } from '../delta';
 
 export function ensureDelta(account: AccountState, tokenId: number): Delta {
   let delta = account.deltas.get(tokenId);

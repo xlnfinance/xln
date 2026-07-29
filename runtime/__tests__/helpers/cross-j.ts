@@ -19,7 +19,7 @@ import type {
   JurisdictionConfig,
   JurisdictionEvent,
 } from '../../types';
-import { createDefaultDelta } from '../../validation-utils';
+import { createDefaultDelta } from '../../account/delta';
 
 export const addr = (byte: string): string => `0x${byte.repeat(20)}`;
 export const entity = (byte: string): string => `0x${byte.repeat(32)}`;

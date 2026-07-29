@@ -3,6 +3,7 @@ import { getDefaultCreditLimit } from '../../utils';
 import { clearFinalizedSettlementWorkspace } from './settle-transition';
 import { buildAccountProofBody } from '../../../protocol/dispute/proof-builder';
 import { invalidateAccountMapCommitment } from '../../map-commitment';
+import { createDefaultDelta } from '../../delta';
 
 const normalizedEntityId = (value: unknown): string => String(value ?? '').trim().toLowerCase();
 
@@ -35,18 +36,7 @@ const applyAccountSettledEvent = (account: AccountState, event: JurisdictionEven
   let delta = account.deltas.get(tokenIdNum);
   if (!delta) {
     const limit = getDefaultCreditLimit(tokenIdNum);
-    delta = {
-      tokenId: tokenIdNum,
-      collateral: 0n,
-      ondelta: 0n,
-      offdelta: 0n,
-      leftCreditLimit: limit,
-      rightCreditLimit: limit,
-      leftAllowance: 0n,
-      rightAllowance: 0n,
-      leftHold: 0n,
-      rightHold: 0n,
-    };
+    delta = createDefaultDelta(tokenIdNum, { left: limit, right: limit });
     account.deltas.set(tokenIdNum, delta);
   }
   const previousCollateral = delta.collateral;

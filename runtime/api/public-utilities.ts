@@ -53,7 +53,8 @@ export {
 } from '../account/financial-utils';
 export { calculateSolvency, verifySolvency } from '../runtime/solvency';
 export { classifyBilateralState, getAccountBarVisual } from '../account/view-state';
-export { createDefaultDelta, isDelta, validateAccountDeltas, validateDelta } from '../validation-utils';
+export { createDefaultDelta } from '../account/delta';
+export { isDelta, validateAccountDeltas, validateDelta } from '../validation-utils';
 export { decode, encode } from '../storage/snapshot-coder';
 export {
   CHAIN_IDS,

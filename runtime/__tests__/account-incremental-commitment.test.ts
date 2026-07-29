@@ -12,7 +12,7 @@ import {
 } from '../account/state-root';
 import { cloneAccountState, cloneEntityState } from '../state-helpers';
 import type { AccountState, EntityState, SwapOffer } from '../types';
-import { createDefaultDelta } from '../validation-utils';
+import { createDefaultDelta } from '../account/delta';
 
 const LEFT = `0x${'11'.repeat(32)}`;
 const RIGHT = `0x${'22'.repeat(32)}`;

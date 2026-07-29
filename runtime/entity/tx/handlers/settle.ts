@@ -41,7 +41,7 @@ import {
   assertCanonicalSettlementWorkspace,
   hasPendingSettlementTransition,
 } from '../../../account/tx/handlers/settle-transition';
-import { projectAccountAfterSettlement } from '../../../protocol/settlement/projection';
+import { projectAccountAfterSettlement } from '../../../account/settlement-projection';
 import { buildAccountProofBodyFromEnv } from '../../../account/consensus/helpers';
 
 import type { AccountState } from '../../../types';

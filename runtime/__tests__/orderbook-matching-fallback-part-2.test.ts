@@ -26,7 +26,7 @@ import {
 
 import type { AccountState, AccountTx, SwapOffer } from '../types';
 
-import { createDefaultDelta } from '../validation-utils';
+import { createDefaultDelta } from '../account/delta';
 
 const TESTNET_STACK = `stack:31337:0x${'11'.repeat(20)}`;
 

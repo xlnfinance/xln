@@ -34,7 +34,7 @@ import {
 } from '../../entity/consensus/state-root';
 import type { StoragePersistenceBoundary } from '../../storage';
 import type { AccountState, CertifiedEntityFrameLink, JReplica, JurisdictionConfig } from '../../types';
-import { createDefaultDelta } from '../../validation-utils';
+import { createDefaultDelta } from '../../account/delta';
 
 const [seed, requestedBoundary] = Bun.argv.slice(2);
 if (!seed || !requestedBoundary) throw new Error('seed and restore boundary are required');

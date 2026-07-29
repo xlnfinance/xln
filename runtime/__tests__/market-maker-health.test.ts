@@ -26,7 +26,7 @@ import {
 import { getBootstrapCreditAmount, HUB_DEFAULT_MIN_TRADE_SIZE } from '../orchestrator/mesh-common';
 import { createEmptyEnv } from '../runtime';
 import type { AccountState, EntityReplica, RuntimeState } from '../types';
-import { createDefaultDelta } from '../validation-utils';
+import { createDefaultDelta } from '../account/delta';
 import { LIMITS } from '../constants';
 import { encodeBuffer } from '../storage/codec';
 

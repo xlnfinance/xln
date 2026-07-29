@@ -4,6 +4,7 @@
  */
 
 import type { AccountState, AccountTx } from '../../../types';
+import { createDefaultDelta } from '../../delta';
 
 export function handleAddDelta(
   account: AccountState,
@@ -17,21 +18,7 @@ export function handleAddDelta(
     return { success: true, events }; // Idempotent - not an error
   }
 
-  // Create new delta with zero balances (matches Channel.ts AddDelta pattern)
-  const newDelta = {
-    tokenId,
-    collateral: 0n,
-    ondelta: 0n,
-    offdelta: 0n,
-    leftCreditLimit: 0n,
-    rightCreditLimit: 0n,
-    leftAllowance: 0n,
-    rightAllowance: 0n,
-    leftHold: 0n,
-    rightHold: 0n,
-  };
-
-  account.deltas.set(tokenId, newDelta);
+  account.deltas.set(tokenId, createDefaultDelta(tokenId));
 
   events.push(`➕ Added token ${tokenId} to account`);
   return { success: true, events };

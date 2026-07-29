@@ -56,7 +56,8 @@ import {
   computeEntityProfileDescriptorHash,
   profileToEntityProfileDescriptor,
 } from '../networking/profile-descriptor';
-import { createDefaultDelta, validateEntityState } from '../validation-utils';
+import { createDefaultDelta } from '../account/delta';
+import { validateEntityState } from '../validation-utils';
 import { getValidatorEncryptionManifestFromBoard, parseProfile, type Profile } from '../networking/gossip';
 import {
   computeProfileHash,

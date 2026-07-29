@@ -22,7 +22,7 @@ import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE, computeSwapPriceTicks, deriveSid
 import { handleSwapResolve } from '../account/tx/handlers/swap-resolve';
 import { deriveCanonicalSwapFillRatio } from '../orderbook/swap-execution';
 import type { AccountState, AccountTx, SwapOffer } from '../types';
-import { createDefaultDelta } from '../validation-utils';
+import { createDefaultDelta } from '../account/delta';
 
 // Helpers
 const LOT_SCALE = SWAP_LOT_SCALE; // 10^12

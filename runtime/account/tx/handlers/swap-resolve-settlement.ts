@@ -1,6 +1,6 @@
 import type { AccountState } from '../../../types';
 import { deriveDelta } from '../../utils';
-import { createDefaultDelta } from '../../../validation-utils';
+import { createDefaultDelta } from '../../delta';
 import { deriveSwapOffdeltaChanges } from '../../../orderbook/swap-execution';
 import { getHold, releaseHold } from '../hold-utils';
 import { ensureDelta } from '../delta-utils';

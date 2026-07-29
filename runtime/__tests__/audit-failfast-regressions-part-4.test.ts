@@ -201,7 +201,7 @@ import { validateStorageAccountDocValue } from '../storage/authoritative-schema'
 
 import { decodeValidatedBuffer, encodeBuffer } from '../storage/codec';
 
-import { createDefaultDelta } from '../validation-utils';
+import { createDefaultDelta } from '../account/delta';
 
 import { cloneEntityState } from '../state-helpers';
 

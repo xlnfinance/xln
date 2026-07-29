@@ -9,7 +9,7 @@ import {
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
 import { buildAccountProofBody } from '../protocol/dispute/proof-builder';
 import type { AccountState } from '../types';
-import { createDefaultDelta } from '../validation-utils';
+import { createDefaultDelta } from '../account/delta';
 
 const LEFT = `0x${'11'.repeat(32)}`;
 const RIGHT = `0x${'22'.repeat(32)}`;

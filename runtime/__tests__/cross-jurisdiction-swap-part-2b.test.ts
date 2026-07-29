@@ -57,7 +57,7 @@ import type {
 
 import { generateLazyEntityId } from '../entity/factory';
 
-import { createDefaultDelta } from '../validation-utils';
+import { createDefaultDelta } from '../account/delta';
 
 import { cloneAccountState, cloneEntityReplica, cloneEntityState } from '../state-helpers';
 

@@ -1,7 +1,8 @@
-import { getDefaultCreditLimit } from '../../account/utils';
-import { cloneAccountState } from '../../state-helpers';
-import type { AccountState, Delta, SettlementDiff } from '../../types';
-import { invalidateAccountMapCommitment } from '../../account/map-commitment';
+import { cloneAccountState } from '../state-helpers';
+import type { AccountState, Delta, SettlementDiff } from '../types';
+import { createDefaultDelta } from './delta';
+import { invalidateAccountMapCommitment } from './map-commitment';
+import { getDefaultCreditLimit } from './utils';
 
 const UINT256_MAX = (1n << 256n) - 1n;
 const INT256_MIN = -(1n << 255n);
@@ -9,18 +10,7 @@ const INT256_MAX = (1n << 255n) - 1n;
 
 const createSettlementDelta = (tokenId: number): Delta => {
   const creditLimit = getDefaultCreditLimit(tokenId);
-  return {
-    tokenId,
-    collateral: 0n,
-    ondelta: 0n,
-    offdelta: 0n,
-    leftCreditLimit: creditLimit,
-    rightCreditLimit: creditLimit,
-    leftAllowance: 0n,
-    rightAllowance: 0n,
-    leftHold: 0n,
-    rightHold: 0n,
-  };
+  return createDefaultDelta(tokenId, { left: creditLimit, right: creditLimit });
 };
 
 const requireProjectedDelta = (account: AccountState, tokenId: number): Delta => {

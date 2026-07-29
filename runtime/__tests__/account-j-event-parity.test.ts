@@ -10,7 +10,7 @@ import { mergeJEventClaimOps } from '../entity/tx/j-events-account';
 import type { JEventAccountTx } from '../entity/tx/j-events-types';
 import { createEmptyEnv } from '../runtime';
 import type { AccountState, AccountTx, RuntimeState, JurisdictionEvent } from '../types';
-import { createDefaultDelta } from '../validation-utils';
+import { createDefaultDelta } from '../account/delta';
 
 const LEFT = `0x${'11'.repeat(32)}`;
 const RIGHT = `0x${'22'.repeat(32)}`;

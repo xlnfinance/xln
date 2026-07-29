@@ -4,7 +4,7 @@ import { handleDirectPayment } from '../account/tx/handlers/direct-payment';
 import { computeFrameHash } from '../account/consensus/frame';
 import { applyPendingForwardFollowup } from '../entity/tx/handlers/account/committed-htlc-followups';
 import type { AccountFrame, AccountInput, AccountState, AccountTx, EntityState, RuntimeState } from '../types';
-import { createDefaultDelta } from '../validation-utils';
+import { createDefaultDelta } from '../account/delta';
 
 const LEFT = `0x${'11'.repeat(32)}`;
 const RIGHT = `0x${'22'.repeat(32)}`;

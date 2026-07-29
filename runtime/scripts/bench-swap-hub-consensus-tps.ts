@@ -25,7 +25,7 @@ import type {
   JurisdictionConfig,
 } from '../types';
 import { getPerfMs } from '../utils';
-import { createDefaultDelta } from '../validation-utils';
+import { createDefaultDelta } from '../account/delta';
 
 type Cli = {
   swaps: number;
