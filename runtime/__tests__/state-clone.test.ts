@@ -190,6 +190,7 @@ describe('state cloning', () => {
 
   test('entity clone preserves aliased cross-j route carriers from original state', () => {
     const state = makeProjectionReplica().state as any;
+    state.entityId = 'left';
     const route = makeCrossJurisdictionRoute();
     const account = makeManualFallbackAccount() as any;
     delete account.uncloneable;
@@ -201,11 +202,11 @@ describe('state cloning', () => {
       },
     ]]);
     state.crossJurisdictionSwaps = new Map([[route.orderId, route]]);
-    state.accounts.set('source', account);
+    state.accounts.set('right', account);
 
     const cloned = cloneEntityState(state);
     const clonedRoute = cloned.crossJurisdictionSwaps!.get(route.orderId)!;
-    const clonedOfferRoute = cloned.accounts.get('source')!.swapOffers.get(route.orderId)!.crossJurisdiction!;
+    const clonedOfferRoute = cloned.accounts.get('right')!.swapOffers.get(route.orderId)!.crossJurisdiction!;
 
     expect(clonedRoute).not.toBe(route);
     expect(clonedOfferRoute).not.toBe(route);
@@ -213,6 +214,23 @@ describe('state cloning', () => {
     expect(clonedRoute.target).toEqual(route.target);
     expect(clonedOfferRoute.source).toEqual(route.source);
     expect(clonedOfferRoute.target).toEqual(route.target);
+  });
+
+  test('rejects non-canonical and mismatched Account map keys at the Entity boundary', () => {
+    const state = makeProjectionReplica().state as any;
+    state.entityId = 'left';
+    const account = makeManualFallbackAccount() as any;
+    delete account.uncloneable;
+
+    state.accounts = new Map([['RIGHT', account]]);
+    expect(() => cloneEntityState(state)).toThrow(
+      'non-canonical counterparty key',
+    );
+
+    state.accounts = new Map([['other', account]]);
+    expect(() => cloneEntityState(state)).toThrow(
+      'counterparty key does not match Account participants',
+    );
   });
 
   test('preserves the exact configured board threshold', () => {

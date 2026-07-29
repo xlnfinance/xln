@@ -131,6 +131,14 @@ function assertAccountState(
 ): asserts account is Record<string, unknown> & AccountState {
   const left = validateString(account['leftEntity'], `${context}.leftEntity`);
   const right = validateString(account['rightEntity'], `${context}.rightEntity`);
+  if (
+    left !== left.trim().toLowerCase() ||
+    right !== right.trim().toLowerCase()
+  ) {
+    throw new FinancialDataCorruptionError(
+      `${context} participants must use canonical lowercase entity IDs`,
+    );
+  }
   if (!left || !right || !isLeftEntity(left, right)) {
     throw new FinancialDataCorruptionError(
       `${context} canonical order violated: leftEntity must be < rightEntity`,

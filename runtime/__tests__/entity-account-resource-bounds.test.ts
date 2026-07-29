@@ -159,13 +159,13 @@ test('Entity validation and storage hydration reject an unbounded generic output
   })).toThrow('STORAGE_CERTIFIED_OUTPUT_RELATIONSHIP_LIMIT_EXCEEDED');
 });
 
-test('account capacity counts only genuinely new normalized keys', () => {
+test('account capacity uses the canonical counterparty key directly', () => {
   const accounts = new Map<string, unknown>();
   for (let index = 0; index < LIMITS.MAX_ACCOUNTS_PER_ENTITY; index += 1) {
     accounts.set(`account-${index}`, {});
   }
   accounts.delete('account-0');
-  accounts.set(counterpartyId.toUpperCase(), {});
+  accounts.set(counterpartyId, {});
 
   expect(assertEntityAccountInsertionCapacity(accounts, counterpartyId, 'replacement')).toBe(false);
   expect(() => assertEntityAccountInsertionCapacity(accounts, `0x${'99'.repeat(32)}`, 'new'))

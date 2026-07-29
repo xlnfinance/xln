@@ -32,10 +32,7 @@ const findAccountKey = (
   counterpartyId: string,
 ): string | null => {
   const target = normalizeEntityRef(counterpartyId);
-  for (const key of accounts.keys()) {
-    if (normalizeEntityRef(key) === target) return key;
-  }
-  return null;
+  return accounts.has(target) ? target : null;
 };
 
 const assertAccountInputParticipants = (

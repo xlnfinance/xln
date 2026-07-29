@@ -47,6 +47,80 @@ const mergeAdmissionRoute = (
 };
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
+const ADMISSION_ROUTE_INDEX = Symbol('xln.cross-j.admission-route-index');
+
+type EntityStateWithAdmissionRouteIndex = EntityState & {
+  [ADMISSION_ROUTE_INDEX]?: Map<string, string>;
+};
+
+const admissionRouteIndexKey = (orderId: string, routeHash: string): string =>
+  `${String(orderId || '')}\0${String(routeHash || '').toLowerCase()}`;
+
+const readAdmissionRouteIndex = (
+  state: EntityState,
+): Map<string, string> | undefined =>
+  (state as EntityStateWithAdmissionRouteIndex)[ADMISSION_ROUTE_INDEX];
+
+const writeAdmissionRouteIndex = (
+  state: EntityState,
+  index: Map<string, string>,
+): void => {
+  Object.defineProperty(state, ADMISSION_ROUTE_INDEX, {
+    value: index,
+    configurable: true,
+    writable: true,
+    enumerable: false,
+  });
+};
+
+const buildAdmissionRouteIndex = (state: EntityState): Map<string, string> => {
+  const index = new Map<string, string>();
+  for (const [primaryKey, admission] of state.crossJurisdictionBookAdmissions ?? []) {
+    const key = admissionRouteIndexKey(
+      admission.orderId || admission.route.orderId,
+      admission.routeHash || admission.route.routeHash || '',
+    );
+    const existing = index.get(key);
+    if (existing && existing !== primaryKey) {
+      throw new Error(`CROSS_J_BOOK_ADMISSION_INDEX_CONFLICT:${key}`);
+    }
+    index.set(key, primaryKey);
+  }
+  writeAdmissionRouteIndex(state, index);
+  return index;
+};
+
+const indexAdmission = (
+  state: EntityState,
+  primaryKey: string,
+  admission: CrossJurisdictionBookAdmission,
+): void => {
+  const index = readAdmissionRouteIndex(state);
+  if (!index) return;
+  index.set(
+    admissionRouteIndexKey(
+      admission.orderId || admission.route.orderId,
+      admission.routeHash || admission.route.routeHash || '',
+    ),
+    primaryKey,
+  );
+};
+
+export const findCrossJurisdictionBookAdmissionKeyByRoute = (
+  state: EntityState,
+  orderId: string,
+  routeHash: string,
+): string | null =>
+  (readAdmissionRouteIndex(state) ?? buildAdmissionRouteIndex(state))
+    .get(admissionRouteIndexKey(orderId, routeHash)) ?? null;
+
+export const forkCrossJurisdictionBookAdmissionIndex = (
+  source: EntityState,
+  target: EntityState,
+): void => {
+  const index = readAdmissionRouteIndex(source);
+  if (index) writeAdmissionRouteIndex(target, new Map(index));
+};
 
 export const crossJurisdictionBookAdmissionKeyFor = (sourceEntityId: string, orderId: string): string =>
   `${normalizeEntityRef(sourceEntityId)}:${String(orderId || '')}`;
@@ -83,6 +157,7 @@ export const mergeCrossJurisdictionBookAdmission = (
         updatedAt: now,
       };
   currentEntityState.crossJurisdictionBookAdmissions.set(key, current);
+  indexAdmission(currentEntityState, key, current);
   return current;
 };
 

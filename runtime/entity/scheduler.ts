@@ -61,17 +61,15 @@ import type {
   CrontabTaskState,
   ScheduledHook,
 } from './scheduler-types';
-import { isLeftEntity } from './id';
-import { deriveDelta } from '../account/utils';
 import { TIMING } from '../constants';
-import {
-  getDefaultRebalancePolicyForToken,
-} from '../account/rebalance-defaults';
 import { createStructuredLogger, shortId } from '../infra/logger';
 import { accountInputProposal, accountInputReferenceHeight } from '../account/consensus/flush';
-import { hasPendingSettlementTransition } from '../account/tx/handlers/settle-transition';
 import { hubRebalanceHandler } from './scheduler/rebalance';
 import { processDueHooks } from './scheduler/due-hooks';
+import {
+  getPendingAccountIds,
+  getRebalanceAccountIds,
+} from './consensus/account-work-index';
 
 export {
   HUB_MAX_C2R_PER_TICK,
@@ -113,9 +111,11 @@ export const emitCommittedPendingFrameWarnings = (
     committedRun === previousRun
   ) return;
 
-  for (const [counterpartyId, account] of committedState.accounts) {
+  for (const counterpartyId of getPendingAccountIds(committedState)) {
+    const account = committedState.accounts.get(counterpartyId);
+    if (!account) throw new Error(`PENDING_ACCOUNT_INDEX_STALE:${counterpartyId}`);
     const pending = account.pendingFrame;
-    if (!pending) continue;
+    if (!pending) throw new Error(`PENDING_ACCOUNT_INDEX_FRAME_MISSING:${counterpartyId}`);
     const frameAge = committedState.timestamp - pending.timestamp;
     if (frameAge > ACCOUNT_PENDING_STALE_WARNING_MS) {
       console.warn(
@@ -158,43 +158,7 @@ export function initCrontab(): CrontabState {
 }
 
 const accountNeedsMaintenance = (state: EntityState): boolean =>
-  [...state.accounts.values()].some(account => Boolean(account.pendingFrame));
-
-const accountNeedsHubRebalanceTask = (
-  state: EntityState,
-  counterpartyId: string,
-): boolean => {
-  const account = state.accounts.get(counterpartyId);
-  if (!account) return false;
-  if ([...account.requestedRebalance.values()].some(amount => amount > 0n)) return true;
-  if (account.pendingFrame || hasPendingSettlementTransition(account)) return false;
-
-  const workspace = account.settlementWorkspace;
-  const hubIsLeft = isLeftEntity(state.entityId, counterpartyId);
-  if (
-    workspace?.status === 'ready_to_submit' &&
-    workspace.lastModifiedByLeft === hubIsLeft &&
-    workspace.executorIsLeft === hubIsLeft &&
-    workspace.ops.length > 0 &&
-    workspace.ops.every(op => op.type === 'c2r') &&
-    Boolean(hubIsLeft ? workspace.rightHanko : workspace.leftHanko)
-  ) return true;
-  if (workspace) return false;
-
-  for (const [tokenId, delta] of account.deltas) {
-    if ((account.requestedRebalance.get(tokenId) ?? 0n) > 0n) continue;
-    const hubDerived = deriveDelta(delta, hubIsLeft);
-    const outHold = hubDerived.outTotalHold;
-    if (outHold === undefined) {
-      throw new Error(`deriveDelta missing outTotalHold for token ${String(tokenId)} on ${counterpartyId}`);
-    }
-    const freeOutCollateral = hubDerived.outCollateral > outHold
-      ? hubDerived.outCollateral - outHold
-      : 0n;
-    if (freeOutCollateral > getDefaultRebalancePolicyForToken(tokenId).r2cRequestSoftLimit) return true;
-  }
-  return false;
-};
+  getPendingAccountIds(state).size > 0;
 
 /** Only schedule periodic consensus work when its handler can change state or emit output. */
 export const crontabTaskHasPendingWork = (
@@ -204,10 +168,7 @@ export const crontabTaskHasPendingWork = (
   if (method === 'maintainPendingAccounts') return accountNeedsMaintenance(state);
   if (!state.hubRebalanceConfig) return false;
   if (state.jBatchState?.sentBatch) return true;
-  for (const counterpartyId of state.accounts.keys()) {
-    if (accountNeedsHubRebalanceTask(state, counterpartyId)) return true;
-  }
-  return false;
+  return getRebalanceAccountIds(state).size > 0;
 };
 
 const CRONTAB_TASK_HANDLERS: Record<CrontabTaskMethod, CrontabTaskHandler> = {
@@ -284,8 +245,12 @@ async function maintainPendingAccounts(
   const outputs: EntityInput[] = [];
   const now = replica.state.timestamp; // DETERMINISTIC: Use entity's own timestamp
 
-  for (const [counterpartyId, account] of replica.state.accounts.entries()) {
-    if (!account.pendingFrame) continue;
+  for (const counterpartyId of getPendingAccountIds(replica.state)) {
+    const account = replica.state.accounts.get(counterpartyId);
+    if (!account) throw new Error(`PENDING_ACCOUNT_INDEX_STALE:${counterpartyId}`);
+    if (!account.pendingFrame) {
+      throw new Error(`PENDING_ACCOUNT_INDEX_FRAME_MISSING:${counterpartyId}`);
+    }
     const frameAge = now - account.pendingFrame.timestamp;
     const cachedInputHeight = account.pendingAccountInput
       ? accountInputProposedFrameHeight(account.pendingAccountInput)

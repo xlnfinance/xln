@@ -22,6 +22,7 @@ import type {
   EntityTransitionContext,
   CrontabTaskState,
 } from '../scheduler-types';
+import { getRebalanceAccountIds } from '../consensus/account-work-index';
 
 const crontabLog = createStructuredLogger('entity.crontab');
 
@@ -306,7 +307,9 @@ const evaluateR2CRequest = (
 const collectR2CTargets = (run: RebalanceRun): R2CTarget[] => {
   const effectiveReserves = new Map(run.replica.state.reserves);
   const targets: R2CTarget[] = [];
-  for (const [counterpartyId, account] of run.replica.state.accounts) {
+  for (const counterpartyId of getRebalanceAccountIds(run.replica.state)) {
+    const account = run.replica.state.accounts.get(counterpartyId);
+    if (!account) throw new Error(`REBALANCE_ACCOUNT_INDEX_STALE:${counterpartyId}`);
     for (const [tokenId, amount] of account.requestedRebalance ?? []) {
       const target = evaluateR2CRequest(
         run,
@@ -476,7 +479,9 @@ const collectC2RWork = (
 ): { plans: C2RPlan[]; executable: string[] } => {
   const plans: C2RPlan[] = [];
   const executable: string[] = [];
-  for (const [counterpartyId, account] of run.replica.state.accounts) {
+  for (const counterpartyId of getRebalanceAccountIds(run.replica.state)) {
+    const account = run.replica.state.accounts.get(counterpartyId);
+    if (!account) throw new Error(`REBALANCE_ACCOUNT_INDEX_STALE:${counterpartyId}`);
     const work = collectC2RAccountWork(run, counterpartyId, account, canTouchBatch);
     if (work.plan) plans.push(work.plan);
     if (work.executable) executable.push(counterpartyId);

@@ -14,7 +14,7 @@ export const assertEntityAccountCountWithinLimit = (
 };
 
 /**
- * Returns false for an existing normalized key so replacement/idempotent replay
+ * Returns false for an existing canonical key so replacement/idempotent replay
  * does not consume another slot. A genuinely new account must reserve capacity
  * before cloning, dirty-marking, or mutating consensus state.
  */
@@ -24,9 +24,7 @@ export const assertEntityAccountInsertionCapacity = (
   context: string,
 ): boolean => {
   const target = normalizedAccountId(accountId);
-  for (const existingId of accounts.keys()) {
-    if (normalizedAccountId(existingId) === target) return false;
-  }
+  if (accounts.has(target)) return false;
   if (accounts.size >= LIMITS.MAX_ACCOUNTS_PER_ENTITY) {
     throw new Error(
       `ENTITY_ACCOUNT_LIMIT_EXCEEDED: context=${context} account=${target || 'invalid'} ` +

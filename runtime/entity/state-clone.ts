@@ -16,7 +16,8 @@ import { applyAccountClonePolicy } from '../account/state-clone';
 import { copyEntityFrameEvents } from './frame-events';
 import { validateEntityState } from './state-validation';
 import { forkEntityAccountCommitmentCache } from './consensus/state-root';
-import { forkQueuedAccountIndex } from './consensus/account-work-index';
+import { forkAccountWorkIndexes } from './consensus/account-work-index';
+import { forkCrossJurisdictionBookAdmissionIndex } from '../extensions/cross-j/orderbook';
 
 const cloneLog = createStructuredLogger('entity.state_clone');
 
@@ -148,7 +149,8 @@ const cloneEntityStateWithPolicy = (
   }
   if (!forSnapshot) {
     forkEntityAccountCommitmentCache(source, cloned);
-    forkQueuedAccountIndex(source, cloned);
+    forkAccountWorkIndexes(source, cloned);
+    forkCrossJurisdictionBookAdmissionIndex(source, cloned);
   }
   return validateClone
     ? validateEntityState(cloned, 'cloneEntityState.structuredClone')

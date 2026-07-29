@@ -481,9 +481,8 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   `frameCloneMs`, cloned replica/account/profile counts, estimated cloned bytes
   and cross-J scratch execution time. A frame touching one account must not scale
   linearly when untouched accounts grow from 10,000 to 100,000.
-  Replace the full settlement refresh and cross-book/order scans with explicit
-  dirty indexes, and benchmark signature/verification/Hanko throughput
-  separately from reducers before claiming 100k tx/s.
+  Benchmark signature/verification/Hanko throughput separately from reducers
+  before claiming 100k tx/s.
 - [ ] Replace case-insensitive Account scans and repeated signer/pair lookups
   with canonical direct indexes, including exact cross-J replica/account
   descriptors; then introduce Runtime→Entity→Account COW only behind

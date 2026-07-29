@@ -6,6 +6,7 @@ import {
   assertCrossJurisdictionOrderAdmissible,
   crossJurisdictionBookAdmissionKeyFor,
   crossJurisdictionBookOwnerRef,
+  findCrossJurisdictionBookAdmissionKeyByRoute,
   getCrossJurisdictionBookAdmissionError,
   isCrossJurisdictionBookAdmissionPending,
   markCrossJurisdictionBookAdmissionClosed,
@@ -53,10 +54,7 @@ export const applyCommittedSwapCancelsToOrderbook = (
 export const findAccountByCounterparty = (state: EntityState | null | undefined, counterpartyId: string) => {
   if (!state?.accounts) return null;
   const target = normalizeEntityRef(counterpartyId);
-  for (const [accountId, account] of state.accounts.entries()) {
-    if (normalizeEntityRef(accountId) === target) return account;
-  }
-  return null;
+  return state.accounts.get(target) ?? null;
 };
 
 export const findCrossJurisdictionBookAdmissionForAck = (
@@ -69,26 +67,19 @@ export const findCrossJurisdictionBookAdmissionForAck = (
   const expectedRouteHash = String(routeHash || '').toLowerCase();
   const direct = admissions?.get(crossJurisdictionBookAdmissionKeyFor(sourceEntityId, orderId));
   if (direct) {
-    if (expectedRouteHash) {
-      const directRouteHash = String(direct.routeHash || direct.route?.routeHash || '').toLowerCase();
-      if (!directRouteHash || directRouteHash !== expectedRouteHash) return null;
-    }
-    return direct;
+    if (!expectedRouteHash) return direct;
+    const directRouteHash = String(
+      direct.routeHash || direct.route?.routeHash || '',
+    ).toLowerCase();
+    return directRouteHash === expectedRouteHash ? direct : null;
   }
-  if (!admissions || admissions.size === 0) return null;
-  if (!expectedRouteHash) return null;
-
-  let match: CrossJurisdictionBookAdmission | null = null;
-  for (const admission of admissions.values()) {
-    if (String(admission.route?.orderId || admission.orderId || '') !== orderId) continue;
-    const admissionRouteHash = String(admission.routeHash || admission.route?.routeHash || '').toLowerCase();
-    if (!admissionRouteHash || admissionRouteHash !== expectedRouteHash) continue;
-    if (match) {
-      throw new Error(`CROSS_J_BOOK_ADMISSION_AMBIGUOUS: order=${orderId} routeHash=${routeHash}`);
-    }
-    match = admission;
-  }
-  return match;
+  if (!admissions || !expectedRouteHash) return null;
+  const indexedKey = findCrossJurisdictionBookAdmissionKeyByRoute(
+    currentEntityState,
+    orderId,
+    expectedRouteHash,
+  );
+  return indexedKey ? admissions.get(indexedKey) ?? null : null;
 };
 
 export {

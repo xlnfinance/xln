@@ -91,7 +91,8 @@ import { normalizeEntityProposalBoard } from '../tx/proposals';
 import { accountHasProposableMempool } from './account-mempool-eligibility';
 import {
   getProposableAccountIds,
-  refreshQueuedAccountIndex,
+  getQueuedAccountIds,
+  refreshAccountWorkIndex,
 } from './account-work-index';
 import { applyAccountInput } from '../../account/consensus';
 import { createLocalAccountInput } from '../../account/input';
@@ -455,9 +456,9 @@ type SettlementSealTx = Omit<SettlementTransitionTx, 'data'> & {
 };
 
 function refreshStaleUncommittedSettlementSeals(state: EntityState, storageChanges: RuntimeOverlayRecord[]): void {
-  for (const [accountId, account] of [...state.accounts.entries()].sort(([left], [right]) =>
-    compareStableText(left, right),
-  )) {
+  for (const accountId of [...getQueuedAccountIds(state)].sort(compareStableText)) {
+    const account = state.accounts.get(accountId);
+    if (!account) throw new Error(`QUEUED_ACCOUNT_INDEX_STALE:${accountId}`);
     const workspace = account.settlementWorkspace;
     if (!workspace || workspace.nonceAtSign !== undefined || account.pendingFrame) continue;
     const workspaceHash = assertCanonicalSettlementWorkspace(account, workspace);
@@ -1187,7 +1188,7 @@ const applyPostEntityTxPhases = async (
   // but stale incremental Entity root.
   for (const accountId of context.proposableAccounts) {
     invalidateEntityAccountCommitment(currentEntityState, accountId);
-    refreshQueuedAccountIndex(currentEntityState, accountId);
+    refreshAccountWorkIndex(currentEntityState, accountId);
   }
   currentEntityState = assignCertifiedOutputIdentities(
     currentEntityState,

@@ -142,8 +142,6 @@ const markTxAccountsProposable = (
   };
   if (entityTx.type === 'accountInput') {
     addIfReady(entityTx.data.fromEntityId);
-  } else if (entityTx.type === 'directPayment') {
-    for (const accountId of state.accounts.keys()) addIfReady(accountId);
   } else if (entityTx.type === 'openAccount') {
     addIfReady(entityTx.data.targetEntityId);
   } else if (entityTx.type === 'extendCredit') {

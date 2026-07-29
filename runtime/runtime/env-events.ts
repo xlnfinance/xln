@@ -25,7 +25,7 @@ import type {
 
 import { storageOverlayRecordKey } from '../protocol/overlay';
 import { invalidateEntityAccountCommitment } from '../entity/consensus/state-root';
-import { refreshQueuedAccountIndex } from '../entity/consensus/account-work-index';
+import { refreshAccountWorkIndex } from '../entity/consensus/account-work-index';
 import { recordRuntimeSecurityIncident, resolveRuntimeSecurityIncident } from './security-incidents';
 
 const getLogState = (env: RuntimeState) => {
@@ -224,7 +224,7 @@ const markStorageAccountDirty = (env: RuntimeState, entityId: string, counterpar
   for (const replica of env.eReplicas.values()) {
     if (replica.entityId.toLowerCase() === normalizedEntityId) {
       invalidateEntityAccountCommitment(replica.state, normalizedCounterpartyId);
-      refreshQueuedAccountIndex(replica.state, normalizedCounterpartyId);
+      refreshAccountWorkIndex(replica.state, normalizedCounterpartyId);
     }
   }
   const record: RuntimeOverlayRecord = {
@@ -267,7 +267,7 @@ export const applyEntityStorageChanges = (
   for (const change of changes) {
     if (change.family === 'account' && change.entityId.toLowerCase() === state.entityId.toLowerCase()) {
       invalidateEntityAccountCommitment(state, change.counterpartyId);
-      refreshQueuedAccountIndex(state, change.counterpartyId);
+      refreshAccountWorkIndex(state, change.counterpartyId);
     }
   }
 };

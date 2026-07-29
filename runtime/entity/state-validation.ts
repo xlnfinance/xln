@@ -183,6 +183,7 @@ const validateReserves = (value: unknown, context: string): void => {
 
 const validateAccounts = (
   value: unknown,
+  entityId: string,
   context: string,
 ): void => {
   const accounts = validateMapInstance(value, `${context}.accounts`);
@@ -190,8 +191,39 @@ const validateAccounts = (
     accounts as Map<string, unknown>,
     `${context}.accounts`,
   );
-  for (const [accountId, account] of accounts) {
-    validateAccountState(account, `${context}.accounts[${String(accountId)}]`);
+  const canonicalEntityId = entityId.trim().toLowerCase();
+  for (const [rawAccountId, value] of accounts) {
+    if (
+      typeof rawAccountId !== 'string' ||
+      rawAccountId !== rawAccountId.trim().toLowerCase()
+    ) {
+      throw new FinancialDataCorruptionError(
+        `${context}.accounts contains non-canonical counterparty key`,
+        { accountId: rawAccountId },
+      );
+    }
+    const account = validateAccountState(
+      value,
+      `${context}.accounts[${rawAccountId}]`,
+    );
+    const leftEntity = account.leftEntity.trim().toLowerCase();
+    const rightEntity = account.rightEntity.trim().toLowerCase();
+    const expectedCounterparty = canonicalEntityId === leftEntity
+      ? rightEntity
+      : canonicalEntityId === rightEntity
+        ? leftEntity
+        : '';
+    if (!expectedCounterparty || rawAccountId !== expectedCounterparty) {
+      throw new FinancialDataCorruptionError(
+        `${context}.accounts counterparty key does not match Account participants`,
+        {
+          accountId: rawAccountId,
+          entityId: canonicalEntityId,
+          leftEntity,
+          rightEntity,
+        },
+      );
+    }
   }
 };
 
@@ -199,7 +231,12 @@ function assertEntityState(
   entity: Record<string, unknown>,
   context: string,
 ): asserts entity is Record<string, unknown> & EntityState {
-  validateString(entity['entityId'], `${context}.entityId`);
+  const entityId = validateString(entity['entityId'], `${context}.entityId`);
+  if (entityId !== entityId.trim().toLowerCase()) {
+    throw new FinancialDataCorruptionError(
+      `${context}.entityId must use canonical lowercase form`,
+    );
+  }
   validateNumber(entity['height'], `${context}.height`);
   validateNumber(entity['timestamp'], `${context}.timestamp`);
   const config = validateConsensusConfig(entity['config'], `${context}.config`);
@@ -208,7 +245,7 @@ function assertEntityState(
   validateProfileEncryption(entity, config, context);
   validateLeaderState(entity['leaderState'], config, context);
   validateReserves(entity['reserves'], context);
-  validateAccounts(entity['accounts'], context);
+  validateAccounts(entity['accounts'], entityId, context);
   validateEntityAccountMetadata(entity, context);
   validateConsumption(entity['consumptionAccumulator'], context);
   validateCertifiedOutputSequences(entity['certifiedOutputSequences'], context);

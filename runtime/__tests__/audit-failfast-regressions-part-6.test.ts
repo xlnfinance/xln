@@ -940,7 +940,7 @@ describe('audit fail-fast regressions', () => {
     expect(queuedAck).toBeDefined();
   });
 
-  test('cross-j fill ack admission fallback requires matching route hash', () => {
+  test('cross-j fill ack admission secondary index requires matching route hash', () => {
     const env = createEmptyEnv('cross-fill-ack-admission-fallback');
     env.timestamp = 10_000;
     const sourceHub = `0x${'20'.repeat(32)}`;

@@ -20,9 +20,8 @@ const sourceAccount = (state: EntityState, route: CrossJurisdictionSwapRoute) =>
       ? sourceEntity
       : '';
   if (!expectedAccount) throw new Error(`CROSS_J_PREPARED_SOURCE_PARTICIPANT_INVALID:${route.orderId}`);
-  for (const [accountId, account] of state.accounts) {
-    if (normalizeEntityId(accountId) === expectedAccount) return account;
-  }
+  const account = state.accounts.get(expectedAccount);
+  if (account) return account;
   throw new Error(`CROSS_J_PREPARED_SOURCE_ACCOUNT_MISSING:${route.orderId}`);
 };
 

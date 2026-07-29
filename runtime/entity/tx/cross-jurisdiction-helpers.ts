@@ -16,11 +16,25 @@ export const findCrossJurisdictionOfferRoute = (
   state: EntityState,
   orderId: string,
 ): { accountId: string; route: CrossJurisdictionSwapRoute } | null => {
-  for (const [accountId, account] of state.accounts.entries()) {
-    const route = account.swapOffers?.get(orderId)?.crossJurisdiction;
-    if (route) return { accountId, route };
-  }
-  return null;
+  const mirroredRoute = state.crossJurisdictionSwaps?.get(orderId);
+  if (!mirroredRoute) return null;
+  const self = normalizeEntityRef(state.entityId);
+  const sourceEntity = normalizeEntityRef(mirroredRoute.source.entityId);
+  const sourceCounterparty = normalizeEntityRef(
+    mirroredRoute.source.counterpartyEntityId,
+  );
+  const accountId = self === sourceEntity
+    ? sourceCounterparty
+    : self === sourceCounterparty
+      ? sourceEntity
+      : '';
+  if (!accountId) return null;
+  const route = state.accounts
+    .get(accountId)
+    ?.swapOffers
+    ?.get(orderId)
+    ?.crossJurisdiction;
+  return route ? { accountId, route } : null;
 };
 
 export const mergeCrossJurisdictionRoute = (
