@@ -1,5 +1,5 @@
 import { getSignerPrivateKeyIfAvailable } from '../../account/crypto';
-import { extractEntityId, extractSignerId } from '../../ids';
+import { extractEntityId, extractSignerId } from '../../protocol/identity';
 import { createStructuredLogger } from '../../infra/logger';
 import { announceCertifiedLocalProfiles } from '../../networking/local-profile-lifecycle';
 import { isDeliveryDelivered } from '../../protocol/payments/delivery-result';

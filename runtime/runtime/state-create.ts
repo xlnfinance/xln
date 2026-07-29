@@ -1,6 +1,6 @@
 import { getSignerPrivateKeyIfAvailable, prewarmSignerKeyCache } from '../account/crypto';
 import { createStructuredLogger } from '../infra/logger';
-import { extractEntityId, extractSignerId } from '../ids';
+import { extractEntityId, extractSignerId } from '../protocol/identity';
 import { attachEventEmitters } from './env-events';
 import { requireRuntimeMempool } from './input-queue';
 import { persistGossipProfileToInfraDb } from './infra-gossip-store';

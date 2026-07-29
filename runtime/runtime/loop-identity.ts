@@ -1,5 +1,5 @@
 import { deriveSignerAddressSync, getSignerPrivateKeyIfAvailable } from '../account/crypto';
-import { extractEntityId, extractSignerId } from '../ids';
+import { extractEntityId, extractSignerId } from '../protocol/identity';
 import { createStructuredLogger } from '../infra/logger';
 import { normalizeRuntimeId } from '../networking/runtime-id';
 import type { RuntimeState } from '../types';

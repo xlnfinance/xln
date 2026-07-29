@@ -20,7 +20,7 @@ export type {
   ReplicaUri,
   EntityType,
   JurisdictionInfo,
-} from './ids';
+} from './protocol/identity';
 
 // Re-export core types from types.ts
 export type {
@@ -165,7 +165,7 @@ export {
   XLN_URI_SCHEME,
   DEFAULT_RUNTIME_HOST,
   MAX_NUMBERED_ENTITY,
-} from './ids';
+} from './protocol/identity';
 
 import type {
   RuntimeAdapterAccountPage,

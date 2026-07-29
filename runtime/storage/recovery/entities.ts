@@ -1,7 +1,7 @@
 import { getLiveAccountJClaimAccumulatorStates } from '../../account/j-claim-store';
 import { getLiveConsumptionAccumulatorStates } from '../../entity/consumption-store';
 import { assertPersistedLocalEntityCryptoKeys } from '../../entity/crypto';
-import { createReplicaKey, formatReplicaKey } from '../../ids';
+import { createReplicaKey, formatReplicaKey } from '../../protocol/identity';
 import {
   assertCertifiedJHistoryIntegrity,
   assertValidatorJHistoryIntegrity,

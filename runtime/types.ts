@@ -1545,7 +1545,7 @@ export interface EnvSnapshot {
 }
 
 // Entity types - canonical definition in ids.ts
-export { type EntityType } from './ids';
+export { type EntityType } from './protocol/identity';
 
 // Constants
 export const ENC = 'hex' as const;

@@ -90,7 +90,7 @@ export {
   toSignerId,
   XLN_COORDINATOR,
   XLN_URI_SCHEME,
-} from '../ids';
+} from '../protocol/identity';
 export {
   clearDatabase,
   formatEntityDisplay,

@@ -1,4 +1,4 @@
-import { extractEntityId } from '../ids';
+import { extractEntityId } from '../protocol/identity';
 import { createStructuredLogger } from '../infra/logger';
 import { normalizeRuntimeId } from '../networking/runtime-id';
 import { safeStringify } from '../protocol/serialization';

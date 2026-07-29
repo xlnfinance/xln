@@ -67,7 +67,7 @@ const CORE_FILES = {
   runtime: [
     // Core data structures and implementation
     'types.ts',              // All TypeScript interfaces (CRITICAL: AccountMachine, EntityState, Delta)
-    'ids.ts',                // Identity system: EntityId, SignerId, JId, ReplicaKey
+    'protocol/identity.ts',  // Identity system: EntityId, SignerId, JId, ReplicaKey
 
     // Main coordinators (how the system works)
     'runtime.ts',            // Narrow public facade
@@ -252,7 +252,7 @@ const CROSS_FILES = {
     'types/cross-jurisdiction.ts',
     'types/jurisdiction-events.ts',
     'types/jurisdiction-runtime.ts',
-    'ids.ts',
+    'protocol/identity.ts',
     'account/utils.ts',
     'protocol/serialization.ts',
     'account/crypto.ts',
@@ -402,7 +402,7 @@ const RUNTIME_FILES = {
     'types/entity-tx.ts',
     'types/jurisdiction-events.ts',
     'types/jurisdiction-runtime.ts',
-    'ids.ts',
+    'protocol/identity.ts',
     'constants.ts',
     'runtime.ts',
     'runtime/composition.ts',
@@ -500,7 +500,7 @@ const ORDERBOOK_FILES = {
     'types.ts',
     'types/account.ts',
     'types/entity-tx.ts',
-    'ids.ts',
+    'protocol/identity.ts',
     'account/utils.ts',
     'protocol/serialization.ts',
     'state-helpers.ts',
@@ -569,7 +569,7 @@ const SWAP_FILES = {
     'types.ts',
     'types/account.ts',
     'types/entity-tx.ts',
-    'ids.ts',
+    'protocol/identity.ts',
     'account/utils.ts',
     'protocol/serialization.ts',
     'state-helpers.ts',
@@ -1155,7 +1155,7 @@ xln/
 
   runtime/
     types.ts                     ${fileSizes['runtime/types.ts'] || '?'} lines - All TypeScript interfaces (START HERE)
-    ids.ts                       ${fileSizes['runtime/ids.ts'] || '?'} lines - Identity system: EntityId, SignerId, JId, ReplicaKey
+    protocol/identity.ts         ${fileSizes['runtime/protocol/identity.ts'] || '?'} lines - Identity system: EntityId, SignerId, JId, ReplicaKey
     runtime.ts                   ${fileSizes['runtime/runtime.ts'] || '?'} lines - Main coordinator, 100ms ticks, R->E->A routing
     entity/consensus/index.ts          ${fileSizes['runtime/entity/consensus/index.ts'] || '?'} lines - BFT consensus (ADD_TX -> PROPOSE -> SIGN -> COMMIT)
     account/consensus/index.ts         ${fileSizes['runtime/account/consensus/index.ts'] || '?'} lines - Bilateral consensus, left/right perspective

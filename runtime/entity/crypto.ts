@@ -1,5 +1,5 @@
 import { getSignerPrivateKey, getSignerPrivateKeyIfAvailable } from '../account/crypto';
-import { extractSignerId } from '../ids';
+import { extractSignerId } from '../protocol/identity';
 import { deriveEncryptionKeyPair, pubKeyToHex } from '../protocol/p2p-crypto';
 import type { RuntimeState } from '../types';
 

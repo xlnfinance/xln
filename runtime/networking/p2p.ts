@@ -9,7 +9,7 @@ import type { RuntimeState, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeE
 import { canonicalizeProfile, getBoardPrimaryPublicKey, parseProfile, type Profile } from '../entity/profile';
 import { RuntimeWsClient } from './ws-client';
 import { buildLocalEntityProfile } from './gossip-helper';
-import { extractEntityId } from '../ids';
+import { extractEntityId } from '../protocol/identity';
 import { getSignerPrivateKeyIfAvailable, registerSignerPublicKey } from '../account/crypto';
 import { computeProfileHash, signProfileRuntimeRoute, verifyProfileSignature } from '../entity/profile-signing';
 import { inspectHankoForHash } from '../hanko/signing';
