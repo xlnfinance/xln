@@ -153,6 +153,7 @@ export type {
   AccountBoardReseal,
   AccountBoardResealMigration,
   AccountFrameProposal,
+  AccountExternalFinalityInput,
   AccountInput,
   AccountLocalInput,
   AccountPeerInput,

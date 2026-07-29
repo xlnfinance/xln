@@ -1,4 +1,9 @@
-import type { AccountInput, AccountState, AccountTx } from '../types';
+import type {
+  AccountExternalFinalityInput,
+  AccountInput,
+  AccountState,
+  AccountTx,
+} from '../types';
 
 /**
  * Build the local-only Account input committed by the owning Entity frame.
@@ -21,6 +26,34 @@ export const createLocalAccountInput = (
     domain: { ...account.domain },
     watchSeed: account.watchSeed,
     txs,
+  };
+};
+
+export const createAccountDisputeFinalityInput = (
+  account: Pick<AccountState, 'leftEntity' | 'rightEntity' | 'domain'>,
+  owningEntityId: string,
+  finalizedJNonce: number,
+  finalizedTokenIds: number[],
+): AccountExternalFinalityInput => {
+  if (
+    owningEntityId !== account.leftEntity &&
+    owningEntityId !== account.rightEntity
+  ) {
+    throw new Error(`ACCOUNT_FINALITY_INPUT_OWNER_MISMATCH:${owningEntityId}`);
+  }
+  return {
+    kind: 'external_finality',
+    fromEntityId: owningEntityId,
+    toEntityId:
+      owningEntityId === account.leftEntity
+        ? account.rightEntity
+        : account.leftEntity,
+    domain: { ...account.domain },
+    finality: {
+      kind: 'dispute_finalized',
+      finalizedJNonce,
+      finalizedTokenIds: [...finalizedTokenIds],
+    },
   };
 };
 

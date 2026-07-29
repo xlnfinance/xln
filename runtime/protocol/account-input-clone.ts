@@ -45,6 +45,15 @@ export function cloneIsolatedAccountInput(input: AccountInput): AccountInput {
   switch (input.kind) {
     case 'txs':
       return { ...base, kind: input.kind, txs: input.txs.map(cloneIsolatedAccountTx) };
+    case 'external_finality':
+      return {
+        ...base,
+        kind: input.kind,
+        finality: {
+          ...input.finality,
+          finalizedTokenIds: [...input.finality.finalizedTokenIds],
+        },
+      };
     case 'frame':
       return { ...base, kind: input.kind, proposal: cloneFrameProposal(input.proposal) };
     case 'ack':

@@ -60,7 +60,8 @@ import {
   advanceCertifiedBoardFinality,
 } from '../../jurisdiction/board-registry';
 import { validateJEventRangeEnvelope } from '../../jurisdiction/j-event-range-validation';
-import { applyAccountDisputeFinality } from '../../account/j-finality';
+import { applyAccountInput } from '../../account/consensus';
+import { createAccountDisputeFinalityInput } from '../../account/input';
 import { applyCertifiedBoardJEvent } from './j-events-board';
 import { applyAccountSettledJEvent } from './j-events-account-settled';
 import {
@@ -108,7 +109,9 @@ const incrementAccountNonce = (nonce: number, code: string): number => {
 const invalidateSettlementIntentAfterDisputeFinality = (
   state: EntityState,
   counterpartyId: string,
-  accountResult: ReturnType<typeof applyAccountDisputeFinality>,
+  accountResult: NonNullable<
+    Awaited<ReturnType<typeof applyAccountInput>>['externalFinality']
+  >,
 ): void => {
   const removedDeferred = state.deferredAccountProposals?.delete(counterpartyId) ?? false;
   if (
@@ -127,15 +130,14 @@ const syncJBatchEntityNonceFromEvent = (
   state: EntityState,
   eventEntityId: string,
   localEntityId: string,
-  batchNonce: unknown,
+  batchNonce: number | undefined,
 ): void => {
   if (String(eventEntityId || '').toLowerCase() !== String(localEntityId || '').toLowerCase()) return;
-  const nonce = Number(batchNonce);
-  if (!Number.isFinite(nonce) || nonce <= 0 || !state.jBatchState) return;
-  const current = Number(state.jBatchState.entityNonce || 0);
-  if (nonce > current) {
-    state.jBatchState.entityNonce = nonce;
-    addMessage(state, `↻ Synced J batch nonce from event (${current} → ${nonce})`);
+  if (batchNonce === undefined || batchNonce <= 0 || !state.jBatchState) return;
+  const current = state.jBatchState.entityNonce || 0;
+  if (batchNonce > current) {
+    state.jBatchState.entityNonce = batchNonce;
+    addMessage(state, `↻ Synced J batch nonce from event (${current} → ${batchNonce})`);
   }
 };
 
@@ -460,7 +462,7 @@ type DisputeStartedEventData = {
   starterIncrementedArguments: string;
   watchSeed?: unknown;
   batchNonce?: number;
-  disputeTimeout?: unknown;
+  disputeTimeout?: number;
   jNonce?: unknown;
 };
 
@@ -521,10 +523,10 @@ const initializeStartedDispute = (
     starterIncrementedArguments: data.starterIncrementedArguments || '0x',
     observedOnChain: true,
     observedBlockNumber: Number(blockNumber || 0),
-    ...(data.batchNonce !== undefined ? { batchNonce: Number(data.batchNonce) } : {}),
+    ...(data.batchNonce !== undefined ? { batchNonce: data.batchNonce } : {}),
     finalizeQueued: false,
   };
-  account.jNonce = Math.max(Number(account.jNonce ?? 0), jNonce);
+  account.jNonce = Math.max(account.jNonce, jNonce);
 
   const localProof = buildAccountProofBodyFromEnv(env, account);
   const onChainProofHash = String(account.activeDispute.initialProofbodyHash || '').toLowerCase();
@@ -731,11 +733,11 @@ const retireFinalizedDisputeState = (
   }
 };
 
-function applyDisputeFinalizedJEvent(
+async function applyDisputeFinalizedJEvent(
   context: FinalizedJEventContext,
   disputeFinalizationEvidence: DisputeFinalizationEvidence[],
-): void {
-  const { newState, event, dirtyAccounts } = context;
+): Promise<void> {
+  const { env, newState, event, dirtyAccounts } = context;
   const data = event.data as DisputeFinalizedEventData;
   const accountContext = resolveDisputeAccountContext(
     newState,
@@ -777,11 +779,20 @@ function applyDisputeFinalizedJEvent(
   // settlement drafted or sealed against the previous epoch is unusable even
   // when its numeric nonce is higher; retaining it would strand holds or let a
   // delayed retry resurrect pre-dispute state.
-  const accountFinality = applyAccountDisputeFinality(
+  const accountInput = createAccountDisputeFinalityInput(
     account,
+    entityIdNorm,
     resolved.finalizedJNonce,
     finalizedProof.tokenIds,
   );
+  const accountInputResult = await applyAccountInput(env, account, accountInput);
+  if (!accountInputResult.success || !accountInputResult.externalFinality) {
+    throw new Error(
+      `ACCOUNT_DISPUTE_FINALITY_INPUT_FAILED:${counterpartyId}:` +
+      `${accountInputResult.error ?? 'RESULT_MISSING'}`,
+    );
+  }
+  const accountFinality = accountInputResult.externalFinality;
   invalidateSettlementIntentAfterDisputeFinality(newState, counterpartyId, accountFinality);
   if (accountFinality.hadActiveDispute) {
     addMessage(
@@ -867,7 +878,7 @@ async function applyFinalizedJEvent(
       await applyDisputeStartedJEvent(context);
       break;
     case 'DisputeFinalized':
-      applyDisputeFinalizedJEvent(context, disputeFinalizationEvidence);
+      await applyDisputeFinalizedJEvent(context, disputeFinalizationEvidence);
       break;
     case 'BatchOperationSkipped':
       applyBatchOperationSkippedEvent(newState, event);

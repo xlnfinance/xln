@@ -352,19 +352,16 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   projection and RuntimeState symbols. Keep exactly three semantic verb
   families: `decode*` for unknown/wire → typed and throw, `assert*` for a typed
   invariant and throw, and `is<Decision>*` for one boolean decision.
-- [ ] Restore a structurally enforceable money boundary. Move finalized
-  Account J-event settlement/dispute mutations out of `entity/tx/` and into
-  Account-owned handlers; Entity may authenticate and route, but only Account
-  code may change delta, collateral, holds or credit. This does not make
-  dispute finality bilateral: Entity constructs one explicit canonical
-  external-finality `AccountInput` and routes it through `applyAccountInput`;
-  the Account-owned J-finality branch applies immediately and unilaterally
-  from authenticated chain history, without an Account mempool, proposal, or
-  peer ACK. The returning peer independently consumes the same finalized
-  J-event and converges byte-identically. Preserve
-  proof gating, cache invalidation and state roots with settlement/dispute
-  tests, and add an ownership gate forbidding Entity/Runtime writes to Account
-  money fields outside calls into Account-owned handlers.
+- [ ] Finish mechanically enforcing the money boundary. Settlement finality
+  already queues an Account-owned `j_event_claim`; dispute finality now builds
+  an explicit `AccountInput(kind='external_finality')` and enters the same
+  `applyAccountInput` composition root. The Account-owned branch applies
+  authenticated chain finality immediately and unilaterally, without Account
+  mempool, proposal, or peer ACK, so either party cannot veto an on-chain
+  result. The returning peer independently consumes the same finalized event
+  and converges byte-identically. Add an ownership gate forbidding
+  Entity/Runtime writes to Account delta, collateral, holds or credit outside
+  calls into Account-owned handlers.
 - [ ] Turn Runtime execution into one visible pipeline:
   `take → validate/plan → mutate owned Runtime → WAL → dispatch`.
   Keep exactly one live `RuntimeReplica` mempool; `runtimeInput` names only the

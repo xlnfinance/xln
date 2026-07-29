@@ -31,6 +31,7 @@ import {
   summarizeDeltasForLog,
 } from './helpers';
 import { appendAccountMempoolTxs } from '../mempool';
+import { applyAccountDisputeFinality } from '../j-finality';
 import { applyLocalAccountInput } from '../local-tx-admission';
 import { getAccountInputEnvelopeError } from '../input';
 import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '../../protocol/dispute/arguments';
@@ -1045,6 +1046,18 @@ export async function applyAccountInput(
     return { success: false, error: envelopeError, events: [] };
   }
   if (input.kind === 'txs') return applyLocalAccountInput(account, input);
+  if (input.kind === 'external_finality') {
+    const { finalizedJNonce, finalizedTokenIds } = input.finality;
+    return {
+      success: true,
+      events: ['ACCOUNT_DISPUTE_FINALITY_APPLIED'],
+      externalFinality: applyAccountDisputeFinality(
+        account,
+        finalizedJNonce,
+        finalizedTokenIds,
+      ),
+    };
+  }
   const securityContext = resolveAccountInputSecurityContext(env, account, providedSecurityContext);
   if (input.watchSeed !== undefined) {
     const inputWatchSeed = normalizeAccountWatchSeed(input.watchSeed, 'ACCOUNT_INPUT');

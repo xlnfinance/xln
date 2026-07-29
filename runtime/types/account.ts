@@ -522,6 +522,22 @@ export type AccountLocalInput = AccountInputBase & {
   txs: AccountTx[];
 };
 
+/**
+ * Finalized jurisdiction consensus routed by the owning Entity machine.
+ *
+ * This input is derived from an authenticated J event already committed by
+ * the parent Entity frame. It applies immediately: requiring a bilateral ACK
+ * would let either peer veto a final on-chain result.
+ */
+export type AccountExternalFinalityInput = AccountInputBase & {
+  kind: 'external_finality';
+  finality: {
+    kind: 'dispute_finalized';
+    finalizedJNonce: number;
+    finalizedTokenIds: number[];
+  };
+};
+
 export type AccountPeerInput =
   | (AccountInputBase & {
       kind: 'frame';
@@ -546,7 +562,10 @@ export type AccountPeerInput =
     });
 
 /** Every command accepted by an Account replica enters this one boundary. */
-export type AccountInput = AccountLocalInput | AccountPeerInput;
+export type AccountInput =
+  | AccountLocalInput
+  | AccountExternalFinalityInput
+  | AccountPeerInput;
 
 // Delta structure for per-token account state (based on old_src)
 export interface Delta {
