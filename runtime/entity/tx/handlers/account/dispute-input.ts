@@ -1,6 +1,6 @@
 import type {
   AccountPeerInput,
-  AccountState,
+  AccountReplica,
   EntityInput,
   EntityState,
   RuntimeState,
@@ -15,7 +15,7 @@ type UnsafeFrameContext = {
   env: RuntimeState;
   state: EntityState;
   input: AccountPeerInput;
-  account: AccountState;
+  account: AccountReplica;
   counterpartyId: string;
   createdAccount: boolean;
   dispute: NonNullable<HandleAccountInputResult['disputeRequired']>;

@@ -207,7 +207,16 @@ export type AccountStateDomain = {
   depositoryAddress: string;
 };
 
-export interface AccountState {
+/**
+ * Complete deterministic replica owned by one Entity.
+ *
+ * `AccountState` below is the bilateral state committed by
+ * `AccountFrame.accountStateRoot`. The remaining fields coordinate proposal,
+ * acknowledgement, resend and Entity-owned automation. They are deterministic
+ * and may be committed by the parent Entity, but are not bilateral Account
+ * state and therefore must never be accepted by Account-root helpers.
+ */
+export interface AccountReplica {
   // CANONICAL REPRESENTATION (like Channel.ts - both entities store IDENTICAL structure)
   leftEntity: string;   // Lower entity ID (canonical left)
   rightEntity: string;  // Higher entity ID (canonical right)
@@ -412,6 +421,36 @@ export interface AccountState {
     rejectedFrameEvidence?: AccountRejectedFrameEvidence;
   };
 }
+
+/**
+ * Bilateral state authenticated by `AccountFrame.accountStateRoot`.
+ *
+ * Keep this list identical to `accountStateRootEntries`. Adding a field here
+ * is a protocol change: both peers must encode it into the Account root.
+ */
+export type AccountState = Pick<
+  AccountReplica,
+  | 'domain'
+  | 'leftEntity'
+  | 'rightEntity'
+  | 'watchSeed'
+  | 'deltas'
+  | 'globalCreditLimits'
+  | 'jNonce'
+  | 'disputeConfig'
+  | 'locks'
+  | 'pulls'
+  | 'swapOffers'
+  | 'subcontracts'
+  | 'lendingIntents'
+  | 'settlementWorkspace'
+  | 'lastFinalizedJHeight'
+  | 'leftPendingJClaims'
+  | 'rightPendingJClaims'
+  | 'requestedRebalance'
+  | 'requestedRebalanceFeeState'
+  | 'rebalanceFeePolicies'
+>;
 
 export type AccountBoardResealMigration = {
   activationJHeight: number;

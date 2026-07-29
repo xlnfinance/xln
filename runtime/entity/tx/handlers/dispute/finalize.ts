@@ -1,5 +1,5 @@
 import type {
-  AccountState,
+  AccountReplica,
   EntityInput,
   EntityState,
   EntityTx,
@@ -33,7 +33,7 @@ type FinalizeTx = Extract<EntityTx, { type: 'disputeFinalize' }>;
 const collectRegistryPublication = (
   tx: FinalizeTx,
   state: EntityState,
-  account: AccountState,
+  account: AccountReplica,
   counterpartyId: string,
   finalProofbodyHash: string,
   env: RuntimeState,
@@ -57,7 +57,7 @@ const collectRegistryPublication = (
 
 const isFinalizeTimingAllowed = (
   state: EntityState,
-  account: AccountState,
+  account: AccountReplica,
   counterpartyId: string,
   selection: FinalProofSelection,
   env: RuntimeState,
@@ -83,7 +83,7 @@ const isFinalizeTimingAllowed = (
 
 const queueDisputeFinalize = (
   state: EntityState,
-  account: AccountState,
+  account: AccountReplica,
   proof: FinalProofPayload,
   registry: { secrets: string[]; transformerAddress: string },
 ): void => {

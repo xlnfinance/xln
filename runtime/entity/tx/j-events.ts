@@ -1,6 +1,6 @@
 import type {
   EntityCandidateEffect,
-  AccountState,
+  AccountReplica,
   EntityInput,
   EntityState,
   RuntimeState,
@@ -76,7 +76,7 @@ const normalizeSignerId = (value: unknown): string => String(value || '').trim()
 const MAX_SAFE_NONCE = BigInt(Number.MAX_SAFE_INTEGER);
 
 /**
- * Solidity exposes dispute nonces as uint256 while AccountState deliberately
+ * Solidity exposes dispute nonces as uint256 while AccountReplica deliberately
  * uses JavaScript safe integers. Convert through BigInt so an adversarial
  * value can never round to a different nonce before consensus compares it.
  */
@@ -358,7 +358,7 @@ type DisputeAccountContext = {
   entityIdNorm: string;
   candidateCounterpartyId: string;
   counterpartyId: string;
-  account: AccountState | undefined;
+  account: AccountReplica | undefined;
 };
 
 const normalizeEntityId = (id: unknown): string => String(id).toLowerCase();
@@ -402,7 +402,7 @@ const normalizeFinalProofbodyHash = (value: unknown, counterpartyId: string): st
 };
 
 const requireFinalizedProofBodyEvidence = (
-  account: AccountState,
+  account: AccountReplica,
   finalProofbodyHashRaw: unknown,
   counterpartyId: string,
 ): { finalProofbodyHash: string; proofbody: ProofBodyStruct; tokenIds: number[] } => {
@@ -626,7 +626,7 @@ type DisputeFinalizedEventData = {
 };
 
 const resolveFinalizationEvidence = (
-  account: AccountState,
+  account: AccountReplica,
   data: DisputeFinalizedEventData,
   senderStr: string,
   counterentityStr: string,

@@ -1,5 +1,5 @@
 import type {
-  AccountState,
+  AccountReplica,
   AccountTx,
   EntityCandidateEffect,
   RuntimeState,
@@ -39,7 +39,7 @@ import { handleLendingAccountTx } from './handlers/lending';
 const accountTxLog = createStructuredLogger('account.tx');
 
 type MutationContext = {
-  account: AccountState;
+  account: AccountReplica;
   tx: AccountTx;
   byLeft: boolean;
   timestamp: number;
@@ -176,7 +176,7 @@ const rejectFrameOnlyTx = (context: MutationContext): ApplyAccountTxResult => {
  * receives the same frame-controlled time/height and mutates only this Account.
  */
 export const applyAccountTxMutation = async (
-  account: AccountState,
+  account: AccountReplica,
   tx: AccountTx,
   byLeft: boolean,
   timestamp: number,

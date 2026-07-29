@@ -1,4 +1,4 @@
-import type { AccountState, Delta, EntityTx, RuntimeState } from '../types';
+import type { AccountReplica, Delta, EntityTx, RuntimeState } from '../types';
 import { deriveDelta, getTokenInfo } from '../account/utils';
 import { encodeBoard, hashBoard } from '../entity/factory';
 import { compareStableText } from '../protocol/serialization';
@@ -134,7 +134,7 @@ export const waitUntil = async (
 };
 
 const accountMatchesCounterparty = (
-  account: AccountState | null | undefined,
+  account: AccountReplica | null | undefined,
   ownerEntityId: string,
   counterpartyId: string,
 ): boolean => {
@@ -290,7 +290,7 @@ export const getAccountState = (
   env: RuntimeState,
   entityId: string,
   counterpartyId: string,
-): AccountState | null => {
+): AccountReplica | null => {
   const replica = getEntityReplicaById(env, entityId);
   if (!replica?.state?.accounts) return null;
   const needle = String(counterpartyId || '').toLowerCase();
@@ -326,7 +326,7 @@ export const serializeAccountDelta = (delta: Delta | null | undefined): Record<s
     : null;
 
 export const getCreditGrantedByEntity = (
-  account: AccountState,
+  account: AccountReplica,
   ownerEntityId: string,
   tokenId: number,
 ): bigint => {
@@ -339,7 +339,7 @@ export const getCreditGrantedByEntity = (
 };
 
 export const getEntityOutCapacity = (
-  account: AccountState | null,
+  account: AccountReplica | null,
   ownerEntityId: string,
   tokenId: number,
 ): bigint => {
@@ -351,8 +351,8 @@ export const getEntityOutCapacity = (
 
 /** A committed Account remains usable even while its peer is offline. */
 export const hasCommittedAccountState = (
-  account: AccountState | null,
-): account is AccountState => {
+  account: AccountReplica | null,
+): account is AccountReplica => {
   if (!account) return false;
   if (account.status !== 'active') return false;
   if (!account.currentFrame) return false;
@@ -361,7 +361,7 @@ export const hasCommittedAccountState = (
 };
 
 /** Mutation producers use this stricter predicate to avoid overlapping writes. */
-export const isAccountWriteLaneIdle = (account: AccountState | null): boolean => {
+export const isAccountWriteLaneIdle = (account: AccountReplica | null): boolean => {
   if (!hasCommittedAccountState(account)) return false;
   if (account.pendingFrame) return false;
   if ((account.mempool?.length ?? 0) > 0) return false;

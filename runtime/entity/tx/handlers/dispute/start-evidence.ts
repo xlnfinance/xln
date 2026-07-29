@@ -1,5 +1,5 @@
 import type {
-  AccountState,
+  AccountReplica,
   EntityState,
   RuntimeState,
 } from '../../../../types';
@@ -39,7 +39,7 @@ export type StartEvidence = {
 export const loadStartProof = (
   sourceState: EntityState,
   state: EntityState,
-  account: AccountState,
+  account: AccountReplica,
   counterpartyId: string,
 ): Omit<StartEvidence, 'signedNonce' | 'nonceSource' | 'jNonce' | 'starterInitialArguments' | 'starterIncrementedArguments'> | null => {
   const counterpartyHanko = account.counterpartyDisputeProofHanko;
@@ -94,7 +94,7 @@ export const loadStartProof = (
 
 export const resolveStartNonce = (
   state: EntityState,
-  account: AccountState,
+  account: AccountReplica,
   counterpartyId: string,
   proofBodyHash: string,
 ): Pick<StartEvidence, 'signedNonce' | 'nonceSource' | 'jNonce'> | null => {
@@ -148,7 +148,7 @@ export const resolveStartNonce = (
 
 export const buildStarterArguments = (
   state: EntityState,
-  account: AccountState,
+  account: AccountReplica,
   counterpartyId: string,
   proofBodyHash: string,
   signedNonce: number,

@@ -1,5 +1,5 @@
 import type {
-  AccountState,
+  AccountReplica,
   EntityState,
   EntityTx,
   RuntimeState,
@@ -20,7 +20,7 @@ export const admitDisputeFinalize = (
   state: EntityState,
   tx: FinalizeTx,
   env: RuntimeState,
-): AccountState | null => {
+): AccountReplica | null => {
   const counterpartyId = tx.data.counterpartyEntityId;
   state.jBatchState ??= initJBatch();
   if (state.jBatchState.sentBatch) {

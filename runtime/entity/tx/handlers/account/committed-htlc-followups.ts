@@ -1,6 +1,6 @@
 import type {
   AccountPeerInput,
-  AccountState,
+  AccountReplica,
   AccountTx,
   EntityCandidateEffect,
   EntityInput,
@@ -30,7 +30,7 @@ type HtlcFollowupContext = {
   state: EntityState;
   newState: EntityState;
   input: AccountPeerInput;
-  account: AccountState;
+  account: AccountReplica;
   outputs: EntityInput[];
   accountTxs: AccountTxTarget[];
   candidateEffects: EntityCandidateEffect[];

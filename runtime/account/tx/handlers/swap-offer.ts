@@ -5,7 +5,7 @@
  * admission → deterministic quantization → cross-J lock binding → commit.
  */
 
-import type { AccountState, AccountTx } from '../../../types';
+import type { AccountReplica, AccountTx } from '../../../types';
 import type { SwapOfferEvent } from '../apply-types';
 import { validateSwapOfferAdmission } from './swap-offer/admission';
 import { prepareSwapOfferAmounts } from './swap-offer/quantization';
@@ -20,7 +20,7 @@ type SwapOfferResult = {
 };
 
 export const handleSwapOffer = async (
-  account: AccountState,
+  account: AccountReplica,
   tx: Extract<AccountTx, { type: 'swap_offer' }>,
   byLeft: boolean,
   currentHeight: number,

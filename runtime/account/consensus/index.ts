@@ -4,7 +4,7 @@
  */
 
 import type {
-  AccountState,
+  AccountReplica,
   AccountDisputeSeal,
   AccountFrame,
   AccountInput,
@@ -96,7 +96,7 @@ type AccountRevealedSecret = { secret: string; hashlock: string };
 type AccountSwapCancelRequest = { offerId: string; accountId: string };
 
 type IncomingFrameValidation = {
-  clonedMachine: AccountState;
+  clonedMachine: AccountReplica;
   proofResult: ReturnType<typeof buildAccountProofBodyFromEnv>;
   processEvents: string[];
   revealedSecrets: AccountRevealedSecret[];
@@ -111,7 +111,7 @@ type IncomingFrameValidationResult =
 type IncomingFrameResult = { kind: 'not_applicable' } | { kind: 'return'; result: HandleAccountInputResult };
 
 const isRefreshableStaleIncomingSettlementSeal = (
-  account: AccountState,
+  account: AccountReplica,
   frame: AccountFrame,
   rejection: AccountTxRejection | undefined,
 ): boolean => {
@@ -137,7 +137,7 @@ const isRefreshableStaleIncomingSettlementSeal = (
   return matchingSeals.length === 1;
 };
 
-function collectReceiverValidationDeltas(clonedMachine: AccountState): {
+function collectReceiverValidationDeltas(clonedMachine: AccountReplica): {
   tokenIds: number[];
   deltas: Delta[];
 } {
@@ -218,7 +218,7 @@ type IncomingFrameReplayResult =
 
 const replayIncomingFrameOnClone = async (
   env: RuntimeState,
-  clonedMachine: AccountState,
+  clonedMachine: AccountReplica,
   input: AccountInput,
   receivedFrame: AccountFrame,
   frameJHeight: number,
@@ -281,7 +281,7 @@ const replayIncomingFrameOnClone = async (
 
 async function validateIncomingFrameOnClone(
   env: RuntimeState,
-  account: AccountState,
+  account: AccountReplica,
   input: AccountInput,
   receivedFrame: AccountFrame,
   frameJHeight: number,
@@ -365,7 +365,7 @@ async function validateIncomingFrameOnClone(
 
 const reexecuteIncomingFrame = async (
   env: RuntimeState,
-  account: AccountState,
+  account: AccountReplica,
   receivedFrame: AccountFrame,
   frameJHeight: number,
   committedJClaims: AccountJClaimSession,
@@ -400,7 +400,7 @@ const reexecuteIncomingFrame = async (
 
 async function commitIncomingFrameOnRealState(
   env: RuntimeState,
-  account: AccountState,
+  account: AccountReplica,
   input: AccountInput,
   receivedFrame: AccountFrame,
   frameJHeight: number,
@@ -503,7 +503,7 @@ type IncomingFrameAckMaterialResult =
   { kind: 'continue'; material: IncomingFrameAckMaterial } | { kind: 'return'; result: HandleAccountInputResult };
 
 const storeAckProofSnapshot = (
-  account: AccountState,
+  account: AccountReplica,
   proofResult: ReturnType<typeof buildAccountProofBodyFromEnv>,
   signedNonce: number,
 ): void => {
@@ -518,7 +518,7 @@ const storeAckProofSnapshot = (
 };
 
 const selectAckDisputeSeal = (
-  account: AccountState,
+  account: AccountReplica,
   proofBodyHash: string,
   signedNonce: number,
   proofChanged: boolean,
@@ -546,7 +546,7 @@ const selectAckDisputeSeal = (
 };
 
 async function buildIncomingFrameAckMaterial(
-  account: AccountState,
+  account: AccountReplica,
   input: AccountInput,
   receivedFrame: AccountFrame,
   ackProofResult: ReturnType<typeof buildAccountProofBodyFromEnv>,
@@ -611,7 +611,7 @@ async function buildIncomingFrameAckMaterial(
   };
 }
 
-function storeAckDisputeState(account: AccountState, material: IncomingFrameAckMaterial): void {
+function storeAckDisputeState(account: AccountReplica, material: IncomingFrameAckMaterial): void {
   if (material.proofChanged && material.ackDisputeHash) {
     replaceLocalDisputeDraft(account, {
       hash: material.ackDisputeHash,
@@ -676,7 +676,7 @@ function buildIncomingFrameReturnPayload(
 }
 
 async function buildAckResponseForIncomingFrame(
-  account: AccountState,
+  account: AccountReplica,
   input: AccountPeerInput,
   receivedFrame: AccountFrame,
   validation: IncomingFrameValidation,
@@ -728,7 +728,7 @@ const classifyPreflightReturn = (result: HandleAccountInputResult): IncomingFram
 };
 
 const classifyIncomingValidationFailure = (
-  account: AccountState,
+  account: AccountReplica,
   input: AccountInput,
   receivedFrame: AccountFrame,
   result: HandleAccountInputResult,
@@ -775,7 +775,7 @@ const classifyIncomingValidationFailure = (
 
 async function handleIncomingAccountFrame(
   env: RuntimeState,
-  account: AccountState,
+  account: AccountReplica,
   input: AccountPeerInput,
   normalizedInputHeight: number | undefined,
   replayCurrentHeight: number,
@@ -857,7 +857,7 @@ async function handleIncomingAccountFrame(
 
 type AccountInputSession = {
   env: RuntimeState;
-  account: AccountState;
+  account: AccountReplica;
   input: AccountPeerInput;
   securityContext: AccountInputSecurityContext;
   normalizedInputHeight: number;
@@ -1022,7 +1022,7 @@ const handleAccountProposalPhase = async (
  */
 const resolveAccountInputSecurityContext = (
   env: RuntimeState,
-  account: AccountState,
+  account: AccountReplica,
   provided: AccountInputSecurityContext | undefined,
 ): AccountInputSecurityContext =>
   provided ?? {
@@ -1036,7 +1036,7 @@ const resolveAccountInputSecurityContext = (
 
 export async function applyAccountInput(
   env: RuntimeState,
-  account: AccountState,
+  account: AccountReplica,
   input: AccountInput,
   providedSecurityContext?: AccountInputSecurityContext,
   accountJClaimNodeStore?: AccountJClaimNodeStore,

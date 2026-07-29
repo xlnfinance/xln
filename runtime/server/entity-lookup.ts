@@ -1,10 +1,10 @@
 import { deriveDelta } from '../account/utils';
-import type { AccountState, RuntimeState } from '../types';
+import type { AccountReplica, AccountState, RuntimeState } from '../types';
 import { getEntityReplicaById } from '../entity/replica-lookup';
 export { getEntityReplicaById } from '../entity/replica-lookup';
 
 const accountMatchesCounterparty = (
-  account: AccountState | null | undefined,
+  account: AccountReplica | null | undefined,
   ownerEntityId: string,
   counterpartyId: string,
 ): boolean => {
@@ -36,7 +36,11 @@ export const hasAccount = (env: RuntimeState, entityId: string, counterpartyId: 
   return false;
 };
 
-export const getAccountState = (env: RuntimeState, entityId: string, counterpartyId: string): AccountState | null => {
+export const getAccountState = (
+  env: RuntimeState,
+  entityId: string,
+  counterpartyId: string,
+): AccountReplica | null => {
   const replica = getEntityReplicaById(env, entityId);
   if (!replica?.state?.accounts) return null;
   const needle = counterpartyId.toLowerCase();

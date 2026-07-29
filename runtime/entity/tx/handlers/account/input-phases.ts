@@ -1,6 +1,6 @@
 import type {
   AccountPeerInput,
-  AccountState,
+  AccountReplica,
   EntityState,
   RuntimeState,
 } from '../../../../types';
@@ -34,7 +34,7 @@ export type AccountInputPhaseContext = {
   env: RuntimeState;
   state: EntityState;
   input: AccountPeerInput;
-  account: AccountState;
+  account: AccountReplica;
   counterpartyId: string;
   createdAccount: boolean;
   effects: CommittedAccountEffects;

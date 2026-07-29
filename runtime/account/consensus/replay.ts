@@ -1,7 +1,7 @@
 import type {
   AccountFrame,
   AccountInput,
-  AccountState,
+  AccountReplica,
 } from '../../types';
 import { createStructuredLogger, shortId } from '../../infra/logger';
 import {
@@ -54,7 +54,7 @@ export const getDisputeHankoShapeError = (
 };
 
 export const describeAccountState = (
-  account: AccountState,
+  account: AccountReplica,
 ): Record<string, unknown> => ({
   currentHeight: Number(account.currentHeight ?? 0),
   currentHash: account.currentFrame?.stateHash ?? null,
@@ -76,7 +76,7 @@ export type AccountInputReplayClassification = {
 };
 
 export const classifyAccountInputReplay = (
-  account: AccountState,
+  account: AccountReplica,
   input: AccountInput,
 ): AccountInputReplayClassification => {
   const ack = accountInputAck(input);
@@ -106,7 +106,7 @@ export const classifyAccountInputReplay = (
 };
 
 export const buildDuplicateCommittedFrameAck = (
-  account: AccountState,
+  account: AccountReplica,
   input: AccountInput,
   events: string[],
   replayCurrentHeight: number,
@@ -149,7 +149,7 @@ export const buildDuplicateCommittedFrameAck = (
 };
 
 export const handleReplayOrObsoleteAccountInput = (
-  account: AccountState,
+  account: AccountReplica,
   input: AccountInput,
   replay: AccountInputReplayClassification,
   events: string[],

@@ -1,7 +1,7 @@
 import type {
   AccountBoardResealMigration,
   AccountDisputeSeal,
-  AccountState,
+  AccountReplica,
   EntityInput,
   EntityState,
   RuntimeState,
@@ -47,7 +47,7 @@ export const BOARD_RESEAL_RETRY_MS = 1_000;
 
 const bytes32 = (value: string): boolean => /^0x[0-9a-f]{64}$/.test(value.toLowerCase());
 
-const hasAnyDisputeSealEvidence = (account: AccountState): boolean => Boolean(
+const hasAnyDisputeSealEvidence = (account: AccountReplica): boolean => Boolean(
   account.currentDisputeProofHanko ||
   account.counterpartyDisputeProofHanko ||
   account.currentDisputeHash ||
@@ -63,7 +63,7 @@ type DisputeSealDraft = {
   issue?: AccountBoardResealMigration['reason'];
 };
 
-const exactBilateralDisputeSeal = (account: AccountState): DisputeSealDraft => {
+const exactBilateralDisputeSeal = (account: AccountReplica): DisputeSealDraft => {
   if (!hasAnyDisputeSealEvidence(account)) return {};
   const localHash = account.currentDisputeHash?.toLowerCase();
   const remoteHash = account.counterpartyDisputeHash?.toLowerCase();
@@ -89,7 +89,7 @@ const exactBilateralDisputeSeal = (account: AccountState): DisputeSealDraft => {
 const accountFrameIssue = (
   state: EntityState,
   counterpartyId: string,
-  account: AccountState,
+  account: AccountReplica,
 ): AccountBoardResealMigration['reason'] | undefined => {
   if (
     account.proofHeader.fromEntity.toLowerCase() !== state.entityId.toLowerCase() ||
@@ -169,7 +169,7 @@ const buildResealOutput = (
   state: EntityState,
   env: RuntimeState,
   counterpartyId: string,
-  account: AccountState,
+  account: AccountReplica,
   input: NonNullable<EntityInput['entityTxs']>,
 ): EntityInput | undefined => {
   try {
@@ -196,7 +196,7 @@ const buildCertifiedAccountResealDraft = (
   env: RuntimeState,
   activation: BoardResealActivation,
   counterpartyId: string,
-  account: AccountState,
+  account: AccountReplica,
   position: ActivationPosition,
 ): AccountResealDraft => {
   const frameHash = account.currentFrame.stateHash.toLowerCase();
@@ -240,7 +240,7 @@ const buildAccountResealDraft = (
   env: RuntimeState,
   activation: BoardResealActivation,
   counterpartyId: string,
-  account: AccountState,
+  account: AccountReplica,
   position: ActivationPosition,
 ): AccountResealDraft => {
   if (Number(account.currentHeight) < 1) {

@@ -1,7 +1,7 @@
 import type {
   AccountInput,
   AccountPeerInput,
-  AccountState,
+  AccountReplica,
   RuntimeState,
 } from '../../types';
 import { verifyHankoForHash } from '../../hanko/signing';
@@ -33,7 +33,7 @@ const rejectBoardReseal = (
 });
 
 const validateBoardResealMetadata = (
-  account: AccountState,
+  account: AccountReplica,
   input: AccountInput,
   reseal: BoardResealPayload,
   events: string[],
@@ -126,7 +126,7 @@ const validateBoardResealMetadata = (
 
 const verifyBoardResealWitnesses = async (
   env: RuntimeState,
-  account: AccountState,
+  account: AccountReplica,
   input: AccountPeerInput,
   reseal: BoardResealPayload,
   metadata: ValidatedBoardResealMetadata,
@@ -188,7 +188,7 @@ const verifyBoardResealWitnesses = async (
 
 export const handleBoardReseal = async (
   env: RuntimeState,
-  account: AccountState,
+  account: AccountReplica,
   input: AccountPeerInput,
   securityContext: AccountInputSecurityContext,
 ): Promise<HandleAccountInputResult | undefined> => {

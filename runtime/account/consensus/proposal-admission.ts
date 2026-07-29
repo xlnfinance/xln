@@ -1,4 +1,4 @@
-import type { AccountState, AccountTx, RuntimeState } from '../../types';
+import type { AccountReplica, AccountTx, RuntimeState } from '../../types';
 import { getAccountPerspective } from '../perspective';
 import { safeStringify } from '../../protocol/serialization';
 import { createStructuredLogger, shortId } from '../../infra/logger';
@@ -24,7 +24,7 @@ export type ProposalAdmissionResult =
   | { success: false; result: ProposeAccountFrameResult };
 
 const selectProposalWindow = (
-  account: AccountState,
+  account: AccountReplica,
   selected: readonly AccountTx[] | undefined,
 ): AccountTx[] => {
   const source = selected ?? account.mempool;
@@ -50,7 +50,7 @@ const selectProposalWindow = (
 
 const validateProposalTimestamp = (
   env: RuntimeState,
-  account: AccountState,
+  account: AccountReplica,
   timestamp: number,
   myEntityId: string,
   counterparty: string,
@@ -72,7 +72,7 @@ const validateProposalTimestamp = (
 };
 
 const rejectUnavailableProposal = (
-  account: AccountState,
+  account: AccountReplica,
   quiet: boolean,
   events: string[],
 ): ProposeAccountFrameResult | null => {
@@ -102,7 +102,7 @@ const rejectUnavailableProposal = (
 
 export const prepareProposalAdmission = (
   env: RuntimeState,
-  account: AccountState,
+  account: AccountReplica,
   entityFrameTimestamp: number,
   entityJHeight: number | undefined,
   selectedMempoolTxs: readonly AccountTx[] | undefined,

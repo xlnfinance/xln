@@ -1,4 +1,4 @@
-import type { AccountState, EntityReplica, RuntimeState, Profile as GossipProfile, RuntimeInput } from '@xln/runtime/api/runtime-module';
+import type { AccountReplica, EntityReplica, RuntimeState, Profile as GossipProfile, RuntimeInput } from '@xln/runtime/api/runtime-module';
 import { getJurisdictionStackId } from '@xln/runtime/api/runtime-module';
 import {
   buildOpenAccountTx,
@@ -269,7 +269,7 @@ export function resolveHubDiscoveryEntityJurisdictionKey(
     || hubDiscoveryJurisdictionKey(replica?.position?.jurisdiction);
 }
 
-function getAccountCounterpartyId(account: AccountState, ownerEntityId: string): string {
+function getAccountCounterpartyId(account: AccountReplica, ownerEntityId: string): string {
   const owner = normalizeHubEntityId(ownerEntityId);
   const left = normalizeHubEntityId(account.leftEntity);
   const right = normalizeHubEntityId(account.rightEntity);
@@ -282,16 +282,16 @@ function findAccountForCounterparty(
   ownerReplica: EntityReplica | null,
   ownerEntityId: string,
   counterpartyEntityId: string,
-): AccountState | null {
+): AccountReplica | null {
   const accounts = ownerReplica?.state?.accounts;
   const target = normalizeHubEntityId(counterpartyEntityId);
   if (!target || !(accounts instanceof Map)) return null;
   const direct = accounts.get(target) ?? accounts.get(counterpartyEntityId);
-  if (direct) return direct as AccountState;
+  if (direct) return direct;
   for (const [key, account] of accounts.entries()) {
-    if (normalizeHubEntityId(key) === target) return account as AccountState;
-    if (getAccountCounterpartyId(account as AccountState, ownerEntityId) === target) {
-      return account as AccountState;
+    if (normalizeHubEntityId(key) === target) return account;
+    if (getAccountCounterpartyId(account, ownerEntityId) === target) {
+      return account;
     }
   }
   return null;
@@ -319,12 +319,12 @@ function buildAccountConnectionStates(
   const owner = normalizeHubEntityId(ownerEntityId);
   const states = new Map<string, HubDiscoveryConnectionState>();
   for (const [key, account] of accounts.entries()) {
-    const counterpartyId = getAccountCounterpartyId(account as AccountState, ownerEntityId)
+    const counterpartyId = getAccountCounterpartyId(account, ownerEntityId)
       || normalizeHubEntityId(key);
     if (!counterpartyId || counterpartyId === owner) continue;
     states.set(counterpartyId, {
-      isConnected: isCommittedAccount(account as AccountState),
-      isOpening: isOpeningAccount(account as AccountState),
+      isConnected: isCommittedAccount(account),
+      isOpening: isOpeningAccount(account),
     });
   }
   return states;

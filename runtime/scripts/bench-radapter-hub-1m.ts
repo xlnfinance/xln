@@ -54,7 +54,7 @@ import type {
   StorageMerkleLeafDoc,
   StorageMerkleRootDoc,
 } from '../storage/types';
-import type { AccountState, EntityReplica, EntityState, RuntimeState, RuntimeInput } from '../types';
+import type { AccountReplica, EntityReplica, EntityState, RuntimeState, RuntimeInput } from '../types';
 
 type Cli = {
   accounts: number;
@@ -225,7 +225,7 @@ const randomEntityId = (seed: string, index: number): string =>
 const hubEntityId = (seed: string): string =>
   `0x${createHash('sha256').update(seed).update(':hub').digest('hex')}`;
 
-const makeAccount = (firstEntity: string, secondEntity: string, height: number, timestamp: number): AccountState => {
+const makeAccount = (firstEntity: string, secondEntity: string, height: number, timestamp: number): AccountReplica => {
   if (firstEntity === secondEntity) throw new Error(`BENCH_SELF_ACCOUNT_FORBIDDEN:${firstEntity}`);
   const [leftEntity, rightEntity] = firstEntity < secondEntity
     ? [firstEntity, secondEntity]

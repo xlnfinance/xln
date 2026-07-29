@@ -1,6 +1,13 @@
 import { ethers } from 'ethers';
 
-import type { AccountState, ConsensusConfig, EntityFrameAuthority, EntityLeaderState, EntityState } from '../../types';
+import type {
+  AccountReplica,
+  AccountState,
+  ConsensusConfig,
+  EntityFrameAuthority,
+  EntityLeaderState,
+  EntityState,
+} from '../../types';
 import { compareStableText } from '../../protocol/serialization';
 import { encodeCanonicalConsensusValue } from '../../protocol/canonical-consensus-value';
 import { cloneAccountInputWithoutPostCommitHankos, cloneAccountTxWithoutPostCommitHankos } from './hanko-witness';
@@ -73,30 +80,7 @@ export const ENTITY_STATE_ROOT_EXCLUDED_FIELDS = [
   'htlcNotes',
 ] as const satisfies readonly (keyof EntityState)[];
 
-type AccountWithReplicaCaches = AccountState & {
-  frameHistory?: unknown;
-  provider?: unknown;
-  ethersProvider?: unknown;
-};
-
-const projectSettlementWorkspace = (workspace: AccountState['settlementWorkspace']): unknown => {
-  if (!workspace) return undefined;
-  const {
-    leftHanko: _leftHanko,
-    rightHanko: _rightHanko,
-    postSettlementDisputeProof,
-    ...unsignedWorkspace
-  } = workspace;
-  if (!postSettlementDisputeProof) return unsignedWorkspace;
-  const {
-    leftHanko: _postLeftHanko,
-    rightHanko: _postRightHanko,
-    ...unsignedPostSettlement
-  } = postSettlementDisputeProof;
-  return { ...unsignedWorkspace, postSettlementDisputeProof: unsignedPostSettlement };
-};
-
-const projectPendingWithdrawals = (withdrawals: AccountState['pendingWithdrawals']): Map<string, unknown> =>
+const projectPendingWithdrawals = (withdrawals: AccountReplica['pendingWithdrawals']): Map<string, unknown> =>
   new Map(
     Array.from(withdrawals.entries()).map(([requestId, withdrawal]) => {
       const { signature: _signature, ...unsignedWithdrawal } = withdrawal;
@@ -152,29 +136,83 @@ const ACCOUNT_ROOT_COMMITTED_FIELDS = [
   'rebalanceFeePolicies',
 ] as const satisfies readonly (keyof AccountState)[];
 
-const projectAccountConsensusState = (account: AccountState): Record<string, unknown> => {
-  const projected = { ...account } as AccountWithReplicaCaches as unknown as Record<string, unknown>;
-  delete projected['frameHistory'];
-  delete projected['provider'];
-  delete projected['ethersProvider'];
-  // Transport routing is validator-local: local keys and observed profiles can
-  // differ while the certified output payload remains identical.
-  delete projected['pendingAccountInputSignerId'];
-  // Entity quorum Hankos and counterparty proofs authenticate already-bound
-  // hashes. They are attached after the Entity frame hash exists, so including
-  // them here would be circular. Retain the unsigned frames, hashes and nonces.
-  delete projected['hankoSignature'];
-  delete projected['currentFrameHanko'];
-  delete projected['counterpartyFrameHanko'];
-  delete projected['currentDisputeProofHanko'];
-  delete projected['counterpartyDisputeProofHanko'];
-  delete projected['counterpartySettlementHanko'];
-  projected['mempool'] = account.mempool.map(cloneAccountTxWithoutPostCommitHankos);
-  if (account.settlementWorkspace) {
-    projected['settlementWorkspace'] = projectSettlementWorkspace(account.settlementWorkspace);
-  } else {
-    delete projected['settlementWorkspace'];
+type AssertNoMissingAccountStateField<T extends never> = T;
+export type AccountStateFieldCoverage = AssertNoMissingAccountStateField<
+  Exclude<keyof AccountState, (typeof ACCOUNT_ROOT_COMMITTED_FIELDS)[number]>
+>;
+
+/**
+ * Deterministic Account replica fields committed by the parent Entity.
+ *
+ * This is an allowlist, not a spread-and-delete projection. A newly added
+ * AccountReplica field must therefore make an explicit protocol choice below
+ * instead of silently entering an Entity root.
+ */
+const ACCOUNT_ENTITY_COMMITTED_FIELDS = [
+  'status',
+  'mempool',
+  'currentFrame',
+  'swapOrderHistory',
+  'swapClosedOrders',
+  'currentHeight',
+  'pendingFrame',
+  'pendingSignatures',
+  'pendingAccountInput',
+  'lastOutboundFrameAck',
+  'rollbackCount',
+  'lastRollbackFrameHash',
+  'proofHeader',
+  'proofBody',
+  'abiProofBody',
+  'boardResealMigration',
+  'counterpartyBoardReseal',
+  'currentDisputeProofNonce',
+  'currentDisputeProofBodyHash',
+  'currentDisputeHash',
+  'counterpartyDisputeProofNonce',
+  'counterpartyDisputeProofBodyHash',
+  'counterpartyDisputeHash',
+  'disputeProofNoncesByHash',
+  'disputeProofBodiesByHash',
+  'disputeArgumentSnapshotsByHash',
+  'disputePrepare',
+  'activeDispute',
+  'pendingForwards',
+  'pendingWithdrawals',
+  'shadow',
+] as const satisfies readonly (keyof AccountReplica)[];
+
+/**
+ * These witnesses or routes depend on validator-local keys or are attached
+ * only after the committed hash exists. Including them would either fork
+ * honest validators or create a circular commitment.
+ */
+const ACCOUNT_ENTITY_LOCAL_FIELDS = [
+  'pendingAccountInputSignerId',
+  'hankoSignature',
+  'currentFrameHanko',
+  'counterpartyFrameHanko',
+  'currentDisputeProofHanko',
+  'counterpartyDisputeProofHanko',
+  'counterpartySettlementHanko',
+] as const satisfies readonly (keyof AccountReplica)[];
+
+export type AccountReplicaFieldCoverage = AssertNoMissingAccountStateField<
+  Exclude<
+    keyof AccountReplica,
+    | (typeof ACCOUNT_ROOT_COMMITTED_FIELDS)[number]
+    | (typeof ACCOUNT_ENTITY_COMMITTED_FIELDS)[number]
+    | (typeof ACCOUNT_ENTITY_LOCAL_FIELDS)[number]
+  >
+>;
+
+const projectAccountConsensusState = (account: AccountReplica): Record<string, unknown> => {
+  const projected: Record<string, unknown> = {};
+  for (const field of ACCOUNT_ENTITY_COMMITTED_FIELDS) {
+    const value: unknown = account[field];
+    if (value !== undefined) projected[field] = value;
   }
+  projected['mempool'] = account.mempool.map(cloneAccountTxWithoutPostCommitHankos);
   projected['pendingWithdrawals'] = projectPendingWithdrawals(account.pendingWithdrawals);
   if (account.pendingAccountInput) {
     projected['pendingAccountInput'] = cloneAccountInputWithoutPostCommitHankos(account.pendingAccountInput);
@@ -189,8 +227,7 @@ const projectAccountConsensusState = (account: AccountState): Record<string, unk
   } else {
     delete projected['lastOutboundFrameAck'];
   }
-  for (const field of ACCOUNT_ROOT_COMMITTED_FIELDS) delete projected[field];
-  return projected as Record<string, unknown>;
+  return projected;
 };
 
 const normalizeAuthoritySignerId = (value: string): string => value.trim().toLowerCase();
@@ -344,7 +381,7 @@ const writeEntityAccountCommitmentCache = (state: EntityState, cache: EntityAcco
   });
 };
 
-const accountCommitmentValueHash = (account: AccountState): string =>
+const accountCommitmentValueHash = (account: AccountReplica): string =>
   computeIntegrityDigest(
     UTF8.encode(
       encodeCanonicalConsensusValue(projectAccountConsensusState(account)),

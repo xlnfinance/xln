@@ -1,4 +1,4 @@
-import type { AccountState, JurisdictionEvent } from '../../../types';
+import type { AccountReplica, JurisdictionEvent } from '../../../types';
 import { getDefaultCreditLimit } from '../../utils';
 import { clearFinalizedSettlementWorkspace } from './settle-transition';
 import { buildAccountProofBody } from '../../../protocol/dispute/proof-builder';
@@ -8,7 +8,7 @@ import { createDefaultDelta } from '../../delta';
 const normalizedEntityId = (value: unknown): string => String(value ?? '').trim().toLowerCase();
 
 const assertAccountSettledEvent = (
-  account: AccountState,
+  account: AccountReplica,
   event: Extract<JurisdictionEvent, { type: 'AccountSettled' }>,
 ): number => {
   const left = normalizedEntityId(event.data.leftEntity);
@@ -29,7 +29,7 @@ const assertAccountSettledEvent = (
   return nonce;
 };
 
-const applyAccountSettledEvent = (account: AccountState, event: JurisdictionEvent): void => {
+const applyAccountSettledEvent = (account: AccountReplica, event: JurisdictionEvent): void => {
   if (event.type !== 'AccountSettled') return;
   const { tokenId, collateral, ondelta } = event.data;
   const tokenIdNum = Number(tokenId);
@@ -57,7 +57,7 @@ const applyAccountSettledEvent = (account: AccountState, event: JurisdictionEven
 };
 
 const activatePostSettlementProof = (
-  account: AccountState,
+  account: AccountReplica,
   counterpartyId: string,
   finalizedNonce: number,
   deltaTransformerAddress: string,
@@ -139,7 +139,7 @@ const activatePostSettlementProof = (
 };
 
 export const applyFinalizedAccountJEvents = (
-  account: AccountState,
+  account: AccountReplica,
   counterpartyId: string,
   events: readonly JurisdictionEvent[],
   deltaTransformerAddress: string,

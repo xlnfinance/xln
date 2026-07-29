@@ -1,6 +1,6 @@
 import type {
   AccountPeerInput,
-  AccountState,
+  AccountReplica,
   EntityCandidateEffect,
   EntityInput,
   EntityState,
@@ -58,7 +58,7 @@ type SuccessfulAccountInputContext = {
   env: RuntimeState;
   state: EntityState;
   input: AccountPeerInput;
-  account: AccountState;
+  account: AccountReplica;
   counterpartyId: string;
   createdAccount: boolean;
   result: HandleAccountInputResult;
@@ -68,7 +68,7 @@ type SuccessfulAccountInputContext = {
 };
 
 const buildCommittedSwapOfferEvent = (
-  account: AccountState,
+  account: AccountReplica,
   counterpartyId: string,
   offerId: string,
 ): SwapOfferEvent | null => {

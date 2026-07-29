@@ -1,4 +1,4 @@
-import type { AccountFrame, AccountInput, AccountState } from '../../types';
+import type { AccountFrame, AccountInput, AccountReplica } from '../../types';
 import { HEAVY_LOGS } from '../../utils';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import { isLeft } from '../utils';
@@ -18,7 +18,7 @@ export type AccountAckTarget = {
 };
 
 export const resolveAccountAckTarget = (
-  account: AccountState,
+  account: AccountReplica,
   input: AccountInput,
   normalizedInputHeight: number | undefined,
 ): AccountAckTarget => {
@@ -40,7 +40,7 @@ export const resolveAccountAckTarget = (
 };
 
 const isSameHeightSimultaneousProposalAck = (
-  account: AccountState,
+  account: AccountReplica,
   input: AccountInput,
   normalizedInputHeight: number | undefined,
 ): boolean => {
@@ -57,7 +57,7 @@ const isSameHeightSimultaneousProposalAck = (
 };
 
 export const handleUnmatchedAck = (
-  account: AccountState,
+  account: AccountReplica,
   input: AccountInput,
   normalizedInputHeight: number | undefined,
   ackProcessed: boolean,
@@ -142,7 +142,7 @@ export const handleUnmatchedAck = (
 };
 
 export const resolveSameHeightIncomingFrame = (
-  account: AccountState,
+  account: AccountReplica,
   receivedFrame: AccountFrame,
   events: string[],
   committedFrames: AccountCommittedFrame[],
@@ -154,10 +154,15 @@ export const resolveSameHeightIncomingFrame = (
   /*
    * Each side may propose once at a height. If both race, valid LEFT wins.
    *
-   * Depository.sol uses the same equal-height winner, so off-chain recovery
-   * and an adversarial on-chain dispute cannot disagree. Selected-proposer or
-   * alternating designs would require view changes or a contract migration.
-   * Wall time, retries, HTLC expiry and settlement evidence never participate.
+   * This is an off-chain Account-frame rule: Depository never compares frame
+   * heights. On-chain it binds the same canonical left/right account identity,
+   * requires the counterparty Hanko, and accepts only a strictly newer nonce.
+   * A unilateral same-height proposal therefore cannot become enforceable;
+   * only the collision winner can acquire both parties' authorization.
+   *
+   * Selected-proposer or alternating designs would add view state without
+   * improving this invariant. Wall time, retries, HTLC expiry and settlement
+   * evidence never participate in collision resolution.
    */
   const localIsLeft = isLeft(account.proofHeader.fromEntity, account.proofHeader.toEntity);
   if (HEAVY_LOGS) {
@@ -195,14 +200,15 @@ export const resolveSameHeightIncomingFrame = (
 };
 
 export const applySameHeightIncomingFrameRollback = (
-  account: AccountState,
+  account: AccountReplica,
   receivedFrame: AccountFrame,
   events: string[],
 ): void => {
   /*
    * Only RIGHT reaches rollback. Its signed proposal never became bilateral,
-   * and contract-level LEFT priority proves it cannot beat the accepted frame.
-   * Restore its intentions once so they can be proposed above the winner.
+   * so it lacks the counterparty Hanko required for on-chain enforcement.
+   * Restore its intentions once so they can be proposed above the accepted
+   * LEFT frame.
    *
    * Never invoke this because time elapsed: a sent Hanko does not expire.
    */

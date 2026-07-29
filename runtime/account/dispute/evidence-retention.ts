@@ -1,4 +1,4 @@
-import type { AccountState, AccountInput } from '../../types';
+import type { AccountReplica, AccountInput } from '../../types';
 import {
   assertJBatchWithinContractLimits,
   type JBatch,
@@ -79,7 +79,7 @@ const addBatchHashes = (
 };
 
 export const collectReachableDisputeEvidenceHashes = (
-  account: AccountState,
+  account: AccountReplica,
   jBatchState?: JBatchState,
 ): Set<string> => {
   const hashes = new Set<string>();
@@ -126,7 +126,7 @@ const compactRecord = <T>(
 };
 
 const assertRetainedProofBodies = (
-  record: AccountState['disputeProofBodiesByHash'],
+  record: AccountReplica['disputeProofBodiesByHash'],
   reachable: ReadonlySet<string>,
 ): void => {
   for (const hash of reachable) {
@@ -145,7 +145,7 @@ const assertRetainedProofBodies = (
 };
 
 const assertRetainedNonces = (
-  record: AccountState['disputeProofNoncesByHash'],
+  record: AccountReplica['disputeProofNoncesByHash'],
   reachable: ReadonlySet<string>,
 ): void => {
   for (const hash of reachable) {
@@ -157,7 +157,7 @@ const assertRetainedNonces = (
 };
 
 const assertRetainedSnapshots = (
-  record: AccountState['disputeArgumentSnapshotsByHash'],
+  record: AccountReplica['disputeArgumentSnapshotsByHash'],
   reachable: ReadonlySet<string>,
 ): void => {
   for (const hash of reachable) {
@@ -175,7 +175,7 @@ const recordHashCount = (records: Array<Record<string, unknown> | undefined>): n
   new Set(records.flatMap((record) => Object.keys(record ?? {}))).size;
 
 export const pruneUnreachableDisputeEvidence = (
-  account: AccountState,
+  account: AccountReplica,
   jBatchState?: JBatchState,
 ): { before: number; after: number } => {
   const reachable = collectReachableDisputeEvidenceHashes(account, jBatchState);

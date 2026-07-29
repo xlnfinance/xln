@@ -24,7 +24,7 @@ import {
   saveEnvToDB,
 } from '../runtime';
 import { dbRootPath } from '../runtime/platform';
-import type { AccountState, EntityReplica, EntityState, EntityTx, RuntimeState, JReplica, RoutedEntityInput } from '../types';
+import type { AccountReplica, EntityReplica, EntityState, EntityTx, RuntimeState, JReplica, RoutedEntityInput } from '../types';
 import { getPerfMs } from '../utils';
 import { buildRuntimeCheckpointSnapshot } from '../storage/wal/snapshot';
 import {
@@ -122,8 +122,8 @@ const summarizeBytes = (values: number[]): DocStats => {
 const encodedSize = (value: unknown): number => Buffer.byteLength(serializeTaggedJson(value));
 
 const compareAccountDocs = (
-  liveAccounts: ReadonlyMap<string, AccountState>,
-  loadedAccounts: ReadonlyMap<string, AccountState>,
+  liveAccounts: ReadonlyMap<string, AccountReplica>,
+  loadedAccounts: ReadonlyMap<string, AccountReplica>,
 ): {
   mismatches: number;
   firstMismatchKey: string | null;
@@ -220,7 +220,7 @@ const projectEntityCoreDoc = (state: EntityState): Record<string, unknown> => ({
   hubRebalanceConfig: state.hubRebalanceConfig,
 });
 
-const projectAccountDoc = (account: AccountState): Record<string, unknown> => ({
+const projectAccountDoc = (account: AccountReplica): Record<string, unknown> => ({
   leftEntity: account.leftEntity,
   rightEntity: account.rightEntity,
   status: account.status,

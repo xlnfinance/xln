@@ -1,5 +1,5 @@
 import type { EntityState } from '../../types';
-import type { AccountState } from '../../types';
+import type { AccountReplica } from '../../types';
 import { deriveDelta } from '../../account/utils';
 import { getDefaultRebalancePolicyForToken } from '../../account/rebalance-defaults';
 import { hasPendingSettlementTransition } from '../../account/tx/handlers/settle-transition';
@@ -70,7 +70,7 @@ const writeRebalanceAccountIndex = (
 const accountHasRebalanceWork = (
   state: EntityState,
   counterpartyId: string,
-  account: AccountState,
+  account: AccountReplica,
 ): boolean => {
   if ([...account.requestedRebalance.values()].some(amount => amount > 0n)) {
     return true;

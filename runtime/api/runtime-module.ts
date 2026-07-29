@@ -31,6 +31,7 @@ export type {
   JReplica,
   SwapBookEntry,
   EntityTx,
+  AccountReplica,
   AccountState,
   AccountFrame,
   AccountSnapshot,

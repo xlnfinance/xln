@@ -1,4 +1,4 @@
-import type { AccountState, EntityState } from '../../types';
+import type { AccountReplica, EntityState } from '../../types';
 import { getSignedSettlementWorkspaceTxError } from '../../account/tx/handlers/settle-transition';
 import { accountTxAwaitsPostCommitHanko } from './hanko-witness';
 import { isAccountControlTx } from '../../account/consensus/dispute-policy';
@@ -11,7 +11,7 @@ import { isAccountControlTx } from '../../account/consensus/dispute-policy';
  * the Entity for them would only manufacture empty Entity heights.
  */
 export const accountHasProposableMempool = (
-  account: AccountState,
+  account: AccountReplica,
   state: EntityState,
 ): boolean => {
   if (account.pendingFrame || account.mempool.length === 0) return false;

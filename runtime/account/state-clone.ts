@@ -1,4 +1,4 @@
-import type { AccountFrame, AccountState, AccountTx } from '../types';
+import type { AccountFrame, AccountReplica, AccountTx } from '../types';
 import {
   cloneCrossJurisdictionAccountFrameRoute,
   cloneCrossJurisdictionAccountInputRoute,
@@ -22,8 +22,8 @@ const cloneAccountTx = <T extends AccountTx>(tx: T): T => {
 };
 
 const cloneCrossJurisdictionState = (
-  target: AccountState,
-  source: AccountState,
+  target: AccountReplica,
+  source: AccountReplica,
 ): void => {
   target.mempool = (source.mempool ?? []).map(cloneAccountTx);
   target.currentFrame = cloneCrossJurisdictionAccountFrameRoute(
@@ -96,8 +96,8 @@ const cloneProofBodyEvidence = (value: unknown): unknown =>
   isProofBody(value) ? cloneProofBodyStruct(value) : value;
 
 const cloneDisputeEvidence = (
-  target: AccountState,
-  source: AccountState,
+  target: AccountReplica,
+  source: AccountReplica,
 ): void => {
   // Signed Solidity evidence and local positional calldata plans are different
   // maps. Never preserve aliases between them while cloning a candidate.
@@ -132,8 +132,8 @@ const cloneDisputeEvidence = (
  * owns its evidence aliases, cross-j carriers, and commitment cache.
  */
 export const applyAccountClonePolicy = (
-  target: AccountState,
-  source: AccountState,
+  target: AccountReplica,
+  source: AccountReplica,
   forSnapshot: boolean,
 ): void => {
   cloneDisputeEvidence(target, source);
@@ -146,9 +146,9 @@ export const cloneAccountFrame = (frame: AccountFrame): AccountFrame =>
 
 /** Clone Account State into an isolated validation or snapshot candidate. */
 export const cloneAccountState = (
-  account: AccountState,
+  account: AccountReplica,
   forSnapshot = false,
-): AccountState => {
+): AccountReplica => {
   const code = forSnapshot
     ? 'ACCOUNT_SNAPSHOT_STRUCTURED_CLONE_FAILED'
     : 'ACCOUNT_STATE_STRUCTURED_CLONE_FAILED';

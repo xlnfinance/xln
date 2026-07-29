@@ -53,92 +53,17 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   reach upward into process orchestration. Move the shared primitive to its
   canonical owner or pass a narrow dependency explicitly—never hide a reverse
   edge behind a re-export.
-- [ ] Close the still-live findings from the GPT audit of
-  `main@fddcac8bab9420f48168b0453cc05419f858f392`, reverified against
-  `main@f1de788d87619ff85a944df382cdb8b8ca02a979` instead of copying stale line
-  numbers. A second GPT read-only audit of the same old SHA independently
-  reported the same financial/runtime findings; it adds no new accepted item
-  until each claim is reproduced on current `main`. Current-code inspection
-  confirms the R→C duplicate lifecycle (`FIN-01/02`), non-durable faucet
-  admission (`SRV-01`) and duplicate/inexact UI money models (`UI-01`).
-  `FIN-03` and `FIN-04` are closed by exact nonce decoding and atomic
-  rebalance-batch construction with unchanged-root regressions. `ARCH-01` is
-  partly closed: finalized Account
-  J-claims now apply through Account-owned handlers, but dispute-finality still
-  mutates Account money state from Entity and remains open.
-  Reproduce `RUN-04` against the current single Runtime mempool before accepting
-  its old “concurrent ingress” explanation:
-  one writer is intentional, but a queued input can still become stale after
-  the preceding committed frame. Do not reopen already-fixed findings:
-  sticky-halt waiter recheck (`RUN-01`), post-WAL notification isolation
-  (`RUN-02`), candidate-only handle cleanup (`RUN-03`), canonical
-  `processRuntime` test imports (`TEST-01`) and exact `XLNModule` alias
-  (`API-01`) now have source/test evidence; the AST file/function ratchet closes
-  `ARCH-02` and must be tightened to zero debt rather than reimplemented.
-  The audit's 278-LOC deletion table is stale: `getAccountTimeoutStats`,
-  `writeFrameDbPutsWithRetention`, `j-events-account-lookup.ts` and
-  `getFirstSignerForEntity` are already absent, while the current dispute
-  finalization scrubber, Hanko witness code and every exported Level helper
-  have production or owning-test call sites. Do not delete those live paths.
-  Recheck static imports, dynamic entrypoints, browser exports and owning tests
-  immediately before any further deletion. Evidence at the reverified SHA:
-  `bun run check` passed and isolated full browser E2E passed `125/125`; these
-  prove the current baseline, not the still-open findings above. The concrete
-  open fixes remain decomposed below so each gets its own L1 → L2 → L3 gate.
-  A later full-E2E run exposed one additional durability bug not present in the
-  audit: a derived `scheduledWake` could be written as pending WAL input and
-  lose its process-local authorization on reload. The canonical durable
-  mempool projection now removes derived wakes and orphaned timestamps while
-  retaining their crontab source; L1 scheduled-wake tests and the exact
-  BrainVault reload L2 are green. Keep this regression in the full gate.
-  The later Kimi architecture/naming audit was rechecked on
-  `main@fe533f375efe`: its remaining live findings are already tracked below
-  (Entity-owned dispute-finality money mutation, explicit
-  `RuntimeReplica`/`AccountReplica` envelopes, the Account-frame
-  `decode*`/`isWellFormed*` validator pair, and a narrow Runtime facade).
-  Do not resurrect its stale items: the `settle` AccountInput bypass,
-  `addToAccountMempool`, `RuntimeSnapshot`, `EntityOutput`, and missing WAL
-  rejection of routed local `AccountInput.txs` are already deleted or fenced
-  with tests.
-  The later Claude audit of dirty `main@c4f9fab62836` was reverified on current
-  `main`: its typed Runtime-ingress provenance bypass, non-exhaustive Account
-  commitment invalidation, and orphaned same-height collision harness are
-  fixed with targeted evidence. Exact remote-input discard, exhaustive Account
-  commitment invalidation, hot-path root cost and the SCC-size ratchet now
-  have source/test evidence. Keep the remaining typed Runtime frame/live field
-  ownership task below. Do not copy stale path counts or reintroduce a second
-  audit backlog.
-- [ ] Close the independently verified Fable audit findings from
-  `main@a2e5d18a8e761221474a109146368d63e413ab9e` against current `main`; never
-  copy its stale paths or counts. Account-owned dispute
-  mutation, the Replica/State split, Activity projection, reverse-import
-  removal, oversized-function ratchet and history-view migration are already
-  owned by the more specific tasks below. Stale-settlement control flow now
-  uses an exhaustive typed rejection instead of parsing an error message.
-  Runtime events now enter history uniformly without name-based severity
-  guesses, and their frame-local exact dedupe is one canonical-keyed Map
-  instead of quadratic re-encoding. The additional open work is: eliminate
-  consensus non-null assertions by returning refined decoded/preflight types;
-  and treat every certified human-readable event string as frozen
-  protocol bytes until the typed `ActivityEvent` projection separates
-  consensus facts from localized display copy. Measure receiver Account-frame
-  clone plus double execution before considering any optimization, and retain
-  it unless byte-identical differential roots and failure parity prove a
-  simpler path. Rename `storage/index.ts` only as an isolated path-only change;
-  never combine it with WAL semantics. Split flat Runtime phase prefixes into
-  owner subdirectories only when the move removes navigation and does not add
-  barrels or compatibility re-exports. Delete closed audit claims from this
-  file as their owning regression turns green.
-  The follow-up GLM audit's exact EntityTx dispatcher is complete: the map is
-  exhaustive over reducer-owned EntityTx variants, while the three parent
-  wrappers fail if they reach the reducer. Its claim that every
-  `Number(account.jNonce)` is another chain-boundary vulnerability is
-  overstated: those fields are already typed Account safe integers; remove
-  redundant coercions after persisted-state validation is proven, but keep
-  FIN-03 scoped to unknown/string `uint256` ingress. Its ownership-gate idea is
-  accepted below, while its claim that calling an Account-owned finality
-  reducer from Entity is itself a money-boundary violation is rejected:
-  authenticated parent routing into the child reducer is the intended cascade.
+- [ ] Close only current, reproduced audit findings. The accepted remainder is
+  decomposed below: durable/idempotent off-chain faucet admission, the
+  Replica/State split, Activity/history migration, the last Entity→Runtime
+  reverse edge, exact Account-frame validation names, canonical financial
+  construction, oversized infrastructure functions and load/recovery proof.
+  Eliminate consensus non-null assertions by returning refined
+  decoded/preflight types. Treat certified human-readable event strings as
+  frozen protocol bytes until typed `ActivityEvent` projection separates
+  consensus facts from localized display copy. Recheck every external finding
+  on current `main`; never preserve stale paths, counts, closed claims or a
+  second audit backlog.
 - [ ] Make the audit surface mechanically legible after the function split.
   Keep production runtime at zero explicit `any` and zero TypeScript
   suppressions; drive the exact `as unknown as` debt to zero through typed
@@ -439,7 +364,10 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   `orchestrator/mm-node-run.ts::runMarketMakerNode`, and
   `orchestrator/hub-node.ts::run`. Split by lifecycle/ownership boundary, not
   arbitrary line ranges, and delete each exact allowance after its verified
-  extraction.
+  extraction. Split `entity/consensus/shared.ts` by consensus phase/owner until
+  it is no longer a 46-export navigation hub; add no replacement barrel.
+  Replace `prod-startup-wiring.test.ts` source-text assertions with executable
+  boundary/boot tests so refactors cannot pass or fail because of spelling.
 - [ ] Enforce an acyclic browser-safe core dependency graph. Keep cloning,
   codecs and state helpers as leaf modules that never import reducers,
   Runtime routing or chain adapters; add a cycle budget that fails on any new
@@ -451,6 +379,9 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   proposal construction and one Account open from the actual browser bundle,
   not only Bun source imports. Programming faults such as `TypeError` must
   preserve their source stack and halt, never be relabelled as rejected input.
+  Remove the `jdenticon` UI dependency from root `runtime/utils.ts`; visual
+  identity belongs to the frontend/view boundary and core leaf utilities must
+  remain browser-safe without importing presentation code.
   The Entity→Runtime ratchet is now `1`, down from `3`: rebalance selects its
   committed Entity leader and Cross-J emits the signer already committed by
   the route. The final edge is first-frame Account output routing before a

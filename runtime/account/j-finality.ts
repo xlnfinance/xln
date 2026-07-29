@@ -1,4 +1,4 @@
-import type { AccountState } from '../types';
+import type { AccountReplica } from '../types';
 import { freezeAccountForDispute } from './consensus/dispute-policy';
 import { invalidateAccountMapCommitment } from './map-commitment';
 import { clearFinalizedSettlementWorkspace } from './tx/handlers/settle-transition';
@@ -10,7 +10,7 @@ export type AccountDisputeFinalityResult = {
 };
 
 const clearFinalizedDeltas = (
-  account: AccountState,
+  account: AccountReplica,
   finalizedTokenIds: readonly number[],
 ): void => {
   for (const tokenId of finalizedTokenIds) {
@@ -35,7 +35,7 @@ const clearFinalizedDeltas = (
   }
 };
 
-const clearFinalizedCollections = (account: AccountState): void => {
+const clearFinalizedCollections = (account: AccountReplica): void => {
   if (account.swapOffers.size > 0) {
     account.swapOffers.clear();
     invalidateAccountMapCommitment(account, 'swapOffers');
@@ -60,7 +60,7 @@ const clearFinalizedCollections = (account: AccountState): void => {
  * veto or indefinitely delay on-chain settlement.
  */
 export const applyAccountDisputeFinality = (
-  account: AccountState,
+  account: AccountReplica,
   finalizedJNonce: number,
   finalizedTokenIds: readonly number[],
 ): AccountDisputeFinalityResult => {

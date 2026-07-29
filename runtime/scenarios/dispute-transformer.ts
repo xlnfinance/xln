@@ -6,7 +6,7 @@
 
 import { ethers } from 'ethers';
 
-import type { AccountFrame, AccountInput, AccountState, EntityTx, RuntimeState } from '../types';
+import type { AccountFrame, AccountInput, AccountReplica, EntityTx, RuntimeState } from '../types';
 import type { JAdapter } from '../jadapter/types';
 import { deriveDisputeTokenFinalization } from '../protocol/dispute/finalization';
 import { generateLockId, hashHtlcSecret } from '../protocol/htlc/utils';
@@ -42,7 +42,7 @@ const requireRegistered = (value: Registered | undefined, name: string): Registe
 const frameTxTypes = (frame: AccountFrame | undefined): string[] =>
   frame?.accountTxs.map((tx) => tx.type) ?? [];
 
-const accountEvidenceSummary = (account: AccountState | undefined) => ({
+const accountEvidenceSummary = (account: AccountReplica | undefined) => ({
   status: account?.status,
   pendingFrameTxs: frameTxTypes(account?.pendingFrame),
   mempool: account?.mempool,
@@ -75,7 +75,7 @@ const captureQueuedAck = (env: RuntimeState, toEntityId: string): AccountAckInpu
   return undefined;
 };
 
-const requirePendingResolution = (account: AccountState | undefined, side: string): AccountFrame => {
+const requirePendingResolution = (account: AccountReplica | undefined, side: string): AccountFrame => {
   const frame = account?.pendingFrame;
   const types = frameTxTypes(frame);
   if (!frame || !types.includes('htlc_resolve') || !types.includes('swap_resolve')) {
@@ -135,14 +135,14 @@ const deltaByToken = (frame: AccountFrame, tokenId: number) => {
   return delta;
 };
 
-const currentDelta = (account: AccountState, tokenId: number) => {
+const currentDelta = (account: AccountReplica, tokenId: number) => {
   const delta = account.deltas.get(tokenId);
   if (!delta) throw new Error(`DISPUTE_TRANSFORMER_BASE_DELTA_MISSING:${tokenId}`);
   return delta;
 };
 
 const combinedPendingOffdelta = (
-  base: AccountState,
+  base: AccountReplica,
   aliceFrame: AccountFrame,
   hubFrame: AccountFrame,
   tokenId: number,

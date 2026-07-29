@@ -11,14 +11,14 @@
  * Final state transition happens only in swap_resolve (counterparty side).
  */
 
-import type { AccountState, AccountTx } from '../../../types';
+import type { AccountReplica, AccountTx } from '../../../types';
 import { createStructuredLogger, shortOrder } from '../../../infra/logger';
 import { recordSwapCancelRequested } from './swap-history';
 
 const swapCancelLog = createStructuredLogger('account.swap');
 
 export async function handleSwapCancelRequest(
-  account: AccountState,
+  account: AccountReplica,
   accountTx: Extract<AccountTx, { type: 'swap_cancel_request' }>,
   byLeft: boolean,
   _currentHeight: number,

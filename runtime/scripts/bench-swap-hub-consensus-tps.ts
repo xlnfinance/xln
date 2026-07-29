@@ -14,7 +14,7 @@ import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../orderbook';
 import { createEmptyEnv } from '../runtime';
 import type {
   AccountInput,
-  AccountState,
+  AccountReplica,
   AccountTx,
   ConsensusConfig,
   CrossJurisdictionSwapRoute,
@@ -41,8 +41,8 @@ type BenchAccountCase = {
   kind: 'same' | 'cross';
   proposerEnv: RuntimeState;
   receiverEnv: RuntimeState;
-  proposer: AccountState;
-  receiver: AccountState;
+  proposer: AccountReplica;
+  receiver: AccountReplica;
   txs: AccountTx[];
   swapCount: number;
 };
@@ -243,7 +243,7 @@ const installJurisdiction = (env: RuntimeState, jurisdiction: JurisdictionConfig
   } as never);
 };
 
-const installDelta = (account: AccountState, tokenId: number, credit = 10n ** 30n): Delta => {
+const installDelta = (account: AccountReplica, tokenId: number, credit = 10n ** 30n): Delta => {
   const delta = createDefaultDelta(tokenId);
   delta.leftCreditLimit = credit;
   delta.rightCreditLimit = credit;
@@ -251,7 +251,7 @@ const installDelta = (account: AccountState, tokenId: number, credit = 10n ** 30
   return delta;
 };
 
-const makeAccount = (selfId: string, counterpartyId: string): AccountState => {
+const makeAccount = (selfId: string, counterpartyId: string): AccountReplica => {
   const [leftEntity, rightEntity] = selfId.toLowerCase() < counterpartyId.toLowerCase()
     ? [selfId, counterpartyId]
     : [counterpartyId, selfId];
@@ -296,11 +296,11 @@ const makeAccount = (selfId: string, counterpartyId: string): AccountState => {
 };
 
 const mirrorAccount = (
-  source: AccountState,
+  source: AccountReplica,
   selfId: string,
   counterpartyId: string,
-): AccountState => {
-  const mirror = structuredClone(source) as AccountState;
+): AccountReplica => {
+  const mirror = structuredClone(source) as AccountReplica;
   mirror.proofHeader = { fromEntity: selfId, toEntity: counterpartyId, nextProofNonce: 0 };
   return mirror;
 };

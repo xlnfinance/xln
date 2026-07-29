@@ -1,4 +1,4 @@
-import type { AccountState, RuntimeState } from '../../types';
+import type { AccountReplica, RuntimeState } from '../../types';
 import { createDisputeProofHashWithNonce } from '../../protocol/dispute/proof-builder';
 import {
   buildAccountProofBodyFromEnv,
@@ -32,8 +32,8 @@ export type ProposalProofResult =
 
 const buildDisputeProjection = (
   env: RuntimeState,
-  account: AccountState,
-  candidate: AccountState,
+  account: AccountReplica,
+  candidate: AccountReplica,
 ): DisputeProjection => {
   try {
     const proof = buildAccountProofBodyFromEnv(env, candidate);
@@ -65,8 +65,8 @@ const buildDisputeProjection = (
 };
 
 const persistDisputeProjection = (
-  account: AccountState,
-  candidate: AccountState,
+  account: AccountReplica,
+  candidate: AccountReplica,
   projection: DisputeProjection,
 ): void => {
   if (!projection.hash) return;
@@ -93,8 +93,8 @@ const persistDisputeProjection = (
 
 export const prepareProposalProof = async (
   env: RuntimeState,
-  account: AccountState,
-  candidate: AccountState,
+  account: AccountReplica,
+  candidate: AccountReplica,
   events: string[],
   checkpointProfile: (label: string) => void,
 ): Promise<ProposalProofResult> => {

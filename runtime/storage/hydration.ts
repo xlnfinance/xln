@@ -1,5 +1,5 @@
 import { rebuildOrderbookPairIndex, type BookState, type OrderbookExtState } from '../orderbook';
-import type { AccountState, EntityReplica, EntityState } from '../types';
+import type { AccountReplica, EntityReplica, EntityState } from '../types';
 import {
   cloneCrossJurisdictionBookAdmission,
   cloneCrossJurisdictionAccountFrameRoute,
@@ -42,13 +42,13 @@ const publicPendingCrossJurisdictionFillAcks = (
     },
   ])) : undefined;
 
-const publicSwapOffers = (offers: AccountState['swapOffers']): AccountState['swapOffers'] =>
+const publicSwapOffers = (offers: AccountReplica['swapOffers']): AccountReplica['swapOffers'] =>
   new Map(Array.from(offers.entries()).map(([id, offer]) => [
     id,
     cloneCrossJurisdictionSwapOfferRoute(offer),
   ]));
 
-const publicSwapHistory = (history: AccountState['swapOrderHistory']): AccountState['swapOrderHistory'] =>
+const publicSwapHistory = (history: AccountReplica['swapOrderHistory']): AccountReplica['swapOrderHistory'] =>
   history instanceof Map
     ? new Map(Array.from(history.entries()).map(([id, entry]) => [
         id,
@@ -56,7 +56,7 @@ const publicSwapHistory = (history: AccountState['swapOrderHistory']): AccountSt
       ]))
     : history;
 
-export const hydrateAccountDocFromStorage = (doc: StorageAccountDoc): AccountState => {
+export const hydrateAccountDocFromStorage = (doc: StorageAccountDoc): AccountReplica => {
   assertAccountMempoolWithinLimit(doc, 'storage.account.mempool');
   return {
   leftEntity: doc.leftEntity,

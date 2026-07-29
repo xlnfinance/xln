@@ -17,7 +17,7 @@
  * Reference: 2019src.txt line 2976 (they_requested_deposit)
  */
 
-import type { AccountState, AccountTx } from '../../../types';
+import type { AccountReplica, AccountTx } from '../../../types';
 import { isLeftEntity } from '../../../protocol/entity-id';
 import { deriveDelta } from '../../utils';
 import { deriveTransferOffdeltaChange } from '../../../protocol/delta-movement';
@@ -26,7 +26,7 @@ import { getDefaultRebalanceBaseFeeForToken } from '../../rebalance-defaults';
 type RequestCollateralTx = Extract<AccountTx, { type: 'request_collateral' }>;
 type RequestCollateralResult = { success: boolean; events: string[]; error?: string };
 
-const validateCollateralRequest = (account: AccountState, data: RequestCollateralTx['data']): string | undefined => {
+const validateCollateralRequest = (account: AccountReplica, data: RequestCollateralTx['data']): string | undefined => {
   if (data.amount <= 0n) return 'request_collateral: amount must be > 0';
   if (data.feeAmount < 0n) return 'request_collateral: feeAmount must be >= 0';
   if (!Number.isFinite(data.policyVersion) || data.policyVersion < 1) {
@@ -39,7 +39,7 @@ const validateCollateralRequest = (account: AccountState, data: RequestCollatera
 };
 
 const storeCollateralRequest = (
-  account: AccountState,
+  account: AccountReplica,
   tx: RequestCollateralTx,
   requestedByLeft: boolean,
   requestedAmount: bigint,
@@ -61,7 +61,7 @@ const storeCollateralRequest = (
 };
 
 export function handleRequestCollateral(
-  account: AccountState,
+  account: AccountReplica,
   accountTx: RequestCollateralTx,
   byLeft?: boolean,
   currentTimestamp = 0,
@@ -166,7 +166,7 @@ export interface RebalanceFeePolicy {
 }
 
 export function resolveAutoRebalanceFeePolicy(
-  account: AccountState,
+  account: AccountReplica,
   ourEntityId: string,
   tokenId: number,
 ): RebalanceFeePolicy | undefined {
@@ -190,7 +190,7 @@ export function resolveAutoRebalanceFeePolicy(
   };
 }
 
-export function checkAutoRebalance(account: AccountState, ourEntityId: string, counterpartyId: string): AccountTx[] {
+export function checkAutoRebalance(account: AccountReplica, ourEntityId: string, counterpartyId: string): AccountTx[] {
   const result: AccountTx[] = [];
 
   // New rebalance cycles must not start during settlement. A committed request

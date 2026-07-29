@@ -8,7 +8,7 @@ import {
 import { committedCrossJSourceDisputeDelayMs } from '../extensions/cross-j/prepared-route';
 import { MAX_ACCOUNT_FRAME_TXS } from '../account/consensus/frame';
 import type {
-  AccountState,
+  AccountReplica,
   AccountTx,
   CrossJurisdictionSwapRoute,
   EntityReplica,
@@ -231,7 +231,7 @@ const fitOpeningCohort = (
 export const selectCrossJOpeningAccountProposalTxs = (
   env: RuntimeState,
   state: EntityState,
-  account: AccountState,
+  account: AccountReplica,
 ): AccountTx[] | null | undefined => {
   const localLegs = crossJOpeningLegs(account.mempool);
   if (localLegs.length === 0) return undefined;

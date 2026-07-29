@@ -37,7 +37,7 @@ import { resolveEntityProposerId } from '../../runtime/entity-output-signer';
 import { addMessages, clearEntityFrameEvents, readEntityFrameEvents } from '../frame-events';
 import type {
   AccountPeerInput,
-  AccountState,
+  AccountReplica,
   AccountTx,
   EntityCandidateEffect,
   EntityFrameEvent,
@@ -501,7 +501,7 @@ type AccountFrameProposal = Awaited<ReturnType<typeof proposeAccountFrame>>;
 const proposeAccountFrameCandidate = async (
   context: ProposePendingAccountFramesContext,
   accountKey: string,
-  account: AccountState,
+  account: AccountReplica,
   crossJOpeningProposalTxs: AccountTx[] | undefined,
 ): Promise<AccountFrameProposal | undefined> => {
   const { env, currentEntityState: state, collectedHashes, proposableAccounts, storageChanges } = context;
@@ -570,7 +570,7 @@ const assertRequiredAccountResponsePreserved = (
 const routeFinalAccountInput = async (
   context: ProposePendingAccountFramesContext,
   accountKey: string,
-  account: AccountState,
+  account: AccountReplica,
   counterpartyId: string,
   input: AccountPeerInput,
   proposal: AccountFrameProposal | undefined,

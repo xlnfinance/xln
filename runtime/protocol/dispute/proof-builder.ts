@@ -1,7 +1,7 @@
 /**
- * ProofBody Builder - Constructs ABI-encoded dispute proofs from AccountState state
+ * ProofBody Builder - Constructs ABI-encoded dispute proofs from AccountReplica state
  *
- * This module bridges runtime AccountState state to on-chain dispute proofs.
+ * This module bridges runtime AccountReplica state to on-chain dispute proofs.
  * The proofBodyHash is what gets signed for bilateral consensus AND dispute submission.
  *
  * Reference: 2024 Channel.ts lines 434-546, Types.sol, DeltaTransformer.sol
@@ -11,7 +11,7 @@
  */
 
 import { ethers } from 'ethers';
-import type { AccountState } from '../../types.js';
+import type { AccountReplica } from '../../types.js';
 import type {
   RuntimeProofBody,
   RuntimeTransformerClause,
@@ -43,8 +43,8 @@ import {
 
 export type { DepositoryHankoDomain } from '../../hanko/onchain-domain.ts';
 
-type DisputeHashAccount = Pick<AccountState, 'leftEntity' | 'rightEntity' | 'proofHeader' | 'watchSeed'>;
-type SettlementHashAccount = Pick<AccountState, 'leftEntity' | 'rightEntity'>;
+type DisputeHashAccount = Pick<AccountReplica, 'leftEntity' | 'rightEntity' | 'proofHeader' | 'watchSeed'>;
+type SettlementHashAccount = Pick<AccountReplica, 'leftEntity' | 'rightEntity'>;
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 const ABI_CODER = ethers.AbiCoder.defaultAbiCoder();
@@ -134,7 +134,7 @@ type ProofDeltaIndex = {
   byTokenId: Map<number, number>;
 };
 
-const buildProofDeltaIndex = (account: AccountState): ProofDeltaIndex => {
+const buildProofDeltaIndex = (account: AccountReplica): ProofDeltaIndex => {
   const tokenIds: number[] = [];
   const offdeltas: bigint[] = [];
   const byTokenId = new Map<number, number>();
@@ -161,7 +161,7 @@ const requireProofDeltaIndex = (
 };
 
 const buildProofPayments = (
-  account: AccountState,
+  account: AccountReplica,
   deltaIndex: ReadonlyMap<number, number>,
 ): RuntimePayment[] =>
   sortTransformerEntries(account.locks.entries()).map(([lockId, lock]) => {
@@ -182,7 +182,7 @@ const buildProofPayments = (
   });
 
 const buildProofSwaps = (
-  account: AccountState,
+  account: AccountReplica,
   deltaIndex: ReadonlyMap<number, number>,
 ): RuntimeSwap[] =>
   sortTransformerEntries(account.swapOffers.entries()).flatMap(
@@ -207,7 +207,7 @@ const buildProofSwaps = (
   );
 
 const buildProofPulls = (
-  account: AccountState,
+  account: AccountReplica,
   deltaIndex: ReadonlyMap<number, number>,
 ): RuntimePull[] =>
   sortTransformerEntries((account.pulls ?? new Map()).entries())
@@ -231,7 +231,7 @@ const buildProofPulls = (
     }));
 
 const buildSubcontractTransformers = (
-  account: AccountState,
+  account: AccountReplica,
 ): RuntimeTransformerClause[] =>
   Array.from(account.subcontracts ?? [])
     .sort(([left], [right]) => compareStableText(left, right))
@@ -254,7 +254,7 @@ const buildSubcontractTransformers = (
     });
 
 const buildProofTransformers = (
-  account: AccountState,
+  account: AccountReplica,
   deltaIndex: ReadonlyMap<number, number>,
   deltaTransformerAddress: string,
 ): RuntimeTransformerClause[] => {
@@ -280,7 +280,7 @@ const buildProofTransformers = (
 };
 
 /**
- * Build ABI-encoded ProofBody from AccountState state
+ * Build ABI-encoded ProofBody from AccountReplica state
  *
  * This is the core function that transforms runtime state into on-chain proof format.
  * The resulting proofBodyHash is signed during bilateral consensus.
@@ -293,7 +293,7 @@ const buildProofTransformers = (
  * @returns ProofBodyResult with runtime, struct, encoded, and hash forms
  */
 export function buildAccountProofBody(
-  account: AccountState,
+  account: AccountReplica,
   deltaTransformerAddress: string,
 ): ProofBodyResult {
   const deltaIndex = buildProofDeltaIndex(account);

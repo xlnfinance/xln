@@ -1,7 +1,7 @@
 import { ethers } from 'ethers';
 
 import type {
-  AccountState,
+  AccountReplica,
   AccountTx,
   RuntimeState,
   SettlementDiff,
@@ -35,7 +35,7 @@ type SettleTransitionTx = Extract<AccountTx, { type: 'settle_transition' }>;
 type UpsertTransition = Extract<SettleTransitionTx['data'], { kind: 'upsert' }>;
 
 export const hasPendingSettlementTransition = (
-  account: Pick<AccountState, 'mempool' | 'pendingFrame'>,
+  account: Pick<AccountReplica, 'mempool' | 'pendingFrame'>,
 ): boolean =>
   account.mempool.some((tx) => tx.type === 'settle_transition') ||
   Boolean(account.pendingFrame?.accountTxs.some((tx) => tx.type === 'settle_transition'));
@@ -110,7 +110,7 @@ const assertSettlementOps = (ops: readonly SettlementOp[]): void => {
 };
 
 const canonicalWorkspaceBody = (
-  account: Pick<AccountState, 'leftEntity' | 'rightEntity'>,
+  account: Pick<AccountReplica, 'leftEntity' | 'rightEntity'>,
   workspace: Pick<SettlementWorkspace, 'revision' | 'ops' | 'lastModifiedByLeft' | 'executorIsLeft' | 'memo'>,
 ) => ({
   domain: WORKSPACE_DOMAIN,
@@ -124,14 +124,14 @@ const canonicalWorkspaceBody = (
 });
 
 export const createSettlementWorkspaceHash = (
-  account: Pick<AccountState, 'leftEntity' | 'rightEntity'>,
+  account: Pick<AccountReplica, 'leftEntity' | 'rightEntity'>,
   workspace: Pick<SettlementWorkspace, 'revision' | 'ops' | 'lastModifiedByLeft' | 'executorIsLeft' | 'memo'>,
 ): string => computeCanonicalMerkleRoot('settlement.workspace', [
   ['body', canonicalWorkspaceBody(account, workspace)],
 ]);
 
 export const assertCanonicalSettlementWorkspace = (
-  account: Pick<AccountState, 'leftEntity' | 'rightEntity'>,
+  account: Pick<AccountReplica, 'leftEntity' | 'rightEntity'>,
   workspace: SettlementWorkspace,
 ): string => {
   const stored = assertWorkspaceHash(workspace.workspaceHash, 'SETTLEMENT_WORKSPACE_HASH_INVALID');
@@ -147,7 +147,7 @@ const holdPlan = (diffs: readonly SettlementDiff[]): HoldPlan[] => diffs.map((di
 }));
 
 const releaseWorkspaceHolds = (
-  draft: AccountState,
+  draft: AccountReplica,
   workspace: SettlementWorkspace,
 ): Set<number> => {
   const changed = new Set<number>();
@@ -176,7 +176,7 @@ const releaseWorkspaceHolds = (
 };
 
 const addWorkspaceHolds = (
-  draft: AccountState,
+  draft: AccountReplica,
   workspace: SettlementWorkspace,
 ): Set<number> => {
   const changed = new Set<number>();
@@ -204,7 +204,7 @@ const addWorkspaceHolds = (
 };
 
 const assertCurrentWorkspace = (
-  account: AccountState,
+  account: AccountReplica,
   revision: number,
   suppliedHash: string,
 ): SettlementWorkspace => {
@@ -278,7 +278,7 @@ const resolveSettlementSealBoardAuthority = async (
 };
 
 const assertSettlementSealNonce = (
-  draft: AccountState,
+  draft: AccountReplica,
   workspace: SettlementWorkspace,
   settlementNonce: number,
 ): void => {
@@ -311,7 +311,7 @@ const assertSettlementSealNonce = (
 };
 
 const prepareSettlementSeal = (
-  draft: AccountState,
+  draft: AccountReplica,
   transition: Extract<SettleTransitionTx['data'], { kind: 'seal' }>,
   env: RuntimeState,
 ) => {
@@ -404,7 +404,7 @@ const prepareSettlementSeal = (
 type PreparedSettlementSeal = ReturnType<typeof prepareSettlementSeal>;
 
 const verifySettlementSealHankos = async (
-  draft: AccountState,
+  draft: AccountReplica,
   transition: Extract<SettleTransitionTx['data'], { kind: 'seal' }>,
   byLeft: boolean,
   env: RuntimeState,
@@ -458,7 +458,7 @@ const verifySettlementSealHankos = async (
 };
 
 const commitSettlementSeal = (
-  draft: AccountState,
+  draft: AccountReplica,
   byLeft: boolean,
   timestamp: number,
   prepared: PreparedSettlementSeal,
@@ -527,7 +527,7 @@ const commitSettlementSeal = (
 };
 
 const applySettlementSeal = async (
-  draft: AccountState,
+  draft: AccountReplica,
   transition: Extract<SettleTransitionTx['data'], { kind: 'seal' }>,
   byLeft: boolean,
   timestamp: number,
@@ -550,7 +550,7 @@ const applySettlementSeal = async (
 };
 
 const buildUpsertWorkspace = (
-  account: AccountState,
+  account: AccountReplica,
   transition: UpsertTransition,
   byLeft: boolean,
   timestamp: number,
@@ -598,8 +598,8 @@ const buildUpsertWorkspace = (
 };
 
 const commitDraft = (
-  account: AccountState,
-  draft: AccountState,
+  account: AccountReplica,
+  draft: AccountReplica,
   changedTokens: ReadonlySet<number>,
 ): void => {
   for (const tokenId of changedTokens) {
@@ -615,7 +615,7 @@ const commitDraft = (
 
 // AccountSettled is bilateral Account consensus too. If it wins a retry race,
 // release the exact workspace holds before removing the workspace body.
-export function clearFinalizedSettlementWorkspace(account: AccountState): void {
+export function clearFinalizedSettlementWorkspace(account: AccountReplica): void {
   const draft = cloneAccountState(account);
   const workspace = draft.settlementWorkspace;
   if (!workspace) return;
@@ -628,7 +628,7 @@ export function clearFinalizedSettlementWorkspace(account: AccountState): void {
 }
 
 export const getSignedSettlementWorkspaceTxError = (
-  account: AccountState,
+  account: AccountReplica,
   tx: AccountTx,
 ): string | undefined => {
   const workspace = account.settlementWorkspace;
@@ -642,7 +642,7 @@ export const getSignedSettlementWorkspaceTxError = (
 };
 
 export async function handleSettleTransition(
-  account: AccountState,
+  account: AccountReplica,
   tx: SettleTransitionTx,
   byLeft: boolean,
   timestamp: number,

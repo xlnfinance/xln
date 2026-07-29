@@ -8,7 +8,6 @@ const EXCLUDED_PATH = /\/(?:__tests__|qa|scenarios|scripts)\//;
 // are existing boundary debts, not permission: new files and larger counts
 // fail this gate, while every cleanup must delete its allowance.
 const DOUBLE_ASSERTION_DEBT: Readonly<Record<string, number>> = {
-  'runtime/entity/consensus/state-root.ts': 1,
   'runtime/entity/tx/handlers/account/orderbook-matching-helpers.ts': 2,
   'runtime/entity/tx/j-events-htlc.ts': 2,
   'runtime/hanko/codec.ts': 1,

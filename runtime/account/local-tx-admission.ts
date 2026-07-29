@@ -1,9 +1,9 @@
 import { appendAccountMempoolTxs } from './mempool';
 import { txFingerprint } from '../protocol/tx-multiset';
-import type { AccountLocalInput, AccountState, AccountTx } from '../types';
+import type { AccountLocalInput, AccountReplica, AccountTx } from '../types';
 import type { HandleAccountInputResult } from './consensus/types';
 
-type AccountMempoolQueue = Pick<AccountState, 'mempool' | 'pendingFrame'>;
+type AccountMempoolQueue = Pick<AccountReplica, 'mempool' | 'pendingFrame'>;
 
 /**
  * Admit one locally authorized Account transaction into the future-frame

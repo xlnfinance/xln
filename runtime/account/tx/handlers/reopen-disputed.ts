@@ -1,7 +1,7 @@
-import type { AccountState, AccountTx } from '../../../types';
+import type { AccountReplica, AccountTx } from '../../../types';
 
 export function handleReopenDisputed(
-  account: AccountState,
+  account: AccountReplica,
   accountTx: Extract<AccountTx, { type: 'reopen_disputed' }>,
 ): { success: boolean; events: string[]; error?: string } {
   const events: string[] = [];

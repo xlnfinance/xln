@@ -40,7 +40,7 @@ import { compareStableText, safeStringify } from '../protocol/serialization';
 import { registerRuntimeAdapterAuthSeed } from '../radapter/auth';
 import { type RuntimeAdapterSocket } from '../radapter/server';
 import { enqueueRuntimeInput } from '../runtime.ts';
-import type { AccountState, CrossJurisdictionSwapRoute, EntityInput, RuntimeState, SwapOffer } from '../types';
+import type { AccountReplica, CrossJurisdictionSwapRoute, EntityInput, RuntimeState, SwapOffer } from '../types';
 import { readInheritedChildSecrets, resolveChildSecret } from '../infra/child-secrets';
 import {
   BOOTSTRAP_POLL_MS,
@@ -1028,7 +1028,7 @@ export const getMarketMakerTokenIds = (
 };
 
 export const collectOfferIdsForAccount = (
-  account: Pick<AccountState, 'swapOffers' | 'mempool' | 'pendingFrame'> | null | undefined,
+  account: Pick<AccountReplica, 'swapOffers' | 'mempool' | 'pendingFrame'> | null | undefined,
 ): Set<string> => {
   const ids = new Set<string>();
   if (account?.swapOffers instanceof Map) {
@@ -1048,7 +1048,7 @@ export const collectOfferIdsForAccount = (
 };
 
 const collectCommittedOfferIdsForAccount = (
-  account: Pick<AccountState, 'swapOffers'> | null | undefined,
+  account: Pick<AccountReplica, 'swapOffers'> | null | undefined,
 ): Set<string> => {
   const ids = new Set<string>();
   if (account?.swapOffers instanceof Map) {

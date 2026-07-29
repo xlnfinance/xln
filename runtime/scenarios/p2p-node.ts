@@ -14,7 +14,7 @@ import { loadJurisdictions } from '../jurisdiction/jurisdiction-loader';
 import { DEFAULT_TOKENS, TOKEN_REGISTRATION_AMOUNT, getDefaultTokenSupply } from '../jurisdiction/default-tokens';
 import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/index.ts';
 import { hashHtlcSecret } from '../protocol/htlc/utils';
-import type { AccountState, Delta, EntityInput, RuntimeState, JurisdictionConfig } from '../types';
+import type { AccountReplica, Delta, EntityInput, RuntimeState, JurisdictionConfig } from '../types';
 import type { JAdapter, JTokenInfo } from '../jadapter/types';
 import type { Profile } from '../entity/profile';
 import { ethers } from 'ethers';
@@ -259,19 +259,19 @@ const getProfileByName = (env: P2PScenarioEnv, name: string): Profile | undefine
   return profile;
 };
 
-const getAccount = (env: P2PScenarioEnv, entityId: string, signerId: string, counterpartyId: string): AccountState | undefined => {
+const getAccount = (env: P2PScenarioEnv, entityId: string, signerId: string, counterpartyId: string): AccountReplica | undefined => {
   const replica = env.eReplicas.get(`${entityId}:${signerId}`);
   return replica?.state.accounts?.get(counterpartyId);
 };
 
-const getLeftEntity = (account: AccountState | undefined): string | null => {
+const getLeftEntity = (account: AccountReplica | undefined): string | null => {
   const from = account?.proofHeader?.fromEntity;
   const to = account?.proofHeader?.toEntity;
   if (!from || !to) return null;
   return from < to ? from : to;
 };
 
-const resolveSides = (account: AccountState | undefined, entityId: string, counterpartyId: string) => {
+const resolveSides = (account: AccountReplica | undefined, entityId: string, counterpartyId: string) => {
   const leftEntity = getLeftEntity(account);
   if (leftEntity) {
     return {
@@ -303,7 +303,7 @@ const describeDelta = (delta: Delta | undefined) => {
   };
 };
 
-const describeAccount = (account: AccountState | undefined) => {
+const describeAccount = (account: AccountReplica | undefined) => {
   if (!account) {
     return { exists: false };
   }

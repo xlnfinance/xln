@@ -8,7 +8,7 @@
  *   console.log(formatAccount(account, myEntityId));
  */
 
-import type { RuntimeState, EntityState, AccountState } from '../types';
+import type { RuntimeState, EntityState, AccountReplica } from '../types';
 import { getWallClockMs } from '../utils';
 import { listOpenSwapOffers } from '../orderbook/open-swap-offers';
 
@@ -394,7 +394,7 @@ export function formatEntity(entity: EntityState, options?: FormatOptions): stri
 /**
  * Format account machine state (A-Machine)
  */
-export function formatAccount(account: AccountState, myEntityId: string, options?: FormatOptions): string {
+export function formatAccount(account: AccountReplica, myEntityId: string, options?: FormatOptions): string {
   const opts = { ...DEFAULT_OPTIONS, ...options };
   const indent = opts.indentSize || 0;
   const output: string[] = [];

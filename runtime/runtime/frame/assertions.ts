@@ -1,4 +1,4 @@
-import type { AccountFrame, AccountState, RuntimeState } from '../../types';
+import type { AccountFrame, AccountReplica, RuntimeState } from '../../types';
 import { validateEntityState } from '../../entity/state-validation';
 import { computeFrameHash } from '../../account/consensus/index';
 import { assertAccountFrameDeltaIntegrity } from '../../account/frame';
@@ -21,7 +21,7 @@ const assertFrameHash = async (frame: AccountFrame, label: string): Promise<void
 };
 
 const assertAccountFrames = async (
-  account: AccountState,
+  account: AccountReplica,
   replicaKey: string,
   counterpartyId: string,
 ): Promise<void> => {

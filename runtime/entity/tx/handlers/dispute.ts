@@ -7,7 +7,7 @@
  */
 
 import type {
-  AccountState,
+  AccountReplica,
   EntityInput,
   EntityState,
   EntityTx,
@@ -91,7 +91,7 @@ const removeDisputedAccountOrdersFromBook = (
   state: EntityState,
   outputs: EntityInput[],
   counterpartyEntityId: string,
-  account: AccountState,
+  account: AccountReplica,
   storageChanges: RuntimeOverlayRecord[],
 ): { remoteOrderIds: string[] } => {
   let localRemoved = 0;
@@ -124,11 +124,11 @@ const removeDisputedAccountOrdersFromBook = (
 
 const markAccountDisputePreparing = (
   state: EntityState,
-  account: AccountState,
+  account: AccountReplica,
   description: string,
   minCooldownMs: number,
   pendingOrderbookRemovalIds: readonly string[],
-  startIntent: NonNullable<AccountState['disputePrepare']>['startIntent'],
+  startIntent: NonNullable<AccountReplica['disputePrepare']>['startIntent'],
 ): void => {
   const startedAt = Number(state.timestamp ?? 0);
   account.status = 'dispute_preparing';
@@ -148,7 +148,7 @@ const markAccountDisputePreparing = (
 
 const buildDisputeStartIntent = (
   tx: Extract<EntityTx, { type: 'prepareDispute' }>,
-): NonNullable<AccountState['disputePrepare']>['startIntent'] => ({
+): NonNullable<AccountReplica['disputePrepare']>['startIntent'] => ({
   description: tx.data.description ?? 'prepare-dispute',
   ...(tx.data.crossJurisdictionRouteId !== undefined
     ? { crossJurisdictionRouteId: tx.data.crossJurisdictionRouteId }

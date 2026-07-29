@@ -1,5 +1,5 @@
 import type {
-  AccountState,
+  AccountReplica,
   RuntimeState,
   EnvSnapshot,
   Profile as GossipProfile,
@@ -17,9 +17,9 @@ export function materializeReplicaView(candidate: EntityReplica | null | undefin
   return materialized;
 }
 
-export function materializeAccountView(candidate: AccountState | null | undefined): AccountState | null {
+export function materializeAccountView(candidate: AccountReplica | null | undefined): AccountReplica | null {
   if (!candidate) return null;
-  const materialized: AccountState = {
+  const materialized: AccountReplica = {
     ...candidate,
     deltas: candidate.deltas instanceof Map ? new Map(candidate.deltas) : candidate.deltas,
   };
@@ -161,11 +161,11 @@ function runtimeProjectionBooksMap(items: RuntimeProjectionBookDoc[] | undefined
 
 function activeEntityProjectionReplica(activeEntity: RuntimeProjectionActiveEntity): EntityReplica {
   const entityId = normalizeEntityId(activeEntity.core.entityId || activeEntity.summary.entityId);
-  const accounts = new Map<string, AccountState>();
+  const accounts = new Map<string, AccountReplica>();
   for (const item of activeEntity.accounts.items ?? []) {
     const key = runtimeProjectionAccountKey(entityId, item);
     if (!key) continue;
-    const account = materializeAccountView(item as AccountState) ?? (item as AccountState);
+    const account = materializeAccountView(item as AccountReplica) ?? (item as AccountReplica);
     accounts.set(key, account);
   }
   const books = runtimeProjectionBooksMap(activeEntity.books.items);
@@ -460,7 +460,7 @@ export function isHubProfile(profile: GossipProfile | undefined): boolean {
   return profile ? profile.metadata.isHub === true : false;
 }
 
-export function resolveAccountCounterparty(entityId: string, account: AccountState): string {
+export function resolveAccountCounterparty(entityId: string, account: AccountReplica): string {
   return account.leftEntity.toLowerCase() === entityId.toLowerCase()
     ? account.rightEntity
     : account.leftEntity;
@@ -468,9 +468,9 @@ export function resolveAccountCounterparty(entityId: string, account: AccountSta
 
 export function findLocalAccountByCounterparty(
   entityId: string,
-  accounts: Map<string, AccountState> | undefined,
+  accounts: Map<string, AccountReplica> | undefined,
   counterpartyId: string | undefined,
-): AccountState | null {
+): AccountReplica | null {
   if (!counterpartyId || !accounts) return null;
   const needle = counterpartyId.toLowerCase();
   for (const [accountKey, account] of accounts.entries()) {
@@ -480,7 +480,7 @@ export function findLocalAccountByCounterparty(
   return null;
 }
 
-export function isAccountLeftPerspective(entityId: string, account: AccountState): boolean {
+export function isAccountLeftPerspective(entityId: string, account: AccountReplica): boolean {
   const owner = String(entityId || '').trim().toLowerCase();
   const left = String(account.leftEntity || '').trim().toLowerCase();
   const right = String(account.rightEntity || '').trim().toLowerCase();

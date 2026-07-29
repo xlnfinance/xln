@@ -16,7 +16,7 @@
  * Run with: bun runtime/scenarios/swap.ts
  */
 
-import type { AccountState, RuntimeState, EntityInput } from '../types';
+import type { AccountReplica, RuntimeState, EntityInput } from '../types';
 import { ethers } from 'ethers';
 import { getBestAsk, SWAP_LOT_SCALE } from '../orderbook';
 import { getOpenSwapOfferEntries } from '../orderbook/open-swap-offers';
@@ -209,7 +209,7 @@ function getRegisteredEntity(signerAlias: string): RegisteredScenarioEntity {
   return registered;
 }
 
-function requireAccount(account: AccountState | undefined, label: string): AccountState {
+function requireAccount(account: AccountReplica | undefined, label: string): AccountReplica {
   if (!account) throw new Error(`SWAP_MISSING_ACCOUNT: ${label}`);
   return account;
 }

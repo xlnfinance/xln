@@ -1,5 +1,5 @@
 import type {
-  AccountState,
+  AccountReplica,
   EntityState,
   RuntimeState,
 } from '../../../../types';
@@ -53,7 +53,7 @@ export type FinalProofPayload = {
 export const selectFinalProof = (
   sourceState: EntityState,
   state: EntityState,
-  account: AccountState,
+  account: AccountReplica,
   counterpartyId: string,
   env: RuntimeState,
 ): FinalProofSelection | null => {
@@ -130,7 +130,7 @@ export const selectFinalProof = (
 
 export const verifyCounterProofIdentity = (
   sourceState: EntityState,
-  account: AccountState,
+  account: AccountReplica,
   counterpartyId: string,
   selection: FinalProofSelection,
 ): void => {
@@ -153,7 +153,7 @@ export const verifyCounterProofIdentity = (
 
 export const buildFinalProofPayload = (
   state: EntityState,
-  account: AccountState,
+  account: AccountReplica,
   counterpartyId: string,
   selection: FinalProofSelection,
   env: RuntimeState,

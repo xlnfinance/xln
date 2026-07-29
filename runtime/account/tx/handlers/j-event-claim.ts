@@ -1,4 +1,4 @@
-import type { AccountState, AccountTx, EntityCandidateEffect, RuntimeState } from '../../../types';
+import type { AccountReplica, AccountTx, EntityCandidateEffect, RuntimeState } from '../../../types';
 import type { AccountJClaimSession } from '../../j-claim-session';
 import { getAccountPerspective } from '../../perspective';
 import { applyAccountJClaimTransition } from '../../j-claim-transition';
@@ -9,7 +9,7 @@ import { createStructuredLogger, shortHash } from '../../../infra/logger';
 const jEventClaimLog = createStructuredLogger('account.j_event');
 
 export function handleJEventClaim(
-  account: AccountState,
+  account: AccountReplica,
   accountTx: Extract<AccountTx, { type: 'j_event_claim' }>,
   byLeft: boolean,
   _currentTimestamp: number,

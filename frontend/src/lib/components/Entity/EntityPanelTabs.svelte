@@ -4,7 +4,7 @@ import { createEventDispatcher } from "svelte";
 import { onDestroy, onMount } from "svelte";
 import type { ComponentType } from "svelte";
 import { MaxUint256, Wallet, hexlify, isAddress, parseEther, ZeroAddress } from "ethers";
-import type { AccountState, EntityTx, RuntimeState, EnvSnapshot, JAdapter, JBatch, Profile, RoutedEntityInput, RuntimeAdapterViewFrame, RuntimeInput, XLNModule } from "@xln/runtime/api/runtime-module";
+import type { AccountReplica, EntityTx, RuntimeState, EnvSnapshot, JAdapter, JBatch, Profile, RoutedEntityInput, RuntimeAdapterViewFrame, RuntimeInput, XLNModule } from "@xln/runtime/api/runtime-module";
 import { buildDebtEnforcementRuntimeInputFromProjection } from "@xln/runtime/protocol/payments/debt-enforcement";
 import { getDraftBatchReserveDelta } from "@xln/runtime/jurisdiction/batch";
 import type { Tab, EntityReplica } from "$lib/types/ui";
@@ -804,7 +804,7 @@ $: isAccountFocused = selectedAccountId !== null;
 $: selectedAccount = isAccountFocused && replica?.state?.accounts && selectedAccountId ? materializeAccountView(replica.state.accounts.get(selectedAccountId)) : null;
 $: accountIds = replica?.state?.accounts ? Array.from(replica.state.accounts.keys()).map((id) => String(id)) : [];
 $: workspaceAccountIds = accountIds.filter((id) => {
-  const account = replica?.state?.accounts?.get?.(id) as AccountState | undefined;
+  const account = replica?.state?.accounts?.get?.(id) as AccountReplica | undefined;
   if (!account) return false;
   return String(account.status || "") !== "disputed";
 });
@@ -1163,7 +1163,7 @@ function getAccountSpendableCapacity(counterpartyEntityId: string, tokenId: numb
   if (!derived) return 0n;
   return derived.outCapacity;
 }
-function isLocalExecutorForWorkspace(counterpartyEntityId: string, account: AccountState | null): boolean {
+function isLocalExecutorForWorkspace(counterpartyEntityId: string, account: AccountReplica | null): boolean {
   const workspace = account?.settlementWorkspace;
   const entityId = String(replica?.state?.entityId || tab.entityId || "")
     .trim()

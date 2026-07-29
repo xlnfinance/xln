@@ -1,4 +1,4 @@
-import type { AccountState, EntityState } from '@xln/runtime/api/runtime-module';
+import type { AccountReplica, EntityState } from '@xln/runtime/api/runtime-module';
 import { compareEntityAssetText } from './entity-asset-catalog';
 
 export type DisputedAccountView = {
@@ -11,7 +11,7 @@ export type CrossJTargetDisputeRisk = {
   tokenId: number;
 };
 
-export function buildDisputedAccountViews(accounts: Map<string, AccountState> | undefined): DisputedAccountView[] {
+export function buildDisputedAccountViews(accounts: Map<string, AccountReplica> | undefined): DisputedAccountView[] {
   if (!(accounts instanceof Map)) return [];
   const out: DisputedAccountView[] = [];
   for (const [counterpartyId, account] of accounts.entries()) {

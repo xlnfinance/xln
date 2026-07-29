@@ -1,4 +1,4 @@
-import type { AccountPeerInput, AccountState, EntityState } from '../../../../types';
+import type { AccountPeerInput, AccountReplica, EntityState } from '../../../../types';
 import {
   accountInputAck,
   accountInputProposal,
@@ -10,7 +10,7 @@ import { addMessage } from '../../../frame-events';
 const accountHandlerLog = createStructuredLogger('account.handler');
 
 export const frozenAccountInputLogLevel = (
-  account: Pick<AccountState, 'status' | 'activeDispute'>,
+  account: Pick<AccountReplica, 'status' | 'activeDispute'>,
   input: Pick<AccountPeerInput, 'kind'>,
 ): 'info' | 'warn' | 'error' => {
   // Reliable transport can legitimately retry a signed ACK after local
@@ -24,7 +24,7 @@ export const frozenAccountInputLogLevel = (
 };
 
 export const canProcessFrozenAccountInput = (
-  status: AccountState['status'],
+  status: AccountReplica['status'],
   hasActiveDispute: boolean,
   _hasAck: boolean,
   frameTxTypes: readonly string[],
@@ -40,7 +40,7 @@ export const canProcessFrozenAccountInput = (
 
 export const rejectFrozenAccountInput = (
   state: EntityState,
-  account: AccountState,
+  account: AccountReplica,
   input: AccountPeerInput,
   counterpartyId: string,
 ): boolean => {

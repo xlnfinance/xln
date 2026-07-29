@@ -22,6 +22,7 @@ const required = new Set([
   'EntityInput',
   'EntityTx',
   'AccountState',
+  'AccountReplica',
   'AccountFrame',
   'AccountInput',
   'AccountTx',

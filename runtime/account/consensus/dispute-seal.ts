@@ -1,6 +1,6 @@
 import type {
   AccountPeerInput,
-  AccountState,
+  AccountReplica,
   RuntimeState,
 } from '../../types';
 import { verifyHankoForHash } from '../../hanko/signing';
@@ -37,7 +37,7 @@ export type LocalDisputeDraft = {
  * witness only after the new draft reaches quorum.
  */
 export const replaceLocalDisputeDraft = (
-  account: AccountState,
+  account: AccountReplica,
   draft: LocalDisputeDraft,
 ): void => {
   delete account.currentDisputeProofHanko;
@@ -56,7 +56,7 @@ export const replaceLocalDisputeDraft = (
  */
 export const validateCounterpartyDisputeSeal = async (
   env: RuntimeState,
-  account: AccountState,
+  account: AccountReplica,
   input: AccountPeerInput,
   seal: ReturnType<typeof accountInputDisputeSeal>,
   context: string,
@@ -112,7 +112,7 @@ export const validateCounterpartyDisputeSeal = async (
 };
 
 export const storeCounterpartyDisputeSeal = (
-  account: AccountState,
+  account: AccountReplica,
   seal: ValidatedCounterpartyDisputeSeal | undefined,
 ): void => {
   if (!seal) return;

@@ -5,7 +5,7 @@ import {
   buildPreparedCrossJurisdictionRoute,
 } from '../extensions/cross-j/index';
 import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../orderbook';
-import type { AccountState, AccountTx, CrossJurisdictionSwapRoute, Delta } from '../types';
+import type { AccountReplica, AccountTx, CrossJurisdictionSwapRoute, Delta } from '../types';
 import { getPerfMs } from '../utils';
 import { createDefaultDelta } from '../account/delta';
 
@@ -55,7 +55,7 @@ const parseCli = (args: string[]): Cli => ({
   minTps: positiveInt(args, '--min-tps', 10_000),
 });
 
-const makeAccount = (leftEntity: string, rightEntity: string): AccountState => ({
+const makeAccount = (leftEntity: string, rightEntity: string): AccountReplica => ({
   leftEntity,
   rightEntity,
   domain: { chainId: 31337, depositoryAddress: addr('de') },
@@ -94,7 +94,7 @@ const makeAccount = (leftEntity: string, rightEntity: string): AccountState => (
   shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
 });
 
-const installDelta = (account: AccountState, tokenId: number, credit = 10n ** 30n): Delta => {
+const installDelta = (account: AccountReplica, tokenId: number, credit = 10n ** 30n): Delta => {
   const delta = createDefaultDelta(tokenId);
   delta.leftCreditLimit = credit;
   delta.rightCreditLimit = credit;
@@ -104,7 +104,7 @@ const installDelta = (account: AccountState, tokenId: number, credit = 10n ** 30
   return delta;
 };
 
-const seedSameSwapAccount = (swaps: number): AccountState => {
+const seedSameSwapAccount = (swaps: number): AccountReplica => {
   const left = entity('11');
   const right = entity('22');
   const account = makeAccount(left, right);
@@ -131,7 +131,7 @@ const seedSameSwapAccount = (swaps: number): AccountState => {
   return account;
 };
 
-const seedCrossSwapAccount = (swaps: number): AccountState => {
+const seedCrossSwapAccount = (swaps: number): AccountReplica => {
   const sourceUser = entity('33');
   const sourceHub = entity('44');
   const targetHub = entity('55');
@@ -252,7 +252,7 @@ const crossAckTx = (index: number): AccountTx => ({
 
 const runPass = async (
   swaps: number,
-): Promise<{ same: AccountState; cross: AccountState; elapsedMs: number; sameElapsedMs: number; crossElapsedMs: number }> => {
+): Promise<{ same: AccountReplica; cross: AccountReplica; elapsedMs: number; sameElapsedMs: number; crossElapsedMs: number }> => {
   const same = seedSameSwapAccount(1);
   const cross = seedCrossSwapAccount(1);
   const sameTemplate = structuredClone(same.swapOffers.get('same-0')!);

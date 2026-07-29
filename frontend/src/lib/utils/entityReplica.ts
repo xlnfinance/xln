@@ -1,4 +1,4 @@
-import type { AccountState, EntityReplica, RuntimeState } from '@xln/runtime/api/runtime-module';
+import type { AccountReplica, EntityReplica, RuntimeState } from '@xln/runtime/api/runtime-module';
 
 // These helpers operate on validated runtime state only.
 // The only nullable boundary is the outer env reference before a runtime is attached.
@@ -16,7 +16,7 @@ export function normalizeEntityId(value: unknown): string {
 }
 
 function matchesCounterparty(
-  account: AccountState,
+  account: AccountReplica,
   ownerEntityId: string,
   counterpartyEntityId: string,
 ): boolean {
@@ -29,7 +29,7 @@ function matchesCounterparty(
   return (left === owner && right === target) || (right === owner && left === target);
 }
 
-function resolveCounterpartyFromAccount(account: AccountState, ownerEntityId: string): string {
+function resolveCounterpartyFromAccount(account: AccountReplica, ownerEntityId: string): string {
   const owner = normalizeEntityId(ownerEntityId);
   const left = normalizeEntityId(account.leftEntity);
   const right = normalizeEntityId(account.rightEntity);
@@ -69,7 +69,7 @@ export function getCounterpartyAccount(
   envLike: EnvLike,
   ownerEntityId: string,
   counterpartyEntityId: string,
-) : { key: string; account: AccountState } | null {
+) : { key: string; account: AccountReplica } | null {
   const replica = getReplicaForEntity(envLike, ownerEntityId);
   if (!replica) return null;
   const accounts = replica.state.accounts;
@@ -97,12 +97,12 @@ export function hasCounterpartyAccount(
   return !!getCounterpartyAccount(envLike, ownerEntityId, counterpartyEntityId);
 }
 
-export function isCommittedAccount(account: AccountState | null | undefined): boolean {
+export function isCommittedAccount(account: AccountReplica | null | undefined): boolean {
   if (!account) return false;
   return Number(account.currentFrame?.height ?? account.currentHeight ?? 0) > 0;
 }
 
-export function isOpeningAccount(account: AccountState | null | undefined): boolean {
+export function isOpeningAccount(account: AccountReplica | null | undefined): boolean {
   if (!account) return false;
   return !isCommittedAccount(account);
 }

@@ -1,7 +1,7 @@
 import type {
   AccountFrame,
   AccountInput,
-  AccountState,
+  AccountReplica,
   EntityCandidateEffect,
   RuntimeState,
 } from '../../types';
@@ -53,7 +53,7 @@ type PendingAckCertificateResult =
 
 const verifyPendingAckCertificate = async (
   env: RuntimeState,
-  account: AccountState,
+  account: AccountReplica,
   ack: AccountFrameAck,
   ackHeight: number,
   validatedSeal: ValidatedCounterpartyDisputeSeal | undefined,
@@ -134,7 +134,7 @@ const verifyPendingAckCertificate = async (
 
 const applyPendingFrameTransactions = async (
   env: RuntimeState,
-  account: AccountState,
+  account: AccountReplica,
   pendingFrame: AccountFrame,
   committedJClaims: AccountJClaimSession,
   timedOutHashlocks: string[],
@@ -182,7 +182,7 @@ const applyPendingFrameTransactions = async (
 };
 
 const installPendingFrameCommit = (
-  account: AccountState,
+  account: AccountReplica,
   input: AccountInput,
   pendingFrame: AccountFrame,
   ack: AccountFrameAck,
@@ -224,7 +224,7 @@ const installPendingFrameCommit = (
 
 const queuePostAckWork = async (
   env: RuntimeState,
-  account: AccountState,
+  account: AccountReplica,
   input: AccountInput,
   committedHeight: number,
   securityContext: AccountInputSecurityContext,
@@ -248,7 +248,7 @@ const queuePostAckWork = async (
 
 export const handlePendingFrameAck = async (
   env: RuntimeState,
-  account: AccountState,
+  account: AccountReplica,
   input: AccountInput,
   ackHeight: number | undefined,
   validatedSeal: ValidatedCounterpartyDisputeSeal | undefined,

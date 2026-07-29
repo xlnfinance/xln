@@ -1,4 +1,4 @@
-import type { AccountState } from '../types';
+import type { AccountReplica } from '../types';
 
 export type OffchainFaucetAccountState = {
   exists: boolean;
@@ -9,7 +9,7 @@ export type OffchainFaucetAccountState = {
 };
 
 export const hasSettledOffchainFaucetCapacitySnapshot = (
-  account: AccountState | null | undefined,
+  account: AccountReplica | null | undefined,
 ): boolean =>
   Boolean(account?.currentFrame) &&
   Number(account?.currentHeight ?? 0) > 0 &&
@@ -17,7 +17,7 @@ export const hasSettledOffchainFaucetCapacitySnapshot = (
   Number(account?.mempool?.length ?? 0) === 0;
 
 export const describeOffchainFaucetAccountState = (
-  account: AccountState | null | undefined,
+  account: AccountReplica | null | undefined,
 ): OffchainFaucetAccountState => ({
   exists: !!account,
   currentHeight: Number(account?.currentHeight ?? 0),
@@ -27,7 +27,7 @@ export const describeOffchainFaucetAccountState = (
 });
 
 export const shouldRejectOffchainFaucetForSettledCapacity = (input: {
-  account: AccountState | null | undefined;
+  account: AccountReplica | null | undefined;
   senderOutCapacity: bigint;
   amount: bigint;
 }): boolean =>

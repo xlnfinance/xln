@@ -3,7 +3,7 @@
  * frame construction, and the hash manifest that Entity consensus certifies.
  */
 
-import type { AccountState, AccountTx, RuntimeState } from '../../types';
+import type { AccountReplica, AccountTx, RuntimeState } from '../../types';
 import { removeCommittedTxsFromMempool } from '../../protocol/tx-multiset';
 import { getPerfMs, HEAVY_LOGS } from '../../utils';
 import { createStructuredLogger, shortId } from '../../infra/logger';
@@ -32,7 +32,7 @@ const accountProposalSlowMs = (): number =>
 type ProposalValidation = Awaited<ReturnType<typeof validateProposalTransactions>>;
 
 const finishEmptyProposal = (
-  account: AccountState,
+  account: AccountReplica,
   validation: ProposalValidation,
 ): ProposeAccountFrameResult | undefined => {
   if (validation.validTxs.length > 0) return undefined;
@@ -78,7 +78,7 @@ const logProposalProfile = (
 };
 
 const logProposalAdmission = (
-  account: AccountState,
+  account: AccountReplica,
   proposalWindow: readonly AccountTx[],
 ): void => {
   if (!HEAVY_LOGS) return;
@@ -95,7 +95,7 @@ const logProposalAdmission = (
 
 export async function proposeAccountFrame(
   env: RuntimeState,
-  account: AccountState,
+  account: AccountReplica,
   entityFrameTimestamp: number,
   entityJHeight?: number, // Optional: J-height from entity state for HTLC consensus
   accountJClaimNodeStore?: AccountJClaimNodeStore,

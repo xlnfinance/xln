@@ -1,11 +1,11 @@
-import type { AccountState, AccountTx } from '../../../types';
+import type { AccountReplica, AccountTx } from '../../../types';
 import { deriveDelta } from '../../utils';
 import { deriveTransferOffdeltaChange } from '../../../protocol/delta-movement';
 
 type RebalanceRefundTx = Extract<AccountTx, { type: 'rebalance_refund' }>;
 
 export function handleRebalanceRefund(
-  account: AccountState,
+  account: AccountReplica,
   tx: RebalanceRefundTx,
   byLeft: boolean,
 ): { success: boolean; events: string[]; error?: string } {

@@ -1,6 +1,6 @@
 import type {
   AccountInput,
-  AccountState,
+  AccountReplica,
   AccountTx,
   EntityInput,
   EntityState,
@@ -173,7 +173,7 @@ const requireDraftWitness = (
   throw new Error(`HANKO_DRAFT_UNSEALED:hash=${hash}:type=${type}:entityHeight=${entityHeight}`);
 };
 
-const getOutboundAccount = (state: EntityState | undefined, input: AccountInput): AccountState | undefined =>
+const getOutboundAccount = (state: EntityState | undefined, input: AccountInput): AccountReplica | undefined =>
   state?.accounts.get(input.toEntityId);
 
 const getAckFrameHash = (state: EntityState | undefined, input: AccountInput): string | undefined => {
@@ -269,7 +269,7 @@ const sealAccountInput = (
 
 const sealSettlementAccountTx = (
   tx: AccountTx,
-  account: AccountState,
+  account: AccountReplica,
   state: EntityState,
   witness: Map<string, HankoWitnessEntry>,
   entityHeight: number,
@@ -313,7 +313,7 @@ const sealSettlementAccountTx = (
  */
 export const accountTxAwaitsPostCommitHanko = (
   tx: AccountTx,
-  account: AccountState,
+  account: AccountReplica,
   state: EntityState,
 ): boolean => {
   if (tx.type !== 'settle_transition' || tx.data.kind !== 'seal') return false;

@@ -1,5 +1,5 @@
 import type {
-  AccountState,
+  AccountReplica,
   EntityState,
   RuntimeState,
 } from '../../../../types';
@@ -162,7 +162,7 @@ export const hasQueuedDisputeFinalize = (
 ): boolean => hasQueuedDisputeOperation(state, counterpartyEntityId, 'disputeFinalizations');
 
 export const collectDisputeEvidenceReadinessIssues = (
-  account: AccountState,
+  account: AccountReplica,
   now: number,
 ): string[] => {
   const issues: string[] = [];

@@ -1,4 +1,4 @@
-import type { AccountState, CrossJurisdictionSwapRoute } from '../../../types';
+import type { AccountReplica, CrossJurisdictionSwapRoute } from '../../../types';
 import {
   CROSS_J_MAX_FILL_RATIO,
   buildCommittedCrossJurisdictionPullBinding,
@@ -22,7 +22,7 @@ export type CrossFillProgress = ReturnType<
 >;
 
 export const syncSourcePullBinding = (
-  account: AccountState,
+  account: AccountReplica,
   route: CrossJurisdictionSwapRoute,
 ): void => {
   const pullId = route.sourcePull?.pullId;

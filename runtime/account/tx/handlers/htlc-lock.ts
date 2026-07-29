@@ -11,7 +11,7 @@
  * - Enforces revealBeforeHeight for griefing protection
  */
 
-import type { AccountState, AccountTx, HtlcLock } from '../../../types';
+import type { AccountReplica, AccountTx, HtlcLock } from '../../../types';
 import { deriveDelta } from '../../utils';
 import { FINANCIAL, LIMITS } from '../../../constants';
 import { ensureDelta } from '../delta-utils';
@@ -22,7 +22,7 @@ import { encryptedHtlcLayer, hashEncryptedHtlcLayer } from '../../../protocol/ht
 type HtlcLockTx = Extract<AccountTx, { type: 'htlc_lock' }>;
 
 const validateHtlcLock = (
-  account: AccountState,
+  account: AccountReplica,
   tx: HtlcLockTx,
   currentTimestamp: number,
   currentHeight: number,
@@ -45,7 +45,7 @@ const validateHtlcLock = (
 };
 
 export async function handleHtlcLock(
-  account: AccountState,
+  account: AccountReplica,
   accountTx: HtlcLockTx,
   byLeft: boolean,
   currentTimestamp: number,

@@ -1,5 +1,5 @@
 import type {
-  AccountState,
+  AccountReplica,
   EntityState,
   LendingLoan,
   LendingPoolPosition,
@@ -224,7 +224,7 @@ export const createEntityFrameCandidateState = (
   }
   const shellSource = {
     ...source,
-    accounts: new Map<string, AccountState>(),
+    accounts: new Map<string, AccountReplica>(),
   };
   delete shellSource.orderbookExt;
   const candidate = cloneEntityStateWithPolicy(shellSource, false, false);

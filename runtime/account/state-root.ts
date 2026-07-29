@@ -1,6 +1,12 @@
 import { ethers } from 'ethers';
 
-import type { AccountState, AccountStateDomain, JurisdictionConfig, SettlementWorkspace } from '../types';
+import type {
+  AccountReplica,
+  AccountState,
+  AccountStateDomain,
+  JurisdictionConfig,
+  SettlementWorkspace,
+} from '../types';
 import { compareStableText } from '../protocol/serialization';
 import { buildHexKeyedMerkle, type RadixMerkleHashAlgorithm } from '../protocol/radix-merkle';
 import { computeIntegrityDigest } from '../infra/integrity-checksum';
@@ -460,14 +466,14 @@ const settlementOverlayState = (
 };
 
 const pendingWithdrawalOverlayState = (
-  withdrawals: AccountState['pendingWithdrawals'],
-): Map<string, Omit<AccountState['pendingWithdrawals'] extends Map<string, infer Entry> ? Entry : never, 'signature'>> =>
+  withdrawals: AccountReplica['pendingWithdrawals'],
+): Map<string, Omit<AccountReplica['pendingWithdrawals'] extends Map<string, infer Entry> ? Entry : never, 'signature'>> =>
   new Map(Array.from(withdrawals.entries()).map(([requestId, withdrawal]) => {
     const { signature: _signature, ...state } = withdrawal;
     return [requestId, state];
   }));
 
-const accountEntityOverlayState = (account: AccountState): unknown => ({
+const accountEntityOverlayState = (account: AccountReplica): unknown => ({
   status: account.status,
   disputePrepare: account.disputePrepare,
   settlementWorkspace: settlementOverlayState(account.settlementWorkspace),
@@ -478,7 +484,7 @@ const accountEntityOverlayState = (account: AccountState): unknown => ({
 });
 
 export const computeAccountShadowRoot = (
-  accounts: ReadonlyMap<string, AccountState>,
+  accounts: ReadonlyMap<string, AccountReplica>,
 ): string => computeCanonicalMerkleRoot(
   'entity.account-shadow',
   Array.from(accounts.entries()).map(([counterpartyId, account]) => [

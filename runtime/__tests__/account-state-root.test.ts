@@ -8,14 +8,14 @@ import {
 } from '../account/state-root';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
 import { buildAccountProofBody } from '../protocol/dispute/proof-builder';
-import type { AccountState } from '../types';
+import type { AccountReplica, AccountState } from '../types';
 import { createDefaultDelta } from '../account/delta';
 
 const LEFT = `0x${'11'.repeat(32)}`;
 const RIGHT = `0x${'22'.repeat(32)}`;
 const DOMAIN = { chainId: 31337, depositoryAddress: `0x${'33'.repeat(20)}` };
 
-const account = (): AccountState => ({
+const account = (): AccountReplica => ({
   leftEntity: LEFT,
   rightEntity: RIGHT,
   domain: DOMAIN,
@@ -41,7 +41,7 @@ const account = (): AccountState => ({
   proofHeader: { fromEntity: LEFT, toEntity: RIGHT, nextProofNonce: 1 },
   proofBody: { tokenIds: [], deltas: [] },
   pendingWithdrawals: new Map(),
-} as AccountState);
+});
 
 describe('canonical account state root', () => {
   test('direct canonical RLP encoder stays byte-identical to the recursive oracle', () => {

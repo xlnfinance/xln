@@ -2,7 +2,7 @@
  * UI-specific types for XLN frontend
  *
  * These types are frontend-only and not shared with backend.
- * For shared types (EntityState, AccountState, etc.), import from $types
+ * For shared types (EntityState, AccountReplica, etc.), import from $types
  */
 
 import type { EnvSnapshot, EntityInput, RuntimeTx, LogLevel, LogCategory, FrameLogEntry } from '$types';
@@ -10,6 +10,7 @@ import type { EnvSnapshot, EntityInput, RuntimeTx, LogLevel, LogCategory, FrameL
 // Re-export commonly used backend types for convenience
 export type {
   EntityReplica,
+  AccountReplica,
   AccountState,
   EntityState,
   EntityTx,

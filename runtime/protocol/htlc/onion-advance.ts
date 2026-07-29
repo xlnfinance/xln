@@ -2,7 +2,7 @@ import { encodeCanonicalConsensusValue } from '../canonical-consensus-value';
 import { keccak256 } from 'ethers';
 
 import { HTLC } from '../../constants';
-import type { AccountState, AccountTx, EntityState, EntityTx, RuntimeState, HtlcLock } from '../../types';
+import type { AccountReplica, AccountTx, EntityState, EntityTx, RuntimeState, HtlcLock } from '../../types';
 
 import { getCertifiedBoardNodeStore, resolveObserverCertifiedBoardHash } from '../../jurisdiction/board-registry';
 import { verifyHankoForHash } from '../../hanko/signing';
@@ -22,7 +22,7 @@ import { hashHtlcSecret } from './utils';
 export type HtlcOnionAdvanceTx = Extract<EntityTx, { type: 'htlcOnionAdvance' }>;
 export type HtlcEncryptedEnvelope = HtlcEnvelope | MultiRecipientCiphertext | string | undefined;
 
-export const committedHtlcLockEnvelope = (account: AccountState, lockId: string): HtlcEncryptedEnvelope => {
+export const committedHtlcLockEnvelope = (account: AccountReplica, lockId: string): HtlcEncryptedEnvelope => {
   for (const frame of [account.pendingFrame, account.currentFrame]) {
     const tx = frame?.accountTxs.find(
       candidate => candidate.type === 'htlc_lock' && candidate.data.lockId === lockId,

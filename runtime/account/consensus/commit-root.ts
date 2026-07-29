@@ -1,4 +1,4 @@
-import type { AccountState } from '../../types';
+import type { AccountReplica } from '../../types';
 import { createStructuredLogger } from '../../infra/logger';
 import { safeStringify } from '../../protocol/serialization';
 import {
@@ -21,11 +21,11 @@ const commitLog = createStructuredLogger('account.commit');
  * actual financial state diverged.
  */
 export const assertLiveCommitMatchesFrame = (
-  account: AccountState,
+  account: AccountReplica,
   expectedRoot: string,
   side: 'proposer' | 'receiver',
   height: number,
-  validatedMachine?: AccountState,
+  validatedMachine?: AccountReplica,
 ): void => {
   const incrementalRoot = computeAccountStateRoot(account);
   if (incrementalRoot === expectedRoot) return;

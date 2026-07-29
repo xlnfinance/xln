@@ -46,14 +46,14 @@ import {
 import { projectAccountAfterSettlement } from '../../../account/settlement-projection';
 import { buildAccountProofBodyFromEnv } from '../../../account/consensus/helpers';
 
-import type { AccountState } from '../../../types';
+import type { AccountReplica } from '../../../types';
 
 const settleLog = createStructuredLogger('entity.settle');
 
 const buildPostSettlementDisputeProof = (
   env: RuntimeState,
   entityState: EntityState,
-  account: AccountState,
+  account: AccountReplica,
   settlementNonce: number,
   diffs: readonly SettlementDiff[],
   forgiveTokenIds: readonly number[],
@@ -85,7 +85,7 @@ type SettlementSealDraft = {
 };
 
 export const buildSettlementSealDraft = (
-  account: AccountState,
+  account: AccountReplica,
   entityState: EntityState,
   counterpartyEntityId: string,
   env: RuntimeState,
@@ -165,7 +165,7 @@ export const buildSettlementSealDraft = (
 
 type AccountTxTarget = { accountId: string; tx: import('../../../types').AccountTx };
 
-const assertNoPendingSettlementTransition = (account: AccountState): void => {
+const assertNoPendingSettlementTransition = (account: AccountReplica): void => {
   if (hasPendingSettlementTransition(account)) throw new Error('SETTLEMENT_TRANSITION_ALREADY_PENDING');
 };
 
@@ -360,7 +360,7 @@ const assertCompiledSettlementDiffs = (
 const prepareSettlementExecution = (
   env: RuntimeState,
   entityState: EntityState,
-  account: AccountState,
+  account: AccountReplica,
   workspace: SettlementWorkspace,
 ) => {
   const { diffs, forgiveTokenIds } = compileOps(
@@ -465,7 +465,7 @@ const verifySettlementHanko = async (
 const verifySettlementExecutionHankos = async (
   env: RuntimeState,
   entityState: EntityState,
-  account: AccountState,
+  account: AccountReplica,
   counterpartyEntityId: string,
   counterpartyHanko: string,
   prepared: PreparedSettlementExecution,
@@ -694,7 +694,7 @@ type CommittedSettlementFollowup = {
  * and must not be signed or used as canonical settlement state.
  */
 export async function processCommittedSettlementTransitionFollowup(
-  account: AccountState,
+  account: AccountReplica,
   accountTx: AccountTx,
   committedFrame: AccountFrame,
   counterpartyEntityId: string,

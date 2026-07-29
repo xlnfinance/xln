@@ -1,5 +1,5 @@
 import type {
-  AccountState,
+  AccountReplica,
   EntityState,
   RuntimeState,
 } from '../../../../types';
@@ -17,7 +17,7 @@ import type { StartEvidence } from './start-evidence';
 export const verifyStartHanko = async (
   sourceState: EntityState,
   state: EntityState,
-  account: AccountState,
+  account: AccountReplica,
   counterpartyId: string,
   evidence: StartEvidence,
   env: RuntimeState,

@@ -3,7 +3,7 @@
  * Routes AccountTx to the handler that mutates one bilateral account clone/state.
  */
 
-import type { AccountState, AccountTx, EntityCandidateEffect, RuntimeState } from '../../types';
+import type { AccountReplica, AccountTx, EntityCandidateEffect, RuntimeState } from '../../types';
 import type { AccountJClaimSession } from '../j-claim-session';
 import { invalidateAccountMapCommitment, type AccountCommittedMap } from '../map-commitment';
 import type { ApplyAccountTxResult } from './apply-types';
@@ -13,7 +13,7 @@ const missingCommitmentInvalidation = (_tx: never): never => {
   throw new Error('ACCOUNT_TX_COMMITMENT_INVALIDATION_MISSING');
 };
 
-const swapDeltaKeys = (account: AccountState, tx: AccountTx): number[] => {
+const swapDeltaKeys = (account: AccountReplica, tx: AccountTx): number[] => {
   if (tx.type === 'swap_offer') return [tx.data.giveTokenId, tx.data.wantTokenId];
   if (tx.type === 'swap_resolve') {
     const offer = account.swapOffers.get(tx.data.offerId);
@@ -28,7 +28,7 @@ const swapDeltaKeys = (account: AccountState, tx: AccountTx): number[] => {
 };
 
 const invalidateCommittedMapsForTx = (
-  account: AccountState,
+  account: AccountReplica,
   tx: AccountTx,
   deltaKeysBeforeMutation: readonly number[],
 ): void => {
@@ -99,7 +99,7 @@ const invalidateCommittedMapsForTx = (
 };
 
 export async function applyAccountTx(
-  account: AccountState,
+  account: AccountReplica,
   accountTx: AccountTx,
   byLeft: boolean,
   currentTimestamp: number = 0,

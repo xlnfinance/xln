@@ -5,7 +5,7 @@
    */
   import { createEventDispatcher } from 'svelte';
   import { xlnFunctions, xlnInstance } from '../../stores/xlnStore';
-  import type { EntityReplica, AccountState } from '$lib/types/ui';
+  import type { EntityReplica, AccountReplica } from '$lib/types/ui';
   import Dropdown from '$lib/components/UI/Dropdown.svelte';
   import { entityAvatar } from '$lib/utils/avatar';
   import { getAccountUiStatus, getAccountUiStatusLabel, type AccountUiStatus } from '$lib/utils/accountStatus';
@@ -44,7 +44,7 @@
     const accountsMap = currentReplica.state.accounts;
 
     for (const [counterpartyId, account] of accountsMap.entries()) {
-      const acc = account as AccountState;
+      const acc = account as AccountReplica;
       const normalizedCounterpartyId = String(counterpartyId || '').trim().toLowerCase();
       const profileName = names.get(normalizedCounterpartyId) || '';
       const status = getAccountUiStatus(acc);

@@ -1,8 +1,8 @@
 <script lang="ts">
-  import type { AccountState, EntityReplica, Tab } from '$lib/types/ui';
+  import type { AccountReplica, EntityReplica, Tab } from '$lib/types/ui';
   import AccountPanel from './AccountPanel.svelte';
 
-  export let selectedAccount: AccountState;
+  export let selectedAccount: AccountReplica;
   export let selectedAccountId: string;
   export let tab: Tab;
   export let replica: EntityReplica | null = null;

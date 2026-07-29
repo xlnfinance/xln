@@ -47,7 +47,7 @@ import { compareStableText, safeStringify } from '../../protocol/serialization';
 import { nodeProcess } from '../../infra/runtime-process';
 import type {
   AccountTx,
-  AccountState,
+  AccountReplica,
   CertifiedEntityFrameLink,
   ConsensusConfig,
   ConsensusOutputOrigin,
@@ -1159,7 +1159,7 @@ export const stashPendingCrossJurisdictionFillAck = (
 const admitGeneratedAccountTx = async (
   env: RuntimeState,
   state: EntityState,
-  account: AccountState,
+  account: AccountReplica,
   tx: AccountTx,
 ): Promise<boolean> => {
   const result = await applyAccountInput(env, account, createLocalAccountInput(account, state.entityId, [tx]));

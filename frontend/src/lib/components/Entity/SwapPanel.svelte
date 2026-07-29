@@ -1,6 +1,6 @@
 <script lang="ts">
 import { tick } from 'svelte';
-import type { AccountState, EntityReplica, Tab } from '$lib/types/ui';
+import type { AccountReplica, EntityReplica, Tab } from '$lib/types/ui';
 import { writable } from 'svelte/store';
 import type { BookState, RuntimeState, SwapAccountCapacityView, SwapInboundCapacityPlan } from '@xln/runtime/api/runtime-module';
 import {
@@ -2320,14 +2320,14 @@ $: ownOrderbookEntityIds = Array.from(
       .filter(Boolean),
   ),
 );
-function accountMachines(): Array<{ accountId: string; account: AccountState }> {
+function accountMachines(): Array<{ accountId: string; account: AccountReplica }> {
   if (!(currentReplica?.state?.accounts instanceof Map)) return [];
   return Array.from(currentReplica.state.accounts.entries()).map(([accountId, account]) => ({
     accountId: String(accountId),
     account,
   }));
 }
-function collectPanelOfferLifecycles(selectSource: (account: AccountState) => Map<string, unknown> | undefined): OfferLifecycle[] {
+function collectPanelOfferLifecycles(selectSource: (account: AccountReplica) => Map<string, unknown> | undefined): OfferLifecycle[] {
   return collectOfferLifecyclesFrom(accountMachines(), selectSource, computeSwapPriceTicksSafe);
 }
 $: {

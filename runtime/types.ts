@@ -14,7 +14,7 @@ import type {
 import type { HankoString } from './types/hanko';
 import type {
   AccountFrame,
-  AccountState,
+  AccountReplica,
   AccountTx,
   AccountHistoryRecord,
   HtlcNoteKey,
@@ -157,6 +157,7 @@ export type {
   AccountInput,
   AccountLocalInput,
   AccountPeerInput,
+  AccountReplica,
   AccountState,
   AccountDisputeSeal,
   AccountStateDomain,
@@ -837,7 +838,9 @@ export interface EntityState {
   // Financial invariant: entity reserves are always keyed by numeric tokenId.
   // Never persist or pass string token keys through live state.
   reserves: Map<number, bigint>; // tokenId -> amount only, metadata from TOKEN_REGISTRY
-  accounts: Map<string, AccountState>; // canonicalKey "left:right" -> account state
+  // The Entity commits the deterministic Account replica envelope; the nested
+  // Account frame commits only AccountState through accountStateRoot.
+  accounts: Map<string, AccountReplica>; // canonicalKey "left:right" -> replica
   // External EOA balances/allowances observed through finalized J snapshots.
   // Keyed by owner EOA, then token/spender keys, so multi-validator entities
   // keep one deterministic map instead of signer-local side-channel state.

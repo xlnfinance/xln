@@ -1,5 +1,5 @@
 import type {
-  AccountState,
+  AccountReplica,
   EntityInput,
   EntityState,
   EntityTx,
@@ -36,7 +36,7 @@ type StartTx = Extract<EntityTx, { type: 'disputeStart' }>;
 const queueDisputeStart = (
   sourceState: EntityState,
   state: EntityState,
-  account: AccountState,
+  account: AccountReplica,
   tx: StartTx,
   evidence: StartEvidence,
   outputs: EntityInput[],

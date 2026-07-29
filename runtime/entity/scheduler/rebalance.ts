@@ -1,5 +1,5 @@
 import type {
-  AccountState,
+  AccountReplica,
   EntityInput,
   EntityTx,
   RuntimeState,
@@ -162,7 +162,7 @@ const recordStaleR2CRetry = (
 
 const validateR2CRequestPolicy = (
   run: RebalanceRun,
-  account: AccountState,
+  account: AccountReplica,
   counterpartyId: string,
   tokenId: number,
   requestedAmount: bigint,
@@ -236,7 +236,7 @@ const validateR2CRequestPolicy = (
 
 const evaluateR2CRequest = (
   run: RebalanceRun,
-  account: AccountState,
+  account: AccountReplica,
   counterpartyId: string,
   tokenId: number,
   requestedAmountRaw: bigint,
@@ -415,7 +415,7 @@ const queueR2CTargets = (
 const collectC2RAccountWork = (
   run: RebalanceRun,
   counterpartyId: string,
-  account: AccountState,
+  account: AccountReplica,
   canTouchBatch: boolean,
 ): { plan?: C2RPlan; executable: boolean } => {
   if (account.pendingFrame || hasPendingSettlementTransition(account)) {

@@ -1,4 +1,4 @@
-import type { AccountState, SwapOffer } from '../../../../types';
+import type { AccountReplica, SwapOffer } from '../../../../types';
 import type { SwapOfferEvent } from '../../apply-types';
 import { deriveDelta } from '../../../utils';
 import { cloneCrossJurisdictionRoute } from '../../../../extensions/cross-j';
@@ -16,7 +16,7 @@ type SwapOfferResult = {
 };
 
 export const commitSwapOffer = (
-  account: AccountState,
+  account: AccountReplica,
   tx: SwapOfferTx,
   admission: SwapOfferAdmission,
   prepared: PreparedSwapOfferAmounts,

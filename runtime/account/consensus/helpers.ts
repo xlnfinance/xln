@@ -1,4 +1,4 @@
-import type { AccountState, AccountTx, Delta, EntityCandidateEffect, RuntimeState } from '../../types';
+import type { AccountReplica, AccountTx, Delta, EntityCandidateEffect, RuntimeState } from '../../types';
 import { createStructuredLogger } from '../../infra/logger';
 import { txFingerprint } from '../../protocol/tx-multiset';
 import {
@@ -69,7 +69,7 @@ export function requireAccountDeltaTransformerAddress(
   return matches[0]!.deltaTransformer;
 }
 
-export const buildAccountProofBodyFromEnv = (env: RuntimeState, account: AccountState) =>
+export const buildAccountProofBodyFromEnv = (env: RuntimeState, account: AccountReplica) =>
   buildAccountProofBody(
     account,
     requireAccountDeltaTransformerAddress(env, account),
@@ -83,7 +83,7 @@ export function shouldIncludeToken(delta: Delta, totalDelta: bigint): boolean {
 
 type SettlementVector = Map<number, { collateral: bigint; ondelta: bigint }>;
 
-export function captureSettlementVector(account: AccountState): SettlementVector {
+export function captureSettlementVector(account: AccountReplica): SettlementVector {
   const out: SettlementVector = new Map();
   for (const [tokenId, delta] of account.deltas.entries()) {
     out.set(tokenId, { collateral: delta.collateral, ondelta: delta.ondelta });
@@ -91,7 +91,7 @@ export function captureSettlementVector(account: AccountState): SettlementVector
   return out;
 }
 
-export function prependUniqueMempoolTxs(account: AccountState, txs: AccountTx[]): number {
+export function prependUniqueMempoolTxs(account: AccountReplica, txs: AccountTx[]): number {
   if (txs.length === 0) return 0;
   const existing = new Set(account.mempool.map(txFingerprint));
   const missing: AccountTx[] = [];
@@ -123,7 +123,7 @@ export function prependUniqueMempoolTxs(account: AccountState, txs: AccountTx[])
 }
 
 export function assertNoUnilateralSettlementMutation(
-  account: AccountState,
+  account: AccountReplica,
   before: SettlementVector,
   tx: AccountTx,
   phase: string,
@@ -153,7 +153,7 @@ export { resolveAutoRebalanceFeePolicy };
 
 export async function runPostFrameAutoRebalanceCheck(
   _env: RuntimeState,
-  account: AccountState,
+  account: AccountReplica,
   ourEntityId: string,
   counterpartyEntityId: string,
   frameHeight: number,

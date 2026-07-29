@@ -1,4 +1,4 @@
-import type { AccountState, AccountTx, RuntimeState } from '../../types';
+import type { AccountReplica, AccountTx, RuntimeState } from '../../types';
 import { cloneAccountState } from '../state-clone';
 import { isLeft } from '../utils';
 import { HEAVY_LOGS } from '../../utils';
@@ -28,7 +28,7 @@ export type ProposalTransactionEffects = {
 };
 
 export type ValidatedProposalTransactions = ProposalTransactionEffects & {
-  clonedMachine: AccountState;
+  clonedMachine: AccountReplica;
   validTxs: AccountTx[];
   validMempoolTxs: AccountTx[];
   txsToRemove: AccountTx[];
@@ -38,7 +38,7 @@ export type ValidatedProposalTransactions = ProposalTransactionEffects & {
 
 type ProposalTransactionContext = {
   env: RuntimeState;
-  account: AccountState;
+  account: AccountReplica;
   proposalWindow: readonly AccountTx[];
   frameTimestamp: number;
   frameJHeight: number;
@@ -69,7 +69,7 @@ const shouldUseOptimisticProposalBatch = (txs: readonly AccountTx[]): boolean =>
     tx.type === 'swap_offer');
 
 const isCrossJurisdictionPullResolveTx = (
-  account: AccountState,
+  account: AccountReplica,
   tx: AccountTx,
 ): tx is Extract<AccountTx, { type: 'pull_resolve' }> => {
   if (tx.type !== 'pull_resolve') return false;
@@ -85,7 +85,7 @@ const isCrossJurisdictionPullResolveTx = (
 };
 
 const isRefreshableStaleSettlementSeal = (
-  account: AccountState,
+  account: AccountReplica,
   tx: AccountTx,
   rejection: AccountTxRejection | undefined,
 ): boolean => {
@@ -111,7 +111,7 @@ const isRefreshableStaleSettlementSeal = (
 
 const applyProposalTransaction = async (
   context: ProposalTransactionContext,
-  machine: AccountState,
+  machine: AccountReplica,
   tx: AccountTx,
   jClaimSession: ReturnType<typeof createAccountJClaimSession>,
 ): Promise<AppliedProposalTx> => {
@@ -136,7 +136,7 @@ const applyProposalTransaction = async (
 };
 
 const collectSuccessfulTransaction = (
-  account: AccountState,
+  account: AccountReplica,
   effects: ProposalTransactionEffects,
   validTxs: AccountTx[],
   validMempoolTxs: AccountTx[],
@@ -167,7 +167,7 @@ const collectSuccessfulTransaction = (
 };
 
 const throwCriticalProposalFailure = (
-  account: AccountState,
+  account: AccountReplica,
   tx: AccountTx,
   error: string | undefined,
 ): void => {
@@ -202,7 +202,7 @@ const throwCriticalProposalFailure = (
 
 const classifyFailedTransaction = (
   context: ProposalTransactionContext,
-  machine: AccountState,
+  machine: AccountReplica,
   applied: AppliedProposalTx,
   effects: ProposalTransactionEffects,
 ): 'deferred' | 'remove' => {
@@ -230,7 +230,7 @@ const classifyFailedTransaction = (
 const validateOptimisticBatch = async (
   context: ProposalTransactionContext,
   jClaimSession: ReturnType<typeof createAccountJClaimSession>,
-): Promise<{ machine: AccountState; applied: AppliedProposalTx[] } | null> => {
+): Promise<{ machine: AccountReplica; applied: AppliedProposalTx[] } | null> => {
   if (!shouldUseOptimisticProposalBatch(context.proposalWindow)) return null;
   const machine = cloneAccountState(context.account);
   const applied: AppliedProposalTx[] = [];

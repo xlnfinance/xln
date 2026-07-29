@@ -8,7 +8,7 @@ import {
   validateObject,
   validateString,
 } from '../protocol/validation-primitives';
-import type { AccountState } from '../types';
+import type { AccountReplica } from '../types';
 import { assertAccountJClaimAccumulatorState } from './j-claim-accumulator';
 import { assertAccountMempoolWithinLimit } from './mempool';
 import { validateDelta } from './delta-validation';
@@ -128,7 +128,7 @@ const validateRebalanceState = (
 function assertAccountState(
   account: Record<string, unknown>,
   context: string,
-): asserts account is Record<string, unknown> & AccountState {
+): asserts account is Record<string, unknown> & AccountReplica {
   const left = validateString(account['leftEntity'], `${context}.leftEntity`);
   const right = validateString(account['rightEntity'], `${context}.rightEntity`);
   if (
@@ -145,7 +145,7 @@ function assertAccountState(
     );
   }
   try {
-    normalizeAccountStateDomain(account['domain'] as AccountState['domain']);
+    normalizeAccountStateDomain(account['domain'] as AccountReplica['domain']);
   } catch (error) {
     throw new FinancialDataCorruptionError(`${context}.domain is invalid`, {
       cause: error instanceof Error ? error.message : String(error),
@@ -155,7 +155,7 @@ function assertAccountState(
   validateString(account['status'], `${context}.status`);
   validateArray(account['mempool'], `${context}.mempool`);
   assertAccountMempoolWithinLimit(
-    account as Pick<AccountState, 'mempool'>,
+    account as Pick<AccountReplica, 'mempool'>,
     `${context}.mempool`,
   );
   decodeAccountFrame(account['currentFrame'], `${context}.currentFrame`);
@@ -173,10 +173,10 @@ function assertAccountState(
   validatePendingSignatures(account, context);
   validateNumber(account['rollbackCount'], `${context}.rollbackCount`);
   assertAccountJClaimAccumulatorState(
-    account['leftPendingJClaims'] as AccountState['leftPendingJClaims'],
+    account['leftPendingJClaims'] as AccountReplica['leftPendingJClaims'],
   );
   assertAccountJClaimAccumulatorState(
-    account['rightPendingJClaims'] as AccountState['rightPendingJClaims'],
+    account['rightPendingJClaims'] as AccountReplica['rightPendingJClaims'],
   );
   validateNumber(account['lastFinalizedJHeight'], `${context}.lastFinalizedJHeight`);
   validateMapInstance(account['pendingWithdrawals'], `${context}.pendingWithdrawals`);
@@ -188,8 +188,8 @@ function assertAccountState(
 
 export const validateAccountState = (
   value: unknown,
-  context = 'AccountState',
-): AccountState => {
+  context = 'AccountReplica',
+): AccountReplica => {
   const account = validateObject(value, context);
   assertAccountState(account, context);
   return account;

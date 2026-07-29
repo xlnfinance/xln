@@ -3,7 +3,7 @@
  * replaying any transaction. This phase never mutates live Account state.
  */
 
-import type { AccountFrame, AccountInput, AccountState, RuntimeState } from '../../types';
+import type { AccountFrame, AccountInput, AccountReplica, RuntimeState } from '../../types';
 import { verifyHankoForHash } from '../../hanko/signing';
 import { createStructuredLogger, shortId } from '../../infra/logger';
 import { HEAVY_LOGS } from '../../utils';
@@ -73,7 +73,7 @@ const verifyIncomingFrameHanko = async (
 };
 
 const handleStaleIncomingFrame = async (
-  account: AccountState,
+  account: AccountReplica,
   input: AccountInput,
   receivedFrame: AccountFrame,
   replayCurrentHeight: number,
@@ -102,7 +102,7 @@ const handleStaleIncomingFrame = async (
 };
 
 const validateIncomingFrameProposer = (
-  account: AccountState,
+  account: AccountReplica,
   input: AccountInput,
   receivedFrame: AccountFrame,
   events: string[],
@@ -128,7 +128,7 @@ const validateIncomingFrameProposer = (
 };
 
 const validateIncomingFrameChain = (
-  account: AccountState,
+  account: AccountReplica,
   input: AccountInput,
   receivedFrame: AccountFrame,
   normalizedInputHeight: number | undefined,
@@ -203,7 +203,7 @@ const validateIncomingFrameChain = (
 };
 
 const validateIncomingFrameDeadline = (
-  account: AccountState,
+  account: AccountReplica,
   input: AccountInput,
   receivedFrame: AccountFrame,
   securityContext: AccountInputSecurityContext,
@@ -242,7 +242,7 @@ const validateIncomingFrameDeadline = (
 
 export const preflightIncomingAccountFrame = async (
   env: RuntimeState,
-  account: AccountState,
+  account: AccountReplica,
   input: AccountInput,
   normalizedInputHeight: number | undefined,
   replayCurrentHeight: number,
