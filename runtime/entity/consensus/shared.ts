@@ -44,7 +44,7 @@ import {
 import { cloneIsolatedProposedEntityFrame } from '../../protocol/runtime-input-clone';
 import { compareStableText, safeStringify } from '../../protocol/serialization';
 import { recordEntityFrameHistory } from '../../runtime/env-events';
-import { nodeProcess } from '../../runtime/platform';
+import { nodeProcess } from '../../infra/runtime-process';
 import { recordRuntimeSecurityIncident, resolveRuntimeSecurityIncident } from '../../runtime/security-incidents';
 import type {
   AccountTx,

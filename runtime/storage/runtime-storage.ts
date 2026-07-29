@@ -1,4 +1,4 @@
-import { runtimeIsBrowser } from '../runtime/platform';
+import { runtimeIsBrowser } from '../infra/runtime-process';
 import { ensureRuntimeState } from '../runtime/runtime-state';
 import type { RuntimeState } from '../types';
 import type { RuntimeStorageApiDeps } from './runtime-storage-deps';

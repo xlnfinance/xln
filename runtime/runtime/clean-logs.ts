@@ -1,5 +1,5 @@
 import type { RuntimeState } from '../types';
-import { runtimeIsBrowser } from './platform';
+import { runtimeIsBrowser } from '../infra/runtime-process';
 
 export type RuntimeCleanLogDeps = {
   ensureRuntimeState: (env: RuntimeState) => NonNullable<RuntimeState['runtimeState']>;

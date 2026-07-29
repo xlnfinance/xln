@@ -1,7 +1,8 @@
 import { Level } from 'level';
 import { deriveSignerAddressSync } from '../account/crypto';
 import { createStructuredLogger } from '../infra/logger';
-import { dbRootPath, nodeProcess } from '../runtime/platform';
+import { nodeProcess } from '../infra/runtime-process';
+import { dbRootPath } from '../runtime/platform';
 import type { RuntimeState } from '../types';
 import {
   readStorageHead,

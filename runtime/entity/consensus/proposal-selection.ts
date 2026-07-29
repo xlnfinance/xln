@@ -5,7 +5,7 @@ import {
   hasPendingLocalJEvent,
   isFrozenBaseJPrefixRollAuthorized,
 } from '../../jurisdiction/j-prefix-consensus';
-import { nodeProcess } from '../../runtime/platform';
+import { nodeProcess } from '../../infra/runtime-process';
 import type { EntityReplica, EntityTx, RuntimeState } from '../../types';
 import { accountHasProposableMempool } from './account-mempool-eligibility';
 import { prioritizeScheduledWakeTransactions } from './input-merge';

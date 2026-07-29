@@ -14,7 +14,7 @@ import {
 import { rehydrateRestoredRuntimeInfra } from '../../runtime/infra';
 import { loadGossipProfilesFromInfraDb } from '../../runtime/infra-gossip-store';
 import { assertPersistedContractConfigReady, registerCommittedSingleSignerWallets } from '../../runtime/recovery-infra';
-import { runtimeIsBrowser } from '../../runtime/platform';
+import { runtimeIsBrowser } from '../../infra/runtime-process';
 import type { RuntimeState } from '../../types';
 import { normalizeDbNamespace } from '../runtime-dbs';
 import { normalizePersistedSnapshotInPlace, restoreDurableRuntimeSnapshot } from '../wal/snapshot';

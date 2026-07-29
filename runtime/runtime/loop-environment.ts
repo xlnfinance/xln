@@ -1,8 +1,10 @@
 import {
   DEFAULT_SNAPSHOT_INTERVAL_FRAMES,
+} from './platform';
+import {
   isProductionRuntime,
   readRuntimeEnv,
-} from './platform';
+} from '../infra/runtime-process';
 import { safeStringify } from '../protocol/serialization';
 import { ensureRuntimeState } from './runtime-state';
 import type { RuntimeState, RuntimeInput } from '../types';

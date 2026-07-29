@@ -1,4 +1,4 @@
-import { nodeProcess } from '../../runtime/platform';
+import { nodeProcess } from '../../infra/runtime-process';
 import {
   cloneIsolatedRoutedEntityInputs,
   cloneIsolatedRuntimeInput,

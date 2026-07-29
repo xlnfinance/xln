@@ -5,7 +5,7 @@ import {
 } from '../account/crypto';
 import { createStructuredLogger } from '../infra/logger';
 import { attachEventEmitters } from './env-events';
-import { nodeProcess, runtimeIsBrowser } from './platform';
+import { nodeProcess, runtimeIsBrowser } from '../infra/runtime-process';
 import type {
   EntityTx,
   RuntimeState,

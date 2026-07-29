@@ -4,7 +4,7 @@ import { isRuntimePerfProfileEnabled, readRuntimePerfSlowMs } from '../../infra/
 import { createStructuredLogger } from '../../infra/logger';
 import type { RuntimeState } from '../../types';
 import { getPerfMs } from '../../utils';
-import { nodeProcess } from '../platform';
+import { nodeProcess } from '../../infra/runtime-process';
 
 const runtimeLog = createStructuredLogger('runtime');
 const APPLY_PROFILE = nodeProcess?.env?.['XLN_RUNTIME_APPLY_PROFILE'] === '1';

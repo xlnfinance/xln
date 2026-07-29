@@ -12,7 +12,7 @@ import { accountInputAck, accountInputProposal } from '../account/consensus/flus
 import type { EntityInput, EntityReplica, EntityTx, RuntimeState, JInput, RoutedEntityInput } from '../types';
 import { resolveEntityProposerId } from '../state-helpers';
 import { decodeRoutedEntityOutput } from '../validation-utils';
-import { nodeProcess } from './platform';
+import { nodeProcess } from '../infra/runtime-process';
 import { isRuntimePerfProfileEnabled, readRuntimePerfSlowMs } from '../infra/perf-runtime-flags';
 import { DEBUG, getPerfMs } from '../utils';
 import { createStructuredLogger, logError, shortId } from '../infra/logger';

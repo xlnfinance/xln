@@ -1,4 +1,4 @@
-import { runtimeIsBrowser } from './platform';
+import { runtimeIsBrowser } from '../infra/runtime-process';
 
 // Bump this on runtime bundle changes that must be reflected in frontend immediately.
 const RUNTIME_BUILD_ID = '2026-07-18-16:00Z';

@@ -1,4 +1,4 @@
-import { runtimeIsBrowser } from '../runtime/platform';
+import { runtimeIsBrowser } from '../infra/runtime-process';
 import { getPerfMs } from '../utils';
 import {
   dropOverlay,

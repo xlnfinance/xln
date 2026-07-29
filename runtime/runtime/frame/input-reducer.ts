@@ -39,7 +39,7 @@ import {
   type RuntimeReliableCommitDeps,
 } from './input-finalize';
 import { safeStringify } from '../../protocol/serialization';
-import { nodeProcess } from '../platform';
+import { nodeProcess } from '../../infra/runtime-process';
 
 const runtimeLog = createStructuredLogger('runtime');
 const APPLY_PROFILE_ENABLED =
