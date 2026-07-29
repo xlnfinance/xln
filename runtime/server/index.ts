@@ -32,24 +32,14 @@ import { createExternalWalletApi } from '../api/external-wallet-api';
 import { maybeHandleQaRequest } from '../qa/api';
 import { createJAdapter, createXlnJsonRpcProvider, type JAdapter } from '../jadapter';
 import type { JAdapterConfig } from '../jadapter/types';
-import {
-  createMarketMakerServerState,
-  resetMarketMakerServerState,
-} from './market-maker-health';
+import { createMarketMakerServerState, resetMarketMakerServerState } from './market-maker-health';
 import { serveRuntimeBundle, serveStatic } from './static-assets';
 import { hasDaemonControlAuth, parseTaggedControlBody, requireDaemonControlAuth } from './auth';
 import { isLocalOperatorRequest, resolveSocketPeerAddress } from './health-redaction';
 import { listLocalControlEntities } from './control-entities';
-import {
-  getAccountState,
-  getEntityReplicaById,
-} from './entity-lookup';
+import { getAccountState, getEntityReplicaById } from './entity-lookup';
 import { createRuntimeIngressReceiptStore } from './ingress-receipts';
-import {
-  createRelayStore,
-  pushDebugEvent,
-  removeClient,
-} from '../relay/store';
+import { createRelayStore, pushDebugEvent, removeClient } from '../relay/store';
 import { openRelayIncidentJournal } from '../relay/incident-journal';
 import { maybeHandleRelayDebugRequest } from '../relay/debug-http';
 import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from '../relay/router';
@@ -59,21 +49,10 @@ import { createLocalDeliveryHandler } from '../relay/local-delivery';
 import { resolveJurisdictionsJsonPath } from '../jurisdiction/jurisdictions-path';
 import { createStructuredLogger, registerStructuredLogSink, shortId } from '../infra/logger';
 import { startParentLivenessWatch } from '../infra/parent-watch';
-import {
-  buildMarketSnapshotForReplica,
-  type MarketSnapshotPayload,
-} from '../relay/market-snapshot';
+import { buildMarketSnapshotForReplica, type MarketSnapshotPayload } from '../relay/market-snapshot';
 import { createMarketSubscriptionStack } from '../relay/market-subscriptions';
-import {
-  decodeMarketWireRequest,
-  encodeMarketWireMessage,
-  type MarketWireRequest,
-} from '../relay/market-wire';
-import {
-  JSON_HEADERS,
-  getErrorMessage,
-  resolveRequiredAnvilRpc,
-} from './utils';
+import { decodeMarketWireRequest, encodeMarketWireMessage, type MarketWireRequest } from '../relay/market-wire';
+import { JSON_HEADERS, getErrorMessage, resolveRequiredAnvilRpc } from './utils';
 import { ethers } from 'ethers';
 import {
   attachRuntimeAdapterTicker,
@@ -131,9 +110,7 @@ let serverStartupBarrier: Promise<void> = Promise.resolve();
 let resolveServerStartupBarrier: (() => void) | null = null;
 // Server encryption keypair now managed by relay-local-delivery.ts
 const HEALTH_CACHE_TTL_MS = 10_000;
-let cachedHealthResponse:
-  | RuntimeHealthCacheEntry
-  | null = null;
+let cachedHealthResponse: RuntimeHealthCacheEntry | null = null;
 let cachedHealthInFlight: Promise<{ fullBody: string; publicBody: string }> | null = null;
 
 let processGuardsInstalled = false;
@@ -162,7 +139,11 @@ const STARTUP_STEP_TIMEOUT_MS = Math.max(
   Math.floor(Number(process.env['XLN_STARTUP_STEP_TIMEOUT_MS'] ?? '20000')),
 );
 
-const withStartupStepTimeout = async <T>(label: string, work: Promise<T>, timeoutMs = STARTUP_STEP_TIMEOUT_MS): Promise<T> => {
+const withStartupStepTimeout = async <T>(
+  label: string,
+  work: Promise<T>,
+  timeoutMs = STARTUP_STEP_TIMEOUT_MS,
+): Promise<T> => {
   let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
   try {
     return await Promise.race([
@@ -191,11 +172,9 @@ const logOneShot = (key: string, message: string, fields: Record<string, unknown
   serverLog.warn(message, fields);
 };
 
-const currentRuntimeHeight = (env: RuntimeState | null): number =>
-  Math.max(0, Math.floor(Number(env?.height ?? 0)));
+const currentRuntimeHeight = (env: RuntimeState | null): number => Math.max(0, Math.floor(Number(env?.height ?? 0)));
 
-const runtimeInputStatusUrl = (id: string): string =>
-  `/api/control/runtime-input/${encodeURIComponent(id)}/status`;
+const runtimeInputStatusUrl = (id: string): string => `/api/control/runtime-input/${encodeURIComponent(id)}/status`;
 
 const SERVER_RUNTIME_SEED = (() => {
   const seed = process.env['XLN_RUNTIME_SEED']?.trim();
@@ -257,7 +236,7 @@ const externalWalletApi = createExternalWalletApi({
   faucetSignerLabel: FAUCET_SIGNER_LABEL,
   faucetWalletEthTarget: FAUCET_WALLET_ETH_TARGET,
   faucetTokenTargetUnits: FAUCET_TOKEN_TARGET_UNITS,
-  emitDebugEvent: (entry) => {
+  emitDebugEvent: entry => {
     pushDebugEvent(relayStore, entry);
   },
   fundBrowserVmWallet: async (address: string, amount: bigint, tokenSymbol?: string): Promise<boolean> => {
@@ -287,17 +266,14 @@ const DEFAULT_OPTIONS: XlnServerOptions = {
 const getDefaultLocalRelayUrl = (port?: number): string => `ws://localhost:${port ?? DEFAULT_OPTIONS.port}/relay`;
 const resolveConfiguredRelayUrl = (port?: number): string => {
   const fallback = getDefaultLocalRelayUrl(port);
-  const candidates = [
-    process.env['INTERNAL_RELAY_URL'],
-    process.env['RELAY_URL'],
-  ]
+  const candidates = [process.env['INTERNAL_RELAY_URL'], process.env['RELAY_URL']]
     .map(value => String(value || '').trim())
     .filter(Boolean);
   return candidates[0] || fallback;
 };
 
 let relayStore = createRelayStore(DEFAULT_OPTIONS.serverId ?? 'xln-server');
-registerStructuredLogSink((entry) => {
+registerStructuredLogSink(entry => {
   if (entry.level !== 'error') return;
   const severity = entry['severity'] === 'fatal' ? 'fatal' : 'error';
   pushDebugEvent(relayStore, {
@@ -322,7 +298,8 @@ const sendDirectEntityInput = (
   targetRuntimeId: string,
   envelope: RuntimeEntityInputsEnvelope,
   ingressTimestamp?: number,
-) => sendEntityInputDirectViaRelaySocketDelivery(relayStore, env, targetRuntimeId, envelope, logOneShot, ingressTimestamp);
+) =>
+  sendEntityInputDirectViaRelaySocketDelivery(relayStore, env, targetRuntimeId, envelope, logOneShot, ingressTimestamp);
 
 const hasDirectRelayClient = (targetRuntimeId: string): boolean =>
   hasConnectedEncryptedRelayClient(relayStore, targetRuntimeId);
@@ -386,7 +363,7 @@ const marketSubscriptionStack = createMarketSubscriptionStack<RelaySocket>({
   fetchSnapshots: (hubEntityId, pairIds, depth) => {
     const env = serverEnv;
     if (!env) throw new Error('Runtime not ready');
-    return pairIds.map((pairId) => buildMarketSnapshot(env, hubEntityId, pairId, depth));
+    return pairIds.map(pairId => buildMarketSnapshot(env, hubEntityId, pairId, depth));
   },
   onHandlerError: (error, msg) => {
     pushDebugEvent(relayStore, {
@@ -401,8 +378,8 @@ const cleanupRpcMarketSubscription = (ws: RelaySocket): void => marketSubscripti
 
 const handleRpcMessage = createServerRpcMessageHandler({
   validateRuntimeInputAdmission,
-  registerRuntimeInputReceipt: (receipt) => runtimeIngressReceipts.register(receipt),
-  readRuntimeInputReceipt: (id) => runtimeIngressReceipts.get(id),
+  registerRuntimeInputReceipt: receipt => runtimeIngressReceipts.register(receipt),
+  readRuntimeInputReceipt: id => runtimeIngressReceipts.get(id),
   buildRuntimeInputStatusUrl: runtimeInputStatusUrl,
 });
 
@@ -477,25 +454,34 @@ const maybeHandleRuntimeInfoApi = async (
   operatorAuthorized: boolean,
 ): Promise<Response | null> => {
   if (pathname === '/api/health') {
-    return handleRuntimeHealth(req, headers, {
-      env,
-      relayStore,
-      healthCacheTtlMs: HEALTH_CACHE_TTL_MS,
-      cachedHealthResponse,
-      setCachedHealthResponse: (entry) => { cachedHealthResponse = entry; },
-      cachedHealthInFlight,
-      setCachedHealthInFlight: (work) => { cachedHealthInFlight = work; },
-      boot: {
-        phase: serverBootPhase,
-        startedAt: serverBootStartedAt,
-        completedAt: serverBootCompletedAt,
-        error: serverBootError,
+    return handleRuntimeHealth(
+      req,
+      headers,
+      {
+        env,
+        relayStore,
+        healthCacheTtlMs: HEALTH_CACHE_TTL_MS,
+        cachedHealthResponse,
+        setCachedHealthResponse: entry => {
+          cachedHealthResponse = entry;
+        },
+        cachedHealthInFlight,
+        setCachedHealthInFlight: work => {
+          cachedHealthInFlight = work;
+        },
+        boot: {
+          phase: serverBootPhase,
+          startedAt: serverBootStartedAt,
+          completedAt: serverBootCompletedAt,
+          error: serverBootError,
+        },
+        activeHubEntityIds: relayStore.activeHubEntityIds,
+        marketMakerState,
+        getAccountState,
+        ensureTokenCatalog: () => tokenCatalogController.ensureTokenCatalog(),
       },
-      activeHubEntityIds: relayStore.activeHubEntityIds,
-      marketMakerState,
-      getAccountState,
-      ensureTokenCatalog: () => tokenCatalogController.ensureTokenCatalog(),
-    }, operatorAuthorized);
+      operatorAuthorized,
+    );
   }
 
   if (pathname === '/api/watchtower-proxy' && (req.method === 'GET' || req.method === 'POST' || req.method === 'PUT')) {
@@ -509,18 +495,24 @@ const maybeHandleRuntimeInfoApi = async (
     return new Response(safeStringify(buildHubDiscoveryPayload({ env, relayStore })), { headers });
   }
   if (pathname === '/api/state' && env) {
-    return new Response(safeStringify({
-      height: env.height,
-      timestamp: env.timestamp,
-      runtimeId: env.runtimeId,
-      entityCount: env.eReplicas?.size || 0,
-    }), { headers });
+    return new Response(
+      safeStringify({
+        height: env.height,
+        timestamp: env.timestamp,
+        runtimeId: env.runtimeId,
+        entityCount: env.eReplicas?.size || 0,
+      }),
+      { headers },
+    );
   }
   if (pathname === '/api/clients') {
-    return new Response(safeStringify({
-      count: relayStore.clients.size,
-      clients: Array.from(relayStore.clients.keys()),
-    }), { headers });
+    return new Response(
+      safeStringify({
+        count: relayStore.clients.size,
+        clients: Array.from(relayStore.clients.keys()),
+      }),
+      { headers },
+    );
   }
   return null;
 };
@@ -531,7 +523,9 @@ const handleGossipProfileApi = async (
   headers: typeof JSON_HEADERS,
 ): Promise<Response> => {
   const url = new URL(req.url);
-  const targetEntityId = String(url.searchParams.get('entityId') || '').trim().toLowerCase();
+  const targetEntityId = String(url.searchParams.get('entityId') || '')
+    .trim()
+    .toLowerCase();
   if (!targetEntityId) {
     return new Response(safeStringify({ ok: false, error: 'entityId is required' }), { status: 400, headers });
   }
@@ -552,21 +546,21 @@ const handleGossipProfileApi = async (
     });
   }
   const bundle = buildKnownProfileBundle({ env, relayStore, entityId: targetEntityId });
-  return new Response(safeStringify({
-    ok: true,
-    entityId: targetEntityId,
-    found: !!bundle.profile,
-    profile: bundle.profile,
-    peers: bundle.peers,
-  }), { headers });
+  return new Response(
+    safeStringify({
+      ok: true,
+      entityId: targetEntityId,
+      found: !!bundle.profile,
+      profile: bundle.profile,
+      peers: bundle.peers,
+    }),
+    { headers },
+  );
 };
 
-const handleJurisdictionsApi = async (
-  env: RuntimeState | null,
-  headers: typeof JSON_HEADERS,
-): Promise<Response> => {
+const handleJurisdictionsApi = async (env: RuntimeState | null, headers: typeof JSON_HEADERS): Promise<Response> => {
   try {
-    const payload = await buildRuntimeJurisdictionsJson(env) ?? await readCanonicalJurisdictionsJson();
+    const payload = (await buildRuntimeJurisdictionsJson(env)) ?? (await readCanonicalJurisdictionsJson());
     return new Response(payload, {
       headers: {
         ...headers,
@@ -575,10 +569,10 @@ const handleJurisdictionsApi = async (
       },
     });
   } catch (error) {
-    return new Response(
-      safeStringify({ error: getErrorMessage(error, 'Failed to read jurisdictions.json') }),
-      { status: 500, headers },
-    );
+    return new Response(safeStringify({ error: getErrorMessage(error, 'Failed to read jurisdictions.json') }), {
+      status: 500,
+      headers,
+    });
   }
 };
 
@@ -621,12 +615,14 @@ const maybeHandleDebugApi = async (
   if (pathname === '/api/debug/entities') {
     const url = new URL(req.url);
     return new Response(
-      safeStringify(buildDebugEntitiesPayload({
-        relayStore,
-        query: url.searchParams.get('q') || '',
-        limit: Number(url.searchParams.get('limit') || '1000'),
-        onlineOnly: url.searchParams.get('online') === 'true',
-      })),
+      safeStringify(
+        buildDebugEntitiesPayload({
+          relayStore,
+          query: url.searchParams.get('q') || '',
+          limit: Number(url.searchParams.get('limit') || '1000'),
+          onlineOnly: url.searchParams.get('online') === 'true',
+        }),
+      ),
       { headers },
     );
   }
@@ -703,7 +699,7 @@ const maybeHandleFinancialApi = (
       relayStore,
       enqueueRuntimeInput,
       validateRuntimeInputAdmission,
-      registerReceipt: (receipt) => runtimeIngressReceipts.register(receipt),
+      registerReceipt: receipt => runtimeIngressReceipts.register(receipt),
       getCurrentRuntimeHeight: currentRuntimeHeight,
       buildRuntimeInputStatusUrl: runtimeInputStatusUrl,
     });
@@ -716,7 +712,7 @@ const maybeHandleFinancialApi = (
       activeHubEntityIds: relayStore.activeHubEntityIds,
       enqueueRuntimeInput,
       validateRuntimeInputAdmission,
-      registerReceipt: (receipt) => runtimeIngressReceipts.register(receipt),
+      registerReceipt: receipt => runtimeIngressReceipts.register(receipt),
       getCurrentRuntimeHeight: currentRuntimeHeight,
       buildRuntimeInputStatusUrl: runtimeInputStatusUrl,
     });
@@ -824,11 +820,7 @@ const handleHttpRequest = async (
   return new Response('Not found', { status: 404 });
 };
 
-const routeRelaySocketMessage = (
-  session: ServerSession,
-  ws: RelaySocket,
-  peerMessage: RuntimeWsMessage,
-): void => {
+const routeRelaySocketMessage = (session: ServerSession, ws: RelaySocket, peerMessage: RuntimeWsMessage): void => {
   const routerConfig = session.routerConfig;
   if (!routerConfig) {
     ws.send(serializeWsMessage({ type: 'error', error: 'Runtime transport not ready' }));
@@ -862,9 +854,10 @@ const handleWebSocketMessage = (
   ws: RelaySocket,
   message: string | Uint8Array | ArrayBuffer,
 ): void => {
-  const messageText = (): string => typeof message === 'string'
-    ? message
-    : new TextDecoder().decode(message instanceof ArrayBuffer ? new Uint8Array(message) : message);
+  const messageText = (): string =>
+    typeof message === 'string'
+      ? message
+      : new TextDecoder().decode(message instanceof ArrayBuffer ? new Uint8Array(message) : message);
   const wsType = ws.data.type;
   try {
     if (wsType === 'rpc') {
@@ -930,12 +923,7 @@ const handleWebSocketMessage = (
   }
 };
 
-const handleWebSocketClose = (
-  session: ServerSession,
-  ws: RelaySocket,
-  code: number,
-  reason: string | Buffer,
-): void => {
+const handleWebSocketClose = (session: ServerSession, ws: RelaySocket, code: number, reason: string | Buffer): void => {
   session.relayHelloChallenges.forget(ws);
   cleanupRpcMarketSubscription(ws);
   forgetRuntimeAdapterClient(ws);
@@ -962,185 +950,191 @@ const handleWebSocketClose = (
   }
 };
 
-const createHttpServer = (options: XlnServerOptions, session: ServerSession) => Bun.serve({
-  port: options.port,
-  hostname: options.host ?? '127.0.0.1',
-  fetch: (req, server) => handleHttpRequest(options, session, req, server),
-  websocket: {
-    open(ws: RelaySocket) {
-      serverLog.info('ws.open', { type: ws.data.type });
-      if (ws.data.type === 'rpc' && session.env) {
-        attachRuntimeAdapterTicker(session.env, registerEnvChangeCallback);
-      }
-      if (ws.data.type === 'relay') session.relayHelloChallenges.issue(ws);
-      pushDebugEvent(relayStore, { event: 'ws_open', details: { wsType: ws.data.type } });
-    },
-    message: (ws, message) => handleWebSocketMessage(session, ws, message),
-    close: (ws, code, reason) => handleWebSocketClose(session, ws, code, reason),
-  },
-});
-
-export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Promise<void> {
-  const options = { ...DEFAULT_OPTIONS, ...opts };
-  const incidentJournalPath = String(
-    process.env['XLN_SERVER_DEBUG_INCIDENT_JOURNAL_PATH'] || `${dbRootPath}.debug-incidents.jsonl`,
-  ).trim();
-  const incidentJournal = openRelayIncidentJournal(incidentJournalPath);
-  relayStore = createRelayStore(options.serverId ?? DEFAULT_OPTIONS.serverId ?? 'xln-server', {
-    initialDebugId: incidentJournal.debugId,
-    initialIncidents: incidentJournal.incidents,
-    debugIdAllocator: () => incidentJournal.allocateDebugId(),
-    incidentSink: incident => incidentJournal.record(incident),
-  });
-  installProcessSafetyGuards();
-  serverLog.info('start', { port: options.port, host: options.host, staticDir: options.staticDir });
-  marketSubscriptionStack.clear();
-  const internalRelayUrl = resolveConfiguredRelayUrl(options.port);
-  serverBootStartedAt = Date.now();
-  serverBootCompletedAt = null;
-  serverBootPhase = 'starting';
-  serverBootError = null;
-  serverStartupBarrier = new Promise<void>(resolve => {
-    resolveServerStartupBarrier = resolve;
-  });
-
-  let env: RuntimeState | null = null;
-  const serverSession: ServerSession = {
-    env: null,
-    routerConfig: null,
-    relayHelloChallenges: createHelloChallengeRegistry(),
-  };
-  const server = createHttpServer(options, serverSession);
-
-  const closeFailedStartup = async (startupError: unknown): Promise<never> => {
-    stopMarketMakerLoop();
-    const original = startupError instanceof Error ? startupError : new Error(String(startupError));
-    const cleanup = await Promise.allSettled([
-      globalJAdapter?.close() ?? Promise.resolve(),
-      env ? closeRuntimeDb(env) : Promise.resolve(),
-      env ? closeInfraDb(env) : Promise.resolve(),
-      server.stop(true),
-    ]);
-    globalJAdapter = null;
-    serverEnv = null;
-    serverSession.env = null;
-    serverSession.routerConfig = null;
-    const cleanupErrors = cleanup
-      .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
-      .map(result => result.reason instanceof Error ? result.reason : new Error(String(result.reason)));
-    if (cleanupErrors.length > 0) {
-      throw new AggregateError([original, ...cleanupErrors], 'SERVER_STARTUP_FAILED_WITH_CLEANUP_ERRORS');
-    }
-    throw original;
-  };
-
-  try {
-    serverBootPhase = 'runtime';
-    serverLog.info('runtime.init.start');
-    env = await main(SERVER_RUNTIME_SEED, {
-      trustedJurisdictionRpcBindings: resolveTrustedServerRestoreRpcBindings(),
-      localSigners: [
-        ...(STARTUP_SIGNER ? [STARTUP_SIGNER] : []),
-        ...(LOCAL_RUNTIME_OWNER ? [{ label: LOCAL_RUNTIME_OWNER.label }] : []),
-      ],
-    });
-    serverEnv = env;
-    serverSession.env = env;
-    registerRuntimeFrameCommitCallback(env, ({ height, runtimeInput }) => {
-      runtimeIngressReceipts.observeRuntimeInput(height, runtimeInput);
-    });
-    serverLog.info('runtime.init.ready', { runtimeId: shortId(env.runtimeId, 10) });
-    const runtimeEnv = env;
-    const verboseRuntimeLogs = /^(1|true)$/i.test(process.env['RUNTIME_VERBOSE_LOGS'] ?? '');
-    env.quietRuntimeLogs = !verboseRuntimeLogs;
-    serverLog.info('runtime.log_mode', { mode: env.quietRuntimeLogs ? 'quiet' : 'verbose' });
-    env.runtimeState = env.runtimeState ?? {};
-    env.runtimeState.directEntityInputsDispatch = (targetRuntimeId, envelope, ingressTimestamp) =>
-      sendDirectEntityInput(runtimeEnv, targetRuntimeId, envelope, ingressTimestamp);
-    env.runtimeState.canUseConnectedRelayFallback = hasDirectRelayClient;
-    startRuntimeLoop(env, {
-      onFatal: async payload => {
-        serverLog.error('runtime.loop_fatal', {
-          ...payload,
-          runtimeId: runtimeEnv.runtimeId,
-          severity: 'fatal',
-        });
+const createHttpServer = (options: XlnServerOptions, session: ServerSession) =>
+  Bun.serve({
+    port: options.port,
+    hostname: options.host ?? '127.0.0.1',
+    fetch: (req, server) => handleHttpRequest(options, session, req, server),
+    websocket: {
+      open(ws: RelaySocket) {
+        serverLog.info('ws.open', { type: ws.data.type });
+        if (ws.data.type === 'rpc' && session.env) {
+          attachRuntimeAdapterTicker(session.env, registerEnvChangeCallback);
+        }
+        if (ws.data.type === 'relay') session.relayHelloChallenges.issue(ws);
+        pushDebugEvent(relayStore, { event: 'ws_open', details: { wsType: ws.data.type } });
       },
-    });
-    serverLog.info('runtime.loop.started');
+      message: (ws, message) => handleWebSocketMessage(session, ws, message),
+      close: (ws, code, reason) => handleWebSocketClose(session, ws, code, reason),
+    },
+  });
 
-    // Initialize J-adapter (anvil for testnet, browserVM for local)
-    const useAnvil = process.env['USE_ANVIL'] === 'true';
-    const anvilRpc = useAnvil ? resolveRequiredAnvilRpc() : '';
+type ServerJurisdictionRegistration = {
+  name: string;
+  adapter: JAdapter;
+  rpcs: string[];
+  requireStateRoot: boolean;
+  blockTimeMs?: number;
+};
 
-    serverLog.info('jadapter.mode', { useAnvil, anvilRpc: useAnvil ? anvilRpc : null });
+const registerServerJurisdiction = async (
+  env: RuntimeState,
+  registration: ServerJurisdictionRegistration,
+): Promise<void> => {
+  if (!env.jReplicas) env.jReplicas = new Map();
+  if (env.jReplicas.has(registration.name)) return;
 
-    if (useAnvil) {
-      serverLog.info('anvil.connect.start', { rpc: anvilRpc });
-      const usePredeployedAddresses = process.env['XLN_USE_PREDEPLOYED_ADDRESSES'] === 'true';
-      const predeployedJurisdictionKey = String(process.env['XLN_PREDEPLOYED_JURISDICTION_KEY'] || '').trim();
+  const { adapter } = registration;
+  const stateRoot = await (adapter.captureStateRoot?.() ?? Promise.resolve(null));
+  if (
+    registration.requireStateRoot &&
+    !(stateRoot instanceof Uint8Array && stateRoot.length === 32)
+  ) {
+    throw new Error('BROWSERVM_STATE_ROOT_UNAVAILABLE: startup local jReplica cannot time-travel safely');
+  }
+  env.jReplicas.set(registration.name, {
+    name: registration.name,
+    blockNumber: 0n,
+    stateRoot,
+    mempool: [],
+    blockDelayMs: 300,
+    ...(registration.blockTimeMs === undefined ? {} : { blockTimeMs: registration.blockTimeMs }),
+    lastBlockTimestamp: env.timestamp,
+    position: { x: 0, y: 50, z: 0 },
+    depositoryAddress: adapter.addresses.depository,
+    entityProviderAddress: adapter.addresses.entityProvider,
+    entityProviderDeploymentBlock: adapter.entityProviderDeploymentBlock,
+    watcherConfirmationDepth: requireWatcherConfirmationDepth(adapter),
+    contracts: adapter.addresses,
+    rpcs: registration.rpcs,
+    chainId: adapter.chainId,
+    jadapter: adapter,
+  });
+  serverLog.info('jreplica.registered', { name: registration.name });
+};
 
-    // Optional: reuse addresses from jurisdictions.json (disabled by default).
-    const fs = await import('fs/promises');
-    let fromReplica: JAdapterConfig['fromReplica'] | undefined = undefined;
-    if (usePredeployedAddresses) {
-      try {
-        const jurisdictionsPath = resolveJurisdictionsJsonPath();
-        serverLog.info('anvil.predeployed.load', {
-          path: jurisdictionsPath,
-          jurisdictionKey: predeployedJurisdictionKey || null,
-        });
-        const jurisdictionsData = await fs.readFile(jurisdictionsPath, 'utf-8');
-        const jurisdictions = JSON.parse(jurisdictionsData);
-        const predeployedConfig = selectPredeployedJurisdiction(jurisdictions, anvilRpc, predeployedJurisdictionKey);
-        if (!predeployedConfig) throw new Error('PREDEPLOYED_JURISDICTION_CONFIG_MISSING');
-        const contracts = predeployedConfig.contracts;
-        fromReplica = {
-          depositoryAddress: String(contracts['depository']),
-          entityProviderAddress: String(contracts['entityProvider']),
-          contracts: {
-            account: String(contracts['account'] || ''),
-            depository: String(contracts['depository']),
-            entityProvider: String(contracts['entityProvider']),
-            deltaTransformer: String(contracts['deltaTransformer'] || ''),
-          },
-          chainId: Number(predeployedConfig.chainId ?? 31337),
-          entityProviderDeploymentBlock: Number(predeployedConfig.entityProviderDeploymentBlock),
-        } as JAdapterConfig['fromReplica'];
-        serverLog.info('anvil.predeployed.loaded');
-      } catch (err) {
-        serverLog.error('anvil.predeployed.load_failed', { error: (err as Error).message });
-        throw err;
+const initializeBrowserVmJurisdiction = async (env: RuntimeState): Promise<JAdapter> => {
+  serverLog.info('browservm.start');
+  const adapter = await withStartupStepTimeout(
+    'createJAdapter(browservm)',
+    createJAdapter({ mode: 'browservm', chainId: 31337 }),
+  );
+  await withStartupStepTimeout(
+    'deployStack(browservm)',
+    adapter.deployStack(),
+    Math.max(STARTUP_STEP_TIMEOUT_MS, 60_000),
+  );
+  await registerServerJurisdiction(env, {
+    name: 'local',
+    adapter,
+    rpcs: [],
+    requireStateRoot: true,
+  });
+  if (!env.activeJurisdiction) env.activeJurisdiction = 'local';
+  return adapter;
+};
+
+const loadPredeployedReplica = async (
+  anvilRpc: string,
+  jurisdictionKey: string,
+  enabled: boolean,
+): Promise<JAdapterConfig['fromReplica'] | undefined> => {
+  if (!enabled) {
+    serverLog.info('anvil.fresh_deploy_mode');
+    return undefined;
+  }
+
+  const jurisdictionsPath = resolveJurisdictionsJsonPath();
+  serverLog.info('anvil.predeployed.load', {
+    path: jurisdictionsPath,
+    jurisdictionKey: jurisdictionKey || null,
+  });
+  try {
+    const jurisdictionsData = await Bun.file(jurisdictionsPath).text();
+    const jurisdictions: unknown = JSON.parse(jurisdictionsData);
+    const predeployedConfig = selectPredeployedJurisdiction(jurisdictions, anvilRpc, jurisdictionKey);
+    if (!predeployedConfig) throw new Error('PREDEPLOYED_JURISDICTION_CONFIG_MISSING');
+    const contracts = predeployedConfig.contracts;
+    const fromReplica = {
+      depositoryAddress: String(contracts['depository']),
+      entityProviderAddress: String(contracts['entityProvider']),
+      contracts: {
+        account: String(contracts['account'] || ''),
+        depository: String(contracts['depository']),
+        entityProvider: String(contracts['entityProvider']),
+        deltaTransformer: String(contracts['deltaTransformer'] || ''),
+      },
+      chainId: Number(predeployedConfig.chainId ?? 31337),
+      entityProviderDeploymentBlock: Number(predeployedConfig.entityProviderDeploymentBlock),
+    } satisfies NonNullable<JAdapterConfig['fromReplica']>;
+    serverLog.info('anvil.predeployed.loaded');
+    return fromReplica;
+  } catch (error) {
+    serverLog.error('anvil.predeployed.load_failed', { error: getErrorMessage(error) });
+    throw error;
+  }
+};
+
+const waitForAnvilChain = async (anvilRpc: string): Promise<number> => {
+  const maxRetries = 30;
+  for (let attempt = 0; attempt < maxRetries; attempt += 1) {
+    try {
+      const network = await createXlnJsonRpcProvider(anvilRpc).getNetwork();
+      const chainId = Number(network.chainId);
+      serverLog.info('anvil.ready', { chainId });
+      if (chainId !== 31337) {
+        throw new Error(`❌ FAIL-FAST: expected ANVIL chainId=31337, got ${chainId} at ${anvilRpc}`);
       }
-    } else {
-      serverLog.info('anvil.fresh_deploy_mode');
+      return chainId;
+    } catch (error) {
+      if (getErrorMessage(error).startsWith('❌ FAIL-FAST: expected ANVIL')) throw error;
+      if (attempt === 0) serverLog.info('anvil.wait', { rpc: anvilRpc });
+      await new Promise<void>(resolve => setTimeout(resolve, 1_000));
     }
+  }
+  throw new Error(`❌ FAIL-FAST: ANVIL not reachable at ${anvilRpc} after ${maxRetries}s. Is anvil running?`);
+};
 
-    // Wait for ANVIL to be ready (retry up to 30s)
-    let detectedChainId = 31337;
-    const maxRetries = 30;
-    let anvilReady = false;
-    for (let i = 0; i < maxRetries; i++) {
-      try {
-        const probe = createXlnJsonRpcProvider(anvilRpc);
-        const network = await probe.getNetwork();
-        if (network?.chainId) detectedChainId = Number(network.chainId);
-        anvilReady = true;
-        serverLog.info('anvil.ready', { chainId: detectedChainId });
-        break;
-      } catch (err) {
-        if (i === 0) serverLog.info('anvil.wait', { rpc: anvilRpc });
-        await new Promise(r => setTimeout(r, 1000));
-      }
-    }
-    if (!anvilReady) {
-      throw new Error(
-        `❌ FAIL-FAST: ANVIL not reachable at ${anvilRpc} after ${maxRetries}s. Is anvil running?`,
-      );
-    }
-    if (detectedChainId !== 31337) {
-      throw new Error(`❌ FAIL-FAST: expected ANVIL chainId=31337, got ${detectedChainId} at ${anvilRpc}`);
-    }
+const assertPredeployedStackCode = async (
+  anvilRpc: string,
+  fromReplica: JAdapterConfig['fromReplica'] | undefined,
+): Promise<void> => {
+  const depositoryAddress = fromReplica?.depositoryAddress;
+  const entityProviderAddress = fromReplica?.entityProviderAddress;
+  if (!depositoryAddress || !entityProviderAddress) return;
+
+  serverLog.info('anvil.predeployed.precheck.start');
+  const [depositoryCode, entityProviderCode] = await withStartupStepTimeout(
+    'precheckPredeployedCode',
+    Promise.all([
+      fetchRpcCode(anvilRpc, depositoryAddress),
+      fetchRpcCode(anvilRpc, entityProviderAddress),
+    ]),
+  );
+  serverLog.info('anvil.predeployed.precheck.complete');
+  if (depositoryCode === '0x' || entityProviderCode === '0x') {
+    throw new Error(`PREDEPLOYED_CONTRACT_CODE_MISSING:${depositoryAddress}:${entityProviderAddress}`);
+  }
+};
+
+const initializeJurisdictionAdapter = async (env: RuntimeState): Promise<void> => {
+  // Initialize J-adapter (anvil for testnet, browserVM for local)
+  const useAnvil = process.env['USE_ANVIL'] === 'true';
+  const anvilRpc = useAnvil ? resolveRequiredAnvilRpc() : '';
+
+  serverLog.info('jadapter.mode', { useAnvil, anvilRpc: useAnvil ? anvilRpc : null });
+
+  if (useAnvil) {
+    serverLog.info('anvil.connect.start', { rpc: anvilRpc });
+    const usePredeployedAddresses = process.env['XLN_USE_PREDEPLOYED_ADDRESSES'] === 'true';
+    const predeployedJurisdictionKey = String(process.env['XLN_PREDEPLOYED_JURISDICTION_KEY'] || '').trim();
+
+    const fromReplica = await loadPredeployedReplica(
+      anvilRpc,
+      predeployedJurisdictionKey,
+      usePredeployedAddresses,
+    );
+    const detectedChainId = await waitForAnvilChain(anvilRpc);
 
     // Ensure fromReplica carries correct chainId (override if stale)
     if (fromReplica && fromReplica.chainId !== detectedChainId) {
@@ -1151,23 +1145,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       fromReplica.chainId = detectedChainId;
     }
 
-    const fromReplicaDepositoryAddress = fromReplica?.depositoryAddress;
-    const fromReplicaEntityProviderAddress = fromReplica?.entityProviderAddress;
-    if (fromReplicaDepositoryAddress && fromReplicaEntityProviderAddress) {
-      serverLog.info('anvil.predeployed.precheck.start');
-      const [depositoryCode, entityProviderCode] = await withStartupStepTimeout(
-        'precheckPredeployedCode',
-        (async () => {
-          const depCode = await fetchRpcCode(anvilRpc, fromReplicaDepositoryAddress);
-          const entityProviderCode = await fetchRpcCode(anvilRpc, fromReplicaEntityProviderAddress);
-          return [depCode, entityProviderCode] as const;
-        })(),
-      );
-      serverLog.info('anvil.predeployed.precheck.complete');
-      if (depositoryCode === '0x' || entityProviderCode === '0x') {
-        throw new Error(`PREDEPLOYED_CONTRACT_CODE_MISSING:${fromReplicaDepositoryAddress}:${fromReplicaEntityProviderAddress}`);
-      }
-    }
+    await assertPredeployedStackCode(anvilRpc, fromReplica);
 
     const rpcAdapterConfig: JAdapterConfig = {
       mode: 'rpc',
@@ -1177,10 +1155,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     if (fromReplica) {
       rpcAdapterConfig.fromReplica = fromReplica;
     }
-    globalJAdapter = await withStartupStepTimeout(
-      'createJAdapter(rpc)',
-      createJAdapter(rpcAdapterConfig),
-    );
+    globalJAdapter = await withStartupStepTimeout('createJAdapter(rpc)', createJAdapter(rpcAdapterConfig));
 
     const deployFreshLocalStack = async (reason: string): Promise<void> => {
       if (usePredeployedAddresses) {
@@ -1196,7 +1171,11 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
           rpcUrl: anvilRpc,
         }),
       );
-      await withStartupStepTimeout('deployStack', globalJAdapter.deployStack(), Math.max(STARTUP_STEP_TIMEOUT_MS, 60_000));
+      await withStartupStepTimeout(
+        'deployStack',
+        globalJAdapter.deployStack(),
+        Math.max(STARTUP_STEP_TIMEOUT_MS, 60_000),
+      );
       serverLog.info('anvil.contracts.deployed');
     };
 
@@ -1234,74 +1213,128 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       );
     }
 
-    // Ensure env has a J-replica for this RPC jurisdiction (required for j_broadcast → j-mempool)
-    if (globalJAdapter && env) {
-      if (!env.jReplicas) env.jReplicas = new Map();
-      const jName = updatedRuntimeJurisdiction?.key || 'primary';
-      if (!env.jReplicas.has(jName)) {
-        const stateRoot = await (globalJAdapter.captureStateRoot?.() ?? Promise.resolve(null));
-        env.jReplicas.set(jName, {
-          name: jName,
-          blockNumber: 0n,
-          stateRoot,
-          mempool: [],
-          blockDelayMs: 300,
-          blockTimeMs: 300,
-          lastBlockTimestamp: env.timestamp,
-          position: { x: 0, y: 50, z: 0 },
-          depositoryAddress: globalJAdapter.addresses.depository,
-          entityProviderAddress: globalJAdapter.addresses.entityProvider,
-          entityProviderDeploymentBlock: globalJAdapter.entityProviderDeploymentBlock,
-          watcherConfirmationDepth: requireWatcherConfirmationDepth(globalJAdapter),
-          contracts: globalJAdapter.addresses,
-          rpcs: [anvilRpc],
-          chainId: globalJAdapter.chainId,
-          jadapter: globalJAdapter,
+    // Runtime owns the adapter lifecycle; the J-replica is only its deterministic
+    // frame/state projection. Register it once, after the contract stack is proven.
+    const jurisdictionName = updatedRuntimeJurisdiction?.key || 'primary';
+    await registerServerJurisdiction(env, {
+      name: jurisdictionName,
+      adapter: globalJAdapter,
+      rpcs: [anvilRpc],
+      requireStateRoot: false,
+      blockTimeMs: 300,
+    });
+    if (!env.activeJurisdiction) env.activeJurisdiction = jurisdictionName;
+  } else {
+    globalJAdapter = await initializeBrowserVmJurisdiction(env);
+  }
+};
+
+type BoundServerSession = {
+  internalRelayUrl: string;
+  session: ServerSession;
+  server: ReturnType<typeof createHttpServer>;
+};
+
+const bindServerSession = (options: XlnServerOptions): BoundServerSession => {
+  const incidentJournalPath = String(
+    process.env['XLN_SERVER_DEBUG_INCIDENT_JOURNAL_PATH'] || `${dbRootPath}.debug-incidents.jsonl`,
+  ).trim();
+  const incidentJournal = openRelayIncidentJournal(incidentJournalPath);
+  relayStore = createRelayStore(options.serverId ?? DEFAULT_OPTIONS.serverId ?? 'xln-server', {
+    initialDebugId: incidentJournal.debugId,
+    initialIncidents: incidentJournal.incidents,
+    debugIdAllocator: () => incidentJournal.allocateDebugId(),
+    incidentSink: incident => incidentJournal.record(incident),
+  });
+  installProcessSafetyGuards();
+  serverLog.info('start', { port: options.port, host: options.host, staticDir: options.staticDir });
+  marketSubscriptionStack.clear();
+  serverBootStartedAt = Date.now();
+  serverBootCompletedAt = null;
+  serverBootPhase = 'starting';
+  serverBootError = null;
+  serverStartupBarrier = new Promise<void>(resolve => {
+    resolveServerStartupBarrier = resolve;
+  });
+  const session: ServerSession = {
+    env: null,
+    routerConfig: null,
+    relayHelloChallenges: createHelloChallengeRegistry(),
+  };
+  return {
+    internalRelayUrl: resolveConfiguredRelayUrl(options.port),
+    session,
+    server: createHttpServer(options, session),
+  };
+};
+
+const closeFailedServerStartup = async (
+  startupError: unknown,
+  env: RuntimeState | null,
+  bound: BoundServerSession,
+): Promise<never> => {
+  stopMarketMakerLoop();
+  const original = startupError instanceof Error ? startupError : new Error(String(startupError));
+  const cleanup = await Promise.allSettled([
+    globalJAdapter?.close() ?? Promise.resolve(),
+    env ? closeRuntimeDb(env) : Promise.resolve(),
+    env ? closeInfraDb(env) : Promise.resolve(),
+    bound.server.stop(true),
+  ]);
+  globalJAdapter = null;
+  serverEnv = null;
+  bound.session.env = null;
+  bound.session.routerConfig = null;
+  const cleanupErrors = cleanup
+    .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+    .map(result => (result.reason instanceof Error ? result.reason : new Error(String(result.reason))));
+  if (cleanupErrors.length > 0) {
+    throw new AggregateError([original, ...cleanupErrors], 'SERVER_STARTUP_FAILED_WITH_CLEANUP_ERRORS');
+  }
+  throw original;
+};
+
+export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Promise<void> {
+  const options = { ...DEFAULT_OPTIONS, ...opts };
+  const bound = bindServerSession(options);
+  let env: RuntimeState | null = null;
+
+  try {
+    serverBootPhase = 'runtime';
+    serverLog.info('runtime.init.start');
+    env = await main(SERVER_RUNTIME_SEED, {
+      trustedJurisdictionRpcBindings: resolveTrustedServerRestoreRpcBindings(),
+      localSigners: [
+        ...(STARTUP_SIGNER ? [STARTUP_SIGNER] : []),
+        ...(LOCAL_RUNTIME_OWNER ? [{ label: LOCAL_RUNTIME_OWNER.label }] : []),
+      ],
+    });
+    serverEnv = env;
+    bound.session.env = env;
+    registerRuntimeFrameCommitCallback(env, ({ height, runtimeInput }) => {
+      runtimeIngressReceipts.observeRuntimeInput(height, runtimeInput);
+    });
+    serverLog.info('runtime.init.ready', { runtimeId: shortId(env.runtimeId, 10) });
+    const runtimeEnv = env;
+    const verboseRuntimeLogs = /^(1|true)$/i.test(process.env['RUNTIME_VERBOSE_LOGS'] ?? '');
+    env.quietRuntimeLogs = !verboseRuntimeLogs;
+    serverLog.info('runtime.log_mode', { mode: env.quietRuntimeLogs ? 'quiet' : 'verbose' });
+    env.runtimeState = env.runtimeState ?? {};
+    env.runtimeState.directEntityInputsDispatch = (targetRuntimeId, envelope, ingressTimestamp) =>
+      sendDirectEntityInput(runtimeEnv, targetRuntimeId, envelope, ingressTimestamp);
+    env.runtimeState.canUseConnectedRelayFallback = hasDirectRelayClient;
+    startRuntimeLoop(env, {
+      onFatal: async payload => {
+        serverLog.error('runtime.loop_fatal', {
+          ...payload,
+          runtimeId: runtimeEnv.runtimeId,
+          severity: 'fatal',
         });
-        serverLog.info('jreplica.registered', { name: jName });
-      }
-      if (!env.activeJurisdiction) env.activeJurisdiction = jName;
-    }
-    } else {
-      serverLog.info('browservm.start');
-      globalJAdapter = await withStartupStepTimeout(
-        'createJAdapter(browservm)',
-        createJAdapter({
-          mode: 'browservm',
-          chainId: 31337,
-        }),
-      );
-      await withStartupStepTimeout('deployStack(browservm)', globalJAdapter.deployStack(), Math.max(STARTUP_STEP_TIMEOUT_MS, 60_000));
-      if (globalJAdapter && env) {
-        if (!env.jReplicas) env.jReplicas = new Map();
-        const jName = 'local';
-        if (!env.jReplicas.has(jName)) {
-          const stateRoot = await (globalJAdapter.captureStateRoot?.() ?? Promise.resolve(null));
-          if (!(stateRoot instanceof Uint8Array && stateRoot.length === 32)) {
-            throw new Error('BROWSERVM_STATE_ROOT_UNAVAILABLE: startup local jReplica cannot time-travel safely');
-          }
-          env.jReplicas.set(jName, {
-            name: jName,
-            blockNumber: 0n,
-            stateRoot,
-            mempool: [],
-            blockDelayMs: 300,
-            lastBlockTimestamp: env.timestamp,
-            position: { x: 0, y: 50, z: 0 },
-            depositoryAddress: globalJAdapter.addresses.depository,
-            entityProviderAddress: globalJAdapter.addresses.entityProvider,
-            entityProviderDeploymentBlock: globalJAdapter.entityProviderDeploymentBlock,
-            watcherConfirmationDepth: requireWatcherConfirmationDepth(globalJAdapter),
-            contracts: globalJAdapter.addresses,
-            rpcs: [],
-            chainId: globalJAdapter.chainId,
-            jadapter: globalJAdapter,
-          });
-          serverLog.info('jreplica.registered', { name: jName });
-        }
-        if (!env.activeJurisdiction) env.activeJurisdiction = jName;
-      }
-    }
+      },
+    });
+    serverLog.info('runtime.loop.started');
+
+    await initializeJurisdictionAdapter(env);
 
     if (LOCAL_RUNTIME_OWNER) {
       const jurisdictionName = String(env.activeJurisdiction || 'local');
@@ -1315,10 +1348,8 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       });
       const result = await ensureLocalRuntimeOwner(env, owner, {
         enqueue: enqueueRuntimeInput,
-        onFrameCommit: (targetEnv, callback) => registerRuntimeFrameCommitCallback(
-          targetEnv,
-          ({ height }) => callback(height),
-        ),
+        onFrameCommit: (targetEnv, callback) =>
+          registerRuntimeFrameCommitCallback(targetEnv, ({ height }) => callback(height)),
         timeoutMs: STARTUP_STEP_TIMEOUT_MS,
       });
       relayStore.activeHubEntityIds = [];
@@ -1335,12 +1366,12 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     // Wire relay-router + local delivery as soon as env exists.
     // Relay WS can receive early hello/gossip traffic during bootstrap.
     const localDeliver = createLocalDeliveryHandler(env, relayStore, getEntityReplicaById);
-    serverSession.routerConfig = {
+    bound.session.routerConfig = {
       store: relayStore,
       localRuntimeId: String(env.runtimeId),
       localDeliver,
       send: (ws, data) => ws.send(data),
-      consumeHelloChallenge: (ws, challenge) => serverSession.relayHelloChallenges.consume(ws, challenge),
+      consumeHelloChallenge: (ws, challenge) => bound.session.relayHelloChallenges.consume(ws, challenge),
       onGossipStore: profile => {
         try {
           runtimeEnv.gossip?.announce?.(profile);
@@ -1372,7 +1403,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       ...(marketMakerState.entityId ? [marketMakerState.entityId.toLowerCase()] : []),
     ];
     startP2P(env, {
-      relayUrls: [internalRelayUrl],
+      relayUrls: [bound.internalRelayUrl],
       ...(advertisedEntityIds.length > 0 ? { advertiseEntityIds: advertisedEntityIds } : {}),
       isHub: hubEntityIds.length > 0,
       gossipPollMs: 250,
@@ -1384,7 +1415,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     serverBootCompletedAt = Date.now();
     serverBootError = (error as Error)?.message || String(error);
     serverLog.error('startup.failed_after_bind', { error: getErrorMessage(error) });
-    return closeFailedStartup(error);
+    return closeFailedServerStartup(error, env, bound);
   } finally {
     resolveServerStartupBarrier?.();
     resolveServerStartupBarrier = null;
@@ -1402,9 +1433,14 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
 if (import.meta.main) {
   const managedParentPid = process.env['XLN_MANAGED_PARENT_PID'];
   const stopParentWatch = managedParentPid
-    ? startParentLivenessWatch('runtime-server', managedParentPid, () => {
-        process.kill(process.pid, 'SIGTERM');
-      }, 250)
+    ? startParentLivenessWatch(
+        'runtime-server',
+        managedParentPid,
+        () => {
+          process.kill(process.pid, 'SIGTERM');
+        },
+        250,
+      )
     : () => {};
   process.once('exit', stopParentWatch);
   const args = process.argv.slice(2);

@@ -509,16 +509,16 @@ describe('production startup wiring', () => {
     expect(standaloneServer).toContain('trustedJurisdictionRpcBindings: resolveTrustedServerRestoreRpcBindings(),');
     expect(standaloneServer).toContain('const jurisdictionRef = getJurisdictionIdentityRef(selected);');
     expect(standaloneServer).toContain(
-      'selectPredeployedJurisdiction(jurisdictions, anvilRpc, predeployedJurisdictionKey)',
+      'selectPredeployedJurisdiction(jurisdictions, anvilRpc, jurisdictionKey)',
     );
     expect(standaloneServer).toContain(
       'entityProviderDeploymentBlock: Number(predeployedConfig.entityProviderDeploymentBlock)',
     );
-    expect(
-      standaloneServer.match(/watcherConfirmationDepth: requireWatcherConfirmationDepth\(globalJAdapter\)/g),
-    ).toHaveLength(2);
+    expect(standaloneServer).toContain(
+      'watcherConfirmationDepth: requireWatcherConfirmationDepth(adapter)',
+    );
     expect(standaloneServer).toContain("serverLog.error('anvil.predeployed.load_failed'");
-    expect(standaloneServer).toContain('throw err;');
+    expect(standaloneServer).toContain('throw error;');
     expect(standaloneServer).toContain("throw new Error('PREDEPLOYED_JURISDICTION_CONFIG_MISSING')");
     expect(standaloneServer).toContain('throw new Error(`PREDEPLOYED_CONTRACT_CODE_MISSING:');
     expect(standaloneServer).toContain('throw new Error(`PREDEPLOYED_STACK_DEPLOY_FORBIDDEN:${reason}`)');
@@ -702,8 +702,11 @@ describe('production startup wiring', () => {
     expect(serverJurisdictions).not.toContain('arrakisDisplayName');
     expect(serverJurisdictions).not.toContain('existingArrakis');
     expect(serverJurisdictions).toContain('name: displayName');
-    expect(standaloneServer).toContain("const jName = updatedRuntimeJurisdiction?.key || 'primary';");
-    expect(standaloneServer).toContain('env.jReplicas.set(jName, {\n          name: jName,');
+    expect(standaloneServer).toContain(
+      "const jurisdictionName = updatedRuntimeJurisdiction?.key || 'primary';",
+    );
+    expect(standaloneServer).toContain('env.jReplicas.set(registration.name, {');
+    expect(standaloneServer).toContain('name: registration.name,');
     expect(standaloneServer).not.toContain('name: jDisplayName,');
     expect(standaloneServer).not.toContain("const jName = 'arrakis';");
     expect(hubNode).toContain('selectWritableJurisdictionKey(jurisdictions, undefined, [rpcUrl, publicRpcUrl])');

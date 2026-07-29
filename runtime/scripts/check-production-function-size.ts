@@ -35,7 +35,6 @@ const COORDINATOR_DEBT: Readonly<Record<string, number>> = {
   'runtime/radapter/resolve.ts::projectGraphFrame': 175,
   'runtime/radapter/resolve.ts::resolveRuntimeAdapterRead': 154,
   'runtime/radapter/server.ts::handleRuntimeAdapterMessage': 302,
-  'runtime/server/index.ts::startXlnServer': 630,
   'runtime/protocol/radix-merkle.ts::buildRadixMerkleMaterialized': 181,
 };
 
