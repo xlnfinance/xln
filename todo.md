@@ -371,8 +371,7 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   every file over 3000 lines; delete each allowance with its verified split.
   The exact remaining owners are `jadapter/rpc-adapter.ts::{createRpcAdapter,
   startWatching,doPoll,pollInFlight callback}`,
-  `orchestrator/mm-node-run.ts::runMarketMakerNode`, and
-  `orchestrator/hub-node.ts::run`. Split by lifecycle/ownership boundary, not
+  and `orchestrator/mm-node-run.ts::runMarketMakerNode`. Split by lifecycle/ownership boundary, not
   arbitrary line ranges, and delete each exact allowance after its verified
   extraction.
   Replace `prod-startup-wiring.test.ts` source-text assertions with executable

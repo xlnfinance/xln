@@ -35,31 +35,7 @@ import type {
 
 import type { GossipLayer } from '../networking/gossip';
 import type { Profile } from '../entity/profile';
-
-export type RuntimeP2PConfigLike = {
-  relayUrls?: string[];
-  wsUrl?: string | null;
-  seedRuntimeIds?: string[];
-  runtimeId?: string;
-  signerId?: string;
-  advertiseEntityIds?: string[];
-  isHub?: boolean;
-  gossipPollMs?: number;
-};
-
-export type RuntimeP2PSurface = {
-  close(): void;
-  connect(): void;
-  isConnected(): boolean;
-  matchesIdentity(runtimeId: string, signerId?: string): boolean;
-  updateConfig(config: RuntimeP2PConfigLike): void;
-  refreshGossip(mode?: unknown): void;
-  ensureProfiles(entityIds: string[]): Promise<boolean>;
-  sendDebugEvent(payload: unknown): boolean;
-  syncProfiles(): Promise<boolean>;
-  announceProfilesForEntities(entityIds: string[], reason?: string): void;
-  announceProfilesForEntitiesNow(entityIds: string[], reason?: string, includePending?: boolean): Promise<void>;
-};
+import type { RuntimeP2PConfigLike } from './p2p-types';
 
 import type {
   RuntimeSecurityIncident,
