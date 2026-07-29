@@ -39,8 +39,8 @@ import {
   verifyCertifiedBoardProof,
 } from '../jurisdiction/board-registry';
 import { deriveEncryptionKeyPair, pubKeyToHex } from '../protocol/p2p-crypto';
-import { computeProfileHash, signProfileRuntimeRoute, verifyProfileSignature } from '../networking/profile-signing';
-import type { Profile } from '../networking/gossip';
+import { computeProfileHash, signProfileRuntimeRoute, verifyProfileSignature } from '../entity/profile-signing';
+import type { Profile } from '../entity/profile';
 import { computeValidatorEncryptionAttestationDigest } from '../protocol/htlc/validator-encryption';
 import { canonicalJurisdictionEventsHash } from '../jurisdiction/event-observation';
 import { getJEventJurisdictionRef } from '../jurisdiction/event-observation';

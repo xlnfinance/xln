@@ -28,7 +28,6 @@ const ROOT_FILE_DEBT = new Set([
 // Existing counts are migration debt: every increase and every newly
 // introduced direction fails, while completed cleanup must remove its entry.
 const REVERSE_DEPENDENCY_DEBT: Readonly<Record<string, number>> = {
-  'entity->networking': 4,
   'protocol->entity': 1,
 };
 

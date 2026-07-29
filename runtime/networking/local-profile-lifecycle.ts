@@ -7,7 +7,7 @@ import {
   buildValidatorEncryptionBoard,
 } from '../entity/profile-encryption';
 import { buildLocalEntityProfile } from './gossip-helper';
-import { computeProfileHash, signProfileRuntimeRoute } from './profile-signing';
+import { computeProfileHash, signProfileRuntimeRoute } from '../entity/profile-signing';
 import { compareStableText } from '../protocol/serialization';
 import {
   requireCompleteValidatorEncryptionManifest,

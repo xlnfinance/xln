@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { deriveSignerAddressSync } from '../account/crypto';
 import { RuntimeP2P } from '../networking/p2p';
 import { hexToPubKey } from '../protocol/p2p-crypto';
-import type { Profile } from '../networking/gossip';
+import type { Profile } from '../entity/profile';
 import type { RuntimeState } from '../types';
 
 const key = (byte: string): string => `0x${byte.repeat(32)}`;

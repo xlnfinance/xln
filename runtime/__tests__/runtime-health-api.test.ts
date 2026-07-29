@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { Profile } from '../networking/gossip';
+import type { Profile } from '../entity/profile';
 import { createRelayStore, storeVerifiedGossipProfile } from '../relay/store';
 import { createEmptyEnv } from '../runtime';
 import { handleRuntimeHealth, type RuntimeHealthCacheEntry, type RuntimeHealthDeps } from '../server/health-api';

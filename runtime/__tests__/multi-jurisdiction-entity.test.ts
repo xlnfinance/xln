@@ -28,7 +28,7 @@ import { getEntityConfigBoardHash } from '../hanko/signing';
 import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../account/default-tokens';
 import { accountStateDomainFromJurisdiction } from '../account/state-root';
 import type { JAdapter } from '../jadapter/types';
-import { canonicalizeProfile, parseProfile } from '../networking/gossip';
+import { canonicalizeProfile, parseProfile } from '../entity/profile';
 import { computeValidatorEncryptionAttestationDigest } from '../protocol/htlc/validator-encryption';
 import type { ConsensusConfig, RuntimeState, JReplica, JurisdictionConfig } from '../types';
 import { installCanonicalRegistrationEvidence } from './helpers/registration-evidence';

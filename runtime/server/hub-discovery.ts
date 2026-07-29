@@ -1,5 +1,5 @@
 import type { RuntimeState } from '../types';
-import type { Profile } from '../networking/gossip';
+import type { Profile } from '../entity/profile';
 import { getAllGossipProfiles } from '../relay/store';
 import { normalizeRuntimeKey, type RelayStore } from '../relay/store';
 import { compareStableText } from '../protocol/serialization';

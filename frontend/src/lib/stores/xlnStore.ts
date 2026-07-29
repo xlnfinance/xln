@@ -71,7 +71,7 @@ import {
 import { waitForOpenAccountCounterpartyProfiles } from '$lib/utils/p2pPrefetch';
 import { requireTokenDecimals } from '$lib/components/Entity/token-metadata';
 import { getXLN, xlnInstance } from './xlnRuntimeLoader';
-import { parseProfile as parseGossipProfile } from '@xln/runtime/networking/gossip';
+import { parseProfile } from '@xln/runtime/entity/profile';
 import type {
   XLNModule,
   RuntimeState,
@@ -1215,13 +1215,13 @@ async function fetchPaymentGossipProfiles(entityIds: string[]): Promise<GossipPr
       }
       const record = payload as { profile?: unknown; peers?: unknown };
       if (record.profile !== undefined && record.profile !== null) {
-        profiles.push(parseGossipProfile(record.profile));
+        profiles.push(parseProfile(record.profile));
       }
       if (record.peers !== undefined) {
         if (!Array.isArray(record.peers)) {
           throw new Error(`PAYMENT_GOSSIP_PEERS_INVALID: entity=${entityId}`);
         }
-        profiles.push(...record.peers.map(parseGossipProfile));
+        profiles.push(...record.peers.map(parseProfile));
       }
     } catch (error) {
       errorLog.log('Payment gossip profile fetch failed', 'Payment Gossip', { entityId, error });

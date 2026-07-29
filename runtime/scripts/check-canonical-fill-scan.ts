@@ -200,10 +200,10 @@ for (const [path, markers] of [
     'getCrossJurisdictionCommittedProofRatio',
     'CROSS_J_MAX_FILL_RATIO',
   ]],
-  ['runtime/__tests__/audit-failfast-regressions.test.ts', [
+  ['runtime/__tests__/audit-failfast-regressions-part-6.test.ts', [
     'MAX_PENDING_CROSS_J_FILL_ACKS',
     'pendingCrossJurisdictionFillAcks = new Map();',
-    ")).rejects.toThrow('CROSS_J_FILL_ACK_PENDING_CAPACITY');",
+    ").rejects.toThrow('CROSS_J_FILL_ACK_PENDING_CAPACITY');",
     'expect(cappedState.pendingCrossJurisdictionFillAcks.size).toBe(MAX_PENDING_CROSS_J_FILL_ACKS);',
   ]],
 ] as const) {
@@ -215,7 +215,7 @@ for (const path of [
   'runtime/qa/runtime-ascii.ts',
   'runtime/protocol/dispute/proof-builder.ts',
   'runtime/networking/gossip-helper.ts',
-  'runtime/networking/gossip.ts',
+  'runtime/entity/profile.ts',
 ] as const) {
   assertNotMatches(readText(path), /\b65_535\b|\b65535\b/, path);
 }

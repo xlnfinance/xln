@@ -1,4 +1,4 @@
-import type { Profile } from '../../networking/gossip';
+import type { Profile } from '../../entity/profile';
 import { normalizeRuntimeId } from '../../networking/runtime-id';
 import { requireBoundaryInteger } from '../../protocol/boundary-validation';
 import { cloneIsolatedRuntimeSnapshot } from '../../protocol/runtime-input-clone';

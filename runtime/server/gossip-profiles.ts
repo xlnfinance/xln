@@ -1,5 +1,5 @@
 import type { RuntimeState } from '../types';
-import type { Profile } from '../networking/gossip';
+import type { Profile } from '../entity/profile';
 import { getAllGossipProfiles, normalizeRuntimeKey, type RelayStore } from '../relay/store';
 
 const normalizeEntityId = (value: unknown): string => String(value || '').trim().toLowerCase();

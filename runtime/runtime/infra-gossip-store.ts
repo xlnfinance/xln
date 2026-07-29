@@ -1,6 +1,6 @@
 import type { Level } from 'level';
-import type { Profile } from '../networking/gossip';
-import { canonicalizeProfile, parseProfile } from '../networking/gossip';
+import type { Profile } from '../entity/profile';
+import { canonicalizeProfile, parseProfile } from '../entity/profile';
 import { deserializeTaggedJson, serializeTaggedJson } from '../protocol/serialization';
 import { createStructuredLogger, shortId } from '../infra/logger';
 import type { RuntimeState } from '../types';

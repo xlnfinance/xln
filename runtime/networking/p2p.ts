@@ -6,12 +6,12 @@
  */
 
 import type { RuntimeState, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../types';
-import { canonicalizeProfile, getBoardPrimaryPublicKey, parseProfile, type Profile } from './gossip';
+import { canonicalizeProfile, getBoardPrimaryPublicKey, parseProfile, type Profile } from '../entity/profile';
 import { RuntimeWsClient } from './ws-client';
 import { buildLocalEntityProfile } from './gossip-helper';
 import { extractEntityId } from '../ids';
 import { getSignerPrivateKeyIfAvailable, registerSignerPublicKey } from '../account/crypto';
-import { computeProfileHash, signProfileRuntimeRoute, verifyProfileSignature } from './profile-signing';
+import { computeProfileHash, signProfileRuntimeRoute, verifyProfileSignature } from '../entity/profile-signing';
 import { inspectHankoForHash } from '../hanko/signing';
 import { deriveEncryptionKeyPair, pubKeyToHex, hexToPubKey, type P2PKeyPair } from '../protocol/p2p-crypto';
 import { asFailFastPayload, failfastAssert } from './failfast';

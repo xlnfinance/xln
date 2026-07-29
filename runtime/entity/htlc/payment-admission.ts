@@ -1,13 +1,13 @@
 import { NobleCryptoProvider } from '../../protocol/crypto/noble';
 import type { EntityInput, EntityState, EntityTx, RuntimeState } from '../../types';
-import type { Profile } from '../../networking/gossip';
-import { canonicalizeProfile, getValidatorEncryptionManifestFromBoard } from '../../networking/gossip';
+import type { Profile } from '../../entity/profile';
+import { canonicalizeProfile, getValidatorEncryptionManifestFromBoard } from '../../entity/profile';
 import {
   computeEntityProfileCertificationComponents,
   profileToEntityProfileDescriptor,
   type EntityProfileDescriptor,
 } from '../profile-descriptor';
-import { computeProfileHash, verifyProfileSignature } from '../../networking/profile-signing';
+import { computeProfileHash, verifyProfileSignature } from '../../entity/profile-signing';
 import { calculateDirectionalFeePPM, sanitizeBaseFee, sanitizeFeePPM } from '../../routing/fees';
 import { getTokenCapacity } from '../../routing/capacity';
 import { resolvePaymentDeadlineWindow } from '../../protocol/payments/delivery';

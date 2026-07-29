@@ -10,7 +10,7 @@ import type {
   Profile,
   ProfileJurisdiction,
   ProfileMirror,
-} from './gossip';
+} from '../entity/profile';
 import { compareStableText, safeStringify } from '../protocol/serialization';
 import { deriveSignerAddressSync, getSignerAddress, getSignerPrivateKeyIfAvailable, getSignerPublicKey } from '../account/crypto';
 import { deriveEncryptionKeyPair, pubKeyToHex } from '../protocol/p2p-crypto';

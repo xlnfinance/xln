@@ -10,7 +10,7 @@ import {
   setDebugIncidentState,
   storeVerifiedGossipProfile,
 } from '../relay/store';
-import type { Profile } from '../networking/gossip';
+import type { Profile } from '../entity/profile';
 import {
   buildCryptographicProfileFixture,
   certifySingleSignerProfileFixture,

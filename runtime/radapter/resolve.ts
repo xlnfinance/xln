@@ -51,7 +51,7 @@ type RuntimeAdapterEntityCoreDoc = StorageEntityCoreDoc & {
   entityEncPrivKey?: '';
   htlcNotes?: EntityState['htlcNotes'];
 };
-import type { Profile } from '../networking/gossip';
+import type { Profile } from '../entity/profile';
 import {
   projectRuntimeIngressReceiptForWire,
   type RuntimeIngressReceipt,

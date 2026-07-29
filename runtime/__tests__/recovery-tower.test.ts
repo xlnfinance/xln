@@ -34,7 +34,7 @@ import { computePersistedEnvStateHash } from '../storage/wal/hash';
 import { createWatchtowerStore } from '../watchtower/store';
 import { handleRecoveryDiscover, handleTowerAppointment, handleTowerRestore } from '../watchtower/http';
 import type { JReplica, JurisdictionConfig } from '../types';
-import type { Profile } from '../networking/gossip';
+import type { Profile } from '../entity/profile';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
 import { generateLazyEntityId } from '../entity/factory';
 import {
@@ -44,7 +44,7 @@ import {
 } from '../entity/consensus/state-root';
 import { buildSingleSignerHanko } from '../hanko/batch';
 import { deriveEncryptionKeyPair, pubKeyToHex } from '../protocol/p2p-crypto';
-import { computeProfileHash, signProfileRuntimeRoute } from '../networking/profile-signing';
+import { computeProfileHash, signProfileRuntimeRoute } from '../entity/profile-signing';
 import { computeValidatorEncryptionAttestationDigest } from '../protocol/htlc/validator-encryption';
 
 const addr = (byte: string): string => `0x${byte.repeat(20)}`;

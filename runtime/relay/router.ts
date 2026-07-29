@@ -28,8 +28,8 @@ import {
   isRelaySocketOpen,
   classifyRelayDeliveryEvent,
 } from './store';
-import type { Profile } from '../networking/gossip';
-import { verifyProfileSignature, type ProfileVerifyResult } from '../networking/profile-signing';
+import type { Profile } from '../entity/profile';
+import { verifyProfileSignature, type ProfileVerifyResult } from '../entity/profile-signing';
 import { verifyHelloAuth } from '../networking/hello-auth';
 import { isDeliveryDelivered, type DeliveryResult } from '../protocol/payments/delivery-result';
 import { createStructuredLogger } from '../infra/logger';

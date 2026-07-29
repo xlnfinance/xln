@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Profile } from '../networking/gossip';
+import type { Profile } from '../entity/profile';
 import { relayRoute } from '../relay/router';
 import { cacheEncryptionKey, createRelayStore, enqueueMessage, resolveEncryptionPublicKeyHex } from '../relay/store';
 import { deserializeWsMessage, hashHelloMessage, makeHelloNonce } from '../networking/ws-protocol';

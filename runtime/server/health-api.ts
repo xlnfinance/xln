@@ -3,7 +3,7 @@ import { getHealthStatus, type HealthStatus, type HubHealth } from './health';
 import type { JTokenInfo } from '../jadapter/types';
 import { getStorageHealthSnapshotSync } from '../infra/storage-monitor';
 import { getAllGossipProfiles, normalizeRuntimeKey, type RelayStore } from '../relay/store';
-import type { Profile } from '../networking/gossip';
+import type { Profile } from '../entity/profile';
 import { publicRuntimeHealthBody } from './health-redaction';
 import { buildDiskSummary } from './utils';
 import { getReplicaAccountCount, getReplicaReserveSnapshot } from './entity-lookup';

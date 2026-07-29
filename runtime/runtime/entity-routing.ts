@@ -11,7 +11,7 @@ import type {
   RuntimeEntityInputsEnvelope,
   RuntimeTx,
 } from '../types';
-import type { Profile } from '../networking/gossip';
+import type { Profile } from '../entity/profile';
 import type { RuntimeOutputRoutingDeps } from './output-routing';
 import { extractCrossJurisdictionRouteFromTx } from '../extensions/cross-j/boundary';
 import { getEffectiveEntityInputTxs } from '../entity/consensus/output-envelope';

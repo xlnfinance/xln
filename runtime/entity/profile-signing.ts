@@ -1,5 +1,5 @@
 import { Signature, keccak256, recoverAddress } from 'ethers';
-import { canonicalizeProfile, type Profile } from './gossip';
+import { canonicalizeProfile, type Profile } from './profile';
 import type { RuntimeState, HankoString } from '../types';
 import { verifyHankoForHash } from '../hanko/signing';
 import { resolveCertifiedRegisteredBoardHash } from '../jurisdiction/board-registry';
@@ -8,7 +8,7 @@ import { serializeTaggedJson } from '../protocol/serialization';
 import {
   computeEntityProfileDescriptorHash,
   profileToEntityProfileDescriptor,
-} from '../entity/profile-descriptor';
+} from './profile-descriptor';
 
 const PROFILE_ROUTE_DOMAIN = 'xln-profile-runtime-route-v1';
 const SECP256K1_HALF_ORDER = BigInt('0x7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0');

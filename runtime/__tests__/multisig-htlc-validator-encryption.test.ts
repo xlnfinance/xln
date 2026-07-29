@@ -58,12 +58,12 @@ import {
 } from '../entity/profile-descriptor';
 import { createDefaultDelta } from '../account/delta';
 import { validateEntityState } from '../validation-utils';
-import { getValidatorEncryptionManifestFromBoard, parseProfile, type Profile } from '../networking/gossip';
+import { getValidatorEncryptionManifestFromBoard, parseProfile, type Profile } from '../entity/profile';
 import {
   computeProfileHash,
   signProfileRuntimeRoute,
   verifyProfileSignature,
-} from '../networking/profile-signing';
+} from '../entity/profile-signing';
 import {
   prepareHtlcPaymentEntityInputs,
   prepareHtlcPaymentEntityTx,

@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Profile } from '../networking/gossip';
-import { parseProfile } from '../networking/gossip';
+import type { Profile } from '../entity/profile';
+import { parseProfile } from '../entity/profile';
 import { buildNetworkGraph } from '../routing/graph';
 import { PathFinder } from '../routing/pathfinding';
 import { SigningKey, computeAddress } from 'ethers';

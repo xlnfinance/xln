@@ -10,13 +10,13 @@ import type {
   Profile,
   ProfileAccount,
   ProfileJurisdiction,
-} from '../../networking/gossip';
-import { canonicalizeProfile } from '../../networking/gossip';
+} from '../../entity/profile';
+import { canonicalizeProfile } from '../../entity/profile';
 import { deriveEncryptionKeyPair, pubKeyToHex } from '../../protocol/p2p-crypto';
 import {
   computeProfileHash,
   computeProfileRouteHash,
-} from '../../networking/profile-signing';
+} from '../../entity/profile-signing';
 import { computeValidatorEncryptionAttestationDigest } from '../../protocol/htlc/validator-encryption';
 
 type CryptographicProfileOptions = Readonly<{

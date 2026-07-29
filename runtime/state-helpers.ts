@@ -44,7 +44,7 @@ import {
   cloneCrossJurisdictionSwapHistoryRoute,
   cloneCrossJurisdictionSwapOfferRoute,
 } from './extensions/cross-j/index';
-import type { Profile } from './networking/gossip';
+import type { Profile } from './entity/profile';
 import { createStructuredLogger } from './infra/logger';
 import { getEntityLeaderState, isEntityActiveLeader } from './entity/consensus/leader';
 import { forkAccountCommitmentCache } from './account/map-commitment';

@@ -3,7 +3,7 @@
  * Builds from gossip profiles to create routing graph
  */
 
-import type { Profile } from '../networking/gossip';
+import type { Profile } from '../entity/profile';
 import { createStructuredLogger } from '../infra/logger';
 import { getTokenCapacity } from './capacity';
 import { calculateDirectionalFeePPM, sanitizeBaseFee, sanitizeFeePPM } from './fees';

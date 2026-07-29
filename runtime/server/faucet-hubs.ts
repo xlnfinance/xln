@@ -1,5 +1,5 @@
 import type { RuntimeState } from '../types';
-import type { Profile } from '../networking/gossip';
+import type { Profile } from '../entity/profile';
 
 export const getFaucetHubProfiles = (env: RuntimeState, activeHubEntityIds: string[]): Profile[] => {
   const activeSet = new Set(activeHubEntityIds.map(id => id.toLowerCase()));

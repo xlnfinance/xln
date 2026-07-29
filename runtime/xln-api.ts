@@ -76,7 +76,8 @@ export type {
   TowerRestoreResponseV1,
 } from './recovery/types';
 
-export type { Profile, GossipLayer } from './networking/gossip';
+export type { GossipLayer } from './networking/gossip';
+export type { Profile } from './entity/profile';
 export type { PaymentRoute } from './routing/pathfinding';
 export type { CompletedBatch, JBatch, JBatchState } from './jurisdiction/batch';
 export type { JAdapter, JEvent } from './jadapter/types';

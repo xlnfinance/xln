@@ -8,7 +8,7 @@ import type {
   ProfileAccount,
   ProfileJurisdiction,
   ProfileTokenCapacity,
-} from '../networking/gossip';
+} from './profile';
 import {
   computeEntityProfileCertificationHash,
   requireCompleteValidatorEncryptionManifest,

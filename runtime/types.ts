@@ -208,11 +208,12 @@ export type {
  * narrative lives in docs/architecture/runtime-reaj.md.
  */
 
-import type { GossipLayer, Profile } from './networking/gossip';
+import type { GossipLayer } from './networking/gossip';
+import type { Profile } from './entity/profile';
 import type { JBatchState } from './jurisdiction/batch';
 import type { CrontabState } from './entity/scheduler-types';
 
-export type { Profile } from './networking/gossip';
+export type { Profile } from './entity/profile';
 
 export type RuntimeP2PConfigLike = {
   relayUrls?: string[];

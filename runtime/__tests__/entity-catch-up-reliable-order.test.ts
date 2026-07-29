@@ -26,7 +26,7 @@ import {
   collectLocalProfileEncryptionAnnouncements,
   getCompleteProfileEncryptionManifest,
 } from '../entity/profile-encryption';
-import { computeProfileHash } from '../networking/profile-signing';
+import { computeProfileHash } from '../entity/profile-signing';
 import { safeStringify } from '../protocol/serialization';
 import { canonicalJurisdictionEventsHash } from '../jurisdiction/event-observation';
 import { recordValidatorJHistory } from '../jurisdiction/local-history';

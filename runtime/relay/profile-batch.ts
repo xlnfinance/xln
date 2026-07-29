@@ -1,4 +1,4 @@
-import type { Profile } from '../networking/gossip';
+import type { Profile } from '../entity/profile';
 import { compareStableText } from '../protocol/serialization';
 
 export type GossipProfileBatchRequest = {

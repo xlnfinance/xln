@@ -1,7 +1,7 @@
 import { ethers } from 'ethers';
 import type { EntityTx, RuntimeState, RuntimeInput } from '../types';
 import { safeStringify } from '../protocol/serialization';
-import type { Profile } from '../networking/gossip';
+import type { Profile } from '../entity/profile';
 import { normalizeRuntimeKey, pushDebugEvent, type RelayStore } from '../relay/store';
 import { createStructuredLogger, shortId } from '../infra/logger';
 import { encodeRebalancePolicyMemo } from '../extensions/rebalance/policy';

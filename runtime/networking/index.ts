@@ -20,7 +20,8 @@
 
 // Gossip protocol
 export { createGossipLayer } from './gossip';
-export type { Profile, GossipLayer, BoardValidator, BoardMetadata } from './gossip';
+export type { GossipLayer } from './gossip';
+export type { Profile, BoardValidator, BoardMetadata } from '../entity/profile';
 export { buildEntityProfile } from './gossip-helper';
 
 // P2P overlay
@@ -54,4 +55,4 @@ export {
   hasValidProfileSignature,
   computeProfileHash,
   computeProfileRouteHash,
-} from './profile-signing';
+} from '../entity/profile-signing';
