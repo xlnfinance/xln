@@ -1,5 +1,5 @@
 import type { AccountState, AccountTx, RuntimeState } from '../../types';
-import { getAccountPerspective } from '../../state-helpers';
+import { getAccountPerspective } from '../perspective';
 import { safeStringify } from '../../protocol/serialization';
 import { createStructuredLogger, shortId } from '../../infra/logger';
 import { MAX_ACCOUNT_FRAME_TXS } from './frame';

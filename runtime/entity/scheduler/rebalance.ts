@@ -7,7 +7,7 @@ import type {
 } from '../../types';
 import { isLeftEntity } from '../id';
 import { deriveDelta } from '../../account/utils';
-import { resolveEntityProposerId } from '../../state-helpers';
+import { resolveEntityProposerId } from '../../runtime/entity-output-signer';
 import { normalizeRebalanceMatchingStrategy } from '../../extensions/rebalance/policy';
 import {
   assertNoTokenlessHubRawOverrides,

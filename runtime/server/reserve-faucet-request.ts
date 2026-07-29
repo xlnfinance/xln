@@ -2,7 +2,7 @@ import type { EntityTx, RuntimeInput, RuntimeState } from '../types';
 import type { JAdapter } from '../jadapter';
 import { safeStringify } from '../protocol/serialization';
 import { createStructuredLogger, shortId } from '../infra/logger';
-import { resolveEntityProposerId } from '../state-helpers';
+import { resolveEntityProposerId } from '../runtime/entity-output-signer';
 import { formatTimingMs, isEntityId32 } from './utils';
 import { faucetFailureBody } from './faucet-failure';
 import { getFaucetHubProfiles } from './faucet-hubs';

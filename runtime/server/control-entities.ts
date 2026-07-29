@@ -1,4 +1,4 @@
-import { resolveEntityProposerId } from '../state-helpers';
+import { resolveEntityProposerId } from '../runtime/entity-output-signer';
 import { compareStableText } from '../protocol/serialization';
 import type { RuntimeState } from '../types';
 

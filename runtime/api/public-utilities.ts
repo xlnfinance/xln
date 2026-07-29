@@ -112,4 +112,4 @@ export {
 } from '../utils';
 export { formatEntityId, getEntityShortId } from '../utils';
 export { safeStringify } from '../protocol/serialization';
-export { resolveEntityProposerId } from '../state-helpers';
+export { resolveEntityProposerId } from '../runtime/entity-output-signer';

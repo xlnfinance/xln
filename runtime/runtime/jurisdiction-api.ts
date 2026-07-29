@@ -1,7 +1,7 @@
 import type { JAdapter } from '../jadapter';
 import { withCanonicalCrossJurisdictionRouteHash } from '../extensions/cross-j/index';
 import { getJurisdictionStackId, requireEntityRuntimeJurisdictionConfig } from '../jurisdiction/jurisdiction-runtime';
-import { resolveEntityProposerId } from '../state-helpers';
+import { resolveEntityProposerId } from './entity-output-signer';
 import type { AccountState, CrossJurisdictionSwapRoute, EntityState, RuntimeState, RuntimeInput } from '../types';
 import { getWallClockMs } from '../utils';
 import { buildDebtEnforcementRuntimeInputFromProjection } from '../protocol/payments/debt-enforcement';

@@ -1,6 +1,6 @@
 import type { AccountState, RuntimeInput, RuntimeState } from '../types';
 import { safeStringify } from '../protocol/serialization';
-import { resolveEntityProposerId } from '../state-helpers';
+import { resolveEntityProposerId } from '../runtime/entity-output-signer';
 import { getAccountState, getEntityOutCapacity, hasAccount } from './entity-lookup';
 import { getFaucetHubProfiles } from './faucet-hubs';
 import { getRequestCreditCap } from './hub-health';

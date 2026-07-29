@@ -10,7 +10,7 @@ import { deriveTransferOffdeltaChange } from '../../../protocol/delta-movement';
 import { FINANCIAL } from '../../../constants';
 import { isLeftEntity } from '../../../protocol/entity-id';
 import { createStructuredLogger } from '../../../infra/logger';
-import { getAccountPerspective } from '../../../state-helpers';
+import { getAccountPerspective } from '../../perspective';
 import { ensureDelta } from '../delta-utils';
 
 const directPaymentLog = createStructuredLogger('account.payment');

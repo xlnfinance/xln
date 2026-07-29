@@ -1,6 +1,6 @@
 import type { AccountState, AccountTx, EntityCandidateEffect, RuntimeState } from '../../../types';
 import type { AccountJClaimSession } from '../../j-claim-session';
-import { getAccountPerspective } from '../../../state-helpers';
+import { getAccountPerspective } from '../../perspective';
 import { applyAccountJClaimTransition } from '../../j-claim-transition';
 import { applyFinalizedAccountJEvents } from './j-event-finality';
 import { getAccountStateDomain, requireAccountDeltaTransformerAddress } from '../../consensus/helpers';

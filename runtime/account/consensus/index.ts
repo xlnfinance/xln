@@ -13,7 +13,8 @@ import type {
   RuntimeState,
   Delta,
 } from '../../types';
-import { cloneAccountFrame, cloneAccountState, getAccountPerspective } from '../../state-helpers';
+import { cloneAccountFrame, cloneAccountState } from '../../state-helpers';
+import { getAccountPerspective } from '../perspective';
 import { HEAVY_LOGS } from '../../utils';
 import { applyAccountTx } from '../tx/apply';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';

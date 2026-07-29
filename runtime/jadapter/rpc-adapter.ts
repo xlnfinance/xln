@@ -33,7 +33,7 @@ import {
 import { assertSealedJBatchBinding } from '../jurisdiction/sealed-batch';
 import { compareStableText, safeStringify } from '../protocol/serialization';
 import { nodeProcess, runtimeIsBrowser } from '../infra/runtime-process';
-import { resolveEntityProposerId } from '../state-helpers';
+import { resolveEntityProposerId } from '../runtime/entity-output-signer';
 import type { DisputeFinalizationEvidence, RuntimeState, JTx, RuntimeInput, RuntimeTx } from '../types';
 import { TOKEN_REGISTRATION_AMOUNT, defaultTokensForJurisdiction, getDefaultTokenSupply } from '../jurisdiction/default-tokens';
 import { extractCanonicalDepositoryEventArgs, parseKnownDepositoryLog } from './depository-event-codec';

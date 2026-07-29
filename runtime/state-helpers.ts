@@ -9,11 +9,9 @@ import type {
   AccountTx,
   EntityReplica,
   EntityState,
-  RuntimeState,
   LendingLoan,
   LendingPoolPosition,
   LendingState,
-  LogCategory,
 } from './types';
 import { cloneDisputeArgumentSnapshot } from './protocol/dispute/argument-snapshot';
 import type { ProofBodyStruct } from '../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
@@ -31,7 +29,6 @@ import {
   cloneIsolatedAccountFrame,
 } from './protocol/account-input-clone';
 import { getAccountFrameHistoryView, setAccountFrameHistoryView } from './runtime/env-events';
-import { getLocalSignerPrivateKey } from './account/crypto';
 import { cloneJBatch, type JBatchState } from './jurisdiction/batch';
 import {
   cloneCrossJurisdictionBookAdmission,
@@ -43,49 +40,11 @@ import {
   cloneCrossJurisdictionSwapHistoryRoute,
   cloneCrossJurisdictionSwapOfferRoute,
 } from './extensions/cross-j/index';
-import type { Profile } from './entity/profile';
 import { createStructuredLogger } from './infra/logger';
-import { getEntityLeaderState, isEntityActiveLeader } from './entity/consensus/leader';
 import { forkAccountCommitmentCache } from './account/map-commitment';
 import { forkEntityAccountCommitmentCache } from './entity/consensus/state-root';
 
 const stateHelperLog = createStructuredLogger('state.helpers');
-const REPLAY_OUTPUT_SIGNER_HINTS = Symbol.for('xln.runtime.replay.output-signer-hints');
-type RuntimeStateWithReplaySignerHints = RuntimeState & {
-  [REPLAY_OUTPUT_SIGNER_HINTS]?: ReadonlyMap<string, string>;
-};
-
-export const installReplayOutputSignerHints = (
-  env: RuntimeState,
-  hints: ReadonlyMap<string, string>,
-): void => {
-  const canonical = new Map<string, string>();
-  for (const [rawEntityId, rawSignerId] of hints) {
-    const entityId = String(rawEntityId || '').trim().toLowerCase();
-    const signerId = String(rawSignerId || '').trim().toLowerCase();
-    if (!entityId || !signerId) {
-      throw new Error('REPLAY_OUTPUT_SIGNER_HINT_INVALID');
-    }
-    canonical.set(entityId, signerId);
-  }
-  Object.defineProperty(env, REPLAY_OUTPUT_SIGNER_HINTS, {
-    value: canonical,
-    configurable: true,
-    enumerable: false,
-    writable: false,
-  });
-};
-
-export const clearReplayOutputSignerHints = (env: RuntimeState): void => {
-  const transient: RuntimeStateWithReplaySignerHints = env;
-  delete transient[REPLAY_OUTPUT_SIGNER_HINTS];
-};
-
-const replayOutputSignerHint = (env: RuntimeState, entityId: string): string | null => {
-  const transient: RuntimeStateWithReplaySignerHints = env;
-  const hints = transient[REPLAY_OUTPUT_SIGNER_HINTS];
-  return hints instanceof Map ? String(hints.get(entityId) || '') || null : null;
-};
 const cloneAccountTxForState = <T extends AccountTx>(tx: T): T => {
   const cloned = structuredClone(tx) as T;
   return cloneCrossJurisdictionAccountTxRoute(cloned) as T;
@@ -167,24 +126,6 @@ const cloneCrossJurisdictionRoutesInAccount = (account: AccountState, source: Ac
   }
 };
 
-/**
- * Get account perspective: Am I left or right? Derive from/to for current operation.
- */
-export function getAccountPerspective(account: AccountState, myEntityId: string): {
-  iAmLeft: boolean;
-  from: string;
-  to: string;
-  counterparty: string;
-} {
-  const iAmLeft = myEntityId === account.leftEntity;
-  return {
-    iAmLeft,
-    from: iAmLeft ? account.leftEntity : account.rightEntity,
-    to: iAmLeft ? account.rightEntity : account.leftEntity,
-    counterparty: iAmLeft ? account.rightEntity : account.leftEntity,
-  };
-}
-
 const cloneJBatchState = (state: JBatchState): JBatchState => {
   const cloned: JBatchState = {
     batch: cloneJBatch(state.batch),
@@ -208,80 +149,6 @@ const cloneJBatchState = (state: JBatchState): JBatchState => {
   }
   return cloned;
 };
-
-/**
- * Emit structured events with a scoped path for time-travel debugging.
- * This keeps per-frame logs queryable without bloating EntityState.
- */
-export function emitScopedEvents(
-  env: RuntimeState,
-  category: LogCategory,
-  scope: string,
-  messages: string[],
-  data: Record<string, unknown> = {},
-  entityId?: string,
-): void {
-  if (!messages || messages.length === 0) return;
-
-  const payload = { path: scope, ...data };
-  for (const message of messages) {
-    env.info(category, message, payload, entityId);
-  }
-}
-
-/**
- * Resolve the proposer signerId for a given entity.
- * Prefers local proposer replica, then exact local replica signer, then local
- * config validators[0], then gossip board[0].
- * Throws if no signer can be resolved (fail early).
- */
-export function resolveEntityProposerId(env: RuntimeState, entityId: string, context: string): string {
-  const targetEntityId = String(entityId || '').toLowerCase();
-  let localKeyReplicaFallback: string | null = null;
-  let configFallback: string | null = null;
-  let gossipFallback: string | null = null;
-
-  for (const [replicaKey, replica] of env.eReplicas.entries()) {
-    const keyParts = String(replicaKey).split(':');
-    const keyEntityId = String(keyParts[0] || '').toLowerCase();
-    const replicaEntityId = String(replica.entityId || '').toLowerCase();
-    if (replicaEntityId !== targetEntityId && keyEntityId !== targetEntityId) continue;
-    const replicaSignerId = String(replica.signerId || keyParts[1] || '').trim();
-    const configuredValidators = replica.state.config.validators || [];
-    if (isEntityActiveLeader(replica) && replicaSignerId && getLocalSignerPrivateKey(env, replicaSignerId)) return replicaSignerId;
-    if (!localKeyReplicaFallback && replicaSignerId && getLocalSignerPrivateKey(env, replicaSignerId)) {
-      localKeyReplicaFallback = replicaSignerId;
-    }
-    if (!configFallback) {
-      configFallback = getEntityLeaderState(replica.state).activeValidatorId || configuredValidators[0] || null;
-    }
-  }
-
-  if (env.gossip?.getProfiles) {
-    const profile = (env.gossip.getProfiles() as Profile[]).find(
-      (p) => String(p.entityId || '').toLowerCase() === targetEntityId,
-    );
-    const board = profile?.metadata.board;
-    if (board && Array.isArray(board.validators) && board.validators.length > 0) {
-      const first = board.validators[0];
-      gossipFallback = first?.signerId || first?.signer || null;
-    }
-  }
-
-  if (localKeyReplicaFallback) return localKeyReplicaFallback;
-  if (configFallback && getLocalSignerPrivateKey(env, configFallback)) return configFallback;
-  // Sparse-WAL replay runs before gossip/network infrastructure is attached.
-  // The same atomically hashed WAL record already contains the durable outbox,
-  // so its exact Account-output signer is valid local routing evidence. This
-  // hint never enters Entity/Account consensus state and is cleared after each
-  // replayed R-frame.
-  const replayHint = replayOutputSignerHint(env, targetEntityId);
-  if (replayHint) return replayHint;
-  if (gossipFallback) return gossipFallback;
-  if (configFallback) return configFallback;
-
-  throw new Error(`SIGNER_RESOLUTION_FAILED: ${context} entityId=${entityId}`);
-}
 
 const cloneLendingPoolPosition = (position: LendingPoolPosition): LendingPoolPosition => ({
   ...position,

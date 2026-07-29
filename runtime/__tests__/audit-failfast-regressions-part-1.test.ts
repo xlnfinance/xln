@@ -246,11 +246,13 @@ import { handleMeshBootstrapLoopError } from '../orchestrator/mesh-bootstrap-fai
 import { fitCrossAmountsToOrderbook } from '../orchestrator/mm-node';
 
 import {
-  clearReplayOutputSignerHints,
   cloneAccountState,
+} from '../state-helpers';
+import {
+  clearReplayOutputSignerHints,
   installReplayOutputSignerHints,
   resolveEntityProposerId,
-} from '../state-helpers';
+} from '../runtime/entity-output-signer';
 
 import { QUOTE_EXPIRY_MS } from '../types';
 

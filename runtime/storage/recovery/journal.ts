@@ -25,7 +25,7 @@ import { refreshScheduledWakeIndex } from '../../runtime/scheduled-wake';
 import {
   clearReplayOutputSignerHints,
   installReplayOutputSignerHints,
-} from '../../state-helpers';
+} from '../../runtime/entity-output-signer';
 import type {
   RuntimeInput,
   RuntimeState,

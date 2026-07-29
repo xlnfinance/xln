@@ -12,7 +12,7 @@ import {
   accountInputProposal,
   accountInputReferenceHeight,
 } from '../../../../account/consensus/flush';
-import { emitScopedEvents } from '../../../../state-helpers';
+import { emitScopedEvents } from '../../../../infra/scoped-events';
 import { addMessages } from '../../../frame-events';
 import { createStructuredLogger, shortId } from '../../../../infra/logger';
 import { scheduleHook } from '../../../scheduler';

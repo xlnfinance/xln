@@ -4,7 +4,7 @@ import type {
   EntityCandidateEffect,
   RuntimeState,
 } from '../../types';
-import { getAccountPerspective } from '../../state-helpers';
+import { getAccountPerspective } from '../perspective';
 import type { AccountJClaimSession } from '../j-claim-session';
 import { canProcessAccountTxForDisputeStatus } from '../consensus/dispute-policy';
 import { createStructuredLogger } from '../../infra/logger';

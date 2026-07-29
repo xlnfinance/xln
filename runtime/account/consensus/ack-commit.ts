@@ -8,7 +8,8 @@ import type {
 import { HEAVY_LOGS } from '../../utils';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import { verifyHankoForHash } from '../../hanko/signing';
-import { cloneAccountFrame, getAccountPerspective } from '../../state-helpers';
+import { cloneAccountFrame } from '../../state-helpers';
+import { getAccountPerspective } from '../perspective';
 import { applyAccountTx } from '../tx/apply';
 import { deriveAccountFrameTokenIds } from '../frame';
 import { appendAccountMempoolTxs } from '../mempool';

@@ -5,7 +5,7 @@ import type { Profile } from '../entity/profile';
 import { normalizeRuntimeKey, pushDebugEvent, type RelayStore } from '../relay/store';
 import { createStructuredLogger, shortId } from '../infra/logger';
 import { encodeRebalancePolicyMemo } from '../extensions/rebalance/policy';
-import { resolveEntityProposerId } from '../state-helpers';
+import { resolveEntityProposerId } from '../runtime/entity-output-signer';
 import { getErrorMessage, isEntityId32 } from './utils';
 import { getAccountState, getEntityOutCapacity, getEntityReplicaById, hasAccount } from './entity-lookup';
 import { getFaucetHubProfiles } from './faucet-hubs';
