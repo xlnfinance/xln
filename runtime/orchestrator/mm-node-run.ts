@@ -44,7 +44,7 @@ import { createRuntimeIngressReceiptStore } from '../server/ingress-receipts';
 import { requiresLocalNodeOperator } from '../server/node-http-access';
 import { handleRuntimeInputStatus } from '../server/runtime-input-control';
 import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
-import type { RuntimeState } from '../runtime/types';
+import type { ReliableDeliveryReceipt, RuntimeState } from '../runtime/types';
 import {
   evaluateBootstrapProgressDeadline,
   isBootstrapWorkWithinDeadline,
@@ -228,6 +228,148 @@ const buildBootstrapStallCapsule = ({
   };
 };
 
+const summarizeMarketMakerHealthForDebug = (
+  health: MarketMakerHealth | null,
+): Record<string, unknown> | null => {
+  if (!health) return null;
+  const accountBlockers = [
+    ...health.hubs.flatMap(hub => hub.blockers),
+    ...health.cross.routes.flatMap(route => route.blockers),
+  ].slice(0, 16);
+  return {
+    ok: health.ok,
+    offers: health.hubs.map(hub => hub.offers),
+    hubBlockers: health.hubs.map(hub => hub.blockers.length),
+    cross: {
+      ok: health.cross.ok,
+      expectedRoutes: health.cross.expectedRoutes,
+      offers: health.cross.routes.map(route => route.offers),
+      blockers: health.cross.routes.map(route => route.blockers.length),
+    },
+    account: accountBlockers,
+    pendingFrame: accountBlockers.some(
+      blocker =>
+        typeof blocker === 'object' &&
+        blocker !== null &&
+        (blocker as { pendingFrame?: unknown }).pendingFrame === true,
+    ),
+  };
+};
+
+const summarizeReliableIdentity = (
+  identity: ReturnType<typeof getReliableOutputIdentity>,
+): Record<string, unknown> | null =>
+  identity
+    ? {
+        kind: identity.kind,
+        entityId: identity.entityId,
+        signerId: identity.signerId,
+        laneKey: identity.laneKey,
+        height: identity.height,
+        logIndex: identity.logIndex ?? null,
+        evidenceKind: identity.evidenceKind,
+        evidenceDigest: identity.evidenceDigest,
+      }
+    : null;
+
+const summarizeReceiptLedger = (
+  ledger: Map<string, ReliableDeliveryReceipt> | undefined,
+): Record<string, unknown>[] =>
+  [...(ledger?.values() ?? [])]
+    .map(receipt => ({
+      coverage: receipt.body.coverage,
+      receiverRuntimeId: receipt.body.receiverRuntimeId,
+      appliedRuntimeHeight: receipt.body.appliedRuntimeHeight,
+      identity: {
+        kind: receipt.body.identity.kind,
+        entityId: receipt.body.identity.entityId,
+        laneKey: receipt.body.identity.laneKey,
+        height: receipt.body.identity.height,
+        logIndex: receipt.body.identity.logIndex ?? null,
+        evidenceKind: receipt.body.identity.evidenceKind,
+        evidenceDigest: receipt.body.identity.evidenceDigest,
+      },
+    }))
+    .sort((left, right) => compareStableText(safeStringify(left), safeStringify(right)));
+
+const buildNodeBootstrapCausalCheckpoint = (
+  env: RuntimeState,
+  contexts: readonly MarketMakerEntityContext[],
+): Record<string, unknown> => {
+  const state = env.runtimeState;
+  return {
+    quiescence: summarizeRuntimeQuiescence(env),
+    pendingReliable: (env.pendingNetworkOutputs ?? [])
+      .map(output => ({
+        targetRuntimeId: output.runtimeId ?? null,
+        targetEntityId: output.entityId,
+        txTypes: (output.entityTxs ?? []).map(tx => tx.type),
+        txCount: output.entityTxs?.length ?? 0,
+        identity: summarizeReliableIdentity(getReliableOutputIdentity(output)),
+      }))
+      .filter(entry => entry.identity !== null)
+      .sort((left, right) => compareStableText(safeStringify(left), safeStringify(right))),
+    senderReceipts: {
+      active: summarizeReceiptLedger(state?.receivedReliableReceiptLedger),
+      terminal: summarizeReceiptLedger(state?.receivedReliableTerminalWatermarks),
+    },
+    receiverReceipts: {
+      active: summarizeReceiptLedger(state?.reliableIngressReceiptLedger),
+      terminal: summarizeReceiptLedger(state?.reliableIngressTerminalWatermarks),
+      pending: [...(state?.pendingReliableIngress?.values() ?? [])]
+        .map(pending => ({
+          targetRuntimeIds: [...pending.targetRuntimeIds].sort(compareStableText),
+          identity: {
+            kind: pending.identity.kind,
+            entityId: pending.identity.entityId,
+            laneKey: pending.identity.laneKey,
+            height: pending.identity.height,
+            logIndex: pending.identity.logIndex ?? null,
+            evidenceKind: pending.identity.evidenceKind,
+            evidenceDigest: pending.identity.evidenceDigest,
+          },
+        }))
+        .sort((left, right) => compareStableText(safeStringify(left), safeStringify(right))),
+    },
+    entities: contexts
+      .map(context => {
+        const replica = getEntityReplicaById(env, context.entityId);
+        return {
+          entityId: context.entityId,
+          jurisdiction: context.jurisdictionName,
+          consumptionRoot: replica?.state.consumptionAccumulator?.root ?? null,
+          consumptionRelationships: replica?.state.consumptionAccumulator?.count ?? 0n,
+          accounts: [...(replica?.state.accounts.entries() ?? [])]
+            .map(([counterpartyEntityId, account]) => ({
+              counterpartyEntityId,
+              currentHeight: account.currentHeight,
+              pendingFrame: Boolean(account.pendingFrame),
+              mempool: account.mempool?.length ?? 0,
+            }))
+            .sort((left, right) => compareStableText(left.counterpartyEntityId, right.counterpartyEntityId)),
+        };
+      })
+      .sort((left, right) => compareStableText(left.entityId, right.entityId)),
+  };
+};
+
+const emitNodeBootstrapDebugEvent = (
+  env: RuntimeState,
+  startupPhase: string,
+  activeEntityId: string | null,
+  event: string,
+  fields: Record<string, unknown> = {},
+): void => {
+  emitMarketMakerBootstrapDebugEvent(event, {
+    stage: startupPhase,
+    entity: activeEntityId,
+    runtimeId: String(env.runtimeId || ''),
+    height: env.height,
+    backlog: getMarketMakerRuntimeBacklogSnapshot(env, { includeQueuedEntityInputs: true }),
+    ...fields,
+  });
+};
+
 export const runMarketMakerNode = async (): Promise<void> => {
   activateMarketMakerProcessArgs();
   if (resolvedArgs.dbPath) process.env['XLN_DB_PATH'] = resolvedArgs.dbPath;
@@ -284,137 +426,12 @@ export const runMarketMakerNode = async (): Promise<void> => {
   let bootstrapCrossProducerAttempted = false;
   let lastDirectEntityInput: DirectEntityInputDebug | null = null;
   let lastDirectEntityInputError: DirectEntityInputDebug | null = null;
-
-  const summarizeMarketMakerHealthForDebug = (health: MarketMakerHealth | null): Record<string, unknown> | null => {
-    if (!health) return null;
-    const accountBlockers = [
-      ...health.hubs.flatMap(hub => hub.blockers),
-      ...health.cross.routes.flatMap(route => route.blockers),
-    ].slice(0, 16);
-    return {
-      ok: health.ok,
-      offers: health.hubs.map(hub => hub.offers),
-      hubBlockers: health.hubs.map(hub => hub.blockers.length),
-      cross: {
-        ok: health.cross.ok,
-        expectedRoutes: health.cross.expectedRoutes,
-        offers: health.cross.routes.map(route => route.offers),
-        blockers: health.cross.routes.map(route => route.blockers.length),
-      },
-      account: accountBlockers,
-      pendingFrame: accountBlockers.some(
-        blocker =>
-          typeof blocker === 'object' &&
-          blocker !== null &&
-          (blocker as { pendingFrame?: unknown }).pendingFrame === true,
-      ),
-    };
-  };
-
-  const summarizeReliableIdentity = (
-    identity: ReturnType<typeof getReliableOutputIdentity>,
-  ): Record<string, unknown> | null =>
-    identity
-      ? {
-          kind: identity.kind,
-          entityId: identity.entityId,
-          signerId: identity.signerId,
-          laneKey: identity.laneKey,
-          height: identity.height,
-          logIndex: identity.logIndex ?? null,
-          evidenceKind: identity.evidenceKind,
-          evidenceDigest: identity.evidenceDigest,
-        }
-      : null;
-
-  const summarizeReceiptLedger = (
-    ledger: Map<string, import('../runtime/types').ReliableDeliveryReceipt> | undefined,
-  ): Record<string, unknown>[] =>
-    [...(ledger?.values() ?? [])]
-      .map(receipt => ({
-        coverage: receipt.body.coverage,
-        receiverRuntimeId: receipt.body.receiverRuntimeId,
-        appliedRuntimeHeight: receipt.body.appliedRuntimeHeight,
-        identity: {
-          kind: receipt.body.identity.kind,
-          entityId: receipt.body.identity.entityId,
-          laneKey: receipt.body.identity.laneKey,
-          height: receipt.body.identity.height,
-          logIndex: receipt.body.identity.logIndex ?? null,
-          evidenceKind: receipt.body.identity.evidenceKind,
-          evidenceDigest: receipt.body.identity.evidenceDigest,
-        },
-      }))
-      .sort((left, right) => compareStableText(safeStringify(left), safeStringify(right)));
-
-  const buildBootstrapCausalCheckpoint = (): Record<string, unknown> => {
-    const state = env.runtimeState;
-    return {
-      quiescence: summarizeRuntimeQuiescence(env),
-      pendingReliable: (env.pendingNetworkOutputs ?? [])
-        .map(output => ({
-          targetRuntimeId: output.runtimeId ?? null,
-          targetEntityId: output.entityId,
-          txTypes: (output.entityTxs ?? []).map(tx => tx.type),
-          txCount: output.entityTxs?.length ?? 0,
-          identity: summarizeReliableIdentity(getReliableOutputIdentity(output)),
-        }))
-        .filter(entry => entry.identity !== null)
-        .sort((left, right) => compareStableText(safeStringify(left), safeStringify(right))),
-      senderReceipts: {
-        active: summarizeReceiptLedger(state?.receivedReliableReceiptLedger),
-        terminal: summarizeReceiptLedger(state?.receivedReliableTerminalWatermarks),
-      },
-      receiverReceipts: {
-        active: summarizeReceiptLedger(state?.reliableIngressReceiptLedger),
-        terminal: summarizeReceiptLedger(state?.reliableIngressTerminalWatermarks),
-        pending: [...(state?.pendingReliableIngress?.values() ?? [])]
-          .map(pending => ({
-            targetRuntimeIds: [...pending.targetRuntimeIds].sort(compareStableText),
-            identity: {
-              kind: pending.identity.kind,
-              entityId: pending.identity.entityId,
-              laneKey: pending.identity.laneKey,
-              height: pending.identity.height,
-              logIndex: pending.identity.logIndex ?? null,
-              evidenceKind: pending.identity.evidenceKind,
-              evidenceDigest: pending.identity.evidenceDigest,
-            },
-          }))
-          .sort((left, right) => compareStableText(safeStringify(left), safeStringify(right))),
-      },
-      entities: mmContexts
-        .map(context => {
-          const replica = getEntityReplicaById(env, context.entityId);
-          return {
-            entityId: context.entityId,
-            jurisdiction: context.jurisdictionName,
-            consumptionRoot: replica?.state.consumptionAccumulator?.root ?? null,
-            consumptionRelationships: replica?.state.consumptionAccumulator?.count ?? 0n,
-            accounts: [...(replica?.state.accounts.entries() ?? [])]
-              .map(([counterpartyEntityId, account]) => ({
-                counterpartyEntityId,
-                currentHeight: account.currentHeight,
-                pendingFrame: Boolean(account.pendingFrame),
-                mempool: account.mempool?.length ?? 0,
-              }))
-              .sort((left, right) => compareStableText(left.counterpartyEntityId, right.counterpartyEntityId)),
-          };
-        })
-        .sort((left, right) => compareStableText(left.entityId, right.entityId)),
-    };
-  };
-
-  const emitBootstrapDebugEvent = (event: string, fields: Record<string, unknown> = {}): void => {
-    emitMarketMakerBootstrapDebugEvent(event, {
-      stage: startupPhase,
-      entity: activeMmEntityId,
-      runtimeId: String(env.runtimeId || ''),
-      height: env.height,
-      backlog: getMarketMakerRuntimeBacklogSnapshot(env, { includeQueuedEntityInputs: true }),
-      ...fields,
-    });
-  };
+  const buildBootstrapCausalCheckpoint = (): Record<string, unknown> =>
+    buildNodeBootstrapCausalCheckpoint(env, mmContexts);
+  const emitBootstrapDebugEvent = (
+    event: string,
+    fields: Record<string, unknown> = {},
+  ): void => emitNodeBootstrapDebugEvent(env, startupPhase, activeMmEntityId, event, fields);
 
   const buildMarketMakerHealthSnapshot = (
     options: {
