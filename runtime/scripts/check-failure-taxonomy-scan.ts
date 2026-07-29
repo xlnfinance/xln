@@ -45,6 +45,15 @@ const readText = (path: string): string => {
       'runtime/runtime/loop-lifecycle.ts',
       'runtime/runtime/loop-failure.ts',
     ],
+    'runtime/runtime/entity-inputs.ts': [
+      'runtime/runtime/entity-inputs.ts',
+      'runtime/runtime/entity-input-admission.ts',
+      'runtime/runtime/entity-input-atomic.ts',
+      'runtime/runtime/entity-input-contract.ts',
+      'runtime/runtime/entity-input-output.ts',
+      'runtime/runtime/entity-input-replica.ts',
+      'runtime/runtime/entity-input-staging.ts',
+    ],
     'runtime/entity/tx/handlers/account.ts': [
       'runtime/entity/tx/handlers/account.ts',
       'runtime/entity/tx/handlers/account/input-phases.ts',
