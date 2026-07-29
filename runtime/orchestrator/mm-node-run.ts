@@ -921,6 +921,77 @@ const initializeMarketMakerContexts = async (
   return tokenIdsByContext;
 };
 
+const selectMarketMakerHubsForContext = (
+  visibleHubs: readonly HubProfile[],
+  context: MarketMakerEntityContext,
+): HubProfile[] =>
+  visibleHubs
+    .filter(profile => sameJurisdiction(context, profile))
+    .sort(
+      (left, right) =>
+        compareStableText(left.jurisdictionRef, right.jurisdictionRef) ||
+        compareStableText(left.entityId, right.entityId),
+    );
+
+const buildMarketMakerSameQuoteJobs = (
+  contexts: readonly MarketMakerEntityContext[],
+  tokenIdsByContext: ReadonlyMap<string, number[]>,
+  visibleHubs: readonly HubProfile[],
+): SameQuoteJob[] =>
+  contexts
+    .flatMap(context => {
+      const tokenIds = getMarketMakerTokenIds(tokenIdsByContext, context);
+      return selectMarketMakerHubsForContext(visibleHubs, context).map(hub => ({ context, hub, tokenIds }));
+    })
+    .sort(
+      (left, right) =>
+        compareStableText(left.context.jurisdictionRef, right.context.jurisdictionRef) ||
+        compareStableText(left.context.entityId, right.context.entityId) ||
+        compareStableText(left.hub.entityId, right.hub.entityId),
+    );
+
+const hasMarketMakerCrossAccountBacklog = (
+  env: RuntimeState,
+  contexts: readonly MarketMakerEntityContext[],
+  visibleHubs: readonly HubProfile[],
+): boolean => {
+  for (const sourceContext of contexts) {
+    for (const sourceHub of selectMarketMakerHubsForContext(visibleHubs, sourceContext)) {
+      if (hasMarketMakerAccountBacklog(env, sourceContext.entityId, sourceHub.entityId)) return true;
+    }
+    for (const targetContext of contexts) {
+      if (sourceContext.entityId === targetContext.entityId || sameJurisdiction(sourceContext, targetContext)) continue;
+      for (const targetHub of selectMarketMakerHubsForContext(visibleHubs, targetContext)) {
+        if (hasMarketMakerAccountBacklog(env, targetContext.entityId, targetHub.entityId)) return true;
+      }
+    }
+  }
+  return false;
+};
+
+const describeMarketMakerSameQuoteProgress = (
+  env: RuntimeState,
+  job: SameQuoteJob,
+): Record<string, unknown> => {
+  const account = getAccountState(env, job.context.entityId, job.hub.entityId);
+  return {
+    mmEntityId: job.context.entityId,
+    jurisdiction: job.context.jurisdictionName,
+    hubEntityId: job.hub.entityId,
+    tokenIds: job.tokenIds,
+    committedOffers: countCommittedMarketMakerOffersForHub(env, job.context.entityId, job.hub.entityId),
+    expectedOffers: buildMarketMakerOfferSpecs([job.hub.entityId], job.tokenIds).length,
+    account: account
+      ? {
+          height: Number(account.currentHeight ?? 0),
+          pendingFrame: Boolean(account.pendingFrame),
+          mempoolLength: Number(account.mempool?.length || 0),
+        }
+      : null,
+    blocker: describeMarketMakerSameHubBlocker(env, job.context.entityId, job.hub.entityId),
+  };
+};
+
 export const runMarketMakerNode = async (): Promise<void> => {
   activateMarketMakerProcessArgs();
   if (resolvedArgs.dbPath) process.env['XLN_DB_PATH'] = resolvedArgs.dbPath;
@@ -1232,68 +1303,17 @@ export const runMarketMakerNode = async (): Promise<void> => {
   let lastSameQuoteProgressLogAt = 0;
   let lastSameQuoteProgressKey = '';
   const hubsForContext = (visibleHubs: HubProfile[], context: MarketMakerEntityContext): HubProfile[] =>
-    visibleHubs
-      .filter(profile => sameJurisdiction(context, profile))
-      .sort(
-        (left, right) =>
-          compareStableText(left.jurisdictionRef, right.jurisdictionRef) ||
-          compareStableText(left.entityId, right.entityId),
-      );
-  const buildSameQuoteJobs = (visibleHubs: HubProfile[]): SameQuoteJob[] => {
-    const jobs: SameQuoteJob[] = [];
-    for (const context of mmContexts) {
-      const tokenIds = getMarketMakerTokenIds(mmTokenIdsByContext, context);
-      for (const hub of hubsForContext(visibleHubs, context)) {
-        jobs.push({ context, hub, tokenIds });
-      }
-    }
-    return jobs.sort(
-      (left, right) =>
-        compareStableText(left.context.jurisdictionRef, right.context.jurisdictionRef) ||
-        compareStableText(left.context.entityId, right.context.entityId) ||
-        compareStableText(left.hub.entityId, right.hub.entityId),
-    );
-  };
+    selectMarketMakerHubsForContext(visibleHubs, context);
+  const buildSameQuoteJobs = (visibleHubs: HubProfile[]): SameQuoteJob[] =>
+    buildMarketMakerSameQuoteJobs(mmContexts, mmTokenIdsByContext, visibleHubs);
   const isAllSameQuoteDepthReady = (visibleHubs: HubProfile[]): boolean => {
     const sameQuoteJobs = buildSameQuoteJobs(visibleHubs);
     return sameQuoteJobs.length > 0 && sameQuoteJobs.every(job => isSameQuoteJobDepthReady(env, job));
   };
-  const hasBootstrapCrossAccountBacklog = (visibleHubs: HubProfile[]): boolean => {
-    for (const sourceContext of mmContexts) {
-      const sourceHubs = hubsForContext(visibleHubs, sourceContext);
-      for (const sourceHub of sourceHubs) {
-        if (hasMarketMakerAccountBacklog(env, sourceContext.entityId, sourceHub.entityId)) return true;
-      }
-      for (const targetContext of mmContexts) {
-        if (sourceContext.entityId === targetContext.entityId || sameJurisdiction(sourceContext, targetContext))
-          continue;
-        const targetHubs = hubsForContext(visibleHubs, targetContext);
-        for (const targetHub of targetHubs) {
-          if (hasMarketMakerAccountBacklog(env, targetContext.entityId, targetHub.entityId)) return true;
-        }
-      }
-    }
-    return false;
-  };
-  const describeSameQuoteJobProgress = (job: SameQuoteJob): Record<string, unknown> => {
-    const account = getAccountState(env, job.context.entityId, job.hub.entityId);
-    return {
-      mmEntityId: job.context.entityId,
-      jurisdiction: job.context.jurisdictionName,
-      hubEntityId: job.hub.entityId,
-      tokenIds: job.tokenIds,
-      committedOffers: countCommittedMarketMakerOffersForHub(env, job.context.entityId, job.hub.entityId),
-      expectedOffers: buildMarketMakerOfferSpecs([job.hub.entityId], job.tokenIds).length,
-      account: account
-        ? {
-            height: Number(account.currentHeight ?? 0),
-            pendingFrame: Boolean(account.pendingFrame),
-            mempoolLength: Number(account.mempool?.length || 0),
-          }
-        : null,
-      blocker: describeMarketMakerSameHubBlocker(env, job.context.entityId, job.hub.entityId),
-    };
-  };
+  const hasBootstrapCrossAccountBacklog = (visibleHubs: HubProfile[]): boolean =>
+    hasMarketMakerCrossAccountBacklog(env, mmContexts, visibleHubs);
+  const describeSameQuoteJobProgress = (job: SameQuoteJob): Record<string, unknown> =>
+    describeMarketMakerSameQuoteProgress(env, job);
   const emitSameQuoteProgress = (reason: string, jobs: SameQuoteJob[], selectedJob?: SameQuoteJob): void => {
     if (!MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL) return;
     const now = Date.now();

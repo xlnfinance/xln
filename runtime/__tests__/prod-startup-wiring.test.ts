@@ -939,7 +939,8 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('buildMarketMakerOfferSpecs([job.hub.entityId], job.tokenIds)');
     expect(mmNode).not.toContain('const isSameQuoteJobCovered = (env: RuntimeState, job: SameQuoteJob): boolean => {');
     expect(mmNode).not.toContain('const isSameQuoteJobReady = (env: RuntimeState, job: SameQuoteJob): boolean => {');
-    expect(mmNode).toContain('const buildSameQuoteJobs = (visibleHubs: HubProfile[]): SameQuoteJob[] => {');
+    expect(mmNode).toContain('const buildMarketMakerSameQuoteJobs = (');
+    expect(mmNode).toContain('const buildSameQuoteJobs = (visibleHubs: HubProfile[]): SameQuoteJob[] =>');
     expect(mmNode).toContain('let bootstrapSameCursor = 0;');
     expect(mmNode).toContain('const isAllSameQuoteDepthReady = (visibleHubs: HubProfile[]): boolean => {');
     expect(mmNode).toContain('compareStableText(left.context.jurisdictionRef, right.context.jurisdictionRef)');
