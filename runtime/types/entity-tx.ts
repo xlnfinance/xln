@@ -1,4 +1,4 @@
-import type { JurisdictionEvent, JurisdictionEventData } from './jurisdiction-events';
+import type { JurisdictionEventData } from './jurisdiction-events';
 import type { AccountPeerInput, AccountStateDomain, CrossJurisdictionSecretRelay, SettlementOp } from './account';
 import type { CrossJurisdictionCloseProof, CrossJurisdictionPullBinding, CrossJurisdictionSwapRoute } from './cross-jurisdiction';
 import type { LendingTermId } from './lending';
@@ -184,16 +184,6 @@ type EntityTxPayload =
           hardLimit: bigint;
           maxAcceptableFee: bigint;
         };
-      };
-    }
-  | {
-      type: 'j_event_account_claim';
-      data: {
-        counterpartyEntityId: string; // Which account this observation is for
-        jHeight: number;
-        jBlockHash: string;
-        events: JurisdictionEvent[];
-        observedAt: number;
       };
     }
   | {
@@ -886,22 +876,6 @@ type EntityTxPayload =
   // ═══════════════════════════════════════════════════════════════
   // RESERVE OPERATIONS
   // ═══════════════════════════════════════════════════════════════
-  | {
-      // Direct R2R transfer: from entity reserve to target entity's reserve
-      type: 'payFromReserve';
-      data: {
-        targetEntityId: string;
-        tokenId: number;
-        amount: bigint;
-      };
-    }
-  | {
-      // Fund entity: add tokens to reserve (mint-like operation)
-      type: 'payToReserve';
-      data: {
-        tokenId: number;
-        amount: bigint;
-      };
-    };
+  ;
 
 export type EntityTx = EntityTxPayload;

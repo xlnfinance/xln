@@ -543,7 +543,6 @@ const eventFromEntityTx = (
       });
     }
     case 'j_event':
-    case 'j_event_account_claim':
       return makeEvent(journal, index, {
         kind: 'onchain',
         type: 'j_event',

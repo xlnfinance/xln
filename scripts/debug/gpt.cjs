@@ -145,7 +145,6 @@ const CORE_FILES = {
     'watchtower/action.ts',                  // Watchtower action decisions
     'server/watchtower-proxy.ts',            // Runtime watchtower proxy API
 
-    'account/tx/index.ts',   // Account transaction types
     'account/tx/apply.ts',   // Account transaction dispatcher
     'account/tx/handlers/add-delta.ts', // Delta addition (payment processing)
 
@@ -318,7 +317,6 @@ const CROSS_FILES = {
     'entity/tx/handlers/dispute.ts',
     'entity/tx/handlers/htlc-payment.ts',
     'entity/tx/handlers/settle.ts',
-    'account/tx/index.ts',
     'account/tx/apply.ts',
     'account/tx/handlers/swap-offer.ts',
     'account/tx/handlers/swap-resolve.ts',
@@ -455,7 +453,6 @@ const RUNTIME_FILES = {
     'entity/tx/handlers/htlc-payment.ts',
     'entity/tx/handlers/settle.ts',
     'entity/tx/handlers/mint-reserves.ts',
-    'account/tx/index.ts',
     'account/tx/apply.ts',
     'account/tx/handlers/add-delta.ts',
     'account/tx/handlers/direct-payment.ts',
@@ -1208,7 +1205,6 @@ xln/
       handlers/mint-reserves.ts        ${fileSizes['runtime/entity/tx/handlers/mint-reserves.ts'] || '?'} lines - Reserve minting
 
     account/tx/
-      index.ts                   ${fileSizes['runtime/account/tx/index.ts'] || '?'} lines - Account transaction types
       apply.ts                   ${fileSizes['runtime/account/tx/apply.ts'] || '?'} lines - Account tx dispatcher
       handlers/add-delta.ts      ${fileSizes['runtime/account/tx/handlers/add-delta.ts'] || '?'} lines - Delta addition
 

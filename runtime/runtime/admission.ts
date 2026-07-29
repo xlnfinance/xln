@@ -4,7 +4,6 @@ const OUTBOX_BACKPRESSURE_EXEMPT_TXS = new Set<EntityTx['type']>([
   'scheduledWake',
   'accountInput',
   'j_event',
-  'j_event_account_claim',
   'processHtlcTimeouts',
   'prepareDispute',
   'disputeStart',

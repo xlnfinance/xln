@@ -59,10 +59,11 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   numbers. A second GPT read-only audit of the same old SHA independently
   reported the same financial/runtime findings; it adds no new accepted item
   until each claim is reproduced on current `main`. Current-code inspection
-  confirms the R→C duplicate lifecycle (`FIN-01/02`), unsafe dispute
-  `uint256 → Number` conversion (`FIN-03`), fail-open rebalance construction
-  (`FIN-04`), non-durable faucet admission (`SRV-01`) and duplicate/inexact UI
-  money models (`UI-01`). `ARCH-01` is partly closed: finalized Account
+  confirms the R→C duplicate lifecycle (`FIN-01/02`), non-durable faucet
+  admission (`SRV-01`) and duplicate/inexact UI money models (`UI-01`).
+  `FIN-03` and `FIN-04` are closed by exact nonce decoding and atomic
+  rebalance-batch construction with unchanged-root regressions. `ARCH-01` is
+  partly closed: finalized Account
   J-claims now apply through Account-owned handlers, but dispute-finality still
   mutates Account money state from Entity and remains open.
   Reproduce `RUN-04` against the current single Runtime mempool before accepting
@@ -109,14 +110,13 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   audit backlog.
 - [ ] Close the independently verified Fable audit findings from
   `main@a2e5d18a8e761221474a109146368d63e413ab9e` against current `main`; never
-  copy its stale paths or counts. `FIN-03`, `FIN-04`, Account-owned dispute
+  copy its stale paths or counts. Account-owned dispute
   mutation, the Replica/State split, Activity projection, reverse-import
   removal, oversized-function ratchet and history-view migration are already
-  owned by the more specific tasks below. The additional open work is:
-  replace stale-settlement control flow that regex-parses
-  `SETTLEMENT_SEAL_NONCE_MISMATCH` from an error message with an exhaustive
-  typed rejection; eliminate consensus non-null assertions by returning
-  refined decoded/preflight types; make audit-event severity explicit instead
+  owned by the more specific tasks below. Stale-settlement control flow now
+  uses an exhaustive typed rejection instead of parsing an error message.
+  The additional open work is: eliminate consensus non-null assertions by
+  returning refined decoded/preflight types; make audit-event severity explicit instead
   of classifying `message.includes(...)`; replace per-append canonical
   re-encoding of every pending audit event with a frame-local deterministic
   key set; and treat every certified human-readable event string as frozen
@@ -489,17 +489,6 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   through an explicit Runtime/J-adapter outbox using Entity-committed intent
   data, and add a source gate forbidding provider, wall-clock and randomness
   access under deterministic Entity/Account/protocol code.
-- [ ] Parse every chain-supplied Account/J nonce through one safe boundary
-  before any mutation. Remove direct `Number(uint256)` conversions in dispute
-  start/finality and choose one canonical nonce representation that cannot
-  round `9007199254740993` to `9007199254740992`; prove malformed/oversized
-  events leave Account state unchanged.
-- [ ] Make hub rebalance scheduling fail before money mutation on every
-  cross-map inconsistency. Preflight fee metadata, Delta presence, reserve
-  capacity and all selected J-batch operations before changing the draft or
-  submission markers; missing state and batch construction errors must abort
-  the isolated frame instead of logging `continue` after a prepaid request.
-  Prove rollback leaves fee, request, draft and Account roots byte-identical.
 - [ ] Make the directory hierarchy match the three nested state machines only
   after semantic diffs are green. Keep the stable root `runtime/runtime.ts`
   browser facade; place Runtime frame transition/mempool/transaction/lifecycle

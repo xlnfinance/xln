@@ -155,6 +155,11 @@ type EntityTxDispatcher = (
   options?: ApplyEntityTxOptions,
 ) => Promise<EntityTxReducerResult> | EntityTxReducerResult;
 
+type ReducibleEntityTx = Exclude<
+  EntityTx,
+  { type: 'entityCommand' | 'consensusOutput' | 'runtimeOutput' }
+>;
+
 const handleJEventEntityTx: EntityTxDispatcher = async (
   env,
   entityState,
@@ -276,7 +281,7 @@ const handleJBroadcastEntityTx: EntityTxDispatcher = async (
 
 // This table is intentionally boring: adding a new EntityTx should mean adding
 // one row here and keeping domain behavior inside runtime/entity/tx/handlers.
-const entityTxDispatchers: Record<string, EntityTxDispatcher> = {
+const entityTxDispatchers = {
   scheduledWake: (env, state, tx, options) => handleScheduledWakeEntityTx(
     env,
     state,
@@ -504,7 +509,7 @@ const entityTxDispatchers: Record<string, EntityTxDispatcher> = {
   prepareDispute: (env, state, tx, options) => handlePrepareDispute(state, tx as Extract<EntityTx, { type: 'prepareDispute' }>, env, options?.storageChanges, options?.mutableFrameState),
   disputeStart: (env, state, tx, options) => handleDisputeStart(state, tx as Extract<EntityTx, { type: 'disputeStart' }>, env, options?.storageChanges, options?.mutableFrameState),
   disputeFinalize: (env, state, tx, options) => handleDisputeFinalize(state, tx as Extract<EntityTx, { type: 'disputeFinalize' }>, env, options?.mutableFrameState),
-};
+} satisfies Record<ReducibleEntityTx['type'], EntityTxDispatcher>;
 
 export const applyEntityTx = async (
   env: RuntimeState,
@@ -515,34 +520,47 @@ export const applyEntityTx = async (
   if (!entityTx) {
     throw new TypeError('ENTITY_TX_UNDEFINED');
   }
+  if (
+    entityTx.type === 'entityCommand' ||
+    entityTx.type === 'consensusOutput' ||
+    entityTx.type === 'runtimeOutput'
+  ) {
+    throw new TypeError(`ENTITY_TX_WRAPPER_REACHED_REDUCER:${entityTx.type}`);
+  }
 
   try {
-    const dispatcher = entityTxDispatchers[String(entityTx.type)];
-    if (dispatcher) {
-      const reducerStorageChanges: RuntimeOverlayRecord[] = [];
-      const reducerCandidateEffects: EntityCandidateEffect[] = [];
-      const { accountChanges = [], ...result } = await dispatcher(env, entityState, entityTx, {
-        ...options,
-        storageChanges: reducerStorageChanges,
-        candidateEffects: reducerCandidateEffects,
-      });
-      const entityId = result.newState.entityId.toLowerCase();
+    const dispatcher: EntityTxDispatcher | undefined = entityTxDispatchers[entityTx.type];
+    if (!dispatcher) {
+      const skippedError = `ENTITY_TX_UNHANDLED: type=${String(entityTx.type)}`;
+      entityTxLog.warn('unhandled', { type: String(entityTx.type) });
       return {
-        ...result,
-        candidateEffects: [...reducerCandidateEffects, ...(result.candidateEffects ?? [])],
-        storageChanges: [
-          { family: 'entity', entityId },
-          ...Array.from(new Set(accountChanges.map(accountId => accountId.toLowerCase())))
-            .sort()
-            .map(counterpartyId => ({ family: 'account' as const, entityId, counterpartyId })),
-          ...reducerStorageChanges,
-        ],
+        newState: entityState,
+        outputs: [],
+        storageChanges: [],
+        candidateEffects: [],
+        jOutputs: [],
+        skippedError,
       };
     }
-
-    const skippedError = `ENTITY_TX_UNHANDLED: type=${String(entityTx.type)}`;
-    entityTxLog.warn('unhandled', { type: String(entityTx.type) });
-    return { newState: entityState, outputs: [], storageChanges: [], candidateEffects: [], jOutputs: [], skippedError };
+    const reducerStorageChanges: RuntimeOverlayRecord[] = [];
+    const reducerCandidateEffects: EntityCandidateEffect[] = [];
+    const { accountChanges = [], ...result } = await dispatcher(env, entityState, entityTx, {
+      ...options,
+      storageChanges: reducerStorageChanges,
+      candidateEffects: reducerCandidateEffects,
+    });
+    const entityId = result.newState.entityId.toLowerCase();
+    return {
+      ...result,
+      candidateEffects: [...reducerCandidateEffects, ...(result.candidateEffects ?? [])],
+      storageChanges: [
+        { family: 'entity', entityId },
+        ...Array.from(new Set(accountChanges.map(accountId => accountId.toLowerCase())))
+          .sort()
+          .map(counterpartyId => ({ family: 'account' as const, entityId, counterpartyId })),
+        ...reducerStorageChanges,
+      ],
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     // A TypeError is a programming fault, not an invalid user transaction.

@@ -855,9 +855,9 @@ async function handleR2R(
     entityId: fromEntityId,
     signerId: fromReplica.signerId,
     entityTxs: [{
-      type: 'payFromReserve',
+      type: 'r2r',
       data: {
-        targetEntityId: toEntityId,
+        toEntityId,
         tokenId: 0, // Default token
         amount: amount
       }
@@ -903,7 +903,7 @@ async function handleFund(
     entityId: entityId,
     signerId: replica.signerId,
     entityTxs: [{
-      type: 'payToReserve',
+      type: 'mintReserves',
       data: {
         tokenId: 0, // Default token
         amount: amount

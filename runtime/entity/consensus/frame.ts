@@ -4,7 +4,6 @@ import type { AccountTx, EntityFrameEvent, EntityState, EntityTx, JPrefixCertifi
 import { HEAVY_LOGS } from '../../utils';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import { compareCanonicalText } from '../../orderbook/swap-execution';
-import { canonicalJurisdictionEventsHash } from '../../jurisdiction/event-observation';
 import { normalizeJurisdictionEvents } from '../../jurisdiction/event-normalization';
 import { canonicalAccountTxForFrameHash } from '../../account/consensus/frame';
 import {
@@ -105,20 +104,6 @@ const canonicalJEventDataForFrameHash = (value: unknown): Record<string, unknown
   };
 };
 
-const canonicalJEventAccountClaimDataForFrameHash = (value: unknown): Record<string, unknown> => {
-  const data = toRecord(value);
-  const events = canonicalEventsForFrameHash(data);
-  const eventsHash = canonicalJurisdictionEventsHash(normalizeJurisdictionEvents(rawJEvents(data)));
-  return {
-    version: 'xln:j-event-account-claim-frame:v1',
-    counterpartyEntityId: String(data['counterpartyEntityId'] ?? '').toLowerCase(),
-    jHeight: toInt(data['jHeight']),
-    eventsHash,
-    events,
-    observedAt: toInt(data['observedAt']),
-  };
-};
-
 const canonicalNestedAccountFrameForFrameHash = (value: unknown): unknown => {
   const frame = toRecord(value);
   if (!Array.isArray(frame['accountTxs'])) return value;
@@ -147,9 +132,6 @@ export const canonicalEntityTxForFrameHash = (tx: EntityTx): Record<string, unkn
   assertNoConsensusVisibleHtlcPaymentSecrets([tx]);
   if (tx.type === 'j_event') {
     return { type: tx.type, data: canonicalJEventDataForFrameHash(tx.data) };
-  }
-  if (tx.type === 'j_event_account_claim') {
-    return { type: tx.type, data: canonicalJEventAccountClaimDataForFrameHash(tx.data) };
   }
   if (tx.type === 'accountInput') {
     return { type: tx.type, data: canonicalAccountInputForFrameHash(tx.data) };
