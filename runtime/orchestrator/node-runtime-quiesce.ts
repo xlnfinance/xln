@@ -8,7 +8,7 @@ import {
   type RuntimeLoopConfig,
 } from '../runtime';
 import { transitionRuntimeLifecycle } from '../runtime/lifecycle';
-import type { RuntimeP2PConfigLike } from '../runtime/p2p-types';
+import type { RuntimeP2PConfig } from '../runtime/p2p-types';
 import type { RuntimeState } from '../runtime/types';
 
 export type NodeRuntimeQuiesceOptions = {
@@ -89,8 +89,8 @@ export const quiesceNodeRuntime = async (
 };
 
 const copyP2PConfig = (
-  config: RuntimeP2PConfigLike | null | undefined,
-): RuntimeP2PConfigLike | null => config ? {
+  config: RuntimeP2PConfig | null | undefined,
+): RuntimeP2PConfig | null => config ? {
   ...config,
   ...(config.relayUrls ? { relayUrls: [...config.relayUrls] } : {}),
   ...(config.seedRuntimeIds ? { seedRuntimeIds: [...config.seedRuntimeIds] } : {}),

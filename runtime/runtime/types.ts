@@ -35,7 +35,7 @@ import type {
 
 import type { GossipLayer } from '../networking/gossip';
 import type { Profile } from '../entity/profile';
-import type { RuntimeP2PConfigLike } from './p2p-types';
+import type { RuntimeP2PConfig } from './p2p-types';
 
 import type {
   RuntimeSecurityIncident,
@@ -514,8 +514,8 @@ export interface RuntimeState {
     /** Entity inputs detached from the live mempool and owned by the active runtime frame. */
     inFlightEntityInputs?: number;
     p2p?: RuntimeP2P | null | undefined;
-    pendingP2PConfig?: RuntimeP2PConfigLike | null;
-    lastP2PConfig?: RuntimeP2PConfigLike | null;
+    pendingP2PConfig?: RuntimeP2PConfig | null;
+    lastP2PConfig?: RuntimeP2PConfig | null;
     envChangeCallbacks?: Set<(state: RuntimeState) => void>;
     runtimeFrameCommitCallbacks?: Set<(frame: { height: number; runtimeInput: RuntimeInput }) => void>;
     storageDb?: Level<Buffer, Buffer> | null | undefined;
