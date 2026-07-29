@@ -104,11 +104,11 @@ const normalizeX25519Key = (raw: unknown): string | null => {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-const hasOwn = (value: Record<string, unknown>, key: string): boolean =>
+const hasOwn = (value: object, key: string): boolean =>
   Object.prototype.hasOwnProperty.call(value, key);
 
 const assertOnlyAllowedKeys = (
-  raw: Record<string, unknown>,
+  raw: object,
   allowedKeys: readonly string[],
   errorPrefix: string,
   entityId: string,
@@ -203,8 +203,8 @@ const ALLOWED_PROFILE_MIRROR_KEYS = [
 ] as const;
 
 const assertNoLegacyProfileFields = (
-  rawProfile: Record<string, unknown>,
-  metadataRaw: Record<string, unknown>,
+  rawProfile: object,
+  metadataRaw: object,
   entityId: string,
 ): void => {
   assertOnlyAllowedKeys(rawProfile, ALLOWED_PROFILE_KEYS, 'GOSSIP_PROFILE_UNKNOWN_FIELD', entityId);
@@ -613,9 +613,8 @@ export const canonicalizeProfile = (
     throw new Error('GOSSIP_PROFILE_ENTITY_ID_REQUIRED');
   }
 
-  const rawProfile = profile as unknown as Record<string, unknown>;
-  const metadata = profile.metadata as unknown as Record<string, unknown>;
-  assertNoLegacyProfileFields(rawProfile, metadata, entityId);
+  assertNoLegacyProfileFields(profile, profile.metadata, entityId);
+  const metadata = profile.metadata;
   if (typeof profile.name !== 'string' || profile.name.trim().length === 0) {
     throw new Error(`GOSSIP_PROFILE_NAME_REQUIRED: entity=${entityId}`);
   }
