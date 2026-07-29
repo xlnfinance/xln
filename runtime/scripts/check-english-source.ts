@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 
-const CYRILLIC = /[А-Яа-яЁё]/u;
+const CYRILLIC = /[\u0400-\u04ff]/u;
 const CHECKED_EXTENSION = /\.(?:cjs|js|json|md|mjs|py|sol|svelte|ts|tsx)$/u;
 
 // These files are multilingual product data, not the language of the
