@@ -14,7 +14,6 @@ const COORDINATOR_DEBT: Readonly<Record<string, number>> = {
   'runtime/jadapter/rpc-adapter.ts::createRpcAdapter': 2390,
   'runtime/jadapter/rpc-adapter.ts::doPoll': 525,
   'runtime/jadapter/rpc-adapter.ts::pollInFlight callback': 436,
-  'runtime/jadapter/rpc-adapter.ts::reconcileWatcherCanonicalTip': 171,
   'runtime/jadapter/rpc-adapter.ts::startWatching': 1040,
   'runtime/orchestrator/hub-node.ts::driveMeshBootstrap': 208,
   'runtime/orchestrator/hub-node.ts::fetch': 323,

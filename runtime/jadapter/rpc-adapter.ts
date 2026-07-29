@@ -99,6 +99,11 @@ import {
   type JEventIngress,
 } from './watcher';
 import { shouldAuditCanonicalWatcherState } from './watcher-poll-policy';
+import {
+  assertFinalizedWatcherAnchors,
+  collectTargetedWatcherRewinds,
+  collectWatcherCanonicalAudit,
+} from './watcher-reconciliation';
 import { submitDebtEnforcement, submitMint } from './rpc-submit-basic';
 import {
   applyBatchFeeOverrides,
@@ -1624,84 +1629,25 @@ export async function createRpcAdapter(
         if (lastSyncedBlock <= 0) return false;
         const watcherReplica = findWatcherJurisdictionReplica(activeEnv, addresses.depository, config.chainId);
         if (!watcherReplica) return false;
-        const relevantReplicaEntries = [...activeEnv.eReplicas.entries()].filter(([, replica]) =>
-          isEntityReplicaRelevantToWatcher(activeEnv, replica, watcherReplica),
+        const audit = collectWatcherCanonicalAudit(
+          activeEnv,
+          watcherReplica,
+          lastSyncedBlock,
         );
-        const relevantReplicas = relevantReplicaEntries.map(([, replica]) => replica);
+        const { relevantReplicaEntries, relevantReplicas } = audit;
         if (relevantReplicas.length === 0) return false;
-
-        const finalizedAnchors = new Map<number, string>();
-        for (const replica of relevantReplicas) {
-          const certifiedAnchor = getEntityCertifiedJAnchor(replica.state);
-          if (!certifiedAnchor) continue;
-          const existing = finalizedAnchors.get(certifiedAnchor.height);
-          if (existing && existing !== certifiedAnchor.hash) {
-            throw new Error(`J_HISTORY_FINALIZED_ANCHOR_DIVERGENCE:height=${certifiedAnchor.height}`);
-          }
-          finalizedAnchors.set(certifiedAnchor.height, certifiedAnchor.hash);
+        const canonicalHeaders = new Map<number, string>();
+        for (const header of await readBlockHeadersAtHeights(
+          audit.auditHeights,
+        )) {
+          canonicalHeaders.set(header.jHeight, header.jBlockHash);
         }
-        const localFrontiers = relevantReplicaEntries.flatMap(([replicaKey, replica]) => {
-          if (!replica.jHistory) return [];
-          const height = Number(replica.jHistory.scannedThroughHeight);
-          const hash = getValidatorJExpectedBlockHash(replica.state, replica.jHistory, height);
-          if (!hash) throw new Error(`J_HISTORY_LOCAL_TIP_UNKNOWN:${replicaKey}:${height}`);
-          return [{ replicaKey, replica, height, hash }];
-        });
-        const auditHeights = [
-          ...new Set([lastSyncedBlock, ...finalizedAnchors.keys(), ...localFrontiers.map(frontier => frontier.height)]),
-        ].sort((left, right) => left - right);
-        const canonicalHeaders = new Map(
-          (await readBlockHeadersAtHeights(auditHeights)).map(header => [header.jHeight, header.jBlockHash] as const),
+        assertFinalizedWatcherAnchors(audit, canonicalHeaders, config.chainId);
+        const targetedRewinds = collectTargetedWatcherRewinds(
+          audit,
+          canonicalHeaders,
+          config.chainId,
         );
-        for (const [height, expectedAnchorHash] of finalizedAnchors) {
-          const canonicalAnchorHash = canonicalHeaders.get(height);
-          if (!canonicalAnchorHash) throw new Error(`J_HISTORY_HEADER_MISSING:height=${height}`);
-          if (expectedAnchorHash !== canonicalAnchorHash) {
-            const owners = relevantReplicas
-              .filter(replica => getEntityCertifiedJAnchor(replica.state)?.height === height)
-              .map(replica => {
-                const entityId = String(replica.entityId || replica.state.entityId || '').slice(0, 10);
-                const jurisdiction = replica.state.config.jurisdiction;
-                return `${entityId}/${String(jurisdiction?.name || 'unnamed')}/${String(jurisdiction?.chainId ?? 'missing')}`;
-              })
-              .join(',');
-            throw new Error(
-              `J_HISTORY_FINALIZED_REORG:${height}` +
-                `:chain=${config.chainId}` +
-                `:owners=${owners || 'unknown'}` +
-                `:expected=${expectedAnchorHash}:canonical=${canonicalAnchorHash}`,
-            );
-          }
-        }
-
-        const targetedRewinds = new Map<
-          string,
-          {
-            height: number;
-            canonicalHash: string;
-            replicaKeys: string[];
-          }
-        >();
-        for (const frontier of localFrontiers) {
-          const canonicalHash = canonicalHeaders.get(frontier.height);
-          if (!canonicalHash) throw new Error(`J_HISTORY_HEADER_MISSING:height=${frontier.height}`);
-          if (frontier.hash === canonicalHash) continue;
-          const certifiedAnchor = getEntityCertifiedJAnchor(frontier.replica.state);
-          if (certifiedAnchor?.height === frontier.height) {
-            throw new Error(
-              `J_HISTORY_FINALIZED_REORG:${frontier.height}:chain=${config.chainId}` +
-                `:expected=${certifiedAnchor.hash}:canonical=${canonicalHash}`,
-            );
-          }
-          const key = `${frontier.height}:${canonicalHash}`;
-          const group = targetedRewinds.get(key) ?? {
-            height: frontier.height,
-            canonicalHash,
-            replicaKeys: [],
-          };
-          group.replicaKeys.push(frontier.replicaKey);
-          targetedRewinds.set(key, group);
-        }
         if (targetedRewinds.size > 0) {
           const rewoundReplicaKeys = new Set<string>();
           for (const group of targetedRewinds.values()) {
