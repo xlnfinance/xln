@@ -12,7 +12,7 @@ import {
 } from '../extensions/cross-j/index';
 import { encodeBuffer } from './codec';
 import { DEFAULT_ACCOUNT_MERKLE_RADIX, normalizeEntityId } from './keys';
-import { buildHexKeyedMerkle, type RadixMerkleRadix } from './merkle';
+import { buildHexKeyedMerkle, type RadixMerkleRadix } from '../protocol/radix-merkle';
 import type { StorageAccountDoc, StorageEntityCoreDoc, StorageReplicaMeta } from './types';
 
 export {

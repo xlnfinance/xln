@@ -54,7 +54,7 @@ import {
   radixMerklePathSlots,
   type RadixMerkleRootKind,
   EMPTY_RADIX_MERKLE_ROOT,
-} from './merkle';
+} from '../protocol/radix-merkle';
 import { buildReplicaLookup } from './replicas';
 import type {
   RuntimeDbLike,

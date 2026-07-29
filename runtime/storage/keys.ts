@@ -1,4 +1,4 @@
-import type { RadixMerkleRadix } from './merkle';
+import type { RadixMerkleRadix } from '../protocol/radix-merkle';
 import { INTEGRITY_DIGEST_ALGORITHM_ID } from '../infra/integrity-checksum';
 import { STORAGE_MERKLE_NAMESPACE_TAG, type StorageMerkleNamespace } from './merkle-namespace-tags';
 

@@ -10,7 +10,7 @@ import {
   computeRadixMerkleRootHash,
   type RadixMerkleMaterializedBranch,
   type RadixMerkleRootKind,
-} from './merkle';
+} from '../protocol/radix-merkle';
 
 const MAX_PHYSICAL_VALUE_BYTES = LIMITS.MAX_STORAGE_VALUE_BYTES;
 const LEAF_PAYLOAD_BYTES = 4_096;

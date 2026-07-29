@@ -2,7 +2,7 @@ import { ethers } from 'ethers';
 
 import type { AccountState, AccountStateDomain, JurisdictionConfig, SettlementWorkspace } from '../types';
 import { compareStableText } from '../protocol/serialization';
-import { buildHexKeyedMerkle, type RadixMerkleHashAlgorithm } from '../storage/merkle';
+import { buildHexKeyedMerkle, type RadixMerkleHashAlgorithm } from '../protocol/radix-merkle';
 import { computeIntegrityDigest } from '../infra/integrity-checksum';
 import { assertAccountJClaimAccumulatorState } from './j-claim-accumulator';
 import {

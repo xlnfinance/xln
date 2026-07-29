@@ -35,7 +35,7 @@ import {
 } from '../storage/keys';
 import { inspectStorage } from '../storage/inspect';
 import { createSnapshot, seedFreshStorageEpoch } from '../storage/lifecycle';
-import { buildHexKeyedMerkleMaterialized, packRadixMerklePath } from '../storage/merkle';
+import { buildHexKeyedMerkleMaterialized, packRadixMerklePath } from '../protocol/radix-merkle';
 import { projectEntityCoreDoc } from '../storage/projections';
 import { deriveRuntimeIdFromSeed } from '../storage/runtime-dbs';
 import {
