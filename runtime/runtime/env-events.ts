@@ -22,7 +22,7 @@ import type {
   RuntimeOverlayRecord,
 } from '../types';
 import { encodeCanonicalEntityConsensusValue } from '../entity/consensus/state-root';
-import { storageOverlayRecordKey } from '../storage/overlay';
+import { storageOverlayRecordKey } from '../protocol/overlay';
 import { invalidateEntityAccountCommitment } from '../entity/consensus/state-root';
 
 const getLogState = (env: RuntimeState) => {

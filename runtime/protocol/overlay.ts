@@ -11,16 +11,16 @@ export const storageOverlayRecordKey = (record: RuntimeOverlayRecord): string =>
   return `b:${normalizeOverlayEntityId(record.entityId)}:${String(record.pairId || '').trim()}`;
 };
 
+/**
+ * Overlay identity is part of the deterministic parent/child effect protocol,
+ * not a LevelDB concern. Runtime storage only materializes the resulting set.
+ */
 export const mergeStorageOverlayRecords = (
   base: readonly RuntimeOverlayRecord[] | undefined,
   extra: readonly RuntimeOverlayRecord[] | undefined,
 ): RuntimeOverlayRecord[] => {
   const byKey = new Map<string, RuntimeOverlayRecord>();
-  for (const record of base ?? []) {
-    byKey.set(storageOverlayRecordKey(record), { ...record });
-  }
-  for (const record of extra ?? []) {
-    byKey.set(storageOverlayRecordKey(record), { ...record });
-  }
+  for (const record of base ?? []) byKey.set(storageOverlayRecordKey(record), { ...record });
+  for (const record of extra ?? []) byKey.set(storageOverlayRecordKey(record), { ...record });
   return Array.from(byKey.values());
 };

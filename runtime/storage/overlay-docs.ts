@@ -3,7 +3,7 @@ import { docRefKey } from './doc-refs';
 import { keyDiff, normalizeEntityId } from './keys';
 import { readValidatedOrNull } from './level';
 import { validateStorageDiffRecordValue } from './authoritative-schema';
-import { mergeStorageOverlayRecords, storageOverlayRecordKey } from './overlay';
+import { mergeStorageOverlayRecords, storageOverlayRecordKey } from '../protocol/overlay';
 import { projectAccountDoc, projectEntityCoreDoc } from './projections';
 import { buildReplicaLookup, findReplicaForEntity } from './replicas';
 import type {

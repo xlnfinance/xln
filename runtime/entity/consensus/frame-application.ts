@@ -26,6 +26,7 @@ import { swapKey, type WorkingOrderbookOffer } from '../../orderbook/swap-execut
 import { computeHtlcEnvelopeContextHash } from '../../protocol/htlc/envelope';
 import { validateMultiRecipientCiphertext } from '../../protocol/htlc/multi-recipient';
 import { encryptedHtlcLayer } from '../../protocol/htlc/onion-advance';
+import { mergeStorageOverlayRecords } from '../../protocol/overlay';
 import { compareStableText, safeStringify } from '../../protocol/serialization';
 import { getNextSettlementNonce } from '../../protocol/settlement/operations';
 import { assertScheduledWakeFrameOrder } from '../../runtime/scheduled-wake';
@@ -38,7 +39,6 @@ import {
   readEntityFrameEvents,
   resolveEntityProposerId,
 } from '../../state-helpers';
-import { mergeStorageOverlayRecords } from '../../storage/overlay';
 import type {
   AccountPeerInput,
   AccountState,
