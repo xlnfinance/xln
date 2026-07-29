@@ -107,6 +107,28 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   have source/test evidence. Keep the remaining typed Runtime frame/live field
   ownership task below. Do not copy stale path counts or reintroduce a second
   audit backlog.
+- [ ] Close the independently verified Fable audit findings from
+  `main@a2e5d18a8e761221474a109146368d63e413ab9e` against current `main`; never
+  copy its stale paths or counts. `FIN-03`, `FIN-04`, Account-owned dispute
+  mutation, the Replica/State split, Activity projection, reverse-import
+  removal, oversized-function ratchet and history-view migration are already
+  owned by the more specific tasks below. The additional open work is:
+  replace stale-settlement control flow that regex-parses
+  `SETTLEMENT_SEAL_NONCE_MISMATCH` from an error message with an exhaustive
+  typed rejection; eliminate consensus non-null assertions by returning
+  refined decoded/preflight types; make audit-event severity explicit instead
+  of classifying `message.includes(...)`; replace per-append canonical
+  re-encoding of every pending audit event with a frame-local deterministic
+  key set; and treat every certified human-readable event string as frozen
+  protocol bytes until the typed `ActivityEvent` projection separates
+  consensus facts from localized display copy. Measure receiver Account-frame
+  clone plus double execution before considering any optimization, and retain
+  it unless byte-identical differential roots and failure parity prove a
+  simpler path. Rename `storage/index.ts` only as an isolated path-only change;
+  never combine it with WAL semantics. Split flat Runtime phase prefixes into
+  owner subdirectories only when the move removes navigation and does not add
+  barrels or compatibility re-exports. Delete closed audit claims from this
+  file as their owning regression turns green.
 - [ ] Make the audit surface mechanically legible after the function split.
   Keep production runtime at zero explicit `any` and zero TypeScript
   suppressions; drive the exact `as unknown as` debt to zero through typed

@@ -35,6 +35,7 @@ import {
   HUB_REBALANCE_INTERVAL_MS,
   initCrontab,
 } from '../entity/scheduler';
+import { hubRebalanceHandler } from '../entity/scheduler/rebalance';
 import { applyFinalizedAccountJEvents } from '../account/tx/handlers/j-event-finality';
 import { createEmptyBatch, initJBatch } from '../jurisdiction/batch';
 import { buildAccountProofBody } from '../protocol/dispute/proof-builder';
@@ -221,6 +222,73 @@ const attachSettlementSealWitness = async (
 };
 
 describe('atomic settlement Account transition', () => {
+  test('hub rebalance rejects an over-limit R2C set without committing its valid prefix', async () => {
+    const env = createEmptyEnv('rebalance-r2c-atomic-batch');
+    const jurisdiction = makeJurisdiction('rebalance-r2c-atomic', 31337, 'a1', 'b2');
+    const signer = registerTestSigner(env, 'rebalance-r2c-atomic-batch', '1');
+    const state = makeState(LEFT, signer, jurisdiction, RIGHT);
+    state.timestamp = 1_000;
+    state.hubRebalanceConfig = {
+      matchingStrategy: 'amount',
+      policyVersion: 1,
+      routingFeePPM: 0,
+      baseFee: 0n,
+      rebalanceLiquidityFeeBps: 0n,
+    };
+    state.jBatchState = initJBatch();
+    state.reserves.set(1, 100n);
+    state.reserves.set(2, 100n);
+    const account = state.accounts.get(RIGHT)!;
+    for (const tokenId of [1, 2]) {
+      const delta = createDefaultDelta(tokenId);
+      delta.offdelta = -100n;
+      account.deltas.set(tokenId, delta);
+      account.requestedRebalance.set(tokenId, 10n);
+      account.requestedRebalanceFeeState.set(tokenId, {
+        feeTokenId: tokenId,
+        feePaidUpfront: 10n ** 30n,
+        requestedAmount: 10n,
+        policyVersion: 1,
+        requestedAt: tokenId,
+        requestedByLeft: false,
+      });
+    }
+    state.jBatchState.batch.reserveToCollateral.push({
+      receivingEntity: LEFT,
+      tokenId: 1,
+      pairs: [{ entity: RIGHT, amount: 1n }],
+    });
+    for (let index = 0; index < 49; index += 1) {
+      state.jBatchState.batch.reserveToCollateral.push({
+        receivingEntity: entity((index + 48).toString(16).padStart(2, '0')),
+        tokenId: 1,
+        pairs: [{ entity: RIGHT, amount: 1n }],
+      });
+    }
+    addReplica(env, state, signer);
+    const replica = env.eReplicas.values().next().value;
+    if (!replica) throw new Error('REBALANCE_ATOMIC_TEST_REPLICA_MISSING');
+    const before = computeCanonicalEntityConsensusStateHash(state);
+
+    await expect(hubRebalanceHandler(
+      env,
+      replica,
+      {
+        method: 'hubRebalance',
+        intervalMs: HUB_REBALANCE_INTERVAL_MS,
+        lastRun: 0,
+        enabled: true,
+        params: {},
+      },
+      {
+        manualBroadcastInInput: false,
+        accountChanges: new Set(),
+      },
+    )).rejects.toThrow('J_BATCH_LIMIT_EXCEEDED');
+    expect(computeCanonicalEntityConsensusStateHash(state)).toBe(before);
+    expect(account.shadow.rebalance.submittedAtByToken.size).toBe(0);
+  });
+
   test('hub scheduler waits for the fully sealed settlement state before execute', async () => {
     const env = createEmptyEnv('settlement-transition-scheduler-awaiting-seal');
     const jurisdiction = makeJurisdiction('settlement-transition-scheduler', 31337, 'a1', 'b2');

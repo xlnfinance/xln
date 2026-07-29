@@ -15,7 +15,11 @@ import {
   getDefaultRebalancePolicyForToken,
 } from '../../account/rebalance-defaults';
 import { createStructuredLogger, shortId } from '../../infra/logger';
-import { batchAddReserveToCollateral, initJBatch } from '../../jurisdiction/batch';
+import {
+  batchAddReserveToCollateral,
+  cloneJBatch,
+  initJBatch,
+} from '../../jurisdiction/batch';
 import { hasPendingSettlementTransition } from '../../account/tx/handlers/settle-transition';
 import type {
   CrontabExecutionContext,
@@ -133,9 +137,8 @@ const resolveBatchAvailability = (run: RebalanceRun): {
   return { canTouchBatch: false, terminal: true };
 };
 
-const resetStaleR2CSubmission = (
+const recordStaleR2CRetry = (
   run: RebalanceRun,
-  account: AccountState,
   counterpartyId: string,
   tokenId: number,
   submittedAgeMs: number,
@@ -144,8 +147,6 @@ const resetStaleR2CSubmission = (
     `⚠️ R→C stale submission reset for retry: token=${tokenId} ` +
     `cp=${counterpartyId.slice(-4)} submittedAgeMs=${submittedAgeMs}`,
   );
-  account.shadow.rebalance.submittedAtByToken.delete(tokenId);
-  run.execution.accountChanges.add(counterpartyId);
   run.debug({
     step: 2,
     status: 'retry',
@@ -202,7 +203,7 @@ const validateR2CRequestPolicy = (
     return null;
   }
   if (submittedStale) {
-    resetStaleR2CSubmission(run, account, counterpartyId, tokenId, submittedAgeMs);
+    recordStaleR2CRetry(run, counterpartyId, tokenId, submittedAgeMs);
   }
   const minFee =
     getDefaultRebalanceBaseFeeForToken(tokenId) +
@@ -355,59 +356,57 @@ const queueR2CTargets = (
     }
     return 0;
   }
-  let queued = 0;
-  for (const target of targets) {
-    try {
-      batchAddReserveToCollateral(
-        run.replica.state.jBatchState!,
-        run.hubId,
-        target.counterpartyId,
-        target.tokenId,
-        target.amount,
+  const current = run.replica.state.jBatchState!;
+  const submissions = targets.map(target => {
+    const account = run.replica.state.accounts.get(target.counterpartyId);
+    if (!account?.requestedRebalanceFeeState?.has(target.tokenId)) {
+      throw new Error(
+        `REBALANCE_TARGET_STATE_CHANGED:${target.counterpartyId}:${target.tokenId}`,
       );
-      const account = run.replica.state.accounts.get(target.counterpartyId);
-      const feeState = account?.requestedRebalanceFeeState?.get(target.tokenId);
-      if (
-        account &&
-        feeState &&
-        !account.shadow.rebalance.submittedAtByToken.has(target.tokenId)
-      ) {
-        account.shadow.rebalance.submittedAtByToken.set(target.tokenId, run.now);
-        run.execution.accountChanges.add(target.counterpartyId);
-      }
-      queued += 1;
-      crontabLog.debug('rebalance.r2c.batch_add', {
-        hub: shortId(run.hubId, 8),
-        counterparty: shortId(target.counterpartyId),
-        tokenId: target.tokenId,
-        amount: target.amount.toString(),
-        requestedAt: target.requestedAt,
-      });
-      run.debug({
-        step: 2,
-        status: 'ok',
-        event: 'batch_add',
-        counterpartyId: target.counterpartyId,
-        tokenId: target.tokenId,
-        amount: String(target.amount),
-        requestedAt: target.requestedAt,
-      });
-    } catch (error) {
-      console.warn(
-        `⚠️ R→C batch add failed for ${target.counterpartyId.slice(-4)}: ` +
-        `${(error as Error).message}`,
-      );
-      run.debug({
-        step: 2,
-        status: 'error',
-        event: 'batch_add_failed',
-        counterpartyId: target.counterpartyId,
-        tokenId: target.tokenId,
-        reason: (error as Error).message || 'unknown',
-      });
     }
+    return { account, target };
+  });
+  const candidate = {
+    ...current,
+    batch: cloneJBatch(current.batch),
+  };
+
+  // Build the complete R→C draft away from live Entity state. A contract
+  // limit or malformed target must reject this Entity frame; committing a
+  // prefix would spend reserve for only part of the selected request set.
+  for (const target of targets) {
+    batchAddReserveToCollateral(
+      candidate,
+      run.hubId,
+      target.counterpartyId,
+      target.tokenId,
+      target.amount,
+    );
   }
-  return queued;
+  current.batch = candidate.batch;
+  current.status = candidate.status;
+
+  for (const { account, target } of submissions) {
+    account.shadow.rebalance.submittedAtByToken.set(target.tokenId, run.now);
+    run.execution.accountChanges.add(target.counterpartyId);
+    crontabLog.debug('rebalance.r2c.batch_add', {
+      hub: shortId(run.hubId, 8),
+      counterparty: shortId(target.counterpartyId),
+      tokenId: target.tokenId,
+      amount: target.amount.toString(),
+      requestedAt: target.requestedAt,
+    });
+    run.debug({
+      step: 2,
+      status: 'ok',
+      event: 'batch_add',
+      counterpartyId: target.counterpartyId,
+      tokenId: target.tokenId,
+      amount: String(target.amount),
+      requestedAt: target.requestedAt,
+    });
+  }
+  return targets.length;
 };
 
 const collectC2RAccountWork = (
