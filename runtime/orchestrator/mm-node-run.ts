@@ -772,6 +772,80 @@ const createMarketMakerHttpHandler = (
     }
   };
 
+type MarketMakerRuntimeAdapterDeps = {
+  env: RuntimeState;
+  runtimeIngressReceipts: ReturnType<typeof createRuntimeIngressReceiptStore>;
+  runtimeInputStatusUrl: (id: string) => string;
+  isMutatingIngressReady: () => boolean;
+};
+
+const createMarketMakerRuntimeAdapterHandler = (
+  deps: MarketMakerRuntimeAdapterDeps,
+): ((ws: MarketMakerServerSocket, raw: string | Buffer | ArrayBuffer) => void) =>
+  (ws, raw) => {
+    let request: import('../radapter/types').RuntimeAdapterRequest;
+    try {
+      request = decodeRuntimeAdapterRequest(raw);
+    } catch (error) {
+      closeInvalidRuntimeAdapterMessage(ws, error);
+      return;
+    }
+    Promise.resolve(
+      handleRuntimeAdapterMessage(ws, request, deps.env, {
+        enqueueRuntimeInput,
+        submitCrossJurisdictionIntent: async (env, route) => {
+          await submitCrossJurisdictionIntent(env, route);
+        },
+        validateRuntimeInputAdmission,
+        registerReceipt: receipt => deps.runtimeIngressReceipts.register(receipt),
+        readReceipt: id => deps.runtimeIngressReceipts.get(id),
+        buildRuntimeInputStatusUrl: deps.runtimeInputStatusUrl,
+        isMutatingIngressReady: deps.isMutatingIngressReady,
+        readHead: env => readPersistedStorageHead(env),
+        readFrame: (env, height) => readPersistedStorageFrameRecord(env, height),
+        listCheckpoints: env => listPersistedCheckpointHeights(env),
+        loadEntityState: (env, entityId, height) => loadEntityStateFromStorageDb(env, entityId, height),
+        loadEntityAccountDoc: (env, entityId, counterpartyId, height) =>
+          loadEntityAccountDocFromStorageDb(env, entityId, counterpartyId, height),
+        loadEntityViewPage: (env, entityId, height, query) =>
+          loadEntityViewPageFromStorageDb(env, entityId, height, query),
+        listEntityIdsAtHeight: (env, height) => listPersistedEntityIdsAtHeight(env, height),
+        readActivityPage: (env, options) => readPersistedRuntimeActivityPage(env, options),
+      }),
+    ).catch(error => {
+      const message = error instanceof Error ? error.message : String(error);
+      ws.send(safeStringify({ type: 'error', error: `Runtime adapter failed: ${message}` }));
+    });
+  };
+
+const createMarketMakerWebSocketHandler = (
+  env: RuntimeState,
+  directRuntimeWs: ReturnType<typeof createDirectRuntimeWsRoute>,
+  handleRuntimeAdapterMessage: (ws: MarketMakerServerSocket, raw: string | Buffer | ArrayBuffer) => void,
+) => ({
+  open(ws: MarketMakerServerSocket) {
+    if (ws.data?.type === 'rpc') {
+      attachRuntimeAdapterTicker(env, registerEnvChangeCallback);
+      return;
+    }
+    directRuntimeWs.websocket.open(ws);
+  },
+  message(ws: MarketMakerServerSocket, raw: string | Buffer | ArrayBuffer) {
+    if (ws.data?.type === 'rpc') {
+      handleRuntimeAdapterMessage(ws, raw);
+      return;
+    }
+    return directRuntimeWs.websocket.message(ws, raw);
+  },
+  close(ws: MarketMakerServerSocket) {
+    if (ws.data?.type === 'rpc') {
+      forgetRuntimeAdapterClient(ws);
+      return;
+    }
+    directRuntimeWs.websocket.close(ws);
+  },
+});
+
 export const runMarketMakerNode = async (): Promise<void> => {
   activateMarketMakerProcessArgs();
   if (resolvedArgs.dbPath) process.env['XLN_DB_PATH'] = resolvedArgs.dbPath;
@@ -997,40 +1071,12 @@ export const runMarketMakerNode = async (): Promise<void> => {
     directRuntimeWs.sendEntityInputsDelivery(targetRuntimeId, envelope, ingressTimestamp);
   env.runtimeState.directReliableReceiptDispatch = (targetRuntimeId, receipt) =>
     directRuntimeWs.sendReliableReceiptDelivery(targetRuntimeId, receipt);
-  const handleRadapterWsMessage = (ws: MarketMakerServerSocket, raw: string | Buffer | ArrayBuffer): void => {
-    let msg: import('../radapter/types').RuntimeAdapterRequest;
-    try {
-      msg = decodeRuntimeAdapterRequest(raw);
-    } catch (error) {
-      closeInvalidRuntimeAdapterMessage(ws, error);
-      return;
-    }
-    Promise.resolve(
-      handleRuntimeAdapterMessage(ws, msg, env, {
-        enqueueRuntimeInput,
-        submitCrossJurisdictionIntent: async (targetEnv, route) => {
-          await submitCrossJurisdictionIntent(targetEnv, route);
-        },
-        validateRuntimeInputAdmission,
-        registerReceipt: receipt => runtimeIngressReceipts.register(receipt),
-        readReceipt: id => runtimeIngressReceipts.get(id),
-        buildRuntimeInputStatusUrl: runtimeInputStatusUrl,
-        isMutatingIngressReady: () => externalIngressReady,
-        readHead: targetEnv => readPersistedStorageHead(targetEnv),
-        readFrame: (targetEnv, height) => readPersistedStorageFrameRecord(targetEnv, height),
-        listCheckpoints: targetEnv => listPersistedCheckpointHeights(targetEnv),
-        loadEntityState: (targetEnv, entityId, height) => loadEntityStateFromStorageDb(targetEnv, entityId, height),
-        loadEntityAccountDoc: (targetEnv, entityId, counterpartyId, height) =>
-          loadEntityAccountDocFromStorageDb(targetEnv, entityId, counterpartyId, height),
-        loadEntityViewPage: (targetEnv, entityId, height, query) =>
-          loadEntityViewPageFromStorageDb(targetEnv, entityId, height, query),
-        listEntityIdsAtHeight: (targetEnv, height) => listPersistedEntityIdsAtHeight(targetEnv, height),
-        readActivityPage: (targetEnv, opts) => readPersistedRuntimeActivityPage(targetEnv, opts),
-      }),
-    ).catch(error => {
-      ws.send(safeStringify({ type: 'error', error: `Runtime adapter failed: ${(error as Error).message}` }));
-    });
-  };
+  const handleRuntimeAdapterWsMessage = createMarketMakerRuntimeAdapterHandler({
+    env,
+    runtimeIngressReceipts,
+    runtimeInputStatusUrl,
+    isMutatingIngressReady: () => externalIngressReady,
+  });
 
   // Bun exposes fetch handlers as soon as Bun.serve returns. Teardown may
   // therefore arrive while jurisdiction/bootstrap initialization below is
@@ -1064,29 +1110,7 @@ export const runMarketMakerNode = async (): Promise<void> => {
         if (healthRefreshLoop) clearInterval(healthRefreshLoop);
       },
     }),
-    websocket: {
-      open(ws: MarketMakerServerSocket) {
-        if (ws.data?.type === 'rpc') {
-          attachRuntimeAdapterTicker(env, registerEnvChangeCallback);
-          return;
-        }
-        directRuntimeWs.websocket.open(ws);
-      },
-      message(ws: MarketMakerServerSocket, raw: string | Buffer | ArrayBuffer) {
-        if (ws.data?.type === 'rpc') {
-          handleRadapterWsMessage(ws, raw);
-          return;
-        }
-        return directRuntimeWs.websocket.message(ws, raw);
-      },
-      close(ws: MarketMakerServerSocket) {
-        if (ws.data?.type === 'rpc') {
-          forgetRuntimeAdapterClient(ws);
-          return;
-        }
-        directRuntimeWs.websocket.close(ws);
-      },
-    },
+    websocket: createMarketMakerWebSocketHandler(env, directRuntimeWs, handleRuntimeAdapterWsMessage),
   });
 
   startupPhase = 'import-jurisdiction';
