@@ -318,11 +318,8 @@ describe('production startup wiring', () => {
       "await clearGossip(env, { runtimeId: String(env.runtimeId || '') });",
       relocationStart,
     );
-    const directRouteStart = hubNode.indexOf(
-      'const directRuntimeWs = createHubDirectRuntimeRoute(',
-      relocationStart,
-    );
-    const p2pStart = hubNode.indexOf('startP2P(env, {', relocationStart);
+    const directRouteStart = hubNode.indexOf('const httpSurface = startHubHttpSurface(', relocationStart);
+    const p2pStart = hubNode.indexOf('live.p2p = startP2P(env, {', relocationStart);
 
     expect(relocationStart).toBeGreaterThanOrEqual(0);
     expect(awaitedClear).toBeGreaterThan(relocationStart);
@@ -1277,7 +1274,9 @@ describe('production startup wiring', () => {
         'const shutdown = async',
         'const stopParentWatch = startParentLivenessWatch',
       );
-      expect(shutdownBlock).toMatch(/await runCleanup\('quiesce', \(\) =>\s*quiesceNodeRuntime\(env, \{/);
+      expect(shutdownBlock).toMatch(
+        /await runCleanup\('quiesce', \(\) =>\s*quiesceNodeRuntime\((?:live\.)?env, \{/,
+      );
       expect(shutdownBlock).toContain("await runCleanup('server'");
       expect(shutdownBlock).toContain("await runCleanup('runtime_db'");
       expect(shutdownBlock).toContain("await runCleanup('infra_db'");
@@ -1305,8 +1304,8 @@ describe('production startup wiring', () => {
 
   test('hub exposes restored entities before its loop while MM imports every entity before P2P', () => {
     const hubSource = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
-    const hubP2PStart = hubSource.indexOf('p2p = startP2P(env, {');
-    const hubP2PReady = hubSource.indexOf("if (!p2p) throw new Error('P2P_START_FAILED');", hubP2PStart);
+    const hubP2PStart = hubSource.indexOf('live.p2p = startP2P(env, {');
+    const hubP2PReady = hubSource.indexOf("if (!live.p2p) throw new Error('P2P_START_FAILED');", hubP2PStart);
     const hubLoopStart = hubSource.indexOf('startRuntimeLoop(env, {', hubP2PReady);
     expect(hubP2PStart).toBeGreaterThan(0);
     expect(hubP2PReady).toBeGreaterThan(hubP2PStart);
@@ -2390,8 +2389,12 @@ describe('production startup wiring', () => {
     );
     expect(hubNode).toContain('const bootstrapClockMs = (): number => getPerfMs();');
     expect(hubNode).toContain('beginBootstrapProgress(bootstrapClockMs())');
-    expect(hubNode).toContain('advanceBootstrapProgress(meshLoopProgress, step, bootstrapClockMs())');
-    expect(hubNode).not.toContain('advanceBootstrapProgress(meshLoopProgress, step, Date.now())');
+    expect(hubNode).toContain(
+      'advanceBootstrapProgress(live.meshLoopProgress, step, bootstrapClockMs())',
+    );
+    expect(hubNode).not.toContain(
+      'advanceBootstrapProgress(live.meshLoopProgress, step, Date.now())',
+    );
     expect(hubNode).toContain(
       "const AUTO_PROVISION_EXTERNAL_FAUCET = process.env['XLN_AUTO_PROVISION_EXTERNAL_FAUCET'] !== '0';",
     );

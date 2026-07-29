@@ -234,6 +234,24 @@ type HubBootstrapEntry = {
   primary: boolean;
 };
 
+type HubBootstrapIdentity = {
+  entityId: string;
+  signerId: string;
+};
+
+type HubNodeLiveContext = {
+  env: RuntimeState;
+  bootstrap: HubBootstrapIdentity | null;
+  hubBootstraps: HubBootstrapEntry[];
+  activeJAdapter: JAdapter | null;
+  activeTokenCatalog: JTokenInfo[];
+  p2p: ReturnType<typeof startP2P> | null;
+  externalIngressReady: boolean;
+  shuttingDown: boolean;
+  meshLoopProgress: BootstrapProgress;
+  meshLoopInFlight: boolean;
+};
+
 type LocalHealthResponse = {
   ok: boolean;
   name: string;
@@ -2465,6 +2483,316 @@ const advanceHubMeshBootstrap = async (
   }
 };
 
+const requireHubTokenCatalog = async (live: HubNodeLiveContext): Promise<JTokenInfo[]> => {
+  if (!live.activeJAdapter) throw new Error('J-adapter not initialized');
+  if (live.activeTokenCatalog.length === 0) {
+    live.activeTokenCatalog = await waitForTokenCatalog(live.activeJAdapter);
+  }
+  return live.activeTokenCatalog;
+};
+
+const createHubExternalWalletApi = (live: HubNodeLiveContext) =>
+  createExternalWalletApi({
+    getJAdapter: () => live.activeJAdapter,
+    getRuntimeId: () => String(live.env.runtimeId || ''),
+    getTokenCatalog: () => requireHubTokenCatalog(live),
+    jsonHeaders: JSON_HEADERS,
+    faucetSeed: `${resolvedArgs.seed}:faucet`,
+    faucetSignerLabel: FAUCET_SIGNER_LABEL,
+    faucetWalletEthTarget: FAUCET_WALLET_ETH_TARGET,
+    faucetTokenTargetUnits: FAUCET_TOKEN_TARGET_UNITS,
+    emitDebugEvent: entry => {
+      if (live.p2p?.sendDebugEvent(entry)) return;
+      if (entry.event === 'error') {
+        nodeLog.error('debug_event.delivery_failed', {
+          reason: entry.reason,
+          status: entry.status,
+        });
+      }
+    },
+    fundBrowserVmWallet: async () => false,
+  });
+
+const createHubStatusHandler = (
+  live: HubNodeLiveContext,
+  bootstrapClockMs: () => number,
+): ((url: URL, operatorAuthorized: boolean) => Response | null) =>
+  (url, operatorAuthorized) => {
+    if (url.pathname === '/api/info') {
+      return new Response(
+        safeStringify({
+          name: resolvedArgs.name,
+          entityId: live.bootstrap?.entityId ?? null,
+          hubEntities: live.hubBootstraps,
+          runtimeId: live.env.runtimeId,
+          apiUrl,
+          relayUrl: resolvedArgs.relayUrl,
+          directWsUrl,
+          storage: {
+            persistencePaused: Boolean(live.env.runtimeState?.persistencePaused),
+          },
+        }),
+        { headers: JSON_HEADERS },
+      );
+    }
+    if (url.pathname !== '/api/health') return null;
+    const health = buildLocalHealth(
+      live.env,
+      live.bootstrap?.entityId ?? null,
+      live.activeTokenCatalog,
+      live.activeJAdapter,
+      live.hubBootstraps,
+      buildBootstrapProgressHealth(
+        live.meshLoopProgress,
+        live.meshLoopInFlight,
+        bootstrapClockMs(),
+        MESH_BOOTSTRAP_STALL_TIMEOUT_MS,
+      ),
+    );
+    return new Response(
+      safeStringify(operatorAuthorized ? health : publicLocalHubHealth(health)),
+      { headers: JSON_HEADERS },
+    );
+  };
+
+type HubHttpSurface = {
+  server: ReturnType<typeof Bun.serve>;
+  httpDrain: ReturnType<typeof createHttpDrainTracker>;
+  externalWalletApi: ReturnType<typeof createExternalWalletApi>;
+  directInputDebug: DirectInputDebugState;
+};
+
+const startHubHttpSurface = (
+  live: HubNodeLiveContext,
+  runtimeIngressReceipts: ReturnType<typeof createRuntimeIngressReceiptStore>,
+  faucetRelayStore: ReturnType<typeof createRelayStore>,
+  pauseBootstrap: () => Promise<void>,
+  bootstrapClockMs: () => number,
+): HubHttpSurface => {
+  const externalWalletApi = createHubExternalWalletApi(live);
+  const directInputDebug: DirectInputDebugState = { lastSeen: null, lastError: null };
+  const directRuntimeWs = createHubDirectRuntimeRoute(
+    live.env,
+    resolvedArgs.seed,
+    () => live.externalIngressReady,
+    directInputDebug,
+  );
+  const handleRadapterWsMessage = createHubRadapterMessageHandler(
+    live.env,
+    runtimeIngressReceipts,
+    () => live.externalIngressReady,
+  );
+  const httpDrain = createHttpDrainTracker();
+  const handleControl = createHubControlRequestHandler({
+    state: live.env,
+    nodeName: resolvedArgs.name,
+    pauseBootstrap,
+    markShuttingDown: () => {
+      live.shuttingDown = true;
+    },
+  });
+  const context: HubHttpContext = {
+    env: live.env,
+    hubBootstraps: live.hubBootstraps,
+    externalWalletApi,
+    faucetRelayStore,
+    runtimeIngressReceipts,
+    getBootstrap: () => live.bootstrap,
+    getJAdapter: () => live.activeJAdapter,
+    ensureTokenCatalog: () => requireHubTokenCatalog(live),
+    getDirectInputDebug: () => ({ ...directInputDebug }),
+    handleStatus: createHubStatusHandler(live, bootstrapClockMs),
+    handleControl,
+  };
+  const server = Bun.serve({
+    hostname: resolvedArgs.apiHost,
+    port: resolvedArgs.apiPort,
+    idleTimeout: 120,
+    async fetch(request, serverRef) {
+      const releaseHttp = httpDrain.begin();
+      try {
+        const url = new URL(request.url);
+        const operatorAuthorized = isLocalOperatorRequest(
+          request,
+          resolveSocketPeerAddress(serverRef, request),
+        );
+        if (request.headers.get('upgrade') === 'websocket' && url.pathname === '/rpc') {
+          return serverRef.upgrade(request, { data: { type: 'rpc' } })
+            ? undefined
+            : new Response('WebSocket upgrade failed', { status: 400 });
+        }
+        const directUpgrade = directRuntimeWs.maybeUpgrade(request, serverRef);
+        if (directUpgrade.handled) return directUpgrade.response;
+        return await handleHubHttpRequest(context, request, url, operatorAuthorized);
+      } finally {
+        releaseHttp();
+      }
+    },
+    websocket: {
+      open(ws: HubServerSocket) {
+        if (ws.data?.type === 'rpc') {
+          attachRuntimeAdapterTicker(live.env, registerEnvChangeCallback);
+          return;
+        }
+        directRuntimeWs.websocket.open(ws);
+      },
+      message(ws: HubServerSocket, raw: string | Buffer | ArrayBuffer) {
+        if (ws.data?.type === 'rpc') {
+          handleRadapterWsMessage(ws, raw);
+          return;
+        }
+        return directRuntimeWs.websocket.message(ws, raw);
+      },
+      close(ws: HubServerSocket) {
+        if (ws.data?.type === 'rpc') {
+          forgetRuntimeAdapterClient(ws);
+          return;
+        }
+        directRuntimeWs.websocket.close(ws);
+      },
+    },
+  });
+  return { server, httpDrain, externalWalletApi, directInputDebug };
+};
+
+type HubMeshBootstrapController = {
+  pauseAndWait(): Promise<void>;
+  start(
+    jurisdiction: JurisdictionConfig,
+    tokenCatalog: JTokenInfo[],
+    externalWalletApi: ReturnType<typeof createExternalWalletApi>,
+  ): void;
+};
+
+const createHubMeshBootstrapController = (
+  live: HubNodeLiveContext,
+  bootstrapClockMs: () => number,
+): HubMeshBootstrapController => {
+  let loop: ReturnType<typeof setInterval> | null = null;
+  let fatal = false;
+  let paused = false;
+
+  const pauseAndWait = async (): Promise<void> => {
+    paused = true;
+    if (loop) {
+      clearInterval(loop);
+      loop = null;
+    }
+    while (live.meshLoopInFlight) await sleep(100);
+  };
+
+  const start: HubMeshBootstrapController['start'] = (jurisdiction, tokenCatalog, externalWalletApi) => {
+    const totalStartedAt = startTiming('mesh_ready_total');
+    const milestones: MeshBootstrapMilestones = {
+      gossipReady: false,
+      accountsReady: false,
+      creditReady: false,
+      reserveReady: false,
+    };
+    let faucetProvision: Promise<void> | null = null;
+    const ensureFaucetReady = async (): Promise<void> => {
+      if (!resolvedArgs.deployTokens || !AUTO_PROVISION_EXTERNAL_FAUCET) return;
+      faucetProvision ??= externalWalletApi.provisionFaucetWallet().then(() => {
+        if (!live.shuttingDown) nodeLog.info('faucet_provision.ready', { name: resolvedArgs.name });
+      });
+      await faucetProvision;
+    };
+    const markProgress = (step: string): void => {
+      live.meshLoopProgress = advanceBootstrapProgress(live.meshLoopProgress, step, bootstrapClockMs());
+    };
+    const drive = async (): Promise<void> => {
+      if (!live.bootstrap || live.shuttingDown || paused || fatal || live.meshLoopInFlight) return;
+      // Inputs are derived only from committed Entity state. Waiting here
+      // prevents re-enqueuing an account open while its prior frame is applying.
+      if (hasPendingRuntimeWork(live.env)) return;
+      live.meshLoopInFlight = true;
+      try {
+        await advanceHubMeshBootstrap({
+          env: live.env,
+          bootstrap: live.bootstrap,
+          hubBootstraps: live.hubBootstraps,
+          jurisdiction,
+          tokenCatalog,
+          milestones,
+          totalStartedAt,
+          markProgress,
+          ensureFaucetReady,
+        });
+      } finally {
+        live.meshLoopInFlight = false;
+      }
+    };
+    const handleFatal = (error: unknown): void => {
+      handleMeshBootstrapLoopError(error, {
+        nodeName: resolvedArgs.name,
+        isShuttingDown: () => live.shuttingDown || fatal,
+        clearLoop: () => {
+          fatal = true;
+          if (loop) clearInterval(loop);
+          loop = null;
+        },
+        exit: code => process.exit(code),
+        logError: (...args) => console.error(...args),
+      });
+    };
+    if (live.shuttingDown || fatal || paused) return;
+    loop = setInterval(() => {
+      if (!live.shuttingDown && !fatal && !paused) void drive().catch(handleFatal);
+    }, BOOTSTRAP_POLL_MS);
+    void drive().catch(handleFatal);
+  };
+
+  return { pauseAndWait, start };
+};
+
+const installHubShutdownHandlers = (
+  live: HubNodeLiveContext,
+  meshController: HubMeshBootstrapController,
+  httpSurface: HubHttpSurface,
+): void => {
+  let shutdownStarted = false;
+  const shutdown = async (code = 0): Promise<void> => {
+    if (shutdownStarted) return;
+    shutdownStarted = true;
+    live.shuttingDown = true;
+    const failures: string[] = [];
+    const runCleanup = async (label: string, cleanup: () => Promise<unknown>): Promise<void> => {
+      try {
+        await cleanup();
+      } catch (error) {
+        failures.push(`${label}:${error instanceof Error ? error.message : String(error)}`);
+      }
+    };
+    await runCleanup('mesh_producer', meshController.pauseAndWait);
+    await runCleanup('quiesce', () => quiesceNodeRuntime(live.env, {
+      workTimeoutMs: 10_000,
+      loopTimeoutMs: 10_000,
+    }));
+    await runCleanup('server', () =>
+      stopServerGracefully(httpSurface.server, httpSurface.httpDrain, resolvedArgs.name, 5_000));
+    await runCleanup('runtime_db', () => closeRuntimeDb(live.env));
+    await runCleanup('infra_db', () => closeInfraDb(live.env));
+    if (failures.length > 0) {
+      console.error(`[${resolvedArgs.name}] shutdown failed: ${failures.join('|')}`);
+      process.exit(code || 1);
+    }
+    process.exit(code);
+  };
+  const stopParentWatch = startParentLivenessWatch(
+    resolvedArgs.name,
+    process.env['XLN_ORCHESTRATOR_PID'],
+    () => void shutdown(1),
+  );
+  process.on('SIGTERM', () => {
+    stopParentWatch();
+    void shutdown();
+  });
+  process.on('SIGINT', () => {
+    stopParentWatch();
+    void shutdown();
+  });
+};
+
 const run = async (): Promise<void> => {
   if (resolvedArgs.dbPath) {
     process.env['XLN_DB_PATH'] = resolvedArgs.dbPath;
@@ -2497,210 +2825,30 @@ const run = async (): Promise<void> => {
   configureHubRuntimeLogging(env);
   finishTiming('runtime_boot', runtimeBootStartedAt);
 
-  let bootstrap: { entityId: string; signerId: string } | null = null;
-  const hubBootstraps: HubBootstrapEntry[] = [];
-  let activeJAdapter: JAdapter | null = null;
-  let activeTokenCatalog: JTokenInfo[] = [];
-  let p2p: ReturnType<typeof startP2P>;
-  let externalIngressReady = false;
-  let meshLoop: ReturnType<typeof setInterval> | null = null;
-  let meshLoopInFlight = false;
+  const live: HubNodeLiveContext = {
+    env,
+    bootstrap: null,
+    hubBootstraps: [],
+    activeJAdapter: null,
+    activeTokenCatalog: [],
+    p2p: null,
+    externalIngressReady: false,
+    shuttingDown: false,
+    meshLoopProgress: beginBootstrapProgress(getPerfMs()),
+    meshLoopInFlight: false,
+  };
   // Bootstrap liveness measures elapsed process time, not civil time. Date.now
   // can move backwards under NTP and previously killed every hub at once.
   const bootstrapClockMs = (): number => getPerfMs();
-  let meshLoopProgress: BootstrapProgress = beginBootstrapProgress(bootstrapClockMs());
-  let meshLoopFatal = false;
-  let meshBootstrapPaused = false;
-  let startMeshBootstrapProducer: (() => void) | null = null;
-  let shuttingDown = false;
-
-  const markMeshBootstrapProgress = (step: string): void => {
-    meshLoopProgress = advanceBootstrapProgress(meshLoopProgress, step, bootstrapClockMs());
-  };
-
-  const pauseMeshBootstrapProducerAndWait = async (): Promise<void> => {
-    meshBootstrapPaused = true;
-    if (meshLoop) {
-      clearInterval(meshLoop);
-      meshLoop = null;
-    }
-    while (meshLoopInFlight) {
-      await sleep(100);
-    }
-  };
-
-  const directInputDebug: DirectInputDebugState = {
-    lastSeen: null,
-    lastError: null,
-  };
-
-  const externalWalletApi = createExternalWalletApi({
-    getJAdapter: () => activeJAdapter,
-    getRuntimeId: () => String(env.runtimeId || ''),
-    getTokenCatalog: async () => {
-      if (!activeJAdapter) throw new Error('J-adapter not initialized');
-      if (activeTokenCatalog.length > 0) return activeTokenCatalog;
-      activeTokenCatalog = await waitForTokenCatalog(activeJAdapter);
-      return activeTokenCatalog;
-    },
-    jsonHeaders: JSON_HEADERS,
-    faucetSeed: `${resolvedArgs.seed}:faucet`,
-    faucetSignerLabel: FAUCET_SIGNER_LABEL,
-    faucetWalletEthTarget: FAUCET_WALLET_ETH_TARGET,
-    faucetTokenTargetUnits: FAUCET_TOKEN_TARGET_UNITS,
-    emitDebugEvent: entry => {
-      if (p2p?.sendDebugEvent(entry)) return;
-      if (entry.event === 'error') {
-        nodeLog.error('debug_event.delivery_failed', {
-          reason: entry.reason,
-          status: entry.status,
-        });
-      }
-    },
-    fundBrowserVmWallet: async () => false,
-  });
-
-  const directRuntimeWs = createHubDirectRuntimeRoute(
-    env,
-    resolvedArgs.seed,
-    () => externalIngressReady,
-    directInputDebug,
-  );
-  const handleRadapterWsMessage = createHubRadapterMessageHandler(
-    env,
+  live.meshLoopProgress = beginBootstrapProgress(bootstrapClockMs());
+  const meshController = createHubMeshBootstrapController(live, bootstrapClockMs);
+  const httpSurface = startHubHttpSurface(
+    live,
     runtimeIngressReceipts,
-    () => externalIngressReady,
-  );
-
-  const httpDrain = createHttpDrainTracker();
-  const handleHubControlRequest = createHubControlRequestHandler({
-    state: env,
-    nodeName: resolvedArgs.name,
-    pauseBootstrap: pauseMeshBootstrapProducerAndWait,
-    markShuttingDown: () => {
-      shuttingDown = true;
-    },
-  });
-  const handleHubStatusRequest = (
-    url: URL,
-    operatorAuthorized: boolean,
-  ): Response | null => {
-    if (url.pathname === '/api/info') {
-      return new Response(
-        safeStringify({
-          name: resolvedArgs.name,
-          entityId: bootstrap?.entityId ?? null,
-          hubEntities: hubBootstraps,
-          runtimeId: env.runtimeId,
-          apiUrl,
-          relayUrl: resolvedArgs.relayUrl,
-          directWsUrl,
-          storage: {
-            persistencePaused: Boolean(
-              env.runtimeState?.persistencePaused,
-            ),
-          },
-        }),
-        { headers: JSON_HEADERS },
-      );
-    }
-    if (url.pathname !== '/api/health') return null;
-    const health = buildLocalHealth(
-      env,
-      bootstrap?.entityId ?? null,
-      activeTokenCatalog,
-      activeJAdapter,
-      hubBootstraps,
-      buildBootstrapProgressHealth(
-        meshLoopProgress,
-        meshLoopInFlight,
-        bootstrapClockMs(),
-        MESH_BOOTSTRAP_STALL_TIMEOUT_MS,
-      ),
-    );
-    return new Response(
-      safeStringify(
-        operatorAuthorized ? health : publicLocalHubHealth(health),
-      ),
-      { headers: JSON_HEADERS },
-    );
-  };
-  const hubHttpContext: HubHttpContext = {
-    env,
-    hubBootstraps,
-    externalWalletApi,
     faucetRelayStore,
-    runtimeIngressReceipts,
-    getBootstrap: () => bootstrap,
-    getJAdapter: () => activeJAdapter,
-    ensureTokenCatalog: async () => {
-      if (!activeJAdapter) throw new Error('J-adapter not initialized');
-      if (activeTokenCatalog.length === 0) {
-        activeTokenCatalog = await waitForTokenCatalog(activeJAdapter);
-      }
-      return activeTokenCatalog;
-    },
-    getDirectInputDebug: () => ({
-      lastSeen: directInputDebug.lastSeen,
-      lastError: directInputDebug.lastError,
-    }),
-    handleStatus: handleHubStatusRequest,
-    handleControl: handleHubControlRequest,
-  };
-  const server = Bun.serve({
-    hostname: resolvedArgs.apiHost,
-    port: resolvedArgs.apiPort,
-    idleTimeout: 120,
-    async fetch(request, serverRef) {
-      const releaseHttp = httpDrain.begin();
-      try {
-	      const url = new URL(request.url);
-	      const pathname = url.pathname;
-	      const operatorAuthorized = isLocalOperatorRequest(request, resolveSocketPeerAddress(serverRef, request));
-
-	      if (request.headers.get('upgrade') === 'websocket' && pathname === '/rpc') {
-	        const upgraded = serverRef.upgrade(request, { data: { type: 'rpc' } });
-	        if (upgraded) return;
-	        return new Response('WebSocket upgrade failed', { status: 400 });
-	      }
-
-	      const directUpgrade = directRuntimeWs.maybeUpgrade(request, serverRef);
-	      if (directUpgrade.handled) return directUpgrade.response;
-
-        return await handleHubHttpRequest(
-          hubHttpContext,
-          request,
-          url,
-          operatorAuthorized,
-        );
-      } finally {
-        releaseHttp();
-      }
-	    },
-	    websocket: {
-	      open(ws: HubServerSocket) {
-	        if (ws.data?.type === 'rpc') {
-	          attachRuntimeAdapterTicker(env, registerEnvChangeCallback);
-	          return;
-	        }
-	        directRuntimeWs.websocket.open(ws);
-	      },
-	      message(ws: HubServerSocket, raw: string | Buffer | ArrayBuffer) {
-	        if (ws.data?.type === 'rpc') {
-	          handleRadapterWsMessage(ws, raw);
-	          return;
-	        }
-	        return directRuntimeWs.websocket.message(ws, raw);
-	      },
-	      close(ws: HubServerSocket) {
-	        if (ws.data?.type === 'rpc') {
-	          forgetRuntimeAdapterClient(ws);
-	          return;
-	        }
-	        directRuntimeWs.websocket.close(ws);
-	      },
-	    },
-	  });
+    meshController.pauseAndWait,
+    bootstrapClockMs,
+  );
 
   const importJStartedAt = startTiming('import_j');
   const jurisdiction = await prepareJurisdictionForImport(resolveJurisdictionConfig(resolvedArgs.rpcUrl));
@@ -2709,43 +2857,43 @@ const run = async (): Promise<void> => {
 
   const hubBootstrapStartedAt = startTiming('hub_bootstrap');
   const bootstrapped = await bootstrapHubJurisdictions(env, jurisdiction);
-  bootstrap = bootstrapped.primaryBootstrap;
-  hubBootstraps.push(...bootstrapped.entries);
+  live.bootstrap = bootstrapped.primaryBootstrap;
+  live.hubBootstraps.push(...bootstrapped.entries);
   finishTiming('hub_bootstrap', hubBootstrapStartedAt);
 
   const primaryJurisdictionName = jurisdiction.name;
 
   const jadapter = getActiveJAdapter(env);
   if (!jadapter) throw new Error('ACTIVE_JADAPTER_MISSING_AFTER_IMPORT');
-  activeJAdapter = jadapter;
+  live.activeJAdapter = jadapter;
   await ensureRpcStackReady(env, jadapter);
 
   const tokenCatalog = resolvedArgs.deployTokens
     ? await ensureTokenCatalog(jadapter, true, primaryJurisdictionName)
     : await waitForTokenCatalog(jadapter);
-  activeTokenCatalog = tokenCatalog;
-  if (bootstrap?.entityId) {
-    tokenCatalogsByEntityId.set(normalizeEntityId(bootstrap.entityId), tokenCatalog);
+  live.activeTokenCatalog = tokenCatalog;
+  if (live.bootstrap?.entityId) {
+    tokenCatalogsByEntityId.set(normalizeEntityId(live.bootstrap.entityId), tokenCatalog);
   }
 
   startJurisdictionWatchers(env);
   const watcherDrain = await drainJWatcherBacklog(env, async currentEnv => processRuntime(currentEnv));
-  externalIngressReady = true;
+  live.externalIngressReady = true;
   nodeLog.info('startup.j_catchup_ready', {
     jurisdictions: watcherDrain.length,
     cursors: watcherDrain.map(status => `${status.chainId}:${status.committedCursor}/${status.targetBlock}`),
   });
 
   const p2pConnectStartedAt = startTiming('p2p_connect');
-  p2p = startP2P(env, {
+  live.p2p = startP2P(env, {
     relayUrls: [resolvedArgs.relayUrl],
     wsUrl: directWsUrl,
     preferRelayForEntityInput: true,
-    advertiseEntityIds: hubBootstraps.map((entry) => entry.entityId),
+    advertiseEntityIds: live.hubBootstraps.map((entry) => entry.entityId),
     isHub: true,
     gossipPollMs: BOOTSTRAP_POLL_MS * 5,
   });
-  if (!p2p) throw new Error('P2P_START_FAILED');
+  if (!live.p2p) throw new Error('P2P_START_FAILED');
   startRuntimeLoop(env, {
     tickDelayMs: HUB_RUNTIME_TICK_DELAY_MS,
     maxEntityInputsPerFrame: HUB_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME,
@@ -2759,85 +2907,11 @@ const run = async (): Promise<void> => {
   });
   finishTiming('p2p_connect', p2pConnectStartedAt);
 
-  const totalMeshStartedAt = startTiming('mesh_ready_total');
-  const meshMilestones: MeshBootstrapMilestones = {
-    gossipReady: false,
-    accountsReady: false,
-    creditReady: false,
-    reserveReady: false,
-  };
-  let faucetProvisionPromise: Promise<void> | null = null;
-
-  const ensureExternalFaucetProvisionReady = async (): Promise<void> => {
-    if (!resolvedArgs.deployTokens || !AUTO_PROVISION_EXTERNAL_FAUCET) return;
-    if (!faucetProvisionPromise) {
-      faucetProvisionPromise = externalWalletApi.provisionFaucetWallet()
-        .then(() => {
-          if (!shuttingDown) {
-            nodeLog.info('faucet_provision.ready', { name: resolvedArgs.name });
-          }
-        });
-    }
-    await faucetProvisionPromise;
-  };
-
-  const driveMeshBootstrap = async (): Promise<void> => {
-    if (!bootstrap || shuttingDown || meshBootstrapPaused) return;
-    if (meshLoopInFlight) return;
-    // Bootstrap commands are derived from committed entity state. Building an
-    // openAccount while the previous frame is still applying can enqueue the
-    // same open twice: the active input is no longer visible in the mempool,
-    // but its account has not reached env yet.
-    if (hasPendingRuntimeWork(env)) return;
-    meshLoopInFlight = true;
-    try {
-      await advanceHubMeshBootstrap({
-        env,
-        bootstrap,
-        hubBootstraps,
-        jurisdiction,
-        tokenCatalog,
-        milestones: meshMilestones,
-        totalStartedAt: totalMeshStartedAt,
-        markProgress: markMeshBootstrapProgress,
-        ensureFaucetReady: ensureExternalFaucetProvisionReady,
-      });
-    } finally {
-      meshLoopInFlight = false;
-    }
-  };
-
-  const handleMeshBootstrapFatal = (error: unknown): void => {
-    handleMeshBootstrapLoopError(error, {
-      nodeName: resolvedArgs.name,
-      isShuttingDown: () => shuttingDown || meshLoopFatal,
-      clearLoop: () => {
-        meshLoopFatal = true;
-        if (meshLoop) {
-          clearInterval(meshLoop);
-          meshLoop = null;
-        }
-      },
-      exit: (code) => process.exit(code),
-      logError: (...args) => console.error(...args),
-    });
-  };
-
-  startMeshBootstrapProducer = () => {
-    if (shuttingDown || meshLoopFatal || meshBootstrapPaused) return;
-    if (!meshLoop) {
-      meshLoop = setInterval(() => {
-        if (shuttingDown || meshLoopFatal || meshBootstrapPaused) return;
-        void driveMeshBootstrap().catch(handleMeshBootstrapFatal);
-      }, BOOTSTRAP_POLL_MS);
-    }
-    void driveMeshBootstrap().catch(handleMeshBootstrapFatal);
-  };
-  startMeshBootstrapProducer();
+  meshController.start(jurisdiction, tokenCatalog, httpSurface.externalWalletApi);
 
   nodeLog.info('runtime.ready', {
     name: resolvedArgs.name,
-    entityId: bootstrap.entityId,
+    entityId: live.bootstrap.entityId,
     runtimeId: String(env.runtimeId || ''),
     api: apiUrl,
     relay: resolvedArgs.relayUrl,
@@ -2859,40 +2933,7 @@ const run = async (): Promise<void> => {
     }
   }
 
-  let shutdownStarted = false;
-  const shutdown = async (code: number = 0) => {
-    if (shutdownStarted) return;
-    shutdownStarted = true;
-    shuttingDown = true;
-    const failures: string[] = [];
-    const runCleanup = async (label: string, cleanup: () => Promise<unknown>): Promise<void> => {
-      try {
-        await cleanup();
-      } catch (error) {
-        failures.push(`${label}:${error instanceof Error ? error.message : String(error)}`);
-      }
-    };
-    await runCleanup('mesh_producer', pauseMeshBootstrapProducerAndWait);
-    await runCleanup('quiesce', () => quiesceNodeRuntime(env, {
-      workTimeoutMs: 10_000,
-      loopTimeoutMs: 10_000,
-    }));
-    await runCleanup('server', () => stopServerGracefully(server, httpDrain, resolvedArgs.name, 5_000));
-    await runCleanup('runtime_db', () => closeRuntimeDb(env));
-    await runCleanup('infra_db', () => closeInfraDb(env));
-    if (failures.length > 0) {
-      console.error(`[${resolvedArgs.name}] shutdown failed: ${failures.join('|')}`);
-      process.exit(code || 1);
-    }
-    process.exit(code);
-  };
-  const stopParentWatch = startParentLivenessWatch(resolvedArgs.name, process.env['XLN_ORCHESTRATOR_PID'], () => {
-    void shutdown(1);
-  });
-
-  process.on('SIGTERM', () => { stopParentWatch(); void shutdown(); });
-  process.on('SIGINT', () => { stopParentWatch(); void shutdown(); });
-
+  installHubShutdownHandlers(live, meshController, httpSurface);
   await waitUntil(() => false, Number.MAX_SAFE_INTEGER, 1000);
 };
 
