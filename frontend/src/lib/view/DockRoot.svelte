@@ -34,6 +34,8 @@
   export let runtimeFrameTimeIndex: Writable<number>;
   export let runtimeFrameIsLive: Writable<boolean>;
   export let requestedPanelId: string | null = null;
+  /** Demo playback: only the graph and its timeline. Set by the embed route. */
+  export let demoMode = false;
 
   let container: HTMLDivElement;
   let dockview: DockviewComponent;
@@ -42,12 +44,13 @@
   let unsubFocusPanel: (() => void) | null = null;
   let activePanelDisposable: { dispose: () => void } | null = null;
   let saveLayoutTimer: ReturnType<typeof setTimeout> | null = null;
+  let dockLayoutObserver: ResizeObserver | null = null;
   let workspaceReadyFrame: number | null = null;
   let workspaceReady = false;
   let pendingRequestedPanelId: string | null = null;
   let collapsed = false;
   let showSidebarInEmbed = false;
-  $: showDockTimeMachine = !embedMode || $settings.showTimeMachine;
+  $: showDockTimeMachine = demoMode || !embedMode || $settings.showTimeMachine;
 
   type EntityPanelSeed = { entityId: string; entityName: string; signerId: string; action?: EntityOpenAction };
   type DockviewInitParams = { api: { id: string; close?: () => void } };
@@ -121,7 +124,7 @@
       workspaceReadyFrame = null;
       workspaceReady = true;
       if (pendingRequestedPanelId) activateRequestedPanel();
-      else dockview.getPanel('wallet-main')?.api.setActive();
+      else dockview.getPanel(demoMode ? 'graph3d' : 'wallet-main')?.api.setActive();
     });
   }
 
@@ -238,6 +241,7 @@
               runtimeFrameTimeIndex,
               runtimeFrameIsLive,
               graphInitSignal,
+              demoMode,
             },
           });
         } else if (options.name === 'wallet') {
@@ -386,7 +390,9 @@
       (window as DockviewWindow).__dockview_instance = dockview;
     }
 
-    const savedLayout = localStorage.getItem('xln-workspace-layout');
+    // A demo is not the operator's workspace: restoring a saved layout would size the graph
+    // to whatever column it occupied next to the wallet, leaving most of the screen empty.
+    const savedLayout = demoMode ? null : localStorage.getItem('xln-workspace-layout');
     let shouldRestoreLayout = false;
     if (savedLayout && !mobileDockLayout) {
       try {
@@ -409,6 +415,10 @@
         component: 'graph3d',
         title: 'Graph3D',
       });
+
+      // A demo is the network and its narration, nothing else. Wallet creation prompts and
+      // dev panels compete with the story and squeeze the graph into a corner.
+      if (demoMode) return;
 
       ensurePanel({
         id: 'wallet-main',
@@ -489,11 +499,25 @@
     const graph3dApi = dockview.getPanel('graph3d');
     if (graph3dApi) {
       setTimeout(() => {
-        if (mobileDockLayout) return;
-        const widthPercent = embedMode ? 1.0 : 0.50;
-        graph3dApi.api.setSize({ width: window.innerWidth * widthPercent });
+        // A demo has a single panel, so the dock already gives it everything.
+        if (mobileDockLayout || demoMode) return;
+        // `window.innerWidth` is 0 in a hidden/offscreen pane, and setSize(0) collapses the
+        // panel to its minimum. Size from the dock container, and only when it is real.
+        const available = container?.clientWidth || window.innerWidth;
+        if (!(available > 0)) return;
+        graph3dApi.api.setSize({ width: available * (embedMode ? 1.0 : 0.5) });
       }, 100);
     }
+
+    // Dockview sizes itself once at construction. If the container is not laid out yet
+    // (mount race, hidden tab, offscreen embed) every panel collapses to its minimum and
+    // never recovers, because no resize event follows. Re-layout whenever the box is real.
+    dockLayoutObserver = new ResizeObserver(() => {
+      const width = container?.clientWidth ?? 0;
+      const height = container?.clientHeight ?? 0;
+      if (width > 0 && height > 0) dockview.layout(width, height);
+    });
+    dockLayoutObserver.observe(container);
 
     activePanelDisposable = dockview.onDidActivePanelChange((panel: ActivePanelRef) => {
       const panelId = panel?.id || panel?.api?.id;
@@ -502,7 +526,7 @@
 
     dockview.onDidLayoutChange(() => {
       if (saveLayoutTimer) clearTimeout(saveLayoutTimer);
-      if (mobileDockLayout) {
+      if (mobileDockLayout || demoMode) {
         saveLayoutTimer = null;
         return;
       }
@@ -584,6 +608,10 @@
       clearTimeout(saveLayoutTimer);
       saveLayoutTimer = null;
     }
+    if (dockLayoutObserver) {
+      dockLayoutObserver.disconnect();
+      dockLayoutObserver = null;
+    }
     if (activePanelDisposable) {
       activePanelDisposable.dispose();
       activePanelDisposable = null;
@@ -596,7 +624,7 @@
 </script>
 
 <div class="view-wrapper" class:embed-mode={embedMode} class:sidebar-open={embedMode && showSidebarInEmbed}>
-  {#if !embedMode}
+  {#if !embedMode && !demoMode}
     <button
       type="button"
       class="dock-exit-btn"
@@ -620,6 +648,8 @@
         timeIndex={runtimeFrameTimeIndex}
         isLive={runtimeFrameIsLive}
         env={runtimeFrameEnv}
+        dockMode
+        {demoMode}
       />
       {#if !embedMode}
         <button class="collapse-btn" on:click={() => collapsed = !collapsed}>

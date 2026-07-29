@@ -37,6 +37,10 @@
   export let timeIndex: Writable<number> | Readable<number>;
   export let isLive: Writable<boolean> | Readable<boolean>;
   export let env: Writable<RuntimeState | null> | Readable<RuntimeState | null>; // For state export
+  /** Rendered inside the dock workspace. The wallet keeps its own single-runtime controls. */
+  export let dockMode = false;
+  /** Embedded demo playback: chrome-free narration. */
+  export let demoMode = false;
 
   // Type guard to check if store is writable
   function isWritable<T>(store: Writable<T> | Readable<T>): store is Writable<T> {
@@ -672,8 +676,14 @@
   }
 </script>
 
-{#if $runtimeGraphScope === 'merged' && $appState.mode === 'dev'}
-  <NetworkMachineTimeline />
+<!--
+  In the dock, merged scope scrubs through the NetworkMachine: it reads frames from each
+  runtime's adapter, so local and remote work the same way. The wallet keeps its own
+  controls below — `dockMode` (not the global app mode) decides, because the embedded
+  workspace renders the dock while the app mode is still 'user'.
+-->
+{#if dockMode && $runtimeGraphScope === 'merged'}
+  <NetworkMachineTimeline {demoMode} />
 {:else}
 <div class="time-machine">
   <!-- Frame Navigation (LEFT - most used) -->

@@ -45,7 +45,13 @@ export type {
   ReplicaUri,
   JurisdictionInfo,
 } from '../ids';
-export { scenarios } from '../runtime/scenarios';
+export {
+  scenarios,
+  scenarioKeys,
+  recordScenario,
+  type ScenarioKey,
+  type ScenarioRecording,
+} from '../runtime/scenarios';
 export { parseScenario, mergeAndSortEvents } from '../scenarios/parser.js';
 export { executeScenario } from '../scenarios/executor.js';
 export { SCENARIOS, getScenario, getScenariosByTag, type ScenarioMetadata } from '../scenarios/index.js';

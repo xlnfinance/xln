@@ -25,24 +25,38 @@ export function buildRuntimeGraphProjections(input: RuntimeGraphProjectionInputs
     .trim()
     .toLowerCase();
   const networkStep = input.scope === 'merged' ? input.networkState.selectedStep : null;
+
+  // Historical: the selected step's frames are the whole truth. Iterating them (rather than
+  // the connected-runtime map) is also what lets a recorded scenario render — it is a
+  // network with no live runtime behind it.
+  if (networkStep) {
+    for (const [runtimeId, frame] of input.networkState.frames) {
+      const runtime = input.runtimeMap.get(runtimeId);
+      projections.push(projectRuntimeGraphFrame(frame, {
+        runtimeId,
+        label: runtime?.label || runtimeId,
+        adapterKind: runtime?.type === 'remote' ? 'remote' : 'browser',
+      }));
+    }
+    return projections;
+  }
+
   for (const runtime of input.runtimeMap.values()) {
     const runtimeId = String(runtime.id || '')
       .trim()
       .toLowerCase();
+
+    // Live: local runtimes project their in-memory env, remote ones their cached frame.
     if (runtime.type === 'local') {
-      const selected = networkStep
-        ? input.networkState.browserFrames.get(runtimeId)
-        : runtimeId === activeId && input.currentEnv
-          ? input.currentEnv
-          : (unwrapLiveRuntimeEnv(runtime.env) ?? runtime.env);
+      const selected = runtimeId === activeId && input.currentEnv
+        ? input.currentEnv
+        : (unwrapLiveRuntimeEnv(runtime.env) ?? runtime.env);
       if (selected) {
         projections.push(projectRuntimeEnv(selected, { runtimeId, label: runtime.label, adapterKind: 'browser' }));
       }
       continue;
     }
-    const frame = networkStep
-      ? (input.networkState.remoteFrames.get(runtimeId) ?? null)
-      : (input.liveRemoteFrames.get(runtimeId) ?? null);
+    const frame = input.liveRemoteFrames.get(runtimeId) ?? null;
     if (frame) {
       projections.push(projectRuntimeGraphFrame(frame, { runtimeId, label: runtime.label, adapterKind: 'remote' }));
     }
@@ -51,7 +65,6 @@ export function buildRuntimeGraphProjections(input: RuntimeGraphProjectionInputs
     .trim()
     .toLowerCase();
   if (
-    !networkStep &&
     input.currentEnv &&
     !projections.some(projection => projection.source.runtimeId === envRuntimeId)
   ) {

@@ -65,7 +65,9 @@ test('DockRoot defaults to Graph left plus pinned wallet and tools on the right'
   expect(source).toContain('appStateOperations.clearDockPanelRequest(panelId)');
   expect(source).toContain("import RemoteRuntimeManager from '$lib/components/Runtime/RemoteRuntimeManager.svelte'");
   expect(source).toContain("appStateOperations.setMode('user')");
-  expect(source).toContain('showDockTimeMachine = !embedMode || $settings.showTimeMachine');
+  // Demo playback always narrates through the Time Machine; the embed setting still governs
+  // the ordinary embedded workspace.
+  expect(source).toContain('showDockTimeMachine = demoMode || !embedMode || $settings.showTimeMachine');
 });
 
 test('DockRoot blocks RuntimeState-only panels on remote runtimes instead of mounting blank fake RuntimeState views', () => {

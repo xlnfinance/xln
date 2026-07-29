@@ -75,6 +75,8 @@ export let runtimeFrameHistory: Writable<any[]>;
 export let runtimeFrameTimeIndex: Writable<number>;
 export let runtimeFrameIsLive: Writable<boolean>;
 export let graphInitSignal: Writable<boolean> | undefined = undefined;
+/** Demo playback: always frame the network, and hide operator-only projection controls. */
+export let demoMode = false;
 $: initEnabled = graphInitSignal ? $graphInitSignal : true;
 $: env = (() => {
   const timeIdx = $runtimeFrameTimeIndex;
@@ -791,6 +793,18 @@ onDestroy(() => {
   });
   entityInputStrikes = [];
 });
+/**
+ * Renderer dimensions that are never zero.
+ *
+ * A hidden tab, an offscreen iframe or a mount race can report a 0x0 box; sizing the
+ * renderer to it produces a canvas that draws nothing and never recovers, because no
+ * resize event follows. Fall back to a usable size and let the observer correct it.
+ */
+function readViewportSize(): { width: number; height: number } {
+  const width = container?.clientWidth || window.innerWidth || 1280;
+  const height = container?.clientHeight || window.innerHeight || 720;
+  return { width: Math.max(1, width), height: Math.max(1, height) };
+}
 function createGrid() {
   if (!scene) return;
   gridHelper = createGraphGrid(gridColor, gridOpacity, gridSize, gridDivisions);
@@ -867,8 +881,7 @@ async function initThreeJS() {
   const themeColors = getGraphThemeColors(settings.theme);
   scene.background = new THREE.Color(themeColors.background);
   createGrid();
-  const containerWidth = container.clientWidth || window.innerWidth;
-  const containerHeight = container.clientHeight || window.innerHeight;
+  const { width: containerWidth, height: containerHeight } = readViewportSize();
   camera = new THREE.PerspectiveCamera(
     75,
     containerWidth / containerHeight,
@@ -1257,7 +1270,9 @@ function updateNetworkData() {
     createEntityNode(profile, index, entityData.length, forceLayoutPositions, isHub, currentReplicas);
   });
   const graphSignature = [...mergedRuntimeGraph.sources.map((source) => source.runtimeId), ...mergedRuntimeGraph.nodes.map((node) => node.entityId), ...mergedRuntimeGraph.accounts.map((account) => account.accountId)].join("|");
-  if (!savedSettings.camera && graphSignature && graphSignature !== autoFittedGraphSignature) {
+  // A demo must always frame its network: a camera saved from an earlier session would
+  // leave the graph half off-screen for every viewer.
+  if ((demoMode || !savedSettings.camera) && graphSignature && graphSignature !== autoFittedGraphSignature) {
     fitCameraToEntities(connectedRuntimeGraphEntityIds(mergedRuntimeGraph));
     autoFittedGraphSignature = graphSignature;
   }
@@ -2780,11 +2795,10 @@ function getDualConnectionAccountInfo(entityA: string, entityB: string): { left:
 }
 function onWindowResize() {
   if (!camera || !renderer || !container) return;
-  const containerWidth = container.clientWidth || window.innerWidth;
-  const containerHeight = container.clientHeight || window.innerHeight;
-  camera.aspect = containerWidth / containerHeight;
+  const { width, height } = readViewportSize();
+  camera.aspect = width / height;
   camera.updateProjectionMatrix();
-  renderer.setSize(containerWidth, containerHeight);
+  renderer.setSize(width, height);
 }
 function toggleBarsMode() {
   barsMode = barsMode === "close" ? "spread" : "close";
@@ -2808,7 +2822,7 @@ function handleVrAutoRotateClick(): void {
   {showMiniPanel} {miniPanelEntityId} {miniPanelEntityName} {miniPanelPosition} {runtimeFrameEnv} {runtimeFrameHistory} {runtimeFrameTimeIndex} {showFpsOverlay}
   {renderFps} {frameTime}
   entityCount={entities.length} connectionCount={connections.length} particleCount={particles.length}
-  {barsMode} {isVRActive} {tooltip} {dualTooltip}
+  {barsMode} {isVRActive} {tooltip} {dualTooltip} showProjectionControls={!demoMode}
   runtimeScope={$runtimeGraphScope} runtimeScopeOptions={graphRuntimeOptions} canonicity={$runtimeGraphCanonicity} sourceCount={mergedRuntimeGraph.sources.length}
   desyncCount={graphDesyncCount} projectionError={graphProjectionError} runtimeNodeLabels={mergedRuntimeGraph.nodes.map((node) => node.selected.label)} timelineRuntimeId={$networkMachineRuntime.selectedStep?.activeRuntimeId ?? ''}
   timelineRuntimeColor={$networkMachineRuntime.selectedStep?.activeRuntimeColor ?? ''} timelineHeight={$networkMachineRuntime.selectedStep?.event.height ?? 0} timelineTimestamp={$networkMachineRuntime.selectedStep?.event.timestamp ?? 0}

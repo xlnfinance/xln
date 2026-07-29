@@ -29,6 +29,8 @@
     visible: boolean; x: number; y: number;
     leftContent: string; rightContent: string; leftEntity: string; rightEntity: string;
   } = { visible: false, x: 0, y: 0, leftContent: '', rightContent: '', leftEntity: '', rightEntity: '' };
+  /** Operator-only source/reference pickers. A demo shows one network, not a debug view. */
+  export let showProjectionControls = true;
   export let runtimeScope = 'merged';
   export let runtimeScopeOptions: Array<{ value: string; label: string }> = [];
   export let canonicity: RuntimeGraphCanonicity = 'timestamp';
@@ -54,6 +56,7 @@
 <div class="graph3d-wrapper">
   <div bind:this={container} class="graph3d-panel"></div>
 
+  {#if showProjectionControls}
   <div class="runtime-projection-controls" data-testid="graph-runtime-projection-controls">
     <label>
       <span>View</span>
@@ -86,6 +89,7 @@
     </span>
     <span class="sr-only" data-testid="graph-runtime-node-summary">{runtimeNodeLabels.join(' · ')}</span>
   </div>
+  {/if}
 
   {#if projectionError || timelineRuntimeId}
     <div class="runtime-status-stack">

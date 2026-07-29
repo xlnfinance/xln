@@ -58,6 +58,8 @@
   export let scenarioId = '';
   export let userMode = false;
   export let requestedPanelId: string | null = null;
+  /** Demo playback: the dock shows only the graph and its timeline. */
+  export let demoMode = false;
 
   type RuntimeLogEntry = {
     id?: number;
@@ -387,7 +389,18 @@
 />
 <PaymentSpotlight />
 
-{#if userMode}
+{#if demoMode}
+  <!-- A demo renders its own minimal surface: no dock, no workspace chrome. -->
+  {#await import('./DemoRoot.svelte') then module}
+    <svelte:component
+      this={module.default}
+      runtimeFrameEnv={localEnvStore}
+      runtimeFrameHistory={localHistoryStore}
+      runtimeFrameTimeIndex={localTimeIndex}
+      runtimeFrameIsLive={localIsLive}
+    />
+  {/await}
+{:else if userMode}
   <UserModePanel
     runtimeFrameEnv={localEnvStore}
     runtimeFrameRevision={localEnvRevisionStore}
@@ -406,6 +419,7 @@
       runtimeFrameTimeIndex={localTimeIndex}
       runtimeFrameIsLive={localIsLive}
       {requestedPanelId}
+      {demoMode}
     />
   {:catch err}
     <div class="view-error">

@@ -129,3 +129,6 @@ frontend/static/runtime-bundle.js
 frontend/public/runtime.js
 frontend/build/runtime.js
 .gstack/
+
+# Recorded demo trails are build artifacts of `bun runtime/scripts/record-demo-trail.ts`
+frontend/static/trails/
