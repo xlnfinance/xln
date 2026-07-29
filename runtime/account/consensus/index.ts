@@ -101,8 +101,14 @@ const assertLiveCommitMatchesFrame = (
   validatedMachine?: AccountState,
 ): void => {
   const incrementalRoot = computeAccountStateRoot(account);
+  // The signed frame root is the commit criterion. Every AccountTx variant is
+  // compile-time-exhaustive about commitment-cache invalidation, so a matching
+  // incremental root is sufficient on the hot path. Rebuilding every map here
+  // made one-leaf commits scale with the entire Account and erased the cache's
+  // benefit. We still run the independent cold oracle on any mismatch so the
+  // failure report identifies stale cache data versus a real state divergence.
+  if (incrementalRoot === expectedRoot) return;
   const coldRoot = computeAccountStateRootCold(account);
-  if (incrementalRoot === expectedRoot && coldRoot === expectedRoot) return;
   const details = {
     side,
     height,
