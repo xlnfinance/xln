@@ -17,7 +17,7 @@ import {
   tryRestoreRuntimeEnvFromTower,
   type Runtime,
 } from '../../frontend/src/lib/stores/vaultStore';
-import { createDefaultDelta } from '../../runtime/validation-utils';
+import { createDefaultDelta } from '../../runtime/account/delta';
 import type { AccountState } from '../../runtime/types';
 import { runWatchtowerSweep } from '../../runtime/watchtower/action';
 import { dbRootPath } from '../../runtime/runtime/platform';
