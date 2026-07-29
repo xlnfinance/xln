@@ -20,7 +20,7 @@ import {
 } from './handlers/account';
 import { applyJEvent } from './j-events';
 import { shouldRethrowEntityTxError } from './invariant-errors';
-import { createStructuredLogger, logError } from '../../infra/logger';
+import { createStructuredLogger } from '../../infra/logger';
 import { handleR2E } from './handlers/r2e';
 import { handleHtlcPayment } from './handlers/htlc-payment';
 import { handleR2C } from './handlers/r2c';
@@ -370,8 +370,7 @@ export const applyEntityTx = async (
   options?: ApplyEntityTxOptions,
 ): Promise<ApplyEntityTxResult> => {
   if (!entityTx) {
-    logError('ENTITY_TX', `❌ EntityTx is undefined!`);
-    return { newState: entityState, outputs: [], storageChanges: [], candidateEffects: [] };
+    throw new TypeError('ENTITY_TX_UNDEFINED');
   }
 
   try {
