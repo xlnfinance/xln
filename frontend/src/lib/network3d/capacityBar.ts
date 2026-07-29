@@ -1,18 +1,18 @@
 /**
- * Geometry for the 2D stage.
+ * The capacity bar — one layout, both scenes.
  *
- * The 3D graph draws a network and hangs a capacity bar on each edge, where the bar ends
- * up a few pixels long because its length is an absolute value scale and the edge length
- * is a layout accident. The 2D stage inverts that: one account's capacity *is* the frame,
- * so its regions are readable, and the rest of the network is context around it.
- *
- * The bar is the same construction `deriveDelta` documents and `formatDeltaAscii` prints:
+ * This is the construction `deriveDelta` documents and `formatDeltaAscii` prints:
  *
  *     [----own credit----|====collateral====|----peer credit----]
  *                              ^ delta
  *
- * Everything right of the delta marker is what LEFT can still send; everything left of it
- * is what LEFT can still receive. Pure functions here, drawing in the component.
+ * Everything left of the delta marker is what LEFT can send; everything right of it is
+ * what LEFT can receive. A payment is not an object travelling anywhere — it is this
+ * marker moving toward whoever paid, and the allocation on either side of it changing to
+ * match. Which is why the layout lives here as data: the same numbers place an SVG rect
+ * and a cylinder, and the same numbers can be interpolated to animate the move.
+ *
+ * Pure functions only; drawing belongs to the scenes.
  */
 
 export type DerivedForStage = {
@@ -93,6 +93,74 @@ export const stageBarFor = (derived: DerivedForStage): StageBar => {
   // the peer's line.
   const markerAt = clamp01(ratio(ownWindow + derived.delta, total));
   return { regions, markerAt, total };
+};
+
+/**
+ * The regions in axis order, always all six.
+ *
+ * Interpolating between two layouts means interpolating the same slots, and a region that
+ * is absent is a region of size zero — not a region that does not exist. Building a bar
+ * from a fixed vector is what lets a payment animate as "this boundary slid and these
+ * shares changed" instead of "the picture was rebuilt".
+ */
+export const CAPACITY_REGION_ORDER = [
+  'ownCreditFree',
+  'ownCreditDrawn',
+  'collateralOwn',
+  'collateralPeer',
+  'peerCreditDrawn',
+  'peerCreditFree',
+] as const satisfies ReadonlyArray<StageRegionKind>;
+
+export type CapacityVector = {
+  /** Fraction of the bar per region, in CAPACITY_REGION_ORDER, summing to ~1. */
+  sizes: number[];
+  markerAt: number;
+};
+
+export const capacityVector = (bar: StageBar): CapacityVector => ({
+  sizes: CAPACITY_REGION_ORDER.map(
+    (kind) => bar.regions.find((region) => region.kind === kind)?.size ?? 0,
+  ),
+  markerAt: bar.markerAt,
+});
+
+export const EMPTY_CAPACITY_VECTOR: CapacityVector = {
+  sizes: CAPACITY_REGION_ORDER.map(() => 0),
+  markerAt: 0.5,
+};
+
+/** Ease-out: value moves fast when it starts and settles, the way a decision lands. */
+export const easeCapacity = (t: number): number => {
+  const clamped = t < 0 ? 0 : t > 1 ? 1 : t;
+  return 1 - (1 - clamped) ** 3;
+};
+
+export const lerpCapacity = (from: CapacityVector, to: CapacityVector, t: number): CapacityVector => {
+  const eased = easeCapacity(t);
+  return {
+    sizes: to.sizes.map((size, index) => {
+      const start = from.sizes[index] ?? 0;
+      return start + (size - start) * eased;
+    }),
+    markerAt: from.markerAt + (to.markerAt - from.markerAt) * eased,
+  };
+};
+
+/**
+ * How hard a credit line is being leaned on, 0..1, per side.
+ *
+ * Drawn against drawn-plus-free: an account with a huge unused limit is not under strain,
+ * and one that has taken nearly all of a small line is.
+ */
+export const creditStrain = (vector: CapacityVector): { own: number; peer: number } => {
+  const at = (kind: StageRegionKind): number =>
+    vector.sizes[CAPACITY_REGION_ORDER.indexOf(kind)] ?? 0;
+  const ratioOf = (drawn: number, free: number): number => (drawn + free <= 0 ? 0 : drawn / (drawn + free));
+  return {
+    own: ratioOf(at('ownCreditDrawn'), at('ownCreditFree')),
+    peer: ratioOf(at('peerCreditDrawn'), at('peerCreditFree')),
+  };
 };
 
 export type StagePoint = { x: number; y: number };

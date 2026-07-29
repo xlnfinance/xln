@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { stageBarFor, ringLayout, compactAmount } from '../../frontend/src/lib/network3d/networkStage2d';
+import { stageBarFor, ringLayout, compactAmount } from '../../frontend/src/lib/network3d/capacityBar';
 
 const derived = (over: Partial<Parameters<typeof stageBarFor>[0]> = {}) => ({
   delta: 0n,

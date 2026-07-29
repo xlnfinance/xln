@@ -11,6 +11,8 @@
 
 import * as THREE from 'three';
 import { toDerivedAccountData, type DerivedAccountData } from './derivedAccount';
+import { CAPACITY_REGION_ORDER, capacityVector, stageBarFor } from './capacityBar';
+import { beginCapacityMotion, type CapacityMotionFrame } from './accountBarMotion';
 import { requireTokenDecimals } from '$lib/components/Entity/token-metadata';
 
 /** Minimal endpoint shape the bars need. Structurally satisfied by GraphEntityData. */
@@ -160,20 +162,31 @@ export function createAccountBars(
     const perpendicularOffset = perpendicular.clone().multiplyScalar(offset);
 
     // Create token-specific bar group
-    const tokenBarGroup = createTokenBars(
-      fromEntity,
-      toEntity,
-      normalizedDirection,
-      fromDerived,
-      toDerived,
-      fromIsLeft,
-      settings,
-      getEntitySize,
-      tokenId,
-      tokenDecimals,
-      adjustedRadius,
-      barHeight
-    );
+    const tokenBarGroup = settings.fitToEdge
+      ? createCanonicalTokenBar({
+          fromEntity,
+          toEntity,
+          fromIsLeft,
+          delta,
+          tokenId,
+          radius: adjustedRadius,
+          getEntitySize,
+          xlnFunctions,
+        })
+      : createTokenBars(
+          fromEntity,
+          toEntity,
+          normalizedDirection,
+          fromDerived,
+          toDerived,
+          fromIsLeft,
+          settings,
+          getEntitySize,
+          tokenId,
+          tokenDecimals,
+          adjustedRadius,
+          barHeight
+        );
 
     // Apply perpendicular offset to position this token's bars
     tokenBarGroup.position.copy(perpendicularOffset);
@@ -181,6 +194,87 @@ export function createAccountBars(
   }
 
   parent.add(group);
+  return group;
+}
+
+/**
+ * One account, laid out by the invariant and free to move.
+ *
+ * Regions come straight from `stageBarFor` — the same numbers the 2D stage draws and the
+ * runtime's own ASCII prints — so the bar cannot drift from the maths. Every segment is a
+ * unit cylinder scaled along the edge, which makes a reallocation a change of scale and
+ * position rather than a rebuild: the separator slides toward whoever paid and the shares
+ * on each side follow it.
+ */
+function createCanonicalTokenBar(params: {
+  fromEntity: BarEndpoint;
+  toEntity: BarEndpoint;
+  fromIsLeft: boolean;
+  delta: unknown;
+  tokenId: number;
+  radius: number;
+  getEntitySize: (entityId: string, tokenId: number) => number;
+  xlnFunctions: { deriveDelta: (delta: unknown, isLeft: boolean) => unknown };
+}): THREE.Group {
+  const group = new THREE.Group();
+  const bar = stageBarFor(params.xlnFunctions.deriveDelta(params.delta, true) as never);
+  if (bar.total <= 0n) return group;
+
+  // The canonical axis runs from LEFT to RIGHT, whichever way the edge was handed to us.
+  const leftEntity = params.fromIsLeft ? params.fromEntity : params.toEntity;
+  const rightEntity = params.fromIsLeft ? params.toEntity : params.fromEntity;
+  const axis = new THREE.Vector3().subVectors(rightEntity.position, leftEntity.position);
+  const axisLength = axis.length();
+  if (axisLength <= 0) return group;
+  const direction = axis.clone().normalize();
+  const leftSize = params.getEntitySize(leftEntity.id, params.tokenId);
+  const rightSize = params.getEntitySize(rightEntity.id, params.tokenId);
+  const span = Math.max(0.001, axisLength - leftSize - rightSize - 1.6);
+  const origin = leftEntity.position.clone().addScaledVector(direction, leftSize + 0.8);
+  const alignment = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction);
+
+  const segments = CAPACITY_REGION_ORDER.map((kind) => {
+    const isCredit = kind === 'ownCreditFree' || kind === 'peerCreditFree';
+    const isDrawn = kind === 'ownCreditDrawn' || kind === 'peerCreditDrawn';
+    const geometry = new THREE.CylinderGeometry(params.radius, params.radius, 1, 16, 1);
+    if (isCredit) applyCreditGradient(geometry, kind === 'ownCreditFree' ? 'left' : 'right');
+    const material = isCredit
+      ? new THREE.MeshLambertMaterial({ vertexColors: true, transparent: true, opacity: 0.42, depthWrite: false })
+      : new THREE.MeshLambertMaterial({
+          color: isDrawn ? BAR_COLORS.unsecured : BAR_COLORS.secured,
+          emissive: new THREE.Color(isDrawn ? BAR_COLORS.unsecured : BAR_COLORS.secured).multiplyScalar(0.1),
+          emissiveIntensity: 0.1,
+        });
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.quaternion.copy(alignment);
+    mesh.userData['regionKind'] = kind;
+    group.add(mesh);
+    return { kind, mesh, material, isDrawn };
+  });
+
+  const separator = createDeltaSeparator(params.radius / 2.5, direction);
+  group.add(separator);
+
+  const apply = (frame: CapacityMotionFrame): void => {
+    let cursor = 0;
+    segments.forEach((segment, index) => {
+      const size = frame.vector.sizes[index] ?? 0;
+      const length = size * span;
+      segment.mesh.visible = length > 0.004;
+      segment.mesh.scale.set(1, Math.max(length, 0.0001), 1);
+      segment.mesh.position.copy(origin).addScaledVector(direction, cursor + length / 2);
+      if (segment.isDrawn) {
+        // Strain, not alarm: a line barely touched sits still, one near its limit breathes.
+        const strain = segment.kind === 'ownCreditDrawn' ? frame.strain.own : frame.strain.peer;
+        segment.material.emissiveIntensity = 0.1 + strain * 0.9 * (0.55 + 0.45 * Math.sin(Date.now() / (420 - strain * 240)));
+      }
+      cursor += length;
+    });
+    separator.position.copy(origin).addScaledVector(direction, frame.vector.markerAt * span);
+  };
+
+  const accountKey = `${leftEntity.id}|${rightEntity.id}|${params.tokenId}`;
+  apply(beginCapacityMotion(accountKey, capacityVector(bar), Date.now(), apply));
   return group;
 }
 

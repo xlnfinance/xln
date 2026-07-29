@@ -12,7 +12,7 @@
   import type { Delta } from '$types';
   import { networkMachineRuntime } from '$lib/stores/networkMachineRuntimeStore';
   import { focusEntityIdsForStep } from '$lib/network3d/networkCaption';
-  import { compactAmount, ringLayout, stageBarFor, type StageRegionKind } from '$lib/network3d/networkStage2d';
+  import { compactAmount, ringLayout, stageBarFor, type StageRegionKind } from '$lib/network3d/capacityBar';
   import { xlnFunctions } from '$lib/stores/xlnStore';
 
   /**

@@ -23,6 +23,7 @@ import { mergeRuntimeGraphProjections, requireActionableGraphNodeRuntimeId, type
 import { materializeRuntimeGraphReplicas } from "$lib/network3d/runtimeGraphRender";
 import { connectedRuntimeGraphEntityIds, resolveRuntimeGraphLayout, type RuntimeGraphLayoutCache } from "$lib/network3d/runtimeGraphLayout";
 import { focusEntityIdsForStep } from "$lib/network3d/networkCaption";
+import { resetCapacityMotion, updateCapacityMotion } from "$lib/network3d/accountBarMotion";
 import { readGraphPositionOverrides, writeGraphPositionOverride } from "$lib/network3d/graphPositionOverrides";
 import {
   buildGraphAvailableRoutes,
@@ -1423,6 +1424,8 @@ function applyDemoStepEmphasis(): void {
   }
 }
 function clearNetwork() {
+  // Whatever comes back is a different network, not a reallocation of this one.
+  resetCapacityMotion();
   entities.forEach(detachEntityVisuals);
   entities = [];
   connections.forEach(detachConnectionVisuals);
@@ -1791,6 +1794,9 @@ function animate() {
     animationId = requestAnimationFrame(animate);
   }
   animateCallCount++;
+  // A payment is the delta moving and the shares following it, so the bars keep moving
+  // between renders even while nothing else changes.
+  updateCapacityMotion(Date.now());
   animateEntityInputStrikes();
   for (const grab of vrGrabs.values()) {
     const controllerWorldPosition = new THREE.Vector3().setFromMatrixPosition(grab.controller.matrixWorld);
