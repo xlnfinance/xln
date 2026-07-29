@@ -541,6 +541,111 @@ const buildMarketMakerInfoResponseJson = (
       : {}),
   });
 
+type MarketMakerHealthProjection = {
+  env: RuntimeState;
+  contexts: readonly MarketMakerEntityContext[];
+  cachedHealth: MarketMakerHealth | null;
+  visibleHubs: readonly HubProfile[];
+  allVisibleHubs: readonly HubProfile[];
+  activeEntityId: string | null;
+  startupPhase: string;
+  expectedHubCount: number;
+  readyHash: string | null;
+  runtimeStateHash: string | null;
+  entityStateHash: string | null;
+  restoredEntityStateHash: string | null;
+  readyAt: number | null;
+  lastDirectEntityInput: DirectEntityInputDebug | null;
+  lastDirectEntityInputError: DirectEntityInputDebug | null;
+};
+
+const resolveMarketMakerHealthForResponse = (
+  input: MarketMakerHealthProjection,
+): MarketMakerHealth => {
+  const unavailableHealth: MarketMakerHealth = {
+    enabled: true,
+    ok: false,
+    entityId: input.activeEntityId,
+    expectedOffersPerHub: 0,
+    expectedOffersPerPair: 0,
+    hubs: input.activeEntityId
+      ? input.visibleHubs.map(profile => ({
+          hubEntityId: profile.entityId,
+          offers: 0,
+          ready: false,
+          depthReady: false,
+          blockers: [],
+          pairs: [],
+        }))
+      : [],
+    cross: {
+      applicable: input.activeEntityId !== null && input.allVisibleHubs.length > 0 && input.contexts.length > 1,
+      ok: false,
+      expectedRoutes: 0,
+      expectedOffersPerRoute: 0,
+      expectedOffersPerPair: 0,
+      routes: [],
+    },
+  };
+  const health = input.activeEntityId ? (input.cachedHealth ?? unavailableHealth) : unavailableHealth;
+  return input.startupPhase === 'offers-ready' ? health : { ...health, ok: false };
+};
+
+const buildMarketMakerHealthResponseJson = (
+  input: MarketMakerHealthProjection,
+): string => {
+  const marketMakerHealth = resolveMarketMakerHealthForResponse(input);
+  const runtimeHalted = input.env.runtimeState?.halted === true;
+  const gossipReady = input.visibleHubs.length === input.expectedHubCount;
+  const readiness = deriveMarketMakerChildReadiness({
+    runtimeHalted,
+    startupPhase: input.startupPhase,
+    gossipReady,
+    marketMakerReady: marketMakerHealth.ok === true,
+  });
+  return safeStringify({
+    ok: readiness.ready,
+    live: readiness.live,
+    ready: readiness.ready,
+    name: resolvedArgs.name,
+    height: Math.max(0, Math.floor(Number(input.env.height || 0))),
+    entityId: input.activeEntityId,
+    runtimeId: String(input.env.runtimeId || '') || null,
+    relayUrl: resolvedArgs.relayUrl,
+    directWsUrl,
+    apiUrl,
+    startupPhase: input.startupPhase,
+    runtime: {
+      halted: runtimeHalted,
+      lifecyclePhase: input.env.runtimeState?.lifecyclePhase ?? null,
+      fatalDebugPayload: input.env.runtimeState?.fatalDebugPayload ?? null,
+    },
+    p2p: {
+      directPeers: getP2PState(input.env).directPeers || [],
+      directInput: {
+        lastSeen: input.lastDirectEntityInput,
+        lastError: input.lastDirectEntityInputError,
+      },
+    },
+    gossip: {
+      visibleHubNames: input.visibleHubs.map(profile => profile.name),
+      visibleHubIds: input.visibleHubs.map(profile => profile.entityId),
+      ready: gossipReady,
+    },
+    bootstrap: {
+      readyHash: input.readyHash,
+      runtimeStateHash: input.runtimeStateHash,
+      entityStateHash: input.entityStateHash,
+      restoredEntityStateHash: input.restoredEntityStateHash,
+      readyAt: input.readyAt,
+    },
+    marketMaker: {
+      ...marketMakerHealth,
+      quiescence: summarizeRuntimeQuiescence(input.env),
+    },
+  });
+};
+
 export const runMarketMakerNode = async (): Promise<void> => {
   activateMarketMakerProcessArgs();
   if (resolvedArgs.dbPath) process.env['XLN_DB_PATH'] = resolvedArgs.dbPath;
@@ -647,97 +752,22 @@ export const runMarketMakerNode = async (): Promise<void> => {
     const visibleHubs = cachedVisibleHubProfiles.filter(profile =>
       primaryContext ? sameJurisdiction(primaryContext, profile) : true,
     );
-    const allVisibleHubs = cachedAllVisibleHubProfiles;
-    const activeEntityId = activeMmEntityId;
-    const rawMarketMakerHealth = activeEntityId
-      ? (cachedMarketMakerHealth ?? {
-          enabled: true,
-          ok: false,
-          entityId: activeEntityId,
-          expectedOffersPerHub: 0,
-          expectedOffersPerPair: 0,
-          hubs: visibleHubs.map(profile => ({
-            hubEntityId: profile.entityId,
-            offers: 0,
-            ready: false,
-            blockers: [],
-            pairs: [],
-          })),
-          cross: {
-            applicable: allVisibleHubs.length > 0 && mmContexts.length > 1,
-            ok: false,
-            expectedRoutes: 0,
-            expectedOffersPerRoute: 0,
-            expectedOffersPerPair: 0,
-            routes: [],
-          },
-        })
-      : {
-          enabled: true,
-          ok: false,
-          entityId: null,
-          expectedOffersPerHub: 0,
-          expectedOffersPerPair: 0,
-          hubs: [],
-          cross: {
-            applicable: false,
-            ok: false,
-            expectedRoutes: 0,
-            expectedOffersPerRoute: 0,
-            expectedOffersPerPair: 0,
-            routes: [],
-          },
-        };
-    const marketMakerHealth =
-      startupPhase === 'offers-ready' ? rawMarketMakerHealth : { ...rawMarketMakerHealth, ok: false };
-    const runtimeHalted = env.runtimeState?.halted === true;
-    const gossipReady = visibleHubs.length === resolvedArgs.meshHubNames.length;
-    const readiness = deriveMarketMakerChildReadiness({
-      runtimeHalted,
+    cachedHealthResponseJson = buildMarketMakerHealthResponseJson({
+      env,
+      contexts: mmContexts,
+      cachedHealth: cachedMarketMakerHealth,
+      visibleHubs,
+      allVisibleHubs: cachedAllVisibleHubProfiles,
+      activeEntityId: activeMmEntityId,
       startupPhase,
-      gossipReady,
-      marketMakerReady: marketMakerHealth.ok === true,
-    });
-    cachedHealthResponseJson = safeStringify({
-      ok: readiness.ready,
-      live: readiness.live,
-      ready: readiness.ready,
-      name: resolvedArgs.name,
-      height: Math.max(0, Math.floor(Number(env.height || 0))),
-      entityId: activeEntityId,
-      runtimeId: String(env.runtimeId || '') || null,
-      relayUrl: resolvedArgs.relayUrl,
-      directWsUrl,
-      apiUrl,
-      startupPhase,
-      runtime: {
-        halted: runtimeHalted,
-        lifecyclePhase: env.runtimeState?.lifecyclePhase ?? null,
-        fatalDebugPayload: env.runtimeState?.fatalDebugPayload ?? null,
-      },
-      p2p: {
-        directPeers: getP2PState(env).directPeers || [],
-        directInput: {
-          lastSeen: lastDirectEntityInput,
-          lastError: lastDirectEntityInputError,
-        },
-      },
-      gossip: {
-        visibleHubNames: visibleHubs.map(profile => profile.name),
-        visibleHubIds: visibleHubs.map(profile => profile.entityId),
-        ready: gossipReady,
-      },
-      bootstrap: {
-        readyHash: bootstrapReadyHash,
-        runtimeStateHash: bootstrapRuntimeStateHash,
-        entityStateHash: bootstrapEntityStateHash,
-        restoredEntityStateHash,
-        readyAt: bootstrapReadyAt,
-      },
-      marketMaker: {
-        ...marketMakerHealth,
-        quiescence: summarizeRuntimeQuiescence(env),
-      },
+      expectedHubCount: resolvedArgs.meshHubNames.length,
+      readyHash: bootstrapReadyHash,
+      runtimeStateHash: bootstrapRuntimeStateHash,
+      entityStateHash: bootstrapEntityStateHash,
+      restoredEntityStateHash,
+      readyAt: bootstrapReadyAt,
+      lastDirectEntityInput,
+      lastDirectEntityInputError,
     });
     rebuildCachedInfoResponseJson();
   };

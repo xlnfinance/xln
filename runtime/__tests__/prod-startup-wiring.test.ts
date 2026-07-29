@@ -1531,22 +1531,29 @@ describe('production startup wiring', () => {
     expect(healthRoute).not.toContain('safeStringify(');
     expect(healthRoute).not.toContain('readVisibleHubProfiles(');
     expect(healthRoute).not.toContain('getMarketMakerHealth(');
+    const healthProjectionStart = mmNode.indexOf('const resolveMarketMakerHealthForResponse = (');
+    const marketMakerStart = mmNode.indexOf('export const runMarketMakerNode');
+    expect(healthProjectionStart).toBeGreaterThan(0);
+    expect(marketMakerStart).toBeGreaterThan(healthProjectionStart);
+    const healthProjection = mmNode.slice(healthProjectionStart, marketMakerStart);
+    expect(healthProjection).toContain(
+      "return input.startupPhase === 'offers-ready' ? health : { ...health, ok: false };",
+    );
+    expect(healthProjection).toContain('const readiness = deriveMarketMakerChildReadiness({');
+    expect(healthProjection).toContain('marketMakerReady: marketMakerHealth.ok === true');
+    expect(healthProjection).toContain('ok: readiness.ready');
+    expect(healthProjection).toContain('live: readiness.live');
+    expect(healthProjection).toContain('ready: readiness.ready');
+    expect(healthProjection).toContain('...marketMakerHealth');
+    expect(healthProjection).toContain('quiescence: summarizeRuntimeQuiescence(input.env)');
+    expect(healthProjection).toContain('expectedRoutes: 0');
+    expect(healthProjection).toContain('return safeStringify({');
     const healthBuilderStart = mmNode.indexOf('const rebuildCachedHealthResponseJson = (): void => {');
     const publishHealthStart = mmNode.indexOf('const publishMarketMakerHealthSnapshot');
-    expect(healthBuilderStart).toBeGreaterThan(0);
+    expect(healthBuilderStart).toBeGreaterThan(marketMakerStart);
     expect(publishHealthStart).toBeGreaterThan(healthBuilderStart);
     const healthBuilder = mmNode.slice(healthBuilderStart, publishHealthStart);
-    expect(healthBuilder).toMatch(/const marketMakerHealth =\s*startupPhase === 'offers-ready'/);
-    expect(healthBuilder).toContain(': { ...rawMarketMakerHealth, ok: false };');
-    expect(healthBuilder).toContain('const readiness = deriveMarketMakerChildReadiness({');
-    expect(healthBuilder).toContain('marketMakerReady: marketMakerHealth.ok === true');
-    expect(healthBuilder).toContain('ok: readiness.ready');
-    expect(healthBuilder).toContain('live: readiness.live');
-    expect(healthBuilder).toContain('ready: readiness.ready');
-    expect(healthBuilder).toContain('...marketMakerHealth');
-    expect(healthBuilder).toContain('quiescence: summarizeRuntimeQuiescence(env)');
-    expect(healthBuilder).toContain('expectedRoutes: 0');
-    expect(healthBuilder).toContain('cachedHealthResponseJson = safeStringify({');
+    expect(healthBuilder).toContain('cachedHealthResponseJson = buildMarketMakerHealthResponseJson({');
     expect(mmNode).toContain(
       "const buildDeferredMarketMakerCrossHealth = (applicable: boolean): MarketMakerHealth['cross'] => ({",
     );
