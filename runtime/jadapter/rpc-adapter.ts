@@ -13,10 +13,6 @@ import {
   EntityProvider__factory,
 } from '../../jurisdictions/typechain-types/index.ts';
 import { BLOCKCHAIN } from '../constants';
-import {
-  assertEntityProviderActionJTxBinding,
-  assertEntityProviderActionResolutionReceipt,
-} from '../entity/entity-provider-action';
 import { normalizeEntityId } from '../entity/id';
 import { prepareSignedBatch } from '../hanko/batch';
 import { hashDisputeProofHankoPayload } from '../hanko/onchain-domain';
@@ -32,14 +28,14 @@ import { assertSealedJBatchBinding } from '../jurisdiction/sealed-batch';
 import { compareStableText, safeStringify } from '../protocol/serialization';
 import { resolveEntityProposerId } from '../runtime/entity-output-signer';
 import type { DisputeFinalizationEvidence, RuntimeState, JTx, RuntimeInput, RuntimeTx } from '../types';
-import { TOKEN_REGISTRATION_AMOUNT, defaultTokensForJurisdiction, getDefaultTokenSupply } from '../jurisdiction/default-tokens';
+import {
+  TOKEN_REGISTRATION_AMOUNT,
+  defaultTokensForJurisdiction,
+  getDefaultTokenSupply,
+} from '../jurisdiction/default-tokens';
 import { extractCanonicalDepositoryEventArgs, parseKnownDepositoryLog } from './depository-event-codec';
 import { classifyJAdapterFailure, makeJAdapterFailureResult } from './failure';
-import {
-  buildExternalTokenToReserveBatch,
-  computeAccountKey,
-  packTokenReference,
-} from './helpers';
+import { buildExternalTokenToReserveBatch, computeAccountKey, packTokenReference } from './helpers';
 import { parseReceiptLogsToJEvents } from './j-event-log-decoder';
 import { CANONICAL_J_EVENTS } from '../jurisdiction/event-catalog';
 import { DEV_CHAIN_IDS } from './index';
@@ -107,6 +103,7 @@ import {
 } from './watcher';
 import { shouldAuditCanonicalWatcherState } from './watcher-poll-policy';
 import { submitDebtEnforcement, submitMint } from './rpc-submit-basic';
+import { submitEntityProviderAction } from './rpc-submit-entity-provider';
 import {
   applyGasHeadroom,
   asFactoryRunner,
@@ -124,7 +121,6 @@ import {
   type FeeOverrides,
   type RpcReceipt,
   type TxOverrides,
-  type UntypedActionMethod,
   type UntypedNonPayableMethod,
 } from './rpc-boundary';
 
@@ -1286,10 +1282,8 @@ export async function createRpcAdapter(
       console.log(`📤 [JAdapter:rpc] submitTx type=${jTx.type} entity=${jTx.entityId.slice(-4)}`);
 
       if (jTx.type === 'debtEnforcement') {
-        return submitDebtEnforcement(
-          jTx,
-          (entityId, tokenId, maxIterations) =>
-            adapter.enforceDebts(entityId, tokenId, maxIterations),
+        return submitDebtEnforcement(jTx, (entityId, tokenId, maxIterations) =>
+          adapter.enforceDebts(entityId, tokenId, maxIterations),
         );
       }
 
@@ -1298,118 +1292,24 @@ export async function createRpcAdapter(
         jTx.type === 'entityProviderReleaseControlShares' ||
         jTx.type === 'entityProviderCancelAction'
       ) {
-        const intent = jTx.data.intent;
-        if (!jTx.data.hankoSignature) {
-          return {
-            success: false,
-            error: `ENTITY_PROVIDER_ACTION_CONSENSUS_HANKO_MISSING:${normalizeEntityId(jTx.entityId)}`,
-          };
-        }
-        try {
-          if (watchOnly && !signerPrivateKey) {
-            throw new Error('JADAPTER_WATCH_ONLY_SIGNER_REQUIRED:entityProviderAction');
-          }
-          const actionSigner =
-            watchOnly && signerPrivateKey
-              ? await signerForPrivateKey(`0x${Buffer.from(signerPrivateKey).toString('hex')}`)
-              : signer;
-          const submittingEntityProvider = entityProvider.connect(
-            actionSigner as unknown as Parameters<typeof entityProvider.connect>[0],
-          );
-          assertEntityProviderActionJTxBinding(jTx, {
+        return submitEntityProviderAction(
+          {
             chainId: config.chainId,
-            entityProviderAddress: await getLiveEntityProviderAddress(),
-            depositoryAddress: await getLiveDepositoryAddress(),
-          });
-          return await runSerializedBatch(async (): Promise<JSubmitResult> => {
-            const chainNonce = await entityProvider.entityActionNonces(intent.entityId);
-            if (chainNonce >= intent.actionNonce) {
-              const exactReceipt = await readEntityProviderActionReceipt(intent.entityId, intent.actionNonce);
-              if (!exactReceipt) {
-                throw new Error(
-                  `ENTITY_PROVIDER_ACTION_NONCE_CONSUMED_WITHOUT_RECEIPT:` +
-                    `${intent.entityId}:${intent.actionNonce.toString()}:${chainNonce.toString()}`,
-                );
-              }
-              assertEntityProviderActionResolutionReceipt(intent, exactReceipt);
-              return {
-                success: true,
-                txHash: exactReceipt.transactionHash,
-                blockNumber: exactReceipt.blockNumber,
-                events: [exactReceipt],
-              };
-            }
-            if (chainNonce + 1n !== intent.actionNonce) {
-              throw new Error(
-                `ENTITY_PROVIDER_ACTION_CHAIN_NONCE_MISMATCH:` +
-                  `${intent.actionNonce.toString()}:${(chainNonce + 1n).toString()}`,
-              );
-            }
-
-            const args: unknown[] =
-              intent.payload.kind === 'entityTransferTokens'
-                ? [
-                    intent.entityNumber,
-                    intent.payload.transfer.to,
-                    intent.payload.transfer.tokenId,
-                    intent.payload.transfer.amount,
-                    jTx.data.hankoSignature,
-                  ]
-                : intent.payload.kind === 'releaseControlShares'
-                  ? [
-                      intent.entityNumber,
-                      intent.payload.release.depositoryAddress,
-                      intent.payload.release.controlAmount,
-                      intent.payload.release.dividendAmount,
-                      intent.payload.release.purpose,
-                      jTx.data.hankoSignature,
-                    ]
-                  : [
-                      intent.entityNumber,
-                      intent.payload.cancel.cancelledActionHash,
-                      intent.payload.cancel.cancelledActionKind,
-                      jTx.data.hankoSignature,
-                    ];
-            const method = (intent.payload.kind === 'entityTransferTokens'
-              ? submittingEntityProvider.entityTransferTokens
-              : intent.payload.kind === 'releaseControlShares'
-                ? submittingEntityProvider.releaseControlShares
-                : submittingEntityProvider.cancelEntityProviderAction) as unknown as UntypedActionMethod;
-            try {
-              await method.staticCall(...args);
-            } catch (error) {
-              const classified = classifyJAdapterFailure(error);
-              return makeJAdapterFailureResult(error, {
-                category: classified.category === 'transient' ? 'transient' : 'terminal',
-                code: classified.code,
-                message: `EntityProvider action staticCall failed: ${classified.message}`,
-              });
-            }
-            const gasLimit = await estimateGasWithHeadroom(() => method.estimateGas(...args), 1_500_000n);
-            const receipt = await sendSignerTxWithExplicitNonce(
-              actionSigner,
-              `EntityProvider.${intent.payload.kind}`,
-              (nonce, feeOverrides) => method(...args, { gasLimit, nonce, ...feeOverrides }),
-            );
-            const events = parseReceiptLogsToJEvents(receipt, eventCarriers(depository, entityProvider));
-            const exact = events.filter(
-              event => event.name === 'EntityProviderActionExecuted' || event.name === 'EntityProviderActionCancelled',
-            );
-            if (exact.length !== 1) {
-              throw new Error(`ENTITY_PROVIDER_ACTION_RECEIPT_COUNT_INVALID:${exact.length}`);
-            }
-            const action = exact[0]!;
-            assertEntityProviderActionResolutionReceipt(intent, action);
-            return {
-              success: true,
-              txHash: receipt.hash,
-              blockNumber: receipt.blockNumber,
-              events,
-            };
-          });
-        } catch (error) {
-          return makeJAdapterFailureResult(error);
-        }
+            watchOnly,
+            signer,
+            entityProvider,
+            depository,
+            getDepositoryAddress: getLiveDepositoryAddress,
+            getEntityProviderAddress: getLiveEntityProviderAddress,
+            signerForPrivateKey,
+            readActionReceipt: readEntityProviderActionReceipt,
+            runSerialized: runSerializedBatch,
+            estimateGas: estimateGasWithHeadroom,
+            send: sendSignerTxWithExplicitNonce,
+          },
+          jTx,
+          signerPrivateKey,
+        );
       }
 
       if (jTx.type === 'batch') {
@@ -1720,11 +1620,8 @@ export async function createRpcAdapter(
       }
 
       if (jTx.type === 'mint') {
-        return submitMint(
-          jTx,
-          DEV_CHAIN_IDS.has(config.chainId),
-          (entityId, tokenId, amount) =>
-            adapter.debugFundReserves(entityId, tokenId, amount),
+        return submitMint(jTx, DEV_CHAIN_IDS.has(config.chainId), (entityId, tokenId, amount) =>
+          adapter.debugFundReserves(entityId, tokenId, amount),
         );
       }
 

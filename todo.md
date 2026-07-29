@@ -8,6 +8,27 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 
 ## 1. Core simplification and human auditability — P0/P1, owner-approved
 
+- [ ] Pass one final independent read-only audit on an immutable release
+  candidate SHA. The auditor must verify the current code and recent diffs
+  rather than trust comments or prior reports, run `check:src` and `check`,
+  and produce reproducible findings with execution path, file/line evidence,
+  measurement, minimal fix, deletion impact, tests and migration risk. Require
+  scored evidence for correctness, determinism, financial safety, recovery,
+  performance architecture, type safety, naming, folder ownership,
+  decoupling, human auditability and tests. Require an actual value-import
+  graph/SCC report, complexity ledger, call-site-proven delete list, ideal
+  owner tree with before/after edge counts, reviewable PR sequence and a
+  60–120 minute one-dollar reading path from external observation through
+  R→E→A, WAL and history. Mechanically record production LOC by owner, files
+  and functions over the ratchets, converter/representation count, unsafe
+  casts, suppressions, aliases, reverse edges, duplicate exports, reducer/root/
+  clone/WAL/view latency and critical transition coverage. Reject generic
+  framework advice, symmetry-only abstractions, speculative vulnerabilities,
+  folder churn without fewer edges, optimization without frame-path evidence,
+  and any finding that ignores xln's nonce, Hanko, LEFT tie-break, single
+  Runtime writer or durable WAL model. The release audit is complete only when
+  every accepted finding is closed or explicitly owner-deferred outside the
+  release scope; do not copy the report into a second permanent backlog.
 - [ ] Enforce the canonical Runtime → Entity → Account cascade documented at
   the top of `AGENTS.md` as the first architecture gate. Use the same
   `*Machine/*Replica`, `*State`, `*Input`, `*Tx`, `*Frame`, `*Output` and phase
