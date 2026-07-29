@@ -5,7 +5,6 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/index.ts';
 import { createExternalWalletApi } from '../api/external-wallet-api';
-import { createDirectRuntimeWsRoute, type DirectWebSocket } from '../networking/direct-runtime-bun';
 import { normalizeRuntimeId } from '../networking/runtime-id';
 import { bootstrapHub } from '../../scripts/bootstrap-hub';
 import { TOKEN_REGISTRATION_AMOUNT, defaultTokensForJurisdiction, getDefaultTokenSupply } from '../jurisdiction/default-tokens';
@@ -33,7 +32,6 @@ import { applyJEventsToEnv } from '../jadapter/watcher';
 import { drainJWatcherBacklog } from '../jadapter/backlog-drain';
 import { createRelayStore } from '../relay/store';
 import { safeStringify } from '../protocol/serialization';
-import { requireDeliveryDelivered } from '../protocol/payments/delivery-result';
 import { createStructuredLogger } from '../infra/logger';
 import { getPerfMs } from '../utils';
 import { handleMeshBootstrapLoopError } from './mesh-bootstrap-fail-fast';
@@ -58,7 +56,6 @@ import {
   resolveRuntimeAdapterAuthAudience,
   resolveRuntimeAdapterAuthSeed,
 } from '../radapter/auth';
-import { decodeRuntimeAdapterRequest } from '../radapter/codec';
 import {
   getJReplicaByJurisdictionRef,
   getJurisdictionIdentityRef,
@@ -66,12 +63,8 @@ import {
 } from '../jurisdiction/jurisdiction-runtime';
 import {
   attachRuntimeAdapterTicker,
-  closeInvalidRuntimeAdapterMessage,
   forgetRuntimeAdapterClient,
-  handleRuntimeAdapterMessage,
-  type RuntimeAdapterSocket,
 } from '../radapter/server';
-import { resolveRuntimeAdapterRead } from '../radapter/resolve';
 import { redactTokenBearingUrlForLog } from './runtime-import-log';
 import { handleLendingStateRequest } from '../server/lending';
 import { handleRuntimeActivityRequest } from '../server/activity-api';
@@ -88,23 +81,12 @@ import {
   main,
   processRuntime,
   enqueueRuntimeInput,
-  handleInboundP2PEntityInputs,
-  handleInboundReliableReceipt,
   startP2P,
   startJurisdictionWatchers,
   startRuntimeLoop,
   getEntityJAdapter,
-  readPersistedStorageFrameRecord,
-  readPersistedStorageHead,
-  readPersistedRuntimeActivityPage,
-  listPersistedCheckpointHeights,
-  loadEntityAccountDocFromStorageDb,
-  loadEntityStateFromStorageDb,
-  loadEntityViewPageFromStorageDb,
-  listPersistedEntityIdsAtHeight,
   registerEnvChangeCallback,
   registerRuntimeFrameCommitCallback,
-  submitCrossJurisdictionIntent,
   validateRuntimeInputAdmission,
 } from '../runtime.ts';
 import type { EntityInput, RuntimeState, JReplica } from '../types';
@@ -140,8 +122,14 @@ import {
   resolveSecondaryJurisdictions,
   type ResolvedMeshJurisdictionConfig,
 } from './mesh-jurisdictions';
-
-type HubServerSocket = DirectWebSocket & RuntimeAdapterSocket & { data?: { type?: string } };
+import {
+  createHubDirectRuntimeRoute,
+  createHubRadapterMessageHandler,
+  runtimeInputStatusUrl,
+  type DirectEntityInputDebug,
+  type DirectInputDebugState,
+  type HubServerSocket,
+} from './hub-runtime-transport';
 
 type Args = {
   name: string;
@@ -281,15 +269,6 @@ type LocalHealthResponse = {
     tokenCatalogCount: number;
   };
   timings: TimingMap;
-};
-
-type DirectEntityInputDebug = {
-  at: number;
-  fromRuntimeId: string;
-  entityIds: string[];
-  signerIds: string[];
-  txTypes: string[];
-  error?: string;
 };
 
 type JurisdictionConfig = ResolvedMeshJurisdictionConfig;
@@ -1008,6 +987,209 @@ const ensureOrderbook = async (env: RuntimeState, entityId: string, signerId: st
   });
   await settleRuntimeFor(env, 45);
   finishTiming('orderbook_init', startedAt);
+};
+
+type ImportedJurisdictionContracts = {
+  chainId?: number;
+  depositoryAddress?: string;
+  entityProviderAddress?: string;
+};
+
+const getImportedJurisdictionContracts = (
+  env: RuntimeState,
+  jurisdictionName: string,
+  fallback?: JurisdictionConfig['contracts'],
+): ImportedJurisdictionContracts => {
+  const replica = env.jReplicas?.get(jurisdictionName);
+  const depositoryAddress = String(
+    replica?.jadapter?.addresses?.depository ||
+      replica?.depositoryAddress ||
+      replica?.contracts?.depository ||
+      fallback?.depository ||
+      '',
+  ).trim();
+  const entityProviderAddress = String(
+    replica?.jadapter?.addresses?.entityProvider ||
+      replica?.entityProviderAddress ||
+      replica?.contracts?.entityProvider ||
+      fallback?.entityProvider ||
+      '',
+  ).trim();
+  const chainId = Number(replica?.chainId ?? replica?.jadapter?.chainId);
+  return {
+    ...(Number.isFinite(chainId) && chainId > 0
+      ? { chainId: Math.floor(chainId) }
+      : {}),
+    ...(depositoryAddress ? { depositoryAddress } : {}),
+    ...(entityProviderAddress ? { entityProviderAddress } : {}),
+  };
+};
+
+const importJurisdiction = async (
+  env: RuntimeState,
+  jurisdiction: JurisdictionConfig,
+): Promise<void> => {
+  enqueueRuntimeInput(env, {
+    runtimeTxs: [{
+      type: 'importJ',
+      data: {
+        name: jurisdiction.name,
+        chainId: jurisdiction.chainId,
+        ticker: 'XLN',
+        rpcs: [jurisdiction.rpc],
+        entityProviderDeploymentBlock:
+          jurisdiction.entityProviderDeploymentBlock,
+        blockTimeMs: requireJurisdictionBlockTimeMs(jurisdiction),
+        ...(jurisdiction.contracts
+          ? { contracts: jurisdiction.contracts }
+          : {}),
+      },
+    }],
+    entityInputs: [],
+  });
+  await processRuntime(env);
+  await processRuntime(env);
+};
+
+type HubBootstrapPosition = NonNullable<
+  NonNullable<Parameters<typeof bootstrapHub>[1]>['position']
+>;
+
+const bootstrapHubEntity = async (
+  env: RuntimeState,
+  input: {
+    signerId: string;
+    rpcUrl: string;
+    failureCode: string;
+    jurisdictionName?: string;
+    position?: HubBootstrapPosition;
+  },
+): Promise<NonNullable<Awaited<ReturnType<typeof bootstrapHub>>>> => {
+  const result = await bootstrapHub(env, {
+    name: resolvedArgs.name,
+    region: resolvedArgs.region,
+    signerId: input.signerId,
+    seed: resolvedArgs.seed,
+    routingFeePPM: 1,
+    baseFee: 0n,
+    swapTakerFeeBps: 1,
+    disputeAutoFinalizeMode:
+      resolvedArgs.name.toLowerCase() === 'h2' ? 'ignore' : 'auto',
+    rebalanceLiquidityFeeBps: 1n,
+    rebalanceTimeoutMs: 10 * 60 * 1000,
+    relayUrl: resolvedArgs.relayUrl,
+    rpcUrl: input.rpcUrl,
+    httpUrl: apiUrl,
+    port: resolvedArgs.apiPort,
+    ...(input.jurisdictionName
+      ? { jurisdictionName: input.jurisdictionName }
+      : {}),
+    ...(input.position ? { position: input.position } : {}),
+  });
+  if (!result?.entityId) throw new Error(input.failureCode);
+  return result;
+};
+
+const bootstrapHubJurisdictions = async (
+  env: RuntimeState,
+  primary: JurisdictionConfig,
+): Promise<{
+  primaryBootstrap: NonNullable<Awaited<ReturnType<typeof bootstrapHub>>>;
+  entries: HubBootstrapEntry[];
+}> => {
+  const primaryBootstrap = await bootstrapHubEntity(env, {
+    signerId: resolvedArgs.signerLabel,
+    rpcUrl: primary.rpc,
+    failureCode: 'HUB_BOOTSTRAP_FAILED',
+  });
+  const primaryContracts = getImportedJurisdictionContracts(
+    env,
+    primary.name,
+    primary.contracts,
+  );
+  const entries: HubBootstrapEntry[] = [{
+    entityId: primaryBootstrap.entityId,
+    signerId: primaryBootstrap.signerId,
+    name: resolvedArgs.name,
+    jurisdictionName: primary.name,
+    chainId: primaryContracts.chainId ?? primary.chainId,
+    ...(primaryContracts.depositoryAddress
+      ? { depositoryAddress: primaryContracts.depositoryAddress }
+      : {}),
+    ...(primaryContracts.entityProviderAddress
+      ? { entityProviderAddress: primaryContracts.entityProviderAddress }
+      : {}),
+    primary: true,
+  }];
+  await ensureOrderbook(
+    env,
+    primaryBootstrap.entityId,
+    primaryBootstrap.signerId,
+  );
+
+  for (const [index, configured] of resolveSecondaryJurisdictions(
+    primary.rpc,
+  ).entries()) {
+    const name = String(
+      configured.name || `Secondary ${index + 1}`,
+    ).trim();
+    if (!name) continue;
+    const jurisdiction = {
+      ...configured,
+      name,
+      rpc: resolveLocalApiUrl(configured.rpc),
+    };
+    if (!hasLiveJAdapterForJurisdiction(env, name)) {
+      nodeLog.debug('sibling_jurisdiction.importing', {
+        jurisdiction: name,
+        rpc: configured.rpc,
+      });
+      await importJurisdiction(env, jurisdiction);
+    } else {
+      nodeLog.debug('sibling_jurisdiction.reusing', { jurisdiction: name });
+    }
+    const previous = env.activeJurisdiction;
+    env.activeJurisdiction = name;
+    const sibling = await bootstrapHubEntity(env, {
+      signerId: `${resolvedArgs.signerLabel}:${name}`,
+      rpcUrl: jurisdiction.rpc,
+      jurisdictionName: name,
+      failureCode: `HUB_SIBLING_BOOTSTRAP_FAILED:${name}`,
+      position: {
+        x: 160 + index * 80,
+        y: 0,
+        z: 120,
+        jurisdiction: name,
+      },
+    });
+    env.activeJurisdiction = previous || primary.name;
+    const contracts = getImportedJurisdictionContracts(
+      env,
+      name,
+      jurisdiction.contracts,
+    );
+    entries.push({
+      entityId: sibling.entityId,
+      signerId: sibling.signerId,
+      name: resolvedArgs.name,
+      jurisdictionName: name,
+      chainId: contracts.chainId ?? jurisdiction.chainId,
+      ...(contracts.depositoryAddress
+        ? { depositoryAddress: contracts.depositoryAddress }
+        : {}),
+      ...(contracts.entityProviderAddress
+        ? { entityProviderAddress: contracts.entityProviderAddress }
+        : {}),
+      primary: false,
+    });
+    await ensureOrderbook(env, sibling.entityId, sibling.signerId);
+    nodeLog.debug('sibling_jurisdiction.ready', {
+      jurisdiction: name,
+      entityId: sibling.entityId,
+    });
+  }
+  env.activeJurisdiction = primary.name;
+  return { primaryBootstrap, entries };
 };
 
 const tokenCatalogsByEntityId = new Map<string, JTokenInfo[]>();
@@ -1960,6 +2142,327 @@ const handleHubJurisdictionsRequest = (
       );
 };
 
+const currentRuntimeHeight = (env: RuntimeState | null): number =>
+  Math.max(0, Math.floor(Number(env?.height ?? 0)));
+
+type HubHttpContext = {
+  env: RuntimeState;
+  hubBootstraps: HubBootstrapEntry[];
+  externalWalletApi: ReturnType<typeof createExternalWalletApi>;
+  faucetRelayStore: ReturnType<typeof createRelayStore>;
+  runtimeIngressReceipts: ReturnType<
+    typeof createRuntimeIngressReceiptStore
+  >;
+  getBootstrap: () => { entityId: string; signerId: string } | null;
+  getJAdapter: () => JAdapter | null;
+  ensureTokenCatalog: () => Promise<JTokenInfo[]>;
+  getDirectInputDebug: () => {
+    lastSeen: DirectEntityInputDebug | null;
+    lastError: DirectEntityInputDebug | null;
+  };
+  handleStatus: (url: URL, operatorAuthorized: boolean) => Response | null;
+  handleControl: (request: Request, url: URL) => Promise<Response | null>;
+};
+
+const handleHubHttpRequest = async (
+  context: HubHttpContext,
+  request: Request,
+  url: URL,
+  operatorAuthorized: boolean,
+): Promise<Response> => {
+  if (requiresLocalNodeOperator(url) && !operatorAuthorized) {
+    return new Response(
+      safeStringify({ error: 'Operator access required' }),
+      { status: 403, headers: JSON_HEADERS },
+    );
+  }
+  const statusResponse = context.handleStatus(url, operatorAuthorized);
+  if (statusResponse) return statusResponse;
+  const accountStatusResponse = handleAccountStatusRequest(
+    context.env,
+    request,
+    url,
+    context.getBootstrap()?.entityId ?? null,
+    context.getDirectInputDebug(),
+  );
+  if (accountStatusResponse) return accountStatusResponse;
+  const controlResponse = await context.handleControl(request, url);
+  if (controlResponse) return controlResponse;
+  const jurisdictionsResponse = handleHubJurisdictionsRequest(
+    context.env,
+    url,
+  );
+  if (jurisdictionsResponse) return jurisdictionsResponse;
+
+  const bootstrap = context.getBootstrap();
+  const jadapter = context.getJAdapter();
+  if (!bootstrap || !jadapter) {
+    return new Response(safeStringify({ error: 'HUB_NOT_READY' }), {
+      status: 503,
+      headers: JSON_HEADERS,
+    });
+  }
+  const marketResponse = handleMarketSnapshotsRequest(
+    context.env,
+    request,
+    url,
+    bootstrap.entityId,
+  );
+  if (marketResponse) return marketResponse;
+  if (url.pathname === '/api/lending/state' && request.method === 'GET') {
+    return handleLendingStateRequest({
+      req: request,
+      env: context.env,
+      headers: JSON_HEADERS,
+      activeHubEntityIds: context.hubBootstraps.map(entry => entry.entityId),
+    });
+  }
+  if (url.pathname === '/api/tokens' && request.method === 'GET') {
+    return context.externalWalletApi.handleTokens();
+  }
+  if (
+    url.pathname === '/api/external-wallet/snapshot' &&
+    request.method === 'POST'
+  ) {
+    return context.externalWalletApi.handleWalletSnapshot(request);
+  }
+  if (url.pathname === '/api/faucet/erc20' && request.method === 'POST') {
+    return context.externalWalletApi.handleErc20Faucet(request);
+  }
+  if (url.pathname === '/api/faucet/gas' && request.method === 'POST') {
+    return context.externalWalletApi.handleGasFaucet(request);
+  }
+  if (url.pathname === '/api/faucet/reserve' && request.method === 'POST') {
+    return handleReserveFaucet({
+      req: request,
+      env: context.env,
+      headers: JSON_HEADERS,
+      relayStore: { activeHubEntityIds: [bootstrap.entityId] },
+      getJAdapter: () => jadapter,
+      ensureTokenCatalog: context.ensureTokenCatalog,
+      validateRuntimeInputAdmission,
+      enqueueRuntimeInput,
+    });
+  }
+  if (url.pathname === '/api/faucet/offchain' && request.method === 'POST') {
+    context.faucetRelayStore.activeHubEntityIds =
+      context.hubBootstraps.map(entry => entry.entityId);
+    return handleOffchainFaucet({
+      req: request,
+      env: context.env,
+      headers: JSON_HEADERS,
+      relayStore: context.faucetRelayStore,
+      enqueueRuntimeInput,
+      validateRuntimeInputAdmission,
+      registerReceipt: receipt =>
+        context.runtimeIngressReceipts.register(receipt),
+      getCurrentRuntimeHeight: currentRuntimeHeight,
+      buildRuntimeInputStatusUrl: runtimeInputStatusUrl,
+    });
+  }
+  const statusMatch = url.pathname.match(
+    /^\/api\/control\/runtime-input\/([^/]+)\/status$/,
+  );
+  if (statusMatch && request.method === 'GET') {
+    return handleRuntimeInputStatus(
+      decodeURIComponent(statusMatch[1] || ''),
+      JSON_HEADERS,
+      context.env,
+      {
+        receipts: context.runtimeIngressReceipts,
+        getCurrentRuntimeHeight: currentRuntimeHeight,
+      },
+    );
+  }
+  const debugReserveResponse = await handleDebugReserveRequest(
+    context.env,
+    request,
+    url,
+  );
+  if (debugReserveResponse) return debugReserveResponse;
+  if (
+    url.pathname === '/api/debug/activity' &&
+    request.method === 'GET'
+  ) {
+    return handleRuntimeActivityRequest(context.env, url, JSON_HEADERS);
+  }
+  return new Response(safeStringify({ error: 'Not found' }), {
+    status: 404,
+    headers: JSON_HEADERS,
+  });
+};
+
+type MeshBootstrapMilestones = {
+  gossipReady: boolean;
+  accountsReady: boolean;
+  creditReady: boolean;
+  reserveReady: boolean;
+};
+
+type HubMeshBootstrapInput = {
+  env: RuntimeState;
+  bootstrap: { entityId: string; signerId: string };
+  hubBootstraps: HubBootstrapEntry[];
+  jurisdiction: JurisdictionConfig;
+  tokenCatalog: JTokenInfo[];
+  milestones: MeshBootstrapMilestones;
+  totalStartedAt: number;
+  markProgress: (step: string) => void;
+  ensureFaucetReady: () => Promise<void>;
+};
+
+const ensureHubMeshReserves = async (
+  input: HubMeshBootstrapInput,
+): Promise<boolean> => {
+  let peerReady = true;
+  if (resolvedArgs.deployTokens) {
+    input.markProgress('peer-reserve-funding');
+    const localIds = new Set(
+      input.hubBootstraps.map(entry => normalizeEntityId(entry.entityId)),
+    );
+    const peerProfiles = readVisibleHubProfiles(input.env, '').filter(
+      profile => !localIds.has(normalizeEntityId(profile.entityId)),
+    );
+    const expected =
+      Math.max(0, resolvedArgs.meshHubNames.length - 1) *
+      input.hubBootstraps.length;
+    peerReady = peerProfiles.length >= expected;
+    if (peerReady) {
+      await ensurePeerBootstrapReserves(
+        input.env,
+        peerProfiles,
+        input.tokenCatalog,
+        step => input.markProgress(`peer-reserve:${step}`),
+      );
+    }
+  }
+  input.markProgress('local-reserve-funding');
+  const health = await ensureHubBootstrapReserves(
+    input.env,
+    input.hubBootstraps,
+    step => input.markProgress(`local-reserve:${step}`),
+  );
+  return health.targetMet === true && peerReady;
+};
+
+const advanceHubMeshBootstrap = async (
+  input: HubMeshBootstrapInput,
+): Promise<void> => {
+  const jurisdiction =
+    getEntityJurisdiction(input.env, input.bootstrap.entityId) ||
+    getEntityJurisdictionName(input.env, input.bootstrap.entityId) ||
+    input.jurisdiction;
+  const visibleProfiles = readVisibleHubProfiles(input.env, jurisdiction);
+  const requiredNames = new Set(
+    resolvedArgs.meshHubNames
+      .map(name => name.trim().toLowerCase())
+      .filter(Boolean),
+  );
+  const requiredProfiles = visibleProfiles.filter(profile => {
+    const name =
+      String(profile.hubName || profile.name || '')
+        .trim()
+        .split(/\s+/)[0]
+        ?.toLowerCase() || '';
+    return requiredNames.has(name);
+  });
+  if (
+    !input.milestones.gossipReady &&
+    requiredProfiles.length === resolvedArgs.meshHubNames.length
+  ) {
+    finishTiming(
+      'gossip_ready',
+      startedAtFor('gossip_ready') ?? startTiming('gossip_ready'),
+    );
+    input.milestones.gossipReady = true;
+  } else if (!input.milestones.gossipReady) {
+    startTiming('gossip_ready');
+  }
+  if (requiredProfiles.length !== resolvedArgs.meshHubNames.length) return;
+
+  const peers = requiredProfiles.filter(
+    profile => profile.entityId !== input.bootstrap.entityId.toLowerCase(),
+  );
+  input.markProgress('direct-peers');
+  if (!directHubPeersReady(input.env, peers)) return;
+  const { openInputs, creditInputs } = planMeshBootstrapInputs(
+    input.env,
+    input.bootstrap,
+    input.hubBootstraps,
+    peers,
+    supportPeerIdentities,
+  );
+  if (openInputs.length > 0) {
+    input.markProgress(`open-accounts:${openInputs.length}`);
+    startTiming('mesh_accounts');
+    enqueueRuntimeInput(input.env, {
+      runtimeTxs: [],
+      entityInputs: openInputs,
+    });
+    await settleRuntimeFor(input.env, 35);
+  }
+  const accountReady =
+    peers.length === Math.max(0, resolvedArgs.meshHubNames.length - 1) &&
+    peers.every(peer =>
+      hasAccount(input.env, input.bootstrap.entityId, peer.entityId) &&
+      DEFAULT_ACCOUNT_TOKEN_IDS.every(tokenId =>
+        Boolean(
+          getAccountState(
+            input.env,
+            input.bootstrap.entityId,
+            peer.entityId,
+          )?.deltas.get(tokenId),
+        ),
+      ),
+    );
+  if (accountReady && !input.milestones.accountsReady) {
+    finishTiming(
+      'mesh_accounts',
+      startedAtFor('mesh_accounts') ?? startTiming('mesh_accounts'),
+    );
+    input.milestones.accountsReady = true;
+  }
+  if (creditInputs.length > 0) {
+    input.markProgress(`extend-credit:${creditInputs.length}`);
+    startTiming('mesh_credit');
+    enqueueRuntimeInput(input.env, {
+      runtimeTxs: [],
+      entityInputs: creditInputs,
+    });
+    await settleRuntimeFor(input.env, 45);
+  }
+  const creditReady =
+    peers.length === Math.max(0, resolvedArgs.meshHubNames.length - 1) &&
+    peers.every(peer =>
+      hasPairMutualCredits(
+        input.env,
+        input.bootstrap.entityId,
+        peer.entityId,
+        DEFAULT_ACCOUNT_TOKEN_IDS,
+        getBootstrapCreditAmount,
+      ),
+    );
+  if (!creditReady) return;
+  if (!input.milestones.creditReady) {
+    finishTiming(
+      'mesh_credit',
+      startedAtFor('mesh_credit') ?? startTiming('mesh_credit'),
+    );
+    input.milestones.creditReady = true;
+  }
+  if (!input.milestones.reserveReady) {
+    input.milestones.reserveReady = await ensureHubMeshReserves(input);
+  }
+  if (
+    input.milestones.reserveReady &&
+    (timings['mesh_ready_total']?.ms ?? null) === null
+  ) {
+    input.markProgress('external-faucet-provision');
+    await input.ensureFaucetReady();
+    finishTiming('mesh_ready_total', input.totalStartedAt);
+  }
+};
+
 const run = async (): Promise<void> => {
   if (resolvedArgs.dbPath) {
     process.env['XLN_DB_PATH'] = resolvedArgs.dbPath;
@@ -1986,10 +2489,6 @@ const run = async (): Promise<void> => {
   }
   const runtimeIngressReceipts = createRuntimeIngressReceiptStore();
   const faucetRelayStore = createRelayStore(`${resolvedArgs.name}-faucet`);
-  const currentRuntimeHeight = (targetEnv: RuntimeState | null): number =>
-    Math.max(0, Math.floor(Number(targetEnv?.height ?? 0)));
-  const runtimeInputStatusUrl = (id: string): string =>
-    `/api/control/runtime-input/${encodeURIComponent(id)}/status`;
   registerRuntimeFrameCommitCallback(env, ({ height, runtimeInput }) => {
     runtimeIngressReceipts.observeRuntimeInput(height, runtimeInput);
   });
@@ -1998,44 +2497,6 @@ const run = async (): Promise<void> => {
 
   let bootstrap: { entityId: string; signerId: string } | null = null;
   const hubBootstraps: HubBootstrapEntry[] = [];
-  const getImportedJurisdictionContracts = (
-    jurisdictionName: string,
-    fallback?: JurisdictionConfig['contracts'],
-  ): {
-    chainId?: number;
-    depositoryAddress?: string;
-    entityProviderAddress?: string;
-  } => {
-    const replica = env.jReplicas?.get(jurisdictionName) as
-      | {
-          chainId?: number;
-          depositoryAddress?: string;
-          entityProviderAddress?: string;
-          contracts?: { depository?: string; entityProvider?: string };
-          jadapter?: { chainId?: number; addresses?: { depository?: string; entityProvider?: string } };
-        }
-      | undefined;
-    const depositoryAddress = String(
-      replica?.jadapter?.addresses?.depository ||
-      replica?.depositoryAddress ||
-      replica?.contracts?.depository ||
-      fallback?.depository ||
-      '',
-    ).trim();
-    const entityProviderAddress = String(
-      replica?.jadapter?.addresses?.entityProvider ||
-      replica?.entityProviderAddress ||
-      replica?.contracts?.entityProvider ||
-      fallback?.entityProvider ||
-      '',
-    ).trim();
-    const chainId = Number(replica?.chainId ?? replica?.jadapter?.chainId);
-    return {
-      ...(Number.isFinite(chainId) && chainId > 0 ? { chainId: Math.floor(chainId) } : {}),
-      ...(depositoryAddress ? { depositoryAddress } : {}),
-      ...(entityProviderAddress ? { entityProviderAddress } : {}),
-    };
-  };
   let activeJAdapter: JAdapter | null = null;
   let activeTokenCatalog: JTokenInfo[] = [];
   let p2p: ReturnType<typeof startP2P>;
@@ -2066,8 +2527,10 @@ const run = async (): Promise<void> => {
     }
   };
 
-  let lastDirectEntityInput: DirectEntityInputDebug | null = null;
-  let lastDirectEntityInputError: DirectEntityInputDebug | null = null;
+  const directInputDebug: DirectInputDebugState = {
+    lastSeen: null,
+    lastError: null,
+  };
 
   const externalWalletApi = createExternalWalletApi({
     getJAdapter: () => activeJAdapter,
@@ -2095,83 +2558,17 @@ const run = async (): Promise<void> => {
     fundBrowserVmWallet: async () => false,
   });
 
-  const directRuntimeWs = createDirectRuntimeWsRoute({
-    runtimeId: String(env.runtimeId || ''),
-    runtimeSeed: resolvedArgs.seed,
-    onRecoveryBundleRequest: async (_from, lookupKey) =>
-      resolveRuntimeAdapterRead({ env }, `recovery/bundles/${encodeURIComponent(lookupKey)}`),
-    onEntityInputs: async (from, envelope, ingressTimestamp) => {
-      if (!externalIngressReady) throw new Error('RUNTIME_STARTUP_J_CATCHUP_PENDING');
-      const debugEntry: DirectEntityInputDebug = {
-        at: Date.now(),
-        fromRuntimeId: String(from || ''),
-        entityIds: envelope.entityInputs.map(input => String(input.entityId || '')),
-        signerIds: envelope.entityInputs.map(input => String(input.signerId || '')),
-        txTypes: envelope.entityInputs.flatMap(input => (input.entityTxs || []).map(tx => String(tx?.type || ''))),
-      };
-      lastDirectEntityInput = debugEntry;
-      try {
-        const inbound = handleInboundP2PEntityInputs(env, from, envelope, ingressTimestamp);
-        for (const receipt of inbound.receipts) {
-          requireDeliveryDelivered(
-            directRuntimeWs.sendReliableReceiptDelivery(from, receipt),
-            delivery => `DIRECT_RELIABLE_RECEIPT_NOT_DELIVERED:${delivery.code}`,
-          );
-        }
-      } catch (error) {
-        lastDirectEntityInputError = {
-          ...debugEntry,
-          error: error instanceof Error ? error.message : String(error),
-        };
-        throw error;
-      }
-    },
-    onReliableReceipt: (from, receipt) => {
-      if (!externalIngressReady) throw new Error('RUNTIME_STARTUP_J_CATCHUP_PENDING');
-      handleInboundReliableReceipt(env, from, receipt);
-    },
-  });
-  env.runtimeState = env.runtimeState ?? {};
-  // Entity inputs and their reliable receipts must share the authenticated
-  // direct websocket whenever the peer is connected. Apart from avoiding a
-  // relay round-trip, this preserves send order: the useful account ACK + next
-  // proposal is queued before the transport receipt. output-routing retains
-  // reliable inputs until their durable receipt and falls back to P2P when the
-  // direct peer is unavailable, so this is not a best-effort-only path.
-  env.runtimeState.directEntityInputsDispatch = (targetRuntimeId, envelope, ingressTimestamp) =>
-    directRuntimeWs.sendEntityInputsDelivery(targetRuntimeId, envelope, ingressTimestamp);
-  env.runtimeState.directReliableReceiptDispatch = (targetRuntimeId, receipt) =>
-    directRuntimeWs.sendReliableReceiptDelivery(targetRuntimeId, receipt);
-  const handleRadapterWsMessage = (ws: HubServerSocket, raw: string | Buffer | ArrayBuffer): void => {
-    let msg: import('../radapter/types').RuntimeAdapterRequest;
-    try {
-      msg = decodeRuntimeAdapterRequest(raw);
-    } catch (error) {
-      closeInvalidRuntimeAdapterMessage(ws, error);
-      return;
-    }
-	    Promise.resolve(handleRuntimeAdapterMessage(ws, msg, env, {
-	      enqueueRuntimeInput,
-	      submitCrossJurisdictionIntent: async (targetEnv, route) => {
-	        await submitCrossJurisdictionIntent(targetEnv, route);
-	      },
-	      validateRuntimeInputAdmission,
-	      registerReceipt: (receipt) => runtimeIngressReceipts.register(receipt),
-	      readReceipt: (id) => runtimeIngressReceipts.get(id),
-	      buildRuntimeInputStatusUrl: runtimeInputStatusUrl,
-	      isMutatingIngressReady: () => externalIngressReady,
-	      readHead: (targetEnv) => readPersistedStorageHead(targetEnv),
-      readFrame: (targetEnv, height) => readPersistedStorageFrameRecord(targetEnv, height),
-      listCheckpoints: (targetEnv) => listPersistedCheckpointHeights(targetEnv),
-      loadEntityState: (targetEnv, entityId, height) => loadEntityStateFromStorageDb(targetEnv, entityId, height),
-      loadEntityAccountDoc: (targetEnv, entityId, counterpartyId, height) => loadEntityAccountDocFromStorageDb(targetEnv, entityId, counterpartyId, height),
-      loadEntityViewPage: (targetEnv, entityId, height, query) => loadEntityViewPageFromStorageDb(targetEnv, entityId, height, query),
-      listEntityIdsAtHeight: (targetEnv, height) => listPersistedEntityIdsAtHeight(targetEnv, height),
-      readActivityPage: (targetEnv, opts) => readPersistedRuntimeActivityPage(targetEnv, opts),
-    })).catch(error => {
-      ws.send(safeStringify({ type: 'error', error: `Runtime adapter failed: ${(error as Error).message}` }));
-    });
-  };
+  const directRuntimeWs = createHubDirectRuntimeRoute(
+    env,
+    resolvedArgs.seed,
+    () => externalIngressReady,
+    directInputDebug,
+  );
+  const handleRadapterWsMessage = createHubRadapterMessageHandler(
+    env,
+    runtimeIngressReceipts,
+    () => externalIngressReady,
+  );
 
   const httpDrain = createHttpDrainTracker();
   const handleHubControlRequest = createHubControlRequestHandler({
@@ -2226,6 +2623,28 @@ const run = async (): Promise<void> => {
       { headers: JSON_HEADERS },
     );
   };
+  const hubHttpContext: HubHttpContext = {
+    env,
+    hubBootstraps,
+    externalWalletApi,
+    faucetRelayStore,
+    runtimeIngressReceipts,
+    getBootstrap: () => bootstrap,
+    getJAdapter: () => activeJAdapter,
+    ensureTokenCatalog: async () => {
+      if (!activeJAdapter) throw new Error('J-adapter not initialized');
+      if (activeTokenCatalog.length === 0) {
+        activeTokenCatalog = await waitForTokenCatalog(activeJAdapter);
+      }
+      return activeTokenCatalog;
+    },
+    getDirectInputDebug: () => ({
+      lastSeen: directInputDebug.lastSeen,
+      lastError: directInputDebug.lastError,
+    }),
+    handleStatus: handleHubStatusRequest,
+    handleControl: handleHubControlRequest,
+  };
   const server = Bun.serve({
     hostname: resolvedArgs.apiHost,
     port: resolvedArgs.apiPort,
@@ -2235,7 +2654,6 @@ const run = async (): Promise<void> => {
       try {
 	      const url = new URL(request.url);
 	      const pathname = url.pathname;
-	      const headers = JSON_HEADERS;
 	      const operatorAuthorized = isLocalOperatorRequest(request, resolveSocketPeerAddress(serverRef, request));
 
 	      if (request.headers.get('upgrade') === 'websocket' && pathname === '/rpc') {
@@ -2247,123 +2665,12 @@ const run = async (): Promise<void> => {
 	      const directUpgrade = directRuntimeWs.maybeUpgrade(request, serverRef);
 	      if (directUpgrade.handled) return directUpgrade.response;
 
-      if (requiresLocalNodeOperator(url) && !operatorAuthorized) {
-        return new Response(safeStringify({ error: 'Operator access required' }), {
-          status: 403,
-          headers,
-        });
-      }
-
-      const statusResponse = handleHubStatusRequest(url, operatorAuthorized);
-      if (statusResponse) return statusResponse;
-
-      const accountStatusResponse = handleAccountStatusRequest(
-        env,
-        request,
-        url,
-        bootstrap?.entityId ?? null,
-        {
-          lastSeen: lastDirectEntityInput,
-          lastError: lastDirectEntityInputError,
-        },
-      );
-      if (accountStatusResponse) return accountStatusResponse;
-
-      const controlResponse = await handleHubControlRequest(request, url);
-      if (controlResponse) return controlResponse;
-      const jurisdictionsResponse = handleHubJurisdictionsRequest(env, url);
-      if (jurisdictionsResponse) return jurisdictionsResponse;
-
-      if (!bootstrap || !activeJAdapter) {
-        return new Response(safeStringify({ error: 'HUB_NOT_READY' }), { status: 503, headers });
-      }
-      const readyBootstrap = bootstrap;
-      const readyJAdapter = activeJAdapter;
-
-      const marketSnapshotsResponse = handleMarketSnapshotsRequest(
-        env,
-        request,
-        url,
-        readyBootstrap.entityId,
-      );
-      if (marketSnapshotsResponse) return marketSnapshotsResponse;
-
-      if (pathname === '/api/lending/state' && request.method === 'GET') {
-        return handleLendingStateRequest({
-          req: request,
-          env,
-          headers,
-          activeHubEntityIds: hubBootstraps.map(entry => entry.entityId),
-        });
-      }
-      if (pathname === '/api/tokens' && request.method === 'GET') {
-        return await externalWalletApi.handleTokens();
-      }
-
-      if (pathname === '/api/external-wallet/snapshot' && request.method === 'POST') {
-        return await externalWalletApi.handleWalletSnapshot(request);
-      }
-
-      if (pathname === '/api/faucet/erc20' && request.method === 'POST') {
-        return await externalWalletApi.handleErc20Faucet(request);
-      }
-
-      if (pathname === '/api/faucet/gas' && request.method === 'POST') {
-        return await externalWalletApi.handleGasFaucet(request);
-      }
-
-      if (pathname === '/api/faucet/reserve' && request.method === 'POST') {
-        return handleReserveFaucet({
-          req: request,
-          env,
-          headers,
-          relayStore: { activeHubEntityIds: [readyBootstrap.entityId] },
-          getJAdapter: () => readyJAdapter,
-          ensureTokenCatalog: async () => {
-            if (activeTokenCatalog.length > 0) return activeTokenCatalog;
-            activeTokenCatalog = await waitForTokenCatalog(readyJAdapter);
-            return activeTokenCatalog;
-          },
-          validateRuntimeInputAdmission, enqueueRuntimeInput,
-        });
-      }
-
-      if (pathname === '/api/faucet/offchain' && request.method === 'POST') {
-        faucetRelayStore.activeHubEntityIds = hubBootstraps.map(entry => entry.entityId);
-        return handleOffchainFaucet({
-          req: request,
-          env,
-          headers,
-          relayStore: faucetRelayStore,
-          enqueueRuntimeInput,
-          validateRuntimeInputAdmission,
-          registerReceipt: (receipt) => runtimeIngressReceipts.register(receipt),
-          getCurrentRuntimeHeight: currentRuntimeHeight,
-          buildRuntimeInputStatusUrl: runtimeInputStatusUrl,
-        });
-      }
-
-      const runtimeInputStatusMatch = pathname.match(/^\/api\/control\/runtime-input\/([^/]+)\/status$/);
-      if (runtimeInputStatusMatch && request.method === 'GET') {
-        const receiptId = decodeURIComponent(runtimeInputStatusMatch[1] || '');
-        return handleRuntimeInputStatus(receiptId, headers, env, {
-          receipts: runtimeIngressReceipts,
-          getCurrentRuntimeHeight: currentRuntimeHeight,
-        });
-      }
-
-      const debugReserveResponse = await handleDebugReserveRequest(
-        env,
-        request,
-        url,
-      );
-      if (debugReserveResponse) return debugReserveResponse;
-
-      if (pathname === '/api/debug/activity' && request.method === 'GET') {
-        return await handleRuntimeActivityRequest(env, url, headers);
-      }
-
-      return new Response(safeStringify({ error: 'Not found' }), { status: 404, headers });
+        return await handleHubHttpRequest(
+          hubHttpContext,
+          request,
+          url,
+          operatorAuthorized,
+        );
       } finally {
         releaseHttp();
       }
@@ -2395,132 +2702,16 @@ const run = async (): Promise<void> => {
 
   const importJStartedAt = startTiming('import_j');
   const jurisdiction = await prepareJurisdictionForImport(resolveJurisdictionConfig(resolvedArgs.rpcUrl));
-  enqueueRuntimeInput(env, {
-    runtimeTxs: [{
-      type: 'importJ',
-      data: {
-        name: jurisdiction.name,
-        chainId: jurisdiction.chainId,
-        ticker: 'XLN',
-        rpcs: [jurisdiction.rpc],
-        entityProviderDeploymentBlock: jurisdiction.entityProviderDeploymentBlock,
-        blockTimeMs: requireJurisdictionBlockTimeMs(jurisdiction),
-        ...(jurisdiction.contracts ? { contracts: jurisdiction.contracts } : {}),
-      },
-    }],
-    entityInputs: [],
-  });
-  await processRuntime(env);
-  await processRuntime(env);
+  await importJurisdiction(env, jurisdiction);
   finishTiming('import_j', importJStartedAt);
 
   const hubBootstrapStartedAt = startTiming('hub_bootstrap');
-  bootstrap = await bootstrapHub(env, {
-    name: resolvedArgs.name,
-    region: resolvedArgs.region,
-    signerId: resolvedArgs.signerLabel,
-    seed: resolvedArgs.seed,
-    routingFeePPM: 1,
-    baseFee: 0n,
-    swapTakerFeeBps: 1,
-    disputeAutoFinalizeMode: resolvedArgs.name.toLowerCase() === 'h2' ? 'ignore' : 'auto',
-    rebalanceLiquidityFeeBps: 1n,
-    rebalanceTimeoutMs: 10 * 60 * 1000,
-    relayUrl: resolvedArgs.relayUrl,
-    rpcUrl: jurisdiction.rpc,
-    httpUrl: apiUrl,
-    port: resolvedArgs.apiPort,
-  });
-  if (!bootstrap?.entityId) throw new Error('HUB_BOOTSTRAP_FAILED');
-  const primaryContracts = getImportedJurisdictionContracts(jurisdiction.name, jurisdiction.contracts);
-  hubBootstraps.push({
-    entityId: bootstrap.entityId,
-    signerId: bootstrap.signerId,
-    name: resolvedArgs.name,
-    jurisdictionName: jurisdiction.name,
-    chainId: primaryContracts.chainId ?? jurisdiction.chainId,
-    ...(primaryContracts.depositoryAddress ? { depositoryAddress: primaryContracts.depositoryAddress } : {}),
-    ...(primaryContracts.entityProviderAddress ? { entityProviderAddress: primaryContracts.entityProviderAddress } : {}),
-    primary: true,
-  });
+  const bootstrapped = await bootstrapHubJurisdictions(env, jurisdiction);
+  bootstrap = bootstrapped.primaryBootstrap;
+  hubBootstraps.push(...bootstrapped.entries);
   finishTiming('hub_bootstrap', hubBootstrapStartedAt);
 
-  await ensureOrderbook(env, bootstrap.entityId, bootstrap.signerId);
-
   const primaryJurisdictionName = jurisdiction.name;
-  const secondaryJurisdictions = resolveSecondaryJurisdictions(jurisdiction.rpc);
-  for (const [index, secondary] of secondaryJurisdictions.entries()) {
-    const secondaryName = String(secondary.name || `Secondary ${index + 1}`).trim();
-    if (!secondaryName) continue;
-    const secondaryRpcUrl = resolveLocalApiUrl(secondary.rpc);
-    if (!hasLiveJAdapterForJurisdiction(env, secondaryName)) {
-      nodeLog.debug('sibling_jurisdiction.importing', {
-        jurisdiction: secondaryName,
-        rpc: secondary.rpc,
-      });
-      enqueueRuntimeInput(env, {
-        runtimeTxs: [{
-          type: 'importJ',
-          data: {
-            name: secondaryName,
-            chainId: secondary.chainId,
-            ticker: 'XLN',
-            rpcs: [secondaryRpcUrl],
-            entityProviderDeploymentBlock: secondary.entityProviderDeploymentBlock,
-            blockTimeMs: requireJurisdictionBlockTimeMs(secondary),
-            ...(secondary.contracts ? { contracts: secondary.contracts } : {}),
-          },
-        }],
-        entityInputs: [],
-      });
-      await processRuntime(env);
-      await processRuntime(env);
-    } else {
-      nodeLog.debug('sibling_jurisdiction.reusing', {
-        jurisdiction: secondaryName,
-      });
-    }
-
-    const priorActiveJurisdiction = env.activeJurisdiction;
-    env.activeJurisdiction = secondaryName;
-    const sibling = await bootstrapHub(env, {
-      name: resolvedArgs.name,
-      region: resolvedArgs.region,
-      signerId: `${resolvedArgs.signerLabel}:${secondaryName}`,
-      seed: resolvedArgs.seed,
-      routingFeePPM: 1,
-      baseFee: 0n,
-      swapTakerFeeBps: 1,
-      disputeAutoFinalizeMode: resolvedArgs.name.toLowerCase() === 'h2' ? 'ignore' : 'auto',
-      rebalanceLiquidityFeeBps: 1n,
-      rebalanceTimeoutMs: 10 * 60 * 1000,
-      relayUrl: resolvedArgs.relayUrl,
-      rpcUrl: secondaryRpcUrl,
-      httpUrl: apiUrl,
-      port: resolvedArgs.apiPort,
-      jurisdictionName: secondaryName,
-      position: { x: 160 + index * 80, y: 0, z: 120, jurisdiction: secondaryName },
-    });
-    env.activeJurisdiction = priorActiveJurisdiction || primaryJurisdictionName;
-    if (!sibling?.entityId) throw new Error(`HUB_SIBLING_BOOTSTRAP_FAILED: ${secondaryName}`);
-    const secondaryContracts = getImportedJurisdictionContracts(secondaryName, secondary.contracts);
-    hubBootstraps.push({
-      entityId: sibling.entityId,
-      signerId: sibling.signerId,
-      name: resolvedArgs.name,
-      jurisdictionName: secondaryName,
-      chainId: secondaryContracts.chainId ?? secondary.chainId,
-      ...(secondaryContracts.depositoryAddress ? { depositoryAddress: secondaryContracts.depositoryAddress } : {}),
-      ...(secondaryContracts.entityProviderAddress ? { entityProviderAddress: secondaryContracts.entityProviderAddress } : {}),
-      primary: false,
-    });
-    await ensureOrderbook(env, sibling.entityId, sibling.signerId);
-    nodeLog.debug('sibling_jurisdiction.ready', {
-      jurisdiction: secondaryName,
-      entityId: sibling.entityId,
-    });
-  }
-  env.activeJurisdiction = primaryJurisdictionName;
 
   const jadapter = getActiveJAdapter(env);
   if (!jadapter) throw new Error('ACTIVE_JADAPTER_MISSING_AFTER_IMPORT');
@@ -2567,10 +2758,12 @@ const run = async (): Promise<void> => {
   finishTiming('p2p_connect', p2pConnectStartedAt);
 
   const totalMeshStartedAt = startTiming('mesh_ready_total');
-  let gossipReadyMarked = false;
-  let accountsReadyMarked = false;
-  let creditReadyMarked = false;
-  let reserveReadyMarked = false;
+  const meshMilestones: MeshBootstrapMilestones = {
+    gossipReady: false,
+    accountsReady: false,
+    creditReady: false,
+    reserveReady: false,
+  };
   let faucetProvisionPromise: Promise<void> | null = null;
 
   const ensureExternalFaucetProvisionReady = async (): Promise<void> => {
@@ -2596,106 +2789,17 @@ const run = async (): Promise<void> => {
     if (hasPendingRuntimeWork(env)) return;
     meshLoopInFlight = true;
     try {
-      const bootstrapJurisdiction =
-        getEntityJurisdiction(env, bootstrap.entityId) ||
-        getEntityJurisdictionName(env, bootstrap.entityId) ||
-        jurisdiction;
-      const visibleHubProfiles = readVisibleHubProfiles(env, bootstrapJurisdiction);
-      const requiredHubNames = new Set(resolvedArgs.meshHubNames.map(name => name.trim().toLowerCase()).filter(Boolean));
-      const requiredHubProfiles = visibleHubProfiles.filter(profile => {
-        const hubName = String(profile.hubName || profile.name || '').trim().split(/\s+/)[0]?.toLowerCase() || '';
-        return requiredHubNames.has(hubName);
-      });
-
-      if (!gossipReadyMarked && requiredHubProfiles.length === resolvedArgs.meshHubNames.length) {
-        finishTiming('gossip_ready', startedAtFor('gossip_ready') ?? startTiming('gossip_ready'));
-        gossipReadyMarked = true;
-      } else if (!gossipReadyMarked) {
-        startTiming('gossip_ready');
-      }
-      if (requiredHubProfiles.length !== resolvedArgs.meshHubNames.length) return;
-
-      const peers = requiredHubProfiles.filter(profile => profile.entityId !== bootstrap.entityId.toLowerCase());
-      markMeshBootstrapProgress('direct-peers');
-      if (!directHubPeersReady(env, peers)) {
-        return;
-      }
-      const { openInputs, creditInputs } = planMeshBootstrapInputs(
+      await advanceHubMeshBootstrap({
         env,
         bootstrap,
         hubBootstraps,
-        peers,
-        supportPeerIdentities,
-      );
-
-      if (openInputs.length > 0) {
-        markMeshBootstrapProgress(`open-accounts:${openInputs.length}`);
-        startTiming('mesh_accounts');
-        enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: openInputs });
-        await settleRuntimeFor(env, 35);
-      }
-
-      const allAccountsReady =
-        peers.length === Math.max(0, resolvedArgs.meshHubNames.length - 1) &&
-        peers.every(peer =>
-          hasAccount(env, bootstrap.entityId, peer.entityId) &&
-          DEFAULT_ACCOUNT_TOKEN_IDS.every((tokenId) => Boolean(getAccountState(env, bootstrap.entityId, peer.entityId)?.deltas.get(tokenId))),
-        );
-      if (allAccountsReady && !accountsReadyMarked) {
-        finishTiming('mesh_accounts', startedAtFor('mesh_accounts') ?? startTiming('mesh_accounts'));
-        accountsReadyMarked = true;
-      }
-
-      if (creditInputs.length > 0) {
-        markMeshBootstrapProgress(`extend-credit:${creditInputs.length}`);
-        startTiming('mesh_credit');
-        enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: creditInputs });
-        await settleRuntimeFor(env, 45);
-      }
-
-      const allCreditReady =
-        peers.length === Math.max(0, resolvedArgs.meshHubNames.length - 1) &&
-        peers.every(peer =>
-          hasPairMutualCredits(env, bootstrap.entityId, peer.entityId, DEFAULT_ACCOUNT_TOKEN_IDS, getBootstrapCreditAmount),
-        );
-      if (!allCreditReady) return;
-      if (!creditReadyMarked) {
-        finishTiming('mesh_credit', startedAtFor('mesh_credit') ?? startTiming('mesh_credit'));
-        creditReadyMarked = true;
-      }
-
-      if (!reserveReadyMarked) {
-        let peerReservesReady = true;
-        if (resolvedArgs.deployTokens) {
-          markMeshBootstrapProgress('peer-reserve-funding');
-          const localHubEntityIds = new Set(hubBootstraps.map(entry => normalizeEntityId(entry.entityId)));
-          const allPeerProfiles = readVisibleHubProfiles(env, '')
-            .filter(profile => !localHubEntityIds.has(normalizeEntityId(profile.entityId)));
-          const expectedPeerProfiles = Math.max(0, resolvedArgs.meshHubNames.length - 1) * hubBootstraps.length;
-          peerReservesReady = allPeerProfiles.length >= expectedPeerProfiles;
-          if (peerReservesReady) {
-            await ensurePeerBootstrapReserves(
-              env,
-              allPeerProfiles,
-              tokenCatalog,
-              (step) => markMeshBootstrapProgress(`peer-reserve:${step}`),
-            );
-          }
-        }
-        markMeshBootstrapProgress('local-reserve-funding');
-        const reserveHealth = await ensureHubBootstrapReserves(
-          env,
-          hubBootstraps,
-          (step) => markMeshBootstrapProgress(`local-reserve:${step}`),
-        );
-        reserveReadyMarked = reserveHealth.targetMet === true && peerReservesReady;
-      }
-
-      if (reserveReadyMarked && (timings['mesh_ready_total']?.ms ?? null) === null) {
-        markMeshBootstrapProgress('external-faucet-provision');
-        await ensureExternalFaucetProvisionReady();
-        finishTiming('mesh_ready_total', totalMeshStartedAt);
-      }
+        jurisdiction,
+        tokenCatalog,
+        milestones: meshMilestones,
+        totalStartedAt: totalMeshStartedAt,
+        markProgress: markMeshBootstrapProgress,
+        ensureFaucetReady: ensureExternalFaucetProvisionReady,
+      });
     } finally {
       meshLoopInFlight = false;
     }

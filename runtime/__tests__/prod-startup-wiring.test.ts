@@ -50,16 +50,27 @@ describe('production startup wiring', () => {
       readMarketMakerNodeSource(),
     ]) {
       const upgrade = source.indexOf('const directUpgrade = directRuntimeWs.maybeUpgrade(request, serverRef);');
-      const guard = source.indexOf('if (requiresLocalNodeOperator(url) && !operatorAuthorized)', upgrade);
-      const statusRoute = source.includes(
-        'const statusResponse = handleHubStatusRequest(',
-      )
-        ? source.indexOf(
-            'const statusResponse = handleHubStatusRequest(',
-            guard,
-          )
-        : source.indexOf("if (pathname === '/api/info')", guard);
-      expect(guard).toBeGreaterThan(upgrade);
+      const extractedHandler = source.indexOf(
+        'const handleHubHttpRequest = async',
+      );
+      const dispatch =
+        extractedHandler >= 0
+          ? source.indexOf('handleHubHttpRequest(', upgrade)
+          : upgrade;
+      const handler = extractedHandler >= 0 ? extractedHandler : upgrade;
+      const guard = source.indexOf(
+        'if (requiresLocalNodeOperator(url) && !operatorAuthorized)',
+        handler,
+      );
+      const statusRoute =
+        extractedHandler >= 0
+          ? source.indexOf(
+              'const statusResponse = context.handleStatus(',
+              guard,
+            )
+          : source.indexOf("if (pathname === '/api/info')", guard);
+      expect(dispatch).toBeGreaterThanOrEqual(upgrade);
+      expect(guard).toBeGreaterThan(handler);
       expect(statusRoute).toBeGreaterThan(guard);
     }
   });
@@ -307,7 +318,10 @@ describe('production startup wiring', () => {
       "await clearGossip(env, { runtimeId: String(env.runtimeId || '') });",
       relocationStart,
     );
-    const directRouteStart = hubNode.indexOf('const directRuntimeWs = createDirectRuntimeWsRoute({', relocationStart);
+    const directRouteStart = hubNode.indexOf(
+      'const directRuntimeWs = createHubDirectRuntimeRoute(',
+      relocationStart,
+    );
     const p2pStart = hubNode.indexOf('startP2P(env, {', relocationStart);
 
     expect(relocationStart).toBeGreaterThanOrEqual(0);
@@ -754,7 +768,7 @@ describe('production startup wiring', () => {
     expect(hubNode).toContain(
       'const hasLiveJAdapterForJurisdiction = (env: RuntimeState, jurisdictionName: string): boolean =>',
     );
-    expect(hubNode).toContain('if (!hasLiveJAdapterForJurisdiction(env, secondaryName)) {');
+    expect(hubNode).toContain('if (!hasLiveJAdapterForJurisdiction(env, name)) {');
     expect(orchestrator).not.toContain('creditAmount: MARKET_MAKER_CREDIT_AMOUNT.toString()');
     expect(mmNode).toContain('const readRpcUrls = (): Record<number, string> => {');
     expect(mmNode).toContain('const match = raw.match(/^\\/(?:api\\/)?rpc([2-8])?(?:\\?.*)?$/);');
@@ -2272,6 +2286,10 @@ describe('production startup wiring', () => {
 
   test('hub and market maker prefer authenticated direct entity delivery with relay fallback', () => {
     const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
+    const hubTransport = readFileSync(
+      join(repoRoot, 'runtime/orchestrator/hub-runtime-transport.ts'),
+      'utf8',
+    );
     const mmNode = readMarketMakerNodeSource();
     const p2p = readFileSync(join(repoRoot, 'runtime/networking/p2p.ts'), 'utf8');
 
@@ -2279,8 +2297,9 @@ describe('production startup wiring', () => {
     expect(p2p).toContain('if (this.preferRelayForEntityInput) {');
     expect(p2p).toContain("transport: 'relay'");
     expect(hubNode).not.toContain("process.env['XLN_ENABLE_DIRECT_ENTITY_INPUT_DISPATCH'] === '1'");
+    expect(hubTransport).not.toContain("process.env['XLN_ENABLE_DIRECT_ENTITY_INPUT_DISPATCH'] === '1'");
     expect(mmNode).not.toContain("process.env['XLN_ENABLE_DIRECT_ENTITY_INPUT_DISPATCH'] === '1'");
-    expect(hubNode).toContain('directRuntimeWs.sendEntityInputsDelivery(targetRuntimeId, envelope, ingressTimestamp)');
+    expect(hubTransport).toContain('route.sendEntityInputsDelivery(');
     expect(mmNode).toContain('directRuntimeWs.sendEntityInputsDelivery(targetRuntimeId, envelope, ingressTimestamp)');
     expect(hubNode).toContain('preferRelayForEntityInput: true');
     expect(mmNode).toContain('preferRelayForEntityInput: true');
@@ -2343,31 +2362,32 @@ describe('production startup wiring', () => {
 
   test('hub mesh bootstrap uses live entity jurisdiction and provisions the external faucet by default', () => {
     const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
-    const driveStart = hubNode.indexOf('const driveMeshBootstrap = async (): Promise<void> => {');
-    const driveEnd = hubNode.indexOf('const handleMeshBootstrapFatal = (error: unknown): void => {', driveStart);
+    const driveStart = hubNode.indexOf('const advanceHubMeshBootstrap = async (');
+    const driveEnd = hubNode.indexOf('const run = async (): Promise<void> => {', driveStart);
     expect(driveStart).toBeGreaterThan(0);
     expect(driveEnd).toBeGreaterThan(driveStart);
     const driveMeshBootstrap = hubNode.slice(driveStart, driveEnd);
-    expect(driveMeshBootstrap).toContain('const bootstrapJurisdiction =');
-    expect(driveMeshBootstrap).toContain('getEntityJurisdiction(env, bootstrap.entityId)');
-    expect(driveMeshBootstrap).toContain('readVisibleHubProfiles(env, bootstrapJurisdiction)');
-    expect(driveMeshBootstrap).not.toContain('readVisibleHubProfiles(env, jurisdiction)');
+    expect(driveMeshBootstrap).toContain('getEntityJurisdiction(input.env, input.bootstrap.entityId)');
+    expect(driveMeshBootstrap).toContain('readVisibleHubProfiles(input.env, jurisdiction)');
     expect(driveMeshBootstrap).toContain(
-      'if (requiredHubProfiles.length !== resolvedArgs.meshHubNames.length) return;',
+      'if (requiredProfiles.length !== resolvedArgs.meshHubNames.length) return;',
     );
+    expect(hubNode).toContain('peerReady = peerProfiles.length >= expected;');
     expect(driveMeshBootstrap).toContain(
-      'const expectedPeerProfiles = Math.max(0, resolvedArgs.meshHubNames.length - 1) * hubBootstraps.length;',
+      'input.milestones.reserveReady = await ensureHubMeshReserves(input);',
     );
-    expect(driveMeshBootstrap).toContain('peerReservesReady = allPeerProfiles.length >= expectedPeerProfiles;');
-    expect(driveMeshBootstrap).toContain('reserveReadyMarked = reserveHealth.targetMet === true && peerReservesReady;');
-    const creditFence = driveMeshBootstrap.indexOf('if (!allCreditReady) return;');
-    const reserveProvision = driveMeshBootstrap.indexOf('if (!reserveReadyMarked) {');
+    const creditFence = driveMeshBootstrap.indexOf('if (!creditReady) return;');
+    const reserveProvision = driveMeshBootstrap.indexOf(
+      'if (!input.milestones.reserveReady) {',
+    );
     expect(creditFence).toBeGreaterThan(0);
     expect(reserveProvision).toBeGreaterThan(creditFence);
     expect(driveMeshBootstrap).not.toContain('assertBootstrapNotStalled');
     expect(driveMeshBootstrap).not.toContain('meshLoopProgress = beginBootstrapProgress(Date.now())');
     expect(driveMeshBootstrap).not.toContain("markMeshBootstrapProgress('idle')");
-    expect(driveMeshBootstrap).toContain('markMeshBootstrapProgress(`local-reserve:${step}`)');
+    expect(hubNode).toContain(
+      'step => input.markProgress(`local-reserve:${step}`)',
+    );
     expect(hubNode).toContain('const bootstrapClockMs = (): number => getPerfMs();');
     expect(hubNode).toContain('beginBootstrapProgress(bootstrapClockMs())');
     expect(hubNode).toContain('advanceBootstrapProgress(meshLoopProgress, step, bootstrapClockMs())');
@@ -2376,7 +2396,7 @@ describe('production startup wiring', () => {
       "const AUTO_PROVISION_EXTERNAL_FAUCET = process.env['XLN_AUTO_PROVISION_EXTERNAL_FAUCET'] !== '0';",
     );
     expect(hubNode).toContain('if (!resolvedArgs.deployTokens || !AUTO_PROVISION_EXTERNAL_FAUCET) return;');
-    expect(hubNode).toContain('await ensureExternalFaucetProvisionReady();');
+    expect(driveMeshBootstrap).toContain('await input.ensureFaucetReady();');
     expect(hubNode).not.toContain(
       'if (resolvedArgs.deployTokens) {\n    void externalWalletApi.provisionFaucetWallet()',
     );
@@ -2516,7 +2536,9 @@ describe('production startup wiring', () => {
 
   test('offchain faucet exposes all local hub bootstrap entities', () => {
     const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
-    expect(hubNode).toContain('faucetRelayStore.activeHubEntityIds = hubBootstraps.map(entry => entry.entityId);');
+    expect(hubNode).toContain(
+      'context.faucetRelayStore.activeHubEntityIds =\n      context.hubBootstraps.map(entry => entry.entityId);',
+    );
     expect(hubNode).not.toContain('faucetRelayStore.activeHubEntityIds = [readyBootstrap.entityId];');
   });
 
