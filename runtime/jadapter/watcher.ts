@@ -11,7 +11,7 @@ export {
   applyWatcherJurisdictionCursor,
   applyJBlockHeadersIngressTransform,
   buildJEventsRuntimeInput,
-  buildRawJEventsRuntimeInput,
+  buildJEventIngressRuntimeInput,
   collectRelevantJEventReplicaKeys,
   enqueueJHistoryRewind,
   enqueueJHistoryRewindForReplicaKeys,
@@ -37,6 +37,6 @@ export {
   type JEventsRuntimeInputBuildResult,
   type PendingWatcherJBlockMap,
   type PendingWatcherJHistoryRange,
-  type RawJEvent,
-  type RawJEventArgs,
 } from './helpers';
+
+export type { JEventIngress } from './types';

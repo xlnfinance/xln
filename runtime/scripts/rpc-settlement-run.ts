@@ -15,7 +15,7 @@ import { createEmptyBatch } from '../jurisdiction/batch';
 import { prepareSignedBatch } from '../hanko/batch';
 import { generateLazyEntityId } from '../entity/factory';
 import { canonicalJurisdictionEventsHash } from '../jurisdiction/event-observation';
-import { parseReceiptLogsToJEvents, rawEventToJEvents, type RawJEventArgs } from '../jadapter/helpers';
+import { parseReceiptLogsToJEvents, rawEventToJEvents } from '../jadapter/helpers';
 
 export type ParityRunOptions = {
   mode: string;
@@ -40,11 +40,11 @@ const toJurisdictionHash = (events: SourceEvent[], entityId: string): string =>
   canonicalJurisdictionEventsHash(events.flatMap((event) => {
     const rawEvent: {
       name: string;
-      args: RawJEventArgs;
+      args: Record<string, unknown>;
       blockNumber?: number;
       blockHash?: string;
       transactionHash?: string;
-    } = { name: event.name, args: (event.args ?? {}) as RawJEventArgs };
+    } = { name: event.name, args: (event.args ?? {}) as Record<string, unknown> };
     if (event.blockNumber !== undefined) rawEvent.blockNumber = event.blockNumber;
     if (event.blockHash !== undefined) rawEvent.blockHash = event.blockHash;
     if (event.transactionHash !== undefined) rawEvent.transactionHash = event.transactionHash;

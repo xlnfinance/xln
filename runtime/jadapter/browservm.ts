@@ -24,8 +24,9 @@ import type {
   JAdapter,
   JAdapterConfig,
   JEvent,
+  JEventIngress,
 } from './types';
-import type { BrowserVMProvider, EVMEvent } from './browservm-provider';
+import type { BrowserVMProvider } from './browservm-provider';
 import {
   assertDepositoryEntityProviderBinding,
   assertJStackAddressMatch,
@@ -80,7 +81,7 @@ export async function createBrowserVMAdapter(
   };
   await verifyStackBinding('browservm_connect');
 
-  const toJEvents = (events: EVMEvent[]): JEvent[] => normalizeAdapterEvents(events);
+  const toJEvents = (events: JEventIngress[]): JEvent[] => normalizeAdapterEvents(events);
 
   const historyWatcher = createBrowserVmHistoryWatcher({
     chainId: config.chainId,

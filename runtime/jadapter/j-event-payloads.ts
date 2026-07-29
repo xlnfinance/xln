@@ -1,7 +1,7 @@
 import type { JurisdictionEvent } from '../types';
 import { normalizeJurisdictionEvent } from '../jurisdiction/event-normalization';
 import { CANONICAL_J_EVENTS } from '../jurisdiction/event-catalog';
-import type { RawJEvent } from './helpers';
+import type { JEventIngress } from './types';
 
 const CANONICAL_EVENT_NAMES = new Set<string>(CANONICAL_J_EVENTS);
 
@@ -20,7 +20,7 @@ type RawEventPayload = {
  * therefore enters the shared normalizer without an adapter-owned DTO.
  */
 const expandAccountSettled = (
-  event: RawJEvent,
+  event: JEventIngress,
   entityId: string,
 ): RawEventPayload[] => {
   const rawSettlements =
@@ -58,7 +58,7 @@ const expandAccountSettled = (
   return events;
 };
 
-const assertRawEventSpecificFields = (event: RawJEvent): void => {
+const assertRawEventSpecificFields = (event: JEventIngress): void => {
   if (event.name === 'DisputeStarted') {
     const timeout = Number(event.args['disputeTimeout']);
     if (!Number.isSafeInteger(timeout) || timeout <= 0) {
@@ -86,7 +86,7 @@ const assertRawEventSpecificFields = (event: RawJEvent): void => {
 };
 
 const withTransportMetadata = (
-  event: RawJEvent,
+  event: JEventIngress,
   payload: RawEventPayload,
   eventIndex: number | undefined,
 ): unknown => ({
@@ -99,7 +99,7 @@ const withTransportMetadata = (
 });
 
 export const rawEventToJEvents = (
-  event: RawJEvent,
+  event: JEventIngress,
   entityId: string,
 ): JurisdictionEvent[] => {
   if (!isCanonicalEventName(event.name)) {

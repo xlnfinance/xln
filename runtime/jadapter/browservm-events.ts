@@ -2,22 +2,13 @@ import { ethers } from 'ethers';
 import { bytesToHex } from '@ethereumjs/util';
 import type { Address } from '@ethereumjs/util';
 import { extractCanonicalDepositoryEventArgs } from './depository-event-codec';
+import type { JEventIngress } from './types';
 
 export type EthereumLog = [
   Address | Uint8Array | string | { toBytes?: () => Uint8Array; toString(): string },
   Uint8Array[],
   Uint8Array,
 ];
-
-export type EVMEvent = {
-  name: string;
-  args: Record<string, unknown>;
-  blockNumber?: number;
-  blockHash?: string;
-  transactionHash?: string;
-  logIndex?: number;
-  timestamp?: number;
-};
 
 export type BrowserVmReceiptLog = {
   address: string;
@@ -58,11 +49,11 @@ export const decodeBrowserVmEvents = (
   blockHash: string,
   timestamp: number,
   transactionHash?: string,
-): EVMEvent[] => {
+): JEventIngress[] => {
   const parsers = interfaces.filter((iface): iface is ethers.Interface => iface !== null);
   if (parsers.length === 0) return [];
 
-  const decoded: EVMEvent[] = [];
+  const decoded: JEventIngress[] = [];
   for (const [logIndex, log] of logs.entries()) {
     const topics = log[1].map((topic: Uint8Array) => bytesToHex(topic));
     const data = bytesToHex(log[2]);

@@ -3,15 +3,22 @@ import { getBatchSize, isBatchEmpty } from '../jurisdiction/batch';
 import { assertSealedJBatchBinding } from '../jurisdiction/sealed-batch';
 import { assertEntityProviderActionJTxBinding } from '../entity/entity-provider-action';
 import type { JTx } from '../types';
-import type { BrowserVMProvider, EVMEvent } from './browservm-provider';
-import type { JAdapter, JAdapterAddresses, JBatchReceipt, JEvent, JSubmitResult } from './types';
+import type { BrowserVMProvider } from './browservm-provider';
+import type {
+  JAdapter,
+  JAdapterAddresses,
+  JBatchReceipt,
+  JEvent,
+  JEventIngress,
+  JSubmitResult,
+} from './types';
 import { makeJAdapterFailureResult } from './failure';
 
 type BrowserVmSubmitContext = {
   chainId: number;
   addresses: JAdapterAddresses;
   browserVM: BrowserVMProvider;
-  toJEvents(events: EVMEvent[]): JEvent[];
+  toJEvents(events: JEventIngress[]): JEvent[];
 };
 
 type SubmitOptions = Parameters<JAdapter['submitTx']>[1];

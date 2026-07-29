@@ -103,8 +103,7 @@ import {
   type EventBatchCounter,
   type PendingWatcherJBlockMap,
   type PendingWatcherJHistoryRange,
-  type RawJEvent,
-  type RawJEventArgs,
+  type JEventIngress,
 } from './watcher';
 import { shouldAuditCanonicalWatcherState } from './watcher-poll-policy';
 import {
@@ -1960,7 +1959,7 @@ export async function createRpcAdapter(
       };
       const findDisputeFinalizationEvidence = async (
         txHash: string,
-        args: RawJEventArgs,
+        args: Record<string, unknown>,
       ): Promise<DisputeFinalizationEvidence | undefined> => {
         const candidates = await readTxFinalizationEvidence(txHash);
         if (candidates.length === 0) {
@@ -2415,7 +2414,7 @@ export async function createRpcAdapter(
           }));
 
           if (logs.length > 0) {
-            const rawEvents: RawJEvent[] = [];
+            const rawEvents: JEventIngress[] = [];
             const authorityTxsByBlock = new Map<number, RuntimeTx[]>();
             const trackedExternalOwners = buildTrackedExternalOwners(activeEnv);
             for (const { kind, log } of logs) {
@@ -2526,7 +2525,7 @@ export async function createRpcAdapter(
                 if (!CANONICAL_J_EVENTS.some(name => name === parsed.name)) continue;
                 // Extract named args from ethers v6 Result (array-like, named keys
                 // not enumerable via Object.keys). Use positional fallback for unnamed params.
-                const args: RawJEventArgs = kind === 'depository' ? extractCanonicalDepositoryEventArgs(parsed) : {};
+                const args: Record<string, unknown> = kind === 'depository' ? extractCanonicalDepositoryEventArgs(parsed) : {};
                 if (kind !== 'depository') {
                   for (let idx = 0; idx < parsed.fragment.inputs.length; idx++) {
                     const input = parsed.fragment.inputs[idx];
@@ -2587,7 +2586,7 @@ export async function createRpcAdapter(
                 eventCounts[e.name] = (eventCounts[e.name] || 0) + 1;
               }
 
-              const byBlock = new Map<number, RawJEvent[]>();
+              const byBlock = new Map<number, JEventIngress[]>();
               for (const e of rawEvents) {
                 const bn = e.blockNumber ?? 0;
                 if (!byBlock.has(bn)) byBlock.set(bn, []);

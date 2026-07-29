@@ -8,8 +8,8 @@ import {
   processEventBatch,
   updateWatcherJurisdictionCursor,
   type EventBatchCounter,
-  type RawJEvent,
 } from './helpers';
+import type { JEventIngress } from './types';
 import type { BrowserVMProvider } from './browservm-provider';
 import type { AuthenticatedRpcLog } from '../jurisdiction/receipt-codec';
 import {
@@ -33,7 +33,7 @@ type BrowserVmWatcherProgress = {
   replicaScannedThrough: Record<string, number>;
 };
 
-const decodeHistoricalLog = (options: BrowserVmHistoryOptions, log: AuthenticatedRpcLog): RawJEvent | null => {
+const decodeHistoricalLog = (options: BrowserVmHistoryOptions, log: AuthenticatedRpcLog): JEventIngress | null => {
   const address = log.address.toLowerCase();
   const carrier =
     address === options.depositoryAddress.toLowerCase()
@@ -81,10 +81,10 @@ const collectHistoricalEvents = (
   targetBlock: number,
   tipBlockHash: string,
 ): {
-  byBlock: Map<number, RawJEvent[]>;
+  byBlock: Map<number, JEventIngress[]>;
   authorityTxsByBlock: Map<number, RuntimeTx[]>;
 } => {
-  const byBlock = new Map<number, RawJEvent[]>();
+  const byBlock = new Map<number, JEventIngress[]>();
   const authorityTxsByBlock = new Map<number, RuntimeTx[]>();
   const watcherReplica = findWatcherJurisdictionReplica(env, options.depositoryAddress, options.chainId);
   if (!watcherReplica) {
@@ -125,7 +125,7 @@ const collectHistoricalEvents = (
 const buildObservedInputs = (
   options: BrowserVmHistoryOptions,
   env: RuntimeState,
-  byBlock: Map<number, RawJEvent[]>,
+  byBlock: Map<number, JEventIngress[]>,
   authorityTxsByBlock: Map<number, RuntimeTx[]>,
   txCounter: EventBatchCounter,
   historicalReplicaCatchUp: boolean,

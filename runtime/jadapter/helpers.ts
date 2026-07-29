@@ -5,7 +5,7 @@
  */
 
 import { ethers } from 'ethers';
-import type { JEvent } from './types';
+import type { JEvent, JEventIngress } from './types';
 import type { DisputeFinalizationEvidence, EntityInput, EntityReplica, RuntimeState, JPrefixAttestation, JReplica, JurisdictionConfig, RuntimeInput, RuntimeTx, ValidatorJBlockHeader, ValidatorJEventBlock } from '../types';
 import { createEmptyBatch, type JBatch } from '../jurisdiction/batch';
 import { enqueueRuntimeInput } from '../runtime/input-queue';
@@ -83,9 +83,13 @@ export const toJEvent = (name: string, args: Record<string, unknown> | undefined
   ...(meta?.logIndex !== undefined ? { logIndex: meta.logIndex } : {}),
 });
 
-export const normalizeAdapterEvents = (events: Array<{
-  name: string; args?: Record<string, unknown>; blockNumber?: number; blockHash?: string; transactionHash?: string; logIndex?: number;
-}>, fallbackMeta?: { blockNumber?: number; blockHash?: string; transactionHash?: string; logIndex?: number }): JEvent[] =>
+export const normalizeAdapterEvents = (
+  events: JEventIngress[],
+  fallbackMeta?: Pick<
+    JEventIngress,
+    'blockNumber' | 'blockHash' | 'transactionHash' | 'logIndex'
+  >,
+): JEvent[] =>
   events.map((event) => {
     const meta: { blockNumber?: number; blockHash?: string; transactionHash?: string; logIndex?: number } = {};
     const blockNumber = event.blockNumber ?? fallbackMeta?.blockNumber;
@@ -190,25 +194,6 @@ export const buildExternalTokenToReserveBatch = (params: {
 // Raw events (name + args) → j_event format { type, data } for j-events.ts
 // ═══════════════════════════════════════════════════════════════════════════
 
-/**
- * Raw event format — common denominator for both BrowserVM and ethers RPC events.
- * BrowserVM emits these directly. RPC adapter normalizes ethers EventLog to this.
- * args supports both named keys and positional indexes.
- */
-export type RawJEventArgs = Record<string, unknown> & {
-  [index: number]: unknown;
-};
-
-export interface RawJEvent {
-  name: string;
-  args: RawJEventArgs;
-  blockNumber?: number;
-  blockHash?: string;
-  transactionHash?: string;
-  logIndex?: number;
-  disputeFinalizationEvidence?: DisputeFinalizationEvidence;
-}
-
 export type EventBatchCounter = {
   value: number;
   _seenLogs?: {
@@ -228,7 +213,7 @@ export type PendingWatcherJHistoryRange = {
 
 
 export type JEventIngressBatch = {
-  rawEvents: RawJEvent[];
+  rawEvents: JEventIngress[];
   blockNumber: number;
   blockHash: string;
 };
@@ -517,7 +502,7 @@ const assertJEventIngressOpen = (env: RuntimeState, label: string): void => {
 /**
  * Check if a raw event is a canonical j-event.
  */
-export function isCanonicalEvent(event: RawJEvent): boolean {
+export function isCanonicalEvent(event: JEventIngress): boolean {
   return CANONICAL_J_EVENT_SET.has(event.name);
 }
 
@@ -525,7 +510,7 @@ export function isCanonicalEvent(event: RawJEvent): boolean {
  * Check if a raw event is relevant to a specific entity.
  * Shared between all adapter modes — same logic regardless of source.
  */
-export function isEventRelevantToEntity(event: RawJEvent, entityId: string): boolean {
+export function isEventRelevantToEntity(event: JEventIngress, entityId: string): boolean {
   const normalize = (id: unknown): string => String(id).toLowerCase();
   const normalizedEntity = normalize(entityId);
   const args = event.args;
@@ -592,7 +577,7 @@ export function isEventRelevantToEntity(event: RawJEvent, entityId: string): boo
   }
 }
 
-export function collectRelevantJEventReplicaKeys(env: RuntimeState, rawEvents: RawJEvent[]): string[] {
+export function collectRelevantJEventReplicaKeys(env: RuntimeState, rawEvents: JEventIngress[]): string[] {
   const canonical = rawEvents.filter(isCanonicalEvent);
   if (canonical.length === 0) return [];
 
@@ -738,7 +723,7 @@ export function resolveCommittedWatcherCursor(
  */
 export type JEventsRuntimeInputBuildResult = {
   input: RuntimeInput;
-  evidenceEvents: RawJEvent[];
+  evidenceEvents: JEventIngress[];
 };
 
 export type JEventsRuntimeInputOptions = {
@@ -763,7 +748,7 @@ const resolveJEventObservedAt = (blockNumber: number): number => {
   return Number.isFinite(height) && height > 0 ? Math.floor(height) : 0;
 };
 
-const enrichDisputeBatchNonces = (rawEvents: RawJEvent[]): RawJEvent[] => {
+const enrichDisputeBatchNonces = (rawEvents: JEventIngress[]): JEventIngress[] => {
   const nonceByTxAndEntity = new Map<string, string>();
   for (const event of rawEvents) {
     if (event.name !== 'HankoBatchProcessed') continue;
@@ -825,12 +810,12 @@ type JEventReplicaDelivery = {
   entityId: string;
   signerId: string;
   jurisdictionRef: string;
-  events: RawJEvent[];
+  events: JEventIngress[];
 };
 
 const collectJEventReplicaDeliveries = (
   env: RuntimeState,
-  events: RawJEvent[],
+  events: JEventIngress[],
   blockNumber: number,
   watcherReplica: JReplica | undefined,
 ): Map<string, JEventReplicaDelivery> => {
@@ -946,13 +931,13 @@ const buildJPrefixAttestationInput = (
 type BuiltJEventReplicaDelivery = {
   runtimeTx: RuntimeTx;
   entityInput: EntityInput | null;
-  evidenceEvents: Array<[string, RawJEvent]>;
+  evidenceEvents: Array<[string, JEventIngress]>;
 };
 
 const buildJEventEvidenceEntries = (
-  events: RawJEvent[],
+  events: JEventIngress[],
   blockHash: string,
-): Array<[string, RawJEvent]> =>
+): Array<[string, JEventIngress]> =>
   events.map((event, index) => [
     event.transactionHash
       ? `${event.transactionHash.toLowerCase()}:${event.logIndex ?? event.name}:${index}`
@@ -1023,9 +1008,9 @@ const buildJEventReplicaDelivery = (
   };
 };
 
-export function buildRawJEventsRuntimeInput(
+export function buildJEventIngressRuntimeInput(
   env: RuntimeState,
-  rawEvents: RawJEvent[],
+  rawEvents: JEventIngress[],
   options: JEventsRuntimeInputOptions,
 ): JEventsRuntimeInputBuildResult | null {
   if (rawEvents.length === 0) return null;
@@ -1045,7 +1030,7 @@ export function buildRawJEventsRuntimeInput(
   );
   const runtimeTxs: RuntimeTx[] = [];
   const entityInputs: EntityInput[] = [];
-  const evidenceEventsByLog = new Map<string, RawJEvent>();
+  const evidenceEventsByLog = new Map<string, JEventIngress>();
   for (const [replicaKey, delivery] of deliveries) {
     const replica = env.eReplicas.get(replicaKey);
     if (!replica) throw new Error(`J_HISTORY_LOCAL_REPLICA_MISSING:${replicaKey}`);
@@ -1417,7 +1402,7 @@ export function enqueueJHistoryRewind(
   );
 }
 
-const normalizeManualJEvents = (events: JEvent[], label: string): RawJEvent[] => {
+const normalizeManualJEvents = (events: JEvent[], label: string): JEventIngress[] => {
   if (!Array.isArray(events)) throw new Error(`J_EVENT_MANUAL_BATCH_INVALID:${label}`);
   return events.map((event, index) => {
     if (!event || typeof event.name !== 'string' || !CANONICAL_J_EVENT_SET.has(event.name)) {
@@ -1443,7 +1428,7 @@ const normalizeManualJEvents = (events: JEvent[], label: string): RawJEvent[] =>
     }
     return {
       name: event.name,
-      args: event.args as RawJEventArgs,
+      args: event.args as Record<string, unknown>,
       blockNumber: event.blockNumber,
       blockHash: event.blockHash,
       transactionHash: event.transactionHash,
@@ -1494,7 +1479,7 @@ export function buildJEventsRuntimeInput(
   const boundSource = bindLocalJEventIngressSource(env, source, label);
   const rawEvents = normalizeManualJEvents(events, label);
 
-  const blockGroups = new Map<number, RawJEvent[]>();
+  const blockGroups = new Map<number, JEventIngress[]>();
   for (const event of rawEvents) {
     const blockNumber = Number(event.blockNumber ?? 0);
     if (!blockGroups.has(blockNumber)) blockGroups.set(blockNumber, []);
@@ -1510,7 +1495,7 @@ export function buildJEventsRuntimeInput(
     if (groupedEvents.some((event) => event.blockHash?.toLowerCase() !== blockHash.toLowerCase())) {
       throw new Error(`J_EVENT_MANUAL_BLOCK_HASH_MISMATCH:${label}:${blockNumber}`);
     }
-    const built = buildRawJEventsRuntimeInput(env, groupedEvents.filter(isCanonicalEvent), {
+    const built = buildJEventIngressRuntimeInput(env, groupedEvents.filter(isCanonicalEvent), {
       blockNumber,
       blockHash,
       adapterLabel: label,
@@ -1550,7 +1535,7 @@ export function buildJEventsRuntimeInput(
  * Shared logic used by both BrowserVM and RPC adapter startWatching().
  */
 export function processEventBatch(
-  rawEvents: RawJEvent[],
+  rawEvents: JEventIngress[],
   env: RuntimeState,
   blockNumber: number,
   blockHash: string,
@@ -1582,7 +1567,7 @@ export function processEventBatch(
     return txCounter._seenLogs;
   })();
   const MAX_DEDUP_LOGS = 50_000;
-  const deduped: RawJEvent[] = [];
+  const deduped: JEventIngress[] = [];
   for (let idx = 0; idx < canonical.length; idx++) {
     const event = canonical[idx]!;
     const txHash = event.transactionHash || '';
@@ -1636,7 +1621,7 @@ export function processEventBatch(
     }
   }
 
-  const built = buildRawJEventsRuntimeInput(env, ingressBatch.rawEvents, {
+  const built = buildJEventIngressRuntimeInput(env, ingressBatch.rawEvents, {
     blockNumber: ingressBatch.blockNumber,
     blockHash: ingressBatch.blockHash,
     adapterLabel,

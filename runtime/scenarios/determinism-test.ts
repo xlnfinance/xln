@@ -27,7 +27,7 @@ import {
   type JBlockHeadersIngress,
   type JEventIngressBatch,
   type JHistoryRangeIngress,
-  type RawJEvent,
+  type JEventIngress,
 } from '../jadapter/watcher';
 
 const RUNS = 2;
@@ -105,7 +105,7 @@ const cloneJBlockHeadersIngress = (
   headers: JBlockHeadersIngress,
 ): JBlockHeadersIngress => cloneJEventTraceValue(headers) as JBlockHeadersIngress;
 
-const jEventSemanticProjection = (events: RawJEvent[]): unknown => toDebugTraceValue(
+const jEventSemanticProjection = (events: JEventIngress[]): unknown => toDebugTraceValue(
   events.map((event) => ({
     name: event.name,
     args: event.args,

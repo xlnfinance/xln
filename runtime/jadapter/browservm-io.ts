@@ -1,6 +1,6 @@
 import { normalizeEntityId } from '../entity/id';
-import type { BrowserVMProvider, EVMEvent } from './browservm-provider';
-import type { JAdapter, JEvent } from './types';
+import type { BrowserVMProvider } from './browservm-provider';
+import type { JAdapter, JEvent, JEventIngress } from './types';
 import { receiptFromEvents } from './browservm-submit';
 
 type BrowserVmIoMethod =
@@ -39,7 +39,7 @@ type BrowserVmIoMethod =
 
 export const createBrowserVmIoMethods = (
   browserVM: BrowserVMProvider,
-  toJEvents: (events: EVMEvent[]) => JEvent[],
+  toJEvents: (events: JEventIngress[]) => JEvent[],
 ): Pick<JAdapter, BrowserVmIoMethod> => ({
   async getReserves(entityId, tokenId) {
     return await browserVM.getReserves(entityId, tokenId);
