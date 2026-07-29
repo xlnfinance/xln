@@ -874,8 +874,10 @@ describe('production startup wiring', () => {
       "reason: 'missing-account' | 'inactive-account' | 'height-zero' | 'pending-frame' | 'mempool';",
     );
     expect(mmNode).toContain("crossOverride?: MarketMakerHealth['cross'];");
-    expect(mmNode).toMatch(/const publishMarketMakerHealthSnapshot = \(\s*options: \{/);
-    expect(mmNode).toContain('if (health) cachedMarketMakerHealth = health;');
+    expect(mmNode).toContain(
+      'const createMarketMakerHealthController = (deps: MarketMakerHealthControllerDeps) => {',
+    );
+    expect(mmNode).toContain('if (health) currentHealth = health;');
     expect(mmNode.match(/startAtCurrentBlock: false/g)).toHaveLength(2);
     expect(runtimeTxHandlers).toContain('applyImportJurisdictionIntent(env, runtimeTx);');
     expect(jurisdictionImport).toContain('const resolveInitialBlockNumber = async (');
@@ -1075,21 +1077,27 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain(
       'const isMarketMakerCrossDepthComplete = (health: MarketMakerHealth | null): boolean => {',
     );
-    expect(mmNode).toContain('const publishReadyHealthSnapshot = (): MarketMakerHealth | null => {');
-    expect(mmNode).toContain('const currentHealth = cachedMarketMakerHealth;');
-    expect(mmNode).toContain('if (!currentHealth || !isMarketMakerCrossDepthComplete(currentHealth)) {');
-    expect(mmNode).toContain('crossOverride: currentHealth.cross');
+    const healthControllerBlock = extractSourceBlock(
+      mmNode,
+      'const createMarketMakerHealthController =',
+      'type MarketMakerHttpHandlerDeps =',
+    );
+    expect(healthControllerBlock).toContain('const publishReady = (): MarketMakerHealth | null => {');
+    expect(healthControllerBlock).toContain(
+      'if (!currentHealth || !isMarketMakerCrossDepthComplete(currentHealth)) return publish({ includeCross: true });',
+    );
+    expect(healthControllerBlock).toContain('crossOverride: currentHealth.cross');
     expect(mmNode).toContain("if (startupPhase === 'offers-ready') {");
-    expect(mmNode).toContain('const before = publishReadyHealthSnapshot();');
+    expect(mmNode).toContain('const before = healthController.publishReady();');
     expect(mmNode).toContain('if (isMarketMakerFullDepthComplete(before)) return;');
     expect(mmNode).toContain("await driveQuotes('steady');");
-    expect(mmNode).toContain('const after = publishReadyHealthSnapshot();');
+    expect(mmNode).toContain('const after = healthController.publishReady();');
     const refreshCachedHealthBlock = extractSourceBlock(
       mmNode,
       'const refreshCachedHealth = (): void => {',
       'const runQuoteMaintenance = async (): Promise<void> => {',
     );
-    expect(refreshCachedHealthBlock).toContain('publishReadyHealthSnapshot();');
+    expect(refreshCachedHealthBlock).toContain('healthController.publishReady();');
     expect(refreshCachedHealthBlock).not.toContain('includeCross: true');
     expect(mmNode).not.toContain('bootstrapCrossExpectedRoutes === false');
     expect(mmNode).not.toContain('crossOverride: buildNeutralMarketMakerCrossHealth()');
@@ -1560,12 +1568,13 @@ describe('production startup wiring', () => {
     expect(healthProjection).toContain('quiescence: summarizeRuntimeQuiescence(input.env)');
     expect(healthProjection).toContain('expectedRoutes: 0');
     expect(healthProjection).toContain('return safeStringify({');
-    const healthBuilderStart = mmNode.indexOf('const rebuildCachedHealthResponseJson = (): void => {');
-    const publishHealthStart = mmNode.indexOf('const publishMarketMakerHealthSnapshot');
-    expect(healthBuilderStart).toBeGreaterThan(marketMakerStart);
-    expect(publishHealthStart).toBeGreaterThan(healthBuilderStart);
-    const healthBuilder = mmNode.slice(healthBuilderStart, publishHealthStart);
-    expect(healthBuilder).toContain('cachedHealthResponseJson = buildMarketMakerHealthResponseJson({');
+    const healthControllerStart = mmNode.indexOf('const createMarketMakerHealthController = (');
+    const httpDepsStart = mmNode.indexOf('type MarketMakerHttpHandlerDeps = {');
+    expect(healthControllerStart).toBeGreaterThan(healthProjectionStart);
+    expect(httpDepsStart).toBeGreaterThan(healthControllerStart);
+    const healthController = mmNode.slice(healthControllerStart, httpDepsStart);
+    expect(healthController).toContain('healthResponseJson = buildMarketMakerHealthResponseJson({');
+    expect(healthController).toContain('const publish = (');
     expect(mmNode).toContain(
       "const buildDeferredMarketMakerCrossHealth = (applicable: boolean): MarketMakerHealth['cross'] => ({",
     );
@@ -1573,15 +1582,17 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain(
       'ok: expectedRouteCount === 0 || (routes.length >= expectedRouteCount && routes.every(route => route.depthReady))',
     );
-    expect(mmNode).toContain('const publishBootstrapHealthSnapshot = (): MarketMakerHealth | null =>');
-    expect(mmNode).toContain("const buildBootstrapCrossHealthOverride = (): MarketMakerHealth['cross'] => {");
-    expect(mmNode).toContain('return buildPlannedMarketMakerCrossHealth(plan);');
-    expect(mmNode).toContain('? { includeCross: false, crossOverride: buildBootstrapCrossHealthOverride() }');
-    expect(mmNode).toContain(': { includeCross: false },');
+    expect(healthController).toContain('const publishBootstrap = (): MarketMakerHealth | null =>');
+    expect(healthController).toContain(
+      'const plan = buildMarketMakerCrossPlanSummary([...deps.contexts()], hubs, new Map(deps.tokenIdsByContext()));',
+    );
+    expect(healthController).toContain(
+      'return publish({ includeCross: false, crossOverride: buildPlannedMarketMakerCrossHealth(plan) });',
+    );
     expect(mmNode).toContain('const buildBootstrapCompletionHealth = (): MarketMakerHealth | null => {');
-    expect(mmNode).toContain('bootstrapCompletionHealth = buildMarketMakerHealthSnapshot({ includeCross: true });');
-    expect(mmNode).toContain('cachedMarketMakerHealth = bootstrapCompletionHealth;');
-    expect(mmNode).toContain('rebuildCachedHealthResponseJson();');
+    expect(mmNode).toContain('bootstrapCompletionHealth = healthController.buildSnapshot({ includeCross: true });');
+    expect(mmNode).toContain('healthController.setCurrentHealth(bootstrapCompletionHealth);');
+    expect(mmNode).toContain('healthController.rebuildHealthResponse();');
     expect(readMarketMakerNodeModule('mm-node-health.ts')).toContain('computeCanonicalEntityHashesFromEnv');
     expect(readMarketMakerNodeModule('mm-node-run.ts')).toContain('computeCanonicalStateHashFromEnv');
     expect(mmNode).toContain('export const buildMarketMakerBootstrapEntityStateHash = (env: RuntimeState): string =>');
@@ -1617,7 +1628,7 @@ describe('production startup wiring', () => {
     expect(mmNode).not.toContain(
       'await markOffersReady();\n      publishMarketMakerHealthSnapshot({ includeCross: true });',
     );
-    expect(mmNode).toContain("startupPhase = 'bootstrap-same-chain';\n    publishBootstrapHealthSnapshot();");
+    expect(mmNode).toContain("startupPhase = 'bootstrap-same-chain';\n    healthController.publishBootstrap();");
     expect(mmNode).toContain('if (bootstrapCrossStarted) {');
     expect(mmNode).toContain('isAllSameQuoteDepthReady(visibleHubs) &&');
     expect(mmNode).toContain('isMarketMakerSameDepthComplete(health)');
@@ -1650,13 +1661,13 @@ describe('production startup wiring', () => {
     );
     expect(infoRoute).not.toContain('getMarketMakerRuntimeBacklogSnapshot(env');
     expect(infoRoute).not.toContain('buildMarketMakerCrossDebugSummary(');
-    expect(mmNode).toContain('const buildInfoResponseJson = (includeCrossDebug = false): string => {');
+    expect(mmNode).toContain('const buildInfoResponse = (includeCrossDebug = false): string => {');
     expect(mmNode).toContain('const buildMarketMakerInfoResponseJson = (');
     expect(mmNode).toContain('currentHealth: input.currentHealth');
     expect(mmNode).toContain('runtimeBacklog: getMarketMakerRuntimeBacklogSnapshot(input.env, {');
     expect(mmNode).toContain('includeQueuedEntityInputs: includeCrossDebug');
     expect(mmNode).toContain('crossDebug: buildMarketMakerCrossDebugSummary(');
-    expect(mmNode).toContain('cachedInfoResponseJson = buildInfoResponseJson(false);');
+    expect(mmNode).toContain('infoResponseJson = buildInfoResponse(false);');
     expect(infoRoute).not.toContain('const allVisibleHubs = readVisibleHubProfiles(env, true);');
     expect(infoRoute).not.toContain('buildMarketMakerHealthSnapshot({ includeCross: true })');
   });
@@ -1810,7 +1821,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('lastProgressCheckpoint,');
     expect(mmNode).toContain('MARKET_MAKER_BOOTSTRAP_STALLED');
     expect(mmNode).not.toContain("markProgress('enqueue');");
-    expect(mmNode).toContain("observeProgress('runtime-backlog', cachedMarketMakerHealth);");
+    expect(mmNode).toContain("observeProgress('runtime-backlog', healthController.readCurrentHealth());");
     expect(mmNode).not.toContain("startupPhase = 'bootstrap-degraded'");
     expect(mmNode).toContain("emitBootstrapDebugEvent('completion-health'");
     expect(mmNode).toContain('bootstrapCompletionCheckArmed = true;');
@@ -1818,7 +1829,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain(
       "pathname === '/api/health/full' || (pathname === '/api/health' && url.searchParams.get('full') === '1')",
     );
-    expect(mmNode).toContain('buildHealthSnapshot: () => buildMarketMakerHealthSnapshot({ includeCross: true })');
+    expect(mmNode).toContain('buildHealthSnapshot: () => healthController.buildSnapshot({ includeCross: true })');
     expect(mmNode).toContain("pathname === '/api/account/status'");
     expect(mmNode).toContain('pendingFrameTxs: (account?.pendingFrame?.accountTxs ?? []).map');
     expect(smoke).toContain('const shouldFetchMarketMakerHealth = (health: HealthPayload): boolean =>');

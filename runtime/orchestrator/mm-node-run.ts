@@ -646,6 +646,127 @@ const buildMarketMakerHealthResponseJson = (
   });
 };
 
+type MarketMakerHealthControllerDeps = {
+  env: RuntimeState;
+  contexts: () => readonly MarketMakerEntityContext[];
+  tokenIdsByContext: () => ReadonlyMap<string, number[]>;
+  activeEntityId: () => string | null;
+  startupPhase: () => string;
+  bootstrapCrossStarted: () => boolean;
+  bootstrap: () => {
+    readyHash: string | null;
+    runtimeStateHash: string | null;
+    entityStateHash: string | null;
+    restoredEntityStateHash: string | null;
+    readyAt: number | null;
+  };
+  directInput: () => {
+    lastSeen: DirectEntityInputDebug | null;
+    lastError: DirectEntityInputDebug | null;
+  };
+};
+
+const createMarketMakerHealthController = (deps: MarketMakerHealthControllerDeps) => {
+  let currentHealth: MarketMakerHealth | null = null;
+  let visibleHubs: HubProfile[] = [];
+  let allVisibleHubs: HubProfile[] = [];
+  let healthResponseJson: string | null = null;
+  let infoResponseJson: string | null = null;
+  const buildSnapshot = (
+    options: { includeCross?: boolean; crossOverride?: MarketMakerHealth['cross'] } = {},
+  ): MarketMakerHealth | null => {
+    const snapshot = computeMarketMakerHealthSnapshot(
+      deps.env,
+      [...deps.contexts()],
+      deps.activeEntityId(),
+      new Map(deps.tokenIdsByContext()),
+      options,
+    );
+    visibleHubs = snapshot.visibleHubs;
+    allVisibleHubs = snapshot.allVisibleHubs;
+    return snapshot.health;
+  };
+  const buildInfoResponse = (includeCrossDebug = false): string => {
+    const bootstrap = deps.bootstrap();
+    return buildMarketMakerInfoResponseJson({
+      env: deps.env,
+      contexts: deps.contexts(),
+      tokenIdsByContext: deps.tokenIdsByContext(),
+      currentHealth,
+      activeEntityId: deps.activeEntityId(),
+      startupPhase: deps.startupPhase(),
+      readyHash: bootstrap.readyHash,
+      runtimeStateHash: bootstrap.runtimeStateHash,
+      entityStateHash: bootstrap.entityStateHash,
+      restoredEntityStateHash: bootstrap.restoredEntityStateHash,
+      readyAt: bootstrap.readyAt,
+    }, includeCrossDebug);
+  };
+  const rebuildInfoResponse = (): void => {
+    infoResponseJson = buildInfoResponse(false);
+  };
+  const rebuildHealthResponse = (): void => {
+    const contexts = deps.contexts();
+    const primaryContext = contexts[0] ?? null;
+    const filteredVisibleHubs = visibleHubs.filter(profile =>
+      primaryContext ? sameJurisdiction(primaryContext, profile) : true,
+    );
+    const bootstrap = deps.bootstrap();
+    const directInput = deps.directInput();
+    healthResponseJson = buildMarketMakerHealthResponseJson({
+      env: deps.env,
+      contexts,
+      cachedHealth: currentHealth,
+      visibleHubs: filteredVisibleHubs,
+      allVisibleHubs,
+      activeEntityId: deps.activeEntityId(),
+      startupPhase: deps.startupPhase(),
+      expectedHubCount: resolvedArgs.meshHubNames.length,
+      readyHash: bootstrap.readyHash,
+      runtimeStateHash: bootstrap.runtimeStateHash,
+      entityStateHash: bootstrap.entityStateHash,
+      restoredEntityStateHash: bootstrap.restoredEntityStateHash,
+      readyAt: bootstrap.readyAt,
+      lastDirectEntityInput: directInput.lastSeen,
+      lastDirectEntityInputError: directInput.lastError,
+    });
+    rebuildInfoResponse();
+  };
+  const publish = (
+    options: { includeCross?: boolean; crossOverride?: MarketMakerHealth['cross'] } = {},
+  ): MarketMakerHealth | null => {
+    const health = buildSnapshot(options);
+    if (health) currentHealth = health;
+    rebuildHealthResponse();
+    return health;
+  };
+  const publishBootstrap = (): MarketMakerHealth | null => {
+    if (!deps.bootstrapCrossStarted()) return publish({ includeCross: false });
+    const hubs = readVisibleHubProfiles(deps.env, true);
+    const plan = buildMarketMakerCrossPlanSummary([...deps.contexts()], hubs, new Map(deps.tokenIdsByContext()));
+    return publish({ includeCross: false, crossOverride: buildPlannedMarketMakerCrossHealth(plan) });
+  };
+  const publishReady = (): MarketMakerHealth | null => {
+    if (!currentHealth || !isMarketMakerCrossDepthComplete(currentHealth)) return publish({ includeCross: true });
+    return publish({ includeCross: false, crossOverride: currentHealth.cross });
+  };
+  return {
+    buildSnapshot,
+    buildInfoResponse,
+    rebuildInfoResponse,
+    rebuildHealthResponse,
+    publish,
+    publishBootstrap,
+    publishReady,
+    readCurrentHealth: (): MarketMakerHealth | null => currentHealth,
+    setCurrentHealth: (health: MarketMakerHealth): void => {
+      currentHealth = health;
+    },
+    readHealthResponseJson: (): string | null => healthResponseJson,
+    readInfoResponseJson: (): string | null => infoResponseJson,
+  };
+};
+
 type MarketMakerHttpHandlerDeps = {
   env: RuntimeState;
   httpDrain: ReturnType<typeof createHttpDrainTracker>;
@@ -1275,11 +1396,6 @@ export const runMarketMakerNode = async (): Promise<void> => {
   let activeMmEntityId: string | null = null;
   let mmContexts: MarketMakerEntityContext[] = [];
   let mmTokenIdsByContext: Map<string, number[]> = new Map();
-  let cachedMarketMakerHealth: MarketMakerHealth | null = null;
-  let cachedVisibleHubProfiles: HubProfile[] = [];
-  let cachedAllVisibleHubProfiles: HubProfile[] = [];
-  let cachedHealthResponseJson: string | null = null;
-  let cachedInfoResponseJson: string | null = null;
   let bootstrapReadyHash: string | null = null;
   let bootstrapRuntimeStateHash: string | null = null;
   let bootstrapEntityStateHash: string | null = null;
@@ -1295,105 +1411,25 @@ export const runMarketMakerNode = async (): Promise<void> => {
     event: string,
     fields: Record<string, unknown> = {},
   ): void => emitNodeBootstrapDebugEvent(env, startupPhase, activeMmEntityId, event, fields);
-
-  const buildMarketMakerHealthSnapshot = (
-    options: {
-      includeCross?: boolean;
-      crossOverride?: MarketMakerHealth['cross'];
-    } = {},
-  ): MarketMakerHealth | null => {
-    const snapshot = computeMarketMakerHealthSnapshot(
-      env,
-      mmContexts,
-      activeMmEntityId,
-      mmTokenIdsByContext,
-      options,
-    );
-    cachedVisibleHubProfiles = snapshot.visibleHubs;
-    cachedAllVisibleHubProfiles = snapshot.allVisibleHubs;
-    return snapshot.health;
-  };
-
-  const buildInfoResponseJson = (includeCrossDebug = false): string => {
-    return buildMarketMakerInfoResponseJson({
-      env,
-      contexts: mmContexts,
-      tokenIdsByContext: mmTokenIdsByContext,
-      currentHealth: cachedMarketMakerHealth,
-      activeEntityId: activeMmEntityId,
-      startupPhase,
+  const healthController = createMarketMakerHealthController({
+    env,
+    contexts: () => mmContexts,
+    tokenIdsByContext: () => mmTokenIdsByContext,
+    activeEntityId: () => activeMmEntityId,
+    startupPhase: () => startupPhase,
+    bootstrapCrossStarted: () => bootstrapCrossStarted,
+    bootstrap: () => ({
       readyHash: bootstrapReadyHash,
       runtimeStateHash: bootstrapRuntimeStateHash,
       entityStateHash: bootstrapEntityStateHash,
       restoredEntityStateHash,
       readyAt: bootstrapReadyAt,
-    }, includeCrossDebug);
-  };
-
-  const rebuildCachedInfoResponseJson = (): void => {
-    cachedInfoResponseJson = buildInfoResponseJson(false);
-  };
-
-  const rebuildCachedHealthResponseJson = (): void => {
-    const primaryContext = mmContexts[0] ?? null;
-    const visibleHubs = cachedVisibleHubProfiles.filter(profile =>
-      primaryContext ? sameJurisdiction(primaryContext, profile) : true,
-    );
-    cachedHealthResponseJson = buildMarketMakerHealthResponseJson({
-      env,
-      contexts: mmContexts,
-      cachedHealth: cachedMarketMakerHealth,
-      visibleHubs,
-      allVisibleHubs: cachedAllVisibleHubProfiles,
-      activeEntityId: activeMmEntityId,
-      startupPhase,
-      expectedHubCount: resolvedArgs.meshHubNames.length,
-      readyHash: bootstrapReadyHash,
-      runtimeStateHash: bootstrapRuntimeStateHash,
-      entityStateHash: bootstrapEntityStateHash,
-      restoredEntityStateHash,
-      readyAt: bootstrapReadyAt,
-      lastDirectEntityInput,
-      lastDirectEntityInputError,
-    });
-    rebuildCachedInfoResponseJson();
-  };
-
-  const publishMarketMakerHealthSnapshot = (
-    options: {
-      includeCross?: boolean;
-      crossOverride?: MarketMakerHealth['cross'];
-    } = {},
-  ): MarketMakerHealth | null => {
-    const health = buildMarketMakerHealthSnapshot(options);
-    if (health) cachedMarketMakerHealth = health;
-    rebuildCachedHealthResponseJson();
-    return health;
-  };
-
-  const buildBootstrapCrossHealthOverride = (): MarketMakerHealth['cross'] => {
-    const visibleHubs = readVisibleHubProfiles(env, true);
-    const plan = buildMarketMakerCrossPlanSummary(mmContexts, visibleHubs, mmTokenIdsByContext);
-    return buildPlannedMarketMakerCrossHealth(plan);
-  };
-
-  const publishBootstrapHealthSnapshot = (): MarketMakerHealth | null =>
-    publishMarketMakerHealthSnapshot(
-      bootstrapCrossStarted
-        ? { includeCross: false, crossOverride: buildBootstrapCrossHealthOverride() }
-        : { includeCross: false },
-    );
-
-  const publishReadyHealthSnapshot = (): MarketMakerHealth | null => {
-    const currentHealth = cachedMarketMakerHealth;
-    if (!currentHealth || !isMarketMakerCrossDepthComplete(currentHealth)) {
-      return publishMarketMakerHealthSnapshot({ includeCross: true });
-    }
-    return publishMarketMakerHealthSnapshot({
-      includeCross: false,
-      crossOverride: currentHealth.cross,
-    });
-  };
+    }),
+    directInput: () => ({
+      lastSeen: lastDirectEntityInput,
+      lastError: lastDirectEntityInputError,
+    }),
+  });
 
   const buildAccountStatusDebug = (
     entityId: string,
@@ -1485,12 +1521,12 @@ export const runMarketMakerNode = async (): Promise<void> => {
       currentRuntimeHeight,
       getActiveEntityId: () => activeMmEntityId,
       buildAccountStatusDebug,
-      buildInfoResponseJson,
-      readCachedInfoResponseJson: () => cachedInfoResponseJson,
-      rebuildCachedInfoResponseJson,
-      buildHealthSnapshot: () => buildMarketMakerHealthSnapshot({ includeCross: true }),
-      readCachedHealthResponseJson: () => cachedHealthResponseJson,
-      rebuildCachedHealthResponseJson,
+      buildInfoResponseJson: healthController.buildInfoResponse,
+      readCachedInfoResponseJson: healthController.readInfoResponseJson,
+      rebuildCachedInfoResponseJson: healthController.rebuildInfoResponse,
+      buildHealthSnapshot: () => healthController.buildSnapshot({ includeCross: true }),
+      readCachedHealthResponseJson: healthController.readHealthResponseJson,
+      rebuildCachedHealthResponseJson: healthController.rebuildHealthResponse,
       stopRuntimeLoops: () => {
         shuttingDown = true;
         if (loop) clearInterval(loop);
@@ -1583,10 +1619,10 @@ export const runMarketMakerNode = async (): Promise<void> => {
   const buildBootstrapCompletionHealth = (): MarketMakerHealth | null => {
     if (bootstrapCompletionHealthHeight === env.height) return bootstrapCompletionHealth;
     bootstrapCompletionHealthHeight = env.height;
-    bootstrapCompletionHealth = buildMarketMakerHealthSnapshot({ includeCross: true });
+    bootstrapCompletionHealth = healthController.buildSnapshot({ includeCross: true });
     if (bootstrapCompletionHealth) {
-      cachedMarketMakerHealth = bootstrapCompletionHealth;
-      rebuildCachedHealthResponseJson();
+      healthController.setCurrentHealth(bootstrapCompletionHealth);
+      healthController.rebuildHealthResponse();
     }
     return bootstrapCompletionHealth;
   };
@@ -1673,7 +1709,9 @@ export const runMarketMakerNode = async (): Promise<void> => {
       if (!shouldContinue()) return false;
       if (!areMarketMakerHubTransportsReady(getP2PState(env), visibleHubs)) return false;
       await yieldMarketMakerApi();
-      const healthBeforeQuotes = mode === 'bootstrap' ? buildMarketMakerHealthSnapshot({ includeCross: false }) : null;
+      const healthBeforeQuotes = mode === 'bootstrap'
+        ? healthController.buildSnapshot({ includeCross: false })
+        : null;
       const primarySameDepthReady = isMarketMakerSameDepthComplete(healthBeforeQuotes);
 
       if (mode === 'bootstrap') {
@@ -1695,7 +1733,7 @@ export const runMarketMakerNode = async (): Promise<void> => {
         if (!bootstrapCrossStarted) {
           bootstrapCrossStarted = true;
           startupPhase = 'bootstrap-cross';
-          rebuildCachedHealthResponseJson();
+          healthController.rebuildHealthResponse();
           emitBootstrapDebugEvent('phase', {
             phase: startupPhase,
             health: summarizeMarketMakerHealthForDebug(healthBeforeQuotes),
@@ -1797,7 +1835,7 @@ export const runMarketMakerNode = async (): Promise<void> => {
       );
     }
     const assertStartedAt = Date.now();
-    const health = assertMarketMakerBootstrapFinalized(env, publishMarketMakerHealthSnapshot({ includeCross: true }));
+    const health = assertMarketMakerBootstrapFinalized(env, healthController.publish({ includeCross: true }));
     emitBootstrapDebugEvent('finalize-step', {
       step: 'assert-finalized',
       durationMs: Date.now() - assertStartedAt,
@@ -1824,8 +1862,8 @@ export const runMarketMakerNode = async (): Promise<void> => {
     bootstrapEntityStateHash = finalization.entityStateHash;
     bootstrapReadyAt = Date.now();
     startupPhase = 'offers-ready';
-    cachedMarketMakerHealth = finalization.health;
-    rebuildCachedHealthResponseJson();
+    healthController.setCurrentHealth(finalization.health);
+    healthController.rebuildHealthResponse();
   };
 
   const finalizeMarketMakerBootstrapState = (): MarketMakerBootstrapFinalization => {
@@ -1899,7 +1937,7 @@ export const runMarketMakerNode = async (): Promise<void> => {
       phase: startupPhase,
       health: summarizeMarketMakerHealthForDebug(health),
     });
-    rebuildCachedHealthResponseJson();
+    healthController.rebuildHealthResponse();
   };
 
   const waitForBootstrapOffers = async (): Promise<MarketMakerHealth | null> => {
@@ -1987,15 +2025,15 @@ export const runMarketMakerNode = async (): Promise<void> => {
           ? Math.max(env.lastProcessEnteredAt ?? 0, env.activeProcessProgressAt ?? 0)
           : undefined,
       );
-      assertBootstrapNotStalled(cachedMarketMakerHealth);
+      assertBootstrapNotStalled(healthController.readCurrentHealth());
       if (hasMarketMakerRuntimeBacklog(env)) {
-        observeProgress('runtime-backlog', cachedMarketMakerHealth);
+        observeProgress('runtime-backlog', healthController.readCurrentHealth());
         bootstrapCompletionCheckArmed = false;
         await yieldMarketMakerApi();
         await sleep(MARKET_MAKER_BOOTSTRAP_LOOP_MS);
         continue;
       }
-      const beforeDrive = publishBootstrapHealthSnapshot();
+      const beforeDrive = healthController.publishBootstrap();
       observeProgress('health', beforeDrive);
       refreshBootstrapPhase(beforeDrive);
       await yieldMarketMakerApi();
@@ -2019,13 +2057,13 @@ export const runMarketMakerNode = async (): Promise<void> => {
         bootstrapCompletionCheckArmed = false;
       }
       if (hasMarketMakerRuntimeBacklog(env)) {
-        observeProgress('runtime-backlog', cachedMarketMakerHealth);
+        observeProgress('runtime-backlog', healthController.readCurrentHealth());
         bootstrapCompletionCheckArmed = false;
         await sleep(MARKET_MAKER_BOOTSTRAP_LOOP_MS);
         continue;
       }
       bootstrapWorkStartedAt = updateBootstrapWorkStartedAt(bootstrapWorkStartedAt, false, Date.now());
-      const health = publishBootstrapHealthSnapshot();
+      const health = healthController.publishBootstrap();
       observeProgress('health', health);
       refreshBootstrapPhase(health);
       if (!enqueued && canCheckBootstrapCompletion()) {
@@ -2054,9 +2092,9 @@ export const runMarketMakerNode = async (): Promise<void> => {
     healthRefreshInFlight = true;
     try {
       if (startupPhase === 'offers-ready') {
-        publishReadyHealthSnapshot();
+        healthController.publishReady();
       } else {
-        publishBootstrapHealthSnapshot();
+        healthController.publishBootstrap();
       }
     } finally {
       healthRefreshInFlight = false;
@@ -2065,15 +2103,15 @@ export const runMarketMakerNode = async (): Promise<void> => {
   const runQuoteMaintenance = async (): Promise<void> => {
     if (hasMarketMakerRuntimeBacklog(env)) return;
     if (startupPhase === 'offers-ready') {
-      const before = publishReadyHealthSnapshot();
+      const before = healthController.publishReady();
       if (isMarketMakerFullDepthComplete(before)) return;
       await driveQuotes('steady');
-      const after = publishReadyHealthSnapshot();
-      if (!isMarketMakerFullDepthComplete(after)) publishMarketMakerHealthSnapshot({ includeCross: true });
+      const after = healthController.publishReady();
+      if (!isMarketMakerFullDepthComplete(after)) healthController.publish({ includeCross: true });
       return;
     }
     const enqueued = await driveQuotes();
-    publishBootstrapHealthSnapshot();
+    healthController.publishBootstrap();
     if (startupPhase !== 'offers-ready' && !enqueued && canCheckBootstrapCompletion()) {
       const completionHealth = buildBootstrapCompletionHealth();
       if (isBootstrapDepthComplete(completionHealth)) {
@@ -2108,7 +2146,7 @@ export const runMarketMakerNode = async (): Promise<void> => {
     }, MARKET_MAKER_HEALTH_REFRESH_MS);
   };
   startupPhase = 'runtime-ready';
-  publishMarketMakerHealthSnapshot({ includeCross: false });
+  healthController.publish({ includeCross: false });
   startHealthRefreshLoop();
   emitBootstrapDebugEvent('phase', { phase: startupPhase });
   nodeLog.info('runtime.ready', {
@@ -2122,7 +2160,7 @@ export const runMarketMakerNode = async (): Promise<void> => {
     await sleep(MARKET_MAKER_BOOTSTRAP_START_DELAY_MS);
     if (shuttingDown) return;
     startupPhase = 'bootstrap-same-chain';
-    publishBootstrapHealthSnapshot();
+    healthController.publishBootstrap();
     emitBootstrapDebugEvent('phase', { phase: startupPhase });
     while (!shuttingDown) {
       const bootstrapHealth = await waitForBootstrapOffers();
