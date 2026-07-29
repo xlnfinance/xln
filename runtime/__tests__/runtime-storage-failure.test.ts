@@ -37,8 +37,8 @@ const prepareFrame = (seed: string) => {
   };
 
   const transaction = createRuntimeFrameTransaction(live);
-  transaction.workingEnv.height = 8;
-  transaction.workingEnv.timestamp = 800;
+  live.height = 8;
+  live.timestamp = 800;
   const frame = createFrameExecutionState();
   frame.transaction = transaction;
   return { live, transaction, frame, stopped };
@@ -77,18 +77,21 @@ describe('Runtime WAL storage failure boundary', () => {
     )).toBe('conflict');
   });
 
-  test('leaves a not-committed candidate for the normal rollback path', async () => {
+  test('leaves a known-undurable in-place frame for the failure path to halt and reload', async () => {
     const { live, transaction, frame, stopped } = prepareFrame('wal-not-committed');
 
     await handleRuntimeFrameStorageFailure(
       'not-committed',
       new Error('append rejected'),
       live,
-      transaction.workingEnv,
+      live,
       frame,
     );
 
-    expect(live.height).toBe(7);
+    // The owned Runtime has already mutated. This helper only classifies WAL
+    // durability; the enclosing frame failure path halts and restores input.
+    // Rolling State back here would reintroduce the deleted shadow Runtime.
+    expect(live.height).toBe(8);
     expect(transaction.published).toBe(false);
     expect(frame.commitDisposition).toBe('undurable');
     expect(frame.reliableReceiptStateDurable).toBe(false);
@@ -102,7 +105,7 @@ describe('Runtime WAL storage failure boundary', () => {
       'committed',
       new Error('post-commit confirmation failed'),
       live,
-      transaction.workingEnv,
+      live,
       frame,
     );
 
@@ -116,32 +119,24 @@ describe('Runtime WAL storage failure boundary', () => {
     expect(stopped.count).toBe(1);
   });
 
-  test('halts at the last proven frame when WAL durability is unknown', async () => {
+  test('halts the mutated Runtime when WAL durability is unknown', async () => {
     const { live, transaction, frame, stopped } = prepareFrame('wal-unknown');
-    let candidateHandleClosed = 0;
-    const candidateState = ensureRuntimeState(transaction.workingEnv);
-    candidateState.storageDb = {
-      close: async () => {
-        candidateHandleClosed += 1;
-      },
-    } as typeof candidateState.storageDb;
 
     await handleRuntimeFrameStorageFailure(
       'unknown',
       new Error('append confirmation timed out'),
       live,
-      transaction.workingEnv,
+      live,
       frame,
     );
 
-    expect(live.height).toBe(7);
-    expect(live.timestamp).toBe(700);
+    expect(live.height).toBe(8);
+    expect(live.timestamp).toBe(800);
     expect(transaction.published).toBe(false);
     expect(frame.commitDisposition).toBe('unknown');
     expect(frame.reliableReceiptStateDurable).toBe(false);
     expect(ensureRuntimeState(live).lifecyclePhase).toBe('halted');
-    expect(ensureRuntimeState(live).fatalDebugPayload?.height).toBe(7);
-    expect(candidateHandleClosed).toBe(1);
+    expect(ensureRuntimeState(live).fatalDebugPayload?.height).toBe(8);
     expect(stopped.count).toBe(1);
   });
 
@@ -152,11 +147,11 @@ describe('Runtime WAL storage failure boundary', () => {
       'conflict',
       new Error('another frame already owns this height'),
       live,
-      transaction.workingEnv,
+      live,
       frame,
     );
 
-    expect(live.height).toBe(7);
+    expect(live.height).toBe(8);
     expect(transaction.published).toBe(false);
     expect(frame.commitDisposition).toBe('conflict');
     expect(frame.reliableReceiptStateDurable).toBe(false);
@@ -165,7 +160,7 @@ describe('Runtime WAL storage failure boundary', () => {
   });
 });
 
-test('real write timeout keeps RAM stale until restart loads WAL truth', async () => {
+test('real write timeout makes mutated RAM unreadable until restart loads WAL truth', async () => {
   const seed = `runtime storage timeout ${process.pid} ${Date.now()} deterministic seed`;
   const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
   removeRuntimeStorage(runtimeId);
@@ -191,9 +186,9 @@ test('real write timeout keeps RAM stale until restart loads WAL truth', async (
     fatalHeight: number;
   };
   expect(result.failure).toContain('RUNTIME_FRAME_STORAGE_UNKNOWN');
-  expect(result.height).toBe(1);
+  expect(result.height).toBe(2);
   expect(result.lifecycle).toBe('halted');
-  expect(result.fatalHeight).toBe(1);
+  expect(result.fatalHeight).toBe(2);
 
   const restored = await loadEnvFromDB(runtimeId, seed);
   if (!restored) throw new Error('timeout fixture did not leave durable Runtime state');

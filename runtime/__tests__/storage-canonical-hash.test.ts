@@ -269,7 +269,7 @@ test('replay oracle canonicalizes empty optional Runtime input queues', () => {
     .toEqual(buildReplayVerifiableRuntimeMachineSnapshot(base));
 });
 
-test('replay oracle canonicalizes the non-halted default but preserves a halt', () => {
+test('replay oracle excludes process-local Runtime lifecycle failures', () => {
   const base = {
     eReplicas: new Map(),
     jReplicas: new Map(),
@@ -281,7 +281,7 @@ test('replay oracle canonicalizes the non-halted default but preserves a halt', 
   expect(buildReplayVerifiableRuntimeMachineSnapshot(running))
     .toEqual(buildReplayVerifiableRuntimeMachineSnapshot(base));
   expect(buildReplayVerifiableRuntimeMachineSnapshot(halted))
-    .toMatchObject({ runtimeState: { halted: true } });
+    .toEqual(buildReplayVerifiableRuntimeMachineSnapshot(base));
 });
 
 test('canonical storage hash is deterministic across orderbook pair index insertion order', () => {

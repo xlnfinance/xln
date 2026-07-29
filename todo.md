@@ -289,6 +289,8 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   publishes only post-commit snapshots. The single writer prevents competing
   transitions, not asynchronous reads during the WAL `await`; no caller may
   observe speculative balances from the owned live object.
+  Close the currently proven gaps in `server/entity-lookup.ts`,
+  `server/health.ts` and direct frontend Runtime references.
   Extract transaction, commit, recovery and dispatch modules; keep
   `runtime/core.ts` a short composition root with no alternate commit path.
   Precompute every expected throwing assertion before mutation; any doubt
@@ -479,6 +481,10 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   `frameCloneMs`, cloned replica/account/profile counts, estimated cloned bytes
   and cross-J preview clone time. A frame touching one account must not scale
   linearly when untouched accounts grow from 10,000 to 100,000.
+  Remove the remaining full Runtime clone in atomic cross-J preflight, replace
+  the full settlement refresh and cross-book/order scans with explicit dirty
+  indexes, and benchmark signature/verification/Hanko throughput separately
+  from reducers before claiming 100k tx/s.
 - [ ] Replace case-insensitive Account scans and repeated signer/pair lookups
   with canonical direct indexes, including exact cross-J replica/account
   descriptors; then introduce Runtime→Entity→Account COW only behind

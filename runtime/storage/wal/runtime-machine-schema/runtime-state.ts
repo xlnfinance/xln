@@ -133,7 +133,7 @@ const validateSecurityIncident = (value: unknown, code: string): void => {
 export const validateDurableRuntimeState = (value: unknown, code: string): void => {
   const state = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(state, [], [
-    'halted', 'fatalDebugPayload', 'maxEntityInputsPerFrame', 'maxEntityTxsPerFrame',
+    'maxEntityInputsPerFrame', 'maxEntityTxsPerFrame',
     'pendingAuditEvents', 'securityIncidents', 'pendingHistoryRecords', 'deferredNetworkMeta',
     'reliableIngressReceiptLedger', 'reliableIngressTerminalWatermarks',
     'receivedReliableReceiptLedger', 'receivedReliableTerminalWatermarks',
@@ -141,15 +141,6 @@ export const validateDurableRuntimeState = (value: unknown, code: string): void 
     'runtimeAdapterCommandFrontiers', 'pendingCommittedJOutbox', 'pendingJurisdictionImports',
     'numberedRegistrationIntents', 'certifiedRegistrationEvidence',
   ], `${code}_FIELDS`);
-  if (state['halted'] !== undefined) requireBoolean(state['halted'], `${code}_HALTED`);
-  if (state['fatalDebugPayload'] !== undefined) {
-    const fatal = requireBoundaryRecord(state['fatalDebugPayload'], `${code}_FATAL`);
-    requireExactBoundaryKeys(fatal, ['message'], ['stack', 'height', 'timestamp'], `${code}_FATAL_FIELDS`);
-    requireString(fatal['message'], `${code}_FATAL_MESSAGE`);
-    if (fatal['stack'] !== undefined) requireString(fatal['stack'], `${code}_FATAL_STACK`);
-    if (fatal['height'] !== undefined) requireBoundaryInteger(fatal['height'], `${code}_FATAL_HEIGHT`);
-    if (fatal['timestamp'] !== undefined) requireBoundaryInteger(fatal['timestamp'], `${code}_FATAL_TIMESTAMP`);
-  }
   for (const field of ['maxEntityInputsPerFrame', 'maxEntityTxsPerFrame']) {
     if (state[field] !== undefined) requireBoundaryInteger(state[field], `${code}_${field.toUpperCase()}`, 1);
   }

@@ -214,8 +214,6 @@ const hasDurableEntries = (value: unknown): boolean => {
 };
 
 const DURABLE_RUNTIME_STATE_KEYS = [
-  'halted',
-  'fatalDebugPayload',
   'maxEntityInputsPerFrame',
   'maxEntityTxsPerFrame',
   'securityIncidents',
@@ -245,8 +243,6 @@ const buildDurableRuntimeStateSnapshot = (
   const state = env.runtimeState;
   if (!state) return undefined;
   const durable = {
-    ...(state.halted === true ? { halted: true } : {}),
-    ...(state.fatalDebugPayload ? { fatalDebugPayload: structuredClone(state.fatalDebugPayload) } : {}),
     ...(state.maxEntityInputsPerFrame !== undefined ? { maxEntityInputsPerFrame: state.maxEntityInputsPerFrame } : {}),
     ...(state.maxEntityTxsPerFrame !== undefined ? { maxEntityTxsPerFrame: state.maxEntityTxsPerFrame } : {}),
     ...(hasDurableEntries(state.securityIncidents) ? { securityIncidents: structuredClone(state.securityIncidents) } : {}),
