@@ -45,7 +45,6 @@ import { readAndAssertRpcChainId } from './rpc-network';
 import {
   PROCESS_BATCH_GAS_FLOOR,
   applyProcessBatchGasFloor,
-  decodeDisputeFinalizationEvidenceCalldata,
   resolveDisputeFinalizationEvidence,
   isTransientRpcUnavailableError,
   isTronChainId,
@@ -54,8 +53,6 @@ import {
   rpcLog,
   shouldEmitExternalWalletAllowanceDelta,
   shouldEmitExternalWalletBalanceDelta,
-  type ExternalWalletTrackedOwnerCursor,
-  type TxFinalizationEvidence,
 } from './rpc-public';
 import { createRpcReadMethods } from './rpc-reads';
 import { createRpcTransactionSequencer } from './rpc-transaction-sequencer';
@@ -125,6 +122,12 @@ import {
   type TxOverrides,
   type UntypedNonPayableMethod,
 } from './rpc-boundary';
+import {
+  buildTrackedExternalOwners,
+  createTxFinalizationEvidenceReader,
+  createWatchedErc20TokenReader,
+  normalizeEvmAddress,
+} from './rpc-watcher-inputs';
 
 const requireWatcherBlockHash = (
   events: readonly JEventIngress[],
@@ -1414,171 +1417,6 @@ export async function createRpcAdapter(
         'event Transfer(address indexed from, address indexed to, uint256 value)',
         'event Approval(address indexed owner, address indexed spender, uint256 value)',
       ]);
-      let erc20WatchTokensCache: Array<{ tokenId: number; address: string }> = [];
-      let erc20WatchTokensLoadedAt = 0;
-      const normalizeEvmAddress = (value: unknown): string => {
-        const candidate = String(value || '')
-          .trim()
-          .toLowerCase();
-        return /^0x[0-9a-f]{40}$/.test(candidate) ? candidate : '';
-      };
-      const readWatchedErc20Tokens = async (): Promise<Array<{ tokenId: number; address: string }>> => {
-        const now = Date.now();
-        if (erc20WatchTokensCache.length > 0 && now - erc20WatchTokensLoadedAt < 10_000) {
-          return erc20WatchTokensCache;
-        }
-        const tokens: Array<{ tokenId: number; address: string }> = [];
-        try {
-          const length = Number(await depository.getTokensLength());
-          for (let tokenId = 1; tokenId < length; tokenId++) {
-            const [contractAddress] = await depository._tokens(tokenId);
-            const normalized = normalizeEvmAddress(contractAddress);
-            if (!normalized || normalized === ethers.ZeroAddress) continue;
-            tokens.push({ tokenId, address: normalized });
-          }
-        } catch (error) {
-          emitWatcherDebug({
-            event: 'j_watch_erc20_registry_read_failed',
-            error: watcherErrorDetails(error),
-          });
-          // The token set defines which log addresses belong to the canonical
-          // observation. Advancing the cursor with a stale/empty registry can
-          // permanently omit a newly registered token's Transfer/Approval.
-          // Abort this poll so the same block range is retried after RPC heals.
-          throw new Error(
-            `J_WATCH_ERC20_REGISTRY_READ_FAILED:${error instanceof Error ? error.message : String(error)}`,
-          );
-        }
-        erc20WatchTokensCache = tokens;
-        erc20WatchTokensLoadedAt = now;
-        return erc20WatchTokensCache;
-      };
-      const buildTrackedExternalOwners = (activeEnv: RuntimeState): Map<string, ExternalWalletTrackedOwnerCursor[]> => {
-        const owners = new Map<string, Map<string, ExternalWalletTrackedOwnerCursor>>();
-        const readBlock = (value: unknown): number => {
-          const numeric = Number(value || 0);
-          return Number.isFinite(numeric) && numeric > 0 ? Math.floor(numeric) : 0;
-        };
-        const getTracked = (owner: string, entityId: string): ExternalWalletTrackedOwnerCursor | null => {
-          const normalizedOwner = normalizeEvmAddress(owner);
-          const normalizedEntity = String(entityId || '')
-            .trim()
-            .toLowerCase();
-          if (!normalizedOwner || !normalizedEntity) return null;
-          let byEntity = owners.get(normalizedOwner);
-          if (!byEntity) {
-            byEntity = new Map();
-            owners.set(normalizedOwner, byEntity);
-          }
-          let tracked = byEntity.get(normalizedEntity);
-          if (!tracked) {
-            tracked = {
-              entityId: normalizedEntity,
-              watchAfterBlock: 0,
-              balanceAfterBlockByToken: new Map(),
-              allowanceAfterBlockByKey: new Map(),
-            };
-            byEntity.set(normalizedEntity, tracked);
-          }
-          return tracked;
-        };
-        for (const replica of activeEnv.eReplicas?.values?.() || []) {
-          const entityId = String(replica.state?.entityId || replica.entityId || '')
-            .trim()
-            .toLowerCase();
-          const externalWallet = replica.state?.externalWallet;
-          if (!entityId || !externalWallet) continue;
-          for (const [owner, balances] of externalWallet.balances?.entries?.() || []) {
-            const tracked = getTracked(owner, entityId);
-            if (!tracked) continue;
-            for (const [tokenAddress, record] of balances.entries()) {
-              const normalizedToken = normalizeEvmAddress(tokenAddress);
-              if (!normalizedToken) continue;
-              tracked.balanceAfterBlockByToken.set(
-                normalizedToken,
-                Math.max(tracked.balanceAfterBlockByToken.get(normalizedToken) ?? 0, readBlock(record.jHeight)),
-              );
-            }
-          }
-          for (const [owner, allowances] of externalWallet.allowances?.entries?.() || []) {
-            const tracked = getTracked(owner, entityId);
-            if (!tracked) continue;
-            for (const [allowanceKey, record] of allowances.entries()) {
-              const [tokenAddress, spender] = String(allowanceKey || '').split(':');
-              const normalizedToken = normalizeEvmAddress(tokenAddress);
-              const normalizedSpender = normalizeEvmAddress(spender);
-              if (!normalizedToken || !normalizedSpender) continue;
-              const key = `${normalizedToken}:${normalizedSpender}`;
-              tracked.allowanceAfterBlockByKey.set(
-                key,
-                Math.max(tracked.allowanceAfterBlockByKey.get(key) ?? 0, readBlock(record.jHeight)),
-              );
-            }
-          }
-        }
-        for (const [entityId, entityOwners] of activeEnv.runtimeState?.externalWalletWatchOwners?.entries?.() || []) {
-          for (const [owner, afterBlock] of entityOwners) {
-            const tracked = getTracked(owner, entityId);
-            if (!tracked) continue;
-            tracked.watchAfterBlock = Math.max(tracked.watchAfterBlock, readBlock(afterBlock));
-          }
-        }
-        return new Map(
-          [...owners.entries()].map(([owner, entityBlocks]) => [
-            owner,
-            [...entityBlocks.values()].sort((left, right) => compareStableText(left.entityId, right.entityId)),
-          ]),
-        );
-      };
-      const txFinalizationEvidenceCache = new Map<string, Promise<TxFinalizationEvidence[]>>();
-      const readTxFinalizationEvidence = async (txHash: string): Promise<TxFinalizationEvidence[]> => {
-        const normalizedHash = String(txHash || '').toLowerCase();
-        if (!normalizedHash || normalizedHash === '0x') {
-          throw new Error('J_DISPUTE_FINALIZATION_TX_HASH_MISSING');
-        }
-        const cached = txFinalizationEvidenceCache.get(normalizedHash);
-        if (cached) return await cached;
-        const promise = (async (): Promise<TxFinalizationEvidence[]> => {
-          const txProvider = provider as Provider & {
-            getTransaction?: (hash: string) => Promise<{ data?: string } | null>;
-          };
-          if (typeof txProvider.getTransaction !== 'function') {
-            throw new Error('J_DISPUTE_FINALIZATION_TX_LOOKUP_UNAVAILABLE');
-          }
-          const tx = await txProvider.getTransaction(txHash);
-          const data = typeof tx?.data === 'string' ? tx.data : '';
-          if (!data || data === '0x') {
-            throw new Error(`J_DISPUTE_FINALIZATION_TX_CALLDATA_MISSING:${normalizedHash}`);
-          }
-          return decodeDisputeFinalizationEvidenceCalldata(data);
-        })();
-        txFinalizationEvidenceCache.set(normalizedHash, promise);
-        if (txFinalizationEvidenceCache.size > 2_000) {
-          const oldest = txFinalizationEvidenceCache.keys().next().value;
-          if (oldest) txFinalizationEvidenceCache.delete(oldest);
-        }
-        try {
-          return await promise;
-        } catch (error) {
-          // A transient RPC failure must be retryable on the next watcher poll;
-          // retaining a rejected Promise would permanently poison this tx hash.
-          if (txFinalizationEvidenceCache.get(normalizedHash) === promise) {
-            txFinalizationEvidenceCache.delete(normalizedHash);
-          }
-          throw error;
-        }
-      };
-      const findDisputeFinalizationEvidence = async (
-        txHash: string,
-        args: Record<string, unknown>,
-      ): Promise<DisputeFinalizationEvidence | undefined> => {
-        return resolveDisputeFinalizationEvidence(
-          await readTxFinalizationEvidence(txHash),
-          txHash,
-          args,
-        );
-      };
-
       const emitWatcherDebug = (payload: Record<string, unknown>) => {
         const p2p = watcherEnv?.runtimeState?.p2p;
         if (isDebugEventEmitter(p2p)) {
@@ -1589,6 +1427,13 @@ export async function createRpcAdapter(
           });
         }
       };
+      const readWatchedErc20Tokens = createWatchedErc20TokenReader(depository, emitWatcherDebug);
+      const readTxFinalizationEvidence = createTxFinalizationEvidenceReader(provider);
+      const findDisputeFinalizationEvidence = async (
+        txHash: string,
+        args: Record<string, unknown>,
+      ): Promise<DisputeFinalizationEvidence | undefined> =>
+        resolveDisputeFinalizationEvidence(await readTxFinalizationEvidence(txHash), txHash, args);
       const readCommittedWatcherCursor = (activeEnv: RuntimeState): number =>
         Math.max(0, getWatcherStartBlock(activeEnv, addresses.depository, config.chainId) - 1);
       const commitScannedWatcherCursor = (activeEnv: RuntimeState, candidateCursor: number): number => {
