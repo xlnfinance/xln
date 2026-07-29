@@ -61,6 +61,7 @@ const cloneEntityReplicaWithPolicy = (
   replica: EntityReplica,
   forSnapshot: boolean,
   validateClone: boolean,
+  shareFrameState = false,
 ): EntityReplica => {
   const cloneState = validateClone
     ? cloneEntityState
@@ -70,7 +71,9 @@ const cloneEntityReplicaWithPolicy = (
     signerId: replica.signerId,
     entityEncPubKey: replica.entityEncPubKey,
     entityEncPrivKey: replica.entityEncPrivKey,
-    state: cloneState(replica.state, forSnapshot),
+    state: shareFrameState
+      ? replica.state
+      : cloneState(replica.state, forSnapshot),
     mempool: Array.isArray(replica.mempool) ? [...replica.mempool] : [],
     ...(replica.proposal && {
       proposal: cloneIsolatedProposedEntityFrame(replica.proposal),
@@ -81,10 +84,9 @@ const cloneEntityReplicaWithPolicy = (
     isProposer: replica.isProposer,
     ...(replica.position && { position: { ...replica.position } }),
     ...(replica.candidate && {
-      candidate: cloneEntityCandidate(
-        replica.candidate,
-        cloneState,
-      ),
+      candidate: shareFrameState
+        ? replica.candidate
+        : cloneEntityCandidate(replica.candidate, cloneState),
     }),
     ...(replica.certifiedFrameLineage && {
       certifiedFrameLineage: structuredClone(replica.certifiedFrameLineage),
@@ -150,3 +152,21 @@ export const cloneTrustedEntityReplica = (
   replica: EntityReplica,
   forSnapshot = false,
 ): EntityReplica => cloneEntityReplicaWithPolicy(replica, forSnapshot, false);
+
+/**
+ * Fork the small consensus envelope without copying Entity frame State.
+ *
+ * Certified State is read-only until an accepted frame replaces the `state`
+ * reference. A pending candidate is also shared intentionally: every expected
+ * rejection is checked before commit finalization mutates its Hanko witnesses.
+ * Any exception after that mutation is a programming fault, so the owning
+ * Runtime halts and reloads WAL truth instead of attempting partial rollback.
+ */
+export const forkEntityReplicaForInput = (
+  replica: EntityReplica,
+): EntityReplica => cloneEntityReplicaWithPolicy(
+  replica,
+  false,
+  false,
+  true,
+);

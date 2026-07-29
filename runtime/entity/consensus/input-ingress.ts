@@ -1,6 +1,6 @@
 import { shortId } from '../../infra/logger';
 import { cloneIsolatedEntityInput } from '../../protocol/runtime-input-clone';
-import { cloneEntityReplica } from '../replica-clone';
+import { forkEntityReplicaForInput } from '../replica-clone';
 import type { EntityInput, EntityReplica, RuntimeState } from '../../types';
 import { formatEntityDisplay, HEAVY_LOGS, log } from '../../utils';
 import { copyLocalEntityLeaderTimeoutVoteAuthorization } from './leader';
@@ -100,7 +100,7 @@ export const prepareEntityInputIngress = (
 
   // Validate the exact retry bytes before canonical clone normalization can
   // discard forbidden fields or coerce malformed signature containers.
-  const workingReplica = cloneEntityReplica(replica);
+  const workingReplica = forkEntityReplicaForInput(replica);
   if (!isEntityInputWellFormed(ingressInput)) {
     const detail =
       `entityId=${ingressInput.entityId} ` +

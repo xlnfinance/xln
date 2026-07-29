@@ -2,7 +2,10 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 
 import { cloneAccountState } from '../account/state-clone';
-import { cloneEntityReplica } from '../entity/replica-clone';
+import {
+  cloneEntityReplica,
+  forkEntityReplicaForInput,
+} from '../entity/replica-clone';
 import { cloneEntityState } from '../entity/state-clone';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
 import { buildCanonicalEntityReplicaSnapshot } from '../storage/wal/snapshot';
@@ -310,6 +313,41 @@ describe('state cloning', () => {
   test('clones projection-shaped replicas without a transient mempool', () => {
     const cloned = cloneEntityReplica(makeProjectionReplica() as any);
     expect(cloned.mempool).toEqual([]);
+  });
+
+  test('Entity input fork shares frame State but isolates mutable envelope maps', () => {
+    const replica = {
+      ...makeProjectionReplica(),
+      mempool: [],
+      candidate: {
+        frameHash: `0x${'ab'.repeat(32)}`,
+        height: 1,
+        state: makeProjectionReplica().state,
+        outputs: [],
+        jOutputs: [],
+        hashesToSign: [],
+        candidateEffects: [],
+        storageChanges: [],
+      },
+      hankoWitness: new Map([[
+        `0x${'cd'.repeat(32)}`,
+        {
+          hanko: '0x01',
+          type: 'profile',
+          entityHeight: 1,
+          createdAt: 1,
+        },
+      ]]),
+    } as any;
+
+    const fork = forkEntityReplicaForInput(replica);
+    fork.hankoWitness!.clear();
+
+    expect(fork).not.toBe(replica);
+    expect(fork.state).toBe(replica.state);
+    expect(fork.candidate).toBe(replica.candidate);
+    expect(fork.mempool).not.toBe(replica.mempool);
+    expect(replica.hankoWitness.size).toBe(1);
   });
 
   test('clones local Hanko witnesses without losing or aliasing committed proofs', () => {

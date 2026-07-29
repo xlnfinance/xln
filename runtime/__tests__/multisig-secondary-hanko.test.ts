@@ -1308,6 +1308,8 @@ describe('multisig secondary Hanko production', () => {
       signerId: validators[0]!,
     });
     if (!proposed.workingReplica.proposal) throw new Error('TEST_ENTITY_PROPOSAL_MISSING');
+    if (!proposed.workingReplica.candidate) throw new Error('TEST_ENTITY_CANDIDATE_MISSING');
+    const candidateBeforeRejections = safeStringify(proposed.workingReplica.candidate);
     const validSignature = proposed.workingReplica.proposal.collectedSigs?.get(validators[0]!)?.[0];
     if (!validSignature) throw new Error('TEST_PROPOSER_SIGNATURE_MISSING');
     const upper = `0x${validators[0]!.slice(2).toUpperCase()}`;
@@ -1329,6 +1331,8 @@ describe('multisig secondary Hanko production', () => {
       });
       expect(result.outcome).toEqual({ kind: 'rejected', code });
       expect(result.workingReplica.state.height).toBe(0);
+      expect(safeStringify(result.workingReplica.candidate)).toBe(candidateBeforeRejections);
+      expect(safeStringify(proposed.workingReplica.candidate)).toBe(candidateBeforeRejections);
     }
     const wrongFrame = await applyEntityInput(setup.env, proposed.workingReplica, {
       entityId: setup.entityId,
@@ -1341,6 +1345,8 @@ describe('multisig secondary Hanko production', () => {
     });
     expect(wrongFrame.outcome).toEqual({ kind: 'rejected', code: 'PRECOMMIT_FRAME_MISMATCH' });
     expect(wrongFrame.workingReplica.state.height).toBe(0);
+    expect(safeStringify(wrongFrame.workingReplica.candidate)).toBe(candidateBeforeRejections);
+    expect(safeStringify(proposed.workingReplica.candidate)).toBe(candidateBeforeRejections);
   });
 
   test('seals ACK and next proposal drafts in semantic order with exact frame and dispute Hankos', async () => {
