@@ -93,6 +93,36 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   invariant, WAL boundary, adversarial-input boundary and intentionally
   non-obvious ordering rule. Comments must explain why the tempting alternative
   is unsafe rather than restating the code.
+- [ ] Finish one canonical jurisdiction-event pipeline and make its trust
+  boundaries mechanically visible:
+  `transport log → JEventIngress → JEvent → JurisdictionEvent → certified
+  JurisdictionEventBlock`. RPC, TRON and BrowserVM may differ only while
+  decoding transport evidence; after that they must use the same ingress,
+  relevance, fan-out, history and Runtime-input construction. Keep
+  `AccountSettled` as the single explicit one-log-to-many-event projection,
+  preserve `logIndex/eventIndex` ordering and dispute-finalization evidence,
+  and fail loud on unknown or malformed financial events. Prove that no
+  transport DTO can enter consensus directly and that required block/hash/tx
+  coordinates cannot become `0`/`0x` defaults after the witnessed boundary.
+- [ ] Delete the remaining jurisdiction-event representation and conversion
+  debt. Prove whether receipt parsing and historical watcher parsing can share
+  one canonical log decoder; merge `buildJEventsRuntimeInput` with
+  `buildJEventIngressRuntimeInput` if they are the same pipeline; and derive
+  decoder registry/type linkage from one event catalog only where this reduces
+  net LOC. Every surviving `normalize*`, `decode*`, `to*Event*` and
+  `from*Event*` must own a documented validation or trust transition.
+  Remove `RecentJEvent` from live Runtime state once the rebuildable history
+  view supplies the same receipt evidence without a second archive.
+- [ ] Split `jadapter/helpers.ts` and `createRpcAdapter` by real I/O and failure
+  boundaries, with no barrel or dependency-bag replacement. Canonical owners
+  are receipt decode, event relevance/fan-out, certified history range,
+  Runtime ingress, cursor/rewind, deployment, contract attachment, submission,
+  receipt confirmation, watcher reconciliation and wallet writes. Delete
+  duplicate gas/nonce/RPC-error policies and BrowserVM/RPC event logic as each
+  owner is extracted. Record before/after LOC, converter count and import
+  edges; require negative net LOC or a proven trust-boundary/type-safety gain.
+  Keep `rpc-adapter.ts` below 3000 throughout and drive its exact oversized
+  function allowances to zero.
 - [ ] Replace technical-history top-level folders with an owner-first tree,
   preserving the distinct guarantees as named subfolders rather than unrelated
   roots: `storage/{wal,state,views,queries,recovery}`,
@@ -185,11 +215,9 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   halt after waking, a post-WAL notification failure cannot downgrade a
   durable commit, and abort closes candidate-only storage handles without
   touching live handles.
-- [ ] Remove ephemeral Account replica fields from `AccountState`, starting
-  with `clonedForValidation`. It is currently kept out of consensus and
-  persistence by independent name-based exclusions in clone, serialization,
-  canonical hashing, projections, storage typing and Entity state-root code.
-  Move validation candidate/cache, mempool, pending frame, outbound ACK/resend
+- [ ] Remove all remaining ephemeral Account replica fields from
+  `AccountState`. Move validation candidate/cache, mempool, pending frame,
+  outbound ACK/resend
   and delivery metadata into `AccountReplica`; delete the exclusion lists only
   after old/new byte-identical Account roots and restart behavior are proven.
   Do not add a compatibility fallback: this is testnet, so make one canonical
@@ -339,7 +367,7 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   coordinators below 100–150 lines, and every file below 3000 lines. After the
   pipeline, collapse DI factories that add navigation
   without providing a real swappable boundary. The R/E/A gate is already at
-  zero functions over 100 lines. The production ratchet now owns 25 exact
+  zero functions over 100 lines. The production ratchet now owns 19 exact
   allowances over 150 lines and rejects every new/growing coordinator plus
   every file over 3000 lines; delete each allowance with its verified split.
   Start with

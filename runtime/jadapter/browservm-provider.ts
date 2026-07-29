@@ -48,7 +48,7 @@ import {
   toBrowserVmReceiptLogs,
   type EthereumLog,
 } from './browservm-events';
-import type { JEvent, JEventIngress } from './types';
+import type { JEvent } from './types';
 import {
   computeCanonicalReceiptsRoot,
   createCanonicalReceiptProofs,
@@ -234,7 +234,7 @@ export class BrowserVMProvider {
   // Event callbacks receive BATCHES of events (all events from one tx/block)
   // This matches real blockchain behavior where events are grouped by block
   // ─────────────────────────────────────────────────────────────────────────────
-  private eventCallbacks: Set<(events: JEventIngress[]) => void | Promise<void>> = new Set();
+  private eventCallbacks: Set<(events: JEvent[]) => void | Promise<void>> = new Set();
 
   // Transaction receipts for ethers compatibility
   private txReceipts = new Map<string, BrowserVmStoredReceipt>();
@@ -760,7 +760,7 @@ export class BrowserVMProvider {
       externalTokenId?: bigint;
       internalTokenId?: number;
     }
-  ): Promise<JEventIngress[]> {
+  ): Promise<JEvent[]> {
     const batch = buildExternalTokenToReserveBatch({
       entityId,
       tokenAddress,
@@ -776,7 +776,7 @@ export class BrowserVMProvider {
     txData: { to?: string; data?: string; gasLimit?: bigint; value?: bigint },
     privKey: Uint8Array = this.deployerPrivKey,
     options?: { emitEvents?: boolean }
-  ): Promise<{ txHash: string; events?: JEventIngress[] }> {
+  ): Promise<{ txHash: string; events?: JEvent[] }> {
     const fromAddress = createAddressFromPrivateKey(privKey);
     const toAddress = txData.to ? createAddressFromString(txData.to) : undefined;
     const { tx, result } = await this.runTxWithNonce(fromAddress, (currentNonce) => {
@@ -970,7 +970,7 @@ export class BrowserVMProvider {
   }
 
   /** Debug: Fund entity reserves (uses admin mintToReserve) - emits ReserveUpdated event */
-  async debugFundReserves(entityId: string, tokenId: number, amount: bigint): Promise<JEventIngress[]> {
+  async debugFundReserves(entityId: string, tokenId: number, amount: bigint): Promise<JEvent[]> {
     if (!this.depositoryAddress || !this.depositoryInterface) {
       throw new Error('Depository not deployed');
     }
@@ -1032,7 +1032,7 @@ export class BrowserVMProvider {
    * @param entityId - Entity depositing collateral (must be a valid entityId for Hanko signing)
    * @param counterpartyId - The counterparty entity (must sign the settlement)
    */
-  async reserveToCollateralDirect(entityId: string, counterpartyId: string, tokenId: number, amount: bigint): Promise<JEventIngress[]> {
+  async reserveToCollateralDirect(entityId: string, counterpartyId: string, tokenId: number, amount: bigint): Promise<JEvent[]> {
     if (!this.depositoryAddress || !this.depositoryInterface) throw new Error('Depository not deployed');
 
     // Use settle() with appropriate diffs to achieve R2C effect
@@ -1413,7 +1413,7 @@ export class BrowserVMProvider {
   }
 
   /** Process batch (Hanko) - calls Depository.processBatch() directly (no TS logic duplication) */
-  async processBatch(encodedBatch: string, hankoData: string, nonce: bigint): Promise<JEventIngress[]> {
+  async processBatch(encodedBatch: string, hankoData: string, nonce: bigint): Promise<JEvent[]> {
     return this.processBatchWithSigner(encodedBatch, hankoData, nonce, this.deployerPrivKey);
   }
 
@@ -1422,7 +1422,7 @@ export class BrowserVMProvider {
     hankoData: string,
     nonce: bigint,
     txPrivKey: Uint8Array,
-  ): Promise<JEventIngress[]> {
+  ): Promise<JEvent[]> {
     return this.processBatchWithSigner(encodedBatch, hankoData, nonce, txPrivKey);
   }
 
@@ -1431,7 +1431,7 @@ export class BrowserVMProvider {
     hankoData: string,
     nonce: bigint,
     txPrivKey: Uint8Array,
-  ): Promise<JEventIngress[]> {
+  ): Promise<JEvent[]> {
     if (!this.depositoryAddress || !this.depositoryInterface) {
       throw new Error('Depository not deployed');
     }
@@ -1531,7 +1531,7 @@ export class BrowserVMProvider {
       entityId: string;
       kind: EntityProviderActionIntent['payload']['kind'];
     },
-  ): Promise<JEventIngress[]> {
+  ): Promise<JEvent[]> {
     if (!this.entityProviderAddress || !this.entityProviderInterface) {
       throw new Error('EntityProvider not deployed');
     }
@@ -1622,7 +1622,7 @@ export class BrowserVMProvider {
     batch: import('../jurisdiction/batch').JBatch,
     hankoPrivKey: Uint8Array,
     txPrivKey: Uint8Array = this.deployerPrivKey,
-  ): Promise<JEventIngress[]> {
+  ): Promise<JEvent[]> {
     if (!this.depositoryAddress || !this.entityProviderAddress) {
       throw new Error('Depository not deployed');
     }
@@ -1832,7 +1832,7 @@ export class BrowserVMProvider {
   getEntityProviderActionReceipt(
     entityId: string,
     actionNonce: bigint,
-  ): JEventIngress | null {
+  ): JEvent | null {
     if (!this.entityProviderAddress || !this.entityProviderInterface) {
       throw new Error('EntityProvider not deployed');
     }
@@ -1897,7 +1897,7 @@ export class BrowserVMProvider {
     }>,
     forgiveDebtsInTokenIds: number[] = [],
     sig?: string
-  ): Promise<JEventIngress[]> {
+  ): Promise<JEvent[]> {
     const hasChanges = diffs.length > 0 || forgiveDebtsInTokenIds.length > 0;
     const finalSig = sig || '0x';
     if (hasChanges && finalSig === '0x') {
@@ -1929,7 +1929,7 @@ export class BrowserVMProvider {
    * Subscribe to batched events. Callback receives ALL events from a single
    * transaction/block together, matching real blockchain behavior.
    */
-  onAny(callback: (events: JEventIngress[]) => void | Promise<void>): () => void {
+  onAny(callback: (events: JEvent[]) => void | Promise<void>): () => void {
     this.eventCallbacks.add(callback);
     this.log(`[BrowserVM] onAny registered (${this.eventCallbacks.size} callbacks)`);
     return () => {
@@ -1944,12 +1944,9 @@ export class BrowserVMProvider {
    */
   private async emitEvents(
     logs: EthereumLog[],
-    transactionHash: string | undefined,
-  ): Promise<JEventIngress[]> {
+    transactionHash: string,
+  ): Promise<JEvent[]> {
     this.log(`🔊 [BrowserVM] emitEvents ENTRY: raw logs=${logs.length}, callbacks=${this.eventCallbacks.size}`);
-    if (logs.length > 0 && !transactionHash) {
-      throw new Error('BROWSERVM_EVENT_TRANSACTION_HASH_MISSING');
-    }
     const events = decodeBrowserVmEvents(
       logs,
       [this.depositoryInterface, this.accountInterface, this.entityProviderInterface],

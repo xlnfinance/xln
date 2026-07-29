@@ -1,6 +1,6 @@
 import { normalizeEntityId } from '../entity/id';
 import type { BrowserVMProvider } from './browservm-provider';
-import type { JAdapter, JEvent, JEventIngress } from './types';
+import type { JAdapter, JEvent } from './types';
 import { receiptFromEvents } from './browservm-submit';
 
 type BrowserVmIoMethod =
@@ -39,7 +39,6 @@ type BrowserVmIoMethod =
 
 export const createBrowserVmIoMethods = (
   browserVM: BrowserVMProvider,
-  toJEvents: (events: JEventIngress[]) => JEvent[],
 ): Pick<JAdapter, BrowserVmIoMethod> => ({
   async getReserves(entityId, tokenId) {
     return await browserVM.getReserves(entityId, tokenId);
@@ -60,8 +59,10 @@ export const createBrowserVmIoMethods = (
     return await browserVM.getEntityProviderActionNonce(normalizeEntityId(entityId));
   },
   async getEntityProviderActionReceipt(entityId, actionNonce) {
-    const receipt = browserVM.getEntityProviderActionReceipt(normalizeEntityId(entityId), actionNonce);
-    return receipt ? (toJEvents([receipt])[0] ?? null) : null;
+    return browserVM.getEntityProviderActionReceipt(
+      normalizeEntityId(entityId),
+      actionNonce,
+    );
   },
   async isEntityRegistered(entityId) {
     return (await browserVM.getEntityInfo(normalizeEntityId(entityId))).exists;
@@ -98,26 +99,45 @@ export const createBrowserVmIoMethods = (
     return await browserVM.getDebts(entityId, tokenId);
   },
   async processBatch(encodedBatch, hankoData, nonce) {
-    return receiptFromEvents(toJEvents(await browserVM.processBatch(encodedBatch, hankoData, nonce)));
+    return receiptFromEvents(
+      await browserVM.processBatch(encodedBatch, hankoData, nonce),
+    );
   },
   async enforceDebts(entityId, tokenId, maxIterations) {
     await browserVM.enforceDebts(entityId, tokenId, maxIterations);
   },
   async debugFundReserves(entityId, tokenId, amount) {
-    return toJEvents(await browserVM.debugFundReserves(entityId, tokenId, amount));
+    return browserVM.debugFundReserves(entityId, tokenId, amount);
   },
   async debugFundReservesBatch(mints) {
     const events: JEvent[] = [];
     for (const mint of mints) {
-      events.push(...toJEvents(await browserVM.debugFundReserves(mint.entityId, mint.tokenId, mint.amount)));
+      events.push(
+        ...await browserVM.debugFundReserves(
+          mint.entityId,
+          mint.tokenId,
+          mint.amount,
+        ),
+      );
     }
     return events;
   },
   async externalTokenToReserve(signerPrivateKey, entityId, tokenAddress, amount, options) {
-    return toJEvents(await browserVM.externalTokenToReserve(signerPrivateKey, entityId, tokenAddress, amount, options));
+    return browserVM.externalTokenToReserve(
+      signerPrivateKey,
+      entityId,
+      tokenAddress,
+      amount,
+      options,
+    );
   },
   async approveErc20(signerPrivateKey, tokenAddress, spender, amount) {
-    return toJEvents(await browserVM.approveErc20(signerPrivateKey, tokenAddress, spender, amount));
+    return browserVM.approveErc20(
+      signerPrivateKey,
+      tokenAddress,
+      spender,
+      amount,
+    );
   },
   async transferErc20(signerPrivateKey, tokenAddress, to, amount) {
     return await browserVM.transferErc20(signerPrivateKey, tokenAddress, to, amount);

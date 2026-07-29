@@ -128,8 +128,8 @@ const createJEventTraceTransform = (
   if (!expected) {
     throw new Error(`J_EVENT_TRACE_UNEXPECTED_BATCH:index=${trace.cursor}`);
   }
-  const expectedSemantics = jEventSemanticProjection(expected.rawEvents);
-  const actualSemantics = jEventSemanticProjection(batch.rawEvents);
+  const expectedSemantics = jEventSemanticProjection(expected.events);
+  const actualSemantics = jEventSemanticProjection(batch.events);
   const semanticDiff = findFirstDiff(expectedSemantics, actualSemantics);
   if (semanticDiff) {
     throw new Error(

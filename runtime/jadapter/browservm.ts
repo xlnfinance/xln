@@ -17,14 +17,9 @@ import {
 } from '../../jurisdictions/typechain-types/index.ts';
 
 import type { RuntimeState } from '../types';
-import {
-  normalizeAdapterEvents,
-} from './helpers';
 import type {
   JAdapter,
   JAdapterConfig,
-  JEvent,
-  JEventIngress,
 } from './types';
 import type { BrowserVMProvider } from './browservm-provider';
 import {
@@ -81,8 +76,6 @@ export async function createBrowserVMAdapter(
   };
   await verifyStackBinding('browservm_connect');
 
-  const toJEvents = (events: JEventIngress[]): JEvent[] => normalizeAdapterEvents(events);
-
   const historyWatcher = createBrowserVmHistoryWatcher({
     chainId: config.chainId,
     depositoryAddress: addresses.depository,
@@ -95,7 +88,6 @@ export async function createBrowserVMAdapter(
     chainId: config.chainId,
     addresses,
     browserVM,
-    toJEvents,
   });
   const stateMethods = createBrowserVmStateMethods(
     browserVM,
@@ -104,7 +96,7 @@ export async function createBrowserVMAdapter(
     },
     verifyStackBinding,
   );
-  const ioMethods = createBrowserVmIoMethods(browserVM, toJEvents);
+  const ioMethods = createBrowserVmIoMethods(browserVM);
 
   const adapter: JAdapter = {
     mode: 'browservm',

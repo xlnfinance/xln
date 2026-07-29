@@ -83,26 +83,6 @@ export const toJEvent = (name: string, args: Record<string, unknown> | undefined
   ...(meta?.logIndex !== undefined ? { logIndex: meta.logIndex } : {}),
 });
 
-export const normalizeAdapterEvents = (
-  events: JEventIngress[],
-  fallbackMeta?: Pick<
-    JEventIngress,
-    'blockNumber' | 'blockHash' | 'transactionHash' | 'logIndex'
-  >,
-): JEvent[] =>
-  events.map((event) => {
-    const meta: { blockNumber?: number; blockHash?: string; transactionHash?: string; logIndex?: number } = {};
-    const blockNumber = event.blockNumber ?? fallbackMeta?.blockNumber;
-    const blockHash = event.blockHash ?? fallbackMeta?.blockHash;
-    const transactionHash = event.transactionHash ?? fallbackMeta?.transactionHash;
-    const logIndex = event.logIndex ?? fallbackMeta?.logIndex;
-    if (blockNumber !== undefined) meta.blockNumber = blockNumber;
-    if (blockHash !== undefined) meta.blockHash = blockHash;
-    if (transactionHash !== undefined) meta.transactionHash = transactionHash;
-    if (logIndex !== undefined) meta.logIndex = logIndex;
-    return toJEvent(event.name, event.args, meta);
-  });
-
 export const parseReceiptLogsToJEvents = (receipt: {
   logs: Array<{
     address: string;
@@ -213,7 +193,7 @@ export type PendingWatcherJHistoryRange = {
 
 
 export type JEventIngressBatch = {
-  rawEvents: JEventIngress[];
+  events: JEventIngress[];
   blockNumber: number;
   blockHash: string;
 };
@@ -1594,18 +1574,18 @@ export function processEventBatch(
   if (deduped.length === 0) return null;
 
   const ingressBatch = jEventIngressTransform
-    ? jEventIngressTransform({ rawEvents: deduped, blockNumber, blockHash })
-    : { rawEvents: deduped, blockNumber, blockHash };
+    ? jEventIngressTransform({ events: deduped, blockNumber, blockHash })
+    : { events: deduped, blockNumber, blockHash };
   if (
     !Number.isSafeInteger(ingressBatch.blockNumber) ||
     ingressBatch.blockNumber < 0 ||
     typeof ingressBatch.blockHash !== 'string' ||
-    ingressBatch.rawEvents.length === 0
+    ingressBatch.events.length === 0
   ) {
     throw new Error(`J_EVENT_INGRESS_TRANSFORM_INVALID:${adapterLabel}`);
   }
   if (source === 'chain') {
-    for (const event of ingressBatch.rawEvents) {
+    for (const event of ingressBatch.events) {
       if (Number(event.blockNumber) !== ingressBatch.blockNumber) {
         throw new Error(`J_EVENT_CHAIN_BLOCK_NUMBER_MISMATCH:${adapterLabel}`);
       }
@@ -1621,7 +1601,7 @@ export function processEventBatch(
     }
   }
 
-  const built = buildJEventIngressRuntimeInput(env, ingressBatch.rawEvents, {
+  const built = buildJEventIngressRuntimeInput(env, ingressBatch.events, {
     blockNumber: ingressBatch.blockNumber,
     blockHash: ingressBatch.blockHash,
     adapterLabel,

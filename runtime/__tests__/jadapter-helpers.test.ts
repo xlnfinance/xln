@@ -1072,7 +1072,7 @@ describe('jadapter helper cursors', () => {
       ...batch,
       blockNumber: 70,
       blockHash: recordedBlockHash,
-      rawEvents: batch.rawEvents.map((event) => ({
+      events: batch.events.map((event) => ({
         ...event,
         blockNumber: 70,
         blockHash: recordedBlockHash,

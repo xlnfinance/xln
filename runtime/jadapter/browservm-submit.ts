@@ -9,7 +9,6 @@ import type {
   JAdapterAddresses,
   JBatchReceipt,
   JEvent,
-  JEventIngress,
   JSubmitResult,
 } from './types';
 import { makeJAdapterFailureResult } from './failure';
@@ -18,7 +17,6 @@ type BrowserVmSubmitContext = {
   chainId: number;
   addresses: JAdapterAddresses;
   browserVM: BrowserVMProvider;
-  toJEvents(events: JEventIngress[]): JEvent[];
 };
 
 type SubmitOptions = Parameters<JAdapter['submitTx']>[1];
@@ -39,7 +37,7 @@ const submitMint = async (
   if (!entityId || !Number.isFinite(tokenId) || amount <= 0n) {
     return { success: false, error: 'Invalid mint payload' };
   }
-  const events = context.toJEvents(await context.browserVM.debugFundReserves(entityId, tokenId, amount));
+  const events = await context.browserVM.debugFundReserves(entityId, tokenId, amount);
   return { success: true, events, blockNumber: receiptFromEvents(events).blockNumber };
 };
 
@@ -80,7 +78,7 @@ const submitEntityProviderAction = async (
       entityProviderAddress: context.addresses.entityProvider,
       depositoryAddress: context.addresses.depository,
     });
-    const events = context.toJEvents(
+    const events =
       await context.browserVM.submitEntityProviderAction(jTx.data.intent, jTx.data.hankoSignature, {
         entityId: normalizeEntityId(jTx.entityId),
         kind:
@@ -89,8 +87,7 @@ const submitEntityProviderAction = async (
             : jTx.type === 'entityProviderReleaseControlShares'
               ? 'releaseControlShares'
               : 'cancelPendingAction',
-      }),
-    );
+      });
     const receipt = receiptFromEvents(events);
     return {
       success: true,
@@ -121,7 +118,7 @@ const submitBatch = async (
   if (isBatchEmpty(batch)) return { success: true };
   try {
     const externalBatch = batch.externalTokenToReserve.length > 0;
-    const rawEvents =
+    const events =
       externalBatch && options.signerPrivateKey
         ? await context.browserVM.processBatchAs(
             batchData.encodedBatch!,
@@ -134,7 +131,6 @@ const submitBatch = async (
             batchData.hankoSignature!,
             BigInt(batchData.entityNonce!),
           );
-    const events = context.toJEvents(rawEvents);
     const receipt = receiptFromEvents(events);
     console.log(`✅ [JAdapter:browservm] Batch executed (${getBatchSize(batch)} ops) block=${receipt.blockNumber}`);
     return {
