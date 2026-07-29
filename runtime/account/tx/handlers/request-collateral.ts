@@ -18,17 +18,14 @@
  */
 
 import type { AccountState, AccountTx } from '../../../types';
-import { isLeftEntity } from '../../../entity/id';
+import { isLeftEntity } from '../../../protocol/entity-id';
 import { deriveDelta } from '../../utils';
 import { getDefaultRebalanceBaseFeeForToken } from '../../rebalance-defaults';
 
 type RequestCollateralTx = Extract<AccountTx, { type: 'request_collateral' }>;
 type RequestCollateralResult = { success: boolean; events: string[]; error?: string };
 
-const validateCollateralRequest = (
-  account: AccountState,
-  data: RequestCollateralTx['data'],
-): string | undefined => {
+const validateCollateralRequest = (account: AccountState, data: RequestCollateralTx['data']): string | undefined => {
   if (data.amount <= 0n) return 'request_collateral: amount must be > 0';
   if (data.feeAmount < 0n) return 'request_collateral: feeAmount must be >= 0';
   if (!Number.isFinite(data.policyVersion) || data.policyVersion < 1) {
@@ -144,9 +141,7 @@ export function handleRequestCollateral(
   );
 
   const feeDisplay = effectiveFeeTarget > 0n ? `, prepaidFee=${effectiveFeeTarget}` : '';
-  const events = [
-    `🔄 Collateral requested: ${effectiveRequest} token ${tokenId}${feeDisplay} (hub will deposit R→C)`,
-  ];
+  const events = [`🔄 Collateral requested: ${effectiveRequest} token ${tokenId}${feeDisplay} (hub will deposit R→C)`];
 
   return { success: true, events };
 }
@@ -176,11 +171,12 @@ export function resolveAutoRebalanceFeePolicy(
   tokenId: number,
 ): RebalanceFeePolicy | undefined {
   const ours = ourEntityId.toLowerCase();
-  const counterpartySide = ours === account.leftEntity.toLowerCase()
-    ? 'right'
-    : ours === account.rightEntity.toLowerCase()
-      ? 'left'
-      : undefined;
+  const counterpartySide =
+    ours === account.leftEntity.toLowerCase()
+      ? 'right'
+      : ours === account.rightEntity.toLowerCase()
+        ? 'left'
+        : undefined;
   if (!counterpartySide) {
     throw new Error(`REBALANCE_POLICY_ENTITY_NOT_IN_ACCOUNT:${ourEntityId}`);
   }
@@ -194,11 +190,7 @@ export function resolveAutoRebalanceFeePolicy(
   };
 }
 
-export function checkAutoRebalance(
-  account: AccountState,
-  ourEntityId: string,
-  counterpartyId: string,
-): AccountTx[] {
+export function checkAutoRebalance(account: AccountState, ourEntityId: string, counterpartyId: string): AccountTx[] {
   const result: AccountTx[] = [];
 
   // New rebalance cycles must not start during settlement. A committed request
@@ -211,8 +203,9 @@ export function checkAutoRebalance(
   }
 
   const isLeft = isLeftEntity(ourEntityId, counterpartyId);
-  const orderedPolicies = [...account.shadow.rebalance.policy.entries()]
-    .sort(([leftTokenId], [rightTokenId]) => leftTokenId - rightTokenId);
+  const orderedPolicies = [...account.shadow.rebalance.policy.entries()].sort(
+    ([leftTokenId], [rightTokenId]) => leftTokenId - rightTokenId,
+  );
   for (const [tokenId, policy] of orderedPolicies) {
     const feePolicy = resolveAutoRebalanceFeePolicy(account, ourEntityId, tokenId);
     if (!feePolicy) continue;
@@ -238,7 +231,7 @@ export function checkAutoRebalance(
     // Also dedupe pre-commit queue: if request_collateral is already in account mempool
     // for this token, do not enqueue another copy in the same consensus window.
     const hasQueuedRequest = account.mempool.some(
-      (tx) => tx.type === 'request_collateral' && Number(tx.data?.tokenId) === Number(tokenId),
+      tx => tx.type === 'request_collateral' && Number(tx.data?.tokenId) === Number(tokenId),
     );
     if (hasQueuedRequest) {
       continue;

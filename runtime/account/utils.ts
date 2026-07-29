@@ -6,7 +6,7 @@
 import type { Delta, DerivedDelta } from '../types';
 import { PERFORMANCE } from '../constants';
 import { validateDelta } from '../validation-utils';
-import { isLeftEntity } from '../entity/id';
+import { isLeftEntity } from '../protocol/entity-id';
 import { DEFAULT_TOKENS, TRON_ONLY_DEFAULT_TOKENS, defaultTokensForJurisdiction } from '../jurisdiction/default-tokens';
 import { logDebug } from '../infra/logger';
 
@@ -22,7 +22,7 @@ export function isLeft(myEntityId: string, counterpartyEntityId: string): boolea
 
 // CRITICAL: Default credit is 0 - credit must be explicitly extended via set_credit_limit
 const BASE_CREDIT_LIMIT = 0n;
-const nonNegative = (value: bigint): bigint => value < 0n ? 0n : value;
+const nonNegative = (value: bigint): bigint => (value < 0n ? 0n : value);
 
 type DeltaPerspective = Omit<DerivedDelta, 'delta' | 'collateral' | 'totalCapacity' | 'ascii'>;
 
@@ -31,11 +31,7 @@ type LeftDeltaDerivation = DeltaPerspective & {
   totalCapacity: bigint;
 };
 
-const deriveLeftPerspective = (
-  delta: Delta,
-  totalDelta: bigint,
-  collateral: bigint,
-): LeftDeltaDerivation => {
+const deriveLeftPerspective = (delta: Delta, totalDelta: bigint, collateral: bigint): LeftDeltaDerivation => {
   const ownCreditLimit = delta.leftCreditLimit;
   const peerCreditLimit = delta.rightCreditLimit;
   const inCollateral = totalDelta > 0n ? nonNegative(collateral - totalDelta) : collateral;
@@ -59,12 +55,8 @@ const deriveLeftPerspective = (
     outAllowance: delta.leftAllowance,
     ownCreditLimit,
     peerCreditLimit,
-    inCapacity: nonNegative(
-      inOwnCredit + inCollateral + inPeerCredit - delta.rightAllowance - rightHold,
-    ),
-    outCapacity: nonNegative(
-      outPeerCredit + outCollateral + outOwnCredit - delta.leftAllowance - leftHold,
-    ),
+    inCapacity: nonNegative(inOwnCredit + inCollateral + inPeerCredit - delta.rightAllowance - rightHold),
+    outCapacity: nonNegative(outPeerCredit + outCollateral + outOwnCredit - delta.leftAllowance - leftHold),
     outOwnCredit,
     inPeerCredit,
     peerCreditUsed: inOwnCredit,
@@ -106,13 +98,8 @@ const formatDeltaAscii = (
   const leftCreditWidth = Math.floor((Number(effectiveOwnCreditWindow) / width) * 50);
   const collateralWidth = Math.floor((Number(collateral) / width) * 50);
   const rightCreditWidth = 50 - leftCreditWidth - collateralWidth;
-  const marker = Math.floor(
-    ((Number(totalDelta) + Number(effectiveOwnCreditWindow)) / width) * 50,
-  );
-  const bar =
-    '-'.repeat(leftCreditWidth) +
-    '='.repeat(collateralWidth) +
-    '-'.repeat(rightCreditWidth);
+  const marker = Math.floor(((Number(totalDelta) + Number(effectiveOwnCreditWindow)) / width) * 50);
+  const bar = '-'.repeat(leftCreditWidth) + '='.repeat(collateralWidth) + '-'.repeat(rightCreditWidth);
   const position = Math.max(0, Math.min(marker, bar.length));
   return `[${bar.substring(0, position)}|${bar.substring(position)}]`;
 };
@@ -153,18 +140,9 @@ export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
   const totalDelta = delta.ondelta + delta.offdelta;
   const collateral = nonNegative(delta.collateral);
   const left = deriveLeftPerspective(delta, totalDelta, collateral);
-  const {
-    effectiveOwnCreditWindow,
-    totalCapacity,
-    ...leftPerspective
-  } = left;
+  const { effectiveOwnCreditWindow, totalCapacity, ...leftPerspective } = left;
   const perspective = isLeft ? leftPerspective : flipDeltaPerspective(leftPerspective);
-  const ascii = formatDeltaAscii(
-    totalDelta,
-    collateral,
-    totalCapacity,
-    effectiveOwnCreditWindow,
-  );
+  const ascii = formatDeltaAscii(totalDelta, collateral, totalCapacity, effectiveOwnCreditWindow);
 
   if (PERFORMANCE.DEBUG_ACCOUNTS) {
     logDebug('ACCOUNT_STATE', 'deriveDelta.return', {
@@ -228,8 +206,8 @@ const TOKEN_ID_BY_SYMBOL = new Map(
 
 export function getKnownTokenIds(): number[] {
   return Object.keys(TOKEN_REGISTRY)
-    .map((tokenId) => Number(tokenId))
-    .filter((tokenId) => Number.isFinite(tokenId) && tokenId > 0)
+    .map(tokenId => Number(tokenId))
+    .filter(tokenId => Number.isFinite(tokenId) && tokenId > 0)
     .sort((a, b) => a - b);
 }
 
@@ -237,8 +215,8 @@ export function getTokenIdsForJurisdiction(
   input?: { name?: string | null; chainId?: number | null } | string | null,
 ): number[] {
   return defaultTokensForJurisdiction(input)
-    .map((token) => TOKEN_ID_BY_SYMBOL.get(String(token.symbol || '').toUpperCase()) ?? 0)
-    .filter((tokenId) => Number.isFinite(tokenId) && tokenId > 0);
+    .map(token => TOKEN_ID_BY_SYMBOL.get(String(token.symbol || '').toUpperCase()) ?? 0)
+    .filter(tokenId => Number.isFinite(tokenId) && tokenId > 0);
 }
 
 // Canonical USD reference stables used for quote-side orientation in swap pairs.
@@ -295,7 +273,7 @@ export type SwapPairPolicy = {
 };
 
 const DEFAULT_SWAP_PAIR_POLICY: SwapPairPolicy = {
-  priceStepTicks: 1,   // 0.0001
+  priceStepTicks: 1, // 0.0001
   bookBucketWidthTicks: 10_000, // 1.0000
   mmMidPriceTicks: 10_000n, // 1.0000
 };
@@ -303,19 +281,19 @@ const DEFAULT_SWAP_PAIR_POLICY: SwapPairPolicy = {
 const SWAP_PAIR_POLICY_BY_BASE_QUOTE: Record<string, SwapPairPolicy> = {
   // WETH/USDC
   '2/1': {
-    priceStepTicks: 1,    // 0.0001 USDC per WETH
+    priceStepTicks: 1, // 0.0001 USDC per WETH
     bookBucketWidthTicks: 10_000, // 1.0000
     mmMidPriceTicks: 25_000_000n, // 2500.0000
   },
   // WETH/USDT
   '2/3': {
-    priceStepTicks: 1,    // 0.0001 USDT per WETH
+    priceStepTicks: 1, // 0.0001 USDT per WETH
     bookBucketWidthTicks: 10_000, // 1.0000
     mmMidPriceTicks: 25_000_000n, // 2500.0000
   },
   // USDC/USDT
   '1/3': {
-    priceStepTicks: 1,      // 0.0001
+    priceStepTicks: 1, // 0.0001
     bookBucketWidthTicks: 10_000, // 1.0000
     mmMidPriceTicks: 10_000n, // 1.0000
   },
@@ -365,7 +343,7 @@ export function buildDefaultEntitySwapPairs(
 ): EntitySwapPairConfig[] {
   const pairs: EntitySwapPairConfig[] = [];
   const seen = new Set<string>();
-  const uniqueTokenIds = Array.from(new Set(tokenIds.filter((id) => Number.isFinite(id) && id > 0)));
+  const uniqueTokenIds = Array.from(new Set(tokenIds.filter(id => Number.isFinite(id) && id > 0)));
 
   for (let i = 0; i < uniqueTokenIds.length; i++) {
     for (let j = i + 1; j < uniqueTokenIds.length; j++) {

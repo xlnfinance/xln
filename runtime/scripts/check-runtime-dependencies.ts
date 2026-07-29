@@ -26,7 +26,7 @@ const ROOT_FILE_DEBT = new Set([
 // Existing counts are migration debt: every increase and every newly
 // introduced direction fails, while completed cleanup must remove its entry.
 const REVERSE_DEPENDENCY_DEBT: Readonly<Record<string, number>> = {
-  'account->entity': 11,
+  'account->entity': 6,
   'account->runtime': 1,
   'account->storage': 1,
   'entity->jadapter': 5,
@@ -50,7 +50,7 @@ const collectFiles = (directory: string): string[] =>
 const packageOwner = (file: string): string => {
   const relative = path.relative(RUNTIME_ROOT, file);
   const parts = relative.split(path.sep);
-  return parts.length === 1 ? '(root)' : parts[0] ?? '(root)';
+  return parts.length === 1 ? '(root)' : (parts[0] ?? '(root)');
 };
 
 const resolvedRuntimeOwner = (specifier: string, importer: string): string | null => {
@@ -72,20 +72,20 @@ const resolvedRuntimeOwner = (specifier: string, importer: string): string | nul
 
 const literalModuleSpecifier = (node: ts.Node): string | null => {
   if (
-    (ts.isImportDeclaration(node) || ts.isExportDeclaration(node))
-    && node.moduleSpecifier
-    && ts.isStringLiteral(node.moduleSpecifier)
+    (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) &&
+    node.moduleSpecifier &&
+    ts.isStringLiteral(node.moduleSpecifier)
   ) {
     return node.moduleSpecifier.text;
   }
   const firstArgument = ts.isCallExpression(node) ? node.arguments[0] : undefined;
   if (
-    ts.isCallExpression(node)
-    && node.arguments.length === 1
-    && firstArgument
-    && ts.isStringLiteral(firstArgument)
-    && (node.expression.kind === ts.SyntaxKind.ImportKeyword
-      || (ts.isIdentifier(node.expression) && node.expression.text === 'require'))
+    ts.isCallExpression(node) &&
+    node.arguments.length === 1 &&
+    firstArgument &&
+    ts.isStringLiteral(firstArgument) &&
+    (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+      (ts.isIdentifier(node.expression) && node.expression.text === 'require'))
   ) {
     return firstArgument.text;
   }
@@ -151,6 +151,6 @@ if (errors.length > 0) {
 const debt = [...observed.values()].reduce((sum, occurrences) => sum + occurrences.length, 0);
 console.log(
   `RUNTIME_DEPENDENCIES_OK files=${files.length} reverseImports=${debt}/` +
-  `${Object.values(REVERSE_DEPENDENCY_DEBT).reduce((sum, count) => sum + count, 0)} ` +
-  `rootDebt=${ROOT_FILE_DEBT.size}`,
+    `${Object.values(REVERSE_DEPENDENCY_DEBT).reduce((sum, count) => sum + count, 0)} ` +
+    `rootDebt=${ROOT_FILE_DEBT.size}`,
 );

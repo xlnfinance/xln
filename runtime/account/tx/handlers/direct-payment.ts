@@ -8,7 +8,7 @@ import type { AccountState, AccountTx } from '../../../types';
 import { deriveDelta } from '../../utils';
 import { deriveTransferOffdeltaChange } from '../../delta-movement';
 import { FINANCIAL } from '../../../constants';
-import { isLeftEntity } from '../../../entity/id';
+import { isLeftEntity } from '../../../protocol/entity-id';
 import { createStructuredLogger } from '../../../infra/logger';
 import { getAccountPerspective } from '../../../state-helpers';
 import { ensureDelta } from '../delta-utils';
@@ -50,11 +50,13 @@ const resolvePaymentParties = (
   payment: DirectPaymentTx['data'],
   byLeft: boolean,
   events: string[],
-): DirectPaymentResult | {
-  leftEntity: string;
-  paymentFromEntity: string;
-  paymentToEntity: string;
-} => {
+):
+  | DirectPaymentResult
+  | {
+      leftEntity: string;
+      paymentFromEntity: string;
+      paymentToEntity: string;
+    } => {
   const { fromEntity, toEntity } = account.proofHeader;
   const leftEntity = isLeftEntity(fromEntity, toEntity) ? fromEntity : toEntity;
   const rightEntity = leftEntity === fromEntity ? toEntity : fromEntity;
@@ -142,7 +144,7 @@ const queuePaymentForward = (
 export function handleDirectPayment(
   account: AccountState,
   accountTx: DirectPaymentTx,
-  byLeft: boolean
+  byLeft: boolean,
 ): DirectPaymentResult {
   const { tokenId, amount } = accountTx.data;
   const events: string[] = [];
@@ -162,13 +164,7 @@ export function handleDirectPayment(
   }
   delta.offdelta += deriveTransferOffdeltaChange(senderIsLeft, amount);
   const counterparty = appendPaymentEvent(account, accountTx.data, parties, byLeft, events);
-  const forwardingError = queuePaymentForward(
-    account,
-    accountTx.data,
-    parties.paymentFromEntity,
-    counterparty,
-    events,
-  );
+  const forwardingError = queuePaymentForward(account, accountTx.data, parties.paymentFromEntity, counterparty, events);
   if (forwardingError) return forwardingError;
   return { success: true, events };
 }

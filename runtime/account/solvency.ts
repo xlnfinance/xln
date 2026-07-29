@@ -1,5 +1,5 @@
 import { computeCanonicalEntityConsensusStateHash } from '../entity/consensus/state-root';
-import { isLeftEntity } from '../entity/id';
+import { isLeftEntity } from '../protocol/entity-id';
 import { createStructuredLogger } from '../infra/logger';
 import type { EntityState, RuntimeState } from '../types';
 
@@ -24,10 +24,14 @@ export interface Solvency {
   isValid: boolean;
 }
 
-const canonicalStack = (state: EntityState): Omit<AssetSolvency, 'tokenId' | 'reserves' | 'confirmedCollateral' | 'pendingCollateral' | 'delta' | 'isValid'> => {
+const canonicalStack = (
+  state: EntityState,
+): Omit<AssetSolvency, 'tokenId' | 'reserves' | 'confirmedCollateral' | 'pendingCollateral' | 'delta' | 'isValid'> => {
   const jurisdiction = state.config?.jurisdiction;
   const chainId = Number(jurisdiction?.chainId);
-  const depositoryAddress = String(jurisdiction?.depositoryAddress || '').trim().toLowerCase();
+  const depositoryAddress = String(jurisdiction?.depositoryAddress || '')
+    .trim()
+    .toLowerCase();
   if (!Number.isSafeInteger(chainId) || chainId <= 0 || !/^0x[0-9a-f]{40}$/.test(depositoryAddress)) {
     throw new Error(`SOLVENCY_STACK_IDENTITY_INVALID:${state.entityId}`);
   }
@@ -52,7 +56,9 @@ const canonicalAmount = (value: unknown, context: string): bigint => {
 const selectCanonicalStates = (env: RuntimeState): EntityState[] => {
   const selected = new Map<string, { signerId: string; state: EntityState }>();
   for (const replica of env.eReplicas.values()) {
-    const entityId = String(replica.state?.entityId || '').trim().toLowerCase();
+    const entityId = String(replica.state?.entityId || '')
+      .trim()
+      .toLowerCase();
     const height = Number(replica.state?.height);
     if (!entityId || !Number.isSafeInteger(height) || height < 0) {
       throw new Error(`SOLVENCY_ENTITY_STATE_INVALID:${entityId || 'missing'}:${String(height)}`);
@@ -72,22 +78,25 @@ const selectCanonicalStates = (env: RuntimeState): EntityState[] => {
       selected.set(entityId, { signerId: String(replica.signerId || ''), state: replica.state });
     }
   }
-  return Array.from(selected.entries()).sort(([left], [right]) => left.localeCompare(right)).map(([, value]) => value.state);
+  return Array.from(selected.entries())
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([, value]) => value.state);
 };
 
-const ensureAsset = (
-  byAsset: Map<string, AssetSolvency>,
-  state: EntityState,
-  rawTokenId: unknown,
-): AssetSolvency => {
+const ensureAsset = (byAsset: Map<string, AssetSolvency>, state: EntityState, rawTokenId: unknown): AssetSolvency => {
   const stack = canonicalStack(state);
   const tokenId = canonicalTokenId(rawTokenId);
   const key = `${stack.stackId}:${tokenId}`;
   const existing = byAsset.get(key);
   if (existing) return existing;
   const created: AssetSolvency = {
-    ...stack, tokenId, reserves: 0n, confirmedCollateral: 0n,
-    pendingCollateral: 0n, delta: 0n, isValid: true,
+    ...stack,
+    tokenId,
+    reserves: 0n,
+    confirmedCollateral: 0n,
+    pendingCollateral: 0n,
+    delta: 0n,
+    isValid: true,
   };
   byAsset.set(key, created);
   return created;
@@ -122,7 +131,12 @@ export const calculateSolvency = (env: RuntimeState, snapshot?: RuntimeState): S
     asset.delta = asset.reserves - asset.confirmedCollateral;
     asset.isValid = asset.delta === 0n;
   }
-  return { byAsset, entityCount: states.length, accountViews, isValid: byAsset.size > 0 && Array.from(byAsset.values()).every(asset => asset.isValid) };
+  return {
+    byAsset,
+    entityCount: states.length,
+    accountViews,
+    isValid: byAsset.size > 0 && Array.from(byAsset.values()).every(asset => asset.isValid),
+  };
 };
 
 export const verifySolvency = (env: RuntimeState, label?: string): boolean => {
@@ -133,7 +147,9 @@ export const verifySolvency = (env: RuntimeState, label?: string): boolean => {
       label: label ?? '',
       assets: invalid.map(asset => ({ key: `${asset.stackId}:${asset.tokenId}`, delta: asset.delta.toString() })),
     });
-    throw new Error(`Solvency check failed: ${invalid.map(asset => `${asset.stackId}:${asset.tokenId}=${asset.delta}`).join(',') || 'no assets'}`);
+    throw new Error(
+      `Solvency check failed: ${invalid.map(asset => `${asset.stackId}:${asset.tokenId}=${asset.delta}`).join(',') || 'no assets'}`,
+    );
   }
   solvencyLog.info('ok', { label: label ?? '', assets: solvency.byAsset.size });
   return true;

@@ -4,46 +4,9 @@
  */
 
 import { ethers } from 'ethers';
+import { normalizeEntityId } from '../protocol/entity-id';
 
-/**
- * Normalize entity ID to consistent 0x-prefixed 64-char hex (32 bytes).
- */
-export function normalizeEntityId(id: string): string {
-  const raw = String(id).toLowerCase();
-  if (!raw.startsWith('0x')) {
-    return raw;
-  }
-  const hex = raw.slice(2);
-  if (!/^[0-9a-f]*$/.test(hex)) {
-    return raw;
-  }
-  if (hex.length === 64) {
-    return raw;
-  }
-  if (hex.length < 64) {
-    return `0x${hex.padStart(64, '0')}`;
-  }
-  return raw;
-}
-
-/**
- * Compare two entity IDs lexicographically.
- * Returns negative if a < b, 0 if equal, positive if a > b.
- */
-export function compareEntityIds(a: string, b: string): number {
-  const left = normalizeEntityId(a);
-  const right = normalizeEntityId(b);
-  if (left === right) return 0;
-  return left < right ? -1 : 1;
-}
-
-/**
- * Check if entity A is the "left" side of a bilateral account.
- * Left entity always has the lexicographically smaller ID.
- */
-export function isLeftEntity(a: string, b: string): boolean {
-  return compareEntityIds(a, b) < 0;
-}
+export { compareEntityIds, isLeftEntity, normalizeEntityId } from '../protocol/entity-id';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // UNIVERSAL ENTITY ID PARSER
@@ -92,10 +55,7 @@ export function createProviderScopedEntityId(provider: string, entityId: string)
   const normalizedEntity = normalizeEntityId(entityId);
 
   // ABI encode packed: address (20 bytes) + bytes32 (32 bytes)
-  const packed = ethers.solidityPacked(
-    ['address', 'bytes32'],
-    [providerAddr, normalizedEntity]
-  );
+  const packed = ethers.solidityPacked(['address', 'bytes32'], [providerAddr, normalizedEntity]);
 
   // Hash to get final 32-byte ID
   return ethers.keccak256(packed);
@@ -119,10 +79,7 @@ const parsedEntityId = (
   needsProfileLookup,
 });
 
-const parseProviderScopedId = (
-  input: string,
-  lookupFn?: EntityIdLookup,
-): ParsedEntityId | undefined => {
+const parseProviderScopedId = (input: string, lookupFn?: EntityIdLookup): ParsedEntityId | undefined => {
   const separator = input.indexOf(':');
   if (separator < 1 || separator !== input.lastIndexOf(':')) return undefined;
   const providerPart = input.slice(0, separator);
@@ -139,10 +96,7 @@ const parseProviderScopedId = (
   };
 };
 
-const parseFullEntityId = (
-  input: string,
-  provider?: string,
-): ParsedEntityId | undefined => {
+const parseFullEntityId = (input: string, provider?: string): ParsedEntityId | undefined => {
   const match = input.match(/^(0x)?([0-9a-fA-F]{64})$/);
   if (!match) return undefined;
   const entityId = normalizeEntityId(`0x${match[2]}`);
@@ -159,29 +113,12 @@ const parseShortEntityId = (
   const shortId = match[1]!.toLowerCase();
   const resolved = lookupFn?.(shortId);
   if (resolved) {
-    return parsedEntityId(
-      input,
-      normalizeEntityId(resolved),
-      provider,
-      'short',
-      shortId.toUpperCase(),
-      false,
-    );
+    return parsedEntityId(input, normalizeEntityId(resolved), provider, 'short', shortId.toUpperCase(), false);
   }
-  return parsedEntityId(
-    input,
-    `0x${shortId.padEnd(64, '0')}`,
-    provider,
-    'short',
-    shortId.toUpperCase(),
-    true,
-  );
+  return parsedEntityId(input, `0x${shortId.padEnd(64, '0')}`, provider, 'short', shortId.toUpperCase(), true);
 };
 
-const parseNumberedEntityId = (
-  input: string,
-  provider?: string,
-): ParsedEntityId | undefined => {
+const parseNumberedEntityId = (input: string, provider?: string): ParsedEntityId | undefined => {
   const match = input.match(/^#?(\d+)$/);
   if (!match) return undefined;
   const number = BigInt(match[1]!);
@@ -230,7 +167,7 @@ const parseNamedEntityId = (
 export function parseUniversalEntityId(
   input: string,
   defaultProvider?: string,
-  lookupFn?: (query: string) => string | null
+  lookupFn?: (query: string) => string | null,
 ): ParsedEntityId {
   const trimmed = input.trim();
   if (!trimmed) throw new Error('ENTITY_ID_EMPTY');
