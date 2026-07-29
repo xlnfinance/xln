@@ -1,4 +1,4 @@
-import { accountHasProposableMempool } from '../entity/consensus/account-mempool-eligibility';
+import { hasProposableAccount } from '../entity/consensus/account-work-index';
 import { isEntityActiveLeader } from '../entity/consensus/leader';
 import {
   entityRequiresJPrefixCertificate,
@@ -63,10 +63,9 @@ export const collectAccountMempoolWakeInputs = (env: RuntimeState): EntityInput[
     const entityId = String(replica.entityId || replica.state.entityId).trim().toLowerCase();
     const signerId = String(replica.signerId || '').trim().toLowerCase();
     if (!entityId || !signerId) continue;
-    const hasProposable = [...replica.state.accounts.values()].some(account =>
-      accountHasProposableMempool(account, replica.state),
-    );
-    if (hasProposable) inputs.push({ entityId, signerId, entityTxs: [] });
+    if (hasProposableAccount(replica.state)) {
+      inputs.push({ entityId, signerId, entityTxs: [] });
+    }
   }
   return inputs;
 };
@@ -87,9 +86,7 @@ const hasEntityMempoolWakeInput = (env: RuntimeState): boolean =>
 
 const hasAccountMempoolWakeInput = (env: RuntimeState): boolean =>
   [...env.eReplicas.values()].some(replica =>
-    [...replica.state.accounts.values()].some(account =>
-      accountHasProposableMempool(account, replica.state),
-    ),
+    hasProposableAccount(replica.state),
   );
 
 const runtimeWakeDeps = {

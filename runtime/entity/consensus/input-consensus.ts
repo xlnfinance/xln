@@ -10,7 +10,7 @@ import type {
   RuntimeState,
 } from '../../types';
 import { getPerfMs } from '../../utils';
-import { accountHasProposableMempool } from './account-mempool-eligibility';
+import { hasProposableAccount } from './account-work-index';
 import { isCanonicalEntityFrameDigest } from './frame';
 import {
   deferEntityConsensusInput,
@@ -121,9 +121,7 @@ const hasLocalConsensusWork = (
 ): boolean =>
   Boolean(trustedLocalEntityTxs?.length) ||
   replica.mempool.length > 0 ||
-  Array.from(replica.state.accounts.values()).some(account =>
-    accountHasProposableMempool(account, replica.state),
-  );
+  hasProposableAccount(replica.state);
 
 const advanceEntityProposal = async (
   context: ApplyEntityInputContext,

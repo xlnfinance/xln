@@ -7,7 +7,7 @@ import {
 } from '../../jurisdiction/j-prefix-consensus';
 import { nodeProcess } from '../../infra/runtime-process';
 import type { EntityReplica, EntityTx, RuntimeState } from '../../types';
-import { accountHasProposableMempool } from './account-mempool-eligibility';
+import { hasProposableAccount } from './account-work-index';
 import { prioritizeScheduledWakeTransactions } from './input-merge';
 import { getReplicaProposalLeader } from './leader';
 import {
@@ -63,9 +63,7 @@ export const selectEntityProposal = async (
   replica: EntityReplica,
   options: EntityProposalSelectionOptions,
 ): Promise<EntityProposalSelection> => {
-  const hasProposableAccountMempool = [...replica.state.accounts.values()].some(account =>
-    accountHasProposableMempool(account, replica.state),
-  );
+  const hasProposableAccountMempool = hasProposableAccount(replica.state);
   const proposalJPrefixCertificate =
     options.localCanPropose && replica.jPrefixRound
       ? buildJPrefixCertificate(replica.state, replica.jPrefixRound.attestations)

@@ -16,6 +16,7 @@ import { applyAccountClonePolicy } from '../account/state-clone';
 import { copyEntityFrameEvents } from './frame-events';
 import { validateEntityState } from './state-validation';
 import { forkEntityAccountCommitmentCache } from './consensus/state-root';
+import { forkQueuedAccountIndex } from './consensus/account-work-index';
 
 const cloneLog = createStructuredLogger('entity.state_clone');
 
@@ -145,7 +146,10 @@ const cloneEntityStateWithPolicy = (
       applyAccountClonePolicy(account, sourceAccount, forSnapshot);
     }
   }
-  if (!forSnapshot) forkEntityAccountCommitmentCache(source, cloned);
+  if (!forSnapshot) {
+    forkEntityAccountCommitmentCache(source, cloned);
+    forkQueuedAccountIndex(source, cloned);
+  }
   return validateClone
     ? validateEntityState(cloned, 'cloneEntityState.structuredClone')
     : cloned;

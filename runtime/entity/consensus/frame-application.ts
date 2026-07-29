@@ -89,6 +89,10 @@ import { pruneSettledOriginatedHtlcRoutes, terminateHtlcRoute } from '../tx/htlc
 import { MalformedEntityFrameInputError } from '../tx/invariant-errors';
 import { normalizeEntityProposalBoard } from '../tx/proposals';
 import { accountHasProposableMempool } from './account-mempool-eligibility';
+import {
+  getProposableAccountIds,
+  refreshQueuedAccountIndex,
+} from './account-work-index';
 import { applyAccountInput } from '../../account/consensus';
 import { createLocalAccountInput } from '../../account/input';
 import { assertEntityFrameTxByteBudget } from './frame';
@@ -1058,10 +1062,8 @@ const prepareEntityFrameWorkingSet = async (
       context.proposableAccounts,
       context.storageChanges,
     );
-    for (const [accountId, account] of currentEntityState.accounts) {
-      if (accountHasProposableMempool(account, currentEntityState)) {
-        context.proposableAccounts.add(accountId);
-      }
+    for (const accountId of getProposableAccountIds(currentEntityState)) {
+      context.proposableAccounts.add(accountId);
     }
   }
   return {
@@ -1185,6 +1187,7 @@ const applyPostEntityTxPhases = async (
   // but stale incremental Entity root.
   for (const accountId of context.proposableAccounts) {
     invalidateEntityAccountCommitment(currentEntityState, accountId);
+    refreshQueuedAccountIndex(currentEntityState, accountId);
   }
   currentEntityState = assignCertifiedOutputIdentities(
     currentEntityState,
