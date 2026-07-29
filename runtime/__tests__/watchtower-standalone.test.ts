@@ -501,7 +501,18 @@ describe('standalone watchtower service', () => {
       towerId: 'tower-public-operator-test',
       dbPath: join(tempRoot, 'tower.level'),
       maxStoredBytesPerLookupKey: 64 * 1024,
+      towerPrivateKey: Wallet.createRandom().privateKey,
       enableOperatorApi: true,
     })).toThrow('WATCHTOWER_OPERATOR_TOKEN_REQUIRED_FOR_PUBLIC_BIND');
+  });
+
+  test('requires an explicit tower signing key when binding publicly', () => {
+    const tempRoot = join(process.cwd(), '.tmp-tests', `watchtower-public-key-${Date.now()}`);
+    expect(() => startStandaloneWatchtowerServer({
+      host: '0.0.0.0',
+      port: 0,
+      towerId: 'tower-public-key-test',
+      dbPath: join(tempRoot, 'tower.level'),
+    })).toThrow('WATCHTOWER_PRIVATE_KEY_REQUIRED_FOR_PUBLIC_BIND');
   });
 });

@@ -22,6 +22,10 @@ import { createWatchtowerStore, type WatchtowerStore } from './store';
 import { createPushStore, type PushStore } from '../push/store';
 import { createPushSender, type PushSenderConfig } from '../push/sender';
 import { createStructuredLogger } from '../infra/logger';
+import {
+  createSweepHealthTracker,
+  type SweepHealthSnapshot,
+} from './sweep-health';
 
 export type StandaloneWatchtowerOptions = {
   host?: string;
@@ -53,6 +57,7 @@ export type StandaloneWatchtowerServer = {
 type SweepScheduler = {
   enabled: boolean;
   intervalMs: number;
+  health: () => SweepHealthSnapshot;
   close: () => void;
 };
 
@@ -106,7 +111,8 @@ const startSweepScheduler = (
   const towerPrivateKey = String(options.towerPrivateKey || '').trim();
   const intervalMs = Math.max(1_000, Math.floor(Number(options.intervalMs ?? 30_000)));
   if (!options.enabled) {
-    return { enabled: false, intervalMs, close: () => {} };
+    const health = createSweepHealthTracker();
+    return { enabled: false, intervalMs, health: health.snapshot, close: () => {} };
   }
   if (!towerPrivateKey) {
     throw new Error('WATCHTOWER_LAST_RESORT_AGENT_PRIVATE_KEY_REQUIRED');
@@ -116,6 +122,7 @@ const startSweepScheduler = (
   let running = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let nextPruneAt = Date.now() + SWEEP_PRUNE_INTERVAL_MS;
+  const health = createSweepHealthTracker();
 
   const schedule = (): void => {
     if (closed) return;
@@ -149,8 +156,12 @@ const startSweepScheduler = (
         if (result.errors > 0) watchtowerLog.warn('sweep.complete', fields);
         else watchtowerLog.info('sweep.complete', fields);
       }
+      if (result.errors > 0) health.failure(`WATCHTOWER_SWEEP_APPOINTMENT_ERRORS:${result.errors}`);
+      else health.success();
     } catch (error) {
-      watchtowerLog.error('sweep.failed', { error: formatError(error) });
+      const message = formatError(error);
+      health.failure(message);
+      watchtowerLog.error('sweep.failed', { error: message });
     } finally {
       running = false;
       schedule();
@@ -161,6 +172,7 @@ const startSweepScheduler = (
   return {
     enabled: true,
     intervalMs,
+    health: health.snapshot,
     close: () => {
       closed = true;
       if (timer) clearTimeout(timer);
@@ -179,13 +191,15 @@ const startPushWatchScheduler = (
 ): SweepScheduler => {
   const intervalMs = Math.max(1_000, Math.floor(Number(options.intervalMs ?? 15_000)));
   if (!options.enabled) {
-    return { enabled: false, intervalMs, close: () => {} };
+    const health = createSweepHealthTracker();
+    return { enabled: false, intervalMs, health: health.snapshot, close: () => {} };
   }
 
   let closed = false;
   let running = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let nextPruneAt = Date.now() + SWEEP_PRUNE_INTERVAL_MS;
+  const health = createSweepHealthTracker();
 
   const schedule = (): void => {
     if (closed) return;
@@ -219,8 +233,12 @@ const startPushWatchScheduler = (
         if (result.errors > 0) watchtowerLog.warn('push_sweep.complete', fields);
         else watchtowerLog.info('push_sweep.complete', fields);
       }
+      if (result.errors > 0) health.failure(`WATCHTOWER_PUSH_SWEEP_ERRORS:${result.errors}`);
+      else health.success();
     } catch (error) {
-      watchtowerLog.error('push_sweep.failed', { error: formatError(error) });
+      const message = formatError(error);
+      health.failure(message);
+      watchtowerLog.error('push_sweep.failed', { error: message });
     } finally {
       running = false;
       schedule();
@@ -231,6 +249,7 @@ const startPushWatchScheduler = (
   return {
     enabled: true,
     intervalMs,
+    health: health.snapshot,
     close: () => {
       closed = true;
       if (timer) clearTimeout(timer);
@@ -273,18 +292,22 @@ const handleHealth = async (
   const { store, pushStore, pushSender, scheduler, pushScheduler } = context;
   const stats = await store.getStats();
   const pushStats = pushStore ? await pushStore.getStats() : null;
+  const sweepHealth = scheduler.health();
+  const pushHealth = pushScheduler.health();
+  const ok = sweepHealth.healthy && pushHealth.healthy;
   return new Response(JSON.stringify({
-    ok: true,
+    ok,
     service: 'xln-watchtower',
     towerId: store.towerId,
     signerAddress: store.signerAddress,
     maxStoredBytesPerLookupKey: store.maxStoredBytesPerLookupKey,
     maxBundlesPerLookupKey: store.maxBundlesPerLookupKey,
-    sweep: { enabled: scheduler.enabled, intervalMs: scheduler.intervalMs },
+    sweep: { enabled: scheduler.enabled, intervalMs: scheduler.intervalMs, ...sweepHealth },
     pushWake: {
       enabled: pushScheduler.enabled,
       intervalMs: pushScheduler.intervalMs,
       sender: pushSender.kind,
+      ...pushHealth,
       ...(pushStats ? { stats: pushStats } : {}),
     },
     operatorApi: {
@@ -292,7 +315,7 @@ const handleHealth = async (
       auth: context.operatorToken ? 'bearer' : 'local-only',
     },
     stats,
-  }), { headers: WATCHTOWER_JSON_HEADERS });
+  }), { status: ok ? 200 : 503, headers: WATCHTOWER_JSON_HEADERS });
 };
 
 const handlePublicTowerRoute = async (
@@ -386,6 +409,9 @@ export const startStandaloneWatchtowerServer = (options: StandaloneWatchtowerOpt
   const operatorApiEnabled = options.enableOperatorApi === true;
   const operatorToken = String(options.operatorToken || '').trim();
   const localOperatorHost = bindHost === '127.0.0.1' || bindHost === 'localhost' || bindHost === '::1';
+  if (!localOperatorHost && !options.towerPrivateKey) {
+    throw new Error('WATCHTOWER_PRIVATE_KEY_REQUIRED_FOR_PUBLIC_BIND');
+  }
   if (operatorApiEnabled && !operatorToken && !localOperatorHost) {
     throw new Error('WATCHTOWER_OPERATOR_TOKEN_REQUIRED_FOR_PUBLIC_BIND');
   }
@@ -415,7 +441,10 @@ export const startStandaloneWatchtowerServer = (options: StandaloneWatchtowerOpt
         ...(options.pushSweepIntervalMs !== undefined ? { intervalMs: options.pushSweepIntervalMs } : {}),
         ...(options.allowedRpcUrls ? { allowedRpcUrls: options.allowedRpcUrls } : {}),
       })
-    : { enabled: false, intervalMs: 0, close: () => {} };
+    : (() => {
+        const health = createSweepHealthTracker();
+        return { enabled: false, intervalMs: 0, health: health.snapshot, close: () => {} };
+      })();
   const context: StandaloneWatchtowerContext = {
     options,
     store,
