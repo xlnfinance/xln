@@ -1,7 +1,5 @@
-import {
-  validateConsensusConfig,
-  validateProposedEntityFrame,
-} from '../validation-utils';
+import { validateConsensusConfig } from '../entity/consensus/config-validation';
+import { validateProposedEntityFrame } from '../validation-utils';
 import { decodeAccountFrame } from '../account/frame-validation';
 import {
   requireBoundaryInteger,

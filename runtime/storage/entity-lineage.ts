@@ -31,7 +31,8 @@ import type {
   RuntimeState,
   ProposedEntityFrame,
 } from '../types';
-import { validateConsensusConfig, validateProposedEntityFrame } from '../validation-utils';
+import { validateConsensusConfig } from '../entity/consensus/config-validation';
+import { validateProposedEntityFrame } from '../validation-utils';
 import { normalizeEntityId } from './keys';
 import type { StorageReplicaLookup } from './types';
 

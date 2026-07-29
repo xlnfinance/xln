@@ -4,7 +4,8 @@ import { readFileSync } from 'node:fs';
 import { cloneAccountState, cloneEntityReplica, cloneEntityState } from '../state-helpers';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
 import { buildCanonicalEntityReplicaSnapshot } from '../storage/wal/snapshot';
-import { validateConsensusConfig, validateEntityReplica } from '../validation-utils';
+import { validateConsensusConfig } from '../entity/consensus/config-validation';
+import { validateEntityReplica } from '../validation-utils';
 
 const makeCrossJurisdictionRoute = () => ({
   orderId: 'order-1',
