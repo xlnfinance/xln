@@ -8,14 +8,14 @@ import { cancelHook, scheduleHook } from '../scheduler';
 import { accountHasProposableMempool } from './account-mempool-eligibility';
 import { applyAccountInput } from '../../account/consensus';
 import { createLocalAccountInput } from '../../account/input';
+import { entityLog } from './shared';
 import {
   buildCrossJurisdictionFillNoticeOutput,
   drainCommittedCrossJurisdictionCancelAcks,
   drainPendingCrossJurisdictionFillAcks,
-  entityLog,
   ownsSourceHubRouteForFillAck,
   stashPendingCrossJurisdictionFillAck,
-} from './shared';
+} from './cross-j-fill-ack';
 import type { ApplyEntityTxsInOrderContext } from './frame-application-types';
 import type {
   SwapCancelEvent,
