@@ -1,4 +1,4 @@
-import type { AccountState } from '../../../types';
+import type { AccountState } from '../../../types/account';
 import { MAX_SWAP_FILL_RATIO } from '../../../orderbook/swap-execution';
 import {
   computeSwapPriceTicks,

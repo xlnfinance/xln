@@ -1,6 +1,9 @@
 import { encodeCanonicalConsensusValue } from '../../protocol/canonical-consensus-value';
 import { ethers } from 'ethers';
-import type { AccountTx, EntityFrameEvent, EntityState, EntityTx, JPrefixCertificate } from '../../types';
+import type { AccountTx } from '../../types/account';
+import type { EntityFrameEvent, EntityState } from '../types';
+import type { EntityTx } from '../../types/entity-tx';
+import type { JPrefixCertificate } from '../../types/jurisdiction-events';
 import { HEAVY_LOGS } from '../../infra/debug-flags';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import { compareCanonicalText } from '../../orderbook/swap-execution';

@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { compileOps } from '../protocol/settlement/operations';
-import type { SettlementOp } from '../types';
+import type { SettlementOp } from '../types/account';
 
 test('compileOps rejects unknown settlement operation types without console fallback', () => {
   const originalWarn = console.warn;

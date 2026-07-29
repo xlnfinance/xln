@@ -1,4 +1,5 @@
-import type { AccountPeerInput, AccountReplica, EntityState } from '../../../../types';
+import type { AccountPeerInput, AccountReplica } from '../../../../types/account';
+import type { EntityState } from '../../../types';
 import {
   accountInputAck,
   accountInputProposal,

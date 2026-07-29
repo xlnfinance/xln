@@ -1,8 +1,6 @@
-import type {
-  AccountReplica,
-  EntityState,
-  RuntimeState,
-} from '../../../../types';
+import type { AccountReplica } from '../../../../types/account';
+import type { EntityState } from '../../../types';
+import type { RuntimeState } from '../../../../types';
 import type { ProofBodyStruct } from '../../../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
 import { isUsableContractAddress } from '../../../../jurisdiction/contract-address';
 import {

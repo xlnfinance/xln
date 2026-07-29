@@ -89,7 +89,9 @@ import {
   registerRuntimeFrameCommitCallback,
   validateRuntimeInputAdmission,
 } from '../runtime.ts';
-import type { EntityInput, RuntimeState, JReplica } from '../types';
+import type { EntityInput } from '../entity/types';
+import type { RuntimeState } from '../types';
+import type { JReplica } from '../types/jurisdiction-runtime';
 import {
   BOOTSTRAP_POLL_MS,
   DEFAULT_ACCOUNT_TOKEN_IDS,

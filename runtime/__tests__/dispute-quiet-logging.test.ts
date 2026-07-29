@@ -3,7 +3,9 @@ import { readEntityFrameEventMessages } from '../entity/frame-events';
 
 import { handleDisputeFinalize } from '../entity/tx/handlers/dispute';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
-import type { EntityState, EntityTx, RuntimeState } from '../types';
+import type { EntityState } from '../entity/types';
+import type { RuntimeState } from '../types';
+import type { EntityTx } from '../types/entity-tx';
 
 const ALICE = `0x${'11'.repeat(32)}`;
 const HUB = `0x${'22'.repeat(32)}`;

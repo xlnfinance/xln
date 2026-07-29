@@ -22,7 +22,9 @@ import { getCertifiedBoardStackKey } from '../jurisdiction/board-registry';
 import { requireUsableContractAddress } from '../jurisdiction/contract-address';
 import { getEntityCertifiedJAnchor, getValidatorJExpectedBlockHash } from '../jurisdiction/local-history';
 import { compareStableText, safeStringify } from '../protocol/serialization';
-import type { DisputeFinalizationEvidence, RuntimeState, JTx, RuntimeInput } from '../types';
+import type { DisputeFinalizationEvidence } from '../types/jurisdiction-events';
+import type { RuntimeState, RuntimeInput } from '../types';
+import type { JTx } from '../types/jurisdiction-runtime';
 import {
   TOKEN_REGISTRATION_AMOUNT,
   defaultTokensForJurisdiction,

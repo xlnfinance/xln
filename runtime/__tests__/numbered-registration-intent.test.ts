@@ -16,7 +16,9 @@ import {
   buildDurableRuntimeMachineSnapshot,
   restoreDurableRuntimeSnapshot,
 } from '../storage/wal/snapshot';
-import type { RuntimeState, JReplica, JurisdictionConfig } from '../types';
+import type { RuntimeState } from '../types';
+import type { JurisdictionConfig } from '../entity/types';
+import type { JReplica } from '../types/jurisdiction-runtime';
 
 const attach = (
   env: RuntimeState,

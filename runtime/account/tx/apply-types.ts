@@ -1,4 +1,5 @@
-import type { CrossJurisdictionSwapRoute, EntityCandidateEffect } from '../../types';
+import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
+import type { AccountOutput } from '../../types/account';
 
 // Account transitions own these outputs. Entity consumes them to update its
 // orderbook projection, but must not redefine the financial result shape.
@@ -50,5 +51,5 @@ export type ApplyAccountTxResult = {
   swapOfferCancelled?: { offerId: string; accountId: string; makerId?: string };
   pullResolved?: { pullId: string; fillRatio: number };
   pullCancelled?: { pullId: string; status: 'cancelled' | 'already-closed' };
-  candidateEffects?: EntityCandidateEffect[];
+  candidateEffects?: AccountOutput[];
 };

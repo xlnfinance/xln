@@ -1,5 +1,6 @@
 import { rebuildOrderbookPairIndex, type BookState, type OrderbookExtState } from '../orderbook';
-import type { AccountReplica, EntityReplica, EntityState } from '../types';
+import type { AccountReplica } from '../types/account';
+import type { EntityReplica, EntityState } from '../entity/types';
 import {
   cloneCrossJurisdictionBookAdmission,
   cloneCrossJurisdictionAccountFrameRoute,

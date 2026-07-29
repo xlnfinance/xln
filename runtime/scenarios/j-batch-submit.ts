@@ -1,4 +1,5 @@
-import type { RuntimeState, JTx } from '../types';
+import type { RuntimeState } from '../types';
+import type { JTx } from '../types/jurisdiction-runtime';
 import type { JAdapter } from '../jadapter/types';
 import type { JBatch } from '../jurisdiction/batch';
 import { getBatchSize } from '../jurisdiction/batch';

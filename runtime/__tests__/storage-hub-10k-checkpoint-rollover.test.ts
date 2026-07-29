@@ -19,7 +19,7 @@ import {
   verifyRuntimeChain,
 } from '../runtime';
 import { readStorageFrameRecord, verifyStorageTailIntegrity } from '../storage';
-import type { JurisdictionConfig } from '../types';
+import type { JurisdictionConfig } from '../entity/types';
 
 const FINAL_HEIGHT = 20_050;
 const MATERIALIZE_PERIOD = 100;

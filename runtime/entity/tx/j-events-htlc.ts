@@ -1,9 +1,6 @@
 import { ethers } from 'ethers';
-import type {
-  CrossJurisdictionSwapRoute,
-  EntityInput,
-  EntityState,
-} from '../../types';
+import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
+import type { EntityInput, EntityState } from '../types';
 import { addMessage } from '../frame-events';
 import { decodeHashLadderBinary } from '../../protocol/htlc/hash-ladder';
 import { CROSS_J_MAX_FILL_RATIO, isCrossJurisdictionTerminalStatus } from '../../extensions/cross-j/index';

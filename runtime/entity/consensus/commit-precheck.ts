@@ -1,13 +1,7 @@
 import { encodeCanonicalConsensusValue } from '../../protocol/canonical-consensus-value';
 import { verifyAccountSignature } from '../../account/crypto';
-import type {
-  ConsensusConfig,
-  EntityReplica,
-  RuntimeState,
-  HashToSign,
-  ProposedEntityFrame,
-  RoutedEntityInput,
-} from '../../types';
+import type { ConsensusConfig, EntityReplica, HashToSign, ProposedEntityFrame } from '../types';
+import type { RuntimeState, RoutedEntityInput } from '../../types';
 import { createEntityFrameHashFromStateRoot, isCanonicalEntityFrameDigest } from './frame';
 import { getEntityHashManifestMismatch } from './hanko-witness';
 

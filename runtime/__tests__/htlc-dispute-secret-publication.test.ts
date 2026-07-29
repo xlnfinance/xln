@@ -10,7 +10,7 @@ import { buildAccountProofBody } from '../protocol/dispute/proof-builder';
 import { hashHtlcSecret } from '../protocol/htlc/utils';
 import { createEmptyEnv } from '../runtime';
 import { createJReplica } from '../scenarios/boot';
-import type { EntityReplica } from '../types';
+import type { EntityReplica } from '../entity/types';
 import {
   addr,
   entity,

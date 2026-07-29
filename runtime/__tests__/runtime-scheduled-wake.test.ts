@@ -35,7 +35,8 @@ import {
 import { safeStringify } from '../protocol/serialization';
 import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
 import { computeCanonicalEntityHash } from '../storage/canonical-hash';
-import type { EntityReplica, EntityState, RuntimeInput } from '../types';
+import type { EntityReplica, EntityState } from '../entity/types';
+import type { RuntimeInput } from '../types';
 import {
   buildCanonicalRuntimeStateSnapshot,
   buildDurableRuntimeMempool,

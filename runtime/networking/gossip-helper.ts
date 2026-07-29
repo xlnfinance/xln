@@ -4,7 +4,8 @@
  */
 
 import { ethers } from 'ethers';
-import type { EntityState, RuntimeState } from '../types';
+import type { EntityState } from '../entity/types';
+import type { RuntimeState } from '../types';
 import type {
   BoardMetadata,
   Profile,

@@ -13,7 +13,8 @@ import {
 } from '../runtime/registration/numbered-registration';
 import { createJAdapter } from '../jadapter';
 import { createEmptyEnv } from '../runtime';
-import type { JReplica, JurisdictionConfig } from '../types';
+import type { JReplica } from '../types/jurisdiction-runtime';
+import type { JurisdictionConfig } from '../entity/types';
 
 const makeReplica = (
   name: string,

@@ -15,7 +15,9 @@
  * Run with: bun runtime/scenarios/multi-sig.ts
  */
 
-import type { ConsensusConfig, EntityReplica, EntityTx, RuntimeState } from '../types';
+import type { ConsensusConfig, EntityReplica } from '../entity/types';
+import type { RuntimeState } from '../types';
+import type { EntityTx } from '../types/entity-tx';
 import { buildEntityTransactionProposalAction, hashEntityProposalAction } from '../entity/authorization';
 import { prepareLocallyAuthoredEntityTxs } from '../entity/command';
 import { encodeBoard, generateLazyEntityId, generateNumberedEntityId, hashBoard } from '../entity/factory';

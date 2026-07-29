@@ -7,7 +7,7 @@ import {
   getBatchSize,
 } from '../jurisdiction/batch';
 import { assertSealedJBatchBinding } from '../jurisdiction/sealed-batch';
-import type { JTx } from '../types';
+import type { JTx } from '../types/jurisdiction-runtime';
 
 const entityId = `0x${'11'.repeat(32)}`;
 const receivingEntity = `0x${'22'.repeat(32)}`;

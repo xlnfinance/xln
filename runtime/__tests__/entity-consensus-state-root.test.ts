@@ -11,7 +11,7 @@ import {
   invalidateEntityAccountCommitment,
 } from '../entity/consensus/state-root';
 import { createEntityFrameHash } from '../entity/consensus/frame';
-import type { EntityState } from '../types';
+import type { EntityState } from '../entity/types';
 
 const entityId = `0x${'11'.repeat(32)}`;
 const counterpartyId = `0x${'22'.repeat(32)}`;

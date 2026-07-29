@@ -1,4 +1,4 @@
-import type { AccountState } from '../../../../types';
+import type { AccountState } from '../../../../types/account';
 import { withCanonicalCrossJurisdictionRouteHash } from '../../../../extensions/cross-j';
 import type { SwapOfferTx } from './admission';
 

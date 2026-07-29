@@ -21,13 +21,9 @@ import { computeCanonicalEntityConsensusStateHash } from '../entity/consensus/st
 import { applyEntityTx } from '../entity/tx/apply';
 import { hydrateEntityStateFromStorage, projectEntityCoreDoc } from '../storage/projections';
 import type { StorageEntityCoreDoc } from '../storage/types';
-import type {
-  ConsensusConfig,
-  EntityState,
-  JReplica,
-  JurisdictionConfig,
-  JurisdictionEvent,
-} from '../types';
+import type { ConsensusConfig, EntityState, JurisdictionConfig } from '../entity/types';
+import type { JReplica } from '../types/jurisdiction-runtime';
+import type { JurisdictionEvent } from '../types/jurisdiction-events';
 
 const SEED = 'debt-ledger-seed';
 const ALICE_SIGNER = deriveSignerAddressSync(SEED, '1').toLowerCase();

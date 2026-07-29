@@ -1,4 +1,5 @@
-import type { AccountTx, EntityInput, EntityState, HashToSign } from '../../types';
+import type { AccountTx } from '../../types/account';
+import type { EntityInput, EntityState, HashToSign } from '../types';
 
 export type JEventAccountTx = {
   accountId: string;

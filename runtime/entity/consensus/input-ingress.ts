@@ -1,7 +1,8 @@
 import { shortId } from '../../infra/logger';
-import { cloneIsolatedEntityInput } from '../../protocol/runtime-input-clone';
+import { cloneIsolatedEntityInput } from '../input-clone';
 import { forkEntityReplicaForInput } from '../replica-clone';
-import type { EntityInput, EntityReplica, RuntimeState } from '../../types';
+import type { EntityInput, EntityReplica } from '../types';
+import type { RuntimeState } from '../../types';
 import { formatEntityDisplay } from '../../presentation/identity-display';
 import { HEAVY_LOGS } from '../../infra/debug-flags';
 import { log } from '../../infra/diagnostics';

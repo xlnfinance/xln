@@ -6,7 +6,7 @@ import { generateLazyEntityId } from '../entity/factory';
 import { initCrontab } from '../entity/scheduler';
 import { dbRootPath } from '../runtime/platform';
 import { safeStringify } from '../protocol/serialization';
-import { cloneIsolatedRuntimeSnapshot } from '../protocol/runtime-input-clone';
+import { cloneIsolatedRuntimeSnapshot } from '../runtime/input-clone';
 import {
   closeInfraDb,
   closeRuntimeDb,
@@ -32,20 +32,10 @@ import {
   buildDurableRuntimeMachineSnapshot,
   restoreDurableRuntimeSnapshot,
 } from '../storage/wal/snapshot';
-import type {
-  AccountInput,
-  ConsensusConfig,
-  EntityInput,
-  EntityReplica,
-  EntityState,
-  RuntimeState,
-  JReplica,
-  JurisdictionConfig,
-  ReliableDeliveryReceipt,
-  RoutedEntityInput,
-  RuntimeInput,
-  RuntimeTx,
-} from '../types';
+import type { AccountInput } from '../types/account';
+import type { ConsensusConfig, EntityInput, EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
+import type { RuntimeState, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../types';
+import type { JReplica } from '../types/jurisdiction-runtime';
 import { enableStrictScenario } from '../scenarios/helpers';
 import { cloneAccountInputWithoutPostCommitHankos } from '../entity/consensus/hanko-witness';
 import { markLocalJAuthorityRuntimeTx } from '../jurisdiction/registration-evidence';

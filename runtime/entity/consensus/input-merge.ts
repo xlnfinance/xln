@@ -1,5 +1,7 @@
-import type { EntityTx, JPrefixAttestation, JurisdictionEventData, RoutedEntityInput } from '../../types';
-import { signatureMapSize } from '../../protocol/signatures';
+import type { EntityTx } from '../../types/entity-tx';
+import type { JPrefixAttestation, JurisdictionEventData } from '../../types/jurisdiction-events';
+import type { RoutedEntityInput } from '../../types';
+import { signatureMapSize } from '../signatures';
 import { compareStableText, safeStringify } from '../../protocol/serialization';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import { hashEntityLeaderVoteBody } from './leader';

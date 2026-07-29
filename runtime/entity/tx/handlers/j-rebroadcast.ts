@@ -1,4 +1,8 @@
-import type { EntityInput, EntityReplica, EntityState, EntityTx, RuntimeState, HashType, JInput, JTx } from '../../../types';
+import type { EntityInput, EntityReplica, EntityState, HashType } from '../../types';
+import type { RuntimeState } from '../../../types';
+import type { JInput } from '../../../jurisdiction/input';
+import type { EntityTx } from '../../../types/entity-tx';
+import type { JTx } from '../../../types/jurisdiction-runtime';
 import { requireUsableContractAddress } from '../../../jurisdiction/contract-address';
 import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';

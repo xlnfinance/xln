@@ -42,31 +42,14 @@ import {
   type NormalizedOrderbookOffer,
   type WorkingOrderbookOffer,
 } from '../../orderbook/swap-execution';
-import { cloneIsolatedProposedEntityFrame } from '../../protocol/runtime-input-clone';
+import { cloneIsolatedProposedEntityFrame } from '../input-clone';
 import { compareStableText, safeStringify } from '../../protocol/serialization';
 import { nodeProcess } from '../../infra/runtime-process';
-import type {
-  AccountTx,
-  AccountReplica,
-  CertifiedEntityFrameLink,
-  ConsensusConfig,
-  ConsensusOutputOrigin,
-  EntityFrameAuthority,
-  EntityCandidateEffect,
-  EntityInput,
-  EntityOutput,
-  EntityLeaderCertificate,
-  EntityLeaderTimeoutVote,
-  EntityReplica,
-  EntityState,
-  EntityTx,
-  RuntimeState,
-  HankoString,
-  HashToSign,
-  ProposedEntityFrame,
-  RuntimeOverlayRecord,
-  EntityCandidate,
-} from '../../types';
+import type { AccountTx, AccountReplica, RuntimeOverlayRecord } from '../../types/account';
+import type { CertifiedEntityFrameLink, ConsensusConfig, EntityFrameAuthority, EntityCandidateEffect, EntityInput, EntityOutput, EntityLeaderCertificate, EntityLeaderTimeoutVote, EntityReplica, EntityState, HashToSign, ProposedEntityFrame, EntityCandidate } from '../types';
+import type { RuntimeState } from '../../types';
+import type { ConsensusOutputOrigin, EntityTx } from '../../types/entity-tx';
+import type { HankoString } from '../../types/hanko';
 import { log } from '../../infra/diagnostics';
 import { validateProposedEntityFrame } from './frame-validation';
 import {

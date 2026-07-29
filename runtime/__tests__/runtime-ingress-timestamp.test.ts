@@ -19,7 +19,10 @@ import {
   startRuntimeLoop,
 } from '../runtime';
 import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
-import type { AccountState, EntityReplica, RuntimeState, JurisdictionConfig, JurisdictionEvent } from '../types';
+import type { AccountState } from '../types/account';
+import type { EntityReplica, JurisdictionConfig } from '../entity/types';
+import type { RuntimeState } from '../types';
+import type { JurisdictionEvent } from '../types/jurisdiction-events';
 import { getWallClockMs } from '../infra/time';
 
 const TEST_JURISDICTION = {

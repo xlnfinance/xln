@@ -1,12 +1,8 @@
 import { FINANCIAL } from '../../../config/constants';
-import type {
-  AccountTx,
-  EntityCandidateEffect,
-  EntityInput,
-  EntityState,
-  EntityTx,
-  RuntimeState,
-} from '../../../types';
+import type { AccountTx } from '../../../types/account';
+import type { EntityCandidateEffect, EntityInput, EntityState } from '../../types';
+import type { RuntimeState } from '../../../types';
+import type { EntityTx } from '../../../types/entity-tx';
 import { formatEntityId } from '../../../presentation/identity-display';
 import { createStructuredLogger, logError, shortId } from '../../../infra/logger';
 import { prepareEntityTxState } from '../../state-clone';

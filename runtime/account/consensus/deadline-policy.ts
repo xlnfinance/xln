@@ -1,7 +1,7 @@
 import { HASHLADDER_MAX_FILL_RATIO, verifyHashLadderBinary } from '../../protocol/htlc/hash-ladder';
 import { hashHtlcSecret } from '../../protocol/htlc/utils';
-import { hashEncryptedHtlcLayer } from '../../protocol/htlc/onion-advance';
-import type { AccountFrame, AccountState, HtlcLock, PullCommitment } from '../../types';
+import { hashEncryptedHtlcLayer } from '../../protocol/htlc/onion-layer';
+import type { AccountFrame, AccountState, HtlcLock, PullCommitment } from '../../types/account';
 import { isHtlcTimelockExpired } from '../htlc-deadline';
 import { isPullRevealExpired } from '../pull-deadline';
 import { ACCOUNT_NETWORK_ALLOWANCE_MS } from './constants';

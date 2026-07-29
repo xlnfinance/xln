@@ -4,7 +4,8 @@ import { createEmptyEnv, enqueueRuntimeInput, generateLazyEntityId, processRunti
 import { getJEventJurisdictionRef } from '../jurisdiction/event-observation';
 import { EMPTY_J_HISTORY_ROOT } from '../jurisdiction/history-consensus';
 import { hydrateEntityStateFromStorage, projectEntityCoreDoc } from '../storage/projections';
-import type { JReplica, JurisdictionConfig } from '../types';
+import type { JReplica } from '../types/jurisdiction-runtime';
+import type { JurisdictionConfig } from '../entity/types';
 
 const addr = (byte: string): string => `0x${byte.repeat(20)}`;
 

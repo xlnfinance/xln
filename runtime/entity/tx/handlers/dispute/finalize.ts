@@ -1,10 +1,7 @@
-import type {
-  AccountReplica,
-  EntityInput,
-  EntityState,
-  EntityTx,
-  RuntimeState,
-} from '../../../../types';
+import type { AccountReplica } from '../../../../types/account';
+import type { EntityInput, EntityState } from '../../../types';
+import type { RuntimeState } from '../../../../types';
+import type { EntityTx } from '../../../../types/entity-tx';
 import { prepareEntityTxState } from '../../../state-clone';
 import { addMessage } from '../../../frame-events';
 import {
@@ -15,7 +12,7 @@ import {
 } from '../../../../jurisdiction/batch';
 import { getEntityCertifiedJurisdictionHeight } from '../../../../jurisdiction/height';
 import { requireAccountDeltaTransformerAddress } from '../../../../account/consensus/helpers';
-import { collectKnownDisputeSecretsForSnapshot } from '../../../../protocol/dispute/arguments';
+import { collectKnownDisputeSecretsForSnapshot } from '../../../dispute-arguments';
 import { isUsableContractAddress } from '../../../../jurisdiction/contract-address';
 import { shortId } from '../../../../infra/logger';
 import { disputeLog, warnDisputeUnlessQuiet } from './shared';

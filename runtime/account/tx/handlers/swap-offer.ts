@@ -5,7 +5,7 @@
  * admission → deterministic quantization → cross-J lock binding → commit.
  */
 
-import type { AccountReplica, AccountTx } from '../../../types';
+import type { AccountReplica, AccountTx } from '../../../types/account';
 import type { SwapOfferEvent } from '../apply-types';
 import { validateSwapOfferAdmission } from './swap-offer/admission';
 import { prepareSwapOfferAmounts } from './swap-offer/quantization';

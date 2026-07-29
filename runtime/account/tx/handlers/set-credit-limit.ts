@@ -6,7 +6,7 @@
  * Uses byLeft (frame property, same on both sides) — NOT perspective-dependent.
  */
 
-import type { AccountState, AccountTx } from '../../../types';
+import type { AccountState, AccountTx } from '../../../types/account';
 import { FINANCIAL } from '../../../config/constants';
 import { ensureDelta } from '../delta-utils';
 

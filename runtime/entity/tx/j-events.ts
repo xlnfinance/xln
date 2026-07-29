@@ -1,14 +1,7 @@
-import type {
-  EntityCandidateEffect,
-  AccountReplica,
-  EntityInput,
-  EntityState,
-  RuntimeState,
-  DisputeFinalizationEvidence,
-  JurisdictionEvent,
-  JurisdictionEventData,
-  HashToSign,
-} from '../../types';
+import type { EntityCandidateEffect, EntityInput, EntityState, HashToSign } from '../types';
+import type { RuntimeState } from '../../types';
+import type { AccountReplica } from '../../types/account';
+import type { DisputeFinalizationEvidence, JurisdictionEvent, JurisdictionEventData } from '../../types/jurisdiction-events';
 import type { ProofBodyStruct } from '../../protocol/dispute/proof-body';
 import { prepareEntityTxState } from '../state-clone';
 import { addMessage } from '../frame-events';

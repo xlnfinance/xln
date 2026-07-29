@@ -40,16 +40,10 @@ import { recordValidatorJHistory } from '../jurisdiction/local-history';
 import { commitReliableIngress } from '../runtime/reliable-delivery';
 import { createDueScheduledWakeInputs, refreshScheduledWakeIndex } from '../runtime/scheduled-wake';
 import { applyRuntimeInput, createEmptyEnv } from '../runtime';
-import type {
-  ConsensusConfig,
-  EntityReplica,
-  EntityState,
-  EntityTx,
-  RuntimeState,
-  JurisdictionEvent,
-  ProposedEntityFrame,
-  ValidatorJHistory,
-} from '../types';
+import type { ConsensusConfig, EntityReplica, EntityState, ProposedEntityFrame } from '../entity/types';
+import type { RuntimeState } from '../types';
+import type { EntityTx } from '../types/entity-tx';
+import type { JurisdictionEvent, ValidatorJHistory } from '../types/jurisdiction-events';
 import { validateConsensusConfig } from '../entity/consensus/config-validation';
 import {
   decodeEntityOutput,

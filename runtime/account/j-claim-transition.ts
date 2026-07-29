@@ -1,4 +1,5 @@
-import type { AccountState, AccountTx, JurisdictionEvent } from '../types';
+import type { AccountState, AccountTx } from '../types/account';
+import type { JurisdictionEvent } from '../types/jurisdiction-events';
 import type {
   AccountJClaimAccumulatorState,
   AccountJClaimDomain,

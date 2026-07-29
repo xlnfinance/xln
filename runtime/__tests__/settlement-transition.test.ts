@@ -46,7 +46,10 @@ import {
 } from '../jurisdiction/board-registry';
 import { createEmptyEnv } from '../runtime';
 import { cloneAccountState } from '../account/state-clone';
-import type { AccountTx, EntityState, RuntimeState, HashToSign, JurisdictionConfig, JurisdictionEvent, SettlementOp } from '../types';
+import type { AccountTx, SettlementOp } from '../types/account';
+import type { EntityState, HashToSign, JurisdictionConfig } from '../entity/types';
+import type { RuntimeState } from '../types';
+import type { JurisdictionEvent } from '../types/jurisdiction-events';
 import { createDefaultDelta } from '../account/delta';
 import {
   addReplica,

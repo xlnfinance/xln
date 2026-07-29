@@ -7,15 +7,11 @@ import {
 } from '../extensions/cross-j/index';
 import { committedCrossJSourceDisputeDelayMs } from '../extensions/cross-j/prepared-route';
 import { MAX_ACCOUNT_FRAME_TXS } from '../account/consensus/frame';
-import type {
-  AccountReplica,
-  AccountTx,
-  CrossJurisdictionSwapRoute,
-  EntityReplica,
-  EntityState,
-  EntityTx,
-  RuntimeState,
-} from '../types';
+import type { AccountReplica, AccountTx } from '../types/account';
+import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
+import type { EntityReplica, EntityState } from './types';
+import type { RuntimeState } from '../types';
+import type { EntityTx } from '../types/entity-tx';
 import { findAccountKey, normalizeEntityRef } from './tx/account-key';
 import { accountHasPullResolveQueued } from './tx/cross-jurisdiction-helpers';
 

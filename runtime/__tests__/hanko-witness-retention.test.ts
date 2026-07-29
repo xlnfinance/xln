@@ -4,7 +4,7 @@ import {
   pruneHankoWitnessToReachableState,
   type HankoWitnessEntry,
 } from '../entity/consensus/hanko-witness';
-import type { EntityState } from '../types';
+import type { EntityState } from '../entity/types';
 
 const hash = (byte: string): string => `0x${byte.repeat(64)}`;
 const entry = (

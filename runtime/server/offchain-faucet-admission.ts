@@ -1,4 +1,4 @@
-import type { AccountReplica } from '../types';
+import type { AccountReplica } from '../types/account';
 
 export type OffchainFaucetAccountState = {
   exists: boolean;

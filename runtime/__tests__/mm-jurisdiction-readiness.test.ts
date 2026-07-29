@@ -2,7 +2,8 @@ import { expect, test } from 'bun:test';
 
 import type { JAdapter } from '../jadapter/types';
 import { waitForJurisdictionAdapter } from '../orchestrator/mm-node';
-import type { RuntimeState, JReplica } from '../types';
+import type { RuntimeState } from '../types';
+import type { JReplica } from '../types/jurisdiction-runtime';
 
 const adapter = (chainId: number, depository: string): JAdapter => ({
   chainId,

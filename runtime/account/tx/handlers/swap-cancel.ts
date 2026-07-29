@@ -11,7 +11,7 @@
  * Final state transition happens only in swap_resolve (counterparty side).
  */
 
-import type { AccountReplica, AccountTx } from '../../../types';
+import type { AccountReplica, AccountTx } from '../../../types/account';
 import { createStructuredLogger, shortOrder } from '../../../infra/logger';
 import { recordSwapCancelRequested } from './swap-history';
 

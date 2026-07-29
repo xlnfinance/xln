@@ -9,7 +9,8 @@ import { createJAdapter } from '../jadapter';
 import { rawEventToJEvents } from '../jadapter/helpers';
 import { createEmptyBatch } from '../jurisdiction/batch';
 import { normalizeJurisdictionEvent } from '../jurisdiction/event-normalization';
-import type { EntityState, JurisdictionEvent } from '../types';
+import type { EntityState } from '../entity/types';
+import type { JurisdictionEvent } from '../types/jurisdiction-events';
 
 const ENTITY_ID = `0x${'11'.repeat(32)}`;
 const STALE_BATCH_HASH = `0x${'22'.repeat(32)}`;

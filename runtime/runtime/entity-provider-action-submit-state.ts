@@ -16,7 +16,10 @@ import {
   requireRuntimeJurisdictionConfigByName,
 } from '../jurisdiction/jurisdiction-runtime';
 import { safeStringify } from '../protocol/serialization';
-import type { EntityReplica, RuntimeState, JInput, JTx, RuntimeTx } from '../types';
+import type { EntityReplica } from '../entity/types';
+import type { RuntimeState, RuntimeTx } from '../types';
+import type { JInput } from '../jurisdiction/input';
+import type { JTx } from '../types/jurisdiction-runtime';
 
 type RetryActionTx = Extract<RuntimeTx, { type: 'retryEntityProviderAction' }>;
 export type ActionJTx =

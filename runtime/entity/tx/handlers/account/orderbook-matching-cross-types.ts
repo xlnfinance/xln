@@ -1,4 +1,4 @@
-import type { EntityCandidateEffect, EntityState } from '../../../../types';
+import type { EntityCandidateEffect, EntityState } from '../../../types';
 import type { BookState, OrderbookExtState } from '../../../../orderbook';
 import type {
   CrossJurisdictionFillInstruction,

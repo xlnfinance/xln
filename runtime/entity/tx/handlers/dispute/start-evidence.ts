@@ -1,8 +1,6 @@
-import type {
-  AccountReplica,
-  EntityState,
-  RuntimeState,
-} from '../../../../types';
+import type { AccountReplica } from '../../../../types/account';
+import type { EntityState } from '../../../types';
+import type { RuntimeState } from '../../../../types';
 import type { ProofBodyStruct } from '../../../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
 import { addMessage } from '../../../frame-events';
 import {
@@ -12,10 +10,10 @@ import {
 } from '../../../../jurisdiction/batch';
 import { hashProofBodyStruct } from '../../../../protocol/dispute/proof-builder';
 import {
-  buildDisputeArgumentsForSnapshot,
   requireDisputeArgumentSnapshot,
   type DisputeArgumentSide,
 } from '../../../../protocol/dispute/arguments';
+import { buildDisputeArgumentsForSnapshot } from '../../../dispute-arguments';
 import { shortHash, shortId } from '../../../../infra/logger';
 import {
   canonicalizeProofBodyStruct,

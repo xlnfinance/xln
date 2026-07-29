@@ -1,6 +1,8 @@
 import { ethers } from 'ethers';
 
-import type { EntityState, RuntimeState, JurisdictionConfig, JurisdictionEvent } from '../types';
+import type { EntityState, JurisdictionConfig } from '../entity/types';
+import type { RuntimeState } from '../types';
+import type { JurisdictionEvent } from '../types/jurisdiction-events';
 import type {
   CertifiedBoardAuthorityBinding,
   CertifiedBoardNodeStore,

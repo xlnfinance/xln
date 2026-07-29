@@ -14,7 +14,7 @@ import {
 
 import { computeAccountStateRoot, computeAccountStateRootCold } from '../account/state-root';
 
-import { resolveCertifiedAccountCounterpartyProposer } from '../account/counterparty-route';
+import { resolveCertifiedAccountCounterpartyProposer } from '../runtime/account-counterparty-route';
 
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
 
@@ -205,8 +205,8 @@ import { createDefaultDelta } from '../account/delta';
 
 import { cloneEntityState } from '../entity/state-clone';
 
+import { buildDisputeArgumentsForSnapshot } from '../entity/dispute-arguments';
 import {
-  buildDisputeArgumentsForSnapshot,
   captureDisputeArgumentSnapshot,
   storeDisputeArgumentSnapshot,
 } from '../protocol/dispute/arguments';
@@ -230,7 +230,8 @@ import { computeHtlcEnvelopeContextHash, computeHtlcSecretOfferContextHash } fro
 
 import { encryptBytesForValidatorManifest } from '../protocol/htlc/multi-recipient';
 
-import { buildHtlcOnionAdvanceTx, hashEncryptedHtlcLayer } from '../protocol/htlc/onion-advance';
+import { buildHtlcOnionAdvanceTx } from '../entity/htlc/onion-advance';
+import { hashEncryptedHtlcLayer } from '../protocol/htlc/onion-layer';
 
 import { encodeHtlcSecretOffer, encodeOnionLayer } from '../protocol/htlc/onion-codec';
 
@@ -251,26 +252,15 @@ import {
   resolveEntityProposerId,
 } from '../runtime/entity-output-signer';
 
-import { QUOTE_EXPIRY_MS } from '../types';
+import { QUOTE_EXPIRY_MS } from '../types/rebalance';
 
-import type {
-  AccountFrame,
-  AccountInput,
-  AccountState,
-  AccountTx,
-  ConsensusConfig,
-  CrossJurisdictionSwapRoute,
-  DisputeFinalizationEvidence,
-  EntityInput,
-  EntityReplica,
-  EntityState,
-  EntityTx,
-  RuntimeState,
-  JInput,
-  JurisdictionConfig,
-  JurisdictionEvent,
-  RuntimeTx,
-} from '../types';
+import type { AccountFrame, AccountInput, AccountState, AccountTx } from '../types/account';
+import type { ConsensusConfig, EntityInput, EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
+import type { RuntimeState, RuntimeTx } from '../types';
+import type { JInput } from '../jurisdiction/input';
+import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
+import type { DisputeFinalizationEvidence, JurisdictionEvent } from '../types/jurisdiction-events';
+import type { EntityTx } from '../types/entity-tx';
 
 import { installCanonicalRegisteredBoardAuthority } from './helpers/registration-evidence';
 

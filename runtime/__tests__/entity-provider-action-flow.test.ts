@@ -59,7 +59,10 @@ import {
 } from '../storage/wal/snapshot';
 import { hydrateEntityStateFromStorage } from '../storage/hydration';
 import { projectEntityCoreDoc } from '../storage/projections';
-import type { ConsensusConfig, EntityReplica, EntityState, EntityTx, RuntimeState, JTx } from '../types';
+import type { ConsensusConfig, EntityReplica, EntityState } from '../entity/types';
+import type { RuntimeState } from '../types';
+import type { EntityTx } from '../types/entity-tx';
+import type { JTx } from '../types/jurisdiction-runtime';
 import { applyJEventRange } from './helpers/j-history';
 
 const address = (byte: string): string => `0x${byte.repeat(20)}`;

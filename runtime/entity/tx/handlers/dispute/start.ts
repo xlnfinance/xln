@@ -1,11 +1,7 @@
-import type {
-  AccountReplica,
-  EntityInput,
-  EntityState,
-  EntityTx,
-  RuntimeState,
-  RuntimeOverlayRecord,
-} from '../../../../types';
+import type { AccountReplica, RuntimeOverlayRecord } from '../../../../types/account';
+import type { EntityInput, EntityState } from '../../../types';
+import type { RuntimeState } from '../../../../types';
+import type { EntityTx } from '../../../../types/entity-tx';
 import { prepareEntityTxState } from '../../../state-clone';
 import { addMessage } from '../../../frame-events';
 import {

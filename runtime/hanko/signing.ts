@@ -3,7 +3,9 @@
  * Bridges between account-consensus and hanko.ts library
  */
 
-import type { ConsensusConfig, EntityState, RuntimeState, HankoBoardDelays, HankoString } from '../types';
+import type { ConsensusConfig, EntityState } from '../entity/types';
+import type { RuntimeState } from '../types';
+import type { HankoBoardDelays, HankoString } from '../types/hanko';
 import { ethers } from 'ethers';
 import { encodeBoard, generateLazyEntityId, hashBoard } from '../entity/factory';
 import { recoverAddressFromDigestSignature, signDigestBytesWithPrivateKey } from '../account/crypto';

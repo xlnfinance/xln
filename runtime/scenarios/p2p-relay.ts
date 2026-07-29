@@ -14,7 +14,7 @@ import { loadJurisdictions } from '../jurisdiction/jurisdiction-loader';
 import { DEFAULT_TOKENS, TOKEN_REGISTRATION_AMOUNT, getDefaultTokenSupply } from '../jurisdiction/default-tokens';
 import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/index.ts';
 import { ethers } from 'ethers';
-import type { JReplica } from '../types';
+import type { JReplica } from '../types/jurisdiction-runtime';
 
 const args = globalThis.process.argv.slice(2);
 const hasFlag = (name: string) => args.includes(name);

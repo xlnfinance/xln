@@ -1,4 +1,4 @@
-import type { AccountReplica, SwapOffer } from '../../../../types';
+import type { AccountReplica, SwapOffer } from '../../../../types/account';
 import type { SwapOfferEvent } from '../../apply-types';
 import { deriveDelta } from '../../../utils';
 import { cloneCrossJurisdictionRoute } from '../../../../extensions/cross-j';

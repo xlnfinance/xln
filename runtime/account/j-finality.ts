@@ -1,4 +1,4 @@
-import type { AccountReplica } from '../types';
+import type { AccountReplica } from '../types/account';
 import { freezeAccountForDispute } from './consensus/dispute-policy';
 import { invalidateAccountMapCommitment } from './map-commitment';
 import { clearFinalizedSettlementWorkspace } from './tx/handlers/settle-transition';

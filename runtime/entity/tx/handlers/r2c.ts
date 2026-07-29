@@ -16,8 +16,11 @@
  * 5. On-chain event triggers bilateral account state update
  */
 
-import type { EntityState, EntityTx, EntityInput, AccountTx, JInput } from '../../../types';
-import { QUOTE_EXPIRY_MS } from '../../../types';
+import type { EntityState, EntityInput } from '../../types';
+import type { JInput } from '../../../jurisdiction/input';
+import type { EntityTx } from '../../../types/entity-tx';
+import type { AccountTx } from '../../../types/account';
+import { QUOTE_EXPIRY_MS } from '../../../types/rebalance';
 import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import { batchAddReserveToCollateral, initJBatch } from '../../../jurisdiction/batch';

@@ -12,7 +12,7 @@ import {
   RCPAN_MICROSCOPE_TOKENS,
   tokenAmountToUsdMicros,
 } from '../../frontend/src/lib/components/Rcpan/microscope-tokens';
-import type { SwapBookEntry } from '../types';
+import type { SwapBookEntry } from '../entity/types';
 import {
   formatGraphEntityReserveBalances,
   formatGraphReserveBadge,

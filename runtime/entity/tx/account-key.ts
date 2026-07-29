@@ -1,4 +1,4 @@
-import type { EntityState } from '../../types';
+import type { EntityState } from '../types';
 
 export const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 

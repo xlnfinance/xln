@@ -11,13 +11,13 @@
  * - Enforces revealBeforeHeight for griefing protection
  */
 
-import type { AccountReplica, AccountTx, HtlcLock } from '../../../types';
+import type { AccountReplica, AccountTx, HtlcLock } from '../../../types/account';
 import { deriveDelta } from '../../utils';
 import { FINANCIAL, LIMITS } from '../../../config/constants';
 import { ensureDelta } from '../delta-utils';
 import { addHold } from '../hold-utils';
 import { isHtlcTimelockExpired } from '../../htlc-deadline';
-import { encryptedHtlcLayer, hashEncryptedHtlcLayer } from '../../../protocol/htlc/onion-advance';
+import { encryptedHtlcLayer, hashEncryptedHtlcLayer } from '../../../protocol/htlc/onion-layer';
 
 type HtlcLockTx = Extract<AccountTx, { type: 'htlc_lock' }>;
 

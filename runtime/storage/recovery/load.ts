@@ -1,7 +1,7 @@
 import {
   cloneIsolatedRoutedEntityInputs,
   cloneIsolatedRuntimeInput,
-} from '../../protocol/runtime-input-clone';
+} from '../../runtime/input-clone';
 import { requireBoundaryInteger } from '../../protocol/boundary-validation';
 import { writeRuntimeMetadata } from '../../runtime/loop-environment';
 import { restoreDurableOutputRetryState } from '../../runtime/durable-output-retry';

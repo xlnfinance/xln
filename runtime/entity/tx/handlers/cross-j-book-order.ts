@@ -22,14 +22,11 @@ import {
   markCrossJurisdictionBookRemovalCommitted,
   mergeCrossJurisdictionBookAdmission,
 } from '../../../extensions/cross-j/orderbook';
-import type {
-  CrossJurisdictionSwapRoute,
-  EntityCandidateEffect,
-  EntityState,
-  EntityTx,
-  RuntimeState,
-  RuntimeOverlayRecord,
-} from '../../../types';
+import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
+import type { EntityCandidateEffect, EntityState } from '../../types';
+import type { RuntimeState } from '../../../types';
+import type { EntityTx } from '../../../types/entity-tx';
+import type { RuntimeOverlayRecord } from '../../../types/account';
 import { getSwapLotScale } from '../../../orderbook';
 import {
   materializeCrossJurisdictionBookRemainder,

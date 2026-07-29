@@ -1,12 +1,13 @@
 import { copyLocalEntityLeaderTimeoutVoteAuthorization } from '../../entity/consensus/leader';
 import { cloneTrustedEntityReplica } from '../../entity/replica-clone';
-import type { RuntimeState, JReplica, RuntimeInput } from '../../types';
+import type { RuntimeState, RuntimeInput } from '../../types';
+import type { JReplica } from '../../types/jurisdiction-runtime';
 import { copyLocalJAuthorityRuntimeTxAuthorization } from '../../jurisdiction/registration-evidence';
 import { createGossipLayer } from '../../networking/gossip';
 import {
   cloneIsolatedRoutedEntityInputs,
   cloneIsolatedRuntimeInput,
-} from '../../protocol/runtime-input-clone';
+} from '../../runtime/input-clone';
 import { copyDeterministicHtlcTestSecretCapability } from '../../protocol/htlc/test-secret-capability';
 import { copyLocalRuntimeAdapterCommandAuthorization } from '../../radapter/command-frontier-auth';
 import {

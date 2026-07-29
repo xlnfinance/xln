@@ -1,4 +1,6 @@
-import type { AccountReplica, AccountTx, EntityCandidateEffect, RuntimeState } from '../../../types';
+import type { AccountReplica, AccountTx } from '../../../types/account';
+import type { AccountOutput } from '../../../types/account';
+import type { RuntimeState } from '../../../types';
 import type { AccountJClaimSession } from '../../j-claim-session';
 import { getAccountPerspective } from '../../perspective';
 import { applyAccountJClaimTransition } from '../../j-claim-transition';
@@ -15,7 +17,7 @@ export function handleJEventClaim(
   _currentTimestamp: number,
   isValidation: boolean,
   myEntityId: string,
-  candidateEffects: EntityCandidateEffect[],
+  candidateEffects: AccountOutput[],
   env: RuntimeState,
   session: AccountJClaimSession,
 ): { success: boolean; events: string[]; error?: string } {

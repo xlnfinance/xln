@@ -6,7 +6,10 @@
 
 import { isHexString } from 'ethers';
 import type { JEvent, JEventIngress } from './types';
-import type { DisputeFinalizationEvidence, EntityInput, RuntimeState, JPrefixAttestation, JReplica, JurisdictionConfig, RuntimeInput, RuntimeTx, ValidatorJEventBlock } from '../types';
+import type { DisputeFinalizationEvidence, JPrefixAttestation, ValidatorJEventBlock } from '../types/jurisdiction-events';
+import type { EntityInput, JurisdictionConfig } from '../entity/types';
+import type { RuntimeState, RuntimeInput, RuntimeTx } from '../types';
+import type { JReplica } from '../types/jurisdiction-runtime';
 import { enqueueRuntimeInput } from '../runtime/input-queue';
 import { createStructuredLogger, shortId } from '../infra/logger';
 import {
@@ -15,7 +18,7 @@ import {
   getJEventJurisdictionRef,
 } from '../jurisdiction/event-observation';
 import { indexReserveUpdatedEvents } from '../jurisdiction/event-evidence';
-import { JBLOCK_LIVENESS_INTERVAL } from '../types';
+import { JBLOCK_LIVENESS_INTERVAL } from '../entity/types';
 import {
   assertValidatorJHistoryMatchesCertifiedAnchor,
   getEntityCertifiedJAnchor,

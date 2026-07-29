@@ -59,14 +59,9 @@ import {
   applyCertifiedEntityLineagePlan,
   buildCertifiedEntityLineagePlan,
 } from '../storage/entity-lineage';
-import type {
-  DeliverableEntityInput,
-  EntityReplica,
-  EntityState,
-  RuntimeState,
-  JurisdictionEvent,
-  ProposedEntityFrame,
-} from '../types';
+import type { DeliverableEntityInput, RuntimeState } from '../types';
+import type { EntityReplica, EntityState, ProposedEntityFrame } from '../entity/types';
+import type { JurisdictionEvent } from '../types/jurisdiction-events';
 import {
   buildDurableRuntimeMachineSnapshot,
   buildReplayVerifiableRuntimeMachineSnapshot,

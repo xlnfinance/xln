@@ -1,4 +1,4 @@
-import type { AccountState, Delta } from '../../types';
+import type { AccountState, Delta } from '../../types/account';
 import { createDefaultDelta } from '../delta';
 
 export function ensureDelta(account: AccountState, tokenId: number): Delta {

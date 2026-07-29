@@ -1,9 +1,4 @@
-import type {
-  AccountReplica,
-  SwapOffer,
-  SwapOrderHistoryEntry,
-  SwapOrderResolveHistoryEntry,
-} from '../../../types';
+import type { AccountReplica, SwapOffer, SwapOrderHistoryEntry, SwapOrderResolveHistoryEntry } from '../../../types/account';
 import {
   cloneCrossJurisdictionRoute,
   cloneCrossJurisdictionSwapHistoryRoute,

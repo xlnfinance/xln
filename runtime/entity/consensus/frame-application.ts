@@ -30,20 +30,11 @@ import { createEntityFrameCandidateState } from '../state-clone';
 import { getAccountPerspective } from '../../account/perspective';
 import { emitScopedEvents } from '../../infra/scoped-events';
 import { addMessages, clearEntityFrameEvents, readEntityFrameEvents } from '../frame-events';
-import type {
-  AccountPeerInput,
-  AccountReplica,
-  AccountTx,
-  EntityCandidateEffect,
-  EntityFrameEvent,
-  EntityOutput,
-  EntityState,
-  EntityTx,
-  RuntimeState,
-  HashType,
-  JInput,
-  RuntimeOverlayRecord,
-} from '../../types';
+import type { AccountPeerInput, AccountReplica, AccountTx, RuntimeOverlayRecord } from '../../types/account';
+import type { EntityCandidateEffect, EntityFrameEvent, EntityOutput, EntityState, HashType } from '../types';
+import type { RuntimeState } from '../../types';
+import type { JInput } from '../../jurisdiction/input';
+import type { EntityTx } from '../../types/entity-tx';
 import type { AccountJClaimNode, AccountJClaimNodeChanges, AccountJClaimNodeStore } from '../../types/account-j-claims';
 import { getPerfMs } from '../../infra/time';
 import {

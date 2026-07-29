@@ -12,7 +12,8 @@ import {
 } from '../account/state-root';
 import { cloneAccountState } from '../account/state-clone';
 import { cloneEntityState } from '../entity/state-clone';
-import type { AccountState, EntityState, SwapOffer } from '../types';
+import type { AccountState, SwapOffer } from '../types/account';
+import type { EntityState } from '../entity/types';
 import { createDefaultDelta } from '../account/delta';
 
 const LEFT = `0x${'11'.repeat(32)}`;

@@ -2,7 +2,9 @@ import { encodeCanonicalConsensusValue } from '../protocol/canonical-consensus-v
 import { ethers } from 'ethers';
 
 import { LIMITS } from '../config/constants';
-import type { ConsensusConfig, CrossJurisdictionSwapRoute, EntityState, EntityTx, ProposalAction } from '../types';
+import type { ConsensusConfig, EntityState, ProposalAction } from './types';
+import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
+import type { EntityTx } from '../types/entity-tx';
 import { buildCrossJurisdictionPullBinding, isCrossJurisdictionTerminalStatus } from '../extensions/cross-j';
 
 import { assertNoConsensusVisibleHtlcPaymentSecrets } from '../protocol/htlc/consensus-secret-guard';

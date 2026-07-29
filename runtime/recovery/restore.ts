@@ -11,7 +11,7 @@ import {
   registerCommittedSingleSignerWallets,
 } from '../runtime/recovery-infra';
 import { replayPersistedRuntimeJournals } from '../storage/recovery/journal';
-import type { RuntimeState, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeTx } from './../types';
+import type { RuntimeState, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeTx } from '../types';
 import type { PersistedFrameJournal } from './../storage/types';
 import type { RuntimeRecoveryBundleV1 } from './../recovery/types';
 import { loadGossipProfilesFromInfraDb } from '../runtime/infra-gossip-store';
@@ -34,9 +34,9 @@ export type RuntimeRecoveryDeps = Pick<
   tryOpenRuntimeWalDb(env: RuntimeState): Promise<boolean>;
   enqueueRuntimeContinuation(
     env: RuntimeState,
-    inputs?: import('../types').EntityInput[],
+    inputs?: import('../entity/types').EntityInput[],
     runtimeTxs?: RuntimeTx[],
-    jInputs?: import('../types').JInput[],
+    jInputs?: import('../jurisdiction/input').JInput[],
     explicitTimestamp?: number,
     reliableReceipts?: ReliableDeliveryReceipt[],
   ): void;

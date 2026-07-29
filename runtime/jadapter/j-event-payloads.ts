@@ -1,4 +1,4 @@
-import type { JurisdictionEvent } from '../types';
+import type { JurisdictionEvent } from '../types/jurisdiction-events';
 import { normalizeJurisdictionEvent } from '../jurisdiction/event-normalization';
 import { CANONICAL_J_EVENTS } from '../jurisdiction/event-catalog';
 import type { JEventIngress } from './types';

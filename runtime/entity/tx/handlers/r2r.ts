@@ -11,7 +11,8 @@
  * 4. jBroadcast tx commits batch to J-machine
  */
 
-import type { EntityState, EntityTx, EntityInput } from '../../../types';
+import type { EntityState, EntityInput } from '../../types';
+import type { EntityTx } from '../../../types/entity-tx';
 import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import { initJBatch, batchAddReserveToReserve } from '../../../jurisdiction/batch';

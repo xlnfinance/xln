@@ -4,7 +4,7 @@ import {
   validateMapInstance,
   validateObject,
 } from '../protocol/validation-primitives';
-import type { ConsensusConfig } from '../types';
+import type { ConsensusConfig } from './types';
 import { assertEntityProviderActionIntent } from './entity-provider-action';
 
 const MAX_UINT256 = (1n << 256n) - 1n;

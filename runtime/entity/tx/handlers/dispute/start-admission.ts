@@ -1,8 +1,6 @@
-import type {
-  AccountReplica,
-  EntityState,
-  EntityTx,
-} from '../../../../types';
+import type { AccountReplica } from '../../../../types/account';
+import type { EntityState } from '../../../types';
+import type { EntityTx } from '../../../../types/entity-tx';
 import { addMessage } from '../../../frame-events';
 import { initJBatch } from '../../../../jurisdiction/batch';
 import { isCrossJurisdictionTerminalStatus } from '../../../../extensions/cross-j';

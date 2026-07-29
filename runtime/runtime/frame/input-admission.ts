@@ -2,14 +2,8 @@ import { createStructuredLogger, logError, shortId } from '../../infra/logger';
 import { normalizeRuntimeId } from '../../networking/runtime-id';
 import { decodeRoutedEntityInput } from '../routing-validation';
 import { validateJInputs } from '../../storage/wal/runtime-machine-schema/j';
-import type {
-  RuntimeState,
-  JInput,
-  ReliableDeliveryReceipt,
-  RoutedEntityInput,
-  RuntimeInput,
-  RuntimeTx,
-} from '../../types';
+import type { RuntimeState, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../../types';
+import type { JInput } from '../../jurisdiction/input';
 import {
   getInputReliableIdentity,
   registerReliableIngress,

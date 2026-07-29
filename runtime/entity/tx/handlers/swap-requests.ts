@@ -1,4 +1,7 @@
-import type { AccountState, AccountTx, EntityInput, EntityState, EntityTx, RuntimeState } from '../../../types';
+import type { AccountState, AccountTx } from '../../../types/account';
+import type { EntityInput, EntityState } from '../../types';
+import type { RuntimeState } from '../../../types';
+import type { EntityTx } from '../../../types/entity-tx';
 import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import {

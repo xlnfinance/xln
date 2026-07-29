@@ -1,4 +1,5 @@
-import type { EntityState, JurisdictionEvent } from '../../types';
+import type { EntityState } from '../types';
+import type { JurisdictionEvent } from '../../types/jurisdiction-events';
 import type { BatchOperationSkip, BatchOperationType } from '../../jurisdiction/batch';
 import { addMessage } from '../frame-events';
 

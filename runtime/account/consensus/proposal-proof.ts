@@ -1,4 +1,5 @@
-import type { AccountReplica, RuntimeState } from '../../types';
+import type { AccountReplica } from '../../types/account';
+import type { RuntimeState } from '../../types';
 import { createDisputeProofHashWithNonce } from '../../protocol/dispute/proof-builder';
 import {
   buildAccountProofBodyFromEnv,

@@ -24,7 +24,7 @@ import {
   type NormalizedOrderbookOffer,
 } from '../orderbook/swap-execution';
 
-import type { AccountState, AccountTx, SwapOffer } from '../types';
+import type { AccountState, AccountTx, SwapOffer } from '../types/account';
 
 import { createDefaultDelta } from '../account/delta';
 

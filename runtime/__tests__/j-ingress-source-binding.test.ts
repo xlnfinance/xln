@@ -12,7 +12,8 @@ import { parseReceiptLogsToJEvents } from '../jadapter/j-event-log-decoder';
 import { bindLocalJEventIngressSource } from '../jadapter/local-ingress-source';
 import { resolveApprovalReceiptLogIndex } from '../jadapter/rpc-public';
 import { createEmptyEnv } from '../runtime';
-import type { EntityReplica, JReplica, JurisdictionConfig } from '../types';
+import type { EntityReplica, JurisdictionConfig } from '../entity/types';
+import type { JReplica } from '../types/jurisdiction-runtime';
 
 const address = (byte: string): string => `0x${byte.repeat(20)}`;
 const entityId = (byte: string): string => `0x${byte.repeat(32)}`;

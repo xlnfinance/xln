@@ -6,10 +6,7 @@ import {
   validateObject,
   validateString,
 } from '../../protocol/validation-primitives';
-import type {
-  EntityLeaderTimeoutVote,
-  ProposedEntityFrame,
-} from '../../types';
+import type { EntityLeaderTimeoutVote, ProposedEntityFrame } from '../types';
 import { assertEntityFrameEventByteBudget } from './frame-events';
 import { validateJPrefixCertificate } from './j-prefix-validation';
 

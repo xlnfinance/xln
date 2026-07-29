@@ -1,4 +1,5 @@
-import type { EntityInput, EntityTx } from '../../types';
+import type { EntityInput } from '../types';
+import type { EntityTx } from '../../types/entity-tx';
 import { compareStableText } from '../../protocol/serialization';
 
 const NESTED_PROTOCOL_TXS = new Set<EntityTx['type']>([

@@ -1,4 +1,5 @@
-import type { RuntimeState, JurisdictionConfig } from '../types';
+import type { RuntimeState } from '../types';
+import type { JurisdictionConfig } from '../entity/types';
 import { requireUsableContractAddress } from '../jurisdiction/contract-address';
 import type { BrowserVMProvider } from './types';
 

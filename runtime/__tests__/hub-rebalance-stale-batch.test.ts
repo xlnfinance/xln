@@ -3,7 +3,7 @@ import { expect, test } from 'bun:test';
 import { computeAccountStateRoot } from '../account/state-root';
 import { executeCrontab, initCrontab, HUB_PENDING_BROADCAST_STALE_MS } from '../entity/scheduler';
 import { createEmptyEnv } from '../runtime';
-import type { EntityReplica, EntityState, JurisdictionConfig } from '../types';
+import type { EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
 import { makeAccount } from './helpers/cross-j';
 
 const entityId = `0x${'c5'.repeat(32)}`;

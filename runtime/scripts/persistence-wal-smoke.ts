@@ -14,7 +14,8 @@ import {
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
 import { generateLazyEntityId } from '../entity/factory';
 import { createJAdapter } from '../jadapter';
-import type { JReplica, JurisdictionConfig } from '../types';
+import type { JReplica } from '../types/jurisdiction-runtime';
+import type { JurisdictionConfig } from '../entity/types';
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`ASSERT: ${message}`);

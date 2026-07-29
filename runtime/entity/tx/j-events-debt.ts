@@ -1,4 +1,6 @@
-import type { DebtEntry, DebtEventType, EntityState, JurisdictionEvent } from '../../types';
+import type { DebtEntry, DebtEventType } from '../../types/debt';
+import type { EntityState } from '../types';
+import type { JurisdictionEvent } from '../../types/jurisdiction-events';
 import { createStructuredLogger, shortId } from '../../infra/logger';
 
 const debtLog = createStructuredLogger('entity.debt');

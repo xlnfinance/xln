@@ -1,10 +1,5 @@
-import type {
-  AccountState,
-  AccountTx,
-  CrossJurisdictionPullBinding,
-  CrossJurisdictionSwapRoute,
-  PullCommitment,
-} from '../../../types';
+import type { AccountState, AccountTx, PullCommitment } from '../../../types/account';
+import type { CrossJurisdictionPullBinding, CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
 import { deriveDelta } from '../../utils';
 import { FINANCIAL, LIMITS } from '../../../config/constants';
 import {

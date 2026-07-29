@@ -1,8 +1,6 @@
-import type {
-  AccountReplica,
-  EntityState,
-  RuntimeState,
-} from '../../../../types';
+import type { AccountReplica } from '../../../../types/account';
+import type { EntityState } from '../../../types';
+import type { RuntimeState } from '../../../../types';
 import type { ProofBodyStruct } from '../../../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
 import { addMessage } from '../../../frame-events';
 import {
@@ -17,7 +15,7 @@ import { buildAccountProofBodyFromEnv } from '../../../../account/consensus/help
 import {
   buildDisputeArgumentsForSnapshot,
   type DisputeArgumentSide,
-} from '../../../../protocol/dispute/arguments';
+} from '../../../dispute-arguments';
 import { shortHash, shortId } from '../../../../infra/logger';
 import {
   canonicalizeProofBodyStruct,

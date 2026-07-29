@@ -1,6 +1,6 @@
 import { appendAccountMempoolTxs } from './mempool';
 import { txFingerprint } from '../protocol/tx-multiset';
-import type { AccountLocalInput, AccountReplica, AccountTx } from '../types';
+import type { AccountLocalInput, AccountReplica, AccountTx } from '../types/account';
 import type { HandleAccountInputResult } from './consensus/types';
 
 type AccountMempoolQueue = Pick<AccountReplica, 'mempool' | 'pendingFrame'>;

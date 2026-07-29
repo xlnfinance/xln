@@ -1,4 +1,5 @@
-import type { EntityReplica, EntityState, RuntimeState } from '../types';
+import type { EntityReplica, EntityState } from '../entity/types';
+import type { RuntimeState } from '../types';
 import { compareStableText } from '../protocol/serialization';
 import {
   buildCertifiedEntityLineagePlan,

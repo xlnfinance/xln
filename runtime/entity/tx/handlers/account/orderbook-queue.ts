@@ -1,4 +1,5 @@
-import type { AccountTx, EntityState } from '../../../../types';
+import type { AccountTx } from '../../../../types/account';
+import type { EntityState } from '../../../types';
 import { swapKey } from '../../../../orderbook/swap-execution';
 
 export interface AccountTxTarget {

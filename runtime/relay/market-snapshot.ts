@@ -1,4 +1,4 @@
-import type { EntityReplica } from '../types';
+import type { EntityReplica } from '../entity/types';
 import { ORDERBOOK_PRICE_SCALE, getBookSideLevels, type BookState } from '../orderbook';
 
 export type MarketSideLevel = {

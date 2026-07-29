@@ -1,6 +1,7 @@
 import { getSignerAddress, getSignerPublicKey, signAccountFrame } from '../account/crypto';
 import { hasLocalSignerKey } from './crypto';
-import type { EntityState, RuntimeState } from '../types';
+import type { EntityState } from './types';
+import type { RuntimeState } from '../types';
 import { serializeTaggedJson } from '../protocol/serialization';
 import {
   computeValidatorEncryptionAttestationDigest,

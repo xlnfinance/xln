@@ -10,7 +10,10 @@ import { cloneJBatch, initJBatch } from '../jurisdiction/batch';
 import { createEmptyEnv } from '../runtime';
 import { hydrateEntityStateFromStorage } from '../storage/hydration';
 import { projectEntityCoreDoc } from '../storage/projections';
-import type { DebtEntry, EntityState, EntityTx, RuntimeState } from '../types';
+import type { DebtEntry } from '../types/debt';
+import type { EntityState } from '../entity/types';
+import type { RuntimeState } from '../types';
+import type { EntityTx } from '../types/entity-tx';
 
 const entityId = `0x${'aa'.repeat(32)}`;
 const counterpartyId = `0x${'bb'.repeat(32)}`;

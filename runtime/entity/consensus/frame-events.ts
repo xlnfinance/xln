@@ -1,6 +1,6 @@
 import { LIMITS } from '../../config/constants';
 import { safeStringify } from '../../protocol/serialization';
-import type { EntityFrameEvent } from '../../types';
+import type { EntityFrameEvent } from '../types';
 
 /**
  * Entity events are signed history, not live state. They still cross the

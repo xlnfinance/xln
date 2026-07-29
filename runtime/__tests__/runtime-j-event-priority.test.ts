@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 
 import { prioritizeJEventFrame } from '../runtime';
-import type { EntityInput, EntityTx, ProposedEntityFrame, RuntimeInput } from '../types';
+import type { EntityInput, ProposedEntityFrame } from '../entity/types';
+import type { RuntimeInput } from '../types';
+import type { EntityTx } from '../types/entity-tx';
 
 describe('Runtime J-event frame priority', () => {
   test('keeps consensus payload exclusively on the deferred lane', () => {

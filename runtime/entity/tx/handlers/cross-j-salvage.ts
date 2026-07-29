@@ -9,13 +9,10 @@ import {
 import { verifyHashLadderBinary } from '../../../protocol/htlc/hash-ladder';
 import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
-import type {
-  CrossJurisdictionSwapRoute,
-  EntityInput,
-  EntityState,
-  EntityTx,
-  RuntimeState,
-} from '../../../types';
+import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
+import type { EntityInput, EntityState } from '../../types';
+import type { RuntimeState } from '../../../types';
+import type { EntityTx } from '../../../types/entity-tx';
 import { normalizeEntityRef } from '../account-key';
 
 type CrossJurisdictionSalvageTx = Extract<EntityTx, { type: 'crossJurisdictionSalvage' }>;

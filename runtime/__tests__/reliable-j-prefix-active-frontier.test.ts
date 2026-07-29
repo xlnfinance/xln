@@ -8,7 +8,9 @@ import {
 } from '../runtime/reliable-delivery';
 import { buildDurableRuntimeMachineSnapshot, restoreDurableRuntimeSnapshot } from '../storage/wal/snapshot';
 import { createEmptyEnv } from '../runtime';
-import type { DeliverableEntityInput, EntityReplica, RuntimeState, JPrefixAttestation } from '../types';
+import type { DeliverableEntityInput, RuntimeState } from '../types';
+import type { EntityReplica } from '../entity/types';
+import type { JPrefixAttestation } from '../types/jurisdiction-events';
 
 const entityId = (byte: string): string => `0x${byte.repeat(32)}`;
 const signerId = (byte: string): string => `0x${byte.repeat(20)}`;

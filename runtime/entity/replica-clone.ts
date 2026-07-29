@@ -1,10 +1,10 @@
-import type { EntityReplica } from '../types';
+import type { EntityReplica } from './types';
 import {
   cloneIsolatedEntityInput,
   cloneIsolatedEntityLeaderCertificate,
   cloneIsolatedEntityLeaderTimeoutVote,
   cloneIsolatedProposedEntityFrame,
-} from '../protocol/runtime-input-clone';
+} from './input-clone';
 import { validateEntityReplica } from './replica-validation';
 import {
   cloneEntityState,

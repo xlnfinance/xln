@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import { deriveDelta } from '../account/utils';
 import { handleDirectPayment } from '../account/tx/handlers/direct-payment';
 import { handleSetCreditLimit } from '../account/tx/handlers/set-credit-limit';
-import type { Delta, DerivedDelta } from '../types';
+import type { Delta, DerivedDelta } from '../types/account';
 import { makeAccount } from './helpers/cross-j';
 
 const nonNegative = (value: bigint): bigint => value > 0n ? value : 0n;

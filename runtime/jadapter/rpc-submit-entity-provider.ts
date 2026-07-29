@@ -5,7 +5,7 @@ import {
   assertEntityProviderActionResolutionReceipt,
 } from '../entity/entity-provider-action';
 import { normalizeEntityId } from '../entity/id';
-import type { JTx } from '../types';
+import type { JTx } from '../types/jurisdiction-runtime';
 import { classifyJAdapterFailure, makeJAdapterFailureResult } from './failure';
 import { parseReceiptLogsToJEvents } from './j-event-log-decoder';
 import { eventCarriers, type FeeOverrides, type RpcReceipt } from './rpc-boundary';

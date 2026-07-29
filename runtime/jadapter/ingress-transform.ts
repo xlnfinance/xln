@@ -1,4 +1,4 @@
-import type { ValidatorJBlockHeader } from '../types';
+import type { ValidatorJBlockHeader } from '../types/jurisdiction-events';
 import type { JEventIngress } from './types';
 
 export type JEventIngressBatch = {

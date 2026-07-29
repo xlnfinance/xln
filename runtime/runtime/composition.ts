@@ -9,10 +9,8 @@ export const RUNTIME_BUILD = RUNTIME_BUILD_ID;
 
 import { setBrowserVMJurisdiction } from '../jadapter';
 import { attachEventEmitters } from './env-events';
-import type {
-  EntityInput,
-  RuntimeState,
-} from '../types';
+import type { EntityInput } from '../entity/types';
+import type { RuntimeState } from '../types';
 import { createPersistenceQueries } from '../storage/queries';
 import { createRuntimeStorageApi } from '../storage/runtime-storage';
 import { rehydrateRestoredRuntimeInfra, type TrustedJurisdictionRpcBinding } from './infra';

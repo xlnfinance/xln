@@ -1,10 +1,7 @@
-import {
-  type EntityInput,
-  type EntityReplica,
-  type EntityTx,
-  type RuntimeState,
-  type JReplica,
-} from '../types';
+import { type EntityInput, type EntityReplica } from '../entity/types';
+import { type RuntimeState } from '../types';
+import { type EntityTx } from '../types/entity-tx';
+import { type JReplica } from '../types/jurisdiction-runtime';
 import type { JAdapter } from './types';
 import {
   findWatcherJurisdictionReplica,

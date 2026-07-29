@@ -16,7 +16,9 @@ import {
 import { applyRuntimeTx } from '../runtime/tx-handlers';
 import { createEmptyEnv } from '../runtime';
 import { buildCertifiedEntityLineagePlan } from '../storage/entity-lineage';
-import type { EntityReplica, RuntimeState, JReplica, JurisdictionConfig } from '../types';
+import type { EntityReplica, JurisdictionConfig } from '../entity/types';
+import type { RuntimeState } from '../types';
+import type { JReplica } from '../types/jurisdiction-runtime';
 import {
   buildDurableRuntimeMachineSnapshot,
   restoreDurableRuntimeSnapshot,

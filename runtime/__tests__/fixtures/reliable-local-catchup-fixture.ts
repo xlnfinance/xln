@@ -28,13 +28,8 @@ import {
   applyCertifiedEntityLineagePlan,
   buildCertifiedEntityLineagePlan,
 } from '../../storage/entity-lineage';
-import type {
-  DeliverableEntityInput,
-  EntityReplica,
-  EntityState,
-  RuntimeState,
-  ProposedEntityFrame,
-} from '../../types';
+import type { DeliverableEntityInput, RuntimeState } from '../../types';
+import type { EntityReplica, EntityState, ProposedEntityFrame } from '../../entity/types';
 
 export const deriveCatchupFixtureSigners = (seed: string): {
   leaderSignerId: string;

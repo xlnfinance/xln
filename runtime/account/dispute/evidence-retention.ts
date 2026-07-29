@@ -1,4 +1,4 @@
-import type { AccountReplica, AccountInput } from '../../types';
+import type { AccountReplica, AccountInput } from '../../types/account';
 import {
   assertJBatchWithinContractLimits,
   type JBatch,

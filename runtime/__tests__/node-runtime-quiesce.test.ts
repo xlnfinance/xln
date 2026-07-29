@@ -20,7 +20,8 @@ import {
   quiesceNodeRuntime,
 } from '../orchestrator/node-runtime-quiesce';
 import { resolveDbPath } from '../storage/runtime-dbs';
-import type { JReplica, JurisdictionConfig } from '../types';
+import type { JReplica } from '../types/jurisdiction-runtime';
+import type { JurisdictionConfig } from '../entity/types';
 
 const removeRuntimeStorage = (basePath: string): void => {
   for (const suffix of ['', '-storage-current', '-storage-previous', '-wal', '-events', '-infra']) {

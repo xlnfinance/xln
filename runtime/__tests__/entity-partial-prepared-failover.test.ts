@@ -7,14 +7,8 @@ import { applyEntityInput } from '../entity/consensus';
 import { buildEntityLeaderVoteBody, hashEntityLeaderVoteBody } from '../entity/consensus/leader';
 import { encodeBoard, hashBoard } from '../entity/factory';
 import { createEmptyEnv } from '../runtime';
-import type {
-  ConsensusConfig,
-  EntityLeaderTimeoutVote,
-  EntityReplica,
-  EntityState,
-  EntityTx,
-  ProposedEntityFrame,
-} from '../types';
+import type { ConsensusConfig, EntityLeaderTimeoutVote, EntityReplica, EntityState, ProposedEntityFrame } from '../entity/types';
+import type { EntityTx } from '../types/entity-tx';
 
 const jurisdiction = {
   name: 'partial-prepared-failover',

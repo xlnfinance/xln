@@ -14,7 +14,8 @@ import { buildCrossJurisdictionPendingFillFromAck } from '../extensions/cross-j/
 import { HASHLADDER_MAX_FILL_RATIO } from '../protocol/htlc/hash-ladder';
 import { MAX_SWAP_FILL_RATIO, exactFillRatioToUint16 } from '../orderbook/swap-execution';
 import { UINT16_MAX } from '../config/constants';
-import type { AccountTx, CrossJurisdictionSwapRoute } from '../types';
+import type { AccountTx } from '../types/account';
+import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 
 const readText = (path: string): string => {
   if (path !== 'runtime/__tests__/audit-failfast-regressions.test.ts') return readFileSync(path, 'utf8');

@@ -4,7 +4,7 @@
  * Reference: Channel.ts DirectPayment transition (2024_src/app/Transition.ts:321-344)
  */
 
-import type { AccountReplica, AccountTx } from '../../../types';
+import type { AccountReplica, AccountTx } from '../../../types/account';
 import { deriveDelta } from '../../utils';
 import { deriveTransferOffdeltaChange } from '../../../protocol/delta-movement';
 import { FINANCIAL } from '../../../config/constants';

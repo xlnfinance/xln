@@ -1,4 +1,4 @@
-import type { JTx } from '../types';
+import type { JTx } from '../types/jurisdiction-runtime';
 import {
   assertJBatchWithinContractLimits,
   batchOpCount,

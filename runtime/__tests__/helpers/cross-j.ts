@@ -8,17 +8,11 @@ import {
   canonicalJurisdictionEventsHash,
   getJEventJurisdictionRef,
 } from '../../jurisdiction/event-observation';
-import type {
-  AccountState,
-  ConsensusConfig,
-  CrossJurisdictionSwapRoute,
-  EntityReplica,
-  EntityState,
-  RuntimeState,
-  DisputeFinalizationEvidence,
-  JurisdictionConfig,
-  JurisdictionEvent,
-} from '../../types';
+import type { AccountState } from '../../types/account';
+import type { ConsensusConfig, EntityReplica, EntityState, JurisdictionConfig } from '../../entity/types';
+import type { RuntimeState } from '../../types';
+import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
+import type { DisputeFinalizationEvidence, JurisdictionEvent } from '../../types/jurisdiction-events';
 import { createDefaultDelta } from '../../account/delta';
 
 export const addr = (byte: string): string => `0x${byte.repeat(20)}`;

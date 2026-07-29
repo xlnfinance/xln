@@ -7,7 +7,10 @@ import {
   getJurisdictionStackId,
   isJurisdictionStackRef,
 } from '../../jurisdiction/jurisdiction-runtime';
-import type { AccountTx, CrossJurisdictionSwapRoute, EntityState, RuntimeState } from '../../types';
+import type { AccountTx } from '../../types/account';
+import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
+import type { EntityState } from '../types';
+import type { RuntimeState } from '../../types';
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 const normalizeAddress = (value: unknown): string => String(value || '').trim().toLowerCase();

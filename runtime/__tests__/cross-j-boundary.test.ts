@@ -5,7 +5,8 @@ import {
   isCrossJurisdictionSiblingPair,
 } from '../extensions/cross-j/boundary';
 import { deriveCanonicalCrossJurisdictionBookOwnerForLegs } from '../extensions/cross-j/market';
-import type { CrossJurisdictionSwapRoute, EntityTx } from '../types';
+import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
+import type { EntityTx } from '../types/entity-tx';
 
 const SOURCE_USER = `0x${'a1'.repeat(32)}`;
 const TARGET_USER = `0x${'a2'.repeat(32)}`;

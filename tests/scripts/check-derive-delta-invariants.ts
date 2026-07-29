@@ -3,7 +3,7 @@
  */
 
 import { deriveDelta } from '../../runtime/account/utils';
-import type { Delta } from '../../runtime/types';
+import type { Delta } from '../../runtime/types/account';
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);

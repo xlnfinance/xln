@@ -1,4 +1,4 @@
-import type { AccountReplica, AccountTx } from '../../types';
+import type { AccountReplica, AccountTx } from '../../types/account';
 import { prependUniqueMempoolTxs } from './helpers';
 import { createStructuredLogger } from '../../infra/logger';
 

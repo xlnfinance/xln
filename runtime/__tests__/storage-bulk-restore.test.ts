@@ -7,7 +7,7 @@ import { KEY_HEAD, STORAGE_SCHEMA_VERSION, keyDiff } from '../storage/keys';
 import { projectEntityCoreDoc } from '../storage/projections';
 import { loadEntityStatesAtHeightFromStorage } from '../storage/read';
 import type { RuntimeDbLike, StorageDiffRecord, StorageHead } from '../storage/types';
-import type { EntityReplica, EntityState, JurisdictionConfig } from '../types';
+import type { EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
 
 const jurisdiction: JurisdictionConfig = {
   name: 'bulk-restore',

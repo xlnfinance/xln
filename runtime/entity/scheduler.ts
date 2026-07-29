@@ -47,12 +47,9 @@
  * method names to concrete handlers via a static registry.
  */
 
-import type {
-  AccountInput,
-  EntityOutput,
-  EntityState,
-  RuntimeState,
-} from '../types';
+import type { AccountInput } from '../types/account';
+import type { EntityOutput, EntityState } from './types';
+import type { RuntimeState } from '../types';
 import type {
   CrontabExecutionContext,
   EntityTransitionContext,

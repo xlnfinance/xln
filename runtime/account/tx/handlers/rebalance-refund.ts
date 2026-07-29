@@ -1,4 +1,4 @@
-import type { AccountReplica, AccountTx } from '../../../types';
+import type { AccountReplica, AccountTx } from '../../../types/account';
 import { deriveDelta } from '../../utils';
 import { deriveTransferOffdeltaChange } from '../../../protocol/delta-movement';
 

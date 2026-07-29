@@ -53,6 +53,11 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   reach upward into process orchestration. Move the shared primitive to its
   canonical owner or pass a narrow dependency explicitly—never hide a reverse
   edge behind a re-export.
+  Remove every Account/Entity `RuntimeState` parameter exposed by dissolving
+  the historical root type barrel. Pass the smallest deterministic value or
+  capability required by each transition (for example timestamp, certified
+  board node store, jurisdiction config, or signature verifier); never move
+  parent types to a neutral barrel merely to satisfy the import graph.
   Drive the remaining root-surface debt from `1` to zero. The production
   value-import graph is now acyclic and permanently ratcheted at SCC size one.
 - [ ] Close only current, reproduced audit findings. The accepted remainder is

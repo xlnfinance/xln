@@ -6,7 +6,7 @@
  * closes the remaining order. Cross-j offers use their separate ACK protocol.
  */
 
-import type { AccountReplica } from '../../../types';
+import type { AccountReplica } from '../../../types/account';
 import { recordSwapClosedLifecycle, recordSwapResolveLifecycle } from './swap-history';
 import {
   validateSwapResolve,

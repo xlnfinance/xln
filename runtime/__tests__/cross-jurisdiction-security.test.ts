@@ -12,7 +12,7 @@ import {
 } from '../extensions/cross-j/index';
 import { validateCrossJurisdictionLocalBinding } from '../entity/tx/cross-jurisdiction-helpers';
 import { createEmptyEnv } from '../runtime';
-import type { CrossJurisdictionSwapRoute } from '../types';
+import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import {
   addr,
   entity,

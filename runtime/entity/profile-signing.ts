@@ -1,6 +1,7 @@
 import { Signature, keccak256, recoverAddress } from 'ethers';
 import { canonicalizeProfile, type Profile } from './profile';
-import type { RuntimeState, HankoString } from '../types';
+import type { RuntimeState } from '../types';
+import type { HankoString } from '../types/hanko';
 import { verifyHankoForHash } from '../hanko/signing';
 import { resolveCertifiedRegisteredBoardHash } from '../jurisdiction/board-registry';
 import { getSignerAddress, getSignerPublicKey, signAccountFrame } from '../account/crypto';

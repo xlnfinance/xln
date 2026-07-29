@@ -1,5 +1,7 @@
 import { createOrderbookExtState, validateSpreadDistribution } from '../../../orderbook';
-import type { EntityInput, EntityState, EntityTx, RuntimeState, Proposal } from '../../../types';
+import type { EntityInput, EntityState, Proposal } from '../../types';
+import type { RuntimeState } from '../../../types';
+import type { EntityTx } from '../../../types/entity-tx';
 import { formatEntityId } from '../../../presentation/identity-display';
 import { log } from '../../../infra/diagnostics';
 import { normalizeEntityName } from '../../profile-name';

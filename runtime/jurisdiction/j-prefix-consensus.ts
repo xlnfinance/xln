@@ -4,19 +4,10 @@ import { ethers } from 'ethers';
 import { signAccountFrame, verifyAccountSignature } from '../account/crypto';
 
 import { compareStableText } from '../protocol/serialization';
-import type {
-  ConsensusConfig,
-  EntityReplica,
-  EntityState,
-  EntityTx,
-  RuntimeState,
-  JPrefixAttestation,
-  JPrefixCertificate,
-  JPrefixClaim,
-  JPrefixRound,
-  JurisdictionEventBlock,
-  ValidatorJHistory,
-} from '../types';
+import type { ConsensusConfig, EntityReplica, EntityState } from '../entity/types';
+import type { RuntimeState } from '../types';
+import type { EntityTx } from '../types/entity-tx';
+import type { JPrefixAttestation, JPrefixCertificate, JPrefixClaim, JPrefixRound, JurisdictionEventBlock, ValidatorJHistory } from '../types/jurisdiction-events';
 import { getJEventJurisdictionRef } from './event-observation';
 import { buildJEventRangeDigest, canonicalJEventRangeHash, foldJHistoryRoot } from './history-consensus';
 import { normalizeStrictJEventBlock } from './j-event-range-validation';
@@ -832,7 +823,7 @@ export const assertFrameJPrefix = (
   env: RuntimeState,
   replica: Pick<EntityReplica, 'signerId' | 'state' | 'jHistory' | 'jPrefixRound'>,
   frame: Pick<
-    import('../types').ProposedEntityFrame,
+    import('../entity/types').ProposedEntityFrame,
     'height' | 'parentFrameHash' | 'leader' | 'txs' | 'jPrefixCertificate'
   >,
 ): void => {

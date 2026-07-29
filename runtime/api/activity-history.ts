@@ -1,4 +1,7 @@
-import type { EntityTx, FrameLogEntry, JInput, RuntimeTx } from '../types';
+import type { EntityTx } from '../types/entity-tx';
+import type { FrameLogEntry } from '../types/logging';
+import type { JInput } from '../jurisdiction/input';
+import type { RuntimeTx } from '../types';
 import { compareStableText } from '../protocol/serialization';
 
 export type ActivityKind = 'onchain' | 'offchain';

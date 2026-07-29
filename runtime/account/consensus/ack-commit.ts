@@ -1,10 +1,6 @@
-import type {
-  AccountFrame,
-  AccountInput,
-  AccountReplica,
-  EntityCandidateEffect,
-  RuntimeState,
-} from '../../types';
+import type { AccountFrame, AccountInput, AccountReplica } from '../../types/account';
+import type { AccountOutput } from '../../types/account';
+import type { RuntimeState } from '../../types';
 import { HEAVY_LOGS } from '../../infra/debug-flags';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import { verifyHankoForHash } from '../../hanko/signing';
@@ -138,7 +134,7 @@ const applyPendingFrameTransactions = async (
   pendingFrame: AccountFrame,
   committedJClaims: AccountJClaimSession,
   timedOutHashlocks: string[],
-  candidateEffects: EntityCandidateEffect[],
+  candidateEffects: AccountOutput[],
 ): Promise<void> => {
   const jHeight = pendingFrame.jHeight ?? account.lastFinalizedJHeight ?? 0;
   for (const tx of pendingFrame.accountTxs) {
@@ -227,7 +223,7 @@ const queuePostAckWork = async (
   input: AccountInput,
   committedHeight: number,
   securityContext: AccountInputSecurityContext,
-  candidateEffects: EntityCandidateEffect[],
+  candidateEffects: AccountOutput[],
   events: string[],
 ): Promise<void> => {
   // Rebalance sees committed state only after pendingFrame has been cleared.
@@ -256,7 +252,7 @@ export const handlePendingFrameAck = async (
   committedFrames: Array<{ frame: AccountFrame; committedViaNewFrame: boolean }>,
   committedJClaims: AccountJClaimSession,
   securityContext: AccountInputSecurityContext,
-  candidateEffects: EntityCandidateEffect[],
+  candidateEffects: AccountOutput[],
 ): Promise<PendingFrameAckResult> => {
   const ack = accountInputAck(input);
   const proposal = accountInputProposal(input);

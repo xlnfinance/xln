@@ -4,7 +4,8 @@ import { applyAccountTx } from '../account/tx/apply';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
 import { createEntityFrameHash } from '../entity/consensus/frame';
 import { applyCommittedAccountFrameFollowups, type AccountTxTarget } from '../entity/tx/handlers/account';
-import type { AccountFrame, AccountState, AccountTx, ConsensusConfig, EntityState } from '../types';
+import type { AccountFrame, AccountState, AccountTx } from '../types/account';
+import type { ConsensusConfig, EntityState } from '../entity/types';
 import { createDefaultDelta } from '../account/delta';
 
 const entity = (byte: string): string => `0x${byte.repeat(32)}`;

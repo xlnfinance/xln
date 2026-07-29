@@ -1,4 +1,5 @@
-import type { AccountState, AccountTx, RebalanceFeePolicySnapshot } from '../../../types';
+import type { AccountState, AccountTx } from '../../../types/account';
+import type { RebalanceFeePolicySnapshot } from '../../../types/rebalance';
 import { TOKENS } from '../../../config/constants';
 
 type RebalancePolicyTx = Extract<AccountTx, { type: 'rebalance_policy' }>;

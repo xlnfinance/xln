@@ -6,7 +6,7 @@ import {
   getAccountSwapMarketLimitError,
   getAccountSwapMarketOfferCount,
 } from '../account/swap-limits';
-import type { SwapOffer } from '../types';
+import type { SwapOffer } from '../types/account';
 import { handleSwapOffer } from '../account/tx/handlers/swap-offer';
 
 const offer = (

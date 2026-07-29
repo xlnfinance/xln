@@ -22,7 +22,7 @@ import {
   getInputReliableIdentity,
   getReliableDeliveryReceiptValidationError,
 } from './reliable-receipt';
-import { cloneIsolatedRoutedEntityInputs } from '../protocol/runtime-input-clone';
+import { cloneIsolatedRoutedEntityInputs } from '../runtime/input-clone';
 
 export type ReliableReceiptSenderCheckpoint = {
   pendingNetworkOutputs: RoutedEntityInput[];

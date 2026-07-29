@@ -9,7 +9,9 @@ import {
 import { verifyHashLadderBinary } from '../../../protocol/htlc/hash-ladder';
 import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
-import type { EntityInput, EntityState, EntityTx, RuntimeState } from '../../../types';
+import type { EntityInput, EntityState } from '../../types';
+import type { RuntimeState } from '../../../types';
+import type { EntityTx } from '../../../types/entity-tx';
 import { formatEntityId } from '../../../presentation/identity-display';
 import { findAccountKey, normalizeEntityRef } from '../account-key';
 import { findCrossJurisdictionPullRoute, isCrossJurisdictionPullCancelWithinClear } from '../cross-jurisdiction-helpers';

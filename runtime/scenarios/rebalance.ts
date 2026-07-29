@@ -13,7 +13,8 @@
  * outCollateral is already secured value and must not inflate trigger metric.
  */
 
-import type { RuntimeState, AccountState } from '../types';
+import type { RuntimeState } from '../types';
+import type { AccountState } from '../types/account';
 import {
   getProcess,
   usd,

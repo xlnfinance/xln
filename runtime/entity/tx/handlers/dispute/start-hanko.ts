@@ -1,8 +1,6 @@
-import type {
-  AccountReplica,
-  EntityState,
-  RuntimeState,
-} from '../../../../types';
+import type { AccountReplica } from '../../../../types/account';
+import type { EntityState } from '../../../types';
+import type { RuntimeState } from '../../../../types';
 import { addMessage } from '../../../frame-events';
 import { createDisputeProofHashWithNonce } from '../../../../protocol/dispute/proof-builder';
 import { buildAccountProofBodyFromEnv } from '../../../../account/consensus/helpers';

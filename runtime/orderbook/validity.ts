@@ -11,7 +11,8 @@ import {
   type PriceBucketState,
 } from './types';
 import { compareCanonicalText, swapKey, type SwapKey } from './swap-execution';
-import type { AccountState, EntityState, SwapOffer } from '../types';
+import type { AccountState, SwapOffer } from '../types/account';
+import type { EntityState } from '../entity/types';
 
 export type OrderbookMediumField = 'pairId' | 'side' | 'priceTicks' | 'qtyLots' | 'ownerId' | 'pairIndex';
 export type QuarantineReason =

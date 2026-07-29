@@ -1,4 +1,4 @@
-import type { JurisdictionEvent } from '../types';
+import type { JurisdictionEvent } from '../types/jurisdiction-events';
 
 const BIGINT_WRAPPER_RE = /^BigInt\((-?\d+)\)$/;
 

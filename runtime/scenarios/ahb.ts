@@ -14,7 +14,8 @@
  * Each frame includes Fed-style subtitles explaining what/why/tradfi-parallel
  */
 
-import type { RuntimeState, EntityInput } from '../types';
+import type { RuntimeState } from '../types';
+import type { EntityInput } from '../entity/types';
 import {
   bindScenarioJReplica,
   ensureJAdapter,

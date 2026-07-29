@@ -6,7 +6,9 @@ import {
   isFrozenBaseJPrefixRollAuthorized,
 } from '../../jurisdiction/j-prefix-consensus';
 import { nodeProcess } from '../../infra/runtime-process';
-import type { EntityReplica, EntityTx, RuntimeState } from '../../types';
+import type { EntityReplica } from '../types';
+import type { RuntimeState } from '../../types';
+import type { EntityTx } from '../../types/entity-tx';
 import { hasProposableAccount } from './account-work-index';
 import { prioritizeScheduledWakeTransactions } from './input-merge';
 import { getReplicaProposalLeader } from './leader';

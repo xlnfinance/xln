@@ -1,19 +1,10 @@
 import { encodeCanonicalConsensusValue } from '../../protocol/canonical-consensus-value';
 import { ethers } from 'ethers';
 
-import type {
-  ConsensusConfig,
-  EntityLeaderState,
-  EntityLeaderCertificate,
-  EntityLeaderTimeoutVote,
-  EntityLeaderTimeoutVoteBody,
-  EntityReplica,
-  EntityState,
-  ProposedEntityFrame,
-} from '../../types';
+import type { ConsensusConfig, EntityLeaderState, EntityLeaderCertificate, EntityLeaderTimeoutVote, EntityLeaderTimeoutVoteBody, EntityReplica, EntityState, ProposedEntityFrame } from '../types';
 import { isFrozenBaseJPrefixRollAuthorized } from '../../jurisdiction/j-prefix-consensus';
 import { compareStableText, serializeTaggedJson } from '../../protocol/serialization';
-import { cloneIsolatedProposedEntityFrame } from '../../protocol/runtime-input-clone';
+import { cloneIsolatedProposedEntityFrame } from '../input-clone';
 
 export const ENTITY_LEADER_TIMEOUT_BASE_MS = 10_000;
 export const ENTITY_LEADER_TIMEOUT_MAX_MS = 60_000;

@@ -11,7 +11,7 @@
  * entity derives byte-identical policies.
  */
 
-import type { EntityState } from '../types';
+import type { JurisdictionConfig } from '../protocol/jurisdiction-config';
 import { getTokenInfo } from './utils';
 import { scaleWholeTokenAmount } from '../types/rebalance';
 import { getDefaultRebalancePolicyForToken } from './rebalance-defaults';
@@ -30,10 +30,10 @@ const scaleWholePolicyAmount = (tokenId: number, value: number): bigint => {
 };
 
 export const resolveJurisdictionRebalanceDefaults = (
-  entityState: EntityState,
+  jurisdiction: JurisdictionConfig | undefined,
   tokenId: number,
 ): ResolvedRebalancePolicy => {
-  const raw = entityState.config?.jurisdiction?.rebalancePolicyUsd;
+  const raw = jurisdiction?.rebalancePolicyUsd;
   if (!raw) return getDefaultRebalancePolicyForToken(tokenId);
   const r2cRequestSoftLimit = scaleWholePolicyAmount(tokenId, raw.r2cRequestSoftLimit);
   const hardLimit = scaleWholePolicyAmount(tokenId, raw.hardLimit);

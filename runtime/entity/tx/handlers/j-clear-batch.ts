@@ -9,7 +9,10 @@
  * rejected/cleared separately if the settlement is no longer valid.
  */
 
-import type { EntityState, EntityTx, EntityInput, RuntimeState, JInput } from '../../../types';
+import type { EntityState, EntityInput } from '../../types';
+import type { RuntimeState } from '../../../types';
+import type { JInput } from '../../../jurisdiction/input';
+import type { EntityTx } from '../../../types/entity-tx';
 import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import { createEmptyBatch, getBatchSize } from '../../../jurisdiction/batch';

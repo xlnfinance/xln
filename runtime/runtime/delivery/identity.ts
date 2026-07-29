@@ -1,13 +1,8 @@
 import { encodeCanonicalConsensusValue } from '../../protocol/canonical-consensus-value';
-import type {
-  EntityTx,
-  RuntimeState,
-  ReliableDeliveryEvidenceBinding,
-  ReliableDeliveryIdentity,
-  RoutedEntityInput,
-} from '../../types';
+import type { EntityTx } from '../../types/entity-tx';
+import type { RuntimeState, ReliableDeliveryEvidenceBinding, ReliableDeliveryIdentity, RoutedEntityInput } from '../../types';
 import { keccak256, toUtf8Bytes } from 'ethers';
-import { hasEntityCommitCertificate } from '../../protocol/signatures';
+import { hasEntityCommitCertificate } from '../../entity/signatures';
 import { normalizeRuntimeId } from '../../networking/runtime-id';
 import { txFingerprint } from '../../protocol/tx-multiset';
 import { compareStableText, safeStringify } from '../../protocol/serialization';

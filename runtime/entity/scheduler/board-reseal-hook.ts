@@ -6,6 +6,7 @@ import type {
   EntityTransitionContext,
   ScheduledHook,
 } from '../scheduler-types';
+import { getCertifiedBoardNodeStore } from '../../jurisdiction/board-registry';
 import {
   applyBoardRotationResealMigrations,
   BOARD_RESEAL_HOOK_ID,
@@ -30,7 +31,7 @@ export const processBoardResealHook = (
   };
   const drafts = buildPendingBoardRotationResealDrafts(
     replica.state,
-    env,
+    getCertifiedBoardNodeStore(env),
     activation,
     hook.data.afterCounterpartyId,
   );

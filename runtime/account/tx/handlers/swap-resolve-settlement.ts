@@ -1,4 +1,4 @@
-import type { AccountState } from '../../../types';
+import type { AccountState } from '../../../types/account';
 import { deriveDelta } from '../../utils';
 import { createDefaultDelta } from '../../delta';
 import { deriveSwapOffdeltaChanges } from '../../../orderbook/swap-execution';

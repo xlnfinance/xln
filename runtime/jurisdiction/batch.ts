@@ -13,7 +13,7 @@
 
 import { ethers } from 'ethers';
 import type { ProofBodyStruct } from '../../jurisdictions/typechain-types/contracts/Depository.sol/Depository.js';
-import type { JurisdictionConfig } from '../types';
+import type { JurisdictionConfig } from '../entity/types';
 import type { RuntimeFailureSignal } from '../protocol/failure-taxonomy';
 import { normalizeEntityId, compareEntityIds } from '../entity/id';
 import { createStructuredLogger, shortHash, shortId } from '../infra/logger';

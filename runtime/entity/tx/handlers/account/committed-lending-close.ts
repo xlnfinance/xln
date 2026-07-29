@@ -1,4 +1,4 @@
-import type { AccountTx } from '../../../../types';
+import type { AccountTx } from '../../../../types/account';
 import { getAccountOutCapacity } from '../../../../extensions/lending';
 import type { LendingFollowupContext } from './committed-lending-followup';
 

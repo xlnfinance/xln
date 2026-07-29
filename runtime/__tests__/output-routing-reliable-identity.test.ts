@@ -10,7 +10,10 @@ import {
   assignCertifiedOutputIdentities,
   hashCertifiedEntityOutputSemantic,
 } from '../entity/consensus/output-certification';
-import type { DeliverableEntityInput, EntityState, EntityTx, JPrefixAttestation, RoutedEntityInput } from '../types';
+import type { DeliverableEntityInput, RoutedEntityInput } from '../types';
+import type { EntityState } from '../entity/types';
+import type { EntityTx } from '../types/entity-tx';
+import type { JPrefixAttestation } from '../types/jurisdiction-events';
 
 const runtimeId = (byte: string): string => `0x${byte.repeat(20)}`;
 const entityId = (byte: string): string => `0x${byte.repeat(32)}`;

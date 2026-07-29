@@ -21,7 +21,7 @@ import { createBook, applyCommand, type BookState, type BookEvent } from '../ord
 import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE, computeSwapPriceTicks, deriveSide } from '../orderbook/types';
 import { handleSwapResolve } from '../account/tx/handlers/swap-resolve';
 import { deriveCanonicalSwapFillRatio } from '../orderbook/swap-execution';
-import type { AccountState, AccountTx, SwapOffer } from '../types';
+import type { AccountState, AccountTx, SwapOffer } from '../types/account';
 import { createDefaultDelta } from '../account/delta';
 
 // Helpers

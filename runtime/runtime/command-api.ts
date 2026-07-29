@@ -8,11 +8,8 @@ import {
   searchRuntimeEntityNames,
 } from '../routing/name-resolution';
 import type { createRuntimeLoopApi } from './loop';
-import type {
-  CrossJurisdictionSwapRoute,
-  RuntimeState,
-  RuntimeEntityInputsEnvelope,
-} from '../types';
+import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
+import type { RuntimeState, RuntimeEntityInputsEnvelope } from '../types';
 import {
   buildCrossJurisdictionSwapSubmission,
   type CrossJurisdictionSwapSubmitParams,

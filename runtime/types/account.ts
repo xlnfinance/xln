@@ -597,6 +597,24 @@ export type AccountInput =
   | AccountExternalFinalityInput
   | AccountPeerInput;
 
+/**
+ * Deterministic messages emitted by the Account machine to its parent Entity.
+ *
+ * Account never publishes these directly. Entity collects them in its
+ * candidate; Runtime interprets them only after the enclosing Entity frame and
+ * Runtime WAL commit.
+ */
+export type AccountOutput =
+  | {
+      kind: 'runtimeEvent';
+      eventName: string;
+      data: Record<string, unknown>;
+    }
+  | {
+      kind: 'debug';
+      payload: Record<string, unknown>;
+    };
+
 // Delta structure for per-token account state (based on old_src)
 export interface Delta {
   tokenId: number;

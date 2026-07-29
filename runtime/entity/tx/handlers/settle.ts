@@ -11,21 +11,16 @@
  * 5. settle_reject: Queue an exact Account-frame clear
  */
 
-import type {
-  AccountFrame,
-  AccountTx,
-  EntityInput,
-  EntityState,
-  EntityTx,
-  SettlementDiff,
-  SettlementWorkspace,
-} from '../../../types';
+import type { AccountFrame, AccountTx, SettlementDiff, SettlementWorkspace } from '../../../types/account';
+import type { EntityInput, EntityState } from '../../types';
+import type { EntityTx } from '../../../types/entity-tx';
 import { prepareEntityTxState } from '../../state-clone';
 import { getAccountPerspective } from '../../../account/perspective';
 import { addMessage } from '../../frame-events';
 import { initJBatch, batchAddSettlement } from '../../../jurisdiction/batch';
 import { isLeftEntity } from '../../id';
-import type { RuntimeState, HashToSign } from '../../../types';
+import type { RuntimeState } from '../../../types';
+import type { HashToSign } from '../../types';
 import { createSettlementHashWithNonce, createDisputeProofHashWithNonce } from '../../../protocol/dispute/proof-builder';
 import { verifyHankoForHash } from '../../../hanko/signing';
 import {
@@ -46,7 +41,7 @@ import {
 import { projectAccountAfterSettlement } from '../../../account/settlement-projection';
 import { buildAccountProofBodyFromEnv } from '../../../account/consensus/helpers';
 
-import type { AccountReplica } from '../../../types';
+import type { AccountReplica } from '../../../types/account';
 
 const settleLog = createStructuredLogger('entity.settle');
 
@@ -163,7 +158,7 @@ export const buildSettlementSealDraft = (
   return { tx: { type: 'settle_transition', data }, hashesToSign };
 };
 
-type AccountTxTarget = { accountId: string; tx: import('../../../types').AccountTx };
+type AccountTxTarget = { accountId: string; tx: import('../../../types/account').AccountTx };
 
 const assertNoPendingSettlementTransition = (account: AccountReplica): void => {
   if (hasPendingSettlementTransition(account)) throw new Error('SETTLEMENT_TRANSITION_ALREADY_PENDING');
@@ -451,7 +446,7 @@ const verifySettlementHanko = async (
     entityId,
   );
   const verified = await verifyHankoForHash(
-    hanko as import('../../../types').HankoString,
+    hanko as import('../../../types/hanko').HankoString,
     hash,
     entityId,
     env,

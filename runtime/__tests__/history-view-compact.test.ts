@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import type { AccountFrame } from '../types';
+import type { AccountFrame } from '../types/account';
 import { buildHistoryViewPuts, readHistoryViewAccountFrames, readHistoryViewRuntimeActivity } from '../storage/history-view';
 import { decodeBuffer, encodeBuffer } from '../storage/codec';
 import { HISTORY_VIEW_ACCOUNT_FRAME, HISTORY_VIEW_RUNTIME_ACTIVITY } from '../storage/keys';

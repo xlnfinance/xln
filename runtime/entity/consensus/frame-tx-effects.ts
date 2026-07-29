@@ -1,8 +1,6 @@
-import type {
-  AccountTx,
-  EntityState,
-  EntityTx,
-} from '../../types';
+import type { AccountTx } from '../../types/account';
+import type { EntityState } from '../types';
+import type { EntityTx } from '../../types/entity-tx';
 import { getPerfMs } from '../../infra/time';
 import { normalizeEntityRef } from '../../orderbook/cross-j-orderbook';
 import { shortId, shortOrder } from '../../infra/logger';

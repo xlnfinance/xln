@@ -6,14 +6,9 @@
 import type { Provider, Signer } from 'ethers';
 import type { Address } from '@ethereumjs/util';
 import type { Account, Depository, EntityProvider, DeltaTransformer } from '../../jurisdictions/typechain-types/index.ts';
-import type {
-  BrowserVMState,
-  DisputeFinalizationEvidence,
-  JAdapterFailure,
-  JReplica,
-  JTx,
-  RuntimeState,
-} from '../types';
+import type { BrowserVMState, RuntimeState } from '../types';
+import type { DisputeFinalizationEvidence } from '../types/jurisdiction-events';
+import type { JAdapterFailure, JReplica, JTx } from '../types/jurisdiction-runtime';
 
 export type JAdapterMode = 'browservm' | 'anvil' | 'rpc' | 'tron';
 

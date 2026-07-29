@@ -1,4 +1,7 @@
-import type { CrossJurisdictionBookAdmission, EntityState, RuntimeState, RuntimeOverlayRecord } from '../types';
+import type { CrossJurisdictionBookAdmission } from '../types/cross-jurisdiction';
+import type { EntityState } from '../entity/types';
+import type { RuntimeState } from '../types';
+import type { RuntimeOverlayRecord } from '../types/account';
 import { normalizeSwapOfferForOrderbook } from './swap-execution';
 import { type OrderbookExtState } from './index';
 import { removeBookOrderById } from './cross-j';

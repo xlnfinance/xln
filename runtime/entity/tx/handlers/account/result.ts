@@ -1,9 +1,5 @@
-import type {
-  AccountPeerInput,
-  EntityCandidateEffect,
-  EntityInput,
-  EntityState,
-} from '../../../../types';
+import type { AccountPeerInput } from '../../../../types/account';
+import type { EntityCandidateEffect, EntityInput, EntityState } from '../../../types';
 import type { AccountJClaimNodeChanges } from '../../../../types/account-j-claims';
 import type { AccountTxTarget } from './orderbook-queue';
 import type {

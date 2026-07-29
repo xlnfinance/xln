@@ -8,7 +8,7 @@ import {
   validateString,
 } from '../protocol/validation-primitives';
 import { validatePersistedValidatorEncryptionManifest } from '../protocol/htlc/validator-encryption';
-import type { ConsensusConfig, EntityState } from '../types';
+import type { ConsensusConfig, EntityState } from './types';
 import { assertEntityAccountCountWithinLimit } from './account-capacity';
 import { validateEntityAccountMetadata } from './account-metadata-validation';
 import { validateEntityCommandState } from './command-state-validation';

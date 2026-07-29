@@ -9,7 +9,7 @@
  * @license AGPL-3.0
  */
 
-import type { JurisdictionConfig } from '../types';
+import type { JurisdictionConfig } from '../entity/types';
 import { isUsableContractAddress } from './contract-address';
 import { loadJurisdictions } from './jurisdiction-loader';
 import { createStructuredLogger } from '../infra/logger';

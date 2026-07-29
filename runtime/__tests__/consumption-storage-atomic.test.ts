@@ -30,7 +30,8 @@ import { recoverStorageDbFromHistory, saveRuntimeFrameToStorage } from '../stora
 import { decodeBuffer } from '../storage/codec';
 import { KEY_HEAD, keyConsumptionNode, keyDiff, keyLiveEntity } from '../storage/keys';
 import type { RuntimeDbLike, StorageEntityCoreDoc, StorageHead } from '../storage/types';
-import type { JReplica, JurisdictionConfig } from '../types';
+import type { JReplica } from '../types/jurisdiction-runtime';
+import type { JurisdictionConfig } from '../entity/types';
 import { getPerfMs } from '../infra/time';
 import { buildRuntimeCheckpointSnapshot } from '../storage/wal/snapshot';
 import { hydrateEntityStateFromStorage, projectEntityCoreDoc } from '../storage/projections';

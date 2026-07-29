@@ -4,11 +4,8 @@
  */
 
 import { logError, shortHash } from '../../infra/logger';
-import type {
-  EntityInput,
-  EntityReplica,
-  RuntimeState,
-} from '../../types';
+import type { EntityInput, EntityReplica } from '../types';
+import type { RuntimeState } from '../../types';
 import { getPerfMs } from '../../infra/time';
 import { hasProposableAccount } from './account-work-index';
 import { isCanonicalEntityFrameDigest } from './frame';

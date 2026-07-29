@@ -3,7 +3,8 @@ import { describe, expect, test } from 'bun:test';
 import {
   buildEntityConsensusSettingsView,
 } from '../../frontend/src/lib/components/Entity/entity-consensus-settings';
-import type { EntityReplica, EntityTx, Proposal } from '../types';
+import type { EntityReplica, Proposal } from '../entity/types';
+import type { EntityTx } from '../types/entity-tx';
 
 const signer = `0x${'11'.repeat(20)}`;
 const recipient = `0x${'22'.repeat(32)}`;

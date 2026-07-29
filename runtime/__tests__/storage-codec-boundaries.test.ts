@@ -3,7 +3,7 @@ import { rmSync } from 'fs';
 import { ethers } from 'ethers';
 import { Level } from 'level';
 
-import type { AccountFrame } from '../types';
+import type { AccountFrame } from '../types/account';
 import { decodeBinaryPayload, encodeBinaryPayload } from '../storage/binary-codec';
 import { decodeBuffer, encodeBuffer, writeBatch } from '../storage/codec';
 import {

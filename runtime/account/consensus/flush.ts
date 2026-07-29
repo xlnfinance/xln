@@ -1,10 +1,4 @@
-import type {
-  AccountDisputeSeal,
-  AccountFrameAck,
-  AccountFrameProposal,
-  AccountBoardReseal,
-  AccountInput,
-} from '../../types';
+import type { AccountDisputeSeal, AccountFrameAck, AccountFrameProposal, AccountBoardReseal, AccountInput } from '../../types/account';
 
 export const accountInputAck = (input: AccountInput): AccountFrameAck | undefined =>
   input.kind === 'ack' || input.kind === 'frame_ack' ? input.ack : undefined;

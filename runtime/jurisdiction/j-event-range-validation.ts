@@ -1,4 +1,4 @@
-import type { JurisdictionEventBlock, JurisdictionEventData } from '../types';
+import type { JurisdictionEventBlock, JurisdictionEventData } from '../types/jurisdiction-events';
 import {
   canonicalJurisdictionEventKey,
   compareCanonicalJurisdictionEvents,

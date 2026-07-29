@@ -4,7 +4,7 @@ import { signEntityHashes } from '../../hanko/signing';
 import { cumulativeMarksToPhases } from '../../infra/perf-profile';
 import { assertFrameJPrefix } from '../../jurisdiction/j-prefix-consensus';
 import { removeCommittedTxsFromMempool } from '../../protocol/tx-multiset';
-import type { ProposedEntityFrame } from '../../types';
+import type { ProposedEntityFrame } from '../types';
 import { getPerfMs } from '../../infra/time';
 import { cacheCommittedConsumptionNodeChanges } from '../consumption-store';
 import { commitEntityFrameCandidateState } from '../state-clone';

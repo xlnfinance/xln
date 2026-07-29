@@ -1,5 +1,5 @@
 import { logError, shortHash } from '../../infra/logger';
-import type { EntityState, ProposedEntityFrame, EntityCandidate } from '../../types';
+import type { EntityState, ProposedEntityFrame, EntityCandidate } from '../types';
 import { applyEntityFrame } from './frame-application';
 import { createEntityFrameHashFromStateRoot, entityFrameEventsEqual } from './frame';
 import {

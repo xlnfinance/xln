@@ -1,4 +1,6 @@
-import type { AccountReplica, AccountTx, Delta, EntityCandidateEffect, RuntimeState } from '../../types';
+import type { AccountReplica, AccountTx, Delta } from '../../types/account';
+import type { AccountOutput } from '../../types/account';
+import type { RuntimeState } from '../../types';
 import { createStructuredLogger } from '../../infra/logger';
 import { txFingerprint } from '../../protocol/tx-multiset';
 import {
@@ -158,7 +160,7 @@ export async function runPostFrameAutoRebalanceCheck(
   counterpartyEntityId: string,
   frameHeight: number,
   owningEntityIsHub: boolean,
-  candidateEffects: EntityCandidateEffect[] = [],
+  candidateEffects: AccountOutput[] = [],
 ): Promise<AccountTx[]> {
   try {
     const emitRebalanceDebug = (payload: Record<string, unknown>) => {

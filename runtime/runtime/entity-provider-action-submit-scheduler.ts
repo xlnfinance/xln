@@ -1,6 +1,7 @@
 import { ENTITY_J_SUBMIT_FALLBACK_MS, isEntityActiveLeader } from '../entity/consensus/leader';
 import { getJurisdictionConfigName } from '../jurisdiction/jurisdiction-runtime';
-import type { EntityReplica, RuntimeState, RuntimeTx } from '../types';
+import type { EntityReplica } from '../entity/types';
+import type { RuntimeState, RuntimeTx } from '../types';
 import {
   canSubmitEntityProviderActionLocally,
   getMatchingEntityProviderActionSubmitState,

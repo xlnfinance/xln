@@ -19,13 +19,8 @@ import { createEmptyEnv } from '../runtime';
 import { hydrateAccountDocFromStorage, hydrateEntityStateFromStorage } from '../storage/hydration';
 import { projectAccountDoc, projectEntityCoreDoc } from '../storage/projections';
 import { signEntityHashes } from '../hanko/signing';
-import type {
-  AccountState,
-  AccountTx,
-  EntityReplica,
-  EntityState,
-  JurisdictionConfig,
-} from '../types';
+import type { AccountState, AccountTx } from '../types/account';
+import type { EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
 import { validateAccountState } from '../account/state-validation';
 import { validateEntityState } from '../entity/state-validation';
 import { sealAccountDraftAsEntity } from './helpers/account-draft';

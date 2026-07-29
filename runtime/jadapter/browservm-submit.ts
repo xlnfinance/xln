@@ -2,7 +2,7 @@ import { normalizeEntityId } from '../entity/id';
 import { getBatchSize, isBatchEmpty } from '../jurisdiction/batch';
 import { assertSealedJBatchBinding } from '../jurisdiction/sealed-batch';
 import { assertEntityProviderActionJTxBinding } from '../entity/entity-provider-action';
-import type { JTx } from '../types';
+import type { JTx } from '../types/jurisdiction-runtime';
 import type { BrowserVMProvider } from './browservm-provider';
 import type { JAdapter, JAdapterAddresses, JBatchReceipt, JEvent, JSubmitResult } from './types';
 import { makeJAdapterFailureResult } from './failure';

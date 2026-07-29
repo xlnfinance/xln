@@ -6,15 +6,10 @@
  * J-batch mutations can be audited independently.
  */
 
-import type {
-  AccountReplica,
-  EntityInput,
-  EntityState,
-  EntityTx,
-  RuntimeState,
-  RuntimeOverlayRecord,
-  SwapOffer,
-} from '../../../types';
+import type { AccountReplica, RuntimeOverlayRecord, SwapOffer } from '../../../types/account';
+import type { EntityInput, EntityState } from '../../types';
+import type { RuntimeState } from '../../../types';
+import type { EntityTx } from '../../../types/entity-tx';
 import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import { freezeAccountForDispute } from '../../../account/consensus/dispute-policy';

@@ -19,7 +19,9 @@ import {
 import { generateLazyEntityId } from '../entity/factory';
 import { readStorageFrameRecord } from '../storage';
 import { resolveDbPath } from '../storage/runtime-dbs';
-import type { EntityReplica, RuntimeState, JReplica, JurisdictionConfig } from '../types';
+import type { EntityReplica, JurisdictionConfig } from '../entity/types';
+import type { RuntimeState } from '../types';
+import type { JReplica } from '../types/jurisdiction-runtime';
 
 type RecoveryEnv = { env: RuntimeState; entityId: string; signerId: string; replica: EntityReplica };
 const cleanupPaths: string[] = [];

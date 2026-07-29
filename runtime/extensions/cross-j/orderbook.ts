@@ -18,12 +18,9 @@ import {
   exactFillRatioToUint16,
   type NormalizedOrderbookOffer,
 } from '../../orderbook/swap-execution';
-import type {
-  AccountTx,
-  CrossJurisdictionBookAdmission,
-  CrossJurisdictionSwapRoute,
-  EntityState,
-} from '../../types';
+import type { AccountTx } from '../../types/account';
+import type { CrossJurisdictionBookAdmission, CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
+import type { EntityState } from '../../entity/types';
 
 const mergeAdmissionRoute = (
   existing: CrossJurisdictionSwapRoute | undefined,

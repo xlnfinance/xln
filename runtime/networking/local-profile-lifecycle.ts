@@ -1,6 +1,7 @@
 import { getSignerPrivateKeyIfAvailable } from '../account/crypto';
 import { isEntityActiveLeader } from '../entity/consensus/leader';
-import type { EntityInput, EntityReplica, RuntimeState } from '../types';
+import type { EntityInput, EntityReplica } from '../entity/types';
+import type { RuntimeState } from '../types';
 import {
   collectLocalProfileEncryptionAnnouncements,
   getCompleteProfileEncryptionManifest,

@@ -9,7 +9,7 @@ import type {
   CrossSwapFillAckTx,
   PreparedCrossSwapFillAck,
 } from './cross-swap-fill-ack-types';
-import type { AccountReplica } from '../../../types';
+import type { AccountReplica } from '../../../types/account';
 
 const reject = (
   events: string[],

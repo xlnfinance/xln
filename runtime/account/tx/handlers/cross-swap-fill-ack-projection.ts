@@ -1,4 +1,4 @@
-import type { CrossJurisdictionSwapRoute } from '../../../types';
+import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
 import { getSwapLotScale } from '../../../orderbook';
 import {
   CROSS_J_MAX_FILL_RATIO,

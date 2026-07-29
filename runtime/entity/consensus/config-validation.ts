@@ -3,7 +3,7 @@ import {
   validateArray,
   validateObject,
 } from '../../protocol/validation-primitives';
-import type { ConsensusConfig } from '../../types';
+import type { ConsensusConfig } from '../types';
 
 const validateShares = (
   value: unknown,

@@ -10,7 +10,11 @@
  * 3. J-events route back with ReserveUpdated
  */
 
-import type { EntityState, EntityTx, EntityInput, JInput, JTx, RuntimeState } from '../../../types';
+import type { EntityState, EntityInput } from '../../types';
+import type { RuntimeState } from '../../../types';
+import type { JInput } from '../../../jurisdiction/input';
+import type { EntityTx } from '../../../types/entity-tx';
+import type { JTx } from '../../../types/jurisdiction-runtime';
 import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import {

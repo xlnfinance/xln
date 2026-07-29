@@ -1,17 +1,8 @@
-import type {
-  AccountInput,
-  AccountFrame,
-  AccountTx,
-  EntityInput,
-  EntityReplica,
-  EntityTx,
-  RuntimeState,
-  JInput,
-  ReliableDeliveryReceipt,
-  RoutedEntityInput,
-  RuntimeEntityInputsEnvelope,
-  RuntimeTx,
-} from '../types';
+import type { AccountInput, AccountFrame, AccountTx } from '../types/account';
+import type { EntityInput, EntityReplica } from '../entity/types';
+import type { RuntimeState, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeEntityInputsEnvelope, RuntimeTx } from '../types';
+import type { JInput } from '../jurisdiction/input';
+import type { EntityTx } from '../types/entity-tx';
 import type { Profile } from '../entity/profile';
 import type { RuntimeOutputRoutingDeps } from './output-routing';
 import { extractCrossJurisdictionRouteFromTx } from '../extensions/cross-j/boundary';

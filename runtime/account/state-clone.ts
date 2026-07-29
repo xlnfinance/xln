@@ -1,4 +1,4 @@
-import type { AccountFrame, AccountReplica, AccountTx } from '../types';
+import type { AccountFrame, AccountReplica, AccountTx } from '../types/account';
 import {
   cloneCrossJurisdictionAccountFrameRoute,
   cloneCrossJurisdictionAccountInputRoute,

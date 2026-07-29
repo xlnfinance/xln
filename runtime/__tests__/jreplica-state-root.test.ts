@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import type { JReplica } from '../types';
+import type { JReplica } from '../types/jurisdiction-runtime';
 import {
   buildCanonicalJReplicaSnapshot,
   normalizePersistedSnapshotInPlace,

@@ -1,7 +1,8 @@
 import { computeCanonicalEntityConsensusStateHash } from '../entity/consensus/state-root';
 import { isLeftEntity } from '../protocol/entity-id';
 import { createStructuredLogger } from '../infra/logger';
-import type { EntityState, RuntimeState } from '../types';
+import type { EntityState } from '../entity/types';
+import type { RuntimeState } from '../types';
 
 const solvencyLog = createStructuredLogger('runtime.solvency');
 

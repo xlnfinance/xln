@@ -1,4 +1,5 @@
-import type { AccountTx, EntityState, HtlcLock, HtlcNoteKey, HtlcRoute } from '../../types';
+import type { AccountTx, HtlcLock, HtlcNoteKey, HtlcRoute } from '../../types/account';
+import type { EntityState } from '../types';
 import { LIMITS } from '../../config/constants';
 import { cancelHook, scheduleHook } from '../scheduler/hook-state';
 

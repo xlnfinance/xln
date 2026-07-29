@@ -1,7 +1,7 @@
 import type { Profile } from '../../entity/profile';
 import { normalizeRuntimeId } from '../../networking/runtime-id';
 import { requireBoundaryInteger } from '../../protocol/boundary-validation';
-import { cloneIsolatedRuntimeSnapshot } from '../../protocol/runtime-input-clone';
+import { cloneIsolatedRuntimeSnapshot } from '../../runtime/input-clone';
 import { assertAccountJClaimRootsAvailable } from '../../account/j-claim-store';
 import { assertConsumptionRootsAvailable } from '../../entity/consumption-store';
 import { setBrowserVMJurisdiction } from '../../jadapter';

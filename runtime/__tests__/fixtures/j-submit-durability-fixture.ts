@@ -5,7 +5,7 @@ import {
 } from '../../runtime/j-submit-state';
 import { collectDueJSubmitRuntimeTxs } from '../../runtime/j-submit-scheduler';
 import { createEmptyBatch } from '../../jurisdiction/batch';
-import type { EntityReplica, EntityState } from '../../types';
+import type { EntityReplica, EntityState } from '../../entity/types';
 
 export const entityId = `0x${'31'.repeat(32)}`;
 export const signerId = `0x${'41'.repeat(20)}`;

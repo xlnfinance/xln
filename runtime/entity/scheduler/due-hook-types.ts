@@ -1,4 +1,4 @@
-import type { EntityInput } from '../../types';
+import type { EntityInput } from '../types';
 
 export type DueHookPlan = {
   outputs: EntityInput[];

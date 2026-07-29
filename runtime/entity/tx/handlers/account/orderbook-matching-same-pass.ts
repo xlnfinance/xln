@@ -1,4 +1,4 @@
-import type { EntityState } from '../../../../types';
+import type { EntityState } from '../../../types';
 import {
   applyCommand,
   deriveSide,

@@ -32,7 +32,8 @@ import { buildCanonicalEntityReplicaSnapshot } from '../storage/wal/snapshot';
 import { validateConsensusConfig } from '../entity/consensus/config-validation';
 import { validateEntityReplica } from '../entity/replica-validation';
 import { createEmptyEnv } from '../runtime';
-import type { AccountState, EntityState } from '../types';
+import type { AccountState } from '../types/account';
+import type { EntityState } from '../entity/types';
 
 const makeCrossJurisdictionRoute = () => ({
   orderId: 'order-1',

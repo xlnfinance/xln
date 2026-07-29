@@ -3,7 +3,9 @@
  * Routes AccountTx to the handler that mutates one bilateral account clone/state.
  */
 
-import type { AccountReplica, AccountTx, EntityCandidateEffect, RuntimeState } from '../../types';
+import type { AccountReplica, AccountTx } from '../../types/account';
+import type { AccountOutput } from '../../types/account';
+import type { RuntimeState } from '../../types';
 import type { AccountJClaimSession } from '../j-claim-session';
 import { invalidateAccountMapCommitment, type AccountCommittedMap } from '../map-commitment';
 import type { ApplyAccountTxResult } from './apply-types';
@@ -110,7 +112,7 @@ export async function applyAccountTx(
   counterpartyCertifiedBoardHash?: string,
 ): Promise<ApplyAccountTxResult> {
   const deltaKeysBeforeMutation = swapDeltaKeys(account, accountTx);
-  const candidateEffects: EntityCandidateEffect[] = [];
+  const candidateEffects: AccountOutput[] = [];
   const result = await applyAccountTxMutation(
     account,
     accountTx,

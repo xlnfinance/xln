@@ -4,18 +4,13 @@ import { createStructuredLogger } from '../../../infra/logger';
 import {
   validateHtlcOnionAdvanceTx,
   type HtlcOnionAdvanceTx,
-} from '../../../protocol/htlc/onion-advance';
+} from '../../htlc/onion-advance';
 import { calculateDirectionalFeePPM, calculateHopFee, sanitizeBaseFee, sanitizeFeePPM } from '../../../routing/fees';
 import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
-import type {
-  AccountTx,
-  EntityCandidateEffect,
-  EntityInput,
-  EntityState,
-  RuntimeState,
-  HtlcRoute,
-} from '../../../types';
+import type { AccountTx, HtlcRoute } from '../../../types/account';
+import type { EntityCandidateEffect, EntityInput, EntityState } from '../../types';
+import type { RuntimeState } from '../../../types';
 import { setHtlcRouteNote, terminateHtlcRoute } from '../htlc-route-lifecycle';
 import { applyHtlcSecretFollowups } from './account/committed-htlc-followups';
 

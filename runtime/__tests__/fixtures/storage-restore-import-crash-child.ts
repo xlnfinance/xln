@@ -33,7 +33,9 @@ import {
   computeEntityFrameAuthorityRoot,
 } from '../../entity/consensus/state-root';
 import type { StoragePersistenceBoundary } from '../../storage';
-import type { AccountState, CertifiedEntityFrameLink, JReplica, JurisdictionConfig } from '../../types';
+import type { AccountState } from '../../types/account';
+import type { CertifiedEntityFrameLink, JurisdictionConfig } from '../../entity/types';
+import type { JReplica } from '../../types/jurisdiction-runtime';
 import { createDefaultDelta } from '../../account/delta';
 
 const [seed, requestedBoundary] = Bun.argv.slice(2);

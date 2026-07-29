@@ -28,6 +28,10 @@ const trackedFiles = execFileSync('git', ['ls-files'], { encoding: 'utf8' })
 const violations: string[] = [];
 for (const file of trackedFiles) {
   if (!CHECKED_EXTENSION.test(file)) continue;
+  // Path-only refactors leave deleted entries in `git ls-files` until the
+  // replacement commit is staged. The source-language gate audits files that
+  // exist in the candidate tree; a deleted path has no content to classify.
+  if (!fs.existsSync(file)) continue;
   if (EXCLUDED_PREFIXES.some(prefix => file.startsWith(prefix))) continue;
   if (MULTILINGUAL_FILES.has(file)) continue;
 

@@ -1,5 +1,5 @@
 import { cloneAccountState } from './state-clone';
-import type { AccountReplica, Delta, SettlementDiff } from '../types';
+import type { AccountReplica, Delta, SettlementDiff } from '../types/account';
 import { createDefaultDelta } from './delta';
 import { invalidateAccountMapCommitment } from './map-commitment';
 import { getDefaultCreditLimit } from './utils';

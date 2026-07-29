@@ -2,7 +2,8 @@ import { describe, expect, test } from 'bun:test';
 
 import { applyEntityHeightDurabilityBarrier } from '../runtime/entity-height-barrier';
 import { createEmptyEnv } from '../runtime';
-import type { EntityReplica, ProposedEntityFrame, RoutedEntityInput, RuntimeInput } from '../types';
+import type { EntityReplica, ProposedEntityFrame } from '../entity/types';
+import type { RoutedEntityInput, RuntimeInput } from '../types';
 
 const signer = (byte: string): string => `0x${byte.repeat(20)}`;
 const entity = (byte: string): string => `0x${byte.repeat(32)}`;

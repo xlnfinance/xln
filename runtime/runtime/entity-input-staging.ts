@@ -7,11 +7,8 @@ import {
   accountInputAck,
   accountInputProposal,
 } from '../account/consensus/flush';
-import type {
-  EntityReplica,
-  RoutedEntityInput,
-  RuntimeState,
-} from '../types';
+import type { EntityReplica } from '../entity/types';
+import type { RoutedEntityInput, RuntimeState } from '../types';
 import { commitEntityFrameCandidateState } from '../entity/state-clone';
 import { getPerfMs } from '../infra/time';
 import { shortId } from '../infra/logger';

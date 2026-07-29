@@ -1,4 +1,6 @@
-import type { EntityReplica, RuntimeState, JTx, RuntimeTx } from '../types';
+import type { EntityReplica } from '../entity/types';
+import type { RuntimeState, RuntimeTx } from '../types';
+import type { JTx } from '../types/jurisdiction-runtime';
 import { classifyRuntimeJBatchFailure } from '../protocol/failure-taxonomy';
 import { safeStringify } from '../protocol/serialization';
 import {

@@ -1,4 +1,4 @@
-import type { AccountState } from '../types';
+import type { AccountState } from '../types/account';
 import {
   FinancialDataCorruptionError,
   validateObject,

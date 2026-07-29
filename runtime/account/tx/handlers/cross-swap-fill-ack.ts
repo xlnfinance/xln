@@ -1,4 +1,4 @@
-import type { AccountReplica } from '../../../types';
+import type { AccountReplica } from '../../../types/account';
 import {
   prepareCrossSwapFillAck,
 } from './cross-swap-fill-ack-admission';

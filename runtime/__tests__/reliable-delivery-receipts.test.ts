@@ -49,15 +49,11 @@ import {
 import { readStorageFrameRecord } from '../storage';
 import { buildRouteOutputKey, getReliableOutputIdentity } from '../runtime/output-routing';
 import { computeAccountStateRoot } from '../account/state-root';
-import type {
-  AccountState,
-  DeliverableEntityInput,
-  EntityTx,
-  EntityReplica,
-  RuntimeState,
-  JPrefixAttestation,
-  ReliableDeliveryReceipt,
-} from '../types';
+import type { AccountState } from '../types/account';
+import type { DeliverableEntityInput, RuntimeState, ReliableDeliveryReceipt } from '../types';
+import type { EntityReplica } from '../entity/types';
+import type { EntityTx } from '../types/entity-tx';
+import type { JPrefixAttestation } from '../types/jurisdiction-events';
 import { makeAccount } from './helpers/cross-j';
 
 const TEST_RUN_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;

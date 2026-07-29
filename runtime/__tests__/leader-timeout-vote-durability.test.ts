@@ -31,14 +31,9 @@ import {
   readPersistedFrameJournal,
   restoreEnvFromRecoveryBundles,
 } from '../runtime';
-import type {
-  EntityLeaderTimeoutVote,
-  EntityReplica,
-  EntityState,
-  RuntimeState,
-  JReplica,
-  JurisdictionConfig,
-} from '../types';
+import type { EntityLeaderTimeoutVote, EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
+import type { RuntimeState } from '../types';
+import type { JReplica } from '../types/jurisdiction-runtime';
 
 const cleanupRuntimeStorage = (runtimeId: string): void => {
   const namespacePath = join(dbRootPath, runtimeId);

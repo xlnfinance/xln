@@ -1,4 +1,4 @@
-import type { CrossJurisdictionSwapRoute } from '../../types';
+import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
 import { isLiquidSwapToken } from '../../account/utils';
 import { parseJurisdictionStackIdentity } from '../../jurisdiction/jurisdiction-stack';
 

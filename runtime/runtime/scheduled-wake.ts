@@ -1,4 +1,6 @@
-import type { EntityInput, EntityLeaderTimeoutVote, EntityReplica, EntityState, EntityTx, RuntimeState } from '../types';
+import type { EntityInput, EntityLeaderTimeoutVote, EntityReplica, EntityState } from '../entity/types';
+import type { RuntimeState } from '../types';
+import type { EntityTx } from '../types/entity-tx';
 import type { CrontabTaskMethod } from '../entity/scheduler-types';
 import { crontabTaskHasPendingWork } from '../entity/scheduler';
 import {

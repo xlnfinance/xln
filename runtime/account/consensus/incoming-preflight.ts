@@ -3,7 +3,8 @@
  * replaying any transaction. This phase never mutates live Account state.
  */
 
-import type { AccountFrame, AccountInput, AccountReplica, RuntimeState } from '../../types';
+import type { AccountFrame, AccountInput, AccountReplica } from '../../types/account';
+import type { RuntimeState } from '../../types';
 import { verifyHankoForHash } from '../../hanko/signing';
 import { createStructuredLogger, shortId } from '../../infra/logger';
 import { HEAVY_LOGS } from '../../infra/debug-flags';

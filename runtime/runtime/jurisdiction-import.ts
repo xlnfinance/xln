@@ -5,14 +5,8 @@ import { createJAdapterWithRetry } from '../jadapter/retry';
 import { createStructuredLogger } from '../infra/logger';
 import type { JAdapter, JAdapterConfig } from '../jadapter/types';
 import { safeStringify } from '../protocol/serialization';
-import type {
-  RuntimeState,
-  JurisdictionImportRequest,
-  JurisdictionImportResult,
-  JReplica,
-  PendingJurisdictionImport,
-  RuntimeTx,
-} from '../types';
+import type { RuntimeState, JurisdictionImportRequest, JurisdictionImportResult, PendingJurisdictionImport, RuntimeTx } from '../types';
+import type { JReplica } from '../types/jurisdiction-runtime';
 import { requireRuntimeMempool } from './input-queue';
 
 type ImportJRuntimeTx = Extract<RuntimeTx, { type: 'importJ' }>;

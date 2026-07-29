@@ -6,7 +6,8 @@
  * operation into the next J-batch. J-broadcast remains the only on-chain commit path.
  */
 
-import type { EntityInput, EntityState, EntityTx } from '../../../types';
+import type { EntityInput, EntityState } from '../../types';
+import type { EntityTx } from '../../../types/entity-tx';
 import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import { batchAddReserveToExternal, initJBatch } from '../../../jurisdiction/batch';

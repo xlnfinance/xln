@@ -1,6 +1,6 @@
 import { keccak256 } from 'ethers';
 import { deriveDelta, isLeft } from '../account/utils';
-import type { EntityState } from '../types';
+import type { EntityState } from './types';
 import { compareStableText, serializeTaggedJson } from '../protocol/serialization';
 import type {
   BoardMetadata,

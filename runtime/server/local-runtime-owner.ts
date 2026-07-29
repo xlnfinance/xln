@@ -1,5 +1,7 @@
 import { generateLazyEntityId } from '../entity/factory';
-import type { ConsensusConfig, RuntimeState, JReplica, RuntimeInput } from '../types';
+import type { ConsensusConfig } from '../entity/types';
+import type { RuntimeState, RuntimeInput } from '../types';
+import type { JReplica } from '../types/jurisdiction-runtime';
 
 const normalize = (value: unknown): string => String(value || '').trim().toLowerCase();
 

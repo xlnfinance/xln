@@ -11,7 +11,7 @@ import { recordValidatorJHistory } from '../jurisdiction/local-history';
 import { markLocalJAuthorityRuntimeTx } from '../jurisdiction/registration-evidence';
 import { applyRuntimeTx } from '../runtime/tx-handlers';
 import { createEmptyEnv } from '../runtime';
-import type { EntityInput, EntityReplica, EntityState } from '../types';
+import type { EntityInput, EntityReplica, EntityState } from '../entity/types';
 
 const seed = 'j-range-overlap-consensus';
 const leaderId = deriveSignerAddressSync(seed, '1').toLowerCase();

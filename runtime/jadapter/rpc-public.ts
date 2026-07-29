@@ -17,7 +17,7 @@ import { Depository__factory } from '../../jurisdictions/typechain-types/index.t
 import { BLOCKCHAIN } from '../config/constants';
 import { createStructuredLogger } from '../infra/logger';
 import { decodeJBatch } from '../jurisdiction/batch';
-import type { DisputeFinalizationEvidence } from '../types';
+import type { DisputeFinalizationEvidence } from '../types/jurisdiction-events';
 import { type AuthenticatedReceiptRange, type ReceiptReadProfile } from './receipt-root';
 import { type RpcBatchResponse } from './rpc-utils';
 import { applyJBlockHeadersIngressTransform } from './watcher';

@@ -9,7 +9,8 @@
  * - AccountSettled reaches both sides and collateral updates bilaterally
  */
 
-import type { RuntimeState, EntityReplica } from '../types';
+import type { RuntimeState } from '../types';
+import type { EntityReplica } from '../entity/types';
 import {
   getProcess,
   assert,

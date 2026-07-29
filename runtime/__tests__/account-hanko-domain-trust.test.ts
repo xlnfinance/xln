@@ -8,7 +8,9 @@ import {
 } from '../account/consensus/helpers';
 import { computeValidatorEncryptionAttestationDigest } from '../protocol/htlc/validator-encryption';
 import { createEmptyEnv } from '../runtime';
-import type { EntityReplica, JurisdictionConfig, JReplica, Profile } from '../types';
+import type { EntityReplica, JurisdictionConfig } from '../entity/types';
+import type { JReplica } from '../types/jurisdiction-runtime';
+import type { Profile } from '../entity/profile';
 
 const FROM = `0x${'11'.repeat(32)}`;
 const TO = `0x${'22'.repeat(32)}`;

@@ -1,4 +1,5 @@
-import type { AccountReplica, EntityReplica, EntityState } from '../types';
+import type { AccountReplica } from '../types/account';
+import type { EntityReplica, EntityState } from '../entity/types';
 import { assertAccountJClaimAccumulatorState } from '../account/j-claim-accumulator';
 import { cloneEntityState } from '../entity/state-clone';
 import {

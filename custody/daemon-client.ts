@@ -11,7 +11,8 @@ import type {
   RuntimeAdapterPaymentRoutesResponse,
   RuntimeAdapterSendResult,
 } from '../runtime/radapter/types';
-import type { EntityTx, RuntimeInput } from '../runtime/types';
+import type { RuntimeInput } from '../runtime/types';
+import type { EntityTx } from '../runtime/types/entity-tx';
 
 export type DaemonAuthKeyProvider = string | (() => string);
 export type DaemonFrameLog = RuntimeAdapterFrameLog;

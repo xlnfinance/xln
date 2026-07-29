@@ -2,8 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import { ethers } from 'ethers';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
 
+import { buildDisputeArgumentsForSnapshot } from '../entity/dispute-arguments';
 import {
-  buildDisputeArgumentsForSnapshot,
   captureDisputeArgumentSnapshot,
   storeDisputeArgumentSnapshot,
 } from '../protocol/dispute/arguments';
@@ -12,7 +12,8 @@ import {
   sanitizeOptionalDisputeArgument,
   sanitizeOptionalDisputeStarterArgumentPair,
 } from '../jurisdiction/batch';
-import type { AccountState, AccountTx, EntityState, SwapOffer } from '../types';
+import type { AccountState, AccountTx, SwapOffer } from '../types/account';
+import type { EntityState } from '../entity/types';
 
 const DELTA_TRANSFORMER = '0x1111111111111111111111111111111111111111';
 const TEST_WATCH_SEED = `0x${'d1'.repeat(32)}`;

@@ -7,7 +7,8 @@ import { deriveSignerAddressSync } from '../account/crypto';
 import { generateLazyEntityId } from '../entity/factory';
 import { createEmptyEnv } from '../runtime';
 import { readEntityFrameEventMessages } from '../entity/frame-events';
-import type { EntityState, EntityTx } from '../types';
+import type { EntityState } from '../entity/types';
+import type { EntityTx } from '../types/entity-tx';
 
 test('basic entity proposal and vote traces stay behind structured logging', () => {
   const handler = readFileSync(join(process.cwd(), 'runtime/entity/tx/handlers/basic.ts'), 'utf8');

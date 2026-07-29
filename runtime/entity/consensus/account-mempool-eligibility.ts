@@ -1,4 +1,5 @@
-import type { AccountReplica, EntityState } from '../../types';
+import type { AccountReplica } from '../../types/account';
+import type { EntityState } from '../types';
 import { getSignedSettlementWorkspaceTxError } from '../../account/tx/handlers/settle-transition';
 import { accountTxAwaitsPostCommitHanko } from './hanko-witness';
 import { isAccountControlTx } from '../../account/consensus/dispute-policy';

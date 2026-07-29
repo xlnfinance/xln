@@ -1,24 +1,8 @@
 import { ethers } from 'ethers';
 import { isLeftEntity } from '../../entity/id';
-import type {
-  AccountFrame,
-  AccountInput,
-  AccountTx,
-  CrossJurisdictionBookAdmission,
-  CrossJurisdictionCloseProof,
-  CrossJurisdictionRouteDomain,
-  CrossJurisdictionSettlementPolicy,
-  CrossJurisdictionPendingFill,
-  CrossJurisdictionPullBinding,
-  CrossJurisdictionPullLeg,
-  CrossJurisdictionSwapLeg,
-  CrossJurisdictionSwapRoute,
-  CrossJurisdictionSwapStatus,
-  CrossJurisdictionTimePolicy,
-  RuntimeState,
-  SwapOffer,
-  SwapOrderHistoryEntry,
-} from '../../types';
+import type { AccountFrame, AccountInput, AccountTx, SwapOffer, SwapOrderHistoryEntry } from '../../types/account';
+import type { CrossJurisdictionBookAdmission, CrossJurisdictionCloseProof, CrossJurisdictionRouteDomain, CrossJurisdictionSettlementPolicy, CrossJurisdictionPendingFill, CrossJurisdictionPullBinding, CrossJurisdictionPullLeg, CrossJurisdictionSwapLeg, CrossJurisdictionSwapRoute, CrossJurisdictionSwapStatus, CrossJurisdictionTimePolicy } from '../../types/cross-jurisdiction';
+import type { RuntimeState } from '../../types';
 import {
   buildHashLadderProof,
   revealHashLadder,

@@ -3,7 +3,7 @@ import {
   deriveCanonicalCrossJurisdictionBookOwnerForLegs,
   deriveCanonicalCrossJurisdictionVenueIdForLegs,
 } from '../extensions/cross-j/market';
-import type { CrossJurisdictionSwapRoute } from '../types';
+import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 
 const normalizeId = (value: string): string => String(value || '').trim().toLowerCase();
 

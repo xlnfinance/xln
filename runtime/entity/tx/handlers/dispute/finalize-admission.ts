@@ -1,9 +1,7 @@
-import type {
-  AccountReplica,
-  EntityState,
-  EntityTx,
-  RuntimeState,
-} from '../../../../types';
+import type { AccountReplica } from '../../../../types/account';
+import type { EntityState } from '../../../types';
+import type { RuntimeState } from '../../../../types';
+import type { EntityTx } from '../../../../types/entity-tx';
 import { addMessage } from '../../../frame-events';
 import { initJBatch } from '../../../../jurisdiction/batch';
 import { freezeAccountForDispute } from '../../../../account/consensus/dispute-policy';

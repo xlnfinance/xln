@@ -18,12 +18,8 @@ import {
 import { advanceCertifiedBoardFinality } from '../jurisdiction/board-registry';
 import { createEmptyEnv } from '../runtime';
 import { hydrateEntityStateFromStorage, projectEntityCoreDoc } from '../storage/projections';
-import type {
-  EntityState,
-  JurisdictionEvent,
-  JurisdictionEventData,
-  ValidatorJEventBlock,
-} from '../types';
+import type { EntityState } from '../entity/types';
+import type { JurisdictionEvent, JurisdictionEventData, ValidatorJEventBlock } from '../types/jurisdiction-events';
 
 const depositoryAddress = `0x${'dd'.repeat(20)}`;
 const entityProviderAddress = `0x${'aa'.repeat(20)}`;

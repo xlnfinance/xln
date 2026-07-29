@@ -13,14 +13,9 @@ import {
 import { applySignerEntityExternalWalletSnapshot } from '../entity/signer-wallet';
 import { cloneEntityState } from '../entity/state-clone';
 import { hydrateEntityStateFromStorage, projectEntityCoreDoc } from '../storage/projections';
-import type {
-  ConsensusConfig,
-  EntityReplica,
-  EntityState,
-  JReplica,
-  JurisdictionConfig,
-  JurisdictionEvent,
-} from '../types';
+import type { ConsensusConfig, EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
+import type { JReplica } from '../types/jurisdiction-runtime';
+import type { JurisdictionEvent } from '../types/jurisdiction-events';
 
 const TOKEN = '0x2222222222222222222222222222222222222222';
 const SPENDER = '0x3333333333333333333333333333333333333333';

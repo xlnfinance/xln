@@ -1,4 +1,4 @@
-import type { JurisdictionEvent } from '../types';
+import type { JurisdictionEvent } from '../types/jurisdiction-events';
 import { compareStableText, safeStringify } from '../protocol/serialization';
 import {
   normalizeMetadata,

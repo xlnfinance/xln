@@ -1,17 +1,11 @@
 import { encodeCanonicalConsensusValue } from '../../protocol/canonical-consensus-value';
 import { keccak256, toUtf8Bytes } from 'ethers';
 
-import type {
-  AccountPeerInput,
-  CertifiedBoardAuthorityBinding,
-  CertifiedBoardRecord,
-  ConsensusOutputOrigin,
-  EntityInput,
-  EntityOutput,
-  EntityTx,
-  RuntimeState,
-  HashToSign,
-} from '../../types';
+import type { AccountPeerInput } from '../../types/account';
+import type { CertifiedBoardAuthorityBinding, CertifiedBoardRecord } from '../../types/entity-board-registry';
+import type { ConsensusOutputOrigin, EntityTx } from '../../types/entity-tx';
+import type { EntityInput, EntityOutput, HashToSign } from '../types';
+import type { RuntimeState } from '../../types';
 import { cloneAccountInputWithoutPostCommitHankos } from './hanko-witness';
 
 import {
@@ -21,7 +15,7 @@ import {
   accountInputProposal,
 } from '../../account/consensus/flush';
 import { verifyHankoForHash } from '../../hanko/signing';
-import type { EntityState } from '../../types';
+import type { EntityState } from '../types';
 import {
   createCertifiedBoardAuthorityBinding,
   getCertifiedBoardNodeStore,

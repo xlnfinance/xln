@@ -27,15 +27,10 @@ import {
 } from '../jurisdiction/j-prefix-consensus';
 import { recordValidatorJHistory } from '../jurisdiction/local-history';
 import { createEmptyEnv, hasRuntimeWork } from '../runtime';
-import type {
-  EntityReplica,
-  EntityState,
-  EntityTx,
-  RuntimeState,
-  JurisdictionEvent,
-  ProposedEntityFrame,
-  ValidatorJHistory,
-} from '../types';
+import type { EntityReplica, EntityState, ProposedEntityFrame } from '../entity/types';
+import type { RuntimeState } from '../types';
+import type { EntityTx } from '../types/entity-tx';
+import type { JurisdictionEvent, ValidatorJHistory } from '../types/jurisdiction-events';
 
 let entityId = `0x${'91'.repeat(32)}`;
 const depositoryAddress = `0x${'92'.repeat(20)}`;

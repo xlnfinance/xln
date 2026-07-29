@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { applyAccountTx } from '../account/tx/apply';
-import type { AccountState, AccountTx } from '../types';
+import type { AccountState, AccountTx } from '../types/account';
 
 const makeAccount = (): AccountState => ({
   proofHeader: { fromEntity: 'left', toEntity: 'right', nextProofNonce: 3 },

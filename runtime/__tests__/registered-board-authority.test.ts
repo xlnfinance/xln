@@ -52,16 +52,10 @@ import { getReliableOutputIdentity } from '../runtime/output-routing';
 import { createDueScheduledWakeInputs, refreshScheduledWakeIndex } from '../runtime/scheduled-wake';
 import { buildRuntimeCheckpointSnapshot } from '../storage/wal/snapshot';
 import { cloneEntityState } from '../entity/state-clone';
-import type {
-  ConsensusOutputOrigin,
-  EntityReplica,
-  EntityTx,
-  RuntimeState,
-  EntityState,
-  JurisdictionConfig,
-  JurisdictionEvent,
-  RoutedEntityInput,
-} from '../types';
+import type { ConsensusOutputOrigin, EntityTx } from '../types/entity-tx';
+import type { EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
+import type { RuntimeState, RoutedEntityInput } from '../types';
+import type { JurisdictionEvent } from '../types/jurisdiction-events';
 import { addr, entity, makeAccount, makeState } from './helpers/cross-j';
 import { buildJEventRangeData } from './helpers/j-history';
 

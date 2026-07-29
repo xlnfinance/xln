@@ -7,7 +7,8 @@ import {
   createEmptyEnv,
   validateRuntimeInputAdmission,
 } from '../runtime';
-import type { JTx, RuntimeInput } from '../types';
+import type { JTx } from '../types/jurisdiction-runtime';
+import type { RuntimeInput } from '../types';
 
 const jurisdiction = 'Testnet';
 const tx = (): JTx => ({

@@ -1,12 +1,8 @@
 import { isLeftEntity } from '../../id';
-import type {
-  Delta,
-  EntityCandidateEffect,
-  EntityInput,
-  EntityState,
-  EntityTx,
-  RuntimeState,
-} from '../../../types';
+import type { Delta } from '../../../types/account';
+import type { EntityCandidateEffect, EntityInput, EntityState } from '../../types';
+import type { RuntimeState } from '../../../types';
+import type { EntityTx } from '../../../types/entity-tx';
 import { formatEntityId } from '../../../presentation/identity-display';
 import { upsertSortedStringMapEntry } from '../../../infra/sorted-map-index';
 import { prepareEntityTxState } from '../../state-clone';
@@ -154,7 +150,7 @@ const seedOpenAccountPolicies = async (
   for (const policyTokenId of tokenIds) {
     const policy = tx.data.rebalancePolicy && policyTokenId === tokenId
       ? tx.data.rebalancePolicy
-      : resolveJurisdictionRebalanceDefaults(state, policyTokenId);
+      : resolveJurisdictionRebalanceDefaults(state.config.jurisdiction, policyTokenId);
     account.shadow.rebalance.policy.set(policyTokenId, { ...policy });
   }
 };

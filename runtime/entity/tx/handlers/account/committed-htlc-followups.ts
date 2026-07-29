@@ -1,18 +1,11 @@
-import type {
-  AccountPeerInput,
-  AccountReplica,
-  AccountTx,
-  EntityCandidateEffect,
-  EntityInput,
-  EntityState,
-  RuntimeState,
-  HtlcNoteKey,
-} from '../../../../types';
+import type { AccountPeerInput, AccountReplica, AccountTx, HtlcNoteKey } from '../../../../types/account';
+import type { EntityCandidateEffect, EntityInput, EntityState } from '../../../types';
+import type { RuntimeState } from '../../../../types';
 import { HEAVY_LOGS } from '../../../../infra/debug-flags';
 import {
-  encryptedHtlcLayer,
   validateLocalCommittedHtlcLayer,
-} from '../../../../protocol/htlc/onion-advance';
+} from '../../../htlc/onion-advance';
+import { encryptedHtlcLayer } from '../../../../protocol/htlc/onion-layer';
 import {
   armHtlcSecretAckTimeout,
   terminateHtlcRoute,

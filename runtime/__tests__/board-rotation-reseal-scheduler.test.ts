@@ -22,14 +22,10 @@ import {
   projectAccountDoc,
   projectEntityCoreDoc,
 } from '../storage/projections';
-import type {
-  EntityReplica,
-  EntityState,
-  EntityTx,
-  RuntimeState,
-  JurisdictionConfig,
-  JurisdictionEvent,
-} from '../types';
+import type { EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
+import type { RuntimeState } from '../types';
+import type { EntityTx } from '../types/entity-tx';
+import type { JurisdictionEvent } from '../types/jurisdiction-events';
 import { addr, makeAccount, makeState } from './helpers/cross-j';
 
 const digest = (value: number): string => `0x${value.toString(16).padStart(64, '0')}`;

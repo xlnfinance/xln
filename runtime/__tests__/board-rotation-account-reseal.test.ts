@@ -24,14 +24,10 @@ import { buildPendingNetworkOutputs, getReliableOutputIdentity } from '../runtim
 import { createEmptyEnv } from '../runtime';
 import { hydrateAccountDocFromStorage } from '../storage/hydration';
 import { projectAccountDoc } from '../storage/projections';
-import type {
-  AccountInput,
-  EntityReplica,
-  EntityState,
-  JurisdictionEvent,
-  JurisdictionConfig,
-  RoutedEntityInput,
-} from '../types';
+import type { AccountInput } from '../types/account';
+import type { EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
+import type { RoutedEntityInput } from '../types';
+import type { JurisdictionEvent } from '../types/jurisdiction-events';
 import {
   buildDurableRuntimeMachineSnapshot,
   restoreDurableRuntimeSnapshot,

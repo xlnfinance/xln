@@ -1,4 +1,4 @@
-import type { AccountFrame, AccountReplica, AccountTx } from '../../types';
+import type { AccountFrame, AccountReplica, AccountTx } from '../../types/account';
 import { HEAVY_LOGS } from '../../infra/debug-flags';
 import { safeStringify } from '../../protocol/serialization';
 import { decodeAccountFrame } from '../frame-validation';

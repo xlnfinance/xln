@@ -1,9 +1,5 @@
-import type {
-  AccountInput,
-  AccountPeerInput,
-  AccountReplica,
-  RuntimeState,
-} from '../../types';
+import type { AccountInput, AccountPeerInput, AccountReplica } from '../../types/account';
+import type { RuntimeState } from '../../types';
 import { verifyHankoForHash } from '../../hanko/signing';
 import type { AccountInputSecurityContext } from './deadline-policy';
 import { accountInputBoardReseal } from './flush';

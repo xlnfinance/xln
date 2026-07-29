@@ -1,4 +1,4 @@
-import type { AccountState } from '../types';
+import type { AccountState } from '../types/account';
 
 export type AccountPerspective = {
   iAmLeft: boolean;

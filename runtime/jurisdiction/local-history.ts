@@ -1,11 +1,5 @@
-import type {
-  EntityState,
-  JurisdictionEventBlock,
-  JurisdictionEventData,
-  ValidatorJBlockHeader,
-  ValidatorJEventBlock,
-  ValidatorJHistory,
-} from '../types';
+import type { EntityState } from '../entity/types';
+import type { JurisdictionEventBlock, JurisdictionEventData, ValidatorJBlockHeader, ValidatorJEventBlock, ValidatorJHistory } from '../types/jurisdiction-events';
 import {
   canonicalDisputeFinalizationEvidenceHash,
   canonicalJurisdictionEventsHash,

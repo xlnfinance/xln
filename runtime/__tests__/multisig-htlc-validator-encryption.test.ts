@@ -21,15 +21,11 @@ import { announceCertifiedLocalProfiles } from '../networking/local-profile-life
 import { NobleCryptoProvider } from '../protocol/crypto/noble';
 import { generateLazyEntityId } from '../entity/factory';
 import { buildQuorumHanko, getEntityConfigBoardHash, verifyHankoForHash } from '../hanko/signing';
-import type {
-  AccountState,
-  CertifiedRegistrationEvidence,
-  EntityCandidateEffect,
-  EntityState,
-  RuntimeState,
-  JurisdictionConfig,
-  JurisdictionEvent,
-} from '../types';
+import type { AccountState } from '../types/account';
+import type { CertifiedRegistrationEvidence } from '../types/jurisdiction-runtime';
+import type { EntityCandidateEffect, EntityState, JurisdictionConfig } from '../entity/types';
+import type { RuntimeState } from '../types';
+import type { JurisdictionEvent } from '../types/jurisdiction-events';
 import {
   computeEntityProfileCertificationHash,
   computeValidatorEncryptionAttestationDigest,
@@ -87,10 +83,12 @@ import { handleHtlcPayment } from '../entity/tx/handlers/htlc-payment';
 import { handleHtlcResolve } from '../account/tx/handlers/htlc-resolve';
 import {
   buildHtlcOnionRevealAcceptedTx,
+  validateHtlcOnionAdvanceTx,
+} from '../entity/htlc/onion-advance';
+import {
   hashEncryptedHtlcLayer,
   htlcSecretOfferContextHash,
-  validateHtlcOnionAdvanceTx,
-} from '../protocol/htlc/onion-advance';
+} from '../protocol/htlc/onion-layer';
 import { hashHtlcSecret } from '../protocol/htlc/utils';
 import { handleHtlcOnionAdvance } from '../entity/tx/handlers/htlc-onion-advance';
 import { encodeHtlcSecretOffer } from '../protocol/htlc/onion-codec';

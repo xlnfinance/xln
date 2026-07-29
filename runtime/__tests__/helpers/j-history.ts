@@ -7,13 +7,9 @@ import {
 } from '../../jurisdiction/history-consensus';
 import { canonicalJurisdictionEventsHash, getJEventJurisdictionRef } from '../../jurisdiction/event-observation';
 import { finalizedJHistoryRoot } from '../../jurisdiction/local-history';
-import type {
-  DisputeFinalizationEvidence,
-  EntityState,
-  RuntimeState,
-  JurisdictionEvent,
-  JurisdictionEventData,
-} from '../../types';
+import type { DisputeFinalizationEvidence, JurisdictionEvent, JurisdictionEventData } from '../../types/jurisdiction-events';
+import type { EntityState } from '../../entity/types';
+import type { RuntimeState } from '../../types';
 import type { JEventApplyResult } from '../../entity/tx/j-events-types';
 
 export type LegacyJEventInput = {

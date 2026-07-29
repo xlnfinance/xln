@@ -10,7 +10,7 @@
  * Reference: types.ts SettlementOp / SettlementDiff
  */
 
-import type { AccountReplica, SettlementOp, SettlementDiff } from '../../types';
+import type { AccountReplica, SettlementOp, SettlementDiff } from '../../types/account';
 
 const INT256_MIN = -(1n << 255n);
 const INT256_MAX = (1n << 255n) - 1n;

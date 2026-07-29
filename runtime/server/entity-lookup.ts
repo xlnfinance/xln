@@ -1,5 +1,6 @@
 import { deriveDelta } from '../account/utils';
-import type { AccountReplica, AccountState, RuntimeState } from '../types';
+import type { AccountReplica, AccountState } from '../types/account';
+import type { RuntimeState } from '../types';
 import { getEntityReplicaById } from '../entity/replica-lookup';
 export { getEntityReplicaById } from '../entity/replica-lookup';
 

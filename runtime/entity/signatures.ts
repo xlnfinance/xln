@@ -1,4 +1,4 @@
-import type { ProposedEntityFrame } from '../types';
+import type { ProposedEntityFrame } from './types';
 
 export const normalizeSignatureMap = (value: unknown): Map<string, string[]> | undefined => {
   if (!value) return undefined;

@@ -1,13 +1,7 @@
 import { ethers } from 'ethers';
 
-import type {
-  AccountReplica,
-  AccountTx,
-  RuntimeState,
-  SettlementDiff,
-  SettlementOp,
-  SettlementWorkspace,
-} from '../../../types';
+import type { AccountReplica, AccountTx, SettlementDiff, SettlementOp, SettlementWorkspace } from '../../../types/account';
+import type { RuntimeState } from '../../../types';
 import { cloneAccountState } from '../../state-clone';
 import { computeCanonicalMerkleRoot } from '../../state-root';
 import { deriveDelta } from '../../utils';

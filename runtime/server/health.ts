@@ -1,7 +1,8 @@
 // Health check endpoint
 // Returns status of all J-machines, hubs, and system health
 
-import type { EntityReplica, RuntimeState } from '../types.js';
+import type { RuntimeState } from '../types.js';
+import type { EntityReplica } from '../entity/types.js';
 import { getP2PState } from '../runtime.js';
 import { compareStableText } from '../protocol/serialization';
 

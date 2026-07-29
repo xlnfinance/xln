@@ -1,7 +1,4 @@
-import type {
-  AccountState,
-  AccountTx,
-} from '../../../../types';
+import type { AccountState, AccountTx } from '../../../../types/account';
 import { FINANCIAL, LIMITS } from '../../../../config/constants';
 import { getAccountSwapMarketLimitError } from '../../../swap-limits';
 

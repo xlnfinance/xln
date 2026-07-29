@@ -6,7 +6,7 @@ import { verifyCanonicalReceiptProof } from '../jurisdiction/receipt-codec';
 import { createEmptyEnv } from '../runtime';
 import { bindScenarioJReplica, createJReplica, createJurisdictionConfig } from '../scenarios/boot';
 import { buildCanonicalJReplicaSnapshot } from '../storage/wal/snapshot';
-import type { EntityReplica } from '../types';
+import type { EntityReplica } from '../entity/types';
 
 const makeReplica = (entityId: string, signerId: string): EntityReplica =>
   ({

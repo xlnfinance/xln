@@ -1,8 +1,4 @@
-import type {
-  AccountTx,
-  Delta,
-  SwapOffer,
-} from '../../../types';
+import type { AccountTx, Delta, SwapOffer } from '../../../types/account';
 
 export type SwapResolveTx = Extract<AccountTx, { type: 'swap_resolve' }>;
 

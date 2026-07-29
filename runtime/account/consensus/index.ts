@@ -3,16 +3,9 @@
  * off-chain account, then bubble committed effects back to the entity runtime.
  */
 
-import type {
-  AccountReplica,
-  AccountDisputeSeal,
-  AccountFrame,
-  AccountInput,
-  AccountPeerInput,
-  EntityCandidateEffect,
-  RuntimeState,
-  Delta,
-} from '../../types';
+import type { AccountReplica, AccountDisputeSeal, AccountFrame, AccountInput, AccountPeerInput, Delta } from '../../types/account';
+import type { AccountOutput } from '../../types/account';
+import type { RuntimeState } from '../../types';
 import { cloneAccountFrame, cloneAccountState } from '../state-clone';
 import { getAccountPerspective } from '../perspective';
 import { HEAVY_LOGS } from '../../infra/debug-flags';
@@ -370,7 +363,7 @@ const reexecuteIncomingFrame = async (
   frameJHeight: number,
   committedJClaims: AccountJClaimSession,
   securityContext: AccountInputSecurityContext,
-  candidateEffects: EntityCandidateEffect[],
+  candidateEffects: AccountOutput[],
 ): Promise<void> => {
   for (const tx of receivedFrame.accountTxs) {
     const beforeSettlement = captureSettlementVector(account);
@@ -411,7 +404,7 @@ async function commitIncomingFrameOnRealState(
   committedFrames: AccountCommittedFrame[],
   committedJClaims: AccountJClaimSession,
   securityContext: AccountInputSecurityContext,
-  candidateEffects: EntityCandidateEffect[],
+  candidateEffects: AccountOutput[],
 ): Promise<void> {
   const { counterparty: cpForCommitLog } = getAccountPerspective(account, ourEntityId);
   if (HEAVY_LOGS) {
@@ -785,7 +778,7 @@ async function handleIncomingAccountFrame(
   committedFrames: AccountCommittedFrame[],
   committedJClaims: AccountJClaimSession,
   securityContext: AccountInputSecurityContext,
-  candidateEffects: EntityCandidateEffect[],
+  candidateEffects: AccountOutput[],
 ): Promise<IncomingFrameResult> {
   if (!accountInputProposal(input)) {
     return { kind: 'not_applicable' };
@@ -869,7 +862,7 @@ type AccountInputSession = {
     committedViaNewFrame: boolean;
   }>;
   committedJClaims: ReturnType<typeof createAccountJClaimSession>;
-  candidateEffects: EntityCandidateEffect[];
+  candidateEffects: AccountOutput[];
 };
 
 const finishAccountInput = (

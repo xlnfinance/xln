@@ -1,5 +1,6 @@
 import type { BookState } from '../orderbook';
-import type { EntityState, RuntimeState } from '../types';
+import type { EntityState } from '../entity/types';
+import type { RuntimeState } from '../types';
 import { computeIntegrityDigest } from '../infra/integrity-checksum';
 import { decodeBuffer, decodeValidatedBuffer } from './codec';
 import { docRefCellKey, docRefKey, docValueKey } from './doc-refs';

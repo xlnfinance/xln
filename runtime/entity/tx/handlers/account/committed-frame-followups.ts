@@ -1,12 +1,6 @@
-import type {
-  AccountFrame,
-  AccountTx,
-  EntityCandidateEffect,
-  EntityState,
-  RuntimeState,
-  HtlcNoteKey,
-  HtlcRoute,
-} from '../../../../types';
+import type { AccountFrame, AccountTx, HtlcNoteKey, HtlcRoute } from '../../../../types/account';
+import type { EntityCandidateEffect, EntityState } from '../../../types';
+import type { RuntimeState } from '../../../../types';
 import { HEAVY_LOGS } from '../../../../infra/debug-flags';
 import { cancelHook } from '../../../scheduler';
 import { pruneSettledOriginatedHtlcRoutes, terminateHtlcRoute } from '../../htlc-route-lifecycle';

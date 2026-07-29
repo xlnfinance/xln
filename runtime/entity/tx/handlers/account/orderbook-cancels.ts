@@ -1,4 +1,5 @@
-import type { EntityInput, EntityState, RuntimeState } from '../../../../types';
+import type { EntityInput, EntityState } from '../../../types';
+import type { RuntimeState } from '../../../../types';
 import {
   applyCommand,
   getBookOrder,

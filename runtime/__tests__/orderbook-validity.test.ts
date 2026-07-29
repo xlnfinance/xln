@@ -4,7 +4,8 @@ import { applyCommand, createBook, type BookState } from '../orderbook/core';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
 import { createOrderbookExtState, ORDERBOOK_PRICE_SCALE, replaceOrderbookPair, SWAP_LOT_SCALE } from '../orderbook/types';
 import { validateBookAgainstOffers, validateBookStructure, validateEntityOrderbooks } from '../orderbook/validity';
-import type { AccountState, EntityState, SwapOffer } from '../types';
+import type { AccountState, SwapOffer } from '../types/account';
+import type { EntityState } from '../entity/types';
 
 const makeOffer = (overrides: Partial<SwapOffer> = {}): SwapOffer => ({
   offerId: 'offer-1',

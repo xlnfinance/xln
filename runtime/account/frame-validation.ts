@@ -1,4 +1,4 @@
-import type { AccountFrame } from '../types';
+import type { AccountFrame } from '../types/account';
 import {
   FinancialDataCorruptionError,
   validateArray,

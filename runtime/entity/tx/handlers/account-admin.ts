@@ -1,4 +1,7 @@
-import type { AccountTx, EntityInput, EntityState, EntityTx, RuntimeState } from '../../../types';
+import type { AccountTx } from '../../../types/account';
+import type { EntityInput, EntityState } from '../../types';
+import type { RuntimeState } from '../../../types';
+import type { EntityTx } from '../../../types/entity-tx';
 import { createStructuredLogger, shortId } from '../../../infra/logger';
 import { normalizeRebalanceMatchingStrategy } from '../../../extensions/rebalance/policy';
 import { prepareEntityTxState } from '../../state-clone';

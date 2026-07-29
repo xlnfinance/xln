@@ -57,7 +57,7 @@ import {
   mergeJPrefixAttestations,
 } from '../../jurisdiction/j-prefix-consensus';
 import { applyRuntimeStorageChanges } from '../../runtime/env-events';
-import { cloneIsolatedRuntimeInput } from '../../protocol/runtime-input-clone';
+import { cloneIsolatedRuntimeInput } from '../../runtime/input-clone';
 import { collectDueJSubmitRuntimeTxs } from '../../runtime/j-submit-scheduler';
 import { registerPendingCommittedJOutbox } from '../../runtime/j-submit-state';
 import { applyRuntimeTx } from '../../runtime/tx-handlers';
@@ -69,15 +69,10 @@ import {
 import { encodeBuffer } from '../../storage/codec';
 import { KEY_HEAD } from '../../storage/keys';
 import { getPerfMs } from '../../infra/time';
-import type {
-  CertifiedRegistrationEvidence,
-  CertifiedEntityFrameLink,
-  EntityState,
-  EntityTx,
-  JReplica,
-  JurisdictionConfig,
-  JurisdictionEvent,
-} from '../../types';
+import type { CertifiedRegistrationEvidence, JReplica } from '../../types/jurisdiction-runtime';
+import type { CertifiedEntityFrameLink, EntityState, JurisdictionConfig } from '../../entity/types';
+import type { EntityTx } from '../../types/entity-tx';
+import type { JurisdictionEvent } from '../../types/jurisdiction-events';
 import {
   installCanonicalRegisteredBoardAuthority,
   installCanonicalRegistrationEvidence,

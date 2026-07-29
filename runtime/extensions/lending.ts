@@ -1,13 +1,8 @@
 import { ethers } from 'ethers';
 
-import type {
-  AccountState,
-  EntityState,
-  LendingLoan,
-  LendingPoolPosition,
-  LendingState,
-  LendingTermId,
-} from '../types';
+import type { AccountState } from '../types/account';
+import type { EntityState } from '../entity/types';
+import type { LendingLoan, LendingPoolPosition, LendingState, LendingTermId } from '../types/lending';
 import { deriveDelta } from '../account/utils';
 import { compareStableText } from '../protocol/serialization';
 

@@ -1,12 +1,7 @@
 import { TIMING } from '../config/constants';
-import type {
-  EntityInput,
-  RuntimeState,
-  JInput,
-  ReliableDeliveryReceipt,
-  RuntimeInput,
-  RuntimeTx,
-} from '../types';
+import type { EntityInput } from '../entity/types';
+import type { RuntimeState, ReliableDeliveryReceipt, RuntimeInput, RuntimeTx } from '../types';
+import type { JInput } from '../jurisdiction/input';
 import { getWallClockMs } from '../infra/time';
 import { createStructuredLogger } from '../infra/logger';
 import { ensureRuntimeState } from './runtime-state';

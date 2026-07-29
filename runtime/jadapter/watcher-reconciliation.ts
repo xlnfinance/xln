@@ -2,11 +2,9 @@ import {
   getEntityCertifiedJAnchor,
   getValidatorJExpectedBlockHash,
 } from '../jurisdiction/local-history';
-import type {
-  EntityReplica,
-  JReplica,
-  RuntimeState,
-} from '../types';
+import type { EntityReplica } from '../entity/types';
+import type { RuntimeState } from '../types';
+import type { JReplica } from '../types/jurisdiction-runtime';
 import { isEntityReplicaRelevantToWatcher } from './watcher';
 
 export type WatcherLocalFrontier = {

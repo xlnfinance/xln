@@ -13,7 +13,11 @@
  * 7. Runtime submits JTx via JAdapter
  */
 
-import type { EntityState, EntityTx, EntityInput, RuntimeState, JTx, JInput, HashType } from '../../../types';
+import type { EntityState, EntityInput, HashType } from '../../types';
+import type { RuntimeState } from '../../../types';
+import type { JInput } from '../../../jurisdiction/input';
+import type { EntityTx } from '../../../types/entity-tx';
+import type { JTx } from '../../../types/jurisdiction-runtime';
 import { requireUsableContractAddress } from '../../../jurisdiction/contract-address';
 import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';

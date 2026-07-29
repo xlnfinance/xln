@@ -13,13 +13,9 @@ import {
 } from '../jurisdiction/board-registry';
 import { validatePersistedValidatorEncryptionManifest } from '../protocol/htlc/validator-encryption';
 import { requireCommittedDirectPaymentRoute } from '../protocol/payments/route';
-import type {
-  EntityCommandNonceState,
-  EntityState,
-  EntityTx,
-  RuntimeState,
-  SignedEntityCommandV1,
-} from '../types';
+import type { EntityCommandNonceState, EntityTx, SignedEntityCommandV1 } from '../types/entity-tx';
+import type { EntityState } from './types';
+import type { RuntimeState } from '../types';
 import {
   assertEntityCommandTxs,
   assertEntityCommandAuthorBindings,

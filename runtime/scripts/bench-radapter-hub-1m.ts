@@ -54,7 +54,9 @@ import type {
   StorageMerkleLeafDoc,
   StorageMerkleRootDoc,
 } from '../storage/types';
-import type { AccountReplica, EntityReplica, EntityState, RuntimeState, RuntimeInput } from '../types';
+import type { AccountReplica } from '../types/account';
+import type { EntityReplica, EntityState } from '../entity/types';
+import type { RuntimeState, RuntimeInput } from '../types';
 
 type Cli = {
   accounts: number;

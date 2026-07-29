@@ -60,17 +60,11 @@ import { applyRuntimeInput, createEmptyEnv, enqueueRuntimeInput, processRuntime 
 import { buildQuorumHanko, verifyHankoForHash } from '../hanko/signing';
 import { hydrateEntityStateFromStorage } from '../storage/hydration';
 import { projectEntityCoreDoc } from '../storage/projections';
-import type {
-  ConsensusConfig,
-  CrossJurisdictionSwapRoute,
-  EntityReplica,
-  EntityState,
-  EntityTx,
-  RuntimeState,
-  JurisdictionEvent,
-  Proposal,
-  RoutedEntityInput,
-} from '../types';
+import type { ConsensusConfig, EntityReplica, EntityState, Proposal } from '../entity/types';
+import type { RuntimeState, RoutedEntityInput } from '../types';
+import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
+import type { EntityTx } from '../types/entity-tx';
+import type { JurisdictionEvent } from '../types/jurisdiction-events';
 
 const address = (byte: string): string => `0x${byte.repeat(20)}`;
 const entityId = (byte: string): string => `0x${byte.repeat(32)}`;

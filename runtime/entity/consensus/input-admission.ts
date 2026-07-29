@@ -1,6 +1,6 @@
 import { shortId } from '../../infra/logger';
 import { nodeProcess } from '../../infra/runtime-process';
-import type { EntityTx } from '../../types';
+import type { EntityTx } from '../../types/entity-tx';
 import { prepareLocallyAuthoredEntityTxs } from '../command';
 import { appendDefaultProposerCrossJMaterializations } from '../cross-j-proposer-materialization';
 import { appendDefaultProposerAcceptedHtlcReveals } from '../htlc-onion-post-commit';

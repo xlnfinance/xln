@@ -1,6 +1,6 @@
 import { ethers } from 'ethers';
 import { getCrossJurisdictionCommittedProofRatio } from './index';
-import type { AccountTx } from '../../types';
+import type { AccountTx } from '../../types/account';
 import type { CrossJurisdictionPendingFill } from '../../types/cross-jurisdiction';
 
 export const CROSS_J_PENDING_FILL_ACK_TTL_MS = 5 * 60_000;

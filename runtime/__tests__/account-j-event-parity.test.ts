@@ -9,7 +9,9 @@ import { prepareAccountJClaimTx } from '../account/j-claim-transition';
 import { mergeJEventClaimOps } from '../entity/tx/j-events-account';
 import type { JEventAccountTx } from '../entity/tx/j-events-types';
 import { createEmptyEnv } from '../runtime';
-import type { AccountState, AccountTx, RuntimeState, JurisdictionEvent } from '../types';
+import type { AccountState, AccountTx } from '../types/account';
+import type { RuntimeState } from '../types';
+import type { JurisdictionEvent } from '../types/jurisdiction-events';
 import { createDefaultDelta } from '../account/delta';
 
 const LEFT = `0x${'11'.repeat(32)}`;

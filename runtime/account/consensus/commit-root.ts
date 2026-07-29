@@ -1,4 +1,4 @@
-import type { AccountReplica } from '../../types';
+import type { AccountReplica } from '../../types/account';
 import { createStructuredLogger } from '../../infra/logger';
 import { safeStringify } from '../../protocol/serialization';
 import {

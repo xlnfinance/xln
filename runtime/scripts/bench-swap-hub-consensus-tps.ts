@@ -12,18 +12,10 @@ import { generateLazyEntityId } from '../entity/factory';
 import { MAX_ACCOUNT_FRAME_TXS } from '../account/consensus/frame';
 import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../orderbook';
 import { createEmptyEnv } from '../runtime';
-import type {
-  AccountInput,
-  AccountReplica,
-  AccountTx,
-  ConsensusConfig,
-  CrossJurisdictionSwapRoute,
-  Delta,
-  EntityReplica,
-  EntityState,
-  RuntimeState,
-  JurisdictionConfig,
-} from '../types';
+import type { AccountInput, AccountReplica, AccountTx, Delta } from '../types/account';
+import type { ConsensusConfig, EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
+import type { RuntimeState } from '../types';
+import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import { getPerfMs } from '../infra/time';
 import { createDefaultDelta } from '../account/delta';
 

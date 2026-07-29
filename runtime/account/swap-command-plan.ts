@@ -1,13 +1,10 @@
 import {
   requantizeRemainingSwapAtPrice,
 } from '../orderbook';
-import type {
-  AccountState,
-  CrossJurisdictionSwapRoute,
-  EntityTx,
-  RuntimeState,
-  RuntimeInput,
-} from '../types';
+import type { AccountState } from '../types/account';
+import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
+import type { EntityTx } from '../types/entity-tx';
+import type { RuntimeState, RuntimeInput } from '../types';
 import {
   planSwapInboundCapacity,
   readSwapAccountCapacity,

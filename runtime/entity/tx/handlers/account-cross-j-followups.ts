@@ -1,13 +1,8 @@
-import type {
-  AccountTx,
-  CrossJurisdictionSwapRoute,
-  EntityCandidateEffect,
-  EntityInput,
-  EntityState,
-  EntityTx,
-  RuntimeState,
-  RuntimeOverlayRecord,
-} from '../../../types';
+import type { AccountTx, RuntimeOverlayRecord } from '../../../types/account';
+import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
+import type { EntityCandidateEffect, EntityInput, EntityState } from '../../types';
+import type { RuntimeState } from '../../../types';
+import type { EntityTx } from '../../../types/entity-tx';
 import {
   buildCrossJurisdictionCloseProof,
   cloneCrossJurisdictionRoute,

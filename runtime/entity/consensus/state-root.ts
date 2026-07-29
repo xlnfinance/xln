@@ -1,13 +1,7 @@
 import { ethers } from 'ethers';
 
-import type {
-  AccountReplica,
-  AccountState,
-  ConsensusConfig,
-  EntityFrameAuthority,
-  EntityLeaderState,
-  EntityState,
-} from '../../types';
+import type { AccountReplica, AccountState } from '../../types/account';
+import type { ConsensusConfig, EntityFrameAuthority, EntityLeaderState, EntityState } from '../types';
 import { compareStableText } from '../../protocol/serialization';
 import { encodeCanonicalConsensusValue } from '../../protocol/canonical-consensus-value';
 import { cloneAccountInputWithoutPostCommitHankos, cloneAccountTxWithoutPostCommitHankos } from './hanko-witness';

@@ -1,5 +1,5 @@
 import { cloneAccountState } from '../account/state-clone';
-import type { AccountReplica } from '../types';
+import type { AccountReplica } from '../types/account';
 import { EntityCandidateMap } from './candidate-map';
 
 /**

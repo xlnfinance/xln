@@ -1,4 +1,6 @@
-import type { AccountPeerInput, EntityState, RuntimeState } from '../../../types';
+import type { AccountPeerInput } from '../../../types/account';
+import type { EntityState } from '../../types';
+import type { RuntimeState } from '../../../types';
 import { createStructuredLogger, shortId } from '../../../infra/logger';
 import {
   accountInputAck,

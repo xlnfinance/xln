@@ -1,10 +1,7 @@
-import type {
-  AccountReplica,
-  EntityInput,
-  EntityTx,
-  RuntimeState,
-  SettlementOp,
-} from '../../types';
+import type { AccountReplica, SettlementOp } from '../../types/account';
+import type { EntityInput } from '../types';
+import type { RuntimeState } from '../../types';
+import type { EntityTx } from '../../types/entity-tx';
 import { isLeftEntity } from '../id';
 import { getEntityLeaderState } from '../consensus/leader';
 import { deriveDelta } from '../../account/utils';

@@ -8,7 +8,7 @@ import {
   validateObject,
   validateString,
 } from '../protocol/validation-primitives';
-import type { AccountReplica } from '../types';
+import type { AccountReplica } from '../types/account';
 import { assertAccountJClaimAccumulatorState } from './j-claim-accumulator';
 import { assertAccountMempoolWithinLimit } from './mempool';
 import { validateDelta } from './delta-validation';

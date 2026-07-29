@@ -1,6 +1,8 @@
 import { getEntityCertifiedJurisdictionHeight } from '../../../jurisdiction/height';
 import { generateLockId, hashHtlcSecret } from '../../../protocol/htlc/utils';
-import type { EntityInput, EntityState, EntityTx, RuntimeState } from '../../../types';
+import type { EntityInput, EntityState } from '../../types';
+import type { RuntimeState } from '../../../types';
+import type { EntityTx } from '../../../types/entity-tx';
 import { formatEntityId } from '../../../presentation/identity-display';
 import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';

@@ -1,4 +1,6 @@
-import type { CrossJurisdictionSwapRoute, EntityInput, EntityTx } from '../../types';
+import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
+import type { EntityInput } from '../../entity/types';
+import type { EntityTx } from '../../types/entity-tx';
 import { getEffectiveEntityInputTxs } from '../../entity/consensus/output-envelope';
 
 /**

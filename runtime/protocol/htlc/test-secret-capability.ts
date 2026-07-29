@@ -1,4 +1,4 @@
-import type { EntityTx } from '../../types';
+import type { EntityTx } from '../../types/entity-tx';
 import { hashHtlcSecret } from './utils';
 
 type HtlcPaymentTx = Extract<EntityTx, { type: 'htlcPayment' }>;

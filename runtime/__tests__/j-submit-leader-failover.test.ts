@@ -12,7 +12,7 @@ import {
   buildDurableRuntimeMachineSnapshot,
   restoreDurableRuntimeSnapshot,
 } from '../storage/wal/snapshot';
-import type { EntityReplica } from '../types';
+import type { EntityReplica } from '../entity/types';
 import {
   makeJSubmitDurabilityFixture,
   signerId as firstLeaderId,

@@ -1,7 +1,7 @@
 import { signAccountFrame } from '../../account/crypto';
 import { assertEntityConfigBoardAuthority } from '../../hanko/signing';
 import { shortHash, shortId } from '../../infra/logger';
-import type { ProposedEntityFrame } from '../../types';
+import type { ProposedEntityFrame } from '../types';
 import {
   deferEntityConsensusInput,
   noopEntityConsensusInput,

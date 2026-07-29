@@ -10,7 +10,7 @@ import {
 } from '../entity/consensus/state-quota';
 import { encodeCanonicalEntityConsensusState } from '../entity/consensus/state-root';
 import type { ConsumptionAccumulatorState } from '../entity/consumption-accumulator';
-import type { EntityState } from '../types';
+import type { EntityState } from '../entity/types';
 
 const entityId = `0x${'11'.repeat(32)}`;
 

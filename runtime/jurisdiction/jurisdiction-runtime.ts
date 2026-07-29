@@ -1,4 +1,6 @@
-import type { ConsensusConfig, RuntimeState, EntityReplica, JReplica, JurisdictionConfig } from '../types';
+import type { ConsensusConfig, EntityReplica, JurisdictionConfig } from '../entity/types';
+import type { RuntimeState } from '../types';
+import type { JReplica } from '../types/jurisdiction-runtime';
 import { firstUsableContractAddress } from './contract-address';
 import {
   getJurisdictionStackId,

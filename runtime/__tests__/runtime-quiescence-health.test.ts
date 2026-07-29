@@ -6,7 +6,9 @@ import {
   isAccountWriteLaneIdle,
   summarizeRuntimeQuiescence,
 } from '../orchestrator/mesh-common';
-import type { AccountState, DeliverableEntityInput, EntityReplica } from '../types';
+import type { AccountState } from '../types/account';
+import type { DeliverableEntityInput } from '../types';
+import type { EntityReplica } from '../entity/types';
 
 test('bootstrap quiescence counts only reliable outbox and live Account work', () => {
   const env = createEmptyEnv('runtime-quiescence-health deterministic seed');

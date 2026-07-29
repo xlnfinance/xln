@@ -1,4 +1,4 @@
-import type { EntityCandidateEffect } from '../../types';
+import type { EntityCandidateEffect } from '../types';
 import { addMessage } from '../frame-events';
 import { getTokenInfo } from '../../account/utils';
 import { normalizeJurisdictionEvents } from '../../jurisdiction/event-normalization';

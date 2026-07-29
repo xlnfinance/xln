@@ -2,7 +2,8 @@ import { normalizeEntityId } from '../entity/id';
 import { isBatchEmpty, preflightBatchForE2, type JBatch } from '../jurisdiction/batch';
 import { assertSealedJBatchBinding, type SealedBatchJTx } from '../jurisdiction/sealed-batch';
 import { resolveEntityProposerId } from '../runtime/entity-output-signer';
-import type { JTx, RuntimeState } from '../types';
+import type { JTx } from '../types/jurisdiction-runtime';
+import type { RuntimeState } from '../types';
 import type { FeeOverrides } from './rpc-boundary';
 
 type BatchJTx = Extract<JTx, { type: 'batch' }>;

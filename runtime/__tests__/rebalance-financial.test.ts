@@ -2,7 +2,8 @@ import { describe, expect, test } from 'bun:test';
 
 import { handleRebalanceRefund } from '../account/tx/handlers/rebalance-refund';
 import { handleRequestCollateral } from '../account/tx/handlers/request-collateral';
-import type { AccountState, RebalanceRequestFeeState } from '../types';
+import type { AccountState } from '../types/account';
+import type { RebalanceRequestFeeState } from '../types/rebalance';
 import { createDefaultDelta } from '../account/delta';
 
 const requestState = (

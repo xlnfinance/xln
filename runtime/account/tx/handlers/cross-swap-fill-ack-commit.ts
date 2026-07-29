@@ -1,4 +1,5 @@
-import type { AccountReplica, CrossJurisdictionSwapRoute } from '../../../types';
+import type { AccountReplica } from '../../../types/account';
+import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
 import {
   CROSS_J_MAX_FILL_RATIO,
   buildCommittedCrossJurisdictionPullBinding,

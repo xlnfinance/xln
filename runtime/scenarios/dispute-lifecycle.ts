@@ -8,7 +8,8 @@
  * 4) explicit reopen moves both sides back to active and clears pending disputed state
  */
 
-import type { AccountState, RuntimeState } from '../types';
+import type { AccountState } from '../types/account';
+import type { RuntimeState } from '../types';
 import type { JAdapter } from '../jadapter/types';
 import { getAccountFrameHistoryView } from '../runtime/env-events';
 import { startRuntimeHistoryTraceForTesting } from '../runtime/history-retention';

@@ -3,7 +3,7 @@
  * Based on old_src/app/Channel.ts deriveDelta logic
  */
 
-import type { Delta, DerivedDelta } from '../types';
+import type { Delta, DerivedDelta } from '../types/account';
 import { PERFORMANCE } from '../config/constants';
 import { validateDelta } from './delta-validation';
 import { isLeftEntity } from '../protocol/entity-id';

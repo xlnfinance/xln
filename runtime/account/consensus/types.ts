@@ -1,4 +1,6 @@
-import type { AccountFrame, AccountPeerInput, AccountTx, EntityCandidateEffect, HankoString } from '../../types';
+import type { AccountFrame, AccountPeerInput, AccountTx } from '../../types/account';
+import type { AccountOutput } from '../../types/account';
+import type { HankoString } from '../../types/hanko';
 import type { AccountJClaimNodeChanges } from '../../types/account-j-claims';
 import type { AccountDisputeFinalityResult } from '../j-finality';
 import type { AccountTxRejection } from '../tx/apply-types';
@@ -33,7 +35,7 @@ export type AccountConsensusFrameResult = {
   swapCancelRequests?: Array<{ offerId: string; accountId: string }>;
   swapOffersCancelled?: Array<{ offerId: string; accountId: string }>;
   hashesToSign?: AccountConsensusHashToSign[];
-  candidateEffects?: EntityCandidateEffect[];
+  candidateEffects?: AccountOutput[];
 };
 
 export type ProposeAccountFrameResult = AccountConsensusFrameResult & {

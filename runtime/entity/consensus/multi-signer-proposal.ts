@@ -5,14 +5,9 @@ import { assertFrameJPrefix } from '../../jurisdiction/j-prefix-consensus';
 import {
   cloneIsolatedEntityLeaderCertificate,
   cloneIsolatedProposedEntityFrame,
-} from '../../protocol/runtime-input-clone';
-import type {
-  EntityReplica,
-  EntityState,
-  RuntimeState,
-  ProposedEntityFrame,
-  EntityCandidate,
-} from '../../types';
+} from '../input-clone';
+import type { EntityReplica, EntityState, ProposedEntityFrame, EntityCandidate } from '../types';
+import type { RuntimeState } from '../../types';
 import { createEntityFrameHashFromStateRoot, entityFrameEventsEqual } from './frame';
 import { applyEntityFrame } from './frame-application';
 import {

@@ -1,6 +1,8 @@
 import { encodeCanonicalConsensusValue } from '../../protocol/canonical-consensus-value';
 import { NobleCryptoProvider } from '../../protocol/crypto/noble';
-import type { EntityInput, EntityState, EntityTx, RuntimeState } from '../../types';
+import type { EntityInput, EntityState } from '../types';
+import type { RuntimeState } from '../../types';
+import type { EntityTx } from '../../types/entity-tx';
 import type { Profile } from '../../entity/profile';
 import { canonicalizeProfile, getValidatorEncryptionManifestFromBoard } from '../../entity/profile';
 import {

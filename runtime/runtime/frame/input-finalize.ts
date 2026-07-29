@@ -2,13 +2,8 @@ import { isLocalEntityLeaderTimeoutVote } from '../../entity/consensus/leader';
 import { createStructuredLogger } from '../../infra/logger';
 import { createGossipLayer } from '../../networking/gossip';
 import { normalizeRuntimeId } from '../../networking/runtime-id';
-import type {
-  RuntimeState,
-  JInput,
-  RoutedEntityInput,
-  RuntimeInput,
-  RuntimeTx,
-} from '../../types';
+import type { RuntimeState, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../../types';
+import type { JInput } from '../../jurisdiction/input';
 import {
   commitReliableIngress,
   getInputReliableIdentity,

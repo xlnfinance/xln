@@ -5,11 +5,11 @@ import {
   type StorageFrameRecord,
 } from '..';
 import {
-  cloneIsolatedEntityInput,
   cloneIsolatedRoutedEntityInputs,
   cloneIsolatedRuntimeInput,
   cloneIsolatedRuntimeSnapshot,
-} from '../../protocol/runtime-input-clone';
+} from '../../runtime/input-clone';
+import { cloneIsolatedEntityInput } from '../../entity/input-clone';
 import {
   buildRuntimeActivityEvents,
   dedupeRuntimeActivityEvents,
@@ -17,13 +17,10 @@ import {
   type RuntimeActivityEvent,
   type RuntimeActivityFilters,
 } from '../../api/activity-history';
-import type {
-  AccountFrame,
-  CertifiedEntityFrameLink,
-  EntityInput,
-  RuntimeState,
-  FrameLogEntry,
-} from '../../types';
+import type { AccountFrame } from '../../types/account';
+import type { CertifiedEntityFrameLink, EntityInput } from '../../entity/types';
+import type { RuntimeState } from '../../types';
+import type { FrameLogEntry } from '../../types/logging';
 import type { PersistedFrameJournal } from '../types';
 import type { PersistenceQueryDeps } from './deps';
 import { requireStorageDbOpen } from '../availability';

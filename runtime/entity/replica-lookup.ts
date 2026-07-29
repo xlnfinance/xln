@@ -1,4 +1,5 @@
-import type { EntityReplica, RuntimeState } from '../types';
+import type { EntityReplica } from './types';
+import type { RuntimeState } from '../types';
 
 export const getEntityReplicaById = (env: RuntimeState, entityId: string): EntityReplica | null => {
   const target = String(entityId || '').trim().toLowerCase();

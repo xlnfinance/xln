@@ -1,4 +1,4 @@
-import type { AccountState, SwapOffer } from '../../../types';
+import type { AccountState, SwapOffer } from '../../../types/account';
 import { FINANCIAL } from '../../../config/constants';
 import {
   deriveExactSwapFillRatio,

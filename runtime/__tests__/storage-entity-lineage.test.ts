@@ -38,16 +38,10 @@ import {
 } from '../storage/entity-lineage';
 import { buildStorageReplicaMetaCommitment } from '../storage/replicas';
 import type { StorageReplicaMeta } from '../storage/types';
-import type {
-  CertifiedEntityFrameLink,
-  CertifiedEntityLineageAnchor,
-  EntityReplica,
-  EntityState,
-  EntityTx,
-  RuntimeState,
-  JReplica,
-  JurisdictionConfig,
-} from '../types';
+import type { CertifiedEntityFrameLink, CertifiedEntityLineageAnchor, EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
+import type { RuntimeState } from '../types';
+import type { EntityTx } from '../types/entity-tx';
+import type { JReplica } from '../types/jurisdiction-runtime';
 
 const address = (byte: string): string => `0x${byte.repeat(20)}`;
 const lineageJurisdiction: JurisdictionConfig = {

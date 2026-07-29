@@ -8,7 +8,7 @@ import {
   getBatchSize,
 } from '../jurisdiction/batch';
 import { createEmptyEnv } from '../runtime';
-import type { JTx } from '../types';
+import type { JTx } from '../types/jurisdiction-runtime';
 
 test('BrowserVM adapter rejects a mismatched sealed batch before mutating chain state', async () => {
   const chainId = 31337;

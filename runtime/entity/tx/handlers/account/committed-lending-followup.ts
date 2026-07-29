@@ -1,10 +1,6 @@
-import type {
-  AccountFrame,
-  AccountState,
-  AccountTx,
-  EntityState,
-  LendingState,
-} from '../../../../types';
+import type { AccountFrame, AccountState, AccountTx } from '../../../../types/account';
+import type { EntityState } from '../../../types';
+import type { LendingState } from '../../../../types/lending';
 import {
   buildLendingLoanId,
   computeLendingInterest,

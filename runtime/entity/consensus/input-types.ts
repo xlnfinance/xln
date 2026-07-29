@@ -1,13 +1,7 @@
-import type {
-  EntityInput,
-  EntityOutput,
-  EntityCandidateEffect,
-  EntityReplica,
-  EntityState,
-  RuntimeState,
-  JInput,
-  RuntimeOverlayRecord,
-} from '../../types';
+import type { EntityInput, EntityOutput, EntityCandidateEffect, EntityReplica, EntityState } from '../types';
+import type { RuntimeState } from '../../types';
+import type { JInput } from '../../jurisdiction/input';
+import type { RuntimeOverlayRecord } from '../../types/account';
 
 export type EntityInputOutcome =
   | { kind: 'committed' }

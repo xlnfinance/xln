@@ -8,7 +8,7 @@ import {
 } from '../account/state-root';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
 import { buildAccountProofBody } from '../protocol/dispute/proof-builder';
-import type { AccountReplica, AccountState } from '../types';
+import type { AccountReplica, AccountState } from '../types/account';
 import { createDefaultDelta } from '../account/delta';
 
 const LEFT = `0x${'11'.repeat(32)}`;

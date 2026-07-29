@@ -16,7 +16,9 @@
  * Run with: bun runtime/scenarios/swap.ts
  */
 
-import type { AccountReplica, RuntimeState, EntityInput } from '../types';
+import type { AccountReplica } from '../types/account';
+import type { RuntimeState } from '../types';
+import type { EntityInput } from '../entity/types';
 import { ethers } from 'ethers';
 import { getBestAsk, SWAP_LOT_SCALE } from '../orderbook';
 import { getOpenSwapOfferEntries } from '../orderbook/open-swap-offers';

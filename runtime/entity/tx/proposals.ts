@@ -1,4 +1,5 @@
-import type { EntityState, RuntimeState, Proposal, ProposalAction } from '../../types';
+import type { EntityState, Proposal, ProposalAction } from '../types';
+import type { RuntimeState } from '../../types';
 import { createHash } from '../../infra/platform-crypto';
 import { safeStringify } from '../../protocol/serialization';
 import { createStructuredLogger, shortHash } from '../../infra/logger';

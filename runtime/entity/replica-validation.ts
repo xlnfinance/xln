@@ -6,7 +6,7 @@ import {
   validateObject,
   validateString,
 } from '../protocol/validation-primitives';
-import type { EntityReplica } from '../types';
+import type { EntityReplica } from './types';
 import {
   validateEntityLeaderCertificate,
   validateEntityLeaderVote,

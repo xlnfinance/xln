@@ -15,7 +15,7 @@ import {
 import { createJAdapter, createXlnJsonRpcProvider, type JAdapter } from '../jadapter';
 import { createEmptyEnv } from '../runtime';
 import { createTokenCatalogController } from '../server/token-catalog';
-import type { JReplica } from '../types';
+import type { JReplica } from '../types/jurisdiction-runtime';
 
 const CHAIN_ID = 31_337;
 

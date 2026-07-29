@@ -12,7 +12,8 @@ import { handleResolveHtlcLockEntityTx } from '../entity/tx/handlers/htlc-direct
 import { pruneSettledOriginatedHtlcRoutes } from '../entity/tx/htlc-route-lifecycle';
 import { publishEntityCandidateEffects } from '../runtime/env-events';
 import { createEmptyEnv } from '../runtime';
-import type { AccountState, EntityCandidateEffect, EntityReplica } from '../types';
+import type { AccountState } from '../types/account';
+import type { EntityCandidateEffect, EntityReplica } from '../entity/types';
 
 const makeReplica = (entityId: string, counterpartyId: string): EntityReplica => {
   const account: AccountState = {

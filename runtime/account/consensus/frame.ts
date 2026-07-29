@@ -1,6 +1,6 @@
 import { ethers } from 'ethers';
 
-import type { AccountFrame, AccountTx } from '../../types';
+import type { AccountFrame, AccountTx } from '../../types/account';
 import { assertAccountFrameDeltaIntegrity } from '../frame';
 import { computeCanonicalMerkleRoot } from '../state-root';
 import { canonicalJurisdictionEventsHash } from '../../jurisdiction/event-observation';

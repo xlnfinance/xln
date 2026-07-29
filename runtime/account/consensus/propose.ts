@@ -3,7 +3,8 @@
  * frame construction, and the hash manifest that Entity consensus certifies.
  */
 
-import type { AccountReplica, AccountTx, RuntimeState } from '../../types';
+import type { AccountReplica, AccountTx } from '../../types/account';
+import type { RuntimeState } from '../../types';
 import { removeCommittedTxsFromMempool } from '../../protocol/tx-multiset';
 import { getPerfMs } from '../../infra/time';
 import { HEAVY_LOGS } from '../../infra/debug-flags';

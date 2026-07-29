@@ -1,33 +1,12 @@
 import { ethers } from 'ethers';
 
-import type { AccountReplica, EntityState, RuntimeState } from '../types';
-import { resolveHankoDefaultProposerSignerId } from '../hanko/signing';
+import type { AccountReplica } from '../types/account';
+import type { CertifiedBoardNodeStore } from '../types/entity-board-registry';
 import { verifyCanonicalHanko } from '../hanko/claims';
-import {
-  getCertifiedBoardNodeStore,
-  resolveObserverCertifiedBoardRecord,
-} from '../jurisdiction/board-registry';
+import { resolveObserverCertifiedBoardRecord } from '../jurisdiction/board-registry';
+import type { EntityState } from './types';
 
 const normalize = (value: string): string => String(value || '').trim().toLowerCase();
-
-/** Resolve an established Account lane from the counterparty's certified frame Hanko. */
-export const resolveCertifiedAccountCounterpartyProposer = async (
-  env: RuntimeState,
-  account: AccountReplica,
-  counterpartyEntityId: string,
-): Promise<string | null> => {
-  const hanko = account.counterpartyFrameHanko;
-  if (!hanko) return null;
-  const counterparty = normalize(counterpartyEntityId);
-  if (counterparty !== normalize(account.leftEntity) && counterparty !== normalize(account.rightEntity)) {
-    throw new Error(`ACCOUNT_COUNTERPARTY_ROUTE_ID_MISMATCH:${counterparty}`);
-  }
-  const frameHash = normalize(account.currentFrame.stateHash);
-  if (!/^0x[0-9a-f]{64}$/.test(frameHash)) {
-    throw new Error(`ACCOUNT_COUNTERPARTY_ROUTE_FRAME_HASH_INVALID:${frameHash || 'missing'}`);
-  }
-  return resolveHankoDefaultProposerSignerId(hanko, frameHash, counterparty, env);
-};
 
 /**
  * Resolve a delivery lane using only the Account witness and the consuming
@@ -36,7 +15,7 @@ export const resolveCertifiedAccountCounterpartyProposer = async (
  * Entities while replaying the same frame.
  */
 export const resolveObserverCertifiedAccountCounterpartyProposer = (
-  env: RuntimeState,
+  store: CertifiedBoardNodeStore,
   observerState: EntityState,
   account: AccountReplica,
   counterpartyEntityId: string,
@@ -52,7 +31,6 @@ export const resolveObserverCertifiedAccountCounterpartyProposer = (
     throw new Error(`ACCOUNT_COUNTERPARTY_ROUTE_FRAME_HASH_INVALID:${frameHash || 'missing'}`);
   }
   const expectedTarget = ethers.toBeHex(BigInt(counterparty), 32).toLowerCase() as `0x${string}`;
-  const store = getCertifiedBoardNodeStore(env);
   const timestampSeconds = Math.floor(observerState.timestamp / 1_000);
   const verified = verifyCanonicalHanko({
     hanko,

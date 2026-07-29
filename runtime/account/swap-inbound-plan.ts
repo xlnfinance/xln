@@ -1,4 +1,5 @@
-import type { AccountState, EntityTx } from '../types';
+import type { AccountState } from '../types/account';
+import type { EntityTx } from '../types/entity-tx';
 import { isLeftEntity } from '../protocol/entity-id';
 import { deriveDelta } from './utils';
 

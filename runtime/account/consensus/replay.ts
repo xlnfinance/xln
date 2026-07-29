@@ -1,8 +1,4 @@
-import type {
-  AccountFrame,
-  AccountInput,
-  AccountReplica,
-} from '../../types';
+import type { AccountFrame, AccountInput, AccountReplica } from '../../types/account';
 import { createStructuredLogger, shortId } from '../../infra/logger';
 import {
   accountInputAck,

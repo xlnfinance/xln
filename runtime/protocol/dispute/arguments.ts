@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import type { AccountReplica, EntityState } from '../../types';
+import type { AccountReplica } from '../../types/account';
 import type { ProofBodyStruct } from '../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
 import { asOfferId, type OfferId } from '../../orderbook/swap-keys';
 import { sortTransformerEntries } from '../transformer-ordering';
@@ -53,10 +53,6 @@ const wrapTransformerArgs = (args: string): string => {
   return abiCoder.encode(['bytes[]'], [[args]]);
 };
 
-const hashHtlcSecret = (secret: string): string => {
-  return ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(['bytes32'], [secret])).toLowerCase();
-};
-
 const buildPendingSwapFillRatios = (
   account: AccountReplica,
   snapshot: DisputeArgumentSnapshot,
@@ -79,48 +75,6 @@ const buildPendingSwapFillRatios = (
     ratios.set(offerId, ratio);
   }
   return ratios;
-};
-
-const collectKnownSecrets = (
-  entityState: EntityState,
-  counterpartyEntityId: string,
-  hashlocks: string[],
-): string[] => {
-  if (!entityState.htlcRoutes?.size || hashlocks.length === 0) return [];
-  const required = new Set(hashlocks.map((hashlock) => hashlock.toLowerCase()));
-  const seen = new Set<string>();
-  const secrets: string[] = [];
-  for (const route of entityState.htlcRoutes.values()) {
-    if (!route.secret) continue;
-    if (!/^0x[0-9a-fA-F]{64}$/.test(route.secret)) continue;
-    const involvesCounterparty =
-      route.inboundEntity === counterpartyEntityId ||
-      route.outboundEntity === counterpartyEntityId;
-    if (!involvesCounterparty) continue;
-    if (!required.has(hashHtlcSecret(route.secret))) continue;
-    if (seen.has(route.secret)) continue;
-    seen.add(route.secret);
-    secrets.push(route.secret);
-  }
-  return secrets;
-};
-
-/**
- * Return only preimages committed by the exact signed ProofBody snapshot.
- *
- * Counterexample: publishing every secret ever learned from one counterparty
- * lets 32 unrelated completed routes exhaust the jurisdiction batch cap and
- * prevent an otherwise valid dispute from closing. The snapshot hash is the
- * authority; live route state is only optional evidence for its hashlocks.
- */
-export const collectKnownDisputeSecretsForSnapshot = (
-  account: AccountReplica,
-  entityState: EntityState,
-  counterpartyEntityId: string,
-  proofbodyHash: string,
-): string[] => {
-  const snapshot = requireDisputeArgumentSnapshot(account, proofbodyHash, 'secrets');
-  return collectKnownSecrets(entityState, counterpartyEntityId, snapshot.plan.paymentHashlocks);
 };
 
 const collectPullResolves = (account: AccountReplica): Map<string, string> => {
@@ -220,12 +174,11 @@ export function requireDisputeArgumentSnapshot(
   return snapshot;
 }
 
-export function buildDisputeArgumentsForSnapshot(
+export function buildDisputeArgumentsFromSnapshot(
   account: AccountReplica,
-  entityState: EntityState,
-  counterpartyEntityId: string,
   proofbodyHash: string,
   options: { secretsSide: DisputeArgumentSide | 'none' },
+  secrets: readonly string[],
 ): {
   leftArguments: string;
   rightArguments: string;
@@ -243,14 +196,8 @@ export function buildDisputeArgumentsForSnapshot(
   const resolves = collectPullResolves(account);
   const leftFillRatios = snapshot.plan.leftSwapOfferIds.map((offerId) => fillRatios.get(asOfferId(offerId)) ?? 0);
   const rightFillRatios = snapshot.plan.rightSwapOfferIds.map((offerId) => fillRatios.get(asOfferId(offerId)) ?? 0);
-  const secrets = collectKnownDisputeSecretsForSnapshot(
-    account,
-    entityState,
-    counterpartyEntityId,
-    proofbodyHash,
-  );
-  const leftSecrets = options.secretsSide === 'left' ? secrets : [];
-  const rightSecrets = options.secretsSide === 'right' ? secrets : [];
+  const leftSecrets = options.secretsSide === 'left' ? [...secrets] : [];
+  const rightSecrets = options.secretsSide === 'right' ? [...secrets] : [];
   const leftPulls = buildPullBuckets(snapshot.plan.leftPullIds, resolves);
   const rightPulls = buildPullBuckets(snapshot.plan.rightPullIds, resolves);
   const leftArgs = encodeDeltaTransformerArgs(leftFillRatios, leftSecrets, leftPulls);

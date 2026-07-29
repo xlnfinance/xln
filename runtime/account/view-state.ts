@@ -6,7 +6,7 @@
  * Left-wins rule: On simultaneous proposals, RIGHT rolls back
  */
 
-import type { AccountReplica } from '../types';
+import type { AccountReplica } from '../types/account';
 
 export type BilateralState =
   | 'committed'    // Both sides synced

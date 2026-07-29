@@ -3,7 +3,8 @@
  * Simplifies creating N hubs + M users with accounts for testing
  */
 
-import type { RuntimeState, EntityInput } from '../types';
+import type { RuntimeState } from '../types';
+import type { EntityInput } from '../entity/types';
 import {
   createJurisdictionConfig,
   getScenarioJAdapter,

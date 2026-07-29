@@ -1,12 +1,7 @@
-import type {
-  EntityReplica,
-  RuntimeState,
-  EnvSnapshot,
-  JReplica,
-  Profile,
-  RoutedEntityInput,
-  RuntimeInput,
-} from '../../types';
+import type { EntityReplica } from '../../entity/types';
+import type { RuntimeState, EnvSnapshot, RoutedEntityInput, RuntimeInput } from '../../types';
+import type { JReplica } from '../../types/jurisdiction-runtime';
+import type { Profile } from '../../entity/profile';
 import { cloneEntityReplica } from '../../entity/replica-clone';
 import { markRestoredJSubmitRuntimeTxs } from '../../runtime/j-submit-state';
 import { markRestoredJAuthorityRuntimeTxs } from '../../jurisdiction/registration-evidence';
@@ -31,7 +26,7 @@ import {
 import {
   cloneIsolatedRoutedEntityInputs,
   cloneIsolatedRuntimeInput,
-} from '../../protocol/runtime-input-clone';
+} from '../../runtime/input-clone';
 
 export const authorizeRestoredRuntimeInput = (runtimeInput: RuntimeInput): RuntimeInput => {
   markRestoredJSubmitRuntimeTxs(runtimeInput.runtimeTxs);

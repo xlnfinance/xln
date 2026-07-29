@@ -1,4 +1,4 @@
-import type { JTx } from '../types';
+import type { JTx } from '../types/jurisdiction-runtime';
 import { createStructuredLogger } from '../infra/logger';
 import { makeJAdapterFailureResult } from './failure';
 import type { JEvent, JSubmitResult } from './types';

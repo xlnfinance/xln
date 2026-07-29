@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { summarizeRuntimeAccountCausality } from '../infra/account-causal-trace';
-import type { AccountInput, EntityInput } from '../types';
+import type { AccountInput } from '../types/account';
+import type { EntityInput } from '../entity/types';
 
 const frameAck = {
   kind: 'frame_ack',

@@ -1,5 +1,5 @@
 import { compareStableText } from '../protocol/serialization';
-import type { JurisdictionEvent } from '../types';
+import type { JurisdictionEvent } from '../types/jurisdiction-events';
 import {
   decodeFields,
   defineEventNormalizer,

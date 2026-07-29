@@ -1,9 +1,4 @@
-import type {
-  AccountExternalFinalityInput,
-  AccountInput,
-  AccountState,
-  AccountTx,
-} from '../types';
+import type { AccountExternalFinalityInput, AccountInput, AccountState, AccountTx } from '../types/account';
 
 /**
  * Build the local-only Account input committed by the owning Entity frame.

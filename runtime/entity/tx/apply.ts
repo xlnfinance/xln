@@ -1,14 +1,8 @@
-import type {
-  AccountPeerInput,
-  EntityState,
-  EntityTx,
-  RuntimeState,
-  EntityOutput,
-  JInput,
-  HashType,
-  RuntimeOverlayRecord,
-  EntityCandidateEffect,
-} from '../../types';
+import type { AccountPeerInput, RuntimeOverlayRecord } from '../../types/account';
+import type { EntityState, EntityOutput, HashType, EntityCandidateEffect } from '../types';
+import type { RuntimeState } from '../../types';
+import type { JInput } from '../../jurisdiction/input';
+import type { EntityTx } from '../../types/entity-tx';
 import type { AccountJClaimNodeStore } from '../../types/account-j-claims';
 import {
   applyAccountInputToEntity,

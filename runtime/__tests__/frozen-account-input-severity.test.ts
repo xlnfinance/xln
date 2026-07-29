@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { canProcessFrozenAccountInput, frozenAccountInputLogLevel } from '../entity/tx/handlers/account';
-import type { AccountInput, AccountState } from '../types';
+import type { AccountInput, AccountState } from '../types/account';
 
 const account = (
   observedOnChain: boolean | undefined,

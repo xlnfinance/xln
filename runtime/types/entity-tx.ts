@@ -3,7 +3,7 @@ import type { AccountPeerInput, AccountStateDomain, CrossJurisdictionSecretRelay
 import type { CrossJurisdictionCloseProof, CrossJurisdictionPullBinding, CrossJurisdictionSwapRoute } from './cross-jurisdiction';
 import type { LendingTermId } from './lending';
 import type { ProfileUpdateTx } from './profile';
-import type { ProposalAction } from '../types';
+import type { ProposalAction } from '../entity/types';
 import type { PaymentDeliveryMode } from './payment';
 import type { ValidatorEncryptionAttestation } from '../protocol/htlc/validator-encryption';
 import type { EntityProfileDescriptor } from '../entity/profile-descriptor';

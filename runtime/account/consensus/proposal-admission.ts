@@ -1,4 +1,5 @@
-import type { AccountReplica, AccountTx, RuntimeState } from '../../types';
+import type { AccountReplica, AccountTx } from '../../types/account';
+import type { RuntimeState } from '../../types';
 import { getAccountPerspective } from '../perspective';
 import { safeStringify } from '../../protocol/serialization';
 import { createStructuredLogger, shortId } from '../../infra/logger';

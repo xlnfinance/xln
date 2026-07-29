@@ -8,7 +8,9 @@
  *   console.log(formatAccount(account, myEntityId));
  */
 
-import type { RuntimeState, EntityState, AccountReplica } from '../types';
+import type { RuntimeState } from '../types';
+import type { EntityState } from '../entity/types';
+import type { AccountReplica } from '../types/account';
 import { getWallClockMs } from '../infra/time';
 import { listOpenSwapOffers } from '../orderbook/open-swap-offers';
 

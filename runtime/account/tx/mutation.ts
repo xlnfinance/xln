@@ -1,9 +1,6 @@
-import type {
-  AccountReplica,
-  AccountTx,
-  EntityCandidateEffect,
-  RuntimeState,
-} from '../../types';
+import type { AccountReplica, AccountTx } from '../../types/account';
+import type { AccountOutput } from '../../types/account';
+import type { RuntimeState } from '../../types';
 import { getAccountPerspective } from '../perspective';
 import type { AccountJClaimSession } from '../j-claim-session';
 import { canProcessAccountTxForDisputeStatus } from '../consensus/dispute-policy';
@@ -48,7 +45,7 @@ type MutationContext = {
   env?: RuntimeState;
   jClaimSession?: AccountJClaimSession;
   counterpartyCertifiedBoardHash?: string;
-  candidateEffects: EntityCandidateEffect[];
+  candidateEffects: AccountOutput[];
   myEntityId: string;
   counterparty: string;
 };
@@ -185,7 +182,7 @@ export const applyAccountTxMutation = async (
   env: RuntimeState | undefined,
   jClaimSession: AccountJClaimSession | undefined,
   counterpartyCertifiedBoardHash: string | undefined,
-  candidateEffects: EntityCandidateEffect[],
+  candidateEffects: AccountOutput[],
 ): Promise<ApplyAccountTxResult> => {
   const myEntityId = account.proofHeader.fromEntity;
   const { counterparty } = getAccountPerspective(account, myEntityId);

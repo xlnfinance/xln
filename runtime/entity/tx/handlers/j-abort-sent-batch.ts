@@ -1,4 +1,7 @@
-import type { EntityInput, EntityState, EntityTx, RuntimeState, JInput } from '../../../types';
+import type { EntityInput, EntityState } from '../../types';
+import type { RuntimeState } from '../../../types';
+import type { JInput } from '../../../jurisdiction/input';
+import type { EntityTx } from '../../../types/entity-tx';
 import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import { createEmptyBatch, getBatchSize, mergeBatchOps } from '../../../jurisdiction/batch';

@@ -23,36 +23,17 @@ export type {
 export type { JurisdictionInfo } from '../protocol/jurisdiction-identity';
 
 // Re-export core types from types.ts
-export type {
-  RuntimeState,
-  EnvSnapshot,
-  EntityReplica,
-  EntityState,
-  JReplica,
-  SwapBookEntry,
-  EntityTx,
-  AccountReplica,
-  AccountState,
-  AccountFrame,
-  AccountSnapshot,
-  Delta,
-  DerivedDelta,
-  Xlnomy,
-  XlnomySnapshot,
-  EntityProfile,
-  JurisdictionConfig,
-  ConsensusConfig,
-  HubRebalanceConfig,
-  DebtEntry,
-  DebtStatus,
-  RuntimeInput,
-  EntityInput,
-  RoutedEntityInput,
-  AccountTx,
-  SettlementDiff,
-  CrossJurisdictionSwapRoute,
-  PaymentDeliveryMode,
-} from '../types';
+export type { RuntimeState, EnvSnapshot, RuntimeInput, RoutedEntityInput } from '../types';
+export type { EntityReplica, EntityState, SwapBookEntry, JurisdictionConfig, ConsensusConfig, EntityInput } from '../entity/types';
+export type { JReplica } from '../types/jurisdiction-runtime';
+export type { EntityTx } from '../types/entity-tx';
+export type { AccountReplica, AccountState, AccountFrame, AccountSnapshot, Delta, DerivedDelta, AccountTx, SettlementDiff } from '../types/account';
+export type { Xlnomy, XlnomySnapshot } from '../types/xlnomy';
+export type { EntityProfile } from '../types/profile';
+export type { HubRebalanceConfig } from '../types/rebalance';
+export type { DebtEntry, DebtStatus } from '../types/debt';
+export type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
+export type { PaymentDeliveryMode } from '../types/payment';
 export type { PersistedFrameJournal } from '../storage/types';
 export type { BoardMemberInput } from '../entity/factory';
 export type { PersistedActivityJournal } from '../api/activity-history';

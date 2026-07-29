@@ -1,7 +1,10 @@
 import { ethers } from 'ethers';
 
 import { EntityProvider__factory } from '../../../jurisdictions/typechain-types';
-import type { CertifiedRegistrationEvidence, EntityState, RuntimeState, JurisdictionConfig, JurisdictionEvent } from '../../types';
+import type { CertifiedRegistrationEvidence } from '../../types/jurisdiction-runtime';
+import type { EntityState, JurisdictionConfig } from '../../entity/types';
+import type { RuntimeState } from '../../types';
+import type { JurisdictionEvent } from '../../types/jurisdiction-events';
 import {
   computeCanonicalReceiptsRoot,
   createCanonicalReceiptProofs,

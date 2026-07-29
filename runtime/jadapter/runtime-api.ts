@@ -3,7 +3,8 @@ import { detectEntityType, extractNumberFromEntityId } from '../entity/factory';
 import { encodeJBatch, computeBatchHankoHash, type JBatch } from '../jurisdiction/batch';
 import { normalizeEntityId } from '../entity/id';
 import { signEntityHashes } from '../hanko/signing';
-import type { RuntimeState, JurisdictionConfig } from '../types';
+import type { RuntimeState } from '../types';
+import type { JurisdictionConfig } from '../entity/types';
 import { connectJurisdictionAdapter, connectJurisdictionContracts } from './jurisdiction';
 
 export const debugFundReserves = async (

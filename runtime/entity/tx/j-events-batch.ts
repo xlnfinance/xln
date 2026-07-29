@@ -1,4 +1,5 @@
-import type { EntityInput, EntityState, JurisdictionEvent } from '../../types';
+import type { EntityInput, EntityState } from '../types';
+import type { JurisdictionEvent } from '../../types/jurisdiction-events';
 import {
   initJBatch,
   isBatchEmpty,

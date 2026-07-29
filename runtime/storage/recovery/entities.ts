@@ -9,7 +9,8 @@ import {
 import { assertCertifiedRegistrationEvidenceStore } from '../../jurisdiction/registration-evidence';
 import { restoreJPrefixRound } from '../../jurisdiction/j-prefix-consensus';
 import { cloneEntityState } from '../../entity/state-clone';
-import type { EntityReplica, EntityState, RuntimeState } from '../../types';
+import type { EntityReplica, EntityState } from '../../entity/types';
+import type { RuntimeState } from '../../types';
 import {
   applyCertifiedEntityLineagePlan,
   buildCertifiedEntityLineagePlan,

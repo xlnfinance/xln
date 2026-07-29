@@ -11,7 +11,7 @@
  */
 
 import { ethers } from 'ethers';
-import type { AccountReplica } from '../../types.js';
+import type { AccountReplica } from '../../types/account.js';
 import type {
   RuntimeProofBody,
   RuntimeTransformerClause,

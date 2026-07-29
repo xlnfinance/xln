@@ -48,20 +48,12 @@ import {
   getConsumptionKey,
   verifyConsumptionProof,
 } from '../entity/consumption-accumulator';
-import type {
-  AccountState,
-  AccountInput,
-  AccountTx,
-  CrossJurisdictionSwapRoute,
-  ConsensusOutputOrigin,
-  EntityInput,
-  EntityReplica,
-  EntityState,
-  EntityTx,
-  RuntimeState,
-  JReplica,
-  JurisdictionConfig,
-} from '../types';
+import type { AccountState, AccountInput, AccountTx } from '../types/account';
+import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
+import type { ConsensusOutputOrigin, EntityTx } from '../types/entity-tx';
+import type { EntityInput, EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
+import type { RuntimeState } from '../types';
+import type { JReplica } from '../types/jurisdiction-runtime';
 
 const seed = 'multisig-secondary-hanko alpha beta gamma';
 const signerLabels = ['1', '2', '3'];

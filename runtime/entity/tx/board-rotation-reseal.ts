@@ -1,14 +1,8 @@
-import type {
-  AccountBoardResealMigration,
-  AccountDisputeSeal,
-  AccountReplica,
-  EntityInput,
-  EntityState,
-  RuntimeState,
-  HashToSign,
-  JurisdictionEvent,
-} from '../../types';
-import { resolveObserverCertifiedAccountCounterpartyProposer } from '../../account/counterparty-route';
+import type { AccountBoardResealMigration, AccountDisputeSeal, AccountReplica } from '../../types/account';
+import type { EntityInput, EntityState, HashToSign } from '../types';
+import type { CertifiedBoardNodeStore } from '../../types/entity-board-registry';
+import type { JurisdictionEvent } from '../../types/jurisdiction-events';
+import { resolveObserverCertifiedAccountCounterpartyProposer } from '../account-counterparty-route';
 import { buildCertifiedEntityOutput } from './cross-j-outputs';
 
 type BoardActivatedEvent = Extract<JurisdictionEvent, { type: 'BoardActivated' }>;
@@ -167,14 +161,14 @@ export const markBoardRotationResealsPending = (
 
 const buildResealOutput = (
   state: EntityState,
-  env: RuntimeState,
+  store: CertifiedBoardNodeStore,
   counterpartyId: string,
   account: AccountReplica,
   input: NonNullable<EntityInput['entityTxs']>,
 ): EntityInput | undefined => {
   try {
     const signerId = resolveObserverCertifiedAccountCounterpartyProposer(
-      env,
+      store,
       state,
       account,
       counterpartyId,
@@ -193,7 +187,7 @@ const buildResealOutput = (
 
 const buildCertifiedAccountResealDraft = (
   state: EntityState,
-  env: RuntimeState,
+  store: CertifiedBoardNodeStore,
   activation: BoardResealActivation,
   counterpartyId: string,
   account: AccountReplica,
@@ -214,7 +208,7 @@ const buildCertifiedAccountResealDraft = (
     boardActivationLogIndex: position[1],
     ...(dispute.seal ? { disputeSeal: dispute.seal } : {}),
   };
-  const output = buildResealOutput(state, env, counterpartyId, account, [{
+  const output = buildResealOutput(state, store, counterpartyId, account, [{
     type: 'accountInput',
     data: {
       kind: 'board_reseal',
@@ -237,7 +231,7 @@ const buildCertifiedAccountResealDraft = (
 
 const buildAccountResealDraft = (
   state: EntityState,
-  env: RuntimeState,
+  store: CertifiedBoardNodeStore,
   activation: BoardResealActivation,
   counterpartyId: string,
   account: AccountReplica,
@@ -248,7 +242,7 @@ const buildAccountResealDraft = (
   }
   const issue = accountFrameIssue(state, counterpartyId, account);
   if (issue) return { hashesToSign: [], migration: migration(counterpartyId, ...position, issue) };
-  return buildCertifiedAccountResealDraft(state, env, activation, counterpartyId, account, position);
+  return buildCertifiedAccountResealDraft(state, store, activation, counterpartyId, account, position);
 };
 
 export const applyBoardRotationResealMigrations = (
@@ -265,7 +259,7 @@ export const applyBoardRotationResealMigrations = (
 
 const buildBoardRotationResealDraftsForActivation = (
   state: EntityState,
-  env: RuntimeState,
+  store: CertifiedBoardNodeStore,
   activation: BoardResealActivation,
   options: {
     afterCounterpartyId?: string;
@@ -299,7 +293,7 @@ const buildBoardRotationResealDraftsForActivation = (
   const batch = orderedAccounts.slice(0, MAX_BOARD_RESEALS_PER_FRAME);
 
   for (const [counterpartyId, account] of batch) {
-    const draft = buildAccountResealDraft(state, env, activation, counterpartyId, account, position);
+    const draft = buildAccountResealDraft(state, store, activation, counterpartyId, account, position);
     if (draft.output) outputs.push(draft.output);
     hashesToSign.push(...draft.hashesToSign);
     accountMigrations.push(draft.migration);
@@ -317,7 +311,7 @@ const buildBoardRotationResealDraftsForActivation = (
 /** Build at most one bounded frame of Account hashes already certified by both parties. */
 export const buildBoardRotationResealDrafts = (
   state: EntityState,
-  env: RuntimeState,
+  store: CertifiedBoardNodeStore,
   event: BoardActivatedEvent,
   options: {
     afterCounterpartyId?: string;
@@ -325,17 +319,17 @@ export const buildBoardRotationResealDrafts = (
   } = {},
 ): BoardRotationResealDrafts => buildBoardRotationResealDraftsForActivation(
   state,
-  env,
+  store,
   boardResealActivation(event),
   options,
 );
 
 export const buildPendingBoardRotationResealDrafts = (
   state: EntityState,
-  env: RuntimeState,
+  store: CertifiedBoardNodeStore,
   activation: BoardResealActivation,
   afterCounterpartyId = '',
-): BoardRotationResealDrafts => buildBoardRotationResealDraftsForActivation(state, env, activation, {
+): BoardRotationResealDrafts => buildBoardRotationResealDraftsForActivation(state, store, activation, {
   afterCounterpartyId,
   pendingOnly: true,
 });

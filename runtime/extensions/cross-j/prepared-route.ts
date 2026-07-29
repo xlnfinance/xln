@@ -1,4 +1,5 @@
-import type { CrossJurisdictionSwapRoute, EntityState } from '../../types';
+import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
+import type { EntityState } from '../../entity/types';
 import {
   cloneCrossJurisdictionRoute,
   CROSS_J_MIN_TARGET_RESPONSE_WINDOW_MS,

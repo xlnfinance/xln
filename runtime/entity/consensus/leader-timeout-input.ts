@@ -4,8 +4,8 @@ import { shortId } from '../../infra/logger';
 import {
   cloneIsolatedEntityLeaderCertificate,
   cloneIsolatedEntityLeaderTimeoutVote,
-} from '../../protocol/runtime-input-clone';
-import type { EntityLeaderTimeoutVote, ProposedEntityFrame } from '../../types';
+} from '../input-clone';
+import type { EntityLeaderTimeoutVote, ProposedEntityFrame } from '../types';
 import {
   assertEntityLeaderVoteMatchesState,
   buildEntityLeaderCertificate,

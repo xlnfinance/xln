@@ -44,16 +44,12 @@ import { buildCrossJurisdictionSwapSubmission } from '../runtime/jurisdiction-ap
 
 import { hashHtlcSecret } from '../protocol/htlc/utils';
 
-import type {
-  AccountTx,
-  CrossJurisdictionSwapRoute,
-  EntityInput,
-  EntityReplica,
-  EntityTx,
-  JurisdictionEvent,
-  RuntimeEntityInputsEnvelope,
-  RoutedEntityInput,
-} from '../types';
+import type { AccountTx } from '../types/account';
+import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
+import type { EntityInput, EntityReplica } from '../entity/types';
+import type { RuntimeEntityInputsEnvelope, RoutedEntityInput } from '../types';
+import type { EntityTx } from '../types/entity-tx';
+import type { JurisdictionEvent } from '../types/jurisdiction-events';
 
 import { generateLazyEntityId } from '../entity/factory';
 
@@ -175,7 +171,7 @@ import { getEffectiveEntityInputTxs } from '../entity/consensus/output-envelope'
 
 import { assertRuntimeOutputAuthorization } from '../entity/authorization';
 
-import { cloneIsolatedRoutedEntityInputs } from '../protocol/runtime-input-clone';
+import { cloneIsolatedRoutedEntityInputs } from '../runtime/input-clone';
 
 import { createDueScheduledWakeInputs } from '../runtime/scheduled-wake';
 

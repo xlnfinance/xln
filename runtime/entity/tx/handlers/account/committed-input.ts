@@ -1,11 +1,6 @@
-import type {
-  AccountPeerInput,
-  AccountReplica,
-  EntityCandidateEffect,
-  EntityInput,
-  EntityState,
-  RuntimeState,
-} from '../../../../types';
+import type { AccountPeerInput, AccountReplica } from '../../../../types/account';
+import type { EntityCandidateEffect, EntityInput, EntityState } from '../../../types';
+import type { RuntimeState } from '../../../../types';
 import type { HandleAccountInputResult } from '../../../../account/consensus/types';
 import {
   accountInputAck,

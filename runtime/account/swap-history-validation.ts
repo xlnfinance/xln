@@ -1,8 +1,5 @@
 import { LIMITS } from '../config/constants';
-import type {
-  SwapOrderHistoryEntry,
-  SwapOrderResolveHistoryEntry,
-} from '../types';
+import type { SwapOrderHistoryEntry, SwapOrderResolveHistoryEntry } from '../types/account';
 import {
   FinancialDataCorruptionError,
   validateArray,

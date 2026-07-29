@@ -1,5 +1,7 @@
 import type { EntityInputOutcome } from '../entity/consensus/index';
-import type { EntityTx, JInput, RoutedEntityInput } from '../types';
+import type { EntityTx } from '../types/entity-tx';
+import type { JInput } from '../jurisdiction/input';
+import type { RoutedEntityInput } from '../types';
 import type { RuntimeEntityRoutingDeps } from './entity-routing';
 import {
   classifyEntityInputApplyFailure,

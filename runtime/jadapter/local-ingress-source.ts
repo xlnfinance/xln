@@ -1,6 +1,7 @@
 import { ethers } from 'ethers';
 
-import type { RuntimeState, JReplica } from '../types';
+import type { RuntimeState } from '../types';
+import type { JReplica } from '../types/jurisdiction-runtime';
 import type { JAdapter } from './types';
 
 export type LocalJEventIngressSource = JAdapter | JReplica;

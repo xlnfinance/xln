@@ -80,15 +80,10 @@ import {
 } from './replicas';
 import { createStructuredLogger } from '../infra/logger';
 import { cumulativeMarksToDurations } from '../infra/perf-profile';
-import type {
-  CertifiedBoardPatriciaNode,
-  EntityState,
-  RuntimeState,
-  RoutedEntityInput,
-  RuntimeInput,
-  RuntimeHistoryRecord,
-} from '../types';
-import { cloneIsolatedRoutedEntityInputs } from '../protocol/runtime-input-clone';
+import type { CertifiedBoardPatriciaNode } from '../types/entity-board-registry';
+import type { EntityState } from '../entity/types';
+import type { RuntimeState, RoutedEntityInput, RuntimeInput, RuntimeHistoryRecord } from '../types';
+import { cloneIsolatedRoutedEntityInputs } from '../runtime/input-clone';
 import {
   collectReachableCertifiedBoardNodes,
   getCertifiedBoardNodeStore,

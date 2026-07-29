@@ -1,4 +1,5 @@
-import type { AccountPeerInput, AccountReplica, EntityState } from '../../../../types';
+import type { AccountPeerInput, AccountReplica } from '../../../../types/account';
+import type { EntityState } from '../../../types';
 import {
   accountStateDomainFromJurisdiction,
   computeAccountStateRoot,
@@ -158,7 +159,7 @@ const createInboundAccountState = (
   for (const tokenId of DEFAULT_ACCOUNT_TOKEN_IDS) {
     account.shadow.rebalance.policy.set(
       tokenId,
-      resolveJurisdictionRebalanceDefaults(state, tokenId),
+      resolveJurisdictionRebalanceDefaults(state.config.jurisdiction, tokenId),
     );
   }
   account.currentFrame.accountStateRoot = computeAccountStateRoot(account);

@@ -1,4 +1,4 @@
-import type { AccountFrame, AccountInput, AccountReplica } from '../../types';
+import type { AccountFrame, AccountInput, AccountReplica } from '../../types/account';
 import { HEAVY_LOGS } from '../../infra/debug-flags';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import { isLeft } from '../utils';

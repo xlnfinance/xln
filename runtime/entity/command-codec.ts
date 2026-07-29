@@ -3,7 +3,7 @@ import { ethers } from 'ethers';
 
 import { LIMITS } from '../config/constants';
 
-import type { EntityTx, SignedEntityCommandV1 } from '../types';
+import type { EntityTx, SignedEntityCommandV1 } from '../types/entity-tx';
 import { canonicalEntityBoardSignerId, isEntityProtocolTx } from './authorization';
 
 export const ENTITY_COMMAND_DOMAIN = 'xln:entity-command:v1' as const;

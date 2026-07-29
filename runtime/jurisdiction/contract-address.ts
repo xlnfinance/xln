@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import type { JReplica } from '../types';
+import type { JReplica } from '../types/jurisdiction-runtime';
 
 export const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 

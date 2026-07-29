@@ -7,7 +7,8 @@ import {
 import { decodeHashLadderBinary } from '../../../protocol/htlc/hash-ladder';
 import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
-import type { EntityInput, EntityState, EntityTx } from '../../../types';
+import type { EntityInput, EntityState } from '../../types';
+import type { EntityTx } from '../../../types/entity-tx';
 
 type CrossJurisdictionSettledTx = Extract<EntityTx, { type: 'crossJurisdictionSettled' }>;
 

@@ -1,5 +1,6 @@
 import { buildDefaultEntitySwapPairs } from '../account/utils';
-import type { AccountReplica, RuntimeState } from '../types';
+import type { AccountReplica } from '../types/account';
+import type { RuntimeState } from '../types';
 
 const MARKET_MAKER_LEVEL_OFFSETS_BPS = [2, 4, 6, 8, 10, 12, 15, 20, 25, 32, 40, 50, 65, 80, 100] as const;
 const MARKET_MAKER_LEVEL_BASE_SIZES = [

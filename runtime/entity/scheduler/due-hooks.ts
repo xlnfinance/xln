@@ -1,7 +1,5 @@
-import type {
-  EntityInput,
-  RuntimeState,
-} from '../../types';
+import type { EntityInput } from '../types';
+import type { RuntimeState } from '../../types';
 import type {
   CrontabExecutionContext,
   EntityTransitionContext,

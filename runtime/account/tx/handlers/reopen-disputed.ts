@@ -1,4 +1,4 @@
-import type { AccountReplica, AccountTx } from '../../../types';
+import type { AccountReplica, AccountTx } from '../../../types/account';
 
 export function handleReopenDisputed(
   account: AccountReplica,

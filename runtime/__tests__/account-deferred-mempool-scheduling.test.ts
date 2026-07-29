@@ -8,7 +8,9 @@ import { createEmptyEnv, hasRuntimeWork } from '../runtime';
 import { canonicalJurisdictionEventsHash, getJEventJurisdictionRef } from '../jurisdiction/event-observation';
 import { recordValidatorJHistory } from '../jurisdiction/local-history';
 import { buildLocalJPrefixAttestation } from '../jurisdiction/j-prefix-consensus';
-import type { AccountState, AccountTx, EntityReplica, JurisdictionEvent } from '../types';
+import type { AccountState, AccountTx } from '../types/account';
+import type { EntityReplica } from '../entity/types';
+import type { JurisdictionEvent } from '../types/jurisdiction-events';
 import {
   addReplica,
   installJurisdictions,

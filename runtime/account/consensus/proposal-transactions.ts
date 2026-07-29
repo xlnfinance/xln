@@ -1,4 +1,5 @@
-import type { AccountReplica, AccountTx, RuntimeState } from '../../types';
+import type { AccountReplica, AccountTx } from '../../types/account';
+import type { RuntimeState } from '../../types';
 import { cloneAccountState } from '../state-clone';
 import { isLeft } from '../utils';
 import { HEAVY_LOGS } from '../../infra/debug-flags';

@@ -1,4 +1,5 @@
-import type { AccountReplica, JurisdictionEvent } from '../../../types';
+import type { AccountReplica } from '../../../types/account';
+import type { JurisdictionEvent } from '../../../types/jurisdiction-events';
 import { getDefaultCreditLimit } from '../../utils';
 import { clearFinalizedSettlementWorkspace } from './settle-transition';
 import { buildAccountProofBody } from '../../../protocol/dispute/proof-builder';

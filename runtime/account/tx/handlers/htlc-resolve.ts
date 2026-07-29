@@ -9,9 +9,9 @@
  * Pattern: 2019 DeleteLockNew with outcomeType (secret/NoCapacity/invalid/fail)
  */
 
-import type { AccountState, AccountTx, Delta, HtlcLock } from '../../../types';
+import type { AccountState, AccountTx, Delta, HtlcLock } from '../../../types/account';
 import { hashHtlcSecret } from '../../../protocol/htlc/utils';
-import { hashEncryptedHtlcLayer, htlcSecretOfferContextHash } from '../../../protocol/htlc/onion-advance';
+import { hashEncryptedHtlcLayer, htlcSecretOfferContextHash } from '../../../protocol/htlc/onion-layer';
 import { validateMultiRecipientCiphertext } from '../../../protocol/htlc/multi-recipient';
 import { createStructuredLogger, shortHash } from '../../../infra/logger';
 import { releaseHold } from '../hold-utils';

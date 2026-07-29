@@ -42,7 +42,9 @@ import {
 import { recordValidatorJHistory } from '../jurisdiction/local-history';
 import { createEmptyEnv } from '../runtime';
 import { applyRuntimeTx } from '../runtime/tx-handlers';
-import type { EntityReplica, RuntimeState, JReplica, JurisdictionConfig } from '../types';
+import type { EntityReplica, JurisdictionConfig } from '../entity/types';
+import type { RuntimeState } from '../types';
+import type { JReplica } from '../types/jurisdiction-runtime';
 
 const makeJReplica = (
   name: string,

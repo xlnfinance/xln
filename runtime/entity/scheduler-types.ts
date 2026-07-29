@@ -1,4 +1,4 @@
-import type { EntityCandidateEffect, EntityState, HashToSign } from '../types';
+import type { EntityCandidateEffect, EntityState, HashToSign } from './types';
 
 /**
  * One isolated Entity reducer pass only needs the candidate State and its id.

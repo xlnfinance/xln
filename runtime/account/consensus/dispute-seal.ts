@@ -1,8 +1,5 @@
-import type {
-  AccountPeerInput,
-  AccountReplica,
-  RuntimeState,
-} from '../../types';
+import type { AccountPeerInput, AccountReplica } from '../../types/account';
+import type { RuntimeState } from '../../types';
 import { verifyHankoForHash } from '../../hanko/signing';
 import { createDisputeProofHashWithNonce } from '../../protocol/dispute/proof-builder';
 import { safeStringify } from '../../protocol/serialization';

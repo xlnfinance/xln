@@ -102,7 +102,7 @@ export {
 } from '../recovery/crypto';
 export { buildSingleSignerHanko } from '../hanko/batch';
 export { buildCrossJurisdictionPullReveal, getCrossJurisdictionPrivateSeed } from '../extensions/cross-j/index';
-export { buildDisputeArgumentsForSnapshot } from '../protocol/dispute/arguments';
+export { buildDisputeArgumentsForSnapshot } from '../entity/dispute-arguments';
 export {
   buildMppChallengeHeader,
   buildMppCredentialHeader,

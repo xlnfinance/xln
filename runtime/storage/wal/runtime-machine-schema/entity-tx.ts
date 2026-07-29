@@ -1,7 +1,8 @@
 import { assertEntityProposalAction } from '../../../entity/authorization';
 import { normalizeSignedEntityCommand } from '../../../entity/command-codec';
 import { normalizeConsensusOutputBoardAuthority } from '../../../entity/consensus/output-certification';
-import type { EntityTx, ProposalAction } from '../../../types';
+import type { EntityTx } from '../../../types/entity-tx';
+import type { ProposalAction } from '../../../entity/types';
 import { assertExactMultiRecipientCiphertextSchema } from '../../../protocol/htlc/multi-recipient-schema';
 import {
   requireArray,

@@ -1,4 +1,4 @@
-import type { EntityFrameEvent, EntityState } from '../types';
+import type { EntityFrameEvent, EntityState } from './types';
 import { ENTITY_FRAME_EVENT_COLLECTOR } from './frame-event-collector';
 
 type EntityStateWithFrameEvents = EntityState & {

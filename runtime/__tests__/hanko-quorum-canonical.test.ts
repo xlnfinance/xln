@@ -14,7 +14,8 @@ import { buildQuorumHanko, inspectHankoForHash, verifyHankoForHash } from '../ha
 import { decodeHankoEnvelope, encodeHankoEnvelope } from '../hanko/codec';
 import { createEmptyEnv } from '../runtime';
 import { createJReplica } from '../scenarios/boot';
-import type { ConsensusConfig, EntityReplica, RuntimeState, JurisdictionConfig } from '../types';
+import type { ConsensusConfig, EntityReplica, JurisdictionConfig } from '../entity/types';
+import type { RuntimeState } from '../types';
 import { installCanonicalRegisteredBoardAuthority } from './helpers/registration-evidence';
 
 type Fixture = {

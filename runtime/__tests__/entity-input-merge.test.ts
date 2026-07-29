@@ -5,7 +5,8 @@ import {
   mergeEntityInputs,
   prioritizeProtocolEntityInputs,
 } from '../entity/consensus/input-merge';
-import type { EntityLeaderTimeoutVote, RoutedEntityInput } from '../types';
+import type { EntityLeaderTimeoutVote } from '../entity/types';
+import type { RoutedEntityInput } from '../types';
 import { orderCertifiedOutputsBySequence } from '../entity/consensus/output-envelope';
 
 const entityId = (suffix: string): string => `0x${suffix.padStart(64, '0')}`;

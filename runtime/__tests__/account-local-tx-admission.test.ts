@@ -9,7 +9,8 @@ import {
   isDisputeStartedByLeft,
 } from '../account/consensus/dispute-policy';
 import { LIMITS } from '../config/constants';
-import type { AccountState, AccountTx, RuntimeState } from '../types';
+import type { AccountState, AccountTx } from '../types/account';
+import type { RuntimeState } from '../types';
 
 const PAYMENT: Extract<AccountTx, { type: 'direct_payment' }> = {
   type: 'direct_payment',

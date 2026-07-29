@@ -5,7 +5,8 @@ import {
   buildPreparedCrossJurisdictionRoute,
 } from '../extensions/cross-j/index';
 import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../orderbook';
-import type { AccountReplica, AccountTx, CrossJurisdictionSwapRoute, Delta } from '../types';
+import type { AccountReplica, AccountTx, Delta } from '../types/account';
+import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import { getPerfMs } from '../infra/time';
 import { createDefaultDelta } from '../account/delta';
 

@@ -17,7 +17,7 @@
  * Reference: 2019src.txt line 2976 (they_requested_deposit)
  */
 
-import type { AccountReplica, AccountTx } from '../../../types';
+import type { AccountReplica, AccountTx } from '../../../types/account';
 import { isLeftEntity } from '../../../protocol/entity-id';
 import { deriveDelta } from '../../utils';
 import { deriveTransferOffdeltaChange } from '../../../protocol/delta-movement';

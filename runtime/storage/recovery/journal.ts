@@ -2,7 +2,7 @@ import { nodeProcess } from '../../infra/runtime-process';
 import {
   cloneIsolatedRoutedEntityInputs,
   cloneIsolatedRuntimeInput,
-} from '../../protocol/runtime-input-clone';
+} from '../../runtime/input-clone';
 import { requireBoundaryInteger } from '../../protocol/boundary-validation';
 import { getConsumptionNodeStore } from '../../entity/consumption-store';
 import {

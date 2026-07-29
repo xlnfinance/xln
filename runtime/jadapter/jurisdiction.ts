@@ -1,4 +1,4 @@
-import type { JurisdictionConfig } from '../types';
+import type { JurisdictionConfig } from '../entity/types';
 import { getAvailableJurisdictions } from '../jurisdiction/config';
 import { createJAdapter } from './factory';
 import type { JAdapter, JAdapterConfig, JAdapterReplicaConnection } from './types';

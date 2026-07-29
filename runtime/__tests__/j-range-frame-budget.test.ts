@@ -24,16 +24,10 @@ import { canonicalJurisdictionEventsHash } from '../jurisdiction/event-observati
 import { EMPTY_J_HISTORY_ROOT } from '../jurisdiction/history-consensus';
 import { recordValidatorJHistory } from '../jurisdiction/local-history';
 import { createEmptyEnv } from '../runtime';
-import type {
-  EntityReplica,
-  EntityState,
-  EntityTx,
-  RuntimeState,
-  JurisdictionEventBlock,
-  JurisdictionEventData,
-  ValidatorJEventBlock,
-  ValidatorJHistory,
-} from '../types';
+import type { EntityReplica, EntityState } from '../entity/types';
+import type { RuntimeState } from '../types';
+import type { EntityTx } from '../types/entity-tx';
+import type { JurisdictionEventBlock, JurisdictionEventData, ValidatorJEventBlock, ValidatorJHistory } from '../types/jurisdiction-events';
 
 const HASH = `0x${'11'.repeat(32)}`;
 const SIGNATURE = `0x${'22'.repeat(65)}`;

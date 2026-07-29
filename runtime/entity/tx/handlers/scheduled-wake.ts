@@ -1,10 +1,6 @@
-import type {
-  EntityCandidateEffect,
-  EntityState,
-  EntityTx,
-  RuntimeState,
-  HashToSign,
-} from '../../../types';
+import type { EntityCandidateEffect, EntityState, HashToSign } from '../../types';
+import type { RuntimeState } from '../../../types';
+import type { EntityTx } from '../../../types/entity-tx';
 import { executeCrontab } from '../../scheduler';
 import { assertScheduledWakeMatchesState } from '../../scheduled-wake-validation';
 import { isCollectiveEntityActionTx } from '../../authorization';

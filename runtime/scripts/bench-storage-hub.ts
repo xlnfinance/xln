@@ -24,7 +24,11 @@ import {
   saveEnvToDB,
 } from '../runtime';
 import { dbRootPath } from '../runtime/platform';
-import type { AccountReplica, EntityReplica, EntityState, EntityTx, RuntimeState, JReplica, RoutedEntityInput } from '../types';
+import type { AccountReplica } from '../types/account';
+import type { EntityReplica, EntityState } from '../entity/types';
+import type { RuntimeState, RoutedEntityInput } from '../types';
+import type { EntityTx } from '../types/entity-tx';
+import type { JReplica } from '../types/jurisdiction-runtime';
 import { getPerfMs } from '../infra/time';
 import { buildRuntimeCheckpointSnapshot } from '../storage/wal/snapshot';
 import {

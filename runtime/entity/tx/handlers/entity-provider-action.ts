@@ -1,14 +1,10 @@
 import { ethers } from 'ethers';
 
-import type {
-  EntityInput,
-  EntityState,
-  EntityTx,
-  RuntimeState,
-  HashType,
-  JInput,
-  JTx,
-} from '../../../types';
+import type { EntityInput, EntityState, HashType } from '../../types';
+import type { RuntimeState } from '../../../types';
+import type { JInput } from '../../../jurisdiction/input';
+import type { EntityTx } from '../../../types/entity-tx';
+import type { JTx } from '../../../types/jurisdiction-runtime';
 import type {
   EntityProviderActionIntent,
   EntityProviderActionPayload,

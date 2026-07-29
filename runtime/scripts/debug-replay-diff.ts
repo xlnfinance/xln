@@ -13,7 +13,9 @@ import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from 
 import { generateLazyEntityId } from '../entity/factory';
 import { buildRuntimeCheckpointSnapshot } from '../storage/wal/snapshot';
 import { serializeTaggedJson } from '../protocol/serialization';
-import type { BrowserVMState, EntityReplica, JReplica } from '../types';
+import type { BrowserVMState } from '../types';
+import type { EntityReplica } from '../entity/types';
+import type { JReplica } from '../types/jurisdiction-runtime';
 import { accountInputProposal } from '../account/consensus/flush';
 
 type RuntimeCheckpointSnapshot = {

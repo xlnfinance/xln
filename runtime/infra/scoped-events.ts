@@ -1,4 +1,4 @@
-import type { LogCategory } from '../types';
+import type { LogCategory } from '../types/logging';
 
 export type ScopedEventSink = {
   info(category: LogCategory, message: string, data?: unknown, entityId?: string): void;

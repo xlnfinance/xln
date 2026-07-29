@@ -39,14 +39,8 @@ import {
 import { MAX_PENDING_NETWORK_OUTPUTS, sendEntityInputWithRouting } from './output-routing';
 import { normalizeDbNamespace } from '../storage/runtime-dbs';
 import { decodeRoutedEntityInput } from './routing-validation';
-import type {
-  EntityInput,
-  RuntimeState,
-  ReliableDeliveryReceipt,
-  RoutedEntityInput,
-  RuntimeEntityInputsEnvelope,
-  RuntimeInput,
-} from '../types';
+import type { EntityInput } from '../entity/types';
+import type { RuntimeState, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeEntityInputsEnvelope, RuntimeInput } from '../types';
 import { clearRuntimeGossip } from './loop-gossip';
 import {
   deriveRuntimeId,

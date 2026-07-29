@@ -37,7 +37,8 @@ import {
   recordValidatorJHistory,
   rewindValidatorJHistory,
 } from '../jurisdiction/local-history';
-import type { EntityReplica, EntityState, JurisdictionEvent, ValidatorJEventBlock } from '../types';
+import type { EntityReplica, EntityState } from '../entity/types';
+import type { JurisdictionEvent, ValidatorJEventBlock } from '../types/jurisdiction-events';
 
 const depositoryAddress = `0x${'dd'.repeat(20)}`;
 const jurisdictionRef = `stack:31337:${depositoryAddress}`;

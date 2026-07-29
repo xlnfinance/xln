@@ -7,7 +7,8 @@ import {
   getJurisdictionIdentityRef,
   sameJurisdictionIdentity,
 } from '../jurisdiction/jurisdiction-runtime';
-import type { RuntimeState, JReplica } from '../types';
+import type { RuntimeState } from '../types';
+import type { JReplica } from '../types/jurisdiction-runtime';
 
 const readText = (path: string): string => {
   if (path !== 'runtime/orchestrator/mm-node.ts') return readFileSync(path, 'utf8');

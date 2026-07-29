@@ -11,7 +11,8 @@ import { LIMITS } from '../config/constants';
 import { setHtlcRouteNote, terminateHtlcRoute } from '../entity/tx/htlc-route-lifecycle';
 import { applyHtlcTimeoutFollowups } from '../entity/tx/handlers/account/committed-htlc-followups';
 import { createEmptyEnv } from '../runtime';
-import type { AccountState, EntityState, SwapOffer } from '../types';
+import type { AccountState, SwapOffer } from '../types/account';
+import type { EntityState } from '../entity/types';
 import { validateAccountState } from '../account/state-validation';
 import { validateEntityState } from '../entity/state-validation';
 

@@ -1,7 +1,8 @@
 import type { Provider } from 'ethers';
 import type { JAdapter } from '../jadapter';
 import { createStructuredLogger } from '../infra/logger';
-import type { RuntimeState, JReplica } from '../types';
+import type { RuntimeState } from '../types';
+import type { JReplica } from '../types/jurisdiction-runtime';
 
 const watcherLog = createStructuredLogger('runtime.jadapter-watcher');
 

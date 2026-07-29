@@ -1,5 +1,6 @@
 import { encodeCanonicalConsensusValue } from '../protocol/canonical-consensus-value';
-import type { EntityTx, JurisdictionEventData } from '../types';
+import type { EntityTx } from '../types/entity-tx';
+import type { JurisdictionEventData } from '../types/jurisdiction-events';
 
 export const MAX_ENTITY_FRAME_J_RANGE_BYTES = 10 * 1024 * 1024;
 

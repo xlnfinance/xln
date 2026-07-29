@@ -1,11 +1,4 @@
-import type {
-  AccountDisputeSeal,
-  AccountFrame,
-  AccountFrameAck,
-  AccountFrameProposal,
-  AccountInput,
-  AccountTx,
-} from '../types';
+import type { AccountDisputeSeal, AccountFrame, AccountFrameAck, AccountFrameProposal, AccountInput, AccountTx } from '../types/account';
 
 export const cloneIsolatedAccountTx = <T extends AccountTx>(tx: T): T => structuredClone(tx);
 

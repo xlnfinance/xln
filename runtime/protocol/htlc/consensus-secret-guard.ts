@@ -1,4 +1,4 @@
-import type { EntityTx } from '../../types';
+import type { EntityTx } from '../../types/entity-tx';
 
 const assertNoSecretFields = (value: unknown, stack: Set<unknown>): void => {
   if (!value || typeof value !== 'object') return;

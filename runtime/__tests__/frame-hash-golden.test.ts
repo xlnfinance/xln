@@ -10,7 +10,9 @@ import {
   computeCanonicalEntityConsensusStateHash,
   computeEntityFrameAuthorityRoot,
 } from '../entity/consensus/state-root';
-import type { AccountFrame, EntityState, EntityTx } from '../types';
+import type { AccountFrame } from '../types/account';
+import type { EntityState } from '../entity/types';
+import type { EntityTx } from '../types/entity-tx';
 
 // Intentional testnet reset: Account frame/state integrity commitments use the
 // native-SHA integrity helper; Ethereum-facing proof hashes remain Keccak.

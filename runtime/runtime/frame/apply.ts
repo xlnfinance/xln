@@ -3,15 +3,9 @@ import {
   causalTraceContainsWork,
   summarizeRuntimeAccountCausality,
 } from '../../infra/account-causal-trace';
-import { cloneIsolatedRuntimeInput } from '../../protocol/runtime-input-clone';
-import type {
-  RuntimeState,
-  JInput,
-  ReliableDeliveryReceipt,
-  RoutedEntityInput,
-  RuntimeInput,
-  RuntimeTx,
-} from '../../types';
+import { cloneIsolatedRuntimeInput } from '../../runtime/input-clone';
+import type { RuntimeState, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../../types';
+import type { JInput } from '../../jurisdiction/input';
 import { getPerfMs } from '../../infra/time';
 import {
   captureReliableReceiptSenderCheckpoint,

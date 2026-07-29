@@ -1,12 +1,7 @@
-import type {
-  EntityInput,
-  RuntimeState,
-  JAdapterFailure,
-  JInput,
-  JReplica,
-  JTx,
-  RuntimeTx,
-} from '../types';
+import type { EntityInput } from '../entity/types';
+import type { RuntimeState, RuntimeTx } from '../types';
+import type { JInput } from '../jurisdiction/input';
+import type { JAdapterFailure, JReplica, JTx } from '../types/jurisdiction-runtime';
 import type { JAdapter, JSubmitResult } from '../jadapter/types';
 import { getLocalSignerPrivateKey } from '../account/crypto';
 import { isBatchEmpty } from '../jurisdiction/batch';

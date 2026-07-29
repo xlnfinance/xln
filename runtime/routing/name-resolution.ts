@@ -5,7 +5,9 @@
  * We do not keep a second profile source of truth in the runtime DB.
  */
 
-import type { EntityTx, RuntimeState, NameSearchResult, ProfileUpdateTx } from '../types';
+import type { EntityTx } from '../types/entity-tx';
+import type { RuntimeState } from '../types';
+import type { NameSearchResult, ProfileUpdateTx } from '../types/profile';
 import { compareStableText } from '../protocol/serialization';
 import { formatEntityDisplay, generateEntityAvatar } from '../presentation/identity-display';
 

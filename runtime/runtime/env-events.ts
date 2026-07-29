@@ -10,18 +10,10 @@ import { encodeCanonicalConsensusValue } from '../protocol/canonical-consensus-v
  *   env.emit('FrameCommitted', { entityId, height, hash });
  */
 
-import type {
-  AccountFrame,
-  AccountState,
-  CertifiedEntityFrameLink,
-  EntityState,
-  EntityCandidateEffect,
-  RuntimeState,
-  LogCategory,
-  FrameLogEntry,
-  RuntimeHistoryRecord,
-  RuntimeOverlayRecord,
-} from '../types';
+import type { AccountFrame, AccountState, RuntimeOverlayRecord } from '../types/account';
+import type { CertifiedEntityFrameLink, EntityState, EntityCandidateEffect } from '../entity/types';
+import type { RuntimeState, RuntimeHistoryRecord } from '../types';
+import type { LogCategory, FrameLogEntry } from '../types/logging';
 
 import { storageOverlayRecordKey } from '../protocol/overlay';
 import { invalidateEntityAccountCommitment } from '../entity/consensus/state-root';

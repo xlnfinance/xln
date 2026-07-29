@@ -22,13 +22,9 @@ import {
   tryOpenStorageDb,
   type StorageDbRole,
 } from '../storage/runtime-dbs';
-import type {
-  EntityInput,
-  RuntimeState,
-  JInput,
-  ReliableDeliveryReceipt,
-  RuntimeTx,
-} from '../types';
+import type { EntityInput } from '../entity/types';
+import type { RuntimeState, ReliableDeliveryReceipt, RuntimeTx } from '../types';
+import type { JInput } from '../jurisdiction/input';
 
 const infrastructureLog = createStructuredLogger('runtime.infrastructure');
 const storageDeps = { ensureRuntimeState };

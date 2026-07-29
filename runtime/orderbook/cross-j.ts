@@ -1,4 +1,6 @@
-import type { CrossJurisdictionSwapRoute, EntityState, RuntimeOverlayRecord } from '../types';
+import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
+import type { EntityState } from '../entity/types';
+import type { RuntimeOverlayRecord } from '../types/account';
 import type { OrderbookExtState } from './index';
 import {
   applyCommand,
