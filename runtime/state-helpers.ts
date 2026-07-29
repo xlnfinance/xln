@@ -56,6 +56,9 @@ const REPLAY_OUTPUT_SIGNER_HINTS = Symbol.for('xln.runtime.replay.output-signer-
 type EntityStateWithFrameEvents = EntityState & {
   [ENTITY_FRAME_EVENT_COLLECTOR]?: EntityFrameEvent[];
 };
+type RuntimeStateWithReplaySignerHints = RuntimeState & {
+  [REPLAY_OUTPUT_SIGNER_HINTS]?: ReadonlyMap<string, string>;
+};
 
 const mutableEntityFrameEvents = (state: EntityState): EntityFrameEvent[] => {
   const transient = state as EntityStateWithFrameEvents;
@@ -109,11 +112,13 @@ export const installReplayOutputSignerHints = (
 };
 
 export const clearReplayOutputSignerHints = (env: RuntimeState): void => {
-  delete (env as unknown as Record<PropertyKey, unknown>)[REPLAY_OUTPUT_SIGNER_HINTS];
+  const transient: RuntimeStateWithReplaySignerHints = env;
+  delete transient[REPLAY_OUTPUT_SIGNER_HINTS];
 };
 
 const replayOutputSignerHint = (env: RuntimeState, entityId: string): string | null => {
-  const hints = (env as unknown as Record<PropertyKey, unknown>)[REPLAY_OUTPUT_SIGNER_HINTS];
+  const transient: RuntimeStateWithReplaySignerHints = env;
+  const hints = transient[REPLAY_OUTPUT_SIGNER_HINTS];
   return hints instanceof Map ? String(hints.get(entityId) || '') || null : null;
 };
 const cloneAccountTxForState = <T extends AccountTx>(tx: T): T => {

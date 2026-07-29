@@ -32,7 +32,6 @@ const DOUBLE_ASSERTION_DEBT: Readonly<Record<string, number>> = {
   'runtime/runtime/reliable-authority.ts': 1,
   'runtime/server/cli.ts': 2,
   'runtime/server/stack-probe.ts': 2,
-  'runtime/state-helpers.ts': 2,
   'runtime/storage/history-view-schema.ts': 3,
   'runtime/storage/runtime-dbs.ts': 1,
   'runtime/storage/schema-state-docs.ts': 1,
