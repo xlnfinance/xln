@@ -8,7 +8,7 @@
  * EVM details.
  */
 
-import type { LogDescription, Provider, Signer } from 'ethers';
+import type { Provider, Signer } from 'ethers';
 import {
   Account__factory,
   Depository__factory,
@@ -19,18 +19,9 @@ import {
 import { normalizeEntityId } from '../entity/id';
 import { getBatchSize, isBatchEmpty } from '../jurisdiction/batch';
 import { assertSealedJBatchBinding } from '../jurisdiction/sealed-batch';
-import type { BrowserVMState, RuntimeState, JTx, RuntimeTx } from '../types';
+import type { BrowserVMState, RuntimeState, JTx } from '../types';
 import {
-  CANONICAL_J_EVENTS,
-  enqueueJHistoryRange,
-  findWatcherJurisdictionReplica,
-  getMinimumScannedSignerJHeight,
-  isEntityReplicaRelevantToWatcher,
   normalizeAdapterEvents,
-  processEventBatch,
-  updateWatcherJurisdictionCursor,
-  type EventBatchCounter,
-  type RawJEvent,
 } from './helpers';
 import type {
   JAdapter,
@@ -46,17 +37,12 @@ import type {
 } from './types';
 import { makeJAdapterFailureResult } from './failure';
 import type { BrowserVmChainCheckpoint, BrowserVMProvider } from './browservm-provider';
-import type { AuthenticatedRpcLog } from './receipt-codec';
 import {
   assertDepositoryEntityProviderBinding,
   assertJStackAddressMatch,
 } from './stack-binding';
-import {
-  buildCertifiedRegistrationEvidence,
-  markLocalJAuthorityRuntimeTx,
-} from '../jurisdiction/registration-evidence';
 import { assertEntityProviderActionJTxBinding } from '../entity/entity-provider-action';
-import { extractCanonicalDepositoryEventArgs } from './depository-event-codec';
+import { createBrowserVmHistoryWatcher } from './browservm-history';
 
 const asFactoryRunner = (runner: unknown): Parameters<typeof Account__factory.connect>[1] =>
   runner as Parameters<typeof Account__factory.connect>[1];
@@ -116,12 +102,8 @@ export async function createBrowserVMAdapter(
   };
   await verifyStackBinding('browservm_connect');
 
-  let watcherUnsubscribe: (() => void) | null = null;
-  let watcherEnv: RuntimeState | null = null;
-  let pollInFlight: Promise<void> | null = null;
   let snapshotCounter = 0;
   const snapshots = new Map<SnapshotId, { root: Uint8Array; chain: BrowserVmChainCheckpoint }>();
-  const txCounter: EventBatchCounter = { value: 0 };
 
   const toJEvents = (events: Array<{
     name: string;
@@ -132,174 +114,14 @@ export async function createBrowserVMAdapter(
     logIndex?: number;
   }>): JEvent[] => normalizeAdapterEvents(events);
 
-  const decodeHistoricalLog = (log: AuthenticatedRpcLog): RawJEvent | null => {
-    const address = log.address.toLowerCase();
-    const carrier = address === addresses.depository.toLowerCase()
-      ? depository
-      : address === addresses.entityProvider.toLowerCase()
-        ? entityProvider
-        : null;
-    if (!carrier) {
-      throw new Error(`BROWSERVM_HISTORICAL_LOG_ADDRESS_UNEXPECTED:${address}`);
-    }
-    let parsed: LogDescription | null;
-    try {
-      parsed = carrier.interface.parseLog({ topics: log.topics, data: log.data });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      throw new Error(
-        `BROWSERVM_HISTORICAL_LOG_DECODE_FAILED:block=${log.blockNumber}` +
-        `:tx=${log.transactionHash}:index=${log.logIndex}:${message}`,
-      );
-    }
-    if (!parsed || !CANONICAL_J_EVENTS.some((name) => name === parsed?.name)) return null;
-    const args = extractCanonicalDepositoryEventArgs(parsed);
-    return {
-      name: parsed.name,
-      args,
-      blockNumber: log.blockNumber,
-      blockHash: log.blockHash,
-      transactionHash: log.transactionHash,
-      logIndex: log.index,
-    };
-  };
-
-  const pollBrowserVmHistory = async (): Promise<void> => {
-    const activeEnv = watcherEnv;
-    if (!activeEnv) return;
-    const watcherReplica = findWatcherJurisdictionReplica(
-      activeEnv,
-      addresses.depository,
-      config.chainId,
-    );
-    if (!watcherReplica) {
-      throw new Error(`BROWSERVM_WATCHER_JURISDICTION_MISSING:${config.chainId}:${addresses.depository}`);
-    }
-    const targetBlock = Number(browserVM.getBlockNumber());
-    const committedCursor = Number(watcherReplica.blockNumber ?? 0n);
-    const minimumLocalScan = getMinimumScannedSignerJHeight(activeEnv, watcherReplica);
-    if (!Number.isSafeInteger(targetBlock) || targetBlock < 0) {
-      throw new Error(`BROWSERVM_WATCHER_TARGET_INVALID:${String(targetBlock)}`);
-    }
-    if (!Number.isSafeInteger(committedCursor) || committedCursor < 0) {
-      throw new Error(`BROWSERVM_WATCHER_CURSOR_INVALID:${String(committedCursor)}`);
-    }
-    const nextGlobalBlock = committedCursor + 1;
-    const nextReplicaBlock = minimumLocalScan === null ? nextGlobalBlock : minimumLocalScan + 1;
-    const fromBlock = Math.max(
-      browserVM.getEntityProviderDeploymentBlock(),
-      Math.min(nextGlobalBlock, nextReplicaBlock),
-    );
-    if (fromBlock > targetBlock) return;
-
-    const tipBlockHash = browserVM.getBlockHashAt(targetBlock);
-    const headers = Array.from(
-      { length: targetBlock - fromBlock + 1 },
-      (_, index) => {
-        const jHeight = fromBlock + index;
-        return { jHeight, jBlockHash: browserVM.getBlockHashAt(jHeight) };
-      },
-    );
-    const logs = await browserVM.getAuthenticatedLogsForRange(
-      fromBlock,
-      targetBlock,
-      [addresses.depository, addresses.entityProvider],
-    );
-    const byBlock = new Map<number, RawJEvent[]>();
-    const authorityTxsByBlock = new Map<number, RuntimeTx[]>();
-    for (const log of logs) {
-      const decoded = decodeHistoricalLog(log);
-      if (!decoded) continue;
-      const block = decoded.blockNumber;
-      if (!Number.isSafeInteger(block) || Number(block) < fromBlock || Number(block) > targetBlock) {
-        throw new Error(`BROWSERVM_HISTORICAL_LOG_HEIGHT_INVALID:${String(block)}`);
-      }
-      const events = byBlock.get(Number(block)) ?? [];
-      events.push(decoded);
-      byBlock.set(Number(block), events);
-      if (
-        log.address.toLowerCase() === addresses.entityProvider.toLowerCase() &&
-        (decoded.name === 'EntityRegistered' || decoded.name === 'FoundationBootstrapped')
-      ) {
-        const evidence = buildCertifiedRegistrationEvidence(
-          activeEnv,
-          watcherReplica,
-          decoded.name,
-          log,
-          {
-            observedThroughHeight: targetBlock,
-            observedTipBlockHash: tipBlockHash,
-            observedHeadHeight: targetBlock,
-            confirmationDepth: 0,
-          },
-        );
-        const tx = markLocalJAuthorityRuntimeTx({
-          type: 'recordAuthenticatedJAuthority',
-          data: evidence,
-        });
-        authorityTxsByBlock.set(Number(block), [
-          ...(authorityTxsByBlock.get(Number(block)) ?? []),
-          tx,
-        ]);
-      }
-    }
-
-    const observedInputs = [];
-    const historicalReplicaCatchUp = fromBlock <= committedCursor;
-    for (const [blockNumber, events] of [...byBlock.entries()].sort(([left], [right]) => left - right)) {
-      events.sort((left, right) => Number(left.logIndex) - Number(right.logIndex));
-      const blockHash = events[0]?.blockHash;
-      if (!blockHash) throw new Error(`BROWSERVM_HISTORICAL_BLOCK_HASH_MISSING:${blockNumber}`);
-      const input = processEventBatch(
-        events,
-        activeEnv,
-        blockNumber,
-        blockHash,
-        txCounter,
-        'browservm',
-        addresses.depository,
-        true,
-        'chain',
-        config.chainId,
-        historicalReplicaCatchUp,
-        authorityTxsByBlock.get(blockNumber) ?? [],
-      );
-      if (input) observedInputs.push(input);
-    }
-
-    const range = enqueueJHistoryRange(
-      activeEnv,
-      observedInputs,
-      targetBlock,
-      tipBlockHash,
-      addresses.depository,
-      headers,
-      config.chainId,
-    );
-    if (observedInputs.length > 0 || range.scannedReplicaKeys.length > 0) {
-      updateWatcherJurisdictionCursor(activeEnv, targetBlock, addresses.depository, config.chainId);
-    }
-    const byReplica = new Map(Object.entries(watcherScanProgress.replicaScannedThrough));
-    for (const [key, replica] of activeEnv.eReplicas.entries()) {
-      if (!isEntityReplicaRelevantToWatcher(activeEnv, replica, watcherReplica)) continue;
-      byReplica.set(key, Math.max(byReplica.get(key) ?? 0, targetBlock));
-    }
-    watcherScanProgress = {
-      scannedThroughHeight: Math.max(watcherScanProgress.scannedThroughHeight, targetBlock),
-      replicaScannedThrough: Object.fromEntries([...byReplica.entries()].sort(([left], [right]) => left.localeCompare(right))),
-    };
-  };
-
-  const pollBrowserVmHistorySerialized = async (): Promise<void> => {
-    if (pollInFlight) return await pollInFlight;
-    const poll = pollBrowserVmHistory();
-    pollInFlight = poll;
-    try {
-      await poll;
-    } finally {
-      if (pollInFlight === poll) pollInFlight = null;
-    }
-  };
+  const historyWatcher = createBrowserVmHistoryWatcher({
+    chainId: config.chainId,
+    depositoryAddress: addresses.depository,
+    entityProviderAddress: addresses.entityProvider,
+    depository,
+    entityProvider,
+    browserVM,
+  });
 
   const adapter: JAdapter = {
     mode: 'browservm',
@@ -578,32 +400,23 @@ export async function createBrowserVMAdapter(
       if (!stackBindingVerified) {
         throw new Error(`J_STACK_BINDING_UNVERIFIED:browservm:chainId=${config.chainId}`);
       }
-      if (watcherUnsubscribe) return;
-      watcherEnv = env;
-      watcherUnsubscribe = browserVM.onAny(async () => {
-        if (!watcherEnv) return;
-        await pollBrowserVmHistorySerialized();
-      });
+      historyWatcher.startWatching(env);
     },
 
     isWatching(): boolean {
-      return watcherUnsubscribe !== null;
+      return historyWatcher.isWatching();
     },
 
     stopWatching(): void {
-      watcherUnsubscribe?.();
-      watcherUnsubscribe = null;
-      watcherEnv = null;
+      historyWatcher.stopWatching();
     },
 
     async stopWatchingAndWait(): Promise<void> {
-      adapter.stopWatching();
-      const inFlight = pollInFlight;
-      if (inFlight) await inFlight;
+      await historyWatcher.stopWatchingAndWait();
     },
 
     async pollNow(): Promise<void> {
-      await pollBrowserVmHistorySerialized();
+      await historyWatcher.pollNow();
     },
 
     getBrowserVM(): BrowserVMProvider {
@@ -631,7 +444,7 @@ export async function createBrowserVMAdapter(
     },
 
     getWatcherScanProgress() {
-      return watcherScanProgress;
+      return historyWatcher.getProgress();
     },
 
     getFinalityDepth(): number {
@@ -648,11 +461,6 @@ export async function createBrowserVMAdapter(
     async close(): Promise<void> {
       await adapter.stopWatchingAndWait();
     },
-  };
-
-  let watcherScanProgress = {
-    scannedThroughHeight: 0,
-    replicaScannedThrough: {} as Record<string, number>,
   };
 
   return adapter;
