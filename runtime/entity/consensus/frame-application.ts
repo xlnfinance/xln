@@ -956,7 +956,6 @@ async function applySwapCancelRequests(
 
 type EntityFrameResult = {
   newState: EntityState;
-  deterministicState: EntityState;
   outputs: EntityInput[];
   jOutputs: JInput[];
   candidateEffects: EntityCandidateEffect[];
@@ -1078,11 +1077,9 @@ const prepareEntityFrameWorkingSet = async (
 
 const buildEntityFrameResult = (
   currentEntityState: EntityState,
-  deterministicState: EntityState,
   context: ApplyEntityTxsInOrderContext,
 ): EntityFrameResult => ({
   newState: currentEntityState,
-  deterministicState,
   outputs: context.allOutputs,
   jOutputs: context.allJOutputs,
   candidateEffects: context.candidateEffects,
@@ -1111,7 +1108,6 @@ const buildEntityFrameResult = (
 
 type PostEntityTxPhases = {
   currentEntityState: EntityState;
-  deterministicState: EntityState;
   orderbookStats: OrderbookFrameStats;
   accountsToProposeFramesCount: number;
   prunedOriginatedHtlcRoutes: number;
@@ -1170,11 +1166,6 @@ const applyPostEntityTxPhases = async (
     context.collectedHashes,
     context.storageChanges,
   );
-  for (const accountId of context.proposableAccounts) {
-    invalidateEntityAccountCommitment(currentEntityState, accountId);
-  }
-  const deterministicState = cloneEntityState(currentEntityState);
-  markFrameProfile('deterministicClone');
   const accountsToProposeFramesCount = crossJSetupPhase
     ? 0
     : await proposePendingAccountFrames({
@@ -1188,6 +1179,13 @@ const applyPostEntityTxPhases = async (
         storageChanges: context.storageChanges,
       });
   markFrameProfile('accountProposals');
+  // Account proposal construction mutates the Account replica envelope
+  // (pending frame, Hanko and resend state). Refresh each dirty leaf only
+  // after that final mutation. Doing it earlier would preserve a valid-looking
+  // but stale incremental Entity root.
+  for (const accountId of context.proposableAccounts) {
+    invalidateEntityAccountCommitment(currentEntityState, accountId);
+  }
   currentEntityState = assignCertifiedOutputIdentities(
     currentEntityState,
     context.allOutputs,
@@ -1198,7 +1196,6 @@ const applyPostEntityTxPhases = async (
   );
   return {
     currentEntityState,
-    deterministicState,
     orderbookStats,
     accountsToProposeFramesCount,
     prunedOriginatedHtlcRoutes,
@@ -1264,7 +1261,6 @@ export const applyEntityFrame = async (
     });
     return buildEntityFrameResult(
       working.currentEntityState,
-      cloneEntityState(working.currentEntityState),
       working.context,
     );
   }
@@ -1272,7 +1268,6 @@ export const applyEntityFrame = async (
   logEntityFrameProfile(working, entityTxs, post);
   return buildEntityFrameResult(
     post.currentEntityState,
-    post.deterministicState,
     working.context,
   );
 };

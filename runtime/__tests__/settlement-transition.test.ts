@@ -8,7 +8,10 @@ import { handleJEventClaim } from '../account/tx/handlers/j-event-claim';
 import { createSettlementWorkspaceHash } from '../account/tx/handlers/settle-transition';
 import { applyEntityFrame } from '../entity/consensus';
 import { proposeAccountFrame } from '../account/consensus/propose';
-import { computeCanonicalEntityConsensusStateHash } from '../entity/consensus/state-root';
+import {
+  assertEntityStateRootCache,
+  computeCanonicalEntityConsensusStateHash,
+} from '../entity/consensus/state-root';
 import { buildSignedEntityCommand } from '../entity/command';
 import { signedEntityCommandTx } from '../entity/command-codec';
 import { buildCollectiveEntityProposalTx } from '../entity/authorization';
@@ -330,6 +333,10 @@ describe('atomic settlement Account transition', () => {
       ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
       executorIsLeft: true,
     }), true, 1_000)).success).toBe(true);
+    // Prime the certified Entity's persistent Account commitment. The frame
+    // candidate must fork this cache and refresh the touched Account after all
+    // proposal-envelope mutations, never fall back to a cold full scan.
+    computeCanonicalEntityConsensusStateHash(rightState);
 
     const approve = {
       type: 'settle_approve',
@@ -339,6 +346,9 @@ describe('atomic settlement Account transition', () => {
     const execution = await applyEntityFrame(env, rightState, [
       signedEntityCommandTx(buildSignedEntityCommand(env, rightState, rightSigner, [proposal])),
     ], 2_000);
+    expect(assertEntityStateRootCache(execution.newState)).toBe(
+      computeCanonicalEntityConsensusStateHash(execution.newState),
+    );
     const queued = execution.newState.accounts.get(leftEntity)!;
 
     expect(execution.collectedHashes?.map(({ type }) => type)).toEqual(['settlement', 'dispute']);
@@ -382,6 +392,9 @@ describe('atomic settlement Account transition', () => {
     expect(computeCanonicalEntityConsensusStateHash(execution.newState)).toBe(unsignedEntityStateRoot);
 
     const nextExecution = await applyEntityFrame(env, execution.newState, [], 2_001);
+    expect(assertEntityStateRootCache(nextExecution.newState)).toBe(
+      computeCanonicalEntityConsensusStateHash(nextExecution.newState),
+    );
     const proposed = nextExecution.newState.accounts.get(leftEntity)!;
     expect(proposed.mempool).toHaveLength(0);
     expect(proposed.pendingFrame?.accountTxs).toHaveLength(1);

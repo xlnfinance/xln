@@ -415,7 +415,11 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   crash-replay time per recovered height, and current-cache rebuild time.
   Prove incremental Entity/Account roots equal cold recomputation with
   differential randomized transaction sequences. Benchmark growing hubs at
-  10k, 100k, and 1M accounts before claiming a path to 10M accounts/10k TPS;
+  10k, 100k, and 1M accounts before claiming a path to 10M accounts/10k TPS.
+  The full topology gate is one million separate durable user Runtimes, each
+  owning its Entity and bilateral Account against one 3-of-4 Hub Entity. Keep
+  all logical Runtimes on disk, materialize a measured hot working set, and
+  count only quorum-certified plus WAL-durable Account transactions as TPS;
   explicitly measure full Runtime replica clone bytes, entity-root account
   traversal, loaded Account working-set size, LevelDB compaction stalls, and
   batch/group-commit throughput. Touched-only state or DB-backed Account state
@@ -506,3 +510,32 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 - [ ] Merge only the proven SHA into clean `main`, tag, publish, deploy the
   production servers/contracts, verify live health and books, and upload the
   unified story videos plus API evidence.
+
+## 7. Hub capital markets — post-core protocol, owner-approved
+
+- [ ] Expose the C/D share model already defined by `EntityProvider.sol`
+  without inventing a parallel finance protocol. C is the control class:
+  sufficient holder authorization may propose a new board for that `entityId`.
+  D is the economic/dividend class. Both fixed supplies initially belong to
+  the Entity, may be released for trading through Depository, and settle
+  delivery-versus-payment through the existing orderbook and bilateral
+  Accounts. An Entity buyback is an ordinary order for its own C or D shares;
+  no privileged buyback path or synthetic asset is needed.
+- [ ] Mirror the existing on-chain governance lifecycle exactly in Runtime and
+  Activity: collect signatures from holders of strictly more than half of the
+  relevant fixed share supply, propose the new board, wait that authority
+  class's configured activation delay, activate it, and retain the previous
+  board for the explicit seven-day post-activation grace. C and D holders may
+  both propose through their respective authority lanes; C has the higher
+  priority and their delays may differ. Share transfer alone never changes the
+  board.
+- [ ] Implement scalable dividend declaration and claims for D shares without
+  iterating every holder in one Entity frame. Bind each distribution to a
+  deterministic record point and conserved treasury amount; holders claim
+  through bounded Account transactions with replay-safe evidence. C ownership
+  and D economics remain separate even when one address owns both classes.
+- [ ] Add cap-table, treasury, governance and Activity views plus real E2E for
+  C/D release, primary and secondary trading, Entity buybacks, dividend
+  declaration/claim, C-authorized board proposal and delayed activation. Use
+  the one testnet schema directly: no v2, legacy reader, fallback settlement,
+  debt/coupon semantics or privileged off-ledger ownership.

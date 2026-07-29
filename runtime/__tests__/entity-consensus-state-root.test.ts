@@ -530,6 +530,10 @@ test('Entity consensus root strips only typed post-hash Account witnesses', () =
   expect(computeCanonicalEntityConsensusStateHash(left)).toBe(computeCanonicalEntityConsensusStateHash(right));
 
   right.accounts.set(counterpartyId, makeAccount('0xright-witness', `0x${'bb'.repeat(32)}`) as never);
+  // Account Map writes are reducer-owned dirty-page operations. The
+  // incremental parent commitment never scans a million untouched Accounts
+  // merely to discover an object replacement.
+  invalidateEntityAccountCommitment(right, counterpartyId);
   expect(computeCanonicalEntityConsensusStateHash(left)).not.toBe(computeCanonicalEntityConsensusStateHash(right));
 });
 

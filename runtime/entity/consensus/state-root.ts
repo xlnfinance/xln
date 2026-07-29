@@ -10,6 +10,15 @@ import { isRuntimePerfProfileEnabled } from '../../infra/perf-runtime-flags';
 import { getPerfMs } from '../../utils';
 import { computeIntegrityDigest } from '../../infra/integrity-checksum';
 import { ENTITY_FRAME_EVENT_COLLECTOR } from '../frame-event-collector';
+import {
+  buildEntityAccountCommitment,
+  deleteEntityAccountCommitment,
+  EMPTY_ENTITY_ACCOUNT_COMMITMENT,
+  entityAccountCommitmentRoot,
+  ENTITY_ACCOUNT_COMMITMENT_RADIX,
+  putEntityAccountCommitment,
+  type EntityAccountCommitment,
+} from './account-commitment-tree';
 
 const entityRootLog = createStructuredLogger('entity.state-root');
 
@@ -318,23 +327,15 @@ type EntitySectionCommitment = {
   encodedBytes: number;
 };
 
-type EntityAccountCommitmentEntry = {
-  account: AccountState;
-  encodedKey: string;
-  encodedValue: string;
-};
-
-type EntityAccountCommitmentCache = Map<string, EntityAccountCommitmentEntry>;
-
 const ENTITY_ACCOUNT_COMMITMENT_CACHE = Symbol('xln.entity.account-commitment-cache');
 type EntityStateWithCommitmentCache = EntityState & {
-  [ENTITY_ACCOUNT_COMMITMENT_CACHE]?: EntityAccountCommitmentCache;
+  [ENTITY_ACCOUNT_COMMITMENT_CACHE]?: EntityAccountCommitment;
 };
 
-const readEntityAccountCommitmentCache = (state: EntityState): EntityAccountCommitmentCache | undefined =>
+const readEntityAccountCommitmentCache = (state: EntityState): EntityAccountCommitment | undefined =>
   (state as EntityStateWithCommitmentCache)[ENTITY_ACCOUNT_COMMITMENT_CACHE];
 
-const writeEntityAccountCommitmentCache = (state: EntityState, cache: EntityAccountCommitmentCache): void => {
+const writeEntityAccountCommitmentCache = (state: EntityState, cache: EntityAccountCommitment): void => {
   Object.defineProperty(state, ENTITY_ACCOUNT_COMMITMENT_CACHE, {
     value: cache,
     configurable: true,
@@ -343,54 +344,83 @@ const writeEntityAccountCommitmentCache = (state: EntityState, cache: EntityAcco
   });
 };
 
+const accountCommitmentValueHash = (account: AccountState): string =>
+  computeIntegrityDigest(
+    UTF8.encode(
+      encodeCanonicalConsensusValue(projectAccountConsensusState(account)),
+    ),
+  );
+
+const buildEntityAccountsCommitmentFromState = (
+  state: EntityState,
+): EntityAccountCommitment => {
+  const entries: Array<readonly [string, string]> = [];
+  for (const [rawCounterpartyId, account] of state.accounts) {
+    const counterpartyId = rawCounterpartyId.trim().toLowerCase();
+    if (rawCounterpartyId !== counterpartyId) {
+      throw new Error(
+        `ENTITY_ACCOUNT_COMMITMENT_NON_CANONICAL_ID:${rawCounterpartyId}`,
+      );
+    }
+    entries.push([counterpartyId, accountCommitmentValueHash(account)]);
+  }
+  return entries.length === 0
+    ? EMPTY_ENTITY_ACCOUNT_COMMITMENT
+    : buildEntityAccountCommitment(entries);
+};
+
 export const invalidateEntityAccountCommitment = (state: EntityState, counterpartyId: string): void => {
-  readEntityAccountCommitmentCache(state)?.delete(counterpartyId.toLowerCase());
+  const cached = readEntityAccountCommitmentCache(state);
+  if (!cached) return;
+  const normalized = counterpartyId.trim().toLowerCase();
+  const account = state.accounts.get(normalized);
+  writeEntityAccountCommitmentCache(
+    state,
+    account
+      ? putEntityAccountCommitment(
+          cached,
+          normalized,
+          accountCommitmentValueHash(account),
+        )
+      : deleteEntityAccountCommitment(cached, normalized),
+  );
 };
 
 export const forkEntityAccountCommitmentCache = (source: EntityState, target: EntityState): void => {
   const sourceCache = readEntityAccountCommitmentCache(source);
   if (!sourceCache) return;
-  const targetCache: EntityAccountCommitmentCache = new Map();
-  for (const [counterpartyId, entry] of sourceCache) {
-    const account = target.accounts.get(counterpartyId);
-    if (!account) continue;
-    targetCache.set(counterpartyId, { ...entry, account });
-  }
-  writeEntityAccountCommitmentCache(target, targetCache);
+  // The trie is immutable. Certified State and its candidate share every
+  // untouched node; invalidating one Account replaces only the candidate path.
+  writeEntityAccountCommitmentCache(target, sourceCache);
 };
 
 const encodeEntityAccountsSection = (state: EntityState, cold: boolean): string => {
-  const cache = cold
-    ? new Map<string, EntityAccountCommitmentEntry>()
-    : (readEntityAccountCommitmentCache(state) ?? new Map<string, EntityAccountCommitmentEntry>());
-  const entries = Array.from(state.accounts.entries()).map(([rawCounterpartyId, account]) => {
-    const counterpartyId = rawCounterpartyId.toLowerCase();
-    const existing = cache.get(counterpartyId);
-    if (existing?.account === account) {
-      return { key: existing.encodedKey, value: existing.encodedValue };
-    }
-    const encodedKey = encodeCanonicalConsensusValue(rawCounterpartyId);
-    const encodedValue = encodeCanonicalConsensusValue(projectAccountConsensusState(account));
-    cache.set(counterpartyId, { account, encodedKey, encodedValue });
-    return { key: encodedKey, value: encodedValue };
+  const commitment = cold
+    ? buildEntityAccountsCommitmentFromState(state)
+    : (readEntityAccountCommitmentCache(state) ?? buildEntityAccountsCommitmentFromState(state));
+  if (!cold && !readEntityAccountCommitmentCache(state)) {
+    writeEntityAccountCommitmentCache(state, commitment);
+  }
+  return encodeCanonicalConsensusValue({
+    domain: 'xln.entity.accounts.radix-merkle',
+    radix: ENTITY_ACCOUNT_COMMITMENT_RADIX,
+    hashAlgorithm: 'integrity',
+    leafCount: commitment.leafCount,
+    root: entityAccountCommitmentRoot(commitment),
   });
-  entries.sort((left, right) => {
-    const byKey = compareStableText(left.key, right.key);
-    return byKey !== 0 ? byKey : compareStableText(left.value, right.value);
-  });
-  if (!cold) writeEntityAccountCommitmentCache(state, cache);
-  return `["Map",[${entries.map(entry => `[${entry.key},${entry.value}]`).join(',')}]]`;
 };
 
 /**
  * Entity state is intentionally a hierarchy, not one giant serialized blob.
- * Each complete top-level section is SHA-256 committed, then the small ordered
- * section map is bound by the signed Keccak Entity root. SHA-256 is only the
- * internal tree primitive; Hanko continues to sign the outer 32-byte Keccak.
+ * Scalar top-level sections are SHA-256 committed. The large Account section
+ * is a persistent radix-Merkle commitment whose leaves bind complete projected
+ * Account replicas. The small ordered section map is then bound by the signed
+ * Keccak Entity root; Hanko still signs one outer 32-byte value.
  *
- * Counterexample: replacing a large cross-j route with only its orderId would
- * be fast but would silently unbind amounts/timeouts. This function hashes the
- * entire canonical value, so every nested consensus byte remains authoritative.
+ * Counterexample: committing only Account state roots would omit pending
+ * bilateral candidates and resend state that Entity consensus intentionally
+ * certifies. Each Account leaf therefore hashes the full canonical projection;
+ * only unchanged trie paths are reused.
  */
 const commitEntityConsensusSections = (
   projected: Record<string, unknown>,
