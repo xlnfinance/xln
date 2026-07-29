@@ -1,4 +1,4 @@
-import { decodeAccountFrame } from '../../../validation-utils';
+import { decodeAccountFrame } from '../../../account/frame-validation';
 import { validateJInputs } from './j';
 import {
   validateNumberedRecord,

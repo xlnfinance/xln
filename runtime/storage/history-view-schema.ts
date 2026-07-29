@@ -1,8 +1,8 @@
 import {
-  decodeAccountFrame,
   validateConsensusConfig,
   validateProposedEntityFrame,
 } from '../validation-utils';
+import { decodeAccountFrame } from '../account/frame-validation';
 import {
   requireBoundaryInteger,
   requireBoundaryRecord,

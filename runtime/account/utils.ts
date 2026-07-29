@@ -5,7 +5,7 @@
 
 import type { Delta, DerivedDelta } from '../types';
 import { PERFORMANCE } from '../constants';
-import { validateDelta } from '../validation-utils';
+import { validateDelta } from './delta-validation';
 import { isLeftEntity } from '../protocol/entity-id';
 import { DEFAULT_TOKENS, TRON_ONLY_DEFAULT_TOKENS, defaultTokensForJurisdiction } from '../jurisdiction/default-tokens';
 import { logDebug } from '../infra/logger';

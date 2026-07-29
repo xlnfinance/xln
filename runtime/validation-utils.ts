@@ -10,7 +10,6 @@
 
 import {
   FinancialDataCorruptionError,
-  TypeSafetyViolationError,
   validateArray,
   validateMapInstance,
   validateNumber,
@@ -26,15 +25,14 @@ export {
   validateEntityId,
 } from './protocol/validation-primitives';
 import { isLeftEntity } from './entity/id';
-import { assertAccountFrameDeltaIntegrity } from './account/frame';
+import { decodeAccountFrame } from './account/frame-validation';
+import { validateDelta } from './account/delta-validation';
 import type {
   ConsensusConfig,
-  Delta,
   RoutedEntityInput,
   EntityReplica,
   EntityState,
   AccountState,
-  AccountFrame,
   EntityLeaderTimeoutVote,
   ProposedEntityFrame,
 } from './types';
@@ -173,129 +171,6 @@ const validateSwapHistoryMap = (
   for (const [key, entry] of history) validateSwapHistoryEntry(key, entry, `${context}[${String(key)}]`);
   return history as Map<string, SwapOrderHistoryEntry>;
 };
-
-/**
- * Strict validation for Delta objects - financial data must be complete
- * @param delta - Unvalidated input that claims to be a Delta
- * @param source - Source context for error messages
- */
-export function validateDelta(delta: unknown, source: string = 'unknown'): Delta {
-  const obj = validateObject(delta, `Delta from ${source}`);
-
-  // Ensure all required properties exist and are proper types
-  const errors: string[] = [];
-
-  const tokenId = obj['tokenId'];
-  if (typeof tokenId !== 'number' || !Number.isInteger(tokenId) || tokenId < 0) {
-    errors.push(`tokenId must be non-negative integer, got: ${String(tokenId)}`);
-  }
-
-  // Validate all BigInt fields
-  const bigintFields = [
-    'collateral',
-    'ondelta',
-    'offdelta',
-    'leftCreditLimit',
-    'rightCreditLimit',
-    'leftAllowance',
-    'rightAllowance',
-    'leftHold',
-    'rightHold',
-  ] as const;
-
-  for (const field of bigintFields) {
-    const value = obj[field];
-    if (value === null || value === undefined) {
-      errors.push(`${field} cannot be null/undefined, got: ${value}`);
-    } else if (typeof value !== 'bigint') {
-      // Try to convert if it's a string representation
-      if (typeof value === 'string' && /^-?\d+n?$/.test(value)) {
-        try {
-          obj[field] = BigInt(value.replace(/n$/, ''));
-        } catch (e) {
-          errors.push(`${field} invalid BigInt string: ${value}`);
-        }
-      } else {
-        errors.push(`${field} must be BigInt, got: ${typeof value} (${value})`);
-      }
-    }
-  }
-
-  if (errors.length > 0) {
-    throw new Error(`Delta validation failed from ${source}:\n${errors.join('\n')}`);
-  }
-
-  // After validation, safe to cast to Delta
-  return {
-    tokenId: obj['tokenId'] as number,
-    collateral: obj['collateral'] as bigint,
-    ondelta: obj['ondelta'] as bigint,
-    offdelta: obj['offdelta'] as bigint,
-    leftCreditLimit: obj['leftCreditLimit'] as bigint,
-    rightCreditLimit: obj['rightCreditLimit'] as bigint,
-    leftAllowance: obj['leftAllowance'] as bigint,
-    rightAllowance: obj['rightAllowance'] as bigint,
-    leftHold: obj['leftHold'] as bigint,
-    rightHold: obj['rightHold'] as bigint,
-  };
-}
-
-/**
- * Validate account deltas from a Map or serialized object.
- *
- * This is a source boundary for financial data: every entry must be valid, and
- * malformed input fails the whole payload instead of returning a partial map.
- * @param deltas - Unvalidated Map or object that may contain deltas
- * @param source - Source context for error messages
- */
-export function validateAccountDeltas(deltas: unknown, source: string = 'unknown'): Map<number, Delta> {
-  if (deltas === null || deltas === undefined) {
-    throw new TypeSafetyViolationError(`ACCOUNT_DELTAS_MISSING: ${source} must provide account deltas`, deltas);
-  }
-
-  const result = new Map<number, Delta>();
-
-  if (deltas instanceof Map) {
-    for (const [tokenId, delta] of deltas.entries()) {
-      if (!Number.isInteger(tokenId) || tokenId < 0) {
-        throw new TypeSafetyViolationError(
-          `ACCOUNT_DELTAS_INVALID_TOKEN_ID: ${source}.Map key must be a non-negative integer`,
-          tokenId,
-        );
-      }
-      const validatedDelta = validateDelta(delta, `${source}.Map[${tokenId}]`);
-      result.set(tokenId, validatedDelta);
-    }
-    return result;
-  }
-
-  const deltaObject = validateObject(deltas, `AccountDeltas from ${source}`);
-  for (const [tokenIdStr, delta] of Object.entries(deltaObject)) {
-    if (!/^(0|[1-9]\d*)$/.test(tokenIdStr)) {
-      throw new TypeSafetyViolationError(
-        `ACCOUNT_DELTAS_INVALID_TOKEN_ID: ${source}.Object key must be a canonical non-negative integer`,
-        tokenIdStr,
-      );
-    }
-    const tokenId = Number(tokenIdStr);
-    const validatedDelta = validateDelta(delta, `${source}.Object[${tokenId}]`);
-    result.set(tokenId, validatedDelta);
-  }
-  return result;
-}
-
-/**
- * Type guard for Delta objects
- * @param obj - Value to check if it's a valid Delta
- */
-export function isDelta(obj: unknown): obj is Delta {
-  try {
-    validateDelta(obj, 'type-guard');
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 // ============================================================================
 // FINTECH-LEVEL TYPE SAFETY: ROUTING INTEGRITY VALIDATION
@@ -650,59 +525,6 @@ function validateCrontabState(value: unknown, fieldName: string): CrontabState {
 // =============================================================================
 // COMPREHENSIVE VALIDATORS - Complete Type Safety
 // =============================================================================
-
-/**
- * Validates AccountFrame objects - Consensus frames for bilateral accounts
- * CRITICAL: Frame integrity ensures consensus safety
- */
-export function decodeAccountFrame(value: unknown, context = 'AccountFrame'): AccountFrame {
-  const obj = validateObject(value, context);
-  const height = validateNumber(obj['height'], `${context}.height`);
-  const prevFrameHashRaw = obj['prevFrameHash'];
-  const prevFrameHash =
-    typeof prevFrameHashRaw === 'string' && (prevFrameHashRaw.length > 0 || height === 0)
-      ? prevFrameHashRaw
-      : validateString(prevFrameHashRaw, `${context}.prevFrameHash`);
-  const stateHashRaw = obj['stateHash'];
-  const stateHash =
-    typeof stateHashRaw === 'string' && (stateHashRaw.length > 0 || height === 0)
-      ? stateHashRaw
-      : validateString(stateHashRaw, `${context}.stateHash`);
-  const accountStateRoot = validateString(obj['accountStateRoot'], `${context}.accountStateRoot`);
-  if (!/^0x[0-9a-fA-F]{64}$/.test(accountStateRoot)) {
-    throw new FinancialDataCorruptionError(`${context}.accountStateRoot must be bytes32 hex`);
-  }
-
-  const validated: AccountFrame = {
-    height,
-    timestamp: validateNumber(obj['timestamp'], `${context}.timestamp`),
-    jHeight: validateNumber(obj['jHeight'], `${context}.jHeight`),
-    accountTxs: validateArray(obj['accountTxs'], `${context}.accountTxs`),
-    prevFrameHash,
-    accountStateRoot,
-    stateHash,
-    deltas: validateArray(obj['deltas'] || [], `${context}.deltas`).map((deltaState, index) =>
-      validateDelta(deltaState, `${context}.deltas[${index}]`),
-    ),
-    ...(typeof obj['byLeft'] === 'boolean' ? { byLeft: obj['byLeft'] } : {}),
-  };
-
-  // Additional integrity checks
-  if (validated.height > 0 && validated.stateHash.length === 0) {
-    throw new FinancialDataCorruptionError('AccountFrame.stateHash cannot be empty');
-  }
-
-  if (validated.height > 0 && validated.timestamp <= 0) {
-    throw new FinancialDataCorruptionError('AccountFrame.timestamp must be positive', { timestamp: validated.timestamp });
-  }
-  try {
-    assertAccountFrameDeltaIntegrity(validated, context);
-  } catch (error) {
-    throw new FinancialDataCorruptionError((error as Error).message);
-  }
-
-  return validated;
-}
 
 const validatePendingAccountResend = (
   account: Record<string, unknown>,

@@ -1,7 +1,7 @@
 import type { AccountFrame, AccountState, AccountTx } from '../../types';
 import { HEAVY_LOGS } from '../../utils';
 import { safeStringify } from '../../protocol/serialization';
-import { decodeAccountFrame } from '../../validation-utils';
+import { decodeAccountFrame } from '../frame-validation';
 import { createStructuredLogger } from '../../infra/logger';
 import {
   createFrameHash,

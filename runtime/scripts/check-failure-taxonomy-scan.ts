@@ -104,6 +104,10 @@ const readText = (path: string): string => {
       'runtime/__tests__/radapter-part-2.test.ts',
       'runtime/__tests__/radapter-part-3.test.ts',
     ],
+    'runtime/validation-utils.ts': [
+      'runtime/validation-utils.ts',
+      'runtime/account/delta-validation.ts',
+    ],
   };
   return (splitSources[path] ?? [path]).map(file => readFileSync(file, 'utf8')).join('\n');
 };

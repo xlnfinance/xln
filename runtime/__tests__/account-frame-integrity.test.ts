@@ -3,7 +3,7 @@ import { expect, test } from 'bun:test';
 import { assertAccountFrameDeltaIntegrity, deriveAccountFrameOffdeltas, deriveAccountFrameTokenIds } from '../account/frame';
 import { canonicalAccountTxForFrameHash } from '../account/consensus/frame';
 import type { AccountFrame, Delta } from '../types';
-import { decodeAccountFrame } from '../validation-utils';
+import { decodeAccountFrame } from '../account/frame-validation';
 
 const delta = (tokenId: number, offdelta: bigint): Delta => ({
   tokenId,

@@ -3,10 +3,13 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { createDefaultDelta } from '../account/delta';
-import { validateAccountDeltas } from '../validation-utils';
+import { validateAccountDeltas } from '../account/delta-validation';
 
 test('validation utilities do not hide account-delta failures behind console output', () => {
-  const source = readFileSync(join(process.cwd(), 'runtime/validation-utils.ts'), 'utf8');
+  const source = readFileSync(
+    join(process.cwd(), 'runtime/account/delta-validation.ts'),
+    'utf8',
+  );
 
   expect(source).not.toContain('console.');
   expect(source).toContain('ACCOUNT_DELTAS_MISSING');
