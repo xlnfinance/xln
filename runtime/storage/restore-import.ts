@@ -46,10 +46,10 @@ import type {
 } from './types';
 
 type ReplicaMetaEntry = { key: Buffer; value: Buffer };
+type EncodedNode = { key: Buffer; value: Buffer };
 
 type ExistingHistoryDecision =
-  | { kind: 'replace' }
-  | { kind: 'idempotent'; head: StorageHead; frame: StorageFrameRecord };
+  { kind: 'replace' } | { kind: 'idempotent'; head: StorageHead; frame: StorageFrameRecord };
 
 export type RestoredStorageBaseOptions = {
   currentDb: RuntimeDbLike;
@@ -76,18 +76,13 @@ const requireAtomicDelete = (batch: ReturnType<RuntimeDbLike['batch']>, label: s
 };
 
 const snapshotKeyForDoc = (height: number, doc: StorageDoc): Buffer => {
-  const prefix = doc.family === 'entity'
-    ? KEY_SNAPSHOT_ENTITY
-    : doc.family === 'account'
-      ? KEY_SNAPSHOT_ACCOUNT
-      : KEY_SNAPSHOT_BOOK;
+  const prefix =
+    doc.family === 'entity' ? KEY_SNAPSHOT_ENTITY : doc.family === 'account' ? KEY_SNAPSHOT_ACCOUNT : KEY_SNAPSHOT_BOOK;
   return Buffer.concat([Buffer.from([prefix]), encodeHeight(height), liveKeyForDoc(doc).subarray(1)]);
 };
 
-const encodedDocValue = (
-  doc: StorageDoc,
-  prepared: Awaited<ReturnType<typeof prepareStorageStateHashes>>,
-): Buffer => prepared.docValueBuffers.get(docValueKey(doc)) ?? encodeBuffer(doc.value);
+const encodedDocValue = (doc: StorageDoc, prepared: Awaited<ReturnType<typeof prepareStorageStateHashes>>): Buffer =>
+  prepared.docValueBuffers.get(docValueKey(doc)) ?? encodeBuffer(doc.value);
 
 const invalidateCurrentCache = async (
   db: RuntimeDbLike,
@@ -99,9 +94,14 @@ const invalidateCurrentCache = async (
   fence.del!(KEY_HEAD);
   await writeBatch(fence);
   await onBoundary?.('after-restore-current-fence');
-  await deleteKeyRange(db, {}, () => true, async () => {
-    await onBoundary?.('after-restore-current-clear-batch');
-  });
+  await deleteKeyRange(
+    db,
+    {},
+    () => true,
+    async () => {
+      await onBoundary?.('after-restore-current-clear-batch');
+    },
+  );
 };
 
 const queueCurrentBody = (
@@ -125,27 +125,25 @@ const buildSnapshotEntries = (
   height: number,
   docs: readonly StorageDoc[],
   prepared: Awaited<ReturnType<typeof prepareStorageStateHashes>>,
-): Array<{ key: Buffer; value: Buffer }> => docs.map((doc) => ({
-  key: snapshotKeyForDoc(height, doc),
-  value: encodedDocValue(doc, prepared),
-}));
+): Array<{ key: Buffer; value: Buffer }> =>
+  docs.map(doc => ({
+    key: snapshotKeyForDoc(height, doc),
+    value: encodedDocValue(doc, prepared),
+  }));
 
 const buildSnapshotReplicaMetaEntries = (
   height: number,
   replicaMetas: readonly ReplicaMetaEntry[],
-): ReplicaMetaEntry[] => replicaMetas.map(({ key, value }) => {
-  if (key.length !== 65 || key[0] !== keyLiveReplicaMetaPrefix()[0]) {
-    throw new Error(`RECOVERY_IMPORT_REPLICA_META_KEY_INVALID:${key.toString('hex')}`);
-  }
-  return {
-    key: Buffer.concat([
-      Buffer.from([KEY_SNAPSHOT_REPLICA_META]),
-      encodeHeight(height),
-      key.subarray(1),
-    ]),
-    value,
-  };
-});
+): ReplicaMetaEntry[] =>
+  replicaMetas.map(({ key, value }) => {
+    if (key.length !== 65 || key[0] !== keyLiveReplicaMetaPrefix()[0]) {
+      throw new Error(`RECOVERY_IMPORT_REPLICA_META_KEY_INVALID:${key.toString('hex')}`);
+    }
+    return {
+      key: Buffer.concat([Buffer.from([KEY_SNAPSHOT_REPLICA_META]), encodeHeight(height), key.subarray(1)]),
+      value,
+    };
+  });
 
 const entriesBytes = (entries: readonly { key: Buffer; value: Buffer }[]): number =>
   entries.reduce((total, item) => total + item.key.byteLength + item.value.byteLength, 0);
@@ -167,9 +165,7 @@ const readAuthoritativeReplicaMetas = async (db: RuntimeDbLike): Promise<Replica
   return entries;
 };
 
-const decideExistingHistory = async (
-  options: RestoredStorageBaseOptions,
-): Promise<ExistingHistoryDecision> => {
+const decideExistingHistory = async (options: RestoredStorageBaseOptions): Promise<ExistingHistoryDecision> => {
   const verified = await verifyStorageTailIntegrity(options.walDb);
   if (verified.latestHeight === 0) return { kind: 'replace' };
   const head = await readStorageHead(options.walDb);
@@ -178,14 +174,12 @@ const decideExistingHistory = async (
   if (verified.latestHeight > options.height) {
     throw new Error(
       `RECOVERY_IMPORT_ROLLBACK_REJECTED:existing=${verified.latestHeight}:candidate=${options.height}:` +
-      `existingHash=${frame.canonicalStateHash ?? 'missing'}:candidateHash=${options.canonicalStateHash}`,
+        `existingHash=${frame.canonicalStateHash ?? 'missing'}:candidateHash=${options.canonicalStateHash}`,
     );
   }
   if (verified.latestHeight < options.height) {
     if (frame.timestamp > options.timestamp) {
-      throw new Error(
-        `RECOVERY_IMPORT_TIMESTAMP_ROLLBACK:existing=${frame.timestamp}:candidate=${options.timestamp}`,
-      );
+      throw new Error(`RECOVERY_IMPORT_TIMESTAMP_ROLLBACK:existing=${frame.timestamp}:candidate=${options.timestamp}`);
     }
     return { kind: 'replace' };
   }
@@ -193,7 +187,7 @@ const decideExistingHistory = async (
   if (frame.canonicalStateHash !== options.canonicalStateHash) {
     throw new Error(
       `RECOVERY_IMPORT_SAME_HEIGHT_CONFLICT:height=${options.height}:` +
-      `existingHash=${frame.canonicalStateHash}:candidateHash=${options.canonicalStateHash}`,
+        `existingHash=${frame.canonicalStateHash}:candidateHash=${options.canonicalStateHash}`,
     );
   }
   const existingMetaDigest = computeStorageReplicaMetaDigest(await readAuthoritativeReplicaMetas(options.walDb));
@@ -201,7 +195,7 @@ const decideExistingHistory = async (
   if (existingMetaDigest !== candidateMetaDigest) {
     throw new Error(
       `RECOVERY_IMPORT_SAME_HEIGHT_META_CONFLICT:height=${options.height}:` +
-      `existingMeta=${existingMetaDigest}:candidateMeta=${candidateMetaDigest}`,
+        `existingMeta=${existingMetaDigest}:candidateMeta=${candidateMetaDigest}`,
     );
   }
   return { kind: 'idempotent', head, frame };
@@ -219,16 +213,13 @@ const queueHistoryReplacement = async (
   return batch;
 };
 
-/**
- * Publish a restored checkpoint without an empty-history window. The current
- * database is only a cache: its head is removed first, so every crash before
- * the authoritative atomic history batch rebuilds from the old history. After
- * that batch, every crash rebuilds from the complete new snapshot.
- */
-export const replaceRestoredStorageBase = async (
+const prepareCertifiedNodes = (
   options: RestoredStorageBaseOptions,
-): Promise<{ entityHashDocs: Map<string, StorageEntityHashDoc> }> => {
-  assertUniqueReplicaMetas(options.replicaMetas);
+): {
+  certifiedBoardNodes: EncodedNode[];
+  consumptionNodes: EncodedNode[];
+  accountJClaimNodes: EncodedNode[];
+} => {
   const certifiedBoardNodes = options.certifiedBoardNodes.map(({ hash, node }) => {
     const actualHash = hashCertifiedBoardNode(node);
     if (actualHash !== hash) throw new Error(`CERTIFIED_BOARD_NODE_CORRUPT:${hash}:${actualHash}`);
@@ -244,13 +235,27 @@ export const replaceRestoredStorageBase = async (
     if (actualHash !== hash) throw new Error(`ACCOUNT_J_CLAIM_NODE_CORRUPT:${hash}:${actualHash}`);
     return { key: keyAccountJClaimNode(hash), value: encodeBuffer(node) };
   });
-  const accountJClaimStates = options.docs.flatMap((doc) => doc.family === 'account'
-    ? [doc.value.leftPendingJClaims, doc.value.rightPendingJClaims]
-    : []);
+  const accountJClaimStates = options.docs.flatMap(doc =>
+    doc.family === 'account' ? [doc.value.leftPendingJClaims, doc.value.rightPendingJClaims] : [],
+  );
   collectReachableAccountJClaimNodes(
     new Map(options.accountJClaimNodes.map(({ hash, node }) => [hash, node])),
     accountJClaimStates,
   );
+  return { certifiedBoardNodes, consumptionNodes, accountJClaimNodes };
+};
+
+/**
+ * Publish a restored checkpoint without an empty-history window. The current
+ * database is only a cache: its head is removed first, so every crash before
+ * the authoritative atomic history batch rebuilds from the old history. After
+ * that batch, every crash rebuilds from the complete new snapshot.
+ */
+export const replaceRestoredStorageBase = async (
+  options: RestoredStorageBaseOptions,
+): Promise<{ entityHashDocs: Map<string, StorageEntityHashDoc> }> => {
+  assertUniqueReplicaMetas(options.replicaMetas);
+  const { certifiedBoardNodes, consumptionNodes, accountJClaimNodes } = prepareCertifiedNodes(options);
   const existing = await decideExistingHistory(options);
   await invalidateCurrentCache(options.currentDb, options.onPersistenceBoundary);
   const prepared = await prepareStorageStateHashes({
@@ -267,14 +272,7 @@ export const replaceRestoredStorageBase = async (
   });
 
   const currentBody = options.currentDb.batch();
-  queueCurrentBody(
-    currentBody,
-    options.docs,
-    prepared,
-    certifiedBoardNodes,
-    consumptionNodes,
-    accountJClaimNodes,
-  );
+  queueCurrentBody(currentBody, options.docs, prepared, certifiedBoardNodes, consumptionNodes, accountJClaimNodes);
   await writeBatch(currentBody);
   await options.onPersistenceBoundary?.('after-restore-current-body');
 
@@ -282,13 +280,13 @@ export const replaceRestoredStorageBase = async (
     if (prepared.stateHash !== existing.frame.stateHash) {
       throw new Error(
         `RECOVERY_IMPORT_SAME_HEIGHT_STORAGE_HASH_CONFLICT:height=${options.height}:` +
-        `existingHash=${existing.frame.stateHash}:candidateHash=${prepared.stateHash}`,
+          `existingHash=${existing.frame.stateHash}:candidateHash=${prepared.stateHash}`,
       );
     }
     if (postStateHash !== existing.frame.postStateHash) {
       throw new Error(
         `RECOVERY_IMPORT_SAME_HEIGHT_POST_STATE_HASH_CONFLICT:height=${options.height}:` +
-        `existingHash=${existing.frame.postStateHash}:candidateHash=${postStateHash}`,
+          `existingHash=${existing.frame.postStateHash}:candidateHash=${postStateHash}`,
       );
     }
     const currentHead = options.currentDb.batch();
@@ -327,13 +325,17 @@ export const replaceRestoredStorageBase = async (
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
     historyRecords: [],
     activityLogs: [],
-    touchedEntities: Array.from(new Set(options.docs.map((doc) => doc.entityId))).sort(),
+    touchedEntities: Array.from(new Set(options.docs.map(doc => doc.entityId))).sort(),
     touchedAccounts: options.docs
       .filter((doc): doc is Extract<StorageDoc, { family: 'account' }> => doc.family === 'account')
-      .map((doc) => ({ entityId: doc.entityId, counterpartyId: doc.counterpartyId })),
-    touchedBookEntities: Array.from(new Set(options.docs
-      .filter((doc): doc is Extract<StorageDoc, { family: 'book' }> => doc.family === 'book')
-      .map((doc) => doc.entityId))).sort(),
+      .map(doc => ({ entityId: doc.entityId, counterpartyId: doc.counterpartyId })),
+    touchedBookEntities: Array.from(
+      new Set(
+        options.docs
+          .filter((doc): doc is Extract<StorageDoc, { family: 'book' }> => doc.family === 'book')
+          .map(doc => doc.entityId),
+      ),
+    ).sort(),
   };
   const frame: StorageFrameRecord = { ...frameBase, frameHash: computeStorageFrameHash(frameBase) };
   const frameEntry = { key: keyFrame(options.height), value: encodeBuffer(frame) };
