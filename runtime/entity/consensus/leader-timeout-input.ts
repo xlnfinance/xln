@@ -16,11 +16,11 @@ import {
 import { rejectEntityConsensusInput, type ApplyEntityInputContext, type ApplyEntityInputResult } from './input-types';
 
 import {
-  calculateQuorumPower,
   entityLog,
   hasVerifiedPreparedQuorum,
   selectPreparedFrameFromCertificate,
 } from './shared';
+import { calculateQuorumPower } from './replica-validation';
 
 const signAndBroadcastLocalVote = async (
   context: ApplyEntityInputContext,

@@ -19,13 +19,15 @@ import { getReplicaProposalLeader } from './leader';
 import { buildCertifiedEntityOutputHashes } from './output-certification';
 import type { EntityProposalSelection } from './proposal-selection';
 import {
-  assertFrameParentMatchesState,
   assertProposerJRangesMatchLocalHistory,
   entityLog,
   expectedCommittedLeaderState,
-  getPrevFrameHash,
   getReplicaJRangeValidationError,
 } from './shared';
+import {
+  assertFrameParentMatchesState,
+  getPrevFrameHash,
+} from './frame-lineage';
 import {
   buildEntityFrameAuthority,
   computeCanonicalEntityConsensusStateHash,

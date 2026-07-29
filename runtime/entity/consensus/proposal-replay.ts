@@ -20,8 +20,8 @@ import {
 import {
   entityLog,
   expectedCommittedLeaderState,
-  getPrevFrameHash,
 } from './shared';
+import { getPrevFrameHash } from './frame-lineage';
 
 export type ProposalReplayResult =
   | { accepted: true; execution: EntityCandidate }

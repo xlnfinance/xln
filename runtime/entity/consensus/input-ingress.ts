@@ -13,12 +13,12 @@ import {
   type ApplyEntityInputResult,
 } from './input-types';
 import {
-  entityLog,
   getEntityMempoolAdmissionError,
   isSingleSignerEntity,
   isEntityInputWellFormed,
   validateEntityReplica,
-} from './shared';
+} from './replica-validation';
+import { entityLog } from './shared';
 
 export type EntityInputIngress =
   | { accepted: false; result: ApplyEntityInputResult }

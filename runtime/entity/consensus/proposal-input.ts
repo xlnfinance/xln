@@ -11,7 +11,6 @@ import {
 } from './input-types';
 import { replayProposedEntityFrame } from './proposal-replay';
 import {
-  assertFrameParentMatchesState,
   entityLog,
   getFrameJPrefixValidationError,
   getReplicaJRangeValidationError,
@@ -20,6 +19,7 @@ import {
   validateProposedFrameLeader,
   verifyHashPrecommitSignatures,
 } from './shared';
+import { assertFrameParentMatchesState } from './frame-lineage';
 
 const validateProposalEnvelope = (
   context: ApplyEntityInputContext,

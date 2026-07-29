@@ -19,11 +19,11 @@ import {
   entityLog,
   expectedCommittedLeaderState,
   getFrameJPrefixValidationError,
-  getPrevFrameHash,
   getReplicaJRangeValidationError,
   getValidatorExecutionForFrame,
   isJPrefixLocalFreshnessRace,
 } from './shared';
+import { getPrevFrameHash } from './frame-lineage';
 
 export type CommitExecutionResolution =
   | { kind: 'execution'; execution: EntityCandidate }

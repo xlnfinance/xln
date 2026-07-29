@@ -7,21 +7,25 @@
 export {
   MAX_PENDING_CROSS_J_FILL_ACKS,
   attachTargetConsumptionProofs,
-  calculateQuorumPower,
-  createEntityFrameHash,
   CROSS_J_PENDING_FILL_ACK_TTL_MS,
   expectedCommittedLeaderState,
-  getEntityStateSummary,
-  mergeEntityInputs,
-  prioritizeEntityConsensusInputs,
-  prioritizeProtocolEntityInputs,
   selectPreparedFrameFromCertificate,
   selectProposableEntityTxs,
-  shouldAutoPropose,
-  sortSignatures,
   verifyEntityLeaderCertificate,
   verifyEntityRelayCertificate,
   type ProposableEntityTxSelection,
 } from './shared';
+export { createEntityFrameHash } from './frame';
+export {
+  mergeEntityInputs,
+  prioritizeEntityConsensusInputs,
+  prioritizeProtocolEntityInputs,
+} from './input-merge';
+export {
+  calculateQuorumPower,
+  getEntityStateSummary,
+  shouldAutoPropose,
+  sortSignatures,
+} from './replica-validation';
 export { applyEntityInput, type EntityInputOutcome } from './input-consensus';
 export { applyEntityFrame } from './frame-application';

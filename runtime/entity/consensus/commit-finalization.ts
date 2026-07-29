@@ -8,8 +8,6 @@ import { commitEntityFrameCandidateState } from '../state-clone';
 import { cacheCommittedConsumptionNodeChanges } from '../consumption-store';
 import { emitCommittedPendingFrameWarnings } from '../scheduler';
 import {
-  appendCertifiedEntityFrameLink,
-  buildCertifiedEntityFrameLink,
   emitCommittedEntitySizeLog,
   entityLog,
   prepareCommittedEntitySizeLog,
@@ -18,6 +16,10 @@ import {
   verifyHashPrecommitSignatures,
   wrapCertifiedEntityOutputs,
 } from './shared';
+import {
+  appendCertifiedEntityFrameLink,
+  buildCertifiedEntityFrameLink,
+} from './frame-lineage';
 import {
   attachHankoWitnessToOutputs,
   getEntityHashManifestMismatch,

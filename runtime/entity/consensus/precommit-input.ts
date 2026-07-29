@@ -9,13 +9,15 @@ import {
   type ApplyEntityInputResult,
 } from './input-types';
 import {
-  calculateQuorumPower,
   entityLog,
   getValidatorExecutionForFrame,
   normalizePrecommitBundles,
-  validateVotingPower,
   verifyHashPrecommitSignatures,
 } from './shared';
+import {
+  calculateQuorumPower,
+  validateVotingPower,
+} from './replica-validation';
 
 const validateActivePrecommitTarget = (
   context: ApplyEntityInputContext,

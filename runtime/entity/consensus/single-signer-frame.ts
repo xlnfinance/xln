@@ -31,19 +31,21 @@ import { getEntityLeaderState } from './leader';
 import { buildCertifiedEntityOutputHashes } from './output-certification';
 import type { EntityProposalSelection } from './proposal-selection';
 import {
-  appendCertifiedEntityFrameLink,
   assertProposerJRangesMatchLocalHistory,
-  buildCertifiedEntityFrameLink,
   emitCommittedEntitySizeLog,
   entityFrameProfileEnabled,
   entityFrameSlowMs,
   entityLog,
-  getPrevFrameHash,
   prepareCommittedEntitySizeLog,
   pruneReplicaFinalizedJHistory,
   runLocalPostCommitHooks,
   wrapCertifiedEntityOutputs,
 } from './shared';
+import {
+  appendCertifiedEntityFrameLink,
+  buildCertifiedEntityFrameLink,
+  getPrevFrameHash,
+} from './frame-lineage';
 import {
   buildEntityFrameAuthority,
   computeCanonicalEntityConsensusStateHash,

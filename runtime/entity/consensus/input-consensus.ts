@@ -20,13 +20,13 @@ import { prepareEntityInputIngress } from './input-ingress';
 import { admitEntityTransactions } from './input-admission';
 
 import {
-  assertFrameParentMatchesState,
-  calculateQuorumPower,
   ensureLocalJPrefixAttestation,
   entityLog,
   normalizePrecommitBundles,
   validateProposedFrameLeader,
 } from './shared';
+import { assertFrameParentMatchesState } from './frame-lineage';
+import { calculateQuorumPower } from './replica-validation';
 import { selectEntityProposal } from './proposal-selection';
 import { commitSingleSignerFrameIfReady } from './single-signer-frame';
 import { handleJPrefixAttestations } from './j-prefix-input';
