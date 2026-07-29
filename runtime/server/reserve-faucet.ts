@@ -27,6 +27,7 @@ export type ReserveFaucetInput = {
   relayStore: { activeHubEntityIds: string[] };
   getJAdapter: () => JAdapter | null;
   ensureTokenCatalog: () => Promise<TokenCatalogEntry[]>;
+  validateRuntimeInputAdmission: (env: RuntimeState, runtimeInput: RuntimeInput) => void;
   enqueueRuntimeInput: (env: RuntimeState, runtimeInput: RuntimeInput) => void;
 };
 
@@ -56,6 +57,7 @@ export const handleReserveFaucet = async (input: ReserveFaucetInput): Promise<Re
       headers: input.headers,
       activeHubEntityIds: input.relayStore.activeHubEntityIds,
       ensureTokenCatalog: input.ensureTokenCatalog,
+      validateRuntimeInputAdmission: input.validateRuntimeInputAdmission,
       enqueueRuntimeInput: input.enqueueRuntimeInput,
     });
   } catch (error) {

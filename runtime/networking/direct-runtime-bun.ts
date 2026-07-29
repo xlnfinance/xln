@@ -11,6 +11,7 @@ import { deserializeWsMessage, makeMessageId, serializeWsMessage, type RuntimeWs
 import { isRuntimeId, normalizeRuntimeId } from './runtime-id';
 import { verifyHelloAuth } from './hello-auth';
 import { createHelloChallengeRegistry } from './hello-challenge';
+import { decodeRuntimeEntityInputsEnvelope } from './entity-input-envelope';
 
 type DirectRuntimeWsOptions = {
   runtimeId: string;
@@ -430,7 +431,9 @@ const handleEntityInputs = async (
   const fromRuntimeId = validateMessageRoute(context, ws, session, msg, 'Direct');
   if (!fromRuntimeId) return;
   try {
-    const envelope = decryptJSON<RuntimeEntityInputsEnvelope>(msg.payload, context.keyPair.privateKey);
+    const envelope = decodeRuntimeEntityInputsEnvelope(
+      decryptJSON(msg.payload, context.keyPair.privateKey),
+    );
     await context.options.onEntityInputs(
       fromRuntimeId,
       envelope,

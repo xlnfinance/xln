@@ -344,6 +344,47 @@ describe('direct runtime websocket route', () => {
     expect(received).toEqual([]);
   });
 
+  test('rejects malformed decrypted envelopes before the Runtime callback', async () => {
+    const serverSeed = 'direct-route-server-malformed-envelope';
+    const clientSeed = 'direct-route-client-malformed-envelope';
+    const serverRuntimeId = deriveSignerAddressSync(serverSeed, '1').toLowerCase();
+    const clientRuntimeId = deriveSignerAddressSync(clientSeed, '1').toLowerCase();
+    let received = 0;
+    const route = createDirectRuntimeWsRoute({
+      runtimeId: serverRuntimeId,
+      runtimeSeed: serverSeed,
+      requireHelloAuth: false,
+      onEntityInputs: () => {
+        received += 1;
+      },
+    });
+    const { ws, sent } = makeFakeWs();
+    route.websocket.open(ws);
+    await route.websocket.message(ws, serializeWsMessage(makeAuthedHello(clientSeed, clientRuntimeId)));
+
+    await route.websocket.message(ws, serializeWsMessage({
+      type: 'entity_inputs',
+      id: 'malformed-encrypted-envelope',
+      from: clientRuntimeId,
+      fromEncryptionPubKey: pubKeyToHex(deriveEncryptionKeyPair(clientSeed).publicKey),
+      to: serverRuntimeId,
+      timestamp: 456,
+      encrypted: true,
+      payload: encryptJSON({
+        sourceRuntimeId: clientRuntimeId,
+        sourceRuntimeHeight: -1,
+        sourceRuntimeTimestamp: 456,
+        entityInputs: [],
+      }, deriveEncryptionKeyPair(serverSeed).publicKey),
+    }));
+
+    expect(sent.at(-1)).toMatchObject({
+      type: 'error',
+      error: 'Direct delivery failed: P2P_ENTITY_INPUTS_ENVELOPE_EMPTY',
+    });
+    expect(received).toBe(0);
+  });
+
   test('answers read-only recovery bundle requests over the authenticated direct socket', async () => {
     const serverSeed = 'direct-route-server-recovery';
     const clientSeed = 'direct-route-client-recovery';

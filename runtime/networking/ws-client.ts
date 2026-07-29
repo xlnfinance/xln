@@ -5,6 +5,7 @@ import { encryptJSON, decryptJSON, pubKeyToHex } from './p2p-crypto';
 import { asFailFastPayload, failfastAssert } from './failfast';
 import { isRuntimeId, normalizeRuntimeId } from './runtime-id';
 import { createStructuredLogger } from '../infra/logger';
+import { decodeRuntimeEntityInputsEnvelope } from './entity-input-envelope';
 
 const NORMAL_CLOSE_CODES = new Set([1000, 1001]);
 const wsLog = createStructuredLogger('runtime.wsClient');
@@ -601,9 +602,8 @@ export class RuntimeWsClient {
       return true;
     }
     try {
-      const envelope = decryptJSON<RuntimeEntityInputsEnvelope>(
-        msg.payload as string,
-        this.options.encryptionKeyPair.privateKey,
+      const envelope = decodeRuntimeEntityInputsEnvelope(
+        decryptJSON(msg.payload as string, this.options.encryptionKeyPair.privateKey),
       );
       await this.options.onEntityInputs?.(
         msg.from,

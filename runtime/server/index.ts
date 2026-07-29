@@ -690,6 +690,7 @@ const maybeHandleFinancialApi = (
       relayStore,
       getJAdapter: () => globalJAdapter,
       ensureTokenCatalog: () => tokenCatalogController.ensureTokenCatalog(),
+      validateRuntimeInputAdmission,
       enqueueRuntimeInput,
     });
   }

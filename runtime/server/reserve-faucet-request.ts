@@ -3,7 +3,7 @@ import type { JAdapter } from '../jadapter';
 import { safeStringify } from '../protocol/serialization';
 import { createStructuredLogger, shortId } from '../infra/logger';
 import { resolveEntityProposerId } from '../state-helpers';
-import { formatTimingMs } from './utils';
+import { formatTimingMs, isEntityId32 } from './utils';
 import { faucetFailureBody } from './faucet-failure';
 import { getFaucetHubProfiles } from './faucet-hubs';
 import {
@@ -27,6 +27,7 @@ export type ReserveFaucetDependencies = {
   headers: HeadersInit;
   activeHubEntityIds: string[];
   ensureTokenCatalog: () => Promise<TokenCatalogEntry[]>;
+  validateRuntimeInputAdmission: (env: RuntimeState, runtimeInput: RuntimeInput) => void;
   enqueueRuntimeInput: (env: RuntimeState, runtimeInput: RuntimeInput) => void;
 };
 
@@ -67,8 +68,8 @@ const parseRequest = async (req: Request, headers: HeadersInit): Promise<Reserve
     return failure(headers, 400, 'FAUCET_USER_ENTITY_ID_REQUIRED', 'Missing userEntityId');
   }
   const value = body as Record<string, unknown>;
-  if (typeof value['userEntityId'] !== 'string' || value['userEntityId'].length === 0) {
-    return failure(headers, 400, 'FAUCET_USER_ENTITY_ID_REQUIRED', 'Missing userEntityId');
+  if (!isEntityId32(value['userEntityId'])) {
+    return failure(headers, 400, 'FAUCET_USER_ENTITY_ID_INVALID', 'Invalid userEntityId');
   }
   const rawTokenId = value['tokenId'] ?? 1;
   const tokenId = typeof rawTokenId === 'number' ? rawTokenId : Number(rawTokenId);
@@ -152,11 +153,22 @@ const entityInput = (
   }],
 });
 
+const enqueueValidatedInput = (
+  deps: ReserveFaucetDependencies,
+  runtimeInput: RuntimeInput,
+): void => {
+  // HTTP is an untrusted source boundary. Admission must run before the input
+  // reaches the one Runtime mempool; the frame reducer must not discover a
+  // malformed faucet instruction after unrelated valid work was queued.
+  deps.validateRuntimeInputAdmission(deps.env, runtimeInput);
+  deps.enqueueRuntimeInput(deps.env, runtimeInput);
+};
+
 const dispatchReserveBatch = async (
   deps: ReserveFaucetDependencies,
   request: AdmittedReserveRequest,
 ): Promise<Response | null> => {
-  deps.enqueueRuntimeInput(deps.env, entityInput(request, [{
+  enqueueValidatedInput(deps, entityInput(request, [{
     type: 'r2r',
     data: {
       toEntityId: request.userEntityId,
@@ -172,7 +184,7 @@ const dispatchReserveBatch = async (
       requestId: request.requestId,
     });
   }
-  deps.enqueueRuntimeInput(deps.env, entityInput(request, [{ type: 'j_broadcast', data: {} }]));
+  enqueueValidatedInput(deps, entityInput(request, [{ type: 'j_broadcast', data: {} }]));
   if (!await waitForRuntimeIdle(deps.env, deps.adapter)) {
     faucetLog.warn('reserve.broadcast_idle_timeout', { requestId: request.requestId });
   }

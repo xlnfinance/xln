@@ -62,6 +62,8 @@ const callReserveFaucet = async (options: {
   env?: RuntimeState | null;
   tokenCatalog?: Array<{ tokenId: number; symbol: string; decimals: number }>;
   tokenId?: number | string;
+  userEntityId?: string;
+  validateRuntimeInputAdmission?: (env: RuntimeState, input: RuntimeInput) => void;
 } = {}): Promise<{ response: Response; body: Record<string, unknown>; enqueued: RuntimeInput[] }> => {
   const enqueued: RuntimeInput[] = [];
   const response = await handleReserveFaucet({
@@ -69,7 +71,7 @@ const callReserveFaucet = async (options: {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        userEntityId: USER,
+        userEntityId: options.userEntityId ?? USER,
         tokenId: options.tokenId ?? 1,
         amount: options.amount ?? '100',
       }),
@@ -79,6 +81,7 @@ const callReserveFaucet = async (options: {
     relayStore: { activeHubEntityIds: options.activeHubEntityIds ?? [HUB] },
     getJAdapter: () => options.adapter === undefined ? makeAdapter() : options.adapter,
     ensureTokenCatalog: async () => options.tokenCatalog ?? [{ tokenId: 1, symbol: 'USDC', decimals: 6 }],
+    validateRuntimeInputAdmission: options.validateRuntimeInputAdmission ?? (() => undefined),
     enqueueRuntimeInput: (_env, runtimeInput) => {
       enqueued.push(runtimeInput);
     },
@@ -121,6 +124,21 @@ describe('reserve faucet failures', () => {
     expect(body.category).toBe('Contradiction');
     expect(body.retryable).toBe(false);
     expect(body.fatal).toBe(true);
+    expect(enqueued).toHaveLength(0);
+  });
+
+  test('rejects malformed entity ids before touching reserves or the Runtime mempool', async () => {
+    const adapter = makeAdapter();
+    adapter.getReserves = async () => {
+      throw new Error('RESERVE_READ_MUST_NOT_RUN');
+    };
+    const { response, body, enqueued } = await callReserveFaucet({
+      adapter,
+      userEntityId: 'not-an-entity-id',
+    });
+
+    expect(response.status).toBe(400);
+    expect(body.code).toBe('FAUCET_USER_ENTITY_ID_INVALID');
     expect(enqueued).toHaveLength(0);
   });
 

@@ -1976,7 +1976,7 @@ const run = async (): Promise<void> => {
             activeTokenCatalog = await waitForTokenCatalog(readyJAdapter);
             return activeTokenCatalog;
           },
-          enqueueRuntimeInput,
+          validateRuntimeInputAdmission, enqueueRuntimeInput,
         });
       }
 
