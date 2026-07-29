@@ -21,6 +21,7 @@ import type { DisputeFinalizationEvidence } from '../types';
 import { type AuthenticatedReceiptRange, type ReceiptReadProfile } from './receipt-root';
 import { type RpcBatchResponse } from './rpc-utils';
 import { applyJBlockHeadersIngressTransform } from './watcher';
+import { TRON_CHAIN_IDS } from './chain-ids';
 
 /**
  * `eth_estimateGas` minimizes gas, while optional dispute transformers are
@@ -32,7 +33,6 @@ export const PROCESS_BATCH_GAS_FLOOR = 10_000_000n;
 export const applyProcessBatchGasFloor = (estimatedGasLimit: bigint, hasDisputeFinalization: boolean): bigint =>
   hasDisputeFinalization && estimatedGasLimit < PROCESS_BATCH_GAS_FLOOR ? PROCESS_BATCH_GAS_FLOOR : estimatedGasLimit;
 
-export const TRON_CHAIN_IDS = new Set<number>([728126428, 3448148188]);
 export const rpcLog = createStructuredLogger('jadapter.rpc');
 
 export type TxFinalizationEvidence = Omit<DisputeFinalizationEvidence, 'sender' | 'finalProofbodyHash'>;

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 
 const repoRoot = process.cwd();
 const readRpcAdapterSource = (): string => [
+  'chain-ids.ts',
   'rpc.ts',
   'rpc-public.ts',
   'rpc-adapter.ts',

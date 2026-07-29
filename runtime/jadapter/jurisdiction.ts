@@ -1,6 +1,6 @@
 import type { JurisdictionConfig } from '../types';
 import { getAvailableJurisdictions } from '../jurisdiction/config';
-import { createJAdapter } from './index';
+import { createJAdapter } from './factory';
 import type { JAdapter, JAdapterConfig, JAdapterReplicaConnection } from './types';
 import { getRegisteredBrowserVMJurisdiction } from './browservm-registry';
 

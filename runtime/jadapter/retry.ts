@@ -1,5 +1,5 @@
 import type { JAdapter, JAdapterConfig } from './types';
-import { createJAdapter } from './index';
+import { createJAdapter } from './factory';
 import { classifyJAdapterFailure } from './failure';
 
 type RetryOptions = {

@@ -31,7 +31,7 @@ import {
 import { makeJAdapterFailureResult } from './failure';
 import { buildExternalTokenToReserveBatch, packTokenReference } from './helpers';
 import { parseReceiptLogsToJEvents } from './j-event-log-decoder';
-import { DEV_CHAIN_IDS } from './index';
+import { DEV_CHAIN_IDS } from './chain-ids';
 import { normalizeReceiptHash, parseReceiptQuantity } from '../jurisdiction/receipt-codec';
 import { readAuthenticatedReceiptRange, type RpcBatchCall } from './receipt-root';
 import { createRpcLifecycleMethods } from './rpc-lifecycle';

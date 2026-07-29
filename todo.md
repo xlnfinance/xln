@@ -106,8 +106,9 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   duplicate gas/nonce/RPC-error policies and BrowserVM/RPC event logic as each
   owner is extracted. Record before/after LOC, converter count and import
   edges; require negative net LOC or a proven trust-boundary/type-safety gain.
-  Keep `rpc-adapter.ts` below 3000 throughout and drive its exact oversized
-  function allowances to zero.
+  The public facade/factory cycle is gone and the global value-import SCC
+  ratchet is now 3. Keep `rpc-adapter.ts` below 3000 throughout and drive its
+  exact oversized function allowances to zero.
 - [ ] Replace technical-history top-level folders with an owner-first tree,
   preserving the distinct guarantees as named subfolders rather than unrelated
   roots: `storage/{wal,state,views,queries,recovery}`,
@@ -378,8 +379,8 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   Runtime routing or chain adapters; add a cycle budget that fails on any new
   cycle crossing Runtime/Entity/Account/J boundaries. Extend the AST gate with
   a value-import Tarjan SCC ratchet seeded from the current verified maximum,
-  then drive it to one while reverse imports are removed; a folder-direction
-  allowlist alone does not see the current Account/Orderbook/Entity cycle.
+  then drive the remaining Entity scheduler SCC from three to one; a
+  folder-direction allowlist alone does not detect same-owner cycles.
   Execute SHA-256,
   proposal construction and one Account open from the actual browser bundle,
   not only Bun source imports. Programming faults such as `TypeError` must
@@ -387,19 +388,6 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   Remove the `jdenticon` UI dependency from root `runtime/utils.ts`; visual
   identity belongs to the frontend/view boundary and core leaf utilities must
   remain browser-safe without importing presentation code.
-  The Entity→Runtime ratchet is now `1`, down from `3`: rebalance selects its
-  committed Entity leader and Cross-J emits the signer already committed by
-  the route. The final edge is first-frame Account output routing before a
-  counterparty Hanko exists. Remove it by introducing a real deterministic
-  `EntityOutput` distinct from routed `EntityInput`: Entity consensus commits
-  the target Entity and authenticated payload, Runtime resolves and persists
-  the exact local/remote delivery lane before WAL publication, and replay uses
-  that durable route without gossip or private-key discovery. Pin the output
-  hash, first Account frame, post-WAL replay and board-rotation behavior before
-  changing the signed field set. Do not hide this boundary behind a resolver
-  callback or move Runtime topology helpers into Entity. Entity may return
-  deterministic storage/effect descriptions but must not import Runtime
-  mutation helpers.
 - [ ] Remove only call-site-proven dead code in small module-owned batches.
   Reverify dynamic imports, scenario/CLI entrypoints and browser API first;
   `runNumberedRegistrationIntent` is currently live scenario infrastructure,
