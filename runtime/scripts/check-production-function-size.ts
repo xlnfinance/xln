@@ -38,7 +38,6 @@ const COORDINATOR_DEBT: Readonly<Record<string, number>> = {
   'runtime/server/index.ts::createHttpServer': 216,
   'runtime/server/index.ts::startXlnServer': 630,
   'runtime/protocol/radix-merkle.ts::buildRadixMerkleMaterialized': 181,
-  'runtime/watchtower/action.ts::runWatchtowerSweep': 159,
 };
 
 type FunctionSize = {

@@ -469,6 +469,127 @@ const buildActionReceipt = (
   createdAt: now,
 });
 
+type SweepProviderFactory = NonNullable<WatchtowerSweepOptions['providerFactory']>;
+type SweepContractFactory = NonNullable<WatchtowerSweepOptions['contractFactory']>;
+
+type WatchtowerSweepContext = {
+  store: WatchtowerStore;
+  towerWallet: Wallet;
+  txWaitTimeoutMs: number;
+  customProviderFactory: boolean;
+  allowedRpcUrls?: string[];
+  providerFactory: SweepProviderFactory;
+  contractFactory: SweepContractFactory;
+};
+
+const appendAppointmentReceipt = (
+  context: WatchtowerSweepContext,
+  appointment: LastResortTowerAppointment,
+  createdAt: number,
+  status: StoredTowerActionReceipt['status'],
+  error?: string,
+  txHash?: string,
+  blockNumber?: number,
+): Promise<void> => context.store.appendActionReceipt(buildActionReceipt(
+  appointment.lookupKey,
+  appointment.runtimeId,
+  appointment.lastResortPayload.triggerHint,
+  appointment.lastResortPayload.appointmentSequence,
+  status,
+  createdAt,
+  error,
+  txHash,
+  blockNumber,
+));
+
+const processLastResortAppointment = async (
+  context: WatchtowerSweepContext,
+  appointment: LastResortTowerAppointment,
+  createdAt: number,
+): Promise<'submitted' | 'skipped'> => {
+  assertLastResortPayloadBasics(appointment);
+  const watch = normalizeWatch(appointment.lastResortPayload.watch);
+  const rpcUrl = context.customProviderFactory
+    ? watch.rpcUrl
+    : assertWatchtowerRpcUrlAllowed(watch.rpcUrl, context.allowedRpcUrls);
+  const provider = context.providerFactory(rpcUrl, watch.chainId);
+  const depository = context.contractFactory(watch, context.towerWallet, provider);
+  const acctKey = await depository.accountKey(watch.watchedEntityId, watch.counterentity);
+  const account = await depository._accounts(acctKey);
+  const currentBlock = BigInt(await provider.getBlockNumber());
+  const disputeTimeout = BigInt(account.disputeTimeout || 0n);
+  const activeDispute = String(account.disputeHash || '').toLowerCase() !== ZERO_HASH;
+  const finalNonce = BigInt(appointment.lastResortPayload.proofNonce);
+  const withinLastResort =
+    currentBlock + BigInt(appointment.lastResortPayload.lastResortWindowBlocks) >= disputeTimeout;
+  if (!activeDispute || !withinLastResort || BigInt(account.nonce || 0n) >= finalNonce) {
+    await appendAppointmentReceipt(context, appointment, createdAt, 'skipped');
+    return 'skipped';
+  }
+
+  let disputeStartBlock: bigint | undefined;
+  if (typeof depository.defaultDisputeDelay === 'function') {
+    const disputeDelay = BigInt(await depository.defaultDisputeDelay());
+    if (disputeDelay > 0n && disputeTimeout >= disputeDelay) {
+      disputeStartBlock = disputeTimeout - disputeDelay;
+    }
+  }
+  const disputeContext = await findActiveDisputeContext(
+    provider,
+    watch,
+    account,
+    currentBlock,
+    disputeStartBlock,
+  );
+  const remedy = await decodeTowerCounterDisputeRemedy(
+    appointment.lastResortPayload.encryptedRemedy,
+    disputeContext.watchSeed,
+  );
+  assertAppointmentMatchesRemedy(appointment, watch, remedy);
+  assertDisputeContextMatchesRemedy(disputeContext, remedy);
+  if (remedy.towerAddress.toLowerCase() !== context.towerWallet.address.toLowerCase()) {
+    throw new Error(
+      `WATCHTOWER_ADDRESS_MISMATCH:${remedy.towerAddress}:${context.towerWallet.address.toLowerCase()}`,
+    );
+  }
+
+  // Solidity binds the counter-dispute to the side recorded in
+  // DisputeStarted. The appointment stores the watched/finalizer side only,
+  // so the event—not a locally guessed left/right role—selects peer arguments.
+  const otherArguments = disputeContext.startedByLeft
+    ? remedy.latestProof.rightArguments
+    : remedy.latestProof.leftArguments;
+  const tx = await depository.watchtowerCounterDispute(
+    remedy.watchedEntityId,
+    {
+      counterentity: remedy.latestProof.counterentity,
+      initialNonce: disputeContext.initialNonce,
+      finalNonce: remedy.latestProof.finalNonce,
+      initialProofbodyHash: disputeContext.initialProofbodyHash,
+      finalProofbody: remedy.latestProof.finalProofbody,
+      starterArguments: disputeContext.starterIncrementedArguments,
+      otherArguments,
+      sig: remedy.latestProof.sig,
+      startedByLeft: disputeContext.startedByLeft,
+      cooperative: false,
+    },
+    remedy.lastResortWindowBlocks,
+    remedy.appointmentSequence,
+    remedy.ownerAuthorizationHanko,
+  );
+  const receipt = await waitForReceiptWithTimeout(tx, context.txWaitTimeoutMs);
+  await appendAppointmentReceipt(
+    context,
+    appointment,
+    createdAt,
+    'submitted',
+    undefined,
+    String(tx.hash || ''),
+    Number(receipt?.blockNumber || 0),
+  );
+  return 'submitted';
+};
+
 export const runWatchtowerSweep = async (
   store: WatchtowerStore,
   options?: WatchtowerSweepOptions,
@@ -492,130 +613,45 @@ export const runWatchtowerSweep = async (
   let skipped = 0;
   let errors = 0;
   const customProviderFactory = options?.providerFactory;
-  const providerFactory = customProviderFactory || ((rpcUrl: string, chainId: number) => createXlnJsonRpcProvider(rpcUrl, chainId));
-  const contractFactory = options?.contractFactory || ((target, wallet, provider) =>
-    new Contract(target.depositoryAddress, DEPOSITORY_MINIMAL_ABI, wallet.connect(provider as unknown as JsonRpcProvider)));
+  const providerFactory: SweepProviderFactory = customProviderFactory
+    || ((rpcUrl: string, chainId: number) => createXlnJsonRpcProvider(rpcUrl, chainId));
+  const defaultContractFactory: SweepContractFactory = (target, wallet, provider) => {
+    if (!(provider instanceof JsonRpcProvider)) {
+      throw new Error('WATCHTOWER_JSON_RPC_PROVIDER_REQUIRED');
+    }
+    // Ethers types dynamic ABI methods as a generic Contract. This single
+    // adapter owns the checked ABI/interface boundary; sweep logic and custom
+    // test contracts remain structurally typed after construction.
+    return new Contract(
+      target.depositoryAddress,
+      DEPOSITORY_MINIMAL_ABI,
+      wallet.connect(provider),
+    ) as unknown as ReturnType<SweepContractFactory>;
+  };
+  const contractFactory = options?.contractFactory ?? defaultContractFactory;
+  const context: WatchtowerSweepContext = {
+    store,
+    towerWallet,
+    txWaitTimeoutMs,
+    customProviderFactory: Boolean(customProviderFactory),
+    ...(options?.allowedRpcUrls ? { allowedRpcUrls: options.allowedRpcUrls } : {}),
+    providerFactory,
+    contractFactory,
+  };
 
   for (const appointment of lastResortAppointments) {
     const createdAt = now();
     try {
-      assertLastResortPayloadBasics(appointment);
-      const watch = normalizeWatch(appointment.lastResortPayload.watch);
-      const rpcUrl = customProviderFactory
-        ? watch.rpcUrl
-        : assertWatchtowerRpcUrlAllowed(watch.rpcUrl, options?.allowedRpcUrls);
-      const provider = providerFactory(rpcUrl, watch.chainId);
-      const depository = contractFactory(watch, towerWallet, provider);
-      const acctKey = await depository.accountKey(watch.watchedEntityId, watch.counterentity) as string;
-      const account = await depository._accounts(acctKey) as OnchainDisputeAccount;
-      const currentBlock = BigInt(await provider.getBlockNumber());
-      const disputeTimeout = BigInt(account.disputeTimeout || 0n);
-      const activeDispute = String(account.disputeHash || '').toLowerCase() !== ZERO_HASH;
-      const finalNonce = BigInt(appointment.lastResortPayload.proofNonce);
-      const withinLastResort = currentBlock + BigInt(appointment.lastResortPayload.lastResortWindowBlocks) >= disputeTimeout;
-      if (!activeDispute || !withinLastResort || BigInt(account.nonce || 0n) >= finalNonce) {
-        await store.appendActionReceipt(
-          buildActionReceipt(
-            appointment.lookupKey,
-            appointment.runtimeId,
-            appointment.lastResortPayload.triggerHint,
-            appointment.lastResortPayload.appointmentSequence,
-            'skipped',
-            createdAt,
-          ),
-        );
-        skipped += 1;
-        continue;
-      }
-      let disputeStartBlock: bigint | undefined;
-      if (typeof depository.defaultDisputeDelay === 'function') {
-        const disputeDelay = BigInt(await depository.defaultDisputeDelay());
-        if (disputeDelay > 0n && disputeTimeout >= disputeDelay) {
-          disputeStartBlock = disputeTimeout - disputeDelay;
-        }
-      }
-      const disputeContext = await findActiveDisputeContext(
-        provider,
-        watch,
-        account,
-        currentBlock,
-        disputeStartBlock,
-      );
-      const remedy = await decodeTowerCounterDisputeRemedy(
-        appointment.lastResortPayload.encryptedRemedy,
-        disputeContext.watchSeed,
-      );
-      assertAppointmentMatchesRemedy(appointment, watch, remedy);
-      assertDisputeContextMatchesRemedy(disputeContext, remedy);
-      if (remedy.towerAddress.toLowerCase() !== towerWallet.address.toLowerCase()) {
-        await store.appendActionReceipt(
-          buildActionReceipt(
-            appointment.lookupKey,
-            appointment.runtimeId,
-            appointment.lastResortPayload.triggerHint,
-            appointment.lastResortPayload.appointmentSequence,
-            'error',
-            createdAt,
-            `WATCHTOWER_ADDRESS_MISMATCH:${remedy.towerAddress}:${towerWallet.address.toLowerCase()}`,
-          ),
-        );
-        errors += 1;
-        continue;
-      }
-      // In counter-dispute mode Solidity requires the starter side to equal the
-      // blob committed in DisputeStarted. The tower remedy intentionally stores
-      // only the watched/finalizer side because the tower learns the actual
-      // starter side from the event. Reusing remedy.left/right blindly can make a
-      // valid transformer counter-dispute fail Account.requireStarterArguments.
-      const otherArguments = disputeContext.startedByLeft
-        ? remedy.latestProof.rightArguments
-        : remedy.latestProof.leftArguments;
-      const finalization = {
-        counterentity: remedy.latestProof.counterentity,
-        initialNonce: disputeContext.initialNonce,
-        finalNonce: remedy.latestProof.finalNonce,
-        initialProofbodyHash: disputeContext.initialProofbodyHash,
-        finalProofbody: remedy.latestProof.finalProofbody,
-        starterArguments: disputeContext.starterIncrementedArguments,
-        otherArguments,
-        sig: remedy.latestProof.sig,
-        startedByLeft: disputeContext.startedByLeft,
-        cooperative: false,
-      };
-
-      const tx = await depository.watchtowerCounterDispute(
-        remedy.watchedEntityId,
-        finalization,
-        remedy.lastResortWindowBlocks,
-        remedy.appointmentSequence,
-        remedy.ownerAuthorizationHanko,
-      );
-      const receipt = await waitForReceiptWithTimeout(tx, txWaitTimeoutMs);
-      await store.appendActionReceipt(
-        buildActionReceipt(
-          appointment.lookupKey,
-          appointment.runtimeId,
-          appointment.lastResortPayload.triggerHint,
-          appointment.lastResortPayload.appointmentSequence,
-          'submitted',
-          createdAt,
-          undefined,
-          String(tx.hash || ''),
-          Number(receipt?.blockNumber || 0),
-        ),
-      );
-      submitted += 1;
+      const result = await processLastResortAppointment(context, appointment, createdAt);
+      if (result === 'submitted') submitted += 1;
+      else skipped += 1;
     } catch (error) {
-      await store.appendActionReceipt(
-        buildActionReceipt(
-          appointment.lookupKey,
-          appointment.runtimeId,
-          appointment.lastResortPayload.triggerHint,
-          appointment.lastResortPayload.appointmentSequence,
-          'error',
-          createdAt,
-          error instanceof Error ? error.message : String(error),
-        ),
+      await appendAppointmentReceipt(
+        context,
+        appointment,
+        createdAt,
+        'error',
+        error instanceof Error ? error.message : String(error),
       );
       errors += 1;
     }
