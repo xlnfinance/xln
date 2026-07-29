@@ -10,9 +10,7 @@ import {
   Account__factory,
   DeltaTransformer__factory,
   Depository__factory,
-  ERC20Mock__factory,
   EntityProvider__factory,
-  HankoVerifier__factory,
 } from '../../jurisdictions/typechain-types/index.ts';
 import { BLOCKCHAIN } from '../constants';
 import {
@@ -32,7 +30,6 @@ import {
 } from '../jurisdiction/registration-evidence';
 import { assertSealedJBatchBinding } from '../jurisdiction/sealed-batch';
 import { compareStableText, safeStringify } from '../protocol/serialization';
-import { nodeProcess, runtimeIsBrowser } from '../infra/runtime-process';
 import { resolveEntityProposerId } from '../runtime/entity-output-signer';
 import type { DisputeFinalizationEvidence, RuntimeState, JTx, RuntimeInput, RuntimeTx } from '../types';
 import { TOKEN_REGISTRATION_AMOUNT, defaultTokensForJurisdiction, getDefaultTokenSupply } from '../jurisdiction/default-tokens';
@@ -110,6 +107,26 @@ import {
   type RawJEventArgs,
 } from './watcher';
 import { shouldAuditCanonicalWatcherState } from './watcher-poll-policy';
+import {
+  applyGasHeadroom,
+  asFactoryRunner,
+  asRpcReceipt,
+  asRpcTxResponse,
+  eventCarriers,
+  haltProcessForFatalWatcherError,
+  isNonceSyncError,
+  makeAccountFactory,
+  makeDeltaTransformerFactory,
+  makeErc20MockFactory,
+  makeHankoVerifierFactory,
+  watcherErrorDetails,
+  watcherErrorMessage,
+  type FeeOverrides,
+  type RpcReceipt,
+  type TxOverrides,
+  type UntypedActionMethod,
+  type UntypedNonPayableMethod,
+} from './rpc-boundary';
 
 export async function createRpcAdapter(
   config: JAdapterConfig,
@@ -135,90 +152,12 @@ export async function createRpcAdapter(
   const GAS_HEADROOM_BPS = Math.max(10_000, Math.floor(Number(process.env['JADAPTER_GAS_HEADROOM_BPS'] ?? '12000')));
   const MAX_FEE_PER_GAS_GWEI = Math.max(1, Math.floor(Number(process.env['JADAPTER_MAX_FEE_GWEI'] ?? '200')));
   const MAX_FEE_PER_GAS_WEI = ethers.parseUnits(String(MAX_FEE_PER_GAS_GWEI), 'gwei');
-  type RpcReceipt = Parameters<typeof parseReceiptLogsToJEvents>[0] & {
-    gasUsed?: bigint;
-  };
-  type RpcTxResponse = {
-    hash: string;
-    wait(confirms?: number, timeout?: number): Promise<unknown | null>;
-  };
-  type FeeOverrides = {
-    maxFeePerGas?: bigint;
-    maxPriorityFeePerGas?: bigint;
-  };
-  type TxOverrides = FeeOverrides & { gasLimit?: bigint; nonce?: number };
-  type UntypedNonPayableMethod = {
-    estimateGas: (...args: unknown[]) => Promise<bigint>;
-    (...args: unknown[]): Promise<unknown>;
-  };
-  type UntypedActionMethod = UntypedNonPayableMethod & {
-    staticCall: (...args: unknown[]) => Promise<unknown>;
-  };
-  const watcherErrorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
   const isTransientRpcUnavailable = (error: unknown): boolean => {
     return isTransientRpcUnavailableError(error);
   };
-  const watcherErrorDetails = (error: unknown): Record<string, unknown> => {
-    if (!(error instanceof Error)) return { raw: String(error) };
-    const err = error as Error & {
-      code?: unknown;
-      shortMessage?: unknown;
-      info?: unknown;
-      cause?: unknown;
-    };
-    return {
-      name: err.name,
-      message: err.message,
-      code: err.code,
-      shortMessage: err.shortMessage,
-      info: err.info,
-      cause: err.cause instanceof Error ? { name: err.cause.name, message: err.cause.message } : err.cause,
-    };
-  };
-  const safeJsonish = (value: unknown): string => {
-    try {
-      return JSON.stringify(value);
-    } catch {
-      return String(value);
-    }
-  };
-  const haltProcessForFatalWatcherError = (fatalPayload: Record<string, unknown>): void => {
-    const error = new Error(`JADAPTER_WATCHER_FATAL:${safeJsonish(fatalPayload)}`);
-    if (runtimeIsBrowser) {
-      setTimeout(() => {
-        throw error;
-      }, 0);
-      return;
-    }
-    if (nodeProcess?.exit) {
-      nodeProcess.exit(1);
-      return;
-    }
-    throw error;
-  };
-  const asFactoryRunner = (runner: unknown): Parameters<typeof Account__factory.connect>[1] =>
-    runner as Parameters<typeof Account__factory.connect>[1];
-  const makeAccountFactory = (runner: unknown): Account__factory =>
-    new (Account__factory as unknown as new (runner: unknown) => Account__factory)(runner);
-  const makeHankoVerifierFactory = (runner: unknown): HankoVerifier__factory =>
-    new (HankoVerifier__factory as unknown as new (runner: unknown) => HankoVerifier__factory)(runner);
-  const makeDeltaTransformerFactory = (runner: unknown): DeltaTransformer__factory =>
-    new (DeltaTransformer__factory as unknown as new (runner: unknown) => DeltaTransformer__factory)(runner);
-  const makeErc20MockFactory = (runner: unknown): ERC20Mock__factory =>
-    new (ERC20Mock__factory as unknown as new (runner: unknown) => ERC20Mock__factory)(runner);
-  const eventCarriers = (
-    ...contracts: Array<{ interface: unknown; target: unknown }>
-  ): Parameters<typeof parseReceiptLogsToJEvents>[1] =>
-    contracts.map(contract => ({
-      address: String(contract.target),
-      interface: contract.interface as ethers.Interface,
-    }));
-  const asRpcTxResponse = (tx: unknown): RpcTxResponse => tx as RpcTxResponse;
-  const asRpcReceipt = (receipt: unknown): RpcReceipt => receipt as RpcReceipt;
-
   const isLocalLatestStateStaticCallRace = (error: unknown): boolean => {
     if (!DEV_CHAIN_IDS.has(config.chainId)) return false;
-    const detail = safeJsonish({
+    const detail = safeStringify({
       message: watcherErrorMessage(error),
       details: watcherErrorDetails(error),
     });
@@ -231,13 +170,14 @@ export async function createRpcAdapter(
   const rpcChainId = await readAndAssertRpcChainId(provider, config.chainId);
   trace('provider.eth_chainId:done', { rpcChainId, configChainId: Number(config.chainId) });
 
-  const applyGasHeadroom = (value: bigint): bigint => (value * BigInt(GAS_HEADROOM_BPS) + 9_999n) / 10_000n;
-
   const estimateProcessBatchGas = async (
     estimate: () => Promise<bigint>,
   ): Promise<{ gasLimit: bigint; usedFallback: boolean; error?: unknown }> => {
     if (config.mode === 'tron') {
-      return { gasLimit: applyGasHeadroom(await estimate()), usedFallback: false };
+      return {
+        gasLimit: applyGasHeadroom(await estimate(), GAS_HEADROOM_BPS),
+        usedFallback: false,
+      };
     }
     return estimateGasWithHeadroomResult(estimate, PROCESS_BATCH_GAS_FLOOR);
   };
@@ -371,7 +311,10 @@ export async function createRpcAdapter(
     fallback: bigint,
   ): Promise<GasEstimateResult> => {
     try {
-      return { gasLimit: applyGasHeadroom(await estimate()), usedFallback: false };
+      return {
+        gasLimit: applyGasHeadroom(await estimate(), GAS_HEADROOM_BPS),
+        usedFallback: false,
+      };
     } catch (error) {
       return { gasLimit: fallback, usedFallback: true, error };
     }
@@ -686,23 +629,6 @@ export async function createRpcAdapter(
       }
     }
     throw new Error(`${label} failed after nonce retry`);
-  };
-
-  type ErrorWithMessage = {
-    message?: unknown;
-  };
-  const isNonceSyncError = (error: unknown): boolean => {
-    const msg =
-      typeof error === 'object' && error !== null && 'message' in error
-        ? String((error as ErrorWithMessage).message ?? '')
-        : String(error ?? '');
-    const normalized = msg.toLowerCase();
-    return (
-      normalized.includes('nonce too low') ||
-      normalized.includes('nonce has already been used') ||
-      normalized.includes('nonce expired') ||
-      normalized.includes('code=nonce_expired')
-    );
   };
 
   const addresses: JAdapterAddresses = {
