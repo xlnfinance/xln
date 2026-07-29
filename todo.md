@@ -16,7 +16,8 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   only Runtime interprets committed outputs as post-WAL external effects.
   Delete or correct docs, comments, types and helpers that blur local
   `AccountTx[]` with signed bilateral `AccountInput`.
-  Drive the AST-ratcheted reverse-import debt to zero: lower Account code must
+  Drive the AST-ratcheted reverse-import debt from the verified 28 edges to
+  zero: lower Account code must
   not import Entity, Runtime, adapters or physical storage; Entity must not
   import Runtime, adapters, networking or physical storage; shared protocol
   leaves must not import machine implementations; HTTP server handlers must not
@@ -255,23 +256,13 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   `requestId → batchHash/opIndex/outcome` owner: withholding the bilateral
   claim must never let the hub spend reserve twice, and abort/requeue must
   rebroadcast or rebuild exactly once rather than doubling the draft amount.
-- [ ] Canonicalize financial construction and naming. Make hold fields
-  mandatory, build every empty Delta through one Account-owned constructor,
-  and prove identical keys/roots across add-delta, J-settlement and projection.
-  **Done:** renamed the strict wire decoder to `decodeRoutedEntityInput` and
-  the soft consensus predicate to `isEntityInputWellFormed`; reducer outputs
-  decode through `decodeRoutedEntityOutput` because Output is a direction, not
-  a duplicate wire type. Next, centralize
-  settlement-Hanko projection and RuntimeState symbols. Apply the same
-  `decode/assert` versus `isWellFormed/isProposable` distinction to twin
-  Account-frame validators; identical names must not hide throwing schema
-  validation versus a soft consensus predicate. Use exactly three semantic
-  verb families: `decode*` for unknown/wire → typed and throw, `assert*` for a
-  typed invariant and throw, and `is<Decision>*` for a boolean decision.
-  Rename the throwing Account-frame decoder to `decodeAccountFrame` and the
-  bounded consensus predicate to `isWithinAccountFrameBounds`; if a predicate
-  cannot be named for one decision, split its grab-bag checks instead of
-  calling it generically `validate*`.
+- [ ] Finish canonical financial construction and naming. Empty Deltas now use
+  the Account-owned constructor, hold fields are mandatory, and strict versus
+  boolean Account-frame validation is named `decodeAccountFrame` versus
+  `isWithinAccountFrameBounds`. Centralize the remaining settlement-Hanko
+  projection and RuntimeState symbols. Keep exactly three semantic verb
+  families: `decode*` for unknown/wire → typed and throw, `assert*` for a typed
+  invariant and throw, and `is<Decision>*` for one boolean decision.
 - [ ] Restore a structurally enforceable money boundary. Move finalized
   Account J-event settlement/dispute mutations out of `entity/tx/` and into
   Account-owned handlers; Entity may authenticate and route, but only Account
@@ -312,12 +303,12 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   coordinators below 100–150 lines, and every file below 3000 lines. After the
   pipeline, collapse DI factories that add navigation
   without providing a real swappable boundary. The R/E/A gate is already at
-  zero functions over 100 lines. The production ratchet now owns 52 exact
+  zero functions over 100 lines. The production ratchet now owns 28 exact
   allowances over 150 lines and rejects every new/growing coordinator plus
   every file over 3000 lines; delete each allowance with its verified split.
   Start with
   `jadapter/rpc-adapter.ts`,
-  `orchestrator/mm-node-run.ts`, `persistence/runtime-storage.ts`,
+  `orchestrator/mm-node-run.ts`, `storage/runtime-storage.ts`,
   `orchestrator/hub-node.ts`, `recovery/restore.ts` and `storage/index.ts`;
   split by lifecycle/ownership boundary, not arbitrary line ranges, and lower
   the exact allowance after every verified extraction.
@@ -434,12 +425,10 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   restore and dispute recovery before removing plaintext duplication.
 
 ## 4. Crash, corruption and load evidence — P1, open
-- [ ] Replace unchecked `JSON.parse(...) as Stored*` reads in the watchtower
-  LevelDB store with one strict decoder per persisted schema.
-  Reject malformed records loudly with the key and schema name, never coerce
-  corrupt financial-protection metadata to defaults, and prove behavior with
-  real LevelDB corruption/reopen tests. Ship each schema boundary separately;
-  do not add legacy or fallback decoders.
+- [ ] Prove the new strict watchtower LevelDB schema decoders with real
+  corruption/reopen tests for lookup documents, action receipts and metadata.
+  Every persisted read is decoded once and now fails closed; finish the disk
+  evidence, including the exact key and schema name in every corruption error.
 - [ ] Add one real Anvil contract-event dispute E2E after payment, HTLC,
   same-J/cross-J swap and pull state. Exercise malformed/oversized optional
   transformer arguments, compare final Depository reserves/debts to the
