@@ -646,6 +646,132 @@ const buildMarketMakerHealthResponseJson = (
   });
 };
 
+type MarketMakerHttpHandlerDeps = {
+  env: RuntimeState;
+  httpDrain: ReturnType<typeof createHttpDrainTracker>;
+  directRuntimeWs: ReturnType<typeof createDirectRuntimeWsRoute>;
+  runtimeIngressReceipts: ReturnType<typeof createRuntimeIngressReceiptStore>;
+  currentRuntimeHeight: (env: RuntimeState | null) => number;
+  getActiveEntityId: () => string | null;
+  buildAccountStatusDebug: (entityId: string, counterpartyEntityId: string, tokenIds: number[]) => Record<string, unknown>;
+  buildInfoResponseJson: (includeCrossDebug?: boolean) => string;
+  readCachedInfoResponseJson: () => string | null;
+  rebuildCachedInfoResponseJson: () => void;
+  buildHealthSnapshot: () => MarketMakerHealth | null;
+  readCachedHealthResponseJson: () => string | null;
+  rebuildCachedHealthResponseJson: () => void;
+  stopRuntimeLoops: () => void;
+};
+
+const quiesceMarketMakerRuntime = async (
+  deps: MarketMakerHttpHandlerDeps,
+  label: string,
+  options: { workTimeoutMs: number; loopTimeoutMs: number; quietMs?: number },
+): Promise<Response> => {
+  deps.stopRuntimeLoops();
+  try {
+    const result = await quiesceNodeRuntime(deps.env, options);
+    return new Response(safeStringify({ ok: true, ...result }), { headers: JSON_HEADERS });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[${resolvedArgs.name}] ${label} failed: ${message}`);
+    return new Response(safeStringify({ ok: false, error: message }), {
+      status: 503,
+      headers: JSON_HEADERS,
+    });
+  }
+};
+
+const createMarketMakerHttpHandler = (
+  deps: MarketMakerHttpHandlerDeps,
+): ((request: Request, server: Bun.Server) => Promise<Response | undefined>) =>
+  async (request, server) => {
+    const releaseHttp = deps.httpDrain.begin();
+    try {
+      const url = new URL(request.url);
+      const pathname = url.pathname;
+      const operatorAuthorized = isLocalOperatorRequest(request, resolveSocketPeerAddress(server, request));
+      if (request.headers.get('upgrade') === 'websocket' && pathname === '/rpc') {
+        if (server.upgrade(request, { data: { type: 'rpc' } })) return;
+        return new Response('WebSocket upgrade failed', { status: 400 });
+      }
+      const directUpgrade = deps.directRuntimeWs.maybeUpgrade(request, server);
+      if (directUpgrade.handled) return directUpgrade.response;
+      if (requiresLocalNodeOperator(url) && !operatorAuthorized) {
+        return new Response(safeStringify({ error: 'Operator access required' }), {
+          status: 403,
+          headers: JSON_HEADERS,
+        });
+      }
+      if (pathname === '/api/account/status' && request.method === 'GET') {
+        const entityId = String(
+          url.searchParams.get('entityId') || url.searchParams.get('mmEntityId') || deps.getActiveEntityId() || '',
+        ).toLowerCase();
+        const counterpartyEntityId = String(url.searchParams.get('counterpartyEntityId') || '').toLowerCase();
+        if (!entityId || !counterpartyEntityId) {
+          return new Response(
+            safeStringify({
+              success: false,
+              code: 'MM_ACCOUNT_STATUS_BAD_REQUEST',
+              error: 'entityId/mmEntityId and counterpartyEntityId are required',
+            }),
+            { status: 400, headers: JSON_HEADERS },
+          );
+        }
+        const tokenIds = String(url.searchParams.get('tokenIds') || '')
+          .split(',')
+          .map(value => Number(value.trim()))
+          .filter(value => Number.isInteger(value) && value > 0);
+        return new Response(safeStringify(deps.buildAccountStatusDebug(entityId, counterpartyEntityId, tokenIds)), {
+          headers: JSON_HEADERS,
+        });
+      }
+      if (pathname === '/api/info') {
+        const includeCrossDebug =
+          url.searchParams.get('crossDebug') === '1' || url.searchParams.get('debug') === 'cross';
+        if (includeCrossDebug) {
+          return new Response(deps.buildInfoResponseJson(true), { headers: JSON_HEADERS });
+        }
+        if (!deps.readCachedInfoResponseJson()) deps.rebuildCachedInfoResponseJson();
+        return new Response(deps.readCachedInfoResponseJson() ?? '{}', { headers: JSON_HEADERS });
+      }
+      if (pathname === '/api/health/full' || (pathname === '/api/health' && url.searchParams.get('full') === '1')) {
+        const health = deps.buildHealthSnapshot();
+        return new Response(health ? safeStringify(health) : '{}', { headers: JSON_HEADERS });
+      }
+      if (pathname === '/api/health') {
+        if (!deps.readCachedHealthResponseJson()) deps.rebuildCachedHealthResponseJson();
+        return new Response(deps.readCachedHealthResponseJson() ?? '{}', { headers: JSON_HEADERS });
+      }
+      const runtimeInputStatusMatch = pathname.match(/^\/api\/control\/runtime-input\/([^/]+)\/status$/);
+      if (runtimeInputStatusMatch && request.method === 'GET') {
+        return handleRuntimeInputStatus(decodeURIComponent(runtimeInputStatusMatch[1] || ''), JSON_HEADERS, deps.env, {
+          receipts: deps.runtimeIngressReceipts,
+          getCurrentRuntimeHeight: deps.currentRuntimeHeight,
+        });
+      }
+      if (pathname === '/api/control/p2p/stop' && request.method === 'POST') {
+        return quiesceMarketMakerRuntime(deps, 'p2p stop', {
+          workTimeoutMs: 10_000,
+          loopTimeoutMs: 5_000,
+        });
+      }
+      if (pathname === '/api/control/runtime/quiesce' && request.method === 'POST') {
+        return quiesceMarketMakerRuntime(deps, 'runtime quiesce', {
+          workTimeoutMs: 20_000,
+          loopTimeoutMs: 5_000,
+          quietMs: 750,
+        });
+      }
+      return new Response(safeStringify({ error: 'Not found' }), {
+        status: 404,
+        headers: JSON_HEADERS,
+      });
+    } finally {
+      releaseHttp();
+    }
+  };
+
 export const runMarketMakerNode = async (): Promise<void> => {
   activateMarketMakerProcessArgs();
   if (resolvedArgs.dbPath) process.env['XLN_DB_PATH'] = resolvedArgs.dbPath;
@@ -918,131 +1044,26 @@ export const runMarketMakerNode = async (): Promise<void> => {
     hostname: resolvedArgs.apiHost,
     port: resolvedArgs.apiPort,
     idleTimeout: 120,
-    async fetch(request, serverRef) {
-      const releaseHttp = httpDrain.begin();
-      try {
-        const url = new URL(request.url);
-        const pathname = url.pathname;
-        const operatorAuthorized = isLocalOperatorRequest(request, resolveSocketPeerAddress(serverRef, request));
-
-        if (request.headers.get('upgrade') === 'websocket' && pathname === '/rpc') {
-          const upgraded = serverRef.upgrade(request, { data: { type: 'rpc' } });
-          if (upgraded) return;
-          return new Response('WebSocket upgrade failed', { status: 400 });
-        }
-
-        const directUpgrade = directRuntimeWs.maybeUpgrade(request, serverRef);
-        if (directUpgrade.handled) return directUpgrade.response;
-
-        if (requiresLocalNodeOperator(url) && !operatorAuthorized) {
-          return new Response(safeStringify({ error: 'Operator access required' }), {
-            status: 403,
-            headers: JSON_HEADERS,
-          });
-        }
-
-        if (pathname === '/api/account/status' && request.method === 'GET') {
-          const entityId = String(
-            url.searchParams.get('entityId') || url.searchParams.get('mmEntityId') || activeMmEntityId || '',
-          ).toLowerCase();
-          const counterpartyEntityId = String(url.searchParams.get('counterpartyEntityId') || '').toLowerCase();
-          if (!entityId || !counterpartyEntityId) {
-            return new Response(
-              safeStringify({
-                success: false,
-                code: 'MM_ACCOUNT_STATUS_BAD_REQUEST',
-                error: 'entityId/mmEntityId and counterpartyEntityId are required',
-              }),
-              { status: 400, headers: JSON_HEADERS },
-            );
-          }
-          const tokenIds = String(url.searchParams.get('tokenIds') || '')
-            .split(',')
-            .map(value => Number(value.trim()))
-            .filter(value => Number.isInteger(value) && value > 0);
-          return new Response(safeStringify(buildAccountStatusDebug(entityId, counterpartyEntityId, tokenIds)), {
-            headers: JSON_HEADERS,
-          });
-        }
-
-        if (pathname === '/api/info') {
-          const includeCrossDebug =
-            url.searchParams.get('crossDebug') === '1' || url.searchParams.get('debug') === 'cross';
-          if (includeCrossDebug) {
-            return new Response(buildInfoResponseJson(true), { headers: JSON_HEADERS });
-          }
-          if (!cachedInfoResponseJson) rebuildCachedInfoResponseJson();
-          return new Response(cachedInfoResponseJson ?? '{}', { headers: JSON_HEADERS });
-        }
-
-        if (pathname === '/api/health/full' || (pathname === '/api/health' && url.searchParams.get('full') === '1')) {
-          const health = buildMarketMakerHealthSnapshot({ includeCross: true });
-          return new Response(health ? safeStringify(health) : '{}', { headers: JSON_HEADERS });
-        }
-
-        if (pathname === '/api/health') {
-          if (!cachedHealthResponseJson) rebuildCachedHealthResponseJson();
-          return new Response(cachedHealthResponseJson ?? '{}', { headers: JSON_HEADERS });
-        }
-
-        const runtimeInputStatusMatch = pathname.match(/^\/api\/control\/runtime-input\/([^/]+)\/status$/);
-        if (runtimeInputStatusMatch && request.method === 'GET') {
-          const receiptId = decodeURIComponent(runtimeInputStatusMatch[1] || '');
-          return handleRuntimeInputStatus(receiptId, JSON_HEADERS, env, {
-            receipts: runtimeIngressReceipts,
-            getCurrentRuntimeHeight: currentRuntimeHeight,
-          });
-        }
-
-        if (pathname === '/api/control/p2p/stop' && request.method === 'POST') {
-          shuttingDown = true;
-          if (loop) clearInterval(loop);
-          if (healthRefreshLoop) clearInterval(healthRefreshLoop);
-          try {
-            const result = await quiesceNodeRuntime(env, {
-              workTimeoutMs: 10_000,
-              loopTimeoutMs: 5_000,
-            });
-            return new Response(safeStringify({ ok: true, ...result }), { headers: JSON_HEADERS });
-          } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            console.error(`[${resolvedArgs.name}] p2p stop failed: ${message}`);
-            return new Response(safeStringify({ ok: false, error: message }), {
-              status: 503,
-              headers: JSON_HEADERS,
-            });
-          }
-        }
-
-        if (pathname === '/api/control/runtime/quiesce' && request.method === 'POST') {
-          shuttingDown = true;
-          if (loop) clearInterval(loop);
-          if (healthRefreshLoop) clearInterval(healthRefreshLoop);
-          try {
-            const result = await quiesceNodeRuntime(env, {
-              workTimeoutMs: 20_000,
-              loopTimeoutMs: 5_000,
-              quietMs: 750,
-            });
-            return new Response(safeStringify({ ok: true, ...result }), { headers: JSON_HEADERS });
-          } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            console.error(`[${resolvedArgs.name}] runtime quiesce failed: ${message}`);
-            return new Response(safeStringify({ ok: false, error: message }), {
-              status: 503,
-              headers: JSON_HEADERS,
-            });
-          }
-        }
-
-        return new Response(safeStringify({ error: 'Not found' }), {
-          status: 404,
-          headers: JSON_HEADERS,
-        });
-      } finally {
-        releaseHttp();
-      }
-    },
+    fetch: createMarketMakerHttpHandler({
+      env,
+      httpDrain,
+      directRuntimeWs,
+      runtimeIngressReceipts,
+      currentRuntimeHeight,
+      getActiveEntityId: () => activeMmEntityId,
+      buildAccountStatusDebug,
+      buildInfoResponseJson,
+      readCachedInfoResponseJson: () => cachedInfoResponseJson,
+      rebuildCachedInfoResponseJson,
+      buildHealthSnapshot: () => buildMarketMakerHealthSnapshot({ includeCross: true }),
+      readCachedHealthResponseJson: () => cachedHealthResponseJson,
+      rebuildCachedHealthResponseJson,
+      stopRuntimeLoops: () => {
+        shuttingDown = true;
+        if (loop) clearInterval(loop);
+        if (healthRefreshLoop) clearInterval(healthRefreshLoop);
+      },
+    }),
     websocket: {
       open(ws: MarketMakerServerSocket) {
         if (ws.data?.type === 'rpc') {

@@ -1252,19 +1252,13 @@ describe('production startup wiring', () => {
     for (const source of sources) {
       expect(source).toContain("from './node-runtime-quiesce';");
       expect(source).toContain('quiesceNodeRuntime');
-      const quiesceBlock = source.includes(
-        'const createHubControlRequestHandler = (',
-      )
+      const quiesceBlock = source.includes('const createHubControlRequestHandler = (')
         ? extractSourceBlock(
             source,
             'const createHubControlRequestHandler = (',
             'const handleHubJurisdictionsRequest = (',
           )
-        : extractSourceBlock(
-            source,
-            "if (pathname === '/api/control/runtime/quiesce' && request.method === 'POST') {",
-            "return new Response(safeStringify({ error: 'Not found' })",
-          );
+        : extractSourceBlock(source, 'const quiesceMarketMakerRuntime = async (', 'const createMarketMakerHttpHandler');
       expect(quiesceBlock).toContain('quiesceNodeRuntime(');
       expect(quiesceBlock).toContain('status: 503');
       expect(quiesceBlock).toContain('safeStringify({ ok: false, error: message })');
@@ -1526,8 +1520,12 @@ describe('production startup wiring', () => {
     expect(controlRouteStart).toBeGreaterThan(healthRouteStart);
 
     const healthRoute = mmNode.slice(healthRouteStart, controlRouteStart);
-    expect(healthRoute).toContain('if (!cachedHealthResponseJson) rebuildCachedHealthResponseJson();');
-    expect(healthRoute).toContain("return new Response(cachedHealthResponseJson ?? '{}', { headers: JSON_HEADERS });");
+    expect(healthRoute).toContain(
+      'if (!deps.readCachedHealthResponseJson()) deps.rebuildCachedHealthResponseJson();',
+    );
+    expect(healthRoute).toContain(
+      "return new Response(deps.readCachedHealthResponseJson() ?? '{}', { headers: JSON_HEADERS });",
+    );
     expect(healthRoute).not.toContain('safeStringify(');
     expect(healthRoute).not.toContain('readVisibleHubProfiles(');
     expect(healthRoute).not.toContain('getMarketMakerHealth(');
@@ -1631,9 +1629,11 @@ describe('production startup wiring', () => {
     const infoRoute = mmNode.slice(infoRouteStart, fullHealthRouteStart);
     expect(infoRoute).toContain("url.searchParams.get('crossDebug') === '1'");
     expect(infoRoute).toContain("url.searchParams.get('debug') === 'cross'");
-    expect(infoRoute).toContain('return new Response(buildInfoResponseJson(true), { headers: JSON_HEADERS });');
-    expect(infoRoute).toContain('if (!cachedInfoResponseJson) rebuildCachedInfoResponseJson();');
-    expect(infoRoute).toContain("return new Response(cachedInfoResponseJson ?? '{}', { headers: JSON_HEADERS });");
+    expect(infoRoute).toContain('return new Response(deps.buildInfoResponseJson(true), { headers: JSON_HEADERS });');
+    expect(infoRoute).toContain('if (!deps.readCachedInfoResponseJson()) deps.rebuildCachedInfoResponseJson();');
+    expect(infoRoute).toContain(
+      "return new Response(deps.readCachedInfoResponseJson() ?? '{}', { headers: JSON_HEADERS });",
+    );
     expect(infoRoute).not.toContain('getMarketMakerRuntimeBacklogSnapshot(env');
     expect(infoRoute).not.toContain('buildMarketMakerCrossDebugSummary(');
     expect(mmNode).toContain('const buildInfoResponseJson = (includeCrossDebug = false): string => {');
@@ -1804,7 +1804,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain(
       "pathname === '/api/health/full' || (pathname === '/api/health' && url.searchParams.get('full') === '1')",
     );
-    expect(mmNode).toContain('const health = buildMarketMakerHealthSnapshot({ includeCross: true });');
+    expect(mmNode).toContain('buildHealthSnapshot: () => buildMarketMakerHealthSnapshot({ includeCross: true })');
     expect(mmNode).toContain("pathname === '/api/account/status'");
     expect(mmNode).toContain('pendingFrameTxs: (account?.pendingFrame?.accountTxs ?? []).map');
     expect(smoke).toContain('const shouldFetchMarketMakerHealth = (health: HealthPayload): boolean =>');
