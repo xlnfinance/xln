@@ -1264,13 +1264,19 @@ describe('production startup wiring', () => {
       expect(quiesceBlock).toContain('status: 503');
       expect(quiesceBlock).toContain('safeStringify({ ok: false, error: message })');
 
-      const shutdownBlock = extractSourceBlock(
-        source,
-        'const shutdown = async',
-        'const stopParentWatch = startParentLivenessWatch',
-      );
+      const shutdownBlock = source.includes('const createMarketMakerShutdown = (')
+        ? extractSourceBlock(
+            source,
+            'const createMarketMakerShutdown = (',
+            'const installMarketMakerShutdownSignals = (',
+          )
+        : extractSourceBlock(
+            source,
+            'const shutdown = async',
+            'const stopParentWatch = startParentLivenessWatch',
+          );
       expect(shutdownBlock).toMatch(
-        /await runCleanup\('quiesce', \(\) =>\s*quiesceNodeRuntime\((?:live\.)?env, \{/,
+        /await runCleanup\('quiesce', \(\) =>\s*quiesceNodeRuntime\((?:live\.|deps\.)?env, \{/,
       );
       expect(shutdownBlock).toContain("await runCleanup('server'");
       expect(shutdownBlock).toContain("await runCleanup('runtime_db'");

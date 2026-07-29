@@ -15,7 +15,7 @@ const COORDINATOR_DEBT: Readonly<Record<string, number>> = {
   'runtime/jadapter/rpc-adapter.ts::doPoll': 389,
   'runtime/jadapter/rpc-adapter.ts::pollInFlight callback': 300,
   'runtime/jadapter/rpc-adapter.ts::startWatching': 659,
-  'runtime/orchestrator/mm-node-run.ts::runMarketMakerNode': 948,
+  'runtime/orchestrator/mm-node-run.ts::runMarketMakerNode': 917,
 };
 
 type FunctionSize = {

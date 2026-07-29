@@ -1177,6 +1177,62 @@ const selectMarketMakerCrossQuoteJobs = (
   return { jobs: selected, nextCursor };
 };
 
+type MarketMakerShutdownDeps = {
+  env: RuntimeState;
+  server: Bun.Server;
+  httpDrain: ReturnType<typeof createHttpDrainTracker>;
+  stopRuntimeLoops: () => void;
+};
+
+const createMarketMakerShutdown = (
+  deps: MarketMakerShutdownDeps,
+): ((code?: number) => Promise<void>) => {
+  let started = false;
+  return async (code = 0) => {
+    if (started) return;
+    started = true;
+    deps.stopRuntimeLoops();
+    const failures: string[] = [];
+    const runCleanup = async (label: string, cleanup: () => Promise<unknown>): Promise<void> => {
+      try {
+        await cleanup();
+      } catch (error) {
+        failures.push(`${label}:${error instanceof Error ? error.message : String(error)}`);
+      }
+    };
+    await runCleanup('quiesce', () =>
+      quiesceNodeRuntime(deps.env, {
+        workTimeoutMs: 10_000,
+        loopTimeoutMs: 10_000,
+      }),
+    );
+    await runCleanup('server', () => stopServerGracefully(deps.server, deps.httpDrain, resolvedArgs.name, 5_000));
+    await runCleanup('runtime_db', () => closeRuntimeDb(deps.env));
+    await runCleanup('infra_db', () => closeInfraDb(deps.env));
+    if (failures.length > 0) {
+      console.error(`[${resolvedArgs.name}] shutdown failed: ${failures.join('|')}`);
+      process.exit(code || 1);
+    }
+    process.exit(code);
+  };
+};
+
+const installMarketMakerShutdownSignals = (
+  shutdown: (code?: number) => Promise<void>,
+): void => {
+  const stopParentWatch = startParentLivenessWatch(
+    resolvedArgs.name,
+    process.env['XLN_ORCHESTRATOR_PID'],
+    () => void shutdown(1),
+  );
+  const shutdownFromSignal = (): void => {
+    stopParentWatch();
+    void shutdown();
+  };
+  process.on('SIGTERM', shutdownFromSignal);
+  process.on('SIGINT', shutdownFromSignal);
+};
+
 export const runMarketMakerNode = async (): Promise<void> => {
   activateMarketMakerProcessArgs();
   if (resolvedArgs.dbPath) process.env['XLN_DB_PATH'] = resolvedArgs.dbPath;
@@ -2081,47 +2137,16 @@ export const runMarketMakerNode = async (): Promise<void> => {
     }
   })().catch(failQuoteLoop);
 
-  let shutdownStarted = false;
-  const shutdown = async (code: number = 0): Promise<void> => {
-    if (shutdownStarted) return;
-    shutdownStarted = true;
-    shuttingDown = true;
-    if (loop) clearInterval(loop);
-    if (healthRefreshLoop) clearInterval(healthRefreshLoop);
-    const failures: string[] = [];
-    const runCleanup = async (label: string, cleanup: () => Promise<unknown>): Promise<void> => {
-      try {
-        await cleanup();
-      } catch (error) {
-        failures.push(`${label}:${error instanceof Error ? error.message : String(error)}`);
-      }
-    };
-    await runCleanup('quiesce', () =>
-      quiesceNodeRuntime(env, {
-        workTimeoutMs: 10_000,
-        loopTimeoutMs: 10_000,
-      }),
-    );
-    await runCleanup('server', () => stopServerGracefully(server, httpDrain, resolvedArgs.name, 5_000));
-    await runCleanup('runtime_db', () => closeRuntimeDb(env));
-    await runCleanup('infra_db', () => closeInfraDb(env));
-    if (failures.length > 0) {
-      console.error(`[${resolvedArgs.name}] shutdown failed: ${failures.join('|')}`);
-      process.exit(code || 1);
-    }
-    process.exit(code);
-  };
-  const stopParentWatch = startParentLivenessWatch(resolvedArgs.name, process.env['XLN_ORCHESTRATOR_PID'], () => {
-    void shutdown(1);
+  const shutdown = createMarketMakerShutdown({
+    env,
+    server,
+    httpDrain,
+    stopRuntimeLoops: () => {
+      shuttingDown = true;
+      if (loop) clearInterval(loop);
+      if (healthRefreshLoop) clearInterval(healthRefreshLoop);
+    },
   });
-
-  process.on('SIGTERM', () => {
-    stopParentWatch();
-    void shutdown();
-  });
-  process.on('SIGINT', () => {
-    stopParentWatch();
-    void shutdown();
-  });
+  installMarketMakerShutdownSignals(shutdown);
   await new Promise<void>(() => {});
 };
