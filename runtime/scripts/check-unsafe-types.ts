@@ -52,7 +52,6 @@ const DOUBLE_ASSERTION_DEBT: Readonly<Record<string, number>> = {
 // These suppressions bridge third-party declaration gaps. They remain visible
 // debt because a suppression can hide unrelated errors on the same line.
 const TS_SUPPRESSION_DEBT: Readonly<Record<string, number>> = {
-  'runtime/jadapter/browservm-ethers-provider.ts': 1,
   'runtime/networking/p2p-crypto.ts': 3,
 };
 
@@ -86,9 +85,9 @@ const inspectFile = (file: string): UnsafeTypeCounts => {
       explicitAnyLines.push(lineOf(source, node.getStart(source)));
     }
     if (
-      ts.isAsExpression(node)
-      && ts.isAsExpression(node.expression)
-      && node.expression.type.kind === ts.SyntaxKind.UnknownKeyword
+      ts.isAsExpression(node) &&
+      ts.isAsExpression(node.expression) &&
+      node.expression.type.kind === ts.SyntaxKind.UnknownKeyword
     ) {
       doubleAssertionLines.push(lineOf(source, node.getStart(source)));
     }
@@ -98,7 +97,7 @@ const inspectFile = (file: string): UnsafeTypeCounts => {
 
   const suppressionLines = text
     .split(/\r?\n/)
-    .flatMap((line, index) => /@ts-(?:ignore|nocheck|expect-error)\b/.test(line) ? [index + 1] : []);
+    .flatMap((line, index) => (/@ts-(?:ignore|nocheck|expect-error)\b/.test(line) ? [index + 1] : []));
   return { explicitAnyLines, doubleAssertionLines, suppressionLines };
 };
 
@@ -128,13 +127,7 @@ for (const file of files) {
   if (counts.explicitAnyLines.length > 0) {
     errors.push(`EXPLICIT_ANY ${file}:${counts.explicitAnyLines.join(',')}`);
   }
-  checkDebt(
-    file,
-    counts.doubleAssertionLines,
-    DOUBLE_ASSERTION_DEBT,
-    observedDoubleAssertions,
-    'DOUBLE_ASSERTION',
-  );
+  checkDebt(file, counts.doubleAssertionLines, DOUBLE_ASSERTION_DEBT, observedDoubleAssertions, 'DOUBLE_ASSERTION');
   checkDebt(file, counts.suppressionLines, TS_SUPPRESSION_DEBT, observedSuppressions, 'TS_SUPPRESSION');
 }
 
@@ -161,5 +154,5 @@ const total = (values: ReadonlyMap<string, number>): number =>
 
 console.log(
   `UNSAFE_TYPES_OK files=${files.length} explicitAny=${explicitAnyCount} ` +
-  `doubleAssertions=${total(observedDoubleAssertions)} suppressions=${total(observedSuppressions)}`,
+    `doubleAssertions=${total(observedDoubleAssertions)} suppressions=${total(observedSuppressions)}`,
 );
