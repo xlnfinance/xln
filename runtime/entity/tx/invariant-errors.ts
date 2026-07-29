@@ -29,6 +29,7 @@ export class MalformedEntityFrameInputError extends Error {
 }
 
 export type EntityInputApplyFailureKind =
+  | 'unroutable-ingress'
   | 'malformed-ingress'
   | 'state-machine-invariant'
   | 'storage'

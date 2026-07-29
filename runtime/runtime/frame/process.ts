@@ -49,7 +49,7 @@ type RuntimeLoopProcessDeps = Pick<
   | 'prioritizeJEventFrame'
   | 'applyEntityInputFrameCap'
   | 'applyEntityTxFrameCap'
-  | 'discardMalformedRemoteEntityInput'
+  | 'discardRejectedEntityInput'
   | 'RuntimeInputDiscardedError'
   | 'getRuntimeWorkReason'
 >;
@@ -421,7 +421,7 @@ const applyAndCommitRuntimeFrame = async (
       frameTimestampBeforeTick: started.frameTimestampBeforeTick,
       quietRuntimeLogs: candidate.quietRuntimeLogs,
       discardMalformedRemoteInput: (input, cause, quiet) =>
-        deps.loop.discardMalformedRemoteEntityInput(liveEnv, input, cause, quiet),
+        deps.loop.discardRejectedEntityInput(liveEnv, input, cause, quiet),
       discardedError: cause => new deps.loop.RuntimeInputDiscardedError(cause),
     }, error, options);
     env = rollback.env;

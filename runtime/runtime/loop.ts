@@ -50,7 +50,7 @@ import {
   type RuntimeWorkDeps,
 } from './loop-work';
 import {
-  discardMalformedRemoteEntityInput,
+  discardRejectedEntityInput,
   RuntimeInputDiscardedError,
 } from './frame/input-discard';
 import { createRuntimeRoutingApi } from './loop-routing';
@@ -166,7 +166,7 @@ export const createRuntimeLoopApi = (deps: RuntimeLoopApiDeps) => {
     applyEntityTxFrameCap,
     generateHookPings,
     isRuntimeFrameReady,
-    discardMalformedRemoteEntityInput,
+    discardRejectedEntityInput,
     RuntimeInputDiscardedError,
     waitForPromiseBeforeTimeout,
     ...lifecycle,

@@ -860,7 +860,7 @@ for (const marker of [
 
 const runtimeSourcePath = 'runtime/runtime/frame/input-discard.ts';
 const runtimeSource = readText(runtimeSourcePath);
-assertIncludes(runtimeSource, 'error.isDiscardableRemoteIngress', runtimeSourcePath);
+assertIncludes(runtimeSource, 'error.isDiscardableIngress', runtimeSourcePath);
 assertNotIncludes(
   runtimeSource,
   'error instanceof RuntimeEntityInputApplyError && error.isRemoteIngress',

@@ -52,10 +52,12 @@ export interface RuntimeEntityInputApplyResult {
 }
 
 /**
- * Preserves authenticated transport provenance across the consensus boundary.
- * Runtime uses this typed error instead of message substring matching: an
- * malformed untrusted remote input may be discarded, while the same failure in a
- * locally generated command is a deterministic runtime bug and must halt.
+ * Preserves the failure class across the EntityInput boundary.
+ *
+ * Admission failures are discarded before mutation regardless of whether the
+ * invalid input came from transport or the local Runtime mempool. Reducer,
+ * storage, and internal failures remain fatal: they may indicate corrupted
+ * committed state and must never be reclassified from an error message.
  */
 export class RuntimeEntityInputApplyError extends Error {
   readonly entityId: string;
@@ -93,8 +95,9 @@ export class RuntimeEntityInputApplyError extends Error {
     return this.sourceRuntimeId.length > 0 && !this.trustedLocalCrossJurisdiction;
   }
 
-  get isDiscardableRemoteIngress(): boolean {
-    return this.isRemoteIngress && this.failureKind === 'malformed-ingress';
+  get isDiscardableIngress(): boolean {
+    return this.failureKind === 'unroutable-ingress' ||
+      (this.failureKind === 'malformed-ingress' && this.isRemoteIngress);
   }
 }
 
@@ -486,15 +489,15 @@ const applyExternalEntityInput = async (
     assertExternalEntityInputAllowed(env, entityInput);
     resolved = resolveEntityInputReplica(env, entityInput);
   } catch (error) {
-    // Admission and replica resolution are part of the authenticated Entity
-    // input boundary. Preserve the input's transport provenance here: a
-    // malformed remote envelope may be discarded, while the identical error
-    // from locally generated work is an invariant failure and must halt.
+    // Admission and replica resolution happen before the Entity reducer can
+    // mutate state. An invalid target or envelope is therefore rejected input,
+    // not a Runtime failure. The original provenance is retained so rollback
+    // removes only the exact rejected lane from a mixed Runtime frame.
     throw new RuntimeEntityInputApplyError(
       entityInput,
       false,
       error,
-      entityInput.from ? 'malformed-ingress' : 'local-bug',
+      'unroutable-ingress',
     );
   }
   const { signerId, replicaKey, replica } = resolved;

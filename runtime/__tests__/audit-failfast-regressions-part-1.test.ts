@@ -181,7 +181,7 @@ import {
 import { createJReplica } from '../scenarios/boot';
 
 import { applyMergedEntityInputs, RuntimeEntityInputApplyError } from '../runtime/entity-inputs';
-import { discardMalformedRemoteEntityInput } from '../runtime/frame/input-discard';
+import { discardRejectedEntityInput } from '../runtime/frame/input-discard';
 
 import { MalformedEntityFrameInputError } from '../entity/tx/invariant-errors';
 
@@ -1022,7 +1022,7 @@ describe('audit fail-fast regressions', () => {
     localEnv.scenarioMode = false;
     const cause = new MalformedEntityFrameInputError('openAccount', 'RUNTIME_REPLICA_NOT_FOUND: test');
     const localError = new RuntimeEntityInputApplyError(entityInput, false, cause);
-    expect(discardMalformedRemoteEntityInput(localEnv, runtimeInput, localError, true)).toBeNull();
+    expect(discardRejectedEntityInput(localEnv, runtimeInput, localError, true)).toBeNull();
 
     const remoteEntityInput = { ...entityInput, from: `0x${'97'.repeat(20)}` };
     const unrelatedInput = {
@@ -1033,7 +1033,7 @@ describe('audit fail-fast regressions', () => {
     const remoteEnv = createEmptyEnv('remote-provenance-may-discard');
     remoteEnv.scenarioMode = false;
     const remoteError = new RuntimeEntityInputApplyError(remoteEntityInput, false, cause);
-    const retained = discardMalformedRemoteEntityInput(
+    const retained = discardRejectedEntityInput(
       remoteEnv,
       { runtimeTxs: [], entityInputs: [remoteEntityInput, unrelatedInput] },
       remoteError,
@@ -1139,7 +1139,19 @@ describe('audit fail-fast regressions', () => {
       new MalformedEntityFrameInputError('definitely_unknown_entity_tx', 'ENTITY_TX_UNHANDLED'),
     );
     expect(malformed.failureKind).toBe('malformed-ingress');
-    expect(malformed.isDiscardableRemoteIngress).toBe(true);
+    expect(malformed.isDiscardableIngress).toBe(true);
+
+    const unroutableLocal = new RuntimeEntityInputApplyError(
+      {
+        entityId: remote.entityId,
+        signerId: remote.signerId,
+        entityTxs: [],
+      },
+      false,
+      new Error('RUNTIME_ENTITY_INPUT_UNKNOWN_TARGET'),
+      'unroutable-ingress',
+    );
+    expect(unroutableLocal.isDiscardableIngress).toBe(true);
 
     const storage = new RuntimeEntityInputApplyError(
       {
@@ -1151,7 +1163,7 @@ describe('audit fail-fast regressions', () => {
       new Error('STORAGE_NODE_HASH_MISMATCH'),
     );
     expect(storage.failureKind).toBe('storage');
-    expect(storage.isDiscardableRemoteIngress).toBe(false);
+    expect(storage.isDiscardableIngress).toBe(false);
 
     const localBug = new RuntimeEntityInputApplyError(
       {
@@ -1163,7 +1175,7 @@ describe('audit fail-fast regressions', () => {
       new TypeError('unexpected undefined state'),
     );
     expect(localBug.failureKind).toBe('local-bug');
-    expect(localBug.isDiscardableRemoteIngress).toBe(false);
+    expect(localBug.isDiscardableIngress).toBe(false);
 
     const applyRemoteAgainstBrokenState = async (
       seed: string,

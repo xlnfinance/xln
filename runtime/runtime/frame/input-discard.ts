@@ -15,7 +15,7 @@ const sameRejectedOrigin = (
   String(input.from || '').trim().toLowerCase() === error.sourceRuntimeId.toLowerCase();
 
 /**
- * Remove only the remote origin that produced a malformed EntityInput.
+ * Remove only the origin that produced a malformed EntityInput.
  *
  * Runtime may reduce a remote envelope beside a locally generated scheduler
  * wake for the same Entity replica. Transport provenance remains attached to
@@ -27,14 +27,14 @@ const sameRejectedOrigin = (
  * bytes are neither consensus data nor history; retaining them would let an
  * attacker grow durable Runtime state without ever producing a valid frame.
  */
-export const discardMalformedRemoteEntityInput = (
+export const discardRejectedEntityInput = (
   env: RuntimeState,
   input: RuntimeInput,
   error: unknown,
   quietLogs: boolean,
 ): RuntimeInput | null => {
   if (env.scenarioMode || readRuntimeMetadata(env, ENV_REPLAY_MODE_KEY) === true) return null;
-  if (!(error instanceof RuntimeEntityInputApplyError) || !error.isDiscardableRemoteIngress) {
+  if (!(error instanceof RuntimeEntityInputApplyError) || !error.isDiscardableIngress) {
     return null;
   }
   const remaining = cloneRuntimeFrameMempool(input);
