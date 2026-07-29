@@ -19,9 +19,9 @@ import { getReplicaProposalLeader } from './leader';
 import { buildCertifiedEntityOutputHashes } from './output-certification';
 import type { EntityProposalSelection } from './proposal-selection';
 import {
-  entityLog,
   expectedCommittedLeaderState,
-} from './shared';
+} from './leader-certificates';
+import { entityLog } from './entity-log';
 import {
   assertProposerJRangesMatchLocalHistory,
   getReplicaJRangeValidationError,

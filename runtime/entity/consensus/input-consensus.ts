@@ -20,9 +20,9 @@ import { prepareEntityInputIngress } from './input-ingress';
 import { admitEntityTransactions } from './input-admission';
 
 import {
-  entityLog,
   normalizePrecommitBundles,
-} from './shared';
+} from './leader-certificates';
+import { entityLog } from './entity-log';
 import { ensureLocalJPrefixAttestation } from './j-prefix-round';
 import { assertFrameParentMatchesState } from './frame-lineage';
 import { validateProposedFrameLeader } from './proposal-policy';

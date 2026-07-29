@@ -69,7 +69,8 @@ const RUNTIME_CORE_TESTS = [
 const SOUNDCHECK_TARGETS = [
   'runtime/runtime.ts',
   'runtime/runtime/composition.ts',
-  'runtime/entity/consensus/shared.ts',
+  'runtime/entity/consensus/leader-certificates.ts',
+  'runtime/entity/consensus/j-prefix-round.ts',
   'runtime/entity/consensus/input-consensus.ts',
   'runtime/entity/consensus/frame-application.ts',
   'runtime/account/consensus/index.ts',

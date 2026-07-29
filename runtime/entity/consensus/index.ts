@@ -9,7 +9,7 @@ export {
   selectPreparedFrameFromCertificate,
   verifyEntityLeaderCertificate,
   verifyEntityRelayCertificate,
-} from './shared';
+} from './leader-certificates';
 export {
   CROSS_J_PENDING_FILL_ACK_TTL_MS,
   MAX_PENDING_CROSS_J_FILL_ACKS,

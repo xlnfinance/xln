@@ -11,10 +11,10 @@ import {
 } from './input-types';
 import { replayProposedEntityFrame } from './proposal-replay';
 import {
-  entityLog,
   normalizePrecommitBundles,
   verifyHashPrecommitSignatures,
-} from './shared';
+} from './leader-certificates';
+import { entityLog } from './entity-log';
 import {
   getFrameJPrefixValidationError,
   getReplicaJRangeValidationError,

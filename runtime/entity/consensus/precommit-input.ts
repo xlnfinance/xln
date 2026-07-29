@@ -9,11 +9,11 @@ import {
   type ApplyEntityInputResult,
 } from './input-types';
 import {
-  entityLog,
   getValidatorExecutionForFrame,
   normalizePrecommitBundles,
   verifyHashPrecommitSignatures,
-} from './shared';
+} from './leader-certificates';
+import { entityLog } from './entity-log';
 import {
   calculateQuorumPower,
   validateVotingPower,

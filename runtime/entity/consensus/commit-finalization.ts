@@ -8,11 +8,13 @@ import { commitEntityFrameCandidateState } from '../state-clone';
 import { cacheCommittedConsumptionNodeChanges } from '../consumption-store';
 import { emitCommittedPendingFrameWarnings } from '../scheduler';
 import {
-  emitCommittedEntitySizeLog,
-  entityLog,
-  prepareCommittedEntitySizeLog,
   verifyHashPrecommitSignatures,
-} from './shared';
+} from './leader-certificates';
+import { entityLog } from './entity-log';
+import {
+  emitCommittedEntitySizeLog,
+  prepareCommittedEntitySizeLog,
+} from './state-size-observation';
 import {
   pruneReplicaFinalizedJHistory,
   runLocalPostCommitHooks,

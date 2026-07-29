@@ -14,7 +14,7 @@ import { attachTargetConsumptionProofs } from './consumption-output';
 import {
   verifyEntityLeaderCertificate,
   verifyEntityRelayCertificate,
-} from './shared';
+} from './leader-certificates';
 
 const FOUNDATION_ENTITY_ID = `0x${'0'.repeat(63)}1`;
 

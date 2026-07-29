@@ -290,7 +290,7 @@ import type { EntityTx } from '../../types/entity-tx';
 import { collectCommittedCrossJurisdictionCancelAcks } from '../tx/handlers/account';
 import type { EntityRuntimeContext } from '../runtime-context';
 import type { EntityCandidateEffect, EntityInput, EntityState } from '../types';
-import { entityLog } from './shared';
+import { entityLog } from './entity-log';
 
 export { CROSS_J_PENDING_FILL_ACK_TTL_MS } from '../../extensions/cross-j/fill-ack';
 

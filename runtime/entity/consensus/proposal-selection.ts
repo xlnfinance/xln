@@ -12,9 +12,7 @@ import type { EntityTx } from '../../types/entity-tx';
 import { hasProposableAccount } from './account-work-index';
 import { prioritizeScheduledWakeTransactions } from './input-merge';
 import { getReplicaProposalLeader } from './leader';
-import {
-  entityLog,
-} from './shared';
+import { entityLog } from './entity-log';
 import { isSingleSignerEntity } from './replica-validation';
 import { selectProposableEntityTxs } from './proposal-policy';
 

@@ -18,7 +18,7 @@ import {
   isEntityInputWellFormed,
   validateEntityReplica,
 } from './replica-validation';
-import { entityLog } from './shared';
+import { entityLog } from './entity-log';
 
 export type EntityInputIngress =
   | { accepted: false; result: ApplyEntityInputResult }

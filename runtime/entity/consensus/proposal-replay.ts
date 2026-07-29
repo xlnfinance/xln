@@ -18,9 +18,9 @@ import {
   computeEntityFrameAuthorityRoot,
 } from './state-root';
 import {
-  entityLog,
   expectedCommittedLeaderState,
-} from './shared';
+} from './leader-certificates';
+import { entityLog } from './entity-log';
 import { getPrevFrameHash } from './frame-lineage';
 
 export type ProposalReplayResult =

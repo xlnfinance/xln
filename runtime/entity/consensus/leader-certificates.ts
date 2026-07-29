@@ -1,17 +1,18 @@
-import { encodeCanonicalConsensusValue } from '../../protocol/canonical-consensus-value';
 /**
- * Entity consensus: validator replicas agree on entity frames, then route
- * committed account/J-layer side effects back into the runtime.
+ * Verifies quorum evidence carried across Entity leader changes.
+ *
+ * A prepared frame is reusable only when its body, signer bundles, parent,
+ * leader certificate, and canonical hash all agree. View change may abandon
+ * valid sub-quorum votes, but it must never reinterpret or merge conflicting
+ * prepared frames.
  */
-
 import { verifyAccountSignature } from '../../account/crypto';
-import { createStructuredLogger, shortId } from '../../infra/logger';
-import { isRuntimePerfProfileEnabled, readRuntimePerfSlowMs } from '../../infra/perf-runtime-flags';
+import { log } from '../../infra/diagnostics';
+import { encodeCanonicalConsensusValue } from '../../protocol/canonical-consensus-value';
 import { compareStableText } from '../../protocol/serialization';
-import { nodeProcess } from '../../infra/runtime-process';
 import type { ConsensusConfig, EntityCandidate, EntityLeaderCertificate, EntityLeaderTimeoutVote, EntityReplica, EntityState, HashToSign, ProposedEntityFrame } from '../types';
 import type { EntityRuntimeContext } from '../runtime-context';
-import { log } from '../../infra/diagnostics';
+import { entityLog } from './entity-log';
 import { createEntityFrameHashFromStateRoot } from './frame';
 import {
   assertEntityLeaderVoteMatchesState,
@@ -20,76 +21,7 @@ import {
   leaderVoteCollectionKey,
   type EntityLeaderStateView,
 } from './leader';
-import { classifyEntityConsensusStateQuotaTransition, measureEntityConsensusStateBytes } from './state-quota';
 import { calculateQuorumPower } from './replica-validation';
-
-
-const consumptionStateMeasurement = (state: EntityState) =>
-  measureEntityConsensusStateBytes(state, {
-    getAccumulatorState: candidate => candidate.consumptionAccumulator,
-  });
-
-type ConsumptionSizeLog = Readonly<{
-  warning: boolean;
-  details: Record<string, string>;
-}>;
-
-const ENTITY_SIZE_OBSERVATION_PERIOD_FRAMES = 100;
-
-export const prepareCommittedEntitySizeLog = (
-  env: EntityRuntimeContext,
-  preState: EntityState,
-  postState: EntityState,
-): ConsumptionSizeLog | null => {
-  const configuredWarningBytes = env.runtimeConfig?.entityConsensusStateWarningBytes;
-  // Canonical Entity encoding is already paid once for the consensus root.
-  // Re-encoding both the pre- and post-state on every frame only to emit a
-  // debug size line doubles the hot-path work. Observe periodically by default;
-  // an explicitly configured quota keeps per-frame warning precision.
-  if (
-    configuredWarningBytes === undefined &&
-    postState.height !== 1 &&
-    postState.height % ENTITY_SIZE_OBSERVATION_PERIOD_FRAMES !== 0
-  ) {
-    return null;
-  }
-  const before = consumptionStateMeasurement(preState);
-  const after = consumptionStateMeasurement(postState);
-  const assessment = classifyEntityConsensusStateQuotaTransition(
-    before.totalBytes,
-    after.totalBytes,
-    configuredWarningBytes === undefined ? undefined : { warningBytes: configuredWarningBytes },
-  );
-  return {
-    warning: assessment.classification !== 'within',
-    details: {
-      entity: shortId(postState.entityId),
-      outputCount: postState.consumptionAccumulator?.count.toString() ?? '0',
-      consumptionTreeBytes: after.consumptionTreeBytes.toString(),
-      totalBytes: after.totalBytes.toString(),
-      warningBytes: assessment.warningBytes.toString(),
-      overageBytes: assessment.overageBytes.toString(),
-      classification: assessment.classification,
-    },
-  };
-};
-
-export const emitCommittedEntitySizeLog = (entry: ConsumptionSizeLog | null): void => {
-  if (!entry) return;
-  if (entry.warning) entityLog.warn('state.size_warning', entry.details);
-  else entityLog.debug('state.size', entry.details);
-};
-
-
-const ENTITY_FRAME_PROFILE =
-  nodeProcess?.env?.['XLN_ENTITY_FRAME_PROFILE'] === '1' ||
-  nodeProcess?.env?.['XLN_ENTITY_INPUT_PROFILE'] === '1' ||
-  nodeProcess?.env?.['XLN_RUNTIME_PROCESS_PROFILE'] === '1';
-const ENTITY_FRAME_SLOW_MS = Math.max(0, Number(nodeProcess?.env?.['XLN_ENTITY_FRAME_SLOW_MS'] || '1000'));
-export const entityFrameProfileEnabled = (): boolean =>
-  ENTITY_FRAME_PROFILE || isRuntimePerfProfileEnabled('XLN_ENTITY_FRAME_PROFILE', 'XLN_ENTITY_INPUT_PROFILE');
-export const entityFrameSlowMs = (): number => readRuntimePerfSlowMs('XLN_ENTITY_FRAME_SLOW_MS', ENTITY_FRAME_SLOW_MS);
-export const entityLog = createStructuredLogger('entity');
 
 const fallbackFrameHashToSign = (hash: string, height: number): HashToSign[] => [
   {

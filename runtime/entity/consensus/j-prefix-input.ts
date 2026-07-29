@@ -13,7 +13,7 @@ import {
   type ApplyEntityInputContext,
   type ApplyEntityInputResult,
 } from './input-types';
-import { entityLog } from './shared';
+import { entityLog } from './entity-log';
 import { ensureLocalJPrefixAttestation } from './j-prefix-round';
 
 const verifyAttestationRound = (context: ApplyEntityInputContext): 'stale' | 'current' | 'future' => {

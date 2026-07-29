@@ -12,7 +12,7 @@ import {
   getReplicaProposalLeader,
   isReplicaProposalLeader,
 } from './leader';
-import { entityLog } from './shared';
+import { entityLog } from './entity-log';
 
 export type EntityTransactionAdmission = {
   localCanPropose: boolean;

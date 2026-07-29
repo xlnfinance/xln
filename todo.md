@@ -374,8 +374,7 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   `orchestrator/mm-node-run.ts::runMarketMakerNode`, and
   `orchestrator/hub-node.ts::run`. Split by lifecycle/ownership boundary, not
   arbitrary line ranges, and delete each exact allowance after its verified
-  extraction. Split `entity/consensus/shared.ts` by consensus phase/owner until
-  it is no longer a 46-export navigation hub; add no replacement barrel.
+  extraction.
   Replace `prod-startup-wiring.test.ts` source-text assertions with executable
   boundary/boot tests so refactors cannot pass or fail because of spelling.
 - [ ] Enforce an acyclic browser-safe core dependency graph. Keep cloning,

@@ -40,7 +40,8 @@ const accountProposePaths = [
 const accountProposePath = accountProposePaths.join(', ');
 const accountFramePath = 'runtime/account/consensus/frame.ts';
 const entityConsensusPaths = [
-  'runtime/entity/consensus/shared.ts',
+  'runtime/entity/consensus/leader-certificates.ts',
+  'runtime/entity/consensus/j-prefix-round.ts',
   'runtime/entity/consensus/input-ingress.ts',
   'runtime/entity/consensus/input-admission.ts',
   'runtime/entity/consensus/input-consensus.ts',

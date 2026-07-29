@@ -93,8 +93,8 @@ import { applyEntityTxReturnedEffects } from './frame-tx-effects';
 import {
   entityFrameProfileEnabled,
   entityFrameSlowMs,
-  entityLog,
-} from './shared';
+} from './frame-profile';
+import { entityLog } from './entity-log';
 import { buildConsumptionOutputIdentity } from './consumption-output';
 import { admitOrderbookOfferForMatching } from './orderbook-admission';
 import {

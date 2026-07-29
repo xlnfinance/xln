@@ -16,10 +16,10 @@ import {
   computeEntityFrameAuthorityRoot,
 } from './state-root';
 import {
-  entityLog,
   expectedCommittedLeaderState,
   getValidatorExecutionForFrame,
-} from './shared';
+} from './leader-certificates';
+import { entityLog } from './entity-log';
 import {
   getFrameJPrefixValidationError,
   getReplicaJRangeValidationError,

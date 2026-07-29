@@ -12,7 +12,7 @@ import {
 import { shortOrder } from '../../infra/logger';
 import type { EntityRuntimeContext } from '../runtime-context';
 import type { EntityState } from '../types';
-import { entityLog } from './shared';
+import { entityLog } from './entity-log';
 
 type EntityAccountState = EntityState['accounts'] extends Map<string, infer State> ? State : never;
 

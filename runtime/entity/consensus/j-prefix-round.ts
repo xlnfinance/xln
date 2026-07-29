@@ -181,4 +181,4 @@ import { emitDefaultProposerHtlcOnionAdvances } from '../htlc-onion-post-commit'
 import type { EntityRuntimeContext } from '../runtime-context';
 import type { EntityOutput, EntityReplica, ProposedEntityFrame } from '../types';
 import { getEntityLeaderState, isEntityActiveLeader } from './leader';
-import { entityLog } from './shared';
+import { entityLog } from './entity-log';

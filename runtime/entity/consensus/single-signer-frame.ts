@@ -31,12 +31,14 @@ import { getEntityLeaderState } from './leader';
 import { buildCertifiedEntityOutputHashes } from './output-certification';
 import type { EntityProposalSelection } from './proposal-selection';
 import {
-  emitCommittedEntitySizeLog,
   entityFrameProfileEnabled,
   entityFrameSlowMs,
-  entityLog,
+} from './frame-profile';
+import { entityLog } from './entity-log';
+import {
+  emitCommittedEntitySizeLog,
   prepareCommittedEntitySizeLog,
-} from './shared';
+} from './state-size-observation';
 import {
   assertProposerJRangesMatchLocalHistory,
   pruneReplicaFinalizedJHistory,

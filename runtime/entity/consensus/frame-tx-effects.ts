@@ -8,7 +8,7 @@ import { cancelHook, scheduleHook } from '../scheduler';
 import { accountHasProposableMempool } from './account-mempool-eligibility';
 import { applyAccountInput } from '../../account/consensus';
 import { createLocalAccountInput } from '../../account/input';
-import { entityLog } from './shared';
+import { entityLog } from './entity-log';
 import {
   buildCrossJurisdictionFillNoticeOutput,
   drainCommittedCrossJurisdictionCancelAcks,

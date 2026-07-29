@@ -537,7 +537,7 @@ for (const [path, markers] of [
     'runtime/runtime/registration/numbered-registration.ts',
     ["createStructuredLogger('runtime.numbered-registration')", 'register_failed'],
   ],
-  ['runtime/entity/consensus/shared.ts', ["createStructuredLogger('entity')"]],
+  ['runtime/entity/consensus/entity-log.ts', ["createStructuredLogger('entity')"]],
   ['runtime/entity/consensus/frame-application.ts', ['frame.profile', 'frame.apply']],
   [
     'runtime/runtime/entity-inputs.ts',
@@ -771,7 +771,9 @@ const entityInputMerge = readText(entityInputMergePath);
 assertNotIncludes(entityInputMerge, 'console.', entityInputMergePath);
 
 for (const entityConsensusPath of [
-  'runtime/entity/consensus/shared.ts',
+  'runtime/entity/consensus/leader-certificates.ts',
+  'runtime/entity/consensus/j-prefix-round.ts',
+  'runtime/entity/consensus/state-size-observation.ts',
   'runtime/entity/consensus/input-consensus.ts',
   'runtime/entity/consensus/frame-application.ts',
 ]) {

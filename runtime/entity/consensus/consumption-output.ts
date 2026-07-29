@@ -22,7 +22,7 @@ import {
   normalizeConsensusOutputOrigin,
 } from './output-certification';
 import { orderCertifiedOutputsBySequence } from './output-envelope';
-import { entityLog } from './shared';
+import { entityLog } from './entity-log';
 
 export const buildConsumptionOutputIdentity = (
   origin: ConsensusOutputOrigin,
