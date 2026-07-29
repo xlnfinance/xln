@@ -3,6 +3,7 @@ import { deriveSide } from './types.ts';
 import type { CrossJurisdictionSwapRoute } from '../types';
 import { UINT16_MAX } from '../constants.ts';
 import { deriveTransferOffdeltaChange } from '../account/delta-movement.ts';
+import { computeSwapPriceTicks } from './types.ts';
 
 export const MAX_SWAP_FILL_RATIO = UINT16_MAX;
 
@@ -41,6 +42,56 @@ export interface NormalizedOrderbookOffer extends SwapOfferLike {
   createdHeight: number;
   crossJurisdiction?: CrossJurisdictionSwapRoute;
 }
+
+export interface OrderbookOfferInput {
+  offerId: string;
+  makerIsLeft: boolean;
+  fromEntity: string;
+  toEntity: string;
+  createdHeight?: number | undefined;
+  giveTokenId: number;
+  giveAmount: bigint;
+  wantTokenId: number;
+  wantAmount: bigint;
+  priceTicks?: bigint | undefined;
+  timeInForce?: 0 | 1 | 2 | undefined;
+  crossJurisdiction?: CrossJurisdictionSwapRoute | undefined;
+}
+
+/** Convert an Account-owned committed offer event into the book's one shape. */
+export const normalizeSwapOfferForOrderbook = (
+  offer: OrderbookOfferInput,
+  accountId: string,
+): NormalizedOrderbookOffer => {
+  const priceTicks = offer.priceTicks && offer.priceTicks > 0n
+    ? offer.priceTicks
+    : computeSwapPriceTicks(offer.giveTokenId, offer.wantTokenId, offer.giveAmount, offer.wantAmount);
+  if (priceTicks <= 0n) throw new Error(`ORDERBOOK_NORMALIZE_INVALID_PRICE: offer=${offer.offerId}`);
+  return {
+    offerId: offer.offerId,
+    accountId,
+    makerIsLeft: offer.makerIsLeft,
+    fromEntity: offer.fromEntity,
+    toEntity: offer.toEntity,
+    createdHeight: offer.createdHeight ?? 0,
+    giveTokenId: offer.giveTokenId,
+    giveAmount: offer.giveAmount,
+    wantTokenId: offer.wantTokenId,
+    wantAmount: offer.wantAmount,
+    priceTicks,
+    timeInForce: offer.timeInForce ?? 0,
+    ...(offer.crossJurisdiction ? { crossJurisdiction: offer.crossJurisdiction } : {}),
+  };
+};
+
+export const compareSwapOffersForOrderbook = <T extends NormalizedOrderbookOffer>(left: T, right: T): number => {
+  if (left.createdHeight !== right.createdHeight) return left.createdHeight - right.createdHeight;
+  const accountOrder = compareCanonicalText(left.accountId, right.accountId);
+  return accountOrder !== 0 ? accountOrder : compareCanonicalText(left.offerId, right.offerId);
+};
+
+export const sortSwapOffersForOrderbook = <T extends NormalizedOrderbookOffer>(offers: readonly T[]): T[] =>
+  [...offers].sort(compareSwapOffersForOrderbook);
 
 export const WORKING_ORDERBOOK_OFFER_BRAND: unique symbol = Symbol('WORKING_ORDERBOOK_OFFER_BRAND');
 

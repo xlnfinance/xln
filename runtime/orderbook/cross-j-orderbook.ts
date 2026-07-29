@@ -1,8 +1,5 @@
 import type { CrossJurisdictionBookAdmission, EntityState, RuntimeState, RuntimeOverlayRecord } from '../types';
-import {
-  normalizeSwapOfferForOrderbook,
-  type SwapCancelEvent,
-} from '../entity/tx/handlers/account';
+import { normalizeSwapOfferForOrderbook } from './swap-execution';
 import { type OrderbookExtState } from './index';
 import { removeBookOrderById } from './cross-j';
 import {
@@ -16,6 +13,7 @@ import {
 import { createStructuredLogger, shortOrder } from '../infra/logger';
 
 export type OrderbookOfferForMatch = ReturnType<typeof normalizeSwapOfferForOrderbook>;
+type CommittedSwapCancel = Readonly<{ offerId: string; accountId: string }>;
 
 const crossJBookLog = createStructuredLogger('crossj.orderbook');
 
@@ -27,7 +25,7 @@ export const deterministicEntityTimestamp = (state: EntityState, env?: RuntimeSt
 export const applyCommittedSwapCancelsToOrderbook = (
   env: RuntimeState,
   state: EntityState,
-  cancels: SwapCancelEvent[],
+  cancels: readonly CommittedSwapCancel[],
   storageChanges: RuntimeOverlayRecord[] = [],
 ): void => {
   if (cancels.length === 0) return;

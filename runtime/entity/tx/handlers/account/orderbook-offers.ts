@@ -1,7 +1,6 @@
 import type { AccountState, SwapOffer } from '../../../../types';
 import type { SwapCancelEvent, SwapCancelRequestEvent, SwapOfferEvent } from '../../../../account/tx/apply-types';
-import { computeSwapPriceTicks, type BookState } from '../../../../orderbook';
-import { compareCanonicalText, type NormalizedOrderbookOffer } from '../../../../orderbook/swap-execution';
+import type { BookState } from '../../../../orderbook';
 import type { CrossJurisdictionFillInstruction } from '../../../../extensions/cross-j/orderbook';
 import type { AccountTxTarget } from './orderbook-queue';
 
@@ -36,41 +35,3 @@ export interface MatchResult {
     reason: string;
   }>;
 }
-
-export const normalizeSwapOfferForOrderbook = (offer: SwapOfferEvent, accountId: string): NormalizedOrderbookOffer => {
-  const priceTicks =
-    typeof offer.priceTicks === 'bigint' && offer.priceTicks > 0n
-      ? offer.priceTicks
-      : computeSwapPriceTicks(offer.giveTokenId, offer.wantTokenId, offer.giveAmount, offer.wantAmount);
-  if (priceTicks <= 0n) {
-    throw new Error(`ORDERBOOK_NORMALIZE_INVALID_PRICE: offer=${offer.offerId}`);
-  }
-
-  return {
-    offerId: String(offer.offerId),
-    accountId: String(accountId),
-    makerIsLeft: !!offer.makerIsLeft,
-    fromEntity: String(offer.fromEntity),
-    toEntity: String(offer.toEntity),
-    createdHeight: Number(offer.createdHeight ?? 0),
-    giveTokenId: Number(offer.giveTokenId),
-    giveAmount: BigInt(offer.giveAmount),
-    wantTokenId: Number(offer.wantTokenId),
-    wantAmount: BigInt(offer.wantAmount),
-    priceTicks,
-    timeInForce: offer.timeInForce ?? 0,
-    ...(offer.crossJurisdiction ? { crossJurisdiction: offer.crossJurisdiction } : {}),
-  };
-};
-
-export const compareSwapOffersForOrderbook = <T extends NormalizedOrderbookOffer>(left: T, right: T): number => {
-  const leftHeight = left.createdHeight;
-  const rightHeight = right.createdHeight;
-  if (leftHeight !== rightHeight) return leftHeight - rightHeight;
-  const accountCmp = compareCanonicalText(left.accountId, right.accountId);
-  if (accountCmp !== 0) return accountCmp;
-  return compareCanonicalText(left.offerId, right.offerId);
-};
-
-export const sortSwapOffersForOrderbook = <T extends NormalizedOrderbookOffer>(swapOffers: readonly T[]): T[] =>
-  [...swapOffers].sort(compareSwapOffersForOrderbook);

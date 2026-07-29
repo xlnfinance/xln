@@ -10,10 +10,8 @@ import {
   queueUniqueSwapResolveForEntityState,
   type AccountTxTarget,
 } from './orderbook-queue';
-import {
-  sortSwapOffersForOrderbook,
-  type MatchResult,
-} from './orderbook-offers';
+import type { MatchResult } from './orderbook-offers';
+import { sortSwapOffersForOrderbook } from '../../../../orderbook/swap-execution';
 import {
   splitWorkingOrderbookOffers,
   type OrderbookProcessOptions,

@@ -36,10 +36,8 @@ import {
   mergeCrossJurisdictionRoute,
   validateCrossJurisdictionRouteTransition,
 } from '../cross-jurisdiction-helpers';
-import {
-  normalizeSwapOfferForOrderbook,
-  type SwapOfferEvent,
-} from './account/orderbook-offers';
+import type { SwapOfferEvent } from './account/orderbook-offers';
+import { normalizeSwapOfferForOrderbook } from '../../../orderbook/swap-execution';
 import type { ApplyEntityTxOptions } from '../apply';
 import {
   buildCrossJurisdictionEntityOutput,

@@ -15,15 +15,13 @@ import type {
   NormalizedOrderbookOffer,
   SameJurisdictionWorkingOrderbookOffer,
 } from '../../../../orderbook/swap-execution';
+import { normalizeSwapOfferForOrderbook } from '../../../../orderbook/swap-execution';
 import {
   hasQueuedSwapResolveForEntityState,
   queueUniqueSwapResolveForEntityState,
   type AccountTxTarget,
 } from './orderbook-queue';
-import {
-  normalizeSwapOfferForOrderbook,
-  resolveStoredOfferEntityRefs,
-} from './orderbook-offers';
+import { resolveStoredOfferEntityRefs } from './orderbook-offers';
 import {
   parseNamespacedOrderId,
   resolvePairBandReference,

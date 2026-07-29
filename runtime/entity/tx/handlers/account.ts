@@ -27,11 +27,6 @@ export {
 export type { AccountHandlerResult } from './account/result';
 export type { AccountTxTarget } from './account/orderbook-queue';
 export {
-  compareSwapOffersForOrderbook,
-  normalizeSwapOfferForOrderbook,
-  sortSwapOffersForOrderbook,
-} from './account/orderbook-offers';
-export {
   collectCommittedCrossJurisdictionCancelAcks,
   processOrderbookCancels,
   routeRemoteCrossJurisdictionBookCancels,

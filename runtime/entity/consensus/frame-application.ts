@@ -80,13 +80,13 @@ import {
 import { initCrontab } from '../scheduler';
 import { applyEntityTx, type ApplyEntityTxResult } from '../tx';
 import {
-  normalizeSwapOfferForOrderbook,
   processOrderbookCancels,
   processOrderbookSwaps,
   routeRemoteCrossJurisdictionBookCancels,
   type SwapCancelRequestEvent,
   type SwapOfferEvent,
 } from '../tx/handlers/account';
+import { normalizeSwapOfferForOrderbook } from '../../orderbook/swap-execution';
 import { buildCurrentEntityProfileHashToSign } from '../tx/handlers/profile-certification';
 import { buildSettlementSealDraft } from '../tx/handlers/settle';
 import { pruneSettledOriginatedHtlcRoutes, terminateHtlcRoute } from '../tx/htlc-route-lifecycle';

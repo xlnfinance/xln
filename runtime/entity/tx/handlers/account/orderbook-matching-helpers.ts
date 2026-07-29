@@ -35,7 +35,8 @@ import {
   type CrossMarketOffer,
 } from '../../../../extensions/cross-j/orderbook';
 import type { EntityState, RuntimeState } from '../../../../types';
-import { normalizeSwapOfferForOrderbook, resolveStoredOfferEntityRefs } from './orderbook-offers';
+import { normalizeSwapOfferForOrderbook } from '../../../../orderbook/swap-execution';
+import { resolveStoredOfferEntityRefs } from './orderbook-offers';
 import type { SwapResolveEnqueueData } from './orderbook-queue';
 
 export type OrderbookProcessOptions = {
