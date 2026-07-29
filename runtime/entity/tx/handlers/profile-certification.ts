@@ -1,5 +1,5 @@
 import type { EntityState, EntityTx, RuntimeState, HashToSign } from '../../../types';
-import { cloneEntityState } from '../../../state-helpers';
+import { cloneEntityState } from '../../state-clone';
 import { buildValidatorEncryptionBoard } from '../../profile-encryption';
 import {
   buildEntityProfileDescriptor,

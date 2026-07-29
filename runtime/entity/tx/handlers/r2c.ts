@@ -18,7 +18,7 @@
 
 import type { EntityState, EntityTx, EntityInput, AccountTx, JInput } from '../../../types';
 import { QUOTE_EXPIRY_MS } from '../../../types';
-import { cloneEntityState } from '../../../state-helpers';
+import { cloneEntityState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import { batchAddReserveToCollateral, initJBatch } from '../../../jurisdiction/batch';
 import { createStructuredLogger, formatAmount, shortId } from '../../../infra/logger';

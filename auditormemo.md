@@ -35,7 +35,7 @@ Scores are `importance / complexity` out of 100.
 | Module | Score | What to read | Why it matters |
 | --- | ---: | --- | --- |
 | Core types and validation | 100 / 70 | `runtime/types.ts`, `runtime/types/account.ts`, `runtime/{runtime,entity,account}/*-validation.ts` | Defines Runtime/Entity/Account objects and owner-local fail-fast decode boundaries. |
-| Runtime loop | 100 / 90 | `runtime/runtime.ts`, `runtime/state-helpers.ts` | Owns RJEA processing, input admission, frame progression, side effects, cloning, and history snapshots. |
+| Runtime loop | 100 / 90 | `runtime/runtime.ts`, `runtime/runtime/frame/`, `runtime/account/state-clone.ts`, `runtime/entity/state-clone.ts` | Owns RJEA processing, input admission, frame progression, side effects, and owner-scoped candidate isolation. |
 | Account consensus | 100 / 95 | `runtime/account/consensus/index.ts`, `runtime/account/consensus/propose.ts`, `runtime/account/consensus/frame.ts` | Bilateral propose/validate/commit and account frame hash rules. This is the most important protocol code after types. |
 | Account tx handlers | 95 / 85 | `runtime/account/tx/apply.ts`, `runtime/account/tx/handlers/*` | Applies payment, HTLC, pull, swap, settlement, dispute-control, and credit actions inside account consensus. |
 | Entity consensus | 96 / 85 | `runtime/entity/consensus/index.ts`, `runtime/entity/consensus/frame.ts`, `runtime/entity/tx/apply.ts` | Entity-level BFT/proposer flow, E-frame hash, entity mempool, and tx dispatch. |

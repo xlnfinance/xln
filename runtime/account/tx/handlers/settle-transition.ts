@@ -8,7 +8,7 @@ import type {
   SettlementOp,
   SettlementWorkspace,
 } from '../../../types';
-import { cloneAccountState } from '../../../state-helpers';
+import { cloneAccountState } from '../../state-clone';
 import { computeCanonicalMerkleRoot } from '../../state-root';
 import { deriveDelta } from '../../utils';
 import { compileOps, getMinimumSafeSettlementNonce } from '../../../protocol/settlement/operations';

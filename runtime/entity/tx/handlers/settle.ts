@@ -20,7 +20,7 @@ import type {
   SettlementDiff,
   SettlementWorkspace,
 } from '../../../types';
-import { cloneEntityState } from '../../../state-helpers';
+import { cloneEntityState } from '../../state-clone';
 import { getAccountPerspective } from '../../../account/perspective';
 import { addMessage } from '../../frame-events';
 import { initJBatch, batchAddSettlement } from '../../../jurisdiction/batch';

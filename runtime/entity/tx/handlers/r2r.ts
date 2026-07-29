@@ -12,7 +12,7 @@
  */
 
 import type { EntityState, EntityTx, EntityInput } from '../../../types';
-import { cloneEntityState } from '../../../state-helpers';
+import { cloneEntityState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import { initJBatch, batchAddReserveToReserve } from '../../../jurisdiction/batch';
 import { createStructuredLogger, shortId } from '../../../infra/logger';

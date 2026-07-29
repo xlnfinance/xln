@@ -274,20 +274,38 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   tests, and add an ownership gate forbidding Entity/Runtime writes to Account
   money fields outside calls into Account-owned handlers.
 - [ ] Turn Runtime execution into one visible pipeline:
-  `take → validate/plan → isolated RJEA apply → WAL → install → dispatch`.
+  `take → validate/plan → mutate owned Runtime → WAL → dispatch`.
   Keep exactly one live `RuntimeReplica` mempool; `runtimeInput` names only the
   immutable input persisted in a committed frame, never a second live queue.
   Represent all frame disposition, rollback and reliable-delivery flags in one
   explicit `FrameExecutionState` instead of cross-stage locals or closures.
-  Extract transaction, commit, rollback and dispatch modules; keep
+  Runtime is the sole proposer and writer, so never clone the full Runtime
+  State. Validate every expected rejection before mutation; then mutate the
+  owned State directly. Any exception or storage doubt after mutation makes
+  the in-memory object unreadable: halt immediately and reload the last
+  committed WAL frame. Never attempt in-memory rollback or soft repair.
+  Extract transaction, commit, recovery and dispatch modules; keep
   `runtime/core.ts` a short composition root with no alternate commit path.
-  Precompute every throwing assertion before install; any doubt after WAL
-  halts and reloads the durable frame. Operational notifications happen only
+  Precompute every expected throwing assertion before mutation; any doubt
+  before or after WAL halts and reloads durable truth. Operational notifications happen only
   after the durable result is fixed and can report failure but never reclassify
   or roll back that result. `env.warn`, `env.error` and special info diagnostics
   currently call P2P debug delivery from the working candidate; queue all
   network-visible diagnostics and flush them only after WAL commit. A rolled
   back frame may log locally but must be externally unobservable.
+- [ ] Make candidate isolation explicit per nested machine instead of cloning
+  the entire Runtime/Entity tree. Single-signer Entity execution mutates its
+  Runtime-owned State directly and relies on the enclosing Runtime WAL:
+  programming faults halt and reload. Multi-signer Entity execution must keep
+  committed State unchanged until Hanko certification; replace its full clone
+  with a touched-only `EntityDraft` that shallow-forks the Entity shell and
+  clones only modified maps and Accounts. A malformed or root-mismatched remote
+  proposal discards only its draft and must never halt the Runtime. Install the
+  certified draft in O(1). Account remains the small bilateral transaction
+  boundary and keeps a full isolated clone. Pin all four policies with
+  characterization tests, perf budgets (clone bytes/reducer/WAL latency), and
+  a gate forbidding reintroduction of full Runtime or single-signer Entity
+  clones.
 - [ ] Make post-state Runtime ingress rejection explicit and deterministic.
   Inputs admitted against frame H may become stale after the single writer
   commits H+1. Classify expected authenticated nonce/board/order conflicts as

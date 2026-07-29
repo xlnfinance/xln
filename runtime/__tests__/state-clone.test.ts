@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 
-import { cloneAccountState, cloneEntityReplica, cloneEntityState } from '../state-helpers';
+import { cloneAccountState } from '../account/state-clone';
+import { cloneEntityReplica } from '../entity/replica-clone';
+import { cloneEntityState } from '../entity/state-clone';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
 import { buildCanonicalEntityReplicaSnapshot } from '../storage/wal/snapshot';
 import { validateConsensusConfig } from '../entity/consensus/config-validation';
@@ -159,13 +161,18 @@ const makeProjectionReplica = () => ({
   },
 });
 
-describe('state helper cloning', () => {
-  test('state helper diagnostics use structured logging only', () => {
-    const source = readFileSync('runtime/state-helpers.ts', 'utf8');
+describe('state cloning', () => {
+  test('clone diagnostics use structured logging only', () => {
+    const source = [
+      readFileSync('runtime/account/state-clone.ts', 'utf8'),
+      readFileSync('runtime/entity/state-clone.ts', 'utf8'),
+    ].join('\n');
 
-    expect(source).toContain("const stateHelperLog = createStructuredLogger('state.helpers');");
-    expect(source).toContain("stateHelperLog.error('clone.entity_state.entity_id_corrupt'");
-    expect(source).toContain("stateHelperLog.error('clone.entity_state.last_finalized_j_height_corrupt'");
+    expect(source).toContain(
+      "const cloneLog = createStructuredLogger('entity.state_clone');",
+    );
+    expect(source).toContain("cloneLog.error('entity_id_corrupt'");
+    expect(source).toContain("cloneLog.error('last_finalized_j_height_corrupt'");
     expect(source).toContain('ACCOUNT_STATE_STRUCTURED_CLONE_FAILED');
     expect(source).not.toContain('manualClone');
     expect(source).not.toContain('console.');

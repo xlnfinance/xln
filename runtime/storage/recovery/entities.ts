@@ -8,7 +8,7 @@ import {
 } from '../../jurisdiction/local-history';
 import { assertCertifiedRegistrationEvidenceStore } from '../../jurisdiction/registration-evidence';
 import { restoreJPrefixRound } from '../../jurisdiction/j-prefix-consensus';
-import { cloneEntityState } from '../../state-helpers';
+import { cloneEntityState } from '../../entity/state-clone';
 import type { EntityReplica, EntityState, RuntimeState } from '../../types';
 import {
   applyCertifiedEntityLineagePlan,

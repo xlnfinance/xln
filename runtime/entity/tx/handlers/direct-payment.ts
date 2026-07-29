@@ -9,7 +9,7 @@ import type {
 } from '../../../types';
 import { formatEntityId } from '../../../utils';
 import { createStructuredLogger, logError, shortId } from '../../../infra/logger';
-import { cloneEntityState } from '../../../state-helpers';
+import { cloneEntityState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import type { AccountTxTarget } from './account';
 import { requireTrustedPaymentGateway } from '../../../protocol/payments/delivery';

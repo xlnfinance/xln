@@ -4,7 +4,7 @@ import type {
   AccountState,
   AccountTx,
 } from '../../types';
-import { cloneAccountFrame } from '../../state-helpers';
+import { cloneAccountFrame } from '../state-clone';
 import { removeCommittedTxsFromMempool } from '../../protocol/tx-multiset';
 import { cloneIsolatedAccountInput } from '../../protocol/account-input-clone';
 import { stageAccountCommitmentCache } from '../map-commitment';

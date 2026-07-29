@@ -41,7 +41,7 @@ import {
   getCertifiedBoardNodeStore,
 } from '../jurisdiction/board-registry';
 import { createEmptyEnv } from '../runtime';
-import { cloneAccountState } from '../state-helpers';
+import { cloneAccountState } from '../account/state-clone';
 import type { AccountTx, EntityState, RuntimeState, HashToSign, JurisdictionConfig, JurisdictionEvent, SettlementOp } from '../types';
 import { createDefaultDelta } from '../account/delta';
 import {

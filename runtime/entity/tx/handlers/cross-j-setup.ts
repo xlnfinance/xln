@@ -17,7 +17,7 @@ import {
   validateCrossJurisdictionRouteTransition,
 } from '../cross-jurisdiction-helpers';
 import { normalizeEntityRef } from '../account-key';
-import { cloneEntityState } from '../../../state-helpers';
+import { cloneEntityState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import { safeStringify } from '../../../protocol/serialization';
 import type { CrossJurisdictionSwapRoute, EntityInput, EntityState, EntityTx, RuntimeState } from '../../../types';

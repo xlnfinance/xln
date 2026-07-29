@@ -202,7 +202,7 @@ import { decodeValidatedBuffer, encodeBuffer } from '../storage/codec';
 
 import { createDefaultDelta } from '../account/delta';
 
-import { cloneEntityState } from '../state-helpers';
+import { cloneEntityState } from '../entity/state-clone';
 
 import {
   buildDisputeArgumentsForSnapshot,
@@ -242,9 +242,7 @@ import { handleMeshBootstrapLoopError } from '../orchestrator/mesh-bootstrap-fai
 
 import { fitCrossAmountsToOrderbook } from '../orchestrator/mm-node';
 
-import {
-  cloneAccountState,
-} from '../state-helpers';
+import { cloneAccountState } from '../account/state-clone';
 import {
   clearReplayOutputSignerHints,
   installReplayOutputSignerHints,

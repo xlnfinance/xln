@@ -150,7 +150,9 @@ FOCUS AREAS:
 
 FILES TO SCAN:
 - runtime/types.ts (interface design)
-- runtime/state-helpers.ts (pure functions)
+- runtime/account/state-clone.ts (Account candidate isolation)
+- runtime/entity/state-clone.ts (Entity candidate isolation)
+- runtime/entity/replica-clone.ts (validator-local replica isolation)
 - runtime/entity/tx/apply.ts (dispatcher pattern)
 - runtime/account/utils.ts (utility functions)
 

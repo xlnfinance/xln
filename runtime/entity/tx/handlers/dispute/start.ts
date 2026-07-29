@@ -6,7 +6,7 @@ import type {
   RuntimeState,
   RuntimeOverlayRecord,
 } from '../../../../types';
-import { cloneEntityState } from '../../../../state-helpers';
+import { cloneEntityState } from '../../../state-clone';
 import { addMessage } from '../../../frame-events';
 import {
   encodeJBatch,

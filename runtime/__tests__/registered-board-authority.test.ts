@@ -51,7 +51,7 @@ import { createEmptyEnv, restoreEnvFromCheckpointSnapshot } from '../runtime';
 import { getReliableOutputIdentity } from '../runtime/output-routing';
 import { createDueScheduledWakeInputs, refreshScheduledWakeIndex } from '../runtime/scheduled-wake';
 import { buildRuntimeCheckpointSnapshot } from '../storage/wal/snapshot';
-import { cloneEntityState } from '../state-helpers';
+import { cloneEntityState } from '../entity/state-clone';
 import type {
   ConsensusOutputOrigin,
   EntityReplica,

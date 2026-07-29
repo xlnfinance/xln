@@ -10,7 +10,7 @@ import type {
   HashToSign,
 } from '../../types';
 import type { ProofBodyStruct } from '../../protocol/dispute/proof-body';
-import { cloneEntityState } from '../../state-helpers';
+import { cloneEntityState } from '../state-clone';
 import { addMessage } from '../frame-events';
 import { CANONICAL_J_EVENTS } from '../../jurisdiction/event-catalog';
 import { hashHtlcSecret } from '../../protocol/htlc/utils';

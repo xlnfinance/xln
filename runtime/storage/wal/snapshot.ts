@@ -7,7 +7,7 @@ import type {
   RoutedEntityInput,
   RuntimeInput,
 } from '../../types';
-import { cloneEntityReplica } from '../../state-helpers';
+import { cloneEntityReplica } from '../../entity/replica-clone';
 import { markRestoredJSubmitRuntimeTxs } from '../../runtime/j-submit-state';
 import { markRestoredJAuthorityRuntimeTxs } from '../../jurisdiction/registration-evidence';
 import { markRestoredJImportResultRuntimeTxs } from '../../runtime/jurisdiction-import';

@@ -1,6 +1,6 @@
 import type { AccountState, EntityReplica, EntityState } from '../types';
 import { assertAccountJClaimAccumulatorState } from '../account/j-claim-accumulator';
-import { cloneEntityState } from '../state-helpers';
+import { cloneEntityState } from '../entity/state-clone';
 import {
   cloneCrossJurisdictionBookAdmission,
   cloneCrossJurisdictionAccountFrameRoute,

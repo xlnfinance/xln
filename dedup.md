@@ -45,8 +45,6 @@ Top 100 simplification targets:
 33. `runtime/storage/wal/snapshot.ts` — separate env snapshot building from BrowserVM state inclusion.
 34. `runtime/storage/index.ts` — separate pure restore from infra rehydration glue.
 35. `runtime/storage/wal/hash.ts` — centralize hash-input normalization with zero ad hoc field deletions outside this file.
-36. `runtime/state-helpers.ts` — split entity clone helpers, account clone helpers, and display/helpers.
-37. `runtime/state-helpers.ts` — replace ad hoc manual clone branches with smaller canonical clone functions.
 38. `runtime/jurisdiction/batch.ts` — split encoding/hash/signing helpers from batch-mutation helpers.
 39. `runtime/jurisdiction/batch.ts` — move submit-to-contract glue out, keep only batch structure logic.
 40. `runtime/jurisdiction/batch.ts` — centralize batch op dedupe rules per op type instead of scattered checks.

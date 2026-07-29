@@ -15,7 +15,7 @@
 
 import type { EntityState, EntityTx, EntityInput, RuntimeState, JTx, JInput, HashType } from '../../../types';
 import { requireUsableContractAddress } from '../../../jurisdiction/contract-address';
-import { cloneEntityState } from '../../../state-helpers';
+import { cloneEntityState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import {
   isBatchEmpty, getBatchSize, cloneJBatch, encodeJBatch,

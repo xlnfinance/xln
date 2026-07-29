@@ -14,7 +14,6 @@ const MAX_VALUE_IMPORT_SCC_SIZE = 5;
 // root entrypoint.
 const ROOT_FILE_DEBT = new Set([
   'runtime/constants.ts',
-  'runtime/state-helpers.ts',
   'runtime/types.ts',
   'runtime/utils.ts',
 ]);

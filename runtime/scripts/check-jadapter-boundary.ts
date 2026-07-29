@@ -14,7 +14,6 @@ const RUNTIME_DIR = path.join(ROOT, 'runtime');
 const DIRECT_EVM_ALLOWLIST = new Set<string>([
   'runtime/runtime/composition.ts',
   'runtime/server/index.ts',
-  'runtime/state-helpers.ts',
   'runtime/server/cli.ts',
   'runtime/jurisdiction/batch.ts',
   'runtime/jadapter/index.ts',

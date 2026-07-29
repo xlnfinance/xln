@@ -24,7 +24,7 @@ import {
   getJurisdictionConfigName,
   requireRuntimeJurisdictionConfigByName,
 } from '../../../jurisdiction/jurisdiction-runtime';
-import { cloneEntityState } from '../../../state-helpers';
+import { cloneEntityState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import { getEntityLeaderState } from '../../consensus/leader';
 import {

@@ -16,7 +16,7 @@ import type {
   EntityTx,
   RuntimeState,
 } from '../../../types';
-import { cloneEntityState } from '../../../state-helpers';
+import { cloneEntityState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import { deriveDelta } from '../../../account/utils';
 import { validatePreparedHtlcPayment } from '../../htlc/payment-admission';

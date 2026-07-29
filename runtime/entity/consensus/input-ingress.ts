@@ -1,6 +1,6 @@
 import { shortId } from '../../infra/logger';
 import { cloneIsolatedEntityInput } from '../../protocol/runtime-input-clone';
-import { cloneEntityReplica } from '../../state-helpers';
+import { cloneEntityReplica } from '../replica-clone';
 import type { EntityInput, EntityReplica, RuntimeState } from '../../types';
 import { formatEntityDisplay, HEAVY_LOGS, log } from '../../utils';
 import { copyLocalEntityLeaderTimeoutVoteAuthorization } from './leader';

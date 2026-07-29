@@ -11,7 +11,7 @@
  */
 
 import type { EntityState, EntityTx, EntityInput, JInput, JTx, RuntimeState } from '../../../types';
-import { cloneEntityState } from '../../../state-helpers';
+import { cloneEntityState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import {
   getJurisdictionConfigName,

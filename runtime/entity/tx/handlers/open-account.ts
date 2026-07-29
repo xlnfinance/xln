@@ -9,7 +9,7 @@ import type {
 } from '../../../types';
 import { formatEntityId } from '../../../utils';
 import { upsertSortedStringMapEntry } from '../../../infra/sorted-map-index';
-import { cloneEntityState } from '../../../state-helpers';
+import { cloneEntityState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import { findAccountKey, normalizeEntityRef } from '../account-key';
 import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../../../account/default-tokens';

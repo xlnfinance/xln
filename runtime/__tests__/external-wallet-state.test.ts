@@ -11,7 +11,7 @@ import {
   generateLazyEntityId,
 } from '../runtime';
 import { applySignerEntityExternalWalletSnapshot } from '../entity/signer-wallet';
-import { cloneEntityState } from '../state-helpers';
+import { cloneEntityState } from '../entity/state-clone';
 import { hydrateEntityStateFromStorage, projectEntityCoreDoc } from '../storage/projections';
 import type {
   ConsensusConfig,

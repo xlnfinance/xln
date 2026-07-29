@@ -3,7 +3,7 @@ import { readEntityFrameEventMessages } from '../entity/frame-events';
 
 import { getJEventJurisdictionRef } from '../jurisdiction/event-observation';
 import { decode, encode } from '../storage/snapshot-coder';
-import { cloneEntityState } from '../state-helpers';
+import { cloneEntityState } from '../entity/state-clone';
 import {
   applyJEventRange,
   buildJEventRangeData,

@@ -157,7 +157,9 @@ const CORE_FILES = {
     'account/crypto.ts',     // Account frame signing/verification (CRITICAL)
 
     // Utilities (support functions)
-    'state-helpers.ts',      // Pure state management functions
+    'account/state-clone.ts', // Account candidate/snapshot isolation
+    'entity/state-clone.ts',  // Entity candidate/snapshot isolation
+    'entity/replica-clone.ts', // Validator-local replica isolation
     'storage/snapshot-coder.ts',     // Deterministic state serialization (RLP encoding)
     'runtime/jurisdiction-api.ts', // J-adapter / on-chain integration surface
   ],
@@ -256,7 +258,9 @@ const CROSS_FILES = {
     'account/utils.ts',
     'protocol/serialization.ts',
     'account/crypto.ts',
-    'state-helpers.ts',
+    'account/state-clone.ts',
+    'entity/state-clone.ts',
+    'entity/replica-clone.ts',
     'runtime.ts',
     'runtime/composition.ts',
     'runtime/frame/process.ts',
@@ -462,7 +466,9 @@ const RUNTIME_FILES = {
     'protocol/signatures.ts',
     'protocol/serialization.ts',
     'storage/snapshot-coder.ts',
-    'state-helpers.ts',
+    'account/state-clone.ts',
+    'entity/state-clone.ts',
+    'entity/replica-clone.ts',
     'runtime/env-events.ts',
     'infra/logger.ts',
     'jurisdiction/jurisdiction-runtime.ts',
@@ -503,7 +509,9 @@ const ORDERBOOK_FILES = {
     'protocol/identity.ts',
     'account/utils.ts',
     'protocol/serialization.ts',
-    'state-helpers.ts',
+    'account/state-clone.ts',
+    'entity/state-clone.ts',
+    'entity/replica-clone.ts',
     'runtime/swap-pairs.ts',
     'orderbook/swap-execution.ts',
     'orderbook/swap-keys.ts',
@@ -572,7 +580,9 @@ const SWAP_FILES = {
     'protocol/identity.ts',
     'account/utils.ts',
     'protocol/serialization.ts',
-    'state-helpers.ts',
+    'account/state-clone.ts',
+    'entity/state-clone.ts',
+    'entity/replica-clone.ts',
     'runtime/swap-pairs.ts',
     'orderbook/swap-execution.ts',
     'orderbook/swap-keys.ts',
@@ -1206,7 +1216,9 @@ xln/
       graph.ts                   ${fileSizes['runtime/routing/graph.ts'] || '?'} lines - Network graph
       pathfinding.ts             ${fileSizes['runtime/routing/pathfinding.ts'] || '?'} lines - Dijkstra routing
 
-    state-helpers.ts             ${fileSizes['runtime/state-helpers.ts'] || '?'} lines - Pure state management
+    account/state-clone.ts       ${fileSizes['runtime/account/state-clone.ts'] || '?'} lines - Account candidate isolation
+    entity/state-clone.ts        ${fileSizes['runtime/entity/state-clone.ts'] || '?'} lines - Entity candidate isolation
+    entity/replica-clone.ts      ${fileSizes['runtime/entity/replica-clone.ts'] || '?'} lines - Replica-local isolation
     storage/snapshot-coder.ts            ${fileSizes['runtime/storage/snapshot-coder.ts'] || '?'} lines - Deterministic RLP serialization
   docs/
     readme.md                           ${fileSizes['docs/readme.md'] || '?'} lines - Live docs index and reading path

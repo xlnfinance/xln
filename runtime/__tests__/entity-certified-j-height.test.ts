@@ -24,7 +24,7 @@ import {
 } from '../protocol/dispute/arguments';
 import { hashHtlcSecret } from '../protocol/htlc/utils';
 import { createEmptyEnv } from '../runtime';
-import { cloneEntityState } from '../state-helpers';
+import { cloneEntityState } from '../entity/state-clone';
 import type { EntityState, EntityTx, RuntimeState } from '../types';
 import { signEntityHashes } from '../hanko/signing';
 import {

@@ -30,7 +30,7 @@ import { mergeStorageOverlayRecords } from '../../protocol/overlay';
 import { compareStableText, safeStringify } from '../../protocol/serialization';
 import { getNextSettlementNonce } from '../../protocol/settlement/operations';
 import { assertScheduledWakeFrameOrder } from '../scheduled-wake-validation';
-import { cloneEntityState } from '../../state-helpers';
+import { cloneEntityState } from '../state-clone';
 import { getAccountPerspective } from '../../account/perspective';
 import { emitScopedEvents } from '../../infra/scoped-events';
 import { resolveEntityProposerId } from '../../runtime/entity-output-signer';

@@ -23,8 +23,8 @@ export type DisputeArgumentSnapshot = {
 
 /**
  * Leaf-level clone used by both Account storage and whole-state cloning.
- * Keep this module free of Runtime/Entity/Account imports: state-helpers sits
- * near the bottom of the dependency graph and must never import a reducer.
+ * Keep this protocol leaf free of Runtime/Entity/Account imports. State clone
+ * owners depend on this evidence copier, never the other way around.
  */
 export const cloneDisputeArgumentSnapshot = (
   snapshot: DisputeArgumentSnapshot,

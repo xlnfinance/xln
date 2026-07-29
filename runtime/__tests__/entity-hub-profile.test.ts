@@ -3,7 +3,7 @@ import { createEmptyEnv, enqueueRuntimeInput, processRuntime } from '../runtime'
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
 import { encodeBoard, hashBoard } from '../entity/factory';
 import { buildLocalEntityProfile } from '../networking/gossip-helper';
-import { cloneEntityState } from '../state-helpers';
+import { cloneEntityState } from '../entity/state-clone';
 import { handleSetHubConfigEntityTx } from '../entity/tx/handlers/account-admin';
 import type { ConsensusConfig, EntityState, HubRebalanceConfig } from '../types';
 

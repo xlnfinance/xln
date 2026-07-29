@@ -42,7 +42,7 @@ import {
   formatSignerDisplay,
 } from '../utils';
 import { createStructuredLogger } from '../infra/logger';
-import { cloneEntityState } from '../state-helpers';
+import { cloneEntityState } from '../entity/state-clone';
 import { buildRuntimeCheckpointLineagePlan } from '../storage/entity-lineage';
 import {
   assertCertifiedRegistrationEvidence,

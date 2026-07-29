@@ -10,7 +10,8 @@ import {
   computeAccountStateRoot,
   computeAccountStateRootCold,
 } from '../account/state-root';
-import { cloneAccountState, cloneEntityState } from '../state-helpers';
+import { cloneAccountState } from '../account/state-clone';
+import { cloneEntityState } from '../entity/state-clone';
 import type { AccountState, EntityState, SwapOffer } from '../types';
 import { createDefaultDelta } from '../account/delta';
 

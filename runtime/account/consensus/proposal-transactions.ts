@@ -1,5 +1,5 @@
 import type { AccountState, AccountTx, RuntimeState } from '../../types';
-import { cloneAccountState } from '../../state-helpers';
+import { cloneAccountState } from '../state-clone';
 import { isLeft } from '../utils';
 import { HEAVY_LOGS } from '../../utils';
 import { applyAccountTx } from '../tx/apply';

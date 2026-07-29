@@ -12,7 +12,7 @@ import {
   markCrossJurisdictionBookAdmissionClosed,
 } from '../../../extensions/cross-j/orderbook';
 import { removeBookOrderById } from '../../../orderbook/cross-j';
-import { cloneEntityState } from '../../../state-helpers';
+import { cloneEntityState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import type {
   CrossJurisdictionSwapRoute,

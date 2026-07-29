@@ -57,7 +57,9 @@ published last and is likewise rebuilt from the WAL when it lags.
 ## Calls into
 
 - `types.ts`
-- `state-helpers.ts`
+- `account/state-clone.ts`
+- `entity/state-clone.ts`
+- `entity/replica-clone.ts`
 - `wal/`
 
 ## Audit note

@@ -12,7 +12,7 @@ import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumula
 import { encodeBoard, hashBoard } from '../entity/factory';
 import { applyCommand, createBook, replaceOrderbookPair } from '../orderbook';
 import { encodeReplicaMeta, hydrateEntityStateFromStorage, projectAccountDoc, projectEntityCoreDoc, projectReplicaMeta } from '../storage/projections';
-import { cloneEntityState } from '../state-helpers';
+import { cloneEntityState } from '../entity/state-clone';
 import type { StorageFrameRecord } from '../storage/types';
 import type { AccountState, EntityReplica, RuntimeState } from '../types';
 import {
