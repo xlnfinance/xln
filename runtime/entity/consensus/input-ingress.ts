@@ -82,6 +82,7 @@ export const prepareEntityInputIngress = (
   replica: EntityReplica,
   ingressInput: EntityInput,
   trustedLocalCrossJurisdiction: boolean,
+  promoteCandidateState: boolean,
 ): EntityInputIngress => {
   if (trustedLocalCrossJurisdiction && !isSingleSignerEntity(replica.state)) {
     throw new Error(`CROSS_J_LOCAL_COMMAND_SINGLE_SIGNER_REQUIRED:${replica.entityId}`);
@@ -144,6 +145,7 @@ export const prepareEntityInputIngress = (
       candidateEffects: [],
       storageChanges: [],
       frameHash,
+      promoteCandidateState,
     },
     entityDisplay,
     quietRuntimeLogs: env.quietRuntimeLogs === true,

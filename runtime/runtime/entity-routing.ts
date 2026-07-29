@@ -4,6 +4,7 @@ import type {
   AccountTx,
   EntityInput,
   EntityReplica,
+  EntityTx,
   RuntimeState,
   JInput,
   ReliableDeliveryReceipt,
@@ -311,7 +312,12 @@ export type CrossJAccountFrameExpectation = {
 export type CrossJAccountInputPairSelection = {
   inputs: RoutedEntityInput[];
   pairs: CrossJAccountInputPair[];
-  droppedInputIndexes: number[];
+  rejectedLegs: CrossJRejectedAccountInput[];
+};
+
+export type CrossJRejectedAccountInput = {
+  inputIndex: number;
+  accountInput: AccountInput;
 };
 
 export type PotentialCrossJAccountInputPair = {
@@ -644,10 +650,101 @@ const findInvalidAtomicCrossJIndexes = (
   return invalid;
 };
 
+const stripRejectedAccountTxs = (
+  input: RoutedEntityInput,
+  rejected: ReadonlySet<AccountInput>,
+): RoutedEntityInput | null => {
+  const entityTxs: EntityTx[] = [];
+  for (const tx of input.entityTxs ?? []) {
+    if (tx.type === 'accountInput') {
+      if (!rejected.has(tx.data)) entityTxs.push(tx);
+      continue;
+    }
+    if (tx.type !== 'consensusOutput' && tx.type !== 'runtimeOutput') {
+      entityTxs.push(tx);
+      continue;
+    }
+    const retained = tx.data.entityTxs.filter(candidate =>
+      candidate.type !== 'accountInput' || !rejected.has(candidate.data));
+    if (retained.length === tx.data.entityTxs.length) {
+      entityTxs.push(tx);
+      continue;
+    }
+    if (retained.length === 0) continue;
+    if (tx.type === 'consensusOutput') {
+      // A certified reliable Account output is required to contain exactly one
+      // nested transaction. Rewriting a signed mixed payload would invalidate
+      // its Hanko, so malformed producers fail loudly instead.
+      throw new Error('CROSS_J_CERTIFIED_OUTPUT_PARTIAL_REWRITE_FORBIDDEN');
+    }
+    entityTxs.push({
+      ...tx,
+      data: {
+        ...tx.data,
+        entityTxs: retained,
+      },
+    });
+  }
+  const hasOtherProtocolPayload = Boolean(
+    entityTxs.length > 0 ||
+    input.proposedFrame ||
+    input.hashPrecommitFrame ||
+    input.hashPrecommits ||
+    input.jPrefixAttestations ||
+    input.leaderTimeoutVote,
+  );
+  if (!hasOtherProtocolPayload) return null;
+  const retained: RoutedEntityInput = {
+    ...input,
+    entityTxs,
+  };
+  delete retained.atomicCrossJurisdictionPair;
+  return retained;
+};
+
+const removeRejectedCrossJAccountInputs = (
+  inputs: readonly RoutedEntityInput[],
+  rejectedLegs: readonly CrossJRejectedAccountInput[],
+): RoutedEntityInput[] => {
+  const rejectedByInput = new Map<number, Set<AccountInput>>();
+  for (const candidate of rejectedLegs) {
+    const rejected = rejectedByInput.get(candidate.inputIndex) ?? new Set();
+    rejected.add(candidate.accountInput);
+    rejectedByInput.set(candidate.inputIndex, rejected);
+  }
+  return inputs.flatMap((input, inputIndex) => {
+    const rejected = rejectedByInput.get(inputIndex);
+    if (!rejected) return [input];
+    const retained = stripRejectedAccountTxs(input, rejected);
+    return retained ? [retained] : [];
+  });
+};
+
+export const removeRejectedCrossJAccountInputsByIndex = (
+  env: RuntimeState,
+  inputs: readonly RoutedEntityInput[],
+  rejectedInputIndexes: ReadonlySet<number>,
+): RoutedEntityInput[] => {
+  const candidates = collectCrossJAdmissionCandidates(env, inputs);
+  const rejectedLegs = [...rejectedInputIndexes].flatMap(inputIndex => {
+    const matched = candidates.filter(candidate =>
+      candidate.inputIndex === inputIndex);
+    const input = inputs[inputIndex];
+    const accountInputs = matched.length > 0
+      ? matched.map(candidate => candidate.accountInput)
+      : input
+        ? effectiveAccountInputs(input)
+        : [];
+    return accountInputs.map(accountInput => ({ inputIndex, accountInput }));
+  });
+  return removeRejectedCrossJAccountInputs(inputs, rejectedLegs);
+};
+
 /**
  * Opening and closing both cross-j legs are atomic Runtime cohorts. Proposals
  * and ACKs must carry the exact source/target pair from one source Runtime
- * frame; a standalone monetary leg is dropped before Account consensus.
+ * frame. A standalone monetary leg is removed before Account consensus while
+ * unrelated Entity transactions in the same Runtime input remain eligible.
  */
 export const selectMatchedCrossJAccountInputPairs = (
   env: RuntimeState,
@@ -656,7 +753,7 @@ export const selectMatchedCrossJAccountInputPairs = (
   const candidates = collectCrossJAdmissionCandidates(env, inputs);
   const atomicGroups = collectAtomicCrossJGroups(inputs);
   if (candidates.length === 0 && atomicGroups.size === 0) {
-    return { inputs: [...inputs], pairs: [], droppedInputIndexes: [] };
+    return { inputs: [...inputs], pairs: [], rejectedLegs: [] };
   }
 
   const grouped = groupUncommittedCrossJCandidates(candidates, inputs);
@@ -675,16 +772,32 @@ export const selectMatchedCrossJAccountInputPairs = (
     committedCandidateIndexes,
     pairs,
   );
-  const droppedInputIndexes = [...new Set([
+  const rejectedInputIndexes = [...new Set([
     ...[...allCandidateIndexes]
       .filter(inputIndex => grouped.invalidIndexes.has(inputIndex) || !pairedIndexes.has(inputIndex)),
     ...atomicInvalidIndexes,
   ])].sort((left, right) => left - right);
-  const dropped = new Set(droppedInputIndexes);
+  const rejected = new Set(rejectedInputIndexes);
+  const rejectedLegs = rejectedInputIndexes.flatMap(inputIndex => {
+    const matched = candidates.filter(candidate =>
+      candidate.inputIndex === inputIndex);
+    const input = inputs[inputIndex];
+    const accountInputs = matched.length > 0
+      ? matched.map(candidate => candidate.accountInput)
+      : input
+        ? effectiveAccountInputs(input)
+        : [];
+    return accountInputs.map(accountInput => ({ inputIndex, accountInput }));
+  });
   return {
-    inputs: inputs.filter((_input, inputIndex) => !dropped.has(inputIndex)),
-    pairs: pairs.filter(pair => !dropped.has(pair.sourceInputIndex) && !dropped.has(pair.targetInputIndex)),
-    droppedInputIndexes,
+    inputs: removeRejectedCrossJAccountInputs(
+      inputs,
+      rejectedLegs,
+    ),
+    pairs: pairs.filter(pair =>
+      !rejected.has(pair.sourceInputIndex) &&
+      !rejected.has(pair.targetInputIndex)),
+    rejectedLegs,
   };
 };
 

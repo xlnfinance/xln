@@ -361,6 +361,7 @@ const drainImmediateCrossJurisdictionOutputs = async (
       entityInput,
       actualSignerId,
       options.isReplay,
+      options.mode === 'commit',
       true,
     );
     context.localCrossJurisdictionEventTrace.push(result.appliedInput);
@@ -565,7 +566,15 @@ const applyExternalEntityInput = async (
   }
   const { signerId, replicaKey, replica } = resolved;
   options.beforeEntityApply?.(entityInput.entityId);
-  const result = await applyEntityInputToReplica(env, replica, replicaKey, entityInput, signerId, options.isReplay);
+  const result = await applyEntityInputToReplica(
+    env,
+    replica,
+    replicaKey,
+    entityInput,
+    signerId,
+    options.isReplay,
+    options.mode === 'commit',
+  );
   context.inputOutcomes.push({
     inputIndex,
     outcome: result.outcome,
@@ -701,6 +710,7 @@ const applyEntityInputToReplica = async (
   entityInput: RoutedEntityInput,
   actualSignerId: string,
   isReplay: boolean,
+  promoteCandidateState: boolean,
   trustedLocalCrossJurisdiction = false,
 ): Promise<{
   outcome: EntityInputOutcome;
@@ -735,7 +745,9 @@ const applyEntityInputToReplica = async (
       env,
       entityReplica,
       normalizedInput,
-      trustedLocalCrossJurisdiction ? { trustedLocalRuntimeProtocol: 'cross-j' } : undefined,
+      trustedLocalCrossJurisdiction
+        ? { trustedLocalRuntimeProtocol: 'cross-j', promoteCandidateState }
+        : { promoteCandidateState },
     );
   } catch (error) {
     throw new RuntimeEntityInputApplyError(entityInput, trustedLocalCrossJurisdiction, error);

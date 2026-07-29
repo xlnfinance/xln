@@ -9,6 +9,7 @@ import {
 import {
   selectMatchedCrossJAccountInputPairs,
   selectPotentialCrossJAccountInputPairs,
+  removeRejectedCrossJAccountInputsByIndex,
   type RuntimeEntityRoutingDeps,
 } from '../entity-routing';
 import { forkRuntimeEntityScratchEnv } from './clone';
@@ -102,7 +103,7 @@ const groupAtomicPairsFirst = (
     ...selection.inputs.filter((_input, inputIndex) => !pairedIndexes.has(inputIndex)),
   ];
   const grouped = selectMatchedCrossJAccountInputPairs(env, groupedInputs);
-  if (grouped.droppedInputIndexes.length > 0 || grouped.pairs.length !== selection.pairs.length) {
+  if (grouped.rejectedLegs.length > 0 || grouped.pairs.length !== selection.pairs.length) {
     throw new Error('RUNTIME_CROSS_J_ACCOUNT_PAIR_GROUPING_DIVERGED');
   }
   return grouped;
@@ -197,6 +198,18 @@ const rejectedPairIndexes = (
     return indexes.some(inputIndex => failedIndexes.has(inputIndex)) ? indexes : [];
   });
 
+const removeFailedPairAccountInputs = (
+  env: RuntimeState,
+  inputs: readonly RoutedEntityInput[],
+  failedIndexes: ReadonlySet<number>,
+): RoutedEntityInput[] => {
+  return removeRejectedCrossJAccountInputsByIndex(
+    env,
+    inputs,
+    failedIndexes,
+  );
+};
+
 export const admitAtomicCrossJAccountInputs = async (
   env: RuntimeState,
   inputs: readonly RoutedEntityInput[],
@@ -217,17 +230,20 @@ export const admitAtomicCrossJAccountInputs = async (
       })),
     });
   }
-  if (initial.droppedInputIndexes.length > 0) {
+  if (initial.rejectedLegs.length > 0) {
+    const rejectedInputIndexes = [...new Set(
+      initial.rejectedLegs.map(leg => leg.inputIndex),
+    )];
     if (isReplay) throw new Error('RUNTIME_REPLAY_CROSS_J_ACCOUNT_PAIR_INVALID');
     env.warn('network', 'CROSS_J_ACCOUNT_PAIR_STRUCTURAL_MISMATCH', {
       received: inputs.length,
-      droppedInputIndexes: initial.droppedInputIndexes,
+      rejectedInputIndexes,
       inputSummary: safeStringify(inputs.map(summarizeAtomicCrossJAccountInput)),
     });
     recordRejectedAtomicCrossJInputs(
       env,
       inputs,
-      initial.droppedInputIndexes,
+      rejectedInputIndexes,
       'CROSS_J_ACCOUNT_PAIR_STRUCTURAL_MISMATCH',
       'A cross-j Account leg arrived without its exact atomic sibling leg and was ignored',
     );
@@ -236,14 +252,14 @@ export const admitAtomicCrossJAccountInputs = async (
   let retained = initial.inputs;
   for (let attempt = 0; attempt <= initial.pairs.length; attempt += 1) {
     const selection = groupAtomicPairsFirst(env, selectMatchedCrossJAccountInputPairs(env, retained));
-    if (selection.droppedInputIndexes.length > 0) {
+    if (selection.rejectedLegs.length > 0) {
       throw new Error('RUNTIME_CROSS_J_ACCOUNT_PAIR_SELECTION_UNSTABLE');
     }
     if (isReplay || selection.pairs.length === 0) return selection;
 
     const pairedCount = selection.pairs.length * 2;
     const paired = selectMatchedCrossJAccountInputPairs(env, selection.inputs.slice(0, pairedCount));
-    if (paired.droppedInputIndexes.length > 0 || paired.pairs.length !== selection.pairs.length) {
+    if (paired.rejectedLegs.length > 0 || paired.pairs.length !== selection.pairs.length) {
       throw new Error('RUNTIME_CROSS_J_ACCOUNT_PAIR_ADMISSION_GROUP_INVALID');
     }
     const validation = await validateAtomicPairsInScratchState(
@@ -258,7 +274,7 @@ export const admitAtomicCrossJAccountInputs = async (
     env.warn('network', 'CROSS_J_ACCOUNT_PAIR_ADMISSION_REJECTED', {
       attempt,
       pairCount: paired.pairs.length,
-      droppedInputIndexes: [...validation.failedIndexes].sort((left, right) => left - right),
+      rejectedInputIndexes: [...validation.failedIndexes].sort((left, right) => left - right),
       failureDetail: validation.failureDetail,
     });
     recordRejectedAtomicCrossJInputs(
@@ -268,7 +284,11 @@ export const admitAtomicCrossJAccountInputs = async (
       'CROSS_J_ACCOUNT_PAIR_ADMISSION_REJECTED',
       'A signed cross-j Account pair failed atomic scratch-state validation and was ignored',
     );
-    retained = selection.inputs.filter((_input, inputIndex) => !validation.failedIndexes.has(inputIndex));
+    retained = removeFailedPairAccountInputs(
+      env,
+      selection.inputs,
+      validation.failedIndexes,
+    );
   }
   throw new Error('RUNTIME_CROSS_J_ACCOUNT_PAIR_ADMISSION_DID_NOT_CONVERGE');
 };

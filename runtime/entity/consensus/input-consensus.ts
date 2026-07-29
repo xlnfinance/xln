@@ -166,7 +166,10 @@ export const applyEntityInput = async (
   env: RuntimeState,
   entityReplica: EntityReplica,
   entityInput: EntityInput,
-  options: { trustedLocalRuntimeProtocol?: 'cross-j' } = {},
+  options: {
+    trustedLocalRuntimeProtocol?: 'cross-j';
+    promoteCandidateState?: boolean;
+  } = {},
 ): Promise<ApplyEntityInputResult> => {
   const consensusProfileStartedAt = getPerfMs();
   const consensusProfileCheckpoints: Record<string, number> = {};
@@ -179,6 +182,7 @@ export const applyEntityInput = async (
     entityReplica,
     entityInput,
     trustedLocalCrossJurisdiction,
+    options.promoteCandidateState !== false,
   );
   if (!ingress.accepted) return ingress.result;
   const phaseContext = ingress.context;

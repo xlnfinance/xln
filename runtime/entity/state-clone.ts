@@ -21,8 +21,14 @@ import { forkAccountWorkIndexes } from './consensus/account-work-index';
 import { forkCrossJurisdictionBookAdmissionIndex } from '../extensions/cross-j/orderbook';
 import {
   createEntityAccountCandidateMap,
+  commitEntityAccountCandidate,
   snapshotEntityAccountMap,
 } from './account-candidate-map';
+import {
+  commitEntityOrderbookCandidate,
+  createEntityOrderbookCandidate,
+  snapshotEntityOrderbookCandidate,
+} from './orderbook-candidate';
 
 const cloneLog = createStructuredLogger('entity.state_clone');
 
@@ -141,6 +147,13 @@ const cloneEntityStateWithPolicy = (
     ? {
         ...source,
         accounts: snapshotEntityAccountMap(source.accounts),
+        ...(source.orderbookExt
+          ? {
+              orderbookExt: snapshotEntityOrderbookCandidate(
+                source.orderbookExt,
+              ),
+            }
+          : {}),
       }
     : source;
   const cloned = structuredCloneOrThrow(
@@ -207,11 +220,27 @@ export const createEntityFrameCandidateState = (
     ...source,
     accounts: new Map<string, AccountState>(),
   };
+  delete shellSource.orderbookExt;
   const candidate = cloneEntityStateWithPolicy(shellSource, false, false);
   candidate.accounts = createEntityAccountCandidateMap(source.accounts);
+  if (source.orderbookExt) {
+    candidate.orderbookExt = createEntityOrderbookCandidate(
+      source.orderbookExt,
+    );
+  }
   copyEntityFrameEvents(source, candidate);
   forkEntityAccountCommitmentCache(source, candidate);
   forkAccountWorkIndexes(source, candidate);
   forkCrossJurisdictionBookAdmissionIndex(source, candidate);
   return candidate;
+};
+
+export const commitEntityFrameCandidateState = (
+  state: EntityState,
+): EntityState => {
+  state.accounts = commitEntityAccountCandidate(state.accounts);
+  if (state.orderbookExt) {
+    state.orderbookExt = commitEntityOrderbookCandidate(state.orderbookExt);
+  }
+  return state;
 };

@@ -8,7 +8,7 @@ import type {
   ProposedEntityFrame,
   EntityCandidate,
 } from '../../types';
-import { commitEntityAccountCandidate } from '../account-candidate-map';
+import { commitEntityFrameCandidateState } from '../state-clone';
 import { cacheCommittedConsumptionNodeChanges } from '../consumption-store';
 import { emitCommittedPendingFrameWarnings } from '../scheduler';
 import {
@@ -193,9 +193,9 @@ const installCommittedState = (
     execution.accountJClaimNodeChanges,
   );
   emitCommittedPendingFrameWarnings(previousState, committedState);
-  committedState.accounts = commitEntityAccountCandidate(
-    committedState.accounts,
-  );
+  if (context.promoteCandidateState) {
+    commitEntityFrameCandidateState(committedState);
+  }
   workingReplica.state = committedState;
   storageChanges.push(
     ...execution.storageChanges,

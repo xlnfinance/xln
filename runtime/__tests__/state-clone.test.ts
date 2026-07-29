@@ -9,6 +9,7 @@ import {
 import {
   cloneEntityState,
   cloneTrustedEntityState,
+  commitEntityFrameCandidateState,
   createEntityFrameCandidateState,
 } from '../entity/state-clone';
 import {
@@ -16,7 +17,13 @@ import {
   EntityAccountCandidateMap,
 } from '../entity/account-candidate-map';
 import { computeCanonicalEntityConsensusStateHash } from '../entity/consensus/state-root';
+import { EntityCandidateMap } from '../entity/candidate-map';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
+import {
+  applyCommand,
+  createBook,
+  createOrderbookExtState,
+} from '../orderbook';
 import { buildCanonicalEntityReplicaSnapshot } from '../storage/wal/snapshot';
 import { validateConsensusConfig } from '../entity/consensus/config-validation';
 import { validateEntityReplica } from '../entity/replica-validation';
@@ -228,6 +235,79 @@ describe('state cloning', () => {
     candidate.accounts = commitEntityAccountCandidate(candidate.accounts);
     expect(candidate.accounts).toBe(source.accounts);
     expect(source.accounts.get(counterpartyId)?.deltas.get(1)?.offdelta).toBe(25n);
+  });
+
+  test('Entity frame candidate isolates only the touched Orderbook pair', () => {
+    const source = makeProjectionReplica().state as EntityState;
+    const firstPair = '1/2';
+    const secondPair = '1/3';
+    const createPairBook = () => createBook({
+      bucketWidthTicks: 100n,
+      maxOrders: 32,
+      stpPolicy: 1,
+    });
+    source.orderbookExt = createOrderbookExtState({
+      entityId: source.entityId,
+      name: 'Projection Hub',
+      spreadDistribution: {
+        makerBps: 0,
+        takerBps: 10_000,
+        hubBps: 0,
+        makerReferrerBps: 0,
+        takerReferrerBps: 0,
+      },
+      referenceTokenId: 1,
+      minTradeSize: 0n,
+      supportedPairs: [firstPair, secondPair],
+    });
+    source.orderbookExt.books.set(firstPair, createPairBook());
+    source.orderbookExt.books.set(secondPair, createPairBook());
+
+    const fullClone = cloneTrustedEntityState(source);
+    const candidate = createEntityFrameCandidateState(source);
+    const candidateBooks = candidate.orderbookExt?.books;
+    if (!(candidateBooks instanceof EntityCandidateMap)) {
+      throw new Error('TEST_ENTITY_CANDIDATE_ORDERBOOK_MISSING');
+    }
+    expect(candidateBooks.stats()).toEqual({
+      base: 2,
+      changed: 0,
+      deleted: 0,
+    });
+
+    const addOrder = (state: EntityState): void => {
+      const book = state.orderbookExt?.books.get(firstPair);
+      if (!book) throw new Error('TEST_ENTITY_CANDIDATE_BOOK_MISSING');
+      applyCommand(book, {
+        kind: 0,
+        ownerId: source.entityId,
+        orderId: 'projection-order',
+        side: 1,
+        tif: 0,
+        postOnly: false,
+        priceTicks: 1_000n,
+        qtyLots: 10n,
+      });
+    };
+    addOrder(fullClone);
+    addOrder(candidate);
+
+    expect(candidateBooks.stats()).toEqual({
+      base: 2,
+      changed: 1,
+      deleted: 0,
+    });
+    expect(source.orderbookExt.books.get(firstPair)?.orders.size).toBe(0);
+    const untouchedCandidateBook = Array.from(candidateBooks.entries())
+      .find(([pairId]) => pairId === secondPair)?.[1];
+    expect(untouchedCandidateBook).toBe(source.orderbookExt.books.get(secondPair));
+    expect(computeCanonicalEntityConsensusStateHash(candidate))
+      .toBe(computeCanonicalEntityConsensusStateHash(fullClone));
+
+    commitEntityFrameCandidateState(candidate);
+    expect(candidate.orderbookExt?.books).toBe(source.orderbookExt.books);
+    expect(source.orderbookExt.books.get(firstPair)?.orders.size).toBe(1);
+    expect(source.orderbookExt.books.get(secondPair)?.orders.size).toBe(0);
   });
 
   test('clone diagnostics use structured logging only', () => {

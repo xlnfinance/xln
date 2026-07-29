@@ -401,7 +401,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(selectPotentialCrossJAccountInputPairs([sourceInput, targetInput])).toHaveLength(1);
     expect(selectMatchedCrossJAccountInputPairs(env, [sourceInput, targetInput])).toMatchObject({
       inputs: [sourceInput, targetInput],
-      droppedInputIndexes: [],
+      rejectedLegs: [],
     });
 
     const mismatchedTarget = closeInput(
@@ -1253,7 +1253,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     ]);
     const proposalSelection = selectMatchedCrossJAccountInputPairs(userEnv, proposals);
     expect(proposalSelection.pairs.map(pair => pair.phase)).toEqual(['proposal']);
-    expect(proposalSelection.droppedInputIndexes).toEqual([]);
+    expect(proposalSelection.rejectedLegs).toEqual([]);
 
     const proposalFrame = (input: RoutedEntityInput) => {
       const accountInput = getEffectiveEntityInputTxs(input).flatMap(tx =>
@@ -1364,6 +1364,31 @@ describe('cross-jurisdiction hashledger swap', () => {
       );
       expect(incidentsAfter, corruption.name).toBeGreaterThan(incidentsBefore);
     }
+
+    const mixedCorruptPair = cloneIsolatedRoutedEntityInputs(proposals);
+    mixedCorruptPair[1]!.sourceRuntimeFrame!.height += 1;
+    mixedCorruptPair[0]!.entityTxs = [
+      ...(mixedCorruptPair[0]!.entityTxs ?? []),
+      {
+        type: 'chat',
+        data: {
+          from: sourceHubSigner,
+          message: 'independent entity tx survives rejected cross-j legs',
+        },
+      },
+    ];
+    const mixedRejected = await admitAtomicCrossJAccountInputs(
+      userEnv,
+      mixedCorruptPair,
+      [],
+      false,
+      makeLocalCrossJRoutingDeps(),
+    );
+    expect(mixedRejected.pairs).toEqual([]);
+    expect(mixedRejected.inputs).toHaveLength(1);
+    expect(getEffectiveEntityInputTxs(mixedRejected.inputs[0]!).map(tx => tx.type))
+      .toEqual(['chat']);
+    expect(mixedRejected.inputs[0]!.atomicCrossJurisdictionPair).toBeUndefined();
 
     const validThenCorruptCohorts = cloneIsolatedRoutedEntityInputs(atomicRepeatedCohorts);
     const corruptNewestTarget = validThenCorruptCohorts.find(
@@ -1531,7 +1556,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(selectMatchedCrossJAccountInputPairs(hubEnv, [acknowledgements[0]!]).inputs).toEqual([]);
     const ackSelection = selectMatchedCrossJAccountInputPairs(hubEnv, acknowledgements);
     expect(ackSelection.pairs.map(pair => pair.phase)).toEqual(['ack']);
-    expect(ackSelection.droppedInputIndexes).toEqual([]);
+    expect(ackSelection.rejectedLegs).toEqual([]);
 
     hubEnv.timestamp += ACCOUNT_PENDING_RESEND_AFTER_MS + 1;
     const dueWake = createDueScheduledWakeInputs(hubEnv, hubEnv.timestamp).find(input => input.entityId === sourceHub);

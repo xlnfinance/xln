@@ -1,0 +1,131 @@
+/**
+ * A frame-local Map overlay. Certified entries remain untouched until commit;
+ * only keys read for mutation or explicitly replaced allocate candidate data.
+ */
+export class EntityCandidateMap<K, V> extends Map<K, V> {
+  readonly #base: Map<K, V>;
+  readonly #changes = new Map<K, V>();
+  readonly #deleted = new Set<K>();
+  readonly #cloneValue: (value: V) => V;
+  readonly #cloneOnIteration: boolean;
+
+  constructor(
+    base: Map<K, V>,
+    cloneValue: (value: V) => V,
+    cloneOnIteration: boolean,
+  ) {
+    super();
+    if (base instanceof EntityCandidateMap) {
+      throw new Error('ENTITY_CANDIDATE_MAP_NESTED');
+    }
+    this.#base = base;
+    this.#cloneValue = cloneValue;
+    this.#cloneOnIteration = cloneOnIteration;
+  }
+
+  override get size(): number {
+    let size = this.#base.size - this.#deleted.size;
+    for (const key of this.#changes.keys()) {
+      if (!this.#base.has(key)) size += 1;
+    }
+    return size;
+  }
+
+  override has(key: K): boolean {
+    return !this.#deleted.has(key) &&
+      (this.#changes.has(key) || this.#base.has(key));
+  }
+
+  #read(key: K): V | undefined {
+    if (this.#deleted.has(key)) return undefined;
+    return this.#changes.has(key)
+      ? this.#changes.get(key)
+      : this.#base.get(key);
+  }
+
+  override get(key: K): V | undefined {
+    if (this.#deleted.has(key)) return undefined;
+    if (this.#changes.has(key)) return this.#changes.get(key);
+    const certified = this.#base.get(key);
+    if (certified === undefined) return undefined;
+    const candidate = this.#cloneValue(certified);
+    this.#changes.set(key, candidate);
+    return candidate;
+  }
+
+  override set(key: K, value: V): this {
+    this.#deleted.delete(key);
+    this.#changes.set(key, value);
+    return this;
+  }
+
+  override delete(key: K): boolean {
+    const existed = this.has(key);
+    this.#changes.delete(key);
+    if (this.#base.has(key)) this.#deleted.add(key);
+    return existed;
+  }
+
+  override clear(): void {
+    this.#changes.clear();
+    for (const key of this.#base.keys()) this.#deleted.add(key);
+  }
+
+  override *keys(): MapIterator<K> {
+    for (const key of this.#base.keys()) {
+      if (!this.#deleted.has(key)) yield key;
+    }
+    for (const key of this.#changes.keys()) {
+      if (!this.#base.has(key)) yield key;
+    }
+  }
+
+  override *values(): MapIterator<V> {
+    for (const key of this.keys()) {
+      const value = this.#cloneOnIteration
+        ? this.get(key)
+        : this.#read(key);
+      if (value !== undefined) yield value;
+    }
+  }
+
+  override *entries(): MapIterator<[K, V]> {
+    for (const key of this.keys()) {
+      const value = this.#cloneOnIteration
+        ? this.get(key)
+        : this.#read(key);
+      if (value !== undefined) yield [key, value];
+    }
+  }
+
+  override [Symbol.iterator](): MapIterator<[K, V]> {
+    return this.entries();
+  }
+
+  override forEach(
+    callback: (value: V, key: K, map: Map<K, V>) => void,
+    thisArg?: unknown,
+  ): void {
+    for (const [key, value] of this.entries()) {
+      callback.call(thisArg, value, key, this);
+    }
+  }
+
+  snapshot(): Map<K, V> {
+    return new Map(this.entries());
+  }
+
+  commit(): Map<K, V> {
+    for (const key of this.#deleted) this.#base.delete(key);
+    for (const [key, value] of this.#changes) this.#base.set(key, value);
+    return this.#base;
+  }
+
+  stats(): Readonly<{ base: number; changed: number; deleted: number }> {
+    return {
+      base: this.#base.size,
+      changed: this.#changes.size,
+      deleted: this.#deleted.size,
+    };
+  }
+}

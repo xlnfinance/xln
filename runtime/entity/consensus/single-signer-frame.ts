@@ -7,7 +7,7 @@ import { removeCommittedTxsFromMempool } from '../../protocol/tx-multiset';
 import type { ProposedEntityFrame } from '../../types';
 import { getPerfMs } from '../../utils';
 import { cacheCommittedConsumptionNodeChanges } from '../consumption-store';
-import { commitEntityAccountCandidate } from '../account-candidate-map';
+import { commitEntityFrameCandidateState } from '../state-clone';
 import { emitCommittedPendingFrameWarnings } from '../scheduler';
 import { createEntityFrameHashFromStateRoot } from './frame';
 import { applyEntityFrame } from './frame-application';
@@ -263,9 +263,9 @@ const installSingleSignerFrame = async (
   cacheCommittedAccountJClaimNodeChanges(env, execution.accountJClaimNodeChanges);
   const priorState = workingReplica.state;
   emitCommittedPendingFrameWarnings(priorState, committedState);
-  committedState.accounts = commitEntityAccountCandidate(
-    committedState.accounts,
-  );
+  if (context.promoteCandidateState) {
+    commitEntityFrameCandidateState(committedState);
+  }
   workingReplica.state = committedState;
   storageChanges.push(
     ...execution.storageChanges,
