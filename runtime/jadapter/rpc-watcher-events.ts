@@ -22,7 +22,7 @@ import {
   normalizeEvmAddress,
   type WatchedErc20Token,
 } from './rpc-watcher-inputs';
-import type { JEventIngress } from './types';
+import type { JEvent } from './types';
 
 type WatcherLogKind = 'depository' | 'entityProvider' | 'erc20';
 
@@ -45,7 +45,7 @@ type WatcherEventDecodeInput = {
 };
 
 export type WatcherEventDecodeResult = {
-  events: JEventIngress[];
+  events: JEvent[];
   authorityTxsByBlock: Map<number, RuntimeTx[]>;
 };
 
@@ -56,6 +56,13 @@ const erc20Interface = new ethers.Interface([
   'event Transfer(address indexed from, address indexed to, uint256 value)',
   'event Approval(address indexed owner, address indexed spender, uint256 value)',
 ]);
+
+const requireErc20Amount = (value: unknown, eventName: string): bigint => {
+  if (typeof value !== 'bigint' || value < 0n) {
+    throw new Error(`J_WATCHER_ERC20_AMOUNT_INVALID:event=${eventName}:value=${String(value)}`);
+  }
+  return value;
+};
 
 const classifyWatcherLog = (
   log: AuthenticatedRpcLog,
@@ -80,14 +87,14 @@ const decodeExternalWalletEvents = (
   parsed: ethers.LogDescription,
   token: WatchedErc20Token,
   trackedOwners: ReadonlyMap<string, ExternalWalletTrackedOwnerCursor[]>,
-): JEventIngress[] => {
+): JEvent[] => {
   const tokenAddress = normalizeEvmAddress(log.address);
   if (!tokenAddress) return [];
   if (parsed.name === 'Transfer') {
     const from = normalizeEvmAddress(parsed.args[0]);
     const to = normalizeEvmAddress(parsed.args[1]);
     if (from && to && from === to) return [];
-    const amount = BigInt(parsed.args[2] ?? 0n);
+    const amount = requireErc20Amount(parsed.args[2], parsed.name);
     const deltas = [
       ...(from && from !== ethers.ZeroAddress
         ? [{ owner: from, balanceDelta: `-${amount.toString()}` }]
@@ -121,7 +128,7 @@ const decodeExternalWalletEvents = (
   const owner = normalizeEvmAddress(parsed.args[0]);
   const spender = normalizeEvmAddress(parsed.args[1]);
   if (!owner || !spender) return [];
-  const allowance = BigInt(parsed.args[2] ?? 0n).toString();
+  const allowance = requireErc20Amount(parsed.args[2], parsed.name).toString();
   return (trackedOwners.get(owner) ?? []).flatMap(tracked =>
     shouldEmitExternalWalletAllowanceDelta(
       tracked,
@@ -152,7 +159,7 @@ const decodeCanonicalContractEvent = async (
   log: AuthenticatedRpcLog,
   carrierInterface: ethers.Interface,
   findEvidence: WatcherEventDecodeInput['findDisputeFinalizationEvidence'],
-): Promise<JEventIngress | null> => {
+): Promise<JEvent | null> => {
   const event = decodeJEventLog(
     log,
     carrierInterface,

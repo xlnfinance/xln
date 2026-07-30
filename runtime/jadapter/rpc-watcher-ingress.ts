@@ -2,7 +2,6 @@ import type { RuntimeState, RuntimeInput } from '../runtime/types';
 import {
   applyJBlockHeadersIngressTransform,
   enqueueJHistoryRange,
-  type JEventIngress,
   type PendingWatcherJHistoryRange,
   type findWatcherJurisdictionReplica,
   processEventBatch,
@@ -16,6 +15,7 @@ import type {
   RpcWatcherServices,
   RpcWatcherSession,
 } from './rpc-watcher-types';
+import type { JEvent } from './types';
 
 type WatcherReplica = NonNullable<ReturnType<typeof findWatcherJurisdictionReplica>>;
 
@@ -37,7 +37,7 @@ export type AuthenticatedWatcherRangeRequest = {
 };
 
 const requireWatcherBlockHash = (
-  events: readonly JEventIngress[],
+  events: readonly JEvent[],
   blockNumber: number,
 ): string => {
   const blockHash = events[0]?.blockHash;
@@ -46,11 +46,11 @@ const requireWatcherBlockHash = (
 };
 
 const groupEventsByBlock = (
-  events: readonly JEventIngress[],
-): Map<number, JEventIngress[]> => {
-  const byBlock = new Map<number, JEventIngress[]>();
+  events: readonly JEvent[],
+): Map<number, JEvent[]> => {
+  const byBlock = new Map<number, JEvent[]>();
   for (const event of events) {
-    const blockNumber = event.blockNumber ?? 0;
+    const blockNumber = event.blockNumber;
     const blockEvents = byBlock.get(blockNumber);
     if (blockEvents) blockEvents.push(event);
     else byBlock.set(blockNumber, [event]);
@@ -60,7 +60,7 @@ const groupEventsByBlock = (
 
 const buildObservedRuntimeInputs = (
   request: AuthenticatedWatcherRangeRequest,
-  events: readonly JEventIngress[],
+  events: readonly JEvent[],
   authorityTxsByBlock: ReadonlyMap<number, RuntimeInput['runtimeTxs']>,
 ): RuntimeInput[] => {
   const observedInputs: RuntimeInput[] = [];

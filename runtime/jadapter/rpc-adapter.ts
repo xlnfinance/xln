@@ -133,13 +133,9 @@ export async function createRpcAdapter(
     }),
     ...watcher,
     getBrowserVM(): BrowserVMProvider | null { return null; },
-    setBlockTimestamp(): void {},
     setQuietLogs(quiet: boolean): void { quietLogs = quiet; },
-    registerEntityWallet(): void {},
-    async captureStateRoot(): Promise<null> { return null; },
     getCurrentBlockNumber: chainIo.readSafeBlockNumber,
     getFinalityDepth: () => chainIo.resolveFinalityDepth(false),
-    async syncRuntimeState(): Promise<null> { return null; },
     close(): Promise<void> {
       closePromise ??= (async () => {
         await watcher.stopWatchingAndWait();

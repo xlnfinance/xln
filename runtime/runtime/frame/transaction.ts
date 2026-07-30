@@ -113,7 +113,7 @@ export const publishRuntimeFrameTransaction = (
     (state.pendingProfileCertificationEntityIds?.size ?? 0) > 0;
   rebuildScheduledWakeIndex(liveEnv);
   for (const replica of liveEnv.jReplicas.values()) {
-    replica.jadapter?.setBlockTimestamp(liveEnv.timestamp);
+    replica.jadapter?.setBlockTimestamp?.(liveEnv.timestamp);
   }
   transaction.published = true;
   return liveEnv;

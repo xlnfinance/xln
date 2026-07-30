@@ -258,7 +258,7 @@ const beginRuntimeFrameMutation = (
   ensureRuntimeState(candidate.env).stateMutationInFlight = true;
   candidate.env.timestamp = candidate.frameTimestamp;
   for (const replica of candidate.env.jReplicas.values()) {
-    replica.jadapter?.setBlockTimestamp(candidate.env.timestamp);
+    replica.jadapter?.setBlockTimestamp?.(candidate.env.timestamp);
   }
 };
 

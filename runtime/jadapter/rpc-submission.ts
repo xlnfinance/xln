@@ -132,10 +132,13 @@ const executeBatchSubmission = async (
         { gasLimit, nonce, ...applyBatchFeeOverrides(fees, data.feeOverrides) },
       ),
     );
+    if (!Number.isSafeInteger(receipt.blockNumber) || receipt.blockNumber < 0) {
+      throw new Error(`J_ADAPTER_MINED_RECEIPT_BLOCK_INVALID:${String(receipt.blockNumber)}`);
+    }
     return {
       success: true,
       txHash: receipt.hash,
-      blockNumber: receipt.blockNumber ?? 0,
+      blockNumber: receipt.blockNumber,
       events: parseReceiptLogsToJEvents(
         receipt,
         eventCarriers(context.stack.depository, context.stack.entityProvider),

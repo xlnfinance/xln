@@ -221,7 +221,8 @@ export interface JAdapter {
 
   // BrowserVM-specific (returns null for RPC mode)
   getBrowserVM(): BrowserVMProvider | null;
-  setBlockTimestamp(timestamp: number): void;
+  /** Deterministic clock control is available only on in-process simulation adapters. */
+  setBlockTimestamp?(timestamp: number): void;
   setQuietLogs?(quiet: boolean): void;
   registerEntityWallet?(entityId: string, privateKey: string): void;
   captureStateRoot?(): Promise<Uint8Array | null>;
