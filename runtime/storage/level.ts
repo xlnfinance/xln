@@ -162,3 +162,4 @@ export const deleteKeyRange = async (
   await flush();
   return { removedBytes, removedKeys };
 };
+import { Buffer } from '../infra/platform-crypto';

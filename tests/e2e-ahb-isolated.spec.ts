@@ -98,9 +98,11 @@ type DeltaSnapshot = {
 type TestWindow = typeof window & {
   isolatedEnv?: {
     runtimeId?: string;
-    height?: number;
     frameLogs?: FrameLogEntryView[];
-    eReplicas?: Map<string, EntityReplicaView>;
+    state?: {
+      height?: number;
+      eReplicas?: Map<string, EntityReplicaView>;
+    };
     gossip?: {
       getProfiles?: () => GossipProfile[];
     };
@@ -272,7 +274,7 @@ async function discoverHubs(page: Page): Promise<string[]> {
       };
       const view = window as TestWindow;
       const runtimeId = String(view.isolatedEnv?.runtimeId || '').toLowerCase();
-      for (const [key, replica] of view.isolatedEnv?.eReplicas?.entries?.() || []) {
+      for (const [key, replica] of view.isolatedEnv?.state?.eReplicas?.entries?.() || []) {
         const [, signerId] = String(key || '').split(':');
         if (String(signerId || '').toLowerCase() !== runtimeId) continue;
         return stackKey(replica?.state?.config?.jurisdiction) || stackKey(replica?.position?.jurisdiction);
@@ -467,10 +469,10 @@ async function waitForAccountIdle(
   while (Date.now() - startedAt < timeoutMs) {
     last = await page.evaluate(({ counterpartyId, entityId }) => {
       const view = window as TestWindow;
-      if (!view.isolatedEnv?.eReplicas) {
+      if (!view.isolatedEnv?.state?.eReplicas) {
         return { hasAccount: false, height: 0, pendingHeight: null, mempoolLen: 0 };
       }
-      for (const [replicaKey, replica] of view.isolatedEnv.eReplicas.entries()) {
+      for (const [replicaKey, replica] of view.isolatedEnv.state.eReplicas.entries()) {
         if (!String(replicaKey).startsWith(`${entityId}:`)) continue;
         const account = replica.state?.accounts?.get(counterpartyId);
         if (!account) return { hasAccount: false, height: 0, pendingHeight: null, mempoolLen: 0 };
@@ -692,7 +694,7 @@ async function waitForRestoredRuntime(page: Page, runtimeId: string): Promise<vo
   await page.waitForFunction(({ targetRuntimeId }) => {
     const view = window as TestWindow;
     return String(view.isolatedEnv?.runtimeId || '').toLowerCase() === String(targetRuntimeId || '').toLowerCase()
-      && Number(view.isolatedEnv?.eReplicas?.size || 0) > 0;
+      && Number(view.isolatedEnv?.state?.eReplicas?.size || 0) > 0;
   }, { targetRuntimeId: runtimeId }, { timeout: INIT_TIMEOUT });
 }
 

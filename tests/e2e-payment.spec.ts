@@ -28,8 +28,8 @@ const PAYMENT_AMOUNT = 25n * 10n ** USDC_DECIMALS;
 async function getConnectedHubEntityId(page: Page): Promise<string | null> {
   return page.evaluate(() => {
     const env = (window as any).isolatedEnv;
-    if (!env?.eReplicas) return null;
-    for (const [, rep] of env.eReplicas.entries()) {
+    if (!env?.state?.eReplicas) return null;
+    for (const [, rep] of env.state.eReplicas.entries()) {
       const accounts = rep?.state?.accounts;
       if (!accounts || accounts.size === 0) continue;
       const first = accounts.keys().next();
@@ -166,9 +166,15 @@ test.describe('E2E HTLC Payment Flow', () => {
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.waitForFunction(() => {
       const maybeWindow = window as typeof window & {
-        isolatedEnv?: { runtimeId?: string; eReplicas?: { size?: number } };
+        isolatedEnv?: {
+          runtimeId?: string;
+          state?: { eReplicas?: { size?: number } };
+        };
       };
-      return Boolean(maybeWindow.isolatedEnv?.runtimeId) && Number(maybeWindow.isolatedEnv?.eReplicas?.size || 0) > 0;
+      return (
+        Boolean(maybeWindow.isolatedEnv?.runtimeId) &&
+        Number(maybeWindow.isolatedEnv?.state?.eReplicas?.size || 0) > 0
+      );
     }, { timeout: 60_000 });
     await expect.poll(async () => await getRenderedPrimaryOutbound(page), { timeout: 60_000 }).toBe(outboundAfterPayment);
     await expect.poll(

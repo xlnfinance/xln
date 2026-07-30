@@ -311,11 +311,13 @@ async function waitForRestoredRuntime(page: Page, runtimeId: string): Promise<vo
       const view = window as typeof window & {
         isolatedEnv?: {
           runtimeId?: string;
-          eReplicas?: Map<string, unknown>;
+          state?: {
+            eReplicas?: Map<string, unknown>;
+          };
         };
       };
       return String(view.isolatedEnv?.runtimeId || '').toLowerCase() === String(targetRuntimeId || '').toLowerCase()
-        && Number(view.isolatedEnv?.eReplicas?.size || 0) > 0;
+        && Number(view.isolatedEnv?.state?.eReplicas?.size || 0) > 0;
     }, { targetRuntimeId: runtimeId }, { timeout: CONSENSUS_TIMEOUT_MS });
     return;
   }

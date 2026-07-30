@@ -1047,3 +1047,4 @@ export const prepareStorageStateHashes = async (options: {
     merkleDels: Array.from(merkleDelsByKey.values()),
   };
 };
+import { Buffer } from '../infra/platform-crypto';

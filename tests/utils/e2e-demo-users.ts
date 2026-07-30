@@ -334,7 +334,9 @@ async function waitForRuntimeReady(page: Page, runtimeId: string): Promise<void>
     const env = (window as typeof window & {
       isolatedEnv?: {
         runtimeId?: string;
-        eReplicas?: Map<string, unknown>;
+        state?: {
+          eReplicas?: Map<string, unknown>;
+        };
       };
     }).isolatedEnv;
     if (!env) {
@@ -344,7 +346,7 @@ async function waitForRuntimeReady(page: Page, runtimeId: string): Promise<void>
     }
     const envRuntimeId = String(env?.runtimeId || '').toLowerCase();
     const envReady = envRuntimeId === String(targetRuntimeId || '').toLowerCase()
-      && Number(env?.eReplicas?.size || 0) > 0;
+      && Number(env?.state?.eReplicas?.size || 0) > 0;
     if (!envReady) return false;
 
     // Runtime creation can surface the profile onboarding screen before the

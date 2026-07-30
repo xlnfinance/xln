@@ -453,3 +453,4 @@ export const withRebranchedValues = <T extends RawDb>(db: T): T => new Proxy(db,
 });
 
 export const STORAGE_MAX_PHYSICAL_VALUE_BYTES = MAX_PHYSICAL_VALUE_BYTES;
+import { Buffer } from '../infra/platform-crypto';

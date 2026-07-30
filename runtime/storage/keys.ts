@@ -434,3 +434,4 @@ export const parseSnapshotManifestHeight = (key: Buffer): number => {
   }
   return decodeHeight(key);
 };
+import { Buffer } from '../infra/platform-crypto';

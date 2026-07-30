@@ -405,3 +405,4 @@ export const pruneHistoryBeforeHeight = async (
   );
   return frames.removedBytes + diffs.removedBytes;
 };
+import { Buffer } from '../infra/platform-crypto';

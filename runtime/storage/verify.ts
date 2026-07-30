@@ -237,3 +237,4 @@ export const verifyStorageTailIntegrity = async (
   }
   return { latestHeight, checkedFrames };
 };
+import { Buffer } from '../infra/platform-crypto';

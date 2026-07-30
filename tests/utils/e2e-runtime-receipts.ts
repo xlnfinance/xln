@@ -24,7 +24,9 @@ type RuntimeWindow = typeof window & {
   isolatedEnv?: {
     runtimeId?: string;
     dbNamespace?: string;
-    height?: number;
+    state?: {
+      height?: number;
+    };
   };
 };
 
@@ -58,7 +60,7 @@ type PersistedFrameReadResult = {
 async function readRuntimeDbMeta(page: Page): Promise<PersistedDbMeta> {
   return page.evaluate(async () => {
     const view = window as RuntimeWindow;
-    const runtimeHeight = Number(view.isolatedEnv?.height || 0);
+    const runtimeHeight = Number(view.isolatedEnv?.state?.height || 0);
     const env = view.isolatedEnv;
     const XLN = view.__xln?.instance;
     if (!env) throw new Error('PERSISTED_RUNTIME_ENV_UNAVAILABLE');
@@ -104,7 +106,7 @@ async function readPersistedFrameEvents(
 ): Promise<PersistedFrameReadResult> {
   return page.evaluate(async ({ nextHeight }) => {
     const view = window as RuntimeWindow;
-    const runtimeHeight = Number(view.isolatedEnv?.height || 0);
+    const runtimeHeight = Number(view.isolatedEnv?.state?.height || 0);
     const env = view.isolatedEnv;
     const events: PersistedFrameEvent[] = [];
 

@@ -223,3 +223,4 @@ export const readAccountStorageLayout = async (
   }
   return { doc: doc as StorageAccountDoc, logicalValue, representation: 'fields' };
 };
+import { Buffer } from '../infra/platform-crypto';

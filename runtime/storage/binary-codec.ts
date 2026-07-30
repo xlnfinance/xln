@@ -194,3 +194,4 @@ export const decodeValidatedBinaryPayload = <T>(
   bytes: Uint8Array,
   validator: BinaryPayloadValidator<T>,
 ): T => validator(decodeBinaryPayload<unknown>(bytes));
+import { Buffer } from '../infra/platform-crypto';

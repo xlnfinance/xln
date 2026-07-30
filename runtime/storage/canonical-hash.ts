@@ -166,3 +166,4 @@ export const computeCanonicalStateHashFromEnv = (
       ...(runtimeInput ? { runtimeInput } : {}),
     }),
   );
+import { Buffer } from '../infra/platform-crypto';

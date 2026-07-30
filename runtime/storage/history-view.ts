@@ -530,3 +530,4 @@ export const readHistoryViewEntityFrames = async (
   }
   return records.sort((left, right) => left.entityHeight - right.entityHeight);
 };
+import { Buffer } from '../infra/platform-crypto';

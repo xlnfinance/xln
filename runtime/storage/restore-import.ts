@@ -382,3 +382,4 @@ export const replaceRestoredStorageBase = async (
   await options.onPersistenceBoundary?.('after-restore-current-head');
   return { entityHashDocs: prepared.entityHashDocs };
 };
+import { Buffer } from '../infra/platform-crypto';

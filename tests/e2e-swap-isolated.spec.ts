@@ -43,26 +43,28 @@ const SWAP_TOKEN_BY_SYMBOL: Record<string, string> = {
 type SwapRuntimeWindow = typeof window & {
   isolatedEnv?: {
     runtimeId?: string;
-    eReplicas?: Map<string, {
-      state?: {
-        accounts?: Map<string, {
-          currentHeight?: number;
-          frameHistory?: Array<{ accountTxs?: Array<{ type?: string }> }>;
-          deltas?: Map<number | string, unknown>;
-          swapOrderHistory?: Map<string, {
-            resolves?: Array<{
-              fillRatio?: number;
-              fillNumerator?: bigint;
-              fillDenominator?: bigint;
-              cancelRemainder?: boolean;
-              executionGiveAmount?: bigint;
-              executionWantAmount?: bigint;
-              comment?: string;
+    state?: {
+      eReplicas?: Map<string, {
+        state?: {
+          accounts?: Map<string, {
+            currentHeight?: number;
+            frameHistory?: Array<{ accountTxs?: Array<{ type?: string }> }>;
+            deltas?: Map<number | string, unknown>;
+            swapOrderHistory?: Map<string, {
+              resolves?: Array<{
+                fillRatio?: number;
+                fillNumerator?: bigint;
+                fillDenominator?: bigint;
+                cancelRemainder?: boolean;
+                executionGiveAmount?: bigint;
+                executionWantAmount?: bigint;
+                comment?: string;
+              }>;
             }>;
           }>;
-        }>;
-      };
-    }>;
+        };
+      }>;
+    };
   };
 };
 
@@ -283,8 +285,8 @@ async function waitForTokenDeltaActive(
     async () => {
       return await page.evaluate(({ counterpartyId, entityId, tokenId }) => {
         const view = window as SwapRuntimeWindow;
-        if (!view.isolatedEnv?.eReplicas) return false;
-        for (const [replicaKey, replica] of view.isolatedEnv.eReplicas.entries()) {
+        if (!view.isolatedEnv?.state?.eReplicas) return false;
+        for (const [replicaKey, replica] of view.isolatedEnv.state.eReplicas.entries()) {
           if (!String(replicaKey).startsWith(`${entityId}:`)) continue;
           const account = replica.state?.accounts?.get(counterpartyId);
           const hasDelta = !!account?.deltas?.has(tokenId);
@@ -353,7 +355,7 @@ async function readSwapResolveCount(
 ): Promise<number> {
   return await page.evaluate(({ counterpartyId, entityId }) => {
     const view = window as SwapRuntimeWindow;
-    if (!view.isolatedEnv?.eReplicas) return 0;
+    if (!view.isolatedEnv?.state?.eReplicas) return 0;
 
     const findAccount = (
       accounts: Map<string, {
@@ -378,7 +380,7 @@ async function readSwapResolveCount(
       return null;
     };
 
-    for (const [replicaKey, replica] of view.isolatedEnv.eReplicas.entries()) {
+    for (const [replicaKey, replica] of view.isolatedEnv.state.eReplicas.entries()) {
       if (!String(replicaKey).startsWith(`${entityId}:`)) continue;
       const account = findAccount(replica.state?.accounts, entityId, counterpartyId);
       if (!account) return 0;
@@ -809,7 +811,7 @@ async function waitForRestoredRuntime(page: Page, runtimeId: string): Promise<vo
   await page.waitForFunction(({ runtimeId }) => {
     const view = window as SwapRuntimeWindow;
     return String(view.isolatedEnv?.runtimeId || '').toLowerCase() === String(runtimeId || '').toLowerCase()
-      && Number(view.isolatedEnv?.eReplicas?.size || 0) > 0;
+      && Number(view.isolatedEnv?.state?.eReplicas?.size || 0) > 0;
   }, { runtimeId }, { timeout: INIT_TIMEOUT });
 }
 

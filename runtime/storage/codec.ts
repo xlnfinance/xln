@@ -49,3 +49,4 @@ export const writeBatch = async (
   const sync = options.sync ?? storageSyncWritesEnabled();
   await batch.write(sync ? { sync: true } : undefined);
 };
+import { Buffer } from '../infra/platform-crypto';

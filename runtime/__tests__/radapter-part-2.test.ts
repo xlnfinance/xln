@@ -2308,6 +2308,24 @@ test('runtime publication callbacks expose only an immutable scalar notice', () 
   expect(JSON.stringify(published)).not.toContain('accounts');
 });
 
+test('runtime publication coalesces in-flight notices until the frame is durable', () => {
+  const env = makeEnv();
+  const publishedHeights: number[] = [];
+  const unregister = registerRuntimePublishedCallback(env, notice => {
+    publishedHeights.push(notice.height);
+  });
+
+  env.state.height = 5;
+  env.infrastructure!.stateMutationInFlight = true;
+  notifyRuntimeStateChanged(env);
+  expect(publishedHeights).toEqual([]);
+
+  env.infrastructure!.stateMutationInFlight = false;
+  notifyRuntimeStateChanged(env);
+  unregister();
+  expect(publishedHeights).toEqual([5]);
+});
+
 test('embedded adapter never publishes an in-flight frame through synchronous status', async () => {
   const env = makeEnv();
   env.state.height = 4;

@@ -5,7 +5,17 @@ import { ensureRuntimeInfrastructure } from '../runtime-infrastructure';
 const runtimeLog = createStructuredLogger('runtime');
 
 export const notifyRuntimeStateChanged = (env: RuntimeReplica): void => {
-  const callbacks = ensureRuntimeInfrastructure(env).envChangeCallbacks;
+  const infrastructure = ensureRuntimeInfrastructure(env);
+  /*
+   * A Runtime mutates H+1 in place while the writer lock excludes readers.
+   * Transport lifecycle changes can request a notification during that window,
+   * but publishing then would expose bytes that do not exist in WAL yet. The
+   * committed-effects phase emits one notification after publication, so the
+   * correct behavior here is to coalesce early requests into that durable
+   * notice—not invoke observers and catch their expected rejection.
+   */
+  if (infrastructure.stateMutationInFlight) return;
+  const callbacks = infrastructure.envChangeCallbacks;
   if (!callbacks || callbacks.size === 0) return;
   for (const callback of callbacks) {
     try {

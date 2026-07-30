@@ -1329,3 +1329,4 @@ export const loadEntityStatesAtHeightFromStorage = async (options: {
   }
   return hydrateEntityStatesFromDocs(options.env, db, docs);
 };
+import { Buffer } from '../infra/platform-crypto';

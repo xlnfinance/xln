@@ -13,3 +13,4 @@ export const encode = <T>(data: T): Buffer => Buffer.from(serializeTaggedJson(da
 export const decode = <T>(buffer: Buffer): T => deserializeTaggedJson<T>(buffer.toString());
 
 export { USE_MSGPACK };
+import { Buffer } from '../infra/platform-crypto';

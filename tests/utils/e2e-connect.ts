@@ -109,18 +109,20 @@ async function isAccountReady(
     async ({ entityId, signerId, hubId, tokenIds, timeoutMs }) => {
       const env = (window as typeof window & {
         isolatedEnv?: {
-          eReplicas?: Map<string, {
-            state?: {
-              accounts?: Map<string, {
-                deltas?: Map<number, unknown>;
-                pendingFrame?: unknown;
-                currentHeight?: number;
-              }>;
-            };
-          }>;
+          state?: {
+            eReplicas?: Map<string, {
+              state?: {
+                accounts?: Map<string, {
+                  deltas?: Map<number, unknown>;
+                  pendingFrame?: unknown;
+                  currentHeight?: number;
+                }>;
+              };
+            }>;
+          };
         };
       }).isolatedEnv;
-      if (!env?.eReplicas) return false;
+      if (!env?.state?.eReplicas) return false;
 
       const normalizeEntityId = (value: unknown): string => String(value || '').trim().toLowerCase();
       const resolveCounterpartyAccount = (
@@ -171,7 +173,7 @@ async function isAccountReady(
 
       const startedAt = Date.now();
 	      while (Date.now() - startedAt <= timeoutMs) {
-	        for (const [replicaKey, replica] of env.eReplicas.entries()) {
+	        for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
 	          const [replicaEntityId, replicaSignerId] = String(replicaKey).split(':');
 	          if (String(replicaEntityId || '').toLowerCase() !== String(entityId || '').toLowerCase()) continue;
 	          if (String(replicaSignerId || '').toLowerCase() !== String(signerId || '').toLowerCase()) continue;
@@ -514,8 +516,53 @@ async function readLocalConnectRuntimeDiagnostic(page: Page, hubId: string): Pro
   return page.evaluate(({ hubId }) => {
     const env = (window as typeof window & {
       isolatedEnv?: {
-        height?: number;
-        timestamp?: number;
+        state?: {
+          height?: number;
+          timestamp?: number;
+          jReplicas?: Map<string, {
+            blockNumber?: bigint;
+            chainId?: number;
+            depositoryAddress?: string;
+          }>;
+          eReplicas?: Map<string, {
+            entityId?: string;
+            signerId?: string;
+            isProposer?: boolean;
+            mempool?: Array<{ type?: string; data?: unknown }>;
+            proposal?: { height?: number; txs?: Array<{ type?: string }> };
+            jHistory?: {
+              scannedThroughHeight?: number;
+              contiguousThroughHeight?: number;
+              eventBlocks?: Map<number, { events?: Array<{ type?: string }> }>;
+              blockHashes?: Map<number, string>;
+            };
+            jPrefixRound?: {
+              targetEntityHeight?: number;
+              attestations?: Map<string, unknown>;
+              certificate?: { selected?: { scannedThroughHeight?: number } };
+            };
+            state?: {
+              entityId?: string;
+              height?: number;
+              lastFinalizedJHeight?: number;
+              jHistoryFinality?: { scannedThroughHeight?: number; eventHistoryRoot?: string };
+              config?: {
+                threshold?: bigint;
+                validators?: string[];
+                shares?: Record<string, bigint>;
+                jurisdiction?: { name?: string; chainId?: number };
+              };
+              messages?: string[];
+              proposals?: Map<string, { status?: string; action?: { type?: string } }>;
+              accounts?: Map<string, {
+                currentHeight?: number;
+                pendingFrame?: { height?: number };
+                mempool?: Array<{ type?: string }>;
+                deltas?: Map<number, unknown>;
+              }>;
+            };
+          }>;
+        };
         runtimeId?: string;
         infrastructure?: {
           halted?: boolean;
@@ -531,50 +578,6 @@ async function readLocalConnectRuntimeDiagnostic(page: Page, hubId: string): Pro
             entityInputs?: Array<{ entityId?: string; entityTxs?: Array<{ type?: string }> }>;
           };
         }>;
-        jReplicas?: Map<string, {
-          blockNumber?: bigint;
-          chainId?: number;
-          depositoryAddress?: string;
-          jadapter?: { mode?: string; chainId?: number; isWatching?: () => boolean };
-        }>;
-        eReplicas?: Map<string, {
-          entityId?: string;
-          signerId?: string;
-          isProposer?: boolean;
-          mempool?: Array<{ type?: string; data?: unknown }>;
-          proposal?: { height?: number; txs?: Array<{ type?: string }> };
-          jHistory?: {
-            scannedThroughHeight?: number;
-            contiguousThroughHeight?: number;
-            eventBlocks?: Map<number, { events?: Array<{ type?: string }> }>;
-            blockHashes?: Map<number, string>;
-          };
-          jPrefixRound?: {
-            targetEntityHeight?: number;
-            attestations?: Map<string, unknown>;
-            certificate?: { selected?: { scannedThroughHeight?: number } };
-          };
-          state?: {
-            entityId?: string;
-            height?: number;
-            lastFinalizedJHeight?: number;
-            jHistoryFinality?: { scannedThroughHeight?: number; eventHistoryRoot?: string };
-            config?: {
-              threshold?: bigint;
-              validators?: string[];
-              shares?: Record<string, bigint>;
-              jurisdiction?: { name?: string; chainId?: number };
-            };
-            messages?: string[];
-            proposals?: Map<string, { status?: string; action?: { type?: string } }>;
-            accounts?: Map<string, {
-              currentHeight?: number;
-              pendingFrame?: { height?: number };
-              mempool?: Array<{ type?: string }>;
-              deltas?: Map<number, unknown>;
-            }>;
-          };
-        }>;
       };
     }).isolatedEnv;
     const summarizeInputs = (inputs: Array<{ entityId?: string; entityTxs?: Array<{ type?: string }> }> | undefined) =>
@@ -584,7 +587,7 @@ async function readLocalConnectRuntimeDiagnostic(page: Page, hubId: string): Pro
       }));
     const normalize = (value: unknown): string => String(value || '').trim().toLowerCase();
     const targetHub = normalize(hubId);
-    const replicas = Array.from(env?.eReplicas?.entries?.() || []).map(([key, replica]) => {
+    const replicas = Array.from(env?.state?.eReplicas?.entries?.() || []).map(([key, replica]) => {
       const account = replica.state?.accounts instanceof Map
         ? replica.state.accounts.get(targetHub) ?? null
         : null;
@@ -652,8 +655,8 @@ async function readLocalConnectRuntimeDiagnostic(page: Page, hubId: string): Pro
       };
     });
     return {
-      height: Number(env?.height || 0),
-      timestamp: Number(env?.timestamp || 0),
+      height: Number(env?.state?.height || 0),
+      timestamp: Number(env?.state?.timestamp || 0),
       runtimeId: env?.runtimeId ?? null,
       infrastructure: env?.infrastructure ? {
         halted: Boolean(env.infrastructure.halted),
@@ -687,13 +690,11 @@ async function readLocalConnectRuntimeDiagnostic(page: Page, hubId: string): Pro
         }),
         entityInputs: summarizeInputs(frame.runtimeInput?.entityInputs),
       })),
-      jurisdictions: Array.from(env?.jReplicas?.entries?.() || []).map(([name, replica]) => ({
+      jurisdictions: Array.from(env?.state?.jReplicas?.entries?.() || []).map(([name, replica]) => ({
         name,
         blockNumber: String(replica.blockNumber ?? ''),
-        chainId: Number(replica.chainId ?? replica.jadapter?.chainId ?? 0),
+        chainId: Number(replica.chainId ?? 0),
         depositoryAddress: replica.depositoryAddress ?? null,
-        adapterMode: replica.jadapter?.mode ?? null,
-        watching: replica.jadapter?.isWatching?.() ?? null,
       })),
       replicas,
     };
@@ -1194,18 +1195,20 @@ async function getAccountOpenStatus(
     ({ entityId, signerId, hubId }) => {
       const env = (window as typeof window & {
         isolatedEnv?: {
-          eReplicas?: Map<string, {
-            state?: {
-              accounts?: Map<string, {
-                deltas?: Map<number, unknown>;
-                pendingFrame?: { height?: number };
-                currentHeight?: number;
-              }>;
-            };
-          }>;
+          state?: {
+            eReplicas?: Map<string, {
+              state?: {
+                accounts?: Map<string, {
+                  deltas?: Map<number, unknown>;
+                  pendingFrame?: { height?: number };
+                  currentHeight?: number;
+                }>;
+              };
+            }>;
+          };
         };
       }).isolatedEnv;
-      if (!env?.eReplicas) {
+      if (!env?.state?.eReplicas) {
         return { exists: false, hasDelta: false, pendingHeight: null, currentHeight: 0 };
       }
 
@@ -1256,7 +1259,7 @@ async function getAccountOpenStatus(
         return null;
       };
 
-      for (const [replicaKey, replica] of env.eReplicas.entries()) {
+      for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
         const [replicaEntityId, replicaSignerId] = String(replicaKey).split(':');
         if (String(replicaEntityId || '').toLowerCase() !== String(entityId || '').toLowerCase()) continue;
         if (String(replicaSignerId || '').toLowerCase() !== String(signerId || '').toLowerCase()) continue;
@@ -1294,20 +1297,22 @@ async function getConnectDebugState(
   return page.evaluate(({ identity, hubId }) => {
     const env = (window as typeof window & {
       isolatedEnv?: {
-        height?: number;
-        timestamp?: number;
+        state?: {
+          height?: number;
+          timestamp?: number;
+          eReplicas?: Map<string, {
+            state?: {
+              messages?: string[];
+              accounts?: Map<string, {
+                currentHeight?: number;
+                pendingFrame?: { height?: number };
+                mempool?: Array<{ type?: string }>;
+              }>;
+            };
+          }>;
+        };
         runtimeInput?: { entityInputs?: Array<{ entityId?: string; entityTxs?: Array<{ type?: string }> }> };
         runtimeMempool?: { entityInputs?: Array<{ entityId?: string; entityTxs?: Array<{ type?: string }> }> };
-        eReplicas?: Map<string, {
-          state?: {
-            messages?: string[];
-            accounts?: Map<string, {
-              currentHeight?: number;
-              pendingFrame?: { height?: number };
-              mempool?: Array<{ type?: string }>;
-            }>;
-          };
-        }>;
         gossip?: { getProfiles?: () => Array<{ entityId?: string; runtimeId?: string; metadata?: unknown }> };
         infrastructure?: {
           p2p?: {
@@ -1364,7 +1369,7 @@ async function getConnectDebugState(
 	      }
 	      return null;
 	    };
-    const replica = env?.eReplicas?.get(`${identity.entityId}:${identity.signerId}`.toLowerCase());
+    const replica = env?.state?.eReplicas?.get(`${identity.entityId}:${identity.signerId}`.toLowerCase());
     const accounts = replica?.state?.accounts;
     const account = accounts instanceof Map
       ? resolveCounterpartyAccount(accounts, identity.entityId, hubId)
@@ -1378,8 +1383,8 @@ async function getConnectDebugState(
         txs: (input.entityTxs || []).map((tx) => tx.type),
       }));
     return {
-      height: env?.height,
-      timestamp: env?.timestamp,
+      height: env?.state?.height,
+      timestamp: env?.state?.timestamp,
       p2p: {
         connected: env?.infrastructure?.p2p?.isConnected?.() ?? null,
         directPeers: env?.infrastructure?.p2p?.getDirectPeerState?.() ?? null,
