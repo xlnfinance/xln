@@ -99,39 +99,26 @@ describe('JReplica stateRoot semantics', () => {
     expect((persisted.jReplicas.get('arrakis') as JReplica).entityProviderDeploymentBlock).toBe(91);
   });
 
-  test('storage-reconstructed jurisdiction metadata becomes a complete deterministic snapshot', () => {
+  test('canonical snapshots reject incomplete jurisdiction state', () => {
     const partial = {
       name: 'restored-rpc',
       chainId: 31337,
       contracts: { depository: `0x${'11'.repeat(20)}` },
     } as JReplica;
 
-    const snapshot = buildCanonicalJReplicaSnapshot(partial);
-
-    expect(snapshot.blockNumber).toBe(0n);
-    expect(snapshot.stateRoot).toBeNull();
-    expect(snapshot.mempool).toEqual([]);
-    expect(snapshot.blockDelayMs).toBe(300);
-    expect(snapshot.lastBlockTimestamp).toBe(0);
-    expect(snapshot.position).toEqual({ x: 0, y: 50, z: 0 });
+    expect(() => buildCanonicalJReplicaSnapshot(partial))
+      .toThrow('RUNTIME_MACHINE_J_BLOCK_NUMBER_INVALID');
   });
 
-  test('restored runtime normalizes partial J replicas before frontend publication', () => {
+  test('restored runtime rejects partial J replicas before publication', () => {
     const partial = {
       name: 'restored-rpc',
       chainId: 31337,
     } as JReplica;
     const env = { jReplicas: new Map([['restored-rpc', partial]]) } as Parameters<typeof normalizeRestoredJReplicas>[0];
 
-    normalizeRestoredJReplicas(env);
-
-    expect(env.jReplicas.get('restored-rpc')).toMatchObject({
-      blockNumber: 0n,
-      mempool: [],
-      blockDelayMs: 300,
-      lastBlockTimestamp: 0,
-      position: { x: 0, y: 50, z: 0 },
-    });
+    expect(() => normalizeRestoredJReplicas(env))
+      .toThrow('RUNTIME_MACHINE_J_BLOCK_NUMBER_INVALID');
   });
 
   test('trusted stack binding rebases only the matching restored RPC transport', () => {

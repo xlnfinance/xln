@@ -71,25 +71,31 @@ const cloneJStateRoot = (
 };
 
 const normalizeJBlockNumber = (value: unknown): bigint => {
-  if (value === undefined || value === null || value === '') return 0n;
-  let blockNumber: bigint;
-  try {
-    blockNumber = BigInt(value as bigint | number | string);
-  } catch (error) {
-    throw new Error(`RUNTIME_MACHINE_J_BLOCK_NUMBER_INVALID:${String(value)}`, { cause: error });
+  if (typeof value !== 'bigint' || value < 0n) {
+    throw new Error(`RUNTIME_MACHINE_J_BLOCK_NUMBER_INVALID:${String(value)}`);
   }
-  if (blockNumber < 0n) throw new Error(`RUNTIME_MACHINE_J_BLOCK_NUMBER_NEGATIVE:${blockNumber}`);
-  return blockNumber;
+  return value;
 };
 
-const normalizeNonNegativeNumber = (value: unknown, fallback: number): number => {
-  const normalized = Number(value);
-  return Number.isFinite(normalized) && normalized >= 0 ? normalized : fallback;
+const requireNonNegativeNumber = (value: unknown, label: string): number => {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    throw new Error(`RUNTIME_MACHINE_J_${label}_INVALID:${String(value)}`);
+  }
+  return value;
 };
 
-const normalizeFiniteNumber = (value: unknown, fallback: number): number => {
-  const normalized = Number(value);
-  return Number.isFinite(normalized) ? normalized : fallback;
+const requireFinitePosition = (
+  value: JReplica['position'],
+): JReplica['position'] => {
+  if (!value || typeof value !== 'object') {
+    throw new Error('RUNTIME_MACHINE_J_POSITION_INVALID');
+  }
+  for (const axis of ['x', 'y', 'z'] as const) {
+    if (typeof value[axis] !== 'number' || !Number.isFinite(value[axis])) {
+      throw new Error(`RUNTIME_MACHINE_J_POSITION_${axis.toUpperCase()}_INVALID`);
+    }
+  }
+  return { ...value };
 };
 
 export const buildCanonicalEntityReplicaSnapshot = (
@@ -117,10 +123,13 @@ export const buildCanonicalJReplicaSnapshot = (jr: JReplica): JReplica => ({
   // zero means no local tip has been observed yet, not an invented chain tip.
   blockNumber: normalizeJBlockNumber(jr.blockNumber),
   stateRoot: cloneJStateRoot(jr.stateRoot, { rpcBacked: Boolean(jr.rpcs?.length) }),
-  mempool: Array.isArray(jr.mempool) ? structuredClone(jr.mempool) : [],
-  blockDelayMs: normalizeNonNegativeNumber(jr.blockDelayMs, 300),
+  mempool: (() => {
+    if (!Array.isArray(jr.mempool)) throw new Error('RUNTIME_MACHINE_J_MEMPOOL_INVALID');
+    return structuredClone(jr.mempool);
+  })(),
+  blockDelayMs: requireNonNegativeNumber(jr.blockDelayMs, 'BLOCK_DELAY'),
   ...(jr.blockTimeMs !== undefined ? { blockTimeMs: jr.blockTimeMs } : {}),
-  lastBlockTimestamp: normalizeNonNegativeNumber(jr.lastBlockTimestamp, 0),
+  lastBlockTimestamp: requireNonNegativeNumber(jr.lastBlockTimestamp, 'LAST_BLOCK_TIMESTAMP'),
   ...(jr.blockReady !== undefined ? { blockReady: jr.blockReady } : {}),
   ...(jr.defaultDisputeDelayBlocks !== undefined ? { defaultDisputeDelayBlocks: jr.defaultDisputeDelayBlocks } : {}),
   ...(jr.watcherConfirmationDepth !== undefined
@@ -128,15 +137,11 @@ export const buildCanonicalJReplicaSnapshot = (jr: JReplica): JReplica => ({
     : {}),
   ...(jr.rpcs ? { rpcs: [...jr.rpcs] } : {}),
   ...(jr.chainId !== undefined ? { chainId: jr.chainId } : {}),
-  position: {
-    x: normalizeFiniteNumber(jr.position?.x, 0),
-    y: normalizeFiniteNumber(jr.position?.y, 50),
-    z: normalizeFiniteNumber(jr.position?.z, 0),
-  },
+  position: requireFinitePosition(jr.position),
   ...(jr.depositoryAddress ? { depositoryAddress: jr.depositoryAddress } : {}),
   ...(jr.entityProviderAddress ? { entityProviderAddress: jr.entityProviderAddress } : {}),
-  ...((jr.entityProviderDeploymentBlock ?? jr.jadapter?.entityProviderDeploymentBlock) !== undefined
-    ? { entityProviderDeploymentBlock: jr.entityProviderDeploymentBlock ?? jr.jadapter!.entityProviderDeploymentBlock }
+  ...(jr.entityProviderDeploymentBlock !== undefined
+    ? { entityProviderDeploymentBlock: jr.entityProviderDeploymentBlock }
     : {}),
   ...(jr.contracts
     ? {
