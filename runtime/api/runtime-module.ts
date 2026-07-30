@@ -251,4 +251,4 @@ export type BigIntMathUtils =
  * browser composition root adds them without making the financial core depend
  * on QA code.
  */
-export type XLNModule = typeof import('../browser');
+export type XLNModule = typeof import('./browser');

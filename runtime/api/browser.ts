@@ -6,5 +6,5 @@
  * scenarios, so the bundle composes both surfaces here. Keeping that edge
  * one-way prevents scenarios from becoming dependencies of the financial core.
  */
-export * from './runtime';
-export * from './scenarios/browser-api';
+export * from '../runtime';
+export * from '../scenarios/browser-api';
