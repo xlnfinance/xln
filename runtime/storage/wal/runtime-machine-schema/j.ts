@@ -103,7 +103,7 @@ const validateEntityProviderData = (value: unknown, code: string): void => {
   }
 };
 
-export const validateJTx = (value: unknown, code: string): JTx => {
+function assertJTx(value: unknown, code: string): asserts value is JTx {
   const tx = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(tx, ['type', 'entityId', 'data', 'timestamp'], ['expectedJBlock'], `${code}_FIELDS`);
   requireString(tx['entityId'], `${code}_ENTITY`);
@@ -141,7 +141,11 @@ export const validateJTx = (value: unknown, code: string): JTx => {
     tx['type'] === 'entityProviderCancelAction'
   ) validateEntityProviderData(data, `${code}_DATA`);
   else throw new Error(`${code}_TYPE`);
-  return tx as unknown as JTx;
+}
+
+export const validateJTx = (value: unknown, code: string): JTx => {
+  assertJTx(value, code);
+  return value;
 };
 
 export const validateJInputs = (value: unknown, code: string): JInput[] =>
@@ -149,50 +153,82 @@ export const validateJInputs = (value: unknown, code: string): JInput[] =>
     const itemCode = `${code}_${index}`;
     const input = requireBoundaryRecord(raw, itemCode);
     requireExactBoundaryKeys(input, ['jurisdictionName', 'jTxs'], [], `${itemCode}_FIELDS`);
-    requireString(input['jurisdictionName'], `${itemCode}_JURISDICTION`);
-    requireArray(input['jTxs'], `${itemCode}_TXS`).forEach((tx, txIndex) =>
+    const jTxs = requireArray(input['jTxs'], `${itemCode}_TXS`).map((tx, txIndex) =>
       validateJTx(tx, `${itemCode}_TX_${txIndex}`));
-    return input as unknown as JInput;
+    return {
+      jurisdictionName: requireString(input['jurisdictionName'], `${itemCode}_JURISDICTION`),
+      jTxs,
+    };
   });
+
+function assertJReplica(
+  value: unknown,
+  expectedName: string,
+  code: string,
+): asserts value is JReplica {
+  const replica = requireBoundaryRecord(value, code);
+  requireExactBoundaryKeys(replica, [
+    'name', 'blockNumber', 'stateRoot', 'mempool', 'blockDelayMs',
+    'lastBlockTimestamp', 'position',
+  ], [
+    'blockTimeMs', 'blockReady', 'defaultDisputeDelayBlocks', 'watcherConfirmationDepth',
+    'rpcs', 'chainId', 'depositoryAddress', 'entityProviderAddress',
+    'entityProviderDeploymentBlock', 'contracts',
+  ], `${code}_FIELDS`);
+  const name = requireString(replica['name'], `${code}_NAME`);
+  if (name !== expectedName) throw new Error(`${code}_NAME_KEY_MISMATCH`);
+  requireBigInt(replica['blockNumber'], `${code}_BLOCK_NUMBER`, 0n);
+  if (replica['stateRoot'] !== null) requireBytes(replica['stateRoot'], `${code}_STATE_ROOT`, 32);
+  requireArray(replica['mempool'], `${code}_MEMPOOL`).forEach((tx, index) =>
+    validateJTx(tx, `${code}_MEMPOOL_${index}`));
+  requireFiniteNumber(replica['blockDelayMs'], `${code}_BLOCK_DELAY`, 0);
+  requireFiniteNumber(replica['lastBlockTimestamp'], `${code}_LAST_TIMESTAMP`, 0);
+  const position = requireBoundaryRecord(replica['position'], `${code}_POSITION`);
+  requireExactBoundaryKeys(position, ['x', 'y', 'z'], [], `${code}_POSITION_FIELDS`);
+  for (const axis of ['x', 'y', 'z']) {
+    requireFiniteNumber(position[axis], `${code}_POSITION_${axis.toUpperCase()}`);
+  }
+  if (replica['blockTimeMs'] !== undefined) {
+    requireFiniteNumber(replica['blockTimeMs'], `${code}_BLOCK_TIME`, 0);
+  }
+  if (replica['blockReady'] !== undefined) {
+    requireBoolean(replica['blockReady'], `${code}_READY`);
+  }
+  for (const field of [
+    'defaultDisputeDelayBlocks',
+    'watcherConfirmationDepth',
+    'chainId',
+    'entityProviderDeploymentBlock',
+  ] as const) {
+    if (replica[field] !== undefined) {
+      requireBoundaryInteger(replica[field], `${code}_${field.toUpperCase()}`);
+    }
+  }
+  for (const field of ['depositoryAddress', 'entityProviderAddress'] as const) {
+    if (replica[field] !== undefined) {
+      requireString(replica[field], `${code}_${field.toUpperCase()}`);
+    }
+  }
+  if (replica['rpcs'] !== undefined) requireStringArray(replica['rpcs'], `${code}_RPCS`);
+  if (replica['contracts'] !== undefined) {
+    const contracts = requireBoundaryRecord(replica['contracts'], `${code}_CONTRACTS`);
+    requireExactBoundaryKeys(
+      contracts,
+      [],
+      ['depository', 'entityProvider', 'account', 'deltaTransformer'],
+      `${code}_CONTRACTS_FIELDS`,
+    );
+    for (const [contract, address] of Object.entries(contracts)) {
+      requireString(address, `${code}_CONTRACT_${contract}`);
+    }
+  }
+}
 
 export const validateJReplicas = (value: unknown, code: string): Array<[string, JReplica]> =>
   requireArray(value, code).map((raw, index) => {
     const itemCode = `${code}_${index}`;
     if (!Array.isArray(raw) || raw.length !== 2) throw new Error(`${itemCode}_TUPLE`);
     const key = requireString(raw[0], `${itemCode}_KEY`);
-    const replica = requireBoundaryRecord(raw[1], `${itemCode}_VALUE`);
-    requireExactBoundaryKeys(replica, [
-      'name', 'blockNumber', 'stateRoot', 'mempool', 'blockDelayMs',
-      'lastBlockTimestamp', 'position',
-    ], [
-      'blockTimeMs', 'blockReady', 'defaultDisputeDelayBlocks', 'watcherConfirmationDepth',
-      'rpcs', 'chainId', 'depositoryAddress', 'entityProviderAddress',
-      'entityProviderDeploymentBlock', 'contracts',
-    ], `${itemCode}_FIELDS`);
-    const name = requireString(replica['name'], `${itemCode}_NAME`);
-    if (name !== key) throw new Error(`${itemCode}_NAME_KEY_MISMATCH`);
-    requireBigInt(replica['blockNumber'], `${itemCode}_BLOCK_NUMBER`, 0n);
-    if (replica['stateRoot'] !== null) requireBytes(replica['stateRoot'], `${itemCode}_STATE_ROOT`, 32);
-    requireArray(replica['mempool'], `${itemCode}_MEMPOOL`).forEach((tx, txIndex) =>
-      validateJTx(tx, `${itemCode}_MEMPOOL_${txIndex}`));
-    requireFiniteNumber(replica['blockDelayMs'], `${itemCode}_BLOCK_DELAY`, 0);
-    requireFiniteNumber(replica['lastBlockTimestamp'], `${itemCode}_LAST_TIMESTAMP`, 0);
-    if (replica['blockTimeMs'] !== undefined) requireFiniteNumber(replica['blockTimeMs'], `${itemCode}_BLOCK_TIME`, 0);
-    if (replica['blockReady'] !== undefined) requireBoolean(replica['blockReady'], `${itemCode}_READY`);
-    for (const field of ['defaultDisputeDelayBlocks', 'watcherConfirmationDepth', 'chainId', 'entityProviderDeploymentBlock']) {
-      if (replica[field] !== undefined) requireBoundaryInteger(replica[field], `${itemCode}_${field.toUpperCase()}`);
-    }
-    if (replica['rpcs'] !== undefined) requireStringArray(replica['rpcs'], `${itemCode}_RPCS`);
-    for (const field of ['depositoryAddress', 'entityProviderAddress']) {
-      if (replica[field] !== undefined) requireString(replica[field], `${itemCode}_${field.toUpperCase()}`);
-    }
-    const position = requireBoundaryRecord(replica['position'], `${itemCode}_POSITION`);
-    requireExactBoundaryKeys(position, ['x', 'y', 'z'], [], `${itemCode}_POSITION_FIELDS`);
-    for (const axis of ['x', 'y', 'z']) requireFiniteNumber(position[axis], `${itemCode}_POSITION_${axis.toUpperCase()}`);
-    if (replica['contracts'] !== undefined) {
-      const contracts = requireBoundaryRecord(replica['contracts'], `${itemCode}_CONTRACTS`);
-      requireExactBoundaryKeys(contracts, [], ['depository', 'entityProvider', 'account', 'deltaTransformer'], `${itemCode}_CONTRACTS_FIELDS`);
-      for (const [contract, address] of Object.entries(contracts)) requireString(address, `${itemCode}_CONTRACT_${contract}`);
-    }
-    return [key, replica as unknown as JReplica];
+    assertJReplica(raw[1], key, `${itemCode}_VALUE`);
+    return [key, raw[1]];
   });
