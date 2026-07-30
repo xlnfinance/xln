@@ -5,9 +5,8 @@
  * We do not keep a second profile source of truth in the runtime DB.
  */
 
-import type { EntityTx } from '../types/entity-tx';
+import type { EntityTx, ProfileUpdateTx } from '../types/entity-tx';
 import type { RuntimeState } from '../runtime/types';
-import type { NameSearchResult, ProfileUpdateTx } from '../types/profile';
 import { compareStableText } from '../protocol/serialization';
 import { generateEntityAvatar } from '../presentation/identity-display';
 
@@ -16,6 +15,13 @@ type DisplayProfile = {
   name: string;
   avatar: string;
   lastUpdated: number;
+};
+
+type NameSearchResult = {
+  entityId: string;
+  name: string;
+  avatar: string;
+  relevance: number;
 };
 
 const normalizeId = (value: string): string => String(value || '').trim().toLowerCase();

@@ -29,7 +29,6 @@ export type { JReplica } from '../types/jurisdiction-runtime';
 export type { EntityTx } from '../types/entity-tx';
 export type { AccountReplica, AccountState, AccountFrame, AccountSnapshot, Delta, DerivedDelta, AccountTx, SettlementDiff } from '../types/account';
 export type { Xlnomy, XlnomySnapshot } from '../types/xlnomy';
-export type { EntityProfile } from '../types/profile';
 export type { HubRebalanceConfig } from '../types/rebalance';
 export type { DebtEntry, DebtStatus } from '../types/debt';
 export type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
