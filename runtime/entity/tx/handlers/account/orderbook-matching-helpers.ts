@@ -135,6 +135,11 @@ type SameOrderbookPriceBandDecision = {
   warnMessage?: string;
 };
 
+const offerIdForDiagnostic = (offer: unknown): string => {
+  if (typeof offer !== 'object' || offer === null) return '';
+  return String(Reflect.get(offer, 'offerId') ?? '');
+};
+
 export const splitWorkingOrderbookOffers = (
   offers: readonly WorkingOrderbookOffer[],
 ): {
@@ -146,8 +151,7 @@ export const splitWorkingOrderbookOffers = (
 
   for (const offer of offers) {
     if (!isWorkingOrderbookOffer(offer)) {
-      const rawOffer = offer as unknown as { offerId?: unknown };
-      throw new Error(`ORDERBOOK_UNADMITTED_OFFER: offer=${String(rawOffer.offerId ?? '')}`);
+      throw new Error(`ORDERBOOK_UNADMITTED_OFFER: offer=${offerIdForDiagnostic(offer)}`);
     }
     if (offer.orderbookKind === 'same-jurisdiction') {
       sameAccountSwapOffers.push(offer);
@@ -157,8 +161,7 @@ export const splitWorkingOrderbookOffers = (
       crossJurisdictionSwapOffers.push(offer);
       continue;
     }
-    const rawOffer = offer as unknown as { offerId?: unknown };
-    throw new Error(`ORDERBOOK_UNADMITTED_OFFER: offer=${String(rawOffer.offerId ?? '')}`);
+    throw new Error(`ORDERBOOK_UNADMITTED_OFFER: offer=${offerIdForDiagnostic(offer)}`);
   }
 
   return { sameAccountSwapOffers, crossJurisdictionSwapOffers };
