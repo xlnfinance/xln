@@ -10,7 +10,7 @@
 		"sourceMap": true,
 		"moduleResolution": "bundler",
 		"allowImportingTsExtensions": true,
-		"types": ["svelte", "vite/client", "node", "bun", "qrcode"], // Avoid picking up unrelated stubbed @types (e.g., glob/minimatch)
+		"types": ["svelte", "vite/client", "node"], // Project declarations cover browser-only libraries.
 
 		// STRICTEST RULES FOR FINANCIAL SYSTEM
 		"strict": true,
