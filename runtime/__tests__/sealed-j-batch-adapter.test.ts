@@ -5,7 +5,7 @@ import {
   computeBatchHankoHash,
   createEmptyBatch,
   encodeJBatch,
-  getBatchSize,
+  batchOpCount,
 } from '../jurisdiction/batch';
 import { createEmptyEnv } from '../runtime';
 import type { JTx } from '../types/jurisdiction-runtime';
@@ -36,7 +36,7 @@ test('BrowserVM adapter rejects a mismatched sealed batch before mutating chain 
         ),
         entityNonce,
         hankoSignature: '0x1234',
-        batchSize: getBatchSize(batch),
+        batchSize: batchOpCount(batch),
       },
       timestamp: 1_000,
     };

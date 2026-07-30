@@ -7,7 +7,7 @@ import { addMessage } from '../../../frame-events';
 import {
   batchAddRevealSecret,
   encodeJBatch,
-  getBatchSize,
+  batchOpCount,
   J_BATCH_CONTRACT_LIMITS,
 } from '../../../../jurisdiction/batch';
 import { getEntityCertifiedJurisdictionHeight } from '../../../../jurisdiction/height';
@@ -95,10 +95,10 @@ const queueDisputeFinalize = (
       `${J_BATCH_CONTRACT_LIMITS.maxDisputeFinalizations}`,
     );
   }
-  if (getBatchSize(batch) + 1 > J_BATCH_CONTRACT_LIMITS.maxTotalOps) {
+  if (batchOpCount(batch) + 1 > J_BATCH_CONTRACT_LIMITS.maxTotalOps) {
     throw new Error(
       `J_BATCH_LIMIT_EXCEEDED: disputeFinalize would exceed total ops ` +
-      `${getBatchSize(batch) + 1}/${J_BATCH_CONTRACT_LIMITS.maxTotalOps}`,
+      `${batchOpCount(batch) + 1}/${J_BATCH_CONTRACT_LIMITS.maxTotalOps}`,
     );
   }
   for (const secret of registry.secrets) {

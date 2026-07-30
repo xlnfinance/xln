@@ -1,5 +1,5 @@
 import { normalizeEntityId } from '../entity/id';
-import { getBatchSize, isBatchEmpty } from '../jurisdiction/batch';
+import { batchOpCount, isBatchEmpty } from '../jurisdiction/batch';
 import { assertSealedJBatchBinding } from '../jurisdiction/sealed-batch';
 import { assertEntityProviderActionJTxBinding } from '../entity/entity-provider-action';
 import type { JTx } from '../types/jurisdiction-runtime';
@@ -104,7 +104,7 @@ const submitBatch = async (
             BigInt(batchData.entityNonce),
           );
     const receipt = receiptFromEvents(events);
-    console.log(`✅ [JAdapter:browservm] Batch executed (${getBatchSize(batch)} ops) block=${receipt.blockNumber}`);
+    console.log(`✅ [JAdapter:browservm] Batch executed (${batchOpCount(batch)} ops) block=${receipt.blockNumber}`);
     return {
       success: true,
       txHash: receipt.txHash,

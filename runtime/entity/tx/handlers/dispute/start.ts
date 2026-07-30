@@ -6,7 +6,7 @@ import { prepareEntityTxState } from '../../../state-clone';
 import { addMessage } from '../../../frame-events';
 import {
   encodeJBatch,
-  getBatchSize,
+  batchOpCount,
   J_BATCH_CONTRACT_LIMITS,
 } from '../../../../jurisdiction/batch';
 import { shortHash, shortId } from '../../../../infra/logger';
@@ -44,9 +44,9 @@ const queueDisputeStart = (
       `${J_BATCH_CONTRACT_LIMITS.maxDisputeStarts}`,
     );
   }
-  if (getBatchSize(batch) + 1 > J_BATCH_CONTRACT_LIMITS.maxTotalOps) {
+  if (batchOpCount(batch) + 1 > J_BATCH_CONTRACT_LIMITS.maxTotalOps) {
     throw new Error(
-      `J_BATCH_LIMIT_EXCEEDED: disputeStart would exceed total ops ${getBatchSize(batch) + 1}/` +
+      `J_BATCH_LIMIT_EXCEEDED: disputeStart would exceed total ops ${batchOpCount(batch) + 1}/` +
       `${J_BATCH_CONTRACT_LIMITS.maxTotalOps}`,
     );
   }

@@ -22,8 +22,8 @@ import { requireUsableContractAddress } from '../../../jurisdiction/contract-add
 import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import {
-  isBatchEmpty, getBatchSize, cloneJBatch, encodeJBatch,
-  computeBatchHankoHash, batchOpCount, createEmptyBatch,
+  isBatchEmpty, batchOpCount, cloneJBatch, encodeJBatch,
+  computeBatchHankoHash, createEmptyBatch,
   assertJBatchWithinContractLimits,
 } from '../../../jurisdiction/batch';
 import {
@@ -77,7 +77,7 @@ const prepareBroadcast = (
   assertJBatchWithinContractLimits(state.jBatchState!.batch, 'j_broadcast');
   const encodedBatch = encodeJBatch(state.jBatchState!.batch);
   const batchHash = computeBatchHankoHash(chainId, depositoryAddress, encodedBatch, nextNonce);
-  const batchSize = getBatchSize(state.jBatchState!.batch);
+  const batchSize = batchOpCount(state.jBatchState!.batch);
   const opCount = batchOpCount(state.jBatchState!.batch);
   const batchGeneration = state.jBatchState!.broadcastCount + 1;
   const jTx: JTx = {

@@ -15,7 +15,7 @@ import type { JInput } from '../../../jurisdiction/input';
 import type { EntityTx } from '../../../types/entity-tx';
 import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
-import { createEmptyBatch, getBatchSize } from '../../../jurisdiction/batch';
+import { createEmptyBatch, batchOpCount } from '../../../jurisdiction/batch';
 import { createStructuredLogger, shortId } from '../../../infra/logger';
 
 const jBatchActionLog = createStructuredLogger('entity.jbatch');
@@ -36,8 +36,8 @@ export async function handleJClearBatch(
     return { newState, outputs, jOutputs };
   }
 
-  const oldBatchSize = getBatchSize(newState.jBatchState.batch);
-  const sentBatchSize = newState.jBatchState.sentBatch ? getBatchSize(newState.jBatchState.sentBatch.batch) : 0;
+  const oldBatchSize = batchOpCount(newState.jBatchState.batch);
+  const sentBatchSize = newState.jBatchState.sentBatch ? batchOpCount(newState.jBatchState.sentBatch.batch) : 0;
   const hadSentBatch = !!newState.jBatchState.sentBatch;
   const droppedFinalizeCounterparties = new Set<string>();
   for (const op of newState.jBatchState.batch.disputeFinalizations || []) {

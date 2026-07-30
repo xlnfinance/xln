@@ -4,7 +4,7 @@ import {
   computeBatchHankoHash,
   createEmptyBatch,
   encodeJBatch,
-  getBatchSize,
+  batchOpCount,
 } from '../jurisdiction/batch';
 import { assertSealedJBatchBinding } from '../jurisdiction/sealed-batch';
 import type { JTx } from '../types/jurisdiction-runtime';
@@ -33,7 +33,7 @@ const makeSealedBatch = (): Extract<JTx, { type: 'batch' }> => {
       ),
       entityNonce,
       hankoSignature: '0x1234',
-      batchSize: getBatchSize(batch),
+      batchSize: batchOpCount(batch),
     },
     timestamp: 1_000,
   };

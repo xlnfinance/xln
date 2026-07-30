@@ -2,7 +2,7 @@ import type { RuntimeState } from '../runtime/types';
 import type { JTx } from '../types/jurisdiction-runtime';
 import type { JAdapter } from '../jadapter/types';
 import type { JBatch } from '../jurisdiction/batch';
-import { getBatchSize } from '../jurisdiction/batch';
+import { batchOpCount } from '../jurisdiction/batch';
 import { getSignerPrivateKey } from '../account/crypto';
 import { prepareSignedBatch } from '../hanko/batch';
 
@@ -31,7 +31,7 @@ export async function submitSignedScenarioBatch(
     entityId,
     data: {
       batch,
-      batchSize: getBatchSize(batch),
+      batchSize: batchOpCount(batch),
       signerId,
       encodedBatch,
       entityNonce: Number(nextNonce),

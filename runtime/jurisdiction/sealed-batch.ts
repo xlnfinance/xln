@@ -4,7 +4,6 @@ import {
   batchOpCount,
   computeBatchHankoHash,
   encodeJBatch,
-  getBatchSize,
 } from './batch';
 import { keccak256 } from 'ethers';
 
@@ -47,7 +46,7 @@ export function assertSealedJBatchBinding(jTx: BatchJTx, domain: SealedJBatchDom
 
   assertJBatchWithinContractLimits(data.batch, 'sealed_j_batch');
 
-  const expectedSize = getBatchSize(data.batch);
+  const expectedSize = batchOpCount(data.batch);
   if (data.batchSize !== expectedSize) {
     throw new Error(`J_BATCH_SIZE_MISMATCH:${data.batchSize}:${expectedSize}`);
   }

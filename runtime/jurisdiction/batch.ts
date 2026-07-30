@@ -214,7 +214,7 @@ const requireBatchRoom = (
   operation: string,
   addedOps = 1,
 ): void => {
-  const nextSize = getBatchSize(batch) + Math.max(0, addedOps);
+  const nextSize = batchOpCount(batch) + Math.max(0, addedOps);
   if (nextSize > J_BATCH_CONTRACT_LIMITS.maxTotalOps) {
     throw new Error(
       `J_BATCH_LIMIT_EXCEEDED: ${operation} would exceed total ops ` +
@@ -236,7 +236,7 @@ const requireArrayRoom = (
 };
 
 export function getJBatchContractLimitIssue(batch: JBatch): string | null {
-  const totalOps = getBatchSize(batch);
+  const totalOps = batchOpCount(batch);
   if (totalOps > J_BATCH_CONTRACT_LIMITS.maxTotalOps) {
     return `total ops ${totalOps}/${J_BATCH_CONTRACT_LIMITS.maxTotalOps}`;
   }
@@ -1271,22 +1271,4 @@ export function batchAddRevealSecret(
     secret: shortHash(secret),
     transformer: shortHash(transformer),
   });
-}
-
-/**
- * Get batch size (total operations)
- */
-export function getBatchSize(batch: JBatch): number {
-  return (
-    batch.flashloans.length +
-    batch.reserveToReserve.length +
-    batch.reserveToCollateral.length +
-    batch.collateralToReserve.length +
-    batch.settlements.length +
-    batch.disputeStarts.length +
-    batch.disputeFinalizations.length +
-    batch.externalTokenToReserve.length +
-    batch.reserveToExternalToken.length +
-    batch.revealSecrets.length
-  );
 }
