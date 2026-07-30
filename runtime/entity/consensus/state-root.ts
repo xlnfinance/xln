@@ -43,6 +43,7 @@ export const ENTITY_STATE_ROOT_FIELDS = [
   'accounts',
   'externalWallet',
   'deferredAccountProposals',
+  'settlementContinuations',
   'lastFinalizedJHeight',
   'jHistoryFinality',
   'certifiedBoardState',

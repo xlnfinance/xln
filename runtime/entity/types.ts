@@ -6,7 +6,12 @@ import type { HankoString } from '../types/hanko';
 import type { AccountFrame, AccountOutput, AccountReplica, AccountTx, AccountHistoryRecord, HtlcNoteKey, HtlcRoute, RuntimeOverlayRecord } from '../types/account';
 import type { HubRebalanceConfig } from '../types/rebalance';
 import type { LendingState } from '../types/lending';
-import type { ConsensusOutputOrigin, EntityCommandNonceState, EntityTx } from '../types/entity-tx';
+import type {
+  ConsensusOutputOrigin,
+  EntityCommandNonceState,
+  EntityTx,
+  PendingSettlementContinuation,
+} from '../types/entity-tx';
 import type { JAdapterFailure } from '../types/jurisdiction-runtime';
 import type { RuntimeFailureSignal } from '../protocol/failure-taxonomy';
 import type { CertifiedBoardRegistryState } from '../types/entity-board-registry';
@@ -244,6 +249,10 @@ export interface EntityState {
   // Exact settlement approvals waiting for Account mempool + ACK quiescence.
   // Bounded one-per-account; value is the governance-approved workspace hash.
   deferredAccountProposals?: Map<string, string>;
+  // Exact Entity-owned continuations waiting for their bilateral Account
+  // workspace to collect both Hankos. The workspace hash prevents a same-height
+  // collision from executing work authorized for a different settlement.
+  settlementContinuations?: Map<string, PendingSettlementContinuation>;
   // 🔭 J-machine tracking (JBlock consensus)
   lastFinalizedJHeight: number;           // Last finalized J-block height
   // Bounded display/audit cache only. Finalized effects plus jHistoryFinality

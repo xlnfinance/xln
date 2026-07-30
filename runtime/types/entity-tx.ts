@@ -48,6 +48,43 @@ export type EntityCommandNonceState = {
   }>;
 };
 
+/**
+ * Bounded Entity-owned work that follows one exact bilateral settlement.
+ *
+ * Account consensus never interprets these actions. The proposing Entity
+ * commits the plan, binds it to the resulting workspace hash, and materializes
+ * it only after both Account replicas have committed `ready_to_submit`.
+ */
+export type SettlementContinuationAction =
+  | {
+      type: 'r2r';
+      toEntityId: string;
+      tokenId: number;
+      amount: bigint;
+    }
+  | {
+      type: 'r2e';
+      receivingEntity: string;
+      tokenId: number;
+      amount: bigint;
+    }
+  | {
+      type: 'r2c';
+      counterpartyId: string;
+      receivingEntityId?: string;
+      tokenId: number;
+      amount: bigint;
+    };
+
+export type SettlementContinuationPlan = {
+  actions: SettlementContinuationAction[];
+  broadcast: boolean;
+};
+
+export type PendingSettlementContinuation = SettlementContinuationPlan & {
+  workspaceHash: string;
+};
+
 export type ConsensusOutputOrigin = {
   sourceEntityId: string;
   lane: 'generic' | 'account-frame' | 'account-ack' | 'account-dispute';
@@ -820,6 +857,7 @@ type EntityTxPayload =
         ops: SettlementOp[];
         executorIsLeft?: boolean;
         memo?: string;
+        continuation?: SettlementContinuationPlan;
       };
     }
   | {

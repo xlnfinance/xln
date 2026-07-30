@@ -36,6 +36,7 @@ import {
 } from '../../../jurisdiction/board-registry';
 import {
   assertCanonicalSettlementWorkspace,
+  createSettlementWorkspaceHash,
   hasPendingSettlementTransition,
 } from '../../../account/tx/handlers/settle-transition';
 import { projectAccountAfterSettlement } from '../../../account/settlement-projection';
@@ -164,6 +165,41 @@ const assertNoPendingSettlementTransition = (account: AccountReplica): void => {
   if (hasPendingSettlementTransition(account)) throw new Error('SETTLEMENT_TRANSITION_ALREADY_PENDING');
 };
 
+const ENTITY_ID_PATTERN = /^0x[0-9a-f]{64}$/;
+const MAX_SETTLEMENT_CONTINUATION_ACTIONS = 1;
+
+const assertSettlementContinuation = (
+  continuation: NonNullable<Extract<EntityTx, { type: 'settle_propose' }>['data']['continuation']>,
+): void => {
+  if (!Array.isArray(continuation.actions)) {
+    throw new Error('SETTLEMENT_CONTINUATION_ACTIONS_INVALID');
+  }
+  if (continuation.actions.length > MAX_SETTLEMENT_CONTINUATION_ACTIONS) {
+    throw new Error(
+      `SETTLEMENT_CONTINUATION_ACTION_LIMIT_EXCEEDED:${continuation.actions.length}`,
+    );
+  }
+  if (typeof continuation.broadcast !== 'boolean') {
+    throw new Error('SETTLEMENT_CONTINUATION_BROADCAST_INVALID');
+  }
+  for (const [index, action] of continuation.actions.entries()) {
+    if (!Number.isSafeInteger(action.tokenId) || action.tokenId < 0) {
+      throw new Error(`SETTLEMENT_CONTINUATION_TOKEN_INVALID:${index}`);
+    }
+    if (typeof action.amount !== 'bigint' || action.amount <= 0n) {
+      throw new Error(`SETTLEMENT_CONTINUATION_AMOUNT_INVALID:${index}`);
+    }
+    const ids = action.type === 'r2r'
+      ? [action.toEntityId]
+      : action.type === 'r2e'
+        ? [action.receivingEntity]
+        : [action.counterpartyId, ...(action.receivingEntityId ? [action.receivingEntityId] : [])];
+    if (ids.some((id) => !ENTITY_ID_PATTERN.test(id))) {
+      throw new Error(`SETTLEMENT_CONTINUATION_ENTITY_INVALID:${index}`);
+    }
+  }
+};
+
 /**
  * settle_propose: Queue a new settlement workspace for Account consensus
  */
@@ -173,7 +209,7 @@ export async function handleSettlePropose(
   _env: EntityRuntimeContext,
   mutableFrameState = false,
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; accountTxs: AccountTxTarget[] }> {
-  const { counterpartyEntityId, executorIsLeft: execParam, memo, ops } = entityTx.data;
+  const { continuation, counterpartyEntityId, executorIsLeft: execParam, memo, ops } = entityTx.data;
   const newState = prepareEntityTxState(entityState, mutableFrameState);
   const outputs: EntityInput[] = [];
   const accountTxs: AccountTxTarget[] = [];
@@ -198,6 +234,28 @@ export async function handleSettlePropose(
   // the only settlement Hanko accepted on-chain; the executor never submits a
   // signature it created itself.
   const executorIsLeft = execParam ?? isLeft;
+  if (continuation) {
+    assertSettlementContinuation(continuation);
+    if (executorIsLeft !== isLeft) {
+      throw new Error('SETTLEMENT_CONTINUATION_REQUIRES_LOCAL_EXECUTOR');
+    }
+    if (newState.settlementContinuations?.has(counterpartyEntityId)) {
+      throw new Error(`SETTLEMENT_CONTINUATION_ALREADY_PENDING:${counterpartyEntityId}`);
+    }
+    const workspaceHash = createSettlementWorkspaceHash(account, {
+      revision: 1,
+      ops,
+      lastModifiedByLeft: isLeft,
+      executorIsLeft,
+      ...(memo !== undefined ? { memo } : {}),
+    });
+    newState.settlementContinuations ??= new Map();
+    newState.settlementContinuations.set(counterpartyEntityId, {
+      workspaceHash,
+      actions: structuredClone(continuation.actions),
+      broadcast: continuation.broadcast,
+    });
+  }
   accountTxs.push({
     accountId: counterpartyEntityId,
     tx: {

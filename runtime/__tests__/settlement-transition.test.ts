@@ -10,6 +10,7 @@ import { prepareAccountJClaimTx } from '../account/j-claim-transition';
 import { handleJEventClaim } from '../account/tx/handlers/j-event-claim';
 import { createSettlementWorkspaceHash } from '../account/tx/handlers/settle-transition';
 import { applyEntityFrame } from '../entity/consensus';
+import { selectSettlementContinuation } from '../entity/consensus/settlement-continuation';
 import { proposeAccountFrame } from '../account/consensus/propose';
 import {
   assertEntityStateRootCache,
@@ -704,6 +705,105 @@ describe('atomic settlement Account transition', () => {
     expect(result.accountTxs[0]?.tx).toMatchObject({
       type: 'settle_transition',
       data: { kind: 'upsert', revision: 1, executorIsLeft: false },
+    });
+  });
+
+  test('Entity proposal commits an exact continuation hash beside the Account transition', async () => {
+    const env = createEmptyEnv('settlement-transition-continuation-proposal');
+    const jurisdiction = makeJurisdiction('settlement-transition', 31337, 'a1', 'b2');
+    const leftState = makeState(LEFT, addr('31'), jurisdiction, RIGHT);
+    const ops = [{ type: 'c2r' as const, tokenId: 1, amount: 4n }];
+    const result = await handleSettlePropose(leftState, {
+      type: 'settle_propose',
+      data: {
+        counterpartyEntityId: RIGHT,
+        ops,
+        executorIsLeft: true,
+        continuation: {
+          actions: [{ type: 'r2r', toEntityId: entity('33'), tokenId: 1, amount: 4n }],
+          broadcast: true,
+        },
+      },
+    }, env);
+
+    const continuation = result.newState.settlementContinuations?.get(RIGHT);
+    expect(continuation).toEqual({
+      workspaceHash: createSettlementWorkspaceHash(
+        result.newState.accounts.get(RIGHT)!,
+        {
+          revision: 1,
+          ops,
+          lastModifiedByLeft: true,
+          executorIsLeft: true,
+        },
+      ),
+      actions: [{ type: 'r2r', toEntityId: entity('33'), tokenId: 1, amount: 4n }],
+      broadcast: true,
+    });
+  });
+
+  test('continuation executes once only for its exact ready workspace and an empty J draft', () => {
+    const jurisdiction = makeJurisdiction('settlement-transition', 31337, 'a1', 'b2');
+    const state = makeState(LEFT, addr('31'), jurisdiction, RIGHT);
+    const account = state.accounts.get(RIGHT)!;
+    const workspace = {
+      workspaceHash: '',
+      ops: [{ type: 'c2r' as const, tokenId: 1, amount: 4n }],
+      lastModifiedByLeft: true,
+      status: 'ready_to_submit' as const,
+      revision: 1,
+      createdAt: 1,
+      lastUpdatedAt: 2,
+      executorIsLeft: true,
+    };
+    workspace.workspaceHash = createSettlementWorkspaceHash(account, workspace);
+    account.settlementWorkspace = workspace;
+    state.settlementContinuations = new Map([[
+      RIGHT,
+      {
+        workspaceHash: workspace.workspaceHash,
+        actions: [{ type: 'r2e', receivingEntity: entity('44'), tokenId: 1, amount: 4n }],
+        broadcast: true,
+      },
+    ]]);
+
+    expect(selectSettlementContinuation(state)).toEqual({
+      kind: 'execute',
+      counterpartyId: RIGHT,
+      txs: [
+        {
+          type: 'settle_execute',
+          data: { counterpartyEntityId: RIGHT, disableC2RShortcut: true },
+        },
+        {
+          type: 'r2e',
+          data: { receivingEntity: entity('44'), tokenId: 1, amount: 4n },
+        },
+        { type: 'j_broadcast', data: {} },
+      ],
+    });
+
+    state.jBatchState = initJBatch();
+    state.jBatchState.batch.reserveToReserve.push({
+      receivingEntity: entity('55'),
+      tokenId: 1,
+      amount: 1n,
+    });
+    expect(selectSettlementContinuation(state)).toEqual({
+      kind: 'wait',
+      counterpartyId: RIGHT,
+    });
+
+    state.jBatchState = initJBatch();
+    account.settlementWorkspace = { ...workspace, memo: 'collision' };
+    account.settlementWorkspace.workspaceHash = createSettlementWorkspaceHash(
+      account,
+      account.settlementWorkspace,
+    );
+    expect(selectSettlementContinuation(state)).toEqual({
+      kind: 'discard',
+      counterpartyId: RIGHT,
+      reason: 'workspace_changed',
     });
   });
 

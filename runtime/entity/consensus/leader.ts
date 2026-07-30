@@ -6,6 +6,7 @@ import { isFrozenBaseJPrefixRollAuthorized } from '../../jurisdiction/j-prefix-c
 import { compareStableText, serializeTaggedJson } from '../../protocol/serialization';
 import { cloneIsolatedProposedEntityFrame } from '../input-clone';
 import { hasQueuedOrPendingAccountWork } from './account-work-index';
+import { hasActionableSettlementContinuation } from './settlement-continuation';
 
 export const ENTITY_LEADER_TIMEOUT_BASE_MS = 10_000;
 export const ENTITY_LEADER_TIMEOUT_MAX_MS = 60_000;
@@ -218,5 +219,6 @@ export const hasEntityLeaderWork = (replica: EntityReplica): boolean => {
     frozenBaseJPrefixRoll
   )
     return true;
-  return hasQueuedOrPendingAccountWork(replica.state);
+  return hasQueuedOrPendingAccountWork(replica.state) ||
+    hasActionableSettlementContinuation(replica.state);
 };

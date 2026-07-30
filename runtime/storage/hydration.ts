@@ -190,6 +190,7 @@ export const hydrateEntityStateFromStorage = (options: {
     ...withProp('prevFrameHash', core.prevFrameHash),
     ...withProp('leaderState', core.leaderState),
     ...withProp('deferredAccountProposals', core.deferredAccountProposals),
+    ...withProp('settlementContinuations', core.settlementContinuations),
     ...withProp('crontabState', core.crontabState),
     ...withProp('jBatchState', core.jBatchState),
     ...withProp('entityProviderActionState', core.entityProviderActionState),

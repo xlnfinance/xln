@@ -181,6 +181,21 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   gate from J-event dispute fields to every Account State mutation, forbidding
   Entity/Runtime writes to Account delta, collateral, holds or credit outside
   calls into Account-owned handlers.
+- [ ] Move multi-frame settlement continuation out of Svelte and into the
+  deterministic Entity machine. A `settle_propose` intent must commit the
+  exact allowed post-settlement continuation and broadcast policy in
+  `EntityState`; Account remains the sole owner of workspace, Hanko and money
+  transitions. After a committed Account frame reaches `ready_to_submit`, the
+  Entity reducer materializes exactly one `settle_execute`, then its bounded
+  `r2r`/`r2e`/`r2c` follow-up and optional `j_broadcast`. Bind the continuation
+  to the exact counterparty, workspace revision/hash, ops and executor; reject
+  replacement, stale or mismatched work fail-fast. Clear it only after the
+  corresponding Account submit transition and follow-up are committed in the
+  same Entity frame. Remove `pendingAssetAutoC2Rs`, reactive promises, polling
+  and timeout ownership from the frontend: reload or a closed browser must not
+  stop, duplicate or reorder finance. Prove plain C→R, every follow-up, manual
+  draft, automatic broadcast, restart/replay, multi-signer candidate parity
+  and byte-identical roots.
 - [ ] Turn Runtime execution into one visible pipeline:
   `take → validate/plan → mutate owned Runtime → WAL → dispatch`.
   Install one external read barrier from the first mutation through WAL commit:

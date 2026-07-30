@@ -84,6 +84,7 @@ export const projectEntityCoreDoc = (
   ...withProp('prevFrameHash', state.prevFrameHash),
   ...withProp('leaderState', state.leaderState),
   ...withProp('deferredAccountProposals', state.deferredAccountProposals),
+  ...withProp('settlementContinuations', state.settlementContinuations),
   ...withProp('crontabState', state.crontabState),
   ...withProp('jBatchState', state.jBatchState),
   ...withProp('entityProviderActionState', state.entityProviderActionState),

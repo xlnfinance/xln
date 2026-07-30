@@ -96,6 +96,7 @@ export type StorageEntityCoreDoc = {
   reserves: Map<number, bigint>;
   externalWallet?: EntityState['externalWallet'];
   deferredAccountProposals?: Map<string, string>;
+  settlementContinuations?: EntityState['settlementContinuations'];
   lastFinalizedJHeight: number;
   jBlockChain: EntityState['jBlockChain'];
   jHistoryFinality?: EntityState['jHistoryFinality'];

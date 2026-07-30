@@ -7,6 +7,7 @@ import { LIMITS } from '../config/constants';
 import type { StorageAccountDoc, StorageEntityCoreDoc } from './types';
 import { normalizeAccountStateDomain } from '../account/state-root';
 import { normalizeEntityId } from './keys';
+import { validateSettlementContinuationValue } from '../entity/account-metadata-validation';
 import {
   requireBoundaryInteger,
   requireBoundaryRecord,
@@ -26,7 +27,7 @@ const ENTITY_REQUIRED = [
 
 const ENTITY_OPTIONAL = [
   'entityCommandNonces', 'prevFrameHash', 'leaderState', 'externalWallet',
-  'deferredAccountProposals', 'jHistoryFinality', 'certifiedBoardState',
+  'deferredAccountProposals', 'settlementContinuations', 'jHistoryFinality', 'certifiedBoardState',
   'crontabState', 'jBatchState', 'entityProviderActionState',
   'profileEncryptionManifest', 'consumptionAccumulator', 'certifiedOutputSequences',
   'outDebtsByToken', 'inDebtsByToken', 'swapTradingPairs',
@@ -78,9 +79,31 @@ export const validateStorageEntityCoreDocValue = (value: unknown): StorageEntity
   requireStorageBigInt(doc['htlcFeesEarned'], `${code}_HTLC_FEES`);
   requireStorageMap(doc['lockBook'], `${code}_LOCK_BOOK`);
   validateDeferredAccountProposals(doc['deferredAccountProposals'], code);
-  const { deferredAccountProposals: _splitAccountRefs, ...sharedCore } = doc;
+  validateSettlementContinuations(doc['settlementContinuations'], code);
+  const {
+    deferredAccountProposals: _splitAccountRefs,
+    settlementContinuations: _splitSettlementContinuations,
+    ...sharedCore
+  } = doc;
   validateEntityState({ ...sharedCore, accounts: new Map() }, code);
   return doc as StorageEntityCoreDoc;
+};
+
+const validateSettlementContinuations = (value: unknown, code: string): void => {
+  if (value === undefined) return;
+  const continuations = requireStorageMap(value, `${code}_SETTLEMENT_CONTINUATIONS`);
+  if (continuations.size > LIMITS.MAX_ACCOUNTS_PER_ENTITY) {
+    throw new Error(`${code}_SETTLEMENT_CONTINUATIONS_LIMIT`);
+  }
+  for (const [accountId, continuation] of continuations) {
+    if (!/^0x[0-9a-f]{64}$/.test(String(accountId))) {
+      throw new Error(`${code}_SETTLEMENT_CONTINUATION_ACCOUNT_ID`);
+    }
+    validateSettlementContinuationValue(
+      continuation,
+      `${code}_SETTLEMENT_CONTINUATION`,
+    );
+  }
 };
 
 const validateDeferredAccountProposals = (value: unknown, code: string): void => {

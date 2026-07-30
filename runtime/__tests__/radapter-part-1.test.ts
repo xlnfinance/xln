@@ -2724,3 +2724,76 @@ test('runtime adapter view-frame excludes unbounded core internals from remote s
   expect(core?.jBatchState?.batch?.settlements?.[0]?.note?.length ?? 0).toBeLessThanOrEqual(200);
   expect(core?.jBatchState?.batch?.settlements?.[0]?.sig).toBe('');
 });
+
+test('remote runtime adapter rejects a tampered server identity proof', async () => {
+  const previousWebSocket = globalThis.WebSocket;
+  const identityEnv = makeEnv();
+
+  class TamperedIdentityWebSocket {
+    static readonly OPEN = 1;
+
+    binaryType = 'arraybuffer';
+    readyState = 0;
+    onopen: (() => void) | null = null;
+    onmessage: ((event: { data: unknown }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    onclose: (() => void) | null = null;
+
+    constructor(_url: string) {
+      setTimeout(() => {
+        this.readyState = TamperedIdentityWebSocket.OPEN;
+        this.onopen?.();
+      }, 0);
+    }
+
+    send(raw: unknown): void {
+      const request = decodeTestRuntimeAdapterMessage<{ id: string; op: string; challenge?: string }>(raw);
+      if (request.op !== 'auth') return;
+      const identity = signRuntimeAdapterServerIdentity(identityEnv, request.challenge || '');
+      const firstByte = identity.identitySignature.slice(2, 4) === '00' ? '01' : '00';
+      identity.identitySignature = `0x${firstByte}${identity.identitySignature.slice(4)}`;
+      setTimeout(
+        () =>
+          this.onmessage?.({
+            data: encodeRuntimeAdapterMessage({
+              v: 1,
+              inReplyTo: request.id,
+              ok: true,
+              payload: {
+                authLevel: 'admin',
+                commandLaneKind: 'capability',
+                currentHeight: 10,
+                nextCommandSequence: 1,
+                ...identity,
+              },
+            }),
+          }),
+        0,
+      );
+    }
+
+    close(): void {
+      this.readyState = 3;
+      this.onclose?.();
+    }
+  }
+
+  globalThis.WebSocket = TamperedIdentityWebSocket as unknown as typeof WebSocket;
+  try {
+    const adapter = new RemoteRuntimeAdapter();
+    await expect(
+      adapter.connect({
+        mode: 'remote',
+        wsUrl: 'ws://runtime-adapter.invalid/rpc',
+        authKey: 'token',
+        reconnectMaxMs: 1_000,
+        requestTimeoutMs: 1_000,
+      }),
+    ).rejects.toThrow('runtime adapter server identity verification failed');
+    expect(adapter.status).toBe('error');
+    expect(adapter.authLevel).toBe(null);
+    expect(adapter.serverFingerprint).toBe(null);
+  } finally {
+    globalThis.WebSocket = previousWebSocket;
+  }
+});

@@ -83,7 +83,7 @@ import {
   buildBroadcastTx,
   buildDisputeFinalizeTx,
   buildExternalToReserveTx,
-  buildMovePostSettleTxs,
+  buildMoveSettlementContinuation,
   buildPrepareDisputeTx,
   buildReopenDisputedAccountTx,
   buildReserveToCollateralTx,
@@ -93,7 +93,6 @@ import {
   encodeExternalEoaAsEntity,
   type DisputeStartOptions,
   type MovePostSettleOp,
-  type PendingAssetAutoC2R,
 } from "./entity-action-txs";
 import { buildDisputedAccountViews, formatCrossJTargetDisputeRiskLabel, getCrossJTargetDisputeRiskForState, type CrossJTargetDisputeRisk } from "./account-dispute-view";
 export let tab: Tab;
@@ -348,10 +347,7 @@ function moveRouteSteps(from: MoveEndpoint, to: MoveEndpoint): string[] {
   });
 }
 function isMoveAwaitingCounterparty(): boolean {
-  return pendingAssetAutoC2Rs.length > 0 || resolvingAssetAutoC2R;
-}
-function refreshPendingCollateralFundingToken(): void {
-  collateralFundingToken = pendingAssetAutoC2Rs[0]?.symbol ?? null;
+  return (replica?.state?.settlementContinuations?.size ?? 0) > 0;
 }
 function getMoveDraftReserveDelta(tokenId: number): bigint {
   const entityId = String(replica?.state?.entityId || tab.entityId || "")
@@ -473,8 +469,7 @@ $: moveValidationSignature = [
   moveTargetEntityId,
   moveTargetHubEntityId,
   moveExecuting ? "1" : "0",
-  pendingAssetAutoC2Rs.length > 0 ? String(pendingAssetAutoC2Rs.length) : "0",
-  resolvingAssetAutoC2R ? "1" : "0",
+  String(replica?.state?.settlementContinuations?.size ?? 0),
   workspaceAccountId,
   selectedAccountId || "",
   selectedMoveTransferToken ? String(selectedMoveTransferToken.tokenId) : "",
@@ -657,6 +652,10 @@ $: panelView = buildEntityPanelView(displayEnv, tab.entityId, tab.signerId, envR
 $: directoryPanelView = runtimeProjectionFrame ? buildEntityPanelView(activeEnv, tab.entityId, tab.signerId, envRevision, runtimeProjectionFrame) : panelView;
 $: activeReplicas = panelView.replicas;
 $: panelProfiles = panelView.profiles;
+$: directoryProfiles = (() => {
+  const liveProfiles = getGossipProfiles(actionRuntimeEnv);
+  return liveProfiles.length > 0 ? liveProfiles : directoryPanelView.profiles;
+})();
 $: replica = panelView.replica;
 $: remoteHubCandidates = buildHubDiscoveryRemoteHubsFromRuntimes($runtimes.values());
 $: hubDiscoveryProjection = buildHubDiscoveryProjection({
@@ -843,7 +842,10 @@ $: moveHubEntityOptions = buildMoveHubEntityOptions({
   targetEntityId: moveTargetEntityId,
   selfEntityId: resolveSelfEntityId(),
   workspaceAccountIds,
-  profiles: panelProfiles,
+  // Account discovery is infrastructure data, not financial display state.
+  // The post-WAL projection intentionally carries only lightweight Entity
+  // summaries, so use the live signed gossip directory for remote accounts.
+  profiles: directoryProfiles,
 });
 $: if (assetWorkspaceTab === "move" && moveToEndpoint === "account") {
   moveTargetHubEntityId = resolveMoveTargetHubEntityId({
@@ -971,8 +973,6 @@ let pendingAssetBridgeSync: {
   baselineReserve: bigint;
 } | null = null;
 let resolvingAssetBridgeSync = false;
-let pendingAssetAutoC2Rs: PendingAssetAutoC2R[] = [];
-let resolvingAssetAutoC2R = false;
 let externalFetchInFlight: Promise<void> | null = null;
 let externalWalletStateSyncKey = "";
 let selectedExternalToReserveToken: ReserveTransferAsset | null = null;
@@ -1449,41 +1449,6 @@ $: {
     }
   }
 }
-$: {
-  const pending = pendingAssetAutoC2Rs[0];
-  if (pending && !resolvingAssetAutoC2R) {
-    const currentAccount = workspaceAccountId && workspaceAccountId.toLowerCase() === pending.counterpartyEntityId.toLowerCase() ? workspaceAccount : findLocalAccountByCounterparty(String(replica?.state?.entityId || tab.entityId || ""), replica?.state?.accounts, pending.counterpartyEntityId);
-    const sentBatchPending = !!replica?.state?.jBatchState?.sentBatch;
-    if (currentAccount?.settlementWorkspace?.status === "submitted") {
-      pendingAssetAutoC2Rs = pendingAssetAutoC2Rs.filter((entry) => entry !== pending);
-      resolvingAssetAutoC2R = false;
-      refreshPendingCollateralFundingToken();
-    } else if (activeIsLive && !sentBatchPending && isLocalExecutorForWorkspace(pending.counterpartyEntityId, currentAccount)) {
-      resolvingAssetAutoC2R = true;
-      void (async () => {
-        try {
-          const entityId = replica?.state?.entityId || tab.entityId;
-          if (!entityId) throw new Error("Active entity missing for collateral-to-reserve auto execution");
-          const signerId = resolveEntitySigner(entityId, "asset-c2r-auto-execute");
-          await submitEntityInputs([buildEntityInput(entityId, signerId, buildMovePostSettleTxs(entityId, pending))]);
-          collateralToReserveAmount = "";
-          toasts.info(pending.broadcast ? `Collateral → Reserve pending on-chain confirmation for ${pending.symbol}.` : `Collateral → Reserve added to draft batch for ${pending.symbol}.`);
-        } catch (err) {
-          logEntityPanelDiagnostic("Asset C→R auto-execute failed", {
-            tokenId: pending.tokenId,
-            counterpartyEntityId: pending.counterpartyEntityId,
-            error: toErrorMessage(err, "Unknown error"),
-          });
-          toasts.error(`Collateral → Reserve failed: ${toErrorMessage(err, "Unknown error")}`);
-        } finally {
-          pendingAssetAutoC2Rs = pendingAssetAutoC2Rs.filter((entry) => entry !== pending);
-          resolvingAssetAutoC2R = false;
-          refreshPendingCollateralFundingToken();
-        }
-      })();
-    }
-  }
-}
 $: transferableAssetOptions = externalTokens.filter(isReserveTransferToken);
 $: selectedExternalToReserveToken = findReserveTransferTokenBySymbol(externalToReserveSymbol);
 $: selectedReserveToCollateralToken = findReserveTransferTokenBySymbol(reserveToCollateralSymbol);
@@ -1830,23 +1795,17 @@ async function collateralToReserve(tokenId: number, amount: bigint, counterparty
                 amount,
               },
             ],
+            continuation: buildMoveSettlementContinuation(
+              entityId,
+              tokenId,
+              amount,
+              postSettleOp,
+              broadcast,
+            ),
           },
         },
       ]),
     ]);
-    pendingAssetAutoC2Rs = [
-      ...pendingAssetAutoC2Rs,
-      {
-        counterpartyEntityId,
-        tokenId,
-        symbol: info.symbol,
-        amount,
-        postSettleOp,
-        broadcast,
-        phase: "awaiting_settlement_execute",
-      },
-    ];
-    refreshPendingCollateralFundingToken();
     toasts.info(`Collateral → Reserve proposed for ${info.symbol}. Waiting for counterparty signature...`);
   } catch (err) {
     logEntityPanelDiagnostic("Collateral → Reserve failed", {

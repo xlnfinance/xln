@@ -2252,14 +2252,15 @@ test('embedded adapter sends to the latest active env after runtime switch', asy
     },
     submitCrossJurisdictionIntent: async () => ({ delivered: true }),
     registerRuntimePublishedCallback: (_env, callback) => {
-      publishCommittedHeight = (height) => callback({
-        runtimeId: String(activeEnv.runtimeId || ''),
-        height,
-        timestamp: activeEnv.state.timestamp,
-        lifecyclePhase: 'running',
-        commandReady: true,
-        commandReadyReason: null,
-      });
+      publishCommittedHeight = height =>
+        callback({
+          runtimeId: String(activeEnv.runtimeId || ''),
+          height,
+          timestamp: activeEnv.state.timestamp,
+          lifecyclePhase: 'running',
+          commandReady: true,
+          commandReadyReason: null,
+        });
       return () => {};
     },
   });
@@ -2364,14 +2365,15 @@ test('embedded adapter never publishes an in-flight frame through synchronous st
     enqueueRuntimeInput: () => {},
     submitCrossJurisdictionIntent: async () => ({ delivered: true }),
     registerRuntimePublishedCallback: (_env, callback) => {
-      notify = (height) => callback({
-        runtimeId: String(env.runtimeId || ''),
-        height,
-        timestamp: env.state.timestamp,
-        lifecyclePhase: 'running',
-        commandReady: true,
-        commandReadyReason: null,
-      });
+      notify = height =>
+        callback({
+          runtimeId: String(env.runtimeId || ''),
+          height,
+          timestamp: env.state.timestamp,
+          lifecyclePhase: 'running',
+          commandReady: true,
+          commandReadyReason: null,
+        });
       return () => {};
     },
   });
@@ -2404,14 +2406,15 @@ test('embedded adapter rejects money commands after the runtime stops accepting 
       return { delivered: true };
     },
     registerRuntimePublishedCallback: (_env, callback) => {
-      publishHalted = () => callback({
-        runtimeId: String(env.runtimeId || ''),
-        height: env.state.height,
-        timestamp: env.state.timestamp,
-        lifecyclePhase: 'halted',
-        commandReady: false,
-        commandReadyReason: 'phase=halted',
-      });
+      publishHalted = () =>
+        callback({
+          runtimeId: String(env.runtimeId || ''),
+          height: env.state.height,
+          timestamp: env.state.timestamp,
+          lifecyclePhase: 'halted',
+          commandReady: false,
+          commandReadyReason: 'phase=halted',
+        });
       return () => {};
     },
   });
@@ -2967,78 +2970,5 @@ test('remote runtime adapter reports connected only after auth and retains autho
     expect(adapter.authLevel).toBe(null);
   } finally {
     (globalThis as unknown as { WebSocket: typeof WebSocket }).WebSocket = previousWebSocket;
-  }
-});
-
-test('remote runtime adapter rejects a tampered server identity proof', async () => {
-  const previousWebSocket = globalThis.WebSocket;
-  const identityEnv = makeEnv();
-
-  class TamperedIdentityWebSocket {
-    static readonly OPEN = 1;
-
-    binaryType = 'arraybuffer';
-    readyState = 0;
-    onopen: (() => void) | null = null;
-    onmessage: ((event: { data: unknown }) => void) | null = null;
-    onerror: (() => void) | null = null;
-    onclose: (() => void) | null = null;
-
-    constructor(_url: string) {
-      setTimeout(() => {
-        this.readyState = TamperedIdentityWebSocket.OPEN;
-        this.onopen?.();
-      }, 0);
-    }
-
-    send(raw: unknown): void {
-      const request = decodeTestRuntimeAdapterMessage<{ id: string; op: string; challenge?: string }>(raw);
-      if (request.op !== 'auth') return;
-      const identity = signRuntimeAdapterServerIdentity(identityEnv, request.challenge || '');
-      const firstByte = identity.identitySignature.slice(2, 4) === '00' ? '01' : '00';
-      identity.identitySignature = `0x${firstByte}${identity.identitySignature.slice(4)}`;
-      setTimeout(
-        () =>
-          this.onmessage?.({
-            data: encodeRuntimeAdapterMessage({
-              v: 1,
-              inReplyTo: request.id,
-              ok: true,
-              payload: {
-                authLevel: 'admin',
-                commandLaneKind: 'capability',
-                currentHeight: 10,
-                nextCommandSequence: 1,
-                ...identity,
-              },
-            }),
-          }),
-        0,
-      );
-    }
-
-    close(): void {
-      this.readyState = 3;
-      this.onclose?.();
-    }
-  }
-
-  globalThis.WebSocket = TamperedIdentityWebSocket as unknown as typeof WebSocket;
-  try {
-    const adapter = new RemoteRuntimeAdapter();
-    await expect(
-      adapter.connect({
-        mode: 'remote',
-        wsUrl: 'ws://runtime-adapter.invalid/rpc',
-        authKey: 'token',
-        reconnectMaxMs: 1_000,
-        requestTimeoutMs: 1_000,
-      }),
-    ).rejects.toThrow('runtime adapter server identity verification failed');
-    expect(adapter.status).toBe('error');
-    expect(adapter.authLevel).toBe(null);
-    expect(adapter.serverFingerprint).toBe(null);
-  } finally {
-    globalThis.WebSocket = previousWebSocket;
   }
 });

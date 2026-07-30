@@ -4,41 +4,128 @@ import {
   validateMapInstance,
 } from '../protocol/validation-primitives';
 
+const ENTITY_ID_PATTERN = /^0x[0-9a-f]{64}$/;
+
+export const validateSettlementContinuationValue = (
+  value: unknown,
+  context: string,
+): void => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new FinancialDataCorruptionError(`${context} value invalid`);
+  }
+  const continuation = value as Record<string, unknown>;
+  const keys = Object.keys(continuation).sort();
+  if (keys.join(',') !== 'actions,broadcast,workspaceHash') {
+    throw new FinancialDataCorruptionError(`${context} fields invalid`);
+  }
+  if (!ENTITY_ID_PATTERN.test(String(continuation['workspaceHash'] ?? ''))) {
+    throw new FinancialDataCorruptionError(`${context} workspace hash invalid`);
+  }
+  const actions = continuation['actions'];
+  if (!Array.isArray(actions) || actions.length > 1) {
+    throw new FinancialDataCorruptionError(`${context} actions invalid`);
+  }
+  if (typeof continuation['broadcast'] !== 'boolean') {
+    throw new FinancialDataCorruptionError(`${context} broadcast invalid`);
+  }
+  for (const [index, rawAction] of actions.entries()) {
+    if (!rawAction || typeof rawAction !== 'object' || Array.isArray(rawAction)) {
+      throw new FinancialDataCorruptionError(`${context} action ${index} invalid`);
+    }
+    const action = rawAction as Record<string, unknown>;
+    const type = action['type'];
+    const expectedKeys = type === 'r2r'
+      ? ['amount', 'toEntityId', 'tokenId', 'type']
+      : type === 'r2e'
+        ? ['amount', 'receivingEntity', 'tokenId', 'type']
+        : type === 'r2c'
+          ? [
+              'amount',
+              'counterpartyId',
+              ...(action['receivingEntityId'] === undefined ? [] : ['receivingEntityId']),
+              'tokenId',
+              'type',
+            ].sort()
+          : [];
+    if (expectedKeys.length === 0 || Object.keys(action).sort().join(',') !== expectedKeys.join(',')) {
+      throw new FinancialDataCorruptionError(`${context} action ${index} fields invalid`);
+    }
+    if (!Number.isSafeInteger(action['tokenId']) || Number(action['tokenId']) < 0) {
+      throw new FinancialDataCorruptionError(`${context} action ${index} token invalid`);
+    }
+    if (typeof action['amount'] !== 'bigint' || action['amount'] <= 0n) {
+      throw new FinancialDataCorruptionError(`${context} action ${index} amount invalid`);
+    }
+    const ids = type === 'r2r'
+      ? [action['toEntityId']]
+      : type === 'r2e'
+        ? [action['receivingEntity']]
+        : [action['counterpartyId'], ...(action['receivingEntityId'] ? [action['receivingEntityId']] : [])];
+    if (ids.some((id) => typeof id !== 'string' || !ENTITY_ID_PATTERN.test(id))) {
+      throw new FinancialDataCorruptionError(`${context} action ${index} entity invalid`);
+    }
+  }
+};
+
 export const validateEntityAccountMetadata = (
   entity: Record<string, unknown>,
   context: string,
 ): void => {
-  if (entity['deferredAccountProposals'] === undefined) return;
-  const deferred = validateMapInstance(
-    entity['deferredAccountProposals'],
-    `${context}.deferredAccountProposals`,
-  );
-  if (deferred.size > LIMITS.MAX_ACCOUNTS_PER_ENTITY) {
-    throw new FinancialDataCorruptionError(
-      `${context}.deferredAccountProposals exceeds ${LIMITS.MAX_ACCOUNTS_PER_ENTITY}`,
-    );
-  }
   const accounts = validateMapInstance(entity['accounts'], `${context}.accounts`);
-  for (const [rawAccountId, rawWorkspaceHash] of deferred) {
+  const validateAccountKey = (rawAccountId: unknown, field: string): string => {
     const accountId = String(rawAccountId ?? '');
-    const workspaceHash = String(rawWorkspaceHash ?? '');
     if (!/^0x[0-9a-f]{64}$/.test(accountId) || accountId !== rawAccountId) {
       throw new FinancialDataCorruptionError(
-        `${context}.deferredAccountProposals account invalid`,
+        `${context}.${field} account invalid`,
       );
     }
     if (!accounts.has(accountId)) {
       throw new FinancialDataCorruptionError(
-        `${context}.deferredAccountProposals account missing`,
+        `${context}.${field} account missing`,
       );
     }
-    if (
-      !/^0x[0-9a-f]{64}$/.test(workspaceHash) ||
-      workspaceHash !== rawWorkspaceHash
-    ) {
+    return accountId;
+  };
+
+  if (entity['deferredAccountProposals'] !== undefined) {
+    const deferred = validateMapInstance(
+      entity['deferredAccountProposals'],
+      `${context}.deferredAccountProposals`,
+    );
+    if (deferred.size > LIMITS.MAX_ACCOUNTS_PER_ENTITY) {
       throw new FinancialDataCorruptionError(
-        `${context}.deferredAccountProposals workspace hash invalid`,
+        `${context}.deferredAccountProposals exceeds ${LIMITS.MAX_ACCOUNTS_PER_ENTITY}`,
       );
     }
+    for (const [rawAccountId, rawWorkspaceHash] of deferred) {
+      validateAccountKey(rawAccountId, 'deferredAccountProposals');
+      const workspaceHash = String(rawWorkspaceHash ?? '');
+      if (
+        !/^0x[0-9a-f]{64}$/.test(workspaceHash) ||
+        workspaceHash !== rawWorkspaceHash
+      ) {
+        throw new FinancialDataCorruptionError(
+          `${context}.deferredAccountProposals workspace hash invalid`,
+        );
+      }
+    }
+  }
+
+  if (entity['settlementContinuations'] === undefined) return;
+  const continuations = validateMapInstance(
+    entity['settlementContinuations'],
+    `${context}.settlementContinuations`,
+  );
+  if (continuations.size > LIMITS.MAX_ACCOUNTS_PER_ENTITY) {
+    throw new FinancialDataCorruptionError(
+      `${context}.settlementContinuations exceeds ${LIMITS.MAX_ACCOUNTS_PER_ENTITY}`,
+    );
+  }
+  for (const [rawAccountId, rawContinuation] of continuations) {
+    validateAccountKey(rawAccountId, 'settlementContinuations');
+    validateSettlementContinuationValue(
+      rawContinuation,
+      `${context}.settlementContinuations`,
+    );
   }
 };

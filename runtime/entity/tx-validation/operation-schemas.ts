@@ -114,7 +114,7 @@ export const ENTITY_TX_OPERATION_SCHEMAS = {
   mintReserves: { required: { tokenId: 'integer', amount: 'bigint' } },
   settle_propose: {
     required: { counterpartyEntityId: 'string', ops: 'array' },
-    optional: { executorIsLeft: 'boolean', memo: 'string' },
+    optional: { executorIsLeft: 'boolean', memo: 'string', continuation: 'record' },
   },
   settle_update: {
     required: { counterpartyEntityId: 'string', ops: 'array' },

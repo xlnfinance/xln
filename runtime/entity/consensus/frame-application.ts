@@ -89,6 +89,7 @@ import { assignCertifiedOutputIdentities, verifyCertifiedEntityOutput } from './
 import { invalidateEntityAccountCommitment } from './state-root';
 import type { ApplyEntityTxsInOrderContext } from './frame-application-types';
 import { applyEntityTxReturnedEffects } from './frame-tx-effects';
+import { selectSettlementContinuation } from './settlement-continuation';
 
 import {
   entityFrameProfileEnabled,
@@ -343,6 +344,35 @@ async function applyEntityTxsInOrder(context: ApplyEntityTxsInOrderContext): Pro
   }
   return currentEntityState;
 }
+
+const materializeSettlementContinuation = async (
+  context: ApplyEntityTxsInOrderContext,
+  state: EntityState,
+): Promise<EntityState> => {
+  const disposition = selectSettlementContinuation(state);
+  if (disposition.kind === 'none' || disposition.kind === 'wait') return state;
+  if (disposition.kind === 'discard') {
+    state.settlementContinuations?.delete(disposition.counterpartyId);
+    addMessages(state, [
+      `Settlement continuation cleared: ${disposition.reason.replaceAll('_', ' ')}`,
+    ]);
+    return state;
+  }
+  const nextState = await applyEntityTxsInOrder({
+    ...context,
+    entityTxs: disposition.txs,
+    currentEntityState: state,
+    authorizedCommand: undefined,
+    authorizedCollective: true,
+    authorizedCertifiedOutput: undefined,
+    authorizedRuntimeOutput: undefined,
+  });
+  // Delete only after every derived transaction succeeded. Multi-signer
+  // candidates discard the touched-state overlay on failure; single-signer
+  // Runtimes halt and reload their pre-frame WAL truth.
+  nextState.settlementContinuations?.delete(disposition.counterpartyId);
+  return nextState;
+};
 
 type ProposePendingAccountFramesContext = {
   env: EntityRuntimeContext;
@@ -1310,6 +1340,10 @@ const applyEntityFrameWithIsolation = async (
     isolateState,
   );
   working.currentEntityState = await applyEntityTxsInOrder(working.context);
+  working.currentEntityState = await materializeSettlementContinuation(
+    working.context,
+    working.currentEntityState,
+  );
   working.markFrameProfile('entityTxLoop');
   const profileHash = buildCurrentEntityProfileHashToSign(working.currentEntityState);
   if (profileHash) working.context.collectedHashes.push(profileHash);

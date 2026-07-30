@@ -11,15 +11,9 @@ export type MovePostSettleOp =
   | { type: 'r2e'; recipientEoa: string }
   | { type: 'reserve_to_collateral'; targetEntityId: string; counterpartyEntityId: string };
 
-export type PendingAssetAutoC2R = {
-  counterpartyEntityId: string;
-  tokenId: number;
-  symbol: string;
-  amount: bigint;
-  postSettleOp: MovePostSettleOp;
-  broadcast: boolean;
-  phase: 'awaiting_settlement_execute' | 'awaiting_follow_up';
-};
+export type SettlementContinuationPlan = NonNullable<
+  EntityTxOf<'settle_propose'>['data']['continuation']
+>;
 
 export type DisputeStartOptions = {
   allowUnsafeCrossJTargetDispute?: boolean;
@@ -149,35 +143,42 @@ export function buildAddTokenToAccountTx(counterpartyEntityId: string, tokenId: 
   };
 }
 
-export function buildMovePostSettleTxs(entityId: string, pending: PendingAssetAutoC2R): EntityTx[] {
+export function buildMoveSettlementContinuation(
+  entityId: string,
+  tokenId: number,
+  amount: bigint,
+  postSettleOp: MovePostSettleOp,
+  broadcast: boolean,
+): SettlementContinuationPlan {
   const selfEntityId = String(entityId || '').trim().toLowerCase();
-  const needsFollowUpReserveOp = pending.postSettleOp.type !== 'none';
-  const entityTxs: EntityTx[] = [
-    {
-      type: 'settle_execute',
-      data: {
-        counterpartyEntityId: pending.counterpartyEntityId,
-        ...(needsFollowUpReserveOp ? { disableC2RShortcut: true } : {}),
-      },
-    },
-  ];
-  if (pending.postSettleOp.type === 'r2r') {
-    entityTxs.push(buildReserveToReserveTx(pending.postSettleOp.recipientEntityId, pending.tokenId, pending.amount));
+  const actions: SettlementContinuationPlan['actions'] = [];
+  if (postSettleOp.type === 'r2r') {
+    actions.push({
+      type: 'r2r',
+      toEntityId: postSettleOp.recipientEntityId,
+      tokenId,
+      amount,
+    });
   }
-  if (pending.postSettleOp.type === 'r2e') {
-    entityTxs.push(buildReserveToExternalEoaTx(pending.postSettleOp.recipientEoa, pending.tokenId, pending.amount));
+  if (postSettleOp.type === 'r2e') {
+    actions.push({
+      type: 'r2e',
+      receivingEntity: encodeExternalEoaAsEntity(postSettleOp.recipientEoa),
+      tokenId,
+      amount,
+    });
   }
-  if (pending.postSettleOp.type === 'reserve_to_collateral') {
-    entityTxs.push(buildReserveToCollateralTx({
-      counterpartyEntityId: pending.postSettleOp.counterpartyEntityId,
-      selfEntityId,
-      receivingEntityId: pending.postSettleOp.targetEntityId,
-      tokenId: pending.tokenId,
-      amount: pending.amount,
-    }));
+  if (postSettleOp.type === 'reserve_to_collateral') {
+    const receivingEntityId = String(postSettleOp.targetEntityId || selfEntityId)
+      .trim()
+      .toLowerCase();
+    actions.push({
+      type: 'r2c',
+      counterpartyId: postSettleOp.counterpartyEntityId,
+      ...(receivingEntityId !== selfEntityId ? { receivingEntityId } : {}),
+      tokenId,
+      amount,
+    });
   }
-  if (pending.broadcast) {
-    entityTxs.push(buildBroadcastTx());
-  }
-  return entityTxs;
+  return { actions, broadcast };
 }

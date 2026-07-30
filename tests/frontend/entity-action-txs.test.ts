@@ -5,7 +5,7 @@ import {
   buildBroadcastTx,
   buildDisputeFinalizeTx,
   buildExternalToReserveTx,
-  buildMovePostSettleTxs,
+  buildMoveSettlementContinuation,
   buildOpenAccountTx,
   buildPrepareDisputeTx,
   buildReopenDisputedAccountTx,
@@ -14,24 +14,12 @@ import {
   buildReserveToReserveTx,
   buildSettlementApproveTx,
   encodeExternalEoaAsEntity,
-  type PendingAssetAutoC2R,
 } from '../../frontend/src/lib/components/Entity/entity-action-txs';
 
 const entityId = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const hubId = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 const targetId = '0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
 const eoa = '0x1111111111111111111111111111111111111111';
-
-const pending = (patch: Partial<PendingAssetAutoC2R>): PendingAssetAutoC2R => ({
-  counterpartyEntityId: hubId,
-  tokenId: 7,
-  symbol: 'USDC',
-  amount: 12n,
-  postSettleOp: { type: 'none' },
-  broadcast: false,
-  phase: 'awaiting_settlement_execute',
-  ...patch,
-});
 
 describe('entity action tx builders', () => {
   test('builds reserve and external movement txs', () => {
@@ -96,20 +84,24 @@ describe('entity action tx builders', () => {
     expect(buildAddTokenToAccountTx(hubId, 4)).toEqual({ type: 'extendCredit', data: { counterpartyEntityId: hubId, tokenId: 4, amount: 0n } });
   });
 
-  test('builds post-settle follow-up sequence', () => {
-    expect(buildMovePostSettleTxs(entityId, pending({
-      postSettleOp: { type: 'reserve_to_collateral', targetEntityId: targetId, counterpartyEntityId: hubId },
-      broadcast: true,
-    }))).toEqual([
-      {
-        type: 'settle_execute',
-        data: { counterpartyEntityId: hubId, disableC2RShortcut: true },
-      },
+  test('builds a durable post-settlement continuation', () => {
+    expect(buildMoveSettlementContinuation(
+      entityId,
+      7,
+      12n,
+      { type: 'reserve_to_collateral', targetEntityId: targetId, counterpartyEntityId: hubId },
+      true,
+    )).toEqual({
+      actions: [
       {
         type: 'r2c',
-        data: { counterpartyId: hubId, receivingEntityId: targetId, tokenId: 7, amount: 12n },
+        counterpartyId: hubId,
+        receivingEntityId: targetId,
+        tokenId: 7,
+        amount: 12n,
       },
-      buildBroadcastTx(),
-    ]);
+      ],
+      broadcast: true,
+    });
   });
 });
