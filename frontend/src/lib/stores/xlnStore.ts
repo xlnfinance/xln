@@ -873,7 +873,7 @@ const createEmbeddedRuntimeAdapter = async (
       if (action !== 'verify-chain') throw new Error(`UNSUPPORTED_RUNTIME_CONTROL:${action}`);
       return xln.verifyLiveRuntimeStorage(env);
     },
-    registerEnvChangeCallback: (env, cb) => xln.registerEnvChangeCallback(env, cb),
+    registerRuntimePublishedCallback: (env, cb) => xln.registerRuntimePublishedCallback(env, cb),
     buildReadContext: (env) => ({
       readHead: () => xln.readPersistedStorageHead(env),
       readFrame: (height) => xln.readPersistedStorageFrameRecord(env, height),

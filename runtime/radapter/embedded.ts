@@ -14,6 +14,7 @@ import { RuntimeAdapterError } from './errors';
 import { resolveRuntimeAdapterRead, type RuntimeAdapterResolveContext } from './resolve';
 import { assertRuntimeCommandReady, getRuntimeCommandReadiness } from '../runtime/lifecycle';
 import { ensureRuntimeState } from '../runtime/runtime-state';
+import type { RuntimePublishedNotice } from '../runtime/loop-environment';
 
 export type EmbeddedRuntimeAdapterDeps = {
   getEnv: () => RuntimeState | null;
@@ -25,7 +26,10 @@ export type EmbeddedRuntimeAdapterDeps = {
     route: CrossJurisdictionSwapRoute,
   ) => Promise<RuntimeAdapterCrossJurisdictionIntentResult>;
   controlRuntime?: (env: RuntimeState, action: RuntimeAdapterControlAction) => Promise<unknown>;
-  registerEnvChangeCallback: (env: RuntimeState, cb: (env: RuntimeState) => void) => (() => void);
+  registerRuntimePublishedCallback: (
+    env: RuntimeState,
+    cb: (notice: RuntimePublishedNotice) => void,
+  ) => (() => void);
   buildReadContext?: (env: RuntimeState) => Partial<Omit<RuntimeAdapterResolveContext, 'env'>>;
 };
 
@@ -92,12 +96,8 @@ export class EmbeddedRuntimeAdapter implements RuntimeAdapter {
     this.env = env;
     this.publishCommittedMetadata(env);
     this.unregister?.();
-    this.unregister = this.deps.registerEnvChangeCallback(env, (nextEnv) => {
-      this.env = nextEnv;
-      // Infrastructure notifications may race an in-place frame mutation.
-      // Such a callback must never publish H+1 before WAL has committed it.
-      if (ensureRuntimeState(nextEnv).stateMutationInFlight) return;
-      this.publishCommittedMetadata(nextEnv);
+    this.unregister = this.deps.registerRuntimePublishedCallback(env, (notice) => {
+      this.publishCommittedNotice(notice);
       for (const cb of this.changeCbs) cb(this.publishedHeight);
     });
     this.setStatus('connected');
@@ -193,6 +193,13 @@ export class EmbeddedRuntimeAdapter implements RuntimeAdapter {
     this.publishedHeight = Math.max(0, Math.floor(Number(env.height ?? 0)));
     this.publishedCommandReady = readiness.ready;
     this.publishedCommandReadyReason = readiness.reason;
+  }
+
+  private publishCommittedNotice(notice: RuntimePublishedNotice): void {
+    this.publishedRuntimeId = notice.runtimeId || this.configuredRuntimeId || 'embedded';
+    this.publishedHeight = notice.height;
+    this.publishedCommandReady = notice.commandReady;
+    this.publishedCommandReadyReason = notice.commandReadyReason;
   }
 
   private requireCommandReady(env: RuntimeState): void {

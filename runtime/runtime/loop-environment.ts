@@ -8,6 +8,11 @@ import {
 import { safeStringify } from '../protocol/serialization';
 import { ensureRuntimeState } from './runtime-state';
 import type { RuntimeState, RuntimeInput } from './types';
+import {
+  getRuntimeCommandReadiness,
+  inferRuntimeLifecyclePhase,
+  type RuntimeLifecyclePhase,
+} from './lifecycle';
 
 export const ENV_APPLY_ALLOWED_KEY = Symbol.for('xln.runtime.env.apply.allowed');
 export const ENV_REPLAY_MODE_KEY = Symbol.for('xln.runtime.env.replay.mode');
@@ -51,6 +56,43 @@ export const registerEnvChangeCallback = (
   state.envChangeCallbacks.add(callback);
   return () => state.envChangeCallbacks?.delete(callback);
 };
+
+export type RuntimePublishedNotice = Readonly<{
+  runtimeId: string;
+  height: number;
+  timestamp: number;
+  lifecyclePhase: RuntimeLifecyclePhase;
+  commandReady: boolean;
+  commandReadyReason: string | null;
+}>;
+
+/**
+ * Public observers receive values, never the mutable Runtime object.
+ *
+ * Runtime owns and mutates its State in place while it constructs the next
+ * frame. Letting a UI retain that object would expose H+1 before WAL commits.
+ * This adapter deliberately publishes only an immutable scalar notice; callers
+ * fetch bounded, owned projections through RuntimeAdapter reads.
+ */
+export const registerRuntimePublishedCallback = (
+  env: RuntimeState,
+  callback: (notice: RuntimePublishedNotice) => void,
+): (() => void) =>
+  registerEnvChangeCallback(env, (committedEnv) => {
+    const state = ensureRuntimeState(committedEnv);
+    if (state.stateMutationInFlight) {
+      throw new Error('RUNTIME_PUBLISHED_NOTICE_BEFORE_COMMIT');
+    }
+    const readiness = getRuntimeCommandReadiness(committedEnv);
+    callback(Object.freeze({
+      runtimeId: String(committedEnv.runtimeId || '').trim().toLowerCase(),
+      height: Math.max(0, Math.floor(Number(committedEnv.height || 0))),
+      timestamp: Math.max(0, Math.floor(Number(committedEnv.timestamp || 0))),
+      lifecyclePhase: inferRuntimeLifecyclePhase(state),
+      commandReady: readiness.ready,
+      commandReadyReason: readiness.reason,
+    }));
+  });
 
 export const registerRuntimeFrameCommitCallback = (
   env: RuntimeState,

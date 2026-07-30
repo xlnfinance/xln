@@ -76,6 +76,7 @@ const runtimeLoopApi = createRuntimeLoopApi({
 
 const {
   registerEnvChangeCallback,
+  registerRuntimePublishedCallback,
   registerRuntimeFrameCommitCallback,
   registerRecoveryBackupBarrier,
   ENV_APPLY_ALLOWED_KEY,
@@ -149,6 +150,7 @@ export type RuntimeLoopConfig = NonNullable<Parameters<typeof startRuntimeLoop>[
 
 export {
   registerEnvChangeCallback,
+  registerRuntimePublishedCallback,
   registerRuntimeFrameCommitCallback,
   registerRecoveryBackupBarrier,
   getRuntimeStorageDb,

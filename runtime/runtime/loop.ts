@@ -14,6 +14,7 @@ import {
   failfastAssert,
   readRuntimeMetadata,
   registerEnvChangeCallback,
+  registerRuntimePublishedCallback,
   registerRecoveryBackupBarrier,
   registerRuntimeFrameCommitCallback,
   writeRuntimeMetadata,
@@ -130,6 +131,7 @@ export const createRuntimeLoopApi = (deps: RuntimeLoopApiDeps) => {
 
   return {
     registerEnvChangeCallback,
+    registerRuntimePublishedCallback,
     registerRuntimeFrameCommitCallback,
     registerRecoveryBackupBarrier,
     ENV_APPLY_ALLOWED_KEY,

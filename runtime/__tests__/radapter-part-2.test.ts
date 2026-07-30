@@ -23,6 +23,8 @@ import {
 } from '../radapter/codec';
 
 import { EmbeddedRuntimeAdapter } from '../radapter/embedded';
+import { registerRuntimePublishedCallback } from '../runtime/loop-environment';
+import { notifyRuntimeStateChanged } from '../runtime/frame/notifications';
 
 import { RemoteRuntimeAdapter } from '../radapter/remote';
 
@@ -2237,7 +2239,7 @@ test('embedded adapter sends to the latest active env after runtime switch', asy
   activeEnv.height = 5;
 
   let currentEnv: RuntimeState | null = staleEnv;
-  let publishCommittedEnv: ((env: RuntimeState) => void) | null = null;
+  let publishCommittedHeight: ((height: number) => void) | null = null;
   const writtenEnv: RuntimeState[] = [];
   const adapter = new EmbeddedRuntimeAdapter({
     getEnv: () => currentEnv,
@@ -2248,8 +2250,15 @@ test('embedded adapter sends to the latest active env after runtime switch', asy
       env.height = Math.max(0, Math.floor(Number(env.height ?? 0))) + 1;
     },
     submitCrossJurisdictionIntent: async () => ({ delivered: true }),
-    registerEnvChangeCallback: (_env, callback) => {
-      publishCommittedEnv = callback;
+    registerRuntimePublishedCallback: (_env, callback) => {
+      publishCommittedHeight = (height) => callback({
+        runtimeId: String(activeEnv.runtimeId || ''),
+        height,
+        timestamp: activeEnv.timestamp,
+        lifecyclePhase: 'running',
+        commandReady: true,
+        commandReadyReason: null,
+      });
       return () => {};
     },
   });
@@ -2272,21 +2281,51 @@ test('embedded adapter sends to the latest active env after runtime switch', asy
   expect(staleEnv.height).toBe(1);
   expect(activeEnv.height).toBe(6);
   expect(adapter.currentHeight).toBe(1);
-  publishCommittedEnv?.(activeEnv);
+  publishCommittedHeight?.(activeEnv.height);
   expect(adapter.currentHeight).toBe(6);
+});
+
+test('runtime publication callbacks expose only an immutable scalar notice', () => {
+  const env = makeEnv();
+  let published: unknown = null;
+  const unregister = registerRuntimePublishedCallback(env, notice => {
+    published = notice;
+  });
+
+  notifyRuntimeStateChanged(env);
+  unregister();
+
+  expect(Object.isFrozen(published)).toBe(true);
+  expect(Object.keys(published as object).sort()).toEqual([
+    'commandReady',
+    'commandReadyReason',
+    'height',
+    'lifecyclePhase',
+    'runtimeId',
+    'timestamp',
+  ]);
+  expect(JSON.stringify(published)).not.toContain('eReplicas');
+  expect(JSON.stringify(published)).not.toContain('accounts');
 });
 
 test('embedded adapter never publishes an in-flight frame through synchronous status', async () => {
   const env = makeEnv();
   env.height = 4;
-  let notify: ((env: RuntimeState) => void) | null = null;
+  let notify: ((height: number) => void) | null = null;
   const adapter = new EmbeddedRuntimeAdapter({
     getEnv: () => env,
     validateRuntimeInputAdmission: () => {},
     enqueueRuntimeInput: () => {},
     submitCrossJurisdictionIntent: async () => ({ delivered: true }),
-    registerEnvChangeCallback: (_env, callback) => {
-      notify = callback;
+    registerRuntimePublishedCallback: (_env, callback) => {
+      notify = (height) => callback({
+        runtimeId: String(env.runtimeId || ''),
+        height,
+        timestamp: env.timestamp,
+        lifecyclePhase: 'running',
+        commandReady: true,
+        commandReadyReason: null,
+      });
       return () => {};
     },
   });
@@ -2296,11 +2335,10 @@ test('embedded adapter never publishes an in-flight frame through synchronous st
 
   env.height = 5;
   env.runtimeState!.stateMutationInFlight = true;
-  notify?.(env);
   expect(adapter.currentHeight).toBe(4);
 
   env.runtimeState!.stateMutationInFlight = false;
-  notify?.(env);
+  notify?.(env.height);
   expect(adapter.currentHeight).toBe(5);
 });
 
@@ -2308,7 +2346,7 @@ test('embedded adapter rejects money commands after the runtime stops accepting 
   const env = makeEnv();
   let enqueued = 0;
   let submitted = 0;
-  let publishCommittedEnv: ((env: RuntimeState) => void) | null = null;
+  let publishHalted: (() => void) | null = null;
   const adapter = new EmbeddedRuntimeAdapter({
     getEnv: () => env,
     validateRuntimeInputAdmission: () => {},
@@ -2319,8 +2357,15 @@ test('embedded adapter rejects money commands after the runtime stops accepting 
       submitted += 1;
       return { delivered: true };
     },
-    registerEnvChangeCallback: (_env, callback) => {
-      publishCommittedEnv = callback;
+    registerRuntimePublishedCallback: (_env, callback) => {
+      publishHalted = () => callback({
+        runtimeId: String(env.runtimeId || ''),
+        height: env.height,
+        timestamp: env.timestamp,
+        lifecyclePhase: 'halted',
+        commandReady: false,
+        commandReadyReason: 'phase=halted',
+      });
       return () => {};
     },
   });
@@ -2329,7 +2374,7 @@ test('embedded adapter rejects money commands after the runtime stops accepting 
   expect(adapter.commandReadyReason).toBe(null);
 
   env.runtimeState = { lifecyclePhase: 'halted', halted: true };
-  publishCommittedEnv?.(env);
+  publishHalted?.();
   expect(adapter.commandReady).toBe(false);
   expect(adapter.commandReadyReason).toBe('phase=halted');
   await expect(adapter.send({ runtimeTxs: [], entityInputs: [] })).rejects.toThrow(

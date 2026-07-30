@@ -3,7 +3,7 @@ import type { XLNModule } from './runtime-module';
 const REQUIRED_BOOTSTRAP_FUNCTIONS = [
   'main',
   'processRuntime',
-  'registerEnvChangeCallback',
+  'registerRuntimePublishedCallback',
   'enqueueRuntimeInput',
   'extractEntityId',
   'parseReplicaKey',
