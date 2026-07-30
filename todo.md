@@ -251,6 +251,45 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   above; do not invent empty `RuntimeOutput` or `AccountOutput` aliases merely
   for naming symmetry. Derive output unions only from real reducer results.
   Public API removals require an explicit compatibility decision.
+- [ ] Exhaust the current mechanically verified dead-code census before the
+  immutable audit. Delete the zero-callsite gossip profile fingerprint and
+  announcement helpers, HTLC hash-ladder encoder, custody debug waiter,
+  market-maker merge/count helpers, mesh Account-delta helper, daemon RPC-auth
+  wrapper, J-batch breakdown helper, Runtime jurisdiction delay helper,
+  watcher-header helper, Runtime WS/debug/client-count helpers, mesh-bootstrap
+  classifier, unused constants and no-op presentation `formatEntityId`.
+  Re-run static and dynamic entrypoint scans after each owner batch; do not
+  remove public testnet types such as the duplicate `EntityProfile` surface
+  until its exact export consumers are migrated.
+- [ ] Finish untrusted-boundary typing and drive the ratcheted double assertions
+  from 12 to zero. Make `parseTaggedControlBody` return `unknown` only and give
+  signer/P2P controls exact-key owner decoders. Replace the partial Tron
+  `TransactionResponse` fiction with the narrow adapter result actually used;
+  model BrowserVM uninitialized lifecycle explicitly; narrow CLI/watchtower
+  contract capabilities; decode reliable J-range identity through one exact
+  unsigned-range schema. Every successful cleanup must tighten
+  `check-unsafe-types` in the same commit.
+- [ ] Consolidate startup/provisioning policy. Own one fail-fast
+  `deployMissingDefaultTokens` implementation under jurisdiction and delete
+  the server, hub and P2P scenario copies, including swallowed registry/code
+  failures and hub signer casts. Own one positive-integer environment decoder
+  and one argv decoder: unset may use the documented default, but
+  present-invalid values and flags missing values must throw. Replace the four
+  storage-health `.catch(() => {})` sites with one explicit awaited or
+  structured-failure policy; health may be stale, never silently unknown.
+- [ ] Complete the verified owner-path cleanup and ratchet every removed edge:
+  move Runtime command-frontier state out of `radapter`, ingress receipts out
+  of `server`, persistence query/history DTOs out of `radapter` and `api`, the
+  RuntimeInput debt-enforcement builder out of `protocol`, Account causal
+  tracing out of `infra`, and profile batching out of `relay`. Internal Runtime
+  and storage modules must import concrete JAdapter owners, never its public
+  facade. These are path/ownership batches only; do not mix them with protocol
+  behavior changes.
+- [ ] Replace the remaining generic/fallback configuration and routing shapes:
+  remove the tautological market-maker route branch that returns `null` on
+  both sides, and require exact owner schemas for every control/config object.
+  Add dependency gates for the newly corrected directions so the old import
+  graph cannot return.
 - [ ] Remove duplicate policy and display code: use canonical Account
   `Delta`/`DerivedDelta` and `deriveDelta` in the dev visualizer and Graph3D;
   BigInt remains exact until the geometry/formatting boundary. Fix the stale
