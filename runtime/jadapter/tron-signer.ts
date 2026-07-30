@@ -226,11 +226,9 @@ export class TronSigner extends ethers.AbstractSigner<ethers.JsonRpcProvider> {
 export const createTronSigner = async (
   params: ConstructorParameters<typeof TronSigner>[0],
 ): Promise<TronSigner> => {
-  // TronWeb publishes distinct import/require entrypoints. Its generated
-  // protobuf runtime is CommonJS, so server-side TRON transport must load the
-  // package's declared require entrypoint. This module is never entered by the
-  // BrowserVM adapter.
-  const { createRequire } = await import('node:module');
-  const { TronWeb } = createRequire(import.meta.url)('tronweb') as typeof import('tronweb');
+  // One standards-based dynamic import works in Bun and browser bundles.
+  // Loading through Node's `createRequire` made the otherwise browser-safe
+  // adapter graph depend on `node:module`, even when TRON was never selected.
+  const { TronWeb } = await import('tronweb');
   return new TronSigner(params, TronWeb);
 };
