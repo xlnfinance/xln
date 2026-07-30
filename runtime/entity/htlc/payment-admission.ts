@@ -4,7 +4,7 @@ import type { EntityInput, EntityState } from '../types';
 import type { EntityRuntimeContext } from '../runtime-context';
 import type { EntityTx } from '../../types/entity-tx';
 import type { Profile } from '../../entity/profile';
-import { canonicalizeProfile, getValidatorEncryptionManifestFromBoard } from '../../entity/profile';
+import { canonicalizeProfile, getValidatorEncryptionManifestFromBoard, parseProfile } from '../../entity/profile';
 import {
   computeEntityProfileCertificationComponents,
   profileToEntityProfileDescriptor,
@@ -361,21 +361,22 @@ const validateCanonicalProfileDescriptor = (raw: unknown): EntityProfileDescript
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     throw new Error('HTLC_PAYMENT_PREPARED_ROUTE_PROFILE_DESCRIPTOR_INVALID');
   }
-  const { version, ...profileFields } = raw as EntityProfileDescriptor & Record<string, unknown>;
+  const descriptor = raw as Record<string, unknown>;
+  const { version, ...profileFields } = descriptor;
   if (version !== 'xln:entity-profile:v1') {
     throw new Error('HTLC_PAYMENT_PREPARED_ROUTE_PROFILE_DESCRIPTOR_VERSION_INVALID');
   }
   let canonical: EntityProfileDescriptor;
   try {
     canonical = profileToEntityProfileDescriptor(
-      canonicalizeProfile({
+      parseProfile({
         ...profileFields,
         lastUpdated: 1,
         runtimeId: 'descriptor-validation',
         runtimeEncPubKey: `0x${'11'.repeat(32)}`,
         wsUrl: null,
         relays: [],
-      } as unknown as Profile),
+      }),
     );
   } catch (error) {
     throw new Error(
