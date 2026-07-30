@@ -134,6 +134,9 @@ describe('State and Replica boundary characterization', () => {
   test('Account root commits bilateral State and excludes its Entity-owned envelope', async () => {
     const { replica } = await createCommittedAccountFixture();
     const account = replica.state.accounts.get(counterpartyId)!;
+    expect(account.currentFrame.height).toBe(0);
+    expect(account.currentFrame.stateHash).toBe('');
+    expect(account.currentFrame.accountStateRoot).toMatch(/^0x[0-9a-f]{64}$/);
     const accountRoot = computeAccountStateRoot(account);
     expect(accountRoot).toBe(computeAccountStateRootCold(account));
 

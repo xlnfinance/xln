@@ -120,8 +120,12 @@ const seedOpenAccountPolicies = async (
 ): Promise<void> => {
   const account = state.accounts.get(counterpartyId);
   if (!account) throw new Error('OPEN_ACCOUNT_CREATED_MACHINE_MISSING');
+  // H=0 is local genesis state, not a signed bilateral Account frame.
+  // Keep its stateHash empty: only an accepted frame H>=1 has a frame hash.
+  // accountStateRoot still commits the complete live Account state and becomes
+  // the starting root for the first proposal. Treating that root as a frame
+  // hash invents evidence neither peer signed and breaks strict WAL replay.
   account.currentFrame.accountStateRoot = computeAccountStateRoot(account);
-  account.currentFrame.stateHash = account.currentFrame.accountStateRoot;
   const tokenId = tx.data.tokenId ?? 1;
   const tokenIds = Array.from(new Set([tokenId, ...DEFAULT_ACCOUNT_TOKEN_IDS]))
     .filter(id => Number.isFinite(id) && id > 0);

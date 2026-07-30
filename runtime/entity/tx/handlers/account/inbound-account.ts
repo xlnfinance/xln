@@ -162,8 +162,10 @@ const createInboundAccountState = (
       resolveJurisdictionRebalanceDefaults(state.config.jurisdiction, tokenId),
     );
   }
+  // The inbound replica knows its complete genesis Account state, so it can
+  // commit accountStateRoot immediately. It still has no signed Account frame:
+  // stateHash remains empty until bilateral consensus accepts H=1.
   account.currentFrame.accountStateRoot = computeAccountStateRoot(account);
-  account.currentFrame.stateHash = account.currentFrame.accountStateRoot;
   return account;
 };
 
