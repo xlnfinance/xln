@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { stageBarFor, ringLayout, compactAmount } from '../../frontend/src/lib/network3d/capacityBar';
+import { stageBarFor } from '../../frontend/src/lib/network3d/capacityBar';
 
 const derived = (over: Partial<Parameters<typeof stageBarFor>[0]> = {}) => ({
   delta: 0n,
@@ -70,21 +70,5 @@ describe('stage capacity bar', () => {
 
   test('an account with nothing in it draws nothing', () => {
     expect(stageBarFor(derived()).regions).toEqual([]);
-  });
-});
-
-describe('stage helpers', () => {
-  test('ring layout is deterministic so nodes never jump between steps', () => {
-    expect(ringLayout(4, 10)).toEqual(ringLayout(4, 10));
-    expect(ringLayout(0, 10)).toEqual([]);
-    expect(ringLayout(1, 10)).toEqual([{ x: 0, y: 0 }]);
-  });
-
-  test('compact amounts stay short enough for a node badge', () => {
-    expect(compactAmount(2_500_000)).toBe('2.5M');
-    expect(compactAmount(850_000)).toBe('850K');
-    expect(compactAmount(1_200)).toBe('1.2K');
-    expect(compactAmount(12_000_000)).toBe('12M');
-    expect(compactAmount(0)).toBe('0');
   });
 });

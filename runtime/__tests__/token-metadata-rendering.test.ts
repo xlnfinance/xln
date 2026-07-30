@@ -84,7 +84,9 @@ describe('rendered token metadata is exact', () => {
   });
 
   test('3D labels render the selected custom token at its exact precision', () => {
-    expect(formatGraphReserveBadge(100_000_000n, 8, 'C8')).toBe(' 1 C8');
+    // A middot separates the name from the amount on a node badge; the point of this
+    // assertion is the precision of a custom-decimals token, which is unchanged.
+    expect(formatGraphReserveBadge(100_000_000n, 8, 'C8')).toBe('  ·  1 C8');
     expect(formatGraphEntityReserveBalances({
       reserves: new Map([[9, 123_456_789n]]),
       selectedTokenId: 9,

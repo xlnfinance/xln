@@ -13,9 +13,7 @@
   import type { RuntimeState } from '@xln/runtime/xln-api';
   import type { EnvSnapshot } from '$types';
   import Graph3DPanel from './panels/Graph3DPanel.svelte';
-  import NetworkStage2D from './core/NetworkStage2D.svelte';
   import NetworkPlayer from './core/NetworkPlayer.svelte';
-  import { networkMachineDemo } from '$lib/stores/networkMachineDemoStore';
 
   export let runtimeFrameEnv: Writable<RuntimeState | null>;
   export let runtimeFrameHistory: Writable<EnvSnapshot[]>;
@@ -26,18 +24,14 @@
 </script>
 
 <div class="demo-root">
-  {#if $networkMachineDemo.stage === '2d'}
-    <NetworkStage2D />
-  {:else}
-    <Graph3DPanel
-      {runtimeFrameEnv}
-      {runtimeFrameHistory}
-      {runtimeFrameTimeIndex}
-      {runtimeFrameIsLive}
-      {graphInitSignal}
-      demoMode
-    />
-  {/if}
+  <Graph3DPanel
+    {runtimeFrameEnv}
+    {runtimeFrameHistory}
+    {runtimeFrameTimeIndex}
+    {runtimeFrameIsLive}
+    {graphInitSignal}
+    demoMode
+  />
   <NetworkPlayer />
 </div>
 

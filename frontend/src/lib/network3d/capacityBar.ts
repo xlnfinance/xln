@@ -163,28 +163,3 @@ export const creditStrain = (vector: CapacityVector): { own: number; peer: numbe
   };
 };
 
-export type StagePoint = { x: number; y: number };
-
-/**
- * Ring layout for the context map.
- *
- * Deterministic from position in the sorted id list, so the same network always draws the
- * same shape and a node never jumps between steps.
- */
-export const ringLayout = (count: number, radius: number): StagePoint[] => {
-  if (count <= 0) return [];
-  if (count === 1) return [{ x: 0, y: 0 }];
-  return Array.from({ length: count }, (_, index) => {
-    const angle = (index / count) * Math.PI * 2 - Math.PI / 2;
-    return { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius };
-  });
-};
-
-/** Compact money for a node badge: 2.5M, 850K, 1.2B. */
-export const compactAmount = (value: number): string => {
-  const abs = Math.abs(value);
-  if (abs >= 1e9) return `${(value / 1e9).toFixed(abs >= 1e10 ? 0 : 1)}B`;
-  if (abs >= 1e6) return `${(value / 1e6).toFixed(abs >= 1e7 ? 0 : 1)}M`;
-  if (abs >= 1e3) return `${(value / 1e3).toFixed(abs >= 1e4 ? 0 : 1)}K`;
-  return value.toFixed(abs > 0 && abs < 1 ? 2 : 0);
-};
