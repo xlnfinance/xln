@@ -192,9 +192,12 @@ export const groupAtomicCrossJAdmissionOutputs = <T extends RoutedEntityInput>(
 };
 
 const overwriteRoutedEntityOutput = <T extends RoutedEntityInput>(target: T, source: T): T => {
-  const targetRecord = target as unknown as Record<string, unknown>;
-  for (const key of Object.keys(targetRecord)) delete targetRecord[key];
-  Object.assign(targetRecord, source);
+  for (const key of Reflect.ownKeys(target)) {
+    if (!Reflect.deleteProperty(target, key)) {
+      throw new Error(`ROUTE_RELIABLE_OUTPUT_FIELD_DELETE_FAILED:${String(key)}`);
+    }
+  }
+  Object.assign(target, source);
   return target;
 };
 
