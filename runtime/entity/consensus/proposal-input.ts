@@ -1,7 +1,7 @@
 import { signAccountFrame } from '../../account/crypto';
 import { assertEntityConfigBoardAuthority } from '../../hanko/signing';
 import { shortHash, shortId } from '../../infra/logger';
-import type { ProposedEntityFrame } from '../types';
+import type { EntityFrame } from '../types';
 import {
   deferEntityConsensusInput,
   noopEntityConsensusInput,
@@ -25,7 +25,7 @@ import { validateProposedFrameLeader } from './proposal-policy';
 
 const validateProposalEnvelope = (
   context: ApplyEntityInputContext,
-  frame: ProposedEntityFrame,
+  frame: EntityFrame,
 ): ApplyEntityInputResult | null => {
   const { env, workingReplica } = context;
   if (frame.height < workingReplica.state.height) {
@@ -74,7 +74,7 @@ const validateProposalEnvelope = (
 
 const validateProposalViewAndJRange = (
   context: ApplyEntityInputContext,
-  frame: ProposedEntityFrame,
+  frame: EntityFrame,
 ): ApplyEntityInputResult | null => {
   const { env, workingReplica } = context;
   const effectiveView = Math.max(
@@ -136,7 +136,7 @@ const validateProposalViewAndJRange = (
 
 const signAndLockProposal = async (
   context: ApplyEntityInputContext,
-  frame: ProposedEntityFrame,
+  frame: EntityFrame,
 ): Promise<ApplyEntityInputResult | null> => {
   const { env, entityInput, entityOutbox, workingReplica } = context;
   const replay = await replayProposedEntityFrame(context, frame);

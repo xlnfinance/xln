@@ -13,13 +13,13 @@ import {
 } from '../orchestrator/bootstrap-progress-deadline';
 import { computeCanonicalRuntimeStateHash } from '../storage/canonical-hash';
 import { computeStorageFrameHash } from '../storage/hashes';
-import type { StorageFrameRecord } from '../storage/types';
+import type { RuntimeFrame } from '../storage/types';
 
 const buildReadyFrame = (
-  canonicalEntityHashes: NonNullable<StorageFrameRecord['canonicalEntityHashes']>,
+  canonicalEntityHashes: NonNullable<RuntimeFrame['canonicalEntityHashes']>,
   runtimeMachine: Record<string, unknown> = { pendingNetworkOutputs: ['durable-output'] },
-): StorageFrameRecord => {
-  const frameBase: StorageFrameRecord = {
+): RuntimeFrame => {
+  const frameBase: RuntimeFrame = {
     height: 165,
     timestamp: 1_000,
     replicaMetaDigest: '0xmeta',

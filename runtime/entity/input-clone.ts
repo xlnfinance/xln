@@ -1,4 +1,4 @@
-import type { EntityInput, EntityOutput, EntityLeaderCertificate, EntityLeaderTimeoutVote, ProposedEntityFrame } from './types';
+import type { EntityInput, EntityOutput, EntityLeaderCertificate, EntityLeaderTimeoutVote, EntityFrame } from './types';
 import type { EntityTx } from '../types/entity-tx';
 import type { JPrefixAttestation, JPrefixCertificate, JPrefixClaim } from '../types/jurisdiction-events';
 
@@ -63,9 +63,9 @@ const cloneLeaderCertificate = (
 });
 
 const cloneProposedEntityFrame = (
-  frame: ProposedEntityFrame,
+  frame: EntityFrame,
   activeFrames: Set<object>,
-): ProposedEntityFrame => {
+): EntityFrame => {
   if (activeFrames.has(frame)) throw new Error('RUNTIME_INPUT_PREPARED_FRAME_CYCLE');
   activeFrames.add(frame);
   try {
@@ -108,8 +108,8 @@ const cloneProposedEntityFrame = (
 };
 
 export const cloneIsolatedProposedEntityFrame = (
-  frame: ProposedEntityFrame,
-): ProposedEntityFrame => cloneProposedEntityFrame(frame, new Set());
+  frame: EntityFrame,
+): EntityFrame => cloneProposedEntityFrame(frame, new Set());
 
 export const cloneIsolatedEntityLeaderTimeoutVote = (
   vote: EntityLeaderTimeoutVote,
@@ -133,7 +133,7 @@ export const cloneIsolatedEntityInput = <T extends EntityOutput>(input: T): T =>
       continue;
     }
     if (key === 'proposedFrame') {
-      cloned[key] = cloneIsolatedProposedEntityFrame(value as ProposedEntityFrame);
+      cloned[key] = cloneIsolatedProposedEntityFrame(value as EntityFrame);
       continue;
     }
     if (key === 'hashPrecommitFrame') {

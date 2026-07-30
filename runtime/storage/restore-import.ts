@@ -39,7 +39,7 @@ import type {
   StorageDoc,
   StorageEntityHashDoc,
   StorageFrameEntityHash,
-  StorageFrameRecord,
+  RuntimeFrame,
   StorageHead,
   StoragePersistenceBoundaryHook,
   StorageSnapshotManifest,
@@ -49,7 +49,7 @@ type ReplicaMetaEntry = { key: Buffer; value: Buffer };
 type EncodedNode = { key: Buffer; value: Buffer };
 
 type ExistingHistoryDecision =
-  { kind: 'replace' } | { kind: 'idempotent'; head: StorageHead; frame: StorageFrameRecord };
+  { kind: 'replace' } | { kind: 'idempotent'; head: StorageHead; frame: RuntimeFrame };
 
 export type RestoredStorageBaseOptions = {
   currentDb: RuntimeDbLike;
@@ -306,7 +306,7 @@ export const replaceRestoredStorageBase = async (
       docCount: snapshotEntries.length + snapshotReplicaMetaEntries.length,
     } satisfies StorageSnapshotManifest),
   };
-  const frameBase: StorageFrameRecord = {
+  const frameBase: RuntimeFrame = {
     height: options.height,
     timestamp: options.timestamp,
     prevFrameHash: ZERO_FRAME_HASH,
@@ -337,7 +337,7 @@ export const replaceRestoredStorageBase = async (
       ),
     ).sort(),
   };
-  const frame: StorageFrameRecord = { ...frameBase, frameHash: computeStorageFrameHash(frameBase) };
+  const frame: RuntimeFrame = { ...frameBase, frameHash: computeStorageFrameHash(frameBase) };
   const frameEntry = { key: keyFrame(options.height), value: encodeBuffer(frame) };
   const retainedHistoryBytes = entriesBytes([
     ...snapshotEntries,

@@ -2,7 +2,7 @@ import {
   readHistoryViewAccountFrames,
   readHistoryViewEntityFrames,
   readHistoryViewRuntimeActivity,
-  type StorageFrameRecord,
+  type RuntimeFrame,
 } from '..';
 import {
   cloneIsolatedRoutedEntityInputs,
@@ -28,7 +28,7 @@ import type { PersistenceQueryDeps } from './deps';
 import { requireStorageDbOpen } from '../availability';
 
 export const buildRecoveryJournalFromStorageFrame = (
-  frame: StorageFrameRecord,
+  frame: RuntimeFrame,
   logs: FrameLogEntry[] = [],
 ): PersistedFrameJournal => ({
   height: frame.height,

@@ -50,7 +50,7 @@ import { buildEntityHashesToSign } from '../entity/consensus/hanko-witness';
 import { generateLazyEntityId } from '../entity/factory';
 import { buildRouteOutputKey } from '../runtime/output-routing';
 import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
-import type { StorageEntityCoreDoc, StorageFrameRecord } from '../storage/types';
+import type { StorageEntityCoreDoc, RuntimeFrame } from '../storage/types';
 import type { DeliverableEntityInput } from '../runtime/types';
 import type { JurisdictionConfig } from '../entity/types';
 import type { JReplica } from '../types/jurisdiction-runtime';
@@ -1832,7 +1832,7 @@ describe('storage frame journal retention', () => {
     const db = getRuntimeWalDb(env);
     const head = await readStorageHead(db);
     if (!head) throw new Error('TEST_HEAD_MISSING');
-    const frame = decodeBuffer<StorageFrameRecord>(await db.get(keyFrame(1)));
+    const frame = decodeBuffer<RuntimeFrame>(await db.get(keyFrame(1)));
     const { entityHashes: _entityHashes, ...nonMaterializedFrame } = frame;
     const batch = db.batch();
     batch.put(KEY_HEAD, encodeBuffer({

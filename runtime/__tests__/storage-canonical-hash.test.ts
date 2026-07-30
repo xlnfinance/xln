@@ -13,7 +13,7 @@ import { encodeBoard, hashBoard } from '../entity/factory';
 import { applyCommand, createBook, replaceOrderbookPair } from '../orderbook';
 import { encodeReplicaMeta, hydrateEntityStateFromStorage, projectAccountDoc, projectEntityCoreDoc, projectReplicaMeta } from '../storage/projections';
 import { cloneEntityState } from '../entity/state-clone';
-import type { StorageFrameRecord } from '../storage/types';
+import type { RuntimeFrame } from '../storage/types';
 import type { AccountState } from '../types/account';
 import type { EntityReplica } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';
@@ -184,7 +184,7 @@ test('canonical storage audit values reject ambiguous or lossy JavaScript values
 });
 
 test('storage frame integrity commits every named runtime-machine field', () => {
-  const base: StorageFrameRecord = {
+  const base: RuntimeFrame = {
     height: 1,
     timestamp: 100,
     replicaMetaDigest: `0x${'22'.repeat(32)}`,

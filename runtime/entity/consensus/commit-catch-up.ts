@@ -1,5 +1,5 @@
 import { logError, shortHash } from '../../infra/logger';
-import type { EntityState, ProposedEntityFrame, EntityCandidate } from '../types';
+import type { EntityState, EntityFrame, EntityCandidate } from '../types';
 import { applyEntityFrame } from './frame-application';
 import { createEntityFrameHashFromStateRoot, entityFrameEventsEqual } from './frame';
 import { buildEntityHashesToSign } from './hanko-witness';
@@ -42,7 +42,7 @@ type ReplayedCommitments =
 
 const validateCatchUpJRange = (
   context: ApplyEntityInputContext,
-  frame: ProposedEntityFrame,
+  frame: EntityFrame,
 ): ApplyEntityInputResult | null => {
   const { env, workingReplica } = context;
   const rangeError = getReplicaJRangeValidationError(
@@ -77,7 +77,7 @@ const validateCatchUpJRange = (
 
 const validateReplayedCommitments = (
   context: ApplyEntityInputContext,
-  frame: ProposedEntityFrame,
+  frame: EntityFrame,
   state: EntityState,
 ): ReplayedCommitments => {
   const { workingReplica } = context;
@@ -121,7 +121,7 @@ const validateReplayedCommitments = (
 
 const replayCommitFrame = async (
   context: ApplyEntityInputContext,
-  frame: ProposedEntityFrame,
+  frame: EntityFrame,
 ): Promise<CommitExecutionResolution> => {
   const { env, workingReplica } = context;
   const jValidationResult = validateCatchUpJRange(context, frame);
@@ -194,7 +194,7 @@ const replayCommitFrame = async (
 
 export const resolveCommitExecution = async (
   context: ApplyEntityInputContext,
-  frame: ProposedEntityFrame,
+  frame: EntityFrame,
 ): Promise<CommitExecutionResolution> => {
   const { workingReplica } = context;
   const existing = getValidatorExecutionForFrame(workingReplica, frame);

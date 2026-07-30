@@ -8,7 +8,7 @@ import {
   runtimeAdapterMessageByteLength,
   runtimeAdapterMaxMessageBytes,
 } from './codec';
-import type { StorageFrameRecord, StorageHead } from '../storage/types';
+import type { RuntimeFrame, StorageHead } from '../storage/types';
 import type { StorageAccountDoc, StorageEntityViewPage } from '../storage';
 import {
   fingerprintRuntimeIngressInput,
@@ -83,7 +83,7 @@ type RuntimeAdapterResponseDiagnostic = {
 
 export type RuntimeAdapterServerDeps = {
   readHead?: (env: RuntimeReplica) => Promise<StorageHead | null>;
-  readFrame?: (env: RuntimeReplica, height: number) => Promise<StorageFrameRecord | null>;
+  readFrame?: (env: RuntimeReplica, height: number) => Promise<RuntimeFrame | null>;
   listCheckpoints?: (env: RuntimeReplica) => Promise<number[]>;
   loadEntityState?: (env: RuntimeReplica, entityId: string, height: number) => Promise<EntityState | null>;
   loadEntityAccountDoc?: (env: RuntimeReplica, entityId: string, counterpartyId: string, height: number) => Promise<StorageAccountDoc | null>;

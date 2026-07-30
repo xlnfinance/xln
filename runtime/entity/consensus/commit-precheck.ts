@@ -1,6 +1,6 @@
 import { encodeCanonicalConsensusValue } from '../../protocol/canonical-consensus-value';
 import { verifyAccountSignature } from '../../account/crypto';
-import type { ConsensusConfig, EntityReplica, HashToSign, ProposedEntityFrame } from '../types';
+import type { ConsensusConfig, EntityReplica, HashToSign, EntityFrame } from '../types';
 import type { EntityRuntimeContext } from '../runtime-context';
 import type { EntityConsensusInput } from './input-types';
 import { createEntityFrameHashFromStateRoot, isCanonicalEntityFrameDigest } from './frame';
@@ -22,15 +22,15 @@ const exactReplica = (env: EntityRuntimeContext, input: EntityConsensusInput): E
   return null;
 };
 
-const locallyValidatedFrame = (replica: EntityReplica, frame: ProposedEntityFrame): ProposedEntityFrame | null =>
+const locallyValidatedFrame = (replica: EntityReplica, frame: EntityFrame): EntityFrame | null =>
   [replica.lockedFrame, replica.proposal].find(
     candidate => candidate?.height === frame.height && candidate.hash === frame.hash,
   ) ?? null;
 
 const frameBodyAndLeaderMatchesLocalReplay = (
   replica: EntityReplica,
-  localFrame: ProposedEntityFrame,
-  candidate: ProposedEntityFrame,
+  localFrame: EntityFrame,
+  candidate: EntityFrame,
 ): boolean => {
   if (
     !isCanonicalEntityFrameDigest(candidate.hash) ||

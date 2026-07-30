@@ -36,7 +36,7 @@ export type { PaymentDeliveryMode } from '../types/payment';
 export type { PersistedFrameJournal } from '../storage/types';
 export type { BoardMemberInput } from '../entity/factory';
 export type { PersistedActivityJournal } from '../storage/views/activity-types';
-export type { StorageFrameRecord, StorageHead } from '../storage/types';
+export type { RuntimeFrame, StorageHead } from '../storage/types';
 export type {
   EncryptedRuntimeRecoveryBundleV1,
   RuntimeRecording,

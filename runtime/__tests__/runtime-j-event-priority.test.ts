@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { prioritizeJEventFrame } from '../runtime';
-import type { EntityInput, ProposedEntityFrame } from '../entity/types';
+import type { EntityInput, EntityFrame } from '../entity/types';
 import type { RuntimeInput } from '../runtime/types';
 import type { EntityTx } from '../types/entity-tx';
 
@@ -9,7 +9,7 @@ describe('Runtime J-event frame priority', () => {
   test('keeps consensus payload exclusively on the deferred lane', () => {
     const jEvent = { type: 'j_event', data: {} } as EntityTx;
     const ordinary = { type: 'profile-update', data: { profile: { name: 'after' } } } as EntityTx;
-    const proposedFrame = { height: 7 } as ProposedEntityFrame;
+    const proposedFrame = { height: 7 } as EntityFrame;
     const input: EntityInput = {
       entityId: `0x${'11'.repeat(32)}`,
       signerId: `0x${'22'.repeat(20)}`,

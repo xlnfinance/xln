@@ -60,7 +60,7 @@ import {
   buildCertifiedEntityLineagePlan,
 } from '../storage/entity-lineage';
 import type { DeliverableEntityInput, RuntimeReplica } from '../runtime/types';
-import type { EntityReplica, EntityState, ProposedEntityFrame } from '../entity/types';
+import type { EntityReplica, EntityState, EntityFrame } from '../entity/types';
 import type { JurisdictionEvent } from '../types/jurisdiction-events';
 import {
   buildDurableRuntimeMachineSnapshot,
@@ -137,7 +137,7 @@ const buildCommitCertificate = async (
   state: EntityState,
   signerIds: string | string[],
   timestamp: number,
-): Promise<{ frame: ProposedEntityFrame; nextState: EntityState }> => {
+): Promise<{ frame: EntityFrame; nextState: EntityState }> => {
   const certificateSigners = Array.isArray(signerIds) ? signerIds : [signerIds];
   const height = state.height + 1;
   const execution = await applyEntityFrame(env, state, [], timestamp);
@@ -184,7 +184,7 @@ const buildCommitCertificate = async (
     })),
     state.config,
   )));
-  const frame: ProposedEntityFrame = {
+  const frame: EntityFrame = {
     height,
     parentFrameHash: previousFrameHash,
     stateRoot: computeCanonicalEntityConsensusStateHash(nextStateBeforeLink),
@@ -208,7 +208,7 @@ const deliverable = (
   receiverRuntimeId: string,
   entityId: string,
   signerId: string,
-  frame: ProposedEntityFrame,
+  frame: EntityFrame,
 ): DeliverableEntityInput => ({
   runtimeId: receiverRuntimeId,
   entityId,

@@ -37,7 +37,7 @@ import type {
   StorageHistoryViewHead,
   StoragePersistenceBoundaryHook,
   StorageRuntimeConfig,
-  StorageFrameRecord,
+  RuntimeFrame,
 } from './types';
 
 type RuntimeHistoryViewBatch = ReturnType<RuntimeDbLike['batch']>;
@@ -239,7 +239,7 @@ export const reconcileHistoryViews = async (options: {
   viewDb: RuntimeDbLike;
   firstWalHeight: number;
   latestWalHeight: number;
-  readWalFrame: (height: number) => Promise<StorageFrameRecord | null>;
+  readWalFrame: (height: number) => Promise<RuntimeFrame | null>;
   config: Required<StorageRuntimeConfig>;
 }): Promise<{ materializedThroughRuntimeHeight: number; writtenBytes: number }> => {
   const firstWalHeight = Math.max(1, Math.floor(Number(options.firstWalHeight)));

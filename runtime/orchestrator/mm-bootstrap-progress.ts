@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { compareStableText, safeStringify } from '../protocol/serialization';
 import { computeCanonicalRuntimeStateHash } from '../storage/canonical-hash';
 import { computeStorageFrameHash } from '../storage/hashes';
-import type { StorageFrameRecord } from '../storage/types';
+import type { RuntimeFrame } from '../storage/types';
 
 export type MarketMakerRuntimeBacklogSnapshot = Readonly<{
   processing: boolean;
@@ -32,7 +32,7 @@ export const assertMarketMakerReadySnapshotParity = (
     height: number;
     entityStateHash: string;
   }>,
-  persistedFrame: StorageFrameRecord | null,
+  persistedFrame: RuntimeFrame | null,
 ): string => {
   if (!persistedFrame) {
     throw new Error(`MARKET_MAKER_READY_SNAPSHOT_FRAME_MISSING:height=${expected.height}`);

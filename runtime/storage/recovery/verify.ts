@@ -8,7 +8,7 @@ import { buildRuntimeCheckpointLineagePlan } from '../entity-lineage';
 import { buildReplayVerifiableRuntimeMachineSnapshot } from '../wal/snapshot';
 import {
   computeStoragePostStateHash,
-  type StorageFrameRecord,
+  type RuntimeFrame,
 } from '..';
 import type { RuntimeReplica } from '../../runtime/types';
 import type { PersistedStorageReadApi } from '../persisted-read';
@@ -32,7 +32,7 @@ export type RuntimeChainVerification = PersistedFrameVerification & {
 
 export const verifyPersistedFrameState = (
   env: RuntimeReplica,
-  frame: StorageFrameRecord,
+  frame: RuntimeFrame,
 ): PersistedFrameVerification => {
   const expectedStateHash = frame.postStateHash;
   const storageHashMode = frame.hashMode === 'storage-merkle-v1';

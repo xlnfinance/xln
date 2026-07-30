@@ -1,5 +1,5 @@
 import type { AccountInput, AccountReplica, AccountTx } from '../../types/account';
-import type { EntityOutput, EntityState, HashToSign, HashType, ProposedEntityFrame } from '../types';
+import type { EntityOutput, EntityState, HashToSign, HashType, EntityFrame } from '../types';
 import type { JInput } from '../../jurisdiction/input';
 import type { HankoString } from '../../types/hanko';
 import { compareCanonicalText } from '../../orderbook/swap-execution';
@@ -74,7 +74,7 @@ export const pruneHankoWitnessToReachableState = (
   return removed;
 };
 
-export const normalizeProposedFrameCollectedSigs = (frame?: ProposedEntityFrame): void => {
+export const normalizeProposedFrameCollectedSigs = (frame?: EntityFrame): void => {
   if (!frame?.collectedSigs) return;
   const normalized = normalizeSignatureMap(frame.collectedSigs);
   if (normalized) frame.collectedSigs = normalized;

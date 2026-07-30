@@ -29,7 +29,7 @@ import {
   buildCertifiedEntityLineagePlan,
 } from '../../storage/entity-lineage';
 import type { DeliverableEntityInput, RuntimeReplica } from '../../runtime/types';
-import type { EntityReplica, EntityState, ProposedEntityFrame } from '../../entity/types';
+import type { EntityReplica, EntityState, EntityFrame } from '../../entity/types';
 
 export const deriveCatchupFixtureSigners = (seed: string): {
   leaderSignerId: string;
@@ -139,7 +139,7 @@ export const buildCatchupFixtureCertificate = async (
   env: RuntimeReplica,
   state: EntityState,
   timestamp: number,
-): Promise<{ frame: ProposedEntityFrame; nextState: EntityState }> => {
+): Promise<{ frame: EntityFrame; nextState: EntityState }> => {
   const height = state.height + 1;
   const execution = await applyEntityFrame(env, state, [], timestamp);
   const nextStateBeforeLink: EntityState = {
@@ -183,7 +183,7 @@ export const buildCatchupFixtureCertificate = async (
     })),
     state.config,
   )));
-  const frame: ProposedEntityFrame = {
+  const frame: EntityFrame = {
     height,
     parentFrameHash,
     stateRoot: computeCanonicalEntityConsensusStateHash(nextStateBeforeLink),
@@ -204,7 +204,7 @@ export const catchupFixtureDeliverable = (
   runtimeId: string,
   entityId: string,
   signerId: string,
-  frame: ProposedEntityFrame,
+  frame: EntityFrame,
 ): DeliverableEntityInput => ({
   runtimeId,
   entityId,

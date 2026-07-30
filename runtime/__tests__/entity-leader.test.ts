@@ -40,7 +40,7 @@ import { recordValidatorJHistory } from '../jurisdiction/local-history';
 import { commitReliableIngress } from '../runtime/reliable-delivery';
 import { createDueScheduledWakeInputs, refreshScheduledWakeIndex } from '../runtime/scheduled-wake';
 import { applyRuntimeInput, createEmptyEnv } from '../runtime';
-import type { ConsensusConfig, EntityReplica, EntityState, ProposedEntityFrame } from '../entity/types';
+import type { ConsensusConfig, EntityReplica, EntityState, EntityFrame } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';
 import type { EntityTx } from '../types/entity-tx';
 import type { JurisdictionEvent, ValidatorJHistory } from '../types/jurisdiction-events';
@@ -283,7 +283,7 @@ describe('entity leader policy', () => {
       nextStateRoot,
       nextAuthorityRoot,
     );
-    const staleFrame: ProposedEntityFrame = {
+    const staleFrame: EntityFrame = {
       height: 1,
       parentFrameHash: 'genesis',
       stateRoot: committedStateRoot,
@@ -300,7 +300,7 @@ describe('entity leader policy', () => {
         [],
       ),
     };
-    const nextFrame: ProposedEntityFrame = {
+    const nextFrame: EntityFrame = {
       height: 2,
       parentFrameHash: committedHash,
       stateRoot: nextStateRoot,
@@ -462,7 +462,7 @@ describe('entity leader policy', () => {
       replay.events,
     );
     const hashesToSign = buildEntityHashesToSign(base.entityId, 1, preparedHash, replay.collectedHashes);
-    const prepared: ProposedEntityFrame = {
+    const prepared: EntityFrame = {
       height: 1,
       parentFrameHash: 'genesis',
       stateRoot: computeCanonicalEntityConsensusStateHash(preparedState),
@@ -479,7 +479,7 @@ describe('entity leader policy', () => {
         hashesToSign.map(({ hash }) => signAccountFrame(signerEnvs.get(signerId)!, signerId, hash)),
       ])),
     };
-    const withPreparedSigners = (...signerIds: string[]): ProposedEntityFrame => ({
+    const withPreparedSigners = (...signerIds: string[]): EntityFrame => ({
       ...structuredClone(prepared),
       collectedSigs: new Map(signerIds.map((signerId) => [
         signerId,
@@ -540,7 +540,7 @@ describe('entity leader policy', () => {
     expect(caughtUp.workingReplica.state.lastFinalizedJHeight).toBe(11);
     expect(caughtUp.workingReplica.state.reserves.get(1)).toBe(111n);
 
-    const assertRelayRejected = async (frame: ProposedEntityFrame): Promise<void> => {
+    const assertRelayRejected = async (frame: EntityFrame): Promise<void> => {
       const result = await applyEntityInput(observerEnv, replicaFor(observerId), {
         entityId: base.entityId,
         signerId: observerId,
@@ -623,7 +623,7 @@ describe('entity leader policy', () => {
       preparedHash,
       preparedResult.collectedHashes,
     );
-    const prepared: ProposedEntityFrame = {
+    const prepared: EntityFrame = {
       height: 1,
       parentFrameHash: 'genesis',
       stateRoot: preparedStateRoot,
@@ -640,7 +640,7 @@ describe('entity leader policy', () => {
         ['3', preparedManifest.map(({ hash }) => signAccountFrame(env, '3', hash))],
       ]),
     };
-    const withPreparedSigners = (...signers: string[]): ProposedEntityFrame => ({
+    const withPreparedSigners = (...signers: string[]): EntityFrame => ({
       ...structuredClone(prepared),
       collectedSigs: new Map(signers.map(signerId => [
         signerId,
@@ -740,7 +740,7 @@ describe('entity leader policy', () => {
       conflictingHash,
       conflictingResult.collectedHashes,
     );
-    const conflictingPrepared: ProposedEntityFrame = {
+    const conflictingPrepared: EntityFrame = {
       height: 1,
       parentFrameHash: 'genesis',
       stateRoot: conflictingStateRoot,

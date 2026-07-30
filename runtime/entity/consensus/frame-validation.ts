@@ -6,7 +6,7 @@ import {
   validateObject,
   validateString,
 } from '../../protocol/validation-primitives';
-import type { EntityLeaderTimeoutVote, ProposedEntityFrame } from '../types';
+import type { EntityLeaderTimeoutVote, EntityFrame } from '../types';
 import { validateEntityTxs } from '../tx-validation';
 import { assertEntityFrameEventByteBudget } from './frame-events';
 import { validateJPrefixCertificate } from './j-prefix-validation';
@@ -129,7 +129,7 @@ export const validateEntityLeaderCertificate = (
 const validateFrameEvents = (
   value: unknown,
   context: string,
-): ProposedEntityFrame['events'] => {
+): EntityFrame['events'] => {
   const events = validateArray<Record<string, unknown>>(value, context);
   for (let index = 0; index < events.length; index += 1) {
     const item = `${context}[${index}]`;
@@ -153,7 +153,7 @@ const validateFrameEvents = (
     }
     validateString(event['message'], `${item}.message`);
   }
-  const decoded = events as ProposedEntityFrame['events'];
+  const decoded = events as EntityFrame['events'];
   assertEntityFrameEventByteBudget(decoded);
   return decoded;
 };
@@ -161,7 +161,7 @@ const validateFrameEvents = (
 function assertProposedEntityFrame(
   frame: Record<string, unknown>,
   context: string,
-): asserts frame is Record<string, unknown> & ProposedEntityFrame {
+): asserts frame is Record<string, unknown> & EntityFrame {
   rejectUnexpectedKeys(
     frame,
     [
@@ -265,7 +265,7 @@ const validateHashManifest = (value: unknown, context: string): void => {
 export const validateProposedEntityFrame = (
   value: unknown,
   context: string,
-): ProposedEntityFrame => {
+): EntityFrame => {
   const frame = validateObject(value, context);
   assertProposedEntityFrame(frame, context);
   return frame;

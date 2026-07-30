@@ -1,4 +1,4 @@
-import type { ProposedEntityFrame } from './types';
+import type { EntityFrame } from './types';
 
 export const normalizeSignatureMap = (value: unknown): Map<string, string[]> | undefined => {
   if (!value) return undefined;
@@ -30,5 +30,5 @@ export const signatureMapSize = (value: unknown): number =>
  * quorum Hanko. This classifies transport envelopes only; consensus still
  * verifies the collected signatures and voting power before applying a frame.
  */
-export const hasEntityCommitCertificate = (frame: ProposedEntityFrame | undefined): boolean =>
+export const hasEntityCommitCertificate = (frame: EntityFrame | undefined): boolean =>
   Array.isArray(frame?.hankos) && frame.hankos.length > 0;

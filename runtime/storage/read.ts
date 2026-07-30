@@ -100,7 +100,7 @@ import type {
   StorageDoc,
   StorageDocRef,
   StorageEntityCoreDoc,
-  StorageFrameRecord,
+  RuntimeFrame,
   StorageHead,
   StorageReplicaMeta,
 } from './types';
@@ -246,7 +246,7 @@ export const readStorageHead = async (
 export const readStorageFrameRecord = async (
   db: RuntimeDbLike,
   height: number,
-): Promise<StorageFrameRecord | null> => {
+): Promise<RuntimeFrame | null> => {
   const targetHeight = Number.isFinite(height) ? Math.max(1, Math.floor(height)) : 0;
   if (targetHeight <= 0) return null;
   const frame = await readValidatedOrNull(db, keyFrame(targetHeight), validateStorageFrameRecordValue);

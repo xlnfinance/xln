@@ -86,7 +86,7 @@ import {
 import type {
   RuntimeDbLike,
   StorageEntityHashDoc,
-  StorageFrameRecord,
+  RuntimeFrame,
   StorageHead,
   StorageMerkleLeafDoc,
   StorageMerkleRootDoc,

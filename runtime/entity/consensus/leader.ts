@@ -1,7 +1,7 @@
 import { encodeCanonicalConsensusValue } from '../../protocol/canonical-consensus-value';
 import { ethers } from 'ethers';
 
-import type { ConsensusConfig, EntityLeaderState, EntityLeaderCertificate, EntityLeaderTimeoutVote, EntityLeaderTimeoutVoteBody, EntityReplica, EntityState, ProposedEntityFrame } from '../types';
+import type { ConsensusConfig, EntityLeaderState, EntityLeaderCertificate, EntityLeaderTimeoutVote, EntityLeaderTimeoutVoteBody, EntityReplica, EntityState, EntityFrame } from '../types';
 import { isFrozenBaseJPrefixRollAuthorized } from '../../jurisdiction/j-prefix-consensus';
 import { compareStableText, serializeTaggedJson } from '../../protocol/serialization';
 import { cloneIsolatedProposedEntityFrame } from '../input-clone';
@@ -107,7 +107,7 @@ const leaderVoteFields = (vote: EntityLeaderTimeoutVoteBody): EntityLeaderTimeou
   nextLeaderId: normalizeSignerId(vote.nextLeaderId),
 });
 
-export const buildPreparedFrameEvidence = (frame: ProposedEntityFrame | undefined): ProposedEntityFrame | undefined => {
+export const buildPreparedFrameEvidence = (frame: EntityFrame | undefined): EntityFrame | undefined => {
   if (!frame) return undefined;
   const evidence = cloneIsolatedProposedEntityFrame(frame);
   // Relay certificates do not participate in the prepared frame hash and must
@@ -120,7 +120,7 @@ export const buildPreparedFrameEvidence = (frame: ProposedEntityFrame | undefine
 };
 
 export const hashEntityLeaderVoteBody = (
-  body: EntityLeaderTimeoutVoteBody & { preparedFrame?: ProposedEntityFrame },
+  body: EntityLeaderTimeoutVoteBody & { preparedFrame?: EntityFrame },
 ): string =>
   ethers.keccak256(
     ethers.toUtf8Bytes(

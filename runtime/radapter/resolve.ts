@@ -19,7 +19,7 @@ import {
 import type {
   StorageAccountDoc,
   StorageEntityCoreDoc,
-  StorageFrameRecord,
+  RuntimeFrame,
   StorageHead,
 } from '../storage/types';
 import { compareAscii, sortedStringMapKeys, sortedStringMapStartIndex } from '../infra/sorted-map-index';
@@ -65,7 +65,7 @@ import { acquireRuntimeCommittedRead } from '../runtime/frame/writer-lock';
 export type RuntimeAdapterResolveContext = {
   env: RuntimeReplica;
   readHead?: () => Promise<StorageHead | null>;
-  readFrame?: (height: number) => Promise<StorageFrameRecord | null>;
+  readFrame?: (height: number) => Promise<RuntimeFrame | null>;
   listCheckpoints?: () => Promise<number[]>;
   loadEntityState?: (entityId: string, height: number) => Promise<EntityState | null>;
   loadEntityAccountDoc?: (entityId: string, counterpartyId: string, height: number) => Promise<StorageAccountDoc | null>;
@@ -240,11 +240,11 @@ export type RuntimeAdapterFrameSummary = {
   frameHash?: string;
   postStateHash: string;
   stateHash: string;
-  hashMode?: StorageFrameRecord['hashMode'];
+  hashMode?: RuntimeFrame['hashMode'];
   materializedState?: boolean;
   canonicalStateHash?: string;
-  entityHashes?: StorageFrameRecord['entityHashes'];
-  canonicalEntityHashes?: StorageFrameRecord['canonicalEntityHashes'];
+  entityHashes?: RuntimeFrame['entityHashes'];
+  canonicalEntityHashes?: RuntimeFrame['canonicalEntityHashes'];
   runtimeInputCounts: {
     runtimeTxs: number;
     jInputs: number;
@@ -1739,7 +1739,7 @@ const projectHistoryFrameBatch = async (
   return { requestedHeights, frames, unavailable };
 };
 
-const compactFrameRecordForRemote = (frame: StorageFrameRecord): RuntimeAdapterFrameSummary => {
+const compactFrameRecordForRemote = (frame: RuntimeFrame): RuntimeAdapterFrameSummary => {
   const runtimeInput = frame.runtimeInput ?? { runtimeTxs: [], jInputs: [], entityInputs: [] };
   const entityInputs = runtimeInput.entityInputs ?? [];
   return {

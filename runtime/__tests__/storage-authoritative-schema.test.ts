@@ -21,7 +21,7 @@ import { decodeValidatedBuffer, encodeBuffer } from '../storage/codec';
 import { createEmptyEnv } from '../runtime';
 import { buildDurableRuntimeMachineSnapshot, restoreDurableRuntimeSnapshot } from '../storage/wal/snapshot';
 import { computeStorageFrameHash } from '../storage/hashes';
-import type { StorageFrameRecord } from '../storage/types';
+import type { RuntimeFrame } from '../storage/types';
 import { createEmptyBatch } from '../jurisdiction/batch';
 import { validateDurableRuntimeMachineSnapshot } from '../storage/wal/runtime-machine-schema';
 import { validateEntityTx } from '../entity/tx-validation';
@@ -407,7 +407,7 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
       }],
     };
     const runtimeMachine = buildDurableRuntimeMachineSnapshot(env);
-    const frameBase: StorageFrameRecord = {
+    const frameBase: RuntimeFrame = {
       height: 1,
       timestamp: 1,
       prevFrameHash: hash,

@@ -5,7 +5,7 @@ import {
   cloneIsolatedEntityLeaderCertificate,
   cloneIsolatedEntityLeaderTimeoutVote,
 } from '../input-clone';
-import type { EntityLeaderTimeoutVote, ProposedEntityFrame } from '../types';
+import type { EntityLeaderTimeoutVote, EntityFrame } from '../types';
 import {
   assertEntityLeaderVoteMatchesState,
   buildEntityLeaderCertificate,
@@ -59,7 +59,7 @@ const signAndBroadcastLocalVote = async (
 const selectPreparedFrame = (
   context: ApplyEntityInputContext,
   certificate: ReturnType<typeof buildEntityLeaderCertificate>,
-): ProposedEntityFrame | null => {
+): EntityFrame | null => {
   const { env, workingReplica } = context;
   const localLockHasPreparedQuorum = workingReplica.lockedFrame
     ? hasVerifiedPreparedQuorum(env, workingReplica.state, workingReplica.lockedFrame, 'ENTITY_PREPARED_LOCAL_LOCK')
@@ -99,7 +99,7 @@ const installLeaderCertificate = (
   const power = calculateQuorumPower(workingReplica.state.config, signers);
   if (power < workingReplica.state.config.threshold) return null;
   const certificate = buildEntityLeaderCertificate(vote, votes);
-  let preparedFrame: ProposedEntityFrame | null;
+  let preparedFrame: EntityFrame | null;
   try {
     preparedFrame = selectPreparedFrame(context, certificate);
   } catch (error) {

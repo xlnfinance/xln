@@ -200,7 +200,7 @@ export type StorageDocRef =
   | { family: 'account'; entityId: string; counterpartyId: string }
   | { family: 'book'; entityId: string; pairId: string };
 
-export type StorageFrameRecord = {
+export type RuntimeFrame = {
   height: number;
   timestamp: number;
   prevFrameHash?: string;
@@ -251,7 +251,7 @@ export type StorageFrameRecord = {
   touchedBookEntities: string[];
 };
 
-export type PersistedFrameJournal = Pick<StorageFrameRecord,
+export type PersistedFrameJournal = Pick<RuntimeFrame,
   | 'height'
   | 'timestamp'
   | 'replicaMetaDigest'

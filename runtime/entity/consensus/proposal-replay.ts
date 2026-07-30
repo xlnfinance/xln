@@ -1,5 +1,5 @@
 import { logError, shortHash } from '../../infra/logger';
-import type { EntityState, ProposedEntityFrame, EntityCandidate } from '../types';
+import type { EntityState, EntityFrame, EntityCandidate } from '../types';
 import { applyEntityFrame } from './frame-application';
 import { createEntityFrameHashFromStateRoot, entityFrameEventsEqual } from './frame';
 import {
@@ -34,7 +34,7 @@ const rejectProposal = (
 
 const verifyProposalRoots = (
   context: ApplyEntityInputContext,
-  frame: ProposedEntityFrame,
+  frame: EntityFrame,
   state: EntityState,
 ): ProposalReplayResult | null => {
   const stateRoot = computeCanonicalEntityConsensusStateHash(state);
@@ -60,7 +60,7 @@ const verifyProposalRoots = (
 
 const verifyProposalFrameHash = (
   context: ApplyEntityInputContext,
-  frame: ProposedEntityFrame,
+  frame: EntityFrame,
   state: EntityState,
 ): ProposalReplayResult | null => {
   const frameHash = createEntityFrameHashFromStateRoot(
@@ -84,7 +84,7 @@ const verifyProposalFrameHash = (
 
 const buildVerifiedProposalHashes = (
   context: ApplyEntityInputContext,
-  frame: ProposedEntityFrame,
+  frame: EntityFrame,
   state: EntityState,
   outputs: EntityCandidate['outputs'],
   collectedHashes: NonNullable<EntityCandidate['hashesToSign']>,
@@ -118,7 +118,7 @@ const buildVerifiedProposalHashes = (
 
 export const replayProposedEntityFrame = async (
   context: ApplyEntityInputContext,
-  frame: ProposedEntityFrame,
+  frame: EntityFrame,
 ): Promise<ProposalReplayResult> => {
   const {
     newState,

@@ -21,7 +21,7 @@ import {
   ZERO_FRAME_HASH,
 } from '../storage/keys';
 import { resolveDbPath } from '../storage/runtime-dbs';
-import type { StorageFrameRecord } from '../storage/types';
+import type { RuntimeFrame } from '../storage/types';
 
 const cleanupPaths: string[] = [];
 
@@ -43,7 +43,7 @@ describe('secondary storage error severity', () => {
     cleanupPaths.push(resolveDbPath(env, 'core'));
     const historyView = getRuntimeWalDb(env);
     await historyView.open();
-    const frameBase: StorageFrameRecord = {
+    const frameBase: RuntimeFrame = {
       height: 1,
       timestamp: 1_234,
       prevFrameHash: ZERO_FRAME_HASH,
@@ -62,7 +62,7 @@ describe('secondary storage error severity', () => {
       touchedAccounts: [],
       touchedBookEntities: [],
     };
-    const frame: StorageFrameRecord = { ...frameBase, frameHash: computeStorageFrameHash(frameBase) };
+    const frame: RuntimeFrame = { ...frameBase, frameHash: computeStorageFrameHash(frameBase) };
     await historyView.put(
       KEY_HEAD,
       encodeBuffer({

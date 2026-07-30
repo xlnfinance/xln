@@ -1,7 +1,7 @@
 import type { Level } from 'level';
 
 import type { RuntimeRecoveryBundleV1 } from '../../recovery/types';
-import type { StorageFrameRecord } from '..';
+import type { RuntimeFrame } from '..';
 import type { StorageDbRole } from '../runtime-dbs';
 import type { RuntimeReplica } from '../../runtime/types';
 
@@ -16,7 +16,7 @@ export type PersistenceQueryDeps = {
   getHistoryViewDb(env: RuntimeReplica): RuntimeDb;
   resolvePersistedLatestHeight(env: RuntimeReplica): Promise<number>;
   resolvePersistedCheckpointHeights(env: RuntimeReplica): Promise<number[]>;
-  readPersistedStorageFrameRecord(env: RuntimeReplica, height: number): Promise<StorageFrameRecord | null>;
+  readPersistedStorageFrameRecord(env: RuntimeReplica, height: number): Promise<RuntimeFrame | null>;
   loadEnvFromStorageByReplay(
     runtimeId?: string | null,
     runtimeSeed?: string | null,

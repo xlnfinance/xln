@@ -134,7 +134,7 @@ import type {
   StorageDoc,
   StorageDocRef,
   StorageEntityHashDoc,
-  StorageFrameRecord,
+  RuntimeFrame,
   StorageHead,
   StoragePersistenceBoundaryHook,
   StoragePersistenceProgressHook,
@@ -217,7 +217,7 @@ export type {
   StorageEntityHashDoc,
   StorageEpochSeedStats,
   StorageFrameEntityHash,
-  StorageFrameRecord,
+  RuntimeFrame,
   StorageHead,
   StoragePersistenceBoundary,
   StoragePersistenceBoundaryHook,
@@ -1042,7 +1042,7 @@ const resolveStorageAppendPosition = async (
   head: StorageHead,
 ): Promise<
   | { staleWriterStopped: true }
-  | { previousFrame: StorageFrameRecord | null; prevFrameHash: string }
+  | { previousFrame: RuntimeFrame | null; prevFrameHash: string }
 > => {
   if (options.stopStaleWriterOnHeadAhead) {
     if (head.latestHeight > options.env.state.height) {
@@ -1156,7 +1156,7 @@ const logReplicaMetaDebug = (
 const prepareStorageStateCommitments = async (
   options: StorageFrameSaveOptions,
   prepared: PreparedStorageFrameSave,
-  previousFrame: StorageFrameRecord | null,
+  previousFrame: RuntimeFrame | null,
   checkpoint: (label: string) => void,
 ) => {
   const {
@@ -1234,7 +1234,7 @@ const prepareStorageStateCommitments = async (
   options.onPersistenceProgress?.('canonical-hashes-built');
   checkpoint('canonicalHashes');
 
-  const replicaMetaStateMode: StorageFrameRecord['replicaMetaStateMode'] =
+  const replicaMetaStateMode: RuntimeFrame['replicaMetaStateMode'] =
     checkpointedLineagePlan
       ? snapshotDue || snapshotRequiredByBytes
         ? 'full'
@@ -1349,7 +1349,7 @@ const buildStorageFrameRecordPlan = (
     options.env,
     options.currentFrameOutputs ?? [],
   );
-  const frameBase: StorageFrameRecord = {
+  const frameBase: RuntimeFrame = {
     height: options.env.state.height,
     timestamp: options.env.state.timestamp,
     prevFrameHash,
@@ -1405,7 +1405,7 @@ const buildStorageFrameRecordPlan = (
   const frameRecord = {
     ...frameBase,
     frameHash: computeStorageFrameHash(frameBase),
-  } satisfies StorageFrameRecord;
+  } satisfies RuntimeFrame;
   const frameKey = keyFrame(options.env.state.height);
   const diffKey = keyDiff(options.env.state.height);
   const frameBuffer = encodeBuffer(frameRecord);
@@ -1453,14 +1453,14 @@ const buildStorageFrameRecordPlan = (
   };
 };
 
-type StorageFrameRecordPlan = ReturnType<typeof buildStorageFrameRecordPlan>;
+type RuntimeFramePlan = ReturnType<typeof buildStorageFrameRecordPlan>;
 
 const buildStorageCommitBatches = (
   options: StorageFrameSaveOptions,
   prepared: PreparedStorageFrameSave,
   commitments: PreparedStorageCommitments,
   pendingNodes: ReturnType<typeof collectPendingStorageNodes>,
-  frame: StorageFrameRecordPlan,
+  frame: RuntimeFramePlan,
 ) => {
   const walBatch = prepared.walDb.batch();
   if (
@@ -1564,7 +1564,7 @@ const commitStorageFrame = async (
   options: StorageFrameSaveOptions,
   prepared: PreparedStorageFrameSave,
   commitments: PreparedStorageCommitments,
-  frame: StorageFrameRecordPlan,
+  frame: RuntimeFramePlan,
   batches: StorageCommitBatches,
   writeStartedAt: number,
   prepareMarks: Record<string, number>,
@@ -1680,7 +1680,7 @@ type CommittedStorageFrame = Awaited<ReturnType<typeof commitStorageFrame>>;
 const finishStorageFrameSave = (
   options: StorageFrameSaveOptions,
   prepared: PreparedStorageFrameSave,
-  frame: StorageFrameRecordPlan,
+  frame: RuntimeFramePlan,
   committed: CommittedStorageFrame,
   snapshot: StorageSnapshotLifecycleResult,
 ): StorageFrameSaveResult => {

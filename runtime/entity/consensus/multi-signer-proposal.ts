@@ -6,7 +6,7 @@ import {
   cloneIsolatedEntityLeaderCertificate,
   cloneIsolatedProposedEntityFrame,
 } from '../input-clone';
-import type { EntityReplica, EntityState, ProposedEntityFrame, EntityCandidate } from '../types';
+import type { EntityReplica, EntityState, EntityFrame, EntityCandidate } from '../types';
 import type { EntityRuntimeContext } from '../runtime-context';
 import { createEntityFrameHashFromStateRoot, entityFrameEventsEqual } from './frame';
 import { applyEntityFrame } from './frame-application';
@@ -39,7 +39,7 @@ import {
 const replayPreparedFrameForRelay = async (
   env: EntityRuntimeContext,
   replica: EntityReplica,
-  frame: ProposedEntityFrame,
+  frame: EntityFrame,
 ): Promise<EntityCandidate> => {
   assertFrameParentMatchesState(replica.state, frame, 'ENTITY_PREPARED_PARENT_MISMATCH');
   const jRangeError = getReplicaJRangeValidationError(env, replica, frame.txs);
@@ -224,7 +224,7 @@ const signProposalManifest = async (
 const buildMultiSignerProposal = async (
   context: ApplyEntityInputContext,
   selection: EntityProposalSelection,
-): Promise<ProposedEntityFrame> => {
+): Promise<EntityFrame> => {
   const { env, workingReplica } = context;
   const { proposalJPrefixCertificate, proposalTxs } = selection;
   const leader = getReplicaProposalLeader(workingReplica);

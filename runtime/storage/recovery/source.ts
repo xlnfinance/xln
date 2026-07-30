@@ -4,7 +4,7 @@ import type { RuntimeReplica } from '../../runtime/types';
 import {
   loadEntityStatesAtHeightFromStorage,
   verifyStorageSnapshotAtHeight,
-  type StorageFrameRecord,
+  type RuntimeFrame,
 } from '..';
 import type {
   PersistedStorageHandle,
@@ -16,7 +16,7 @@ export type PersistedRestoreSource = {
   persistedHandles: PersistedStorageHandle[];
   latestHeight: number;
   targetHeight: number;
-  frame: StorageFrameRecord;
+  frame: RuntimeFrame;
   selectedSnapshotHeight: number;
   restoredStates: Map<string, EntityState>;
 };

@@ -10,7 +10,7 @@ import { verifyAccountSignature } from '../../account/crypto';
 import { log } from '../../infra/diagnostics';
 import { encodeCanonicalConsensusValue } from '../../protocol/canonical-consensus-value';
 import { compareStableText } from '../../protocol/serialization';
-import type { ConsensusConfig, EntityCandidate, EntityLeaderCertificate, EntityLeaderTimeoutVote, EntityReplica, EntityState, HashToSign, ProposedEntityFrame } from '../types';
+import type { ConsensusConfig, EntityCandidate, EntityLeaderCertificate, EntityLeaderTimeoutVote, EntityReplica, EntityState, HashToSign, EntityFrame } from '../types';
 import type { EntityRuntimeContext } from '../runtime-context';
 import { entityLog } from './entity-log';
 import { createEntityFrameHashFromStateRoot } from './frame';
@@ -83,7 +83,7 @@ export const verifyHashPrecommitSignatures = (
 export const hasVerifiedPreparedQuorum = (
   env: EntityRuntimeContext,
   state: EntityLeaderStateView,
-  frame: ProposedEntityFrame,
+  frame: EntityFrame,
   context: string,
 ): boolean => {
   const hashes = frame.hashesToSign;
@@ -143,7 +143,7 @@ const getCertificateSignedVotes = (certificate: EntityLeaderCertificate): Map<st
 export const verifyEntityLeaderCertificate = (
   env: EntityRuntimeContext,
   state: EntityLeaderStateView,
-  frame: ProposedEntityFrame,
+  frame: EntityFrame,
 ): boolean => {
   const committedLeader = getEntityLeaderState(state);
   const proposedLeaderId = frame.leader.proposerSignerId.toLowerCase();
@@ -189,7 +189,7 @@ export const verifyEntityLeaderCertificate = (
 };
 
 type PreparedFrameGroup = {
-  frame: ProposedEntityFrame;
+  frame: EntityFrame;
   signatures: Map<string, string[]>;
 };
 
@@ -197,7 +197,7 @@ const validatePreparedFrameEvidence = (
   env: EntityRuntimeContext,
   state: EntityLeaderStateView,
   certificate: EntityLeaderCertificate,
-  evidence: ProposedEntityFrame,
+  evidence: EntityFrame,
 ): Map<string, string[]> => {
   if (evidence.height !== certificate.targetHeight) {
     throw new Error(`ENTITY_PREPARED_HEIGHT_MISMATCH:${evidence.height}:${certificate.targetHeight}`);
@@ -253,7 +253,7 @@ const validatePreparedFrameEvidence = (
 
 const mergePreparedFrameEvidence = (
   groups: Map<string, PreparedFrameGroup>,
-  evidence: ProposedEntityFrame,
+  evidence: EntityFrame,
   signatures: Map<string, string[]>,
 ): void => {
   const group = groups.get(evidence.hash) ?? {
@@ -284,7 +284,7 @@ export const selectPreparedFrameFromCertificate = (
   env: EntityRuntimeContext,
   state: EntityLeaderStateView,
   certificate: EntityLeaderCertificate,
-): ProposedEntityFrame | null => {
+): EntityFrame | null => {
   const groups = new Map<string, PreparedFrameGroup>();
   let evidenceCount = 0;
   for (const vote of getCertificateSignedVotes(certificate).values()) {
@@ -319,7 +319,7 @@ export const selectPreparedFrameFromCertificate = (
 export const verifyEntityRelayCertificate = (
   env: EntityRuntimeContext,
   state: EntityLeaderStateView,
-  frame: ProposedEntityFrame,
+  frame: EntityFrame,
 ): boolean => {
   const relay = frame.leader.relayCertificate;
   if (!relay) return true;
@@ -347,7 +347,7 @@ export const verifyEntityRelayCertificate = (
 
 export const expectedCommittedLeaderState = (
   state: EntityLeaderStateView,
-  frame: ProposedEntityFrame,
+  frame: EntityFrame,
 ): NonNullable<EntityState['leaderState']> => {
   const current = getEntityLeaderState(state);
   const certificate = frame.leader.certificate;
@@ -362,7 +362,7 @@ export const expectedCommittedLeaderState = (
 
 export const getValidatorExecutionForFrame = (
   replica: EntityReplica,
-  frame: ProposedEntityFrame,
+  frame: EntityFrame,
 ): EntityCandidate | undefined => {
   const execution = replica.candidate;
   if (!execution) return undefined;

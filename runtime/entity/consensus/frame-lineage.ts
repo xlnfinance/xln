@@ -6,7 +6,7 @@ import type {
   EntityFrameAuthority,
   EntityReplica,
   EntityState,
-  ProposedEntityFrame,
+  EntityFrame,
 } from '../types';
 import { createEntityFrameHashFromStateRoot } from './frame';
 import {
@@ -28,7 +28,7 @@ export const getPrevFrameHash = (state: EntityState): string => {
 
 export const assertFrameParentMatchesState = (
   state: EntityState,
-  frame: ProposedEntityFrame,
+  frame: EntityFrame,
   context: string,
 ): void => {
   const expected = getPrevFrameHash(state);
@@ -44,7 +44,7 @@ export const assertFrameParentMatchesState = (
  */
 export const buildCertifiedEntityFrameLink = (
   entityId: string,
-  frame: ProposedEntityFrame,
+  frame: EntityFrame,
   postState: EntityState,
   verifiedCommitment?: Readonly<{
     stateRoot: string;

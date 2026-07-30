@@ -2,13 +2,13 @@ import { describe, expect, test } from 'bun:test';
 
 import { applyEntityHeightDurabilityBarrier } from '../runtime/entity-height-barrier';
 import { createEmptyEnv } from '../runtime';
-import type { EntityReplica, ProposedEntityFrame } from '../entity/types';
+import type { EntityReplica, EntityFrame } from '../entity/types';
 import type { RoutedEntityInput, RuntimeInput } from '../runtime/types';
 
 const signer = (byte: string): string => `0x${byte.repeat(20)}`;
 const entity = (byte: string): string => `0x${byte.repeat(32)}`;
 
-const certifiedFrame = (height: number, byte: string): ProposedEntityFrame => ({
+const certifiedFrame = (height: number, byte: string): EntityFrame => ({
   height,
   parentFrameHash: height === 1 ? 'genesis' : `0x${'10'.repeat(32)}`,
   stateRoot: `0x${'20'.repeat(32)}`,

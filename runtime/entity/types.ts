@@ -51,7 +51,7 @@ export interface EntityLeaderTimeoutVote extends EntityLeaderTimeoutVoteBody {
   voterId: string;
   signature: string;
   /** Exact locally locked frame, including every precommit observed so far. */
-  preparedFrame?: ProposedEntityFrame;
+  preparedFrame?: EntityFrame;
 }
 
 
@@ -89,7 +89,7 @@ export interface EntityInput {
   /** Transient pre-commit marker; removed when wrapped as siblingOutput. */
   localRuntimeProtocol?: 'cross-j';
   entityTxs?: EntityTx[];
-  proposedFrame?: ProposedEntityFrame;
+  proposedFrame?: EntityFrame;
 
   // HANKO PRECOMMITS: signerId -> array of EOA sigs (one per proposedFrame.hashesToSign[])
   // Validators sign ALL hashes, proposer collects and merges into hankos after threshold
@@ -371,7 +371,7 @@ export interface HashToSign {
 }
 
 
-export interface ProposedEntityFrame {
+export interface EntityFrame {
   height: number;
   /** Exact predecessor committed by this frame hash. Never inferred from transport order. */
   parentFrameHash: string;
@@ -443,7 +443,7 @@ export interface EntityFrameAuthority {
 
 
 export interface CertifiedEntityFrameLink {
-  frame: ProposedEntityFrame;
+  frame: EntityFrame;
   postAuthority: EntityFrameAuthority;
 }
 
@@ -543,8 +543,8 @@ export interface EntityReplica {
   entityEncPrivKey: string;
   state: EntityState;
   mempool: EntityTx[];
-  proposal?: ProposedEntityFrame;
-  lockedFrame?: ProposedEntityFrame; // Frame this validator is locked/precommitted to
+  proposal?: EntityFrame;
+  lockedFrame?: EntityFrame; // Frame this validator is locked/precommitted to
   /** One validator-local speculative frame; commits never trust proposer-supplied post-state. */
   candidate?: EntityCandidate;
   /** Latest finalized certificate only; historical certificates live in the Runtime WAL and history views. */

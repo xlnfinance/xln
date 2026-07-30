@@ -62,7 +62,7 @@ import type {
   StorageDocRef,
   StorageEntityHashDoc,
   StorageFrameEntityHash,
-  StorageFrameRecord,
+  RuntimeFrame,
   StorageMerkleBranchDoc,
   StorageMerkleLeafDoc,
   StorageMerkleRootDoc,
@@ -244,7 +244,7 @@ export const assertEntityHashesEqual = (
 export const prepareStorageCanonicalStateHashes = (
   env: RuntimeReplica,
   touchedEntities: string[],
-  previousFrame: StorageFrameRecord | null,
+  previousFrame: RuntimeFrame | null,
   replicaLookup = buildReplicaLookup(env),
   runtimeMachine = buildDurableRuntimeMachineSnapshot(env),
 ): { canonicalStateHash: string; canonicalEntityHashes: StorageFrameEntityHash[] } => {
@@ -266,7 +266,7 @@ export const prepareStorageCanonicalStateHashes = (
   };
 };
 
-export const computeStorageFrameHash = (record: StorageFrameRecord): string => {
+export const computeStorageFrameHash = (record: RuntimeFrame): string => {
   // Local WAL integrity intentionally covers the complete persisted record,
   // including runtimeOutputs/transport state. Cross-replay state identity is
   // canonicalStateHash, which commits to replayable Entity state instead.

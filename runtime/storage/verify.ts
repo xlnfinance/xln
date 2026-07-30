@@ -24,7 +24,7 @@ import {
 import { countKeys, iterateKeys, readValidatedOrNull } from './level';
 import { validateStorageSnapshotManifestValue } from './authoritative-schema';
 import { readStorageFrameRecord, readStorageHead } from './read';
-import type { RuntimeDbLike, StorageFrameRecord, StorageHead } from './types';
+import type { RuntimeDbLike, RuntimeFrame, StorageHead } from './types';
 
 const countSnapshotDocs = async (db: RuntimeDbLike, height: number): Promise<number> => {
   const [entities, accounts, books, replicaMetas] = await Promise.all([
@@ -159,7 +159,7 @@ export const verifyStorageTailIntegrity = async (
   }
 
   let checkedFrames = 0;
-  let latestRecord: StorageFrameRecord | null = null;
+  let latestRecord: RuntimeFrame | null = null;
   for (let height = startHeight; height <= latestHeight; height += 1) {
     const record = await readStorageFrameRecord(db, height);
     if (!record) throw new Error(`STORAGE_VERIFY_FRAME_MISSING: height=${height}`);

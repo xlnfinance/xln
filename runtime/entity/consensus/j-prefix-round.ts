@@ -37,7 +37,7 @@ export const assertProposerJRangesMatchLocalHistory = (
 export const getFrameJPrefixValidationError = (
   env: EntityRuntimeContext,
   replica: EntityReplica,
-  frame: ProposedEntityFrame,
+  frame: EntityFrame,
 ): string | null => {
   try {
     assertFrameJPrefix(env, replica, frame);
@@ -179,6 +179,6 @@ import { getEntityFrameJRangeBudgetError } from '../../jurisdiction/range-budget
 import type { EntityTx } from '../../types/entity-tx';
 import { emitDefaultProposerHtlcOnionAdvances } from '../htlc-onion-post-commit';
 import type { EntityRuntimeContext } from '../runtime-context';
-import type { EntityOutput, EntityReplica, ProposedEntityFrame } from '../types';
+import type { EntityOutput, EntityReplica, EntityFrame } from '../types';
 import { getEntityLeaderState, isEntityActiveLeader } from './leader';
 import { entityLog } from './entity-log';

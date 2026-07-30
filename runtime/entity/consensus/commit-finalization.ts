@@ -2,7 +2,7 @@ import { cacheCommittedAccountJClaimNodeChanges } from '../account-j-claim-node-
 import { buildQuorumHanko } from '../../hanko/signing';
 import { logError, shortHash, shortId } from '../../infra/logger';
 import { removeCommittedTxsFromMempool } from '../../protocol/tx-multiset';
-import type { EntityState, ProposedEntityFrame, EntityCandidate } from '../types';
+import type { EntityState, EntityFrame, EntityCandidate } from '../types';
 import type { HankoString } from '../../types/hanko';
 import { commitEntityFrameCandidateState } from '../state-clone';
 import { cacheCommittedConsumptionNodeChanges } from '../consumption-store';
@@ -45,7 +45,7 @@ type HankoBuildResult =
 
 const buildCommitHankos = async (
   context: ApplyEntityInputContext,
-  frame: ProposedEntityFrame,
+  frame: EntityFrame,
   execution: EntityCandidate,
   signaturesBySigner: Map<string, string[]>,
 ): Promise<HankoBuildResult> => {
@@ -116,7 +116,7 @@ const buildCommitHankos = async (
 
 const attachCommitProofsAndOutputs = (
   context: ApplyEntityInputContext,
-  frame: ProposedEntityFrame,
+  frame: EntityFrame,
   execution: EntityCandidate,
   hankos: HankoString[],
 ): void => {
@@ -170,7 +170,7 @@ const attachCommitProofsAndOutputs = (
 
 const installCommittedState = (
   context: ApplyEntityInputContext,
-  frame: ProposedEntityFrame,
+  frame: EntityFrame,
   execution: EntityCandidate,
   hankos: HankoString[],
 ): void => {
@@ -224,7 +224,7 @@ const installCommittedState = (
 
 export const finalizeCommitNotification = async (
   context: ApplyEntityInputContext,
-  frame: ProposedEntityFrame,
+  frame: EntityFrame,
   execution: EntityCandidate,
   signaturesBySigner: Map<string, string[]>,
   options: { broadcastCommit?: boolean } = {},

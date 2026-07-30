@@ -11,7 +11,7 @@ import {
 } from '../consumption-accumulator';
 import { getConsumptionNodeStore } from '../consumption-store';
 import type { EntityRuntimeContext } from '../runtime-context';
-import type { EntityOutput, EntityState, HashToSign, ProposedEntityFrame } from '../types';
+import type { EntityOutput, EntityState, HashToSign, EntityFrame } from '../types';
 import {
   assertCertifiedOutputSemanticIdentity,
   buildCertifiedEntityOutputHashes,
@@ -98,7 +98,7 @@ export const attachTargetConsumptionProofs = (
 /** Convert committed Entity outputs into their exact Runtime-routable form. */
 export const wrapCertifiedEntityOutputs = (
   outputs: EntityOutput[],
-  frame: ProposedEntityFrame,
+  frame: EntityFrame,
   sourceState: EntityState,
   env: EntityRuntimeContext,
   hashesToSign: HashToSign[],

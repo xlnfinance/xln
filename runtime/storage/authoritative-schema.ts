@@ -10,7 +10,7 @@ import type {
   StorageDoc,
   StorageDocRef,
   StorageFrameEntityHash,
-  StorageFrameRecord,
+  RuntimeFrame,
   StorageHead,
   StorageSnapshotManifest,
 } from './types';
@@ -77,7 +77,7 @@ const validateFrameEntityHashes = (value: unknown, code: string): StorageFrameEn
     return item as StorageFrameEntityHash;
   });
 
-export const validateStorageFrameRecordValue = (value: unknown): StorageFrameRecord => {
+export const validateStorageFrameRecordValue = (value: unknown): RuntimeFrame => {
   const code = 'STORAGE_FRAME_INVALID';
   const frame = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(frame, [
@@ -150,7 +150,7 @@ export const validateStorageFrameRecordValue = (value: unknown): StorageFrameRec
       `${code}_RUNTIME_OUTPUT_RETRY_STATE`,
     );
   }
-  return frame as StorageFrameRecord;
+  return frame as RuntimeFrame;
 };
 
 const validateTouchedAccounts = (value: unknown, code: string): void => {

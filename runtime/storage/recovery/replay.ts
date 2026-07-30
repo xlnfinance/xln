@@ -7,7 +7,7 @@ import {
   readStorageFrameRecord,
   reconcileHistoryViews,
   resolveStorageRuntimeConfig,
-  type StorageFrameRecord,
+  type RuntimeFrame,
 } from '..';
 import { computeCanonicalEntityHashesFromEnv } from '../canonical-hash';
 import type { PersistedStorageReadApi } from '../persisted-read';
@@ -75,7 +75,7 @@ const resolveReplayTarget = async (
 
 const assertReplayedFrameMatches = (
   env: RuntimeReplica,
-  frame: StorageFrameRecord,
+  frame: RuntimeFrame,
 ): void => {
   const verification = verifyPersistedFrameState(env, frame);
   if (verification.ok) return;
@@ -140,7 +140,7 @@ const finalizeReplay = async (
   reads: PersistedStorageReadApi,
   restored: LoadedRuntimeStorage,
   target: ReplayTarget,
-  frame: StorageFrameRecord,
+  frame: RuntimeFrame,
 ): Promise<void> => {
   assertReplayedFrameMatches(restored.env, frame);
   await restoreActivityViews(
@@ -189,7 +189,7 @@ export const createRuntimeReplayLoader = (
   if (!restored) return null;
   let returningEnv = false;
   try {
-    let targetFrame: StorageFrameRecord | null = null;
+    let targetFrame: RuntimeFrame | null = null;
     for (
       let height = target.selectedSnapshotHeight;
       height <= target.targetHeight;

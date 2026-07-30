@@ -7,7 +7,7 @@ import { applyEntityInput } from '../entity/consensus';
 import { buildEntityLeaderVoteBody, hashEntityLeaderVoteBody } from '../entity/consensus/leader';
 import { encodeBoard, hashBoard } from '../entity/factory';
 import { createEmptyEnv } from '../runtime';
-import type { ConsensusConfig, EntityLeaderTimeoutVote, EntityReplica, EntityState, ProposedEntityFrame } from '../entity/types';
+import type { ConsensusConfig, EntityLeaderTimeoutVote, EntityReplica, EntityState, EntityFrame } from '../entity/types';
 import type { EntityTx } from '../types/entity-tx';
 
 const jurisdiction = {
@@ -45,7 +45,7 @@ const signedTimeoutVote = (
   env: ReturnType<typeof createEmptyEnv>,
   state: EntityState,
   voterId: string,
-  preparedFrame?: ProposedEntityFrame,
+  preparedFrame?: EntityFrame,
 ): EntityLeaderTimeoutVote => {
   const vote: EntityLeaderTimeoutVote = {
     ...buildEntityLeaderVoteBody(state),

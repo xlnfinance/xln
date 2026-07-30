@@ -20,7 +20,7 @@ import {
   readStorageFrameRecord,
   readStorageHead,
   saveRuntimeFrameToStorage,
-  type StorageFrameRecord,
+  type RuntimeFrame,
 } from '.';
 import { withStorageWriterLock } from './runtime-dbs';
 import type { RuntimeFrameCommitStatus } from './commit-status';
@@ -56,7 +56,7 @@ export class RuntimeFrameStorageError extends Error {
 }
 
 type RuntimeFrameCommitProof = Pick<
-  StorageFrameRecord,
+  RuntimeFrame,
   'runtimeInput' | 'runtimeMachine' | 'runtimeStateHash'
 >;
 

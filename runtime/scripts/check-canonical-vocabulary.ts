@@ -13,12 +13,15 @@ const forbiddenSuffixes = new Set([
   'Transaction',
 ]);
 const required = new Set([
+  'RuntimeState',
   'RuntimeReplica',
+  'RuntimeFrame',
   'RuntimeInput',
   'RuntimeTx',
   'EntityState',
   'EntityReplica',
   'EntityCandidate',
+  'EntityFrame',
   'EntityInput',
   'EntityOutput',
   'EntityTx',
@@ -26,6 +29,7 @@ const required = new Set([
   'AccountReplica',
   'AccountFrame',
   'AccountInput',
+  'AccountOutput',
   'AccountTx',
 ]);
 const discovered = new Set<string>();

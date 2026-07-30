@@ -823,7 +823,7 @@ export const assertFrameJPrefix = (
   env: EntityRuntimeContext,
   replica: Pick<EntityReplica, 'signerId' | 'state' | 'jHistory' | 'jPrefixRound'>,
   frame: Pick<
-    import('../entity/types').ProposedEntityFrame,
+    import('../entity/types').EntityFrame,
     'height' | 'parentFrameHash' | 'leader' | 'txs' | 'jPrefixCertificate'
   >,
 ): void => {

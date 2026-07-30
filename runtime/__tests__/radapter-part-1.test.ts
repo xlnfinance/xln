@@ -85,7 +85,7 @@ import {
 import type {
   RuntimeDbLike,
   StorageEntityHashDoc,
-  StorageFrameRecord,
+  RuntimeFrame,
   StorageHead,
   StorageMerkleLeafDoc,
   StorageMerkleRootDoc,
@@ -1523,7 +1523,7 @@ test('runtime adapter frame read returns compact summary without raw runtime inp
       },
     ],
   } as unknown as RuntimeInput;
-  const frame: StorageFrameRecord = {
+  const frame: RuntimeFrame = {
     height: 7,
     timestamp: 700,
     prevFrameHash: 'prev',
@@ -1566,7 +1566,7 @@ test('runtime adapter frame read returns compact summary without raw runtime inp
 
 test('runtime adapter timeline-index returns a bounded compact timestamp page', async () => {
   const env = makeEnv();
-  const frames = new Map<number, StorageFrameRecord>(
+  const frames = new Map<number, RuntimeFrame>(
     Array.from({ length: 7 }, (_, index) => {
       const height = index + 1;
       return [
@@ -1581,7 +1581,7 @@ test('runtime adapter timeline-index returns a bounded compact timestamp page', 
           touchedEntities: [],
           touchedAccounts: [],
           touchedBookEntities: [],
-        } as StorageFrameRecord,
+        } as RuntimeFrame,
       ];
     }),
   );

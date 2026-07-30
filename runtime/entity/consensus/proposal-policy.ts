@@ -3,7 +3,7 @@ import { getCertifiedBoardNodeStore, resolveObserverCertifiedBoardRecord } from 
 import { selectEntityTxsWithinJRangeBudget } from '../../jurisdiction/range-budget';
 import type { EntityTx } from '../../types/entity-tx';
 import type { EntityRuntimeContext } from '../runtime-context';
-import type { EntityState, ProposedEntityFrame } from '../types';
+import type { EntityState, EntityFrame } from '../types';
 import { selectCrossJCommitPhaseTxs } from '../cross-j-proposer-materialization';
 import { selectEntityFrameTxByteBudget } from './frame';
 import {
@@ -135,7 +135,7 @@ export const isSelfBoardAuthorityTransitionFrame = async (
 export const validateProposedFrameLeader = (
   env: EntityRuntimeContext,
   state: EntityState,
-  frame: ProposedEntityFrame,
+  frame: EntityFrame,
 ): boolean =>
   Boolean(
     frame.leader && verifyEntityLeaderCertificate(env, state, frame) && verifyEntityRelayCertificate(env, state, frame),

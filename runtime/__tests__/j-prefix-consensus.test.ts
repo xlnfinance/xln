@@ -27,7 +27,7 @@ import {
 } from '../jurisdiction/j-prefix-consensus';
 import { recordValidatorJHistory } from '../jurisdiction/local-history';
 import { createEmptyEnv, hasRuntimeWork } from '../runtime';
-import type { EntityReplica, EntityState, ProposedEntityFrame } from '../entity/types';
+import type { EntityReplica, EntityState, EntityFrame } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';
 import type { EntityTx } from '../types/entity-tx';
 import type { JurisdictionEvent, ValidatorJHistory } from '../types/jurisdiction-events';
@@ -147,7 +147,7 @@ const buildOrdinaryProposal = async (
   state: EntityState,
   proposerSignerId: string,
   timestamp: number,
-): Promise<ProposedEntityFrame> => {
+): Promise<EntityFrame> => {
   const userTxs: EntityTx[] = [
     {
       type: 'chat',

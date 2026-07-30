@@ -22,7 +22,7 @@ import {
   registrationEvidenceKey,
 } from '../jurisdiction/registration-evidence';
 import { compareStableText } from '../protocol/serialization';
-import type { CertifiedEntityFrameLink, CertifiedEntityLineageAnchor, ConsensusConfig, EntityFrameAuthority, EntityReplica, ProposedEntityFrame } from '../entity/types';
+import type { CertifiedEntityFrameLink, CertifiedEntityLineageAnchor, ConsensusConfig, EntityFrameAuthority, EntityReplica, EntityFrame } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';
 import { validateConsensusConfig } from '../entity/consensus/config-validation';
 import { validateProposedEntityFrame } from '../entity/consensus/frame-validation';
@@ -170,7 +170,7 @@ const assertLeaderTransition = (
   }
 };
 
-const assertFrameBody = (entityId: string, link: CertifiedEntityFrameLink): ProposedEntityFrame => {
+const assertFrameBody = (entityId: string, link: CertifiedEntityFrameLink): EntityFrame => {
   const frame = validateProposedEntityFrame(link.frame, 'StorageCertifiedEntityFrame');
   const postAuthorityRoot = computeEntityFrameAuthorityRoot(link.postAuthority);
   if (postAuthorityRoot !== frame.authorityRoot) {
@@ -255,7 +255,7 @@ const assertCertificateVariant = (
 
 const linkFingerprint = (link: CertifiedEntityFrameLink): string => encodeCanonicalConsensusValue(link);
 
-const immutableFrameMetadataFingerprint = (frame: ProposedEntityFrame): string => {
+const immutableFrameMetadataFingerprint = (frame: EntityFrame): string => {
   const { collectedSigs: _collectedSigs, hankos: _hankos, ...immutableMetadata } = frame;
   return encodeCanonicalConsensusValue(immutableMetadata);
 };
