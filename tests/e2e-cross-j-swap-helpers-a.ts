@@ -591,19 +591,28 @@ export async function importRpc2SiblingEntity(
       if (!Number.isSafeInteger(blockTimeMs) || blockTimeMs <= 0) {
         throw new Error(`rpc2 jurisdiction block time invalid: ${String(jurisdictionRaw.blockTimeMs)}`);
       }
-
       const runtimeModule = view.__xln?.instance;
       if (!runtimeModule) throw new Error('__xln.instance missing');
 
-      const hasConnectedAdapter = (replica: any): boolean =>
+      const hasConnectedAdapter = (name: string): boolean => {
+        const adapter = env.infrastructure?.liveJAdapters?.get(name);
+        return (
         Boolean(
-          replica?.jadapter?.addresses?.depository &&
-          replica?.jadapter?.addresses?.entityProvider &&
-          replica?.jadapter?.depository &&
-          replica?.jadapter?.entityProvider &&
-          typeof replica?.jadapter?.submitTx === 'function',
+            adapter?.addresses?.depository &&
+            adapter?.addresses?.entityProvider &&
+            adapter?.depository &&
+            adapter?.entityProvider &&
+            typeof adapter?.submitTx === 'function',
+          )
         );
-      if (!hasConnectedAdapter(env.state.jReplicas?.get(jurisdictionName))) {
+      };
+      if (!hasConnectedAdapter(jurisdictionName)) {
+        const entityProviderDeploymentBlock = Number(jurisdictionRaw.entityProviderDeploymentBlock);
+        if (!Number.isSafeInteger(entityProviderDeploymentBlock) || entityProviderDeploymentBlock < 1) {
+          throw new Error(
+            `rpc2 jurisdiction entity-provider deployment block invalid: ${String(jurisdictionRaw.entityProviderDeploymentBlock)}`,
+          );
+        }
         runtimeModule.enqueueRuntimeInput(env, {
           runtimeTxs: [
             {
@@ -614,6 +623,7 @@ export async function importRpc2SiblingEntity(
                 ticker: String(jurisdictionRaw.currency || 'TRX'),
                 rpcs: [rpc],
                 blockTimeMs,
+                entityProviderDeploymentBlock,
                 contracts: {
                   depository: String(contracts.depository),
                   entityProvider: String(contracts.entityProvider),
@@ -648,13 +658,13 @@ export async function importRpc2SiblingEntity(
       async () =>
         page.evaluate(jurisdictionName => {
           const env = (window as CrossRuntimeWindow).isolatedEnv;
-          const replica = env?.state.jReplicas?.get(jurisdictionName);
+          const adapter = env?.infrastructure?.liveJAdapters?.get(jurisdictionName);
           return Boolean(
-            replica?.jadapter?.addresses?.depository &&
-            replica?.jadapter?.addresses?.entityProvider &&
-            replica?.jadapter?.depository &&
-            replica?.jadapter?.entityProvider &&
-            typeof replica?.jadapter?.submitTx === 'function',
+            adapter?.addresses?.depository &&
+            adapter?.addresses?.entityProvider &&
+            adapter?.depository &&
+            adapter?.entityProvider &&
+            typeof adapter?.submitTx === 'function',
           );
         }, result.jurisdictionName),
       {
@@ -980,14 +990,14 @@ export async function waitForDefaultJurisdictionReplicas(page: Page, label: stri
         page.evaluate(() => {
           const env = (window as CrossRuntimeWindow).isolatedEnv;
           const jurisdictions = Array.from(env?.state.jReplicas?.keys?.() || []).map(name => String(name));
-          const replicas = Array.from(env?.state.jReplicas?.values?.() || []);
-          const isConnected = (replica: any): boolean =>
+          const liveAdapters = Array.from(env?.infrastructure?.liveJAdapters?.entries?.() || []);
+          const isConnected = (adapter: any): boolean =>
             Boolean(
-              replica?.jadapter?.addresses?.depository &&
-              replica?.jadapter?.addresses?.entityProvider &&
-              replica?.jadapter?.depository &&
-              replica?.jadapter?.entityProvider &&
-              typeof replica?.jadapter?.submitTx === 'function',
+              adapter?.addresses?.depository &&
+              adapter?.addresses?.entityProvider &&
+              adapter?.depository &&
+              adapter?.entityProvider &&
+              typeof adapter?.submitTx === 'function',
             );
           const entities = Array.from(env?.state.eReplicas?.values?.() || []).map((replica: any) => ({
             entityId: String(replica?.state?.entityId || replica?.entityId || ''),
@@ -1002,11 +1012,11 @@ export async function waitForDefaultJurisdictionReplicas(page: Page, label: stri
             entityJurisdictionCount: entityJurisdictions.size,
             hasTestnet: jurisdictions.some(name => /^testnet$/i.test(name)),
             hasSecondary: jurisdictions.some(name => /tron|rpc2|second/i.test(name)),
-            hasTestnetAdapter: replicas.some(
-              (replica: any) => /^testnet$/i.test(String(replica?.name || '')) && isConnected(replica),
+            hasTestnetAdapter: liveAdapters.some(
+              ([name, adapter]: any) => /^testnet$/i.test(String(name)) && isConnected(adapter),
             ),
-            hasSecondaryAdapter: replicas.some(
-              (replica: any) => /tron|rpc2|second/i.test(String(replica?.name || '')) && isConnected(replica),
+            hasSecondaryAdapter: liveAdapters.some(
+              ([name, adapter]: any) => /tron|rpc2|second/i.test(String(name)) && isConnected(adapter),
             ),
             entities: entities.length,
           };
