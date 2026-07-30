@@ -4,7 +4,6 @@ import {
   createRelayStore,
   deliverPendingMessages,
   enqueueMessage,
-  flushPendingMessages,
   isRelaySendResultFailure,
   pushDebugEvent,
   setDebugIncidentState,
@@ -18,6 +17,18 @@ import {
 } from './helpers/cryptographic-profile';
 
 const asRecords = (items: unknown[]): Array<Record<string, unknown>> => items as Array<Record<string, unknown>>;
+
+const drainPendingMessages = (
+  store: ReturnType<typeof createRelayStore>,
+  runtimeId: string,
+): unknown[] => {
+  const delivered: unknown[] = [];
+  deliverPendingMessages(store, runtimeId, message => {
+    delivered.push(message);
+    return true;
+  });
+  return delivered;
+};
 
 test('relay send result predicate matches websocket failure contract', () => {
   expect(isRelaySendResultFailure(false)).toBe(true);
@@ -101,7 +112,7 @@ test('relay pending queue enforces total bytes and target caps', () => {
   expect(enqueueMessage(store, 'runtime-a', { n: 1, payload: 'aaaaa' })).toBe(1);
   expect(enqueueMessage(store, 'runtime-a', { n: 2, payload: 'bbbbb' })).toBe(2);
   expect(enqueueMessage(store, 'runtime-a', { n: 3, payload: 'ccccc' })).toBe(2);
-  expect(asRecords(flushPendingMessages(store, 'runtime-a')).map(msg => msg['n'])).toEqual([2, 3]);
+  expect(asRecords(drainPendingMessages(store, 'runtime-a')).map(msg => msg['n'])).toEqual([2, 3]);
   expect(store.pendingMessageBytes).toBe(0);
 
   enqueueMessage(store, 'runtime-a', { payload: 'x'.repeat(20) });
@@ -152,7 +163,7 @@ test('relay pending delivery retains current and later messages when send fails'
     },
   });
   expect(asRecords(delivered).map(msg => msg['n'])).toEqual([1]);
-  expect(asRecords(flushPendingMessages(store, 'runtime-a')).map(msg => msg['n'])).toEqual([2, 3]);
+  expect(asRecords(drainPendingMessages(store, 'runtime-a')).map(msg => msg['n'])).toEqual([2, 3]);
   expect(store.pendingMessageBytes).toBe(0);
 });
 

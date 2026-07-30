@@ -792,11 +792,6 @@ export const selectMatchedCrossJAccountInputPairs = (
   };
 };
 
-export const filterMatchedCrossJAccountInputPairs = (
-  env: RuntimeState,
-  inputs: readonly RoutedEntityInput[],
-): RoutedEntityInput[] => selectMatchedCrossJAccountInputPairs(env, inputs).inputs;
-
 const runtimeRoutingTimestamp = (env: RuntimeState): number => {
   const timestamp = Math.floor(Number(env.timestamp ?? 0));
   return Number.isFinite(timestamp) && timestamp >= 0 ? timestamp : 0;

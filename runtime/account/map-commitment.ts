@@ -345,11 +345,6 @@ export const invalidateAccountMapCommitment = (
   else cached.dirtyKeys.add(key);
 };
 
-export const clearAccountCommitmentCache = (account: AccountState): void => {
-  deleteHiddenCache(account, ACCOUNT_CACHE);
-  deleteHiddenCache(account, STAGED_ACCOUNT_CACHE);
-};
-
 export const forkAccountCommitmentCache = (source: AccountState, target: AccountState): void => {
   const sourceCache = readAccountCache(source);
   if (sourceCache) {

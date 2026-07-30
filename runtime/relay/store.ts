@@ -488,14 +488,6 @@ export const getDefaultGossipProfiles = (
   );
 };
 
-export const getHubGossipProfiles = (store: RelayStore, limit?: number): Profile[] => {
-  return selectProfileBatch(
-    getAllGossipProfiles(store),
-    { set: 'hubs', ...(limit !== undefined ? { limit } : {}) },
-    DEFAULT_GOSSIP_SYNC_LIMIT,
-  );
-};
-
 export const getProfileBatch = (
   store: RelayStore,
   request: GossipProfileBatchRequest = {},
@@ -625,33 +617,6 @@ export const enqueueMessage = (store: RelayStore, toKey: string, msg: unknown): 
   return queue.length;
 };
 
-export const flushPendingMessages = (store: RelayStore, toKey: string): unknown[] => {
-  const pending = store.pendingMessages.get(toKey) || [];
-  store.pendingMessages.delete(toKey);
-  const now = Date.now();
-  const deliverable: unknown[] = [];
-  for (const item of pending) {
-    store.pendingMessageBytes = Math.max(0, store.pendingMessageBytes - item.bytes);
-    // Account frames reject timestamps outside the same five-minute window.
-    // Delivering older pending entity_input after a deterministic runtime reset
-    // can replay an old, validly signed frame into a fresh local account. Drop it
-    // at the relay boundary instead of letting stale consensus traffic poison
-    // the next live run.
-    if (now - item.enqueuedAt > store.pendingLimits.maxAgeMs) {
-      pushDebugEvent(store, {
-        event: 'pending_drop',
-        to: toKey,
-        status: 'dropped',
-        reason: 'PENDING_MESSAGE_EXPIRED',
-        size: item.bytes,
-      });
-      continue;
-    }
-    deliverable.push(item.msg);
-  }
-  return deliverable;
-};
-
 export const deliverPendingMessages = (
   store: RelayStore,
   toKey: string,
@@ -715,16 +680,4 @@ export const deliverPendingMessages = (
 export const clearPendingMessages = (store: RelayStore): void => {
   store.pendingMessages.clear();
   store.pendingMessageBytes = 0;
-};
-
-// ---------------------------------------------------------------------------
-// Reset
-// ---------------------------------------------------------------------------
-
-export const resetStore = (store: RelayStore): void => {
-  store.debugEvents.length = 0;
-  store.debugIncidents.clear();
-  store.debugId = 0;
-  clearPendingMessages(store);
-  store.runtimeEncryptionKeys.clear();
 };

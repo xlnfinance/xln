@@ -35,9 +35,6 @@ export const transitionRuntimeLifecycle = (
   return next;
 };
 
-export const runtimeCanScheduleWork = (state: RuntimeLifecycleState): boolean =>
-  inferRuntimeLifecyclePhase(state) === 'running';
-
 export type RuntimeCommandReadiness =
   | { ready: true; reason: null }
   | { ready: false; reason: string };

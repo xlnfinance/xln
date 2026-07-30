@@ -32,19 +32,6 @@ export function calculateHtlcForwardAmount(
 }
 
 /**
- * Calculate fee amount (not remaining amount)
- */
-export function calculateHtlcFeeAmount(
-  amountIn: bigint,
-  feePPM: number = DEFAULT_FEE_PPM,
-  baseFee: bigint = HTLC.BASE_FEE_USD
-): bigint {
-  const ppm = Number.isFinite(feePPM) && feePPM >= 0 ? BigInt(Math.floor(feePPM)) : 0n;
-  const rateFee = (amountIn * ppm) / 1_000_000n;
-  return baseFee + rateFee;
-}
-
-/**
  * Compute minimal inbound amount needed to guarantee desired forwarded amount.
  * Inversion of calculateHtlcForwardAmount with integer rounding.
  */
@@ -98,20 +85,6 @@ export function hashHtlcSecret(secret: string): string {
   }
   const abiCoder = ethers.AbiCoder.defaultAbiCoder();
   return ethers.keccak256(abiCoder.encode(['bytes32'], [secret]));
-}
-
-/**
- * Generate secret and hashlock for HTLC
- * DEPRECATED: This function uses RNG and is non-deterministic!
- * For consensus-safe HTLC creation, pass secret/hashlock explicitly in tx.data
- *
- * @throws Error - Always throws to prevent non-deterministic usage in consensus
- */
-export function generateHashlock(): { secret: string; hashlock: string } {
-  throw new Error(
-    'generateHashlock() is non-deterministic and BANNED in consensus code. ' +
-    'Pass secret/hashlock as tx.data parameters (derived from tx hash or provided by user).'
-  );
 }
 
 /**

@@ -34,7 +34,6 @@ import { compareStableText } from '../serialization.ts';
 import { deriveSwapOffdeltaChanges } from '../../orderbook/swap-execution.ts';
 import { deriveTransferOffdeltaChange } from '../delta-movement.ts';
 import {
-  encodeDisputeProofHankoPayload,
   hashCooperativeDisputeProofHankoPayload,
   hashCooperativeUpdateHankoPayload,
   hashDisputeProofHankoPayload,
@@ -383,29 +382,6 @@ function getCanonicalAccountKey(account: DisputeHashAccount): string {
       ? [account.leftEntity, account.rightEntity]
       : [account.rightEntity, account.leftEntity];
   return ethers.solidityPacked(['bytes32', 'bytes32'], [first, second]);
-}
-
-/**
- * Encode dispute message for signing (matches Account.sol verifyDisputeProofHanko)
- *
- * MessageType.DisputeProof = 1
- * Format: abi.encode(MessageType.DisputeProof, chainId, depository, account_key,
- * nonce, proofbodyHash, watchSeed)
- */
-export function encodeDisputeMessage(
-  account: DisputeHashAccount,
-  proofBodyHash: string,
-  domain: DepositoryHankoDomain,
-): string {
-  const chKey = getCanonicalAccountKey(account);
-  const watchSeed = normalizeAccountWatchSeed(account.watchSeed, 'DISPUTE_MESSAGE');
-  return encodeDisputeProofHankoPayload(
-    domain,
-    chKey,
-    account.proofHeader.nextProofNonce,
-    proofBodyHash,
-    watchSeed,
-  );
 }
 
 /**

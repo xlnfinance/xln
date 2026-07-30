@@ -90,14 +90,3 @@ export const safeArrayGet = <T>(
   }
   return array[index]!;
 };
-
-export const validateEntityId = (value: unknown, context: string): string => {
-  const entityId = validateString(value, context);
-  if (entityId.includes('undefined')) {
-    throw new FinancialDataCorruptionError(
-      `${context} contains 'undefined' - routing corruption detected`,
-      { entityId },
-    );
-  }
-  return entityId;
-};
