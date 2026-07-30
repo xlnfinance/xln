@@ -343,6 +343,25 @@ test('Account validation and storage hydration reject an undrainable mempool', (
   );
 });
 
+test('Account state decoding never repairs missing or malformed replica fields', () => {
+  const missingSignatures = makeAccount();
+  delete (missingSignatures as Partial<typeof missingSignatures>).pendingSignatures;
+  expect(() => validateAccountState(missingSignatures, 'missingSignatures'))
+    .toThrow('missingSignatures.pendingSignatures');
+
+  const malformedTx = makeAccount([{
+    type: 'direct_payment',
+    data: { tokenId: 1, amount: 1n, extra: true },
+  } as AccountTx]);
+  expect(() => validateAccountState(malformedTx, 'malformedTx'))
+    .toThrow('malformedTx.mempool_0_DATA_FIELDS');
+
+  const fractionalHeight = makeAccount();
+  fractionalHeight.currentHeight = 1.5;
+  expect(() => validateAccountState(fractionalHeight, 'fractionalHeight'))
+    .toThrow('fractionalHeight.currentHeight');
+});
+
 test('single and batch Account mempool enqueue reject atomically at the shared cap', async () => {
   const full = makeAccount(
     Array.from({ length: LIMITS.ACCOUNT_MEMPOOL_SIZE }, (_, index) => memoTx(index)),

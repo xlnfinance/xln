@@ -1,10 +1,10 @@
 import { LIMITS } from '../config/constants';
 import { isLeftEntity } from '../protocol/entity-id';
+import { requireBoundaryInteger } from '../protocol/boundary-validation';
 import {
   FinancialDataCorruptionError,
   validateArray,
   validateMapInstance,
-  validateNumber,
   validateObject,
   validateString,
 } from '../protocol/validation-primitives';
@@ -13,6 +13,7 @@ import { assertAccountJClaimAccumulatorState } from './j-claim-accumulator';
 import { assertAccountMempoolWithinLimit } from './mempool';
 import { validateDelta } from './delta-validation';
 import { decodeAccountFrame } from './frame-validation';
+import { decodeAccountTxs } from './tx-validation';
 import { validatePendingAccountResend } from './pending-resend-validation';
 import {
   validateRebalanceFeePolicies,
@@ -84,11 +85,12 @@ const validatePendingSignatures = (
   account: Record<string, unknown>,
   context: string,
 ): void => {
-  if (!Array.isArray(account['pendingSignatures'])) {
-    account['pendingSignatures'] = [];
-    return;
-  }
-  validateArray(account['pendingSignatures'], `${context}.pendingSignatures`);
+  const signatures = validateArray(
+    account['pendingSignatures'],
+    `${context}.pendingSignatures`,
+  );
+  signatures.forEach((signature, index) =>
+    validateString(signature, `${context}.pendingSignatures[${index}]`));
 };
 
 const validateRebalanceState = (
@@ -152,8 +154,15 @@ function assertAccountState(
     });
   }
 
-  validateString(account['status'], `${context}.status`);
-  validateArray(account['mempool'], `${context}.mempool`);
+  const status = validateString(account['status'], `${context}.status`);
+  if (
+    status !== 'active'
+    && status !== 'dispute_preparing'
+    && status !== 'disputed'
+  ) {
+    throw new FinancialDataCorruptionError(`${context}.status is invalid`);
+  }
+  decodeAccountTxs(account['mempool'], `${context}.mempool`, decodeAccountFrame);
   assertAccountMempoolWithinLimit(
     account as Pick<AccountReplica, 'mempool'>,
     `${context}.mempool`,
@@ -168,17 +177,20 @@ function assertAccountState(
   validateSwapHistories(account, context);
   validateLendingIntents(account['lendingIntents'], `${context}.lendingIntents`);
   validateCreditLimits(account['globalCreditLimits'], `${context}.globalCreditLimits`);
-  validateNumber(account['currentHeight'], `${context}.currentHeight`);
+  requireBoundaryInteger(account['currentHeight'], `${context}.currentHeight`);
   validatePendingAccountResend(account, context);
   validatePendingSignatures(account, context);
-  validateNumber(account['rollbackCount'], `${context}.rollbackCount`);
+  requireBoundaryInteger(account['rollbackCount'], `${context}.rollbackCount`);
   assertAccountJClaimAccumulatorState(
     account['leftPendingJClaims'] as AccountReplica['leftPendingJClaims'],
   );
   assertAccountJClaimAccumulatorState(
     account['rightPendingJClaims'] as AccountReplica['rightPendingJClaims'],
   );
-  validateNumber(account['lastFinalizedJHeight'], `${context}.lastFinalizedJHeight`);
+  requireBoundaryInteger(
+    account['lastFinalizedJHeight'],
+    `${context}.lastFinalizedJHeight`,
+  );
   validateMapInstance(account['pendingWithdrawals'], `${context}.pendingWithdrawals`);
   validateRebalanceState(account, context);
   for (const [tokenId, delta] of deltas) {
