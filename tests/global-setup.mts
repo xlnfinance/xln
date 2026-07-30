@@ -282,6 +282,12 @@ const captureFailedRuntimeSnapshots = async (
   const settled = await Promise.allSettled(pages.map(async (page, index) => {
     const artifactName = `browser-runtime-${index + 1}.json`;
     try {
+      // Marketing, docs, and other static surfaces intentionally do not boot a
+      // Runtime. Requiring the app debug API there obscures the original UI
+      // failure with a false secondary error. The app remains fail-closed:
+      // every failed /app page must expose a serializable Runtime snapshot.
+      const pagePath = new URL(page.url()).pathname;
+      if (!pagePath.startsWith('/app')) return;
       const snapshot = await withFailureHookTimeout(`snapshot:${index + 1}`, async () => page.evaluate(() => {
         const root = (window as Window & { __xln?: Record<string, unknown> }).__xln;
         if (!root) throw new Error('E2E_FAILURE_DEBUG_SURFACE_MISSING');

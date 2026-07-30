@@ -67,10 +67,10 @@ test.describe('Docs site', () => {
     await expect(page.getByTestId('doc-link-implementation-payment-spec')).toBeVisible();
     await page.getByTestId('doc-link-implementation-payment-spec').click();
     await page.waitForURL(/doc=implementation%2Fpayment-spec/);
-    await expect(page.locator('.doc-title')).toHaveText('XLN Payment System Specification');
+    await expect(page.locator('.doc-title')).toHaveText('Payment and HTLC flow');
 
     await search.fill('');
-    const statusLink = page.locator('.markdown-body a[data-doc-link="1"]').filter({ hasText: /status/i }).first();
+    const statusLink = page.getByTestId('doc-link-status').first();
     await expect(statusLink).toBeVisible();
     await statusLink.click();
     await page.waitForURL(/doc=status/);
