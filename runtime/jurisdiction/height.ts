@@ -87,13 +87,3 @@ export function requireRuntimeJurisdictionBlockTimeMs(env: RuntimeState, jurisdi
   if (Number.isFinite(raw) && raw > 0) return Math.floor(raw);
   throw new Error(`JURISDICTION_BLOCK_TIME_MISSING:${jurisdictionName || env.activeJurisdiction || 'active'}`);
 }
-
-export function requireRuntimeJurisdictionDisputeDelayMs(
-  env: RuntimeState,
-  jurisdictionName?: string,
-  fallbackBlocks = PRODUCTION_DISPUTE_DELAY_BLOCKS,
-): number {
-  const blocks = getRuntimeJurisdictionDefaultDisputeDelayBlocks(env, jurisdictionName, fallbackBlocks);
-  const blockTimeMs = requireRuntimeJurisdictionBlockTimeMs(env, jurisdictionName);
-  return blocks * blockTimeMs;
-}

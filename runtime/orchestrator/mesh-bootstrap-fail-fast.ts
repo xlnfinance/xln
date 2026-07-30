@@ -9,9 +9,6 @@ export const classifyMeshBootstrapError = (error: unknown): MeshBootstrapErrorCl
   return { category: retryable ? 'retryable-transport' : 'fatal', message };
 };
 
-export const isExpectedMeshBootstrapError = (error: unknown): boolean =>
-  classifyMeshBootstrapError(error).category === 'retryable-transport';
-
 export type MeshBootstrapLoopErrorHandlerOptions = {
   nodeName: string;
   isShuttingDown?: () => boolean;

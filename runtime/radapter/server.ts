@@ -419,8 +419,6 @@ export const forgetRuntimeAdapterClient = (ws: RuntimeAdapterSocket): void => {
   clients.delete(ws);
 };
 
-export const runtimeAdapterClientCount = (): number => clients.size;
-
 export const closeInvalidRuntimeAdapterMessage = (ws: RuntimeAdapterSocket, error: unknown): void => {
   const message = error instanceof Error ? error.message : String(error || '');
   ws.close?.(message.includes('RADAPTER_MESSAGE_TOO_LARGE') ? 1009 : 1003, 'Invalid runtime adapter message');

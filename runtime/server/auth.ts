@@ -5,10 +5,8 @@ import {
   verifyRuntimeAdapterAuthCredential,
 } from '../radapter/auth';
 import type { RuntimeAdapterAuthLevel } from '../radapter/types';
-import { safeStringify, deserializeTaggedJson, serializeTaggedJson } from '../protocol/serialization';
+import { deserializeTaggedJson, serializeTaggedJson } from '../protocol/serialization';
 import type { RuntimeState } from '../runtime/types';
-
-type RpcSocket = { send(data: string): unknown };
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
 export const DEFAULT_CONTROL_BODY_MAX_BYTES = 256 * 1024;
@@ -52,22 +50,6 @@ export const requireDaemonControlAuth = (
   }
   if (hasDaemonControlAuth(req, env, requiredLevel)) return null;
   return new Response(serializeTaggedJson({ ok: false, error: 'Unauthorized' }), { status: 401, headers: JSON_HEADERS });
-};
-
-export const requireDaemonRpcAuth = (
-  ws: RpcSocket,
-  id: unknown,
-  msg: Record<string, unknown>,
-  env: RuntimeState | null,
-  requiredLevel: RuntimeAdapterAuthLevel,
-): boolean => {
-  if (!env) {
-    ws.send(safeStringify({ type: 'error', inReplyTo: id, code: 'E_INTERNAL', error: 'Runtime not ready' }));
-    return false;
-  }
-  if (verifyDaemonCapability(env, msg['key'], requiredLevel)) return true;
-  ws.send(safeStringify({ type: 'error', inReplyTo: id, code: 'E_UNAUTHORIZED', error: 'runtime adapter capability required' }));
-  return false;
 };
 
 export class ControlBodyTooLargeError extends Error {

@@ -249,9 +249,6 @@ const buildRuntimeWsEnvelope = (message: RuntimeWsMessage): RuntimeWsEnvelope =>
   v: XLN_PROTOCOL_VERSION,
 });
 
-export const validateRuntimeWsMessage = (value: unknown): RuntimeWsMessage =>
-  stripRuntimeWsEnvelope(validateRuntimeWsEnvelope(value));
-
 export const serializeWsMessage = (msg: RuntimeWsMessage): Uint8Array =>
   runtimeWsEnvelopeCodec.encode(buildRuntimeWsEnvelope(msg));
 

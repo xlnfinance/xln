@@ -785,22 +785,6 @@ export function batchOpCount(batch: JBatch): number {
   );
 }
 
-/** Per-operation counters for history/debug UI. */
-export function batchOpBreakdown(batch: JBatch): BatchOpBreakdown {
-  return {
-    flashloans: batch.flashloans.length,
-    reserveToReserve: batch.reserveToReserve.length,
-    reserveToCollateral: batch.reserveToCollateral.length,
-    collateralToReserve: batch.collateralToReserve.length,
-    settlements: batch.settlements.length,
-    disputeStarts: batch.disputeStarts.length,
-    disputeFinalizations: batch.disputeFinalizations.length,
-    externalTokenToReserve: batch.externalTokenToReserve.length,
-    reserveToExternalToken: batch.reserveToExternalToken.length,
-    revealSecrets: batch.revealSecrets.length,
-  };
-}
-
 /**
  * Merge all operations from source batch into target batch (append semantics).
  * Used by failure/abort recovery flows when moving sentBatch ops back to current.

@@ -51,9 +51,6 @@ const runtimeAdapterWireCodec: Codec<RuntimeAdapterWireMessage> = {
 export const encodeRuntimeAdapterMessage = (message: RuntimeAdapterWireMessage): Uint8Array =>
   runtimeAdapterWireCodec.encode(message);
 
-export const encodeRuntimeAdapterMessageForDebug = (message: unknown): string =>
-  serializeTaggedJson(message);
-
 export const encodeRuntimeAdapterMessageForBrowser = (message: RuntimeAdapterWireMessage): string =>
   serializeTaggedJson(validateRuntimeAdapterWireMessage(message));
 
