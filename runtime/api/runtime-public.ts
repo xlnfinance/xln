@@ -89,6 +89,7 @@ export {
   computeRuntimeRecoveryCheckpointHash,
   validateRuntimeRecoveryBundle,
 } from '../recovery/bundle';
+export { decodeTowerProofBody } from '../recovery/tower-proof-body';
 export { buildRuntimeRecording, validateRuntimeRecording } from '../recovery/recording';
 export {
   buildTowerAppointmentOwnerMessage,

@@ -130,8 +130,8 @@ export async function buildDelayedLastResortAppointmentsForTower(
       );
       const ownerAuthorizationHanko = xln.buildSingleSignerHanko(entityId, ownerAuthorizationHash, signerPrivateKey);
 
-      const finalProofbody = structuredClone(proofBody as Record<string, unknown>);
-      const transformers = finalProofbody['transformers'];
+      const finalProofbody = xln.decodeTowerProofBody(proofBody);
+      const transformers = finalProofbody.transformers;
       let leftArguments = '0x';
       let rightArguments = '0x';
       if (Array.isArray(transformers) && transformers.length > 0) {
@@ -160,7 +160,7 @@ export async function buildDelayedLastResortAppointmentsForTower(
         else rightArguments = builtArguments.rightArguments;
       }
       if (
-        String(finalProofbody['watchSeed'] || '')
+        finalProofbody.watchSeed
           .trim()
           .toLowerCase() !== watchSeed
       ) {

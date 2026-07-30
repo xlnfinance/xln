@@ -259,8 +259,6 @@ function summarizeAccountTx(
       return `Set credit limit · ${activityTokenAmount(data['tokenId'], data['amount'], options)}`;
     case 'add_delta':
       return `Opened token lane · ${activityEntityName(accountId, accountLabel, options)} / ${options.getTokenInfo(Number(data['tokenId'] || 0)).symbol}`;
-    case 'account_settle':
-      return `Claimed on-chain settlement · ${options.getTokenInfo(Number(data['tokenId'] || 0)).symbol}`;
     case 'reserve_to_collateral':
       return `Claimed reserve → collateral move · ${options.getTokenInfo(Number(data['tokenId'] || 0)).symbol}`;
     case 'htlc_lock':

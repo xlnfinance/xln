@@ -52,6 +52,7 @@ export type {
   TowerDiscoverResponseV1,
   TowerEncryptedPayloadV1,
   TowerFinalDisputeProof,
+  TowerProofBody,
   TowerModeV1,
   TowerReceiptV1,
   TowerRestoreRequestV1,
