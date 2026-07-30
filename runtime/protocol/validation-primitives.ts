@@ -64,29 +64,3 @@ export const validateMapInstance = (
   }
   return value;
 };
-
-export const safeMapGet = <K, V>(
-  map: Map<K, V>,
-  key: K,
-  context: string,
-): V => {
-  const value = map.get(key);
-  if (value === undefined) {
-    throw new Error(`FINANCIAL-SAFETY: ${context} not found for key: ${key}`);
-  }
-  return value;
-};
-
-export const safeArrayGet = <T>(
-  array: T[],
-  index: number,
-  context: string,
-): T => {
-  if (index < 0 || index >= array.length) {
-    throw new TypeSafetyViolationError(
-      `Array index out of bounds in ${context}`,
-      { index, length: array.length },
-    );
-  }
-  return array[index]!;
-};

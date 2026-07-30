@@ -222,49 +222,11 @@ export function logDebug(category: keyof LogConfig, ...args: unknown[]): void {
   log(category, 'debug', ...args);
 }
 
-export function logInfo(category: keyof LogConfig, ...args: unknown[]): void {
-  log(category, 'info', ...args);
-}
-
-export function logWarn(category: keyof LogConfig, ...args: unknown[]): void {
-  log(category, 'warn', ...args);
-}
-
 export function logError(category: keyof LogConfig, ...args: unknown[]): void {
   log(category, 'error', ...args);
   if (FAIL_FAST_ERRORS) {
     throw new Error(`[FAIL_FAST] ${String(category)}: ${formatLogArgs(args)}`);
   }
-}
-
-// Debug helper to show current config
-export function showLogConfig(): void {
-  console.log('📊 Current Log Configuration:');
-  Object.entries(LOG_CONFIG).forEach(([key, enabled]) => {
-    console.log(`  ${enabled ? '✅' : '❌'} ${key}`);
-  });
-}
-
-// Runtime config setter (for debugging from console)
-export function setLogConfig(category: keyof LogConfig, enabled: boolean): void {
-  LOG_CONFIG[category] = enabled;
-  console.log(`🔧 Log category "${category}" set to ${enabled ? 'ON' : 'OFF'}`);
-}
-
-// Enable all logs
-export function enableAllLogs(): void {
-  Object.keys(LOG_CONFIG).forEach(key => {
-    LOG_CONFIG[key as keyof LogConfig] = true;
-  });
-  console.log('✅ All logs enabled');
-}
-
-// Disable all logs
-export function disableAllLogs(): void {
-  Object.keys(LOG_CONFIG).forEach(key => {
-    LOG_CONFIG[key as keyof LogConfig] = false;
-  });
-  console.log('❌ All logs disabled');
 }
 
 // Extend Window interface for debugging
