@@ -3,6 +3,8 @@
  * Usage (internal): bun run runtime/scenarios/p2p-node.ts --role hub|alice|bob ...
  */
 
+import { ethers } from 'ethers';
+
 import { startStandaloneRelayServer } from '../relay/standalone-server';
 import { main, startP2P, processRuntime, enqueueRuntimeInput, createLazyEntity, generateLazyEntityId, getActiveJAdapter, startRuntimeLoop } from '../runtime.ts';
 import { createLocalDeliveryHandler } from '../relay/local-delivery';
@@ -11,15 +13,13 @@ import { processUntil } from './helpers';
 import { isLeft, deriveDelta } from '../account/utils';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey, getSignerPrivateKey } from '../account/crypto';
 import { loadJurisdictions } from '../jurisdiction/jurisdiction-loader';
-import { DEFAULT_TOKENS, TOKEN_REGISTRATION_AMOUNT, getDefaultTokenSupply } from '../jurisdiction/default-tokens';
-import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/index.ts';
+import { deployMissingDefaultTokens } from '../jurisdiction/dev-token-deployment';
 import { hashHtlcSecret } from '../protocol/htlc/utils';
 import type { AccountReplica, Delta } from '../types/account';
 import type { EntityInput, JurisdictionConfig } from '../entity/types';
 import type { RuntimeState } from '../runtime/types';
 import type { JAdapter, JTokenInfo } from '../jadapter/types';
 import type { Profile } from '../entity/profile';
-import { ethers } from 'ethers';
 import { withDeterministicHtlcTestSecret } from '../protocol/htlc/test-secret-capability';
 
 const args = globalThis.process.argv.slice(2);
@@ -100,58 +100,17 @@ const resolveJurisdiction = (): {
   };
 };
 
-const deployDefaultTokensOnRpc = async (jadapter: JAdapter): Promise<void> => {
-  if (jadapter.mode === 'browservm') return;
-  const existing = await jadapter.getTokenRegistry().catch(() => []);
-  if (existing.length > 0) return;
-
-  const depositoryAddress = jadapter.addresses?.depository;
-  if (!depositoryAddress) {
-    throw new Error('TOKEN_DEPLOY: Depository address missing');
-  }
-
-  console.log(`[P2P] Deploying default tokens on ${jurisdictionName}...`);
-  const erc20Factory = new ERC20Mock__factory(jadapter.signer);
-  for (const token of DEFAULT_TOKENS) {
-    const tokenContract = await erc20Factory.deploy(
-      token.name,
-      token.symbol,
-      token.decimals,
-      getDefaultTokenSupply(token.decimals),
-    );
-    await tokenContract.waitForDeployment();
-    const tokenAddress = await tokenContract.getAddress();
-    console.log(`[P2P] ${token.symbol} deployed at ${tokenAddress}`);
-
-    const approveTx = await tokenContract.approve(depositoryAddress, TOKEN_REGISTRATION_AMOUNT);
-    await approveTx.wait();
-
-    const registerTx = await jadapter.depository.connect(jadapter.signer).adminRegisterExternalToken({
-      entity: ethers.ZeroHash,
-      contractAddress: tokenAddress,
-      externalTokenId: 0,
-      tokenType: 0,
-      internalTokenId: 0,
-      amount: TOKEN_REGISTRATION_AMOUNT,
-    });
-    await registerTx.wait();
-    console.log(`[P2P] Token registered: ${token.symbol}`);
-  }
-};
-
 const ensureTokenCatalog = async (jadapter: JAdapter, allowDeploy: boolean): Promise<JTokenInfo[]> => {
-  const current = await jadapter.getTokenRegistry().catch(() => []);
+  const current = await jadapter.getTokenRegistry();
   if (current.length > 0) {
     if (jadapter.mode !== 'browservm') {
       const firstToken = current[0];
       if (firstToken?.address) {
-        const code = await jadapter.provider.getCode(firstToken.address).catch(() => '0x');
+        const code = await jadapter.provider.getCode(firstToken.address);
         if (code === '0x' || code.length < 10) {
-          console.warn(`[P2P] Token ${firstToken.symbol} has no code - redeploying`);
-          if (allowDeploy) {
-            await deployDefaultTokensOnRpc(jadapter);
-            return await jadapter.getTokenRegistry().catch(() => []);
-          }
+          throw new Error(
+            `TOKEN_CONTRACT_CODE_MISSING:${firstToken.symbol}:${firstToken.address}`,
+          );
         }
       }
     }
@@ -159,8 +118,8 @@ const ensureTokenCatalog = async (jadapter: JAdapter, allowDeploy: boolean): Pro
   }
 
   if (allowDeploy) {
-    await deployDefaultTokensOnRpc(jadapter);
-    return await jadapter.getTokenRegistry().catch(() => []);
+    await deployMissingDefaultTokens(jadapter, jurisdictionName);
+    return await jadapter.getTokenRegistry();
   }
 
   return current;
@@ -168,7 +127,7 @@ const ensureTokenCatalog = async (jadapter: JAdapter, allowDeploy: boolean): Pro
 
 const waitForTokenCatalog = async (jadapter: JAdapter, maxRounds = 40): Promise<JTokenInfo[]> => {
   for (let i = 0; i < maxRounds; i++) {
-    const tokens = await jadapter.getTokenRegistry().catch(() => []);
+    const tokens = await jadapter.getTokenRegistry();
     if (tokens.length > 0) return tokens;
     await sleep(250);
   }

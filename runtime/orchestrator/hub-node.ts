@@ -3,12 +3,11 @@
 import { ethers, getIndexedAccountPath, HDNodeWallet, Mnemonic } from 'ethers';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/index.ts';
 import { createExternalWalletApi } from '../api/external-wallet-api';
 import { normalizeRuntimeId } from '../networking/runtime-id';
 import { bootstrapHub } from '../../scripts/bootstrap-hub';
-import { TOKEN_REGISTRATION_AMOUNT, defaultTokensForJurisdiction, getDefaultTokenSupply } from '../jurisdiction/default-tokens';
-import { DEV_CHAIN_IDS } from '../jadapter';
+import { defaultTokensForJurisdiction } from '../jurisdiction/default-tokens';
+import { deployMissingDefaultTokens } from '../jurisdiction/dev-token-deployment';
 import type { JAdapter, JTokenInfo } from '../jadapter/types';
 import {
   normalizeJurisdictionKey,
@@ -887,59 +886,6 @@ const ensureRpcStackReady = async (env: RuntimeState, jadapter: JAdapter): Promi
   throw new Error('RPC_STACK_ADDRESSES_MISSING');
 };
 
-const deployDefaultTokensOnRpc = async (jadapter: JAdapter, jurisdictionName = ''): Promise<void> => {
-  if (jadapter.mode === 'browservm') return;
-  if (!DEV_CHAIN_IDS.has(jadapter.chainId)) {
-    throw new Error(`TOKEN_DEFAULT_DEPLOY_FORBIDDEN:${jadapter.chainId}`);
-  }
-  const existing = await jadapter.getTokenRegistry();
-  const existingSymbols = new Set(
-    existing
-      .map(token => String(token.symbol || '').trim().toUpperCase())
-      .filter(symbol => symbol.length > 0),
-  );
-
-  const depositoryAddress = jadapter.addresses?.depository;
-  if (!depositoryAddress) {
-    throw new Error('TOKEN_DEPLOY_DEPOSITORY_MISSING');
-  }
-
-  const desiredTokens = defaultTokensForJurisdiction({
-    name: jurisdictionName,
-    chainId: Number((jadapter as { chainId?: number }).chainId),
-  });
-  console.log(`Deploying default tokens on dev chain: ${desiredTokens.map(token => token.symbol).join(',')}`);
-  const signer = jadapter.signer as unknown as ethers.Signer;
-  const erc20Factory = new ERC20Mock__factory(signer);
-  for (const token of desiredTokens) {
-    if (existingSymbols.has(String(token.symbol || '').trim().toUpperCase())) {
-      continue;
-    }
-    const tokenContract = await erc20Factory.deploy(
-      token.name,
-      token.symbol,
-      token.decimals,
-      getDefaultTokenSupply(token.decimals),
-    );
-    await tokenContract.waitForDeployment();
-    const tokenAddress = await tokenContract.getAddress();
-
-    const approveTx = await tokenContract.approve(depositoryAddress, TOKEN_REGISTRATION_AMOUNT);
-    await approveTx.wait();
-
-    const registerTx = await jadapter.depository.connect(signer as unknown as ethers.ContractRunner).adminRegisterExternalToken({
-      entity: ethers.ZeroHash,
-      contractAddress: tokenAddress,
-      externalTokenId: 0,
-      tokenType: 0,
-      internalTokenId: 0,
-      amount: TOKEN_REGISTRATION_AMOUNT,
-    });
-    await registerTx.wait();
-    console.log(`Token registered ${token.symbol} -> ${tokenAddress}`);
-  }
-};
-
 const ensureTokenCatalog = async (jadapter: JAdapter, allowDeploy: boolean, jurisdictionName = ''): Promise<JTokenInfo[]> => {
   const current = await jadapter.getTokenRegistry();
   const desiredTokens = defaultTokensForJurisdiction({
@@ -954,7 +900,7 @@ const ensureTokenCatalog = async (jadapter: JAdapter, allowDeploy: boolean, juri
   const hasDesiredTokens = desiredTokens.every(token => existingSymbols.has(token.symbol.trim().toUpperCase()));
   if (current.length >= HUB_REQUIRED_TOKEN_COUNT && hasDesiredTokens) return current;
   if (allowDeploy) {
-    await deployDefaultTokensOnRpc(jadapter, jurisdictionName);
+    await deployMissingDefaultTokens(jadapter, jurisdictionName);
     return await waitForTokenCatalog(jadapter);
   }
   throw new Error(`TOKEN_CATALOG_INCOMPLETE required=${HUB_REQUIRED_TOKEN_COUNT} actual=${current.length}`);
