@@ -312,7 +312,7 @@ const reliableOrder = (output: RoutedEntityInput): number => {
 const routingDeps = (
   getP2P: RuntimeOutputRoutingDeps['getP2P'],
 ): RuntimeOutputRoutingDeps => ({
-  ensureRuntimeState: env => env.infrastructure!,
+  ensureRuntimeInfrastructure: env => env.infrastructure!,
   getP2P,
   enqueueRuntimeInputs: () => {},
   extractEntityId: replicaKey => String(replicaKey).split(':')[0] || '',
@@ -444,7 +444,7 @@ describe('ordered reliable output lanes', () => {
       pendingNetworkOutputs: [],
     } as unknown as RuntimeReplica;
     const deps = {
-      ensureRuntimeState: (targetEnv: RuntimeReplica) => targetEnv.infrastructure ??= {},
+      ensureRuntimeInfrastructure: (targetEnv: RuntimeReplica) => targetEnv.infrastructure ??= {},
     } as RuntimeOutputRoutingDeps;
 
     env.pendingNetworkOutputs = rescheduleDeferredOutputs(
@@ -521,7 +521,7 @@ describe('ordered reliable output lanes', () => {
       pendingNetworkOutputs: [],
     } as unknown as RuntimeReplica;
     const deps = {
-      ensureRuntimeState: (targetEnv: RuntimeReplica) => targetEnv.infrastructure ??= {},
+      ensureRuntimeInfrastructure: (targetEnv: RuntimeReplica) => targetEnv.infrastructure ??= {},
     } as RuntimeOutputRoutingDeps;
 
     env.pendingNetworkOutputs = rescheduleDeferredOutputs(
@@ -555,7 +555,7 @@ describe('ordered reliable output lanes', () => {
       pendingNetworkOutputs: [],
     } as unknown as RuntimeReplica;
     const deps = {
-      ensureRuntimeState: (targetEnv: RuntimeReplica) => targetEnv.infrastructure ??= {},
+      ensureRuntimeInfrastructure: (targetEnv: RuntimeReplica) => targetEnv.infrastructure ??= {},
     } as RuntimeOutputRoutingDeps;
 
     env.pendingNetworkOutputs = rescheduleDeferredOutputs(
@@ -631,7 +631,7 @@ describe('ordered reliable output lanes', () => {
       pendingNetworkOutputs: [],
     } as unknown as RuntimeReplica;
     const deps = {
-      ensureRuntimeState: (targetEnv: RuntimeReplica) => targetEnv.infrastructure ??= {},
+      ensureRuntimeInfrastructure: (targetEnv: RuntimeReplica) => targetEnv.infrastructure ??= {},
     } as RuntimeOutputRoutingDeps;
     let pending: RoutedEntityInput[] = [];
 
@@ -657,7 +657,7 @@ describe('ordered reliable output lanes', () => {
       pendingNetworkOutputs: [],
     } as unknown as RuntimeReplica;
     const deps = {
-      ensureRuntimeState: (targetEnv: RuntimeReplica) => targetEnv.infrastructure ??= {},
+      ensureRuntimeInfrastructure: (targetEnv: RuntimeReplica) => targetEnv.infrastructure ??= {},
     } as RuntimeOutputRoutingDeps;
 
     const pending = rescheduleDeferredOutputs(env, [], [lower, higher], [], deps);

@@ -2407,7 +2407,7 @@ describe('audit fail-fast regressions', () => {
       {
         isReplay: false,
         routingDeps: {
-          ensureRuntimeState: targetEnv => targetEnv.infrastructure!,
+          ensureRuntimeInfrastructure: targetEnv => targetEnv.infrastructure!,
           enqueueRuntimeInputs: () => {},
           extractEntityId: replicaKey => replicaKey.split(':')[0] ?? '',
           hasLocalSignerForEntity: () => true,

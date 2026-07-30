@@ -364,7 +364,7 @@ export type RuntimeEntityInputRoutingResult = {
 };
 
 export type RuntimeOutputRoutingDeps = {
-  ensureRuntimeState(env: RuntimeReplica): NonNullable<RuntimeReplica['infrastructure']>;
+  ensureRuntimeInfrastructure(env: RuntimeReplica): NonNullable<RuntimeReplica['infrastructure']>;
   getP2P(env: RuntimeReplica): RuntimeP2PDispatch | null;
   enqueueRuntimeInputs(
     env: RuntimeReplica,
@@ -385,7 +385,7 @@ const getDeferredNetworkMeta = (
   env: RuntimeReplica,
   deps: RuntimeOutputRoutingDeps,
 ): NonNullable<NonNullable<RuntimeReplica['infrastructure']>['deferredNetworkMeta']> => {
-  const state = deps.ensureRuntimeState(env);
+  const state = deps.ensureRuntimeInfrastructure(env);
   if (!state.deferredNetworkMeta) {
     state.deferredNetworkMeta = new Map();
   }

@@ -13,7 +13,7 @@ import type {
 import { RuntimeAdapterError } from './errors';
 import { resolveRuntimeAdapterRead, type RuntimeAdapterResolveContext } from './resolve';
 import { assertRuntimeCommandReady, getRuntimeCommandReadiness } from '../runtime/lifecycle';
-import { ensureRuntimeState } from '../runtime/runtime-state';
+import { ensureRuntimeInfrastructure } from '../runtime/runtime-infrastructure';
 import type { RuntimePublishedNotice } from '../runtime/loop-environment';
 
 export type EmbeddedRuntimeAdapterDeps = {
@@ -179,7 +179,7 @@ export class EmbeddedRuntimeAdapter implements RuntimeAdapter {
    * status must be a value snapshot so an uncommitted H+1 cannot leak.
    */
   private publishCommittedMetadata(env: RuntimeReplica): void {
-    if (ensureRuntimeState(env).stateMutationInFlight) {
+    if (ensureRuntimeInfrastructure(env).stateMutationInFlight) {
       throw new RuntimeAdapterError(
         'E_INTERNAL',
         'RUNTIME_COMMITTED_STATE_UNAVAILABLE_RELOAD_REQUIRED',

@@ -2,11 +2,11 @@ import type { RuntimeReplica } from './types';
 import { runtimeIsBrowser } from '../infra/runtime-process';
 
 export type RuntimeCleanLogDeps = {
-  ensureRuntimeState: (env: RuntimeReplica) => NonNullable<RuntimeReplica['infrastructure']>;
+  ensureRuntimeInfrastructure: (env: RuntimeReplica) => NonNullable<RuntimeReplica['infrastructure']>;
 };
 
 const getCleanLogBuffer = (env: RuntimeReplica, deps: RuntimeCleanLogDeps): string[] => {
-  const state = deps.ensureRuntimeState(env);
+  const state = deps.ensureRuntimeInfrastructure(env);
   if (!state.cleanLogs) state.cleanLogs = [];
   return state.cleanLogs;
 };

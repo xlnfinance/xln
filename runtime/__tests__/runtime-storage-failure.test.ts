@@ -13,7 +13,7 @@ import { createFrameExecutionState } from '../runtime/frame/execution-state';
 import { handleRuntimeFrameStorageFailure } from '../runtime/frame/storage-failure';
 import { createRuntimeFrameTransaction } from '../runtime/frame/transaction';
 import { dbRootPath } from '../runtime/platform';
-import { ensureRuntimeState } from '../runtime/runtime-state';
+import { ensureRuntimeInfrastructure } from '../runtime/runtime-infrastructure';
 import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
 import { classifyRuntimeFrameCommitProof } from '../storage/commit';
 import { buildDurableRuntimeMachineSnapshot } from '../storage/wal/snapshot';
@@ -32,7 +32,7 @@ const prepareFrame = (seed: string) => {
   live.state.height = 7;
   live.state.timestamp = 700;
   const stopped = { count: 0 };
-  ensureRuntimeState(live).stopLoop = () => {
+  ensureRuntimeInfrastructure(live).stopLoop = () => {
     stopped.count += 1;
   };
 
@@ -114,8 +114,8 @@ describe('Runtime WAL storage failure boundary', () => {
     expect(transaction.published).toBe(true);
     expect(frame.commitDisposition).toBe('committed');
     expect(frame.reliableReceiptStateDurable).toBe(true);
-    expect(ensureRuntimeState(live).lifecyclePhase).toBe('halted');
-    expect(ensureRuntimeState(live).fatalDebugPayload?.height).toBe(8);
+    expect(ensureRuntimeInfrastructure(live).lifecyclePhase).toBe('halted');
+    expect(ensureRuntimeInfrastructure(live).fatalDebugPayload?.height).toBe(8);
     expect(stopped.count).toBe(1);
   });
 
@@ -135,8 +135,8 @@ describe('Runtime WAL storage failure boundary', () => {
     expect(transaction.published).toBe(false);
     expect(frame.commitDisposition).toBe('unknown');
     expect(frame.reliableReceiptStateDurable).toBe(false);
-    expect(ensureRuntimeState(live).lifecyclePhase).toBe('halted');
-    expect(ensureRuntimeState(live).fatalDebugPayload?.height).toBe(8);
+    expect(ensureRuntimeInfrastructure(live).lifecyclePhase).toBe('halted');
+    expect(ensureRuntimeInfrastructure(live).fatalDebugPayload?.height).toBe(8);
     expect(stopped.count).toBe(1);
   });
 
@@ -155,7 +155,7 @@ describe('Runtime WAL storage failure boundary', () => {
     expect(transaction.published).toBe(false);
     expect(frame.commitDisposition).toBe('conflict');
     expect(frame.reliableReceiptStateDurable).toBe(false);
-    expect(ensureRuntimeState(live).lifecyclePhase).toBe('halted');
+    expect(ensureRuntimeInfrastructure(live).lifecyclePhase).toBe('halted');
     expect(stopped.count).toBe(1);
   });
 });

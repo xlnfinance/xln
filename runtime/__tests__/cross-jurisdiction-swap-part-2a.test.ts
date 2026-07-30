@@ -178,7 +178,7 @@ import { createDueScheduledWakeInputs } from '../runtime/scheduled-wake';
 import { ACCOUNT_PENDING_RESEND_AFTER_MS } from '../entity/scheduler';
 
 const makeLocalCrossJRoutingDeps = (): RuntimeEntityRoutingDeps => ({
-  ensureRuntimeState: current => {
+  ensureRuntimeInfrastructure: current => {
     if (!current.infrastructure) throw new Error('TEST_RUNTIME_STATE_REQUIRED');
     return current.infrastructure;
   },

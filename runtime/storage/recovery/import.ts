@@ -11,7 +11,7 @@ import {
   assertCertifiedJHistoryIntegrity,
   assertValidatorJHistoryMatchesCertifiedAnchor,
 } from '../../jurisdiction/local-history';
-import { ensureRuntimeState } from '../../runtime/runtime-state';
+import { ensureRuntimeInfrastructure } from '../../runtime/runtime-infrastructure';
 import type { RuntimeReplica } from '../../runtime/types';
 import { clearDatabase } from '../clear-database';
 import { computeCanonicalEntityHash, computeCanonicalRuntimeStateHash } from '../canonical-hash';
@@ -158,7 +158,7 @@ const persistRestoredRuntimeStateUnlocked = async (
   if (await deps.tryOpenStorageDb(env, 'previous')) {
     await clearDatabase(deps.getStorageDb(env, 'previous'));
   }
-  const state = ensureRuntimeState(env);
+  const state = ensureRuntimeInfrastructure(env);
   state.storageEntityHashDocs = replacement.entityHashDocs;
   state.currentStorageOverlayMarks = [];
 };

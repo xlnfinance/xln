@@ -26,7 +26,7 @@ import {
   type RuntimeP2PLifecycleDeps,
 } from './p2p-lifecycle';
 import { registerReliableReceiptIngress } from './reliable-delivery';
-import { ensureRuntimeState } from './runtime-state';
+import { ensureRuntimeInfrastructure } from './runtime-infrastructure';
 import { assertScheduledWakeTxAuthorized } from './scheduled-wake';
 import { assertRuntimeCommandReady } from './lifecycle';
 import {
@@ -75,7 +75,7 @@ const normalizeRuntimeEntityInput = (
 const getRuntimeEntityRoutingDeps = (
   apiDeps: RuntimeRoutingApiDeps,
 ): RuntimeEntityRoutingDeps => ({
-  ensureRuntimeState,
+  ensureRuntimeInfrastructure,
   enqueueRuntimeInputs: (env, inputs, runtimeTxs, jInputs, ingressTimestamp, options) =>
     enqueueRuntimeInputs(env, inputs, runtimeTxs, jInputs, ingressTimestamp, undefined, options),
   extractEntityId,
@@ -142,7 +142,7 @@ const handleInboundReliableReceipt = (
 const getRuntimeP2PLifecycleDeps = (
   apiDeps: RuntimeRoutingApiDeps,
 ): RuntimeP2PLifecycleDeps => ({
-  ensureRuntimeState,
+  ensureRuntimeInfrastructure,
   notifyEnvChange: apiDeps.notifyEnvChange,
   enqueueRuntimeInputs: (env, inputs) => enqueueRuntimeInputs(env, inputs),
   handleInboundP2PEntityInputs: (env, from, envelope, timestamp) =>

@@ -118,7 +118,7 @@ describe('storage filesystem durability', () => {
 
     try {
       await expect(tryOpenStorageDb(env, {
-        ensureRuntimeState: target => (target.infrastructure ??= {}),
+        ensureRuntimeInfrastructure: target => (target.infrastructure ??= {}),
       })).rejects.toThrow('STORAGE_EPOCH_MARKER_INVALID');
     } finally {
       if (env.infrastructure?.storageDb) await closeStorageDb(env);
@@ -152,7 +152,7 @@ describe('storage filesystem durability', () => {
       },
     } as unknown as RuntimeReplica;
     const deps = {
-      ensureRuntimeState: (target: RuntimeReplica) => (target.infrastructure ??= {}),
+      ensureRuntimeInfrastructure: (target: RuntimeReplica) => (target.infrastructure ??= {}),
     };
 
     const closing = closeStorageDb(env);
@@ -197,7 +197,7 @@ describe('storage filesystem durability', () => {
       },
     } as unknown as RuntimeReplica;
     const deps = {
-      ensureRuntimeState: (target: RuntimeReplica) => (target.infrastructure ??= {}),
+      ensureRuntimeInfrastructure: (target: RuntimeReplica) => (target.infrastructure ??= {}),
     };
 
     const closingFrame = closeRuntimeWalDb(env);

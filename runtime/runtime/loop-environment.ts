@@ -6,7 +6,7 @@ import {
   readRuntimeEnv,
 } from '../infra/runtime-process';
 import { safeStringify } from '../protocol/serialization';
-import { ensureRuntimeState } from './runtime-state';
+import { ensureRuntimeInfrastructure } from './runtime-infrastructure';
 import type { RuntimeReplica, RuntimeInput } from './types';
 import {
   getRuntimeCommandReadiness,
@@ -51,7 +51,7 @@ export const registerEnvChangeCallback = (
   env: RuntimeReplica,
   callback: (env: RuntimeReplica) => void,
 ): (() => void) => {
-  const state = ensureRuntimeState(env);
+  const state = ensureRuntimeInfrastructure(env);
   state.envChangeCallbacks ??= new Set();
   state.envChangeCallbacks.add(callback);
   return () => state.envChangeCallbacks?.delete(callback);
@@ -79,7 +79,7 @@ export const registerRuntimePublishedCallback = (
   callback: (notice: RuntimePublishedNotice) => void,
 ): (() => void) =>
   registerEnvChangeCallback(env, (committedEnv) => {
-    const state = ensureRuntimeState(committedEnv);
+    const state = ensureRuntimeInfrastructure(committedEnv);
     if (state.stateMutationInFlight) {
       throw new Error('RUNTIME_PUBLISHED_NOTICE_BEFORE_COMMIT');
     }
@@ -98,7 +98,7 @@ export const registerRuntimeFrameCommitCallback = (
   env: RuntimeReplica,
   callback: (frame: { height: number; runtimeInput: RuntimeInput }) => void,
 ): (() => void) => {
-  const state = ensureRuntimeState(env);
+  const state = ensureRuntimeInfrastructure(env);
   state.runtimeFrameCommitCallbacks ??= new Set();
   state.runtimeFrameCommitCallbacks.add(callback);
   return () => state.runtimeFrameCommitCallbacks?.delete(callback);
@@ -111,7 +111,7 @@ export const registerRecoveryBackupBarrier = (
     info: { height: number; remoteOutputCount: number; jInputCount: number },
   ) => Promise<void>,
 ): (() => void) => {
-  const state = ensureRuntimeState(env);
+  const state = ensureRuntimeInfrastructure(env);
   state.recoveryBackupBarrier = callback;
   return () => {
     if (state.recoveryBackupBarrier === callback) state.recoveryBackupBarrier = null;

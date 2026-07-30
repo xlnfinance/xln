@@ -18,7 +18,7 @@ import {
 type RuntimeLifecycleState = NonNullable<RuntimeReplica['infrastructure']>;
 
 export type RuntimeWakeDeps = {
-  ensureRuntimeState(env: RuntimeReplica): RuntimeLifecycleState;
+  ensureRuntimeInfrastructure(env: RuntimeReplica): RuntimeLifecycleState;
   requireRuntimeMempool(env: RuntimeReplica): RuntimeInput;
   enqueueRuntimeInputs(
     env: RuntimeReplica,

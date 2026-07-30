@@ -5,7 +5,7 @@ import {
 } from '../../runtime';
 import { deriveSignerAddressSync } from '../../account/crypto';
 import { generateLazyEntityId } from '../../entity/factory';
-import { ensureRuntimeState } from '../../runtime/runtime-state';
+import { ensureRuntimeInfrastructure } from '../../runtime/runtime-infrastructure';
 import type { ConsensusConfig, JurisdictionConfig } from '../../entity/types';
 import type { RuntimeTx } from '../../runtime/types';
 import { createTestJReplica } from '../helpers/j-replica';
@@ -66,7 +66,7 @@ try {
   failure = error instanceof Error ? error.message : String(error);
 }
 
-const state = ensureRuntimeState(env);
+const state = ensureRuntimeInfrastructure(env);
 console.log(`STORAGE_TIMEOUT_RESULT:${JSON.stringify({
   failure,
   height: env.state.height,

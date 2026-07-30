@@ -5,7 +5,7 @@ import {
 } from '../reliable-delivery';
 import { requireRuntimeMempool } from '../input-queue';
 import { transitionRuntimeLifecycle } from '../lifecycle';
-import { ensureRuntimeState } from '../runtime-state';
+import { ensureRuntimeInfrastructure } from '../runtime-infrastructure';
 import {
   prependOlderRuntimeInput,
 } from './transaction';
@@ -29,7 +29,7 @@ const haltMutatedRuntime = (
   env: RuntimeReplica,
   error: unknown,
 ): void => {
-  const state = ensureRuntimeState(env);
+  const state = ensureRuntimeInfrastructure(env);
   const cause = error instanceof Error ? error : new Error(String(error));
   transitionRuntimeLifecycle(state, 'halted');
   state.fatalDebugPayload = {

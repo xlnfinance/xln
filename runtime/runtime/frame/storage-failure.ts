@@ -1,6 +1,6 @@
 import { clearPendingAuditEvents } from '../env-events';
 import { transitionRuntimeLifecycle } from '../lifecycle';
-import { ensureRuntimeState } from '../runtime-state';
+import { ensureRuntimeInfrastructure } from '../runtime-infrastructure';
 import type { RuntimeReplica } from '../types';
 import type { FrameExecutionState } from './execution-state';
 import {
@@ -15,7 +15,7 @@ const haltRuntimeForRecovery = (
   runtime: RuntimeReplica,
   message: string,
 ): void => {
-  const state = ensureRuntimeState(runtime);
+  const state = ensureRuntimeInfrastructure(runtime);
   transitionRuntimeLifecycle(state, 'halted');
   state.fatalDebugPayload = {
     message,

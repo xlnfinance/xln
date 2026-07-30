@@ -1,6 +1,6 @@
 import type { RuntimeInput, RuntimeReplica } from '../types';
 import { requireRuntimeMempool } from '../input-queue';
-import { ensureRuntimeState } from '../runtime-state';
+import { ensureRuntimeInfrastructure } from '../runtime-infrastructure';
 import { rebuildScheduledWakeIndex } from '../scheduled-wake';
 
 export { cloneRuntimeFrameMempool } from './clone';
@@ -25,7 +25,7 @@ export const createRuntimeFrameTransaction = (
 ): RuntimeFrameTransaction => {
   const frameMempool = requireRuntimeMempool(liveEnv);
   const activeMempool: RuntimeInput = { runtimeTxs: [], entityInputs: [] };
-  ensureRuntimeState(liveEnv).inFlightEntityInputs = frameMempool.entityInputs.length;
+  ensureRuntimeInfrastructure(liveEnv).inFlightEntityInputs = frameMempool.entityInputs.length;
   liveEnv.runtimeMempool = activeMempool;
   return {
     liveEnv,
@@ -105,7 +105,7 @@ export const publishRuntimeFrameTransaction = (
   liveEnv.history = [];
   liveEnv.frameLogs = liveEnv.frameLogs.slice(transaction.liveFrameLogBaseLength);
 
-  const state = ensureRuntimeState(liveEnv);
+  const state = ensureRuntimeInfrastructure(liveEnv);
   state.stateMutationInFlight = false;
   state.wakeRequested =
     state.wakeRequested === true ||

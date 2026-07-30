@@ -4,12 +4,12 @@ import type { RuntimeReplica, ReliableDeliveryReceipt, RuntimeInput, RuntimeTx }
 import type { JInput } from '../jurisdiction/input';
 import { getWallClockMs } from '../infra/time';
 import { createStructuredLogger } from '../infra/logger';
-import { ensureRuntimeState } from './runtime-state';
+import { ensureRuntimeInfrastructure } from './runtime-infrastructure';
 
 const runtimeInputQueueLog = createStructuredLogger('runtime.input_queue');
 
 export type RuntimeInputQueueDeps = {
-  ensureRuntimeState: (env: RuntimeReplica) => NonNullable<RuntimeReplica['infrastructure']>;
+  ensureRuntimeInfrastructure: (env: RuntimeReplica) => NonNullable<RuntimeReplica['infrastructure']>;
   requestRuntimeLoopWake: (env: RuntimeReplica) => void;
 };
 
@@ -19,7 +19,7 @@ export type RuntimeInputQueueOptions = {
 };
 
 export const requestRuntimeLoopWake = (env: RuntimeReplica): void => {
-  const state = ensureRuntimeState(env);
+  const state = ensureRuntimeInfrastructure(env);
   if (state.halted) return;
   const wakeLoop = state.wakeLoop;
   if (wakeLoop) {
@@ -66,7 +66,7 @@ export const enqueueRuntimeInputsWithDeps = (
   options: RuntimeInputQueueOptions = {},
 ): void => {
   const mempool = requireRuntimeMempool(env);
-  const state = deps.ensureRuntimeState(env);
+  const state = deps.ensureRuntimeInfrastructure(env);
   const hasIncomingWork = Boolean(
     inputs?.length || runtimeTxs?.length || jInputs?.length || reliableReceipts?.length,
   );
@@ -134,7 +134,7 @@ export const enqueueRuntimeInput = (env: RuntimeReplica, runtimeInput: RuntimeIn
     : (runtimeInput.timestamp ?? getWallClockMs());
   enqueueRuntimeInputsWithDeps(
     env,
-    { ensureRuntimeState, requestRuntimeLoopWake },
+    { ensureRuntimeInfrastructure, requestRuntimeLoopWake },
     runtimeInput.entityInputs,
     runtimeInput.runtimeTxs,
     runtimeInput.jInputs,

@@ -441,7 +441,7 @@ test('runtime lifecycle clears attachment only through drained shutdown', async 
   } as unknown as RuntimeReplica;
 
   await stopRuntimeP2PAndWait(env, {
-    ensureRuntimeState: (target) => target.infrastructure!,
+    ensureRuntimeInfrastructure: (target) => target.infrastructure!,
     notifyEnvChange: () => {},
     handleInboundP2PEntityInput: () => ({ kind: 'accepted' }),
     handleInboundReliableReceipt: () => {},
@@ -467,7 +467,7 @@ test('synchronous stop retains transport ownership for a later awaited drain', a
     },
   } as unknown as RuntimeReplica;
   const deps = {
-    ensureRuntimeState: (target: RuntimeReplica) => target.infrastructure!,
+    ensureRuntimeInfrastructure: (target: RuntimeReplica) => target.infrastructure!,
     notifyEnvChange: () => {},
     handleInboundP2PEntityInput: () => ({ kind: 'accepted' as const }),
     handleInboundReliableReceipt: () => {},
@@ -508,7 +508,7 @@ test('synchronous runtime stop preserves actual P2P clients until awaited drain'
     lastP2PConfig: { runtimeId: RUNTIME_ID },
   };
   const deps = {
-    ensureRuntimeState: (target: RuntimeReplica) => target.infrastructure!,
+    ensureRuntimeInfrastructure: (target: RuntimeReplica) => target.infrastructure!,
     notifyEnvChange: () => {},
     handleInboundP2PEntityInput: () => ({ kind: 'accepted' as const }),
     handleInboundReliableReceipt: () => {},
@@ -542,7 +542,7 @@ test('runtime lifecycle retains the quiesced handle when drain fails', async () 
   } as unknown as RuntimeReplica;
 
   await expect(stopRuntimeP2PAndWait(env, {
-    ensureRuntimeState: (target) => target.infrastructure!,
+    ensureRuntimeInfrastructure: (target) => target.infrastructure!,
     notifyEnvChange: () => {},
     handleInboundP2PEntityInput: () => ({ kind: 'accepted' }),
     handleInboundReliableReceipt: () => {},

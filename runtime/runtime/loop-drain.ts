@@ -2,7 +2,7 @@ import type { RuntimeReplica } from './types';
 import { inferRuntimeLifecyclePhase } from './lifecycle';
 import { requestRuntimeLoopWake } from './input-queue';
 import { getRemainingRuntimeFrameDelayMs } from './loop-work';
-import { ensureRuntimeState } from './runtime-state';
+import { ensureRuntimeInfrastructure } from './runtime-infrastructure';
 
 const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
@@ -46,7 +46,7 @@ const drainInactiveRuntime = async (
   remaining: number,
   deps: RuntimeDrainDeps,
 ): Promise<boolean> => {
-  const state = ensureRuntimeState(env);
+  const state = ensureRuntimeInfrastructure(env);
   if (state.persistencePaused) throw new Error('RUNTIME_WORK_DRAIN_PERSISTENCE_PAUSED');
   if (inferRuntimeLifecyclePhase(state) === 'halted') throw new Error('RUNTIME_WORK_DRAIN_HALTED');
   if (state.loopPromise || state.processingPromise) return false;

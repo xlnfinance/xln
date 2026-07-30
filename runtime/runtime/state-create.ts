@@ -4,7 +4,7 @@ import { extractEntityId, extractSignerId } from '../protocol/identity';
 import { attachEventEmitters } from './env-events';
 import { requireRuntimeMempool } from './input-queue';
 import { persistGossipProfileToInfraDb } from './infra-gossip-store';
-import { ensureRuntimeState } from './runtime-state';
+import { ensureRuntimeInfrastructure } from './runtime-infrastructure';
 import { createGossipLayer } from '../networking/gossip';
 import type { Profile } from '../entity/profile';
 import { buildLocalEntityProfile } from '../networking/gossip-helper';
@@ -109,7 +109,7 @@ export const createRuntimeStateApi = (deps: RuntimeStateCreateDeps) => {
     attachEventEmitters(env);
     requireRuntimeMempool(env);
     deps.ensureRuntimeConfig(env);
-    ensureRuntimeState(env);
+    ensureRuntimeInfrastructure(env);
     if (seedText) prewarmRuntimeSignerCache(seedText, 20);
     return env;
   };

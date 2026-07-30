@@ -52,7 +52,7 @@ const createRebranchedLevel = (path: string): Level<Buffer, Buffer> => withRebra
 );
 
 export type RuntimeStorageDbDeps = {
-  ensureRuntimeState(env: RuntimeReplica): RuntimeLifecycleState;
+  ensureRuntimeInfrastructure(env: RuntimeReplica): RuntimeLifecycleState;
 };
 
 const DEFAULT_DB_NAMESPACE = 'default';
@@ -561,7 +561,7 @@ export const getStorageDb = (
   role: StorageDbRole = 'current',
 ): Level<Buffer, Buffer> => {
   assertRuntimeDbNotClosing(env, role === 'current' ? 'storage-current' : 'storage-previous');
-  const state = deps.ensureRuntimeState(env);
+  const state = deps.ensureRuntimeInfrastructure(env);
   const fields = storageStateFields(role);
   const existing = state[fields.dbField] as Level<Buffer, Buffer> | undefined;
   if (existing) return existing;
@@ -734,7 +734,7 @@ const waitForStorageEpochRotation = async (
   env: RuntimeReplica,
   deps: RuntimeStorageDbDeps,
 ): Promise<void> => {
-  const pending = deps.ensureRuntimeState(env).storageEpochRotatePromise;
+  const pending = deps.ensureRuntimeInfrastructure(env).storageEpochRotatePromise;
   if (pending) await pending;
 };
 
@@ -745,7 +745,7 @@ const verifyOpenedStorageDb = async (
   db: Level<Buffer, Buffer>,
 ): Promise<void> => {
   assertStorageSafetyOverridesAllowed();
-  const state = deps.ensureRuntimeState(env);
+  const state = deps.ensureRuntimeInfrastructure(env);
   const verifiedField = role === 'current' ? 'storageVerifiedCurrentHeight' : 'storageVerifiedPreviousHeight';
   const previousVerifiedHeight = Number(state[verifiedField] ?? -1);
   const head = await readStorageHead(db);
@@ -761,7 +761,7 @@ export const tryOpenStorageDb = async (
 ): Promise<boolean> => {
   await waitForStorageEpochRotation(env, deps);
   await recoverStorageEpochRotation(env);
-  const state = deps.ensureRuntimeState(env);
+  const state = deps.ensureRuntimeInfrastructure(env);
   const fields = storageStateFields(role);
   if (role === 'previous' && !(await storagePathExists(resolveStorageDbPath(env, role)))) {
     return false;
@@ -801,7 +801,7 @@ export const rotateStorageEpochDb = async (
   timestamp = env.state.timestamp,
 ): Promise<boolean> => {
   if (!nodeProcess) return false;
-  const state = deps.ensureRuntimeState(env);
+  const state = deps.ensureRuntimeInfrastructure(env);
   if (state.storageEpochRotatePromise) {
     await state.storageEpochRotatePromise;
     return true;
@@ -861,7 +861,7 @@ export const getInfraDb = (
   deps: RuntimeStorageDbDeps,
 ): Level<Buffer, Buffer> => {
   assertRuntimeDbNotClosing(env, 'infra');
-  const state = deps.ensureRuntimeState(env);
+  const state = deps.ensureRuntimeInfrastructure(env);
   if (!state.infraDb) {
     const path = resolveDbPath(env, 'infra');
     state.infraDb = createRebranchedLevel(path);
@@ -874,7 +874,7 @@ export const getRuntimeWalDb = (
   deps: RuntimeStorageDbDeps,
 ): Level<Buffer, Buffer> => {
   assertRuntimeDbNotClosing(env, 'runtime-wal');
-  const state = deps.ensureRuntimeState(env);
+  const state = deps.ensureRuntimeInfrastructure(env);
   if (!state.runtimeWalDb) {
     state.runtimeWalDb = createRebranchedLevel(resolveRuntimeWalDbPath(env));
   }
@@ -904,7 +904,7 @@ export const getHistoryViewDb = (
   deps: RuntimeStorageDbDeps,
 ): Level<Buffer, Buffer> => {
   assertRuntimeDbNotClosing(env, 'history-views');
-  const state = deps.ensureRuntimeState(env);
+  const state = deps.ensureRuntimeInfrastructure(env);
   if (!state.historyViewDb) {
     state.historyViewDb = createRebranchedLevel(resolveHistoryViewDbPath(env));
   }
@@ -949,7 +949,7 @@ export async function tryOpenRuntimeWalDb(
   env: RuntimeReplica,
   deps: RuntimeStorageDbDeps,
 ): Promise<boolean> {
-  const state = deps.ensureRuntimeState(env);
+  const state = deps.ensureRuntimeInfrastructure(env);
   if (!state.runtimeWalDbOpenPromise) {
     const db = getRuntimeWalDb(env, deps);
     state.runtimeWalDbOpenPromise = (async () => {
@@ -986,7 +986,7 @@ export async function tryOpenHistoryViewDb(
   env: RuntimeReplica,
   deps: RuntimeStorageDbDeps,
 ): Promise<boolean> {
-  const state = deps.ensureRuntimeState(env);
+  const state = deps.ensureRuntimeInfrastructure(env);
   if (!state.historyViewDbOpenPromise) {
     const db = getHistoryViewDb(env, deps);
     state.historyViewDbOpenPromise = (async () => {

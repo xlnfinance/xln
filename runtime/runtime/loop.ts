@@ -4,7 +4,7 @@ import {
   MAX_RUNTIME_J_TXS,
   MAX_RUNTIME_J_TXS_PER_JURISDICTION,
 } from './input-validation';
-import { ensureRuntimeState } from './runtime-state';
+import { ensureRuntimeInfrastructure } from './runtime-infrastructure';
 import type { RuntimeReplica, RuntimeInput } from './types';
 import { closeRuntimeWalDb, closeHistoryViewDb, closeInfraDb, closeStorageDb } from '../storage/runtime-dbs';
 import {
@@ -123,7 +123,7 @@ export const createRuntimeLoopApi = (deps: RuntimeLoopApiDeps) => {
   };
 
   const closeManagedInfraDb = async (env: RuntimeReplica): Promise<void> => {
-    ensureRuntimeState(env).infraDbClosing = true;
+    ensureRuntimeInfrastructure(env).infraDbClosing = true;
     await drainInfraDbWrites(env);
     await closeInfraDb(env);
   };

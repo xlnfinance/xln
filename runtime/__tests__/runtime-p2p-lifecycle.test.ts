@@ -27,7 +27,7 @@ test('detachRuntimeP2P closes p2p and clears runtime state', () => {
   } as unknown as RuntimeReplica;
 
   detachRuntimeP2P(env, {
-    ensureRuntimeState: (targetEnv) => {
+    ensureRuntimeInfrastructure: (targetEnv) => {
       targetEnv.infrastructure ??= {};
       return targetEnv.infrastructure;
     },

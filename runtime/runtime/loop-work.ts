@@ -22,7 +22,7 @@ import {
 import { requireRuntimeMempool } from './input-queue';
 import { ensureRuntimeConfig } from './loop-environment';
 import { enqueueRuntimeInputs } from './loop-infrastructure';
-import { ensureRuntimeState } from './runtime-state';
+import { ensureRuntimeInfrastructure } from './runtime-infrastructure';
 import type { EntityInput, EntityReplica } from '../entity/types';
 import type { RuntimeReplica, RuntimeInput } from './types';
 
@@ -91,7 +91,7 @@ const hasAccountMempoolWakeInput = (env: RuntimeReplica): boolean =>
   );
 
 const runtimeWakeDeps = {
-  ensureRuntimeState,
+  ensureRuntimeInfrastructure,
   requireRuntimeMempool,
   enqueueRuntimeInputs,
   getRuntimeNowMs: (env: RuntimeReplica) => env.state.timestamp ?? 0,
@@ -259,7 +259,7 @@ export const isRuntimeFrameReady = (
   if (env.scenarioMode) return true;
   const rawDelayMs = overrideDelayMs ?? ensureRuntimeConfig(env).minFrameDelayMs ?? 0;
   if (!Number.isFinite(rawDelayMs) || rawDelayMs <= 0) return true;
-  const lastFrameAt = ensureRuntimeState(env).lastFrameAt;
+  const lastFrameAt = ensureRuntimeInfrastructure(env).lastFrameAt;
   if (typeof lastFrameAt !== 'number' || !Number.isFinite(lastFrameAt) || lastFrameAt <= 0) {
     return true;
   }
@@ -273,7 +273,7 @@ export const getRemainingRuntimeFrameDelayMs = (
   if (env.scenarioMode) return 0;
   const rawDelayMs = overrideDelayMs ?? ensureRuntimeConfig(env).minFrameDelayMs ?? 0;
   if (!Number.isFinite(rawDelayMs) || rawDelayMs <= 0) return 0;
-  const lastFrameAt = ensureRuntimeState(env).lastFrameAt;
+  const lastFrameAt = ensureRuntimeInfrastructure(env).lastFrameAt;
   if (typeof lastFrameAt !== 'number' || !Number.isFinite(lastFrameAt) || lastFrameAt <= 0) {
     return 0;
   }

@@ -16,7 +16,7 @@ import {
   type CrossJurisdictionSwapSubmitResult,
 } from './jurisdiction-api';
 import { assertRuntimeCommandReady } from './lifecycle';
-import { ensureRuntimeState } from './runtime-state';
+import { ensureRuntimeInfrastructure } from './runtime-infrastructure';
 
 type RuntimeCommandDependencies = Pick<
   ReturnType<typeof createRuntimeLoopApi>,
@@ -69,7 +69,7 @@ export const createRuntimeCommandApi = (dependencies: RuntimeCommandDependencies
       entityInputs: [],
       crossJurisdictionIntent: structuredClone(canonicalRoute),
     };
-    const direct = ensureRuntimeState(env).directEntityInputsDispatch;
+    const direct = ensureRuntimeInfrastructure(env).directEntityInputsDispatch;
     let delivery = direct
       ? requireDeliveryResult(
           direct(targetRuntimeId, envelope, envelope.sourceRuntimeTimestamp),

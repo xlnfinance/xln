@@ -1,5 +1,5 @@
 import { runtimeIsBrowser } from '../infra/runtime-process';
-import { ensureRuntimeState } from '../runtime/runtime-state';
+import { ensureRuntimeInfrastructure } from '../runtime/runtime-infrastructure';
 import type { RuntimeReplica } from '../runtime/types';
 import type { RuntimeStorageApiDeps } from './runtime-storage-deps';
 import { createRuntimeStorageCommitApi } from './commit';
@@ -28,7 +28,7 @@ export const notifyRuntimeSyncAfterCommit = (
 ): Error | null => {
   const enabled = options.enabled ?? runtimeIsBrowser;
   if (!enabled || !env.runtimeId) return null;
-  const state = ensureRuntimeState(env);
+  const state = ensureRuntimeInfrastructure(env);
   try {
     const createChannel =
       options.createChannel ??

@@ -32,7 +32,7 @@ test('enqueueRuntimeInputs timestamps work and wakes the loop', () => {
   enqueueRuntimeInputsWithDeps(
     env,
     {
-      ensureRuntimeState: (targetEnv) => {
+      ensureRuntimeInfrastructure: (targetEnv) => {
         targetEnv.infrastructure ??= {};
         return targetEnv.infrastructure;
       },
@@ -67,7 +67,7 @@ test('enqueueRuntimeInputs preserves already accepted internal continuations dur
   enqueueRuntimeInputsWithDeps(
     env,
     {
-      ensureRuntimeState: () => env.infrastructure!,
+      ensureRuntimeInfrastructure: () => env.infrastructure!,
       requestRuntimeLoopWake: () => { wakeCount += 1; },
     },
     undefined,
@@ -92,7 +92,7 @@ test('enqueueRuntimeInputs rejects work after quiesce has paused durable persist
   expect(() => enqueueRuntimeInputsWithDeps(
     env,
     {
-      ensureRuntimeState: () => env.infrastructure!,
+      ensureRuntimeInfrastructure: () => env.infrastructure!,
       requestRuntimeLoopWake: () => {
         throw new Error('POST_PAUSE_INGRESS_MUST_NOT_WAKE');
       },

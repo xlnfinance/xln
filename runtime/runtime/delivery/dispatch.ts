@@ -302,7 +302,7 @@ const tryDirectOutputEnvelope = (
   deps: RuntimeOutputRoutingDeps,
   deferredOutputs: RoutedEntityInput[],
 ): boolean => {
-  const state = deps.ensureRuntimeState(env);
+  const state = deps.ensureRuntimeInfrastructure(env);
   const directDispatch = state.directEntityInputsDispatch;
   if (!directDispatch) return false;
   const delivery = requireDeliveryResult(
@@ -482,7 +482,7 @@ export const sendEntityInputWithRouting = (
   input: RoutedEntityInput,
   deps: RuntimeOutputRoutingDeps,
 ): RuntimeEntityInputRoutingResult => {
-  const state = deps.ensureRuntimeState(env);
+  const state = deps.ensureRuntimeInfrastructure(env);
   const originatedInput: RoutedEntityInput = input.sourceRuntimeFrame
     ? input
     : {

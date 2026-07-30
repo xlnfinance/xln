@@ -10,7 +10,7 @@ import {
   requestRuntimeLoopWake,
   type RuntimeInputQueueOptions,
 } from './input-queue';
-import { ensureRuntimeState } from './runtime-state';
+import { ensureRuntimeInfrastructure } from './runtime-infrastructure';
 import {
   getRuntimeWalDb,
   getHistoryViewDb,
@@ -27,9 +27,9 @@ import type { RuntimeReplica, ReliableDeliveryReceipt, RuntimeTx } from './types
 import type { JInput } from '../jurisdiction/input';
 
 const infrastructureLog = createStructuredLogger('runtime.infrastructure');
-const storageDeps = { ensureRuntimeState };
-const cleanLogDeps = { ensureRuntimeState };
-const inputQueueDeps = { ensureRuntimeState, requestRuntimeLoopWake };
+const storageDeps = { ensureRuntimeInfrastructure };
+const cleanLogDeps = { ensureRuntimeInfrastructure };
+const inputQueueDeps = { ensureRuntimeInfrastructure, requestRuntimeLoopWake };
 
 export const getRuntimeStorageDb = (
   env: RuntimeReplica,
@@ -64,7 +64,7 @@ export const tryOpenRuntimeHistoryViewDb = (env: RuntimeReplica): Promise<boolea
   tryOpenHistoryViewDb(env, storageDeps);
 
 export const waitForRuntimeLoopWake = async (env: RuntimeReplica): Promise<void> => {
-  const state = ensureRuntimeState(env);
+  const state = ensureRuntimeInfrastructure(env);
   if (state.wakeRequested) {
     state.wakeRequested = false;
     return;
@@ -89,7 +89,7 @@ export const waitForRuntimeLoopWakeOrTimeout = async (
   env: RuntimeReplica,
   timeoutMs: number,
 ): Promise<'wake' | 'timeout'> => {
-  const state = ensureRuntimeState(env);
+  const state = ensureRuntimeInfrastructure(env);
   if (timeoutMs <= 0) {
     if (state.wakeRequested) state.wakeRequested = false;
     await new Promise<void>(resolve => setTimeout(resolve, 0));
@@ -167,7 +167,7 @@ export const enqueueRuntimeContinuation = (
 );
 
 export const tryOpenRuntimeInfraDb = async (env: RuntimeReplica): Promise<boolean> => {
-  const state = ensureRuntimeState(env);
+  const state = ensureRuntimeInfrastructure(env);
   if (state.infraDbClosing) return false;
   state.infraDbOpenPromise ??= getRuntimeInfraDb(env).open().then(
     () => true,
@@ -201,14 +201,14 @@ export const infraGossipDbAccess = {
 };
 
 export const trackInfraDbWrite = (env: RuntimeReplica, promise: Promise<void>): void => {
-  const state = ensureRuntimeState(env);
+  const state = ensureRuntimeInfrastructure(env);
   state.infraDbPendingWrites ??= new Set();
   const tracked = promise.finally(() => state.infraDbPendingWrites?.delete(tracked));
   state.infraDbPendingWrites.add(tracked);
 };
 
 export const drainInfraDbWrites = async (env: RuntimeReplica): Promise<void> => {
-  const state = ensureRuntimeState(env);
+  const state = ensureRuntimeInfrastructure(env);
   while (state.infraDbPendingWrites && state.infraDbPendingWrites.size > 0) {
     await Promise.allSettled([...state.infraDbPendingWrites]);
   }

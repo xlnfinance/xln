@@ -107,7 +107,7 @@ const dispatchFrameOutputs = (outputs: DeliverableEntityInput[]): {
     },
     targetRuntimeId,
   })), {
-    ensureRuntimeState: target => target.infrastructure!,
+    ensureRuntimeInfrastructure: target => target.infrastructure!,
     getP2P: () => null,
     enqueueRuntimeInputs: () => {},
     extractEntityId: key => String(key).split(':')[0] || '',
@@ -160,7 +160,7 @@ describe('runtime output routing', () => {
     } as unknown as RuntimeReplica;
 
     const planned = planEntityOutputs(env, [output], {
-      ensureRuntimeState: target => target.infrastructure!,
+      ensureRuntimeInfrastructure: target => target.infrastructure!,
       getP2P: () => null,
       enqueueRuntimeInputs: () => {},
       extractEntityId: key => String(key).split(':')[0] || '',
@@ -365,7 +365,7 @@ describe('runtime output routing', () => {
       infrastructure: {},
     } as unknown as RuntimeReplica;
     const deps = {
-      ensureRuntimeState: (targetEnv: RuntimeReplica) => targetEnv.infrastructure!,
+      ensureRuntimeInfrastructure: (targetEnv: RuntimeReplica) => targetEnv.infrastructure!,
     } as any;
 
     const pending = rescheduleDeferredOutputs(env, [], [output], [], deps);
@@ -389,7 +389,7 @@ describe('runtime output routing', () => {
       infrastructure: {},
     } as unknown as RuntimeReplica;
     const deps = {
-      ensureRuntimeState: (targetEnv: RuntimeReplica) => targetEnv.infrastructure!,
+      ensureRuntimeInfrastructure: (targetEnv: RuntimeReplica) => targetEnv.infrastructure!,
     } as any;
 
     const pending = rescheduleDeferredOutputs(env, [], [output], [], deps);
@@ -417,7 +417,7 @@ describe('runtime output routing', () => {
       infrastructure: {},
     } as unknown as RuntimeReplica;
     const deps = {
-      ensureRuntimeState: (targetEnv: RuntimeReplica) => targetEnv.infrastructure!,
+      ensureRuntimeInfrastructure: (targetEnv: RuntimeReplica) => targetEnv.infrastructure!,
     } as any;
     const before = getWallClockMs();
     const pending = rescheduleDeferredOutputs(env, [], [output], [], deps);
@@ -445,7 +445,7 @@ describe('runtime output routing', () => {
     } as unknown as RuntimeReplica;
 
     const planned = planEntityOutputs(env, [output], {
-      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure ??= {},
+      ensureRuntimeInfrastructure: (targetEnv) => targetEnv.infrastructure ??= {},
       getP2P: () => ({
         enqueueEntityInputsDelivery: () => deliveryAccepted('TEST_DELIVERED'),
         getVerifiedRuntimeRoute: () => ({ runtimeId: resolvedRuntimeId, lastUpdated: 2 }),
@@ -480,7 +480,7 @@ describe('runtime output routing', () => {
     } as unknown as RuntimeReplica;
 
     const planned = planEntityOutputs(env, [output], {
-      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure ??= {},
+      ensureRuntimeInfrastructure: (targetEnv) => targetEnv.infrastructure ??= {},
       getP2P: () => ({
         enqueueEntityInputsDelivery: () => deliveryAccepted('TEST_DELIVERED'),
         getVerifiedRuntimeRoute: () => ({ runtimeId: resolvedRuntimeId, lastUpdated: 2 }),
@@ -516,7 +516,7 @@ describe('runtime output routing', () => {
     } as unknown as RuntimeReplica;
 
     const planned = planEntityOutputs(env, [output], {
-      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure ??= {},
+      ensureRuntimeInfrastructure: (targetEnv) => targetEnv.infrastructure ??= {},
       getP2P: () => ({
         enqueueEntityInputsDelivery: () => deliveryAccepted('TEST_DELIVERED'),
         getVerifiedRuntimeRoute: () => ({ runtimeId: currentRuntimeId, lastUpdated: 2 }),
@@ -551,7 +551,7 @@ describe('runtime output routing', () => {
     } as unknown as RuntimeReplica;
 
     const planned = planEntityOutputs(env, [output], {
-      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure ??= {},
+      ensureRuntimeInfrastructure: (targetEnv) => targetEnv.infrastructure ??= {},
       getP2P: () => null,
       enqueueRuntimeInputs: () => {},
       extractEntityId: (replicaKey) => String(replicaKey).split(':')[0] || '',
@@ -594,7 +594,7 @@ describe('runtime output routing', () => {
     };
 
     const deferred = dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
-      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
+      ensureRuntimeInfrastructure: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => ({
         enqueueEntityInputsDelivery: (runtimeId, envelope, ingressTimestamp) => {
           p2pCalls.push({ targetRuntimeId: runtimeId, envelope, ingressTimestamp });
@@ -646,7 +646,7 @@ describe('runtime output routing', () => {
     };
 
     const deferred = dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
-      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
+      ensureRuntimeInfrastructure: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => ({
         enqueueEntityInputsDelivery: (runtimeId, envelope, ingressTimestamp) => {
           p2pCalls.push({ targetRuntimeId: runtimeId, envelope, ingressTimestamp });
@@ -696,7 +696,7 @@ describe('runtime output routing', () => {
     };
 
     expect(() => dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
-      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
+      ensureRuntimeInfrastructure: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => ({
         enqueueEntityInputsDelivery: (() => true) as any,
       }),
@@ -739,7 +739,7 @@ describe('runtime output routing', () => {
     };
 
     const deferred = dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
-      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
+      ensureRuntimeInfrastructure: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => ({
         enqueueEntityInputsDelivery: () => {
           p2pCalls.push(true);
@@ -886,7 +886,7 @@ describe('runtime output routing', () => {
     };
 
     expect(() => dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
-      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
+      ensureRuntimeInfrastructure: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => ({
         enqueueEntityInputsDelivery: () => {
           p2pCalls.push(true);
@@ -933,7 +933,7 @@ describe('runtime output routing', () => {
     };
 
     const deferred = dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
-      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
+      ensureRuntimeInfrastructure: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => ({
         enqueueEntityInputsDelivery: (runtimeId, envelope, ingressTimestamp) => {
           p2pCalls.push({ targetRuntimeId: runtimeId, envelope, ingressTimestamp });
@@ -980,7 +980,7 @@ describe('runtime output routing', () => {
     };
 
     const result = sendEntityInputWithRouting(env, input, {
-      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
+      ensureRuntimeInfrastructure: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => ({
         enqueueEntityInputsDelivery: (runtimeId, envelope, ingressTimestamp) => {
           p2pCalls.push({ targetRuntimeId: runtimeId, envelope, ingressTimestamp });
@@ -1033,7 +1033,7 @@ describe('runtime output routing', () => {
     };
 
     const result = sendEntityInputWithRouting(env, input, {
-      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
+      ensureRuntimeInfrastructure: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => null,
       enqueueRuntimeInputs: (_env, entityInputs) => {
         queued.push(...entityInputs);
@@ -1090,7 +1090,7 @@ describe('runtime output routing', () => {
     } as unknown as RuntimeReplica;
 
     const deferred = dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
-      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
+      ensureRuntimeInfrastructure: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => ({
         enqueueEntityInputsDelivery: () => deliveryFailure({
           category: 'TransientRace',
@@ -1117,7 +1117,7 @@ describe('runtime output routing', () => {
       [buildRouteOutputKey(output), { attempts: 3, nextRetryAt: env.state.timestamp }],
     ]);
     dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
-      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
+      ensureRuntimeInfrastructure: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => ({
         enqueueEntityInputsDelivery: () => deliveryFailure({
           category: 'TransientRace',
@@ -1162,7 +1162,7 @@ describe('runtime output routing', () => {
     } as unknown as RuntimeReplica;
 
     const deferred = dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
-      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
+      ensureRuntimeInfrastructure: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => null,
       enqueueRuntimeInputs: () => {},
       extractEntityId: (replicaKey) => String(replicaKey).split(':')[0] || '',
@@ -1203,7 +1203,7 @@ describe('runtime output routing', () => {
     } as unknown as RuntimeReplica;
 
     const deferred = dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
-      ensureRuntimeState: target => target.infrastructure!,
+      ensureRuntimeInfrastructure: target => target.infrastructure!,
       getP2P: () => null,
       enqueueRuntimeInputs: () => {},
       extractEntityId: key => String(key).split(':')[0] || '',
@@ -1240,7 +1240,7 @@ describe('runtime output routing', () => {
     } as unknown as RuntimeReplica;
 
     expect(() => dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
-      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
+      ensureRuntimeInfrastructure: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => ({
         enqueueEntityInputsDelivery: () => deliveryFailure({
           category: 'Contradiction',
@@ -1275,7 +1275,7 @@ describe('runtime output routing', () => {
       signerId: staleSignerId,
       entityTxs: [],
     }], {
-      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
+      ensureRuntimeInfrastructure: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => null,
       enqueueRuntimeInputs: () => {},
       extractEntityId: (replicaKey) => String(replicaKey).split(':')[0] || '',
@@ -1320,7 +1320,7 @@ describe('runtime output routing', () => {
       signerId: staleSenderSignerId,
       entityTxs: [],
     }], {
-      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
+      ensureRuntimeInfrastructure: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => null,
       enqueueRuntimeInputs: () => {},
       extractEntityId: (replicaKey) => String(replicaKey).split(':')[0] || '',
@@ -1364,7 +1364,7 @@ describe('runtime output routing', () => {
       signerId: staleSenderSignerId,
       entityTxs: [{ type: 'accountInput', data: { fromEntityId: entityId('6d'), toEntityId: targetEntityId } } as any],
     }], {
-      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
+      ensureRuntimeInfrastructure: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => null,
       enqueueRuntimeInputs: () => {},
       extractEntityId: (replicaKey) => String(replicaKey).split(':')[0] || '',
@@ -1406,7 +1406,7 @@ describe('runtime output routing', () => {
       signerId: secondarySignerId,
       entityTxs: [{ type: 'accountInput', data: { fromEntityId: entityId('6d'), toEntityId: targetEntityId } } as any],
     }], {
-      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
+      ensureRuntimeInfrastructure: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => null,
       enqueueRuntimeInputs: () => {},
       extractEntityId: (replicaKey) => String(replicaKey).split(':')[0] || '',
@@ -1463,7 +1463,7 @@ describe('runtime output routing', () => {
         collectedSigs: new Map(),
       } as never,
     }], {
-      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
+      ensureRuntimeInfrastructure: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => null,
       enqueueRuntimeInputs: () => {},
       extractEntityId: (replicaKey) => String(replicaKey).split(':')[0] || '',
@@ -1479,7 +1479,7 @@ describe('runtime output routing', () => {
       hashPrecommitFrame: { height: 7, frameHash: '0xproposal' },
       hashPrecommits: new Map([[primarySignerId, ['0xsig']]]),
     }], {
-      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
+      ensureRuntimeInfrastructure: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => null,
       enqueueRuntimeInputs: () => {},
       extractEntityId: (replicaKey) => String(replicaKey).split(':')[0] || '',
@@ -1514,7 +1514,7 @@ describe('runtime output routing', () => {
     } as unknown as RuntimeReplica;
 
     const resolved = resolveRuntimeIdForEntity(env, targetEntityId, {
-      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
+      ensureRuntimeInfrastructure: (targetEnv) => targetEnv.infrastructure!,
     });
 
     expect(resolved).toBe(targetRuntimeId);
@@ -1538,7 +1538,7 @@ describe('runtime output routing', () => {
       },
     } as unknown as RuntimeReplica;
     const deps = {
-      ensureRuntimeState: (targetEnv: RuntimeReplica) => targetEnv.infrastructure!,
+      ensureRuntimeInfrastructure: (targetEnv: RuntimeReplica) => targetEnv.infrastructure!,
     };
 
     expect(resolveRuntimeIdForEntity(env, targetEntityId, deps)).toBe(targetRuntimeId);
@@ -1574,7 +1574,7 @@ describe('runtime output routing', () => {
         },
       } as any],
     }], {
-      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
+      ensureRuntimeInfrastructure: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => null,
       enqueueRuntimeInputs: () => {},
       extractEntityId: (replicaKey) => String(replicaKey).split(':')[0] || '',
@@ -1612,7 +1612,7 @@ describe('runtime output routing', () => {
         },
       } as any],
     }], {
-      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
+      ensureRuntimeInfrastructure: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => null,
       enqueueRuntimeInputs: () => {},
       extractEntityId: (replicaKey) => String(replicaKey).split(':')[0] || '',
@@ -1656,7 +1656,7 @@ describe('runtime output routing', () => {
         collectedSigs: new Map(),
       } as any,
     }], {
-      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
+      ensureRuntimeInfrastructure: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => null,
       enqueueRuntimeInputs: () => {},
       extractEntityId: (replicaKey) => String(replicaKey).split(':')[0] || '',
@@ -1702,7 +1702,7 @@ describe('runtime output routing', () => {
         },
       } as any],
     }, {
-      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
+      ensureRuntimeInfrastructure: (targetEnv) => targetEnv.infrastructure!,
       enqueueRuntimeInputs: (_targetEnv, inputs) => {
         enqueued.push(...(inputs ?? []));
       },
@@ -1746,7 +1746,7 @@ describe('runtime output routing', () => {
         },
       } as any],
     }, {
-      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
+      ensureRuntimeInfrastructure: (targetEnv) => targetEnv.infrastructure!,
       enqueueRuntimeInputs: (_targetEnv, inputs) => {
         enqueued.push(...(inputs ?? []));
       },
@@ -1791,7 +1791,7 @@ describe('runtime output routing', () => {
         },
       } as any],
     }, {
-      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
+      ensureRuntimeInfrastructure: (targetEnv) => targetEnv.infrastructure!,
       enqueueRuntimeInputs: (_targetEnv, inputs) => {
         enqueued.push(...(inputs ?? []));
       },
@@ -1839,7 +1839,7 @@ describe('runtime output routing', () => {
         },
       } as any],
     }, {
-      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
+      ensureRuntimeInfrastructure: (targetEnv) => targetEnv.infrastructure!,
       enqueueRuntimeInputs: (_targetEnv, inputs) => {
         enqueued.push(...(inputs ?? []));
       },
@@ -1885,7 +1885,7 @@ describe('runtime output routing', () => {
     };
 
     expect(routeInboundP2PEntityInput(env, sourceRuntimeId, input, {
-      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
+      ensureRuntimeInfrastructure: (targetEnv) => targetEnv.infrastructure!,
       enqueueRuntimeInputs: (_targetEnv, inputs) => enqueued.push(...(inputs ?? [])),
       extractEntityId: (replicaKey) => String(replicaKey).split(':')[0] || '',
       hasLocalSignerForEntity: () => true,

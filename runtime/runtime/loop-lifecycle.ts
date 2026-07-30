@@ -12,7 +12,7 @@ import {
   getRemainingRuntimeFrameDelayMs,
 } from './loop-work';
 import { yieldRuntimeIoTurn } from './platform';
-import { ensureRuntimeState } from './runtime-state';
+import { ensureRuntimeInfrastructure } from './runtime-infrastructure';
 import { deleteScheduledWakeIndex, rebuildScheduledWakeIndex } from './scheduled-wake';
 import {
   startJurisdictionWatchers,
@@ -162,7 +162,7 @@ const startRuntimeLoopWithDeps = (
   deps: RuntimeLoopLifecycleDeps,
 ): (() => void) => {
   if (env.scenarioMode) return () => {};
-  const state = ensureRuntimeState(env);
+  const state = ensureRuntimeInfrastructure(env);
   configureFrameCaps(state, config);
   const phase = inferRuntimeLifecyclePhase(state);
   if (phase === 'halted' || phase === 'running') return state.stopLoop ?? (() => {});
@@ -208,7 +208,7 @@ const resumeRuntimeLoopWithDeps = (
   config: RuntimeLoopConfig | undefined,
   deps: RuntimeLoopLifecycleDeps,
 ): (() => void) => {
-  const state = ensureRuntimeState(env);
+  const state = ensureRuntimeInfrastructure(env);
   const phase = inferRuntimeLifecyclePhase(state);
   if (phase === 'halted') throw new Error('RUNTIME_RESUME_HALTED');
   if (phase === 'running') return state.stopLoop ?? (() => {});
@@ -226,7 +226,7 @@ const resumeAfterPersistenceQuiesce = (
   config: RuntimeLoopConfig | undefined,
   deps: RuntimeLoopLifecycleDeps,
 ): (() => void) => {
-  const state = ensureRuntimeState(env);
+  const state = ensureRuntimeInfrastructure(env);
   const phase = inferRuntimeLifecyclePhase(state);
   if (phase === 'halted') throw new Error('RUNTIME_RESUME_HALTED');
   if (phase === 'running' && (state.persistencePaused || state.persistenceQuiescing)) {

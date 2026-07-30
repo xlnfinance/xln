@@ -6,7 +6,7 @@ import {
   peekPendingHistoryRecords,
 } from '../runtime/env-events';
 import { transitionRuntimeLifecycle } from '../runtime/lifecycle';
-import { ensureRuntimeState } from '../runtime/runtime-state';
+import { ensureRuntimeInfrastructure } from '../runtime/runtime-infrastructure';
 import { readRuntimeMetadata } from '../runtime/loop-environment';
 import { safeStringify } from '../protocol/serialization';
 import type {
@@ -198,7 +198,7 @@ export const saveRuntimeEnvironment = async (
     );
   }
   if (saveResult.staleWriterStopped) {
-    const state = ensureRuntimeState(env);
+    const state = ensureRuntimeInfrastructure(env);
     transitionRuntimeLifecycle(state, 'halted');
     state.fatalDebugPayload = {
       message:

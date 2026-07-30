@@ -7,7 +7,7 @@ import type { createRuntimeLoopApi } from '../loop';
 import { materializePendingJurisdictionImportResults } from '../jurisdiction-import';
 import { requireRuntimeMempool } from '../input-queue';
 import { transitionRuntimeLifecycle } from '../lifecycle';
-import { ensureRuntimeState } from '../runtime-state';
+import { ensureRuntimeInfrastructure } from '../runtime-infrastructure';
 import type { createRuntimeRecoveryApi } from '../../recovery/restore';
 import type { createRuntimeStorageApi } from '../../storage/runtime-storage';
 import { notifyRuntimeSyncAfterCommit } from '../../storage/runtime-storage';
@@ -227,7 +227,7 @@ const openRuntimeFrameCandidate = (
   profile.metrics.cloneBytes = 0;
   profile.metrics.cloneMs = 0;
   const env = liveEnv;
-  const state = ensureRuntimeState(env);
+  const state = ensureRuntimeInfrastructure(env);
   const mempool = transaction.frameMempool;
   for (const replica of env.state.jReplicas.values()) {
     replica.jadapter?.setQuietLogs?.(quietRuntimeLogs);
@@ -255,7 +255,7 @@ const beginRuntimeFrameMutation = (
   // still untouched. Past this line every exception requires halt + reload.
   deps.applyRuntimeInput.validate(candidate.env, candidate.runtimeInput);
   frame.mutationStarted = true;
-  ensureRuntimeState(candidate.env).stateMutationInFlight = true;
+  ensureRuntimeInfrastructure(candidate.env).stateMutationInFlight = true;
   candidate.env.state.timestamp = candidate.frameTimestamp;
   for (const replica of candidate.env.state.jReplicas.values()) {
     replica.jadapter?.setBlockTimestamp?.(candidate.env.state.timestamp);
@@ -280,7 +280,7 @@ const haltStaleRuntimeWriter = async (
     discardMalformedRemoteInput: false,
     requeue: false,
   });
-  const state = ensureRuntimeState(liveEnv);
+  const state = ensureRuntimeInfrastructure(liveEnv);
   transitionRuntimeLifecycle(state, 'halted');
   state.fatalDebugPayload = {
     message:
@@ -310,7 +310,7 @@ const publishCommittedRuntimeFrame = (
   flushPendingAuditEvents(candidateEnv);
   candidateEnv.frameLogs = [];
   const env = publishRuntimeFrameTransaction(frame.transaction);
-  const state = ensureRuntimeState(env);
+  const state = ensureRuntimeInfrastructure(env);
   if (frame.pendingTraceSnapshot) {
     recordRuntimeHistoryTraceForTesting(env, frame.pendingTraceSnapshot);
   }
@@ -347,7 +347,7 @@ const commitRuntimeFrame = async (
     frame.commitDisposition = 'committed';
     clearPendingAuditEvents(candidateEnv);
     const env = publishRuntimeFrameTransaction(frame.transaction);
-    return { env, state: ensureRuntimeState(env), staleWriterStopped: false };
+    return { env, state: ensureRuntimeInfrastructure(env), staleWriterStopped: false };
   }
 
   if (!options.quietLogs) runtimeLog.debug('storage.save.start', { height: candidateEnv.state.height });
@@ -523,7 +523,7 @@ export const createRuntimeProcessor = (deps: RuntimeProcessDeps) => async (
 ): Promise<RuntimeReplica> => {
   const liveEnv = env;
   deps.loop.ensureRuntimeConfig(env);
-  const processState = ensureRuntimeState(env);
+  const processState = ensureRuntimeInfrastructure(env);
   assertRuntimeWriterAcceptingIngress(processState);
   if (inputs?.length) {
     const ingressTimestamp = env.scenarioMode ? (env.state.timestamp ?? 0) : getWallClockMs();

@@ -26,7 +26,7 @@ export type RuntimeInboundEntityInputOptions = {
 };
 
 export type RuntimeEntityRoutingDeps = {
-  ensureRuntimeState(env: RuntimeReplica): RuntimeLifecycleState;
+  ensureRuntimeInfrastructure(env: RuntimeReplica): RuntimeLifecycleState;
   enqueueRuntimeInputs(
     env: RuntimeReplica,
     inputs?: EntityInput[],
@@ -805,10 +805,10 @@ const resolveRuntimeIdFromProfile = (profile: Profile | undefined): string | nul
 export const resolveRuntimeIdForEntity = (
   env: RuntimeReplica,
   entityId: string,
-  deps: Pick<RuntimeEntityRoutingDeps, 'ensureRuntimeState'>,
+  deps: Pick<RuntimeEntityRoutingDeps, 'ensureRuntimeInfrastructure'>,
 ): string | null => {
   const target = normalizeEntityKey(entityId);
-  const state = deps.ensureRuntimeState(env);
+  const state = deps.ensureRuntimeInfrastructure(env);
   if (!state.entityRuntimeHints) {
     state.entityRuntimeHints = new Map();
   }
@@ -847,7 +847,7 @@ export const resolveRuntimeIdForEntity = (
 export const resolveRuntimeIdForCrossJurisdictionEntity = (
   env: RuntimeReplica,
   entityId: string,
-  deps: Pick<RuntimeEntityRoutingDeps, 'ensureRuntimeState' | 'extractEntityId' | 'hasLocalSignerForEntity'>,
+  deps: Pick<RuntimeEntityRoutingDeps, 'ensureRuntimeInfrastructure' | 'extractEntityId' | 'hasLocalSignerForEntity'>,
 ): string | null => {
   const localRuntimeId = normalizeRuntimeId(String(env.runtimeId || ''));
   if (localRuntimeId && deps.hasLocalSignerForEntity(env, entityId)) return localRuntimeId;
@@ -858,12 +858,12 @@ export const registerEntityRuntimeHintWithDeps = (
   env: RuntimeReplica,
   entityId: string,
   runtimeId: string,
-  deps: Pick<RuntimeEntityRoutingDeps, 'ensureRuntimeState'>,
+  deps: Pick<RuntimeEntityRoutingDeps, 'ensureRuntimeInfrastructure'>,
 ): void => {
   if (!entityId || !runtimeId) return;
   const normalizedRuntimeId = normalizeRuntimeId(runtimeId);
   if (!normalizedRuntimeId) return;
-  const state = deps.ensureRuntimeState(env);
+  const state = deps.ensureRuntimeInfrastructure(env);
   const hints = state.entityRuntimeHints!;
   hints.set(normalizeEntityKey(entityId), {
     runtimeId: normalizedRuntimeId,
@@ -995,7 +995,7 @@ export const validateInboundP2PEntityInput = (
     }, context);
   }
 
-  const infrastructure = deps.ensureRuntimeState(env);
+  const infrastructure = deps.ensureRuntimeInfrastructure(env);
   if (infrastructure.halted && !env.scenarioMode) {
     return rejectUnavailableInboundTarget(env, input, 'INBOUND_ENTITY_RUNTIME_HALTED', {
       fromRuntimeId: from,
@@ -1291,7 +1291,7 @@ export const routeInboundP2PEntityInputs = (
 export const createRuntimeOutputRoutingDeps = (
   deps: RuntimeEntityRoutingDeps,
 ): RuntimeOutputRoutingDeps => ({
-  ensureRuntimeState: deps.ensureRuntimeState,
+  ensureRuntimeInfrastructure: deps.ensureRuntimeInfrastructure,
   getP2P: deps.getP2P,
   enqueueRuntimeInputs: (env, inputs, _runtimeTxs, _jInputs, ingressTimestamp) => {
     deps.enqueueRuntimeInputs(env, inputs, undefined, undefined, ingressTimestamp);

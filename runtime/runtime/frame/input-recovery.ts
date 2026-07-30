@@ -1,6 +1,6 @@
 import type { RuntimeReplica, RuntimeInput } from '../types';
 import { requireRuntimeMempool } from '../input-queue';
-import { ensureRuntimeState } from '../runtime-state';
+import { ensureRuntimeInfrastructure } from '../runtime-infrastructure';
 import type { FrameExecutionState } from './execution-state';
 import {
   cloneRuntimeFrameMempool,
@@ -82,5 +82,5 @@ export const restoreUndurableRuntimeInput = async (
   const error = discarded
     ? context.discardedError(originalError)
     : originalError;
-  return { env: liveEnv, state: ensureRuntimeState(liveEnv), error };
+  return { env: liveEnv, state: ensureRuntimeInfrastructure(liveEnv), error };
 };

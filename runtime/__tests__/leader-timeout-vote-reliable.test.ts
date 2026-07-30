@@ -137,7 +137,7 @@ const routingDeps = (
   targetRuntimeId: string,
   getP2P: RuntimeOutputRoutingDeps['getP2P'],
 ): RuntimeOutputRoutingDeps => ({
-  ensureRuntimeState: env => env.infrastructure!,
+  ensureRuntimeInfrastructure: env => env.infrastructure!,
   getP2P,
   enqueueRuntimeInputs: () => {},
   extractEntityId: replicaKey => String(replicaKey).split(':')[0] || '',

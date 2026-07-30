@@ -1,6 +1,6 @@
 import { materializePendingJurisdictionImportResults } from '../jurisdiction-import';
 import { submitRuntimeJOutbox, type RuntimeJOutboxQueue } from '../j-submit';
-import { ensureRuntimeState } from '../runtime-state';
+import { ensureRuntimeInfrastructure } from '../runtime-infrastructure';
 import type { RuntimeReplica, RuntimeInput, RuntimeTx } from '../types';
 import type { JInput } from '../../jurisdiction/input';
 import { getWallClockMs } from '../../infra/time';
@@ -42,7 +42,7 @@ export const runCommittedRuntimeEffects = async (
   profile: RuntimeProcessProfile,
   deps: CommittedRuntimeEffectDeps,
 ): Promise<void> => {
-  const state = ensureRuntimeState(env);
+  const state = ensureRuntimeInfrastructure(env);
   await runCommittedRecoveryBarrier(
     env,
     frame,

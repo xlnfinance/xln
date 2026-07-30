@@ -11,7 +11,7 @@ import {
   type PlannedRemoteOutput,
   type RuntimeOutputRoutingDeps,
 } from '../output-routing';
-import { ensureRuntimeState } from '../runtime-state';
+import { ensureRuntimeInfrastructure } from '../runtime-infrastructure';
 import { finalizeReliableIngressCommit } from '../reliable-delivery';
 import type { FrameExecutionState } from './execution-state';
 
@@ -41,7 +41,7 @@ export const dispatchCommittedEntityOutputs = async (
   plan: CommittedEntityOutputPlan,
   routing: RuntimeOutputRoutingDeps,
 ): Promise<void> => {
-  const p2p = ensureRuntimeState(env).p2p ?? null;
+  const p2p = ensureRuntimeInfrastructure(env).p2p ?? null;
   const localIds = collectLocallySignableEntityIds(env);
   const changedLocalIds = [...changedEntityIds].filter(entityId => localIds.has(entityId));
   const knownIds = new Set(
@@ -88,7 +88,7 @@ export const runCommittedRecoveryBarrier = async (
   jSideEffectCount: number,
   runtimeInfraEffectCount: number,
 ): Promise<void> => {
-  const barrier = ensureRuntimeState(env).recoveryBackupBarrier;
+  const barrier = ensureRuntimeInfrastructure(env).recoveryBackupBarrier;
   const receiptCount = frame.reliableIngressCommits.reduce(
     (count, commit) => count + commit.targetRuntimeIds.length,
     0,
@@ -132,7 +132,7 @@ export const finalizeCommittedReceiptDeliveries = (
 
 export const dispatchCommittedReceipts = (env: RuntimeReplica, frame: FrameExecutionState): void => {
   if (frame.reliableReceiptDeliveries.length === 0) return;
-  const state = ensureRuntimeState(env);
+  const state = ensureRuntimeInfrastructure(env);
   const p2p = state.p2p ?? null;
   for (const delivery of frame.reliableReceiptDeliveries) {
     const direct = state.directReliableReceiptDispatch?.(delivery.runtimeId, delivery.receipt);

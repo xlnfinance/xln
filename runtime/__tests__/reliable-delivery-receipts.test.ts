@@ -763,7 +763,7 @@ describe('durable scoped reliable delivery receipts', () => {
     const applied = await applyMergedEntityInputs(receiver, [{ ...output, from: sender.runtimeId! }], [], {
       isReplay: false,
       routingDeps: {
-        ensureRuntimeState: targetEnv => targetEnv.infrastructure!,
+        ensureRuntimeInfrastructure: targetEnv => targetEnv.infrastructure!,
         enqueueRuntimeInputs: () => {},
         extractEntityId: replicaKey => replicaKey.split(':')[0] ?? '',
         hasLocalSignerForEntity: () => true,

@@ -90,7 +90,7 @@ const createRuntime = (seed: string): RuntimeReplica => {
 };
 
 const routingDeps: RuntimeEntityRoutingDeps = {
-  ensureRuntimeState: env => (env.infrastructure ??= {}),
+  ensureRuntimeInfrastructure: env => (env.infrastructure ??= {}),
   enqueueRuntimeInputs: () => {},
   extractEntityId: replicaKey => String(replicaKey).split(':')[0] || '',
   hasLocalSignerForEntity: () => false,
