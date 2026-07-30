@@ -1408,13 +1408,12 @@ const projectGraphEntityCore = (core: RuntimeAdapterEntityCoreDoc): RuntimeAdapt
 const GRAPH_ACCOUNT_ACTIVITY_SAMPLE_LIMIT = 2;
 
 const projectGraphAccountActivity = (tx: AccountTx): RuntimeAdapterGraphAccountActivity => {
-  const data = tx.data && typeof tx.data === 'object'
-    ? tx.data as unknown as Record<string, unknown>
-    : {};
-  const tokenId = Number(data['tokenId']);
-  const amount = data['amount'];
-  const fromEntityId = typeof data['fromEntityId'] === 'string' ? data['fromEntityId'] : undefined;
-  const toEntityId = typeof data['toEntityId'] === 'string' ? data['toEntityId'] : undefined;
+  const tokenId = Number(Reflect.get(tx.data, 'tokenId'));
+  const amount = Reflect.get(tx.data, 'amount');
+  const rawFromEntityId = Reflect.get(tx.data, 'fromEntityId');
+  const rawToEntityId = Reflect.get(tx.data, 'toEntityId');
+  const fromEntityId = typeof rawFromEntityId === 'string' ? rawFromEntityId : undefined;
+  const toEntityId = typeof rawToEntityId === 'string' ? rawToEntityId : undefined;
   return {
     type: tx.type,
     ...(Number.isSafeInteger(tokenId) && tokenId >= 0 ? { tokenId } : {}),
