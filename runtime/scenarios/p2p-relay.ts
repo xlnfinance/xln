@@ -7,13 +7,12 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 import net from 'net';
 import path from 'path';
+import { ethers } from 'ethers';
 import { deriveSignerAddressSync } from '../account/crypto';
 import { createJAdapter } from '../jadapter';
 import type { JAdapter, JTokenInfo } from '../jadapter/types';
 import { loadJurisdictions } from '../jurisdiction/jurisdiction-loader';
-import { DEFAULT_TOKENS, TOKEN_REGISTRATION_AMOUNT, getDefaultTokenSupply } from '../jurisdiction/default-tokens';
-import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/index.ts';
-import { ethers } from 'ethers';
+import { deployMissingDefaultTokens } from '../jurisdiction/dev-token-deployment';
 import type { JReplica } from '../types/jurisdiction-runtime';
 
 const args = globalThis.process.argv.slice(2);
@@ -44,45 +43,8 @@ type ProcInfo = {
 };
 
 const ensureTokenCatalog = async (jadapter: JAdapter): Promise<JTokenInfo[]> => {
-  const current = await jadapter.getTokenRegistry().catch(() => []);
-  if (current.length > 0) {
-    return current;
-  }
-
-  const depositoryAddress = jadapter.addresses?.depository;
-  if (!depositoryAddress) {
-    throw new Error('TOKEN_DEPLOY: Depository address missing');
-  }
-
-  console.log('[P2P] Deploying default tokens (prefund step)...');
-  const erc20Factory = new ERC20Mock__factory(jadapter.signer);
-  for (const token of DEFAULT_TOKENS) {
-    const tokenContract = await erc20Factory.deploy(
-      token.name,
-      token.symbol,
-      token.decimals,
-      getDefaultTokenSupply(token.decimals),
-    );
-    await tokenContract.waitForDeployment();
-    const tokenAddress = await tokenContract.getAddress();
-    console.log(`[P2P] ${token.symbol} deployed at ${tokenAddress}`);
-
-    const approveTx = await tokenContract.approve(depositoryAddress, TOKEN_REGISTRATION_AMOUNT);
-    await approveTx.wait();
-
-    const registerTx = await jadapter.depository.connect(jadapter.signer).adminRegisterExternalToken({
-      entity: ethers.ZeroHash,
-      contractAddress: tokenAddress,
-      externalTokenId: 0,
-      tokenType: 0,
-      internalTokenId: 0,
-      amount: TOKEN_REGISTRATION_AMOUNT,
-    });
-    await registerTx.wait();
-    console.log(`[P2P] Token registered: ${token.symbol}`);
-  }
-
-  return await jadapter.getTokenRegistry().catch(() => []);
+  await deployMissingDefaultTokens(jadapter, jurisdictionName);
+  return await jadapter.getTokenRegistry();
 };
 
 const prefundRpcWallets = async (): Promise<void> => {
