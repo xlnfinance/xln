@@ -1,4 +1,4 @@
-import type { AccountPeerInput, AccountReplica, AccountTx, HtlcNoteKey } from '../../../../types/account';
+import type { AccountPeerInput, AccountReplica, AccountTx } from '../../../../types/account';
 import type { EntityCandidateEffect, EntityInput, EntityState } from '../../../types';
 import type { EntityRuntimeContext } from '../../../runtime-context';
 import { HEAVY_LOGS } from '../../../../infra/debug-flags';
@@ -144,11 +144,6 @@ export function applyHtlcSecretFollowups(ctx: HtlcSecretFollowupContext, reveale
     const eventAmount = eventLock?.amount ?? route.amount;
     const eventTokenId = eventLock?.tokenId ?? route.tokenId;
     const eventLockId = eventLock?.lockId ?? route.inboundLockId ?? route.outboundLockId;
-    const finalizedDescription =
-      (eventLock && newState.htlcNotes?.get(`lock:${eventLock.lockId}` as HtlcNoteKey))
-      ?? newState.htlcNotes?.get(`hashlock:${hashlock}` as HtlcNoteKey)
-      ?? undefined;
-
     route.secret = secret;
     if (route.pendingFee) {
       newState.htlcFeesEarned = (newState.htlcFeesEarned || 0n) + route.pendingFee;
@@ -198,7 +193,6 @@ export function applyHtlcSecretFollowups(ctx: HtlcSecretFollowupContext, reveale
         ...(eventLockId ? { lockId: eventLockId } : {}),
         ...(eventAmount !== undefined ? { amount: eventAmount } : {}),
         ...(eventTokenId !== undefined ? { tokenId: eventTokenId } : {}),
-        ...(finalizedDescription ? { description: finalizedDescription } : {}),
         ...(route.startedAtMs !== undefined ? { startedAtMs: route.startedAtMs } : {}),
         ...(getJurisdictionId(state, env) ? { jurisdictionId: getJurisdictionId(state, env) } : {}),
         finalizedAtMs: newState.timestamp,

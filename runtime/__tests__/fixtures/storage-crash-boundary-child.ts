@@ -433,11 +433,6 @@ const quorumHanko = await buildQuorumHanko(
   firstReplica.state.config,
   firstReplica.state,
 );
-for (const candidate of env.state.eReplicas.values()) {
-  candidate.state.htlcNotes = new Map([
-    [`lock:0x${'ef'.repeat(32)}`, `private-note:${candidate.signerId}`],
-  ]);
-}
 const proposerReplica = Array.from(env.state.eReplicas.values()).find((candidate) => (
   candidate.entityId === entityId && candidate.signerId === signerA
 ));
@@ -517,13 +512,7 @@ if (recoveryLagMode || recoveryBoardRootLagMode) {
       certifiedHeightOne.state,
       [buildCertifiedBoardRangeTx(certifiedHeightOne.state, [rotation])],
     );
-    const laggingLocalIdentity = {
-      htlcNotes: structuredClone(laggingEntry[1].state.htlcNotes),
-    };
-    laggingEntry[1].state = {
-      ...structuredClone(certifiedHeightOne.state),
-      ...laggingLocalIdentity,
-    };
+    laggingEntry[1].state = structuredClone(certifiedHeightOne.state);
     laggingEntry[1].certifiedFrameLineage = [structuredClone(certifiedHeightOne.link)];
     certifiedEntry[1].state = certifiedHeightTwo.state;
     certifiedEntry[1].certifiedFrameLineage = [

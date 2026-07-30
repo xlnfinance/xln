@@ -119,7 +119,6 @@ const makeEnv = (account: AccountState, reserves: Array<[number, bigint]>): Runt
           profile: { name: 'canonical-test', isHub: false, avatar: '', bio: '', website: '' },
           htlcRoutes: new Map(),
           htlcFeesEarned: 0n,
-          htlcNotes: new Map(),
           lockBook: new Map(),
           swapTradingPairs: [],
         },
@@ -345,15 +344,15 @@ test('validator-local HTLC notes neither diverge shared storage nor leak into En
   const first = Array.from(env.state.eReplicas.values())[0]!;
   const second = structuredClone(first);
   second.signerId = signerIds[1]!;
-  first.state.htlcNotes = new Map([[`lock:0x${'33'.repeat(32)}`, 'validator-one']]);
-  second.state.htlcNotes = new Map([[`lock:0x${'33'.repeat(32)}`, 'validator-two']]);
+  first.htlcNotes = new Map([[`lock:0x${'33'.repeat(32)}`, 'validator-one']]);
+  second.htlcNotes = new Map([[`lock:0x${'33'.repeat(32)}`, 'validator-two']]);
   env.state.eReplicas.set(`${entityId}:${signerIds[1]}`, second);
 
   expect(computeCanonicalEntityHash(first).hash).toBe(computeCanonicalEntityHash(second).hash);
   expect(() => computeCanonicalStateHashFromEnv(env)).not.toThrow();
   expect('htlcNotes' in projectEntityCoreDoc(first.state)).toBeFalse();
-  expect(projectReplicaMeta(first).state.htlcNotes).toEqual(first.state.htlcNotes);
-  expect(projectReplicaMeta(second).state.htlcNotes).toEqual(second.state.htlcNotes);
+  expect(projectReplicaMeta(first).htlcNotes).toEqual(first.htlcNotes);
+  expect(projectReplicaMeta(second).htlcNotes).toEqual(second.htlcNotes);
 });
 
 test('canonical storage rejects conflicting validator replicas of one Entity', () => {

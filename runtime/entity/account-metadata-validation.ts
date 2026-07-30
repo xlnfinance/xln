@@ -4,42 +4,10 @@ import {
   validateMapInstance,
 } from '../protocol/validation-primitives';
 
-const validateHtlcNotes = (value: unknown, context: string): void => {
-  if (value === undefined) return;
-  const notes = validateMapInstance(value, `${context}.htlcNotes`);
-  if (notes.size > LIMITS.MAX_ENTITY_HTLC_NOTES) {
-    throw new FinancialDataCorruptionError(
-      `ENTITY_HTLC_NOTE_LIMIT_EXCEEDED:${context}:size=${notes.size}:max=${LIMITS.MAX_ENTITY_HTLC_NOTES}`,
-    );
-  }
-  for (const [key, note] of notes) {
-    if (
-      typeof key !== 'string' ||
-      key.length > LIMITS.MAX_ENTITY_HTLC_NOTE_LENGTH ||
-      (!key.startsWith('hashlock:') && !key.startsWith('lock:')) ||
-      key.endsWith(':')
-    ) {
-      throw new FinancialDataCorruptionError(
-        `${context}.htlcNotes contains invalid key`,
-      );
-    }
-    if (
-      typeof note !== 'string' ||
-      note.length === 0 ||
-      note.length > LIMITS.MAX_ENTITY_HTLC_NOTE_LENGTH
-    ) {
-      throw new FinancialDataCorruptionError(
-        `${context}.htlcNotes contains invalid note`,
-      );
-    }
-  }
-};
-
 export const validateEntityAccountMetadata = (
   entity: Record<string, unknown>,
   context: string,
 ): void => {
-  validateHtlcNotes(entity['htlcNotes'], context);
   if (entity['deferredAccountProposals'] === undefined) return;
   const deferred = validateMapInstance(
     entity['deferredAccountProposals'],

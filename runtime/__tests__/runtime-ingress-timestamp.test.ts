@@ -112,7 +112,6 @@ const makeReplica = (
       },
       htlcRoutes: new Map(),
       htlcFeesEarned: 0n,
-      htlcNotes: new Map(),
       lockBook: new Map(),
       swapTradingPairs: [],
       crontabState: initCrontab(),

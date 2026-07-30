@@ -37,7 +37,6 @@ const baseState = (): EntityState => ({
   profile: { name: 'state-root', isHub: false, avatar: '', bio: '', website: '' },
   htlcRoutes: new Map(),
   htlcFeesEarned: 0n,
-  htlcNotes: new Map(),
   lockBook: new Map(),
 });
 
@@ -144,9 +143,6 @@ const mutators = {
   },
   htlcFeesEarned: state => {
     state.htlcFeesEarned = 1n;
-  },
-  htlcNotes: state => {
-    state.htlcNotes = new Map([['note' as never, 'validator-local-note']]);
   },
   consumptionAccumulator: state => {
     state.consumptionAccumulator = {
@@ -560,7 +556,6 @@ test('Entity frame hash binds the complete shared post-replay state root', async
   expect(rightHash).not.toBe(leftHash);
 
   right.nonces.clear();
-  right.htlcNotes?.set('note' as never, 'different-validator-local-note');
   expect(await createEntityFrameHash('genesis', 1, 100, [], right)).toBe(leftHash);
   expect(await createEntityFrameHash('different-prev-frame', 1, 100, [], right)).not.toBe(leftHash);
 });

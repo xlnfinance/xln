@@ -48,7 +48,6 @@ const makeEntityState = (validators: readonly [string, string], entityId: string
   },
   htlcRoutes: new Map(),
   htlcFeesEarned: 0n,
-  htlcNotes: new Map(),
   lockBook: new Map(),
   swapTradingPairs: [],
 });

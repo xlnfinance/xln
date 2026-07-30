@@ -38,7 +38,6 @@ const makeHubState = (frozenTimestamp: number, lastSubmittedAt: number): EntityS
   profile: { name: 'H1', isHub: true, avatar: '', bio: '', website: '' },
   htlcRoutes: new Map(),
   htlcFeesEarned: 0n,
-  htlcNotes: new Map(),
   lockBook: new Map(),
   swapTradingPairs: [],
   hubRebalanceConfig: {

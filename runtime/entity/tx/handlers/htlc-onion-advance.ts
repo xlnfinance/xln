@@ -11,7 +11,7 @@ import { addMessage } from '../../frame-events';
 import type { AccountTx, HtlcRoute } from '../../../types/account';
 import type { EntityCandidateEffect, EntityInput, EntityState } from '../../types';
 import type { EntityRuntimeContext } from '../../runtime-context';
-import { setHtlcRouteNote, terminateHtlcRoute } from '../htlc-route-lifecycle';
+import { terminateHtlcRoute } from '../htlc-route-lifecycle';
 import { applyHtlcSecretFollowups } from './account/committed-htlc-followups';
 
 const log = createStructuredLogger('entity.htlc_onion_advance');
@@ -73,8 +73,6 @@ const applyFinalAdvance = (
       existingRoute.startedAtMs = tx.data.advance.startedAtMs;
     }
   }
-  const description = tx.data.advance.description?.trim() ?? '';
-  if (description) setHtlcRouteNote(state, hashlock, inboundLockId, description);
   if (!queuedResolve(state, inboundEntityId, inboundLockId)) {
     accountTxs.push({
       accountId: inboundEntityId,

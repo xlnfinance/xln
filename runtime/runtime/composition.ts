@@ -1,4 +1,5 @@
 import { runtimeIsBrowser } from '../infra/runtime-process';
+export { getLiveJAdapter, getLiveJAdapterEntries } from './live-jadapters';
 
 // Bump this on runtime bundle changes that must be reflected in frontend immediately.
 const RUNTIME_BUILD_ID = '2026-07-18-16:00Z';

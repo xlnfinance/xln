@@ -89,7 +89,6 @@ const makeReplica = (entityId: string, counterpartyId: string): EntityReplica =>
       },
       htlcRoutes: new Map(),
       htlcFeesEarned: 0n,
-      htlcNotes: new Map(),
       lockBook: new Map(),
       swapTradingPairs: [],
       crontabState: initCrontab(),
@@ -227,6 +226,7 @@ describe('htlc event contract and dispute tail', () => {
     const env = createEmptyEnv('htlc-received-description-seed');
     env.quietRuntimeLogs = true;
     const replica = makeReplica(entityId, counterpartyId);
+    env.state.eReplicas.set(`${entityId}:${replica.signerId}`, replica);
     replica.state.htlcRoutes.set(hashlock, {
       hashlock,
       tokenId: 1,
@@ -236,7 +236,7 @@ describe('htlc event contract and dispute tail', () => {
       inboundLockId: lockId,
       createdTimestamp: replica.state.timestamp - 500,
     });
-    replica.state.htlcNotes.set(`hashlock:${hashlock}`, 'uid:customer-7');
+    replica.htlcNotes = new Map([[`hashlock:${hashlock}`, 'uid:customer-7']]);
 
     const candidateEffects: EntityCandidateEffect[] = [];
     applyCommittedAccountFrameFollowups(replica.state, counterpartyId, {
@@ -499,6 +499,7 @@ describe('htlc event contract and dispute tail', () => {
     env.quietRuntimeLogs = true;
     env.activeJurisdiction = 'Testnet';
     const replica = makeReplica(entityId, counterpartyId);
+    env.state.eReplicas.set(`${entityId}:${replica.signerId}`, replica);
     const account = replica.state.accounts.get(counterpartyId)!;
     account.mempool.push({
       type: 'htlc_lock',
@@ -511,7 +512,7 @@ describe('htlc event contract and dispute tail', () => {
         revealBeforeHeight: 10,
       },
     });
-    replica.state.htlcNotes.set(`lock:${outboundLockId}`, 'invoice-42');
+    replica.htlcNotes = new Map([[`lock:${outboundLockId}`, 'invoice-42']]);
     replica.state.htlcRoutes.set(hashlock, {
       hashlock,
       tokenId: 1,

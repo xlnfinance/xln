@@ -61,7 +61,8 @@
 
   async function inspectBytecode(): Promise<void> {
     if (!selected) return;
-    const provider = selected.jadapter?.provider as unknown as { getCode?: (address: string) => Promise<unknown> } | undefined;
+    const provider = $runtimeFrameEnv?.infrastructure?.liveJAdapters
+      ?.get(selected.name)?.provider as { getCode?: (address: string) => Promise<unknown> } | undefined;
     if (!provider?.getCode) {
       inspectorError = 'Selected J-Machine has no readable contract provider';
       contracts = contractAddresses(selected).map((entry) => ({ ...entry, bytes: null, error: inspectorError }));

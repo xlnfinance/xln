@@ -70,7 +70,6 @@ export const ENTITY_STATE_ROOT_FIELDS = [
 export const ENTITY_STATE_ROOT_EXCLUDED_FIELDS = [
   'prevFrameHash',
   'jBlockChain',
-  'htlcNotes',
 ] as const satisfies readonly (keyof EntityState)[];
 
 type AssertNoMissingEntityStateField<T extends never> = T;

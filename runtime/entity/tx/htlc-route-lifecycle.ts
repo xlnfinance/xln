@@ -1,6 +1,5 @@
-import type { AccountTx, HtlcLock, HtlcNoteKey, HtlcRoute } from '../../types/account';
+import type { AccountTx, HtlcLock, HtlcRoute } from '../../types/account';
 import type { EntityState } from '../types';
-import { LIMITS } from '../../config/constants';
 import { cancelHook, scheduleHook } from '../scheduler/hook-state';
 
 /** Auto-dispute when the upstream peer never acknowledges a returned secret. */
@@ -83,29 +82,6 @@ export function armHtlcSecretAckTimeout(
   });
 }
 
-export function setHtlcRouteNote(
-  state: EntityState,
-  hashlock: string,
-  lockId: string,
-  note: string,
-): void {
-  if (note.length === 0 || note.length > LIMITS.MAX_ENTITY_HTLC_NOTE_LENGTH) {
-    throw new Error(`ENTITY_HTLC_NOTE_INVALID_LENGTH:${note.length}`);
-  }
-  const notes = state.htlcNotes instanceof Map
-    ? state.htlcNotes
-    : new Map<HtlcNoteKey, string>();
-  const keys = [`hashlock:${hashlock}`, `lock:${lockId}`] as const satisfies readonly HtlcNoteKey[];
-  const newKeyCount = keys.filter((key) => !notes.has(key)).length;
-  if (notes.size + newKeyCount > LIMITS.MAX_ENTITY_HTLC_NOTES) {
-    throw new Error(
-      `ENTITY_HTLC_NOTE_LIMIT_EXCEEDED:size=${notes.size + newKeyCount}:max=${LIMITS.MAX_ENTITY_HTLC_NOTES}`,
-    );
-  }
-  for (const key of keys) notes.set(key, note);
-  state.htlcNotes = notes;
-}
-
 export function terminateHtlcRoute(
   state: EntityState,
   hashlock: string,
@@ -117,12 +93,6 @@ export function terminateHtlcRoute(
   route.secretAckedAt = timestamp;
   if (state.crontabState) {
     cancelHook(state.crontabState, `htlc-secret-ack:${route.hashlock}`);
-  }
-  const notes = state.htlcNotes;
-  if (notes) {
-    notes.delete(`hashlock:${hashlock}`);
-    if (route.inboundLockId) notes.delete(`lock:${route.inboundLockId}`);
-    if (route.outboundLockId) notes.delete(`lock:${route.outboundLockId}`);
   }
   state.htlcRoutes.delete(hashlock);
 }

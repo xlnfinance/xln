@@ -116,6 +116,7 @@ export const appendCertifiedEntityFrameLink = (
   candidateEffects.push({
     kind: 'entityFrameHistory',
     entityId: replica.entityId,
+    signerId: replica.signerId,
     link: structuredClone(link),
   });
   // The exact old history is durable in the Runtime/frame WAL. Keep only the

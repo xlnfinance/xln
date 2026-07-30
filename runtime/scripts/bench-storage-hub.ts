@@ -218,7 +218,6 @@ const projectEntityCoreDoc = (state: EntityState): Record<string, unknown> => ({
   profile: state.profile,
   htlcRoutes: state.htlcRoutes,
   htlcFeesEarned: state.htlcFeesEarned,
-  htlcNotes: state.htlcNotes,
   outDebtsByToken: state.outDebtsByToken,
   inDebtsByToken: state.inDebtsByToken,
   orderbookExt: state.orderbookExt,

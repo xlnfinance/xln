@@ -7,7 +7,7 @@ import { prepareEntityTxState } from '../../state-clone';
 import { addMessage } from '../../frame-events';
 import { findAccountKey } from '../account-key';
 import type { AccountTxTarget } from './account';
-import { persistVerifiedHtlcSecret, setHtlcRouteNote } from '../htlc-route-lifecycle';
+import { persistVerifiedHtlcSecret } from '../htlc-route-lifecycle';
 
 type EntityTxOf<T extends EntityTx['type']> = Extract<EntityTx, { type: T }>;
 
@@ -33,7 +33,7 @@ export const handleHashlockPaymentEntityTx = (
   const newState = prepareEntityTxState(entityState, mutableFrameState);
   const outputs: EntityInput[] = [];
   const accountTxs: AccountTxTarget[] = [];
-  const { targetEntityId, tokenId, amount, hashlock, description } = entityTx.data;
+  const { targetEntityId, tokenId, amount, hashlock } = entityTx.data;
   const normalizedTarget = findAccountKey(newState, targetEntityId);
   if (!normalizedTarget) {
     addMessage(newState, `❌ Hashlock payment failed: no account with ${targetEntityId}`);
@@ -117,9 +117,6 @@ export const handleHashlockPaymentEntityTx = (
     direction: 'outgoing',
     createdAt: BigInt(newState.timestamp),
   });
-  if (description && typeof description === 'string') {
-    setHtlcRouteNote(newState, hashlock, lockId, description);
-  }
   addMessage(newState, `🔒 Hashlock payment locked ${amountBig} token ${tokenId} to ${normalizedTarget}`);
   wakeLocalProposer(entityState, outputs);
   return { newState, outputs, accountTxs };

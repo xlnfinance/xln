@@ -16,7 +16,6 @@ import { addMessage } from '../../frame-events';
 import { deriveDelta } from '../../../account/utils';
 import { validatePreparedHtlcPayment } from '../../htlc/payment-admission';
 import { createStructuredLogger, formatAmount, shortHash, shortId } from '../../../infra/logger';
-import { setHtlcRouteNote } from '../htlc-route-lifecycle';
 
 const htlcLog = createStructuredLogger('entity.htlc');
 const formatEntityId = (id: string): string => id.slice(-4);
@@ -102,9 +101,6 @@ const recordOriginatedHtlc = (
     outboundLockId: prepared.lockId,
     createdTimestamp: newState.timestamp,
   });
-  if (prepared.description) {
-    setHtlcRouteNote(newState, prepared.hashlock, prepared.lockId, prepared.description);
-  }
   candidateEffects.push({
     kind: 'runtimeEvent',
     eventName: 'HtlcInitiated',

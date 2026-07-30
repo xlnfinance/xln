@@ -426,8 +426,7 @@ export const getJReplicaContractAddress = (
   const contractKey = label === 'entity_provider' ? 'entityProvider' : 'depository';
   return requireContractAddress(
     (replica[`${contractKey}Address` as keyof RuntimeJReplica] as string | undefined) ||
-      replica.contracts?.[contractKey] ||
-      replica.jadapter?.addresses?.[contractKey],
+      replica.contracts?.[contractKey],
     label,
   );
 };
@@ -443,7 +442,7 @@ export const buildSignerEntityConfig = (
   const depositoryAddress = getJReplicaContractAddress(jReplica, 'depository');
   const entityProviderAddress = getJReplicaContractAddress(jReplica, 'entity_provider');
   const rpcAddress = String(jReplica.rpcs?.[0] || '').trim();
-  const chainId = Number(jReplica.chainId ?? jReplica.jadapter?.chainId ?? fallbackChainId);
+  const chainId = Number(jReplica.chainId ?? fallbackChainId);
   const blockTimeMs = Number(jReplica.blockTimeMs);
   if (!Number.isFinite(chainId) || chainId <= 0) {
     throw new Error(`ENTITY_JURISDICTION_CHAIN_ID_MISSING: ${jurisdictionName}`);

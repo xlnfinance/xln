@@ -113,7 +113,6 @@ const makeReplica = (entityId: string, signerId: string, isProposer: boolean): E
       },
       htlcRoutes: new Map(),
       htlcFeesEarned: 0n,
-      htlcNotes: new Map(),
       lockBook: new Map(),
       swapTradingPairs: [],
     },

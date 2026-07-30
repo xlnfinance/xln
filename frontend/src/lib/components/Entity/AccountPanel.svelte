@@ -346,7 +346,7 @@
   }
 
   function getHtlcNote(data: Record<string, unknown>): string | null {
-    const notes = replica?.state?.htlcNotes;
+    const notes = replica?.htlcNotes;
     if (!(notes instanceof Map)) return null;
     const lockId = typeof data['lockId'] === 'string' ? data['lockId'] : '';
     if (lockId) {

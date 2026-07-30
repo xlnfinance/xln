@@ -4,6 +4,7 @@ import {
   type JurisdictionsPayload,
   type Runtime,
 } from './vault-recovery';
+import type { RuntimeReplica } from '@xln/runtime/api/runtime-module';
 
 export const findRuntimeByIdCaseInsensitive = (
   runtimeMap: Record<string, Runtime>,
@@ -67,19 +68,16 @@ export const hasRuntimeJurisdictionAddresses = (replica: unknown): boolean => {
   return Boolean(depository && entityProvider && account && deltaTransformer);
 };
 
-export const hasConnectedJurisdictionAdapter = (replica: unknown): boolean => {
-  const candidate = replica as {
-    jadapter?: {
-      addresses?: { depository?: string; entityProvider?: string };
-      depository?: unknown;
-      entityProvider?: unknown;
-    };
-  } | null;
+export const hasConnectedJurisdictionAdapter = (
+  env: RuntimeReplica,
+  jurisdictionName: string,
+): boolean => {
+  const adapter = env.infrastructure?.liveJAdapters?.get(jurisdictionName);
   return Boolean(
-    candidate?.jadapter?.addresses?.depository &&
-    candidate?.jadapter?.addresses?.entityProvider &&
-    candidate?.jadapter?.depository &&
-    candidate?.jadapter?.entityProvider,
+    adapter?.addresses?.depository &&
+    adapter.addresses.entityProvider &&
+    adapter.depository &&
+    adapter.entityProvider,
   );
 };
 

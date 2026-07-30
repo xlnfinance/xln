@@ -150,7 +150,6 @@ const makeEntityState = (entityId: string, config: ConsensusConfig): EntityState
   },
   htlcRoutes: new Map(),
   htlcFeesEarned: 0n,
-  htlcNotes: new Map(),
   lockBook: new Map(),
   crontabState: initCrontab(),
   swapTradingPairs: [],

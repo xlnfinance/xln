@@ -2071,7 +2071,7 @@ describe('storage frame journal retention', () => {
       await getRuntimeWalDb(restoredAtTwo).get(keyLiveReplicaMeta(entityId, signer)),
     );
     expect(compactMeta['state']).toBeUndefined();
-    expect(compactMeta['localEntityState']).toBeDefined();
+    expect(compactMeta['htlcNotes']).toBeUndefined();
     expect((await verifyStorageTailIntegrity(getRuntimeWalDb(restoredAtTwo))).checkedFrames).toBe(3);
 
     await closeRuntimeDb(restoredAtTwo);

@@ -79,7 +79,7 @@ export async function buildDelayedLastResortAppointmentsForTower(
     } catch {
       continue;
     }
-    const chainId = Number(jReplica.chainId ?? jReplica.jadapter?.chainId ?? 0);
+    const chainId = Number(jReplica.chainId ?? 0);
     if (!Number.isFinite(chainId) || chainId <= 0) continue;
 
     const rpcBase = String(jReplica.rpcs?.[0] || '').trim();

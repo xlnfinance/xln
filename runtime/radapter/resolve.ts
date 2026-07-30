@@ -51,7 +51,7 @@ type RuntimeAdapterEntityCoreDoc = StorageEntityCoreDoc & {
   signerId?: string;
   isProposer?: boolean;
   entityEncPubKey?: string;
-  htlcNotes?: EntityState['htlcNotes'];
+  htlcNotes?: EntityReplica['htlcNotes'];
 };
 import type { Profile } from '../entity/profile';
 import {

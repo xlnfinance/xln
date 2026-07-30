@@ -8,13 +8,24 @@ import {
   recordSwapResolveLifecycle,
 } from '../account/tx/handlers/swap-history';
 import { LIMITS } from '../config/constants';
-import { setHtlcRouteNote, terminateHtlcRoute } from '../entity/tx/htlc-route-lifecycle';
+import {
+  indexCertifiedEntityFrameNotes,
+  pruneEntityReplicaHtlcNotes,
+} from '../entity/htlc/note-index';
+import { terminateHtlcRoute } from '../entity/tx/htlc-route-lifecycle';
 import { applyHtlcTimeoutFollowups } from '../entity/tx/handlers/account/committed-htlc-followups';
 import { createEmptyEnv } from '../runtime';
 import type { AccountState, SwapOffer } from '../types/account';
-import type { EntityState } from '../entity/types';
+import type {
+  EntityCandidateEffect,
+  EntityReplica,
+  EntityState,
+  Proposal,
+} from '../entity/types';
+import type { EntityTx } from '../types/entity-tx';
 import { validateAccountState } from '../account/state-validation';
-import { validateEntityState } from '../entity/state-validation';
+import { validateEntityReplica } from '../entity/replica-validation';
+import { publishEntityCandidateEffects } from '../runtime/env-events';
 
 const leftEntity = `0x${'11'.repeat(32)}`;
 const rightEntity = `0x${'22'.repeat(32)}`;
@@ -100,8 +111,16 @@ const makeEntity = (): EntityState => ({
   profile: { name: 'bounds', isHub: false, avatar: '', bio: '', website: '' },
   htlcRoutes: new Map(),
   htlcFeesEarned: 0n,
-  htlcNotes: new Map(),
   lockBook: new Map(),
+});
+
+const makeReplica = (state = makeEntity()): EntityReplica => ({
+  entityId: state.entityId,
+  signerId: proposer,
+  entityEncPubKey: `0x${'77'.repeat(32)}`,
+  state,
+  mempool: [],
+  isProposer: true,
 });
 
 test('terminal swap histories retain a deterministic bounded tail without losing active rows', () => {
@@ -168,7 +187,8 @@ test('swap lifecycle text bounds reject before mutating the projection', () => {
 });
 
 test('terminating an HTLC removes both validator-local note lookup keys', () => {
-  const state = makeEntity();
+  const replica = makeReplica();
+  const { state } = replica;
   const hashlock = `0x${'99'.repeat(32)}`;
   const lockId = `0x${'aa'.repeat(32)}`;
   state.htlcRoutes.set(hashlock, {
@@ -177,17 +197,21 @@ test('terminating an HTLC removes both validator-local note lookup keys', () => 
     outboundLockId: lockId,
     createdTimestamp: 1,
   });
-  state.htlcNotes?.set(`hashlock:${hashlock}`, 'coffee');
-  state.htlcNotes?.set(`lock:${lockId}`, 'coffee');
+  replica.htlcNotes = new Map([
+    [`hashlock:${hashlock}`, 'coffee'],
+    [`lock:${lockId}`, 'coffee'],
+  ]);
 
   terminateHtlcRoute(state, hashlock, 2);
+  pruneEntityReplicaHtlcNotes(replica);
 
   expect(state.htlcRoutes).toHaveLength(0);
-  expect(state.htlcNotes).toHaveLength(0);
+  expect(replica.htlcNotes).toBeUndefined();
 });
 
 test('timeout terminal activity is emitted before its HTLC notes are removed', () => {
-  const state = makeEntity();
+  const replica = makeReplica();
+  const { state } = replica;
   const account = makeAccount();
   const hashlock = `0x${'ab'.repeat(32)}`;
   const lockId = `0x${'cd'.repeat(32)}`;
@@ -198,10 +222,13 @@ test('timeout terminal activity is emitted before its HTLC notes are removed', (
     outboundLockId: lockId,
     createdTimestamp: 1,
   });
-  state.htlcNotes?.set(`hashlock:${hashlock}`, 'timeout note');
-  state.htlcNotes?.set(`lock:${lockId}`, 'timeout note');
+  replica.htlcNotes = new Map([
+    [`hashlock:${hashlock}`, 'timeout note'],
+    [`lock:${lockId}`, 'timeout note'],
+  ]);
   const env = createEmptyEnv('terminal-note-timeout');
-  const candidateEffects = [];
+  env.state.eReplicas.set(`${replica.entityId}:${replica.signerId}`, replica);
+  const candidateEffects: EntityCandidateEffect[] = [];
 
   applyHtlcTimeoutFollowups({
     env,
@@ -216,37 +243,141 @@ test('timeout terminal activity is emitted before its HTLC notes are removed', (
 
   expect(candidateEffects.some((effect) => effect.kind === 'runtimeEvent' && effect.eventName === 'HtlcFailed')).toBe(true);
   expect(state.htlcRoutes).toHaveLength(0);
-  expect(state.htlcNotes).toHaveLength(0);
+  publishEntityCandidateEffects(env, candidateEffects);
+  expect(env.frameLogs.find(entry => entry.message === 'HtlcFailed')?.data?.description).toBe('timeout note');
+  expect(replica.htlcNotes).toBeUndefined();
 });
 
 test('HTLC note insertion rejects atomically at the Entity cap', () => {
-  const state = makeEntity();
-  state.htlcNotes = new Map(Array.from(
+  const replica = makeReplica();
+  replica.htlcNotes = new Map(Array.from(
     { length: LIMITS.MAX_ENTITY_HTLC_NOTES },
-    (_, index) => [`lock:${index}`, 'note'],
+    (_, index) => [`lock:${index}` as const, 'note'],
   ));
   const hashlock = `0x${'de'.repeat(32)}`;
   const lockId = `0x${'ef'.repeat(32)}`;
 
-  expect(() => setHtlcRouteNote(state, hashlock, lockId, 'new note')).toThrow(
+  expect(() => indexCertifiedEntityFrameNotes(replica, { txs: [{
+    type: 'hashlockPayment',
+    data: { targetEntityId: rightEntity, tokenId: 1, amount: 1n, hashlock, lockId, description: 'new note' },
+  }] })).toThrow(
     'ENTITY_HTLC_NOTE_LIMIT_EXCEEDED',
   );
-  expect(state.htlcNotes).toHaveLength(LIMITS.MAX_ENTITY_HTLC_NOTES);
-  expect(state.htlcNotes.has(`hashlock:${hashlock}`)).toBe(false);
-  expect(state.htlcNotes.has(`lock:${lockId}`)).toBe(false);
+  expect(replica.htlcNotes).toHaveLength(LIMITS.MAX_ENTITY_HTLC_NOTES);
+  expect(replica.htlcNotes.has(`hashlock:${hashlock}`)).toBe(false);
+  expect(replica.htlcNotes.has(`lock:${lockId}`)).toBe(false);
 });
 
 test('HTLC note text validation rejects before adding either lookup key', () => {
-  const state = makeEntity();
+  const replica = makeReplica();
   const hashlock = `0x${'12'.repeat(32)}`;
   const lockId = `0x${'34'.repeat(32)}`;
-  expect(() => setHtlcRouteNote(
-    state,
+  expect(() => indexCertifiedEntityFrameNotes(replica, { txs: [{
+    type: 'hashlockPayment',
+    data: {
+      targetEntityId: rightEntity,
+      tokenId: 1,
+      amount: 1n,
+      hashlock,
+      lockId,
+      description: 'x'.repeat(LIMITS.MAX_ENTITY_HTLC_NOTE_LENGTH + 1),
+    },
+  }] })).toThrow('ENTITY_HTLC_NOTE_INVALID_LENGTH');
+  expect(replica.htlcNotes).toBeUndefined();
+});
+
+test('certified proposal and executed vote frames index nested HTLC descriptions', () => {
+  const hashlock = `0x${'45'.repeat(32)}`;
+  const lockId = `0x${'56'.repeat(32)}`;
+  const nestedPayment = {
+    type: 'hashlockPayment',
+    data: {
+      targetEntityId: rightEntity,
+      tokenId: 1,
+      amount: 1n,
+      hashlock,
+      lockId,
+      description: 'nested invoice',
+    },
+  } satisfies EntityTx;
+  const action = {
+    type: 'entity_transaction',
+    data: { version: 1, actionHash: `0x${'67'.repeat(32)}`, txs: [nestedPayment] },
+  } as const;
+
+  const proposedReplica = makeReplica();
+  indexCertifiedEntityFrameNotes(proposedReplica, { txs: [{
+    type: 'propose',
+    data: { proposer, action },
+  }] });
+  expect(proposedReplica.htlcNotes?.get(`hashlock:${hashlock}`)).toBe('nested invoice');
+  expect(proposedReplica.htlcNotes?.get(`lock:${lockId}`)).toBe('nested invoice');
+
+  const votedReplica = makeReplica();
+  const proposalId = `0x${'78'.repeat(32)}`;
+  votedReplica.state.proposals.set(proposalId, {
+    id: proposalId,
+    proposer,
+    boardHash: `0x${'89'.repeat(32)}`,
+    boardEpoch: 0,
+    action,
+    actionHash: action.data.actionHash,
+    votes: new Map(),
+    status: 'executed',
+    created: 1,
+  } satisfies Proposal);
+  indexCertifiedEntityFrameNotes(votedReplica, { txs: [{
+    type: 'vote',
+    data: { proposalId, voter: proposer, choice: 'yes' },
+  }] });
+  expect(votedReplica.htlcNotes?.get(`hashlock:${hashlock}`)).toBe('nested invoice');
+  expect(votedReplica.htlcNotes?.get(`lock:${lockId}`)).toBe('nested invoice');
+});
+
+test('only a final certified onion advance indexes its private presentation note', () => {
+  const hashlock = `0x${'9a'.repeat(32)}`;
+  const inboundLockId = `0x${'ab'.repeat(32)}`;
+  const baseData = {
+    version: 1 as const,
+    proposerSignerId: proposer,
+    inboundEntityId: rightEntity,
+    inboundLockId,
+    encryptedLayerHash: `0x${'bc'.repeat(32)}`,
     hashlock,
-    lockId,
-    'x'.repeat(LIMITS.MAX_ENTITY_HTLC_NOTE_LENGTH + 1),
-  )).toThrow('ENTITY_HTLC_NOTE_INVALID_LENGTH');
-  expect(state.htlcNotes).toHaveLength(0);
+    tokenId: 1,
+    amount: 1n,
+    timelock: 2n,
+    revealBeforeHeight: 3,
+  };
+
+  const forwardedReplica = makeReplica();
+  indexCertifiedEntityFrameNotes(forwardedReplica, { txs: [{
+    type: 'htlcOnionAdvance',
+    data: {
+      ...baseData,
+      advance: {
+        kind: 'forward',
+        nextEntityId: rightEntity,
+        nextAmount: 1n,
+        nextTimelock: 1n,
+        nextRevealBeforeHeight: 2,
+        nextEncryptedLayerHash: `0x${'cd'.repeat(32)}`,
+        nextLayer: 'opaque',
+      },
+    },
+  }] });
+  expect(forwardedReplica.htlcNotes).toBeUndefined();
+
+  const finalReplica = makeReplica();
+  indexCertifiedEntityFrameNotes(finalReplica, { txs: [{
+    type: 'htlcOnionAdvance',
+    data: {
+      ...baseData,
+      advance: { kind: 'final', description: 'final recipient' },
+    },
+  }] });
+  expect(finalReplica.htlcNotes?.get(`hashlock:${hashlock}`)).toBe('final recipient');
+  expect(finalReplica.htlcNotes?.get(`lock:${inboundLockId}`)).toBe('final recipient');
 });
 
 test('decode validation rejects oversized swap history, resolve history, and HTLC notes', () => {
@@ -291,12 +422,12 @@ test('decode validation rejects oversized swap history, resolve history, and HTL
     'ACCOUNT_SWAP_RESOLVE_HISTORY_LIMIT_EXCEEDED',
   );
 
-  const state = makeEntity();
-  state.htlcNotes = new Map(Array.from(
+  const replica = makeReplica();
+  replica.htlcNotes = new Map(Array.from(
     { length: LIMITS.MAX_ENTITY_HTLC_NOTES + 1 },
-    (_, index) => [`lock:${index}`, 'note'],
+    (_, index) => [`lock:${index}` as const, 'note'],
   ));
-  expect(() => validateEntityState(state, 'oversizedHtlcNotes')).toThrow(
+  expect(() => validateEntityReplica(replica, 'oversizedHtlcNotes')).toThrow(
     'ENTITY_HTLC_NOTE_LIMIT_EXCEEDED',
   );
 });

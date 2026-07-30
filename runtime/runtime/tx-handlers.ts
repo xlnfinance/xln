@@ -369,7 +369,6 @@ const buildCheckpointReplica = (
     resolveImportCheckpointState(env, identity.entityId, identity.signerId, config),
     true,
   );
-  state.htlcNotes = new Map();
   return {
     entityId: identity.entityId,
     signerId: identity.signerId,
@@ -428,7 +427,6 @@ const buildGenesisReplica = (
       },
       htlcRoutes: new Map(),
       htlcFeesEarned: 0n,
-      htlcNotes: new Map(),
       lockBook: new Map(),
       crontabState: initCrontab(),
       swapTradingPairs: buildDefaultEntitySwapPairs(

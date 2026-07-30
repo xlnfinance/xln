@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { AbiCoder, HDNodeWallet, Interface, Mnemonic, ParamType, Wallet, getIndexedAccountPath, hexlify, keccak256, solidityPacked, toUtf8Bytes } from 'ethers';
 
 import * as xln from '../../runtime/runtime.ts';
+import { getLiveJAdapter } from '../../runtime/runtime/live-jadapters';
 import { startStandaloneWatchtowerServer, type StandaloneWatchtowerServer } from '../../runtime/watchtower/standalone-server';
 import {
   buildTowerAppointmentOwnerMessage,
@@ -270,7 +271,7 @@ describe('watchtower recovery full flow', () => {
       entityProviderAddress: restoredJReplica.entityProviderAddress,
     };
 
-    const browserVMState = await restoredJReplica.jadapter?.dumpState?.();
+    const browserVMState = await getLiveJAdapter(env, jurisdictionName)?.dumpState?.();
     if (!browserVMState) throw new Error('RESTORE_FLOW_BROWSERVM_STATE_MISSING');
     env.browserVMState = browserVMState;
 

@@ -1,4 +1,4 @@
-import type { AccountFrame, AccountTx, HtlcNoteKey, HtlcRoute } from '../../../../types/account';
+import type { AccountFrame, AccountTx, HtlcRoute } from '../../../../types/account';
 import type { EntityCandidateEffect, EntityState } from '../../../types';
 import type { EntityRuntimeContext } from '../../../runtime-context';
 import { HEAVY_LOGS } from '../../../../infra/debug-flags';
@@ -23,10 +23,6 @@ function emitOriginatedHtlcFinalized(
 ): void {
   if (accountTx.data.outcome !== 'secret') return;
   if ((!route.originated && route.inboundEntity) || route.outboundLockId !== accountTx.data.lockId) return;
-  const description =
-    state.htlcNotes?.get(`lock:${accountTx.data.lockId}` as HtlcNoteKey)
-    ?? state.htlcNotes?.get(`hashlock:${route.hashlock}` as HtlcNoteKey)
-    ?? undefined;
   candidateEffects.push({
     kind: 'runtimeEvent',
     eventName: 'HtlcFinalized',
@@ -39,7 +35,6 @@ function emitOriginatedHtlcFinalized(
       lockId: accountTx.data.lockId,
       ...(route.amount !== undefined ? { amount: route.amount } : {}),
       ...(route.tokenId !== undefined ? { tokenId: route.tokenId } : {}),
-      ...(description ? { description } : {}),
       ...(route.startedAtMs !== undefined ? { startedAtMs: route.startedAtMs } : {}),
       ...(jurisdictionIdFor(state, env) ? { jurisdictionId: jurisdictionIdFor(state, env) } : {}),
       finalizedAtMs: state.timestamp,
@@ -96,9 +91,6 @@ export function applyCommittedAccountFrameFollowups(
               continue;
             }
             if (resolvesInbound) {
-              const description =
-                newState.htlcNotes?.get(`lock:${accountTx.data.lockId}`)
-                ?? newState.htlcNotes?.get(`hashlock:${hashlock}`);
               candidateEffects.push({
                 kind: 'runtimeEvent',
                 eventName: 'HtlcReceived',
@@ -111,7 +103,6 @@ export function applyCommittedAccountFrameFollowups(
                   ...(route.amount !== undefined ? { amount: route.amount } : {}),
                   ...(route.tokenId !== undefined ? { tokenId: route.tokenId } : {}),
                   ...(route.startedAtMs !== undefined ? { startedAtMs: route.startedAtMs } : {}),
-                  ...(description ? { description } : {}),
                   ...(jurisdictionIdFor(newState, env) ? { jurisdictionId: jurisdictionIdFor(newState, env) } : {}),
                   receivedAtMs: newState.timestamp,
                 }),

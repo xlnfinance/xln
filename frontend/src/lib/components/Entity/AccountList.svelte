@@ -142,7 +142,7 @@
   function getActiveFlowSummary(counterpartyId: string): { items: ActiveFlowSummary[]; overflowCount: number } {
     const items: Array<ActiveFlowSummary & { createdAt: number }> = [];
     const lockBook = replica?.state?.lockBook;
-    const notes = replica?.state?.htlcNotes;
+    const notes = replica?.htlcNotes;
     const routes = replica?.state?.htlcRoutes;
     if (!lockBook || typeof lockBook.values !== 'function') return { items: [], overflowCount: 0 };
 

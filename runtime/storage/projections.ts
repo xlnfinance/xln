@@ -105,7 +105,7 @@ export type EntityReplicaCoreViewDoc = StorageEntityCoreDoc & {
   signerId: string;
   isProposer: boolean;
   entityEncPubKey: string;
-  htlcNotes?: EntityState['htlcNotes'];
+  htlcNotes?: EntityReplica['htlcNotes'];
 };
 
 /**
@@ -115,13 +115,13 @@ export type EntityReplicaCoreViewDoc = StorageEntityCoreDoc & {
  */
 export const projectEntityReplicaCoreView = (
   state: EntityState,
-  replica: Pick<EntityReplica, 'signerId' | 'isProposer' | 'entityEncPubKey'>,
+  replica: Pick<EntityReplica, 'signerId' | 'isProposer' | 'entityEncPubKey' | 'htlcNotes'>,
 ): EntityReplicaCoreViewDoc => ({
   ...projectEntityCoreDoc(state),
   signerId: normalizeEntityId(replica.signerId),
   isProposer: replica.isProposer,
   entityEncPubKey: replica.entityEncPubKey,
-  ...withProp('htlcNotes', state.htlcNotes),
+  ...withProp('htlcNotes', replica.htlcNotes),
 });
 
 const cloneHankoWitness = (hankoWitness?: EntityReplica['hankoWitness']): EntityReplica['hankoWitness'] | undefined => {
@@ -156,11 +156,7 @@ const buildReplicaMetaProjection = (
   isProposer: replica.isProposer,
   entityEncPubKey: replica.entityEncPubKey,
   ...(!options?.omitState ? { state } : {}),
-  ...(options?.omitState ? {
-    localEntityState: {
-      ...withProp('htlcNotes', state.htlcNotes),
-    },
-  } : {}),
+  ...withProp('htlcNotes', replica.htlcNotes),
   mempool,
   ...withProp('position', replica.position),
   ...withProp('proposal', replica.proposal),

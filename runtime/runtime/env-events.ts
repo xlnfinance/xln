@@ -11,13 +11,23 @@ import { encodeCanonicalConsensusValue } from '../protocol/canonical-consensus-v
  */
 
 import type { AccountFrame, RuntimeOverlayRecord } from '../types/account';
-import type { CertifiedEntityFrameLink, EntityState, EntityCandidateEffect } from '../entity/types';
+import type {
+  CertifiedEntityFrameLink,
+  EntityCandidateEffect,
+  EntityReplica,
+  EntityState,
+} from '../entity/types';
 import type { RuntimeReplica, RuntimeHistoryRecord } from './types';
 import type { LogCategory, FrameLogEntry } from '../types/logging';
 
 import { storageOverlayRecordKey } from '../protocol/overlay';
 import { invalidateEntityAccountCommitment } from '../entity/consensus/state-root';
 import { refreshAccountWorkIndex } from '../entity/consensus/account-work-index';
+import {
+  enrichHtlcRuntimeEvent,
+  indexCertifiedEntityFrameNotes,
+  pruneEntityReplicaHtlcNotes,
+} from '../entity/htlc/note-index';
 import { recordRuntimeSecurityIncident, resolveRuntimeSecurityIncident } from './security-incidents';
 
 const getLogState = (env: RuntimeReplica) => {
@@ -287,13 +297,41 @@ export const recordAccountFrameHistory = (
 };
 
 export const publishEntityCandidateEffects = (env: RuntimeReplica, effects: readonly EntityCandidateEffect[]): void => {
+  let activeReplica: EntityReplica | null = null;
+  const touchedReplicas = new Set<EntityReplica>();
   for (const effect of effects) {
     if (effect.kind === 'entityFrameHistory') {
+      activeReplica = Array.from(env.state.eReplicas.values()).find(
+        replica =>
+          replica.entityId.toLowerCase() === effect.entityId.toLowerCase()
+          && replica.signerId.toLowerCase() === effect.signerId.toLowerCase(),
+      ) ?? null;
+      if (!activeReplica) {
+        throw new Error(
+          `ENTITY_FRAME_HISTORY_REPLICA_MISSING:entity=${effect.entityId}:signer=${effect.signerId}`,
+        );
+      }
+      indexCertifiedEntityFrameNotes(activeReplica, effect.link.frame);
+      touchedReplicas.add(activeReplica);
       recordEntityFrameHistory(env, effect);
     } else if (effect.kind === 'accountFrameHistory') {
       recordAccountFrameHistory(env, effect);
     } else if (effect.kind === 'runtimeEvent') {
-      env.emit(effect.eventName, effect.data);
+      const eventEntityId =
+        typeof effect.data['entityId'] === 'string'
+          ? effect.data['entityId'].toLowerCase()
+          : null;
+      const eventReplicas = eventEntityId
+        ? Array.from(env.state.eReplicas.values()).filter(
+            replica => replica.entityId.toLowerCase() === eventEntityId,
+          )
+        : [];
+      const eventReplica = activeReplica ?? (eventReplicas.length === 1 ? eventReplicas[0]! : null);
+      if (eventReplica) touchedReplicas.add(eventReplica);
+      env.emit(
+        effect.eventName,
+        eventReplica ? enrichHtlcRuntimeEvent(eventReplica, effect.data) : effect.data,
+      );
     } else if (effect.kind === 'securityIncidentRecord') {
       recordRuntimeSecurityIncident(env, effect.identity);
     } else if (effect.kind === 'securityIncidentResolve') {
@@ -302,6 +340,7 @@ export const publishEntityCandidateEffects = (env: RuntimeReplica, effects: read
       queuePendingAuditEvent(env, effect.payload);
     }
   }
+  for (const replica of touchedReplicas) pruneEntityReplicaHtlcNotes(replica);
 };
 
 export const recordEntityFrameHistory = (

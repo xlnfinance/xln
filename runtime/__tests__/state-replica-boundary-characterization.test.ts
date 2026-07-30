@@ -180,11 +180,11 @@ describe('State and Replica boundary characterization', () => {
 
     const historyView = cloneEntityState(baselineState, true);
     historyView.prevFrameHash = hex('93', 32);
-    historyView.htlcNotes.set('history-only', {
-      hash: hex('94', 32),
-      secret: hex('95', 32),
-    });
     expect(computeCanonicalEntityConsensusStateHash(historyView)).toBe(entityRoot);
+
+    const replicaStateRoot = computeCanonicalEntityConsensusStateHash(replica.state);
+    replica.htlcNotes = new Map([[`hashlock:${hex('94', 32)}`, 'history-only']]);
+    expect(computeCanonicalEntityConsensusStateHash(replica.state)).toBe(replicaStateRoot);
 
     const committedChange = cloneEntityState(baselineState, true);
     committedChange.reserves.set(1, 1n);

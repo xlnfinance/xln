@@ -40,8 +40,8 @@ export const runtimeQuiesceWorkSummary = (env: RuntimeReplica) => ({
   pendingNetworkOutputs: env.pendingNetworkOutputs?.length ?? 0,
   jurisdictions: Array.from(env.state.jReplicas.entries(), ([name, replica]) => ({
     name,
-    mode: replica.jadapter?.mode ?? null,
-    watching: replica.jadapter?.isWatching?.() ?? false,
+    mode: env.infrastructure?.liveJAdapters?.get(name)?.mode ?? null,
+    watching: env.infrastructure?.liveJAdapters?.get(name)?.isWatching?.() ?? false,
   })),
   replicas: Array.from(env.state.eReplicas.entries()).flatMap(([key, replica]) => {
     const accounts = Array.from(replica.state.accounts.entries()).flatMap(([counterpartyId, account]) =>

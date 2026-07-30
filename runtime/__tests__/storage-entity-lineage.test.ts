@@ -76,7 +76,6 @@ const makeGenesis = (env: RuntimeReplica, signerId: string): EntityState => {
     profile: { name: 'lineage', isHub: false, avatar: '', bio: '', website: '' },
     htlcRoutes: new Map(),
     htlcFeesEarned: 0n,
-    htlcNotes: new Map(),
     lockBook: new Map(),
     swapTradingPairs: [],
     pendingCrossJurisdictionFillAcks: new Map(),

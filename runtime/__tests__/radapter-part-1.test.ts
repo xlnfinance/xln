@@ -220,7 +220,6 @@ const makeEnv = (): RuntimeReplica =>
               profile: { name: 'Adapter Test', isHub: false, avatar: '', bio: '', website: '' },
               htlcRoutes: new Map(),
               htlcFeesEarned: 0n,
-              htlcNotes: new Map(),
               lockBook: new Map(),
               swapTradingPairs: [],
             },
@@ -834,7 +833,7 @@ test('current stored view frame overlays local identity without mixing a later l
   const env = makeEnv();
   const replica = Array.from(env.state.eReplicas.values())[0]!;
   replica.state.prevFrameHash = 'frame-h7';
-  replica.state.htlcNotes = new Map([['hashlock:local-h7', 'local note h7']]);
+  replica.htlcNotes = new Map([['hashlock:local-h7', 'local note h7']]);
   const storedCore = structuredClone(projectEntityCoreDoc(replica.state));
   const frame = await resolveRuntimeAdapterRead<{
     height: number;
@@ -877,7 +876,7 @@ test('current stored view frame overlays local identity without mixing a later l
         replica.state.profile = { ...replica.state.profile, name: 'Later live frame' };
         replica.state.reserves = new Map([[1, 800n]]);
         replica.entityEncPubKey = 'pub-h8';
-        replica.state.htlcNotes = new Map([['hashlock:local-h8', 'local note h8']]);
+        replica.htlcNotes = new Map([['hashlock:local-h8', 'local note h8']]);
         return {
           core: storedCore,
           accounts: { items: [], nextCursor: null },
@@ -2626,7 +2625,7 @@ test('runtime adapter view-frame caps route-heavy core maps under wire budget', 
       note: largeNote,
     };
     replica.state.htlcRoutes.set(id, { id, note: largeNote } as any);
-    replica.state.htlcNotes?.set(id, largeNote);
+    replica.htlcNotes?.set(id, largeNote);
     replica.state.crossJurisdictionSwaps.set(id, route as any);
   }
 

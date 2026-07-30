@@ -777,7 +777,7 @@ const getRuntimeFatalDiagnostics = (env: RuntimeReplica, replicaName?: string): 
         entityProviderAddress: replica.entityProviderAddress ?? null,
         contracts: replica.contracts ?? null,
         rpcs: replica.rpcs ?? null,
-        hasAdapter: hasConnectedJurisdictionAdapter(replica),
+        hasAdapter: hasConnectedJurisdictionAdapter(env, replica.name),
         hasAddresses: hasRuntimeJurisdictionAddresses(replica),
       }
     : null;
@@ -1219,8 +1219,8 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
 
   const hasLiveJAdapter = (targetEnv: RuntimeReplica | null): boolean => {
     if (!targetEnv?.state.jReplicas || targetEnv.state.jReplicas.size === 0) return false;
-    for (const [, jReplica] of targetEnv.state.jReplicas.entries()) {
-      if (hasConnectedJurisdictionAdapter(jReplica)) return true;
+    for (const [name] of targetEnv.state.jReplicas.entries()) {
+      if (hasConnectedJurisdictionAdapter(targetEnv, name)) return true;
     }
     return false;
   };
@@ -1618,7 +1618,7 @@ export const vaultOperations = {
     };
 
     const existing = findJReplicaByName(getLatestEnv(), config.name);
-    if (existing && hasConnectedJurisdictionAdapter(existing)) {
+    if (existing && hasConnectedJurisdictionAdapter(getLatestEnv(), existing.name)) {
       return {
         ...config,
         ...(existing.entityProviderDeploymentBlock !== undefined

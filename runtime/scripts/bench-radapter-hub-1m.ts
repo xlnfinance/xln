@@ -288,7 +288,6 @@ const makeHubState = (entityId: string, height: number, timestamp: number): Enti
   profile: { name: 'H1 1M Hub Bench', isHub: true, avatar: '', bio: '', website: '' },
   htlcRoutes: new Map(),
   htlcFeesEarned: 0n,
-  htlcNotes: new Map(),
   lockBook: new Map(),
   swapTradingPairs: [],
 });

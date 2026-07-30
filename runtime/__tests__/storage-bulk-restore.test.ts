@@ -37,7 +37,6 @@ const makeState = (entityId: string, height: number): EntityState => ({
   profile: { name: `entity-${entityId.slice(-4)}`, isHub: false, avatar: '', bio: '', website: '' },
   htlcRoutes: new Map(),
   htlcFeesEarned: 0n,
-  htlcNotes: new Map(),
   lockBook: new Map(),
 });
 

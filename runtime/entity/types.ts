@@ -276,7 +276,6 @@ export interface EntityState {
   // 🔒 HTLC Routing - Multi-hop payment tracking (like 2024 hashlockMap)
   htlcRoutes: Map<string, HtlcRoute>; // hashlock → routing context
   htlcFeesEarned: bigint; // Running total of HTLC routing fees collected
-  htlcNotes?: Map<HtlcNoteKey, string>; // local UI notes; recipient note comes from final encrypted envelope only
 
   // 💳 Debt ledger — mirrored on both debtor and creditor sides from canonical j-events.
   outDebtsByToken?: Map<number, Map<string, DebtEntry>>;
@@ -473,6 +472,7 @@ export type EntityCandidateEffect =
   | {
       kind: 'entityFrameHistory';
       entityId: string;
+      signerId: string;
       link: CertifiedEntityFrameLink;
     }
   | {
@@ -590,6 +590,11 @@ export interface EntityReplica {
   };
   /** Validator-local EntityProvider submit receipt; never part of Entity consensus. */
   entityProviderActionSubmitState?: EntityProviderActionSubmitState;
+  /**
+   * Bounded presentation index rebuilt from certified Entity frames.
+   * Descriptions never enter EntityState or an Account frame.
+   */
+  htlcNotes?: Map<HtlcNoteKey, string>;
   // Position is RELATIVE to j-machine (jurisdiction)
   // Frontend calculates: worldPos = jMachine.position + relativePosition
   position?: {

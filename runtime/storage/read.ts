@@ -289,15 +289,9 @@ const listReplicaMetas = async (
       decoded && typeof decoded === 'object' && !Array.isArray(decoded) &&
       !Object.hasOwn(decoded, 'state') && sharedState
     ) {
-      const decodedRecord = decoded as Record<string, unknown>;
-      const localState = decodedRecord['localEntityState'];
-      if (!localState || typeof localState !== 'object' || Array.isArray(localState)) {
-        throw new Error(`STORAGE_REPLICA_META_LOCAL_STATE_MISSING:entity=${expectedEntityId}`);
-      }
-      const { localEntityState: _localEntityState, ...localMeta } = decodedRecord;
       candidate = {
-        ...localMeta,
-        state: { ...sharedState, ...(localState as Record<string, unknown>) },
+        ...decoded,
+        state: sharedState,
       };
     }
     const meta = validateEntityReplicaMetadata(

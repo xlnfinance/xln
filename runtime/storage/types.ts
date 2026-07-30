@@ -323,8 +323,8 @@ export type StorageReplicaMeta = {
    * Entity doc/diff at the same R-frame instead of duplicating it.
    */
   state?: EntityState;
-  /** Entity-local fields intentionally excluded from shared Entity docs. */
-  localEntityState?: Pick<EntityState, 'htlcNotes'>;
+  /** Validator-local presentation index rebuilt from certified Entity frames. */
+  htlcNotes?: EntityReplica['htlcNotes'];
   mempool: EntityReplica['mempool'];
   position?: EntityReplica['position'];
   proposal?: EntityReplica['proposal'];
@@ -345,8 +345,7 @@ export type StorageReplicaMeta = {
 type AssertNoUnclassifiedPersistenceKeys<T extends never> = T;
 type EntityPersistenceSplitKeys =
   | 'accounts'
-  | 'orderbookExt'
-  | 'htlcNotes';
+  | 'orderbookExt';
 type ReplicaPersistenceSplitKeys = never;
 
 export type AccountPersistenceCoverage = AssertNoUnclassifiedPersistenceKeys<

@@ -46,7 +46,6 @@ const makeEntityState = (): EntityState => ({
   },
   htlcRoutes: new Map(),
   htlcFeesEarned: 0n,
-  htlcNotes: new Map(),
   lockBook: new Map(),
   swapTradingPairs: [],
 });

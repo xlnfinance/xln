@@ -126,7 +126,6 @@ const createEntityState = (
     profile: { name: 'catch-up validator', isHub: false, avatar: '', bio: '', website: '' },
     htlcRoutes: new Map(),
     htlcFeesEarned: 0n,
-    htlcNotes: new Map(),
     lockBook: new Map(),
     swapTradingPairs: [],
   };
