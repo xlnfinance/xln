@@ -10,6 +10,10 @@ import {
   normalizeDisputeFinalizationEvidence,
 } from './event-observation';
 import { buildJEventRangeDigest, canonicalJEventRangeHash } from './history-consensus';
+import {
+  requireBoundaryRecord,
+  requireExactBoundaryKeys,
+} from '../protocol/boundary-primitives';
 
 export type JEventRangeSignatureVerifier = (
   signerId: string,
@@ -54,21 +58,28 @@ const canonicalEventOrder = (events: JurisdictionEventBlock['events']): boolean 
  * replica halt instead of an ordinary consensus rejection.
  */
 export const normalizeStrictJEventBlock = (
-  raw: JurisdictionEventBlock,
+  value: unknown,
   previousHeight: number,
   scannedThroughHeight: number,
   codePrefix = 'J_RANGE',
 ): JurisdictionEventBlock => {
-  const blockNumber = height(raw?.blockNumber, `${codePrefix}_BLOCK_HEIGHT_INVALID`);
+  const raw = requireBoundaryRecord(value, `${codePrefix}_BLOCK_INVALID`);
+  requireExactBoundaryKeys(
+    raw,
+    ['blockNumber', 'blockHash', 'eventsHash', 'events'],
+    ['disputeFinalizationEvidence', 'disputeFinalizationEvidenceHash'],
+    `${codePrefix}_BLOCK_FIELDS_INVALID`,
+  );
+  const blockNumber = height(raw['blockNumber'], `${codePrefix}_BLOCK_HEIGHT_INVALID`);
   if (blockNumber <= previousHeight || blockNumber > scannedThroughHeight) {
     throw new Error(`${codePrefix}_BLOCK_ORDER_INVALID`);
   }
-  const blockHash = hash(raw?.blockHash, `${codePrefix}_BLOCK_HASH_INVALID`);
-  if (!Array.isArray(raw?.events) || raw.events.length === 0) {
+  const blockHash = hash(raw['blockHash'], `${codePrefix}_BLOCK_HASH_INVALID`);
+  if (!Array.isArray(raw['events']) || raw['events'].length === 0) {
     throw new Error(`${codePrefix}_EVENT_BLOCK_EMPTY`);
   }
-  const events = normalizeJurisdictionEvents(raw.events);
-  if (events.length !== raw.events.length) throw new Error(`${codePrefix}_EVENT_INVALID`);
+  const events = normalizeJurisdictionEvents(raw['events']);
+  if (events.length !== raw['events'].length) throw new Error(`${codePrefix}_EVENT_INVALID`);
   if (!canonicalEventOrder(events)) throw new Error(`${codePrefix}_EVENT_ORDER_INVALID`);
   for (const event of events) {
     if (Number(event.blockNumber) !== blockNumber || text(event.blockHash) !== blockHash) {
@@ -76,18 +87,23 @@ export const normalizeStrictJEventBlock = (
     }
   }
   const eventsHash = canonicalJurisdictionEventsHash(events);
-  if (hash(raw.eventsHash, `${codePrefix}_EVENTS_HASH_INVALID`) !== eventsHash) {
+  if (hash(raw['eventsHash'], `${codePrefix}_EVENTS_HASH_INVALID`) !== eventsHash) {
     throw new Error(`${codePrefix}_EVENTS_HASH_MISMATCH`);
   }
 
-  if (raw.disputeFinalizationEvidence !== undefined && !Array.isArray(raw.disputeFinalizationEvidence)) {
+  if (
+    raw['disputeFinalizationEvidence'] !== undefined &&
+    !Array.isArray(raw['disputeFinalizationEvidence'])
+  ) {
     throw new Error(`${codePrefix}_EVIDENCE_INVALID`);
   }
-  const evidence = normalizeDisputeFinalizationEvidence(raw.disputeFinalizationEvidence ?? []);
+  const evidence = normalizeDisputeFinalizationEvidence(
+    raw['disputeFinalizationEvidence'] ?? [],
+  );
   const evidenceHash = evidence.length > 0
     ? canonicalDisputeFinalizationEvidenceHash(evidence)
     : '';
-  if (text(raw.disputeFinalizationEvidenceHash) !== evidenceHash) {
+  if (text(raw['disputeFinalizationEvidenceHash']) !== evidenceHash) {
     throw new Error(`${codePrefix}_EVIDENCE_HASH_MISMATCH`);
   }
   return {
@@ -97,6 +113,69 @@ export const normalizeStrictJEventBlock = (
     events,
     ...(evidence.length > 0 ? { disputeFinalizationEvidence: evidence } : {}),
     ...(evidenceHash ? { disputeFinalizationEvidenceHash: evidenceHash } : {}),
+  };
+};
+
+export type UnsignedJurisdictionEventData = Omit<
+  JurisdictionEventData,
+  'signature' | 'observedAt'
+>;
+
+/** Decode the exact unsigned J-range embedded in a reliable-delivery identity. */
+export const decodeUnsignedJEventRange = (
+  value: unknown,
+): UnsignedJurisdictionEventData => {
+  const raw = requireBoundaryRecord(value, 'J_RANGE_UNSIGNED_INVALID');
+  requireExactBoundaryKeys(
+    raw,
+    [
+      'from',
+      'jurisdictionRef',
+      'baseHeight',
+      'scannedThroughHeight',
+      'tipBlockHash',
+      'eventHistoryRoot',
+      'rangeHash',
+      'blocks',
+    ],
+    [],
+    'J_RANGE_UNSIGNED_FIELDS_INVALID',
+  );
+  const from = text(raw['from']);
+  const jurisdictionRef = text(raw['jurisdictionRef']);
+  if (!from || !jurisdictionRef) throw new Error('J_RANGE_UNSIGNED_IDENTITY_INVALID');
+  const baseHeight = height(raw['baseHeight'], 'J_RANGE_BASE_HEIGHT_INVALID');
+  const scannedThroughHeight = height(
+    raw['scannedThroughHeight'],
+    'J_RANGE_SCANNED_HEIGHT_INVALID',
+  );
+  if (scannedThroughHeight <= baseHeight) {
+    throw new Error('J_RANGE_HEIGHT_INVALID');
+  }
+  if (!Array.isArray(raw['blocks'])) throw new Error('J_RANGE_BLOCKS_INVALID');
+  let previousHeight = baseHeight;
+  const blocks = raw['blocks'].map(block => {
+    const normalized = normalizeStrictJEventBlock(
+      block,
+      previousHeight,
+      scannedThroughHeight,
+    );
+    previousHeight = normalized.blockNumber;
+    return normalized;
+  });
+  const rangeHash = canonicalJEventRangeHash(jurisdictionRef, blocks);
+  if (hash(raw['rangeHash'], 'J_RANGE_BODY_HASH_INVALID') !== rangeHash) {
+    throw new Error('J_RANGE_BODY_HASH_MISMATCH');
+  }
+  return {
+    from,
+    jurisdictionRef,
+    baseHeight,
+    scannedThroughHeight,
+    tipBlockHash: hash(raw['tipBlockHash'], 'J_RANGE_TIP_HASH_INVALID'),
+    eventHistoryRoot: hash(raw['eventHistoryRoot'], 'J_RANGE_HISTORY_ROOT_INVALID'),
+    rangeHash,
+    blocks,
   };
 };
 

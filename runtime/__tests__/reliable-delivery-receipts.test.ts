@@ -89,6 +89,7 @@ const frameOutput = (
     hash: frameHash,
     txs: [],
     events: [],
+    hashesToSign: [],
     leader: { proposerSignerId: signerId('b2'), view: 0 },
     collectedSigs: new Map(),
     ...(hankos ? { hankos } : {}),
@@ -208,26 +209,30 @@ const jFinalityOutput = (
   receiverRuntimeId: string,
   scannedThroughHeight: number,
   eventHistoryRoot = `0x${scannedThroughHeight.toString(16).padStart(64, '1')}`,
-): DeliverableEntityInput => ({
-  runtimeId: receiverRuntimeId,
-  entityId: entityId('b1'),
-  signerId: signerId('b2'),
-  entityTxs: [{
-    type: 'j_event',
-    data: {
+): DeliverableEntityInput => {
+  const jurisdictionRef =
+    'stack:31337:0x00000000000000000000000000000000000000aa';
+  return {
+    runtimeId: receiverRuntimeId,
+    entityId: entityId('b1'),
+    signerId: signerId('b2'),
+    entityTxs: [{
+      type: 'j_event',
+      data: {
       from: signerId('c3'),
-      jurisdictionRef: 'stack:31337:0x00000000000000000000000000000000000000aa',
+      jurisdictionRef,
       baseHeight: Math.max(0, scannedThroughHeight - 10),
       scannedThroughHeight,
       observedAt: scannedThroughHeight,
       blocks: [],
       tipBlockHash: `0x${scannedThroughHeight.toString(16).padStart(64, '0')}`,
-      rangeHash: `0x${'31'.repeat(32)}`,
+      rangeHash: canonicalJEventRangeHash(jurisdictionRef, []),
       eventHistoryRoot,
       signature: `0xj-signature-${scannedThroughHeight}`,
-    },
-  } as never],
-});
+      },
+    } as never],
+  };
+};
 
 const jPrefixAttestationOutput = (
   receiverRuntimeId: string,

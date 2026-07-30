@@ -1,9 +1,9 @@
 import type { EntityLeaderCertificate, EntityLeaderTimeoutVote, EntityReplica } from '../entity/types';
 import type { RuntimeState, ReliableDeliveryIdentity, RoutedEntityInput } from './types';
 import type { EntityTx } from '../types/entity-tx';
-import type { JurisdictionEventData } from '../types/jurisdiction-events';
 import { getEntityLeaderState } from '../entity/consensus/leader';
 import { reconcileJEventRangeWithFinalizedState } from '../jurisdiction/local-history';
+import { decodeUnsignedJEventRange } from '../jurisdiction/j-event-range-validation';
 import {
   getJPrefixAttestationTemporalDisposition,
   verifyOutOfRoundJPrefixAttestation,
@@ -533,12 +533,8 @@ const terminalJFinality = (
 ): boolean => {
   if (replica.state.lastFinalizedJHeight < identity.height) return false;
   const logical = parseIdentityJson(identity.logicalKey, 'RELIABLE_AUTHORITY_J_LOGICAL_KEY_INVALID');
-  const range = logical['unsignedRange'];
-  if (!range || typeof range !== 'object' || Array.isArray(range)) {
-    throw new Error('RELIABLE_AUTHORITY_J_RANGE_INVALID');
-  }
-  const unsignedRange = range as Record<string, unknown>;
-  if (Number(unsignedRange['scannedThroughHeight']) !== identity.height) {
+  const unsignedRange = decodeUnsignedJEventRange(logical['unsignedRange']);
+  if (unsignedRange.scannedThroughHeight !== identity.height) {
     throw new Error('RELIABLE_AUTHORITY_J_IDENTITY_HEIGHT_MISMATCH');
   }
   // Height alone is never ancestry proof for J ranges. An active H50 range may
@@ -548,7 +544,7 @@ const terminalJFinality = (
     ...unsignedRange,
     signature: '',
     observedAt: 0,
-  } as unknown as JurisdictionEventData;
+  };
   return reconcileJEventRangeWithFinalizedState(replica.state, data).kind === 'noop';
 };
 

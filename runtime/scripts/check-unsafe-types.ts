@@ -10,7 +10,6 @@ const EXCLUDED_PATH = /\/(?:__tests__|qa|scenarios|scripts)\//;
 const DOUBLE_ASSERTION_DEBT: Readonly<Record<string, number>> = {
   'runtime/jadapter/browservm-provider.ts': 4,
   'runtime/jadapter/tron-signer.ts': 1,
-  'runtime/runtime/reliable-authority.ts': 1,
 };
 
 // Suppressions can hide unrelated errors on the same line. The empty ratchet
