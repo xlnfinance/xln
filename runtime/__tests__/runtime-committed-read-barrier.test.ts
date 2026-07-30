@@ -1,11 +1,17 @@
 import { describe, expect, test } from 'bun:test';
 
 import { createEmptyEnv } from '../runtime';
+import { deriveRuntimeAdapterCapabilityToken } from '../radapter/auth';
+import { decodeRuntimeAdapterBrowserMessage } from '../radapter/codec';
+import { handleRuntimeAdapterMessage } from '../radapter/server';
 import {
   acquireRuntimeCommittedRead,
   acquireRuntimeFrameWriter,
   withRuntimeCommittedRead,
 } from '../runtime/frame/writer-lock';
+
+const radapterAuthSeed = process.env['XLN_RADAPTER_AUTH_SEED'] || 'seed';
+process.env['XLN_RADAPTER_AUTH_SEED'] = radapterAuthSeed;
 
 describe('runtime committed read barrier', () => {
   test('installs the shared barrier before the first reader on a fresh Runtime', async () => {
@@ -114,5 +120,89 @@ describe('runtime committed read barrier', () => {
 
     const releaseWriter = await acquireRuntimeFrameWriter(env.infrastructure!);
     releaseWriter();
+  });
+
+  test('Runtime adapter commands cannot inspect or mutate an in-flight frame', async () => {
+    const env = createEmptyEnv('adapter committed read barrier');
+    env.infrastructure!.lifecyclePhase = 'running';
+    env.infrastructure!.loopActive = true;
+    const responses: string[] = [];
+    const socket = {
+      send: (message: string | Uint8Array) => {
+        responses.push(String(message));
+      },
+    };
+    let enqueued = 0;
+    const deps = {
+      enqueueRuntimeInput: () => {
+        enqueued += 1;
+      },
+    };
+
+    await handleRuntimeAdapterMessage(
+      socket,
+      {
+        v: 1,
+        id: 'auth-committed-read',
+        op: 'auth',
+        key: deriveRuntimeAdapterCapabilityToken(
+          radapterAuthSeed,
+          'full',
+          Date.now() + 60_000,
+          {
+            audience: env.runtimeId!,
+            tokenId: 'commit-barrier-token',
+          },
+        ),
+        challenge: `0x${'41'.repeat(32)}`,
+      },
+      env,
+      deps,
+    );
+    expect(decodeRuntimeAdapterBrowserMessage(responses.pop()!)).toMatchObject({
+      ok: true,
+      payload: { authLevel: 'admin' },
+    });
+    responses.length = 0;
+
+    env.infrastructure!.stateMutationInFlight = true;
+    await handleRuntimeAdapterMessage(
+      socket,
+      {
+        v: 1,
+        id: 'send-during-mutation',
+        op: 'send',
+        commandId: 'commit-barrier-command-0001',
+        commandSequence: 1,
+        input: { runtimeTxs: [], entityInputs: [] },
+      },
+      env,
+      deps,
+    );
+    expect(decodeRuntimeAdapterBrowserMessage(responses.pop()!)).toMatchObject({
+      ok: false,
+      error: { code: 'E_INTERNAL' },
+    });
+    expect(enqueued).toBe(0);
+
+    env.infrastructure!.stateMutationInFlight = false;
+    await handleRuntimeAdapterMessage(
+      socket,
+      {
+        v: 1,
+        id: 'send-after-commit',
+        op: 'send',
+        commandId: 'commit-barrier-command-0001',
+        commandSequence: 1,
+        input: { runtimeTxs: [], entityInputs: [] },
+      },
+      env,
+      deps,
+    );
+    expect(decodeRuntimeAdapterBrowserMessage(responses.pop()!)).toMatchObject({
+      ok: true,
+      payload: { status: 'pending' },
+    });
+    expect(enqueued).toBe(1);
   });
 });

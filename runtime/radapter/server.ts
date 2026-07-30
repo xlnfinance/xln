@@ -55,6 +55,7 @@ import { markLocalRuntimeAdapterCommandTx } from './command-frontier-auth';
 import { verifyRuntimeAdapterOwnerBinding } from './owner-binding';
 import { encodeBinaryPayload } from '../storage/binary-codec';
 import { XLN_PROTOCOL_VERSION } from '../protocol/version';
+import { withRuntimeCommittedRead } from '../runtime/frame/writer-lock';
 
 export type RuntimeAdapterSocket = {
   send: (message: string | Uint8Array) => unknown;
@@ -933,83 +934,85 @@ const enqueueRuntimeAdapterCommand = (
   sendOk(ws, msg.id, result, diagnostic());
 };
 
-const handleRuntimeAdapterSend = (
+const handleRuntimeAdapterSend = async (
   ws: RuntimeAdapterSocket,
   msg: RuntimeAdapterRequestByOp<'send'>,
   env: RuntimeReplica,
   state: AdapterClientState,
   deps: RuntimeAdapterServerDeps,
   diagnostic: RuntimeAdapterDiagnostic,
-): void => {
-  requireAuth(state, 'admin');
-  requireBucket(state.sendBucket, 'send');
-  requireMutatingRuntimeAdapterReady(env, deps);
-  const laneId = state.commandLaneId;
-  const expiresAtMs = state.commandFrontierExpiresAtMs;
-  if (
-    !laneId ||
-    !state.commandLaneKind ||
-    (state.commandLaneKind === 'capability' && !expiresAtMs)
-  ) {
-    throw new RuntimeAdapterError(
-      'E_UNAUTHORIZED',
-      'runtime adapter command lane is unavailable',
-    );
-  }
-  const commandId = normalizeCommandId(msg.commandId);
-  const commandSequence = commandSequenceOrThrow(msg.commandSequence);
-  const inputHash = runtimeInputHash(msg.input);
-  if (
-    sendCommittedRuntimeAdapterCommand(
+): Promise<void> => {
+  await withRuntimeCommittedRead(env, () => {
+    requireAuth(state, 'admin');
+    requireBucket(state.sendBucket, 'send');
+    requireMutatingRuntimeAdapterReady(env, deps);
+    const laneId = state.commandLaneId;
+    const expiresAtMs = state.commandFrontierExpiresAtMs;
+    if (
+      !laneId ||
+      !state.commandLaneKind ||
+      (state.commandLaneKind === 'capability' && !expiresAtMs)
+    ) {
+      throw new RuntimeAdapterError(
+        'E_UNAUTHORIZED',
+        'runtime adapter command lane is unavailable',
+      );
+    }
+    const commandId = normalizeCommandId(msg.commandId);
+    const commandSequence = commandSequenceOrThrow(msg.commandSequence);
+    const inputHash = runtimeInputHash(msg.input);
+    if (
+      sendCommittedRuntimeAdapterCommand(
+        ws,
+        msg,
+        env,
+        laneId,
+        commandId,
+        commandSequence,
+        inputHash,
+        diagnostic,
+      )
+    ) {
+      return;
+    }
+    const committedSequence =
+      readRuntimeAdapterCommandFrontier(env, laneId)?.lastContiguousSequence ?? 0;
+    const expectedSequence = committedSequence + 1;
+    if (commandSequence !== expectedSequence) {
+      throw new RuntimeAdapterError(
+        'E_COMMAND_PENDING',
+        `runtime adapter command sequence gap: expected=${expectedSequence} actual=${commandSequence}`,
+        true,
+        250,
+      );
+    }
+    if (
+      sendPendingRuntimeAdapterCommand(
+        ws,
+        msg,
+        reconcilePendingCommand(env, laneId),
+        commandId,
+        commandSequence,
+        inputHash,
+        diagnostic,
+      )
+    ) {
+      return;
+    }
+    assertRuntimeAdapterCommandCapacity(env, laneId);
+    enqueueRuntimeAdapterCommand(
       ws,
       msg,
       env,
+      deps,
       laneId,
       commandId,
       commandSequence,
       inputHash,
+      expiresAtMs,
       diagnostic,
-    )
-  ) {
-    return;
-  }
-  const committedSequence =
-    readRuntimeAdapterCommandFrontier(env, laneId)?.lastContiguousSequence ?? 0;
-  const expectedSequence = committedSequence + 1;
-  if (commandSequence !== expectedSequence) {
-    throw new RuntimeAdapterError(
-      'E_COMMAND_PENDING',
-      `runtime adapter command sequence gap: expected=${expectedSequence} actual=${commandSequence}`,
-      true,
-      250,
     );
-  }
-  if (
-    sendPendingRuntimeAdapterCommand(
-      ws,
-      msg,
-      reconcilePendingCommand(env, laneId),
-      commandId,
-      commandSequence,
-      inputHash,
-      diagnostic,
-    )
-  ) {
-    return;
-  }
-  assertRuntimeAdapterCommandCapacity(env, laneId);
-  enqueueRuntimeAdapterCommand(
-    ws,
-    msg,
-    env,
-    deps,
-    laneId,
-    commandId,
-    commandSequence,
-    inputHash,
-    expiresAtMs,
-    diagnostic,
-  );
+  });
 };
 
 export const handleRuntimeAdapterMessage = async (
@@ -1045,7 +1048,10 @@ export const handleRuntimeAdapterMessage = async (
 
   try {
     if (msg.op === 'auth') {
-      handleRuntimeAdapterAuth(ws, msg, env, state, diagnostic);
+      await withRuntimeCommittedRead(
+        env,
+        () => handleRuntimeAdapterAuth(ws, msg, env, state, diagnostic),
+      );
       return true;
     }
 
@@ -1086,7 +1092,7 @@ export const handleRuntimeAdapterMessage = async (
     }
 
     if (msg.op === 'send') {
-      handleRuntimeAdapterSend(ws, msg, env, state, deps, diagnostic);
+      await handleRuntimeAdapterSend(ws, msg, env, state, deps, diagnostic);
       return true;
     }
 
