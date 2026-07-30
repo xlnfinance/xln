@@ -122,11 +122,11 @@ export const getControlBodyErrorStatus = (error: unknown, fallbackStatus: number
   return message.startsWith('CONTROL_BODY_TOO_LARGE') ? 413 : fallbackStatus;
 };
 
-export const parseTaggedControlBody = async <T>(
+export const parseTaggedControlBody = async (
   req: Request,
   maxBytes = DEFAULT_CONTROL_BODY_MAX_BYTES,
-): Promise<T> => {
+): Promise<unknown> => {
   const raw = await readCappedControlBody(req, maxBytes);
-  if (!raw.trim()) return {} as T;
-  return deserializeTaggedJson<T>(raw);
+  if (!raw.trim()) return {};
+  return deserializeTaggedJson<unknown>(raw);
 };

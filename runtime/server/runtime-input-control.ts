@@ -25,7 +25,7 @@ export const handleRuntimeInputControl = async (
     return new Response(serializeTaggedJson({ ok: false, error: 'Runtime not ready' }), { status: 503, headers });
   }
   try {
-    const body = await deps.parseTaggedControlBody<unknown>(req);
+    const body = await deps.parseTaggedControlBody(req);
     const runtimeInput = decodeRuntimeInput(body, 'CONTROL_RUNTIME_INPUT');
     const { runtimeTxs, entityInputs, jInputs = [] } = runtimeInput;
     if (runtimeTxs.length === 0 && entityInputs.length === 0 && jInputs.length === 0) {

@@ -1,4 +1,9 @@
 import type { RuntimeState } from '../runtime/types';
+import {
+  requireBoundaryInteger,
+  requireBoundaryRecord,
+  requireExactBoundaryKeys,
+} from '../protocol/boundary-primitives';
 import { serializeTaggedJson } from '../protocol/serialization';
 import { getControlBodyErrorStatus } from './auth';
 import type { parseTaggedControlBody } from './auth';
@@ -7,6 +12,53 @@ import type { startP2P } from '../runtime';
 type P2PControlDeps = {
   parseTaggedControlBody: typeof parseTaggedControlBody;
   startP2P: typeof startP2P;
+};
+
+type P2PControlBody = {
+  relayUrls?: string[];
+  advertiseEntityIds?: string[];
+  gossipPollMs?: number;
+};
+
+const decodeStringList = (value: unknown, code: string): string[] => {
+  if (!Array.isArray(value)) throw new Error(code);
+  return value.map((entry, index) => {
+    if (typeof entry !== 'string' || entry.trim().length === 0) {
+      throw new Error(`${code}:index=${index}`);
+    }
+    return entry.trim();
+  });
+};
+
+export const decodeP2PControlBody = (value: unknown): P2PControlBody => {
+  const body = requireBoundaryRecord(value, 'P2P_CONTROL_BODY_INVALID');
+  requireExactBoundaryKeys(
+    body,
+    [],
+    ['relayUrls', 'advertiseEntityIds', 'gossipPollMs'],
+    'P2P_CONTROL_FIELDS_INVALID',
+  );
+  const relayUrls = body['relayUrls'] === undefined
+    ? undefined
+    : decodeStringList(body['relayUrls'], 'P2P_CONTROL_RELAY_URLS_INVALID');
+  const advertiseEntityIds = body['advertiseEntityIds'] === undefined
+    ? undefined
+    : decodeStringList(
+      body['advertiseEntityIds'],
+      'P2P_CONTROL_ENTITY_IDS_INVALID',
+    ).map(entityId => entityId.toLowerCase());
+  const gossipPollMs = body['gossipPollMs'] === undefined
+    ? undefined
+    : requireBoundaryInteger(
+      body['gossipPollMs'],
+      'P2P_CONTROL_GOSSIP_POLL_MS_INVALID',
+      250,
+    );
+  return {
+    ...(relayUrls === undefined ? {} : { relayUrls }),
+    ...(advertiseEntityIds === undefined ? {} : { advertiseEntityIds }),
+    ...(gossipPollMs === undefined ? {} : { gossipPollMs }),
+  };
 };
 
 export const handleP2PControl = async (
@@ -18,22 +70,18 @@ export const handleP2PControl = async (
   if (!env) {
     return new Response(serializeTaggedJson({ ok: false, error: 'Runtime not ready' }), { status: 503, headers });
   }
+  let body: P2PControlBody;
   try {
-    const body = await deps.parseTaggedControlBody<{
-      relayUrls?: unknown;
-      advertiseEntityIds?: unknown;
-      gossipPollMs?: unknown;
-    }>(req);
-    const relayUrls = Array.isArray(body?.relayUrls)
-      ? body.relayUrls.map(value => (typeof value === 'string' ? value.trim() : '')).filter(Boolean)
-      : undefined;
-    const advertiseEntityIds = Array.isArray(body?.advertiseEntityIds)
-      ? body.advertiseEntityIds.map(value => (typeof value === 'string' ? value.trim().toLowerCase() : '')).filter(Boolean)
-      : undefined;
-    const gossipPollMs = Number.isFinite(Number(body?.gossipPollMs))
-      ? Math.max(250, Math.floor(Number(body?.gossipPollMs)))
-      : undefined;
+    body = decodeP2PControlBody(await deps.parseTaggedControlBody(req));
+  } catch (error) {
+    return new Response(
+      serializeTaggedJson({ ok: false, error: error instanceof Error ? error.message : String(error) }),
+      { status: getControlBodyErrorStatus(error, 400), headers },
+    );
+  }
+  const { relayUrls, advertiseEntityIds, gossipPollMs } = body;
 
+  try {
     deps.startP2P(env, {
       ...(relayUrls ? { relayUrls } : {}),
       ...(advertiseEntityIds ? { advertiseEntityIds } : {}),
@@ -53,7 +101,10 @@ export const handleP2PControl = async (
     );
   } catch (error) {
     return new Response(
-      serializeTaggedJson({ ok: false, error: (error as Error).message || 'Failed to update P2P config' }),
+      serializeTaggedJson({
+        ok: false,
+        error: error instanceof Error ? error.message : 'Failed to update P2P config',
+      }),
       { status: getControlBodyErrorStatus(error, 500), headers },
     );
   }
