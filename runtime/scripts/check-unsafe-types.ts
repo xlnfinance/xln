@@ -16,7 +16,6 @@ const DOUBLE_ASSERTION_DEBT: Readonly<Record<string, number>> = {
   'runtime/jadapter/tron-signer.ts': 1,
   'runtime/jurisdiction/batch.ts': 1,
   'runtime/jurisdiction/config.ts': 1,
-  'runtime/entity/profile.ts': 3,
   'runtime/orchestrator/hub-node.ts': 2,
   'runtime/protocol/boundary-validation.ts': 2,
   'runtime/entity/htlc/payment-admission.ts': 1,

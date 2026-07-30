@@ -9,6 +9,7 @@ import { computeAddress, getAddress } from 'ethers';
 import { compareCanonicalText } from '../orderbook/swap-keys';
 import { UINT16_MAX } from '../config/constants';
 import {
+  VALIDATOR_ENCRYPTION_ATTESTATION_VERSION,
   requireCompleteValidatorEncryptionManifest,
   type ValidatorEncryptionAttestation,
   type ValidatorEncryptionManifest,
@@ -284,11 +285,15 @@ const parsePositiveTimestamp = (raw: unknown, entityId: string): number => {
 };
 
 const parseUint16 = (raw: unknown, field: string, entityId: string): number => {
-  const value = typeof raw === 'number' ? raw : Number(raw);
-  if (!Number.isFinite(value) || value < 0) {
+  if (
+    typeof raw !== 'number' ||
+    !Number.isSafeInteger(raw) ||
+    raw < 0 ||
+    raw > UINT16_MAX
+  ) {
     throw new Error(`${field}: entity=${entityId}`);
   }
-  return Math.min(UINT16_MAX, Math.floor(value));
+  return raw;
 };
 
 const parseBigIntValue = (raw: unknown, field: string, entityId: string): bigint => {
@@ -361,7 +366,34 @@ const parseBoardMetadata = (raw: unknown, entityId: string): BoardMetadata => {
       'GOSSIP_PROFILE_ENCRYPTION_ATTESTATION_UNKNOWN_FIELD',
       entityId,
     );
-    return attestationRaw as unknown as ValidatorEncryptionAttestation;
+    const requireAttestationString = (
+      field: keyof ValidatorEncryptionAttestation,
+    ): string => {
+      const value = attestationRaw[field];
+      if (typeof value !== 'string' || value.trim().length === 0) {
+        throw new Error(
+          `GOSSIP_PROFILE_ENCRYPTION_ATTESTATION_${field.toUpperCase()}_INVALID: entity=${entityId}`,
+        );
+      }
+      return value;
+    };
+    if (attestationRaw['version'] !== VALIDATOR_ENCRYPTION_ATTESTATION_VERSION) {
+      throw new Error(`GOSSIP_PROFILE_ENCRYPTION_ATTESTATION_VERSION_INVALID: entity=${entityId}`);
+    }
+    return {
+      version: VALIDATOR_ENCRYPTION_ATTESTATION_VERSION,
+      entityId: requireAttestationString('entityId'),
+      signerId: requireAttestationString('signerId'),
+      signer: requireAttestationString('signer'),
+      publicKey: requireAttestationString('publicKey'),
+      weight: parseUint16(
+        attestationRaw['weight'],
+        'GOSSIP_PROFILE_ENCRYPTION_ATTESTATION_WEIGHT_INVALID',
+        entityId,
+      ),
+      encryptionPublicKey: requireAttestationString('encryptionPublicKey'),
+      signature: requireAttestationString('signature'),
+    };
   });
   const manifest = requireCompleteValidatorEncryptionManifest(
     { entityId, threshold, validators },

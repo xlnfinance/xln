@@ -121,6 +121,38 @@ describe('Routing metadata hard requirements', () => {
     expect(() => parseProfile(malformed)).toThrow('GOSSIP_PROFILE_ACCOUNT_OUT_CAPACITY_INVALID');
   });
 
+  test('rejects non-numeric and overflowing uint16 board values', () => {
+    const validProfile = profile(ALICE, ALICE.slice(0, 42), {
+      routingFeePPM: 10_000,
+      baseFee: 0n,
+      isHub: false,
+      board: boardFor(ALICE, `0x${'41'.repeat(32)}`),
+    }, []);
+    const validBoard = validProfile.metadata.board;
+
+    expect(() => parseProfile({
+      ...validProfile,
+      metadata: {
+        ...validProfile.metadata,
+        board: { ...validBoard, threshold: '1' },
+      },
+    })).toThrow('GOSSIP_PROFILE_BOARD_THRESHOLD_INVALID');
+
+    expect(() => parseProfile({
+      ...validProfile,
+      metadata: {
+        ...validProfile.metadata,
+        board: {
+          ...validBoard,
+          encryptionAttestations: validBoard.encryptionAttestations.map((attestation) => ({
+            ...attestation,
+            weight: 65_536,
+          })),
+        },
+      },
+    })).toThrow('GOSSIP_PROFILE_ENCRYPTION_ATTESTATION_WEIGHT_INVALID');
+  });
+
   test('routing graph diagnostics use structured logging only', () => {
     const source = readFileSync(join(process.cwd(), 'runtime/routing/graph.ts'), 'utf8');
 
