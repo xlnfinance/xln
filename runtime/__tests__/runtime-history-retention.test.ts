@@ -63,11 +63,17 @@ test('production RuntimeState retains only the bounded canonical debug tail', as
   env.activeJurisdiction = jurisdiction.name;
   env.jReplicas.set(jurisdiction.name, {
     ...jurisdiction,
+    blockNumber: 0n,
+    stateRoot: null,
+    mempool: [],
+    blockDelayMs: 0,
+    lastBlockTimestamp: 0,
+    position: { x: 0, y: 0, z: 0 },
     contracts: {
       depository: jurisdiction.depositoryAddress,
       entityProvider: jurisdiction.entityProviderAddress,
     },
-  } as never);
+  });
   enqueueRuntimeInput(env, {
     runtimeTxs: [{
       type: 'importReplica',

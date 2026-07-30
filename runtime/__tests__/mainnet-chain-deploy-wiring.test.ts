@@ -8,6 +8,8 @@ const readRpcAdapterSource = (): string => [
   'rpc-public.ts',
   'rpc-adapter.ts',
   'rpc-lifecycle.ts',
+  'rpc-chain-io.ts',
+  'rpc-finality.ts',
   'rpc-reads.ts',
   'rpc-wallet-writes.ts',
 ].map(file => readFileSync(join(repoRoot, 'runtime/jadapter', file), 'utf8')).join('\n');
@@ -121,7 +123,7 @@ describe('mainnet chain deployment wiring', () => {
     expect(rpc).toContain('const TRON_CHAIN_IDS = new Set<number>([728126428, 3448148188])');
     expect(rpc).toContain('/walletsolidity/getnowblock');
     expect(rpc).toContain('TRON_CONFIRMATION_DEPTH_FORBIDDEN');
-    expect(rpc).toContain('isTronChainId(config.chainId) ? readTronSolidifiedBlockNumber()');
+    expect(rpc).toContain('isTronChainId(config.chainId) ? readTronSolidifiedBlockNumber(config)');
     expect(rpc).not.toContain('TRON_FINALITY_DEPTH');
   });
 
