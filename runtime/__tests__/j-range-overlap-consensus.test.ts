@@ -3,7 +3,7 @@ import { deriveSignerAddressSync, signAccountFrame } from '../account/crypto';
 import { applyEntityInput } from '../entity/consensus';
 import { generateLazyEntityId } from '../entity/factory';
 import { applyJEvent } from '../entity/tx/j-events';
-import { buildJHistoryRangeRuntimeInput } from '../jadapter/helpers';
+import { buildJHistoryRangeRuntimeInput } from '../jadapter/history-ingress';
 import { canonicalJurisdictionEventsHash } from '../jurisdiction/event-observation';
 import { buildJEventRangeDigest, canonicalJEventRangeHash } from '../jurisdiction/history-consensus';
 import { assertFrameJPrefix, buildLocalJPrefixAttestation } from '../jurisdiction/j-prefix-consensus';

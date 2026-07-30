@@ -57,7 +57,6 @@ Top 100 simplification targets:
 47. `runtime/jadapter/browservm.ts` — extract watcher glue into `browservm-watcher.ts`.
 48. `runtime/jadapter/browservm-provider.ts` — split deployment, ERC20 ops, and batch processing into separate files.
 49. `runtime/jadapter/browservm-provider.ts` — move test/demo-only token bootstrap into a separate module.
-50. `runtime/jadapter/helpers.ts` — keep only canonical adapter-shared helpers; move debug/noise elsewhere.
 51. `runtime/jadapter/runtime-api.ts` — dedupe manual batch signing with `runtime/hanko/batch.ts`.
 52. `runtime/jadapter/runtime-api.ts` — reduce thin wrappers that only re-export `jadapter` calls.
 53. `runtime/jadapter/index.ts` — keep factory only; move BrowserVM registry state elsewhere if still needed.

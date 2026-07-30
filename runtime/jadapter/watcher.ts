@@ -1,35 +1,54 @@
 /**
  * Canonical J watcher -> runtime ingress surface.
  *
- * Import watcher delivery/cursor helpers from here, not from scattered runtime
- * files. The implementation is intentionally centralized so J-event fanout,
- * filtering, and runtime wake semantics do not fork.
+ * Infrastructure consumers can import this surface without knowing the owner
+ * modules below. Consensus and Runtime handlers import the narrow owner module
+ * they execute, which keeps dependency direction visible.
  */
 
 export {
-  applyJEventsToEnv,
-  applyWatcherJurisdictionCursor,
-  buildJEventsRuntimeInput,
   buildJEventObservationInput,
+  rawEventToJEvents,
+  type EventBatchCounter,
+  type JEventsRuntimeInputBuildResult,
+} from './event-observation';
+
+export {
+  applyJEventsToEnv,
+  buildJEventsRuntimeInput,
+} from './manual-event-ingress';
+
+export {
+  enqueueJHistoryRange,
+  buildJHistoryRangeRuntimeInput,
+} from './history-ingress';
+
+export {
   enqueueJHistoryRewind,
   enqueueJHistoryRewindForReplicaKeys,
-  getWatcherStartBlock,
+} from './history-rewind';
+
+export {
   findWatcherJurisdictionReplica,
   getMinimumCommittedSignerJHeight,
   getMinimumScannedSignerJHeight,
-  isWatcherJHistoryRangeDurable,
-  enqueueJHistoryRange,
   isEntityReplicaRelevantToWatcher,
-  processEventBatch,
-  rawEventToJEvents,
+} from './watcher-replica';
+
+export {
+  applyWatcherJurisdictionCursor,
+  getWatcherStartBlock,
+  isWatcherJHistoryRangeDurable,
   rememberPendingWatcherJBlock,
   resolveCommittedWatcherCursor,
   updateWatcherJurisdictionCursor,
-  type EventBatchCounter,
-  type JEventsRuntimeInputBuildResult,
   type PendingWatcherJBlockMap,
   type PendingWatcherJHistoryRange,
-} from './helpers';
+} from './watcher-cursor';
+
+export {
+  processEventBatch,
+} from './watcher-event-batch';
 
 export {
   collectRelevantJEventReplicaKeys,

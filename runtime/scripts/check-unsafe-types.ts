@@ -21,7 +21,6 @@ const DOUBLE_ASSERTION_DEBT: Readonly<Record<string, number>> = {
   'runtime/protocol/boundary-validation.ts': 2,
   'runtime/entity/htlc/payment-admission.ts': 1,
   'runtime/radapter/resolve.ts': 1,
-  'runtime/radapter/wire-schema.ts': 4,
   'runtime/runtime/delivery/pending.ts': 1,
   'runtime/runtime/reliable-authority.ts': 1,
   'runtime/server/cli.ts': 2,

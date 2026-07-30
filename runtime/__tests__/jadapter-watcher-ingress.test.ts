@@ -120,19 +120,30 @@ const makeReplica = (entityId: string, signerId: string, isProposer: boolean): E
     },
   }) as EntityReplica;
 
-describe('jadapter helper cursors', () => {
-  test('jadapter helper diagnostics use structured logging only', () => {
-    const source = readFileSync(join(process.cwd(), 'runtime/jadapter/helpers.ts'), 'utf8');
+describe('JAdapter watcher ingress', () => {
+  test('J-event observation diagnostics use structured logging only', () => {
+    const source = readFileSync(
+      join(process.cwd(), 'runtime/jadapter/event-observation.ts'),
+      'utf8',
+    );
 
-    expect(source).toContain("createStructuredLogger('jadapter.helpers')");
-    expect(source).toContain("jadapterHelperLog.info('event_batch.canonical'");
-    expect(source).toContain("jadapterHelperLog.info('j_event.deliver_settled'");
-    expect(source).toContain("jadapterHelperLog.info('event_batch.delivered_to_entity'");
+    expect(source).toContain("createStructuredLogger('jadapter.event-observation')");
+    expect(source).toContain("log.info('event_batch.canonical'");
+    expect(source).toContain("log.info('j_event.deliver_settled'");
+    expect(source).toContain("log.info('event_batch.delivered_to_entity'");
     expect(source).not.toContain('console.');
   });
 
   test('jadapter ingress depends on the machine queue, not the runtime facade', () => {
-    const source = readFileSync(join(process.cwd(), 'runtime/jadapter/helpers.ts'), 'utf8');
+    const files = [
+      'history-ingress.ts',
+      'manual-event-ingress.ts',
+      'watcher-cursor.ts',
+      'watcher-event-batch.ts',
+    ];
+    const source = files
+      .map(file => readFileSync(join(process.cwd(), 'runtime/jadapter', file), 'utf8'))
+      .join('\n');
 
     expect(source).toContain("from '../runtime/input-queue'");
     expect(source).not.toMatch(/from ['"]\.\.\/runtime(?:\.ts)?['"]/);

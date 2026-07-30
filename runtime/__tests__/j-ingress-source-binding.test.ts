@@ -7,7 +7,7 @@ import { createJAdapter } from '../jadapter';
 import {
   applyJEventsToEnv,
   buildJEventsRuntimeInput,
-} from '../jadapter/helpers';
+} from '../jadapter/manual-event-ingress';
 import { parseReceiptLogsToJEvents } from '../jadapter/j-event-log-decoder';
 import { bindLocalJEventIngressSource } from '../jadapter/local-ingress-source';
 import { resolveApprovalReceiptLogIndex } from '../jadapter/rpc-public';

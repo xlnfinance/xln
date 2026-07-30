@@ -55,7 +55,7 @@ import {
   applyImportJurisdictionIntent,
   assertJImportResultRuntimeTxAuthorized,
 } from './jurisdiction-import';
-import { applyWatcherJurisdictionCursor } from '../jadapter/helpers';
+import { applyWatcherJurisdictionCursor } from '../jadapter/watcher-cursor';
 import {
   applyNumberedRegistrationIntent,
   applyNumberedRegistrationResolution,

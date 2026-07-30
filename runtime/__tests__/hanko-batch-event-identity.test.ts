@@ -6,7 +6,7 @@ import { applyBatchOperationSkippedEvent } from '../entity/tx/j-events-batch-ski
 import { generateLazyEntityId } from '../entity/factory';
 import { prepareSignedBatch } from '../hanko/batch';
 import { createJAdapter } from '../jadapter';
-import { rawEventToJEvents } from '../jadapter/helpers';
+import { rawEventToJEvents } from '../jadapter/j-event-payloads';
 import { createEmptyBatch } from '../jurisdiction/batch';
 import { normalizeJurisdictionEvent } from '../jurisdiction/event-normalization';
 import type { EntityState } from '../entity/types';

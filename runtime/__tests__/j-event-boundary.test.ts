@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { receiptFromEvents } from '../jadapter/browservm-submit';
-import { rawEventToJEvents } from '../jadapter/helpers';
+import { rawEventToJEvents } from '../jadapter/j-event-payloads';
 import type { JEvent } from '../jadapter/types';
 
 const entityId = `0x${'11'.repeat(32)}`;

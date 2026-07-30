@@ -3,7 +3,7 @@ import { SigningKey, computeAddress } from 'ethers';
 
 import { deriveSignerKeySync, registerSignerKey } from '../account/crypto';
 import { computeCanonicalEntityConsensusStateHash } from '../entity/consensus/state-root';
-import { rawEventToJEvents } from '../jadapter/helpers';
+import { rawEventToJEvents } from '../jadapter/j-event-payloads';
 import { normalizeJurisdictionEvent } from '../jurisdiction/event-normalization';
 import { createEmptyEnv } from '../runtime';
 import type { RuntimeState } from '../runtime/types';

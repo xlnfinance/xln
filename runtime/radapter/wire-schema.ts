@@ -17,16 +17,6 @@ import { XLN_PROTOCOL_VERSION } from '../protocol/version';
 
 export type RuntimeAdapterWireMessage = RuntimeAdapterRequest | RuntimeAdapterResponse | RuntimeAdapterPush;
 
-const ERROR_CODES = new Set<RuntimeAdapterErrorCode>([
-  'E_UNAUTHORIZED',
-  'E_NOT_FOUND',
-  'E_BAD_PATH',
-  'E_BAD_QUERY',
-  'E_RATE_LIMITED',
-  'E_COMMAND_PENDING',
-  'E_INTERNAL',
-]);
-
 const QUERY_KEYS = [
   'atHeight',
   'heights',
@@ -99,8 +89,9 @@ const validateStringList = (value: unknown, code: string): void => {
   if (!Array.isArray(value) || value.some(entry => typeof entry !== 'string')) throw new Error(code);
 };
 
-const validateReadQuery = (value: unknown): RuntimeAdapterReadQuery => {
-  const query = requireBoundaryRecord(value, 'RADAPTER_REQUEST_QUERY_INVALID');
+function assertReadQuery(
+  query: Record<string, unknown>,
+): asserts query is Record<string, unknown> & RuntimeAdapterReadQuery {
   requireExactBoundaryKeys(query, [], QUERY_KEYS, 'RADAPTER_REQUEST_QUERY_FIELDS_INVALID');
   for (const key of QUERY_INTEGER_KEYS) {
     if (query[key] !== undefined) requireBoundaryInteger(query[key], `RADAPTER_REQUEST_QUERY_${key}_INVALID`);
@@ -136,10 +127,17 @@ const validateReadQuery = (value: unknown): RuntimeAdapterReadQuery => {
   ) {
     throw new Error('RADAPTER_REQUEST_QUERY_KIND_INVALID');
   }
-  return query as RuntimeAdapterReadQuery;
+}
+
+const validateReadQuery = (value: unknown): RuntimeAdapterReadQuery => {
+  const query = requireBoundaryRecord(value, 'RADAPTER_REQUEST_QUERY_INVALID');
+  assertReadQuery(query);
+  return query;
 };
 
-const validateRequest = (message: Record<string, unknown>): RuntimeAdapterRequest => {
+function assertRequest(
+  message: Record<string, unknown>,
+): asserts message is Record<string, unknown> & RuntimeAdapterRequest {
   requireNonEmptyString(message['id'], 'RADAPTER_REQUEST_ID_INVALID');
   if (message['v'] !== XLN_PROTOCOL_VERSION) throw new Error('RADAPTER_REQUEST_VERSION_INVALID');
   switch (message['op']) {
@@ -189,27 +187,54 @@ const validateRequest = (message: Record<string, unknown>): RuntimeAdapterReques
     default:
       throw new Error(`RADAPTER_REQUEST_OP_INVALID:${String(message['op'])}`);
   }
-  return message as unknown as RuntimeAdapterRequest;
+}
+
+const validateRequest = (message: Record<string, unknown>): RuntimeAdapterRequest => {
+  assertRequest(message);
+  return message;
 };
 
-const validateError = (value: unknown): RuntimeAdapterErrorPayload => {
-  const error = requireBoundaryRecord(value, 'RADAPTER_RESPONSE_ERROR_INVALID');
+const isRuntimeAdapterErrorCode = (value: unknown): value is RuntimeAdapterErrorCode => {
+  switch (value) {
+    case 'E_UNAUTHORIZED':
+    case 'E_NOT_FOUND':
+    case 'E_BAD_PATH':
+    case 'E_BAD_QUERY':
+    case 'E_RATE_LIMITED':
+    case 'E_COMMAND_PENDING':
+    case 'E_INTERNAL':
+      return true;
+    default:
+      return false;
+  }
+};
+
+function assertError(
+  error: Record<string, unknown>,
+): asserts error is Record<string, unknown> & RuntimeAdapterErrorPayload {
   requireExactBoundaryKeys(
     error,
     ['code', 'message', 'retryable'],
     ['retryAfterMs'],
     'RADAPTER_RESPONSE_ERROR_FIELDS_INVALID',
   );
-  if (!ERROR_CODES.has(error['code'] as RuntimeAdapterErrorCode)) throw new Error('RADAPTER_RESPONSE_ERROR_CODE_INVALID');
+  if (!isRuntimeAdapterErrorCode(error['code'])) throw new Error('RADAPTER_RESPONSE_ERROR_CODE_INVALID');
   if (typeof error['message'] !== 'string') throw new Error('RADAPTER_RESPONSE_ERROR_MESSAGE_INVALID');
   if (typeof error['retryable'] !== 'boolean') throw new Error('RADAPTER_RESPONSE_ERROR_RETRYABLE_INVALID');
   if (error['retryAfterMs'] !== undefined) {
     requireBoundaryInteger(error['retryAfterMs'], 'RADAPTER_RESPONSE_ERROR_RETRY_AFTER_INVALID');
   }
-  return error as unknown as RuntimeAdapterErrorPayload;
+}
+
+const validateError = (value: unknown): RuntimeAdapterErrorPayload => {
+  const error = requireBoundaryRecord(value, 'RADAPTER_RESPONSE_ERROR_INVALID');
+  assertError(error);
+  return error;
 };
 
-const validateResponse = (message: Record<string, unknown>): RuntimeAdapterResponse => {
+function assertResponse(
+  message: Record<string, unknown>,
+): asserts message is Record<string, unknown> & RuntimeAdapterResponse {
   if (message['v'] !== XLN_PROTOCOL_VERSION) throw new Error('RADAPTER_RESPONSE_VERSION_INVALID');
   requireNonEmptyString(message['inReplyTo'], 'RADAPTER_RESPONSE_REPLY_ID_INVALID');
   if (message['ok'] === true) {
@@ -220,10 +245,16 @@ const validateResponse = (message: Record<string, unknown>): RuntimeAdapterRespo
   } else {
     throw new Error('RADAPTER_RESPONSE_OK_INVALID');
   }
-  return message as unknown as RuntimeAdapterResponse;
+}
+
+const validateResponse = (message: Record<string, unknown>): RuntimeAdapterResponse => {
+  assertResponse(message);
+  return message;
 };
 
-const validatePush = (message: Record<string, unknown>): RuntimeAdapterPush => {
+function assertPush(
+  message: Record<string, unknown>,
+): asserts message is Record<string, unknown> & RuntimeAdapterPush {
   requireExactBoundaryKeys(
     message,
     ['v', 'op', 'height', 'commandReady', 'commandReadyReason'],
@@ -244,7 +275,11 @@ const validatePush = (message: Record<string, unknown>): RuntimeAdapterPush => {
   if (message['commandReady'] === false && !String(message['commandReadyReason'] || '').trim()) {
     throw new Error('RADAPTER_PUSH_COMMAND_READY_REASON_INVALID');
   }
-  return message as unknown as RuntimeAdapterPush;
+}
+
+const validatePush = (message: Record<string, unknown>): RuntimeAdapterPush => {
+  assertPush(message);
+  return message;
 };
 
 export const validateRuntimeAdapterWireMessage = (value: unknown): RuntimeAdapterWireMessage => {

@@ -8,7 +8,7 @@ import {
   processEventBatch,
   updateWatcherJurisdictionCursor,
   type EventBatchCounter,
-} from './helpers';
+} from './watcher';
 import type { JEventIngress } from './types';
 import type { BrowserVMProvider } from './browservm-provider';
 import type { AuthenticatedRpcLog } from '../jurisdiction/receipt-codec';
