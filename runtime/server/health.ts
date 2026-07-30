@@ -5,6 +5,7 @@ import type { RuntimeState } from '../runtime/types.js';
 import type { EntityReplica } from '../entity/types.js';
 import { getP2PState } from '../runtime.js';
 import { compareStableText } from '../protocol/serialization';
+import { withRuntimeCommittedRead } from '../runtime/frame/writer-lock';
 
 export interface HealthStatus {
   timestamp: number;
@@ -84,7 +85,7 @@ const serializeReserves = (reserves: ReadonlyMap<string | number, bigint>): Reco
   return Object.fromEntries(entries);
 };
 
-export async function getHealthStatus(env: RuntimeState | null): Promise<HealthStatus> {
+const buildHealthStatus = (env: RuntimeState | null): HealthStatus => {
   const jMachines: JMachineHealth[] = [];
   const hubs: HubHealth[] = [];
   const replicasByEntityId = env ? buildEntityReplicaIndex(env) : new Map<string, EntityReplica>();
@@ -159,4 +160,15 @@ export async function getHealthStatus(env: RuntimeState | null): Promise<HealthS
       relay: !!env,
     },
   };
-}
+};
+
+/**
+ * Project health from one WAL-confirmed Runtime view.
+ *
+ * Health is externally visible. It must not leak balances from H+1 while the
+ * writer is still awaiting the WAL commit that makes H+1 real.
+ */
+export const getHealthStatus = (env: RuntimeState | null): Promise<HealthStatus> =>
+  env
+    ? withRuntimeCommittedRead(env, () => buildHealthStatus(env))
+    : Promise.resolve(buildHealthStatus(null));
