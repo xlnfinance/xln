@@ -709,12 +709,13 @@ async function waitForOrderbookLevelsVisible(
   }
 }
 
-async function readSwapResolveSnapshots(
+async function readSwapResolveSnapshotsFrom(
   page: Page,
   entityId: string,
   counterpartyId: string,
+  historyField: 'swapOrderHistory' | 'swapClosedOrders',
 ): Promise<SwapResolveSnapshot[]> {
-  return await page.evaluate(({ entityId, counterpartyId }) => {
+  return await page.evaluate(({ entityId, counterpartyId, historyField }) => {
     const view = window as SwapRuntimeWindow;
     const env = view.isolatedEnv;
     const recordOf = (value: unknown): Record<string, unknown> =>
@@ -740,7 +741,7 @@ async function readSwapResolveSnapshots(
       if (!(accounts instanceof Map)) continue;
       for (const [accountKey, rawAccount] of accounts.entries()) {
         if (!accountMatches(String(accountKey || ''), rawAccount)) continue;
-        const history = recordOf(rawAccount).swapOrderHistory;
+        const history = recordOf(rawAccount)[historyField];
         if (!(history instanceof Map)) return out;
         for (const [offerId, rawLifecycle] of history.entries()) {
           const resolves = recordOf(rawLifecycle).resolves;
@@ -763,7 +764,33 @@ async function readSwapResolveSnapshots(
       }
     }
     return out;
-  }, { entityId, counterpartyId });
+  }, { entityId, counterpartyId, historyField });
+}
+
+async function readSwapResolveSnapshots(
+  page: Page,
+  entityId: string,
+  counterpartyId: string,
+): Promise<SwapResolveSnapshot[]> {
+  return readSwapResolveSnapshotsFrom(
+    page,
+    entityId,
+    counterpartyId,
+    'swapOrderHistory',
+  );
+}
+
+async function readClosedSwapResolveSnapshots(
+  page: Page,
+  entityId: string,
+  counterpartyId: string,
+): Promise<SwapResolveSnapshot[]> {
+  return readSwapResolveSnapshotsFrom(
+    page,
+    entityId,
+    counterpartyId,
+    'swapClosedOrders',
+  );
 }
 
 async function waitForLatestSwapResolveSnapshot(
@@ -1238,6 +1265,16 @@ test.describe('E2E Swap Isolated Flow', () => {
         .toBe(1);
       await waitForOrderbookLevelVisible(alicePage, 'ask', selfTradeAskPrice);
 
+      await expect
+        .poll(async () => {
+          const closed = await readClosedSwapResolveSnapshots(alicePage, alice.entityId, hubId);
+          return closed.some((snapshot) => /^STP:/.test(snapshot.comment));
+        }, {
+          timeout: 30_000,
+          intervals: [250, 500, 750],
+          message: 'committed Account state must close the STP-cancelled taker',
+        })
+        .toBe(true);
       await expectClosedOrderRowStatus(alicePage, /Canceled/i);
       await expect(alicePage.getByTestId('swap-closed-order-row').filter({ hasText: /STP:/i }).first()).toBeVisible({ timeout: 10_000 });
     } finally {

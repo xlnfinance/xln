@@ -880,6 +880,12 @@ const compactAccountDocForView = (doc: StorageAccountDoc): StorageAccountDoc => 
     // bounded tail so a committed Runtime view can render and cancel recent
     // orders without reaching into the live mutable replica.
     swapOffers: compactMapTail(doc.swapOffers, 100) ?? new Map(),
+    // These maps are bounded Account read-models, not the forever frame
+    // archive. Keep their recent tail in the committed view: replacing a live
+    // replica with this projection must never make a just-closed order vanish
+    // from the UI. Older activity remains queryable from Account frame history.
+    swapOrderHistory: compactMapTail(doc.swapOrderHistory, 100) ?? new Map(),
+    swapClosedOrders: compactMapTail(doc.swapClosedOrders, 100) ?? new Map(),
     globalCreditLimits: doc.globalCreditLimits,
     currentHeight: doc.currentHeight,
     pendingSignatures: [],

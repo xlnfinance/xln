@@ -565,8 +565,12 @@ test('runtime adapter view-frame excludes unbounded account internals from remot
   expect(compact?.disputeProofBodiesByHash).toBeUndefined();
   expect(compact?.disputeArgumentSnapshotsByHash).toBeUndefined();
   expect(compact?.settlementWorkspace).toBeUndefined();
-  expect(compact?.swapOrderHistory).toBeUndefined();
-  expect(compact?.swapClosedOrders).toBeUndefined();
+  expect(compact?.swapOrderHistory?.size).toBe(100);
+  expect(compact?.swapOrderHistory?.has('history-0')).toBe(false);
+  expect(compact?.swapOrderHistory?.has('history-19999')).toBe(true);
+  expect(compact?.swapClosedOrders?.size).toBe(100);
+  expect(compact?.swapClosedOrders?.has('closed-0')).toBe(false);
+  expect(compact?.swapClosedOrders?.has('closed-19999')).toBe(true);
   expect(compact?.leftPendingJClaims).toEqual(createEmptyAccountJClaimAccumulator());
   expect(compact?.rightPendingJClaims).toEqual(createEmptyAccountJClaimAccumulator());
   expect(compact?.boardResealMigration).toEqual(account.boardResealMigration);

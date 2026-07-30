@@ -807,8 +807,10 @@ test('runtime adapter direct read paths return compact read snapshots', async ()
     expect(doc.swapOffers.size).toBe(100);
     expect(doc.swapOffers.has('offer-0')).toBe(false);
     expect(doc.swapOffers.get('offer-100')?.offerId).toBe('offer-100');
-    expect(doc.swapOrderHistory).toBeUndefined();
-    expect(doc.swapClosedOrders).toBeUndefined();
+    expect(doc.swapOrderHistory).toBeInstanceOf(Map);
+    expect(doc.swapOrderHistory?.size).toBe(1);
+    expect(doc.swapClosedOrders).toBeInstanceOf(Map);
+    expect(doc.swapClosedOrders?.size).toBe(1);
   }
   expect(encodedLiveEntity.byteLength).toBeLessThan(1_048_576);
   expect(encodedLiveAccount.byteLength).toBeLessThan(1_048_576);
