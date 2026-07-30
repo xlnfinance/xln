@@ -1248,7 +1248,6 @@ export const countMarketMakerEntityInputTxs = (inputsByEntitySigner: ReadonlyMap
 
 const resolveEntityRuntimeIdForCrossJ = (
   env: RuntimeState,
-  routeEntityIds: string[],
   entityId: string,
 ): string | null => {
   const target = normalizeEntityRef(entityId);
@@ -1261,24 +1260,14 @@ const resolveEntityRuntimeIdForCrossJ = (
     .trim()
     .toLowerCase();
   if (runtimeId) return runtimeId;
-  return routeEntityIds.includes(target) && localRuntimeId ? null : null;
+  return null;
 };
 
 const isCrossJurisdictionRouteTwoRuntime = (env: RuntimeState, route: CrossJurisdictionSwapRoute): boolean => {
   const canonical = withCanonicalCrossJurisdictionRouteHash(route);
-  const requiredEntityIds = [
-    canonical.source.entityId,
-    canonical.source.counterpartyEntityId,
-    canonical.target.entityId,
-    canonical.target.counterpartyEntityId,
-    canonical.bookOwnerEntityId || '',
-    canonical.hubEntityId || '',
-  ]
-    .map(normalizeEntityRef)
-    .filter(Boolean);
   return Boolean(
     resolveCrossJurisdictionRuntimeTopology(canonical, entityId =>
-      resolveEntityRuntimeIdForCrossJ(env, requiredEntityIds, entityId),
+      resolveEntityRuntimeIdForCrossJ(env, entityId),
     ),
   );
 };
