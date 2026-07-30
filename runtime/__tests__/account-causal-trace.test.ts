@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { summarizeRuntimeAccountCausality } from '../infra/account-causal-trace';
+import { summarizeRuntimeAccountCausality } from '../qa/account-causal-trace';
 import type { AccountInput } from '../types/account';
 import type { EntityInput } from '../entity/types';
 

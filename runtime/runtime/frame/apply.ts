@@ -2,7 +2,7 @@ import { createStructuredLogger } from '../../infra/logger';
 import {
   causalTraceContainsWork,
   summarizeRuntimeAccountCausality,
-} from '../../infra/account-causal-trace';
+} from '../../qa/account-causal-trace';
 import { cloneIsolatedRuntimeInput } from '../../runtime/input-clone';
 import type { RuntimeState, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../types';
 import type { JInput } from '../../jurisdiction/input';

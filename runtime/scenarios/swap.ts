@@ -31,7 +31,7 @@ import { getTokenInfo } from '../account/utils';
 import {
   summarizeRuntimeAccountCausality,
   type EntityInputCausalTrace,
-} from '../infra/account-causal-trace';
+} from '../qa/account-causal-trace';
 import { getPerfMs } from '../infra/time';
 
 let _process: ((env: RuntimeState, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<RuntimeState>) | null = null;
