@@ -5,17 +5,12 @@ import { requireBoundaryInteger } from '../../protocol/boundary-validation';
 import { cloneIsolatedRuntimeSnapshot } from '../../runtime/input-clone';
 import { assertAccountJClaimRootsAvailable } from '../../entity/account-j-claim-node-store';
 import { assertConsumptionRootsAvailable } from '../../entity/consumption-store';
-import { setBrowserVMJurisdiction } from '../../jadapter/browservm-registry';
 import { assertCertifiedBoardRootsAvailable } from '../../jurisdiction/board-registry';
 import { assertCertifiedRegistrationEvidenceStore } from '../../jurisdiction/registration-evidence';
 import {
   assertCertifiedJHistoryIntegrity,
   assertValidatorJHistoryMatchesCertifiedAnchor,
 } from '../../jurisdiction/local-history';
-import { rehydrateRestoredRuntimeInfra } from '../../runtime/infra';
-import { loadGossipProfilesFromInfraDb } from '../../runtime/infra-gossip-store';
-import { assertPersistedContractConfigReady, registerCommittedSingleSignerWallets } from '../../runtime/recovery-infra';
-import { runtimeIsBrowser } from '../../infra/runtime-process';
 import type { RuntimeReplica } from '../../runtime/types';
 import { normalizeDbNamespace } from '../runtime-dbs';
 import { restoreDurableRuntimeSnapshot } from '../wal/snapshot';
@@ -32,8 +27,12 @@ export interface CheckpointRestoreOptions {
 
 export interface CheckpointRestoreDeps {
   createEmptyEnv: RuntimeModule['createEmptyEnv'];
-  infraGossipDbAccess: Parameters<typeof loadGossipProfilesFromInfraDb>[1];
 }
+
+export type DecodedCheckpointSnapshot = {
+  env: RuntimeReplica;
+  gossipProfiles: Profile[];
+};
 
 const requireCheckpointEntries = (
   raw: unknown,
@@ -118,11 +117,11 @@ const assertCheckpointCommitments = async (env: RuntimeReplica): Promise<void> =
 // A recovery bundle uses the canonical WAL checkpoint representation. Keeping one
 // decoder prevents backup import and local crash recovery from drifting into two
 // subtly different state machines.
-export const restoreCheckpointSnapshot = async (
+export const decodeCheckpointSnapshot = async (
   deps: CheckpointRestoreDeps,
   snapshot: Record<string, unknown>,
   options: CheckpointRestoreOptions = {},
-): Promise<RuntimeReplica> => {
+): Promise<DecodedCheckpointSnapshot> => {
   if (!snapshot || typeof snapshot !== 'object') throw new Error('RECOVERY_CHECKPOINT_INVALID');
 
   const normalizedSnapshot = cloneIsolatedRuntimeSnapshot(snapshot);
@@ -137,15 +136,5 @@ export const restoreCheckpointSnapshot = async (
 
   const gossipProfiles = restoreCheckpointState(env, normalizedSnapshot);
   await assertCheckpointCommitments(env);
-  if (!options.readOnly) {
-    await rehydrateRestoredRuntimeInfra(env, {
-      isBrowser: runtimeIsBrowser,
-      loadGossipProfiles: target => loadGossipProfilesFromInfraDb(target, deps.infraGossipDbAccess),
-      assertPersistedContractConfigReady,
-      setBrowserVMJurisdiction,
-    });
-  }
-  registerCommittedSingleSignerWallets(env);
-  for (const profile of gossipProfiles) env.gossip?.announce?.(profile);
-  return env;
+  return { env, gossipProfiles };
 };

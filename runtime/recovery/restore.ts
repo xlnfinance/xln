@@ -10,13 +10,19 @@ import {
   reconcileRecoveryInfraEffects,
   registerCommittedSingleSignerWallets,
 } from '../runtime/recovery-infra';
+import { rehydrateRestoredRuntimeInfra } from '../runtime/infra';
+import { runtimeIsBrowser } from '../infra/runtime-process';
+import { setBrowserVMJurisdiction } from '../jadapter/browservm-registry';
 import { replayPersistedRuntimeJournals } from '../storage/recovery/journal';
 import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeTx } from '../runtime/types';
 import type { PersistedFrameJournal } from './../storage/types';
 import type { RuntimeRecoveryBundleV1 } from './../recovery/types';
 import { loadGossipProfilesFromInfraDb } from '../runtime/infra-gossip-store';
 import type { StorageDbRole } from './../storage/runtime-dbs';
-import { restoreCheckpointSnapshot } from '../storage/recovery/checkpoint';
+import {
+  decodeCheckpointSnapshot,
+  type CheckpointRestoreOptions,
+} from '../storage/recovery/checkpoint';
 import { persistRestoredRuntimeState, type PersistRestoredRuntimeOptions } from '../storage/recovery/import';
 import { restoreRuntimeFromBundles, type RuntimeBundleRestoreOptions } from './bundle-restore';
 
@@ -64,10 +70,27 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
     applyRuntimeInput,
   } = deps;
 
-  const restoreEnvFromCheckpointSnapshot = (
+  const restoreEnvFromCheckpointSnapshot = async (
     snapshot: Record<string, unknown>,
-    options?: Parameters<typeof restoreCheckpointSnapshot>[2],
-  ) => restoreCheckpointSnapshot({ createEmptyEnv, infraGossipDbAccess }, snapshot, options);
+    options: CheckpointRestoreOptions = {},
+  ): Promise<RuntimeReplica> => {
+    const { env, gossipProfiles } = await decodeCheckpointSnapshot(
+      { createEmptyEnv },
+      snapshot,
+      options,
+    );
+    if (!options.readOnly) {
+      await rehydrateRestoredRuntimeInfra(env, {
+        isBrowser: runtimeIsBrowser,
+        loadGossipProfiles: target => loadGossipProfilesFromInfraDb(target, infraGossipDbAccess),
+        assertPersistedContractConfigReady,
+        setBrowserVMJurisdiction,
+      });
+    }
+    registerCommittedSingleSignerWallets(env);
+    for (const profile of gossipProfiles) env.gossip?.announce?.(profile);
+    return env;
+  };
 
   const replayRecoveryFrameJournals = (env: RuntimeReplica, frames: PersistedFrameJournal[]): Promise<void> =>
     replayPersistedRuntimeJournals(

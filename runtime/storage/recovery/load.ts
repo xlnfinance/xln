@@ -109,7 +109,6 @@ const installRestoredRuntimeFrame = async (
   await reads.restoreOverlayFromFrameLog(env, targetHeight);
   env.frameLogs = frame.activityLogs.map(entry => ({ ...entry }));
   if (frame.runtimeMachine) {
-    restoreDurableRuntimeSnapshot(env, frame.runtimeMachine);
     await assertCertifiedRegistrationEvidenceStore(env);
   }
   assertRestoredCanonicalState(env, source);
@@ -148,6 +147,10 @@ export const loadPersistedRuntime = async (
     );
     if (!source) return null;
     if (source.frame.runtimeMachine) {
+      // Install the durable Runtime-machine envelope once, before rebuilding
+      // the Entity graph that references its content-addressed witness stores.
+      // Reapplying it afterward is redundant and risks erasing state produced
+      // by graph restoration if the two phases ever gain overlapping fields.
       restoreDurableRuntimeSnapshot(env, source.frame.runtimeMachine);
     }
     await restorePersistedEntityGraph(
