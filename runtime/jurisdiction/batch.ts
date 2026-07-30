@@ -520,29 +520,38 @@ export function encodeJBatch(batch: JBatch): string {
   return encoded;
 }
 
-const materializeAbiTuple = (tuple: ethers.Result): Record<string, unknown> =>
-  Object.fromEntries(
-    Object.entries(tuple.toObject()).map(([key, value]) => [
-      key,
-      Array.isArray(value)
-        ? Array.from(
-            value,
-            item => item instanceof ethers.Result
-              ? materializeAbiTuple(item)
-              : item,
-          )
-        : value,
-    ]),
-  );
+/**
+ * Decode by the ABI schema instead of Result.toObject().
+ *
+ * ethers refuses to objectify an unnamed tuple. Solidity permits those tuples
+ * inside named structures, so a valid processBatch containing a dispute proof
+ * used to fail only after it reached the watcher. The ParamType tree is the
+ * authority: every consensus-facing object key comes from the pinned ABI, while
+ * positional Result values remain an untrusted transport representation.
+ */
+const materializeAbiValue = (param: ethers.ParamType, value: unknown, context: string): unknown => {
+  if (param.baseType === 'array') {
+    const itemParam = param.arrayChildren;
+    if (!itemParam || !Array.isArray(value)) {
+      throw new Error(`J_BATCH_ABI_ARRAY_INVALID:${context}`);
+    }
+    return Array.from(value, (item, index) =>
+      materializeAbiValue(itemParam, item, `${context}[${index}]`));
+  }
+  if (param.baseType !== 'tuple') return value;
+  if (!param.components || !Array.isArray(value)) {
+    throw new Error(`J_BATCH_ABI_TUPLE_INVALID:${context}`);
+  }
+  return Object.fromEntries(param.components.map((component, index) => {
+    if (!component.name) throw new Error(`J_BATCH_ABI_COMPONENT_UNNAMED:${context}[${index}]`);
+    return [component.name, materializeAbiValue(component, value[index], `${context}.${component.name}`)];
+  }));
+};
 
 export function decodeJBatch(encodedBatch: string): JBatch {
   const abiCoder = ethers.AbiCoder.defaultAbiCoder();
   const decoded = abiCoder.decode([DEPOSITORY_BATCH_PARAM], encodedBatch);
-  const tuple = decoded[0];
-  if (!(tuple instanceof ethers.Result)) {
-    throw new Error('J_BATCH_ABI_RESULT_INVALID');
-  }
-  const batch: unknown = materializeAbiTuple(tuple);
+  const batch = materializeAbiValue(DEPOSITORY_BATCH_PARAM, decoded[0], 'batch');
   validateJBatch(batch, 'J_BATCH_ABI_RESULT');
   return batch;
 }
