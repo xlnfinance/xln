@@ -24,7 +24,7 @@ import type {
 import type { RuntimeAdapterRequest } from '../radapter/types';
 import type { RuntimeState } from '../runtime/types';
 import type { RelaySocket } from './relay-direct';
-import type { RegisterReceiptOptions, RuntimeIngressReceipt } from './ingress-receipts';
+import type { RegisterReceiptOptions, RuntimeIngressReceipt } from '../runtime/ingress-receipts';
 
 type ServerRpcHandlerDeps = {
   validateRuntimeInputAdmission?: (env: RuntimeState, input: Parameters<typeof enqueueRuntimeInput>[1]) => void;

@@ -57,7 +57,7 @@ import type { Profile } from '../entity/profile';
 import {
   projectRuntimeIngressReceiptForWire,
   type RuntimeIngressReceipt,
-} from '../server/ingress-receipts';
+} from '../runtime/ingress-receipts';
 import { calculateSolvency } from '../runtime/solvency';
 import { acquireRuntimeCommittedRead } from '../runtime/frame/writer-lock';
 

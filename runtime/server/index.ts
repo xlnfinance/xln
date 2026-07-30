@@ -38,7 +38,7 @@ import { hasDaemonControlAuth, parseTaggedControlBody, requireDaemonControlAuth 
 import { isLocalOperatorRequest, resolveSocketPeerAddress } from './health-redaction';
 import { listLocalControlEntities } from './control-entities';
 import { getAccountState, getEntityReplicaById } from './entity-lookup';
-import { createRuntimeIngressReceiptStore } from './ingress-receipts';
+import { createRuntimeIngressReceiptStore } from '../runtime/ingress-receipts';
 import { createRelayStore, pushDebugEvent, removeClient } from '../relay/store';
 import { openRelayIncidentJournal } from '../relay/incident-journal';
 import { maybeHandleRelayDebugRequest } from '../relay/debug-http';

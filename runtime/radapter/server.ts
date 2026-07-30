@@ -15,7 +15,7 @@ import {
   projectRuntimeIngressReceiptForWire,
   type RegisterReceiptOptions,
   type RuntimeIngressReceipt,
-} from '../server/ingress-receipts';
+} from '../runtime/ingress-receipts';
 import { RuntimeAdapterError, toRuntimeAdapterErrorPayload } from './errors';
 import { consumeToken, createTokenBucket, tokenRetryAfterMs, type TokenBucket } from './rate-limit';
 import { resolveRuntimeAdapterRead } from './resolve';

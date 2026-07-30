@@ -69,7 +69,7 @@ import { handleLendingStateRequest } from '../server/lending';
 import { handleRuntimeActivityRequest } from '../server/activity-api';
 import { handleReserveFaucet } from '../server/reserve-faucet';
 import { handleOffchainFaucet } from '../server/offchain-faucet';
-import { createRuntimeIngressReceiptStore } from '../server/ingress-receipts';
+import { createRuntimeIngressReceiptStore } from '../runtime/ingress-receipts';
 import { handleRuntimeInputStatus } from '../server/runtime-input-control';
 import {
   getActiveJAdapter,

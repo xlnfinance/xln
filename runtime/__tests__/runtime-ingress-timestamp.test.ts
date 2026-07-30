@@ -6,7 +6,7 @@ import { initCrontab, scheduleHook } from '../entity/scheduler';
 import { generateLazyEntityId } from '../entity/factory';
 import { deriveLocalEntityCryptoKeys, hasLocalSignerKey } from '../entity/crypto';
 import { processEventBatch } from '../jadapter/watcher';
-import { createRuntimeIngressReceiptStore } from '../server/ingress-receipts';
+import { createRuntimeIngressReceiptStore } from '../runtime/ingress-receipts';
 import { buildJEventRangeData } from './helpers/j-history';
 import { recordValidatorJHistory } from '../jurisdiction/local-history';
 import {

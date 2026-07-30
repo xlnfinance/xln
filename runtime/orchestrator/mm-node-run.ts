@@ -40,7 +40,7 @@ import {
 } from '../runtime.ts';
 import { getReliableOutputIdentity } from '../runtime/output-routing';
 import { isLocalOperatorRequest, resolveSocketPeerAddress } from '../server/health-redaction';
-import { createRuntimeIngressReceiptStore } from '../server/ingress-receipts';
+import { createRuntimeIngressReceiptStore } from '../runtime/ingress-receipts';
 import { requiresLocalNodeOperator } from '../server/node-http-access';
 import { handleRuntimeInputStatus } from '../server/runtime-input-control';
 import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';

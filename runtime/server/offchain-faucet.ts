@@ -11,7 +11,7 @@ import { getErrorMessage, isEntityId32 } from './utils';
 import { getAccountState, getEntityOutCapacity, getEntityReplicaById, hasAccount } from './entity-lookup';
 import { withRuntimeCommittedRead } from '../runtime/frame/writer-lock';
 import { getFaucetHubProfiles } from './faucet-hubs';
-import type { RegisterReceiptOptions, RuntimeIngressReceipt } from './ingress-receipts';
+import type { RegisterReceiptOptions, RuntimeIngressReceipt } from '../runtime/ingress-receipts';
 import {
   describeOffchainFaucetAccountState,
   shouldRejectOffchainFaucetForSettledCapacity,

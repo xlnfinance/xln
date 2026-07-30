@@ -2,7 +2,7 @@ import type { RuntimeActivityEvent, RuntimeActivityFilters } from '../api/activi
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { RuntimeInput } from '../runtime/types';
 import type { XlnProtocolVersion } from '../protocol/version';
-import type { RuntimeIngressReceipt } from '../server/ingress-receipts';
+import type { RuntimeIngressReceipt } from '../runtime/ingress-receipts';
 
 export type RuntimeAdapterMode = 'embedded' | 'remote';
 export type RuntimeAdapterStatus = 'connected' | 'connecting' | 'disconnected' | 'error';
