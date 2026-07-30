@@ -171,11 +171,14 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 - [ ] Finish mechanically enforcing the money boundary. Settlement finality
   already queues an Account-owned `j_event_claim`; dispute finality now builds
   an explicit `AccountInput(kind='external_finality')` and enters the same
-  `applyAccountInput` composition root. The Account-owned branch applies
-  authenticated chain finality immediately and unilaterally, without Account
-  mempool, proposal, or peer ACK, so either party cannot veto an on-chain
-  result. The returning peer independently consumes the same finalized event
-  and converges byte-identically. Add an ownership gate forbidding
+  `applyAccountInput` composition root. Authenticated `DisputeStarted` uses
+  that same Account-owned boundary; Entity authenticates the event and
+  schedules follow-ups without writing Account dispute fields. The
+  Account-owned branch applies authenticated chain finality immediately and
+  unilaterally, without Account mempool, proposal, or peer ACK, so either party
+  cannot veto an on-chain result. The returning peer independently consumes
+  the same finalized event and converges byte-identically. Extend the ownership
+  gate from J-event dispute fields to every Account State mutation, forbidding
   Entity/Runtime writes to Account delta, collateral, holds or credit outside
   calls into Account-owned handlers.
 - [ ] Turn Runtime execution into one visible pipeline:

@@ -24,7 +24,10 @@ import {
   summarizeDeltasForLog,
 } from './helpers';
 import { appendAccountMempoolTxs } from '../mempool';
-import { applyAccountDisputeFinality } from '../j-finality';
+import {
+  applyAccountDisputeFinality,
+  applyAccountDisputeStarted,
+} from '../j-finality';
 import { applyLocalAccountInput } from '../local-tx-admission';
 import { getAccountInputEnvelopeError } from '../input';
 import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '../../protocol/dispute/arguments';
@@ -1024,6 +1027,29 @@ const resolveAccountInputSecurityContext = (
     verifyHanko: context.verifyHanko,
   });
 
+const applyExternalFinalityInput = (
+  account: AccountReplica,
+  input: Extract<AccountInput, { kind: 'external_finality' }>,
+): HandleAccountInputResult => {
+  if (input.finality.kind === 'dispute_started') {
+    applyAccountDisputeStarted(account, input.finality);
+    return {
+      success: true,
+      events: ['ACCOUNT_DISPUTE_STARTED_APPLIED'],
+    };
+  }
+  const { finalizedJNonce, finalizedTokenIds } = input.finality;
+  return {
+    success: true,
+    events: ['ACCOUNT_DISPUTE_FINALITY_APPLIED'],
+    externalFinality: applyAccountDisputeFinality(
+      account,
+      finalizedJNonce,
+      finalizedTokenIds,
+    ),
+  };
+};
+
 export async function applyAccountInput(
   context: AccountConsensusContext,
   account: AccountReplica,
@@ -1036,16 +1062,7 @@ export async function applyAccountInput(
   }
   if (input.kind === 'txs') return applyLocalAccountInput(account, input);
   if (input.kind === 'external_finality') {
-    const { finalizedJNonce, finalizedTokenIds } = input.finality;
-    return {
-      success: true,
-      events: ['ACCOUNT_DISPUTE_FINALITY_APPLIED'],
-      externalFinality: applyAccountDisputeFinality(
-        account,
-        finalizedJNonce,
-        finalizedTokenIds,
-      ),
-    };
+    return applyExternalFinalityInput(account, input);
   }
   const accountJClaimNodeStore = context.jClaimNodeStore;
   const securityContext = resolveAccountInputSecurityContext(context, account, providedSecurityContext);

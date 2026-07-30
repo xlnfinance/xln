@@ -52,6 +52,32 @@ export const createAccountDisputeFinalityInput = (
   };
 };
 
+export const createAccountDisputeStartedInput = (
+  account: Pick<AccountState, 'leftEntity' | 'rightEntity' | 'domain'>,
+  owningEntityId: string,
+  finality: Extract<
+    AccountExternalFinalityInput['finality'],
+    { kind: 'dispute_started' }
+  >,
+): AccountExternalFinalityInput => {
+  if (
+    owningEntityId !== account.leftEntity &&
+    owningEntityId !== account.rightEntity
+  ) {
+    throw new Error(`ACCOUNT_FINALITY_INPUT_OWNER_MISMATCH:${owningEntityId}`);
+  }
+  return {
+    kind: 'external_finality',
+    fromEntityId: owningEntityId,
+    toEntityId:
+      owningEntityId === account.leftEntity
+        ? account.rightEntity
+        : account.leftEntity,
+    domain: { ...account.domain },
+    finality: { ...finality },
+  };
+};
+
 /** Validate the common envelope before any Account variant can mutate state. */
 export const getAccountInputEnvelopeError = (
   account: Pick<AccountState, 'leftEntity' | 'rightEntity' | 'domain' | 'watchSeed'>,

@@ -42,10 +42,13 @@ export function cloneIsolatedAccountInput(input: AccountInput): AccountInput {
       return {
         ...base,
         kind: input.kind,
-        finality: {
-          ...input.finality,
-          finalizedTokenIds: [...input.finality.finalizedTokenIds],
-        },
+        finality:
+          input.finality.kind === 'dispute_finalized'
+            ? {
+                ...input.finality,
+                finalizedTokenIds: [...input.finality.finalizedTokenIds],
+              }
+            : { ...input.finality },
       };
     case 'frame':
       return { ...base, kind: input.kind, proposal: cloneFrameProposal(input.proposal) };

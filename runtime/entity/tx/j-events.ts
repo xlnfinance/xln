@@ -38,7 +38,6 @@ import {
   applyEntityProviderActionCancelled,
   applyEntityProviderActionExecuted,
 } from './j-events-entity-provider-action';
-import { freezeAccountForDispute, isDisputeStartedByLeft } from '../../account/consensus/dispute-policy';
 import {
   foldJHistoryRoot,
 } from '../../jurisdiction/history-consensus';
@@ -55,7 +54,10 @@ import {
 } from '../../jurisdiction/board-registry';
 import { validateJEventRangeEnvelope } from '../../jurisdiction/j-event-range-validation';
 import { applyAccountInput } from '../../account/consensus';
-import { createAccountDisputeFinalityInput } from '../../account/input';
+import {
+  createAccountDisputeFinalityInput,
+  createAccountDisputeStartedInput,
+} from '../../account/input';
 import { applyCertifiedBoardJEvent } from './j-events-board';
 import { applyAccountSettledJEvent } from './j-events-account-settled';
 import {
@@ -474,11 +476,17 @@ type StartedDispute = {
   disputeTimeout: number;
 };
 
-const initializeStartedDispute = (
+const initializeStartedDispute = async (
   context: FinalizedJEventContext,
   data: DisputeStartedEventData,
-): StartedDispute | null => {
-  const { newState, env, blockNumber, dirtyAccounts } = context;
+): Promise<StartedDispute | null> => {
+  const {
+    newState,
+    env,
+    blockNumber,
+    dirtyAccounts,
+    accountConsensusContext,
+  } = context;
   const { sender, counterentity, nonce, proofbodyHash } = data;
   const {
     senderStr,
@@ -494,48 +502,52 @@ const initializeStartedDispute = (
 
   const weAreStarter = senderStr === entityIdNorm;
   const disputeTimeout = Number(data.disputeTimeout);
-  if (!Number.isSafeInteger(disputeTimeout) || disputeTimeout <= Number(blockNumber || 0)) {
-    throw new Error(
-      `J_EVENT_DISPUTE_TIMEOUT_INVALID:block=${String(blockNumber)}:timeout=${String(data.disputeTimeout)}`,
-    );
-  }
   const initialNonce = decodeAccountNonce(nonce, 'J_EVENT_DISPUTE_NONCE_INVALID');
   const jNonce = decodeAccountNonce(
     data.jNonce ?? nonce,
     'J_EVENT_DISPUTE_J_NONCE_INVALID',
   );
 
-  syncJBatchEntityNonceFromEvent(newState, senderStr, entityIdNorm, data.batchNonce);
-  dirtyAccounts.add(counterpartyId.toLowerCase());
-  account.status = 'disputed';
-  freezeAccountForDispute(account, true);
-
-  // Unified nonce: initialNonce = the nonce used in disputeStart (from event).
-  // jNonce defaults to the dispute nonce when no richer event payload exists.
-  account.activeDispute = {
-    startedByLeft: isDisputeStartedByLeft(senderStr, account.leftEntity, account.rightEntity),
+  const accountInput = createAccountDisputeStartedInput(account, entityIdNorm, {
+    kind: 'dispute_started',
+    starterEntityId: senderStr,
     initialProofbodyHash: String(proofbodyHash),
     initialNonce,
     disputeTimeout,
     jNonce,
     starterInitialArguments: data.starterInitialArguments || '0x',
     starterIncrementedArguments: data.starterIncrementedArguments || '0x',
-    observedOnChain: true,
     observedBlockNumber: Number(blockNumber || 0),
     ...(data.batchNonce !== undefined ? { batchNonce: data.batchNonce } : {}),
-    finalizeQueued: false,
-  };
-  account.jNonce = Math.max(account.jNonce, jNonce);
+  });
+  const accountInputResult = await applyAccountInput(
+    accountConsensusContext,
+    account,
+    accountInput,
+  );
+  if (!accountInputResult.success) {
+    throw new Error(
+      `ACCOUNT_DISPUTE_STARTED_INPUT_FAILED:${counterpartyId}:` +
+      `${accountInputResult.error ?? 'RESULT_MISSING'}`,
+    );
+  }
 
+  syncJBatchEntityNonceFromEvent(newState, senderStr, entityIdNorm, data.batchNonce);
+  dirtyAccounts.add(counterpartyId.toLowerCase());
+
+  const activeDispute = account.activeDispute;
+  if (!activeDispute) {
+    throw new Error(`ACCOUNT_DISPUTE_STARTED_STATE_MISSING:${counterpartyId}`);
+  }
   const localProof = buildAccountProofBodyFromJurisdictions(env.state, account);
-  const onChainProofHash = String(account.activeDispute.initialProofbodyHash || '').toLowerCase();
+  const onChainProofHash = String(activeDispute.initialProofbodyHash || '').toLowerCase();
   const storedProofKnown = Object.keys(account.disputeProofBodiesByHash ?? {})
     .some((hash) => hash.toLowerCase() === onChainProofHash);
   if (localProof.proofBodyHash.toLowerCase() !== onChainProofHash) {
     jEventLog.debug('dispute.proof_hash_not_current', {
       counterparty: shortId(counterpartyId),
       local: shortHash(localProof.proofBodyHash),
-      onChain: shortHash(account.activeDispute.initialProofbodyHash),
+      onChain: shortHash(activeDispute.initialProofbodyHash),
       storedProofKnown,
     });
   }
@@ -611,7 +623,7 @@ const applyStartedDisputeFollowups = (
 
 async function applyDisputeStartedJEvent(context: FinalizedJEventContext): Promise<void> {
   const data = context.event.data as DisputeStartedEventData;
-  const dispute = initializeStartedDispute(context, data);
+  const dispute = await initializeStartedDispute(context, data);
   if (dispute) applyStartedDisputeFollowups(context, dispute);
 }
 

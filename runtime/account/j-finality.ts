@@ -1,5 +1,8 @@
-import type { AccountReplica } from '../types/account';
-import { freezeAccountForDispute } from './consensus/dispute-policy';
+import type { AccountExternalFinalityInput, AccountReplica } from '../types/account';
+import {
+  freezeAccountForDispute,
+  isDisputeStartedByLeft,
+} from './consensus/dispute-policy';
 import { invalidateAccountMapCommitment } from './map-commitment';
 import { clearFinalizedSettlementWorkspace } from './tx/handlers/settle-transition';
 
@@ -7,6 +10,70 @@ export type AccountDisputeFinalityResult = {
   hadActiveDispute: boolean;
   hadSettlementWorkspace: boolean;
   removedSettlementTxs: number;
+};
+
+type DisputeStartedFinality = Extract<
+  AccountExternalFinalityInput['finality'],
+  { kind: 'dispute_started' }
+>;
+
+const requireSafeNonce = (value: number, code: string): void => {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`${code}:${String(value)}`);
+  }
+};
+
+/**
+ * Apply an authenticated Depository DisputeStarted event inside Account.
+ *
+ * Entity owns event authentication and follow-up routing, but it must not
+ * duplicate Account policy by writing dispute fields itself. Like finalized
+ * settlement, this transition is unilateral external consensus: waiting for
+ * a peer ACK would let the peer ignore an already-final on-chain freeze.
+ */
+export const applyAccountDisputeStarted = (
+  account: AccountReplica,
+  finality: DisputeStartedFinality,
+): void => {
+  requireSafeNonce(finality.initialNonce, 'ACCOUNT_DISPUTE_INITIAL_NONCE_INVALID');
+  requireSafeNonce(finality.jNonce, 'ACCOUNT_DISPUTE_J_NONCE_INVALID');
+  requireSafeNonce(
+    finality.observedBlockNumber,
+    'ACCOUNT_DISPUTE_OBSERVED_BLOCK_INVALID',
+  );
+  if (
+    !Number.isSafeInteger(finality.disputeTimeout) ||
+    finality.disputeTimeout <= finality.observedBlockNumber
+  ) {
+    throw new Error(
+      `ACCOUNT_DISPUTE_TIMEOUT_INVALID:` +
+      `${finality.observedBlockNumber}:${finality.disputeTimeout}`,
+    );
+  }
+
+  const startedByLeft = isDisputeStartedByLeft(
+    finality.starterEntityId,
+    account.leftEntity,
+    account.rightEntity,
+  );
+  account.status = 'disputed';
+  freezeAccountForDispute(account, true);
+  account.activeDispute = {
+    startedByLeft,
+    initialProofbodyHash: finality.initialProofbodyHash,
+    initialNonce: finality.initialNonce,
+    disputeTimeout: finality.disputeTimeout,
+    jNonce: finality.jNonce,
+    starterInitialArguments: finality.starterInitialArguments,
+    starterIncrementedArguments: finality.starterIncrementedArguments,
+    observedOnChain: true,
+    observedBlockNumber: finality.observedBlockNumber,
+    ...(finality.batchNonce !== undefined
+      ? { batchNonce: finality.batchNonce }
+      : {}),
+    finalizeQueued: false,
+  };
+  account.jNonce = Math.max(account.jNonce, finality.jNonce);
 };
 
 const clearFinalizedDeltas = (

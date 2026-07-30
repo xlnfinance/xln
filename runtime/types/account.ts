@@ -519,11 +519,24 @@ export type AccountLocalInput = AccountInputBase & {
  */
 export type AccountExternalFinalityInput = AccountInputBase & {
   kind: 'external_finality';
-  finality: {
-    kind: 'dispute_finalized';
-    finalizedJNonce: number;
-    finalizedTokenIds: number[];
-  };
+  finality:
+    | {
+        kind: 'dispute_started';
+        starterEntityId: string;
+        initialProofbodyHash: string;
+        initialNonce: number;
+        disputeTimeout: number;
+        jNonce: number;
+        starterInitialArguments: string;
+        starterIncrementedArguments: string;
+        observedBlockNumber: number;
+        batchNonce?: number;
+      }
+    | {
+        kind: 'dispute_finalized';
+        finalizedJNonce: number;
+        finalizedTokenIds: number[];
+      };
 };
 
 export type AccountPeerInput =
