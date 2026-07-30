@@ -57,7 +57,7 @@ async function loadJurisdictionConfigs(): Promise<Map<string, JurisdictionConfig
 
   if (!isBrowser && typeof process !== 'undefined') {
     // Node.js: use centralized loader
-    config = loadJurisdictions() as unknown as Record<string, unknown>;
+    config = { ...loadJurisdictions() };
   } else {
     // Browser: fetch with timeout
     const controller = new AbortController();
