@@ -149,22 +149,22 @@ describe('production startup wiring', () => {
     const mmNode = readMarketMakerNodeSource();
     const finalize = extractSourceBlock(
       mmNode,
-      'const finalizeMarketMakerBootstrapState = (): MarketMakerBootstrapFinalization =>',
-      'const markOffersReady = async',
+      'const build = (): MarketMakerBootstrapFinalization =>',
+      'const markReady = async',
     );
-    expect(finalize).toContain('const finalization = buildMarketMakerBootstrapFinalization();');
-    expect(finalize).toContain('publishMarketMakerBootstrapFinalization(finalization);');
+    expect(finalize).toContain('computeCanonicalStateHashFromEnv(deps.env)');
+    expect(finalize).toContain('buildMarketMakerBootstrapEntityStateHash(deps.env)');
     expect(finalize).not.toContain('await ');
     expect(finalize).not.toContain('checkpointNodeRuntime');
   });
 
   test('market-maker rechecks completion immediately before publishing READY', () => {
     const mmNode = readMarketMakerNodeSource();
-    const mark = extractSourceBlock(mmNode, 'const markOffersReady = async', 'const refreshBootstrapPhase =');
-    const firstCheck = mark.indexOf('if (!canCheckBootstrapCompletion()) return false;');
+    const mark = extractSourceBlock(mmNode, 'const markReady = async', 'return { markReady };');
+    const firstCheck = mark.indexOf('if (!deps.canCheckCompletion()) return false;');
     const yieldIndex = mark.indexOf('await yieldMarketMakerApi();', firstCheck);
-    const secondCheck = mark.indexOf('if (!canCheckBootstrapCompletion()) return false;', yieldIndex);
-    const finalize = mark.indexOf('finalizeMarketMakerBootstrapState();', secondCheck);
+    const secondCheck = mark.indexOf('if (!deps.canCheckCompletion()) return false;', yieldIndex);
+    const finalize = mark.indexOf('const finalization = build();', secondCheck);
     expect(firstCheck).toBeGreaterThanOrEqual(0);
     expect(yieldIndex).toBeGreaterThan(firstCheck);
     expect(secondCheck).toBeGreaterThan(yieldIndex);
@@ -1598,8 +1598,8 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('export const buildMarketMakerBootstrapEntityStateHash = (env: RuntimeState): string =>');
     expect(mmProgress).toContain("schema: 'market-maker-bootstrap-entity-state-v1'");
     expect(mmNode).toContain('const fingerprint = buildMarketMakerBootstrapFingerprint(');
-    expect(mmNode).toContain('const runtimeStateHash = computeCanonicalStateHashFromEnv(env);');
-    expect(mmNode).toContain('const entityStateHash = buildMarketMakerBootstrapEntityStateHash(env);');
+    expect(mmNode).toContain('const runtimeStateHash = computeCanonicalStateHashFromEnv(deps.env);');
+    expect(mmNode).toContain('const entityStateHash = buildMarketMakerBootstrapEntityStateHash(deps.env);');
     expect(mmNode).toContain('bootstrapReadyHash = finalization.fingerprint.hash;');
     expect(mmNode).toContain('bootstrapRuntimeStateHash = finalization.runtimeStateHash;');
     expect(mmNode).toContain('bootstrapEntityStateHash = finalization.entityStateHash;');
@@ -1825,7 +1825,7 @@ describe('production startup wiring', () => {
     expect(mmNode).not.toContain("startupPhase = 'bootstrap-degraded'");
     expect(mmNode).toContain("deps.emit('completion-health'");
     expect(mmNode).toContain('completionCheckArmed = true;');
-    expect(mmNode).toContain("emitBootstrapDebugEvent('finalize-step'");
+    expect(mmNode).toContain("deps.emit('finalize-step'");
     expect(mmNode).toContain(
       "pathname === '/api/health/full' || (pathname === '/api/health' && url.searchParams.get('full') === '1')",
     );
@@ -1864,14 +1864,14 @@ describe('production startup wiring', () => {
     expect(mmNode).not.toContain('MARKET_MAKER_PERSIST_READY_SNAPSHOT');
     const mmReadySource = extractSourceBlock(
       mmNode,
-      'const finalizeMarketMakerBootstrapState = (): MarketMakerBootstrapFinalization =>',
-      'const markOffersReady = async',
+      'const build = (): MarketMakerBootstrapFinalization =>',
+      'const markReady = async',
     );
-    expect(mmReadySource).toContain('buildMarketMakerBootstrapFinalization();');
-    expect(mmReadySource).toContain('publishMarketMakerBootstrapFinalization(finalization);');
+    expect(mmReadySource).toContain('computeCanonicalStateHashFromEnv(deps.env)');
+    expect(mmReadySource).toContain('buildMarketMakerBootstrapEntityStateHash(deps.env)');
     expect(mmReadySource).not.toContain('await ');
-    expect(mmNode).toContain('const markOffersReady = async (): Promise<boolean> => {');
-    expect(mmNode).toContain('const finalization = finalizeMarketMakerBootstrapState();');
+    expect(mmNode).toContain('const markReady = async (): Promise<boolean> => {');
+    expect(mmNode).toContain('const finalization = build();');
     expect(orchestrator).toContain("const preserveState = process.env['XLN_MESH_PRESERVE_STATE_ON_RESET'] === '1';");
     expect(orchestrator).toContain('} else if (existsSync(args.dbRoot)) {');
     expect(orchestrator).toContain('rmSync(args.dbRoot, { recursive: true, force: true });');
@@ -2224,15 +2224,15 @@ describe('production startup wiring', () => {
     const readyStart = mmNode.indexOf('const isMarketMakerConnectivityReady = (');
     const quotePipelineStart = mmNode.indexOf('const createBootstrapSameQuoteDriver = (');
     const driveStart = mmNode.indexOf('const driveQuotes = async (');
-    const markReadyStart = mmNode.indexOf('const markOffersReady = async (): Promise<boolean> => {');
+    const quotePipelineEnd = mmNode.indexOf('const publishMarketMakerBootstrapFinalization = (');
     expect(ensureStart).toBeGreaterThan(0);
     expect(readyStart).toBeGreaterThan(ensureStart);
     expect(quotePipelineStart).toBeGreaterThan(readyStart);
     expect(driveStart).toBeGreaterThan(quotePipelineStart);
-    expect(markReadyStart).toBeGreaterThan(driveStart);
+    expect(quotePipelineEnd).toBeGreaterThan(driveStart);
 
     const ensureConnectivity = mmNode.slice(ensureStart, readyStart);
-    const quotePipeline = mmNode.slice(quotePipelineStart, markReadyStart);
+    const quotePipeline = mmNode.slice(quotePipelineStart, quotePipelineEnd);
     expect(ensureConnectivity).not.toContain('settleRuntimeFor(');
     expect(ensureConnectivity).not.toContain('const accountOpenInputs: EntityInput[] = []');
     expect(ensureConnectivity).toContain('return true;');

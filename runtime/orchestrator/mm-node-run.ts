@@ -1528,6 +1528,111 @@ const waitForBootstrapOffers = async (deps: WaitForBootstrapOffersDeps): Promise
   return null;
 };
 
+type MarketMakerBootstrapFinalization = {
+  health: MarketMakerHealth;
+  fingerprint: ReturnType<typeof buildMarketMakerBootstrapFingerprint>;
+  runtimeStateHash: string;
+  entityStateHash: string;
+};
+
+type MarketMakerBootstrapFinalizerDeps = {
+  env: RuntimeState;
+  contexts: () => readonly MarketMakerEntityContext[];
+  tokenIdsByContext: () => ReadonlyMap<string, number[]>;
+  health: ReturnType<typeof createMarketMakerHealthController>;
+  buildSameQuoteJobs: (visibleHubs: HubProfile[]) => SameQuoteJob[];
+  allSameQuoteDepthReady: (visibleHubs: HubProfile[]) => boolean;
+  isReady: () => boolean;
+  canCheckCompletion: () => boolean;
+  publish: (finalization: MarketMakerBootstrapFinalization) => void;
+  emit: (event: string, fields?: Record<string, unknown>) => void;
+  logReadyHash: (fields: Record<string, unknown>) => void;
+  logOffersReady: (fields: Record<string, unknown>) => void;
+  primaryContext: MarketMakerEntityContext;
+  apiUrl: string;
+};
+
+const createMarketMakerBootstrapFinalizer = (deps: MarketMakerBootstrapFinalizerDeps) => {
+  const build = (): MarketMakerBootstrapFinalization => {
+    const visibleHubs = readVisibleHubProfiles(deps.env, true);
+    if (!deps.allSameQuoteDepthReady(visibleHubs)) {
+      throw new Error(
+        `MARKET_MAKER_BOOTSTRAP_INCOMPLETE: ${safeStringify({
+          scope: 'same-chain-all-contexts-depth',
+          incomplete: deps
+            .buildSameQuoteJobs(visibleHubs)
+            .filter(job => !isSameQuoteJobDepthReady(deps.env, job))
+            .map(job => ({
+              mmEntityId: job.context.entityId,
+              jurisdiction: job.context.jurisdictionName,
+              hubEntityId: job.hub.entityId,
+              committedOffers: countCommittedMarketMakerOffersForHub(
+                deps.env,
+                job.context.entityId,
+                job.hub.entityId,
+              ),
+              expectedOffers: buildMarketMakerOfferSpecs([job.hub.entityId], job.tokenIds).length,
+              blocker: describeMarketMakerSameHubBlocker(deps.env, job.context.entityId, job.hub.entityId),
+            })),
+        })}`,
+      );
+    }
+    const assertStartedAt = Date.now();
+    const health = assertMarketMakerBootstrapFinalized(deps.env, deps.health.publish({ includeCross: true }));
+    deps.emit('finalize-step', { step: 'assert-finalized', durationMs: Date.now() - assertStartedAt });
+    const fingerprintStartedAt = Date.now();
+    const fingerprint = buildMarketMakerBootstrapFingerprint(
+      deps.env,
+      [...deps.contexts()],
+      visibleHubs,
+      new Map(deps.tokenIdsByContext()),
+      health,
+    );
+    deps.emit('finalize-step', { step: 'fingerprint', durationMs: Date.now() - fingerprintStartedAt });
+    const hashStartedAt = Date.now();
+    const runtimeStateHash = computeCanonicalStateHashFromEnv(deps.env);
+    const entityStateHash = buildMarketMakerBootstrapEntityStateHash(deps.env);
+    deps.emit('finalize-step', { step: 'canonical-hashes', durationMs: Date.now() - hashStartedAt });
+    return { health, fingerprint, runtimeStateHash, entityStateHash };
+  };
+  const markReady = async (): Promise<boolean> => {
+    if (deps.isReady()) return true;
+    if (!deps.canCheckCompletion()) return false;
+    // Accepted ingress gets one event-loop turn to enter the Runtime mempool.
+    // READY is published only if the completion fence remains true afterwards.
+    await yieldMarketMakerApi();
+    if (!deps.canCheckCompletion()) return false;
+    // RuntimeState advances only after the canonical commit point has persisted
+    // the frame and durable outbox. READY therefore describes committed state;
+    // it must never invent a bootstrap-specific snapshot or second commit path.
+    const finalizeStartedAt = Date.now();
+    const publishStartedAt = Date.now();
+    const finalization = build();
+    deps.publish(finalization);
+    deps.emit('finalize-step', { step: 'publish-ready-state', durationMs: Date.now() - publishStartedAt });
+    const { health, fingerprint, runtimeStateHash, entityStateHash } = finalization;
+    deps.emit('ready-hash', {
+      hash: fingerprint.hash,
+      runtimeStateHash,
+      entityStateHash,
+      health: summarizeMarketMakerHealthForDebug(health),
+      finalizeDurationMs: Date.now() - finalizeStartedAt,
+    });
+    deps.logReadyHash({ hash: fingerprint.hash, runtimeStateHash, entityStateHash });
+    if (envFlagEnabled(process.env['XLN_MARKET_MAKER_LOG_READY_HASH_PAYLOAD'])) {
+      console.log(`[MESH-MM] BOOTSTRAP_READY_HASH_PAYLOAD payload=${safeStringify(fingerprint.payload)}`);
+    }
+    deps.logOffersReady({
+      entityId: deps.primaryContext.entityId,
+      runtimeId: String(deps.env.runtimeId || ''),
+      api: deps.apiUrl,
+      relay: resolvedArgs.relayUrl,
+    });
+    return true;
+  };
+  return { markReady };
+};
+
 export const runMarketMakerNode = async (): Promise<void> => {
   activateMarketMakerProcessArgs();
   if (resolvedArgs.dbPath) process.env['XLN_DB_PATH'] = resolvedArgs.dbPath;
@@ -1982,54 +2087,6 @@ export const runMarketMakerNode = async (): Promise<void> => {
     }
   };
 
-  type MarketMakerBootstrapFinalization = {
-    health: MarketMakerHealth;
-    fingerprint: ReturnType<typeof buildMarketMakerBootstrapFingerprint>;
-    runtimeStateHash: string;
-    entityStateHash: string;
-  };
-
-  const buildMarketMakerBootstrapFinalization = (): MarketMakerBootstrapFinalization => {
-    const visibleHubs = readVisibleHubProfiles(env, true);
-    if (!isAllSameQuoteDepthReady(visibleHubs)) {
-      throw new Error(
-        `MARKET_MAKER_BOOTSTRAP_INCOMPLETE: ${safeStringify({
-          scope: 'same-chain-all-contexts-depth',
-          incomplete: buildSameQuoteJobs(visibleHubs)
-            .filter(job => !isSameQuoteJobDepthReady(env, job))
-            .map(job => ({
-              mmEntityId: job.context.entityId,
-              jurisdiction: job.context.jurisdictionName,
-              hubEntityId: job.hub.entityId,
-              committedOffers: countCommittedMarketMakerOffersForHub(env, job.context.entityId, job.hub.entityId),
-              expectedOffers: buildMarketMakerOfferSpecs([job.hub.entityId], job.tokenIds).length,
-              blocker: describeMarketMakerSameHubBlocker(env, job.context.entityId, job.hub.entityId),
-            })),
-        })}`,
-      );
-    }
-    const assertStartedAt = Date.now();
-    const health = assertMarketMakerBootstrapFinalized(env, healthController.publish({ includeCross: true }));
-    emitBootstrapDebugEvent('finalize-step', {
-      step: 'assert-finalized',
-      durationMs: Date.now() - assertStartedAt,
-    });
-    const fingerprintStartedAt = Date.now();
-    const fingerprint = buildMarketMakerBootstrapFingerprint(env, mmContexts, visibleHubs, mmTokenIdsByContext, health);
-    emitBootstrapDebugEvent('finalize-step', {
-      step: 'fingerprint',
-      durationMs: Date.now() - fingerprintStartedAt,
-    });
-    const hashStartedAt = Date.now();
-    const runtimeStateHash = computeCanonicalStateHashFromEnv(env);
-    const entityStateHash = buildMarketMakerBootstrapEntityStateHash(env);
-    emitBootstrapDebugEvent('finalize-step', {
-      step: 'canonical-hashes',
-      durationMs: Date.now() - hashStartedAt,
-    });
-    return { health, fingerprint, runtimeStateHash, entityStateHash };
-  };
-
   const publishMarketMakerBootstrapFinalization = (finalization: MarketMakerBootstrapFinalization): void => {
     bootstrapReadyHash = finalization.fingerprint.hash;
     bootstrapRuntimeStateHash = finalization.runtimeStateHash;
@@ -2039,57 +2096,23 @@ export const runMarketMakerNode = async (): Promise<void> => {
     healthController.setCurrentHealth(finalization.health);
     healthController.rebuildHealthResponse();
   };
-
-  const finalizeMarketMakerBootstrapState = (): MarketMakerBootstrapFinalization => {
-    // The live RuntimeState advances only after the canonical runtime commit point has
-    // persisted the finalized frame and its durable outbox. READY therefore
-    // describes an already-durable state; it must never create a second,
-    // bootstrap-specific snapshot protocol.
-    const finalization = buildMarketMakerBootstrapFinalization();
-    publishMarketMakerBootstrapFinalization(finalization);
-    return finalization;
-  };
-
-  const markOffersReady = async (): Promise<boolean> => {
-    if (startupPhase === 'offers-ready') return true;
-    if (!canCheckBootstrapCompletion()) return false;
-    // Let already-accepted ingress declare itself before erecting the final
-    // checkpoint fence. A transient backlog means "drain and retry", not a
-    // corrupt bootstrap and not a reason to terminate the market maker.
-    await yieldMarketMakerApi();
-    if (!canCheckBootstrapCompletion()) return false;
-
-    const finalizeStartedAt = Date.now();
-    const publishStartedAt = Date.now();
-    const finalization = finalizeMarketMakerBootstrapState();
-    const { health, fingerprint, runtimeStateHash, entityStateHash } = finalization;
-    emitBootstrapDebugEvent('finalize-step', {
-      step: 'publish-ready-state',
-      durationMs: Date.now() - publishStartedAt,
-    });
-    emitBootstrapDebugEvent('ready-hash', {
-      hash: fingerprint.hash,
-      runtimeStateHash,
-      entityStateHash,
-      health: summarizeMarketMakerHealthForDebug(health),
-      finalizeDurationMs: Date.now() - finalizeStartedAt,
-    });
-    nodeLog.info('bootstrap.ready_hash', {
-      hash: fingerprint.hash,
-      runtimeStateHash,
-      entityStateHash,
-    });
-    if (envFlagEnabled(process.env['XLN_MARKET_MAKER_LOG_READY_HASH_PAYLOAD'])) {
-      console.log(`[MESH-MM] BOOTSTRAP_READY_HASH_PAYLOAD payload=${safeStringify(fingerprint.payload)}`);
-    }
-    nodeLog.info('offers.ready', {
-      entityId: primaryMmContext.entityId,
-      runtimeId: String(env.runtimeId || ''),
-      api: apiUrl,
-      relay: resolvedArgs.relayUrl,
-    });
-    return true;
-  };
+  const bootstrapFinalizer = createMarketMakerBootstrapFinalizer({
+    env,
+    contexts: () => mmContexts,
+    tokenIdsByContext: () => mmTokenIdsByContext,
+    health: healthController,
+    buildSameQuoteJobs,
+    allSameQuoteDepthReady: isAllSameQuoteDepthReady,
+    isReady: () => startupPhase === 'offers-ready',
+    canCheckCompletion: canCheckBootstrapCompletion,
+    publish: publishMarketMakerBootstrapFinalization,
+    emit: emitBootstrapDebugEvent,
+    logReadyHash: fields => nodeLog.info('bootstrap.ready_hash', fields),
+    logOffersReady: fields => nodeLog.info('offers.ready', fields),
+    primaryContext: primaryMmContext,
+    apiUrl,
+  });
+  const markOffersReady = bootstrapFinalizer.markReady;
 
   const refreshBootstrapPhase = (health: MarketMakerHealth | null): void => {
     if (isBootstrapDepthComplete(health)) return;
