@@ -83,9 +83,9 @@ async function readFaucetAccountSnapshot(
           }>;
         };
       }).isolatedEnv;
-      if (!env?.eReplicas) return null;
+      if (!env?.state?.eReplicas) return null;
 
-      for (const [replicaKey, replica] of env.eReplicas.entries()) {
+      for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
         const [replicaEntityId, replicaSignerId] = String(replicaKey).split(':');
         if (String(replicaEntityId || '').toLowerCase() !== String(entityId || '').toLowerCase()) continue;
         if (signerId && String(replicaSignerId || '').toLowerCase() !== String(signerId || '').toLowerCase()) continue;
@@ -151,8 +151,8 @@ async function findEntitySigner(page: Page, entityId: string): Promise<string | 
         eReplicas?: Map<string, unknown>;
       };
     }).isolatedEnv;
-    if (!env?.eReplicas) return null;
-    for (const replicaKey of env.eReplicas.keys()) {
+    if (!env?.state?.eReplicas) return null;
+    for (const replicaKey of env.state.eReplicas.keys()) {
       const [replicaEntityId, replicaSignerId] = String(replicaKey).split(':');
       if (String(replicaEntityId || '').toLowerCase() !== String(targetEntityId || '').toLowerCase()) continue;
       if (replicaSignerId) return replicaSignerId;
@@ -210,8 +210,8 @@ async function measureAccountStateToDomLatency(
             }>;
           };
         }).isolatedEnv;
-        if (!env?.eReplicas) return null;
-        for (const [replicaKey, replica] of env.eReplicas.entries()) {
+        if (!env?.state?.eReplicas) return null;
+        for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
           const [replicaEntityId, replicaSignerId] = String(replicaKey).split(':');
           if (String(replicaEntityId || '').toLowerCase() !== String(entityId || '').toLowerCase()) continue;
           if (signerId && String(replicaSignerId || '').toLowerCase() !== String(signerId || '').toLowerCase()) continue;

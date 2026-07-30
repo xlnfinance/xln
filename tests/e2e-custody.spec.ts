@@ -556,7 +556,7 @@ async function getOffchainOutboundCapacity(
           rightHold: serializeAmount(record.rightHold),
         };
       };
-      if (!env?.eReplicas) {
+      if (!env?.state?.eReplicas) {
         return {
           runtimeId: String(env?.runtimeId || ''),
           reason: 'isolatedEnv missing',
@@ -569,7 +569,7 @@ async function getOffchainOutboundCapacity(
       const counterpartyNorm = String(counterpartyEntityId || '').trim().toLowerCase();
       const runtimeSignerNorm = String(env.runtimeId || '').trim().toLowerCase();
       const debugReplicas: OffchainCapacitySnapshot['replicas'] = [];
-      for (const [replicaKey, replica] of env.eReplicas.entries()) {
+      for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
         const replicaParts = String(replicaKey || '').split(':');
         const replicaEntityId = String(replicaParts[0] || '').trim().toLowerCase();
         const replicaSignerId = String(replicaParts[1] || '').trim().toLowerCase();
@@ -674,14 +674,14 @@ async function waitForOffchainOutboundCapacity(
               if (!left || !right) return false;
               return (left === ownerNorm && right === counterpartyNorm) || (right === ownerNorm && left === counterpartyNorm);
             };
-            if (!env?.eReplicas) {
+            if (!env?.state?.eReplicas) {
               return { runtimeId: String(env?.runtimeId || ''), reason: 'isolatedEnv missing', replicas: [] };
             }
             const ownerNorm = String(ownerEntityId || '').trim().toLowerCase();
             const counterpartyNorm = String(counterpartyEntityId || '').trim().toLowerCase();
             const runtimeSignerNorm = String(env.runtimeId || '').trim().toLowerCase();
             const replicas: OffchainCapacitySnapshot['replicas'] = [];
-            for (const [replicaKey, replica] of env.eReplicas.entries()) {
+            for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
               const replicaParts = String(replicaKey || '').split(':');
               const replicaEntityId = String(replicaParts[0] || '').trim().toLowerCase();
               const replicaSignerId = String(replicaParts[1] || '').trim().toLowerCase();

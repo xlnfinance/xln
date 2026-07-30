@@ -204,8 +204,8 @@ async function getLocalEntity(page: Page): Promise<LocalEntityRef> {
         eReplicas?: Map<string, unknown>;
       };
     }).isolatedEnv;
-    if (!env?.eReplicas) return null;
-    for (const [replicaKey] of env.eReplicas.entries()) {
+    if (!env?.state?.eReplicas) return null;
+    for (const [replicaKey] of env.state.eReplicas.entries()) {
       const [entityId, signerId] = String(replicaKey).split(':');
       if (!entityId || !signerId) continue;
       return { entityId, signerId };
@@ -234,7 +234,7 @@ async function readMoveBatchSnapshot(
         eReplicas?: Map<string, unknown>;
       };
     }).isolatedEnv;
-    if (!env?.eReplicas) {
+    if (!env?.state?.eReplicas) {
       return {
         pendingExternalToReserve: 0,
         pendingReserveToCollateral: 0,
@@ -257,12 +257,12 @@ async function readMoveBatchSnapshot(
         recentMessages: [],
       };
     }
-    const key = Array.from(env.eReplicas.keys()).find((candidateKey: string) => {
+    const key = Array.from(env.state.eReplicas.keys()).find((candidateKey: string) => {
       const [candidateEntityId, candidateSignerId] = String(candidateKey).split(':');
       return String(candidateEntityId || '').toLowerCase() === String(entityId).toLowerCase()
         && String(candidateSignerId || '').toLowerCase() === String(signerId).toLowerCase();
     });
-    const replica = key ? env.eReplicas.get(key) as {
+    const replica = key ? env.state.eReplicas.get(key) as {
       state?: {
         jBatchState?: {
           entityNonce?: number;
@@ -633,7 +633,7 @@ async function readBrowserReserveDebug(page: Page): Promise<unknown> {
       };
     };
     const env = win.isolatedEnv;
-    const entities = Array.from(env?.eReplicas?.entries?.() ?? []).map(([key, replica]) => ({
+    const entities = Array.from(env?.state?.eReplicas?.entries?.() ?? []).map(([key, replica]) => ({
       key,
       entityId: replica.entityId,
       signerId: replica.signerId,
@@ -647,7 +647,7 @@ async function readBrowserReserveDebug(page: Page): Promise<unknown> {
           }
         : null,
     }));
-    const jReplicas = Array.from(env?.jReplicas?.entries?.() ?? []).map(([name, replica]) => ({
+    const jReplicas = Array.from(env?.state?.jReplicas?.entries?.() ?? []).map(([name, replica]) => ({
       name,
       blockNumber: readBig(replica.blockNumber),
       lastBlockTimestamp: replica.lastBlockTimestamp ?? null,
@@ -666,7 +666,7 @@ async function readBrowserReserveDebug(page: Page): Promise<unknown> {
     });
     return {
       runtimeId: env?.runtimeId ?? null,
-      timestamp: env?.timestamp ?? null,
+      timestamp: env?.state?.timestamp ?? null,
       entities,
       jReplicas,
       mempool: {
@@ -765,8 +765,8 @@ async function readAccountOutCapacityRaw(
         }>;
       };
     }).isolatedEnv;
-    if (!env?.eReplicas) return null;
-    for (const [replicaKey, replica] of env.eReplicas.entries()) {
+    if (!env?.state?.eReplicas) return null;
+    for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
       if (!String(replicaKey).startsWith(`${entityId}:`)) continue;
       const account = replica.state?.accounts?.get(counterpartyId);
       const delta = account?.deltas?.get(tokenId);

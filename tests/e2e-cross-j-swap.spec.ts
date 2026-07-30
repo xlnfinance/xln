@@ -821,7 +821,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
               entityId: String(input?.entityId || ''),
               txTypes: effectiveTxs(input).map((tx: any) => String(tx?.type || '')),
             })),
-            crossRoutes: Array.from(activeEnv?.eReplicas?.values?.() || []).flatMap((replica: any) =>
+            crossRoutes: Array.from(activeEnv?.state.eReplicas?.values?.() || []).flatMap((replica: any) =>
               Array.from(replica?.state?.crossJurisdictionSwaps?.values?.() || []).map((route: any) => ({
                 entityId: String(replica?.state?.entityId || replica?.entityId || ''),
                 orderId: String(route?.orderId || ''),
@@ -937,7 +937,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
                 const env = (window as CrossRuntimeWindow).isolatedEnv;
                 const owner = String(entityId).toLowerCase();
                 const counterparty = String(hubId).toLowerCase();
-                const replica = Array.from(env?.eReplicas?.values?.() || []).find(
+                const replica = Array.from(env?.state.eReplicas?.values?.() || []).find(
                   (candidate: any) =>
                     String(candidate?.state?.entityId || candidate?.entityId || '').toLowerCase() === owner,
                 );

@@ -139,10 +139,12 @@ test('settings can add custom jurisdiction from canonical JSON and import it int
         return await page.evaluate((jurisdictionName) => {
           const env = (window as typeof window & {
             isolatedEnv?: {
-              jReplicas?: Map<string, { contracts?: { depository?: string } }>;
+              state: {
+                jReplicas: Map<string, { contracts?: { depository?: string } }>;
+              };
             };
           }).isolatedEnv;
-          const replica = env?.jReplicas?.get?.(jurisdictionName);
+          const replica = env?.state.jReplicas?.get?.(jurisdictionName);
           return {
             hasReplica: Boolean(replica),
             depository: String(replica?.contracts?.depository || ''),
@@ -190,10 +192,12 @@ test('settings can add BrowserVM jurisdiction and keep Graph3D visual path alive
       const env = (window as typeof window & {
         isolatedEnv?: {
           activeJurisdiction?: string;
-          jReplicas?: Map<string, { rpcs?: string[]; stateRoot?: Uint8Array | null; contracts?: { depository?: string } }>;
+          state: {
+            jReplicas: Map<string, { rpcs?: string[]; stateRoot?: Uint8Array | null; contracts?: { depository?: string } }>;
+          };
         };
       }).isolatedEnv;
-      const replica = env?.jReplicas?.get?.('local-sim-visual');
+      const replica = env?.state.jReplicas?.get?.('local-sim-visual');
       return {
         hasReplica: Boolean(replica),
         rpcCount: Number(replica?.rpcs?.length ?? -1),
@@ -212,9 +216,15 @@ test('settings can add BrowserVM jurisdiction and keep Graph3D visual path alive
   await expect(page.locator('.graph3d-panel canvas')).toHaveCount(1, { timeout: INIT_TIMEOUT });
   await expect.poll(async () => await page.evaluate(() => {
     const env = (window as typeof window & {
-      __xln?: { env?: { jReplicas?: Map<string, unknown> } | null };
+      __xln?: {
+        env?: {
+          state: {
+            jReplicas: Map<string, unknown>;
+          };
+        } | null;
+      };
     }).__xln?.env;
-    return env?.jReplicas?.has?.('local-sim-visual') === true;
+    return env?.state.jReplicas?.has?.('local-sim-visual') === true;
   }), {
     timeout: INIT_TIMEOUT,
     intervals: [50, 100, 250, 500],
@@ -222,7 +232,9 @@ test('settings can add BrowserVM jurisdiction and keep Graph3D visual path alive
   const restoredJMachineShape = await page.evaluate(() => {
     type JMachineShape = { blockNumber?: unknown; mempool?: unknown };
     type RuntimeShape = {
-      jReplicas?: Map<string, JMachineShape>;
+      state: {
+        jReplicas: Map<string, JMachineShape>;
+      };
       history?: Array<{ jReplicas?: Map<string, JMachineShape> }>;
     };
     const target = window as typeof window & {
@@ -234,7 +246,7 @@ test('settings can add BrowserVM jurisdiction and keep Graph3D visual path alive
     }));
     const env = target.__xln?.env;
     return {
-      current: inspect(env?.jReplicas),
+      current: inspect(env?.state.jReplicas),
       history: (env?.history ?? []).slice(-2).flatMap((frame) => inspect(frame.jReplicas)),
     };
   });

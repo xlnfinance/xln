@@ -92,12 +92,12 @@ async function getRenderedPrimaryCapacity(page: Page, selectors: string): Promis
   if (!targetCard) {
     const debug = await page.evaluate(() => {
       const env = (window as any).isolatedEnv;
-      const replicas = env?.eReplicas instanceof Map ? Array.from(env.eReplicas.entries()) : [];
+      const replicas = env?.state?.eReplicas instanceof Map ? Array.from(env.state.eReplicas.entries()) : [];
       const descriptor = Object.getOwnPropertyDescriptor(window, 'isolatedEnv');
       const xlnRoot = (window as any).__xln || {};
       return {
         runtimeId: String(env?.runtimeId || ''),
-        height: Number(env?.height || 0),
+        height: Number(env?.state?.height || 0),
         selectedRuntimeId: String(document.querySelector<HTMLElement>('[data-testid="context-current"]')?.dataset?.runtimeId || ''),
         runtimeSelection: (window as any).__xlnRuntimeSelection ?? xlnRoot.runtimeSelection ?? null,
         isolatedEnvDescriptor: {

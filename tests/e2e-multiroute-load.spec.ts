@@ -268,7 +268,7 @@ async function pay(page: Page, from: string, signerId: string, to: string, route
 async function getLockCount(page: Page, entityId: string): Promise<number> {
   return page.evaluate(({ entityId }) => {
     const env = (window as any).isolatedEnv;
-    for (const [k, rep] of (env?.eReplicas ?? new Map()).entries()) {
+    for (const [k, rep] of (env?.state?.eReplicas ?? new Map()).entries()) {
       if (String(k).startsWith(entityId + ':')) return (rep as any).state?.lockBook?.size || 0;
     }
     return -1;
@@ -296,7 +296,7 @@ async function getAccountLockCount(page: Page, entityId: string, counterpartyId:
     };
 
     const env = (window as any).isolatedEnv;
-    for (const [k, rep] of (env?.eReplicas ?? new Map()).entries()) {
+    for (const [k, rep] of (env?.state?.eReplicas ?? new Map()).entries()) {
       if (!String(k).startsWith(entityId + ':')) continue;
       const account = findAccount((rep as any)?.state?.accounts, entityId, counterpartyId);
       return account?.locks?.size || 0;
@@ -852,7 +852,7 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 19 test cases', () => {
     // Diagnose: inspect hook state + entity timestamp + runtime events
     const hookDiag1 = await pageFor('alice').evaluate(({ entityId }) => {
       const env = (window as any).isolatedEnv;
-      for (const [k, rep] of (env?.eReplicas ?? new Map()).entries()) {
+      for (const [k, rep] of (env?.state?.eReplicas ?? new Map()).entries()) {
         if (!String(k).startsWith(entityId + ':')) continue;
         const cs = (rep as any).state?.crontabState;
         const hooks = cs?.hooks;
@@ -863,7 +863,7 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 19 test cases', () => {
         })) : [];
         return {
           entityTimestamp: (rep as any).state?.timestamp,
-          envTimestamp: env?.timestamp,
+          envTimestamp: env?.state?.timestamp,
           hookCount: hooks?.size ?? -1,
           hooks: hookList,
           crontabExists: !!cs,
@@ -887,13 +887,13 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 19 test cases', () => {
         .filter((e: any) => String(e?.type ?? '').includes('Hook') || String(e?.type ?? '').includes('htlc_timeout'))
         .slice(-10)
         .map((e: any) => ({ type: e.type, data: JSON.stringify(e.data ?? {}).slice(0, 100) }));
-      for (const [k, rep] of (env?.eReplicas ?? new Map()).entries()) {
+      for (const [k, rep] of (env?.state?.eReplicas ?? new Map()).entries()) {
         if (!String(k).startsWith(entityId + ':')) continue;
         const cs = (rep as any).state?.crontabState;
         const hooks = cs?.hooks;
         return {
           entityTimestamp: (rep as any).state?.timestamp,
-          envTimestamp: env?.timestamp,
+          envTimestamp: env?.state?.timestamp,
           hookCount: hooks?.size ?? -1,
           hooksRemaining: hooks ? Array.from(hooks.entries()).map(([id, h]: any) => ({
             id: String(id).slice(0, 30), triggerAt: h.triggerAt,
@@ -937,7 +937,7 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 19 test cases', () => {
         const env = (window as typeof window & {
           isolatedEnv?: { runtimeId?: string; eReplicas?: Map<string, unknown> };
         }).isolatedEnv;
-        return Boolean(env?.runtimeId && Number(env?.eReplicas?.size || 0) > 0);
+        return Boolean(env?.runtimeId && Number(env?.state?.eReplicas?.size || 0) > 0);
       }, { timeout: 5_000 }).then(() => true).catch(() => false);
       if (!runtimeStillLoaded) {
         const reopened = await createRuntimeIdentity(userPage, name, users[name]!.mnemonic);

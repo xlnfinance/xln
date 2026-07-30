@@ -71,8 +71,8 @@ async function connectHub(page: Page, entityId: string, signerId: string, hubId:
 
   const debugState = await page.evaluate(({ entityId, hubId }) => {
     const env = (window as any).isolatedEnv;
-    if (!env?.eReplicas) return { foundEntity: false, accounts: [] as any[] };
-    for (const [k, rep] of env.eReplicas.entries()) {
+    if (!env?.state?.eReplicas) return { foundEntity: false, accounts: [] as any[] };
+    for (const [k, rep] of env.state.eReplicas.entries()) {
       if (!String(k).startsWith(entityId + ':')) continue;
       const accounts: any[] = [];
       for (const [cpId, acc] of (rep?.state?.accounts ?? new Map()).entries()) {
@@ -111,16 +111,16 @@ async function runtimeSnapshot(page: Page) {
 
     let entityCount = 0;
     const entityKeys: string[] = [];
-    if (env.eReplicas) {
-      for (const [k] of env.eReplicas.entries()) {
+    if (env.state.eReplicas) {
+      for (const [k] of env.state.eReplicas.entries()) {
         entityCount += 1;
         entityKeys.push(String(k));
       }
     }
 
     const entities: any[] = [];
-    if (env.eReplicas) {
-      for (const [k, rep] of env.eReplicas.entries()) {
+    if (env.state.eReplicas) {
+      for (const [k, rep] of env.state.eReplicas.entries()) {
         const entityId = String(k).split(':')[0];
         const accounts: any[] = [];
         if (rep?.state?.accounts) {
@@ -192,7 +192,7 @@ async function runtimeSnapshot(page: Page) {
     return {
       runtimeId,
       hasEnv: true,
-      runtimeHeight: Number(env.height || 0),
+      runtimeHeight: Number(env.state.height || 0),
       historyFrames: Number(env.history?.length || 0),
       entityCount,
       entityKeys,
@@ -205,9 +205,9 @@ async function runtimeSnapshot(page: Page) {
 async function readPairProgress(page: Page, counterpartyId: string) {
   return await page.evaluate(({ counterpartyId }) => {
     const env = (window as any).isolatedEnv;
-    if (!env?.eReplicas) return null;
+    if (!env?.state?.eReplicas) return null;
     const runtimeId = String(env.runtimeId || '').toLowerCase();
-    for (const [key, rep] of env.eReplicas.entries()) {
+    for (const [key, rep] of env.state.eReplicas.entries()) {
       const [entityId, signerId] = String(key).split(':');
       if (!entityId || !signerId || String(signerId).toLowerCase() !== runtimeId) continue;
       const account = rep?.state?.accounts?.get?.(counterpartyId);
@@ -356,7 +356,7 @@ async function readSwapState(page: Page, entityId: string, signerId: string, cou
     };
 
     const env = (window as any).isolatedEnv;
-    if (!env?.eReplicas) {
+    if (!env?.state?.eReplicas) {
       return {
         openOfferCount: 0,
         accountSwapOffersSize: 0,
@@ -366,12 +366,12 @@ async function readSwapState(page: Page, entityId: string, signerId: string, cou
         accountHasSwapCancelRequestInPendingFrame: false,
       };
     }
-    const key = Array.from(env.eReplicas.keys()).find((k: string) => {
+    const key = Array.from(env.state.eReplicas.keys()).find((k: string) => {
       const [eid, sid] = String(k).split(':');
       return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
         && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
     });
-    const rep = key ? env.eReplicas.get(key) : null;
+    const rep = key ? env.state.eReplicas.get(key) : null;
     const account = findAccount(rep?.state?.accounts, entityId, counterpartyId);
     return {
       openOfferCount: Number(
@@ -532,7 +532,7 @@ async function runtimeDbMeta(page: Page) {
 async function outCap(page: Page, entityId: string, cpId: string): Promise<bigint> {
   return await page.evaluate(async ({ entityId, cpId }) => {
     const env = (window as any).isolatedEnv;
-    if (!env?.eReplicas) throw new Error('isolatedEnv missing');
+    if (!env?.state?.eReplicas) throw new Error('isolatedEnv missing');
     const runtimeModule = (window as any).__xln?.instance;
     const deriveDelta = (runtimeModule as any)?.deriveDelta;
     if (typeof deriveDelta !== 'function') {
@@ -540,7 +540,7 @@ async function outCap(page: Page, entityId: string, cpId: string): Promise<bigin
     }
     const entity = String(entityId || '').toLowerCase();
     const counterparty = String(cpId || '').toLowerCase();
-    for (const [key, replica] of env.eReplicas.entries()) {
+    for (const [key, replica] of env.state.eReplicas.entries()) {
       const [replicaEntityId] = String(key).split(':');
       if (String(replicaEntityId || '').toLowerCase() !== entity) continue;
       const account = replica?.state?.accounts?.get?.(cpId);

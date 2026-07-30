@@ -180,20 +180,22 @@ async function readLocalHubAccountState(page: Page, hubId: string): Promise<{
     const env = (window as typeof window & {
       isolatedEnv?: {
         runtimeId?: string;
-        height?: number;
-        eReplicas?: Map<string, {
-          state?: {
-            accounts?: Map<string, {
-              currentHeight?: number;
-              pendingFrame?: unknown;
-              deltas?: Map<number, unknown>;
-            }>;
-          };
-        }>;
+        state?: {
+          height?: number;
+          eReplicas?: Map<string, {
+            state?: {
+              accounts?: Map<string, {
+                currentHeight?: number;
+                pendingFrame?: unknown;
+                deltas?: Map<number, unknown>;
+              }>;
+            };
+          }>;
+        };
       };
     }).isolatedEnv;
     const runtimeId = String(env?.runtimeId || '').toLowerCase();
-    if (!env?.eReplicas) {
+    if (!env?.state?.eReplicas) {
       return {
         runtimeHeight: 0,
         accountExists: false,
@@ -202,7 +204,7 @@ async function readLocalHubAccountState(page: Page, hubId: string): Promise<{
         tokenIds: [],
       };
     }
-    for (const [key, replica] of env.eReplicas.entries()) {
+    for (const [key, replica] of env.state.eReplicas.entries()) {
       const [, signerId] = String(key).split(':');
       if (String(signerId || '').toLowerCase() !== runtimeId) continue;
       const account = replica?.state?.accounts?.get?.(targetHubId);
@@ -211,7 +213,7 @@ async function readLocalHubAccountState(page: Page, hubId: string): Promise<{
         ? Array.from(account.deltas.keys()).map((tokenId) => Number(tokenId)).sort((a, b) => a - b)
         : [];
       return {
-        runtimeHeight: Number(env.height || 0),
+        runtimeHeight: Number(env.state.height || 0),
         accountExists: true,
         currentHeight: Number(account.currentHeight || 0),
         hasPendingFrame: !!account.pendingFrame,
@@ -219,7 +221,7 @@ async function readLocalHubAccountState(page: Page, hubId: string): Promise<{
       };
     }
     return {
-      runtimeHeight: Number(env.height || 0),
+      runtimeHeight: Number(env.state.height || 0),
       accountExists: false,
       currentHeight: 0,
       hasPendingFrame: false,
@@ -240,30 +242,32 @@ async function readPrimaryLocalAccountState(page: Page): Promise<{
     const env = (window as typeof window & {
       isolatedEnv?: {
         runtimeId?: string;
-        height?: number;
-        eReplicas?: Map<string, {
-          state?: {
-            accounts?: Map<string, {
-              currentHeight?: number;
-              pendingFrame?: unknown;
-              deltas?: Map<number, unknown>;
-            }>;
-          };
-        }>;
+        state?: {
+          height?: number;
+          eReplicas?: Map<string, {
+            state?: {
+              accounts?: Map<string, {
+                currentHeight?: number;
+                pendingFrame?: unknown;
+                deltas?: Map<number, unknown>;
+              }>;
+            };
+          }>;
+        };
       };
     }).isolatedEnv;
     const runtimeId = String(env?.runtimeId || '').toLowerCase();
     const fallback = {
-      runtimeHeight: Number(env?.height || 0),
+      runtimeHeight: Number(env?.state?.height || 0),
       hubId: null,
       accountExists: false,
       currentHeight: 0,
       hasPendingFrame: false,
       tokenIds: [] as number[],
     };
-    if (!(env?.eReplicas instanceof Map)) return fallback;
+    if (!(env?.state?.eReplicas instanceof Map)) return fallback;
 
-    for (const [key, replica] of env.eReplicas.entries()) {
+    for (const [key, replica] of env.state.eReplicas.entries()) {
       const [, signerId] = String(key).split(':');
       if (String(signerId || '').toLowerCase() !== runtimeId) continue;
       if (!(replica?.state?.accounts instanceof Map) || replica.state.accounts.size === 0) continue;
@@ -288,7 +292,7 @@ async function readPrimaryLocalAccountState(page: Page): Promise<{
       }
       if (!best) return fallback;
       return {
-        runtimeHeight: Number(env?.height || 0),
+        runtimeHeight: Number(env?.state?.height || 0),
         hubId: best.hubId,
         accountExists: true,
         currentHeight: best.currentHeight,
@@ -307,14 +311,16 @@ async function waitForLocalRuntimeIdentity(page: Page): Promise<{ entityId: stri
       const env = (window as typeof window & {
         isolatedEnv?: {
           runtimeId?: string;
-          eReplicas?: Map<string, unknown>;
+          state?: {
+            eReplicas?: Map<string, unknown>;
+          };
         };
       }).isolatedEnv;
       const runtimeId = String(env?.runtimeId || '').toLowerCase();
-      if (!runtimeId || !(env?.eReplicas instanceof Map) || env.eReplicas.size === 0) {
+      if (!runtimeId || !(env?.state?.eReplicas instanceof Map) || env.state.eReplicas.size === 0) {
         return null;
       }
-      for (const key of env.eReplicas.keys()) {
+      for (const key of env.state.eReplicas.keys()) {
         const [entityId, signerId] = String(key).split(':');
         if (
           /^0x[a-fA-F0-9]{64}$/.test(entityId || '')
@@ -675,9 +681,11 @@ async function readRecoveryUiDiagnostics(page: Page): Promise<Record<string, unk
     const env = (window as typeof window & {
       isolatedEnv?: {
         runtimeId?: string;
-        height?: number;
-        eReplicas?: Map<string, unknown>;
-        jReplicas?: Map<string, unknown>;
+        state?: {
+          height?: number;
+          eReplicas?: Map<string, unknown>;
+          jReplicas?: Map<string, unknown>;
+        };
       };
     }).isolatedEnv;
     return {
@@ -687,9 +695,9 @@ async function readRecoveryUiDiagnostics(page: Page): Promise<Record<string, unk
       selectedEntityId: String(selectedTrigger?.dataset?.entityId || ''),
       selectedSignerId: String(selectedTrigger?.dataset?.signerId || ''),
       envRuntimeId: String(env?.runtimeId || ''),
-      envHeight: Number(env?.height || 0),
-      envReplicaCount: Number(env?.eReplicas?.size || 0),
-      envJurisdictionCount: Number(env?.jReplicas?.size || 0),
+      envHeight: Number(env?.state?.height || 0),
+      envReplicaCount: Number(env?.state?.eReplicas?.size || 0),
+      envJurisdictionCount: Number(env?.state?.jReplicas?.size || 0),
       visibleButtons: Array.from(document.querySelectorAll('button'))
         .map((button) => String((button as HTMLButtonElement).innerText || '').trim())
         .filter(Boolean)

@@ -66,8 +66,8 @@ test.describe('Browser storage writer serialization', () => {
         const env = XLN.createEmptyEnv(seed);
         env.runtimeId = dbNamespace;
         env.dbNamespace = dbNamespace;
-        env.height = height;
-        env.timestamp = timestamp;
+        env.state.height = height;
+        env.state.timestamp = timestamp;
         env.quietRuntimeLogs = true;
         env.scenarioMode = false;
         return env;

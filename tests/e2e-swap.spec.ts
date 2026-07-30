@@ -432,12 +432,12 @@ async function ensureAnyHubAccountOpen(page: Page): Promise<{
     };
 
     const findLocalReplica = (env: any, entityId: string, signerId: string) => {
-      const repKey = Array.from(env.eReplicas.keys()).find((key: string) => {
+      const repKey = Array.from(env.state.eReplicas.keys()).find((key: string) => {
         const [eid, sid] = String(key).split(':');
         return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
           && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
       });
-      return repKey ? env.eReplicas.get(repKey) : null;
+      return repKey ? env.state.eReplicas.get(repKey) : null;
     };
 
     const accountReadyForSwap = (entityId: string, counterpartyId: string, account: any) => {
@@ -453,14 +453,14 @@ async function ensureAnyHubAccountOpen(page: Page): Promise<{
 
     const env = (window as any).isolatedEnv;
     const XLN = (window as any).XLN;
-    if (!env?.eReplicas || !XLN?.enqueueRuntimeInput) return { ok: false, error: 'isolatedEnv/XLN missing' };
+    if (!env?.state.eReplicas || !XLN?.enqueueRuntimeInput) return { ok: false, error: 'isolatedEnv/XLN missing' };
 
     const runtimeSigner = String(env.runtimeId || '').toLowerCase();
     let entityId = '';
     let signerId = '';
     let openedHubId = '';
 
-    for (const [key, rep] of env.eReplicas.entries()) {
+    for (const [key, rep] of env.state.eReplicas.entries()) {
       const [eid, sid] = String(key).split(':');
       if (!eid || !sid) continue;
       if (runtimeSigner && String(sid).toLowerCase() !== runtimeSigner) continue;
@@ -497,13 +497,13 @@ async function ensureAnyHubAccountOpen(page: Page): Promise<{
     if (!hubId) return { ok: false, error: 'hub not discovered in gossip' };
 
     const existingAccount = (() => {
-      const repKey = Array.from(env.eReplicas.keys()).find((key: string) => {
+      const repKey = Array.from(env.state.eReplicas.keys()).find((key: string) => {
         const [eid, sid] = String(key).split(':');
         return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
           && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
       });
       if (!repKey) return null;
-      const rep = env.eReplicas.get(repKey);
+      const rep = env.state.eReplicas.get(repKey);
       return findAccount(rep?.state?.accounts, entityId, hubId);
     })();
 
@@ -534,7 +534,7 @@ async function ensureAnyHubAccountOpen(page: Page): Promise<{
     } | null> => {
       const startedAt = Date.now();
       while (Date.now() - startedAt < timeoutMs) {
-        for (const [key, rep] of env.eReplicas.entries()) {
+        for (const [key, rep] of env.state.eReplicas.entries()) {
           const [eid] = String(key).split(':');
           if (String(eid || '').toLowerCase() !== String(entityId).toLowerCase()) continue;
           const account = findAccount(rep?.state?.accounts, entityId, hubId);
@@ -681,12 +681,12 @@ async function readAccountTokenOutCapacity(
     const nonNegative = (x: bigint): bigint => (x < 0n ? 0n : x);
     const normalize = (value: string) => String(value || '').trim().toLowerCase();
     const env = (window as any).isolatedEnv;
-    if (!env?.eReplicas) return 0;
-    const key = Array.from(env.eReplicas.keys()).find((k: string) => {
+    if (!env?.state.eReplicas) return 0;
+    const key = Array.from(env.state.eReplicas.keys()).find((k: string) => {
       const [eid, sid] = String(k).split(':');
       return normalize(eid) === normalize(entityId) && normalize(sid) === normalize(signerId);
     });
-    const replica = key ? env.eReplicas.get(key) : null;
+    const replica = key ? env.state.eReplicas.get(key) : null;
     if (!replica?.state?.accounts || !(replica.state.accounts instanceof Map)) return 0;
 
     let account: any = null;
@@ -922,7 +922,7 @@ async function readSwapState(
     };
 
     const env = (window as any).isolatedEnv;
-    if (!env?.eReplicas) {
+    if (!env?.state.eReplicas) {
       return {
         openOfferCount: 0,
         accountSwapOffersSize: 0,
@@ -944,12 +944,12 @@ async function readSwapState(
         deltas: {},
       };
     }
-    const key = Array.from(env.eReplicas.keys()).find((k: string) => {
+    const key = Array.from(env.state.eReplicas.keys()).find((k: string) => {
       const [eid, sid] = String(k).split(':');
       return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
         && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
     });
-    const rep = key ? env.eReplicas.get(key) : null;
+    const rep = key ? env.state.eReplicas.get(key) : null;
     const account = findAccount(rep?.state?.accounts, entityId, counterpartyId);
     const accountHistory = account?.swapOrderHistory instanceof Map
       ? Array.from(account.swapOrderHistory.values())
@@ -1116,13 +1116,13 @@ async function readSwapResolveCount(
     };
 
     const env = (window as any).isolatedEnv;
-    if (!env?.eReplicas) return 0;
-    const key = Array.from(env.eReplicas.keys()).find((k: string) => {
+    if (!env?.state.eReplicas) return 0;
+    const key = Array.from(env.state.eReplicas.keys()).find((k: string) => {
       const [eid, sid] = String(k).split(':');
       return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
         && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
     });
-    const rep = key ? env.eReplicas.get(key) : null;
+    const rep = key ? env.state.eReplicas.get(key) : null;
     const account = findAccount(rep?.state?.accounts, entityId, counterpartyId);
     if (!account) return 0;
 
@@ -1161,13 +1161,13 @@ async function readPositiveSwapResolveCount(
     };
 
     const env = (window as any).isolatedEnv;
-    if (!env?.eReplicas) return 0;
-    const key = Array.from(env.eReplicas.keys()).find((k: string) => {
+    if (!env?.state.eReplicas) return 0;
+    const key = Array.from(env.state.eReplicas.keys()).find((k: string) => {
       const [eid, sid] = String(k).split(':');
       return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
         && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
     });
-    const rep = key ? env.eReplicas.get(key) : null;
+    const rep = key ? env.state.eReplicas.get(key) : null;
     const account = findAccount(rep?.state?.accounts, entityId, counterpartyId);
     if (!account) return 0;
 
@@ -1303,7 +1303,7 @@ async function waitForSwapOrderbookLiquidity(
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => {
     const env = (window as any).isolatedEnv;
-    return !!env?.runtimeId && Number(env?.eReplicas?.size || 0) > 0;
+    return !!env?.runtimeId && Number(env?.state.eReplicas?.size || 0) > 0;
   }, { timeout: 60_000 });
   await openSwapWorkspace(page);
   lastState = await tryWaitOnce(45_000);
@@ -1470,13 +1470,13 @@ async function executeOrderbookClickFill(
     const amountInput = document.querySelector('[data-testid="swap-ticket-amount"]') as HTMLInputElement | null;
     const priceInput = document.querySelector('[data-testid="swap-ticket-rate"]') as HTMLInputElement | null;
     const formError = (document.querySelector('.swap-panel .form-error') as HTMLElement | null)?.innerText || '';
-    if (!env?.eReplicas) return null;
-    const key = Array.from(env.eReplicas.keys()).find((k: string) => {
+    if (!env?.state.eReplicas) return null;
+    const key = Array.from(env.state.eReplicas.keys()).find((k: string) => {
       const [eid, sid] = String(k).split(':');
       return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
         && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
     });
-    const rep = key ? env.eReplicas.get(key) : null;
+    const rep = key ? env.state.eReplicas.get(key) : null;
     const account = rep?.state?.accounts?.get?.(counterpartyId);
     const offer = account?.swapOffers instanceof Map ? Array.from(account.swapOffers.values())[0] : null;
     let swapResolveCount = 0;
@@ -1488,8 +1488,8 @@ async function executeOrderbookClickFill(
         if (Number(tx?.data?.fillRatio || 0) > 0) positiveSwapResolveCount += 1;
       }
     }
-    const hubRepKey = Array.from(env.eReplicas.keys()).find((k: string) => String(k).split(':')[0]?.toLowerCase() === String(counterpartyId).toLowerCase());
-    const hubRep = hubRepKey ? env.eReplicas.get(hubRepKey) : null;
+    const hubRepKey = Array.from(env.state.eReplicas.keys()).find((k: string) => String(k).split(':')[0]?.toLowerCase() === String(counterpartyId).toLowerCase());
+    const hubRep = hubRepKey ? env.state.eReplicas.get(hubRepKey) : null;
     const book = hubRep?.state?.orderbookExt?.books?.get?.('1/2');
     const readSideLevels = (currentBook: any, side: 'ask' | 'bid') => {
       if (!currentBook) return [];
@@ -1669,14 +1669,14 @@ async function executeOrderbookClickFill(
       let lastSignature = '';
       const sample = () => {
         const env = (window as any).isolatedEnv;
-        const replicaKey = env?.eReplicas instanceof Map
-          ? Array.from(env.eReplicas.keys()).find((key: unknown) => {
+        const replicaKey = env?.state.eReplicas instanceof Map
+          ? Array.from(env.state.eReplicas.keys()).find((key: unknown) => {
               const [candidateEntityId, candidateSignerId] = String(key).split(':');
               return candidateEntityId?.toLowerCase() === entityId.toLowerCase()
                 && candidateSignerId?.toLowerCase() === signerId.toLowerCase();
             })
           : null;
-        const replica = replicaKey ? env.eReplicas.get(replicaKey) : null;
+        const replica = replicaKey ? env.state.eReplicas.get(replicaKey) : null;
         const account = replica?.state?.accounts instanceof Map
           ? Array.from(replica.state.accounts.entries()).find(([key, value]: [unknown, any]) =>
               String(key).toLowerCase() === counterpartyId.toLowerCase()
@@ -1687,7 +1687,7 @@ async function executeOrderbookClickFill(
           ? Array.from(account.swapOrderHistory.values()) as any[]
           : [];
         const state = {
-          runtimeHeight: Number(env?.height ?? 0),
+          runtimeHeight: Number(env?.state.height ?? 0),
           entityHeight: Number(replica?.state?.height ?? 0),
           accountHeight: Number(account?.currentHeight ?? 0),
           mempool: Number(account?.mempool?.length ?? 0),
@@ -2295,10 +2295,10 @@ test.describe('E2E Swap Flow', () => {
       await page.waitForFunction(
         ({ entityId, accountId }) => {
           const env = (window as any).isolatedEnv;
-          if (!env?.eReplicas || !(env.eReplicas instanceof Map)) return false;
+          if (!env?.state.eReplicas || !(env.state.eReplicas instanceof Map)) return false;
           const targetEntityId = String(entityId || '').toLowerCase();
           const targetAccountId = String(accountId || '').toLowerCase();
-          const replica = Array.from(env.eReplicas.values()).find((candidate: any) =>
+          const replica = Array.from(env.state.eReplicas.values()).find((candidate: any) =>
             String(candidate?.entityId || '').toLowerCase() === targetEntityId,
           );
           const account = replica?.state?.accounts?.get?.(targetAccountId);
@@ -2317,7 +2317,7 @@ test.describe('E2E Swap Flow', () => {
       await page.reload({ waitUntil: 'domcontentloaded' });
       await page.waitForFunction(() => {
         const env = (window as any).isolatedEnv;
-        return !!env?.runtimeId && Number(env?.eReplicas?.size || 0) > 0;
+        return !!env?.runtimeId && Number(env?.state.eReplicas?.size || 0) > 0;
       }, { timeout: 60_000 });
       await openSwapWorkspace(page);
       await selectCounterpartyInSwap(page, accountRef.counterpartyId);
@@ -2420,7 +2420,7 @@ test.describe('E2E Swap Flow', () => {
       await page.reload({ waitUntil: 'domcontentloaded' });
       await page.waitForFunction(() => {
         const env = (window as any).isolatedEnv;
-        return !!env?.runtimeId && Number(env?.eReplicas?.size || 0) > 0;
+        return !!env?.runtimeId && Number(env?.state.eReplicas?.size || 0) > 0;
       }, { timeout: 60_000 });
     });
     await timedStep('swap.reload_assert_no_open_offer', async () => {

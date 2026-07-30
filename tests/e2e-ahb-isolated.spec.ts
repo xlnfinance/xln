@@ -386,9 +386,9 @@ async function outCapRaw(page: Page, entityId: string, cpId: string): Promise<bi
   const delta = await page.evaluate(({ cpId, entityId }) => {
     const view = window as TestWindow;
     const env = view.isolatedEnv;
-    if (!env?.eReplicas) return null;
+    if (!env?.state?.eReplicas) return null;
 
-    for (const [replicaKey, replica] of env.eReplicas.entries()) {
+    for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
       if (!String(replicaKey).startsWith(`${entityId}:`)) continue;
       const account = replica?.state?.accounts?.get?.(cpId);
       const rawDelta = account?.deltas?.get?.(1);

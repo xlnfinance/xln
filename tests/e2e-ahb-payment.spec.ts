@@ -221,7 +221,7 @@ async function waitForActiveRuntime(page: Page, expectedRuntimeId: string, tag: 
   await page.waitForFunction(({ expectedRuntimeId }) => {
     const env = (window as any).isolatedEnv;
     return String(env?.runtimeId || '').toLowerCase() === String(expectedRuntimeId || '').toLowerCase()
-      && Number(env?.eReplicas?.size || 0) > 0;
+      && Number(env?.state?.eReplicas?.size || 0) > 0;
   }, { expectedRuntimeId }, { timeout: 20_000 });
 
   const activeRuntimeId = await page.evaluate(() => String((window as any).isolatedEnv?.runtimeId || '').toLowerCase());
@@ -291,8 +291,8 @@ async function dumpState(page: Page, label: string) {
     if (!env) return { label, error: 'no isolatedEnv' };
 
     const entities: any[] = [];
-    if (env.eReplicas) {
-      for (const [key, rep] of env.eReplicas.entries()) {
+    if (env.state?.eReplicas) {
+      for (const [key, rep] of env.state.eReplicas.entries()) {
         const accounts: any[] = [];
         if (rep.state?.accounts) {
           for (const [cpId, acc] of rep.state.accounts.entries()) {
@@ -333,8 +333,8 @@ async function dumpState(page: Page, label: string) {
       loopActive: env.infrastructure?.loopActive || false,
       p2pConnected: !!p2p,
       gossipProfiles,
-      entityCount: env.eReplicas?.size || 0,
-      eReplicaKeys: env.eReplicas ? [...env.eReplicas.keys()] : [],
+      entityCount: env.state?.eReplicas?.size || 0,
+      eReplicaKeys: env.state?.eReplicas ? [...env.state.eReplicas.keys()] : [],
       entities,
     };
   }, label);
@@ -381,7 +381,7 @@ async function findSelfCycleRoute(
 ): Promise<string[]> {
   const route = await page.evaluate(({ selfEntityId, minIntermediates, requiredHubs }) => {
     const env = (window as any).isolatedEnv;
-    const replicas = env?.eReplicas;
+    const replicas = env?.state?.eReplicas;
     const profiles = env?.gossip?.getProfiles?.() || [];
     const adjacency = new Map<string, Set<string>>();
 
@@ -473,9 +473,9 @@ async function findSelfCycleRoute(
 async function outCap(page: Page, entityId: string, cpId: string): Promise<bigint> {
   const delta = await page.evaluate(({ entityId, cpId }) => {
     const env = (window as any).isolatedEnv;
-    if (!env?.eReplicas) return null;
+    if (!env?.state?.eReplicas) return null;
 
-    for (const [replicaKey, replica] of env.eReplicas.entries()) {
+    for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
       if (!String(replicaKey).startsWith(`${entityId}:`)) continue;
       const account = replica?.state?.accounts?.get?.(cpId);
       const rawDelta = account?.deltas?.get?.(1);
@@ -594,10 +594,10 @@ async function getAccountSyncState(
 ): Promise<{ hasAccount: boolean; height: number; pendingHeight: number | null; mempoolLen: number }> {
   return page.evaluate(({ entityId, counterpartyId }) => {
     const env = (window as any).isolatedEnv;
-    if (!env?.eReplicas) {
+    if (!env?.state?.eReplicas) {
       return { hasAccount: false, height: 0, pendingHeight: null, mempoolLen: 0 };
     }
-    for (const [key, rep] of env.eReplicas.entries()) {
+    for (const [key, rep] of env.state.eReplicas.entries()) {
       if (!String(key).startsWith(entityId + ':')) continue;
       const account = rep?.state?.accounts?.get?.(counterpartyId);
       if (!account) return { hasAccount: false, height: 0, pendingHeight: null, mempoolLen: 0 };
@@ -834,7 +834,7 @@ async function screenshot(page: Page, name: string) {
 async function getEntityPersistenceSnapshot(page: Page, entityId: string, counterpartyId: string) {
   return page.evaluate(({ entityId, counterpartyId }) => {
     const env = (window as any).isolatedEnv;
-    if (!env?.eReplicas) {
+    if (!env?.state?.eReplicas) {
       return {
         envReady: false,
         runtimeHeight: 0,
@@ -843,13 +843,13 @@ async function getEntityPersistenceSnapshot(page: Page, entityId: string, counte
         accountCount: 0,
       };
     }
-    for (const [key, rep] of env.eReplicas.entries()) {
+    for (const [key, rep] of env.state.eReplicas.entries()) {
       if (!String(key).startsWith(entityId + ':')) continue;
       const accountCount = rep?.state?.accounts?.size || 0;
       const hasAccount = !!rep?.state?.accounts?.has?.(counterpartyId);
       return {
         envReady: true,
-        runtimeHeight: Number(env.height || 0),
+        runtimeHeight: Number(env.state.height || 0),
         historyFrames: Array.isArray(env.history) ? env.history.length : 0,
         hasAccount,
         accountCount,
@@ -857,7 +857,7 @@ async function getEntityPersistenceSnapshot(page: Page, entityId: string, counte
     }
     return {
       envReady: true,
-      runtimeHeight: Number(env.height || 0),
+      runtimeHeight: Number(env.state.height || 0),
       historyFrames: Array.isArray(env.history) ? env.history.length : 0,
       hasAccount: false,
       accountCount: 0,
@@ -1249,7 +1249,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
       await expect.poll(async () => {
         const info = await page.evaluate((eid) => {
           const env = (window as any).isolatedEnv;
-          for (const [k, rep] of (env?.eReplicas || new Map()).entries()) {
+          for (const [k, rep] of (env?.state?.eReplicas || new Map()).entries()) {
             if (String(k).startsWith(eid + ':')) {
               return rep?.state?.lockBook?.size || 0;
             }
@@ -1284,7 +1284,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
 
     const lockInfo = await page.evaluate((eid) => {
       const env = (window as any).isolatedEnv;
-      for (const [k, rep] of (env?.eReplicas || new Map()).entries()) {
+      for (const [k, rep] of (env?.state?.eReplicas || new Map()).entries()) {
         if (String(k).startsWith(eid + ':')) {
           return { locks: rep?.state?.lockBook?.size || 0 };
         }
@@ -1317,7 +1317,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.waitForFunction(() => {
       const env = (window as any).isolatedEnv;
-      return !!env?.runtimeId && Number(env?.eReplicas?.size || 0) > 0;
+      return !!env?.runtimeId && Number(env?.state?.eReplicas?.size || 0) > 0;
     }, { timeout: 60_000 });
 
     await switchToRuntime(page, 'alice');

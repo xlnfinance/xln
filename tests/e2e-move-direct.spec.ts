@@ -142,7 +142,7 @@ async function readBrowserExternalWalletDebug(page: Page, symbol: string, holder
       if (value && typeof value === 'object') return Object.entries(value as Record<string, unknown>);
       return [];
     };
-    const replicas = mapEntries(env?.eReplicas).map(([key, replica]: [unknown, any]) => {
+    const replicas = mapEntries(env?.state?.eReplicas).map(([key, replica]: [unknown, any]) => {
       const wallet = replica?.state?.externalWallet;
       const balances = wallet?.balances instanceof Map ? wallet.balances.get(owner) : undefined;
       const tokenRecord = balances instanceof Map ? balances.get(tokenAddress) : undefined;
@@ -162,7 +162,7 @@ async function readBrowserExternalWalletDebug(page: Page, symbol: string, holder
         block: Number(block || 0),
       })),
     }));
-    const jReplicas = mapEntries(env?.jReplicas).map(([key, replica]: [unknown, any]) => ({
+    const jReplicas = mapEntries(env?.state?.jReplicas).map(([key, replica]: [unknown, any]) => ({
       key: String(key),
       blockNumber: Number(replica?.blockNumber || 0),
       hasAdapter: Boolean(replica?.jAdapter),
@@ -170,7 +170,7 @@ async function readBrowserExternalWalletDebug(page: Page, symbol: string, holder
     }));
     return {
       runtimeId: String(env?.runtimeId || ''),
-      height: Number(env?.height || 0),
+      height: Number(env?.state?.height || 0),
       loopActive: Boolean(env?.infrastructure?.loopActive),
       queuedEntityInputs: Number(env?.runtimeMempool?.entityInputs?.length || 0),
       processing: Boolean(env?.infrastructure?.processingPromise),

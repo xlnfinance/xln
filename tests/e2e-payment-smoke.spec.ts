@@ -129,7 +129,7 @@ async function readJWatcherDiagnostics(page: Page): Promise<unknown> {
       };
     }).isolatedEnv;
     return {
-      jurisdictions: [...(env?.jReplicas?.entries() ?? [])].map(([key, replica]) => ({
+      jurisdictions: [...(env?.state?.jReplicas?.entries() ?? [])].map(([key, replica]) => ({
         key,
         name: replica.name,
         chainId: replica.chainId,
@@ -138,7 +138,7 @@ async function readJWatcherDiagnostics(page: Page): Promise<unknown> {
         depositoryAddress: replica.depositoryAddress,
         rpcs: replica.rpcs,
       })),
-      entities: [...(env?.eReplicas?.entries() ?? [])].map(([key, replica]) => {
+      entities: [...(env?.state?.eReplicas?.entries() ?? [])].map(([key, replica]) => {
         const finalizedHeight = Number(replica.state?.lastFinalizedJHeight ?? 0);
         return {
           key,

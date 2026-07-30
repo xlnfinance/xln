@@ -26,9 +26,9 @@ export async function outCap(page: Page, entityId: string, cpId: string): Promis
         }>;
       };
     }).isolatedEnv;
-    if (!env?.eReplicas) return null;
+    if (!env?.state?.eReplicas) return null;
 
-    for (const [replicaKey, replica] of env.eReplicas.entries()) {
+    for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
       if (!String(replicaKey).startsWith(`${entityId}:`)) continue;
       const account = replica?.state?.accounts?.get?.(cpId);
       const rawDelta = account?.deltas?.get?.(1);

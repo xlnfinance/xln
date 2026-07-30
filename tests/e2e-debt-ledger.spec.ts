@@ -192,13 +192,13 @@ async function readAccountProgress(
 }> {
   return page.evaluate(({ entityId, signerId, counterpartyId }) => {
     const env = (window as any).isolatedEnv;
-    if (!env?.eReplicas) return { exists: false, pendingFrame: false, currentHeight: 0 };
-    const key = Array.from(env.eReplicas.keys()).find((k: string) => {
+    if (!env?.state?.eReplicas) return { exists: false, pendingFrame: false, currentHeight: 0 };
+    const key = Array.from(env.state.eReplicas.keys()).find((k: string) => {
       const [eid, sid] = String(k).split(':');
       return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
         && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
     });
-    const rep = key ? env.eReplicas.get(key) : null;
+    const rep = key ? env.state.eReplicas.get(key) : null;
     const account = rep?.state?.accounts?.get?.(counterpartyId);
     return {
       exists: !!account,
@@ -272,7 +272,7 @@ async function readJBatchSnapshot(
 }> {
   return page.evaluate(({ entityId, signerId }) => {
     const env = (window as any).isolatedEnv;
-    if (!env?.eReplicas) {
+    if (!env?.state?.eReplicas) {
       return {
         pendingDisputeStarts: 0,
         pendingDisputeFinalizations: 0,
@@ -286,12 +286,12 @@ async function readJBatchSnapshot(
         recentMessages: [],
       };
     }
-    const key = Array.from(env.eReplicas.keys()).find((k: string) => {
+    const key = Array.from(env.state.eReplicas.keys()).find((k: string) => {
       const [eid, sid] = String(k).split(':');
       return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
         && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
     });
-    const rep = key ? env.eReplicas.get(key) : null;
+    const rep = key ? env.state.eReplicas.get(key) : null;
     const pending = rep?.state?.jBatchState?.batch;
     const sent = rep?.state?.jBatchState?.sentBatch?.batch;
     const history = Array.from(rep?.state?.jBlockChain || []).flatMap((block: any) =>
@@ -333,9 +333,9 @@ async function readAllBatchSnapshots(page: Page): Promise<Array<{
 }>> {
   return page.evaluate(() => {
     const env = (window as any).isolatedEnv;
-    if (!env?.eReplicas) return [];
+    if (!env?.state?.eReplicas) return [];
     const rows: Array<{ key: string; pendingCount: number; sentCount: number; historyCount: number }> = [];
-    for (const [key, replica] of env.eReplicas.entries()) {
+    for (const [key, replica] of env.state.eReplicas.entries()) {
       const batch = replica?.state?.jBatchState?.batch;
       const sent = replica?.state?.jBatchState?.sentBatch?.batch;
       const history = Array.from(replica?.state?.jBlockChain || []).flatMap((block: any) =>
@@ -396,7 +396,9 @@ async function readMoveUiDebug(page: Page): Promise<{
     const headerEntity = document.querySelector('.wallet-meta-value');
     const env = (window as typeof window & {
       isolatedEnv?: {
-        eReplicas?: Map<string, unknown>;
+        state?: {
+          eReplicas?: Map<string, unknown>;
+        };
       };
     }).isolatedEnv;
     return {
@@ -410,7 +412,7 @@ async function readMoveUiDebug(page: Page): Promise<{
       href: String(window.location.href || ''),
       readyState: String(document.readyState || ''),
       hasIsolatedEnv: !!env,
-      replicaCount: env?.eReplicas instanceof Map ? env.eReplicas.size : 0,
+      replicaCount: env?.state?.eReplicas instanceof Map ? env.state.eReplicas.size : 0,
     };
   });
 }
@@ -685,13 +687,13 @@ async function readAccountState(
 ): Promise<{ activeDispute: boolean; disputeTimeout: number }> {
   return page.evaluate(({ entityId, signerId, counterpartyId }) => {
     const env = (window as any).isolatedEnv;
-    if (!env?.eReplicas) return { activeDispute: false, disputeTimeout: 0 };
-    const key = Array.from(env.eReplicas.keys()).find((k: string) => {
+    if (!env?.state?.eReplicas) return { activeDispute: false, disputeTimeout: 0 };
+    const key = Array.from(env.state.eReplicas.keys()).find((k: string) => {
       const [eid, sid] = String(k).split(':');
       return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
         && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
     });
-    const rep = key ? env.eReplicas.get(key) : null;
+    const rep = key ? env.state.eReplicas.get(key) : null;
     const account = rep?.state?.accounts?.get?.(counterpartyId);
     return {
       activeDispute: !!account?.activeDispute,
@@ -806,13 +808,13 @@ async function readDebtSnapshotsForCounterparty(
 ): Promise<DebtSnapshot[]> {
   return page.evaluate(({ entityId, signerId, counterpartyId, tokenId }) => {
     const env = (window as any).isolatedEnv;
-    if (!env?.eReplicas) return [];
-    const key = Array.from(env.eReplicas.keys()).find((k: string) => {
+    if (!env?.state?.eReplicas) return [];
+    const key = Array.from(env.state.eReplicas.keys()).find((k: string) => {
       const [eid, sid] = String(k).split(':');
       return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
         && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
     });
-    const rep = key ? env.eReplicas.get(key) : null;
+    const rep = key ? env.state.eReplicas.get(key) : null;
     const ledgers = [
       ['out', rep?.state?.outDebtsByToken],
       ['in', rep?.state?.inDebtsByToken],
@@ -846,13 +848,13 @@ async function readAccountDeltaSnapshot(
 ): Promise<{ ondelta: string; offdelta: string; total: string } | null> {
   const raw = await page.evaluate(({ entityId, signerId, counterpartyId, tokenId }) => {
     const env = (window as any).isolatedEnv;
-    if (!env?.eReplicas) return null;
-    const key = Array.from(env.eReplicas.keys()).find((k: string) => {
+    if (!env?.state?.eReplicas) return null;
+    const key = Array.from(env.state.eReplicas.keys()).find((k: string) => {
       const [eid, sid] = String(k).split(':');
       return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
         && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
     });
-    const rep = key ? env.eReplicas.get(key) : null;
+    const rep = key ? env.state.eReplicas.get(key) : null;
     const account = rep?.state?.accounts?.get?.(counterpartyId);
     const delta = account?.deltas?.get?.(tokenId);
     if (!delta) return null;
@@ -1167,8 +1169,8 @@ async function openOutstandingDebtToken(page: Page, symbol = 'USDC'): Promise<vo
             : [],
         }));
       };
-      const replicas = env?.eReplicas?.entries
-        ? Array.from(env.eReplicas.entries()).map(([key, replica]: [unknown, any]) => ({
+      const replicas = env?.state?.eReplicas?.entries
+        ? Array.from(env.state.eReplicas.entries()).map(([key, replica]: [unknown, any]) => ({
             key: String(key || ''),
             entityId: String(replica?.state?.entityId || ''),
             out: summarizeLedger(replica?.state?.outDebtsByToken),

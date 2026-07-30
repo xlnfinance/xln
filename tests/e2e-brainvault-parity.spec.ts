@@ -35,15 +35,18 @@ type CanonicalEntityProbe = {
 
 type BrowserEntityEnv = {
   runtimeId?: string;
-  eReplicas?: Map<string, {
-    entityId?: string;
-    state?: {
+  state?: {
+    height?: number;
+    eReplicas?: Map<string, {
       entityId?: string;
-      height?: number;
-      profile?: { name?: string };
-      accounts?: Map<string, unknown>;
-    };
-  }>;
+      state?: {
+        entityId?: string;
+        height?: number;
+        profile?: { name?: string };
+        accounts?: Map<string, unknown>;
+      };
+    }>;
+  };
 };
 
 const CASES = [
@@ -212,7 +215,7 @@ async function waitForCanonicalProfile(page: Page, expectedProfileName: string):
       .find((element) => element.offsetParent !== null)?.textContent?.trim();
     if (error) throw new Error(`BRAINVAULT_START_FAILED:${error}`);
     const env = (window as typeof window & { isolatedEnv?: BrowserEntityEnv }).isolatedEnv;
-    for (const [replicaKey, replica] of env?.eReplicas?.entries?.() ?? []) {
+    for (const [replicaKey, replica] of env?.state?.eReplicas?.entries?.() ?? []) {
       const [keyEntityId = '', signerId = ''] = String(replicaKey).split(':');
       const entityId = String(replica?.state?.entityId || replica?.entityId || '').toLowerCase();
       if (replica?.state?.profile?.name !== profileName || entityId !== keyEntityId.toLowerCase()) continue;
@@ -249,13 +252,13 @@ async function readOnboardingRuntimeDiagnostics(page: Page): Promise<Record<stri
       jInputs: (input?.jInputs ?? []).map((input: any) => input?.jurisdictionName),
     });
     return {
-      runtimeHeight: env?.height ?? null,
+      runtimeHeight: env?.state?.height ?? null,
       runtimeMempool: summarizeInput(env?.runtimeMempool),
       history: (env?.history ?? []).slice(-12).map((frame: any) => ({
         height: frame?.height,
         input: summarizeInput(frame?.runtimeInput),
       })),
-      replicas: Array.from(env?.eReplicas?.entries?.() ?? []).map(([key, replica]: [string, any]) => ({
+      replicas: Array.from(env?.state?.eReplicas?.entries?.() ?? []).map(([key, replica]: [string, any]) => ({
         key,
         entityId: replica?.state?.entityId,
         height: replica?.state?.height,
@@ -308,14 +311,14 @@ async function startBrainvaultWallet(page: Page, expectedProfileName: string): P
         })),
       });
       return {
-        height: env?.height,
+        height: env?.state?.height,
         runtimeMempool: summarizeInput(env?.runtimeMempool),
         pendingOutputs: (env?.pendingOutputs ?? []).length,
         networkInbox: (env?.networkInbox ?? []).length,
         pendingNetworkOutputs: (env?.pendingNetworkOutputs ?? []).length,
         pendingCommittedJOutbox: env?.infrastructure?.pendingCommittedJOutbox?.length ?? 0,
         pendingJurisdictionImports: env?.infrastructure?.pendingJurisdictionImports?.size ?? 0,
-        replicas: Array.from(env?.eReplicas?.entries?.() ?? []).map(([key, replica]: [string, any]) => ({
+        replicas: Array.from(env?.state?.eReplicas?.entries?.() ?? []).map(([key, replica]: [string, any]) => ({
           key,
           height: replica?.state?.height,
           profileName: replica?.state?.profile?.name,

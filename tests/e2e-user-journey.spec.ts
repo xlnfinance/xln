@@ -147,7 +147,7 @@ async function readHubAccountSummary(page: Page): Promise<{
     const accounts: Array<{ entityId: string; counterpartyId: string; height: number; pending: boolean }> = [];
     const entityIds = new Set<string>();
     const committedEntityIds = new Set<string>();
-    for (const [key, rep] of env?.eReplicas?.entries?.() ?? []) {
+    for (const [key, rep] of env?.state?.eReplicas?.entries?.() ?? []) {
       const entityId = String(rep?.entityId || rep?.state?.entityId || String(key).split(':')[0] || '').toLowerCase();
       if (entityId) entityIds.add(entityId);
       for (const [counterpartyId, account] of rep.state?.accounts?.entries?.() ?? []) {
@@ -188,9 +188,9 @@ async function readPrimaryAccountProgress(page: Page): Promise<AccountProgress |
         }>;
       };
     }).isolatedEnv;
-    if (!env?.eReplicas) return null;
+    if (!env?.state?.eReplicas) return null;
 
-    for (const [key, replica] of env.eReplicas.entries()) {
+    for (const [key, replica] of env.state.eReplicas.entries()) {
       const [entityId, signerId] = String(key).split(':');
       if (!entityId || !signerId) continue;
 
@@ -253,10 +253,10 @@ async function readEntityIdleSnapshot(
         }>;
       };
     }).isolatedEnv;
-    if (!env?.eReplicas) throw new Error('E2E_IDLE_RUNTIME_MISSING');
+    if (!env?.state?.eReplicas) throw new Error('E2E_IDLE_RUNTIME_MISSING');
     const entity = targetEntityId.toLowerCase();
     const signer = targetSignerId.toLowerCase();
-    const replica = Array.from(env.eReplicas.values()).find((candidate) =>
+    const replica = Array.from(env.state.eReplicas.values()).find((candidate) =>
       String(candidate.entityId || candidate.state?.entityId || '').toLowerCase() === entity &&
       String(candidate.signerId || '').toLowerCase() === signer,
     );
@@ -264,7 +264,7 @@ async function readEntityIdleSnapshot(
     const jurisdiction = replica.state.config?.jurisdiction;
     const jurisdictionChainId = Number(jurisdiction?.chainId ?? 0);
     const jurisdictionDepository = String(jurisdiction?.depositoryAddress ?? '').toLowerCase();
-    const watcherMatches = Array.from(env.jReplicas?.values() ?? []).filter((candidate) => {
+    const watcherMatches = Array.from(env.state.jReplicas?.values() ?? []).filter((candidate) => {
       const chainId = Number(candidate.chainId ?? candidate.jadapter?.chainId ?? 0);
       const depository = String(
         candidate.depositoryAddress ??
@@ -322,7 +322,7 @@ async function readEntityIdleSnapshot(
         !replica.proposal &&
         !replica.lockedFrame &&
         accounts.every((account) => (account.mempool?.length ?? 0) === 0 && !account.pendingFrame),
-      runtimeHeight: Number(env.height ?? 0),
+      runtimeHeight: Number(env.state.height ?? 0),
       entityHeight: Number(replica.state.height ?? 0),
       projectedJHeight,
       watcherScannedJHeight,
@@ -383,12 +383,12 @@ async function ensureAnyHubAccountOpen(page: Page): Promise<void> {
         };
       };
     }).isolatedEnv;
-    if (!env?.eReplicas) return { ready: false, hubId: '' };
+    if (!env?.state?.eReplicas) return { ready: false, hubId: '' };
 
     let ready = false;
     let hubId = '';
 
-    for (const [key, rep] of env.eReplicas.entries()) {
+    for (const [key, rep] of env.state.eReplicas.entries()) {
       const [entityId] = String(key).split(':');
       if (!entityId) continue;
       if (rep?.state?.accounts instanceof Map) {

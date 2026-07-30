@@ -132,13 +132,15 @@ async function readActivePushWakeTarget(page: Page): Promise<{
     const env = (window as typeof window & {
       isolatedEnv?: {
         runtimeId?: string;
-        eReplicas?: Map<string, any>;
-        jReplicas?: Map<string, any>;
+        state?: {
+          eReplicas?: Map<string, any>;
+          jReplicas?: Map<string, any>;
+        };
       };
     }).isolatedEnv;
-    if (!env?.eReplicas || !env?.jReplicas) throw new Error('PUSH_E2E_ENV_UNAVAILABLE');
+    if (!env?.state?.eReplicas || !env?.state?.jReplicas) throw new Error('PUSH_E2E_ENV_UNAVAILABLE');
     const runtimeId = String(env.runtimeId || '').toLowerCase();
-    for (const [rawKey, replica] of env.eReplicas.entries()) {
+    for (const [rawKey, replica] of env.state.eReplicas.entries()) {
       const [entityId, signerId] = String(rawKey).split(':');
       if (!entityId?.startsWith('0x') || entityId.length !== 66 || !signerId) continue;
       if (runtimeId && String(signerId).toLowerCase() !== runtimeId) continue;
@@ -146,7 +148,7 @@ async function readActivePushWakeTarget(page: Page): Promise<{
       const chainId = Number(jurisdiction.chainId || 0);
       const depository = String(jurisdiction.depositoryAddress || '').toLowerCase();
       const name = String(jurisdiction.name || '');
-      for (const jr of env.jReplicas.values()) {
+      for (const jr of env.state.jReplicas.values()) {
         const jrName = String(jr?.name || '');
         const jrChainId = Number(jr?.chainId || jr?.jadapter?.chainId || 0);
         const jrDepository = String(jr?.depositoryAddress || jr?.contracts?.depository || '').toLowerCase();
@@ -322,7 +324,7 @@ async function readAccountMeta(
 }> {
   return await page.evaluate(({ entityId, signerId, counterpartyId }) => {
     const env = (window as any).isolatedEnv;
-    if (!env?.eReplicas) {
+    if (!env?.state?.eReplicas) {
       return {
         frameHeight: 0,
         hasCounterpartyDisputeProof: false,
@@ -331,12 +333,12 @@ async function readAccountMeta(
         counterpartyDisputeProofNonce: null,
       };
     }
-    const key = Array.from(env.eReplicas.keys()).find((k: string) => {
+    const key = Array.from(env.state.eReplicas.keys()).find((k: string) => {
       const [eid, sid] = String(k).split(':');
       return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
         && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
     });
-    const rep = key ? env.eReplicas.get(key) : null;
+    const rep = key ? env.state.eReplicas.get(key) : null;
     const account = rep?.state?.accounts?.get?.(counterpartyId);
     return {
       frameHeight: Number(account?.currentHeight || 0),
@@ -420,12 +422,12 @@ async function readAccountState(
 ): Promise<{ activeDispute: boolean; jBatchDisputeStarts: number }> {
   return await page.evaluate(({ entityId, signerId, counterpartyId }) => {
     const env = (window as any).isolatedEnv;
-    const key = Array.from(env?.eReplicas?.keys?.() || []).find((k: string) => {
+    const key = Array.from(env?.state?.eReplicas?.keys?.() || []).find((k: string) => {
       const [eid, sid] = String(k).split(':');
       return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
         && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
     });
-    const rep = key ? env.eReplicas.get(key) : null;
+    const rep = key ? env.state.eReplicas.get(key) : null;
     const account = rep?.state?.accounts?.get?.(counterpartyId);
     const batch = rep?.state?.jBatchState?.batch;
     return {
@@ -442,12 +444,12 @@ async function readJBatchSnapshot(
 ): Promise<{ pendingDisputeStarts: number; batchHistoryCount: number; lastBatchStatus: string }> {
   return await page.evaluate(({ entityId, signerId }) => {
     const env = (window as any).isolatedEnv;
-    const key = Array.from(env?.eReplicas?.keys?.() || []).find((k: string) => {
+    const key = Array.from(env?.state?.eReplicas?.keys?.() || []).find((k: string) => {
       const [eid, sid] = String(k).split(':');
       return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
         && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
     });
-    const rep = key ? env.eReplicas.get(key) : null;
+    const rep = key ? env.state.eReplicas.get(key) : null;
     const pending = rep?.state?.jBatchState?.batch;
     const history = Array.from(rep?.state?.jBlockChain || []).flatMap((block: any) =>
       Array.from(block?.events || []).filter((event: any) =>

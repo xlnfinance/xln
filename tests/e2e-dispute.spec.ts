@@ -96,13 +96,15 @@ async function ensureHubAccountOpen(
     const env = (window as typeof window & {
       isolatedEnv?: {
         runtimeId?: string;
-        eReplicas?: Map<string, unknown>;
+        state?: {
+          eReplicas?: Map<string, unknown>;
+        };
       };
     }).isolatedEnv;
-    if (!env?.eReplicas) return null;
+    if (!env?.state?.eReplicas) return null;
 
     const runtimeId = String(env.runtimeId || '').toLowerCase();
-    for (const replicaKey of env.eReplicas.keys()) {
+    for (const replicaKey of env.state.eReplicas.keys()) {
       const [entityId, signerId] = String(replicaKey).split(':');
       if (!entityId?.startsWith('0x') || entityId.length !== 66 || !signerId) continue;
       if (runtimeId && String(signerId).toLowerCase() !== runtimeId) continue;
@@ -123,9 +125,9 @@ async function ensureHubAccountOpen(
 async function readLocalReserveState(page: Page, entityId: string, opts?: { allowUnavailable?: boolean }): Promise<bigint> {
   const value = await page.evaluate(async ({ entityId }) => {
     const env = (window as any).isolatedEnv;
-    if (!env?.eReplicas) return null;
+    if (!env?.state?.eReplicas) return null;
     const entityLower = String(entityId || '').toLowerCase();
-    for (const [key, rep] of env.eReplicas.entries()) {
+    for (const [key, rep] of env.state.eReplicas.entries()) {
       const [eid] = String(key).split(':');
       if (String(eid || '').toLowerCase() !== entityLower) continue;
       const reserves = rep?.state?.reserves;
@@ -156,9 +158,9 @@ async function readOnchainReserveViaAnvil(
   const apiBase = await getActiveApiBase(page);
   const jurisdiction = await page.evaluate(({ entityId }) => {
     const env = (window as any).isolatedEnv;
-    if (!env?.eReplicas) return null;
+    if (!env?.state?.eReplicas) return null;
     const entityLower = String(entityId || '').toLowerCase();
-    for (const [key, rep] of env.eReplicas.entries()) {
+    for (const [key, rep] of env.state.eReplicas.entries()) {
       const [eid] = String(key).split(':');
       if (String(eid || '').toLowerCase() !== entityLower) continue;
       const config = rep?.state?.config?.jurisdiction || null;
@@ -212,7 +214,7 @@ async function readAccountState(
 }> {
   return await page.evaluate(async ({ entityId, signerId, counterpartyId }) => {
     const env = (window as any).isolatedEnv;
-    if (!env?.eReplicas) {
+    if (!env?.state?.eReplicas) {
       return {
         exists: false,
         status: '',
@@ -223,12 +225,12 @@ async function readAccountState(
         jBatchDisputeFinalizations: 0,
       };
     }
-    const key = Array.from(env.eReplicas.keys()).find((k: string) => {
+    const key = Array.from(env.state.eReplicas.keys()).find((k: string) => {
       const [eid, sid] = String(k).split(':');
       return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
         && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
     });
-    const rep = key ? env.eReplicas.get(key) : null;
+    const rep = key ? env.state.eReplicas.get(key) : null;
     const account = rep?.state?.accounts?.get?.(counterpartyId);
     const batch = rep?.state?.jBatchState?.batch;
     return {
@@ -361,7 +363,7 @@ async function readAccountMeta(
 }> {
   return await page.evaluate(({ entityId, signerId, counterpartyId }) => {
     const env = (window as any).isolatedEnv;
-    if (!env?.eReplicas) {
+    if (!env?.state?.eReplicas) {
       return {
         frameHeight: 0,
         hasCounterpartyDisputeProof: false,
@@ -370,12 +372,12 @@ async function readAccountMeta(
         counterpartyDisputeProofNonce: null,
       };
     }
-    const key = Array.from(env.eReplicas.keys()).find((k: string) => {
+    const key = Array.from(env.state.eReplicas.keys()).find((k: string) => {
       const [eid, sid] = String(k).split(':');
       return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
         && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
     });
-    const rep = key ? env.eReplicas.get(key) : null;
+    const rep = key ? env.state.eReplicas.get(key) : null;
     const account = rep?.state?.accounts?.get?.(counterpartyId);
     return {
       frameHeight: Number(account?.currentHeight || 0),
@@ -399,13 +401,13 @@ async function readAccountCollateralState(
 ): Promise<bigint> {
   const raw = await page.evaluate(({ entityId, signerId, counterpartyId, tokenId }) => {
     const env = (window as any).isolatedEnv;
-    if (!env?.eReplicas) return '0';
-    const key = Array.from(env.eReplicas.keys()).find((k: string) => {
+    if (!env?.state?.eReplicas) return '0';
+    const key = Array.from(env.state.eReplicas.keys()).find((k: string) => {
       const [eid, sid] = String(k).split(':');
       return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
         && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
     });
-    const rep = key ? env.eReplicas.get(key) : null;
+    const rep = key ? env.state.eReplicas.get(key) : null;
     const account = rep?.state?.accounts?.get?.(counterpartyId);
     const delta = account?.deltas?.get?.(tokenId);
     return String(delta?.collateral || '0');
@@ -428,23 +430,25 @@ async function readAccountWithdrawableCollateralState(
       };
     };
     const env = runtimeWindow.isolatedEnv as {
-      eReplicas?: Map<string, {
-        state?: {
-          accounts?: Map<string, {
-            leftEntity?: string;
-            rightEntity?: string;
-            deltas?: Map<number, unknown>;
-          }>;
-        };
-      }>;
+      state?: {
+        eReplicas?: Map<string, {
+          state?: {
+            accounts?: Map<string, {
+              leftEntity?: string;
+              rightEntity?: string;
+              deltas?: Map<number, unknown>;
+            }>;
+          };
+        }>;
+      };
     } | undefined;
-    if (!env?.eReplicas) return '0';
-    const key = Array.from(env.eReplicas.keys()).find((k: string) => {
+    if (!env?.state?.eReplicas) return '0';
+    const key = Array.from(env.state.eReplicas.keys()).find((k: string) => {
       const [eid, sid] = String(k).split(':');
       return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
         && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
     });
-    const replica = key ? env.eReplicas.get(key) : null;
+    const replica = key ? env.state.eReplicas.get(key) : null;
     const account = replica?.state?.accounts?.get?.(counterpartyId);
     const delta = account?.deltas?.get?.(tokenId);
     const deriveDelta = runtimeWindow.XLN?.deriveDelta;
@@ -494,16 +498,16 @@ async function readAccountProgress(
     };
 
     const env = (window as any).isolatedEnv;
-    if (!env?.eReplicas) {
+    if (!env?.state?.eReplicas) {
       return { exists: false, currentHeight: 0, pendingFrame: false };
     }
 
-    const key = Array.from(env.eReplicas.keys()).find((k: string) => {
+    const key = Array.from(env.state.eReplicas.keys()).find((k: string) => {
       const [eid, sid] = String(k).split(':');
       return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
         && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
     });
-    const rep = key ? env.eReplicas.get(key) : null;
+    const rep = key ? env.state.eReplicas.get(key) : null;
     const account = findAccount(rep?.state?.accounts, entityId, counterpartyId);
 
     return {
@@ -529,13 +533,13 @@ async function readAccountTxTypePresence(
 ): Promise<{ mempool: boolean; pending: boolean; history: boolean }> {
   return await page.evaluate(({ entityId, signerId, counterpartyId, txType }) => {
     const env = (window as any).isolatedEnv;
-    if (!env?.eReplicas) return { mempool: false, pending: false, history: false };
-    const key = Array.from(env.eReplicas.keys()).find((k: string) => {
+    if (!env?.state?.eReplicas) return { mempool: false, pending: false, history: false };
+    const key = Array.from(env.state.eReplicas.keys()).find((k: string) => {
       const [eid, sid] = String(k).split(':');
       return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
         && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
     });
-    const rep = key ? env.eReplicas.get(key) : null;
+    const rep = key ? env.state.eReplicas.get(key) : null;
     const account = rep?.state?.accounts?.get?.(counterpartyId);
     const hasMempool = Array.isArray(account?.mempool) && account.mempool.some((tx: any) => String(tx?.type || '') === txType);
     const hasPending = Array.isArray(account?.pendingFrame?.accountTxs)
@@ -893,7 +897,7 @@ async function seedDisputePreconditions(
         const env = (window as any).isolatedEnv;
         if (!env) throw new Error('isolatedEnv missing');
         const runtimeId = String(env.runtimeId || '').toLowerCase();
-        const repKey = Array.from(env.eReplicas?.keys?.() || []).find((k: string) => {
+        const repKey = Array.from(env.state.eReplicas?.keys?.() || []).find((k: string) => {
           const [eid, sid] = String(k).split(':');
           return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
             && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
@@ -1113,7 +1117,7 @@ async function readDisputeDebug(
 }> {
   return await page.evaluate(({ entityId, signerId, counterpartyId }) => {
     const env = (window as any).isolatedEnv;
-    if (!env?.eReplicas) {
+    if (!env?.state?.eReplicas) {
       return {
         status: '',
         activeDispute: false,
@@ -1123,12 +1127,12 @@ async function readDisputeDebug(
         hasProofHanko: false,
       };
     }
-    const key = Array.from(env.eReplicas.keys()).find((k: string) => {
+    const key = Array.from(env.state.eReplicas.keys()).find((k: string) => {
       const [eid, sid] = String(k).split(':');
       return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
         && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
     });
-    const rep = key ? env.eReplicas.get(key) : null;
+    const rep = key ? env.state.eReplicas.get(key) : null;
     const account = rep?.state?.accounts?.get?.(counterpartyId);
     return {
       status: String(account?.status || ''),
@@ -1182,7 +1186,7 @@ async function readJBatchSnapshot(
 }> {
   return await page.evaluate(({ entityId, signerId }) => {
     const env = (window as any).isolatedEnv;
-    if (!env?.eReplicas) {
+    if (!env?.state?.eReplicas) {
       return {
         pendingDisputeStarts: 0,
         pendingReserveToCollateral: 0,
@@ -1214,12 +1218,12 @@ async function readJBatchSnapshot(
       };
     }
 
-    const key = Array.from(env.eReplicas.keys()).find((k: string) => {
+    const key = Array.from(env.state.eReplicas.keys()).find((k: string) => {
       const [eid, sid] = String(k).split(':');
       return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
         && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
     });
-    const rep = key ? env.eReplicas.get(key) : null;
+    const rep = key ? env.state.eReplicas.get(key) : null;
     const pending = rep?.state?.jBatchState?.batch;
     const sent = rep?.state?.jBatchState?.sentBatch?.batch;
     const history = Array.from(rep?.state?.jBlockChain || []).flatMap((block: any) =>
@@ -1237,7 +1241,7 @@ async function readJBatchSnapshot(
     const last = history.length > 0 ? history[history.length - 1] : null;
     const lastOps = (last?.operations && typeof last.operations === 'object') ? last.operations : {};
     const jurisdiction = rep?.state?.config?.jurisdiction;
-    const jReplicas = Array.from(env.jReplicas?.values?.() || []).map((jr: any) => ({
+    const jReplicas = Array.from(env.state.jReplicas?.values?.() || []).map((jr: any) => ({
       name: String(jr?.name || ''),
       depositoryAddress: String(jr?.depositoryAddress || jr?.contracts?.depository || ''),
       entityProviderAddress: String(jr?.entityProviderAddress || jr?.contracts?.entityProvider || ''),
@@ -1305,10 +1309,12 @@ async function readSettlementWorkspaceSnapshot(
   return await page.evaluate(({ entityId, signerId, counterpartyId }) => {
     const env = (window as Window & {
       isolatedEnv?: {
-        eReplicas?: Map<string, { state?: { accounts?: Map<string, { settlementWorkspace?: unknown }> } }>;
+        state?: {
+          eReplicas?: Map<string, { state?: { accounts?: Map<string, { settlementWorkspace?: unknown }> } }>;
+        };
       };
     }).isolatedEnv;
-    const replicas = env?.eReplicas;
+    const replicas = env?.state?.eReplicas;
     if (!(replicas instanceof Map)) {
       return { exists: false, status: '', memo: '', version: 0, opTypes: [] };
     }
@@ -1517,7 +1523,7 @@ test.describe('E2E Dispute Flow', () => {
       await page.reload({ waitUntil: 'domcontentloaded' });
       await page.waitForFunction(() => {
         const env = (window as any).isolatedEnv;
-        return !!env?.runtimeId && Number(env?.eReplicas?.size || 0) > 0;
+        return !!env?.runtimeId && Number(env?.state?.eReplicas?.size || 0) > 0;
       }, { timeout: 60_000 });
     });
     await timedStep('dispute.reload_assert_reserve', async () => {

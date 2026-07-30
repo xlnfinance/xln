@@ -187,8 +187,8 @@ async function collectProfileOnboardingSurfaceDiagnostics(page: Page): Promise<R
         .filter(visible)
         .map((element) => String(element.textContent || '').trim()),
       runtimeId: String(env?.runtimeId || ''),
-      runtimeHeight: Number(env?.height || 0),
-      replicaCount: Number(env?.eReplicas?.size || 0),
+      runtimeHeight: Number(env?.state?.height || 0),
+      replicaCount: Number(env?.state?.eReplicas?.size || 0),
       bodyText: String(document.body?.innerText || '').slice(0, 1_200),
     };
   }).catch((diagnosticError) => ({ diagnosticError: String(diagnosticError) }));
@@ -375,7 +375,7 @@ async function waitForRuntimeBootstrap(
           };
         }).isolatedEnv;
         const runtimeId = String(env?.runtimeId || '').toLowerCase();
-        const replicaCount = Number(env?.eReplicas?.size || 0);
+        const replicaCount = Number(env?.state?.eReplicas?.size || 0);
 
         const selectedTrigger = document.querySelector<HTMLElement>('[data-testid="context-current"]');
         const selectedRuntimeId = String(selectedTrigger?.dataset?.runtimeId || '').toLowerCase();
@@ -445,7 +445,7 @@ async function waitForActiveRuntimeId(page: Page, runtimeId: string): Promise<vo
     const envRuntimeId = String(env?.runtimeId || '').toLowerCase();
     if (envRuntimeId) {
       return envRuntimeId === String(targetRuntimeId || '').toLowerCase()
-        && Number(env?.eReplicas?.size || 0) > 0
+        && Number(env?.state?.eReplicas?.size || 0) > 0
         && (!selectedRuntimeId || String(selectedRuntimeId || '').toLowerCase() === envRuntimeId);
     }
     return String(selectedRuntimeId || '').toLowerCase() === String(targetRuntimeId || '').toLowerCase();
@@ -472,7 +472,7 @@ async function waitForAnyRuntimeReady(page: Page): Promise<string> {
         eReplicas?: Map<string, unknown>;
       };
     }).isolatedEnv;
-    if (!env?.runtimeId || Number(env?.eReplicas?.size || 0) <= 0) return null;
+    if (!env?.runtimeId || Number(env?.state?.eReplicas?.size || 0) <= 0) return null;
     return String(env.runtimeId).toLowerCase();
   }, { timeout: RUNTIME_READY_TIMEOUT }).then(async (handle) => {
     const value = await handle.jsonValue();
@@ -505,7 +505,7 @@ async function waitForNextRuntimeReady(page: Page, previousRuntimeId: string | n
         && selectedRuntimeId !== previous
         && /^0x[a-fA-F0-9]{64}$/.test(selectedEntityId)
         && /^0x[a-fA-F0-9]{40}$/.test(selectedSignerId)
-        && Number(env?.eReplicas?.size || 0) > 0
+        && Number(env?.state?.eReplicas?.size || 0) > 0
       ) {
         return runtimeId;
       }
@@ -518,7 +518,7 @@ async function waitForNextRuntimeReady(page: Page, previousRuntimeId: string | n
       ) {
         return selectedRuntimeId;
       }
-      if (!runtimeId || Number(env?.eReplicas?.size || 0) <= 0) return null;
+      if (!runtimeId || Number(env?.state?.eReplicas?.size || 0) <= 0) return null;
       if (previous && runtimeId === previous) return null;
       return runtimeId;
     }, { priorRuntimeId: previousRuntimeId }, { timeout: RUNTIME_READY_TIMEOUT }).then(async (handle) => {
@@ -585,10 +585,10 @@ async function waitForNextRuntimeReady(page: Page, previousRuntimeId: string | n
         selectedEntityId: String(selectedTrigger?.dataset?.entityId || ''),
         selectedSignerId: String(selectedTrigger?.dataset?.signerId || ''),
         envRuntimeId: String(env?.runtimeId || ''),
-        envHeight: Number(env?.height || 0),
-        envReplicaCount: Number(env?.eReplicas?.size || 0),
-        envJurisdictionCount: Number(env?.jReplicas?.size || 0),
-        envReplicaKeys: env?.eReplicas ? Array.from(env.eReplicas.keys()).slice(0, 8) : [],
+        envHeight: Number(env?.state?.height || 0),
+        envReplicaCount: Number(env?.state?.eReplicas?.size || 0),
+        envJurisdictionCount: Number(env?.state?.jReplicas?.size || 0),
+        envReplicaKeys: env?.state?.eReplicas ? Array.from(env.state.eReplicas.keys()).slice(0, 8) : [],
         localStorageSummary,
       };
     }).catch((diagnosticError) => ({ evaluationError: String(diagnosticError) }));
@@ -643,7 +643,7 @@ async function waitForReadyAfterCreate(
           && selectedRuntimeId !== previous
           && /^0x[a-fA-F0-9]{64}$/.test(selectedEntityId)
           && /^0x[a-fA-F0-9]{40}$/.test(selectedSignerId)
-          && Number(env?.eReplicas?.size || 0) > 0
+          && Number(env?.state?.eReplicas?.size || 0) > 0
         ) {
           return runtimeId;
         }
@@ -656,7 +656,7 @@ async function waitForReadyAfterCreate(
         ) {
           return selectedRuntimeId;
         }
-        if (!runtimeId || Number(env?.eReplicas?.size || 0) <= 0) return null;
+        if (!runtimeId || Number(env?.state?.eReplicas?.size || 0) <= 0) return null;
         if (previous && runtimeId === previous) return null;
         return runtimeId;
       }, { priorRuntimeId: previousRuntimeId }).catch(() => null);
@@ -765,7 +765,7 @@ async function completeProfileOnboardingIfVisible(page: Page, label: string): Pr
             .filter((element) => element.offsetParent !== null)
             .map((element) => String(element.textContent ?? '').trim()),
           runtimeId: String(env?.runtimeId ?? ''),
-          height: Number(env?.height ?? 0),
+          height: Number(env?.state?.height ?? 0),
           runtimeMempool: inputSummary(env?.runtimeMempool),
           pendingOutputs: (env?.pendingOutputs ?? []).map(inputSummary),
           networkInbox: (env?.networkInbox ?? []).map(inputSummary),
@@ -781,7 +781,7 @@ async function completeProfileOnboardingIfVisible(page: Page, label: string): Pr
             senderActive: env?.infrastructure?.receivedReliableReceiptLedger?.size ?? 0,
             senderTerminal: env?.infrastructure?.receivedReliableTerminalWatermarks?.size ?? 0,
           },
-          replicas: Array.from(env?.eReplicas?.entries?.() ?? []).map(([key, replica]: [string, any]) => ({
+          replicas: Array.from(env?.state?.eReplicas?.entries?.() ?? []).map(([key, replica]: [string, any]) => ({
             key,
             height: Number(replica?.state?.height ?? 0),
             mempool: (replica?.mempool ?? []).map((tx: any) => String(tx?.type ?? '')),
@@ -1209,12 +1209,12 @@ export async function createRuntimeIdentity(
           }>;
         };
       }).isolatedEnv;
-      if (!env?.eReplicas) return null;
+      if (!env?.state?.eReplicas) return null;
       const activeRuntimeId = String(env.runtimeId || '').toLowerCase();
       if (activeRuntimeId && activeRuntimeId !== String(runtimeId || '').toLowerCase()) return null;
       const expectedJurisdiction = String(jurisdiction || '').trim().toLowerCase();
       const candidates: Array<{ entityId: string; signerId: string; runtimeId: string; jurisdiction: string }> = [];
-      for (const [replicaKey, replica] of env.eReplicas.entries()) {
+      for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
         const [entityId, signerId] = String(replicaKey).split(':');
         if (!entityId?.startsWith('0x') || entityId.length !== 66 || !signerId) continue;
         if (String(signerId).toLowerCase() !== String(runtimeId || '').toLowerCase()) continue;
@@ -1257,7 +1257,7 @@ export async function createRuntimeIdentity(
       }).isolatedEnv;
       return {
         envRuntimeId: String(env?.runtimeId || ''),
-        replicaKeys: env?.eReplicas ? Array.from(env.eReplicas.entries()).map(([key, replica]) => ({
+        replicaKeys: env?.state?.eReplicas ? Array.from(env.state.eReplicas.entries()).map(([key, replica]) => ({
           key,
           entityId: String(replica?.state?.entityId || ''),
           jurisdiction: String(replica?.state?.config?.jurisdiction?.name || replica?.position?.jurisdiction || ''),
@@ -1289,8 +1289,8 @@ export async function getActiveEntity(page: Page): Promise<{ entityId: string; s
       };
     }).isolatedEnv;
     const runtimeId = String(env?.runtimeId || '').toLowerCase();
-    if (runtimeId && env?.eReplicas) {
-      for (const [replicaKey, replica] of env.eReplicas.entries()) {
+    if (runtimeId && env?.state?.eReplicas) {
+      for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
         const [entityId, signerId] = String(replicaKey).split(':');
         const normalizedSignerId = String(signerId || '').toLowerCase();
         if (!entityId?.startsWith('0x') || entityId.length !== 66 || !signerId) continue;
@@ -1323,9 +1323,9 @@ export async function getActiveEntity(page: Page): Promise<{ entityId: string; s
       };
     }
 
-    if (!env?.eReplicas) return null;
+    if (!env?.state?.eReplicas) return null;
     const validReplicas: Array<{ entityId: string; signerId: string; jurisdiction?: string }> = [];
-    for (const [replicaKey, replica] of env.eReplicas.entries()) {
+    for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
       const [entityId, signerId] = String(replicaKey).split(':');
       const normalizedSignerId = String(signerId || '').toLowerCase();
       if (!entityId?.startsWith('0x') || entityId.length !== 66 || !signerId) continue;

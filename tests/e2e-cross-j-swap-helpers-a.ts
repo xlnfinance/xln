@@ -119,8 +119,10 @@ export type SyntheticJEventInput = {
 export type CrossRuntimeWindow = Window & {
   isolatedEnv?: {
     runtimeId?: string;
-    eReplicas?: Map<string, any>;
-    jReplicas?: Map<string, any>;
+    state: {
+      eReplicas: Map<string, any>;
+      jReplicas: Map<string, any>;
+    };
   };
   __xln?: {
     instance?: any;
@@ -448,7 +450,7 @@ export async function injectSyntheticJEventThroughWatcher(
 
       const entityId = String(identity.entityId || '').toLowerCase();
       const signerId = String(identity.signerId || '').toLowerCase();
-      const entityReplica = [...(env.eReplicas?.values?.() || [])].find(
+      const entityReplica = [...(env.state.eReplicas?.values?.() || [])].find(
         (replica: any) =>
           String(replica?.state?.entityId || '').toLowerCase() === entityId &&
           String(replica?.signerId || '').toLowerCase() === signerId,
@@ -473,7 +475,7 @@ export async function injectSyntheticJEventThroughWatcher(
       const blockNumber = scannedHeight + 1;
       const expectedChainId = Number(jurisdiction.chainId);
       const expectedDepository = String(jurisdiction.depositoryAddress || '').toLowerCase();
-      const watcherMatches = [...(env.jReplicas?.values?.() || [])].filter((replica: any) => {
+      const watcherMatches = [...(env.state.jReplicas?.values?.() || [])].filter((replica: any) => {
         const chainId = Number(replica?.chainId ?? replica?.jadapter?.chainId);
         const depository = String(
           replica?.depositoryAddress ||
@@ -601,7 +603,7 @@ export async function importRpc2SiblingEntity(
           replica?.jadapter?.entityProvider &&
           typeof replica?.jadapter?.submitTx === 'function',
         );
-      if (!hasConnectedAdapter(env.jReplicas?.get(jurisdictionName))) {
+      if (!hasConnectedAdapter(env.state.jReplicas?.get(jurisdictionName))) {
         runtimeModule.enqueueRuntimeInput(env, {
           runtimeTxs: [
             {
@@ -646,7 +648,7 @@ export async function importRpc2SiblingEntity(
       async () =>
         page.evaluate(jurisdictionName => {
           const env = (window as CrossRuntimeWindow).isolatedEnv;
-          const replica = env?.jReplicas?.get(jurisdictionName);
+          const replica = env?.state.jReplicas?.get(jurisdictionName);
           return Boolean(
             replica?.jadapter?.addresses?.depository &&
             replica?.jadapter?.addresses?.entityProvider &&
@@ -681,7 +683,7 @@ export async function importRpc2SiblingEntity(
       const entityId = runtimeModule.generateLazyEntityId([signer.address], 1n).toLowerCase();
       const { config } = runtimeModule.createLazyEntity(`${label}-rpc2`, [signer.address], 1n, jurisdiction);
       const replicaKey = `${entityId}:${signer.address}`.toLowerCase();
-      if (!env.eReplicas?.has(replicaKey)) {
+      if (!env.state.eReplicas?.has(replicaKey)) {
         runtimeModule.enqueueRuntimeInput(env, {
           runtimeTxs: [
             {
@@ -709,7 +711,7 @@ export async function importRpc2SiblingEntity(
       async () =>
         page.evaluate(({ entityId, signerId }) => {
           const env = (window as CrossRuntimeWindow).isolatedEnv;
-          return Boolean(env?.eReplicas?.has(`${entityId}:${signerId}`.toLowerCase()));
+          return Boolean(env?.state.eReplicas?.has(`${entityId}:${signerId}`.toLowerCase()));
         }, sibling),
       {
         timeout: 60_000,
@@ -740,7 +742,7 @@ export async function waitForAccountReady(
         page.evaluate(
           ({ identity, hubId, tokenIds }) => {
             const env = (window as CrossRuntimeWindow).isolatedEnv;
-            const replica = env?.eReplicas?.get(`${identity.entityId}:${identity.signerId}`.toLowerCase());
+            const replica = env?.state.eReplicas?.get(`${identity.entityId}:${identity.signerId}`.toLowerCase());
             const normalizeEntityId = (value: unknown): string =>
               String(value || '')
                 .trim()
@@ -863,7 +865,7 @@ export async function ensureDirectHubAccount(
   const hasAccount = await page.evaluate(
     ({ identity, hubId }) => {
       const env = (window as CrossRuntimeWindow).isolatedEnv;
-      const replica = env?.eReplicas?.get(`${identity.entityId}:${identity.signerId}`.toLowerCase());
+      const replica = env?.state.eReplicas?.get(`${identity.entityId}:${identity.signerId}`.toLowerCase());
       return Boolean(replica?.state?.accounts?.get(hubId));
     },
     { identity, hubId },
@@ -888,7 +890,7 @@ export async function ensureDirectHubAccount(
     page.evaluate(
       ({ identity, hubId, tokenId, amount }) => {
         const env = (window as CrossRuntimeWindow).isolatedEnv;
-        const replica = env?.eReplicas?.get(`${identity.entityId}:${identity.signerId}`.toLowerCase());
+        const replica = env?.state.eReplicas?.get(`${identity.entityId}:${identity.signerId}`.toLowerCase());
         const normalizeEntityId = (value: unknown): string =>
           String(value || '')
             .trim()
@@ -977,8 +979,8 @@ export async function waitForDefaultJurisdictionReplicas(page: Page, label: stri
       async () =>
         page.evaluate(() => {
           const env = (window as CrossRuntimeWindow).isolatedEnv;
-          const jurisdictions = Array.from(env?.jReplicas?.keys?.() || []).map(name => String(name));
-          const replicas = Array.from(env?.jReplicas?.values?.() || []);
+          const jurisdictions = Array.from(env?.state.jReplicas?.keys?.() || []).map(name => String(name));
+          const replicas = Array.from(env?.state.jReplicas?.values?.() || []);
           const isConnected = (replica: any): boolean =>
             Boolean(
               replica?.jadapter?.addresses?.depository &&
@@ -987,7 +989,7 @@ export async function waitForDefaultJurisdictionReplicas(page: Page, label: stri
               replica?.jadapter?.entityProvider &&
               typeof replica?.jadapter?.submitTx === 'function',
             );
-          const entities = Array.from(env?.eReplicas?.values?.() || []).map((replica: any) => ({
+          const entities = Array.from(env?.state.eReplicas?.values?.() || []).map((replica: any) => ({
             entityId: String(replica?.state?.entityId || replica?.entityId || ''),
             signerId: String(replica?.signerId || ''),
             jurisdiction: String(replica?.state?.config?.jurisdiction?.name || replica?.position?.jurisdiction || ''),
@@ -1028,7 +1030,7 @@ export async function waitForDefaultJurisdictionReplicas(page: Page, label: stri
         page.evaluate(() => {
           const env = (window as CrossRuntimeWindow).isolatedEnv;
           const entityJurisdictions = new Set(
-            Array.from(env?.eReplicas?.values?.() || [])
+            Array.from(env?.state.eReplicas?.values?.() || [])
               .map((replica: any) =>
                 String(replica?.state?.config?.jurisdiction?.name || replica?.position?.jurisdiction || '')
                   .trim()
@@ -1038,7 +1040,7 @@ export async function waitForDefaultJurisdictionReplicas(page: Page, label: stri
           );
           return {
             entityJurisdictionCount: entityJurisdictions.size,
-            entities: Number(env?.eReplicas?.size || 0),
+            entities: Number(env?.state.eReplicas?.size || 0),
           };
         }),
       {
@@ -1109,9 +1111,9 @@ export async function createRuntimeIdentityViaStore(
       async () =>
         page.evaluate(runtimeId => {
           const env = (window as CrossRuntimeWindow).isolatedEnv;
-          if (!env?.eReplicas) return null;
+          if (!env?.state.eReplicas) return null;
           const runtimeNeedle = String(runtimeId || '').toLowerCase();
-          for (const [key, replica] of env.eReplicas.entries()) {
+          for (const [key, replica] of env.state.eReplicas.entries()) {
             const [entityId, signerId] = String(key || '').split(':');
             if (String(signerId || '').toLowerCase() !== runtimeNeedle) continue;
             return {
@@ -1133,7 +1135,7 @@ export async function createRuntimeIdentityViaStore(
   const identity = await page.evaluate(runtimeId => {
     const env = (window as CrossRuntimeWindow).isolatedEnv;
     const runtimeNeedle = String(runtimeId || '').toLowerCase();
-    for (const [key, replica] of env?.eReplicas?.entries?.() || []) {
+    for (const [key, replica] of env?.state.eReplicas?.entries?.() || []) {
       const [entityId, signerId] = String(key || '').split(':');
       if (String(signerId || '').toLowerCase() !== runtimeNeedle) continue;
       return {
@@ -1202,14 +1204,14 @@ export async function accountCapacity(
   const delta = await page.evaluate(
     ({ entityId, counterpartyId, tokenId }) => {
       const env = (window as CrossRuntimeWindow).isolatedEnv;
-      if (!env?.eReplicas) return null;
+      if (!env?.state.eReplicas) return null;
       const readBig = (value: unknown): string => {
         if (typeof value === 'bigint') return value.toString();
         if (typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value)) return String(value);
         if (typeof value === 'string' && /^-?\d+$/.test(value.trim())) return value.trim();
         return '0';
       };
-      for (const [replicaKey, replica] of env.eReplicas.entries()) {
+      for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
         if (
           !String(replicaKey)
             .toLowerCase()
@@ -1296,7 +1298,7 @@ export async function waitForOutCapAtLeast(
         };
         const targetEntityId = normalize(entityId);
         const targetCounterpartyId = normalize(counterpartyId);
-        const replicas = Array.from(env?.eReplicas?.entries?.() || [])
+        const replicas = Array.from(env?.state.eReplicas?.entries?.() || [])
           .map(([key, replica]: [string, any]) => {
             const state = replica?.state;
             if (!state) return null;
@@ -1465,7 +1467,7 @@ export async function readRebalanceSnapshot(
         }
         return null;
       };
-      const replica = env?.eReplicas?.get(`${identity.entityId}:${identity.signerId}`.toLowerCase());
+      const replica = env?.state.eReplicas?.get(`${identity.entityId}:${identity.signerId}`.toLowerCase());
       const accounts = replica?.state?.accounts;
       if (!(accounts instanceof Map)) return null;
       const account = resolveCounterpartyAccount(accounts, identity.entityId, hubId);
@@ -1660,7 +1662,7 @@ export async function openSwapWorkspace(page: Page): Promise<void> {
       const current = document.querySelector('[data-testid="context-current"]');
       const entityId = String(current?.getAttribute('data-entity-id') || '').toLowerCase();
       const env = (window as CrossRuntimeWindow).isolatedEnv;
-      const replica = Array.from(env?.eReplicas?.values?.() || []).find(
+      const replica = Array.from(env?.state.eReplicas?.values?.() || []).find(
         (candidate: any) => String(candidate?.state?.entityId || '').toLowerCase() === entityId,
       ) as any;
       const state = replica?.state;
@@ -1820,7 +1822,7 @@ export async function selectCrossRoute(page: Page, targetEntityId: string): Prom
           name: String(profile?.name || ''),
           jurisdiction: String(profile?.metadata?.jurisdiction?.name || ''),
         }));
-      const replicas = Array.from(env?.eReplicas?.entries?.() || []).map(([key, replica]: [string, any]) => ({
+      const replicas = Array.from(env?.state.eReplicas?.entries?.() || []).map(([key, replica]: [string, any]) => ({
         key: String(key).slice(0, 22),
         entityId: String(replica?.entityId || replica?.state?.entityId || '').slice(0, 10),
         signerId: String(replica?.signerId || '').slice(0, 10),

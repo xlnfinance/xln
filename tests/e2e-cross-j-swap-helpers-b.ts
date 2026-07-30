@@ -444,8 +444,8 @@ export async function placeCrossOrder(
             const view = window as CrossRuntimeWindow & { __xln_env?: any };
             const summarizeEnv = (env: any) => ({
               runtimeId: String(env?.runtimeId || ''),
-              height: Number(env?.height || 0),
-              timestamp: Number(env?.timestamp || 0),
+              height: Number(env?.state.height || 0),
+              timestamp: Number(env?.state.timestamp || 0),
               scenarioMode: Boolean(env?.scenarioMode),
               loopActive: Boolean(env?.infrastructure?.loopActive),
               wakeRequested: Boolean(env?.infrastructure?.wakeRequested),
@@ -643,9 +643,9 @@ export async function readCrossState(
       const entityNeedle = String(identity.entityId || '').toLowerCase();
       const signerNeedle = String(identity.signerId || '').toLowerCase();
       const hubNeedle = String(hubId || '').toLowerCase();
-      let replica = env?.eReplicas?.get(`${entityNeedle}:${signerNeedle}`);
-      if (!replica && env?.eReplicas instanceof Map) {
-        for (const [key, candidate] of env.eReplicas.entries()) {
+      let replica = env?.state.eReplicas?.get(`${entityNeedle}:${signerNeedle}`);
+      if (!replica && env?.state.eReplicas instanceof Map) {
+        for (const [key, candidate] of env.state.eReplicas.entries()) {
           const keyText = String(key || '').toLowerCase();
           const candidateEntity = String(candidate?.state?.entityId || candidate?.entityId || '').toLowerCase();
           const candidateSigner = String(candidate?.signerId || '').toLowerCase();
@@ -956,7 +956,7 @@ export async function waitForCrossPullFlow(
     ]);
     const replicas = await page.evaluate(() => {
       const env = (window as CrossRuntimeWindow).isolatedEnv;
-      return Array.from(env?.eReplicas?.entries?.() || []).map(([key, replica]: [string, any]) => {
+      return Array.from(env?.state.eReplicas?.entries?.() || []).map(([key, replica]: [string, any]) => {
         const state = replica?.state;
         return {
           key: String(key || ''),
@@ -1089,7 +1089,7 @@ export async function readCrossResolveSnapshots(
         }
       };
 
-      for (const [replicaKey, replica] of env?.eReplicas?.entries?.() || []) {
+      for (const [replicaKey, replica] of env?.state.eReplicas?.entries?.() || []) {
         if (!String(replicaKey).toLowerCase().startsWith(`${owner}:`)) continue;
         const state = recordOf(recordOf(replica).state);
         const accounts = state.accounts;
@@ -1145,7 +1145,7 @@ export async function waitForLatestCrossResolveSnapshot(
         const owner = String(entityId || '').toLowerCase();
         const cp = String(counterpartyId || '').toLowerCase();
         const out: any[] = [];
-        for (const [replicaKey, replica] of env?.eReplicas?.entries?.() || []) {
+        for (const [replicaKey, replica] of env?.state.eReplicas?.entries?.() || []) {
           if (!String(replicaKey).toLowerCase().startsWith(`${owner}:`)) continue;
           const state = replica?.state;
           out.push({
@@ -1250,7 +1250,7 @@ export async function waitForCrossOffersCleared(
       ({ identity, hubId }) => {
         const env = (window as CrossRuntimeWindow).isolatedEnv;
         const out: any[] = [];
-        for (const [key, replica] of env?.eReplicas?.entries?.() || []) {
+        for (const [key, replica] of env?.state.eReplicas?.entries?.() || []) {
           const state = replica?.state;
           const entityId = String(state?.entityId || replica?.entityId || '').toLowerCase();
           if (
@@ -1532,7 +1532,7 @@ export async function triggerSourceDisputeArguments(
       if (!runtimeModule) throw new Error('__xln.instance missing');
       const sourceEntityId = String(source.entityId || '').toLowerCase();
       let sourceState: any = null;
-      for (const replica of env.eReplicas?.values?.() || []) {
+      for (const replica of env.state.eReplicas?.values?.() || []) {
         const state = replica?.state;
         if (String(state?.entityId || '').toLowerCase() === sourceEntityId) {
           sourceState = state;
@@ -1554,7 +1554,7 @@ export async function triggerSourceDisputeArguments(
       }
       const currentJHeight = Math.max(
         0,
-        ...Array.from(env.jReplicas?.values?.() || []).map(
+        ...Array.from(env.state.jReplicas?.values?.() || []).map(
           (replica: any) => Number(replica?.blockNumber || 0),
         ),
       );

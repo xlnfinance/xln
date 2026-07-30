@@ -43,8 +43,8 @@ const SWAP_TOKEN_BY_SYMBOL: Record<string, string> = {
 type SwapRuntimeWindow = typeof window & {
   isolatedEnv?: {
     runtimeId?: string;
-    state?: {
-      eReplicas?: Map<string, {
+    state: {
+      eReplicas: Map<string, {
         state?: {
           accounts?: Map<string, {
             currentHeight?: number;
@@ -161,9 +161,9 @@ async function outCap(page: Page, entityId: string, counterpartyId: string, toke
   const delta = await page.evaluate(({ counterpartyId, entityId, tokenId }) => {
     const view = window as SwapRuntimeWindow;
     const env = view.isolatedEnv;
-    if (!env?.eReplicas) return null;
+    if (!env?.state.eReplicas) return null;
 
-    for (const [replicaKey, replica] of env.eReplicas.entries()) {
+    for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
       if (!String(replicaKey).startsWith(`${entityId}:`)) continue;
       const account = replica.state?.accounts?.get(counterpartyId);
       const delta = account?.deltas?.get(tokenId);
@@ -210,9 +210,9 @@ async function holdTotal(page: Page, entityId: string, counterpartyId: string, t
   const delta = await page.evaluate(({ counterpartyId, entityId, tokenId }) => {
     const view = window as SwapRuntimeWindow;
     const env = view.isolatedEnv;
-    if (!env?.eReplicas) return null;
+    if (!env?.state.eReplicas) return null;
 
-    for (const [replicaKey, replica] of env.eReplicas.entries()) {
+    for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
       if (!String(replicaKey).startsWith(`${entityId}:`)) continue;
       const account = replica.state?.accounts?.get(counterpartyId);
       const delta = account?.deltas?.get(tokenId);
@@ -733,7 +733,7 @@ async function readSwapResolveSnapshots(
         Boolean(left && right && ((left === owner && right === cp) || (right === owner && left === cp)));
     };
 
-    for (const [replicaKey, replica] of env?.eReplicas?.entries?.() || []) {
+    for (const [replicaKey, replica] of env?.state.eReplicas?.entries?.() || []) {
       if (!String(replicaKey).toLowerCase().startsWith(`${owner}:`)) continue;
       const state = recordOf(recordOf(replica).state);
       const accounts = state.accounts;
@@ -831,13 +831,13 @@ async function readSwapOfferSnapshot(
   return await page.evaluate(({ entityId, signerId, counterpartyId }) => {
     const view = window as SwapRuntimeWindow;
     const env = view.isolatedEnv;
-    if (!env?.eReplicas) return [];
-    const key = Array.from(env.eReplicas.keys()).find((replicaKey: string) => {
+    if (!env?.state.eReplicas) return [];
+    const key = Array.from(env.state.eReplicas.keys()).find((replicaKey: string) => {
       const [replicaEntityId, replicaSignerId] = String(replicaKey || '').split(':');
       return String(replicaEntityId || '').toLowerCase() === String(entityId || '').toLowerCase()
         && String(replicaSignerId || '').toLowerCase() === String(signerId || '').toLowerCase();
     });
-    const replica = key ? env.eReplicas.get(key) : null;
+    const replica = key ? env.state.eReplicas.get(key) : null;
     if (!replica?.state?.accounts) return [];
     const owner = String(entityId || '').toLowerCase();
     const cp = String(counterpartyId || '').toLowerCase();
@@ -919,13 +919,13 @@ async function readSwapOfferCount(
   return await page.evaluate(({ entityId, signerId, counterpartyId }) => {
     const view = window as SwapRuntimeWindow;
     const env = view.isolatedEnv;
-    if (!env?.eReplicas) return 0;
-    const key = Array.from(env.eReplicas.keys()).find((replicaKey: string) => {
+    if (!env?.state.eReplicas) return 0;
+    const key = Array.from(env.state.eReplicas.keys()).find((replicaKey: string) => {
       const [replicaEntityId, replicaSignerId] = String(replicaKey || '').split(':');
       return String(replicaEntityId || '').toLowerCase() === String(entityId || '').toLowerCase()
         && String(replicaSignerId || '').toLowerCase() === String(signerId || '').toLowerCase();
     });
-    const replica = key ? env.eReplicas.get(key) : null;
+    const replica = key ? env.state.eReplicas.get(key) : null;
     if (!replica?.state?.accounts) return 0;
     const owner = String(entityId || '').toLowerCase();
     const cp = String(counterpartyId || '').toLowerCase();
@@ -955,13 +955,13 @@ async function readSwapHistoryCount(
   return await page.evaluate(({ entityId, signerId, counterpartyId }) => {
     const view = window as SwapRuntimeWindow;
     const env = view.isolatedEnv;
-    if (!env?.eReplicas) return 0;
-    const key = Array.from(env.eReplicas.keys()).find((replicaKey: string) => {
+    if (!env?.state.eReplicas) return 0;
+    const key = Array.from(env.state.eReplicas.keys()).find((replicaKey: string) => {
       const [replicaEntityId, replicaSignerId] = String(replicaKey || '').split(':');
       return String(replicaEntityId || '').toLowerCase() === String(entityId || '').toLowerCase()
         && String(replicaSignerId || '').toLowerCase() === String(signerId || '').toLowerCase();
     });
-    const replica = key ? env.eReplicas.get(key) : null;
+    const replica = key ? env.state.eReplicas.get(key) : null;
     if (!replica?.state?.accounts) return 0;
     const owner = String(entityId || '').toLowerCase();
     const cp = String(counterpartyId || '').toLowerCase();

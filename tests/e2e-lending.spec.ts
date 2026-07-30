@@ -100,11 +100,11 @@ async function accountOutCapacity(
       };
     };
     const env = view.isolatedEnv;
-    if (!env?.eReplicas) return null;
+    if (!env?.state?.eReplicas) return null;
 
     const entityKey = String(entityId || '').toLowerCase();
     const accountKey = String(counterpartyId || '').toLowerCase();
-    for (const [replicaKey, replica] of env.eReplicas.entries()) {
+    for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
       if (!String(replicaKey).toLowerCase().startsWith(`${entityKey}:`)) continue;
       const account = replica.state?.accounts?.get(accountKey) ?? replica.state?.accounts?.get(counterpartyId);
       const delta = account?.deltas?.get(tokenId);

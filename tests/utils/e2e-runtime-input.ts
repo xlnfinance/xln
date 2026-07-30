@@ -2,7 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { expect, type Page } from '@playwright/test';
 
 type RuntimeEnv = {
-  eReplicas: Map<string, unknown>;
+  state: {
+    eReplicas: Map<string, unknown>;
+  };
 };
 
 type EntityTxInput = {
@@ -134,7 +136,7 @@ export async function enqueueEntityTxs(
       const env = runtimeWindow.isolatedEnv;
       if (!env) return { ok: false, error: 'isolatedEnv missing' };
       const expectedKey = `${entityId}:${signerId}`.toLowerCase();
-      const replicaKeys = Array.from(env.eReplicas.keys(), (key) => String(key).toLowerCase());
+      const replicaKeys = Array.from(env.state.eReplicas.keys(), (key) => String(key).toLowerCase());
       if (!replicaKeys.includes(expectedKey)) {
         return { ok: false, error: `local replica ${expectedKey} missing` };
       }

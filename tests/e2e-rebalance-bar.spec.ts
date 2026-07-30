@@ -300,7 +300,7 @@ async function readRecentFrameEvents(page: Page, counterpartyId: string): Promis
       }))
       : [];
 
-    for (const [key, rep] of env?.eReplicas?.entries?.() || []) {
+    for (const [key, rep] of env?.state?.eReplicas?.entries?.() || []) {
       const acc = rep?.state?.accounts?.get?.(counterpartyId);
       const history = Array.isArray(acc?.frameHistory)
         ? acc.frameHistory.slice(-12).map((frame: any) => ({
@@ -499,8 +499,8 @@ async function waitForEntityAdvertised(page: Page, entityId: string, timeoutMs =
 async function getLocalEntity(page: Page): Promise<{ entityId: string; signerId: string }> {
   const entity = await page.evaluate(() => {
     const env = (window as any).isolatedEnv;
-    if (!env?.eReplicas) return null;
-    for (const [key] of env.eReplicas.entries()) {
+    if (!env?.state?.eReplicas) return null;
+    for (const [key] of env.state.eReplicas.entries()) {
       const [entityId, signerId] = String(key).split(':');
       if (!entityId || !signerId) continue;
       return { entityId, signerId };
@@ -710,9 +710,9 @@ async function sendRoutedHtlcPayment(
 async function readPairState(page: Page, counterpartyId: string, ownerEntityId?: string) {
   const raw = await page.evaluate(({ counterpartyId, ownerEntityId }) => {
     const env = (window as any).isolatedEnv;
-    if (!env?.eReplicas) return null;
+    if (!env?.state?.eReplicas) return null;
     const ownerTarget = String(ownerEntityId || '').toLowerCase();
-    for (const [key, rep] of env.eReplicas.entries()) {
+    for (const [key, rep] of env.state.eReplicas.entries()) {
       const replicaEntityId = String(rep?.entityId || String(key).split(':')[0] || '').toLowerCase();
       if (ownerTarget && replicaEntityId !== ownerTarget) continue;
       const acc = rep.state?.accounts?.get(counterpartyId);
@@ -967,8 +967,8 @@ async function sendDirectPaymentToHub(
 async function readAccountFlowState(page: Page, hubId: string) {
   return page.evaluate(({ hubId }) => {
     const env = (window as any).isolatedEnv;
-    if (!env?.eReplicas) return null;
-    for (const [key, rep] of env.eReplicas.entries()) {
+    if (!env?.state?.eReplicas) return null;
+    for (const [key, rep] of env.state.eReplicas.entries()) {
       const acc = rep.state?.accounts?.get(hubId);
       if (!acc) continue;
       const history = Array.isArray(acc.frameHistory) ? acc.frameHistory : [];
@@ -1004,9 +1004,9 @@ async function readAccountFlowState(page: Page, hubId: string) {
 async function readAccountJEventClaims(page: Page, hubId: string) {
   return page.evaluate(({ hubId }) => {
     const env = (window as any).isolatedEnv;
-    if (!env?.eReplicas) return null;
+    if (!env?.state?.eReplicas) return null;
     const target = String(hubId || '').toLowerCase();
-    for (const [key, rep] of env.eReplicas.entries()) {
+    for (const [key, rep] of env.state.eReplicas.entries()) {
       const acc = rep.state?.accounts?.get(hubId);
       if (!acc) continue;
       const history = Array.isArray(acc.frameHistory) ? acc.frameHistory : [];
@@ -1057,8 +1057,8 @@ async function readAccountJEventClaims(page: Page, hubId: string) {
 async function readRebalanceState(page: Page, hubId: string) {
   const raw = await page.evaluate(({ hubId }) => {
     const env = (window as any).isolatedEnv;
-    if (!env?.eReplicas) return null;
-    for (const [key, rep] of env.eReplicas.entries()) {
+    if (!env?.state?.eReplicas) return null;
+    for (const [key, rep] of env.state.eReplicas.entries()) {
       const acc = rep.state?.accounts?.get(hubId);
       if (!acc) continue;
       const delta = acc.deltas?.get?.(1);
@@ -1260,12 +1260,12 @@ async function driveFaucetsUntilRequestCollateralCommitted(
 async function readRebalanceDiagnostics(page: Page, hubId: string) {
   return page.evaluate(({ hubId }) => {
     const env = (window as any).isolatedEnv;
-    if (!env?.eReplicas) return null;
+    if (!env?.state?.eReplicas) return null;
     let profile: any = null;
     const target = String(hubId || '').toLowerCase();
     const profiles = env?.gossip?.getProfiles?.() || [];
     profile = profiles.find((p: any) => String(p?.entityId || '').toLowerCase() === target) || null;
-    for (const [key, rep] of env.eReplicas.entries()) {
+    for (const [key, rep] of env.state.eReplicas.entries()) {
       const acc = rep.state?.accounts?.get(hubId);
       if (!acc) continue;
       return {
@@ -1413,17 +1413,27 @@ async function reloadRuntimeAndWaitReady(page: Page, rebalanceConsole: string[],
     await page.reload({ waitUntil: 'domcontentloaded' });
     try {
       await page.waitForFunction(() => {
-        const env = (window as unknown as { isolatedEnv?: { runtimeId?: string; eReplicas?: { size?: number } } }).isolatedEnv;
-        return !!env?.runtimeId && Number(env?.eReplicas?.size || 0) > 0;
+        const env = (window as unknown as {
+          isolatedEnv?: {
+            runtimeId?: string;
+            state?: { eReplicas?: { size?: number } };
+          };
+        }).isolatedEnv;
+        return !!env?.runtimeId && Number(env?.state?.eReplicas?.size || 0) > 0;
       }, { timeout: 60_000 });
     } catch (error) {
       const runtimeDebug = await page.evaluate(() => {
-        const env = (window as unknown as { isolatedEnv?: { runtimeId?: string; eReplicas?: { size?: number } } }).isolatedEnv;
+        const env = (window as unknown as {
+          isolatedEnv?: {
+            runtimeId?: string;
+            state?: { eReplicas?: { size?: number } };
+          };
+        }).isolatedEnv;
         const runtimesRaw = typeof localStorage !== 'undefined' ? localStorage.getItem('xln-vaults') : null;
         return {
           hasEnv: !!env,
           runtimeId: env?.runtimeId || null,
-          replicaCount: Number(env?.eReplicas?.size || 0),
+          replicaCount: Number(env?.state?.eReplicas?.size || 0),
           hasVaultsKey: !!runtimesRaw,
           vaultsKeyLength: runtimesRaw?.length || 0,
           location: window.location.href,
