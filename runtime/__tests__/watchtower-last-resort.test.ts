@@ -9,8 +9,8 @@ import {
   encodeTowerCounterDisputeRemedy,
   runWatchtowerSweep,
 } from '../watchtower/action';
-import { encryptTowerPayloadForWatchSeed } from '../recovery/crypto';
-import type { TowerAppointmentV1 } from '../recovery/types';
+import { encryptTowerPayloadForWatchSeed } from '../storage/recovery/crypto';
+import type { TowerAppointmentV1 } from '../storage/recovery/types';
 
 const makeLookupKey = (label: string): string => keccak256(toUtf8Bytes(label));
 const disputeStartedInterface = new Interface([

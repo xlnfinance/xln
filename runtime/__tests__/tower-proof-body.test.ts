@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { decodeTowerProofBody } from '../recovery/tower-proof-body';
+import { decodeTowerProofBody } from '../storage/recovery/tower-proof-body';
 
 const validProofBody = {
   watchSeed: `0x${'12'.repeat(32)}`,

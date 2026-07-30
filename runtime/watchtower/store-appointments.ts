@@ -4,9 +4,9 @@ import type {
   TowerLastResortPayloadV1,
   TowerModeV1,
   TowerReceiptV1,
-} from '../recovery/types';
-import { normalizeTowerModeV1 } from '../recovery/types';
-import { computeTowerLastResortPayloadDigest } from '../recovery/crypto';
+} from '../storage/recovery/types';
+import { normalizeTowerModeV1 } from '../storage/recovery/types';
+import { computeTowerLastResortPayloadDigest } from '../storage/recovery/crypto';
 import { deserializeTaggedJson } from '../protocol/serialization';
 import {
   computeStoredLookupBytes,

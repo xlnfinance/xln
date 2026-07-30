@@ -1,4 +1,4 @@
-import type { PersistedFrameJournal } from '../storage/types';
+import type { PersistedFrameJournal } from '../types';
 
 export type RuntimeRecoverySignerV1 = {
   index: number;

@@ -56,7 +56,7 @@ export type {
   TowerReceiptV1,
   TowerRestoreRequestV1,
   TowerRestoreResponseV1,
-} from '../recovery/types';
+} from '../storage/recovery/types';
 
 export type { GossipLayer } from '../networking/gossip';
 export type { Profile } from '../entity/profile';

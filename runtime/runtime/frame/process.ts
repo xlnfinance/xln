@@ -8,7 +8,7 @@ import { materializePendingJurisdictionImportResults } from '../jurisdiction-imp
 import { requireRuntimeMempool } from '../input-queue';
 import { transitionRuntimeLifecycle } from '../lifecycle';
 import { ensureRuntimeInfrastructure } from '../runtime-infrastructure';
-import type { createRuntimeRecoveryApi } from '../../recovery/restore';
+import type { createRuntimeRecoveryApi } from '../../storage/recovery/restore';
 import type { createRuntimeStorageApi } from '../../storage/runtime-storage';
 import { notifyRuntimeSyncAfterCommit } from '../../storage/runtime-storage';
 import type { EntityInput } from '../../entity/types';

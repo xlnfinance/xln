@@ -5,11 +5,11 @@ import type {
   TowerDiscoverResponseV1,
   TowerRestoreRequestV1,
   TowerRestoreResponseV1,
-} from '../recovery/types';
-import { normalizeTowerModeV1 } from '../recovery/types';
+} from '../storage/recovery/types';
+import { normalizeTowerModeV1 } from '../storage/recovery/types';
 import {
   buildTowerAppointmentOwnerMessage,
-} from '../recovery/crypto';
+} from '../storage/recovery/crypto';
 import type { WatchtowerStore } from './store';
 import { runWatchtowerSweep } from './action';
 import type { PushStore } from '../push/store';

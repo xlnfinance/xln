@@ -13,7 +13,7 @@ import { createPersistenceQueries } from '../storage/queries';
 import { createRuntimeStorageApi } from '../storage/runtime-storage';
 import { rehydrateRestoredRuntimeInfra, type TrustedJurisdictionRpcBinding } from './infra';
 import { createRuntimeLoopApi } from './loop';
-import { createRuntimeRecoveryApi } from '../recovery/restore';
+import { createRuntimeRecoveryApi } from '../storage/recovery/restore';
 import { createRuntimeStateApi } from './state-create';
 import { loadGossipProfilesFromInfraDb } from './infra-gossip-store';
 import { withStorageConsistentRead } from '../storage/runtime-dbs';

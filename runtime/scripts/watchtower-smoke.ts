@@ -14,11 +14,11 @@ import {
   enqueueRuntimeInput,
   processRuntime,
 } from '../runtime';
-import { buildRuntimeRecoveryBundle } from '../recovery/bundle';
+import { buildRuntimeRecoveryBundle } from '../storage/recovery/bundle';
 import {
   buildTowerAppointmentOwnerMessage,
   encryptRuntimeRecoveryBundle,
-} from '../recovery/crypto';
+} from '../storage/recovery/crypto';
 import type { JReplica, JurisdictionConfig, TowerAppointmentV1 } from '../api/runtime-module';
 import { startStandaloneWatchtowerServer } from '../watchtower/standalone-server';
 

@@ -27,15 +27,15 @@ import { RuntimeAdapterError } from './errors';
 import { encodeRuntimeAdapterMessage, runtimeAdapterMaxMessageBytes } from './codec';
 import { detachRuntimeAdapterPayload } from './codec';
 import { XLN_PROTOCOL_VERSION } from '../protocol/version';
-import { buildRuntimeRecoveryBundle } from '../recovery/bundle';
+import { buildRuntimeRecoveryBundle } from '../storage/recovery/bundle';
 import {
   deriveRuntimeRecoveryLookupKey,
   encryptRuntimeRecoveryBundle,
-} from '../recovery/crypto';
+} from '../storage/recovery/crypto';
 import type {
   EncryptedRuntimeRecoveryBundleV1,
   RuntimeRecoverySignerV1,
-} from '../recovery/types';
+} from '../storage/recovery/types';
 import type { RuntimeActivityFilters } from '../storage/views/activity-types';
 import type {
   RuntimeAdapterActivityPage,

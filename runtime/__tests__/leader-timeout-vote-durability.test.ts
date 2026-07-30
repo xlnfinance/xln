@@ -19,7 +19,7 @@ import { dbRootPath } from '../runtime/platform';
 import {
   buildRuntimeRecoveryBundle,
   validateRuntimeRecoveryBundle,
-} from '../recovery/bundle';
+} from '../storage/recovery/bundle';
 import {
   applyRuntimeInput,
   closeInfraDb,

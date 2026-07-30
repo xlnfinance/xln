@@ -71,17 +71,17 @@ export type {
   TowerReceiptV1,
   TowerRestoreRequestV1,
   TowerRestoreResponseV1,
-} from '../recovery/types';
+} from '../storage/recovery/types';
 export {
   buildRuntimeRecoveryBundle,
   buildRuntimeRecoveryCheckpointBundle,
   computeRuntimeRecoveryBundleHash,
   computeRuntimeRecoveryCheckpointHash,
   validateRuntimeRecoveryBundle,
-} from '../recovery/bundle';
-export { decodeTowerProofBody } from '../recovery/tower-proof-body';
+} from '../storage/recovery/bundle';
+export { decodeTowerProofBody } from '../storage/recovery/tower-proof-body';
 export { encodeTowerCounterDisputeRemedy } from '../watchtower/action';
-export { buildRuntimeRecording, validateRuntimeRecording } from '../recovery/recording';
+export { buildRuntimeRecording, validateRuntimeRecording } from '../storage/recovery/recording';
 export {
   buildTowerAppointmentOwnerMessage,
   computeWatchtowerCounterDisputeAuthorizationHash,
@@ -91,7 +91,7 @@ export {
   deriveRuntimeRecoveryLookupKey,
   encryptTowerPayloadForWatchSeed,
   encryptRuntimeRecoveryBundle,
-} from '../recovery/crypto';
+} from '../storage/recovery/crypto';
 export { buildSingleSignerHanko } from '../hanko/batch';
 export { buildCrossJurisdictionPullReveal, getCrossJurisdictionPrivateSeed } from '../extensions/cross-j/index';
 export { buildDisputeArgumentsForSnapshot } from '../entity/dispute-arguments';

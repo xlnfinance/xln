@@ -1,4 +1,4 @@
-import type { TowerAppointmentV1 } from '../recovery/types';
+import type { TowerAppointmentV1 } from '../storage/recovery/types';
 import { closeWatchtowerStore, createWatchtowerStoreContext } from './store-db';
 import { getLatest, getLatestReceipt, listLatestLastResortAppointments, upsertAppointment } from './store-appointments';
 import { appendActionReceipt, appendComplaint, getStats, listActionReceipts, pruneExpired } from './store-actions';

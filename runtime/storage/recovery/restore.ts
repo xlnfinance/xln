@@ -1,32 +1,32 @@
 import { Level } from 'level';
-import { type RuntimeOutputRoutingDeps } from '../runtime/output-routing';
+import { type RuntimeOutputRoutingDeps } from '../../runtime/output-routing';
 import {
   applyCommittedLocalReliableReceipts,
   applyRecoveryRuntimeOutputPlan,
   hasPendingLocalReliableOutput,
-} from '../runtime/recovery-output';
+} from '../../runtime/recovery-output';
 import {
   assertPersistedContractConfigReady,
   reconcileRecoveryInfraEffects,
   registerCommittedSingleSignerWallets,
-} from '../runtime/recovery-infra';
-import { rehydrateRestoredRuntimeInfra } from '../runtime/infra';
-import { runtimeIsBrowser } from '../infra/runtime-process';
-import { assertBrowserVMJurisdiction } from '../jadapter/browservm-registry';
-import { replayPersistedRuntimeJournals } from '../storage/recovery/journal';
-import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeTx } from '../runtime/types';
-import type { PersistedFrameJournal } from './../storage/types';
-import type { RuntimeRecoveryBundleV1 } from './../recovery/types';
-import { loadGossipProfilesFromInfraDb } from '../runtime/infra-gossip-store';
-import type { StorageDbRole } from './../storage/runtime-dbs';
+} from '../../runtime/recovery-infra';
+import { rehydrateRestoredRuntimeInfra } from '../../runtime/infra';
+import { runtimeIsBrowser } from '../../infra/runtime-process';
+import { assertBrowserVMJurisdiction } from '../../jadapter/browservm-registry';
+import { replayPersistedRuntimeJournals } from './journal';
+import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeTx } from '../../runtime/types';
+import type { PersistedFrameJournal } from '../types';
+import type { RuntimeRecoveryBundleV1 } from './types';
+import { loadGossipProfilesFromInfraDb } from '../../runtime/infra-gossip-store';
+import type { StorageDbRole } from '../runtime-dbs';
 import {
   decodeCheckpointSnapshot,
   type CheckpointRestoreOptions,
-} from '../storage/recovery/checkpoint';
-import { persistRestoredRuntimeState, type PersistRestoredRuntimeOptions } from '../storage/recovery/import';
+} from './checkpoint';
+import { persistRestoredRuntimeState, type PersistRestoredRuntimeOptions } from './import';
 import { restoreRuntimeFromBundles, type RuntimeBundleRestoreOptions } from './bundle-restore';
 
-type RuntimeModule = typeof import('../runtime');
+type RuntimeModule = typeof import('../../runtime');
 
 export type RuntimeRecoveryDeps = Pick<
   RuntimeModule,
@@ -40,9 +40,9 @@ export type RuntimeRecoveryDeps = Pick<
   tryOpenRuntimeWalDb(env: RuntimeReplica): Promise<boolean>;
   enqueueRuntimeContinuation(
     env: RuntimeReplica,
-    inputs?: import('../entity/types').EntityInput[],
+    inputs?: import('../../entity/types').EntityInput[],
     runtimeTxs?: RuntimeTx[],
-    jInputs?: import('../jurisdiction/input').JInput[],
+    jInputs?: import('../../jurisdiction/input').JInput[],
     explicitTimestamp?: number,
     reliableReceipts?: ReliableDeliveryReceipt[],
   ): void;

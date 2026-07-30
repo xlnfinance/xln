@@ -13,8 +13,8 @@ import {
   buildTowerAppointmentOwnerMessage,
   deriveRuntimeRecoveryActionLookupKey,
   encryptTowerPayloadForWatchSeed,
-} from '../recovery/crypto';
-import type { TowerLastResortPayloadV1, TowerAppointmentV1, TowerCounterDisputeRemedy } from '../recovery/types';
+} from '../storage/recovery/crypto';
+import type { TowerLastResortPayloadV1, TowerAppointmentV1, TowerCounterDisputeRemedy } from '../storage/recovery/types';
 import { generateLazyEntityId } from '../entity/factory';
 import { encodeTowerCounterDisputeRemedy, runWatchtowerSweep } from '../watchtower/action';
 import { startStandaloneWatchtowerServer, type StandaloneWatchtowerServer } from '../watchtower/standalone-server';

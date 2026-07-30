@@ -6,13 +6,13 @@ import { Wallet, ethers } from 'ethers';
 import { deriveSignerKeySync } from '../account/crypto';
 import { generateLazyEntityId } from '../entity/factory';
 import { createEmptyEnv, enqueueRuntimeInput, processRuntime } from '../runtime.ts';
-import { buildRuntimeRecoveryBundle } from '../recovery/bundle';
+import { buildRuntimeRecoveryBundle } from '../storage/recovery/bundle';
 import {
   buildTowerAppointmentOwnerMessage,
   deriveRuntimeRecoveryActionLookupKey,
   encryptRuntimeRecoveryBundle,
   encryptTowerPayloadForWatchSeed,
-} from '../recovery/crypto';
+} from '../storage/recovery/crypto';
 import type { JReplica, JurisdictionConfig, TowerLastResortPayloadV1, TowerAppointmentV1 } from '../api/runtime-module';
 import {
   encodeTowerCounterDisputeRemedy,

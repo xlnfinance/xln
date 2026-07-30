@@ -13,7 +13,7 @@ import {
   createDisputeProofHash,
   createSettlementHashWithNonce,
 } from '../protocol/dispute/proof-builder';
-import { computeWatchtowerCounterDisputeAuthorizationHash } from '../recovery/crypto';
+import { computeWatchtowerCounterDisputeAuthorizationHash } from '../storage/recovery/crypto';
 import {
   ENTITY_PROVIDER_ACTION_CANCELLED_EVENT,
   ENTITY_PROVIDER_ACTION_CANCELLED_TOPIC,

@@ -667,10 +667,10 @@ Compared with adding only payments/swaps/cross-chain swaps, recovery/watchtowers
 
 Files/modules:
 
-- add `runtime/recovery/types.ts`;
-- add `runtime/recovery/bundle.ts`;
-- add `runtime/recovery/verify.ts`;
-- add `runtime/recovery/peer-sync.ts`;
+- add `runtime/storage/recovery/types.ts`;
+- add `runtime/storage/recovery/bundle.ts`;
+- add `runtime/storage/recovery/verify.ts`;
+- add `runtime/storage/recovery/peer-sync.ts`;
 - extend hub/direct relay surfaces in `runtime/server/index.ts`, `runtime/orchestrator/hub-node.ts`, and relay server modules;
 - extend `entity-crontab.ts` to schedule PSR pings.
 
@@ -685,9 +685,9 @@ Exit tests:
 
 Files/modules:
 
-- add `runtime/recovery/tower-client.ts`;
-- add `runtime/recovery/tower-server.ts` or a standalone `tower` service;
-- add `runtime/recovery/encryption.ts`;
+- add `runtime/storage/recovery/tower-client.ts`;
+- add `runtime/storage/recovery/tower-server.ts` or a standalone `tower` service;
+- add `runtime/storage/recovery/encryption.ts`;
 - add tower receipt persistence in runtime storage projection;
 - add frontend recovery coverage panel.
 
@@ -711,7 +711,7 @@ Current repo status:
 Files/modules:
 
 - extend `runtime/jadapter/watcher.ts` event fanout for account/dispute events;
-- add `runtime/recovery/tower-action.ts`;
+- add `runtime/storage/recovery/tower-action.ts`;
 - add tower fee budget and action receipts;
 - add a guarded contract path, for example `watchtowerCounterDispute`, that rejects early tower action before the last-resort window;
 - update `jurisdictions` contracts if a newer proof cannot challenge an older dispute.
@@ -757,9 +757,9 @@ Features:
 Status key: done = implemented and covered in the current repo; open = still
 active backlog.
 
-1. done: define recovery protocol types in `runtime/recovery/types.ts`.
-2. done: build bundle creation from `AccountReplica` in `runtime/recovery/bundle.ts`.
-3. done: build deterministic verification in `runtime/recovery/verify.ts`.
+1. done: define recovery protocol types in `runtime/storage/recovery/types.ts`.
+2. done: build bundle creation from `AccountReplica` in `runtime/storage/recovery/bundle.ts`.
+3. done: build deterministic verification in `runtime/storage/recovery/verify.ts`.
 4. partial: add PSR wire handling to direct runtime/hub/relay transports.
    - done: authenticated direct runtime websocket accepts
      `recovery_bundle_request` and answers with encrypted runtime recovery

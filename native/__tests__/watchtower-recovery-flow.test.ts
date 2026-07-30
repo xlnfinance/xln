@@ -10,7 +10,7 @@ import {
   buildTowerAppointmentOwnerMessage,
   decryptTowerPayloadWithWatchSeed,
   encryptRuntimeRecoveryBundle,
-} from '../../runtime/recovery/crypto';
+} from '../../runtime/storage/recovery/crypto';
 import type {
   JReplica,
   JurisdictionConfig,

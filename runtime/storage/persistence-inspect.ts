@@ -18,7 +18,7 @@ import type {
   EncryptedRuntimeRecoveryBundleV1,
   RuntimeRecoveryBundleV1,
   TowerReceiptV1,
-} from '../recovery/types';
+} from './recovery/types';
 
 export type PersistenceIssueSeverity = 'info' | 'warning' | 'critical';
 

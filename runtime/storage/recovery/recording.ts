@@ -1,6 +1,6 @@
 import { ethers } from 'ethers';
 
-import { serializeTaggedJson } from '../protocol/serialization';
+import { serializeTaggedJson } from '../../protocol/serialization';
 import {
   computeRuntimeRecoveryBundleHash,
   validateRuntimeRecoveryBundle,

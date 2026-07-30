@@ -5,7 +5,7 @@ import type {
   TowerLastResortPayloadV1,
   TowerModeV1,
   TowerReceiptV1,
-} from '../recovery/types';
+} from '../storage/recovery/types';
 
 export type StoredLookupDoc = {
   lookupKey: string;

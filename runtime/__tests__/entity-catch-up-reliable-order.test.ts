@@ -31,7 +31,7 @@ import { safeStringify } from '../protocol/serialization';
 import { canonicalJurisdictionEventsHash } from '../jurisdiction/event-observation';
 import { recordValidatorJHistory } from '../jurisdiction/local-history';
 import { markLocalJAuthorityRuntimeTx } from '../jurisdiction/registration-evidence';
-import { buildRuntimeRecoveryBundle } from '../recovery/bundle';
+import { buildRuntimeRecoveryBundle } from '../storage/recovery/bundle';
 import { applyMergedEntityInputs } from '../runtime/entity-inputs';
 import type { RuntimeEntityRoutingDeps } from '../runtime/entity-routing';
 import {

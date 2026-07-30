@@ -435,7 +435,7 @@ Rules:
   - Include both starter argument blobs in `ActiveDisputeContext`.
   - Submit `leftArguments/rightArguments/starterInitialArguments/starterIncrementedArguments`.
 
-- `runtime/recovery/types.ts`
+- `runtime/storage/recovery/types.ts`
   - Version the tower remedy payload.
   - Add current dispute fields.
   - Reject counter-dispute remedies that do not bind the revealed `watchSeed`.

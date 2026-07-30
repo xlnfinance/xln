@@ -1,17 +1,17 @@
 import {
   buildRuntimeRecoveryBundle,
   buildRuntimeRecoveryCheckpointBundle,
-} from '../../recovery/bundle';
+} from '../recovery/bundle';
 import {
   buildRuntimeRecording,
   validateRuntimeRecording,
-} from '../../recovery/recording';
+} from '../recovery/recording';
 import { buildRuntimeCheckpointSnapshot } from '../wal/snapshot';
 import type {
   RuntimeRecording,
   RuntimeRecoveryMetaV1,
   RuntimeRecoverySignerV1,
-} from '../../recovery/types';
+} from '../recovery/types';
 import type { RuntimeReplica } from '../../runtime/types';
 import type { PersistenceQueryDeps } from './deps';
 import type { createPersistenceEntityQueries } from './entity';
