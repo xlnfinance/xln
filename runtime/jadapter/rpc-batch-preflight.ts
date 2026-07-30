@@ -18,9 +18,7 @@ type ProcessBatchPreflight = {
   hankoData: string;
   entityNonce: bigint;
   gasLimit: bigint;
-  gasEstimateUsedFallback: boolean;
   disputeStartDebug: Array<Record<string, unknown>>;
-  isLocalSnapshotRace(error: unknown): boolean;
 };
 
 const revertDetail = (depository: Depository, revertData: unknown): string => {
@@ -57,15 +55,6 @@ export const preflightProcessBatch = async (input: ProcessBatchPreflight): Promi
     const source = typeof error === 'object' && error !== null ? (error as RevertSource) : null;
     const revertData = source?.data ?? source?.error?.data ?? source?.info?.error?.data;
     const usableRevertData = revertData === '0x' ? undefined : revertData;
-    const snapshotRace = !usableRevertData && !input.gasEstimateUsedFallback && input.isLocalSnapshotRace(error);
-    if (snapshotRace) {
-      console.warn(
-        '⚠️ [JAdapter:rpc] processBatch preflight hit local dev-chain ' +
-          'latest-state snapshot race after successful gas estimate; ' +
-          'continuing to submit the already-estimated batch',
-      );
-      return null;
-    }
     if (!usableRevertData && failure.category === 'transient') {
       return makeJAdapterFailureResult(error);
     }

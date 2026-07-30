@@ -43,14 +43,15 @@ const sendTypedTx = async (
   method: unknown,
   args: unknown[],
   options: {
-    gasFallback: bigint;
     minimumGasLimit?: bigint;
     txNonce: number | null;
     resetSignerNonce: boolean;
   },
 ): Promise<RpcReceipt> => {
   const txMethod = method as UntypedNonPayableMethod;
-  const estimated = await context.chainIo.estimateGas(() => txMethod.estimateGas(...args), options.gasFallback);
+  const estimated = await context.chainIo.estimateGas(
+    () => txMethod.estimateGas(...args),
+  );
   const gasLimit = options.minimumGasLimit !== undefined && estimated < options.minimumGasLimit
     ? options.minimumGasLimit
     : estimated;
@@ -91,17 +92,16 @@ export const processRpcSignedBatch = async (
       const depository = txSigner
         ? context.stack.depository.connect(txSigner)
         : context.stack.depository;
-      const estimate = await context.chainIo.estimateGasResult(
+      const estimatedGas = await context.chainIo.estimateGas(
         () => depository.processBatch.estimateGas(
           prepared.encodedBatch,
           prepared.hankoData,
           prepared.nextNonce,
         ),
-        PROCESS_BATCH_GAS_FLOOR,
       );
       const gasLimit = context.config.mode === 'tron'
-        ? estimate.gasLimit
-        : applyProcessBatchGasFloor(estimate.gasLimit, batch.disputeFinalizations.length > 0);
+        ? estimatedGas
+        : applyProcessBatchGasFloor(estimatedGas, batch.disputeFinalizations.length > 0);
       const tx = await depository.processBatch(
         prepared.encodedBatch,
         prepared.hankoData,
@@ -139,7 +139,6 @@ const createCoreWriteMethods = (context: RpcWriteContext): Pick<RpcWriteMethods,
           context.stack.depository.processBatch,
           [encodedBatch, hankoData, nonce],
           {
-            gasFallback: PROCESS_BATCH_GAS_FLOOR,
             ...(context.config.mode === 'tron' || batch.disputeFinalizations.length === 0
               ? {}
               : { minimumGasLimit: PROCESS_BATCH_GAS_FLOOR }),
@@ -170,7 +169,6 @@ const createCoreWriteMethods = (context: RpcWriteContext): Pick<RpcWriteMethods,
           context.stack.depository.enforceDebts,
           [entityId, BigInt(tokenId), BigInt(maxIterations)],
           {
-            gasFallback: 500_000n,
             txNonce: await context.sequencer.allocate(),
             resetSignerNonce: false,
           },
@@ -193,7 +191,6 @@ const createDebugWriteMethods = (
       context.stack.depository.mintToReserve,
       [entry.entityId, BigInt(entry.tokenId), entry.amount],
       {
-        gasFallback: 1_000_000n,
         txNonce: await context.sequencer.allocate(),
         resetSignerNonce: false,
       },

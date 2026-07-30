@@ -19,18 +19,11 @@ import {
 import type { JAdapterConfig } from './types';
 import { resolveRpcFinalityDepth } from './rpc-finality';
 
-export type RpcGasEstimate = {
-  gasLimit: bigint;
-  usedFallback: boolean;
-  error?: unknown;
-};
-
 export type RpcChainIo = {
   buildFeeOverrides(): Promise<FeeOverrides>;
   waitForReceipt(txLike: unknown, label: string): Promise<RpcReceipt>;
   signerForPrivateKey(privateKey: string): Promise<Signer>;
-  estimateGas(estimate: () => Promise<bigint>, fallback: bigint): Promise<bigint>;
-  estimateGasResult(estimate: () => Promise<bigint>, fallback: bigint): Promise<RpcGasEstimate>;
+  estimateGas(estimate: () => Promise<bigint>): Promise<bigint>;
   readCurrentBlockNumber(): Promise<number>;
   readSafeBlockNumber(): Promise<number>;
   readBlockHeaders(heights: number[]): Promise<Array<{ jHeight: number; jBlockHash: string }>>;
@@ -268,27 +261,15 @@ export const createRpcChainIo = (
   signer: Signer,
 ): RpcChainIo => {
   const settings = readSettings(config);
-  const estimateGasResult = async (
-    estimate: () => Promise<bigint>,
-    fallback: bigint,
-  ): Promise<RpcGasEstimate> => {
-    try {
-      return {
-        gasLimit: applyGasHeadroom(await estimate(), settings.gasHeadroomBps),
-        usedFallback: false,
-      };
-    } catch (error) {
-      return { gasLimit: fallback, usedFallback: true, error };
-    }
-  };
+  const estimateGas = async (estimate: () => Promise<bigint>): Promise<bigint> =>
+    applyGasHeadroom(await estimate(), settings.gasHeadroomBps);
   const readCurrentBlockNumber = async (): Promise<number> =>
     parseBlockNumber(await provider.send('eth_blockNumber', []));
   return {
     buildFeeOverrides: createFeeReader(config, provider, settings.maxFeePerGasWei),
     waitForReceipt: createReceiptWaiter(settings),
     signerForPrivateKey: createSignerFactory(config, provider, signer),
-    estimateGasResult,
-    estimateGas: async (estimate, fallback) => (await estimateGasResult(estimate, fallback)).gasLimit,
+    estimateGas,
     readCurrentBlockNumber,
     readSafeBlockNumber: () =>
       isTronChainId(config.chainId) ? readTronSolidifiedBlockNumber(config) : readCurrentBlockNumber(),

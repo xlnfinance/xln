@@ -1,6 +1,5 @@
 import type { Signer } from 'ethers';
 import { ethers } from 'ethers';
-import { safeStringify } from '../protocol/serialization';
 import type { RuntimeState } from '../runtime/types';
 import type { JTx } from '../types/jurisdiction-runtime';
 import { makeJAdapterFailureResult } from './failure';
@@ -12,11 +11,10 @@ import {
   planRpcBatchSubmission,
 } from './rpc-batch-plan';
 import { preflightProcessBatch } from './rpc-batch-preflight';
-import { eventCarriers, watcherErrorDetails, watcherErrorMessage } from './rpc-boundary';
+import { eventCarriers } from './rpc-boundary';
 import type { RpcChainIo } from './rpc-chain-io';
 import type { RpcContractStack } from './rpc-contract-stack';
 import {
-  PROCESS_BATCH_GAS_FLOOR,
   applyProcessBatchGasFloor,
   rpcLog,
 } from './rpc-public';
@@ -43,17 +41,6 @@ type SubmissionContext = {
   sequencer: RpcTransactionSequencer;
   receipts: RpcReceiptReaders;
   writes: RpcWriteMethods;
-};
-
-const isLocalSnapshotRace = (context: SubmissionContext, error: unknown): boolean => {
-  if (!DEV_CHAIN_IDS.has(context.config.chainId)) return false;
-  const detail = safeStringify({
-    message: watcherErrorMessage(error),
-    details: watcherErrorDetails(error),
-  });
-  return /missing revert data|CALL_EXCEPTION|BlockOutOfRangeError|Failed to load state snapshot|No such file/i.test(
-    detail,
-  );
 };
 
 const resolveBatchSubmitter = async (
@@ -104,22 +91,19 @@ const executeBatchSubmission = async (
     depositoryAddress: await context.stack.getDepositoryAddress(),
   });
   try {
-    const estimate = await context.chainIo.estimateGasResult(
+    const estimatedGas = await context.chainIo.estimateGas(
       () => depository.processBatch.estimateGas(data.encodedBatch, data.hankoSignature, entityNonce),
-      PROCESS_BATCH_GAS_FLOOR,
     );
     const gasLimit = context.config.mode === 'tron'
-      ? estimate.gasLimit
-      : applyProcessBatchGasFloor(estimate.gasLimit, plan.batch.disputeFinalizations.length > 0);
+      ? estimatedGas
+      : applyProcessBatchGasFloor(estimatedGas, plan.batch.disputeFinalizations.length > 0);
     const preflightFailure = await preflightProcessBatch({
       depository,
       encodedBatch: data.encodedBatch,
       hankoData: data.hankoSignature,
       entityNonce,
       gasLimit,
-      gasEstimateUsedFallback: estimate.usedFallback,
       disputeStartDebug: disputeDebug,
-      isLocalSnapshotRace: error => isLocalSnapshotRace(context, error),
     });
     if (preflightFailure) return preflightFailure;
     const receipt = await context.sequencer.send(

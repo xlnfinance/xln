@@ -29,7 +29,7 @@ export type RpcEntityProviderSubmitContext = {
   signerForPrivateKey(privateKey: string): Promise<Signer>;
   readActionReceipt(entityId: string, actionNonce: bigint): Promise<JEvent | null>;
   runSerialized<T>(work: () => Promise<T>): Promise<T>;
-  estimateGas(estimate: () => Promise<bigint>, fallback: bigint): Promise<bigint>;
+  estimateGas(estimate: () => Promise<bigint>): Promise<bigint>;
   send(
     signer: Signer,
     label: string,
@@ -166,7 +166,7 @@ export const submitEntityProviderAction = async (
           message: `EntityProvider action staticCall failed: ${failure.message}`,
         });
       }
-      const gasLimit = await context.estimateGas(action.estimateGas, 1_500_000n);
+      const gasLimit = await context.estimateGas(action.estimateGas);
       const receipt = await context.send(signer, `EntityProvider.${intent.payload.kind}`, (nonce, feeOverrides) =>
         action.send(nonce, feeOverrides, gasLimit),
       );
