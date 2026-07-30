@@ -13,10 +13,12 @@ import { cloneIsolatedEntityInput } from '../../entity/input-clone';
 import {
   buildRuntimeActivityEvents,
   dedupeRuntimeActivityEvents,
-  type PersistedActivityJournal,
-  type RuntimeActivityEvent,
-  type RuntimeActivityFilters,
 } from '../../api/activity-history';
+import type {
+  PersistedActivityJournal,
+  RuntimeActivityEvent,
+  RuntimeActivityFilters,
+} from '../views/activity-types';
 import type { AccountFrame } from '../../types/account';
 import type { CertifiedEntityFrameLink, EntityInput } from '../../entity/types';
 import type { RuntimeState } from '../../runtime/types';

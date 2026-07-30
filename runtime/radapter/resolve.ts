@@ -35,7 +35,7 @@ import type {
   EncryptedRuntimeRecoveryBundleV1,
   RuntimeRecoverySignerV1,
 } from '../recovery/types';
-import type { RuntimeActivityFilters } from '../api/activity-history';
+import type { RuntimeActivityFilters } from '../storage/views/activity-types';
 import type {
   RuntimeAdapterActivityPage,
   RuntimeAdapterEntitySummary,

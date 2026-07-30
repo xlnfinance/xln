@@ -1,4 +1,4 @@
-import type { RuntimeActivityEvent, RuntimeActivityFilters } from '../api/activity-history';
+import type { RuntimeActivityEvent, RuntimeActivityFilters } from '../storage/views/activity-types';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { RuntimeInput } from '../runtime/types';
 import type { XlnProtocolVersion } from '../protocol/version';

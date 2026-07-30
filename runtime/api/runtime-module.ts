@@ -35,7 +35,7 @@ export type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 export type { PaymentDeliveryMode } from '../types/payment';
 export type { PersistedFrameJournal } from '../storage/types';
 export type { BoardMemberInput } from '../entity/factory';
-export type { PersistedActivityJournal } from '../api/activity-history';
+export type { PersistedActivityJournal } from '../storage/views/activity-types';
 export type { StorageFrameRecord, StorageHead } from '../storage/types';
 export type {
   EncryptedRuntimeRecoveryBundleV1,
@@ -85,7 +85,7 @@ export type {
   MppJsonValue,
   MppReceipt,
 } from '../protocol/payments/mpp';
-export type { RuntimeActivityEvent, RuntimeActivityFilters } from '../api/activity-history';
+export type { RuntimeActivityEvent, RuntimeActivityFilters } from '../storage/views/activity-types';
 export type { DeliveryOutcome, DeliveryResult } from '../protocol/payments/delivery-result';
 export type { RuntimeEntityInputRoutingResult } from '../runtime/output-routing';
 export type {
