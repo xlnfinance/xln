@@ -147,6 +147,6 @@ describe('runtime snapshot codec', () => {
       .toThrow('RUNTIME_MACHINE_J_BLOCK_NUMBER_INVALID:not-a-height');
     env.jReplicas.get('Corrupt')!.blockNumber = -1n;
     expect(() => buildDurableRuntimeMachineSnapshot(env))
-      .toThrow('RUNTIME_MACHINE_J_BLOCK_NUMBER_NEGATIVE:-1');
+      .toThrow('RUNTIME_MACHINE_J_BLOCK_NUMBER_INVALID:-1');
   });
 });

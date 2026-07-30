@@ -8,7 +8,6 @@ const EXCLUDED_PATH = /\/(?:__tests__|qa|scenarios|scripts)\//;
 // are existing boundary debts, not permission: new files and larger counts
 // fail this gate, while every cleanup must delete its allowance.
 const DOUBLE_ASSERTION_DEBT: Readonly<Record<string, number>> = {
-  'runtime/jadapter/browservm-provider.ts': 4,
   'runtime/jadapter/tron-signer.ts': 1,
 };
 

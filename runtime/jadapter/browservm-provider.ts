@@ -200,8 +200,8 @@ const assertCheckpointReceiptRoots = async (
 };
 
 export class BrowserVMProvider {
-  private vm: EthereumVm = null as unknown as EthereumVm;
-  private common: EthereumCommon = null as unknown as EthereumCommon;
+  private vm!: EthereumVm;
+  private common!: EthereumCommon;
   private configuredChainId = 31_337;
   private accountAddress: Address | null = null;
   private depositoryAddress: Address | null = null;
@@ -341,8 +341,6 @@ export class BrowserVMProvider {
   async reset(): Promise<void> {
     console.log('[BrowserVM] Resetting to fresh state...');
     this.initialized = false;
-    this.vm = null as unknown as EthereumVm;
-    this.common = null as unknown as EthereumCommon;
     this.accountAddress = null;
     this.depositoryAddress = null;
     this.entityProviderAddress = null;
