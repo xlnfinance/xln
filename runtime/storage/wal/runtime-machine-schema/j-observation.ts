@@ -67,7 +67,7 @@ const validateBlock = (value: unknown, code: string): void => {
   }
 };
 
-export const validateJObservationData = (value: unknown, code: string): void => {
+function assertJObservationData(value: unknown, code: string): asserts value is ObservationData {
   const data = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(data, [
     'entityId', 'signerId', 'jurisdictionRef', 'scannedThroughHeight', 'tipBlockHash', 'blocks',
@@ -86,9 +86,12 @@ export const validateJObservationData = (value: unknown, code: string): void => 
   }
   requireArray(data['blocks'], `${code}_BLOCKS`).forEach((block, index) =>
     validateBlock(block, `${code}_BLOCK_${index}`));
+}
 
+export const validateJObservationData = (value: unknown, code: string): void => {
+  assertJObservationData(value, code);
   // This pure reducer is the canonical semantic check for height/hash/root
   // coherence. Running it with no prior history validates every supplied byte
   // without mutating live runtime state.
-  recordValidatorJHistory(undefined, data as unknown as ObservationData);
+  recordValidatorJHistory(undefined, value);
 };
