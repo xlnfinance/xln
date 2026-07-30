@@ -31,3 +31,17 @@ test('recovery rejects missing or malformed replica collections', async () => {
     jReplicas: [['duplicate', {}], ['duplicate', {}]],
   })).rejects.toThrow('RECOVERY_CHECKPOINT_J_REPLICAS_INVALID:duplicate_key');
 });
+
+test('recovery rejects malformed optional Runtime-machine fields', async () => {
+  const snapshot = buildRuntimeCheckpointSnapshot(createEmptyEnv('recovery-runtime-machine-reject'));
+
+  await expect(restoreEnvFromCheckpointSnapshot({
+    ...snapshot,
+    runtimeConfig: 'corrupt',
+  })).rejects.toThrow('RECOVERY_CHECKPOINT_RUNTIME_MACHINE_RUNTIME_CONFIG');
+
+  await expect(restoreEnvFromCheckpointSnapshot({
+    ...snapshot,
+    infrastructure: 'corrupt',
+  })).rejects.toThrow('RECOVERY_CHECKPOINT_RUNTIME_MACHINE_RUNTIME_STATE');
+});

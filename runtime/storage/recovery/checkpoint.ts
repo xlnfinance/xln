@@ -19,6 +19,7 @@ import { runtimeIsBrowser } from '../../infra/runtime-process';
 import type { RuntimeReplica } from '../../runtime/types';
 import { normalizeDbNamespace } from '../runtime-dbs';
 import { restoreDurableRuntimeSnapshot } from '../wal/snapshot';
+import { validateDurableRuntimeMachineSnapshot } from '../wal/runtime-machine-schema';
 import { validateJReplicas } from '../wal/runtime-machine-schema/j';
 
 type RuntimeModule = typeof import('../../runtime');
@@ -67,8 +68,23 @@ const restoreCheckpointState = (env: RuntimeReplica, snapshot: Record<string, un
     snapshot['jReplicas'],
     'RECOVERY_CHECKPOINT_J_REPLICAS_INVALID',
   );
-  const { eReplicas: _entityReplicas, jReplicas: _jurisdictionReplicas, ...durableSnapshot } = snapshot;
-  restoreDurableRuntimeSnapshot(env, durableSnapshot);
+  const {
+    eReplicas: _entityReplicas,
+    jReplicas: _jurisdictionReplicas,
+    height: _height,
+    timestamp: _timestamp,
+    gossip: _gossip,
+    ...durableSnapshot
+  } = snapshot;
+  // Portable recovery is an untrusted storage boundary. Validate the same
+  // Runtime-machine payload used by WAL replay before installing any field;
+  // silently ignoring malformed optional configuration would let corruption
+  // change recovery semantics without invalidating the checkpoint.
+  const validatedRuntimeMachine = validateDurableRuntimeMachineSnapshot(
+    { ...durableSnapshot, jReplicas: jurisdictionEntries },
+    'RECOVERY_CHECKPOINT_RUNTIME_MACHINE',
+  );
+  restoreDurableRuntimeSnapshot(env, validatedRuntimeMachine);
   env.state.eReplicas = new Map(entityEntries.map(([key, replica], index) => [
     key,
     validateEntityReplica(replica, `RecoveryCheckpoint.EntityReplica[${index}]`),

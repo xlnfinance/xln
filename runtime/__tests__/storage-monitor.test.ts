@@ -8,6 +8,7 @@ import {
   getDiskFreeShortfallBytes,
   getMinDiskFreeBytes,
   isStoragePathMissingError,
+  parseStorageLimit,
   parseStorageHistory,
 } from '../infra/storage-monitor';
 
@@ -18,6 +19,13 @@ describe('storage monitor disk guard', () => {
 
   test('fails closed when free space is below the required floor', () => {
     expect(() => assertDiskFreeAtLeast(4, 5)).toThrow('INSUFFICIENT_DISK_FREE: free=4 required=5 shortfall=1');
+  });
+
+  test('rejects non-finite disk measurements and configuration', () => {
+    expect(() => assertDiskFreeAtLeast(Number.NaN, 5)).toThrow('DISK_FREE_BYTES_INVALID:NaN');
+    expect(() => assertDiskFreeAtLeast(5, Number.NaN)).toThrow('DISK_REQUIRED_BYTES_INVALID:NaN');
+    expect(() => parseStorageLimit('garbage', 5, 'TEST')).toThrow('STORAGE_CONFIG_TEST_INVALID:garbage');
+    expect(parseStorageLimit(undefined, 5, 'TEST')).toBe(5);
   });
 
   test('exposes the runtime disk guard threshold for gate evidence', () => {

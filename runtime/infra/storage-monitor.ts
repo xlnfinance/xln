@@ -46,15 +46,39 @@ export type StorageHealth = {
   historyPath: string;
 };
 
+export const parseStorageLimit = (
+  value: string | undefined,
+  fallback: number,
+  name: string,
+): number => {
+  const parsed = value === undefined || value === '' ? fallback : Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`STORAGE_CONFIG_${name}_INVALID:${String(value)}`);
+  }
+  return parsed;
+};
+
 const MIN_DISK_FREE_BYTES = Math.max(
   1 * 1024 ** 3,
-  Number(process.env['XLN_MIN_DISK_FREE_BYTES'] || String(5 * 1024 ** 3)),
+  parseStorageLimit(process.env['XLN_MIN_DISK_FREE_BYTES'], 5 * 1024 ** 3, 'MIN_DISK_FREE_BYTES'),
 );
-const STORAGE_HEALTH_CACHE_MS = Math.max(5_000, Number(process.env['XLN_STORAGE_HEALTH_CACHE_MS'] || '60000'));
+const STORAGE_HEALTH_CACHE_MS = Math.max(
+  5_000,
+  parseStorageLimit(process.env['XLN_STORAGE_HEALTH_CACHE_MS'], 60_000, 'HEALTH_CACHE_MS'),
+);
 const STORAGE_HEALTH_DEEP_SCAN = process.env['XLN_STORAGE_HEALTH_DEEP_SCAN'] === '1';
-const STORAGE_HEALTH_SCAN_MAX_ENTRIES = Math.max(100, Number(process.env['XLN_STORAGE_HEALTH_SCAN_MAX_ENTRIES'] || '2000'));
-const STORAGE_HEALTH_SCAN_MAX_DIR_ENTRIES = Math.max(50, Number(process.env['XLN_STORAGE_HEALTH_SCAN_MAX_DIR_ENTRIES'] || '500'));
-const STORAGE_HEALTH_SCAN_MAX_MS = Math.max(5, Number(process.env['XLN_STORAGE_HEALTH_SCAN_MAX_MS'] || '25'));
+const STORAGE_HEALTH_SCAN_MAX_ENTRIES = Math.max(
+  100,
+  parseStorageLimit(process.env['XLN_STORAGE_HEALTH_SCAN_MAX_ENTRIES'], 2_000, 'SCAN_MAX_ENTRIES'),
+);
+const STORAGE_HEALTH_SCAN_MAX_DIR_ENTRIES = Math.max(
+  50,
+  parseStorageLimit(process.env['XLN_STORAGE_HEALTH_SCAN_MAX_DIR_ENTRIES'], 500, 'SCAN_MAX_DIR_ENTRIES'),
+);
+const STORAGE_HEALTH_SCAN_MAX_MS = Math.max(
+  5,
+  parseStorageLimit(process.env['XLN_STORAGE_HEALTH_SCAN_MAX_MS'], 25, 'SCAN_MAX_MS'),
+);
 const STORAGE_HISTORY_WINDOW_MS = 26 * 60 * 60 * 1000;
 const STORAGE_ONE_HOUR_MS = 60 * 60 * 1000;
 const RDB_ROOT = process.env['XLN_RDB_ROOT'] || join(process.cwd(), 'db');
@@ -85,6 +109,12 @@ const statDiskBytes = (): { totalBytes: number; usedBytes: number; freeBytes: nu
 };
 
 export const assertDiskFreeAtLeast = (freeBytes: number, requiredBytes = MIN_DISK_FREE_BYTES): void => {
+  if (!Number.isFinite(freeBytes) || freeBytes < 0) {
+    throw new Error(`DISK_FREE_BYTES_INVALID:${String(freeBytes)}`);
+  }
+  if (!Number.isFinite(requiredBytes) || requiredBytes < 0) {
+    throw new Error(`DISK_REQUIRED_BYTES_INVALID:${String(requiredBytes)}`);
+  }
   if (freeBytes < requiredBytes) {
     throw new Error(
       `INSUFFICIENT_DISK_FREE: free=${String(freeBytes)} required=${String(requiredBytes)} shortfall=${String(requiredBytes - freeBytes)}`,
@@ -131,7 +161,10 @@ const scanPathBytes = (targetPath: string): PathByteScan => {
       missingEntries += 1;
       return;
     }
-    console.warn(`[storage-monitor] ${phase} scan failed path=${path}`, error);
+    throw new Error(
+      `STORAGE_SCAN_FAILED:path=${path}:phase=${phase}`,
+      error instanceof Error ? { cause: error } : undefined,
+    );
   };
 
   const deadlineReached = (): boolean => Date.now() - startedAt >= STORAGE_HEALTH_SCAN_MAX_MS;
