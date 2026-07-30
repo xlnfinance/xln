@@ -383,13 +383,14 @@ export const buildCanonicalRuntimeStateSnapshot = (
   const runtimeState = buildDurableRuntimeStateSnapshot(env, {
     includeCertifiedBoardNodes: options?.includeCertifiedBoardNodes === true,
   });
+  const browserVMState = options?.browserVMState ?? env.browserVMState;
   return {
     height: env.height,
     timestamp: env.timestamp,
     ...(env.runtimeId ? { runtimeId: env.runtimeId } : {}),
     ...(env.activeJurisdiction ? { activeJurisdiction: env.activeJurisdiction } : {}),
-    ...(options?.browserVMState ?? env.browserVMState
-      ? { browserVMState: options?.browserVMState ?? env.browserVMState }
+    ...(browserVMState
+      ? { browserVMState: structuredClone(browserVMState) }
       : {}),
     ...(env.runtimeConfig ? { runtimeConfig: structuredClone(env.runtimeConfig) } : {}),
     ...(runtimeState ? { runtimeState } : {}),

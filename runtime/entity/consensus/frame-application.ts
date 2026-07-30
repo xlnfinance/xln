@@ -1151,6 +1151,27 @@ type PostEntityTxPhases = {
   prunedOriginatedHtlcRoutes: number;
 };
 
+const refreshChangedAccountCommitments = (
+  state: EntityState,
+  context: ApplyEntityTxsInOrderContext,
+): void => {
+  const entityId = state.entityId.toLowerCase();
+  const changedAccountIds = new Set(context.proposableAccounts);
+  for (const change of context.storageChanges) {
+    if (change.family === 'account' && change.entityId.toLowerCase() === entityId) {
+      changedAccountIds.add(change.counterpartyId.toLowerCase());
+    }
+  }
+  // Every Account mutation contributes a leaf to the signed Entity root.
+  // `proposableAccounts` covers proposal-envelope changes, while
+  // `storageChanges` also covers transactions such as openAccount that create
+  // or mutate a leaf without proposing it until a later Entity frame.
+  for (const accountId of changedAccountIds) {
+    invalidateEntityAccountCommitment(state, accountId);
+    refreshAccountWorkIndex(state, accountId);
+  }
+};
+
 const applyPostEntityTxPhases = async (
   working: EntityFrameWorkingSet,
 ): Promise<PostEntityTxPhases> => {
@@ -1226,10 +1247,7 @@ const applyPostEntityTxPhases = async (
   // (pending frame, Hanko and resend state). Refresh each dirty leaf only
   // after that final mutation. Doing it earlier would preserve a valid-looking
   // but stale incremental Entity root.
-  for (const accountId of context.proposableAccounts) {
-    invalidateEntityAccountCommitment(currentEntityState, accountId);
-    refreshAccountWorkIndex(currentEntityState, accountId);
-  }
+  refreshChangedAccountCommitments(currentEntityState, context);
   currentEntityState = assignCertifiedOutputIdentities(
     currentEntityState,
     context.allOutputs,
