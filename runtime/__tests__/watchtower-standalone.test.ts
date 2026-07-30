@@ -24,7 +24,9 @@ test('watchtower disk decoder rejects partial lookup records instead of defaulti
     updatedAt: 0,
     receipts: [],
   });
-  expect(() => decodeStoredLookupDoc(partial)).toThrow('TOWER_STORED_BUNDLES_INVALID');
+  expect(() => decodeStoredLookupDoc(partial)).toThrow(
+    'TOWER_STORED_LOOKUP_FIELDS_INVALID:missing=bundles:extra=none',
+  );
 });
 
 afterEach(async () => {
