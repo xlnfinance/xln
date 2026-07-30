@@ -8,6 +8,8 @@ import {
   hasProposableAccount,
   refreshAccountWorkIndex,
 } from '../entity/consensus/account-work-index';
+import { hasEntityLeaderWork } from '../entity/consensus/leader';
+import type { EntityReplica } from '../entity/types';
 import { cloneEntityState } from '../entity/state-clone';
 import {
   entity,
@@ -77,5 +79,39 @@ describe('Entity Account work indexes', () => {
     expect([...getQueuedAccountIds(state)]).toEqual([counterparty]);
     expect([...getPendingAccountIds(state)]).toEqual([counterparty]);
     expect([...getRebalanceAccountIds(state)]).toEqual([counterparty]);
+  });
+
+  test('leader liveness never scans the Account map after index warmup', () => {
+    const self = entity('31');
+    const counterparty = entity('32');
+    const state = makeState(
+      self,
+      'validator',
+      makeJurisdiction('leader-work-index', 31_337, 'ca', 'cb'),
+      counterparty,
+    );
+    let iterations = 0;
+    class CountingAccountMap extends Map<string, typeof state.accounts extends Map<string, infer V> ? V : never> {
+      override *[Symbol.iterator](): MapIterator<[string, typeof state.accounts extends Map<string, infer V> ? V : never]> {
+        iterations += 1;
+        yield* super[Symbol.iterator]();
+      }
+    }
+    state.accounts = new CountingAccountMap(state.accounts);
+    getQueuedAccountIds(state);
+    getPendingAccountIds(state);
+    iterations = 0;
+
+    const replica = { state, mempool: [] } as EntityReplica;
+    expect(hasEntityLeaderWork(replica)).toBe(false);
+    expect(iterations).toBe(0);
+
+    state.accounts.get(counterparty)!.mempool.push({
+      type: 'direct_payment',
+      data: { tokenId: 1, amount: 1n },
+    });
+    refreshAccountWorkIndex(state, counterparty);
+    expect(hasEntityLeaderWork(replica)).toBe(true);
+    expect(iterations).toBe(0);
   });
 });

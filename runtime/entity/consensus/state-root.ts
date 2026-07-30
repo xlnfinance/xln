@@ -19,6 +19,7 @@ import {
   putEntityAccountCommitment,
   type EntityAccountCommitment,
 } from './account-commitment-tree';
+import { entityAccountCommitmentEntries } from '../account-candidate-map';
 
 const entityRootLog = createStructuredLogger('entity.state-root');
 
@@ -388,7 +389,7 @@ const buildEntityAccountsCommitmentFromState = (
   state: EntityState,
 ): EntityAccountCommitment => {
   const entries: Array<readonly [string, string]> = [];
-  for (const [rawCounterpartyId, account] of state.accounts) {
+  for (const [rawCounterpartyId, account] of entityAccountCommitmentEntries(state.accounts)) {
     const counterpartyId = rawCounterpartyId.trim().toLowerCase();
     if (rawCounterpartyId !== counterpartyId) {
       throw new Error(

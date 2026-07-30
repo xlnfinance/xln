@@ -100,6 +100,20 @@ export class EntityCandidateMap<K, V> extends Map<K, V> {
     }
   }
 
+  /**
+   * Read the visible overlay without claiming base values for mutation.
+   *
+   * Subclasses may expose this only to pure projections. Normal iteration
+   * deliberately keeps clone-on-read semantics for reducers that mutate
+   * nested values while iterating.
+   */
+  protected *visibleEntriesWithoutCloning(): MapIterator<[K, V]> {
+    for (const key of this.keys()) {
+      const value = this.#read(key);
+      if (value !== undefined) yield [key, value];
+    }
+  }
+
   override [Symbol.iterator](): MapIterator<[K, V]> {
     return this.entries();
   }

@@ -11,6 +11,15 @@ export class EntityAccountCandidateMap
   constructor(base: Map<string, AccountReplica>) {
     super(base, cloneAccountState, true);
   }
+
+  /**
+   * Canonical state-root projection is pure and must not turn every untouched
+   * Account into a mutable candidate. Do not use this iterator in reducers:
+   * untouched values still belong to the certified base State.
+   */
+  entriesForConsensusCommitment(): MapIterator<[string, AccountReplica]> {
+    return this.visibleEntriesWithoutCloning();
+  }
 }
 
 export const createEntityAccountCandidateMap = (
@@ -30,3 +39,10 @@ export const commitEntityAccountCandidate = (
   accounts instanceof EntityAccountCandidateMap
     ? accounts.commit()
     : accounts;
+
+export const entityAccountCommitmentEntries = (
+  accounts: Map<string, AccountReplica>,
+): MapIterator<[string, AccountReplica]> =>
+  accounts instanceof EntityAccountCandidateMap
+    ? accounts.entriesForConsensusCommitment()
+    : accounts.entries();

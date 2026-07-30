@@ -5,6 +5,7 @@ import type { ConsensusConfig, EntityLeaderState, EntityLeaderCertificate, Entit
 import { isFrozenBaseJPrefixRollAuthorized } from '../../jurisdiction/j-prefix-consensus';
 import { compareStableText, serializeTaggedJson } from '../../protocol/serialization';
 import { cloneIsolatedProposedEntityFrame } from '../input-clone';
+import { hasQueuedOrPendingAccountWork } from './account-work-index';
 
 export const ENTITY_LEADER_TIMEOUT_BASE_MS = 10_000;
 export const ENTITY_LEADER_TIMEOUT_MAX_MS = 60_000;
@@ -217,8 +218,5 @@ export const hasEntityLeaderWork = (replica: EntityReplica): boolean => {
     frozenBaseJPrefixRoll
   )
     return true;
-  for (const account of replica.state.accounts.values()) {
-    if (account.mempool.length > 0 || account.pendingFrame || account.pendingAccountInput) return true;
-  }
-  return false;
+  return hasQueuedOrPendingAccountWork(replica.state);
 };

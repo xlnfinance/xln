@@ -16,7 +16,10 @@ import {
   commitEntityAccountCandidate,
   EntityAccountCandidateMap,
 } from '../entity/account-candidate-map';
-import { computeCanonicalEntityConsensusStateHash } from '../entity/consensus/state-root';
+import {
+  computeCanonicalEntityConsensusStateHash,
+  computeCanonicalEntityConsensusStateHashCold,
+} from '../entity/consensus/state-root';
 import {
   applyEntityFrame,
   applyRuntimeOwnedEntityFrame,
@@ -212,6 +215,34 @@ describe('state cloning', () => {
 
     expect(source.accounts.get(counterpartyId)?.deltas.get(1)?.collateral).toBe(0n);
     expect((candidate.accounts as EntityAccountCandidateMap).stats().changed).toBe(1);
+  });
+
+  test('Entity root projection never claims untouched Accounts for mutation', () => {
+    const source = makeProjectionReplica().state as EntityState;
+    for (const byte of ['b1', 'b2', 'b3']) {
+      const counterpartyId = `0x${byte.repeat(32)}`;
+      const accountFixture = makeManualFallbackAccount();
+      delete accountFixture.uncloneable;
+      const account = accountFixture as unknown as AccountState;
+      account.leftEntity = source.entityId;
+      account.rightEntity = counterpartyId;
+      source.accounts.set(counterpartyId, account);
+    }
+
+    const sourceRoot = computeCanonicalEntityConsensusStateHashCold(source);
+    const candidate = createEntityFrameCandidateState(source);
+    const accounts = candidate.accounts as EntityAccountCandidateMap;
+    expect(accounts.stats().changed).toBe(0);
+    expect(computeCanonicalEntityConsensusStateHash(candidate)).toBe(sourceRoot);
+    expect(computeCanonicalEntityConsensusStateHashCold(candidate)).toBe(sourceRoot);
+    expect(accounts.stats().changed).toBe(0);
+
+    const touchedId = `0x${'b2'.repeat(32)}`;
+    candidate.accounts.get(touchedId)!.deltas.get(1)!.collateral = 7n;
+    expect(accounts.stats().changed).toBe(1);
+    const incremental = computeCanonicalEntityConsensusStateHash(candidate);
+    expect(incremental).toBe(computeCanonicalEntityConsensusStateHashCold(candidate));
+    expect(accounts.stats().changed).toBe(1);
   });
 
   test('Entity Account candidate preserves the full-clone root and promotes only at commit', () => {

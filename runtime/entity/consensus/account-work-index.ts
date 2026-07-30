@@ -145,6 +145,19 @@ export const getPendingAccountIds = (
 ): ReadonlySet<string> =>
   readPendingAccountIndex(state) ?? buildPendingAccountIndex(state);
 
+/**
+ * O(1) after the indexes' first lazy build.
+ *
+ * `pendingAccountInput` needs no separate index: Account validation requires
+ * it to exist exactly when `pendingFrame` exists. Duplicating that fact would
+ * add a second cache that can drift.
+ */
+export const hasQueuedOrPendingAccountWork = (
+  state: EntityState,
+): boolean =>
+  getQueuedAccountIds(state).size > 0 ||
+  getPendingAccountIds(state).size > 0;
+
 export const getRebalanceAccountIds = (
   state: EntityState,
 ): ReadonlySet<string> =>
