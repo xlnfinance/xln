@@ -2449,7 +2449,7 @@ const handleHealthRequest = async (
     pathname === '/api/health/full' ||
     (pathname === '/api/health' && url.searchParams.get('full') === '1');
   if (fullHealth) {
-    void getStorageHealth().catch(() => {});
+    await getStorageHealth();
     await refreshChildHealthForResponse();
     const marketMakerHealthOverride = activeResetOptions.enableMarketMaker
       ? await fetchMarketMakerFullHealthForResponse()
@@ -2467,7 +2467,7 @@ const handleHealthRequest = async (
     );
   }
   if (pathname === '/api/health') {
-    void getStorageHealth().catch(() => {});
+    await getStorageHealth();
     await refreshChildHealthForResponse();
     const health = await buildAggregatedHealthResponse();
     return new Response(
@@ -2478,7 +2478,7 @@ const handleHealthRequest = async (
     );
   }
   if (pathname === '/api/metrics') {
-    void getStorageHealth().catch(() => {});
+    await getStorageHealth();
     await refreshChildHealthForResponse();
     const health = await buildAggregatedHealthResponse();
     return new Response(buildPrometheusMetrics(health), {
@@ -2509,7 +2509,7 @@ const handleRuntimeImportRequest = async (
   ) {
     return null;
   }
-  void getStorageHealth().catch(() => {});
+  await getStorageHealth();
   await refreshChildHealthForResponse();
   const readiness = resolveRuntimeImportReadiness(
     await buildAggregatedHealthResponse(),
