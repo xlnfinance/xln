@@ -598,7 +598,7 @@ function createDisputeIndicator(
   glowCylinder.quaternion.setFromUnitVectors(axis, targetAxis);
 
   // Add pulsing animation data
-  (glowCylinder as any).userData = {
+  glowCylinder.userData = {
     isDisputeGlow: true,
     pulsePhase: 0
   };
@@ -629,7 +629,7 @@ function createDisputeIndicator(
   sword.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), swordDirection);
 
   // Add sword marker
-  (sword as any).userData = {
+  sword.userData = {
     isDisputeSword: true,
     initiator: startedByFrom ? 'from' : 'to'
   };
@@ -649,7 +649,7 @@ function createDisputeIndicator(
   const shield = new THREE.Mesh(shieldGeometry, shieldMaterial);
   shield.position.copy(shieldPos);
 
-  (shield as any).userData = {
+  shield.userData = {
     isDisputeShield: true,
     defender: startedByFrom ? 'to' : 'from'
   };

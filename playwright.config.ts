@@ -1,4 +1,9 @@
-import { defineConfig, devices } from '@playwright/test';
+import {
+  defineConfig,
+  devices,
+  type ScreenshotMode,
+  type TraceMode,
+} from '@playwright/test';
 import { existsSync } from 'node:fs';
 
 delete process.env['NO_COLOR'];
@@ -22,9 +27,35 @@ const PW_PROFILE = process.env['PW_PROFILE'] || '';
 const PW_SIMPLE_REPORTER = process.env['PW_SIMPLE_REPORTER'] === '1';
 const PW_OUTPUT_DIR = process.env['PW_OUTPUT_DIR'] || './tests/test-results';
 const PW_FAST = process.env['PW_FAST'] === '1';
-const PW_TRACE = process.env['PW_TRACE'] || (PW_FAST ? 'off' : 'on-first-retry');
-const PW_SCREENSHOT = process.env['PW_SCREENSHOT'] || (PW_FAST ? 'off' : 'only-on-failure');
-const PW_VIDEO = process.env['PW_VIDEO'] || 'on';
+const TRACE_MODES: readonly TraceMode[] = [
+  'off', 'on', 'retain-on-failure', 'on-first-retry', 'on-all-retries',
+  'retain-on-first-failure', 'retain-on-failure-and-retries',
+];
+const SCREENSHOT_MODES: readonly ScreenshotMode[] = [
+  'off', 'on', 'only-on-failure', 'on-first-failure',
+];
+const VIDEO_MODES = ['off', 'on', 'retain-on-failure', 'on-first-retry'] as const;
+type VideoMode = typeof VIDEO_MODES[number];
+
+const isTraceMode = (value: string): value is TraceMode =>
+  TRACE_MODES.some(mode => mode === value);
+const isScreenshotMode = (value: string): value is ScreenshotMode =>
+  SCREENSHOT_MODES.some(mode => mode === value);
+const isVideoMode = (value: string): value is VideoMode =>
+  VIDEO_MODES.some(mode => mode === value);
+
+const traceMode = process.env['PW_TRACE'] ?? (PW_FAST ? 'off' : 'on-first-retry');
+if (!isTraceMode(traceMode)) throw new Error(`PLAYWRIGHT_MODE_INVALID:PW_TRACE:${traceMode}`);
+const screenshotMode = process.env['PW_SCREENSHOT'] ?? (PW_FAST ? 'off' : 'only-on-failure');
+if (!isScreenshotMode(screenshotMode)) {
+  throw new Error(`PLAYWRIGHT_MODE_INVALID:PW_SCREENSHOT:${screenshotMode}`);
+}
+const videoMode = process.env['PW_VIDEO'] ?? 'on';
+if (!isVideoMode(videoMode)) throw new Error(`PLAYWRIGHT_MODE_INVALID:PW_VIDEO:${videoMode}`);
+
+const PW_TRACE = traceMode;
+const PW_SCREENSHOT = screenshotMode;
+const PW_VIDEO = videoMode;
 const PW_REPORTER = process.env['PW_REPORTER'];
 const PW_TEST_TIMEOUT_RAW = Number(process.env['PW_TEST_TIMEOUT'] || '60000');
 const PW_TEST_TIMEOUT = Number.isFinite(PW_TEST_TIMEOUT_RAW) && PW_TEST_TIMEOUT_RAW > 0
@@ -92,13 +123,13 @@ export default defineConfig({
     baseURL: PW_BASE_URL,
     headless: process.env['HEADED'] !== 'true', // Headless by default, use HEADED=true for visual
     ignoreHTTPSErrors: true, // Ignore self-signed cert errors
-    trace: PW_TRACE as any,
-    screenshot: PW_SCREENSHOT as any,
+    trace: PW_TRACE,
+    screenshot: PW_SCREENSHOT,
     viewport: PW_VIEWPORT,
     deviceScaleFactor: 1,
     video: PW_VIDEO === 'off'
       ? 'off'
-      : { mode: PW_VIDEO as 'on' | 'retain-on-failure' | 'on-first-retry', size: PW_VIEWPORT },
+      : { mode: PW_VIDEO, size: PW_VIEWPORT },
     launchOptions: {
       args: [
         '--disable-gpu',
