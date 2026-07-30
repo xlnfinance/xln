@@ -4,17 +4,24 @@ import { getHealthStatus } from '../server/health';
 import { startJurisdictionWatchers } from '../runtime';
 import type { RuntimeReplica } from '../runtime/types';
 import type { JReplica } from '../types/jurisdiction-runtime';
+import { attachLiveJAdapter } from '../runtime/live-jadapters';
 
-const makeEnv = (replicas: Array<[string, JReplica]>): RuntimeReplica => ({
+const makeEnv = (
+  replicas: Array<[string, JReplica, ReturnType<typeof makeAdapter>]>,
+): RuntimeReplica => {
+  const env = {
   runtimeId: 'test-runtime',
   state: {
   height: 0n,
   timestamp: 0,
   eReplicas: new Map(),
-  jReplicas: new Map(replicas),
+  jReplicas: new Map(replicas.map(([name, replica]) => [name, replica])),
   },
   infrastructure: {},
-} as unknown as RuntimeReplica);
+  } as unknown as RuntimeReplica;
+  for (const [name, , adapter] of replicas) attachLiveJAdapter(env, name, adapter as never);
+  return env;
+};
 
 const makeAdapter = (options?: { watching?: boolean }) => {
   let watching = options?.watching === true;
@@ -62,13 +69,12 @@ const makeReplica = (adapter: ReturnType<typeof makeAdapter>, blockNumber = 0n):
   contracts: adapter.addresses,
   rpcs: ['http://127.0.0.1:8545'],
   chainId: 31337,
-  jadapter: adapter as never,
 });
 
 describe('canonical J-watcher ownership', () => {
   test('health reports the J-watcher cursor without direct provider RPC reads', async () => {
     const adapter = makeAdapter({ watching: true });
-    const env = makeEnv([['arrakis', makeReplica(adapter, 42n)]]);
+    const env = makeEnv([['arrakis', makeReplica(adapter, 42n), adapter]]);
 
     const health = await getHealthStatus(env);
 
@@ -83,8 +89,8 @@ describe('canonical J-watcher ownership', () => {
     const primary = makeAdapter();
     const duplicate = makeAdapter({ watching: true });
     const env = makeEnv([
-      ['primary', makeReplica(primary)],
-      ['duplicate', makeReplica(duplicate)],
+      ['primary', makeReplica(primary), primary],
+      ['duplicate', makeReplica(duplicate), duplicate],
     ]);
 
     startJurisdictionWatchers(env);

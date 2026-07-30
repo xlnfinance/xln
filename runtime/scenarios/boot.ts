@@ -15,6 +15,11 @@ import { isLoopbackUrl } from '../networking/loopback-url';
 import { commitRuntimeInput, ensureSignerKeysFromSeed, requireRuntimeSeed, processJEvents, converge, setScenarioStorageEnabled } from './helpers';
 import { getCertifiedBoardStackKey } from '../jurisdiction/board-registry';
 import { registrationEvidenceKey } from '../jurisdiction/registration-evidence';
+import {
+  attachLiveJAdapter,
+  getLiveJAdapter,
+  getLiveJAdapterEntries,
+} from '../runtime/live-jadapters';
 
 export type { JAdapterMode };
 
@@ -326,7 +331,6 @@ export async function bootScenario(config: ScenarioConfig): Promise<ScenarioBoot
   // 3. Create JAdapter (creates BrowserVM or connects to RPC)
   const jReplicaName = config.jurisdictionName ?? `${config.name} Demo`;
   const jadapter = await ensureJAdapter(env, config.mode, { deployStack: true });
-  env.jAdapter = jadapter;
   const defaultDisputeDelayBlocks = await ensureLocalDisputeDelayConfigured(jadapter, jReplicaName);
 
   // 4. Create jReplica
@@ -526,13 +530,12 @@ export async function fundEntities(
  * Scenarios call this to access the adapter without passing it separately.
  */
 export function getScenarioJAdapter(env: RuntimeReplica): JAdapter {
-  const jReplica = env.state.jReplicas?.get(env.activeJurisdiction || '');
-  if (jReplica?.jadapter) {
-    return jReplica.jadapter;
+  if (env.activeJurisdiction) {
+    const active = getLiveJAdapter(env, env.activeJurisdiction);
+    if (active) return active;
   }
-  for (const jr of env.state.jReplicas?.values() || []) {
-    if (jr.jadapter) return jr.jadapter;
-  }
+  const first = getLiveJAdapterEntries(env)[0]?.adapter;
+  if (first) return first;
   throw new Error(`${SCENARIO_JADAPTER_MISSING}: call bootScenario() first`);
 }
 
@@ -586,7 +589,6 @@ export function bindScenarioJReplica(env: RuntimeReplica, replica: JReplica, ada
     throw new Error(`SCENARIO_J_CONFIRMATION_DEPTH_INVALID:${String(confirmationDepth)}`);
   }
   Object.assign(replica, {
-    jadapter: adapter,
     chainId,
     watcherConfirmationDepth: Number(confirmationDepth),
     depositoryAddress: adapter.addresses.depository,
@@ -594,7 +596,7 @@ export function bindScenarioJReplica(env: RuntimeReplica, replica: JReplica, ada
     entityProviderDeploymentBlock: adapter.entityProviderDeploymentBlock,
     contracts: { ...adapter.addresses },
   });
-  env.jAdapter = adapter;
+  attachLiveJAdapter(env, replica.name, adapter);
   return replica;
 }
 
@@ -634,7 +636,7 @@ export async function createNumberedEntity(
   const signer = `${entityNumber}`;
   const boardIdentity = computeBoardIdentity(env, signer);
   const entityId = boardIdentity.boardHash;
-  env.jAdapter?.registerEntityWallet?.(
+  getScenarioJAdapter(env).registerEntityWallet?.(
     entityId,
     ethers.hexlify(boardIdentity.privateKey),
   );

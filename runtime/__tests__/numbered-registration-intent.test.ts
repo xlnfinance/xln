@@ -19,6 +19,7 @@ import {
 import type { RuntimeReplica } from '../runtime/types';
 import type { JurisdictionConfig } from '../entity/types';
 import type { JReplica } from '../types/jurisdiction-runtime';
+import { attachLiveJAdapter } from '../runtime/live-jadapters';
 
 const attach = (
   env: RuntimeReplica,
@@ -39,10 +40,9 @@ const attach = (
     entityProviderDeploymentBlock: adapter.entityProviderDeploymentBlock,
     watcherConfirmationDepth: 0,
     contracts: { ...adapter.addresses },
-    jadapter: adapter,
   };
-  env.jAdapter = adapter;
   env.state.jReplicas.set(jurisdiction.name, replica);
+  attachLiveJAdapter(env, jurisdiction.name, adapter);
 };
 
 describe('durable numbered registration intent', () => {

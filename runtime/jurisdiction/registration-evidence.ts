@@ -144,7 +144,7 @@ export const computeRegistrationEvidenceClaimHash = (evidence: CertifiedRegistra
   );
 
 const jReplicaStackKey = (replica: JReplica): string | null => {
-  const chainId = replica.chainId ?? replica.jadapter?.chainId;
+  const chainId = replica.chainId;
   const depositoryAddress = replica.depositoryAddress ?? replica.contracts?.depository;
   const entityProviderAddress = replica.entityProviderAddress ?? replica.contracts?.entityProvider;
   if (!chainId || !depositoryAddress || !entityProviderAddress) return null;

@@ -10,17 +10,16 @@ import { getWallClockMs } from '../infra/time';
 import { buildDebtEnforcementRuntimeInputFromProjection } from './debt-enforcement-input';
 import type { DebtEnforcementProjectionRuntimeInputParams } from './debt-enforcement-input';
 import { deriveCanonicalCrossJurisdictionBookOwnerForLegs } from '../extensions/cross-j/market';
+import { getLiveJAdapter } from './live-jadapters';
 
 export function getActiveJAdapter(env: RuntimeReplica): JAdapter | null {
   if (!env.activeJurisdiction) return null;
-  const jReplica = env.state.jReplicas?.get(env.activeJurisdiction);
-  return jReplica?.jadapter || null;
+  return getLiveJAdapter(env, env.activeJurisdiction) ?? null;
 }
 
 export function getEntityJAdapter(env: RuntimeReplica, entityId: string, signerId?: string): JAdapter | null {
   const jurisdiction = requireEntityRuntimeJurisdictionConfig(env, entityId, signerId);
-  const jReplica = env.state.jReplicas?.get(jurisdiction.name);
-  return jReplica?.jadapter || null;
+  return getLiveJAdapter(env, jurisdiction.name) ?? null;
 }
 
 export type CrossJurisdictionSwapSubmitParams = {

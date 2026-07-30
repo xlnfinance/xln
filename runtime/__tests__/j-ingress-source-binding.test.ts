@@ -5,6 +5,10 @@ import { join } from 'node:path';
 
 import { createJAdapter } from '../jadapter';
 import {
+  attachLiveJAdapter,
+  getLiveJAdapter,
+} from '../runtime/live-jadapters';
+import {
   applyJEventsToEnv,
   buildJEventsRuntimeInput,
 } from '../jadapter/manual-event-ingress';
@@ -268,19 +272,28 @@ describe('manual J-event ingress source binding', () => {
       const sourceA = {
         ...jReplica(chainA),
         contracts: { ...adapterA.addresses },
-        jadapter: adapterA,
       } satisfies JReplica;
       const sourceB = {
         ...jReplica(chainB),
         contracts: { ...adapterB.addresses },
-        jadapter: adapterB,
       } satisfies JReplica;
+      const isolatedA = createEmptyEnv('live-jadapter-runtime-a');
+      const isolatedB = createEmptyEnv('live-jadapter-runtime-b');
+      isolatedA.state.jReplicas.set('shared-name', sourceA);
+      isolatedB.state.jReplicas.set('shared-name', sourceB);
+      attachLiveJAdapter(isolatedA, 'shared-name', adapterA);
+      attachLiveJAdapter(isolatedB, 'shared-name', adapterB);
+      expect(getLiveJAdapter(isolatedA, 'shared-name')).toBe(adapterA);
+      expect(getLiveJAdapter(isolatedB, 'shared-name')).toBe(adapterB);
+      expect(isolatedA.state.jReplicas.get('shared-name')).not.toHaveProperty('jadapter');
+      expect(isolatedB.state.jReplicas.get('shared-name')).not.toHaveProperty('jadapter');
       const mismatchedEnv = createEmptyEnv('manual-j-ingress-real-stack-mismatch');
       mismatchedEnv.state.jReplicas.set(chainB.name, {
         ...sourceB,
         entityProviderAddress: address('ff'),
         contracts: { ...sourceB.contracts, entityProvider: address('ff') },
       });
+      attachLiveJAdapter(mismatchedEnv, chainB.name, adapterB);
       expect(() => bindLocalJEventIngressSource(
         mismatchedEnv,
         mismatchedEnv.state.jReplicas.get(chainB.name),
@@ -288,6 +301,8 @@ describe('manual J-event ingress source binding', () => {
       )).toThrow('J_EVENT_LOCAL_SOURCE_ENTITY_PROVIDER_MISMATCH');
       const env = createEmptyEnv('manual-j-ingress-real-two-stack');
       env.state.jReplicas = new Map([[chainA.name, sourceA], [chainB.name, sourceB]]);
+      attachLiveJAdapter(env, chainA.name, adapterA);
+      attachLiveJAdapter(env, chainB.name, adapterB);
       const entityA = entityId('71');
       const entityB = entityId('72');
       env.state.eReplicas.set(`${entityA}:1`, entityReplica(entityA, '1', chainA));

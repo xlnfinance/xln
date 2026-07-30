@@ -6,6 +6,7 @@
  */
 
 import type { RuntimeReplica } from '../runtime/types';
+import { getLiveJAdapterEntries } from '../runtime/live-jadapters';
 import { createHash } from 'node:crypto';
 import { safeStringify } from '../protocol/serialization';
 import { clearSignerKeys } from '../account/crypto';
@@ -433,11 +434,9 @@ const cleanupScenarioEnv = async (env: RuntimeReplica): Promise<void> => {
   const { closeRuntimeDb, closeInfraDb, stopRuntimeLoopAndWait } = await import('../runtime');
   await stopRuntimeLoopAndWait(env, 5_000);
 
-  const adapters = new Set<unknown>();
-  if (env.jAdapter) adapters.add(env.jAdapter);
-  for (const replica of env.state.jReplicas?.values() ?? []) {
-    if (replica.jadapter) adapters.add(replica.jadapter);
-  }
+  const adapters = new Set<unknown>(
+    getLiveJAdapterEntries(env).map(({ adapter }) => adapter),
+  );
 
   for (const adapter of adapters) {
     const close = (adapter as { close?: () => Promise<void> | void }).close;

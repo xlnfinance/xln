@@ -3,6 +3,7 @@ import { ethers } from 'ethers';
 import type { RuntimeReplica } from '../runtime/types';
 import type { JReplica } from '../types/jurisdiction-runtime';
 import type { JAdapter } from './types';
+import { getLiveJAdapter } from '../runtime/live-jadapters';
 
 export type LocalJEventIngressSource = JAdapter | JReplica;
 
@@ -49,8 +50,8 @@ export const bindLocalJEventIngressSource = (
   if (!source || typeof source !== 'object') {
     throw new Error(`J_EVENT_LOCAL_SOURCE_REQUIRED:${context}`);
   }
-  const matches = [...(env.state.jReplicas?.entries() ?? [])].filter(([, replica]) =>
-    replica === source || replica.jadapter === source
+  const matches = [...(env.state.jReplicas?.entries() ?? [])].filter(([name, replica]) =>
+    replica === source || getLiveJAdapter(env, name) === source
   );
   if (matches.length === 0) {
     throw new Error(`J_EVENT_LOCAL_SOURCE_NOT_REGISTERED:${context}`);
@@ -63,7 +64,7 @@ export const bindLocalJEventIngressSource = (
   const chainId = requireChainId(replica.chainId, context);
   const depositoryAddress = requireAddress(replicaDepository(replica), 'DEPOSITORY', context);
   const entityProviderAddress = requireAddress(replicaEntityProvider(replica), 'ENTITY_PROVIDER', context);
-  const adapter = replica.jadapter;
+  const adapter = getLiveJAdapter(env, replicaName);
   if (adapter) {
     const adapterChainId = requireChainId(adapter.chainId, `${context}:adapter`);
     const adapterDepository = requireAddress(adapter.addresses?.depository, 'DEPOSITORY', `${context}:adapter`);

@@ -160,29 +160,19 @@ export const buildRuntimeJurisdictionsJson = async (env?: RuntimeReplica | null)
           entityProvider?: string;
           deltaTransformer?: string;
         };
-        jadapter?: {
-          entityProviderDeploymentBlock?: number;
-          addresses?: {
-            account?: string;
-            depository?: string;
-            entityProvider?: string;
-            deltaTransformer?: string;
-          };
-        };
       }
     | undefined;
   if (!replica) return null;
 
-  const addresses = replica.jadapter?.addresses ?? {};
-  const account = String(addresses.account || replica.contracts?.account || '').trim();
+  const account = String(replica.contracts?.account || '').trim();
   const depository =
-    String(addresses.depository || replica.depositoryAddress || replica.contracts?.depository || '').trim();
+    String(replica.depositoryAddress || replica.contracts?.depository || '').trim();
   const entityProvider =
-    String(addresses.entityProvider || replica.entityProviderAddress || replica.contracts?.entityProvider || '').trim();
-  const deltaTransformer = String(addresses.deltaTransformer || replica.contracts?.deltaTransformer || '').trim();
+    String(replica.entityProviderAddress || replica.contracts?.entityProvider || '').trim();
+  const deltaTransformer = String(replica.contracts?.deltaTransformer || '').trim();
   if (!account || !depository || !entityProvider || !deltaTransformer) return null;
   const entityProviderDeploymentBlock = Number(
-    replica.entityProviderDeploymentBlock ?? replica.jadapter?.entityProviderDeploymentBlock,
+    replica.entityProviderDeploymentBlock,
   );
   if (!Number.isSafeInteger(entityProviderDeploymentBlock) || entityProviderDeploymentBlock < 1) {
     throw new Error(

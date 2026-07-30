@@ -78,6 +78,7 @@ import {
 import { createTokenCatalogController } from './token-catalog';
 import { buildHubDiscoveryPayload } from './hub-discovery';
 import { buildDebugEntitiesPayload, buildKnownProfileBundle } from './gossip-profiles';
+import { attachLiveJAdapter } from '../runtime/live-jadapters';
 import { maybeHandleDebugDumpsRequest } from './debug-dumps';
 import { handleCreditRequest } from './credit-request';
 import { handleLendingStateRequest } from './lending';
@@ -1033,8 +1034,8 @@ const registerServerJurisdiction = async (
     contracts: adapter.addresses,
     rpcs: registration.rpcs,
     chainId: adapter.chainId,
-    jadapter: adapter,
   });
+  attachLiveJAdapter(env, registration.name, adapter);
   serverLog.info('jreplica.registered', { name: registration.name });
 };
 

@@ -4,13 +4,14 @@ import type { JAdapter } from '../jadapter/types';
 import { waitForJurisdictionAdapter } from '../orchestrator/mm-node';
 import type { RuntimeReplica } from '../runtime/types';
 import type { JReplica } from '../types/jurisdiction-runtime';
+import { attachLiveJAdapter } from '../runtime/live-jadapters';
 
 const adapter = (chainId: number, depository: string): JAdapter => ({
   chainId,
   addresses: { depository },
 } as JAdapter);
 
-const replica = (name: string, chainId: number, depository: string, jadapter: JAdapter): JReplica => ({
+const replica = (name: string, chainId: number, depository: string): JReplica => ({
   name,
   chainId,
   depositoryAddress: depository,
@@ -28,7 +29,6 @@ const replica = (name: string, chainId: number, depository: string, jadapter: JA
   blockDelayMs: 300,
   lastBlockTimestamp: 0,
   position: { x: 0, y: 0, z: 0 },
-  jadapter,
 } as JReplica);
 
 const tronConfig = (depository: string) => ({
@@ -52,11 +52,13 @@ test('market maker readiness returns the requested jurisdiction adapter, not the
     activeJurisdiction: 'arrakis',
     state: {
   jReplicas: new Map([
-        ['arrakis', replica('arrakis', 31_337, arrakisDepository, arrakisAdapter)],
-        ['Tron', replica('Tron', 31_338, tronDepository, tronAdapter)],
+        ['arrakis', replica('arrakis', 31_337, arrakisDepository)],
+        ['Tron', replica('Tron', 31_338, tronDepository)],
       ]),
     },
   } as RuntimeReplica;
+  attachLiveJAdapter(env, 'arrakis', arrakisAdapter);
+  attachLiveJAdapter(env, 'Tron', tronAdapter);
 
   expect(await waitForJurisdictionAdapter(env, tronConfig(tronDepository), 1)).toBe(tronAdapter);
 });
@@ -69,11 +71,13 @@ test('market maker readiness fails closed on duplicate live replicas for one sta
     activeJurisdiction: 'arrakis',
     state: {
   jReplicas: new Map([
-        ['Tron', replica('Tron', 31_338, depository, first)],
-        ['duplicate', replica('duplicate', 31_338, depository, second)],
+        ['Tron', replica('Tron', 31_338, depository)],
+        ['duplicate', replica('duplicate', 31_338, depository)],
       ]),
     },
   } as RuntimeReplica;
+  attachLiveJAdapter(env, 'Tron', first);
+  attachLiveJAdapter(env, 'duplicate', second);
 
   await expect(waitForJurisdictionAdapter(env, tronConfig(depository), 1))
     .rejects.toThrow('JURISDICTION_ADAPTER_AMBIGUOUS');

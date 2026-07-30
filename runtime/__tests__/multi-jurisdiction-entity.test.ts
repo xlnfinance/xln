@@ -36,6 +36,7 @@ import { installCanonicalRegistrationEvidence } from './helpers/registration-evi
 import { createTestJReplica } from './helpers/j-replica';
 import { resolveDbPath } from '../storage/runtime-dbs';
 import { SigningKey, computeAddress } from 'ethers';
+import { attachLiveJAdapter } from '../runtime/live-jadapters';
 
 const addr = (byte: string): string => `0x${byte.repeat(20)}`;
 const entity = (byte: string): string => `0x${byte.repeat(32)}`;
@@ -91,8 +92,8 @@ const installJurisdiction = (env: RuntimeReplica, jurisdiction: JurisdictionConf
     },
     ...(jurisdiction.blockTimeMs !== undefined ? { blockTimeMs: jurisdiction.blockTimeMs } : {}),
     watcherConfirmationDepth: 0,
-    ...(adapter ? { jadapter: adapter as JAdapter } : {}),
   }));
+  if (adapter) attachLiveJAdapter(env, jurisdiction.name, adapter as JAdapter);
 };
 
 const makeConfig = (signerId: string, jurisdiction: JurisdictionConfig): ConsensusConfig => ({

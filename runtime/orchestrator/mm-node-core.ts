@@ -24,6 +24,11 @@ import {
 import { crossJurisdictionBookOwnerRef } from '../extensions/cross-j/orderbook';
 import { createStructuredLogger } from '../infra/logger';
 import type { JAdapter, JTokenInfo } from '../jadapter/types';
+import {
+  attachLiveJAdapter,
+  getLiveJAdapter,
+  getLiveJAdapterEntries,
+} from '../runtime/live-jadapters';
 import { getJurisdictionIdentityRef } from '../jurisdiction/jurisdiction-runtime';
 import { getJurisdictionStackId, requireJurisdictionChainId } from '../jurisdiction/jurisdiction-stack';
 import { type DirectWebSocket } from '../networking/direct-runtime-bun';
@@ -571,9 +576,9 @@ const hasJurisdictionReplica = (env: RuntimeReplica, jurisdiction: JurisdictionC
 };
 
 const hasLiveJurisdictionAdapter = (env: RuntimeReplica, jurisdiction: JurisdictionConfig): boolean => {
-  for (const replica of env.state.jReplicas?.values?.() || []) {
+  for (const [name, replica] of env.state.jReplicas?.entries?.() || []) {
     if (sameImportedJurisdiction(jurisdiction, replica)) {
-      return Boolean(replica?.jadapter);
+      return Boolean(getLiveJAdapter(env, name));
     }
   }
   return false;
@@ -673,9 +678,9 @@ export const waitForTokenCatalog = async (jadapter: JAdapter, rounds = 80): Prom
 };
 
 const findJurisdictionAdapters = (env: RuntimeReplica, jurisdiction: JurisdictionConfig): JAdapter[] =>
-  [...(env.state.jReplicas?.values?.() ?? [])]
-    .filter(replica => sameImportedJurisdiction(jurisdiction, replica) && Boolean(replica.jadapter))
-    .map(replica => replica.jadapter!);
+  getLiveJAdapterEntries(env)
+    .filter(({ name }) => sameImportedJurisdiction(jurisdiction, env.state.jReplicas.get(name)))
+    .map(({ adapter }) => adapter);
 
 export const waitForJurisdictionAdapter = async (
   env: RuntimeReplica,
@@ -725,7 +730,7 @@ export const ensureJurisdictionReplica = (env: RuntimeReplica, jadapter: JAdapte
   };
   replica.rpcs = [rpcUrl];
   replica.chainId = requireJurisdictionChainId(jadapter.chainId, 'MM_JADAPTER_CHAIN_ID_INVALID');
-  replica.jadapter = jadapter;
+  attachLiveJAdapter(env, activeName, jadapter);
 };
 
 const hubBaseName = (name: string): string =>

@@ -440,6 +440,14 @@ export interface RuntimeState {
 export interface RuntimeInfrastructure {
   /** Validator-local secrets; never enter Runtime State, WAL, or history. */
   entityEncryptionPrivateKeys?: Map<string, string>;
+  /**
+   * Process-local chain clients, keyed by canonical jurisdiction name.
+   *
+   * Providers, signers, sockets, and callbacks are capabilities, not State.
+   * Keeping them beside JReplica would make the object non-deterministic and
+   * force every hash/snapshot path to remember an exclusion list.
+   */
+  liveJAdapters?: Map<string, import('../jadapter/types').JAdapter>;
   lifecyclePhase?: 'booting' | 'running' | 'quiescing' | 'stopped' | 'halted';
   loopActive?: boolean;
   halted?: boolean;
@@ -677,10 +685,6 @@ export interface RuntimeReplica {
   // Isolated BrowserVM instance per runtime (prevents cross-runtime state leakage)
   browserVM?: import('../jadapter/types').BrowserVMProvider | null; // BrowserVMProvider instance for this runtime (DEPRECATED: use jAdapter)
   browserVMState?: BrowserVMState; // Serialized BrowserVM state for time travel
-
-  // Unified J-Machine adapter (preferred over the BrowserVM compatibility field)
-  // Use: const jAdapter = env.jAdapter ?? await createJAdapter({ mode: 'browservm', chainId: 31337 })
-  jAdapter?: import('../jadapter/types').JAdapter;
 
   // Active jurisdiction
   activeJurisdiction?: string | undefined; // Currently active J-replica name

@@ -8,6 +8,7 @@ import { isBatchEmpty } from '../jurisdiction/batch';
 import { indexReserveUpdatedEvents } from '../jurisdiction/event-evidence';
 import { classifyJAdapterFailure } from '../jadapter/failure';
 import { ensureLiveJAdapterForReplica } from './infra';
+import { getLiveJAdapter } from './live-jadapters';
 import { createStructuredLogger, shortId } from '../infra/logger';
 import {
   findJSubmitReplica,
@@ -304,7 +305,7 @@ const resolveJSubmitAdapter = async (
     return null;
   }
 
-  let adapter = typeof replica.jadapter?.submitTx === 'function' ? replica.jadapter : null;
+  let adapter = getLiveJAdapter(env, jurisdictionName) ?? null;
   try {
     adapter ??= await ensureLiveJAdapterForReplica(env, jurisdictionName, {
       allowBrowserVm: typeof window !== 'undefined',

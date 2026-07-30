@@ -21,6 +21,7 @@ import {
 } from '../orchestrator/node-runtime-quiesce';
 import { resolveDbPath } from '../storage/runtime-dbs';
 import type { JReplica } from '../types/jurisdiction-runtime';
+import { attachLiveJAdapter } from '../runtime/live-jadapters';
 import type { JurisdictionConfig } from '../entity/types';
 
 const removeRuntimeStorage = (basePath: string): void => {
@@ -83,8 +84,8 @@ describe('node runtime quiesce', () => {
       contracts: adapter.addresses,
       rpcs: ['http://127.0.0.1:8545'],
       chainId: adapter.chainId,
-      jadapter: adapter,
     } as unknown as JReplica);
+    attachLiveJAdapter(env, 'quiesce-race', adapter as never);
 
     startRuntimeLoop(env, { tickDelayMs: 0 });
     expect(startCount).toBe(1);

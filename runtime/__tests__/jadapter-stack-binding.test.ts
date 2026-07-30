@@ -111,10 +111,6 @@ const replicaForAddresses = (
   entityProviderAddress: entityProvider,
   entityProviderDeploymentBlock: adapter.entityProviderDeploymentBlock,
   contracts: { ...adapter.addresses, entityProvider },
-  jadapter: {
-    chainId: CHAIN_ID,
-    addresses: { ...adapter.addresses, entityProvider },
-  },
 }) as JReplica;
 
 test('RPC fromReplica rejects a live EntityProvider not bound to the Depository', async () => {

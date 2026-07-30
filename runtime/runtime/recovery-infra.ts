@@ -8,6 +8,7 @@ import type { RuntimeReplica, RuntimeTx } from './types';
 import type { JReplica } from '../types/jurisdiction-runtime';
 import { createStructuredLogger } from '../infra/logger';
 import { ensureLiveJAdapterForReplica } from './infra';
+import { getLiveJAdapter } from './live-jadapters';
 
 const runtimeLog = createStructuredLogger('runtime');
 
@@ -77,7 +78,11 @@ const registerSingleSignerWallet = (
     const value = String(rpc || '').trim().toLowerCase();
     return value.length > 0 && !value.startsWith('browservm:');
   });
-  const adapter = jurisdictionReplica.jadapter;
+  const jurisdictionName = [...env.state.jReplicas]
+    .find(([, candidate]) => candidate === jurisdictionReplica)?.[0];
+  const adapter = jurisdictionName
+    ? getLiveJAdapter(env, jurisdictionName)
+    : undefined;
   if (!adapter) {
     // RPC submission carries an assembled Hanko and is signed by the
     // jurisdiction transaction sender. Entity private keys must never leak

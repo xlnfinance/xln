@@ -97,7 +97,7 @@ const resolveJurisdiction = (env: RuntimeReplica, requestedName?: string) => {
   const blockTimeMs = requireJurisdictionBlockTimeMs({ name, blockTimeMs: jr.blockTimeMs });
   return {
     name,
-    chainId: Number(jr.jadapter?.chainId ?? jr.chainId ?? 0),
+    chainId: Number(jr.chainId ?? 0),
     address: jr.rpcs?.[0] ?? '',
     entityProviderAddress: jr.entityProviderAddress ?? jr.contracts?.entityProvider ?? '',
     depositoryAddress: jr.depositoryAddress ?? jr.contracts?.depository ?? '',

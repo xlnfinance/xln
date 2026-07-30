@@ -26,6 +26,7 @@ import {
   buildDurableRuntimeMachineSnapshot,
   restoreDurableRuntimeSnapshot,
 } from '../storage/wal/snapshot';
+import { attachLiveJAdapter } from '../runtime/live-jadapters';
 
 const CHAIN_ID = 31_337;
 const RUNTIME_SEED = 'j-watcher-backlog-drain';
@@ -225,14 +226,13 @@ describe('RPC J-watcher backlog drain', () => {
 
     const jurisdictionName = 'Backlog Drain';
     const jReplica = createJReplica(env, jurisdictionName, adapter.addresses.depository);
-    jReplica.jadapter = adapter;
     jReplica.depositoryAddress = adapter.addresses.depository;
     jReplica.entityProviderAddress = adapter.addresses.entityProvider;
     jReplica.chainId = CHAIN_ID;
     jReplica.watcherConfirmationDepth = 0;
     jReplica.rpcs = [managedAnvil.rpcUrl];
     jReplica.contracts = { ...adapter.addresses };
-    env.jAdapter = adapter;
+    attachLiveJAdapter(env, jurisdictionName, adapter);
     adapter.startWatching(env);
 
     const jurisdiction = createJurisdictionConfig(

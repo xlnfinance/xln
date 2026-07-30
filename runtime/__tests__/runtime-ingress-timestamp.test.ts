@@ -24,6 +24,8 @@ import type { EntityReplica, JurisdictionConfig } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';
 import type { JurisdictionEvent } from '../types/jurisdiction-events';
 import { getWallClockMs } from '../infra/time';
+import { attachLiveJAdapter } from '../runtime/live-jadapters';
+import type { JAdapter } from '../jadapter/types';
 
 const TEST_JURISDICTION = {
   address: `0x${'22'.repeat(20)}`,
@@ -64,8 +66,8 @@ const addTestJurisdiction = (env: RuntimeReplica, name = TEST_JURISDICTION.name,
     },
     rpcs: ['http://localhost:8545'],
     chainId: TEST_JURISDICTION.chainId,
-    ...(jadapter ? { jadapter: jadapter as never } : {}),
   });
+  if (jadapter) attachLiveJAdapter(env, name, jadapter as JAdapter);
 };
 
 const makeReplica = (

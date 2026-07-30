@@ -9,6 +9,7 @@ import {
 } from './watcher';
 import { safeStringify } from '../protocol/serialization';
 import { scheduler } from 'node:timers/promises';
+import { getLiveJAdapterEntries } from '../runtime/live-jadapters';
 
 export const J_WATCHER_DRAIN_STALL_TIMEOUT_MS = 60_000;
 const J_WATCHER_DRAIN_RETRY_DELAY_MS = 100;
@@ -69,9 +70,8 @@ const requireSafeBlock = (value: unknown, label: string): number => {
 
 const getUniqueWatcherAdapters = (env: RuntimeReplica): JAdapter[] => {
   const adapters = new Set<JAdapter>();
-  for (const replica of env.state.jReplicas.values()) {
-    const adapter = replica.jadapter;
-    if (adapter) adapters.add(adapter);
+  for (const { adapter } of getLiveJAdapterEntries(env)) {
+    adapters.add(adapter);
   }
   return [...adapters];
 };

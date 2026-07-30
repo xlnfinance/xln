@@ -14,6 +14,7 @@ import type { JAdapter } from '../../jadapter/types';
 import type { ConsensusConfig, JurisdictionConfig } from '../../entity/types';
 import type { RuntimeReplica } from '../types';
 import { DEBUG } from '../../infra/debug-flags';
+import { getLiveJAdapterEntries } from '../live-jadapters';
 
 const registrationLog = createStructuredLogger('runtime.numbered-registration');
 
@@ -34,9 +35,8 @@ export const getTrustedRegistrationAdapter = (
     jurisdiction.entityProviderAddress,
   );
   const candidates = new Set<JAdapter>();
-  if (env.jAdapter) candidates.add(env.jAdapter);
-  for (const replica of env.state.jReplicas.values()) {
-    if (replica.jadapter) candidates.add(replica.jadapter);
+  for (const { adapter } of getLiveJAdapterEntries(env)) {
+    candidates.add(adapter);
   }
   const matches = [...candidates].filter((adapter) =>
     adapter.chainId === expectedChainId &&

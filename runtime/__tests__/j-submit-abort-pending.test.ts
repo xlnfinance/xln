@@ -17,6 +17,7 @@ import {
   findJSubmitCrashReplica,
   processUntilJSubmitCrash,
 } from './fixtures/j-submit-crash-helpers';
+import { attachLiveJAdapter } from '../runtime/live-jadapters';
 
 describe('J-submit abort with durable pending attempt', () => {
   let cleanupRuntimeId = '';
@@ -98,7 +99,7 @@ describe('J-submit abort with durable pending attempt', () => {
     if (!restored) throw new Error('failed to restore durable abort with pending attempt');
     restored.scenarioMode = true;
     restored.quietRuntimeLogs = true;
-    restored.state.jReplicas.get(jurisdiction.name)!.jadapter = jadapter;
+    attachLiveJAdapter(restored, jurisdiction.name, jadapter);
     const browserVM = jadapter.getBrowserVM();
     if (!browserVM) throw new Error('abort-pending BrowserVM missing');
     const blockBefore = browserVM.getBlockNumber();

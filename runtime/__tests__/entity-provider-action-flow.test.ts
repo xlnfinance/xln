@@ -61,6 +61,7 @@ import { hydrateEntityStateFromStorage } from '../storage/hydration';
 import { projectEntityCoreDoc } from '../storage/projections';
 import type { ConsensusConfig, EntityReplica, EntityState } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';
+import { attachLiveJAdapter } from '../runtime/live-jadapters';
 import type { EntityTx } from '../types/entity-tx';
 import type { JTx } from '../types/jurisdiction-runtime';
 import { applyJEventRange } from './helpers/j-history';
@@ -1011,8 +1012,8 @@ describe('EntityProvider action flow', () => {
           depository: adapter.addresses.depository,
           entityProvider: adapter.addresses.entityProvider,
         },
-        jadapter: adapter,
       });
+      attachLiveJAdapter(env, 'BrowserVMAction', adapter);
       const state = baseState(entityId, config, env.state.timestamp);
       installCertifiedBoardAuthority(env, state);
       const result = handleEntityProviderTransfer(

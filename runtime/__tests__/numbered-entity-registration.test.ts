@@ -15,6 +15,7 @@ import { createJAdapter } from '../jadapter';
 import { createEmptyEnv } from '../runtime';
 import type { JReplica } from '../types/jurisdiction-runtime';
 import type { JurisdictionConfig } from '../entity/types';
+import { attachLiveJAdapter } from '../runtime/live-jadapters';
 
 const makeReplica = (
   name: string,
@@ -31,8 +32,16 @@ const makeReplica = (
   depositoryAddress: adapter.addresses.depository,
   entityProviderAddress: adapter.addresses.entityProvider,
   contracts: { ...adapter.addresses },
-  jadapter: adapter,
 });
+
+const attachAdapter = (
+  env: ReturnType<typeof createEmptyEnv>,
+  name: string,
+  adapter: Awaited<ReturnType<typeof createJAdapter>>,
+): void => {
+  env.state.jReplicas.set(name, makeReplica(name, adapter));
+  attachLiveJAdapter(env, name, adapter);
+};
 
 describe('numbered Entity registration authority', () => {
   test('batch receipt parser rejects missing, extra, reordered, and mismatched registrations', async () => {
@@ -89,8 +98,7 @@ describe('numbered Entity registration authority', () => {
         depositoryAddress: adapter.addresses.depository,
         entityProviderAddress: adapter.addresses.entityProvider,
       };
-      env.jAdapter = adapter;
-      env.state.jReplicas.set(jurisdiction.name, makeReplica(jurisdiction.name, adapter));
+      attachAdapter(env, jurisdiction.name, adapter);
       const payerBefore = await adapter.getEthBalance(payerAddress);
 
       const results = await createNumberedEntitiesBatch(
@@ -146,8 +154,7 @@ describe('numbered Entity registration authority', () => {
         depositoryAddress: adapter.addresses.depository,
         entityProviderAddress: adapter.addresses.entityProvider,
       };
-      env.state.jReplicas.set(name, makeReplica(name, adapter));
-      env.jAdapter = adapter;
+      attachAdapter(env, name, adapter);
 
       const selectedBefore = await adapter.getEthBalance(signerAddress);
       const adapterSignerBefore = await adapter.getEthBalance(adapterSignerAddress);
@@ -200,7 +207,7 @@ describe('numbered Entity registration authority', () => {
       )).rejects.toThrow('NUMBERED_REGISTRATION_TRUSTED_ADAPTER_MISSING');
 
       const missingSigner = createEmptyEnv('numbered-registration:missing-signer');
-      missingSigner.jAdapter = adapter;
+      attachAdapter(missingSigner, jurisdiction.name, adapter);
       await expect(createNumberedEntity(
         'entity-id-must-not-propose',
         [`0x${'33'.repeat(32)}`, '0x1111111111111111111111111111111111111111'],
@@ -240,8 +247,8 @@ describe('numbered Entity registration authority', () => {
         entityProviderAddress: first.addresses.entityProvider,
       };
       const env = createEmptyEnv('numbered-registration:ambiguous');
-      env.jAdapter = first;
-      env.state.jReplicas.set('duplicate-stack', makeReplica('duplicate-stack', second));
+      attachAdapter(env, jurisdiction.name, first);
+      attachAdapter(env, 'duplicate-stack', second);
       await expect(createNumberedEntity(
         'must-not-guess-vm',
         ['0x1111111111111111111111111111111111111111'],

@@ -39,7 +39,7 @@ describe('determinism cleanup lifecycle', () => {
     expect(source).toContain("child.kill('SIGTERM')");
     expect(source).toContain("child.kill('SIGKILL')");
     expect(source).toContain('await stopManagedScenarioAnvil();');
-    expect(source).toContain('env.jAdapter = jadapter;');
+    expect(source).toContain('getLiveJAdapterEntries(env)');
   });
 
   test('rpc adapter close waits for an in-flight watcher poll before returning', () => {

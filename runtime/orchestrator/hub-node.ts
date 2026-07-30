@@ -11,6 +11,7 @@ import { bootstrapHub } from '../../scripts/bootstrap-hub';
 import { defaultTokensForJurisdiction } from '../jurisdiction/default-tokens';
 import { deployMissingDefaultTokens } from '../jurisdiction/dev-token-deployment';
 import type { JAdapter, JTokenInfo } from '../jadapter/types';
+import { attachLiveJAdapter, getLiveJAdapter } from '../runtime/live-jadapters';
 import {
   normalizeJurisdictionKey,
   selectWritableJurisdictionKey,
@@ -59,7 +60,6 @@ import {
   resolveRuntimeAdapterAuthSeed,
 } from '../radapter/auth';
 import {
-  getJReplicaByJurisdictionRef,
   getJurisdictionIdentityRef,
   isJurisdictionStackRef,
 } from '../jurisdiction/jurisdiction-runtime';
@@ -363,7 +363,7 @@ const resolveJReplicaForJurisdictionIdentity = (
 };
 
 const hasLiveJAdapterForJurisdiction = (env: RuntimeReplica, jurisdictionName: string): boolean =>
-  Boolean(resolveJReplicaForJurisdictionName(env, jurisdictionName)?.replica?.jadapter);
+  Boolean(getLiveJAdapter(env, resolveJReplicaForJurisdictionName(env, jurisdictionName)?.name ?? ''));
 
 type JurisdictionImportDiagnostics = {
   name: string;
@@ -787,7 +787,7 @@ const syncEnvJurisdictionReplica = (env: RuntimeReplica, jadapter: JAdapter, rpc
   };
   replica.rpcs = [rpcUrl];
   replica.chainId = requireJurisdictionChainId(jadapter.chainId, 'HUB_JADAPTER_CHAIN_ID_INVALID');
-  replica.jadapter = jadapter;
+  attachLiveJAdapter(env, activeName, jadapter);
 };
 
 const buildRuntimeJurisdictionsPayload = (env: RuntimeReplica): string | null => {
@@ -806,25 +806,16 @@ const buildRuntimeJurisdictionsPayload = (env: RuntimeReplica): string | null =>
           entityProvider?: string;
           deltaTransformer?: string;
         };
-        jadapter?: {
-          addresses?: {
-            account?: string;
-            depository?: string;
-            entityProvider?: string;
-            deltaTransformer?: string;
-          };
-        };
       }
     | undefined;
   if (!replica) return null;
 
-  const addresses = replica.jadapter?.addresses ?? {};
-  const account = String(addresses.account || replica.contracts?.account || '').trim();
+  const account = String(replica.contracts?.account || '').trim();
   const depository =
-    String(addresses.depository || replica.depositoryAddress || replica.contracts?.depository || '').trim();
+    String(replica.depositoryAddress || replica.contracts?.depository || '').trim();
   const entityProvider =
-    String(addresses.entityProvider || replica.entityProviderAddress || replica.contracts?.entityProvider || '').trim();
-  const deltaTransformer = String(addresses.deltaTransformer || replica.contracts?.deltaTransformer || '').trim();
+    String(replica.entityProviderAddress || replica.contracts?.entityProvider || '').trim();
+  const deltaTransformer = String(replica.contracts?.deltaTransformer || '').trim();
   if (!account || !depository || !entityProvider || !deltaTransformer) return null;
 
   const version = readCurrentJurisdictionsVersion();
@@ -963,20 +954,18 @@ const getImportedJurisdictionContracts = (
 ): ImportedJurisdictionContracts => {
   const replica = env.state.jReplicas?.get(jurisdictionName);
   const depositoryAddress = String(
-    replica?.jadapter?.addresses?.depository ||
-      replica?.depositoryAddress ||
+    replica?.depositoryAddress ||
       replica?.contracts?.depository ||
       fallback?.depository ||
       '',
   ).trim();
   const entityProviderAddress = String(
-    replica?.jadapter?.addresses?.entityProvider ||
-      replica?.entityProviderAddress ||
+    replica?.entityProviderAddress ||
       replica?.contracts?.entityProvider ||
       fallback?.entityProvider ||
       '',
   ).trim();
-  const chainId = Number(replica?.chainId ?? replica?.jadapter?.chainId);
+  const chainId = Number(replica?.chainId);
   return {
     ...(Number.isFinite(chainId) && chainId > 0
       ? { chainId: Math.floor(chainId) }
@@ -1175,8 +1164,8 @@ const requireJAdapterForDebugReserve = (
     if (!isJurisdictionStackRef(explicitJurisdiction)) {
       throw new Error(`DEBUG_RESERVE_JURISDICTION_REF_INVALID: entity=${entityId} jurisdiction=${explicitJurisdiction}`);
     }
-    const jReplica = getJReplicaByJurisdictionRef(env, explicitJurisdiction);
-    const adapter = jReplica?.jadapter;
+    const resolved = resolveJReplicaForJurisdictionIdentity(env, explicitJurisdiction);
+    const adapter = resolved ? getLiveJAdapter(env, resolved.name) : undefined;
     if (!adapter) {
       throw new Error(`DEBUG_RESERVE_JURISDICTION_UNAVAILABLE: entity=${entityId} jurisdiction=${explicitJurisdiction}`);
     }
@@ -1336,7 +1325,9 @@ const ensurePeerBootstrapReserves = async (
     const jurisdictionName = String(jurisdiction.jurisdictionName || jurisdictionKey).trim();
     const resolvedReplica = resolveJReplicaForJurisdictionIdentity(env, jurisdiction.jurisdictionRef);
     const replicaName = resolvedReplica?.replica?.name || resolvedReplica?.name || jurisdictionName;
-    const jadapter = resolvedReplica?.replica?.jadapter;
+    const jadapter = resolvedReplica
+      ? getLiveJAdapter(env, resolvedReplica.name)
+      : undefined;
     if (!jadapter) {
       throw new Error(
         `PEER_RESERVE_JADAPTER_MISSING: jurisdiction=${jurisdictionKey} ` +

@@ -6,6 +6,11 @@ import { createJAdapterWithRetry } from '../jadapter/retry';
 import { createStructuredLogger } from '../infra/logger';
 import { getJurisdictionIdentityRef } from '../jurisdiction/jurisdiction-runtime';
 import { buildCanonicalJReplicaSnapshot } from '../storage/wal/snapshot';
+import {
+  attachLiveJAdapter,
+  detachLiveJAdapter,
+  getLiveJAdapter,
+} from './live-jadapters';
 
 const infraLog = createStructuredLogger('runtime.infra');
 const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error);
@@ -57,11 +62,7 @@ export const hasLiveJAdapter = (value: unknown): value is JAdapter => {
 export const normalizeRestoredJReplicas = (env: RuntimeReplica): void => {
   if (!env.state.jReplicas) env.state.jReplicas = new Map();
   for (const [name, replica] of env.state.jReplicas.entries()) {
-    const jadapter = hasLiveJAdapter(replica.jadapter) ? replica.jadapter : undefined;
-    env.state.jReplicas.set(name, {
-      ...buildCanonicalJReplicaSnapshot(replica),
-      ...(jadapter ? { jadapter } : {}),
-    });
+    env.state.jReplicas.set(name, buildCanonicalJReplicaSnapshot(replica));
   }
 };
 
@@ -144,18 +145,15 @@ export const ensureLiveJAdapterForReplica = async (
   const jReplica = env.state.jReplicas?.get(name);
   if (!jReplica) return null;
 
-  if (jReplica.jadapter && !hasLiveJAdapter(jReplica.jadapter)) {
-    delete (jReplica as JReplica & { jadapter?: unknown }).jadapter;
-  }
-  if (jReplica.jadapter) {
-    const attachedAdapter = jReplica.jadapter;
+  const liveAdapter = getLiveJAdapter(env, name);
+  if (liveAdapter) {
     try {
-      await assertJAdapterMatchesReplica(name, jReplica, attachedAdapter);
+      await assertJAdapterMatchesReplica(name, jReplica, liveAdapter);
     } catch (error) {
-      delete jReplica.jadapter;
+      detachLiveJAdapter(env, name, liveAdapter);
       throw error;
     }
-    return attachedAdapter;
+    return liveAdapter;
   }
 
   const rpcUrl = jReplica.rpcs?.find((candidate) => {
@@ -209,7 +207,7 @@ export const ensureLiveJAdapterForReplica = async (
 
   await assertJAdapterMatchesReplica(name, jReplica, jadapter);
 
-  jReplica.jadapter = jadapter;
+  attachLiveJAdapter(env, name, jadapter);
   infraLog.debug('jadapter.derived', { name, mode: hasRpcs ? 'rpc' : 'browservm' });
   return jadapter;
 };

@@ -27,7 +27,7 @@ export const buildLocalRuntimeOwner = (input: {
   if (!profileName) throw new Error('LOCAL_RUNTIME_OWNER_PROFILE_NAME_REQUIRED');
   const jurisdictionName = String(input.jurisdiction.name || input.jurisdictionName || '').trim();
   if (!jurisdictionName) throw new Error('LOCAL_RUNTIME_OWNER_JURISDICTION_NAME_REQUIRED');
-  const chainId = Number(input.jurisdiction.chainId ?? input.jurisdiction.jadapter?.chainId);
+  const chainId = Number(input.jurisdiction.chainId);
   if (!Number.isSafeInteger(chainId) || chainId <= 0) {
     throw new Error('LOCAL_RUNTIME_OWNER_CHAIN_ID_INVALID');
   }

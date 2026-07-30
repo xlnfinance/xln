@@ -15,21 +15,16 @@ export const readRpcReplicaAddresses = (config: JAdapterConfig): JAdapterAddress
   const replica = config.fromReplica;
   if (!replica) return { account: '', depository: '', entityProvider: '', deltaTransformer: '' };
   return {
-    account: firstAddress(replica.jadapter?.addresses?.account, replica.contracts?.account),
+    account: firstAddress(replica.contracts?.account),
     depository: firstAddress(
-      replica.jadapter?.addresses?.depository,
       replica.contracts?.depository,
       replica.depositoryAddress,
     ),
     entityProvider: firstAddress(
-      replica.jadapter?.addresses?.entityProvider,
       replica.contracts?.entityProvider,
       replica.entityProviderAddress,
     ),
-    deltaTransformer: firstAddress(
-      replica.jadapter?.addresses?.deltaTransformer,
-      replica.contracts?.deltaTransformer,
-    ),
+    deltaTransformer: firstAddress(replica.contracts?.deltaTransformer),
   };
 };
 

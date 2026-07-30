@@ -14,6 +14,10 @@ import { buildBrowserVMJurisdiction, createJAdapter } from '../jadapter';
 import { applyImportJurisdictionIntent } from '../runtime/jurisdiction-import';
 import { createEmptyEnv } from '../runtime';
 import { getJurisdictionIdentityRef } from '../jurisdiction/jurisdiction-runtime';
+import {
+  attachLiveJAdapter,
+  getLiveJAdapter,
+} from '../runtime/live-jadapters';
 
 const makeJReplica = (overrides: Partial<JReplica> = {}): JReplica => ({
   name: 'arrakis',
@@ -177,7 +181,7 @@ describe('JReplica stateRoot semantics', () => {
     } as Parameters<typeof ensureLiveJAdapterForReplica>[0];
 
     expect(await ensureLiveJAdapterForReplica(env, 'local', { allowBrowserVm: false })).toBeNull();
-    expect(replica.jadapter).toBeUndefined();
+    expect(getLiveJAdapter(env, 'local')).toBeUndefined();
   });
 
   test('rejects a pre-attached adapter from a different trusted chain domain', async () => {
@@ -192,21 +196,21 @@ describe('JReplica stateRoot semantics', () => {
       depositoryAddress: adapter.addresses.depository,
       entityProviderAddress: adapter.addresses.entityProvider,
       contracts: { ...adapter.addresses },
-      jadapter: adapter,
     });
     const env = {
       state: { jReplicas: new Map([['wrong-domain', replica]]) },
     } as Parameters<typeof ensureLiveJAdapterForReplica>[0];
+    attachLiveJAdapter(env, 'wrong-domain', adapter);
 
     await expect(ensureLiveJAdapterForReplica(env, 'wrong-domain', { allowBrowserVm: true }))
       .rejects.toThrow('RESTORE_JADAPTER_CHAIN_MISMATCH');
-    expect(replica.jadapter).toBeUndefined();
+    expect(getLiveJAdapter(env, 'wrong-domain')).toBeUndefined();
   }, 30_000);
 
   test('import intent is independent of an ephemeral attached adapter', async () => {
     const adapter = await createJAdapter({ mode: 'browservm', chainId: 31_337 });
     try {
-      const existingReplica = (jadapter?: typeof adapter): JReplica => makeJReplica({
+      const existingReplica = (): JReplica => makeJReplica({
         name: 'persisted-rpc',
         chainId: 1,
         stateRoot: null,
@@ -214,11 +218,11 @@ describe('JReplica stateRoot semantics', () => {
         depositoryAddress: adapter.addresses.depository,
         entityProviderAddress: adapter.addresses.entityProvider,
         contracts: { ...adapter.addresses },
-        ...(jadapter ? { jadapter } : {}),
       });
       const withAdapter = createEmptyEnv('import-intent-with-ephemeral-adapter');
       const withoutAdapter = createEmptyEnv('import-intent-without-ephemeral-adapter');
-      withAdapter.state.jReplicas.set('persisted-rpc', existingReplica(adapter));
+      withAdapter.state.jReplicas.set('persisted-rpc', existingReplica());
+      attachLiveJAdapter(withAdapter, 'persisted-rpc', adapter);
       withoutAdapter.state.jReplicas.set('persisted-rpc', existingReplica());
       const importTx = {
         type: 'importJ' as const,

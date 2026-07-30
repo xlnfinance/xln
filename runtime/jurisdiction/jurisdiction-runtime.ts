@@ -31,18 +31,16 @@ type JurisdictionIdentitySource = {
   chainId?: unknown;
   depositoryAddress?: unknown;
   contracts?: { depository?: unknown } | null;
-  jadapter?: { chainId?: unknown; addresses?: { depository?: unknown } | null } | null;
 };
 
 export const getJurisdictionIdentityRef = (jurisdiction: unknown): string => {
   if (!jurisdiction || typeof jurisdiction !== 'object') return '';
   const source = jurisdiction as JurisdictionIdentitySource;
   const depository = firstUsableContractAddress(
-    source.jadapter?.addresses?.depository,
     source.depositoryAddress,
     source.contracts?.depository,
   );
-  const chainId = normalizeStackChainId(source.chainId ?? source.jadapter?.chainId);
+  const chainId = normalizeStackChainId(source.chainId);
   return getJurisdictionStackId({
     depositoryAddress: depository || '',
     ...(chainId !== null ? { chainId } : {}),
@@ -58,11 +56,10 @@ export const sameJurisdictionIdentity = (left: unknown, right: unknown): boolean
 const getJReplicaStackId = (replica: JReplica | undefined): string => {
   if (!replica) return '';
   const depository = firstUsableContractAddress(
-    replica.jadapter?.addresses?.depository,
     replica.depositoryAddress,
     replica.contracts?.depository,
   );
-  const chainId = normalizeStackChainId(replica.chainId ?? replica.jadapter?.chainId);
+  const chainId = normalizeStackChainId(replica.chainId);
   return getJurisdictionStackId({
     depositoryAddress: depository || '',
     ...(chainId !== null ? { chainId } : {}),
@@ -113,19 +110,16 @@ export function resolveRuntimeJurisdictionConfig(
   const replica = getCandidateReplica(env, current);
 
   const depositoryAddress = firstUsableContractAddress(
-    replica?.jadapter?.addresses?.depository,
     replica?.depositoryAddress,
     replica?.contracts?.depository,
     current?.depositoryAddress,
   );
   const entityProviderAddress = firstUsableContractAddress(
-    replica?.jadapter?.addresses?.entityProvider,
     replica?.entityProviderAddress,
     replica?.contracts?.entityProvider,
     current?.entityProviderAddress,
   );
   const rawChainId = firstDefined<number | bigint>(
-    replica?.jadapter?.chainId,
     replica?.chainId,
     current?.chainId,
   );
@@ -134,7 +128,6 @@ export function resolveRuntimeJurisdictionConfig(
       ? Number(rawChainId)
       : (typeof rawChainId === 'number' && Number.isFinite(rawChainId) ? rawChainId : undefined);
   const entityProviderDeploymentBlock = firstDefined<number>(
-    replica?.jadapter?.entityProviderDeploymentBlock,
     replica?.entityProviderDeploymentBlock,
     current?.entityProviderDeploymentBlock,
   );
@@ -183,16 +176,14 @@ export function requireRuntimeJurisdictionConfigByName(
 
   const candidate: JurisdictionConfig = {
     name: replica.name || configuredName,
-    address: current?.address || replica.rpcs?.[0] || (replica.jadapter?.mode === 'browservm' ? 'browservm://' : ''),
+    address: current?.address || replica.rpcs?.[0] || `jreplica://${replica.name || configuredName}`,
     entityProviderAddress:
       current?.entityProviderAddress ||
-      replica.jadapter?.addresses?.entityProvider ||
       replica.entityProviderAddress ||
       replica.contracts?.entityProvider ||
       '',
     depositoryAddress:
       current?.depositoryAddress ||
-      replica.jadapter?.addresses?.depository ||
       replica.depositoryAddress ||
       replica.contracts?.depository ||
       '',
@@ -201,17 +192,13 @@ export function requireRuntimeJurisdictionConfigByName(
         ? { chainId: current.chainId }
         : replica.chainId !== undefined
           ? { chainId: replica.chainId }
-          : replica.jadapter?.chainId !== undefined
-            ? { chainId: replica.jadapter.chainId }
-            : {}
+          : {}
     ),
     ...(current?.blockTimeMs !== undefined ? { blockTimeMs: current.blockTimeMs } : {}),
     ...(current?.registrationBlock !== undefined ? { registrationBlock: current.registrationBlock } : {}),
     ...(current?.entityProviderDeploymentBlock !== undefined
       ? { entityProviderDeploymentBlock: current.entityProviderDeploymentBlock }
-      : replica.jadapter?.entityProviderDeploymentBlock !== undefined
-        ? { entityProviderDeploymentBlock: replica.jadapter.entityProviderDeploymentBlock }
-        : replica.entityProviderDeploymentBlock !== undefined
+      : replica.entityProviderDeploymentBlock !== undefined
           ? { entityProviderDeploymentBlock: replica.entityProviderDeploymentBlock }
           : {}),
     ...(current?.rebalancePolicyUsd ? { rebalancePolicyUsd: current.rebalancePolicyUsd } : {}),

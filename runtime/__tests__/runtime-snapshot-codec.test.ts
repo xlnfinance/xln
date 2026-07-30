@@ -99,7 +99,7 @@ describe('runtime snapshot codec', () => {
       stateRoot: new Uint8Array(32).fill(7),
       lastBlockTimestamp: 0,
     }));
-    expect(restored.state.jReplicas.get('Testnet')?.jadapter).toBeUndefined();
+    expect('jadapter' in (restored.state.jReplicas.get('Testnet') ?? {})).toBe(false);
   });
 
   test('durable runtime snapshot retains explicit triggers and drops scheduled-wake-only inputs', () => {

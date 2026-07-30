@@ -2,6 +2,7 @@ import type { RuntimeInput, RuntimeReplica } from '../types';
 import { requireRuntimeMempool } from '../input-queue';
 import { ensureRuntimeInfrastructure } from '../runtime-infrastructure';
 import { rebuildScheduledWakeIndex } from '../scheduled-wake';
+import { getLiveJAdapterEntries } from '../live-jadapters';
 
 export { cloneRuntimeFrameMempool } from './clone';
 
@@ -112,8 +113,8 @@ export const publishRuntimeFrameTransaction = (
     runtimeInputHasQueuedWork(mergedMempool) ||
     (state.pendingProfileCertificationEntityIds?.size ?? 0) > 0;
   rebuildScheduledWakeIndex(liveEnv);
-  for (const replica of liveEnv.state.jReplicas.values()) {
-    replica.jadapter?.setBlockTimestamp?.(liveEnv.state.timestamp);
+  for (const { adapter } of getLiveJAdapterEntries(liveEnv)) {
+    adapter.setBlockTimestamp?.(liveEnv.state.timestamp);
   }
   transaction.published = true;
   return liveEnv;

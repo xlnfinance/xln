@@ -21,9 +21,26 @@ import {
   makeJSubmitDurabilityFixture,
   signerId,
 } from './fixtures/j-submit-durability-fixture';
+import { attachLiveJAdapter } from '../runtime/live-jadapters';
+import type { RuntimeReplica } from '../runtime/types';
+import type { JAdapter } from '../jadapter/types';
 
 const makeFixture = makeJSubmitDurabilityFixture;
 const commitAttempt = commitJSubmitAttempt;
+
+const installSubmitAdapter = (env: RuntimeReplica, adapter: JAdapter): void => {
+  env.state.jReplicas = new Map([[jurisdictionName, {
+    name: jurisdictionName,
+    chainId: 31337,
+    blockNumber: 0n,
+    stateRoot: null,
+    mempool: [],
+    blockDelayMs: 0,
+    lastBlockTimestamp: 0,
+    position: { x: 0, y: 0, z: 0 },
+  }]]);
+  attachLiveJAdapter(env, jurisdictionName, adapter);
+};
 
 describe('durable validator-local J submit state', () => {
   test('committed batch without an attempt is due immediately', () => {
@@ -128,15 +145,13 @@ describe('durable validator-local J submit state', () => {
       signerId,
       entityTxs: [{ type: 'j_event', data: {} as never }],
     });
-    env.state.jReplicas = new Map([[jurisdictionName, {
-      jadapter: {
+    installSubmitAdapter(env, {
         pollNow: async () => {},
         submitTx: async () => {
           submitCalls += 1;
           return { success: true, events: [] };
         },
-      },
-    } as never]]);
+      } as JAdapter);
     const queued: Parameters<typeof applyRuntimeTx>[1][] = [];
 
     await submitRuntimeJOutbox(env, jOutbox, {
@@ -157,8 +172,7 @@ describe('durable validator-local J submit state', () => {
   test('empty J-prefix liveness does not starve an otherwise valid submit', async () => {
     const { env, jOutbox } = await commitAttempt();
     let submitCalls = 0;
-    env.state.jReplicas = new Map([[jurisdictionName, {
-      jadapter: {
+    installSubmitAdapter(env, {
         pollNow: async () => {
           env.runtimeMempool!.entityInputs.push({
             entityId,
@@ -170,8 +184,7 @@ describe('durable validator-local J submit state', () => {
           submitCalls += 1;
           return { success: true, events: [] };
         },
-      },
-    } as never]]);
+      } as JAdapter);
     const queued: Parameters<typeof applyRuntimeTx>[1][] = [];
 
     await submitRuntimeJOutbox(env, jOutbox, {

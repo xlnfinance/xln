@@ -6,6 +6,7 @@ import type { EntityReplica } from '../entity/types.js';
 import { getP2PState } from '../runtime.js';
 import { compareStableText } from '../protocol/serialization';
 import { withRuntimeCommittedRead } from '../runtime/frame/writer-lock';
+import { getLiveJAdapter } from '../runtime/live-jadapters';
 
 export interface HealthStatus {
   timestamp: number;
@@ -94,7 +95,7 @@ const buildHealthStatus = (env: RuntimeReplica | null): HealthStatus => {
   if (env?.state.jReplicas) {
     for (const [name, jReplica] of env.state.jReplicas.entries()) {
       try {
-        const jadapter = jReplica.jadapter;
+        const jadapter = getLiveJAdapter(env, name);
         const status: JMachineHealth = {
           name,
           chainId: jReplica.chainId || 31337,

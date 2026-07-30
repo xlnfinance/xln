@@ -255,6 +255,8 @@ import { QUOTE_EXPIRY_MS } from '../types/rebalance';
 import type { AccountFrame, AccountInput, AccountState, AccountTx } from '../types/account';
 import type { ConsensusConfig, EntityInput, EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
 import type { RuntimeReplica, RuntimeTx } from '../runtime/types';
+import type { JAdapter } from '../jadapter/types';
+import { attachLiveJAdapter } from '../runtime/live-jadapters';
 import type { JInput } from '../jurisdiction/input';
 import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { DisputeFinalizationEvidence, JurisdictionEvent } from '../types/jurisdiction-events';
@@ -755,6 +757,20 @@ const submitAuditRuntimeJOutbox = async (
   await submitRuntimeJOutbox(env, inputs, deps);
 };
 
+const installAuditJAdapter = (env: RuntimeReplica, adapter: JAdapter): void => {
+  env.state.jReplicas.set('Testnet', {
+    name: 'Testnet',
+    blockNumber: 0n,
+    stateRoot: null,
+    mempool: [],
+    blockDelayMs: 0,
+    lastBlockTimestamp: 0,
+    chainId: 31337,
+    position: { x: 0, y: 0, z: 0 },
+  });
+  attachLiveJAdapter(env, 'Testnet', adapter);
+};
+
 describe('audit fail-fast regressions', () => {
   test('finalized j-events mark mutated account docs dirty for storage replay', async () => {
     const seed = 'j-event-account-storage-mark seed alpha beta gamma';
@@ -1033,17 +1049,10 @@ describe('audit fail-fast regressions', () => {
       isProposer: true,
       state,
     } as EntityReplica);
-    env.state.jReplicas = new Map([
-      [
-        'Testnet',
-        {
-          jadapter: {
-            submitTx: async () => ({ success: false, error: 'ECONNREFUSED' }),
-            pollNow: async () => {},
-          },
-        } as any,
-      ],
-    ]);
+    installAuditJAdapter(env, {
+      submitTx: async () => ({ success: false, error: 'ECONNREFUSED' }),
+      pollNow: async () => {},
+    } as JAdapter);
     const queuedInputs: EntityInput[] = [];
     const queuedRuntimeTxs: RuntimeTx[] = [];
 
@@ -1151,24 +1160,17 @@ describe('audit fail-fast regressions', () => {
     } as EntityReplica);
     let submitCalls = 0;
     let accountReadCalls = 0;
-    env.state.jReplicas = new Map([
-      [
-        'Testnet',
-        {
-          jadapter: {
-            getAccountInfo: async () => {
-              accountReadCalls += 1;
-              throw new Error('contract account state must not be read by runtime');
-            },
-            submitTx: async () => {
-              submitCalls += 1;
-              return { success: true, events: [], txHash: `0x${'18'.repeat(32)}` };
-            },
-            pollNow: async () => {},
-          },
-        } as any,
-      ],
-    ]);
+    installAuditJAdapter(env, {
+      getAccountInfo: async () => {
+        accountReadCalls += 1;
+        throw new Error('contract account state must not be read by runtime');
+      },
+      submitTx: async () => {
+        submitCalls += 1;
+        return { success: true, events: [], txHash: `0x${'18'.repeat(32)}` };
+      },
+      pollNow: async () => {},
+    } as JAdapter);
     const queuedInputs: EntityInput[] = [];
 
     await submitAuditRuntimeJOutbox(
@@ -1229,26 +1231,19 @@ describe('audit fail-fast regressions', () => {
     env.state.timestamp = 126;
     let accountReadCalls = 0;
     let submitCalls = 0;
-    env.state.jReplicas = new Map([
-      [
-        'Testnet',
-        {
-          jadapter: {
-            getAccountInfo: async () => {
-              accountReadCalls += 1;
-              throw new Error('contract account state must not be read by runtime');
-            },
-            submitTx: async () => {
-              submitCalls += 1;
-              return submitCalls === 1
-                ? { success: false, error: 'staticCall revert: E5()' }
-                : { success: true, events: [], txHash: `0x${'ce'.repeat(32)}` };
-            },
-            pollNow: async () => {},
-          },
-        } as any,
-      ],
-    ]);
+    installAuditJAdapter(env, {
+      getAccountInfo: async () => {
+        accountReadCalls += 1;
+        throw new Error('contract account state must not be read by runtime');
+      },
+      submitTx: async () => {
+        submitCalls += 1;
+        return submitCalls === 1
+          ? { success: false, error: 'staticCall revert: E5()' }
+          : { success: true, events: [], txHash: `0x${'ce'.repeat(32)}` };
+      },
+      pollNow: async () => {},
+    } as JAdapter);
     const queuedInputs: EntityInput[] = [];
     const queuedRuntimeTxs: RuntimeTx[] = [];
     const disputeBatch = {
@@ -1329,17 +1324,10 @@ describe('audit fail-fast regressions', () => {
     const env = createEmptyEnv('j-submit-unproven-e5');
     env.runtimeId = signerId;
     env.state.timestamp = 126;
-    env.state.jReplicas = new Map([
-      [
-        'Testnet',
-        {
-          jadapter: {
-            submitTx: async () => ({ success: false, error: 'staticCall revert: E5()' }),
-            pollNow: async () => {},
-          },
-        } as any,
-      ],
-    ]);
+    installAuditJAdapter(env, {
+      submitTx: async () => ({ success: false, error: 'staticCall revert: E5()' }),
+      pollNow: async () => {},
+    } as JAdapter);
     const queuedRuntimeTxs: RuntimeTx[] = [];
 
     await submitAuditRuntimeJOutbox(
@@ -1430,17 +1418,10 @@ describe('audit fail-fast regressions', () => {
       isProposer: true,
       state,
     } as EntityReplica);
-    env.state.jReplicas = new Map([
-      [
-        'Testnet',
-        {
-          jadapter: {
-            submitTx: async () => ({ success: false, error: 'staticCall revert: E3()' }),
-            pollNow: async () => {},
-          },
-        } as any,
-      ],
-    ]);
+    installAuditJAdapter(env, {
+      submitTx: async () => ({ success: false, error: 'staticCall revert: E3()' }),
+      pollNow: async () => {},
+    } as JAdapter);
     const queuedRuntimeTxs: RuntimeTx[] = [];
 
     await submitAuditRuntimeJOutbox(
@@ -1499,20 +1480,13 @@ describe('audit fail-fast regressions', () => {
     env.runtimeId = localRuntimeId;
     env.state.timestamp = 125;
     let adapterCalls = 0;
-    env.state.jReplicas = new Map([
-      [
-        'Testnet',
-        {
-          jadapter: {
-            submitTx: async () => {
-              adapterCalls += 1;
-              return { success: true };
-            },
-            pollNow: async () => {},
-          },
-        } as any,
-      ],
-    ]);
+    installAuditJAdapter(env, {
+      submitTx: async () => {
+        adapterCalls += 1;
+        return { success: true };
+      },
+      pollNow: async () => {},
+    } as JAdapter);
     const queuedRuntimeTxs: RuntimeTx[] = [];
 
     await submitAuditRuntimeJOutbox(
@@ -1568,22 +1542,15 @@ describe('audit fail-fast regressions', () => {
     env.runtimeId = runtimeId;
     env.state.timestamp = 126;
     let adapterCalls = 0;
-    env.state.jReplicas = new Map([
-      [
-        'Testnet',
-        {
-          jadapter: {
-            submitTx: async (_tx: unknown, options: { signerId?: string; signerPrivateKey?: Uint8Array }) => {
-              adapterCalls += 1;
-              expect(options.signerId).toBe(localScenarioSignerId);
-              expect(options.signerPrivateKey).toBeInstanceOf(Uint8Array);
-              return { success: true };
-            },
-            pollNow: async () => {},
-          },
-        } as any,
-      ],
-    ]);
+    installAuditJAdapter(env, {
+      submitTx: async (_tx: unknown, options: { signerId?: string; signerPrivateKey?: Uint8Array }) => {
+        adapterCalls += 1;
+        expect(options.signerId).toBe(localScenarioSignerId);
+        expect(options.signerPrivateKey).toBeInstanceOf(Uint8Array);
+        return { success: true };
+      },
+      pollNow: async () => {},
+    } as JAdapter);
 
     await submitAuditRuntimeJOutbox(
       env,
@@ -1628,20 +1595,13 @@ describe('audit fail-fast regressions', () => {
     const env = createEmptyEnv('j-submit-unsealed-batch');
     env.state.timestamp = 123;
     let adapterCalls = 0;
-    env.state.jReplicas = new Map([
-      [
-        'Testnet',
-        {
-          jadapter: {
-            submitTx: async () => {
-              adapterCalls += 1;
-              return { success: true };
-            },
-            pollNow: async () => {},
-          },
-        } as any,
-      ],
-    ]);
+    installAuditJAdapter(env, {
+      submitTx: async () => {
+        adapterCalls += 1;
+        return { success: true };
+      },
+      pollNow: async () => {},
+    } as JAdapter);
     const queuedRuntimeTxs: RuntimeTx[] = [];
 
     await submitAuditRuntimeJOutbox(

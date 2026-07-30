@@ -16,6 +16,10 @@ import {
 import { formatRuntime } from '../../qa/runtime-ascii';
 import { safeStringify } from '../../protocol/serialization';
 import type { RuntimeReplica, JAdapter } from '../../runtime/types';
+import {
+  getLiveJAdapter,
+  getLiveJAdapterEntries,
+} from '../../runtime/live-jadapters';
 
 type Phase = 'crash' | 'recover';
 
@@ -115,10 +119,9 @@ const countExactHankoBatchLogs = async (
 };
 
 const closeEnv = async (env: RuntimeReplica): Promise<void> => {
-  const adapters = new Set<JAdapter>();
-  for (const replica of env.state.jReplicas.values()) {
-    if (replica.jadapter) adapters.add(replica.jadapter);
-  }
+  const adapters = new Set<JAdapter>(
+    getLiveJAdapterEntries(env).map(({ adapter }) => adapter),
+  );
   await closeRuntimeDb(env);
   await closeInfraDb(env);
   for (const adapter of adapters) {
@@ -240,8 +243,7 @@ const runRecoverPhase = async (): Promise<void> => {
   restored.scenarioMode = true;
   restored.quietRuntimeLogs = true;
   const replica = findReplica(restored, proof.senderId);
-  const jReplica = restored.state.jReplicas.get(proof.jurisdictionName);
-  const adapter = jReplica?.jadapter;
+  const adapter = getLiveJAdapter(restored, proof.jurisdictionName);
   if (!adapter) fail(`restored-rpc-adapter-missing:${proof.jurisdictionName}`);
   assertEqual(adapter.mode, 'rpc', 'restored-adapter-mode');
   adapter.setQuietLogs?.(true);
@@ -293,7 +295,7 @@ const runRecoverPhase = async (): Promise<void> => {
   reopened.scenarioMode = true;
   reopened.quietRuntimeLogs = true;
   const reopenedReplica = findReplica(reopened, proof.senderId);
-  const reopenedAdapter = reopened.state.jReplicas.get(proof.jurisdictionName)?.jadapter;
+  const reopenedAdapter = getLiveJAdapter(reopened, proof.jurisdictionName);
   if (!reopenedAdapter) fail('second-reopen-adapter-missing');
   reopenedAdapter.setQuietLogs?.(true);
   assertEqual(reopened.state.height, finalRuntimeHeight, 'runtime-head-after-second-reopen');

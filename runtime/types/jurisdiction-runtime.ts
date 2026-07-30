@@ -1,4 +1,3 @@
-import type { JAdapter } from '../jadapter/types';
 import type { JBatch } from '../jurisdiction/batch';
 import type { EntityProviderActionJTxData } from './entity-provider-actions';
 
@@ -56,12 +55,9 @@ export interface JReplica {
   lastBlockTimestamp: number;             // Timestamp (ms) of last block creation
   blockReady?: boolean;                   // True when mempool has items and blockDelayMs elapsed
 
-  // JAdapter instance (for balance queries, transactions, etc)
-  // Works with both browservm and rpc modes
-  jadapter?: JAdapter;
   // RPC endpoints for this jurisdiction (preferred for j-watcher + batch broadcast)
   rpcs?: string[];
-  // Chain id (optional, prefer jadapter.chainId when available)
+  // Canonical chain id. Active providers must match it before attachment.
   chainId?: number;
   // Persisted local view of depository.defaultDisputeDelay for deterministic handlers.
   defaultDisputeDelayBlocks?: number;

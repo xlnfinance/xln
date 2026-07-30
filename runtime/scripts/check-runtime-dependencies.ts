@@ -93,6 +93,7 @@ const literalModuleSpecifier = (node: ts.Node): string | null => {
 };
 
 const observed = new Map<string, Array<{ file: string; line: number; specifier: string }>>();
+const stateOwnedAdapterAccesses: Array<{ file: string; line: number; property: string }> = [];
 const runtimeTypeBarrelExports: Array<{ line: number; specifier: string }> = [];
 const files = collectFiles('runtime').sort();
 const fileSet = new Set(files);
@@ -103,6 +104,16 @@ for (const file of files) {
   const from = packageOwner(path.resolve(file));
   const source = ts.createSourceFile(file, fs.readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
   const visit = (node: ts.Node): void => {
+    if (
+      ts.isPropertyAccessExpression(node) &&
+      (node.name.text === 'jadapter' || node.name.text === 'jAdapter')
+    ) {
+      stateOwnedAdapterAccesses.push({
+        file,
+        line: source.getLineAndCharacterOfPosition(node.name.getStart(source)).line + 1,
+        property: node.name.text,
+      });
+    }
     const specifier = literalModuleSpecifier(node);
     if (
       file === 'runtime/runtime/types.ts' &&
@@ -138,6 +149,9 @@ for (const file of files) {
 }
 
 const errors: string[] = [];
+for (const access of stateOwnedAdapterAccesses) {
+  errors.push(`STATE_OWNED_JADAPTER_ACCESS ${access.file}:${access.line}:${access.property}`);
+}
 for (const { line, specifier } of runtimeTypeBarrelExports) {
   errors.push(`RUNTIME_TYPE_BARREL_EXPORT runtime/runtime/types.ts:${line}:${specifier}`);
 }

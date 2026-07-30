@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { JAdapter } from '../jadapter/types';
+import { getLiveJAdapter } from '../runtime/live-jadapters';
 import { normalizeJurisdictionImportRequest } from '../runtime/jurisdiction-import';
 import { findMissingRpcContractCode } from '../orchestrator/contract-readiness';
 import {
@@ -234,7 +235,7 @@ test('orchestrator provisions exact primary contracts before RPC import', async 
     await processRuntime(env);
     await processRuntime(env);
     const replica = env.state.jReplicas.get('Primary');
-    importedAdapter = replica?.jadapter ?? null;
+    importedAdapter = getLiveJAdapter(env, 'Primary') ?? null;
     expect(replica?.contracts).toEqual(Object.fromEntries(
       Object.entries(first.contracts).map(([key, value]) => [key, value.toLowerCase()]),
     ));
@@ -355,7 +356,7 @@ test('fresh RPC import uses provisioned deployment metadata after Anvil history 
     await processRuntime(env);
     await processRuntime(env);
     const imported = env.state.jReplicas.get('Primary');
-    importedAdapter = imported?.jadapter ?? null;
+    importedAdapter = getLiveJAdapter(env, 'Primary') ?? null;
     expect(imported?.blockNumber).toBe(BigInt(deploymentBlock - 1));
     expect(importedAdapter?.entityProviderDeploymentBlock).toBe(deploymentBlock);
   } finally {

@@ -18,6 +18,7 @@
 
 import type { AccountReplica } from '../types/account';
 import type { RuntimeReplica } from '../runtime/types';
+import { getLiveJAdapterEntries } from '../runtime/live-jadapters';
 import type { EntityInput } from '../entity/types';
 import { ethers } from 'ethers';
 import { getBestAsk, SWAP_LOT_SCALE } from '../orderbook';
@@ -57,9 +58,8 @@ const getProcess = async () => {
 async function processJEvents(env: RuntimeReplica): Promise<void> {
   // RPC watcher is polling-based; force immediate poll in scenarios to avoid
   // relying on wall-clock interval timing between submit and assertions.
-  for (const [, jReplica] of env.state.jReplicas) {
-    const ja = jReplica.jadapter;
-    if (ja?.pollNow) await ja.pollNow();
+  for (const { adapter } of getLiveJAdapterEntries(env)) {
+    if (adapter.pollNow) await adapter.pollNow();
   }
 
   const pending = env.runtimeMempool.entityInputs.length;

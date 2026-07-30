@@ -33,6 +33,7 @@ import { handleRuntimeFrameStorageFailure } from './storage-failure';
 import { runCommittedRuntimeEffects } from './post-commit';
 import { finishRuntimeFrame, handleRuntimeFrameFailure } from './finish';
 import type { RuntimeInputReducer } from './input-reducer';
+import { getLiveJAdapterEntries } from '../live-jadapters';
 
 const runtimeLog = createStructuredLogger('runtime');
 
@@ -229,8 +230,8 @@ const openRuntimeFrameCandidate = (
   const env = liveEnv;
   const state = ensureRuntimeInfrastructure(env);
   const mempool = transaction.frameMempool;
-  for (const replica of env.state.jReplicas.values()) {
-    replica.jadapter?.setQuietLogs?.(quietRuntimeLogs);
+  for (const { adapter } of getLiveJAdapterEntries(env)) {
+    adapter.setQuietLogs?.(quietRuntimeLogs);
   }
   const runtimeInput = buildRuntimeFrameInput(env, mempool, deps);
   liveState.inFlightEntityInputs = runtimeInput.entityInputs.length;
@@ -257,8 +258,8 @@ const beginRuntimeFrameMutation = (
   frame.mutationStarted = true;
   ensureRuntimeInfrastructure(candidate.env).stateMutationInFlight = true;
   candidate.env.state.timestamp = candidate.frameTimestamp;
-  for (const replica of candidate.env.state.jReplicas.values()) {
-    replica.jadapter?.setBlockTimestamp?.(candidate.env.state.timestamp);
+  for (const { adapter } of getLiveJAdapterEntries(candidate.env)) {
+    adapter.setBlockTimestamp?.(candidate.env.state.timestamp);
   }
 };
 

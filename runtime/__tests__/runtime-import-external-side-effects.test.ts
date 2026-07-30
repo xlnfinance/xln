@@ -20,6 +20,7 @@ import {
   loadEnvFromDB,
   processRuntime,
 } from '../runtime';
+import { getLiveJAdapter } from '../runtime/live-jadapters';
 
 const TEST_RUN_ID = `${globalThis.process.pid}-${Date.now()}`;
 const cleanupNamespaces: string[] = [];
@@ -150,7 +151,7 @@ describe('runtime import external-side-effect atomicity', () => {
 
     await processRuntime(env);
     const replica = env.state.jReplicas.get('Durable BrowserVM');
-    const adapter = replica?.jadapter;
+    const adapter = getLiveJAdapter(env, 'Durable BrowserVM');
     if (!replica || !adapter) throw new Error('DURABLE_BROWSERVM_IMPORT_MISSING');
     try {
       expect(env.state.height).toBe(2);
@@ -234,10 +235,11 @@ describe('runtime import external-side-effect atomicity', () => {
     expect(restoredIntent.infrastructure?.pendingJurisdictionImports?.size).toBe(1);
     await processRuntime(restoredIntent);
     const committedReplica = restoredIntent.state.jReplicas.get('Restored BrowserVM');
-    if (!committedReplica?.jadapter) throw new Error('RESTORED_IMPORT_RESULT_MISSING');
+    const committedAdapter = getLiveJAdapter(restoredIntent, 'Restored BrowserVM');
+    if (!committedReplica || !committedAdapter) throw new Error('RESTORED_IMPORT_RESULT_MISSING');
     expect(restoredIntent.state.height).toBe(2);
-    expect(committedReplica.jadapter.getBrowserVM()).toBe(restoredIntent.browserVM);
-    await committedReplica.jadapter.close();
+    expect(committedAdapter.getBrowserVM()).toBe(restoredIntent.browserVM);
+    await committedAdapter.close();
     await closeRuntimeDb(restoredIntent);
     await closeInfraDb(restoredIntent);
 
@@ -245,11 +247,12 @@ describe('runtime import external-side-effect atomicity', () => {
     if (!restoredResult) throw new Error('RESTORED_IMPORT_RESULT_ENV_MISSING');
     try {
       const replica = restoredResult.state.jReplicas.get('Restored BrowserVM');
-      if (!replica?.jadapter) throw new Error('RESTORED_IMPORT_ADAPTER_MISSING');
+      const adapter = getLiveJAdapter(restoredResult, 'Restored BrowserVM');
+      if (!replica || !adapter) throw new Error('RESTORED_IMPORT_ADAPTER_MISSING');
       expect(restoredResult.state.height).toBe(2);
       expect(restoredResult.infrastructure?.pendingJurisdictionImports).toBeUndefined();
-      expect(replica.jadapter.getBrowserVM()).toBe(restoredResult.browserVM);
-      await replica.jadapter.close();
+      expect(adapter.getBrowserVM()).toBe(restoredResult.browserVM);
+      await adapter.close();
     } finally {
       await closeRuntimeDb(restoredResult);
       await closeInfraDb(restoredResult);

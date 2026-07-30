@@ -21,6 +21,7 @@ import {
   findJSubmitCrashReplica,
   processUntilJSubmitCrash,
 } from './fixtures/j-submit-crash-helpers';
+import { attachLiveJAdapter } from '../runtime/live-jadapters';
 
 type RealCrashBoundary =
   | 'before-intent'
@@ -92,7 +93,7 @@ describe('J submit crash recovery', () => {
     if (!afterIntent) throw new Error('failed to restore committed J intent');
     afterIntent.scenarioMode = true;
     afterIntent.quietRuntimeLogs = true;
-    afterIntent.state.jReplicas.get(jurisdiction.name)!.jadapter = jadapter;
+    attachLiveJAdapter(afterIntent, jurisdiction.name, jadapter);
     const intentReplica = findReplica(afterIntent, sender.id);
     expect(intentReplica.state.jBatchState?.status).toBe('sent');
     expect(intentReplica.jSubmitState).toBeUndefined();
@@ -109,7 +110,7 @@ describe('J submit crash recovery', () => {
     if (!afterAttempt) throw new Error('failed to restore durable J attempt');
     afterAttempt.scenarioMode = true;
     afterAttempt.quietRuntimeLogs = true;
-    afterAttempt.state.jReplicas.get(jurisdiction.name)!.jadapter = jadapter;
+    attachLiveJAdapter(afterAttempt, jurisdiction.name, jadapter);
     expect(findReplica(afterAttempt, sender.id).jSubmitState).toMatchObject({
       submitAttempts: 1,
       entityNonce: 1,
@@ -140,7 +141,7 @@ describe('J submit crash recovery', () => {
     if (!beforeIo) throw new Error('failed to restore before real BrowserVM rejection');
     beforeIo.scenarioMode = true;
     beforeIo.quietRuntimeLogs = true;
-    beforeIo.state.jReplicas.get(jurisdiction.name)!.jadapter = jadapter;
+    attachLiveJAdapter(beforeIo, jurisdiction.name, jadapter);
     const consensusHashBeforeResult = computeCanonicalEntityHash(findReplica(beforeIo, sender.id)).hash;
     expect(beforeIo.infrastructure?.pendingCommittedJOutbox).toHaveLength(1);
 
@@ -173,7 +174,7 @@ describe('J submit crash recovery', () => {
     expect(findReplica(afterIo, sender.id).jSubmitState?.terminalFailure).toBeUndefined();
     expect(findReplica(afterIo, sender.id).state.jBatchState?.entityNonce).toBe(1);
     expect(findReplica(afterIo, sender.id).state.jBatchState?.sentBatch).toBeUndefined();
-    afterIo.state.jReplicas.get(jurisdiction.name)!.jadapter = jadapter;
+    attachLiveJAdapter(afterIo, jurisdiction.name, jadapter);
     await processRuntime(afterIo, []);
     await processRuntime(afterIo, []);
     expect(afterIo.infrastructure?.pendingCommittedJOutbox ?? []).toEqual([]);

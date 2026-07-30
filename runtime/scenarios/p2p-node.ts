@@ -18,6 +18,7 @@ import { hashHtlcSecret } from '../protocol/htlc/utils';
 import type { AccountReplica, Delta } from '../types/account';
 import type { EntityInput, JurisdictionConfig } from '../entity/types';
 import type { RuntimeReplica } from '../runtime/types';
+import { getLiveJAdapter } from '../runtime/live-jadapters';
 import type { JAdapter, JTokenInfo } from '../jadapter/types';
 import type { Profile } from '../entity/profile';
 import { withDeterministicHtlcTestSecret } from '../protocol/htlc/test-secret-capability';
@@ -663,7 +664,7 @@ const run = async () => {
     await processRuntime(env);
 
     const browserReplica = env.state.jReplicas.get(jurisdictionName);
-    const browserAdapter = browserReplica?.jadapter;
+    const browserAdapter = getLiveJAdapter(env, jurisdictionName);
     if (!browserReplica || !browserAdapter?.addresses.depository || !browserAdapter.addresses.entityProvider) {
       throw new Error(`P2P_BROWSERVM_JURISDICTION_MISSING: ${jurisdictionName}`);
     }
