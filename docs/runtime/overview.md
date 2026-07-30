@@ -1,71 +1,130 @@
-# Runtime Code Map
+# Runtime code map
 
-This document is the entry point for reading the xln runtime. It is not a full
-file catalog. The goal is to show where protocol truth lives, which modules are
-infrastructure, and which folders are generated or scenario-only.
+**Role:** source-reading guide
+**Audience:** protocol implementers and auditors
+**Authority:** current source paths, enforced by `check:runtime-doc-paths`
 
-## Read Order
+The `runtime/` tree contains three nested state machines and the infrastructure
+that drives them. Read the cascade before the services around it.
 
-If you only have 1-2 hours, read files in this order:
+## The 90-minute path
 
-1. `runtime/runtime.ts`
-   Public runtime API and compatibility entry point.
-2. `runtime/runtime/lifecycle.ts`, `runtime/runtime/input-queue.ts`, `runtime/runtime/entity-inputs.ts`, `runtime/runtime/output-routing.ts`
-   Single-writer loop, ingress, entity dispatch, and durable output routing.
-3. `runtime/entity/consensus/input-consensus.ts`, `runtime/entity/consensus/frame-application.ts`, `runtime/entity/consensus/leader.ts`
-   Entity-frame proposal, quorum validation, commit, and ordered leader failover.
-4. `runtime/account/consensus/index.ts`, `runtime/account/consensus/frame.ts`, `runtime/account/consensus/deadline-policy.ts`
-   Bilateral account proposal/ACK, secondary-manifest validation, and receiver-local deadline policy.
-5. `runtime/entity/tx/apply.ts`
-   Entity-tx dispatcher and domain entry points.
-6. `runtime/account/tx/apply.ts`
-   Bilateral account-tx dispatcher.
-7. `runtime/jurisdiction/history-consensus.ts`, `runtime/jurisdiction/event-observation.ts`, `runtime/runtime/j-submit.ts`
-   Per-validator J-block histories, quorum-prefix finality, observation, and durable submission.
-8. `runtime/storage/`, `runtime/storage/wal/snapshot.ts`
-   Snapshot/WAL/materialization and local integrity hashes.
-9. `runtime/extensions/cross-j/`, `runtime/orderbook/`
-   Cross-j lifecycle and same-j market extensions outside the minimal payment core.
-10. `runtime/networking/`, `runtime/relay/`, `runtime/server/`
-    Transport and operator surfaces; these do not define financial truth.
+### 1. Vocabulary and commitments
 
-## Core Domains
+1. `runtime/runtime/types.ts` — Runtime Input, Tx, Frame, and live replica.
+2. `runtime/entity/types.ts` — Entity State, candidate, Frame, and replica.
+3. `runtime/types/account.ts` — Account State, replica, Input, Tx, and Frame.
+4. `runtime/account/state-root.ts` — the exact bilateral commitment.
+5. `runtime/entity/consensus/state-root.ts` — Entity commitment, including the
+   deterministic Account-replica projection.
 
-- `runtime/runtime.ts`
-  Owns the runtime loop, frame persistence, env lifecycle, and top-level API.
-- `runtime/runtime/`
-  Owns lifecycle, input admission, scheduled wakes, routing, and persistence orchestration.
-- `runtime/entity/consensus/`
-  Own entity-frame consensus, proposal hashing, and cross-j orderbook orchestration.
-- `runtime/account/consensus/`
-  Own bilateral frame consensus, replay protection, and dispute proof updates.
-- `runtime/entity/tx/`
-  Applies entity-layer transactions, J-events, disputes, settlement, cross-j coordination.
-- `runtime/account/tx/`
-  Applies bilateral txs such as payment, HTLC, pull, swap, settlement-side actions.
-- `runtime/jurisdiction/`
-  Groups validator observations by jurisdiction block and finalizes only the exact quorum-supported prefix.
-- `runtime/storage/`, including `runtime/storage/wal/`
-  Durable truth: snapshot, WAL, materialized docs, canonical hash verification.
-- `runtime/networking/`, `runtime/relay/`
-  Transport only. These modules deliver inputs; they do not define financial truth.
-- `runtime/server/`
-  Runtime HTTP/WS surface, health, faucet, ingress receipts, tower/recovery APIs.
-- `runtime/jadapter/`
-  J-layer bridge. `rpc.ts` is production-testnet relevant. BrowserVM adapters are legacy/dev-oriented.
-- `runtime/orderbook/`, `runtime/routing/`
-  Same-j swap matching, book state, graph routing, and pathfinding.
+### 2. One input through all three machines
 
-## Folder Readmes
+6. `runtime/runtime/frame/process.ts` — the visible Runtime coordinator.
+7. `runtime/runtime/frame/prepare.ts` — detach one immutable Runtime input.
+8. `runtime/runtime/frame/apply.ts` — apply Runtime and routed Entity work.
+9. `runtime/entity/consensus/input-consensus.ts` — the Entity entry point.
+10. `runtime/entity/consensus/frame-application.ts` — replay a candidate.
+11. `runtime/account/consensus/index.ts` — the Account entry point.
+12. `runtime/account/tx/apply.ts` — validate one Account transaction.
+13. `runtime/account/tx/mutation.ts` — mutate Account-owned financial state.
+
+### 3. Certification and failure
+
+14. `runtime/entity/consensus/single-signer-frame.ts` — immediate local
+    certification through the same candidate model.
+15. `runtime/entity/consensus/multi-signer-proposal.ts` — validator candidate
+    and Hanko flow.
+16. `runtime/account/consensus/collision.ts` — deterministic same-height
+    LEFT-wins rollback.
+17. `runtime/account/consensus/ack-commit.ts` — bilateral commit.
+18. `runtime/runtime/frame/storage-failure.ts` — pre/post-WAL failure rules.
+19. `runtime/storage/commit.ts` — the only durable Runtime commit point.
+20. `runtime/storage/recovery/replay.ts` — rebuild from durable truth.
+
+### 4. External settlement
+
+21. `runtime/jurisdiction/history-consensus.ts` — certified J-prefix facts.
+22. `runtime/jadapter/ingress-transform.ts` — external evidence boundary.
+23. `runtime/entity/tx/j-events.ts` — certified J effects enter Entity.
+24. `runtime/account/j-finality.ts` — Account-owned settlement finality.
+25. `runtime/runtime/j-submit.ts` — durable post-frame submission lifecycle.
+
+## Folder ownership
+
+| Folder | Owns | Must not own |
+|---|---|---|
+| `runtime/runtime/` | Runtime input, frame, WAL ordering, routing | Entity/Account financial rules |
+| `runtime/entity/` | Entity transactions, candidates, Hanko consensus | physical storage or transport |
+| `runtime/account/` | bilateral consensus and every money mutation | Entity/Runtime orchestration |
+| `runtime/jurisdiction/` | deterministic J protocol facts | RPC/provider behavior |
+| `runtime/jadapter/` | chain reads, authenticated receipts, submissions | consensus authority |
+| `runtime/storage/` | current state, WAL, history views, replay | protocol decisions |
+| `runtime/networking/` | Runtime-to-Runtime delivery | financial state |
+| `runtime/relay/` | discovery and market relay services | Runtime consensus |
+| `runtime/api/` | public typed Runtime surface | service lifecycle |
+| `runtime/server/` | HTTP/WebSocket delivery | process orchestration |
+| `runtime/orchestrator/` | process startup and service composition | reducer logic |
+| `runtime/radapter/` | frontend projections and commands | direct state mutation |
+| `runtime/watchtower/` | encrypted appointments and chain action | spend-capable user keys |
+| `runtime/qa/` | diagnostics and human-readable state dumps | protocol behavior |
+
+## The three commit boundaries
+
+```text
+Runtime
+  one local writer
+  Input → apply owned state → WAL → publish → effects
+
+Entity
+  validator set
+  Input → isolated candidate → Hanko certificate → install → outputs
+
+Account
+  two peers
+  Input → isolated candidate → bilateral ACK → install → outputs
+```
+
+`*State` is frame-committed deterministic data. `*Replica` is the live instance
+that also owns the next candidate, mempool, certification, retry, or delivery
+metadata. `*Machine` describes transition logic; it is not a data type.
+
+Runtime is locally single-writer, not concurrent consensus. Entity consensus
+may be single-signer or multi-signer. Account consensus is always bilateral.
+The common vocabulary must not hide these different trust boundaries behind a
+generic base class.
+
+## Visibility and failure
+
+- Public API and UI read only the last WAL-committed Runtime frame.
+- A candidate is not history and is never a public balance.
+- Before WAL, a rejected input is absent from public history.
+- Any programming/storage doubt after owned-state mutation halts reads and
+  reloads durable truth.
+- After WAL, the frame exists even if notification or delivery fails; effects
+  retry without reclassifying the commit.
+- RPC and transport observations become authority only after decoding,
+  authentication, deterministic input construction, and frame commit.
+
+## Executable reading traces
+
+- `runtime/__tests__/runtime-frame-atomicity.test.ts` — mutation/WAL/read
+  barriers and input recovery.
+- `runtime/scripts/persistence-simultaneous-proposal-smoke.ts` — Account
+  collision, rollback ordering, and LEFT wins.
+- `runtime/__tests__/account-frame-integrity.test.ts` — exact frame validation.
+- `runtime/__tests__/derive-delta-property.test.ts` — the single balance model.
+- `runtime/__tests__/storage-canonical-hash.test.ts` — durable canonical bytes.
+- `runtime/__tests__/multisig-secondary-hanko.test.ts` — candidate
+  certification.
+
+## Supporting guides
 
 - [Runtime machine](./runtime.md)
 - [Entity machine](./entity.md)
 - [Account machine](./account.md)
 - [Jurisdiction machine](./jurisdiction.md)
 - [Protocol primitives](./protocol.md)
-- [Runtime extensions](./extensions.md)
-- [Account transactions](./account-transactions.md)
-- [Entity transactions](./entity-transactions.md)
 - [Storage](./storage.md)
 - [Networking](./networking.md)
 - [Server](./server.md)
@@ -73,60 +132,6 @@ If you only have 1-2 hours, read files in this order:
 - [Recovery](./recovery.md)
 - [Watchtower](./watchtower.md)
 
-## Surface Classification
-
-### Protocol-critical
-
-These files define correctness and are the first audit target:
-
-- `runtime/runtime.ts`
-- `runtime/runtime/`
-- `runtime/entity/consensus/`
-- `runtime/account/consensus/`
-- `runtime/entity/tx/`
-- `runtime/account/tx/`
-- `runtime/jurisdiction/`
-- `runtime/storage/`
-- `runtime/storage/wal/`
-
-### Infrastructure, not protocol truth
-
-- `runtime/server/`
-- `runtime/networking/`
-- `runtime/relay/`
-- `runtime/orchestrator/`
-- `runtime/radapter/`
-
-### Scenario / dev / operator tooling
-
-- `runtime/scripts/`
-- `runtime/scenarios/`
-- `runtime/qa/runtime-ascii.ts`
-- `runtime/qa/`
-
-### Public and machine-owned type surfaces
-
-- `runtime/api/runtime-module.ts`
-- `runtime/runtime/types.ts`
-
-`runtime/api/runtime-module.ts` is the canonical frontend-facing Runtime module
-contract. It lives at the API boundary rather than in the Runtime source root.
-`runtime/runtime/types.ts` owns Runtime machine types. Entity and Account types
-remain in their owner folders; new code must import from the owning layer rather
-than recreating a root compatibility barrel.
-Contract bindings are generated under `jurisdictions/typechain-types/`; do not
-recreate a second runtime-local typechain copy.
-
-## Cleanup Targets
-
-These are the current safe simplification targets:
-
-- keep BrowserVM adapters out of the default public-testnet reading path
-- continue replacing internal `./types` imports with narrower domain type modules
-- keep generated contract bindings and scenario tooling out of protocol reviews
-- avoid adding new root-level helper files when a domain folder already exists
-
-## Safe Cleanup Rule
-
-Do not mechanically move consensus/apply files while behavior is changing.
-Stabilize behavior first, then do one move-only pass.
+Generated bindings live under `jurisdictions/typechain-types/`. Scenario,
+benchmark, QA, and archived files are valuable evidence but are not protocol
+authority.

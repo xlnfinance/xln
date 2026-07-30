@@ -31,7 +31,7 @@ xln/
 └── .archive/           Historical implementations; never current authority
 ```
 
-`runtime.ts` is intentionally a narrow public facade. Core behavior belongs to
+`runtime/runtime.ts` is intentionally a narrow public facade. Core behavior belongs to
 the owning Runtime, Entity, or Account folder; physical I/O stays outside those
 state-machine folders.
 
@@ -233,7 +233,7 @@ bun run bench:radapter:hub1m:allmem  # Same, but materialize all 1M accounts int
 
 **Tech:** Dockview (2.8k stars), Svelte reactivity, localStorage persistence
 
-**Source:** `/frontend/src/lib/components/` + `/docs/xlnview.md`
+**Source:** `frontend/src/lib/view/` and `frontend/src/lib/components/`
 
 ---
 
@@ -247,7 +247,8 @@ bun run bench:radapter:hub1m:allmem  # Same, but materialize all 1M accounts int
 - **Reset:** Refresh page = new universe
 - **Persistent:** Optional IndexedDB (resume sessions)
 
-**Config:** Genesis configs in `runtime/evms/browser-evm.ts`
+**Implementation:** `runtime/jadapter/browservm.ts` and its focused
+`browservm-*` modules
 
 **Demo:** Load any scenario (AHB, Grid) - BrowserVM deploys contracts automatically
 
