@@ -72,7 +72,7 @@ test('runtime dev startup status logs stay structured', () => {
   expect(runtimeLoop).toContain("throwSettledErrors(shutdown, 'RUNTIME_DB_CLOSE_QUIESCE_FAILED')");
   expect(runtimeFailure).toContain("failureLog.error('error'");
   expect(runtimeConsoleLines).toEqual([
-    "console.log(`\\n⏸️  FRAME STEPPING: Stopped at frame ${env.height}`);",
+    "console.log(`\\n⏸️  FRAME STEPPING: Stopped at frame ${env.state.height}`);",
     "console.log('═'.repeat(80));",
     'console.log(formatRuntime(env, { maxAccounts: 10, maxLocks: 20, maxSwaps: 20 }));',
     "console.log('═'.repeat(80) + '\\n');",

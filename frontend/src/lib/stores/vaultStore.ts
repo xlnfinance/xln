@@ -71,7 +71,6 @@ import {
   resolveJurisdictionConfig,
   resolveJurisdictionRpc,
   resolveRpcUrl,
-  stringifyTowerPayload,
   waitForCondition,
 } from './vault-helpers';
 

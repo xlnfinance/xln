@@ -103,8 +103,10 @@ describe('storage filesystem durability', () => {
   test('fails closed on a malformed durable rotation marker', async () => {
     const namespace = `storage-marker-invalid-${process.pid}-${Date.now()}`;
     const env = {
-      height: 0,
-      timestamp: 0,
+      state: {
+  height: 0,
+  timestamp: 0,
+      },
       runtimeId: namespace,
       dbNamespace: namespace,
       infrastructure: {},
@@ -137,8 +139,10 @@ describe('storage filesystem durability', () => {
       close: () => closeFailure,
     };
     const env = {
-      height: 0,
-      timestamp: 0,
+      state: {
+  height: 0,
+  timestamp: 0,
+      },
       runtimeId: `storage-close-poison-${process.pid}-${Date.now()}`,
       dbNamespace: `storage-close-poison-${process.pid}-${Date.now()}`,
       infrastructure: {
@@ -178,8 +182,10 @@ describe('storage filesystem durability', () => {
     const frameClose = deferred();
     const infraClose = deferred();
     const env = {
-      height: 0,
-      timestamp: 0,
+      state: {
+  height: 0,
+  timestamp: 0,
+      },
       runtimeId: `storage-close-all-${process.pid}-${Date.now()}`,
       dbNamespace: `storage-close-all-${process.pid}-${Date.now()}`,
       infrastructure: {

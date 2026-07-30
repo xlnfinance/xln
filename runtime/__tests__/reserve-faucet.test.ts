@@ -21,27 +21,29 @@ const makeEnv = (options: {
   activeHubProfile?: boolean;
   hubReserve?: bigint;
 } = {}): RuntimeReplica => ({
+  state: {
   eReplicas: new Map([
-    [`${HUB}:${HUB_SIGNER}`, {
-      entityId: HUB,
-      signerId: HUB_SIGNER,
-      entityEncPubKey: '',
-      entityEncPrivKey: '',
-      isProposer: true,
-      mempool: [],
-      state: {
+      [`${HUB}:${HUB_SIGNER}`, {
         entityId: HUB,
-        reserves: new Map([[1, options.hubReserve ?? 0n]]),
-        accounts: new Map(),
-        config: {
-          mode: 'proposer-based',
-          threshold: 1n,
-          validators: [HUB_SIGNER],
-          shares: { [HUB_SIGNER]: 1n },
+        signerId: HUB_SIGNER,
+        entityEncPubKey: '',
+        entityEncPrivKey: '',
+        isProposer: true,
+        mempool: [],
+        state: {
+          entityId: HUB,
+          reserves: new Map([[1, options.hubReserve ?? 0n]]),
+          accounts: new Map(),
+          config: {
+            mode: 'proposer-based',
+            threshold: 1n,
+            validators: [HUB_SIGNER],
+            shares: { [HUB_SIGNER]: 1n },
+          },
         },
-      },
-    }],
-  ]),
+      }],
+    ]),
+  },
   gossip: {
     getProfiles: () => options.activeHubProfile === false
       ? []

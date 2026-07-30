@@ -167,9 +167,3 @@ export const resolveRpcUrl = (rpc: string, baseOrigin?: string): string => {
   }
   return rpc;
 };
-
-export // Tower remedies carry dispute proof bodies, which still contain bigint deltas.
-// JSON.stringify would throw here and silently break last-resort tower coverage,
-// so we normalize bigint leaves into decimal strings before upload.
-const stringifyTowerPayload = (value: unknown): string =>
-  JSON.stringify(value, (_key, candidate) => (typeof candidate === 'bigint' ? candidate.toString() : candidate));

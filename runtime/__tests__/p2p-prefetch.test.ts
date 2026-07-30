@@ -450,7 +450,7 @@ test('enqueueEntityInputsDelivery uses relay when direct transport is not author
 test('getQueueState reports the runtime-owned durable outbox', () => {
   const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
   p2p.env = {
-    timestamp: 1_500,
+    state: { timestamp: 1_500 },
     pendingNetworkOutputs: [{
       runtimeId: TARGET_RUNTIME_ID,
       entityId: SOURCE_ENTITY_ID,

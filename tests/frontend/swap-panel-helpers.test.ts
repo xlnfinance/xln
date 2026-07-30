@@ -47,7 +47,7 @@ describe('swap panel helpers', () => {
           ],
         ]),
       },
-      eReplicas: new Map([
+      state: { eReplicas: new Map([
         [
           `${userId}:0xSignerA`,
           {
@@ -85,7 +85,7 @@ describe('swap panel helpers', () => {
             },
           },
         ],
-      ]),
+      ]) },
     };
 
     const view = buildSwapPanelRuntimeView(frame as never);
@@ -316,8 +316,8 @@ describe('swap panel helpers', () => {
     const clearSlice = panel.slice(clearStart, formatStart);
 
     expect(resolverSlice).toContain('function resolveSwapLogicalClock(');
-    expect(resolverSlice).toContain('sourceReplica?.state?.timestamp ?? runtimeEnv?.timestamp');
-    expect(resolverSlice).toContain('sourceReplica?.state?.height ?? runtimeEnv?.height');
+    expect(resolverSlice).toContain('sourceReplica?.state?.timestamp ?? runtimeEnv?.state.timestamp');
+    expect(resolverSlice).toContain('sourceReplica?.state?.height ?? runtimeEnv?.state.height');
     expect(resolverSlice).toContain('resolveProjectedSignerId(entityId)');
     expect(resolverSlice).not.toContain("throw new Error('XLN environment not ready')");
     expect(placeSlice).toContain('resolveSwapLogicalClock(currentReplica)');

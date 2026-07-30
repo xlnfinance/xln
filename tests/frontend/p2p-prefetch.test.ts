@@ -20,14 +20,14 @@ const TRON_JURISDICTION = {
 
 function envWithSourceJurisdiction(extra: Record<string, unknown> = {}) {
   return {
-    eReplicas: new Map([
+    state: { eReplicas: new Map([
       [`${SOURCE}:${SIGNER}`, {
         state: {
           entityId: SOURCE,
           config: { jurisdiction: TRON_JURISDICTION },
         },
       }],
-    ]),
+    ]) },
     ...extra,
   };
 }

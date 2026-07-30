@@ -437,7 +437,9 @@ describe('ordered reliable output lanes', () => {
     const targetAck = { ...accountAckOutput(4), sourceRuntimeFrame: frame, atomicCrossJurisdictionPair: pair };
     const env = {
       scenarioMode: true,
-      timestamp: 1_000,
+      state: {
+  timestamp: 1_000,
+      },
       infrastructure: {},
       pendingNetworkOutputs: [],
     } as unknown as RuntimeReplica;
@@ -468,8 +470,10 @@ describe('ordered reliable output lanes', () => {
     const envelopes: RuntimeEntityInputsEnvelope[] = [];
     const env = {
       runtimeId: runtimeId('90'),
-      height: 50,
-      timestamp: 1_002,
+      state: {
+  height: 50,
+  timestamp: 1_002,
+      },
       infrastructure: {},
       warn: () => {},
       error: () => {},
@@ -510,7 +514,9 @@ describe('ordered reliable output lanes', () => {
     };
     const env = {
       scenarioMode: true,
-      timestamp: 1_000,
+      state: {
+  timestamp: 1_000,
+      },
       infrastructure: {},
       pendingNetworkOutputs: [],
     } as unknown as RuntimeReplica;
@@ -542,7 +548,9 @@ describe('ordered reliable output lanes', () => {
     const targetAck = { ...accountAckOutput(4), sourceRuntimeFrame: frame, atomicCrossJurisdictionPair: pair };
     const env = {
       scenarioMode: true,
-      timestamp: 1_000,
+      state: {
+  timestamp: 1_000,
+      },
       infrastructure: {},
       pendingNetworkOutputs: [],
     } as unknown as RuntimeReplica;
@@ -587,7 +595,9 @@ describe('ordered reliable output lanes', () => {
     const envelopes: RuntimeEntityInputsEnvelope[] = [];
     const env = {
       runtimeId: runtimeId('90'),
-      timestamp: 1_000,
+      state: {
+  timestamp: 1_000,
+      },
       infrastructure: {},
       warn: () => {},
       error: () => {},
@@ -614,7 +624,9 @@ describe('ordered reliable output lanes', () => {
     const output = accountAckOutput(5);
     const env = {
       scenarioMode: true,
-      timestamp: 0,
+      state: {
+  timestamp: 0,
+      },
       infrastructure: {},
       pendingNetworkOutputs: [],
     } as unknown as RuntimeReplica;
@@ -638,7 +650,9 @@ describe('ordered reliable output lanes', () => {
     const higher = accountAckOutput(6);
     const env = {
       scenarioMode: true,
-      timestamp: 1_000,
+      state: {
+  timestamp: 1_000,
+      },
       infrastructure: {},
       pendingNetworkOutputs: [],
     } as unknown as RuntimeReplica;
@@ -661,7 +675,9 @@ describe('ordered reliable output lanes', () => {
       const attempted: number[] = [];
       const env = {
         runtimeId: runtimeId('90'),
-        timestamp: 1_000,
+        state: {
+  timestamp: 1_000,
+        },
         infrastructure: {},
         warn: () => {},
         error: () => {},
@@ -695,7 +711,9 @@ describe('ordered reliable output lanes', () => {
       const attempted: number[] = [];
       const env = {
         runtimeId: runtimeId('90'),
-        timestamp: 1_000,
+        state: {
+  timestamp: 1_000,
+        },
         infrastructure: {},
         pendingNetworkOutputs: [],
         warn: () => {},
@@ -741,7 +759,9 @@ describe('ordered reliable output lanes', () => {
     const h8 = { ...accountAckOutput(8), runtimeId: receiver.runtimeId };
     const env = {
       runtimeId: runtimeId('90'),
-      timestamp: 1_000,
+      state: {
+  timestamp: 1_000,
+      },
       infrastructure: {},
       pendingNetworkOutputs: [],
       warn: () => {},
@@ -798,7 +818,9 @@ describe('ordered reliable output lanes', () => {
     const receipt = createReliableDeliveryReceipt(receiver, h11Identity, 'terminal');
     const env = {
       runtimeId: runtimeId('90'),
-      timestamp: 1_000,
+      state: {
+  timestamp: 1_000,
+      },
       infrastructure: {},
       pendingNetworkOutputs: [h11],
       warn: () => {},
@@ -859,7 +881,9 @@ describe('ordered reliable output lanes', () => {
     const attempted: number[] = [];
     const env = {
       runtimeId: runtimeId('90'),
-      timestamp: 1_000,
+      state: {
+  timestamp: 1_000,
+      },
       infrastructure: {},
       warn: () => {},
       error: () => {},
@@ -893,7 +917,9 @@ describe('ordered reliable output lanes', () => {
     const attempted: string[] = [];
     const env = {
       runtimeId: runtimeId('90'),
-      timestamp: 1_000,
+      state: {
+  timestamp: 1_000,
+      },
       infrastructure: {},
       warn: () => {},
       error: () => {},
@@ -932,7 +958,9 @@ describe('ordered reliable output lanes', () => {
     const attempted: Array<number | 'ordinary'> = [];
     const env = {
       runtimeId: runtimeId('90'),
-      timestamp: 1_000,
+      state: {
+  timestamp: 1_000,
+      },
       infrastructure: {},
       warn: () => {},
       error: () => {},
@@ -968,7 +996,9 @@ describe('ordered reliable output lanes', () => {
     const attempted: string[] = [];
     const env = {
       runtimeId: runtimeId('90'),
-      timestamp: 1_000,
+      state: {
+  timestamp: 1_000,
+      },
       infrastructure: {},
       warn: () => {},
       error: () => {},
@@ -1012,7 +1042,9 @@ describe('ordered reliable output lanes', () => {
     });
     const env = {
       runtimeId: runtimeId('90'),
-      timestamp: 1_000,
+      state: {
+  timestamp: 1_000,
+      },
       infrastructure: {
         receivedReliableReceiptLedger: new Map([['proposal', receipt(proposalIdentity)]]),
       },
@@ -1044,7 +1076,9 @@ describe('ordered reliable output lanes', () => {
   test('transport handoff does not GC a reliable output before durable application receipt', () => {
     const env = {
       runtimeId: runtimeId('90'),
-      timestamp: 1_000,
+      state: {
+  timestamp: 1_000,
+      },
       infrastructure: {},
       warn: () => {},
       error: () => {},

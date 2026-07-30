@@ -57,7 +57,7 @@ const proofBodyParam = ParamType.from(
 );
 const makeProofBody = (watchSeed: string, offdelta: bigint): Record<string, unknown> => ({
   watchSeed,
-  tokenIds: [1],
+  tokenIds: [1n],
   offdeltas: [offdelta],
   transformers: [],
 });
@@ -359,7 +359,7 @@ describe('watchtower recovery full flow', () => {
     expect(restored).not.toBeNull();
     expect(restored?.bundle.runtimeHeight).toBe(bundle.runtimeHeight);
     expect(restored?.env.runtimeId).toBe(runtimeId);
-    expect(restored?.env.eReplicas.size).toBe(env.state.eReplicas.size);
+    expect(restored?.env.state.eReplicas.size).toBe(env.state.eReplicas.size);
     expect(runtime.signers[0]?.entityId).toBe(entityId);
     await xln.closeRuntimeDb(restored!.env);
     await xln.closeInfraDb(restored!.env);
@@ -655,7 +655,6 @@ describe('watchtower recovery full flow', () => {
         }),
       }),
     });
-
     expect(result).toEqual({
       scanned: 1,
       submitted: 1,

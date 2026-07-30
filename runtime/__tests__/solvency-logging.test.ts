@@ -24,7 +24,8 @@ const expectVerificationFailure = (env: RuntimeReplica, label: string): void => 
 };
 
 const makeEnv = (): RuntimeReplica => ({
-  eReplicas: new Map([
+  state: {
+    eReplicas: new Map([
     ['a', {
       state: {
         entityId: ENTITY_A,
@@ -46,10 +47,11 @@ const makeEnv = (): RuntimeReplica => ({
         ]),
       },
     }],
-  ]),
-  jReplicas: new Map(),
-  height: 0,
-  timestamp: 0,
+    ]),
+    jReplicas: new Map(),
+    height: 0,
+    timestamp: 0,
+  },
 } as unknown as RuntimeReplica);
 
 test('solvency diagnostics use structured logging only', () => {

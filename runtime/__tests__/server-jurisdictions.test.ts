@@ -96,7 +96,7 @@ describe('server jurisdiction writer', () => {
   test('runtime jurisdiction export waits for the full contract set', async () => {
     const partialEnv = {
       activeJurisdiction: 'Testnet',
-      jReplicas: new Map([
+      state: { jReplicas: new Map([
         ['Testnet', {
           name: 'Testnet',
           chainId: 31337,
@@ -107,14 +107,14 @@ describe('server jurisdiction writer', () => {
             entityProvider: '0x0000000000000000000000000000000000000002',
           },
         }],
-      ]),
+      ]) },
     };
 
     await expect(buildRuntimeJurisdictionsJson(partialEnv as never)).resolves.toBeNull();
 
     const completeEnv = {
       activeJurisdiction: 'Testnet',
-      jReplicas: new Map([
+      state: { jReplicas: new Map([
         ['Testnet', {
           name: 'Testnet',
           chainId: 31337,
@@ -127,7 +127,7 @@ describe('server jurisdiction writer', () => {
             deltaTransformer: '0x0000000000000000000000000000000000000006',
           },
         }],
-      ]),
+      ]) },
     };
 
     const json = await buildRuntimeJurisdictionsJson(completeEnv as never);

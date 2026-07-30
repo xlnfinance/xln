@@ -39,12 +39,12 @@ describe('entity panel model helpers', () => {
 
   test('resolves entity jurisdiction from replicas and gossip fallback', () => {
     const env = {
-      eReplicas: new Map([
+      state: { eReplicas: new Map([
         ['alice:signer', {
           entityId: 'alice',
           state: { entityId: 'alice', config: { jurisdiction: { chainId: 10 } } },
         }],
-      ]),
+      ]) },
       gossip: {
         getProfiles: () => [
           { entityId: 'bob', metadata: { jurisdiction: { name: 'Remote J' } } },
@@ -65,7 +65,7 @@ describe('entity panel model helpers', () => {
       },
     } as any;
     const env = {
-      eReplicas: new Map([
+      state: { eReplicas: new Map([
         ['hub:signer', {
           entityId: 'hub',
           state: { entityId: 'hub', config: { jurisdiction: { chainId: 10 } } },
@@ -74,12 +74,12 @@ describe('entity panel model helpers', () => {
           entityId: 'remote',
           state: { entityId: 'remote', config: { jurisdiction: { chainId: 20 } } },
         }],
-      ]),
+      ]) },
     } as any;
 
     expect(isSameJurisdictionEntity(env, replica, 'alice', 'alice', 'hub')).toBe(true);
     expect(isSameJurisdictionEntity(env, replica, 'alice', 'alice', 'remote')).toBe(false);
-    expect(isSameJurisdictionEntity({} as any, null, '', 'left', 'right')).toBe(true);
+    expect(isSameJurisdictionEntity(null, null, '', 'left', 'right')).toBe(true);
     expect(isSameJurisdictionEntity(env, replica, 'alice', 'alice', 'unknown-hub')).toBe(true);
   });
 
@@ -110,22 +110,24 @@ describe('entity panel model helpers', () => {
   test('projects entity panel read model from env once at the model boundary', () => {
     const view = buildEntityPanelView({
       runtimeId: 'runtime-1',
-      height: 42,
-      timestamp: 1234,
+      state: {
+        height: 42,
+        timestamp: 1234,
+        eReplicas: new Map([
+          ['alice:signer-a', {
+            entityId: 'alice',
+            state: { entityId: 'alice', accounts: new Map([['bob', {}]]) },
+          }],
+          ['h1:signer-h1', {
+            entityId: 'h1',
+            state: { entityId: 'h1', profile: { name: 'H1', isHub: true }, accounts: new Map() },
+          }],
+        ]),
+        jReplicas: new Map([
+          ['testnet', { name: 'Testnet', chainId: 31337 }],
+        ]),
+      },
       activeJurisdiction: 'Testnet',
-      eReplicas: new Map([
-        ['alice:signer-a', {
-          entityId: 'alice',
-          state: { entityId: 'alice', accounts: new Map([['bob', {}]]) },
-        }],
-        ['h1:signer-h1', {
-          entityId: 'h1',
-          state: { entityId: 'h1', profile: { name: 'H1', isHub: true }, accounts: new Map() },
-        }],
-      ]),
-      jReplicas: new Map([
-        ['testnet', { name: 'Testnet', chainId: 31337 }],
-      ]),
       gossip: {
         getProfiles: () => [
           { entityId: 'alice', name: 'Alice', metadata: { isHub: false } },
@@ -295,7 +297,9 @@ describe('entity panel model helpers', () => {
     expect(resolveAccountListEntityName('ALICE', 'alice', new Map(), 'You')).toBe('You');
     expect(resolveAccountListEntityName('BOB', 'alice', new Map([['bob', 'Hub B']]))).toBe('Hub B');
     expect(resolveAccountListEntityName('BOB', 'alice', new Map())).toBe('BOB');
-    expect(hasDevnetJurisdiction({ jReplicas: new Map([['local', { chainId: 31337 }]]) } as any)).toBe(true);
+    expect(hasDevnetJurisdiction({
+      state: { jReplicas: new Map([['local', { chainId: 31337 }]]) },
+    } as any)).toBe(true);
     expect(accountList).toContain('export let runtimeHeight: number');
     expect(accountList).toContain('export let entityNames: Map<string, string>');
     expect(accountList).toContain('export let profileByEntityId: Map<string, GossipProfile>');

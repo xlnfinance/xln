@@ -7,7 +7,7 @@ import type {
   XLNModule,
 } from '@xln/runtime/api/runtime-module';
 import { Wallet } from 'ethers';
-import { resolveRpcUrl, stringifyTowerPayload } from './vault-helpers';
+import { resolveRpcUrl } from './vault-helpers';
 import {
   WATCHTOWER_LAST_RESORT_WINDOW_BLOCKS,
   WATCHTOWER_SAFETY_MARGIN_BLOCKS,
@@ -186,7 +186,11 @@ export async function buildDelayedLastResortAppointmentsForTower(
           sig: proofHanko,
         },
       };
-      const serializedRemedy = stringifyTowerPayload(remedy);
+      // The Runtime owns the remedy wire format. Reusing its tagged codec keeps
+      // signed int256/uint256 values as bigint across encrypt/decrypt instead of
+      // letting a frontend JSON replacer silently turn financial values into
+      // decimal strings that the fail-closed watchtower must reject.
+      const serializedRemedy = xln.encodeTowerCounterDisputeRemedy(remedy);
       const encryptedRemedy = await xln.encryptTowerPayloadForWatchSeed(serializedRemedy, watchSeed);
       const triggerHint = `chain:${chainId}:acct:${entityId}:${counterpartyId}`;
       const lastResortPayload: TowerLastResortPayloadV1 = {

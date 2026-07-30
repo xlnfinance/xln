@@ -19,10 +19,10 @@ test('command palette view builds a deduplicated entity search index', () => {
         { entityId: B, name: 'Hub One', metadata: { isHub: true } },
       ],
     },
-    eReplicas: new Map([
+    state: { eReplicas: new Map([
       [`${A}:signer`, { state: { profile: { name: 'Duplicate Alice' } } }],
       [`${C}:signer`, { state: { entityId: C, profile: { name: 'Charlie' } } }],
-    ]),
+    ]) },
   });
 
   expect(view.entities).toEqual([

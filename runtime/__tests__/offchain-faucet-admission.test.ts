@@ -57,26 +57,28 @@ const makeEnv = (
   hubEntityId: string = HUB,
   hubSignerId: string = HUB_SIGNER,
 ): RuntimeReplica => ({
+  state: {
   eReplicas: new Map([
-    [`${hubEntityId}:${hubSignerId}`, {
-      entityId: hubEntityId,
-      signerId: hubSignerId,
-      entityEncPubKey: '',
-      entityEncPrivKey: '',
-      isProposer: true,
-      mempool: [],
-      state: {
+      [`${hubEntityId}:${hubSignerId}`, {
         entityId: hubEntityId,
-        accounts: new Map([[USER, account]]),
-        config: {
-          mode: 'proposer-based',
-          threshold: 1n,
-          validators: [hubSignerId],
-          shares: { [hubSignerId]: 1n },
+        signerId: hubSignerId,
+        entityEncPubKey: '',
+        entityEncPrivKey: '',
+        isProposer: true,
+        mempool: [],
+        state: {
+          entityId: hubEntityId,
+          accounts: new Map([[USER, account]]),
+          config: {
+            mode: 'proposer-based',
+            threshold: 1n,
+            validators: [hubSignerId],
+            shares: { [hubSignerId]: 1n },
+          },
         },
-      },
-    }],
-  ]),
+      }],
+    ]),
+  },
   gossip: { getProfiles: () => [] },
   runtimeId: USER_RUNTIME_ID,
 } as unknown as RuntimeReplica);

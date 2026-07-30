@@ -115,7 +115,9 @@ describe('JReplica stateRoot semantics', () => {
       name: 'restored-rpc',
       chainId: 31337,
     } as JReplica;
-    const env = { jReplicas: new Map([['restored-rpc', partial]]) } as Parameters<typeof normalizeRestoredJReplicas>[0];
+    const env = {
+      state: { jReplicas: new Map([['restored-rpc', partial]]) },
+    } as Parameters<typeof normalizeRestoredJReplicas>[0];
 
     expect(() => normalizeRestoredJReplicas(env))
       .toThrow('RUNTIME_MACHINE_J_BLOCK_NUMBER_INVALID');
@@ -135,13 +137,13 @@ describe('JReplica stateRoot semantics', () => {
       rpcs: ['http://127.0.0.1:19700'],
     });
     const env = {
-      jReplicas: new Map([
+      state: { jReplicas: new Map([
         ['matching', matching],
         ['other-stack', otherStack],
-      ]),
+      ]) },
     } as Parameters<typeof applyTrustedJurisdictionRpcBindings>[0];
 
-    applyTrustedJurisdictionRpcBindings(env, [{
+    applyTrustedJurisdictionRpcBindings(env.state, [{
       jurisdictionRef: getJurisdictionIdentityRef(matching),
       rpcUrl: 'http://127.0.0.1:19800',
     }]);
@@ -157,11 +159,11 @@ describe('JReplica stateRoot semantics', () => {
       rpcs: ['http://127.0.0.1:19700'],
     });
     const env = {
-      jReplicas: new Map([['arrakis', replica]]),
+      state: { jReplicas: new Map([['arrakis', replica]]) },
     } as Parameters<typeof applyTrustedJurisdictionRpcBindings>[0];
     const jurisdictionRef = getJurisdictionIdentityRef(replica);
 
-    expect(() => applyTrustedJurisdictionRpcBindings(env, [
+    expect(() => applyTrustedJurisdictionRpcBindings(env.state, [
       { jurisdictionRef, rpcUrl: 'http://127.0.0.1:19800' },
       { jurisdictionRef, rpcUrl: 'http://127.0.0.1:19900' },
     ])).toThrow('RESTORE_JURISDICTION_RPC_BINDING_CONFLICT');
@@ -171,7 +173,7 @@ describe('JReplica stateRoot semantics', () => {
   test('does not send persisted BrowserVM pseudo URLs to an RPC provider', async () => {
     const replica = makeJReplica({ name: 'local', rpcs: ['browservm://local'] });
     const env = {
-      jReplicas: new Map([['local', replica]]),
+      state: { jReplicas: new Map([['local', replica]]) },
     } as Parameters<typeof ensureLiveJAdapterForReplica>[0];
 
     expect(await ensureLiveJAdapterForReplica(env, 'local', { allowBrowserVm: false })).toBeNull();
@@ -193,7 +195,7 @@ describe('JReplica stateRoot semantics', () => {
       jadapter: adapter,
     });
     const env = {
-      jReplicas: new Map([['wrong-domain', replica]]),
+      state: { jReplicas: new Map([['wrong-domain', replica]]) },
     } as Parameters<typeof ensureLiveJAdapterForReplica>[0];
 
     await expect(ensureLiveJAdapterForReplica(env, 'wrong-domain', { allowBrowserVm: true }))

@@ -312,10 +312,12 @@ describe('signed Entity command admission', () => {
     const enqueued: RoutedEntityInput[] = [];
     const env = {
       runtimeId: address('33'),
-      eReplicas: new Map([[
-        `${targetEntityId}:${targetSignerId}`,
-        { entityId: targetEntityId, signerId: targetSignerId },
-      ]]),
+      state: {
+  eReplicas: new Map([[
+          `${targetEntityId}:${targetSignerId}`,
+          { entityId: targetEntityId, signerId: targetSignerId },
+        ]]),
+      },
       infrastructure: { entityRuntimeHints: new Map() },
       warn: () => {},
       info: () => {},

@@ -89,8 +89,10 @@ const dispatchFrameOutputs = (outputs: DeliverableEntityInput[]): {
   const delivered: DeliverableEntityInput[] = [];
   const env = {
     runtimeId: runtimeId('10'),
-    height: 25,
-    timestamp: 2_500,
+    state: {
+  height: 25,
+  timestamp: 2_500,
+    },
     infrastructure: {
       directEntityInputsDispatch: (_runtimeId: string, envelope: RuntimeEntityInputsEnvelope) => {
         delivered.push(...envelope.entityInputs);
@@ -147,7 +149,9 @@ describe('runtime output routing', () => {
     };
     const env = {
       runtimeId: runtimeId('a3'),
-      timestamp: 1,
+      state: {
+  timestamp: 1,
+      },
       infrastructure: {},
       gossip: { getProfiles: () => [] },
       info: (_scope: string, code: string) => infoCodes.push(code),
@@ -354,7 +358,9 @@ describe('runtime output routing', () => {
       entityTxs: [],
     } satisfies RoutedEntityInput;
     const env = {
-      timestamp: 1_000,
+      state: {
+  timestamp: 1_000,
+      },
       pendingNetworkOutputs: [],
       infrastructure: {},
     } as unknown as RuntimeReplica;
@@ -376,7 +382,9 @@ describe('runtime output routing', () => {
     } satisfies RoutedEntityInput;
     const env = {
       scenarioMode: true,
-      timestamp: 1_000,
+      state: {
+  timestamp: 1_000,
+      },
       pendingNetworkOutputs: [],
       infrastructure: {},
     } as unknown as RuntimeReplica;
@@ -402,7 +410,9 @@ describe('runtime output routing', () => {
     } satisfies RoutedEntityInput;
     const env = {
       scenarioMode: false,
-      timestamp: 1,
+      state: {
+  timestamp: 1,
+      },
       pendingNetworkOutputs: [],
       infrastructure: {},
     } as unknown as RuntimeReplica;
@@ -562,7 +572,9 @@ describe('runtime output routing', () => {
     const p2pCalls: Array<{ targetRuntimeId: string; envelope: RuntimeEntityInputsEnvelope; ingressTimestamp?: number }> = [];
     const env = {
       runtimeId: runtimeId('11'),
-      timestamp: 1234,
+      state: {
+  timestamp: 1234,
+      },
       infrastructure: {
         directEntityInputsDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FALLBACK' }),
       },
@@ -616,7 +628,9 @@ describe('runtime output routing', () => {
     const p2pCalls: Array<{ targetRuntimeId: string; envelope: RuntimeEntityInputsEnvelope; ingressTimestamp?: number }> = [];
     const env = {
       runtimeId: runtimeId('11'),
-      timestamp: 4321,
+      state: {
+  timestamp: 4321,
+      },
       infrastructure: {
         directEntityInputsDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FALLBACK' }),
       },
@@ -664,7 +678,9 @@ describe('runtime output routing', () => {
     const targetRuntimeId = runtimeId('2b');
     const env = {
       runtimeId: runtimeId('11'),
-      timestamp: 4331,
+      state: {
+  timestamp: 4331,
+      },
       infrastructure: {
         directEntityInputsDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FALLBACK' }),
       },
@@ -699,7 +715,9 @@ describe('runtime output routing', () => {
     const p2pCalls: unknown[] = [];
     const env = {
       runtimeId: runtimeId('11'),
-      timestamp: 2468,
+      state: {
+  timestamp: 2468,
+      },
       infrastructure: {
         directEntityInputsDispatch: () => ({
           outcome: 'delivered',
@@ -850,7 +868,9 @@ describe('runtime output routing', () => {
     const p2pCalls: unknown[] = [];
     const env = {
       runtimeId: runtimeId('11'),
-      timestamp: 2469,
+      state: {
+  timestamp: 2469,
+      },
       infrastructure: {
         directEntityInputsDispatch: (() => true) as any,
       },
@@ -889,7 +909,9 @@ describe('runtime output routing', () => {
     const p2pCalls: Array<{ targetRuntimeId: string; envelope: RuntimeEntityInputsEnvelope; ingressTimestamp?: number }> = [];
     const env = {
       runtimeId: runtimeId('11'),
-      timestamp: 1357,
+      state: {
+  timestamp: 1357,
+      },
       infrastructure: {
         directEntityInputsDispatch: () => ({
           outcome: 'deferred',
@@ -938,8 +960,10 @@ describe('runtime output routing', () => {
     const p2pCalls: Array<{ targetRuntimeId: string; envelope: RuntimeEntityInputsEnvelope; ingressTimestamp?: number }> = [];
     const env = {
       runtimeId: runtimeId('11'),
-      height: 15,
-      timestamp: 2345,
+      state: {
+  height: 15,
+  timestamp: 2345,
+      },
       infrastructure: {
         directEntityInputsDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FALLBACK' }),
       },
@@ -995,7 +1019,9 @@ describe('runtime output routing', () => {
     const localSignerId = runtimeId('39');
     const env = {
       runtimeId: runtimeId('11'),
-      timestamp: 3456,
+      state: {
+  timestamp: 3456,
+      },
       infrastructure: {},
       warn: () => {},
       error: () => {},
@@ -1050,7 +1076,9 @@ describe('runtime output routing', () => {
     const infos: string[] = [];
     const env = {
       runtimeId: runtimeId('11'),
-      timestamp: 9012,
+      state: {
+  timestamp: 9012,
+      },
       infrastructure: {
         directEntityInputsDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FALLBACK' }),
       },
@@ -1123,7 +1151,9 @@ describe('runtime output routing', () => {
     const infos: string[] = [];
     const env = {
       runtimeId: runtimeId('11'),
-      timestamp: 5678,
+      state: {
+  timestamp: 5678,
+      },
       infrastructure: {
         directEntityInputsDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FALLBACK' }),
       },
@@ -1162,7 +1192,9 @@ describe('runtime output routing', () => {
     const infos: string[] = [];
     const env = {
       runtimeId: runtimeId('11'),
-      timestamp: 5678,
+      state: {
+  timestamp: 5678,
+      },
       infrastructure: {
         directEntityInputsDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FALLBACK' }),
       },
@@ -1199,7 +1231,9 @@ describe('runtime output routing', () => {
     };
     const env = {
       runtimeId: runtimeId('11'),
-      timestamp: 5678,
+      state: {
+  timestamp: 5678,
+      },
       infrastructure: {},
       warn: () => {},
       error: () => {},
@@ -1466,7 +1500,9 @@ describe('runtime output routing', () => {
     const targetRuntimeId = runtimeId('6e');
     const targetEntityId = entityId('6f');
     const env = {
-      timestamp: 1234,
+      state: {
+  timestamp: 1234,
+      },
       infrastructure: {},
       gossip: {
         getProfiles: () => [{
@@ -1489,7 +1525,9 @@ describe('runtime output routing', () => {
     const targetRuntimeId = runtimeId('71');
     const targetEntityId = entityId('72');
     const env = {
-      timestamp: 10_000,
+      state: {
+  timestamp: 10_000,
+      },
       infrastructure: { entityRuntimeHints: new Map() },
       gossip: {
         getProfiles: () => [{
@@ -1641,7 +1679,9 @@ describe('runtime output routing', () => {
     const enqueued: RoutedEntityInput[] = [];
     const env = {
       runtimeId: runtimeId('11'),
-      eReplicas: new Map([[`${localEntityId}:${actualSignerId}`, { entityId: localEntityId, signerId: actualSignerId }]]),
+      state: {
+  eReplicas: new Map([[`${localEntityId}:${actualSignerId}`, { entityId: localEntityId, signerId: actualSignerId }]]),
+      },
       infrastructure: { entityRuntimeHints: new Map() },
       warn: () => {},
       info: () => {},
@@ -1685,7 +1725,9 @@ describe('runtime output routing', () => {
     const enqueued: RoutedEntityInput[] = [];
     const env = {
       runtimeId: runtimeId('11'),
-      eReplicas: new Map(),
+      state: {
+  eReplicas: new Map(),
+      },
       infrastructure: { entityRuntimeHints: new Map() },
       warn: () => {},
       info: () => {},
@@ -1727,7 +1769,9 @@ describe('runtime output routing', () => {
     const enqueued: RoutedEntityInput[] = [];
     const env = {
       runtimeId: runtimeId('11'),
-      eReplicas: new Map([[`${localEntityId}:${signerId}`, { entityId: localEntityId, signerId }]]),
+      state: {
+  eReplicas: new Map([[`${localEntityId}:${signerId}`, { entityId: localEntityId, signerId }]]),
+      },
       infrastructure: { entityRuntimeHints: new Map(), halted: true },
       warn: () => {},
       info: () => {},
@@ -1773,7 +1817,9 @@ describe('runtime output routing', () => {
     let startCalls = 0;
     const env = {
       runtimeId: runtimeId('11'),
-      eReplicas: new Map([[`${localEntityId}:${signerId}`, { entityId: localEntityId, signerId }]]),
+      state: {
+  eReplicas: new Map([[`${localEntityId}:${signerId}`, { entityId: localEntityId, signerId }]]),
+      },
       infrastructure: { entityRuntimeHints: new Map(), loopActive: false, persistenceQuiescing: true },
       warn: () => {},
       info: (_scope: string, code: string) => infos.push(code),
@@ -1822,8 +1868,10 @@ describe('runtime output routing', () => {
     const enqueued: RoutedEntityInput[] = [];
     const env = {
       runtimeId: runtimeId('11'),
-      height: 9,
-      eReplicas: new Map([[`${localEntityId}:${signerId}`, { entityId: localEntityId, signerId }]]),
+      state: {
+  height: 9,
+  eReplicas: new Map([[`${localEntityId}:${signerId}`, { entityId: localEntityId, signerId }]]),
+      },
       infrastructure: { entityRuntimeHints: new Map(), persistenceQuiescing: true },
       warn: () => {},
       info: () => {},

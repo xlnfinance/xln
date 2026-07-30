@@ -36,28 +36,30 @@ const makeAccount = (): AccountState => {
 };
 
 const makeEnv = (): RuntimeReplica => ({
+  state: {
   height: 9,
-  runtimeId: RUNTIME_ID,
   eReplicas: new Map([
-    [`${HUB}:${HUB_SIGNER}`, {
-      entityId: HUB,
-      signerId: HUB_SIGNER,
-      entityEncPubKey: '',
-      entityEncPrivKey: '',
-      isProposer: true,
-      mempool: [],
-      state: {
+      [`${HUB}:${HUB_SIGNER}`, {
         entityId: HUB,
-        accounts: new Map([[USER, makeAccount()]]),
-        config: {
-          mode: 'proposer-based',
-          threshold: 1n,
-          validators: [HUB_SIGNER],
-          shares: { [HUB_SIGNER]: 1n },
+        signerId: HUB_SIGNER,
+        entityEncPubKey: '',
+        entityEncPrivKey: '',
+        isProposer: true,
+        mempool: [],
+        state: {
+          entityId: HUB,
+          accounts: new Map([[USER, makeAccount()]]),
+          config: {
+            mode: 'proposer-based',
+            threshold: 1n,
+            validators: [HUB_SIGNER],
+            shares: { [HUB_SIGNER]: 1n },
+          },
         },
-      },
-    }],
-  ]),
+      }],
+    ]),
+  },
+  runtimeId: RUNTIME_ID,
   gossip: {
     getProfiles: () => [{
       entityId: HUB,

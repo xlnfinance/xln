@@ -50,10 +50,12 @@ test('market maker readiness returns the requested jurisdiction adapter, not the
   const tronAdapter = adapter(31_338, tronDepository);
   const env = {
     activeJurisdiction: 'arrakis',
-    jReplicas: new Map([
-      ['arrakis', replica('arrakis', 31_337, arrakisDepository, arrakisAdapter)],
-      ['Tron', replica('Tron', 31_338, tronDepository, tronAdapter)],
-    ]),
+    state: {
+  jReplicas: new Map([
+        ['arrakis', replica('arrakis', 31_337, arrakisDepository, arrakisAdapter)],
+        ['Tron', replica('Tron', 31_338, tronDepository, tronAdapter)],
+      ]),
+    },
   } as RuntimeReplica;
 
   expect(await waitForJurisdictionAdapter(env, tronConfig(tronDepository), 1)).toBe(tronAdapter);
@@ -65,10 +67,12 @@ test('market maker readiness fails closed on duplicate live replicas for one sta
   const second = adapter(31_338, depository);
   const env = {
     activeJurisdiction: 'arrakis',
-    jReplicas: new Map([
-      ['Tron', replica('Tron', 31_338, depository, first)],
-      ['duplicate', replica('duplicate', 31_338, depository, second)],
-    ]),
+    state: {
+  jReplicas: new Map([
+        ['Tron', replica('Tron', 31_338, depository, first)],
+        ['duplicate', replica('duplicate', 31_338, depository, second)],
+      ]),
+    },
   } as RuntimeReplica;
 
   await expect(waitForJurisdictionAdapter(env, tronConfig(depository), 1))

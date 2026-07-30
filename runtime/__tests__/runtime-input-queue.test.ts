@@ -6,10 +6,12 @@ import { enqueueRuntimeInputsWithDeps } from '../runtime/input-queue';
 import type { RuntimeReplica } from '../runtime/types';
 
 const makeEnv = (): RuntimeReplica => ({
+  state: {
   eReplicas: new Map(),
   jReplicas: new Map(),
   height: 0,
   timestamp: 1000,
+  },
   runtimeId: 'runtime-a',
   runtimeMempool: { runtimeTxs: [], entityInputs: [] },
 } as RuntimeReplica);

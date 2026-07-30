@@ -15,7 +15,7 @@ test('solvency projection derives reserves and collateral from an injected runti
     },
   } as const;
   const frame = {
-    eReplicas: new Map([
+    state: { eReplicas: new Map([
       ['left:signer', {
         state: {
           entityId: left,
@@ -44,7 +44,7 @@ test('solvency projection derives reserves and collateral from an injected runti
           }]]),
         },
       }],
-    ]),
+    ]) },
   };
 
   expect(buildSolvencyProjection(frame)).toEqual({
@@ -65,7 +65,7 @@ test('solvency projection derives reserves and collateral from an injected runti
 
 test('solvency projection fails loud on malformed amounts', () => {
   const frame = {
-    eReplicas: new Map([
+    state: { eReplicas: new Map([
       ['entity:signer', {
         state: {
           entityId: `0x${'11'.repeat(32)}`,
@@ -81,7 +81,7 @@ test('solvency projection fails loud on malformed amounts', () => {
           accounts: new Map(),
         },
       }],
-    ]),
+    ]) },
   };
 
   expect(() => buildSolvencyProjection(frame)).toThrow('bigint-compatible amount');

@@ -52,29 +52,31 @@ const makeEnv = (
 ): unknown => ({
   runtimeId,
   activeJurisdiction: 'Local',
-  eReplicas: new Map([[`${targetEntityId}:${runtimeId}`, {
-    entityId: targetEntityId,
-    state: {
+  state: {
+    eReplicas: new Map([[`${targetEntityId}:${runtimeId}`, {
       entityId: targetEntityId,
-      config: {
-        jurisdiction: {
-          name: 'Local',
-          address: overrides.jurisdictionAddress ?? 'jreplica://Local',
-          chainId: 31337,
-          depositoryAddress: overrides.depositoryAddress ?? '0x000000000000000000000000000000000000dead',
+      state: {
+        entityId: targetEntityId,
+        config: {
+          jurisdiction: {
+            name: 'Local',
+            address: overrides.jurisdictionAddress ?? 'jreplica://Local',
+            chainId: 31337,
+            depositoryAddress: overrides.depositoryAddress ?? '0x000000000000000000000000000000000000dead',
+          },
         },
       },
-    },
-  }]]),
-  jReplicas: overrides.state.jReplicas ?? new Map([['Local', {
-    name: 'Local',
-    chainId: 31337,
-    rpcs: overrides.rpcs ?? ['http://127.0.0.1:8545'],
-    jadapter: {
-      rpcs: overrides.adapterRpcs ?? [],
-    },
-    depositoryAddress: '0x000000000000000000000000000000000000dead',
-  }]]),
+    }]]),
+    jReplicas: overrides.jReplicas ?? new Map([['Local', {
+      name: 'Local',
+      chainId: 31337,
+      rpcs: overrides.rpcs ?? ['http://127.0.0.1:8545'],
+      jadapter: {
+        rpcs: overrides.adapterRpcs ?? [],
+      },
+      depositoryAddress: '0x000000000000000000000000000000000000dead',
+    }]]),
+  },
 });
 
 describe('push wake registration frontend contract', () => {

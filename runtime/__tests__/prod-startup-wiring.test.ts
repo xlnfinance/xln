@@ -709,7 +709,7 @@ describe('production startup wiring', () => {
     expect(serverJurisdictions).not.toContain('existingArrakis');
     expect(serverJurisdictions).toContain('name: displayName');
     expect(standaloneServer).toContain("const jurisdictionName = updatedRuntimeJurisdiction?.key || 'primary';");
-    expect(standaloneServer).toContain('env.jReplicas.set(registration.name, {');
+    expect(standaloneServer).toContain('env.state.jReplicas.set(registration.name, {');
     expect(standaloneServer).toContain('name: registration.name,');
     expect(standaloneServer).not.toContain('name: jDisplayName,');
     expect(standaloneServer).not.toContain("const jName = 'arrakis';");
@@ -1550,7 +1550,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('state.bootstrapReadyHash = finalization.fingerprint.hash;');
     expect(mmNode).toContain('state.bootstrapRuntimeStateHash = finalization.runtimeStateHash;');
     expect(mmNode).toContain('state.bootstrapEntityStateHash = finalization.entityStateHash;');
-    expect(mmNode).toContain('const restoredEntityStateHash = env.eReplicas.size > 0');
+    expect(mmNode).toContain('const restoredEntityStateHash = env.state.eReplicas.size > 0');
     expect(mmNode).toContain('restoredEntityStateHash,');
     expect(mmNode).toContain('runtimeStateHash,');
     expect(mmNode).toContain('entityStateHash,');

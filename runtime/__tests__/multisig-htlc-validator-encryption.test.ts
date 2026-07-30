@@ -497,7 +497,10 @@ const certifiedGossipProfile = async (): Promise<Profile> => {
       shares: { [first.signer]: 1n, [second.signer]: 1n },
     },
   );
-  const signingEnv = { runtimeSeed: 'multisig-profile-route' } as RuntimeReplica;
+  const signingEnv = {
+    runtimeSeed: 'multisig-profile-route',
+    state: { height: 0, timestamp: 0, eReplicas: new Map(), jReplicas: new Map() },
+  } as RuntimeReplica;
   registerSignerKey(signingEnv, first.signerId, first.privateKey);
   return signProfileRuntimeRoute(signingEnv, profile, first.signerId);
 };
@@ -557,7 +560,10 @@ const certifiedSenderGossipProfile = async (): Promise<Profile> => {
     [{ signerId: SENDER_SIGNER, signature: signDigest(SENDER_PRIVATE_KEY, profileHash) }],
     { threshold: 1n, validators: [SENDER_SIGNER], shares: { [SENDER_SIGNER]: 1n } },
   );
-  const signingEnv = { runtimeSeed: 'sender-profile-route' } as RuntimeReplica;
+  const signingEnv = {
+    runtimeSeed: 'sender-profile-route',
+    state: { height: 0, timestamp: 0, eReplicas: new Map(), jReplicas: new Map() },
+  } as RuntimeReplica;
   registerSignerKey(signingEnv, SENDER_SIGNER, SENDER_PRIVATE_KEY);
   return signProfileRuntimeRoute(signingEnv, profile, SENDER_SIGNER);
 };
@@ -619,7 +625,10 @@ const certifiedSingleSignerHubProfile = async (nextHopId: string): Promise<Profi
     [{ signerId: validator.signer, signature: signDigest(validator.privateKey, profileHash) }],
     { threshold: 1n, validators: [validator.signer], shares: { [validator.signer]: 1n } },
   );
-  const signingEnv = { runtimeSeed: 'single-hub-profile-route' } as RuntimeReplica;
+  const signingEnv = {
+    runtimeSeed: 'single-hub-profile-route',
+    state: { height: 0, timestamp: 0, eReplicas: new Map(), jReplicas: new Map() },
+  } as RuntimeReplica;
   registerSignerKey(signingEnv, validator.signerId, validator.privateKey);
   return signProfileRuntimeRoute(signingEnv, profile, validator.signerId);
 };
@@ -673,7 +682,10 @@ const certifiedProcessSourceProfile = async (
     [{ signerId: validator.signer, signature: signDigest(validator.privateKey, profileHash) }],
     { threshold: 1n, validators: [validator.signer], shares: { [validator.signer]: 1n } },
   );
-  const signingEnv = { runtimeSeed: 'process-source-profile-route' } as RuntimeReplica;
+  const signingEnv = {
+    runtimeSeed: 'process-source-profile-route',
+    state: { height: 0, timestamp: 0, eReplicas: new Map(), jReplicas: new Map() },
+  } as RuntimeReplica;
   registerSignerKey(signingEnv, validator.signerId, validator.privateKey);
   return signProfileRuntimeRoute(signingEnv, profile, validator.signerId);
 };
@@ -743,7 +755,9 @@ describe('multisig HTLC validator encryption', () => {
   });
 
   test('consensus replay canonicalizes the full manifest and independently derives the profile secondary hash', () => {
-    const env = { eReplicas: new Map() } as unknown as RuntimeReplica;
+    const env = {
+      state: { eReplicas: new Map() },
+    } as unknown as RuntimeReplica;
     const state = certificationState();
     state.config.validators.reverse();
     const result = handleCertifyProfileEntityTx(env, state, {
@@ -1365,10 +1379,12 @@ describe('multisig HTLC validator encryption', () => {
     const senderProfile = await certifiedSenderGossipProfile();
     const state = senderState();
     const env = {
-      height: 10,
-      timestamp: state.timestamp,
+      state: {
+  height: 10,
+  timestamp: state.timestamp,
+  eReplicas: new Map(),
+      },
       runtimeSeed: 'htlc-admission-test',
-      eReplicas: new Map(),
       gossip: {
         getProfiles: () => [senderProfile, profile],
         getNetworkGraph: () => ({ findPaths: async () => [] }),
@@ -1446,10 +1462,12 @@ describe('multisig HTLC validator encryption', () => {
     const senderProfile = await certifiedSenderGossipProfile();
     const state = senderState();
     const env = {
-      height: 10,
-      timestamp: state.timestamp,
+      state: {
+  height: 10,
+  timestamp: state.timestamp,
+  eReplicas: new Map(),
+      },
       runtimeSeed: 'htlc-random-secret-ingress',
-      eReplicas: new Map(),
       gossip: {
         getProfiles: () => [senderProfile, profile],
         getNetworkGraph: () => ({ findPaths: async () => [] }),
@@ -1486,10 +1504,12 @@ describe('multisig HTLC validator encryption', () => {
     state.accounts.set(ENTITY_ID, paymentAccount(SENDER_ID, ENTITY_ID));
     const emitted: Array<{ eventName: string; data: Record<string, unknown> }> = [];
     const env = {
-      height: 10,
-      timestamp: state.timestamp,
+      state: {
+  height: 10,
+  timestamp: state.timestamp,
+  eReplicas: new Map(),
+      },
       runtimeSeed: 'htlc-capacity-severity-test',
-      eReplicas: new Map(),
       gossip: {
         getProfiles: () => [senderProfile, profile],
         getNetworkGraph: () => ({ findPaths: async () => [] }),
@@ -1539,10 +1559,12 @@ describe('multisig HTLC validator encryption', () => {
     state.accounts.set(ENTITY_ID, paymentAccount(SENDER_ID, ENTITY_ID));
     const emitted: Array<{ eventName: string; data: Record<string, unknown> }> = [];
     const env = {
-      height: 10,
-      timestamp: state.timestamp,
+      state: {
+  height: 10,
+  timestamp: state.timestamp,
+  eReplicas: new Map(),
+      },
       runtimeSeed: 'htlc-initiation-event-test',
-      eReplicas: new Map(),
       quietRuntimeLogs: true,
       gossip: {
         getProfiles: () => [senderProfile, profile],
@@ -1588,13 +1610,15 @@ describe('multisig HTLC validator encryption', () => {
   test('rejects a partial prepared payload before consensus admission', async () => {
     const state = senderState();
     const env = {
-      height: 10,
-      timestamp: state.timestamp,
-      eReplicas: new Map([[`${SENDER_ID}:sender`, {
-        entityId: SENDER_ID,
-        signerId: 'sender',
-        state,
-      }]]),
+      state: {
+  height: 10,
+  timestamp: state.timestamp,
+  eReplicas: new Map([[`${SENDER_ID}:sender`, {
+          entityId: SENDER_ID,
+          signerId: 'sender',
+          state,
+        }]]),
+      },
     } as unknown as RuntimeReplica;
     await expect(prepareHtlcPaymentEntityInputs(env, [{
       entityId: SENDER_ID,
@@ -1978,10 +2002,12 @@ describe('multisig HTLC validator encryption', () => {
     const state = senderState();
     state.lastFinalizedJHeight = 41;
     const admissionEnv = {
-      height: 10,
-      timestamp: state.timestamp,
+      state: {
+  height: 10,
+  timestamp: state.timestamp,
+  eReplicas: new Map(),
+      },
       runtimeSeed: 'multihop-admission',
-      eReplicas: new Map(),
       gossip: {
         getProfiles: () => [senderProfile, hub, destination],
         getNetworkGraph: () => ({ findPaths: async () => [] }),
@@ -2006,12 +2032,16 @@ describe('multisig HTLC validator encryption', () => {
     const validatorEnvA = {
       ...admissionEnv,
       gossip: undefined,
-      jReplicas: new Map([['j', { blockNumber: 41 }]]),
+      state: {
+  jReplicas: new Map([['j', { blockNumber: 41 }]]),
+      },
     } as unknown as RuntimeReplica;
     const validatorEnvB = {
       ...admissionEnv,
       gossip: undefined,
-      jReplicas: new Map([['j', { blockNumber: 999 }]]),
+      state: {
+  jReplicas: new Map([['j', { blockNumber: 999 }]]),
+      },
     } as unknown as RuntimeReplica;
     const [validatedA, validatedB] = await Promise.all([
       validatePreparedHtlcPayment(validatorEnvA, structuredClone(state), prepared),
@@ -2112,13 +2142,15 @@ describe('multisig HTLC validator encryption', () => {
     const envFor = (validator: typeof first): RuntimeReplica => ({
       runtimeSeed: `isolated-${validator.signerId}`,
       infrastructure: {},
-      eReplicas: new Map([[`${ENTITY_ID}:${validator.signer}`, {
-        entityId: ENTITY_ID,
-        signerId: validator.signer,
-        entityEncPubKey: validator.encryptionPublicKey,
-        entityEncPrivKey: validator.encryptionPrivateKey,
-        state: stateFor(validator),
-      }]]),
+      state: {
+  eReplicas: new Map([[`${ENTITY_ID}:${validator.signer}`, {
+          entityId: ENTITY_ID,
+          signerId: validator.signer,
+          entityEncPubKey: validator.encryptionPublicKey,
+          entityEncPrivKey: validator.encryptionPrivateKey,
+          state: stateFor(validator),
+        }]]),
+      },
       gossip: { getProfiles: () => [] },
       warn: () => {},
     } as unknown as RuntimeReplica);

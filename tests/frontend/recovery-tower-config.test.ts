@@ -249,12 +249,12 @@ const makeTestRecoveryEnv = (runtimeId: string, entityId: string, counterpartyId
       account: '0x3333333333333333333333333333333333333333',
       deltaTransformer: '0x4444444444444444444444444444444444444444',
     },
-  } as RuntimeReplica['jReplicas'] extends Map<string, infer T> ? T : never);
+  } as RuntimeReplica['state']['jReplicas'] extends Map<string, infer T> ? T : never);
 
   const proofBody = {
     watchSeed: testWatchSeed,
-    offdeltas: ['0'],
-    tokenIds: [1],
+    offdeltas: [0n],
+    tokenIds: [1n],
     transformers: [],
   };
   const proofBodyHash = proofBodyHashOf(proofBody);

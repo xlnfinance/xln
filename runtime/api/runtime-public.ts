@@ -80,6 +80,7 @@ export {
   validateRuntimeRecoveryBundle,
 } from '../recovery/bundle';
 export { decodeTowerProofBody } from '../recovery/tower-proof-body';
+export { encodeTowerCounterDisputeRemedy } from '../watchtower/action';
 export { buildRuntimeRecording, validateRuntimeRecording } from '../recovery/recording';
 export {
   buildTowerAppointmentOwnerMessage,

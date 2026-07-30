@@ -31,7 +31,7 @@ const REBALANCE_POLICY = {
 };
 
 const sourceEnv = () => ({
-  eReplicas: new Map([
+  state: { eReplicas: new Map([
     [
       `${SOURCE}:${SIGNER}`,
       {
@@ -41,7 +41,7 @@ const sourceEnv = () => ({
         },
       },
     ],
-  ]),
+  ]) },
 });
 
 const hub = {

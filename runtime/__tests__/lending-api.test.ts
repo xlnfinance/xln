@@ -12,16 +12,18 @@ const SIGNER = `0x${'33'.repeat(20)}`;
 describe('lending API boundary', () => {
   test('GET exposes committed hub lending state', async () => {
     const env = {
-      eReplicas: new Map([[`${HUB}:${SIGNER}`, {
-        entityId: HUB,
-        signerId: SIGNER,
-        entityEncPubKey: '',
-        entityEncPrivKey: '',
-        state: {
+      state: {
+  eReplicas: new Map([[`${HUB}:${SIGNER}`, {
           entityId: HUB,
-          lending: { pools: new Map(), loans: new Map() },
-        },
-      }]]),
+          signerId: SIGNER,
+          entityEncPubKey: '',
+          entityEncPrivKey: '',
+          state: {
+            entityId: HUB,
+            lending: { pools: new Map(), loans: new Map() },
+          },
+        }]]),
+      },
     } as unknown as RuntimeReplica;
     const request = new Request(`http://xln.local/api/lending/state?hubEntityId=${HUB}&userEntityId=${USER}&tokenId=1`);
     const response = await handleLendingStateRequest({ req: request, env, headers: {}, activeHubEntityIds: [HUB] });

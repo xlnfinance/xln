@@ -161,7 +161,7 @@ describe('account Hanko trusted domain boundary', () => {
       chainId: TRUSTED.chainId,
       depositoryAddress: TRUSTED.depositoryAddress,
     });
-    expect(requireAccountDeltaTransformerAddress(env, ACCOUNT)).toBe(TRUSTED_TRANSFORMER);
+    expect(requireAccountDeltaTransformerAddress(env.state, ACCOUNT)).toBe(TRUSTED_TRANSFORMER);
   });
 
   test('ignores conflicting local Entity replica domains', () => {
@@ -204,7 +204,7 @@ describe('account Hanko trusted domain boundary', () => {
     const missing = createEmptyEnv('account-proof-transformer-missing');
     installReplica(missing, `${FROM}:validator-a`, FROM, TRUSTED);
     installJurisdictionReplica(missing, TRUSTED.name, TRUSTED);
-    expect(() => requireAccountDeltaTransformerAddress(missing, ACCOUNT)).toThrow(
+    expect(() => requireAccountDeltaTransformerAddress(missing.state, ACCOUNT)).toThrow(
       'JURISDICTION_DURABLE_STACK_DELTA_TRANSFORMER_MISSING',
     );
 
@@ -212,7 +212,7 @@ describe('account Hanko trusted domain boundary', () => {
     installReplica(duplicate, `${FROM}:validator-a`, FROM, TRUSTED);
     installJurisdictionReplica(duplicate, 'trusted-a', TRUSTED, TRUSTED_TRANSFORMER);
     installJurisdictionReplica(duplicate, 'trusted-b', TRUSTED, TRUSTED_TRANSFORMER);
-    expect(() => requireAccountDeltaTransformerAddress(duplicate, ACCOUNT)).toThrow(
+    expect(() => requireAccountDeltaTransformerAddress(duplicate.state, ACCOUNT)).toThrow(
       'ACCOUNT_PROOF_JURISDICTION_AMBIGUOUS',
     );
   });
@@ -235,7 +235,7 @@ describe('account Hanko trusted domain boundary', () => {
       position: { x: 0, y: 0, z: 0 },
     } as unknown as JReplica);
 
-    expect(() => requireAccountDeltaTransformerAddress(env, ACCOUNT)).toThrow(
+    expect(() => requireAccountDeltaTransformerAddress(env.state, ACCOUNT)).toThrow(
       'ACCOUNT_PROOF_JURISDICTION_NOT_FOUND',
     );
   });
@@ -262,7 +262,7 @@ describe('account Hanko trusted domain boundary', () => {
       position: { x: 0, y: 0, z: 0 },
     });
 
-    expect(() => requireAccountDeltaTransformerAddress(env, ACCOUNT)).toThrow(
+    expect(() => requireAccountDeltaTransformerAddress(env.state, ACCOUNT)).toThrow(
       'JURISDICTION_DURABLE_STACK_DEPOSITORY_ALIAS_CONFLICT',
     );
   });

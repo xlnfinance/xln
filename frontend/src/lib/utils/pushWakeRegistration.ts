@@ -113,7 +113,7 @@ const replicaEntityId = (key: string, replica: unknown): string => {
 
 const findEntityReplica = (env: unknown, entityId: string): unknown => {
   const target = normalizeEntityId(entityId);
-  const replicas = getPath(env, ['eReplicas']);
+  const replicas = getPath(env, ['state', 'eReplicas']);
   if (!(replicas instanceof Map)) throw new Error('PUSH_ENV_ENTITY_REPLICAS_UNAVAILABLE');
   for (const [key, replica] of replicas.entries()) {
     if (replicaEntityId(String(key), replica) === target) return replica;
@@ -122,7 +122,7 @@ const findEntityReplica = (env: unknown, entityId: string): unknown => {
 };
 
 const findJReplica = (env: unknown, chainId: number, depositoryAddress: string): unknown => {
-  const jReplicas = getPath(env, ['jReplicas']);
+  const jReplicas = getPath(env, ['state', 'jReplicas']);
   if (!(jReplicas instanceof Map)) throw new Error('PUSH_ENV_J_REPLICAS_UNAVAILABLE');
   for (const replica of jReplicas.values()) {
     const replicaChainId = Number(getPath(replica, ['chainId']) || getPath(replica, ['jadapter', 'chainId']) || 0);

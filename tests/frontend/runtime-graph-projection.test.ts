@@ -461,8 +461,8 @@ describe('NetworkMachine runtime indexes', () => {
       env: {
         runtimeId: 'browser-a',
         history: [
-          { height: 1, timestamp: 100, runtimeInput: { runtimeTxs: [], jInputs: [], entityInputs: [] } },
-          { height: 2, timestamp: 200, runtimeInput: { runtimeTxs: [{ type: 'noop' }], jInputs: [], entityInputs: [] } },
+          { state: { height: 1, timestamp: 100 }, runtimeInput: { runtimeTxs: [], jInputs: [], entityInputs: [] } },
+          { state: { height: 2, timestamp: 200 }, runtimeInput: { runtimeTxs: [{ type: 'noop' }], jInputs: [], entityInputs: [] } },
         ],
       } as never,
     });

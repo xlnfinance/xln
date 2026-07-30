@@ -7,10 +7,12 @@ import type { JReplica } from '../types/jurisdiction-runtime';
 
 const makeEnv = (replicas: Array<[string, JReplica]>): RuntimeReplica => ({
   runtimeId: 'test-runtime',
+  state: {
   height: 0n,
   timestamp: 0,
   eReplicas: new Map(),
   jReplicas: new Map(replicas),
+  },
   infrastructure: {},
 } as unknown as RuntimeReplica);
 

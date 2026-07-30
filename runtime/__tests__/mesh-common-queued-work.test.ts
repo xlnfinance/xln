@@ -19,8 +19,10 @@ describe('mesh queued work detection', () => {
     const env = {
       infrastructure: { processingPromise: new Promise<void>(() => {}) },
       runtimeMempool: { runtimeTxs: [], entityInputs: [] },
-      eReplicas: new Map(),
-      jReplicas: new Map(),
+      state: {
+  eReplicas: new Map(),
+  jReplicas: new Map(),
+      },
     } as unknown as RuntimeReplica;
 
     expect(hasPendingRuntimeWork(env)).toBe(true);
@@ -43,7 +45,9 @@ describe('mesh queued work detection', () => {
           }],
         }],
       },
-      eReplicas: new Map(),
+      state: {
+  eReplicas: new Map(),
+      },
     } as unknown as RuntimeReplica;
 
     expect(hasQueuedOpenAccount(env, entityId, counterpartyId)).toBe(true);
@@ -67,7 +71,9 @@ describe('mesh queued work detection', () => {
           }],
         }],
       },
-      eReplicas: new Map(),
+      state: {
+  eReplicas: new Map(),
+      },
     } as unknown as RuntimeReplica;
 
     expect(hasQueuedExtendCredit(env, entityId, counterpartyId, 2, 1000n)).toBe(true);
@@ -114,7 +120,9 @@ describe('mesh queued work detection', () => {
     };
     const env = {
       runtimeMempool: { runtimeTxs: [], entityInputs: [] },
-      eReplicas: new Map([[`${entityId}:${author}`, { entityId, mempool: [signedCommand] }]]),
+      state: {
+  eReplicas: new Map([[`${entityId}:${author}`, { entityId, mempool: [signedCommand] }]]),
+      },
     } as unknown as RuntimeReplica;
 
     expect(hasQueuedOpenAccount(env, entityId, counterpartyId)).toBe(true);
@@ -142,7 +150,9 @@ describe('mesh queued work detection', () => {
           }],
         }],
       },
-      eReplicas: new Map(),
+      state: {
+  eReplicas: new Map(),
+      },
     } as unknown as RuntimeReplica;
 
     expect([...collectQueuedSwapOfferIds(env, entityId, counterpartyId)]).toEqual(['mm-queued-ask-1']);
