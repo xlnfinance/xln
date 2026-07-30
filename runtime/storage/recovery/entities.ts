@@ -23,7 +23,7 @@ import {
 import { computeCanonicalEntityHash } from '../canonical-hash';
 import type { PersistedStorageReadApi } from '../persisted-read';
 import type { RuntimeStorageApiDeps } from '../runtime-storage-deps';
-import { rebuildPersistedJurisdictions, resolvePersistedReplicaIdentity } from './identity';
+import { assertPersistedJurisdictionsAvailable, resolvePersistedReplicaIdentity } from './identity';
 
 const installPersistedEntityReplicas = async (
   reads: PersistedStorageReadApi,
@@ -204,7 +204,7 @@ export const restorePersistedEntityGraph = async (
     selectedSnapshotHeight,
   );
   await hydrateRestoredEntityDags(deps, env);
-  if (env.jReplicas.size === 0) rebuildPersistedJurisdictions(env);
+  assertPersistedJurisdictionsAvailable(env);
   await assertCertifiedRegistrationEvidenceStore(env);
   if (targetHeight === latestHeight) {
     verifyRestoredEntityLineage(env, restoredStates);

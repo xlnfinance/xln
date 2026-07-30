@@ -48,48 +48,20 @@ export const resolvePersistedReplicaIdentity = (
 };
 
 /**
- * Jurisdiction replicas are a deterministic projection of restored Entities.
- * No RPC discovery is permitted while authoritative state is being rebuilt.
+ * Entity state names the Jurisdiction it belongs to, but it does not contain
+ * the Jurisdiction frame, cursor, complete contract stack, or finality policy.
+ * Reconstructing a JReplica from Entity config would therefore invent
+ * consensus-relevant state. Recovery must obtain the exact JReplica from the
+ * Runtime WAL instead.
  */
-export const rebuildPersistedJurisdictions = (env: RuntimeState): void => {
-  env.jReplicas = new Map();
-  for (const replica of env.eReplicas.values()) {
-    const jurisdiction = replica.state.config?.jurisdiction as
-      | Record<string, unknown>
-      | undefined;
-    const name =
-      typeof jurisdiction?.['name'] === 'string' ? jurisdiction['name'] : '';
-    if (!name || env.jReplicas.has(name)) continue;
-
-    const depositoryAddress = String(
-      jurisdiction?.['depositoryAddress'] || '',
-    ).trim();
-    const entityProviderAddress = String(
-      jurisdiction?.['entityProviderAddress'] || '',
-    ).trim();
-    const deltaTransformerAddress = String(
-      jurisdiction?.['deltaTransformerAddress'] ??
-        jurisdiction?.['deltaTransformer'] ??
-        '',
-    ).trim();
-    const chainId = Number.isFinite(Number(jurisdiction?.['chainId']))
-      ? Number(jurisdiction?.['chainId'])
-      : 31337;
-    env.jReplicas.set(name, {
-      name,
-      depositoryAddress,
-      entityProviderAddress,
-      chainId,
-      contracts: {
-        ...(depositoryAddress ? { depository: depositoryAddress } : {}),
-        ...(entityProviderAddress
-          ? { entityProvider: entityProviderAddress }
-          : {}),
-        ...(deltaTransformerAddress
-          ? { deltaTransformer: deltaTransformerAddress }
-          : {}),
-      },
-    } as never);
-    if (!env.activeJurisdiction) env.activeJurisdiction = name;
+export const assertPersistedJurisdictionsAvailable = (env: RuntimeState): void => {
+  if (env.jReplicas.size > 0) return;
+  const configuredEntity = [...env.eReplicas.values()].find(
+    replica => replica.state.config?.jurisdiction !== undefined,
+  );
+  if (configuredEntity) {
+    throw new Error(
+      `STORAGE_RESTORE_J_REPLICA_MISSING:entity=${configuredEntity.entityId}`,
+    );
   }
 };
