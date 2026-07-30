@@ -1,4 +1,5 @@
 import { assertEntityProposalAction } from '../../../entity/authorization';
+import { decodeAccountPeerInput } from '../../../account/input-validation';
 import { normalizeSignedEntityCommand } from '../../../entity/command-codec';
 import { normalizeConsensusOutputBoardAuthority } from '../../../entity/consensus/output-certification';
 import { requireKnownEntityTxType } from '../../../entity/tx/catalog';
@@ -254,14 +255,6 @@ const validateCrossJClearMaterialization = (value: unknown, code: string): void 
   }
 };
 
-const validateAccountPeerInput = (value: unknown, code: string): void => {
-  const input = requireBoundaryRecord(value, code);
-  const kind = requireString(input['kind'], `${code}_KIND`);
-  if (kind === 'txs') {
-    throw new Error(`${code}_LOCAL_INPUT_FORBIDDEN`);
-  }
-};
-
 const validateEntityTxRecord = (value: unknown, code: string, depth: number): EntityTx => {
   if (depth > ENTITY_TX_NESTING_LIMIT) throw new Error(`${code}_NESTING_LIMIT`);
   const tx = requireBoundaryRecord(value, code);
@@ -276,7 +269,7 @@ const validateEntityTxRecord = (value: unknown, code: string, depth: number): En
   else if (type === 'scheduledWake') validateScheduledWake(tx['data'], `${code}_DATA`);
   else if (type === 'htlcPayment') validatePreparedHtlcPayment(tx['data'], `${code}_DATA`);
   else if (type === 'htlcOnionAdvance') validateHtlcOnionAdvance(tx['data'], `${code}_DATA`);
-  else if (type === 'accountInput') validateAccountPeerInput(tx['data'], `${code}_DATA`);
+  else if (type === 'accountInput') decodeAccountPeerInput(tx['data'], `${code}_DATA`);
   else if (type === 'materializeCrossJurisdictionClear') validateCrossJClearMaterialization(tx['data'], `${code}_DATA`);
   else if (type === 'materializeCrossJurisdictionSwap') validateCrossJMaterialization(tx['data'], `${code}_DATA`);
   else validateSimpleIdentityTx(type, tx['data'], `${code}_DATA`);

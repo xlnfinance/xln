@@ -1,16 +1,33 @@
-import type { FrameLogEntry } from '../types/logging';
+import type { FrameLogEntry, LogCategory, LogLevel } from '../types/logging';
 import type { RuntimeInput } from '../runtime/types';
 
-const LOG_LEVELS = new Set(['trace', 'debug', 'info', 'warn', 'error']);
-const LOG_CATEGORIES = new Set([
-  'consensus',
-  'account',
-  'jurisdiction',
-  'evm',
-  'network',
-  'ui',
-  'system',
-]);
+const isLogLevel = (value: unknown): value is LogLevel => {
+  switch (value) {
+    case 'trace':
+    case 'debug':
+    case 'info':
+    case 'warn':
+    case 'error':
+      return true;
+    default:
+      return false;
+  }
+};
+
+const isLogCategory = (value: unknown): value is LogCategory => {
+  switch (value) {
+    case 'consensus':
+    case 'account':
+    case 'jurisdiction':
+    case 'evm':
+    case 'network':
+    case 'ui':
+    case 'system':
+      return true;
+    default:
+      return false;
+  }
+};
 
 export const requireBoundaryRecord = (
   value: unknown,
@@ -106,12 +123,26 @@ export const validateFrameLogEntries = (value: unknown, invalidCode: string): Fr
     const code = `${invalidCode}:entry=${index}`;
     const log = requireBoundaryRecord(entry, code);
     requireExactBoundaryKeys(log, ['id', 'timestamp', 'level', 'category', 'message'], ['entityId', 'data'], code);
-    requireBoundaryInteger(log['id'], code, 0);
-    requireBoundaryInteger(log['timestamp'], code, 0);
-    if (!LOG_LEVELS.has(String(log['level'])) || !LOG_CATEGORIES.has(String(log['category']))) throw new Error(code);
-    if (typeof log['message'] !== 'string') throw new Error(code);
-    if (log['entityId'] !== undefined && typeof log['entityId'] !== 'string') throw new Error(code);
-    if (log['data'] !== undefined) requireBoundaryRecord(log['data'], code);
-    return log as unknown as FrameLogEntry;
+    const id = requireBoundaryInteger(log['id'], code, 0);
+    const timestamp = requireBoundaryInteger(log['timestamp'], code, 0);
+    const level = log['level'];
+    const category = log['category'];
+    const message = log['message'];
+    const entityId = log['entityId'];
+    const data = log['data'];
+    if (!isLogLevel(level) || !isLogCategory(category) || typeof message !== 'string') {
+      throw new Error(code);
+    }
+    if (entityId !== undefined && typeof entityId !== 'string') throw new Error(code);
+    const decodedData = data === undefined ? undefined : requireBoundaryRecord(data, code);
+    return {
+      id,
+      timestamp,
+      level,
+      category,
+      message,
+      ...(entityId === undefined ? {} : { entityId }),
+      ...(decodedData === undefined ? {} : { data: decodedData }),
+    };
   });
 };

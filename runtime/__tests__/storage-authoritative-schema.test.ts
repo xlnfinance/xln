@@ -324,6 +324,59 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
     }, 'ACCOUNT_INPUT_WAL')).toThrow('ACCOUNT_INPUT_WAL_DATA_LOCAL_INPUT_FORBIDDEN');
   });
 
+  test('exactly decodes persisted Account peer inputs before restore', () => {
+    const base = {
+      kind: 'ack',
+      fromEntityId: entityId,
+      toEntityId: counterpartyId,
+      domain: {
+        chainId: 31_337,
+        depositoryAddress: `0x${'11'.repeat(20)}`,
+      },
+      watchSeed: hash,
+    };
+    const validAck = {
+      ...base,
+      ack: {
+        height: 1,
+        frameHash: hash,
+        disputeSeal: {
+          hash,
+          proofBodyHash: hash,
+          proofNonce: 1,
+        },
+      },
+    };
+
+    expect(() => validateEntityTx({
+      type: 'accountInput',
+      data: validAck,
+    }, 'ACCOUNT_INPUT_WAL')).not.toThrow();
+
+    expect(() => validateEntityTx({
+      type: 'accountInput',
+      data: {
+        ...validAck,
+        ack: {
+          ...validAck.ack,
+          disputeSeal: {
+            ...validAck.ack.disputeSeal,
+            proofNonce: '1',
+          },
+        },
+      },
+    }, 'ACCOUNT_INPUT_WAL')).toThrow(
+      'ACCOUNT_INPUT_WAL_DATA_ACK_DISPUTE_SEAL_PROOF_NONCE',
+    );
+
+    expect(() => validateEntityTx({
+      type: 'accountInput',
+      data: { ...validAck, unexpected: true },
+    }, 'ACCOUNT_INPUT_WAL')).toThrow(
+      'ACCOUNT_INPUT_WAL_DATA_FIELDS:missing=none:extra=unexpected',
+    );
+  });
+
   test('valid nested outbox round-trips without changing frame hash or restore state', async () => {
     const env = createEmptyEnv('storage-runtime-machine-roundtrip');
     const batch = createEmptyBatch();
