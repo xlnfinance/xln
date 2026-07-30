@@ -1,6 +1,6 @@
-import { normalizeJurisdictionImportRequest } from '../../../runtime/jurisdiction-import';
-import { validateRuntimeAdapterCommandMarker } from '../../../radapter/command-frontier';
-import type { JurisdictionImportRequest, RuntimeTx } from '../../../runtime/types';
+import { validateRuntimeAdapterCommandMarker } from '../../radapter/command-frontier';
+import { normalizeJurisdictionImportRequest } from '../jurisdiction-import';
+import type { JurisdictionImportRequest, RuntimeTx } from '../types';
 import { validateBrowserVmState } from './browser';
 import { validateJObservationData } from './j-observation';
 import {
@@ -13,7 +13,7 @@ import {
   requireString,
   requireStringArray,
   validateStorageSafeValue,
-} from '../../../protocol/boundary-primitives';
+} from '../../protocol/boundary-primitives';
 import {
   validateConsensusConfig,
   validateEntityPosition,

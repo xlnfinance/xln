@@ -9,7 +9,7 @@ import {
 } from '../runtime/jurisdiction-import';
 import { createEmptyEnv } from '../runtime';
 import { createJReplica } from '../scenarios/boot';
-import { validateBrowserVmState } from '../storage/wal/runtime-machine-schema/browser';
+import { validateBrowserVmState } from '../runtime/input-schema/browser';
 
 test('BrowserVM stack does not reuse the fresh-Anvil watcher domain', async () => {
   const adapter = await createJAdapter({ mode: 'browservm', chainId: 31_337 });

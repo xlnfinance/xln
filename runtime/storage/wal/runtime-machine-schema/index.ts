@@ -1,11 +1,10 @@
 import type { RoutedEntityInput, RuntimeInput } from '../../../runtime/types';
-import { validateRuntimeInputEnvelope } from '../../../protocol/boundary-validation';
+import { decodeRuntimeInput } from '../../../runtime/input-schema';
 import { cloneIsolatedRuntimeSnapshot } from '../../../runtime/input-clone';
 import { decodeRoutedEntityInput } from '../../../runtime/routing-validation';
-import { validateBrowserVmState } from './browser';
+import { validateBrowserVmState } from '../../../runtime/input-schema/browser';
 import { validateEntityTxs } from '../../../entity/tx-validation';
 import { validateJInputs, validateJReplicas } from './j';
-import { validateRuntimeTx } from './runtime-tx';
 import { validateDurableRuntimeState, validateReliableReceipt } from './runtime-state';
 import {
   requireArray,
@@ -145,7 +144,7 @@ const validateRoutedEntityInputs = (
   .map((entry, index) => validateRoutedEntityInput(entry, `${code}_${index}`, options));
 
 const validateRuntimeInput = (value: unknown, code: string): RuntimeInput => {
-  const input = validateRuntimeInputEnvelope(value, code);
+  const input = decodeRuntimeInput(value, code);
   input.entityInputs.forEach((entry, index) => validateRoutedEntityInput(
     entry,
     `${code}_ENTITY_INPUT_${index}`,
@@ -156,7 +155,6 @@ const validateRuntimeInput = (value: unknown, code: string): RuntimeInput => {
     requireArray(input.reliableReceipts, `${code}_RELIABLE_RECEIPTS`).forEach((receipt, index) =>
       validateReliableReceipt(receipt, `${code}_RELIABLE_RECEIPT_${index}`));
   }
-  input.runtimeTxs.forEach((tx, index) => validateRuntimeTx(tx, `${code}_RUNTIME_TX_${index}`));
   return input;
 };
 

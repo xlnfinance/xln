@@ -4,7 +4,7 @@ import {
   validateNumberedRecord,
   validatePendingImport,
   validateRegistrationEvidence,
-} from './registrations';
+} from '../../../runtime/input-schema/registrations';
 import {
   requireArray,
   requireBoolean,

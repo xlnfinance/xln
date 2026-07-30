@@ -4,6 +4,7 @@ import { getControlBodyErrorStatus } from './auth';
 import type { createRuntimeIngressReceiptStore } from './ingress-receipts';
 import type { parseTaggedControlBody } from './auth';
 import type { enqueueRuntimeInput } from '../runtime';
+import { decodeRuntimeInput } from '../runtime/input-schema';
 
 type RuntimeInputControlDeps = {
   enqueueRuntimeInput: typeof enqueueRuntimeInput;
@@ -24,21 +25,15 @@ export const handleRuntimeInputControl = async (
     return new Response(serializeTaggedJson({ ok: false, error: 'Runtime not ready' }), { status: 503, headers });
   }
   try {
-    const body = await deps.parseTaggedControlBody<Partial<RuntimeInput>>(req);
-    const runtimeTxs = Array.isArray(body?.runtimeTxs) ? body.runtimeTxs : [];
-    const entityInputs = Array.isArray(body?.entityInputs) ? body.entityInputs : [];
-    const jInputs = Array.isArray(body?.jInputs) ? body.jInputs : [];
+    const body = await deps.parseTaggedControlBody<unknown>(req);
+    const runtimeInput = decodeRuntimeInput(body, 'CONTROL_RUNTIME_INPUT');
+    const { runtimeTxs, entityInputs, jInputs = [] } = runtimeInput;
     if (runtimeTxs.length === 0 && entityInputs.length === 0 && jInputs.length === 0) {
       return new Response(
         serializeTaggedJson({ ok: false, error: 'runtimeTxs, entityInputs, or jInputs are required' }),
         { status: 400, headers },
       );
     }
-    const runtimeInput: RuntimeInput = {
-      runtimeTxs,
-      entityInputs,
-      ...(jInputs.length > 0 ? { jInputs } : {}),
-    };
     deps.validateRuntimeInputAdmission(env, runtimeInput);
     deps.enqueueRuntimeInput(env, runtimeInput);
     const receipt = deps.receipts.register({

@@ -1,6 +1,6 @@
-import { normalizeJurisdictionEvent } from '../../../jurisdiction/event-normalization';
-import { recordValidatorJHistory } from '../../../jurisdiction/local-history';
-import type { RuntimeTx } from '../../../runtime/types';
+import { normalizeJurisdictionEvent } from '../../jurisdiction/event-normalization';
+import { recordValidatorJHistory } from '../../jurisdiction/local-history';
+import type { RuntimeTx } from '../types';
 import {
   requireArray,
   requireBoolean,
@@ -8,7 +8,7 @@ import {
   requireBoundaryRecord,
   requireExactBoundaryKeys,
   requireString,
-} from '../../../protocol/boundary-primitives';
+} from '../../protocol/boundary-primitives';
 
 type ObservationData = Extract<RuntimeTx, { type: 'observeJRange' }>['data'];
 

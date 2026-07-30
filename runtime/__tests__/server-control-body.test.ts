@@ -83,6 +83,44 @@ test('runtime input control still accepts normal tagged payloads', async () => {
   expect(accepted[0]?.jInputs).toHaveLength(1);
 });
 
+test('runtime input control rejects malformed Runtime transactions before enqueue', async () => {
+  let enqueueCalled = false;
+  const response = await handleRuntimeInputControl(
+    new Request('http://localhost/api/control/runtime-input', {
+      method: 'POST',
+      body: serializeTaggedJson({
+        runtimeTxs: [{ type: 'advanceJWatcherCursor', data: { blockNumber: -1 } }],
+        entityInputs: [],
+      }),
+    }),
+    { 'Content-Type': 'application/json' },
+    {} as RuntimeState,
+    {
+      enqueueRuntimeInput: () => {
+        enqueueCalled = true;
+      },
+      validateRuntimeInputAdmission: () => {
+        throw new Error('admission must not receive malformed RuntimeTx');
+      },
+      parseTaggedControlBody,
+      receipts: {
+        register: () => {
+          throw new Error('receipt must not be registered');
+        },
+        get: () => undefined,
+      } as never,
+      getCurrentRuntimeHeight: () => 0,
+      buildStatusUrl: id => `/api/control/runtime-input/${id}/status`,
+    },
+  );
+
+  expect(response.status).toBe(400);
+  expect(enqueueCalled).toBe(false);
+  expect(await response.text()).toContain(
+    'CONTROL_RUNTIME_INPUT_RUNTIME_TX_0_DATA_FIELDS',
+  );
+});
+
 test('control body error status maps oversized bodies to 413 only', () => {
   expect(getControlBodyErrorStatus(new Error(`CONTROL_BODY_TOO_LARGE: bytes=2 max=1`), 400)).toBe(413);
   expect(getControlBodyErrorStatus(new Error('bad json'), 400)).toBe(400);
