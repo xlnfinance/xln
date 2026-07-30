@@ -6,8 +6,6 @@ import {
   isJurisdictionStackRef,
 } from './jurisdiction-runtime';
 
-export const PRODUCTION_DISPUTE_DELAY_BLOCKS = 5_760;
-
 /**
  * Jurisdiction height visible to an Entity reducer.
  *
@@ -57,33 +55,4 @@ export function getRuntimeJurisdictionHeight(env: RuntimeState, fallbackHeight =
     if (Number.isFinite(blockNumber) && blockNumber > best) best = Math.floor(blockNumber);
   }
   return best;
-}
-
-export function getRuntimeJurisdictionDefaultDisputeDelayBlocks(
-  env: RuntimeState,
-  jurisdictionName?: string,
-  fallbackBlocks = PRODUCTION_DISPUTE_DELAY_BLOCKS,
-): number {
-  const preferred =
-    getJReplicaByJurisdictionNameOrRef(env, jurisdictionName) ||
-    (env.activeJurisdiction ? env.jReplicas?.get(env.activeJurisdiction) : undefined);
-  const candidates = preferred
-    ? [preferred, ...Array.from(env.jReplicas?.values?.() || [])]
-    : Array.from(env.jReplicas?.values?.() || []);
-  for (const replica of candidates) {
-    const raw = Number(replica?.defaultDisputeDelayBlocks ?? NaN);
-    if (Number.isFinite(raw) && raw > 0) return Math.floor(raw);
-  }
-  return Number.isFinite(fallbackBlocks) && fallbackBlocks > 0
-    ? Math.floor(fallbackBlocks)
-    : PRODUCTION_DISPUTE_DELAY_BLOCKS;
-}
-
-export function requireRuntimeJurisdictionBlockTimeMs(env: RuntimeState, jurisdictionName?: string): number {
-  const preferred =
-    getJReplicaByJurisdictionNameOrRef(env, jurisdictionName) ||
-    (env.activeJurisdiction ? env.jReplicas?.get(env.activeJurisdiction) : undefined);
-  const raw = Number(preferred?.blockTimeMs ?? NaN);
-  if (Number.isFinite(raw) && raw > 0) return Math.floor(raw);
-  throw new Error(`JURISDICTION_BLOCK_TIME_MISSING:${jurisdictionName || env.activeJurisdiction || 'active'}`);
 }

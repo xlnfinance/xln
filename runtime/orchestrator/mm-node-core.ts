@@ -1219,23 +1219,6 @@ const pushMarketMakerEntityTx = (
   inputsByEntitySigner.set(key, input);
 };
 
-export const mergeMarketMakerEntityInputs = (
-  inputsByEntitySigner: Map<string, EntityInput>,
-  inputs: EntityInput[],
-): void => {
-  for (const input of inputs) {
-    const entityId = String(input.entityId || '');
-    const signerId = String(input.signerId || '');
-    if (!entityId || !signerId) continue;
-    for (const tx of input.entityTxs || []) {
-      pushMarketMakerEntityTx(inputsByEntitySigner, entityId, signerId, tx);
-    }
-  }
-};
-
-export const countMarketMakerEntityInputTxs = (inputsByEntitySigner: ReadonlyMap<string, EntityInput>): number =>
-  Array.from(inputsByEntitySigner.values()).reduce((sum, input) => sum + Number(input.entityTxs?.length || 0), 0);
-
 const resolveEntityRuntimeIdForCrossJ = (
   env: RuntimeState,
   entityId: string,

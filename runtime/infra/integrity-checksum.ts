@@ -1,7 +1,6 @@
 import { sha256 } from '@noble/hashes/sha2.js';
 
 export const INTEGRITY_CHECKSUM_BYTES = 16;
-export const INTEGRITY_DIGEST_BYTES = 32;
 export const INTEGRITY_DIGEST_ALGORITHM_ID = 'sha256' as const;
 
 type NativeHasher = {

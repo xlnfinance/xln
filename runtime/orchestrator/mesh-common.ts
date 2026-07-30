@@ -24,7 +24,6 @@ export const getBootstrapCreditAmount = (
 ): bigint => getBootstrapTokenAmount(tokenId, decimals);
 
 export const HUB_MESH_CREDIT_AMOUNT = getBootstrapCreditAmount(HUB_MESH_TOKEN_ID);
-export const DEFAULT_USER_HUB_CREDIT_AMOUNT = 10_000n * 10n ** BigInt(getTokenInfo(HUB_MESH_TOKEN_ID).decimals);
 export const HUB_REQUIRED_TOKEN_COUNT = 3;
 export const HUB_DEFAULT_SUPPORTED_PAIRS = ['1/2', '1/3', '2/3'] as const;
 export const HUB_DEFAULT_MIN_TRADE_SIZE = 10n * 10n ** BigInt(getTokenInfo(HUB_MESH_TOKEN_ID).decimals);
