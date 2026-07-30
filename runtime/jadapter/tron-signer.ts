@@ -12,8 +12,8 @@ type TronTriggerResult = Awaited<
 type TronContractTransaction = NonNullable<TronTriggerResult['transaction']>;
 
 const DEFAULT_TRON_FEE_LIMIT = 15_000_000_000;
-const DEFAULT_TRON_POLL_MS = 3_000;
-const DEFAULT_TRON_WAIT_MS = 300_000;
+const DEFAULT_TRON_BROADCAST_POLL_MS = 250;
+const DEFAULT_TRON_BROADCAST_VISIBILITY_MS = 30_000;
 
 const resolveFullHost = (rpcUrl: string, explicit?: string): string =>
   String(explicit || rpcUrl).replace(/\/jsonrpc\/?$/i, '').replace(/\/$/, '');
@@ -167,6 +167,16 @@ export class TronSigner extends ethers.AbstractSigner<ethers.JsonRpcProvider> {
     return this.#energyFee;
   }
 
+  async #readBroadcastTransaction(hash: string): Promise<ethers.TransactionResponse> {
+    const deadline = Date.now() + DEFAULT_TRON_BROADCAST_VISIBILITY_MS;
+    while (Date.now() < deadline) {
+      const response = await this.provider.getTransaction(hash);
+      if (response) return response;
+      await wait(DEFAULT_TRON_BROADCAST_POLL_MS);
+    }
+    throw new Error(`TRON_TRANSACTION_RESPONSE_TIMEOUT:${hash}:${DEFAULT_TRON_BROADCAST_VISIBILITY_MS}`);
+  }
+
   override async sendTransaction(tx: ethers.TransactionRequest): Promise<ethers.TransactionResponse> {
     const call = await this.#resolveCall(tx);
     let unsigned: TronTransferTransaction | TronContractTransaction;
@@ -206,23 +216,10 @@ export class TronSigner extends ethers.AbstractSigner<ethers.JsonRpcProvider> {
     const broadcast = await this.#tronWeb.trx.sendRawTransaction(signed);
     if (!broadcast?.result) throw transactionError('TRON_BROADCAST_FAILED', broadcast);
     const hash = `0x${String(signed.txID).replace(/^0x/, '')}`;
-    const provider = this.provider;
-    const response = {
-      hash,
-      wait: async (_confirms = 1, timeout = DEFAULT_TRON_WAIT_MS) => {
-        const deadline = Date.now() + timeout;
-        while (Date.now() < deadline) {
-          const receipt = await provider.getTransactionReceipt(hash);
-          if (receipt) {
-            if (receipt.status !== 1) throw new Error(`TRON_TRANSACTION_REVERTED:${hash}`);
-            return receipt;
-          }
-          await wait(DEFAULT_TRON_POLL_MS);
-        }
-        throw new Error(`TRON_TRANSACTION_RECEIPT_TIMEOUT:${hash}:${timeout}`);
-      },
-    };
-    return response as unknown as ethers.TransactionResponse;
+    // Return the provider's genuine response. Fabricating an Ethereum-shaped
+    // object here used to hide missing nonce/fee/block fields behind a cast and
+    // made downstream receipt semantics depend on an incomplete fiction.
+    return this.#readBroadcastTransaction(hash);
   }
 }
 

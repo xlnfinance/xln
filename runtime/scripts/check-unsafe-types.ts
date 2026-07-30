@@ -7,9 +7,7 @@ const EXCLUDED_PATH = /\/(?:__tests__|qa|scenarios|scripts)\//;
 // A double assertion bypasses TypeScript's proof that two types overlap. These
 // are existing boundary debts, not permission: new files and larger counts
 // fail this gate, while every cleanup must delete its allowance.
-const DOUBLE_ASSERTION_DEBT: Readonly<Record<string, number>> = {
-  'runtime/jadapter/tron-signer.ts': 1,
-};
+const DOUBLE_ASSERTION_DEBT: Readonly<Record<string, number>> = {};
 
 // Suppressions can hide unrelated errors on the same line. The empty ratchet
 // makes their removal permanent.

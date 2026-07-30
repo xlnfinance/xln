@@ -45,6 +45,30 @@ describe('TRON signer boundary', () => {
 
   test('native TRX transfer bypasses smart-contract energy estimation', async () => {
     const provider = createXlnJsonRpcProvider('http://127.0.0.1:1/jsonrpc', 3448148188);
+    const transactionHash = `0x${'11'.repeat(32)}`;
+    const transactionResponse = new ethers.TransactionResponse({
+      blockNumber: null,
+      blockHash: null,
+      hash: transactionHash,
+      index: 0,
+      type: 0,
+      to: '0x2222222222222222222222222222222222222222',
+      from: new ethers.Wallet(PRIVATE_KEY).address,
+      nonce: 0,
+      gasLimit: 0n,
+      gasPrice: 0n,
+      maxPriorityFeePerGas: null,
+      maxFeePerGas: null,
+      data: '0x',
+      value: 1n,
+      chainId: 3448148188n,
+      signature: new ethers.Wallet(PRIVATE_KEY).signingKey.sign(ethers.ZeroHash),
+      accessList: null,
+      authorizationList: null,
+    }, provider);
+    Object.defineProperty(provider, 'getTransaction', {
+      value: async (hash: string) => hash === transactionHash ? transactionResponse : null,
+    });
     const ownerHex = `41${new ethers.Wallet(PRIVATE_KEY).address.slice(2)}`;
     const owner = TronWeb.address.fromHex(ownerHex);
     let sendTrxCalls = 0;
@@ -84,7 +108,8 @@ describe('TRON signer boundary', () => {
       to: '0x2222222222222222222222222222222222222222',
       value: 1n,
     });
-    expect(response.hash).toBe(`0x${'11'.repeat(32)}`);
+    expect(response).toBe(transactionResponse);
+    expect(response.hash).toBe(transactionHash);
     expect(sendTrxCalls).toBe(1);
     expect(estimateEnergyCalls).toBe(0);
     await provider.destroy();
