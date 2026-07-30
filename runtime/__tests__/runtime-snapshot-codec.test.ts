@@ -149,4 +149,18 @@ describe('runtime snapshot codec', () => {
     expect(() => buildDurableRuntimeMachineSnapshot(env))
       .toThrow('RUNTIME_MACHINE_J_BLOCK_NUMBER_INVALID:-1');
   });
+
+  test('runtime snapshots reject a missing jurisdiction replica map', () => {
+    const env = createEmptyEnv('durable-runtime-missing-j-replicas');
+    Reflect.deleteProperty(env, 'jReplicas');
+
+    expect(() => buildDurableRuntimeMachineSnapshot(env))
+      .toThrow('RUNTIME_SNAPSHOT_J_REPLICAS_MISSING');
+    expect(() => buildCanonicalEnvSnapshot(env, {
+      runtimeInput: { runtimeTxs: [], entityInputs: [] },
+      runtimeOutputs: [],
+      description: 'missing jurisdiction replicas',
+    }))
+      .toThrow('RUNTIME_SNAPSHOT_J_REPLICAS_MISSING');
+  });
 });

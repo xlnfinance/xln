@@ -330,7 +330,7 @@ export const buildDurableRuntimeMachineSnapshot = (
     ...((options?.pendingNetworkOutputs ?? env.pendingNetworkOutputs)?.length
       ? { pendingNetworkOutputs: cloneRuntimeOutputs(options?.pendingNetworkOutputs ?? env.pendingNetworkOutputs ?? []) }
       : {}),
-    jReplicas: Array.from((env.jReplicas || new Map()).entries()).map(([key, replica]) => [
+    jReplicas: Array.from(requireRuntimeJReplicas(env).entries()).map(([key, replica]) => [
       key,
       buildDurableJReplicaSnapshot(replica),
     ]),
@@ -377,6 +377,13 @@ const cloneLogs = (logs: RuntimeState['frameLogs'] | undefined): RuntimeState['f
   return logs.map(entry => ({ ...entry }));
 };
 
+const requireRuntimeJReplicas = (env: RuntimeState): RuntimeState['jReplicas'] => {
+  if (!(env.jReplicas instanceof Map)) {
+    throw new Error('RUNTIME_SNAPSHOT_J_REPLICAS_MISSING');
+  }
+  return env.jReplicas;
+};
+
 export const buildCanonicalRuntimeStateSnapshot = (
   env: RuntimeState,
   options?: {
@@ -410,7 +417,7 @@ export const buildCanonicalRuntimeStateSnapshot = (
         options?.compactTransient ? { compactTransient: true } : undefined,
       ),
     ]),
-    jReplicas: Array.from((env.jReplicas || new Map()).entries()).map(([replicaKey, jr]) => [
+    jReplicas: Array.from(requireRuntimeJReplicas(env).entries()).map(([replicaKey, jr]) => [
       replicaKey,
       buildCanonicalJReplicaSnapshot(jr),
     ]),
