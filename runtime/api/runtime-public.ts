@@ -46,16 +46,6 @@ export type {
 } from '../protocol/identity';
 export type { JurisdictionInfo } from '../protocol/jurisdiction-identity';
 export {
-  scenarios,
-  scenarioKeys,
-  recordScenario,
-  type ScenarioKey,
-  type ScenarioRecording,
-} from '../runtime/scenarios';
-export { parseScenario, mergeAndSortEvents } from '../scenarios/parser.js';
-export { executeScenario } from '../scenarios/executor.js';
-export { SCENARIOS, getScenario, getScenariosByTag, type ScenarioMetadata } from '../scenarios/index.js';
-export {
   deriveSignerKey,
   deriveSignerKeySync,
   getCachedSignerPrivateKey,

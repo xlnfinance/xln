@@ -244,5 +244,11 @@ export type FinancialConstants =
 export type BigIntMathUtils =
   typeof import('../account/financial-utils').BigIntMath;
 
-/** Exact browser runtime module namespace; no handwritten mirror may drift. */
-export type XLNModule = typeof import('../runtime');
+/**
+ * Exact browser bundle namespace; no handwritten mirror may drift.
+ *
+ * The production Runtime facade deliberately excludes demo scenarios. The
+ * browser composition root adds them without making the financial core depend
+ * on QA code.
+ */
+export type XLNModule = typeof import('../browser');

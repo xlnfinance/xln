@@ -8,8 +8,8 @@ OUT="${XLN_RUNTIME_BUNDLE_OUT:-frontend/static/runtime.js}"
 
 mkdir -p "$(dirname "$OUT")"
 
-echo "[build-runtime] bundling runtime/runtime.ts -> $OUT"
-bun build runtime/runtime.ts --target=browser --outfile="$OUT" --minify \
+echo "[build-runtime] bundling runtime/browser.ts -> $OUT"
+bun build runtime/browser.ts --target=browser --outfile="$OUT" --minify \
   --external http --external https --external zlib \
   --external fs --external path --external crypto \
   --external stream --external buffer --external url \
