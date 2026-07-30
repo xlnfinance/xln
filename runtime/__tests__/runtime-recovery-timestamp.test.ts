@@ -15,3 +15,19 @@ test('recovery rejects timestamp normalization instead of clamping durable state
     timestamp: 10.9,
   })).rejects.toThrow('RECOVERY_CHECKPOINT_TIMESTAMP_INVALID');
 });
+
+test('recovery rejects missing or malformed replica collections', async () => {
+  const snapshot = buildRuntimeCheckpointSnapshot(createEmptyEnv('recovery-replica-reject'));
+  const { eReplicas: _missingEntities, ...withoutEntities } = snapshot;
+
+  await expect(restoreEnvFromCheckpointSnapshot(withoutEntities))
+    .rejects.toThrow('RECOVERY_CHECKPOINT_ENTITY_REPLICAS_INVALID');
+  await expect(restoreEnvFromCheckpointSnapshot({
+    ...snapshot,
+    eReplicas: [['only-a-key']],
+  })).rejects.toThrow('RUNTIME_SNAPSHOT_EREPLICAS_ENTRY_INVALID:0');
+  await expect(restoreEnvFromCheckpointSnapshot({
+    ...snapshot,
+    jReplicas: [['duplicate', {}], ['duplicate', {}]],
+  })).rejects.toThrow('RECOVERY_CHECKPOINT_J_REPLICAS_INVALID:duplicate_key');
+});
