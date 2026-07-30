@@ -4,8 +4,8 @@ import { createEmptyEnv, enqueueRuntimeInput, generateLazyEntityId, processRunti
 import { getJEventJurisdictionRef } from '../jurisdiction/event-observation';
 import { EMPTY_J_HISTORY_ROOT } from '../jurisdiction/history-consensus';
 import { hydrateEntityStateFromStorage, projectEntityCoreDoc } from '../storage/projections';
-import type { JReplica } from '../types/jurisdiction-runtime';
 import type { JurisdictionConfig } from '../entity/types';
+import { createTestJReplica } from './helpers/j-replica';
 
 const addr = (byte: string): string => `0x${byte.repeat(20)}`;
 
@@ -18,7 +18,7 @@ const installJurisdiction = (env: ReturnType<typeof createEmptyEnv>): Jurisdicti
     entityProviderAddress: addr('12'),
   };
   env.activeJurisdiction = jurisdiction.name;
-  env.jReplicas.set(jurisdiction.name, {
+  env.jReplicas.set(jurisdiction.name, createTestJReplica({
     name: jurisdiction.name,
     rpcs: [jurisdiction.address],
     chainId: jurisdiction.chainId,
@@ -30,7 +30,7 @@ const installJurisdiction = (env: ReturnType<typeof createEmptyEnv>): Jurisdicti
       account: addr('13'),
       deltaTransformer: addr('14'),
     },
-  } as JReplica);
+  }));
   return jurisdiction;
 };
 

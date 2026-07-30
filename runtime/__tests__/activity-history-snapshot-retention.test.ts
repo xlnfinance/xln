@@ -22,6 +22,7 @@ import { generateLazyEntityId } from '../entity/factory';
 import { readHistoryViewRuntimeActivity } from '../storage/history-view';
 import { keyHistoryViewRuntimeActivity } from '../storage/keys';
 import { readFrameReceipts } from '../server/rpc-ws';
+import { createTestJReplica } from './helpers/j-replica';
 
 const recipientId = `0x${'bb'.repeat(32)}`;
 const hubId = `0x${'cc'.repeat(32)}`;
@@ -58,18 +59,19 @@ test('activity remains queryable while snapshots retain the authoritative R-fram
   const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
   const jurisdiction = {
     name: 'activity-snapshot-retention',
+    address: 'browservm://activity-snapshot-retention',
     chainId: 31_337,
     depositoryAddress: '0x000000000000000000000000000000000000dEaD',
     entityProviderAddress: '0x000000000000000000000000000000000000bEEF',
   };
   env.activeJurisdiction = jurisdiction.name;
-  env.jReplicas.set(jurisdiction.name, {
+  env.jReplicas.set(jurisdiction.name, createTestJReplica({
     ...jurisdiction,
     contracts: {
       depository: jurisdiction.depositoryAddress,
       entityProvider: jurisdiction.entityProviderAddress,
     },
-  } as never);
+  }));
   enqueueRuntimeInput(env, {
     runtimeTxs: [{
       type: 'importReplica',

@@ -33,7 +33,7 @@ import {
 } from '../runtime';
 import type { EntityLeaderTimeoutVote, EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
 import type { RuntimeState } from '../runtime/types';
-import type { JReplica } from '../types/jurisdiction-runtime';
+import { createTestJReplica } from './helpers/j-replica';
 
 const cleanupRuntimeStorage = (runtimeId: string): void => {
   const namespacePath = join(dbRootPath, runtimeId);
@@ -115,7 +115,7 @@ const installJurisdiction = (env: RuntimeState): JurisdictionConfig => {
     entityProviderAddress: `0x${'12'.repeat(20)}`,
   };
   env.activeJurisdiction = jurisdiction.name;
-  env.jReplicas.set(jurisdiction.name, {
+  env.jReplicas.set(jurisdiction.name, createTestJReplica({
     name: jurisdiction.name,
     rpcs: [],
     chainId: jurisdiction.chainId,
@@ -127,7 +127,7 @@ const installJurisdiction = (env: RuntimeState): JurisdictionConfig => {
       account: `0x${'13'.repeat(20)}`,
       deltaTransformer: `0x${'14'.repeat(20)}`,
     },
-  } as JReplica);
+  }));
   return jurisdiction;
 };
 

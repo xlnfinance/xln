@@ -8,6 +8,7 @@ import { generateLazyEntityId } from '../../entity/factory';
 import { ensureRuntimeState } from '../../runtime/runtime-state';
 import type { ConsensusConfig, JurisdictionConfig } from '../../entity/types';
 import type { RuntimeTx } from '../../runtime/types';
+import { createTestJReplica } from '../helpers/j-replica';
 
 const [seed] = Bun.argv.slice(2);
 if (!seed) throw new Error('runtime storage timeout fixture requires a seed');
@@ -16,6 +17,7 @@ const env = createEmptyEnv(seed);
 env.quietRuntimeLogs = true;
 const jurisdiction: JurisdictionConfig = {
   name: 'runtime-storage-timeout',
+  address: 'browservm://runtime-storage-timeout',
   chainId: 31_337,
   depositoryAddress: '0x000000000000000000000000000000000000dead',
   entityProviderAddress: '0x000000000000000000000000000000000000beef',
@@ -23,7 +25,7 @@ const jurisdiction: JurisdictionConfig = {
 const accountAddress = '0x000000000000000000000000000000000000aacc';
 const deltaTransformerAddress = '0x000000000000000000000000000000000000da7a';
 env.activeJurisdiction = jurisdiction.name;
-env.jReplicas.set(jurisdiction.name, {
+env.jReplicas.set(jurisdiction.name, createTestJReplica({
   ...jurisdiction,
   contracts: {
     depository: jurisdiction.depositoryAddress,
@@ -31,7 +33,7 @@ env.jReplicas.set(jurisdiction.name, {
     account: accountAddress,
     deltaTransformer: deltaTransformerAddress,
   },
-} as never);
+}));
 
 const importTx = (index: string): RuntimeTx => {
   const signerId = deriveSignerAddressSync(seed, index).toLowerCase();
