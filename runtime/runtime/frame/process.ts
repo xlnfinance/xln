@@ -338,6 +338,7 @@ const commitRuntimeFrame = async (
   options: {
     frameAdvanced: boolean;
     frameHeightBeforeTick: number;
+    frameTimestampBeforeTick: number;
     appliedInput: RuntimeInput | undefined;
     quietLogs: boolean;
   },
@@ -345,6 +346,14 @@ const commitRuntimeFrame = async (
 ): Promise<RuntimeFrameCommitResult> => {
   if (!frame.transaction) throw new Error('RUNTIME_FRAME_TRANSACTION_MISSING_AT_COMMIT');
   if (!options.frameAdvanced) {
+    // Candidate time is needed while evaluating due work, but timestamp is
+    // canonical Runtime State. If no frame advanced there is no WAL record,
+    // so publishing the candidate timestamp would create state that vanishes
+    // after restart. Restore the committed clock before releasing readers.
+    candidateEnv.state.timestamp = options.frameTimestampBeforeTick;
+    for (const { adapter } of getLiveJAdapterEntries(candidateEnv)) {
+      adapter.setBlockTimestamp?.(options.frameTimestampBeforeTick);
+    }
     frame.commitDisposition = 'committed';
     clearPendingAuditEvents(candidateEnv);
     const env = publishRuntimeFrameTransaction(frame.transaction);
@@ -491,6 +500,7 @@ const applyAndCommitRuntimeFrame = async (
   const commit = await commitRuntimeFrame(env, liveEnv, frame, profile, {
     frameAdvanced,
     frameHeightBeforeTick: started.frameHeightBeforeTick,
+    frameTimestampBeforeTick: started.frameTimestampBeforeTick,
     appliedInput: applied.appliedInput,
     quietLogs: candidate.quietRuntimeLogs,
   }, deps);

@@ -53,13 +53,19 @@ describe('live runtime env helpers', () => {
   });
 
   test('detached runtime view env does not expose the live env handle', () => {
+    const account = { deltas: new Map([[1, { offdelta: 10n }]]) };
+    const entity = { state: { accounts: new Map([['peer', account]]) } };
     const liveEnv = makeLiveEnv();
+    liveEnv.state.eReplicas.set('entity:signer', entity);
     const detached = createDetachedRuntimeViewEnv(liveEnv as never);
 
     expect(isRuntimeLikeEnv(detached)).toBe(true);
     expect(detached).not.toBe(liveEnv);
     expect(detached.state.eReplicas).not.toBe(liveEnv.state.eReplicas);
     expect(detached.state.jReplicas).not.toBe(liveEnv.state.jReplicas);
+    account.deltas.get(1)!.offdelta = 99n;
+    const detachedEntity = detached.state.eReplicas.get('entity:signer') as typeof entity;
+    expect(detachedEntity.state.accounts.get('peer')?.deltas.get(1)?.offdelta).toBe(10n);
     expect(unwrapLiveRuntimeEnv(detached)).toBe(detached);
   });
 });

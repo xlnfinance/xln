@@ -8,7 +8,7 @@ import {
 } from './event-observation';
 import {
   compareCanonicalJurisdictionEvents,
-  normalizeJurisdictionEvents,
+  requireCanonicalJurisdictionEvents,
 } from './event-normalization';
 import {
   canonicalJEventRangeHash,
@@ -42,7 +42,7 @@ const normalizeEventBlock = (
   if (blockJurisdiction !== jurisdictionRef) throw new Error('J_HISTORY_LOCAL_JURISDICTION_MISMATCH');
   const jBlockHash = normalizedText(block.jBlockHash);
   if (!jBlockHash) throw new Error('J_HISTORY_LOCAL_BLOCK_HASH_MISSING');
-  const events = normalizeJurisdictionEvents(block.events).sort(compareCanonicalJurisdictionEvents);
+  const events = requireCanonicalJurisdictionEvents(block.events).sort(compareCanonicalJurisdictionEvents);
   const eventsHash = canonicalJurisdictionEventsHash(events);
   if (normalizedText(block.eventsHash) !== eventsHash) throw new Error('J_HISTORY_LOCAL_EVENTS_HASH_MISMATCH');
   const evidence = normalizeDisputeFinalizationEvidence(block.disputeFinalizationEvidence ?? []);
@@ -138,7 +138,7 @@ const assertDisplayBlockIntegrity = (
   if (!/^0x[0-9a-f]{64}$/.test(blockHash)) {
     throw new Error(`J_HISTORY_FINALITY_BLOCK_HASH_CORRUPTION:${height}`);
   }
-  const normalizedEvents = normalizeJurisdictionEvents(block.events);
+  const normalizedEvents = requireCanonicalJurisdictionEvents(block.events);
   if (!Array.isArray(block.events) || normalizedEvents.length !== block.events.length) {
     throw new Error(`J_HISTORY_FINALITY_EVENT_BODY_CORRUPTION:${height}`);
   }

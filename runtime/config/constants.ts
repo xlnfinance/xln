@@ -47,6 +47,14 @@ export const LIMITS = {
   /** Maximum active HTLC locks per bilateral account; 16-bit hashledger cross-j swaps need 16 live legs. */
   MAX_ACCOUNT_HTLC_LOCKS: 32,
 
+  /**
+   * Maximum token-indexed Delta rows in one bilateral Account.
+   * Account.sol accepts at most 128 tokens in a dispute ProofBody; allowing a
+   * larger off-chain state would create a signed Account that cannot be
+   * enforced on-chain and would amplify clone/root/replay cost.
+   */
+  MAX_ACCOUNT_TOKEN_ROWS: 128,
+
   /** Aggregate live-offer guard; oversized maps are paged by Account storage. */
   MAX_ACCOUNT_SWAP_OFFERS: 2000,
 
@@ -76,6 +84,13 @@ export const LIMITS = {
 
   /** Maximum resting orders per pair book */
   MAX_ORDERBOOK_ORDERS_PER_PAIR: 10_000,
+
+  /** Process-local Runtime ingress bounds; accepted durable work bypasses these only during recovery. */
+  MAX_RUNTIME_MEMPOOL_RUNTIME_TXS: 1_000,
+  MAX_RUNTIME_MEMPOOL_ENTITY_INPUTS: 10_000,
+  MAX_RUNTIME_MEMPOOL_J_INPUTS: 1_000,
+  MAX_RUNTIME_MEMPOOL_RELIABLE_RECEIPTS: 10_000,
+  MAX_RUNTIME_MEMPOOL_TOTAL_ITEMS: 20_000,
 } as const;
 
 // ═══════════════════════════════════════════════════════════════

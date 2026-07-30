@@ -10,6 +10,7 @@ import {
   normalizeBigNumberish,
   normalizeBytes32,
   normalizeEntity,
+  normalizeHexBytes,
   normalizeInt,
   normalizeString,
   type JurisdictionEventNormalizer,
@@ -75,17 +76,15 @@ const disputeStarted = defineEventNormalizer('DisputeStarted', data => {
     counterentity: normalizeEntity,
     nonce: normalizeBigNumberish,
     proofbodyHash: normalizeString,
+    watchSeed: normalizeBytes32,
+    starterInitialArguments: normalizeHexBytes,
+    starterIncrementedArguments: normalizeHexBytes,
     disputeTimeout: normalizeInt,
   });
   if (!decoded || decoded.disputeTimeout <= 0) return null;
   const batchNonce = normalizeInt(data['batchNonce']);
   return {
     ...decoded,
-    watchSeed: normalizeString(data['watchSeed']) ?? '0x',
-    starterInitialArguments:
-      normalizeString(data['starterInitialArguments']) ?? '0x',
-    starterIncrementedArguments:
-      normalizeString(data['starterIncrementedArguments']) ?? '0x',
     ...(batchNonce !== null ? { batchNonce } : {}),
   };
 });

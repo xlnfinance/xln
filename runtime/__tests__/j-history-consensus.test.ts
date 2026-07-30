@@ -1487,6 +1487,10 @@ describe('J validator-local history and Entity-finalized ranges', () => {
     const canonicalHash = canonicalJurisdictionEventsHash([earlier, later]);
 
     expect(canonicalJurisdictionEventsHash([later, earlier])).toBe(canonicalHash);
+    expect(() => canonicalJurisdictionEventsHash([
+      earlier,
+      { type: 'UnknownConsensusEvent', data: {} } as never,
+    ])).toThrow('JURISDICTION_EVENT_INVALID:1');
     expect([later, earlier].sort(compareCanonicalJurisdictionEvents)).toEqual([earlier, later]);
   });
 

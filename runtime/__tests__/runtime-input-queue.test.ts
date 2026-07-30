@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { enqueueRuntimeInputsWithDeps } from '../runtime/input-queue';
+import { LIMITS } from '../config/constants';
 import type { RuntimeReplica } from '../runtime/types';
 
 const makeEnv = (): RuntimeReplica => ({
@@ -103,4 +104,35 @@ test('enqueueRuntimeInputs rejects work after quiesce has paused durable persist
     'RUNTIME_INPUT_INGRESS_AFTER_PERSISTENCE_PAUSE:runtime=runtime-a:runtimeTxs=observeJRange',
   );
   expect(env.runtimeMempool.runtimeTxs).toHaveLength(0);
+});
+
+test('runtime input queue rejects an oversized batch atomically', () => {
+  const env = makeEnv();
+  const oversized = Array.from(
+    { length: LIMITS.MAX_RUNTIME_MEMPOOL_ENTITY_INPUTS + 1 },
+    (_, index) => ({
+      entityId: `entity-${index}`,
+      signerId: `signer-${index}`,
+      entityTxs: [],
+    }),
+  );
+
+  expect(() => enqueueRuntimeInputsWithDeps(
+    env,
+    {
+      ensureRuntimeInfrastructure: (targetEnv) => {
+        targetEnv.infrastructure ??= {};
+        return targetEnv.infrastructure;
+      },
+      requestRuntimeLoopWake: () => {
+        throw new Error('OVERSIZED_BATCH_MUST_NOT_WAKE');
+      },
+    },
+    oversized,
+  )).toThrow(
+    `RUNTIME_MEMPOOL_CAPACITY_EXCEEDED:entityInputs:` +
+    `${LIMITS.MAX_RUNTIME_MEMPOOL_ENTITY_INPUTS + 1}:` +
+    `${LIMITS.MAX_RUNTIME_MEMPOOL_ENTITY_INPUTS}`,
+  );
+  expect(env.runtimeMempool.entityInputs).toHaveLength(0);
 });

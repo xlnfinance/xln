@@ -27,16 +27,25 @@ export function normalizeJurisdictionEvent(
   return event ? { ...normalizeMetadata(raw), ...event } : null;
 }
 
-export function normalizeJurisdictionEvents(
+/**
+ * Decode bytes that are already part of a consensus or history commitment.
+ *
+ * Filtering is forbidden here: otherwise `hash(valid + invalid)` would equal
+ * `hash(valid)`, allowing signed bytes to disappear before application.
+ * External watchers may ignore unknown logs before constructing J inputs, but
+ * once an array enters RJEA every member must be canonical.
+ */
+export function requireCanonicalJurisdictionEvents(
   value: unknown,
 ): JurisdictionEvent[] {
-  if (!Array.isArray(value)) return [];
-  const events: JurisdictionEvent[] = [];
-  for (const item of value) {
+  if (!Array.isArray(value)) throw new Error('JURISDICTION_EVENTS_ARRAY_REQUIRED');
+  return value.map((item, index) => {
     const event = normalizeJurisdictionEvent(item);
-    if (event) events.push(event);
-  }
-  return events;
+    if (!event) {
+      throw new Error(`JURISDICTION_EVENT_INVALID:${index}`);
+    }
+    return event;
+  });
 }
 
 const canonicalJurisdictionEventPayloadKey = (

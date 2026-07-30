@@ -422,14 +422,28 @@ const maybeHandleControlApi = async (
   if (pathname === '/api/control/runtime-input' && req.method === 'POST') {
     const authError = requireDaemonControlAuth(req, env);
     if (authError) return authError;
-    return handleRuntimeInputControl(req, headers, env, {
-      enqueueRuntimeInput,
-      validateRuntimeInputAdmission,
-      parseTaggedControlBody,
-      receipts: runtimeIngressReceipts,
-      getCurrentRuntimeHeight: currentRuntimeHeight,
-      buildStatusUrl: runtimeInputStatusUrl,
-    });
+    if (!env) {
+      return handleRuntimeInputControl(req, headers, env, {
+        enqueueRuntimeInput,
+        validateRuntimeInputAdmission,
+        parseTaggedControlBody,
+        receipts: runtimeIngressReceipts,
+        getCurrentRuntimeHeight: currentRuntimeHeight,
+        buildStatusUrl: runtimeInputStatusUrl,
+      });
+    }
+    // The response records enqueuedHeight. Holding a committed-read lease
+    // prevents an in-place H+1 candidate from leaking through that metadata;
+    // enqueue itself is synchronous and cannot deadlock the Runtime writer.
+    return withRuntimeCommittedRead(env, () =>
+      handleRuntimeInputControl(req, headers, env, {
+        enqueueRuntimeInput,
+        validateRuntimeInputAdmission,
+        parseTaggedControlBody,
+        receipts: runtimeIngressReceipts,
+        getCurrentRuntimeHeight: currentRuntimeHeight,
+        buildStatusUrl: runtimeInputStatusUrl,
+      }));
   }
 
   const runtimeInputStatusMatch = pathname.match(/^\/api\/control\/runtime-input\/([^/]+)\/status$/);

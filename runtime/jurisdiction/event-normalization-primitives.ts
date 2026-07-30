@@ -41,6 +41,12 @@ export const normalizeBytes32 = (value: unknown): string | null => {
   return /^0x[0-9a-f]{64}$/.test(bytes) ? bytes : null;
 };
 
+export const normalizeHexBytes = (value: unknown): string | null => {
+  if (typeof value !== 'string') return null;
+  const bytes = value.trim().toLowerCase();
+  return /^0x(?:[0-9a-f]{2})*$/.test(bytes) ? bytes : null;
+};
+
 export const normalizeBigNumberish = (value: unknown): string | null => {
   if (typeof value === 'bigint') return value.toString();
   if (typeof value === 'number') {

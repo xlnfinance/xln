@@ -1,7 +1,7 @@
 import {
   canonicalJurisdictionEventKey,
   compareCanonicalJurisdictionEvents,
-  normalizeJurisdictionEvents,
+  requireCanonicalJurisdictionEvents,
 } from '../../jurisdiction/event-normalization';
 import type { JEventClaimTx, JEventAccountTx } from './j-events-types';
 
@@ -40,13 +40,13 @@ export function mergeJEventClaimOps(ops: JEventAccountTx[]): void {
       throw new Error(`ACCOUNT_J_CLAIM_MERGE_TARGET_MISSING:${key}`);
     }
     target.tx.data.events.push(
-      ...normalizeJurisdictionEvents(op.tx.data.events),
+      ...requireCanonicalJurisdictionEvents(op.tx.data.events),
     );
     ops.splice(index, 1);
   }
   for (const op of ops) {
     if (!isJEventClaimOp(op)) continue;
-    const events = normalizeJurisdictionEvents(op.tx.data.events).sort(
+    const events = requireCanonicalJurisdictionEvents(op.tx.data.events).sort(
       compareCanonicalJurisdictionEvents,
     );
     const keys = events.map(canonicalJurisdictionEventKey);

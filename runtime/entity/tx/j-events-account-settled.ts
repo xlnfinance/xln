@@ -1,7 +1,7 @@
 import type { EntityCandidateEffect } from '../types';
 import { addMessage } from '../frame-events';
 import { getTokenInfo } from '../../account/utils';
-import { normalizeJurisdictionEvents } from '../../jurisdiction/event-normalization';
+import { requireCanonicalJurisdictionEvents } from '../../jurisdiction/event-normalization';
 import { createStructuredLogger, shortId } from '../../infra/logger';
 import type { FinalizedJEventContext } from './j-events';
 
@@ -62,7 +62,7 @@ export const applyAccountSettledJEvent = (
   dirtyAccounts.add(counterpartyId.toLowerCase());
   account.lastFinalizedJHeight ??= 0;
 
-  const normalized = normalizeJurisdictionEvents([event]);
+  const normalized = requireCanonicalJurisdictionEvents([event]);
   if (normalized.length !== 1 || !normalized[0]) {
     jEventLog.warn('account_settled.claim_normalize_failed', {
       tokenId: tokenIdNum,

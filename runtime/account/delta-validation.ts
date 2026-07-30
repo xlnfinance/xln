@@ -1,4 +1,5 @@
 import type { Delta } from '../types/account';
+import { assertAccountDeltaCapacity } from './delta-capacity';
 import {
   TypeSafetyViolationError,
   validateObject,
@@ -83,6 +84,7 @@ export const validateAccountDeltas = (
   }
   const result = new Map<number, Delta>();
   if (deltas instanceof Map) {
+    assertAccountDeltaCapacity(deltas.size, source);
     for (const [tokenId, delta] of deltas.entries()) {
       if (!Number.isInteger(tokenId) || tokenId < 0) {
         throw new TypeSafetyViolationError(
@@ -95,6 +97,7 @@ export const validateAccountDeltas = (
     return result;
   }
   const entries = validateObject(deltas, `AccountDeltas from ${source}`);
+  assertAccountDeltaCapacity(Object.keys(entries).length, source);
   for (const [tokenIdText, delta] of Object.entries(entries)) {
     if (!/^(0|[1-9]\d*)$/.test(tokenIdText)) {
       throw new TypeSafetyViolationError(

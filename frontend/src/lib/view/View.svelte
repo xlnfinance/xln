@@ -113,7 +113,9 @@
 
   const resolveLocalDebugEnv = (): RuntimeReplica | null => {
     const projectedEnv = get(localEnvStore);
-    const projectedRuntimeEnv = projectedEnv ? (unwrapLiveRuntimeEnv(projectedEnv) ?? projectedEnv) : null;
+    // Rendering uses the committed detached projection. Only debug commands
+    // unwrap the live handle after this selection has been validated.
+    const projectedRuntimeEnv = projectedEnv;
     const activeEnv = getEnv();
     const liveRuntimeEnv = activeEnv ? (unwrapLiveRuntimeEnv(activeEnv) ?? activeEnv) : null;
     const selectedRuntimeId = normalizeRuntimeId(get(activeRuntimeId));

@@ -95,7 +95,12 @@ const registerSingleSignerWallet = (
     });
     return;
   }
-  if (adapter.mode !== 'browservm' && hasExternalRpc) return;
+  // BrowserVM is the only adapter that executes entity-authorized calls
+  // in-process and therefore the only adapter allowed to receive entity keys.
+  // RPC, Anvil and Tron adapters submit already-authorized Hankos; inferring
+  // key authority from an empty `rpcs` list or method presence would both
+  // crash valid RPC stacks and leak keys to future adapter implementations.
+  if (adapter.mode !== 'browservm') return;
   if (!adapter.registerEntityWallet) {
     throw new Error(
       `ENTITY_JURISDICTION_WALLET_BINDER_MISSING:${replica.entityId}`,

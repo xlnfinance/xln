@@ -50,7 +50,7 @@ export function buildRuntimeGraphProjections(input: RuntimeGraphProjectionInputs
     if (runtime.type === 'local') {
       const selected = runtimeId === activeId && input.currentEnv
         ? input.currentEnv
-        : (unwrapLiveRuntimeEnv(runtime.env) ?? runtime.env);
+        : runtime.env;
       if (selected) {
         projections.push(projectRuntimeEnv(selected, { runtimeId, label: runtime.label, adapterKind: 'browser' }));
       }

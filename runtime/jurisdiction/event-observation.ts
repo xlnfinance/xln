@@ -5,7 +5,7 @@ import { getJurisdictionIdentityRef } from './jurisdiction-runtime';
 import {
   canonicalJurisdictionEventKey,
   compareCanonicalJurisdictionEvents,
-  normalizeJurisdictionEvents,
+  requireCanonicalJurisdictionEvents,
 } from './event-normalization';
 
 export const UNCONFIGURED_J_EVENT_JURISDICTION = 'unconfigured';
@@ -14,7 +14,7 @@ export const getJEventJurisdictionRef = (jurisdiction: unknown): string =>
   getJurisdictionIdentityRef(jurisdiction) || UNCONFIGURED_J_EVENT_JURISDICTION;
 
 export const canonicalJurisdictionEventsHash = (events: JurisdictionEvent[]): string => {
-  const keys = normalizeJurisdictionEvents(events)
+  const keys = requireCanonicalJurisdictionEvents(events)
     .sort(compareCanonicalJurisdictionEvents)
     .map((event) => canonicalJurisdictionEventKey(event));
   return ethers.keccak256(ethers.toUtf8Bytes(JSON.stringify(keys)));

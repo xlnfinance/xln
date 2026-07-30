@@ -4,7 +4,7 @@ import type { AccountFrame, AccountTx } from '../../types/account';
 import { assertAccountFrameDeltaIntegrity } from '../frame';
 import { computeCanonicalMerkleRoot } from '../state-root';
 import { canonicalJurisdictionEventsHash } from '../../jurisdiction/event-observation';
-import { normalizeJurisdictionEvents } from '../../jurisdiction/event-normalization';
+import { requireCanonicalJurisdictionEvents } from '../../jurisdiction/event-normalization';
 import { ACCOUNT_NETWORK_ALLOWANCE_MS } from './constants';
 import { LIMITS } from '../../config/constants';
 
@@ -78,7 +78,7 @@ const requireNonNegativeSafeInteger = (value: unknown, label: string): number =>
 
 const canonicalJEventClaimForFrameHash = (value: unknown): Record<string, unknown> => {
   const data = toRecord(value);
-  const events = normalizeJurisdictionEvents(Array.isArray(data['events']) ? data['events'] : []);
+  const events = requireCanonicalJurisdictionEvents(Array.isArray(data['events']) ? data['events'] : []);
 
   // The signed Account frame binds the exact chain block, full canonical body,
   // and both independently verified Patricia witnesses. None are local hints.

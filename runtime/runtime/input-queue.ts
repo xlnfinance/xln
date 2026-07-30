@@ -1,4 +1,4 @@
-import { TIMING } from '../config/constants';
+import { LIMITS, TIMING } from '../config/constants';
 import type { EntityInput } from '../entity/types';
 import type { RuntimeReplica, ReliableDeliveryReceipt, RuntimeInput, RuntimeTx } from './types';
 import type { JInput } from '../jurisdiction/input';
@@ -51,6 +51,36 @@ const normalizeIngressTimestamp = (env: RuntimeReplica, explicitTimestamp?: numb
   return env.state.timestamp ?? 0;
 };
 
+const assertRuntimeMempoolCapacity = (
+  mempool: RuntimeInput,
+  incoming: {
+    runtimeTxs: number;
+    entityInputs: number;
+    jInputs: number;
+    reliableReceipts: number;
+  },
+): void => {
+  const next = {
+    runtimeTxs: mempool.runtimeTxs.length + incoming.runtimeTxs,
+    entityInputs: mempool.entityInputs.length + incoming.entityInputs,
+    jInputs: (mempool.jInputs?.length ?? 0) + incoming.jInputs,
+    reliableReceipts:
+      (mempool.reliableReceipts?.length ?? 0) + incoming.reliableReceipts,
+  };
+  const total = next.runtimeTxs + next.entityInputs + next.jInputs + next.reliableReceipts;
+  const limits = [
+    ['runtimeTxs', next.runtimeTxs, LIMITS.MAX_RUNTIME_MEMPOOL_RUNTIME_TXS],
+    ['entityInputs', next.entityInputs, LIMITS.MAX_RUNTIME_MEMPOOL_ENTITY_INPUTS],
+    ['jInputs', next.jInputs, LIMITS.MAX_RUNTIME_MEMPOOL_J_INPUTS],
+    ['reliableReceipts', next.reliableReceipts, LIMITS.MAX_RUNTIME_MEMPOOL_RELIABLE_RECEIPTS],
+    ['total', total, LIMITS.MAX_RUNTIME_MEMPOOL_TOTAL_ITEMS],
+  ] as const;
+  const exceeded = limits.find(([, count, limit]) => count > limit);
+  if (exceeded) {
+    throw new Error(`RUNTIME_MEMPOOL_CAPACITY_EXCEEDED:${exceeded[0]}:${exceeded[1]}:${exceeded[2]}`);
+  }
+};
+
 /**
  * Normalize all runtime ingress into one mutable mempool object. This is still
  * pre-consensus: queued inputs are observable work, not committed state.
@@ -84,6 +114,12 @@ export const enqueueRuntimeInputsWithDeps = (
       `reliableReceipts=${reliableReceipts?.length ?? 0}`,
     );
   }
+  assertRuntimeMempoolCapacity(mempool, {
+    runtimeTxs: runtimeTxs?.length ?? 0,
+    entityInputs: inputs?.length ?? 0,
+    jInputs: jInputs?.length ?? 0,
+    reliableReceipts: reliableReceipts?.length ?? 0,
+  });
   const normalizedTimestamp = normalizeIngressTimestamp(env, explicitTimestamp);
   if (runtimeTxs && runtimeTxs.length > 0) {
     mempool.runtimeTxs.push(...runtimeTxs);

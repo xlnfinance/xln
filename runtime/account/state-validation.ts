@@ -12,6 +12,7 @@ import type { AccountReplica } from '../types/account';
 import { assertAccountJClaimAccumulatorState } from './j-claim-accumulator';
 import { assertAccountMempoolWithinLimit } from './mempool';
 import { validateDelta } from './delta-validation';
+import { assertAccountDeltaCapacity } from './delta-capacity';
 import { decodeAccountFrame } from './frame-validation';
 import { decodeAccountTxs } from './tx-validation';
 import { validatePendingAccountResend } from './pending-resend-validation';
@@ -169,6 +170,7 @@ function assertAccountState(
   );
   decodeAccountFrame(account['currentFrame'], `${context}.currentFrame`);
   const deltas = validateMapInstance(account['deltas'], `${context}.deltas`);
+  assertAccountDeltaCapacity(deltas.size, `${context}.deltas`);
   validateMapInstance(account['locks'], `${context}.locks`);
   validateMapInstance(account['swapOffers'], `${context}.swapOffers`);
   if (account['pulls'] !== undefined) {

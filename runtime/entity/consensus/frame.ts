@@ -7,7 +7,7 @@ import type { JPrefixCertificate } from '../../types/jurisdiction-events';
 import { HEAVY_LOGS } from '../../infra/debug-flags';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import { compareCanonicalText } from '../../orderbook/swap-execution';
-import { normalizeJurisdictionEvents } from '../../jurisdiction/event-normalization';
+import { requireCanonicalJurisdictionEvents } from '../../jurisdiction/event-normalization';
 import { canonicalAccountTxForFrameHash } from '../../account/consensus/frame';
 import {
   computeCanonicalEntityConsensusStateHash,
@@ -62,7 +62,7 @@ const rawJEvents = (data: Record<string, unknown>): unknown[] =>
   Array.isArray(data['events']) ? data['events'] : data['event'] !== undefined ? [data['event']] : [];
 
 const canonicalEventsForFrameHash = (data: Record<string, unknown>): Array<Record<string, unknown>> =>
-  normalizeJurisdictionEvents(rawJEvents(data)).map(event => ({
+  requireCanonicalJurisdictionEvents(rawJEvents(data)).map(event => ({
     blockNumber: event.blockNumber ?? null,
     blockHash: event.blockHash?.toLowerCase() ?? null,
     transactionHash: event.transactionHash?.toLowerCase() ?? null,

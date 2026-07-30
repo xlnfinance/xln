@@ -11,7 +11,7 @@ import { canonicalJurisdictionEventsHash } from '../jurisdiction/event-observati
 import {
   canonicalJurisdictionEventKey,
   compareCanonicalJurisdictionEvents,
-  normalizeJurisdictionEvents,
+  requireCanonicalJurisdictionEvents,
 } from '../jurisdiction/event-normalization';
 import {
   applyAccountJClaimDelete,
@@ -27,7 +27,7 @@ type ClaimTx = Extract<AccountTx, { type: 'j_event_claim' }>;
 
 const canonicalEvents = (value: unknown): JurisdictionEvent[] => {
   const raw = Array.isArray(value) ? value : [];
-  const normalized = normalizeJurisdictionEvents(raw);
+  const normalized = requireCanonicalJurisdictionEvents(raw);
   if (normalized.length === 0 || normalized.length !== raw.length) {
     throw new Error('ACCOUNT_J_CLAIM_EVENTS_INVALID');
   }

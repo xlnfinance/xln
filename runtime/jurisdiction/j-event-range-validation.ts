@@ -2,7 +2,7 @@ import type { JurisdictionEventBlock, JurisdictionEventData } from '../types/jur
 import {
   canonicalJurisdictionEventKey,
   compareCanonicalJurisdictionEvents,
-  normalizeJurisdictionEvents,
+  requireCanonicalJurisdictionEvents,
 } from './event-normalization';
 import {
   canonicalDisputeFinalizationEvidenceHash,
@@ -78,7 +78,7 @@ export const normalizeStrictJEventBlock = (
   if (!Array.isArray(raw['events']) || raw['events'].length === 0) {
     throw new Error(`${codePrefix}_EVENT_BLOCK_EMPTY`);
   }
-  const events = normalizeJurisdictionEvents(raw['events']);
+  const events = requireCanonicalJurisdictionEvents(raw['events']);
   if (events.length !== raw['events'].length) throw new Error(`${codePrefix}_EVENT_INVALID`);
   if (!canonicalEventOrder(events)) throw new Error(`${codePrefix}_EVENT_ORDER_INVALID`);
   for (const event of events) {

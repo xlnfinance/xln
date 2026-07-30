@@ -47,6 +47,18 @@ describe('canonical DisputeStarted timeout', () => {
     expect(normalized?.data.disputeTimeout).toBe(5_861);
     const { disputeTimeout: _, ...missingTimeout } = eventData;
     expect(normalizeJurisdictionEvent({ type: 'DisputeStarted', data: missingTimeout })).toBeNull();
+    for (const requiredField of [
+      'watchSeed',
+      'starterInitialArguments',
+      'starterIncrementedArguments',
+    ] as const) {
+      const missingEvidence: Partial<typeof eventData> = { ...eventData };
+      delete missingEvidence[requiredField];
+      expect(
+        normalizeJurisdictionEvent({ type: 'DisputeStarted', data: missingEvidence }),
+        requiredField,
+      ).toBeNull();
+    }
 
     const raw = { name: 'DisputeStarted', args: eventData, blockNumber: 101 };
     expect(rawEventToJEvents(raw, entityId)[0]?.data.disputeTimeout).toBe(5_861);
