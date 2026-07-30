@@ -55,14 +55,14 @@ async function getActiveApiBase(page: Page): Promise<string> {
   const runtimeApi = await page.evaluate(() => {
     const env = (window as typeof window & {
       isolatedEnv?: {
-        runtimeState?: {
+        infrastructure?: {
           p2p?: {
             relayUrls?: string[];
           };
         };
       };
     }).isolatedEnv;
-    const relay = env?.runtimeState?.p2p?.relayUrls?.[0] ?? null;
+    const relay = env?.infrastructure?.p2p?.relayUrls?.[0] ?? null;
     return typeof relay === 'string' ? relay : null;
   });
   return relayToApiBase(runtimeApi) ?? APP_BASE_URL;

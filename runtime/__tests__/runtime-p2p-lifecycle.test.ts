@@ -17,7 +17,7 @@ test('runtime p2p lifecycle diagnostics use structured logging', () => {
 test('detachRuntimeP2P closes p2p and clears runtime state', () => {
   let closed = 0;
   const env = {
-    runtimeState: {
+    infrastructure: {
       p2p: {
         close: () => {
           closed += 1;
@@ -28,13 +28,13 @@ test('detachRuntimeP2P closes p2p and clears runtime state', () => {
 
   detachRuntimeP2P(env, {
     ensureRuntimeState: (targetEnv) => {
-      targetEnv.runtimeState ??= {};
-      return targetEnv.runtimeState;
+      targetEnv.infrastructure ??= {};
+      return targetEnv.infrastructure;
     },
     notifyEnvChange: () => {},
     handleInboundP2PEntityInput: () => {},
   });
 
   expect(closed).toBe(1);
-  expect(env.runtimeState?.p2p).toBeNull();
+  expect(env.infrastructure?.p2p).toBeNull();
 });

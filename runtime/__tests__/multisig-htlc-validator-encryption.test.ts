@@ -1825,11 +1825,11 @@ describe('multisig HTLC validator encryption', () => {
     // yields while materializing durable jurisdiction work; a checkpoint may
     // establish its fence before the deterministic profile continuation is
     // queued. The already-accepted frame must still finish in memory.
-    env.runtimeState ??= {};
-    env.runtimeState.persistencePaused = true;
-    env.runtimeState.persistenceQuiescing = true;
+    env.infrastructure ??= {};
+    env.infrastructure.persistencePaused = true;
+    env.infrastructure.persistenceQuiescing = true;
     await certificationFrame;
-    env.runtimeState.persistenceQuiescing = false;
+    env.infrastructure.persistenceQuiescing = false;
 
     const profile = env.gossip.getProfiles().find((candidate) => candidate.entityId === entityId);
     expect(profile?.metadata.profileHanko).toBeDefined();
@@ -2111,7 +2111,7 @@ describe('multisig HTLC validator encryption', () => {
     });
     const envFor = (validator: typeof first): RuntimeReplica => ({
       runtimeSeed: `isolated-${validator.signerId}`,
-      runtimeState: {},
+      infrastructure: {},
       eReplicas: new Map([[`${ENTITY_ID}:${validator.signer}`, {
         entityId: ENTITY_ID,
         signerId: validator.signer,

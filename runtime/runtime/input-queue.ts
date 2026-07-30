@@ -9,7 +9,7 @@ import { ensureRuntimeState } from './runtime-state';
 const runtimeInputQueueLog = createStructuredLogger('runtime.input_queue');
 
 export type RuntimeInputQueueDeps = {
-  ensureRuntimeState: (env: RuntimeReplica) => NonNullable<RuntimeReplica['runtimeState']>;
+  ensureRuntimeState: (env: RuntimeReplica) => NonNullable<RuntimeReplica['infrastructure']>;
   requestRuntimeLoopWake: (env: RuntimeReplica) => void;
 };
 

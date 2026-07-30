@@ -17,7 +17,7 @@ const receiverRuntimeId = deriveSignerAddressSync(receiverSeed, 'runtime').toLow
 registerSignerKey(receiver, receiverRuntimeId, deriveSignerKeySync(receiverSeed, 'runtime'));
 receiver.runtimeId = receiverRuntimeId;
 receiver.runtimeSeed = receiverSeed;
-receiver.runtimeState ??= {};
+receiver.infrastructure ??= {};
 const output = JSON.parse(encodedOutput) as DeliverableEntityInput;
 const registration = registerReliableIngress(receiver, senderRuntimeId, output);
 if (registration.kind !== 'enqueue') {

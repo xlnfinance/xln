@@ -150,7 +150,7 @@ test('PaymentPanel consumes PaymentPanelView instead of owning full env reads', 
   expect(panel).not.toContain('currentEnv?.gossip?.getProfiles');
   expect(panel).not.toContain('getXLN');
   expect(panel).not.toContain('env.gossip');
-  expect(panel).not.toContain('runtimeState?.p2p');
+  expect(panel).not.toContain('infrastructure?.p2p');
   expect(panel).not.toContain('ensureGossipProfiles');
   expect(panel).not.toContain('refreshGossip?.');
   expect(panel).not.toContain('/api/gossip/profile');
@@ -182,7 +182,7 @@ test('payment gossip refresh is owned by runtime store operation', () => {
   expect(source).toContain('PAYMENT_PREFLIGHT_GOSSIP_PROJECTION_ONLY');
   expect(source).toContain('return { profiles: Array.from(mergedProfiles.values()), announced };');
   expect(source).toContain('env.gossip.announce(profile)');
-  expect(source).toContain('env.runtimeState?.p2p?.syncProfiles?.()');
+  expect(source).toContain('env.infrastructure?.p2p?.syncProfiles?.()');
   expect(source).toContain('xln?.ensureGossipProfiles');
   expect(source).toContain('xln?.refreshGossip?.(env)');
   expect(source).not.toContain("if (!env) throw new Error('Runtime env is not loaded')");

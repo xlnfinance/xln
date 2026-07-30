@@ -264,7 +264,7 @@ if (state.count !== 1n) {
 }
 
 const checkpoint = buildRuntimeCheckpointSnapshot(env);
-const checkpointState = checkpoint['runtimeState'] as { accountJClaimNodes?: Map<string, unknown> };
+const checkpointState = checkpoint['infrastructure'] as { accountJClaimNodes?: Map<string, unknown> };
 if (checkpointState.accountJClaimNodes?.size !== 1) {
   throw new Error(`ACCOUNT_J_CRASH_CHECKPOINT_NODE_COUNT:${checkpointState.accountJClaimNodes?.size ?? -1}`);
 }

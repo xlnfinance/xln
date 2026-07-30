@@ -159,8 +159,8 @@ test('hub persists 20k non-empty R-wal across 10k checkpoint rollover and cold r
     }
 
     expect(env.state.height).toBe(FINAL_HEIGHT);
-    expect(env.runtimeState?.runtimeAdapterCommandFrontiers?.size).toBe(1);
-    expect(env.runtimeState?.runtimeAdapterCommandFrontiers?.get(laneId)?.lastContiguousSequence)
+    expect(env.infrastructure?.runtimeAdapterCommandFrontiers?.size).toBe(1);
+    expect(env.infrastructure?.runtimeAdapterCommandFrontiers?.get(laneId)?.lastContiguousSequence)
       .toBe(FINAL_HEIGHT - 1);
 
     const db = getRuntimeWalDb(env);
@@ -214,7 +214,7 @@ test('hub persists 20k non-empty R-wal across 10k checkpoint rollover and cold r
     expect(restored?.state.height).toBe(FINAL_HEIGHT);
     expect(Array.from(restored?.state.eReplicas.values() ?? []).some(replica => replica.entityId === entityId))
       .toBe(true);
-    expect(restored?.runtimeState?.runtimeAdapterCommandFrontiers?.get(laneId)?.lastContiguousSequence)
+    expect(restored?.infrastructure?.runtimeAdapterCommandFrontiers?.get(laneId)?.lastContiguousSequence)
       .toBe(FINAL_HEIGHT - 1);
     await closeRuntimeDb(restored!);
     await closeInfraDb(restored!);

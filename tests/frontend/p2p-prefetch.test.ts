@@ -35,7 +35,7 @@ function envWithSourceJurisdiction(extra: Record<string, unknown> = {}) {
 test('prewarmCounterpartyProfiles forwards unique normalized entity ids to runtime p2p', async () => {
   let seen: string[] = [];
   const env = {
-    runtimeState: {
+    infrastructure: {
       p2p: {
         ensureProfiles: async (entityIds: string[]) => {
           seen = [...entityIds];
@@ -58,7 +58,7 @@ test('prewarmCounterpartyProfiles forwards unique normalized entity ids to runti
 
 test('prewarmCounterpartyProfiles degrades cleanly when runtime p2p is unavailable', async () => {
   await expect(prewarmCounterpartyProfiles(null, ['0xabc'])).resolves.toBe(false);
-  await expect(prewarmCounterpartyProfiles({ runtimeState: {} } as never, ['0xabc'])).resolves.toBe(false);
+  await expect(prewarmCounterpartyProfiles({ infrastructure: {} } as never, ['0xabc'])).resolves.toBe(false);
 });
 
 test('open-account profile waits stay fail-fast for cockpit commands', () => {
@@ -79,7 +79,7 @@ test('waitForCounterpartyRuntimeRoutes requires a gossip runtime id', async () =
     gossip: {
       getProfiles: () => profiles,
     },
-    runtimeState: {
+    infrastructure: {
       p2p: {
         ensureProfiles: async (entityIds: string[]) => {
           profiles.push({ entityId: entityIds[0]!, runtimeId: '0xruntime' });
@@ -98,7 +98,7 @@ test('waitForCounterpartyRuntimeRoutes rejects profiles without runtime routes',
     gossip: {
       getProfiles: () => [{ entityId: '0xabc' }],
     },
-    runtimeState: {
+    infrastructure: {
       p2p: {
         ensureProfiles: async () => true,
       },
@@ -118,7 +118,7 @@ test('openAccount profile readiness requires target jurisdiction metadata', asyn
         metadata: { isHub: true },
       }],
     },
-    runtimeState: {
+    infrastructure: {
       p2p: {
         ensureProfiles: async () => true,
       },
@@ -146,7 +146,7 @@ test('openAccount profile readiness accepts same-jurisdiction target profiles', 
         },
       }],
     },
-    runtimeState: {
+    infrastructure: {
       p2p: {
         ensureProfiles: async () => true,
       },

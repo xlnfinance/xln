@@ -143,7 +143,7 @@ const makeEnv = (): RuntimeReplica =>
     height: 7,
     timestamp: 700,
     runtimeSeed: 'seed',
-    runtimeState: {
+    infrastructure: {
       lifecyclePhase: 'running',
       loopActive: true,
     },

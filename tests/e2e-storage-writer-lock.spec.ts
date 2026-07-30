@@ -168,8 +168,8 @@ test.describe('Browser storage writer serialization', () => {
           frameHashAfterB: frameAfterB.frameHash,
           frameHashAfterStaleSave: frameAfterStaleSave.frameHash,
           staleWriterStopped: staleSave.staleWriterStopped,
-          staleLifecycle: String(envA.runtimeState?.lifecyclePhase || ''),
-          staleFatalMessage: String(envA.runtimeState?.fatalDebugPayload?.message || ''),
+          staleLifecycle: String(envA.infrastructure?.lifecyclePhase || ''),
+          staleFatalMessage: String(envA.infrastructure?.fatalDebugPayload?.message || ''),
           staleHeightPresent: staleHeightBeforeSave !== null || staleHeightAfterSave !== null,
         };
       } finally {

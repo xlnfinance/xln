@@ -445,7 +445,7 @@ export async function registerEntities(
     const stackKey = getCertifiedBoardStackKey(jurisdiction);
     const receiptBlock = Number(registerReceipt.blockNumber);
     for (const [index, registered] of result.entries()) {
-      const evidence = env.runtimeState?.certifiedRegistrationEvidence?.get(
+      const evidence = env.infrastructure?.certifiedRegistrationEvidence?.get(
         registrationEvidenceKey(stackKey, registered.id),
       );
       if (!evidence) {

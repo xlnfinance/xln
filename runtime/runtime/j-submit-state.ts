@@ -150,7 +150,7 @@ const pendingAttemptFingerprint = (jurisdictionName: string, jTx: JTx): string =
 
 const pendingAttemptFingerprints = (env: RuntimeReplica): Map<string, string> => {
   const fingerprints = new Map<string, string>();
-  for (const input of env.runtimeState?.pendingCommittedJOutbox ?? []) {
+  for (const input of env.infrastructure?.pendingCommittedJOutbox ?? []) {
     for (const jTx of input.jTxs) {
       const attempt = requireCanonicalPendingAttempt(input.jurisdictionName, jTx);
       const fingerprint = pendingAttemptFingerprint(input.jurisdictionName, jTx);
@@ -182,7 +182,7 @@ const matchesJSubmitBatchIdentity = (
 );
 
 export const hasPendingCommittedJBatch = (env: RuntimeReplica, identity: JSubmitBatchIdentity): boolean =>
-  (env.runtimeState?.pendingCommittedJOutbox ?? []).some((input) => input.jTxs.some((jTx) =>
+  (env.infrastructure?.pendingCommittedJOutbox ?? []).some((input) => input.jTxs.some((jTx) =>
     matchesJSubmitBatchIdentity(input.jurisdictionName, jTx, identity)));
 
 export const getMatchingJSubmitState = (replica: EntityReplica) => {
@@ -231,8 +231,8 @@ export const assertJSubmitRuntimeTxAuthorized = (runtimeTx: RuntimeTx, replay: b
 
 export const registerPendingCommittedJOutbox = (env: RuntimeReplica, additions: JInput[]): void => {
   if (additions.length === 0) return;
-  if (!env.runtimeState) env.runtimeState = {};
-  const existing = env.runtimeState.pendingCommittedJOutbox ?? [];
+  if (!env.infrastructure) env.infrastructure = {};
+  const existing = env.infrastructure.pendingCommittedJOutbox ?? [];
   const known = pendingAttemptFingerprints(env);
   const accepted: JInput[] = [];
   for (const input of additions) {
@@ -251,7 +251,7 @@ export const registerPendingCommittedJOutbox = (env: RuntimeReplica, additions: 
     });
     if (jTxs.length > 0) accepted.push({ jurisdictionName: input.jurisdictionName, jTxs });
   }
-  env.runtimeState.pendingCommittedJOutbox = [...existing, ...accepted];
+  env.infrastructure.pendingCommittedJOutbox = [...existing, ...accepted];
 };
 
 export const applyRetryJSubmitRuntimeTx = (env: RuntimeReplica, tx: RetryJSubmitTx): JInput[] => {

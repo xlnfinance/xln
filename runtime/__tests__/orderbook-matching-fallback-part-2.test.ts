@@ -1257,9 +1257,9 @@ describe('orderbook matching fallback execution mapping', () => {
       'remote-maker:maker-cross-expired-pending-progress',
     );
     expect(admission?.pendingFill?.ttlExpiredAt).toBe(entityState.timestamp);
-    expect(runtimeEnv.runtimeState?.securityIncidents).toBeUndefined();
+    expect(runtimeEnv.infrastructure?.securityIncidents).toBeUndefined();
     publishEntityCandidateEffects(runtimeEnv, candidateEffects);
-    expect([...runtimeEnv.runtimeState!.securityIncidents!.values()]).toContainEqual(
+    expect([...runtimeEnv.infrastructure!.securityIncidents!.values()]).toContainEqual(
       expect.objectContaining({
         code: 'CROSS_J_BOOK_FILL_TTL_EXPIRED',
         status: 'active',

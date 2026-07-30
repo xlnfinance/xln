@@ -2,7 +2,7 @@ import type { RuntimeReplica } from '../types';
 import { inferRuntimeLifecyclePhase } from '../lifecycle';
 import { ensureRuntimeState } from '../runtime-state';
 
-type RuntimeLifecycleState = NonNullable<RuntimeReplica['runtimeState']>;
+type RuntimeLifecycleState = NonNullable<RuntimeReplica['infrastructure']>;
 
 export const assertRuntimeWriterAcceptingIngress = (state: RuntimeLifecycleState): void => {
   if (inferRuntimeLifecyclePhase(state) === 'halted') {

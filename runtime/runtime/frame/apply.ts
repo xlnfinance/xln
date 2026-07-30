@@ -61,7 +61,7 @@ const queueProfileCertification = (
   env: RuntimeReplica,
   changedEntityIds: ReadonlySet<string>,
 ): void => {
-  const state = env.runtimeState!;
+  const state = env.infrastructure!;
   const candidates = state.pendingProfileCertificationEntityIds ?? new Set<string>();
   for (const entityId of changedEntityIds) {
     const certified = [...env.state.eReplicas.values()].some(
@@ -150,6 +150,6 @@ export const applyPreparedRuntimeFrame = async (
       deps.setApplyAllowed(env, false);
     }
   }
-  jOutbox = [...(env.runtimeState?.pendingCommittedJOutbox ?? []), ...jOutbox];
+  jOutbox = [...(env.infrastructure?.pendingCommittedJOutbox ?? []), ...jOutbox];
   return { appliedInput, entityOutbox, jOutbox, queuedJSubmitRetries, changedEntityIds };
 };

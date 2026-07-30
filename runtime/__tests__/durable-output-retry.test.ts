@@ -20,7 +20,7 @@ describe('durable output retry', () => {
     expect(liveRouteKey.length).toBeGreaterThan(8_192);
 
     const env = {
-      runtimeState: {
+      infrastructure: {
         deferredNetworkMeta: new Map([[
           liveRouteKey,
           { attempts: 7, nextRetryAt: 9_000_000_000_000 },
@@ -34,7 +34,7 @@ describe('durable output retry', () => {
 
     const restored = {} as RuntimeReplica;
     restoreDurableOutputRetryState(restored, retryState, [output]);
-    expect(restored.runtimeState?.deferredNetworkMeta?.get(liveRouteKey)).toEqual({
+    expect(restored.infrastructure?.deferredNetworkMeta?.get(liveRouteKey)).toEqual({
       attempts: 7,
       nextRetryAt: 9_000_000_000_000,
     });
@@ -65,7 +65,7 @@ describe('durable output retry', () => {
     } as RoutedEntityInput;
     const liveRouteKey = buildRouteOutputKey(output);
     const env = {
-      runtimeState: {
+      infrastructure: {
         deferredNetworkMeta: new Map([[
           liveRouteKey,
           { attempts: 1, nextRetryAt: 42, manual: true },
@@ -78,7 +78,7 @@ describe('durable output retry', () => {
     restoreDurableOutputRetryState(restored, persisted, [output]);
 
     expect(persisted[0]?.manual).toBe(true);
-    expect(restored.runtimeState?.deferredNetworkMeta?.get(liveRouteKey)).toEqual({
+    expect(restored.infrastructure?.deferredNetworkMeta?.get(liveRouteKey)).toEqual({
       attempts: 1,
       nextRetryAt: 42,
       manual: true,

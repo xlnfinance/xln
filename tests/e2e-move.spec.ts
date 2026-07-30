@@ -622,7 +622,7 @@ async function readBrowserReserveDebug(page: Page): Promise<unknown> {
           runtimeTxs?: unknown[];
           jInputs?: unknown[];
         };
-        runtimeState?: {
+        infrastructure?: {
           recentJEvents?: Array<{
             name?: string;
             blockNumber?: number;
@@ -677,7 +677,7 @@ async function readBrowserReserveDebug(page: Page): Promise<unknown> {
         runtimeTxs: env?.runtimeMempool?.runtimeTxs?.length ?? 0,
         jInputs: env?.runtimeMempool?.jInputs?.length ?? 0,
       },
-      recentJEvents: env?.runtimeState?.recentJEvents?.slice(-8).map((event) => ({
+      recentJEvents: env?.infrastructure?.recentJEvents?.slice(-8).map((event) => ({
         name: event.name,
         blockNumber: event.blockNumber,
         transactionHash: event.transactionHash,

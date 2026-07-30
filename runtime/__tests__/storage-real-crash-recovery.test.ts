@@ -315,8 +315,8 @@ describe('real process storage crash recovery', () => {
           entityNonce: 1,
           submitAttempts: 1,
         });
-        expect(restored.runtimeState?.pendingCommittedJOutbox).toHaveLength(1);
-        const pendingBatch = restored.runtimeState?.pendingCommittedJOutbox?.[0]?.jTxs[0];
+        expect(restored.infrastructure?.pendingCommittedJOutbox).toHaveLength(1);
+        const pendingBatch = restored.infrastructure?.pendingCommittedJOutbox?.[0]?.jTxs[0];
         expect(pendingBatch?.type).toBe('batch');
         expect(pendingBatch?.type === 'batch' ? pendingBatch.data.runtimeSubmitAttempt : undefined)
           .toMatchObject({

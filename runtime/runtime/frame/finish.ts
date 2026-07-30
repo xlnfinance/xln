@@ -12,7 +12,7 @@ import {
 import type { FrameExecutionState } from './execution-state';
 import type { RuntimeProcessProfile } from './process-profile';
 
-type RuntimeLifecycleState = NonNullable<RuntimeReplica['runtimeState']>;
+type RuntimeLifecycleState = NonNullable<RuntimeReplica['infrastructure']>;
 
 export type RuntimeFrameFailureDeps = {
   isStorageError(error: unknown): boolean;

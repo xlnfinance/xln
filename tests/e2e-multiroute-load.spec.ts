@@ -123,7 +123,7 @@ async function getActiveApiBase(page: Page): Promise<string> {
   if (process.env.E2E_API_BASE_URL) return API_BASE_URL;
   const relay = await page.evaluate(() => {
     const env = (window as any).isolatedEnv;
-    return env?.runtimeState?.p2p?.relayUrls?.[0] ?? null;
+    return env?.infrastructure?.p2p?.relayUrls?.[0] ?? null;
   });
   return relayToApiBase(relay) ?? APP_BASE_URL;
 }
@@ -153,7 +153,7 @@ async function waitForEntityAdvertised(page: Page, entityId: string, timeoutMs =
       const env = (window as any).isolatedEnv;
       const profiles = env?.gossip?.getProfiles?.() ?? [];
       if (profiles.some((p: any) => String(p?.entityId || '').toLowerCase() === target)) return true;
-      const p2p = env?.runtimeState?.p2p;
+      const p2p = env?.infrastructure?.p2p;
       if (typeof p2p?.refreshGossip === 'function') try { await p2p.refreshGossip(); } catch {}
       await new Promise(r => setTimeout(r, 400));
     }
@@ -172,7 +172,7 @@ async function discoverHubs(page: Page): Promise<string[]> {
         .filter((p: any) => p?.metadata?.isHub === true)
         .map((p: any) => String(p.entityId));
       if (hubs.length >= 3) return hubs;
-      const p2p = env?.runtimeState?.p2p;
+      const p2p = env?.infrastructure?.p2p;
       if (typeof p2p?.refreshGossip === 'function') try { await p2p.refreshGossip(); } catch {}
       await new Promise(r => setTimeout(r, 800));
     }

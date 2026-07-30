@@ -123,7 +123,7 @@ async function readHubAccountSummary(page: Page): Promise<{
         pendingOutputs?: unknown[];
         networkInbox?: unknown[];
         pendingNetworkOutputs?: unknown[];
-        runtimeState?: {
+        infrastructure?: {
           processingPromise?: Promise<void> | null;
           inFlightEntityInputs?: number;
           pendingReliableIngress?: Map<string, unknown>;
@@ -298,11 +298,11 @@ async function readEntityIdleSnapshot(
       (env.pendingOutputs?.length ?? 0) +
       (env.networkInbox?.length ?? 0) +
       (env.pendingNetworkOutputs?.length ?? 0) +
-      (env.runtimeState?.inFlightEntityInputs ?? 0) +
-      (env.runtimeState?.pendingReliableIngress?.size ?? 0) +
-      (env.runtimeState?.reliableIngressCommitting?.size ?? 0) +
-      (env.runtimeState?.pendingCommittedJOutbox?.length ?? 0) +
-      (env.runtimeState?.processingPromise ? 1 : 0);
+      (env.infrastructure?.inFlightEntityInputs ?? 0) +
+      (env.infrastructure?.pendingReliableIngress?.size ?? 0) +
+      (env.infrastructure?.reliableIngressCommitting?.size ?? 0) +
+      (env.infrastructure?.pendingCommittedJOutbox?.length ?? 0) +
+      (env.infrastructure?.processingPromise ? 1 : 0);
     const recentInputs = (env.history ?? []).slice(-24).flatMap(frame =>
       (frame.runtimeInput?.entityInputs ?? [])
         .filter(input => String(input.entityId ?? '').toLowerCase() === entity)

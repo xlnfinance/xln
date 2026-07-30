@@ -38,7 +38,7 @@ export type RegistrationSubmission =
 export const getNumberedRegistrationRecord = (
   env: RuntimeReplica,
   intentId: string,
-): NumberedRegistrationRecord | undefined => env.runtimeState?.numberedRegistrationIntents?.get(
+): NumberedRegistrationRecord | undefined => env.infrastructure?.numberedRegistrationIntents?.get(
   numberedRegistrationBytes32(intentId, 'INTENT_ID'),
 );
 
@@ -84,9 +84,9 @@ export const applyNumberedRegistrationIntent = (env: RuntimeReplica, pending: Pe
   if (computeNumberedRegistrationRequestHash(pending.request) !== pending.requestHash) throw new Error('NUMBERED_REGISTRATION_REQUEST_HASH_MISMATCH');
   const adapter = getTrustedRegistrationAdapter(env, pending.request.entities[0]!.config.jurisdiction!);
   parseNumberedRegistrationIntentTransaction(adapter, pending);
-  env.runtimeState ??= {};
-  env.runtimeState.numberedRegistrationIntents ??= new Map();
-  const existing = env.runtimeState.numberedRegistrationIntents.get(pending.request.intentId);
+  env.infrastructure ??= {};
+  env.infrastructure.numberedRegistrationIntents ??= new Map();
+  const existing = env.infrastructure.numberedRegistrationIntents.get(pending.request.intentId);
   if (existing) {
     if (existing.requestHash !== pending.requestHash) throw new Error('NUMBERED_REGISTRATION_INTENT_PAYLOAD_CONFLICT');
     if (existing.status === 'pending' && existing.transactionHash !== pending.transactionHash) {
@@ -94,7 +94,7 @@ export const applyNumberedRegistrationIntent = (env: RuntimeReplica, pending: Pe
     }
     return;
   }
-  env.runtimeState.numberedRegistrationIntents.set(pending.request.intentId, structuredClone(pending));
+  env.infrastructure.numberedRegistrationIntents.set(pending.request.intentId, structuredClone(pending));
 };
 
 export const submitNumberedRegistrationIntent = async (
@@ -135,7 +135,7 @@ const completedResolution = (
   const { receipt, registrations } = submission;
   const results = registrations.map((registration, index) => {
     const planned = pending.request.entities[index]!;
-    const evidence = env.runtimeState?.certifiedRegistrationEvidence?.get(
+    const evidence = env.infrastructure?.certifiedRegistrationEvidence?.get(
       registrationEvidenceKey(pending.request.stackKey, registration.entityId),
     );
     if (!evidence) throw new Error(`NUMBERED_REGISTRATION_EVIDENCE_MISSING:${registration.entityId}`);
@@ -199,7 +199,7 @@ export const applyNumberedRegistrationResolution = (
   env: RuntimeReplica,
   resolution: ResolveNumberedRegistrationData,
 ): void => {
-  const records = env.runtimeState?.numberedRegistrationIntents;
+  const records = env.infrastructure?.numberedRegistrationIntents;
   const pending = records?.get(numberedRegistrationBytes32(resolution.intentId, 'INTENT_ID'));
   if (!pending || pending.status !== 'pending') {
     if (pending?.status === 'completed' && resolution.kind === 'completed' && pending.requestHash === resolution.requestHash) return;
@@ -215,7 +215,7 @@ export const applyNumberedRegistrationResolution = (
   if (resolution.results.length !== pending.request.entities.length) throw new Error('NUMBERED_REGISTRATION_RESULT_COUNT_MISMATCH');
   for (const [index, result] of resolution.results.entries()) {
     const planned = pending.request.entities[index]!;
-    const evidence = env.runtimeState?.certifiedRegistrationEvidence?.get(
+    const evidence = env.infrastructure?.certifiedRegistrationEvidence?.get(
       registrationEvidenceKey(pending.request.stackKey, result.entityId),
     );
     const signerId = planned.config.validators[0]!.toLowerCase();

@@ -21,19 +21,19 @@ import { refreshAccountWorkIndex } from '../entity/consensus/account-work-index'
 import { recordRuntimeSecurityIncident, resolveRuntimeSecurityIncident } from './security-incidents';
 
 const getLogState = (env: RuntimeReplica) => {
-  if (!env.runtimeState) env.runtimeState = {};
-  if (!env.runtimeState.logState) {
-    env.runtimeState.logState = { nextId: 0, mirrorToConsole: true };
+  if (!env.infrastructure) env.infrastructure = {};
+  if (!env.infrastructure.logState) {
+    env.infrastructure.logState = { nextId: 0, mirrorToConsole: true };
   }
-  return env.runtimeState.logState;
+  return env.infrastructure.logState;
 };
 
 const MAX_CLEAN_LOGS = 2000;
 
 const getCleanLogBuffer = (env: RuntimeReplica): string[] => {
-  if (!env.runtimeState) env.runtimeState = {};
-  if (!env.runtimeState.cleanLogs) env.runtimeState.cleanLogs = [];
-  return env.runtimeState.cleanLogs;
+  if (!env.infrastructure) env.infrastructure = {};
+  if (!env.infrastructure.cleanLogs) env.infrastructure.cleanLogs = [];
+  return env.infrastructure.cleanLogs;
 };
 
 const addCleanLog = (env: RuntimeReplica, level: string, msg: string): void => {
@@ -50,7 +50,7 @@ const addCleanLog = (env: RuntimeReplica, level: string, msg: string): void => {
 };
 
 const forwardDebugEvent = (env: RuntimeReplica, payload: Record<string, unknown>): void => {
-  const p2p = env.runtimeState?.p2p as { sendDebugEvent?: (data: unknown) => boolean } | undefined;
+  const p2p = env.infrastructure?.p2p as { sendDebugEvent?: (data: unknown) => boolean } | undefined;
   try {
     p2p?.sendDebugEvent?.(payload);
   } catch (error) {
@@ -61,9 +61,9 @@ const forwardDebugEvent = (env: RuntimeReplica, payload: Record<string, unknown>
 };
 
 const getPendingAuditEvents = (env: RuntimeReplica): Map<string, Record<string, unknown>> => {
-  if (!env.runtimeState) env.runtimeState = {};
-  if (!env.runtimeState.pendingAuditEvents) env.runtimeState.pendingAuditEvents = new Map();
-  return env.runtimeState.pendingAuditEvents;
+  if (!env.infrastructure) env.infrastructure = {};
+  if (!env.infrastructure.pendingAuditEvents) env.infrastructure.pendingAuditEvents = new Map();
+  return env.infrastructure.pendingAuditEvents;
 };
 
 const queuePendingAuditEvent = (env: RuntimeReplica, payload: Record<string, unknown>): void => {
@@ -128,7 +128,7 @@ const attachStructuredLogger =
   };
 
 export const flushPendingAuditEvents = (env: RuntimeReplica): void => {
-  const pending = env.runtimeState?.pendingAuditEvents;
+  const pending = env.infrastructure?.pendingAuditEvents;
   if (!(pending instanceof Map) || pending.size === 0) return;
   for (const payload of pending.values()) {
     forwardDebugEvent(env, payload);
@@ -137,15 +137,15 @@ export const flushPendingAuditEvents = (env: RuntimeReplica): void => {
 };
 
 export const clearPendingAuditEvents = (env: RuntimeReplica): void => {
-  const pending = env.runtimeState?.pendingAuditEvents;
+  const pending = env.infrastructure?.pendingAuditEvents;
   if (!(pending instanceof Map) || pending.size === 0) return;
   pending.clear();
 };
 
 const getPendingHistoryRecords = (env: RuntimeReplica): RuntimeHistoryRecord[] => {
-  if (!env.runtimeState) env.runtimeState = {};
-  if (!env.runtimeState.pendingHistoryRecords) env.runtimeState.pendingHistoryRecords = [];
-  return env.runtimeState.pendingHistoryRecords;
+  if (!env.infrastructure) env.infrastructure = {};
+  if (!env.infrastructure.pendingHistoryRecords) env.infrastructure.pendingHistoryRecords = [];
+  return env.infrastructure.pendingHistoryRecords;
 };
 
 const getOverlay = (env: RuntimeReplica): RuntimeOverlayRecord[] => {
@@ -163,8 +163,8 @@ const pushOverlayRecord = (env: RuntimeReplica, record: RuntimeOverlayRecord): v
     overlay.push(record);
   }
 
-  const runtimeState = env.runtimeState ?? (env.runtimeState = {});
-  const currentMarks = runtimeState.currentStorageOverlayMarks ?? (runtimeState.currentStorageOverlayMarks = []);
+  const infrastructure = env.infrastructure ?? (env.infrastructure = {});
+  const currentMarks = infrastructure.currentStorageOverlayMarks ?? (infrastructure.currentStorageOverlayMarks = []);
   const currentIndex = currentMarks.findIndex(candidate => storageOverlayRecordKey(candidate) === key);
   if (currentIndex >= 0) {
     currentMarks[currentIndex] = { ...record };
@@ -344,7 +344,7 @@ export const peekPendingHistoryRecords = (
   runtimeHeight?: number,
   timestamp?: number,
 ): RuntimeHistoryRecord[] => {
-  const pending = env.runtimeState?.pendingHistoryRecords;
+  const pending = env.infrastructure?.pendingHistoryRecords;
   if (!Array.isArray(pending) || pending.length === 0) return [];
   const stampedHeight = Number.isFinite(runtimeHeight) ? Math.max(0, Math.floor(Number(runtimeHeight))) : null;
   const stampedTimestamp = Number.isFinite(timestamp) ? Math.max(0, Math.floor(Number(timestamp))) : null;
@@ -356,7 +356,7 @@ export const peekPendingHistoryRecords = (
 };
 
 export const dropPendingHistoryRecords = (env: RuntimeReplica, count: number): void => {
-  const pending = env.runtimeState?.pendingHistoryRecords;
+  const pending = env.infrastructure?.pendingHistoryRecords;
   if (!Array.isArray(pending) || pending.length === 0) return;
   pending.splice(0, Math.max(0, Math.floor(count)));
 };

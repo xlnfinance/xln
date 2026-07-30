@@ -445,21 +445,21 @@ export const advanceCertifiedBoardFinality = (
 };
 
 export const getCertifiedBoardNodeStore = (env: EntityRuntimeContext): CertifiedBoardNodeStore => {
-  env.runtimeState ??= {};
-  env.runtimeState.certifiedBoardNodes ??= new Map();
-  return env.runtimeState.certifiedBoardNodes;
+  env.infrastructure ??= {};
+  env.infrastructure.certifiedBoardNodes ??= new Map();
+  return env.infrastructure.certifiedBoardNodes;
 };
 
 export const cacheCertifiedBoardNodes = (env: EntityRuntimeContext, nodes: ReadonlyMap<string, CertifiedBoardPatriciaNode>): void => {
   const store = getCertifiedBoardNodeStore(env);
-  env.runtimeState ??= {};
-  env.runtimeState.pendingCertifiedBoardNodes ??= new Map();
+  env.infrastructure ??= {};
+  env.infrastructure.pendingCertifiedBoardNodes ??= new Map();
   for (const [hash, node] of nodes) {
     if (hashCertifiedBoardNode(node) !== hash) throw new Error(`CERTIFIED_BOARD_NODE_CORRUPT:${hash}`);
     if (node.type === 'leaf') Object.freeze(node.record);
     Object.freeze(node);
     store.set(hash, node);
-    env.runtimeState.pendingCertifiedBoardNodes.set(hash, node);
+    env.infrastructure.pendingCertifiedBoardNodes.set(hash, node);
   }
 };
 

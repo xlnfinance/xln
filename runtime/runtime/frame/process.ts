@@ -80,7 +80,7 @@ export type RuntimeProcessDeps = {
   notifyRuntimeFrameCommitted(env: RuntimeReplica, input: RuntimeInput): void;
 };
 
-type RuntimeLifecycleState = NonNullable<RuntimeReplica['runtimeState']>;
+type RuntimeLifecycleState = NonNullable<RuntimeReplica['infrastructure']>;
 type RuntimeIngressDecision =
   | { ready: true }
   | { ready: false; outcome: 'no-work' | 'not-ready' };

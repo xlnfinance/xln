@@ -64,7 +64,7 @@ export const buildDurableOutputRetryState = (
   outputs: readonly RoutedEntityInput[],
 ): DurableOutputRetryState[] => outputs.flatMap(output => {
   const liveRouteKey = buildRouteOutputKey(output);
-  const meta = env.runtimeState?.deferredNetworkMeta?.get(liveRouteKey);
+  const meta = env.infrastructure?.deferredNetworkMeta?.get(liveRouteKey);
   return meta ? [{
     outputHash: hashOutput(output),
     attempts: meta.attempts,
@@ -78,9 +78,9 @@ export const restoreDurableOutputRetryState = (
   entries: readonly DurableOutputRetryState[],
   outputs: readonly RoutedEntityInput[],
 ): void => {
-  if (!env.runtimeState) env.runtimeState = {};
+  if (!env.infrastructure) env.infrastructure = {};
   if (entries.length === 0) {
-    delete env.runtimeState.deferredNetworkMeta;
+    delete env.infrastructure.deferredNetworkMeta;
     return;
   }
   const outputRoutes = indexOutputs(outputs);
@@ -94,5 +94,5 @@ export const restoreDurableOutputRetryState = (
       ...(entry.manual ? { manual: true as const } : {}),
     });
   }
-  env.runtimeState.deferredNetworkMeta = restored;
+  env.infrastructure.deferredNetworkMeta = restored;
 };

@@ -57,9 +57,9 @@ export const maybeHandleDebugDumpsRequest = async (input: {
     : typeof payload?.['reason'] === 'string'
       ? payload['reason']
       : 'debug-dump';
-  const runtimeId = typeof payload?.['runtimeState'] === 'object' && payload['runtimeState']
-    && typeof (payload['runtimeState'] as Record<string, unknown>)['runtimeId'] === 'string'
-    ? String((payload['runtimeState'] as Record<string, unknown>)['runtimeId'])
+  const runtimeId = typeof payload?.['infrastructure'] === 'object' && payload['infrastructure']
+    && typeof (payload['infrastructure'] as Record<string, unknown>)['runtimeId'] === 'string'
+    ? String((payload['infrastructure'] as Record<string, unknown>)['runtimeId'])
     : undefined;
   const fileName = buildDebugDumpFileName(reason, runtimeId);
   const filePath = `${DEBUG_DUMPS_DIR}/${fileName}`;
@@ -74,8 +74,8 @@ export const maybeHandleDebugDumpsRequest = async (input: {
     details: {
       file: fileName,
       trigger: trigger ?? null,
-      height: typeof payload?.['runtimeState'] === 'object' && payload['runtimeState']
-        ? (payload['runtimeState'] as Record<string, unknown>)['height']
+      height: typeof payload?.['infrastructure'] === 'object' && payload['infrastructure']
+        ? (payload['infrastructure'] as Record<string, unknown>)['height']
         : null,
       persistedLatestHeight: typeof payload?.['persistedWal'] === 'object' && payload['persistedWal']
         ? (payload['persistedWal'] as Record<string, unknown>)['latestHeight']

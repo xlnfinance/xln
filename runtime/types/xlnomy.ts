@@ -151,7 +151,7 @@ export interface XlnomySnapshot {
   entities: string[];
 
   // Runtime state (replicas + history)
-  runtimeState?: {
+  infrastructure?: {
     replicas: unknown; // Serialized Map<string, EntityReplica>
     history: EnvSnapshot[];
   };

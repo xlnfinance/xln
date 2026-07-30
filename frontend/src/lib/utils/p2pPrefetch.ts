@@ -72,7 +72,7 @@ export async function prewarmCounterpartyProfiles(
   entityIds: readonly string[],
   timeoutMs = DEFAULT_PROFILE_PREFETCH_TIMEOUT_MS,
 ): Promise<boolean> {
-  const p2p = env?.runtimeState?.p2p;
+  const p2p = env?.infrastructure?.p2p;
   if (!p2p?.ensureProfiles) return false;
 
   const targets = Array.from(new Set(entityIds.map(normalizeEntityId).filter(Boolean)));

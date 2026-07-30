@@ -127,8 +127,8 @@ const durableIngressSources = (
     sourcesByIdentity.set(commit.key, sources);
   }
   for (const ledger of [
-    env.runtimeState?.reliableIngressReceiptLedger,
-    env.runtimeState?.reliableIngressTerminalWatermarks,
+    env.infrastructure?.reliableIngressReceiptLedger,
+    env.infrastructure?.reliableIngressTerminalWatermarks,
   ]) {
     for (const [frontierKey, receipt] of ledger ?? []) {
       const parsed = JSON.parse(frontierKey) as { sourceRuntimeId?: unknown };

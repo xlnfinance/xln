@@ -190,7 +190,7 @@ describe('validator-local registered H0 authority evidence', () => {
       .get(`${entityId}:${replica.signerId}`)?.authorityEvidenceHash)
       .toBe(computeRegistrationEvidenceHash(evidence));
 
-    const stored = restored.runtimeState!.certifiedRegistrationEvidence!.values().next().value!;
+    const stored = restored.infrastructure!.certifiedRegistrationEvidence!.values().next().value!;
     expect(() => { stored.boardHash = `0x${'44'.repeat(32)}`; }).toThrow();
   });
 });

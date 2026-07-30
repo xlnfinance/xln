@@ -312,7 +312,7 @@ const reliableOrder = (output: RoutedEntityInput): number => {
 const routingDeps = (
   getP2P: RuntimeOutputRoutingDeps['getP2P'],
 ): RuntimeOutputRoutingDeps => ({
-  ensureRuntimeState: env => env.runtimeState!,
+  ensureRuntimeState: env => env.infrastructure!,
   getP2P,
   enqueueRuntimeInputs: () => {},
   extractEntityId: replicaKey => String(replicaKey).split(':')[0] || '',
@@ -382,7 +382,7 @@ describe('ordered reliable output lanes', () => {
       expect(lostEnvelopes[0]?.entityInputs).toHaveLength(2);
       env.pendingNetworkOutputs = rescheduleDeferredOutputs(env, [], failed, [], lostDeps);
       expect(env.pendingNetworkOutputs).toHaveLength(2);
-      expect([...env.runtimeState!.deferredNetworkMeta!.values()].every(meta => meta.manual === true)).toBe(true);
+      expect([...env.infrastructure!.deferredNetworkMeta!.values()].every(meta => meta.manual === true)).toBe(true);
 
       await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, env.pendingNetworkOutputs);
       await closeRuntimeDb(env);
@@ -438,11 +438,11 @@ describe('ordered reliable output lanes', () => {
     const env = {
       scenarioMode: true,
       timestamp: 1_000,
-      runtimeState: {},
+      infrastructure: {},
       pendingNetworkOutputs: [],
     } as unknown as RuntimeReplica;
     const deps = {
-      ensureRuntimeState: (targetEnv: RuntimeReplica) => targetEnv.runtimeState ??= {},
+      ensureRuntimeState: (targetEnv: RuntimeReplica) => targetEnv.infrastructure ??= {},
     } as RuntimeOutputRoutingDeps;
 
     env.pendingNetworkOutputs = rescheduleDeferredOutputs(
@@ -470,7 +470,7 @@ describe('ordered reliable output lanes', () => {
       runtimeId: runtimeId('90'),
       height: 50,
       timestamp: 1_002,
-      runtimeState: {},
+      infrastructure: {},
       warn: () => {},
       error: () => {},
     } as unknown as RuntimeReplica;
@@ -511,11 +511,11 @@ describe('ordered reliable output lanes', () => {
     const env = {
       scenarioMode: true,
       timestamp: 1_000,
-      runtimeState: {},
+      infrastructure: {},
       pendingNetworkOutputs: [],
     } as unknown as RuntimeReplica;
     const deps = {
-      ensureRuntimeState: (targetEnv: RuntimeReplica) => targetEnv.runtimeState ??= {},
+      ensureRuntimeState: (targetEnv: RuntimeReplica) => targetEnv.infrastructure ??= {},
     } as RuntimeOutputRoutingDeps;
 
     env.pendingNetworkOutputs = rescheduleDeferredOutputs(
@@ -526,7 +526,7 @@ describe('ordered reliable output lanes', () => {
       deps,
     );
 
-    expect(env.runtimeState?.deferredNetworkMeta?.size).toBe(2);
+    expect(env.infrastructure?.deferredNetworkMeta?.size).toBe(2);
     expect(getNextNetworkRetryTimestamp(env, deps)).toBeNull();
     env.state.timestamp = 1_000_000;
     expect(hasReadyPendingNetworkOutputs(env, deps, 1_000_000)).toBe(false);
@@ -543,11 +543,11 @@ describe('ordered reliable output lanes', () => {
     const env = {
       scenarioMode: true,
       timestamp: 1_000,
-      runtimeState: {},
+      infrastructure: {},
       pendingNetworkOutputs: [],
     } as unknown as RuntimeReplica;
     const deps = {
-      ensureRuntimeState: (targetEnv: RuntimeReplica) => targetEnv.runtimeState ??= {},
+      ensureRuntimeState: (targetEnv: RuntimeReplica) => targetEnv.infrastructure ??= {},
     } as RuntimeOutputRoutingDeps;
 
     env.pendingNetworkOutputs = rescheduleDeferredOutputs(
@@ -559,9 +559,9 @@ describe('ordered reliable output lanes', () => {
     );
 
     expect(env.pendingNetworkOutputs).toHaveLength(2);
-    expect(env.runtimeState?.deferredNetworkMeta?.size).toBe(2);
+    expect(env.infrastructure?.deferredNetworkMeta?.size).toBe(2);
     expect(getNextNetworkRetryTimestamp(env, deps)).toBeNull();
-    expect([...env.runtimeState!.deferredNetworkMeta!.values()]).toEqual([
+    expect([...env.infrastructure!.deferredNetworkMeta!.values()]).toEqual([
       {
         attempts: 1,
         nextRetryAt: 1_000,
@@ -588,7 +588,7 @@ describe('ordered reliable output lanes', () => {
     const env = {
       runtimeId: runtimeId('90'),
       timestamp: 1_000,
-      runtimeState: {},
+      infrastructure: {},
       warn: () => {},
       error: () => {},
     } as unknown as RuntimeReplica;
@@ -615,11 +615,11 @@ describe('ordered reliable output lanes', () => {
     const env = {
       scenarioMode: true,
       timestamp: 0,
-      runtimeState: {},
+      infrastructure: {},
       pendingNetworkOutputs: [],
     } as unknown as RuntimeReplica;
     const deps = {
-      ensureRuntimeState: (targetEnv: RuntimeReplica) => targetEnv.runtimeState ??= {},
+      ensureRuntimeState: (targetEnv: RuntimeReplica) => targetEnv.infrastructure ??= {},
     } as RuntimeOutputRoutingDeps;
     let pending: RoutedEntityInput[] = [];
 
@@ -639,17 +639,17 @@ describe('ordered reliable output lanes', () => {
     const env = {
       scenarioMode: true,
       timestamp: 1_000,
-      runtimeState: {},
+      infrastructure: {},
       pendingNetworkOutputs: [],
     } as unknown as RuntimeReplica;
     const deps = {
-      ensureRuntimeState: (targetEnv: RuntimeReplica) => targetEnv.runtimeState ??= {},
+      ensureRuntimeState: (targetEnv: RuntimeReplica) => targetEnv.infrastructure ??= {},
     } as RuntimeOutputRoutingDeps;
 
     const pending = rescheduleDeferredOutputs(env, [], [lower, higher], [], deps);
     env.pendingNetworkOutputs = pending;
 
-    expect(env.runtimeState?.deferredNetworkMeta?.size).toBe(2);
+    expect(env.infrastructure?.deferredNetworkMeta?.size).toBe(2);
     expect(getNextNetworkRetryTimestamp(env, deps)).toBe(2_000);
     expect(hasReadyPendingNetworkOutputs(env, deps, 1_999)).toBe(false);
     env.state.timestamp = 2_000;
@@ -662,7 +662,7 @@ describe('ordered reliable output lanes', () => {
       const env = {
         runtimeId: runtimeId('90'),
         timestamp: 1_000,
-        runtimeState: {},
+        infrastructure: {},
         warn: () => {},
         error: () => {},
       } as unknown as RuntimeReplica;
@@ -696,7 +696,7 @@ describe('ordered reliable output lanes', () => {
       const env = {
         runtimeId: runtimeId('90'),
         timestamp: 1_000,
-        runtimeState: {},
+        infrastructure: {},
         pendingNetworkOutputs: [],
         warn: () => {},
         error: () => {},
@@ -742,7 +742,7 @@ describe('ordered reliable output lanes', () => {
     const env = {
       runtimeId: runtimeId('90'),
       timestamp: 1_000,
-      runtimeState: {},
+      infrastructure: {},
       pendingNetworkOutputs: [],
       warn: () => {},
       error: () => {},
@@ -762,7 +762,7 @@ describe('ordered reliable output lanes', () => {
 
     expect(attempted).toEqual([5, 8]);
     expect((env.pendingNetworkOutputs ?? []).map(reliableOrder)).toEqual([5, 8]);
-    expect(env.runtimeState?.deferredNetworkMeta?.size).toBe(2);
+    expect(env.infrastructure?.deferredNetworkMeta?.size).toBe(2);
     const h5RetryAt = getNextNetworkRetryTimestamp(env, deps);
     expect(h5RetryAt).not.toBeNull();
     expect(hasReadyPendingNetworkOutputs(env, deps, h5RetryAt! - 1)).toBe(false);
@@ -799,7 +799,7 @@ describe('ordered reliable output lanes', () => {
     const env = {
       runtimeId: runtimeId('90'),
       timestamp: 1_000,
-      runtimeState: {},
+      infrastructure: {},
       pendingNetworkOutputs: [h11],
       warn: () => {},
       error: () => {},
@@ -847,7 +847,7 @@ describe('ordered reliable output lanes', () => {
       expect(pendingNetworkOutputs[0]?.runtimeId).toBe(receiver.runtimeId);
       const sender = {
         runtimeId: runtimeId('90'),
-        runtimeState: {},
+        infrastructure: {},
         pendingNetworkOutputs,
       } as unknown as RuntimeReplica;
       expect(applyReliableDeliveryReceipts(sender, [receipt])).toEqual({ removed: 1 });
@@ -860,7 +860,7 @@ describe('ordered reliable output lanes', () => {
     const env = {
       runtimeId: runtimeId('90'),
       timestamp: 1_000,
-      runtimeState: {},
+      infrastructure: {},
       warn: () => {},
       error: () => {},
     } as unknown as RuntimeReplica;
@@ -894,7 +894,7 @@ describe('ordered reliable output lanes', () => {
     const env = {
       runtimeId: runtimeId('90'),
       timestamp: 1_000,
-      runtimeState: {},
+      infrastructure: {},
       warn: () => {},
       error: () => {},
     } as unknown as RuntimeReplica;
@@ -933,7 +933,7 @@ describe('ordered reliable output lanes', () => {
     const env = {
       runtimeId: runtimeId('90'),
       timestamp: 1_000,
-      runtimeState: {},
+      infrastructure: {},
       warn: () => {},
       error: () => {},
     } as unknown as RuntimeReplica;
@@ -969,7 +969,7 @@ describe('ordered reliable output lanes', () => {
     const env = {
       runtimeId: runtimeId('90'),
       timestamp: 1_000,
-      runtimeState: {},
+      infrastructure: {},
       warn: () => {},
       error: () => {},
     } as unknown as RuntimeReplica;
@@ -1013,7 +1013,7 @@ describe('ordered reliable output lanes', () => {
     const env = {
       runtimeId: runtimeId('90'),
       timestamp: 1_000,
-      runtimeState: {
+      infrastructure: {
         receivedReliableReceiptLedger: new Map([['proposal', receipt(proposalIdentity)]]),
       },
       warn: () => {},
@@ -1033,8 +1033,8 @@ describe('ordered reliable output lanes', () => {
 
     expect(deliver().map(reliableOrder)).toEqual([2]);
     expect(attempted).toEqual([]);
-    env.runtimeState!.receivedReliableReceiptLedger!.clear();
-    env.runtimeState!.receivedReliableTerminalWatermarks = new Map([
+    env.infrastructure!.receivedReliableReceiptLedger!.clear();
+    env.infrastructure!.receivedReliableTerminalWatermarks = new Map([
       ['certificate', receipt(certificateIdentity)],
     ]);
     expect(deliver().map(reliableOrder)).toEqual([2]);
@@ -1045,7 +1045,7 @@ describe('ordered reliable output lanes', () => {
     const env = {
       runtimeId: runtimeId('90'),
       timestamp: 1_000,
-      runtimeState: {},
+      infrastructure: {},
       warn: () => {},
       error: () => {},
     } as unknown as RuntimeReplica;

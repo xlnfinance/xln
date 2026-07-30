@@ -108,11 +108,11 @@ export const resolveRuntimeWorkReason = (
   deps: RuntimeWorkDeps,
 ): string | null => {
   const mempool = requireRuntimeMempool(env);
-  if ((env.runtimeState?.pendingProfileCertificationEntityIds?.size ?? 0) > 0) {
+  if ((env.infrastructure?.pendingProfileCertificationEntityIds?.size ?? 0) > 0) {
     return 'profile-certification';
   }
-  if ((env.runtimeState?.pendingCommittedJOutbox?.length ?? 0) > 0) return 'committed-j-outbox';
-  if ((env.runtimeState?.pendingJurisdictionImports?.size ?? 0) > 0) return 'jurisdiction-import';
+  if ((env.infrastructure?.pendingCommittedJOutbox?.length ?? 0) > 0) return 'committed-j-outbox';
+  if ((env.infrastructure?.pendingJurisdictionImports?.size ?? 0) > 0) return 'jurisdiction-import';
   if (mempool.runtimeTxs.length > 0 || mempool.entityInputs.length > 0) return 'runtime-mempool';
   if ((mempool.jInputs?.length ?? 0) > 0) return 'j-input';
   if ((mempool.reliableReceipts?.length ?? 0) > 0) return 'reliable-receipt';
@@ -133,7 +133,7 @@ export const resolveRuntimeWorkReason = (
   if (hasAccountMempoolWakeInput(env)) return 'account-mempool';
   // Quiesce drains only work accepted before its ingress fence. Timers remain
   // durable and fire after explicit resume.
-  if (!env.runtimeState?.persistenceQuiescing && hasDueEntityHooks(env)) {
+  if (!env.infrastructure?.persistenceQuiescing && hasDueEntityHooks(env)) {
     return 'entity-hook';
   }
   return null;
@@ -247,7 +247,7 @@ export const generateHookPings = (
   nowMs = env.state.timestamp ?? 0,
   queuedAt = env.state.timestamp ?? 0,
 ): void => {
-  if (env.runtimeState?.persistenceQuiescing) return;
+  if (env.infrastructure?.persistenceQuiescing) return;
   generateHookPingsWithDeps(env, runtimeWakeDeps, nowMs, queuedAt);
 };
 

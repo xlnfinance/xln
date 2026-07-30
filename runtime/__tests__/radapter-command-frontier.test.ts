@@ -27,7 +27,7 @@ test('runtime adapter command marker is local-only and survives durable restore'
 
   await expect(applyRuntimeTx(env, tx)).rejects.toThrow('RADAPTER_COMMAND_RUNTIME_TX_UNAUTHORIZED');
   await applyRuntimeTx(env, markLocalRuntimeAdapterCommandTx(tx));
-  expect(env.runtimeState?.runtimeAdapterCommandFrontiers?.get(laneId)).toMatchObject({
+  expect(env.infrastructure?.runtimeAdapterCommandFrontiers?.get(laneId)).toMatchObject({
     lastContiguousSequence: 1,
     lastInputHash: inputHash,
     observedHeight: 8,
@@ -35,8 +35,8 @@ test('runtime adapter command marker is local-only and survives durable restore'
 
   const restored = createEmptyEnv('radapter-frontier-restore');
   restoreDurableRuntimeSnapshot(restored, buildDurableRuntimeMachineSnapshot(env));
-  expect(restored.runtimeState?.runtimeAdapterCommandFrontiers).toEqual(
-    env.runtimeState?.runtimeAdapterCommandFrontiers,
+  expect(restored.infrastructure?.runtimeAdapterCommandFrontiers).toEqual(
+    env.infrastructure?.runtimeAdapterCommandFrontiers,
   );
 });
 
@@ -46,7 +46,7 @@ test('one million committed commands keep one bounded lane frontier', () => {
   for (let sequence = 1; sequence <= 1_000_000; sequence += 1) {
     applyRuntimeAdapterCommandMarker(env, marker(sequence));
   }
-  expect(env.runtimeState?.runtimeAdapterCommandFrontiers?.size).toBe(1);
-  expect(env.runtimeState?.runtimeAdapterCommandFrontiers?.get(laneId)?.lastContiguousSequence)
+  expect(env.infrastructure?.runtimeAdapterCommandFrontiers?.size).toBe(1);
+  expect(env.infrastructure?.runtimeAdapterCommandFrontiers?.get(laneId)?.lastContiguousSequence)
     .toBe(1_000_000);
 });

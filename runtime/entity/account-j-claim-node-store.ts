@@ -11,12 +11,12 @@ import {
 } from '../account/j-claim-accumulator';
 
 export const getAccountJClaimNodeStore = (env: EntityRuntimeContext): Map<string, AccountJClaimNode> => {
-  env.runtimeState ??= {};
-  const existing = env.runtimeState.accountJClaimNodes;
+  env.infrastructure ??= {};
+  const existing = env.infrastructure.accountJClaimNodes;
   if (existing instanceof Map) return existing as Map<string, AccountJClaimNode>;
   if (existing !== undefined) throw new Error('ACCOUNT_J_CLAIM_NODE_STORE_INVALID');
   const created = new Map<string, AccountJClaimNode>();
-  env.runtimeState.accountJClaimNodes = created;
+  env.infrastructure.accountJClaimNodes = created;
   return created;
 };
 
@@ -40,13 +40,13 @@ export const cacheCommittedAccountJClaimNodeChanges = (
   changes: AccountJClaimNodeChanges | undefined,
 ): void => {
   if (!changes || (changes.newNodes.length === 0 && changes.replacedNodeHashes.length === 0)) return;
-  env.runtimeState ??= {};
+  env.infrastructure ??= {};
   const store = getAccountJClaimNodeStore(env);
-  const pending = env.runtimeState.pendingAccountJClaimNodes instanceof Map
-    ? env.runtimeState.pendingAccountJClaimNodes as Map<string, AccountJClaimNode>
+  const pending = env.infrastructure.pendingAccountJClaimNodes instanceof Map
+    ? env.infrastructure.pendingAccountJClaimNodes as Map<string, AccountJClaimNode>
     : new Map<string, AccountJClaimNode>();
-  const deletes = env.runtimeState.pendingAccountJClaimNodeDeletes instanceof Set
-    ? env.runtimeState.pendingAccountJClaimNodeDeletes
+  const deletes = env.infrastructure.pendingAccountJClaimNodeDeletes instanceof Set
+    ? env.infrastructure.pendingAccountJClaimNodeDeletes
     : new Set<string>();
   for (const { hash, node } of changes.newNodes) {
     putVerifiedNode(store, hash, node, 'ACCOUNT_J_CLAIM_NODE_DELTA_CORRUPT');
@@ -54,8 +54,8 @@ export const cacheCommittedAccountJClaimNodeChanges = (
     deletes.delete(hash);
   }
   for (const hash of changes.replacedNodeHashes) deletes.add(hash);
-  env.runtimeState.pendingAccountJClaimNodes = pending;
-  env.runtimeState.pendingAccountJClaimNodeDeletes = deletes;
+  env.infrastructure.pendingAccountJClaimNodes = pending;
+  env.infrastructure.pendingAccountJClaimNodeDeletes = deletes;
 };
 
 export const getLiveAccountJClaimAccumulatorStates = (env: EntityRuntimeContext): AccountJClaimAccumulatorState[] => {
@@ -73,7 +73,7 @@ export const assertAccountJClaimRootsAvailable = (env: EntityRuntimeContext): vo
 };
 
 export const getSafePendingAccountJClaimDeletes = (env: EntityRuntimeContext): string[] => {
-  const candidates = env.runtimeState?.pendingAccountJClaimNodeDeletes;
+  const candidates = env.infrastructure?.pendingAccountJClaimNodeDeletes;
   if (!(candidates instanceof Set) || candidates.size === 0) return [];
   const reachable = collectReachableAccountJClaimNodes(
     getAccountJClaimNodeStore(env),
@@ -86,7 +86,7 @@ export const finalizePersistedAccountJClaimNodes = (
   env: EntityRuntimeContext,
   deleted: readonly string[],
 ): void => {
-  const state = env.runtimeState;
+  const state = env.infrastructure;
   if (!state) return;
   state.pendingAccountJClaimNodes = new Map();
   const store: AccountJClaimNodeStore = getAccountJClaimNodeStore(env);

@@ -2,7 +2,7 @@ import type { EntityInput } from '../../entity/types';
 import type { RuntimeReplica } from '../types';
 import type { RuntimeProcessProfile } from './process-profile';
 
-type RuntimeLifecycleState = NonNullable<RuntimeReplica['runtimeState']>;
+type RuntimeLifecycleState = NonNullable<RuntimeReplica['infrastructure']>;
 
 export type RuntimeFrameStartDeps = {
   attachEventEmitters(env: RuntimeReplica): void;

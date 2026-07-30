@@ -830,8 +830,8 @@ export async function flushRuntime(page: Page, rounds = 3): Promise<void> {
         }
       | undefined;
     if (!runtimeModule) throw new Error('__xln.instance missing');
-    if (env.runtimeState?.halted) {
-      throw new Error(`runtime halted before flush: ${JSON.stringify(env.runtimeState.fatalDebugPayload || {})}`);
+    if (env.infrastructure?.halted) {
+      throw new Error(`runtime halted before flush: ${JSON.stringify(env.infrastructure.fatalDebugPayload || {})}`);
     }
     runtimeModule.startRuntimeLoop?.(env);
     if (typeof runtimeModule.waitForRuntimeProcessingIdle !== 'function') {
@@ -843,8 +843,8 @@ export async function flushRuntime(page: Page, rounds = 3): Promise<void> {
       if (!idle) {
         throw new Error('runtime processing did not become idle before flush timeout');
       }
-      if (env.runtimeState?.halted) {
-        throw new Error(`runtime halted during flush: ${JSON.stringify(env.runtimeState.fatalDebugPayload || {})}`);
+      if (env.infrastructure?.halted) {
+        throw new Error(`runtime halted during flush: ${JSON.stringify(env.infrastructure.fatalDebugPayload || {})}`);
       }
       await new Promise(resolve => setTimeout(resolve, 100));
     }

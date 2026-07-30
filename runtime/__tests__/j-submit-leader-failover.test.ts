@@ -114,7 +114,7 @@ describe('validator-local J submit leader failover', () => {
     await applyRuntimeTx(env, secondResult, { isReplay: true });
     expect(firstLeader.jSubmitState?.lastResultOutcome).toBe('terminalFailure');
     expect(secondLeader.jSubmitState?.lastResultOutcome).toBe('submitted');
-    expect(env.runtimeState?.pendingCommittedJOutbox).toEqual([]);
+    expect(env.infrastructure?.pendingCommittedJOutbox).toEqual([]);
 
     const restored = restoreFailoverEnv(env);
     const firstBeforeReplay = structuredClone(restored.state.eReplicas.get(

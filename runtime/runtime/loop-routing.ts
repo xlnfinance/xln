@@ -117,7 +117,7 @@ const handleInboundReliableReceipt = (
   if (!sourceRuntimeId || sourceRuntimeId !== receipt.body.receiverRuntimeId) {
     throw new Error('RELIABLE_RECEIPT_TRANSPORT_SOURCE_MISMATCH');
   }
-  if (env.runtimeState?.persistenceQuiescing && !env.scenarioMode && !options.acceptedBeforeQuiesce) {
+  if (env.infrastructure?.persistenceQuiescing && !env.scenarioMode && !options.acceptedBeforeQuiesce) {
     env.info('network', 'RELIABLE_RECEIPT_DEFERRED_QUIESCING', {
       sourceRuntimeId,
       receiverRuntimeId: receipt.body.receiverRuntimeId,

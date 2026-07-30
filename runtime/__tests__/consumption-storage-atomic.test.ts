@@ -155,7 +155,7 @@ test('normal frame atomically publishes accumulator root, witness node, diff, an
   });
   const node = applied.newNodes[0]!;
   const checkpoint = buildRuntimeCheckpointSnapshot(env);
-  const checkpointState = checkpoint['runtimeState'] as { consumptionNodes?: Map<string, unknown> };
+  const checkpointState = checkpoint['infrastructure'] as { consumptionNodes?: Map<string, unknown> };
   expect(checkpointState.consumptionNodes?.size).toBe(1);
   const store = getConsumptionNodeStore(env);
   store.delete(node.hash);

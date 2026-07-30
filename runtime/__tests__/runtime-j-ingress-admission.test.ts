@@ -20,7 +20,7 @@ const tx = (): JTx => ({
 
 const env = () => {
   const value = createEmptyEnv('j-ingress-admission');
-  value.runtimeState = { lifecyclePhase: 'running', loopActive: true };
+  value.infrastructure = { lifecyclePhase: 'running', loopActive: true };
   value.state.jReplicas.set(jurisdiction, {} as never);
   value.state.jReplicas.set('Testnet2', {} as never);
   value.state.jReplicas.set('Testnet3', {} as never);

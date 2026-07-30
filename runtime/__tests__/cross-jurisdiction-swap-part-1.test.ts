@@ -179,8 +179,8 @@ import { ACCOUNT_PENDING_RESEND_AFTER_MS } from '../entity/scheduler';
 
 const makeLocalCrossJRoutingDeps = (): RuntimeEntityRoutingDeps => ({
   ensureRuntimeState: current => {
-    if (!current.runtimeState) throw new Error('TEST_RUNTIME_STATE_REQUIRED');
-    return current.runtimeState;
+    if (!current.infrastructure) throw new Error('TEST_RUNTIME_STATE_REQUIRED');
+    return current.infrastructure;
   },
   enqueueRuntimeInputs: () => {
     throw new Error('TEST_UNEXPECTED_RUNTIME_REQUEUE');
@@ -1339,7 +1339,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       const replicasBefore = [...userEnv.state.eReplicas.entries()].map(
         ([key, replica]) => [key, cloneEntityReplica(replica)] as const,
       );
-      const incidentsBefore = [...(userEnv.runtimeState?.securityIncidents?.values() ?? [])].reduce(
+      const incidentsBefore = [...(userEnv.infrastructure?.securityIncidents?.values() ?? [])].reduce(
         (sum, incident) => sum + incident.occurrences,
         0,
       );
@@ -1362,7 +1362,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         reducerRejectedProposalPairs += 1;
       }
       expect([...userEnv.state.eReplicas.entries()], corruption.name).toEqual(replicasBefore);
-      const incidentsAfter = [...(userEnv.runtimeState?.securityIncidents?.values() ?? [])].reduce(
+      const incidentsAfter = [...(userEnv.infrastructure?.securityIncidents?.values() ?? [])].reduce(
         (sum, incident) => sum + incident.occurrences,
         0,
       );
@@ -1509,7 +1509,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       const replicasBefore = [...hubEnv.state.eReplicas.entries()].map(
         ([key, replica]) => [key, cloneEntityReplica(replica)] as const,
       );
-      const incidentsBefore = [...(hubEnv.runtimeState?.securityIncidents?.values() ?? [])].reduce(
+      const incidentsBefore = [...(hubEnv.infrastructure?.securityIncidents?.values() ?? [])].reduce(
         (sum, incident) => sum + incident.occurrences,
         0,
       );
@@ -1532,7 +1532,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         reducerRejectedAckPairs += 1;
       }
       expect([...hubEnv.state.eReplicas.entries()], corruption.name).toEqual(replicasBefore);
-      const incidentsAfter = [...(hubEnv.runtimeState?.securityIncidents?.values() ?? [])].reduce(
+      const incidentsAfter = [...(hubEnv.infrastructure?.securityIncidents?.values() ?? [])].reduce(
         (sum, incident) => sum + incident.occurrences,
         0,
       );
@@ -1629,7 +1629,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     const retainedProposalCohort = rescheduleDeferredOutputs(hubEnv, [], proposals, [], makeLocalCrossJRoutingDeps());
     expect(retainedProposalCohort).toHaveLength(2);
     expect(pruneReceiptedReliableOutputs(hubEnv, retainedProposalCohort)).toEqual([]);
-    expect(hubEnv.runtimeState?.deferredNetworkMeta?.size).toBe(0);
+    expect(hubEnv.infrastructure?.deferredNetworkMeta?.size).toBe(0);
   });
 
   test('submitCrossJurisdictionSwap queues hub prepare, then prepare builds symmetric pull commitments', async () => {
@@ -1641,7 +1641,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     hubEnv.state.timestamp = 10_000;
     env.quietRuntimeLogs = true;
     hubEnv.quietRuntimeLogs = true;
-    env.runtimeState!.lifecyclePhase = 'running';
+    env.infrastructure!.lifecyclePhase = 'running';
     const eth = makeJurisdiction('Ethereum', 1, '11', '12');
     const base = makeJurisdiction('Base', 8453, '21', '22');
     installJurisdictions(env, eth, base);
@@ -1691,12 +1691,12 @@ describe('cross-jurisdiction hashledger swap', () => {
     registerEntityRuntimeHintWithDeps(hubEnv, targetUser, env.runtimeId!, routingDeps);
     let directAttempts = 0;
     let relayAttempts = 0;
-    env.runtimeState!.directEntityInputsDispatch = targetRuntimeId => {
+    env.infrastructure!.directEntityInputsDispatch = targetRuntimeId => {
       expect(targetRuntimeId).toBe(hubEnv.runtimeId);
       directAttempts += 1;
       return deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FALLBACK' });
     };
-    env.runtimeState!.p2p = {
+    env.infrastructure!.p2p = {
       enqueueEntityInputsDelivery: (targetRuntimeId: string, envelope: RuntimeEntityInputsEnvelope) => {
         expect(targetRuntimeId).toBe(hubEnv.runtimeId);
         relayAttempts += 1;
@@ -1732,7 +1732,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     ).rejects.toThrow('INBOUND_CROSS_J_INTENT_ORDER_ID_CONFLICT');
     expect(directAttempts).toBe(3);
     expect(relayAttempts).toBe(3);
-    expect([...hubEnv.runtimeState!.securityIncidents!.values()].map(incident => incident.code)).toContain(
+    expect([...hubEnv.infrastructure!.securityIncidents!.values()].map(incident => incident.code)).toContain(
       'CROSS_J_INTENT_ORDER_ID_CONFLICT',
     );
     const targetReceivingAccount = targetUserState.accounts.get(targetHub)!;

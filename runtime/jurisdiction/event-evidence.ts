@@ -67,8 +67,8 @@ const reserveIndexKeyFromArgs = (args: Record<string, unknown>): string | null =
 };
 
 const ensureReserveUpdatedIndex = (env: RuntimeReplica): Map<string, ReserveUpdatedEvidence> => {
-  if (!env.runtimeState) env.runtimeState = {};
-  const current = env.runtimeState.recentReserveUpdatedEvents;
+  if (!env.infrastructure) env.infrastructure = {};
+  const current = env.infrastructure.recentReserveUpdatedEvents;
   if (current instanceof Map) return current;
   const next = new Map<string, ReserveUpdatedEvidence>();
   if (current && typeof current === 'object') {
@@ -76,7 +76,7 @@ const ensureReserveUpdatedIndex = (env: RuntimeReplica): Map<string, ReserveUpda
       if (value?.name === 'ReserveUpdated') next.set(key, value);
     }
   }
-  env.runtimeState.recentReserveUpdatedEvents = next;
+  env.infrastructure.recentReserveUpdatedEvents = next;
   return next;
 };
 
@@ -96,7 +96,7 @@ export const indexReserveUpdatedEvents = (
   }> | undefined,
 ): void => {
   if (!events || events.length === 0) return;
-  if (!env.runtimeState) env.runtimeState = {};
+  if (!env.infrastructure) env.infrastructure = {};
 
   const evidence = events
     .map((event) => toReserveUpdatedEvidence(env, event))
@@ -119,7 +119,7 @@ export const findReserveUpdatedEvidence = (
 ): ReserveUpdatedEvidence | null => {
   const normalizedEntityId = String(entityId || '').trim().toLowerCase();
   const normalizedTokenId = Number(tokenId);
-  const reserveIndex = env.runtimeState?.recentReserveUpdatedEvents;
+  const reserveIndex = env.infrastructure?.recentReserveUpdatedEvents;
   const indexedEvent = reserveIndex instanceof Map
     ? reserveIndex.get(`${normalizedEntityId}:${normalizedTokenId}`)
     : undefined;

@@ -32,7 +32,7 @@ const runtime = (seed: string): RuntimeReplica => {
   registerSignerKey(env, runtimeId, deriveSignerKeySync(seed, '1'));
   env.runtimeId = runtimeId;
   env.runtimeSeed = seed;
-  env.runtimeState ??= {};
+  env.infrastructure ??= {};
   env.scenarioMode = true;
   env.quietRuntimeLogs = true;
   env.runtimeConfig = { storage: { enabled: false } };
@@ -89,8 +89,8 @@ describe('bounded lower reliable receipt reconstruction', () => {
     expect(retry.receipt.body.coverage).toBe('terminal');
     expect(retry.receipt.body.identity.height).toBe(1);
     expect(retry.receipt.body.identity.frameHash).toBe(heightOne.frame.hash);
-    expect(restored.runtimeState?.reliableIngressTerminalWatermarks?.size).toBe(2);
-    expect(restored.runtimeState?.reliableIngressReceiptLedger?.size ?? 0).toBe(0);
+    expect(restored.infrastructure?.reliableIngressTerminalWatermarks?.size).toBe(2);
+    expect(restored.infrastructure?.reliableIngressReceiptLedger?.size ?? 0).toBe(0);
 
     const proposal = structuredClone(h1);
     delete proposal.proposedFrame!.hankos;
@@ -136,11 +136,11 @@ describe('bounded lower reliable receipt reconstruction', () => {
 
     const firstAttempt = commitReliableIngress(receiver, [h1]);
     expect(firstAttempt).toHaveLength(2);
-    expect(receiver.runtimeState?.reliableIngressTerminalWatermarks?.size).toBe(2);
+    expect(receiver.infrastructure?.reliableIngressTerminalWatermarks?.size).toBe(2);
     rollbackReliableIngressCommit(receiver, firstAttempt);
-    expect(receiver.runtimeState?.reliableIngressTerminalWatermarks?.size).toBe(0);
-    expect(receiver.runtimeState?.reliableIngressReceiptLedger?.size).toBe(0);
-    expect(receiver.runtimeState?.pendingReliableIngress?.size).toBe(1);
+    expect(receiver.infrastructure?.reliableIngressTerminalWatermarks?.size).toBe(0);
+    expect(receiver.infrastructure?.reliableIngressReceiptLedger?.size).toBe(0);
+    expect(receiver.infrastructure?.pendingReliableIngress?.size).toBe(1);
 
     const committed = commitReliableIngress(receiver, [h1]);
     const deliveries = finalizeReliableIngressCommit(receiver, committed);
@@ -149,8 +149,8 @@ describe('bounded lower reliable receipt reconstruction', () => {
       sourceA.runtimeId!,
       sourceB.runtimeId!,
     ].sort());
-    expect(receiver.runtimeState?.reliableIngressTerminalWatermarks?.size).toBe(2);
-    expect(receiver.runtimeState?.pendingReliableIngress?.size).toBe(0);
+    expect(receiver.infrastructure?.reliableIngressTerminalWatermarks?.size).toBe(2);
+    expect(receiver.infrastructure?.pendingReliableIngress?.size).toBe(0);
 
     const snapshot = buildDurableRuntimeMachineSnapshot(receiver);
     const restored = runtime(receiverSeed);
@@ -189,20 +189,20 @@ describe('bounded lower reliable receipt reconstruction', () => {
       { length: MAX_RELIABLE_INGRESS_SOURCE_LANES },
       (_, index) => `0x${(index + 1).toString(16).padStart(40, '0')}`,
     );
-    receiver.runtimeState!.reliableIngressTerminalWatermarks = new Map(
+    receiver.infrastructure!.reliableIngressTerminalWatermarks = new Map(
       sourceRuntimeIds.map(runtimeId => [
         receiverFrontierKey(runtimeId, receipt.body.identity),
         receipt,
       ]),
     );
-    receiver.runtimeState!.reliableIngressReceiptLedger = new Map();
+    receiver.infrastructure!.reliableIngressReceiptLedger = new Map();
 
     expect(registerReliableIngress(receiver, sourceRuntimeIds[0]!, h1).kind).toBe('receipt');
-    const before = receiver.runtimeState!.reliableIngressTerminalWatermarks.size;
+    const before = receiver.infrastructure!.reliableIngressTerminalWatermarks.size;
     const newSource = `0x${(MAX_RELIABLE_INGRESS_SOURCE_LANES + 1).toString(16).padStart(40, '0')}`;
     expect(() => registerReliableIngress(receiver, newSource, h1))
       .toThrow('RELIABLE_INGRESS_SOURCE_LANE_CAPACITY_EXCEEDED');
-    expect(receiver.runtimeState!.reliableIngressTerminalWatermarks.size).toBe(before);
-    expect(receiver.runtimeState!.pendingReliableIngress?.size ?? 0).toBe(0);
+    expect(receiver.infrastructure!.reliableIngressTerminalWatermarks.size).toBe(before);
+    expect(receiver.infrastructure!.pendingReliableIngress?.size ?? 0).toBe(0);
   });
 });

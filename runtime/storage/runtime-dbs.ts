@@ -16,7 +16,7 @@ import {
   writeDurableStorageMarkerFile,
 } from './fs-durability';
 
-type RuntimeLifecycleState = NonNullable<RuntimeReplica['runtimeState']>;
+type RuntimeLifecycleState = NonNullable<RuntimeReplica['infrastructure']>;
 type RuntimeDbHandleRole = 'storage-current' | 'storage-previous' | 'runtime-wal' | 'history-views' | 'infra';
 
 const storageLog = createStructuredLogger('runtime.storage');
@@ -574,7 +574,7 @@ export const closeStorageDb = async (
   env: RuntimeReplica,
   role: StorageDbRole = 'current',
 ): Promise<void> => {
-  const state = env.runtimeState;
+  const state = env.infrastructure;
   if (!state) return;
   const fields = storageStateFields(role);
   const db = state[fields.dbField] as Level<Buffer, Buffer> | undefined;
@@ -882,7 +882,7 @@ export const getRuntimeWalDb = (
 };
 
 export const closeRuntimeWalDb = async (env: RuntimeReplica): Promise<void> => {
-  const state = env.runtimeState;
+  const state = env.infrastructure;
   const db = state?.runtimeWalDb as Level<Buffer, Buffer> | undefined;
   if (!db) return;
   beginRuntimeDbClose(env, 'runtime-wal');
@@ -912,7 +912,7 @@ export const getHistoryViewDb = (
 };
 
 export const closeHistoryViewDb = async (env: RuntimeReplica): Promise<void> => {
-  const state = env.runtimeState;
+  const state = env.infrastructure;
   const db = state?.historyViewDb;
   if (!db) return;
   beginRuntimeDbClose(env, 'history-views');
@@ -929,7 +929,7 @@ export const closeHistoryViewDb = async (env: RuntimeReplica): Promise<void> => 
 };
 
 export const closeInfraDb = async (env: RuntimeReplica): Promise<void> => {
-  const state = env.runtimeState;
+  const state = env.infrastructure;
   if (!state?.infraDb) return;
   const db = state.infraDb;
   beginRuntimeDbClose(env, 'infra');

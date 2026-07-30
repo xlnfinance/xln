@@ -242,7 +242,7 @@ describe('JAdapter watcher ingress', () => {
       `0x${'42'.repeat(20)}`,
     );
     env.state.jReplicas.set(source.name, source);
-    env.runtimeState = { persistenceQuiescing: true } as RuntimeReplica['runtimeState'];
+    env.infrastructure = { persistenceQuiescing: true } as RuntimeReplica['infrastructure'];
     const entityId = `0x${'44'.repeat(32)}`;
     const owner = `0x${'55'.repeat(20)}`;
     const txCounter = { value: 0 } as { value: number; _seenLogs?: unknown };
@@ -280,7 +280,7 @@ describe('JAdapter watcher ingress', () => {
 
     expect(txCounter._seenLogs).toBeUndefined();
     expect(env.runtimeMempool?.entityInputs ?? []).toHaveLength(0);
-    expect(env.runtimeState?.externalWalletWatchOwners).toBeUndefined();
+    expect(env.infrastructure?.externalWalletWatchOwners).toBeUndefined();
 
     expect(() => applyJEventsToEnv(env, [{
       name: 'ExternalWalletSnapshot',
@@ -297,7 +297,7 @@ describe('JAdapter watcher ingress', () => {
     }], 'manual-snapshot', source)).toThrow(/J_EVENT_INGRESS_QUIESCING:manual-snapshot/);
 
     expect(env.runtimeMempool?.entityInputs ?? []).toHaveLength(0);
-    expect(env.runtimeState?.externalWalletWatchOwners).toBeUndefined();
+    expect(env.infrastructure?.externalWalletWatchOwners).toBeUndefined();
   });
 
   test('external wallet snapshot normalization rejects missing financial fields', () => {
@@ -794,7 +794,7 @@ describe('JAdapter watcher ingress', () => {
     expect(range).toEqual({ scannedReplicaKeys: [], finalityReplicaKeys: [] });
     expect(env.runtimeMempool?.runtimeTxs ?? []).toEqual([]);
     expect(env.runtimeMempool?.entityInputs ?? []).toEqual([]);
-    expect(env.runtimeState?.wakeRequested).not.toBe(true);
+    expect(env.infrastructure?.wakeRequested).not.toBe(true);
   });
 
   test('watcher does not enqueue the next authenticated page before the prior local scan is durable', () => {
@@ -925,7 +925,7 @@ describe('JAdapter watcher ingress', () => {
     // H7 without authenticated H1..H6 is durable local evidence, but it is
     // not a signable exact prefix. Validators must not invent the gap.
     expect(env.runtimeMempool?.entityInputs ?? []).toEqual([]);
-    expect(env.runtimeState?.wakeRequested).toBe(true);
+    expect(env.infrastructure?.wakeRequested).toBe(true);
   });
 
   test('deferred watcher event stays out of the mempool until its authenticated prefix is queued atomically', async () => {
@@ -980,7 +980,7 @@ describe('JAdapter watcher ingress', () => {
     const attestation = env.runtimeMempool?.entityInputs[0]?.jPrefixAttestations?.get(signerId);
     expect(attestation?.scannedThroughHeight).toBe(7);
     expect(attestation?.headers.map((header) => header.jHeight)).toEqual([1, 2, 3, 4, 5, 6, 7]);
-    expect(env.runtimeState?.wakeRequested).toBe(true);
+    expect(env.infrastructure?.wakeRequested).toBe(true);
 
     for (const tx of env.runtimeMempool?.runtimeTxs ?? []) await applyRuntimeTx(env, tx);
     const history = env.state.eReplicas.get(`${entityId}:${signerId}`)?.jHistory;
@@ -1207,7 +1207,7 @@ describe('JAdapter watcher ingress', () => {
     expect(input?.entityInputs).toEqual([]);
     expect(rebuiltInput?.entityInputs).toEqual([]);
     expect(env.runtimeMempool?.entityInputs ?? []).toEqual([]);
-    expect(env.runtimeState?.wakeRequested).not.toBe(true);
+    expect(env.infrastructure?.wakeRequested).not.toBe(true);
   });
 
   test('receipt events never advance an unobserved entity on another jurisdiction', () => {

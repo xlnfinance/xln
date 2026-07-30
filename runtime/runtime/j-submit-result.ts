@@ -38,7 +38,7 @@ const assertValidAdapterFailure = (data: RecordJSubmitResultTx['data']): void =>
 
 const findPendingAttempt = (env: RuntimeReplica, attemptId: string): PendingAttempt | null => {
   const matches: PendingAttempt[] = [];
-  for (const input of env.runtimeState?.pendingCommittedJOutbox ?? []) {
+  for (const input of env.infrastructure?.pendingCommittedJOutbox ?? []) {
     for (const jTx of input.jTxs) {
       if (jTx.type === 'batch' && jTx.data.runtimeSubmitAttempt?.attemptId === attemptId) {
         matches.push({ jurisdictionName: input.jurisdictionName, jTx });
@@ -132,19 +132,19 @@ const findRecordedResultFingerprint = (env: RuntimeReplica, attemptId: string): 
 };
 
 const removePendingAttempt = (env: RuntimeReplica, attemptId: string): void => {
-  const pending = env.runtimeState?.pendingCommittedJOutbox ?? [];
+  const pending = env.infrastructure?.pendingCommittedJOutbox ?? [];
   const remaining = pending.flatMap((input) => {
     const jTxs = input.jTxs.filter((jTx) => (
       jTx.type !== 'batch' || jTx.data.runtimeSubmitAttempt?.attemptId !== attemptId
     ));
     return jTxs.length > 0 ? [{ jurisdictionName: input.jurisdictionName, jTxs }] : [];
   });
-  if (env.runtimeState) env.runtimeState.pendingCommittedJOutbox = remaining;
+  if (env.infrastructure) env.infrastructure.pendingCommittedJOutbox = remaining;
 };
 
 const activePendingAttemptIds = (env: RuntimeReplica, replica: EntityReplica): Set<string> => {
   const active = new Set<string>();
-  for (const input of env.runtimeState?.pendingCommittedJOutbox ?? []) {
+  for (const input of env.infrastructure?.pendingCommittedJOutbox ?? []) {
     for (const jTx of input.jTxs) {
       if (
         jTx.type === 'batch' &&

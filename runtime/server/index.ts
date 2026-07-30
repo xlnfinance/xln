@@ -534,7 +534,7 @@ const handleGossipProfileApi = async (
     return new Response(safeStringify({ ok: false, error: 'entityId is required' }), { status: 400, headers });
   }
   try {
-    await env?.runtimeState?.p2p?.syncProfiles?.();
+    await env?.infrastructure?.p2p?.syncProfiles?.();
   } catch (error) {
     serverLog.warn('gossip.profile_sync_failed', {
       targetEntityId,
@@ -1344,10 +1344,10 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     const verboseRuntimeLogs = /^(1|true)$/i.test(process.env['RUNTIME_VERBOSE_LOGS'] ?? '');
     env.quietRuntimeLogs = !verboseRuntimeLogs;
     serverLog.info('runtime.log_mode', { mode: env.quietRuntimeLogs ? 'quiet' : 'verbose' });
-    env.runtimeState = env.runtimeState ?? {};
-    env.runtimeState.directEntityInputsDispatch = (targetRuntimeId, envelope, ingressTimestamp) =>
+    env.infrastructure = env.infrastructure ?? {};
+    env.infrastructure.directEntityInputsDispatch = (targetRuntimeId, envelope, ingressTimestamp) =>
       sendDirectEntityInput(runtimeEnv, targetRuntimeId, envelope, ingressTimestamp);
-    env.runtimeState.canUseConnectedRelayFallback = hasDirectRelayClient;
+    env.infrastructure.canUseConnectedRelayFallback = hasDirectRelayClient;
     startRuntimeLoop(env, {
       onFatal: async payload => {
         serverLog.error('runtime.loop_fatal', {

@@ -399,8 +399,8 @@ test('localhost debug env surfaces expose RuntimeView with matching live runtime
   expect(publishSource).toContain('const selectedRuntimeId = normalizeRuntimeId(get(activeRuntimeId));');
   expect(publishSource).toContain('const liveRuntimeMatchesSelection = Boolean(!selectedRuntimeId || (liveRuntimeId && liveRuntimeId === selectedRuntimeId));');
   expect(publishSource).toContain('if (runtimeEnv && !runtimeEnvMatchesActiveSelection(runtimeEnv))');
-  expect(publishSource).toContain('liveRuntimeEnv?.runtimeState?.p2p');
-  expect(publishSource).toContain('liveRuntimeEnv?.runtimeState?.loopActive');
+  expect(publishSource).toContain('liveRuntimeEnv?.infrastructure?.p2p');
+  expect(publishSource).toContain('liveRuntimeEnv?.infrastructure?.loopActive');
   expect(publishSource).toContain('if (projectedRuntimeEnv && !projectedRuntimeMatchesSelection) return null;');
   expect(publishSource).toContain('projectedRuntimeMatchesSelection ? projectedRuntimeEnv : null');
   expect(viewSource).toContain('liveEnvResolver={resolveLocalDebugEnv}');

@@ -3,7 +3,7 @@ import { normalizeRuntimeFailureCode } from '../protocol/failure-taxonomy';
 import type { RuntimeReplica } from './types';
 import { transitionRuntimeLifecycle } from './lifecycle';
 
-type RuntimeLifecycleState = NonNullable<RuntimeReplica['runtimeState']>;
+type RuntimeLifecycleState = NonNullable<RuntimeReplica['infrastructure']>;
 
 type FatalLoopDeps = {
   getRuntimeProcessGlobal(): { exit?: (code: number) => unknown } | null;

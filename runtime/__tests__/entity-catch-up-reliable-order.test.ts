@@ -85,12 +85,12 @@ const createRuntime = (seed: string): RuntimeReplica => {
   env.scenarioMode = true;
   env.quietRuntimeLogs = true;
   env.runtimeConfig = { storage: { enabled: false } };
-  env.runtimeState ??= {};
+  env.infrastructure ??= {};
   return env;
 };
 
 const routingDeps: RuntimeEntityRoutingDeps = {
-  ensureRuntimeState: env => (env.runtimeState ??= {}),
+  ensureRuntimeState: env => (env.infrastructure ??= {}),
   enqueueRuntimeInputs: () => {},
   extractEntityId: replicaKey => String(replicaKey).split(':')[0] || '',
   hasLocalSignerForEntity: () => false,
@@ -232,10 +232,10 @@ const installReplica = (env: RuntimeReplica, state: EntityState, signerId: strin
 
 const reliableRecoveryProjection = (env: RuntimeReplica): Record<string, unknown> => ({
   pendingNetworkOutputs: env.pendingNetworkOutputs ?? [],
-  reliableIngressReceiptLedger: env.runtimeState?.reliableIngressReceiptLedger ?? new Map(),
-  reliableIngressTerminalWatermarks: env.runtimeState?.reliableIngressTerminalWatermarks ?? new Map(),
-  receivedReliableReceiptLedger: env.runtimeState?.receivedReliableReceiptLedger ?? new Map(),
-  receivedReliableTerminalWatermarks: env.runtimeState?.receivedReliableTerminalWatermarks ?? new Map(),
+  reliableIngressReceiptLedger: env.infrastructure?.reliableIngressReceiptLedger ?? new Map(),
+  reliableIngressTerminalWatermarks: env.infrastructure?.reliableIngressTerminalWatermarks ?? new Map(),
+  receivedReliableReceiptLedger: env.infrastructure?.receivedReliableReceiptLedger ?? new Map(),
+  receivedReliableTerminalWatermarks: env.infrastructure?.receivedReliableTerminalWatermarks ?? new Map(),
 });
 
 describe('ordered reliable Entity catch-up', () => {
@@ -370,14 +370,14 @@ describe('ordered reliable Entity catch-up', () => {
     expect(receiver.state.eReplicas.get(`${initialState.entityId}:${signerId}`)?.state.height).toBe(0);
     expect(commitReliableIngress(receiver, futureAttempt.appliedEntityInputs)).toEqual([]);
     releaseUncommittedReliableIngress(receiver, [h2], futureAttempt.appliedEntityInputs);
-    expect(receiver.runtimeState?.pendingReliableIngress?.size ?? 0).toBe(0);
+    expect(receiver.infrastructure?.pendingReliableIngress?.size ?? 0).toBe(0);
     expect(sender.pendingNetworkOutputs).toHaveLength(2);
 
     const machineSnapshot = buildDurableRuntimeMachineSnapshot(receiver);
     const restarted = createRuntime(`entity-catch-up-receiver-${TEST_RUN_ID}`);
     installReplica(restarted, initialState, signerId);
     restoreDurableRuntimeSnapshot(restarted, machineSnapshot);
-    expect(restarted.runtimeState?.reliableIngressReceiptLedger?.size ?? 0).toBe(0);
+    expect(restarted.infrastructure?.reliableIngressReceiptLedger?.size ?? 0).toBe(0);
     expect(registerReliableIngress(restarted, sender.runtimeId!, h2).kind).toBe('enqueue');
     releaseUncommittedReliableIngress(restarted, [h2], []);
 
@@ -414,8 +414,8 @@ describe('ordered reliable Entity catch-up', () => {
     applyReliableDeliveryReceipts(sender, [h2Commits[0]!.receipt]);
 
     expect(sender.pendingNetworkOutputs).toEqual([]);
-    expect(restarted.runtimeState?.reliableIngressReceiptLedger?.size ?? 0).toBe(0);
-    expect(restarted.runtimeState?.reliableIngressTerminalWatermarks?.size).toBe(1);
+    expect(restarted.infrastructure?.reliableIngressReceiptLedger?.size ?? 0).toBe(0);
+    expect(restarted.infrastructure?.reliableIngressTerminalWatermarks?.size).toBe(1);
     expect(h1Commits[0]!.receipt!.body.identity.height).toBe(1);
     expect(h2Commits[0]!.receipt!.body.identity.height).toBe(2);
     expect(h1Commits[0]!.receipt!.body.identity.frameHash).toBe(heightOne.frame.hash);
@@ -530,8 +530,8 @@ describe('ordered reliable Entity catch-up', () => {
         expect(receiver.state.eReplicas.get(
           `${initialState.entityId}:${signerId}`,
         )?.state.height).toBe(4);
-        expect(receiver.runtimeState?.pendingReliableIngress?.size ?? 0).toBe(0);
-        expect(receiver.runtimeState?.reliableIngressTerminalWatermarks?.size).toBe(1);
+        expect(receiver.infrastructure?.pendingReliableIngress?.size ?? 0).toBe(0);
+        expect(receiver.infrastructure?.reliableIngressTerminalWatermarks?.size).toBe(1);
       }));
   }
 
@@ -774,14 +774,14 @@ describe('ordered reliable Entity catch-up', () => {
     expect(afterHeightOneRestart.pendingNetworkOutputs, safeStringify({
       pendingNetworkOutputs: afterHeightOneRestart.pendingNetworkOutputs,
       runtimeMempool: afterHeightOneRestart.runtimeMempool,
-      pendingReliableIngress: afterHeightOneRestart.runtimeState?.pendingReliableIngress,
-      reliableIngressReceiptLedger: afterHeightOneRestart.runtimeState?.reliableIngressReceiptLedger,
-      reliableIngressTerminalWatermarks: afterHeightOneRestart.runtimeState?.reliableIngressTerminalWatermarks,
-      receivedReliableReceiptLedger: afterHeightOneRestart.runtimeState?.receivedReliableReceiptLedger,
-      receivedReliableTerminalWatermarks: afterHeightOneRestart.runtimeState?.receivedReliableTerminalWatermarks,
+      pendingReliableIngress: afterHeightOneRestart.infrastructure?.pendingReliableIngress,
+      reliableIngressReceiptLedger: afterHeightOneRestart.infrastructure?.reliableIngressReceiptLedger,
+      reliableIngressTerminalWatermarks: afterHeightOneRestart.infrastructure?.reliableIngressTerminalWatermarks,
+      receivedReliableReceiptLedger: afterHeightOneRestart.infrastructure?.receivedReliableReceiptLedger,
+      receivedReliableTerminalWatermarks: afterHeightOneRestart.infrastructure?.receivedReliableTerminalWatermarks,
     }, 2)).toEqual([]);
     expect(afterHeightOneRestart.runtimeMempool?.entityInputs ?? []).toEqual([]);
-    expect(afterHeightOneRestart.runtimeState?.reliableIngressTerminalWatermarks?.size).toBe(1);
-    expect(afterHeightOneRestart.runtimeState?.receivedReliableTerminalWatermarks?.size).toBe(1);
+    expect(afterHeightOneRestart.infrastructure?.reliableIngressTerminalWatermarks?.size).toBe(1);
+    expect(afterHeightOneRestart.infrastructure?.receivedReliableTerminalWatermarks?.size).toBe(1);
   });
 });

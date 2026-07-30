@@ -80,7 +80,7 @@ describe('runtime health API handler', () => {
     const { deps } = createHealthDeps();
     deps.env = createEmptyEnv('runtime-health-read-barrier');
     const releaseWriter = await acquireRuntimeFrameWriter(
-      deps.env.runtimeState!,
+      deps.env.infrastructure!,
     );
     let settled = false;
     const response = handleRuntimeHealth(

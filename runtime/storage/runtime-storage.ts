@@ -10,7 +10,7 @@ import { createRuntimeChainVerifier } from './recovery/verify';
 
 export type { RuntimeStorageApiDeps } from './runtime-storage-deps';
 
-type RuntimeSyncChannel = NonNullable<NonNullable<RuntimeReplica['runtimeState']>['runtimeSyncChannel']>;
+type RuntimeSyncChannel = NonNullable<NonNullable<RuntimeReplica['infrastructure']>['runtimeSyncChannel']>;
 
 export type RuntimeSyncNotificationOptions = {
   enabled?: boolean;

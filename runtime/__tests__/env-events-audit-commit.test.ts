@@ -10,7 +10,7 @@ import { createEmptyEnv } from '../runtime';
 test('every machine event reaches history only after commit flush', () => {
   const env = createEmptyEnv('env-events-audit-commit-seed');
   const forwarded: Array<Record<string, unknown>> = [];
-  env.runtimeState!.p2p = {
+  env.infrastructure!.p2p = {
     sendDebugEvent: (payload: unknown) => {
       forwarded.push(payload as Record<string, unknown>);
       return true;
@@ -22,19 +22,19 @@ test('every machine event reaches history only after commit flush', () => {
 
   expect(forwarded).toHaveLength(0);
   expect(env.frameLogs).toHaveLength(1);
-  expect(env.runtimeState?.pendingAuditEvents?.size).toBe(1);
+  expect(env.infrastructure?.pendingAuditEvents?.size).toBe(1);
 
   flushPendingAuditEvents(env);
 
   expect(forwarded).toHaveLength(1);
   expect(forwarded[0]?.eventName).toBe('OrdinaryCommittedFact');
-  expect(env.runtimeState?.pendingAuditEvents?.size).toBe(0);
+  expect(env.infrastructure?.pendingAuditEvents?.size).toBe(0);
 });
 
 test('clearing pending audit events drops uncommitted high-signal emits', () => {
   const env = createEmptyEnv('env-events-audit-clear-seed');
   const forwarded: Array<Record<string, unknown>> = [];
-  env.runtimeState!.p2p = {
+  env.infrastructure!.p2p = {
     sendDebugEvent: (payload: unknown) => {
       forwarded.push(payload as Record<string, unknown>);
       return true;
@@ -46,13 +46,13 @@ test('clearing pending audit events drops uncommitted high-signal emits', () => 
   flushPendingAuditEvents(env);
 
   expect(forwarded).toHaveLength(0);
-  expect(env.runtimeState?.pendingAuditEvents?.size).toBe(0);
+  expect(env.infrastructure?.pendingAuditEvents?.size).toBe(0);
 });
 
 test('warn, error, and rebalance diagnostics cannot escape before WAL commit', () => {
   const env = createEmptyEnv('env-events-structured-log-boundary');
   const forwarded: Array<Record<string, unknown>> = [];
-  env.runtimeState!.p2p = {
+  env.infrastructure!.p2p = {
     sendDebugEvent: (payload: unknown) => {
       forwarded.push(payload as Record<string, unknown>);
       return true;
@@ -66,7 +66,7 @@ test('warn, error, and rebalance diagnostics cannot escape before WAL commit', (
     env.warn('account', 'signed proposal is stale');
     env.error('runtime', 'candidate failed');
     expect(forwarded).toEqual([]);
-    expect(env.runtimeState?.pendingAuditEvents?.size).toBe(3);
+    expect(env.infrastructure?.pendingAuditEvents?.size).toBe(3);
 
     flushPendingAuditEvents(env);
     expect(forwarded.map(payload => payload.level)).toEqual(['info', 'warn', 'error']);
@@ -79,7 +79,7 @@ test('warn, error, and rebalance diagnostics cannot escape before WAL commit', (
 test('candidate notifications remain inert until commit publication and dedupe by exact payload', () => {
   const env = createEmptyEnv('candidate-effect-commit-boundary');
   const forwarded: Array<Record<string, unknown>> = [];
-  env.runtimeState!.p2p = {
+  env.infrastructure!.p2p = {
     sendDebugEvent: (payload: unknown) => {
       forwarded.push(payload as Record<string, unknown>);
       return true;
@@ -90,9 +90,9 @@ test('candidate notifications remain inert until commit publication and dedupe b
     payload: { code: 'REB_STEP', entityId: '0x01', frameHeight: 7 },
   };
 
-  expect(env.runtimeState?.pendingAuditEvents).toBeUndefined();
+  expect(env.infrastructure?.pendingAuditEvents).toBeUndefined();
   publishEntityCandidateEffects(env, [effect, effect]);
-  expect(env.runtimeState?.pendingAuditEvents?.size).toBe(1);
+  expect(env.infrastructure?.pendingAuditEvents?.size).toBe(1);
   expect(forwarded).toHaveLength(0);
 
   flushPendingAuditEvents(env);
@@ -122,7 +122,7 @@ test('candidate Account history is idempotent and conflicting bytes fail fast', 
   };
 
   publishEntityCandidateEffects(env, [effect, effect]);
-  expect(env.runtimeState?.pendingHistoryRecords).toHaveLength(1);
+  expect(env.infrastructure?.pendingHistoryRecords).toHaveLength(1);
   expect(() => publishEntityCandidateEffects(env, [{
     ...effect,
     frame: { ...frame, stateHash: '0x03' },

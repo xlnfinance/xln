@@ -208,7 +208,7 @@ export const applyImportJurisdictionIntent = (
     const conflictingReplica = [...env.state.jReplicas.entries()].find(([name, replica]) =>
       jurisdictionNameKey(name) !== jurisdictionNameKey(request.name) &&
       Array.isArray(replica.rpcs) && replica.rpcs.length === 0);
-    const conflictingIntent = [...(env.runtimeState?.pendingJurisdictionImports?.values() ?? [])]
+    const conflictingIntent = [...(env.infrastructure?.pendingJurisdictionImports?.values() ?? [])]
       .find(intent =>
         jurisdictionNameKey(intent.request.name) !== jurisdictionNameKey(request.name) &&
         intent.request.rpcs.length === 0);
@@ -226,15 +226,15 @@ export const applyImportJurisdictionIntent = (
   }
   const requestHash = buildJurisdictionImportRequestHash(request);
   const importId = requestHash;
-  env.runtimeState ??= {};
-  env.runtimeState.pendingJurisdictionImports ??= new Map();
+  env.infrastructure ??= {};
+  env.infrastructure.pendingJurisdictionImports ??= new Map();
   const nameKey = jurisdictionNameKey(request.name);
-  for (const pending of env.runtimeState.pendingJurisdictionImports.values()) {
+  for (const pending of env.infrastructure.pendingJurisdictionImports.values()) {
     if (jurisdictionNameKey(pending.request.name) !== nameKey) continue;
     if (pending.importId === importId && pending.requestHash === requestHash) return;
     throw new Error(`IMPORT_J_PENDING_CONFLICT:${request.name}`);
   }
-  env.runtimeState.pendingJurisdictionImports.set(importId, {
+  env.infrastructure.pendingJurisdictionImports.set(importId, {
     importId,
     requestHash,
     request,
@@ -353,7 +353,7 @@ export const applyCompleteImportJurisdiction = (
   runtimeTx: CompleteImportJRuntimeTx,
 ): void => {
   const existing = findJurisdictionReplica(env, runtimeTx.data.name);
-  const pending = env.runtimeState?.pendingJurisdictionImports?.get(runtimeTx.data.importId);
+  const pending = env.infrastructure?.pendingJurisdictionImports?.get(runtimeTx.data.importId);
   if (!pending) {
     if (existing) {
       assertReplicaMatchesResult(existing[1], runtimeTx.data);
@@ -387,9 +387,9 @@ export const applyCompleteImportJurisdiction = (
     });
   }
   if (result.browserVMState) env.browserVMState = structuredClone(result.browserVMState);
-  env.runtimeState!.pendingJurisdictionImports!.delete(result.importId);
-  if (env.runtimeState!.pendingJurisdictionImports!.size === 0) {
-    delete env.runtimeState!.pendingJurisdictionImports;
+  env.infrastructure!.pendingJurisdictionImports!.delete(result.importId);
+  if (env.infrastructure!.pendingJurisdictionImports!.size === 0) {
+    delete env.infrastructure!.pendingJurisdictionImports;
   }
   env.activeJurisdiction ||= result.name;
 };
@@ -572,7 +572,7 @@ export const materializePendingJurisdictionImportResults = async (
   env: RuntimeReplica,
   enqueue: (runtimeTx: CompleteImportJRuntimeTx) => void,
 ): Promise<void> => {
-  const pending = env.runtimeState?.pendingJurisdictionImports;
+  const pending = env.infrastructure?.pendingJurisdictionImports;
   if (!pending || pending.size === 0) return;
   const queuedIds = new Set(requireRuntimeMempool(env).runtimeTxs
     .filter((tx): tx is CompleteImportJRuntimeTx => tx.type === 'completeImportJ')

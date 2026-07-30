@@ -328,7 +328,7 @@ const assertGenesisBoardAuthority = (
     throw new Error(`STORAGE_ENTITY_LINEAGE_GENESIS_STACK_MISSING:${entityId}`);
   }
   const configuredStack = getCertifiedBoardStackKey(authority.config.jurisdiction);
-  const evidence = env.runtimeState?.certifiedRegistrationEvidence?.get(
+  const evidence = env.infrastructure?.certifiedRegistrationEvidence?.get(
     registrationEvidenceKey(configuredStack, entityId),
   );
   if (!evidence) {

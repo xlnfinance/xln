@@ -140,7 +140,7 @@ type RuntimeProfileSourceEnv = RuntimeReplica & {
   gossip?: {
     getProfiles?: () => unknown[];
   };
-  runtimeState?: {
+  infrastructure?: {
     p2p?: {
       ensureProfiles?: (entityIds: string[]) => Promise<boolean>;
     };
@@ -489,7 +489,7 @@ export function getHubOpenAccountPermissionError(input: HubOpenAccountPermission
 function hasLiveRuntimeProfileSource(env: RuntimeReplica | null | undefined): boolean {
   const runtimeEnv = env as RuntimeProfileSourceEnv | null | undefined;
   return Boolean(
-    runtimeEnv?.runtimeState?.p2p?.ensureProfiles
+    runtimeEnv?.infrastructure?.p2p?.ensureProfiles
       || runtimeEnv?.gossip?.getProfiles,
   );
 }

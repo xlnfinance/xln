@@ -24,8 +24,8 @@ describe('post-commit Runtime sync notification', () => {
     expect(error?.message).toBe('RUNTIME_SYNC_NOTIFICATION_FAILED:height=17');
     expect(env.state.height).toBe(17);
     expect(closeCalls).toEqual([17]);
-    expect(env.runtimeState?.runtimeSyncChannel).toBeNull();
-    expect(env.runtimeState?.runtimeSyncNotificationFailure).toEqual({
+    expect(env.infrastructure?.runtimeSyncChannel).toBeNull();
+    expect(env.infrastructure?.runtimeSyncNotificationFailure).toEqual({
       height: 17,
       message: 'RUNTIME_SYNC_NOTIFICATION_FAILED:height=17',
     });
@@ -34,7 +34,7 @@ describe('post-commit Runtime sync notification', () => {
   test('clears the previous failure after a successful notification', () => {
     const env = createEmptyEnv('runtime-sync-notification-recovery');
     env.state.height = 18;
-    env.runtimeState!.runtimeSyncNotificationFailure = {
+    env.infrastructure!.runtimeSyncNotificationFailure = {
       height: 17,
       message: 'previous failure',
     };
@@ -50,6 +50,6 @@ describe('post-commit Runtime sync notification', () => {
 
     expect(error).toBeNull();
     expect(messages).toEqual([{ runtimeId: env.runtimeId, height: 18 }]);
-    expect(env.runtimeState?.runtimeSyncNotificationFailure).toBeUndefined();
+    expect(env.infrastructure?.runtimeSyncNotificationFailure).toBeUndefined();
   });
 });

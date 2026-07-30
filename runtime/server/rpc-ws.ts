@@ -104,7 +104,7 @@ const findPaymentRoutes = async (
   }
   if (amount <= 0n) throw new RuntimeAdapterError('E_BAD_QUERY', 'payment route amount must be positive');
 
-  if (env.runtimeState?.p2p?.syncProfiles) await env.runtimeState.p2p.syncProfiles();
+  if (env.infrastructure?.p2p?.syncProfiles) await env.infrastructure.p2p.syncProfiles();
   const profilesReady = await ensureGossipProfiles(env, [sourceEntityId, targetEntityId]);
   if (!profilesReady) {
     throw new RuntimeAdapterError('E_INTERNAL', 'payment route profiles are unavailable', true);

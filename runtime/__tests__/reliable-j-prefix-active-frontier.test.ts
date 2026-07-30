@@ -21,7 +21,7 @@ const runtime = (seed: string): RuntimeReplica => {
   registerSignerKey(env, runtimeId, deriveSignerKeySync(seed, '1'));
   env.runtimeId = runtimeId;
   env.runtimeSeed = seed;
-  env.runtimeState ??= {};
+  env.infrastructure ??= {};
   return env;
 };
 
@@ -119,7 +119,7 @@ describe('reliable applied J-prefix active frontier', () => {
     expect(applied).toHaveLength(1);
     expect(applied[0]?.receipt?.body.coverage).toBe('exact');
     finalizeReliableIngressCommit(receiver, applied);
-    expect(receiver.runtimeState?.reliableIngressReceiptLedger?.size).toBe(1);
+    expect(receiver.infrastructure?.reliableIngressReceiptLedger?.size).toBe(1);
 
     const restored = runtime('reliable-j-prefix-frontier-receiver');
     restoreDurableRuntimeSnapshot(restored, buildDurableRuntimeMachineSnapshot(receiver));
@@ -128,8 +128,8 @@ describe('reliable applied J-prefix active frontier', () => {
     const retired = commitReliableIngress(restored, []);
     expect(retired).toHaveLength(1);
     expect(retired[0]?.receipt).toBeNull();
-    expect(restored.runtimeState?.reliableIngressReceiptLedger?.size).toBe(0);
-    expect(restored.runtimeState?.reliableIngressTerminalWatermarks?.size).toBe(1);
+    expect(restored.infrastructure?.reliableIngressReceiptLedger?.size).toBe(0);
+    expect(restored.infrastructure?.reliableIngressTerminalWatermarks?.size).toBe(1);
     expect(registerReliableIngress(restored, sender.runtimeId!, output).kind).toBe('receipt');
 
     const conflicting = jPrefixOutput(restored.runtimeId!, 12, '52');
@@ -145,7 +145,7 @@ describe('reliable applied J-prefix active frontier', () => {
 
     expect(registerReliableIngress(receiver, sender.runtimeId!, output).kind).toBe('enqueue');
     expect(commitReliableIngress(receiver, [])).toEqual([]);
-    expect(receiver.runtimeState?.pendingReliableIngress?.size).toBe(1);
-    expect(receiver.runtimeState?.reliableIngressTerminalWatermarks?.size ?? 0).toBe(0);
+    expect(receiver.infrastructure?.pendingReliableIngress?.size).toBe(1);
+    expect(receiver.infrastructure?.reliableIngressTerminalWatermarks?.size ?? 0).toBe(0);
   });
 });

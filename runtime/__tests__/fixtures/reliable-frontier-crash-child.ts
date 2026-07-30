@@ -129,18 +129,18 @@ const ingressActive = receipt(env, runtimeId, ingressActiveIdentity, 'exact');
 const senderTerminal = receipt(env, peerRuntimeId, senderTerminalIdentity, 'terminal');
 const senderActive = receipt(env, peerRuntimeId, senderActiveIdentity, 'exact');
 
-env.runtimeState ??= {};
-env.runtimeState.reliableIngressTerminalWatermarks = new Map([
+env.infrastructure ??= {};
+env.infrastructure.reliableIngressTerminalWatermarks = new Map([
   [receiverFrontierKey(peerRuntimeId, ingressTerminalIdentity), ingressTerminal],
   [receiverFrontierKey(relayRuntimeId, ingressTerminalIdentity), ingressTerminal],
 ]);
-env.runtimeState.reliableIngressReceiptLedger = new Map([
+env.infrastructure.reliableIngressReceiptLedger = new Map([
   [receiverFrontierKey(peerRuntimeId, ingressActiveIdentity), ingressActive],
 ]);
-env.runtimeState.receivedReliableTerminalWatermarks = new Map([
+env.infrastructure.receivedReliableTerminalWatermarks = new Map([
   [senderFrontierKey(senderTerminal), senderTerminal],
 ]);
-env.runtimeState.receivedReliableReceiptLedger = new Map([
+env.infrastructure.receivedReliableReceiptLedger = new Map([
   [senderFrontierKey(senderActive), senderActive],
 ]);
 

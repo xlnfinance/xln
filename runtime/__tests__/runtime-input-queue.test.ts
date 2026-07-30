@@ -31,8 +31,8 @@ test('enqueueRuntimeInputs timestamps work and wakes the loop', () => {
     env,
     {
       ensureRuntimeState: (targetEnv) => {
-        targetEnv.runtimeState ??= {};
-        return targetEnv.runtimeState;
+        targetEnv.infrastructure ??= {};
+        return targetEnv.infrastructure;
       },
       requestRuntimeLoopWake: () => {
         wakeCount += 1;
@@ -55,7 +55,7 @@ test('enqueueRuntimeInputs timestamps work and wakes the loop', () => {
 
 test('enqueueRuntimeInputs preserves already accepted internal continuations during durable pause', () => {
   const env = makeEnv();
-  env.runtimeState = {
+  env.infrastructure = {
     lifecyclePhase: 'quiescing',
     persistenceQuiescing: true,
     persistencePaused: true,
@@ -65,7 +65,7 @@ test('enqueueRuntimeInputs preserves already accepted internal continuations dur
   enqueueRuntimeInputsWithDeps(
     env,
     {
-      ensureRuntimeState: () => env.runtimeState!,
+      ensureRuntimeState: () => env.infrastructure!,
       requestRuntimeLoopWake: () => { wakeCount += 1; },
     },
     undefined,
@@ -81,7 +81,7 @@ test('enqueueRuntimeInputs preserves already accepted internal continuations dur
 
 test('enqueueRuntimeInputs rejects work after quiesce has paused durable persistence', () => {
   const env = makeEnv();
-  env.runtimeState = {
+  env.infrastructure = {
     lifecyclePhase: 'quiescing',
     persistenceQuiescing: true,
     persistencePaused: true,
@@ -90,7 +90,7 @@ test('enqueueRuntimeInputs rejects work after quiesce has paused durable persist
   expect(() => enqueueRuntimeInputsWithDeps(
     env,
     {
-      ensureRuntimeState: () => env.runtimeState!,
+      ensureRuntimeState: () => env.infrastructure!,
       requestRuntimeLoopWake: () => {
         throw new Error('POST_PAUSE_INGRESS_MUST_NOT_WAKE');
       },

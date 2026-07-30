@@ -396,7 +396,7 @@ async function ensureRuntimeOnline(page: Page, tag: string) {
           reconnect?: () => void;
         };
         type RuntimeEnv = {
-          runtimeState?: {
+          infrastructure?: {
             p2p?: RuntimeP2P;
           };
         };
@@ -404,7 +404,7 @@ async function ensureRuntimeOnline(page: Page, tag: string) {
           isolatedEnv?: RuntimeEnv;
         };
         const env = runtimeWindow.isolatedEnv;
-        const p2p = env?.runtimeState?.p2p;
+        const p2p = env?.infrastructure?.p2p;
         if (!env || !p2p) return false;
         if (typeof p2p.isConnected === 'function' && p2p.isConnected()) return true;
         const start = typeof p2p.connect === 'function' ? p2p.connect : p2p.reconnect;

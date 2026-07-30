@@ -147,7 +147,7 @@ describe('node runtime quiesce', () => {
       }],
       entityInputs: [],
     });
-    expect(env.runtimeState?.loopActive ?? false).toBe(false);
+    expect(env.infrastructure?.loopActive ?? false).toBe(false);
     expect(hasRuntimeWork(env)).toBe(true);
 
     const result = await quiesceNodeRuntime(env, {
@@ -167,8 +167,8 @@ describe('node runtime quiesce', () => {
 
   test('fails closed when work appears after durable persistence was paused', async () => {
     const env = createEmptyEnv(null);
-    env.runtimeState ??= {};
-    env.runtimeState.persistencePaused = true;
+    env.infrastructure ??= {};
+    env.infrastructure.persistencePaused = true;
     enqueueRuntimeInput(env, {
       runtimeTxs: [],
       entityInputs: [{
@@ -183,7 +183,7 @@ describe('node runtime quiesce', () => {
       loopTimeoutMs: 20,
       quietMs: 1,
     })).rejects.toThrow('NODE_RUNTIME_QUIESCE_FAILED:work_drain:RUNTIME_WORK_DRAIN_PERSISTENCE_PAUSED');
-    expect(env.runtimeState?.persistenceQuiescing).toBe(true);
+    expect(env.infrastructure?.persistenceQuiescing).toBe(true);
   });
 
   test('checkpoint atomically persists only after full quiesce and resumes prior loop and P2P', async () => {
@@ -249,10 +249,10 @@ describe('node runtime quiesce', () => {
         quietMs: 1,
         loopConfig: { tickDelayMs: 0 },
         persist: async () => {
-          expect(env.runtimeState?.loopActive).toBe(false);
-          expect(env.runtimeState?.p2p).toBeNull();
-          expect(env.runtimeState?.persistenceQuiescing).toBe(true);
-          expect(env.runtimeState?.persistencePaused).toBe(true);
+          expect(env.infrastructure?.loopActive).toBe(false);
+          expect(env.infrastructure?.p2p).toBeNull();
+          expect(env.infrastructure?.persistenceQuiescing).toBe(true);
+          expect(env.infrastructure?.persistencePaused).toBe(true);
           expect(env.state.height).toBeGreaterThanOrEqual(1);
           expect(env.state.eReplicas.has(`${entityId}:${runtimeId}`)).toBe(true);
           expect(env.runtimeMempool?.runtimeTxs).toHaveLength(0);
@@ -280,12 +280,12 @@ describe('node runtime quiesce', () => {
         wasPersistencePaused: false,
       });
       expect(persisted).toBe(true);
-      expect(env.runtimeState?.loopActive).toBe(true);
-      expect(env.runtimeState?.persistenceQuiescing).toBe(false);
-      expect(env.runtimeState?.persistencePaused).toBe(false);
-      expect(env.runtimeState?.p2p).not.toBeNull();
-      expect(env.runtimeState?.p2p).not.toBe(originalP2P);
-      expect(env.runtimeState?.lastP2PConfig).toEqual({ runtimeId });
+      expect(env.infrastructure?.loopActive).toBe(true);
+      expect(env.infrastructure?.persistenceQuiescing).toBe(false);
+      expect(env.infrastructure?.persistencePaused).toBe(false);
+      expect(env.infrastructure?.p2p).not.toBeNull();
+      expect(env.infrastructure?.p2p).not.toBe(originalP2P);
+      expect(env.infrastructure?.lastP2PConfig).toEqual({ runtimeId });
     } finally {
       await stopRuntimeLoopAndWait(env, 5_000);
       await stopP2PAndWait(env, 5_000);
@@ -309,9 +309,9 @@ describe('node runtime quiesce', () => {
           throw new Error('disk-write-failed');
         },
       })).rejects.toThrow('NODE_RUNTIME_CHECKPOINT_FAILED:persist:disk-write-failed');
-      expect(env.runtimeState?.loopActive).toBe(true);
-      expect(env.runtimeState?.persistenceQuiescing).toBe(false);
-      expect(env.runtimeState?.persistencePaused).toBe(false);
+      expect(env.infrastructure?.loopActive).toBe(true);
+      expect(env.infrastructure?.persistenceQuiescing).toBe(false);
+      expect(env.infrastructure?.persistencePaused).toBe(false);
     } finally {
       await stopRuntimeLoopAndWait(env, 50);
     }
@@ -345,8 +345,8 @@ describe('node runtime quiesce', () => {
         entityProvider: jurisdiction.entityProviderAddress,
       },
     } as JReplica);
-    env.runtimeState ??= {};
-    env.runtimeState.persistencePaused = true;
+    env.infrastructure ??= {};
+    env.infrastructure.persistencePaused = true;
     enqueueRuntimeInput(env, {
       runtimeTxs: [{
         type: 'importReplica',
@@ -381,8 +381,8 @@ describe('node runtime quiesce', () => {
       });
 
       expect(result.wasPersistencePaused).toBe(true);
-      expect(env.runtimeState.persistencePaused).toBe(false);
-      expect(env.runtimeState.persistenceQuiescing).toBe(false);
+      expect(env.infrastructure.persistencePaused).toBe(false);
+      expect(env.infrastructure.persistenceQuiescing).toBe(false);
       expect((await readPersistedStorageHead(env))?.latestHeight).toBe(1);
     } finally {
       await stopRuntimeLoopAndWait(env, 1_000);
@@ -396,8 +396,8 @@ describe('node runtime quiesce', () => {
     const env = createEmptyEnv(`failed-bootstrap-checkpoint-${process.pid}-${Date.now()}`);
     const runtimeId = env.runtimeId;
     if (!runtimeId) throw new Error('TEST_RUNTIME_ID_MISSING');
-    env.runtimeState ??= {};
-    env.runtimeState.persistencePaused = true;
+    env.infrastructure ??= {};
+    env.infrastructure.persistencePaused = true;
     const originalP2P = startP2P(env, { runtimeId });
     if (!originalP2P) throw new Error('TEST_P2P_START_FAILED');
     startRuntimeLoop(env, { tickDelayMs: 0 });
@@ -413,11 +413,11 @@ describe('node runtime quiesce', () => {
         },
       })).rejects.toThrow('NODE_RUNTIME_CHECKPOINT_FAILED:persist:bootstrap-base-write-failed');
 
-      expect(env.runtimeState.persistencePaused).toBe(true);
-      expect(env.runtimeState.persistenceQuiescing).toBe(false);
-      expect(env.runtimeState.lifecyclePhase).toBe('stopped');
-      expect(env.runtimeState.loopActive).toBe(false);
-      expect(env.runtimeState.p2p).toBeNull();
+      expect(env.infrastructure.persistencePaused).toBe(true);
+      expect(env.infrastructure.persistenceQuiescing).toBe(false);
+      expect(env.infrastructure.lifecyclePhase).toBe('stopped');
+      expect(env.infrastructure.loopActive).toBe(false);
+      expect(env.infrastructure.p2p).toBeNull();
     } finally {
       await stopRuntimeLoopAndWait(env, 50);
       await stopP2PAndWait(env, 50);
@@ -428,8 +428,8 @@ describe('node runtime quiesce', () => {
     const env = createEmptyEnv(`paused-checkpoint-${process.pid}-${Date.now()}`);
     const runtimeId = env.runtimeId;
     if (!runtimeId) throw new Error('TEST_RUNTIME_ID_MISSING');
-    env.runtimeState ??= {};
-    env.runtimeState.persistencePaused = true;
+    env.infrastructure ??= {};
+    env.infrastructure.persistencePaused = true;
     const originalP2P = startP2P(env, { runtimeId });
     if (!originalP2P) throw new Error('TEST_P2P_START_FAILED');
     startRuntimeLoop(env, { tickDelayMs: 0 });
@@ -443,10 +443,10 @@ describe('node runtime quiesce', () => {
       });
 
       expect(result.wasPersistencePaused).toBe(true);
-      expect(env.runtimeState.persistencePaused).toBe(true);
-      expect(env.runtimeState.lifecyclePhase).toBe('stopped');
-      expect(env.runtimeState.loopActive).toBe(false);
-      expect(env.runtimeState.p2p).toBeNull();
+      expect(env.infrastructure.persistencePaused).toBe(true);
+      expect(env.infrastructure.lifecyclePhase).toBe('stopped');
+      expect(env.infrastructure.loopActive).toBe(false);
+      expect(env.infrastructure.p2p).toBeNull();
     } finally {
       await stopRuntimeLoopAndWait(env, 50);
       await stopP2PAndWait(env, 50);

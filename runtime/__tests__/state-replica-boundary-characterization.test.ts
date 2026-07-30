@@ -199,11 +199,11 @@ describe('State and Replica boundary characterization', () => {
     const baselineSnapshot = buildDurableRuntimeMachineSnapshot(env);
     const baselineHash = computeCanonicalStateHashFromEnv(env);
 
-    env.runtimeState!.pendingProfileCertificationEntityIds = new Set([counterpartyId]);
+    env.infrastructure!.pendingProfileCertificationEntityIds = new Set([counterpartyId]);
     expect(bytesOf(buildDurableRuntimeMachineSnapshot(env))).toBe(bytesOf(baselineSnapshot));
     expect(computeCanonicalStateHashFromEnv(env)).toBe(baselineHash);
 
-    env.runtimeState!.maxEntityInputsPerFrame = 17;
+    env.infrastructure!.maxEntityInputsPerFrame = 17;
     const durableSnapshot = buildDurableRuntimeMachineSnapshot(env);
     expect(bytesOf(durableSnapshot)).not.toBe(bytesOf(baselineSnapshot));
     expect(computeCanonicalStateHashFromEnv(env)).not.toBe(baselineHash);
@@ -213,7 +213,7 @@ describe('State and Replica boundary characterization', () => {
     restoreDurableRuntimeSnapshot(restored, decoded);
     expect(bytesOf(buildDurableRuntimeMachineSnapshot(restored))).toBe(bytesOf(durableSnapshot));
     expect(restored.browserVMState).toEqual(env.browserVMState);
-    expect(restored.runtimeState?.pendingProfileCertificationEntityIds).toBeUndefined();
+    expect(restored.infrastructure?.pendingProfileCertificationEntityIds).toBeUndefined();
   });
 
   test('BrowserVM state survives the canonical history binary boundary byte-for-byte', () => {

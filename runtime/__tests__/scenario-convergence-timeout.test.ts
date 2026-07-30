@@ -111,7 +111,7 @@ describe('scenario convergence timeout diagnostics', () => {
     env.state.timestamp = 1_999;
     const output = networkOutput('3');
     env.pendingNetworkOutputs = [output];
-    env.runtimeState!.deferredNetworkMeta = new Map([
+    env.infrastructure!.deferredNetworkMeta = new Map([
       [buildRouteOutputKey(output), { attempts: 1, nextRetryAt: 2_000 }],
     ]);
 
@@ -151,12 +151,12 @@ describe('scenario convergence timeout diagnostics', () => {
     };
 
     expect(registerReliableIngress(env, receiverRuntimeId, output).kind).toBe('enqueue');
-    expect(env.runtimeState?.pendingReliableIngress?.size).toBe(1);
+    expect(env.infrastructure?.pendingReliableIngress?.size).toBe(1);
     env.runtimeMempool.entityInputs = [output];
 
     await processWithOffline(env, undefined, new Set(['4']), 'validator-offline');
 
-    expect(env.runtimeState?.pendingReliableIngress?.size).toBe(0);
+    expect(env.infrastructure?.pendingReliableIngress?.size).toBe(0);
     expect(env.runtimeMempool.entityInputs).toEqual([]);
     expect(registerReliableIngress(env, receiverRuntimeId, output).kind).toBe('enqueue');
   });

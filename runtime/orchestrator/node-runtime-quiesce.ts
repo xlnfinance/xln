@@ -53,7 +53,7 @@ export const quiesceNodeRuntime = async (
 
   // Establish the ingress fence first. The runtime loop remains alive long
   // enough to drain accepted work, but cannot restart a stopped J watcher.
-  if (env.runtimeState) env.runtimeState.persistenceQuiescing = true;
+  if (env.infrastructure) env.infrastructure.persistenceQuiescing = true;
   try {
     await stopJurisdictionWatchersAndWait(env);
   } catch (error) {
@@ -106,8 +106,8 @@ export const checkpointNodeRuntime = async (
   env: RuntimeReplica,
   options: NodeRuntimeCheckpointOptions,
 ): Promise<NodeRuntimeCheckpointResult> => {
-  env.runtimeState = env.runtimeState ?? {};
-  const state = env.runtimeState;
+  env.infrastructure = env.infrastructure ?? {};
+  const state = env.infrastructure;
   if (state.persistenceQuiescing) {
     throw new Error('NODE_RUNTIME_CHECKPOINT_ALREADY_QUIESCING');
   }

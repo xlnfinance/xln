@@ -224,8 +224,8 @@ describe('runtime recovery tower', () => {
     };
     env.runtimeMempool = queuedInput;
     env.runtimeConfig = { minFrameDelayMs: 25, snapshotIntervalFrames: 7 };
-    env.runtimeState = {
-      ...(env.runtimeState ?? {}),
+    env.infrastructure = {
+      ...(env.infrastructure ?? {}),
       maxEntityInputsPerFrame: 123,
     };
     env.pendingOutputs = [{ entityId, signerId: runtimeId, runtimeId, entityTxs: [] }];
@@ -267,7 +267,7 @@ describe('runtime recovery tower', () => {
     expect(restoredEnv.state.jReplicas.size).toBe(env.state.jReplicas.size);
     expect(restoredEnv.runtimeMempool).toEqual(env.runtimeMempool);
     expect(restoredEnv.runtimeConfig).toEqual(env.runtimeConfig);
-    expect(restoredEnv.runtimeState?.maxEntityInputsPerFrame).toBe(123);
+    expect(restoredEnv.infrastructure?.maxEntityInputsPerFrame).toBe(123);
     expect(restoredEnv.pendingOutputs).toEqual(env.pendingOutputs);
     expect(restoredEnv.networkInbox).toEqual(env.networkInbox);
   });

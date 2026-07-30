@@ -1844,10 +1844,10 @@ export const hasMarketMakerAccountBacklog = (env: RuntimeReplica, entityId: stri
 export const hasMarketMakerRuntimeBacklog = (env: RuntimeReplica): boolean => {
   const runtimeMempool = env.runtimeMempool;
   return runtimeBacklogBlocksMarketMakerQuotes({
-    processing: Boolean(env.runtimeState?.processingPromise),
+    processing: Boolean(env.infrastructure?.processingPromise),
     runtimeTxs: Number(runtimeMempool?.runtimeTxs?.length || 0),
     entityInputs: Number(runtimeMempool?.entityInputs?.length || 0),
-    inFlightEntityInputs: Number(env.runtimeState?.inFlightEntityInputs || 0),
+    inFlightEntityInputs: Number(env.infrastructure?.inFlightEntityInputs || 0),
     jInputs: Number(runtimeMempool?.jInputs?.length || 0),
   });
 };
@@ -1857,10 +1857,10 @@ export const getMarketMakerRuntimeBacklogSnapshot = (
   options: { includeQueuedEntityInputs?: boolean } = {},
 ): Record<string, unknown> => {
   const snapshot: Record<string, unknown> = {
-    processing: Boolean(env.runtimeState?.processingPromise),
+    processing: Boolean(env.infrastructure?.processingPromise),
     runtimeTxs: Number(env.runtimeMempool?.runtimeTxs?.length || 0),
     entityInputs: Number(env.runtimeMempool?.entityInputs?.length || 0),
-    inFlightEntityInputs: Number(env.runtimeState?.inFlightEntityInputs || 0),
+    inFlightEntityInputs: Number(env.infrastructure?.inFlightEntityInputs || 0),
     jInputs: Number(env.runtimeMempool?.jInputs?.length || 0),
   };
   if (options.includeQueuedEntityInputs === true) {

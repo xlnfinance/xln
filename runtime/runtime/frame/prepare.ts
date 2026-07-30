@@ -28,7 +28,7 @@ const countEntityTxs = (input: RuntimeInput): number =>
 
 export const prepareRuntimeFrameInput = async (
   env: RuntimeReplica,
-  state: NonNullable<RuntimeReplica['runtimeState']>,
+  state: NonNullable<RuntimeReplica['infrastructure']>,
   input: RuntimeInput,
   mempool: RuntimeInput,
   queuedAt: number | undefined,

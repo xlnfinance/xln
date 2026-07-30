@@ -39,7 +39,7 @@ async function ensureRuntimeOnline(page: Page, tag: string): Promise<void> {
   const ok = await page.evaluate(async () => {
     const env = (window as typeof window & {
       isolatedEnv?: {
-        runtimeState?: {
+        infrastructure?: {
           p2p?: {
             isConnected?: () => boolean;
             connect?: () => void;
@@ -48,7 +48,7 @@ async function ensureRuntimeOnline(page: Page, tag: string): Promise<void> {
         };
       };
     }).isolatedEnv;
-    const p2p = env?.runtimeState?.p2p;
+    const p2p = env?.infrastructure?.p2p;
     if (!env || !p2p) return false;
 
     const startedAt = Date.now();
@@ -72,7 +72,7 @@ async function nudgeRuntimeOnline(page: Page): Promise<void> {
   await page.evaluate(() => {
     const env = (window as typeof window & {
       isolatedEnv?: {
-        runtimeState?: {
+        infrastructure?: {
           p2p?: {
             isConnected?: () => boolean;
             connect?: () => void;
@@ -81,7 +81,7 @@ async function nudgeRuntimeOnline(page: Page): Promise<void> {
         };
       };
     }).isolatedEnv;
-    const p2p = env?.runtimeState?.p2p;
+    const p2p = env?.infrastructure?.p2p;
     if (!p2p || (typeof p2p.isConnected === 'function' && p2p.isConnected())) return;
     if (typeof p2p.connect === 'function') {
       try { p2p.connect(); } catch {}
@@ -517,7 +517,7 @@ async function readLocalConnectRuntimeDiagnostic(page: Page, hubId: string): Pro
         height?: number;
         timestamp?: number;
         runtimeId?: string;
-        runtimeState?: {
+        infrastructure?: {
           halted?: boolean;
           fatalDebugPayload?: unknown;
           loopActive?: boolean;
@@ -655,10 +655,10 @@ async function readLocalConnectRuntimeDiagnostic(page: Page, hubId: string): Pro
       height: Number(env?.height || 0),
       timestamp: Number(env?.timestamp || 0),
       runtimeId: env?.runtimeId ?? null,
-      runtimeState: env?.runtimeState ? {
-        halted: Boolean(env.runtimeState.halted),
-        loopActive: Boolean(env.runtimeState.loopActive),
-        fatalDebugPayload: env.runtimeState.fatalDebugPayload ?? null,
+      infrastructure: env?.infrastructure ? {
+        halted: Boolean(env.infrastructure.halted),
+        loopActive: Boolean(env.infrastructure.loopActive),
+        fatalDebugPayload: env.infrastructure.fatalDebugPayload ?? null,
       } : null,
       uiErrors: Array.from(document.querySelectorAll('.hub-panel .error-banner, [role="alert"], .toast'))
         .map((entry) => String(entry.textContent || '').trim())
@@ -724,7 +724,7 @@ async function waitForHubRuntimeProfile(page: Page, hubId: string, timeoutMs = 2
         const env = (window as typeof window & {
           isolatedEnv?: {
             gossip?: { getProfiles?: () => Array<{ entityId?: string; runtimeId?: string }> };
-            runtimeState?: {
+            infrastructure?: {
               p2p?: {
                 isConnected?: () => boolean;
                 connect?: () => void;
@@ -741,7 +741,7 @@ async function waitForHubRuntimeProfile(page: Page, hubId: string, timeoutMs = 2
         const profile = getProfile();
         if (String(profile?.runtimeId || '').trim()) return true;
 
-        const p2p = env?.runtimeState?.p2p;
+        const p2p = env?.infrastructure?.p2p;
         if (!p2p) {
           return { ok: false, reason: 'missing-p2p', profileCount: env?.gossip?.getProfiles?.().length || 0 };
         }
@@ -846,7 +846,7 @@ async function waitForHubRuntimeTransportReady(page: Page, hubId: string, timeou
             gossip?: {
               getProfiles?: () => Array<{ entityId?: string; runtimeId?: string; wsUrl?: string | null }>;
             };
-            runtimeState?: {
+            infrastructure?: {
               p2p?: {
                 isConnected?: () => boolean;
                 connect?: () => void;
@@ -860,7 +860,7 @@ async function waitForHubRuntimeTransportReady(page: Page, hubId: string, timeou
           };
         }).isolatedEnv;
         const target = String(targetHubId || '').toLowerCase();
-        const p2p = env?.runtimeState?.p2p;
+        const p2p = env?.infrastructure?.p2p;
         const profile = env?.gossip?.getProfiles?.().find((candidate) =>
           String(candidate?.entityId || '').toLowerCase() === target,
         );
@@ -1309,7 +1309,7 @@ async function getConnectDebugState(
           };
         }>;
         gossip?: { getProfiles?: () => Array<{ entityId?: string; runtimeId?: string; metadata?: unknown }> };
-        runtimeState?: {
+        infrastructure?: {
           p2p?: {
             getDirectPeerState?: () => Array<{ runtimeId: string; endpoint: string; open: boolean; lastError?: string; lastErrorAt?: number }>;
             getQueueState?: () => unknown;
@@ -1381,10 +1381,10 @@ async function getConnectDebugState(
       height: env?.height,
       timestamp: env?.timestamp,
       p2p: {
-        connected: env?.runtimeState?.p2p?.isConnected?.() ?? null,
-        directPeers: env?.runtimeState?.p2p?.getDirectPeerState?.() ?? null,
-        queue: env?.runtimeState?.p2p?.getQueueState?.() ?? null,
-        reconnect: env?.runtimeState?.p2p?.getReconnectState?.() ?? null,
+        connected: env?.infrastructure?.p2p?.isConnected?.() ?? null,
+        directPeers: env?.infrastructure?.p2p?.getDirectPeerState?.() ?? null,
+        queue: env?.infrastructure?.p2p?.getQueueState?.() ?? null,
+        reconnect: env?.infrastructure?.p2p?.getReconnectState?.() ?? null,
       },
 	      account: account ? {
 	        currentHeight: Number(account.currentHeight || 0),
@@ -1481,12 +1481,12 @@ async function hasExportedRuntimeP2P(page: Page): Promise<boolean> {
   return await page.evaluate(() => {
     const env = (window as typeof window & {
       isolatedEnv?: {
-        runtimeState?: {
+        infrastructure?: {
           p2p?: unknown;
         };
       };
     }).isolatedEnv;
-    return Boolean(env?.runtimeState?.p2p);
+    return Boolean(env?.infrastructure?.p2p);
   }).catch(() => false);
 }
 

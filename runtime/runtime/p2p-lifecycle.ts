@@ -13,7 +13,7 @@ import {
 export type { P2PConfig } from '../networking/p2p';
 
 export type RuntimeP2PLifecycleDeps = {
-  ensureRuntimeState: (env: RuntimeReplica) => NonNullable<RuntimeReplica['runtimeState']>;
+  ensureRuntimeState: (env: RuntimeReplica) => NonNullable<RuntimeReplica['infrastructure']>;
   notifyEnvChange: (env: RuntimeReplica) => void;
   handleInboundP2PEntityInputs: (
     env: RuntimeReplica,
@@ -61,7 +61,7 @@ const reconnectP2P = (p2p: P2Pish): void => {
 
 const reuseProcessP2P = (
   env: RuntimeReplica,
-  state: NonNullable<RuntimeReplica['runtimeState']>,
+  state: NonNullable<RuntimeReplica['infrastructure']>,
   config: P2PConfig,
   runtimeId: string,
 ): RuntimeP2P | null => {
@@ -79,7 +79,7 @@ const reuseProcessP2P = (
 };
 
 const reuseAttachedP2P = (
-  state: NonNullable<RuntimeReplica['runtimeState']>,
+  state: NonNullable<RuntimeReplica['infrastructure']>,
   config: P2PConfig,
   runtimeId: string,
 ): RuntimeP2P | null => {
@@ -96,7 +96,7 @@ const reuseAttachedP2P = (
 
 const buildRuntimeP2POptions = (
   env: RuntimeReplica,
-  state: NonNullable<RuntimeReplica['runtimeState']>,
+  state: NonNullable<RuntimeReplica['infrastructure']>,
   config: P2PConfig,
   runtimeId: string,
   deps: RuntimeP2PLifecycleDeps,
@@ -250,7 +250,7 @@ export const stopRuntimeP2PAndWait = async (
 };
 
 export const detachRuntimeP2P = (env: RuntimeReplica, deps: RuntimeP2PLifecycleDeps): void => {
-  const state = env.runtimeState;
+  const state = env.infrastructure;
   if (!state?.p2p) return;
   try {
     state.p2p.close();

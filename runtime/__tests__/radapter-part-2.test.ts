@@ -145,7 +145,7 @@ const makeEnv = (): RuntimeReplica =>
     height: 7,
     timestamp: 700,
     runtimeSeed: 'seed',
-    runtimeState: {
+    infrastructure: {
       lifecyclePhase: 'running',
       loopActive: true,
     },
@@ -1330,7 +1330,7 @@ test('runtime adapter rejects send and cross-j before either reaches a halted ru
     deps,
   );
   messages.length = 0;
-  env.runtimeState = { lifecyclePhase: 'halted', halted: true };
+  env.infrastructure = { lifecyclePhase: 'halted', halted: true };
 
   await handleRuntimeAdapterMessage(
     socket,
@@ -1498,7 +1498,7 @@ test('runtime adapter send commandId deduplicates retries and rejects payload ch
   expect(conflict.ok).toBe(false);
   expect(conflict.error.code).toBe('E_COMMAND_PENDING');
   expect(enqueued).toBe(1);
-  expect(env.runtimeState?.runtimeAdapterCommandFrontiers).toBeUndefined();
+  expect(env.infrastructure?.runtimeAdapterCommandFrontiers).toBeUndefined();
 });
 
 test('vault-owner command retry survives capability token rotation without a second enqueue', async () => {
@@ -1577,7 +1577,7 @@ test('vault-owner command retry survives capability token rotation without a sec
   expect(retried.auth.payload.nextCommandSequence).toBe(2);
   expect(retried.send.payload.status).toBe('observed');
   expect(enqueued).toBe(1);
-  expect(env.runtimeState?.runtimeAdapterCommandFrontiers?.size).toBe(1);
+  expect(env.infrastructure?.runtimeAdapterCommandFrontiers?.size).toBe(1);
 });
 
 test('vault-owner command frontier survives capability expiry and durable restore', async () => {
@@ -1642,16 +1642,16 @@ test('vault-owner command frontier survives capability expiry and durable restor
   };
 
   await send(now + 60_000, 'before');
-  const durableRuntimeState = structuredClone(env.runtimeState);
+  const durableRuntimeState = structuredClone(env.infrastructure);
   env = makeEnv();
   env.runtimeId = runtimeId;
   env.state.timestamp = now + 61_000;
-  env.runtimeState = durableRuntimeState;
+  env.infrastructure = durableRuntimeState;
   const retried = await send(now + 120_000, 'after');
 
   expect(retried.payload.status).toBe('observed');
   expect(enqueued).toBe(1);
-  expect(env.runtimeState?.runtimeAdapterCommandFrontiers?.size).toBe(1);
+  expect(env.infrastructure?.runtimeAdapterCommandFrontiers?.size).toBe(1);
 });
 
 test('invalid vault-owner proof rejects auth instead of falling back to a capability lane', async () => {
@@ -1902,8 +1902,8 @@ test('runtime adapter rejects a new command lane before enqueue when active capa
   };
   const env = makeEnv();
   const expiresAtMs = Date.now() + 60_000;
-  env.runtimeState ??= {};
-  env.runtimeState.runtimeAdapterCommandFrontiers = new Map(
+  env.infrastructure ??= {};
+  env.infrastructure.runtimeAdapterCommandFrontiers = new Map(
     Array.from({ length: MAX_ACTIVE_RUNTIME_ADAPTER_COMMAND_LANES }, (_, index) => [
       `0x${(index + 1).toString(16).padStart(64, '0')}`,
       {
@@ -2334,10 +2334,10 @@ test('embedded adapter never publishes an in-flight frame through synchronous st
   expect(adapter.currentHeight).toBe(4);
 
   env.state.height = 5;
-  env.runtimeState!.stateMutationInFlight = true;
+  env.infrastructure!.stateMutationInFlight = true;
   expect(adapter.currentHeight).toBe(4);
 
-  env.runtimeState!.stateMutationInFlight = false;
+  env.infrastructure!.stateMutationInFlight = false;
   notify?.(env.state.height);
   expect(adapter.currentHeight).toBe(5);
 });
@@ -2373,7 +2373,7 @@ test('embedded adapter rejects money commands after the runtime stops accepting 
   expect(adapter.commandReady).toBe(true);
   expect(adapter.commandReadyReason).toBe(null);
 
-  env.runtimeState = { lifecyclePhase: 'halted', halted: true };
+  env.infrastructure = { lifecyclePhase: 'halted', halted: true };
   publishHalted?.();
   expect(adapter.commandReady).toBe(false);
   expect(adapter.commandReadyReason).toBe('phase=halted');

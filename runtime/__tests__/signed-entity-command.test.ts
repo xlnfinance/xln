@@ -316,7 +316,7 @@ describe('signed Entity command admission', () => {
         `${targetEntityId}:${targetSignerId}`,
         { entityId: targetEntityId, signerId: targetSignerId },
       ]]),
-      runtimeState: { entityRuntimeHints: new Map() },
+      infrastructure: { entityRuntimeHints: new Map() },
       warn: () => {},
       info: () => {},
       error: () => {},
@@ -330,7 +330,7 @@ describe('signed Entity command admission', () => {
         data: { isHub: true, routingFeePPM: 777, baseFee: 123n },
       }],
     }, {
-      ensureRuntimeState: target => target.runtimeState!,
+      ensureRuntimeState: target => target.infrastructure!,
       enqueueRuntimeInputs: (_target, inputs) => enqueued.push(...(inputs ?? [])),
       extractEntityId: key => String(key).split(':')[0] || '',
       hasLocalSignerForEntity: () => true,
@@ -352,7 +352,7 @@ describe('signed Entity command admission', () => {
       from: address('55'),
       entityTxs: [signedEntityCommandTx(command)],
     }, {
-      ensureRuntimeState: target => target.runtimeState!,
+      ensureRuntimeState: target => target.infrastructure!,
       enqueueRuntimeInputs: (_target, inputs) => enqueued.push(...(inputs ?? [])),
       extractEntityId: key => String(key).split(':')[0] || '',
       hasLocalSignerForEntity: () => true,

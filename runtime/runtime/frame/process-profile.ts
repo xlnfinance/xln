@@ -98,7 +98,7 @@ export const createRuntimeProcessProfile = (
     readyPendingOutputs: 0,
     waitingPendingOutputs: 0,
     pendingNetworkAfter: liveEnv.pendingNetworkOutputs?.length ?? 0,
-    deferredNetworkMeta: liveEnv.runtimeState?.deferredNetworkMeta?.size ?? 0,
+    deferredNetworkMeta: liveEnv.infrastructure?.deferredNetworkMeta?.size ?? 0,
     jOutputs: 0,
     frameAdvanced: false,
   };

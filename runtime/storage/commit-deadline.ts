@@ -56,7 +56,7 @@ export const waitForRuntimeProcessingIdle = async (
 ): Promise<boolean> => {
   const startedAt = Date.now();
   while (true) {
-    const pending = env.runtimeState?.processingPromise;
+    const pending = env.infrastructure?.processingPromise;
     if (!pending) return true;
     const remaining = timeoutMs - (Date.now() - startedAt);
     if (remaining <= 0) return false;

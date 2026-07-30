@@ -35,7 +35,7 @@ test('production RuntimeReplica retains only the bounded canonical debug tail', 
     ...(env.runtimeConfig || {}),
     storage: { ...(env.runtimeConfig?.storage || {}), enabled: false },
   };
-  if (env.runtimeState) env.runtimeState.persistencePaused = true;
+  if (env.infrastructure) env.infrastructure.persistencePaused = true;
   env.scenarioMode = true;
   env.quietRuntimeLogs = true;
 

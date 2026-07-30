@@ -74,7 +74,7 @@ const assertValidActionResult = (data: RecordActionResultTx['data']): void => {
 
 const findPendingAttempt = (env: RuntimeReplica, attemptId: string): PendingActionAttempt | null => {
   const matches: PendingActionAttempt[] = [];
-  for (const input of env.runtimeState?.pendingCommittedJOutbox ?? []) {
+  for (const input of env.infrastructure?.pendingCommittedJOutbox ?? []) {
     for (const jTx of input.jTxs) {
       if (
         isEntityProviderActionJTx(jTx) &&
@@ -130,19 +130,19 @@ const findRecordedFingerprint = (env: RuntimeReplica, attemptId: string): string
 };
 
 export const removePendingEntityProviderActionAttempt = (env: RuntimeReplica, attemptId: string): void => {
-  const remaining = (env.runtimeState?.pendingCommittedJOutbox ?? []).flatMap((input) => {
+  const remaining = (env.infrastructure?.pendingCommittedJOutbox ?? []).flatMap((input) => {
     const jTxs = input.jTxs.filter((jTx) => !(
       isEntityProviderActionJTx(jTx) &&
       jTx.data.runtimeSubmitAttempt?.attemptId === attemptId
     ));
     return jTxs.length > 0 ? [{ jurisdictionName: input.jurisdictionName, jTxs }] : [];
   });
-  if (env.runtimeState) env.runtimeState.pendingCommittedJOutbox = remaining;
+  if (env.infrastructure) env.infrastructure.pendingCommittedJOutbox = remaining;
 };
 
 const activePendingAttemptIds = (env: RuntimeReplica, replica: EntityReplica): Set<string> => {
   const active = new Set<string>();
-  for (const input of env.runtimeState?.pendingCommittedJOutbox ?? []) {
+  for (const input of env.infrastructure?.pendingCommittedJOutbox ?? []) {
     for (const jTx of input.jTxs) {
       if (
         isEntityProviderActionJTx(jTx) &&

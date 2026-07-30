@@ -19,8 +19,8 @@ export const buildRuntimeSecurityIncidentId = (
 ].join(':');
 
 const getIncidentMap = (env: RuntimeReplica): Map<string, RuntimeSecurityIncident> => {
-  const runtimeState = env.runtimeState ?? (env.runtimeState = {});
-  return runtimeState.securityIncidents ?? (runtimeState.securityIncidents = new Map());
+  const infrastructure = env.infrastructure ?? (env.infrastructure = {});
+  return infrastructure.securityIncidents ?? (infrastructure.securityIncidents = new Map());
 };
 
 const incidentTimestamp = (env: RuntimeReplica): number => {

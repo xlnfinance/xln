@@ -1758,7 +1758,7 @@ const buildLocalHealth = (
   hubEntities: HubBootstrapEntry[],
   bootstrapProgress: BootstrapProgressHealth,
 ): LocalHealthResponse => {
-  const runtimeHalted = env.runtimeState?.halted === true;
+  const runtimeHalted = env.infrastructure?.halted === true;
   const selfJurisdictionName = getEntityJurisdictionName(env, entityId);
   const selfJurisdiction = getEntityJurisdiction(env, entityId) || selfJurisdictionName;
   const visibleHubProfiles = readVisibleHubProfiles(env, selfJurisdiction);
@@ -1781,8 +1781,8 @@ const buildLocalHealth = (
     apiUrl,
     runtime: {
       halted: runtimeHalted,
-      lifecyclePhase: env.runtimeState?.lifecyclePhase ?? null,
-      fatalDebugPayload: env.runtimeState?.fatalDebugPayload ?? null,
+      lifecyclePhase: env.infrastructure?.lifecyclePhase ?? null,
+      fatalDebugPayload: env.infrastructure?.fatalDebugPayload ?? null,
     },
     quiescence: summarizeRuntimeQuiescence(env),
     p2p: {
@@ -1890,9 +1890,9 @@ const handleAccountStatusRequest = (
       runtime: {
         height: Number(env.state.height ?? 0),
         timestamp: Number(env.state.timestamp ?? 0),
-        halted: Boolean(env.runtimeState?.halted),
-        fatalDebugPayload: env.runtimeState?.fatalDebugPayload ?? null,
-        loopActive: Boolean(env.runtimeState?.loopActive),
+        halted: Boolean(env.infrastructure?.halted),
+        fatalDebugPayload: env.infrastructure?.fatalDebugPayload ?? null,
+        loopActive: Boolean(env.infrastructure?.loopActive),
         runtimeMempool: summarizeRecentRuntimeInputs(
           env.runtimeMempool?.entityInputs,
         ),
@@ -2468,7 +2468,7 @@ const createHubStatusHandler = (
           relayUrl: resolvedArgs.relayUrl,
           directWsUrl,
           storage: {
-            persistencePaused: Boolean(live.env.runtimeState?.persistencePaused),
+            persistencePaused: Boolean(live.env.infrastructure?.persistencePaused),
           },
         }),
         { headers: JSON_HEADERS },

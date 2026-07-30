@@ -11,7 +11,7 @@ const makeEnv = (replicas: Array<[string, JReplica]>): RuntimeReplica => ({
   timestamp: 0,
   eReplicas: new Map(),
   jReplicas: new Map(replicas),
-  runtimeState: {},
+  infrastructure: {},
 } as unknown as RuntimeReplica);
 
 const makeAdapter = (options?: { watching?: boolean }) => {

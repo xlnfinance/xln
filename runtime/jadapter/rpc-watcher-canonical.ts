@@ -197,7 +197,7 @@ export const assertAuthorityEvidenceCanonical = async (
     entityProviderAddress: services.entityProviderAddress,
   });
   const evidence = Array.from(
-    activeEnv.runtimeState?.certifiedRegistrationEvidence?.values() ?? [],
+    activeEnv.infrastructure?.certifiedRegistrationEvidence?.values() ?? [],
   ).filter(candidate => candidate.stackKey === stackKey);
   const currentHeader = (await services.readBlockHeaders([currentHead]))[0];
   if (!currentHeader) throw new Error(`J_AUTHORITY_HEAD_HEADER_MISSING:${currentHead}`);

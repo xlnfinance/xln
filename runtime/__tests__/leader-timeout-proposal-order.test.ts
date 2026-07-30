@@ -241,7 +241,7 @@ describe('leader timeout / old-view proposal ordering regression', () => {
       localReplica.entityEncPrivKey = keys.privateKey;
       fixture.env.state.eReplicas.set(`${fixture.state.entityId}:${signerId}`, localReplica);
     }
-    fixture.env.runtimeState = { ...fixture.env.runtimeState, maxEntityInputsPerFrame: 1 };
+    fixture.env.infrastructure = { ...fixture.env.infrastructure, maxEntityInputsPerFrame: 1 };
     await processRuntime(fixture.env, [poisoned, fixture.localVoteInput]);
     const target = fixture.env.state.eReplicas.get(`${fixture.state.entityId}:2`);
     expect(target?.leaderVotes?.has('2')).toBe(true);

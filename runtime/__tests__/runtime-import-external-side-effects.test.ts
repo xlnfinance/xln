@@ -149,7 +149,7 @@ describe('runtime import external-side-effect atomicity', () => {
     await processRuntime(env);
     expect(env.state.height).toBe(1);
     expect(env.state.jReplicas.size).toBe(0);
-    expect(env.runtimeState?.pendingJurisdictionImports?.size).toBe(1);
+    expect(env.infrastructure?.pendingJurisdictionImports?.size).toBe(1);
     expect(env.runtimeMempool?.runtimeTxs.map(tx => tx.type)).toEqual(['completeImportJ']);
     expect(getRegisteredBrowserVMJurisdiction()).toBe(registryBefore);
 
@@ -159,7 +159,7 @@ describe('runtime import external-side-effect atomicity', () => {
     if (!replica || !adapter) throw new Error('DURABLE_BROWSERVM_IMPORT_MISSING');
     try {
       expect(env.state.height).toBe(2);
-      expect(env.runtimeState?.pendingJurisdictionImports).toBeUndefined();
+      expect(env.infrastructure?.pendingJurisdictionImports).toBeUndefined();
       expect(env.runtimeMempool?.runtimeTxs).toHaveLength(0);
       expect(adapter.getBrowserVM()).toBe(env.browserVM);
       expect(adapter.isWatching()).toBe(true);
@@ -206,7 +206,7 @@ describe('runtime import external-side-effect atomicity', () => {
 
     await expect(processRuntime(env)).rejects.toThrow('IMPORT_J_RPC_CONTRACTS_REQUIRED');
     expect(env.state.height).toBe(0);
-    expect(env.runtimeState?.pendingJurisdictionImports).toBeUndefined();
+    expect(env.infrastructure?.pendingJurisdictionImports).toBeUndefined();
     expect(env.state.jReplicas.size).toBe(0);
   });
 
@@ -228,7 +228,7 @@ describe('runtime import external-side-effect atomicity', () => {
     });
     await processRuntime(env);
     expect(env.state.height).toBe(1);
-    expect(env.runtimeState?.pendingJurisdictionImports?.size).toBe(1);
+    expect(env.infrastructure?.pendingJurisdictionImports?.size).toBe(1);
     await closeRuntimeDb(env);
     await closeInfraDb(env);
 
@@ -236,7 +236,7 @@ describe('runtime import external-side-effect atomicity', () => {
     if (!restoredIntent) throw new Error('RESTORED_IMPORT_INTENT_MISSING');
     expect(restoredIntent.state.height).toBe(1);
     expect(restoredIntent.state.jReplicas.size).toBe(0);
-    expect(restoredIntent.runtimeState?.pendingJurisdictionImports?.size).toBe(1);
+    expect(restoredIntent.infrastructure?.pendingJurisdictionImports?.size).toBe(1);
     await processRuntime(restoredIntent);
     const committedReplica = restoredIntent.state.jReplicas.get('Restored BrowserVM');
     if (!committedReplica?.jadapter) throw new Error('RESTORED_IMPORT_RESULT_MISSING');
@@ -252,7 +252,7 @@ describe('runtime import external-side-effect atomicity', () => {
       const replica = restoredResult.state.jReplicas.get('Restored BrowserVM');
       if (!replica?.jadapter) throw new Error('RESTORED_IMPORT_ADAPTER_MISSING');
       expect(restoredResult.state.height).toBe(2);
-      expect(restoredResult.runtimeState?.pendingJurisdictionImports).toBeUndefined();
+      expect(restoredResult.infrastructure?.pendingJurisdictionImports).toBeUndefined();
       expect(replica.jadapter.getBrowserVM()).toBe(restoredResult.browserVM);
       await replica.jadapter.close();
     } finally {

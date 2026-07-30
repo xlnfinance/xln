@@ -85,8 +85,8 @@ describe('vault runtime creation lock', () => {
       'await xln.stopP2PAndWait(env, RUNTIME_P2P_SHUTDOWN_TIMEOUT_MS);',
     );
     const drainWork = functionSource.indexOf('await xln.waitForRuntimeWorkDrained(env, 30_000);');
-    const pausePersistence = functionSource.indexOf('env.runtimeState.persistencePaused = true;');
-    const quiescePersistence = functionSource.indexOf('env.runtimeState.persistenceQuiescing = true;');
+    const pausePersistence = functionSource.indexOf('env.infrastructure.persistencePaused = true;');
+    const quiescePersistence = functionSource.indexOf('env.infrastructure.persistenceQuiescing = true;');
     const stopLoop = functionSource.indexOf('await xln.stopRuntimeLoopAndWait(env, 30_000);');
 
     expect(stopWatchers).toBeGreaterThan(0);

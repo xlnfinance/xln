@@ -160,7 +160,7 @@ export const actionAttemptMatchesIdentity = (
 export const hasPendingCommittedEntityProviderAction = (
   env: RuntimeReplica,
   identity: Omit<EntityProviderActionAttemptIdentity, 'attemptNumber'>,
-): boolean => (env.runtimeState?.pendingCommittedJOutbox ?? []).some((input) =>
+): boolean => (env.infrastructure?.pendingCommittedJOutbox ?? []).some((input) =>
   input.jTxs.some((jTx) => actionAttemptMatchesIdentity(input.jurisdictionName, jTx, identity)));
 
 const requireTrustedPending = (env: RuntimeReplica, replica: EntityReplica) => {

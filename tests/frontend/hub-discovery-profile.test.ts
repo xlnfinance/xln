@@ -87,7 +87,7 @@ test('hub open-account readiness rejects live runtimes without a usable route', 
     gossip: {
       getProfiles: () => [],
     },
-    runtimeState: {
+    infrastructure: {
       p2p: {
         ensureProfiles: async () => false,
       },

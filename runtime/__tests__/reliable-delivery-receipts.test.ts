@@ -64,7 +64,7 @@ const runtime = (seed: string): RuntimeReplica => {
   registerSignerKey(env, runtimeId, deriveSignerKeySync(seed, '1'));
   env.runtimeId = runtimeId;
   env.runtimeSeed = seed;
-  env.runtimeState ??= {};
+  env.infrastructure ??= {};
   return env;
 };
 
@@ -390,12 +390,12 @@ const commitApplied = (receiver: RuntimeReplica, outputs: DeliverableEntityInput
 };
 
 const receiverFrontierCount = (env: RuntimeReplica): number =>
-  (env.runtimeState?.reliableIngressReceiptLedger?.size ?? 0) +
-  (env.runtimeState?.reliableIngressTerminalWatermarks?.size ?? 0);
+  (env.infrastructure?.reliableIngressReceiptLedger?.size ?? 0) +
+  (env.infrastructure?.reliableIngressTerminalWatermarks?.size ?? 0);
 
 const senderFrontierCount = (env: RuntimeReplica): number =>
-  (env.runtimeState?.receivedReliableReceiptLedger?.size ?? 0) +
-  (env.runtimeState?.receivedReliableTerminalWatermarks?.size ?? 0);
+  (env.infrastructure?.receivedReliableReceiptLedger?.size ?? 0) +
+  (env.infrastructure?.receivedReliableTerminalWatermarks?.size ?? 0);
 
 const commitAtReceiver = (
   receiver: RuntimeReplica,
@@ -511,7 +511,7 @@ describe('durable scoped reliable delivery receipts', () => {
     expect(registerReliableIngress(receiver, sender.runtimeId!, bundledSuccessor, {
       allowContiguousPendingAccountAck: true,
     }).kind).toBe('enqueue');
-    expect(receiver.runtimeState?.pendingReliableIngress?.size).toBe(2);
+    expect(receiver.infrastructure?.pendingReliableIngress?.size).toBe(2);
     expect(registerReliableIngress(receiver, sender.runtimeId!, bundledSuccessor, {
       allowContiguousPendingAccountAck: true,
     }).kind).toBe('pending');
@@ -544,9 +544,9 @@ describe('durable scoped reliable delivery receipts', () => {
     // mempool without applying it to the bilateral Account yet. That is not an
     // application receipt: the source must retain the output until H10 commits.
     expect(commitReliableIngress(receiver, [output])).toEqual([]);
-    expect(receiver.runtimeState?.reliableIngressReceiptLedger?.size ?? 0).toBe(0);
+    expect(receiver.infrastructure?.reliableIngressReceiptLedger?.size ?? 0).toBe(0);
     releaseUncommittedReliableIngress(receiver, [output], [output]);
-    expect(receiver.runtimeState?.pendingReliableIngress?.size ?? 0).toBe(0);
+    expect(receiver.infrastructure?.pendingReliableIngress?.size ?? 0).toBe(0);
     expect(registerReliableIngress(receiver, sender.runtimeId!, output).kind).toBe('enqueue');
 
     const account = replica.state.accounts.get(entityId('d1'))!;
@@ -763,7 +763,7 @@ describe('durable scoped reliable delivery receipts', () => {
     const applied = await applyMergedEntityInputs(receiver, [{ ...output, from: sender.runtimeId! }], [], {
       isReplay: false,
       routingDeps: {
-        ensureRuntimeState: targetEnv => targetEnv.runtimeState!,
+        ensureRuntimeState: targetEnv => targetEnv.infrastructure!,
         enqueueRuntimeInputs: () => {},
         extractEntityId: replicaKey => replicaKey.split(':')[0] ?? '',
         hasLocalSignerForEntity: () => true,
@@ -789,7 +789,7 @@ describe('durable scoped reliable delivery receipts', () => {
       identity: { kind: 'account-ack', height: 10, frameHash: pendingFrame.stateHash },
     });
     finalizeReliableIngressCommit(receiver, commits);
-    expect(receiver.runtimeState?.pendingReliableIngress?.size ?? 0).toBe(0);
+    expect(receiver.infrastructure?.pendingReliableIngress?.size ?? 0).toBe(0);
   });
 
   test('failed receiver WAL commit exposes no application receipt', () => {
@@ -800,7 +800,7 @@ describe('durable scoped reliable delivery receipts', () => {
 
     rollbackReliableIngressCommit(receiver, commits);
 
-    expect(receiver.runtimeState?.reliableIngressReceiptLedger?.size).toBe(0);
+    expect(receiver.infrastructure?.reliableIngressReceiptLedger?.size).toBe(0);
     expect(registerReliableIngress(receiver, sender.runtimeId!, output).kind).toBe('pending');
   });
 
@@ -856,7 +856,7 @@ describe('durable scoped reliable delivery receipts', () => {
     expect(registerReliableIngress(receiver, sender.runtimeId!, forged).kind).toBe('enqueue');
     expect(commitReliableIngress(receiver, [])).toEqual([]);
     releaseUncommittedReliableIngress(receiver, [forged], []);
-    expect(receiver.runtimeState?.pendingReliableIngress?.size).toBe(0);
+    expect(receiver.infrastructure?.pendingReliableIngress?.size).toBe(0);
 
     expect(registerReliableIngress(receiver, sender.runtimeId!, honest).kind).toBe('enqueue');
     const commits = commitReliableIngress(receiver, []);
@@ -889,7 +889,7 @@ describe('durable scoped reliable delivery receipts', () => {
     expect(registerReliableIngress(forgedReceiver, source.runtimeId!, forged).kind).toBe('enqueue');
     expect(() => commitReliableIngress(forgedReceiver, [forged]))
       .toThrow('J_PREFIX_SIGNATURE_REJECTED');
-    expect(forgedReceiver.runtimeState?.reliableIngressTerminalWatermarks?.size ?? 0).toBe(0);
+    expect(forgedReceiver.infrastructure?.reliableIngressTerminalWatermarks?.size ?? 0).toBe(0);
   });
 
   test('poisoned same-hash Entity body cannot suppress the honest proposal', () => {
@@ -913,7 +913,7 @@ describe('durable scoped reliable delivery receipts', () => {
     expect(registerReliableIngress(receiver, sender.runtimeId!, poisoned).kind).toBe('enqueue');
     expect(() => registerReliableIngress(receiver, sender.runtimeId!, honest))
       .toThrow('RELIABLE_INGRESS_ENTITY_FRAME_BODY_CONFLICT');
-    expect(receiver.runtimeState?.pendingReliableIngress?.size).toBe(1);
+    expect(receiver.infrastructure?.pendingReliableIngress?.size).toBe(1);
   });
 
   test('proposal receipt does not ACK or GC a later certificate for the same frame', () => {
@@ -1071,11 +1071,11 @@ describe('durable scoped reliable delivery receipts', () => {
       coverage: 'exact',
       identity: { height: 2, evidenceKind: 'account-frame-ack' },
     });
-    expect(receiver.runtimeState?.reliableIngressTerminalWatermarks?.values().next().value?.body.identity)
+    expect(receiver.infrastructure?.reliableIngressTerminalWatermarks?.values().next().value?.body.identity)
       .toMatchObject({ height: 1, evidenceKind: 'account-frame-ack' });
-    expect(receiver.runtimeState?.reliableIngressReceiptLedger?.values().next().value?.body.identity)
+    expect(receiver.infrastructure?.reliableIngressReceiptLedger?.values().next().value?.body.identity)
       .toMatchObject({ height: 2, evidenceKind: 'account-frame-ack' });
-    expect(receiver.runtimeState?.pendingReliableIngress?.size ?? 0).toBe(0);
+    expect(receiver.infrastructure?.pendingReliableIngress?.size ?? 0).toBe(0);
 
     const afterSuccessorApply = buildDurableRuntimeMachineSnapshot(receiver);
     const restartedAfterApply = runtime(receiverSeed);
@@ -1112,8 +1112,8 @@ describe('durable scoped reliable delivery receipts', () => {
       stateHash: '0xproposal-state-8',
     } as never;
     delete account.pendingFrame;
-    const activeBefore = receiver.runtimeState?.reliableIngressReceiptLedger?.size ?? 0;
-    const pendingBefore = receiver.runtimeState?.pendingReliableIngress?.size ?? 0;
+    const activeBefore = receiver.infrastructure?.reliableIngressReceiptLedger?.size ?? 0;
+    const pendingBefore = receiver.infrastructure?.pendingReliableIngress?.size ?? 0;
 
     const registration = registerReliableIngress(receiver, sender.runtimeId!, richer);
 
@@ -1128,8 +1128,8 @@ describe('durable scoped reliable delivery receipts', () => {
     });
     expect(registration.receipt.body.identity.evidenceDigest)
       .not.toBe(plainCommit.receipt.body.identity.evidenceDigest);
-    expect(receiver.runtimeState?.reliableIngressReceiptLedger?.size ?? 0).toBe(activeBefore);
-    expect(receiver.runtimeState?.pendingReliableIngress?.size ?? 0).toBe(pendingBefore);
+    expect(receiver.infrastructure?.reliableIngressReceiptLedger?.size ?? 0).toBe(activeBefore);
+    expect(receiver.infrastructure?.pendingReliableIngress?.size ?? 0).toBe(pendingBefore);
   });
 
   test('terminal plain ACK rejects a richer same-height proposal that conflicts with committed state', () => {
@@ -1174,8 +1174,8 @@ describe('durable scoped reliable delivery receipts', () => {
       sender.runtimeId!,
       conflictingAckBody,
     )).toThrow('RELIABLE_FRONTIER_LANE_ORDER_CONFLICT:account-ack:7');
-    expect(receiver.runtimeState?.reliableIngressReceiptLedger?.size ?? 0).toBe(0);
-    expect(receiver.runtimeState?.pendingReliableIngress?.size ?? 0).toBe(0);
+    expect(receiver.infrastructure?.reliableIngressReceiptLedger?.size ?? 0).toBe(0);
+    expect(receiver.infrastructure?.pendingReliableIngress?.size ?? 0).toBe(0);
   });
 
   test('terminal plain ACK never infers richer proposal ancestry beyond exact H+1', () => {
@@ -1204,7 +1204,7 @@ describe('durable scoped reliable delivery receipts', () => {
       sender.runtimeId!,
       accountFrameAckOutput(receiver.runtimeId!, 7, '0xproposal-state-8'),
     ).kind).toBe('enqueue');
-    expect(receiver.runtimeState?.pendingReliableIngress?.size ?? 0).toBe(1);
+    expect(receiver.infrastructure?.pendingReliableIngress?.size ?? 0).toBe(1);
   });
 
   test('receiver serializes same-lane variants but not independent protocol kinds', () => {
@@ -1281,7 +1281,7 @@ describe('durable scoped reliable delivery receipts', () => {
     expect(commits[0]!.receipt!.body.coverage).toBe('exact');
     expect(() => registerReliableIngress(receiver, sender.runtimeId!, missingLower))
       .toThrow('RELIABLE_INGRESS_OPEN_FRONTIER_ORDER_GAP:j-finality:100:50');
-    expect(receiver.runtimeState?.reliableIngressTerminalWatermarks?.size ?? 0).toBe(0);
+    expect(receiver.infrastructure?.reliableIngressTerminalWatermarks?.size ?? 0).toBe(0);
   });
 
   test('a finalized J watermark exact-ACKs every fully stale linked-list range', () => {
@@ -1311,8 +1311,8 @@ describe('durable scoped reliable delivery receipts', () => {
     };
 
     expect(commitReliableIngress(receiver, [])).toHaveLength(1);
-    expect(receiver.runtimeState?.reliableIngressReceiptLedger?.size ?? 0).toBe(0);
-    expect(receiver.runtimeState?.reliableIngressTerminalWatermarks?.size).toBe(1);
+    expect(receiver.infrastructure?.reliableIngressReceiptLedger?.size ?? 0).toBe(0);
+    expect(receiver.infrastructure?.reliableIngressTerminalWatermarks?.size).toBe(1);
 
     const conflictingLower = jFinalityOutput(
       receiver.runtimeId!,
@@ -1361,7 +1361,7 @@ describe('durable scoped reliable delivery receipts', () => {
       entityHeight: 1,
     };
     commitReliableIngress(receiver, []);
-    const terminal = receiver.runtimeState?.reliableIngressTerminalWatermarks?.values().next().value;
+    const terminal = receiver.infrastructure?.reliableIngressTerminalWatermarks?.values().next().value;
     if (!terminal) throw new Error('TEST_J_TERMINAL_RECEIPT_MISSING');
     const conflictingLower = jFinalityOutput(receiver.runtimeId!, 50, `0x${'ff'.repeat(32)}`);
     sender.pendingNetworkOutputs = [conflictingLower, higher];
@@ -1384,8 +1384,8 @@ describe('durable scoped reliable delivery receipts', () => {
       batchSender.pendingNetworkOutputs = [matchingLower, higher];
       expect(applyReliableDeliveryReceipts(batchSender, receipts)).toEqual({ removed: 2 });
       expect(batchSender.pendingNetworkOutputs).toEqual([]);
-      expect(batchSender.runtimeState?.receivedReliableTerminalWatermarks?.size).toBe(1);
-      expect(batchSender.runtimeState?.receivedReliableReceiptLedger?.size).toBe(0);
+      expect(batchSender.infrastructure?.receivedReliableTerminalWatermarks?.size).toBe(1);
+      expect(batchSender.infrastructure?.receivedReliableReceiptLedger?.size).toBe(0);
     }
   });
 
@@ -1416,8 +1416,8 @@ describe('durable scoped reliable delivery receipts', () => {
     };
 
     expect(commitReliableIngress(receiver, [])).toHaveLength(1);
-    expect(receiver.runtimeState?.reliableIngressReceiptLedger?.size).toBe(0);
-    expect(receiver.runtimeState?.reliableIngressTerminalWatermarks?.size).toBe(1);
+    expect(receiver.infrastructure?.reliableIngressReceiptLedger?.size).toBe(0);
+    expect(receiver.infrastructure?.reliableIngressTerminalWatermarks?.size).toBe(1);
   });
 
   test('sparse and richer precommit evidence apply once each while signer equivocation fails closed', () => {
@@ -1607,10 +1607,10 @@ describe('durable scoped reliable delivery receipts', () => {
 
     expect(applyReliableDeliveryReceipts(sender, [h2Receipt])).toEqual({ removed: 1 });
     expect(sender.pendingNetworkOutputs).toEqual([h1]);
-    expect(sender.runtimeState?.receivedReliableTerminalWatermarks?.size).toBe(1);
+    expect(sender.infrastructure?.receivedReliableTerminalWatermarks?.size).toBe(1);
     expect(applyReliableDeliveryReceipts(sender, [h1Receipt])).toEqual({ removed: 1 });
     expect(sender.pendingNetworkOutputs).toEqual([]);
-    expect(sender.runtimeState?.receivedReliableTerminalWatermarks?.values().next().value
+    expect(sender.infrastructure?.receivedReliableTerminalWatermarks?.values().next().value
       ?.body.identity.height).toBe(2);
 
     const equivocatingReceiver = runtime(receiverSeed);
@@ -1627,7 +1627,7 @@ describe('durable scoped reliable delivery receipts', () => {
     );
     expect(() => applyReliableDeliveryReceipts(sender, [conflictingCommits[0]!.receipt!]))
       .toThrow('RELIABLE_RECEIPT_LANE_ORDER_CONFLICT');
-    expect(sender.runtimeState?.receivedReliableTerminalWatermarks?.values().next().value
+    expect(sender.infrastructure?.receivedReliableTerminalWatermarks?.values().next().value
       ?.body.identity.frameHash).toBe(h2.proposedFrame!.hash);
   });
 
@@ -1683,7 +1683,7 @@ describe('durable scoped reliable delivery receipts', () => {
     rollbackReliableDeliveryReceipts(sender, checkpoint);
 
     expect(sender.pendingNetworkOutputs).toEqual([output]);
-    expect(sender.runtimeState?.receivedReliableReceiptLedger).toBeUndefined();
+    expect(sender.infrastructure?.receivedReliableReceiptLedger).toBeUndefined();
   });
 
   test('duplicate receipt remains idempotent across sender restart', () => {
@@ -1708,7 +1708,7 @@ describe('durable scoped reliable delivery receipts', () => {
     const output = frameOutput(receiver.runtimeId!);
     const key = buildRouteOutputKey(output);
     sender.pendingNetworkOutputs = [output];
-    sender.runtimeState!.deferredNetworkMeta = new Map([[
+    sender.infrastructure!.deferredNetworkMeta = new Map([[
       key,
       { attempts: 6, nextRetryAt: 99_999_999 },
     ]]);
@@ -1717,7 +1717,7 @@ describe('durable scoped reliable delivery receipts', () => {
     restoreDurableRuntimeSnapshot(restored, buildDurableRuntimeMachineSnapshot(sender));
 
     expect(restored.pendingNetworkOutputs).toEqual([output]);
-    expect(restored.runtimeState?.deferredNetworkMeta?.get(key)).toEqual({
+    expect(restored.infrastructure?.deferredNetworkMeta?.get(key)).toEqual({
       attempts: 6,
       nextRetryAt: 99_999_999,
     });
@@ -1742,7 +1742,7 @@ describe('durable scoped reliable delivery receipts', () => {
 
     expect(sender.state.height).toBe(1);
     expect(sender.pendingNetworkOutputs).toEqual([]);
-    expect(sender.runtimeState?.receivedReliableReceiptLedger?.size).toBe(1);
+    expect(sender.infrastructure?.receivedReliableReceiptLedger?.size).toBe(1);
     const durableFrame = await readStorageFrameRecord(getRuntimeWalDb(sender), sender.state.height);
     expect(durableFrame?.runtimeInput.reliableReceipts).toEqual([commits[0]!.receipt]);
 
@@ -1796,9 +1796,9 @@ describe('durable scoped reliable delivery receipts', () => {
       ...output,
       from: sender.runtimeId,
     }]);
-    expect(receiver.runtimeState?.pendingReliableIngress?.size ?? 0).toBe(0);
-    expect(receiver.runtimeState?.reliableIngressReceiptLedger?.size ?? 0).toBe(0);
-    expect([...(receiver.runtimeState?.reliableIngressTerminalWatermarks?.values() ?? [])]
+    expect(receiver.infrastructure?.pendingReliableIngress?.size ?? 0).toBe(0);
+    expect(receiver.infrastructure?.reliableIngressReceiptLedger?.size ?? 0).toBe(0);
+    expect([...(receiver.infrastructure?.reliableIngressTerminalWatermarks?.values() ?? [])]
       .some(receipt => receipt.body.identity.kind === 'hash-precommit')).toBe(true);
   });
 
@@ -1828,8 +1828,8 @@ describe('durable scoped reliable delivery receipts', () => {
     await processRuntime(receiver, [output]);
 
     expect(receiver.state.height).toBe(heightBefore);
-    expect(receiver.runtimeState?.pendingReliableIngress?.size ?? 0).toBe(0);
-    expect(receiver.runtimeState?.reliableIngressReceiptLedger?.size ?? 0).toBe(0);
-    expect(receiver.runtimeState?.reliableIngressTerminalWatermarks?.size ?? 0).toBe(0);
+    expect(receiver.infrastructure?.pendingReliableIngress?.size ?? 0).toBe(0);
+    expect(receiver.infrastructure?.reliableIngressReceiptLedger?.size ?? 0).toBe(0);
+    expect(receiver.infrastructure?.reliableIngressTerminalWatermarks?.size ?? 0).toBe(0);
   });
 });

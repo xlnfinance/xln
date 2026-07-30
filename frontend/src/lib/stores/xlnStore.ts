@@ -1193,7 +1193,7 @@ type RuntimeDebugPayload = {
 
 export function sendRuntimeDebugEvent(payload: RuntimeDebugPayload): void {
   const env = getEnv();
-  const p2p = env?.runtimeState?.p2p;
+  const p2p = env?.infrastructure?.p2p;
   if (typeof p2p?.sendDebugEvent !== 'function') return;
   try {
     p2p.sendDebugEvent(payload);
@@ -1283,7 +1283,7 @@ export async function refreshPaymentRuntimeGossip(options: {
   }
 
   try {
-    await env.runtimeState?.p2p?.syncProfiles?.();
+    await env.infrastructure?.p2p?.syncProfiles?.();
   } catch (error) {
     errorLog.log('Payment gossip p2p sync failed', 'Payment Gossip', error);
   }
@@ -1311,7 +1311,7 @@ export async function refreshPaymentRuntimeGossip(options: {
       errorLog.log('Payment gossip runtime refresh failed', 'Payment Gossip', error);
     }
     try {
-      env.runtimeState?.p2p?.refreshGossip?.();
+      env.infrastructure?.p2p?.refreshGossip?.();
     } catch (error) {
       errorLog.log('Payment gossip p2p refresh failed', 'Payment Gossip', error);
     }
@@ -1365,7 +1365,7 @@ const drainLocalRuntimeInput = async (
 const normalizeRuntimeIdentifier = (value: unknown): string => String(value || '').trim().toLowerCase();
 
 const assertLocalRuntimeInputIngressOpen = (env: RuntimeReplica): void => {
-  if (env.runtimeState?.persistenceQuiescing && !env.scenarioMode) {
+  if (env.infrastructure?.persistenceQuiescing && !env.scenarioMode) {
     throw new Error(`LOCAL_RUNTIME_INPUT_INGRESS_QUIESCING:${env.runtimeId || '<unknown>'}`);
   }
 };

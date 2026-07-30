@@ -76,7 +76,7 @@ describe('J-submit abort with durable pending attempt', () => {
     });
     await processUntilJSubmitCrash(env, [], 'PAUSE_AFTER_ABORT_TEST_ATTEMPT');
     removeAttemptBarrier();
-    expect(env.runtimeState?.pendingCommittedJOutbox).toHaveLength(1);
+    expect(env.infrastructure?.pendingCommittedJOutbox).toHaveLength(1);
 
     const removeAbortBarrier = registerRecoveryBackupBarrier(env, async () => {
       throw new Error('PAUSE_AFTER_DURABLE_ABORT');
@@ -103,7 +103,7 @@ describe('J-submit abort with durable pending attempt', () => {
     if (!browserVM) throw new Error('abort-pending BrowserVM missing');
     const blockBefore = browserVM.getBlockNumber();
     const nonceBefore = await jadapter.getEntityNonce(sender.id);
-    const staleBatchTx = restored.runtimeState?.pendingCommittedJOutbox?.[0]?.jTxs[0];
+    const staleBatchTx = restored.infrastructure?.pendingCommittedJOutbox?.[0]?.jTxs[0];
     if (!staleBatchTx || staleBatchTx.type !== 'batch' || !staleBatchTx.data.runtimeSubmitAttempt) {
       throw new Error('restored stale batch attempt missing');
     }
@@ -133,7 +133,7 @@ describe('J-submit abort with durable pending attempt', () => {
     expect(cancellationResult.data.outcome).toBe('reconciled');
     await processRuntime(restored, []);
     const staleAttemptId = staleBatchTx.data.runtimeSubmitAttempt.attemptId;
-    const livePendingIds = (restored.runtimeState?.pendingCommittedJOutbox ?? []).flatMap(
+    const livePendingIds = (restored.infrastructure?.pendingCommittedJOutbox ?? []).flatMap(
       (input) => input.jTxs.flatMap((jTx) => (
         jTx.type === 'batch' && jTx.data.runtimeSubmitAttempt
           ? [jTx.data.runtimeSubmitAttempt.attemptId]
@@ -147,7 +147,7 @@ describe('J-submit abort with durable pending attempt', () => {
     const final = await loadEnvFromDB(runtimeId, seed);
     if (!final) throw new Error('failed to reopen durable J-submit abort result');
     try {
-      const restoredPendingIds = (final.runtimeState?.pendingCommittedJOutbox ?? []).flatMap(
+      const restoredPendingIds = (final.infrastructure?.pendingCommittedJOutbox ?? []).flatMap(
         (input) => input.jTxs.flatMap((jTx) => (
           jTx.type === 'batch' && jTx.data.runtimeSubmitAttempt
             ? [jTx.data.runtimeSubmitAttempt.attemptId]

@@ -86,7 +86,7 @@ const driveUntil = async (
   console.error(safeStringify({
     label,
     runtimeMempool: env.runtimeMempool,
-    pendingCommittedJOutbox: env.runtimeState?.pendingCommittedJOutbox,
+    pendingCommittedJOutbox: env.infrastructure?.pendingCommittedJOutbox,
     replicas: Array.from(env.state.eReplicas.values()).map((replica) => ({
       entityId: replica.entityId,
       signerId: replica.signerId,
@@ -190,7 +190,7 @@ const runCrashPhase = async (): Promise<never> => {
     const replica = findReplica(env, sender.id);
     const sentBatch = replica.state.jBatchState?.sentBatch;
     const local = replica.jSubmitState;
-    const pending = env.runtimeState?.pendingCommittedJOutbox ?? [];
+    const pending = env.infrastructure?.pendingCommittedJOutbox ?? [];
     const pendingBatch = pending.flatMap((input) => input.jTxs).find(
       (jTx) => jTx.type === 'batch' && jTx.entityId.toLowerCase() === sender.id.toLowerCase(),
     );
@@ -246,7 +246,7 @@ const runRecoverPhase = async (): Promise<void> => {
   assertEqual(adapter.mode, 'rpc', 'restored-adapter-mode');
   adapter.setQuietLogs?.(true);
 
-  const pendingBefore = restored.runtimeState?.pendingCommittedJOutbox ?? [];
+  const pendingBefore = restored.infrastructure?.pendingCommittedJOutbox ?? [];
   assertEqual(pendingBefore.length, 1, 'pending-before-reconcile');
   assertEqual(replica.jSubmitState?.submitAttempts, 1, 'submit-attempts-before-reconcile');
   assertEqual(replica.jSubmitState?.lastResultAttemptId, undefined, 'result-before-reconcile');
@@ -261,7 +261,7 @@ const runRecoverPhase = async (): Promise<void> => {
   await adapter.pollNow?.();
   await driveUntil(
     restored,
-    () => (restored.runtimeState?.pendingCommittedJOutbox?.length ?? 0) === 0 &&
+    () => (restored.infrastructure?.pendingCommittedJOutbox?.length ?? 0) === 0 &&
       findReplica(restored, proof.senderId).state.jBatchState?.sentBatch === undefined &&
       findReplica(restored, proof.senderId).state.jBatchState?.entityNonce === proof.entityNonce,
     'authenticated-j-event-applied',
@@ -300,7 +300,7 @@ const runRecoverPhase = async (): Promise<void> => {
   assertEqual(reopenedReplica.state.height, finalEntityHeight, 'entity-head-after-second-reopen');
   assertEqual(computeCanonicalEntityHash(reopenedReplica).hash, canonicalHash, 'canonical-hash-after-second-reopen');
   assertEqual(reopenedReplica.jSubmitState?.lastResultAttemptId, resultAttemptId, 'result-after-second-reopen');
-  assertEqual(reopened.runtimeState?.pendingCommittedJOutbox?.length ?? 0, 0, 'pending-after-second-reopen');
+  assertEqual(reopened.infrastructure?.pendingCommittedJOutbox?.length ?? 0, 0, 'pending-after-second-reopen');
   assertEqual(await reopenedAdapter.getEntityNonce(proof.senderId), 1n, 'chain-nonce-after-second-reopen');
   const finalHankoBatchLogCount = await countExactHankoBatchLogs(
     reopenedAdapter,
@@ -312,7 +312,7 @@ const runRecoverPhase = async (): Promise<void> => {
   await Bun.write(recoveryPath, JSON.stringify({
     runtimeId,
     pendingBefore: pendingBefore.length,
-    pendingAfter: reopened.runtimeState?.pendingCommittedJOutbox?.length ?? 0,
+    pendingAfter: reopened.infrastructure?.pendingCommittedJOutbox?.length ?? 0,
     submitAttempts: reopenedReplica.jSubmitState?.submitAttempts,
     resultOutcome: reopenedReplica.jSubmitState?.lastResultOutcome ?? null,
     resultAttemptId: reopenedReplica.jSubmitState?.lastResultAttemptId ?? null,

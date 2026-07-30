@@ -57,8 +57,8 @@ export function resolveExternalWalletSnapshotIngress(
     return 'cancel-runtime-changed';
   }
   if (
-    currentEnv?.runtimeState?.persistenceQuiescing === true ||
-    currentEnv?.runtimeState?.lifecyclePhase === 'quiescing'
+    currentEnv?.infrastructure?.persistenceQuiescing === true ||
+    currentEnv?.infrastructure?.lifecyclePhase === 'quiescing'
   ) {
     return 'cancel-runtime-quiescing';
   }

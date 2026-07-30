@@ -81,7 +81,7 @@ test('restores all bounded reliable frontiers and the next outbox item after rea
   }
   try {
     expect(restored.state.height).toBe(2);
-    const state = restored.runtimeState;
+    const state = restored.infrastructure;
     expect(
       state?.reliableIngressTerminalWatermarks?.size,
       'receiver terminal must retain both source-scoped frontiers',

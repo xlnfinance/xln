@@ -179,7 +179,7 @@ describe('runtime scheduled wake', () => {
       data: {},
     });
     env.state.eReplicas.set(`${id}:${proposer}`, makeReplica(state, proposer, true));
-    env.runtimeState!.persistenceQuiescing = true;
+    env.infrastructure!.persistenceQuiescing = true;
 
     expect(hasRuntimeWork(env)).toBe(false);
     expect(await waitForRuntimeWorkDrained(env, 20, 1)).toBe(true);

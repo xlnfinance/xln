@@ -447,11 +447,11 @@ export async function placeCrossOrder(
               height: Number(env?.height || 0),
               timestamp: Number(env?.timestamp || 0),
               scenarioMode: Boolean(env?.scenarioMode),
-              loopActive: Boolean(env?.runtimeState?.loopActive),
-              wakeRequested: Boolean(env?.runtimeState?.wakeRequested),
-              processing: Boolean(env?.runtimeState?.processingPromise),
+              loopActive: Boolean(env?.infrastructure?.loopActive),
+              wakeRequested: Boolean(env?.infrastructure?.wakeRequested),
+              processing: Boolean(env?.infrastructure?.processingPromise),
               lastProcessEnteredAt: Number(env?.lastProcessEnteredAt || 0),
-              lastFrameAt: Number(env?.runtimeState?.lastFrameAt || 0),
+              lastFrameAt: Number(env?.infrastructure?.lastFrameAt || 0),
               minFrameDelayMs: Number(env?.runtimeConfig?.minFrameDelayMs || 0),
               queuedAt: Number(env?.runtimeMempool?.queuedAt || 0),
               runtimeInputTypes: Array.from(env?.runtimeInput?.entityInputs || []).map((input: any) => ({
@@ -756,12 +756,12 @@ export async function readCrossState(
           precommits: Number(input?.hashPrecommits?.size || 0),
         })),
         p2pState: {
-          exists: Boolean(env?.runtimeState?.p2p),
-          connected: Boolean(env?.runtimeState?.p2p?.isConnected?.()),
-          queue: env?.runtimeState?.p2p?.getQueueState?.() || null,
-          directPeers: env?.runtimeState?.p2p?.getDirectPeerState?.() || null,
+          exists: Boolean(env?.infrastructure?.p2p),
+          connected: Boolean(env?.infrastructure?.p2p?.isConnected?.()),
+          queue: env?.infrastructure?.p2p?.getQueueState?.() || null,
+          directPeers: env?.infrastructure?.p2p?.getDirectPeerState?.() || null,
         },
-        recoveryBarrier: Boolean(env?.runtimeState?.recoveryBackupBarrier),
+        recoveryBarrier: Boolean(env?.infrastructure?.recoveryBackupBarrier),
         ownerIsLeft: entityNeedle === String(account?.leftEntity || '').toLowerCase(),
         currentFrameFees: Array.from(account?.currentFrame?.accountTxs || []).reduce(
           (fees: Record<string, string>, tx: any) => {

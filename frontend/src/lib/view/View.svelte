@@ -128,8 +128,8 @@
       (!projectedRuntimeId || projectedRuntimeId === liveRuntimeId),
     );
     const liveRuntimeOwnsInfra = Boolean(
-      liveRuntimeEnv?.runtimeState?.p2p ||
-      liveRuntimeEnv?.runtimeState?.loopActive,
+      liveRuntimeEnv?.infrastructure?.p2p ||
+      liveRuntimeEnv?.infrastructure?.loopActive,
     );
     if (projectedRuntimeEnv && !projectedRuntimeMatchesSelection) return null;
     return liveRuntimeMatchesProjection && liveRuntimeOwnsInfra

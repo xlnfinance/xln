@@ -98,9 +98,9 @@ export const applyRuntimeTx = async (
   if (runtimeTx.type === 'recordAuthenticatedJAuthority') {
     await assertCertifiedRegistrationEvidence(env, runtimeTx.data);
     const key = registrationEvidenceKey(runtimeTx.data.stackKey, runtimeTx.data.entityId);
-    env.runtimeState ??= {};
-    env.runtimeState.certifiedRegistrationEvidence ??= new Map();
-    const existing = env.runtimeState.certifiedRegistrationEvidence.get(key);
+    env.infrastructure ??= {};
+    env.infrastructure.certifiedRegistrationEvidence ??= new Map();
+    const existing = env.infrastructure.certifiedRegistrationEvidence.get(key);
     if (existing) {
       const existingClaimHash = computeRegistrationEvidenceClaimHash(existing);
       const incomingClaimHash = computeRegistrationEvidenceClaimHash(runtimeTx.data);
@@ -109,7 +109,7 @@ export const applyRuntimeTx = async (
       }
       return [];
     }
-    env.runtimeState.certifiedRegistrationEvidence.set(
+    env.infrastructure.certifiedRegistrationEvidence.set(
       key,
       freezeCertifiedRegistrationEvidence(structuredClone(runtimeTx.data)),
     );

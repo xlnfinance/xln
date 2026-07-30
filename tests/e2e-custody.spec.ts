@@ -187,7 +187,7 @@ async function ensureRuntimeProfileDownloaded(page: Page, entityId: string): Pro
         gossip?: {
           getProfiles?: () => Array<{ entityId?: string }>;
         };
-        runtimeState?: {
+        infrastructure?: {
           p2p?: {
             ensureProfiles?: (entityIds: string[]) => Promise<boolean>;
             refreshGossip?: () => Promise<void> | void;
@@ -196,7 +196,7 @@ async function ensureRuntimeProfileDownloaded(page: Page, entityId: string): Pro
       };
     };
     const env = maybeWindow.isolatedEnv;
-    const p2p = env?.runtimeState?.p2p;
+    const p2p = env?.infrastructure?.p2p;
     const target = String(targetEntityId || '').toLowerCase();
     const hasProfile = (): boolean =>
       (env?.gossip?.getProfiles?.() ?? []).some(profile => String(profile.entityId || '').toLowerCase() === target);
@@ -417,7 +417,7 @@ async function ensureRuntimeOnline(page: Page, tag: string): Promise<void> {
   const ok = await page.evaluate(async () => {
     const maybeWindow = window as typeof window & {
       isolatedEnv?: {
-        runtimeState?: {
+        infrastructure?: {
           p2p?: {
             isConnected?: () => boolean;
             connect?: () => void;
@@ -427,7 +427,7 @@ async function ensureRuntimeOnline(page: Page, tag: string): Promise<void> {
       };
     };
     const env = maybeWindow.isolatedEnv;
-    const p2p = env?.runtimeState?.p2p;
+    const p2p = env?.infrastructure?.p2p;
     if (!env || !p2p) return false;
 
     const startedAt = Date.now();

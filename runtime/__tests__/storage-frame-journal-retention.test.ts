@@ -989,8 +989,8 @@ describe('storage frame journal retention', () => {
     const retryKey = buildRouteOutputKey(pendingOutput);
     const persistedFutureRetryAt = 8_000_000_000_000;
     env.pendingNetworkOutputs = [pendingOutput];
-    env.runtimeState ??= {};
-    env.runtimeState.deferredNetworkMeta = new Map([[
+    env.infrastructure ??= {};
+    env.infrastructure.deferredNetworkMeta = new Map([[
       retryKey,
       { attempts: 6, nextRetryAt: persistedFutureRetryAt },
     ]]);
@@ -1028,15 +1028,15 @@ describe('storage frame journal retention', () => {
     expect(verification.ok).toBe(true);
     const restored = await loadEnvFromDB(runtimeId, seed);
     expect(restored?.pendingNetworkOutputs).toEqual([pendingOutput]);
-    expect(restored?.runtimeState?.deferredNetworkMeta?.get(retryKey)).toEqual({
+    expect(restored?.infrastructure?.deferredNetworkMeta?.get(retryKey)).toEqual({
       attempts: 6,
       nextRetryAt: persistedFutureRetryAt,
     });
     if (restored) {
       expect(computeCanonicalStateHashFromEnv(restored)).toBe(liveCanonicalStateHash);
       await processRuntime(restored, []);
-      expect(restored.runtimeState?.deferredNetworkMeta?.get(retryKey)?.attempts).toBe(7);
-      expect(restored.runtimeState?.deferredNetworkMeta?.get(retryKey)?.nextRetryAt)
+      expect(restored.infrastructure?.deferredNetworkMeta?.get(retryKey)?.attempts).toBe(7);
+      expect(restored.infrastructure?.deferredNetworkMeta?.get(retryKey)?.nextRetryAt)
         .toBeLessThan(persistedFutureRetryAt);
       await closeRuntimeDb(restored);
       await closeInfraDb(restored);

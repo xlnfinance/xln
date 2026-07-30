@@ -155,7 +155,7 @@ async function readBrowserExternalWalletDebug(page: Page, symbol: string, holder
         nativeBalance: nativeRecord ? String(nativeRecord.balance) : null,
       };
     });
-    const watchOwners = mapEntries(env?.runtimeState?.externalWalletWatchOwners).map(([entityId, owners]) => ({
+    const watchOwners = mapEntries(env?.infrastructure?.externalWalletWatchOwners).map(([entityId, owners]) => ({
       entityId: String(entityId),
       owners: mapEntries(owners).map(([trackedOwner, block]) => ({
         owner: String(trackedOwner),
@@ -171,9 +171,9 @@ async function readBrowserExternalWalletDebug(page: Page, symbol: string, holder
     return {
       runtimeId: String(env?.runtimeId || ''),
       height: Number(env?.height || 0),
-      loopActive: Boolean(env?.runtimeState?.loopActive),
+      loopActive: Boolean(env?.infrastructure?.loopActive),
       queuedEntityInputs: Number(env?.runtimeMempool?.entityInputs?.length || 0),
-      processing: Boolean(env?.runtimeState?.processingPromise),
+      processing: Boolean(env?.infrastructure?.processingPromise),
       watchOwners,
       jReplicas,
       replicas,

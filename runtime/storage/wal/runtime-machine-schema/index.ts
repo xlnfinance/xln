@@ -164,14 +164,14 @@ export const validateDurableRuntimeMachineSnapshot = (
 ): Record<string, unknown> => {
   const snapshot = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(snapshot, ['runtimeInput', 'jReplicas'], [
-    'runtimeId', 'activeJurisdiction', 'browserVMState', 'runtimeConfig', 'runtimeState',
+    'runtimeId', 'activeJurisdiction', 'browserVMState', 'runtimeConfig', 'infrastructure',
     'pendingOutputs', 'networkInbox', 'pendingNetworkOutputs',
   ], `${code}_FIELDS`);
   if (snapshot['runtimeId'] !== undefined) requireString(snapshot['runtimeId'], `${code}_RUNTIME_ID`);
   if (snapshot['activeJurisdiction'] !== undefined) requireString(snapshot['activeJurisdiction'], `${code}_ACTIVE_JURISDICTION`);
   if (snapshot['browserVMState'] !== undefined) validateBrowserVmState(snapshot['browserVMState'], `${code}_BROWSER_VM_STATE`);
   if (snapshot['runtimeConfig'] !== undefined) validateRuntimeConfig(snapshot['runtimeConfig'], `${code}_RUNTIME_CONFIG`);
-  if (snapshot['runtimeState'] !== undefined) validateDurableRuntimeState(snapshot['runtimeState'], `${code}_RUNTIME_STATE`);
+  if (snapshot['infrastructure'] !== undefined) validateDurableRuntimeState(snapshot['infrastructure'], `${code}_RUNTIME_STATE`);
   validateRuntimeInput(snapshot['runtimeInput'], `${code}_RUNTIME_INPUT`);
   for (const field of ['pendingOutputs', 'networkInbox']) {
     if (snapshot[field] !== undefined) validateRoutedEntityInputs(snapshot[field], `${code}_${field.toUpperCase()}`);

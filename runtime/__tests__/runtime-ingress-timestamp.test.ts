@@ -140,7 +140,7 @@ describe('runtime ingress timestamp', () => {
 
   test('runtime loop does not restart once runtime state is sticky-halted', async () => {
     const env = createIsolatedEnv('sticky-halt');
-    env.runtimeState = { halted: true, loopActive: false };
+    env.infrastructure = { halted: true, loopActive: false };
     let startCalls = 0;
     addTestJurisdiction(env, 'Testnet', {
       startWatching() {
@@ -156,13 +156,13 @@ describe('runtime ingress timestamp', () => {
     stop();
     await sleep(20);
 
-    expect(env.runtimeState?.loopActive).toBe(false);
+    expect(env.infrastructure?.loopActive).toBe(false);
     expect(startCalls).toBe(0);
   });
 
   test('direct process entry rejects a sticky-halted runtime before applying work', async () => {
     const env = createIsolatedEnv('direct-process-halt');
-    env.runtimeState = { lifecyclePhase: 'halted', halted: true };
+    env.infrastructure = { lifecyclePhase: 'halted', halted: true };
     const heightBefore = env.state.height;
 
     await expect(processRuntime(env)).rejects.toThrow('RUNTIME_PROCESS_HALTED');
@@ -197,7 +197,7 @@ describe('runtime ingress timestamp', () => {
     env.quietRuntimeLogs = true;
     env.scenarioMode = true;
     env.state.timestamp = 1_000;
-    env.runtimeState = {
+    env.infrastructure = {
       loopActive: false,
       halted: false,
       maxEntityInputsPerFrame: 1,
@@ -276,7 +276,7 @@ describe('runtime ingress timestamp', () => {
     expect(env.state.height).toBe(1);
     expect(committedInputs).toEqual([{ height: 1, entityInputCount: 12 }]);
     expect(env.runtimeMempool?.entityInputs ?? []).toHaveLength(0);
-    expect(env.runtimeState?.maxEntityInputsPerFrame).toBeUndefined();
+    expect(env.infrastructure?.maxEntityInputsPerFrame).toBeUndefined();
   });
 
   test('runtime tx frame cap never splits one accepted entity input', async () => {
@@ -284,7 +284,7 @@ describe('runtime ingress timestamp', () => {
     env.quietRuntimeLogs = true;
     env.scenarioMode = true;
     env.state.timestamp = 1_000;
-    env.runtimeState = {
+    env.infrastructure = {
       loopActive: false,
       halted: false,
       maxEntityTxsPerFrame: 2,
@@ -342,7 +342,7 @@ describe('runtime ingress timestamp', () => {
     env.quietRuntimeLogs = true;
     env.scenarioMode = true;
     env.state.timestamp = 1_000;
-    env.runtimeState = {
+    env.infrastructure = {
       loopActive: false,
       halted: false,
       maxEntityInputsPerFrame: 1,

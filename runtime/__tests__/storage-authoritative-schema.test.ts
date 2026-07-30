@@ -119,7 +119,7 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
   test('rejects nested runtime-machine outbox corruption at the frame decode boundary', async () => {
     const env = createEmptyEnv('storage-runtime-machine-schema');
     const runtimeMachine = buildDurableRuntimeMachineSnapshot(env);
-    runtimeMachine['runtimeState'] = { pendingCommittedJOutbox: 'CORRUPT' };
+    runtimeMachine['infrastructure'] = { pendingCommittedJOutbox: 'CORRUPT' };
     const frame = {
       height: 1,
       timestamp: 1,
@@ -156,12 +156,12 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
   test('rejects unknown runtime-state fields and corrupt nested J entries', () => {
     const base = buildDurableRuntimeMachineSnapshot(createEmptyEnv('runtime-machine-corrupt-variants'));
     const unknownState = structuredClone(base);
-    unknownState['runtimeState'] = { unexpected: true };
+    unknownState['infrastructure'] = { unexpected: true };
     expect(() => validateDurableRuntimeMachineSnapshot(unknownState, 'RUNTIME_MACHINE'))
       .toThrow('RUNTIME_MACHINE_RUNTIME_STATE_FIELDS:missing=none:extra=unexpected');
 
     const corruptOutboxEntry = structuredClone(base);
-    corruptOutboxEntry['runtimeState'] = {
+    corruptOutboxEntry['infrastructure'] = {
       pendingCommittedJOutbox: [{ jurisdictionName: 'Testnet', jTxs: 'CORRUPT' }],
     };
     expect(() => validateDurableRuntimeMachineSnapshot(corruptOutboxEntry, 'RUNTIME_MACHINE'))
@@ -381,7 +381,7 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
     const env = createEmptyEnv('storage-runtime-machine-roundtrip');
     const batch = createEmptyBatch();
     batch.flashloans.push({ tokenId: 1, amount: 7n });
-    env.runtimeState = {
+    env.infrastructure = {
       pendingCommittedJOutbox: [{
         jurisdictionName: 'Testnet',
         jTxs: [{
@@ -441,8 +441,8 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
     expect(computeStorageFrameHash(decoded)).toBe(frame.frameHash);
     const restored = createEmptyEnv('storage-runtime-machine-roundtrip-restored');
     restoreDurableRuntimeSnapshot(restored, decoded.runtimeMachine!);
-    expect(restored.runtimeState?.pendingCommittedJOutbox).toEqual(
-      env.runtimeState.pendingCommittedJOutbox,
+    expect(restored.infrastructure?.pendingCommittedJOutbox).toEqual(
+      env.infrastructure.pendingCommittedJOutbox,
     );
   });
 });

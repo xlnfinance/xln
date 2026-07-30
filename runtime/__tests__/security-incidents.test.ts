@@ -33,8 +33,8 @@ describe('runtime security incidents', () => {
     recordRuntimeSecurityIncident(env, incident);
 
     const id = buildRuntimeSecurityIncidentId(incident);
-    expect(env.runtimeState?.securityIncidents?.size).toBe(1);
-    expect(env.runtimeState?.securityIncidents?.get(id)).toMatchObject({
+    expect(env.infrastructure?.securityIncidents?.size).toBe(1);
+    expect(env.infrastructure?.securityIncidents?.get(id)).toMatchObject({
       status: 'active',
       firstSeenAt: 100,
       lastSeenAt: 110,
@@ -43,7 +43,7 @@ describe('runtime security incidents', () => {
 
     env.state.timestamp = 120;
     resolveRuntimeSecurityIncident(env, incident);
-    expect(env.runtimeState?.securityIncidents?.get(id)).toMatchObject({
+    expect(env.infrastructure?.securityIncidents?.get(id)).toMatchObject({
       status: 'resolved',
       resolvedAt: 120,
       occurrences: 2,
@@ -51,13 +51,13 @@ describe('runtime security incidents', () => {
 
     env.state.timestamp = 130;
     recordRuntimeSecurityIncident(env, incident);
-    expect(env.runtimeState?.securityIncidents?.get(id)).toMatchObject({
+    expect(env.infrastructure?.securityIncidents?.get(id)).toMatchObject({
       status: 'active',
       firstSeenAt: 100,
       lastSeenAt: 130,
       occurrences: 3,
     });
-    expect(env.runtimeState?.securityIncidents?.get(id)?.resolvedAt).toBeUndefined();
+    expect(env.infrastructure?.securityIncidents?.get(id)?.resolvedAt).toBeUndefined();
   });
 
   test('bounds incident memory and aggregates overflow without throwing', () => {
@@ -71,8 +71,8 @@ describe('runtime security incidents', () => {
       });
     }
 
-    expect(env.runtimeState?.securityIncidents?.size).toBe(MAX_RUNTIME_SECURITY_INCIDENTS);
-    expect(env.runtimeState?.securityIncidents?.get('cross-j:incident-capacity')).toMatchObject({
+    expect(env.infrastructure?.securityIncidents?.size).toBe(MAX_RUNTIME_SECURITY_INCIDENTS);
+    expect(env.infrastructure?.securityIncidents?.get('cross-j:incident-capacity')).toMatchObject({
       status: 'active',
       code: 'SECURITY_INCIDENT_CAPACITY_REACHED',
       occurrences: 21,
@@ -90,7 +90,7 @@ describe('runtime security incidents', () => {
     const restored = createEmptyEnv('security-incident-durable-target');
     restoreDurableRuntimeSnapshot(restored, snapshot);
 
-    expect([...restored.runtimeState!.securityIncidents!.values()]).toContainEqual(expect.objectContaining({
+    expect([...restored.infrastructure!.securityIncidents!.values()]).toContainEqual(expect.objectContaining({
       code: incident.code,
       status: 'active',
       firstSeenAt: 500,

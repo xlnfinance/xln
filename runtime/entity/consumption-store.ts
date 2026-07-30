@@ -15,11 +15,11 @@ export type ConsumptionNodeChanges = Readonly<{
 }>;
 
 export const getConsumptionNodeStore = (env: EntityRuntimeContext): Map<string, ConsumptionNode> => {
-  env.runtimeState ??= {};
-  const existing = env.runtimeState.consumptionNodes;
+  env.infrastructure ??= {};
+  const existing = env.infrastructure.consumptionNodes;
   if (existing instanceof Map) return existing as Map<string, ConsumptionNode>;
   const created = new Map(existing ?? []);
-  env.runtimeState.consumptionNodes = created;
+  env.infrastructure.consumptionNodes = created;
   return created;
 };
 
@@ -44,13 +44,13 @@ export const cacheCommittedConsumptionNodeChanges = (
   changes: ConsumptionNodeChanges | undefined,
 ): void => {
   if (!changes || (changes.newNodes.length === 0 && changes.replacedNodeHashes.length === 0)) return;
-  env.runtimeState ??= {};
+  env.infrastructure ??= {};
   const store = getConsumptionNodeStore(env);
-  const pending = env.runtimeState.pendingConsumptionNodes instanceof Map
-    ? env.runtimeState.pendingConsumptionNodes as Map<string, ConsumptionNode>
+  const pending = env.infrastructure.pendingConsumptionNodes instanceof Map
+    ? env.infrastructure.pendingConsumptionNodes as Map<string, ConsumptionNode>
     : new Map<string, ConsumptionNode>();
-  const deletes = env.runtimeState.pendingConsumptionNodeDeletes instanceof Set
-    ? env.runtimeState.pendingConsumptionNodeDeletes
+  const deletes = env.infrastructure.pendingConsumptionNodeDeletes instanceof Set
+    ? env.infrastructure.pendingConsumptionNodeDeletes
     : new Set<string>();
   for (const { hash, node } of changes.newNodes) {
     putVerifiedNode(store, hash, node, 'CONSUMPTION_NODE_DELTA_CORRUPT');
@@ -58,8 +58,8 @@ export const cacheCommittedConsumptionNodeChanges = (
     deletes.delete(hash);
   }
   for (const hash of changes.replacedNodeHashes) deletes.add(hash);
-  env.runtimeState.pendingConsumptionNodes = pending;
-  env.runtimeState.pendingConsumptionNodeDeletes = deletes;
+  env.infrastructure.pendingConsumptionNodes = pending;
+  env.infrastructure.pendingConsumptionNodeDeletes = deletes;
 };
 
 const collectRoot = (
@@ -107,7 +107,7 @@ export const assertConsumptionRootsAvailable = (env: EntityRuntimeContext): void
 };
 
 export const getSafePendingConsumptionDeletes = (env: EntityRuntimeContext): string[] => {
-  const candidates = env.runtimeState?.pendingConsumptionNodeDeletes;
+  const candidates = env.infrastructure?.pendingConsumptionNodeDeletes;
   if (!(candidates instanceof Set) || candidates.size === 0) return [];
   const reachable = collectReachableConsumptionNodes(
     getConsumptionNodeStore(env),
@@ -120,7 +120,7 @@ export const finalizePersistedConsumptionNodes = (
   env: EntityRuntimeContext,
   deletedHashes: readonly string[],
 ): void => {
-  const state = env.runtimeState;
+  const state = env.infrastructure;
   if (!state) return;
   state.pendingConsumptionNodes = new Map();
   const store = getConsumptionNodeStore(env);

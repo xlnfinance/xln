@@ -49,7 +49,7 @@ export const assertJEventIngressOpen = (
   env: RuntimeReplica,
   label: string,
 ): void => {
-  if (!env.runtimeState?.persistenceQuiescing || env.scenarioMode) return;
+  if (!env.infrastructure?.persistenceQuiescing || env.scenarioMode) return;
   env.error?.('jurisdiction', 'J_EVENT_INGRESS_QUIESCING', { label });
   throw new Error(`J_EVENT_INGRESS_QUIESCING:${label}`);
 };
@@ -169,7 +169,7 @@ const buildDelivery = (
       blockNumber: options.blockNumber,
       accountSettled: settled,
     });
-    env.runtimeState?.p2p?.sendDebugEvent?.({
+    env.infrastructure?.p2p?.sendDebugEvent?.({
       level: 'info', code: 'REB_STEP', step: 4, status: 'ok',
       event: 'j_event_delivered', entityId: delivery.entityId,
       signerId: delivery.signerId, blockNumber: options.blockNumber,

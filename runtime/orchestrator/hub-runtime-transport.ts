@@ -109,11 +109,11 @@ export const createHubDirectRuntimeRoute = (
       handleInboundReliableReceipt(env, from, receipt);
     },
   });
-  env.runtimeState = env.runtimeState ?? {};
+  env.infrastructure = env.infrastructure ?? {};
   // Both payload and receipt use one authenticated socket so account ACK
   // ordering cannot be inverted. Durable output routing still retains the
   // input and falls back to P2P when the direct peer is unavailable.
-  env.runtimeState.directEntityInputsDispatch = (
+  env.infrastructure.directEntityInputsDispatch = (
     targetRuntimeId,
     envelope,
     ingressTimestamp,
@@ -122,7 +122,7 @@ export const createHubDirectRuntimeRoute = (
     envelope,
     ingressTimestamp,
   );
-  env.runtimeState.directReliableReceiptDispatch = (
+  env.infrastructure.directReliableReceiptDispatch = (
     targetRuntimeId,
     receipt,
   ) => route.sendReliableReceiptDelivery(targetRuntimeId, receipt);

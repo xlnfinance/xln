@@ -226,8 +226,8 @@ describe('JReplica stateRoot semantics', () => {
       applyImportJurisdictionIntent(withAdapter, importTx);
       applyImportJurisdictionIntent(withoutAdapter, importTx);
 
-      expect(withAdapter.runtimeState?.pendingJurisdictionImports?.size).toBe(1);
-      expect(withoutAdapter.runtimeState?.pendingJurisdictionImports?.size).toBe(1);
+      expect(withAdapter.infrastructure?.pendingJurisdictionImports?.size).toBe(1);
+      expect(withoutAdapter.infrastructure?.pendingJurisdictionImports?.size).toBe(1);
     } finally {
       await adapter.close();
     }

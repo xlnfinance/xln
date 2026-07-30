@@ -7,14 +7,14 @@ import {
 import { ensureReliableState } from './reliable-receipt';
 
 const durableReceiverSourceLaneKeys = (
-  state: NonNullable<RuntimeReplica['runtimeState']>,
+  state: NonNullable<RuntimeReplica['infrastructure']>,
 ): Set<string> => new Set([
   ...(state.reliableIngressReceiptLedger?.keys() ?? []),
   ...(state.reliableIngressTerminalWatermarks?.keys() ?? []),
 ]);
 
 export const receiverSourceLaneKeys = (
-  state: NonNullable<RuntimeReplica['runtimeState']>,
+  state: NonNullable<RuntimeReplica['infrastructure']>,
 ): Set<string> => {
   const keys = durableReceiverSourceLaneKeys(state);
   for (const pending of state.pendingReliableIngress?.values() ?? []) {
@@ -26,7 +26,7 @@ export const receiverSourceLaneKeys = (
 };
 
 export const assertReceiverSourceLaneCapacity = (
-  state: NonNullable<RuntimeReplica['runtimeState']>,
+  state: NonNullable<RuntimeReplica['infrastructure']>,
   candidateKey: string,
   knownKeys = receiverSourceLaneKeys(state),
 ): void => {
@@ -36,7 +36,7 @@ export const assertReceiverSourceLaneCapacity = (
 
 export const ensureReliableIngressState = (
   env: RuntimeReplica,
-): NonNullable<RuntimeReplica['runtimeState']> => {
+): NonNullable<RuntimeReplica['infrastructure']> => {
   const state = ensureReliableState(env);
   state.reliableIngressReceiptLedger ??= new Map();
   state.reliableIngressTerminalWatermarks ??= new Map();

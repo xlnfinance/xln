@@ -22,7 +22,7 @@ const emitWatcherDebug = (
   session: RpcWatcherSession,
   payload: Record<string, unknown>,
 ): void => {
-  const p2p = session.env.runtimeState?.p2p;
+  const p2p = session.env.infrastructure?.p2p;
   if (!isDebugEventEmitter(p2p)) return;
   p2p.sendDebugEvent({
     level: 'info',

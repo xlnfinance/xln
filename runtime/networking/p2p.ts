@@ -315,9 +315,9 @@ export class RuntimeP2P {
       });
     this.onGossipProfiles = options.onGossipProfiles;
     this.onEncryptionManifestComplete = options.onEncryptionManifestComplete;
-    if (!this.env.runtimeState) this.env.runtimeState = {};
-    this.verifiedProfileRoutes = this.env.runtimeState.verifiedProfileRoutes ?? new Map();
-    this.env.runtimeState.verifiedProfileRoutes = this.verifiedProfileRoutes;
+    if (!this.env.infrastructure) this.env.infrastructure = {};
+    this.verifiedProfileRoutes = this.env.infrastructure.verifiedProfileRoutes ?? new Map();
+    this.env.infrastructure.verifiedProfileRoutes = this.verifiedProfileRoutes;
     const seed = this.env.runtimeSeed;
     if (!seed) {
       throw new Error('P2P_INIT_ERROR: runtimeSeed is required for encryption keypair');
@@ -583,8 +583,8 @@ export class RuntimeP2P {
       runtimeEncPubKey: profile.runtimeEncPubKey,
       lastUpdated: profile.lastUpdated,
     });
-    if (!this.env.runtimeState) this.env.runtimeState = {};
-    this.env.runtimeState.verifiedProfileRoutes = this.verifiedProfileRoutes;
+    if (!this.env.infrastructure) this.env.infrastructure = {};
+    this.env.infrastructure.verifiedProfileRoutes = this.verifiedProfileRoutes;
   }
 
   getReconnectState(): { attempt: number; nextAt: number } | null {

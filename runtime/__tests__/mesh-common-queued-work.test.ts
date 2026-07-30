@@ -17,7 +17,7 @@ const counterpartyId = '0x222222222222222222222222222222222222222222222222222222
 describe('mesh queued work detection', () => {
   test('keeps bootstrap settled behind an in-flight runtime frame after its mempool drains', () => {
     const env = {
-      runtimeState: { processingPromise: new Promise<void>(() => {}) },
+      infrastructure: { processingPromise: new Promise<void>(() => {}) },
       runtimeMempool: { runtimeTxs: [], entityInputs: [] },
       eReplicas: new Map(),
       jReplicas: new Map(),

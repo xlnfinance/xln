@@ -437,6 +437,192 @@ export interface RuntimeState {
 }
 
 /** One live Runtime instance: committed State plus local machine machinery. */
+export interface RuntimeInfrastructure {
+  lifecyclePhase?: 'booting' | 'running' | 'quiescing' | 'stopped' | 'halted';
+  loopActive?: boolean;
+  halted?: boolean;
+  fatalDebugPayload?: {
+    message: string;
+    stack?: string;
+    height?: number;
+    timestamp?: number;
+  };
+  loopPromise?: Promise<void> | null;
+  stopLoop?: (() => void) | null;
+  wakeLoop?: (() => void) | null;
+  wakeRequested?: boolean;
+  /** Ephemeral keys owned by the active storage writer; never persisted. */
+  storageReplicaMetaKeys?: Set<string>;
+  /** Ephemeral, event-driven profile certification candidates; rebuilt by a full scan after restart. */
+  pendingProfileCertificationEntityIds?: Set<string>;
+  scheduledWakeIndex?: {
+    heap: Array<{
+      dueAt: number;
+      entityId: string;
+      signerId: string;
+      generation: number;
+    }>;
+    generations: Map<string, number>;
+    replicas: Map<string, EntityReplica>;
+    initialized: boolean;
+  };
+  persistencePaused?: boolean;
+  persistenceQuiescing?: boolean;
+  lastFrameAt?: number; // Wall-clock timestamp of the most recent processed runtime cycle
+  maxEntityInputsPerFrame?: number;
+  maxEntityTxsPerFrame?: number;
+  processingPromise?: Promise<void> | null;
+  /** Infra-only read/write barrier; never part of deterministic Runtime State. */
+  activeCommittedReaders?: number;
+  committedReadersDrained?: Promise<void> | null;
+  resolveCommittedReadersDrained?: (() => void) | null;
+  /** True after owned-State mutation starts and until WAL-backed publish. */
+  stateMutationInFlight?: boolean;
+  /** Entity inputs detached from the live mempool and owned by the active runtime frame. */
+  inFlightEntityInputs?: number;
+  p2p?: RuntimeP2P | null | undefined;
+  pendingP2PConfig?: RuntimeP2PConfig | null;
+  lastP2PConfig?: RuntimeP2PConfig | null;
+  envChangeCallbacks?: Set<(state: RuntimeReplica) => void>;
+  runtimeFrameCommitCallbacks?: Set<(frame: { height: number; runtimeInput: RuntimeInput }) => void>;
+  storageDb?: Level<Buffer, Buffer> | null | undefined;
+  storageDbOpenPromise?: Promise<boolean> | null | undefined;
+  storagePreviousDb?: Level<Buffer, Buffer> | null | undefined;
+  storagePreviousDbOpenPromise?: Promise<boolean> | null | undefined;
+  storageVerifiedCurrentHeight?: number;
+  storageVerifiedPreviousHeight?: number;
+  storageVerifiedWalHeight?: number;
+  storageEpochRotatePromise?: Promise<void> | null;
+  storageEntityHashDocs?: unknown;
+  /** Content-addressed board nodes. Authority is the root in EntityState. */
+  certifiedBoardNodes?: CertifiedBoardNodeStore;
+  /** Newly created immutable nodes awaiting the same atomic batch as a root. */
+  pendingCertifiedBoardNodes?: CertifiedBoardNodeStore;
+  /** Content-addressed consumed-output witnesses. EntityState root is authority. */
+  consumptionNodes?: ConsumptionNodeStore;
+  /** Committed nodes awaiting the same atomic storage batch as EntityState. */
+  pendingConsumptionNodes?: ConsumptionNodeStore;
+  /** Obsolete committed path nodes awaiting safe cross-replica reachability GC. */
+  pendingConsumptionNodeDeletes?: Set<string>;
+  /** Content-addressed bilateral Account J-claim witnesses. Account roots are authority. */
+  accountJClaimNodes?: AccountJClaimNodeStore;
+  /** Committed nodes awaiting the same atomic batch as Account root documents. */
+  pendingAccountJClaimNodes?: AccountJClaimNodeStore;
+  /** Obsolete path nodes awaiting safe cross-replica reachability GC. */
+  pendingAccountJClaimNodeDeletes?: Set<string>;
+  /** Validator-local receipt proofs; never sourced from Entity/peer state. */
+  certifiedRegistrationEvidence?: Map<string, CertifiedRegistrationEvidence>;
+  currentStorageOverlayMarks?: RuntimeOverlayRecord[];
+  runtimeWalDb?: Level<Buffer, Buffer> | null | undefined;
+  runtimeWalDbOpenPromise?: Promise<boolean> | null | undefined;
+  /** Rebuildable Entity/Account/J history indexes. Runtime WAL remains authoritative. */
+  historyViewDb?: Level<Buffer, Buffer> | null | undefined;
+  historyViewDbOpenPromise?: Promise<boolean> | null | undefined;
+  infraDb?: Level<Buffer, Buffer> | null | undefined;
+  infraDbOpenPromise?: Promise<boolean> | null | undefined;
+  infraDbClosing?: boolean;
+  infraDbPendingWrites?: Set<Promise<void>>;
+  runtimeSyncChannel?: {
+    postMessage(message: unknown): void;
+    close(): void;
+  } | null;
+  /** Last post-WAL browser notification failure; never changes commit status. */
+  runtimeSyncNotificationFailure?: {
+    height: number;
+    message: string;
+  };
+  logState?: {
+    nextId: number;
+    mirrorToConsole?: boolean;
+  };
+  /** Exact frame-local event set keyed by canonical bytes; preserves insertion order. */
+  pendingAuditEvents?: Map<string, Record<string, unknown>>;
+  /** Bounded, replayable wallet security status. Never stores untrusted payload bodies. */
+  securityIncidents?: Map<string, RuntimeSecurityIncident>;
+  recentReserveUpdatedEvents?: Map<string, {
+    name: 'ReserveUpdated';
+    args: Record<string, unknown>;
+    blockNumber: number;
+    blockHash: string;
+    transactionHash: string;
+    observedAt: number;
+  }>;
+  pendingHistoryRecords?: RuntimeHistoryRecord[];
+  cleanLogs?: string[];
+  routeDeferState?: Map<string, {
+    warnAt: number;
+    gossipAt: number;
+    deferredCount: number;
+    escalated: boolean;
+  }>;
+  deferredNetworkMeta?: Map<string, {
+    attempts: number;
+    nextRetryAt: number;
+    manual?: true;
+  }>;
+  /** Durable receiver active exact frontier, keyed by authenticated source runtime + lane. */
+  reliableIngressReceiptLedger?: Map<string, ReliableDeliveryReceipt>;
+  /** Durable receiver terminal watermark, keyed by authenticated source runtime + lane. */
+  reliableIngressTerminalWatermarks?: Map<string, ReliableDeliveryReceipt>;
+  /** Durable sender-side active exact frontier, keyed by receiver + reliable lane. */
+  receivedReliableReceiptLedger?: Map<string, ReliableDeliveryReceipt>;
+  /** Durable sender-side protocol-terminal watermark, keyed by receiver + reliable lane. */
+  receivedReliableTerminalWatermarks?: Map<string, ReliableDeliveryReceipt>;
+  /** Ephemeral ingress waiters. These never imply durability and are never snapshotted. */
+  pendingReliableIngress?: Map<string, PendingReliableIngress>;
+  /** Ephemeral guard: receipt exists in working state but the enclosing frame is not durable yet. */
+  reliableIngressCommitting?: Set<string>;
+  verifiedProfileRoutes?: Map<string, {
+    runtimeId: string;
+    runtimeEncPubKey: string;
+    lastUpdated: number;
+  }>;
+  entityRuntimeHints?: Map<string, {
+    runtimeId: string;
+    seenAt: number;
+  }>;
+  externalWalletWatchOwners?: Map<string, Map<string, number>>;
+  watcherDedupCounter?: import('../jadapter/watcher').EventBatchCounter;
+  directEntityInputsDispatch?: ((
+    targetRuntimeId: string,
+    envelope: RuntimeEntityInputsEnvelope,
+    ingressTimestamp?: number,
+  ) => import('../runtime/output-routing').RuntimeDirectEntityInputDispatchResult) | null;
+  directReliableReceiptDispatch?: ((
+    targetRuntimeId: string,
+    receipt: ReliableDeliveryReceipt,
+  ) => import('../protocol/payments/delivery-result').DeliveryResult) | null;
+  /**
+   * True only when the target runtime is already attached to this same
+   * server/relay process with a cached encryption key. This is local socket
+   * delivery capability, not permission to queue arbitrary public relay hops.
+   */
+  canUseConnectedRelayFallback?: ((targetRuntimeId: string) => boolean) | null;
+  /**
+   * Optional post-commit backup barrier. If present, runtime holds remote
+   * side effects until this callback confirms external recovery storage for
+   * the just-committed state.
+   */
+  recoveryBackupBarrier?: ((
+    state: RuntimeReplica,
+    info: {
+      height: number;
+      remoteOutputCount: number;
+      jInputCount: number;
+    },
+  ) => Promise<void>) | null;
+  /** Already committed J side effects awaiting a durable result RuntimeTx. */
+  pendingCommittedJOutbox?: JInput[];
+  /** Durable import intents awaiting a local, replayable completeImportJ result. */
+  pendingJurisdictionImports?: Map<string, PendingJurisdictionImport>;
+  /** Caller-idempotent registration batches; completed records are O(actual batches). */
+  numberedRegistrationIntents?: Map<string, NumberedRegistrationRecord>;
+  runtimeAdapterCommandFrontiers?: Map<
+    string,
+    import('../radapter/command-frontier').RuntimeAdapterCommandFrontier
+  >;
+}
+
 export interface RuntimeReplica {
   state: RuntimeState;
   runtimeSeed?: string | undefined; // BrainVault seed backing this runtime (plaintext, dev mode)
@@ -481,191 +667,7 @@ export interface RuntimeReplica {
       accountMerkleRadix?: 16 | 256;
     };
   } | undefined;
-  runtimeState?: {
-    lifecyclePhase?: 'booting' | 'running' | 'quiescing' | 'stopped' | 'halted';
-    loopActive?: boolean;
-    halted?: boolean;
-    fatalDebugPayload?: {
-      message: string;
-      stack?: string;
-      height?: number;
-      timestamp?: number;
-    };
-    loopPromise?: Promise<void> | null;
-    stopLoop?: (() => void) | null;
-    wakeLoop?: (() => void) | null;
-    wakeRequested?: boolean;
-    /** Ephemeral keys owned by the active storage writer; never persisted. */
-    storageReplicaMetaKeys?: Set<string>;
-    /** Ephemeral, event-driven profile certification candidates; rebuilt by a full scan after restart. */
-    pendingProfileCertificationEntityIds?: Set<string>;
-    scheduledWakeIndex?: {
-      heap: Array<{
-        dueAt: number;
-        entityId: string;
-        signerId: string;
-        generation: number;
-      }>;
-      generations: Map<string, number>;
-      replicas: Map<string, EntityReplica>;
-      initialized: boolean;
-    };
-    persistencePaused?: boolean;
-    persistenceQuiescing?: boolean;
-    lastFrameAt?: number; // Wall-clock timestamp of the most recent processed runtime cycle
-    maxEntityInputsPerFrame?: number;
-    maxEntityTxsPerFrame?: number;
-    processingPromise?: Promise<void> | null;
-    /** Infra-only read/write barrier; never part of deterministic Runtime State. */
-    activeCommittedReaders?: number;
-    committedReadersDrained?: Promise<void> | null;
-    resolveCommittedReadersDrained?: (() => void) | null;
-    /** True after owned-State mutation starts and until WAL-backed publish. */
-    stateMutationInFlight?: boolean;
-    /** Entity inputs detached from the live mempool and owned by the active runtime frame. */
-    inFlightEntityInputs?: number;
-    p2p?: RuntimeP2P | null | undefined;
-    pendingP2PConfig?: RuntimeP2PConfig | null;
-    lastP2PConfig?: RuntimeP2PConfig | null;
-    envChangeCallbacks?: Set<(state: RuntimeReplica) => void>;
-    runtimeFrameCommitCallbacks?: Set<(frame: { height: number; runtimeInput: RuntimeInput }) => void>;
-    storageDb?: Level<Buffer, Buffer> | null | undefined;
-    storageDbOpenPromise?: Promise<boolean> | null | undefined;
-    storagePreviousDb?: Level<Buffer, Buffer> | null | undefined;
-    storagePreviousDbOpenPromise?: Promise<boolean> | null | undefined;
-    storageVerifiedCurrentHeight?: number;
-    storageVerifiedPreviousHeight?: number;
-    storageVerifiedWalHeight?: number;
-    storageEpochRotatePromise?: Promise<void> | null;
-    storageEntityHashDocs?: unknown;
-    /** Content-addressed board nodes. Authority is the root in EntityState. */
-    certifiedBoardNodes?: CertifiedBoardNodeStore;
-    /** Newly created immutable nodes awaiting the same atomic batch as a root. */
-    pendingCertifiedBoardNodes?: CertifiedBoardNodeStore;
-    /** Content-addressed consumed-output witnesses. EntityState root is authority. */
-    consumptionNodes?: ConsumptionNodeStore;
-    /** Committed nodes awaiting the same atomic storage batch as EntityState. */
-    pendingConsumptionNodes?: ConsumptionNodeStore;
-    /** Obsolete committed path nodes awaiting safe cross-replica reachability GC. */
-    pendingConsumptionNodeDeletes?: Set<string>;
-    /** Content-addressed bilateral Account J-claim witnesses. Account roots are authority. */
-    accountJClaimNodes?: AccountJClaimNodeStore;
-    /** Committed nodes awaiting the same atomic batch as Account root documents. */
-    pendingAccountJClaimNodes?: AccountJClaimNodeStore;
-    /** Obsolete path nodes awaiting safe cross-replica reachability GC. */
-    pendingAccountJClaimNodeDeletes?: Set<string>;
-    /** Validator-local receipt proofs; never sourced from Entity/peer state. */
-    certifiedRegistrationEvidence?: Map<string, CertifiedRegistrationEvidence>;
-    currentStorageOverlayMarks?: RuntimeOverlayRecord[];
-    runtimeWalDb?: Level<Buffer, Buffer> | null | undefined;
-    runtimeWalDbOpenPromise?: Promise<boolean> | null | undefined;
-    /** Rebuildable Entity/Account/J history indexes. Runtime WAL remains authoritative. */
-    historyViewDb?: Level<Buffer, Buffer> | null | undefined;
-    historyViewDbOpenPromise?: Promise<boolean> | null | undefined;
-    infraDb?: Level<Buffer, Buffer> | null | undefined;
-    infraDbOpenPromise?: Promise<boolean> | null | undefined;
-    infraDbClosing?: boolean;
-    infraDbPendingWrites?: Set<Promise<void>>;
-    runtimeSyncChannel?: {
-      postMessage(message: unknown): void;
-      close(): void;
-    } | null;
-    /** Last post-WAL browser notification failure; never changes commit status. */
-    runtimeSyncNotificationFailure?: {
-      height: number;
-      message: string;
-    };
-    logState?: {
-      nextId: number;
-      mirrorToConsole?: boolean;
-    };
-    /** Exact frame-local event set keyed by canonical bytes; preserves insertion order. */
-    pendingAuditEvents?: Map<string, Record<string, unknown>>;
-    /** Bounded, replayable wallet security status. Never stores untrusted payload bodies. */
-    securityIncidents?: Map<string, RuntimeSecurityIncident>;
-    recentReserveUpdatedEvents?: Map<string, {
-      name: 'ReserveUpdated';
-      args: Record<string, unknown>;
-      blockNumber: number;
-      blockHash: string;
-      transactionHash: string;
-      observedAt: number;
-    }>;
-    pendingHistoryRecords?: RuntimeHistoryRecord[];
-    cleanLogs?: string[];
-    routeDeferState?: Map<string, {
-      warnAt: number;
-      gossipAt: number;
-      deferredCount: number;
-      escalated: boolean;
-    }>;
-    deferredNetworkMeta?: Map<string, {
-      attempts: number;
-      nextRetryAt: number;
-      manual?: true;
-    }>;
-    /** Durable receiver active exact frontier, keyed by authenticated source runtime + lane. */
-    reliableIngressReceiptLedger?: Map<string, ReliableDeliveryReceipt>;
-    /** Durable receiver terminal watermark, keyed by authenticated source runtime + lane. */
-    reliableIngressTerminalWatermarks?: Map<string, ReliableDeliveryReceipt>;
-    /** Durable sender-side active exact frontier, keyed by receiver + reliable lane. */
-    receivedReliableReceiptLedger?: Map<string, ReliableDeliveryReceipt>;
-    /** Durable sender-side protocol-terminal watermark, keyed by receiver + reliable lane. */
-    receivedReliableTerminalWatermarks?: Map<string, ReliableDeliveryReceipt>;
-    /** Ephemeral ingress waiters. These never imply durability and are never snapshotted. */
-    pendingReliableIngress?: Map<string, PendingReliableIngress>;
-    /** Ephemeral guard: receipt exists in working state but the enclosing frame is not durable yet. */
-    reliableIngressCommitting?: Set<string>;
-    verifiedProfileRoutes?: Map<string, {
-      runtimeId: string;
-      runtimeEncPubKey: string;
-      lastUpdated: number;
-    }>;
-    entityRuntimeHints?: Map<string, {
-      runtimeId: string;
-      seenAt: number;
-    }>;
-    externalWalletWatchOwners?: Map<string, Map<string, number>>;
-    watcherDedupCounter?: import('../jadapter/watcher').EventBatchCounter;
-    directEntityInputsDispatch?: ((
-      targetRuntimeId: string,
-      envelope: RuntimeEntityInputsEnvelope,
-      ingressTimestamp?: number,
-    ) => import('../runtime/output-routing').RuntimeDirectEntityInputDispatchResult) | null;
-    directReliableReceiptDispatch?: ((
-      targetRuntimeId: string,
-      receipt: ReliableDeliveryReceipt,
-    ) => import('../protocol/payments/delivery-result').DeliveryResult) | null;
-    /**
-     * True only when the target runtime is already attached to this same
-     * server/relay process with a cached encryption key. This is local socket
-     * delivery capability, not permission to queue arbitrary public relay hops.
-     */
-    canUseConnectedRelayFallback?: ((targetRuntimeId: string) => boolean) | null;
-    /**
-     * Optional post-commit backup barrier. If present, runtime holds remote
-     * side effects until this callback confirms external recovery storage for
-     * the just-committed state.
-     */
-    recoveryBackupBarrier?: ((
-      state: RuntimeReplica,
-      info: {
-        height: number;
-        remoteOutputCount: number;
-        jInputCount: number;
-      },
-    ) => Promise<void>) | null;
-    /** Already committed J side effects awaiting a durable result RuntimeTx. */
-    pendingCommittedJOutbox?: JInput[];
-    /** Durable import intents awaiting a local, replayable completeImportJ result. */
-    pendingJurisdictionImports?: Map<string, PendingJurisdictionImport>;
-    /** Caller-idempotent registration batches; completed records are O(actual batches). */
-    numberedRegistrationIntents?: Map<string, NumberedRegistrationRecord>;
-    runtimeAdapterCommandFrontiers?: Map<
-      string,
-      import('../radapter/command-frontier').RuntimeAdapterCommandFrontier
-    >;
-  } | undefined;
+  infrastructure?: RuntimeInfrastructure | undefined;
   /** Bounded local/debug timeline. Authoritative history lives in the storage WAL. */
   history: EnvSnapshot[];
   gossip: GossipLayer;

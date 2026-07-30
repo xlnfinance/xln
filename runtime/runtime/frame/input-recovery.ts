@@ -25,7 +25,7 @@ export type UndurableRuntimeInputContext = {
 
 export type UndurableRuntimeInputResult = {
   env: RuntimeReplica;
-  state: NonNullable<RuntimeReplica['runtimeState']>;
+  state: NonNullable<RuntimeReplica['infrastructure']>;
   error: Error;
 };
 

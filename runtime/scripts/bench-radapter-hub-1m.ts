@@ -344,12 +344,12 @@ const makeEnv = (seed: string, entityId: string, state: EntityState): RuntimeRep
     },
     runtimeSeed: seed,
     runtimeId,
-    runtimeState: {},
+    infrastructure: {},
   } as RuntimeReplica;
   // This benchmark owns its command consumer below; the synthetic Runtime is
   // fully booted once that consumer exists. Keep the production readiness
   // fence intact instead of teaching the adapter to accept commands in booting.
-  transitionRuntimeLifecycle(env.runtimeState!, 'running');
+  transitionRuntimeLifecycle(env.infrastructure!, 'running');
   return env;
 };
 

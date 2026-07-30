@@ -1486,7 +1486,7 @@ describe('registered Entity certified board authority', () => {
   test('recovery checkpoint carries only reachable nodes into a fresh runtime', async () => {
     const { profile, localEnv, boardHash } = await buildRegisteredProfile();
     const snapshot = buildRuntimeCheckpointSnapshot(localEnv);
-    const durableState = snapshot['runtimeState'] as { certifiedBoardNodes?: Map<string, unknown> };
+    const durableState = snapshot['infrastructure'] as { certifiedBoardNodes?: Map<string, unknown> };
     expect(durableState.certifiedBoardNodes?.size).toBeGreaterThan(0);
     // A recovery checkpoint never persists private keys. Clear the in-process
     // vault cache so this restore exercises a genuinely fresh observer runtime

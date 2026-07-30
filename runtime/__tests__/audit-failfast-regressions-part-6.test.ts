@@ -893,9 +893,9 @@ describe('audit fail-fast regressions', () => {
     const preserved = await applyEntityFrame(expiredEnv, expiredState, []);
     const preservedAck = preserved.newState.pendingCrossJurisdictionFillAcks?.values().next().value;
     expect(preservedAck?.ttlExpiredAt).toBe(expiredEnv.state.timestamp);
-    expect(expiredEnv.runtimeState?.securityIncidents).toBeUndefined();
+    expect(expiredEnv.infrastructure?.securityIncidents).toBeUndefined();
     publishEntityCandidateEffects(expiredEnv, preserved.candidateEffects);
-    expect([...expiredEnv.runtimeState!.securityIncidents!.values()]).toContainEqual(
+    expect([...expiredEnv.infrastructure!.securityIncidents!.values()]).toContainEqual(
       expect.objectContaining({
         code: 'CROSS_J_FILL_ACK_TTL_EXPIRED',
         status: 'active',

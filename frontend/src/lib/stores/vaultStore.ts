@@ -753,7 +753,7 @@ const getLiveRuntimeEnvForId = (runtimeId: string, fallback?: RuntimeReplica | n
 
 const getRuntimeFatalDiagnostics = (env: RuntimeReplica, replicaName?: string): string => {
   const frameLogs = env.frameLogs;
-  const cleanLogs = Array.isArray(env.runtimeState?.cleanLogs) ? env.runtimeState.cleanLogs : [];
+  const cleanLogs = Array.isArray(env.infrastructure?.cleanLogs) ? env.infrastructure.cleanLogs : [];
   const recentErrors = frameLogs
     .filter(
       (entry: FrameLogEntry) =>
@@ -787,7 +787,7 @@ const getRuntimeFatalDiagnostics = (env: RuntimeReplica, replicaName?: string): 
       runtimeId: env.runtimeId ?? null,
       height: env.state.height ?? null,
       latestHeight: env.state.height ?? null,
-      loopActive: env.runtimeState?.loopActive ?? null,
+      loopActive: env.infrastructure?.loopActive ?? null,
       jState,
       recentErrors,
       recentLogs,
@@ -921,7 +921,7 @@ async function suspendRuntimeEnvActivity(env: RuntimeReplica, loadedXln?: XLNMod
   // Fence new P2P/J ingress before draining work that was already accepted.
   // The loop remains alive for the drain, but cannot resurrect a watcher after
   // stopJurisdictionWatchersAndWait has returned.
-  if (env.runtimeState) env.runtimeState.persistenceQuiescing = true;
+  if (env.infrastructure) env.infrastructure.persistenceQuiescing = true;
 
   try {
     await xln.stopJurisdictionWatchersAndWait(env);
@@ -943,8 +943,8 @@ async function suspendRuntimeEnvActivity(env: RuntimeReplica, loadedXln?: XLNMod
     );
   }
 
-  if (env.runtimeState) {
-    env.runtimeState.persistencePaused = true;
+  if (env.infrastructure) {
+    env.infrastructure.persistencePaused = true;
   }
 
   const idle = await xln.stopRuntimeLoopAndWait(env, 30_000);
@@ -1100,7 +1100,7 @@ async function resetRuntimePersistence(runtime: Runtime, xln: XLNModule): Promis
 }
 
 function ensureRuntimeLoopRunning(env: RuntimeReplica, xln: XLNModule, reason: string): void {
-  const state = env.runtimeState;
+  const state = env.infrastructure;
   if (state?.loopActive && !state.persistencePaused && !state.persistenceQuiescing) return;
   xln.resumeRuntimeAfterPersistenceQuiesce(env);
 }
@@ -1677,7 +1677,7 @@ export const vaultOperations = {
       },
       () => {
         const latestEnv = getLatestEnv();
-        if (latestEnv.runtimeState?.loopActive === false) {
+        if (latestEnv.infrastructure?.loopActive === false) {
           throw new Error(
             `importJ(${config.name}) failed: runtime loop halted\n${getRuntimeFatalDiagnostics(latestEnv, config.name)}`,
           );
@@ -2110,7 +2110,7 @@ export const vaultOperations = {
           () => {
             const replica = findJReplicaByName(newEnv!, primaryJurisdictionName);
             if (hasRuntimeJurisdictionAddresses(replica)) return true;
-            if (newEnv?.runtimeState?.loopActive === false) {
+            if (newEnv?.infrastructure?.loopActive === false) {
               throw new Error(
                 `createRuntime.importJ(${primaryJurisdictionName}) failed: runtime loop halted\n${getRuntimeFatalDiagnostics(newEnv)}`,
               );

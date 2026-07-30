@@ -881,10 +881,10 @@ describe('audit fail-fast regressions', () => {
       ]),
     ).resolves.toBe(env);
 
-    expect(env.runtimeState?.halted).not.toBe(true);
-    expect(env.runtimeState?.lifecyclePhase).not.toBe('halted');
+    expect(env.infrastructure?.halted).not.toBe(true);
+    expect(env.infrastructure?.lifecyclePhase).not.toBe('halted');
     expect(env.runtimeMempool?.entityInputs).toHaveLength(0);
-    expect(env.runtimeState?.securityIncidents).toBeUndefined();
+    expect(env.infrastructure?.securityIncidents).toBeUndefined();
   });
 
   test('runtime ingress retargets stale signer hints only when the local target entity has one replica', async () => {
@@ -1190,7 +1190,7 @@ describe('audit fail-fast regressions', () => {
           {
             isReplay: false,
             routingDeps: {
-              ensureRuntimeState: targetEnv => targetEnv.runtimeState!,
+              ensureRuntimeState: targetEnv => targetEnv.infrastructure!,
               enqueueRuntimeInputs: () => {},
               extractEntityId: replicaKey => replicaKey.split(':')[0] ?? '',
               hasLocalSignerForEntity: () => true,
@@ -1345,7 +1345,7 @@ describe('audit fail-fast regressions', () => {
 
   test('runtime input admission rejects tx-bearing stale signer before enqueue', () => {
     const env = createEmptyEnv('runtime-input-admission-stale-signer');
-    env.runtimeState = { lifecyclePhase: 'running', loopActive: true };
+    env.infrastructure = { lifecyclePhase: 'running', loopActive: true };
     env.scenarioMode = false;
     env.quietRuntimeLogs = true;
     const { entityId, signerId } = registerLazySigner('runtime-input-admission-stale-signer', '1');
@@ -1420,7 +1420,7 @@ describe('audit fail-fast regressions', () => {
 
   test('runtime input admission accounts for importReplica earlier in the same batch', () => {
     const env = createEmptyEnv('runtime-input-admission-import-replica');
-    env.runtimeState = { lifecyclePhase: 'running', loopActive: true };
+    env.infrastructure = { lifecyclePhase: 'running', loopActive: true };
     env.scenarioMode = false;
     env.quietRuntimeLogs = true;
     const entityId = `0x${'9f'.repeat(32)}`;
@@ -2049,14 +2049,14 @@ describe('audit fail-fast regressions', () => {
       frameTimestamp,
     );
     env.overlay = [];
-    if (env.runtimeState) env.runtimeState.currentStorageOverlayMarks = [];
+    if (env.infrastructure) env.infrastructure.currentStorageOverlayMarks = [];
     await expect(applyEntityFrame(env, state, frameTxs, frameTimestamp)).rejects.toThrow(
       'ENTITY_FRAME_TX_FAILED: type=definitely_unknown_entity_tx',
     );
 
     expect(readEntityFrameEventMessages(state)).toHaveLength(0);
     expect(state.nonces.has(signer)).toBe(false);
-    expect(env.runtimeState?.currentStorageOverlayMarks ?? []).toEqual([]);
+    expect(env.infrastructure?.currentStorageOverlayMarks ?? []).toEqual([]);
   });
 
   test('entity frame keeps reducer storage changes local until exact commit', async () => {
@@ -2069,13 +2069,13 @@ describe('audit fail-fast regressions', () => {
       { type: 'chatMessage', data: { message: 'commit-bound storage change' } } as any,
     ]);
     env.overlay = [];
-    if (env.runtimeState) env.runtimeState.currentStorageOverlayMarks = [];
+    if (env.infrastructure) env.infrastructure.currentStorageOverlayMarks = [];
 
     const applied = await applyEntityFrame(env, state, frameTxs, env.state.timestamp);
 
     expect(readEntityFrameEventMessages(applied.newState)).toHaveLength(1);
     expect(applied.storageChanges).toContainEqual({ family: 'entity', entityId: state.entityId });
-    expect(env.runtimeState?.currentStorageOverlayMarks ?? []).toEqual([]);
+    expect(env.infrastructure?.currentStorageOverlayMarks ?? []).toEqual([]);
   });
 
   test('cross-j remote route cannot seed missing sibling runtime hints before topology validation', async () => {

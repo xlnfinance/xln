@@ -35,8 +35,8 @@ const senderLedgerForReceipt = (
   env: RuntimeReplica,
   receipt: ReliableDeliveryReceipt,
 ): Map<string, ReliableDeliveryReceipt> | undefined => receipt.body.coverage === 'terminal'
-  ? env.runtimeState?.receivedReliableTerminalWatermarks
-  : env.runtimeState?.receivedReliableReceiptLedger;
+  ? env.infrastructure?.receivedReliableTerminalWatermarks
+  : env.infrastructure?.receivedReliableReceiptLedger;
 
 const receiptCandidates = (
   env: RuntimeReplica,
@@ -143,7 +143,7 @@ const terminalCrossCoverage = (
   env: RuntimeReplica,
   receipt: ReliableDeliveryReceipt,
 ): TerminalCrossCoverage => terminalCrossCoverageFromLedger(
-  env.runtimeState?.receivedReliableTerminalWatermarks,
+  env.infrastructure?.receivedReliableTerminalWatermarks,
   receipt,
 );
 
@@ -251,14 +251,14 @@ export const captureReliableReceiptSenderCheckpoint = (
   env: RuntimeReplica,
 ): ReliableReceiptSenderCheckpoint => ({
   pendingNetworkOutputs: cloneIsolatedRoutedEntityInputs(env.pendingNetworkOutputs ?? []),
-  receivedLedger: env.runtimeState?.receivedReliableReceiptLedger
-    ? structuredClone(env.runtimeState.receivedReliableReceiptLedger)
+  receivedLedger: env.infrastructure?.receivedReliableReceiptLedger
+    ? structuredClone(env.infrastructure.receivedReliableReceiptLedger)
     : undefined,
-  receivedTerminalWatermarks: env.runtimeState?.receivedReliableTerminalWatermarks
-    ? structuredClone(env.runtimeState.receivedReliableTerminalWatermarks)
+  receivedTerminalWatermarks: env.infrastructure?.receivedReliableTerminalWatermarks
+    ? structuredClone(env.infrastructure.receivedReliableTerminalWatermarks)
     : undefined,
-  deferredNetworkMeta: env.runtimeState?.deferredNetworkMeta
-    ? structuredClone(env.runtimeState.deferredNetworkMeta)
+  deferredNetworkMeta: env.infrastructure?.deferredNetworkMeta
+    ? structuredClone(env.infrastructure.deferredNetworkMeta)
     : undefined,
 });
 

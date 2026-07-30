@@ -17,7 +17,7 @@ import type { RuntimeReplica } from '../runtime/types';
 
 describe('runtime lifecycle', () => {
   test('uses one explicit phase as the lifecycle source of truth', () => {
-    const state: NonNullable<RuntimeReplica['runtimeState']> = {
+    const state: NonNullable<RuntimeReplica['infrastructure']> = {
       lifecyclePhase: 'booting',
       loopActive: false,
       halted: false,
@@ -34,7 +34,7 @@ describe('runtime lifecycle', () => {
   });
 
   test('halted is terminal and cannot self-resurrect', () => {
-    const state: NonNullable<RuntimeReplica['runtimeState']> = { lifecyclePhase: 'halted', halted: true };
+    const state: NonNullable<RuntimeReplica['infrastructure']> = { lifecyclePhase: 'halted', halted: true };
     expect(() => transitionRuntimeLifecycle(state, 'running')).toThrow(
       /RUNTIME_LIFECYCLE_INVALID_TRANSITION: halted->running/,
     );
@@ -44,16 +44,16 @@ describe('runtime lifecycle', () => {
     const env = createEmptyEnv('runtime-command-readiness');
 
     for (const phase of ['booting', 'quiescing', 'stopped', 'halted'] as const) {
-      env.runtimeState = { lifecyclePhase: phase };
+      env.infrastructure = { lifecyclePhase: phase };
       expect(() => assertRuntimeCommandReady(env)).toThrow(
         `RUNTIME_COMMAND_NOT_READY:phase=${phase}`,
       );
     }
 
-    env.runtimeState = { lifecyclePhase: 'running', loopActive: true };
+    env.infrastructure = { lifecyclePhase: 'running', loopActive: true };
     expect(() => assertRuntimeCommandReady(env)).not.toThrow();
 
-    env.runtimeState.persistencePaused = true;
+    env.infrastructure.persistencePaused = true;
     expect(() => assertRuntimeCommandReady(env)).toThrow(
       'RUNTIME_COMMAND_NOT_READY:persistence-fenced',
     );
@@ -63,35 +63,35 @@ describe('runtime lifecycle', () => {
     const env = createEmptyEnv('runtime-explicit-resume');
     startRuntimeLoop(env);
     expect(await stopRuntimeLoopAndWait(env)).toBe(true);
-    expect(env.runtimeState?.lifecyclePhase).toBe('quiescing');
+    expect(env.infrastructure?.lifecyclePhase).toBe('quiescing');
 
     resumeRuntimeLoop(env);
 
-    expect(env.runtimeState?.lifecyclePhase).toBe('running');
-    env.runtimeState?.stopLoop?.();
+    expect(env.infrastructure?.lifecyclePhase).toBe('running');
+    env.infrastructure?.stopLoop?.();
   });
 
   test('durable resume clears the persistence fence before restarting the loop', async () => {
     const env = createEmptyEnv('runtime-durable-resume');
-    env.runtimeState ??= {};
-    env.runtimeState.lifecyclePhase = 'quiescing';
-    env.runtimeState.persistenceQuiescing = true;
-    env.runtimeState.persistencePaused = true;
+    env.infrastructure ??= {};
+    env.infrastructure.lifecyclePhase = 'quiescing';
+    env.infrastructure.persistenceQuiescing = true;
+    env.infrastructure.persistencePaused = true;
 
     resumeRuntimeAfterPersistenceQuiesce(env);
 
-    expect(env.runtimeState.persistencePaused).toBe(false);
-    expect(env.runtimeState.persistenceQuiescing).toBe(false);
-    expect(env.runtimeState.lifecyclePhase).toBe('running');
-    env.runtimeState.stopLoop?.();
+    expect(env.infrastructure.persistencePaused).toBe(false);
+    expect(env.infrastructure.persistenceQuiescing).toBe(false);
+    expect(env.infrastructure.lifecyclePhase).toBe('running');
+    env.infrastructure.stopLoop?.();
   });
 
   test('durable resume fails loudly if a running loop still has a persistence fence', () => {
     const env = createEmptyEnv('runtime-invalid-durable-resume');
-    env.runtimeState ??= {};
-    env.runtimeState.lifecyclePhase = 'running';
-    env.runtimeState.loopActive = true;
-    env.runtimeState.persistencePaused = true;
+    env.infrastructure ??= {};
+    env.infrastructure.lifecyclePhase = 'running';
+    env.infrastructure.loopActive = true;
+    env.infrastructure.persistencePaused = true;
 
     expect(() => resumeRuntimeAfterPersistenceQuiesce(env)).toThrow(
       'RUNTIME_DURABLE_RESUME_RUNNING_WITH_PERSISTENCE_FENCE',
@@ -100,7 +100,7 @@ describe('runtime lifecycle', () => {
 
   test('propagates a rejected runtime loop instead of treating shutdown as drained', async () => {
     const env = createEmptyEnv('runtime-loop-rejection');
-    env.runtimeState = {
+    env.infrastructure = {
       lifecyclePhase: 'running',
       loopActive: true,
       loopPromise: Promise.reject(new Error('LOOP_REJECTED_DURING_SHUTDOWN')),
@@ -111,7 +111,7 @@ describe('runtime lifecycle', () => {
 
   test('propagates a rejected processing task instead of reporting idle', async () => {
     const env = createEmptyEnv('runtime-processing-rejection');
-    env.runtimeState = {
+    env.infrastructure = {
       processingPromise: Promise.reject(new Error('PROCESSING_REJECTED_DURING_SHUTDOWN')),
     };
 

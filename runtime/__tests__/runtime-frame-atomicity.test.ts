@@ -265,23 +265,23 @@ describe('runtime frame atomicity', () => {
     const env = createEmptyEnv(`runtime sticky halt waiter ${TEST_RUN_ID}`);
     env.quietRuntimeLogs = true;
     let releaseWriter!: () => void;
-    env.runtimeState!.processingPromise = new Promise<void>(resolve => {
+    env.infrastructure!.processingPromise = new Promise<void>(resolve => {
       releaseWriter = resolve;
     });
     const heightBefore = env.state.height;
     const waitingProcess = processRuntime(env);
 
-    env.runtimeState!.lifecyclePhase = 'halted';
-    env.runtimeState!.halted = true;
+    env.infrastructure!.lifecyclePhase = 'halted';
+    env.infrastructure!.halted = true;
     // Match the real writer release order: clear ownership before waking the
     // queued caller. Leaving a resolved Promise installed makes any correct
     // `while (processingPromise)` lock implementation spin forever.
-    env.runtimeState!.processingPromise = null;
+    env.infrastructure!.processingPromise = null;
     releaseWriter();
 
     await expect(waitingProcess).rejects.toThrow('RUNTIME_PROCESS_HALTED');
     expect(env.state.height).toBe(heightBefore);
-    expect(env.runtimeState?.processingPromise).toBeNull();
+    expect(env.infrastructure?.processingPromise).toBeNull();
   });
 
   test('frame input cloning preserves every shared board config without cross-message aliases', () => {
@@ -623,11 +623,11 @@ describe('runtime frame atomicity', () => {
     for (let attempt = 0; attempt < 1_000; attempt += 1) {
       maximumInFlightEntityInputs = Math.max(
         maximumInFlightEntityInputs,
-        Number(env.runtimeState?.inFlightEntityInputs || 0),
+        Number(env.infrastructure?.inFlightEntityInputs || 0),
       );
       if (
-        env.runtimeState?.processingPromise &&
-        Number(env.runtimeState.inFlightEntityInputs || 0) > 0 &&
+        env.infrastructure?.processingPromise &&
+        Number(env.infrastructure.inFlightEntityInputs || 0) > 0 &&
         env.runtimeMempool?.entityInputs.length === 0
       ) {
         observedDetachedEntityInput = true;
@@ -640,7 +640,7 @@ describe('runtime frame atomicity', () => {
       expect({ observedDetachedEntityInput, maximumInFlightEntityInputs })
         .toEqual({ observedDetachedEntityInput: true, maximumInFlightEntityInputs: 1 });
       await processPromise;
-      expect(env.runtimeState?.inFlightEntityInputs).toBe(0);
+      expect(env.infrastructure?.inFlightEntityInputs).toBe(0);
 
       await corruptCurrentHeadAhead(env);
       enqueueRuntimeInput(env, {
@@ -652,7 +652,7 @@ describe('runtime frame atomicity', () => {
         }],
       });
       await expect(processRuntime(env)).rejects.toThrow('STORAGE_CURRENT_AHEAD_OF_HISTORY');
-      expect(env.runtimeState?.inFlightEntityInputs).toBe(0);
+      expect(env.infrastructure?.inFlightEntityInputs).toBe(0);
     } finally {
       await closeTestEnv(env);
     }
@@ -726,13 +726,13 @@ describe('runtime frame atomicity', () => {
     installJurisdiction(env);
     const replica = installValidatorReplica(env, address('c5'), env.runtimeId!);
     const reliable = createTestReliableReceipt(env, replica.entityId, replica.signerId);
-    env.runtimeState!.persistenceQuiescing = true;
+    env.infrastructure!.persistenceQuiescing = true;
 
     expect(handleInboundReliableReceipt(env, reliable.from, reliable.receipt))
       .toBe('deferred');
     expect(env.runtimeMempool?.reliableReceipts ?? []).toHaveLength(0);
-    expect(env.runtimeState?.receivedReliableReceiptLedger).toBeUndefined();
-    expect(env.runtimeState?.receivedReliableTerminalWatermarks).toBeUndefined();
+    expect(env.infrastructure?.receivedReliableReceiptLedger).toBeUndefined();
+    expect(env.infrastructure?.receivedReliableTerminalWatermarks).toBeUndefined();
   });
 
   test('each Runtime owns one active mempool while a detached frame executes', async () => {
@@ -812,7 +812,7 @@ describe('runtime frame atomicity', () => {
     const leader = address('11');
     const validator = address('12');
     const replica = installValidatorReplica(env, leader, validator);
-    env.runtimeState!.entityRuntimeHints = new Map([
+    env.infrastructure!.entityRuntimeHints = new Map([
       [hash('21'), { runtimeId: address('22'), seenAt: env.state.timestamp }],
     ]);
 
@@ -865,7 +865,7 @@ describe('runtime frame atomicity', () => {
     control.state.timestamp = env.state.timestamp;
     installJurisdiction(control);
     const controlReplica = installValidatorReplica(control, leader, validator);
-    control.runtimeState!.entityRuntimeHints = new Map([
+    control.infrastructure!.entityRuntimeHints = new Map([
       [hash('21'), { runtimeId: address('22'), seenAt: control.state.timestamp }],
       [controlReplica.entityId, { runtimeId: address('23'), seenAt: control.state.timestamp }],
     ]);
@@ -876,12 +876,12 @@ describe('runtime frame atomicity', () => {
     });
     await processRuntime(control);
     expect(control.state.eReplicas.get(`${controlReplica.entityId}:${validator}`)?.mempool).toHaveLength(1);
-    expect(control.runtimeState?.entityRuntimeHints?.get(remoteEntityId)?.runtimeId).toBe(remoteRuntimeId);
+    expect(control.infrastructure?.entityRuntimeHints?.get(remoteEntityId)?.runtimeId).toBe(remoteRuntimeId);
     expect(control.state.eReplicas.get(`${imported.entityId}:${imported.signerId}`)?.certifiedFrameAnchor)
       .toBeDefined();
 
     const replicaBefore = safeStringify(buildCanonicalEntityReplicaSnapshot(replica));
-    const hintsBefore = safeStringify(env.runtimeState!.entityRuntimeHints);
+    const hintsBefore = safeStringify(env.infrastructure!.entityRuntimeHints);
     enqueueRuntimeInput(env, ingress);
 
     await expect(processRuntime(env)).rejects.toThrow('RUNTIME_ENTITY_INPUT_UNKNOWN_TARGET');
@@ -896,8 +896,8 @@ describe('runtime frame atomicity', () => {
     expect(env.state.eReplicas.has(`${imported.entityId}:${imported.signerId}`)).toBe(false);
     expect([...env.state.eReplicas.values()].some(candidate => candidate.certifiedFrameAnchor)).toBe(false);
     expect([...env.state.eReplicas.values()].some(candidate => candidate.certifiedFrameLineage?.length)).toBe(false);
-    expect(safeStringify(env.runtimeState!.entityRuntimeHints)).toBe(hintsBefore);
-    expect(env.runtimeState!.entityRuntimeHints?.has(remoteEntityId)).toBe(false);
+    expect(safeStringify(env.infrastructure!.entityRuntimeHints)).toBe(hintsBefore);
+    expect(env.infrastructure!.entityRuntimeHints?.has(remoteEntityId)).toBe(false);
     expect(safeStringify(exactQueuedInput(env))).toBe(ingressBytes);
     expect(env.runtimeMempool?.queuedAt).toBe(1_000);
     expect(env.state.height).toBe(0);
@@ -945,8 +945,8 @@ describe('runtime frame atomicity', () => {
       // Runtime owns its State and no longer pays O(total state) for a working
       // clone. Once mutation starts, RAM is deliberately unreadable: only the
       // durable WAL head below is authoritative until operator recovery.
-      expect(env.runtimeState?.halted).toBe(true);
-      expect(env.runtimeState?.fatalDebugPayload?.message)
+      expect(env.infrastructure?.halted).toBe(true);
+      expect(env.infrastructure?.fatalDebugPayload?.message)
         .toContain('RUNTIME_MUTATION_FAILED_RELOAD_REQUIRED');
       expect(safeStringify(exactQueuedInput(env))).toBe(ingressBytes);
       expect(env.runtimeMempool?.queuedAt).toBe(timestampBefore);
@@ -997,7 +997,7 @@ describe('runtime frame atomicity', () => {
     let observedDetachedIngressTail = false;
     for (let attempt = 0; attempt < 1_000; attempt += 1) {
       if (
-        env.runtimeState?.processingPromise &&
+        env.infrastructure?.processingPromise &&
         (env.runtimeMempool?.runtimeTxs.length ?? -1) === 0
       ) {
         observedDetachedIngressTail = true;
@@ -1011,15 +1011,15 @@ describe('runtime frame atomicity', () => {
         .toEqual({ kind: 'queued' });
       await expect(processPromise).rejects.toThrow('STORAGE_CURRENT_AHEAD_OF_HISTORY');
 
-      expect(env.runtimeState?.halted).toBe(true);
-      expect(env.runtimeState?.fatalDebugPayload?.message)
+      expect(env.infrastructure?.halted).toBe(true);
+      expect(env.infrastructure?.fatalDebugPayload?.message)
         .toContain('RUNTIME_MUTATION_FAILED_RELOAD_REQUIRED');
       expect(env.runtimeMempool?.runtimeTxs).toEqual(frameA.runtimeTxs);
       expect(env.runtimeMempool?.entityInputs.filter(input => input.hashPrecommitFrame))
         .toEqual([{ ...frameB, from: sourceRuntimeId }]);
       // Transport admission only appends bytes. Reliable frontier state changes
       // when this input belongs to the next isolated Runtime frame.
-      expect(env.runtimeState?.pendingReliableIngress?.size ?? 0).toBe(0);
+      expect(env.infrastructure?.pendingReliableIngress?.size ?? 0).toBe(0);
       const walHead = await readStorageHead(getRuntimeWalDb(env));
       expect(walHead?.latestHeight).toBe(heightBefore);
     } finally {
@@ -1047,7 +1047,7 @@ describe('runtime frame atomicity', () => {
     const frameA = importReplicaTx('a');
     enqueueRuntimeInput(env, { runtimeTxs: [frameA], entityInputs: [] });
     const processPromise = processRuntime(env);
-    expect(env.runtimeState?.processingPromise).toBeTruthy();
+    expect(env.infrastructure?.processingPromise).toBeTruthy();
     let observedDetachedIngressTail = false;
     for (let attempt = 0; attempt < 1_000; attempt += 1) {
       if ((env.runtimeMempool?.runtimeTxs.length ?? -1) === 0) {
@@ -1072,14 +1072,14 @@ describe('runtime frame atomicity', () => {
       // The transport accepted frameB while this R-frame was running. It belongs
       // to the next frame even if persistence quiesces before this frame commits.
       env.scenarioMode = false;
-      env.runtimeState!.persistenceQuiescing = true;
-      env.runtimeState!.persistencePaused = true;
+      env.infrastructure!.persistenceQuiescing = true;
+      env.infrastructure!.persistencePaused = true;
       await processPromise;
 
       expect(env.state.height).toBe(heightBefore + 1);
       expect(env.state.eReplicas.has(`${frameA.entityId}:${frameA.signerId}`)).toBe(true);
       expect(env.runtimeMempool?.entityInputs).toEqual([{ ...frameB, from: sourceRuntimeId }]);
-      expect(env.runtimeState?.pendingReliableIngress?.size ?? 0).toBe(0);
+      expect(env.infrastructure?.pendingReliableIngress?.size ?? 0).toBe(0);
     } finally {
       env.scenarioMode = true;
       await closeTestEnv(env);

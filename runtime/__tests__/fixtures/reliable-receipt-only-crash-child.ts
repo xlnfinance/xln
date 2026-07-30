@@ -86,10 +86,10 @@ if (registerReliableIngress(env, peerRuntimeId, stalePrecommit).kind !== 'enqueu
 }
 await processRuntime(env, [stalePrecommit]);
 if (env.state.height !== 3) throw new Error(`RELIABLE_RECEIPT_ONLY_RUNTIME_HEIGHT:${env.state.height}`);
-if ((env.runtimeState?.pendingReliableIngress?.size ?? 0) !== 0) {
+if ((env.infrastructure?.pendingReliableIngress?.size ?? 0) !== 0) {
   throw new Error('RELIABLE_RECEIPT_ONLY_PENDING_NOT_CLEARED');
 }
-if (![...(env.runtimeState?.reliableIngressTerminalWatermarks?.values() ?? [])]
+if (![...(env.infrastructure?.reliableIngressTerminalWatermarks?.values() ?? [])]
   .some(receipt => receipt.body.identity.kind === 'hash-precommit')) {
   throw new Error('RELIABLE_RECEIPT_ONLY_TERMINAL_MISSING');
 }

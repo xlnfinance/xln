@@ -893,7 +893,7 @@ describe('production startup wiring', () => {
     expect(mmNode).not.toContain('type MarketMakerCrossOfferBudget = {');
     expect(mmNode).toContain('const hasMarketMakerAccountBacklog = (');
     expect(mmNode).toContain('const hasMarketMakerRuntimeBacklog = (env: RuntimeReplica): boolean => {');
-    expect(mmNode).toContain('Boolean(env.runtimeState?.processingPromise)');
+    expect(mmNode).toContain('Boolean(env.infrastructure?.processingPromise)');
     expect(mmNode).toContain('if (hasMarketMakerRuntimeBacklog(deps.env)) return false;');
     expect(mmNode).toContain('type SameQuoteJob = {');
     expect(mmNode).toContain('const isSameQuoteJobDepthReady = (env: RuntimeReplica, job: SameQuoteJob): boolean => {');

@@ -70,10 +70,10 @@ test('restores H+1 and deferred H+2 from LevelDB after real SIGKILL', async () =
     expect(replica?.state.height).toBe(1);
     expect(restored.pendingNetworkOutputs?.map(output => output.proposedFrame?.height)).toEqual([2]);
     expect(restored.runtimeMempool?.entityInputs.map(input => input.proposedFrame?.height)).toEqual([2]);
-    expect(restored.runtimeState?.reliableIngressReceiptLedger?.size ?? 0).toBe(0);
-    expect(restored.runtimeState?.reliableIngressTerminalWatermarks?.size).toBe(1);
-    expect(restored.runtimeState?.receivedReliableReceiptLedger?.size ?? 0).toBe(0);
-    expect(restored.runtimeState?.receivedReliableTerminalWatermarks?.size).toBe(1);
+    expect(restored.infrastructure?.reliableIngressReceiptLedger?.size ?? 0).toBe(0);
+    expect(restored.infrastructure?.reliableIngressTerminalWatermarks?.size).toBe(1);
+    expect(restored.infrastructure?.receivedReliableReceiptLedger?.size ?? 0).toBe(0);
+    expect(restored.infrastructure?.receivedReliableTerminalWatermarks?.size).toBe(1);
 
     const h2Hash = restored.pendingNetworkOutputs?.[0]?.proposedFrame?.hash;
     expect(h2Hash).toMatch(/^0x[0-9a-f]{64}$/);
@@ -104,8 +104,8 @@ test('restores H+1 and deferred H+2 from LevelDB after real SIGKILL', async () =
     expect(finalReplica?.state.prevFrameHash).toBe(h2Hash);
     expect(restored.pendingNetworkOutputs ?? []).toEqual([]);
     expect(restored.runtimeMempool?.entityInputs ?? []).toEqual([]);
-    expect(restored.runtimeState?.reliableIngressTerminalWatermarks?.size).toBe(1);
-    expect(restored.runtimeState?.receivedReliableTerminalWatermarks?.size).toBe(1);
+    expect(restored.infrastructure?.reliableIngressTerminalWatermarks?.size).toBe(1);
+    expect(restored.infrastructure?.receivedReliableTerminalWatermarks?.size).toBe(1);
   } finally {
     await closeRuntimeDb(restored);
     await closeInfraDb(restored);

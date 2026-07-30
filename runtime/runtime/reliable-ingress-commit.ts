@@ -44,7 +44,7 @@ export type ReliableIngressCommit = {
 };
 
 type ReliableIngressMutationContext = {
-  state: NonNullable<RuntimeReplica['runtimeState']>;
+  state: NonNullable<RuntimeReplica['infrastructure']>;
   sourceLaneKeys: Set<string>;
 };
 
@@ -59,8 +59,8 @@ const snapshotIngressMutation = (
   frontierKey,
   receipt,
   targetRuntimeIds,
-  previousActive: env.runtimeState?.reliableIngressReceiptLedger?.get(frontierKey),
-  previousTerminal: env.runtimeState?.reliableIngressTerminalWatermarks?.get(frontierKey),
+  previousActive: env.infrastructure?.reliableIngressReceiptLedger?.get(frontierKey),
+  previousTerminal: env.infrastructure?.reliableIngressTerminalWatermarks?.get(frontierKey),
 });
 
 const assertTerminalAdvance = (

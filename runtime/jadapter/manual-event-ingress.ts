@@ -133,8 +133,8 @@ export const applyJEventsToEnv = (
     if (!entityId || !/^0x[0-9a-f]{40}$/.test(owner)) {
       throw new Error(`J_EVENT_EXTERNAL_WALLET_IDENTITY_INVALID:${label}:${entityId || 'missing'}:${owner || 'missing'}`);
     }
-    const runtimeState = env.runtimeState ??= {};
-    const watches = runtimeState.externalWalletWatchOwners ??= new Map();
+    const infrastructure = env.infrastructure ??= {};
+    const watches = infrastructure.externalWalletWatchOwners ??= new Map();
     const owners = watches.get(entityId) ?? new Map<string, number>();
     const blockNumber = Number(event.blockNumber);
     owners.set(owner, Math.max(owners.get(owner) ?? 0, blockNumber));

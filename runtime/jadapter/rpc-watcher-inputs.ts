@@ -82,7 +82,7 @@ export const buildTrackedExternalOwners = (
       }
     }
   }
-  for (const [entityId, entityOwners] of env.runtimeState?.externalWalletWatchOwners?.entries?.() || []) {
+  for (const [entityId, entityOwners] of env.infrastructure?.externalWalletWatchOwners?.entries?.() || []) {
     for (const [owner, afterBlock] of entityOwners) {
       const tracked = getTracked(owner, entityId);
       if (tracked) tracked.watchAfterBlock = Math.max(tracked.watchAfterBlock, readBlock(afterBlock));

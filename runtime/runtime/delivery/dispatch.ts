@@ -153,8 +153,8 @@ const awaitsDurableEntityCertificate = (
   const normalizedTarget = normalizeRuntimeId(targetRuntimeId);
   if (!normalizedTarget) throw new Error('ROUTE_RELIABLE_TARGET_RUNTIME_INVALID');
   const priorReceipts = [
-    ...(env.runtimeState?.receivedReliableReceiptLedger?.values() ?? []),
-    ...(env.runtimeState?.receivedReliableTerminalWatermarks?.values() ?? []),
+    ...(env.infrastructure?.receivedReliableReceiptLedger?.values() ?? []),
+    ...(env.infrastructure?.receivedReliableTerminalWatermarks?.values() ?? []),
   ]
     .filter(receipt =>
       receipt.body.receiverRuntimeId === normalizedTarget &&

@@ -30,7 +30,7 @@ export const waitForPromiseBeforeTimeout = <T>(
   });
 
 const waitForProcessingCycle = async (env: RuntimeReplica, remaining: number): Promise<void> => {
-  const processing = env.runtimeState?.processingPromise;
+  const processing = env.infrastructure?.processingPromise;
   if (!processing) return;
   await Promise.race([
     processing.then(
@@ -74,7 +74,7 @@ export const waitForRuntimeWorkDrained = async (
     const remaining = timeoutMs - (now - startedAt);
     if (remaining <= 0) return false;
     await waitForProcessingCycle(env, remaining);
-    const hasWork = deps.hasRuntimeWork(env) || Boolean(env.runtimeState?.processingPromise);
+    const hasWork = deps.hasRuntimeWork(env) || Boolean(env.infrastructure?.processingPromise);
     if (!hasWork) {
       idleSince ??= Date.now();
       const quietFor = Date.now() - idleSince;
@@ -88,8 +88,8 @@ export const waitForRuntimeWorkDrained = async (
     }
     if (
       options.allowPersistencePaused &&
-      !env.runtimeState?.loopPromise &&
-      !env.runtimeState?.processingPromise
+      !env.infrastructure?.loopPromise &&
+      !env.infrastructure?.processingPromise
     ) {
       await deps.processRuntime(env);
       continue;

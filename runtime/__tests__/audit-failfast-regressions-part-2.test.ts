@@ -2187,7 +2187,7 @@ describe('audit fail-fast regressions', () => {
         } as any,
       ],
     });
-    expect(env.runtimeState?.currentStorageOverlayMarks ?? []).toEqual([]);
+    expect(env.infrastructure?.currentStorageOverlayMarks ?? []).toEqual([]);
     expect(
       result.storageChanges.some(record => record.family === 'entity' && record.entityId === entityId),
     ).toBe(true);
@@ -2213,15 +2213,15 @@ describe('audit fail-fast regressions', () => {
       type: 'profile-update',
       data: { profile: { entityId, name: 'Storage changes' } },
     });
-    expect(env.runtimeState?.currentStorageOverlayMarks ?? []).toEqual([]);
+    expect(env.infrastructure?.currentStorageOverlayMarks ?? []).toEqual([]);
     expect(reduced.storageChanges).toEqual([{ family: 'entity', entityId }]);
     applyStorageChanges(env, reduced.newState, reduced.storageChanges);
-    expect(env.runtimeState?.currentStorageOverlayMarks).toEqual([{ family: 'entity', entityId }]);
+    expect(env.infrastructure?.currentStorageOverlayMarks).toEqual([{ family: 'entity', entityId }]);
 
     const rejected = await applyEntityTx(env, reduced.newState, { type: '__unknown__' } as unknown as EntityTx);
     expect(rejected.skippedError).toContain('ENTITY_TX_UNHANDLED');
     expect(rejected.storageChanges).toEqual([]);
-    expect(env.runtimeState?.currentStorageOverlayMarks).toEqual([{ family: 'entity', entityId }]);
+    expect(env.infrastructure?.currentStorageOverlayMarks).toEqual([{ family: 'entity', entityId }]);
 
     const cachedRoot = computeCanonicalEntityConsensusStateHash(state);
     state.accounts.get(counterpartyId)!.currentHeight += 1;
@@ -2230,7 +2230,7 @@ describe('audit fail-fast regressions', () => {
     const invalidatedRoot = computeCanonicalEntityConsensusStateHash(state);
     expect(invalidatedRoot).not.toBe(cachedRoot);
     expect(invalidatedRoot).toBe(computeCanonicalEntityConsensusStateHashCold(state));
-    expect(env.runtimeState?.currentStorageOverlayMarks).toContainEqual({
+    expect(env.infrastructure?.currentStorageOverlayMarks).toContainEqual({
       family: 'account',
       entityId,
       counterpartyId,
@@ -2269,7 +2269,7 @@ describe('audit fail-fast regressions', () => {
       accountChanges: new Set(),
     });
 
-    const marks = env.runtimeState?.currentStorageOverlayMarks ?? [];
+    const marks = env.infrastructure?.currentStorageOverlayMarks ?? [];
     expect(state.crontabState.hooks.has('test-settlement-window')).toBe(false);
     expect(marks).toEqual([]);
   });

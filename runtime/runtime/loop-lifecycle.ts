@@ -26,7 +26,7 @@ import {
 import { emitRuntimeLoopError, reportFatalLoopError } from './loop-failure';
 
 const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
-type RuntimeLifecycleState = NonNullable<RuntimeReplica['runtimeState']>;
+type RuntimeLifecycleState = NonNullable<RuntimeReplica['infrastructure']>;
 
 export type RuntimeLoopConfig = {
   tickDelayMs?: number;
@@ -187,7 +187,7 @@ const stopRuntimeLoopAndWaitWithDeps = async (
   timeoutMs: number,
   deps: RuntimeLoopLifecycleDeps,
 ): Promise<boolean> => {
-  const state = env.runtimeState;
+  const state = env.infrastructure;
   if (state && inferRuntimeLifecyclePhase(state) !== 'halted') {
     transitionRuntimeLifecycle(state, 'quiescing');
   }
@@ -242,7 +242,7 @@ const resumeAfterPersistenceQuiesce = (
 };
 
 const detachRuntimeEnv = (env: RuntimeReplica): void => {
-  const state = env.runtimeState;
+  const state = env.infrastructure;
   stopJurisdictionWatchers(env);
   state?.stopLoop?.();
   if (state) {

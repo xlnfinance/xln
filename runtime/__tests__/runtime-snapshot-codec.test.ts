@@ -50,7 +50,7 @@ describe('runtime snapshot codec', () => {
       runtimeId: `0x${'33'.repeat(20)}`,
       entityTxs: [],
     }];
-    env.runtimeState = {
+    env.infrastructure = {
       verifiedProfileRoutes: new Map([[
         `0x${'44'.repeat(32)}`,
         {
@@ -91,9 +91,9 @@ describe('runtime snapshot codec', () => {
     // deliberately excluded from the durable Runtime machine: P2P can update
     // them between frames, so persisting them would make replay depend on
     // nondeterministic network timing.
-    expect(checkpoint.runtimeState?.verifiedProfileRoutes).toBeUndefined();
-    expect(restored.runtimeState?.verifiedProfileRoutes).toBeUndefined();
-    expect(restored.runtimeState?.runtimeAdapterCommandFrontiers).toEqual(env.runtimeState.runtimeAdapterCommandFrontiers);
+    expect(checkpoint.infrastructure?.verifiedProfileRoutes).toBeUndefined();
+    expect(restored.infrastructure?.verifiedProfileRoutes).toBeUndefined();
+    expect(restored.infrastructure?.runtimeAdapterCommandFrontiers).toEqual(env.infrastructure.runtimeAdapterCommandFrontiers);
     expect(restored.state.jReplicas.get('Testnet')).toEqual(expect.objectContaining({
       blockNumber: 44n,
       stateRoot: new Uint8Array(32).fill(7),

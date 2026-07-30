@@ -180,8 +180,8 @@ import { ACCOUNT_PENDING_RESEND_AFTER_MS } from '../entity/scheduler';
 
 const makeLocalCrossJRoutingDeps = (): RuntimeEntityRoutingDeps => ({
   ensureRuntimeState: current => {
-    if (!current.runtimeState) throw new Error('TEST_RUNTIME_STATE_REQUIRED');
-    return current.runtimeState;
+    if (!current.infrastructure) throw new Error('TEST_RUNTIME_STATE_REQUIRED');
+    return current.infrastructure;
   },
   enqueueRuntimeInputs: () => {
     throw new Error('TEST_UNEXPECTED_RUNTIME_REQUEUE');

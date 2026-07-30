@@ -35,12 +35,12 @@ test('requireRuntimeSeed still fails when no real seed exists', () => {
 test('setScenarioStorageEnabled disables scenario frame persistence explicitly', () => {
   const env = {
     runtimeConfig: { storage: { snapshotPeriodFrames: 12 } },
-    runtimeState: { persistencePaused: false },
+    infrastructure: { persistencePaused: false },
   } as RuntimeReplica;
 
   setScenarioStorageEnabled(env, false);
 
   expect(env.runtimeConfig?.storage?.enabled).toBe(false);
   expect(env.runtimeConfig?.storage?.snapshotPeriodFrames).toBe(12);
-  expect(env.runtimeState?.persistencePaused).toBe(true);
+  expect(env.infrastructure?.persistencePaused).toBe(true);
 });

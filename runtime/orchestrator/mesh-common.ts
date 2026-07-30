@@ -70,7 +70,7 @@ export const deriveMarketMakerEntityId = (
 ): string => hashBoard(encodeBoard(buildMarketMakerConsensusConfig(signerId, jurisdiction))).toLowerCase();
 
 export const hasPendingRuntimeWork = (env: RuntimeReplica): boolean => {
-  if (env.runtimeState?.processingPromise) return true;
+  if (env.infrastructure?.processingPromise) return true;
   if (env.pendingOutputs?.length) return true;
   if (env.pendingNetworkOutputs?.length) return true;
   if (env.networkInbox?.length) return true;

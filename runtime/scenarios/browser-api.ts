@@ -92,7 +92,7 @@ export const recordScenario = async (
     ...env.runtimeConfig,
     storage: { ...env.runtimeConfig?.storage, enabled: false },
   };
-  if (env.runtimeState) env.runtimeState.persistencePaused = true;
+  if (env.infrastructure) env.infrastructure.persistencePaused = true;
 
   const trace = startRuntimeFrameTrace(env);
   try {

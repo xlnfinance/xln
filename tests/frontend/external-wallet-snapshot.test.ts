@@ -70,11 +70,11 @@ describe('external wallet snapshot helpers', () => {
   test('cancels an in-flight local observation after runtime switch or quiesce', () => {
     const running = {
       runtimeId: '0xAbC',
-      runtimeState: { lifecyclePhase: 'running', persistenceQuiescing: false },
+      infrastructure: { lifecyclePhase: 'running', persistenceQuiescing: false },
     } as any;
     const quiescing = {
       runtimeId: '0xabc',
-      runtimeState: { lifecyclePhase: 'quiescing', persistenceQuiescing: true },
+      infrastructure: { lifecyclePhase: 'quiescing', persistenceQuiescing: true },
     } as any;
 
     expect(resolveExternalWalletSnapshotIngress('0xabc', running)).toBe('apply');

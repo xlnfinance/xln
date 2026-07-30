@@ -2,7 +2,7 @@ import type { RuntimeReplica } from './types';
 
 export type RuntimeLifecyclePhase = 'booting' | 'running' | 'quiescing' | 'stopped' | 'halted';
 
-type RuntimeLifecycleState = NonNullable<RuntimeReplica['runtimeState']>;
+type RuntimeLifecycleState = NonNullable<RuntimeReplica['infrastructure']>;
 
 const ALLOWED_TRANSITIONS: Record<RuntimeLifecyclePhase, ReadonlySet<RuntimeLifecyclePhase>> = {
   booting: new Set(['running', 'quiescing', 'stopped', 'halted']),
@@ -40,7 +40,7 @@ export type RuntimeCommandReadiness =
   | { ready: false; reason: string };
 
 export const getRuntimeCommandReadiness = (env: RuntimeReplica): RuntimeCommandReadiness => {
-  const state = env.runtimeState ?? {};
+  const state = env.infrastructure ?? {};
   const phase = inferRuntimeLifecyclePhase(state);
   if (phase !== 'running') return { ready: false, reason: `phase=${phase}` };
   if (state.persistencePaused === true || state.persistenceQuiescing === true) {

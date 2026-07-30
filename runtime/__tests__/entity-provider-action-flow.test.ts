@@ -509,7 +509,7 @@ describe('EntityProvider action flow', () => {
       },
     });
     registerPendingCommittedJOutbox(fixture.env, attemptOutbox);
-    expect(fixture.env.runtimeState?.pendingCommittedJOutbox).toHaveLength(1);
+    expect(fixture.env.infrastructure?.pendingCommittedJOutbox).toHaveLength(1);
     expect(collectDueEntityProviderActionRuntimeTxs(fixture.env, fixture.env.state.timestamp)).toEqual([]);
   });
 
@@ -665,12 +665,12 @@ describe('EntityProvider action flow', () => {
     applyRecordEntityProviderActionResultRuntimeTx(fixture.env, oldResult);
     expect(fixture.replica.entityProviderActionSubmitState).toEqual(newLocalBefore);
     expect(fixture.replica.state.entityProviderActionState?.pending?.generation).toBe(2);
-    expect(fixture.env.runtimeState?.pendingCommittedJOutbox).toEqual([]);
+    expect(fixture.env.infrastructure?.pendingCommittedJOutbox).toEqual([]);
 
     applyRecordEntityProviderActionResultRuntimeTx(fixture.env, oldResult);
     expect(fixture.replica.entityProviderActionSubmitState).toEqual(newLocalBefore);
     expect(fixture.replica.state.entityProviderActionState?.pending?.generation).toBe(2);
-    expect(fixture.env.runtimeState?.pendingCommittedJOutbox).toEqual([]);
+    expect(fixture.env.infrastructure?.pendingCommittedJOutbox).toEqual([]);
   });
 
   test('terminal revert remains fail-closed: receipt is durable but consensus pending is never cleared', async () => {
@@ -725,7 +725,7 @@ describe('EntityProvider action flow', () => {
       `${replicaSnapshot.entityId}:${replicaSnapshot.signerId}`,
       replicaSnapshot,
     );
-    expect(restored.runtimeState?.pendingCommittedJOutbox).toEqual(outbox);
+    expect(restored.infrastructure?.pendingCommittedJOutbox).toEqual(outbox);
     expect(replicaSnapshot.entityProviderActionSubmitState)
       .toEqual(fixture.replica.entityProviderActionSubmitState);
     expect(replicaSnapshot.state.entityProviderActionState?.pending?.actionHash).toBe(pending.actionHash);

@@ -46,7 +46,7 @@ export const createRuntimeStateApi = (deps: RuntimeStateCreateDeps) => {
     let env!: RuntimeReplica;
     const gossip = createGossipLayer({
       onAnnounce: profile => {
-        if (!env || env.runtimeState?.infraDbClosing) return;
+        if (!env || env.infrastructure?.infraDbClosing) return;
         const write = persistGossipProfileToInfraDb(env, deps.infraGossipDbAccess, profile).catch(error => {
           runtimeLog.warn('infra_db.gossip_persist_failed', {
             entity: String(profile?.entityId || '').slice(-8),
@@ -92,7 +92,7 @@ export const createRuntimeStateApi = (deps: RuntimeStateCreateDeps) => {
       ...(dbNamespace ? { dbNamespace } : {}),
       runtimeMempool: { runtimeTxs: [], entityInputs: [] },
       runtimeConfig: undefined,
-      runtimeState: undefined,
+      infrastructure: undefined,
       history: [],
       gossip,
       frameLogs: [],

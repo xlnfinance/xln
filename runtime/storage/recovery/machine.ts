@@ -10,9 +10,9 @@ import {
 const normalizeEmptyIngress = (
   machine: Record<string, unknown>,
 ): Record<string, unknown> => {
-  const runtimeState = machine['runtimeState'];
-  if (!runtimeState || typeof runtimeState !== 'object') return machine;
-  const state = { ...(runtimeState as Record<string, unknown>) };
+  const infrastructure = machine['infrastructure'];
+  if (!infrastructure || typeof infrastructure !== 'object') return machine;
+  const state = { ...(infrastructure as Record<string, unknown>) };
   for (const key of [
     'pendingReliableIngress',
     'reliableIngressCommitting',
@@ -23,8 +23,8 @@ const normalizeEmptyIngress = (
     }
   }
   const normalized = { ...machine };
-  if (Object.keys(state).length > 0) normalized['runtimeState'] = state;
-  else delete normalized['runtimeState'];
+  if (Object.keys(state).length > 0) normalized['infrastructure'] = state;
+  else delete normalized['infrastructure'];
   return normalized;
 };
 
@@ -50,7 +50,7 @@ export const listRecoveryRuntimeMachineMismatchFields = (
     ) {
       continue;
     }
-    if (field !== 'runtimeState') {
+    if (field !== 'infrastructure') {
       mismatches.push(field);
       continue;
     }
@@ -74,7 +74,7 @@ export const listRecoveryRuntimeMachineMismatchFields = (
         canonicalMachine({ value: expectedState[stateField] }) !==
           canonicalMachine({ value: actualState[stateField] })
       ) {
-        mismatches.push(`runtimeState.${stateField}`);
+        mismatches.push(`infrastructure.${stateField}`);
       }
     }
   }
@@ -85,11 +85,11 @@ const readMachineField = (
   machine: Record<string, unknown>,
   field: string,
 ): unknown => {
-  if (!field.startsWith('runtimeState.')) return machine[field];
-  const state = machine['runtimeState'];
+  if (!field.startsWith('infrastructure.')) return machine[field];
+  const state = machine['infrastructure'];
   if (!state || typeof state !== 'object') return undefined;
   return (state as Record<string, unknown>)[
-    field.slice('runtimeState.'.length)
+    field.slice('infrastructure.'.length)
   ];
 };
 

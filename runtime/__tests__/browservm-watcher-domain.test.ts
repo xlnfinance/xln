@@ -50,8 +50,8 @@ test('jurisdiction import rejects a duplicate watcher domain before publication'
     contracts,
   });
   const requestHash = buildJurisdictionImportRequestHash(request);
-  env.runtimeState ??= {};
-  env.runtimeState.pendingJurisdictionImports = new Map([[
+  env.infrastructure ??= {};
+  env.infrastructure.pendingJurisdictionImports = new Map([[
     requestHash,
     { importId: requestHash, requestHash, request },
   ]]);

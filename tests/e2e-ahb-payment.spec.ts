@@ -116,7 +116,7 @@ async function getActiveApiBase(page: Page): Promise<string> {
   if (process.env.E2E_API_BASE_URL) return API_BASE_URL;
   const runtimeApi = await page.evaluate(() => {
     const env = (window as any).isolatedEnv;
-    const relay = env?.runtimeState?.p2p?.relayUrls?.[0] ?? null;
+    const relay = env?.infrastructure?.p2p?.relayUrls?.[0] ?? null;
     return typeof relay === 'string' ? relay : null;
   });
   return relayToApiBase(runtimeApi) ?? APP_BASE_URL;
@@ -154,7 +154,7 @@ async function assertP2PSingletonAndWsHealth(page: Page, tag: string) {
     const start = Date.now();
     while (Date.now() - start < 45_000) {
       const env = (window as any).isolatedEnv;
-      const p2p = env?.runtimeState?.p2p as any;
+      const p2p = env?.infrastructure?.p2p as any;
       if (p2p && typeof p2p.isConnected === 'function' && p2p.isConnected()) {
         return true;
       }
@@ -174,7 +174,7 @@ async function assertP2PSingletonAndWsHealth(page: Page, tag: string) {
   const snapshot = await page.evaluate(async ({ apiBaseUrl }) => {
     const env = (window as any).isolatedEnv;
     const runtimeId = String(env?.runtimeId || '');
-    const p2p = env?.runtimeState?.p2p as any;
+    const p2p = env?.infrastructure?.p2p as any;
     const clients = Array.isArray(p2p?.clients) ? p2p.clients : [];
     const relayUrls = Array.isArray(p2p?.relayUrls) ? p2p.relayUrls : [];
     let wsOpenForRuntime = 0;
@@ -231,7 +231,7 @@ async function waitForActiveRuntime(page: Page, expectedRuntimeId: string, tag: 
 async function ensureRuntimeOnline(page: Page, tag: string) {
   const ok = await page.evaluate(async () => {
     const env = (window as any).isolatedEnv;
-    const p2p = env?.runtimeState?.p2p as any;
+    const p2p = env?.infrastructure?.p2p as any;
     if (!env || !p2p) return false;
     const start = Date.now();
     while (Date.now() - start < 20_000) {
@@ -323,14 +323,14 @@ async function dumpState(page: Page, label: string) {
       }
     }
 
-    const p2p = env.runtimeState?.p2p;
+    const p2p = env.infrastructure?.p2p;
     const gossipProfiles = env.gossip?.getProfiles?.()?.length || 0;
 
     return {
       label,
       runtimeId: env.runtimeId?.slice(0, 12) || 'none',
       envObjId: `env@${env._debugId || 'no-id'}`,
-      loopActive: env.runtimeState?.loopActive || false,
+      loopActive: env.infrastructure?.loopActive || false,
       p2pConnected: !!p2p,
       gossipProfiles,
       entityCount: env.eReplicas?.size || 0,

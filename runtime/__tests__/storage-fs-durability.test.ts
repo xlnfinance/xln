@@ -107,7 +107,7 @@ describe('storage filesystem durability', () => {
       timestamp: 0,
       runtimeId: namespace,
       dbNamespace: namespace,
-      runtimeState: {},
+      infrastructure: {},
     } as RuntimeReplica;
     const basePath = resolveDbPath(env);
     const markerPath = `${basePath}-storage-rotation.json`;
@@ -116,10 +116,10 @@ describe('storage filesystem durability', () => {
 
     try {
       await expect(tryOpenStorageDb(env, {
-        ensureRuntimeState: target => (target.runtimeState ??= {}),
+        ensureRuntimeState: target => (target.infrastructure ??= {}),
       })).rejects.toThrow('STORAGE_EPOCH_MARKER_INVALID');
     } finally {
-      if (env.runtimeState?.storageDb) await closeStorageDb(env);
+      if (env.infrastructure?.storageDb) await closeStorageDb(env);
       rmSync(basePath, { recursive: true, force: true });
       rmSync(`${basePath}-storage-current`, { recursive: true, force: true });
       rmSync(`${basePath}-storage-previous`, { recursive: true, force: true });
@@ -141,23 +141,23 @@ describe('storage filesystem durability', () => {
       timestamp: 0,
       runtimeId: `storage-close-poison-${process.pid}-${Date.now()}`,
       dbNamespace: `storage-close-poison-${process.pid}-${Date.now()}`,
-      runtimeState: {
+      infrastructure: {
         storageDb: poisonedHandle,
         storageDbOpenPromise: Promise.resolve(true),
         storageVerifiedCurrentHeight: 7,
       },
     } as unknown as RuntimeReplica;
     const deps = {
-      ensureRuntimeState: (target: RuntimeReplica) => (target.runtimeState ??= {}),
+      ensureRuntimeState: (target: RuntimeReplica) => (target.infrastructure ??= {}),
     };
 
     const closing = closeStorageDb(env);
     expect(() => getStorageDb(env, deps)).toThrow(
       'STORAGE_HANDLE_STATUS_CONFLICT:role=storage-current:status=closing',
     );
-    expect(env.runtimeState?.storageDb).toBeNull();
-    expect(env.runtimeState?.storageDbOpenPromise).toBeNull();
-    expect(env.runtimeState?.storageVerifiedCurrentHeight).toBeUndefined();
+    expect(env.infrastructure?.storageDb).toBeNull();
+    expect(env.infrastructure?.storageDbOpenPromise).toBeNull();
+    expect(env.infrastructure?.storageVerifiedCurrentHeight).toBeUndefined();
 
     rejectClose!(new Error('injected close failure'));
     await expect(closing).rejects.toThrow('injected close failure');
@@ -182,7 +182,7 @@ describe('storage filesystem durability', () => {
       timestamp: 0,
       runtimeId: `storage-close-all-${process.pid}-${Date.now()}`,
       dbNamespace: `storage-close-all-${process.pid}-${Date.now()}`,
-      runtimeState: {
+      infrastructure: {
         runtimeWalDb: { close: () => frameClose.promise },
         runtimeWalDbOpenPromise: Promise.resolve(true),
         storageVerifiedWalHeight: 9,
@@ -191,7 +191,7 @@ describe('storage filesystem durability', () => {
       },
     } as unknown as RuntimeReplica;
     const deps = {
-      ensureRuntimeState: (target: RuntimeReplica) => (target.runtimeState ??= {}),
+      ensureRuntimeState: (target: RuntimeReplica) => (target.infrastructure ??= {}),
     };
 
     const closingFrame = closeRuntimeWalDb(env);
@@ -202,11 +202,11 @@ describe('storage filesystem durability', () => {
     expect(() => getInfraDb(env, deps)).toThrow(
       'STORAGE_HANDLE_STATUS_CONFLICT:role=infra:status=closing',
     );
-    expect(env.runtimeState?.runtimeWalDb).toBeNull();
-    expect(env.runtimeState?.runtimeWalDbOpenPromise).toBeNull();
-    expect(env.runtimeState?.storageVerifiedWalHeight).toBeUndefined();
-    expect(env.runtimeState?.infraDb).toBeNull();
-    expect(env.runtimeState?.infraDbOpenPromise).toBeNull();
+    expect(env.infrastructure?.runtimeWalDb).toBeNull();
+    expect(env.infrastructure?.runtimeWalDbOpenPromise).toBeNull();
+    expect(env.infrastructure?.storageVerifiedWalHeight).toBeUndefined();
+    expect(env.infrastructure?.infraDb).toBeNull();
+    expect(env.infrastructure?.infraDbOpenPromise).toBeNull();
 
     frameClose.resolve();
     infraClose.resolve();

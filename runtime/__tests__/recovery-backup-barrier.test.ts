@@ -18,8 +18,8 @@ test('persisted pending network outputs retry after backup recovery', async () =
     signerId: targetSignerId,
     sourceRuntimeFrame: { height: env.state.height, timestamp: env.state.timestamp },
   }];
-  env.runtimeState = {
-    ...(env.runtimeState || {}),
+  env.infrastructure = {
+    ...(env.infrastructure || {}),
     loopActive: false,
     wakeRequested: false,
     entityRuntimeHints: new Map([[targetEntityId, { runtimeId: '0x2222222222222222222222222222222222222222', seenAt: env.state.timestamp }]]),
@@ -47,8 +47,8 @@ test('direct remote sends fail closed while recovery backup barrier is active', 
   const targetEntityId = `0x${'cd'.repeat(32)}`;
   const targetSignerId = `0x${'02'.repeat(20)}`;
   let dispatchCount = 0;
-  env.runtimeState = {
-    ...(env.runtimeState || {}),
+  env.infrastructure = {
+    ...(env.infrastructure || {}),
     entityRuntimeHints: new Map([[targetEntityId, { runtimeId: '0x2222222222222222222222222222222222222222', seenAt: env.state.timestamp }]]),
     directEntityInputsDispatch: () => {
       dispatchCount += 1;

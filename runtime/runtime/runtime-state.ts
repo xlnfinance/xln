@@ -1,9 +1,9 @@
 import type { RuntimeReplica } from './types';
 import { inferRuntimeLifecyclePhase } from './lifecycle';
 
-export const ensureRuntimeState = (env: RuntimeReplica): NonNullable<RuntimeReplica['runtimeState']> => {
-  if (!env.runtimeState) {
-    env.runtimeState = {
+export const ensureRuntimeState = (env: RuntimeReplica): NonNullable<RuntimeReplica['infrastructure']> => {
+  if (!env.infrastructure) {
+    env.infrastructure = {
       lifecyclePhase: 'booting',
       loopActive: false,
       halted: false,
@@ -21,14 +21,14 @@ export const ensureRuntimeState = (env: RuntimeReplica): NonNullable<RuntimeRepl
       recoveryBackupBarrier: null,
     };
   }
-  if (!env.runtimeState.entityRuntimeHints) {
-    env.runtimeState.entityRuntimeHints = new Map();
+  if (!env.infrastructure.entityRuntimeHints) {
+    env.infrastructure.entityRuntimeHints = new Map();
   }
-  if (!env.runtimeState.lifecyclePhase) {
-    env.runtimeState.lifecyclePhase = inferRuntimeLifecyclePhase(env.runtimeState);
+  if (!env.infrastructure.lifecyclePhase) {
+    env.infrastructure.lifecyclePhase = inferRuntimeLifecyclePhase(env.infrastructure);
   }
-  if (!env.runtimeState.watcherDedupCounter) {
-    env.runtimeState.watcherDedupCounter = { value: 0 };
+  if (!env.infrastructure.watcherDedupCounter) {
+    env.infrastructure.watcherDedupCounter = { value: 0 };
   }
-  return env.runtimeState;
+  return env.infrastructure;
 };

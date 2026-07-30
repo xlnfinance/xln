@@ -33,7 +33,7 @@ export interface EntityRuntimeContext {
   runtimeConfig?: {
     entityConsensusStateWarningBytes?: number;
   } | undefined;
-  runtimeState?: {
+  infrastructure?: {
     consumptionNodes?: ConsumptionNodeStore;
     pendingConsumptionNodes?: ConsumptionNodeStore;
     pendingConsumptionNodeDeletes?: Set<string>;

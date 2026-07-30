@@ -12,9 +12,9 @@ import type {
 import { getReliableIdentityValidationError } from './reliable-frontier';
 import { getReliableOutputIdentity } from './output-routing';
 
-export const ensureReliableState = (env: RuntimeReplica): NonNullable<RuntimeReplica['runtimeState']> => {
-  env.runtimeState ??= {};
-  return env.runtimeState;
+export const ensureReliableState = (env: RuntimeReplica): NonNullable<RuntimeReplica['infrastructure']> => {
+  env.infrastructure ??= {};
+  return env.infrastructure;
 };
 
 const toDeliveryIdentity = (

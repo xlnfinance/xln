@@ -60,7 +60,7 @@ async function readRuntimeIngressDiagnostics(page: Page): Promise<{
   return await page.evaluate(() => {
     const env = (window as typeof window & {
       __e2eRuntimeIngressEnv?: {
-        runtimeState?: {
+        infrastructure?: {
           loopActive?: boolean;
           halted?: boolean;
         };
@@ -73,8 +73,8 @@ async function readRuntimeIngressDiagnostics(page: Page): Promise<{
     const logs = Array.isArray(env?.frameLogs) ? env.frameLogs : [];
     const countMessage = (message: string) => logs.filter((entry) => String(entry?.message || '') === message).length;
     return {
-      loopActive: Boolean(env?.runtimeState?.loopActive),
-      halted: Boolean(env?.runtimeState?.halted),
+      loopActive: Boolean(env?.infrastructure?.loopActive),
+      halted: Boolean(env?.infrastructure?.halted),
       queuedRejectedInputs: Array.isArray(env?.runtimeMempool?.entityInputs)
         ? env.runtimeMempool.entityInputs.filter((input) => String(input?.signerId || '').toLowerCase() === `0x${'ef'.repeat(20)}`).length
         : 0,

@@ -101,7 +101,7 @@ describe('durable validator-local J submit state', () => {
     expect(replica.jSubmitState?.terminalFailure).toMatchObject({ message: 'staticCall revert: E3()' });
     expect(replica.state.jBatchState?.sentBatch?.terminalFailure).toBeUndefined();
     expect(computeCanonicalEntityHash(replica).hash).toBe(beforeHash);
-    expect(env.runtimeState?.pendingCommittedJOutbox).toEqual([]);
+    expect(env.infrastructure?.pendingCommittedJOutbox).toEqual([]);
     expect(collectDueJSubmitRuntimeTxs(env, env.state.timestamp + ENTITY_J_SUBMIT_FALLBACK_MS * 2)).toEqual([]);
   });
 
@@ -225,7 +225,7 @@ describe('durable validator-local J submit state', () => {
 
     expect(await applyRuntimeTx(env, retry, { isReplay: true })).toEqual([]);
     expect(replica.jSubmitState?.submitAttempts).toBe(1);
-    expect(env.runtimeState?.pendingCommittedJOutbox).toHaveLength(1);
+    expect(env.infrastructure?.pendingCommittedJOutbox).toHaveLength(1);
   });
 
   test('late result retires only its old pending attempt and cannot corrupt a newer attempt', async () => {
@@ -233,7 +233,7 @@ describe('durable validator-local J submit state', () => {
     const firstBatchTx = firstOutbox[0]?.jTxs[0];
     if (!firstBatchTx || firstBatchTx.type !== 'batch') throw new Error('first attempt fixture missing');
 
-    env.runtimeState!.pendingCommittedJOutbox = [];
+    env.infrastructure!.pendingCommittedJOutbox = [];
     env.state.timestamp += ENTITY_J_SUBMIT_FALLBACK_MS;
     const [secondRetry] = collectDueJSubmitRuntimeTxs(env, env.state.timestamp);
     if (!secondRetry) throw new Error('second retry fixture missing');
@@ -249,7 +249,7 @@ describe('durable validator-local J submit state', () => {
     ), { isReplay: true });
 
     expect(replica.jSubmitState).toEqual(before);
-    const pending = env.runtimeState?.pendingCommittedJOutbox ?? [];
+    const pending = env.infrastructure?.pendingCommittedJOutbox ?? [];
     expect(pending).toHaveLength(1);
     const remaining = pending[0]?.jTxs[0];
     expect(remaining?.type === 'batch' ? remaining.data.runtimeSubmitAttempt?.attemptNumber : null).toBe(2);
@@ -268,19 +268,19 @@ describe('durable validator-local J submit state', () => {
     await applyRuntimeTx(env, resultTx, { isReplay: true });
     const afterFirstResult = {
       local: structuredClone(replica.jSubmitState),
-      pending: structuredClone(env.runtimeState?.pendingCommittedJOutbox),
+      pending: structuredClone(env.infrastructure?.pendingCommittedJOutbox),
     };
 
     await applyRuntimeTx(env, structuredClone(resultTx), { isReplay: true });
     expect(replica.jSubmitState).toEqual(afterFirstResult.local);
-    expect(env.runtimeState?.pendingCommittedJOutbox).toEqual(afterFirstResult.pending);
+    expect(env.infrastructure?.pendingCommittedJOutbox).toEqual(afterFirstResult.pending);
 
     const conflicting = structuredClone(resultTx);
     conflicting.data.message = 'staticCall revert: E5()';
     await expect(applyRuntimeTx(env, conflicting, { isReplay: true }))
       .rejects.toThrow('J_SUBMIT_RESULT_DUPLICATE_CONFLICT');
     expect(replica.jSubmitState).toEqual(afterFirstResult.local);
-    expect(env.runtimeState?.pendingCommittedJOutbox).toEqual(afterFirstResult.pending);
+    expect(env.infrastructure?.pendingCommittedJOutbox).toEqual(afterFirstResult.pending);
   });
 
   test('conflicting duplicate of an older recorded attempt still fails after a newer result', async () => {
@@ -354,7 +354,7 @@ describe('durable validator-local J submit state', () => {
     const beforeOldReplay = structuredClone(restored.jSubmitState);
     const restoredFixture = makeFixture();
     restoredFixture.env.state.eReplicas.set(`${entityId}:${signerId}`, restored);
-    restoredFixture.env.runtimeState = structuredClone(env.runtimeState);
+    restoredFixture.env.infrastructure = structuredClone(env.infrastructure);
     await applyRuntimeTx(restoredFixture.env, structuredClone(results[0]!), { isReplay: true });
     expect(restored.jSubmitState).toEqual(beforeOldReplay);
 
@@ -401,7 +401,7 @@ describe('durable validator-local J submit state', () => {
     });
 
     await applyRuntimeTx(env, oldResult, { isReplay: true });
-    const pendingAfterOldResult = structuredClone(env.runtimeState?.pendingCommittedJOutbox);
+    const pendingAfterOldResult = structuredClone(env.infrastructure?.pendingCommittedJOutbox);
     expect(pendingAfterOldResult).toHaveLength(1);
     const remaining = pendingAfterOldResult?.[0]?.jTxs[0];
     expect(remaining?.type === 'batch' ? remaining.data.batchHash : null).toBe(nextBatchHash);
@@ -409,12 +409,12 @@ describe('durable validator-local J submit state', () => {
 
     await applyRuntimeTx(env, structuredClone(oldResult), { isReplay: true });
     expect(replica.jSubmitState).toEqual(localAfterOldResult);
-    expect(env.runtimeState?.pendingCommittedJOutbox).toEqual(pendingAfterOldResult);
+    expect(env.infrastructure?.pendingCommittedJOutbox).toEqual(pendingAfterOldResult);
   });
 
   test('pending outbox rejects a conflicting payload that reuses an attempt id', async () => {
     const { env, jOutbox } = await commitAttempt();
-    const before = structuredClone(env.runtimeState?.pendingCommittedJOutbox);
+    const before = structuredClone(env.infrastructure?.pendingCommittedJOutbox);
     const conflicting = structuredClone(jOutbox);
     const conflictingBatch = conflicting[0]?.jTxs[0];
     if (!conflictingBatch || conflictingBatch.type !== 'batch') {
@@ -424,6 +424,6 @@ describe('durable validator-local J submit state', () => {
 
     expect(() => registerPendingCommittedJOutbox(env, conflicting))
       .toThrow('J_SUBMIT_PENDING_ATTEMPT_ID_MISMATCH');
-    expect(env.runtimeState?.pendingCommittedJOutbox).toEqual(before);
+    expect(env.infrastructure?.pendingCommittedJOutbox).toEqual(before);
   });
 });

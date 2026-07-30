@@ -18,7 +18,7 @@
   let activeSecurityIncidents: RuntimeSecurityIncident[] = [];
 
   $: securityIncidents = Array.from(
-    $activeRuntime?.env?.runtimeState?.securityIncidents?.values() ?? [],
+    $activeRuntime?.env?.infrastructure?.securityIncidents?.values() ?? [],
   ).sort((left, right) => right.lastSeenAt - left.lastSeenAt || left.id.localeCompare(right.id));
   $: activeSecurityIncidents = securityIncidents.filter((incident) => incident.status === 'active');
 

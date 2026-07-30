@@ -36,7 +36,7 @@ const getWatcherKey = (replica: JReplica): string | null => {
 export const startJurisdictionWatchers = (env: RuntimeReplica): void => {
   // Quiesce closes ingress before draining accepted work. Never resurrect a
   // producer after that fence has been raised.
-  if (env.runtimeState?.persistenceQuiescing || !env.state.jReplicas?.size) return;
+  if (env.infrastructure?.persistenceQuiescing || !env.state.jReplicas?.size) return;
   const owners = new Map<string, JAdapter>();
   for (const [name, replica] of env.state.jReplicas) {
     const adapter = replica.jadapter;

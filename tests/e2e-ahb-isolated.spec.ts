@@ -104,7 +104,7 @@ type TestWindow = typeof window & {
     gossip?: {
       getProfiles?: () => GossipProfile[];
     };
-    runtimeState?: {
+    infrastructure?: {
       p2p?: {
         relayUrls?: string[];
       };
@@ -216,7 +216,7 @@ async function getActiveApiBase(page: Page): Promise<string> {
   if (process.env.E2E_API_BASE_URL) return API_BASE_URL;
   const runtimeApi = await page.evaluate(() => {
     const view = window as TestWindow;
-    const relay = view.isolatedEnv?.runtimeState?.p2p?.relayUrls?.[0] ?? null;
+    const relay = view.isolatedEnv?.infrastructure?.p2p?.relayUrls?.[0] ?? null;
     return typeof relay === 'string' ? relay : null;
   });
   return relayToApiBase(runtimeApi) ?? APP_BASE_URL;

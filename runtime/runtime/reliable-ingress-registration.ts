@@ -60,7 +60,7 @@ const pendingIdentitiesForLane = (
   env: RuntimeReplica,
   fromRuntimeId: string,
   identity: ReliableDeliveryIdentity,
-): ReliableDeliveryIdentity[] => [...(env.runtimeState?.pendingReliableIngress?.values() ?? [])]
+): ReliableDeliveryIdentity[] => [...(env.infrastructure?.pendingReliableIngress?.values() ?? [])]
   .filter(entry => entry.targetRuntimeIds.has(fromRuntimeId))
   .map(entry => entry.identity)
   .filter(candidate => candidate.laneKey === identity.laneKey);
@@ -81,7 +81,7 @@ const registerAgainstDurableFrontiers = (
   identity: ReliableDeliveryIdentity,
 ): ReliableIngressRegistration | null => {
   const key = receiverFrontierKey(fromRuntimeId, identity);
-  const terminal = env.runtimeState?.reliableIngressTerminalWatermarks?.get(key);
+  const terminal = env.infrastructure?.reliableIngressTerminalWatermarks?.get(key);
   if (
     terminal &&
     identity.kind === 'account-ack' &&
@@ -131,7 +131,7 @@ const registerAgainstDurableFrontiers = (
     );
     throw new Error(`RELIABLE_INGRESS_TERMINAL_EXACT_CONFLICT:${identity.height}`);
   }
-  const active = env.runtimeState?.reliableIngressReceiptLedger?.get(key);
+  const active = env.infrastructure?.reliableIngressReceiptLedger?.get(key);
   if (!active) {
     if (terminal && compareReliableIdentityPosition(identity, terminal.body.identity) < 0) {
       throw new Error(`RELIABLE_INGRESS_TERMINAL_ORDER_CONFLICT:${identity.kind}:${identity.height}`);

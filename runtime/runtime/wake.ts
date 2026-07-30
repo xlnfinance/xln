@@ -15,7 +15,7 @@ import {
   getNextEntityProviderActionRetryTimestamp,
 } from './entity-provider-action-submit-scheduler';
 
-type RuntimeLifecycleState = NonNullable<RuntimeReplica['runtimeState']>;
+type RuntimeLifecycleState = NonNullable<RuntimeReplica['infrastructure']>;
 
 export type RuntimeWakeDeps = {
   ensureRuntimeState(env: RuntimeReplica): RuntimeLifecycleState;

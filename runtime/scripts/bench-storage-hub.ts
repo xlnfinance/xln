@@ -478,7 +478,7 @@ const importParticipants = async (
       entityInputs: [],
     } as unknown as RuntimeReplica['runtimeMempool'];
     await applyRuntimeInput(env, runtimeInput);
-    if (env.runtimeConfig?.storage?.enabled === true || env.runtimeState?.persistencePaused !== true) {
+    if (env.runtimeConfig?.storage?.enabled === true || env.infrastructure?.persistencePaused !== true) {
       await saveEnvToDB(env, runtimeInput);
     }
   }
@@ -590,10 +590,10 @@ async function main() {
         }
       : {}),
   };
-  if (!env.runtimeState) {
-    env.runtimeState = {} as NonNullable<RuntimeReplica['runtimeState']>;
+  if (!env.infrastructure) {
+    env.infrastructure = {} as NonNullable<RuntimeReplica['infrastructure']>;
   }
-  env.runtimeState.persistencePaused = !persist && !storageEnabled;
+  env.infrastructure.persistencePaused = !persist && !storageEnabled;
   const jurisdiction = {
     address: 'browservm://bench',
     name: 'bench',

@@ -909,8 +909,8 @@ describe('audit fail-fast regressions', () => {
     expect(mutatedCommitResult.workingReplica.state.height).toBe(0);
 
     env.runtimeId = `0x${'71'.repeat(20)}`;
-    env.runtimeState ??= {};
-    env.runtimeState.entityRuntimeHints = new Map();
+    env.infrastructure ??= {};
+    env.infrastructure.entityRuntimeHints = new Map();
     env.state.eReplicas.set(`${entityId}:${second.signerId}`, precommitResult.workingReplica);
     const remoteEntityId = `0x${'72'.repeat(32)}`;
     const lockedMempoolSize = precommitResult.workingReplica.mempool.length;
@@ -938,7 +938,7 @@ describe('audit fail-fast regressions', () => {
       {
         isReplay: false,
         routingDeps: {
-          ensureRuntimeState: targetEnv => targetEnv.runtimeState!,
+          ensureRuntimeState: targetEnv => targetEnv.infrastructure!,
           enqueueRuntimeInputs: () => {},
           extractEntityId: replicaKey => replicaKey.split(':')[0] ?? '',
           hasLocalSignerForEntity: () => true,
@@ -951,7 +951,7 @@ describe('audit fail-fast regressions', () => {
 
     expect(mergedResult.appliedEntityInputs).toEqual([]);
     expect(env.state.eReplicas.get(`${entityId}:${second.signerId}`)?.mempool).toHaveLength(lockedMempoolSize);
-    expect(env.runtimeState.entityRuntimeHints.has(remoteEntityId)).toBe(false);
+    expect(env.infrastructure.entityRuntimeHints.has(remoteEntityId)).toBe(false);
   });
 
   test('entity catch-up commit rejects a secondary hash not emitted by local replay', async () => {

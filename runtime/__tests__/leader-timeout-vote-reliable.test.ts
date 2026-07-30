@@ -47,7 +47,7 @@ const runtime = (seed: string): RuntimeReplica => {
   registerSignerKey(env, runtimeId, deriveSignerKeySync(seed, 'runtime'));
   env.runtimeId = runtimeId;
   env.runtimeSeed = seed;
-  env.runtimeState ??= {};
+  env.infrastructure ??= {};
   env.quietRuntimeLogs = true;
   env.warn = () => {};
   return env;
@@ -137,7 +137,7 @@ const routingDeps = (
   targetRuntimeId: string,
   getP2P: RuntimeOutputRoutingDeps['getP2P'],
 ): RuntimeOutputRoutingDeps => ({
-  ensureRuntimeState: env => env.runtimeState!,
+  ensureRuntimeState: env => env.infrastructure!,
   getP2P,
   enqueueRuntimeInputs: () => {},
   extractEntityId: replicaKey => String(replicaKey).split(':')[0] || '',
@@ -188,7 +188,7 @@ describe('reliable leader timeout vote delivery', () => {
 
     const unrelatedIngress = voteOutput(receiver, replica, unrelatedRemoteVote);
     expect(registerReliableIngress(receiver, sender.runtimeId!, unrelatedIngress).kind).toBe('enqueue');
-    expect(receiver.runtimeState?.pendingReliableIngress?.size).toBe(1);
+    expect(receiver.infrastructure?.pendingReliableIngress?.size).toBe(1);
 
     const result = await applyRuntimeInput(receiver, {
       runtimeTxs: [],
@@ -196,7 +196,7 @@ describe('reliable leader timeout vote delivery', () => {
     });
     expect(result.appliedRuntimeInput.entityInputs[0]?.leaderTimeoutVote?.signature)
       .toMatch(/^0x[0-9a-f]+$/i);
-    expect(receiver.runtimeState?.pendingReliableIngress?.size).toBe(1);
+    expect(receiver.infrastructure?.pendingReliableIngress?.size).toBe(1);
   });
 
   test('unmarked unsigned timeout vote remains invalid transport ingress', () => {
@@ -510,8 +510,8 @@ describe('reliable leader timeout vote delivery', () => {
     expect(early.outcome.kind).toBe('rejected');
     expect(commitReliableIngress(receiver, [])).toEqual([]);
     releaseUncommittedReliableIngress(receiver, [nextViewOutput], []);
-    expect(receiver.runtimeState?.reliableIngressReceiptLedger?.size ?? 0).toBe(0);
-    expect(receiver.runtimeState?.reliableIngressTerminalWatermarks?.size ?? 0).toBe(0);
+    expect(receiver.infrastructure?.reliableIngressReceiptLedger?.size ?? 0).toBe(0);
+    expect(receiver.infrastructure?.reliableIngressTerminalWatermarks?.size ?? 0).toBe(0);
     expect(sender.pendingNetworkOutputs).toEqual([nextViewOutput]);
 
     // A real view-1 frame makes every same-target view-2 vote a protocol no-op.

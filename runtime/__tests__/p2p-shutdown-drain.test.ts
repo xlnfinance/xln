@@ -429,7 +429,7 @@ test('closing p2p rejects late direct-client creation', () => {
 test('runtime lifecycle clears attachment only through drained shutdown', async () => {
   let drained = false;
   const env = {
-    runtimeState: {
+    infrastructure: {
       p2p: {
         closeAndWait: async () => {
           await Bun.sleep(5);
@@ -441,7 +441,7 @@ test('runtime lifecycle clears attachment only through drained shutdown', async 
   } as unknown as RuntimeReplica;
 
   await stopRuntimeP2PAndWait(env, {
-    ensureRuntimeState: (target) => target.runtimeState!,
+    ensureRuntimeState: (target) => target.infrastructure!,
     notifyEnvChange: () => {},
     handleInboundP2PEntityInput: () => ({ kind: 'accepted' }),
     handleInboundReliableReceipt: () => {},
@@ -449,8 +449,8 @@ test('runtime lifecycle clears attachment only through drained shutdown', async 
   });
 
   expect(drained).toBe(true);
-  expect(env.runtimeState?.p2p).toBeNull();
-  expect(env.runtimeState?.lastP2PConfig).toBeNull();
+  expect(env.infrastructure?.p2p).toBeNull();
+  expect(env.infrastructure?.lastP2PConfig).toBeNull();
 });
 
 test('synchronous stop retains transport ownership for a later awaited drain', async () => {
@@ -461,13 +461,13 @@ test('synchronous stop retains transport ownership for a later awaited drain', a
     closeAndWait: async () => { drained = true; },
   };
   const env = {
-    runtimeState: {
+    infrastructure: {
       p2p,
       lastP2PConfig: { runtimeId: RUNTIME_ID },
     },
   } as unknown as RuntimeReplica;
   const deps = {
-    ensureRuntimeState: (target: RuntimeReplica) => target.runtimeState!,
+    ensureRuntimeState: (target: RuntimeReplica) => target.infrastructure!,
     notifyEnvChange: () => {},
     handleInboundP2PEntityInput: () => ({ kind: 'accepted' as const }),
     handleInboundReliableReceipt: () => {},
@@ -476,11 +476,11 @@ test('synchronous stop retains transport ownership for a later awaited drain', a
 
   stopRuntimeP2P(env, deps);
   expect(closeStarted).toBe(true);
-  expect(env.runtimeState?.p2p).toBe(p2p);
+  expect(env.infrastructure?.p2p).toBe(p2p);
 
   await stopRuntimeP2PAndWait(env, deps);
   expect(drained).toBe(true);
-  expect(env.runtimeState?.p2p).toBeNull();
+  expect(env.infrastructure?.p2p).toBeNull();
 });
 
 test('synchronous runtime stop preserves actual P2P clients until awaited drain', async () => {
@@ -502,13 +502,13 @@ test('synchronous runtime stop preserves actual P2P clients until awaited drain'
   };
   const internals = p2p as unknown as { clients: Array<typeof client> };
   internals.clients = [client];
-  env.runtimeState = {
-    ...env.runtimeState,
+  env.infrastructure = {
+    ...env.infrastructure,
     p2p,
     lastP2PConfig: { runtimeId: RUNTIME_ID },
   };
   const deps = {
-    ensureRuntimeState: (target: RuntimeReplica) => target.runtimeState!,
+    ensureRuntimeState: (target: RuntimeReplica) => target.infrastructure!,
     notifyEnvChange: () => {},
     handleInboundP2PEntityInput: () => ({ kind: 'accepted' as const }),
     handleInboundReliableReceipt: () => {},
@@ -525,7 +525,7 @@ test('synchronous runtime stop preserves actual P2P clients until awaited drain'
   expect(drained).toBe(true);
   expect(performance.now() - startedAt).toBeGreaterThanOrEqual(20);
   expect(internals.clients).toEqual([]);
-  expect(env.runtimeState?.p2p).toBeNull();
+  expect(env.infrastructure?.p2p).toBeNull();
 });
 
 test('runtime lifecycle retains the quiesced handle when drain fails', async () => {
@@ -535,20 +535,20 @@ test('runtime lifecycle retains the quiesced handle when drain fails', async () 
     },
   };
   const env = {
-    runtimeState: {
+    infrastructure: {
       p2p,
       lastP2PConfig: { runtimeId: RUNTIME_ID },
     },
   } as unknown as RuntimeReplica;
 
   await expect(stopRuntimeP2PAndWait(env, {
-    ensureRuntimeState: (target) => target.runtimeState!,
+    ensureRuntimeState: (target) => target.infrastructure!,
     notifyEnvChange: () => {},
     handleInboundP2PEntityInput: () => ({ kind: 'accepted' }),
     handleInboundReliableReceipt: () => {},
     enqueueRuntimeInputs: () => {},
   })).rejects.toThrow('drain-failed');
 
-  expect(env.runtimeState?.p2p).toBe(p2p);
-  expect(env.runtimeState?.lastP2PConfig).toEqual({ runtimeId: RUNTIME_ID });
+  expect(env.infrastructure?.p2p).toBe(p2p);
+  expect(env.infrastructure?.lastP2PConfig).toEqual({ runtimeId: RUNTIME_ID });
 });

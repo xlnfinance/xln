@@ -18,7 +18,7 @@ import {
 } from '../extensions/cross-j';
 import { recordRuntimeSecurityIncident } from './security-incidents';
 
-type RuntimeLifecycleState = NonNullable<RuntimeReplica['runtimeState']>;
+type RuntimeLifecycleState = NonNullable<RuntimeReplica['infrastructure']>;
 
 export type RuntimeInboundEntityInputOptions = {
   /** The transport accepted this exact input before persistence quiescing began. */
@@ -995,8 +995,8 @@ export const validateInboundP2PEntityInput = (
     }, context);
   }
 
-  const runtimeState = deps.ensureRuntimeState(env);
-  if (runtimeState.halted && !env.scenarioMode) {
+  const infrastructure = deps.ensureRuntimeState(env);
+  if (infrastructure.halted && !env.scenarioMode) {
     return rejectUnavailableInboundTarget(env, input, 'INBOUND_ENTITY_RUNTIME_HALTED', {
       fromRuntimeId: from,
       entityId: input.entityId,
@@ -1005,7 +1005,7 @@ export const validateInboundP2PEntityInput = (
   }
 
   if (
-    runtimeState.persistenceQuiescing &&
+    infrastructure.persistenceQuiescing &&
     !env.scenarioMode &&
     options.acceptedBeforeQuiesce !== true
   ) {

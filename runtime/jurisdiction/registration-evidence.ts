@@ -398,7 +398,7 @@ export const freezeCertifiedRegistrationEvidence = (
 };
 
 export const assertCertifiedRegistrationEvidenceStore = async (env: RuntimeReplica): Promise<void> => {
-  const store = env.runtimeState?.certifiedRegistrationEvidence;
+  const store = env.infrastructure?.certifiedRegistrationEvidence;
   if (store !== undefined && !(store instanceof Map)) {
     throw new Error('J_AUTHORITY_STORE_TYPE_INVALID');
   }

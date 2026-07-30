@@ -91,7 +91,7 @@ const dispatchFrameOutputs = (outputs: DeliverableEntityInput[]): {
     runtimeId: runtimeId('10'),
     height: 25,
     timestamp: 2_500,
-    runtimeState: {
+    infrastructure: {
       directEntityInputsDispatch: (_runtimeId: string, envelope: RuntimeEntityInputsEnvelope) => {
         delivered.push(...envelope.entityInputs);
         return deliveryAccepted('ROUTE_DIRECT_DELIVERED');
@@ -105,7 +105,7 @@ const dispatchFrameOutputs = (outputs: DeliverableEntityInput[]): {
     },
     targetRuntimeId,
   })), {
-    ensureRuntimeState: target => target.runtimeState!,
+    ensureRuntimeState: target => target.infrastructure!,
     getP2P: () => null,
     enqueueRuntimeInputs: () => {},
     extractEntityId: key => String(key).split(':')[0] || '',
@@ -148,7 +148,7 @@ describe('runtime output routing', () => {
     const env = {
       runtimeId: runtimeId('a3'),
       timestamp: 1,
-      runtimeState: {},
+      infrastructure: {},
       gossip: { getProfiles: () => [] },
       info: (_scope: string, code: string) => infoCodes.push(code),
       warn: () => {},
@@ -156,7 +156,7 @@ describe('runtime output routing', () => {
     } as unknown as RuntimeReplica;
 
     const planned = planEntityOutputs(env, [output], {
-      ensureRuntimeState: target => target.runtimeState!,
+      ensureRuntimeState: target => target.infrastructure!,
       getP2P: () => null,
       enqueueRuntimeInputs: () => {},
       extractEntityId: key => String(key).split(':')[0] || '',
@@ -356,10 +356,10 @@ describe('runtime output routing', () => {
     const env = {
       timestamp: 1_000,
       pendingNetworkOutputs: [],
-      runtimeState: {},
+      infrastructure: {},
     } as unknown as RuntimeReplica;
     const deps = {
-      ensureRuntimeState: (targetEnv: RuntimeReplica) => targetEnv.runtimeState!,
+      ensureRuntimeState: (targetEnv: RuntimeReplica) => targetEnv.infrastructure!,
     } as any;
 
     const pending = rescheduleDeferredOutputs(env, [], [output], [], deps);
@@ -378,14 +378,14 @@ describe('runtime output routing', () => {
       scenarioMode: true,
       timestamp: 1_000,
       pendingNetworkOutputs: [],
-      runtimeState: {},
+      infrastructure: {},
     } as unknown as RuntimeReplica;
     const deps = {
-      ensureRuntimeState: (targetEnv: RuntimeReplica) => targetEnv.runtimeState!,
+      ensureRuntimeState: (targetEnv: RuntimeReplica) => targetEnv.infrastructure!,
     } as any;
 
     const pending = rescheduleDeferredOutputs(env, [], [output], [], deps);
-    const retry = env.runtimeState?.deferredNetworkMeta?.get(buildRouteOutputKey(output));
+    const retry = env.infrastructure?.deferredNetworkMeta?.get(buildRouteOutputKey(output));
     expect(retry?.nextRetryAt).toBe(2_000);
     env.state.timestamp = 1_999;
     expect(splitPendingOutputsByRetryWindow(env, pending, deps).ready).toHaveLength(0);
@@ -404,15 +404,15 @@ describe('runtime output routing', () => {
       scenarioMode: false,
       timestamp: 1,
       pendingNetworkOutputs: [],
-      runtimeState: {},
+      infrastructure: {},
     } as unknown as RuntimeReplica;
     const deps = {
-      ensureRuntimeState: (targetEnv: RuntimeReplica) => targetEnv.runtimeState!,
+      ensureRuntimeState: (targetEnv: RuntimeReplica) => targetEnv.infrastructure!,
     } as any;
     const before = getWallClockMs();
     const pending = rescheduleDeferredOutputs(env, [], [output], [], deps);
     const after = getWallClockMs();
-    const retry = env.runtimeState?.deferredNetworkMeta?.get(buildRouteOutputKey(output));
+    const retry = env.infrastructure?.deferredNetworkMeta?.get(buildRouteOutputKey(output));
 
     expect(retry?.nextRetryAt).toBeGreaterThanOrEqual(before + 1_000);
     expect(retry?.nextRetryAt).toBeLessThanOrEqual(after + 1_000);
@@ -435,7 +435,7 @@ describe('runtime output routing', () => {
     } as unknown as RuntimeReplica;
 
     const planned = planEntityOutputs(env, [output], {
-      ensureRuntimeState: (targetEnv) => targetEnv.runtimeState ??= {},
+      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure ??= {},
       getP2P: () => ({
         enqueueEntityInputsDelivery: () => deliveryAccepted('TEST_DELIVERED'),
         getVerifiedRuntimeRoute: () => ({ runtimeId: resolvedRuntimeId, lastUpdated: 2 }),
@@ -470,7 +470,7 @@ describe('runtime output routing', () => {
     } as unknown as RuntimeReplica;
 
     const planned = planEntityOutputs(env, [output], {
-      ensureRuntimeState: (targetEnv) => targetEnv.runtimeState ??= {},
+      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure ??= {},
       getP2P: () => ({
         enqueueEntityInputsDelivery: () => deliveryAccepted('TEST_DELIVERED'),
         getVerifiedRuntimeRoute: () => ({ runtimeId: resolvedRuntimeId, lastUpdated: 2 }),
@@ -506,7 +506,7 @@ describe('runtime output routing', () => {
     } as unknown as RuntimeReplica;
 
     const planned = planEntityOutputs(env, [output], {
-      ensureRuntimeState: (targetEnv) => targetEnv.runtimeState ??= {},
+      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure ??= {},
       getP2P: () => ({
         enqueueEntityInputsDelivery: () => deliveryAccepted('TEST_DELIVERED'),
         getVerifiedRuntimeRoute: () => ({ runtimeId: currentRuntimeId, lastUpdated: 2 }),
@@ -541,7 +541,7 @@ describe('runtime output routing', () => {
     } as unknown as RuntimeReplica;
 
     const planned = planEntityOutputs(env, [output], {
-      ensureRuntimeState: (targetEnv) => targetEnv.runtimeState ??= {},
+      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure ??= {},
       getP2P: () => null,
       enqueueRuntimeInputs: () => {},
       extractEntityId: (replicaKey) => String(replicaKey).split(':')[0] || '',
@@ -563,7 +563,7 @@ describe('runtime output routing', () => {
     const env = {
       runtimeId: runtimeId('11'),
       timestamp: 1234,
-      runtimeState: {
+      infrastructure: {
         directEntityInputsDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FALLBACK' }),
       },
       warn: (_scope: string, code: string) => {
@@ -582,7 +582,7 @@ describe('runtime output routing', () => {
     };
 
     const deferred = dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
-      ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
+      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => ({
         enqueueEntityInputsDelivery: (runtimeId, envelope, ingressTimestamp) => {
           p2pCalls.push({ targetRuntimeId: runtimeId, envelope, ingressTimestamp });
@@ -617,7 +617,7 @@ describe('runtime output routing', () => {
     const env = {
       runtimeId: runtimeId('11'),
       timestamp: 4321,
-      runtimeState: {
+      infrastructure: {
         directEntityInputsDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FALLBACK' }),
       },
       warn: () => {},
@@ -632,7 +632,7 @@ describe('runtime output routing', () => {
     };
 
     const deferred = dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
-      ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
+      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => ({
         enqueueEntityInputsDelivery: (runtimeId, envelope, ingressTimestamp) => {
           p2pCalls.push({ targetRuntimeId: runtimeId, envelope, ingressTimestamp });
@@ -665,7 +665,7 @@ describe('runtime output routing', () => {
     const env = {
       runtimeId: runtimeId('11'),
       timestamp: 4331,
-      runtimeState: {
+      infrastructure: {
         directEntityInputsDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FALLBACK' }),
       },
       warn: () => {},
@@ -680,7 +680,7 @@ describe('runtime output routing', () => {
     };
 
     expect(() => dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
-      ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
+      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => ({
         enqueueEntityInputsDelivery: (() => true) as any,
       }),
@@ -700,7 +700,7 @@ describe('runtime output routing', () => {
     const env = {
       runtimeId: runtimeId('11'),
       timestamp: 2468,
-      runtimeState: {
+      infrastructure: {
         directEntityInputsDispatch: () => ({
           outcome: 'delivered',
           code: 'ROUTE_DIRECT_DELIVERED',
@@ -721,7 +721,7 @@ describe('runtime output routing', () => {
     };
 
     const deferred = dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
-      ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
+      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => ({
         enqueueEntityInputsDelivery: () => {
           p2pCalls.push(true);
@@ -851,7 +851,7 @@ describe('runtime output routing', () => {
     const env = {
       runtimeId: runtimeId('11'),
       timestamp: 2469,
-      runtimeState: {
+      infrastructure: {
         directEntityInputsDispatch: (() => true) as any,
       },
       warn: () => {},
@@ -866,7 +866,7 @@ describe('runtime output routing', () => {
     };
 
     expect(() => dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
-      ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
+      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => ({
         enqueueEntityInputsDelivery: () => {
           p2pCalls.push(true);
@@ -890,7 +890,7 @@ describe('runtime output routing', () => {
     const env = {
       runtimeId: runtimeId('11'),
       timestamp: 1357,
-      runtimeState: {
+      infrastructure: {
         directEntityInputsDispatch: () => ({
           outcome: 'deferred',
           code: 'ROUTE_DIRECT_MISS_FALLBACK',
@@ -911,7 +911,7 @@ describe('runtime output routing', () => {
     };
 
     const deferred = dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
-      ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
+      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => ({
         enqueueEntityInputsDelivery: (runtimeId, envelope, ingressTimestamp) => {
           p2pCalls.push({ targetRuntimeId: runtimeId, envelope, ingressTimestamp });
@@ -940,7 +940,7 @@ describe('runtime output routing', () => {
       runtimeId: runtimeId('11'),
       height: 15,
       timestamp: 2345,
-      runtimeState: {
+      infrastructure: {
         directEntityInputsDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FALLBACK' }),
       },
       warn: () => {},
@@ -956,7 +956,7 @@ describe('runtime output routing', () => {
     };
 
     const result = sendEntityInputWithRouting(env, input, {
-      ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
+      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => ({
         enqueueEntityInputsDelivery: (runtimeId, envelope, ingressTimestamp) => {
           p2pCalls.push({ targetRuntimeId: runtimeId, envelope, ingressTimestamp });
@@ -996,7 +996,7 @@ describe('runtime output routing', () => {
     const env = {
       runtimeId: runtimeId('11'),
       timestamp: 3456,
-      runtimeState: {},
+      infrastructure: {},
       warn: () => {},
       error: () => {},
     } as unknown as RuntimeReplica;
@@ -1007,7 +1007,7 @@ describe('runtime output routing', () => {
     };
 
     const result = sendEntityInputWithRouting(env, input, {
-      ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
+      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => null,
       enqueueRuntimeInputs: (_env, entityInputs) => {
         queued.push(...entityInputs);
@@ -1051,7 +1051,7 @@ describe('runtime output routing', () => {
     const env = {
       runtimeId: runtimeId('11'),
       timestamp: 9012,
-      runtimeState: {
+      infrastructure: {
         directEntityInputsDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FALLBACK' }),
       },
       warn: (_scope: string, code: string) => warnings.push(code),
@@ -1062,7 +1062,7 @@ describe('runtime output routing', () => {
     } as unknown as RuntimeReplica;
 
     const deferred = dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
-      ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
+      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => ({
         enqueueEntityInputsDelivery: () => deliveryFailure({
           category: 'TransientRace',
@@ -1085,11 +1085,11 @@ describe('runtime output routing', () => {
     expect(warnings).toEqual([]);
     expect(infos).toEqual(['ROUTE_SEND_DEFERRED']);
 
-    env.runtimeState!.deferredNetworkMeta = new Map([
+    env.infrastructure!.deferredNetworkMeta = new Map([
       [buildRouteOutputKey(output), { attempts: 3, nextRetryAt: env.state.timestamp }],
     ]);
     dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
-      ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
+      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => ({
         enqueueEntityInputsDelivery: () => deliveryFailure({
           category: 'TransientRace',
@@ -1124,7 +1124,7 @@ describe('runtime output routing', () => {
     const env = {
       runtimeId: runtimeId('11'),
       timestamp: 5678,
-      runtimeState: {
+      infrastructure: {
         directEntityInputsDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FALLBACK' }),
       },
       warn: (_scope: string, code: string) => warnings.push(code),
@@ -1132,7 +1132,7 @@ describe('runtime output routing', () => {
     } as unknown as RuntimeReplica;
 
     const deferred = dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
-      ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
+      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => null,
       enqueueRuntimeInputs: () => {},
       extractEntityId: (replicaKey) => String(replicaKey).split(':')[0] || '',
@@ -1163,7 +1163,7 @@ describe('runtime output routing', () => {
     const env = {
       runtimeId: runtimeId('11'),
       timestamp: 5678,
-      runtimeState: {
+      infrastructure: {
         directEntityInputsDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FALLBACK' }),
       },
       warn: (_scope: string, code: string) => warnings.push(code),
@@ -1171,7 +1171,7 @@ describe('runtime output routing', () => {
     } as unknown as RuntimeReplica;
 
     const deferred = dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
-      ensureRuntimeState: target => target.runtimeState!,
+      ensureRuntimeState: target => target.infrastructure!,
       getP2P: () => null,
       enqueueRuntimeInputs: () => {},
       extractEntityId: key => String(key).split(':')[0] || '',
@@ -1200,13 +1200,13 @@ describe('runtime output routing', () => {
     const env = {
       runtimeId: runtimeId('11'),
       timestamp: 5678,
-      runtimeState: {},
+      infrastructure: {},
       warn: () => {},
       error: () => {},
     } as unknown as RuntimeReplica;
 
     expect(() => dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
-      ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
+      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => ({
         enqueueEntityInputsDelivery: () => deliveryFailure({
           category: 'Contradiction',
@@ -1233,7 +1233,7 @@ describe('runtime output routing', () => {
       runtimeId: runtimeId('11'),
       warn: (_scope: string, code: string) => warnings.push(code),
       error: () => {},
-      runtimeState: { entityRuntimeHints: new Map() },
+      infrastructure: { entityRuntimeHints: new Map() },
     } as unknown as RuntimeReplica;
 
     const result = planEntityOutputs(env, [{
@@ -1241,7 +1241,7 @@ describe('runtime output routing', () => {
       signerId: staleSignerId,
       entityTxs: [],
     }], {
-      ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
+      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => null,
       enqueueRuntimeInputs: () => {},
       extractEntityId: (replicaKey) => String(replicaKey).split(':')[0] || '',
@@ -1268,7 +1268,7 @@ describe('runtime output routing', () => {
       runtimeId: runtimeId('11'),
       warn: (_scope: string, code: string) => warnings.push(code),
       error: () => {},
-      runtimeState: {},
+      infrastructure: {},
       gossip: {
         getProfiles: () => [{
           entityId: targetEntityId,
@@ -1286,7 +1286,7 @@ describe('runtime output routing', () => {
       signerId: staleSenderSignerId,
       entityTxs: [],
     }], {
-      ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
+      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => null,
       enqueueRuntimeInputs: () => {},
       extractEntityId: (replicaKey) => String(replicaKey).split(':')[0] || '',
@@ -1312,7 +1312,7 @@ describe('runtime output routing', () => {
       runtimeId: runtimeId('11'),
       warn: () => {},
       error: (_scope: string, code: string) => errors.push(code),
-      runtimeState: {},
+      infrastructure: {},
       gossip: {
         getProfiles: () => [{
           entityId: targetEntityId,
@@ -1330,7 +1330,7 @@ describe('runtime output routing', () => {
       signerId: staleSenderSignerId,
       entityTxs: [{ type: 'accountInput', data: { fromEntityId: entityId('6d'), toEntityId: targetEntityId } } as any],
     }], {
-      ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
+      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => null,
       enqueueRuntimeInputs: () => {},
       extractEntityId: (replicaKey) => String(replicaKey).split(':')[0] || '',
@@ -1354,7 +1354,7 @@ describe('runtime output routing', () => {
       runtimeId: runtimeId('11'),
       warn: () => {},
       error: (_scope: string, code: string) => errors.push(code),
-      runtimeState: {},
+      infrastructure: {},
       gossip: {
         getProfiles: () => [{
           entityId: targetEntityId,
@@ -1372,7 +1372,7 @@ describe('runtime output routing', () => {
       signerId: secondarySignerId,
       entityTxs: [{ type: 'accountInput', data: { fromEntityId: entityId('6d'), toEntityId: targetEntityId } } as any],
     }], {
-      ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
+      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => null,
       enqueueRuntimeInputs: () => {},
       extractEntityId: (replicaKey) => String(replicaKey).split(':')[0] || '',
@@ -1399,7 +1399,7 @@ describe('runtime output routing', () => {
       runtimeId: runtimeId('11'),
       warn: (_scope: string, code: string) => warnings.push(code),
       error: (_scope: string, code: string) => errors.push(code),
-      runtimeState: {},
+      infrastructure: {},
       gossip: {
         getProfiles: () => [{
           entityId: targetEntityId,
@@ -1429,7 +1429,7 @@ describe('runtime output routing', () => {
         collectedSigs: new Map(),
       } as never,
     }], {
-      ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
+      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => null,
       enqueueRuntimeInputs: () => {},
       extractEntityId: (replicaKey) => String(replicaKey).split(':')[0] || '',
@@ -1445,7 +1445,7 @@ describe('runtime output routing', () => {
       hashPrecommitFrame: { height: 7, frameHash: '0xproposal' },
       hashPrecommits: new Map([[primarySignerId, ['0xsig']]]),
     }], {
-      ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
+      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => null,
       enqueueRuntimeInputs: () => {},
       extractEntityId: (replicaKey) => String(replicaKey).split(':')[0] || '',
@@ -1467,7 +1467,7 @@ describe('runtime output routing', () => {
     const targetEntityId = entityId('6f');
     const env = {
       timestamp: 1234,
-      runtimeState: {},
+      infrastructure: {},
       gossip: {
         getProfiles: () => [{
           entityId: targetEntityId,
@@ -1478,11 +1478,11 @@ describe('runtime output routing', () => {
     } as unknown as RuntimeReplica;
 
     const resolved = resolveRuntimeIdForEntity(env, targetEntityId, {
-      ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
+      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
     });
 
     expect(resolved).toBe(targetRuntimeId);
-    expect(env.runtimeState.entityRuntimeHints?.get(targetEntityId)?.seenAt).toBe(1234);
+    expect(env.infrastructure.entityRuntimeHints?.get(targetEntityId)?.seenAt).toBe(1234);
   });
 
   test('entity runtime hint ttl uses deterministic env timestamp', () => {
@@ -1490,7 +1490,7 @@ describe('runtime output routing', () => {
     const targetEntityId = entityId('72');
     const env = {
       timestamp: 10_000,
-      runtimeState: { entityRuntimeHints: new Map() },
+      infrastructure: { entityRuntimeHints: new Map() },
       gossip: {
         getProfiles: () => [{
           entityId: targetEntityId,
@@ -1500,11 +1500,11 @@ describe('runtime output routing', () => {
       },
     } as unknown as RuntimeReplica;
     const deps = {
-      ensureRuntimeState: (targetEnv: RuntimeReplica) => targetEnv.runtimeState!,
+      ensureRuntimeState: (targetEnv: RuntimeReplica) => targetEnv.infrastructure!,
     };
 
     expect(resolveRuntimeIdForEntity(env, targetEntityId, deps)).toBe(targetRuntimeId);
-    expect(env.runtimeState!.entityRuntimeHints!.get(targetEntityId)?.seenAt).toBe(10_000);
+    expect(env.infrastructure!.entityRuntimeHints!.get(targetEntityId)?.seenAt).toBe(10_000);
 
     env.state.timestamp = 70_001;
     env.gossip = { getProfiles: () => [] } as never;
@@ -1520,7 +1520,7 @@ describe('runtime output routing', () => {
       runtimeId: runtimeId('11'),
       warn: () => {},
       error: (_scope: string, code: string) => errors.push(code),
-      runtimeState: {},
+      infrastructure: {},
     } as unknown as RuntimeReplica;
 
     expect(() => planEntityOutputs(env, [{
@@ -1536,7 +1536,7 @@ describe('runtime output routing', () => {
         },
       } as any],
     }], {
-      ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
+      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => null,
       enqueueRuntimeInputs: () => {},
       extractEntityId: (replicaKey) => String(replicaKey).split(':')[0] || '',
@@ -1558,7 +1558,7 @@ describe('runtime output routing', () => {
       runtimeId: runtimeId('11'),
       warn: () => {},
       error: (_scope: string, code: string) => errors.push(code),
-      runtimeState: {},
+      infrastructure: {},
     } as unknown as RuntimeReplica;
 
     const result = planEntityOutputs(env, [{
@@ -1574,7 +1574,7 @@ describe('runtime output routing', () => {
         },
       } as any],
     }], {
-      ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
+      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => null,
       enqueueRuntimeInputs: () => {},
       extractEntityId: (replicaKey) => String(replicaKey).split(':')[0] || '',
@@ -1602,7 +1602,7 @@ describe('runtime output routing', () => {
       runtimeId: runtimeId('11'),
       warn: (_scope: string, code: string) => warnings.push(code),
       error: (_scope: string, code: string) => errors.push(code),
-      runtimeState: {},
+      infrastructure: {},
     } as unknown as RuntimeReplica;
 
     expect(() => planEntityOutputs(env, [{
@@ -1618,7 +1618,7 @@ describe('runtime output routing', () => {
         collectedSigs: new Map(),
       } as any,
     }], {
-      ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
+      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
       getP2P: () => null,
       enqueueRuntimeInputs: () => {},
       extractEntityId: (replicaKey) => String(replicaKey).split(':')[0] || '',
@@ -1642,7 +1642,7 @@ describe('runtime output routing', () => {
     const env = {
       runtimeId: runtimeId('11'),
       eReplicas: new Map([[`${localEntityId}:${actualSignerId}`, { entityId: localEntityId, signerId: actualSignerId }]]),
-      runtimeState: { entityRuntimeHints: new Map() },
+      infrastructure: { entityRuntimeHints: new Map() },
       warn: () => {},
       info: () => {},
       error: (_scope: string, code: string) => errors.push(code),
@@ -1662,7 +1662,7 @@ describe('runtime output routing', () => {
         },
       } as any],
     }, {
-      ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
+      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
       enqueueRuntimeInputs: (_targetEnv, inputs) => {
         enqueued.push(...(inputs ?? []));
       },
@@ -1686,7 +1686,7 @@ describe('runtime output routing', () => {
     const env = {
       runtimeId: runtimeId('11'),
       eReplicas: new Map(),
-      runtimeState: { entityRuntimeHints: new Map() },
+      infrastructure: { entityRuntimeHints: new Map() },
       warn: () => {},
       info: () => {},
       error: (_scope: string, code: string) => errors.push(code),
@@ -1704,7 +1704,7 @@ describe('runtime output routing', () => {
         },
       } as any],
     }, {
-      ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
+      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
       enqueueRuntimeInputs: (_targetEnv, inputs) => {
         enqueued.push(...(inputs ?? []));
       },
@@ -1728,7 +1728,7 @@ describe('runtime output routing', () => {
     const env = {
       runtimeId: runtimeId('11'),
       eReplicas: new Map([[`${localEntityId}:${signerId}`, { entityId: localEntityId, signerId }]]),
-      runtimeState: { entityRuntimeHints: new Map(), halted: true },
+      infrastructure: { entityRuntimeHints: new Map(), halted: true },
       warn: () => {},
       info: () => {},
       error: (_scope: string, code: string) => errors.push(code),
@@ -1747,7 +1747,7 @@ describe('runtime output routing', () => {
         },
       } as any],
     }, {
-      ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
+      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
       enqueueRuntimeInputs: (_targetEnv, inputs) => {
         enqueued.push(...(inputs ?? []));
       },
@@ -1761,7 +1761,7 @@ describe('runtime output routing', () => {
     })).toThrow(/INBOUND_ENTITY_RUNTIME_HALTED/);
     expect(errors).toContain('INBOUND_ENTITY_RUNTIME_HALTED');
     expect(enqueued).toHaveLength(0);
-    expect(env.runtimeState.entityRuntimeHints.size).toBe(0);
+    expect(env.infrastructure.entityRuntimeHints.size).toBe(0);
   });
 
   test('returns retryable backpressure before enqueueing inbound P2P input during persistence quiesce', () => {
@@ -1774,7 +1774,7 @@ describe('runtime output routing', () => {
     const env = {
       runtimeId: runtimeId('11'),
       eReplicas: new Map([[`${localEntityId}:${signerId}`, { entityId: localEntityId, signerId }]]),
-      runtimeState: { entityRuntimeHints: new Map(), loopActive: false, persistenceQuiescing: true },
+      infrastructure: { entityRuntimeHints: new Map(), loopActive: false, persistenceQuiescing: true },
       warn: () => {},
       info: (_scope: string, code: string) => infos.push(code),
       error: (_scope: string, code: string) => errors.push(code),
@@ -1793,7 +1793,7 @@ describe('runtime output routing', () => {
         },
       } as any],
     }, {
-      ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
+      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
       enqueueRuntimeInputs: (_targetEnv, inputs) => {
         enqueued.push(...(inputs ?? []));
       },
@@ -1812,7 +1812,7 @@ describe('runtime output routing', () => {
     expect(infos).toContain('INBOUND_ENTITY_RUNTIME_QUIESCING');
     expect(enqueued).toHaveLength(0);
     expect(startCalls).toBe(0);
-    expect(env.runtimeState.entityRuntimeHints.size).toBe(0);
+    expect(env.infrastructure.entityRuntimeHints.size).toBe(0);
   });
 
   test('drains exact ingress accepted before persistence quiesce began', () => {
@@ -1824,7 +1824,7 @@ describe('runtime output routing', () => {
       runtimeId: runtimeId('11'),
       height: 9,
       eReplicas: new Map([[`${localEntityId}:${signerId}`, { entityId: localEntityId, signerId }]]),
-      runtimeState: { entityRuntimeHints: new Map(), persistenceQuiescing: true },
+      infrastructure: { entityRuntimeHints: new Map(), persistenceQuiescing: true },
       warn: () => {},
       info: () => {},
     } as unknown as RuntimeReplica;
@@ -1837,7 +1837,7 @@ describe('runtime output routing', () => {
     };
 
     expect(routeInboundP2PEntityInput(env, sourceRuntimeId, input, {
-      ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
+      ensureRuntimeState: (targetEnv) => targetEnv.infrastructure!,
       enqueueRuntimeInputs: (_targetEnv, inputs) => enqueued.push(...(inputs ?? [])),
       extractEntityId: (replicaKey) => String(replicaKey).split(':')[0] || '',
       hasLocalSignerForEntity: () => true,

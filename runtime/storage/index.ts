@@ -933,7 +933,7 @@ const runStorageSnapshotLifecycle = async (
  */
 const prepareStorageFrameSave = async (options: StorageFrameSaveOptions) => {
   const config = resolveStorageRuntimeConfig(options.env);
-  if (!config.enabled || options.env.runtimeState?.persistencePaused) {
+  if (!config.enabled || options.env.infrastructure?.persistencePaused) {
     return {
       skipped: {
         materialized: false,
@@ -959,7 +959,7 @@ const prepareStorageFrameSave = async (options: StorageFrameSaveOptions) => {
       ? { onPersistenceProgress: options.onPersistenceProgress }
       : {}),
   });
-  const state = options.env.runtimeState ?? {};
+  const state = options.env.infrastructure ?? {};
   if (recovered.entityHashDocs) {
     state.storageEntityHashDocs = recovered.entityHashDocs;
   }
@@ -1078,7 +1078,7 @@ const resolveStorageAppendPosition = async (
 };
 
 const collectPendingStorageNodes = (env: RuntimeReplica) => {
-  const state = env.runtimeState ?? {};
+  const state = env.infrastructure ?? {};
   const boardNodes =
     state.pendingCertifiedBoardNodes instanceof Map
       ? state.pendingCertifiedBoardNodes

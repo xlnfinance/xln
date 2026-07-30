@@ -114,8 +114,8 @@ describe('J submit crash recovery', () => {
       submitAttempts: 1,
       entityNonce: 1,
     });
-    expect(afterAttempt.runtimeState?.pendingCommittedJOutbox).toHaveLength(1);
-    const sealedAttempt = afterAttempt.runtimeState?.pendingCommittedJOutbox?.[0]?.jTxs[0];
+    expect(afterAttempt.infrastructure?.pendingCommittedJOutbox).toHaveLength(1);
+    const sealedAttempt = afterAttempt.infrastructure?.pendingCommittedJOutbox?.[0]?.jTxs[0];
     if (sealedAttempt?.type !== 'batch') {
       throw new Error('real terminal rejection sealed batch attempt missing');
     }
@@ -142,7 +142,7 @@ describe('J submit crash recovery', () => {
     beforeIo.quietRuntimeLogs = true;
     beforeIo.state.jReplicas.get(jurisdiction.name)!.jadapter = jadapter;
     const consensusHashBeforeResult = computeCanonicalEntityHash(findReplica(beforeIo, sender.id)).hash;
-    expect(beforeIo.runtimeState?.pendingCommittedJOutbox).toHaveLength(1);
+    expect(beforeIo.infrastructure?.pendingCommittedJOutbox).toHaveLength(1);
 
     await jadapter.stopWatchingAndWait?.();
     jadapter.startWatching(beforeIo);
@@ -169,14 +169,14 @@ describe('J submit crash recovery', () => {
     if (!afterIo) throw new Error('failed to restore after uncommitted J result');
     afterIo.scenarioMode = true;
     afterIo.quietRuntimeLogs = true;
-    expect(afterIo.runtimeState?.pendingCommittedJOutbox).toHaveLength(1);
+    expect(afterIo.infrastructure?.pendingCommittedJOutbox).toHaveLength(1);
     expect(findReplica(afterIo, sender.id).jSubmitState?.terminalFailure).toBeUndefined();
     expect(findReplica(afterIo, sender.id).state.jBatchState?.entityNonce).toBe(1);
     expect(findReplica(afterIo, sender.id).state.jBatchState?.sentBatch).toBeUndefined();
     afterIo.state.jReplicas.get(jurisdiction.name)!.jadapter = jadapter;
     await processRuntime(afterIo, []);
     await processRuntime(afterIo, []);
-    expect(afterIo.runtimeState?.pendingCommittedJOutbox ?? []).toEqual([]);
+    expect(afterIo.infrastructure?.pendingCommittedJOutbox ?? []).toEqual([]);
     expect(findReplica(afterIo, sender.id).state.jBatchState?.sentBatch).toBeUndefined();
     const consensusHashAfterReconcile = computeCanonicalEntityHash(findReplica(afterIo, sender.id)).hash;
     expect(consensusHashAfterReconcile).toBe(
@@ -193,7 +193,7 @@ describe('J submit crash recovery', () => {
       expect(finalReplica.jSubmitState?.lastResultOutcome).toBeUndefined();
       expect(finalReplica.jSubmitState?.terminalFailure).toBeUndefined();
       expect(finalReplica.state.jBatchState?.sentBatch).toBeUndefined();
-      expect(afterResult.runtimeState?.pendingCommittedJOutbox ?? []).toEqual([]);
+      expect(afterResult.infrastructure?.pendingCommittedJOutbox ?? []).toEqual([]);
       expect(computeCanonicalEntityHash(finalReplica).hash).toBe(consensusHashAfterReconcile);
     } finally {
       await closeRuntimeDb(afterResult);
@@ -238,7 +238,7 @@ describe('J submit crash recovery', () => {
           (candidate.state.jBatchState?.batch.reserveToReserve.length ?? 0) > 0
         ));
         if (!replica) throw new Error(`restored J-submit sender missing at ${boundary}`);
-        const pending = restored.runtimeState?.pendingCommittedJOutbox ?? [];
+        const pending = restored.infrastructure?.pendingCommittedJOutbox ?? [];
         if (boundary === 'before-intent') {
           expect(replica.state.jBatchState?.status).toBe('accumulating');
           expect(replica.state.jBatchState?.sentBatch).toBeUndefined();

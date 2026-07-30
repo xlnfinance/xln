@@ -156,13 +156,13 @@ test('relocation clear drains pending profile writes before deleting durable gos
       wsUrl: 'ws://127.0.0.1:19711/ws',
       relays: ['ws://127.0.0.1:19704/relay'],
     });
-    expect(env.runtimeState?.infraDbPendingWrites?.size).toBe(1);
+    expect(env.infrastructure?.infraDbPendingWrites?.size).toBe(1);
 
     const clearing = clearGossip(env);
     expect(clearing).toBeInstanceOf(Promise);
     await clearing;
     expect(env.gossip.getProfiles()).toHaveLength(0);
-    expect(env.runtimeState?.infraDbPendingWrites?.size ?? 0).toBe(0);
+    expect(env.infrastructure?.infraDbPendingWrites?.size ?? 0).toBe(0);
     await closeInfraDb(env);
 
     probe = createEmptyEnv(seed);

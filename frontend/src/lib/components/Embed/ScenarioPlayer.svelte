@@ -332,7 +332,7 @@
         enabled: false,
       },
     };
-    if (env.runtimeState) env.runtimeState.persistencePaused = true;
+    if (env.infrastructure) env.infrastructure.persistencePaused = true;
     return env;
   }
 
@@ -350,13 +350,13 @@
       }
     }
     try {
-      env.runtimeState?.stopLoop?.();
+      env.infrastructure?.stopLoop?.();
     } catch (error) {
       diagnostics.push(`${label}: failed to stop runtime loop: ${formatErrorMessage(error)}`);
     }
-    if (env.runtimeState) {
-      env.runtimeState.loopActive = false;
-      env.runtimeState.stopLoop = null;
+    if (env.infrastructure) {
+      env.infrastructure.loopActive = false;
+      env.infrastructure.stopLoop = null;
     }
     return diagnostics;
   }

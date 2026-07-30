@@ -124,7 +124,7 @@ export const createLocalDeliveryHandler = (
         );
         for (const receipt of result.receipts) {
           const delivery =
-            env.runtimeState?.p2p?.enqueueReliableReceiptDelivery(from, receipt);
+            env.infrastructure?.p2p?.enqueueReliableReceiptDelivery(from, receipt);
           if (!delivery || !isDeliveryDelivered(delivery)) {
             throw new Error(
               `RELIABLE_RECEIPT_SEND_DEFERRED:${delivery?.code ?? 'P2P_UNAVAILABLE'}`,

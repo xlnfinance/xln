@@ -40,7 +40,7 @@ type PollRequest = {
 };
 
 const isIngressPaused = (env: RuntimeReplica): boolean =>
-  !!env.runtimeState?.persistenceQuiescing && !env.scenarioMode;
+  !!env.infrastructure?.persistenceQuiescing && !env.scenarioMode;
 
 const pauseForQuiesce = (
   request: PollRequest,

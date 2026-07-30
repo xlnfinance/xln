@@ -87,11 +87,11 @@ const heapPop = (heap: DeadlineEntry[]): DeadlineEntry | undefined => {
 };
 
 const getIndex = (env: RuntimeReplica): DeadlineIndex => {
-  if (!env.runtimeState) env.runtimeState = {};
-  let index = env.runtimeState.scheduledWakeIndex;
+  if (!env.infrastructure) env.infrastructure = {};
+  let index = env.infrastructure.scheduledWakeIndex;
   if (!index) {
     index = { heap: [], generations: new Map(), replicas: new Map(), initialized: false };
-    env.runtimeState.scheduledWakeIndex = index;
+    env.infrastructure.scheduledWakeIndex = index;
   }
   return index;
 };
@@ -294,5 +294,5 @@ export const assertScheduledWakeTxAuthorized = (tx: EntityTx, replay: boolean): 
 };
 
 export const deleteScheduledWakeIndex = (env: RuntimeReplica): void => {
-  if (env.runtimeState) delete env.runtimeState.scheduledWakeIndex;
+  if (env.infrastructure) delete env.infrastructure.scheduledWakeIndex;
 };

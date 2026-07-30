@@ -313,8 +313,8 @@ async function startBrainvaultWallet(page: Page, expectedProfileName: string): P
         pendingOutputs: (env?.pendingOutputs ?? []).length,
         networkInbox: (env?.networkInbox ?? []).length,
         pendingNetworkOutputs: (env?.pendingNetworkOutputs ?? []).length,
-        pendingCommittedJOutbox: env?.runtimeState?.pendingCommittedJOutbox?.length ?? 0,
-        pendingJurisdictionImports: env?.runtimeState?.pendingJurisdictionImports?.size ?? 0,
+        pendingCommittedJOutbox: env?.infrastructure?.pendingCommittedJOutbox?.length ?? 0,
+        pendingJurisdictionImports: env?.infrastructure?.pendingJurisdictionImports?.size ?? 0,
         replicas: Array.from(env?.eReplicas?.entries?.() ?? []).map(([key, replica]: [string, any]) => ({
           key,
           height: replica?.state?.height,

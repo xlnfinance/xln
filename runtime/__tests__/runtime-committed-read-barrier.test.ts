@@ -10,13 +10,13 @@ import {
 describe('runtime committed read barrier', () => {
   test('installs the shared barrier before the first reader on a fresh Runtime', async () => {
     const env = createEmptyEnv('fresh read barrier');
-    env.runtimeState = undefined;
+    env.infrastructure = undefined;
 
     const releaseReader = await acquireRuntimeCommittedRead(env);
-    expect(env.runtimeState?.activeCommittedReaders).toBe(1);
+    expect(env.infrastructure?.activeCommittedReaders).toBe(1);
 
     let writerEntered = false;
-    const writer = acquireRuntimeFrameWriter(env.runtimeState!).then(release => {
+    const writer = acquireRuntimeFrameWriter(env.infrastructure!).then(release => {
       writerEntered = true;
       return release;
     });
@@ -34,7 +34,7 @@ describe('runtime committed read barrier', () => {
     const firstRelease = await acquireRuntimeCommittedRead(env);
     const secondRelease = await acquireRuntimeCommittedRead(env);
     let writerEntered = false;
-    const writer = acquireRuntimeFrameWriter(env.runtimeState!).then(release => {
+    const writer = acquireRuntimeFrameWriter(env.infrastructure!).then(release => {
       writerEntered = true;
       return release;
     });
@@ -53,7 +53,7 @@ describe('runtime committed read barrier', () => {
 
   test('reader waits for the active writer and then sees committed state', async () => {
     const env = createEmptyEnv('writer blocks read barrier');
-    const releaseWriter = await acquireRuntimeFrameWriter(env.runtimeState!);
+    const releaseWriter = await acquireRuntimeFrameWriter(env.infrastructure!);
     let readerEntered = false;
     const reader = acquireRuntimeCommittedRead(env).then(release => {
       readerEntered = true;
@@ -75,11 +75,11 @@ describe('runtime committed read barrier', () => {
     const env = createEmptyEnv('reader drain serializes queued writers');
     const releaseReader = await acquireRuntimeCommittedRead(env);
     const entries: string[] = [];
-    const firstWriter = acquireRuntimeFrameWriter(env.runtimeState!).then(release => {
+    const firstWriter = acquireRuntimeFrameWriter(env.infrastructure!).then(release => {
       entries.push('first');
       return release;
     });
-    const secondWriter = acquireRuntimeFrameWriter(env.runtimeState!).then(release => {
+    const secondWriter = acquireRuntimeFrameWriter(env.infrastructure!).then(release => {
       entries.push('second');
       return release;
     });
@@ -97,8 +97,8 @@ describe('runtime committed read barrier', () => {
 
   test('mutated undurable state stays unreadable after a halted writer releases', async () => {
     const env = createEmptyEnv('read barrier rejects damaged state');
-    const releaseWriter = await acquireRuntimeFrameWriter(env.runtimeState!);
-    env.runtimeState!.stateMutationInFlight = true;
+    const releaseWriter = await acquireRuntimeFrameWriter(env.infrastructure!);
+    env.infrastructure!.stateMutationInFlight = true;
     releaseWriter();
 
     await expect(acquireRuntimeCommittedRead(env)).rejects.toThrow(
@@ -112,7 +112,7 @@ describe('runtime committed read barrier', () => {
       throw new Error('READ_PROJECTION_FAILED');
     })).rejects.toThrow('READ_PROJECTION_FAILED');
 
-    const releaseWriter = await acquireRuntimeFrameWriter(env.runtimeState!);
+    const releaseWriter = await acquireRuntimeFrameWriter(env.infrastructure!);
     releaseWriter();
   });
 });

@@ -203,7 +203,7 @@ const buildBootstrapStallCapsule = ({
     currentCheckpoint,
     health: summarizedHealth,
     backlog: getMarketMakerRuntimeBacklogSnapshot(env, { includeQueuedEntityInputs: true }),
-    activeProcess: env.runtimeState?.processingPromise
+    activeProcess: env.infrastructure?.processingPromise
       ? {
           enteredAt: env.lastProcessEnteredAt,
           progressAt: env.activeProcessProgressAt,
@@ -292,7 +292,7 @@ const buildNodeBootstrapCausalCheckpoint = (
   env: RuntimeReplica,
   contexts: readonly MarketMakerEntityContext[],
 ): Record<string, unknown> => {
-  const state = env.runtimeState;
+  const state = env.infrastructure;
   return {
     quiescence: summarizeRuntimeQuiescence(env),
     pendingReliable: (env.pendingNetworkOutputs ?? [])
@@ -452,9 +452,9 @@ const buildMarketMakerAccountStatusDebug = (
     runtime: {
       height: Number(env.state.height ?? 0),
       timestamp: Number(env.state.timestamp ?? 0),
-      halted: Boolean(env.runtimeState?.halted),
-      fatalDebugPayload: env.runtimeState?.fatalDebugPayload ?? null,
-      loopActive: Boolean(env.runtimeState?.loopActive),
+      halted: Boolean(env.infrastructure?.halted),
+      fatalDebugPayload: env.infrastructure?.fatalDebugPayload ?? null,
+      loopActive: Boolean(env.infrastructure?.loopActive),
       backlog: getMarketMakerRuntimeBacklogSnapshot(env, { includeQueuedEntityInputs: true }),
       runtimeMempool: summarizeRuntimeInputs(env.runtimeMempool?.entityInputs),
     },
@@ -583,7 +583,7 @@ const resolveMarketMakerHealthForResponse = (input: MarketMakerHealthProjection)
 
 const buildMarketMakerHealthResponseJson = (input: MarketMakerHealthProjection): string => {
   const marketMakerHealth = resolveMarketMakerHealthForResponse(input);
-  const runtimeHalted = input.env.runtimeState?.halted === true;
+  const runtimeHalted = input.env.infrastructure?.halted === true;
   const gossipReady = input.visibleHubs.length === input.expectedHubCount;
   const readiness = deriveMarketMakerChildReadiness({
     runtimeHalted,
@@ -605,8 +605,8 @@ const buildMarketMakerHealthResponseJson = (input: MarketMakerHealthProjection):
     startupPhase: input.startupPhase,
     runtime: {
       halted: runtimeHalted,
-      lifecyclePhase: input.env.runtimeState?.lifecyclePhase ?? null,
-      fatalDebugPayload: input.env.runtimeState?.fatalDebugPayload ?? null,
+      lifecyclePhase: input.env.infrastructure?.lifecyclePhase ?? null,
+      fatalDebugPayload: input.env.infrastructure?.fatalDebugPayload ?? null,
     },
     p2p: {
       directPeers: getP2PState(input.env).directPeers || [],
@@ -1395,7 +1395,7 @@ const createBootstrapProgressMonitor = (deps: BootstrapProgressMonitorDeps) => {
       workStartedAt,
       active,
       now,
-      deps.env.runtimeState?.processingPromise
+      deps.env.infrastructure?.processingPromise
         ? Math.max(deps.env.lastProcessEnteredAt ?? 0, deps.env.activeProcessProgressAt ?? 0)
         : undefined,
     );
@@ -2108,12 +2108,12 @@ const startMarketMakerServices = async (context: MarketMakerNodeContext): Promis
       handleInboundReliableReceipt(env, from, receipt);
     },
   });
-  env.runtimeState = env.runtimeState ?? {};
+  env.infrastructure = env.infrastructure ?? {};
   // Direct dispatch is process infrastructure. It is deliberately installed
   // outside every Runtime frame and excluded from canonical state roots.
-  env.runtimeState.directEntityInputsDispatch = (targetRuntimeId, envelope, ingressTimestamp) =>
+  env.infrastructure.directEntityInputsDispatch = (targetRuntimeId, envelope, ingressTimestamp) =>
     directRuntimeWs.sendEntityInputsDelivery(targetRuntimeId, envelope, ingressTimestamp);
-  env.runtimeState.directReliableReceiptDispatch = (targetRuntimeId, receipt) =>
+  env.infrastructure.directReliableReceiptDispatch = (targetRuntimeId, receipt) =>
     directRuntimeWs.sendReliableReceiptDelivery(targetRuntimeId, receipt);
   const handleRuntimeAdapterWsMessage = createMarketMakerRuntimeAdapterHandler({
     env,

@@ -773,11 +773,11 @@ async function completeProfileOnboardingIfVisible(page: Page, label: string): Pr
             output: inputSummary({ entityInputs: [entry?.output ?? entry] }),
           })),
           reliable: {
-            ingressPending: env?.runtimeState?.pendingReliableIngress?.size ?? 0,
-            ingressActive: env?.runtimeState?.reliableIngressReceiptLedger?.size ?? 0,
-            ingressTerminal: env?.runtimeState?.reliableIngressTerminalWatermarks?.size ?? 0,
-            senderActive: env?.runtimeState?.receivedReliableReceiptLedger?.size ?? 0,
-            senderTerminal: env?.runtimeState?.receivedReliableTerminalWatermarks?.size ?? 0,
+            ingressPending: env?.infrastructure?.pendingReliableIngress?.size ?? 0,
+            ingressActive: env?.infrastructure?.reliableIngressReceiptLedger?.size ?? 0,
+            ingressTerminal: env?.infrastructure?.reliableIngressTerminalWatermarks?.size ?? 0,
+            senderActive: env?.infrastructure?.receivedReliableReceiptLedger?.size ?? 0,
+            senderTerminal: env?.infrastructure?.receivedReliableTerminalWatermarks?.size ?? 0,
           },
           replicas: Array.from(env?.eReplicas?.entries?.() ?? []).map(([key, replica]: [string, any]) => ({
             key,
@@ -822,7 +822,7 @@ async function ensureRuntimeOnline(page: Page, tag: string): Promise<void> {
       return await page.evaluate(() => {
         const env = (window as typeof window & {
           isolatedEnv?: {
-            runtimeState?: {
+            infrastructure?: {
               p2p?: {
                 isConnected?: () => boolean;
                 connect?: () => void;
@@ -831,7 +831,7 @@ async function ensureRuntimeOnline(page: Page, tag: string): Promise<void> {
             };
           };
         }).isolatedEnv;
-        const p2p = env?.runtimeState?.p2p;
+        const p2p = env?.infrastructure?.p2p;
         if (!env || !p2p) return false;
         if (typeof p2p.isConnected === 'function' && p2p.isConnected()) return true;
         const start = typeof p2p.connect === 'function' ? p2p.connect : p2p.reconnect;

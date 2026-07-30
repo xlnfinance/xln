@@ -83,7 +83,7 @@ export function setScenarioStorageEnabled(env: RuntimeReplica, enabled: boolean)
       enabled,
     },
   };
-  if (env.runtimeState) env.runtimeState.persistencePaused = !enabled;
+  if (env.infrastructure) env.infrastructure.persistencePaused = !enabled;
   if (!enabled) env.gossip = createGossipLayer();
 }
 
@@ -124,7 +124,7 @@ export const advanceScenarioTime = (env: RuntimeReplica, stepMs?: number, force:
 export const advanceScenarioToNextNetworkRetry = (env: RuntimeReplica): number | null => {
   const pending = env.pendingNetworkOutputs ?? [];
   if (pending.length === 0) return null;
-  const retryMeta = env.runtimeState?.deferredNetworkMeta;
+  const retryMeta = env.infrastructure?.deferredNetworkMeta;
   if (!retryMeta) return null;
 
   let nextRetryAt = Infinity;

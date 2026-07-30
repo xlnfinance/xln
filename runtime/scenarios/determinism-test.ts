@@ -512,7 +512,7 @@ const runScenarioOnce = async (
         enabled: false,
       },
     };
-    if (env.runtimeState) env.runtimeState.persistencePaused = true;
+    if (env.infrastructure) env.infrastructure.persistencePaused = true;
 
     const run = await scenario.load() as (targetEnv: RuntimeReplica) => Promise<RuntimeReplica | void>;
     const returnedEnv = await run(env);

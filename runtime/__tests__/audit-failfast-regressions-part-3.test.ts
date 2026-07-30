@@ -864,7 +864,7 @@ describe('audit fail-fast regressions', () => {
     });
     expect(applied.outcome).toEqual({ kind: 'committed' });
     expect(applied.newState.lastFinalizedJHeight).toBe(rangeData.scannedThroughHeight);
-    expect(env.runtimeState?.currentStorageOverlayMarks ?? []).toEqual([]);
+    expect(env.infrastructure?.currentStorageOverlayMarks ?? []).toEqual([]);
     expect(
       applied.storageChanges.some(
         record =>
@@ -2380,8 +2380,8 @@ describe('audit fail-fast regressions', () => {
     env.scenarioMode = true;
     env.quietRuntimeLogs = true;
     env.runtimeId = `0x${'51'.repeat(20)}`;
-    env.runtimeState ??= {};
-    env.runtimeState.entityRuntimeHints = new Map();
+    env.infrastructure ??= {};
+    env.infrastructure.entityRuntimeHints = new Map();
     const replica = makeReplicaMissingPrevFrameHash();
     const queuedTx: EntityTx = { type: 'chatMessage', data: { message: 'full' } };
     replica.mempool = Array.from({ length: LIMITS.MEMPOOL_SIZE }, () => queuedTx);
@@ -2407,7 +2407,7 @@ describe('audit fail-fast regressions', () => {
       {
         isReplay: false,
         routingDeps: {
-          ensureRuntimeState: targetEnv => targetEnv.runtimeState!,
+          ensureRuntimeState: targetEnv => targetEnv.infrastructure!,
           enqueueRuntimeInputs: () => {},
           extractEntityId: replicaKey => replicaKey.split(':')[0] ?? '',
           hasLocalSignerForEntity: () => true,
@@ -2419,7 +2419,7 @@ describe('audit fail-fast regressions', () => {
     );
 
     expect(result.appliedEntityInputs).toEqual([]);
-    expect(env.runtimeState.entityRuntimeHints.has(remoteEntityId)).toBe(false);
+    expect(env.infrastructure.entityRuntimeHints.has(remoteEntityId)).toBe(false);
   });
 
   test('entity commit catch-up derives committed state only from local replay', async () => {

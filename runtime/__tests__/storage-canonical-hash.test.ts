@@ -219,7 +219,7 @@ test('per-frame post-state hash commits replayed state and frame coordinates', (
     height: 7,
     timestamp: 1234,
     replicaMetaDigest: `0x${'22'.repeat(32)}`,
-    runtimeMachine: { runtimeState: { pendingCommittedJOutbox: new Map([['a', 1]]) } },
+    runtimeMachine: { infrastructure: { pendingCommittedJOutbox: new Map([['a', 1]]) } },
   };
   const hash = computeStoragePostStateHash(base);
 
@@ -231,27 +231,27 @@ test('per-frame post-state hash commits replayed state and frame coordinates', (
   })).not.toBe(hash);
   expect(computeStoragePostStateHash({
     ...base,
-    runtimeMachine: { runtimeState: { pendingCommittedJOutbox: new Map([['a', 2]]) } },
+    runtimeMachine: { infrastructure: { pendingCommittedJOutbox: new Map([['a', 2]]) } },
   })).not.toBe(hash);
 });
 
 test('replay oracle excludes local operator config and active J-adapter selector', () => {
-  const runtimeState = { pendingCommittedJOutbox: new Map([['a', 1]]) };
+  const infrastructure = { pendingCommittedJOutbox: new Map([['a', 1]]) };
   const left = projectReplayVerifiableRuntimeMachine({
     runtimeId: 'runtime-a',
     activeJurisdiction: 'Testnet',
     runtimeConfig: { storage: { snapshotPeriodFrames: 2 } },
-    runtimeState,
+    infrastructure,
   });
   const right = projectReplayVerifiableRuntimeMachine({
     runtimeId: 'runtime-a',
     activeJurisdiction: 'Tron',
     runtimeConfig: { storage: { snapshotPeriodFrames: 200 } },
-    runtimeState,
+    infrastructure,
   });
 
   expect(left).toEqual(right);
-  expect(left).toEqual({ runtimeId: 'runtime-a', runtimeState });
+  expect(left).toEqual({ runtimeId: 'runtime-a', infrastructure });
 });
 
 test('replay oracle canonicalizes empty optional Runtime input queues', () => {
@@ -288,8 +288,8 @@ test('replay oracle excludes process-local Runtime lifecycle failures', () => {
     },
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
   } as unknown as RuntimeReplica;
-  const running = { ...base, runtimeState: { halted: false } } as RuntimeReplica;
-  const halted = { ...base, runtimeState: { halted: true } } as RuntimeReplica;
+  const running = { ...base, infrastructure: { halted: false } } as RuntimeReplica;
+  const halted = { ...base, infrastructure: { halted: true } } as RuntimeReplica;
 
   expect(buildReplayVerifiableRuntimeMachineSnapshot(running))
     .toEqual(buildReplayVerifiableRuntimeMachineSnapshot(base));

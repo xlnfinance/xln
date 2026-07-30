@@ -364,7 +364,7 @@ export type RuntimeEntityInputRoutingResult = {
 };
 
 export type RuntimeOutputRoutingDeps = {
-  ensureRuntimeState(env: RuntimeReplica): NonNullable<RuntimeReplica['runtimeState']>;
+  ensureRuntimeState(env: RuntimeReplica): NonNullable<RuntimeReplica['infrastructure']>;
   getP2P(env: RuntimeReplica): RuntimeP2PDispatch | null;
   enqueueRuntimeInputs(
     env: RuntimeReplica,
@@ -384,7 +384,7 @@ export type RuntimeOutputRoutingDeps = {
 const getDeferredNetworkMeta = (
   env: RuntimeReplica,
   deps: RuntimeOutputRoutingDeps,
-): NonNullable<NonNullable<RuntimeReplica['runtimeState']>['deferredNetworkMeta']> => {
+): NonNullable<NonNullable<RuntimeReplica['infrastructure']>['deferredNetworkMeta']> => {
   const state = deps.ensureRuntimeState(env);
   if (!state.deferredNetworkMeta) {
     state.deferredNetworkMeta = new Map();
@@ -820,12 +820,12 @@ export const pruneReceiptedReliableOutputs = (
       );
     if (!committedProposalCohort) return unit.outputs;
     for (const output of unit.outputs) {
-      env.runtimeState?.deferredNetworkMeta?.delete(buildRouteOutputKey(output));
+      env.infrastructure?.deferredNetworkMeta?.delete(buildRouteOutputKey(output));
     }
     return [];
   });
-  const active = env.runtimeState?.receivedReliableReceiptLedger;
-  const terminal = env.runtimeState?.receivedReliableTerminalWatermarks;
+  const active = env.infrastructure?.receivedReliableReceiptLedger;
+  const terminal = env.infrastructure?.receivedReliableTerminalWatermarks;
   if ((!active || active.size === 0) && (!terminal || terminal.size === 0)) {
     return uncommittedOutputs;
   }
@@ -854,7 +854,7 @@ export const pruneReceiptedReliableOutputs = (
     const reliableOutputs = unit.outputs.filter(output => getReliableOutputIdentity(output) !== null);
     if (unit.atomic && reliableOutputs.length > 0 && reliableOutputs.every(isReceipted)) {
       for (const output of unit.outputs) {
-        env.runtimeState?.deferredNetworkMeta?.delete(buildRouteOutputKey(output));
+        env.infrastructure?.deferredNetworkMeta?.delete(buildRouteOutputKey(output));
       }
       continue;
     }
@@ -863,7 +863,7 @@ export const pruneReceiptedReliableOutputs = (
         retained.push(output);
         continue;
       }
-      env.runtimeState?.deferredNetworkMeta?.delete(buildRouteOutputKey(output));
+      env.infrastructure?.deferredNetworkMeta?.delete(buildRouteOutputKey(output));
     }
   }
   return retained;
