@@ -1556,41 +1556,6 @@ function hasReplicaAccount(candidate: EntityReplica | null | undefined, counterp
   if (!candidate || !counterparty) return false;
   return candidate.state?.accounts instanceof Map && candidate.state.accounts.has(counterparty);
 }
-async function waitForCrossTargetCapacity(
-  targetEntityId: string,
-  targetHubEntityId: string,
-  tokenIdValue: number,
-  requiredInboundAmount: bigint,
-  timeoutMs = 20_000,
-): Promise<void> {
-  const startedAt = performance.now();
-  let lastReason = 'target account is not projected';
-  while (performance.now() - startedAt < timeoutMs) {
-    const targetReplica = findReplicaByEntityId(targetEntityId);
-    const targetAccount = targetReplica?.state?.accounts?.get?.(targetHubEntityId) ?? null;
-    try {
-      const capacityPlan = activeXlnFunctions?.planSwapInboundCapacity({
-        account: targetAccount,
-        ownerEntityId: targetEntityId,
-        counterpartyEntityId: targetHubEntityId,
-        tokenId: tokenIdValue,
-        requiredInboundAmount,
-        allowOpenAccount: false,
-      });
-      if (capacityPlan && capacityPlan.setupTxs.length === 0) return;
-      lastReason = `current=${capacityPlan?.currentInboundCapacity ?? 0n}`;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (!message.startsWith('SWAP_INBOUND_ACCOUNT_MISSING:')) throw error;
-      lastReason = message;
-    }
-    await new Promise<void>((resolve) => setTimeout(resolve, 100));
-  }
-  throw new Error(
-    `SWAP_CROSS_TARGET_SETUP_COMMIT_TIMEOUT:entity=${targetEntityId}:hub=${targetHubEntityId}:` +
-      `token=${tokenIdValue}:required=${requiredInboundAmount}:last=${lastReason}`,
-  );
-}
 function isInboundCapacityValidationError(reason: string): boolean {
   if (!reason) return false;
   return reason.startsWith('Inbound token is not active in this account.') || reason.startsWith('Insufficient inbound capacity');
@@ -2517,10 +2482,16 @@ async function placeSwapOffer() {
       }
       const runtimeSubmitStartedAt = performance.now();
       if (commandPlan.targetSetupInput) {
+        // The command bus resolves only after the setup RuntimeInput reaches
+        // WAL. The Runtime command API then re-checks the target Account from
+        // authoritative committed state before it transports the intent.
+        // Polling a UI projection here was both redundant and wrong: a focused
+        // projection intentionally omits sibling Entity Account details.
         await submitRuntimeInput(commandPlan.targetSetupInput);
-        await waitForCrossTargetCapacity(targetRoute.targetEntityId, targetRoute.targetHubEntityId, wantToken, commandPlan.preparedOrder.effectiveWant);
       }
-      await submitActiveCrossJurisdictionIntent(commandPlan.crossJurisdictionIntent);
+      await submitActiveCrossJurisdictionIntent(commandPlan.crossJurisdictionIntent, {
+        waitForTargetReady: commandPlan.targetSetupInput !== null,
+      });
       performance.measure('xln.cross_j.runtime_submit', {
         start: runtimeSubmitStartedAt,
         end: performance.now(),

@@ -21,7 +21,7 @@ import { getOpenAccountRebalancePolicyData } from "$lib/utils/onboardingPreferen
 import { prewarmCounterpartyProfiles } from "$lib/utils/p2pPrefetch";
 import { requireSignerIdForEntity } from "$lib/utils/entityReplica";
 import { registerDebugSurface } from "$lib/utils/debugSurface";
-import { getEntityDisplayName, resolveEntityName } from "$lib/utils/entityNaming";
+import { getEntityDisplayName, getGossipProfiles, resolveEntityName } from "$lib/utils/entityNaming";
 import { entityAvatar } from "$lib/utils/avatar";
 import { getJurisdictionBadgeInfo } from "$lib/utils/jurisdictionBadge";
 import { formatEntityId } from "$lib/utils/format";
@@ -694,6 +694,7 @@ $: paymentView = displayProjectionFrame
     });
 $: swapRuntimeView = buildSwapPanelRuntimeView({
   profiles: panelProfiles,
+  networkProfiles: getGossipProfiles(actionRuntimeEnv),
   entityNames: panelView.entityNames,
   replicas: activeReplicas,
 }) as SwapPanelRuntimeView;

@@ -20,6 +20,7 @@ export type SwapPanelReplicaView = {
 
 export type SwapPanelProjectionSource = {
   profiles?: readonly GossipProfile[] | Map<string, GossipProfile> | null;
+  networkProfiles?: readonly GossipProfile[] | Map<string, GossipProfile> | null;
   entityNames?: Map<string, string> | null;
   replicas?: Map<string, EntityReplica> | readonly EntityReplica[] | null;
 };
@@ -59,16 +60,33 @@ export function normalizeEntityId(value: string): string {
   return String(value || '').trim().toLowerCase();
 }
 
-function readProjectionProfiles(frame: SwapPanelFrame): GossipProfile[] | null {
-  const profiles = (frame as SwapPanelProjectionSource | null | undefined)?.profiles;
+function readProfileCollection(
+  profiles: readonly GossipProfile[] | Map<string, GossipProfile> | null | undefined,
+): GossipProfile[] | null {
   if (profiles instanceof Map) return Array.from(profiles.values());
   if (Array.isArray(profiles)) return [...profiles];
   return null;
 }
 
 function readSwapGossipProfiles(frame: SwapPanelFrame): GossipProfile[] {
-  const projectionProfiles = readProjectionProfiles(frame);
-  if (projectionProfiles !== null) return projectionProfiles;
+  const projection = frame as SwapPanelProjectionSource | null | undefined;
+  const projectionProfiles = readProfileCollection(projection?.profiles);
+  const networkProfiles = readProfileCollection(projection?.networkProfiles);
+  if (projectionProfiles !== null || networkProfiles !== null) {
+    const profilesByEntity = new Map<string, GossipProfile>();
+    for (const profile of projectionProfiles ?? []) {
+      const entityId = normalizeEntityId(profile.entityId);
+      if (entityId) profilesByEntity.set(entityId, profile);
+    }
+    // Financial and consensus data remains the committed projection. Signed
+    // gossip is live transport metadata, so it owns relay endpoints and may
+    // change between Runtime frames without exposing an in-flight candidate.
+    for (const profile of networkProfiles ?? []) {
+      const entityId = normalizeEntityId(profile.entityId);
+      if (entityId) profilesByEntity.set(entityId, profile);
+    }
+    return Array.from(profilesByEntity.values());
+  }
   const source = frame as SwapGossipSource | null | undefined;
   if (!source?.gossip) return [];
   if (typeof source.gossip.getProfiles === 'function') return source.gossip.getProfiles();

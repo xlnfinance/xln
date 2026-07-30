@@ -1710,6 +1710,7 @@ export async function submitRuntimeInput(
 
 export async function submitActiveCrossJurisdictionIntent(
   route: CrossJurisdictionSwapRoute,
+  options: Readonly<{ waitForTargetReady?: boolean }> = {},
 ): Promise<void> {
   assertRuntimeViewIsLive(get(runtimeView));
   assertNetworkMachineIsLive(get(networkMachineRuntime));
@@ -1717,7 +1718,25 @@ export async function submitActiveCrossJurisdictionIntent(
   if (!adapter || adapter.status !== 'connected') {
     throw new Error('CROSS_J_INTENT_RUNTIME_ADAPTER_NOT_CONNECTED');
   }
-  await adapter.submitCrossJurisdictionIntent(route);
+  const deadline = Date.now() + 20_000;
+  while (true) {
+    try {
+      await adapter.submitCrossJurisdictionIntent(route);
+      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!options.waitForTargetReady || !message.startsWith('CROSS_J_TARGET_INBOUND_NOT_READY:')) {
+        throw error;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(`CROSS_J_TARGET_READINESS_TIMEOUT:${message}`, { cause: error });
+      }
+      // Opening an Account is a bilateral proposal/ack exchange. The check
+      // above is side-effect free until that Account is committed, so retrying
+      // it cannot duplicate an intent or observe an in-flight Runtime frame.
+      await sleep(100);
+    }
+  }
 }
 
 export async function submitEntityInputs(inputs: RoutedEntityInput[] = []): Promise<RuntimeReplica | null> {

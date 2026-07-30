@@ -147,6 +147,40 @@ describe('swap panel helpers', () => {
     expect(view.getPairBook(hubId, '1/2')).toBe(book);
   });
 
+  test('uses live signed network profiles for relay routing without replacing committed replicas', () => {
+    const hubId = '0xHubProjection';
+    const committedReplica = {
+      entityId: '0xUserProjection',
+      signerId: '0xSignerProjection',
+      state: {
+        entityId: '0xUserProjection',
+        accounts: new Map(),
+      },
+    };
+    const view = buildSwapPanelRuntimeView({
+      profiles: [
+        {
+          entityId: hubId,
+          name: 'H projection',
+          relays: [],
+          metadata: { isHub: true, jurisdiction: { name: 'Testnet' } },
+        },
+      ],
+      networkProfiles: [
+        {
+          entityId: hubId,
+          name: 'H live',
+          relays: ['ws://127.0.0.1:20262/relay'],
+          metadata: { isHub: true, jurisdiction: { name: 'Testnet' } },
+        },
+      ],
+      replicas: new Map([['0xUserProjection:0xSignerProjection', committedReplica]]),
+    });
+
+    expect(view.getHubProfile(hubId)?.relays).toEqual(['ws://127.0.0.1:20262/relay']);
+    expect(view.localReplicas).toEqual([committedReplica]);
+  });
+
   test('preserves jurisdiction labels and strips repeated suffixes', () => {
     expect(normalizeJurisdictionDisplayName('arrakis')).toBe('arrakis');
     expect(normalizeJurisdictionDisplayName('Arrakis (shared anvil)')).toBe('Arrakis (shared anvil)');
@@ -266,7 +300,8 @@ describe('swap panel helpers', () => {
       expect(text).toContain('activeXlnFunctions.planSwapCommand');
       expect(text).toContain('if (commandPlan.targetSetupInput)');
       expect(text).toContain('await submitRuntimeInput(commandPlan.targetSetupInput)');
-      expect(text).toContain('await submitActiveCrossJurisdictionIntent(commandPlan.crossJurisdictionIntent)');
+      expect(text).toContain('await submitActiveCrossJurisdictionIntent(commandPlan.crossJurisdictionIntent, {');
+      expect(text).toContain('waitForTargetReady: commandPlan.targetSetupInput !== null');
       expect(text).not.toContain('activeXlnFunctions.deriveDelta');
       expect(text).not.toContain('10_000n * 10n ** decimals');
       expect(text).not.toContain('crossCommandEnv');
@@ -292,6 +327,7 @@ describe('swap panel helpers', () => {
     expect(workspace).toContain('runtimeView={swapRuntimeView}');
     expect(tabs).toContain('swapRuntimeView = buildSwapPanelRuntimeView({');
     expect(tabs).toContain('profiles: panelProfiles');
+    expect(tabs).toContain('networkProfiles: getGossipProfiles(actionRuntimeEnv)');
     expect(tabs).toContain('entityNames: panelView.entityNames');
     expect(tabs).toContain('replicas: activeReplicas');
   });
@@ -323,7 +359,8 @@ describe('swap panel helpers', () => {
     expect(placeSlice).toContain('resolveSwapLogicalClock(currentReplica)');
     expect(placeSlice).toContain('activeXlnFunctions.planSwapCommand({');
     expect(placeSlice).toContain('await submitRuntimeInput(commandPlan.targetSetupInput)');
-    expect(placeSlice).toContain('await submitActiveCrossJurisdictionIntent(commandPlan.crossJurisdictionIntent)');
+    expect(placeSlice).toContain('await submitActiveCrossJurisdictionIntent(commandPlan.crossJurisdictionIntent, {');
+    expect(placeSlice).toContain('waitForTargetReady: commandPlan.targetSetupInput !== null');
     expect(placeSlice).toContain('await prewarmCounterpartyProfiles(runtimeEnv, [targetRoute.targetHubEntityId])');
     expect(placeSlice).not.toContain("throw new Error('XLN environment not ready')");
     expect(placeSlice).not.toContain('env.timestamp');
