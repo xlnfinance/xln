@@ -218,11 +218,10 @@ export const rehydrateRestoredRuntimeInfra = async (
     isBrowser: boolean;
     loadGossipProfiles: (env: RuntimeReplica) => Promise<void>;
     assertPersistedContractConfigReady: (env: RuntimeReplica, label: string) => void;
-    setBrowserVMJurisdiction: (
-      env: RuntimeReplica,
+    assertBrowserVMJurisdiction: (
       depositoryAddress: string,
       chainId: number,
-      browserVM?: BrowserVMProvider | null,
+      browserVM: BrowserVMProvider,
     ) => void;
     trustedJurisdictionRpcBindings?: readonly TrustedJurisdictionRpcBinding[];
   },
@@ -254,8 +253,11 @@ export const rehydrateRestoredRuntimeInfra = async (
           throw new Error('RESTORE_MULTIPLE_BROWSERVM_UNSUPPORTED');
         }
         restoredBrowserVM = browserVM;
-        env.browserVM = browserVM;
-        options.setBrowserVMJurisdiction(env, adapter.addresses.depository, adapter.chainId, browserVM);
+        options.assertBrowserVMJurisdiction(
+          adapter.addresses.depository,
+          adapter.chainId,
+          browserVM,
+        );
         if (typeof window !== 'undefined') {
           (window as Window & { __xlnBrowserVM?: BrowserVMProvider | null }).__xlnBrowserVM = browserVM;
         }

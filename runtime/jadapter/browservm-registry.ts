@@ -1,15 +1,6 @@
-import type { RuntimeReplica } from '../runtime/types';
 import type { JurisdictionConfig } from '../entity/types';
 import { requireUsableContractAddress } from '../jurisdiction/contract-address';
 import type { BrowserVMProvider } from './types';
-
-type BrowserVMCarrier = BrowserVMProvider | { browserVM?: BrowserVMProvider | null } | null | undefined;
-
-const unwrapBrowserVM = (value: BrowserVMCarrier): BrowserVMProvider | null => {
-  if (!value || typeof value !== 'object') return null;
-  if ('browserVM' in value) return value.browserVM ?? null;
-  return value as BrowserVMProvider;
-};
 
 export const buildBrowserVMJurisdiction = (
   depositoryAddress: string,
@@ -23,30 +14,23 @@ export const buildBrowserVMJurisdiction = (
   entityProviderAddress,
 });
 
-export const setBrowserVMJurisdiction = (
-  env: RuntimeReplica,
+export const assertBrowserVMJurisdiction = (
   depositoryAddress: string,
   chainId: number,
-  browserVMInstance?: BrowserVMCarrier,
+  browserVM: BrowserVMProvider,
 ): void => {
-  const browserVM = unwrapBrowserVM(browserVMInstance);
   if (!Number.isSafeInteger(chainId) || chainId <= 0) {
     throw new Error(`BROWSERVM_JURISDICTION_CHAIN_ID_INVALID:${String(chainId)}`);
   }
-  const providerChainId = browserVM?.getChainId?.();
+  const providerChainId = browserVM.getChainId?.();
   if (providerChainId !== undefined && BigInt(chainId) !== providerChainId) {
     throw new Error(
       `BROWSERVM_JURISDICTION_CHAIN_ID_MISMATCH:expected=${chainId}:actual=${providerChainId.toString()}`,
     );
   }
-  if (browserVM) env.browserVM = browserVM;
-
   requireUsableContractAddress(
     'entity_provider',
-    browserVM?.getEntityProviderAddress?.() || env.browserVM?.getEntityProviderAddress?.(),
+    browserVM.getEntityProviderAddress?.(),
   );
   requireUsableContractAddress('depository', depositoryAddress);
 };
-
-export const getBrowserVMInstance = (env?: RuntimeReplica | null): BrowserVMProvider | null =>
-  (env?.browserVM as BrowserVMProvider | null | undefined) ?? null;

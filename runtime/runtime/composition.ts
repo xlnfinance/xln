@@ -8,7 +8,7 @@ const RUNTIME_BUILD_ID = '2026-07-18-16:00Z';
 export const RUNTIME_SCHEMA_VERSION = 1;
 export const RUNTIME_BUILD = RUNTIME_BUILD_ID;
 
-import { setBrowserVMJurisdiction } from '../jadapter/browservm-registry';
+import { assertBrowserVMJurisdiction } from '../jadapter/browservm-registry';
 import { attachEventEmitters } from './env-events';
 import type { EntityInput } from '../entity/types';
 import type { RuntimeReplica } from './types';
@@ -258,7 +258,7 @@ export {
   main,
   resolveEntityName,
   searchEntityNames,
-  setBrowserVMJurisdiction,
+  assertBrowserVMJurisdiction,
 };
 
 // Runtime is a pure library - no auto-execution side effects.
@@ -390,7 +390,7 @@ export const loadEnvFromDB = async (
       loadGossipProfiles: targetEnv =>
         loadGossipProfilesFromInfraDb(targetEnv, infraGossipDbAccess),
       assertPersistedContractConfigReady,
-      setBrowserVMJurisdiction,
+      assertBrowserVMJurisdiction,
       ...(trustedJurisdictionRpcBindings ? { trustedJurisdictionRpcBindings } : {}),
     }),
   registerCommittedSingleSignerWallets,

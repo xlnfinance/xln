@@ -434,21 +434,17 @@ const makeIncomingAccountFrame = (
 });
 
 const attachSigningReplica = (env: ReturnType<typeof createEmptyEnv>, entityId: string, signerId: string): void => {
-  const browserDepository = (
-    env.browserVM as { getDepositoryAddress?: () => string } | undefined
-  )?.getDepositoryAddress?.();
   const config = makeSingleSignerConfigFor(signerId);
   const jurisdiction = config.jurisdiction!;
-  const depository = browserDepository ?? jurisdiction.depositoryAddress;
   if (!env.state.jReplicas.has('__audit_test__')) {
     env.state.jReplicas.set('__audit_test__', {
       name: '__audit_test__',
       chainId: jurisdiction.chainId,
       rpcs: [],
-      depositoryAddress: depository,
+      depositoryAddress: jurisdiction.depositoryAddress,
       entityProviderAddress: jurisdiction.entityProviderAddress,
       contracts: {
-        depository,
+        depository: jurisdiction.depositoryAddress,
         entityProvider: jurisdiction.entityProviderAddress,
         account: hex20('98'),
         deltaTransformer: hex20('99'),
@@ -1558,7 +1554,6 @@ describe('audit fail-fast regressions', () => {
     env.scenarioMode = true;
     env.quietRuntimeLogs = true;
     env.state.timestamp = 1_000;
-    env.browserVM = { getDepositoryAddress: () => hex20('dd') } as any;
     const { signerId, entityId: left } = registerLazySigner('account-tx-atomicity', '1');
     attachSigningReplica(env, left, signerId);
     const right = `0x${'ff'.repeat(32)}`;
@@ -1613,7 +1608,6 @@ describe('audit fail-fast regressions', () => {
     env.quietRuntimeLogs = true;
     env.state.timestamp = 1_000;
     const depositoryAddress = hex20('dd');
-    env.browserVM = { getDepositoryAddress: () => depositoryAddress } as any;
     const { signerId, entityId: left } = registerLazySigner('account-frame-timestamp-parity', '1');
     attachSigningReplica(env, left, signerId);
     const right = `0x${'ff'.repeat(32)}`;
@@ -1655,8 +1649,6 @@ describe('audit fail-fast regressions', () => {
     const validatorEnv = createEmptyEnv(seed);
     proposerEnv.state.timestamp = 1_000;
     validatorEnv.state.timestamp = 1_100;
-    proposerEnv.browserVM = { getDepositoryAddress: () => hex20('dd') } as typeof proposerEnv.browserVM;
-    validatorEnv.browserVM = { getDepositoryAddress: () => hex20('dd') } as typeof validatorEnv.browserVM;
     const left = registerLazySigner(seed, '1');
     const right = registerLazySigner(seed, '2');
     attachSigningReplica(proposerEnv, left.entityId, left.signerId);
@@ -1957,9 +1949,6 @@ describe('audit fail-fast regressions', () => {
     const env = createEmptyEnv('swap-resolve-batch-fallback');
     env.state.timestamp = 10_000;
     env.quietRuntimeLogs = true;
-    env.browserVM = {
-      getDepositoryAddress: () => hex20('dd'),
-    } as typeof env.browserVM;
 
     const makerIdentity = registerLazySigner('swap-resolve-batch-fallback', 'maker');
     const hubIdentity = registerLazySigner('swap-resolve-batch-fallback', 'hub');

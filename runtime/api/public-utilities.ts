@@ -16,7 +16,6 @@ export {
 } from '../runtime/registration/numbered-registration';
 export {
   debugFundReserves,
-  getBrowserVMInstance,
   getEntityInfoFromChain,
   submitProcessBatch,
 } from '../jadapter';

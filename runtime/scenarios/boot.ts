@@ -273,7 +273,7 @@ export async function ensureJAdapter(
   options?: { deployStack?: boolean },
 ): Promise<JAdapter> {
   const { createJAdapter } = await import('../jadapter');
-  const { setBrowserVMJurisdiction } = await import('../jadapter');
+  const { assertBrowserVMJurisdiction } = await import('../jadapter');
 
   const actualMode = mode ?? env?.scenarioJAdapterMode ?? getJAdapterMode();
   const rpcUrl = process.env['ANVIL_RPC'] || getDefaultAnvilRpcUrl();
@@ -297,8 +297,11 @@ export async function ensureJAdapter(
   if (actualMode === 'browservm' && env) {
     const browserVM = jadapter.getBrowserVM();
     if (browserVM) {
-      env.browserVM = browserVM;
-      setBrowserVMJurisdiction(env, jadapter.addresses.depository, jadapter.chainId, browserVM);
+      assertBrowserVMJurisdiction(
+        jadapter.addresses.depository,
+        jadapter.chainId,
+        browserVM,
+      );
     }
   }
 

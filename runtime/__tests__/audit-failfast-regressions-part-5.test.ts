@@ -434,21 +434,17 @@ const makeIncomingAccountFrame = (
 });
 
 const attachSigningReplica = (env: ReturnType<typeof createEmptyEnv>, entityId: string, signerId: string): void => {
-  const browserDepository = (
-    env.browserVM as { getDepositoryAddress?: () => string } | undefined
-  )?.getDepositoryAddress?.();
   const config = makeSingleSignerConfigFor(signerId);
   const jurisdiction = config.jurisdiction!;
-  const depository = browserDepository ?? jurisdiction.depositoryAddress;
   if (!env.state.jReplicas.has('__audit_test__')) {
     env.state.jReplicas.set('__audit_test__', {
       name: '__audit_test__',
       chainId: jurisdiction.chainId,
       rpcs: [],
-      depositoryAddress: depository,
+      depositoryAddress: jurisdiction.depositoryAddress,
       entityProviderAddress: jurisdiction.entityProviderAddress,
       contracts: {
-        depository,
+        depository: jurisdiction.depositoryAddress,
         entityProvider: jurisdiction.entityProviderAddress,
         account: hex20('98'),
         deltaTransformer: hex20('99'),
@@ -768,7 +764,6 @@ describe('audit fail-fast regressions', () => {
     const env = createEmptyEnv(seed);
     env.quietRuntimeLogs = true;
     env.state.timestamp = 10_000;
-    env.browserVM = { getDepositoryAddress: () => hex20('dd') } as typeof env.browserVM;
 
     const first = registerLazySigner(seed, '1');
     const second = registerLazySigner(seed, '2');

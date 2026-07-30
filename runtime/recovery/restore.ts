@@ -12,7 +12,7 @@ import {
 } from '../runtime/recovery-infra';
 import { rehydrateRestoredRuntimeInfra } from '../runtime/infra';
 import { runtimeIsBrowser } from '../infra/runtime-process';
-import { setBrowserVMJurisdiction } from '../jadapter/browservm-registry';
+import { assertBrowserVMJurisdiction } from '../jadapter/browservm-registry';
 import { replayPersistedRuntimeJournals } from '../storage/recovery/journal';
 import type { RuntimeReplica, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeTx } from '../runtime/types';
 import type { PersistedFrameJournal } from './../storage/types';
@@ -84,7 +84,7 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
         isBrowser: runtimeIsBrowser,
         loadGossipProfiles: target => loadGossipProfilesFromInfraDb(target, infraGossipDbAccess),
         assertPersistedContractConfigReady,
-        setBrowserVMJurisdiction,
+        assertBrowserVMJurisdiction,
       });
     }
     registerCommittedSingleSignerWallets(env);

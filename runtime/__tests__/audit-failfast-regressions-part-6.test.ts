@@ -434,21 +434,17 @@ const makeIncomingAccountFrame = (
 });
 
 const attachSigningReplica = (env: ReturnType<typeof createEmptyEnv>, entityId: string, signerId: string): void => {
-  const browserDepository = (
-    env.browserVM as { getDepositoryAddress?: () => string } | undefined
-  )?.getDepositoryAddress?.();
   const config = makeSingleSignerConfigFor(signerId);
   const jurisdiction = config.jurisdiction!;
-  const depository = browserDepository ?? jurisdiction.depositoryAddress;
   if (!env.state.jReplicas.has('__audit_test__')) {
     env.state.jReplicas.set('__audit_test__', {
       name: '__audit_test__',
       chainId: jurisdiction.chainId,
       rpcs: [],
-      depositoryAddress: depository,
+      depositoryAddress: jurisdiction.depositoryAddress,
       entityProviderAddress: jurisdiction.entityProviderAddress,
       contracts: {
-        depository,
+        depository: jurisdiction.depositoryAddress,
         entityProvider: jurisdiction.entityProviderAddress,
         account: hex20('98'),
         deltaTransformer: hex20('99'),
@@ -1665,7 +1661,6 @@ describe('audit fail-fast regressions', () => {
   test('disputeStart treats pending cross_pull_close as foldable dispute evidence', async () => {
     const env = createEmptyEnv('prepare-dispute-cross-close-evidence');
     env.state.timestamp = 12_000;
-    env.browserVM = { getDepositoryAddress: () => hex20('dd') } as any;
     const hubSigner = registerLazySigner('prepare-dispute-cross-close-evidence', 'hub');
     const hubId = hubSigner.entityId;
     const userId = `0x${'ab'.repeat(32)}`;

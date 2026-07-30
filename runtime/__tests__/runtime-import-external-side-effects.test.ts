@@ -97,7 +97,6 @@ describe('runtime import external-side-effect atomicity', () => {
     env.quietRuntimeLogs = true;
     env.scenarioMode = true;
     env.state.timestamp = 1_000;
-    const browserVMBefore = env.browserVM;
     const unknownSignerId = `0x${'cd'.repeat(20)}`;
     const unknownEntityId = generateLazyEntityId([unknownSignerId], 1n).toLowerCase();
 
@@ -121,7 +120,7 @@ describe('runtime import external-side-effect atomicity', () => {
     await expect(processRuntime(env)).rejects.toThrow('RUNTIME_ENTITY_INPUT_UNKNOWN_TARGET');
 
     expect(env.state.jReplicas.size).toBe(0);
-    expect(env.browserVM).toBe(browserVMBefore);
+    expect(env.infrastructure?.liveJAdapters).toBeUndefined();
   }, 30_000);
 
   test('BrowserVM import publishes one live adapter only after durable result commit', async () => {
@@ -157,9 +156,10 @@ describe('runtime import external-side-effect atomicity', () => {
       expect(env.state.height).toBe(2);
       expect(env.infrastructure?.pendingJurisdictionImports).toBeUndefined();
       expect(env.runtimeMempool?.runtimeTxs).toHaveLength(0);
-      expect(adapter.getBrowserVM()).toBe(env.browserVM);
+      const browserVM = adapter.getBrowserVM();
+      if (!browserVM) throw new Error('DURABLE_BROWSERVM_PROVIDER_MISSING');
       expect(adapter.isWatching()).toBe(true);
-      expect(env.browserVM?.getDepositoryAddress().toLowerCase())
+      expect(browserVM.getDepositoryAddress().toLowerCase())
         .toBe(adapter.addresses.depository.toLowerCase());
       expect(replica.contracts?.deltaTransformer?.toLowerCase())
         .toBe(adapter.addresses.deltaTransformer.toLowerCase());
@@ -238,7 +238,7 @@ describe('runtime import external-side-effect atomicity', () => {
     const committedAdapter = getLiveJAdapter(restoredIntent, 'Restored BrowserVM');
     if (!committedReplica || !committedAdapter) throw new Error('RESTORED_IMPORT_RESULT_MISSING');
     expect(restoredIntent.state.height).toBe(2);
-    expect(committedAdapter.getBrowserVM()).toBe(restoredIntent.browserVM);
+    expect(committedAdapter.getBrowserVM()).not.toBeNull();
     await committedAdapter.close();
     await closeRuntimeDb(restoredIntent);
     await closeInfraDb(restoredIntent);
@@ -251,7 +251,7 @@ describe('runtime import external-side-effect atomicity', () => {
       if (!replica || !adapter) throw new Error('RESTORED_IMPORT_ADAPTER_MISSING');
       expect(restoredResult.state.height).toBe(2);
       expect(restoredResult.infrastructure?.pendingJurisdictionImports).toBeUndefined();
-      expect(adapter.getBrowserVM()).toBe(restoredResult.browserVM);
+      expect(adapter.getBrowserVM()).not.toBeNull();
       await adapter.close();
     } finally {
       await closeRuntimeDb(restoredResult);

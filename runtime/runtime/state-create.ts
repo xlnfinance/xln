@@ -103,7 +103,6 @@ export const createRuntimeStateApi = (deps: RuntimeStateCreateDeps) => {
       warn: () => {},
       error: () => {},
       emit: () => {},
-      browserVM: null,
     };
 
     attachEventEmitters(env);

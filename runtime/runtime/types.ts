@@ -682,8 +682,8 @@ export interface RuntimeReplica {
   history: EnvSnapshot[];
   gossip: GossipLayer;
 
-  // Isolated BrowserVM instance per runtime (prevents cross-runtime state leakage)
-  browserVM?: import('../jadapter/types').BrowserVMProvider | null; // BrowserVMProvider instance for this runtime (DEPRECATED: use jAdapter)
+  // The BrowserVM's durable image belongs to the replica. Its live provider is
+  // owned exclusively by the process-local JAdapter.
   browserVMState?: BrowserVMState; // Serialized BrowserVM state for time travel
 
   // Active jurisdiction

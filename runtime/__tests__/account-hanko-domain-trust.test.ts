@@ -178,10 +178,6 @@ describe('account Hanko trusted domain boundary', () => {
     const env = createEmptyEnv('account-hanko-missing-domain');
     env.activeJurisdiction = HOSTILE.name;
     env.gossip.announce(hostileProfile());
-    env.browserVM = {
-      getChainId: () => HOSTILE.chainId,
-      getDepositoryAddress: () => HOSTILE.depositoryAddress,
-    } as typeof env.browserVM;
     env.state.jReplicas.set(HOSTILE.name, {
       name: HOSTILE.name,
       chainId: HOSTILE.chainId,

@@ -1,6 +1,6 @@
 import { ethers } from 'ethers';
 import { getLocalSignerPrivateKey } from '../account/crypto';
-import { setBrowserVMJurisdiction } from '../jadapter/browservm-registry';
+import { assertBrowserVMJurisdiction } from '../jadapter/browservm-registry';
 import { findWatcherJurisdictionReplica } from '../jadapter/watcher-replica';
 import { requireDurableJurisdictionStack } from '../jurisdiction/contract-address';
 import type { EntityReplica } from '../entity/types';
@@ -148,8 +148,7 @@ export const reconcileRecoveryInfraEffects = async (
       if (!browserVM) {
         throw new Error(`COMMITTED_BROWSERVM_MISSING:${entry[0]}`);
       }
-      setBrowserVMJurisdiction(
-        env,
+      assertBrowserVMJurisdiction(
         adapter.addresses.depository,
         adapter.chainId,
         browserVM,
