@@ -3,6 +3,7 @@ import { mkdirSync, readdirSync, rmSync, statSync } from 'fs';
 import { basename, dirname, join } from 'path';
 
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
+import { hasCliFlag, readCliOption } from '../config/cli';
 import { deriveAccountWatchSeed } from '../protocol/account-watch-seed';
 import { generateLazyEntityId } from '../entity/factory';
 import {
@@ -59,13 +60,15 @@ type PaymentKind = 'direct' | 'htlc';
 
 const args = globalThis.process.argv.slice(2);
 
-const getArg = (name: string, fallback?: string): string | undefined => {
-  const idx = args.indexOf(name);
-  if (idx === -1) return fallback;
-  return args[idx + 1] || fallback;
-};
+function getArg(name: string): string | undefined;
+function getArg(name: string, fallback: string): string;
+function getArg(name: string, fallback?: string): string | undefined {
+  return fallback === undefined
+    ? readCliOption(args, name)
+    : readCliOption(args, name, fallback);
+}
 
-const hasFlag = (name: string): boolean => args.includes(name);
+const hasFlag = (name: string): boolean => hasCliFlag(args, name);
 
 const parsePositiveInt = (value: string | undefined, fallback: number): number => {
   const parsed = Number.parseInt(String(value ?? ''), 10);

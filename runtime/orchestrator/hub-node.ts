@@ -4,6 +4,7 @@ import { ethers, getIndexedAccountPath, HDNodeWallet, Mnemonic } from 'ethers';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { createExternalWalletApi } from '../api/external-wallet-api';
+import { hasCliFlag, readCliOption } from '../config/cli';
 import { normalizeRuntimeId } from '../networking/runtime-id';
 import { bootstrapHub } from '../../scripts/bootstrap-hub';
 import { defaultTokensForJurisdiction } from '../jurisdiction/default-tokens';
@@ -375,15 +376,10 @@ type JurisdictionImportDiagnostics = {
 
 const argsRaw = process.argv.slice(2);
 
-const getArg = (name: string, fallback = ''): string => {
-  const eq = argsRaw.find(arg => arg.startsWith(`${name}=`));
-  if (eq) return eq.slice(name.length + 1);
-  const index = argsRaw.indexOf(name);
-  if (index === -1) return fallback;
-  return argsRaw[index + 1] || fallback;
-};
+const getArg = (name: string, fallback = ''): string =>
+  readCliOption(argsRaw, name, fallback);
 
-const hasFlag = (name: string): boolean => argsRaw.includes(name);
+const hasFlag = (name: string): boolean => hasCliFlag(argsRaw, name);
 
 const readRpcUrls = (): Record<number, string> => {
   const urls: Record<number, string> = {};

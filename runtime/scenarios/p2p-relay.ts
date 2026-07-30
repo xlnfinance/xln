@@ -14,18 +14,14 @@ import type { JAdapter, JTokenInfo } from '../jadapter/types';
 import { loadJurisdictions } from '../jurisdiction/jurisdiction-loader';
 import { deployMissingDefaultTokens } from '../jurisdiction/dev-token-deployment';
 import type { JReplica } from '../types/jurisdiction-runtime';
+import { hasCliFlag, readCliOption } from '../config/cli';
 
 const args = globalThis.process.argv.slice(2);
-const hasFlag = (name: string) => args.includes(name);
-const getArg = (name: string, fallback?: string): string | undefined => {
-  const idx = args.indexOf(name);
-  if (idx === -1) return fallback;
-  return args[idx + 1] || fallback;
-};
+const hasFlag = (name: string): boolean => hasCliFlag(args, name);
 
 const useRpc = hasFlag('--rpc') || process.env['P2P_RPC'] === '1';
-const rpcUrlOverride = getArg('--rpc-url') || process.env['P2P_RPC_URL'];
-const jurisdictionName = getArg('--jurisdiction', 'arrakis')!;
+const rpcUrlOverride = readCliOption(args, '--rpc-url') || process.env['P2P_RPC_URL'];
+const jurisdictionName = readCliOption(args, '--jurisdiction', 'arrakis');
 const nodeRpcArgs = useRpc
   ? ['--rpc', '--jurisdiction', jurisdictionName, '--skip-wallet-funding', ...(rpcUrlOverride ? ['--rpc-url', rpcUrlOverride] : [])]
   : [];

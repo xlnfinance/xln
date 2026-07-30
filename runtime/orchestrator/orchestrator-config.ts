@@ -1,6 +1,7 @@
 import { join, resolve } from 'node:path';
 import { normalizeLoopbackUrl } from '../networking/loopback-url';
 import { readPositiveIntegerEnv } from '../config/environment';
+import { hasCliFlag, readCliOption } from '../config/cli';
 import type { Args } from './orchestrator-types';
 
 const argsRaw = process.argv.slice(2);
@@ -41,15 +42,10 @@ export const HUB_NAMES = ['H1', 'H2', 'H3'] as const;
 export const HUB_REQUIRED_TOKEN_COUNT = 3;
 const RPC_PROXY_INDEXES = [1, 2, 3, 4, 5, 6, 7, 8] as const;
 
-const getArg = (name: string, fallback = ''): string => {
-  const eq = argsRaw.find(arg => arg.startsWith(`${name}=`));
-  if (eq) return eq.slice(name.length + 1);
-  const index = argsRaw.indexOf(name);
-  if (index === -1) return fallback;
-  return argsRaw[index + 1] || fallback;
-};
+const getArg = (name: string, fallback = ''): string =>
+  readCliOption(argsRaw, name, fallback);
 
-const hasFlag = (name: string): boolean => argsRaw.includes(name);
+const hasFlag = (name: string): boolean => hasCliFlag(argsRaw, name);
 
 const normalizeWsBaseUrl = (raw: string, fallbackHost: string, fallbackPort: number): string => {
   const fallback = `ws://${fallbackHost}:${fallbackPort}`;

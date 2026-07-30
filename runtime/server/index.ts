@@ -14,6 +14,7 @@
  */
 
 import { readPositiveIntegerEnv } from '../config/environment';
+import { readCliOption } from '../config/cli';
 import {
   main,
   enqueueRuntimeInput,
@@ -1469,17 +1470,11 @@ if (import.meta.main) {
   process.once('exit', stopParentWatch);
   const args = process.argv.slice(2);
 
-  const getArg = (name: string, fallback?: string): string | undefined => {
-    const idx = args.indexOf(name);
-    if (idx === -1) return fallback;
-    return args[idx + 1] || fallback;
-  };
-
   const options: Partial<XlnServerOptions> = {
-    port: Number(getArg('--port', '8080')),
-    host: getArg('--host', '127.0.0.1'),
-    staticDir: getArg('--static-dir', './frontend/build'),
-    serverId: getArg('--server-id', 'xln-server'),
+    port: Number(readCliOption(args, '--port', '8080')),
+    host: readCliOption(args, '--host', '127.0.0.1'),
+    staticDir: readCliOption(args, '--static-dir', './frontend/build'),
+    serverId: readCliOption(args, '--server-id', 'xln-server'),
   };
 
   serverLog.info('cli.start', {

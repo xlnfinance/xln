@@ -13,6 +13,7 @@ import {
 } from '../account/utils';
 import { deriveAccountWatchSeed } from '../protocol/account-watch-seed';
 import { LIMITS, SWAP_CONSTANTS } from '../config/constants';
+import { readCliOption } from '../config/cli';
 import { resolveCrossJurisdictionRuntimeTopology } from '../extensions/cross-j/boundary';
 import {
   deriveCanonicalCrossJurisdictionBookOwnerForLegs,
@@ -422,13 +423,8 @@ const MARKET_MAKER_STABLE_LEVEL_BASE_SIZES = [
 ] as const;
 const argsRaw = process.argv.slice(2);
 
-const getArg = (name: string, fallback = ''): string => {
-  const eq = argsRaw.find(arg => arg.startsWith(`${name}=`));
-  if (eq) return eq.slice(name.length + 1);
-  const index = argsRaw.indexOf(name);
-  if (index === -1) return fallback;
-  return argsRaw[index + 1] || fallback;
-};
+const getArg = (name: string, fallback = ''): string =>
+  readCliOption(argsRaw, name, fallback);
 
 const readRpcUrls = (): Record<number, string> => {
   const urls: Record<number, string> = {};

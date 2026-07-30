@@ -10,21 +10,17 @@ import {
   type EnableRoutingConfig,
   type SetupCustodyConfig,
 } from '../orchestrator/daemon-control';
+import { hasCliFlag, readCliOption } from '../config/cli';
 
 const args = process.argv.slice(2);
 const inheritedSecrets = readInheritedChildSecrets();
 
 const command = args[0] || '';
 
-const getArg = (name: string, fallback = ''): string => {
-  const withEquals = args.find(arg => arg.startsWith(`${name}=`));
-  if (withEquals) return withEquals.slice(name.length + 1);
-  const index = args.indexOf(name);
-  if (index === -1) return fallback;
-  return args[index + 1] || fallback;
-};
+const getArg = (name: string, fallback = ''): string =>
+  readCliOption(args, name, fallback);
 
-const hasFlag = (name: string): boolean => args.includes(name);
+const hasFlag = (name: string): boolean => hasCliFlag(args, name);
 
 const parseOptionalNumber = (value: string): number | undefined => {
   if (!value.trim()) return undefined;

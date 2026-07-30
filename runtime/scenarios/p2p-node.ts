@@ -21,26 +21,26 @@ import type { RuntimeState } from '../runtime/types';
 import type { JAdapter, JTokenInfo } from '../jadapter/types';
 import type { Profile } from '../entity/profile';
 import { withDeterministicHtlcTestSecret } from '../protocol/htlc/test-secret-capability';
+import { hasCliFlag, readCliOption } from '../config/cli';
 
 const args = globalThis.process.argv.slice(2);
 
-const getArg = (name: string, fallback?: string): string | undefined => {
-  const idx = args.indexOf(name);
-  if (idx === -1) return fallback;
-  return args[idx + 1] || fallback;
-};
+const getArg = (name: string): string | undefined =>
+  readCliOption(args, name);
+const getArgOr = (name: string, fallback: string): string =>
+  readCliOption(args, name, fallback);
 
-const hasFlag = (name: string): boolean => args.includes(name);
+const hasFlag = (name: string): boolean => hasCliFlag(args, name);
 
-const role = getArg('--role', 'node')!;
-const seed = getArg('--seed', role)!;
-const relayUrl = getArg('--relay-url', 'ws://127.0.0.1:8787')!;
+const role = getArgOr('--role', 'node');
+const seed = getArgOr('--seed', role);
+const relayUrl = getArgOr('--relay-url', 'ws://127.0.0.1:8787');
 const seedRuntimeId = getArg('--seed-runtime-id');
-const relayPort = Number(getArg('--relay-port', '0'));
-const relayHost = getArg('--relay-host', '127.0.0.1')!;
+const relayPort = Number(getArgOr('--relay-port', '0'));
+const relayHost = getArgOr('--relay-host', '127.0.0.1');
 const isHub = hasFlag('--hub');
 const useRpc = hasFlag('--rpc');
-const jurisdictionName = getArg('--jurisdiction', 'arrakis')!;
+const jurisdictionName = getArgOr('--jurisdiction', 'arrakis');
 const rpcUrlOverride = getArg('--rpc-url');
 const skipWalletFunding = hasFlag('--skip-wallet-funding');
 
