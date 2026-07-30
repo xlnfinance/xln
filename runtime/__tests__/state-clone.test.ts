@@ -587,16 +587,21 @@ describe('state cloning', () => {
           createdAt: 1,
         },
       ]]),
+      htlcNotes: new Map([['hashlock:0x01', 'private invoice']]),
     } as any;
 
     const fork = forkEntityReplicaForInput(replica);
     fork.hankoWitness!.clear();
+    fork.htlcNotes!.set('lock:0x02', 'second invoice');
 
     expect(fork).not.toBe(replica);
     expect(fork.state).toBe(replica.state);
     expect(fork.candidate).toBe(replica.candidate);
     expect(fork.mempool).not.toBe(replica.mempool);
     expect(replica.hankoWitness.size).toBe(1);
+    expect(fork.htlcNotes).not.toBe(replica.htlcNotes);
+    expect(replica.htlcNotes.has('lock:0x02')).toBe(false);
+    expect(fork.htlcNotes.get('hashlock:0x01')).toBe('private invoice');
   });
 
   test('clones local Hanko witnesses without losing or aliasing committed proofs', () => {

@@ -1258,7 +1258,7 @@ describe('orderbook matching fallback execution mapping', () => {
     );
     expect(admission?.pendingFill?.ttlExpiredAt).toBe(entityState.timestamp);
     expect(runtimeEnv.infrastructure?.securityIncidents).toBeUndefined();
-    publishEntityCandidateEffects(runtimeEnv, candidateEffects);
+    publishEntityCandidateEffects(runtimeEnv, null, candidateEffects);
     expect([...runtimeEnv.infrastructure!.securityIncidents!.values()]).toContainEqual(
       expect.objectContaining({
         code: 'CROSS_J_BOOK_FILL_TTL_EXPIRED',

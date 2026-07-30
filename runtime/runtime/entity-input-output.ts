@@ -188,7 +188,7 @@ export const collectCommittedEntityResult = (
 ): void => {
   env.state.eReplicas.set(replicaKey, result.nextReplica);
   applyStorageChanges(env, result.nextReplica.state, result.storageChanges);
-  publishEntityCandidateEffects(env, result.candidateEffects);
+  publishEntityCandidateEffects(env, result.nextReplica, result.candidateEffects);
   routeCommittedEntityOutputs(env, result.outputs, context);
   if (result.jOutputs.length === 0) return;
   entityInputLog.debug('j_outputs.collected', {

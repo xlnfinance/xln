@@ -121,6 +121,7 @@ export function applyHtlcTimeoutFollowups(ctx: HtlcFollowupContext, timedOutHash
         eventName: 'HtlcFailed',
         data: {
           hashlock: timedOutHashlock,
+          ...(route.outboundLockId ? { lockId: route.outboundLockId } : {}),
           reason: 'timeout',
           entityId: state.entityId,
         },

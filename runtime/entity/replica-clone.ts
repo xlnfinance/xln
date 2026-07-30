@@ -131,6 +131,9 @@ const cloneEntityReplicaWithPolicy = (
         replica.entityProviderActionSubmitState,
       ),
     }),
+    ...(replica.htlcNotes && {
+      htlcNotes: new Map(replica.htlcNotes),
+    }),
   } as EntityReplica;
 
   if (validateClone) {

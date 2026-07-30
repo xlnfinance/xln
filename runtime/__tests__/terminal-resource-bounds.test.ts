@@ -9,8 +9,8 @@ import {
 } from '../account/tx/handlers/swap-history';
 import { LIMITS } from '../config/constants';
 import {
+  consumeHtlcRuntimeEvent,
   indexCertifiedEntityFrameNotes,
-  pruneEntityReplicaHtlcNotes,
 } from '../entity/htlc/note-index';
 import { terminateHtlcRoute } from '../entity/tx/htlc-route-lifecycle';
 import { applyHtlcTimeoutFollowups } from '../entity/tx/handlers/account/committed-htlc-followups';
@@ -186,7 +186,7 @@ test('swap lifecycle text bounds reject before mutating the projection', () => {
   expect(account.swapOrderHistory?.get(offer.offerId)?.resolves).toHaveLength(0);
 });
 
-test('terminating an HTLC removes both validator-local note lookup keys', () => {
+test('terminal event consumption removes both validator-local note lookup keys', () => {
   const replica = makeReplica();
   const { state } = replica;
   const hashlock = `0x${'99'.repeat(32)}`;
@@ -203,9 +203,13 @@ test('terminating an HTLC removes both validator-local note lookup keys', () => 
   ]);
 
   terminateHtlcRoute(state, hashlock, 2);
-  pruneEntityReplicaHtlcNotes(replica);
-
   expect(state.htlcRoutes).toHaveLength(0);
+  expect(replica.htlcNotes).toHaveLength(2);
+  expect(consumeHtlcRuntimeEvent(replica, 'HtlcFailed', { hashlock, lockId })).toEqual({
+    hashlock,
+    lockId,
+    description: 'coffee',
+  });
   expect(replica.htlcNotes).toBeUndefined();
 });
 
@@ -243,7 +247,7 @@ test('timeout terminal activity is emitted before its HTLC notes are removed', (
 
   expect(candidateEffects.some((effect) => effect.kind === 'runtimeEvent' && effect.eventName === 'HtlcFailed')).toBe(true);
   expect(state.htlcRoutes).toHaveLength(0);
-  publishEntityCandidateEffects(env, candidateEffects);
+  publishEntityCandidateEffects(env, replica, candidateEffects);
   expect(env.frameLogs.find(entry => entry.message === 'HtlcFailed')?.data?.description).toBe('timeout note');
   expect(replica.htlcNotes).toBeUndefined();
 });

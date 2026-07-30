@@ -118,35 +118,37 @@ export const indexCertifiedEntityFrameNotes = (
   else delete replica.htlcNotes;
 };
 
-export const enrichHtlcRuntimeEvent = (
-  replica: EntityReplica,
-  data: Record<string, unknown>,
-): Record<string, unknown> => {
-  if (typeof data['description'] === 'string') return data;
-  const lockId = typeof data['lockId'] === 'string' ? data['lockId'] : null;
-  const hashlock = typeof data['hashlock'] === 'string' ? data['hashlock'] : null;
-  const description =
-    (lockId ? replica.htlcNotes?.get(`lock:${lockId}`) : undefined)
-    ?? (hashlock ? replica.htlcNotes?.get(`hashlock:${hashlock}`) : undefined);
-  return description ? { ...data, description } : data;
-};
+const TERMINAL_HTLC_EVENTS = new Set([
+  'HtlcFailed',
+  'HtlcFinalized',
+  'HtlcReceived',
+]);
 
 /**
- * Terminal routes leave consensus state before their final UI event is
- * published. Pruning therefore runs only after every effect from that frame.
+ * Attach validator-local presentation data to a durable terminal event, then
+ * consume it. Consensus reachability is deliberately not a cleanup signal:
+ * Account settlement may remove the last route before the parent Runtime
+ * publishes the resulting event in a later frame.
  */
-export const pruneEntityReplicaHtlcNotes = (replica: EntityReplica): void => {
+export const consumeHtlcRuntimeEvent = (
+  replica: EntityReplica,
+  eventName: string,
+  data: Record<string, unknown>,
+): Record<string, unknown> => {
+  const lockId = typeof data['lockId'] === 'string' ? data['lockId'] : null;
+  const hashlock = typeof data['hashlock'] === 'string' ? data['hashlock'] : null;
   const notes = replica.htlcNotes;
-  if (!notes?.size) return;
-  const liveKeys = new Set<HtlcNoteKey>();
-  for (const route of replica.state.htlcRoutes.values()) {
-    liveKeys.add(`hashlock:${route.hashlock}`);
-    if (route.inboundLockId) liveKeys.add(`lock:${route.inboundLockId}`);
-    if (route.outboundLockId) liveKeys.add(`lock:${route.outboundLockId}`);
+  const description =
+    typeof data['description'] === 'string'
+      ? data['description']
+      : (lockId ? notes?.get(`lock:${lockId}`) : undefined)
+        ?? (hashlock ? notes?.get(`hashlock:${hashlock}`) : undefined);
+  if (notes && TERMINAL_HTLC_EVENTS.has(eventName)) {
+    if (lockId) notes.delete(`lock:${lockId}`);
+    if (hashlock) notes.delete(`hashlock:${hashlock}`);
+    if (notes.size === 0) delete replica.htlcNotes;
   }
-  for (const lockId of replica.state.lockBook.keys()) liveKeys.add(`lock:${lockId}`);
-  for (const key of notes.keys()) {
-    if (!liveKeys.has(key)) notes.delete(key);
-  }
-  if (notes.size === 0) delete replica.htlcNotes;
+  return description === undefined || typeof data['description'] === 'string'
+    ? data
+    : { ...data, description };
 };

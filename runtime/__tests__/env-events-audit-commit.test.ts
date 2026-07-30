@@ -91,7 +91,7 @@ test('candidate notifications remain inert until commit publication and dedupe b
   };
 
   expect(env.infrastructure?.pendingAuditEvents).toBeUndefined();
-  publishEntityCandidateEffects(env, [effect, effect]);
+  publishEntityCandidateEffects(env, null, [effect, effect]);
   expect(env.infrastructure?.pendingAuditEvents?.size).toBe(1);
   expect(forwarded).toHaveLength(0);
 
@@ -121,9 +121,9 @@ test('candidate Account history is idempotent and conflicting bytes fail fast', 
     frame,
   };
 
-  publishEntityCandidateEffects(env, [effect, effect]);
+  publishEntityCandidateEffects(env, null, [effect, effect]);
   expect(env.infrastructure?.pendingHistoryRecords).toHaveLength(1);
-  expect(() => publishEntityCandidateEffects(env, [{
+  expect(() => publishEntityCandidateEffects(env, null, [{
     ...effect,
     frame: { ...frame, stateHash: '0x03' },
   }])).toThrow('HISTORY_VIEW_ACCOUNT_FRAME_FORK');

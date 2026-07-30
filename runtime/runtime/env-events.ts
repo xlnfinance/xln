@@ -24,9 +24,8 @@ import { storageOverlayRecordKey } from '../protocol/overlay';
 import { invalidateEntityAccountCommitment } from '../entity/consensus/state-root';
 import { refreshAccountWorkIndex } from '../entity/consensus/account-work-index';
 import {
-  enrichHtlcRuntimeEvent,
+  consumeHtlcRuntimeEvent,
   indexCertifiedEntityFrameNotes,
-  pruneEntityReplicaHtlcNotes,
 } from '../entity/htlc/note-index';
 import { recordRuntimeSecurityIncident, resolveRuntimeSecurityIncident } from './security-incidents';
 
@@ -296,23 +295,41 @@ export const recordAccountFrameHistory = (
   applyRuntimeStorageChanges(env, [{ family: 'account', entityId, counterpartyId }]);
 };
 
-export const publishEntityCandidateEffects = (env: RuntimeReplica, effects: readonly EntityCandidateEffect[]): void => {
-  let activeReplica: EntityReplica | null = null;
-  const touchedReplicas = new Set<EntityReplica>();
+export const publishEntityCandidateEffects = (
+  env: RuntimeReplica,
+  sourceReplica: EntityReplica | null,
+  effects: readonly EntityCandidateEffect[],
+): void => {
+  const resolveHistoryReplica = (
+    effect: Extract<EntityCandidateEffect, { kind: 'entityFrameHistory' }>,
+  ): EntityReplica => {
+    if (
+      !sourceReplica
+      || sourceReplica.entityId.toLowerCase() !== effect.entityId.toLowerCase()
+      || sourceReplica.signerId.toLowerCase() !== effect.signerId.toLowerCase()
+    ) {
+      throw new Error(
+        `ENTITY_FRAME_HISTORY_REPLICA_MISSING:entity=${effect.entityId}:signer=${effect.signerId}`,
+      );
+    }
+    return sourceReplica;
+  };
+
+  // Effects from several Entity transitions share one atomic Runtime frame,
+  // but their append order is not a presentation contract. Index every
+  // certified frame before emitting any Runtime event so a terminal HTLC event
+  // can recover its private invoice note even when the matching history effect
+  // appears later in this batch. Reading ingress instead would be unsafe: an
+  // uncommitted request must never become observable metadata.
+  for (const effect of effects) {
+    if (effect.kind !== 'entityFrameHistory') continue;
+    const replica = resolveHistoryReplica(effect);
+    indexCertifiedEntityFrameNotes(replica, effect.link.frame);
+  }
+
   for (const effect of effects) {
     if (effect.kind === 'entityFrameHistory') {
-      activeReplica = Array.from(env.state.eReplicas.values()).find(
-        replica =>
-          replica.entityId.toLowerCase() === effect.entityId.toLowerCase()
-          && replica.signerId.toLowerCase() === effect.signerId.toLowerCase(),
-      ) ?? null;
-      if (!activeReplica) {
-        throw new Error(
-          `ENTITY_FRAME_HISTORY_REPLICA_MISSING:entity=${effect.entityId}:signer=${effect.signerId}`,
-        );
-      }
-      indexCertifiedEntityFrameNotes(activeReplica, effect.link.frame);
-      touchedReplicas.add(activeReplica);
+      resolveHistoryReplica(effect);
       recordEntityFrameHistory(env, effect);
     } else if (effect.kind === 'accountFrameHistory') {
       recordAccountFrameHistory(env, effect);
@@ -321,16 +338,19 @@ export const publishEntityCandidateEffects = (env: RuntimeReplica, effects: read
         typeof effect.data['entityId'] === 'string'
           ? effect.data['entityId'].toLowerCase()
           : null;
-      const eventReplicas = eventEntityId
-        ? Array.from(env.state.eReplicas.values()).filter(
-            replica => replica.entityId.toLowerCase() === eventEntityId,
-          )
-        : [];
-      const eventReplica = activeReplica ?? (eventReplicas.length === 1 ? eventReplicas[0]! : null);
-      if (eventReplica) touchedReplicas.add(eventReplica);
+      // The caller has just applied this exact replica. Never infer event
+      // ownership by scanning siblings: one Runtime may host several validator
+      // replicas for the same Entity, and choosing by entityId would make local
+      // metadata depend on Map cardinality and iteration order.
+      const eventReplica =
+        sourceReplica && (!eventEntityId || sourceReplica.entityId.toLowerCase() === eventEntityId)
+          ? sourceReplica
+          : null;
       env.emit(
         effect.eventName,
-        eventReplica ? enrichHtlcRuntimeEvent(eventReplica, effect.data) : effect.data,
+        eventReplica
+          ? consumeHtlcRuntimeEvent(eventReplica, effect.eventName, effect.data)
+          : effect.data,
       );
     } else if (effect.kind === 'securityIncidentRecord') {
       recordRuntimeSecurityIncident(env, effect.identity);
@@ -340,7 +360,6 @@ export const publishEntityCandidateEffects = (env: RuntimeReplica, effects: read
       queuePendingAuditEvent(env, effect.payload);
     }
   }
-  for (const replica of touchedReplicas) pruneEntityReplicaHtlcNotes(replica);
 };
 
 export const recordEntityFrameHistory = (

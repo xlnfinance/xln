@@ -259,7 +259,7 @@ describe('htlc event contract and dispute tail', () => {
     }, [], env, candidateEffects);
 
     expect(env.frameLogs.filter((entry) => entry.message === 'HtlcReceived')).toHaveLength(0);
-    publishEntityCandidateEffects(env, candidateEffects);
+    publishEntityCandidateEffects(env, replica, candidateEffects);
     expect(env.frameLogs.filter((entry) => entry.message === 'HtlcReceived')).toHaveLength(1);
     expect(env.frameLogs.find((entry) => entry.message === 'HtlcReceived')?.data).toMatchObject({
       entityId,
@@ -270,6 +270,101 @@ describe('htlc event contract and dispute tail', () => {
       amount: '10',
       tokenId: 1,
       description: 'uid:customer-7',
+    });
+  });
+
+  test('uses the exact producing replica when sibling validators host the same Entity', () => {
+    const recipientEntityId = `0x${'22'.repeat(32)}`;
+    const counterpartyId = `0x${'33'.repeat(32)}`;
+    const hashlock = `0x${'44'.repeat(32)}`;
+    const env = createEmptyEnv('multi-validator-event-enrichment');
+    const recipientReplica = makeReplica(recipientEntityId, counterpartyId);
+    const siblingReplica = makeReplica(recipientEntityId, counterpartyId);
+    siblingReplica.signerId = '2';
+    recipientReplica.htlcNotes = new Map([[`hashlock:${hashlock}`, 'uid:recipient-7']]);
+    env.state.eReplicas.set(`${recipientEntityId}:${recipientReplica.signerId}`, recipientReplica);
+    env.state.eReplicas.set(`${recipientEntityId}:${siblingReplica.signerId}`, siblingReplica);
+
+    const effects: EntityCandidateEffect[] = [{
+      kind: 'runtimeEvent',
+      eventName: 'HtlcReceived',
+      data: {
+        entityId: recipientEntityId,
+        hashlock,
+      },
+    }];
+
+    publishEntityCandidateEffects(env, recipientReplica, effects);
+    expect(env.frameLogs.find((entry) => entry.message === 'HtlcReceived')?.data).toMatchObject({
+      entityId: recipientEntityId,
+      hashlock,
+      description: 'uid:recipient-7',
+    });
+  });
+
+  test('indexes every certified Entity frame before publishing Runtime events', () => {
+    const entityId = `0x${'11'.repeat(32)}`;
+    const counterpartyId = `0x${'22'.repeat(32)}`;
+    const hashlock = `0x${'33'.repeat(32)}`;
+    const lockId = `0x${'44'.repeat(32)}`;
+    const replica = makeReplica(entityId, counterpartyId);
+    const env = createEmptyEnv('certified-note-before-runtime-event');
+    env.state.eReplicas.set(`${entityId}:${replica.signerId}`, replica);
+
+    const effects: EntityCandidateEffect[] = [{
+      kind: 'runtimeEvent',
+      eventName: 'HtlcReceived',
+      data: { entityId, hashlock, lockId },
+    }, {
+      kind: 'entityFrameHistory',
+      entityId,
+      signerId: replica.signerId,
+      link: {
+        frame: {
+          height: 1,
+          parentFrameHash: '',
+          stateRoot: `0x${'01'.repeat(32)}`,
+          authorityRoot: `0x${'02'.repeat(32)}`,
+          timestamp: 1,
+          txs: [{
+            type: 'htlcOnionAdvance',
+            data: {
+              version: 1,
+              proposerSignerId: replica.signerId,
+              inboundEntityId: counterpartyId,
+              inboundLockId: lockId,
+              encryptedLayerHash: `0x${'03'.repeat(32)}`,
+              hashlock,
+              tokenId: 1,
+              amount: 3n,
+              timelock: 2n,
+              revealBeforeHeight: 3,
+              advance: { kind: 'final', description: 'uid:customer-9' },
+            },
+          }],
+          events: [],
+          hash: `0x${'04'.repeat(32)}`,
+          leader: { proposerSignerId: replica.signerId, view: 0 },
+          hashesToSign: [],
+        },
+        postAuthority: {
+          config: replica.state.config,
+          leaderState: {
+            activeValidatorId: replica.signerId,
+            view: 0,
+            changedAtHeight: 0,
+          },
+        },
+      },
+    }];
+
+    publishEntityCandidateEffects(env, replica, effects);
+
+    expect(env.frameLogs.find((entry) => entry.message === 'HtlcReceived')?.data).toMatchObject({
+      entityId,
+      hashlock,
+      lockId,
+      description: 'uid:customer-9',
     });
   });
 
@@ -545,7 +640,7 @@ describe('htlc event contract and dispute tail', () => {
     expect(replica.state.htlcRoutes.has(hashlock)).toBe(false);
     expect(account.mempool).toEqual([]);
     expect(env.frameLogs.filter((entry) => entry.message === 'HtlcFinalized')).toHaveLength(0);
-    publishEntityCandidateEffects(env, candidateEffects);
+    publishEntityCandidateEffects(env, replica, candidateEffects);
     const finalizedEvents = env.frameLogs.filter((entry) => entry.message === 'HtlcFinalized');
     expect(finalizedEvents).toHaveLength(1);
     expect(finalizedEvents[0]?.data).toMatchObject({
@@ -692,7 +787,7 @@ describe('htlc event contract and dispute tail', () => {
 
     expect(replica.state.htlcRoutes.has(hashlock)).toBe(false);
     expect(env.frameLogs.filter((entry) => entry.message === 'HtlcFinalized')).toHaveLength(0);
-    publishEntityCandidateEffects(env, candidateEffects);
+    publishEntityCandidateEffects(env, replica, candidateEffects);
     expect(env.frameLogs.filter((entry) => entry.message === 'HtlcFinalized')).toHaveLength(1);
   });
 
