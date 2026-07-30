@@ -208,39 +208,57 @@ export type AccountStateDomain = {
 };
 
 /**
+ * Bilateral state authenticated by `AccountFrame.accountStateRoot`.
+ *
+ * This is deliberately a standalone type, not a projection from
+ * `AccountReplica`. The dependency direction matters: the frame commits State;
+ * the local replica adds consensus coordination around that State. Adding a
+ * field here is therefore a protocol change and must also update
+ * `accountStateRootEntries`.
+ */
+export interface AccountState {
+  leftEntity: string;
+  rightEntity: string;
+  domain: AccountStateDomain;
+  watchSeed: string;
+  deltas: Map<number, Delta>;
+  locks: Map<string, HtlcLock>;
+  swapOffers: Map<string, SwapOffer>;
+  pulls?: Map<string, PullCommitment>;
+  subcontracts?: Map<string, AccountSubcontract>;
+  lendingIntents?: Map<string, AccountLendingIntentKind>;
+  globalCreditLimits: {
+    ownLimit: bigint;
+    peerLimit: bigint;
+  };
+  leftPendingJClaims: AccountJClaimAccumulatorState;
+  rightPendingJClaims: AccountJClaimAccumulatorState;
+  lastFinalizedJHeight: number;
+  disputeConfig: {
+    leftDisputeDelay: number;
+    rightDisputeDelay: number;
+  };
+  jNonce: number;
+  settlementWorkspace?: SettlementWorkspace;
+  requestedRebalance: Map<number, bigint>;
+  requestedRebalanceFeeState: Map<number, RebalanceRequestFeeState>;
+  rebalanceFeePolicies?: Map<number, BilateralRebalanceFeePolicy>;
+}
+
+/**
  * Complete deterministic replica owned by one Entity.
  *
- * `AccountState` below is the bilateral state committed by
- * `AccountFrame.accountStateRoot`. The remaining fields coordinate proposal,
- * acknowledgement, resend and Entity-owned automation. They are deterministic
- * and may be committed by the parent Entity, but are not bilateral Account
- * state and therefore must never be accepted by Account-root helpers.
+ * The inherited State is the bilateral commitment shared by both peers. The
+ * fields declared here coordinate proposal, acknowledgement, resend and
+ * Entity-owned automation. The parent Entity may commit this wider envelope,
+ * but Account-root helpers must accept `AccountState`, never the envelope.
  */
-export interface AccountReplica {
-  // CANONICAL REPRESENTATION (like Channel.ts - both entities store IDENTICAL structure)
-  leftEntity: string;   // Lower entity ID (canonical left)
-  rightEntity: string;  // Higher entity ID (canonical right)
-  domain: AccountStateDomain; // Committed locally, then carried by every bilateral input
-  watchSeed: string;    // 32-byte shared account seed revealed only when a dispute starts
+export interface AccountReplica extends AccountState {
   status: AccountStatus; // Manual lifecycle gate for dispute freeze/reopen
 
   mempool: AccountTx[]; // Unprocessed account transactions
   currentFrame: AccountFrame; // Latest finalized bilateral frame; older frames live in the Runtime WAL and history views.
 
-  // Per-token delta states (giant per-token table like old_src)
-  deltas: Map<number, Delta>; // tokenId -> Delta
-
-  // HTLC state (conditional payments)
-  locks: Map<string, HtlcLock>; // lockId → lock details
-
-  // Swap offers (limit orders)
-  swapOffers: Map<string, SwapOffer>; // offerId → offer details
-  pulls?: Map<string, PullCommitment>; // pullId → ratio-gated pull details
-  subcontracts?: Map<string, AccountSubcontract>; // custom DeltaTransformer clauses
-  // Bilateral idempotency receipts for lending extension commands. Financial
-  // effects and these receipts commit in the same Account frame, so replaying
-  // an intent can never move money twice.
-  lendingIntents?: Map<string, AccountLendingIntentKind>;
   // Durable local lifecycle log for swap UI/history.
   // Keep this in account state so closed/partial orders do not disappear
   // when the short bilateral frameHistory ring buffer prunes old frames.
@@ -249,12 +267,6 @@ export interface AccountReplica {
   // Keep open working state and terminal history separate so the UI does not infer
   // closed rows by subtracting live offers from a broad lifecycle store.
   swapClosedOrders?: Map<string, SwapOrderHistoryEntry>;
-
-  // Global credit limits (in reference currency - USDC)
-  globalCreditLimits: {
-    ownLimit: bigint; // How much credit we extend to counterparty (USD)
-    peerLimit: bigint; // How much credit counterparty extends to us (USD)
-  };
 
   // Frame-based consensus (like old_src Channel, consistent with entity frames)
   currentHeight: number; // Renamed from currentFrameId for S/E/A consistency
@@ -270,12 +282,6 @@ export interface AccountReplica {
   // Rollback support for bilateral disagreements
   rollbackCount: number;
   lastRollbackFrameHash?: string; // Track last rollback to prevent duplicate increments
-
-  // Bilateral J-event consensus. Only authenticated pending roots are state;
-  // finalized bodies have already been applied and belong in the rebuildable history view.
-  leftPendingJClaims: AccountJClaimAccumulatorState;
-  rightPendingJClaims: AccountJClaimAccumulatorState;
-  lastFinalizedJHeight: number;
 
   // Removed isProposer - use isLeft() function like old_src Channel.ts instead
 
@@ -302,11 +308,6 @@ export interface AccountReplica {
     encodedProofBody: string;   // ABI-encoded bytes for contract call
     proofBodyHash: string;      // keccak256(encodedProofBody) - signed for disputes
     lastUpdatedHeight: number;  // Frame height when last computed
-  };
-  // Dispute configuration (per-side delay settings)
-  disputeConfig: {
-    leftDisputeDelay: number;   // uint16 - value * 10 = blocks
-    rightDisputeDelay: number;  // uint16 - value * 10 = blocks
   };
   // HANKO SYSTEM: Frame consensus + Dispute proofs
   currentFrameHanko?: HankoString;           // My hanko on current frame (bilateral consensus)
@@ -356,14 +357,6 @@ export interface AccountReplica {
     };
   };
 
-  // ON-CHAIN NONCE: Tracks the nonce stored on-chain
-  // Starts at 0, set to signedNonce when settlement/dispute succeeds
-  // DISTINCT from proofHeader.nextProofNonce (which tracks what value to use next)
-  jNonce: number;
-
-  // SETTLEMENT WORKSPACE: Structured negotiation area
-  settlementWorkspace?: SettlementWorkspace;
-
   // Active dispute state (set after disputeStart, needed for disputeFinalize)
   activeDispute?: {
     startedByLeft: boolean;           // Who initiated dispute (from on-chain)
@@ -404,11 +397,6 @@ export interface AccountReplica {
     signature?: string; // If approved
   }>;
 
-  // Rebalancing hints (Phase 3: Hub coordination)
-  requestedRebalance: Map<number, bigint>; // tokenId → amount entity wants rebalanced (credit→collateral)
-  requestedRebalanceFeeState: Map<number, RebalanceRequestFeeState>; // tokenId → prepaid fee metadata
-  rebalanceFeePolicies?: Map<number, BilateralRebalanceFeePolicy>;
-
   // Entity-private automation state. It is persisted and committed by the
   // owning Entity machine, but excluded from the bilateral Account root and
   // never sent to the counterparty.
@@ -417,36 +405,6 @@ export interface AccountReplica {
     rejectedFrameEvidence?: AccountRejectedFrameEvidence;
   };
 }
-
-/**
- * Bilateral state authenticated by `AccountFrame.accountStateRoot`.
- *
- * Keep this list identical to `accountStateRootEntries`. Adding a field here
- * is a protocol change: both peers must encode it into the Account root.
- */
-export type AccountState = Pick<
-  AccountReplica,
-  | 'domain'
-  | 'leftEntity'
-  | 'rightEntity'
-  | 'watchSeed'
-  | 'deltas'
-  | 'globalCreditLimits'
-  | 'jNonce'
-  | 'disputeConfig'
-  | 'locks'
-  | 'pulls'
-  | 'swapOffers'
-  | 'subcontracts'
-  | 'lendingIntents'
-  | 'settlementWorkspace'
-  | 'lastFinalizedJHeight'
-  | 'leftPendingJClaims'
-  | 'rightPendingJClaims'
-  | 'requestedRebalance'
-  | 'requestedRebalanceFeeState'
-  | 'rebalanceFeePolicies'
->;
 
 export type AccountBoardResealMigration = {
   activationJHeight: number;
