@@ -46,20 +46,9 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   only Runtime interprets committed outputs as post-WAL external effects.
   Delete or correct docs, comments, types and helpers that blur local
   `AccountTx[]` with signed bilateral `AccountInput`.
-  Keep the AST-ratcheted reverse-import debt at the verified zero: lower Account code must
-  not import Entity, Runtime, adapters or physical storage; Entity must not
-  import Runtime, adapters, networking or physical storage; shared protocol
-  leaves must not import machine implementations; HTTP server handlers must not
-  reach upward into process orchestration. Move the shared primitive to its
-  canonical owner or pass a narrow dependency explicitly—never hide a reverse
-  edge behind a re-export.
-  Remove every Account/Entity `RuntimeState` parameter exposed by dissolving
-  the historical root type barrel. Pass the smallest deterministic value or
-  capability required by each transition (for example timestamp, certified
-  board node store, jurisdiction config, or signature verifier); never move
-  parent types to a neutral barrel merely to satisfy the import graph.
-  Keep root-surface debt at zero. The production value-import graph is acyclic
-  and permanently ratcheted at SCC size one.
+  Preserve the enforced lower-layer ownership boundaries when moving code:
+  pass the smallest deterministic value or capability required by a transition
+  and never hide an upward dependency behind a neutral barrel or re-export.
 - [ ] Close only current, reproduced audit findings. The accepted remainder is
   decomposed below: durable/idempotent off-chain faucet admission, the
   Replica/State split, Activity/history migration, exact Account-frame
@@ -78,9 +67,6 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   and every increase. Decode untrusted WAL/P2P/RPC/LevelDB data exactly once,
   then pass canonical types through reducers instead of scattering defensive
   guards through trusted financial code.
-  Delete rename-only import aliases where the canonical exported name can be
-  used directly; retain namespace imports, `as const`, type assertions and
-  genuine collision resolution because they are different language features.
   Remove duplicate constructors/policies/serializers only after proving one
   canonical owner, delete dead exports only after static and dynamic
   entrypoint/call-site checks, and add concise comments at every financial
@@ -98,10 +84,6 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   and fail loud on unknown or malformed financial events. Prove that no
   transport DTO can enter consensus directly and that required block/hash/tx
   coordinates cannot become `0`/`0x` defaults after the witnessed boundary.
-- [ ] Delete the remaining jurisdiction-event representation and conversion
-  debt. Derive decoder registry/type linkage from one event catalog only where
-  this reduces net LOC. Every surviving `normalize*`, `decode*`, `to*Event*`
-  and `from*Event*` must own a documented validation or trust transition.
 - [ ] Split `jadapter/helpers.ts` and `createRpcAdapter` by real I/O and failure
   boundaries, with no barrel or dependency-bag replacement. Canonical owners
   are receipt decode, event relevance/fan-out, certified history range,
@@ -123,34 +105,18 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   untracked `engine/` and `e2e/`. Perform path-only batches with exact export
   surface checks and no compatibility re-exports, then tighten the dependency
   and root-surface ratchets after every move.
-- [ ] Normalize the three nested state-machine vocabularies (owner-approved)
-  without pretending
-  their consensus protocols are identical. Preferred names are `RuntimeState`,
-  `EntityState`, `AccountState`; `RuntimeInput`, `EntityInput`, `AccountInput`;
-  `RuntimeFrame`, `EntityFrame`, `AccountFrame`; and matching `*Output` types.
-  The compile-checked migration from the historical `Env` and `AccountMachine`
-  names is complete, including frontend and test consumers. Give each
-  machine the same narrow façade and phase vocabulary (`admission`, `apply`,
-  `frame`, `consensus`/`commit`, `output`, `state-root`) while keeping Runtime
-  WAL, Entity validator certification and Account bilateral ACK semantics
-  explicit. Do not introduce inheritance or a generic reducer that hides those
-  different trust boundaries.
 - [ ] Separate committed frame state from each replica envelope before
-  optimizing clones. Target `RuntimeReplica = RuntimeState + one ingress
-  queue + WAL/outbox/lifecycle`, `EntityReplica = EntityState + mempool +
-  candidate/certificate`, and `AccountReplica = AccountState + mempool +
-  pending bilateral candidate/ACK/resend metadata`. `*State` must contain only
-  deterministic data committed by its corresponding frame; validator-local,
-  transport, watchdog and retry fields belong to the envelope. First pin
-  byte-identical roots, replay, pre-WAL failure and post-WAL recovery. Runtime
-  may then use single-writer mutate+halt/reload instead of a full clone; Entity
-  and Account must retain isolated candidates until their respective
-  certificate or bilateral ACK commits them. Keep single-signer Entity on the
-  same candidate pipeline with an immediate local certificate. Preserve the
-  intentional parent commitment: EntityState binds the deterministic
-  AccountReplica envelope (mempool, pending candidate and delivery state with
-  post-commit Hankos stripped), while AccountStateRoot binds only bilateral
-  committed state. Replace implicit field-deletion projections with two
+  optimizing further. Introduce the missing `RuntimeReplica` boundary around
+  committed `RuntimeState`, ingress, WAL/outbox, lifecycle and process-local
+  infrastructure. Remove history/UI/transient collectors from `EntityState`
+  and type its Account map as the exact deterministic Account-replica view
+  committed by the Entity root. Keep validator-local Hankos, keys, transport,
+  watchdogs and retry metadata in replica-owned storage. First pin
+  byte-identical Account, Entity and Runtime roots, replay, pre-WAL failure,
+  post-WAL recovery and browser snapshots. Preserve the intentional parent
+  commitment: EntityState binds deterministic Account proposal/ACK/resend
+  state with post-commit Hankos stripped, while AccountStateRoot binds only
+  bilateral `AccountState`. Replace implicit field-deletion projections with
   explicitly named byte-identical projections.
 - [ ] Give every nested machine one explicit deterministic input boundary.
   `RuntimeInput` owns `RuntimeTx[]` plus routed Entity inputs; `EntityInput`
@@ -205,29 +171,17 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   halt after waking, a post-WAL notification failure cannot downgrade a
   durable commit, and abort closes candidate-only storage handles without
   touching live handles.
-- [ ] Remove all remaining ephemeral Account replica fields from
-  `AccountState`. Move validation candidate/cache, mempool, pending frame,
-  outbound ACK/resend
-  and delivery metadata into `AccountReplica`; delete the exclusion lists only
-  after old/new byte-identical Account roots and restart behavior are proven.
-  Do not add a compatibility fallback: this is testnet, so make one canonical
-  schema transition with explicit migration tooling if durable fixtures need
-  conversion.
 - [ ] Finish the canonical Activity projection and local crypto ownership.
-  `EntityState.messages`, `batchHistory`, and the unwritten
-  `accountInputQueue` are gone: text and J finality are certified frame events,
-  durable history is read through the shared Activity panel, and no duplicate
-  UI cache remains in consensus State. Keep canonical ordered Entity/Account
-  event receipts inline in their signed Frame and covered by its Hanko; do not
-  add a second Merkle tree unless measured frame sizes require one. Complete
-  the exact typed
+  Keep canonical ordered Entity/Account event receipts inline in their signed
+  Frame and covered by its Hanko; do not add a second Merkle tree unless
+  measured frame sizes require one. Complete the exact typed
   `ActivityEvent` projection for Entity, Account, and authenticated J events
   with deterministic event id, source machine/frame/hash/index, scopes, actor,
   kind, and payload. Keep the disposable LevelDB view exactly rebuildable from
-  the authoritative Runtime WAL and certified child frames. Relocate
-  hash-excluded `entityEncPrivKey` to validator-local `EntityReplica` storage
-  only after dynamic/browser entrypoints, recovery hydration, and root fixtures
-  prove its real ownership; use one testnet schema and no fallback reader.
+  the authoritative Runtime WAL and certified child frames. Move display text,
+  local notes and validator-private encryption material out of committed State;
+  prove dynamic/browser entrypoints, recovery hydration and roots with one
+  testnet schema and no fallback reader.
 - [ ] Store Runtime, Entity, Account, and J histories across three explicit
   physical roles: rebuildable hot `current`, authoritative epoch-rolled
   `runtimeWal`, and rebuildable `historyViews`. Runtime WAL epochs are a
@@ -299,15 +253,6 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   calls into Account-owned handlers.
 - [ ] Turn Runtime execution into one visible pipeline:
   `take → validate/plan → mutate owned Runtime → WAL → dispatch`.
-  Keep exactly one live `RuntimeReplica` mempool; `runtimeInput` names only the
-  immutable input persisted in a committed frame, never a second live queue.
-  Represent all frame disposition, rollback and reliable-delivery flags in one
-  explicit `FrameExecutionState` instead of cross-stage locals or closures.
-  Runtime is the sole proposer and writer, so never clone the full Runtime
-  State. Validate every expected rejection before mutation; then mutate the
-  owned State directly. Any exception or storage doubt after mutation makes
-  the in-memory object unreadable: halt immediately and reload the last
-  committed WAL frame. Never attempt in-memory rollback or soft repair.
   Install one external read barrier from the first mutation through WAL commit:
   server/radapter/API readers wait or return an explicit busy result, and UI
   publishes only post-commit snapshots. The single writer prevents competing
@@ -321,34 +266,16 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   before or after WAL halts and reloads durable truth. Operational notifications happen only
   after the durable result is fixed and can report failure but never reclassify
   or roll back that result. `env.warn`, `env.error` and special info diagnostics
-  currently call P2P debug delivery from the working candidate; queue all
-  network-visible diagnostics and flush them only after WAL commit. A rolled
-  back frame may log locally but must be externally unobservable.
-- [ ] Make candidate isolation explicit per nested machine instead of cloning
-  the entire Runtime/Entity tree. Single-signer Entity execution mutates its
-  Runtime-owned State directly and relies on the enclosing Runtime WAL:
-  programming faults halt that Entity and reload its last durable state while
-  unrelated Entities continue. Multi-signer Entity execution must keep
-  `replica.state` certified until Hanko. Keep speculative execution exclusively
-  in the canonical `EntityReplica.candidate` phase; storage projections, API, UI,
-  routing and capacity checks must never treat it as certified. Replace the
-  full Entity clone used to build that candidate with a touched-only shell:
-  clone each changed small Account and only changed Entity/orderbook Map keys,
-  while untouched data references the immutable certified State. While locked,
-  accept only consensus progress for that proposal; never write candidate
-  Account/Entity frames to certified history or release financial outputs.
-  Matching quorum Hanko promotes the already-executed candidate without
-  re-execution. Root mismatch discards the candidate and deterministically
-  advances the proposer/view without automatically removing a validator;
-  unknown damage halts only that Entity and reloads
-  its last certified frame. Persist a signing lock in every Runtime WAL frame
+  must queue network-visible diagnostics and flush them only after WAL commit.
+  A rejected frame may log locally but must be externally unobservable.
+- [ ] Complete the remaining candidate-safety evidence. Persist a signing lock
+  in every Runtime WAL frame
   that may dispatch a local precommit, before that signature becomes externally
   visible, so restart cannot double-sign. Validator removal remains governance.
-  Happy-path work must be O(touched state), never O(total Accounts/orderbook),
-  while unrelated Entities continue. Account remains
-  the small bilateral transaction boundary and keeps a full isolated clone. Pin all four policies with
-  characterization tests, perf budgets (clone bytes/reducer/WAL latency), and
-  a gate forbidding reintroduction of full Runtime or single-signer Entity
+  Prove happy-path work remains O(touched state), unrelated Entities continue,
+  and Account remains the small isolated bilateral boundary. Add differential
+  roots and perf budgets for touched clone bytes, reducer latency and WAL
+  latency; preserve the gate forbidding full Runtime and single-signer Entity
   clones.
 - [ ] Make post-state Runtime ingress rejection explicit and deterministic.
   Inputs admitted against frame H may become stale after the single writer
@@ -366,7 +293,7 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   coordinators below 100–150 lines, and every file below 3000 lines. After the
   pipeline, collapse DI factories that add navigation
   without providing a real swappable boundary. The R/E/A gate is already at
-  zero functions over 100 lines. The production ratchet now owns 6 exact
+  zero functions over 100 lines. The production ratchet now owns 5 exact
   allowances over 150 lines and rejects every new/growing coordinator plus
   every file over 3000 lines; delete each allowance with its verified split.
   The exact remaining owners are `jadapter/rpc-adapter.ts::{createRpcAdapter,
@@ -378,18 +305,10 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   boundary/boot tests so refactors cannot pass or fail because of spelling.
 - [ ] Enforce an acyclic browser-safe core dependency graph. Keep cloning,
   codecs and state helpers as leaf modules that never import reducers,
-  Runtime routing or chain adapters; add a cycle budget that fails on any new
-  cycle crossing Runtime/Entity/Account/J boundaries. Extend the AST gate with
-  a value-import Tarjan SCC ratchet seeded from the current verified maximum,
-  then drive the remaining Entity scheduler SCC from three to one; a
-  folder-direction allowlist alone does not detect same-owner cycles.
-  Execute SHA-256,
-  proposal construction and one Account open from the actual browser bundle,
+  Runtime routing or chain adapters. Execute SHA-256, proposal construction
+  and one Account open from the actual browser bundle,
   not only Bun source imports. Programming faults such as `TypeError` must
   preserve their source stack and halt, never be relabelled as rejected input.
-  Remove the `jdenticon` UI dependency from root `runtime/utils.ts`; visual
-  identity belongs to the frontend/view boundary and core leaf utilities must
-  remain browser-safe without importing presentation code.
 - [ ] Remove only call-site-proven dead code in small module-owned batches.
   Reverify dynamic imports, scenario/CLI entrypoints and browser API first;
   `runNumberedRegistrationIntent` is currently live scenario infrastructure,
@@ -397,8 +316,7 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   wallet/helper, retention/hook, lookup/barrel and rename-only orphans.
   The old audit's named deletion batch has been exhausted or disproved on the
   current tree; discover the next candidates from current call sites instead
-  of carrying that stale list forward. Reverify and delete dead
-  `RuntimeSnapshot` and zero-call-site tx/financial/hook/barrel exports.
+  of carrying that stale list forward.
   Introduce `EntityOutput` only as the real reducer-to-parent boundary required
   above; do not invent empty `RuntimeOutput` or `AccountOutput` aliases merely
   for naming symmetry. Derive output unions only from real reducer results.

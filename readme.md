@@ -1,4 +1,4 @@
-# XLN - Cross-Local Network
+# xln — Cross-Local Network
 
 
 **Instant off-chain settlement with on-chain finality.**
@@ -7,27 +7,33 @@ Byzantine consensus meets Bloomberg Terminal meets VR. Run complete economic sim
 
 ---
 
-## 🌐 Directory Structure
+## Repository map
 
 ```
-Core:
-  /docs/                Philosophy, architecture, eternal specs
-  /runtime/             Consensus engine (BFT entity + bilateral account state machines)
-    /account/tx/        Account transaction handlers
-    /entity/tx/         Entity transaction handlers
-    /scenarios/         Economic simulations (ahb.ts, grid.ts, etc.)
-    /evms/              EVM integrations (BrowserVM, remote)
-  /jurisdictions/       Solidity contracts (Ethereum, Polygon, Arbitrum, ...)
-  /frontend/            Main xln.finance app + 3D visualization
-    /src/lib/components/   UI panels (Entity, Network, TimeMachine, etc.)
-  /tests/               E2E tests (Playwright)
+xln/
+├── runtime/
+│   ├── runtime/        Runtime input, frame, WAL boundary, and output routing
+│   ├── entity/         Entity transactions, candidates, and Hanko consensus
+│   ├── account/        Bilateral consensus and all financial mutation
+│   ├── jurisdiction/   Deterministic jurisdiction protocol and event facts
+│   ├── jadapter/       External chain observation and submission
+│   ├── storage/        WAL, current state, history views, and recovery
+│   ├── networking/     Runtime-to-Runtime transport
+│   ├── relay/          Discovery and market relay services
+│   ├── api/            Public Runtime API
+│   ├── server/         HTTP/WebSocket delivery
+│   └── orchestrator/   Process startup and service composition
+├── jurisdictions/      Solidity settlement and dispute contracts
+├── frontend/           xln.finance client; display and input only
+├── tests/              Browser and full-stack E2E evidence
+├── docs/               Live protocol specifications and audit guides
+├── scripts/            Build, release, audit-context, and operator tools
+└── .archive/           Historical implementations; never current authority
+```
 
-Dev:
-  /scripts/             Utilities (playwright helpers, deployment, debug)
-  /ai/                  AI integrations (STT server, telegram bot, council)
-  bootstrap.sh          One-command setup
-  CLAUDE.md             AI instructions
-  .archive/             Old implementations (historical reference)
+`runtime.ts` is intentionally a narrow public facade. Core behavior belongs to
+the owning Runtime, Entity, or Account folder; physical I/O stays outside those
+state-machine folders.
 
 ---
 
@@ -46,7 +52,7 @@ open http://localhost:8080
 
 ---
 
-## 🎯 What is XLN?
+## 🎯 What is xln?
 
 Cross-Local Network enables entities to:
 - Exchange value **instantly off-chain** (BFT consensus)
@@ -256,57 +262,24 @@ bun run bench:radapter:hub1m:allmem  # Same, but materialize all 1M accounts int
 
 ---
 
-## 📚 Documentation Tree
+## Auditor reading path
 
-```
-Root:
-  readme.md              This file - project overview
-  todo.md                Active TODO/NEXT backlog
-  CLAUDE.md              AI assistant instructions
-  CHANGELOG.md           Version history
+The shortest reliable path from protocol vocabulary to one committed unit of
+value is:
 
-/docs/
-  ├── contributing/      How to develop on XLN
-  │   ├── workflow.md           Daily commands (bun run dev, etc)
-  │   ├── bug-prevention.md     Pre-commit checklist
-  │   ├── agentic.md            AI autonomous execution (80% rule)
-  │   └── adhd-format.md        Response formatting guide
-  │
-  ├── research/          Explorations & specifications
-  │   ├── insurance/            Insurance layer designs
-  │   │   ├── claude-analysis.md
-  │   │   ├── codex-analysis.md
-  │   │   └── gemini-analysis.md
-  │   ├── depository-core.md    Contract logic summary
-  │   └── rollups-position.md   XLN vs rollups comparison
-  │
-  ├── status.md          Current launch state and blocker order
-  ├── mainnet.md         Real-user-fund release bar
-  ├── roadmap.md         Strategic rollout plan
-  ├── recovery-watchtower-protocol.md
-  │                       Recovery, tower backup, and last-resort dispute spec
-  ├── deployment/        Deploy and ops runbooks
-  ├── archive/           Historical snapshots only
-  │
-  ├── about/             Philosophy & origin
-  │   ├── homakov.md            Founder's vision
-  │   └── repo-structure.md     Private vs public repos
-  │
-  ├── testing/           Test procedures
-  │   └── ahb-demo.md           AHB demo steps
-  │
-  └── docs/              Core architecture (existing)
-      ├── rjea.md               R→E→A→J flow explanation
-      ├── xlnview.md            Panel architecture
-      ├── flow.md               Transaction flow
-      └── ...                   (eternal specs)
-```
+1. [R → E → A → J architecture](docs/core/rjea-architecture.md)
+2. [Payment and HTLC flow](docs/implementation/payment-spec.md)
+3. `runtime/runtime/frame/process.ts` — Runtime transition and WAL ordering
+4. `runtime/entity/consensus/input-consensus.ts` — Entity entry point
+5. `runtime/account/consensus/index.ts` — Account entry point and collision
+6. `runtime/account/tx/apply.ts` — financial validation
+7. `runtime/account/tx/mutation.ts` — financial mutation
+8. `runtime/storage/commit.ts` — the only durable Runtime commit point
 
-**Quick links:**
-- New to XLN? Start with [docs/readme.md](docs/readme.md)
-- Current priorities? Check [todo.md](todo.md)
-- Current launch state? Read [docs/status.md](docs/status.md)
-- Mainnet bar? Read [docs/mainnet.md](docs/mainnet.md)
+Then read [the documentation index](docs/readme.md), [active release
+blockers](todo.md), and [the mainnet acceptance bar](docs/mainnet.md). Files
+under `docs/archive/` and `docs/releases/` are historical evidence, never
+current protocol authority.
 
 ---
 
