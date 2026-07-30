@@ -914,11 +914,11 @@ describe('production startup wiring', () => {
     expect(mmNode).not.toContain('const isCrossQuoteJobDepthComplete =');
     const sameProgressBody = extractSourceBlock(
       mmNode,
-      'const emitSameQuoteProgress =',
+      'const emitSameProgress =',
       'const isBootstrapDepthComplete =',
     );
-    expect(sameProgressBody.indexOf('if (now - lastSameQuoteProgressLogAt < 2_000) return;')).toBeLessThan(
-      sameProgressBody.indexOf('const incomplete = jobs.filter(job => !isSameQuoteJobDepthReady(env, job));'),
+    expect(sameProgressBody.indexOf('if (now - lastProgressLogAt < 2_000) return;')).toBeLessThan(
+      sameProgressBody.indexOf('const incomplete = jobs.filter(job => !isSameQuoteJobDepthReady(deps.env, job));'),
     );
     expect(mmNode).not.toContain('setImmediate(resolve)');
     expect(mmNode).not.toContain('await sleep(0);');
@@ -942,9 +942,9 @@ describe('production startup wiring', () => {
     expect(mmNode).not.toContain('const isSameQuoteJobCovered = (env: RuntimeState, job: SameQuoteJob): boolean => {');
     expect(mmNode).not.toContain('const isSameQuoteJobReady = (env: RuntimeState, job: SameQuoteJob): boolean => {');
     expect(mmNode).toContain('const buildMarketMakerSameQuoteJobs = (');
-    expect(mmNode).toContain('const buildSameQuoteJobs = (visibleHubs: HubProfile[]): SameQuoteJob[] =>');
+    expect(mmNode).toContain('const buildSameJobs = (visibleHubs: HubProfile[]): SameQuoteJob[] =>');
     expect(mmNode).toContain('let bootstrapSameCursor = 0;');
-    expect(mmNode).toContain('const isAllSameQuoteDepthReady = (visibleHubs: HubProfile[]): boolean => {');
+    expect(mmNode).toContain('const allSameDepthReady = (visibleHubs: HubProfile[]): boolean => {');
     expect(mmNode).toContain('compareStableText(left.context.jurisdictionRef, right.context.jurisdictionRef)');
     expect(mmNode).toContain("jurisdictionRef: String(context.jurisdictionRef || '').trim().toLowerCase()");
     expect(mmNode).not.toContain('compareStableText(left.context.jurisdictionName, right.context.jurisdictionName)');
@@ -987,7 +987,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('const primarySameDepthReady = isMarketMakerSameDepthComplete(healthBeforeQuotes);');
     expect(mmNode).not.toContain('const primarySameReady = isMarketMakerSameReady(healthBeforeQuotes);');
     expect(mmNode).not.toContain("if (mode !== 'bootstrap' || !primarySameDepthReady) {");
-    expect(mmNode).toContain('const sameDepthReady = isAllSameQuoteDepthReady(visibleHubs);');
+    expect(mmNode).toContain('const sameDepthReady = quoteReadModel.allSameDepthReady(visibleHubs);');
     expect(mmNode).toContain('const sameSettledDepthReady = primarySameDepthReady && sameDepthReady;');
     expect(mmNode).toContain('if (!sameSettledDepthReady) return false;');
     expect(mmNode).not.toContain('const sameCoverageReady = isAllSameQuoteCovered(visibleHubs);');
@@ -1028,7 +1028,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('targetHubs,');
     expect(mmNode).toContain("if (mode === 'steady') return true;");
     expect(mmNode).toContain(
-      'isAllSameQuoteDepthReady(readVisibleHubProfiles(env, true)) && isMarketMakerDepthComplete(health)',
+      'allSameDepthReady(readVisibleHubProfiles(deps.env, true)) && isMarketMakerDepthComplete(health)',
     );
     expect(mmNode).toContain("scope: 'same-chain-all-contexts-depth'");
     expect(mmNode).not.toContain("if (mode !== 'bootstrap') return;");
@@ -1038,7 +1038,7 @@ describe('production startup wiring', () => {
     expect(mmNode).not.toContain("const jobCount = mode === 'bootstrap'");
     expect(mmNode).not.toContain('? crossQuoteJobs.length');
     expect(mmNode).toContain('MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK');
-    expect(mmNode).toContain('if (isBootstrapDepthComplete(health)) return;');
+    expect(mmNode).toContain('if (quoteReadModel.isBootstrapDepthComplete(health)) return;');
     expect(mmNode).toContain(
       'if (deps.isDepthComplete(beforeDrive) && deps.canCheckCompletion()) return beforeDrive;',
     );
@@ -1588,10 +1588,10 @@ describe('production startup wiring', () => {
     expect(healthController).toContain(
       'return publish({ includeCross: false, crossOverride: buildPlannedMarketMakerCrossHealth(plan) });',
     );
-    expect(mmNode).toContain('const buildBootstrapCompletionHealth = (): MarketMakerHealth | null => {');
-    expect(mmNode).toContain('bootstrapCompletionHealth = healthController.buildSnapshot({ includeCross: true });');
-    expect(mmNode).toContain('healthController.setCurrentHealth(bootstrapCompletionHealth);');
-    expect(mmNode).toContain('healthController.rebuildHealthResponse();');
+    expect(mmNode).toContain('const buildCompletionHealth = (): MarketMakerHealth | null => {');
+    expect(mmNode).toContain('completionHealth = deps.health.buildSnapshot({ includeCross: true });');
+    expect(mmNode).toContain('deps.health.setCurrentHealth(completionHealth);');
+    expect(mmNode).toContain('deps.health.rebuildHealthResponse();');
     expect(readMarketMakerNodeModule('mm-node-health.ts')).toContain('computeCanonicalEntityHashesFromEnv');
     expect(readMarketMakerNodeModule('mm-node-run.ts')).toContain('computeCanonicalStateHashFromEnv');
     expect(mmNode).toContain('export const buildMarketMakerBootstrapEntityStateHash = (env: RuntimeState): string =>');
@@ -1611,10 +1611,10 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('let bootstrapCrossPlanJobCount: number | null = null;');
     expect(mmNode).not.toContain('let bootstrapCrossExpectedRoutes');
     expect(mmNode).toContain("emitBootstrapDebugEvent('cross-plan'");
-    expect(mmNode).toContain('const hasExpectedBootstrapCrossRoutes = (visibleHubs: HubProfile[]): boolean =>');
-    expect(mmNode).toContain('const canCheckBootstrapCompletion = (): boolean =>');
-    expect(mmNode).toContain('if (hasCrossPlan && !bootstrapCrossProducerAttempted) return false;');
-    expect(mmNode).toContain('return !hasCrossPlan || !hasBootstrapCrossAccountBacklog(visibleHubs);');
+    expect(mmNode).toContain('const plan = buildMarketMakerCrossPlanSummary(');
+    expect(mmNode).toContain('const canCheckCompletion = (): boolean =>');
+    expect(mmNode).toContain('if (plan.expectedRoutes > 0 && !bootstrapCross.producerAttempted) return false;');
+    expect(mmNode).toContain('return plan.expectedRoutes === 0 || !hasCrossAccountBacklog(visibleHubs);');
     expect(mmNode).not.toContain('const completionBeforeDrive = buildBootstrapCompletionHealth();');
     expect(mmNode).toContain("const enqueued = await deps.driveQuotes('bootstrap');");
     expect(mmNode).toContain('if (!enqueued && deps.canCheckCompletion()) {');
@@ -1629,7 +1629,7 @@ describe('production startup wiring', () => {
     );
     expect(mmNode).toContain("startupPhase = 'bootstrap-same-chain';\n    healthController.publishBootstrap();");
     expect(mmNode).toContain('if (bootstrapCrossStarted) {');
-    expect(mmNode).toContain('isAllSameQuoteDepthReady(visibleHubs) &&');
+    expect(mmNode).toContain('quoteReadModel.allSameDepthReady(visibleHubs) &&');
     expect(mmNode).toContain('isMarketMakerSameDepthComplete(health)');
     expect(mmNode).not.toContain('bootstrapCrossStarted || isMarketMakerSameReady(health)');
     expect(mmNode).not.toContain("if (startupPhase !== 'offers-ready' && bootstrapCrossStarted) {");
@@ -1726,7 +1726,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain("process.env['XLN_MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL']");
     expect(orchestrator).toContain('XLN_MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL:');
     expect(orchestrator).toContain("join(marketMakerChild.dbPath, 'bootstrap-events.jsonl')");
-    expect(mmNode).toContain("emitBootstrapDebugEvent('same-quote-progress'");
+    expect(mmNode).toContain("deps.emit('same-quote-progress'");
     expect(mmNode).not.toContain("emitBootstrapDebugEvent('cross-progress'");
     expect(mmNode).not.toContain("emitMarketMakerCrossBootstrapWaveEvent('cross-wave-enqueue'");
     expect(mmNode).not.toContain('deferredBootstrapCrossInputs');
@@ -1804,9 +1804,9 @@ describe('production startup wiring', () => {
       mmNode.indexOf('const crossQuoteJobs = await buildCrossQuoteJobs(mode, visibleHubs, shouldContinue);'),
     );
     expect(mmNode).toContain(
-      'if (hasBootstrapCrossAccountBacklog(visibleHubs)) {\n          await yieldMarketMakerApi();\n          return false;\n        }',
+      'if (quoteReadModel.hasCrossAccountBacklog(visibleHubs)) {\n          await yieldMarketMakerApi();\n          return false;\n        }',
     );
-    expect(mmNode.indexOf('if (hasBootstrapCrossAccountBacklog(visibleHubs)) {')).toBeLessThan(
+    expect(mmNode.indexOf('if (quoteReadModel.hasCrossAccountBacklog(visibleHubs)) {')).toBeLessThan(
       mmNode.indexOf('const crossQuoteJobs = await buildCrossQuoteJobs(mode, visibleHubs, shouldContinue);'),
     );
     expect(mmNode).toContain('let completionCheckArmed = false;');

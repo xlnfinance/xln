@@ -1710,6 +1710,92 @@ const createMarketMakerMaintenanceLoops = (deps: MarketMakerMaintenanceLoopDeps)
   return { fail, startHealth, startQuotes, stop };
 };
 
+type MarketMakerQuoteReadModelDeps = {
+  env: RuntimeState;
+  contexts: () => readonly MarketMakerEntityContext[];
+  tokenIdsByContext: () => ReadonlyMap<string, number[]>;
+  health: ReturnType<typeof createMarketMakerHealthController>;
+  bootstrapCross: () => {
+    started: boolean;
+    producerAttempted: boolean;
+  };
+  emit: (event: string, fields?: Record<string, unknown>) => void;
+};
+
+const createMarketMakerQuoteReadModel = (deps: MarketMakerQuoteReadModelDeps) => {
+  let lastProgressLogAt = 0;
+  let lastProgressKey = '';
+  let completionHealthHeight = -1;
+  let completionHealth: MarketMakerHealth | null = null;
+  const buildSameJobs = (visibleHubs: HubProfile[]): SameQuoteJob[] =>
+    buildMarketMakerSameQuoteJobs([...deps.contexts()], new Map(deps.tokenIdsByContext()), visibleHubs);
+  const allSameDepthReady = (visibleHubs: HubProfile[]): boolean => {
+    const jobs = buildSameJobs(visibleHubs);
+    return jobs.length > 0 && jobs.every(job => isSameQuoteJobDepthReady(deps.env, job));
+  };
+  const hasCrossAccountBacklog = (visibleHubs: HubProfile[]): boolean =>
+    hasMarketMakerCrossAccountBacklog(deps.env, [...deps.contexts()], visibleHubs);
+  const emitSameProgress = (reason: string, jobs: SameQuoteJob[], selectedJob?: SameQuoteJob): void => {
+    if (!MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL) return;
+    const now = Date.now();
+    if (now - lastProgressLogAt < 2_000) return;
+    const incomplete = jobs.filter(job => !isSameQuoteJobDepthReady(deps.env, job));
+    const key = incomplete
+      .map(
+        job =>
+          `${job.context.entityId}:${job.hub.entityId}:` +
+          countCommittedMarketMakerOffersForHub(deps.env, job.context.entityId, job.hub.entityId),
+      )
+      .join('|');
+    if (key === lastProgressKey) return;
+    lastProgressKey = key;
+    lastProgressLogAt = now;
+    deps.emit('same-quote-progress', {
+      reason,
+      selected: selectedJob ? describeMarketMakerSameQuoteProgress(deps.env, selectedJob) : null,
+      incomplete: incomplete.slice(0, 8).map(job => describeMarketMakerSameQuoteProgress(deps.env, job)),
+      incompleteCount: incomplete.length,
+    });
+  };
+  const isBootstrapDepthComplete = (health: MarketMakerHealth | null): boolean =>
+    allSameDepthReady(readVisibleHubProfiles(deps.env, true)) && isMarketMakerDepthComplete(health);
+  const buildCompletionHealth = (): MarketMakerHealth | null => {
+    if (completionHealthHeight === deps.env.height) return completionHealth;
+    completionHealthHeight = deps.env.height;
+    completionHealth = deps.health.buildSnapshot({ includeCross: true });
+    if (completionHealth) {
+      deps.health.setCurrentHealth(completionHealth);
+      deps.health.rebuildHealthResponse();
+    }
+    return completionHealth;
+  };
+  const invalidateCompletionHealth = (): void => {
+    completionHealthHeight = -1;
+  };
+  const canCheckCompletion = (): boolean => {
+    const bootstrapCross = deps.bootstrapCross();
+    if (!bootstrapCross.started || hasMarketMakerRuntimeBacklog(deps.env)) return false;
+    const visibleHubs = readVisibleHubProfiles(deps.env, true);
+    const plan = buildMarketMakerCrossPlanSummary(
+      [...deps.contexts()],
+      visibleHubs,
+      new Map(deps.tokenIdsByContext()),
+    );
+    if (plan.expectedRoutes > 0 && !bootstrapCross.producerAttempted) return false;
+    return plan.expectedRoutes === 0 || !hasCrossAccountBacklog(visibleHubs);
+  };
+  return {
+    allSameDepthReady,
+    buildCompletionHealth,
+    buildSameJobs,
+    canCheckCompletion,
+    emitSameProgress,
+    hasCrossAccountBacklog,
+    invalidateCompletionHealth,
+    isBootstrapDepthComplete,
+  };
+};
+
 export const runMarketMakerNode = async (): Promise<void> => {
   activateMarketMakerProcessArgs();
   if (resolvedArgs.dbPath) process.env['XLN_DB_PATH'] = resolvedArgs.dbPath;
@@ -1930,68 +2016,23 @@ export const runMarketMakerNode = async (): Promise<void> => {
   let bootstrapCrossCursor = 0;
   let steadyCrossCursor = 0;
   const attemptedBootstrapIntentOrderIds = new Set<string>();
-  let lastSameQuoteProgressLogAt = 0;
-  let lastSameQuoteProgressKey = '';
   const hubsForContext = (visibleHubs: HubProfile[], context: MarketMakerEntityContext): HubProfile[] =>
     selectMarketMakerHubsForContext(visibleHubs, context);
-  const buildSameQuoteJobs = (visibleHubs: HubProfile[]): SameQuoteJob[] =>
-    buildMarketMakerSameQuoteJobs(mmContexts, mmTokenIdsByContext, visibleHubs);
-  const isAllSameQuoteDepthReady = (visibleHubs: HubProfile[]): boolean => {
-    const sameQuoteJobs = buildSameQuoteJobs(visibleHubs);
-    return sameQuoteJobs.length > 0 && sameQuoteJobs.every(job => isSameQuoteJobDepthReady(env, job));
-  };
-  const hasBootstrapCrossAccountBacklog = (visibleHubs: HubProfile[]): boolean =>
-    hasMarketMakerCrossAccountBacklog(env, mmContexts, visibleHubs);
-  const describeSameQuoteJobProgress = (job: SameQuoteJob): Record<string, unknown> =>
-    describeMarketMakerSameQuoteProgress(env, job);
-  const emitSameQuoteProgress = (reason: string, jobs: SameQuoteJob[], selectedJob?: SameQuoteJob): void => {
-    if (!MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL) return;
-    const now = Date.now();
-    if (now - lastSameQuoteProgressLogAt < 2_000) return;
-    const incomplete = jobs.filter(job => !isSameQuoteJobDepthReady(env, job));
-    const key = incomplete
-      .map(
-        job =>
-          `${job.context.entityId}:${job.hub.entityId}:${countCommittedMarketMakerOffersForHub(env, job.context.entityId, job.hub.entityId)}`,
-      )
-      .join('|');
-    if (key === lastSameQuoteProgressKey) return;
-    lastSameQuoteProgressKey = key;
-    lastSameQuoteProgressLogAt = now;
-    emitBootstrapDebugEvent('same-quote-progress', {
-      reason,
-      selected: selectedJob ? describeSameQuoteJobProgress(selectedJob) : null,
-      incomplete: incomplete.slice(0, 8).map(describeSameQuoteJobProgress),
-      incompleteCount: incomplete.length,
-    });
-  };
-  const isBootstrapDepthComplete = (health: MarketMakerHealth | null): boolean =>
-    isAllSameQuoteDepthReady(readVisibleHubProfiles(env, true)) && isMarketMakerDepthComplete(health);
-  let bootstrapCompletionHealthHeight = -1;
-  let bootstrapCompletionHealth: MarketMakerHealth | null = null;
-  const buildBootstrapCompletionHealth = (): MarketMakerHealth | null => {
-    if (bootstrapCompletionHealthHeight === env.height) return bootstrapCompletionHealth;
-    bootstrapCompletionHealthHeight = env.height;
-    bootstrapCompletionHealth = healthController.buildSnapshot({ includeCross: true });
-    if (bootstrapCompletionHealth) {
-      healthController.setCurrentHealth(bootstrapCompletionHealth);
-      healthController.rebuildHealthResponse();
-    }
-    return bootstrapCompletionHealth;
-  };
-  const hasExpectedBootstrapCrossRoutes = (visibleHubs: HubProfile[]): boolean =>
-    buildMarketMakerCrossPlanSummary(mmContexts, visibleHubs, mmTokenIdsByContext).expectedRoutes > 0;
-  const canCheckBootstrapCompletion = (): boolean => {
-    if (!bootstrapCrossStarted || hasMarketMakerRuntimeBacklog(env)) return false;
-    const visibleHubs = readVisibleHubProfiles(env, true);
-    const hasCrossPlan = hasExpectedBootstrapCrossRoutes(visibleHubs);
-    if (hasCrossPlan && !bootstrapCrossProducerAttempted) return false;
-    return !hasCrossPlan || !hasBootstrapCrossAccountBacklog(visibleHubs);
-  };
+  const quoteReadModel = createMarketMakerQuoteReadModel({
+    env,
+    contexts: () => mmContexts,
+    tokenIdsByContext: () => mmTokenIdsByContext,
+    health: healthController,
+    bootstrapCross: () => ({
+      started: bootstrapCrossStarted,
+      producerAttempted: bootstrapCrossProducerAttempted,
+    }),
+    emit: emitBootstrapDebugEvent,
+  });
   const driveBootstrapSameQuotes = createBootstrapSameQuoteDriver({
     env,
-    buildJobs: buildSameQuoteJobs,
-    emitProgress: emitSameQuoteProgress,
+    buildJobs: quoteReadModel.buildSameJobs,
+    emitProgress: quoteReadModel.emitSameProgress,
     getCursor: () => bootstrapSameCursor,
     setCursor: cursor => {
       bootstrapSameCursor = cursor;
@@ -2080,7 +2121,7 @@ export const runMarketMakerNode = async (): Promise<void> => {
         }
       }
       if (mode === 'bootstrap') {
-        const sameDepthReady = isAllSameQuoteDepthReady(visibleHubs);
+        const sameDepthReady = quoteReadModel.allSameDepthReady(visibleHubs);
         const sameSettledDepthReady = primarySameDepthReady && sameDepthReady;
         if (!sameSettledDepthReady) return false;
         if (!bootstrapCrossStarted) {
@@ -2093,7 +2134,7 @@ export const runMarketMakerNode = async (): Promise<void> => {
           });
           await yieldMarketMakerApi();
         }
-        if (hasBootstrapCrossAccountBacklog(visibleHubs)) {
+        if (quoteReadModel.hasCrossAccountBacklog(visibleHubs)) {
           await yieldMarketMakerApi();
           return false;
         }
@@ -2105,7 +2146,7 @@ export const runMarketMakerNode = async (): Promise<void> => {
         const crossPlan = buildMarketMakerCrossPlanSummary(mmContexts, visibleHubs, mmTokenIdsByContext);
         if (bootstrapCrossPlanJobCount !== crossPlan.expectedJobs) {
           bootstrapCrossPlanJobCount = crossPlan.expectedJobs;
-          bootstrapCompletionHealthHeight = -1;
+          quoteReadModel.invalidateCompletionHealth();
           emitBootstrapDebugEvent('cross-plan', {
             expectedJobs: crossPlan.expectedJobs,
             expectedRoutes: crossPlan.expectedRoutes,
@@ -2175,10 +2216,10 @@ export const runMarketMakerNode = async (): Promise<void> => {
     contexts: () => mmContexts,
     tokenIdsByContext: () => mmTokenIdsByContext,
     health: healthController,
-    buildSameQuoteJobs,
-    allSameQuoteDepthReady: isAllSameQuoteDepthReady,
+    buildSameQuoteJobs: quoteReadModel.buildSameJobs,
+    allSameQuoteDepthReady: quoteReadModel.allSameDepthReady,
     isReady: () => startupPhase === 'offers-ready',
-    canCheckCompletion: canCheckBootstrapCompletion,
+    canCheckCompletion: quoteReadModel.canCheckCompletion,
     publish: publishMarketMakerBootstrapFinalization,
     emit: emitBootstrapDebugEvent,
     logReadyHash: fields => nodeLog.info('bootstrap.ready_hash', fields),
@@ -2189,13 +2230,13 @@ export const runMarketMakerNode = async (): Promise<void> => {
   const markOffersReady = bootstrapFinalizer.markReady;
 
   const refreshBootstrapPhase = (health: MarketMakerHealth | null): void => {
-    if (isBootstrapDepthComplete(health)) return;
+    if (quoteReadModel.isBootstrapDepthComplete(health)) return;
     const previousPhase = startupPhase;
     if (bootstrapCrossStarted) {
       startupPhase = 'bootstrap-cross';
     } else {
       const visibleHubs = readVisibleHubProfiles(env, true);
-      const sameReady = isAllSameQuoteDepthReady(visibleHubs) && isMarketMakerSameDepthComplete(health);
+      const sameReady = quoteReadModel.allSameDepthReady(visibleHubs) && isMarketMakerSameDepthComplete(health);
       if (sameReady) {
         bootstrapCrossStarted = true;
         startupPhase = 'bootstrap-cross';
@@ -2229,9 +2270,9 @@ export const runMarketMakerNode = async (): Promise<void> => {
     phase: () => startupPhase,
     health: healthController,
     driveQuotes,
-    canCheckCompletion: canCheckBootstrapCompletion,
-    buildCompletionHealth: buildBootstrapCompletionHealth,
-    isBootstrapDepthComplete,
+    canCheckCompletion: quoteReadModel.canCheckCompletion,
+    buildCompletionHealth: quoteReadModel.buildCompletionHealth,
+    isBootstrapDepthComplete: quoteReadModel.isBootstrapDepthComplete,
     markReady: markOffersReady,
     emit: emitBootstrapDebugEvent,
   });
@@ -2263,9 +2304,9 @@ export const runMarketMakerNode = async (): Promise<void> => {
         health: healthController,
         progress: bootstrapProgress,
         refreshPhase: refreshBootstrapPhase,
-        isDepthComplete: isBootstrapDepthComplete,
-        canCheckCompletion: canCheckBootstrapCompletion,
-        buildCompletionHealth: buildBootstrapCompletionHealth,
+        isDepthComplete: quoteReadModel.isBootstrapDepthComplete,
+        canCheckCompletion: quoteReadModel.canCheckCompletion,
+        buildCompletionHealth: quoteReadModel.buildCompletionHealth,
         driveQuotes,
         emit: emitBootstrapDebugEvent,
       });
