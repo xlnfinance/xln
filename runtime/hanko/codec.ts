@@ -21,22 +21,6 @@ const SECP256K1_HALF_ORDER = BigInt(
   '0x7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0',
 );
 
-type AbiClaim = readonly [
-  entityId: string,
-  entityIndexes: readonly bigint[],
-  weights: readonly bigint[],
-  threshold: bigint,
-  boardChangeDelay: bigint,
-  controlChangeDelay: bigint,
-  dividendChangeDelay: bigint,
-];
-
-type AbiEnvelope = readonly [readonly [
-  placeholders: readonly string[],
-  packedSignatures: string,
-  claims: readonly AbiClaim[],
-]];
-
 const asHex = (value: string, label: string): HankoHex => {
   if (!ethers.isHexString(value)) throw new Error(`HANKO_${label}_HEX_INVALID`);
   return ethers.hexlify(value).toLowerCase() as HankoHex;
@@ -87,28 +71,59 @@ export const encodeHankoEnvelope = (envelope: HankoEnvelope): HankoString => ABI
   ]],
 );
 
-const decodeClaim = (claim: AbiClaim, index: number): HankoWireClaim => ({
-  entityId: asHankoBytes32(claim[0], `CLAIM_${index}_ENTITY_ID`),
-  entityIndexes: [...claim[1]],
-  weights: [...claim[2]],
-  threshold: claim[3],
-  boardChangeDelay: claim[4],
-  controlChangeDelay: claim[5],
-  dividendChangeDelay: claim[6],
-});
+const requireAbiArray = (value: unknown, label: string): readonly unknown[] => {
+  if (!Array.isArray(value)) throw new Error(`HANKO_${label}_ARRAY_INVALID`);
+  return value;
+};
+
+const requireAbiBigInt = (value: unknown, label: string): bigint => {
+  if (typeof value !== 'bigint') throw new Error(`HANKO_${label}_BIGINT_INVALID`);
+  return value;
+};
+
+const requireAbiString = (value: unknown, label: string): string => {
+  if (typeof value !== 'string') throw new Error(`HANKO_${label}_STRING_INVALID`);
+  return value;
+};
+
+const decodeClaim = (value: unknown, index: number): HankoWireClaim => {
+  const claim = requireAbiArray(value, `CLAIM_${index}`);
+  if (claim.length !== 7) throw new Error(`HANKO_CLAIM_${index}_LENGTH_INVALID`);
+  const indexes = requireAbiArray(claim[1], `CLAIM_${index}_INDEXES`)
+    .map((entry, member) => requireAbiBigInt(entry, `CLAIM_${index}_INDEX_${member}`));
+  const weights = requireAbiArray(claim[2], `CLAIM_${index}_WEIGHTS`)
+    .map((entry, member) => requireAbiBigInt(entry, `CLAIM_${index}_WEIGHT_${member}`));
+  return {
+    entityId: asHankoBytes32(
+      requireAbiString(claim[0], `CLAIM_${index}_ENTITY_ID`),
+      `CLAIM_${index}_ENTITY_ID`,
+    ),
+    entityIndexes: indexes,
+    weights,
+    threshold: requireAbiBigInt(claim[3], `CLAIM_${index}_THRESHOLD`),
+    boardChangeDelay: requireAbiBigInt(claim[4], `CLAIM_${index}_BOARD_CHANGE_DELAY`),
+    controlChangeDelay: requireAbiBigInt(claim[5], `CLAIM_${index}_CONTROL_CHANGE_DELAY`),
+    dividendChangeDelay: requireAbiBigInt(claim[6], `CLAIM_${index}_DIVIDEND_CHANGE_DELAY`),
+  };
+};
 
 export const decodeHankoEnvelope = (encoded: HankoString): HankoEnvelope => {
   const canonicalInput = asHex(encoded, 'ENVELOPE');
-  let decoded: AbiEnvelope;
+  let decoded: ethers.Result;
   try {
-    decoded = ABI_CODER.decode(HANKO_ABI, canonicalInput) as unknown as AbiEnvelope;
+    decoded = ABI_CODER.decode(HANKO_ABI, canonicalInput);
   } catch (error) {
     throw new Error(`HANKO_ABI_DECODE_INVALID:${error instanceof Error ? error.message : String(error)}`);
   }
-  const [placeholders, packedSignatures, claims] = decoded[0];
+  const tuple = requireAbiArray(decoded[0], 'ENVELOPE');
+  if (tuple.length !== 3) throw new Error('HANKO_ENVELOPE_LENGTH_INVALID');
+  const placeholders = requireAbiArray(tuple[0], 'PLACEHOLDERS');
+  const packedSignatures = tuple[1];
+  const claims = requireAbiArray(tuple[2], 'CLAIMS');
   const envelope: HankoEnvelope = {
-    placeholders: placeholders.map((value, index) => asHankoBytes32(value, `PLACEHOLDER_${index}`)),
-    packedSignatures: asHex(packedSignatures, 'PACKED_SIGNATURES'),
+    placeholders: placeholders.map((value, index) =>
+      asHankoBytes32(requireAbiString(value, `PLACEHOLDER_${index}`), `PLACEHOLDER_${index}`)),
+    packedSignatures: asHex(requireAbiString(packedSignatures, 'PACKED_SIGNATURES'), 'PACKED_SIGNATURES'),
     claims: claims.map(decodeClaim),
   };
   if (encodeHankoEnvelope(envelope).toLowerCase() !== canonicalInput) {
