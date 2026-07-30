@@ -166,7 +166,6 @@ export interface FrontendXlnFunctions {
   FINANCIAL_CONSTANTS: FinancialConstants;
   getEntity: (entityId: string) => FrontendEntitySummary;
   getEntityShortId: XLNModule['getEntityShortId'];
-  formatEntityId: XLNModule['formatEntityId'];
   formatEntityDisplay: XLNModule['formatEntityDisplay'];
   hashToAvatar: XLNModule['hashToAvatar'];
   generateEntityAvatar: XLNModule['generateEntityAvatar'];
@@ -1792,7 +1791,6 @@ export const xlnFunctions = derived([xlnInstance, settings], ([$xlnInstance, $se
       FINANCIAL_CONSTANTS: {} as FinancialConstants,
       getEntity: failFn('getEntity'),
       getEntityShortId: failFn('getEntityShortId'),
-      formatEntityId: failFn('formatEntityId'),
       formatEntityDisplay: failFn('formatEntityDisplay'),
       // Display-only helpers must not crash early boot paths like /app#pay deep links.
       hashToAvatar: (() => '') as FrontendXlnFunctions['hashToAvatar'],
@@ -1863,11 +1861,10 @@ export const xlnFunctions = derived([xlnInstance, settings], ([$xlnInstance, $se
         if (!shortId) {
           throw new Error(`FINTECH-SAFETY: getEntityShortId returned empty: ${shortId}`);
         }
-        const display = $xlnInstance.formatEntityId(entityId);
         return {
           id: entityId,
           shortId,
-          display,
+          display: entityId,
           avatar: $xlnInstance.generateEntityAvatar(entityId),
           info: $xlnInstance.getEntityDisplayInfo(entityId),
         };
@@ -1891,7 +1888,6 @@ export const xlnFunctions = derived([xlnInstance, settings], ([$xlnInstance, $se
       }
     },
 
-    formatEntityId: $xlnInstance.formatEntityId,
     formatEntityDisplay: $xlnInstance.formatEntityDisplay,
 
     // Avatar generation (using XLN instance functions)

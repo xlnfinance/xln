@@ -142,12 +142,11 @@
   }
 
   // Current selection display
-  $: displayText = getDisplayText(tab, activeReplicas, activeXlnFunctions);
+  $: displayText = getDisplayText(tab, activeReplicas);
 
   function getDisplayText(
     tab: Tab,
     replicas: Map<string, EntityReplica> | null | undefined,
-    xlnFuncs: { formatEntityId?: (id: string) => string } | null,
   ): string {
     if (!tab.entityId || !replicas) return 'Select Entity';
 

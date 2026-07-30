@@ -90,5 +90,3 @@ export const getEntityShortId = (entityId: string): string => {
   }
   return hex.slice(0, 4).toUpperCase();
 };
-
-export const formatEntityId = (entityId: string): string => entityId;

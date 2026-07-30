@@ -104,6 +104,6 @@ export {
 } from '../protocol/jurisdiction-identity';
 export { clearDatabase } from '../storage/clear-database';
 export { generateEntityAvatar, generateSignerAvatar, getEntityDisplayInfo, getSignerDisplayInfo, hashToAvatar } from '../presentation/identity-display';
-export { formatEntityId, getEntityShortId } from '../presentation/identity-display';
+export { getEntityShortId } from '../presentation/identity-display';
 export { safeStringify } from '../protocol/serialization';
 export { resolveEntityProposerId } from '../runtime/entity-output-signer';

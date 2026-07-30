@@ -179,8 +179,7 @@
       const profileName = profile.name.trim();
       if (profileName) return profileName;
     }
-    const formattedId = activeXlnFunctions?.formatEntityId?.(canonical);
-    return String(formattedId || formatShortId(canonical));
+    return formatShortId(canonical);
   }
 
   function entityAvatar(entity: string): string {
