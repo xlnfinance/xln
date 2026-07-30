@@ -10,6 +10,10 @@ import type {
   StoredTowerActionReceipt,
   StoredTowerMetaStats,
 } from './store-types';
+import {
+  requireBoundaryRecord,
+  requireExactBoundaryKeys,
+} from '../protocol/boundary-validation';
 
 export type WatchtowerStoredSchema = 'lookup' | 'action-receipt' | 'meta-stats';
 
@@ -33,8 +37,7 @@ export const decodeWatchtowerStoredValue = <T>(
 };
 
 const record = (value: unknown, code: string): Record<string, unknown> => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(code);
-  return value as Record<string, unknown>;
+  return requireBoundaryRecord(value, code);
 };
 
 const text = (value: unknown, code: string): string => {
@@ -57,6 +60,12 @@ const decodeBundle = (
   runtimeId: string,
 ): EncryptedRuntimeRecoveryBundleV1 => {
   const bundle = record(value, 'TOWER_STORED_BUNDLE_INVALID');
+  requireExactBoundaryKeys(
+    bundle,
+    ['version', 'runtimeId', 'lookupKey', 'height', 'createdAt', 'bundleHash', 'iv', 'ciphertext'],
+    ['kind', 'baseRuntimeHeight', 'baseCheckpointHash', 'compression'],
+    'TOWER_STORED_BUNDLE_FIELDS_INVALID',
+  );
   if (bundle['version'] !== 1) throw new Error('TOWER_STORED_BUNDLE_VERSION_INVALID');
   if (bundle['kind'] !== undefined && bundle['kind'] !== 'snapshot' && bundle['kind'] !== 'journal_tail') {
     throw new Error('TOWER_STORED_BUNDLE_KIND_INVALID');
@@ -81,6 +90,33 @@ const decodeBundle = (
 
 const decodeReceipt = (value: unknown, lookupKey: string, runtimeId: string): TowerReceiptV1 => {
   const receipt = record(value, 'TOWER_STORED_RECEIPT_INVALID');
+  requireExactBoundaryKeys(
+    receipt,
+    [
+      'type',
+      'version',
+      'towerId',
+      'lookupKey',
+      'runtimeId',
+      'height',
+      'bundleHash',
+      'receivedAt',
+      'sequence',
+      'retainedSlots',
+    ],
+    [
+      'towerMode',
+      'slot',
+      'storedAt',
+      'expiresAt',
+      'storedBytes',
+      'maxStoredBytes',
+      'quotaOk',
+      'appointmentSequence',
+      'towerSignature',
+    ],
+    'TOWER_STORED_RECEIPT_FIELDS_INVALID',
+  );
   if (receipt['type'] !== 'tower_receipt' || receipt['version'] !== 1) {
     throw new Error('TOWER_STORED_RECEIPT_VERSION_INVALID');
   }
@@ -112,6 +148,12 @@ const decodeReceipt = (value: unknown, lookupKey: string, runtimeId: string): To
 
 export const decodeStoredLookupDoc = (raw: string, expectedLookupKey?: string): StoredLookupDoc => {
   const doc = record(deserializeTaggedJson(raw), 'TOWER_STORED_LOOKUP_INVALID');
+  requireExactBoundaryKeys(
+    doc,
+    ['lookupKey', 'runtimeId', 'updatedAt', 'receipts', 'bundles'],
+    [],
+    'TOWER_STORED_LOOKUP_FIELDS_INVALID',
+  );
   const lookupKey = text(doc['lookupKey'], 'TOWER_STORED_LOOKUP_KEY_INVALID').toLowerCase();
   if (!/^0x[0-9a-f]{64}$/.test(lookupKey)) throw new Error('TOWER_STORED_LOOKUP_KEY_INVALID');
   if (expectedLookupKey && lookupKey !== expectedLookupKey) throw new Error('TOWER_STORED_LOOKUP_KEY_MISMATCH');
@@ -123,6 +165,12 @@ export const decodeStoredLookupDoc = (raw: string, expectedLookupKey?: string): 
   const receipts = doc['receipts'].map((entry) => decodeReceipt(entry, lookupKey, runtimeId));
   const bundles = doc['bundles'].map((value) => {
     const entry = record(value, 'TOWER_STORED_BUNDLE_ENTRY_INVALID');
+    requireExactBoundaryKeys(
+      entry,
+      ['slot', 'towerMode', 'bundle', 'lastResortPayloadDigest'],
+      ['lastResortPayload'],
+      'TOWER_STORED_BUNDLE_ENTRY_FIELDS_INVALID',
+    );
     const slot = safeInt(entry['slot'], 'TOWER_STORED_BUNDLE_SLOT_INVALID');
     const towerMode = normalizeTowerModeV1(entry['towerMode']);
     const bundle = decodeBundle(entry['bundle'], lookupKey, runtimeId);
@@ -148,11 +196,33 @@ export const decodeStoredLookupDoc = (raw: string, expectedLookupKey?: string): 
 
 export const decodeStoredMetaStats = (raw: string): StoredTowerMetaStats => {
   const stats = record(deserializeTaggedJson(raw), 'TOWER_STORED_META_INVALID');
+  requireExactBoundaryKeys(
+    stats,
+    ['actionReceiptCount'],
+    [],
+    'TOWER_STORED_META_FIELDS_INVALID',
+  );
   return { actionReceiptCount: safeInt(stats['actionReceiptCount'], 'TOWER_STORED_META_COUNT_INVALID') };
 };
 
 export const decodeStoredActionReceipt = (raw: string): StoredTowerActionReceipt => {
   const receipt = record(deserializeTaggedJson(raw), 'TOWER_STORED_ACTION_INVALID');
+  requireExactBoundaryKeys(
+    receipt,
+    [
+      'id',
+      'lookupKey',
+      'runtimeId',
+      'towerMode',
+      'actionKind',
+      'triggerHint',
+      'appointmentSequence',
+      'status',
+      'createdAt',
+    ],
+    ['txHash', 'blockNumber', 'error'],
+    'TOWER_STORED_ACTION_FIELDS_INVALID',
+  );
   const towerMode = normalizeTowerModeV1(receipt['towerMode']);
   const status = receipt['status'];
   if (status !== 'submitted' && status !== 'skipped' && status !== 'error') {
@@ -167,5 +237,26 @@ export const decodeStoredActionReceipt = (raw: string): StoredTowerActionReceipt
   safeInt(receipt['appointmentSequence'], 'TOWER_STORED_ACTION_SEQUENCE_INVALID');
   safeInt(receipt['createdAt'], 'TOWER_STORED_ACTION_CREATED_AT_INVALID');
   optionalSafeInt(receipt['blockNumber'], 'TOWER_STORED_ACTION_BLOCK_INVALID');
-  return { ...receipt, towerMode, status } as StoredTowerActionReceipt;
+  const txHash = receipt['txHash'];
+  const error = receipt['error'];
+  if (txHash !== undefined) text(txHash, 'TOWER_STORED_ACTION_TX_HASH_INVALID');
+  if (error !== undefined && typeof error !== 'string') {
+    throw new Error('TOWER_STORED_ACTION_ERROR_INVALID');
+  }
+  return {
+    id: String(receipt['id']),
+    lookupKey: String(receipt['lookupKey']),
+    runtimeId: String(receipt['runtimeId']),
+    towerMode,
+    actionKind: 'counter_dispute_only',
+    triggerHint: String(receipt['triggerHint']),
+    appointmentSequence: Number(receipt['appointmentSequence']),
+    status,
+    createdAt: Number(receipt['createdAt']),
+    ...(txHash === undefined ? {} : { txHash: String(txHash) }),
+    ...(receipt['blockNumber'] === undefined
+      ? {}
+      : { blockNumber: Number(receipt['blockNumber']) }),
+    ...(error === undefined ? {} : { error }),
+  };
 };

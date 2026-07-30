@@ -5,7 +5,7 @@ import { applyJBlockHeadersIngressTransform } from './watcher';
 import type { RpcBatchCall } from './receipt-root';
 import {
   applyGasHeadroom,
-  asRpcReceipt,
+  decodeRpcReceipt,
   asRpcTxResponse,
   type FeeOverrides,
   type RpcReceipt,
@@ -77,7 +77,7 @@ const createReceiptWaiter = (settings: ChainIoSettings): RpcChainIo['waitForRece
     const tx = asRpcTxResponse(txLike);
     const receipt = await tx.wait(settings.txWaitConfirms, settings.txWaitTimeoutMs);
     if (!receipt) throw new Error(`${label} transaction not mined (hash=${tx.hash})`);
-    return asRpcReceipt(receipt);
+    return decodeRpcReceipt(receipt);
   };
 
 const createSignerFactory = (

@@ -10,6 +10,8 @@ import {
   META_STATS_KEY,
 } from '../watchtower/store-db';
 import { createWatchtowerStore } from '../watchtower/store';
+import { decodeStoredActionReceipt } from '../watchtower/store-decode';
+import { serializeTaggedJson } from '../protocol/serialization';
 
 const temporaryStores: string[] = [];
 const lookupKey = `0x${'11'.repeat(32)}`;
@@ -36,7 +38,7 @@ test('lookup corruption fails after LevelDB reopen with schema and physical key'
   const store = createWatchtowerStore({ dbPath });
 
   await expect(store.getLatest(lookupKey)).rejects.toThrow(
-    `TOWER_STORED_RECORD_INVALID:schema=lookup:key=${key}:TOWER_STORED_LOOKUP_KEY_INVALID`,
+    `TOWER_STORED_RECORD_INVALID:schema=lookup:key=${key}:TOWER_STORED_LOOKUP_FIELDS_INVALID`,
   );
   await store.close();
 });
@@ -47,7 +49,7 @@ test('action receipt corruption fails after LevelDB reopen with schema and physi
   const store = createWatchtowerStore({ dbPath });
 
   await expect(store.listActionReceipts(lookupKey)).rejects.toThrow(
-    `TOWER_STORED_RECORD_INVALID:schema=action-receipt:key=${key}:TOWER_STORED_ACTION_STATUS_INVALID`,
+    `TOWER_STORED_RECORD_INVALID:schema=action-receipt:key=${key}:TOWER_STORED_ACTION_FIELDS_INVALID`,
   );
   await store.close();
 });
@@ -57,7 +59,25 @@ test('metadata corruption fails after LevelDB reopen with schema and physical ke
   const store = createWatchtowerStore({ dbPath });
 
   await expect(store.getStats()).rejects.toThrow(
-    `TOWER_STORED_RECORD_INVALID:schema=meta-stats:key=${META_STATS_KEY}:TOWER_STORED_META_COUNT_INVALID`,
+    `TOWER_STORED_RECORD_INVALID:schema=meta-stats:key=${META_STATS_KEY}:TOWER_STORED_META_FIELDS_INVALID`,
   );
   await store.close();
+});
+
+test('action receipt decoder rejects schema drift instead of preserving unknown fields', () => {
+  const encoded = serializeTaggedJson({
+    id: 'action-1',
+    lookupKey,
+    runtimeId: `0x${'22'.repeat(20)}`,
+    towerMode: 'blind_backup',
+    actionKind: 'counter_dispute_only',
+    triggerHint: 'proof',
+    appointmentSequence: 1,
+    status: 'submitted',
+    createdAt: 1,
+    unexpected: true,
+  });
+  expect(() => decodeStoredActionReceipt(encoded)).toThrow(
+    'TOWER_STORED_ACTION_FIELDS_INVALID:missing=none:extra=unexpected',
+  );
 });

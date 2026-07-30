@@ -66,7 +66,86 @@ export const eventCarriers = (
 
 export const asRpcTxResponse = (tx: unknown): RpcTxResponse => tx as RpcTxResponse;
 
-export const asRpcReceipt = (receipt: unknown): RpcReceipt => receipt as RpcReceipt;
+const decodeRpcLog = (
+  value: unknown,
+  receiptHash: string,
+  receiptIndex: number,
+): RpcReceipt['logs'][number] => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`J_ADAPTER_RECEIPT_LOG_INVALID:${receiptHash}:${receiptIndex}`);
+  }
+  const log = value as Record<string, unknown>;
+  const address = log['address'];
+  const topics = log['topics'];
+  const data = log['data'];
+  if (
+    !ethers.isAddress(address) ||
+    !Array.isArray(topics) ||
+    topics.some(topic => !ethers.isHexString(topic, 32)) ||
+    !ethers.isHexString(data)
+  ) {
+    throw new Error(`J_ADAPTER_RECEIPT_LOG_INVALID:${receiptHash}:${receiptIndex}`);
+  }
+  const index = log['index'];
+  const logIndex = log['logIndex'];
+  if (
+    index !== undefined &&
+    (!Number.isSafeInteger(index) || Number(index) < 0)
+  ) {
+    throw new Error(`J_ADAPTER_RECEIPT_LOG_INDEX_INVALID:${receiptHash}:${receiptIndex}`);
+  }
+  if (
+    logIndex !== undefined &&
+    (!Number.isSafeInteger(logIndex) || Number(logIndex) < 0)
+  ) {
+    throw new Error(`J_ADAPTER_RECEIPT_LOG_INDEX_INVALID:${receiptHash}:${receiptIndex}`);
+  }
+  return {
+    address,
+    topics,
+    data,
+    ...(index === undefined ? {} : { index: Number(index) }),
+    ...(logIndex === undefined ? {} : { logIndex: Number(logIndex) }),
+  };
+};
+
+/**
+ * Project an untrusted provider receipt into the only shape JAdapter accepts.
+ *
+ * A successful empty-log receipt still needs canonical chain coordinates;
+ * otherwise an RPC fault could be mistaken for a mined transaction with no
+ * events.
+ */
+export const decodeRpcReceipt = (value: unknown): RpcReceipt => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('J_ADAPTER_RECEIPT_INVALID');
+  }
+  const receipt = value as Record<string, unknown>;
+  const blockNumber = receipt['blockNumber'];
+  const blockHash = receipt['blockHash'];
+  const hash = receipt['hash'];
+  const logs = receipt['logs'];
+  if (
+    !Number.isSafeInteger(blockNumber) ||
+    Number(blockNumber) < 1 ||
+    !ethers.isHexString(blockHash, 32) ||
+    !ethers.isHexString(hash, 32) ||
+    !Array.isArray(logs)
+  ) {
+    throw new Error('J_ADAPTER_RECEIPT_COORDINATES_INVALID');
+  }
+  const gasUsed = receipt['gasUsed'];
+  if (gasUsed !== undefined && typeof gasUsed !== 'bigint') {
+    throw new Error('J_ADAPTER_RECEIPT_GAS_USED_INVALID');
+  }
+  return {
+    blockNumber: Number(blockNumber),
+    blockHash,
+    hash,
+    logs: logs.map((log, index) => decodeRpcLog(log, hash, index)),
+    ...(gasUsed === undefined ? {} : { gasUsed }),
+  };
+};
 
 export const applyGasHeadroom = (value: bigint, headroomBps: number): bigint =>
   (value * BigInt(headroomBps) + 9_999n) / 10_000n;

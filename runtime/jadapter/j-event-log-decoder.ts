@@ -73,6 +73,14 @@ export const parseReceiptLogsToJEvents = (
   },
   carriers: JEventCarrier[],
 ): JEvent[] => {
+  if (
+    !Number.isSafeInteger(receipt.blockNumber) ||
+    receipt.blockNumber < 1 ||
+    !ethers.isHexString(receipt.blockHash, 32) ||
+    !ethers.isHexString(receipt.hash, 32)
+  ) {
+    throw new Error('J_ADAPTER_RECEIPT_COORDINATES_INVALID');
+  }
   const carrierByAddress = new Map<string, JEventCarrier>();
   for (const carrier of carriers) {
     if (!ethers.isAddress(carrier.address)) {

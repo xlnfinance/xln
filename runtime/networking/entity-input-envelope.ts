@@ -2,6 +2,10 @@ import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { RuntimeEntityInputsEnvelope } from '../runtime/types';
 import { validateDeliverableEntityInput } from '../runtime/routing-validation';
 import { normalizeRuntimeId } from './runtime-id';
+import {
+  requireBoundaryRecord,
+  requireExactBoundaryKeys,
+} from '../protocol/boundary-validation';
 
 const requireFrameCoordinate = (value: unknown, field: string): number => {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
@@ -15,10 +19,16 @@ const decodeAtomicPair = (
   inputCount: number,
 ): RuntimeEntityInputsEnvelope['atomicCrossJurisdictionPair'] => {
   if (value === undefined) return undefined;
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('P2P_ENTITY_INPUTS_ENVELOPE_ATOMIC_PAIR_INVALID');
-  }
-  const pair = value as Record<string, unknown>;
+  const pair = requireBoundaryRecord(
+    value,
+    'P2P_ENTITY_INPUTS_ENVELOPE_ATOMIC_PAIR_INVALID',
+  );
+  requireExactBoundaryKeys(
+    pair,
+    ['phase', 'pairKey'],
+    [],
+    'P2P_ENTITY_INPUTS_ENVELOPE_ATOMIC_PAIR_FIELDS_INVALID',
+  );
   const phase = pair['phase'];
   const pairKey = pair['pairKey'];
   if (
@@ -34,9 +44,7 @@ const decodeAtomicPair = (
 
 const decodeCrossJurisdictionIntent = (value: unknown): CrossJurisdictionSwapRoute | undefined => {
   if (value === undefined) return undefined;
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('P2P_ENTITY_INPUTS_ENVELOPE_CROSS_J_INTENT_INVALID');
-  }
+  requireBoundaryRecord(value, 'P2P_ENTITY_INPUTS_ENVELOPE_CROSS_J_INTENT_INVALID');
   // The transport only establishes the envelope shape. Runtime admission
   // canonicalizes and validates every financial field against local state;
   // duplicating that protocol validator here would create two authorities.
@@ -48,10 +56,13 @@ const decodeCrossJurisdictionIntent = (value: unknown): CrossJurisdictionSwapRou
  * Runtime machine. Encryption proves confidentiality, not schema validity.
  */
 export const decodeRuntimeEntityInputsEnvelope = (value: unknown): RuntimeEntityInputsEnvelope => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('P2P_ENTITY_INPUTS_ENVELOPE_INVALID');
-  }
-  const envelope = value as Record<string, unknown>;
+  const envelope = requireBoundaryRecord(value, 'P2P_ENTITY_INPUTS_ENVELOPE_INVALID');
+  requireExactBoundaryKeys(
+    envelope,
+    ['sourceRuntimeId', 'sourceRuntimeHeight', 'sourceRuntimeTimestamp', 'entityInputs'],
+    ['atomicCrossJurisdictionPair', 'crossJurisdictionIntent'],
+    'P2P_ENTITY_INPUTS_ENVELOPE_FIELDS_INVALID',
+  );
   const sourceRuntimeId = normalizeRuntimeId(envelope['sourceRuntimeId']);
   if (!sourceRuntimeId) throw new Error('P2P_ENTITY_INPUTS_ENVELOPE_SOURCE_RUNTIME_INVALID');
   if (!Array.isArray(envelope['entityInputs'])) {

@@ -182,6 +182,13 @@ describe('manual J-event ingress source binding', () => {
       { address: address('43'), interface: contractInterface },
       { address: address('43'), interface: contractInterface },
     ])).toThrow(`J_RECEIPT_CARRIER_ADDRESS_DUPLICATE:${address('43')}`);
+    expect(() => parseReceiptLogsToJEvents({
+      ...receipt,
+      logs: [],
+      blockNumber: 0,
+      blockHash: '0x',
+      hash: '0x',
+    }, [])).toThrow('J_ADAPTER_RECEIPT_COORDINATES_INVALID');
   });
 
   test('manual chain events fail closed when EVM log order is absent', () => {
