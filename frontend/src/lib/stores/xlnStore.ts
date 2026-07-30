@@ -431,7 +431,10 @@ const updateLocalEnvironmentStores = (xln: XLNModule, env: RuntimeState): void =
 
 const registerLocalEnvironmentCallback = (xln: XLNModule, env: RuntimeState): void => {
   unregisterEnvChange?.();
-  unregisterEnvChange = xln.registerEnvChangeCallback?.(env, (nextEnv) => updateLocalEnvironmentStores(xln, nextEnv)) || null;
+  unregisterEnvChange = xln.registerRuntimePublishedCallback?.(env, (notice) => {
+    currentHeight.set(notice.height);
+    scheduleRuntimeProjectionRefresh();
+  }) || null;
 };
 
 const clearRuntimeAdapterSubscriptions = (): void => {

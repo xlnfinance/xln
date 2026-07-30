@@ -86,10 +86,10 @@ import {
   startJurisdictionWatchers,
   startRuntimeLoop,
   getEntityJAdapter,
-  registerEnvChangeCallback,
   registerRuntimeFrameCommitCallback,
   validateRuntimeInputAdmission,
 } from '../runtime.ts';
+import { registerEnvChangeCallback } from '../runtime/loop-environment';
 import type { EntityInput } from '../entity/types';
 import type { RuntimeState } from '../runtime/types';
 import type { JReplica } from '../types/jurisdiction-runtime';

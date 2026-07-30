@@ -1005,7 +1005,7 @@ function registerRuntimeEnvChange(runtimeId: string, env: RuntimeState, xln: XLN
     throw new Error('[VaultStore] Cannot register env change callback without runtimeId');
   }
   unregisterRuntimeEnvChange(normalizedRuntimeId);
-  if (typeof xln.registerEnvChangeCallback !== 'function') return;
+  if (typeof xln.registerRuntimePublishedCallback !== 'function') return;
   const recovery = get(runtimesState).runtimes[normalizedRuntimeId]?.recovery;
   if (recovery?.waitForTowerReceipts === true && typeof xln.registerRecoveryBackupBarrier === 'function') {
     runtimeRecoveryBarrierUnsubscribers.set(
@@ -1016,16 +1016,19 @@ function registerRuntimeEnvChange(runtimeId: string, env: RuntimeState, xln: XLN
     );
   }
 
-  const onEnvChange = (nextEnv: RuntimeState): void => {
-    runtimeOperations.updateRuntimeEnv(normalizedRuntimeId, nextEnv);
+  const onPublished = (): void => {
+    runtimeOperations.updateRuntimeEnv(normalizedRuntimeId, runtimeEnv);
     if (normalizeRuntimeId(get(activeRuntimeId) || '') === normalizedRuntimeId) {
-      setXlnEnvironment(nextEnv);
+      setXlnEnvironment(runtimeEnv);
     }
-    scheduleRuntimeRecoveryUpload(normalizedRuntimeId, nextEnv, xln);
+    scheduleRuntimeRecoveryUpload(normalizedRuntimeId, runtimeEnv, xln);
   };
 
-  runtimeEnvChangeUnsubscribers.set(normalizedRuntimeId, xln.registerEnvChangeCallback(runtimeEnv, onEnvChange));
-  onEnvChange(runtimeEnv);
+  runtimeEnvChangeUnsubscribers.set(
+    normalizedRuntimeId,
+    xln.registerRuntimePublishedCallback(runtimeEnv, onPublished),
+  );
+  onPublished();
 }
 
 function runtimeToEntry(runtime: Runtime, env: RuntimeState) {

@@ -22,11 +22,11 @@ import {
   startP2P,
   startRuntimeLoop,
   ensureGossipProfiles,
-  registerEnvChangeCallback,
   registerRuntimeFrameCommitCallback,
   closeRuntimeDb,
   closeInfraDb,
 } from '../runtime.ts';
+import { registerEnvChangeCallback } from '../runtime/loop-environment';
 import { readFileSync } from 'node:fs';
 import { safeStringify, serializeTaggedJson } from '../protocol/serialization';
 import type { RuntimeState, RuntimeEntityInputsEnvelope } from '../runtime/types';

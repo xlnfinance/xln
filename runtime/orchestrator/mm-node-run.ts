@@ -30,7 +30,6 @@ import {
   readPersistedRuntimeActivityPage,
   readPersistedStorageFrameRecord,
   readPersistedStorageHead,
-  registerEnvChangeCallback,
   registerRuntimeFrameCommitCallback,
   startJurisdictionWatchers,
   startP2P,
@@ -38,6 +37,7 @@ import {
   submitCrossJurisdictionIntent,
   validateRuntimeInputAdmission,
 } from '../runtime.ts';
+import { registerEnvChangeCallback } from '../runtime/loop-environment';
 import { getReliableOutputIdentity } from '../runtime/output-routing';
 import { isLocalOperatorRequest, resolveSocketPeerAddress } from '../server/health-redaction';
 import { createRuntimeIngressReceiptStore } from '../runtime/ingress-receipts';

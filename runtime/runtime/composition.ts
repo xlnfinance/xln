@@ -75,7 +75,6 @@ const runtimeLoopApi = createRuntimeLoopApi({
 });
 
 const {
-  registerEnvChangeCallback,
   registerRuntimePublishedCallback,
   registerRuntimeFrameCommitCallback,
   registerRecoveryBackupBarrier,
@@ -149,7 +148,6 @@ const failfastAssert: (
 export type RuntimeLoopConfig = NonNullable<Parameters<typeof startRuntimeLoop>[1]>;
 
 export {
-  registerEnvChangeCallback,
   registerRuntimePublishedCallback,
   registerRuntimeFrameCommitCallback,
   registerRecoveryBackupBarrier,

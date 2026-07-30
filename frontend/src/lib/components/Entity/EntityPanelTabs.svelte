@@ -651,10 +651,7 @@ $: activeCommandsReady = activeIsLive && $runtimeControllerHandle.commandReady;
 $: fallbackRuntimeEnv = getRuntimeEnv(activeEnv);
 $: actionRuntimeEnv = activeLiveEnv ?? (typeof liveEnvResolver === "function" ? liveEnvResolver() : null) ?? fallbackRuntimeEnv;
 $: displayEnv = activeIsLive ? (actionRuntimeEnv ?? activeEnv) : activeEnv;
-// The live Runtime object is an action handle, never a display model. Runtime
-// mutates that object while it builds H+1, whereas RuntimeAdapter projections
-// are owned snapshots of committed H. Prefer the projection in both embedded
-// and remote mode so the UI cannot render pre-WAL financial state.
+// Display only the owned post-WAL projection; the live Runtime is an action handle.
 $: displayProjectionFrame = runtimeProjectionFrame;
 $: panelView = buildEntityPanelView(displayEnv, tab.entityId, tab.signerId, envRevision, displayProjectionFrame);
 $: directoryPanelView = runtimeProjectionFrame ? buildEntityPanelView(activeEnv, tab.entityId, tab.signerId, envRevision, runtimeProjectionFrame) : panelView;
