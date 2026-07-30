@@ -8,6 +8,27 @@ import {
 } from '../runtime/frame/writer-lock';
 
 describe('runtime committed read barrier', () => {
+  test('installs the shared barrier before the first reader on a fresh Runtime', async () => {
+    const env = createEmptyEnv('fresh read barrier');
+    env.runtimeState = undefined;
+
+    const releaseReader = await acquireRuntimeCommittedRead(env);
+    expect(env.runtimeState?.activeCommittedReaders).toBe(1);
+
+    let writerEntered = false;
+    const writer = acquireRuntimeFrameWriter(env.runtimeState!).then(release => {
+      writerEntered = true;
+      return release;
+    });
+    await Promise.resolve();
+    expect(writerEntered).toBeFalse();
+
+    releaseReader();
+    const releaseWriter = await writer;
+    expect(writerEntered).toBeTrue();
+    releaseWriter();
+  });
+
   test('writer waits until every committed reader releases its view', async () => {
     const env = createEmptyEnv('read barrier blocks writer');
     const firstRelease = await acquireRuntimeCommittedRead(env);

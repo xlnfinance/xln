@@ -1,5 +1,6 @@
 import type { RuntimeState } from '../types';
 import { inferRuntimeLifecyclePhase } from '../lifecycle';
+import { ensureRuntimeState } from '../runtime-state';
 
 type RuntimeLifecycleState = NonNullable<RuntimeState['runtimeState']>;
 
@@ -29,7 +30,9 @@ const waitForCommittedReaders = async (
 export const acquireRuntimeCommittedRead = async (
   env: RuntimeState,
 ): Promise<() => void> => {
-  const state = env.runtimeState ?? {};
+  // The barrier belongs to the live Runtime replica. A detached fallback
+  // object would let a writer miss an already-active reader on a fresh Runtime.
+  const state = ensureRuntimeState(env);
   while (state.processingPromise) await state.processingPromise;
   if (state.stateMutationInFlight) {
     throw new Error('RUNTIME_COMMITTED_STATE_UNAVAILABLE_RELOAD_REQUIRED');
