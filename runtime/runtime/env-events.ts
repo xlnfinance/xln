@@ -416,11 +416,3 @@ export function attachEventEmitters(env: RuntimeState): void {
     });
   };
 }
-
-/**
- * Reset global log ID counter (for testing)
- */
-export function resetLogCounter(env: RuntimeState): void {
-  const logState = getLogState(env);
-  logState.nextId = 0;
-}

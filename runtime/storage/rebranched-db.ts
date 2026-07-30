@@ -453,4 +453,3 @@ export const withRebranchedValues = <T extends RawDb>(db: T): T => new Proxy(db,
 });
 
 export const STORAGE_MAX_PHYSICAL_VALUE_BYTES = MAX_PHYSICAL_VALUE_BYTES;
-export const STORAGE_REBRANCH_LEAF_PAYLOAD_BYTES = LEAF_PAYLOAD_BYTES;

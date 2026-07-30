@@ -12,8 +12,4 @@ export const encode = <T>(data: T): Buffer => Buffer.from(serializeTaggedJson(da
 
 export const decode = <T>(buffer: Buffer): T => deserializeTaggedJson<T>(buffer.toString());
 
-export const encodeAsync = async <T>(data: T): Promise<Buffer> => encode(data);
-
-export const decodeAsync = async <T>(buffer: Buffer): Promise<T> => decode<T>(buffer);
-
 export { USE_MSGPACK };

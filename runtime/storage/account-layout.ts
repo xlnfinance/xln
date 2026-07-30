@@ -1,5 +1,4 @@
 import { computeIntegrityDigest } from '../infra/integrity-checksum';
-import { compareStableText } from '../protocol/serialization';
 import { LIMITS } from '../config/constants';
 import { decodeBuffer, encodeBuffer } from './codec';
 import { keyLiveAccountField } from './keys';
@@ -224,11 +223,3 @@ export const readAccountStorageLayout = async (
   }
   return { doc: doc as StorageAccountDoc, logicalValue, representation: 'fields' };
 };
-
-export const inspectAccountStorageFields = (doc: StorageAccountDoc): Array<{
-  field: StorageAccountField;
-  tag: number;
-  bytes: number;
-  hash: string;
-}> => encodeFields(doc).map(({ field, tag, value, hash }) => ({ field, tag, bytes: value.byteLength, hash }))
-  .sort((left, right) => compareStableText(left.field, right.field));

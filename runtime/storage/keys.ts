@@ -83,7 +83,6 @@ export const KEY_SNAPSHOT_REPLICA_META = 0x34;
 export const KEY_REBRANCH_NODE = 0x7e;
 
 export const STORAGE_VERIFY_TAIL_FRAMES = 128;
-export const EPOCH_SEED_FRAME_TAIL = STORAGE_VERIFY_TAIL_FRAMES + 1;
 
 export const KEY_HISTORY_VIEW_HEAD = Buffer.from([0x00]);
 export const HISTORY_VIEW_ACCOUNT_FRAME = 0x01;
@@ -177,14 +176,6 @@ export const keyLiveAccountField = (
     hexBytes(counterpartyId),
     Buffer.from([fieldTag]),
   ]);
-};
-
-export const keyLiveAccountFieldPrefix = (entityId?: string, counterpartyId?: string): Buffer => {
-  if (entityId && counterpartyId) {
-    return Buffer.concat([Buffer.from([KEY_LIVE_ACCOUNT_FIELD]), hexBytes(entityId), hexBytes(counterpartyId)]);
-  }
-  if (entityId) return Buffer.concat([Buffer.from([KEY_LIVE_ACCOUNT_FIELD]), hexBytes(entityId)]);
-  return Buffer.from([KEY_LIVE_ACCOUNT_FIELD]);
 };
 
 export const keyLiveBook = (entityId: string, pairId: string): Buffer =>

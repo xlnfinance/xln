@@ -844,18 +844,6 @@ export const resolveRuntimeIdForEntity = (
   return null;
 };
 
-export const hasLocalEntityReplica = (
-  env: RuntimeState,
-  entityId: string,
-  deps: Pick<RuntimeEntityRoutingDeps, 'extractEntityId'>,
-): boolean => {
-  const target = normalizeEntityKey(entityId);
-  for (const key of env.eReplicas.keys()) {
-    if (normalizeEntityKey(deps.extractEntityId(key)) === target) return true;
-  }
-  return false;
-};
-
 export const resolveRuntimeIdForCrossJurisdictionEntity = (
   env: RuntimeState,
   entityId: string,

@@ -1,7 +1,6 @@
 import type { EntityInput, EntityLeaderTimeoutVote, EntityReplica, EntityState } from '../entity/types';
 import type { RuntimeState } from './types';
 import type { EntityTx } from '../types/entity-tx';
-import type { CrontabTaskMethod } from '../entity/scheduler-types';
 import { crontabTaskHasPendingWork } from '../entity/scheduler';
 import {
   MAX_SCHEDULED_WAKE_DIAGNOSTIC_JOBS,
@@ -297,5 +296,3 @@ export const assertScheduledWakeTxAuthorized = (tx: EntityTx, replay: boolean): 
 export const deleteScheduledWakeIndex = (env: RuntimeState): void => {
   if (env.runtimeState) delete env.runtimeState.scheduledWakeIndex;
 };
-
-export const scheduledWakeTaskId = (method: CrontabTaskMethod): string => method;
