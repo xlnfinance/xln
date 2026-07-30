@@ -15,6 +15,7 @@ import { resolveRuntimeAdapterRead, type RuntimeAdapterResolveContext } from './
 import { assertRuntimeCommandReady, getRuntimeCommandReadiness } from '../runtime/lifecycle';
 import { ensureRuntimeInfrastructure } from '../runtime/runtime-infrastructure';
 import type { RuntimePublishedNotice } from '../runtime/loop-environment';
+import { withRuntimeCommittedRead } from '../runtime/frame/writer-lock';
 
 export type EmbeddedRuntimeAdapterDeps = {
   getEnv: () => RuntimeReplica | null;
@@ -94,7 +95,10 @@ export class EmbeddedRuntimeAdapter implements RuntimeAdapter {
       : this.deps.getEnv();
     if (!env) throw new RuntimeAdapterError('E_INTERNAL', 'embedded runtime env is not ready', true);
     this.env = env;
-    this.publishCommittedMetadata(env);
+    // Runtime may already be constructing H+1 when the UI attaches. Wait for
+    // the writer instead of leaking speculative State or making UI startup
+    // depend on a lucky event-loop ordering.
+    await withRuntimeCommittedRead(env, () => this.publishCommittedMetadata(env));
     this.unregister?.();
     this.unregister = this.deps.registerRuntimePublishedCallback(env, (notice) => {
       this.publishCommittedNotice(notice);

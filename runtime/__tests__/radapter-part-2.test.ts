@@ -24,6 +24,7 @@ import {
 import { EmbeddedRuntimeAdapter } from '../radapter/embedded';
 import { registerRuntimePublishedCallback } from '../runtime/loop-environment';
 import { notifyRuntimeStateChanged } from '../runtime/frame/notifications';
+import { acquireRuntimeFrameWriter } from '../runtime/frame/writer-lock';
 
 import { RemoteRuntimeAdapter } from '../radapter/remote';
 
@@ -2324,6 +2325,33 @@ test('runtime publication coalesces in-flight notices until the frame is durable
   notifyRuntimeStateChanged(env);
   unregister();
   expect(publishedHeights).toEqual([5]);
+});
+
+test('embedded adapter connect waits for the active Runtime frame to commit', async () => {
+  const env = makeEnv();
+  env.state.height = 4;
+  const releaseWriter = await acquireRuntimeFrameWriter(env.infrastructure!);
+  env.infrastructure!.stateMutationInFlight = true;
+  const adapter = new EmbeddedRuntimeAdapter({
+    getEnv: () => env,
+    validateRuntimeInputAdmission: () => {},
+    enqueueRuntimeInput: () => {},
+    submitCrossJurisdictionIntent: async () => ({ delivered: true }),
+    registerRuntimePublishedCallback: () => () => {},
+  });
+
+  let connected = false;
+  const connecting = adapter.connect({ mode: 'embedded' }).then(() => {
+    connected = true;
+  });
+  await Promise.resolve();
+  expect(connected).toBeFalse();
+
+  env.state.height = 5;
+  env.infrastructure!.stateMutationInFlight = false;
+  releaseWriter();
+  await connecting;
+  expect(adapter.currentHeight).toBe(5);
 });
 
 test('embedded adapter never publishes an in-flight frame through synchronous status', async () => {
