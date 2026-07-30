@@ -66,7 +66,7 @@ const CORE_FILES = {
   ],
   runtime: [
     // Core data structures and implementation
-    'types.ts',              // All TypeScript interfaces (CRITICAL: AccountMachine, EntityState, Delta)
+    'runtime/types.ts',      // Runtime input/frame/replica interfaces
     'protocol/identity.ts',  // Identity system: EntityId, SignerId, JId, ReplicaKey
 
     // Main coordinators (how the system works)
@@ -76,7 +76,7 @@ const CORE_FILES = {
     'runtime/input-queue.ts', // The single Runtime mempool
     'runtime/output-routing.ts', // Post-commit output routing
     'runtime/live-restore.ts', // Durable Runtime restore boundary
-    'entity/consensus/index.ts',   // BFT consensus (ADD_TX -> PROPOSE -> SIGN -> COMMIT)
+    'entity/consensus/index.ts',   // Entity input -> candidate -> Hanko certificate -> commit
     'account/consensus/index.ts',  // Bilateral account consensus between entities
     'account/input.ts',      // Canonical AccountInput boundary
     'account/j-finality.ts', // Account-owned unilateral Depository finality
@@ -245,7 +245,7 @@ const CROSS_FILES = {
     'mocks/NoReturnERC20Mock.sol',
   ],
   runtime: [
-    'types.ts',
+    'runtime/types.ts',
     'types/account.ts',
     'types/entity-tx.ts',
     'types/cross-jurisdiction.ts',
@@ -289,7 +289,6 @@ const CROSS_FILES = {
     'extensions/cross-j/orderbook.ts',
     'extensions/cross-j/boundary.ts',
     'entity/tx/apply.ts',
-    'entity/tx/financial.ts',
     'entity/tx/j-events.ts',
     'entity/tx/cross-j-outputs.ts',
     'entity/tx/cross-jurisdiction-helpers.ts',
@@ -396,7 +395,7 @@ const CROSS_FILES = {
 const RUNTIME_FILES = {
   contracts: [],
   runtime: uniqueFiles([
-    'types.ts',
+    'runtime/types.ts',
     'types/account.ts',
     'types/entity-tx.ts',
     'types/jurisdiction-events.ts',
@@ -436,7 +435,6 @@ const RUNTIME_FILES = {
     'jurisdiction/event-observation.ts',
     'entity/tx/apply.ts',
     'entity/tx/validation.ts',
-    'entity/tx/financial.ts',
     'entity/tx/proposals.ts',
     'entity/tx/j-events.ts',
     'entity/tx/j-events-account.ts',
@@ -456,7 +454,6 @@ const RUNTIME_FILES = {
     'account/utils.ts',
     'account/crypto.ts',
     'account/frame.ts',
-    'protocol/signatures.ts',
     'protocol/serialization.ts',
     'storage/snapshot-coder.ts',
     'account/state-clone.ts',
@@ -496,7 +493,7 @@ const RUNTIME_FILES = {
 const ORDERBOOK_FILES = {
   contracts: [],
   runtime: [
-    'types.ts',
+    'runtime/types.ts',
     'types/account.ts',
     'types/entity-tx.ts',
     'protocol/identity.ts',
@@ -567,7 +564,7 @@ const SWAP_FILES = {
     'Account.sol',
   ],
   runtime: uniqueFiles([
-    'types.ts',
+    'runtime/types.ts',
     'types/account.ts',
     'types/entity-tx.ts',
     'protocol/identity.ts',
@@ -1135,7 +1132,7 @@ salvage -> evidence -> dispute -> finalization path is tested.
 
 **Implementation path (read third, ~45min):**
 - Depository.sol (7min) - enforceDebts() FIFO
-- types.ts - All TypeScript interfaces
+- runtime/types.ts - Runtime input, frame, and replica interfaces
 - entity/consensus/index.ts - BFT state machine
 - account/consensus/index.ts - Bilateral consensus
 - entity/tx/apply.ts - Transaction dispatcher
@@ -1157,10 +1154,10 @@ xln/
     DeltaTransformer.sol       ${fileSizes['contracts/DeltaTransformer.sol'] || '?'} lines - Delta transformations: HTLCs, swaps, limit orders
 
   runtime/
-    runtime/types.ts             ${fileSizes['runtime/runtime/types.ts'] || '?'} lines - Runtime machine interfaces
+    runtime/types.ts             ${fileSizes['runtime/runtime/types.ts'] || '?'} lines - Runtime input/frame/replica interfaces
     protocol/identity.ts         ${fileSizes['runtime/protocol/identity.ts'] || '?'} lines - Identity system: EntityId, SignerId, JId, ReplicaKey
-    runtime.ts                   ${fileSizes['runtime/runtime.ts'] || '?'} lines - Main coordinator, 100ms ticks, R->E->A routing
-    entity/consensus/index.ts          ${fileSizes['runtime/entity/consensus/index.ts'] || '?'} lines - BFT consensus (ADD_TX -> PROPOSE -> SIGN -> COMMIT)
+    runtime.ts                   ${fileSizes['runtime/runtime.ts'] || '?'} lines - Narrow public facade
+    entity/consensus/index.ts          ${fileSizes['runtime/entity/consensus/index.ts'] || '?'} lines - Entity candidate and Hanko certification
     account/consensus/index.ts         ${fileSizes['runtime/account/consensus/index.ts'] || '?'} lines - Bilateral consensus, left/right perspective
     account/view-state.ts   ${fileSizes['runtime/account/view-state.ts'] || '?'} lines - Bilateral state machine
     jurisdiction/batch.ts                   ${fileSizes['runtime/jurisdiction/batch.ts'] || '?'} lines - J-batch: E-machine accumulates -> jBroadcast -> J-machine
@@ -1191,7 +1188,6 @@ xln/
     entity/tx/
       apply.ts                   ${fileSizes['runtime/entity/tx/apply.ts'] || '?'} lines - Entity tx dispatcher
       validation.ts              ${fileSizes['runtime/entity/tx/validation.ts'] || '?'} lines - Transaction validation
-      financial.ts               ${fileSizes['runtime/entity/tx/financial.ts'] || '?'} lines - Financial accounting
       proposals.ts               ${fileSizes['runtime/entity/tx/proposals.ts'] || '?'} lines - Proposal logic
       j-events.ts                ${fileSizes['runtime/entity/tx/j-events.ts'] || '?'} lines - Jurisdiction events
       handlers/account.ts              ${fileSizes['runtime/entity/tx/handlers/account.ts'] || '?'} lines - Account operations

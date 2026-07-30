@@ -1,940 +1,203 @@
-# XLN Payment System Specification
+# Payment and HTLC flow
 
-**Role:** canonical payment-flow reference
-**Status:** live spec; implementation progress and launch blockers are tracked in [../status.md](../status.md) and [../mainnet.md](../mainnet.md)
-**Audience:** runtime, entity/account-consensus, routing, and wallet implementers
+**Role:** live implementation guide  
+**Audience:** protocol implementers and auditors  
+**Authority:** executable types and reducers; this guide explains their ordering
 
-This document explains the intended payment architecture and message flow. It
-should stay ahead of the code where necessary, but it should not try to be the
-current blocker dashboard.
+This document traces value through the nested Runtime → Entity → Account
+cascade. Read [the cascade architecture](../core/rjea-architecture.md) first.
 
-## Architecture Overview
+## Invariants
 
-The XLN payment system implements a hierarchical state machine architecture where:
-- **Entity Machine (E-Machine)**: Handles entity consensus, proposes blocks, receives payment commands
-- **Account Machine (A-Machine)**: Manages bilateral consensus between entity pairs, processes actual payments
-- **Server Machine (S-Machine)**: Routes inputs, ticks every 100ms, manages global state
+1. Money changes only in the Account reducer.
+2. Entity authorizes intent, chooses the Account, and routes committed child
+   outputs. It does not edit Account balances.
+3. Runtime owns ingress, persistence, and external delivery. It exposes a new
+   frame only after the WAL commit.
+4. Reducers read deterministic State and Inputs. RPC, contracts, transports,
+   private keys, and wall-clock time are never reducer authority.
+5. Each peer independently derives and verifies the same Account state root.
 
-All payments originate as EntityTx in the E-Machine and flow down to the appropriate A-Machines.
+## The common path
 
-## 1. Direct Payment (Without Subcontracts)
-
-### 1.1 Overview
-Direct payments transfer value directly between two entities that have an established account relationship. No hashlocks or conditional logic required.
-
-### 1.2 Data Structures
-
-```typescript
-// In types.ts - EntityTx for direct payment
-interface DirectPaymentEntityTx {
-  type: 'direct-payment';
-  data: {
-    recipientEntityId: string;
-    tokenId: number;
-    amount: bigint;
-    description?: string;
-    invoiceId?: string; // For payment tracking
-  };
-}
-
-// Account-level transaction
-interface DirectPaymentAccountTx {
-  type: 'direct-payment';
-  data: {
-    tokenId: number;
-    amount: bigint;
-    description?: string;
-    invoiceId?: string;
-    direction: 'outgoing' | 'incoming'; // Set by A-Machine
-  };
-}
+```text
+user / peer / J watcher
+  │
+  ▼
+RuntimeInput
+  ├─ RuntimeTx[]
+  └─ routed EntityInput[]
+        │
+        ▼
+      EntityInput
+        ├─ EntityTx[]
+        └─ Entity consensus evidence
+              │
+              ▼
+            AccountInput
+              ├─ txs(AccountTx[])       local future-frame admission
+              └─ AccountPeerInput       signed bilateral evidence
+                    │
+                    ▼
+                 AccountFrame
+                    │ bilateral ACK
+                    ▼
+                 EntityOutput
+                    │
+                    ▼
+RuntimeFrame → WAL → external delivery
 ```
 
-### 1.3 Implementation Flow
+An `EntityTx` is not an `AccountTx`. It may deterministically produce a local
+`AccountInput { kind: 'txs' }`, or it may carry one exact peer
+`AccountPeerInput` as `EntityTx.accountInput`. Both branches enter
+`applyAccountInput`; neither bypasses the Account machine.
 
-#### Step 1: Entity Machine Receives Payment Command
-```typescript
-// In entity/tx/apply.ts
-function applyDirectPaymentTx(
-  entityState: EntityState,
-  tx: DirectPaymentEntityTx,
-  signerId: string
-): { events: string[]; accountInputs: AccountInput[] } {
-  const events: string[] = [];
+## Direct payment
 
-  // Validate sender has authority
-  if (!entityState.signers.includes(signerId)) {
-    throw new Error(`Signer ${signerId} not authorized for entity`);
-  }
-
-  // Create account input for the recipient
-  const accountInput: AccountInput = {
-    entityId: entityState.entityId,
-    counterpartyEntityId: tx.data.recipientEntityId,
-    accountTxs: [{
-      type: 'direct-payment',
-      data: {
-        ...tx.data,
-        direction: 'outgoing'
-      }
-    }],
-    timestamp: env.timestamp  // CRITICAL: Use controlled timestamp for determinism
-  };
-
-  events.push(`💸 Initiating payment of ${tx.data.amount} token ${tx.data.tokenId} to ${tx.data.recipientEntityId}`);
-
-  return { events, accountInputs: [accountInput] };
-}
-```
-
-#### Step 2: Entity Consensus Aggregates Account Inputs
-```typescript
-// In entity-consensus.ts - Modified applyEntityInput
-export const applyEntityInput = async (
-  env: Env,
-  entityReplica: EntityReplica,
-  entityInput: EntityInput
-): Promise<{ newState: EntityState, outputs: EntityInput[] }> => {
-  // ... existing validation ...
-
-  // Process entity transactions
-  const proposableAccountMachines: Map<string, AccountInput[]> = new Map();
-
-  for (const tx of entityInput.entityTxs || []) {
-    const result = applyEntityTx(entityReplica.state, tx);
-
-    // Aggregate account inputs by counterparty
-    for (const accountInput of result.accountInputs || []) {
-      const key = accountInput.counterpartyEntityId;
-      if (!proposableAccountMachines.has(key)) {
-        proposableAccountMachines.set(key, []);
-      }
-      proposableAccountMachines.get(key)!.push(accountInput);
-    }
-  }
-
-  // At end of frame processing, propose to all flushable accounts
-  for (const [counterpartyId, inputs] of proposableAccountMachines) {
-    const accountMachine = env.accountMachines.get(
-      `${entityReplica.entityId}:${counterpartyId}`
-    );
-
-    if (accountMachine) {
-      // Add to mempool
-      for (const input of inputs) {
-        accountMachine.mempool.push(...input.accountTxs);
-      }
-
-      // Propose frame if we're proposer
-      if (accountMachine.isProposer) {
-        const result = await proposeAccountFrame(accountMachine);
-        if (result.success && result.accountInput) {
-          // Bubble up account input as entity output
-          outputs.push({
-            entityId: counterpartyId,
-            signerId: entityReplica.signerId,
-            accountInputs: [result.accountInput]
-          });
-        }
-      }
-    }
-  }
-
-  // ... rest of existing code ...
-};
-```
-
-#### Step 3: Account Machine Processes Payment
-```typescript
-// In account-consensus.ts - Extended processAccountTx
-case 'direct-payment': {
-  const { tokenId, amount, description, direction } = accountTx.data;
-
-  // Get or create delta
-  let delta = accountMachine.deltas.get(tokenId);
-  if (!delta) {
-    delta = createDefaultDelta(tokenId);
-    accountMachine.deltas.set(tokenId, delta);
-  }
-
-  // Derive current capacity
-  const derived = deriveDelta(delta, accountMachine.isProposer);
-
-  if (direction === 'outgoing') {
-    // Check capacity
-    if (amount > derived.outCapacity) {
-      return {
-        success: false,
-        error: `Insufficient capacity: ${amount} > ${derived.outCapacity}`,
-        events
-      };
-    }
-
-    // Apply payment
-    delta.offdelta += amount;
-    events.push(`💸 Sent ${amount} token ${tokenId} to ${accountMachine.counterpartyEntityId}`);
-  } else {
-    // Incoming payment
-    delta.offdelta -= amount;
-    events.push(`💰 Received ${amount} token ${tokenId} from ${accountMachine.counterpartyEntityId}`);
-  }
-
-  return { success: true, events };
-}
-```
-
-## 2. Hashlock Payment with Onion Routing
-
-### 2.1 Overview
-Hashlock payments enable trustless multi-hop payments through intermediary entities. Uses HTLCs (Hash Time-Locked Contracts) and onion routing for privacy.
-
-### 2.2 Data Structures
+The user submits:
 
 ```typescript
-// Hashlock state in AccountMachine
-interface HashlockEntry {
-  hash: string;
-  amount: bigint;
-  tokenId: number;
-  timelock: number; // Unix timestamp
-  state: 'pending' | 'settled' | 'cancelled';
-  routingPacket?: string; // Encrypted onion packet
-
-  // Tracking for multi-hop
-  incomingChannelId?: string; // Where we received from
-  outgoingChannelId?: string; // Where we forwarded to
-}
-
-// Entity-level hashlock payment
-interface HashlockPaymentEntityTx {
-  type: 'hashlock-payment';
-  data: {
-    route: string[]; // Entity IDs forming the payment path
-    finalRecipient: string;
-    tokenId: number;
-    amount: bigint;
-    description?: string;
-  };
-}
-
-// Account-level transactions
-interface AddHashlockAccountTx {
-  type: 'add-hashlock';
-  data: {
-    hash: string;
-    tokenId: number;
-    amount: bigint;
-    timelock: number;
-    routingPacket: string; // Encrypted for next hop
-  };
-}
-
-interface SettleHashlockAccountTx {
-  type: 'settle-hashlock';
-  data: {
-    hash: string;
-    secret: string;
-  };
-}
-
-interface CancelHashlockAccountTx {
-  type: 'cancel-hashlock';
-  data: {
-    hash: string;
-    reason: string;
-  };
-}
+type DirectPaymentIntent = Extract<EntityTx, { type: 'directPayment' }>;
 ```
 
-### 2.3 Onion Routing Implementation
+The Entity handler validates the route and converts the next hop into an
+Account-owned `direct_payment` transaction. The Account reducer:
 
-```typescript
-// In entity/tx/onion.ts
-import { encrypt, decrypt } from '../crypto-utils';
+1. resolves the canonical LEFT/RIGHT perspective;
+2. derives available capacity with the single canonical `deriveDelta`;
+3. rejects insufficient capacity before mutation;
+4. moves the signed amount in the Account delta;
+5. records the transaction in the proposed Account frame.
 
-interface OnionLayer {
-  amount: bigint;
-  tokenId: number;
-  nextHop?: string;
-  finalData?: {
-    recipient: string;
-    description?: string;
-    invoiceId?: string;
-  };
-}
+The counterparty replays those exact transactions against its matching
+committed Account state. It ACKs only the byte-identical frame and state root.
+Forwarding to a later hop is created from the committed child frame, never from
+an uncommitted proposal.
 
-export function createOnionPacket(
-  route: string[],
-  finalData: any,
-  encryptionKeys: Map<string, string>
-): string {
-  // Start with innermost layer (final recipient)
-  let packet = JSON.stringify({
-    ...finalData,
-    isFinal: true
-  });
-
-  // Wrap in encryption layers, reverse order
-  for (let i = route.length - 1; i >= 0; i--) {
-    const layerData: OnionLayer = {
-      amount: finalData.amount,
-      tokenId: finalData.tokenId,
-      nextHop: i < route.length - 1 ? route[i + 1] : undefined,
-      finalData: i === route.length - 1 ? finalData : undefined
-    };
-
-    // Encrypt current packet for this hop
-    const pubKey = encryptionKeys.get(route[i])!;
-    packet = encrypt(pubKey, JSON.stringify({
-      ...layerData,
-      innerPacket: packet
-    }));
-  }
-
-  return packet;
-}
-
-export function peelOnionLayer(
-  encryptedPacket: string,
-  privateKey: string
-): { data: OnionLayer; nextPacket?: string } {
-  const decrypted = decrypt(privateKey, encryptedPacket);
-  const parsed = JSON.parse(decrypted);
-
-  return {
-    data: {
-      amount: parsed.amount,
-      tokenId: parsed.tokenId,
-      nextHop: parsed.nextHop,
-      finalData: parsed.finalData
-    },
-    nextPacket: parsed.innerPacket
-  };
-}
+```text
+source Entity
+  └─ Account(source, hop 1)
+       └─ committed forward
+            └─ hop 1 Entity
+                 └─ Account(hop 1, hop 2)
+                      └─ ...
 ```
 
-### 2.4 Hashlock Payment Flow
+## HTLC payment
 
-#### Step 1: E-Machine Initiates Hashlock Payment
-```typescript
-// In entity/tx/handlers/payment.ts
-async function applyHashlockPaymentTx(
-  env: Env,
-  entityState: EntityState,
-  tx: HashlockPaymentEntityTx,
-  signerId: string
-): Promise<{ events: string[]; accountInputs: AccountInput[] }> {
-  // Generate payment secret and hash
-  const secret = generateSecret();
-  const hash = keccak256(secret);
+`htlcPayment` uses a prepared encrypted route. `hashlockPayment` is the
+hashlock-only form used when the sender must not know the preimage, including
+cross-jurisdiction swaps.
 
-  // Store secret for later revelation
-  env.paymentSecrets.set(hash, {
-    secret,
-    entityId: entityState.entityId,
-    created: env.timestamp  // CRITICAL: Deterministic timestamp
-  });
+Each hop commits an `htlc_lock` Account transaction containing:
 
-  // Get routing information
-  const route = tx.data.route;
-  const firstHop = route[0];
+- a unique lock id;
+- the shared hashlock;
+- token and amount;
+- the Account deadline;
+- the next encrypted envelope or final recipient offer.
 
-  // Create onion packet
-  const encryptionKeys = await getEntityEncryptionKeys(route);
-  const onionPacket = createOnionPacket(route, {
-    ...tx.data,
-    secret // Include secret in final layer
-  }, encryptionKeys);
+The lock immediately reduces spendable capacity through Account holds. No
+separate balance cache is authoritative.
 
-  // Create account input for first hop
-  const accountInput: AccountInput = {
-    entityId: entityState.entityId,
-    counterpartyEntityId: firstHop,
-    accountTxs: [{
-      type: 'add-hashlock',
-      data: {
-        hash,
-        tokenId: tx.data.tokenId,
-        amount: tx.data.amount,
-        timelock: env.timestamp + (route.length * 60 * 60 * 1000), // 1hr per hop (deterministic)
-        routingPacket: onionPacket
-      }
-    }]
-  };
+### Successful reveal
 
-  return {
-    events: [`🔒 Initiating hashlock payment via ${route.join(' → ')}`],
-    accountInputs: [accountInput]
-  };
-}
+```text
+1. User commits a lock toward H1.
+2. H1 commits the next lock toward H2.
+3. H2 commits the final lock toward the recipient.
+4. Recipient returns the secret through its Account with H2.
+5. H2 resolves backward through its Account with H1.
+6. H1 resolves backward through its Account with the user.
 ```
 
-#### Step 2: A-Machine Processes Hashlock
-```typescript
-// In account-consensus.ts - Extended processAccountTx
-case 'add-hashlock': {
-  const { hash, tokenId, amount, timelock, routingPacket } = accountTx.data;
+Every unlock is an `htlc_resolve` inside a committed bilateral Account frame.
+A self-payment follows the same six logical edges; co-located Runtime replicas
+may deliver them quickly, but may not skip certification or WAL visibility.
 
-  // Check if we already have this hashlock
-  if (accountMachine.hashlocks.has(hash)) {
-    return { success: false, error: 'Duplicate hashlock', events };
-  }
+The raw secret is not guessed, polled, or read from a contract. It becomes
+usable only after the exact encrypted offer and Account acknowledgement make
+the reveal deterministic.
 
-  // Check capacity
-  const delta = accountMachine.deltas.get(tokenId);
-  const derived = deriveDelta(delta!, accountMachine.isProposer);
+### Failure and timeout
 
-  if (isOurFrame && amount > derived.outCapacity) {
-    return { success: false, error: 'Insufficient capacity for hashlock', events };
-  }
+Deadlines are frame/J-height data, not local timers. A timeout transaction may
+release a lock only when the committed deterministic height permits it.
+Transport retries resend the exact signed input; they never create a new
+proposal with a different payload.
 
-  // Lock the funds
-  const hashlock: HashlockEntry = {
-    hash,
-    amount,
-    tokenId,
-    timelock,
-    state: 'pending',
-    routingPacket
-  };
+## Bilateral proposal collision
 
-  accountMachine.hashlocks.set(hash, hashlock);
+Account proposals do not expire locally. Once a Hanko leaves a replica, that
+proposal is final and is resent unchanged until the protocol advances.
 
-  // Adjust capacity (funds are locked, not transferred yet)
-  if (isOurFrame) {
-    delta!.offdelta += amount; // Temporarily reduce our capacity
-  }
+Both peers may propose the same next height. The lower Entity id is canonical
+LEFT, and the valid LEFT frame wins the collision at equal height. RIGHT:
 
-  events.push(`🔒 Added hashlock ${hash.slice(0, 8)} for ${amount}`);
+1. restores the last committed Account state;
+2. accepts LEFT's frame as the winning next frame;
+3. restores its losing transactions to the mempool in original order;
+4. reapplies them above the accepted frame.
 
-  // Trigger forwarding in entity machine
-  if (!isOurFrame) {
-    // Process routing packet to determine next hop
-    env.pendingHashlockForwards.push({
-      accountMachineId: accountMachine.id,
-      hashlock
-    });
-  }
+This is not a timeout, leader election, or retry heuristic. It matches the
+unconditional LEFT tie-break enforced by the jurisdiction contract, so the
+off-chain winner is also the dispute winner.
 
-  return { success: true, events };
-}
+## Jurisdiction boundary
 
-case 'settle-hashlock': {
-  const { hash, secret } = accountTx.data;
+Account settlement and dispute requests become deterministic outputs. Runtime
+submits them after its enclosing frame is durable. The reducer never reads a
+live contract nonce or balance.
 
-  const hashlock = accountMachine.hashlocks.get(hash);
-  if (!hashlock || hashlock.state !== 'pending') {
-    return { success: false, error: 'Hashlock not found or already settled', events };
-  }
+Finalized contract evidence follows one canonical path:
 
-  // Verify secret
-  if (keccak256(secret) !== hash) {
-    return { success: false, error: 'Invalid secret', events };
-  }
-
-  // Settle the hashlock
-  hashlock.state = 'settled';
-
-  // Transfer is already applied via offdelta when hashlock was added
-  // Just need to clean up
-
-  events.push(`✅ Settled hashlock ${hash.slice(0, 8)} with secret`);
-
-  // Propagate secret backwards
-  if (hashlock.incomingChannelId) {
-    env.pendingSecretPropagations.push({
-      channelId: hashlock.incomingChannelId,
-      hash,
-      secret
-    });
-  }
-
-  return { success: true, events };
-}
+```text
+transport log
+  → JEventIngress
+  → JEvent
+  → JurisdictionEvent
+  → certified JurisdictionEventBlock
+  → RuntimeInput
+  → EntityTx
+  → AccountTx
 ```
 
-#### Step 3: E-Machine Handles Forwarding
-```typescript
-// In entity-consensus.ts - After processing account inputs
-async function processHashlockForwards(env: Env, entityId: string): Promise<EntityInput[]> {
-  const outputs: EntityInput[] = [];
-
-  for (const forward of env.pendingHashlockForwards) {
-    const accountMachine = env.accountMachines.get(forward.accountMachineId);
-    if (!accountMachine) continue;
-
-    const hashlock = forward.hashlock;
-
-    // Decrypt routing packet
-    const entityPrivKey = await getEntityPrivateKey(entityId);
-    const { data, nextPacket } = peelOnionLayer(
-      hashlock.routingPacket!,
-      entityPrivKey
-    );
-
-    if (data.finalData) {
-      // We are the final recipient
-      const secret = data.finalData.secret;
-
-      // Settle incoming hashlock
-      accountMachine.mempool.push({
-        type: 'settle-hashlock',
-        data: { hash: hashlock.hash, secret }
-      });
-
-      console.log(`🎯 Final recipient of payment: ${data.finalData.description}`);
-    } else if (data.nextHop) {
-      // Forward to next hop
-      const nextAccountMachine = env.accountMachines.get(
-        `${entityId}:${data.nextHop}`
-      );
-
-      if (nextAccountMachine) {
-        // Calculate fee (optional)
-        const fee = data.amount * 1n / 1000n; // 0.1% fee
-        const forwardAmount = data.amount - fee;
-
-        // Add outgoing hashlock
-        nextAccountMachine.mempool.push({
-          type: 'add-hashlock',
-          data: {
-            hash: hashlock.hash,
-            tokenId: data.tokenId,
-            amount: forwardAmount,
-            timelock: hashlock.timelock - 3600000, // Reduce by 1 hour
-            routingPacket: nextPacket!
-          }
-        });
-
-        // Track connection for secret propagation
-        hashlock.outgoingChannelId = `${entityId}:${data.nextHop}`;
-      }
-    }
-  }
-
-  env.pendingHashlockForwards.length = 0;
-  return outputs;
-}
-```
-
-## 3. Path Finding with Dijkstra
-
-### 3.1 Overview
-Path finding determines the optimal route for multi-hop payments through the network based on channel capacities and fees.
-
-### 3.2 Network Graph Structure
-
-```typescript
-// In routing/graph.ts
-interface ChannelEdge {
-  from: string;
-  to: string;
-  capacity: bigint;
-  baseFee: bigint;
-  feeRate: number; // Parts per million
-  minHTLC: bigint;
-  maxHTLC: bigint;
-  disabled: boolean;
-}
-
-interface NetworkGraph {
-  nodes: Set<string>; // Entity IDs
-  edges: Map<string, ChannelEdge[]>; // Adjacency list
-
-  // Channel capacity tracking
-  channelCapacities: Map<string, {
-    outbound: bigint;
-    inbound: bigint;
-  }>;
-}
-```
-
-### 3.3 Route Finding Implementation
-
-```typescript
-// In routing/pathfinding.ts
-interface Route {
-  path: string[];
-  totalFee: bigint;
-  totalAmount: bigint;
-  probability: number; // Success probability estimate
-}
-
-export class PathFinder {
-  constructor(private graph: NetworkGraph) {}
-
-  findRoutes(
-    source: string,
-    target: string,
-    amount: bigint,
-    maxRoutes: number = 3
-  ): Route[] {
-    // Dijkstra with modifications for Lightning-style routing
-    const distances = new Map<string, bigint>();
-    const previous = new Map<string, string>();
-    const fees = new Map<string, bigint>();
-    const visited = new Set<string>();
-
-    // Priority queue entries: [cost, node, path]
-    const pq: Array<[bigint, string, string[]]> = [[0n, source, [source]]];
-    distances.set(source, 0n);
-    fees.set(source, 0n);
-
-    const routes: Route[] = [];
-
-    while (pq.length > 0 && routes.length < maxRoutes) {
-      // Sort by cost (inefficient but simple)
-      pq.sort((a, b) => Number(a[0] - b[0]));
-      const [currentCost, current, path] = pq.shift()!;
-
-      if (visited.has(current)) continue;
-
-      // Found target
-      if (current === target) {
-        routes.push({
-          path,
-          totalFee: fees.get(current)!,
-          totalAmount: amount + fees.get(current)!,
-          probability: this.calculateProbability(path, amount)
-        });
-        continue;
-      }
-
-      visited.add(current);
-
-      // Explore neighbors
-      const edges = this.graph.edges.get(current) || [];
-      for (const edge of edges) {
-        if (visited.has(edge.to)) continue;
-        if (edge.disabled) continue;
-
-        // Check capacity
-        const requiredAmount = this.calculateRequiredAmount(
-          amount,
-          path.concat([edge.to]),
-          target
-        );
-
-        if (requiredAmount > edge.capacity) continue;
-
-        // Calculate cost (fee + risk)
-        const edgeFee = this.calculateFee(edge, requiredAmount);
-        const totalFee = fees.get(current)! + edgeFee;
-        const cost = totalFee + this.calculateRiskPenalty(edge, requiredAmount);
-
-        // Update if better path found
-        if (!distances.has(edge.to) || cost < distances.get(edge.to)!) {
-          distances.set(edge.to, cost);
-          fees.set(edge.to, totalFee);
-          previous.set(edge.to, current);
-          pq.push([cost, edge.to, path.concat([edge.to])]);
-        }
-      }
-    }
-
-    return routes.sort((a, b) => Number(a.totalFee - b.totalFee));
-  }
-
-  private calculateFee(edge: ChannelEdge, amount: bigint): bigint {
-    return edge.baseFee + (amount * BigInt(edge.feeRate)) / 1000000n;
-  }
-
-  private calculateRequiredAmount(
-    finalAmount: bigint,
-    path: string[],
-    target: string
-  ): bigint {
-    // Work backwards from target to calculate required amount at each hop
-    let amount = finalAmount;
-
-    for (let i = path.length - 1; i > 0; i--) {
-      const edge = this.getEdge(path[i - 1], path[i]);
-      if (edge) {
-        amount = amount + this.calculateFee(edge, amount);
-      }
-    }
-
-    return amount;
-  }
-
-  private calculateProbability(path: string[], amount: bigint): number {
-    // Simple probability model based on channel utilization
-    let probability = 1.0;
-
-    for (let i = 0; i < path.length - 1; i++) {
-      const edge = this.getEdge(path[i], path[i + 1]);
-      if (edge) {
-        const utilization = Number(amount) / Number(edge.capacity);
-        // Higher utilization = lower success probability
-        probability *= Math.exp(-utilization * 2);
-      }
-    }
-
-    return probability;
-  }
-
-  private calculateRiskPenalty(edge: ChannelEdge, amount: bigint): bigint {
-    // Add penalty for risky channels (low capacity, high utilization)
-    const utilization = Number(amount) / Number(edge.capacity);
-    const penalty = BigInt(Math.floor(Number(amount) * utilization * 0.01));
-    return penalty;
-  }
-
-  private getEdge(from: string, to: string): ChannelEdge | undefined {
-    const edges = this.graph.edges.get(from) || [];
-    return edges.find(e => e.to === to);
-  }
-}
-```
-
-### 3.4 Integration with Entity Machine
-
-```typescript
-// In entity/tx/handlers/routing.ts
-export async function findPaymentRoute(
-  env: Env,
-  source: string,
-  target: string,
-  tokenId: number,
-  amount: bigint
-): Promise<string[] | null> {
-  // Build network graph from current account machines
-  const graph = buildNetworkGraph(env, tokenId);
-
-  // Find routes
-  const pathFinder = new PathFinder(graph);
-  const routes = pathFinder.findRoutes(source, target, amount);
-
-  if (routes.length === 0) {
-    console.log(`❌ No route found from ${source} to ${target} for ${amount}`);
-    return null;
-  }
-
-  // Select best route (lowest fee by default)
-  const bestRoute = routes[0];
-  console.log(`✅ Found route: ${bestRoute.path.join(' → ')}, fee: ${bestRoute.totalFee}`);
-
-  return bestRoute.path;
-}
-
-function buildNetworkGraph(env: Env, tokenId: number): NetworkGraph {
-  const graph: NetworkGraph = {
-    nodes: new Set(),
-    edges: new Map(),
-    channelCapacities: new Map()
-  };
-
-  // Add all entities as nodes
-  for (const entityId of env.entityReplicas.keys()) {
-    graph.nodes.add(entityId);
-    graph.edges.set(entityId, []);
-  }
-
-  // Add edges from account machines
-  for (const [key, accountMachine] of env.accountMachines) {
-    const [entity1, entity2] = key.split(':');
-    const delta = accountMachine.deltas.get(tokenId);
-
-    if (delta) {
-      const derived = deriveDelta(delta, true);
-
-      // Add edge from entity1 to entity2
-      graph.edges.get(entity1)?.push({
-        from: entity1,
-        to: entity2,
-        capacity: derived.outCapacity,
-        baseFee: 0n, // fee policy is configured outside this sketch
-        feeRate: 1000, // 0.1%
-        minHTLC: 1n,
-        maxHTLC: derived.outCapacity,
-        disabled: false
-      });
-
-      // Add reverse edge
-      const reverseDerived = deriveDelta(delta, false);
-      graph.edges.get(entity2)?.push({
-        from: entity2,
-        to: entity1,
-        capacity: reverseDerived.outCapacity,
-        baseFee: 0n,
-        feeRate: 1000,
-        minHTLC: 1n,
-        maxHTLC: reverseDerived.outCapacity,
-        disabled: false
-      });
-    }
-  }
-
-  return graph;
-}
-```
-
-## 4. Complete Payment Flow Example
-
-### Direct Payment Flow
-1. User initiates: `entity.sendDirectPayment(recipientId, tokenId, amount)`
-2. E-Machine creates DirectPaymentEntityTx
-3. E-Machine processes tx, creates AccountInput for recipient
-4. AccountInput added to A-Machine mempool
-5. A-Machine proposes frame with payment
-6. Counterparty A-Machine acknowledges
-7. Payment complete, balances updated
-
-### Hashlock Payment Flow
-1. User initiates: `entity.sendPayment(recipientId, tokenId, amount)`
-2. E-Machine finds route using PathFinder
-3. E-Machine creates HashlockPaymentEntityTx with route
-4. E-Machine generates secret, creates onion packet
-5. First hop A-Machine receives add-hashlock
-6. Each intermediary:
-   - Peels onion layer
-   - Forwards with reduced amount (minus fee)
-   - Tracks incoming/outgoing hashlock connection
-7. Final recipient:
-   - Reveals secret
-   - Settles hashlock
-8. Secret propagates backwards:
-   - Each hop settles with previous
-   - Fees collected by intermediaries
-9. Payment complete
-
-## 5. Error Handling
-
-### Capacity Errors
-- Check capacity before adding hashlock
-- Cancel hashlock if forward fails
-- Propagate cancellation backwards
-
-### Timeout Handling
-- Monitor hashlock timelocks in server tick
-- Auto-cancel expired hashlocks
-- Return funds to sender
-
-### Route Failures
-- Retry with alternative routes
-- Implement route probing
-- Update capacity estimates based on failures
-
-## 6. Security Considerations
-
-### Hash Preimage Security
-- Use cryptographically secure random for secrets
-- Never reuse secrets
-- Store secrets securely until revelation
-
-### Onion Routing Privacy
-- Each hop only knows previous and next
-- Amount can be obscured with overpayment
-- Timing correlation resistance
-
-### Fee Griefing Prevention
-- Minimum hashlock amounts
-- Rate limiting per entity
-- Reputation tracking
-
-## 7. Testing Strategy
-
-### Unit Tests
-1. Direct payment with sufficient capacity
-2. Direct payment with insufficient capacity
-3. Hashlock creation and settlement
-4. Hashlock timeout and cancellation
-5. Multi-hop payment success
-6. Multi-hop payment partial failure
-
-### Integration Tests
-1. 3-hop payment through network
-2. Concurrent payments in both directions
-3. Network-wide rebalancing
-4. Mass payment scenarios
-5. Failure recovery and consistency
-
-### Performance Tests
-1. 1000 payments/second throughput
-2. 10-hop payment latency
-3. Route finding with 10,000 nodes
-4. Onion encryption/decryption overhead
-
-## Implementation Status
-
-This section is intentionally coarse. Exact ordering and exit criteria live in
-`status.md`.
-
-### Direct payments
-
-- account/entity flow exists conceptually and is treated as the stable baseline
-- this remains the reference path that all more complex payment types build on
-
-### HTLCs and routed payments
-
-- hashlock mechanics, forwarding, and timeout handling exist conceptually and in partial implementation
-- routed payments are real enough to matter, but not yet at the “stop worrying” bar for production launch
-
-### Onion/privacy layer
-
-- cleartext routing is not a final answer
-- envelope encryption/privacy hardening remains a live launch concern
-
-### Pathfinding and fee logic
-
-- route selection exists conceptually
-- production-quality path quality, fee logic, and broader performance proof still need continued hardening
-
-## Appendix A: Message Formats
-
-### EntityInput with Payment
-```typescript
-{
-  entityId: "entity123",
-  signerId: "signer456",
-  entityTxs: [{
-    type: "hashlock-payment",
-    data: {
-      route: ["hub1", "hub2"],
-      finalRecipient: "entity789",
-      tokenId: 1,
-      amount: 1000000n,
-      description: "Invoice #123"
-    }
-  }]
-}
-```
-
-### AccountFrame with Hashlocks
-```typescript
-{
-  frameId: 42,
-  timestamp: 1703001234567,
-  accountTxs: [{
-    type: "add-hashlock",
-    data: {
-      hash: "0xabcd...",
-      tokenId: 1,
-      amount: 1000000n,
-      timelock: 1703005000000,
-      routingPacket: "encrypted..."
-    }
-  }],
-  tokenIds: [1],
-  deltas: [500000n], // Net position after hashlocks
-  hashlockCount: 1
-}
-```
-
-## Appendix B: Configuration
-
-### Payment Configuration
-```typescript
-interface PaymentConfig {
-  maxPaymentAmount: bigint;      // 1000 ETH equivalent
-  minPaymentAmount: bigint;      // 1 wei
-  maxRouteLength: number;        // 10 hops
-  baseRoutingFee: bigint;        // 1000 wei
-  routingFeeRate: number;        // 1000 = 0.1%
-  hashlockTimeout: number;       // 3600000ms per hop
-  maxConcurrentHashlocks: number; // 100 per channel
-}
-```
-
----
-End of Payment System Specification v1.0
+Authenticated events update Account jurisdiction state, including collateral,
+settlement, dispute, and nonce facts. Malformed financial evidence fails loud
+in development and tests. Production drops malformed uncommitted ingress; it
+does not publish it in a Runtime frame.
+
+## Rebalance
+
+Rebalance is an Account protocol, not a faucet side effect:
+
+1. a user commits `request_collateral` with the exact fee-policy version;
+2. the Hub waits until the committed request reaches its soft limit;
+3. the Hub constructs one atomic jurisdiction batch;
+4. finalized jurisdiction events update both Account replicas;
+5. a rejected or expired request returns its prepaid fee through an explicit
+   Account transaction.
+
+A request is never silently topped up or inferred from a live contract read.
+Missing fee state rejects the batch before any reserve or Account mutation.
+
+## Source reading order
+
+1. `runtime/types/entity-tx.ts` — user and peer Entity intents.
+2. `runtime/types/account.ts` — Account Input, Tx, Frame, State, and Replica.
+3. `runtime/entity/tx/handlers/direct-payment.ts` — direct intent routing.
+4. `runtime/entity/tx/handlers/htlc-payment.ts` — prepared onion admission.
+5. `runtime/account/consensus/index.ts` — the single Account input boundary.
+6. `runtime/account/tx/apply.ts` — validation dispatch.
+7. `runtime/account/tx/mutation.ts` — Account-owned mutation dispatch.
+8. `runtime/account/consensus/` — proposal, ACK, collision, and commit.
+9. `runtime/runtime/frame/` — enclosing Runtime frame and WAL boundary.
+
+For executable evidence, start with:
+
+- `runtime/__tests__/derive-delta-property.test.ts`;
+- `runtime/__tests__/account-frame-integrity.test.ts`;
+- `runtime/scripts/persistence-simultaneous-proposal-smoke.ts`;
+- `runtime/__tests__/runtime-frame-atomicity.test.ts`;
+- the focused HTLC and self-payment E2E scenarios.
