@@ -67,7 +67,7 @@ const buildFromIngress = (
   const boundSource = bindLocalJEventIngressSource(env, source, label);
   const groups = new Map<number, JEventIngress[]>();
   for (const event of events) {
-    const blockNumber = Number(event.blockNumber ?? 0);
+    const blockNumber = Number(event.blockNumber);
     groups.set(blockNumber, [...(groups.get(blockNumber) || []), event]);
   }
 
@@ -136,8 +136,8 @@ export const applyJEventsToEnv = (
     const runtimeState = env.runtimeState ??= {};
     const watches = runtimeState.externalWalletWatchOwners ??= new Map();
     const owners = watches.get(entityId) ?? new Map<string, number>();
-    const blockNumber = Number(event.blockNumber ?? 0);
-    owners.set(owner, Math.max(owners.get(owner) ?? 0, Number.isFinite(blockNumber) ? blockNumber : 0));
+    const blockNumber = Number(event.blockNumber);
+    owners.set(owner, Math.max(owners.get(owner) ?? 0, blockNumber));
     watches.set(entityId, owners);
   }
   indexReserveUpdatedEvents(env, ingress);

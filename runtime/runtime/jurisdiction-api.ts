@@ -1,4 +1,4 @@
-import type { JAdapter } from '../jadapter';
+import type { JAdapter } from '../jadapter/types';
 import { withCanonicalCrossJurisdictionRouteHash } from '../extensions/cross-j/index';
 import { getJurisdictionStackId, requireEntityRuntimeJurisdictionConfig } from '../jurisdiction/jurisdiction-runtime';
 import { resolveEntityProposerId } from './entity-output-signer';
@@ -7,8 +7,8 @@ import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
 import type { EntityState } from '../entity/types';
 import type { RuntimeState, RuntimeInput } from './types';
 import { getWallClockMs } from '../infra/time';
-import { buildDebtEnforcementRuntimeInputFromProjection } from '../protocol/payments/debt-enforcement';
-import type { DebtEnforcementProjectionRuntimeInputParams } from '../protocol/payments/debt-enforcement';
+import { buildDebtEnforcementRuntimeInputFromProjection } from './debt-enforcement-input';
+import type { DebtEnforcementProjectionRuntimeInputParams } from './debt-enforcement-input';
 import { deriveCanonicalCrossJurisdictionBookOwnerForLegs } from '../extensions/cross-j/market';
 
 export function getActiveJAdapter(env: RuntimeState): JAdapter | null {

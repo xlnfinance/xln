@@ -7,7 +7,7 @@ const RUNTIME_BUILD_ID = '2026-07-18-16:00Z';
 export const RUNTIME_SCHEMA_VERSION = 1;
 export const RUNTIME_BUILD = RUNTIME_BUILD_ID;
 
-import { setBrowserVMJurisdiction } from '../jadapter';
+import { setBrowserVMJurisdiction } from '../jadapter/browservm-registry';
 import { attachEventEmitters } from './env-events';
 import type { EntityInput } from '../entity/types';
 import type { RuntimeState } from './types';

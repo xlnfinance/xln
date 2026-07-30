@@ -5,7 +5,7 @@ import { requireBoundaryInteger } from '../../protocol/boundary-validation';
 import { cloneIsolatedRuntimeSnapshot } from '../../runtime/input-clone';
 import { assertAccountJClaimRootsAvailable } from '../../entity/account-j-claim-node-store';
 import { assertConsumptionRootsAvailable } from '../../entity/consumption-store';
-import { setBrowserVMJurisdiction } from '../../jadapter';
+import { setBrowserVMJurisdiction } from '../../jadapter/browservm-registry';
 import { assertCertifiedBoardRootsAvailable } from '../../jurisdiction/board-registry';
 import { assertCertifiedRegistrationEvidenceStore } from '../../jurisdiction/registration-evidence';
 import {

@@ -5,7 +5,7 @@ import { onDestroy, onMount } from "svelte";
 import type { ComponentType } from "svelte";
 import { MaxUint256, Wallet, hexlify, isAddress, parseEther, ZeroAddress } from "ethers";
 import type { AccountReplica, EntityTx, RuntimeState, EnvSnapshot, JAdapter, JBatch, Profile, RoutedEntityInput, RuntimeAdapterViewFrame, RuntimeInput, XLNModule } from "@xln/runtime/api/runtime-module";
-import { buildDebtEnforcementRuntimeInputFromProjection } from "@xln/runtime/protocol/payments/debt-enforcement";
+import { buildDebtEnforcementRuntimeInputFromProjection } from "@xln/runtime/runtime/debt-enforcement-input";
 import { getDraftBatchReserveDelta } from "@xln/runtime/jurisdiction/batch";
 import type { Tab, EntityReplica } from "$lib/types/ui";
 import { getXLN, resolveConfiguredApiBase } from "../../stores/xlnStore";

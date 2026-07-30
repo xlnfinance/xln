@@ -1,6 +1,6 @@
 import type { RuntimeState } from './types';
 import type { JReplica } from '../types/jurisdiction-runtime';
-import type { JAdapter } from '../jadapter';
+import type { JAdapter } from '../jadapter/types';
 import type { BrowserVMProvider, JAdapterConfig } from '../jadapter/types';
 import { createJAdapterWithRetry } from '../jadapter/retry';
 import { createStructuredLogger } from '../infra/logger';

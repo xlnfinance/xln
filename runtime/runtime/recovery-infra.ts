@@ -1,6 +1,6 @@
 import { ethers } from 'ethers';
 import { getLocalSignerPrivateKey } from '../account/crypto';
-import { setBrowserVMJurisdiction } from '../jadapter';
+import { setBrowserVMJurisdiction } from '../jadapter/browservm-registry';
 import { findWatcherJurisdictionReplica } from '../jadapter/watcher-replica';
 import { requireDurableJurisdictionStack } from '../jurisdiction/contract-address';
 import type { EntityReplica } from '../entity/types';
