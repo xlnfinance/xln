@@ -26,6 +26,13 @@ const DEFAULT_MAX_BLOCK_RANGE = 5_000;
 const DEFAULT_MAX_BACKFILL_BLOCKS = 50_000;
 const disputeWatchLog = createStructuredLogger('watchtower.dispute_watch');
 
+const uint256ToSafeNumber = (value: unknown, label: string): number => {
+  if (typeof value !== 'bigint' || value < 0n || value > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new Error(`WATCHTOWER_DISPUTE_${label}_INVALID`);
+  }
+  return Number(value);
+};
+
 const formatError = (error: unknown): string => error instanceof Error ? error.message : String(error);
 
 type WatchLog = { topics: readonly string[]; data: string; blockNumber?: number; transactionHash?: string };
@@ -73,12 +80,15 @@ const parseDisputeStarted = (
       depositoryAddress: depositoryAddress.toLowerCase(),
       sender: String(parsed.args[0]).toLowerCase(),
       counterentity: String(parsed.args[1]).toLowerCase(),
-      nonce: Number(parsed.args[2]),
+      nonce: uint256ToSafeNumber(parsed.args[2], 'NONCE'),
       blockNumber: Number(log.blockNumber || 0),
       ...(log.transactionHash ? { txHash: String(log.transactionHash) } : {}),
     };
-  } catch {
-    return null;
+  } catch (error) {
+    // Production watchers ignore unrelated/malformed external logs. Tests and
+    // development throw so a decoder or ABI drift can never hide until release.
+    if (process.env['NODE_ENV'] === 'production') return null;
+    throw error;
   }
 };
 

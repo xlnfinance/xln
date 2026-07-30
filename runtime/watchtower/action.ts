@@ -1,4 +1,8 @@
 import { Contract, Interface, JsonRpcProvider, Wallet, ethers } from 'ethers';
+import {
+  requireBoundaryRecord,
+  requireExactBoundaryKeys,
+} from '../protocol/boundary-validation';
 import { deserializeTaggedJson, serializeTaggedJson } from '../protocol/serialization';
 import { createXlnJsonRpcProvider } from '../jadapter';
 import type {
@@ -31,9 +35,8 @@ type WatchtowerSweepProvider = {
 };
 
 const isHexLike = (value: unknown, length?: number): value is string => {
-  if (typeof value !== 'string' || !value.startsWith('0x')) return false;
-  if (length !== undefined && value.length !== length) return false;
-  return true;
+  if (typeof value !== 'string' || !ethers.isHexString(value)) return false;
+  return length === undefined || value.length === length;
 };
 
 const normalizeHex32 = (value: unknown, label: string): string => {
@@ -47,27 +50,107 @@ const normalizeAddress = (value: unknown, label: string): string => {
 };
 
 const toInt = (value: unknown, label: string): number => {
-  const number = Number(value);
-  if (!Number.isFinite(number) || number < 0) throw new Error(`WATCHTOWER_REMEDY_${label}_INVALID`);
-  return Math.floor(number);
+  if (!Number.isSafeInteger(value) || Number(value) < 0) {
+    throw new Error(`WATCHTOWER_REMEDY_${label}_INVALID`);
+  }
+  return Number(value);
+};
+
+const uint256ToSafeNumber = (value: unknown, label: string): number => {
+  if (typeof value !== 'bigint' || value < 0n || value > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new Error(`WATCHTOWER_REMEDY_${label}_INVALID`);
+  }
+  return Number(value);
+};
+
+const requireHex = (value: unknown, label: string): string => {
+  if (!isHexLike(value)) throw new Error(`WATCHTOWER_REMEDY_${label}_INVALID`);
+  return value;
+};
+
+const normalizeFinalProofbody = (value: unknown): Record<string, unknown> => {
+  const proof = requireBoundaryRecord(value, 'WATCHTOWER_REMEDY_FINAL_PROOFBODY_INVALID');
+  requireExactBoundaryKeys(
+    proof,
+    ['watchSeed', 'offdeltas', 'tokenIds', 'transformers'],
+    [],
+    'WATCHTOWER_REMEDY_FINAL_PROOFBODY_FIELDS_INVALID',
+  );
+  const offdeltas = proof['offdeltas'];
+  const tokenIds = proof['tokenIds'];
+  const transformers = proof['transformers'];
+  if (!Array.isArray(offdeltas) || offdeltas.some(delta => typeof delta !== 'bigint')) {
+    throw new Error('WATCHTOWER_REMEDY_FINAL_PROOFBODY_OFFDELTAS_INVALID');
+  }
+  if (
+    !Array.isArray(tokenIds)
+    || tokenIds.some(tokenId => typeof tokenId !== 'bigint' || tokenId < 0n)
+  ) {
+    throw new Error('WATCHTOWER_REMEDY_FINAL_PROOFBODY_TOKEN_IDS_INVALID');
+  }
+  if (offdeltas.length !== tokenIds.length || !Array.isArray(transformers)) {
+    throw new Error('WATCHTOWER_REMEDY_FINAL_PROOFBODY_SHAPE_INVALID');
+  }
+  const decodedTransformers = transformers.map((rawTransformer, transformerIndex) => {
+    const code = `WATCHTOWER_REMEDY_FINAL_PROOFBODY_TRANSFORMER_${transformerIndex}`;
+    const transformer = requireBoundaryRecord(rawTransformer, `${code}_INVALID`);
+    requireExactBoundaryKeys(
+      transformer,
+      ['transformerAddress', 'encodedBatch', 'allowances'],
+      [],
+      `${code}_FIELDS_INVALID`,
+    );
+    if (!Array.isArray(transformer['allowances'])) throw new Error(`${code}_ALLOWANCES_INVALID`);
+    const allowances = transformer['allowances'].map((rawAllowance, allowanceIndex) => {
+      const allowanceCode = `${code}_ALLOWANCE_${allowanceIndex}`;
+      const allowance = requireBoundaryRecord(rawAllowance, `${allowanceCode}_INVALID`);
+      requireExactBoundaryKeys(
+        allowance,
+        ['deltaIndex', 'rightAllowance', 'leftAllowance'],
+        [],
+        `${allowanceCode}_FIELDS_INVALID`,
+      );
+      const decoded: Record<string, bigint> = {};
+      for (const field of ['deltaIndex', 'rightAllowance', 'leftAllowance'] as const) {
+        const amount = allowance[field];
+        if (typeof amount !== 'bigint' || amount < 0n) {
+          throw new Error(`${allowanceCode}_${field.toUpperCase()}_INVALID`);
+        }
+        decoded[field] = amount;
+      }
+      return decoded;
+    });
+    return {
+      transformerAddress: normalizeAddress(transformer['transformerAddress'], 'TRANSFORMER'),
+      encodedBatch: requireHex(transformer['encodedBatch'], 'TRANSFORMER_BATCH'),
+      allowances,
+    };
+  });
+  return {
+    watchSeed: normalizeHex32(proof['watchSeed'], 'FINAL_PROOFBODY_WATCH_SEED'),
+    offdeltas: [...offdeltas],
+    tokenIds: [...tokenIds],
+    transformers: decodedTransformers,
+  };
 };
 
 const normalizeFinalDisputeProof = (value: unknown): TowerFinalDisputeProof => {
-  const candidate = value as Record<string, unknown>;
-  if (!candidate || typeof candidate !== 'object') {
-    throw new Error('WATCHTOWER_REMEDY_FINALIZATION_INVALID');
-  }
-  const proofBody = candidate['finalProofbody'];
-  if (!proofBody || typeof proofBody !== 'object') throw new Error('WATCHTOWER_REMEDY_FINAL_PROOFBODY_INVALID');
-  const normalizedProofBody = structuredClone(proofBody as Record<string, unknown>);
-  normalizedProofBody['watchSeed'] = normalizeHex32(normalizedProofBody['watchSeed'], 'FINAL_PROOFBODY_WATCH_SEED');
+  const candidate = requireBoundaryRecord(value, 'WATCHTOWER_REMEDY_FINALIZATION_INVALID');
+  requireExactBoundaryKeys(
+    candidate,
+    ['counterentity', 'finalNonce', 'finalProofbody', 'leftArguments', 'rightArguments', 'sig'],
+    [],
+    'WATCHTOWER_REMEDY_FINALIZATION_FIELDS_INVALID',
+  );
   return {
     counterentity: normalizeHex32(candidate['counterentity'], 'COUNTERENTITY'),
     finalNonce: toInt(candidate['finalNonce'], 'FINAL_NONCE'),
-    finalProofbody: normalizedProofBody,
-    leftArguments: isHexLike(candidate['leftArguments']) ? String(candidate['leftArguments']) : '0x',
-    rightArguments: isHexLike(candidate['rightArguments']) ? String(candidate['rightArguments']) : '0x',
-    sig: isHexLike(candidate['sig']) ? String(candidate['sig']) : '0x',
+    finalProofbody: normalizeFinalProofbody(candidate['finalProofbody']),
+    // Arguments are optional adversarial evidence and may be empty. The signed
+    // proof and Hanko below are authority, so they never receive defaults.
+    leftArguments: requireHex(candidate['leftArguments'], 'LEFT_ARGUMENTS'),
+    rightArguments: requireHex(candidate['rightArguments'], 'RIGHT_ARGUMENTS'),
+    sig: requireHex(candidate['sig'], 'SIGNATURE'),
   };
 };
 
@@ -86,6 +169,16 @@ export const decodeTowerCounterDisputeRemedy = async (
     : String(payload || '').trim();
   if (!raw) throw new Error('WATCHTOWER_REMEDY_EMPTY');
   const parsed = deserializeTaggedJson<Record<string, unknown>>(raw);
+  requireExactBoundaryKeys(
+    parsed,
+    [
+      'version', 'type', 'rpcUrl', 'chainId', 'depositoryAddress',
+      'watchedEntityId', 'towerAddress', 'lastResortWindowBlocks',
+      'appointmentSequence', 'ownerAuthorizationHanko', 'latestProof',
+    ],
+    [],
+    'WATCHTOWER_REMEDY_FIELDS_INVALID',
+  );
   if (parsed['type'] !== 'counter_dispute_remedy' || parsed['version'] !== 1) {
     throw new Error('WATCHTOWER_REMEDY_TYPE_INVALID');
   }
@@ -99,7 +192,10 @@ export const decodeTowerCounterDisputeRemedy = async (
     towerAddress: normalizeAddress(parsed['towerAddress'], 'TOWER'),
     lastResortWindowBlocks: toInt(parsed['lastResortWindowBlocks'], 'LAST_RESORT_WINDOW_BLOCKS'),
     appointmentSequence: toInt(parsed['appointmentSequence'], 'APPOINTMENT_SEQUENCE'),
-    ownerAuthorizationHanko: isHexLike(parsed['ownerAuthorizationHanko']) ? String(parsed['ownerAuthorizationHanko']) : '0x',
+    ownerAuthorizationHanko: requireHex(
+      parsed['ownerAuthorizationHanko'],
+      'OWNER_AUTHORIZATION_HANKO',
+    ),
     latestProof: normalizeFinalDisputeProof(parsed['latestProof']),
   };
 };
@@ -128,14 +224,17 @@ const assertLastResortPayloadBasics = (appointment: LastResortTowerAppointment):
   if (payload.responseMode !== 'last_resort') {
     throw new Error('WATCHTOWER_RESPONSE_MODE_UNSUPPORTED');
   }
-  if (Math.max(0, Math.floor(Number(payload.appointmentSequence || 0))) <= 0) {
+  if (!Number.isSafeInteger(payload.appointmentSequence) || payload.appointmentSequence <= 0) {
     throw new Error('WATCHTOWER_APPOINTMENT_SEQUENCE_INVALID');
   }
-  if (Math.max(0, Math.floor(Number(payload.proofNonce || 0))) <= 0) {
+  if (!Number.isSafeInteger(payload.proofNonce) || payload.proofNonce <= 0) {
     throw new Error('WATCHTOWER_PROOF_NONCE_INVALID');
   }
   normalizeHex32(payload.proofBodyHash, 'PROOF_BODY_HASH');
-  if (Math.max(0, Math.floor(Number(payload.lastResortWindowBlocks || 0))) <= 0) {
+  if (
+    !Number.isSafeInteger(payload.lastResortWindowBlocks)
+    || payload.lastResortWindowBlocks <= 0
+  ) {
     throw new Error('WATCHTOWER_LAST_RESORT_WINDOW_INVALID');
   }
 };
@@ -308,7 +407,10 @@ const findActiveDisputeContext = async (
   if (typeof provider.getLogs !== 'function') {
     throw new Error('WATCHTOWER_PROVIDER_GET_LOGS_UNAVAILABLE');
   }
-  const latestBlock = Math.max(0, Math.min(Number(currentBlock), Number(account.disputeTimeout)));
+  const latestBlock = Math.min(
+    uint256ToSafeNumber(currentBlock, 'CURRENT_BLOCK'),
+    uint256ToSafeNumber(account.disputeTimeout, 'DISPUTE_TIMEOUT'),
+  );
   const hintedFromBlock = Number(fromBlockHint || 0n);
   const fromBlock = Number.isFinite(hintedFromBlock) && hintedFromBlock > 0
     ? Math.max(0, Math.floor(hintedFromBlock))
@@ -337,7 +439,7 @@ const findActiveDisputeContext = async (
       )) {
         continue;
       }
-      const initialNonce = Number(parsed.args[2]);
+      const initialNonce = uint256ToSafeNumber(parsed.args[2], 'EVENT_NONCE');
       const initialProofbodyHash = String(parsed.args[3]).toLowerCase();
       const watchSeed = normalizeHex32(parsed.args[4], 'EVENT_WATCH_SEED');
       const starterInitialArguments = String(parsed.args[5] || '0x');
@@ -345,7 +447,7 @@ const findActiveDisputeContext = async (
       const eventDisputeTimeout = BigInt(parsed.args[7]);
       const startedByLeft = sender < counterentity;
       if (
-        initialNonce !== Number(account.nonce) ||
+        initialNonce !== uint256ToSafeNumber(account.nonce, 'ACCOUNT_NONCE') ||
         initialProofbodyHash !== account.disputeInitialProofbodyHash.toLowerCase() ||
         eventDisputeTimeout !== account.disputeTimeout ||
         startedByLeft !== account.disputeStartedByLeft

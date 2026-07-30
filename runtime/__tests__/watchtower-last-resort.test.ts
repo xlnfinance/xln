@@ -3,7 +3,12 @@ import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { AbiCoder, Interface, ParamType, Wallet, keccak256, solidityPacked, toUtf8Bytes } from 'ethers';
 import { createWatchtowerStore } from '../watchtower/store';
-import { assertWatchtowerRpcUrlAllowed, encodeTowerCounterDisputeRemedy, runWatchtowerSweep } from '../watchtower/action';
+import {
+  assertWatchtowerRpcUrlAllowed,
+  decodeTowerCounterDisputeRemedy,
+  encodeTowerCounterDisputeRemedy,
+  runWatchtowerSweep,
+} from '../watchtower/action';
 import { encryptTowerPayloadForWatchSeed } from '../recovery/crypto';
 import type { TowerAppointmentV1 } from '../recovery/types';
 
@@ -58,6 +63,42 @@ const encodeDisputeHash = (
 );
 
 describe('watchtower delayed last-resort sweep', () => {
+  test('rejects malformed signed remedy authority instead of repairing it', async () => {
+    const remedy = {
+      version: 1 as const,
+      type: 'counter_dispute_remedy' as const,
+      rpcUrl: 'http://127.0.0.1:8545',
+      chainId: 31337,
+      depositoryAddress: `0x${'11'.repeat(20)}`,
+      watchedEntityId: `0x${'22'.repeat(32)}`,
+      towerAddress: `0x${'33'.repeat(20)}`,
+      lastResortWindowBlocks: 8,
+      appointmentSequence: 1,
+      ownerAuthorizationHanko: '0xbeef',
+      latestProof: {
+        counterentity: `0x${'44'.repeat(32)}`,
+        finalNonce: 2,
+        finalProofbody: makeProofBody(`0x${'55'.repeat(32)}`),
+        leftArguments: '0x',
+        rightArguments: '0x',
+        sig: '0xcafe',
+      },
+    };
+
+    await expect(decodeTowerCounterDisputeRemedy(encodeTowerCounterDisputeRemedy({
+      ...remedy,
+      appointmentSequence: 1.5,
+    }))).rejects.toThrow('WATCHTOWER_REMEDY_APPOINTMENT_SEQUENCE_INVALID');
+    await expect(decodeTowerCounterDisputeRemedy(encodeTowerCounterDisputeRemedy({
+      ...remedy,
+      ownerAuthorizationHanko: '0xnot-hex',
+    }))).rejects.toThrow('WATCHTOWER_REMEDY_OWNER_AUTHORIZATION_HANKO_INVALID');
+    await expect(decodeTowerCounterDisputeRemedy(encodeTowerCounterDisputeRemedy({
+      ...remedy,
+      latestProof: { ...remedy.latestProof, sig: '' },
+    }))).rejects.toThrow('WATCHTOWER_REMEDY_SIGNATURE_INVALID');
+  });
+
   test('allows configured public RPC slots by default', () => {
     expect(assertWatchtowerRpcUrlAllowed('https://xln.finance/rpc2')).toBe('https://xln.finance/rpc2');
     expect(assertWatchtowerRpcUrlAllowed('https://xln.finance/rpc8')).toBe('https://xln.finance/rpc8');
