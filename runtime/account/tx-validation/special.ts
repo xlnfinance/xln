@@ -5,10 +5,7 @@ import {
   requireBoundaryRecord,
   requireExactBoundaryKeys,
 } from '../../protocol/boundary-validation';
-import type { AccountFrame } from '../../types/account';
 import { validateAccountTxDataFields } from './fields';
-
-export type AccountFrameDecoder = (value: unknown, code: string) => AccountFrame;
 
 const validateCloseProof = (value: unknown, code: string): void => {
   const proof = validateAccountTxDataFields(value, {
@@ -209,14 +206,8 @@ export const validateSpecialAccountTxData = (
   type: string,
   value: unknown,
   code: string,
-  decodeFrame: AccountFrameDecoder,
 ): boolean => {
-  if (type === 'account_frame') {
-    const data = validateAccountTxDataFields(value, {
-      required: { frame: 'record', processedTransactions: 'integer', fromEntity: 'string' },
-    }, code);
-    decodeFrame(data['frame'], `${code}_FRAME`);
-  } else if (type === 'htlc_lock') validateHtlcLock(value, code);
+  if (type === 'htlc_lock') validateHtlcLock(value, code);
   else if (type === 'htlc_resolve') validateHtlcResolve(value, code);
   else if (type === 'cross_pull_close') {
     const data = validateAccountTxDataFields(

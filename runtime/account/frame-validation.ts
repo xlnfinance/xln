@@ -13,8 +13,6 @@ import {
   requireExactBoundaryKeys,
 } from '../protocol/boundary-validation';
 
-const ACCOUNT_FRAME_NESTING_LIMIT = 16;
-
 /**
  * Decode unknown storage/wire data into the only valid AccountFrame shape.
  * Callers inside Account consensus receive an already checked frame.
@@ -22,11 +20,7 @@ const ACCOUNT_FRAME_NESTING_LIMIT = 16;
 export const decodeAccountFrame = (
   value: unknown,
   context = 'AccountFrame',
-  nestingDepth = 0,
 ): AccountFrame => {
-  if (nestingDepth > ACCOUNT_FRAME_NESTING_LIMIT) {
-    throw new FinancialDataCorruptionError(`${context}.nesting limit exceeded`);
-  }
   const frame = validateObject(value, context);
   requireExactBoundaryKeys(
     frame,
@@ -62,12 +56,7 @@ export const decodeAccountFrame = (
     height,
     timestamp: requireBoundaryInteger(frame['timestamp'], `${context}.timestamp`),
     jHeight: requireBoundaryInteger(frame['jHeight'], `${context}.jHeight`),
-    accountTxs: decodeAccountTxs(
-      frame['accountTxs'],
-      `${context}.accountTxs`,
-      (nestedFrame, nestedContext) =>
-        decodeAccountFrame(nestedFrame, nestedContext, nestingDepth + 1),
-    ),
+    accountTxs: decodeAccountTxs(frame['accountTxs'], `${context}.accountTxs`),
     prevFrameHash: optionalAtGenesis('prevFrameHash'),
     accountStateRoot,
     stateHash: optionalAtGenesis('stateHash'),

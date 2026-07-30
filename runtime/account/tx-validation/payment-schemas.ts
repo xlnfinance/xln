@@ -11,14 +11,6 @@ export const ACCOUNT_TX_PAYMENT_SCHEMAS = {
   },
   add_delta: { required: { tokenId: 'integer' } },
   set_credit_limit: { required: { tokenId: 'integer', amount: 'bigint' } },
-  account_settle: {
-    required: {
-      tokenId: 'integer', ownReserve: 'string', counterpartyReserve: 'string',
-      collateral: 'string', ondelta: 'string', side: 'string',
-      blockNumber: 'integer', transactionHash: 'string',
-    },
-    literals: { side: ['left', 'right'] },
-  },
   reserve_to_collateral: {
     required: {
       tokenId: 'integer', collateral: 'string', ondelta: 'string',

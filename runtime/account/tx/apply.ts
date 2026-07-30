@@ -88,8 +88,6 @@ const invalidateCommittedMapsForTx = (
       return;
     case 'rebalance_policy':
     case 'reopen_disputed':
-    case 'account_frame':
-    case 'account_settle':
       return;
     default:
       // This is a financial cache-safety boundary, not merely a TypeScript

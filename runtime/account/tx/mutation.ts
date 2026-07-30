@@ -4,7 +4,6 @@ import type { AccountConsensusContext } from '../consensus/context';
 import { getAccountPerspective } from '../perspective';
 import type { AccountJClaimSession } from '../j-claim-session';
 import { canProcessAccountTxForDisputeStatus } from '../consensus/dispute-policy';
-import { createStructuredLogger } from '../../infra/logger';
 import type { ApplyAccountTxResult } from './apply-types';
 import { handleAddDelta } from './handlers/add-delta';
 import { handleSetCreditLimit } from './handlers/set-credit-limit';
@@ -32,8 +31,6 @@ import {
 } from './handlers/settle-transition';
 import { handleJEventClaim } from './handlers/j-event-claim';
 import { handleLendingAccountTx } from './handlers/lending';
-
-const accountTxLog = createStructuredLogger('account.tx');
 
 type MutationContext = {
   account: AccountReplica;
@@ -156,18 +153,6 @@ const applyJEventClaim = (context: MutationContext): ApplyAccountTxResult => {
   );
 };
 
-const rejectFrameOnlyTx = (context: MutationContext): ApplyAccountTxResult => {
-  accountTxLog.debug('account_frame.rejected', {
-    account: context.counterparty,
-    nonce: context.account.proofHeader.nextProofNonce,
-  });
-  return {
-    success: false,
-    error: 'account_frame is not a transaction type',
-    events: [],
-  };
-};
-
 /**
  * This is the only transaction router inside Account consensus. Each handler
  * receives the same frame-controlled time/height and mutates only this Account.
@@ -220,12 +205,6 @@ export const applyAccountTxMutation = async (
     case 'lending_close_request':
     case 'lending_close_payout':
       return handleLendingAccountTx(account, tx, byLeft);
-    case 'account_settle':
-      return {
-        success: false,
-        events: ['❌ account_settle must not be processed here'],
-        error: 'account_settle handled externally',
-      };
     case 'reserve_to_collateral': return handleReserveToCollateral(account, tx);
     case 'request_collateral': return applyCollateralRequest(context);
     case 'rebalance_refund': return handleRebalanceRefund(account, tx, byLeft);
@@ -254,6 +233,5 @@ export const applyAccountTxMutation = async (
         consensusContext,
         counterpartyCertifiedBoardHash,
       );
-    case 'account_frame': return rejectFrameOnlyTx(context);
   }
 };

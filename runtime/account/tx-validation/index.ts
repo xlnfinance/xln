@@ -6,7 +6,6 @@ import {
 import { ACCOUNT_TX_LENDING_SCHEMAS } from './lending-schemas';
 import { ACCOUNT_TX_PAYMENT_SCHEMAS } from './payment-schemas';
 import {
-  type AccountFrameDecoder,
   validateSpecialAccountTxData,
 } from './special';
 import {
@@ -21,7 +20,6 @@ const ACCOUNT_TX_SIMPLE_SCHEMAS = {
 
 type SimpleAccountTxType = keyof typeof ACCOUNT_TX_SIMPLE_SCHEMAS;
 type SpecialAccountTxType =
-  | 'account_frame'
   | 'cross_pull_close'
   | 'htlc_lock'
   | 'htlc_resolve'
@@ -50,14 +48,13 @@ const isSimpleAccountTxType = (
 function assertDecodedAccountTx(
   value: unknown,
   code: string,
-  decodeFrame: AccountFrameDecoder,
 ): asserts value is AccountTx {
   const tx = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(tx, ['type', 'data'], [], `${code}_FIELDS`);
   const type = tx['type'];
   if (typeof type !== 'string') throw new Error(`${code}_TYPE`);
   requireBoundaryRecord(tx['data'], `${code}_DATA`);
-  if (validateSpecialAccountTxData(type, tx['data'], `${code}_DATA`, decodeFrame)) return;
+  if (validateSpecialAccountTxData(type, tx['data'], `${code}_DATA`)) return;
   if (!isSimpleAccountTxType(type)) throw new Error(`${code}_TYPE_UNKNOWN:${type}`);
   const schema: AccountTxDataSchema = ACCOUNT_TX_SIMPLE_SCHEMAS[type];
   validateAccountTxDataFields(tx['data'], schema, `${code}_DATA`);
@@ -66,17 +63,15 @@ function assertDecodedAccountTx(
 export const decodeAccountTx = (
   value: unknown,
   code: string,
-  decodeFrame: AccountFrameDecoder,
 ): AccountTx => {
-  assertDecodedAccountTx(value, code, decodeFrame);
+  assertDecodedAccountTx(value, code);
   return value;
 };
 
 export const decodeAccountTxs = (
   value: unknown,
   code: string,
-  decodeFrame: AccountFrameDecoder,
 ): AccountTx[] => {
   if (!Array.isArray(value)) throw new Error(code);
-  return value.map((tx, index) => decodeAccountTx(tx, `${code}_${index}`, decodeFrame));
+  return value.map((tx, index) => decodeAccountTx(tx, `${code}_${index}`));
 };

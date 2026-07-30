@@ -766,20 +766,6 @@ export type AccountTx =
     }
   | { type: 'add_delta'; data: { tokenId: number } }
   | { type: 'set_credit_limit'; data: { tokenId: number; amount: bigint } }
-  | { type: 'account_frame'; data: { frame: AccountFrame; processedTransactions: number; fromEntity: string } }
-  | {
-      type: 'account_settle';
-      data: {
-        tokenId: number;
-        ownReserve: string;
-        counterpartyReserve: string;
-        collateral: string;
-        ondelta: string;
-        side: 'left' | 'right';
-        blockNumber: number;
-        transactionHash: string;
-      };
-    }
   | {
       type: 'reserve_to_collateral';
       data: {

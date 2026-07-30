@@ -6,7 +6,7 @@ const hash = `0x${'11'.repeat(32)}`;
 const entityId = `0x${'22'.repeat(32)}`;
 
 const decodeTx = (value: unknown, code = 'ACCOUNT_TX') =>
-  decodeAccountTx(value, code, decodeAccountFrame);
+  decodeAccountTx(value, code);
 
 const genesisFrame = (accountTxs: unknown[]) => ({
   height: 0,
@@ -41,7 +41,7 @@ describe('signed Account frame transaction decoder', () => {
       .toThrow('ACCOUNT_TX_TYPE_UNKNOWN');
   });
 
-  test('rejects malformed nested settlement and Account-frame payloads', () => {
+  test('rejects malformed nested settlement payloads', () => {
     expect(() => decodeTx({
       type: 'settle_transition',
       data: {
@@ -52,14 +52,6 @@ describe('signed Account frame transaction decoder', () => {
       },
     })).toThrow('ACCOUNT_TX_DATA_OPS_0_AMOUNT');
 
-    expect(() => decodeTx({
-      type: 'account_frame',
-      data: {
-        frame: { height: 1 },
-        processedTransactions: 1,
-        fromEntity: entityId,
-      },
-    })).toThrow('ACCOUNT_TX_DATA_FRAME.fields');
   });
 
   test('accepts representative financial, lending, HTLC, and settlement variants', () => {
@@ -97,7 +89,7 @@ describe('signed Account frame transaction decoder', () => {
     }).type).toBe('settle_transition');
   });
 
-  test('decodeAccountFrame applies the exact AccountTx boundary recursively', () => {
+  test('decodeAccountFrame applies the exact AccountTx boundary', () => {
     expect(() => decodeAccountFrame(genesisFrame([
       { type: 'set_credit_limit', data: { tokenId: 1, amount: '10' } },
     ]))).toThrow('AccountFrame.accountTxs_0_DATA_AMOUNT');
@@ -127,18 +119,4 @@ describe('signed Account frame transaction decoder', () => {
     })).toThrow('AccountFrame.byLeft');
   });
 
-  test('rejects adversarial recursive account_frame nesting', () => {
-    let nested: unknown = genesisFrame([]);
-    for (let index = 0; index < 18; index += 1) {
-      nested = genesisFrame([{
-        type: 'account_frame',
-        data: {
-          frame: nested,
-          processedTransactions: 0,
-          fromEntity: entityId,
-        },
-      }]);
-    }
-    expect(() => decodeAccountFrame(nested)).toThrow('nesting limit exceeded');
-  });
 });

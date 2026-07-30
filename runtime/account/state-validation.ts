@@ -162,7 +162,7 @@ function assertAccountState(
   ) {
     throw new FinancialDataCorruptionError(`${context}.status is invalid`);
   }
-  decodeAccountTxs(account['mempool'], `${context}.mempool`, decodeAccountFrame);
+  decodeAccountTxs(account['mempool'], `${context}.mempool`);
   assertAccountMempoolWithinLimit(
     account as Pick<AccountReplica, 'mempool'>,
     `${context}.mempool`,
