@@ -6,7 +6,8 @@ import {
   requireBoundaryRecord,
   requireExactBoundaryKeys,
   requireString,
-} from '../../../protocol/boundary-primitives';
+} from '../protocol/boundary-primitives';
+import type { JBatch } from './batch';
 
 type FieldValidator = (value: unknown, code: string) => unknown;
 
@@ -14,30 +15,46 @@ const validateRecordArray = (
   value: unknown,
   code: string,
   fields: Record<string, FieldValidator>,
-): void => {
-  for (const [index, raw] of requireArray(value, code).entries()) {
+): unknown[] => {
+  const records = requireArray(value, code);
+  for (const [index, raw] of records.entries()) {
     const itemCode = `${code}_${index}`;
     const item = requireBoundaryRecord(raw, itemCode);
     const keys = Object.keys(fields);
     requireExactBoundaryKeys(item, keys, [], `${itemCode}_FIELDS`);
-    for (const key of keys) fields[key]!(item[key], `${itemCode}_${key.toUpperCase()}`);
+    for (const key of keys) {
+      item[key] = fields[key]!(item[key], `${itemCode}_${key.toUpperCase()}`);
+    }
   }
+  return records;
 };
 
-const integer: FieldValidator = (value, code) => requireBoundaryInteger(value, code);
+const integer: FieldValidator = (value, code) => {
+  if (typeof value === 'bigint') {
+    if (value < 0n || value > BigInt(Number.MAX_SAFE_INTEGER)) {
+      throw new Error(`${code}:${value.toString()}`);
+    }
+    return Number(value);
+  }
+  return requireBoundaryInteger(value, code);
+};
 const bigint: FieldValidator = (value, code) => requireBigInt(value, code);
 const string: FieldValidator = (value, code) => requireString(value, code);
 const bool: FieldValidator = (value, code) => requireBoolean(value, code);
 
-const validateProofBody = (value: unknown, code: string): void => {
+const validateProofBody = (value: unknown, code: string): unknown => {
   const proof = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(proof, ['watchSeed', 'offdeltas', 'tokenIds', 'transformers'], [], `${code}_FIELDS`);
   requireString(proof['watchSeed'], `${code}_WATCH_SEED`);
-  requireArray(proof['offdeltas'], `${code}_OFFDELTAS`).forEach((entry, index) =>
-    requireBigInt(entry, `${code}_OFFDELTAS_${index}`));
-  requireArray(proof['tokenIds'], `${code}_TOKEN_IDS`).forEach((entry, index) =>
-    requireBigInt(entry, `${code}_TOKEN_IDS_${index}`, 0n));
-  validateRecordArray(proof['transformers'], `${code}_TRANSFORMERS`, {
+  proof['offdeltas'] = requireArray(proof['offdeltas'], `${code}_OFFDELTAS`)
+    .map((entry, index) => requireBigInt(entry, `${code}_OFFDELTAS_${index}`));
+  proof['tokenIds'] = requireArray(proof['tokenIds'], `${code}_TOKEN_IDS`)
+    .map((entry, index) =>
+      requireBigInt(entry, `${code}_TOKEN_IDS_${index}`, 0n));
+  proof['transformers'] = validateRecordArray(
+    proof['transformers'],
+    `${code}_TRANSFORMERS`,
+    {
     transformerAddress: string,
     encodedBatch: string,
     allowances: (allowances, allowanceCode) => validateRecordArray(allowances, allowanceCode, {
@@ -45,10 +62,15 @@ const validateProofBody = (value: unknown, code: string): void => {
       rightAllowance: bigint,
       leftAllowance: bigint,
     }),
-  });
+    },
+  );
+  return proof;
 };
 
-export const validateJBatch = (value: unknown, code: string): void => {
+export function validateJBatch(
+  value: unknown,
+  code: string,
+): asserts value is JBatch {
   const batch = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(batch, [
     'reserveToExternalToken', 'externalTokenToReserve', 'reserveToReserve',
@@ -79,8 +101,9 @@ export const validateJBatch = (value: unknown, code: string): void => {
     diffs: (diffs, diffsCode) => validateRecordArray(diffs, diffsCode, {
       tokenId: integer, leftDiff: bigint, rightDiff: bigint, collateralDiff: bigint, ondeltaDiff: bigint,
     }),
-    forgiveDebtsInTokenIds: (ids, idsCode) => requireArray(ids, idsCode).forEach((id, index) =>
-      requireBoundaryInteger(id, `${idsCode}_${index}`)),
+    forgiveDebtsInTokenIds: (ids, idsCode) =>
+      requireArray(ids, idsCode).map((id, index) =>
+        integer(id, `${idsCode}_${index}`)),
     sig: string,
     nonce: integer,
   });
@@ -95,4 +118,4 @@ export const validateJBatch = (value: unknown, code: string): void => {
   });
   validateRecordArray(batch['flashloans'], `${code}_FLASHLOANS`, { tokenId: integer, amount: bigint });
   validateRecordArray(batch['revealSecrets'], `${code}_REVEAL_SECRETS`, { transformer: string, secret: string });
-};
+}

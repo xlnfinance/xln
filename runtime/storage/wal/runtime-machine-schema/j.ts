@@ -1,7 +1,7 @@
 import type { JInput } from '../../../jurisdiction/input';
 import type { JReplica } from '../../../types/jurisdiction-runtime';
 import type { JTx } from '../../../types/jurisdiction-runtime';
-import { validateJBatch } from './j-batch';
+import { validateJBatch } from '../../../jurisdiction/batch-validation';
 import {
   requireArray,
   requireBigInt,

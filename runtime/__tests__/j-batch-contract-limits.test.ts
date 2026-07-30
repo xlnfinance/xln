@@ -8,6 +8,8 @@ import {
   batchAddSettlement,
   cloneJBatch,
   createEmptyBatch,
+  decodeJBatch,
+  encodeJBatch,
   getJBatchContractLimitIssue,
   initJBatch,
 } from '../jurisdiction/batch';
@@ -47,6 +49,15 @@ const addSettlement = (
 );
 
 describe('j-batch contract limits', () => {
+  test('ABI decode returns plain cloneable canonical data', () => {
+    const batch = createEmptyBatch();
+    batch.flashloans.push({ tokenId: 1, amount: 2n });
+    const decoded = decodeJBatch(encodeJBatch(batch));
+
+    expect(decoded).toEqual(batch);
+    expect(cloneJBatch(decoded)).toEqual(batch);
+  });
+
   test('R2C builder mirrors the aggregate 256-pair contract work bound', () => {
     const state = initJBatch();
     for (let tokenId = 1; tokenId <= 4; tokenId += 1) {

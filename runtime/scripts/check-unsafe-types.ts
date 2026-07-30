@@ -10,7 +10,6 @@ const EXCLUDED_PATH = /\/(?:__tests__|qa|scenarios|scripts)\//;
 const DOUBLE_ASSERTION_DEBT: Readonly<Record<string, number>> = {
   'runtime/jadapter/browservm-provider.ts': 4,
   'runtime/jadapter/tron-signer.ts': 1,
-  'runtime/jurisdiction/batch.ts': 1,
   'runtime/orchestrator/hub-node.ts': 2,
   'runtime/runtime/reliable-authority.ts': 1,
   'runtime/server/cli.ts': 2,

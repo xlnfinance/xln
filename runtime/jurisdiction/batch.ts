@@ -13,6 +13,7 @@
 
 import { ethers } from 'ethers';
 import type { ProofBodyStruct } from '../../jurisdictions/typechain-types/contracts/Depository.sol/Depository.js';
+import { validateJBatch } from './batch-validation';
 import type { JurisdictionConfig } from '../entity/types';
 import type { RuntimeFailureSignal } from '../protocol/failure-taxonomy';
 import { normalizeEntityId, compareEntityIds } from '../entity/id';
@@ -333,59 +334,13 @@ export function createEmptyBatch(): JBatch {
   };
 }
 
-const cloneProofbody = (proofbody: ProofBodyStruct): ProofBodyStruct => {
-  try {
-    return structuredClone(proofbody);
-  } catch {
-    return {
-      watchSeed: proofbody.watchSeed,
-      offdeltas: [...proofbody.offdeltas],
-      tokenIds: [...proofbody.tokenIds],
-      transformers: proofbody.transformers.map((transformer) => ({
-        transformerAddress: transformer.transformerAddress,
-        encodedBatch: transformer.encodedBatch,
-        allowances: transformer.allowances.map((allowance) => ({
-          deltaIndex: allowance.deltaIndex,
-          rightAllowance: allowance.rightAllowance,
-          leftAllowance: allowance.leftAllowance,
-        })),
-      })),
-    };
-  }
-};
-
-export function cloneJBatch(batch: JBatch): JBatch {
-  try {
-    return structuredClone(batch);
-  } catch {
-    return {
-      flashloans: batch.flashloans.map(op => ({ ...op })),
-      reserveToReserve: batch.reserveToReserve.map(op => ({ ...op })),
-      reserveToCollateral: batch.reserveToCollateral.map(op => ({
-        tokenId: op.tokenId,
-        receivingEntity: op.receivingEntity,
-        pairs: op.pairs.map(pair => ({ ...pair })),
-      })),
-      collateralToReserve: batch.collateralToReserve.map(op => ({ ...op })),
-      settlements: batch.settlements.map(settlement => ({
-        ...settlement,
-        diffs: settlement.diffs.map(diff => ({ ...diff })),
-        forgiveDebtsInTokenIds: [...settlement.forgiveDebtsInTokenIds],
-      })),
-      disputeStarts: batch.disputeStarts.map(op => ({
-        ...op,
-        initialProofbody: cloneProofbody(op.initialProofbody),
-      })),
-      disputeFinalizations: batch.disputeFinalizations.map(op => ({
-        ...op,
-        finalProofbody: cloneProofbody(op.finalProofbody),
-      })),
-      externalTokenToReserve: batch.externalTokenToReserve.map(op => ({ ...op })),
-      reserveToExternalToken: batch.reserveToExternalToken.map(op => ({ ...op })),
-      revealSecrets: batch.revealSecrets.map(op => ({ ...op })),
-    };
-  }
-}
+/**
+ * J batches contain only plain objects, arrays, strings, booleans and BigInts.
+ * A clone failure is corruption and must stop the frame. A hand-maintained
+ * fallback would silently omit the next Solidity field and sign different
+ * bytes from those submitted on-chain.
+ */
+export const cloneJBatch = (batch: JBatch): JBatch => structuredClone(batch);
 
 // ABI with C2R shortcut - matches Types.sol Batch struct
 // NOTE: Always use this ABI now that contracts have been recompiled with collateralToReserve
@@ -565,10 +520,31 @@ export function encodeJBatch(batch: JBatch): string {
   return encoded;
 }
 
+const materializeAbiTuple = (tuple: ethers.Result): Record<string, unknown> =>
+  Object.fromEntries(
+    Object.entries(tuple.toObject()).map(([key, value]) => [
+      key,
+      Array.isArray(value)
+        ? Array.from(
+            value,
+            item => item instanceof ethers.Result
+              ? materializeAbiTuple(item)
+              : item,
+          )
+        : value,
+    ]),
+  );
+
 export function decodeJBatch(encodedBatch: string): JBatch {
   const abiCoder = ethers.AbiCoder.defaultAbiCoder();
   const decoded = abiCoder.decode([DEPOSITORY_BATCH_PARAM], encodedBatch);
-  return decoded[0] as unknown as JBatch;
+  const tuple = decoded[0];
+  if (!(tuple instanceof ethers.Result)) {
+    throw new Error('J_BATCH_ABI_RESULT_INVALID');
+  }
+  const batch: unknown = materializeAbiTuple(tuple);
+  validateJBatch(batch, 'J_BATCH_ABI_RESULT');
+  return batch;
 }
 
 export function summarizeBatch(batch: JBatch): Record<string, unknown> {
