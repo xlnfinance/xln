@@ -118,7 +118,7 @@ export const validateStorageAccountDocValue = (value: unknown): StorageAccountDo
   return doc as StorageAccountDoc;
 };
 
-const validateBookHeader = (value: unknown): BookState => {
+function assertBookHeader(value: unknown): asserts value is BookState {
   const code = 'STORAGE_BOOK_DOC_INVALID';
   const book = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(book, [
@@ -139,15 +139,14 @@ const validateBookHeader = (value: unknown): BookState => {
   requireBoundaryInteger(book['tradeCount'], `${code}_TRADE_COUNT`);
   requireStorageBigInt(book['tradeQtySum'], `${code}_TRADE_QTY`);
   requireStorageBigInt(book['eventHash'], `${code}_EVENT_HASH`);
-  return book as unknown as BookState;
-};
+}
 
 export const validateStorageBookDocValue = (value: unknown): BookState => {
-  const book = validateBookHeader(value);
-  const report = validateBookStructure(book);
+  assertBookHeader(value);
+  const report = validateBookStructure(value);
   if (!report.ok) throw new Error(`STORAGE_BOOK_DOC_STRUCTURE_INVALID:${report.errors.join('|')}`);
-  verifyAndWarmBookCommitment(book, 'STORAGE_BOOK_DOC_COMMITMENT');
-  return book;
+  verifyAndWarmBookCommitment(value, 'STORAGE_BOOK_DOC_COMMITMENT');
+  return value;
 };
 
 export const assertStorageEntityDocBinding = (

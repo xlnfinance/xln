@@ -62,11 +62,11 @@ const validateRuntimeConfig = (value: unknown, code: string): void => {
   if (config['storage'] !== undefined) validateStorageConfig(config['storage'], `${code}_STORAGE`);
 };
 
-const validateRoutedEntityInput = (
+function assertRoutedEntityInput(
   value: unknown,
   code: string,
   options: { allowSourceRuntimeFrame?: boolean } = {},
-): RoutedEntityInput => {
+): asserts value is RoutedEntityInput {
   const input = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(input, ['entityId', 'signerId'], [
     'runtimeId', 'from', 'certifiedOutputIdentity', 'entityTxs', 'proposedFrame',
@@ -126,7 +126,15 @@ const validateRoutedEntityInput = (
   }
   if (input['jPrefixAttestations'] !== undefined) validateStorageSafeValue(input['jPrefixAttestations'], `${code}_J_PREFIX`);
   if (input['leaderTimeoutVote'] !== undefined) validateStorageSafeValue(input['leaderTimeoutVote'], `${code}_LEADER_TIMEOUT`);
-  return input as unknown as RoutedEntityInput;
+}
+
+const validateRoutedEntityInput = (
+  value: unknown,
+  code: string,
+  options: { allowSourceRuntimeFrame?: boolean } = {},
+): RoutedEntityInput => {
+  assertRoutedEntityInput(value, code, options);
+  return value;
 };
 
 const validateRoutedEntityInputs = (

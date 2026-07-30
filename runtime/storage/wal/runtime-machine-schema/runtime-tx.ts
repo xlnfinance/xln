@@ -243,7 +243,7 @@ const validateRuntimeTxData = (type: string, value: unknown, code: string): void
   else throw new Error(`${code}_TYPE_UNKNOWN:${type}`);
 };
 
-export const validateRuntimeTx = (value: unknown, code: string): RuntimeTx => {
+function assertRuntimeTx(value: unknown, code: string): asserts value is RuntimeTx {
   validateStorageSafeValue(value, code);
   const tx = requireBoundaryRecord(value, code);
   const type = requireString(tx['type'], `${code}_TYPE`);
@@ -252,5 +252,9 @@ export const validateRuntimeTx = (value: unknown, code: string): RuntimeTx => {
     requireExactBoundaryKeys(tx, ['type', 'data'], [], `${code}_FIELDS`);
     validateRuntimeTxData(type, tx['data'], `${code}_DATA`);
   }
-  return tx as unknown as RuntimeTx;
+}
+
+export const validateRuntimeTx = (value: unknown, code: string): RuntimeTx => {
+  assertRuntimeTx(value, code);
+  return value;
 };
