@@ -1354,6 +1354,180 @@ const installMarketMakerShutdownSignals = (
   process.on('SIGINT', shutdownFromSignal);
 };
 
+type BootstrapProgressMonitorDeps = {
+  env: RuntimeState;
+  primaryContext: MarketMakerEntityContext;
+  phase: () => string;
+  checkpoint: () => Record<string, unknown>;
+  directInput: () => {
+    lastSeen: DirectEntityInputDebug | null;
+    lastError: DirectEntityInputDebug | null;
+  };
+  emit: (event: string, fields?: Record<string, unknown>) => void;
+};
+
+/**
+ * Separates causal-progress accounting from quote production.
+ *
+ * A busy Runtime is not stalled merely because market depth is unchanged: its
+ * accepted inputs may still be advancing toward a durable frame. Conversely,
+ * unchanged health and Runtime checkpoints mean startup is truly stuck.
+ */
+const createBootstrapProgressMonitor = (deps: BootstrapProgressMonitorDeps) => {
+  let lastProgressAt = Date.now();
+  let lastProgressSignature = '';
+  let lastProgressReason = 'startup';
+  let lastProgressCheckpoint = deps.checkpoint();
+  let workStartedAt: number | null = null;
+  const observe = (
+    reason: string,
+    health: MarketMakerHealth | null,
+  ): ReturnType<typeof evaluateBootstrapProgressDeadline> => {
+    const checkpoint = deps.checkpoint();
+    const signature = marketMakerBootstrapProgressSignature(health, checkpoint);
+    const evaluation = evaluateBootstrapProgressDeadline(
+      { signature: lastProgressSignature, lastProgressAt },
+      signature,
+      Date.now(),
+      MARKET_MAKER_BOOTSTRAP_STALL_TIMEOUT_MS,
+    );
+    if (!evaluation.progressed) return evaluation;
+    lastProgressSignature = evaluation.signature;
+    lastProgressAt = evaluation.lastProgressAt;
+    lastProgressReason = reason;
+    lastProgressCheckpoint = checkpoint;
+    deps.emit('progress', {
+      reason,
+      idleMs: 0,
+      health: summarizeMarketMakerHealthForDebug(health),
+    });
+    return evaluation;
+  };
+  const updateWork = (active: boolean): void => {
+    const now = Date.now();
+    workStartedAt = updateBootstrapWorkStartedAt(
+      workStartedAt,
+      active,
+      now,
+      deps.env.runtimeState?.processingPromise
+        ? Math.max(deps.env.lastProcessEnteredAt ?? 0, deps.env.activeProcessProgressAt ?? 0)
+        : undefined,
+    );
+  };
+  const assertNotStalled = (health: MarketMakerHealth | null): void => {
+    const now = Date.now();
+    const evaluation = observe('deadline-checkpoint', health);
+    if (!evaluation.stalled) return;
+    if (
+      hasMarketMakerRuntimeBacklog(deps.env) &&
+      isBootstrapWorkWithinDeadline(workStartedAt, now, MARKET_MAKER_BOOTSTRAP_STALL_TIMEOUT_MS)
+    )
+      return;
+    const visibleHubs = readVisibleHubProfiles(deps.env).filter(profile =>
+      sameJurisdiction(deps.primaryContext, profile),
+    );
+    const directInput = deps.directInput();
+    const capsule = buildBootstrapStallCapsule({
+      env: deps.env,
+      phase: deps.phase(),
+      idleMs: evaluation.idleMs,
+      lastProgressReason,
+      lastProgressSignature,
+      lastProgressCheckpoint,
+      currentCheckpoint: deps.checkpoint(),
+      summarizedHealth: summarizeMarketMakerHealthForDebug(health),
+      visibleHubs,
+      lastDirectEntityInput: directInput.lastSeen,
+      lastDirectEntityInputError: directInput.lastError,
+    });
+    console.error(`[MESH-MM] BOOTSTRAP_STALLED capsule=${safeStringify(capsule)}`);
+    deps.emit('timeout', { capsule });
+    throw new Error(
+      `MARKET_MAKER_BOOTSTRAP_STALLED:phase=${deps.phase()}:idleMs=${evaluation.idleMs}:` +
+        `pendingReliable=${summarizeRuntimeQuiescence(deps.env).pendingReliableOutputs}`,
+    );
+  };
+  return { assertNotStalled, observe, updateWork };
+};
+
+type WaitForBootstrapOffersDeps = {
+  env: RuntimeState;
+  isShuttingDown: () => boolean;
+  health: ReturnType<typeof createMarketMakerHealthController>;
+  progress: ReturnType<typeof createBootstrapProgressMonitor>;
+  refreshPhase: (health: MarketMakerHealth | null) => void;
+  isDepthComplete: (health: MarketMakerHealth | null) => boolean;
+  canCheckCompletion: () => boolean;
+  buildCompletionHealth: () => MarketMakerHealth | null;
+  driveQuotes: (mode: MarketMakerQuoteMode) => Promise<boolean>;
+  emit: (event: string, fields?: Record<string, unknown>) => void;
+};
+
+const waitForBootstrapOffers = async (deps: WaitForBootstrapOffersDeps): Promise<MarketMakerHealth | null> => {
+  let completionCheckArmed = false;
+  let lastBacklogLogAt = 0;
+  while (!deps.isShuttingDown()) {
+    const hasBacklog = hasMarketMakerRuntimeBacklog(deps.env);
+    deps.progress.updateWork(hasBacklog);
+    deps.progress.assertNotStalled(deps.health.readCurrentHealth());
+    if (hasBacklog) {
+      deps.progress.observe('runtime-backlog', deps.health.readCurrentHealth());
+      completionCheckArmed = false;
+      await yieldMarketMakerApi();
+      await sleep(MARKET_MAKER_BOOTSTRAP_LOOP_MS);
+      continue;
+    }
+    const beforeDrive = deps.health.publishBootstrap();
+    deps.progress.observe('health', beforeDrive);
+    deps.refreshPhase(beforeDrive);
+    await yieldMarketMakerApi();
+    if (deps.isDepthComplete(beforeDrive) && deps.canCheckCompletion()) return beforeDrive;
+    if (completionCheckArmed && deps.canCheckCompletion()) {
+      const startedAt = Date.now();
+      const completionHealth = deps.buildCompletionHealth();
+      deps.emit('completion-health', {
+        durationMs: Date.now() - startedAt,
+        health: summarizeMarketMakerHealthForDebug(completionHealth),
+      });
+      deps.progress.observe('completion-health', completionHealth);
+      await yieldMarketMakerApi();
+      if (deps.isDepthComplete(completionHealth) && deps.canCheckCompletion()) return completionHealth;
+      completionCheckArmed = false;
+    }
+    const enqueued = await deps.driveQuotes('bootstrap');
+    await yieldMarketMakerApi();
+    if (enqueued) {
+      deps.progress.updateWork(true);
+      completionCheckArmed = false;
+    }
+    if (hasMarketMakerRuntimeBacklog(deps.env)) {
+      deps.progress.observe('runtime-backlog', deps.health.readCurrentHealth());
+      completionCheckArmed = false;
+      await sleep(MARKET_MAKER_BOOTSTRAP_LOOP_MS);
+      continue;
+    }
+    deps.progress.updateWork(false);
+    const health = deps.health.publishBootstrap();
+    deps.progress.observe('health', health);
+    deps.refreshPhase(health);
+    if (!enqueued && deps.canCheckCompletion()) {
+      completionCheckArmed = true;
+      await yieldMarketMakerApi();
+      const now = Date.now();
+      if (now - lastBacklogLogAt >= 5_000) {
+        lastBacklogLogAt = now;
+        const backlog = getMarketMakerRuntimeBacklogSnapshot(deps.env);
+        deps.emit('backlog', { backlog });
+        if (MARKET_MAKER_BOOTSTRAP_LOG_BACKLOG) {
+          console.log(`[MESH-MM] BOOTSTRAP_WAIT_BACKLOG ${safeStringify(backlog)}`);
+        }
+      }
+    }
+    await sleep(MARKET_MAKER_BOOTSTRAP_LOOP_MS);
+  }
+  return null;
+};
+
 export const runMarketMakerNode = async (): Promise<void> => {
   activateMarketMakerProcessArgs();
   if (resolvedArgs.dbPath) process.env['XLN_DB_PATH'] = resolvedArgs.dbPath;
@@ -1940,150 +2114,17 @@ export const runMarketMakerNode = async (): Promise<void> => {
     healthController.rebuildHealthResponse();
   };
 
-  const waitForBootstrapOffers = async (): Promise<MarketMakerHealth | null> => {
-    let lastProgressAt = Date.now();
-    let lastProgressSignature = '';
-    let lastProgressReason = 'startup';
-    let lastProgressCheckpoint = buildBootstrapCausalCheckpoint();
-    let lastBacklogLogAt = 0;
-    let bootstrapCompletionCheckArmed = false;
-    let bootstrapWorkStartedAt: number | null = null;
-    const markProgress = (
-      reason: string,
-      health: MarketMakerHealth | null,
-      now: number,
-      checkpoint: ReturnType<typeof buildBootstrapCausalCheckpoint>,
-    ): void => {
-      lastProgressAt = now;
-      lastProgressReason = reason;
-      lastProgressCheckpoint = checkpoint;
-      emitBootstrapDebugEvent('progress', {
-        reason,
-        idleMs: 0,
-        health: summarizeMarketMakerHealthForDebug(health),
-      });
-    };
-    const observeProgress = (
-      reason: string,
-      health: MarketMakerHealth | null,
-    ): ReturnType<typeof evaluateBootstrapProgressDeadline> => {
-      const checkpoint = buildBootstrapCausalCheckpoint();
-      const signature = marketMakerBootstrapProgressSignature(health, checkpoint);
-      const evaluation = evaluateBootstrapProgressDeadline(
-        { signature: lastProgressSignature, lastProgressAt },
-        signature,
-        Date.now(),
-        MARKET_MAKER_BOOTSTRAP_STALL_TIMEOUT_MS,
-      );
-      if (evaluation.progressed) {
-        lastProgressSignature = evaluation.signature;
-        markProgress(reason, health, evaluation.lastProgressAt, checkpoint);
-      }
-      return evaluation;
-    };
-    const assertBootstrapNotStalled = (health: MarketMakerHealth | null): void => {
-      const now = Date.now();
-      const evaluation = observeProgress('deadline-checkpoint', health);
-      const { idleMs } = evaluation;
-      if (!evaluation.stalled) return;
-      if (
-        hasMarketMakerRuntimeBacklog(env) &&
-        isBootstrapWorkWithinDeadline(bootstrapWorkStartedAt, now, MARKET_MAKER_BOOTSTRAP_STALL_TIMEOUT_MS)
-      )
-        return;
-      const visibleHubs = readVisibleHubProfiles(env).filter(profile => sameJurisdiction(primaryMmContext, profile));
-      const currentCheckpoint = buildBootstrapCausalCheckpoint();
-      const capsule = buildBootstrapStallCapsule({
-        env,
-        phase: startupPhase,
-        idleMs,
-        lastProgressReason,
-        lastProgressSignature,
-        lastProgressCheckpoint,
-        currentCheckpoint,
-        summarizedHealth: summarizeMarketMakerHealthForDebug(health),
-        visibleHubs,
-        lastDirectEntityInput,
-        lastDirectEntityInputError,
-      });
-      console.error(`[MESH-MM] BOOTSTRAP_STALLED capsule=${safeStringify(capsule)}`);
-      emitBootstrapDebugEvent('timeout', {
-        capsule,
-      });
-      throw new Error(
-        `MARKET_MAKER_BOOTSTRAP_STALLED:phase=${startupPhase}:idleMs=${idleMs}:` +
-          `pendingReliable=${summarizeRuntimeQuiescence(env).pendingReliableOutputs}`,
-      );
-    };
-    while (!shuttingDown) {
-      const bootstrapLoopNow = Date.now();
-      bootstrapWorkStartedAt = updateBootstrapWorkStartedAt(
-        bootstrapWorkStartedAt,
-        hasMarketMakerRuntimeBacklog(env),
-        bootstrapLoopNow,
-        env.runtimeState?.processingPromise
-          ? Math.max(env.lastProcessEnteredAt ?? 0, env.activeProcessProgressAt ?? 0)
-          : undefined,
-      );
-      assertBootstrapNotStalled(healthController.readCurrentHealth());
-      if (hasMarketMakerRuntimeBacklog(env)) {
-        observeProgress('runtime-backlog', healthController.readCurrentHealth());
-        bootstrapCompletionCheckArmed = false;
-        await yieldMarketMakerApi();
-        await sleep(MARKET_MAKER_BOOTSTRAP_LOOP_MS);
-        continue;
-      }
-      const beforeDrive = healthController.publishBootstrap();
-      observeProgress('health', beforeDrive);
-      refreshBootstrapPhase(beforeDrive);
-      await yieldMarketMakerApi();
-      if (isBootstrapDepthComplete(beforeDrive) && canCheckBootstrapCompletion()) return beforeDrive;
-      if (bootstrapCompletionCheckArmed && canCheckBootstrapCompletion()) {
-        const completionStartedAt = Date.now();
-        const completionHealth = buildBootstrapCompletionHealth();
-        emitBootstrapDebugEvent('completion-health', {
-          durationMs: Date.now() - completionStartedAt,
-          health: summarizeMarketMakerHealthForDebug(completionHealth),
-        });
-        observeProgress('completion-health', completionHealth);
-        await yieldMarketMakerApi();
-        if (isBootstrapDepthComplete(completionHealth) && canCheckBootstrapCompletion()) return completionHealth;
-        bootstrapCompletionCheckArmed = false;
-      }
-      const enqueued = await driveQuotes('bootstrap');
-      await yieldMarketMakerApi();
-      if (enqueued) {
-        bootstrapWorkStartedAt = updateBootstrapWorkStartedAt(bootstrapWorkStartedAt, true, Date.now());
-        bootstrapCompletionCheckArmed = false;
-      }
-      if (hasMarketMakerRuntimeBacklog(env)) {
-        observeProgress('runtime-backlog', healthController.readCurrentHealth());
-        bootstrapCompletionCheckArmed = false;
-        await sleep(MARKET_MAKER_BOOTSTRAP_LOOP_MS);
-        continue;
-      }
-      bootstrapWorkStartedAt = updateBootstrapWorkStartedAt(bootstrapWorkStartedAt, false, Date.now());
-      const health = healthController.publishBootstrap();
-      observeProgress('health', health);
-      refreshBootstrapPhase(health);
-      if (!enqueued && canCheckBootstrapCompletion()) {
-        bootstrapCompletionCheckArmed = true;
-        await yieldMarketMakerApi();
-        const now = Date.now();
-        if (now - lastBacklogLogAt >= 5_000) {
-          lastBacklogLogAt = now;
-          const backlog = getMarketMakerRuntimeBacklogSnapshot(env);
-          emitBootstrapDebugEvent('backlog', { backlog });
-          if (MARKET_MAKER_BOOTSTRAP_LOG_BACKLOG) {
-            console.log(`[MESH-MM] BOOTSTRAP_WAIT_BACKLOG ${safeStringify(backlog)}`);
-          }
-        }
-      }
-      await sleep(MARKET_MAKER_BOOTSTRAP_LOOP_MS);
-    }
-    if (shuttingDown) return null;
-    throw new Error('MARKET_MAKER_BOOTSTRAP_STOPPED_WITHOUT_SHUTDOWN');
-  };
+  const bootstrapProgress = createBootstrapProgressMonitor({
+    env,
+    primaryContext: primaryMmContext,
+    phase: () => startupPhase,
+    checkpoint: buildBootstrapCausalCheckpoint,
+    directInput: () => ({
+      lastSeen: lastDirectEntityInput,
+      lastError: lastDirectEntityInputError,
+    }),
+    emit: emitBootstrapDebugEvent,
+  });
 
   let healthRefreshInFlight = false;
   const refreshCachedHealth = (): void => {
@@ -2163,7 +2204,18 @@ export const runMarketMakerNode = async (): Promise<void> => {
     healthController.publishBootstrap();
     emitBootstrapDebugEvent('phase', { phase: startupPhase });
     while (!shuttingDown) {
-      const bootstrapHealth = await waitForBootstrapOffers();
+      const bootstrapHealth = await waitForBootstrapOffers({
+        env,
+        isShuttingDown: () => shuttingDown,
+        health: healthController,
+        progress: bootstrapProgress,
+        refreshPhase: refreshBootstrapPhase,
+        isDepthComplete: isBootstrapDepthComplete,
+        canCheckCompletion: canCheckBootstrapCompletion,
+        buildCompletionHealth: buildBootstrapCompletionHealth,
+        driveQuotes,
+        emit: emitBootstrapDebugEvent,
+      });
       if (!bootstrapHealth) break;
       if (await markOffersReady()) {
         startQuoteLoop();

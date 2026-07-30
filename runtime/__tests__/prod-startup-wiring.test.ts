@@ -130,13 +130,13 @@ describe('production startup wiring', () => {
 
   test('market-maker revalidates bootstrap completion after yielding to ingress', () => {
     const mmNode = readMarketMakerNodeSource();
-    const armedBranchStart = mmNode.indexOf('if (bootstrapCompletionCheckArmed && canCheckBootstrapCompletion()) {');
-    const armedBranchEnd = mmNode.indexOf('bootstrapCompletionCheckArmed = false;', armedBranchStart);
+    const armedBranchStart = mmNode.indexOf('if (completionCheckArmed && deps.canCheckCompletion()) {');
+    const armedBranchEnd = mmNode.indexOf('completionCheckArmed = false;', armedBranchStart);
     const armedBranch = mmNode.slice(armedBranchStart, armedBranchEnd);
     const compactBranch = armedBranch.replace(/\s+/g, '');
     const yieldIndex = compactBranch.indexOf('awaityieldMarketMakerApi();');
     const stableReturnIndex = compactBranch.indexOf(
-      'if(isBootstrapDepthComplete(completionHealth)&&canCheckBootstrapCompletion())returncompletionHealth;',
+      'if(deps.isDepthComplete(completionHealth)&&deps.canCheckCompletion())returncompletionHealth;',
     );
 
     expect(armedBranchStart).toBeGreaterThanOrEqual(0);
@@ -160,7 +160,7 @@ describe('production startup wiring', () => {
 
   test('market-maker rechecks completion immediately before publishing READY', () => {
     const mmNode = readMarketMakerNodeSource();
-    const mark = extractSourceBlock(mmNode, 'const markOffersReady = async', 'const waitForBootstrapOffers = async');
+    const mark = extractSourceBlock(mmNode, 'const markOffersReady = async', 'const refreshBootstrapPhase =');
     const firstCheck = mark.indexOf('if (!canCheckBootstrapCompletion()) return false;');
     const yieldIndex = mark.indexOf('await yieldMarketMakerApi();', firstCheck);
     const secondCheck = mark.indexOf('if (!canCheckBootstrapCompletion()) return false;', yieldIndex);
@@ -1040,7 +1040,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK');
     expect(mmNode).toContain('if (isBootstrapDepthComplete(health)) return;');
     expect(mmNode).toContain(
-      'if (isBootstrapDepthComplete(beforeDrive) && canCheckBootstrapCompletion()) return beforeDrive;',
+      'if (deps.isDepthComplete(beforeDrive) && deps.canCheckCompletion()) return beforeDrive;',
     );
     expect(mmNode).toContain('const hubsDepthReady = hubs.length > 0 && hubs.every((entry) => entry.depthReady);');
     expect(mmNode).toContain('const crossDepthReady = !cross.applicable || (');
@@ -1617,12 +1617,12 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('if (hasCrossPlan && !bootstrapCrossProducerAttempted) return false;');
     expect(mmNode).toContain('return !hasCrossPlan || !hasBootstrapCrossAccountBacklog(visibleHubs);');
     expect(mmNode).not.toContain('const completionBeforeDrive = buildBootstrapCompletionHealth();');
-    expect(mmNode).toContain("const enqueued = await driveQuotes('bootstrap');");
-    expect(mmNode).toContain('if (!enqueued && canCheckBootstrapCompletion()) {');
+    expect(mmNode).toContain("const enqueued = await deps.driveQuotes('bootstrap');");
+    expect(mmNode).toContain('if (!enqueued && deps.canCheckCompletion()) {');
     expect(mmNode.replace(/\s+/g, '')).toContain(
-      'if(isBootstrapDepthComplete(completionHealth)&&canCheckBootstrapCompletion())returncompletionHealth;',
+      'if(deps.isDepthComplete(completionHealth)&&deps.canCheckCompletion())returncompletionHealth;',
     );
-    expect(mmNode).toContain('const bootstrapHealth = await waitForBootstrapOffers();');
+    expect(mmNode).toContain('const bootstrapHealth = await waitForBootstrapOffers({');
     expect(mmNode).toContain('if (await markOffersReady()) {');
     expect(mmNode).toContain('startQuoteLoop();');
     expect(mmNode).not.toContain(
@@ -1637,7 +1637,7 @@ describe('production startup wiring', () => {
     expect(mmNode).not.toContain(
       'const completionHealth = bootstrapCrossStarted ? buildBootstrapCompletionHealth() : health;',
     );
-    expect(mmNode).toContain("const enqueued = await driveQuotes('bootstrap');");
+    expect(mmNode).toContain("const enqueued = await deps.driveQuotes('bootstrap');");
     expect(mmNode).toContain("if (startupPhase !== 'offers-ready' && !enqueued && canCheckBootstrapCompletion()) {");
     expect(mmNode).toContain('await markOffersReady();');
   });
@@ -1810,21 +1810,21 @@ describe('production startup wiring', () => {
     expect(mmNode.indexOf('if (hasBootstrapCrossAccountBacklog(visibleHubs)) {')).toBeLessThan(
       mmNode.indexOf('const crossQuoteJobs = await buildCrossQuoteJobs(mode, visibleHubs, shouldContinue);'),
     );
-    expect(mmNode).toContain('let bootstrapCompletionCheckArmed = false;');
+    expect(mmNode).toContain('let completionCheckArmed = false;');
     expect(mmNode).toContain('let lastProgressAt = Date.now();');
-    expect(mmNode).toContain("emitBootstrapDebugEvent('progress'");
+    expect(mmNode).toContain("deps.emit('progress'");
     const progressEvent = mmNode.slice(
-      mmNode.indexOf("emitBootstrapDebugEvent('progress'"),
-      mmNode.indexOf("emitBootstrapDebugEvent('progress'") + 300,
+      mmNode.indexOf("deps.emit('progress'"),
+      mmNode.indexOf("deps.emit('progress'") + 300,
     );
     expect(progressEvent).not.toContain('checkpoint:');
     expect(mmNode).toContain('lastProgressCheckpoint,');
     expect(mmNode).toContain('MARKET_MAKER_BOOTSTRAP_STALLED');
     expect(mmNode).not.toContain("markProgress('enqueue');");
-    expect(mmNode).toContain("observeProgress('runtime-backlog', healthController.readCurrentHealth());");
+    expect(mmNode).toContain("deps.progress.observe('runtime-backlog', deps.health.readCurrentHealth());");
     expect(mmNode).not.toContain("startupPhase = 'bootstrap-degraded'");
-    expect(mmNode).toContain("emitBootstrapDebugEvent('completion-health'");
-    expect(mmNode).toContain('bootstrapCompletionCheckArmed = true;');
+    expect(mmNode).toContain("deps.emit('completion-health'");
+    expect(mmNode).toContain('completionCheckArmed = true;');
     expect(mmNode).toContain("emitBootstrapDebugEvent('finalize-step'");
     expect(mmNode).toContain(
       "pathname === '/api/health/full' || (pathname === '/api/health' && url.searchParams.get('full') === '1')",
