@@ -729,10 +729,10 @@ describe('production startup wiring', () => {
     expect(hubNode).toContain('const activeAdapter = getActiveJAdapter(env);');
     expect(hubNode).not.toContain("return requireJAdapterForEntity(env, entityId, 'DEBUG_RESERVE');");
     expect(hubNode).toContain('const configureHubRuntimeLogging = (env: RuntimeState): void => {');
-    expect(hubNode).toContain("if (envFlagEnabled(process.env['XLN_HUB_VERBOSE_RUNTIME_LOGS'])) return;");
+    expect(hubNode).toContain("if (readBooleanEnv('XLN_HUB_VERBOSE_RUNTIME_LOGS', false)) return;");
     expect(hubNode).toContain('env.quietRuntimeLogs = true;');
     expect(hubNode).toContain('configureHubRuntimeLogging(env);');
-    expect(hubNode).toContain("const LOG_HUB_ADMIN_URL = envFlagEnabled(process.env['XLN_HUB_ADMIN_URL_LOG']);");
+    expect(hubNode).toContain("const LOG_HUB_ADMIN_URL = readBooleanEnv('XLN_HUB_ADMIN_URL_LOG', false);");
     const adminUrlLog = hubNode.slice(hubNode.indexOf('if (LOG_HUB_ADMIN_URL) {'));
     expect(adminUrlLog).toContain("nodeLog.info('admin_url.ready'");
     expect(adminUrlLog).toContain("nodeLog.warn('admin_url.unavailable'");
@@ -759,7 +759,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('isCanonicalAccountOpener(mmEntityId, hubEntityId)');
     expect(mmNode).not.toContain('dev_bootstrap.storage_disabled');
     expect(mmNode).toContain('const configureMarketMakerRuntimeLogging = (env: RuntimeState): void => {');
-    expect(mmNode).toContain("if (envFlagEnabled(process.env['XLN_MARKET_MAKER_VERBOSE_RUNTIME_LOGS'])) return;");
+    expect(mmNode).toContain("if (readBooleanEnv('XLN_MARKET_MAKER_VERBOSE_RUNTIME_LOGS', false)) return;");
     expect(mmNode).toContain('env.quietRuntimeLogs = true;');
     expect(mmNode).toContain('const buildLocalMarketMakerSignerLabels = (): string[] => {');
     expect(mmNode).toContain('localSigners: localSignerLabels.map(label => ({ label }))');
@@ -1554,7 +1554,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('restoredEntityStateHash,');
     expect(mmNode).toContain('runtimeStateHash,');
     expect(mmNode).toContain('entityStateHash,');
-    expect(mmNode).toContain("process.env['XLN_MARKET_MAKER_LOG_READY_HASH_PAYLOAD']");
+    expect(mmNode).toContain("readBooleanEnv('XLN_MARKET_MAKER_LOG_READY_HASH_PAYLOAD', false)");
     expect(mmNode).toContain('BOOTSTRAP_READY_HASH_PAYLOAD payload=${safeStringify(fingerprint.payload)}');
     expect(mmNode).toContain('bootstrapCrossPlanJobCount: null,');
     expect(mmNode).not.toContain('let bootstrapCrossExpectedRoutes');

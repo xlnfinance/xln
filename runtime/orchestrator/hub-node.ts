@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { createExternalWalletApi } from '../api/external-wallet-api';
 import { hasCliFlag, readCliOption } from '../config/cli';
+import { readBooleanEnv } from '../config/environment';
 import { normalizeRuntimeId } from '../networking/runtime-id';
 import { bootstrapHub } from '../../scripts/bootstrap-hub';
 import { defaultTokensForJurisdiction } from '../jurisdiction/default-tokens';
@@ -562,11 +563,7 @@ const HUB_MAX_ENTITY_TXS_PER_RUNTIME_FRAME = Math.max(
   Number(process.env['HUB_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || process.env['XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '0'),
 );
 
-const envFlagEnabled = (value: unknown): boolean => {
-  const normalized = String(value ?? '').trim().toLowerCase();
-  return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
-};
-const LOG_HUB_ADMIN_URL = envFlagEnabled(process.env['XLN_HUB_ADMIN_URL_LOG']);
+const LOG_HUB_ADMIN_URL = readBooleanEnv('XLN_HUB_ADMIN_URL_LOG', false);
 
 const buildLocalHubSignerLabels = (): string[] => {
   const primary = resolveMeshJurisdictionConfig(resolvedArgs.rpcUrl);
@@ -579,7 +576,7 @@ const buildLocalHubSignerLabels = (): string[] => {
 };
 
 const configureHubRuntimeLogging = (env: RuntimeState): void => {
-  if (envFlagEnabled(process.env['XLN_HUB_VERBOSE_RUNTIME_LOGS'])) return;
+  if (readBooleanEnv('XLN_HUB_VERBOSE_RUNTIME_LOGS', false)) return;
   env.quietRuntimeLogs = true;
 };
 

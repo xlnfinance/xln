@@ -14,6 +14,7 @@ import {
 import { deriveAccountWatchSeed } from '../protocol/account-watch-seed';
 import { LIMITS, SWAP_CONSTANTS } from '../config/constants';
 import { readCliOption } from '../config/cli';
+import { readBooleanEnv } from '../config/environment';
 import { resolveCrossJurisdictionRuntimeTopology } from '../extensions/cross-j/boundary';
 import {
   deriveCanonicalCrossJurisdictionBookOwnerForLegs,
@@ -526,13 +527,6 @@ export const resolveLocalApiUrl = (value: string): string => {
 };
 export const JSON_HEADERS = { 'Content-Type': 'application/json' } as const;
 
-export const envFlagEnabled = (value: unknown): boolean => {
-  const normalized = String(value ?? '')
-    .trim()
-    .toLowerCase();
-  return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
-};
-
 export const buildLocalMarketMakerSignerLabels = (): string[] => {
   const primary = resolveJurisdictionConfig(resolvedArgs.rpcUrl);
   const labels = [resolvedArgs.signerLabel];
@@ -544,7 +538,7 @@ export const buildLocalMarketMakerSignerLabels = (): string[] => {
 };
 
 export const configureMarketMakerRuntimeLogging = (env: RuntimeState): void => {
-  if (envFlagEnabled(process.env['XLN_MARKET_MAKER_VERBOSE_RUNTIME_LOGS'])) return;
+  if (readBooleanEnv('XLN_MARKET_MAKER_VERBOSE_RUNTIME_LOGS', false)) return;
   env.quietRuntimeLogs = true;
 };
 

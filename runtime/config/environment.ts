@@ -24,3 +24,22 @@ export const readPositiveIntegerEnv = (
   }
   return value;
 };
+
+/**
+ * Decode an operator boolean exactly once.
+ *
+ * A typo must not silently disable a safety or diagnostics switch. Only an
+ * absent variable may select the caller's documented default.
+ */
+export const readBooleanEnv = (
+  name: string,
+  fallback: boolean,
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): boolean => {
+  const raw = environment[name];
+  if (raw === undefined) return fallback;
+  const normalized = raw.trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  throw new Error(`ENV_BOOLEAN_INVALID:${name}:${raw}`);
+};

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { readPositiveIntegerEnv } from '../config/environment';
+import { readBooleanEnv, readPositiveIntegerEnv } from '../config/environment';
 
 describe('environment configuration boundary', () => {
   test('uses the documented default only when the variable is absent', () => {
@@ -23,4 +23,20 @@ describe('environment configuration boundary', () => {
       `ENV_POSITIVE_INTEGER_UNSAFE:LIMIT:${raw}`,
     );
   });
+
+  test('decodes explicit booleans and defaults only when absent', () => {
+    expect(readBooleanEnv('FLAG', true, {})).toBe(true);
+    expect(readBooleanEnv('FLAG', false, { FLAG: 'yes' })).toBe(true);
+    expect(readBooleanEnv('FLAG', false, { FLAG: ' true ' })).toBe(true);
+    expect(readBooleanEnv('FLAG', true, { FLAG: 'OFF' })).toBe(false);
+  });
+
+  test.each(['', 'truthy', '2'])(
+    'rejects a present invalid boolean: %s',
+    (raw) => {
+      expect(() => readBooleanEnv('FLAG', false, { FLAG: raw })).toThrow(
+        `ENV_BOOLEAN_INVALID:FLAG:${raw}`,
+      );
+    },
+  );
 });

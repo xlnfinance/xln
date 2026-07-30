@@ -7,6 +7,7 @@ import { dirname, join } from 'node:path';
 import { scheduler } from 'node:timers/promises';
 import { compareStableText, safeStringify } from '../protocol/serialization';
 import { REMOTE_RUNTIME } from '../config/constants';
+import { readBooleanEnv } from '../config/environment';
 import { createStructuredLogger, registerStructuredLogSink } from '../infra/logger';
 import { deriveSignerAddressSync } from '../account/crypto';
 import { deriveRuntimeAdapterCapabilityToken } from '../radapter/auth';
@@ -415,9 +416,7 @@ const runtimeImportRefreshMarginMs = Math.max(
 );
 const runtimeImportManifestPath = process.env['XLN_RUNTIME_IMPORT_MANIFEST_PATH']?.trim()
   || join(args.dbRoot, 'runtime-import-manifest.json');
-const runtimeImportLogUrlEnabled = ['1', 'true', 'yes', 'on'].includes(
-  String(process.env['XLN_RUNTIME_IMPORT_LOG_URL'] || '').trim().toLowerCase(),
-);
+const runtimeImportLogUrlEnabled = readBooleanEnv('XLN_RUNTIME_IMPORT_LOG_URL', false);
 
 const isLoopbackPublicBase = /^(localhost|127\.|0\.0\.0\.0|::1|\[::1\])/.test(
   new URL(args.publicWsBaseUrl).hostname,

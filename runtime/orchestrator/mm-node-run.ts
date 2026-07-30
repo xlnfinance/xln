@@ -117,7 +117,6 @@ import {
   emitMarketMakerBootstrapDebugEvent,
   ensureJurisdictionReplica,
   ensureMarketMakerHubConnectivity,
-  envFlagEnabled,
   getMarketMakerRuntimeBacklogSnapshot,
   getMarketMakerTokenIds,
   hasMarketMakerAccountBacklog,
@@ -137,6 +136,7 @@ import {
   waitForTokenCatalog,
   yieldMarketMakerApi,
 } from './mm-node-core';
+import { readBooleanEnv } from '../config/environment';
 import {
   assertMarketMakerBootstrapFinalized,
   buildDeferredMarketMakerCrossHealth,
@@ -1601,7 +1601,7 @@ const createMarketMakerBootstrapFinalizer = (deps: MarketMakerBootstrapFinalizer
       finalizeDurationMs: Date.now() - finalizeStartedAt,
     });
     deps.logReadyHash({ hash: fingerprint.hash, runtimeStateHash, entityStateHash });
-    if (envFlagEnabled(process.env['XLN_MARKET_MAKER_LOG_READY_HASH_PAYLOAD'])) {
+    if (readBooleanEnv('XLN_MARKET_MAKER_LOG_READY_HASH_PAYLOAD', false)) {
       console.log(`[MESH-MM] BOOTSTRAP_READY_HASH_PAYLOAD payload=${safeStringify(fingerprint.payload)}`);
     }
     deps.logOffersReady({
