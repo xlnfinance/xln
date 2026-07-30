@@ -67,7 +67,10 @@ export const resolveMeshJurisdictionConfig = (
   const data = loadJurisdictions();
   const map = data.jurisdictions ?? {};
   const requestedRpc = String(rpcUrlOverride || '').trim();
-  const entries = Object.values(map).filter(hasRequiredContracts);
+  const entries: ResolvedMeshJurisdictionConfig[] = [];
+  for (const entry of Object.values(map)) {
+    if (hasRequiredContracts(entry)) entries.push(entry);
+  }
   const exactMatch = entries.find((entry) => sameMeshRpc(entry.rpc, requestedRpc));
   const selected = exactMatch ?? entries.find(isPrimaryJurisdiction) ?? entries[0];
   if (!selected) {

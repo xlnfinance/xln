@@ -74,6 +74,12 @@ const resolveJurisdiction = (): {
   if (!contracts.depository || !contracts.entityProvider || !contracts.account || !contracts.deltaTransformer) {
     throw new Error(`JURISDICTION_CONTRACTS_MISSING: ${jurisdictionName}`);
   }
+  const completeContracts = {
+    depository: contracts.depository,
+    entityProvider: contracts.entityProvider,
+    account: contracts.account,
+    deltaTransformer: contracts.deltaTransformer,
+  };
   const entityProviderDeploymentBlock = Number(entry.entityProviderDeploymentBlock);
   if (!Number.isSafeInteger(entityProviderDeploymentBlock) || entityProviderDeploymentBlock < 1) {
     throw new Error(`JURISDICTION_ENTITY_PROVIDER_DEPLOYMENT_BLOCK_INVALID: ${jurisdictionName}`);
@@ -86,7 +92,12 @@ const resolveJurisdiction = (): {
     chainId: entry.chainId,
     entityProviderDeploymentBlock,
   };
-  return { jurisdiction, rpcUrl, contracts, entityProviderDeploymentBlock };
+  return {
+    jurisdiction,
+    rpcUrl,
+    contracts: completeContracts,
+    entityProviderDeploymentBlock,
+  };
 };
 
 const deployDefaultTokensOnRpc = async (jadapter: JAdapter): Promise<void> => {

@@ -623,13 +623,13 @@ for (const [path, markers] of [
     'runtime/jurisdiction/config.ts',
     [
       "createStructuredLogger('runtime.jurisdiction_config')",
-      'browser_api_unavailable',
+      'JURISDICTIONS_BROWSER_FETCH_FAILED',
       'JURISDICTIONS_BROWSER_CONFIG_INVALID',
     ],
   ],
   [
     'runtime/jurisdiction/jurisdiction-loader.ts',
-    ["createStructuredLogger('runtime.jurisdiction_loader')", 'config_missing_using_defaults', 'DEFAULT_LAST_UPDATED'],
+    ["createStructuredLogger('runtime.jurisdiction_loader')", 'JURISDICTIONS_CONFIG_MISSING', 'decodeJurisdictionsData'],
   ],
   ['runtime/radapter/server.ts', ["createStructuredLogger('runtime.radapter')", 'response_too_large']],
   ['runtime/orchestrator/proxy.ts', ['classifyRuntimeTransportFailure', 'failure,']],

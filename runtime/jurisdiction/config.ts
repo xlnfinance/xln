@@ -1,8 +1,7 @@
 /**
  * Jurisdiction Configuration Loader
  *
- * Pure functions for loading jurisdiction configs from the canonical jurisdictions source.
- * NO global state. NO singletons. NO mocks.
+ * External-I/O boundary for the canonical jurisdictions source.
  *
  * For contract operations, use JAdapter directly on JReplica.
  *
@@ -31,19 +30,12 @@ const errorMessage = (error: unknown): string =>
 
 /**
  * Load available jurisdictions from config
- * Returns empty array if config not found (BrowserVM mode)
+ * Missing or malformed configuration rejects. An empty array is valid only
+ * when the canonical source explicitly contains no active jurisdictions.
  */
 export async function getAvailableJurisdictions(): Promise<JurisdictionConfig[]> {
   const jurisdictions = await loadJurisdictionConfigs();
   return Array.from(jurisdictions.values());
-}
-
-/**
- * Get jurisdiction by name
- */
-export async function getJurisdictionByName(name: string): Promise<JurisdictionConfig | undefined> {
-  const jurisdictions = await loadJurisdictionConfigs();
-  return jurisdictions.get(name.toLowerCase());
 }
 
 /**
@@ -72,21 +64,16 @@ async function loadJurisdictionConfigs(): Promise<Map<string, JurisdictionConfig
       });
     } catch (fetchError: unknown) {
       const err = fetchError as { name?: string };
-      jurisdictionConfigLog.debug('browser_api_unavailable', {
-        reason: err.name === 'AbortError' ? 'timeout' : 'fetch_failed',
-        error: errorMessage(fetchError),
-      });
-      return jurisdictions;
+      throw new Error(
+        `JURISDICTIONS_BROWSER_FETCH_FAILED:` +
+        `${err.name === 'AbortError' ? 'timeout' : errorMessage(fetchError)}`,
+      );
     } finally {
       clearTimeout(timeoutId);
     }
 
     if (!response.ok) {
-      jurisdictionConfigLog.debug('browser_api_unavailable', {
-        reason: 'http_status',
-        status: response.status,
-      });
-      return jurisdictions;
+      throw new Error(`JURISDICTIONS_BROWSER_HTTP_STATUS:${response.status}`);
     }
 
     try {
@@ -97,24 +84,35 @@ async function loadJurisdictionConfigs(): Promise<Map<string, JurisdictionConfig
     }
   }
 
-  const jurisdictionData = (config as { jurisdictions?: Record<string, unknown> }).jurisdictions;
+  const jurisdictionData = (config as { jurisdictions?: unknown }).jurisdictions;
   const globalRebalancePolicyUsd = parseRebalancePolicyUsd(
     (config as { defaults?: { rebalancePolicyUsd?: unknown } }).defaults?.rebalancePolicyUsd,
   );
-  if (!jurisdictionData) return jurisdictions;
+  if (
+    !jurisdictionData
+    || typeof jurisdictionData !== 'object'
+    || Array.isArray(jurisdictionData)
+  ) {
+    throw new Error('JURISDICTIONS_ENTRIES_INVALID');
+  }
 
   for (const [key, data] of Object.entries(jurisdictionData)) {
-    if (!data || typeof data !== 'object') continue;
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      throw new Error(`JURISDICTION_ENTRY_INVALID:${key}`);
+    }
 
     const jData = data as Record<string, unknown>;
-    const contracts = jData['contracts'] as Record<string, string> | undefined;
+    const contracts = jData['contracts'];
     const status = String(jData['status'] ?? 'active').trim().toLowerCase();
     if (!isActiveJurisdictionStatus(status)) {
       jurisdictionConfigLog.debug('entry_skipped_inactive', { key, status });
       continue;
     }
 
-    let rpcUrl = jData['rpc'] as string;
+    if (typeof jData['rpc'] !== 'string' || !jData['rpc'].trim()) {
+      throw new Error(`JURISDICTION_RPC_INVALID:${key}`);
+    }
+    let rpcUrl = jData['rpc'];
 
     // Handle relative URLs in browser
     if (isBrowser && rpcUrl?.startsWith('/')) {
@@ -133,21 +131,33 @@ async function loadJurisdictionConfigs(): Promise<Map<string, JurisdictionConfig
     }
 
     const rebalancePolicyUsd = parseRebalancePolicyUsd(jData['rebalancePolicyUsd']) ?? globalRebalancePolicyUsd;
-    const entityProviderAddress = contracts?.['entityProvider'];
-    const depositoryAddress = contracts?.['depository'];
+    if (!contracts || typeof contracts !== 'object' || Array.isArray(contracts)) {
+      throw new Error(`JURISDICTION_CONTRACTS_INVALID:${key}`);
+    }
+    const contractRecord = contracts as Record<string, unknown>;
+    const entityProviderAddress = contractRecord['entityProvider'];
+    const depositoryAddress = contractRecord['depository'];
     if (!isUsableContractAddress(entityProviderAddress) || !isUsableContractAddress(depositoryAddress)) {
-      jurisdictionConfigLog.debug('entry_skipped_incomplete_contracts', {
-        key,
-        hasEntityProvider: Boolean(entityProviderAddress),
-        hasDepository: Boolean(depositoryAddress),
-      });
-      continue;
+      throw new Error(`JURISDICTION_CONTRACTS_INCOMPLETE:${key}`);
+    }
+    if (typeof jData['name'] !== 'string' || !jData['name'].trim()) {
+      throw new Error(`JURISDICTION_NAME_INVALID:${key}`);
+    }
+    if (!Number.isSafeInteger(jData['chainId']) || Number(jData['chainId']) <= 0) {
+      throw new Error(`JURISDICTION_CHAIN_ID_INVALID:${key}`);
+    }
+    if (
+      typeof jData['blockTimeMs'] !== 'number'
+      || !Number.isFinite(jData['blockTimeMs'])
+      || jData['blockTimeMs'] <= 0
+    ) {
+      throw new Error(`JURISDICTION_BLOCK_TIME_INVALID:${key}`);
     }
 
     jurisdictions.set(key, {
-      name: jData['name'] as string,
-      chainId: jData['chainId'] as number,
-      blockTimeMs: Number(jData['blockTimeMs']),
+      name: jData['name'],
+      chainId: Number(jData['chainId']),
+      blockTimeMs: jData['blockTimeMs'],
       address: rpcUrl,
       entityProviderAddress,
       depositoryAddress,

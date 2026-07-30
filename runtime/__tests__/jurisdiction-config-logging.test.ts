@@ -15,7 +15,7 @@ test('jurisdiction config loader uses structured logging without direct console 
   const source = readFileSync(join(process.cwd(), 'runtime/jurisdiction/config.ts'), 'utf8');
 
   expect(source).toContain("const jurisdictionConfigLog = createStructuredLogger('runtime.jurisdiction_config');");
-  expect(source).toContain("jurisdictionConfigLog.debug('browser_api_unavailable'");
+  expect(source).toContain('JURISDICTIONS_BROWSER_FETCH_FAILED');
   expect(source).toContain("jurisdictionConfigLog.error('browser_config_invalid'");
   expect(source).toContain('JURISDICTIONS_BROWSER_CONFIG_INVALID');
   expect(source).not.toContain('console.');

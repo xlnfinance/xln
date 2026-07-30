@@ -51,23 +51,18 @@ describe('jurisdiction loader diagnostics', () => {
     const source = readFileSync(join(process.cwd(), 'runtime/jurisdiction/jurisdiction-loader.ts'), 'utf8');
 
     expect(source).toContain("const jurisdictionLoaderLog = createStructuredLogger('runtime.jurisdiction_loader');");
-    expect(source).toContain("logJurisdictionLoaderDebug('config_missing_using_defaults'");
     expect(source).toContain("logJurisdictionLoaderDebug('config_loaded'");
     expect(source).toContain("logJurisdictionLoaderDebug('cache_cleared'");
-    expect(source).toContain("lastUpdated: DEFAULT_LAST_UPDATED");
+    expect(source).toContain('JURISDICTIONS_CONFIG_MISSING');
     expect(source).not.toContain('console.');
     expect(source).not.toContain('new Date()');
   });
 
-  test('missing config fallback is quiet and deterministic by default', async () => {
-    useTempJurisdictionsPath();
-
-    const { result, messages } = await captureConsole(() => loadJurisdictions());
-
-    expect(result).toMatchObject({
-      version: '1',
-      lastUpdated: '1970-01-01T00:00:00.000Z',
-      jurisdictions: {},
+  test('missing canonical config fails loud without logging', async () => {
+    const path = useTempJurisdictionsPath();
+    const { messages } = await captureConsole(async () => {
+      expect(() => loadJurisdictions())
+        .toThrow(`JURISDICTIONS_LOAD_FAILED:path=unknown:JURISDICTIONS_CONFIG_MISSING:path=${path}`);
     });
     expect(messages).toEqual([]);
   });
