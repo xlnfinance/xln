@@ -11,7 +11,6 @@ const DOUBLE_ASSERTION_DEBT: Readonly<Record<string, number>> = {
   'runtime/jadapter/browservm-provider.ts': 4,
   'runtime/jadapter/tron-signer.ts': 1,
   'runtime/runtime/reliable-authority.ts': 1,
-  'runtime/server/cli.ts': 2,
   'runtime/watchtower/action.ts': 1,
 };
 

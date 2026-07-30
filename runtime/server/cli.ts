@@ -8,7 +8,6 @@
  */
 
 import * as readline from 'readline';
-import type { JAdapter } from '../jadapter';
 import { createXlnJsonRpcProvider } from '../jadapter';
 import { ethers } from 'ethers';
 import { createProviderScopedEntityId, normalizeEntityId } from '../entity/id';
@@ -20,7 +19,12 @@ const REMOTE_RPC = process.env['XLN_CLI_REMOTE_RPC'] || 'https://xln.finance/rpc
 const LOCAL_RPC = process.env['XLN_CLI_LOCAL_RPC'] || 'http://localhost:8545';
 const DEFAULT_DEV_PRIVATE_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
 
-type CliJAdapter = JAdapter & {
+type CliJAdapter = {
+  chainId: number;
+  provider: ethers.JsonRpcProvider;
+  addresses: CliJurisdiction['contracts'];
+  getReserves(entityId: string, tokenId: number): Promise<bigint>;
+  getEntityNonce(entityId: string): Promise<bigint>;
   reserveToReserve(
     from: string,
     to: string,
@@ -52,21 +56,14 @@ async function init(remote: boolean) {
   );
 
   // Connect to existing contracts
-  const { Depository__factory, EntityProvider__factory } = await import('../../jurisdictions/typechain-types/index.ts');
+  const { Depository__factory } = await import('../../jurisdictions/typechain-types/index.ts');
 
-  type DepositoryRunner = Parameters<typeof Depository__factory.connect>[1];
-  const contractRunner = signer as unknown as DepositoryRunner;
-  const depository = Depository__factory.connect(activeJurisdiction.contracts.depository, contractRunner);
-  const entityProvider = EntityProvider__factory.connect(activeJurisdiction.contracts.entityProvider, contractRunner);
+  const depository = Depository__factory.connect(activeJurisdiction.contracts.depository, signer);
 
   // Create minimal adapter object for queries
   jAdapter = {
-    mode: 'rpc',
     chainId: activeJurisdiction.chainId,
     provider,
-    signer,
-    depository,
-    entityProvider,
     addresses: activeJurisdiction.contracts,
     async getReserves(entityId: string, tokenId: number) {
       const entityAddress = createProviderScopedEntityId(activeJurisdiction.contracts.entityProvider, normalizeEntityId(entityId));
@@ -96,7 +93,7 @@ async function init(remote: boolean) {
       await tx.wait();
       return [];
     },
-  } as unknown as CliJAdapter;
+  };
 
   const block = await provider.getBlockNumber();
   console.log(`Connected. Block: ${block}`);
