@@ -13,7 +13,6 @@ const DOUBLE_ASSERTION_DEBT: Readonly<Record<string, number>> = {
   'runtime/runtime/reliable-authority.ts': 1,
   'runtime/server/cli.ts': 2,
   'runtime/watchtower/action.ts': 1,
-  'runtime/watchtower/dispute-watch.ts': 1,
 };
 
 // Suppressions can hide unrelated errors on the same line. The empty ratchet

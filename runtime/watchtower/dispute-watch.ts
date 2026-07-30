@@ -39,7 +39,12 @@ type WatchLog = { topics: readonly string[]; data: string; blockNumber?: number;
 
 type WatchProvider = {
   getBlockNumber: () => Promise<number>;
-  getLogs: (filter: Record<string, unknown>) => Promise<WatchLog[]>;
+  getLogs: (filter: {
+    address: string;
+    topics: string[];
+    fromBlock: number;
+    toBlock: number;
+  }) => Promise<readonly WatchLog[]>;
 };
 
 export interface DisputeWatchStore {
@@ -102,7 +107,7 @@ export const runDisputeWatchSweep = async (
   const maxBackfill = Math.max(maxBlockRange, Math.floor(Number(options?.maxBackfillBlocks ?? DEFAULT_MAX_BACKFILL_BLOCKS)));
   const customProviderFactory = options?.providerFactory;
   const providerFactory = customProviderFactory
-    || ((rpcUrl: string) => createXlnJsonRpcProvider(rpcUrl) as unknown as WatchProvider);
+    || ((rpcUrl: string) => createXlnJsonRpcProvider(rpcUrl));
 
   const watchTargets = await store.listWatchTargets();
   let eventsObserved = 0;
