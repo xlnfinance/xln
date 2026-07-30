@@ -12,11 +12,27 @@ import {
 } from '../runtime-dbs';
 import { verifyStorageTailIntegrity } from '../verify';
 import { assertCertifiedJHistoryIntegrity } from '../../jurisdiction/local-history';
-import type { RuntimeAdapterReadQuery } from '../../radapter';
 import type { EntityState } from '../../entity/types';
 import type { RuntimeState } from '../../runtime/types';
 import type { PersistenceQueryDeps } from './deps';
 import { requireStorageDbOpen } from '../availability';
+
+/**
+ * Pagination understood by the persisted Entity view.
+ *
+ * Keep this storage-owned shape narrower than RuntimeAdapterReadQuery. The
+ * adapter accepts many unrelated transport filters; storage must not depend on
+ * that public transport surface merely to page accounts and books.
+ */
+export type StorageEntityViewQuery = {
+  cursor?: string;
+  limit?: number;
+  accountsCursor?: string;
+  booksCursor?: string;
+  accountsLimit?: number;
+  booksLimit?: number;
+  sortDir?: 'asc' | 'desc';
+};
 
 const inspectRuntimeStorage = async (
   deps: PersistenceQueryDeps,
@@ -129,7 +145,7 @@ export const createPersistenceEntityQueries = (deps: PersistenceQueryDeps) => {
     env: RuntimeState,
     entityId: string,
     height: number,
-    query?: RuntimeAdapterReadQuery,
+    query?: StorageEntityViewQuery,
   ) => {
     const accountQuery = {
       ...(query?.cursor ? { cursor: query.cursor } : {}),
