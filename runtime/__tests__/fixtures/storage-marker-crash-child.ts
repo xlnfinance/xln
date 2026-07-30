@@ -1,5 +1,5 @@
 import {
-  writeDurableStorageMarkerFile,
+  writeDurableFile,
   type StorageDurabilityBoundary,
 } from '../../storage/fs-durability';
 
@@ -10,7 +10,7 @@ if (!markerPath || !requestedBoundary) {
   throw new Error('marker path and durability boundary are required');
 }
 
-await writeDurableStorageMarkerFile(
+await writeDurableFile(
   markerPath,
   `${JSON.stringify({ snapshotHeight: 7, generation: 'durable-marker-v1' })}\n`,
   {

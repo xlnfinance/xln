@@ -8,8 +8,17 @@ export const normalizeStackAddress = (value: unknown): string =>
 
 export const normalizeStackChainId = (value: unknown): number | null => {
   const numeric = Number(value);
-  if (!Number.isFinite(numeric) || numeric <= 0) return null;
-  return Math.floor(numeric);
+  if (!Number.isSafeInteger(numeric) || numeric <= 0) return null;
+  return numeric;
+};
+
+export const requireJurisdictionChainId = (
+  value: unknown,
+  code = 'JURISDICTION_CHAIN_ID_INVALID',
+): number => {
+  const chainId = normalizeStackChainId(value);
+  if (chainId === null) throw new Error(`${code}:${String(value)}`);
+  return chainId;
 };
 
 export const isJurisdictionStackRef = (value: unknown): boolean =>

@@ -14,9 +14,9 @@ type StorageDirectoryHandle = {
 };
 
 export type StorageDurabilityBoundary =
-  | 'after-marker-write'
-  | 'after-marker-file-sync'
-  | 'after-marker-rename'
+  | 'after-file-write'
+  | 'after-file-sync'
+  | 'after-file-rename'
   | 'before-parent-dir-sync'
   | 'after-parent-dir-sync';
 
@@ -91,50 +91,50 @@ export const fsyncStorageParentDirectory = async (
 };
 
 /**
- * Publish a recovery marker with the ordering required by crash recovery:
+ * Publish a small canonical file with the ordering required by crash recovery:
  * complete tmp body -> file fsync -> atomic rename -> parent-directory fsync.
  * Renaming an unsynced tmp first is tempting, but after a machine crash it can
  * leave a canonical marker name whose body was never durable. Any failure here
  * is intentionally fatal so DB-directory rotation cannot start without its
  * recovery fence.
  */
-export const writeDurableStorageMarkerFile = async (
-  markerPath: string,
-  markerBody: string,
+export const writeDurableFile = async (
+  targetPath: string,
+  body: string,
   options: StorageDurabilityOptions = {},
 ): Promise<void> => {
-  if (!markerBody) throw new Error(`STORAGE_MARKER_BODY_EMPTY:path=${markerPath}`);
+  if (!body) throw new Error(`STORAGE_FILE_BODY_EMPTY:path=${targetPath}`);
   const fs = await import('fs/promises');
-  const tmpPath = `${markerPath}.tmp`;
-  let markerFile: StorageFileHandle;
+  const tmpPath = `${targetPath}.tmp`;
+  let file: StorageFileHandle;
   try {
-    markerFile = await fs.open(tmpPath, 'w', 0o600) as StorageFileHandle;
+    file = await fs.open(tmpPath, 'w', 0o600) as StorageFileHandle;
   } catch (error) {
-    throw durabilityError('STORAGE_MARKER_TMP_OPEN_FAILED', tmpPath, error);
+    throw durabilityError('STORAGE_FILE_TMP_OPEN_FAILED', tmpPath, error);
   }
 
   try {
     try {
-      await markerFile.writeFile(markerBody, { encoding: 'utf8' });
+      await file.writeFile(body, { encoding: 'utf8' });
     } catch (error) {
-      throw durabilityError('STORAGE_MARKER_FILE_WRITE_FAILED', tmpPath, error);
+      throw durabilityError('STORAGE_FILE_WRITE_FAILED', tmpPath, error);
     }
-    await options.onBoundary?.('after-marker-write');
+    await options.onBoundary?.('after-file-write');
     try {
-      await (options.syncFile ?? ((handle) => handle.sync()))(markerFile);
+      await (options.syncFile ?? ((handle) => handle.sync()))(file);
     } catch (error) {
-      throw durabilityError('STORAGE_MARKER_FILE_FSYNC_FAILED', tmpPath, error);
+      throw durabilityError('STORAGE_FILE_FSYNC_FAILED', tmpPath, error);
     }
-    await options.onBoundary?.('after-marker-file-sync');
+    await options.onBoundary?.('after-file-sync');
   } finally {
-    await markerFile.close();
+    await file.close();
   }
 
   try {
-    await fs.rename(tmpPath, markerPath);
+    await fs.rename(tmpPath, targetPath);
   } catch (error) {
-    throw durabilityError('STORAGE_MARKER_RENAME_FAILED', markerPath, error);
+    throw durabilityError('STORAGE_FILE_RENAME_FAILED', targetPath, error);
   }
-  await options.onBoundary?.('after-marker-rename');
-  await fsyncStorageParentDirectory(markerPath, options);
+  await options.onBoundary?.('after-file-rename');
+  await fsyncStorageParentDirectory(targetPath, options);
 };

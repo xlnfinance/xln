@@ -1,5 +1,6 @@
 import type { JurisdictionConfig } from '../entity/types';
 import { getAvailableJurisdictions } from '../jurisdiction/config';
+import { requireJurisdictionChainId } from '../jurisdiction/jurisdiction-stack';
 import { createJAdapter } from './factory';
 import type { JAdapter, JAdapterConfig, JAdapterReplicaConnection } from './types';
 import { getRegisteredBrowserVMJurisdiction } from './browservm-registry';
@@ -22,7 +23,10 @@ export const buildJAdapterConfigFromJurisdiction = (jurisdiction: JurisdictionCo
   const browserVM = isBrowserVMJurisdiction(jurisdiction);
   const config: JAdapterConfig = {
     mode: browserVM ? 'browservm' : 'rpc',
-    chainId: jurisdiction.chainId ?? 31337,
+    chainId: requireJurisdictionChainId(
+      jurisdiction.chainId,
+      'J_ADAPTER_JURISDICTION_CHAIN_ID_INVALID',
+    ),
     fromReplica: buildFromReplica(jurisdiction),
   };
   if (!browserVM) {

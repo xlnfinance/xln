@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 
 import {
   fsyncStorageParentDirectory,
-  writeDurableStorageMarkerFile,
+  writeDurableFile,
   type StorageDurabilityBoundary,
 } from '../storage/fs-durability';
 import {
@@ -38,9 +38,9 @@ afterEach(() => {
 
 describe('storage filesystem durability', () => {
   for (const boundary of [
-    'after-marker-write',
-    'after-marker-file-sync',
-    'after-marker-rename',
+    'after-file-write',
+    'after-file-sync',
+    'after-file-rename',
   ] satisfies StorageDurabilityBoundary[]) {
     test(`publishes only a complete marker across SIGKILL ${boundary}`, async () => {
       const markerPath = makeMarkerPath(boundary);
@@ -55,12 +55,12 @@ describe('storage filesystem durability', () => {
 
       expect(exitCode, stderr).toBe(137);
       expect(child.signalCode, stderr).toBe('SIGKILL');
-      expect(existsSync(markerPath)).toBe(boundary === 'after-marker-rename');
+      expect(existsSync(markerPath)).toBe(boundary === 'after-file-rename');
       if (existsSync(markerPath)) expect(readFileSync(markerPath, 'utf8')).toBe(markerBody);
 
       // A fresh process may retry an interrupted publication. The canonical
       // marker must then be the complete, file-synced body, never a torn tmp.
-      await writeDurableStorageMarkerFile(markerPath, markerBody);
+      await writeDurableFile(markerPath, markerBody);
       expect(readFileSync(markerPath, 'utf8')).toBe(markerBody);
     }, 10_000);
   }
@@ -76,11 +76,11 @@ describe('storage filesystem durability', () => {
 
   test('surfaces a marker file fsync failure before publication', async () => {
     const markerPath = makeMarkerPath('file-sync-eio');
-    await expect(writeDurableStorageMarkerFile(markerPath, markerBody, {
+    await expect(writeDurableFile(markerPath, markerBody, {
       syncFile: async () => {
         throw Object.assign(new Error('injected marker sync failure'), { code: 'EIO' });
       },
-    })).rejects.toThrow('STORAGE_MARKER_FILE_FSYNC_FAILED:code=EIO');
+    })).rejects.toThrow('STORAGE_FILE_FSYNC_FAILED:code=EIO');
     expect(existsSync(markerPath)).toBeFalse();
   });
 

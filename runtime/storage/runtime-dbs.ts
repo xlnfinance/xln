@@ -13,7 +13,7 @@ import { assertStorageSafetyOverridesAllowed } from './safety';
 import { withRebranchedValues } from './rebranched-db';
 import {
   fsyncStorageParentDirectory,
-  writeDurableStorageMarkerFile,
+  writeDurableFile,
 } from './fs-durability';
 
 type RuntimeLifecycleState = NonNullable<RuntimeReplica['infrastructure']>;
@@ -651,7 +651,7 @@ const readStorageRotationMarker = async (env: RuntimeReplica): Promise<StorageEp
 const writeStorageRotationMarker = async (env: RuntimeReplica, marker: StorageEpochRotationMarker): Promise<void> => {
   if (!nodeProcess) return;
   const markerPath = resolveStorageRotationMarkerPath(env);
-  await writeDurableStorageMarkerFile(markerPath, `${JSON.stringify(marker)}\n`);
+  await writeDurableFile(markerPath, `${JSON.stringify(marker)}\n`);
 };
 
 const removeStorageRotationMarker = async (env: RuntimeReplica): Promise<void> => {

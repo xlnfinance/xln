@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { ethers, getIndexedAccountPath, HDNodeWallet, Mnemonic } from 'ethers';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { createExternalWalletApi } from '../api/external-wallet-api';
 import { hasCliFlag, readCliOption } from '../config/cli';
@@ -33,6 +33,7 @@ import { applyJEventsToEnv } from '../jadapter/watcher';
 import { drainJWatcherBacklog } from '../jadapter/backlog-drain';
 import { createRelayStore } from '../relay/store';
 import { safeStringify } from '../protocol/serialization';
+import { writeDurableFile } from '../storage/fs-durability';
 import { createStructuredLogger } from '../infra/logger';
 import { getPerfMs } from '../infra/time';
 import { handleMeshBootstrapLoopError } from './mesh-bootstrap-fail-fast';
@@ -62,6 +63,7 @@ import {
   getJurisdictionIdentityRef,
   isJurisdictionStackRef,
 } from '../jurisdiction/jurisdiction-runtime';
+import { requireJurisdictionChainId } from '../jurisdiction/jurisdiction-stack';
 import {
   attachRuntimeAdapterTicker,
   forgetRuntimeAdapterClient,
@@ -739,7 +741,7 @@ const writeJurisdictionAddresses = async (jadapter: JAdapter, rpcUrl: string): P
       ...previous,
       name: displayName,
       primary: previous.primary ?? true,
-      chainId: Number(jadapter.chainId || 31337),
+      chainId: requireJurisdictionChainId(jadapter.chainId, 'HUB_JADAPTER_CHAIN_ID_INVALID'),
       rpc: publicRpcUrl,
       explorer: previous.explorer ?? '',
       currency: previous.currency ?? 'USD',
@@ -764,7 +766,7 @@ const writeJurisdictionAddresses = async (jadapter: JAdapter, rpcUrl: string): P
         gasLimit: 1000000,
       },
     };
-    writeFileSync(filePath, JSON.stringify(nextPayload, null, 2) + '\n', 'utf8');
+    await writeDurableFile(filePath, `${JSON.stringify(nextPayload, null, 2)}\n`);
   }
   resetMeshJurisdictionsCache();
 };
@@ -784,7 +786,7 @@ const syncEnvJurisdictionReplica = (env: RuntimeReplica, jadapter: JAdapter, rpc
     deltaTransformer: jadapter.addresses.deltaTransformer,
   };
   replica.rpcs = [rpcUrl];
-  replica.chainId = Number(jadapter.chainId || 31337);
+  replica.chainId = requireJurisdictionChainId(jadapter.chainId, 'HUB_JADAPTER_CHAIN_ID_INVALID');
   replica.jadapter = jadapter;
 };
 
@@ -842,7 +844,7 @@ const buildRuntimeJurisdictionsPayload = (env: RuntimeReplica): string | null =>
         name: displayName,
         primary: true,
         status: 'active',
-        chainId: Number(replica.chainId || 31337),
+        chainId: requireJurisdictionChainId(replica.chainId, 'HUB_JURISDICTION_CHAIN_ID_INVALID'),
         rpc: toPublicRpcUrl(String(replica.rpcs?.[0] || resolvedArgs.rpcUrl || '/rpc')),
         contracts: {
           account,

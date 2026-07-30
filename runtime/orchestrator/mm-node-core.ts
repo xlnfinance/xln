@@ -25,7 +25,7 @@ import { crossJurisdictionBookOwnerRef } from '../extensions/cross-j/orderbook';
 import { createStructuredLogger } from '../infra/logger';
 import type { JAdapter, JTokenInfo } from '../jadapter/types';
 import { getJurisdictionIdentityRef } from '../jurisdiction/jurisdiction-runtime';
-import { getJurisdictionStackId } from '../jurisdiction/jurisdiction-stack';
+import { getJurisdictionStackId, requireJurisdictionChainId } from '../jurisdiction/jurisdiction-stack';
 import { type DirectWebSocket } from '../networking/direct-runtime-bun';
 import { normalizeRuntimeId } from '../networking/runtime-id';
 import {
@@ -724,7 +724,7 @@ export const ensureJurisdictionReplica = (env: RuntimeReplica, jadapter: JAdapte
     deltaTransformer: jadapter.addresses.deltaTransformer,
   };
   replica.rpcs = [rpcUrl];
-  replica.chainId = Number(jadapter.chainId || 31337);
+  replica.chainId = requireJurisdictionChainId(jadapter.chainId, 'MM_JADAPTER_CHAIN_ID_INVALID');
   replica.jadapter = jadapter;
 };
 
