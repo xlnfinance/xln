@@ -1,6 +1,8 @@
 import { validateConsensusConfig } from '../entity/consensus/config-validation';
 import { validateProposedEntityFrame } from '../entity/consensus/frame-validation';
 import { decodeAccountFrame } from '../account/frame-validation';
+import { validateEntityTxs } from './wal/runtime-machine-schema/entity-tx';
+import { validateJInputs } from './wal/runtime-machine-schema/j';
 import {
   requireBoundaryInteger,
   requireBoundaryRecord,
@@ -53,29 +55,26 @@ const validateCompactRuntimeInput = (
   const input = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(input, ['entityInputs'], ['jInputs'], `${code}:fields`);
   if (!Array.isArray(input['entityInputs'])) throw new Error(code);
-  for (const [index, rawEntry] of input['entityInputs'].entries()) {
+  const entityInputs = input['entityInputs'].map((rawEntry, index) => {
     const entryCode = `HISTORY_VIEW_RUNTIME_ACTIVITY_ENTITY_INPUT_INVALID:height=${height}:index=${index}`;
     const entry = requireBoundaryRecord(rawEntry, entryCode);
     requireExactBoundaryKeys(entry, ['entityId'], ['entityTxs'], `${entryCode}:fields`);
     if (typeof entry['entityId'] !== 'string' || entry['entityId'].length === 0) throw new Error(entryCode);
-    if (entry['entityTxs'] !== undefined) {
-      if (!Array.isArray(entry['entityTxs'])) throw new Error(entryCode);
-      for (const tx of entry['entityTxs']) {
-        const txRecord = requireBoundaryRecord(tx, entryCode);
-        if (typeof txRecord['type'] !== 'string' || txRecord['type'].length === 0) throw new Error(entryCode);
-      }
-    }
-  }
-  if (input['jInputs'] !== undefined) {
-    if (!Array.isArray(input['jInputs'])) throw new Error(`${code}:jInputs`);
-    for (const [index, rawEntry] of input['jInputs'].entries()) {
-      const entryCode = `${code}:jInput=${index}`;
-      const entry = requireBoundaryRecord(rawEntry, entryCode);
-      requireExactBoundaryKeys(entry, ['jurisdictionName', 'jTxs'], [], `${entryCode}:fields`);
-      if (typeof entry['jurisdictionName'] !== 'string' || !Array.isArray(entry['jTxs'])) throw new Error(entryCode);
-    }
-  }
-  return input as unknown as StoredRuntimeActivityValue['runtimeInput'];
+    const entityTxs = entry['entityTxs'] === undefined
+      ? undefined
+      : validateEntityTxs(entry['entityTxs'], `${entryCode}:entityTxs`);
+    return {
+      entityId: entry['entityId'],
+      ...(entityTxs === undefined ? {} : { entityTxs }),
+    };
+  });
+  const jInputs = input['jInputs'] === undefined
+    ? undefined
+    : validateJInputs(input['jInputs'], `${code}:jInputs`);
+  return {
+    entityInputs,
+    ...(jInputs === undefined ? {} : { jInputs }),
+  };
 };
 
 export const validateStoredRuntimeActivityValue = (
@@ -170,7 +169,7 @@ export const validateStoredEntityFrameValue = (
   }
   const authority = requireBoundaryRecord(link['postAuthority'], `${code}:postAuthority`);
   requireExactBoundaryKeys(authority, ['config', 'leaderState'], [], `${code}:postAuthority`);
-  validateConsensusConfig(authority['config'], `${code}:postAuthority.config`);
+  const config = validateConsensusConfig(authority['config'], `${code}:postAuthority.config`);
   const leaderState = requireBoundaryRecord(authority['leaderState'], `${code}:postAuthority.leaderState`);
   requireExactBoundaryKeys(
     leaderState,
@@ -181,15 +180,22 @@ export const validateStoredEntityFrameValue = (
   if (typeof leaderState['activeValidatorId'] !== 'string' || leaderState['activeValidatorId'].length === 0) {
     throw new Error(`${code}:postAuthority.leaderState.activeValidatorId`);
   }
-  requireBoundaryInteger(leaderState['view'], `${code}:postAuthority.leaderState.view`);
-  requireBoundaryInteger(
+  const view = requireBoundaryInteger(leaderState['view'], `${code}:postAuthority.leaderState.view`);
+  const changedAtHeight = requireBoundaryInteger(
     leaderState['changedAtHeight'],
     `${code}:postAuthority.leaderState.changedAtHeight`,
   );
   return {
     link: {
       frame,
-      postAuthority: authority as unknown as StoredEntityFrameValue['link']['postAuthority'],
+      postAuthority: {
+        config,
+        leaderState: {
+          activeValidatorId: leaderState['activeValidatorId'],
+          view,
+          changedAtHeight,
+        },
+      },
     },
     runtimeHeight: requireBoundaryInteger(record['runtimeHeight'], `${code}:runtimeHeight`, 1),
     timestamp: requireBoundaryInteger(record['timestamp'], `${code}:timestamp`),
@@ -216,12 +222,28 @@ export const validateRuntimeHistoryRecords = (
         throw new Error(`${code}:identity`);
       }
       const accountHeight = requireBoundaryInteger(record['accountHeight'], `${code}:accountHeight`, 1);
-      validateStoredAccountFrameValue({
+      const stored = validateStoredAccountFrameValue({
         source: record['source'],
         frame: record['frame'],
         runtimeHeight: record['runtimeHeight'],
         timestamp: record['timestamp'],
       }, accountHeight);
+      if (stored.runtimeHeight !== runtimeHeight || stored.timestamp !== runtimeTimestamp) {
+        throw new Error(
+          `${code}:runtime_binding:expected=${runtimeHeight}/${runtimeTimestamp}:` +
+          `actual=${stored.runtimeHeight}/${stored.timestamp}`,
+        );
+      }
+      return {
+        kind: 'accountFrame',
+        entityId: record['entityId'],
+        counterpartyId: record['counterpartyId'],
+        accountHeight,
+        source: stored.source,
+        frame: stored.frame,
+        runtimeHeight: stored.runtimeHeight,
+        timestamp: stored.timestamp,
+      };
     } else if (record['kind'] === 'entityFrame') {
       requireExactBoundaryKeys(
         record,
@@ -231,20 +253,27 @@ export const validateRuntimeHistoryRecords = (
       );
       if (typeof record['entityId'] !== 'string') throw new Error(`${code}:entityId`);
       const entityHeight = requireBoundaryInteger(record['entityHeight'], `${code}:entityHeight`, 1);
-      validateStoredEntityFrameValue({
+      const stored = validateStoredEntityFrameValue({
         link: record['link'],
         runtimeHeight: record['runtimeHeight'],
         timestamp: record['timestamp'],
       }, entityHeight);
+      if (stored.runtimeHeight !== runtimeHeight || stored.timestamp !== runtimeTimestamp) {
+        throw new Error(
+          `${code}:runtime_binding:expected=${runtimeHeight}/${runtimeTimestamp}:` +
+          `actual=${stored.runtimeHeight}/${stored.timestamp}`,
+        );
+      }
+      return {
+        kind: 'entityFrame',
+        entityId: record['entityId'],
+        entityHeight,
+        link: stored.link,
+        runtimeHeight: stored.runtimeHeight,
+        timestamp: stored.timestamp,
+      };
     } else {
       throw new Error(`${code}:kind`);
     }
-    if (record['runtimeHeight'] !== runtimeHeight || record['timestamp'] !== runtimeTimestamp) {
-      throw new Error(
-        `${code}:runtime_binding:expected=${runtimeHeight}/${runtimeTimestamp}:` +
-        `actual=${String(record['runtimeHeight'])}/${String(record['timestamp'])}`,
-      );
-    }
-    return record as unknown as RuntimeHistoryRecord;
   });
 };

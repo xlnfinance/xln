@@ -17,7 +17,6 @@ const DOUBLE_ASSERTION_DEBT: Readonly<Record<string, number>> = {
   'runtime/entity/htlc/payment-admission.ts': 1,
   'runtime/runtime/reliable-authority.ts': 1,
   'runtime/server/cli.ts': 2,
-  'runtime/storage/history-view-schema.ts': 3,
   'runtime/storage/schema-state-docs.ts': 1,
   'runtime/storage/wal/runtime-machine-schema/index.ts': 1,
   'runtime/storage/wal/runtime-machine-schema/j-observation.ts': 1,

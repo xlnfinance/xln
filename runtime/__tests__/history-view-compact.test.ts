@@ -228,5 +228,17 @@ describe('history-view compact values', () => {
       makeMemoryDb([[activityPut!.key, encodeBuffer(corrupted)]]),
       12,
     )).rejects.toThrow('HISTORY_VIEW_RUNTIME_ACTIVITY_FIELDS_INVALID:height=12');
+
+    const malformedTx = decodeBuffer<Record<string, unknown>>(activityPut!.value);
+    malformedTx['runtimeInput'] = {
+      entityInputs: [{
+        entityId,
+        entityTxs: [{ type: 'chat', data: { validatorId: entityId } }],
+      }],
+    };
+    await expect(readHistoryViewRuntimeActivity(
+      makeMemoryDb([[activityPut!.key, encodeBuffer(malformedTx)]]),
+      12,
+    )).rejects.toThrow('HISTORY_VIEW_RUNTIME_ACTIVITY_ENTITY_INPUT_INVALID');
   });
 });
