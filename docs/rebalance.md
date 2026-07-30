@@ -71,7 +71,7 @@ One active quote per account at a time. New quote replaces old.
 
 ## data structures
 
-### RebalancePolicy (stored per-token in AccountMachine)
+### RebalancePolicy (stored per-token in AccountReplica)
 
 ```typescript
 interface RebalancePolicy {
@@ -84,7 +84,7 @@ interface RebalancePolicy {
 Both sides see this (set via `set_rebalance_policy` accountTx).
 Hub uses it to decide when to quote. User entity uses it for auto-accept.
 
-### RebalanceQuote (stored in AccountMachine, one at a time)
+### RebalanceQuote (stored in AccountReplica, one at a time)
 
 ```typescript
 interface RebalanceQuote {
@@ -99,10 +99,10 @@ interface RebalanceQuote {
 
 Expiry: `env.timestamp > quoteId + QUOTE_EXPIRY_MS` (5 minutes = 300,000ms).
 
-### AccountMachine additions
+### AccountReplica additions
 
 ```typescript
-interface AccountMachine {
+interface AccountReplica {
   // ... existing fields ...
   rebalancePolicy: Map<number, RebalancePolicy>   // tokenId → policy
   activeRebalanceQuote?: RebalanceQuote            // one at a time

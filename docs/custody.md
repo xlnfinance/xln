@@ -38,8 +38,8 @@ Hub deducts as needed. User sees itemized deductions on next sync.
 ### bilateral state addition
 
 ```typescript
-// Added to AccountMachine (per-account)
-interface AccountMachine {
+// Added to AccountReplica (per-account)
+interface AccountReplica {
   // ... existing fields ...
   custody: Map<number, bigint>;  // tokenId → custody balance
 }
@@ -262,7 +262,7 @@ Example: route $100 payment
 ## implementation plan
 
 ### phase 1: data structure
-- Add `custody: Map<number, bigint>` to AccountMachine
+- Add `custody: Map<number, bigint>` to AccountReplica
 - Add to proof body (disputable)
 - Add to frame state hash
 

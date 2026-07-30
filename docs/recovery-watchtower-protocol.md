@@ -280,7 +280,7 @@ type AccountRecoveryBundleV1 = {
     swapOffers?: Array<[string, SwapOffer]>;
     pulls?: Array<[string, PullCommitment]>;
     settlementWorkspace?: SettlementWorkspace;
-    lastOutboundFrameAck?: AccountMachine["lastOutboundFrameAck"];
+    lastOutboundFrameAck?: AccountReplica["lastOutboundFrameAck"];
   };
 
   pending?: {
@@ -424,7 +424,7 @@ On account open:
 
 On every committed frame:
 
-1. Build `AccountRecoveryBundleV1` from `AccountMachine`.
+1. Build `AccountRecoveryBundleV1` from `AccountReplica`.
 2. Verify locally before upload:
    - recompute `frame.stateHash`;
    - verify owner and counterparty frame hankos;
@@ -465,7 +465,7 @@ sequenceDiagram
   W->>W: Verify frame hashes, hankos, proof bodies, nonces
   W->>J: Check account/dispute anchors and latest J state
   W->>W: Select highest valid safe bundle per account
-  W->>W: Materialize AccountMachine state
+  W->>W: Materialize AccountReplica
   W->>R: Submit complaint if peer lied/refused
   W->>T: Refresh tower appointments
   W-->>U: Wallet opens at restored state
@@ -506,7 +506,7 @@ Detailed steps:
    - If no valid state exists, show account as discovered but unrecovered.
 
 6. **Materialize runtime**
-   - Rebuild `AccountMachine` with current frame, deltas, locks, proof metadata, J observations, settlement workspace, and pending frame if valid.
+   - Rebuild `AccountReplica` with current frame, deltas, locks, proof metadata, J observations, settlement workspace, and pending frame if valid.
    - Append the Runtime WAL, then materialize history views.
    - Restart PSR cadence and tower uploads.
    - Mark account status as `verified`, `peer-restored`, `tower-restored`, `proof-only`, or `conflict`.
@@ -758,7 +758,7 @@ Status key: done = implemented and covered in the current repo; open = still
 active backlog.
 
 1. done: define recovery protocol types in `runtime/recovery/types.ts`.
-2. done: build bundle creation from `AccountMachine` in `runtime/recovery/bundle.ts`.
+2. done: build bundle creation from `AccountReplica` in `runtime/recovery/bundle.ts`.
 3. done: build deterministic verification in `runtime/recovery/verify.ts`.
 4. partial: add PSR wire handling to direct runtime/hub/relay transports.
    - done: authenticated direct runtime websocket accepts

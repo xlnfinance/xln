@@ -37,12 +37,12 @@ finalization.
 - Before V2, `jurisdictions/contracts/Depository.sol:891` passed `finalArguments` and
   `initialArguments` into `_finalizeAccount`.
 - Before V2, `runtime/entity/tx/handlers/dispute.ts:425` built `initialArguments` from the current
-  `AccountMachine`.
+  `AccountReplica`.
 - Before V2, `runtime/entity/tx/handlers/dispute.ts:447` then used a stored
   `counterpartyDisputeProofBodyHash`, so the arguments and proof body can be from
   different heights.
 - Before V2, `runtime/entity/tx/handlers/dispute.ts:777` built `finalArguments` from the current
-  `AccountMachine`, while `runtime/entity/tx/handlers/dispute.ts:805` could finalize using a
+  `AccountReplica`, while `runtime/entity/tx/handlers/dispute.ts:805` could finalize using a
   stored proof body.
 - Before V2, `runtime/entity/tx/j-events.ts:528` stored only `activeDispute.initialArguments`.
 - Before V2, `runtime/watchtower/action.ts:198` reimplemented the same one-argument dispute hash.

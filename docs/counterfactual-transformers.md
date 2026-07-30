@@ -209,7 +209,7 @@ lands. Pre-mainnet ⇒ K is cheap now.
 
 ### 3.1 State (mostly exists)
 
-`AccountMachine.subcontracts: Map<string, AccountSubcontract>` already flows through
+`AccountReplica.subcontracts: Map<string, AccountSubcontract>` already flows through
 state-root, storage projection/hydration, and proof-builder (`proof-builder.ts:236`).
 
 Extend `AccountSubcontract` with fields needed for counterfactual life:

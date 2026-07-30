@@ -31,16 +31,17 @@ const required = new Set([
 const discovered = new Set<string>();
 const violations: string[] = [];
 const legacyEntityCandidateName = ['validator', 'Execution'].join('');
+const legacyTypeNames = /\b(?:RuntimeEnv|EntityMachine|AccountMachine|ServerMachine)\b/gu;
 
-const listTypeScriptFiles = (directory: string): string[] => readdirSync(directory, {
+const listFiles = (directory: string, extension: string): string[] => readdirSync(directory, {
   withFileTypes: true,
 }).flatMap(entry => {
   const path = join(directory, entry.name);
-  if (entry.isDirectory()) return listTypeScriptFiles(path);
-  return entry.isFile() && path.endsWith('.ts') ? [path] : [];
+  if (entry.isDirectory()) return listFiles(path, extension);
+  return entry.isFile() && path.endsWith(extension) ? [path] : [];
 });
 
-for (const path of listTypeScriptFiles('runtime')) {
+for (const path of listFiles('runtime', '.ts')) {
   if (path.includes('/__tests__/') || path.includes('/generated/')) continue;
   const source = readFileSync(path, 'utf8');
   if (source.includes(legacyEntityCandidateName)) {
@@ -69,6 +70,18 @@ for (const path of listTypeScriptFiles('runtime')) {
     ts.forEachChild(node, visit);
   };
   visit(file);
+}
+
+// Active documentation is part of the audit surface. Historical release notes,
+// archived designs, and audit evidence must retain their original vocabulary;
+// live specifications must use the same type names as the compiler.
+for (const path of listFiles('docs', '.md')) {
+  if (path.includes('/archive/') || path.includes('/releases/') || path.includes('/audit/')) continue;
+  const source = readFileSync(path, 'utf8');
+  for (const match of source.matchAll(legacyTypeNames)) {
+    const line = source.slice(0, match.index).split('\n').length;
+    violations.push(`${path}:${line}:legacy-doc-type:${match[0]}`);
+  }
 }
 
 for (const name of required) {

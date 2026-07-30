@@ -50,18 +50,18 @@ B ↔ C: { B_to_C: 8, C_to_B: 12 }
 ```
 Entity A:
   accounts = {
-    B: AccountMachine(A, B),  ← independent state machine
-    C: AccountMachine(A, C),  ← independent state machine
+    B: AccountReplica(A, B),  ← independent replica
+    C: AccountReplica(A, C),  ← independent replica
   }
 
 Entity B:
   accounts = {
-    A: AccountMachine(B, A),  ← mirror of A's machine
-    C: AccountMachine(B, C),  ← independent state machine
+    A: AccountReplica(B, A),  ← mirror of A's replica
+    C: AccountReplica(B, C),  ← independent replica
   }
 ```
 
-each `AccountMachine` maintains:
+each `AccountReplica` maintains:
 - **deltas**: balance changes per entity (canonical state)
 - **frameHistory**: sequence of signed frames (audit trail)
 - **commitQueue**: pending transactions awaiting signatures

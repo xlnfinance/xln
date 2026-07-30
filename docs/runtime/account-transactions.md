@@ -5,7 +5,7 @@ This folder owns bilateral account transaction application.
 ## What it does
 
 - validates and applies bilateral account txs
-- updates `AccountMachine`
+- updates `AccountReplica`
 - returns deterministic events used by account consensus and followup logic
 
 ## Main files
