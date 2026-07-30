@@ -15,6 +15,10 @@ import {
   requireString,
   validateStorageSafeValue,
 } from './primitives';
+import {
+  isSimpleEntityTxType,
+  validateSimpleEntityTxData,
+} from './entity-tx-simple-schema';
 
 const ENTITY_TX_NESTING_LIMIT = 16;
 
@@ -255,7 +259,11 @@ const validateCrossJClearMaterialization = (value: unknown, code: string): void 
   }
 };
 
-const validateEntityTxRecord = (value: unknown, code: string, depth: number): EntityTx => {
+function assertEntityTxRecord(
+  value: unknown,
+  code: string,
+  depth: number,
+): asserts value is EntityTx {
   if (depth > ENTITY_TX_NESTING_LIMIT) throw new Error(`${code}_NESTING_LIMIT`);
   const tx = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(tx, ['type', 'data'], [], `${code}_FIELDS`);
@@ -272,8 +280,17 @@ const validateEntityTxRecord = (value: unknown, code: string, depth: number): En
   else if (type === 'accountInput') decodeAccountPeerInput(tx['data'], `${code}_DATA`);
   else if (type === 'materializeCrossJurisdictionClear') validateCrossJClearMaterialization(tx['data'], `${code}_DATA`);
   else if (type === 'materializeCrossJurisdictionSwap') validateCrossJMaterialization(tx['data'], `${code}_DATA`);
-  else validateSimpleIdentityTx(type, tx['data'], `${code}_DATA`);
-  return tx as unknown as EntityTx;
+  else if (type === 'chat' || type === 'vote') validateSimpleIdentityTx(type, tx['data'], `${code}_DATA`);
+  else if (isSimpleEntityTxType(type)) validateSimpleEntityTxData(type, tx['data'], `${code}_DATA`);
+  else {
+    const unhandledType: never = type;
+    throw new Error(`${code}_TYPE_UNHANDLED:${String(unhandledType)}`);
+  }
+}
+
+const validateEntityTxRecord = (value: unknown, code: string, depth: number): EntityTx => {
+  assertEntityTxRecord(value, code, depth);
+  return value;
 };
 
 export const validateEntityTx = (value: unknown, code: string): EntityTx => {
