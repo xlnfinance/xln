@@ -524,6 +524,11 @@ describe('J validator-local history and Entity-finalized ranges', () => {
         events: [],
         hash: `0x${'11'.repeat(32)}`,
         leader: { proposerSignerId: activeLeaderId, view: 0 },
+        hashesToSign: [{
+          hash: `0x${'11'.repeat(32)}`,
+          type: 'entityFrame',
+          context: `entity-frame:${validatorState.height + 1}`,
+        }],
       },
     });
 
@@ -1207,6 +1212,11 @@ describe('J validator-local history and Entity-finalized ranges', () => {
         events: [],
         hash: `0x${'11'.repeat(32)}`,
         leader: { proposerSignerId: leaderId, view: 0 },
+        hashesToSign: [{
+          hash: `0x${'11'.repeat(32)}`,
+          type: 'entityFrame',
+          context: `entity-frame:${entityState.height + 1}`,
+        }],
       },
     })).rejects.toThrow('J_HISTORY_FINALITY_ROOT_CORRUPTION');
     expect(replica.lockedFrame).toBeUndefined();
