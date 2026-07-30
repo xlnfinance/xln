@@ -1633,6 +1633,83 @@ const createMarketMakerBootstrapFinalizer = (deps: MarketMakerBootstrapFinalizer
   return { markReady };
 };
 
+type MarketMakerMaintenanceLoopDeps = {
+  env: RuntimeState;
+  isShuttingDown: () => boolean;
+  phase: () => string;
+  health: ReturnType<typeof createMarketMakerHealthController>;
+  driveQuotes: (mode?: MarketMakerQuoteMode) => Promise<boolean>;
+  canCheckCompletion: () => boolean;
+  buildCompletionHealth: () => MarketMakerHealth | null;
+  isBootstrapDepthComplete: (health: MarketMakerHealth | null) => boolean;
+  markReady: () => Promise<boolean>;
+  emit: (event: string, fields?: Record<string, unknown>) => void;
+};
+
+const createMarketMakerMaintenanceLoops = (deps: MarketMakerMaintenanceLoopDeps) => {
+  let quoteTimer: ReturnType<typeof setInterval> | null = null;
+  let healthTimer: ReturnType<typeof setInterval> | null = null;
+  let healthRefreshInFlight = false;
+  const fail = (error: unknown): void => {
+    if (deps.isShuttingDown()) return;
+    const message = error instanceof Error ? error.message : String(error);
+    deps.emit('fatal', { error: message });
+    console.error('[MM] quote loop failed; shutting down:', message);
+    stop();
+    process.exit(1);
+  };
+  const refreshHealth = (): void => {
+    if (deps.isShuttingDown() || healthRefreshInFlight || hasMarketMakerRuntimeBacklog(deps.env)) return;
+    healthRefreshInFlight = true;
+    try {
+      if (deps.phase() === 'offers-ready') deps.health.publishReady();
+      else deps.health.publishBootstrap();
+    } finally {
+      healthRefreshInFlight = false;
+    }
+  };
+  const maintainQuotes = async (): Promise<void> => {
+    if (hasMarketMakerRuntimeBacklog(deps.env)) return;
+    if (deps.phase() === 'offers-ready') {
+      const before = deps.health.publishReady();
+      if (isMarketMakerFullDepthComplete(before)) return;
+      await deps.driveQuotes('steady');
+      const after = deps.health.publishReady();
+      if (!isMarketMakerFullDepthComplete(after)) deps.health.publish({ includeCross: true });
+      return;
+    }
+    const enqueued = await deps.driveQuotes();
+    deps.health.publishBootstrap();
+    if (!enqueued && deps.canCheckCompletion()) {
+      const completionHealth = deps.buildCompletionHealth();
+      if (deps.isBootstrapDepthComplete(completionHealth)) await deps.markReady();
+    }
+  };
+  const startQuotes = (): void => {
+    if (quoteTimer) return;
+    quoteTimer = setInterval(() => {
+      if (!deps.isShuttingDown()) void maintainQuotes().catch(fail);
+    }, MARKET_MAKER_QUOTE_LOOP_MS);
+  };
+  const startHealth = (): void => {
+    if (healthTimer) return;
+    healthTimer = setInterval(() => {
+      try {
+        refreshHealth();
+      } catch (error) {
+        fail(error);
+      }
+    }, MARKET_MAKER_HEALTH_REFRESH_MS);
+  };
+  function stop(): void {
+    if (quoteTimer) clearInterval(quoteTimer);
+    if (healthTimer) clearInterval(healthTimer);
+    quoteTimer = null;
+    healthTimer = null;
+  }
+  return { fail, startHealth, startQuotes, stop };
+};
+
 export const runMarketMakerNode = async (): Promise<void> => {
   activateMarketMakerProcessArgs();
   if (resolvedArgs.dbPath) process.env['XLN_DB_PATH'] = resolvedArgs.dbPath;
@@ -1785,8 +1862,9 @@ export const runMarketMakerNode = async (): Promise<void> => {
   // still awaiting. Keep every lifecycle handle used by control routes
   // initialized before the server becomes reachable.
   let shuttingDown = false;
-  let loop: ReturnType<typeof setInterval> | null = null;
-  let healthRefreshLoop: ReturnType<typeof setInterval> | null = null;
+  let stopRuntimeLoops = (): void => {
+    shuttingDown = true;
+  };
   const httpDrain = createHttpDrainTracker();
   const server = Bun.serve({
     hostname: resolvedArgs.apiHost,
@@ -1806,11 +1884,7 @@ export const runMarketMakerNode = async (): Promise<void> => {
       buildHealthSnapshot: () => healthController.buildSnapshot({ includeCross: true }),
       readCachedHealthResponseJson: healthController.readHealthResponseJson,
       rebuildCachedHealthResponseJson: healthController.rebuildHealthResponse,
-      stopRuntimeLoops: () => {
-        shuttingDown = true;
-        if (loop) clearInterval(loop);
-        if (healthRefreshLoop) clearInterval(healthRefreshLoop);
-      },
+      stopRuntimeLoops: () => stopRuntimeLoops(),
     }),
     websocket: createMarketMakerWebSocketHandler(env, directRuntimeWs, handleRuntimeAdapterWsMessage),
   });
@@ -2149,69 +2223,25 @@ export const runMarketMakerNode = async (): Promise<void> => {
     emit: emitBootstrapDebugEvent,
   });
 
-  let healthRefreshInFlight = false;
-  const refreshCachedHealth = (): void => {
-    if (shuttingDown || healthRefreshInFlight) return;
-    if (hasMarketMakerRuntimeBacklog(env)) return;
-    healthRefreshInFlight = true;
-    try {
-      if (startupPhase === 'offers-ready') {
-        healthController.publishReady();
-      } else {
-        healthController.publishBootstrap();
-      }
-    } finally {
-      healthRefreshInFlight = false;
-    }
-  };
-  const runQuoteMaintenance = async (): Promise<void> => {
-    if (hasMarketMakerRuntimeBacklog(env)) return;
-    if (startupPhase === 'offers-ready') {
-      const before = healthController.publishReady();
-      if (isMarketMakerFullDepthComplete(before)) return;
-      await driveQuotes('steady');
-      const after = healthController.publishReady();
-      if (!isMarketMakerFullDepthComplete(after)) healthController.publish({ includeCross: true });
-      return;
-    }
-    const enqueued = await driveQuotes();
-    healthController.publishBootstrap();
-    if (startupPhase !== 'offers-ready' && !enqueued && canCheckBootstrapCompletion()) {
-      const completionHealth = buildBootstrapCompletionHealth();
-      if (isBootstrapDepthComplete(completionHealth)) {
-        await markOffersReady();
-      }
-    }
-  };
-  const failQuoteLoop = (error: unknown): void => {
-    if (shuttingDown) return;
-    const message = error instanceof Error ? error.message : String(error);
-    emitBootstrapDebugEvent('fatal', { error: message });
-    console.error(`[MM] quote loop failed; shutting down:`, message);
-    if (loop) clearInterval(loop);
-    if (healthRefreshLoop) clearInterval(healthRefreshLoop);
-    process.exit(1);
-  };
-  const startQuoteLoop = (): void => {
-    if (loop) return;
-    loop = setInterval(() => {
-      if (shuttingDown) return;
-      void runQuoteMaintenance().catch(failQuoteLoop);
-    }, MARKET_MAKER_QUOTE_LOOP_MS);
-  };
-  const startHealthRefreshLoop = (): void => {
-    if (healthRefreshLoop) return;
-    healthRefreshLoop = setInterval(() => {
-      try {
-        refreshCachedHealth();
-      } catch (error) {
-        failQuoteLoop(error);
-      }
-    }, MARKET_MAKER_HEALTH_REFRESH_MS);
+  const maintenanceLoops = createMarketMakerMaintenanceLoops({
+    env,
+    isShuttingDown: () => shuttingDown,
+    phase: () => startupPhase,
+    health: healthController,
+    driveQuotes,
+    canCheckCompletion: canCheckBootstrapCompletion,
+    buildCompletionHealth: buildBootstrapCompletionHealth,
+    isBootstrapDepthComplete,
+    markReady: markOffersReady,
+    emit: emitBootstrapDebugEvent,
+  });
+  stopRuntimeLoops = () => {
+    shuttingDown = true;
+    maintenanceLoops.stop();
   };
   startupPhase = 'runtime-ready';
   healthController.publish({ includeCross: false });
-  startHealthRefreshLoop();
+  maintenanceLoops.startHealth();
   emitBootstrapDebugEvent('phase', { phase: startupPhase });
   nodeLog.info('runtime.ready', {
     entityId: primaryMmContext.entityId,
@@ -2241,24 +2271,20 @@ export const runMarketMakerNode = async (): Promise<void> => {
       });
       if (!bootstrapHealth) break;
       if (await markOffersReady()) {
-        startQuoteLoop();
+        maintenanceLoops.startQuotes();
         return;
       }
     }
     if (!shuttingDown) {
       throw new Error('MARKET_MAKER_BOOTSTRAP_STOPPED_WITHOUT_READY');
     }
-  })().catch(failQuoteLoop);
+  })().catch(maintenanceLoops.fail);
 
   const shutdown = createMarketMakerShutdown({
     env,
     server,
     httpDrain,
-    stopRuntimeLoops: () => {
-      shuttingDown = true;
-      if (loop) clearInterval(loop);
-      if (healthRefreshLoop) clearInterval(healthRefreshLoop);
-    },
+    stopRuntimeLoops,
   });
   installMarketMakerShutdownSignals(shutdown);
   await new Promise<void>(() => {});

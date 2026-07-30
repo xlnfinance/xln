@@ -1087,17 +1087,17 @@ describe('production startup wiring', () => {
       'if (!currentHealth || !isMarketMakerCrossDepthComplete(currentHealth)) return publish({ includeCross: true });',
     );
     expect(healthControllerBlock).toContain('crossOverride: currentHealth.cross');
-    expect(mmNode).toContain("if (startupPhase === 'offers-ready') {");
-    expect(mmNode).toContain('const before = healthController.publishReady();');
+    expect(mmNode).toContain("if (deps.phase() === 'offers-ready') {");
+    expect(mmNode).toContain('const before = deps.health.publishReady();');
     expect(mmNode).toContain('if (isMarketMakerFullDepthComplete(before)) return;');
-    expect(mmNode).toContain("await driveQuotes('steady');");
-    expect(mmNode).toContain('const after = healthController.publishReady();');
+    expect(mmNode).toContain("await deps.driveQuotes('steady');");
+    expect(mmNode).toContain('const after = deps.health.publishReady();');
     const refreshCachedHealthBlock = extractSourceBlock(
       mmNode,
-      'const refreshCachedHealth = (): void => {',
-      'const runQuoteMaintenance = async (): Promise<void> => {',
+      'const refreshHealth = (): void => {',
+      'const maintainQuotes = async (): Promise<void> => {',
     );
-    expect(refreshCachedHealthBlock).toContain('healthController.publishReady();');
+    expect(refreshCachedHealthBlock).toContain('deps.health.publishReady();');
     expect(refreshCachedHealthBlock).not.toContain('includeCross: true');
     expect(mmNode).not.toContain('bootstrapCrossExpectedRoutes === false');
     expect(mmNode).not.toContain('crossOverride: buildNeutralMarketMakerCrossHealth()');
@@ -1299,8 +1299,7 @@ describe('production startup wiring', () => {
     const serverStart = mmNode.indexOf('const server = Bun.serve({');
     const lifecycleDeclarations = [
       'let shuttingDown = false;',
-      'let loop: ReturnType<typeof setInterval> | null = null;',
-      'let healthRefreshLoop: ReturnType<typeof setInterval> | null = null;',
+      'let stopRuntimeLoops = (): void => {',
     ];
 
     expect(serverStart).toBeGreaterThan(0);
@@ -1624,7 +1623,7 @@ describe('production startup wiring', () => {
     );
     expect(mmNode).toContain('const bootstrapHealth = await waitForBootstrapOffers({');
     expect(mmNode).toContain('if (await markOffersReady()) {');
-    expect(mmNode).toContain('startQuoteLoop();');
+    expect(mmNode).toContain('maintenanceLoops.startQuotes();');
     expect(mmNode).not.toContain(
       'await markOffersReady();\n      publishMarketMakerHealthSnapshot({ includeCross: true });',
     );
@@ -1638,8 +1637,8 @@ describe('production startup wiring', () => {
       'const completionHealth = bootstrapCrossStarted ? buildBootstrapCompletionHealth() : health;',
     );
     expect(mmNode).toContain("const enqueued = await deps.driveQuotes('bootstrap');");
-    expect(mmNode).toContain("if (startupPhase !== 'offers-ready' && !enqueued && canCheckBootstrapCompletion()) {");
-    expect(mmNode).toContain('await markOffersReady();');
+    expect(mmNode).toContain('if (!enqueued && deps.canCheckCompletion()) {');
+    expect(mmNode).toContain('await deps.markReady();');
   });
 
   test('market maker info route keeps cross debug opt-in off the hot path', () => {
