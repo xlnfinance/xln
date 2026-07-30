@@ -25,6 +25,7 @@ import type {
 import { compareAscii, sortedStringMapKeys, sortedStringMapStartIndex } from '../infra/sorted-map-index';
 import { RuntimeAdapterError } from './errors';
 import { encodeRuntimeAdapterMessage, runtimeAdapterMaxMessageBytes } from './codec';
+import { detachRuntimeAdapterPayload } from './codec';
 import { XLN_PROTOCOL_VERSION } from '../protocol/version';
 import { buildRuntimeRecoveryBundle } from '../recovery/bundle';
 import {
@@ -2041,7 +2042,15 @@ export const resolveRuntimeAdapterRead = async <T = unknown>(
 ): Promise<T> => {
   const release = await acquireRuntimeCommittedRead(ctx.env);
   try {
-    return await resolveRuntimeAdapterReadFromCommittedState<T>(ctx, path, query);
+    const projection = await resolveRuntimeAdapterReadFromCommittedState<T>(ctx, path, query);
+    /**
+     * The committed-read lease protects only this function. Returning references
+     * into the live Runtime would let an embedded caller observe the next
+     * in-place frame after the lease is released. Adapter payloads are bounded
+     * transport DTOs, so taking ownership here is cheap and never clones the
+     * Runtime's unbounded Entity/Account maps.
+     */
+    return detachRuntimeAdapterPayload(projection);
   } finally {
     release();
   }

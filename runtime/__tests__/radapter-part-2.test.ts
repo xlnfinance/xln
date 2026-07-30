@@ -569,6 +569,31 @@ test('runtime adapter view-frame excludes unbounded account internals from remot
   expect(compact?.boardResealMigration).toEqual(account.boardResealMigration);
 });
 
+test('runtime adapter returns an owned projection after releasing the committed-read lease', async () => {
+  const env = makeEnv();
+  const persistedHead: StorageHead = {
+    schemaVersion: STORAGE_SCHEMA_VERSION,
+    latestHeight: env.height,
+    latestMaterializedHeight: env.height,
+    latestSnapshotHeight: 1,
+    snapshotPeriodFrames: 256,
+    retainSnapshots: 3,
+    epochMaxBytes: 1,
+    accountMerkleRadix: 16,
+    epochReplayBytes: 0,
+    retainedHistoryBytes: 0,
+  };
+  const projectedHead = await resolveRuntimeAdapterRead<StorageHead>(
+    { env, readHead: async () => persistedHead },
+    'head',
+    { atHeight: 1 },
+  );
+
+  persistedHead.latestHeight += 1;
+
+  expect(projectedHead.latestHeight).toBe(env.height);
+});
+
 test('storage-backed historical view pages support desc account and book cursors', async () => {
   const env = makeEnv();
   const replica = Array.from(env.eReplicas.values())[0]!;

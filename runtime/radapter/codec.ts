@@ -6,6 +6,7 @@ import {
   type RuntimeAdapterWireMessage,
 } from './wire-schema';
 import type { RuntimeAdapterRequest } from './types';
+import { XLN_PROTOCOL_VERSION } from '../protocol/version';
 
 const DEFAULT_MAX_MESSAGE_BYTES = 1_048_576;
 
@@ -73,4 +74,25 @@ export const decodeRuntimeAdapterRequest = (raw: unknown): RuntimeAdapterRequest
   const message = decodeRuntimeAdapterMessage(raw);
   if (!('id' in message)) throw new Error('RADAPTER_CLIENT_REQUEST_REQUIRED');
   return message;
+};
+
+/**
+ * Give an embedded caller the same owned payload that a remote caller receives.
+ *
+ * Adapter projections may contain codec-supported values such as BigInt and
+ * Map which are not reliably detached by every host's `structuredClone`.
+ * A canonical wire round-trip both removes references into live Runtime state
+ * and prevents embedded/remote behavior from drifting.
+ */
+export const detachRuntimeAdapterPayload = <T>(payload: T): T => {
+  const message = decodeRuntimeAdapterMessage(encodeRuntimeAdapterMessage({
+    v: XLN_PROTOCOL_VERSION,
+    inReplyTo: 'embedded-projection',
+    ok: true,
+    payload,
+  }));
+  if (!('ok' in message) || !message.ok) {
+    throw new Error('RADAPTER_PROJECTION_ROUNDTRIP_INVALID');
+  }
+  return message.payload as T;
 };
