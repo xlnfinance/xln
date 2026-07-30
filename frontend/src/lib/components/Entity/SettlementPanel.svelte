@@ -68,8 +68,11 @@
 
   function isRuntimeEnv(value: unknown): value is RuntimeEnv {
     if (!value || typeof value !== 'object') return false;
-    const obj = value as { eReplicas?: unknown; jReplicas?: unknown; runtimeInput?: unknown };
-    return obj.eReplicas instanceof Map && obj.jReplicas instanceof Map;
+    const obj = value as {
+      state?: { eReplicas?: unknown; jReplicas?: unknown };
+      runtimeInput?: unknown;
+    };
+    return obj.state?.eReplicas instanceof Map && obj.state.jReplicas instanceof Map;
   }
 
   function resolveSignerId(env: RuntimeEnv): string {

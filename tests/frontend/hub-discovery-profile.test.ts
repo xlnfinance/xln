@@ -593,7 +593,7 @@ test('HubDiscoveryPanel renders a supplied projection instead of scanning eRepli
   expect(source).not.toContain('enqueueEntityInputs');
   expect(source).not.toContain("type: 'openAccount'");
   expect(source).not.toContain('function collectLocalHubs');
-  expect(source).not.toContain('env?.eReplicas');
+  expect(source).not.toContain('env?.state.eReplicas');
   expect(source).not.toContain('getEntityJurisdictionKey(');
   expect(source).not.toContain('appRuntimeAdapterMode');
   expect(source).not.toContain('runtimeAdapterAuthLevel');

@@ -163,8 +163,8 @@ export const computeCanonicalStateHashFromEnv = (
   runtimeInput?: RuntimeInput,
 ): string =>
   computeCanonicalRuntimeStateHash(
-    env.height,
-    env.timestamp,
+    env.state.height,
+    env.state.timestamp,
     computeCanonicalEntityHashesFromEnv(env),
     buildDurableRuntimeMachineSnapshot(env, {
       ...(runtimeInput ? { runtimeInput } : {}),

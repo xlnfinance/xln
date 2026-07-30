@@ -94,7 +94,7 @@ const collectRuntimeIngress = async (
   deps: RuntimeProcessDeps,
 ): Promise<RuntimeIngressDecision> => {
   const { loop } = deps;
-  const ingressTimestamp = env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
+  const ingressTimestamp = env.scenarioMode ? (env.state.timestamp ?? 0) : getWallClockMs();
   if (inputs?.length) loop.enqueueRuntimeInputs(env, inputs, undefined, undefined, ingressTimestamp);
   if (env.pendingOutputs?.length) {
     loop.enqueueRuntimeContinuation(env, env.pendingOutputs, undefined, undefined, ingressTimestamp);
@@ -112,7 +112,7 @@ const collectRuntimeIngress = async (
       undefined,
       [runtimeTx],
       undefined,
-      env.scenarioMode ? env.timestamp : getWallClockMs(),
+      env.scenarioMode ? env.state.timestamp : getWallClockMs(),
     );
   });
   profile.mark('jurisdictionImports');
@@ -130,7 +130,7 @@ const collectRuntimeIngress = async (
   profile.mark('enqueue');
 
   if (!loop.hasRuntimeWork(env)) return { ready: false, outcome: 'no-work' };
-  const gateTimestamp = env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
+  const gateTimestamp = env.scenarioMode ? (env.state.timestamp ?? 0) : getWallClockMs();
   if (!loop.isRuntimeFrameReady(env, gateTimestamp, runtimeDelay)) {
     return { ready: false, outcome: 'not-ready' };
   }
@@ -184,12 +184,12 @@ const resolveRuntimeFrameTimestamp = (
 ): number => {
   if (env.scenarioMode) {
     return requireBoundaryInteger(
-      requireBoundaryInteger(env.timestamp, 'RUNTIME_TIMESTAMP_INVALID') + 100,
+      requireBoundaryInteger(env.state.timestamp, 'RUNTIME_TIMESTAMP_INVALID') + 100,
       'RUNTIME_TIMESTAMP_OVERFLOW',
     );
   }
   const liveNow = getWallClockMs();
-  const previousTimestamp = requireBoundaryInteger(env.timestamp, 'RUNTIME_TIMESTAMP_INVALID');
+  const previousTimestamp = requireBoundaryInteger(env.state.timestamp, 'RUNTIME_TIMESTAMP_INVALID');
   if (previousTimestamp > liveNow + TIMING.TIMESTAMP_DRIFT_MS) {
     throw new Error(`RUNTIME_CLOCK_AHEAD: env.timestamp=${previousTimestamp} wall=${liveNow}`);
   }
@@ -229,7 +229,7 @@ const openRuntimeFrameCandidate = (
   const env = liveEnv;
   const state = ensureRuntimeState(env);
   const mempool = transaction.frameMempool;
-  for (const replica of env.jReplicas.values()) {
+  for (const replica of env.state.jReplicas.values()) {
     replica.jadapter?.setQuietLogs?.(quietRuntimeLogs);
   }
   const runtimeInput = buildRuntimeFrameInput(env, mempool, deps);
@@ -256,9 +256,9 @@ const beginRuntimeFrameMutation = (
   deps.applyRuntimeInput.validate(candidate.env, candidate.runtimeInput);
   frame.mutationStarted = true;
   ensureRuntimeState(candidate.env).stateMutationInFlight = true;
-  candidate.env.timestamp = candidate.frameTimestamp;
-  for (const replica of candidate.env.jReplicas.values()) {
-    replica.jadapter?.setBlockTimestamp?.(candidate.env.timestamp);
+  candidate.env.state.timestamp = candidate.frameTimestamp;
+  for (const replica of candidate.env.state.jReplicas.values()) {
+    replica.jadapter?.setBlockTimestamp?.(candidate.env.state.timestamp);
   }
 };
 
@@ -286,8 +286,8 @@ const haltStaleRuntimeWriter = async (
     message:
       `STALE_RUNTIME_WRITER_STOPPED: frame=${frameHeightBeforeTick + 1} ` +
       `runtime=${String(liveEnv.runtimeId || '').slice(0, 12)}`,
-    height: Math.max(0, liveEnv.height),
-    timestamp: Math.max(0, liveEnv.timestamp),
+    height: Math.max(0, liveEnv.state.height),
+    timestamp: Math.max(0, liveEnv.state.timestamp),
   };
   state.stopLoop?.();
   profile.outcome = 'stale-writer-stopped';
@@ -314,14 +314,14 @@ const publishCommittedRuntimeFrame = (
   if (frame.pendingTraceSnapshot) {
     recordRuntimeHistoryTraceForTesting(env, frame.pendingTraceSnapshot);
   }
-  if (!quietLogs) runtimeLog.debug('storage.save.done', { height: env.height });
+  if (!quietLogs) runtimeLog.debug('storage.save.done', { height: env.state.height });
   profile.mark('publish');
   if (appliedInput) {
     const notificationError = notifyRuntimeSyncAfterCommit(env);
     if (notificationError) {
       runtimeLog.error('runtime_sync.notification_failed', {
         error: notificationError.message,
-        height: env.height,
+        height: env.state.height,
       });
     }
     deps.notifyRuntimeFrameCommitted(env, appliedInput);
@@ -350,7 +350,7 @@ const commitRuntimeFrame = async (
     return { env, state: ensureRuntimeState(env), staleWriterStopped: false };
   }
 
-  if (!options.quietLogs) runtimeLog.debug('storage.save.start', { height: candidateEnv.height });
+  if (!options.quietLogs) runtimeLog.debug('storage.save.start', { height: candidateEnv.state.height });
   try {
     const outcome = await deps.storage.saveEnvToDB(
       candidateEnv,
@@ -526,7 +526,7 @@ export const createRuntimeProcessor = (deps: RuntimeProcessDeps) => async (
   const processState = ensureRuntimeState(env);
   assertRuntimeWriterAcceptingIngress(processState);
   if (inputs?.length) {
-    const ingressTimestamp = env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
+    const ingressTimestamp = env.scenarioMode ? (env.state.timestamp ?? 0) : getWallClockMs();
     deps.loop.enqueueRuntimeInputs(env, inputs, undefined, undefined, ingressTimestamp);
   }
   const releaseProcessLock = await acquireRuntimeFrameWriter(processState);

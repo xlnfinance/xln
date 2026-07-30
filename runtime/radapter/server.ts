@@ -291,7 +291,7 @@ const emitRuntimeAdapterResponseTooLarge = (
     query: compactReadQueryForLog(diagnostic?.query),
     authLevel: diagnostic?.authLevel ?? null,
     runtimeId: String(env?.runtimeId || '') || null,
-    height: Math.max(0, Math.floor(Number(env?.height ?? 0))),
+    height: Math.max(0, Math.floor(Number(env?.state.height ?? 0))),
     payloadKeys: payload ? Object.keys(payload).slice(0, 20) : [],
     payloadBytes: byteBreakdownForLog(payload),
     activeEntityBytes: byteBreakdownForLog(activeEntity),
@@ -427,7 +427,7 @@ export const closeInvalidRuntimeAdapterMessage = (ws: RuntimeAdapterSocket, erro
 export const broadcastRuntimeAdapterTick = (env: RuntimeReplica): void => {
   prunePendingCommands(env);
   if (clients.size === 0) return;
-  const height = Math.max(0, Math.floor(Number(env.height ?? 0)));
+  const height = Math.max(0, Math.floor(Number(env.state.height ?? 0)));
   const readiness = getRuntimeCommandReadiness(env);
   const message = encodeRuntimeAdapterMessageForBrowser({
     v: XLN_PROTOCOL_VERSION,
@@ -546,7 +546,7 @@ const handleRuntimeAdapterAuth = (
       authLevel: auth.level,
       commandLaneKind,
       expiresAtMs: auth.expiresAtMs,
-      currentHeight: Math.max(0, Math.floor(Number(env.height ?? 0))),
+      currentHeight: Math.max(0, Math.floor(Number(env.state.height ?? 0))),
       commandReady: readiness.ready,
       commandReadyReason: readiness.reason,
       nextCommandSequence:
@@ -678,7 +678,7 @@ const handleRuntimeAdapterRead = async (
     path: msg.path,
     query: compactReadQueryForLog(msg.query),
     runtimeId: String(env.runtimeId || '') || null,
-    height: Math.max(0, Math.floor(Number(env.height ?? 0))),
+    height: Math.max(0, Math.floor(Number(env.state.height ?? 0))),
   };
   const pendingTimer = setTimeout(() => {
     runtimeAdapterLog.warn('read.pending', {
@@ -797,7 +797,7 @@ const sendCommittedRuntimeAdapterCommand = (
     {
       height:
         committed?.observedHeight ??
-        Math.max(0, Math.floor(Number(env.height ?? 0))),
+        Math.max(0, Math.floor(Number(env.state.height ?? 0))),
       status: 'observed',
       commandSequence,
     },
@@ -896,7 +896,7 @@ const enqueueRuntimeAdapterCommand = (
   });
   markedInput.runtimeTxs.push(commandMarker);
   deps.validateRuntimeInputAdmission?.(env, markedInput);
-  const acceptedHeight = Math.max(0, Math.floor(Number(env.height ?? 0)));
+  const acceptedHeight = Math.max(0, Math.floor(Number(env.state.height ?? 0)));
   deps.enqueueRuntimeInput(env, markedInput);
   // The marker shares the exact Runtime frame with the command. It is the
   // durable idempotency authority even when an Entity reducer canonicalizes

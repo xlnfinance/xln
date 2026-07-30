@@ -48,7 +48,7 @@ export const prepareRuntimeFrameInput = async (
   mempool.queuedAt = undefined;
   frame.inputDrained = true;
 
-  const timestamp = queuedAt ?? env.timestamp ?? 0;
+  const timestamp = queuedAt ?? env.state.timestamp ?? 0;
   const jEventPrioritized = deps.prioritizeJEventFrame(input, mempool, timestamp);
   input.entityInputs = prioritizeEntityConsensusInputs(input.entityInputs, entityInput =>
     hasVerifiedEntityCommitPrecertificate(env, entityInput));

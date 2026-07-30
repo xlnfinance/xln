@@ -129,7 +129,7 @@ const createMultisigAccountState = (
 ) => {
   const env = createEmptyEnv(`${seed}:runtime:${localSignerId}`);
   registerOnly(env, localSignerId);
-  env.timestamp = 10_000;
+  env.state.timestamp = 10_000;
   env.scenarioMode = true;
   env.quietRuntimeLogs = true;
   const entityId = generateLazyEntityId(authority.validators, authority.threshold).toLowerCase();
@@ -142,7 +142,7 @@ const createMultisigAccountState = (
     depositoryAddress: `0x${'dd'.repeat(20)}`,
     entityProviderAddress: `0x${'ee'.repeat(20)}`,
   };
-  env.jReplicas.set(jurisdiction.name, {
+  env.state.jReplicas.set(jurisdiction.name, {
     name: jurisdiction.name,
     chainId: jurisdiction.chainId,
     rpcs: [jurisdiction.address!],
@@ -205,7 +205,7 @@ const createMultisigAccountState = (
   const state = {
     entityId,
     height: 0,
-    timestamp: env.timestamp,
+    timestamp: env.state.timestamp,
     nonces: new Map(),
     proposals: new Map(),
     config: {
@@ -237,8 +237,8 @@ const createMultisigAccountState = (
     isProposer: localSignerId === authority.validators[0],
     state,
   };
-  env.eReplicas.set(`${entityId}:${localSignerId}`, replica);
-  env.eReplicas.set(`${counterpartyId}:${counterpartySigner}`, {
+  env.state.eReplicas.set(`${entityId}:${localSignerId}`, replica);
+  env.state.eReplicas.set(`${counterpartyId}:${counterpartySigner}`, {
     entityId: counterpartyId,
     signerId: counterpartySigner,
     entityEncPubKey: '',
@@ -435,7 +435,7 @@ describe('multisig secondary Hanko production', () => {
       validators: [validators[0]!],
       threshold: 1n,
     });
-    const target = source.env.eReplicas.get(`${source.counterpartyId}:${counterpartySigner}`);
+    const target = source.env.state.eReplicas.get(`${source.counterpartyId}:${counterpartySigner}`);
     const sharedGenesis = source.state.accounts.get(source.counterpartyId);
     if (!target || !sharedGenesis) throw new Error('TEST_SINGLE_SIGNER_ACCOUNT_PAIR_MISSING');
     const targetGenesis = structuredClone(sharedGenesis);
@@ -492,7 +492,7 @@ describe('multisig secondary Hanko production', () => {
 
   test('target proposer builds sequential proofs without publishing speculative CAS nodes', async () => {
     const source = createMultisigAccountState(validators[0]);
-    const target = source.env.eReplicas.get(`${source.counterpartyId}:${counterpartySigner}`);
+    const target = source.env.state.eReplicas.get(`${source.counterpartyId}:${counterpartySigner}`);
     if (!target) throw new Error('TEST_TARGET_REPLICA_MISSING');
     const rawOutputs: EntityTx[] = [];
     for (let outputIndex = 0; outputIndex < 2; outputIndex += 1) {
@@ -528,7 +528,7 @@ describe('multisig secondary Hanko production', () => {
     expect(proposedTxs.every(tx => tx.type === 'consensusOutput' && tx.data.consumptionProof)).toBe(true);
     expect(getConsumptionNodeStore(source.env).size).toBe(0);
 
-    const replay = await applyEntityFrame(source.env, target.state, proposedTxs, source.env.timestamp + 1);
+    const replay = await applyEntityFrame(source.env, target.state, proposedTxs, source.env.state.timestamp + 1);
     expect(replay.newState.consumptionAccumulator?.count).toBe(1n);
     expect(replay.consumptionNodeChanges?.newNodes).toHaveLength(1);
     expect(getConsumptionNodeStore(source.env).size).toBe(0);
@@ -536,7 +536,7 @@ describe('multisig secondary Hanko production', () => {
 
   test('keeps a sequence gap durable, then applies it after the missing output commits', async () => {
     const source = createMultisigAccountState(validators[0]);
-    const target = source.env.eReplicas.get(`${source.counterpartyId}:${counterpartySigner}`);
+    const target = source.env.state.eReplicas.get(`${source.counterpartyId}:${counterpartySigner}`);
     if (!target) throw new Error('TEST_TARGET_REPLICA_MISSING');
     const certifiedOutput = async (sequence: bigint, reason: string): Promise<EntityTx> => {
       const entityTxs = [await buildCertifiedBoardResealTx(
@@ -751,7 +751,7 @@ describe('multisig secondary Hanko production', () => {
   test('account proposal produces unsigned drafts for the Entity quorum to seal', async () => {
     const { env, state, counterpartyId } = createMultisigAccountState();
 
-    const result = await applyEntityFrame(env, state, [], env.timestamp);
+    const result = await applyEntityFrame(env, state, [], env.state.timestamp);
     const proposedAccount = result.newState.accounts.get(counterpartyId);
     if (!proposedAccount?.pendingFrame || !proposedAccount.pendingAccountInput) {
       throw new Error('TEST_MULTISIG_ACCOUNT_PROPOSAL_MISSING');
@@ -924,7 +924,7 @@ describe('multisig secondary Hanko production', () => {
       proposer.env,
     )).rejects.toThrow(/CONSENSUS_OUTPUT_WITNESS_HANKO_INVALID/);
 
-    const dedupTarget = proposer.env.eReplicas.get(`${proposer.counterpartyId}:${counterpartySigner}`);
+    const dedupTarget = proposer.env.state.eReplicas.get(`${proposer.counterpartyId}:${counterpartySigner}`);
     if (!dedupTarget) throw new Error('TEST_DEDUP_TARGET_MISSING');
     const dedupEntityTxs: EntityTx[] = [await buildCertifiedBoardResealTx(
       proposer,
@@ -983,7 +983,7 @@ describe('multisig secondary Hanko production', () => {
       }],
     };
     const targetKey = `${proposer.counterpartyId}:${counterpartySigner}`;
-    const targetReplica = proposer.env.eReplicas.get(targetKey);
+    const targetReplica = proposer.env.state.eReplicas.get(targetKey);
     if (!targetReplica) throw new Error('TEST_TARGET_REPLICA_MISSING');
     registerOnly(proposer.env, counterpartySigner);
     const firstDelivery = await applyEntityInput(proposer.env, targetReplica, structuredClone(certifiedInput));
@@ -1069,7 +1069,7 @@ describe('multisig secondary Hanko production', () => {
           consumptionProof: quarantinedProof,
         },
       }],
-      proposer.env.timestamp + 1,
+      proposer.env.state.timestamp + 1,
     )).rejects.toThrow(/CONSENSUS_OUTPUT_RELATIONSHIP_QUARANTINED/);
 
     const assertTamperRejected = async (
@@ -1134,7 +1134,7 @@ describe('multisig secondary Hanko production', () => {
       jurisdiction: source.state.config.jurisdiction,
     };
     const targetTemplate: EntityState = {
-      ...structuredClone(source.env.eReplicas.get(`${source.counterpartyId}:${counterpartySigner}`)!.state),
+      ...structuredClone(source.env.state.eReplicas.get(`${source.counterpartyId}:${counterpartySigner}`)!.state),
       entityId: targetEntityId,
       config: targetConfig,
       accounts: new Map(),
@@ -1158,8 +1158,8 @@ describe('multisig secondary Hanko production', () => {
       mempool: [],
       isProposer: false,
     };
-    source.env.eReplicas.set(`${targetEntityId}:${targetValidators[0]}`, targetLeader);
-    source.env.eReplicas.set(`${targetEntityId}:${targetValidators[1]}`, targetFollower);
+    source.env.state.eReplicas.set(`${targetEntityId}:${targetValidators[0]}`, targetLeader);
+    source.env.state.eReplicas.set(`${targetEntityId}:${targetValidators[1]}`, targetFollower);
 
     const entityTxs: EntityTx[] = [await buildCertifiedBoardResealTx(
       source,
@@ -1223,7 +1223,7 @@ describe('multisig secondary Hanko production', () => {
 
   test('rejects a valid source-A output Hanko whose nested account input claims source C', async () => {
     const source = createMultisigAccountState(validators[0]);
-    const targetReplica = source.env.eReplicas.get(`${source.counterpartyId}:${counterpartySigner}`);
+    const targetReplica = source.env.state.eReplicas.get(`${source.counterpartyId}:${counterpartySigner}`);
     if (!targetReplica) throw new Error('TEST_TARGET_REPLICA_MISSING');
     const forgedSource = digest('c');
     const entityTxs: EntityTx[] = [{
@@ -1259,7 +1259,7 @@ describe('multisig secondary Hanko production', () => {
     await expect(applyEntityFrame(source.env, targetReplica.state, [{
       type: 'consensusOutput',
       data: { origin, outputHanko, targetEntityId: source.counterpartyId, entityTxs },
-    }], source.env.timestamp + 1)).rejects.toThrow(
+    }], source.env.state.timestamp + 1)).rejects.toThrow(
       `CONSENSUS_OUTPUT_SEMANTIC_SOURCE_MISMATCH:accountInput:${source.entityId}`,
     );
     expect(targetReplica.state.height).toBe(0);
@@ -1268,7 +1268,7 @@ describe('multisig secondary Hanko production', () => {
 
   test('validator rejects a source-certified output frame without a target consumption proof', async () => {
     const source = createMultisigAccountState(validators[0]);
-    const targetReplica = source.env.eReplicas.get(`${source.counterpartyId}:${counterpartySigner}`);
+    const targetReplica = source.env.state.eReplicas.get(`${source.counterpartyId}:${counterpartySigner}`);
     if (!targetReplica) throw new Error('TEST_TARGET_REPLICA_MISSING');
     const entityTxs: EntityTx[] = [await buildCertifiedBoardResealTx(
       source,
@@ -1290,7 +1290,7 @@ describe('multisig secondary Hanko production', () => {
     await expect(applyEntityFrame(source.env, targetReplica.state, [{
       type: 'consensusOutput',
       data: { origin, outputHanko, targetEntityId: source.counterpartyId, entityTxs },
-    }], source.env.timestamp + 1)).rejects.toThrow('CONSUMPTION_PROOF_REQUIRED');
+    }], source.env.state.timestamp + 1)).rejects.toThrow('CONSUMPTION_PROOF_REQUIRED');
   });
 
   test('rejects malformed, unknown, and case-duplicate precommit signers at the EntityInput boundary', async () => {
@@ -1397,7 +1397,7 @@ describe('multisig secondary Hanko production', () => {
         hanko: await buildExactQuorumHanko(setup, hash),
         type,
         entityHeight: 1,
-        createdAt: setup.env.timestamp,
+        createdAt: setup.env.state.timestamp,
       });
     }
 
@@ -1466,8 +1466,8 @@ describe('multisig secondary Hanko production', () => {
       lastModifiedByLeft: true,
       status: 'awaiting_counterparty' as const,
       version: 1,
-      createdAt: setup.env.timestamp,
-      lastUpdatedAt: setup.env.timestamp,
+      createdAt: setup.env.state.timestamp,
+      lastUpdatedAt: setup.env.state.timestamp,
       // Make the local Entity the non-executor on both accounts, so its exact
       // settlement digest and post-proof digest are both quorum-signed.
       executorIsLeft: setup.entityId.toLowerCase() !== account.leftEntity.toLowerCase(),
@@ -1513,7 +1513,7 @@ describe('multisig secondary Hanko production', () => {
         hanko: await buildExactQuorumHanko(setup, hash),
         type,
         entityHeight: 1,
-        createdAt: setup.env.timestamp,
+        createdAt: setup.env.state.timestamp,
       });
     }
 

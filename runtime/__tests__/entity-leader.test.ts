@@ -167,7 +167,7 @@ describe('entity leader policy', () => {
   test('certifies fallback leader from signed timeout votes and lets it propose', async () => {
     const env = createEmptyEnv('entity-leader-failover');
     env.scenarioMode = true;
-    env.timestamp = 10_000;
+    env.state.timestamp = 10_000;
     const proposerId = deriveSignerAddressSync(env.runtimeSeed!, '1').toLowerCase();
     const board: ConsensusConfig = {
       mode: 'proposer-based',
@@ -199,13 +199,13 @@ describe('entity leader policy', () => {
         lastConsensusProgressAt: 0,
       });
     }
-    env.eReplicas = new Map(Array.from(replicas.entries()).map(([signerId, replica]) => [
+    env.state.eReplicas = new Map(Array.from(replicas.entries()).map(([signerId, replica]) => [
       `${base.entityId}:${signerId}`,
       replica,
     ]));
     refreshScheduledWakeIndex(env);
 
-    const timeoutInputs = createDueScheduledWakeInputs(env, env.timestamp);
+    const timeoutInputs = createDueScheduledWakeInputs(env, env.state.timestamp);
     const vote2 = timeoutInputs.find(input => input.signerId === '2');
     const vote3 = timeoutInputs.find(input => input.signerId === '3');
     const vote4 = timeoutInputs.find(input => input.signerId === '4');
@@ -234,7 +234,7 @@ describe('entity leader policy', () => {
       deliveredVote3!.leaderTimeoutVote!.signature,
     )).toBe(true);
 
-    const ownVoteReplica = env.eReplicas.get(`${base.entityId}:2`);
+    const ownVoteReplica = env.state.eReplicas.get(`${base.entityId}:2`);
     if (!ownVoteReplica) throw new Error('TEST_LOCAL_LEADER_VOTE_REPLICA_MISSING');
     const withTwoVotes = await applyEntityInput(env, ownVoteReplica, deliveredVote3!);
     const deliveredVote4 = voteFrom4.outputs.find(output => output.signerId === '2');
@@ -253,7 +253,7 @@ describe('entity leader policy', () => {
   test('ignores a delayed committed proposal without replacing the next proposal', async () => {
     const env = createEmptyEnv('entity-stale-proposal');
     env.scenarioMode = true;
-    env.timestamp = 2_000;
+    env.state.timestamp = 2_000;
     const committedState = state();
     committedState.entityId = '9';
     committedState.height = 1;
@@ -347,7 +347,7 @@ describe('entity leader policy', () => {
     for (const env of [proposerEnv, failoverEnv, validatorEnv, observerEnv]) {
       env.scenarioMode = true;
       env.quietRuntimeLogs = true;
-      env.timestamp = 20_000;
+      env.state.timestamp = 20_000;
     }
     const installKey = (env: RuntimeReplica, label: string): string => {
       const signerId = deriveSignerAddressSync(env.runtimeSeed!, label).toLowerCase();
@@ -572,7 +572,7 @@ describe('entity leader policy', () => {
     const env = createEmptyEnv('entity-prepared-failover');
     env.scenarioMode = true;
     env.quietRuntimeLogs = true;
-    env.timestamp = 20_000;
+    env.state.timestamp = 20_000;
     const proposerId = deriveSignerAddressSync(env.runtimeSeed!, '1').toLowerCase();
     const board: ConsensusConfig = {
       mode: 'proposer-based',
@@ -671,9 +671,9 @@ describe('entity leader policy', () => {
       isProposer: false,
       lastConsensusProgressAt: 0,
     };
-    env.eReplicas.set(`${base.entityId}:2`, replica);
+    env.state.eReplicas.set(`${base.entityId}:2`, replica);
     refreshScheduledWakeIndex(env);
-    const preparedTimeout = createDueScheduledWakeInputs(env, env.timestamp)
+    const preparedTimeout = createDueScheduledWakeInputs(env, env.state.timestamp)
       .find(input => input.signerId === '2');
     expect(preparedTimeout?.leaderTimeoutVote?.preparedFrame?.hash).toBe(preparedHash);
     expect(preparedTimeout?.leaderTimeoutVote?.preparedFrame?.collectedSigs?.size).toBe(2);

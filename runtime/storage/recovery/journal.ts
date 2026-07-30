@@ -123,7 +123,7 @@ const replayOneFrame = async (
   frame: PersistedFrameJournal,
   height: number,
 ): Promise<void> => {
-  env.timestamp = requireBoundaryInteger(
+  env.state.timestamp = requireBoundaryInteger(
     frame.timestamp,
     `RECOVERY_JOURNAL_TIMESTAMP_INVALID:height=${height}`,
   );
@@ -156,7 +156,7 @@ const replayOneFrame = async (
       deps.getRuntimeOutputRoutingDeps(),
     );
     deps.generateHookPings(env);
-    const history = peekPendingHistoryRecords(env, env.height, env.timestamp);
+    const history = peekPendingHistoryRecords(env, env.state.height, env.state.timestamp);
     finalizeReliableIngressCommit(env, result.reliableIngressCommits);
     clearPendingAuditEvents(env);
     env.runtimeMempool = frame.pendingRuntimeInput
@@ -191,7 +191,7 @@ export const replayPersistedRuntimeJournals = async (
   try {
     let expectedHeight = requireBoundaryInteger(
       requireBoundaryInteger(
-        env.height,
+        env.state.height,
         'RECOVERY_JOURNAL_BASE_HEIGHT_INVALID',
       ) + 1,
       'RECOVERY_JOURNAL_HEIGHT_OVERFLOW',
@@ -199,10 +199,10 @@ export const replayPersistedRuntimeJournals = async (
     for (const frame of frames) {
       const height = validateReplayFrameHeader(frame, expectedHeight);
       await replayOneFrame(deps, env, frame, height);
-      if (env.height !== height) {
+      if (env.state.height !== height) {
         throw new Error(
           `RECOVERY_JOURNAL_REPLAY_HEIGHT_MISMATCH: ` +
-          `expected=${height} actual=${env.height}`,
+          `expected=${height} actual=${env.state.height}`,
         );
       }
       expectedHeight = requireBoundaryInteger(

@@ -133,7 +133,7 @@ const admitRequest = async (
       hubEntityId,
       'faucet-reserve',
     );
-    const hubReplica = Array.from(deps.env.eReplicas.values())
+    const hubReplica = Array.from(deps.env.state.eReplicas.values())
       .find(replica => replica.entityId === hubEntityId);
     const hubReserve = hubReplica?.state.reserves.get(token.tokenId) ?? 0n;
     if (hubReserve < token.amountWei) {

@@ -37,8 +37,8 @@ const getReplicaEntityId = (replicaKey: unknown, replica: unknown): string => {
 
 function getLocalEntityJurisdiction(currentEnv: RuntimeReplica | null | undefined, targetEntityId: string): { found: boolean; key: string } {
   const target = normalizeEntityId(targetEntityId);
-  if (!target || !currentEnv?.eReplicas) return { found: false, key: '' };
-  for (const [replicaKey, replica] of currentEnv.eReplicas.entries()) {
+  if (!target || !currentEnv?.state.eReplicas) return { found: false, key: '' };
+  for (const [replicaKey, replica] of currentEnv.state.eReplicas.entries()) {
     if (getReplicaEntityId(replicaKey, replica) !== target) continue;
     return {
       found: true,

@@ -563,7 +563,7 @@ export class RuntimeP2P {
       targetCount: Object.keys(perTarget).length,
       totalMessages: pending.length,
       oldestEntryAge: Number.isFinite(oldestTimestamp)
-        ? Math.max(0, Number(this.env.timestamp ?? oldestTimestamp) - oldestTimestamp)
+        ? Math.max(0, Number(this.env.state.timestamp ?? oldestTimestamp) - oldestTimestamp)
         : 0,
       perTarget,
     };
@@ -1202,7 +1202,7 @@ export class RuntimeP2P {
   }
 
   private async getLocalProfilesForEntities(entityIds?: string[]): Promise<Profile[]> {
-    if (!this.env.eReplicas || this.env.eReplicas.size === 0) return [];
+    if (!this.env.state.eReplicas || this.env.state.eReplicas.size === 0) return [];
     const targetSet = entityIds && entityIds.length > 0 ? new Set(entityIds.map(normalizeId)) : null;
     const advertisedSet =
       this.advertiseEntityIds && this.advertiseEntityIds.length > 0
@@ -1210,7 +1210,7 @@ export class RuntimeP2P {
         : null;
     const profiles: Profile[] = [];
     const seen = new Set<string>();
-    for (const [replicaKey, replica] of this.env.eReplicas.entries()) {
+    for (const [replicaKey, replica] of this.env.state.eReplicas.entries()) {
       const entityId = extractEntityId(replicaKey);
       const replicaSignerId = getReplicaSignerId(replicaKey);
       // Only advertise entities we can actually sign for.
@@ -1239,7 +1239,7 @@ export class RuntimeP2P {
       // Get last announced timestamp for this entity from gossip
       const existingProfile = this.env.gossip?.getProfiles?.().find(profile => profile.entityId === entityId);
       const lastTimestamp = existingProfile?.lastUpdated || 0;
-      const monotonicTimestamp = Math.max(lastTimestamp + 1, this.env.timestamp);
+      const monotonicTimestamp = Math.max(lastTimestamp + 1, this.env.state.timestamp);
       const profile = buildLocalEntityProfile(this.env, replica.state, monotonicTimestamp);
       profile.runtimeId = this.runtimeId;
       profile.wsUrl = profile.metadata.isHub === true ? this.wsUrl : null;
@@ -1305,7 +1305,7 @@ export class RuntimeP2P {
     if (this.closing || this.closed) return;
     if (announcements.length === 0) return;
     const localEntities = new Map(
-      [...this.env.eReplicas.values()].map(replica => [normalizeId(replica.entityId), replica.state] as const),
+      [...this.env.state.eReplicas.values()].map(replica => [normalizeId(replica.entityId), replica.state] as const),
     );
     for (const announcement of announcements) {
       if (this.closing || this.closed) return;

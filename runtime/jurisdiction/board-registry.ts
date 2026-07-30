@@ -491,7 +491,7 @@ export const resolveSigningCertifiedBoardHash = (
   const normalizedEntityId = normalizeBytes32(entityId, 'ENTITY_ID');
   const states = candidateState
     ? [candidateState]
-    : [...env.eReplicas.values()]
+    : [...env.state.eReplicas.values()]
         .filter((replica) => normalizeBytes32(replica.state.entityId, 'ENTITY_ID') === normalizedEntityId)
         .map((replica) => replica.state);
   if (states.length === 0) return null;
@@ -527,7 +527,7 @@ export const resolveUniqueCertifiedRegisteredBoardRecord = (
   const store = getCertifiedBoardNodeStore(env);
   const perStack = new Map<string, CertifiedBoardRecord[]>();
   const seenRoots = new Set<string>();
-  for (const replica of env.eReplicas.values()) {
+  for (const replica of env.state.eReplicas.values()) {
     const registry = replica.state.certifiedBoardState;
     if (!registry) continue;
     const rootIdentity = `${registry.stackKey}:${registry.boardRegistryRoot}`;
@@ -687,7 +687,7 @@ export const collectReachableCertifiedBoardNodes = (
 };
 
 export const assertCertifiedBoardRootsAvailable = (env: EntityRuntimeContext): void => {
-  const roots = [...env.eReplicas.values()]
+  const roots = [...env.state.eReplicas.values()]
     .map((replica) => replica.state.certifiedBoardState?.boardRegistryRoot)
     .filter((root): root is string => Boolean(root));
   collectReachableCertifiedBoardNodes(getCertifiedBoardNodeStore(env), roots);

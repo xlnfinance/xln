@@ -27,7 +27,7 @@ const testConfig = (signerId: string) => ({
 
 const addTestJurisdiction = (env: ReturnType<typeof createEmptyEnv>): void => {
   env.activeJurisdiction = testJurisdiction.name;
-  env.jReplicas.set(testJurisdiction.name, {
+  env.state.jReplicas.set(testJurisdiction.name, {
     name: testJurisdiction.name,
     blockNumber: 0n,
     stateRoot: new Uint8Array(32),
@@ -59,7 +59,7 @@ describe('runtime entity crypto', () => {
     const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
     const keys = deriveLocalEntityCryptoKeys(env, entityId, signerId);
 
-    env.eReplicas.set(`${entityId}:${signerId}`, {
+    env.state.eReplicas.set(`${entityId}:${signerId}`, {
       entityId,
       signerId,
       entityEncPubKey: keys.publicKey,
@@ -74,7 +74,7 @@ describe('runtime entity crypto', () => {
 
     assertLocalEntityCryptoKeys(env);
 
-    const replica = env.eReplicas.get(`${entityId}:${signerId}`);
+    const replica = env.state.eReplicas.get(`${entityId}:${signerId}`);
     expect(replica?.entityEncPubKey).toBe(keys.publicKey);
     expect(replica?.entityEncPrivKey).toBe(keys.privateKey);
   });
@@ -87,7 +87,7 @@ describe('runtime entity crypto', () => {
     registerSignerKey(env, signerId, deriveSignerKeySync(seed, '1'));
     const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
 
-    env.eReplicas.set(`${entityId}:${signerId}`, {
+    env.state.eReplicas.set(`${entityId}:${signerId}`, {
       entityId,
       signerId,
       entityEncPubKey: `0x${'11'.repeat(32)}`,
@@ -128,7 +128,7 @@ describe('runtime entity crypto', () => {
     const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
     const keys = deriveLocalEntityCryptoKeys(env, entityId, signerId);
 
-    env.eReplicas.set(`${entityId}:${signerId}`, {
+    env.state.eReplicas.set(`${entityId}:${signerId}`, {
       entityId,
       signerId,
       entityEncPubKey: keys.publicKey,
@@ -153,7 +153,7 @@ describe('runtime entity crypto', () => {
       },
     });
 
-    const replica = env.eReplicas.get(`${entityId}:${signerId}`);
+    const replica = env.state.eReplicas.get(`${entityId}:${signerId}`);
     expect(replica?.entityEncPubKey).toBe(keys.publicKey);
     expect(replica?.entityEncPrivKey).toBe(keys.privateKey);
   });

@@ -52,7 +52,7 @@ export const handleRuntimeRpcProxy = async ({
 }: RuntimeRpcProxyRequest): Promise<Response> => {
   const blockLocal = process.env['BLOCK_LOCAL_RPC_PROXY'] === 'true';
   const explicitUpstream = process.env['RPC_UPSTREAM_URL'] || process.env['PUBLIC_RPC_URL'] || process.env['ANVIL_RPC'];
-  const jMachineRpc = env?.activeJurisdiction ? env.jReplicas.get(env.activeJurisdiction)?.rpcs?.[0] : undefined;
+  const jMachineRpc = env?.activeJurisdiction ? env.state.jReplicas.get(env.activeJurisdiction)?.rpcs?.[0] : undefined;
   const upstream = explicitUpstream || jMachineRpc || '';
   const isLocal = isLoopbackUrl(upstream);
   const isProduction = process.env['NODE_ENV'] === 'production';

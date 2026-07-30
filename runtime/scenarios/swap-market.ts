@@ -83,23 +83,23 @@ export async function swapMarket(env: RuntimeReplica): Promise<void> {
   ensureSignerKeysFromSeed(env, ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'], 'Swap Market');
   const process = await getProcess();
 
-  if (env.scenarioMode && env.height === 0) {
-    env.timestamp = 1;
+  if (env.scenarioMode && env.state.height === 0) {
+    env.state.timestamp = 1;
   }
 
-  if (env.jReplicas && env.jReplicas.size > 0) {
-    console.log(`[SWAP-MARKET] Clearing ${env.jReplicas.size} old jurisdictions from previous scenario`);
-    env.jReplicas.clear();
+  if (env.state.jReplicas && env.state.jReplicas.size > 0) {
+    console.log(`[SWAP-MARKET] Clearing ${env.state.jReplicas.size} old jurisdictions from previous scenario`);
+    env.state.jReplicas.clear();
   }
-  if (env.eReplicas && env.eReplicas.size > 0) {
-    console.log(`[SWAP-MARKET] Clearing ${env.eReplicas.size} old entities from previous scenario`);
-    env.eReplicas.clear();
+  if (env.state.eReplicas && env.state.eReplicas.size > 0) {
+    console.log(`[SWAP-MARKET] Clearing ${env.state.eReplicas.size} old entities from previous scenario`);
+    env.state.eReplicas.clear();
   }
   if (env.history && env.history.length > 0) {
     console.log(`[SWAP-MARKET] Clearing ${env.history.length} old snapshots from previous scenario`);
     env.history = [];
   }
-  env.height = 0;
+  env.state.height = 0;
   env.runtimeMempool = { runtimeTxs: [], entityInputs: [] };
   env.pendingOutputs = [];
   env.pendingNetworkOutputs = [];
@@ -107,19 +107,19 @@ export async function swapMarket(env: RuntimeReplica): Promise<void> {
   env.frameLogs = [];
   env.gossip = createGossipLayer();
 
-  if (env.jReplicas && env.jReplicas.size > 0) {
-    console.log(`[SWAP-MARKET] Clearing ${env.jReplicas.size} old jurisdictions from previous scenario`);
-    env.jReplicas.clear();
+  if (env.state.jReplicas && env.state.jReplicas.size > 0) {
+    console.log(`[SWAP-MARKET] Clearing ${env.state.jReplicas.size} old jurisdictions from previous scenario`);
+    env.state.jReplicas.clear();
   }
-  if (env.eReplicas && env.eReplicas.size > 0) {
-    console.log(`[SWAP-MARKET] Clearing ${env.eReplicas.size} old entities from previous scenario`);
-    env.eReplicas.clear();
+  if (env.state.eReplicas && env.state.eReplicas.size > 0) {
+    console.log(`[SWAP-MARKET] Clearing ${env.state.eReplicas.size} old entities from previous scenario`);
+    env.state.eReplicas.clear();
   }
   if (env.history && env.history.length > 0) {
     console.log(`[SWAP-MARKET] Clearing ${env.history.length} old snapshots from previous scenario`);
     env.history = [];
   }
-  env.height = 0;
+  env.state.height = 0;
   env.runtimeMempool = { runtimeTxs: [], entityInputs: [] };
   env.pendingOutputs = [];
   env.pendingNetworkOutputs = [];
@@ -811,8 +811,8 @@ export async function swapMarketStress(env: RuntimeReplica): Promise<void> {
   ensureSignerKeysFromSeed(env, ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11'], 'Swap Market Stress');
   const process = await getProcess();
 
-  if (env.scenarioMode && env.height === 0) {
-    env.timestamp = 1;
+  if (env.scenarioMode && env.state.height === 0) {
+    env.state.timestamp = 1;
   }
 
   console.log('═══════════════════════════════════════════════════════════════');

@@ -73,7 +73,7 @@ test('jurisdiction import rejects a duplicate watcher domain before publication'
       contracts,
     },
   })).toThrow('IMPORT_J_WATCHER_IDENTITY_CONFLICT:duplicate:primary');
-  expect(env.jReplicas.has('duplicate')).toBe(false);
+  expect(env.state.jReplicas.has('duplicate')).toBe(false);
 });
 
 test('BrowserVM reset preserves its configured chain and recreates the same fresh chain', async () => {

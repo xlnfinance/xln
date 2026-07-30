@@ -23,7 +23,7 @@ type CrossJurisdictionSalvageResult = {
 };
 
 const deterministicEntityTimestamp = (state: EntityState, env: EntityRuntimeContext): number =>
-  Number(state.timestamp || env.timestamp || 0);
+  Number(state.timestamp || env.state.timestamp || 0);
 
 const buildCrossJurisdictionStarterPullArguments = (binary: string): string => {
   const abiCoder = ethers.AbiCoder.defaultAbiCoder();

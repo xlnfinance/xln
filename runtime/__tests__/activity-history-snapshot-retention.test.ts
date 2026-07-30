@@ -65,7 +65,7 @@ test('activity remains queryable while snapshots retain the authoritative R-fram
     entityProviderAddress: '0x000000000000000000000000000000000000bEEF',
   };
   env.activeJurisdiction = jurisdiction.name;
-  env.jReplicas.set(jurisdiction.name, createTestJReplica({
+  env.state.jReplicas.set(jurisdiction.name, createTestJReplica({
     ...jurisdiction,
     contracts: {
       depository: jurisdiction.depositoryAddress,
@@ -94,8 +94,8 @@ test('activity remains queryable while snapshots retain the authoritative R-fram
 
   try {
     for (let height = 2; height <= 5; height += 1) {
-      env.height = height;
-      env.timestamp = 1_700_000_000_000 + height;
+      env.state.height = height;
+      env.state.timestamp = 1_700_000_000_000 + height;
       const runtimeInput = height === 3
         ? {
             runtimeTxs: [],
@@ -117,7 +117,7 @@ test('activity remains queryable while snapshots retain the authoritative R-fram
       env.frameLogs = height === 3
         ? [{
             id: 1,
-            timestamp: env.timestamp,
+            timestamp: env.state.timestamp,
             level: 'info',
             category: 'system',
             message: 'HtlcReceived',

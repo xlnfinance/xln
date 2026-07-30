@@ -216,8 +216,8 @@ describe('JReplica stateRoot semantics', () => {
       });
       const withAdapter = createEmptyEnv('import-intent-with-ephemeral-adapter');
       const withoutAdapter = createEmptyEnv('import-intent-without-ephemeral-adapter');
-      withAdapter.jReplicas.set('persisted-rpc', existingReplica(adapter));
-      withoutAdapter.jReplicas.set('persisted-rpc', existingReplica());
+      withAdapter.state.jReplicas.set('persisted-rpc', existingReplica(adapter));
+      withoutAdapter.state.jReplicas.set('persisted-rpc', existingReplica());
       const importTx = {
         type: 'importJ' as const,
         data: { name: 'new-browser-vm', chainId: 31_337, ticker: 'SIM', rpcs: [] },

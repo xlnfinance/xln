@@ -35,7 +35,7 @@ export const getTrustedRegistrationAdapter = (
   );
   const candidates = new Set<JAdapter>();
   if (env.jAdapter) candidates.add(env.jAdapter);
-  for (const replica of env.jReplicas.values()) {
+  for (const replica of env.state.jReplicas.values()) {
     if (replica.jadapter) candidates.add(replica.jadapter);
   }
   const matches = [...candidates].filter((adapter) =>

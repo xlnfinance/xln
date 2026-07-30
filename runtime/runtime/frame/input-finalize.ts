@@ -97,20 +97,20 @@ export const advanceAppliedRuntimeFrame = (
 
   if (advances) {
     env.emit('RuntimeTick', {
-      height: env.height + 1,
+      height: env.state.height + 1,
       runtimeTxs: runtimeTxs.length,
       entityInputs: entityInputCount,
       outputs: entityOutbox.length,
     });
-    env.height++;
+    env.state.height++;
   } else {
     if (env.quietRuntimeLogs !== true) runtimeLog.debug('frame.skip_empty');
     env.extra = undefined;
   }
   if (!env.gossip) {
-    runtimeLog.warn('gossip.missing_recreate', { height: env.height });
+    runtimeLog.warn('gossip.missing_recreate', { height: env.state.height });
     env.gossip = createGossipLayer();
-    runtimeLog.info('gossip.recreated', { height: env.height });
+    runtimeLog.info('gossip.recreated', { height: env.state.height });
   }
   return entityInputCount;
 };

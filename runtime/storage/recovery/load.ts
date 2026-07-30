@@ -88,8 +88,8 @@ const installRestoredRuntimeFrame = async (
     frame,
     selectedSnapshotHeight,
   } = source;
-  env.height = targetHeight;
-  env.timestamp = requireBoundaryInteger(
+  env.state.height = targetHeight;
+  env.state.timestamp = requireBoundaryInteger(
     frame.timestamp,
     `STORAGE_RESTORE_TIMESTAMP_INVALID:height=${targetHeight}`,
   );

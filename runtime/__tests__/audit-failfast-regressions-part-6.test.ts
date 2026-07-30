@@ -440,8 +440,8 @@ const attachSigningReplica = (env: ReturnType<typeof createEmptyEnv>, entityId: 
   const config = makeSingleSignerConfigFor(signerId);
   const jurisdiction = config.jurisdiction!;
   const depository = browserDepository ?? jurisdiction.depositoryAddress;
-  if (!env.jReplicas.has('__audit_test__')) {
-    env.jReplicas.set('__audit_test__', {
+  if (!env.state.jReplicas.has('__audit_test__')) {
+    env.state.jReplicas.set('__audit_test__', {
       name: '__audit_test__',
       chainId: jurisdiction.chainId,
       rpcs: [],
@@ -461,7 +461,7 @@ const attachSigningReplica = (env: ReturnType<typeof createEmptyEnv>, entityId: 
       position: { x: 0, y: 0, z: 0 },
     });
   }
-  env.eReplicas.set(`${entityId}:${signerId}`, {
+  env.state.eReplicas.set(`${entityId}:${signerId}`, {
     entityId,
     signerId,
     entityEncPubKey: '',
@@ -497,7 +497,7 @@ const ensureCanonicalCommandBoardAuthority = async (env: RuntimeReplica, state: 
     }
     return;
   }
-  let replica = Array.from(env.jReplicas.values()).find(
+  let replica = Array.from(env.state.jReplicas.values()).find(
     candidate =>
       candidate.chainId === jurisdiction.chainId &&
       candidate.depositoryAddress?.toLowerCase() === jurisdiction.depositoryAddress.toLowerCase() &&
@@ -523,7 +523,7 @@ const buildQuorumAuthorizedFrameTxs = async (
   env: RuntimeReplica,
   state: EntityState,
   collectiveTxs: EntityTx[],
-  frameTimestamp: number = env.timestamp,
+  frameTimestamp: number = env.state.timestamp,
 ): Promise<EntityTx[]> => {
   await ensureCanonicalCommandBoardAuthority(env, state);
   const [proposer, ...otherValidators] = state.config.validators;
@@ -710,7 +710,7 @@ const sealAuditJSubmitAttempts = (env: RuntimeReplica, inputs: JInput[]): void =
         attemptId,
         batchGeneration,
       };
-      const existing = Array.from(env.eReplicas.values()).find(
+      const existing = Array.from(env.state.eReplicas.values()).find(
         replica =>
           replica.entityId.toLowerCase() === jTx.entityId.toLowerCase() &&
           replica.signerId.toLowerCase() === signerId.toLowerCase(),
@@ -752,7 +752,7 @@ const sealAuditJSubmitAttempts = (env: RuntimeReplica, inputs: JInput[]): void =
         submitAttempts: jTx.data.runtimeSubmitAttempt.attemptNumber,
         lastSubmittedAt: jTx.data.runtimeSubmitAttempt.attemptedAt,
       };
-      env.eReplicas.set(`${jTx.entityId}:${signerId}`, replica);
+      env.state.eReplicas.set(`${jTx.entityId}:${signerId}`, replica);
     }
   }
   registerPendingCommittedJOutbox(env, inputs);
@@ -770,7 +770,7 @@ const submitAuditRuntimeJOutbox = async (
 describe('audit fail-fast regressions', () => {
   test('cross-j fill notice waits for source offer instead of looping fatal errors', async () => {
     const env = createEmptyEnv('cross-fill-notice-pending-source-offer');
-    env.timestamp = 10_000;
+    env.state.timestamp = 10_000;
     env.quietRuntimeLogs = true;
     const lot = SWAP_LOT_SCALE;
     const sourceHub = `0x${'20'.repeat(32)}`;
@@ -811,11 +811,11 @@ describe('audit fail-fast regressions', () => {
           amount: 75_000n * lot,
         },
         status: 'resting',
-        createdAt: env.timestamp,
-        updatedAt: env.timestamp,
-        expiresAt: env.timestamp + 60_000,
+        createdAt: env.state.timestamp,
+        updatedAt: env.state.timestamp,
+        expiresAt: env.state.timestamp + 60_000,
       },
-      { runtimeSeed: 'cross-fill-notice-pending-source-offer', sourceDisputeDelayMs: 5_000, now: env.timestamp },
+      { runtimeSeed: 'cross-fill-notice-pending-source-offer', sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
     );
     route.status = 'resting';
 
@@ -841,8 +841,8 @@ describe('audit fail-fast regressions', () => {
       cappedState.pendingCrossJurisdictionFillAcks.set(`old-${index}`, {
         accountId: sourceUser,
         tx: oldAck,
-        storedAt: env.timestamp - 100_000 - index,
-        ttlExpiredAt: env.timestamp - 50_000 - index,
+        storedAt: env.state.timestamp - 100_000 - index,
+        ttlExpiredAt: env.state.timestamp - 50_000 - index,
         reason: 'test-cap',
       });
     }
@@ -886,13 +886,13 @@ describe('audit fail-fast regressions', () => {
     expect(prematurelyQueued).toBeUndefined();
 
     const expiredState = structuredClone(first.newState) as typeof first.newState;
-    const originalTimestamp = env.timestamp;
-    env.timestamp = originalTimestamp + CROSS_J_PENDING_FILL_ACK_TTL_MS + 1;
+    const originalTimestamp = env.state.timestamp;
+    env.state.timestamp = originalTimestamp + CROSS_J_PENDING_FILL_ACK_TTL_MS + 1;
     const expiredEnv = env;
-    expiredState.timestamp = expiredEnv.timestamp;
+    expiredState.timestamp = expiredEnv.state.timestamp;
     const preserved = await applyEntityFrame(expiredEnv, expiredState, []);
     const preservedAck = preserved.newState.pendingCrossJurisdictionFillAcks?.values().next().value;
-    expect(preservedAck?.ttlExpiredAt).toBe(expiredEnv.timestamp);
+    expect(preservedAck?.ttlExpiredAt).toBe(expiredEnv.state.timestamp);
     expect(expiredEnv.runtimeState?.securityIncidents).toBeUndefined();
     publishEntityCandidateEffects(expiredEnv, preserved.candidateEffects);
     expect([...expiredEnv.runtimeState!.securityIncidents!.values()]).toContainEqual(
@@ -903,7 +903,7 @@ describe('audit fail-fast regressions', () => {
         offerId: orderId,
       }),
     );
-    env.timestamp = originalTimestamp;
+    env.state.timestamp = originalTimestamp;
 
     const stateWithOffer = first.newState;
     const sourceAccount = stateWithOffer.accounts.get(sourceUser)!;
@@ -931,7 +931,7 @@ describe('audit fail-fast regressions', () => {
 
   test('cross-j fill ack admission secondary index requires matching route hash', () => {
     const env = createEmptyEnv('cross-fill-ack-admission-fallback');
-    env.timestamp = 10_000;
+    env.state.timestamp = 10_000;
     const sourceHub = `0x${'20'.repeat(32)}`;
     const sourceUser = `0x${'31'.repeat(32)}`;
     const targetHub = `0x${'32'.repeat(32)}`;
@@ -964,11 +964,11 @@ describe('audit fail-fast regressions', () => {
           amount: 25_000n * SWAP_LOT_SCALE,
         },
         status: 'resting',
-        createdAt: env.timestamp,
-        updatedAt: env.timestamp,
-        expiresAt: env.timestamp + 60_000,
+        createdAt: env.state.timestamp,
+        updatedAt: env.state.timestamp,
+        expiresAt: env.state.timestamp + 60_000,
       },
-      { runtimeSeed: 'cross-fill-ack-admission-fallback', sourceDisputeDelayMs: 5_000, now: env.timestamp },
+      { runtimeSeed: 'cross-fill-ack-admission-fallback', sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
     );
     const state = makeEntityState(targetHub);
     const routeHash = route.routeHash || 'route-hash';
@@ -979,7 +979,7 @@ describe('audit fail-fast regressions', () => {
       bookOwnerEntityId: targetHub,
       status: 'admitted' as const,
       route,
-      updatedAt: env.timestamp,
+      updatedAt: env.state.timestamp,
     };
     state.crossJurisdictionBookAdmissions = new Map([[`${sourceUser.toLowerCase()}:${orderId}`, admission]]);
 
@@ -1074,7 +1074,7 @@ describe('audit fail-fast regressions', () => {
 
   test('prepareDispute routes remote cross-j removal from the committed book signer', async () => {
     const env = createEmptyEnv('dispute-start-cross-j-remote-book');
-    env.timestamp = 10_000;
+    env.state.timestamp = 10_000;
     env.quietRuntimeLogs = true;
     const sourceHub = `0x${'92'.repeat(32)}`;
     const sourceUser = `0x${'93'.repeat(32)}`;
@@ -1110,11 +1110,11 @@ describe('audit fail-fast regressions', () => {
           amount: 2_000n,
         },
         status: 'resting',
-        createdAt: env.timestamp,
-        updatedAt: env.timestamp,
-        expiresAt: env.timestamp + 60_000,
+        createdAt: env.state.timestamp,
+        updatedAt: env.state.timestamp,
+        expiresAt: env.state.timestamp + 60_000,
       },
-      { runtimeSeed: 'dispute-start-cross-j-remote-book', sourceDisputeDelayMs: 5_000, now: env.timestamp },
+      { runtimeSeed: 'dispute-start-cross-j-remote-book', sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
     );
     account.swapOffers.set(offerId, {
       offerId,
@@ -1128,7 +1128,7 @@ describe('audit fail-fast regressions', () => {
     });
     state.accounts.set(sourceUser, account);
     state.crossJurisdictionSwaps = new Map([[offerId, route]]);
-    mergeCrossJurisdictionBookAdmission(state, route, env.timestamp).status = 'admitted';
+    mergeCrossJurisdictionBookAdmission(state, route, env.state.timestamp).status = 'admitted';
 
     const result = await handlePrepareDispute(
       state,
@@ -1155,7 +1155,7 @@ describe('audit fail-fast regressions', () => {
         sourceEntityId: sourceUser,
         sourceAccountId: sourceUser,
         route,
-        removedAt: env.timestamp,
+        removedAt: env.state.timestamp,
         reason: 'account_dispute_prepare',
       },
     });
@@ -1584,7 +1584,7 @@ describe('audit fail-fast regressions', () => {
 
   test('disputeStart allows matching pending pull_resolve when explicit starter pull args are supplied', async () => {
     const env = createEmptyEnv('prepare-dispute-explicit-pull-evidence');
-    env.timestamp = 11_000;
+    env.state.timestamp = 11_000;
     const hubId = `0x${'9a'.repeat(32)}`;
     const userId = `0x${'9b'.repeat(32)}`;
     const targetHub = `0x${'9c'.repeat(32)}`;
@@ -1611,13 +1611,13 @@ describe('audit fail-fast regressions', () => {
           amount: 200n,
         },
         status: 'resting',
-        createdAt: env.timestamp,
-        updatedAt: env.timestamp,
+        createdAt: env.state.timestamp,
+        updatedAt: env.state.timestamp,
       },
       {
         runtimeSeed: 'prepare-dispute-explicit-pull-evidence',
         sourceDisputeDelayMs: 5_000,
-        now: env.timestamp,
+        now: env.state.timestamp,
       },
     );
     const binary = buildCrossJurisdictionPullReveal(
@@ -1669,7 +1669,7 @@ describe('audit fail-fast regressions', () => {
 
   test('disputeStart treats pending cross_pull_close as foldable dispute evidence', async () => {
     const env = createEmptyEnv('prepare-dispute-cross-close-evidence');
-    env.timestamp = 12_000;
+    env.state.timestamp = 12_000;
     env.browserVM = { getDepositoryAddress: () => hex20('dd') } as any;
     const hubSigner = registerLazySigner('prepare-dispute-cross-close-evidence', 'hub');
     const hubId = hubSigner.entityId;
@@ -1702,13 +1702,13 @@ describe('audit fail-fast regressions', () => {
         filledSourceAmount: 25n,
         filledTargetAmount: 50n,
         status: 'clearing',
-        createdAt: env.timestamp,
-        updatedAt: env.timestamp,
+        createdAt: env.state.timestamp,
+        updatedAt: env.state.timestamp,
       },
       {
         runtimeSeed: 'prepare-dispute-cross-close-evidence',
         sourceDisputeDelayMs: 5_000,
-        now: env.timestamp,
+        now: env.state.timestamp,
       },
     );
     const binary = buildCrossJurisdictionPullReveal(
@@ -1739,14 +1739,14 @@ describe('audit fail-fast regressions', () => {
           partialRoot: route.sourcePull!.partialRoot,
           crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'source'),
           createdHeight: 0,
-          createdTimestamp: env.timestamp,
+          createdTimestamp: env.state.timestamp,
         },
       ],
     ]);
     const delta = createDefaultDelta(route.sourcePull!.tokenId);
     delta.rightHold = BigInt(route.sourcePull!.amount);
     account.deltas.set(route.sourcePull!.tokenId, delta);
-    const proposed = await proposeAccountFrame(createAccountConsensusContext(env), account, env.timestamp);
+    const proposed = await proposeAccountFrame(createAccountConsensusContext(env), account, env.state.timestamp);
     expect(proposed.success).toBe(true);
     const pendingHeight = proposed.accountInput!.proposal.frame.height;
     hubState.accounts.set(userId, account);

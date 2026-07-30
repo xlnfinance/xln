@@ -33,7 +33,7 @@ const installJurisdiction = (env: ReturnType<typeof createEmptyEnv>, name = 'Tow
     entityProviderAddress: addr('12'),
   };
   env.activeJurisdiction = jurisdiction.name;
-  env.jReplicas.set(jurisdiction.name, {
+  env.state.jReplicas.set(jurisdiction.name, {
     name: jurisdiction.name,
     rpcs: [jurisdiction.address],
     chainId: jurisdiction.chainId,

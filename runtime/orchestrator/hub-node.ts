@@ -347,7 +347,7 @@ const resolveJReplicaForJurisdictionIdentity = (
     : (jurisdiction as { name?: unknown; jurisdictionName?: unknown } | null | undefined)?.name ||
       (jurisdiction as { jurisdictionName?: unknown } | null | undefined)?.jurisdictionName);
   if (!targetRef && !targetName) return null;
-  for (const [name, replica] of env.jReplicas?.entries?.() || []) {
+  for (const [name, replica] of env.state.jReplicas?.entries?.() || []) {
     const candidate = { ...replica, name: replica?.name || name };
     if (targetRef) {
       if (getJurisdictionIdentityRef(candidate) === targetRef) return { name, replica };
@@ -770,9 +770,9 @@ const writeJurisdictionAddresses = async (jadapter: JAdapter, rpcUrl: string): P
 };
 
 const syncEnvJurisdictionReplica = (env: RuntimeReplica, jadapter: JAdapter, rpcUrl: string): void => {
-  const activeName = env.activeJurisdiction || Array.from(env.jReplicas?.keys?.() || [])[0];
+  const activeName = env.activeJurisdiction || Array.from(env.state.jReplicas?.keys?.() || [])[0];
   if (!activeName) return;
-  const replica = env.jReplicas?.get(activeName);
+  const replica = env.state.jReplicas?.get(activeName);
   if (!replica) return;
   replica.depositoryAddress = jadapter.addresses.depository;
   replica.entityProviderAddress = jadapter.addresses.entityProvider;
@@ -789,9 +789,9 @@ const syncEnvJurisdictionReplica = (env: RuntimeReplica, jadapter: JAdapter, rpc
 };
 
 const buildRuntimeJurisdictionsPayload = (env: RuntimeReplica): string | null => {
-  const activeName = env.activeJurisdiction || Array.from(env.jReplicas?.keys?.() || [])[0];
+  const activeName = env.activeJurisdiction || Array.from(env.state.jReplicas?.keys?.() || [])[0];
   if (!activeName) return null;
-  const replica = env.jReplicas?.get(activeName) as
+  const replica = env.state.jReplicas?.get(activeName) as
     | {
         name?: string;
         chainId?: number;
@@ -959,7 +959,7 @@ const getImportedJurisdictionContracts = (
   jurisdictionName: string,
   fallback?: JurisdictionConfig['contracts'],
 ): ImportedJurisdictionContracts => {
-  const replica = env.jReplicas?.get(jurisdictionName);
+  const replica = env.state.jReplicas?.get(jurisdictionName);
   const depositoryAddress = String(
     replica?.jadapter?.addresses?.depository ||
       replica?.depositoryAddress ||
@@ -1325,7 +1325,7 @@ const ensurePeerBootstrapReserves = async (
   }
 
   const activeReplicaName = String(env.activeJurisdiction || '');
-  const activeReplica = activeReplicaName ? env.jReplicas?.get(activeReplicaName) : undefined;
+  const activeReplica = activeReplicaName ? env.state.jReplicas?.get(activeReplicaName) : undefined;
   const activeJurisdiction = activeReplica
     ? { ...activeReplica, name: activeReplica.name || activeReplicaName }
     : activeReplicaName;
@@ -1338,7 +1338,7 @@ const ensurePeerBootstrapReserves = async (
     if (!jadapter) {
       throw new Error(
         `PEER_RESERVE_JADAPTER_MISSING: jurisdiction=${jurisdictionKey} ` +
-        `known=${Array.from(env.jReplicas?.keys?.() || []).join(',')}`,
+        `known=${Array.from(env.state.jReplicas?.keys?.() || []).join(',')}`,
       );
     }
     const catalog = sameJurisdictionRef(jurisdiction, activeJurisdiction)
@@ -1773,7 +1773,7 @@ const buildLocalHealth = (
   return {
     ok: !runtimeHalted && Boolean(entityId) && pairs.length === Math.max(0, requiredNames.length - 1) && pairs.every(pair => pair.ready),
     name: resolvedArgs.name,
-    height: Math.max(0, Math.floor(Number(env.height || 0))),
+    height: Math.max(0, Math.floor(Number(env.state.height || 0))),
     entityId,
     runtimeId: String(env.runtimeId || '') || null,
     relayUrl: resolvedArgs.relayUrl,
@@ -1888,8 +1888,8 @@ const handleAccountStatusRequest = (
         delta: serializeAccountDelta(account?.deltas?.get(tokenId)),
       })),
       runtime: {
-        height: Number(env.height ?? 0),
-        timestamp: Number(env.timestamp ?? 0),
+        height: Number(env.state.height ?? 0),
+        timestamp: Number(env.state.timestamp ?? 0),
         halted: Boolean(env.runtimeState?.halted),
         fatalDebugPayload: env.runtimeState?.fatalDebugPayload ?? null,
         loopActive: Boolean(env.runtimeState?.loopActive),
@@ -2102,7 +2102,7 @@ const handleHubJurisdictionsRequest = (
 };
 
 const currentRuntimeHeight = (env: RuntimeReplica | null): number =>
-  Math.max(0, Math.floor(Number(env?.height ?? 0)));
+  Math.max(0, Math.floor(Number(env?.state.height ?? 0)));
 
 type HubHttpContext = {
   env: RuntimeReplica;

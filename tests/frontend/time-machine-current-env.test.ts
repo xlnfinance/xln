@@ -250,7 +250,7 @@ describe('frontend time-machine current env contract', () => {
     expect(graph).not.toContain('enqueueRuntimeInput(env,');
     expect(graph).not.toContain('$runtimeFrameEnv?.runtimeInput');
     expect(graph).not.toContain('$runtimeFrameEnv.runtimeInput');
-    expect(graph).not.toContain('get(runtimeFrameEnv)?.eReplicas');
+    expect(graph).not.toContain('get(runtimeFrameEnv)?.state.eReplicas');
     expect(graph).toContain('if (timeIndex >= 0) {');
     expect(graph).toContain('debug.warn(`⚠️ No entity data found at frame ${timeIndex} - clearing network`)');
     expect(dock).toContain('runtimeFrameIsLive,');
@@ -260,7 +260,7 @@ describe('frontend time-machine current env contract', () => {
     const architect = read('frontend/src/lib/view/panels/ArchitectPanel.svelte');
 
     expect(architect).toContain('function clearDemoRuntimeState');
-    expect(architect).toContain('$runtimeFrameEnv.eReplicas.clear()');
+    expect(architect).toContain('$runtimeFrameEnv.state.eReplicas.clear()');
     expect(architect).toContain("publishCurrentEnv([])");
     expect(architect).toContain("Existing economy cleared before topology rebuild");
     expect(architect).not.toContain('Reset not implemented');

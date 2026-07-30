@@ -39,9 +39,9 @@ function pushSnapshot(env: RuntimeReplica, tag: string, description: string, met
     tag,
     description,
     metadata,
-    timestamp: env.timestamp,
-    eReplicas: new Map(env.eReplicas),
-    jReplicas: env.jReplicas ? new Map(env.jReplicas) : undefined
+    timestamp: env.state.timestamp,
+    eReplicas: new Map(env.state.eReplicas),
+    jReplicas: env.state.jReplicas ? new Map(env.state.jReplicas) : undefined
   };
   env.history.push(frame as unknown as RuntimeReplica['history'][number]);
   console.log(`📸 Snapshot: ${description}`);
@@ -65,8 +65,8 @@ function usd(amount: number): bigint {
 }
 
 async function openGridAccount(env: RuntimeReplica, fromEntityId: string, toEntityId: string): Promise<void> {
-  const replicaKey = Array.from(env.eReplicas.keys()).find(k => k.startsWith(`${fromEntityId}:`));
-  const replica = replicaKey ? env.eReplicas.get(replicaKey) : null;
+  const replicaKey = Array.from(env.state.eReplicas.keys()).find(k => k.startsWith(`${fromEntityId}:`));
+  const replica = replicaKey ? env.state.eReplicas.get(replicaKey) : null;
   if (!replica) {
     throw new Error(`Grid scenario cannot open account: missing replica for ${fromEntityId}`);
   }
@@ -99,8 +99,8 @@ async function submitReserveToReserveBatch(
   toEntityId: string,
   amount: bigint,
 ): Promise<void> {
-  const replicaKey = Array.from(env.eReplicas.keys()).find((key) => key.startsWith(`${fromEntityId}:`));
-  const replica = replicaKey ? env.eReplicas.get(replicaKey) : null;
+  const replicaKey = Array.from(env.state.eReplicas.keys()).find((key) => key.startsWith(`${fromEntityId}:`));
+  const replica = replicaKey ? env.state.eReplicas.get(replicaKey) : null;
   const signerId = replica?.signerId;
   if (!signerId) {
     throw new Error(`Grid: missing signer for ${fromEntityId.slice(-4)}`);
@@ -186,7 +186,7 @@ export async function grid(env: RuntimeReplica): Promise<void> {
   console.log('All 8 nodes broadcasting to single J-Machine...');
 
   // Get jReplica for mempool operations
-  const jReplica = env.jReplicas?.get('Grid Demo');
+  const jReplica = env.state.jReplicas?.get('Grid Demo');
   if (!jReplica) throw new Error('J-Machine not found');
 
   // Fund all nodes with initial reserves via JAdapter
@@ -222,7 +222,7 @@ export async function grid(env: RuntimeReplica): Promise<void> {
       from: fromNode,
       to: toNode,
       amount: usd(10_000),
-      timestamp: env.timestamp
+      timestamp: env.state.timestamp
     });
   }
 

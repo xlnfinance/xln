@@ -187,15 +187,15 @@ const makeLocalCrossJRoutingDeps = (): RuntimeEntityRoutingDeps => ({
   },
   extractEntityId: replicaKey => replicaKey.split(':')[0] || '',
   hasLocalSignerForEntity: (current, entityId) =>
-    Array.from(current.eReplicas.values()).some(replica => replica.entityId.toLowerCase() === entityId.toLowerCase()),
+    Array.from(current.state.eReplicas.values()).some(replica => replica.entityId.toLowerCase() === entityId.toLowerCase()),
   hasLocalSignerForEntitySigner: (current, entityId, signerId) =>
-    Array.from(current.eReplicas.values()).some(
+    Array.from(current.state.eReplicas.values()).some(
       replica =>
         replica.entityId.toLowerCase() === entityId.toLowerCase() &&
         replica.signerId.toLowerCase() === signerId.toLowerCase(),
     ),
   resolveSoleLocalSignerForEntity: (current, entityId) => {
-    const signers = Array.from(current.eReplicas.values())
+    const signers = Array.from(current.state.eReplicas.values())
       .filter(replica => replica.entityId.toLowerCase() === entityId.toLowerCase())
       .map(replica => replica.signerId);
     return signers.length === 1 ? signers[0]! : null;
@@ -207,7 +207,7 @@ describe('cross-jurisdiction hashledger swap', () => {
   const makeTargetDisputeRouteSelectionFixture = (scenario: string) => {
     const env = createEmptyEnv(scenario);
     env.scenarioMode = true;
-    env.timestamp = 50_000;
+    env.state.timestamp = 50_000;
     env.quietRuntimeLogs = true;
     const sourceJ = makeJurisdiction('Ethereum', 1, '11', '12');
     const targetJ = makeJurisdiction('Base', 8453, '21', '22');
@@ -251,10 +251,10 @@ describe('cross-jurisdiction hashledger swap', () => {
               amount: 90n,
             },
             status: 'resting',
-            createdAt: env.timestamp,
-            updatedAt: env.timestamp,
+            createdAt: env.state.timestamp,
+            updatedAt: env.state.timestamp,
           },
-          { runtimeSeed: 'test-seed', sourceDisputeDelayMs: 5_000, now: env.timestamp },
+          { runtimeSeed: 'test-seed', sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
         ),
         status: options.status ?? 'resting',
       };
@@ -461,7 +461,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     const existingState = makeState(targetUser, signer, base, targetHub);
     existingState.crossJurisdictionSwaps?.set(baseRoute.orderId, { ...baseRoute, status: 'settled' });
     const env = createEmptyEnv('cross-terminal-overwrite');
-    env.timestamp = 10_000;
+    env.state.timestamp = 10_000;
     installJurisdictions(env, eth, base);
     const result = await applyEntityTx(env, existingState, {
       type: 'registerCrossJurisdictionSwap',
@@ -1000,7 +1000,7 @@ describe('cross-jurisdiction hashledger swap', () => {
 
   test('committed cross-j fill ack fails closed when source route mirror is missing', () => {
     const env = createEmptyEnv('cross-fill-ack-missing-route');
-    env.timestamp = 10_000;
+    env.state.timestamp = 10_000;
     env.quietRuntimeLogs = true;
     const eth = makeJurisdiction('Ethereum', 1, '11', '12');
     const sourceHub = entity('7a');

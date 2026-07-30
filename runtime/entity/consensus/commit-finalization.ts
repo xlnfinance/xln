@@ -129,7 +129,7 @@ const attachCommitProofsAndOutputs = (
       hanko,
       type: hashInfo.type,
       entityHeight: frame.height,
-      createdAt: env.timestamp,
+      createdAt: env.state.timestamp,
     });
   });
   sealHankoWitnessInState(
@@ -269,7 +269,7 @@ export const finalizeCommitNotification = async (
     delete workingReplica.pendingLeaderCertificate;
   }
   workingReplica.leaderVotes = new Map();
-  workingReplica.lastConsensusProgressAt = env.timestamp;
+  workingReplica.lastConsensusProgressAt = env.state.timestamp;
   workingReplica.isProposer = isEntityActiveLeader(workingReplica);
   await runLocalPostCommitHooks(env, workingReplica, entityOutbox);
   entityLog.debug('commit.applied', {

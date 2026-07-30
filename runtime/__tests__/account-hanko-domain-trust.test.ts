@@ -62,7 +62,7 @@ const installReplica = (
   entityId: string,
   jurisdiction: JurisdictionConfig,
 ): void => {
-  env.eReplicas.set(key, {
+  env.state.eReplicas.set(key, {
     entityId,
     signerId: key.slice(-40),
     entityEncPubKey: '',
@@ -80,7 +80,7 @@ const installJurisdictionReplica = (
   jurisdiction: JurisdictionConfig,
   deltaTransformer?: string,
 ): void => {
-  env.jReplicas.set(key, {
+  env.state.jReplicas.set(key, {
     name: key,
     chainId: jurisdiction.chainId,
     depositoryAddress: jurisdiction.depositoryAddress,
@@ -183,7 +183,7 @@ describe('account Hanko trusted domain boundary', () => {
       getChainId: () => HOSTILE.chainId,
       getDepositoryAddress: () => HOSTILE.depositoryAddress,
     } as typeof env.browserVM;
-    env.jReplicas.set(HOSTILE.name, {
+    env.state.jReplicas.set(HOSTILE.name, {
       name: HOSTILE.name,
       chainId: HOSTILE.chainId,
       depositoryAddress: HOSTILE.depositoryAddress,
@@ -220,7 +220,7 @@ describe('account Hanko trusted domain boundary', () => {
   test('never accepts live adapter identity as durable proof authority', () => {
     const env = createEmptyEnv('account-proof-adapter-is-not-authority');
     installReplica(env, `${FROM}:validator-a`, FROM, TRUSTED);
-    env.jReplicas.set(TRUSTED.name, {
+    env.state.jReplicas.set(TRUSTED.name, {
       name: TRUSTED.name,
       contracts: { deltaTransformer: TRUSTED_TRANSFORMER },
       jadapter: {
@@ -243,7 +243,7 @@ describe('account Hanko trusted domain boundary', () => {
   test('rejects a split durable stack instead of trusting address aliases', () => {
     const env = createEmptyEnv('account-proof-split-stack');
     installReplica(env, `${FROM}:validator-a`, FROM, TRUSTED);
-    env.jReplicas.set(TRUSTED.name, {
+    env.state.jReplicas.set(TRUSTED.name, {
       name: TRUSTED.name,
       chainId: TRUSTED.chainId,
       depositoryAddress: TRUSTED.depositoryAddress,

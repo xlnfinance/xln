@@ -45,7 +45,7 @@ const [sender, receiver] = await registerEntities(env, jadapter, [
 if (!sender || !receiver) throw new Error('J-submit crash entities were not registered');
 
 const senderReplica = () => {
-  const replica = Array.from(env.eReplicas.values()).find((candidate) => (
+  const replica = Array.from(env.state.eReplicas.values()).find((candidate) => (
     candidate.entityId === sender.id && candidate.signerId === sender.signer
   ));
   if (!replica) throw new Error('J-submit crash sender replica missing');
@@ -60,7 +60,7 @@ const driveUntil = async (predicate: () => boolean, label: string): Promise<void
   console.error(formatRuntime(env));
   console.error(safeStringify({
     runtimeMempool: env.runtimeMempool,
-    replicas: Array.from(env.eReplicas.entries()).map(([key, replica]) => ({
+    replicas: Array.from(env.state.eReplicas.entries()).map(([key, replica]) => ({
       key,
       stateHeight: replica.state.height,
       mempool: replica.mempool,

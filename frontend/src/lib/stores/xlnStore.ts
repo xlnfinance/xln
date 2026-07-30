@@ -233,7 +233,7 @@ export function resolveRelayUrls(): string[] {
 }
 
 // Derived stores for convenience
-export const replicas = derived(xlnEnvironment, $env => ($env ? $env.eReplicas : new Map()));
+export const replicas = derived(xlnEnvironment, $env => ($env ? $env.state.eReplicas : new Map()));
 
 // P2P connection state (polled from runtime)
 export type P2PState = {
@@ -408,7 +408,7 @@ const updateLocalEnvironmentStores = (xln: XLNModule, env: RuntimeReplica): void
 
   setXlnEnvironment(env);
   history.set(env.history);
-  currentHeight.set(env.height);
+  currentHeight.set(env.state.height);
   if (envRuntimeId) {
     upsertRuntimeSnapshot(env, { mode: 'embedded', runtimeId: envRuntimeId }, 'connected');
   }
@@ -416,7 +416,7 @@ const updateLocalEnvironmentStores = (xln: XLNModule, env: RuntimeReplica): void
 
   entityPositions.update(currentPositions => {
     let hasChanges = false;
-    for (const [replicaKey, replica] of env.eReplicas.entries()) {
+    for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
       const entityId = xln.extractEntityId(replicaKey);
       if (entityId && replica.position && !currentPositions.has(entityId)) {
         const pos = replica.position;
@@ -1121,7 +1121,7 @@ export async function initializeXLN(): Promise<RuntimeReplica | null> {
     // Extract positions from initial load as well
     // Positions are RELATIVE to j-machine - store jReplica reference for world position calculation
     const initialPositions = new Map<string, RelativeEntityPosition>();
-    for (const [replicaKey, replica] of env.eReplicas.entries()) {
+    for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
       const entityId = xln.extractEntityId(replicaKey); // Uses ids.ts - no split
       if (entityId && replica.position) {
         const pos = replica.position;
@@ -1348,7 +1348,7 @@ const drainLocalRuntimeInput = async (
       (height) => xln.readPersistedStorageFrameRecord(env, height),
       input,
       afterHeight,
-      Math.max(afterHeight, Math.floor(Number(env.height || 0))),
+      Math.max(afterHeight, Math.floor(Number(env.state.height || 0))),
     );
     if (persistedHeight !== null) return persistedHeight;
     // The runtime loop created with this RuntimeReplica is the only owner allowed to call
@@ -1358,7 +1358,7 @@ const drainLocalRuntimeInput = async (
     if (Date.now() - startedAt > 4_000) break;
   }
   throw new Error(
-    `LOCAL_RUNTIME_INPUT_COMMIT_TIMEOUT: after=${afterHeight} latest=${Math.max(0, Number(env.height || 0))}`,
+    `LOCAL_RUNTIME_INPUT_COMMIT_TIMEOUT: after=${afterHeight} latest=${Math.max(0, Number(env.state.height || 0))}`,
   );
 };
 
@@ -1554,7 +1554,7 @@ const routeRuntimeInput = async (
     ...(serverFingerprint ? { serverFingerprint } : {}),
     ...(remoteAdapter ? { nextCommandSequence: remoteAdapter.nextCommandSequence } : {}),
     ...(usesRemoteAdapter && !remoteJournalUnlocked ? { remoteJournalMode: 'one-shot' as const } : {}),
-    initialHeight: Number(runtimeEnv.height || 0),
+    initialHeight: Number(runtimeEnv.state.height || 0),
     ...commandOptions,
   }, async (progress, receipt) => {
     if (usesRemoteAdapter) {
@@ -1576,7 +1576,7 @@ const routeRuntimeInput = async (
     }
     assertLocalRuntimeInputIngressOpen(runtimeEnv);
     let submittedRuntimeEnv = runtimeEnv;
-    const submittedAfterHeight = Math.max(0, Math.floor(Number(runtimeEnv.height || 0)));
+    const submittedAfterHeight = Math.max(0, Math.floor(Number(runtimeEnv.state.height || 0)));
     if (adapter?.mode === 'embedded' && embeddedAdapterTargetsRuntimeEnv(runtimeEnv)) {
       const accepted = await runtimeAdapterSend(input, { commandId: receipt.commandId });
       await progress.accepted(accepted.height);
@@ -1584,7 +1584,7 @@ const routeRuntimeInput = async (
       submittedRuntimeEnv = currentEnv ? (unwrapLiveRuntimeEnv(currentEnv) ?? currentEnv) : runtimeEnv;
     } else {
       xln.enqueueRuntimeInput(runtimeEnv, input);
-      await progress.accepted(Number(runtimeEnv.height || 0));
+      await progress.accepted(Number(runtimeEnv.state.height || 0));
     }
     const committedHeight = await drainLocalRuntimeInput(
       xln,
@@ -1686,7 +1686,7 @@ export async function dispatchRuntimeInputToRuntimeEnv(env: RuntimeReplica, inpu
     }
   }
   assertLocalRuntimeInputIngressOpen(runtimeEnv);
-  const submittedAfterHeight = Math.max(0, Math.floor(Number(runtimeEnv.height || 0)));
+  const submittedAfterHeight = Math.max(0, Math.floor(Number(runtimeEnv.state.height || 0)));
   xln.enqueueRuntimeInput(runtimeEnv, input);
   await drainLocalRuntimeInput(xln, runtimeEnv, input, submittedAfterHeight);
   publishLocalRuntimeEnvIfActive(runtimeEnv);

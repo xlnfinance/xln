@@ -371,10 +371,10 @@ const tryAcquireStorageWriterLock = async (
   staleStorageLockSequence += 1;
   const ownerSequence = staleStorageLockSequence;
   const body: StorageWriterLockBody = {
-    owner: `${nodeProcess?.pid ?? 'unknown'}:${now}:${Math.max(0, Number(env.height || 0))}:${ownerSequence}`,
+    owner: `${nodeProcess?.pid ?? 'unknown'}:${now}:${Math.max(0, Number(env.state.height || 0))}:${ownerSequence}`,
     ...(typeof nodeProcess?.pid === 'number' ? { pid: nodeProcess.pid } : {}),
     ...(typeof env.runtimeId === 'string' ? { runtimeId: env.runtimeId } : {}),
-    frameHeight: Math.max(0, Number(env.height || 0)),
+    frameHeight: Math.max(0, Number(env.state.height || 0)),
     acquiredAt: now,
     expiresAt: now + STORAGE_WRITER_LOCK_TTL_MS,
   };
@@ -798,7 +798,7 @@ export const rotateStorageEpochDb = async (
   env: RuntimeReplica,
   deps: RuntimeStorageDbDeps,
   snapshotHeight: number,
-  timestamp = env.timestamp,
+  timestamp = env.state.timestamp,
 ): Promise<boolean> => {
   if (!nodeProcess) return false;
   const state = deps.ensureRuntimeState(env);

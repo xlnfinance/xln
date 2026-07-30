@@ -440,8 +440,8 @@ const attachSigningReplica = (env: ReturnType<typeof createEmptyEnv>, entityId: 
   const config = makeSingleSignerConfigFor(signerId);
   const jurisdiction = config.jurisdiction!;
   const depository = browserDepository ?? jurisdiction.depositoryAddress;
-  if (!env.jReplicas.has('__audit_test__')) {
-    env.jReplicas.set('__audit_test__', {
+  if (!env.state.jReplicas.has('__audit_test__')) {
+    env.state.jReplicas.set('__audit_test__', {
       name: '__audit_test__',
       chainId: jurisdiction.chainId,
       rpcs: [],
@@ -461,7 +461,7 @@ const attachSigningReplica = (env: ReturnType<typeof createEmptyEnv>, entityId: 
       position: { x: 0, y: 0, z: 0 },
     });
   }
-  env.eReplicas.set(`${entityId}:${signerId}`, {
+  env.state.eReplicas.set(`${entityId}:${signerId}`, {
     entityId,
     signerId,
     entityEncPubKey: '',
@@ -497,7 +497,7 @@ const ensureCanonicalCommandBoardAuthority = async (env: RuntimeReplica, state: 
     }
     return;
   }
-  let replica = Array.from(env.jReplicas.values()).find(
+  let replica = Array.from(env.state.jReplicas.values()).find(
     candidate =>
       candidate.chainId === jurisdiction.chainId &&
       candidate.depositoryAddress?.toLowerCase() === jurisdiction.depositoryAddress.toLowerCase() &&
@@ -517,7 +517,7 @@ const buildQuorumAuthorizedFrameTxs = async (
   env: RuntimeReplica,
   state: EntityState,
   collectiveTxs: EntityTx[],
-  frameTimestamp: number = env.timestamp,
+  frameTimestamp: number = env.state.timestamp,
 ): Promise<EntityTx[]> => {
   await ensureCanonicalCommandBoardAuthority(env, state);
   const [proposer, ...otherValidators] = state.config.validators;
@@ -704,7 +704,7 @@ const sealAuditJSubmitAttempts = (env: RuntimeReplica, inputs: JInput[]): void =
         attemptId,
         batchGeneration,
       };
-      const existing = Array.from(env.eReplicas.values()).find(
+      const existing = Array.from(env.state.eReplicas.values()).find(
         replica =>
           replica.entityId.toLowerCase() === jTx.entityId.toLowerCase() &&
           replica.signerId.toLowerCase() === signerId.toLowerCase(),
@@ -746,7 +746,7 @@ const sealAuditJSubmitAttempts = (env: RuntimeReplica, inputs: JInput[]): void =
         submitAttempts: jTx.data.runtimeSubmitAttempt.attemptNumber,
         lastSubmittedAt: jTx.data.runtimeSubmitAttempt.attemptedAt,
       };
-      env.eReplicas.set(`${jTx.entityId}:${signerId}`, replica);
+      env.state.eReplicas.set(`${jTx.entityId}:${signerId}`, replica);
     }
   }
   registerPendingCommittedJOutbox(env, inputs);
@@ -765,7 +765,7 @@ describe('audit fail-fast regressions', () => {
   test('jurisdiction-specific runtime height ignores higher sibling chain tip', () => {
     const env = createEmptyEnv('jurisdiction-height-specificity');
     env.activeJurisdiction = 'Tron';
-    env.jReplicas = new Map([
+    env.state.jReplicas = new Map([
       ['Testnet', { name: 'Testnet', blockNumber: 3145n }],
       ['Tron', { name: 'Tron', blockNumber: 5794n }],
     ] as any);
@@ -896,7 +896,7 @@ describe('audit fail-fast regressions', () => {
     const staleSignerId = `0xb262${'00'.repeat(18)}`;
     const state = makeEntityState(entityId);
     state.config = makeSingleSignerConfigFor(actualSignerId);
-    env.eReplicas.set(`${entityId}:${actualSignerId}`, {
+    env.state.eReplicas.set(`${entityId}:${actualSignerId}`, {
       entityId,
       signerId: actualSignerId,
       entityEncPubKey: '',
@@ -915,7 +915,7 @@ describe('audit fail-fast regressions', () => {
         },
       ]),
     ).resolves.toBe(env);
-    expect(env.eReplicas.has(`${entityId}:${actualSignerId}`)).toBe(true);
+    expect(env.state.eReplicas.has(`${entityId}:${actualSignerId}`)).toBe(true);
   });
 
   test('runtime ingress rejects stale signer hints for tx-bearing inputs even with one local replica', async () => {
@@ -927,7 +927,7 @@ describe('audit fail-fast regressions', () => {
     const staleSignerId = `0x${'86'.repeat(20)}`;
     const state = makeEntityState(entityId);
     state.config = makeSingleSignerConfigFor(actualSignerId);
-    env.eReplicas.set(`${entityId}:${actualSignerId}`, {
+    env.state.eReplicas.set(`${entityId}:${actualSignerId}`, {
       entityId,
       signerId: actualSignerId,
       entityEncPubKey: '',
@@ -966,7 +966,7 @@ describe('audit fail-fast regressions', () => {
     const staleSignerId = `0x${'96'.repeat(20)}`;
     const state = makeEntityState(entityId);
     state.config = makeSingleSignerConfigFor(actualSignerId);
-    env.eReplicas.set(`${entityId}:${actualSignerId}`, {
+    env.state.eReplicas.set(`${entityId}:${actualSignerId}`, {
       entityId,
       signerId: actualSignerId,
       entityEncPubKey: '',
@@ -996,7 +996,7 @@ describe('audit fail-fast regressions', () => {
       ]),
     ).resolves.toBe(env);
     expect(env.runtimeMempool?.entityInputs).toHaveLength(0);
-    expect(env.eReplicas.get(`${entityId}:${actualSignerId}`)?.state.accounts.size).toBe(0);
+    expect(env.state.eReplicas.get(`${entityId}:${actualSignerId}`)?.state.accounts.size).toBe(0);
   });
 
   test('runtime discards only the malformed remote origin lane', () => {
@@ -1068,7 +1068,7 @@ describe('audit fail-fast regressions', () => {
       const state = makeEntityState(entityId);
       state.config = makeSingleSignerConfigFor(signerId);
       const localKeys = deriveLocalEntityCryptoKeys(env, entityId, signerId);
-      env.eReplicas.set(`${entityId}:${signerId}`, {
+      env.state.eReplicas.set(`${entityId}:${signerId}`, {
         entityId,
         signerId,
         entityEncPubKey: localKeys.publicKey,
@@ -1251,7 +1251,7 @@ describe('audit fail-fast regressions', () => {
     const staleConfigSignerId = `0x${'9c'.repeat(20)}`;
     const state = makeEntityState(entityId);
     state.config = makeSingleSignerConfigFor(staleConfigSignerId);
-    env.eReplicas.set(`${entityId}:${actualSignerId}`, {
+    env.state.eReplicas.set(`${entityId}:${actualSignerId}`, {
       entityId,
       signerId: actualSignerId,
       entityEncPubKey: '',
@@ -1272,7 +1272,7 @@ describe('audit fail-fast regressions', () => {
     const staleGossipSignerId = `0x${'9b'.repeat(20)}`;
     const state = makeEntityState(entityId);
     state.config = makeSingleSignerConfigFor(actualSignerId);
-    env.eReplicas.set(`${entityId}:${actualSignerId}`, {
+    env.state.eReplicas.set(`${entityId}:${actualSignerId}`, {
       entityId,
       signerId: actualSignerId,
       entityEncPubKey: '',
@@ -1306,7 +1306,7 @@ describe('audit fail-fast regressions', () => {
     const hubSignerId = `0x${'9f'.repeat(20)}`;
     const state = makeEntityState(entityId);
     state.config = makeSingleSignerConfigFor(importedUserSignerId);
-    env.eReplicas.set(`${entityId}:${importedUserSignerId}`, {
+    env.state.eReplicas.set(`${entityId}:${importedUserSignerId}`, {
       entityId,
       signerId: importedUserSignerId,
       entityEncPubKey: '',
@@ -1454,7 +1454,7 @@ describe('audit fail-fast regressions', () => {
     const env = createEmptyEnv('cross-j-salvage-route-signer');
     env.scenarioMode = true;
     env.quietRuntimeLogs = true;
-    env.timestamp = 10_000;
+    env.state.timestamp = 10_000;
     const sourceUser = `0x${'a1'.repeat(32)}`;
     const sourceHub = `0x${'a2'.repeat(32)}`;
     const targetHub = `0x${'a3'.repeat(32)}`;
@@ -1501,13 +1501,13 @@ describe('audit fail-fast regressions', () => {
           amount: 200n,
         },
         status: 'resting',
-        createdAt: env.timestamp,
-        updatedAt: env.timestamp,
+        createdAt: env.state.timestamp,
+        updatedAt: env.state.timestamp,
       },
       {
         runtimeSeed: 'cross-j-salvage-route-signer',
         sourceDisputeDelayMs: 5_000,
-        now: env.timestamp,
+        now: env.state.timestamp,
       },
     );
     sourceState.crossJurisdictionSwaps.set(route.orderId, route);
@@ -1580,7 +1580,7 @@ describe('audit fail-fast regressions', () => {
     for (const signerId of [signerA, signerB]) {
       const state = makeEntityState(entityId);
       state.config = structuredClone(config);
-      env.eReplicas.set(`${entityId}:${signerId}`, {
+      env.state.eReplicas.set(`${entityId}:${signerId}`, {
         entityId,
         signerId,
         entityEncPubKey: '',
@@ -1613,7 +1613,7 @@ describe('audit fail-fast regressions', () => {
     }));
 
     await expect(processRuntime(env, inputs)).rejects.toThrow('Too many entity inputs');
-    expect(env.height).toBe(0);
+    expect(env.state.height).toBe(0);
     expect(env.runtimeMempool?.entityInputs.length).toBe(10001);
   });
 
@@ -1670,7 +1670,7 @@ describe('audit fail-fast regressions', () => {
       shares: { [signerAddress]: 1n },
       jurisdiction,
     };
-    env.eReplicas.set(`${entityId}:${signerAddress}`, {
+    env.state.eReplicas.set(`${entityId}:${signerAddress}`, {
       entityId,
       signerId: signerAddress,
       entityEncPubKey: '',
@@ -1684,7 +1684,7 @@ describe('audit fail-fast regressions', () => {
     jReplica.depositoryAddress = jurisdiction.depositoryAddress;
     jReplica.entityProviderAddress = jurisdiction.entityProviderAddress;
     jReplica.watcherConfirmationDepth = 0;
-    const state = env.eReplicas.get(`${entityId}:${signerAddress}`)!.state;
+    const state = env.state.eReplicas.get(`${entityId}:${signerAddress}`)!.state;
     const boardHash = hashHankoBoard(1, [ethers.zeroPadValue(signerAddress, 32)], [1]);
     await installCanonicalRegisteredBoardAuthority(env, jurisdiction, state, boardHash);
     const hanko = signedHankoForTest(hash, [signerPrivateKey], [], [[entityId, [0n], [1n], 1n]]);
@@ -1728,7 +1728,7 @@ describe('audit fail-fast regressions', () => {
       validators: [signerAddress, cosignerAddress],
       shares: { [signerAddress]: 1n, [cosignerAddress]: 1n },
     };
-    env.eReplicas.set(`${entityId}:${signerAddress}`, {
+    env.state.eReplicas.set(`${entityId}:${signerAddress}`, {
       entityId,
       signerId: signerAddress,
       entityEncPubKey: '',
@@ -2062,7 +2062,7 @@ describe('audit fail-fast regressions', () => {
   test('entity frame keeps reducer storage changes local until exact commit', async () => {
     const env = createEmptyEnv('entity-frame-storage-commit-boundary');
     env.quietRuntimeLogs = true;
-    env.timestamp = 1_000;
+    env.state.timestamp = 1_000;
     const state = makeEntityState(`0x${'60'.repeat(32)}`);
     installSingleSignerBoard(env, state);
     const frameTxs = await buildQuorumAuthorizedFrameTxs(env, state, [
@@ -2071,7 +2071,7 @@ describe('audit fail-fast regressions', () => {
     env.overlay = [];
     if (env.runtimeState) env.runtimeState.currentStorageOverlayMarks = [];
 
-    const applied = await applyEntityFrame(env, state, frameTxs, env.timestamp);
+    const applied = await applyEntityFrame(env, state, frameTxs, env.state.timestamp);
 
     expect(readEntityFrameEventMessages(applied.newState)).toHaveLength(1);
     expect(applied.storageChanges).toContainEqual({ family: 'entity', entityId: state.entityId });
@@ -2154,9 +2154,9 @@ describe('audit fail-fast regressions', () => {
     const restingRoute = { ...route, status: 'resting' as const };
     const state = makeEntityState(sourceHub);
     const env = createEmptyEnv('cross-admit-atomic-route');
-    env.timestamp = 1_000;
+    env.state.timestamp = 1_000;
 
-    expect(getCrossJurisdictionBookAdmissionError(state, restingRoute, env.timestamp)).toContain(
+    expect(getCrossJurisdictionBookAdmissionError(state, restingRoute, env.state.timestamp)).toContain(
       'CROSS_J_BOOK_ADMISSION_PENDING',
     );
     const admitted = handleAdmitCrossJurisdictionBookOrderEntityTx(env, state, {
@@ -2165,7 +2165,7 @@ describe('audit fail-fast regressions', () => {
     });
     expect(admitted.swapOffersCreated).toHaveLength(1);
     expect(admitted.newState.crossJurisdictionBookAdmissions?.values().next().value?.status).toBe('admitted');
-    expect(() => assertCrossJurisdictionOrderAdmissible(admitted.newState, restingRoute, env.timestamp)).not.toThrow();
+    expect(() => assertCrossJurisdictionOrderAdmissible(admitted.newState, restingRoute, env.state.timestamp)).not.toThrow();
 
     const admission = admitted.newState.crossJurisdictionBookAdmissions?.values().next().value;
     if (!admission) throw new Error('test fixture missing cross-j admission');
@@ -2180,7 +2180,7 @@ describe('audit fail-fast regressions', () => {
 
   test('committed source pull advances source route to resting before fill notice', () => {
     const env = createEmptyEnv('cross-j-source-commit-resting');
-    env.timestamp = 10_000;
+    env.state.timestamp = 10_000;
     const sourceUser = `0x${'31'.repeat(32)}`;
     const sourceHub = `0x${'41'.repeat(32)}`;
     const targetHub = `0x${'42'.repeat(32)}`;
@@ -2244,7 +2244,7 @@ describe('audit fail-fast regressions', () => {
         },
       },
       outputs,
-      env.timestamp,
+      env.state.timestamp,
       swapOffersCreated,
     );
 

@@ -48,7 +48,7 @@ export const buildTrackedExternalOwners = (
     return tracked;
   };
 
-  for (const replica of env.eReplicas?.values?.() || []) {
+  for (const replica of env.state.eReplicas?.values?.() || []) {
     const entityId = String(replica.state?.entityId || replica.entityId || '')
       .trim()
       .toLowerCase();

@@ -53,7 +53,7 @@ export const verifyStartHanko = async (
     boardHash ? { registeredBoardHash: boardHash } : undefined,
   );
   if (verification.valid) return true;
-  const currentProof = buildAccountProofBodyFromJurisdictions(env, account);
+  const currentProof = buildAccountProofBodyFromJurisdictions(env.state, account);
   addMessage(
     state,
     `❌ Counterparty dispute proof invalid for current account snapshot; ` +

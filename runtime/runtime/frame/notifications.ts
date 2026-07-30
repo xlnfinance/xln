@@ -24,14 +24,14 @@ export const notifyRuntimeFrameCommitted = (
 ): void => {
   const callbacks = ensureRuntimeState(env).runtimeFrameCommitCallbacks;
   if (!callbacks || callbacks.size === 0) return;
-  const frame = { height: env.height, runtimeInput };
+  const frame = { height: env.state.height, runtimeInput };
   for (const callback of callbacks) {
     try {
       callback(frame);
     } catch (error) {
       runtimeLog.warn('frame_commit.callback_failed', {
         error: error instanceof Error ? error.message : String(error),
-        height: env.height,
+        height: env.state.height,
       });
     }
   }

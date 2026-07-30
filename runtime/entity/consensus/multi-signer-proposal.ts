@@ -241,13 +241,13 @@ const buildMultiSignerProposal = async (
       ? { jPrefixCertificate: proposalJPrefixCertificate }
       : {}),
   });
-  const applied = await applyEntityFrame(env, workingReplica.state, proposalTxs, env.timestamp);
+  const applied = await applyEntityFrame(env, workingReplica.state, proposalTxs, env.state.timestamp);
   const height = workingReplica.state.height + 1;
   const state = buildProposalState(
     workingReplica,
     applied.newState,
     height,
-    env.timestamp,
+    env.state.timestamp,
     leader.view,
   );
   const parentFrameHash = getPrevFrameHash(workingReplica.state);
@@ -256,7 +256,7 @@ const buildMultiSignerProposal = async (
   const frameHash = createEntityFrameHashFromStateRoot(
     parentFrameHash,
     height,
-    env.timestamp,
+    env.state.timestamp,
     proposalTxs,
     applied.events,
     state.entityId,
@@ -302,7 +302,7 @@ const buildMultiSignerProposal = async (
     txs: [...proposalTxs],
     events: structuredClone(applied.events),
     hash: frameHash,
-    timestamp: env.timestamp,
+    timestamp: env.state.timestamp,
     leader: {
       proposerSignerId: workingReplica.signerId.toLowerCase(),
       view: leader.view,

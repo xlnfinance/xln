@@ -38,13 +38,13 @@ export async function submitSignedScenarioBatch(
       hankoSignature: hankoData,
       batchHash,
     },
-    timestamp: env.timestamp,
+    timestamp: env.state.timestamp,
   };
   const result = await jadapter.submitTx(jTx, {
     env,
     signerId,
     signerPrivateKey,
-    timestamp: env.timestamp,
+    timestamp: env.state.timestamp,
   });
   if (!result.success) {
     throw new Error(result.error || `${errorPrefix}: signed batch failed`);

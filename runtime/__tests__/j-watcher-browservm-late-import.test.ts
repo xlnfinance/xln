@@ -50,7 +50,7 @@ describe('BrowserVM J-watcher historical catch-up', () => {
         position: { x: 0, y: 0, z: 0 },
       }], jurisdiction);
       if (!registered) throw new Error('NUMERIC_SIGNER_ISOLATION_REGISTRATION_MISSING');
-      const replica = env.eReplicas.get(`${registered.id}:${registered.signer}`);
+      const replica = env.state.eReplicas.get(`${registered.id}:${registered.signer}`);
       if (!replica) throw new Error('NUMERIC_SIGNER_ISOLATION_REPLICA_MISSING');
 
       const onchain = await jadapter.entityProvider.getEntityInfo(registered.id);
@@ -88,7 +88,7 @@ describe('BrowserVM J-watcher historical catch-up', () => {
 
       const onchain = await jadapter.entityProvider.getEntityInfo(registered.id);
       expect(onchain.exists).toBe(true);
-      const replica = env.eReplicas.get(`${registered.id}:${registered.signer}`);
+      const replica = env.state.eReplicas.get(`${registered.id}:${registered.signer}`);
       if (!replica) throw new Error('BROWSERVM_LATE_IMPORT_REPLICA_MISSING');
 
       expect(replica.jHistory?.scannedThroughHeight).toBeGreaterThanOrEqual(Number(onchain.registrationBlock));
@@ -122,14 +122,14 @@ describe('BrowserVM J-watcher historical catch-up', () => {
       ], jurisdiction);
       if (!sender || !observer) throw new Error('BROWSERVM_MULTI_ENTITY_REGISTRATION_MISSING');
 
-      const observerBeforeFund = env.eReplicas.get(`${observer.id}:${observer.signer}`);
+      const observerBeforeFund = env.state.eReplicas.get(`${observer.id}:${observer.signer}`);
       if (!observerBeforeFund) throw new Error('BROWSERVM_MULTI_ENTITY_OBSERVER_BEFORE_FUND_MISSING');
       const observerScanBeforeFund = observerBeforeFund.jHistory?.scannedThroughHeight;
 
       await fundEntities(env, jadapter, [{ id: sender.id, tokenId: 1, amount: 100n }]);
       const targetBlock = Number(await jadapter.getCurrentBlockNumber?.());
-      const senderReplica = env.eReplicas.get(`${sender.id}:${sender.signer}`);
-      const observerReplica = env.eReplicas.get(`${observer.id}:${observer.signer}`);
+      const senderReplica = env.state.eReplicas.get(`${sender.id}:${sender.signer}`);
+      const observerReplica = env.state.eReplicas.get(`${observer.id}:${observer.signer}`);
       if (!senderReplica || !observerReplica) throw new Error('BROWSERVM_MULTI_ENTITY_REPLICA_MISSING');
 
       expect(senderReplica.state.reserves.get(1)).toBe(100n);

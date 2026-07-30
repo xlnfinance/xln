@@ -18,7 +18,7 @@ import type { RuntimeReplica } from '../runtime/types';
 import { createTestJReplica } from './helpers/j-replica';
 
 function hasPendingBilateralState(env: RuntimeReplica): boolean {
-  for (const replica of env.eReplicas.values()) {
+  for (const replica of env.state.eReplicas.values()) {
     for (const account of replica.state?.accounts?.values() || []) {
       if (account.pendingFrame || account.pendingAccountInput) {
         return true;
@@ -71,7 +71,7 @@ describe('checkpoint persistence with pending bilateral state', () => {
       chainId: 31337,
     };
     env.activeJurisdiction = jurisdiction.name;
-    env.jReplicas.set(jurisdiction.name, createTestJReplica({
+    env.state.jReplicas.set(jurisdiction.name, createTestJReplica({
       name: jurisdiction.name,
       depositoryAddress: jurisdiction.depositoryAddress,
       entityProviderAddress: jurisdiction.entityProviderAddress,
@@ -155,21 +155,21 @@ describe('checkpoint persistence with pending bilateral state', () => {
 
     const checkpointHeights = await listPersistedCheckpointHeights(env);
     const checkpointHeight = Number(checkpointHeights.at(-1) || 0);
-    expect(checkpointHeight).toBe(env.height);
+    expect(checkpointHeight).toBe(env.state.height);
 
     await closeRuntimeDb(env);
     await closeInfraDb(env);
 
     const restored = await loadEnvFromDB(runtimeId, seed, { fromSnapshotHeight: checkpointHeight });
     expect(restored).toBeTruthy();
-    expect(restored?.height).toBe(checkpointHeight);
+    expect(restored?.state.height).toBe(checkpointHeight);
     expect(hasPendingBilateralState(restored!)).toBe(true);
 
     await closeRuntimeDb(restored!);
     await closeInfraDb(restored!);
 
     const restarted = await main(seed);
-    expect(restarted.height).toBe(checkpointHeight);
+    expect(restarted.state.height).toBe(checkpointHeight);
     expect(hasPendingBilateralState(restarted)).toBe(true);
     await closeRuntimeDb(restarted);
     await closeInfraDb(restarted);

@@ -62,12 +62,12 @@ describe('runtime committed read barrier', () => {
 
     await Promise.resolve();
     expect(readerEntered).toBeFalse();
-    env.height = 7;
+    env.state.height = 7;
     releaseWriter();
 
     const releaseReader = await reader;
     expect(readerEntered).toBeTrue();
-    expect(env.height).toBe(7);
+    expect(env.state.height).toBe(7);
     releaseReader();
   });
 

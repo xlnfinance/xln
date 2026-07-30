@@ -70,7 +70,7 @@
   let newXlnomyBlockTime = '1000';
 
   // Get available Xlnomies from env
-  $: jurisdictions = $runtimeFrameEnv?.jReplicas ? Array.from($runtimeFrameEnv.jReplicas.keys()) : [];
+  $: jurisdictions = $runtimeFrameEnv?.state.jReplicas ? Array.from($runtimeFrameEnv.state.jReplicas.keys()) : [];
   $: activeJurisdiction = $runtimeFrameEnv?.activeJurisdiction || '';
 
   // Check if env is ready
@@ -141,12 +141,12 @@
 
   function clearDemoRuntimeState(message: string): boolean {
     if (!requireLiveMode('reset demo')) return false;
-    if (!$runtimeFrameEnv?.eReplicas) {
+    if (!$runtimeFrameEnv?.state.eReplicas) {
       lastAction = 'No demo runtime state to reset';
       return false;
     }
     stopFedPaymentLoop();
-    $runtimeFrameEnv.eReplicas.clear();
+    $runtimeFrameEnv.state.eReplicas.clear();
     $runtimeFrameEnv.runtimeInput = { runtimeTxs: [], entityInputs: [], jInputs: [] } as RuntimeInput;
     $runtimeFrameEnv.history = [];
     tutorialActive = false;
@@ -194,8 +194,8 @@
       throw new Error(`${label}: runtimeSeed missing - unlock vault or set XLN_RUNTIME_SEED`);
     }
 
-    if (!$runtimeFrameEnv.eReplicas) {
-      $runtimeFrameEnv.eReplicas = new Map();
+    if (!$runtimeFrameEnv.state.eReplicas) {
+      $runtimeFrameEnv.state.eReplicas = new Map();
     }
 
     runtimeFrameEnv.set($runtimeFrameEnv);
@@ -203,8 +203,8 @@
 
   // Get entity IDs for dropdowns (extract entityId from replica keys)
   let entityIds: string[] = [];
-  $: entityIds = $runtimeFrameEnv?.eReplicas
-    ? Array.from($runtimeFrameEnv.eReplicas.keys() as Iterable<string>).map((key: string) => key.split(':')[0] || key).filter((id: string, idx: number, arr: string[]) => arr.indexOf(id) === idx)
+  $: entityIds = $runtimeFrameEnv?.state.eReplicas
+    ? Array.from($runtimeFrameEnv.state.eReplicas.keys() as Iterable<string>).map((key: string) => key.split(':')[0] || key).filter((id: string, idx: number, arr: string[]) => arr.indexOf(id) === idx)
     : [];
 
   // Listen for VR payment gestures
@@ -296,8 +296,8 @@
         throw new Error(`Insufficient reserves: have ${fromReserve}, need ${amount}`);
       }
 
-      const replicaKey = (Array.from($runtimeFrameEnv.eReplicas.keys()) as string[]).find((key) => key.startsWith(`${r2rFromEntity}:`));
-      const replica = replicaKey ? $runtimeFrameEnv.eReplicas.get(replicaKey) : null;
+      const replicaKey = (Array.from($runtimeFrameEnv.state.eReplicas.keys()) as string[]).find((key) => key.startsWith(`${r2rFromEntity}:`));
+      const replica = replicaKey ? $runtimeFrameEnv.state.eReplicas.get(replicaKey) : null;
       const signerId = replica?.signerId;
       if (!signerId) {
         throw new Error(`Missing signer for ${shortAddress(r2rFromEntity)}`);
@@ -389,7 +389,7 @@
       const jadapter = await getJAdapterFromEnv();
 
       // CRITICAL: Clear old state BEFORE running demo
-      $runtimeFrameEnv.eReplicas.clear();
+      $runtimeFrameEnv.state.eReplicas.clear();
       $runtimeFrameEnv.history = [];
 
       // Run the ACTUAL AHB scenario (same code as CLI)
@@ -433,7 +433,7 @@
     try {
       const XLN = await getXLN();
       ensureScenarioEnv(XLN, 'HTLC');
-      $runtimeFrameEnv.eReplicas.clear();
+      $runtimeFrameEnv.state.eReplicas.clear();
       $runtimeFrameEnv.history = [];
       await XLN.scenarios.lockAhb($runtimeFrameEnv);
 
@@ -467,7 +467,7 @@
     try {
       const XLN = await getXLN();
       ensureScenarioEnv(XLN, 'Swap');
-      $runtimeFrameEnv.eReplicas.clear();
+      $runtimeFrameEnv.state.eReplicas.clear();
       $runtimeFrameEnv.history = [];
       await XLN.scenarios.swap($runtimeFrameEnv);
 
@@ -497,7 +497,7 @@
       const XLN = await getXLN();
 
       ensureScenarioEnv(XLN, 'Swap Market');
-      $runtimeFrameEnv.eReplicas.clear();
+      $runtimeFrameEnv.state.eReplicas.clear();
       $runtimeFrameEnv.history = [];
       const runSwapMarketScenario = XLN.scenarios.swapMarket;
       if (!runSwapMarketScenario) throw new Error('Swap Market scenario is unavailable');
@@ -522,7 +522,7 @@
       const XLN = await getXLN();
 
       ensureScenarioEnv(XLN, 'Rapid Fire');
-      $runtimeFrameEnv.eReplicas.clear();
+      $runtimeFrameEnv.state.eReplicas.clear();
       $runtimeFrameEnv.history = [];
       const runRapidFireScenario = XLN.scenarios.rapidFire;
       if (!runRapidFireScenario) throw new Error('Rapid Fire scenario is unavailable');
@@ -580,8 +580,8 @@
       ensureScenarioEnv(XLN, 'Grid');
 
       // Clear old state BEFORE running demo
-      $runtimeFrameEnv.eReplicas.clear();
-      $runtimeFrameEnv.jReplicas?.clear();
+      $runtimeFrameEnv.state.eReplicas.clear();
+      $runtimeFrameEnv.state.jReplicas?.clear();
       $runtimeFrameEnv.history = [];
 
       // Run the grid scenario
@@ -620,8 +620,8 @@
       ensureScenarioEnv(XLN, 'Settle');
 
       // Clear old state BEFORE running demo
-      $runtimeFrameEnv.eReplicas.clear();
-      $runtimeFrameEnv.jReplicas?.clear();
+      $runtimeFrameEnv.state.eReplicas.clear();
+      $runtimeFrameEnv.state.jReplicas?.clear();
       $runtimeFrameEnv.history = [];
 
       // Run the settle scenario
@@ -685,7 +685,7 @@
 
       lastAction = 'Creating 3×3 hub (9 entities)...';
 
-      const xlnomy = $runtimeFrameEnv.jReplicas.get($runtimeFrameEnv.activeJurisdiction);
+      const xlnomy = $runtimeFrameEnv.state.jReplicas.get($runtimeFrameEnv.activeJurisdiction);
       if (!xlnomy) throw new Error('Active xlnomy not found');
 
       const jPos = xlnomy.jMachine.position;
@@ -792,8 +792,8 @@
         to = entityIds[Math.floor(Math.random() * entityIds.length)];
       }
 
-      const fromReplicaKey = (Array.from($runtimeFrameEnv.eReplicas.keys()) as string[]).find(k => k.startsWith(from + ':'));
-      const fromReplica = fromReplicaKey ? $runtimeFrameEnv.eReplicas.get(fromReplicaKey) : null;
+      const fromReplicaKey = (Array.from($runtimeFrameEnv.state.eReplicas.keys()) as string[]).find(k => k.startsWith(from + ':'));
+      const fromReplica = fromReplicaKey ? $runtimeFrameEnv.state.eReplicas.get(fromReplicaKey) : null;
 
       if (!fromReplica || !from || !to) {
         throw new Error('Entity not found');
@@ -859,8 +859,8 @@
 
       // Pick random sender with reserves > 0
       const entitiesWithReserves = entityIds.filter(id => {
-        const key = (Array.from($runtimeFrameEnv.eReplicas.keys()) as string[]).find(k => k.startsWith(id + ':'));
-        const replica = key ? $runtimeFrameEnv.eReplicas.get(key) : null;
+        const key = (Array.from($runtimeFrameEnv.state.eReplicas.keys()) as string[]).find(k => k.startsWith(id + ':'));
+        const replica = key ? $runtimeFrameEnv.state.eReplicas.get(key) : null;
         const reserves = replica?.state?.reserves?.get(0) || 0n;
         return BigInt(reserves) > 0n;
       });
@@ -872,8 +872,8 @@
       }
 
       const from = entitiesWithReserves[Math.floor(Math.random() * entitiesWithReserves.length)];
-      const fromReplicaKey = (Array.from($runtimeFrameEnv.eReplicas.keys()) as string[]).find(k => k.startsWith(from + ':'));
-      const fromReplica = fromReplicaKey ? $runtimeFrameEnv.eReplicas.get(fromReplicaKey) : null;
+      const fromReplicaKey = (Array.from($runtimeFrameEnv.state.eReplicas.keys()) as string[]).find(k => k.startsWith(from + ':'));
+      const fromReplica = fromReplicaKey ? $runtimeFrameEnv.state.eReplicas.get(fromReplicaKey) : null;
 
       if (!fromReplica) throw new Error('Sender replica not found');
 
@@ -953,7 +953,7 @@
     try {
       const XLN = await getXLN();
 
-      const xlnomy = $runtimeFrameEnv.jReplicas.get($runtimeFrameEnv.activeJurisdiction);
+      const xlnomy = $runtimeFrameEnv.state.jReplicas.get($runtimeFrameEnv.activeJurisdiction);
       if (!xlnomy) throw new Error('Active xlnomy not found');
 
       // Create 100 entities in 10x10 grid
@@ -1160,7 +1160,7 @@
 
     const XLN = await getXLN();
 
-    const xlnomy = $runtimeFrameEnv.jReplicas.get($runtimeFrameEnv.activeJurisdiction);
+    const xlnomy = $runtimeFrameEnv.state.jReplicas.get($runtimeFrameEnv.activeJurisdiction);
     if (!xlnomy) {
       console.error('[createEntities] Active xlnomy not found:', $runtimeFrameEnv.activeJurisdiction);
       throw new Error('Active xlnomy not found');
@@ -1298,8 +1298,8 @@
           if (accountsOpened.has(accountKey)) continue;
           accountsOpened.add(accountKey);
 
-          const fromReplicaKey = (Array.from($runtimeFrameEnv.eReplicas.keys()) as string[]).find(k => k.startsWith(fromId + ':'));
-          const fromReplica = fromReplicaKey ? $runtimeFrameEnv.eReplicas.get(fromReplicaKey) : null;
+          const fromReplicaKey = (Array.from($runtimeFrameEnv.state.eReplicas.keys()) as string[]).find(k => k.startsWith(fromId + ':'));
+          const fromReplica = fromReplicaKey ? $runtimeFrameEnv.state.eReplicas.get(fromReplicaKey) : null;
 
           if (fromReplica) {
             accountInputs.push({
@@ -1361,8 +1361,8 @@
     if (!centralBankLayer) return;
 
     const fedId = entityIds.find(id => {
-      const key = (Array.from($runtimeFrameEnv.eReplicas.keys()) as string[]).find(k => k.startsWith(id + ':'));
-      const replica = key ? $runtimeFrameEnv.eReplicas.get(key) : null;
+      const key = (Array.from($runtimeFrameEnv.state.eReplicas.keys()) as string[]).find(k => k.startsWith(id + ':'));
+      const replica = key ? $runtimeFrameEnv.state.eReplicas.get(key) : null;
       return replica?.signerId?.includes(centralBankLayer.name.toLowerCase().replace(/\s/g, '_'));
     });
 
@@ -1373,8 +1373,8 @@
     let totalEntities = 0;
 
     for (const id of entityIds) {
-      const key = (Array.from($runtimeFrameEnv.eReplicas.keys()) as string[]).find(k => k.startsWith(id + ':'));
-      const replica = key ? $runtimeFrameEnv.eReplicas.get(key) : null;
+      const key = (Array.from($runtimeFrameEnv.state.eReplicas.keys()) as string[]).find(k => k.startsWith(id + ':'));
+      const replica = key ? $runtimeFrameEnv.state.eReplicas.get(key) : null;
       if (replica?.state?.reserves) {
         const tokenReserves = replica.state.reserves.get(0) || 0n;
         totalReserves += BigInt(tokenReserves);
@@ -1390,8 +1390,8 @@
       const deficit = (targetAverage - averageReserves) * BigInt(totalEntities);
       const mintAmount = deficit > 1_000_000n ? 1_000_000n : deficit; // Max $1M per tick
 
-      const fedKey = (Array.from($runtimeFrameEnv.eReplicas.keys()) as string[]).find(k => k.startsWith(fedId + ':'));
-      const fedReplica = fedKey ? $runtimeFrameEnv.eReplicas.get(fedKey) : null;
+      const fedKey = (Array.from($runtimeFrameEnv.state.eReplicas.keys()) as string[]).find(k => k.startsWith(fedId + ':'));
+      const fedReplica = fedKey ? $runtimeFrameEnv.state.eReplicas.get(fedKey) : null;
 
       if (fedReplica) {
         await debugFundReservesBatch([{ entityId: fedId, tokenId: 1, amount: mintAmount }]);
@@ -1403,16 +1403,16 @@
   async function run20PercentPayments(XLN: any) {
     // Get all entities with reserves > 0
     const activeEntities = entityIds.filter(id => {
-      const key = (Array.from($runtimeFrameEnv.eReplicas.keys()) as string[]).find(k => k.startsWith(id + ':'));
-      const replica = key ? $runtimeFrameEnv.eReplicas.get(key) : null;
+      const key = (Array.from($runtimeFrameEnv.state.eReplicas.keys()) as string[]).find(k => k.startsWith(id + ':'));
+      const replica = key ? $runtimeFrameEnv.state.eReplicas.get(key) : null;
       const reserves = replica?.state?.reserves?.get(0) || 0n;
       return BigInt(reserves) > 0n;
     });
 
     // Each entity sends 20% to random peer
     for (const fromId of activeEntities) {
-      const fromKey = (Array.from($runtimeFrameEnv.eReplicas.keys()) as string[]).find(k => k.startsWith(fromId + ':'));
-      const fromReplica = fromKey ? $runtimeFrameEnv.eReplicas.get(fromKey) : null;
+      const fromKey = (Array.from($runtimeFrameEnv.state.eReplicas.keys()) as string[]).find(k => k.startsWith(fromId + ':'));
+      const fromReplica = fromKey ? $runtimeFrameEnv.state.eReplicas.get(fromKey) : null;
       if (!fromReplica) continue;
 
       const reserves = BigInt(fromReplica.state?.reserves?.get(0) || 0n);
@@ -1468,8 +1468,8 @@
   async function detectAndHandleCrisis(XLN: any, topology: any) {
     // Check each entity's reserve ratio
     for (const id of entityIds) {
-      const key = (Array.from($runtimeFrameEnv.eReplicas.keys()) as string[]).find(k => k.startsWith(id + ':'));
-      const replica = key ? $runtimeFrameEnv.eReplicas.get(key) : null;
+      const key = (Array.from($runtimeFrameEnv.state.eReplicas.keys()) as string[]).find(k => k.startsWith(id + ':'));
+      const replica = key ? $runtimeFrameEnv.state.eReplicas.get(key) : null;
       if (!replica) continue;
 
       const reserves = BigInt(replica.state?.reserves?.get(0) || 0n);
@@ -1511,14 +1511,14 @@
     if (fedPaymentInterval) clearInterval(fedPaymentInterval);
 
     const bankEntityIds = entityIds.filter(id => {
-      const key = (Array.from($runtimeFrameEnv.eReplicas.keys()) as string[]).find(k => k.startsWith(id + ':'));
-      const replica = key ? $runtimeFrameEnv.eReplicas.get(key) : null;
+      const key = (Array.from($runtimeFrameEnv.state.eReplicas.keys()) as string[]).find(k => k.startsWith(id + ':'));
+      const replica = key ? $runtimeFrameEnv.state.eReplicas.get(key) : null;
       return replica?.signerId && !replica.signerId.includes('_fed');
     });
 
     const fedId = entityIds.find(id => {
-      const key = (Array.from($runtimeFrameEnv.eReplicas.keys()) as string[]).find(k => k.startsWith(id + ':'));
-      const replica = key ? $runtimeFrameEnv.eReplicas.get(key) : null;
+      const key = (Array.from($runtimeFrameEnv.state.eReplicas.keys()) as string[]).find(k => k.startsWith(id + ':'));
+      const replica = key ? $runtimeFrameEnv.state.eReplicas.get(key) : null;
       return replica?.signerId?.includes('_fed');
     });
 
@@ -1544,8 +1544,8 @@
           const bank = bankEntityIds[Math.floor(Math.random() * bankEntityIds.length)]!;
           const amount = Math.floor(Math.random() * 500000) + 100000; // $100K-$600K
 
-          const fedKey = (Array.from($runtimeFrameEnv.eReplicas.keys()) as string[]).find(k => k.startsWith(fedId + ':'));
-          const fedReplica = fedKey ? $runtimeFrameEnv.eReplicas.get(fedKey) : null;
+          const fedKey = (Array.from($runtimeFrameEnv.state.eReplicas.keys()) as string[]).find(k => k.startsWith(fedId + ':'));
+          const fedReplica = fedKey ? $runtimeFrameEnv.state.eReplicas.get(fedKey) : null;
 
           if (fedReplica) {
             await ingressRuntimeInput(XLN, { runtimeTxs: [], entityInputs: [{
@@ -1568,8 +1568,8 @@
           const bank = bankEntityIds[Math.floor(Math.random() * bankEntityIds.length)]!;
           const amount = Math.floor(Math.random() * 300000) + 50000; // $50K-$350K
 
-          const bankKey = (Array.from($runtimeFrameEnv.eReplicas.keys()) as string[]).find(k => k.startsWith(bank + ':'));
-          const bankReplica = bankKey ? $runtimeFrameEnv.eReplicas.get(bankKey) : null;
+          const bankKey = (Array.from($runtimeFrameEnv.state.eReplicas.keys()) as string[]).find(k => k.startsWith(bank + ':'));
+          const bankReplica = bankKey ? $runtimeFrameEnv.state.eReplicas.get(bankKey) : null;
 
           if (bankReplica) {
             await ingressRuntimeInput(XLN, { runtimeTxs: [], entityInputs: [{
@@ -1597,8 +1597,8 @@
 
           const amount = Math.floor(Math.random() * 200000) + 25000; // $25K-$225K
 
-          const fromKey = (Array.from($runtimeFrameEnv.eReplicas.keys()) as string[]).find(k => k.startsWith(from + ':'));
-          const fromReplica = fromKey ? $runtimeFrameEnv.eReplicas.get(fromKey) : null;
+          const fromKey = (Array.from($runtimeFrameEnv.state.eReplicas.keys()) as string[]).find(k => k.startsWith(from + ':'));
+          const fromReplica = fromKey ? $runtimeFrameEnv.state.eReplicas.get(fromKey) : null;
 
           if (fromReplica) {
             // Check if account exists
@@ -1657,7 +1657,7 @@
     }
 
     // Limit to 9 jurisdictions (3×3 grid)
-    if ($runtimeFrameEnv?.jReplicas && $runtimeFrameEnv.jReplicas.size >= 9) {
+    if ($runtimeFrameEnv?.state.jReplicas && $runtimeFrameEnv.state.jReplicas.size >= 9) {
       lastAction = ' Maximum 9 jurisdictions (3×3 grid full)';
       return;
     }
@@ -1721,7 +1721,7 @@
     lastAction = `Switching to "${name}"...`;
 
     try {
-      if (!$runtimeFrameEnv.jReplicas?.has(name)) {
+      if (!$runtimeFrameEnv.state.jReplicas?.has(name)) {
         lastAction = ` Xlnomy "${name}" not found`;
         return;
       }

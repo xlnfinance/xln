@@ -111,7 +111,7 @@ describe('runtime scheduled wake', () => {
     const proposer = signerId('30');
     const state = makeState(entityId('20'), proposer, 2_000);
     const env = createEmptyEnv('entity-frame-timestamp-regression');
-    env.timestamp = 2_100;
+    env.state.timestamp = 2_100;
 
     await expect(applyEntityFrame(env, state, [], 1_999)).rejects.toThrow(
       'ENTITY_FRAME_TIMESTAMP_REGRESSION:previous=2000:proposed=1999',
@@ -178,7 +178,7 @@ describe('runtime scheduled wake', () => {
       type: 'watchdog',
       data: {},
     });
-    env.eReplicas.set(`${id}:${proposer}`, makeReplica(state, proposer, true));
+    env.state.eReplicas.set(`${id}:${proposer}`, makeReplica(state, proposer, true));
     env.runtimeState!.persistenceQuiescing = true;
 
     expect(hasRuntimeWork(env)).toBe(false);
@@ -188,7 +188,7 @@ describe('runtime scheduled wake', () => {
 
   test('does not initialize consensus crontab state outside a committed Entity frame', async () => {
     const env = createEmptyEnv('scheduled-wake-noop-state-test');
-    env.timestamp = 10_000;
+    env.state.timestamp = 10_000;
     env.scenarioMode = false;
     const id = entityId('30');
     const proposer = signerId('40');
@@ -211,7 +211,7 @@ describe('runtime scheduled wake', () => {
   test('places a newly due wake before transactions already waiting in proposer mempool', async () => {
     const seed = 'scheduled wake existing mempool ordering';
     const env = createEmptyEnv(seed);
-    env.timestamp = 10_000;
+    env.state.timestamp = 10_000;
     env.scenarioMode = true;
     const proposer = deriveSignerAddressSync(seed, '1').toLowerCase();
     registerSignerKey(env, proposer, deriveSignerKeySync(seed, '1'));
@@ -252,14 +252,14 @@ describe('runtime scheduled wake', () => {
   test('drives an idle active proposer when committed work remains in Entity mempool', async () => {
     const seed = 'entity mempool proposer wake';
     const env = createEmptyEnv(seed);
-    env.timestamp = 1;
+    env.state.timestamp = 1;
     env.scenarioMode = true;
     env.runtimeConfig = { storage: { enabled: false } };
     const proposer = deriveSignerAddressSync(seed, '1').toLowerCase();
     registerSignerKey(env, proposer, deriveSignerKeySync(seed, '1'));
     const id = generateLazyEntityId([proposer], 1n).toLowerCase();
     const replica = attachLocalEntityKeys(env, makeReplica(makeState(id, proposer, 1), proposer, true));
-    env.eReplicas.set(`${id}:${proposer}`, replica);
+    env.state.eReplicas.set(`${id}:${proposer}`, replica);
     collectLocalProfileEncryptionAnnouncements(env);
     const manifest = getCompleteProfileEncryptionManifest(env, replica.state);
     if (!manifest) throw new Error('profile manifest fixture missing');
@@ -286,12 +286,12 @@ describe('runtime scheduled wake', () => {
     });
     await processRuntime(env);
 
-    expect(env.height).toBe(1);
-    expect(env.eReplicas.get(`${id}:${proposer}`)?.state.height).toBe(1);
-    const committedReplica = env.eReplicas.get(`${id}:${proposer}`);
+    expect(env.state.height).toBe(1);
+    expect(env.state.eReplicas.get(`${id}:${proposer}`)?.state.height).toBe(1);
+    const committedReplica = env.state.eReplicas.get(`${id}:${proposer}`);
     expect(committedReplica && readEntityFrameEventMessages(committedReplica.state))
       .toContain(`${proposer}: left after prior commit`);
-    expect(env.eReplicas.get(`${id}:${proposer}`)?.mempool).toHaveLength(0);
+    expect(env.state.eReplicas.get(`${id}:${proposer}`)?.mempool).toHaveLength(0);
     expect(committedInputs).toEqual([{
       height: 1,
       entityInputs: [{
@@ -304,11 +304,11 @@ describe('runtime scheduled wake', () => {
 
   test('creates a wake only for the explicit proposer replica', () => {
     const env = createEmptyEnv('scheduled-wake-proposer-test');
-    env.timestamp = 10_000;
+    env.state.timestamp = 10_000;
     const id = entityId('31');
     const proposer = signerId('41');
     const validator = signerId('42');
-    const proposerState = makeState(id, proposer, env.timestamp);
+    const proposerState = makeState(id, proposer, env.state.timestamp);
     const validatorState = structuredClone(proposerState);
     scheduleHook(proposerState.crontabState!, {
       id: 'watchdog:due',
@@ -322,10 +322,10 @@ describe('runtime scheduled wake', () => {
       type: 'watchdog',
       data: {},
     });
-    env.eReplicas.set(`${id}:${proposer}`, makeReplica(proposerState, proposer, true));
-    env.eReplicas.set(`${id}:${validator}`, makeReplica(validatorState, validator, false));
+    env.state.eReplicas.set(`${id}:${proposer}`, makeReplica(proposerState, proposer, true));
+    env.state.eReplicas.set(`${id}:${validator}`, makeReplica(validatorState, validator, false));
 
-    const inputs = createDueScheduledWakeInputs(env, env.timestamp);
+    const inputs = createDueScheduledWakeInputs(env, env.state.timestamp);
 
     expect(inputs).toHaveLength(1);
     expect(inputs[0]).toMatchObject({ entityId: id, signerId: proposer });
@@ -351,24 +351,24 @@ describe('runtime scheduled wake', () => {
 
   test('does not persist process-local scheduled wakes in pending Runtime input', () => {
     const env = createEmptyEnv('scheduled-wake-durable-mempool');
-    env.timestamp = 10_000;
+    env.state.timestamp = 10_000;
     const id = entityId('52');
     const proposer = signerId('53');
-    const state = makeState(id, proposer, env.timestamp);
+    const state = makeState(id, proposer, env.state.timestamp);
     scheduleHook(state.crontabState!, {
       id: 'durable:regenerate',
       triggerAt: 9_000,
       type: 'watchdog',
       data: {},
     });
-    env.eReplicas.set(`${id}:${proposer}`, makeReplica(state, proposer, true));
-    const [wakeInput] = createDueScheduledWakeInputs(env, env.timestamp);
+    env.state.eReplicas.set(`${id}:${proposer}`, makeReplica(state, proposer, true));
+    const [wakeInput] = createDueScheduledWakeInputs(env, env.state.timestamp);
     if (!wakeInput) throw new Error('scheduled wake fixture missing');
 
     const durable = buildDurableRuntimeMempool({
       runtimeTxs: [],
       entityInputs: [wakeInput],
-      queuedAt: env.timestamp,
+      queuedAt: env.state.timestamp,
     });
 
     expect(durable.entityInputs).toEqual([]);
@@ -378,11 +378,11 @@ describe('runtime scheduled wake', () => {
 
   test('replays the same crontab mutation on proposer and validator state', async () => {
     const env = createEmptyEnv('scheduled-wake-replay-test');
-    env.timestamp = 10_000;
+    env.state.timestamp = 10_000;
     env.scenarioMode = true;
     const id = entityId('61');
     const proposer = signerId('62');
-    const state = makeState(id, proposer, env.timestamp);
+    const state = makeState(id, proposer, env.state.timestamp);
     scheduleHook(state.crontabState!, {
       id: 'watchdog:deterministic',
       triggerAt: 9_000,
@@ -399,8 +399,8 @@ describe('runtime scheduled wake', () => {
       },
     };
 
-    const proposerResult = await applyEntityFrame(env, state, [tx], env.timestamp);
-    const validatorResult = await applyEntityFrame(env, state, [tx], env.timestamp);
+    const proposerResult = await applyEntityFrame(env, state, [tx], env.state.timestamp);
+    const validatorResult = await applyEntityFrame(env, state, [tx], env.state.timestamp);
 
     expect(safeStringify(validatorResult.newState)).toBe(
       safeStringify(proposerResult.newState),
@@ -410,11 +410,11 @@ describe('runtime scheduled wake', () => {
 
   test('applies deterministic self-actions in the scheduled wake frame', async () => {
     const env = createEmptyEnv('scheduled-wake-self-action-test');
-    env.timestamp = 10_000;
+    env.state.timestamp = 10_000;
     env.scenarioMode = true;
     const id = entityId('60');
     const proposer = signerId('61');
-    const state = makeState(id, proposer, env.timestamp);
+    const state = makeState(id, proposer, env.state.timestamp);
     scheduleHook(state.crontabState!, {
       id: 'cross-j-sweep:self',
       triggerAt: 9_000,
@@ -431,7 +431,7 @@ describe('runtime scheduled wake', () => {
       },
     };
 
-    const result = await applyEntityFrame(env, state, [tx], env.timestamp);
+    const result = await applyEntityFrame(env, state, [tx], env.state.timestamp);
 
     expect(result.outputs).toEqual([]);
     expect(readEntityFrameEventMessages(result.newState)).toContain(
@@ -441,7 +441,7 @@ describe('runtime scheduled wake', () => {
 
   test('accepts newly due jobs while a canonical wake waits for its frame', async () => {
     const env = createEmptyEnv('scheduled-wake-frame-delay-test');
-    env.timestamp = 10_000;
+    env.state.timestamp = 10_000;
     env.scenarioMode = true;
     const id = entityId('63');
     const proposer = signerId('64');
@@ -468,18 +468,18 @@ describe('runtime scheduled wake', () => {
       },
     };
 
-    const result = await applyEntityFrame(env, state, [tx], env.timestamp);
+    const result = await applyEntityFrame(env, state, [tx], env.state.timestamp);
 
     expect(result.newState.crontabState?.hooks.size).toBe(0);
   });
 
   test('treats canceled wake jobs as diagnostics while executing current frame state', async () => {
     const env = createEmptyEnv('scheduled-wake-canceled-job-test');
-    env.timestamp = 10_000;
+    env.state.timestamp = 10_000;
     env.scenarioMode = true;
     const id = entityId('65');
     const proposer = signerId('66');
-    const state = makeState(id, proposer, env.timestamp);
+    const state = makeState(id, proposer, env.state.timestamp);
     const staleWake: ScheduledWakeTx = {
       type: 'scheduledWake',
       data: {
@@ -490,18 +490,18 @@ describe('runtime scheduled wake', () => {
       },
     };
 
-    const result = await applyEntityFrame(env, state, [staleWake], env.timestamp);
+    const result = await applyEntityFrame(env, state, [staleWake], env.state.timestamp);
 
     expect(result.newState.crontabState?.hooks.size).toBe(0);
   });
 
   test('rejects a wake that is not the first and only wake in an entity frame', async () => {
     const env = createEmptyEnv('scheduled-wake-order-test');
-    env.timestamp = 10_000;
+    env.state.timestamp = 10_000;
     env.scenarioMode = true;
     const id = entityId('67');
     const proposer = signerId('68');
-    const state = makeState(id, proposer, env.timestamp);
+    const state = makeState(id, proposer, env.state.timestamp);
     const wake: ScheduledWakeTx = {
       type: 'scheduledWake',
       data: {
@@ -515,64 +515,64 @@ describe('runtime scheduled wake', () => {
     await expect(applyEntityFrame(env, state, [
       { type: 'chatMessage', data: { message: 'before wake', timestamp: 9_000 } },
       wake,
-    ], env.timestamp)).rejects.toThrow('SCHEDULED_WAKE_FRAME_ORDER_INVALID');
-    await expect(applyEntityFrame(env, state, [wake, wake], env.timestamp)).rejects.toThrow(
+    ], env.state.timestamp)).rejects.toThrow('SCHEDULED_WAKE_FRAME_ORDER_INVALID');
+    await expect(applyEntityFrame(env, state, [wake, wake], env.state.timestamp)).rejects.toThrow(
       'SCHEDULED_WAKE_FRAME_ORDER_INVALID',
     );
   });
 
   test('indexes imported replicas and invalidates detached replicas without rebuilding the loop', () => {
     const env = createEmptyEnv('scheduled-wake-index-sync-test');
-    env.timestamp = 10_000;
+    env.state.timestamp = 10_000;
     refreshScheduledWakeIndex(env, new Set());
     const id = entityId('71');
     const proposer = signerId('72');
-    const state = makeState(id, proposer, env.timestamp);
+    const state = makeState(id, proposer, env.state.timestamp);
     scheduleHook(state.crontabState!, {
       id: 'imported:due',
       triggerAt: 9_000,
       type: 'watchdog',
       data: {},
     });
-    env.eReplicas.set(`${id}:${proposer}`, makeReplica(state, proposer, true));
+    env.state.eReplicas.set(`${id}:${proposer}`, makeReplica(state, proposer, true));
 
     refreshScheduledWakeIndex(env, new Set());
     expect(getNextScheduledWakeTimestamp(env)).toBe(9_000);
 
-    env.eReplicas.clear();
+    env.state.eReplicas.clear();
     refreshScheduledWakeIndex(env, new Set());
     expect(getNextScheduledWakeTimestamp(env)).toBeNull();
   });
 
   test('does not revive stale heap entries when a replica is removed and re-added', () => {
     const env = createEmptyEnv('scheduled-wake-generation-tombstone-test');
-    env.timestamp = 10_000;
+    env.state.timestamp = 10_000;
     const id = entityId('73');
     const proposer = signerId('74');
-    const firstState = makeState(id, proposer, env.timestamp);
+    const firstState = makeState(id, proposer, env.state.timestamp);
     scheduleHook(firstState.crontabState!, {
       id: 'first:due',
       triggerAt: 9_000,
       type: 'watchdog',
       data: {},
     });
-    env.eReplicas.set(`${id}:${proposer}`, makeReplica(firstState, proposer, true));
+    env.state.eReplicas.set(`${id}:${proposer}`, makeReplica(firstState, proposer, true));
     refreshScheduledWakeIndex(env, new Set());
 
-    env.eReplicas.clear();
+    env.state.eReplicas.clear();
     refreshScheduledWakeIndex(env, new Set());
 
-    const replacementState = makeState(id, proposer, env.timestamp);
+    const replacementState = makeState(id, proposer, env.state.timestamp);
     scheduleHook(replacementState.crontabState!, {
       id: 'replacement:due',
       triggerAt: 9_000,
       type: 'watchdog',
       data: {},
     });
-    env.eReplicas.set(`${id}:${proposer}`, makeReplica(replacementState, proposer, true));
+    env.state.eReplicas.set(`${id}:${proposer}`, makeReplica(replacementState, proposer, true));
     refreshScheduledWakeIndex(env, new Set());
 
-    const inputs = createDueScheduledWakeInputs(env, env.timestamp);
+    const inputs = createDueScheduledWakeInputs(env, env.state.timestamp);
     expect(inputs).toHaveLength(1);
     expect(inputs[0]?.entityTxs[0]?.data.jobs).toEqual([
       { kind: 'hook', id: 'replacement:due', dueAt: 9_000 },
@@ -581,11 +581,11 @@ describe('runtime scheduled wake', () => {
 
   test('bounds advisory jobs while draining every due hook from canonical state', async () => {
     const env = createEmptyEnv('scheduled-wake-bounded-diagnostics-test');
-    env.timestamp = 10_000;
+    env.state.timestamp = 10_000;
     env.scenarioMode = true;
     const id = entityId('75');
     const proposer = signerId('76');
-    const state = makeState(id, proposer, env.timestamp);
+    const state = makeState(id, proposer, env.state.timestamp);
     for (let index = 0; index < MAX_SCHEDULED_WAKE_DIAGNOSTIC_JOBS + 1; index += 1) {
       scheduleHook(state.crontabState!, {
         id: `due:${String(index).padStart(4, '0')}`,
@@ -594,12 +594,12 @@ describe('runtime scheduled wake', () => {
         data: {},
       });
     }
-    env.eReplicas.set(`${id}:${proposer}`, makeReplica(state, proposer, true));
+    env.state.eReplicas.set(`${id}:${proposer}`, makeReplica(state, proposer, true));
 
-    const [input] = createDueScheduledWakeInputs(env, env.timestamp);
+    const [input] = createDueScheduledWakeInputs(env, env.state.timestamp);
     expect(input?.entityTxs[0]?.data.jobs).toHaveLength(MAX_SCHEDULED_WAKE_DIAGNOSTIC_JOBS);
 
-    const result = await applyEntityFrame(env, state, input!.entityTxs, env.timestamp);
+    const result = await applyEntityFrame(env, state, input!.entityTxs, env.state.timestamp);
     expect(result.newState.crontabState?.hooks.size).toBe(0);
   });
 
@@ -630,8 +630,8 @@ describe('runtime scheduled wake', () => {
     expect(persistedInput?.entityInputs[0]?.entityTxs?.map(tx => tx.type)).toEqual(['chatMessage']);
 
     const restored = createEmptyEnv('scheduled-wake-snapshot-filter-restored');
-    restored.height = env.height;
-    restored.timestamp = env.timestamp;
+    restored.state.height = env.state.height;
+    restored.state.timestamp = env.state.timestamp;
     restoreDurableRuntimeSnapshot(restored, snapshot);
     expect(restored.runtimeMempool?.entityInputs[0]?.entityTxs?.map(tx => tx.type)).toEqual(['chatMessage']);
     expect(computeCanonicalStateHashFromEnv(restored)).toBe(computeCanonicalStateHashFromEnv(env));
@@ -639,10 +639,10 @@ describe('runtime scheduled wake', () => {
 
   test('does not enqueue another wake while one is awaiting entity consensus', () => {
     const env = createEmptyEnv('scheduled-wake-multisig-dedup-test');
-    env.timestamp = 10_000;
+    env.state.timestamp = 10_000;
     const id = entityId('81');
     const proposer = signerId('82');
-    const state = makeState(id, proposer, env.timestamp);
+    const state = makeState(id, proposer, env.state.timestamp);
     scheduleHook(state.crontabState!, {
       id: 'pending:due',
       triggerAt: 9_000,
@@ -650,12 +650,12 @@ describe('runtime scheduled wake', () => {
       data: {},
     });
     const replica = makeReplica(state, proposer, true);
-    env.eReplicas.set(`${id}:${proposer}`, replica);
-    const [input] = createDueScheduledWakeInputs(env, env.timestamp);
+    env.state.eReplicas.set(`${id}:${proposer}`, replica);
+    const [input] = createDueScheduledWakeInputs(env, env.state.timestamp);
     expect(input).toBeDefined();
     replica.mempool.push(input!.entityTxs[0]!);
     refreshScheduledWakeIndex(env, new Set([id]));
 
-    expect(createDueScheduledWakeInputs(env, env.timestamp)).toEqual([]);
+    expect(createDueScheduledWakeInputs(env, env.state.timestamp)).toEqual([]);
   });
 });

@@ -61,10 +61,12 @@ export async function runSettleScenario(existingEnv?: RuntimeReplica): Promise<R
     env = existingEnv;
   } else {
     env = {
-      eReplicas: new Map(),
-      jReplicas: new Map(),
-      height: 0,
-      timestamp: SCENARIO_START_TIMESTAMP,
+      state: {
+        eReplicas: new Map(),
+        jReplicas: new Map(),
+        height: 0,
+        timestamp: SCENARIO_START_TIMESTAMP,
+      },
       runtimeMempool: { runtimeTxs: [], entityInputs: [] },
       history: [],
       gossip: createGossipLayer(),

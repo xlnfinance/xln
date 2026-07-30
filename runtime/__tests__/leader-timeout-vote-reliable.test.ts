@@ -104,7 +104,7 @@ const installVoteTarget = (
     mempool: [],
     isProposer: false,
   };
-  env.eReplicas.set(`${entityId}:${signerId}`, replica);
+  env.state.eReplicas.set(`${entityId}:${signerId}`, replica);
   const body = buildEntityLeaderVoteBody(state);
   const vote: EntityLeaderTimeoutVote = {
     ...body,
@@ -153,11 +153,11 @@ const applyVote = async (
   output: DeliverableEntityInput,
 ): Promise<void> => {
   const key = `${output.entityId}:${output.signerId}`;
-  const replica = receiver.eReplicas.get(key);
+  const replica = receiver.state.eReplicas.get(key);
   if (!replica) throw new Error('TEST_LEADER_VOTE_REPLICA_MISSING');
   const applied = await applyEntityInput(receiver, replica, output);
   expect(applied.outcome.kind).toBe('committed');
-  receiver.eReplicas.set(key, applied.workingReplica);
+  receiver.state.eReplicas.set(key, applied.workingReplica);
 };
 
 describe('reliable leader timeout vote delivery', () => {
@@ -165,7 +165,7 @@ describe('reliable leader timeout vote delivery', () => {
     const receiver = runtime('leader-vote-local-intent-receiver');
     const sender = runtime('leader-vote-local-intent-sender');
     receiver.scenarioMode = true;
-    receiver.timestamp = 10_000;
+    receiver.state.timestamp = 10_000;
     const { replica, vote: unrelatedRemoteVote } = installVoteTarget(
       receiver,
       'leader-vote-local-intent-board',
@@ -178,7 +178,7 @@ describe('reliable leader timeout vote delivery', () => {
     });
     refreshScheduledWakeIndex(receiver);
 
-    const [scheduledIntent] = createDueScheduledWakeInputs(receiver, receiver.timestamp);
+    const [scheduledIntent] = createDueScheduledWakeInputs(receiver, receiver.state.timestamp);
     const localVote = scheduledIntent?.leaderTimeoutVote;
     expect(localVote?.signature).toBe('');
     const localMarker = localVote && Object.getOwnPropertySymbols(localVote)
@@ -431,7 +431,7 @@ describe('reliable leader timeout vote delivery', () => {
     const output = voteOutput(receiver, replica, vote);
 
     expect(registerReliableIngress(receiver, sender.runtimeId!, output).kind).toBe('enqueue');
-    const persistedReplica = receiver.eReplicas.get(`${replica.entityId}:${replica.signerId}`);
+    const persistedReplica = receiver.state.eReplicas.get(`${replica.entityId}:${replica.signerId}`);
     if (!persistedReplica) throw new Error('TEST_LEADER_VOTE_TERMINAL_REPLICA_MISSING');
     persistedReplica.state.height = vote.targetHeight;
     const terminal = commitReliableIngress(receiver, []);
@@ -516,7 +516,7 @@ describe('reliable leader timeout vote delivery', () => {
 
     // A real view-1 frame makes every same-target view-2 vote a protocol no-op.
     // The retry receives an exact terminal ACK instead of mutating newer state.
-    const committed = receiver.eReplicas.get(`${replica.entityId}:${replica.signerId}`);
+    const committed = receiver.state.eReplicas.get(`${replica.entityId}:${replica.signerId}`);
     if (!committed) throw new Error('TEST_LEADER_VOTE_REORDER_REPLICA_MISSING');
     committed.state.height = firstViewVote.targetHeight;
     committed.state.prevFrameHash = `0x${'71'.repeat(32)}`;

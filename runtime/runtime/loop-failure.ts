@@ -48,16 +48,16 @@ export const reportFatalLoopError = async (
   state.fatalDebugPayload = {
     message,
     ...(stack ? { stack } : {}),
-    height: Math.max(0, env.height ?? 0),
-    timestamp: Math.max(0, env.timestamp ?? 0),
+    height: Math.max(0, env.state.height ?? 0),
+    timestamp: Math.max(0, env.state.timestamp ?? 0),
   };
   if (config?.onFatal) {
     try {
       await config.onFatal({
         code: normalizeRuntimeFailureCode(message),
         message,
-        height: Math.max(0, env.height ?? 0),
-        timestamp: Math.max(0, env.timestamp ?? 0),
+        height: Math.max(0, env.state.height ?? 0),
+        timestamp: Math.max(0, env.state.timestamp ?? 0),
       });
     } catch (reportError) {
       failureLog.error('fatal_report_failed', {

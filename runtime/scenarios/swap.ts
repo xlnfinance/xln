@@ -46,7 +46,7 @@ const getProcess = async () => {
     _processWithStep = async (env: RuntimeReplica, inputs?: EntityInput[], delay?: number, single?: boolean) => {
       if (env.scenarioMode) {
         const step = typeof delay === 'number' && delay > 0 ? delay : 1;
-        env.timestamp = (env.timestamp || 0) + step;
+        env.state.timestamp = (env.state.timestamp || 0) + step;
       }
       return _process!(env, inputs, delay, single);
     };
@@ -57,7 +57,7 @@ const getProcess = async () => {
 async function processJEvents(env: RuntimeReplica): Promise<void> {
   // RPC watcher is polling-based; force immediate poll in scenarios to avoid
   // relying on wall-clock interval timing between submit and assertions.
-  for (const [, jReplica] of env.jReplicas) {
+  for (const [, jReplica] of env.state.jReplicas) {
     const ja = jReplica.jadapter;
     if (ja?.pollNow) await ja.pollNow();
   }
@@ -229,8 +229,8 @@ export async function swap(env: RuntimeReplica): Promise<void> {
   registeredEntitiesByAlias.clear();
   const process = await getProcess();
 
-  if (env.scenarioMode && env.height === 0) {
-    env.timestamp = 1;
+  if (env.scenarioMode && env.state.height === 0) {
+    env.state.timestamp = 1;
   }
 
   console.log('═══════════════════════════════════════════════════════════════');
@@ -243,19 +243,19 @@ export async function swap(env: RuntimeReplica): Promise<void> {
   console.log('🏛️ Setting up BrowserVM J-Machine...');
 
   // Clear old state if switching scenarios (prevents accumulation from AHB/other scenarios)
-  if (env.jReplicas && env.jReplicas.size > 0) {
-    console.log(`[SWAP] Clearing ${env.jReplicas.size} old jurisdictions from previous scenario`);
-    env.jReplicas.clear();
+  if (env.state.jReplicas && env.state.jReplicas.size > 0) {
+    console.log(`[SWAP] Clearing ${env.state.jReplicas.size} old jurisdictions from previous scenario`);
+    env.state.jReplicas.clear();
   }
-  if (env.eReplicas && env.eReplicas.size > 0) {
-    console.log(`[SWAP] Clearing ${env.eReplicas.size} old entities from previous scenario`);
-    env.eReplicas.clear();
+  if (env.state.eReplicas && env.state.eReplicas.size > 0) {
+    console.log(`[SWAP] Clearing ${env.state.eReplicas.size} old entities from previous scenario`);
+    env.state.eReplicas.clear();
   }
   if (env.history && env.history.length > 0) {
     console.log(`[SWAP] Clearing ${env.history.length} old snapshots from previous scenario`);
     env.history = [];
   }
-  env.height = 0; // Reset to frame 0
+  env.state.height = 0; // Reset to frame 0
   env.runtimeMempool = { runtimeTxs: [], entityInputs: [] };
   env.pendingOutputs = [];
   env.pendingNetworkOutputs = [];
@@ -660,7 +660,7 @@ export async function swapWithOrderbook(env: RuntimeReplica): Promise<RuntimeRep
     if (inputs.length > 0) {
       accountCausalFrames.push({
         runtimeHeight: height,
-        runtimeTimestamp: env.timestamp,
+        runtimeTimestamp: env.state.timestamp,
         inputs,
       });
     }
@@ -1111,7 +1111,7 @@ export async function swapWithOrderbook(env: RuntimeReplica): Promise<RuntimeRep
   // Wait for DisputeStarted to propagate
   for (let i = 0; i < 20; i++) {
     await process(env);
-    const jRep = env.jReplicas.get('Swap Demo');
+    const jRep = env.state.jReplicas.get('Swap Demo');
     if (jRep && jRep.mempool.length === 0) break;
   }
   await processJEvents(env);
@@ -1121,7 +1121,7 @@ export async function swapWithOrderbook(env: RuntimeReplica): Promise<RuntimeRep
   const hubActiveDispute = hubAccountAfterStart.activeDispute;
   if (!hubActiveDispute) throw new Error('SWAP_MISSING_HUB_ACTIVE_DISPUTE');
   const { buildAccountProofBodyFromJurisdictions } = await import('../account/consensus/helpers');
-  const hubProofAfterStart = buildAccountProofBodyFromJurisdictions(env, hubAccountAfterStart);
+  const hubProofAfterStart = buildAccountProofBodyFromJurisdictions(env.state, hubAccountAfterStart);
   assert(
     hubProofAfterStart.proofBodyHash === hubActiveDispute.initialProofbodyHash,
     'Hub dispute proofBodyHash matches on-chain start hash'
@@ -1130,7 +1130,7 @@ export async function swapWithOrderbook(env: RuntimeReplica): Promise<RuntimeRep
   const aliceAccountAfterStart = requireAccount(aliceAfterStart.state.accounts.get(hub.id), 'alice/hub after dispute start');
   const aliceActiveDispute = aliceAccountAfterStart.activeDispute;
   if (!aliceActiveDispute) throw new Error('SWAP_MISSING_ALICE_ACTIVE_DISPUTE');
-  const aliceProofAfterStart = buildAccountProofBodyFromJurisdictions(env, aliceAccountAfterStart);
+  const aliceProofAfterStart = buildAccountProofBodyFromJurisdictions(env.state, aliceAccountAfterStart);
   assert(
     aliceProofAfterStart.proofBodyHash === aliceActiveDispute.initialProofbodyHash,
     'Counterparty dispute proofBodyHash matches on-chain start hash'
@@ -1183,7 +1183,7 @@ export async function swapWithOrderbook(env: RuntimeReplica): Promise<RuntimeRep
 
   for (let i = 0; i < 20; i++) {
     await process(env);
-    const jRep = env.jReplicas.get('Swap Demo');
+    const jRep = env.state.jReplicas.get('Swap Demo');
     if (jRep && jRep.mempool.length === 0) break;
   }
   await processJEvents(env);

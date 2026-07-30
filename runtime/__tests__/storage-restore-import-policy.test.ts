@@ -65,7 +65,7 @@ const createRecoveryEnv = async (
     },
   };
   env.activeJurisdiction = jurisdiction.name;
-  env.jReplicas.set(jurisdiction.name, {
+  env.state.jReplicas.set(jurisdiction.name, {
     ...jurisdiction,
     blockNumber: 0n,
     stateRoot: new Uint8Array(32),
@@ -114,7 +114,7 @@ const createRecoveryEnv = async (
     });
     await processRuntime(env, []);
   }
-  const replica = Array.from(env.eReplicas.values())[0];
+  const replica = Array.from(env.state.eReplicas.values())[0];
   if (!replica) throw new Error('restore import policy replica missing');
   return { env, entityId, signerId, replica };
 };
@@ -132,8 +132,8 @@ const assertFreshState = async (
   const restored = await loadEnvFromDB(runtimeId, seed);
   if (!restored) throw new Error('restore import policy lost authoritative state');
   try {
-    expect(restored.height).toBe(expected.height);
-    const replica = Array.from(restored.eReplicas.values())[0];
+    expect(restored.state.height).toBe(expected.height);
+    const replica = Array.from(restored.state.eReplicas.values())[0];
     expect(replica?.lastConsensusProgressAt).toBe(expected.progress);
     expect(replica?.state.profile.name).toBe(expected.profileName);
   } finally {
@@ -146,7 +146,7 @@ describe('restored checkpoint conflict policy', () => {
     const seed = `restore advance ${process.pid} deterministic seed`;
     const base = await createRecoveryEnv(seed);
     cleanupPaths.push(resolveDbPath(base.env, 'core'));
-    base.env.timestamp = 1_000;
+    base.env.state.timestamp = 1_000;
     base.replica.lastConsensusProgressAt = 1_111;
     await persistRestoredEnvToDB(base.env);
     await closeRecoveryEnv(base.env);
@@ -171,7 +171,7 @@ describe('restored checkpoint conflict policy', () => {
       }],
     });
     await processRuntime(restored, []);
-    const advancedReplica = Array.from(restored.eReplicas.values())[0];
+    const advancedReplica = Array.from(restored.state.eReplicas.values())[0];
     if (!advancedReplica) throw new Error('restore advance replica missing');
     advancedReplica.lastConsensusProgressAt = 2_222;
     await persistRestoredEnvToDB(restored);
@@ -184,13 +184,13 @@ describe('restored checkpoint conflict policy', () => {
     const seed = `restore rollback ${process.pid} deterministic seed`;
     const base = await createRecoveryEnv(seed, false, 'higher-base');
     cleanupPaths.push(resolveDbPath(base.env, 'core'));
-    base.env.timestamp = 2_000;
+    base.env.state.timestamp = 2_000;
     base.replica.lastConsensusProgressAt = 2_222;
     await persistRestoredEnvToDB(base.env);
     await closeRecoveryEnv(base.env);
 
     const stale = await createRecoveryEnv(seed);
-    stale.env.timestamp = 1_000;
+    stale.env.state.timestamp = 1_000;
     stale.replica.lastConsensusProgressAt = 1_111;
     await expect(persistRestoredEnvToDB(stale.env)).rejects.toThrow('RECOVERY_IMPORT_ROLLBACK_REJECTED');
     await closeRecoveryEnv(stale.env);
@@ -201,13 +201,13 @@ describe('restored checkpoint conflict policy', () => {
     const seed = `restore same height conflict ${process.pid} deterministic seed`;
     const base = await createRecoveryEnv(seed, false, 'candidate-A');
     cleanupPaths.push(resolveDbPath(base.env, 'core'));
-    base.env.timestamp = 2_000;
+    base.env.state.timestamp = 2_000;
     base.replica.lastConsensusProgressAt = 2_222;
     await persistRestoredEnvToDB(base.env);
     await closeRecoveryEnv(base.env);
 
     const conflicting = await createRecoveryEnv(seed, false, 'candidate-B');
-    conflicting.env.timestamp = 2_000;
+    conflicting.env.state.timestamp = 2_000;
     conflicting.replica.lastConsensusProgressAt = 2_222;
     await expect(persistRestoredEnvToDB(conflicting.env))
       .rejects.toThrow('RECOVERY_IMPORT_SAME_HEIGHT_CONFLICT');
@@ -219,7 +219,7 @@ describe('restored checkpoint conflict policy', () => {
     const seed = `restore replica divergence ${process.pid} deterministic seed`;
     const base = await createRecoveryEnv(seed, false, 'canonical-base');
     cleanupPaths.push(resolveDbPath(base.env, 'core'));
-    base.env.timestamp = 1_000;
+    base.env.state.timestamp = 1_000;
     base.replica.lastConsensusProgressAt = 1_111;
     await persistRestoredEnvToDB(base.env);
 
@@ -227,7 +227,7 @@ describe('restored checkpoint conflict policy', () => {
     cleanupPaths.push(resolveDbPath(fork.env, 'core'));
     const conflicting = structuredClone(fork.replica);
     conflicting.signerId = deriveSignerAddressSync(seed, '2').toLowerCase();
-    base.env.eReplicas.set(`${base.entityId}:${conflicting.signerId}`, conflicting);
+    base.env.state.eReplicas.set(`${base.entityId}:${conflicting.signerId}`, conflicting);
     await expect(persistRestoredEnvToDB(base.env))
       .rejects.toThrow('STORAGE_ENTITY_REPLICA_STATE_DIVERGENCE');
     await closeRecoveryEnv(base.env);
@@ -239,10 +239,10 @@ describe('restored checkpoint conflict policy', () => {
     const seed = `restore idempotent ${process.pid} deterministic seed`;
     const current = await createRecoveryEnv(seed, true);
     cleanupPaths.push(resolveDbPath(current.env, 'core'));
-    const before = await readStorageFrameRecord(getRuntimeWalDb(current.env), current.env.height);
+    const before = await readStorageFrameRecord(getRuntimeWalDb(current.env), current.env.state.height);
     expect(before?.canonicalStateHash).toBeString();
     await persistRestoredEnvToDB(current.env);
-    const after = await readStorageFrameRecord(getRuntimeWalDb(current.env), current.env.height);
+    const after = await readStorageFrameRecord(getRuntimeWalDb(current.env), current.env.state.height);
     expect(after?.frameHash).toBe(before?.frameHash);
     await closeRecoveryEnv(current.env);
   });
@@ -251,16 +251,16 @@ describe('restored checkpoint conflict policy', () => {
     const seed = `restore position validation ${process.pid} deterministic seed`;
     const current = await createRecoveryEnv(seed, false, 'valid-base');
     cleanupPaths.push(resolveDbPath(current.env, 'core'));
-    current.env.timestamp = 1_000;
+    current.env.state.timestamp = 1_000;
     current.replica.lastConsensusProgressAt = 1_111;
     await persistRestoredEnvToDB(current.env);
     for (const invalidHeight of [0, -1, 1.9, Number.NaN]) {
-      current.env.height = invalidHeight;
+      current.env.state.height = invalidHeight;
       await expect(persistRestoredEnvToDB(current.env)).rejects.toThrow('RECOVERY_PERSIST_HEIGHT_REQUIRED');
     }
-    current.env.height = 2;
+    current.env.state.height = 2;
     for (const invalidTimestamp of [-1, 1.9, Number.NaN]) {
-      current.env.timestamp = invalidTimestamp;
+      current.env.state.timestamp = invalidTimestamp;
       await expect(persistRestoredEnvToDB(current.env)).rejects.toThrow('RECOVERY_PERSIST_TIMESTAMP_INVALID');
     }
     await closeRecoveryEnv(current.env);

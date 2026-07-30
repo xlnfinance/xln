@@ -219,7 +219,7 @@ export const applyNumberedRegistrationResolution = (
       registrationEvidenceKey(pending.request.stackKey, result.entityId),
     );
     const signerId = planned.config.validators[0]!.toLowerCase();
-    const replica = [...env.eReplicas.values()].find(candidate =>
+    const replica = [...env.state.eReplicas.values()].find(candidate =>
       candidate.entityId.toLowerCase() === result.entityId && candidate.signerId.toLowerCase() === signerId);
     if (!evidence || computeRegistrationEvidenceHash(evidence) !== result.evidenceHash || !replica) {
       throw new Error(`NUMBERED_REGISTRATION_COMPLETION_INCOMPLETE:${result.entityId}`);
@@ -245,7 +245,7 @@ const completedResults = (
   completed: CompletedNumberedRegistration,
 ): NumberedRegistrationResult[] => completed.results.map((result, index) => {
   const signerId = request.entities[index]!.config.validators[0]!.toLowerCase();
-  const replica = [...env.eReplicas.values()].find(candidate =>
+  const replica = [...env.state.eReplicas.values()].find(candidate =>
     candidate.entityId.toLowerCase() === result.entityId && candidate.signerId.toLowerCase() === signerId);
   if (!replica) throw new Error(`NUMBERED_REGISTRATION_COMPLETED_REPLICA_MISSING:${result.entityId}`);
   return { config: structuredClone(replica.state.config), entityNumber: result.entityNumber, entityId: result.entityId };

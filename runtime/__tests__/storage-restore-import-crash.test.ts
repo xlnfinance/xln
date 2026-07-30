@@ -66,11 +66,11 @@ describe('restored checkpoint atomic publication', () => {
       const restored = await loadEnvFromDB(runtimeId, seed);
       if (!restored) throw new Error('restore import crash fixture lost the authoritative base');
       try {
-        expect(restored.height).toBe(expectedHeight);
-        expect(restored.timestamp).toBe(expectedHeight * 1_000);
+        expect(restored.state.height).toBe(expectedHeight);
+        expect(restored.state.timestamp).toBe(expectedHeight * 1_000);
         const signerId = deriveSignerAddressSync(seed, '1').toLowerCase();
         const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
-        const replica = Array.from(restored.eReplicas.values()).find((candidate) => (
+        const replica = Array.from(restored.state.eReplicas.values()).find((candidate) => (
           candidate.entityId === entityId && candidate.signerId === signerId
         ));
         expect(replica?.lastConsensusProgressAt).toBe(expectedHeight * 1_000);

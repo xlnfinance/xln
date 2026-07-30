@@ -25,7 +25,7 @@ const enqueueScopedRewind = (
   const runtimeTxs: RuntimeTx[] = [];
   const replicaKeys: string[] = [];
   const foundKeys = new Set<string>();
-  for (const [replicaKey, replica] of env.eReplicas) {
+  for (const [replicaKey, replica] of env.state.eReplicas) {
     if (requestedKeys && !requestedKeys.has(replicaKey)) continue;
     if (requestedKeys) foundKeys.add(replicaKey);
     if (watcher && !isEntityReplicaRelevantToWatcher(env, replica, watcher)) {

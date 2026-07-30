@@ -48,7 +48,7 @@ export const createPersistenceRecordingQueries = (
         targetHeight,
         { prunedTargetReturnsNull: true },
       );
-      if (!restored || restored.env.height !== targetHeight) {
+      if (!restored || restored.env.state.height !== targetHeight) {
         if (restored?.env) await deps.closeRuntimeDb(restored.env);
         return null;
       }
@@ -70,9 +70,9 @@ export const createPersistenceRecordingQueries = (
   ): Promise<RuntimeRecording> => {
     const createdAt = Math.max(0, Math.floor(Number(options.createdAt ?? Date.now())));
     const latestHeight = await entityQueries.getPersistedLatestHeight(env);
-    if (latestHeight !== env.height) {
+    if (latestHeight !== env.state.height) {
       throw new Error(
-        `RUNTIME_RECORDING_LIVE_HEAD_MISMATCH:persisted=${latestHeight}:env=${env.height}`,
+        `RUNTIME_RECORDING_LIVE_HEAD_MISMATCH:persisted=${latestHeight}:env=${env.state.height}`,
       );
     }
     if (latestHeight <= 0) {

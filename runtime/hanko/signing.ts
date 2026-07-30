@@ -522,7 +522,7 @@ export async function verifyHankoForHash(
         );
       }
     }
-    const entityTimestampSeconds = env ? Math.floor(env.timestamp / 1_000) : 0;
+    const entityTimestampSeconds = env ? Math.floor(env.state.timestamp / 1_000) : 0;
     const verified = verifyCanonicalHanko({
       hanko: hankoBytes,
       digest: hash,

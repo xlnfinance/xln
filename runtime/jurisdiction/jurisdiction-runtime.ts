@@ -72,9 +72,9 @@ const getJReplicaStackId = (replica: JReplica | undefined): string => {
 export const getJReplicaByName = (env: EntityRuntimeContext, name?: string | null): JReplica | undefined => {
   const normalized = normalizeJurisdictionName(name);
   if (!normalized) return undefined;
-  const exact = env.jReplicas?.get(name as string);
+  const exact = env.state.jReplicas?.get(name as string);
   if (exact) return exact;
-  for (const replica of env.jReplicas?.values?.() || []) {
+  for (const replica of env.state.jReplicas?.values?.() || []) {
     if (normalizeJurisdictionName(replica?.name) === normalized) {
       return replica;
     }
@@ -87,7 +87,7 @@ export const getJReplicaByJurisdictionRef = (env: EntityRuntimeContext, ref?: st
   if (!raw) return undefined;
   if (!isJurisdictionStackRef(raw)) return undefined;
   const wanted = raw.toLowerCase();
-  for (const replica of env.jReplicas?.values?.() || []) {
+  for (const replica of env.state.jReplicas?.values?.() || []) {
     if (getJReplicaStackId(replica) === wanted) return replica;
   }
   return undefined;
@@ -97,10 +97,10 @@ const getCandidateReplica = (env: EntityRuntimeContext, current?: JurisdictionCo
   const named = getJReplicaByName(env, current?.name);
   if (named) return named;
   if (env.activeJurisdiction) {
-    const active = env.jReplicas?.get(env.activeJurisdiction);
+    const active = env.state.jReplicas?.get(env.activeJurisdiction);
     if (active) return active;
   }
-  for (const replica of env.jReplicas?.values?.() || []) {
+  for (const replica of env.state.jReplicas?.values?.() || []) {
     return replica;
   }
   return undefined;
@@ -253,7 +253,7 @@ export function assertEntityJurisdictionBinding(
   if (!incomingName) {
     throw new Error(`ENTITY_JURISDICTION_MISSING: entity=${entityId}`);
   }
-  for (const replica of env.eReplicas?.values?.() || []) {
+  for (const replica of env.state.eReplicas?.values?.() || []) {
     if (!sameEntity(replica, entityId)) continue;
     const existingName = getJurisdictionConfigName(replica.state?.config?.jurisdiction);
     if (!existingName) continue;
@@ -290,7 +290,7 @@ export function backfillEntityJurisdictionBinding(
 ): void {
   const jurisdictionName = getJurisdictionConfigName(jurisdiction);
   if (!jurisdictionName) return;
-  for (const replica of env.eReplicas?.values?.() || []) {
+  for (const replica of env.state.eReplicas?.values?.() || []) {
     if (!sameEntity(replica, entityId)) continue;
     const existingName = getJurisdictionConfigName(replica.state?.config?.jurisdiction);
     if (existingName) continue;
@@ -324,7 +324,7 @@ export function requireEntityRuntimeJurisdictionConfig(
 ): JurisdictionConfig {
   let exactSignerName = '';
   let foundName = '';
-  for (const replica of env.eReplicas?.values?.() || []) {
+  for (const replica of env.state.eReplicas?.values?.() || []) {
     if (!sameEntity(replica, entityId)) continue;
     const name = getJurisdictionConfigName(replica.state?.config?.jurisdiction);
     if (!name) continue;

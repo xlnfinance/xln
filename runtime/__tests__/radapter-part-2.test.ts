@@ -342,10 +342,10 @@ const makeTestViewPageLoader =
     },
   ) => {
     const normalizedEntityId = String(requestedEntityId).toLowerCase();
-    const replica = Array.from(env.eReplicas.values()).find(
+    const replica = Array.from(env.state.eReplicas.values()).find(
       item => String(item.entityId).toLowerCase() === normalizedEntityId,
     );
-    if (!replica || height !== env.height) return null;
+    if (!replica || height !== env.state.height) return null;
     const accountLimit = readTestPageLimit(query?.accountsLimit ?? query?.limit, 10);
     const accountCursor = String(query?.accountsCursor ?? query?.cursor ?? '').toLowerCase();
     const accountDirection = query?.sortDir === 'desc' ? 'desc' : 'asc';
@@ -458,7 +458,7 @@ const ownerBindingSignature = (runtimeId: string, challenge: string, capability:
 
 test('runtime adapter view-frame excludes unbounded account internals from remote snapshots', async () => {
   const env = makeEnv();
-  const replica = Array.from(env.eReplicas.values())[0]!;
+  const replica = Array.from(env.state.eReplicas.values())[0]!;
   const account = replica.state.accounts.get(counterpartyId)! as any;
   account.watchSeed = `0x${'11'.repeat(32)}`;
   account.boardResealMigration = {
@@ -575,8 +575,8 @@ test('runtime adapter returns an owned projection after releasing the committed-
   const env = makeEnv();
   const persistedHead: StorageHead = {
     schemaVersion: STORAGE_SCHEMA_VERSION,
-    latestHeight: env.height,
-    latestMaterializedHeight: env.height,
+    latestHeight: env.state.height,
+    latestMaterializedHeight: env.state.height,
     latestSnapshotHeight: 1,
     snapshotPeriodFrames: 256,
     retainSnapshots: 3,
@@ -593,12 +593,12 @@ test('runtime adapter returns an owned projection after releasing the committed-
 
   persistedHead.latestHeight += 1;
 
-  expect(projectedHead.latestHeight).toBe(env.height);
+  expect(projectedHead.latestHeight).toBe(env.state.height);
 });
 
 test('storage-backed historical view pages support desc account and book cursors', async () => {
   const env = makeEnv();
-  const replica = Array.from(env.eReplicas.values())[0]!;
+  const replica = Array.from(env.state.eReplicas.values())[0]!;
   const baseAccount = replica.state.accounts.get(counterpartyId)!;
   const snapshotHeight = 4;
   const latestHeight = 5;
@@ -669,12 +669,12 @@ test('storage-backed historical view pages support desc account and book cursors
 
 test('storage readers reject requested heights beyond the persisted head', async () => {
   const env = makeEnv();
-  const replica = Array.from(env.eReplicas.values())[0]!;
+  const replica = Array.from(env.state.eReplicas.values())[0]!;
   const account = replica.state.accounts.get(counterpartyId)!;
   const head: StorageHead = {
     schemaVersion: STORAGE_SCHEMA_VERSION,
-    latestHeight: env.height,
-    latestMaterializedHeight: env.height,
+    latestHeight: env.state.height,
+    latestMaterializedHeight: env.state.height,
     latestSnapshotHeight: 0,
     snapshotPeriodFrames: 256,
     retainSnapshots: 3,
@@ -688,7 +688,7 @@ test('storage readers reject requested heights beyond the persisted head', async
     [keyLiveEntity(entityId), encodeBuffer(projectEntityCoreDoc(replica.state))],
     [keyLiveAccount(entityId, counterpartyId), encodeBuffer(projectAccountDoc(account))],
   ]);
-  const futureHeight = env.height + 1;
+  const futureHeight = env.state.height + 1;
 
   await expect(
     loadEntityStateFromStorage({
@@ -727,12 +727,12 @@ test('storage live recovery verifies doc values through merkle leaves', async ()
   process.env['XLN_STORAGE_VERIFY_DOC_HASHES'] = '1';
   try {
     const env = makeEnv();
-    const replica = Array.from(env.eReplicas.values())[0]!;
+    const replica = Array.from(env.state.eReplicas.values())[0]!;
     const account = replica.state.accounts.get(counterpartyId)!;
     const head: StorageHead = {
       schemaVersion: STORAGE_SCHEMA_VERSION,
-      latestHeight: env.height,
-      latestMaterializedHeight: env.height,
+      latestHeight: env.state.height,
+      latestMaterializedHeight: env.state.height,
       latestSnapshotHeight: 0,
       snapshotPeriodFrames: 256,
       retainSnapshots: 3,
@@ -773,7 +773,7 @@ test('storage live recovery verifies doc values through merkle leaves', async ()
 
 test('storage live recovery hydrates a typed split Account through its logical layout', async () => {
   const env = makeEnv();
-  const replica = Array.from(env.eReplicas.values())[0]!;
+  const replica = Array.from(env.state.eReplicas.values())[0]!;
   const account = replica.state.accounts.get(counterpartyId)!;
   account.pendingSignatures = Array.from(
     { length: 160 },
@@ -781,8 +781,8 @@ test('storage live recovery hydrates a typed split Account through its logical l
   );
   const head: StorageHead = {
     schemaVersion: STORAGE_SCHEMA_VERSION,
-    latestHeight: env.height,
-    latestMaterializedHeight: env.height,
+    latestHeight: env.state.height,
+    latestMaterializedHeight: env.state.height,
     latestSnapshotHeight: 0,
     snapshotPeriodFrames: 256,
     retainSnapshots: 3,
@@ -823,12 +823,12 @@ test('storage live recovery rejects live docs that do not match merkle leaf valu
   process.env['XLN_STORAGE_VERIFY_DOC_HASHES'] = '1';
   try {
     const env = makeEnv();
-    const replica = Array.from(env.eReplicas.values())[0]!;
+    const replica = Array.from(env.state.eReplicas.values())[0]!;
     const account = replica.state.accounts.get(counterpartyId)!;
     const head: StorageHead = {
       schemaVersion: STORAGE_SCHEMA_VERSION,
-      latestHeight: env.height,
-      latestMaterializedHeight: env.height,
+      latestHeight: env.state.height,
+      latestMaterializedHeight: env.state.height,
       latestSnapshotHeight: 0,
       snapshotPeriodFrames: 256,
       retainSnapshots: 3,
@@ -874,7 +874,7 @@ test('storage live recovery can deep verify merkle side records', async () => {
   process.env['XLN_STORAGE_VERIFY_MERKLE'] = 'deep';
   try {
     const env = makeEnv();
-    const replica = Array.from(env.eReplicas.values())[0]!;
+    const replica = Array.from(env.state.eReplicas.values())[0]!;
     const account = replica.state.accounts.get(counterpartyId)!;
     const coreDoc = projectEntityCoreDoc(replica.state);
     const accountDoc = projectAccountDoc(account);
@@ -888,8 +888,8 @@ test('storage live recovery can deep verify merkle side records', async () => {
     });
     const head: StorageHead = {
       schemaVersion: STORAGE_SCHEMA_VERSION,
-      latestHeight: env.height,
-      latestMaterializedHeight: env.height,
+      latestHeight: env.state.height,
+      latestMaterializedHeight: env.state.height,
       latestSnapshotHeight: 0,
       snapshotPeriodFrames: 256,
       retainSnapshots: 3,
@@ -947,7 +947,7 @@ test('storage live recovery can deep verify merkle side records', async () => {
 
 test('storage startup verifies live key bindings and the complete materialized merkle tree', async () => {
   const env = makeEnv();
-  const replica = Array.from(env.eReplicas.values())[0]!;
+  const replica = Array.from(env.state.eReplicas.values())[0]!;
   const account = replica.state.accounts.get(counterpartyId)!;
   const coreDoc = projectEntityCoreDoc(replica.state);
   const accountDoc = projectAccountDoc(account);
@@ -998,7 +998,7 @@ test('storage startup verifies live key bindings and the complete materialized m
 
 test('runtime adapter account pagination avoids full sort materialization', async () => {
   const env = makeEnv();
-  const replica = Array.from(env.eReplicas.values())[0]!;
+  const replica = Array.from(env.state.eReplicas.values())[0]!;
   const base = replica.state.accounts.get(counterpartyId)!;
   replica.state.accounts.clear();
   for (let i = 999; i >= 0; i -= 1) {
@@ -1024,7 +1024,7 @@ test('runtime adapter account pagination avoids full sort materialization', asyn
 
 test('runtime adapter books path is bounded and paged', async () => {
   const env = makeEnv();
-  const replica = Array.from(env.eReplicas.values())[0]!;
+  const replica = Array.from(env.state.eReplicas.values())[0]!;
   replica.state.orderbookExt = makeOrderbookExt(
     new Map(Array.from({ length: 12 }, (_, index) => [`1/${index + 1}`, makeBook(BigInt(100 + index))])),
   );
@@ -1039,7 +1039,7 @@ test('runtime adapter books path is bounded and paged', async () => {
 
 test('runtime adapter compact book view preserves full level depth while trimming visible orders', async () => {
   const env = makeEnv();
-  const replica = Array.from(env.eReplicas.values())[0]!;
+  const replica = Array.from(env.state.eReplicas.values())[0]!;
   replica.state.orderbookExt = makeOrderbookExt(new Map([['1/2', makeCrowdedBidLevelBook(100n, 25)]]));
 
   const frame = await resolveRuntimeAdapterRead<{
@@ -1585,7 +1585,7 @@ test('vault-owner command frontier survives capability expiry and durable restor
   let env = makeEnv();
   const runtimeId = deriveSignerAddressSync(String(env.runtimeSeed), '1').toLowerCase();
   env.runtimeId = runtimeId;
-  env.timestamp = now;
+  env.state.timestamp = now;
   const challenge = `0x${'52'.repeat(32)}`;
   const input: RuntimeInput = { runtimeTxs: [], entityInputs: [], jInputs: [] };
   let enqueued = 0;
@@ -1645,7 +1645,7 @@ test('vault-owner command frontier survives capability expiry and durable restor
   const durableRuntimeState = structuredClone(env.runtimeState);
   env = makeEnv();
   env.runtimeId = runtimeId;
-  env.timestamp = now + 61_000;
+  env.state.timestamp = now + 61_000;
   env.runtimeState = durableRuntimeState;
   const retried = await send(now + 120_000, 'after');
 
@@ -1910,7 +1910,7 @@ test('runtime adapter rejects a new command lane before enqueue when active capa
         lastContiguousSequence: 1,
         lastInputHash: `0x${'11'.repeat(32)}`,
         lastCommandId: `capacity-command-${String(index).padStart(6, '0')}`,
-        observedHeight: env.height,
+        observedHeight: env.state.height,
         expiresAtMs,
       },
     ]),
@@ -2197,7 +2197,7 @@ test('runtime adapter caps outgoing responses and closes oversized sockets', asy
     },
   };
   const env = makeEnv();
-  const replica = Array.from(env.eReplicas.values())[0]!;
+  const replica = Array.from(env.state.eReplicas.values())[0]!;
   replica.state.profile = { ...replica.state.profile, bio: 'x'.repeat(4_000) };
   try {
     await handleRuntimeAdapterMessage(
@@ -2232,11 +2232,11 @@ test('runtime adapter caps outgoing responses and closes oversized sockets', asy
 
 test('embedded adapter sends to the latest active env after runtime switch', async () => {
   const staleEnv = makeEnv();
-  staleEnv.height = 1;
-  staleEnv.eReplicas = new Map();
+  staleEnv.state.height = 1;
+  staleEnv.state.eReplicas = new Map();
 
   const activeEnv = makeEnv();
-  activeEnv.height = 5;
+  activeEnv.state.height = 5;
 
   let currentEnv: RuntimeReplica | null = staleEnv;
   let publishCommittedHeight: ((height: number) => void) | null = null;
@@ -2247,14 +2247,14 @@ test('embedded adapter sends to the latest active env after runtime switch', asy
     enqueueRuntimeInput: (env, input) => {
       writtenEnv.push(env);
       expect(input.entityInputs?.[0]?.entityId).toBe(entityId);
-      env.height = Math.max(0, Math.floor(Number(env.height ?? 0))) + 1;
+      env.state.height = Math.max(0, Math.floor(Number(env.state.height ?? 0))) + 1;
     },
     submitCrossJurisdictionIntent: async () => ({ delivered: true }),
     registerRuntimePublishedCallback: (_env, callback) => {
       publishCommittedHeight = (height) => callback({
         runtimeId: String(activeEnv.runtimeId || ''),
         height,
-        timestamp: activeEnv.timestamp,
+        timestamp: activeEnv.state.timestamp,
         lifecyclePhase: 'running',
         commandReady: true,
         commandReadyReason: null,
@@ -2278,10 +2278,10 @@ test('embedded adapter sends to the latest active env after runtime switch', asy
   });
 
   expect(writtenEnv).toEqual([activeEnv]);
-  expect(staleEnv.height).toBe(1);
-  expect(activeEnv.height).toBe(6);
+  expect(staleEnv.state.height).toBe(1);
+  expect(activeEnv.state.height).toBe(6);
   expect(adapter.currentHeight).toBe(1);
-  publishCommittedHeight?.(activeEnv.height);
+  publishCommittedHeight?.(activeEnv.state.height);
   expect(adapter.currentHeight).toBe(6);
 });
 
@@ -2310,7 +2310,7 @@ test('runtime publication callbacks expose only an immutable scalar notice', () 
 
 test('embedded adapter never publishes an in-flight frame through synchronous status', async () => {
   const env = makeEnv();
-  env.height = 4;
+  env.state.height = 4;
   let notify: ((height: number) => void) | null = null;
   const adapter = new EmbeddedRuntimeAdapter({
     getEnv: () => env,
@@ -2321,7 +2321,7 @@ test('embedded adapter never publishes an in-flight frame through synchronous st
       notify = (height) => callback({
         runtimeId: String(env.runtimeId || ''),
         height,
-        timestamp: env.timestamp,
+        timestamp: env.state.timestamp,
         lifecyclePhase: 'running',
         commandReady: true,
         commandReadyReason: null,
@@ -2333,12 +2333,12 @@ test('embedded adapter never publishes an in-flight frame through synchronous st
   await adapter.connect({ mode: 'embedded' });
   expect(adapter.currentHeight).toBe(4);
 
-  env.height = 5;
+  env.state.height = 5;
   env.runtimeState!.stateMutationInFlight = true;
   expect(adapter.currentHeight).toBe(4);
 
   env.runtimeState!.stateMutationInFlight = false;
-  notify?.(env.height);
+  notify?.(env.state.height);
   expect(adapter.currentHeight).toBe(5);
 });
 
@@ -2360,8 +2360,8 @@ test('embedded adapter rejects money commands after the runtime stops accepting 
     registerRuntimePublishedCallback: (_env, callback) => {
       publishHalted = () => callback({
         runtimeId: String(env.runtimeId || ''),
-        height: env.height,
-        timestamp: env.timestamp,
+        height: env.state.height,
+        timestamp: env.state.timestamp,
         lifecyclePhase: 'halted',
         commandReady: false,
         commandReadyReason: 'phase=halted',
@@ -2392,7 +2392,7 @@ test('remote adapter can inspect and control a hub over the rpc wire', async () 
   const env = makeEnv();
   const runtimeId = deriveSignerAddressSync(String(env.runtimeSeed), '1').toLowerCase();
   env.runtimeId = runtimeId;
-  const replica = Array.from(env.eReplicas.values())[0]!;
+  const replica = Array.from(env.state.eReplicas.values())[0]!;
   replica.state.profile = { ...replica.state.profile, name: 'H1 Hub', isHub: true };
   const token = deriveRuntimeAdapterCapabilityToken('seed', 'full', Date.now() + 60_000, {
     audience: runtimeId,
@@ -2439,12 +2439,12 @@ test('remote adapter can inspect and control a hub over the rpc wire', async () 
         },
         enqueueRuntimeInput: (targetEnv, input) => {
           enqueued.push(input);
-          targetEnv.height = Math.max(0, Math.floor(Number(targetEnv.height ?? 0))) + 1;
+          targetEnv.state.height = Math.max(0, Math.floor(Number(targetEnv.state.height ?? 0))) + 1;
         },
         controlRuntime: async (targetEnv, action) => ({
           ok: action === 'verify-chain',
           runtimeId: targetEnv.runtimeId,
-          verifiedHeight: targetEnv.height,
+          verifiedHeight: targetEnv.state.height,
         }),
         registerReceipt: receipt => {
           const registered = {
@@ -2566,13 +2566,13 @@ test('remote adapter can inspect and control a hub over the rpc wire', async () 
 
     const head = await adapter.read<{ latestHeight: number }>('head');
     expect(head.latestHeight).toBe(8);
-    env.height = 12;
+    env.state.height = 12;
     const newerHead = await adapter.read<{ latestHeight: number }>('head');
     expect(newerHead.latestHeight).toBe(12);
     expect(adapter.currentHeight).toBe(12);
     expect(heights).toContain(12);
 
-    env.height = 11;
+    env.state.height = 11;
     const laggingHead = await adapter.read<{ latestHeight: number }>('head');
     expect(laggingHead.latestHeight).toBe(11);
     expect(adapter.currentHeight).toBe(12);
@@ -2592,7 +2592,7 @@ test('remote adapter rejects send without a caller-owned commandId before transp
 
 test('storage entity hash docs persist root metadata only', async () => {
   const env = makeEnv();
-  const replica = Array.from(env.eReplicas.values())[0]!;
+  const replica = Array.from(env.state.eReplicas.values())[0]!;
   const base = replica.state.accounts.get(counterpartyId)!;
   const accountCount = 4_100;
   const puts = Array.from({ length: accountCount }, (_, index) => {

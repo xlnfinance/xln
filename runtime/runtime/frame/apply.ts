@@ -64,7 +64,7 @@ const queueProfileCertification = (
   const state = env.runtimeState!;
   const candidates = state.pendingProfileCertificationEntityIds ?? new Set<string>();
   for (const entityId of changedEntityIds) {
-    const certified = [...env.eReplicas.values()].some(
+    const certified = [...env.state.eReplicas.values()].some(
       replica =>
         replica.entityId.toLowerCase() === entityId &&
         Boolean(replica.state.profileEncryptionManifest),

@@ -61,7 +61,7 @@ test('production RuntimeReplica retains only the bounded canonical debug tail', 
     entityProviderAddress: '0x000000000000000000000000000000000000bEEF',
   };
   env.activeJurisdiction = jurisdiction.name;
-  env.jReplicas.set(jurisdiction.name, {
+  env.state.jReplicas.set(jurisdiction.name, {
     ...jurisdiction,
     blockNumber: 0n,
     stateRoot: null,
@@ -97,10 +97,10 @@ test('production RuntimeReplica retains only the bounded canonical debug tail', 
   await processRuntime(env, []);
   trace.stop();
 
-  expect(env.height).toBe(1);
+  expect(env.state.height).toBe(1);
   expect(env.history).toEqual([]);
   expect(trace.snapshots).toHaveLength(1);
-  expect(trace.snapshots[0]?.height).toBe(1);
+  expect(trace.snapshots[0]?.state.height).toBe(1);
 
   const secondSigner = deriveSignerAddressSync(seed, '2');
   const secondEntityId = generateLazyEntityId([secondSigner], 1n).toLowerCase();
@@ -124,7 +124,7 @@ test('production RuntimeReplica retains only the bounded canonical debug tail', 
   });
   await processRuntime(env, []);
 
-  expect(env.height).toBe(2);
+  expect(env.state.height).toBe(2);
   expect(env.runtimeConfig?.snapshotIntervalFrames).toBe(100);
   expect(env.history).toEqual([]);
 });

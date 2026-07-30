@@ -91,7 +91,7 @@ export const collectRelevantJEventReplicaKeys = (
   if (canonicalEvents.length === 0) return [];
 
   const replicaKeys = new Set<string>();
-  for (const [replicaKey, replica] of env.eReplicas?.entries?.() || []) {
+  for (const [replicaKey, replica] of env.state.eReplicas?.entries?.() || []) {
     const [entityIdFromKey] = replicaKey.split(':');
     const entityId = String(
       replica?.state?.entityId || replica?.entityId || entityIdFromKey || '',

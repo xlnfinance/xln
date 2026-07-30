@@ -88,7 +88,7 @@ export async function runRebalanceScenario(): Promise<void> {
 
   const { createEmptyEnv } = await import('../runtime');
   let env = createEmptyEnv('rebalance-scenario-seed-2026');
-  env.timestamp = 1000000;
+  env.state.timestamp = 1000000;
   env.scenarioMode = true;
   setScenarioStorageEnabled(env, false);
 
@@ -106,7 +106,7 @@ export async function runRebalanceScenario(): Promise<void> {
     stateRoot: new Uint8Array(32),
     mempool: [],
     blockDelayMs: 100,
-    lastBlockTimestamp: env.timestamp,
+    lastBlockTimestamp: env.state.timestamp,
     position: { x: 0, y: 600, z: 0 },
     contracts: {
       account: jadapter.addresses.account,
@@ -116,7 +116,7 @@ export async function runRebalanceScenario(): Promise<void> {
     },
     rpcs: [jMode === 'browservm' ? 'browservm://' : rpcUrl],
   };
-  env.jReplicas.set(jReplicaName, jReplica);
+  env.state.jReplicas.set(jReplicaName, jReplica);
   env.activeJurisdiction = jReplicaName;
 
   // Attach the same trusted local policy used by Runtime jurisdiction import.
@@ -165,7 +165,7 @@ export async function runRebalanceScenario(): Promise<void> {
 
   // Helper: poll on-chain events and feed into runtime
   const syncChain = async () => {
-    env.timestamp += 150;
+    env.state.timestamp += 150;
     await process(env);
     await processJEvents(env);
     await process(env);
@@ -314,7 +314,7 @@ export async function runRebalanceScenario(): Promise<void> {
   }]);
 
   // Step 3: J-processor → on-chain tx → poll events
-  env.timestamp += 150;
+  env.state.timestamp += 150;
   await process(env); // J-processor fires batch
   await syncChain();  // Poll events + process
   await convergeScenario(env);
@@ -461,7 +461,7 @@ export async function runRebalanceScenario(): Promise<void> {
 
   // Entity timestamps advance only through committed frames.
   function advanceTime(ms: number) {
-    env.timestamp += ms;
+    env.state.timestamp += ms;
   }
 
   // ── Cycle 1: Trigger hub crontab and process bilateral frames ──

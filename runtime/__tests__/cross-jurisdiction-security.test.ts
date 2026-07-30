@@ -110,7 +110,7 @@ describe('cross-jurisdiction security invariants', () => {
 
   test('source clear fails if account offer route hash diverges from entity route', async () => {
     const env = createEmptyEnv('cross-clear-route-mismatch');
-    env.timestamp = 2_000;
+    env.state.timestamp = 2_000;
     env.quietRuntimeLogs = true;
     const eth = makeJurisdiction('Ethereum', 1, '11', '12');
     const sourceUser = entity('01');
@@ -145,7 +145,7 @@ describe('cross-jurisdiction security invariants', () => {
 
   test('source clear throws on corrupted committed route without pull commitments', async () => {
     const env = createEmptyEnv('cross-clear-corrupt-route');
-    env.timestamp = 2_000;
+    env.state.timestamp = 2_000;
     env.quietRuntimeLogs = true;
     const eth = makeJurisdiction('Ethereum', 1, '11', '12');
     const sourceUser = entity('01');
@@ -170,7 +170,7 @@ describe('cross-jurisdiction security invariants', () => {
 
   test('target-side prepareDispute drafts through exact hanko preflight when optional pull arguments are unavailable', async () => {
     const env = createEmptyEnv('cross-target-dispute-needs-source-args');
-    env.timestamp = 2_000;
+    env.state.timestamp = 2_000;
     env.quietRuntimeLogs = true;
     const tron = makeJurisdiction('Tron', 2, '21', '22');
     const route = buildRoute('cross-target-dispute-needs-source-args', 'cross-target-dispute-needs-source-args');
@@ -203,7 +203,7 @@ describe('cross-jurisdiction security invariants', () => {
 
   test('target-side prepareDispute preserves pull arguments through normal hanko preflight', async () => {
     const env = createEmptyEnv('cross-target-dispute-with-source-args');
-    env.timestamp = 2_000;
+    env.state.timestamp = 2_000;
     env.quietRuntimeLogs = true;
     const tron = makeJurisdiction('Tron', 2, '21', '22');
     const route = buildRoute('cross-target-dispute-with-source-args', 'cross-target-dispute-with-source-args');

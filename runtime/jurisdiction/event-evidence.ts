@@ -55,7 +55,7 @@ const toReserveUpdatedEvidence = (
     blockNumber: event.blockNumber,
     blockHash: event.blockHash,
     transactionHash: event.transactionHash,
-    observedAt: Number(env.timestamp ?? 0),
+    observedAt: Number(env.state.timestamp ?? 0),
   };
 };
 

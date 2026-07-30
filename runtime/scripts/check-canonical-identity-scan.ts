@@ -48,18 +48,23 @@ requireCondition(!sameJurisdictionIdentity(canonical, conflicting), 'different s
 requireCondition(!sameJurisdictionIdentity({ name: 'Testnet' }, { name: 'testnet' }), 'name-only jurisdiction objects must not match');
 
 const env = {
-  jReplicas: new Map<string, JReplica>([
-    ['collision', {
-      name: canonicalRef,
-      chainId: 31338,
-      depositoryAddress: address('22'),
-    } as JReplica],
-    ['canonical', {
-      name: 'Canonical',
-      chainId: 31337,
-      depositoryAddress: address('11'),
-    } as JReplica],
-  ]),
+  state: {
+    eReplicas: new Map(),
+    height: 0,
+    timestamp: 0,
+    jReplicas: new Map<string, JReplica>([
+      ['collision', {
+        name: canonicalRef,
+        chainId: 31338,
+        depositoryAddress: address('22'),
+      } as JReplica],
+      ['canonical', {
+        name: 'Canonical',
+        chainId: 31337,
+        depositoryAddress: address('11'),
+      } as JReplica],
+    ]),
+  },
 } as RuntimeReplica;
 
 requireCondition(getJReplicaByJurisdictionRef(env, canonicalRef)?.name === 'Canonical', 'stack ref lookup picked wrong replica');

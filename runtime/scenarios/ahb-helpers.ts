@@ -87,7 +87,7 @@ export async function submitReserveToReserveBatch(
 type ReplicaEntry = [string, EntityReplica];
 
 export function findReplica(env: RuntimeReplica, entityId: string): ReplicaEntry {
-  const entry = Array.from(env.eReplicas.entries()).find(([key]) => key.startsWith(entityId + ':'));
+  const entry = Array.from(env.state.eReplicas.entries()).find(([key]) => key.startsWith(entityId + ':'));
   if (!entry) {
     throw new Error(`AHB: Replica for entity ${entityId} not found`);
   }

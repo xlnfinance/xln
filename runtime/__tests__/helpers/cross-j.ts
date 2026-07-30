@@ -52,7 +52,7 @@ export const prepareJEventInput = (
     jurisdictionRef?: string;
   },
 ): { jurisdictionRef: string; eventsHash: string; disputeFinalizationEvidenceHash?: string } => {
-  const matchingReplica = Array.from(env.eReplicas.values()).find((replica) =>
+  const matchingReplica = Array.from(env.state.eReplicas.values()).find((replica) =>
     replica.entityId.toLowerCase() === entityId.toLowerCase() &&
     replica.signerId.toLowerCase() === signerId.toLowerCase());
   const jurisdictionRef = input.jurisdictionRef ?? getJEventJurisdictionRef(matchingReplica?.state.config.jurisdiction);
@@ -171,7 +171,7 @@ export const addReplica = (env: RuntimeReplica, state: EntityState, signerId: st
   const keys = hasLocalSignerKey(env, signerId)
     ? deriveLocalEntityCryptoKeys(env, state.entityId, signerId)
     : { publicKey: '', privateKey: '' };
-  env.eReplicas.set(`${state.entityId}:${signerId}`, {
+  env.state.eReplicas.set(`${state.entityId}:${signerId}`, {
     entityId: state.entityId,
     signerId,
     entityEncPubKey: keys.publicKey,
@@ -184,7 +184,7 @@ export const addReplica = (env: RuntimeReplica, state: EntityState, signerId: st
 
 export const installJurisdictions = (env: RuntimeReplica, ...jurisdictions: JurisdictionConfig[]): void => {
   for (const jurisdiction of jurisdictions) {
-    env.jReplicas.set(jurisdiction.name, {
+    env.state.jReplicas.set(jurisdiction.name, {
       name: jurisdiction.name,
       chainId: jurisdiction.chainId,
       rpcs: [jurisdiction.address],

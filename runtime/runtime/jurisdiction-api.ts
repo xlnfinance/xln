@@ -13,13 +13,13 @@ import { deriveCanonicalCrossJurisdictionBookOwnerForLegs } from '../extensions/
 
 export function getActiveJAdapter(env: RuntimeReplica): JAdapter | null {
   if (!env.activeJurisdiction) return null;
-  const jReplica = env.jReplicas?.get(env.activeJurisdiction);
+  const jReplica = env.state.jReplicas?.get(env.activeJurisdiction);
   return jReplica?.jadapter || null;
 }
 
 export function getEntityJAdapter(env: RuntimeReplica, entityId: string, signerId?: string): JAdapter | null {
   const jurisdiction = requireEntityRuntimeJurisdictionConfig(env, entityId, signerId);
-  const jReplica = env.jReplicas?.get(jurisdiction.name);
+  const jReplica = env.state.jReplicas?.get(jurisdiction.name);
   return jReplica?.jadapter || null;
 }
 
@@ -77,7 +77,7 @@ export const requireCrossJurisdictionOrderId = (value: string): string => {
 const findEntityStateForRuntime = (env: RuntimeReplica, entityId: string, signerId?: string): EntityState | null => {
   const target = normalizeRuntimeEntityId(entityId);
   const signer = signerId ? String(signerId).toLowerCase() : null;
-  for (const [replicaKey, replica] of env.eReplicas.entries()) {
+  for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
     const [keyEntity, keySigner] = String(replicaKey).split(':');
     const replicaEntity = normalizeRuntimeEntityId(replica.entityId || keyEntity || '');
     const replicaSigner = String(replica.signerId || keySigner || '').toLowerCase();
@@ -103,7 +103,7 @@ const resolveCrossJurisdictionSwapContext = (
   env: RuntimeReplica,
   params: CrossJurisdictionSwapSubmitParams,
 ) => {
-  const now = env.scenarioMode ? env.timestamp : getWallClockMs();
+  const now = env.scenarioMode ? env.state.timestamp : getWallClockMs();
   const sourceUserSignerId = params.sourceUserSignerId ??
     resolveEntityProposerId(env, params.sourceUserEntityId, 'cross-swap.source-user');
   const sourceHubSignerId = params.sourceHubSignerId ??
@@ -268,7 +268,7 @@ export function buildDebtEnforcementRuntimeInput(
   if (!entityId) throw new Error('DEBT_ENFORCEMENT_ENTITY_REQUIRED');
   const signerId = params.signerId ? String(params.signerId).trim().toLowerCase() : undefined;
   const jurisdiction = requireEntityRuntimeJurisdictionConfig(env, entityId, signerId);
-  const now = env.scenarioMode ? env.timestamp : getWallClockMs();
+  const now = env.scenarioMode ? env.state.timestamp : getWallClockMs();
 
   return buildDebtEnforcementRuntimeInputFromProjection({
     entityId,

@@ -129,11 +129,11 @@
     if (timeIndex >= 0 && history && history.length > 0) {
       const idx = Math.min(timeIndex as number, history.length - 1);
       const frame = history[idx];
-      return frame ? (Array.from(frame.jReplicas.values()) as JurisdictionView[]) : [];
+      return frame ? (Array.from(frame.state.jReplicas.values()) as JurisdictionView[]) : [];
     }
 
-    if (env?.jReplicas) {
-      return Array.from(env.jReplicas.values()) as JurisdictionView[];
+    if (env?.state.jReplicas) {
+      return Array.from(env.state.jReplicas.values()) as JurisdictionView[];
     }
 
     return [];
@@ -176,9 +176,9 @@
     let eReplicas: Map<string, any> | null = null;
     if (timeIndex >= 0 && history && history.length > 0) {
       const idx = Math.min(timeIndex as number, history.length - 1);
-      eReplicas = history[idx]?.eReplicas ?? null;
+      eReplicas = history[idx]?.state.eReplicas ?? null;
     } else {
-      eReplicas = env?.eReplicas ?? null;
+      eReplicas = env?.state.eReplicas ?? null;
     }
 
     if (eReplicas) {
@@ -278,9 +278,9 @@
     let eReplicas: Map<string, any> | null = null;
     if (timeIndex >= 0 && history && history.length > 0) {
       const idx = Math.min(timeIndex as number, history.length - 1);
-      eReplicas = history[idx]?.eReplicas ?? null;
+      eReplicas = history[idx]?.state.eReplicas ?? null;
     } else {
-      eReplicas = env?.eReplicas ?? null;
+      eReplicas = env?.state.eReplicas ?? null;
     }
 
     if (!eReplicas) return disputes;
@@ -645,9 +645,9 @@
     let eReplicas: Map<string, any> | null = null;
     if (timeIndex >= 0 && history && history.length > 0) {
       const idx = Math.min(timeIndex, history.length - 1);
-      eReplicas = history[idx]?.eReplicas ?? null;
+      eReplicas = history[idx]?.state.eReplicas ?? null;
     } else {
-      eReplicas = runtimeFrameEnvValue?.eReplicas ?? null;
+      eReplicas = runtimeFrameEnvValue?.state.eReplicas ?? null;
     }
 
     if (!eReplicas || eReplicas.size === 0) {

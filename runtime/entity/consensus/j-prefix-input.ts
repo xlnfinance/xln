@@ -118,7 +118,7 @@ export const handleJPrefixAttestations = (context: ApplyEntityInputContext): App
     return rejectEntityConsensusInput(context, 'J_PREFIX_ROUND_FROZEN');
   }
   workingReplica.jPrefixRound = merged;
-  if (changed) workingReplica.lastConsensusProgressAt = env.timestamp;
+  if (changed) workingReplica.lastConsensusProgressAt = env.state.timestamp;
   rebroadcastLocalAttestation(context);
   return null;
 };

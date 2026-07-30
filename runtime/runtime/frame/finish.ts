@@ -34,8 +34,8 @@ const haltMutatedRuntime = (
   transitionRuntimeLifecycle(state, 'halted');
   state.fatalDebugPayload = {
     message: `RUNTIME_MUTATION_FAILED_RELOAD_REQUIRED:${cause.message}`,
-    height: Math.max(0, env.height),
-    timestamp: Math.max(0, env.timestamp),
+    height: Math.max(0, env.state.height),
+    timestamp: Math.max(0, env.state.timestamp),
   };
   state.stopLoop?.();
 };

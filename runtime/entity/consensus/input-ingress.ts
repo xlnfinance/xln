@@ -62,7 +62,7 @@ const logEntityInput = (
     write('input.received', {
       entity: entityDisplay,
       signer: shortId(replica.signerId),
-      ts: env.timestamp,
+      ts: env.state.timestamp,
       txs: input.entityTxs?.map(tx => tx.type) ?? [],
       mempool: replica.mempool.length,
       proposer: replica.isProposer,

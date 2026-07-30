@@ -122,7 +122,7 @@ const readImportedContracts = (
   name: string,
   fallback?: JMachineConfig['contracts'],
 ): JMachineConfig['contracts'] | undefined => {
-  const imported = env.jReplicas?.get?.(name);
+  const imported = env.state.jReplicas?.get?.(name);
   const contracts = {
     depository: String(imported?.depositoryAddress || imported?.contracts?.depository || fallback?.depository || ''),
     entityProvider: String(imported?.entityProviderAddress || imported?.contracts?.entityProvider || fallback?.entityProvider || ''),
@@ -145,7 +145,7 @@ export const buildPersistedJMachineConfig = (
 ): JMachineConfig => {
   const config = normalizeJMachineCreateDetail(detail);
   const contracts = env ? readImportedContracts(env, config.name, config.contracts) : config.contracts;
-  const imported = env?.jReplicas?.get?.(config.name);
+  const imported = env?.state.jReplicas?.get?.(config.name);
   return {
     name: config.name,
     mode: config.mode,
@@ -171,10 +171,10 @@ export const importJMachineViaRuntime = async (
   const nextEnv = await submitRuntimeInput(buildJMachineImportRuntimeInput(normalized));
   if (!nextEnv) throw new Error(`J_MACHINE_IMPORT_REQUIRES_EMBEDDED_RUNTIME:${normalized.name}`);
   const startedAt = Date.now();
-  while (!nextEnv.jReplicas?.get?.(normalized.name) && Date.now() - startedAt < J_MACHINE_IMPORT_COMMIT_WAIT_MS) {
+  while (!nextEnv.state.jReplicas?.get?.(normalized.name) && Date.now() - startedAt < J_MACHINE_IMPORT_COMMIT_WAIT_MS) {
     await sleep(J_MACHINE_IMPORT_COMMIT_POLL_MS);
   }
-  if (!nextEnv.jReplicas?.get?.(normalized.name)) {
+  if (!nextEnv.state.jReplicas?.get?.(normalized.name)) {
     throw new Error(`J_MACHINE_IMPORT_NOT_COMMITTED:${normalized.name}`);
   }
   const config = buildPersistedJMachineConfig(

@@ -21,7 +21,7 @@
   $: selectedFrame = $runtimeFrameTimeIndex >= 0
     ? ($runtimeFrameHistory[Math.min($runtimeFrameTimeIndex, $runtimeFrameHistory.length - 1)] ?? null)
     : $runtimeFrameEnv;
-  $: machines = Array.from(selectedFrame?.jReplicas?.values?.() ?? []) as Machine[];
+  $: machines = Array.from(selectedFrame?.state.jReplicas?.values?.() ?? []) as Machine[];
   $: if (!selectedName || !machines.some((machine) => machine.name === selectedName)) selectedName = machines[0]?.name ?? '';
   $: selected = machines.find((machine) => machine.name === selectedName) ?? null;
   $: reserveCount = selected?.reserves instanceof Map ? selected.reserves.size : Object.keys(selected?.reserves ?? {}).length;

@@ -24,20 +24,20 @@ const addSecondEntityWithSameBatch = (fixture: ReturnType<typeof makeJSubmitDura
   // This is an independent entity lane. Cloning the fixture must not also
   // clone entity A's validator-local retry clock into entity B.
   delete second.jSubmitState;
-  fixture.env.eReplicas.set(`${secondEntityId}:${signerId}`, second);
+  fixture.env.state.eReplicas.set(`${secondEntityId}:${signerId}`, second);
   return second;
 };
 
 describe('J-submit lane identity', () => {
   test('durable pending attempt for entity A does not block entity B with the same batch hash and nonce', async () => {
     const fixture = makeJSubmitDurabilityFixture();
-    const [firstRetry] = collectDueJSubmitRuntimeTxs(fixture.env, fixture.env.timestamp);
+    const [firstRetry] = collectDueJSubmitRuntimeTxs(fixture.env, fixture.env.state.timestamp);
     if (!firstRetry) throw new Error('first entity retry missing');
     const firstOutbox = await applyRuntimeTx(fixture.env, firstRetry, { isReplay: true });
     registerPendingCommittedJOutbox(fixture.env, firstOutbox);
     addSecondEntityWithSameBatch(fixture);
 
-    const retries = collectDueJSubmitRuntimeTxs(fixture.env, fixture.env.timestamp);
+    const retries = collectDueJSubmitRuntimeTxs(fixture.env, fixture.env.state.timestamp);
     expect(retries).toHaveLength(1);
     expect(retries[0]?.data.entityId).toBe(secondEntityId);
   });
@@ -45,7 +45,7 @@ describe('J-submit lane identity', () => {
   test('queued retry for entity A does not globally deduplicate entity B lane', () => {
     const fixture = makeJSubmitDurabilityFixture();
     addSecondEntityWithSameBatch(fixture);
-    const retries = collectDueJSubmitRuntimeTxs(fixture.env, fixture.env.timestamp);
+    const retries = collectDueJSubmitRuntimeTxs(fixture.env, fixture.env.state.timestamp);
     const firstRetry = retries.find((retry) => retry.data.entityId !== secondEntityId);
     if (!firstRetry) throw new Error('first queued entity retry missing');
     fixture.env.runtimeMempool = {
@@ -53,14 +53,14 @@ describe('J-submit lane identity', () => {
       entityInputs: [],
     };
 
-    const dueWithFirstQueued = collectDueJSubmitRuntimeTxs(fixture.env, fixture.env.timestamp);
+    const dueWithFirstQueued = collectDueJSubmitRuntimeTxs(fixture.env, fixture.env.state.timestamp);
     expect(dueWithFirstQueued).toHaveLength(1);
     expect(dueWithFirstQueued[0]?.data.entityId).toBe(secondEntityId);
   });
 
   test('pending identity is scoped by jurisdiction and validator signer', async () => {
     const fixture = makeJSubmitDurabilityFixture();
-    const [firstRetry] = collectDueJSubmitRuntimeTxs(fixture.env, fixture.env.timestamp);
+    const [firstRetry] = collectDueJSubmitRuntimeTxs(fixture.env, fixture.env.state.timestamp);
     if (!firstRetry) throw new Error('first signer retry missing');
     const firstOutbox = await applyRuntimeTx(fixture.env, firstRetry, { isReplay: true });
     registerPendingCommittedJOutbox(fixture.env, firstOutbox);

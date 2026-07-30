@@ -78,7 +78,7 @@ describe('Account J-claim real storage crash recovery', () => {
       const restored = await loadEnvFromDB(runtimeId, seed);
       if (!restored) throw new Error('ACCOUNT_J_CRASH_RESTORE_MISSING');
       try {
-        const replica = Array.from(restored.eReplicas.values()).find((candidate) => candidate.entityId === entityId);
+        const replica = Array.from(restored.state.eReplicas.values()).find((candidate) => candidate.entityId === entityId);
         const account = replica?.state.accounts.get(counterpartyId);
         if (!account) throw new Error('ACCOUNT_J_CRASH_RESTORED_ACCOUNT_MISSING');
         const side = account.leftEntity === entityId ? 'left' as const : 'right' as const;
@@ -116,7 +116,7 @@ describe('Account J-claim real storage crash recovery', () => {
 
         const historyDb = getRuntimeWalDb(restored);
         const persistedNode = decodeBuffer<AccountJClaimNode>(await historyDb.get(keyAccountJClaimNode(state.root)));
-        const diff = decodeBuffer<StorageDiffRecord>(await historyDb.get(keyDiff(restored.height)));
+        const diff = decodeBuffer<StorageDiffRecord>(await historyDb.get(keyDiff(restored.state.height)));
         const accountDoc = diff.puts.find((doc) => (
           doc.family === 'account' && doc.entityId === entityId && doc.counterpartyId === counterpartyId
         ));

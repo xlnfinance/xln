@@ -83,7 +83,7 @@ const resolveAuthoritativeFrameCommitStatus = async (
   if (!(await deps.tryOpenRuntimeWalDb(env))) return 'unknown';
   const walDb = deps.getRuntimeWalDb(env);
   const head = await readStorageHead(walDb);
-  const frame = await readStorageFrameRecord(walDb, env.height);
+  const frame = await readStorageFrameRecord(walDb, env.state.height);
   if (frame) {
     // A frame body without its committed Runtime snapshot and hash can prove
     // neither success nor conflict. Treating absent proof fields as wildcards
@@ -104,8 +104,8 @@ const resolveAuthoritativeFrameCommitStatus = async (
     );
   }
   if (!head) return 'unknown';
-  if (head.latestHeight >= env.height) return 'conflict';
-  if (head.latestHeight === env.height - 1) return 'not-committed';
+  if (head.latestHeight >= env.state.height) return 'conflict';
+  if (head.latestHeight === env.state.height - 1) return 'not-committed';
   return 'unknown';
 };
 
@@ -126,8 +126,8 @@ export const saveRuntimeEnvironment = async (
   }
   const pendingHistoryRecords = peekPendingHistoryRecords(
     env,
-    env.height,
-    env.timestamp,
+    env.state.height,
+    env.state.timestamp,
   );
   let saveResult: Awaited<ReturnType<typeof saveRuntimeFrameToStorage>>;
   try {
@@ -193,7 +193,7 @@ export const saveRuntimeEnvironment = async (
     throw new RuntimeFrameStorageError(
       'not-committed',
       new Error(
-        `STORAGE_AUTHORITATIVE_FRAME_NOT_COMMITTED:height=${env.height}`,
+        `STORAGE_AUTHORITATIVE_FRAME_NOT_COMMITTED:height=${env.state.height}`,
       ),
     );
   }
@@ -202,10 +202,10 @@ export const saveRuntimeEnvironment = async (
     transitionRuntimeLifecycle(state, 'halted');
     state.fatalDebugPayload = {
       message:
-        `STALE_RUNTIME_WRITER_STOPPED: frame=${env.height} runtime=` +
+        `STALE_RUNTIME_WRITER_STOPPED: frame=${env.state.height} runtime=` +
         String(env.runtimeId || '').slice(0, 12),
-      height: Math.max(0, env.height ?? 0),
-      timestamp: Math.max(0, env.timestamp ?? 0),
+      height: Math.max(0, env.state.height ?? 0),
+      timestamp: Math.max(0, env.state.timestamp ?? 0),
     };
     state.stopLoop?.();
     return { staleWriterStopped: true };

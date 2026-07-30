@@ -64,9 +64,9 @@ test('restores H+1 and deferred H+2 from LevelDB after real SIGKILL', async () =
   const restored = await loadEnvFromDB(runtimeId, seed);
   if (!restored) throw new Error(`CATCHUP_CRASH_RESTORE_MISSING\n${stdout}\n${stderr}`);
   try {
-    const replica = restored.eReplicas.get(`${entityId}:${targetSignerId}`);
+    const replica = restored.state.eReplicas.get(`${entityId}:${targetSignerId}`);
     expect(getCachedSignerPrivateKey(restored, targetSignerId)).toBeNull();
-    expect(restored.height).toBe(2);
+    expect(restored.state.height).toBe(2);
     expect(replica?.state.height).toBe(1);
     expect(restored.pendingNetworkOutputs?.map(output => output.proposedFrame?.height)).toEqual([2]);
     expect(restored.runtimeMempool?.entityInputs.map(input => input.proposedFrame?.height)).toEqual([2]);
@@ -90,7 +90,7 @@ test('restores H+1 and deferred H+2 from LevelDB after real SIGKILL', async () =
 
     for (let tick = 0; tick < 8; tick += 1) {
       await processRuntime(restored, []);
-      const current = restored.eReplicas.get(`${entityId}:${targetSignerId}`);
+      const current = restored.state.eReplicas.get(`${entityId}:${targetSignerId}`);
       if (
         current?.state.height === 2 &&
         current.state.prevFrameHash === h2Hash &&
@@ -99,7 +99,7 @@ test('restores H+1 and deferred H+2 from LevelDB after real SIGKILL', async () =
       ) break;
     }
 
-    const finalReplica = restored.eReplicas.get(`${entityId}:${targetSignerId}`);
+    const finalReplica = restored.state.eReplicas.get(`${entityId}:${targetSignerId}`);
     expect(finalReplica?.state.height).toBe(2);
     expect(finalReplica?.state.prevFrameHash).toBe(h2Hash);
     expect(restored.pendingNetworkOutputs ?? []).toEqual([]);

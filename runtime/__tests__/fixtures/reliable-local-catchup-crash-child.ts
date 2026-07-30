@@ -72,12 +72,12 @@ enqueueRuntimeInput(env, {
   entityInputs: [],
 });
 await processRuntime(env, []);
-if (env.height !== 1) throw new Error(`CATCHUP_CRASH_ANCHOR_HEIGHT:${env.height}`);
+if (env.state.height !== 1) throw new Error(`CATCHUP_CRASH_ANCHOR_HEIGHT:${env.state.height}`);
 
 env.pendingNetworkOutputs = [structuredClone(h2)];
 await processRuntime(env, []);
 await processRuntime(env, []);
-const beforeH1 = env.eReplicas.get(`${initialState.entityId}:${targetSignerId}`);
+const beforeH1 = env.state.eReplicas.get(`${initialState.entityId}:${targetSignerId}`);
 if (beforeH1?.state.height !== 0) {
   throw new Error(`CATCHUP_CRASH_H2_APPLIED_EARLY:${beforeH1?.state.height ?? 'missing'}`);
 }
@@ -85,14 +85,14 @@ if (beforeH1?.state.height !== 0) {
 env.pendingNetworkOutputs = [structuredClone(h1), ...(env.pendingNetworkOutputs ?? [])];
 await processRuntime(env, []);
 await processRuntime(env, [structuredClone(h2)]);
-const afterH1 = env.eReplicas.get(`${initialState.entityId}:${targetSignerId}`);
+const afterH1 = env.state.eReplicas.get(`${initialState.entityId}:${targetSignerId}`);
 // Deferred H2 attempts mutate no certified state and therefore own no empty
 // Runtime frames. The authority anchor is R1 and certified H1 is published
 // atomically in R2 while H2 remains in both durable retry queues.
-if (env.height !== 2 || afterH1?.state.height !== 1) {
-  throw new Error(`CATCHUP_CRASH_H1_NOT_DURABLE:R=${env.height}:E=${afterH1?.state.height ?? 'missing'}`);
+if (env.state.height !== 2 || afterH1?.state.height !== 1) {
+  throw new Error(`CATCHUP_CRASH_H1_NOT_DURABLE:R=${env.state.height}:E=${afterH1?.state.height ?? 'missing'}`);
 }
-const durableFrame = await readStorageFrameRecord(getRuntimeWalDb(env), env.height);
+const durableFrame = await readStorageFrameRecord(getRuntimeWalDb(env), env.state.height);
 const durableHeights = durableFrame?.runtimeInput.entityInputs
   .map(input => input.proposedFrame?.height ?? null);
 if (durableHeights?.length !== 1 || durableHeights[0] !== 1) {

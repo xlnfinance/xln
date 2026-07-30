@@ -67,12 +67,12 @@
 
   // Find replica for this entity
   $: replica = ((): ReplicaLike | null => {
-    if (!env?.eReplicas) return null;
-    if (env.eReplicas instanceof Map) {
-      const match = Array.from(env.eReplicas.entries()).find(([key]) => key.startsWith(entityId + ':'))?.[1] as ReplicaLike | undefined;
+    if (!env?.state.eReplicas) return null;
+    if (env.state.eReplicas instanceof Map) {
+      const match = Array.from(env.state.eReplicas.entries()).find(([key]) => key.startsWith(entityId + ':'))?.[1] as ReplicaLike | undefined;
       return match ?? null;
     }
-    const entries = Object.entries(env.eReplicas as Record<string, ReplicaLike>);
+    const entries = Object.entries(env.state.eReplicas as Record<string, ReplicaLike>);
     return entries.find(([key]) => key.startsWith(entityId + ':'))?.[1] ?? null;
   })();
 

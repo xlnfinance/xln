@@ -215,7 +215,7 @@ test('orchestrator provisions exact primary contracts before RPC import', async 
     const env = createEmptyEnv(`orchestrator-primary-rpc-import-${String(process.pid)}-${String(port)}`);
     env.quietRuntimeLogs = true;
     env.scenarioMode = true;
-    env.timestamp = 1_000;
+    env.state.timestamp = 1_000;
     setScenarioStorageEnabled(env, false);
     enqueueRuntimeInput(env, {
       runtimeTxs: [{
@@ -233,7 +233,7 @@ test('orchestrator provisions exact primary contracts before RPC import', async 
     });
     await processRuntime(env);
     await processRuntime(env);
-    const replica = env.jReplicas.get('Primary');
+    const replica = env.state.jReplicas.get('Primary');
     importedAdapter = replica?.jadapter ?? null;
     expect(replica?.contracts).toEqual(Object.fromEntries(
       Object.entries(first.contracts).map(([key, value]) => [key, value.toLowerCase()]),
@@ -336,7 +336,7 @@ test('fresh RPC import uses provisioned deployment metadata after Anvil history 
     const env = createEmptyEnv(`orchestrator-pruned-rpc-import-${String(process.pid)}-${String(port)}`);
     env.quietRuntimeLogs = true;
     env.scenarioMode = true;
-    env.timestamp = 1_000;
+    env.state.timestamp = 1_000;
     setScenarioStorageEnabled(env, false);
     enqueueRuntimeInput(env, {
       runtimeTxs: [{
@@ -354,7 +354,7 @@ test('fresh RPC import uses provisioned deployment metadata after Anvil history 
     });
     await processRuntime(env);
     await processRuntime(env);
-    const imported = env.jReplicas.get('Primary');
+    const imported = env.state.jReplicas.get('Primary');
     importedAdapter = imported?.jadapter ?? null;
     expect(imported?.blockNumber).toBe(BigInt(deploymentBlock - 1));
     expect(importedAdapter?.entityProviderDeploymentBlock).toBe(deploymentBlock);

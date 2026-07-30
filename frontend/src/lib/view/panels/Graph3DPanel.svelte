@@ -153,7 +153,7 @@ function getLiveEnvForAction(action: string): any {
   }
   const currentEnv = get(runtimeFrameEnv);
   const liveEnv = unwrapLiveRuntimeEnv(currentEnv) ?? currentEnv;
-  if (!liveEnv?.eReplicas || !(liveEnv.eReplicas instanceof Map)) {
+  if (!liveEnv?.state.eReplicas || !(liveEnv.state.eReplicas instanceof Map)) {
     throw new Error(`${action} requires live runtime environment`);
   }
   return liveEnv;
@@ -394,7 +394,7 @@ $: if (scene && jurisdictionsData) {
       const prevFrameIdx = timeIdx === -1 ? historyFrames.length - 2 : timeIdx - 1;
       if (prevFrameIdx >= 0 && prevFrameIdx < historyFrames.length) {
         prevFrame = historyFrames[prevFrameIdx];
-        const prevJReplicas = prevFrame?.jReplicas;
+        const prevJReplicas = prevFrame?.state.jReplicas;
         if (prevJReplicas) {
           const prevJReplicaArr = Array.isArray(prevJReplicas) ? prevJReplicas : Array.from(prevJReplicas.values());
           const prevJR = prevJReplicaArr.find((jr: any) => jr.name === activeJurisdiction.name);
@@ -418,7 +418,7 @@ $: if (scene && jurisdictionsData) {
       jMachineTxBoxes.push(txCube);
     });
     if (prevFrame) {
-      const prevJReplica = findGraphJReplica(prevFrame.jReplicas, activeJurisdiction.name);
+      const prevJReplica = findGraphJReplica(prevFrame.state.jReplicas, activeJurisdiction.name);
       const prevJHeight = graphJReplicaHeight(prevJReplica);
       const currJHeightNum = Number(currentJHeight);
       if (currJHeightNum > prevJHeight && prevMempoolSize > 0) {
@@ -466,7 +466,7 @@ $: if (scene && jurisdictionsData) {
         let foundHeight = -1;
         for (let frameIdx = maxFrameIdx; frameIdx >= 0; frameIdx--) {
           const frame = runtimeHistory[frameIdx];
-          const frameJReplica = findGraphJReplica(frame?.jReplicas, activeJurisdiction.name);
+          const frameJReplica = findGraphJReplica(frame?.state.jReplicas, activeJurisdiction.name);
           const frameJHeight = graphJReplicaHeight(frameJReplica);
           if (frameJHeight <= targetHeight && frameJHeight > 0) {
             foundFrame = frameJReplica;
@@ -1342,7 +1342,7 @@ function createEntityNode(profile: any, index: number, total: number, forceLayou
     persistedPosition: $entityPositions.get(profile.entityId),
     fallbackJurisdiction: env?.activeJurisdiction || "default",
     resolveJMachinePosition: (jurisdictionName) => {
-      const stored = env?.jReplicas?.get(jurisdictionName)?.position;
+      const stored = env?.state.jReplicas?.get(jurisdictionName)?.position;
       if (stored) return stored;
       const mesh = jMachines.get(jurisdictionName);
       return mesh ? { x: mesh.position.x, y: mesh.position.y, z: mesh.position.z } : null;
@@ -2555,7 +2555,7 @@ function calculateAvailableRoutes(from: string, to: string) {
     return;
   }
   availableRoutes = buildGraphAvailableRoutes({
-    replicas: env.eReplicas,
+    replicas: env.state.eReplicas,
     from,
     to,
     getEntityShortName,
@@ -2615,9 +2615,9 @@ async function executeSinglePayment(job: GraphPaymentJob) {
     }
     const actionEnv = getLiveEnvForAction("Graph payment");
     let ourReplica: any = null;
-    for (const key of actionEnv.eReplicas.keys()) {
+    for (const key of actionEnv.state.eReplicas.keys()) {
       if (key.startsWith(job.from + ":")) {
-        ourReplica = actionEnv.eReplicas.get(key);
+        ourReplica = actionEnv.state.eReplicas.get(key);
         break;
       }
     }
@@ -2632,7 +2632,7 @@ async function executeSinglePayment(job: GraphPaymentJob) {
       throw new Error("No route selected");
     }
     let signerId = "1"; // default
-    for (const key of actionEnv.eReplicas.keys()) {
+    for (const key of actionEnv.state.eReplicas.keys()) {
       if (key.startsWith(job.from + ":")) {
         signerId = key.split(":")[1] || "1";
         break;

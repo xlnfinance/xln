@@ -70,7 +70,7 @@ describe('runtime snapshot codec', () => {
         },
       ]]),
     };
-    env.jReplicas.set('Testnet', {
+    env.state.jReplicas.set('Testnet', {
       name: 'Testnet',
       blockNumber: 44n,
       stateRoot: new Uint8Array(32).fill(7),
@@ -94,12 +94,12 @@ describe('runtime snapshot codec', () => {
     expect(checkpoint.runtimeState?.verifiedProfileRoutes).toBeUndefined();
     expect(restored.runtimeState?.verifiedProfileRoutes).toBeUndefined();
     expect(restored.runtimeState?.runtimeAdapterCommandFrontiers).toEqual(env.runtimeState.runtimeAdapterCommandFrontiers);
-    expect(restored.jReplicas.get('Testnet')).toEqual(expect.objectContaining({
+    expect(restored.state.jReplicas.get('Testnet')).toEqual(expect.objectContaining({
       blockNumber: 44n,
       stateRoot: new Uint8Array(32).fill(7),
       lastBlockTimestamp: 0,
     }));
-    expect(restored.jReplicas.get('Testnet')?.jadapter).toBeUndefined();
+    expect(restored.state.jReplicas.get('Testnet')?.jadapter).toBeUndefined();
   });
 
   test('durable runtime snapshot retains explicit triggers and drops scheduled-wake-only inputs', () => {
@@ -133,7 +133,7 @@ describe('runtime snapshot codec', () => {
 
   test('durable runtime snapshot rejects corrupted jurisdiction block numbers', () => {
     const env = createEmptyEnv('durable-runtime-invalid-j-height');
-    env.jReplicas.set('Corrupt', {
+    env.state.jReplicas.set('Corrupt', {
       name: 'Corrupt',
       blockNumber: 'not-a-height' as never,
       stateRoot: new Uint8Array(32),
@@ -145,14 +145,14 @@ describe('runtime snapshot codec', () => {
 
     expect(() => buildDurableRuntimeMachineSnapshot(env))
       .toThrow('RUNTIME_MACHINE_J_BLOCK_NUMBER_INVALID:not-a-height');
-    env.jReplicas.get('Corrupt')!.blockNumber = -1n;
+    env.state.jReplicas.get('Corrupt')!.blockNumber = -1n;
     expect(() => buildDurableRuntimeMachineSnapshot(env))
       .toThrow('RUNTIME_MACHINE_J_BLOCK_NUMBER_INVALID:-1');
   });
 
   test('runtime snapshots reject a missing jurisdiction replica map', () => {
     const env = createEmptyEnv('durable-runtime-missing-j-replicas');
-    Reflect.deleteProperty(env, 'jReplicas');
+    Reflect.deleteProperty(env.state, 'jReplicas');
 
     expect(() => buildDurableRuntimeMachineSnapshot(env))
       .toThrow('RUNTIME_SNAPSHOT_J_REPLICAS_MISSING');

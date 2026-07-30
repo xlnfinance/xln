@@ -92,7 +92,7 @@ describe('J submit crash recovery', () => {
     if (!afterIntent) throw new Error('failed to restore committed J intent');
     afterIntent.scenarioMode = true;
     afterIntent.quietRuntimeLogs = true;
-    afterIntent.jReplicas.get(jurisdiction.name)!.jadapter = jadapter;
+    afterIntent.state.jReplicas.get(jurisdiction.name)!.jadapter = jadapter;
     const intentReplica = findReplica(afterIntent, sender.id);
     expect(intentReplica.state.jBatchState?.status).toBe('sent');
     expect(intentReplica.jSubmitState).toBeUndefined();
@@ -109,7 +109,7 @@ describe('J submit crash recovery', () => {
     if (!afterAttempt) throw new Error('failed to restore durable J attempt');
     afterAttempt.scenarioMode = true;
     afterAttempt.quietRuntimeLogs = true;
-    afterAttempt.jReplicas.get(jurisdiction.name)!.jadapter = jadapter;
+    afterAttempt.state.jReplicas.get(jurisdiction.name)!.jadapter = jadapter;
     expect(findReplica(afterAttempt, sender.id).jSubmitState).toMatchObject({
       submitAttempts: 1,
       entityNonce: 1,
@@ -140,7 +140,7 @@ describe('J submit crash recovery', () => {
     if (!beforeIo) throw new Error('failed to restore before real BrowserVM rejection');
     beforeIo.scenarioMode = true;
     beforeIo.quietRuntimeLogs = true;
-    beforeIo.jReplicas.get(jurisdiction.name)!.jadapter = jadapter;
+    beforeIo.state.jReplicas.get(jurisdiction.name)!.jadapter = jadapter;
     const consensusHashBeforeResult = computeCanonicalEntityHash(findReplica(beforeIo, sender.id)).hash;
     expect(beforeIo.runtimeState?.pendingCommittedJOutbox).toHaveLength(1);
 
@@ -173,7 +173,7 @@ describe('J submit crash recovery', () => {
     expect(findReplica(afterIo, sender.id).jSubmitState?.terminalFailure).toBeUndefined();
     expect(findReplica(afterIo, sender.id).state.jBatchState?.entityNonce).toBe(1);
     expect(findReplica(afterIo, sender.id).state.jBatchState?.sentBatch).toBeUndefined();
-    afterIo.jReplicas.get(jurisdiction.name)!.jadapter = jadapter;
+    afterIo.state.jReplicas.get(jurisdiction.name)!.jadapter = jadapter;
     await processRuntime(afterIo, []);
     await processRuntime(afterIo, []);
     expect(afterIo.runtimeState?.pendingCommittedJOutbox ?? []).toEqual([]);
@@ -232,7 +232,7 @@ describe('J submit crash recovery', () => {
       const restored = await loadEnvFromDB(runtimeId, seed);
       if (!restored) throw new Error(`failed to restore J-submit crash boundary ${boundary}`);
       try {
-        const replica = Array.from(restored.eReplicas.values()).find((candidate) => (
+        const replica = Array.from(restored.state.eReplicas.values()).find((candidate) => (
           candidate.jSubmitState !== undefined ||
           candidate.state.jBatchState?.sentBatch !== undefined ||
           (candidate.state.jBatchState?.batch.reserveToReserve.length ?? 0) > 0

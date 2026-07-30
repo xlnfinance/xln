@@ -78,7 +78,7 @@ const buildSingleSignerCommitments = (
   const { env, workingReplica } = context;
   const leader = getEntityLeaderState(workingReplica.state);
   const height = workingReplica.state.height + 1;
-  const timestamp = env.timestamp;
+  const timestamp = env.state.timestamp;
   const parentFrameHash = getPrevFrameHash(workingReplica.state);
   const state = {
     ...applied.newState,
@@ -155,7 +155,7 @@ const buildSingleSignerFrame = async (
     env,
     workingReplica.state,
     proposalTxs,
-    env.timestamp,
+    env.state.timestamp,
   );
   options.checkpoint('frameApply');
   const commitments = buildSingleSignerCommitments(context, options, applied);
@@ -300,7 +300,7 @@ const installSingleSignerFrame = async (
   candidateEffects.push(...execution.candidateEffects);
   pruneReplicaFinalizedJHistory(workingReplica);
   await runLocalPostCommitHooks(env, workingReplica, entityOutbox);
-  workingReplica.lastConsensusProgressAt = env.timestamp;
+  workingReplica.lastConsensusProgressAt = env.state.timestamp;
   entityOutbox.push(...commitOutputs);
   jOutbox.push(...execution.jOutputs);
   workingReplica.mempool = removeCommittedTxsFromMempool(

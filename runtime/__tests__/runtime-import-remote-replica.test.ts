@@ -18,7 +18,7 @@ const installJurisdiction = (env: ReturnType<typeof createEmptyEnv>): Jurisdicti
     entityProviderAddress: addr('12'),
   };
   env.activeJurisdiction = jurisdiction.name;
-  env.jReplicas.set(jurisdiction.name, createTestJReplica({
+  env.state.jReplicas.set(jurisdiction.name, createTestJReplica({
     name: jurisdiction.name,
     rpcs: [jurisdiction.address],
     chainId: jurisdiction.chainId,
@@ -69,7 +69,7 @@ describe('runtime remote replica import', () => {
 
     await processRuntime(env);
 
-    const replica = env.eReplicas.get(`${entityId}:${signerId}`);
+    const replica = env.state.eReplicas.get(`${entityId}:${signerId}`);
     expect(replica).toBeDefined();
     expect(replica?.entityEncPubKey).toBe('');
     expect(replica?.entityEncPrivKey).toBe('');
@@ -100,7 +100,7 @@ describe('runtime remote replica import', () => {
     const env = createEmptyEnv('runtime-import-failure-atomicity');
     env.quietRuntimeLogs = true;
     env.scenarioMode = true;
-    env.timestamp = 1_000;
+    env.state.timestamp = 1_000;
     const jurisdiction = installJurisdiction(env);
     const signerId = `0x${'ab'.repeat(20)}`;
     const importedEntityId = generateLazyEntityId([signerId], 1n).toLowerCase();
@@ -128,11 +128,11 @@ describe('runtime remote replica import', () => {
 
     await expect(processRuntime(env)).rejects.toThrow('RUNTIME_ENTITY_INPUT_UNKNOWN_TARGET');
 
-    expect(env.eReplicas.has(`${importedEntityId}:${signerId}`)).toBe(false);
-    expect([...env.eReplicas.values()].some(replica => replica.certifiedFrameAnchor !== undefined)).toBe(false);
-    expect([...env.eReplicas.values()].some(replica => replica.certifiedFrameLineage !== undefined)).toBe(false);
-    expect(env.height).toBe(0);
-    expect(env.timestamp).toBe(1_000);
+    expect(env.state.eReplicas.has(`${importedEntityId}:${signerId}`)).toBe(false);
+    expect([...env.state.eReplicas.values()].some(replica => replica.certifiedFrameAnchor !== undefined)).toBe(false);
+    expect([...env.state.eReplicas.values()].some(replica => replica.certifiedFrameLineage !== undefined)).toBe(false);
+    expect(env.state.height).toBe(0);
+    expect(env.state.timestamp).toBe(1_000);
     expect(env.runtimeMempool?.runtimeTxs).toEqual(runtimeInput.runtimeTxs);
     expect(env.runtimeMempool?.entityInputs).toEqual(runtimeInput.entityInputs);
     expect(env.runtimeMempool?.queuedAt).toBe(1_000);

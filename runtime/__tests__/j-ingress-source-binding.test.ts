@@ -92,7 +92,7 @@ describe('manual J-event ingress source binding', () => {
     const env = createEmptyEnv('manual-j-ingress-object-capability');
     const config = jurisdiction('chain-local', 31_337, 'c1', 'c2');
     const source = jReplica(config);
-    env.jReplicas.set(config.name, source);
+    env.state.jReplicas.set(config.name, source);
 
     expect(bindLocalJEventIngressSource(env, source, 'exact')).toMatchObject({
       replica: source,
@@ -113,12 +113,12 @@ describe('manual J-event ingress source binding', () => {
     const chainB = jurisdiction('chain-b', 31_338, 'a1', 'a2');
     const sourceA = jReplica(chainA);
     const sourceB = jReplica(chainB);
-    env.jReplicas = new Map([[chainA.name, sourceA], [chainB.name, sourceB]]);
+    env.state.jReplicas = new Map([[chainA.name, sourceA], [chainB.name, sourceB]]);
 
     const entityA = entityId('aa');
     const entityB = entityId('bb');
-    env.eReplicas.set(`${entityA}:1`, entityReplica(entityA, '1', chainA));
-    env.eReplicas.set(`${entityB}:2`, entityReplica(entityB, '2', chainB));
+    env.state.eReplicas.set(`${entityA}:1`, entityReplica(entityA, '1', chainA));
+    env.state.eReplicas.set(`${entityB}:2`, entityReplica(entityB, '2', chainB));
 
     const input = buildJEventsRuntimeInput(env, [{
       name: 'ReserveUpdated',
@@ -139,9 +139,9 @@ describe('manual J-event ingress source binding', () => {
     const env = createEmptyEnv('manual-j-ingress-log-index');
     const config = jurisdiction('chain-log-index', 31_337, 'd1', 'd2');
     const source = jReplica(config);
-    env.jReplicas.set(config.name, source);
+    env.state.jReplicas.set(config.name, source);
     const observedEntity = entityId('41');
-    env.eReplicas.set(`${observedEntity}:1`, entityReplica(observedEntity, '1', config));
+    env.state.eReplicas.set(`${observedEntity}:1`, entityReplica(observedEntity, '1', config));
     const contractInterface = new ethers.Interface([
       'event ReserveUpdated(bytes32 indexed entity,uint256 indexed tokenId,uint256 newBalance)',
     ]);
@@ -195,7 +195,7 @@ describe('manual J-event ingress source binding', () => {
     const env = createEmptyEnv('manual-j-ingress-log-index-missing');
     const config = jurisdiction('chain-log-index-missing', 31_337, 'e1', 'e2');
     const source = jReplica(config);
-    env.jReplicas.set(config.name, source);
+    env.state.jReplicas.set(config.name, source);
 
     expect(() => buildJEventsRuntimeInput(env, [{
       name: 'ReserveUpdated',
@@ -277,22 +277,22 @@ describe('manual J-event ingress source binding', () => {
         jadapter: adapterB,
       } satisfies JReplica;
       const mismatchedEnv = createEmptyEnv('manual-j-ingress-real-stack-mismatch');
-      mismatchedEnv.jReplicas.set(chainB.name, {
+      mismatchedEnv.state.jReplicas.set(chainB.name, {
         ...sourceB,
         entityProviderAddress: address('ff'),
         contracts: { ...sourceB.contracts, entityProvider: address('ff') },
       });
       expect(() => bindLocalJEventIngressSource(
         mismatchedEnv,
-        mismatchedEnv.jReplicas.get(chainB.name),
+        mismatchedEnv.state.jReplicas.get(chainB.name),
         'real-stack-mismatch',
       )).toThrow('J_EVENT_LOCAL_SOURCE_ENTITY_PROVIDER_MISMATCH');
       const env = createEmptyEnv('manual-j-ingress-real-two-stack');
-      env.jReplicas = new Map([[chainA.name, sourceA], [chainB.name, sourceB]]);
+      env.state.jReplicas = new Map([[chainA.name, sourceA], [chainB.name, sourceB]]);
       const entityA = entityId('71');
       const entityB = entityId('72');
-      env.eReplicas.set(`${entityA}:1`, entityReplica(entityA, '1', chainA));
-      env.eReplicas.set(`${entityB}:2`, entityReplica(entityB, '2', chainB));
+      env.state.eReplicas.set(`${entityA}:1`, entityReplica(entityA, '1', chainA));
+      env.state.eReplicas.set(`${entityB}:2`, entityReplica(entityB, '2', chainB));
 
       const events = await adapterB.debugFundReserves(entityB, 1, 5n);
       expect(events).toHaveLength(1);

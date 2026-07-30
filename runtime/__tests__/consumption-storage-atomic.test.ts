@@ -94,7 +94,7 @@ test('normal frame atomically publishes accumulator root, witness node, diff, an
   env.quietRuntimeLogs = true;
   env.runtimeConfig = { storage: { enabled: false } };
   env.activeJurisdiction = jurisdiction.name;
-  env.jReplicas.set(jurisdiction.name, {
+  env.state.jReplicas.set(jurisdiction.name, {
     ...jurisdiction,
     blockNumber: 0n,
     stateRoot: new Uint8Array(32),
@@ -127,7 +127,7 @@ test('normal frame atomically publishes accumulator root, witness node, diff, an
     entityInputs: [],
   });
   await processRuntime(env, []);
-  const replica = Array.from(env.eReplicas.values())[0]!;
+  const replica = Array.from(env.state.eReplicas.values())[0]!;
   const identity = {
     targetEntityId: entityId,
     sourceEntityId: `0x${'22'.repeat(32)}`,
@@ -194,7 +194,7 @@ test('normal frame atomically publishes accumulator root, witness node, diff, an
 
   const atomicHistoryWrite = historyDb.writes.find((keys) => (
     keys.includes(KEY_HEAD.toString('hex')) &&
-    keys.includes(keyDiff(env.height).toString('hex')) &&
+    keys.includes(keyDiff(env.state.height).toString('hex')) &&
     keys.includes(keyConsumptionNode(node.hash).toString('hex'))
   ));
   expect(atomicHistoryWrite).toBeDefined();
@@ -223,7 +223,7 @@ test('normal frame atomically publishes accumulator root, witness node, diff, an
     },
   });
   expect(decodeBuffer(await rebuiltCurrent.get(keyConsumptionNode(node.hash)))).toEqual(node.node);
-  expect(decodeBuffer<StorageHead>(await rebuiltCurrent.get(KEY_HEAD)).latestHeight).toBe(env.height);
+  expect(decodeBuffer<StorageHead>(await rebuiltCurrent.get(KEY_HEAD)).latestHeight).toBe(env.state.height);
 
   const projected = projectEntityCoreDoc(replica.state);
   const overflowSequences = new Map(Array.from(

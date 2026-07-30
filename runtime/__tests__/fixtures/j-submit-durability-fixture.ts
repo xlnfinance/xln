@@ -64,8 +64,8 @@ const makeState = (): EntityState => {
 export const makeJSubmitDurabilityFixture = () => {
   const env = createEmptyEnv('j-submit-durability-seed');
   env.runtimeId = signerId;
-  env.timestamp = 2_000;
-  env.eReplicas.clear();
+  env.state.timestamp = 2_000;
+  env.state.eReplicas.clear();
   const replica: EntityReplica = {
     entityId,
     signerId,
@@ -81,13 +81,13 @@ export const makeJSubmitDurabilityFixture = () => {
       createdAt: 1_000,
     }]]),
   };
-  env.eReplicas.set(`${entityId}:${signerId}`, replica);
+  env.state.eReplicas.set(`${entityId}:${signerId}`, replica);
   return { env, replica };
 };
 
 export const commitJSubmitAttempt = async () => {
   const fixture = makeJSubmitDurabilityFixture();
-  const [retry] = collectDueJSubmitRuntimeTxs(fixture.env, fixture.env.timestamp);
+  const [retry] = collectDueJSubmitRuntimeTxs(fixture.env, fixture.env.state.timestamp);
   if (!retry) throw new Error('retry fixture missing');
   const jOutbox = await applyRuntimeTx(fixture.env, retry, { isReplay: true });
   registerPendingCommittedJOutbox(fixture.env, jOutbox);

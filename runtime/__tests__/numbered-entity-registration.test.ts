@@ -90,7 +90,7 @@ describe('numbered Entity registration authority', () => {
         entityProviderAddress: adapter.addresses.entityProvider,
       };
       env.jAdapter = adapter;
-      env.jReplicas.set(jurisdiction.name, makeReplica(jurisdiction.name, adapter));
+      env.state.jReplicas.set(jurisdiction.name, makeReplica(jurisdiction.name, adapter));
       const payerBefore = await adapter.getEthBalance(payerAddress);
 
       const results = await createNumberedEntitiesBatch(
@@ -146,7 +146,7 @@ describe('numbered Entity registration authority', () => {
         depositoryAddress: adapter.addresses.depository,
         entityProviderAddress: adapter.addresses.entityProvider,
       };
-      env.jReplicas.set(name, makeReplica(name, adapter));
+      env.state.jReplicas.set(name, makeReplica(name, adapter));
       env.jAdapter = adapter;
 
       const selectedBefore = await adapter.getEthBalance(signerAddress);
@@ -241,7 +241,7 @@ describe('numbered Entity registration authority', () => {
       };
       const env = createEmptyEnv('numbered-registration:ambiguous');
       env.jAdapter = first;
-      env.jReplicas.set('duplicate-stack', makeReplica('duplicate-stack', second));
+      env.state.jReplicas.set('duplicate-stack', makeReplica('duplicate-stack', second));
       await expect(createNumberedEntity(
         'must-not-guess-vm',
         ['0x1111111111111111111111111111111111111111'],

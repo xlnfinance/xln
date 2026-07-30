@@ -219,7 +219,7 @@ describe('RPC J-watcher backlog drain', () => {
 
     const env = createEmptyEnv(RUNTIME_SEED);
     env.scenarioMode = true;
-    env.timestamp = 1;
+    env.state.timestamp = 1;
     setScenarioStorageEnabled(env, false);
     ensureSignerKeysFromSeed(env, ['2', '3'], RUNTIME_SEED);
 
@@ -281,9 +281,9 @@ describe('RPC J-watcher backlog drain', () => {
 
     await processJEvents(env);
 
-    const replica = env.eReplicas.get(`${entityId}:${SIGNER_ID}`);
+    const replica = env.state.eReplicas.get(`${entityId}:${SIGNER_ID}`);
     expect(replica?.state.reserves.get(TOKEN_ID)).toBe(RESERVE_AMOUNT);
-    expect(Number(env.jReplicas.get(jurisdictionName)?.blockNumber ?? 0n))
+    expect(Number(env.state.jReplicas.get(jurisdictionName)?.blockNumber ?? 0n))
       .toBeGreaterThanOrEqual(Number(reserveEvent?.blockNumber ?? 0));
     expect(replica?.state.lastFinalizedJHeight).toBeGreaterThanOrEqual(Number(reserveEvent?.blockNumber ?? 0));
 
@@ -292,9 +292,9 @@ describe('RPC J-watcher backlog drain', () => {
     await processJEvents(env);
 
     const durableSemanticHeight = Number(reserveEvent?.blockNumber ?? 0);
-    expect(Number(env.jReplicas.get(jurisdictionName)?.blockNumber ?? 0n)).toBe(durableSemanticHeight);
+    expect(Number(env.state.jReplicas.get(jurisdictionName)?.blockNumber ?? 0n)).toBe(durableSemanticHeight);
     expect(adapter.getWatcherScanProgress?.().scannedThroughHeight).toBe(authenticatedEmptyTail);
-    const currentReplica = env.eReplicas.get(`${entityId}:${SIGNER_ID}`);
+    const currentReplica = env.state.eReplicas.get(`${entityId}:${SIGNER_ID}`);
     expect(currentReplica?.jHistory?.scannedThroughHeight).toBe(durableSemanticHeight);
     expect(currentReplica?.state.lastFinalizedJHeight).toBe(durableSemanticHeight);
 
@@ -317,18 +317,18 @@ describe('RPC J-watcher backlog drain', () => {
     const irrelevantLogHeight = await provider.getBlockNumber();
     await processJEvents(env);
 
-    const afterIrrelevantLog = env.eReplicas.get(`${entityId}:${SIGNER_ID}`);
+    const afterIrrelevantLog = env.state.eReplicas.get(`${entityId}:${SIGNER_ID}`);
     expect(afterIrrelevantLog?.jHistory?.scannedThroughHeight).toBe(durableSemanticHeight);
     expect(afterIrrelevantLog?.jHistory?.contiguousThroughHeight).toBe(durableSemanticHeight);
     expect(adapter.getWatcherScanProgress?.().scannedThroughHeight).toBe(irrelevantLogHeight);
 
     const restored = createEmptyEnv(RUNTIME_SEED);
     if (!afterIrrelevantLog) throw new Error('J_WATCHER_BACKLOG_REPLICA_MISSING');
-    restored.eReplicas.set(`${entityId}:${SIGNER_ID}`, buildCanonicalEntityReplicaSnapshot(afterIrrelevantLog));
+    restored.state.eReplicas.set(`${entityId}:${SIGNER_ID}`, buildCanonicalEntityReplicaSnapshot(afterIrrelevantLog));
     restoreDurableRuntimeSnapshot(restored, buildDurableRuntimeMachineSnapshot(env));
 
-    expect(Number(restored.jReplicas.get(jurisdictionName)?.blockNumber ?? 0n)).toBe(durableSemanticHeight);
-    expect(restored.eReplicas.get(`${entityId}:${SIGNER_ID}`)?.jHistory?.scannedThroughHeight)
+    expect(Number(restored.state.jReplicas.get(jurisdictionName)?.blockNumber ?? 0n)).toBe(durableSemanticHeight);
+    expect(restored.state.eReplicas.get(`${entityId}:${SIGNER_ID}`)?.jHistory?.scannedThroughHeight)
       .toBe(durableSemanticHeight);
 
     const lateSignerPrivateKey = getSignerPrivateKey(env, LATE_SIGNER_ID);
@@ -355,7 +355,7 @@ describe('RPC J-watcher backlog drain', () => {
 
     await processJEvents(env);
 
-    const lateReplica = env.eReplicas.get(`${lateEntityId}:${LATE_SIGNER_ID}`);
+    const lateReplica = env.state.eReplicas.get(`${lateEntityId}:${LATE_SIGNER_ID}`);
     expect(lateReplica?.jHistory?.scannedThroughHeight).toBe(irrelevantLogHeight);
     expect(lateReplica?.state.lastFinalizedJHeight).toBeLessThan(irrelevantLogHeight);
     if (!lateReplica) throw new Error('J_WATCHER_BACKLOG_LATE_REPLICA_MISSING');
@@ -364,7 +364,7 @@ describe('RPC J-watcher backlog drain', () => {
       getCertifiedBoardNodeStore(env),
       registeredEntityId,
     )).toBe(registeredBoardHash.toLowerCase());
-    expect(env.eReplicas.get(`${entityId}:${SIGNER_ID}`)?.state.reserves.get(TOKEN_ID))
+    expect(env.state.eReplicas.get(`${entityId}:${SIGNER_ID}`)?.state.reserves.get(TOKEN_ID))
       .toBe(RESERVE_AMOUNT);
 
     await provider.send('anvil_mine', ['0x1']);

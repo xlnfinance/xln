@@ -34,22 +34,22 @@ export const notifyRuntimeSyncAfterCommit = (
       options.createChannel ??
       ((name: string): RuntimeSyncChannel => new BroadcastChannel(name));
     state.runtimeSyncChannel ??= createChannel('xln-runtime-sync');
-    state.runtimeSyncChannel.postMessage({ runtimeId: env.runtimeId, height: env.height });
+    state.runtimeSyncChannel.postMessage({ runtimeId: env.runtimeId, height: env.state.height });
     delete state.runtimeSyncNotificationFailure;
     return null;
   } catch (cause) {
-    const notificationError = new Error(`RUNTIME_SYNC_NOTIFICATION_FAILED:height=${env.height}`, { cause });
+    const notificationError = new Error(`RUNTIME_SYNC_NOTIFICATION_FAILED:height=${env.state.height}`, { cause });
     let reportedError: Error = notificationError;
     try {
       state.runtimeSyncChannel?.close();
     } catch (closeCause) {
       reportedError = new AggregateError(
         [notificationError, closeCause],
-        `RUNTIME_SYNC_NOTIFICATION_AND_CLOSE_FAILED:height=${env.height}`,
+        `RUNTIME_SYNC_NOTIFICATION_AND_CLOSE_FAILED:height=${env.state.height}`,
       );
     }
     state.runtimeSyncChannel = null;
-    state.runtimeSyncNotificationFailure = { height: env.height, message: reportedError.message };
+    state.runtimeSyncNotificationFailure = { height: env.state.height, message: reportedError.message };
     return reportedError;
   }
 };

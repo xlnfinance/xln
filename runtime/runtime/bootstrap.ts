@@ -69,7 +69,7 @@ const restoreRuntimeAtBootstrap = async (
   if (!env) return { env: baseEnv, restored: false };
   runtimeLog.info('main.restored', {
     runtime: String(env.runtimeId || '').slice(0, 12),
-    height: env.height,
+    height: env.state.height,
   });
   return { env, restored: true };
 };

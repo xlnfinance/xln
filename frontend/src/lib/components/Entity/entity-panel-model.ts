@@ -40,7 +40,7 @@ export function getEnvReplicaMap(
   _revision = '',
 ): Map<string, EntityReplica> | null {
   if (!sourceEnv) return null;
-  return materializeReplicaMap(sourceEnv.eReplicas as Map<string, EntityReplica>);
+  return materializeReplicaMap(sourceEnv.state.eReplicas as Map<string, EntityReplica>);
 }
 
 export function findReplicaForEntityTab(
@@ -254,7 +254,7 @@ function buildEntityPanelViewFromRuntimeProjection(
   return {
     runtimeId: getRuntimeId(sourceEnv),
     height: Math.max(0, Math.floor(Number(frame.height || 0))),
-    timestamp: Math.max(0, Math.floor(Number(activeReplica.state?.timestamp ?? sourceEnv?.timestamp ?? 0))),
+    timestamp: Math.max(0, Math.floor(Number(activeReplica.state?.timestamp ?? sourceEnv?.state.timestamp ?? 0))),
     activeJurisdictionName: getCurrentEntityJurisdictionName(sourceEnv, activeReplica),
     replicas,
     replica: findReplicaForEntityTab(replicas, activeReplica.entityId, activeReplica.signerId || signerId),
@@ -295,22 +295,22 @@ export function buildEntityPanelView(
   }
   return {
     runtimeId: getRuntimeId(sourceEnv),
-    height: Number(sourceEnv?.height ?? 0),
-    timestamp: Math.max(0, Math.floor(Number(sourceEnv?.timestamp ?? 0))),
+    height: Number(sourceEnv?.state.height ?? 0),
+    timestamp: Math.max(0, Math.floor(Number(sourceEnv?.state.timestamp ?? 0))),
     activeJurisdictionName: getActiveJurisdictionName(sourceEnv),
     replicas,
     replica: findReplicaForEntityTab(replicas, entityId, signerId),
     profiles,
     profileByEntityId,
     entityNames,
-    jurisdictions: sourceEnv?.jReplicas ? Array.from(sourceEnv.jReplicas.values()) as EntityPanelJurisdictionView[] : [],
+    jurisdictions: sourceEnv?.state.jReplicas ? Array.from(sourceEnv.state.jReplicas.values()) as EntityPanelJurisdictionView[] : [],
     isDevnet: hasDevnetJurisdiction(sourceEnv),
   };
 }
 
 export function hasDevnetJurisdiction(sourceEnv: RuntimeReplica | EnvSnapshot | null | undefined): boolean {
-  if (!sourceEnv?.jReplicas) return false;
-  for (const [, replica] of sourceEnv.jReplicas.entries()) {
+  if (!sourceEnv?.state.jReplicas) return false;
+  for (const [, replica] of sourceEnv.state.jReplicas.entries()) {
     if (Number(replica?.chainId ?? 0) === 31337) return true;
   }
   return false;
@@ -381,7 +381,7 @@ export function getEntityJurisdictionKey(
   if (!normalized) return '';
 
   const fromReplicas = getEntityJurisdictionKeyFromReplicas(
-    env?.eReplicas as Map<string, EntityReplica> | null | undefined,
+    env?.state.eReplicas as Map<string, EntityReplica> | null | undefined,
     normalized,
   );
   if (fromReplicas) return fromReplicas;

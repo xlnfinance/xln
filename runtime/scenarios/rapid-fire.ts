@@ -58,8 +58,8 @@ export async function rapidFire(env: RuntimeReplica): Promise<void> {
   ensureSignerKeysFromSeed(env, ['1', '2', '3'], 'Rapid Fire');
   const process = await getProcess();
 
-  if (env.scenarioMode && env.height === 0) {
-    env.timestamp = 1;
+  if (env.scenarioMode && env.state.height === 0) {
+    env.state.timestamp = 1;
   }
 
   console.log('═══════════════════════════════════════════════════════════════');
@@ -261,7 +261,7 @@ export async function rapidFire(env: RuntimeReplica): Promise<void> {
   let totalMempool = 0;
   let totalPending = 0;
 
-  for (const [, replica] of env.eReplicas) {
+  for (const [, replica] of env.state.eReplicas) {
     for (const [, account] of replica.state.accounts) {
       totalMempool += account.mempool.length;
       if (account.pendingFrame) totalPending++;

@@ -86,13 +86,13 @@ const ensureRuntimeInput = (env: RuntimeReplica) => {
 
 const resolveJurisdiction = (env: RuntimeReplica, requestedName?: string) => {
   const normalizedRequested = String(requestedName || '').trim().toLowerCase();
-  const name = (normalizedRequested && env.jReplicas
-      ? Array.from(env.jReplicas.keys()).find((key) => key.toLowerCase() === normalizedRequested)
+  const name = (normalizedRequested && env.state.jReplicas
+      ? Array.from(env.state.jReplicas.keys()).find((key) => key.toLowerCase() === normalizedRequested)
       : undefined)
     || env.activeJurisdiction
-    || (env.jReplicas ? Array.from(env.jReplicas.keys())[0] : undefined);
-  if (!name || !env.jReplicas) return null;
-  const jr = env.jReplicas.get(name);
+    || (env.state.jReplicas ? Array.from(env.state.jReplicas.keys())[0] : undefined);
+  if (!name || !env.state.jReplicas) return null;
+  const jr = env.state.jReplicas.get(name);
   if (!jr) return null;
   const blockTimeMs = requireJurisdictionBlockTimeMs({ name, blockTimeMs: jr.blockTimeMs });
   return {
@@ -132,7 +132,7 @@ export async function bootstrapHub(env?: RuntimeReplica, config?: Partial<HubCon
   const encodedBoard = encodeBoard(consensusConfig);
   const entityId = hashBoard(encodedBoard);
 
-  const replicaExists = !!Array.from(env.eReplicas?.keys?.() || []).find(key => key.startsWith(`${entityId}:`));
+  const replicaExists = !!Array.from(env.state.eReplicas?.keys?.() || []).find(key => key.startsWith(`${entityId}:`));
 
   if (!replicaExists) {
     ensureRuntimeInput(env);
@@ -154,8 +154,8 @@ export async function bootstrapHub(env?: RuntimeReplica, config?: Partial<HubCon
       entityId,
       jurisdictionName: jurisdiction?.name || hubConfig.jurisdictionName || '',
     });
-  } else if (jurisdiction && env.eReplicas) {
-    for (const [key, replica] of env.eReplicas.entries()) {
+  } else if (jurisdiction && env.state.eReplicas) {
+    for (const [key, replica] of env.state.eReplicas.entries()) {
       if (key.startsWith(entityId)) {
         if (!replica.state.config?.jurisdiction) {
           replica.state.config.jurisdiction = jurisdiction;

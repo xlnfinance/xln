@@ -338,10 +338,10 @@ const makeTestViewPageLoader =
     },
   ) => {
     const normalizedEntityId = String(requestedEntityId).toLowerCase();
-    const replica = Array.from(env.eReplicas.values()).find(
+    const replica = Array.from(env.state.eReplicas.values()).find(
       item => String(item.entityId).toLowerCase() === normalizedEntityId,
     );
-    if (!replica || height !== env.height) return null;
+    if (!replica || height !== env.state.height) return null;
     const accountLimit = readTestPageLimit(query?.accountsLimit ?? query?.limit, 10);
     const accountCursor = String(query?.accountsCursor ?? query?.cursor ?? '').toLowerCase();
     const accountDirection = query?.sortDir === 'desc' ? 'desc' : 'asc';
@@ -454,7 +454,7 @@ const ownerBindingSignature = (runtimeId: string, challenge: string, capability:
 
 test('runtime adapter solvency-summary returns per-stack asset conservation', async () => {
   const env = makeEnv();
-  const replica = Array.from(env.eReplicas.values())[0]!;
+  const replica = Array.from(env.state.eReplicas.values())[0]!;
   const account = replica.state.accounts.get(counterpartyId)!;
   account.deltas.set(1, { ...makeTestDelta(1, 0n), collateral: 100n });
   account.pendingFrame = {
@@ -668,7 +668,7 @@ test('runtime adapter resolver reads live head and entity paths', async () => {
 
 test('runtime adapter direct read paths return compact read snapshots', async () => {
   const env = makeEnv();
-  const replica = Array.from(env.eReplicas.values())[0]!;
+  const replica = Array.from(env.state.eReplicas.values())[0]!;
   const account = replica.state.accounts.get(counterpartyId)! as any;
   account.watchSeed = `0x${'42'.repeat(32)}`;
   account.mempool = Array.from({ length: 500 }, (_, index) => ({
@@ -756,7 +756,7 @@ test('runtime adapter direct read paths return compact read snapshots', async ()
       loadEntityState: async () => replica.state,
     },
     `entity/${entityId}`,
-    { atHeight: env.height - 1 },
+    { atHeight: env.state.height - 1 },
   );
   const historicalAccount = await resolveRuntimeAdapterRead<typeof liveAccount>(
     {
@@ -764,7 +764,7 @@ test('runtime adapter direct read paths return compact read snapshots', async ()
       loadEntityAccountDoc: async () => projectAccountDoc(account),
     },
     `entity/${entityId}/account/${counterpartyId}`,
-    { atHeight: env.height - 1 },
+    { atHeight: env.state.height - 1 },
   );
   const encodedLiveEntity = encodeRuntimeAdapterMessage({
     v: 1,
@@ -833,7 +833,7 @@ test('runtime adapter resolver returns a bounded view frame for the app shell', 
 
 test('current stored view frame overlays local identity without mixing a later live frame', async () => {
   const env = makeEnv();
-  const replica = Array.from(env.eReplicas.values())[0]!;
+  const replica = Array.from(env.state.eReplicas.values())[0]!;
   replica.state.prevFrameHash = 'frame-h7';
   replica.state.htlcNotes = new Map([['hashlock:local-h7', 'local note h7']]);
   const storedCore = structuredClone(projectEntityCoreDoc(replica.state));
@@ -858,8 +858,8 @@ test('current stored view frame overlays local identity without mixing a later l
       env,
       readHead: async () => ({
         schemaVersion: STORAGE_SCHEMA_VERSION,
-        latestHeight: env.height,
-        latestMaterializedHeight: env.height,
+        latestHeight: env.state.height,
+        latestMaterializedHeight: env.state.height,
         latestSnapshotHeight: 0,
         snapshotPeriodFrames: 256,
         retainSnapshots: 3,
@@ -870,8 +870,8 @@ test('current stored view frame overlays local identity without mixing a later l
       }),
       loadEntityViewPage: async () => {
         await Promise.resolve();
-        env.height = 8;
-        env.timestamp = 800;
+        env.state.height = 8;
+        env.state.timestamp = 800;
         replica.isProposer = false;
         replica.state.height = 8;
         replica.state.timestamp = 800;
@@ -934,7 +934,7 @@ test('runtime adapter graph-frame keeps gossip peers and complete local account 
   env.gossip = createGossipLayer();
   env.gossip.announce(makeHubProfile(entityId, 'H1'));
   env.gossip.announce(makeHubProfile(counterpartyId, 'H2'));
-  const account = Array.from(env.eReplicas.values())[0]!.state.accounts.get(counterpartyId)!;
+  const account = Array.from(env.state.eReplicas.values())[0]!.state.accounts.get(counterpartyId)!;
   account.deltas.set(1, makeTestDelta(1, 25n));
   const activityTxs: AccountTx[] = [10n, 20n, 30n].map(amount => ({
     type: 'direct_payment',
@@ -1032,9 +1032,9 @@ test('runtime adapter live graph-frame never reads a prunable storage generation
       env,
       readHead: async () => ({
         schemaVersion: STORAGE_SCHEMA_VERSION,
-        latestHeight: env.height,
-        latestMaterializedHeight: env.height,
-        latestSnapshotHeight: Math.max(0, env.height - 1),
+        latestHeight: env.state.height,
+        latestMaterializedHeight: env.state.height,
+        latestSnapshotHeight: Math.max(0, env.state.height - 1),
         snapshotPeriodFrames: 5,
         retainSnapshots: 3,
         epochMaxBytes: 1,
@@ -1044,7 +1044,7 @@ test('runtime adapter live graph-frame never reads a prunable storage generation
       }),
       loadEntityViewPage: async () => {
         storagePageReads += 1;
-        throw new Error(`STORAGE_DIFF_MISSING: height=${env.height} scope=entity:${entityId}`);
+        throw new Error(`STORAGE_DIFF_MISSING: height=${env.state.height} scope=entity:${entityId}`);
       },
     },
     'graph-frame',
@@ -1052,13 +1052,13 @@ test('runtime adapter live graph-frame never reads a prunable storage generation
   );
 
   expect(storagePageReads).toBe(0);
-  expect(frame.height).toBe(env.height);
+  expect(frame.height).toBe(env.state.height);
   expect(frame.entities.some(entry => entry.summary.entityId === entityId)).toBe(true);
 });
 
 test('runtime adapter explicit graph-frame height uses exact RDB state even at the live height', async () => {
   const env = makeEnv();
-  const livePage = await makeTestViewPageLoader(env)(entityId, env.height, {
+  const livePage = await makeTestViewPageLoader(env)(entityId, env.state.height, {
     accountsLimit: 10,
     booksLimit: 1,
   });
@@ -1074,9 +1074,9 @@ test('runtime adapter explicit graph-frame height uses exact RDB state even at t
   let storagePageReads = 0;
   const head = {
     schemaVersion: STORAGE_SCHEMA_VERSION,
-    latestHeight: env.height,
-    latestMaterializedHeight: env.height,
-    latestSnapshotHeight: env.height,
+    latestHeight: env.state.height,
+    latestMaterializedHeight: env.state.height,
+    latestSnapshotHeight: env.state.height,
     snapshotPeriodFrames: 5,
     retainSnapshots: 3,
     epochMaxBytes: 1,
@@ -1096,7 +1096,7 @@ test('runtime adapter explicit graph-frame height uses exact RDB state even at t
       },
     },
     'graph-frame',
-    { atHeight: env.height, limit: 10, accountsLimit: 10 },
+    { atHeight: env.state.height, limit: 10, accountsLimit: 10 },
   );
 
   const storedEntity = frame.entities.find(entry => entry.summary.entityId === entityId);
@@ -1111,13 +1111,13 @@ test('runtime adapter explicit graph-frame height uses exact RDB state even at t
         readHead: async () => head,
         listEntityIdsAtHeight: async () => [entityId],
         loadEntityViewPage: async () => {
-          throw new Error(`STORAGE_DIFF_MISSING: height=${env.height} scope=entity:${entityId}`);
+          throw new Error(`STORAGE_DIFF_MISSING: height=${env.state.height} scope=entity:${entityId}`);
         },
       },
       'graph-frame',
-      { atHeight: env.height, limit: 10, accountsLimit: 10 },
+      { atHeight: env.state.height, limit: 10, accountsLimit: 10 },
     ),
-  ).rejects.toThrow(`STORAGE_DIFF_MISSING: height=${env.height} scope=entity:${entityId}`);
+  ).rejects.toThrow(`STORAGE_DIFF_MISSING: height=${env.state.height} scope=entity:${entityId}`);
 });
 
 test('runtime adapter graph-frame wire DTO stays below budget near topology limits', () => {
@@ -1262,7 +1262,7 @@ test('runtime adapter historical graph-frame derives fallback timestamp from the
     query?: Parameters<ReturnType<typeof makeTestViewPageLoader>>[2],
   ) => {
     if (height !== historicalHeight) return null;
-    const live = await liveLoader(requestedEntityId, env.height, query);
+    const live = await liveLoader(requestedEntityId, env.state.height, query);
     if (!live) return null;
     return {
       ...live,
@@ -1277,7 +1277,7 @@ test('runtime adapter historical graph-frame derives fallback timestamp from the
   }>(
     {
       env,
-      readHead: async () => ({ latestHeight: env.height }) as StorageHead,
+      readHead: async () => ({ latestHeight: env.state.height }) as StorageHead,
       readFrame: async () => null,
       listEntityIdsAtHeight: async () => [entityId],
       loadEntityViewPage,
@@ -1288,13 +1288,13 @@ test('runtime adapter historical graph-frame derives fallback timestamp from the
 
   expect(frame.height).toBe(historicalHeight);
   expect(frame.timestamp).toBe(historicalTimestamp);
-  expect(frame.timestamp).not.toBe(env.timestamp);
+  expect(frame.timestamp).not.toBe(env.state.timestamp);
   expect(frame.stateHash).toBe('');
 });
 
 test('runtime adapter entity summaries preserve gossip jurisdiction for live hub replicas', async () => {
   const env = makeEnv();
-  const replica = Array.from(env.eReplicas.values())[0]!;
+  const replica = Array.from(env.state.eReplicas.values())[0]!;
   replica.state.profile = { ...replica.state.profile, name: 'H1', isHub: true };
   env.gossip = createGossipLayer();
   env.gossip.announce(makeHubProfile(entityId, 'H1'));
@@ -1319,7 +1319,7 @@ test('runtime adapter entity summaries preserve gossip jurisdiction for live hub
 
 test('runtime adapter view-frame exposes compact pending j-batch operations for cockpit actions', async () => {
   const env = makeEnv();
-  const replica = Array.from(env.eReplicas.values())[0]!;
+  const replica = Array.from(env.state.eReplicas.values())[0]!;
   replica.state.jBatchState = {
     batch: {
       flashloans: [],
@@ -1381,9 +1381,9 @@ test('runtime adapter view-frame exposes compact pending j-batch operations for 
 
 test('runtime adapter view frame defaults to the live entity with real relationships', async () => {
   const env = makeEnv();
-  const primary = Array.from(env.eReplicas.values())[0]!;
+  const primary = Array.from(env.state.eReplicas.values())[0]!;
   const emptyEntityId = `0x${'00'.repeat(32)}`;
-  env.eReplicas.set(`${emptyEntityId}:empty-signer`, {
+  env.state.eReplicas.set(`${emptyEntityId}:empty-signer`, {
     ...primary,
     entityId: emptyEntityId,
     signerId: 'empty-signer',
@@ -1423,10 +1423,10 @@ test('runtime adapter view frame defaults to the live entity with real relations
 
 test('runtime adapter historical batch without entityId defaults to live entity with real relationships', async () => {
   const env = makeEnv();
-  const primary = Array.from(env.eReplicas.values())[0]!;
+  const primary = Array.from(env.state.eReplicas.values())[0]!;
   const staleEntityId = `0x${'00'.repeat(32)}`;
   const emptyEntityId = `0x${'01'.repeat(32)}`;
-  env.eReplicas.set(`${emptyEntityId}:empty-signer`, {
+  env.state.eReplicas.set(`${emptyEntityId}:empty-signer`, {
     ...primary,
     entityId: emptyEntityId,
     signerId: 'empty-signer',
@@ -1478,7 +1478,7 @@ test('runtime adapter historical batch without entityId defaults to live entity 
       loadEntityViewPage: async requestedEntityId => {
         const normalizedEntityId = normalizeEntityId(requestedEntityId);
         if (normalizedEntityId === staleEntityId) return null;
-        const replica = Array.from(env.eReplicas.values()).find(
+        const replica = Array.from(env.state.eReplicas.values()).find(
           item => normalizeEntityId(item.entityId) === normalizedEntityId,
         );
         if (!replica) return null;
@@ -1686,7 +1686,7 @@ test('runtime adapter recovery bundle read is gated by seed-derived lookup key',
   expect(response.bundles).toHaveLength(1);
   const decrypted = await decryptRuntimeRecoveryBundle(response.bundle, env.runtimeSeed);
   expect(decrypted.runtimeId).toBe(env.runtimeId);
-  expect(decrypted.runtimeHeight).toBe(env.height);
+  expect(decrypted.runtimeHeight).toBe(env.state.height);
   expect(decrypted.signers[0]?.address).toBe(env.runtimeId);
 
   await expect(resolveRuntimeAdapterRead({ env }, `recovery/bundles/0x${'00'.repeat(32)}`)).rejects.toThrow(
@@ -1701,7 +1701,7 @@ test('runtime adapter recovery bundle read is gated by seed-derived lookup key',
 
 test('runtime adapter view frame defaults to 10 accounts and cursor pagination', async () => {
   const env = makeEnv();
-  const replica = Array.from(env.eReplicas.values())[0]!;
+  const replica = Array.from(env.state.eReplicas.values())[0]!;
   const base = replica.state.accounts.get(counterpartyId)!;
   replica.state.accounts.clear();
   for (let i = 0; i < 12; i += 1) {
@@ -1747,9 +1747,9 @@ test('runtime adapter view frame defaults to 10 accounts and cursor pagination',
 
 test('runtime adapter view frame honors the requested entity id', async () => {
   const env = makeEnv();
-  const first = Array.from(env.eReplicas.values())[0]!;
+  const first = Array.from(env.state.eReplicas.values())[0]!;
   const secondEntityId = `0x${'cc'.repeat(32)}`;
-  env.eReplicas.set(`${secondEntityId}:signer`, {
+  env.state.eReplicas.set(`${secondEntityId}:signer`, {
     ...first,
     entityId: secondEntityId,
     signerId: 'other-signer',
@@ -1775,7 +1775,7 @@ test('runtime adapter view frame honors the requested entity id', async () => {
 
 test('runtime adapter historical view frame uses paged storage loader instead of full entity load', async () => {
   const env = makeEnv();
-  const replica = Array.from(env.eReplicas.values())[0]!;
+  const replica = Array.from(env.state.eReplicas.values())[0]!;
   const account = replica.state.accounts.get(counterpartyId)!;
   let fullLoadCalled = false;
   let pagedLoadCalled = false;
@@ -1823,7 +1823,7 @@ test('runtime adapter historical view frame uses paged storage loader instead of
 
 test('runtime adapter historical view frame skips missing non-active summaries without hiding active entity failures', async () => {
   const env = makeEnv();
-  const replica = Array.from(env.eReplicas.values())[0]!;
+  const replica = Array.from(env.state.eReplicas.values())[0]!;
   const missingEntityId = `0x${'de'.repeat(32)}`;
 
   const frame = await resolveRuntimeAdapterRead<{
@@ -1892,8 +1892,8 @@ test('runtime adapter historical view frame skips missing non-active summaries w
 
 test('runtime adapter live view-frame stays live if env height advances during projection', async () => {
   const env = makeEnv();
-  env.height = 8;
-  const replica = Array.from(env.eReplicas.values())[0]!;
+  env.state.height = 8;
+  const replica = Array.from(env.state.eReplicas.values())[0]!;
   replica.state.height = 8;
   let historicalListingCalled = false;
 
@@ -1905,7 +1905,7 @@ test('runtime adapter live view-frame stays live if env height advances during p
     {
       env,
       readHead: async () => {
-        env.height = 9;
+        env.state.height = 9;
         replica.state.height = 9;
         return {
           schemaVersion: STORAGE_SCHEMA_VERSION,
@@ -1942,7 +1942,7 @@ test('runtime adapter live view-frame stays live if env height advances during p
 
 test('runtime adapter history-frame-batch returns bounded historical view frames in one read', async () => {
   const env = makeEnv();
-  const replica = Array.from(env.eReplicas.values())[0]!;
+  const replica = Array.from(env.state.eReplicas.values())[0]!;
   const account = replica.state.accounts.get(counterpartyId)!;
   const loadedHeights: number[] = [];
 
@@ -1999,7 +1999,7 @@ test('runtime adapter history-frame-batch returns bounded historical view frames
 
 test('runtime adapter history-frame-batch marks missing storage diffs unavailable without failing the batch', async () => {
   const env = makeEnv();
-  const replica = Array.from(env.eReplicas.values())[0]!;
+  const replica = Array.from(env.state.eReplicas.values())[0]!;
   const account = replica.state.accounts.get(counterpartyId)!;
 
   const batch = await resolveRuntimeAdapterRead<{
@@ -2216,15 +2216,15 @@ test('runtime adapter activity read fails fast on malformed queries', async () =
 test('runtime adapter historical reads fail closed when storage loaders are missing', async () => {
   const env = makeEnv();
 
-  await expect(resolveRuntimeAdapterRead({ env }, 'entities', { atHeight: env.height - 1 })).rejects.toThrow(
+  await expect(resolveRuntimeAdapterRead({ env }, 'entities', { atHeight: env.state.height - 1 })).rejects.toThrow(
     'storage entity listing is required for historical reads',
   );
-  await expect(resolveRuntimeAdapterRead({ env }, 'head', { atHeight: env.height - 1 })).rejects.toThrow(
+  await expect(resolveRuntimeAdapterRead({ env }, 'head', { atHeight: env.state.height - 1 })).rejects.toThrow(
     'storage head reader is required for historical reads',
   );
   await expect(
     resolveRuntimeAdapterRead({ env, listEntityIdsAtHeight: async () => [entityId] }, 'view-frame', {
-      atHeight: env.height - 1,
+      atHeight: env.state.height - 1,
     }),
   ).rejects.toThrow('storage head reader is required for historical reads');
 });
@@ -2243,7 +2243,7 @@ test('runtime adapter historical view frame fails closed when storage head is mi
         },
       },
       'view-frame',
-      { atHeight: env.height - 1 },
+      { atHeight: env.state.height - 1 },
     ),
   ).rejects.toThrow('storage head not found at height');
 });
@@ -2260,7 +2260,7 @@ test('runtime adapter historical entity summaries fail closed when listed state 
         loadEntityState: async () => null,
       },
       'entities',
-      { atHeight: env.height - 1 },
+      { atHeight: env.state.height - 1 },
     ),
   ).rejects.toThrow('entity summary not found at height');
 });
@@ -2284,7 +2284,7 @@ test('runtime adapter historical head reads persisted storage head', async () =>
       }),
     },
     'head',
-    { atHeight: env.height - 1 },
+    { atHeight: env.state.height - 1 },
   );
 
   expect(head.latestHeight).toBe(42);
@@ -2293,7 +2293,7 @@ test('runtime adapter historical head reads persisted storage head', async () =>
 
 test('runtime adapter current head exposes persisted snapshot cadence when storage is available', async () => {
   const env = makeEnv();
-  env.height = 45;
+  env.state.height = 45;
   const storedHead: StorageHead = {
     schemaVersion: STORAGE_SCHEMA_VERSION,
     latestHeight: 45,
@@ -2334,7 +2334,7 @@ test('runtime adapter current head exposes persisted snapshot cadence when stora
 
 test('runtime adapter current head preserves persisted snapshot cadence when storage lags live height', async () => {
   const env = makeEnv();
-  env.height = 19;
+  env.state.height = 19;
   const storedHead: StorageHead = {
     schemaVersion: STORAGE_SCHEMA_VERSION,
     latestHeight: 16,
@@ -2364,7 +2364,7 @@ test('runtime adapter current head preserves persisted snapshot cadence when sto
 
 test('runtime adapter rejects historical reads beyond the persisted storage head', async () => {
   const env = makeEnv();
-  env.height = 20;
+  env.state.height = 20;
   const persistedHead: StorageHead = {
     schemaVersion: STORAGE_SCHEMA_VERSION,
     latestHeight: 8,
@@ -2426,8 +2426,8 @@ test('runtime adapter rejects historical reads beyond the persisted storage head
 
 test('runtime adapter historical account search uses the point storage loader', async () => {
   const env = makeEnv();
-  env.height = 9;
-  const replica = Array.from(env.eReplicas.values())[0]!;
+  env.state.height = 9;
+  const replica = Array.from(env.state.eReplicas.values())[0]!;
   const account = replica.state.accounts.get(counterpartyId)!;
   let viewPageCalled = false;
   let pointLookup: { entityId: string; counterpartyId: string; height: number } | null = null;
@@ -2463,7 +2463,7 @@ test('runtime adapter historical account search uses the point storage loader', 
 
 test('runtime adapter current view frame projects live state without replaying persisted history', async () => {
   const env = makeEnv();
-  const replica = Array.from(env.eReplicas.values())[0]!;
+  const replica = Array.from(env.state.eReplicas.values())[0]!;
   let pagedLoadCalled = false;
 
   const frame = await resolveRuntimeAdapterRead<{
@@ -2478,8 +2478,8 @@ test('runtime adapter current view frame projects live state without replaying p
       env,
       readHead: async () => ({
         schemaVersion: STORAGE_SCHEMA_VERSION,
-        latestHeight: env.height,
-        latestMaterializedHeight: env.height,
+        latestHeight: env.state.height,
+        latestMaterializedHeight: env.state.height,
         latestSnapshotHeight: 0,
         snapshotPeriodFrames: 256,
         retainSnapshots: 3,
@@ -2509,8 +2509,8 @@ test('runtime adapter current view frame projects live state without replaying p
 
 test('runtime adapter historical 1M account view-frame stays aggregate-first and under wire budget', async () => {
   const env = makeEnv();
-  env.height = 2;
-  const replica = Array.from(env.eReplicas.values())[0]!;
+  env.state.height = 2;
+  const replica = Array.from(env.state.eReplicas.values())[0]!;
   const account = replica.state.accounts.get(counterpartyId)!;
   let loaderCalls = 0;
   const visibleDocs = Array.from({ length: 10 }, (_, index) => {
@@ -2548,9 +2548,9 @@ test('runtime adapter historical 1M account view-frame stays aggregate-first and
       env,
       readHead: async () => ({
         schemaVersion: STORAGE_SCHEMA_VERSION,
-        latestHeight: env.height,
-        latestMaterializedHeight: env.height,
-        latestSnapshotHeight: env.height,
+        latestHeight: env.state.height,
+        latestMaterializedHeight: env.state.height,
+        latestSnapshotHeight: env.state.height,
         snapshotPeriodFrames: 256,
         retainSnapshots: 3,
         epochMaxBytes: 1,
@@ -2602,7 +2602,7 @@ test('runtime adapter historical 1M account view-frame stays aggregate-first and
 
 test('runtime adapter view-frame caps route-heavy core maps under wire budget', async () => {
   const env = makeEnv();
-  const replica = Array.from(env.eReplicas.values())[0]!;
+  const replica = Array.from(env.state.eReplicas.values())[0]!;
   const largeNote = 'x'.repeat(4_000);
   replica.entityEncPrivKey = 'secret-key-must-not-leave-server';
   replica.state.crossJurisdictionSwaps = new Map();
@@ -2662,7 +2662,7 @@ test('runtime adapter view-frame caps route-heavy core maps under wire budget', 
 
 test('runtime adapter view-frame excludes unbounded core internals from remote snapshots', async () => {
   const env = makeEnv();
-  const replica = Array.from(env.eReplicas.values())[0]!;
+  const replica = Array.from(env.state.eReplicas.values())[0]!;
   replica.state.nonces = new Map(
     Array.from({ length: 50_000 }, (_, index) => [`0x${index.toString(16).padStart(64, '0')}`, index]),
   );

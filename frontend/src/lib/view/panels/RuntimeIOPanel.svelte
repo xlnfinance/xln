@@ -29,10 +29,12 @@
   type JMachineLike = { blockNumber?: number; entities?: unknown[] };
   type XlnomyLike = { name: string; jMachine?: JMachineLike };
   type RuntimeFrameLike = {
-    height?: number;
+    state: {
+      height?: number;
+      eReplicas?: Map<string, ReplicaLike>;
+      jReplicas?: Map<string, XlnomyLike>;
+    };
     logs?: FrameLogEntry[];
-    eReplicas?: Map<string, ReplicaLike>;
-    jReplicas?: Map<string, XlnomyLike>;
     gossip?: { profiles?: unknown[] };
     runtimeInput?: unknown;
     runtimeOutputs?: unknown;
@@ -173,14 +175,14 @@
   }
 
   // Get replica count
-  $: replicaCount = currentFrame?.eReplicas?.size || 0;
+  $: replicaCount = currentFrame?.state.eReplicas?.size || 0;
 
   // Get replicas as array
-  $: replicasArray = currentFrame?.eReplicas ? mapToArray(currentFrame.eReplicas) : [];
+  $: replicasArray = currentFrame?.state.eReplicas ? mapToArray(currentFrame.state.eReplicas) : [];
 
   // Get xlnomies (J-Machine state) as array
-  $: xlnomiesArray = (currentFrame?.jReplicas
-    ? Array.from(currentFrame.jReplicas.values())
+  $: xlnomiesArray = (currentFrame?.state.jReplicas
+    ? Array.from(currentFrame.state.jReplicas.values())
     : []) as XlnomyLike[];
 
   // Toggle xlnomy expansion
@@ -197,7 +199,7 @@
 <div class="runtime-io-panel">
   <div class="header">
     <h3>Runtime State</h3>
-    <span class="subtitle">Frame {currentFrame?.height || 0} | {replicaCount} E-replicas | {xlnomiesArray.length} J-machines</span>
+    <span class="subtitle">Frame {currentFrame?.state.height || 0} | {replicaCount} E-replicas | {xlnomiesArray.length} J-machines</span>
   </div>
 
   <div class="content">
@@ -236,11 +238,11 @@
           <h4>💰 Solvency Check (Conservation Law)</h4>
           <div class="solvency-content">
             {#if currentFrame}
-              {@const totalReserves = valuesOf<ReplicaLike>(currentFrame.eReplicas).reduce((sum: bigint, replica) => {
+              {@const totalReserves = valuesOf<ReplicaLike>(currentFrame.state.eReplicas).reduce((sum: bigint, replica) => {
                 const reserves = valuesOf<unknown>(replica.state?.reserves).reduce((s: bigint, amt) => s + toBigIntValue(amt), 0n);
                 return sum + reserves;
               }, 0n)}
-              {@const totalCollateral = valuesOf<ReplicaLike>(currentFrame.eReplicas).reduce((sum: bigint, replica) => {
+              {@const totalCollateral = valuesOf<ReplicaLike>(currentFrame.state.eReplicas).reduce((sum: bigint, replica) => {
                 const collateral = valuesOf<AccountLike>(replica.state?.accounts).reduce((s: bigint, acct) => {
                   return s + valuesOf<DeltaLike>(acct.deltas).reduce((cs: bigint, delta) => cs + toBigIntValue(delta.collateral), 0n);
                 }, 0n);

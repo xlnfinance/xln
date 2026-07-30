@@ -56,7 +56,7 @@ export const selectFinalProof = (
   env: EntityRuntimeContext,
 ): FinalProofSelection | null => {
   const activeDispute = account.activeDispute!;
-  const currentProof = buildAccountProofBodyFromJurisdictions(env, account);
+  const currentProof = buildAccountProofBodyFromJurisdictions(env.state, account);
   const counterHash = account.counterpartyDisputeProofBodyHash;
   const counterNonce = account.counterpartyDisputeProofNonce;
   const counterHanko = account.counterpartyDisputeProofHanko;

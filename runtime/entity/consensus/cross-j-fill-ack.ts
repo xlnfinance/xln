@@ -116,7 +116,7 @@ export const stashPendingCrossJurisdictionFillAck = (
   currentEntityState.pendingCrossJurisdictionFillAcks.set(key, {
     accountId,
     tx: cloneCrossJurisdictionAccountTxRoute(tx) as CrossSwapFillAckTx,
-    storedAt: currentEntityState.timestamp || env.timestamp,
+    storedAt: currentEntityState.timestamp || env.state.timestamp,
     reason,
   });
   entityLog.info('crossj.fill_ack_deferred', {
@@ -176,7 +176,7 @@ export const drainPendingCrossJurisdictionFillAcks = async (
 ): Promise<number> => {
   const pending = currentEntityState.pendingCrossJurisdictionFillAcks;
   if (!pending || pending.size === 0) return 0;
-  const now = Number(currentEntityState.timestamp || env.timestamp || 0);
+  const now = Number(currentEntityState.timestamp || env.state.timestamp || 0);
   let drained = 0;
   for (const [key, pendingAck] of Array.from(pending.entries()).sort(([a], [b]) => compareStableText(a, b))) {
     const ageMs = Math.max(0, now - Number(pendingAck.storedAt || 0));

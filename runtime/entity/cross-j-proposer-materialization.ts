@@ -251,7 +251,7 @@ export const selectCrossJOpeningAccountProposalTxs = (
   for (const [, { sibling, orderIds }] of [...localGroups.entries()].sort(([left], [right]) =>
     left.localeCompare(right),
   )) {
-    const replica = [...env.eReplicas.values()].find(
+    const replica = [...env.state.eReplicas.values()].find(
       candidate =>
         normalized(candidate.entityId) === sibling.entityId && normalized(candidate.signerId) === sibling.signerId,
     );
@@ -330,7 +330,7 @@ export const appendDefaultProposerCrossJMaterializations = (
     const preparedRoute = buildPreparedCrossJurisdictionRoute(route, {
       runtimeSeed: env.runtimeSeed,
       sourceDisputeDelayMs: committedCrossJSourceDisputeDelayMs(replica.state, route),
-      now: env.timestamp,
+      now: env.state.timestamp,
     });
     additions.push({
       type: 'materializeCrossJurisdictionSwap',

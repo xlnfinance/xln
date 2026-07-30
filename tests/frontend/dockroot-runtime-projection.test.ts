@@ -18,8 +18,8 @@ test('DockRoot resolves entity panel seeds through RuntimeView projections', () 
   expect(source).not.toContain("from '$lib/stores/runtimeQueryClient'");
   expect(source).not.toContain('runtimeQueryClient.readViewFrame');
   expect(source).not.toContain('resolveEntityPanelData(panelId)');
-  expect(source).not.toContain('env?.eReplicas');
-  expect(source).not.toContain('env.eReplicas');
+  expect(source).not.toContain('env?.state.eReplicas');
+  expect(source).not.toContain('env.state.eReplicas');
   expect(source).not.toContain('jReplicas');
   expect(source).not.toContain('parameters.api?.close?.()');
 });

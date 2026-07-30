@@ -54,7 +54,7 @@ const installStack = (env: RuntimeReplica, depth = 2): void => {
     },
     watcherConfirmationDepth: depth,
   };
-  env.jReplicas.set(jurisdiction.name, replica);
+  env.state.jReplicas.set(jurisdiction.name, replica);
 };
 
 const makeRegisteredRuntime = (seed: string): {
@@ -80,7 +80,7 @@ const makeRegisteredRuntime = (seed: string): {
     mempool: [],
     isProposer: true,
   };
-  env.eReplicas.set(`${entityId}:${signerId}`, replica);
+  env.state.eReplicas.set(`${entityId}:${signerId}`, replica);
   return { env, replica, boardHash };
 };
 
@@ -130,7 +130,7 @@ describe('validator-local registered H0 authority evidence', () => {
       type: 'observeJRange',
       data: {
         entityId,
-        signerId: env.eReplicas.values().next().value!.signerId,
+        signerId: env.state.eReplicas.values().next().value!.signerId,
         jurisdictionRef: `0x${'11'.repeat(32)}`,
         scannedThroughHeight: 5,
         tipBlockHash: `0x${'22'.repeat(32)}`,
@@ -183,7 +183,7 @@ describe('validator-local registered H0 authority evidence', () => {
     const snapshot = buildDurableRuntimeMachineSnapshot(env);
     const restored = createEmptyEnv('registration-authority-restore');
     restored.scenarioMode = true;
-    restored.eReplicas = new Map([[`${entityId}:${replica.signerId}`, structuredClone(replica)]]);
+    restored.state.eReplicas = new Map([[`${entityId}:${replica.signerId}`, structuredClone(replica)]]);
     restoreDurableRuntimeSnapshot(restored, snapshot);
     await expect(assertCertifiedRegistrationEvidenceStore(restored)).resolves.toBeUndefined();
     expect(buildCertifiedEntityLineagePlan(restored).anchorByReplicaKey

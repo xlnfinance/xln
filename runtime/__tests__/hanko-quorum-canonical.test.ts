@@ -78,7 +78,7 @@ const installRegisteredBoardAuthority = async (
   jReplica.entityProviderAddress = jurisdiction.entityProviderAddress;
   jReplica.watcherConfirmationDepth = 0;
   const boardHash = hashBoard(encodeBoard(config)).toLowerCase();
-  const state = fixture.env.eReplicas.get(`${entityId}:${config.validators[0]}`)!.state;
+  const state = fixture.env.state.eReplicas.get(`${entityId}:${config.validators[0]}`)!.state;
   await installCanonicalRegisteredBoardAuthority(fixture.env, jurisdiction, state, boardHash);
 };
 
@@ -292,7 +292,7 @@ describe('canonical quorum Hanko construction', () => {
       shares: { [a!]: 1n, [b!]: 1n },
       jurisdiction,
     };
-    fixture.env.eReplicas.set(`${registeredId}:${a}`, {
+    fixture.env.state.eReplicas.set(`${registeredId}:${a}`, {
       entityId: registeredId,
       signerId: a!,
       entityEncPubKey: '',

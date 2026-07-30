@@ -60,7 +60,7 @@ export const cacheCommittedAccountJClaimNodeChanges = (
 
 export const getLiveAccountJClaimAccumulatorStates = (env: EntityRuntimeContext): AccountJClaimAccumulatorState[] => {
   const states: AccountJClaimAccumulatorState[] = [];
-  for (const { state } of env.eReplicas.values()) {
+  for (const { state } of env.state.eReplicas.values()) {
     for (const account of state.accounts.values()) {
       states.push(account.leftPendingJClaims, account.rightPendingJClaims);
     }

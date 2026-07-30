@@ -2,7 +2,7 @@
   OrderbookPanel.svelte
 
   Displays a real-time orderbook strictly from relay market snapshots.
-  We intentionally do not fall back to local env.eReplicas here: the relay stream is the
+  We intentionally do not fall back to local env.state.eReplicas here: the relay stream is the
   canonical UI API for combined books, freshness, and multi-hub visibility. Rendering a
   local fallback after a partial or stale stream would mislabel the screen as an aggregated
   combined book while silently dropping hubs. If the requested snapshot set is incomplete,

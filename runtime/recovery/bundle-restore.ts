@@ -96,9 +96,9 @@ export const restoreRuntimeFromBundles = async (
   const candidate = selectRecoveryCandidate(validated, options.targetHeight);
   const env = await deps.restoreCheckpoint(candidate.snapshot.checkpoint!, options);
   await replayCandidateTail(deps, env, candidate, Boolean(options.readOnly));
-  if (env.height !== candidate.height) {
+  if (env.state.height !== candidate.height) {
     const mismatch = new Error(
-      `RECOVERY_BUNDLE_TARGET_HEIGHT_MISMATCH:expected=${candidate.height}:actual=${env.height}`,
+      `RECOVERY_BUNDLE_TARGET_HEIGHT_MISMATCH:expected=${candidate.height}:actual=${env.state.height}`,
     );
     if (options.readOnly) throw mismatch;
     await deps.failAfterCleanup(env, mismatch);

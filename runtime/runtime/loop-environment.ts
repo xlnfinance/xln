@@ -86,8 +86,8 @@ export const registerRuntimePublishedCallback = (
     const readiness = getRuntimeCommandReadiness(committedEnv);
     callback(Object.freeze({
       runtimeId: String(committedEnv.runtimeId || '').trim().toLowerCase(),
-      height: Math.max(0, Math.floor(Number(committedEnv.height || 0))),
-      timestamp: Math.max(0, Math.floor(Number(committedEnv.timestamp || 0))),
+      height: Math.max(0, Math.floor(Number(committedEnv.state.height || 0))),
+      timestamp: Math.max(0, Math.floor(Number(committedEnv.state.timestamp || 0))),
       lifecyclePhase: inferRuntimeLifecyclePhase(state),
       commandReady: readiness.ready,
       commandReadyReason: readiness.reason,

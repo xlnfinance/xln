@@ -83,8 +83,8 @@ test('calculate and verify solvency keep every jurisdiction asset independent', 
   process.env['XLN_LOG_SCOPES'] = 'test-suppressed';
   try {
     expect(verifySolvency(env, 'unit')).toBe(true);
-    env.eReplicas.values().next().value!.state.reserves = new Map([[1, 1n], [2, 2n]]);
-    env.eReplicas.values().next().value!.state.accounts.get(ENTITY_B)!.deltas = new Map([
+    env.state.eReplicas.values().next().value!.state.reserves = new Map([[1, 1n], [2, 2n]]);
+    env.state.eReplicas.values().next().value!.state.accounts.get(ENTITY_B)!.deltas = new Map([
       [1, { collateral: 2n }],
       [2, { collateral: 1n }],
     ] as never);
@@ -97,7 +97,7 @@ test('calculate and verify solvency keep every jurisdiction asset independent', 
 
 test('a surplus in one token never covers a deficit in another token', () => {
   const env = makeEnv();
-  const state = env.eReplicas.values().next().value!.state;
+  const state = env.state.eReplicas.values().next().value!.state;
   state.reserves = new Map([[1, 1n], [2, 2n]]);
   state.accounts.get(ENTITY_B)!.deltas = new Map([
     [1, { collateral: 2n }],
@@ -113,7 +113,7 @@ test('a surplus in one token never covers a deficit in another token', () => {
 
 test('the same token id in two Depositories remains two independent assets', () => {
   const env = makeEnv();
-  const secondReplica = structuredClone(env.eReplicas.values().next().value!);
+  const secondReplica = structuredClone(env.state.eReplicas.values().next().value!);
   secondReplica.entityId = ENTITY_C;
   secondReplica.signerId = 'second-stack-signer';
   secondReplica.state.entityId = ENTITY_C;
@@ -126,7 +126,7 @@ test('the same token id in two Depositories remains two independent assets', () 
   secondReplica.state.accounts = new Map([
     [ENTITY_D, { deltas: new Map([[1, { collateral: 7n }]]) }],
   ] as never);
-  env.eReplicas.set('second-stack', secondReplica);
+  env.state.eReplicas.set('second-stack', secondReplica);
 
   const solvency = calculateSolvency(env);
   expect(solvency.entityCount).toBe(2);
@@ -138,13 +138,13 @@ test('the same token id in two Depositories remains two independent assets', () 
 
 test('multiple validator replicas of one Entity are counted once', () => {
   const env = makeEnv();
-  const firstReplica = env.eReplicas.values().next().value!;
+  const firstReplica = env.state.eReplicas.values().next().value!;
   firstReplica.entityId = ENTITY_A;
   firstReplica.signerId = 'validator-b';
   firstReplica.state.accounts = new Map();
   const secondReplica = structuredClone(firstReplica);
   secondReplica.signerId = 'validator-a';
-  env.eReplicas.set('second-validator', secondReplica);
+  env.state.eReplicas.set('second-validator', secondReplica);
 
   const solvency = calculateSolvency(env);
   expect(solvency.entityCount).toBe(1);
@@ -153,14 +153,14 @@ test('multiple validator replicas of one Entity are counted once', () => {
 
 test('same-height divergent validator replicas fail loud', () => {
   const env = makeEnv();
-  const firstReplica = env.eReplicas.values().next().value!;
+  const firstReplica = env.state.eReplicas.values().next().value!;
   firstReplica.entityId = ENTITY_A;
   firstReplica.signerId = 'validator-a';
   firstReplica.state.accounts = new Map();
   const conflictingReplica = structuredClone(firstReplica);
   conflictingReplica.signerId = 'validator-b';
   conflictingReplica.state.reserves = new Map([[1, 4n]]);
-  env.eReplicas.set('conflicting-validator', conflictingReplica);
+  env.state.eReplicas.set('conflicting-validator', conflictingReplica);
 
   expect(() => calculateSolvency(env)).toThrow('SOLVENCY_ENTITY_REPLICA_DIVERGENCE');
 });

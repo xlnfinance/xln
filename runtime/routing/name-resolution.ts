@@ -47,7 +47,7 @@ const collectProfiles = (env: RuntimeReplica | null | undefined): Map<string, Di
     });
   }
 
-  for (const replica of env.eReplicas.values()) {
+  for (const replica of env.state.eReplicas.values()) {
     const entityId = normalizeId(replica.entityId);
     if (!entityId) continue;
     const localProfile = replica.state.profile;
@@ -55,7 +55,7 @@ const collectProfiles = (env: RuntimeReplica | null | undefined): Map<string, Di
       entityId,
       name: normalizeName(localProfile.name, entityId),
       avatar: localProfile.avatar,
-      lastUpdated: Number.isFinite(replica.state.timestamp) ? replica.state.timestamp : env.timestamp,
+      lastUpdated: Number.isFinite(replica.state.timestamp) ? replica.state.timestamp : env.state.timestamp,
     });
   }
 

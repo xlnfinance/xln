@@ -55,8 +55,8 @@ export const resolvePersistedReplicaIdentity = (
  * Runtime WAL instead.
  */
 export const assertPersistedJurisdictionsAvailable = (env: RuntimeReplica): void => {
-  if (env.jReplicas.size > 0) return;
-  const configuredEntity = [...env.eReplicas.values()].find(
+  if (env.state.jReplicas.size > 0) return;
+  const configuredEntity = [...env.state.eReplicas.values()].find(
     replica => replica.state.config?.jurisdiction !== undefined,
   );
   if (configuredEntity) {

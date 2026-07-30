@@ -146,7 +146,7 @@ test('PaymentPanel consumes PaymentPanelView instead of owning full env reads', 
   expect(panel).not.toContain('currentEnv &&\n    activeIsLive');
   expect(panel).not.toContain('submitEntityInputs');
   expect(panel).not.toContain('export let env');
-  expect(panel).not.toContain('env.eReplicas');
+  expect(panel).not.toContain('env.state.eReplicas');
   expect(panel).not.toContain('currentEnv?.gossip?.getProfiles');
   expect(panel).not.toContain('getXLN');
   expect(panel).not.toContain('env.gossip');

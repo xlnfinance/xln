@@ -316,7 +316,7 @@ export async function bootScenario(config: ScenarioConfig): Promise<ScenarioBoot
   const seed = config.seed ?? `${config.name}-scenario-seed`;
   const env = createEmptyEnv(seed);
   env.scenarioMode = true;
-  env.timestamp = 1;
+  env.state.timestamp = 1;
   setScenarioStorageEnabled(env, config.storageEnabled ?? false);
 
   // 2. Seed signer keys
@@ -526,11 +526,11 @@ export async function fundEntities(
  * Scenarios call this to access the adapter without passing it separately.
  */
 export function getScenarioJAdapter(env: RuntimeReplica): JAdapter {
-  const jReplica = env.jReplicas?.get(env.activeJurisdiction || '');
+  const jReplica = env.state.jReplicas?.get(env.activeJurisdiction || '');
   if (jReplica?.jadapter) {
     return jReplica.jadapter;
   }
-  for (const jr of env.jReplicas?.values() || []) {
+  for (const jr of env.state.jReplicas?.values() || []) {
     if (jr.jadapter) return jr.jadapter;
   }
   throw new Error(`${SCENARIO_JADAPTER_MISSING}: call bootScenario() first`);
@@ -549,8 +549,8 @@ export function createJReplica(
   depositoryAddress: string,
   position: { x: number; y: number; z: number } = { x: 0, y: 600, z: 0 }
 ): JReplica {
-  if (!env.jReplicas) {
-    env.jReplicas = new Map();
+  if (!env.state.jReplicas) {
+    env.state.jReplicas = new Map();
   }
 
   const jReplica = {
@@ -559,7 +559,7 @@ export function createJReplica(
     stateRoot: new Uint8Array(32),
     mempool: [] as JTx[],
     blockDelayMs: 300,
-    lastBlockTimestamp: env.timestamp,
+    lastBlockTimestamp: env.state.timestamp,
     position,
     contracts: {
       depository: depositoryAddress,
@@ -569,7 +569,7 @@ export function createJReplica(
     }
   };
 
-  env.jReplicas.set(name, jReplica);
+  env.state.jReplicas.set(name, jReplica);
   env.activeJurisdiction = name;
 
   return jReplica;

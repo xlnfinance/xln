@@ -143,10 +143,10 @@ const readCanonicalNetworkVersion = async (): Promise<string> => {
 };
 
 export const buildRuntimeJurisdictionsJson = async (env?: RuntimeReplica | null): Promise<string | null> => {
-  if (!env?.jReplicas || env.jReplicas.size === 0) return null;
-  const jurisdictionName = env.activeJurisdiction ?? env.jReplicas.keys().next().value;
+  if (!env?.state.jReplicas || env.state.jReplicas.size === 0) return null;
+  const jurisdictionName = env.activeJurisdiction ?? env.state.jReplicas.keys().next().value;
   if (typeof jurisdictionName !== 'string' || !jurisdictionName) return null;
-  const replica = env.jReplicas.get(jurisdictionName) as
+  const replica = env.state.jReplicas.get(jurisdictionName) as
     | {
         name?: string;
         chainId?: number;

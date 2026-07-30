@@ -353,8 +353,8 @@ const reuseExistingReplica = (
       });
     }
   }
-  if (existingKey !== identity.replicaKey) env.eReplicas.delete(existingKey);
-  env.eReplicas.set(identity.replicaKey, replica);
+  if (existingKey !== identity.replicaKey) env.state.eReplicas.delete(existingKey);
+  env.state.eReplicas.set(identity.replicaKey, replica);
   return identity.entityId;
 };
 
@@ -408,7 +408,7 @@ const buildGenesisReplica = (
     state: {
       entityId: identity.entityId,
       height: 0,
-      timestamp: env.timestamp,
+      timestamp: env.state.timestamp,
       nonces: new Map(),
       proposals: new Map(),
       config,
@@ -458,7 +458,7 @@ const assertCreatedReplicaJHeight = (
   env: RuntimeReplica,
   replicaKey: string,
 ): void => {
-  const actual = env.eReplicas.get(replicaKey)?.state.lastFinalizedJHeight;
+  const actual = env.state.eReplicas.get(replicaKey)?.state.lastFinalizedJHeight;
   if (typeof actual !== 'number') {
     throw new Error(
       'ENTITY_CREATION_INVALID_J_HEIGHT: replica=' + replicaKey +
@@ -482,7 +482,7 @@ const importReplicaRuntimeTx = (env: RuntimeReplica, runtimeTx: ImportReplicaRun
     identity.signerId,
   );
   const config = requireBoundEntityConfig(env, identity.entityId, runtimeTx.data.config);
-  const siblings = Array.from(env.eReplicas.values()).filter(replica =>
+  const siblings = Array.from(env.state.eReplicas.values()).filter(replica =>
     String(replica.entityId || replica.state.entityId).toLowerCase() === identity.entityId);
   const hasCheckpoint = entityHasCertifiedCheckpoint(siblings);
   if (existing) {
@@ -504,7 +504,7 @@ const importReplicaRuntimeTx = (env: RuntimeReplica, runtimeTx: ImportReplicaRun
   );
   if (siblings.length > 0) {
     const replica = buildCheckpointReplica(env, runtimeTx, identity, config, replicaKeys);
-    env.eReplicas.set(identity.replicaKey, replica);
+    env.state.eReplicas.set(identity.replicaKey, replica);
     runtimeTxLog.info('replica.imported_from_certified_checkpoint', {
       entity: identity.entityId,
       signer: identity.signerId,
@@ -515,7 +515,7 @@ const importReplicaRuntimeTx = (env: RuntimeReplica, runtimeTx: ImportReplicaRun
   }
 
   backfillEntityJurisdictionBinding(env, identity.entityId, config.jurisdiction!);
-  env.eReplicas.set(
+  env.state.eReplicas.set(
     identity.replicaKey,
     buildGenesisReplica(env, runtimeTx, identity, config, replicaKeys),
   );
@@ -529,10 +529,10 @@ const findExistingReplicaCaseInsensitive = (
   signerId: string,
 ): { key: string; replica: EntityReplica } | null => {
   const directKey = `${entityId}:${signerId}`;
-  const directReplica = env.eReplicas.get(directKey);
+  const directReplica = env.state.eReplicas.get(directKey);
   if (directReplica) return { key: directKey, replica: directReplica };
 
-  for (const [key, candidate] of env.eReplicas.entries()) {
+  for (const [key, candidate] of env.state.eReplicas.entries()) {
     const [candidateEntity, candidateSigner] = String(key).split(':');
     if (String(candidateEntity || '').toLowerCase() !== entityId) continue;
     if (String(candidateSigner || '').toLowerCase() !== signerId) continue;

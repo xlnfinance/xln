@@ -94,7 +94,7 @@ const installReplica = (env: RuntimeReplica, state: EntityState, signerId: strin
     mempool: [],
     isProposer: false,
   };
-  env.eReplicas.set(`${state.entityId}:${signerId}`, replica);
+  env.state.eReplicas.set(`${state.entityId}:${signerId}`, replica);
   return replica;
 };
 
@@ -115,7 +115,7 @@ export const prepareCatchupFixtureReplica = async (
   installFixtureEncryptionKeys(env, target);
   installFixtureEncryptionKeys(env, leader);
   collectLocalProfileEncryptionAnnouncements(env);
-  env.eReplicas.delete(`${state.entityId}:${leaderSignerId}`);
+  env.state.eReplicas.delete(`${state.entityId}:${leaderSignerId}`);
   const manifest = getCompleteProfileEncryptionManifest(env, target.state);
   if (!manifest) throw new Error('CATCHUP_FIXTURE_PROFILE_MANIFEST_MISSING');
   state.profileEncryptionManifest = structuredClone(manifest);

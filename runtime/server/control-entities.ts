@@ -19,7 +19,7 @@ const getProfileNameForEntity = (
   getRelayProfileName: (entityId: string) => string | undefined,
 ): string => {
   const target = entityId.toLowerCase();
-  const localReplica = Array.from(env.eReplicas?.values?.() || []).find(replica => String(replica?.entityId || '').toLowerCase() === target);
+  const localReplica = Array.from(env.state.eReplicas?.values?.() || []).find(replica => String(replica?.entityId || '').toLowerCase() === target);
   const localName = localReplica?.state?.profile?.name;
   const gossipProfile = (env.gossip?.getProfiles?.() || []).find(profile => String(profile?.entityId || '').toLowerCase() === target);
   const rawName = localName ?? gossipProfile?.name ?? getRelayProfileName(target);
@@ -32,7 +32,7 @@ export const listLocalControlEntities = (
 ): ControlEntitySummary[] => {
   const seen = new Set<string>();
   const entities: ControlEntitySummary[] = [];
-  for (const replica of env.eReplicas?.values?.() || []) {
+  for (const replica of env.state.eReplicas?.values?.() || []) {
     const entityId = String(replica?.entityId || '').toLowerCase();
     if (!entityId || seen.has(entityId)) continue;
     const signerId = resolveEntityProposerId(env, entityId, 'daemon-control.list');

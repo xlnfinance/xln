@@ -108,8 +108,11 @@
   function cloneEnvSnapshot(frame: EnvSnapshot): EnvSnapshot {
     return {
       ...frame,
-      eReplicas: new Map(frame.eReplicas),
-      jReplicas: new Map(frame.jReplicas),
+      state: {
+        ...frame.state,
+        eReplicas: new Map(frame.state.eReplicas),
+        jReplicas: new Map(frame.state.jReplicas),
+      },
     };
   }
 
@@ -123,7 +126,7 @@
     let accountCount = 0;
     let accountHeightTotal = 0;
     let pendingFrameCount = 0;
-    for (const replica of frame.eReplicas?.values?.() || []) {
+    for (const replica of frame.state.eReplicas?.values?.() || []) {
       for (const account of replica?.state?.accounts?.values?.() || []) {
         accountCount += 1;
         accountHeightTotal += Number(account.currentHeight ?? account.currentFrame?.height ?? 0);
@@ -132,9 +135,9 @@
     }
     return [
       String(frame.runtimeId || ''),
-      String(frame.height || 0),
-      String(frame.timestamp || 0),
-      String(frame.eReplicas?.size || 0),
+      String(frame.state.height || 0),
+      String(frame.state.timestamp || 0),
+      String(frame.state.eReplicas?.size || 0),
       String(accountCount),
       String(accountHeightTotal),
       String(pendingFrameCount),
@@ -267,8 +270,8 @@
   // Available jurisdictions (time-aware)
   const availableJurisdictions = $derived.by(() => {
     const frame = currentFrame;
-    if (!frame?.jReplicas) return [];
-    return Array.from(frame.jReplicas.values()) as JurisdictionLike[];
+    if (!frame?.state.jReplicas) return [];
+    return Array.from(frame.state.jReplicas.values()) as JurisdictionLike[];
   });
 
   function getFrameActiveJurisdiction(frame: RuntimeFrame | null | undefined): string | null {
@@ -302,10 +305,10 @@
 
   // Get replica for selected entity
   const selectedReplica = $derived.by<EntityReplica | null>(() => {
-    if (!selectedEntityId || !selectedSignerId || !currentFrame?.eReplicas) {
+    if (!selectedEntityId || !selectedSignerId || !currentFrame?.state.eReplicas) {
       return null;
     }
-    const replicas = currentFrame.eReplicas;
+    const replicas = currentFrame.state.eReplicas;
     const selectedEntityLower = selectedEntityId.toLowerCase();
     const selectedSignerLower = selectedSignerId.toLowerCase();
     for (const [key, replica] of replicas.entries()) {
@@ -320,7 +323,7 @@
   });
 
   function firstReplicaInFrame(frame: RuntimeFrame | null | undefined): EntityReplica | null {
-    const replicas = frame?.eReplicas;
+    const replicas = frame?.state.eReplicas;
     if (!replicas) return null;
     for (const replica of replicas.values()) {
       if (replica?.entityId && replica?.signerId) return replica;
@@ -330,7 +333,7 @@
 
   function findReplicaByEntityInFrame(frame: RuntimeFrame | null | undefined, entityId: string): EntityReplica | null {
     const normalized = String(entityId || '').trim().toLowerCase();
-    const replicas = frame?.eReplicas;
+    const replicas = frame?.state.eReplicas;
     if (!normalized || !replicas) return null;
     for (const replica of replicas.values()) {
       if (String(replica?.entityId || '').trim().toLowerCase() === normalized && replica?.signerId) {
@@ -341,7 +344,7 @@
   }
 
   function firstReplicaWithRelationshipsInFrame(frame: RuntimeFrame | null | undefined): EntityReplica | null {
-    const replicas = frame?.eReplicas;
+    const replicas = frame?.state.eReplicas;
     if (!replicas) return null;
     let best: { replica: EntityReplica; score: number } | null = null;
     for (const replica of replicas.values()) {
@@ -371,7 +374,7 @@
   });
 
   $effect(() => {
-    if (isRemoteRuntime || !currentFrame?.eReplicas) return;
+    if (isRemoteRuntime || !currentFrame?.state.eReplicas) return;
     if (selectedEntityId && selectedReplica) return;
 
     const vault = $activeRuntimeStore;
@@ -477,7 +480,7 @@
   }
 
   function frameReplicas(frame: RuntimeFrame | null | undefined): Map<string, EntityReplica> {
-    const replicas = frame?.eReplicas;
+    const replicas = frame?.state.eReplicas;
     return replicas instanceof Map
       ? replicas as Map<string, EntityReplica>
       : new Map<string, EntityReplica>();
@@ -505,7 +508,7 @@
   }
 
   const formationRuntimeProjection = $derived.by((): FormationRuntimeProjection => {
-    const jurisdictions = Array.from(currentFrame?.jReplicas?.values?.() || []).map((replica) => ({
+    const jurisdictions = Array.from(currentFrame?.state.jReplicas?.values?.() || []).map((replica) => ({
       name: String(replica?.name || ''),
       address: String(replica?.depositoryAddress || ''),
       entityProviderAddress: String(replica?.entityProviderAddress || ''),
@@ -608,7 +611,7 @@
   });
 
   function listJMachineNames(env: RuntimeFrame | null | undefined): string[] {
-    const jReplicas = env?.jReplicas;
+    const jReplicas = env?.state.jReplicas;
     if (!jReplicas) return [];
     return Array.from(jReplicas.keys());
   }
@@ -628,7 +631,7 @@
     signerId: string,
     jurisdictionName?: string | null,
   ): EntityReplica | null {
-    const reps = env?.eReplicas;
+    const reps = env?.state.eReplicas;
     if (!reps) return null;
     const replicas = reps instanceof Map ? reps : new Map<string, EntityReplica>(Object.entries(reps || {}) as Array<[string, EntityReplica]>);
     const signerLower = signerId.toLowerCase();
@@ -648,8 +651,8 @@
       selectedReplica?.state?.config?.jurisdiction?.name
       || selectedJurisdictionName
       || null;
-    if (!jurisdictionName || !currentFrame?.jReplicas) return false;
-    const replicas: JurisdictionEntry[] = Array.from(currentFrame.jReplicas.values());
+    if (!jurisdictionName || !currentFrame?.state.jReplicas) return false;
+    const replicas: JurisdictionEntry[] = Array.from(currentFrame.state.jReplicas.values());
     const match = replicas.find((replica) => replica?.name === jurisdictionName);
     return Array.isArray(match?.rpcs) && match.rpcs.some((rpc: string) => !rpc.startsWith('browservm://'));
   });

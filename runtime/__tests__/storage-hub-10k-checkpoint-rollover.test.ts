@@ -79,7 +79,7 @@ test('hub persists 20k non-empty R-wal across 10k checkpoint rollover and cold r
     entityProviderAddress: '0x000000000000000000000000000000000000bEEF',
   };
   env.activeJurisdiction = jurisdiction.name;
-  env.jReplicas.set(jurisdiction.name, {
+  env.state.jReplicas.set(jurisdiction.name, {
     ...jurisdiction,
     blockNumber: 0n,
     stateRoot: new Uint8Array(32),
@@ -123,9 +123,9 @@ test('hub persists 20k non-empty R-wal across 10k checkpoint rollover and cold r
       entityInputs: [],
     });
     await processRuntime(env, []);
-    expect(env.height).toBe(1);
+    expect(env.state.height).toBe(1);
 
-    for (let sequence = 1; env.height < FINAL_HEIGHT; sequence += 1) {
+    for (let sequence = 1; env.state.height < FINAL_HEIGHT; sequence += 1) {
       enqueueRuntimeInput(env, {
         runtimeTxs: [markLocalRuntimeAdapterCommandTx({
           type: 'recordRuntimeAdapterCommand',
@@ -144,13 +144,13 @@ test('hub persists 20k non-empty R-wal across 10k checkpoint rollover and cold r
       const durationMs = performance.now() - startedAt;
       frameDurations.push(durationMs);
       peakRssBytes = Math.max(peakRssBytes, process.memoryUsage.rss());
-      if (env.height % SNAPSHOT_PERIOD === 0) snapshotDurations.push(durationMs);
-      else if (env.height % MATERIALIZE_PERIOD === 0) materializeDurations.push(durationMs);
+      if (env.state.height % SNAPSHOT_PERIOD === 0) snapshotDurations.push(durationMs);
+      else if (env.state.height % MATERIALIZE_PERIOD === 0) materializeDurations.push(durationMs);
       else sparseDurations.push(durationMs);
-      if (env.height % 1_000 === 0) {
+      if (env.state.height % 1_000 === 0) {
         const now = performance.now();
         console.log('[HUB_10K_PROGRESS]', {
-          height: env.height,
+          height: env.state.height,
           last1kMs: Math.round(now - progressStartedAt),
           rssMiB: Number((process.memoryUsage.rss() / 1024 / 1024).toFixed(1)),
         });
@@ -158,7 +158,7 @@ test('hub persists 20k non-empty R-wal across 10k checkpoint rollover and cold r
       }
     }
 
-    expect(env.height).toBe(FINAL_HEIGHT);
+    expect(env.state.height).toBe(FINAL_HEIGHT);
     expect(env.runtimeState?.runtimeAdapterCommandFrontiers?.size).toBe(1);
     expect(env.runtimeState?.runtimeAdapterCommandFrontiers?.get(laneId)?.lastContiguousSequence)
       .toBe(FINAL_HEIGHT - 1);
@@ -211,8 +211,8 @@ test('hub persists 20k non-empty R-wal across 10k checkpoint rollover and cold r
     await closeInfraDb(env);
     console.log('[HUB_10K_STAGE]', { stage: 'cold-restore-head', height: FINAL_HEIGHT });
     restored = await loadEnvFromDB(runtimeId, seed);
-    expect(restored?.height).toBe(FINAL_HEIGHT);
-    expect(Array.from(restored?.eReplicas.values() ?? []).some(replica => replica.entityId === entityId))
+    expect(restored?.state.height).toBe(FINAL_HEIGHT);
+    expect(Array.from(restored?.state.eReplicas.values() ?? []).some(replica => replica.entityId === entityId))
       .toBe(true);
     expect(restored?.runtimeState?.runtimeAdapterCommandFrontiers?.get(laneId)?.lastContiguousSequence)
       .toBe(FINAL_HEIGHT - 1);

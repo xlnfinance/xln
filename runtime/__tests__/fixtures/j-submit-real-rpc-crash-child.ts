@@ -65,7 +65,7 @@ const crashNow = (): never => {
 
 const findReplica = (env: RuntimeReplica, entityId: string) => {
   const normalized = entityId.toLowerCase();
-  const replica = Array.from(env.eReplicas.values()).find(
+  const replica = Array.from(env.state.eReplicas.values()).find(
     (candidate) => candidate.entityId.toLowerCase() === normalized,
   );
   if (!replica) fail(`replica-missing:${entityId}`);
@@ -87,7 +87,7 @@ const driveUntil = async (
     label,
     runtimeMempool: env.runtimeMempool,
     pendingCommittedJOutbox: env.runtimeState?.pendingCommittedJOutbox,
-    replicas: Array.from(env.eReplicas.values()).map((replica) => ({
+    replicas: Array.from(env.state.eReplicas.values()).map((replica) => ({
       entityId: replica.entityId,
       signerId: replica.signerId,
       height: replica.state.height,
@@ -116,7 +116,7 @@ const countExactHankoBatchLogs = async (
 
 const closeEnv = async (env: RuntimeReplica): Promise<void> => {
   const adapters = new Set<JAdapter>();
-  for (const replica of env.jReplicas.values()) {
+  for (const replica of env.state.jReplicas.values()) {
     if (replica.jadapter) adapters.add(replica.jadapter);
   }
   await closeRuntimeDb(env);
@@ -142,7 +142,7 @@ const runCrashPhase = async (): Promise<never> => {
   env.quietRuntimeLogs = true;
   jadapter.setQuietLogs?.(true);
   assertEqual(jadapter.mode, 'rpc', 'adapter-mode');
-  const jReplica = env.jReplicas.get(jurisdiction.name);
+  const jReplica = env.state.jReplicas.get(jurisdiction.name);
   if (!jReplica) fail(`jurisdiction-replica-missing:${jurisdiction.name}`);
   jReplica.rpcs = [rpcUrl];
 
@@ -212,7 +212,7 @@ const runCrashPhase = async (): Promise<never> => {
       attemptId,
       submitAttempts: local.submitAttempts,
       lastSubmittedAt: local.lastSubmittedAt,
-      runtimeTimestamp: env.timestamp,
+      runtimeTimestamp: env.state.timestamp,
       txHash: result.txHash,
       blockNumber: result.blockNumber!,
       chainNonce: (await jadapter.getEntityNonce(sender.id)).toString(),
@@ -240,7 +240,7 @@ const runRecoverPhase = async (): Promise<void> => {
   restored.scenarioMode = true;
   restored.quietRuntimeLogs = true;
   const replica = findReplica(restored, proof.senderId);
-  const jReplica = restored.jReplicas.get(proof.jurisdictionName);
+  const jReplica = restored.state.jReplicas.get(proof.jurisdictionName);
   const adapter = jReplica?.jadapter;
   if (!adapter) fail(`restored-rpc-adapter-missing:${proof.jurisdictionName}`);
   assertEqual(adapter.mode, 'rpc', 'restored-adapter-mode');
@@ -252,7 +252,7 @@ const runRecoverPhase = async (): Promise<void> => {
   assertEqual(replica.jSubmitState?.lastResultAttemptId, undefined, 'result-before-reconcile');
   assertEqual(replica.state.jBatchState?.sentBatch?.batchHash, proof.batchHash, 'sent-batch-before-reconcile');
   assertEqual(await adapter.getEntityNonce(proof.senderId), 1n, 'chain-nonce-before-reconcile');
-  const restoredTimestamp = restored.timestamp;
+  const restoredTimestamp = restored.state.timestamp;
   const nextRetryTimestampBefore = getNextJSubmitRetryTimestamp(restored);
   assertEqual(nextRetryTimestampBefore, null, 'pending-attempt-must-not-schedule-second-attempt');
 
@@ -268,9 +268,9 @@ const runRecoverPhase = async (): Promise<void> => {
   );
   const reconciledReplica = findReplica(restored, proof.senderId);
   const canonicalHash = computeCanonicalEntityHash(reconciledReplica).hash;
-  const finalRuntimeHeight = restored.height;
+  const finalRuntimeHeight = restored.state.height;
   const finalEntityHeight = reconciledReplica.state.height;
-  const finalTimestamp = restored.timestamp;
+  const finalTimestamp = restored.state.timestamp;
   const retryBackoffAt = proof.lastSubmittedAt + ENTITY_J_SUBMIT_FALLBACK_MS;
   const resultAttemptId = reconciledReplica.jSubmitState?.lastResultAttemptId;
   assertEqual(resultAttemptId, undefined, 'submit-result-must-not-replace-j-event-authority');
@@ -293,10 +293,10 @@ const runRecoverPhase = async (): Promise<void> => {
   reopened.scenarioMode = true;
   reopened.quietRuntimeLogs = true;
   const reopenedReplica = findReplica(reopened, proof.senderId);
-  const reopenedAdapter = reopened.jReplicas.get(proof.jurisdictionName)?.jadapter;
+  const reopenedAdapter = reopened.state.jReplicas.get(proof.jurisdictionName)?.jadapter;
   if (!reopenedAdapter) fail('second-reopen-adapter-missing');
   reopenedAdapter.setQuietLogs?.(true);
-  assertEqual(reopened.height, finalRuntimeHeight, 'runtime-head-after-second-reopen');
+  assertEqual(reopened.state.height, finalRuntimeHeight, 'runtime-head-after-second-reopen');
   assertEqual(reopenedReplica.state.height, finalEntityHeight, 'entity-head-after-second-reopen');
   assertEqual(computeCanonicalEntityHash(reopenedReplica).hash, canonicalHash, 'canonical-hash-after-second-reopen');
   assertEqual(reopenedReplica.jSubmitState?.lastResultAttemptId, resultAttemptId, 'result-after-second-reopen');

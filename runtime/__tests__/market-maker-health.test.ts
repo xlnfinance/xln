@@ -292,7 +292,7 @@ const addReplica = (
   signerId: string,
   accounts: Map<string, AccountState> = new Map(),
 ): void => {
-  env.eReplicas.set(`${entityId}:${signerId}`, {
+  env.state.eReplicas.set(`${entityId}:${signerId}`, {
     entityId,
     signerId,
     entityEncPubKey: '',
@@ -323,7 +323,7 @@ const buildBootstrapTopology = (): {
   tokenIdsByContext: MarketMakerTokenIdsByContext;
 } => {
   const env = createEmptyEnv('market-maker-bootstrap-health');
-  env.timestamp = 1_000;
+  env.state.timestamp = 1_000;
   env.runtimeId = addr('90');
   env.quietRuntimeLogs = true;
   const hubRuntimeId = addr('91');
@@ -434,7 +434,7 @@ test('five-token jurisdiction keeps same-chain and cross depth inside one accoun
 
 test('cross offer construction requires the deterministic Runtime-frame timestamp', () => {
   const { env, contexts, visibleHubs } = buildBootstrapTopology();
-  env.timestamp = 0;
+  env.state.timestamp = 0;
 
   expect(() => buildMarketMakerCrossOfferSpecs(
     env,

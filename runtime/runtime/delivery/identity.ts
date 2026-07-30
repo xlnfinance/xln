@@ -637,7 +637,7 @@ export const accountProposalCommittedBySender = (env: RuntimeReplica, output: Ro
   });
   if (proposals.length === 0) return false;
   return proposals.every(({ accountInput, proposal }) =>
-    [...env.eReplicas.values()].some(replica => {
+    [...env.state.eReplicas.values()].some(replica => {
       if (replica.entityId.toLowerCase() !== accountInput.fromEntityId.toLowerCase()) return false;
       const targetCounterparty = accountInput.toEntityId.toLowerCase();
       const account = [...replica.state.accounts.entries()].find(

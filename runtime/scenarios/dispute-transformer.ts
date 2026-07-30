@@ -100,7 +100,7 @@ const dropPartitionedOutputs = (env: RuntimeReplica, entityIds: ReadonlySet<stri
 
 const countOrderbookRows = (env: RuntimeReplica, offerIds: ReadonlySet<string>): number => {
   let rows = 0;
-  for (const replica of env.eReplicas.values()) {
+  for (const replica of env.state.eReplicas.values()) {
     for (const orderId of replica.state.orderbookExt?.orderPairs?.keys() ?? []) {
       if ([...offerIds].some((offerId) => orderId === offerId || orderId.endsWith(`:${offerId}`))) rows++;
     }
@@ -230,13 +230,13 @@ export async function runDisputeTransformer(_existingEnv?: RuntimeReplica): Prom
     const hubSecret = ethers.keccak256(ethers.toUtf8Bytes('dispute-transformer:hub-secret'));
     const aliceHashlock = hashHtlcSecret(aliceSecret);
     const hubHashlock = hashHtlcSecret(hubSecret);
-    const revealHeight = Number(env.jReplicas.values().next().value?.blockNumber ?? 0n) + 20_000;
+    const revealHeight = Number(env.state.jReplicas.values().next().value?.blockNumber ?? 0n) + 20_000;
     // Managed scenario Anvil starts at a fixed timestamp. Do not derive signed
     // Account state from the latest RPC block: watcher scheduling can mine one
     // extra service block and change the ProofBody by one second.
     const deadline = SCENARIO_DEADLINE_MS;
-    const aliceLockId = generateLockId(aliceHashlock, revealHeight, 0, env.timestamp);
-    const hubLockId = generateLockId(hubHashlock, revealHeight, 1, env.timestamp);
+    const aliceLockId = generateLockId(aliceHashlock, revealHeight, 0, env.state.timestamp);
+    const hubLockId = generateLockId(hubHashlock, revealHeight, 1, env.state.timestamp);
     const giveAmount = MAX_FILL_RATIO * WETH_LOT;
     const wantAmount = MAX_FILL_RATIO * 3_000n;
 

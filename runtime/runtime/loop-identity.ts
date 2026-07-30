@@ -20,7 +20,7 @@ export const deriveRuntimeId = (seed: string): string =>
 export const getLocalSignerIdsForEntity = (env: RuntimeReplica, entityId: string): string[] => {
   const targetEntityId = String(entityId || '').toLowerCase();
   const signerIds = new Set<string>();
-  for (const replicaKey of env.eReplicas.keys()) {
+  for (const replicaKey of env.state.eReplicas.keys()) {
     const replicaEntityId = extractEntityId(replicaKey).toLowerCase();
     const signerId = extractSignerId(replicaKey);
     if (replicaEntityId !== targetEntityId || !signerId) continue;

@@ -140,7 +140,7 @@ const applyCertifiedBoardEvent = (
 const setup = (label = 'single') => {
   const env = createEmptyEnv(`entity-provider-action-flow:${label}`);
   env.scenarioMode = true;
-  env.timestamp = 1_000;
+  env.state.timestamp = 1_000;
   const signerId = deriveSignerAddressSync(env.runtimeSeed!, 'validator').toLowerCase();
   registerSignerKey(env, signerId, deriveSignerKeySync(env.runtimeSeed!, 'validator'));
   env.runtimeId = signerId;
@@ -157,7 +157,7 @@ const setup = (label = 'single') => {
       entityProviderAddress: address('a3'),
     },
   };
-  const state = baseState(numberedEntityId(2n), config, env.timestamp);
+  const state = baseState(numberedEntityId(2n), config, env.state.timestamp);
   installCertifiedBoardAuthority(env, state);
   const localKeys = deriveLocalEntityCryptoKeys(env, state.entityId, signerId);
   const replica: EntityReplica = {
@@ -169,8 +169,8 @@ const setup = (label = 'single') => {
     mempool: [],
     isProposer: true,
   };
-  env.eReplicas.set(`${state.entityId}:${signerId}`, replica);
-  env.jReplicas.set('EntityProviderActions', {
+  env.state.eReplicas.set(`${state.entityId}:${signerId}`, replica);
+  env.state.jReplicas.set('EntityProviderActions', {
     name: 'EntityProviderActions',
     blockNumber: 0n,
     stateRoot: null,
@@ -213,7 +213,7 @@ const buildPending = async (fixture: ReturnType<typeof setup>) => {
     hanko: `0x${'12'.repeat(65)}`,
     type: 'entityProviderAction',
     entityHeight: 1,
-    createdAt: fixture.env.timestamp,
+    createdAt: fixture.env.state.timestamp,
   }]]);
   return { result, jTx, pending };
 };
@@ -312,7 +312,7 @@ describe('EntityProvider action flow', () => {
       fixture.env,
       original.result.newState,
       [signedEntityCommandTx(cancelCommand)],
-      fixture.env.timestamp + 1,
+      fixture.env.state.timestamp + 1,
     );
     expect(quorumAuthorized.newState.entityProviderActionState?.pending?.actionHash)
       .toBe(cancelJTx.data?.intent?.actionHash);
@@ -426,7 +426,7 @@ describe('EntityProvider action flow', () => {
       fixture.env,
       fixture.state,
       [signedEntityCommandTx(command)],
-      fixture.env.timestamp + 1,
+      fixture.env.state.timestamp + 1,
     );
     expect(applied.newState.entityProviderActionState?.pending?.payload.kind)
       .toBe('entityTransferTokens');
@@ -510,7 +510,7 @@ describe('EntityProvider action flow', () => {
     });
     registerPendingCommittedJOutbox(fixture.env, attemptOutbox);
     expect(fixture.env.runtimeState?.pendingCommittedJOutbox).toHaveLength(1);
-    expect(collectDueEntityProviderActionRuntimeTxs(fixture.env, fixture.env.timestamp)).toEqual([]);
+    expect(collectDueEntityProviderActionRuntimeTxs(fixture.env, fixture.env.state.timestamp)).toEqual([]);
   });
 
   test('BoardActivated expires pending only for this Entity and preserves nonce plus generation', async () => {
@@ -611,7 +611,7 @@ describe('EntityProvider action flow', () => {
       transactionHash: blockHash('35'),
       logIndex: 0,
     });
-    const retry = collectDueEntityProviderActionRuntimeTxs(fixture.env, fixture.env.timestamp)[0];
+    const retry = collectDueEntityProviderActionRuntimeTxs(fixture.env, fixture.env.state.timestamp)[0];
     if (!retry) throw new Error('TEST_STALE_EPOCH_RETRY_MISSING');
     expect(() => applyRetryEntityProviderActionRuntimeTx(fixture.env, retry))
       .toThrow('ENTITY_PROVIDER_ACTION_PENDING_BOARD_EPOCH_STALE');
@@ -621,7 +621,7 @@ describe('EntityProvider action flow', () => {
     const fixture = setup('retry-scheduler');
     await buildPending(fixture);
     expect(getNextEntityProviderActionRetryTimestamp(fixture.env)).toBe(0);
-    const [retry] = collectDueEntityProviderActionRuntimeTxs(fixture.env, fixture.env.timestamp);
+    const [retry] = collectDueEntityProviderActionRuntimeTxs(fixture.env, fixture.env.state.timestamp);
     expect(retry?.type).toBe('retryEntityProviderAction');
     const outbox = applyRetryEntityProviderActionRuntimeTx(fixture.env, retry!);
     registerPendingCommittedJOutbox(fixture.env, outbox);
@@ -630,14 +630,14 @@ describe('EntityProvider action flow', () => {
       message: 'rpc unavailable',
     });
     applyRecordEntityProviderActionResultRuntimeTx(fixture.env, resultTx);
-    expect(collectDueEntityProviderActionRuntimeTxs(fixture.env, fixture.env.timestamp)).toEqual([]);
-    expect(collectDueEntityProviderActionRuntimeTxs(fixture.env, fixture.env.timestamp + 60_000)).toHaveLength(1);
+    expect(collectDueEntityProviderActionRuntimeTxs(fixture.env, fixture.env.state.timestamp)).toEqual([]);
+    expect(collectDueEntityProviderActionRuntimeTxs(fixture.env, fixture.env.state.timestamp + 60_000)).toHaveLength(1);
   });
 
   test('stale RPC result retires only its exact old attempt and never mutates a new generation', async () => {
     const fixture = setup('stale-result');
     const { pending } = await buildPending(fixture);
-    const retry = collectDueEntityProviderActionRuntimeTxs(fixture.env, fixture.env.timestamp)[0]!;
+    const retry = collectDueEntityProviderActionRuntimeTxs(fixture.env, fixture.env.state.timestamp)[0]!;
     const outbox = applyRetryEntityProviderActionRuntimeTx(fixture.env, retry);
     registerPendingCommittedJOutbox(fixture.env, outbox);
     const oldAction = requireActionJTx(outbox[0]?.jTxs[0]);
@@ -676,7 +676,7 @@ describe('EntityProvider action flow', () => {
   test('terminal revert remains fail-closed: receipt is durable but consensus pending is never cleared', async () => {
     const fixture = setup('terminal');
     const { pending } = await buildPending(fixture);
-    const retry = collectDueEntityProviderActionRuntimeTxs(fixture.env, fixture.env.timestamp)[0]!;
+    const retry = collectDueEntityProviderActionRuntimeTxs(fixture.env, fixture.env.state.timestamp)[0]!;
     const outbox = applyRetryEntityProviderActionRuntimeTx(fixture.env, retry);
     registerPendingCommittedJOutbox(fixture.env, outbox);
     const action = requireActionJTx(outbox[0]?.jTxs[0]);
@@ -712,16 +712,16 @@ describe('EntityProvider action flow', () => {
       hanko: `0x${'34'.repeat(65)}`,
       type: 'entityProviderAction',
       entityHeight: 2,
-      createdAt: fixture.env.timestamp,
+      createdAt: fixture.env.state.timestamp,
     }]]);
-    const retry = collectDueEntityProviderActionRuntimeTxs(fixture.env, fixture.env.timestamp)[0]!;
+    const retry = collectDueEntityProviderActionRuntimeTxs(fixture.env, fixture.env.state.timestamp)[0]!;
     const outbox = applyRetryEntityProviderActionRuntimeTx(fixture.env, retry);
     registerPendingCommittedJOutbox(fixture.env, outbox);
     const machineSnapshot = buildDurableRuntimeMachineSnapshot(fixture.env);
     const replicaSnapshot = buildCanonicalEntityReplicaSnapshot(fixture.replica);
     const restored = createEmptyEnv('entity-provider-action:snapshot-restored');
     restoreDurableRuntimeSnapshot(restored, machineSnapshot);
-    restored.eReplicas.set(
+    restored.state.eReplicas.set(
       `${replicaSnapshot.entityId}:${replicaSnapshot.signerId}`,
       replicaSnapshot,
     );
@@ -729,7 +729,7 @@ describe('EntityProvider action flow', () => {
     expect(replicaSnapshot.entityProviderActionSubmitState)
       .toEqual(fixture.replica.entityProviderActionSubmitState);
     expect(replicaSnapshot.state.entityProviderActionState?.pending?.actionHash).toBe(pending.actionHash);
-    expect(collectDueEntityProviderActionRuntimeTxs(restored, restored.timestamp)).toEqual([]);
+    expect(collectDueEntityProviderActionRuntimeTxs(restored, restored.state.timestamp)).toEqual([]);
 
     const hydrated = hydrateEntityStateFromStorage({
       core: projectEntityCoreDoc(fixture.replica.state),
@@ -758,8 +758,8 @@ describe('EntityProvider action flow', () => {
     };
     const proposerEnv = createEmptyEnv(`${seed}:proposer`);
     proposerEnv.scenarioMode = true;
-    proposerEnv.timestamp = 1_000;
-    proposerEnv.jReplicas.set('EntityProviderActions', {
+    proposerEnv.state.timestamp = 1_000;
+    proposerEnv.state.jReplicas.set('EntityProviderActions', {
       name: 'EntityProviderActions',
       blockNumber: 0n,
       stateRoot: null,
@@ -773,7 +773,7 @@ describe('EntityProvider action flow', () => {
       contracts: { depository: address('a2'), entityProvider: address('a3') },
     });
     const entityId = hashBoard(encodeBoard(config, proposerEnv)).toLowerCase();
-    const proposerState = baseState(entityId, config, proposerEnv.timestamp);
+    const proposerState = baseState(entityId, config, proposerEnv.state.timestamp);
     installCertifiedBoardAuthority(proposerEnv, proposerState);
     const result = handleEntityProviderTransfer(
       proposerState,
@@ -824,11 +824,11 @@ describe('EntityProvider action flow', () => {
     };
     const preparationEnv = createEmptyEnv(`${boardSeed}:preparation`);
     preparationEnv.scenarioMode = true;
-    preparationEnv.timestamp = 5_000;
+    preparationEnv.state.timestamp = 5_000;
     signers.forEach((signerId, index) =>
       registerSignerKey(preparationEnv, signerId, deriveSignerKeySync(boardSeed, labels[index]!)));
     const entityId = hashBoard(encodeBoard(config, preparationEnv)).toLowerCase();
-    const genesis = baseState(entityId, config, preparationEnv.timestamp);
+    const genesis = baseState(entityId, config, preparationEnv.state.timestamp);
     installCertifiedBoardAuthority(preparationEnv, genesis);
     const proposalCommand = buildSignedEntityCommand(
       preparationEnv,
@@ -866,11 +866,11 @@ describe('EntityProvider action flow', () => {
       const signerId = signers[index]!;
       const env = createEmptyEnv(`${boardSeed}:isolated:${index}`);
       env.scenarioMode = true;
-      env.timestamp = 5_003;
+      env.state.timestamp = 5_003;
       env.runtimeId = signerId;
       registerSignerKey(env, signerId, deriveSignerKeySync(boardSeed, labels[index]!));
       cacheCertifiedBoardNodes(env, getCertifiedBoardNodeStore(preparationEnv));
-      env.jReplicas.set('EntityProviderActions', {
+      env.state.jReplicas.set('EntityProviderActions', {
         name: 'EntityProviderActions',
         blockNumber: 0n,
         stateRoot: null,
@@ -892,7 +892,7 @@ describe('EntityProvider action flow', () => {
         mempool: [],
         isProposer: index === 0,
       };
-      env.eReplicas.set(`${entityId}:${signerId}`, replica);
+      env.state.eReplicas.set(`${entityId}:${signerId}`, replica);
       return { env, replica, signerId };
     };
     const third = makeIsolated(2);
@@ -983,7 +983,7 @@ describe('EntityProvider action flow', () => {
       const entityId = numberedEntityId(BigInt(entityNumber));
       const env = createEmptyEnv(seed);
       env.scenarioMode = true;
-      env.timestamp = 2_000;
+      env.state.timestamp = 2_000;
       registerSignerKey(env, signerId, privateKey);
       const config: ConsensusConfig = {
         mode: 'proposer-based',
@@ -998,7 +998,7 @@ describe('EntityProvider action flow', () => {
           entityProviderAddress: adapter.addresses.entityProvider,
         },
       };
-      env.jReplicas.set('BrowserVMAction', {
+      env.state.jReplicas.set('BrowserVMAction', {
         name: 'BrowserVMAction',
         blockNumber: 0n,
         stateRoot: null,
@@ -1015,7 +1015,7 @@ describe('EntityProvider action flow', () => {
         },
         jadapter: adapter,
       });
-      const state = baseState(entityId, config, env.timestamp);
+      const state = baseState(entityId, config, env.state.timestamp);
       installCertifiedBoardAuthority(env, state);
       const result = handleEntityProviderTransfer(
         state,
@@ -1031,7 +1031,7 @@ describe('EntityProvider action flow', () => {
         jTx.data.intent.actionHash,
         privateKey,
       );
-      const submitted = await adapter.submitTx(jTx, { env, signerId, timestamp: env.timestamp });
+      const submitted = await adapter.submitTx(jTx, { env, signerId, timestamp: env.state.timestamp });
       if (!submitted.success) {
         throw new Error(`TEST_BROWSERVM_ACTION_SUBMIT_FAILED:${submitted.error ?? 'unknown'}`);
       }
@@ -1042,7 +1042,7 @@ describe('EntityProvider action flow', () => {
       const receipt = await adapter.getEntityProviderActionReceipt?.(entityId, 1n);
       expect(receipt?.args['actionHash']).toBe(jTx.data.intent.actionHash);
 
-      const reconciled = await adapter.submitTx(jTx, { env, signerId, timestamp: env.timestamp + 1 });
+      const reconciled = await adapter.submitTx(jTx, { env, signerId, timestamp: env.state.timestamp + 1 });
       expect(reconciled.success).toBe(true);
       expect(await adapter.getEntityProviderActionNonce?.(entityId)).toBe(1n);
       expect(reconciled.events?.filter((event) => event.name === 'EntityProviderActionExecuted'))
@@ -1069,7 +1069,7 @@ describe('EntityProvider action flow', () => {
       const released = await adapter.submitTx(releaseJTx, {
         env,
         signerId,
-        timestamp: env.timestamp + 2,
+        timestamp: env.state.timestamp + 2,
       });
       if (!released.success) {
         throw new Error(`TEST_BROWSERVM_RELEASE_SUBMIT_FAILED:${released.error ?? 'unknown'}`);
@@ -1109,7 +1109,7 @@ describe('EntityProvider action flow', () => {
       const cancelled = await adapter.submitTx(cancelJTx, {
         env,
         signerId,
-        timestamp: env.timestamp + 3,
+        timestamp: env.state.timestamp + 3,
       });
       if (!cancelled.success) {
         throw new Error(`TEST_BROWSERVM_CANCEL_SUBMIT_FAILED:${cancelled.error ?? 'unknown'}`);
@@ -1124,7 +1124,7 @@ describe('EntityProvider action flow', () => {
       const cancelledOriginal = await adapter.submitTx(pendingTransferJTx, {
         env,
         signerId,
-        timestamp: env.timestamp + 4,
+        timestamp: env.state.timestamp + 4,
       });
       expect(cancelledOriginal.success).toBe(true);
       expect(cancelledOriginal.events?.filter((event) => event.name === 'EntityProviderActionCancelled'))

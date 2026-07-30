@@ -85,14 +85,14 @@ test('a hub aborts an unconfirmed sent batch even while its own frame clock is f
   env.quietRuntimeLogs = true;
   // The runtime clock keeps advancing past the stale threshold while the
   // entity's own clock stays where the blocked handler left it.
-  env.timestamp = submittedAt + HUB_PENDING_BROADCAST_STALE_MS + 5_000;
+  env.state.timestamp = submittedAt + HUB_PENDING_BROADCAST_STALE_MS + 5_000;
 
   const state = makeHubState(frozenEntityClock, submittedAt);
   state.crontabState = initCrontab();
   for (const task of state.crontabState.tasks.values()) task.lastRun = 0;
 
   const replica = { entityId, signerId, mempool: [], isProposer: true, state } as unknown as EntityReplica;
-  env.eReplicas.set(`${entityId}:${signerId}`, replica);
+  env.state.eReplicas.set(`${entityId}:${signerId}`, replica);
 
   const outputs = await executeCrontab(env, replica, state.crontabState, {
     manualBroadcastInInput: false,
@@ -114,14 +114,14 @@ test('a hub still waits while the sent batch is younger than the stale threshold
   const env = createEmptyEnv('hub-rebalance-fresh-batch');
   env.scenarioMode = true;
   env.quietRuntimeLogs = true;
-  env.timestamp = submittedAt + 1_000;
+  env.state.timestamp = submittedAt + 1_000;
 
   const state = makeHubState(submittedAt + 500, submittedAt);
   state.crontabState = initCrontab();
   for (const task of state.crontabState.tasks.values()) task.lastRun = 0;
 
   const replica = { entityId, signerId, mempool: [], isProposer: true, state } as unknown as EntityReplica;
-  env.eReplicas.set(`${entityId}:${signerId}`, replica);
+  env.state.eReplicas.set(`${entityId}:${signerId}`, replica);
 
   const outputs = await executeCrontab(env, replica, state.crontabState, {
     manualBroadcastInInput: false,
@@ -156,14 +156,14 @@ test('hub crontab cannot unilaterally clear a bilateral rebalance request', asyn
   const env = createEmptyEnv('hub-rebalance-bilateral-clear');
   env.scenarioMode = true;
   env.quietRuntimeLogs = true;
-  env.timestamp = 1_000_000;
-  const state = makeHubState(env.timestamp, 0);
+  env.state.timestamp = 1_000_000;
+  const state = makeHubState(env.state.timestamp, 0);
   state.jBatchState = undefined;
   state.accounts.set(userId, hubAccount);
   state.crontabState = initCrontab();
   for (const task of state.crontabState.tasks.values()) task.lastRun = 0;
   const replica = { entityId, signerId, mempool: [], isProposer: true, state } as EntityReplica;
-  env.eReplicas.set(`${entityId}:${signerId}`, replica);
+  env.state.eReplicas.set(`${entityId}:${signerId}`, replica);
 
   await executeCrontab(env, replica, state.crontabState, {
     manualBroadcastInInput: false,

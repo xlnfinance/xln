@@ -349,8 +349,8 @@ describe('ordered reliable output lanes', () => {
     const env = createEmptyEnv(seed);
     env.runtimeId = sourceRuntimeId;
     env.dbNamespace = sourceRuntimeId;
-    env.height = 1;
-    env.timestamp = 1_000;
+    env.state.height = 1;
+    env.state.timestamp = 1_000;
     env.quietRuntimeLogs = true;
     const sourceProposal = crossJProposalOutput('source', { height: 1, timestamp: 1_000 });
     const targetProposal = crossJProposalOutput('target', { height: 1, timestamp: 1_000 });
@@ -390,7 +390,7 @@ describe('ordered reliable output lanes', () => {
 
       const restored = await loadEnvFromDB(sourceRuntimeId, seed);
       if (!restored) throw new Error('TEST_CROSS_J_RESTART_DID_NOT_RESTORE');
-      restored.timestamp = 1_000_000;
+      restored.state.timestamp = 1_000_000;
       const deliveredEnvelopes: RuntimeEntityInputsEnvelope[] = [];
       const restoredDeps = routingDeps(() => ({
         enqueueEntityInputsDelivery: (_runtimeId, envelope) => {
@@ -400,7 +400,7 @@ describe('ordered reliable output lanes', () => {
       }));
       try {
         expect(restored.pendingNetworkOutputs).toHaveLength(2);
-        expect(hasReadyPendingNetworkOutputs(restored, restoredDeps, restored.timestamp)).toBe(false);
+        expect(hasReadyPendingNetworkOutputs(restored, restoredDeps, restored.state.timestamp)).toBe(false);
         expect(deliveredEnvelopes).toHaveLength(0);
         expect(markPendingCrossJAdmissionOutputsReady(restored, restoredDeps, targetRuntimeId)).toBe(1);
 
@@ -455,7 +455,7 @@ describe('ordered reliable output lanes', () => {
     expect(getNextNetworkRetryTimestamp(env, deps)).toBeNull();
     markRestoredReliableOutputsDue(env);
     expect(getNextNetworkRetryTimestamp(env, deps)).toBeNull();
-    env.timestamp = 1_000_000;
+    env.state.timestamp = 1_000_000;
     expect(hasReadyPendingNetworkOutputs(env, deps, 1_000_000)).toBe(false);
     expect(markPendingCrossJAdmissionOutputsReady(env, deps, targetRuntimeId)).toBe(1);
     expect(getNextNetworkRetryTimestamp(env, deps)).toBe(0);
@@ -528,7 +528,7 @@ describe('ordered reliable output lanes', () => {
 
     expect(env.runtimeState?.deferredNetworkMeta?.size).toBe(2);
     expect(getNextNetworkRetryTimestamp(env, deps)).toBeNull();
-    env.timestamp = 1_000_000;
+    env.state.timestamp = 1_000_000;
     expect(hasReadyPendingNetworkOutputs(env, deps, 1_000_000)).toBe(false);
     expect(markPendingCrossJAdmissionOutputsReady(env, deps, targetRuntimeId)).toBe(1);
     expect(getNextNetworkRetryTimestamp(env, deps)).toBe(1_000_000);
@@ -628,8 +628,8 @@ describe('ordered reliable output lanes', () => {
       env.pendingNetworkOutputs = pending;
       const nextRetryAt = getNextNetworkRetryTimestamp(env, deps);
       expect(nextRetryAt).not.toBeNull();
-      expect(nextRetryAt! - env.timestamp).toBeLessThanOrEqual(4_000);
-      env.timestamp = nextRetryAt!;
+      expect(nextRetryAt! - env.state.timestamp).toBeLessThanOrEqual(4_000);
+      env.state.timestamp = nextRetryAt!;
     }
   });
 
@@ -652,7 +652,7 @@ describe('ordered reliable output lanes', () => {
     expect(env.runtimeState?.deferredNetworkMeta?.size).toBe(2);
     expect(getNextNetworkRetryTimestamp(env, deps)).toBe(2_000);
     expect(hasReadyPendingNetworkOutputs(env, deps, 1_999)).toBe(false);
-    env.timestamp = 2_000;
+    env.state.timestamp = 2_000;
     expect(splitPendingOutputsByRetryWindow(env, pending, deps).ready).toEqual(pending);
   });
 

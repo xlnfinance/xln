@@ -237,7 +237,7 @@ const makeTestRecoveryEnv = (runtimeId: string, entityId: string, counterpartyId
   env.runtimeId = runtimeId;
   env.dbNamespace = `tower-active-encryption-${Date.now()}`;
   env.activeJurisdiction = 'Local';
-  env.jReplicas.set('Local', {
+  env.state.jReplicas.set('Local', {
     name: 'Local',
     rpcs: ['http://127.0.0.1:8545'],
     chainId: 31337,
@@ -258,7 +258,7 @@ const makeTestRecoveryEnv = (runtimeId: string, entityId: string, counterpartyId
     transformers: [],
   };
   const proofBodyHash = proofBodyHashOf(proofBody);
-  env.eReplicas.set(`${entityId}:${runtimeId}`, {
+  env.state.eReplicas.set(`${entityId}:${runtimeId}`, {
     entityId,
     signerId: runtimeId,
     state: {

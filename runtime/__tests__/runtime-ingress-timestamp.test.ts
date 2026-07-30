@@ -46,13 +46,13 @@ const testJurisdiction = (name = TEST_JURISDICTION.name): JurisdictionConfig => 
 
 const addTestJurisdiction = (env: RuntimeReplica, name = TEST_JURISDICTION.name, jadapter?: unknown): void => {
   env.activeJurisdiction = env.activeJurisdiction || name;
-  env.jReplicas.set(name, {
+  env.state.jReplicas.set(name, {
     name,
     blockNumber: 0n,
     stateRoot: new Uint8Array(32),
     mempool: [],
     blockDelayMs: 0,
-    lastBlockTimestamp: env.timestamp,
+    lastBlockTimestamp: env.state.timestamp,
     position: { x: 0, y: 0, z: 0 },
     depositoryAddress: TEST_JURISDICTION.depositoryAddress,
     entityProviderAddress: TEST_JURISDICTION.entityProviderAddress,
@@ -131,7 +131,7 @@ const addSignableReplica = (
   const keys = deriveLocalEntityCryptoKeys(env, entityId, signerId);
   replica.entityEncPubKey = keys.publicKey;
   replica.entityEncPrivKey = keys.privateKey;
-  env.eReplicas.set(`${entityId}:${signerId}`, replica);
+  env.state.eReplicas.set(`${entityId}:${signerId}`, replica);
   return { entityId, signerId, replica };
 };
 
@@ -163,32 +163,32 @@ describe('runtime ingress timestamp', () => {
   test('direct process entry rejects a sticky-halted runtime before applying work', async () => {
     const env = createIsolatedEnv('direct-process-halt');
     env.runtimeState = { lifecyclePhase: 'halted', halted: true };
-    const heightBefore = env.height;
+    const heightBefore = env.state.height;
 
     await expect(processRuntime(env)).rejects.toThrow('RUNTIME_PROCESS_HALTED');
-    expect(env.height).toBe(heightBefore);
+    expect(env.state.height).toBe(heightBefore);
   });
 
   test('restored runtime does not fire future hooks without new ingress timestamp', async () => {
     const env = createIsolatedEnv('runtime-ingress-timestamp-seed');
     env.quietRuntimeLogs = true;
-    env.timestamp = Date.now();
+    env.state.timestamp = Date.now();
 
     const signerId = deriveSignerAddressSync(env.runtimeSeed!, 'restored-remote').toLowerCase();
     const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
-    const replica = makeReplica(entityId, env.timestamp, signerId);
-    env.eReplicas.set(`${entityId}:${signerId}`, replica);
+    const replica = makeReplica(entityId, env.state.timestamp, signerId);
+    env.state.eReplicas.set(`${entityId}:${signerId}`, replica);
 
     scheduleHook(replica.state.crontabState!, {
       id: 'watchdog:futuristic',
-      triggerAt: env.timestamp + 60_000,
+      triggerAt: env.state.timestamp + 60_000,
       type: 'watchdog',
       data: {},
     });
 
     await processRuntime(env);
 
-    expect(env.timestamp).toBe(replica.state.timestamp);
+    expect(env.state.timestamp).toBe(replica.state.timestamp);
     expect(replica.state.crontabState?.hooks?.has('watchdog:futuristic')).toBe(true);
   });
 
@@ -196,7 +196,7 @@ describe('runtime ingress timestamp', () => {
     const env = createIsolatedEnv('runtime-entity-input-frame-cap');
     env.quietRuntimeLogs = true;
     env.scenarioMode = true;
-    env.timestamp = 1_000;
+    env.state.timestamp = 1_000;
     env.runtimeState = {
       loopActive: false,
       halted: false,
@@ -206,7 +206,7 @@ describe('runtime ingress timestamp', () => {
     const replicas = ['cap-1', 'cap-2', 'cap-3'].map((label) => {
       const signerId = deriveSignerAddressSync(env.runtimeSeed!, label).toLowerCase();
       const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
-      env.eReplicas.set(`${entityId}:${signerId}`, makeReplica(entityId, 1_000, signerId, env));
+      env.state.eReplicas.set(`${entityId}:${signerId}`, makeReplica(entityId, 1_000, signerId, env));
       return { entityId, signerId };
     });
     const entityIds = replicas.map(({ entityId }) => entityId);
@@ -231,7 +231,7 @@ describe('runtime ingress timestamp', () => {
 
   test('stale queuedAt without payload cannot spin empty Runtime cycles', () => {
     const env = createIsolatedEnv('runtime-empty-queued-at');
-    env.timestamp = 1_000;
+    env.state.timestamp = 1_000;
     env.runtimeMempool = {
       runtimeTxs: [],
       entityInputs: [],
@@ -245,14 +245,14 @@ describe('runtime ingress timestamp', () => {
     const env = createIsolatedEnv('runtime-entity-input-no-default-cap');
     env.quietRuntimeLogs = true;
     env.scenarioMode = true;
-    env.timestamp = 1_000;
+    env.state.timestamp = 1_000;
 
     const replicas = Array.from({ length: 12 }, (_, index) => {
       const label = `uncapped-${index}`;
       const signerId = deriveSignerAddressSync(env.runtimeSeed!, label).toLowerCase();
       registerSignerKey(env, signerId, deriveSignerKeySync(env.runtimeSeed!, label));
       const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
-      env.eReplicas.set(`${entityId}:${signerId}`, makeReplica(entityId, 1_000, signerId, env));
+      env.state.eReplicas.set(`${entityId}:${signerId}`, makeReplica(entityId, 1_000, signerId, env));
       return { entityId, signerId };
     });
     enqueueRuntimeInput(env, {
@@ -273,7 +273,7 @@ describe('runtime ingress timestamp', () => {
 
     await processRuntime(env);
 
-    expect(env.height).toBe(1);
+    expect(env.state.height).toBe(1);
     expect(committedInputs).toEqual([{ height: 1, entityInputCount: 12 }]);
     expect(env.runtimeMempool?.entityInputs ?? []).toHaveLength(0);
     expect(env.runtimeState?.maxEntityInputsPerFrame).toBeUndefined();
@@ -283,7 +283,7 @@ describe('runtime ingress timestamp', () => {
     const env = createIsolatedEnv('runtime-entity-tx-frame-cap');
     env.quietRuntimeLogs = true;
     env.scenarioMode = true;
-    env.timestamp = 1_000;
+    env.state.timestamp = 1_000;
     env.runtimeState = {
       loopActive: false,
       halted: false,
@@ -295,7 +295,7 @@ describe('runtime ingress timestamp', () => {
     registerSignerKey(env, signerAddress, deriveSignerKeySync(env.runtimeSeed!, signerLabel));
     const signerId = signerAddress;
     const entityId = generateLazyEntityId([signerAddress], 1n);
-    env.eReplicas.set(`${entityId}:${signerId}`, makeReplica(entityId, 1_000, signerId, env));
+    env.state.eReplicas.set(`${entityId}:${signerId}`, makeReplica(entityId, 1_000, signerId, env));
     const txs = Array.from({ length: 5 }, (_, index) => ({
       type: 'profile-update' as const,
       data: {
@@ -315,7 +315,7 @@ describe('runtime ingress timestamp', () => {
       id: 'capped-runtime-input',
       kind: 'test',
       counts: { runtimeTxs: 0, entityInputs: 1, jInputs: 0 },
-      enqueuedHeight: env.height,
+      enqueuedHeight: env.state.height,
       runtimeInput: acceptedInput,
     });
     registerRuntimeFrameCommitCallback(env, ({ height, runtimeInput }) => {
@@ -341,7 +341,7 @@ describe('runtime ingress timestamp', () => {
     const env = createIsolatedEnv('runtime-entity-input-frame-cap-j-event');
     env.quietRuntimeLogs = true;
     env.scenarioMode = true;
-    env.timestamp = 1_000;
+    env.state.timestamp = 1_000;
     env.runtimeState = {
       loopActive: false,
       halted: false,
@@ -356,11 +356,11 @@ describe('runtime ingress timestamp', () => {
     registerSignerKey(env, jEventSignerId, deriveSignerKeySync(env.runtimeSeed!, jEventSignerLabel));
     const normalEntityId = generateLazyEntityId([normalSignerId], 1n);
     const jEventEntityId = generateLazyEntityId([jEventSignerId], 1n);
-    env.eReplicas.set(
+    env.state.eReplicas.set(
       `${normalEntityId}:${normalSignerId}`,
       makeReplica(normalEntityId, 1_000, normalSignerId, env),
     );
-    env.eReplicas.set(
+    env.state.eReplicas.set(
       `${jEventEntityId}:${jEventSignerId}`,
       makeReplica(jEventEntityId, 1_000, jEventSignerId, env),
     );
@@ -371,7 +371,7 @@ describe('runtime ingress timestamp', () => {
     const blockNumber = 1;
     const blockHash = `0x${'ab'.repeat(32)}`;
     const transactionHash = `0x${'cd'.repeat(32)}`;
-    const jEventReplica = env.eReplicas.get(`${jEventEntityId}:${jEventSignerId}`)!;
+    const jEventReplica = env.state.eReplicas.get(`${jEventEntityId}:${jEventSignerId}`)!;
     const jEventRange = buildJEventRangeData(jEventReplica.state, {
       from: jEventSignerId,
       event: jEvent,
@@ -431,7 +431,7 @@ describe('runtime ingress timestamp', () => {
   test('new ingress timestamp is clamped in live mode and still fires due hooks', async () => {
     const env = createIsolatedEnv('runtime-ingress-timestamp-seed');
     env.quietRuntimeLogs = true;
-    env.timestamp = getWallClockMs();
+    env.state.timestamp = getWallClockMs();
     addTestJurisdiction(env);
     const committedScheduledWakePresence: boolean[] = [];
     registerRuntimeFrameCommitCallback(env, ({ runtimeInput }) => {
@@ -439,11 +439,11 @@ describe('runtime ingress timestamp', () => {
         input.entityTxs?.some(tx => tx.type === 'scheduledWake')));
     });
 
-    const { entityId: existingEntityId, signerId, replica } = addSignableReplica(env, env.timestamp);
+    const { entityId: existingEntityId, signerId, replica } = addSignableReplica(env, env.state.timestamp);
 
     scheduleHook(replica.state.crontabState!, {
       id: 'watchdog:due-after-ingress',
-      triggerAt: env.timestamp + 1_000,
+      triggerAt: env.state.timestamp + 1_000,
       type: 'watchdog',
       data: {},
     });
@@ -480,10 +480,10 @@ describe('runtime ingress timestamp', () => {
 
     await processRuntime(env);
 
-    expect(env.timestamp).toBeLessThan(futureIngressTimestamp);
-    expect(env.timestamp).toBeGreaterThan(replica.state.timestamp);
-    expect(env.timestamp).toBeLessThanOrEqual(getWallClockMs() + TIMING.TIMESTAMP_DRIFT_MS);
-    const updatedReplica = env.eReplicas.get(`${existingEntityId}:${signerId}`);
+    expect(env.state.timestamp).toBeLessThan(futureIngressTimestamp);
+    expect(env.state.timestamp).toBeGreaterThan(replica.state.timestamp);
+    expect(env.state.timestamp).toBeLessThanOrEqual(getWallClockMs() + TIMING.TIMESTAMP_DRIFT_MS);
+    const updatedReplica = env.state.eReplicas.get(`${existingEntityId}:${signerId}`);
     expect(updatedReplica?.state.crontabState?.hooks?.has('watchdog:due-after-ingress')).toBe(false);
     expect(committedScheduledWakePresence.at(-1)).toBe(true);
   });
@@ -491,27 +491,27 @@ describe('runtime ingress timestamp', () => {
   test('direct live process inputs stamp R-frame from block creation time', async () => {
     const env = createIsolatedEnv('runtime-ingress-timestamp-seed');
     env.quietRuntimeLogs = true;
-    env.timestamp = 1_000;
+    env.state.timestamp = 1_000;
 
     const { entityId, signerId } = addSignableReplica(env, 1_000);
 
     const before = getWallClockMs();
     await processRuntime(env, [{ entityId, signerId, entityTxs: [] }]);
 
-    expect(env.timestamp).toBeGreaterThanOrEqual(before);
-    expect(env.timestamp).toBeLessThanOrEqual(Date.now() + TIMING.TIMESTAMP_DRIFT_MS);
+    expect(env.state.timestamp).toBeGreaterThanOrEqual(before);
+    expect(env.state.timestamp).toBeLessThanOrEqual(Date.now() + TIMING.TIMESTAMP_DRIFT_MS);
   });
 
   test('explicit live ingress timestamp controls delayed R-frame timestamp', async () => {
     const env = createIsolatedEnv('runtime-explicit-ingress-timestamp');
     env.quietRuntimeLogs = true;
-    env.timestamp = 1_000;
+    env.state.timestamp = 1_000;
 
     const signerId = deriveSignerAddressSync(env.runtimeSeed!, '1').toLowerCase();
     registerSignerKey(env, signerId, deriveSignerKeySync(env.runtimeSeed!, '1'));
     const entityId = generateLazyEntityId([signerId], 1n);
     const replica = makeReplica(entityId, 1_000, signerId, env);
-    env.eReplicas.set(`${entityId}:${signerId}`, replica);
+    env.state.eReplicas.set(`${entityId}:${signerId}`, replica);
     let committedInput: RuntimeReplica['runtimeInput'] | null = null;
     registerRuntimeFrameCommitCallback(env, ({ runtimeInput }) => {
       committedInput = structuredClone(runtimeInput);
@@ -537,8 +537,8 @@ describe('runtime ingress timestamp', () => {
     await sleep(20);
     await processRuntime(env);
 
-    expect(env.timestamp).toBe(20_000);
-    const updatedReplica = env.eReplicas.get(`${entityId}:${signerId}`);
+    expect(env.state.timestamp).toBe(20_000);
+    const updatedReplica = env.state.eReplicas.get(`${entityId}:${signerId}`);
     expect(updatedReplica?.state.timestamp).toBe(20_000);
     expect(committedInput?.entityInputs[0]?.entityTxs?.[0]).toMatchObject({
       type: 'profile-update',
@@ -552,11 +552,11 @@ describe('runtime ingress timestamp', () => {
       const env = createEmptyEnv(seed);
       env.dbNamespace = `${String(env.runtimeId || 'runtime')}-${dbSuffix}`;
       env.quietRuntimeLogs = true;
-      env.timestamp = 1_000;
+      env.state.timestamp = 1_000;
       const signerId = deriveSignerAddressSync(env.runtimeSeed!, '1').toLowerCase();
       registerSignerKey(env, signerId, deriveSignerKeySync(env.runtimeSeed!, '1'));
       const entityId = generateLazyEntityId([signerId], 1n);
-      env.eReplicas.set(`${entityId}:${signerId}`, makeReplica(entityId, 1_000, signerId, env));
+      env.state.eReplicas.set(`${entityId}:${signerId}`, makeReplica(entityId, 1_000, signerId, env));
       return { env, entityId, signerId };
     };
     const submit = async (env: RuntimeReplica, entityId: string, signerId: string): Promise<string> => {
@@ -573,7 +573,7 @@ describe('runtime ingress timestamp', () => {
         }],
       });
       await processRuntime(env);
-      expect(env.timestamp).toBe(20_000);
+      expect(env.state.timestamp).toBe(20_000);
       return computeCanonicalStateHashFromEnv(env);
     };
 
@@ -589,7 +589,7 @@ describe('runtime ingress timestamp', () => {
   test('empty entity ingress advances runtime clock and fires due hooks', async () => {
     const env = createIsolatedEnv('runtime-ingress-timestamp-seed');
     env.quietRuntimeLogs = true;
-    env.timestamp = 1_000;
+    env.state.timestamp = 1_000;
 
     const { entityId, signerId, replica } = addSignableReplica(env, 1_000);
 
@@ -613,9 +613,9 @@ describe('runtime ingress timestamp', () => {
 
     await processRuntime(env);
 
-    expect(env.timestamp).toBeGreaterThanOrEqual(10_000);
-    expect(env.timestamp).toBeLessThanOrEqual(Date.now() + TIMING.TIMESTAMP_DRIFT_MS);
-    const updatedReplica = env.eReplicas.get(`${entityId}:${signerId}`);
+    expect(env.state.timestamp).toBeGreaterThanOrEqual(10_000);
+    expect(env.state.timestamp).toBeLessThanOrEqual(Date.now() + TIMING.TIMESTAMP_DRIFT_MS);
+    const updatedReplica = env.state.eReplicas.get(`${entityId}:${signerId}`);
     expect(updatedReplica?.state.crontabState?.hooks?.has('watchdog:due-after-empty-ingress')).toBe(false);
     expect(committedScheduledWake).toBe(true);
   });
@@ -623,13 +623,13 @@ describe('runtime ingress timestamp', () => {
   test('idle runtime loop does not advance logical time from wall clock', async () => {
     const env = createIsolatedEnv('runtime-ingress-timestamp-seed');
     env.quietRuntimeLogs = true;
-    env.timestamp = Date.now();
+    env.state.timestamp = Date.now();
 
     const entityId = `0x${'77'.repeat(32)}`;
-    const replica = makeReplica(entityId, env.timestamp);
-    env.eReplicas.set(`${entityId}:1`, replica);
+    const replica = makeReplica(entityId, env.state.timestamp);
+    env.state.eReplicas.set(`${entityId}:1`, replica);
 
-    const futureTriggerAt = env.timestamp + 60_000;
+    const futureTriggerAt = env.state.timestamp + 60_000;
     scheduleHook(replica.state.crontabState!, {
       id: 'watchdog:idle-loop-must-not-fire',
       triggerAt: futureTriggerAt,
@@ -644,19 +644,19 @@ describe('runtime ingress timestamp', () => {
       stop();
     }
 
-    expect(env.timestamp).toBeLessThan(futureTriggerAt);
-    const updatedReplica = env.eReplicas.get(`${entityId}:1`);
+    expect(env.state.timestamp).toBeLessThan(futureTriggerAt);
+    const updatedReplica = env.state.eReplicas.get(`${entityId}:1`);
     expect(updatedReplica?.state.crontabState?.hooks?.has('watchdog:idle-loop-must-not-fire')).toBe(true);
   });
 
   test('idle runtime loop advances to due hook timestamp once wall clock reaches it', async () => {
     const env = createIsolatedEnv('runtime-ingress-timestamp-seed');
     env.quietRuntimeLogs = true;
-    env.timestamp = Date.now();
+    env.state.timestamp = Date.now();
 
-    const { entityId, signerId, replica } = addSignableReplica(env, env.timestamp);
+    const { entityId, signerId, replica } = addSignableReplica(env, env.state.timestamp);
 
-    const dueAt = env.timestamp + 30;
+    const dueAt = env.state.timestamp + 30;
     scheduleHook(replica.state.crontabState!, {
       id: 'watchdog:idle-loop-due-after-wall-clock',
       triggerAt: dueAt,
@@ -671,8 +671,8 @@ describe('runtime ingress timestamp', () => {
       stop();
     }
 
-    expect(env.timestamp).toBeGreaterThanOrEqual(dueAt);
-    const updatedReplica = env.eReplicas.get(`${entityId}:${signerId}`);
+    expect(env.state.timestamp).toBeGreaterThanOrEqual(dueAt);
+    const updatedReplica = env.state.eReplicas.get(`${entityId}:${signerId}`);
     expect(updatedReplica?.state.crontabState?.hooks?.has('watchdog:idle-loop-due-after-wall-clock')).toBe(false);
   });
 
@@ -724,10 +724,10 @@ describe('runtime ingress timestamp', () => {
     };
 
     await importReplica('zero-delay-first');
-    const firstHeight = env.height;
+    const firstHeight = env.state.height;
     expect(env.runtimeConfig?.minFrameDelayMs).toBe(0);
     await importReplica('zero-delay-second');
-    expect(env.height).toBe(firstHeight + 1);
+    expect(env.state.height).toBe(firstHeight + 1);
   });
 
   test('runtime loop waits for minFrameDelayMs between processed cycles', async () => {
@@ -786,10 +786,10 @@ describe('runtime ingress timestamp', () => {
     const stop = startRuntimeLoop(env, { tickDelayMs: 1 });
     try {
       await sleep(20);
-      expect(env.eReplicas.get(`${delayedEntityId}:${delayedSignerId}`)).toBeUndefined();
+      expect(env.state.eReplicas.get(`${delayedEntityId}:${delayedSignerId}`)).toBeUndefined();
 
       await sleep(100);
-      expect(env.eReplicas.get(`${delayedEntityId}:${delayedSignerId}`)).toBeDefined();
+      expect(env.state.eReplicas.get(`${delayedEntityId}:${delayedSignerId}`)).toBeDefined();
     } finally {
       stop();
     }
@@ -829,12 +829,12 @@ describe('runtime ingress timestamp', () => {
   test('runtime loop starts watcher for jReplica added after loop start', async () => {
     const env = createIsolatedEnv('runtime-late-watcher-start-seed');
     env.quietRuntimeLogs = true;
-    env.timestamp = Date.now();
+    env.state.timestamp = Date.now();
 
     const signerId = deriveSignerAddressSync(env.runtimeSeed!, 'late-watcher-remote').toLowerCase();
     const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
-    const replica = makeReplica(entityId, env.timestamp, signerId);
-    env.eReplicas.set(`${entityId}:${signerId}`, replica);
+    const replica = makeReplica(entityId, env.state.timestamp, signerId);
+    env.state.eReplicas.set(`${entityId}:${signerId}`, replica);
 
     let startCount = 0;
     let started = false;
@@ -941,13 +941,13 @@ describe('runtime ingress timestamp', () => {
     const seed = uniqueSeed('runtime-watcher-wake-seed');
     const env = createEmptyEnv(seed);
     env.quietRuntimeLogs = true;
-    env.timestamp = 1_000;
+    env.state.timestamp = 1_000;
 
     const signerId = deriveSignerAddressSync(seed, '1').toLowerCase();
     const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
     const replica = makeReplica(entityId, 1_000, signerId, env);
     replica.isProposer = true;
-    env.eReplicas.set(`${entityId}:${signerId}`, replica);
+    env.state.eReplicas.set(`${entityId}:${signerId}`, replica);
 
     const stop = startRuntimeLoop(env, { tickDelayMs: 1 });
     try {
@@ -972,12 +972,12 @@ describe('runtime ingress timestamp', () => {
       );
 
       for (let i = 0; i < 40; i += 1) {
-        const observed = env.eReplicas.get(`${entityId}:${signerId}`)?.jHistory?.eventBlocks.get(12);
+        const observed = env.state.eReplicas.get(`${entityId}:${signerId}`)?.jHistory?.eventBlocks.get(12);
         if (observed?.events.some(event => event.type === 'ReserveUpdated')) break;
         await sleep(10);
       }
 
-      const observedReplica = env.eReplicas.get(`${entityId}:${signerId}`);
+      const observedReplica = env.state.eReplicas.get(`${entityId}:${signerId}`);
       expect(observedReplica?.jHistory?.eventBlocks.get(12)?.events.some(
         event => event.type === 'ReserveUpdated',
       )).toBe(true);

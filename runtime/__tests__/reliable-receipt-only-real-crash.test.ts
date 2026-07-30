@@ -59,8 +59,8 @@ test('restores a terminal receipt-only frontier after real SIGKILL', async () =>
   try {
     const { leaderSignerId, targetSignerId } = deriveCatchupFixtureSigners(seed);
     const entityId = createCatchupFixtureState(leaderSignerId, targetSignerId).entityId;
-    expect(restored.height).toBe(3);
-    expect(restored.eReplicas.get(`${entityId}:${targetSignerId}`)?.state.height).toBe(1);
+    expect(restored.state.height).toBe(3);
+    expect(restored.state.eReplicas.get(`${entityId}:${targetSignerId}`)?.state.height).toBe(1);
     expect(restored.runtimeState?.pendingReliableIngress?.size ?? 0).toBe(0);
     const terminalPrecommit = [...(restored.runtimeState?.reliableIngressTerminalWatermarks?.values() ?? [])]
       .find(receipt => receipt.body.identity.kind === 'hash-precommit');

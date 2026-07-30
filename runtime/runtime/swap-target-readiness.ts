@@ -12,7 +12,7 @@ export const assertCrossJurisdictionSwapTargetReadyInEnv = (
   const targetEntityId = normalizeId(route.target.counterpartyEntityId);
   const targetSignerId = normalizeId(route.targetSignerId || '');
   const hubEntityId = normalizeId(route.target.entityId);
-  const replica = [...env.eReplicas.values()].find(candidate => (
+  const replica = [...env.state.eReplicas.values()].find(candidate => (
     normalizeId(candidate.entityId || candidate.state?.entityId || '') === targetEntityId &&
     (!targetSignerId || normalizeId(candidate.signerId || '') === targetSignerId)
   ));

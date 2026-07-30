@@ -527,7 +527,7 @@ const initializeStartedDispute = (
   };
   account.jNonce = Math.max(account.jNonce, jNonce);
 
-  const localProof = buildAccountProofBodyFromJurisdictions(env, account);
+  const localProof = buildAccountProofBodyFromJurisdictions(env.state, account);
   const onChainProofHash = String(account.activeDispute.initialProofbodyHash || '').toLowerCase();
   const storedProofKnown = Object.keys(account.disputeProofBodiesByHash ?? {})
     .some((hash) => hash.toLowerCase() === onChainProofHash);

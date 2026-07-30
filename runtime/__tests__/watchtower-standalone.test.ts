@@ -45,7 +45,7 @@ const installJurisdiction = (env: ReturnType<typeof createEmptyEnv>): Jurisdicti
     entityProviderAddress: addr('12'),
   };
   env.activeJurisdiction = jurisdiction.name;
-  env.jReplicas.set(jurisdiction.name, createTestJReplica({
+  env.state.jReplicas.set(jurisdiction.name, createTestJReplica({
     name: jurisdiction.name,
     rpcs: [jurisdiction.address],
     chainId: jurisdiction.chainId,

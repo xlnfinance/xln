@@ -175,7 +175,7 @@ const logOneShot = (key: string, message: string, fields: Record<string, unknown
   serverLog.warn(message, fields);
 };
 
-const currentRuntimeHeight = (env: RuntimeReplica | null): number => Math.max(0, Math.floor(Number(env?.height ?? 0)));
+const currentRuntimeHeight = (env: RuntimeReplica | null): number => Math.max(0, Math.floor(Number(env?.state.height ?? 0)));
 
 const runtimeInputStatusUrl = (id: string): string => `/api/control/runtime-input/${encodeURIComponent(id)}/status`;
 
@@ -501,10 +501,10 @@ const maybeHandleRuntimeInfoApi = async (
   if (pathname === '/api/state' && env) {
     return new Response(
       safeStringify({
-        height: env.height,
-        timestamp: env.timestamp,
+        height: env.state.height,
+        timestamp: env.state.timestamp,
         runtimeId: env.runtimeId,
-        entityCount: env.eReplicas?.size || 0,
+        entityCount: env.state.eReplicas?.size || 0,
       }),
       { headers },
     );
@@ -1006,8 +1006,8 @@ const registerServerJurisdiction = async (
   env: RuntimeReplica,
   registration: ServerJurisdictionRegistration,
 ): Promise<void> => {
-  if (!env.jReplicas) env.jReplicas = new Map();
-  if (env.jReplicas.has(registration.name)) return;
+  if (!env.state.jReplicas) env.state.jReplicas = new Map();
+  if (env.state.jReplicas.has(registration.name)) return;
 
   const { adapter } = registration;
   const stateRoot = await (adapter.captureStateRoot?.() ?? Promise.resolve(null));
@@ -1017,14 +1017,14 @@ const registerServerJurisdiction = async (
   ) {
     throw new Error('BROWSERVM_STATE_ROOT_UNAVAILABLE: startup local jReplica cannot time-travel safely');
   }
-  env.jReplicas.set(registration.name, {
+  env.state.jReplicas.set(registration.name, {
     name: registration.name,
     blockNumber: 0n,
     stateRoot,
     mempool: [],
     blockDelayMs: 300,
     ...(registration.blockTimeMs === undefined ? {} : { blockTimeMs: registration.blockTimeMs }),
-    lastBlockTimestamp: env.timestamp,
+    lastBlockTimestamp: env.state.timestamp,
     position: { x: 0, y: 50, z: 0 },
     depositoryAddress: adapter.addresses.depository,
     entityProviderAddress: adapter.addresses.entityProvider,
@@ -1363,7 +1363,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
 
     if (LOCAL_RUNTIME_OWNER) {
       const jurisdictionName = String(env.activeJurisdiction || 'local');
-      const jurisdiction = env.jReplicas.get(jurisdictionName);
+      const jurisdiction = env.state.jReplicas.get(jurisdictionName);
       if (!jurisdiction) throw new Error(`LOCAL_RUNTIME_OWNER_JURISDICTION_MISSING:${jurisdictionName}`);
       const owner = buildLocalRuntimeOwner({
         signerId: deriveSignerAddressSync(SERVER_RUNTIME_SEED, LOCAL_RUNTIME_OWNER.label),

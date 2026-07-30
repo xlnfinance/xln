@@ -167,12 +167,12 @@ const installRegisteredBoard = (
 const installProofStack = (env: RuntimeReplica, state: EntityState): void => {
   const jurisdiction = state.config.jurisdiction;
   if (!jurisdiction) throw new Error('TEST_PROOF_JURISDICTION_MISSING');
-  if (![...env.eReplicas.values()].some((replica) => replica.entityId === state.entityId)) {
+  if (![...env.state.eReplicas.values()].some((replica) => replica.entityId === state.entityId)) {
     const signerId = state.config.validators[0];
     if (!signerId) throw new Error('TEST_PROOF_SIGNER_MISSING');
     addReplica(env, state, signerId);
   }
-  env.jReplicas.set(jurisdiction.name, {
+  env.state.jReplicas.set(jurisdiction.name, {
     name: jurisdiction.name,
     chainId: jurisdiction.chainId,
     depositoryAddress: jurisdiction.depositoryAddress,
@@ -273,7 +273,7 @@ describe('atomic settlement Account transition', () => {
       });
     }
     addReplica(env, state, signer);
-    const replica = env.eReplicas.values().next().value;
+    const replica = env.state.eReplicas.values().next().value;
     if (!replica) throw new Error('REBALANCE_ATOMIC_TEST_REPLICA_MISSING');
     const before = computeCanonicalEntityConsensusStateHash(state);
 
@@ -323,7 +323,7 @@ describe('atomic settlement Account transition', () => {
     })).success).toBe(true);
     account.settlementWorkspace!.rightHanko = '0x1234';
     expect(account.settlementWorkspace!.status).toBe('awaiting_counterparty');
-    const replica = env.eReplicas.values().next().value;
+    const replica = env.state.eReplicas.values().next().value;
     if (!replica) throw new Error('SETTLEMENT_SCHEDULER_TEST_REPLICA_MISSING');
 
     const outputs = await executeCrontab(env, replica, state.crontabState, {
@@ -371,7 +371,7 @@ describe('atomic settlement Account transition', () => {
     const workspaceBefore = structuredClone(workspace);
     const mempoolBefore = structuredClone(account.mempool);
     const batchBefore = structuredClone(state.jBatchState);
-    const replica = env.eReplicas.values().next().value;
+    const replica = env.state.eReplicas.values().next().value;
     if (!replica) throw new Error('SETTLEMENT_SCHEDULER_TEST_REPLICA_MISSING');
 
     const outputs = await executeCrontab(env, replica, state.crontabState, {

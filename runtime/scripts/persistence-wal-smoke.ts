@@ -75,7 +75,7 @@ async function main() {
     position: { x: 0, y: 0, z: 0 },
     contracts,
   };
-  env.jReplicas.set(jurisdiction.name, jReplica);
+  env.state.jReplicas.set(jurisdiction.name, jReplica);
 
   enqueueRuntimeInput(env, {
     runtimeTxs: [
@@ -140,8 +140,8 @@ async function main() {
     await processRuntime(env, []);
   }
 
-  assert(env.eReplicas.size === 2, `expected 2 replicas before reload, got ${env.eReplicas.size}`);
-  assert(env.height > 2, `runtime advanced beyond checkpoint frame (height=${env.height})`);
+  assert(env.state.eReplicas.size === 2, `expected 2 replicas before reload, got ${env.state.eReplicas.size}`);
+  assert(env.state.height > 2, `runtime advanced beyond checkpoint frame (height=${env.state.height})`);
 
   const latestHeight = await getPersistedLatestHeight(env);
   const checkpointHeight = Number((await listPersistedCheckpointHeights(env)).at(-1) || 0);
@@ -153,12 +153,12 @@ async function main() {
 
   const restored = await loadEnvFromDB(runtimeId, seed);
   assert(restored, 'restored env from db');
-  assert(restored.eReplicas.size === 2, `expected 2 replicas after reload, got ${restored.eReplicas.size}`);
-  const replicaA = [...restored.eReplicas.keys()].find((k) => String(k).startsWith(`${entityA}:`));
-  const replicaB = [...restored.eReplicas.keys()].find((k) => String(k).startsWith(`${entityB}:`));
+  assert(restored.state.eReplicas.size === 2, `expected 2 replicas after reload, got ${restored.state.eReplicas.size}`);
+  const replicaA = [...restored.state.eReplicas.keys()].find((k) => String(k).startsWith(`${entityA}:`));
+  const replicaB = [...restored.state.eReplicas.keys()].find((k) => String(k).startsWith(`${entityB}:`));
   assert(!!replicaA, 'replica A present after reload');
   assert(!!replicaB, 'replica B present after reload');
-  assert(restored.height === env.height, `runtime height preserved (${restored.height} == ${env.height})`);
+  assert(restored.state.height === env.state.height, `runtime height preserved (${restored.state.height} == ${env.state.height})`);
   await closeRuntimeDb(restored);
   await closeInfraDb(restored);
 
@@ -181,11 +181,11 @@ async function main() {
     runtimeId,
     latestHeight,
     checkpointHeight,
-    envHeight: env.height,
-    restoredHeight: restored.height,
+    envHeight: env.state.height,
+    restoredHeight: restored.state.height,
     verifyFromGenesis,
-    replicasBefore: env.eReplicas.size,
-    replicasAfter: restored.eReplicas.size,
+    replicasBefore: env.state.eReplicas.size,
+    replicasAfter: restored.state.eReplicas.size,
   }, null, 2));
 }
 

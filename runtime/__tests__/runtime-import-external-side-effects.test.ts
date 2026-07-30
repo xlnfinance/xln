@@ -96,7 +96,7 @@ describe('runtime import external-side-effect atomicity', () => {
     const env = createEmptyEnv('runtime-import-j-external-side-effects');
     env.quietRuntimeLogs = true;
     env.scenarioMode = true;
-    env.timestamp = 1_000;
+    env.state.timestamp = 1_000;
     const browserVMBefore = env.browserVM;
     const registryBefore = getRegisteredBrowserVMJurisdiction();
     const unknownSignerId = `0x${'cd'.repeat(20)}`;
@@ -121,7 +121,7 @@ describe('runtime import external-side-effect atomicity', () => {
 
     await expect(processRuntime(env)).rejects.toThrow('RUNTIME_ENTITY_INPUT_UNKNOWN_TARGET');
 
-    expect(env.jReplicas.size).toBe(0);
+    expect(env.state.jReplicas.size).toBe(0);
     expect(env.browserVM).toBe(browserVMBefore);
     expect(getRegisteredBrowserVMJurisdiction()).toBe(registryBefore);
   }, 30_000);
@@ -130,7 +130,7 @@ describe('runtime import external-side-effect atomicity', () => {
     const env = createEmptyEnv(`runtime-import-j-two-phase-success-${TEST_RUN_ID}`);
     env.quietRuntimeLogs = true;
     env.scenarioMode = true;
-    env.timestamp = 1_000;
+    env.state.timestamp = 1_000;
     const registryBefore = getRegisteredBrowserVMJurisdiction();
 
     enqueueRuntimeInput(env, {
@@ -147,18 +147,18 @@ describe('runtime import external-side-effect atomicity', () => {
     });
 
     await processRuntime(env);
-    expect(env.height).toBe(1);
-    expect(env.jReplicas.size).toBe(0);
+    expect(env.state.height).toBe(1);
+    expect(env.state.jReplicas.size).toBe(0);
     expect(env.runtimeState?.pendingJurisdictionImports?.size).toBe(1);
     expect(env.runtimeMempool?.runtimeTxs.map(tx => tx.type)).toEqual(['completeImportJ']);
     expect(getRegisteredBrowserVMJurisdiction()).toBe(registryBefore);
 
     await processRuntime(env);
-    const replica = env.jReplicas.get('Durable BrowserVM');
+    const replica = env.state.jReplicas.get('Durable BrowserVM');
     const adapter = replica?.jadapter;
     if (!replica || !adapter) throw new Error('DURABLE_BROWSERVM_IMPORT_MISSING');
     try {
-      expect(env.height).toBe(2);
+      expect(env.state.height).toBe(2);
       expect(env.runtimeState?.pendingJurisdictionImports).toBeUndefined();
       expect(env.runtimeMempool?.runtimeTxs).toHaveLength(0);
       expect(adapter.getBrowserVM()).toBe(env.browserVM);
@@ -176,21 +176,21 @@ describe('runtime import external-side-effect atomicity', () => {
     const env = createEmptyEnv('runtime-import-j-forged-result');
     env.quietRuntimeLogs = true;
     env.scenarioMode = true;
-    env.timestamp = 1_000;
+    env.state.timestamp = 1_000;
     enqueueRuntimeInput(env, {
       runtimeTxs: [{ type: 'completeImportJ', data: {} as never }],
       entityInputs: [],
     });
     await expect(processRuntime(env)).rejects.toThrow('J_IMPORT_RESULT_EXTERNAL_INGRESS_REJECTED');
-    expect(env.height).toBe(0);
-    expect(env.jReplicas.size).toBe(0);
+    expect(env.state.height).toBe(0);
+    expect(env.state.jReplicas.size).toBe(0);
   });
 
   test('RPC import without an already provisioned stack fails before durable intent', async () => {
     const env = createEmptyEnv('runtime-import-j-rpc-requires-contracts');
     env.quietRuntimeLogs = true;
     env.scenarioMode = true;
-    env.timestamp = 1_000;
+    env.state.timestamp = 1_000;
     enqueueRuntimeInput(env, {
       runtimeTxs: [{
         type: 'importJ',
@@ -205,9 +205,9 @@ describe('runtime import external-side-effect atomicity', () => {
     });
 
     await expect(processRuntime(env)).rejects.toThrow('IMPORT_J_RPC_CONTRACTS_REQUIRED');
-    expect(env.height).toBe(0);
+    expect(env.state.height).toBe(0);
     expect(env.runtimeState?.pendingJurisdictionImports).toBeUndefined();
-    expect(env.jReplicas.size).toBe(0);
+    expect(env.state.jReplicas.size).toBe(0);
   });
 
   test('pending BrowserVM import resumes after restore and rehydrates exactly one VM', async () => {
@@ -215,7 +215,7 @@ describe('runtime import external-side-effect atomicity', () => {
     const env = createEmptyEnv(seed);
     env.quietRuntimeLogs = true;
     env.scenarioMode = true;
-    env.timestamp = 1_000;
+    env.state.timestamp = 1_000;
     setScenarioStorageEnabled(env, true);
     if (!env.runtimeId) throw new Error('RUNTIME_ID_MISSING');
     cleanupNamespaces.push(env.runtimeId);
@@ -227,20 +227,20 @@ describe('runtime import external-side-effect atomicity', () => {
       entityInputs: [],
     });
     await processRuntime(env);
-    expect(env.height).toBe(1);
+    expect(env.state.height).toBe(1);
     expect(env.runtimeState?.pendingJurisdictionImports?.size).toBe(1);
     await closeRuntimeDb(env);
     await closeInfraDb(env);
 
     const restoredIntent = await loadEnvFromDB(env.runtimeId, seed);
     if (!restoredIntent) throw new Error('RESTORED_IMPORT_INTENT_MISSING');
-    expect(restoredIntent.height).toBe(1);
-    expect(restoredIntent.jReplicas.size).toBe(0);
+    expect(restoredIntent.state.height).toBe(1);
+    expect(restoredIntent.state.jReplicas.size).toBe(0);
     expect(restoredIntent.runtimeState?.pendingJurisdictionImports?.size).toBe(1);
     await processRuntime(restoredIntent);
-    const committedReplica = restoredIntent.jReplicas.get('Restored BrowserVM');
+    const committedReplica = restoredIntent.state.jReplicas.get('Restored BrowserVM');
     if (!committedReplica?.jadapter) throw new Error('RESTORED_IMPORT_RESULT_MISSING');
-    expect(restoredIntent.height).toBe(2);
+    expect(restoredIntent.state.height).toBe(2);
     expect(committedReplica.jadapter.getBrowserVM()).toBe(restoredIntent.browserVM);
     await committedReplica.jadapter.close();
     await closeRuntimeDb(restoredIntent);
@@ -249,9 +249,9 @@ describe('runtime import external-side-effect atomicity', () => {
     const restoredResult = await loadEnvFromDB(env.runtimeId, seed);
     if (!restoredResult) throw new Error('RESTORED_IMPORT_RESULT_ENV_MISSING');
     try {
-      const replica = restoredResult.jReplicas.get('Restored BrowserVM');
+      const replica = restoredResult.state.jReplicas.get('Restored BrowserVM');
       if (!replica?.jadapter) throw new Error('RESTORED_IMPORT_ADAPTER_MISSING');
-      expect(restoredResult.height).toBe(2);
+      expect(restoredResult.state.height).toBe(2);
       expect(restoredResult.runtimeState?.pendingJurisdictionImports).toBeUndefined();
       expect(replica.jadapter.getBrowserVM()).toBe(restoredResult.browserVM);
       await replica.jadapter.close();
@@ -308,7 +308,7 @@ describe('runtime import external-side-effect atomicity', () => {
 
       await expect(processRuntime(env)).rejects.toThrow('RUNTIME_ENTITY_INPUT_UNKNOWN_TARGET');
 
-      expect(env.eReplicas.has(`${importedEntityId}:${importedSignerId}`)).toBe(false);
+      expect(env.state.eReplicas.has(`${importedEntityId}:${importedSignerId}`)).toBe(false);
       expect(() => browserVM.getEntityWallet(importedEntityId)).toThrow(
         'BrowserVM missing wallet for entity',
       );

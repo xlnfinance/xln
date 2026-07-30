@@ -36,9 +36,9 @@ const getWatcherKey = (replica: JReplica): string | null => {
 export const startJurisdictionWatchers = (env: RuntimeReplica): void => {
   // Quiesce closes ingress before draining accepted work. Never resurrect a
   // producer after that fence has been raised.
-  if (env.runtimeState?.persistenceQuiescing || !env.jReplicas?.size) return;
+  if (env.runtimeState?.persistenceQuiescing || !env.state.jReplicas?.size) return;
   const owners = new Map<string, JAdapter>();
-  for (const [name, replica] of env.jReplicas) {
+  for (const [name, replica] of env.state.jReplicas) {
     const adapter = replica.jadapter;
     if (!adapter) continue;
     const watcherKey = getWatcherKey(replica);
@@ -58,8 +58,8 @@ export const startJurisdictionWatchers = (env: RuntimeReplica): void => {
 };
 
 export const stopJurisdictionWatchers = (env: RuntimeReplica): void => {
-  if (!env.jReplicas?.size) return;
-  for (const [name, replica] of env.jReplicas) {
+  if (!env.state.jReplicas?.size) return;
+  for (const [name, replica] of env.state.jReplicas) {
     const adapter = replica.jadapter;
     if (!adapter?.isWatching()) continue;
     try {
@@ -90,9 +90,9 @@ const stopAdapterAndWait = (adapter: JAdapter, names: string[]): Promise<void> =
 };
 
 export const stopJurisdictionWatchersAndWait = async (env: RuntimeReplica): Promise<void> => {
-  if (!env.jReplicas?.size) return;
+  if (!env.state.jReplicas?.size) return;
   const adapters = new Map<JAdapter, string[]>();
-  for (const [name, replica] of env.jReplicas) {
+  for (const [name, replica] of env.state.jReplicas) {
     const adapter = replica.jadapter;
     if (!adapter) continue;
     const names = adapters.get(adapter) ?? [];

@@ -134,7 +134,7 @@ export const findEntityProviderActionReplica = (
 ): EntityReplica | null => {
   const entity = normalizeEntityProviderActionId(entityId);
   const signer = normalizeEntityProviderActionId(signerId);
-  for (const replica of env.eReplicas.values()) {
+  for (const replica of env.state.eReplicas.values()) {
     if (
       normalizeEntityProviderActionId(replica.entityId) === entity &&
       normalizeEntityProviderActionId(replica.signerId) === signer
@@ -242,7 +242,7 @@ export const applyRetryEntityProviderActionRuntimeTx = (
   if (
     previous &&
     previous.submitAttempts > 0 &&
-    env.timestamp < previous.lastSubmittedAt + ENTITY_J_SUBMIT_FALLBACK_MS
+    env.state.timestamp < previous.lastSubmittedAt + ENTITY_J_SUBMIT_FALLBACK_MS
   ) return [];
   const witness = replica.hankoWitness?.get(pending.actionHash);
   if (!witness || witness.type !== 'entityProviderAction') {
@@ -253,7 +253,7 @@ export const applyRetryEntityProviderActionRuntimeTx = (
     throw new Error('ENTITY_PROVIDER_ACTION_ATTEMPT_NUMBER_EXHAUSTED');
   }
   const attemptId = buildEntityProviderActionAttemptId({ ...identity, attemptNumber });
-  const attemptedAt = env.timestamp;
+  const attemptedAt = env.state.timestamp;
   replica.entityProviderActionSubmitState = {
     jurisdictionName,
     actionHash: pending.actionHash,

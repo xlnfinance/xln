@@ -170,8 +170,8 @@ export function formatRuntime(env: RuntimeReplica, options?: FormatOptions): str
 
   // Runtime header
   const runtimeInfo = [
-    `Height: ${env.height || 0} | Timestamp: ${formatTimestamp(env.timestamp, false)}`,
-    `Entities: ${env.eReplicas.size} | J-Replicas: ${env.jReplicas?.size || 0}`
+    `Height: ${env.state.height || 0} | Timestamp: ${formatTimestamp(env.state.timestamp, false)}`,
+    `Entities: ${env.state.eReplicas.size} | J-Replicas: ${env.state.jReplicas?.size || 0}`
   ];
 
   output.push(drawBox('RUNTIME STATE', runtimeInfo, 0, true));
@@ -236,9 +236,9 @@ export function formatRuntime(env: RuntimeReplica, options?: FormatOptions): str
   }
 
   // J-Replicas (Jurisdictions)
-  if (env.jReplicas && env.jReplicas.size > 0) {
+  if (env.state.jReplicas && env.state.jReplicas.size > 0) {
     output.push('  J-REPLICAS (Jurisdictions):');
-    for (const [jName, jReplica] of env.jReplicas) {
+    for (const [jName, jReplica] of env.state.jReplicas) {
       const jDepository = jReplica.depositoryAddress || jReplica.contracts?.depository;
       const jInfo = [
         `Name: ${jName}`,
@@ -253,9 +253,9 @@ export function formatRuntime(env: RuntimeReplica, options?: FormatOptions): str
 
   // Entities
   let entityCount = 0;
-  for (const replica of env.eReplicas.values()) {
+  for (const replica of env.state.eReplicas.values()) {
     if (opts.maxAccounts && entityCount >= opts.maxAccounts) {
-      output.push(`  ... and ${env.eReplicas.size - entityCount} more entities`);
+      output.push(`  ... and ${env.state.eReplicas.size - entityCount} more entities`);
       break;
     }
 
@@ -596,14 +596,14 @@ export function formatOrderbook(bookState: unknown, pairId: string, depth: numbe
  * Format a summary line for quick status
  */
 export function formatSummary(env: RuntimeReplica): string {
-  const entityCount = env.eReplicas.size;
-  const jCount = env.jReplicas?.size || 0;
+  const entityCount = env.state.eReplicas.size;
+  const jCount = env.state.jReplicas?.size || 0;
 
   let totalReserves = 0n;
   let totalCollateral = 0n;
   let totalLocks = 0;
 
-  for (const [, replica] of env.eReplicas) {
+  for (const [, replica] of env.state.eReplicas) {
     for (const [, amount] of replica.state.reserves) {
       totalReserves += amount;
     }
@@ -615,7 +615,7 @@ export function formatSummary(env: RuntimeReplica): string {
     }
   }
 
-  return `H=${env.height || 0} | E=${entityCount} J=${jCount} | R=${formatBigInt(totalReserves)} C=${formatBigInt(totalCollateral)} L=${totalLocks}`;
+  return `H=${env.state.height || 0} | E=${entityCount} J=${jCount} | R=${formatBigInt(totalReserves)} C=${formatBigInt(totalCollateral)} L=${totalLocks}`;
 }
 
 // Helper: Get lock status

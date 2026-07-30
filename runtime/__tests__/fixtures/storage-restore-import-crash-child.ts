@@ -61,7 +61,7 @@ env.runtimeConfig = {
   storage: { ...env.runtimeConfig?.storage, enabled: false },
 };
 env.activeJurisdiction = jurisdiction.name;
-env.jReplicas.set(jurisdiction.name, {
+env.state.jReplicas.set(jurisdiction.name, {
   ...jurisdiction,
   blockNumber: 0n,
   stateRoot: new Uint8Array(32),
@@ -96,7 +96,7 @@ enqueueRuntimeInput(env, {
   entityInputs: [],
 });
 await processRuntime(env, []);
-const replica = Array.from(env.eReplicas.values())[0];
+const replica = Array.from(env.state.eReplicas.values())[0];
 if (!replica) throw new Error('restore import crash replica missing');
 const counterpartyId = `0x${'ff'.repeat(32)}`;
 const [leftEntity, rightEntity] = [entityId, counterpartyId].sort() as [string, string];
@@ -230,16 +230,16 @@ const commitConsumption = async (height: number): Promise<void> => {
 };
 await commitConsumption(1);
 replica.lastConsensusProgressAt = 1_000;
-env.timestamp = 1_000;
+env.state.timestamp = 1_000;
 await persistRestoredEnvToDB(env);
 
 // Exercise the rebranched cache-clear boundary too. This key is deliberately not
 // authoritative: recovery must discard it and rebuild solely from history.
 await getRuntimeStorageDb(env).put(Buffer.from([0x7f]), Buffer.from('stale-cache'), { sync: true });
-env.height += 1;
+env.state.height += 1;
 await commitConsumption(2);
 replica.lastConsensusProgressAt = 2_000;
-env.timestamp = 2_000;
+env.state.timestamp = 2_000;
 await persistRestoredEnvToDB(env, {
   onPersistenceBoundary: (reached) => {
     if (reached !== boundary) return;

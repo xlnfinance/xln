@@ -44,7 +44,7 @@ const collectRegistryPublication = (
       )
     : [];
   const transformerAddress = secrets.length > 0
-    ? requireAccountDeltaTransformerAddress(env, account)
+    ? requireAccountDeltaTransformerAddress(env.state, account)
     : '';
   if (secrets.length > 0 && !isUsableContractAddress(transformerAddress)) {
     throw new Error('DISPUTE_FINALIZE_MISSING_DELTA_TRANSFORMER_ADDRESS');

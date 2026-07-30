@@ -80,8 +80,8 @@ export const hasPendingRuntimeWork = (env: RuntimeReplica): boolean => {
   if (mempool.jInputs?.length) return true;
   if (mempool.reliableReceipts?.length) return true;
 
-  if (env.jReplicas) {
-    for (const replica of env.jReplicas.values()) {
+  if (env.state.jReplicas) {
+    for (const replica of env.state.jReplicas.values()) {
       if ((replica.mempool?.length ?? 0) > 0) return true;
     }
   }
@@ -100,7 +100,7 @@ export type RuntimeQuiescenceHealth = {
 export const summarizeRuntimeQuiescence = (env: RuntimeReplica): RuntimeQuiescenceHealth => {
   let pendingAccountFrames = 0;
   let accountMempoolTxs = 0;
-  for (const replica of env.eReplicas.values()) {
+  for (const replica of env.state.eReplicas.values()) {
     for (const account of replica.state.accounts.values()) {
       if (account.pendingFrame) pendingAccountFrames += 1;
       accountMempoolTxs += account.mempool?.length ?? 0;

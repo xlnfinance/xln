@@ -20,7 +20,7 @@ function assert(condition: unknown, message: string): asserts condition {
 }
 
 function describeAccounts(env: Awaited<ReturnType<typeof createEmptyEnv>>) {
-  return Array.from(env.eReplicas.entries()).flatMap(([replicaKey, replica]) =>
+  return Array.from(env.state.eReplicas.entries()).flatMap(([replicaKey, replica]) =>
     Array.from(replica.state.accounts.entries()).map(([counterpartyId, account]) => ({
       replicaKey,
       counterpartyId,
@@ -52,7 +52,7 @@ async function main() {
   env.runtimeConfig = { ...(env.runtimeConfig || {}), snapshotIntervalFrames: 1000 };
   env.quietRuntimeLogs = true;
   env.scenarioMode = true;
-  env.timestamp = 1000;
+  env.state.timestamp = 1000;
 
   // The collision proof is Account-only, but every Entity replica still binds
   // to an explicit jurisdiction domain. This deterministic real domain fixture
@@ -70,7 +70,7 @@ async function main() {
     entityProviderAddress: contracts.entityProvider,
   };
   env.activeJurisdiction = jurisdiction.name;
-  env.jReplicas.set(jurisdiction.name, {
+  env.state.jReplicas.set(jurisdiction.name, {
     name: jurisdiction.name,
     rpcs: [jurisdiction.address],
     chainId,
@@ -203,7 +203,7 @@ async function main() {
   assert(restored, 'restored env from db');
   const after = describeAccounts(restored);
 
-  assert(restored.height === env.height, `runtime height preserved (${restored.height} === ${env.height})`);
+  assert(restored.state.height === env.state.height, `runtime height preserved (${restored.state.height} === ${env.state.height})`);
   assert(after.length === before.length, `account count preserved (${after.length} === ${before.length})`);
 
   for (const baseline of before) {
@@ -252,8 +252,8 @@ async function main() {
     JSON.stringify(
       {
         runtimeId,
-        heightBeforeReload: env.height,
-        heightAfterReload: restored.height,
+        heightBeforeReload: env.state.height,
+        heightAfterReload: restored.state.height,
         accounts: after.map(account => ({
           replicaKey: account.replicaKey,
           counterpartyId: account.counterpartyId,

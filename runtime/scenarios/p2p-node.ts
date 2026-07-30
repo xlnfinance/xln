@@ -135,7 +135,7 @@ const waitForTokenCatalog = async (jadapter: JAdapter, maxRounds = 40): Promise<
 };
 
 const getReserveBalance = (env: P2PScenarioEnv, entityId: string, signerId: string, tokenId: number): bigint => {
-  const replica = env.eReplicas.get(`${entityId}:${signerId}`);
+  const replica = env.state.eReplicas.get(`${entityId}:${signerId}`);
   if (!replica) return 0n;
   return replica.state.reserves?.get(tokenId) ?? 0n;
 };
@@ -232,7 +232,7 @@ const getProfileByName = (env: P2PScenarioEnv, name: string): Profile | undefine
 };
 
 const getAccount = (env: P2PScenarioEnv, entityId: string, signerId: string, counterpartyId: string): AccountReplica | undefined => {
-  const replica = env.eReplicas.get(`${entityId}:${signerId}`);
+  const replica = env.state.eReplicas.get(`${entityId}:${signerId}`);
   return replica?.state.accounts?.get(counterpartyId);
 };
 
@@ -300,7 +300,7 @@ const logAccountState = (env: P2PScenarioEnv, entityId: string, signerId: string
 };
 
 const logEntityState = (env: P2PScenarioEnv, entityId: string, signerId: string, label: string) => {
-  const replica = env.eReplicas.get(`${entityId}:${signerId}`);
+  const replica = env.state.eReplicas.get(`${entityId}:${signerId}`);
   if (!replica) {
     console.log(`[P2P_DEBUG] ${label}`, { entity: 'missing' });
     return;
@@ -662,7 +662,7 @@ const run = async () => {
     await processRuntime(env);
     await processRuntime(env);
 
-    const browserReplica = env.jReplicas.get(jurisdictionName);
+    const browserReplica = env.state.jReplicas.get(jurisdictionName);
     const browserAdapter = browserReplica?.jadapter;
     if (!browserReplica || !browserAdapter?.addresses.depository || !browserAdapter.addresses.entityProvider) {
       throw new Error(`P2P_BROWSERVM_JURISDICTION_MISSING: ${jurisdictionName}`);

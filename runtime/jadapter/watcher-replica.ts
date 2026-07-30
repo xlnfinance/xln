@@ -24,7 +24,7 @@ export const findWatcherJurisdictionReplica = (
   depositoryAddress?: string,
   chainId?: number,
 ): JReplica | null => {
-  const replicas = [...(env.jReplicas?.values() || [])];
+  const replicas = [...(env.state.jReplicas?.values() || [])];
   if (replicas.length === 0) return null;
 
   const depository = normalizedLabel(depositoryAddress);
@@ -49,7 +49,7 @@ export const findWatcherJurisdictionReplica = (
   }
 
   const active = env.activeJurisdiction
-    ? env.jReplicas?.get(env.activeJurisdiction)
+    ? env.state.jReplicas?.get(env.activeJurisdiction)
     : undefined;
   return active ?? replicas[0] ?? null;
 };
@@ -62,7 +62,7 @@ export const requireWatcherJurisdictionReplica = (
 ): JReplica => {
   const replica = findWatcherJurisdictionReplica(env, depositoryAddress, chainId);
   if (replica) return replica;
-  const available = [...(env.jReplicas?.values() || [])]
+  const available = [...(env.state.jReplicas?.values() || [])]
     .map(candidate => {
       const address = normalizedLabel(
         candidate.depositoryAddress || candidate.contracts?.depository,
@@ -84,7 +84,7 @@ export const isEntityReplicaRelevantToWatcher = (
   watcher: JReplica,
 ): boolean => {
   const jurisdiction = replica.state?.config?.jurisdiction;
-  if (!jurisdiction) return (env.jReplicas?.size ?? 0) <= 1;
+  if (!jurisdiction) return (env.state.jReplicas?.size ?? 0) <= 1;
 
   const watcherChainId = watcherChainIdOf(watcher);
   const entityChainId = Number(jurisdiction.chainId);
@@ -117,7 +117,7 @@ export const getMinimumCommittedSignerJHeight = (
   watcher?: JReplica,
 ): number | null => {
   let minimum: number | null = null;
-  for (const replica of env.eReplicas?.values() || []) {
+  for (const replica of env.state.eReplicas?.values() || []) {
     if (watcher && !isEntityReplicaRelevantToWatcher(env, replica, watcher)) continue;
     const height = Number(replica.state?.lastFinalizedJHeight ?? 0);
     if (!Number.isFinite(height) || height < 0) continue;
@@ -131,7 +131,7 @@ export const getMinimumScannedSignerJHeight = (
   watcher?: JReplica,
 ): number | null => {
   let minimum: number | null = null;
-  for (const replica of env.eReplicas?.values() || []) {
+  for (const replica of env.state.eReplicas?.values() || []) {
     if (watcher && !isEntityReplicaRelevantToWatcher(env, replica, watcher)) continue;
     const height = Number(
       replica.jHistory

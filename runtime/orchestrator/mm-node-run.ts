@@ -360,7 +360,7 @@ const emitNodeBootstrapDebugEvent = (
     stage: startupPhase,
     entity: activeEntityId,
     runtimeId: String(env.runtimeId || ''),
-    height: env.height,
+    height: env.state.height,
     backlog: getMarketMakerRuntimeBacklogSnapshot(env, { includeQueuedEntityInputs: true }),
     ...fields,
   });
@@ -450,8 +450,8 @@ const buildMarketMakerAccountStatusDebug = (
       delta: serializeAccountDelta(account?.deltas?.get(tokenId)),
     })),
     runtime: {
-      height: Number(env.height ?? 0),
-      timestamp: Number(env.timestamp ?? 0),
+      height: Number(env.state.height ?? 0),
+      timestamp: Number(env.state.timestamp ?? 0),
       halted: Boolean(env.runtimeState?.halted),
       fatalDebugPayload: env.runtimeState?.fatalDebugPayload ?? null,
       loopActive: Boolean(env.runtimeState?.loopActive),
@@ -596,7 +596,7 @@ const buildMarketMakerHealthResponseJson = (input: MarketMakerHealthProjection):
     live: readiness.live,
     ready: readiness.ready,
     name: resolvedArgs.name,
-    height: Math.max(0, Math.floor(Number(input.env.height || 0))),
+    height: Math.max(0, Math.floor(Number(input.env.state.height || 0))),
     entityId: input.activeEntityId,
     runtimeId: String(input.env.runtimeId || '') || null,
     relayUrl: resolvedArgs.relayUrl,
@@ -1742,8 +1742,8 @@ const createMarketMakerQuoteReadModel = (deps: MarketMakerQuoteReadModelDeps) =>
   const isBootstrapDepthComplete = (health: MarketMakerHealth | null): boolean =>
     allSameDepthReady(readVisibleHubProfiles(deps.env, true)) && isMarketMakerDepthComplete(health);
   const buildCompletionHealth = (): MarketMakerHealth | null => {
-    if (completionHealthHeight === deps.env.height) return completionHealth;
-    completionHealthHeight = deps.env.height;
+    if (completionHealthHeight === deps.env.state.height) return completionHealth;
+    completionHealthHeight = deps.env.state.height;
     completionHealth = deps.health.buildSnapshot({ includeCross: true });
     if (completionHealth) {
       deps.health.setCurrentHealth(completionHealth);
@@ -2131,7 +2131,7 @@ const startMarketMakerServices = async (context: MarketMakerNodeContext): Promis
       httpDrain,
       directRuntimeWs,
       runtimeIngressReceipts: ingressReceipts,
-      currentRuntimeHeight: target => Math.max(0, Math.floor(Number(target?.height ?? 0))),
+      currentRuntimeHeight: target => Math.max(0, Math.floor(Number(target?.state.height ?? 0))),
       getActiveEntityId: () => state.activeEntityId,
       buildAccountStatusDebug: (entityId, counterpartyEntityId, tokenIds) =>
         buildMarketMakerAccountStatusDebug(
@@ -2377,7 +2377,7 @@ export const runMarketMakerNode = async (): Promise<void> => {
   // watchers can apply new, legitimate inputs. A post-startup raw Entity hash
   // is not a restore oracle: even an empty finalized J range advances the
   // certified anchor, Entity height, timestamp, and frame hash.
-  const restoredEntityStateHash = env.eReplicas.size > 0 ? buildMarketMakerBootstrapEntityStateHash(env) : null;
+  const restoredEntityStateHash = env.state.eReplicas.size > 0 ? buildMarketMakerBootstrapEntityStateHash(env) : null;
   const context = createMarketMakerNodeContext(env, restoredEntityStateHash);
   const { state, health: healthController, emit: emitBootstrapDebugEvent } = context;
   registerRuntimeFrameCommitCallback(env, ({ height, runtimeInput }) => {

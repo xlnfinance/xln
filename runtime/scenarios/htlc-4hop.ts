@@ -197,7 +197,7 @@ if (import.meta.main) {
   const runtime = await import('../runtime');
   const env = runtime.createEmptyEnv();
   env.scenarioMode = true;
-  env.timestamp = 1000;
+  env.state.timestamp = 1000;
   env.runtimeSeed = 'htlc-4hop-cli-seed-42';
 
   await htlc4hop(env);

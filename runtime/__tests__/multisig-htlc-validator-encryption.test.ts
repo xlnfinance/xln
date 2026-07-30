@@ -133,7 +133,7 @@ const PROCESS_DELTA_TRANSFORMER = `0x${'f1'.repeat(20)}`;
 const installProcessJurisdictionReplica = (
   env: ReturnType<typeof createEmptyEnv>,
 ) => {
-  const replica = env.jReplicas.get(PROCESS_JURISDICTION.name) ?? createJReplica(
+  const replica = env.state.jReplicas.get(PROCESS_JURISDICTION.name) ?? createJReplica(
     env,
     PROCESS_JURISDICTION.name,
     PROCESS_JURISDICTION.depositoryAddress,
@@ -343,7 +343,7 @@ const certifyRegisteredBoardPrefix = async (
     logIndex: evidence.logIndex,
   }];
 
-  const replicaEntry = Array.from(env.eReplicas.entries()).find(([, candidate]) => (
+  const replicaEntry = Array.from(env.state.eReplicas.entries()).find(([, candidate]) => (
     candidate.entityId === entityId && candidate.signerId === signerId
   ));
   if (!replicaEntry) throw new Error('HTLC_TEST_AUTHORITY_REPLICA_MISSING');
@@ -393,7 +393,7 @@ const certifyRegisteredBoardPrefix = async (
       `${applied.newState.lastFinalizedJHeight}:${evidence.activationHeight}`,
     );
   }
-  env.eReplicas.set(replicaKey, applied.workingReplica);
+  env.state.eReplicas.set(replicaKey, applied.workingReplica);
 };
 
 const paymentAccount = (sourceEntityId: string, targetEntityId: string): AccountState => {
@@ -701,7 +701,7 @@ describe('multisig HTLC validator encryption', () => {
 
     for (const signerId of validators) {
       const keys = deriveLocalEntityCryptoKeys(creationEnv, entityId, signerId);
-      creationEnv.eReplicas.set(`${entityId}:${signerId}`, {
+      creationEnv.state.eReplicas.set(`${entityId}:${signerId}`, {
         entityId,
         signerId,
         entityEncPubKey: keys.publicKey,
@@ -1633,9 +1633,9 @@ describe('multisig HTLC validator encryption', () => {
     installProcessJurisdictionReplica(env);
     env.dbNamespace = `${env.runtimeId}-multisig-htlc-${process.pid}`;
     env.scenarioMode = true;
-    env.timestamp = initialState.timestamp;
+    env.state.timestamp = initialState.timestamp;
     env.quietRuntimeLogs = true;
-    env.eReplicas.set(`${sourceEntityId}:${source.signer}`, {
+    env.state.eReplicas.set(`${sourceEntityId}:${source.signer}`, {
       entityId: sourceEntityId,
       signerId: source.signer,
       entityEncPubKey: pubKeyToHex(sourceEncryption.publicKey),
@@ -1683,7 +1683,7 @@ describe('multisig HTLC validator encryption', () => {
     expect(durablePayment.data.preparedEnvelope).toBeDefined();
     expect(durablePayment.data).not.toHaveProperty('secret');
     expect(serializeTaggedJson(historyTrace.snapshots)).not.toContain(rawSecret);
-    expect(serializeTaggedJson(env.eReplicas)).not.toContain(rawSecret);
+    expect(serializeTaggedJson(env.state.eReplicas)).not.toContain(rawSecret);
     expect(durablePayment.data.preparedRouteProfiles).toHaveLength(1);
     expect(durablePayment.data.startedAtMs).toBe(1_000);
     const uiLikePayment = {
@@ -1723,10 +1723,10 @@ describe('multisig HTLC validator encryption', () => {
       registerSignerKey(validatorEnv, source.signer, source.privateKey);
       installProcessJurisdictionReplica(validatorEnv);
       validatorEnv.scenarioMode = true;
-      validatorEnv.timestamp = 1_000;
+      validatorEnv.state.timestamp = 1_000;
       validatorEnv.quietRuntimeLogs = true;
       validatorEnv.gossip.setProfiles([]);
-      validatorEnv.eReplicas.set(`${sourceEntityId}:${source.signer}`, {
+      validatorEnv.state.eReplicas.set(`${sourceEntityId}:${source.signer}`, {
         entityId: sourceEntityId,
         signerId: source.signer,
         entityEncPubKey: '',
@@ -1803,9 +1803,9 @@ describe('multisig HTLC validator encryption', () => {
     registerSignerKey(env, signerId, privateKey);
     env.dbNamespace = `${env.runtimeId}-local-profile-${process.pid}`;
     env.scenarioMode = true;
-    env.timestamp = state.timestamp;
+    env.state.timestamp = state.timestamp;
     env.quietRuntimeLogs = true;
-    env.eReplicas.set(`${entityId}:${signerId}`, {
+    env.state.eReplicas.set(`${entityId}:${signerId}`, {
       entityId,
       signerId,
       entityEncPubKey: pubKeyToHex(encryption.publicKey),
@@ -1878,9 +1878,9 @@ describe('multisig HTLC validator encryption', () => {
       .filter((tx) => tx.type === 'certifyProfile').length;
     expect(recertifyTxCount).toBe(1);
 
-    const heightAfterRecertification = env.height;
+    const heightAfterRecertification = env.state.height;
     await processRuntime(env);
-    expect(env.height).toBe(heightAfterRecertification);
+    expect(env.state.height).toBe(heightAfterRecertification);
 
     await processRuntime(env, [{ entityId, signerId, entityTxs: [] }]);
     const recertifyTxCountAfterIdleFrame = historyTrace.snapshots
@@ -1910,9 +1910,9 @@ describe('multisig HTLC validator encryption', () => {
     registerSignerKey(env, signerId, privateKey);
     env.dbNamespace = `${env.runtimeId}-local-profile-p2p-${process.pid}`;
     env.scenarioMode = true;
-    env.timestamp = state.timestamp;
+    env.state.timestamp = state.timestamp;
     env.quietRuntimeLogs = true;
-    env.eReplicas.set(`${entityId}:${signerId}`, {
+    env.state.eReplicas.set(`${entityId}:${signerId}`, {
       entityId,
       signerId,
       entityEncPubKey: pubKeyToHex(encryption.publicKey),
@@ -2140,10 +2140,10 @@ describe('multisig HTLC validator encryption', () => {
     };
     expect(await firstColdStart.getLocalProfilesForEntities()).toEqual([]);
     expect(firstColdStart.getLocalEncryptionAnnouncements()).toHaveLength(1);
-    const [validReplica] = firstEnv.eReplicas.values();
-    firstEnv.eReplicas.set('malformed-replica-key', validReplica!);
+    const [validReplica] = firstEnv.state.eReplicas.values();
+    firstEnv.state.eReplicas.set('malformed-replica-key', validReplica!);
     await expect(firstColdStart.getLocalProfilesForEntities()).rejects.toThrow('Invalid replica key format');
-    firstEnv.eReplicas.delete('malformed-replica-key');
+    firstEnv.state.eReplicas.delete('malformed-replica-key');
 
     const secondEnv = envFor(second);
     registerSignerKey(secondEnv, second.signer, second.privateKey);

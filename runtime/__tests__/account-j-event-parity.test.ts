@@ -66,7 +66,7 @@ const machine = (): AccountState => ({
 
 const env = (): RuntimeReplica => {
   const value = createEmptyEnv('account-j-parity');
-  value.jReplicas.set('account-j-parity', {
+  value.state.jReplicas.set('account-j-parity', {
     name: 'account-j-parity',
     chainId: DOMAIN.chainId,
     depositoryAddress: DOMAIN.depositoryAddress,
@@ -83,7 +83,7 @@ const env = (): RuntimeReplica => {
     lastBlockTimestamp: 0,
     position: { x: 0, y: 0, z: 0 },
   });
-  value.eReplicas.set('left-validator', {
+  value.state.eReplicas.set('left-validator', {
     entityId: LEFT,
     signerId: `0x${'66'.repeat(20)}`,
     entityEncPubKey: '',

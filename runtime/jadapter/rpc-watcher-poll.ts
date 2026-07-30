@@ -129,7 +129,7 @@ const rememberScanProgress = (
   );
   if (!watcherReplica) return;
   const byReplica = new Map(Object.entries(session.scanProgress.replicaScannedThrough));
-  for (const [key, replica] of session.env.eReplicas.entries()) {
+  for (const [key, replica] of session.env.state.eReplicas.entries()) {
     if (!isEntityReplicaRelevantToWatcher(session.env, replica, watcherReplica)) continue;
     byReplica.set(key, Math.max(byReplica.get(key) ?? 0, scannedThroughHeight));
   }
@@ -185,7 +185,7 @@ const resolveExpectedParent = (
   parentHeight: number,
 ): { hash?: string; finalized: boolean } => {
   if (parentHeight <= 0) return { finalized: false };
-  const relevantReplicas = [...env.eReplicas.values()].filter(replica =>
+  const relevantReplicas = [...env.state.eReplicas.values()].filter(replica =>
     isEntityReplicaRelevantToWatcher(env, replica, watcherReplica),
   );
   const hashes = new Set(

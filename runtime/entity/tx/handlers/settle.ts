@@ -57,7 +57,7 @@ const buildPostSettlementDisputeProof = (
   if (!jurisdiction?.depositoryAddress) throw new Error('POST_SETTLEMENT_JURISDICTION_MISSING');
   const nonce = settlementNonce + 1;
   const projected = projectAccountAfterSettlement(account, diffs, forgiveTokenIds);
-  const { proofBodyHash } = buildAccountProofBodyFromJurisdictions(env, projected);
+  const { proofBodyHash } = buildAccountProofBodyFromJurisdictions(env.state, projected);
   const disputeHash = createDisputeProofHashWithNonce(
     account,
     proofBodyHash,

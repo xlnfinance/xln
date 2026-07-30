@@ -34,7 +34,7 @@ export const buildReplicaLookup = (env: RuntimeReplica): StorageReplicaLookup =>
  */
 export const buildLiveReplicaLookup = (env: RuntimeReplica): StorageReplicaLookup => {
   const lookup: StorageReplicaLookup = new Map();
-  for (const [replicaKey, replica] of [...env.eReplicas.entries()].sort(([left], [right]) => (
+  for (const [replicaKey, replica] of [...env.state.eReplicas.entries()].sort(([left], [right]) => (
     compareStableText(String(left).toLowerCase(), String(right).toLowerCase())
   ))) {
     if (!replica?.state) continue;
@@ -51,7 +51,7 @@ export const buildLiveReplicaLookup = (env: RuntimeReplica): StorageReplicaLooku
 export const buildLiveReplicaMetaPlan = (env: RuntimeReplica): CertifiedEntityLineagePlan => {
   const lineageByReplicaKey = new Map();
   const anchorByReplicaKey = new Map();
-  for (const [replicaKey, replica] of env.eReplicas.entries()) {
+  for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
     if (replica.certifiedFrameLineage) {
       lineageByReplicaKey.set(String(replicaKey), replica.certifiedFrameLineage);
     }
@@ -91,7 +91,7 @@ export const buildStorageReplicaMetaCommitmentFromCheckpointPlan = (
   digest: string;
 } => {
   const entries: Array<{ key: Buffer; value: Buffer }> = [];
-  for (const [replicaKey, replica] of env.eReplicas.entries()) {
+  for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
     if (!replica?.state) continue;
     const entityId = normalizeEntityId(replica.entityId || replica.state.entityId || '');
     const signerId = normalizeEntityId(replica.signerId || '');
@@ -117,7 +117,7 @@ export const buildStorageLiveReplicaMetaCommitment = (env: RuntimeReplica): {
   digest: string;
 } => {
   const entries: Array<{ key: Buffer; value: Buffer }> = [];
-  for (const [replicaKey, replica] of env.eReplicas.entries()) {
+  for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
     if (!replica?.state) continue;
     const entityId = normalizeEntityId(replica.entityId || replica.state.entityId || '');
     const signerId = normalizeEntityId(replica.signerId || '');

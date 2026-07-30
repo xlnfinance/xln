@@ -113,7 +113,7 @@ export const withStorageWriteDeadline = async <T>(
         reject(
           new RuntimeStorageWriteTimeoutError(
             timeoutMs,
-            env.height,
+            env.state.height,
             String(env.runtimeId || ''),
             lastProgressStep,
           ),

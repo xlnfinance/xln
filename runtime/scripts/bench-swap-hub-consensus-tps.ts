@@ -183,7 +183,7 @@ const addReplica = (
   signerId: string,
   jurisdiction: JurisdictionConfig,
 ): void => {
-  env.eReplicas.set(`${entityId}:${signerId}`, {
+  env.state.eReplicas.set(`${entityId}:${signerId}`, {
     entityId,
     signerId,
     entityEncPubKey: `0x${'aa'.repeat(32)}`,
@@ -219,7 +219,7 @@ const registerBenchIdentity = (
 const installJurisdiction = (env: RuntimeReplica, jurisdiction: JurisdictionConfig): void => {
   env.activeJurisdiction = jurisdiction.name;
   const deltaTransformer = addr('dd');
-  env.jReplicas.set(jurisdiction.name, {
+  env.state.jReplicas.set(jurisdiction.name, {
     name: jurisdiction.name,
     chainId: jurisdiction.chainId,
     rpcs: [jurisdiction.address],
@@ -487,7 +487,7 @@ const runConsensusRoundTrip = async (benchCase: BenchAccountCase, stages?: Stage
   const proposed = await proposeAccountFrame(
     proposerContext,
     benchCase.proposer,
-    benchCase.proposerEnv.timestamp,
+    benchCase.proposerEnv.state.timestamp,
   );
   const receiveStartedAt = getPerfMs();
   if (!proposed.success) throw new Error(`${benchCase.kind}:propose_failed:${proposed.error}`);
@@ -527,7 +527,7 @@ const runConsensusRoundTrip = async (benchCase: BenchAccountCase, stages?: Stage
 const makeParticipantEnv = (seed: string, jurisdiction: JurisdictionConfig): RuntimeReplica => {
   const env = createEmptyEnv(seed);
   env.runtimeSeed = seed;
-  env.timestamp = 1_000;
+  env.state.timestamp = 1_000;
   env.quietRuntimeLogs = true;
   installJurisdiction(env, jurisdiction);
   return env;
@@ -536,7 +536,7 @@ const makeParticipantEnv = (seed: string, jurisdiction: JurisdictionConfig): Run
 const makeEnv = (seed: string): { env: RuntimeReplica; jurisdiction: JurisdictionConfig; hubId: string } => {
   const env = createEmptyEnv(seed);
   env.runtimeSeed = seed;
-  env.timestamp = 1_000;
+  env.state.timestamp = 1_000;
   env.quietRuntimeLogs = true;
   const jurisdiction = makeJurisdiction();
   installJurisdiction(env, jurisdiction);

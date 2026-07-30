@@ -76,7 +76,7 @@ test('Settings/UserMode JMachine import uses the shared runtime helper', () => {
   expect(userMode).toContain('await importJMachineViaRuntime(env, event.detail)');
   expect(userMode).toContain('data-testid="user-mode-jmachine-error"');
   expect(helper).toContain('J_MACHINE_IMPORT_COMMIT_WAIT_MS = 3_000');
-  expect(helper).toContain('while (!nextEnv.jReplicas?.get?.(normalized.name)');
+  expect(helper).toContain('while (!nextEnv.state.jReplicas?.get?.(normalized.name)');
   expect(helper).toContain('await sleep(J_MACHINE_IMPORT_COMMIT_POLL_MS)');
   expect(userMode).not.toContain('[ensureSelfEntities] No J-machines');
   expect(addJMachine).not.toContain('Date.now()');

@@ -6,8 +6,11 @@ type RuntimeViewEnv = RuntimeReplica & { [LIVE_RUNTIME_ENV_KEY]?: RuntimeReplica
 
 export function isRuntimeLikeEnv(value: unknown): value is RuntimeReplica {
   if (!value || typeof value !== 'object') return false;
-  const env = value as { eReplicas?: unknown; jReplicas?: unknown; history?: unknown };
-  return env.eReplicas instanceof Map && env.jReplicas instanceof Map && Array.isArray(env.history);
+  const env = value as {
+    state?: { eReplicas?: unknown; jReplicas?: unknown };
+    history?: unknown;
+  };
+  return env.state?.eReplicas instanceof Map && env.state.jReplicas instanceof Map && Array.isArray(env.history);
 }
 
 export function attachLiveRuntimeEnv<T extends object>(viewEnv: T, liveEnv: RuntimeReplica): T {
@@ -22,8 +25,11 @@ export function attachLiveRuntimeEnv<T extends object>(viewEnv: T, liveEnv: Runt
 export function createDetachedRuntimeViewEnv(liveEnv: RuntimeReplica): RuntimeReplica {
   return {
     ...liveEnv,
-    eReplicas: new Map(liveEnv.eReplicas),
-    jReplicas: new Map(liveEnv.jReplicas),
+    state: {
+      ...liveEnv.state,
+      eReplicas: new Map(liveEnv.state.eReplicas),
+      jReplicas: new Map(liveEnv.state.jReplicas),
+    },
   };
 }
 

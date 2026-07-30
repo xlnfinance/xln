@@ -57,8 +57,8 @@ const requireCheckpointEntries = (
 };
 
 const restoreCheckpointState = (env: RuntimeReplica, snapshot: Record<string, unknown>): Profile[] => {
-  env.height = requireBoundaryInteger(snapshot['height'], 'RECOVERY_CHECKPOINT_HEIGHT_INVALID');
-  env.timestamp = requireBoundaryInteger(snapshot['timestamp'], 'RECOVERY_CHECKPOINT_TIMESTAMP_INVALID');
+  env.state.height = requireBoundaryInteger(snapshot['height'], 'RECOVERY_CHECKPOINT_HEIGHT_INVALID');
+  env.state.timestamp = requireBoundaryInteger(snapshot['timestamp'], 'RECOVERY_CHECKPOINT_TIMESTAMP_INVALID');
   const entityEntries = requireCheckpointEntries(
     snapshot['eReplicas'],
     'RECOVERY_CHECKPOINT_ENTITY_REPLICAS_INVALID',
@@ -69,11 +69,11 @@ const restoreCheckpointState = (env: RuntimeReplica, snapshot: Record<string, un
   );
   const { eReplicas: _entityReplicas, jReplicas: _jurisdictionReplicas, ...durableSnapshot } = snapshot;
   restoreDurableRuntimeSnapshot(env, durableSnapshot);
-  env.eReplicas = new Map(entityEntries.map(([key, replica], index) => [
+  env.state.eReplicas = new Map(entityEntries.map(([key, replica], index) => [
     key,
     validateEntityReplica(replica, `RecoveryCheckpoint.EntityReplica[${index}]`),
   ]));
-  env.jReplicas = new Map(validateJReplicas(
+  env.state.jReplicas = new Map(validateJReplicas(
     jurisdictionEntries,
     'RECOVERY_CHECKPOINT_J_REPLICA',
   ));
@@ -89,7 +89,7 @@ const restoreCheckpointState = (env: RuntimeReplica, snapshot: Record<string, un
 };
 
 const assertCheckpointCommitments = async (env: RuntimeReplica): Promise<void> => {
-  for (const replica of env.eReplicas.values()) {
+  for (const replica of env.state.eReplicas.values()) {
     assertCertifiedJHistoryIntegrity(replica.state);
     assertValidatorJHistoryMatchesCertifiedAnchor(replica.state, replica.jHistory);
   }

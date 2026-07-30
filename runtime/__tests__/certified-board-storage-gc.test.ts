@@ -77,7 +77,7 @@ test('retained checkpoint roots preserve board witnesses until snapshot pruning 
   env.quietRuntimeLogs = true;
   env.runtimeConfig = { storage: { enabled: false } };
   env.activeJurisdiction = jurisdiction.name;
-  env.jReplicas.set(jurisdiction.name, {
+  env.state.jReplicas.set(jurisdiction.name, {
     ...jurisdiction,
     blockNumber: 0n,
     stateRoot: new Uint8Array(32),
@@ -107,7 +107,7 @@ test('retained checkpoint roots preserve board witnesses until snapshot pruning 
     entityInputs: [],
   });
   await processRuntime(env, []);
-  const replica = Array.from(env.eReplicas.values())[0]!;
+  const replica = Array.from(env.state.eReplicas.values())[0]!;
   const stackKey = getCertifiedBoardStackKey(jurisdiction);
   const dbRoot = mkdtempSync(join(tmpdir(), 'xln-certified-board-gc-'));
   const currentDb = new Level<Buffer, Buffer>(join(dbRoot, 'current'), {
@@ -188,8 +188,8 @@ test('retained checkpoint roots preserve board witnesses until snapshot pruning 
       };
       refreshGenesisAnchor(replica);
       if (epoch > 1) {
-        env.height += 1;
-        env.timestamp += 1;
+        env.state.height += 1;
+        env.state.timestamp += 1;
       }
       applyRuntimeStorageChanges(env, [{ family: 'entity', entityId }]);
       await save();

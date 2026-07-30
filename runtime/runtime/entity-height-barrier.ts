@@ -7,7 +7,7 @@ const findExactReplica = (
   env: RuntimeReplica,
   entityId: string,
   signerId: string,
-): EntityReplica | undefined => [...env.eReplicas.values()].find(replica =>
+): EntityReplica | undefined => [...env.state.eReplicas.values()].find(replica =>
   normalize(replica.entityId || replica.state.entityId) === entityId &&
   normalize(replica.signerId) === signerId);
 

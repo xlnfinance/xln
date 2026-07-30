@@ -45,10 +45,10 @@ export function getRuntimeJurisdictionHeight(env: RuntimeReplica, fallbackHeight
     return Number.isFinite(blockNumber) ? Math.max(0, Math.floor(blockNumber)) : fallback;
   }
 
-  const active = env.activeJurisdiction ? env.jReplicas?.get(env.activeJurisdiction) : undefined;
+  const active = env.activeJurisdiction ? env.state.jReplicas?.get(env.activeJurisdiction) : undefined;
   const candidates = active
-    ? [active, ...Array.from(env.jReplicas?.values?.() || [])]
-    : Array.from(env.jReplicas?.values?.() || []);
+    ? [active, ...Array.from(env.state.jReplicas?.values?.() || [])]
+    : Array.from(env.state.jReplicas?.values?.() || []);
   let best = fallback;
   for (const replica of candidates) {
     const blockNumber = Number(replica?.blockNumber ?? 0n);

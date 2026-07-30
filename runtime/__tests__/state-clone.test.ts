@@ -371,7 +371,7 @@ describe('state cloning', () => {
 
   test('single-signer Runtime ownership skips the Entity candidate shell', async () => {
     const env = createEmptyEnv('single-signer owned Entity frame');
-    env.timestamp = 2;
+    env.state.timestamp = 2;
     const isolatedSource = makeProjectionReplica().state as EntityState;
     const ownedSource = cloneTrustedEntityState(isolatedSource);
 
@@ -379,18 +379,18 @@ describe('state cloning', () => {
       env,
       isolatedSource,
       [],
-      env.timestamp,
+      env.state.timestamp,
     );
     const owned = await applyRuntimeOwnedEntityFrame(
       env,
       ownedSource,
       [],
-      env.timestamp,
+      env.state.timestamp,
     );
 
     expect(isolatedSource.timestamp).toBe(1);
     expect(isolated.newState.accounts).toBeInstanceOf(EntityAccountCandidateMap);
-    expect(ownedSource.timestamp).toBe(env.timestamp);
+    expect(ownedSource.timestamp).toBe(env.state.timestamp);
     expect(owned.newState.accounts).toBe(ownedSource.accounts);
     expect(owned.newState.accounts).not.toBeInstanceOf(EntityAccountCandidateMap);
     expect(computeCanonicalEntityConsensusStateHash(owned.newState))

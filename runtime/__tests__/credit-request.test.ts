@@ -103,7 +103,7 @@ describe('credit request ingress', () => {
         expiresAt: 10_001,
         ...(receipt.note ? { note: receipt.note } : {}),
       }),
-      getCurrentRuntimeHeight: (targetEnv) => Number(targetEnv?.height ?? 0),
+      getCurrentRuntimeHeight: (targetEnv) => Number(targetEnv?.state.height ?? 0),
       buildRuntimeInputStatusUrl: (id) => `/api/runtime-input/${id}`,
     });
     const body = await response.json();

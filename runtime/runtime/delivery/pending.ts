@@ -415,7 +415,7 @@ export const reportRetryableRouteDefer = (
   env.info?.('network', 'ROUTE_SEND_DEFERRED', payload);
 };
 
-const getRuntimeNowMs = (env: RuntimeReplica): number => env.timestamp ?? 0;
+const getRuntimeNowMs = (env: RuntimeReplica): number => env.state.timestamp ?? 0;
 
 // Retry metadata must stay in one clock domain. Deterministic scenarios own
 // logical time explicitly; production transport retries are wall-clock I/O.

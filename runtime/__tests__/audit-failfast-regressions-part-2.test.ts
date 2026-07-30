@@ -440,8 +440,8 @@ const attachSigningReplica = (env: ReturnType<typeof createEmptyEnv>, entityId: 
   const config = makeSingleSignerConfigFor(signerId);
   const jurisdiction = config.jurisdiction!;
   const depository = browserDepository ?? jurisdiction.depositoryAddress;
-  if (!env.jReplicas.has('__audit_test__')) {
-    env.jReplicas.set('__audit_test__', {
+  if (!env.state.jReplicas.has('__audit_test__')) {
+    env.state.jReplicas.set('__audit_test__', {
       name: '__audit_test__',
       chainId: jurisdiction.chainId,
       rpcs: [],
@@ -461,7 +461,7 @@ const attachSigningReplica = (env: ReturnType<typeof createEmptyEnv>, entityId: 
       position: { x: 0, y: 0, z: 0 },
     });
   }
-  env.eReplicas.set(`${entityId}:${signerId}`, {
+  env.state.eReplicas.set(`${entityId}:${signerId}`, {
     entityId,
     signerId,
     entityEncPubKey: '',
@@ -497,7 +497,7 @@ const ensureCanonicalCommandBoardAuthority = async (env: RuntimeReplica, state: 
     }
     return;
   }
-  let replica = Array.from(env.jReplicas.values()).find(
+  let replica = Array.from(env.state.jReplicas.values()).find(
     candidate =>
       candidate.chainId === jurisdiction.chainId &&
       candidate.depositoryAddress?.toLowerCase() === jurisdiction.depositoryAddress.toLowerCase() &&
@@ -517,7 +517,7 @@ const buildQuorumAuthorizedFrameTxs = async (
   env: RuntimeReplica,
   state: EntityState,
   collectiveTxs: EntityTx[],
-  frameTimestamp: number = env.timestamp,
+  frameTimestamp: number = env.state.timestamp,
 ): Promise<EntityTx[]> => {
   await ensureCanonicalCommandBoardAuthority(env, state);
   const [proposer, ...otherValidators] = state.config.validators;
@@ -704,7 +704,7 @@ const sealAuditJSubmitAttempts = (env: RuntimeReplica, inputs: JInput[]): void =
         attemptId,
         batchGeneration,
       };
-      const existing = Array.from(env.eReplicas.values()).find(
+      const existing = Array.from(env.state.eReplicas.values()).find(
         replica =>
           replica.entityId.toLowerCase() === jTx.entityId.toLowerCase() &&
           replica.signerId.toLowerCase() === signerId.toLowerCase(),
@@ -746,7 +746,7 @@ const sealAuditJSubmitAttempts = (env: RuntimeReplica, inputs: JInput[]): void =
         submitAttempts: jTx.data.runtimeSubmitAttempt.attemptNumber,
         lastSubmittedAt: jTx.data.runtimeSubmitAttempt.attemptedAt,
       };
-      env.eReplicas.set(`${jTx.entityId}:${signerId}`, replica);
+      env.state.eReplicas.set(`${jTx.entityId}:${signerId}`, replica);
     }
   }
   registerPendingCommittedJOutbox(env, inputs);
@@ -765,7 +765,7 @@ describe('audit fail-fast regressions', () => {
   test('signed non-deadline account frame remains valid after a ten-minute outage', async () => {
     const seed = 'account-frame-watcher-lag';
     const env = createEmptyEnv(seed);
-    env.timestamp = 10_000;
+    env.state.timestamp = 10_000;
     env.quietRuntimeLogs = true;
     const first = registerLazySigner(seed, '1');
     const second = registerLazySigner(seed, '2');
@@ -782,11 +782,11 @@ describe('audit fail-fast regressions', () => {
     receiver.mempool = [];
     receiver.proofHeader = { fromEntity: right.entityId, toEntity: left.entityId, nextProofNonce: 0 };
 
-    const proposal = await proposeAccountFrame(createAccountConsensusContext(env), proposer, env.timestamp, 9);
+    const proposal = await proposeAccountFrame(createAccountConsensusContext(env), proposer, env.state.timestamp, 9);
     if (!proposal.success || !proposal.accountInput) throw new Error(proposal.error || 'proposal failed');
     const sealedProposal = await sealAccountDraftAsEntity(env, left.entityId, left.signerId, proposal);
     const result = await applyAccountInput(createAccountConsensusContext(env), receiver, sealedProposal, {
-      entityTimestamp: env.timestamp + 10 * 60_000,
+      entityTimestamp: env.state.timestamp + 10 * 60_000,
       finalizedJHeight: 10,
     });
 
@@ -797,7 +797,7 @@ describe('audit fail-fast regressions', () => {
   test('Entity flush batches a committed peer J-claim ACK with the local claim', async () => {
     const seed = 'account-j-claim-overlay-batched-ack';
     const env = createEmptyEnv(seed);
-    env.timestamp = 10_000;
+    env.state.timestamp = 10_000;
     env.quietRuntimeLogs = true;
     const first = registerLazySigner(seed, '1');
     const second = registerLazySigner(seed, '2');
@@ -832,11 +832,11 @@ describe('audit fail-fast regressions', () => {
     receiver.mempool = [structuredClone(claim)];
     receiver.proofHeader = { fromEntity: right.entityId, toEntity: left.entityId, nextProofNonce: 0 };
 
-    const proposed = await proposeAccountFrame(createAccountConsensusContext(env), proposer, env.timestamp, 7);
+    const proposed = await proposeAccountFrame(createAccountConsensusContext(env), proposer, env.state.timestamp, 7);
     if (!proposed.success || !proposed.accountInput) throw new Error(proposed.error || 'proposal failed');
     const sealedProposal = await sealAccountDraftAsEntity(env, left.entityId, left.signerId, proposed);
     const result = await applyAccountInput(createAccountConsensusContext(env), receiver, sealedProposal, {
-      entityTimestamp: env.timestamp,
+      entityTimestamp: env.state.timestamp,
       finalizedJHeight: 7,
     });
 
@@ -848,7 +848,7 @@ describe('audit fail-fast regressions', () => {
     const flushed = await proposeAccountFrame(
       createAccountConsensusContext(env, { get: hash => newClaimNodes.get(hash) }),
       receiver,
-      env.timestamp,
+      env.state.timestamp,
       7,
     );
     expect(flushed.success).toBe(true);
@@ -939,7 +939,7 @@ describe('audit fail-fast regressions', () => {
   test('late signed HTLC secret is retained as evidence and prepares a dispute', async () => {
     const seed = 'late-htlc-secret-dispute';
     const env = createEmptyEnv(seed);
-    env.timestamp = 10_000;
+    env.state.timestamp = 10_000;
     env.quietRuntimeLogs = true;
     const first = registerLazySigner(seed, '1');
     const second = registerLazySigner(seed, '2');
@@ -953,7 +953,7 @@ describe('audit fail-fast regressions', () => {
     const upstreamEntityId = `0x${'73'.repeat(32)}`;
     const upstreamLockId = 'late-secret-upstream-lock';
     const amount = 7n;
-    const timelock = BigInt(env.timestamp + HTLC_ENFORCEMENT_RESERVE_MS - 1);
+    const timelock = BigInt(env.state.timestamp + HTLC_ENFORCEMENT_RESERVE_MS - 1);
     const resolveTx: AccountTx = {
       type: 'htlc_resolve',
       data: { lockId, outcome: 'secret', secret },
@@ -978,13 +978,13 @@ describe('audit fail-fast regressions', () => {
         createdTimestamp: 0,
       });
     }
-    const proposal = await proposeAccountFrame(createAccountConsensusContext(env), proposer, env.timestamp, 1);
+    const proposal = await proposeAccountFrame(createAccountConsensusContext(env), proposer, env.state.timestamp, 1);
     if (!proposal.success || !proposal.accountInput) throw new Error(proposal.error || 'proposal failed');
     const sealedProposal = await sealAccountDraftAsEntity(env, left.entityId, left.signerId, proposal);
 
     const receiverState = makeEntityState(right.entityId);
     receiverState.config = makeSingleSignerConfigFor(right.signerId);
-    receiverState.timestamp = env.timestamp;
+    receiverState.timestamp = env.state.timestamp;
     receiverState.lastFinalizedJHeight = 1;
     receiverState.accounts.set(left.entityId, receiver);
     receiverState.htlcRoutes.set(hashlock, {
@@ -995,7 +995,7 @@ describe('audit fail-fast regressions', () => {
       inboundLockId: upstreamLockId,
       outboundEntity: left.entityId,
       outboundLockId: lockId,
-      createdTimestamp: env.timestamp,
+      createdTimestamp: env.state.timestamp,
     });
     const applied = await applyEntityTx(env, receiverState, {
       type: 'accountInput',
@@ -1013,12 +1013,12 @@ describe('audit fail-fast regressions', () => {
       outboundEntity: left.entityId,
       outboundLockId: lockId,
       secretAckPending: true,
-      secretAckStartedAt: env.timestamp,
-      secretAckDeadlineAt: env.timestamp + HTLC_SECRET_ACK_TIMEOUT_MS,
+      secretAckStartedAt: env.state.timestamp,
+      secretAckDeadlineAt: env.state.timestamp + HTLC_SECRET_ACK_TIMEOUT_MS,
     });
     expect(applied.newState.crontabState?.hooks.get(`htlc-secret-ack:${hashlock}`)).toEqual({
       id: `htlc-secret-ack:${hashlock}`,
-      triggerAt: env.timestamp + HTLC_SECRET_ACK_TIMEOUT_MS,
+      triggerAt: env.state.timestamp + HTLC_SECRET_ACK_TIMEOUT_MS,
       type: 'htlc_secret_ack_timeout',
       data: {
         hashlock,
@@ -1057,7 +1057,7 @@ describe('audit fail-fast regressions', () => {
   test('signed deterministic replay failure freezes only the account and retains evidence', async () => {
     const seed = 'signed-invalid-account-frame';
     const env = createEmptyEnv(seed);
-    env.timestamp = 10_000;
+    env.state.timestamp = 10_000;
     env.quietRuntimeLogs = true;
     const first = registerLazySigner(seed, '1');
     const second = registerLazySigner(seed, '2');
@@ -1072,7 +1072,7 @@ describe('audit fail-fast regressions', () => {
       receiver,
       { type: 'set_credit_limit', data: { tokenId: 1, amount: -1n } },
       true,
-      env.timestamp,
+      env.state.timestamp,
       0,
     );
     invalidFrame.prevFrameHash = 'genesis';
@@ -1088,7 +1088,7 @@ describe('audit fail-fast regressions', () => {
     };
 
     const accountResult = await applyAccountInput(createAccountConsensusContext(env), cloneAccountState(receiver), accountInput, {
-      entityTimestamp: env.timestamp,
+      entityTimestamp: env.state.timestamp,
       finalizedJHeight: 0,
     });
     expect(accountResult.success).toBe(false);
@@ -1097,7 +1097,7 @@ describe('audit fail-fast regressions', () => {
 
     const receiverState = makeEntityState(right.entityId);
     receiverState.config = makeSingleSignerConfigFor(right.signerId);
-    receiverState.timestamp = env.timestamp;
+    receiverState.timestamp = env.state.timestamp;
     receiverState.accounts.set(left.entityId, receiver);
     const applied = await applyEntityTx(env, receiverState, {
       type: 'accountInput',
@@ -1118,7 +1118,7 @@ describe('audit fail-fast regressions', () => {
   test('signed stale settlement seal is rejected without mutating or disputing the account', async () => {
     const seed = 'signed-stale-settlement-seal';
     const env = createEmptyEnv(seed);
-    env.timestamp = 10_000;
+    env.state.timestamp = 10_000;
     env.quietRuntimeLogs = true;
     const first = registerLazySigner(seed, '1');
     const second = registerLazySigner(seed, '2');
@@ -1145,7 +1145,7 @@ describe('audit fail-fast regressions', () => {
         },
       },
       true,
-      env.timestamp,
+      env.state.timestamp,
     );
     expect(workspaceResult.success).toBe(true);
     receiver.proofHeader.nextProofNonce = 9;
@@ -1167,7 +1167,7 @@ describe('audit fail-fast regressions', () => {
         settlementHanko: '0x5678',
       },
     };
-    const staleFrame = makeIncomingAccountFrame(receiver, staleSeal, true, env.timestamp, 0);
+    const staleFrame = makeIncomingAccountFrame(receiver, staleSeal, true, env.state.timestamp, 0);
     staleFrame.prevFrameHash = 'genesis';
     staleFrame.stateHash = await createFrameHash(staleFrame);
     const [frameHanko] = await signEntityHashes(env, left.entityId, left.signerId, [staleFrame.stateHash]);
@@ -1182,7 +1182,7 @@ describe('audit fail-fast regressions', () => {
     const before = safeStringify(receiver);
 
     const accountResult = await applyAccountInput(createAccountConsensusContext(env), receiver, accountInput, {
-      entityTimestamp: env.timestamp,
+      entityTimestamp: env.state.timestamp,
       finalizedJHeight: 0,
     });
     expect(accountResult.success).toBe(false);
@@ -1192,7 +1192,7 @@ describe('audit fail-fast regressions', () => {
 
     const receiverState = makeEntityState(right.entityId);
     receiverState.config = makeSingleSignerConfigFor(right.signerId);
-    receiverState.timestamp = env.timestamp;
+    receiverState.timestamp = env.state.timestamp;
     receiverState.accounts.set(left.entityId, cloneAccountState(receiver));
     const applied = await applyEntityTx(env, receiverState, {
       type: 'accountInput',
@@ -1562,7 +1562,7 @@ describe('audit fail-fast regressions', () => {
     const env = createEmptyEnv('account-tx-atomicity');
     env.scenarioMode = true;
     env.quietRuntimeLogs = true;
-    env.timestamp = 1_000;
+    env.state.timestamp = 1_000;
     env.browserVM = { getDepositoryAddress: () => hex20('dd') } as any;
     const { signerId, entityId: left } = registerLazySigner('account-tx-atomicity', '1');
     attachSigningReplica(env, left, signerId);
@@ -1603,7 +1603,7 @@ describe('audit fail-fast regressions', () => {
       rightHold: 0n,
     });
 
-    const result = await proposeAccountFrame(createAccountConsensusContext(env), account, env.timestamp);
+    const result = await proposeAccountFrame(createAccountConsensusContext(env), account, env.state.timestamp);
 
     expect(result.success).toBe(true);
     expect(result.accountInput?.proposal.frame?.accountTxs.map(tx => tx.type)).toEqual(['set_credit_limit']);
@@ -1616,7 +1616,7 @@ describe('audit fail-fast regressions', () => {
     const env = createEmptyEnv('account-frame-timestamp-parity');
     env.scenarioMode = true;
     env.quietRuntimeLogs = true;
-    env.timestamp = 1_000;
+    env.state.timestamp = 1_000;
     const depositoryAddress = hex20('dd');
     env.browserVM = { getDepositoryAddress: () => depositoryAddress } as any;
     const { signerId, entityId: left } = registerLazySigner('account-frame-timestamp-parity', '1');
@@ -1636,7 +1636,7 @@ describe('audit fail-fast regressions', () => {
     const proposer = makeProposalAccount([pullLock], left, right);
     proposer.currentHeight = 4;
     proposer.currentFrame.height = 4;
-    proposer.currentFrame.timestamp = env.timestamp;
+    proposer.currentFrame.timestamp = env.state.timestamp;
     proposer.currentFrame.stateHash = `0x${'cc'.repeat(32)}`;
     const delta = createDefaultDelta(1);
     delta.leftCreditLimit = 1_000n;
@@ -1644,10 +1644,10 @@ describe('audit fail-fast regressions', () => {
     const receiver = cloneAccountState(proposer);
     receiver.proofHeader = { fromEntity: right, toEntity: left, nextProofNonce: 0 };
 
-    const proposed = await proposeAccountFrame(createAccountConsensusContext(env), proposer, env.timestamp);
+    const proposed = await proposeAccountFrame(createAccountConsensusContext(env), proposer, env.state.timestamp);
     if (!proposed.success) throw new Error(proposed.error || 'proposal failed');
     const frame = proposed.accountInput!.proposal.frame;
-    expect(frame.timestamp).toBe(env.timestamp);
+    expect(frame.timestamp).toBe(env.state.timestamp);
 
     const replayed = await applyAccountTx(receiver, pullLock, frame.byLeft!, frame.timestamp, frame.jHeight, true, env);
     expect(replayed.success).toBe(true);
@@ -1658,8 +1658,8 @@ describe('audit fail-fast regressions', () => {
     const seed = 'account-frame-entity-timestamp-authority';
     const proposerEnv = createEmptyEnv(seed);
     const validatorEnv = createEmptyEnv(seed);
-    proposerEnv.timestamp = 1_000;
-    validatorEnv.timestamp = 1_100;
+    proposerEnv.state.timestamp = 1_000;
+    validatorEnv.state.timestamp = 1_100;
     proposerEnv.browserVM = { getDepositoryAddress: () => hex20('dd') } as typeof proposerEnv.browserVM;
     validatorEnv.browserVM = { getDepositoryAddress: () => hex20('dd') } as typeof validatorEnv.browserVM;
     const left = registerLazySigner(seed, '1');
@@ -1691,8 +1691,8 @@ describe('audit fail-fast regressions', () => {
     validatorState.timestamp = 777;
     const proposerEnv = createEmptyEnv('profile-timestamp-proposer');
     const validatorEnv = createEmptyEnv('profile-timestamp-validator');
-    proposerEnv.timestamp = 1_000;
-    validatorEnv.timestamp = 1_100;
+    proposerEnv.state.timestamp = 1_000;
+    validatorEnv.state.timestamp = 1_100;
     const tx = {
       type: 'profile-update',
       data: { profile: { entityId, name: 'Committed timestamp' } },
@@ -1727,8 +1727,8 @@ describe('audit fail-fast regressions', () => {
     };
     const proposerEnv = createEmptyEnv('r2c-timestamp-proposer');
     const validatorEnv = createEmptyEnv('r2c-timestamp-validator');
-    proposerEnv.timestamp = quoteId + QUOTE_EXPIRY_MS;
-    validatorEnv.timestamp = proposerEnv.timestamp + 1;
+    proposerEnv.state.timestamp = quoteId + QUOTE_EXPIRY_MS;
+    validatorEnv.state.timestamp = proposerEnv.state.timestamp + 1;
     const tx = {
       type: 'r2c',
       data: {
@@ -1752,8 +1752,8 @@ describe('audit fail-fast regressions', () => {
     const seed = 'open-account-watch-seed-materialization';
     const proposerEnv = createEmptyEnv(seed);
     const validatorEnv = createEmptyEnv('different-validator-runtime-seed');
-    proposerEnv.timestamp = 1_000;
-    validatorEnv.timestamp = 1_100;
+    proposerEnv.state.timestamp = 1_000;
+    validatorEnv.state.timestamp = 1_100;
     const author = registerLazySigner(seed, '1');
     const targetEntityId = `0x${'b7'.repeat(32)}`;
     const state = makeEntityState(author.entityId);
@@ -1763,7 +1763,7 @@ describe('audit fail-fast regressions', () => {
     const installTarget = (env: RuntimeReplica): void => {
       const target = makeEntityState(targetEntityId);
       target.config = state.config;
-      env.eReplicas.set(`${targetEntityId}:target-signer`, {
+      env.state.eReplicas.set(`${targetEntityId}:target-signer`, {
         entityId: targetEntityId,
         signerId: 'target-signer',
         entityEncPubKey: '',
@@ -1805,7 +1805,7 @@ describe('audit fail-fast regressions', () => {
 
   test('proposeAccountFrame throws instead of dropping invalid cross-j fill ack', async () => {
     const env = createEmptyEnv('cross-fill-ack-propose-failfast');
-    env.timestamp = 10_000;
+    env.state.timestamp = 10_000;
     env.quietRuntimeLogs = true;
     const left = `0x${'11'.repeat(32)}`;
     const right = `0x${'22'.repeat(32)}`;
@@ -1832,13 +1832,13 @@ describe('audit fail-fast regressions', () => {
       right,
     );
 
-    await expect(proposeAccountFrame(createAccountConsensusContext(env), account, env.timestamp)).rejects.toThrow(/CROSS_J_FILL_ACK_PROPOSAL_FAILED/);
+    await expect(proposeAccountFrame(createAccountConsensusContext(env), account, env.state.timestamp)).rejects.toThrow(/CROSS_J_FILL_ACK_PROPOSAL_FAILED/);
     expect(account.mempool).toHaveLength(1);
   });
 
   test('proposeAccountFrame throws instead of dropping invalid cross-j pull resolve', async () => {
     const env = createEmptyEnv('cross-pull-resolve-propose-failfast');
-    env.timestamp = 10_000;
+    env.state.timestamp = 10_000;
     env.quietRuntimeLogs = true;
     const left = `0x${'11'.repeat(32)}`;
     const right = `0x${'22'.repeat(32)}`;
@@ -1880,7 +1880,7 @@ describe('audit fail-fast regressions', () => {
       ],
     ]);
 
-    await expect(proposeAccountFrame(createAccountConsensusContext(env), account, env.timestamp)).rejects.toThrow(
+    await expect(proposeAccountFrame(createAccountConsensusContext(env), account, env.state.timestamp)).rejects.toThrow(
       /CROSS_J_PULL_RESOLVE_PROPOSAL_FAILED/,
     );
     expect(account.mempool).toHaveLength(1);
@@ -1888,7 +1888,7 @@ describe('audit fail-fast regressions', () => {
 
   test('proposeAccountFrame throws instead of dropping invalid cross-j swap offer', async () => {
     const env = createEmptyEnv('cross-swap-offer-propose-failfast');
-    env.timestamp = 10_000;
+    env.state.timestamp = 10_000;
     env.quietRuntimeLogs = true;
     const left = `0x${'11'.repeat(32)}`;
     const right = `0x${'22'.repeat(32)}`;
@@ -1953,7 +1953,7 @@ describe('audit fail-fast regressions', () => {
       right,
     );
 
-    await expect(proposeAccountFrame(createAccountConsensusContext(env), account, env.timestamp)).rejects.toThrow(
+    await expect(proposeAccountFrame(createAccountConsensusContext(env), account, env.state.timestamp)).rejects.toThrow(
       /CROSS_J_SWAP_OFFER_PROPOSAL_FAILED/,
     );
     expect(account.mempool).toHaveLength(1);
@@ -1961,7 +1961,7 @@ describe('audit fail-fast regressions', () => {
 
   test('proposeAccountFrame keeps valid swap_resolve txs when optimistic batch validation falls back', async () => {
     const env = createEmptyEnv('swap-resolve-batch-fallback');
-    env.timestamp = 10_000;
+    env.state.timestamp = 10_000;
     env.quietRuntimeLogs = true;
     env.browserVM = {
       getDepositoryAddress: () => hex20('dd'),
@@ -2029,7 +2029,7 @@ describe('audit fail-fast regressions', () => {
       quantizedWant: wantAmount,
     });
 
-    const result = await proposeAccountFrame(createAccountConsensusContext(env), account, env.timestamp);
+    const result = await proposeAccountFrame(createAccountConsensusContext(env), account, env.state.timestamp);
 
     expect(result.success).toBe(true);
     expect(result.accountInput?.proposal.frame.accountTxs).toEqual([validTx]);
@@ -2040,7 +2040,7 @@ describe('audit fail-fast regressions', () => {
   test('same-chain offers match and queue both resolves in one hub Entity frame', async () => {
     const seed = 'same-chain-single-hub-frame';
     const env = createEmptyEnv(seed);
-    env.timestamp = 10_000;
+    env.state.timestamp = 10_000;
     env.quietRuntimeLogs = true;
     const hub = registerLazySigner(seed, 'hub');
     const maker = registerLazySigner(seed, 'maker');
@@ -2070,7 +2070,7 @@ describe('audit fail-fast regressions', () => {
     ): Promise<{ input: AccountInput; hubAccount: AccountState }> => {
       const proposerAccount = fundedAccount(identity.entityId, hub.entityId);
       proposerAccount.mempool.push(tx);
-      const proposed = await proposeAccountFrame(createAccountConsensusContext(env), proposerAccount, env.timestamp, 0);
+      const proposed = await proposeAccountFrame(createAccountConsensusContext(env), proposerAccount, env.state.timestamp, 0);
       if (!proposed.success || !proposed.accountInput) {
         throw new Error(`SAME_CHAIN_PROPOSAL_FAILED:${proposed.error || 'missing input'}`);
       }
@@ -2135,7 +2135,7 @@ describe('audit fail-fast regressions', () => {
         { type: 'accountInput', data: makerOffer.input },
         { type: 'accountInput', data: takerOffer.input },
       ],
-      env.timestamp,
+      env.state.timestamp,
     );
 
     for (const accountId of [maker.entityId, taker.entityId]) {
@@ -2159,7 +2159,7 @@ describe('audit fail-fast regressions', () => {
     const env = createEmptyEnv(seed);
     env.scenarioMode = true;
     env.quietRuntimeLogs = true;
-    env.timestamp = 10_000;
+    env.state.timestamp = 10_000;
     const { signerId, entityId } = registerLazySigner(seed, '1');
     const replica = {
       entityId,
@@ -2199,7 +2199,7 @@ describe('audit fail-fast regressions', () => {
     const env = createEmptyEnv('storage changes reducer seed alpha beta gamma');
     const state = makeEntityState(entityId);
     state.accounts.set(counterpartyId, makeProposalAccount([], entityId, counterpartyId));
-    env.eReplicas.set(`${entityId}:test`, {
+    env.state.eReplicas.set(`${entityId}:test`, {
       entityId,
       signerId: 'test',
       entityEncPubKey: '',
@@ -2279,7 +2279,7 @@ describe('audit fail-fast regressions', () => {
     const env = createEmptyEnv(seed);
     env.scenarioMode = true;
     env.quietRuntimeLogs = true;
-    env.timestamp = 30_000;
+    env.state.timestamp = 30_000;
     const { signerId, entityId } = registerLazySigner(seed, '1');
     const jurisdiction = {
       name: 'Testnet',
@@ -2289,7 +2289,7 @@ describe('audit fail-fast regressions', () => {
       chainId: 31337,
     };
     env.activeJurisdiction = 'Testnet';
-    env.jReplicas.set('Testnet', {
+    env.state.jReplicas.set('Testnet', {
       name: 'Testnet',
       blockNumber: 0n,
       stateRoot: new Uint8Array(32),

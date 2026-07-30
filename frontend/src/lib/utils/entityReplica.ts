@@ -8,7 +8,7 @@ type EnvLike = RuntimeReplica | null | undefined;
 
 function toReplicaEntries(envLike: EnvLike): Array<[string, EntityReplica]> {
   if (!envLike) return [];
-  return Array.from(envLike.eReplicas.entries());
+  return Array.from(envLike.state.eReplicas.entries());
 }
 
 export function normalizeEntityId(value: unknown): string {

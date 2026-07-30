@@ -313,7 +313,7 @@ const installStaleJPrefixAuthority = (
 ): void => {
   const attestation = output.jPrefixAttestations?.values().next().value;
   if (!attestation) throw new Error('TEST_SIGNED_STALE_J_PREFIX_MISSING');
-  receiver.eReplicas.set(`${output.entityId}:${output.signerId}`, {
+  receiver.state.eReplicas.set(`${output.entityId}:${output.signerId}`, {
     entityId: output.entityId,
     signerId: output.signerId,
     entityEncPubKey: '',
@@ -345,7 +345,7 @@ const installStaleJPrefixAuthority = (
 
 const ensureAppliedAuthority = (env: RuntimeReplica, output: DeliverableEntityInput): void => {
   const key = `${output.entityId}:${output.signerId}`;
-  const replica = env.eReplicas.get(key) ?? ({
+  const replica = env.state.eReplicas.get(key) ?? ({
     entityId: output.entityId,
     signerId: output.signerId,
     entityEncPubKey: '',
@@ -381,7 +381,7 @@ const ensureAppliedAuthority = (env: RuntimeReplica, output: DeliverableEntityIn
     };
   }
   replica.mempool.push(...structuredClone(output.entityTxs ?? []));
-  env.eReplicas.set(key, replica);
+  env.state.eReplicas.set(key, replica);
 };
 
 const commitApplied = (receiver: RuntimeReplica, outputs: DeliverableEntityInput[]) => {
@@ -417,7 +417,7 @@ const commitTerminalAccountAtReceiver = (
 ) => {
   expect(registerReliableIngress(receiver, senderRuntimeId, output).kind).toBe('enqueue');
   ensureAppliedAuthority(receiver, output);
-  const replica = receiver.eReplicas.get(`${output.entityId}:${output.signerId}`);
+  const replica = receiver.state.eReplicas.get(`${output.entityId}:${output.signerId}`);
   if (!replica) throw new Error('TEST_ACCOUNT_RECEIPT_REPLICA_MISSING');
   replica.state.accounts.set(entityId('d1'), {
     leftEntity: entityId('d1'),
@@ -524,7 +524,7 @@ describe('durable scoped reliable delivery receipts', () => {
 
     expect(registerReliableIngress(receiver, sender.runtimeId!, output).kind).toBe('enqueue');
     ensureAppliedAuthority(receiver, output);
-    const replica = receiver.eReplicas.get(`${output.entityId}:${output.signerId}`);
+    const replica = receiver.state.eReplicas.get(`${output.entityId}:${output.signerId}`);
     if (!replica) throw new Error('TEST_STAGED_ACCOUNT_ACK_REPLICA_MISSING');
     replica.mempool = [];
     replica.state.accounts.set(entityId('d1'), {
@@ -571,7 +571,7 @@ describe('durable scoped reliable delivery receipts', () => {
     const receiver = runtime('reliable-certified-ack-frozen-prefix-receiver');
     receiver.scenarioMode = true;
     receiver.quietRuntimeLogs = true;
-    receiver.timestamp = 2_000;
+    receiver.state.timestamp = 2_000;
 
     const validatorId = receiver.runtimeId!;
     const targetEntityId = generateLazyEntityId([validatorId], 1n).toLowerCase();
@@ -704,7 +704,7 @@ describe('durable scoped reliable delivery receipts', () => {
       })),
       blocks: [],
     }, state);
-    receiver.eReplicas.set(`${targetEntityId}:${validatorId}`, replica);
+    receiver.state.eReplicas.set(`${targetEntityId}:${validatorId}`, replica);
 
     const nestedAck: EntityTx = {
       type: 'accountInput',
@@ -775,8 +775,8 @@ describe('durable scoped reliable delivery receipts', () => {
 
     expect(applied.entityFrameCommitted).toBe(true);
     expect(applied.appliedEntityInputs).toHaveLength(1);
-    expect(receiver.eReplicas.get(`${targetEntityId}:${validatorId}`)?.state.height).toBe(1);
-    const committedAccount = receiver.eReplicas
+    expect(receiver.state.eReplicas.get(`${targetEntityId}:${validatorId}`)?.state.height).toBe(1);
+    const committedAccount = receiver.state.eReplicas
       .get(`${targetEntityId}:${validatorId}`)?.state.accounts.get(sourceEntityId) as AccountState | undefined;
     if (!committedAccount) throw new Error('TEST_FROZEN_PREFIX_ACCOUNT_MISSING');
     expect(committedAccount.currentHeight).toBe(10);
@@ -823,7 +823,7 @@ describe('durable scoped reliable delivery receipts', () => {
     const honest = jPrefixAttestationOutput(receiver.runtimeId!, 11, '51');
     const forged = jPrefixAttestationOutput(receiver.runtimeId!, 12, '52');
     ensureAppliedAuthority(receiver, honest);
-    const replica = receiver.eReplicas.get(`${honest.entityId}:${honest.signerId}`);
+    const replica = receiver.state.eReplicas.get(`${honest.entityId}:${honest.signerId}`);
     if (!replica) throw new Error('TEST_J_PREFIX_REPLICA_MISSING');
     replica.state.height = 1;
     const honestAttestation = honest.jPrefixAttestations!.values().next().value!;
@@ -1003,7 +1003,7 @@ describe('durable scoped reliable delivery receipts', () => {
 
     expect(registerReliableIngress(receiver, sender.runtimeId!, first).kind).toBe('enqueue');
     ensureAppliedAuthority(receiver, first);
-    const replica = receiver.eReplicas.get(`${first.entityId}:${first.signerId}`);
+    const replica = receiver.state.eReplicas.get(`${first.entityId}:${first.signerId}`);
     if (!replica) throw new Error('TEST_ACCOUNT_SUCCESSOR_REPLICA_MISSING');
     replica.state.accounts.set(entityId('d1'), {
       leftEntity: entityId('d1'),
@@ -1102,7 +1102,7 @@ describe('durable scoped reliable delivery receipts', () => {
       '0xaccount-frame-7',
     );
     if (!plainCommit?.receipt) throw new Error('TEST_TERMINAL_PLAIN_RECEIPT_MISSING');
-    const replica = receiver.eReplicas.get(`${plain.entityId}:${plain.signerId}`);
+    const replica = receiver.state.eReplicas.get(`${plain.entityId}:${plain.signerId}`);
     const account = replica?.state.accounts.get(entityId('d1'));
     if (!account) throw new Error('TEST_TERMINAL_PLAIN_ACCOUNT_MISSING');
     account.currentHeight = 8;
@@ -1143,7 +1143,7 @@ describe('durable scoped reliable delivery receipts', () => {
       7,
       '0xaccount-frame-7',
     );
-    const replica = receiver.eReplicas.get(`${plain.entityId}:${plain.signerId}`);
+    const replica = receiver.state.eReplicas.get(`${plain.entityId}:${plain.signerId}`);
     const account = replica?.state.accounts.get(entityId('d1'));
     if (!account) throw new Error('TEST_TERMINAL_PLAIN_CONFLICT_ACCOUNT_MISSING');
     account.currentHeight = 8;
@@ -1189,7 +1189,7 @@ describe('durable scoped reliable delivery receipts', () => {
       7,
       '0xaccount-frame-7',
     );
-    const replica = receiver.eReplicas.get(`${plain.entityId}:${plain.signerId}`);
+    const replica = receiver.state.eReplicas.get(`${plain.entityId}:${plain.signerId}`);
     const account = replica?.state.accounts.get(entityId('d1'));
     if (!account) throw new Error('TEST_TERMINAL_PLAIN_NO_ANCESTRY_ACCOUNT_MISSING');
     account.currentHeight = 9;
@@ -1290,7 +1290,7 @@ describe('durable scoped reliable delivery receipts', () => {
     const higher = jFinalityOutput(receiver.runtimeId!, 100, EMPTY_J_HISTORY_ROOT);
     const commits = commitAtReceiver(receiver, sender.runtimeId!, higher);
     finalizeReliableIngressCommit(receiver, commits);
-    const replica = receiver.eReplicas.values().next().value as EntityReplica;
+    const replica = receiver.state.eReplicas.values().next().value as EntityReplica;
     const tx = higher.entityTxs![0]!;
     if (tx.type !== 'j_event') throw new Error('TEST_J_FINALITY_TX_MISSING');
     const data = tx.data;
@@ -1342,7 +1342,7 @@ describe('durable scoped reliable delivery receipts', () => {
     const higher = jFinalityOutput(receiver.runtimeId!, 100, EMPTY_J_HISTORY_ROOT);
     const commits = commitAtReceiver(receiver, sender.runtimeId!, higher);
     finalizeReliableIngressCommit(receiver, commits);
-    const replica = receiver.eReplicas.values().next().value as EntityReplica;
+    const replica = receiver.state.eReplicas.values().next().value as EntityReplica;
     const tx = higher.entityTxs![0]!;
     if (tx.type !== 'j_event') throw new Error('TEST_J_FINALITY_TX_MISSING');
     const matchingLower = jFinalityOutput(receiver.runtimeId!, 50, EMPTY_J_HISTORY_ROOT);
@@ -1399,7 +1399,7 @@ describe('durable scoped reliable delivery receipts', () => {
     );
     const commits = commitAtReceiver(receiver, sender.runtimeId!, conflictingLower);
     finalizeReliableIngressCommit(receiver, commits);
-    const replica = receiver.eReplicas.values().next().value as EntityReplica;
+    const replica = receiver.state.eReplicas.values().next().value as EntityReplica;
     const tx = conflictingLower.entityTxs![0]!;
     if (tx.type !== 'j_event') throw new Error('TEST_J_FINALITY_TX_MISSING');
     replica.state.lastFinalizedJHeight = 100;
@@ -1462,7 +1462,7 @@ describe('durable scoped reliable delivery receipts', () => {
 
     expect(registerReliableIngress(receiver, sender.runtimeId!, first).kind).toBe('enqueue');
     ensureAppliedAuthority(receiver, first);
-    const replica = receiver.eReplicas.get(`${first.entityId}:${first.signerId}`)!;
+    const replica = receiver.state.eReplicas.get(`${first.entityId}:${first.signerId}`)!;
     replica.state.height = 7;
     replica.state.prevFrameHash = frameHash;
     const firstCommits = commitReliableIngress(receiver, [first]);
@@ -1740,10 +1740,10 @@ describe('durable scoped reliable delivery receipts', () => {
 
     await processRuntime(sender);
 
-    expect(sender.height).toBe(1);
+    expect(sender.state.height).toBe(1);
     expect(sender.pendingNetworkOutputs).toEqual([]);
     expect(sender.runtimeState?.receivedReliableReceiptLedger?.size).toBe(1);
-    const durableFrame = await readStorageFrameRecord(getRuntimeWalDb(sender), sender.height);
+    const durableFrame = await readStorageFrameRecord(getRuntimeWalDb(sender), sender.state.height);
     expect(durableFrame?.runtimeInput.reliableReceipts).toEqual([commits[0]!.receipt]);
 
     handleInboundReliableReceipt(sender, receiver.runtimeId!, commits[0]!.receipt);
@@ -1771,7 +1771,7 @@ describe('durable scoped reliable delivery receipts', () => {
       targetSignerId,
       certified.frame,
     )]);
-    expect(receiver.eReplicas.get(`${initialState.entityId}:${targetSignerId}`)?.state.height).toBe(1);
+    expect(receiver.state.eReplicas.get(`${initialState.entityId}:${targetSignerId}`)?.state.height).toBe(1);
 
     const output = precommitOutput(
       receiver.runtimeId!,
@@ -1783,15 +1783,15 @@ describe('durable scoped reliable delivery receipts', () => {
     output.signerId = targetSignerId;
 
     expect(registerReliableIngress(receiver, sender.runtimeId!, output).kind).toBe('enqueue');
-    const replica = receiver.eReplicas.get(`${output.entityId}:${output.signerId}`);
+    const replica = receiver.state.eReplicas.get(`${output.entityId}:${output.signerId}`);
     if (!replica) throw new Error('TEST_TERMINAL_ONLY_REPLICA_MISSING');
     expect(replica.state.prevFrameHash).toBe(certified.frame.hash);
 
-    const heightBefore = receiver.height;
+    const heightBefore = receiver.state.height;
     await processRuntime(receiver, [output]);
 
-    expect(receiver.height).toBe(heightBefore + 1);
-    const receiptOnlyFrame = await readStorageFrameRecord(getRuntimeWalDb(receiver), receiver.height);
+    expect(receiver.state.height).toBe(heightBefore + 1);
+    const receiptOnlyFrame = await readStorageFrameRecord(getRuntimeWalDb(receiver), receiver.state.height);
     expect(receiptOnlyFrame?.runtimeInput.entityInputs).toEqual([{
       ...output,
       from: sender.runtimeId,
@@ -1824,10 +1824,10 @@ describe('durable scoped reliable delivery receipts', () => {
     );
 
     expect(registerReliableIngress(receiver, sender.runtimeId!, output).kind).toBe('enqueue');
-    const heightBefore = receiver.height;
+    const heightBefore = receiver.state.height;
     await processRuntime(receiver, [output]);
 
-    expect(receiver.height).toBe(heightBefore);
+    expect(receiver.state.height).toBe(heightBefore);
     expect(receiver.runtimeState?.pendingReliableIngress?.size ?? 0).toBe(0);
     expect(receiver.runtimeState?.reliableIngressReceiptLedger?.size ?? 0).toBe(0);
     expect(receiver.runtimeState?.reliableIngressTerminalWatermarks?.size ?? 0).toBe(0);

@@ -101,7 +101,7 @@ const dispatchFrameOutputs = (outputs: DeliverableEntityInput[]): {
   const deferred = dispatchEntityOutputs(env, outputs.map(output => ({
     output: {
       ...output,
-      sourceRuntimeFrame: output.sourceRuntimeFrame ?? { height: env.height, timestamp: env.timestamp },
+      sourceRuntimeFrame: output.sourceRuntimeFrame ?? { height: env.state.height, timestamp: env.state.timestamp },
     },
     targetRuntimeId,
   })), {
@@ -387,9 +387,9 @@ describe('runtime output routing', () => {
     const pending = rescheduleDeferredOutputs(env, [], [output], [], deps);
     const retry = env.runtimeState?.deferredNetworkMeta?.get(buildRouteOutputKey(output));
     expect(retry?.nextRetryAt).toBe(2_000);
-    env.timestamp = 1_999;
+    env.state.timestamp = 1_999;
     expect(splitPendingOutputsByRetryWindow(env, pending, deps).ready).toHaveLength(0);
-    env.timestamp = 2_000;
+    env.state.timestamp = 2_000;
     expect(splitPendingOutputsByRetryWindow(env, pending, deps).ready).toEqual([output]);
   });
 
@@ -1086,7 +1086,7 @@ describe('runtime output routing', () => {
     expect(infos).toEqual(['ROUTE_SEND_DEFERRED']);
 
     env.runtimeState!.deferredNetworkMeta = new Map([
-      [buildRouteOutputKey(output), { attempts: 3, nextRetryAt: env.timestamp }],
+      [buildRouteOutputKey(output), { attempts: 3, nextRetryAt: env.state.timestamp }],
     ]);
     dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
       ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
@@ -1506,7 +1506,7 @@ describe('runtime output routing', () => {
     expect(resolveRuntimeIdForEntity(env, targetEntityId, deps)).toBe(targetRuntimeId);
     expect(env.runtimeState!.entityRuntimeHints!.get(targetEntityId)?.seenAt).toBe(10_000);
 
-    env.timestamp = 70_001;
+    env.state.timestamp = 70_001;
     env.gossip = { getProfiles: () => [] } as never;
     expect(resolveRuntimeIdForEntity(env, targetEntityId, deps)).toBeNull();
   });
@@ -1844,7 +1844,7 @@ describe('runtime output routing', () => {
       hasLocalSignerForEntitySigner: () => true,
       resolveSoleLocalSignerForEntity: () => signerId,
       getP2P: () => null,
-    }, env.timestamp, { acceptedBeforeQuiesce: true })).toEqual({ kind: 'queued' });
+    }, env.state.timestamp, { acceptedBeforeQuiesce: true })).toEqual({ kind: 'queued' });
 
     expect(enqueued).toEqual([{ ...input, from: sourceRuntimeId }]);
   });

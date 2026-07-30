@@ -25,7 +25,7 @@ const jurisdiction: JurisdictionConfig = {
 const accountAddress = '0x000000000000000000000000000000000000aacc';
 const deltaTransformerAddress = '0x000000000000000000000000000000000000da7a';
 env.activeJurisdiction = jurisdiction.name;
-env.jReplicas.set(jurisdiction.name, createTestJReplica({
+env.state.jReplicas.set(jurisdiction.name, createTestJReplica({
   ...jurisdiction,
   contracts: {
     depository: jurisdiction.depositoryAddress,
@@ -55,7 +55,7 @@ const importTx = (index: string): RuntimeTx => {
 process.env['XLN_STORAGE_WRITE_TIMEOUT_MS'] = '0';
 enqueueRuntimeInput(env, { runtimeTxs: [importTx('1')], entityInputs: [] });
 await processRuntime(env);
-if (env.height !== 1) throw new Error(`fixture baseline height ${env.height}`);
+if (env.state.height !== 1) throw new Error(`fixture baseline height ${env.state.height}`);
 
 process.env['XLN_STORAGE_WRITE_TIMEOUT_MS'] = '1';
 enqueueRuntimeInput(env, { runtimeTxs: [importTx('2')], entityInputs: [] });
@@ -69,8 +69,8 @@ try {
 const state = ensureRuntimeState(env);
 console.log(`STORAGE_TIMEOUT_RESULT:${JSON.stringify({
   failure,
-  height: env.height,
-  timestamp: env.timestamp,
+  height: env.state.height,
+  timestamp: env.state.timestamp,
   lifecycle: state.lifecyclePhase,
   fatalHeight: state.fatalDebugPayload?.height,
 })}`);

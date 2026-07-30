@@ -228,7 +228,7 @@ export const createBrowserVmHistoryWatcher = (options: BrowserVmHistoryOptions) 
       updateWatcherJurisdictionCursor(env, targetBlock, options.depositoryAddress, options.chainId);
     }
     const byReplica = new Map(Object.entries(progress.replicaScannedThrough));
-    for (const [key, replica] of env.eReplicas.entries()) {
+    for (const [key, replica] of env.state.eReplicas.entries()) {
       if (!isEntityReplicaRelevantToWatcher(env, replica, watcherReplica)) continue;
       byReplica.set(key, Math.max(byReplica.get(key) ?? 0, targetBlock));
     }

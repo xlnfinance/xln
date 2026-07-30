@@ -24,7 +24,7 @@ const certifiedFrame = (height: number, byte: string): ProposedEntityFrame => ({
 });
 
 const installLane = (env: ReturnType<typeof createEmptyEnv>, entityId: string, signerId: string, height: number): void => {
-  env.eReplicas.set(`${entityId}:${signerId}`, {
+  env.state.eReplicas.set(`${entityId}:${signerId}`, {
     entityId,
     signerId,
     entityEncPubKey: '',

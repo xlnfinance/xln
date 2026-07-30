@@ -65,7 +65,7 @@ export const resolveEntityProposerId = (env: RuntimeReplica, entityId: string, c
   let configFallback: string | null = null;
   let gossipFallback: string | null = null;
 
-  for (const [replicaKey, replica] of env.eReplicas.entries()) {
+  for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
     const keyParts = String(replicaKey).split(':');
     const keyEntityId = String(keyParts[0] || '').toLowerCase();
     const replicaEntityId = String(replica.entityId || '').toLowerCase();

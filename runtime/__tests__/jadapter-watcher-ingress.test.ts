@@ -76,7 +76,7 @@ const makeJurisdiction = (name: string, chainId: number, depositoryAddress: stri
 const makeCursorEnv = (seed: string, replicas: JReplica[], activeJurisdiction?: string): RuntimeReplica => {
   const env = createEmptyEnv(seed);
   env.activeJurisdiction = activeJurisdiction;
-  env.jReplicas = new Map(replicas.map((replica) => [replica.name, replica]));
+  env.state.jReplicas = new Map(replicas.map((replica) => [replica.name, replica]));
   return env;
 };
 
@@ -241,7 +241,7 @@ describe('JAdapter watcher ingress', () => {
       31_337,
       `0x${'42'.repeat(20)}`,
     );
-    env.jReplicas.set(source.name, source);
+    env.state.jReplicas.set(source.name, source);
     env.runtimeState = { persistenceQuiescing: true } as RuntimeReplica['runtimeState'];
     const entityId = `0x${'44'.repeat(32)}`;
     const owner = `0x${'55'.repeat(20)}`;
@@ -393,8 +393,8 @@ describe('JAdapter watcher ingress', () => {
     const right = makeReplica(entityId, '2', false);
     left.state.lastFinalizedJHeight = 40;
     right.state.lastFinalizedJHeight = 45;
-    env.eReplicas.set(`${entityId}:1`, left);
-    env.eReplicas.set(`${entityId}:2`, right);
+    env.state.eReplicas.set(`${entityId}:1`, left);
+    env.state.eReplicas.set(`${entityId}:2`, right);
 
     expect(getMinimumCommittedSignerJHeight(env)).toBe(40);
     expect(getWatcherStartBlock(env, '0xaaa')).toBe(41);
@@ -434,7 +434,7 @@ describe('JAdapter watcher ingress', () => {
       blockHashes: new Map([[10, `0x${'10'.repeat(32)}`]]),
     };
     const replicaKey = `${entityId}:1`;
-    env.eReplicas.set(replicaKey, replica);
+    env.state.eReplicas.set(replicaKey, replica);
     const healthyEntityId = `0x${'66'.repeat(32)}`;
     const healthy = makeReplica(healthyEntityId, '2', true);
     healthy.state.config.jurisdiction = jurisdiction;
@@ -448,7 +448,7 @@ describe('JAdapter watcher ingress', () => {
       blockHashes: new Map([[10, `0x${'20'.repeat(32)}`]]),
     };
     const healthyReplicaKey = `${healthyEntityId}:2`;
-    env.eReplicas.set(healthyReplicaKey, healthy);
+    env.state.eReplicas.set(healthyReplicaKey, healthy);
 
     expect(enqueueJHistoryRewindForReplicaKeys(
       env,
@@ -487,10 +487,10 @@ describe('JAdapter watcher ingress', () => {
     arrakisRight.state.lastFinalizedJHeight = 110;
     wakandaLeft.state.lastFinalizedJHeight = 5;
     wakandaRight.state.lastFinalizedJHeight = 7;
-    env.eReplicas.set(`${arrakisEntity}:1`, arrakisLeft);
-    env.eReplicas.set(`${arrakisEntity}:2`, arrakisRight);
-    env.eReplicas.set(`${wakandaEntity}:1`, wakandaLeft);
-    env.eReplicas.set(`${wakandaEntity}:2`, wakandaRight);
+    env.state.eReplicas.set(`${arrakisEntity}:1`, arrakisLeft);
+    env.state.eReplicas.set(`${arrakisEntity}:2`, arrakisRight);
+    env.state.eReplicas.set(`${wakandaEntity}:1`, wakandaLeft);
+    env.state.eReplicas.set(`${wakandaEntity}:2`, wakandaRight);
 
     expect(getMinimumCommittedSignerJHeight(env)).toBe(5);
     expect(getWatcherStartBlock(env, arrakis.depositoryAddress)).toBe(101);
@@ -534,7 +534,7 @@ describe('JAdapter watcher ingress', () => {
         ),
       ]),
     };
-    env.eReplicas.set(`${replica.entityId}:1`, replica);
+    env.state.eReplicas.set(`${replica.entityId}:1`, replica);
 
     expect(getMinimumScannedSignerJHeight(env, watcher)).toBe(44);
 
@@ -576,8 +576,8 @@ describe('JAdapter watcher ingress', () => {
     wakandaEntity.state.config.jurisdiction = wakanda;
     arrakisEntity.state.lastFinalizedJHeight = 100;
     wakandaEntity.state.lastFinalizedJHeight = 5;
-    env.eReplicas.set(`${arrakisEntity.entityId}:1`, arrakisEntity);
-    env.eReplicas.set(`${wakandaEntity.entityId}:2`, wakandaEntity);
+    env.state.eReplicas.set(`${arrakisEntity.entityId}:1`, arrakisEntity);
+    env.state.eReplicas.set(`${wakandaEntity.entityId}:2`, wakandaEntity);
 
     expect(isEntityReplicaRelevantToWatcher(env, arrakisEntity, arrakisJ)).toBe(true);
     expect(isEntityReplicaRelevantToWatcher(env, arrakisEntity, wakandaJ)).toBe(false);
@@ -626,8 +626,8 @@ describe('JAdapter watcher ingress', () => {
     const validator = makeReplica(entityId, validatorSignerId, false);
     proposer.state.lastFinalizedJHeight = 8;
     validator.state.lastFinalizedJHeight = 8;
-    env.eReplicas.set(`${entityId}:${proposerSignerId}`, proposer);
-    env.eReplicas.set(`${entityId}:${validatorSignerId}`, validator);
+    env.state.eReplicas.set(`${entityId}:${proposerSignerId}`, proposer);
+    env.state.eReplicas.set(`${entityId}:${validatorSignerId}`, validator);
 
     const rawEvents = [{
       name: 'ReserveUpdated',
@@ -676,7 +676,7 @@ describe('JAdapter watcher ingress', () => {
       headers: [{ jHeight: 1, jBlockHash: blockHash(1) }],
       blocks: [],
     }, replica.state);
-    env.eReplicas.set(replicaKey, replica);
+    env.state.eReplicas.set(replicaKey, replica);
 
     const signedHead = buildLocalJPrefixAttestation(env, replica);
     if (!signedHead) throw new Error('TEST_CURRENT_J_PREFIX_ATTESTATION_MISSING');
@@ -746,7 +746,7 @@ describe('JAdapter watcher ingress', () => {
     const blockHash = (height: number): string => `0x${height.toString(16).padStart(64, '0')}`;
     const replica = makeReplica(entityId, signerId, true);
     replica.state.config.jurisdiction = jurisdiction;
-    env.eReplicas.set(replicaKey, replica);
+    env.state.eReplicas.set(replicaKey, replica);
 
     const range = enqueueJHistoryRange(
       env,
@@ -777,7 +777,7 @@ describe('JAdapter watcher ingress', () => {
     const blockHash = (height: number): string => `0x${height.toString(16).padStart(64, '0')}`;
     const replica = makeReplica(entityId, signerId, true);
     replica.state.config.jurisdiction = jurisdiction;
-    env.eReplicas.set(`${entityId}:${signerId}`, replica);
+    env.state.eReplicas.set(`${entityId}:${signerId}`, replica);
 
     const range = enqueueJHistoryRange(
       env,
@@ -802,7 +802,7 @@ describe('JAdapter watcher ingress', () => {
     const entityId = `0x${'45'.repeat(32)}`;
     const replica = makeReplica(entityId, '1', true);
     const replicaKey = `${entityId}:1`;
-    env.eReplicas.set(replicaKey, replica);
+    env.state.eReplicas.set(replicaKey, replica);
     const pending = {
       fromBlock: 1,
       toBlock: 10,
@@ -865,7 +865,7 @@ describe('JAdapter watcher ingress', () => {
         [100, `0x${'64'.repeat(32)}`],
       ]),
     };
-    env.eReplicas.set(replicaKey, replica);
+    env.state.eReplicas.set(replicaKey, replica);
 
     expect(isWatcherJHistoryRangeDurable(env, {
       fromBlock: 1,
@@ -877,7 +877,7 @@ describe('JAdapter watcher ingress', () => {
 
   test('processEventBatch durably fans out sparse observations and defers unsigned prefix heads', () => {
     const env = createEmptyEnv('jadapter-helper-delivery-seed');
-    env.timestamp = 1_000;
+    env.state.timestamp = 1_000;
     env.quietRuntimeLogs = true;
 
     const entityId = `0x${'44'.repeat(32)}`;
@@ -893,8 +893,8 @@ describe('JAdapter watcher ingress', () => {
     };
     proposer.state.config = board;
     validator.state.config = board;
-    env.eReplicas.set(`${entityId}:${proposerSignerId}`, proposer);
-    env.eReplicas.set(`${entityId}:${validatorSignerId}`, validator);
+    env.state.eReplicas.set(`${entityId}:${proposerSignerId}`, proposer);
+    env.state.eReplicas.set(`${entityId}:${validatorSignerId}`, validator);
 
     processEventBatch(
       [{
@@ -930,11 +930,11 @@ describe('JAdapter watcher ingress', () => {
 
   test('deferred watcher event stays out of the mempool until its authenticated prefix is queued atomically', async () => {
     const env = createEmptyEnv('jadapter-deferred-event-prefix-atomicity');
-    env.timestamp = 1_000;
+    env.state.timestamp = 1_000;
     env.quietRuntimeLogs = true;
     const entityId = `0x${'48'.repeat(32)}`;
     const signerId = '1';
-    env.eReplicas.set(`${entityId}:${signerId}`, makeReplica(entityId, signerId, true));
+    env.state.eReplicas.set(`${entityId}:${signerId}`, makeReplica(entityId, signerId, true));
     const blockHash = (height: number): string =>
       `0x${height.toString(16).padStart(64, '0')}`;
 
@@ -983,18 +983,18 @@ describe('JAdapter watcher ingress', () => {
     expect(env.runtimeState?.wakeRequested).toBe(true);
 
     for (const tx of env.runtimeMempool?.runtimeTxs ?? []) await applyRuntimeTx(env, tx);
-    const history = env.eReplicas.get(`${entityId}:${signerId}`)?.jHistory;
+    const history = env.state.eReplicas.get(`${entityId}:${signerId}`)?.jHistory;
     expect(history?.contiguousThroughHeight).toBe(7);
     expect(history?.eventBlocks.get(7)?.events[0]?.type).toBe('ReserveUpdated');
   });
 
   test('sparse semantic event waits for its exact contiguous prefix instead of certifying empty catch-up pages', async () => {
     const env = createEmptyEnv('jadapter-sparse-event-no-empty-entity-wal');
-    env.timestamp = 1_000;
+    env.state.timestamp = 1_000;
     env.quietRuntimeLogs = true;
     const entityId = `0x${'58'.repeat(32)}`;
     const signerId = '1';
-    env.eReplicas.set(`${entityId}:${signerId}`, makeReplica(entityId, signerId, true));
+    env.state.eReplicas.set(`${entityId}:${signerId}`, makeReplica(entityId, signerId, true));
     const blockHash = (height: number): string =>
       `0x${height.toString(16).padStart(64, '0')}`;
 
@@ -1034,7 +1034,7 @@ describe('JAdapter watcher ingress', () => {
     for (const tx of env.runtimeMempool?.runtimeTxs ?? []) await applyRuntimeTx(env, tx);
     env.runtimeMempool!.runtimeTxs = [];
     env.runtimeMempool!.entityInputs = [];
-    const partialHistory = env.eReplicas.get(`${entityId}:${signerId}`)?.jHistory;
+    const partialHistory = env.state.eReplicas.get(`${entityId}:${signerId}`)?.jHistory;
     expect(partialHistory?.contiguousThroughHeight).toBe(3);
     expect(partialHistory?.eventBlocks.has(7)).toBe(true);
 
@@ -1054,7 +1054,7 @@ describe('JAdapter watcher ingress', () => {
   test('chain watcher rejects a Solidity event that lost its EVM log index', () => {
     const env = createEmptyEnv('jadapter-chain-log-order');
     const entityId = `0x${'49'.repeat(32)}`;
-    env.eReplicas.set(`${entityId}:1`, makeReplica(entityId, '1', true));
+    env.state.eReplicas.set(`${entityId}:1`, makeReplica(entityId, '1', true));
 
     expect(() => processEventBatch(
       [{
@@ -1078,7 +1078,7 @@ describe('JAdapter watcher ingress', () => {
   test('J-event ingress transform replaces external block identity before durable observation', () => {
     const env = createEmptyEnv('jadapter-helper-trace-transform');
     const entityId = `0x${'46'.repeat(32)}`;
-    env.eReplicas.set(`${entityId}:1`, makeReplica(entityId, '1', true));
+    env.state.eReplicas.set(`${entityId}:1`, makeReplica(entityId, '1', true));
     const recordedBlockHash = `0x${'88'.repeat(32)}`;
     const restore = setJEventIngressTransform((batch) => ({
       ...batch,
@@ -1124,7 +1124,7 @@ describe('JAdapter watcher ingress', () => {
   test('J-history range ingress transform replaces external tip identity before signing', () => {
     const env = createEmptyEnv('jadapter-range-trace-transform');
     const entityId = `0x${'47'.repeat(32)}`;
-    env.eReplicas.set(`${entityId}:1`, makeReplica(entityId, '1', true));
+    env.state.eReplicas.set(`${entityId}:1`, makeReplica(entityId, '1', true));
     const recordedTipHash = `0x${'99'.repeat(32)}`;
     const restore = setJHistoryRangeIngressTransform(() => ({
       scannedThroughHeight: 180,
@@ -1144,14 +1144,14 @@ describe('JAdapter watcher ingress', () => {
     expect(observation.data.scannedThroughHeight).toBe(180);
     expect(observation.data.tipBlockHash).toBe(recordedTipHash);
     expect(observation.data.headers).toEqual([{ jHeight: 180, jBlockHash: recordedTipHash }]);
-    const localHistory = env.eReplicas.get(`${entityId}:1`)?.jHistory;
+    const localHistory = env.state.eReplicas.get(`${entityId}:1`)?.jHistory;
     expect(localHistory?.blockHashes.get(180)).toBeUndefined();
     expect(env.runtimeMempool?.entityInputs ?? []).toEqual([]);
   });
 
   test('buildJEventsRuntimeInput returns durable sparse observations without enqueueing', () => {
     const env = createEmptyEnv('jadapter-helper-build-input-seed');
-    env.timestamp = 1_000;
+    env.state.timestamp = 1_000;
     env.quietRuntimeLogs = true;
     const jurisdiction = makeJurisdiction('build-input', 31_337, `0x${'46'.repeat(20)}`);
     const source = makeJReplica(
@@ -1161,7 +1161,7 @@ describe('JAdapter watcher ingress', () => {
       jurisdiction.chainId,
       jurisdiction.entityProviderAddress,
     );
-    env.jReplicas.set(source.name, source);
+    env.state.jReplicas.set(source.name, source);
 
     const entityId = `0x${'45'.repeat(32)}`;
     const proposerSignerId = '1';
@@ -1176,8 +1176,8 @@ describe('JAdapter watcher ingress', () => {
     };
     proposer.state.config = { ...board, jurisdiction };
     validator.state.config = { ...board, jurisdiction };
-    env.eReplicas.set(`${entityId}:${proposerSignerId}`, proposer);
-    env.eReplicas.set(`${entityId}:${validatorSignerId}`, validator);
+    env.state.eReplicas.set(`${entityId}:${proposerSignerId}`, proposer);
+    env.state.eReplicas.set(`${entityId}:${validatorSignerId}`, validator);
 
     const event = {
       name: 'ReserveUpdated',
@@ -1192,7 +1192,7 @@ describe('JAdapter watcher ingress', () => {
       logIndex: 0,
     };
     const input = buildJEventsRuntimeInput(env, [event], 'test-build', source);
-    env.timestamp = 9_999;
+    env.state.timestamp = 9_999;
     const rebuiltInput = buildJEventsRuntimeInput(env, [event], 'test-build', source);
 
     expect(input?.timestamp).toBe(8);
@@ -1235,8 +1235,8 @@ describe('JAdapter watcher ingress', () => {
     const tronReplica = makeReplica(tronEntityId, '2', true);
     testnetReplica.state.config.jurisdiction = testnet;
     tronReplica.state.config.jurisdiction = tron;
-    env.eReplicas.set(`${testnetEntityId}:1`, testnetReplica);
-    env.eReplicas.set(`${tronEntityId}:2`, tronReplica);
+    env.state.eReplicas.set(`${testnetEntityId}:1`, testnetReplica);
+    env.state.eReplicas.set(`${tronEntityId}:2`, tronReplica);
 
     const input = buildJEventsRuntimeInput(env, [{
       name: 'ReserveUpdated',
@@ -1255,15 +1255,15 @@ describe('JAdapter watcher ingress', () => {
 
   test('watcher reserve evidence survives unrelated two-jurisdiction traffic', () => {
     const env = createEmptyEnv('jadapter-helper-reserve-evidence-seed');
-    env.timestamp = 1_000;
+    env.state.timestamp = 1_000;
     env.quietRuntimeLogs = true;
 
     const entityA = `0x${'71'.repeat(32)}`;
     const entityB = `0x${'72'.repeat(32)}`;
     const signerA = '1';
     const signerB = '2';
-    env.eReplicas.set(`${entityA}:${signerA}`, makeReplica(entityA, signerA, true));
-    env.eReplicas.set(`${entityB}:${signerB}`, makeReplica(entityB, signerB, true));
+    env.state.eReplicas.set(`${entityA}:${signerA}`, makeReplica(entityA, signerA, true));
+    env.state.eReplicas.set(`${entityB}:${signerB}`, makeReplica(entityB, signerB, true));
 
     processEventBatch(
       [{
@@ -1334,7 +1334,7 @@ describe('JAdapter watcher ingress', () => {
 
   test('processEventBatch keeps same ERC20 transfer log deltas for both tracked external owners', () => {
     const env = createEmptyEnv('jadapter-helper-external-delta-dedup');
-    env.timestamp = 1_000;
+    env.state.timestamp = 1_000;
     env.quietRuntimeLogs = true;
 
     const leftEntityId = `0x${'51'.repeat(32)}`;
@@ -1344,8 +1344,8 @@ describe('JAdapter watcher ingress', () => {
     const tokenAddress = `0x${'61'.repeat(20)}`;
     const leftOwner = `0x${'71'.repeat(20)}`;
     const rightOwner = `0x${'72'.repeat(20)}`;
-    env.eReplicas.set(`${leftEntityId}:${leftSignerId}`, makeReplica(leftEntityId, leftSignerId, true));
-    env.eReplicas.set(`${rightEntityId}:${rightSignerId}`, makeReplica(rightEntityId, rightSignerId, true));
+    env.state.eReplicas.set(`${leftEntityId}:${leftSignerId}`, makeReplica(leftEntityId, leftSignerId, true));
+    env.state.eReplicas.set(`${rightEntityId}:${rightSignerId}`, makeReplica(rightEntityId, rightSignerId, true));
 
     processEventBatch(
       [

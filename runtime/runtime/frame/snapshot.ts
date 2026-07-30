@@ -13,7 +13,7 @@ export const prepareRuntimeFrameCommit = (
   frame: FrameExecutionState,
   profile: RuntimeProcessProfile,
 ): boolean => {
-  const frameAdvanced = env.height !== frameHeightBeforeTick;
+  const frameAdvanced = env.state.height !== frameHeightBeforeTick;
   profile.metrics.frameAdvanced = frameAdvanced;
   if (frameAdvanced && hasRuntimeHistoryTraceForTesting(liveEnv)) {
     const logs = Array.isArray(env.frameLogs)
@@ -22,9 +22,9 @@ export const prepareRuntimeFrameCommit = (
     frame.pendingTraceSnapshot = buildCanonicalEnvSnapshot(env, {
       runtimeInput: appliedInput ?? { runtimeTxs: [], entityInputs: [] },
       runtimeOutputs: env.pendingOutputs ?? [],
-      description: env.extra?.description ?? `Frame ${env.height}`,
+      description: env.extra?.description ?? `Frame ${env.state.height}`,
       meta: {
-        title: env.extra?.subtitle?.title ?? `Frame ${env.height}`,
+        title: env.extra?.subtitle?.title ?? `Frame ${env.state.height}`,
         ...(env.extra?.subtitle ? { subtitle: env.extra.subtitle } : {}),
         ...(env.frameDisplayMs !== undefined ? { displayMs: env.frameDisplayMs } : {}),
       },

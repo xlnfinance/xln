@@ -67,11 +67,11 @@ describe('bounded lower reliable receipt reconstruction', () => {
 
     expect(registerReliableIngress(receiver, sourceA.runtimeId!, h1).kind).toBe('enqueue');
     await processRuntime(receiver, [h1]);
-    expect(receiver.eReplicas.get(`${initialState.entityId}:${targetSignerId}`)?.state.height).toBe(1);
+    expect(receiver.state.eReplicas.get(`${initialState.entityId}:${targetSignerId}`)?.state.height).toBe(1);
 
     expect(registerReliableIngress(receiver, sourceB.runtimeId!, h2).kind).toBe('enqueue');
     await processRuntime(receiver, [h2]);
-    const replica = receiver.eReplicas.get(`${initialState.entityId}:${targetSignerId}`);
+    const replica = receiver.state.eReplicas.get(`${initialState.entityId}:${targetSignerId}`);
     expect(replica?.state.height).toBe(2);
     expect(replica?.certifiedFrameLineage?.some(link => link.frame.hash === heightOne.frame.hash)).toBe(true);
 
@@ -80,7 +80,7 @@ describe('bounded lower reliable receipt reconstruction', () => {
     delete replicaSnapshot.certifiedFrameLineage;
     delete replicaSnapshot.certifiedFrameAnchor;
     const restored = runtime(receiverSeed);
-    restored.eReplicas.set(`${initialState.entityId}:${targetSignerId}`, replicaSnapshot);
+    restored.state.eReplicas.set(`${initialState.entityId}:${targetSignerId}`, replicaSnapshot);
     restoreDurableRuntimeSnapshot(restored, runtimeSnapshot);
 
     const retry = registerReliableIngress(restored, sourceA.runtimeId!, h1);
@@ -131,7 +131,7 @@ describe('bounded lower reliable receipt reconstruction', () => {
 
     expect(registerReliableIngress(receiver, sourceA.runtimeId!, h1).kind).toBe('enqueue');
     expect(registerReliableIngress(receiver, sourceB.runtimeId!, h1).kind).toBe('pending');
-    const replica = receiver.eReplicas.get(`${initialState.entityId}:${targetSignerId}`)!;
+    const replica = receiver.state.eReplicas.get(`${initialState.entityId}:${targetSignerId}`)!;
     replica.state = structuredClone(heightOne.nextState);
 
     const firstAttempt = commitReliableIngress(receiver, [h1]);
@@ -178,7 +178,7 @@ describe('bounded lower reliable receipt reconstruction', () => {
       heightOne.frame,
     );
     expect(registerReliableIngress(receiver, source.runtimeId!, h1).kind).toBe('enqueue');
-    const replica = receiver.eReplicas.get(`${initialState.entityId}:${targetSignerId}`)!;
+    const replica = receiver.state.eReplicas.get(`${initialState.entityId}:${targetSignerId}`)!;
     replica.state = structuredClone(heightOne.nextState);
     const committed = commitReliableIngress(receiver, [h1]);
     finalizeReliableIngressCommit(receiver, committed);

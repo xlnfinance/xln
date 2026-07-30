@@ -9,10 +9,12 @@ import {
 
 function makeLiveEnv() {
   return {
-    eReplicas: new Map(),
-    jReplicas: new Map(),
-    height: 1,
-    timestamp: 1,
+    state: {
+      eReplicas: new Map(),
+      jReplicas: new Map(),
+      height: 1,
+      timestamp: 1,
+    },
     runtimeInput: { runtimeTxs: [], entityInputs: [], jInputs: [] },
     history: [],
     gossip: { getProfiles: () => [] },
@@ -21,10 +23,12 @@ function makeLiveEnv() {
 
 function makeSnapshot() {
   return {
-    eReplicas: new Map(),
-    jReplicas: new Map(),
-    height: 1,
-    timestamp: 1,
+    state: {
+      eReplicas: new Map(),
+      jReplicas: new Map(),
+      height: 1,
+      timestamp: 1,
+    },
     runtimeInput: { runtimeTxs: [], entityInputs: [], jInputs: [] },
     runtimeOutputs: [],
     description: 'historical frame',
@@ -54,8 +58,8 @@ describe('live runtime env helpers', () => {
 
     expect(isRuntimeLikeEnv(detached)).toBe(true);
     expect(detached).not.toBe(liveEnv);
-    expect(detached.eReplicas).not.toBe(liveEnv.eReplicas);
-    expect(detached.jReplicas).not.toBe(liveEnv.jReplicas);
+    expect(detached.state.eReplicas).not.toBe(liveEnv.state.eReplicas);
+    expect(detached.state.jReplicas).not.toBe(liveEnv.state.jReplicas);
     expect(unwrapLiveRuntimeEnv(detached)).toBe(detached);
   });
 });

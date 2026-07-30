@@ -239,7 +239,7 @@ const removeOrRouteCrossJurisdictionBookOrder = (
       newState,
       route.source.entityId,
       route.orderId,
-      Number(newState.timestamp || env.timestamp || 0),
+      Number(newState.timestamp || env.state.timestamp || 0),
       reason,
     );
     return;
@@ -798,7 +798,7 @@ const closeOrProgressCrossJurisdictionBook = (
       state,
       route.source.entityId,
       route.orderId,
-      Number(state.timestamp || env.timestamp || 0),
+      Number(state.timestamp || env.state.timestamp || 0),
       'cancel_ack_committed',
     );
   } else {

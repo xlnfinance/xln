@@ -422,11 +422,23 @@ export type RuntimeHistoryRecord = AccountHistoryRecord | {
 
 export type BrowserVMState = import('../jadapter/browservm-state').BrowserVmSerializedState;
 
-export interface RuntimeReplica {
+/**
+ * Deterministic data fixed by one committed Runtime frame.
+ *
+ * This object contains no mempool, transport, database handle, callback,
+ * secret, wall clock, or retry machinery. A RuntimeFrame commits this State;
+ * RuntimeReplica owns the machinery that builds and durably publishes it.
+ */
+export interface RuntimeState {
   eReplicas: Map<string, EntityReplica>;  // Entity replicas (E-layer state machines)
   jReplicas: Map<string, JReplica>;       // Jurisdiction replicas (J-layer EVM state)
   height: number;
   timestamp: number;
+}
+
+/** One live Runtime instance: committed State plus local machine machinery. */
+export interface RuntimeReplica {
+  state: RuntimeState;
   runtimeSeed?: string | undefined; // BrainVault seed backing this runtime (plaintext, dev mode)
   runtimeId?: string | undefined; // Runtime identity (usually signer1 address)
   lastProcessEnteredAt?: number; // Wall-clock timestamp of most recent process() entry
@@ -716,13 +728,10 @@ export interface RuntimeReplica {
 }
 
 export interface EnvSnapshot {
-  height: number;
-  timestamp: number;
+  state: RuntimeState;
   runtimeSeed?: string;
   runtimeId?: string;
   dbNamespace?: string;
-  eReplicas: Map<string, EntityReplica>;  // E-layer state
-  jReplicas: Map<string, JReplica>;        // J-layer state snapshot (same shape as live env)
   browserVMState?: BrowserVMState;
   runtimeInput: RuntimeInput;
   runtimeOutputs: RoutedEntityInput[];

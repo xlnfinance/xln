@@ -62,7 +62,7 @@ const startTime = Date.now();
 
 const buildEntityReplicaIndex = (env: RuntimeReplica): Map<string, EntityReplica> => {
   const replicas = new Map<string, EntityReplica>();
-  for (const [replicaKey, replica] of env.eReplicas.entries()) {
+  for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
     const fallbackEntityId = String(replicaKey).split(':')[0] || '';
     const entityId = String(replica.entityId || fallbackEntityId).toLowerCase();
     if (!entityId || replicas.has(entityId)) continue;
@@ -91,8 +91,8 @@ const buildHealthStatus = (env: RuntimeReplica | null): HealthStatus => {
   const replicasByEntityId = env ? buildEntityReplicaIndex(env) : new Map<string, EntityReplica>();
 
   // Check J-machines
-  if (env?.jReplicas) {
-    for (const [name, jReplica] of env.jReplicas.entries()) {
+  if (env?.state.jReplicas) {
+    for (const [name, jReplica] of env.state.jReplicas.entries()) {
       try {
         const jadapter = jReplica.jadapter;
         const status: JMachineHealth = {

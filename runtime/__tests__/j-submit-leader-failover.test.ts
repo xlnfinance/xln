@@ -31,7 +31,7 @@ const requireBatchAttempt = (outbox: Awaited<ReturnType<typeof applyRuntimeTx>>)
 const restoreFailoverEnv = (source: ReturnType<typeof createEmptyEnv>) => {
   const restored = createEmptyEnv('j-submit-leader-failover-restore');
   restoreDurableRuntimeSnapshot(restored, buildDurableRuntimeMachineSnapshot(source));
-  restored.eReplicas = new Map(Array.from(source.eReplicas.entries()).map(([key, replica]) => [
+  restored.state.eReplicas = new Map(Array.from(source.state.eReplicas.entries()).map(([key, replica]) => [
     key,
     buildCanonicalEntityReplicaSnapshot(replica),
   ]));
@@ -60,13 +60,13 @@ describe('validator-local J submit leader failover', () => {
       state: structuredClone(firstLeader.state),
     };
     delete secondLeader.jSubmitState;
-    env.eReplicas = new Map([
+    env.state.eReplicas = new Map([
       [`${firstLeader.entityId}:${firstLeaderId}`, firstLeader],
       [`${secondLeader.entityId}:${secondLeaderId}`, secondLeader],
     ]);
     env.runtimeId = firstLeaderId;
 
-    const [firstRetry] = collectDueJSubmitRuntimeTxs(env, env.timestamp);
+    const [firstRetry] = collectDueJSubmitRuntimeTxs(env, env.state.timestamp);
     if (!firstRetry) throw new Error('first leader retry missing');
     const firstOutbox = await applyRuntimeTx(env, firstRetry, { isReplay: true });
     registerPendingCommittedJOutbox(env, firstOutbox);
@@ -82,7 +82,7 @@ describe('validator-local J submit leader failover', () => {
     // This committed leaderState is the deterministic output of a separately
     // tested quorum-certified view change. Both replicas now agree that B is
     // authoritative, while validator-local submit attempt counters remain local.
-    for (const replica of env.eReplicas.values()) {
+    for (const replica of env.state.eReplicas.values()) {
       replica.state.leaderState = {
         activeValidatorId: secondLeaderId,
         view: 1,
@@ -92,9 +92,9 @@ describe('validator-local J submit leader failover', () => {
     firstLeader.isProposer = false;
     secondLeader.isProposer = true;
     env.runtimeId = secondLeaderId;
-    env.timestamp += 1;
+    env.state.timestamp += 1;
 
-    const [secondRetry] = collectDueJSubmitRuntimeTxs(env, env.timestamp);
+    const [secondRetry] = collectDueJSubmitRuntimeTxs(env, env.state.timestamp);
     if (!secondRetry) throw new Error('second leader retry missing');
     const secondOutbox = await applyRuntimeTx(env, secondRetry, { isReplay: true });
     registerPendingCommittedJOutbox(env, secondOutbox);
@@ -117,17 +117,17 @@ describe('validator-local J submit leader failover', () => {
     expect(env.runtimeState?.pendingCommittedJOutbox).toEqual([]);
 
     const restored = restoreFailoverEnv(env);
-    const firstBeforeReplay = structuredClone(restored.eReplicas.get(
+    const firstBeforeReplay = structuredClone(restored.state.eReplicas.get(
       `${firstLeader.entityId}:${firstLeaderId}`,
     )?.jSubmitState);
-    const secondBeforeReplay = structuredClone(restored.eReplicas.get(
+    const secondBeforeReplay = structuredClone(restored.state.eReplicas.get(
       `${secondLeader.entityId}:${secondLeaderId}`,
     )?.jSubmitState);
     await applyRuntimeTx(restored, structuredClone(firstResult), { isReplay: true });
     await applyRuntimeTx(restored, structuredClone(secondResult), { isReplay: true });
-    expect(restored.eReplicas.get(`${firstLeader.entityId}:${firstLeaderId}`)?.jSubmitState)
+    expect(restored.state.eReplicas.get(`${firstLeader.entityId}:${firstLeaderId}`)?.jSubmitState)
       .toEqual(firstBeforeReplay);
-    expect(restored.eReplicas.get(`${secondLeader.entityId}:${secondLeaderId}`)?.jSubmitState)
+    expect(restored.state.eReplicas.get(`${secondLeader.entityId}:${secondLeaderId}`)?.jSubmitState)
       .toEqual(secondBeforeReplay);
   });
 });

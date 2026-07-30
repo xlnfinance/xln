@@ -202,7 +202,7 @@ const signAndLockProposal = async (
     collectedSigs,
   };
   workingReplica.candidate = execution;
-  workingReplica.lastConsensusProgressAt = env.timestamp;
+  workingReplica.lastConsensusProgressAt = env.state.timestamp;
   for (const validatorId of workingReplica.state.config.validators) {
     if (validatorId.toLowerCase() === localSignerId) continue;
     entityOutbox.push({

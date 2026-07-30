@@ -581,7 +581,7 @@ const findIngressEntityState = (env: EntityRuntimeContext, input: EntityInput): 
   const signerId = String(input.signerId || '')
     .trim()
     .toLowerCase();
-  const exact = [...env.eReplicas.values()].filter(
+  const exact = [...env.state.eReplicas.values()].filter(
     replica => replica.entityId.toLowerCase() === entityId && replica.signerId.toLowerCase() === signerId,
   );
   if (exact.length !== 1) {
@@ -589,7 +589,7 @@ const findIngressEntityState = (env: EntityRuntimeContext, input: EntityInput): 
       `HTLC_PAYMENT_INGRESS_REPLICA_MATCH_COUNT: entity=${entityId} signer=${signerId} matches=${exact.length}`,
     );
   }
-  return { ...exact[0]!.state, timestamp: env.timestamp };
+  return { ...exact[0]!.state, timestamp: env.state.timestamp };
 };
 
 export const prepareHtlcPaymentEntityTx = async (

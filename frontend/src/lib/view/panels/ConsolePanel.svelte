@@ -121,7 +121,7 @@
     state: () => {
       const env = $runtimeFrameEnv;
       return {
-        entities: Object.keys(env.eReplicas || {}).length,
+        entities: Object.keys(env.state.eReplicas || {}).length,
         height: env.height,
         timestamp: env.timestamp
       };
@@ -129,12 +129,12 @@
 
     entities: () => {
       const env = $runtimeFrameEnv;
-      return Object.keys(env.eReplicas || {});
+      return Object.keys(env.state.eReplicas || {});
     },
 
     inspect: (entityId: string) => {
       const env = $runtimeFrameEnv;
-      const replica = env.eReplicas?.[entityId];
+      const replica = env.state.eReplicas?.[entityId];
       if (!replica) return `Entity ${entityId} not found`;
       return replica;
     },

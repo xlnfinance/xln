@@ -71,11 +71,11 @@ await prepareCatchupFixtureReplica(
   authority.targetSignerId,
 );
 applyRuntimeStorageChanges(env, [{ family: 'entity', entityId: authorityState.entityId }]);
-env.height = 1;
-env.timestamp = 1;
+env.state.height = 1;
+env.state.timestamp = 1;
 await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
-env.height = 2;
-env.timestamp = 2;
+env.state.height = 2;
+env.state.timestamp = 2;
 
 const entityId = (byte: string): string => `0x${byte.repeat(32)}`;
 const signerId = (byte: string): string => `0x${byte.repeat(20)}`;
@@ -110,7 +110,7 @@ const receipt = (
     coverage,
     receiverRuntimeId,
     identity: value,
-    appliedRuntimeHeight: env.height,
+    appliedRuntimeHeight: env.state.height,
   };
   const bodyDigest = keccak256(toUtf8Bytes(serializeTaggedJson(body))).toLowerCase();
   return {

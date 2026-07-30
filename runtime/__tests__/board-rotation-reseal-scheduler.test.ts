@@ -211,7 +211,7 @@ test('1000 board reseals drain in deterministic 32-account frames across restart
     mempool: [],
     isProposer: true,
   } as EntityReplica;
-  env.eReplicas.set(`${sourceEntityId}:${signerId}`, sourceReplica);
+  env.state.eReplicas.set(`${sourceEntityId}:${signerId}`, sourceReplica);
 
   const delivered: string[] = [];
   let batches = 0;
@@ -247,7 +247,7 @@ test('1000 board reseals drain in deterministic 32-account frames across restart
       ]));
       state = hydrateEntityStateFromStorage({ core, accounts, books: new Map() });
       sourceReplica.state = state;
-      env.eReplicas.set(`${sourceEntityId}:${signerId}`, sourceReplica);
+      env.state.eReplicas.set(`${sourceEntityId}:${signerId}`, sourceReplica);
       expect(state.crontabState?.hooks.get(BOARD_RESEAL_HOOK_ID)).toEqual(
         result.newState.crontabState?.hooks.get(BOARD_RESEAL_HOOK_ID),
       );

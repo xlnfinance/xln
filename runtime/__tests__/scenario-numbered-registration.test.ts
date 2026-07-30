@@ -33,7 +33,7 @@ const attach = (
     jadapter: adapter,
   };
   env.jAdapter = adapter;
-  env.jReplicas.set(jurisdiction.name, replica);
+  env.state.jReplicas.set(jurisdiction.name, replica);
 };
 
 describe('scenario numbered-registration boundary', () => {
@@ -71,7 +71,7 @@ describe('scenario numbered-registration boundary', () => {
       expect(result.errors).toEqual([]);
       expect(result.success).toBe(true);
       expect(await adapter.entityProvider.nextNumber()).toBe(4n);
-      expect(env.eReplicas.size).toBe(2);
+      expect(env.state.eReplicas.size).toBe(2);
     } finally {
       await adapter.close();
     }

@@ -101,7 +101,7 @@ const replicaKeysForEntity = (
   imports: ReadonlySet<string>,
 ): string[] => {
   const prefix = `${entityId}:`;
-  return [...env.eReplicas.keys(), ...imports].filter(key =>
+  return [...env.state.eReplicas.keys(), ...imports].filter(key =>
     key.startsWith(prefix),
   );
 };
@@ -124,7 +124,7 @@ export const validateExternalEntityInputTargets = (
       const entityId = input.entityId.trim().toLowerCase();
       const signerId = input.signerId.trim().toLowerCase();
       const replicaKey = `${entityId}:${signerId}`;
-      if (env.eReplicas.has(replicaKey) || imports.has(replicaKey)) continue;
+      if (env.state.eReplicas.has(replicaKey) || imports.has(replicaKey)) continue;
       const siblingKeys = replicaKeysForEntity(env, entityId, imports);
       const mayRetargetEmptyProtocolInput =
         siblingKeys.length === 1 && (input.entityTxs?.length ?? 0) === 0;
@@ -156,9 +156,9 @@ export const findEntityReplicaKey = (
   const signerNorm = signerId ? String(signerId).toLowerCase() : null;
   if (signerNorm) {
     const directKey = `${entityNorm}:${signerNorm}`;
-    if (env.eReplicas.has(directKey)) return directKey;
+    if (env.state.eReplicas.has(directKey)) return directKey;
   }
-  for (const key of env.eReplicas.keys()) {
+  for (const key of env.state.eReplicas.keys()) {
     const [repEntityId, repSignerId] = String(key).split(':');
     if (!repEntityId || repEntityId.toLowerCase() !== entityNorm) continue;
     if (!signerNorm || repSignerId?.toLowerCase() === signerNorm) return key;
@@ -171,7 +171,7 @@ const findEntityReplicaKeys = (
   entityId: string,
 ): string[] => {
   const entityNorm = String(entityId || '').toLowerCase();
-  return Array.from(env.eReplicas.keys()).filter(key => {
+  return Array.from(env.state.eReplicas.keys()).filter(key => {
     const [repEntityId] = String(key).split(':');
     return Boolean(repEntityId && repEntityId.toLowerCase() === entityNorm);
   });
@@ -191,7 +191,7 @@ export const resolveEntityInputReplica = (
   );
 
   let replicaKey = `${entityId}:${signerId}`;
-  let replica = env.eReplicas.get(replicaKey);
+  let replica = env.state.eReplicas.get(replicaKey);
   const txTypes = (entityInput.entityTxs || []).map(tx => tx.type);
   const localReplicaKeys =
     replica || txTypes.length > 0
@@ -214,7 +214,7 @@ export const resolveEntityInputReplica = (
   }
   if (!replica && localReplicaKeys.length === 1 && txTypes.length === 0) {
     replicaKey = localReplicaKeys[0]!;
-    replica = env.eReplicas.get(replicaKey);
+    replica = env.state.eReplicas.get(replicaKey);
     env.warn(
       'network',
       'ENTITY_INPUT_SIGNER_HINT_RETARGETED',

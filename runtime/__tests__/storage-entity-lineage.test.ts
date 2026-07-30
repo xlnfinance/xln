@@ -176,7 +176,7 @@ const installReplica = (
     ...(options.anchor ? { certifiedFrameAnchor: options.anchor } : {}),
     ...(options.lineage ? { certifiedFrameLineage: options.lineage } : {}),
   };
-  env.eReplicas = new Map([[`${state.entityId}:${signerId}`, replica]]);
+  env.state.eReplicas = new Map([[`${state.entityId}:${signerId}`, replica]]);
   return replica;
 };
 
@@ -192,7 +192,7 @@ const installCertifiedImportFixture = async (
     entityProviderAddress: address('32'),
   };
   env.activeJurisdiction = jurisdiction.name;
-  env.jReplicas.set(jurisdiction.name, {
+  env.state.jReplicas.set(jurisdiction.name, {
     name: jurisdiction.name,
     rpcs: [jurisdiction.address],
     chainId: jurisdiction.chainId,
@@ -271,8 +271,8 @@ describe('certified Entity storage lineage', () => {
     genesis.entityId = generateLazyEntityId([signerId, observerId], 1n).toLowerCase();
     const certified = await certifyNextFrame(env, signerId, genesis, []);
     const observerState = structuredClone(certified.state);
-    env.height = 100;
-    env.eReplicas = new Map([
+    env.state.height = 100;
+    env.state.eReplicas = new Map([
       [`${genesis.entityId}:${signerId}`, {
         entityId: genesis.entityId,
         signerId,
@@ -331,13 +331,13 @@ describe('certified Entity storage lineage', () => {
       isProposer: true,
       certifiedFrameAnchor: genesisAnchor(idleState),
     };
-    env.eReplicas.set(`${idleState.entityId}:${idleSignerId}`, idleReplica);
+    env.state.eReplicas.set(`${idleState.entityId}:${idleSignerId}`, idleReplica);
     const idleAnchorBefore = structuredClone(idleReplica.certifiedFrameAnchor);
 
-    env.height = 7;
+    env.state.height = 7;
     refreshRuntimeCheckpointLineageForEntity(env, genesis.entityId);
 
-    expect(env.eReplicas.get(`${genesis.entityId}:${signerId}`)?.certifiedFrameAnchor
+    expect(env.state.eReplicas.get(`${genesis.entityId}:${signerId}`)?.certifiedFrameAnchor
       ?.runtimeCheckpoint?.runtimeHeight).toBe(7);
     expect(idleReplica.certifiedFrameAnchor).toEqual(idleAnchorBefore);
   });
@@ -346,7 +346,7 @@ describe('certified Entity storage lineage', () => {
     const { env, signerId, genesis } = makeRuntime('storage-lineage-noop-refresh');
     const replica = installReplica(env, signerId, genesis, { anchor: genesisAnchor(genesis) });
     const anchorBefore = structuredClone(replica.certifiedFrameAnchor);
-    env.height = 7;
+    env.state.height = 7;
 
     const noOpGuard = beginRuntimeCheckpointLineageRefresh(env, genesis.entityId);
     expect(replica.certifiedFrameAnchor?.runtimeCheckpoint?.runtimeHeight).toBe(7);
@@ -363,7 +363,7 @@ describe('certified Entity storage lineage', () => {
 
   test('rebases certified lineage into the atomic runtime WAL checkpoint', async () => {
     const { env, signerId, genesis } = makeRuntime('storage-lineage-bounded-checkpoint');
-    env.height = 20;
+    env.state.height = 20;
     let state = genesis;
     const lineage: CertifiedEntityFrameLink[] = [];
     for (let height = 1; height <= 20; height += 1) {
@@ -427,13 +427,13 @@ describe('certified Entity storage lineage', () => {
       'storage-lineage-repeat-import-latest-only',
     );
     let state = initialState;
-    let latest = env.eReplicas.values().next().value?.certifiedFrameLineage?.at(-1);
+    let latest = env.state.eReplicas.values().next().value?.certifiedFrameLineage?.at(-1);
     for (let height = 2; height <= 20; height += 1) {
       const certified = await certifyNextFrame(env, signerId, state, []);
       state = certified.state;
       latest = certified.link;
     }
-    const replica = env.eReplicas.get(`${state.entityId}:${signerId}`)!;
+    const replica = env.state.eReplicas.get(`${state.entityId}:${signerId}`)!;
     replica.state = state;
     replica.certifiedFrameLineage = [latest!];
     delete replica.certifiedFrameAnchor;
@@ -449,7 +449,7 @@ describe('certified Entity storage lineage', () => {
       },
     });
 
-    expect(env.eReplicas.get(`${state.entityId}:${signerId}`)?.certifiedFrameLineage)
+    expect(env.state.eReplicas.get(`${state.entityId}:${signerId}`)?.certifiedFrameLineage)
       .toHaveLength(1);
     expect(computeCanonicalEntityConsensusStateHash(state)).toBe(stateRootBefore);
   });
@@ -459,7 +459,7 @@ describe('certified Entity storage lineage', () => {
       'storage-lineage-multi-entity-frame-runtime-frame',
     );
     applyCertifiedEntityLineagePlan(env, buildRuntimeCheckpointLineagePlan(env));
-    const replica = env.eReplicas.get(`${heightOne.entityId}:${signerId}`)!;
+    const replica = env.state.eReplicas.get(`${heightOne.entityId}:${signerId}`)!;
     expect(replica.certifiedFrameAnchor?.height).toBe(1);
     expect(replica.certifiedFrameLineage ?? []).toHaveLength(1);
 
@@ -489,7 +489,7 @@ describe('certified Entity storage lineage', () => {
       entityProviderAddress: address('42'),
     };
     env.activeJurisdiction = jurisdiction.name;
-    env.jReplicas.set(jurisdiction.name, {
+    env.state.jReplicas.set(jurisdiction.name, {
       name: jurisdiction.name,
       rpcs: [jurisdiction.address],
       chainId: jurisdiction.chainId,

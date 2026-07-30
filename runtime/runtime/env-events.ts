@@ -80,7 +80,7 @@ const appendFrameLog = (
   const logState = getLogState(env);
   env.frameLogs.push({
     id: logState.nextId++,
-    timestamp: env.timestamp,
+    timestamp: env.state.timestamp,
     ...entry,
   });
   addCleanLog(env, cleanLevel, entry.message);
@@ -101,7 +101,7 @@ const queueStructuredAuditEvent = (
     entityId,
     data,
     runtimeId: env.runtimeId,
-    at: env.timestamp,
+    at: env.state.timestamp,
   });
 };
 
@@ -184,7 +184,7 @@ const markStorageAccountDirty = (env: RuntimeReplica, entityId: string, counterp
   const normalizedEntityId = String(entityId || '').toLowerCase();
   const normalizedCounterpartyId = String(counterpartyId || '').toLowerCase();
   if (!normalizedEntityId || !normalizedCounterpartyId) return;
-  for (const replica of env.eReplicas.values()) {
+  for (const replica of env.state.eReplicas.values()) {
     if (replica.entityId.toLowerCase() === normalizedEntityId) {
       invalidateEntityAccountCommitment(replica.state, normalizedCounterpartyId);
       refreshAccountWorkIndex(replica.state, normalizedCounterpartyId);
@@ -412,7 +412,7 @@ export function attachEventEmitters(env: RuntimeReplica): void {
       eventName,
       data,
       runtimeId: env.runtimeId,
-      at: env.timestamp,
+      at: env.state.timestamp,
     });
   };
 }

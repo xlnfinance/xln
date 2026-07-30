@@ -86,7 +86,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
   try {
     console.log('[AHB] ========================================');
     console.log('[AHB] Starting Alice-Hub-Bob Demo (JAdapter)');
-    console.log('[AHB] BEFORE: eReplicas =', env.eReplicas.size, 'history =', env.history?.length || 0);
+    console.log('[AHB] BEFORE: eReplicas =', env.state.eReplicas.size, 'history =', env.history?.length || 0);
     console.log('[AHB] ========================================');
 
     // ============================================================================
@@ -1274,7 +1274,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     console.log(`   Charlie lastFinalizedJHeight after sync: ${charlieRepSynced.state.lastFinalizedJHeight || 0}\n`);
 
     // Create HTLC with short expiry (no secret shared - will timeout)
-    const currentJHeight = env.jReplicas.get('AHB Demo')?.blockNumber || 0n;
+    const currentJHeight = env.state.jReplicas.get('AHB Demo')?.blockNumber || 0n;
     const shortExpiry = Number(currentJHeight) + 3; // Expires in 3 blocks
 
     console.log(`📋 Hub creates HTLC to Charlie (no secret), expires at height ${shortExpiry}\n`);
@@ -1282,7 +1282,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     // Generate hashlock without sharing secret with Charlie (timeout test)
     const { generateLockId } = await import('../protocol/htlc/utils');
     const { hashlock: testHashlock } = rng.nextHashlock();
-    const testLockId = generateLockId(testHashlock, shortExpiry, 0, env.timestamp);
+    const testLockId = generateLockId(testHashlock, shortExpiry, 0, env.state.timestamp);
 
     console.log(`   Lock ID: ${testLockId.slice(0,16)}...`);
     console.log(`   Hashlock: ${testHashlock.slice(0,16)}...`);
@@ -1298,7 +1298,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
           hashlock: testHashlock,
           // This fixture tests J-height expiry. Keep the independent wall-clock
           // deadline beyond the receiver enforcement reserve so admission is valid.
-          timelock: BigInt(env.timestamp + 60_000),
+          timelock: BigInt(env.state.timestamp + 60_000),
           revealBeforeHeight: shortExpiry,
           amount: usd(10_000),
           tokenId: USDC_TOKEN_ID
@@ -1339,7 +1339,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
 
         // Advance time significantly
         for (let i = 0; i < 10; i++) {
-          env.timestamp += 5000; // Advance 5s per cycle
+          env.state.timestamp += 5000; // Advance 5s per cycle
           await process(env);
         }
 
@@ -1557,9 +1557,9 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     // Create a new HTLC that Bob will have to reveal on-chain
     // Deterministic secret from seeded RNG (generateLockId already imported above)
     const hostageSecret = rng.nextHashlock();
-    const currentJHeightHostage = env.jReplicas.get('AHB Demo')?.blockNumber || 0n;
+    const currentJHeightHostage = env.state.jReplicas.get('AHB Demo')?.blockNumber || 0n;
     const hostageExpiry = Number(currentJHeightHostage) + 100; // Long expiry
-    const hostageLockId = generateLockId(hostageSecret.hashlock, hostageExpiry, 0, env.timestamp);
+    const hostageLockId = generateLockId(hostageSecret.hashlock, hostageExpiry, 0, env.state.timestamp);
     const hostageAmount = usd(5_000);
 
     console.log(`📋 Creating HTLC Hub→Bob that Bob will reveal on-chain`);
@@ -1577,7 +1577,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
           counterpartyId: bob.id,
           lockId: hostageLockId,
           hashlock: hostageSecret.hashlock,
-          timelock: BigInt(env.timestamp + 100000), // Long timelock
+          timelock: BigInt(env.state.timestamp + 100000), // Long timelock
           revealBeforeHeight: hostageExpiry,
           amount: hostageAmount,
           tokenId: USDC_TOKEN_ID
@@ -1670,9 +1670,9 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     // STEP 3: Wait for J-machine processing + process DisputeStarted event
     console.log('⏳ STEP 3: Waiting for J-machine to process + events...');
     for (let i = 0; i < 20; i++) {
-      env.timestamp += 350; // Advance past blockDelayMs
+      env.state.timestamp += 350; // Advance past blockDelayMs
       await convergeWithOffline(env, hostageOfflineSigners, 20, 'hostage-hub-offline');
-      const jRep = env.jReplicas?.get('AHB Demo');
+      const jRep = env.state.jReplicas?.get('AHB Demo');
       if (jRep && jRep.mempool.length === 0) break;
     }
     await processJEvents(env);
@@ -1730,7 +1730,7 @@ export async function lockAhb(env: RuntimeReplica): Promise<void> {
     for (let attempt = 0; attempt < 5; attempt += 1) {
       const [, currentBobReplica] = findReplica(env, bob.id);
       if (BigInt(currentBobReplica.state.lastFinalizedJHeight) >= timeoutBlock) break;
-      env.timestamp += 1_000;
+      env.state.timestamp += 1_000;
       await convergeWithOffline(env, hostageOfflineSigners, 20, 'hostage-hub-offline');
     }
     const [, bobReplicaAtTimeout] = findReplica(env, bob.id);

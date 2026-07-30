@@ -54,15 +54,15 @@ export const createReliableDeliveryReceipt = (
 ): ReliableDeliveryReceipt => {
   const receiverRuntimeId = normalizeRuntimeId(env.runtimeId);
   if (!receiverRuntimeId) throw new Error('RELIABLE_RECEIPT_RECEIVER_RUNTIME_INVALID');
-  if (!Number.isSafeInteger(env.height) || env.height < 0) {
-    throw new Error(`RELIABLE_RECEIPT_RUNTIME_HEIGHT_INVALID:${String(env.height)}`);
+  if (!Number.isSafeInteger(env.state.height) || env.state.height < 0) {
+    throw new Error(`RELIABLE_RECEIPT_RUNTIME_HEIGHT_INVALID:${String(env.state.height)}`);
   }
   const body: ReliableDeliveryReceipt['body'] = {
     version: 1,
     coverage,
     receiverRuntimeId,
     identity,
-    appliedRuntimeHeight: env.height,
+    appliedRuntimeHeight: env.state.height,
   };
   return { body, signature: signAccountFrame(env, receiverRuntimeId, receiptDigest(body)) };
 };

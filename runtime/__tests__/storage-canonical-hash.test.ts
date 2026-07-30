@@ -93,10 +93,11 @@ const makeAccount = (frameStateHash: string): AccountState =>
 
 const makeEnv = (account: AccountState, reserves: Array<[number, bigint]>): RuntimeReplica =>
   ({
-    height: 7,
-    timestamp: 1234,
-    jReplicas: new Map(),
-    eReplicas: new Map<string, EntityReplica>([
+    state: {
+      height: 7,
+      timestamp: 1234,
+      jReplicas: new Map(),
+      eReplicas: new Map<string, EntityReplica>([
       [`${entityId}:${signerIds[0]}`, {
         entityId,
         signerId: signerIds[0]!,
@@ -123,8 +124,9 @@ const makeEnv = (account: AccountState, reserves: Array<[number, bigint]>): Runt
           lockBook: new Map(),
           swapTradingPairs: [],
         },
-      } as EntityReplica],
-    ]),
+        } as EntityReplica],
+      ]),
+    },
   }) as RuntimeReplica;
 
 const sharedOrderId = 'account:offer-1';
@@ -145,7 +147,7 @@ const createBookWithSharedOrder = () => {
 
 const makeEnvWithOrderbookPairs = (pairIds: string[]): RuntimeReplica => {
   const env = makeEnv(makeAccount('history-a'), [[1, 10n]]);
-  const replica = Array.from(env.eReplicas.values())[0]!;
+  const replica = Array.from(env.state.eReplicas.values())[0]!;
   const orderbookExt = {
     books: new Map(),
     orderPairs: new Map(),
@@ -254,8 +256,12 @@ test('replay oracle excludes local operator config and active J-adapter selector
 
 test('replay oracle canonicalizes empty optional Runtime input queues', () => {
   const base = {
-    eReplicas: new Map(),
-    jReplicas: new Map(),
+    state: {
+      eReplicas: new Map(),
+      jReplicas: new Map(),
+      height: 0,
+      timestamp: 0,
+    },
     runtimeMempool: { runtimeTxs: [], entityInputs: [] },
   } as unknown as RuntimeReplica;
   const withEmptyOptionals = {
@@ -274,8 +280,12 @@ test('replay oracle canonicalizes empty optional Runtime input queues', () => {
 
 test('replay oracle excludes process-local Runtime lifecycle failures', () => {
   const base = {
-    eReplicas: new Map(),
-    jReplicas: new Map(),
+    state: {
+      eReplicas: new Map(),
+      jReplicas: new Map(),
+      height: 0,
+      timestamp: 0,
+    },
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
   } as unknown as RuntimeReplica;
   const running = { ...base, runtimeState: { halted: false } } as RuntimeReplica;
@@ -291,8 +301,8 @@ test('canonical storage hash is deterministic across orderbook pair index insert
   const left = makeEnvWithOrderbookPairs(['b-pair', 'a-pair']);
   const right = makeEnvWithOrderbookPairs(['a-pair', 'b-pair']);
 
-  const leftIndex = Array.from(left.eReplicas.values())[0]!.state.orderbookExt!.orderPairs.get(sharedOrderId);
-  const rightIndex = Array.from(right.eReplicas.values())[0]!.state.orderbookExt!.orderPairs.get(sharedOrderId);
+  const leftIndex = Array.from(left.state.eReplicas.values())[0]!.state.orderbookExt!.orderPairs.get(sharedOrderId);
+  const rightIndex = Array.from(right.state.eReplicas.values())[0]!.state.orderbookExt!.orderPairs.get(sharedOrderId);
 
   expect(leftIndex).toEqual(['a-pair', 'b-pair']);
   expect(rightIndex).toEqual(['a-pair', 'b-pair']);
@@ -310,7 +320,7 @@ test('canonical storage hash ignores UI frameHistory and reacts to consensus sta
 
 test('canonical Entity hash excludes validator-private J history', () => {
   const env = makeEnv(makeAccount('history-a'), [[1, 10n]]);
-  const replica = Array.from(env.eReplicas.values())[0]!;
+  const replica = Array.from(env.state.eReplicas.values())[0]!;
   const before = computeCanonicalEntityHash(replica).hash;
 
   replica.jHistory = {
@@ -333,12 +343,12 @@ test('canonical Entity hash excludes validator-private J history', () => {
 
 test('validator-local HTLC notes neither diverge shared storage nor leak into Entity core', () => {
   const env = makeEnv(makeAccount('history-a'), [[1, 10n]]);
-  const first = Array.from(env.eReplicas.values())[0]!;
+  const first = Array.from(env.state.eReplicas.values())[0]!;
   const second = structuredClone(first);
   second.signerId = signerIds[1]!;
   first.state.htlcNotes = new Map([[`lock:0x${'33'.repeat(32)}`, 'validator-one']]);
   second.state.htlcNotes = new Map([[`lock:0x${'33'.repeat(32)}`, 'validator-two']]);
-  env.eReplicas.set(`${entityId}:${signerIds[1]}`, second);
+  env.state.eReplicas.set(`${entityId}:${signerIds[1]}`, second);
 
   expect(computeCanonicalEntityHash(first).hash).toBe(computeCanonicalEntityHash(second).hash);
   expect(() => computeCanonicalStateHashFromEnv(env)).not.toThrow();
@@ -349,11 +359,11 @@ test('validator-local HTLC notes neither diverge shared storage nor leak into En
 
 test('canonical storage rejects conflicting validator replicas of one Entity', () => {
   const env = makeEnv(makeAccount('history-a'), [[1, 10n]]);
-  const first = Array.from(env.eReplicas.values())[0]!;
+  const first = Array.from(env.state.eReplicas.values())[0]!;
   const conflicting = structuredClone(first);
   conflicting.signerId = signerIds[1]!;
   conflicting.state.profile = { ...conflicting.state.profile, name: 'validator-local-conflict' };
-  env.eReplicas.set(`${entityId}:${signerIds[1]}`, conflicting);
+  env.state.eReplicas.set(`${entityId}:${signerIds[1]}`, conflicting);
 
   expect(() => computeCanonicalStateHashFromEnv(env))
     .toThrow('STORAGE_ENTITY_REPLICA_STATE_DIVERGENCE');
@@ -361,7 +371,7 @@ test('canonical storage rejects conflicting validator replicas of one Entity', (
 
 test('storage projection round-trip preserves canonical account optional-field shape', () => {
   const env = makeEnv(makeAccount('history-a'), [[1, 10n]]);
-  const replica = Array.from(env.eReplicas.values())[0]!;
+  const replica = Array.from(env.state.eReplicas.values())[0]!;
   const state = replica.state;
   const account = state.accounts.get(counterpartyId)!;
   account.hankoSignature = '0xaccount-proof-hanko';
@@ -452,7 +462,7 @@ test('storage projection round-trip preserves canonical account optional-field s
 
 test('replica metadata projection preserves in-flight consensus and layout state', () => {
   const env = makeEnv(makeAccount('history-a'), [[1, 10n]]);
-  const replica = Array.from(env.eReplicas.values())[0]!;
+  const replica = Array.from(env.state.eReplicas.values())[0]!;
   replica.mempool = [{ type: 'broadcast', data: { message: 'pending' } }];
   replica.position = { x: 1, y: 2, z: 3, jurisdiction: 'Testnet' };
   replica.jHistory = {
@@ -475,7 +485,7 @@ test('replica metadata projection preserves in-flight consensus and layout state
 
 test('immediate replica metadata encoding matches the isolated recovery projection', () => {
   const env = makeEnv(makeAccount('history-a'), [[1, 10n]]);
-  const replica = Array.from(env.eReplicas.values())[0]!;
+  const replica = Array.from(env.state.eReplicas.values())[0]!;
   const account = replica.state.accounts.get(counterpartyId)!;
   Object.defineProperty(account, Symbol('ephemeral-account-marker'), {
     configurable: true,
@@ -491,7 +501,7 @@ test('immediate replica metadata encoding matches the isolated recovery projecti
 
 test('live replica metadata omits transient commitment caches at every in-flight state level', () => {
   const env = makeEnv(makeAccount('history-a'), [[1, 10n]]);
-  const replica = Array.from(env.eReplicas.values())[0]!;
+  const replica = Array.from(env.state.eReplicas.values())[0]!;
   const validatorState = cloneEntityState(replica.state, true);
   const transientEntityCache = Symbol('xln.entity.account-commitment-cache');
   const transientAccountCache = Symbol('xln.account.commitment-cache');

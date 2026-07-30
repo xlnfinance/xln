@@ -233,7 +233,7 @@ test('board reseal receipt is terminal and stable across Runtime restart', async
       accounts: new Map([[sourceEntityId, account]]),
     },
   } as unknown as EntityReplica;
-  receiver.eReplicas.set(`${receiverEntityId}:${receiverSigner}`, replica);
+  receiver.state.eReplicas.set(`${receiverEntityId}:${receiverSigner}`, replica);
   const commits = commitReliableIngress(receiver, [output]);
   expect(commits).toHaveLength(1);
   expect(commits[0]?.receipt?.body).toMatchObject({
@@ -306,7 +306,7 @@ test('board reseal routing is identical with sparse and populated validator topo
     timestamp: 1_000,
     accounts: new Map([[targetEntityId, account]]),
   } as unknown as EntityState;
-  populated.eReplicas.set(`${targetEntityId}:${targetSigner}`, {
+  populated.state.eReplicas.set(`${targetEntityId}:${targetSigner}`, {
     entityId: targetEntityId,
     signerId: targetSigner,
     entityEncPubKey: '',
@@ -333,7 +333,7 @@ test('board reseal routing is identical with sparse and populated validator topo
   const populatedDraft = buildBoardRotationResealDrafts(structuredClone(state), populated, activation);
   const sparseDraft = buildBoardRotationResealDrafts(structuredClone(state), sparse, activation);
 
-  expect(sparse.eReplicas.size).toBe(0);
+  expect(sparse.state.eReplicas.size).toBe(0);
   expect(sparseDraft).toEqual(populatedDraft);
   expect(sparseDraft.outputs).toEqual([
     expect.objectContaining({ entityId: targetEntityId, signerId: targetSigner }),
@@ -375,7 +375,7 @@ test('one uncertified Account cannot block BoardActivated reseals for certified 
     reason: 'bilateral-frame-uncertified',
   };
   const certifiedBefore = structuredClone(certified);
-  env.eReplicas.set(`${certifiedId}:${signerId}`, {
+  env.state.eReplicas.set(`${certifiedId}:${signerId}`, {
     entityId: certifiedId,
     signerId,
     entityEncPubKey: '',
@@ -462,7 +462,7 @@ test('partial bilateral dispute evidence never emits a frame-only board reseal',
   account.currentDisputeProofBodyHash = digest('e3');
   account.currentDisputeProofNonce = 4;
   account.currentDisputeProofHanko = '0x03';
-  env.eReplicas.set(`${counterpartyId}:${signerId}`, {
+  env.state.eReplicas.set(`${counterpartyId}:${signerId}`, {
     entityId: counterpartyId,
     signerId,
     entityEncPubKey: '',
@@ -534,7 +534,7 @@ test('one board reseal pass emits at most 32 deterministic Accounts', async () =
       shares: { [signerId]: weight },
     });
     accounts.set(counterpartyId, account);
-    env.eReplicas.set(`${counterpartyId}:${signerId}`, {
+    env.state.eReplicas.set(`${counterpartyId}:${signerId}`, {
       entityId: counterpartyId,
       signerId,
       entityEncPubKey: '',
@@ -639,7 +639,7 @@ test('two board rotations in one finalized J range collapse to the latest reseal
   account.currentFrameHanko = '0x01';
   account.counterpartyFrameHanko = '0x02';
   state.accounts.set(counterpartyId, account);
-  env.eReplicas.set(`${counterpartyId}:${signerId}`, {
+  env.state.eReplicas.set(`${counterpartyId}:${signerId}`, {
     entityId: counterpartyId,
     signerId,
     entityEncPubKey: '',

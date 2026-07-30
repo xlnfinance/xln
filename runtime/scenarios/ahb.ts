@@ -94,19 +94,19 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
 
   try {
     // Reset runtime state for clean scenario runs in browser (persisted env can cause nonce/mempool drift)
-    if (env.jReplicas && env.jReplicas.size > 0) {
-      console.log(`[AHB] Clearing ${env.jReplicas.size} old jurisdictions from previous scenario`);
-      env.jReplicas.clear();
+    if (env.state.jReplicas && env.state.jReplicas.size > 0) {
+      console.log(`[AHB] Clearing ${env.state.jReplicas.size} old jurisdictions from previous scenario`);
+      env.state.jReplicas.clear();
     }
-    if (env.eReplicas && env.eReplicas.size > 0) {
-      console.log(`[AHB] Clearing ${env.eReplicas.size} old entities from previous scenario`);
-      env.eReplicas.clear();
+    if (env.state.eReplicas && env.state.eReplicas.size > 0) {
+      console.log(`[AHB] Clearing ${env.state.eReplicas.size} old entities from previous scenario`);
+      env.state.eReplicas.clear();
     }
     if (env.history && env.history.length > 0) {
       console.log(`[AHB] Clearing ${env.history.length} old snapshots from previous scenario`);
       env.history = [];
     }
-    env.height = 0;
+    env.state.height = 0;
     env.runtimeMempool = { runtimeTxs: [], entityInputs: [] };
     env.pendingOutputs = [];
     env.pendingNetworkOutputs = [];
@@ -114,12 +114,12 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     env.gossip = createGossipLayer();
     env.activeJurisdiction = undefined;
     if (env.scenarioMode) {
-      env.timestamp = 1;
+      env.state.timestamp = 1;
     }
 
     console.log('[AHB] ========================================');
     console.log('[AHB] Starting Alice-Hub-Bob Demo (JAdapter)');
-    console.log('[AHB] BEFORE: eReplicas =', env.eReplicas.size, 'history =', env.history?.length || 0);
+    console.log('[AHB] BEFORE: eReplicas =', env.state.eReplicas.size, 'history =', env.history?.length || 0);
     console.log('[AHB] ========================================');
 
     let jadapter: JAdapter;
@@ -437,7 +437,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     });
     await process(env, [r2rTx2]);
 
-    const jReplicaAfterR2R2 = env.jReplicas.get(AHB_JURISDICTION);
+    const jReplicaAfterR2R2 = env.state.jReplicas.get(AHB_JURISDICTION);
     if (!jReplicaAfterR2R2) throw new Error('J-Machine not found');
     const pendingBatches = jReplicaAfterR2R2.mempool.length;
     // JAdapter submits batches immediately post-save, so mempool may already be cleared
@@ -680,7 +680,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
 
     // ASSERT: jOutput was routed and processed (J-machine auto-processes if blockDelayMs elapsed)
     // NOTE: process() auto-ticks J-machine, so batch may already be processed (not pending)
-    const jReplica = env.jReplicas.get('AHB Demo');
+    const jReplica = env.state.jReplicas.get('AHB Demo');
     if (!jReplica) throw new Error('J-Machine not found');
     console.log(`[Frame 8 ASSERT] J-Machine state: mempool=${jReplica.mempool.length}, blockNumber=${jReplica.blockNumber}`);
     // jOutput routing confirmed if EITHER batch is pending OR block was already processed
@@ -711,8 +711,8 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
     console.log('\n⏳ FRAME 8.5: Mempool Delay - Batch pending in J-Machine');
 
     // Read jReplica for status display (read-only)
-    const jReplicaStatus = env.jReplicas?.get(AHB_JURISDICTION);
-    const elapsedMs = jReplicaStatus ? env.timestamp - (jReplicaStatus.lastBlockTimestamp || 0) : 0;
+    const jReplicaStatus = env.state.jReplicas?.get(AHB_JURISDICTION);
+    const elapsedMs = jReplicaStatus ? env.state.timestamp - (jReplicaStatus.lastBlockTimestamp || 0) : 0;
     const delayMs = jReplicaStatus?.blockDelayMs || 1000;
     console.log(`[Frame 8.5] elapsed=${elapsedMs}ms, blockDelayMs=${delayMs}ms`);
 
@@ -2212,7 +2212,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
   }]);
 
   await processUntil(env, () => {
-    const jRep = env.jReplicas?.get('AHB Demo');
+    const jRep = env.state.jReplicas?.get('AHB Demo');
     return jRep ? jRep.mempool.length === 0 : false;
   }, 40, 'J-machine process edge disputeStart');
 
@@ -2225,7 +2225,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
   // Starter tries to finalize before timeout (should fail)
   console.log('🧪 STEP 8a: Bob attempts early finalize (should fail)...');
   const edgeInfoBeforeFail = vm?.getAccountInfo ? await vm.getAccountInfo(bob.id, hub.id) : null;
-  const jRepEarly = env.jReplicas?.get('AHB Demo');
+  const jRepEarly = env.state.jReplicas?.get('AHB Demo');
   if (!jRepEarly) {
     throw new Error('PHASE 8: J-Machine not found for early finalize check');
   }
@@ -2587,7 +2587,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
         ]
       }]);
       await processUntil(env, () => {
-        const jRep = env.jReplicas?.get('AHB Demo');
+        const jRep = env.state.jReplicas?.get('AHB Demo');
         return jRep ? jRep.mempool.length === 0 : false;
       }, 20, 'Hub reserve replenish');
       await processJEvents(env);
@@ -2657,7 +2657,7 @@ export async function ahb(env: RuntimeReplica): Promise<void> {
       }]);
 
       await processUntil(env, () => {
-        const jRep = env.jReplicas?.get('AHB Demo');
+        const jRep = env.state.jReplicas?.get('AHB Demo');
         return jRep ? jRep.mempool.length === 0 : false;
       }, 40, 'Carol cooperative close');
 

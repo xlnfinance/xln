@@ -80,7 +80,7 @@ test('restores all bounded reliable frontiers and the next outbox item after rea
     );
   }
   try {
-    expect(restored.height).toBe(2);
+    expect(restored.state.height).toBe(2);
     const state = restored.runtimeState;
     expect(
       state?.reliableIngressTerminalWatermarks?.size,

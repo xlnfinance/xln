@@ -84,8 +84,8 @@ describe('storage frame journal retention', () => {
     const env = createEmptyEnv(seed);
     env.runtimeId = runtimeId;
     env.dbNamespace = runtimeId;
-    env.height = 1;
-    env.timestamp = 1_000;
+    env.state.height = 1;
+    env.state.timestamp = 1_000;
     env.quietRuntimeLogs = true;
     await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
     return env;
@@ -99,8 +99,8 @@ describe('storage frame journal retention', () => {
     const env = createEmptyEnv(seed);
     env.runtimeId = runtimeId;
     env.dbNamespace = runtimeId;
-    env.height = 1;
-    env.timestamp = 1_000;
+    env.state.height = 1;
+    env.state.timestamp = 1_000;
     env.quietRuntimeLogs = true;
     let envClosed = false;
     try {
@@ -218,8 +218,8 @@ describe('storage frame journal retention', () => {
     };
 
     for (let height = 1; height <= 3; height += 1) {
-      env.height = height;
-      env.timestamp = 1_000 + height;
+      env.state.height = height;
+      env.state.timestamp = 1_000 + height;
       await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
     }
 
@@ -292,10 +292,10 @@ describe('storage frame journal retention', () => {
     await processRuntime(env, []);
     const prunedHeight = await getPersistedLatestHeight(env);
 
-    env.height = prunedHeight + 1;
-    env.timestamp += 1;
+    env.state.height = prunedHeight + 1;
+    env.state.timestamp += 1;
     await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
-    const retainedHeight = env.height;
+    const retainedHeight = env.state.height;
 
     await closeRuntimeDb(env);
     await closeInfraDb(env);
@@ -356,7 +356,7 @@ describe('storage frame journal retention', () => {
 
     const namesByHeight = new Map<number, string>();
     for (let index = 0; index < 8; index += 1) {
-      const name = `retained-at-${env.height + 1}`;
+      const name = `retained-at-${env.state.height + 1}`;
       enqueueRuntimeInput(env, {
         runtimeTxs: [],
         entityInputs: [{
@@ -369,7 +369,7 @@ describe('storage frame journal retention', () => {
         }],
       });
       await processRuntime(env, []);
-      namesByHeight.set(env.height, name);
+      namesByHeight.set(env.state.height, name);
     }
 
     const checkpoints = await listPersistedCheckpointHeights(env);
@@ -433,10 +433,10 @@ describe('storage frame journal retention', () => {
       signerId: '2',
       runtimeId: remoteSignerId,
       name: 'Remote counterparty',
-      lastUpdated: env.timestamp,
+      lastUpdated: env.state.timestamp,
     }));
     enqueueRuntimeInput(env, {
-      timestamp: env.timestamp,
+      timestamp: env.state.timestamp,
       runtimeTxs: [],
       entityInputs: [{
         entityId: localEntityId,
@@ -449,7 +449,7 @@ describe('storage frame journal retention', () => {
     });
     await processRuntime(env, []);
 
-    expect(await listPersistedEntityIdsAtHeight(env, env.height)).toEqual([localEntityId]);
+    expect(await listPersistedEntityIdsAtHeight(env, env.state.height)).toEqual([localEntityId]);
 
     await closeRuntimeDb(env);
     await closeInfraDb(env);
@@ -505,8 +505,8 @@ describe('storage frame journal retention', () => {
     });
     await processRuntime(env, []);
     await processRuntime(env, []);
-    const checkpointHeight = env.height;
-    expect(env.eReplicas.get(`${entityId}:${signer.toLowerCase()}`)?.state.height).toBeGreaterThan(0);
+    const checkpointHeight = env.state.height;
+    expect(env.state.eReplicas.get(`${entityId}:${signer.toLowerCase()}`)?.state.height).toBeGreaterThan(0);
 
     const secondSigner = deriveSignerAddressSync(seed, '2');
     registerSignerKey(env, secondSigner, deriveSignerKeySync(seed, '2'));
@@ -530,7 +530,7 @@ describe('storage frame journal retention', () => {
       entityInputs: [],
     });
     await processRuntime(env, []);
-    expect(env.height).toBeGreaterThan(checkpointHeight);
+    expect(env.state.height).toBeGreaterThan(checkpointHeight);
 
     await closeRuntimeDb(env);
     await closeInfraDb(env);
@@ -569,8 +569,8 @@ describe('storage frame journal retention', () => {
     const env = createEmptyEnv(seed);
     env.runtimeId = runtimeId;
     env.dbNamespace = runtimeId;
-    env.height = 1;
-    env.timestamp = 1_000;
+    env.state.height = 1;
+    env.state.timestamp = 1_000;
     env.quietRuntimeLogs = true;
     const competingHistoryDb = new Level(resolveRuntimeWalDbPath(env), {
       valueEncoding: 'buffer',
@@ -605,7 +605,7 @@ describe('storage frame journal retention', () => {
 
   const installTestJurisdiction = (env: ReturnType<typeof createEmptyEnv>, jurisdiction: JurisdictionConfig): void => {
     env.activeJurisdiction = jurisdiction.name;
-    env.jReplicas.set(jurisdiction.name, {
+    env.state.jReplicas.set(jurisdiction.name, {
       name: jurisdiction.name,
       blockNumber: 0n,
       stateRoot: new Uint8Array(32),
@@ -643,8 +643,8 @@ describe('storage frame journal retention', () => {
     const env = createEmptyEnv(seed);
     env.runtimeId = runtimeId;
     env.dbNamespace = runtimeId;
-    env.height = 1;
-    env.timestamp = 1_000;
+    env.state.height = 1;
+    env.state.timestamp = 1_000;
     env.quietRuntimeLogs = true;
 
     const firstSave = await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
@@ -686,8 +686,8 @@ describe('storage frame journal retention', () => {
     const env = createEmptyEnv(seed);
     env.runtimeId = runtimeId;
     env.dbNamespace = runtimeId;
-    env.height = 1;
-    env.timestamp = 1_000;
+    env.state.height = 1;
+    env.state.timestamp = 1_000;
     env.quietRuntimeLogs = true;
 
     await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
@@ -736,17 +736,17 @@ describe('storage frame journal retention', () => {
     const env = createEmptyEnv(seed);
     env.runtimeId = runtimeId;
     env.dbNamespace = runtimeId;
-    env.height = 1;
-    env.timestamp = 1_000;
+    env.state.height = 1;
+    env.state.timestamp = 1_000;
     env.quietRuntimeLogs = true;
 
     await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
-    env.height = 2;
-    env.timestamp = 2_000;
+    env.state.height = 2;
+    env.state.timestamp = 2_000;
     await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
 
-    env.height = 1;
-    env.timestamp = 3_000;
+    env.state.height = 1;
+    env.state.timestamp = 3_000;
     const result = await saveRuntimeFrameToStorage({
       env,
       tryOpenDb: async (targetEnv) => {
@@ -790,8 +790,8 @@ describe('storage frame journal retention', () => {
       expiresAt: Date.now() + STORAGE_WRITER_LOCK_TTL_MS,
     })}\n`, 'utf8');
 
-    env.height = 2;
-    env.timestamp = 2_000;
+    env.state.height = 2;
+    env.state.timestamp = 2_000;
     await expect(saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [])).rejects.toThrow(
       'STORAGE_WRITER_LOCK_HELD',
     );
@@ -817,8 +817,8 @@ describe('storage frame journal retention', () => {
       expiresAt: Date.now() - 1_000,
     })}\n`, 'utf8');
 
-    env.height = 2;
-    env.timestamp = 2_000;
+    env.state.height = 2;
+    env.state.timestamp = 2_000;
     await expect(saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [])).rejects.toThrow(
       'STORAGE_WRITER_LOCK_HELD',
     );
@@ -880,7 +880,7 @@ describe('storage frame journal retention', () => {
 
     const restored = await loadEnvFromDB(runtimeId, seed);
     if (!restored) throw new Error('test fixture failed to restore multi-validator runtime');
-    const restoredReplicas = Array.from(restored.eReplicas.values())
+    const restoredReplicas = Array.from(restored.state.eReplicas.values())
       .filter((replica) => replica.entityId === entityId)
       .sort((left, right) => left.signerId.localeCompare(right.signerId));
     const expectedReplicas = [
@@ -896,7 +896,7 @@ describe('storage frame journal retention', () => {
 
     const restoredFromHistory = await loadEnvFromDB(runtimeId, seed);
     if (!restoredFromHistory) throw new Error('test fixture failed to restore from authoritative history meta');
-    const identitiesFromHistory = Array.from(restoredFromHistory.eReplicas.values())
+    const identitiesFromHistory = Array.from(restoredFromHistory.state.eReplicas.values())
       .filter((replica) => replica.entityId === entityId)
       .map(({ signerId, isProposer }) => [signerId, isProposer])
       .sort((left, right) => String(left[0]).localeCompare(String(right[0])));
@@ -967,7 +967,7 @@ describe('storage frame journal retention', () => {
       runtimeId: `0x${'71'.repeat(20)}`,
       entityId: `0x${'72'.repeat(32)}`,
       signerId: `0x${'73'.repeat(20)}`,
-      sourceRuntimeFrame: { height: env.height, timestamp: env.timestamp },
+      sourceRuntimeFrame: { height: env.state.height, timestamp: env.state.timestamp },
       proposedFrame: {
         height: 22,
         parentFrameHash: `0x${'74'.repeat(32)}`,
@@ -1016,7 +1016,7 @@ describe('storage frame journal retention', () => {
       entityInputs: [],
     });
     await processRuntime(env, []);
-    const journal = await readPersistedFrameJournal(env, env.height);
+    const journal = await readPersistedFrameJournal(env, env.state.height);
     expect(journal?.runtimeOutputs).toEqual([pendingOutput]);
     expect(journal?.runtimeMachine).toBeUndefined();
     expect(journal?.runtimeStateHash).toBeUndefined();
@@ -1089,8 +1089,8 @@ describe('storage frame journal retention', () => {
       env.quietRuntimeLogs = true;
       env.runtimeId = deriveSignerAddressSync(env.runtimeSeed!, '1').toLowerCase();
       env.dbNamespace = env.runtimeId;
-      env.height = 1;
-      env.timestamp = 1_000;
+      env.state.height = 1;
+      env.state.timestamp = 1_000;
 
       await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
       const frame = await readStorageFrameRecord(getRuntimeWalDb(env), 1);
@@ -1257,7 +1257,7 @@ describe('storage frame journal retention', () => {
       }],
     });
     await processRuntime(env, []);
-    expect(env.height).toBe(2);
+    expect(env.state.height).toBe(2);
 
     const historyDb = getRuntimeWalDb(env);
     expect(await readRawOrNull(historyDb, keyDiff(2))).toBeTruthy();
@@ -1420,7 +1420,7 @@ describe('storage frame journal retention', () => {
     await closeInfraDb(env);
 
     const restored = await loadEnvFromDB(runtimeId, seed);
-    expect(restored?.height).toBe(latestAfterRotation + 1);
+    expect(restored?.state.height).toBe(latestAfterRotation + 1);
     if (restored) {
       enqueueRuntimeInput(restored, {
         runtimeTxs: [],
@@ -1434,7 +1434,7 @@ describe('storage frame journal retention', () => {
         }],
       });
       await processRuntime(restored, []);
-      expect(restored.height).toBe(latestAfterRotation + 2);
+      expect(restored.state.height).toBe(latestAfterRotation + 2);
       expect(await getPersistedLatestHeight(restored)).toBe(latestAfterRotation + 2);
       await closeRuntimeDb(restored);
       await closeInfraDb(restored);
@@ -1467,7 +1467,7 @@ describe('storage frame journal retention', () => {
       },
     };
     env.quietRuntimeLogs = true;
-    env.timestamp = 1_000;
+    env.state.timestamp = 1_000;
 
     const signerA = deriveSignerAddressSync(seed, '1');
     const signerB = deriveSignerAddressSync(seed, '2');
@@ -1486,7 +1486,7 @@ describe('storage frame journal retention', () => {
     installTestJurisdiction(env, jurisdiction);
 
     enqueueRuntimeInput(env, {
-      timestamp: env.timestamp,
+      timestamp: env.state.timestamp,
       runtimeTxs: [
         {
           type: 'importReplica',
@@ -1524,7 +1524,7 @@ describe('storage frame journal retention', () => {
     await processRuntime(env, []);
 
     enqueueRuntimeInput(env, {
-      timestamp: env.timestamp,
+      timestamp: env.state.timestamp,
       runtimeTxs: [],
       entityInputs: [
         {
@@ -1575,7 +1575,7 @@ describe('storage frame journal retention', () => {
       }],
     });
     await processRuntime(env, []);
-    const replayTailHeight = env.height;
+    const replayTailHeight = env.state.height;
     expect(await readPersistedFrameJournal(env, replayTailHeight)).toBeTruthy();
 
     await closeRuntimeDb(env);
@@ -1583,9 +1583,9 @@ describe('storage frame journal retention', () => {
 
     const restored = await loadEnvFromDB(runtimeId, seed);
     expect(restored).toBeTruthy();
-    expect(restored?.height).toBe(replayTailHeight);
+    expect(restored?.state.height).toBe(replayTailHeight);
     let restoredHistoryFrames = 0;
-    for (const replica of restored?.eReplicas.values() ?? []) {
+    for (const replica of restored?.state.eReplicas.values() ?? []) {
       for (const [counterpartyId, account] of replica.state.accounts.entries()) {
         const frames = restored
           ? await readPersistedAccountFrameHistory(
@@ -1593,7 +1593,7 @@ describe('storage frame journal retention', () => {
               replica.entityId,
               counterpartyId,
               50,
-              { maxRuntimeHeight: restored.height, maxAccountHeight: account.currentHeight },
+              { maxRuntimeHeight: restored.state.height, maxAccountHeight: account.currentHeight },
             )
           : [];
         restoredHistoryFrames = Math.max(
@@ -1669,10 +1669,10 @@ describe('storage frame journal retention', () => {
     await processRuntime(env, []);
 
     for (let signerIndex = 2; signerIndex <= 5; signerIndex += 1) {
-      const height = env.height + 1;
+      const height = env.state.height + 1;
       env.frameLogs = [{
         id: height,
-        timestamp: env.timestamp,
+        timestamp: env.state.timestamp,
         level: 'info',
         category: 'system',
         message: `storage-crash-history-view-loss-${height}`,
@@ -1743,8 +1743,8 @@ describe('storage frame journal retention', () => {
     const env = createEmptyEnv(seed);
     env.runtimeId = runtimeId;
     env.dbNamespace = runtimeId;
-    env.height = 1;
-    env.timestamp = 1_000;
+    env.state.height = 1;
+    env.state.timestamp = 1_000;
     env.quietRuntimeLogs = true;
     await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
 
@@ -2029,15 +2029,15 @@ describe('storage frame journal retention', () => {
       }],
     });
     await processRuntime(env, []);
-    expect(env.height).toBe(2);
+    expect(env.state.height).toBe(2);
     expect(env.overlay?.length ?? 0).toBeGreaterThan(0);
 
     await closeRuntimeDb(env);
     await closeInfraDb(env);
 
     const restoredAtTwo = await loadEnvFromDB(runtimeId, seed);
-    expect(restoredAtTwo?.height).toBe(2);
-    const restoredReplica = Array.from(restoredAtTwo?.eReplicas.values() ?? [])
+    expect(restoredAtTwo?.state.height).toBe(2);
+    const restoredReplica = Array.from(restoredAtTwo?.state.eReplicas.values() ?? [])
       .find((item) => item.entityId === entityId);
     expect(restoredReplica?.state.profile.name).toBe('non-materialized-message');
     expect(restoredAtTwo?.overlay?.length ?? 0).toBeGreaterThan(0);
@@ -2063,7 +2063,7 @@ describe('storage frame journal retention', () => {
       }],
     });
     await processRuntime(restoredAtTwo, []);
-    expect(restoredAtTwo.height).toBe(3);
+    expect(restoredAtTwo.state.height).toBe(3);
     expect(restoredAtTwo.overlay?.length ?? 0).toBe(0);
     const materializedFrame = await readStorageFrameRecord(getRuntimeWalDb(restoredAtTwo), 3);
     expect(materializedFrame?.replicaMetaStateMode).toBe('shared-entity-state');
@@ -2078,9 +2078,9 @@ describe('storage frame journal retention', () => {
     await closeInfraDb(restoredAtTwo);
 
     const restoredAfterMaterialize = await loadEnvFromDB(runtimeId, seed);
-    const materializedReplica = Array.from(restoredAfterMaterialize?.eReplicas.values() ?? [])
+    const materializedReplica = Array.from(restoredAfterMaterialize?.state.eReplicas.values() ?? [])
       .find((item) => item.entityId === entityId);
-    expect(restoredAfterMaterialize?.height).toBe(3);
+    expect(restoredAfterMaterialize?.state.height).toBe(3);
     expect(materializedReplica?.state.profile.name).toBe('non-materialized-message');
     if (restoredAfterMaterialize) {
       await closeRuntimeDb(restoredAfterMaterialize);
@@ -2116,11 +2116,11 @@ describe('storage frame journal retention', () => {
 	  };
 
 	  for (let height = 1; height <= 4; height += 1) {
-	    env.height = height;
-	    env.timestamp = 2_000 + height;
+	    env.state.height = height;
+	    env.state.timestamp = 2_000 + height;
 	    env.frameLogs = [{
 	      id: height,
-	      timestamp: env.timestamp,
+	      timestamp: env.state.timestamp,
 	      level: 'info',
 	      category: 'system',
 	      message: `history-view-prune-${height}`,
@@ -2146,12 +2146,12 @@ describe('storage frame journal retention', () => {
     const env = createEmptyEnv(seed);
     env.runtimeId = runtimeId;
     env.dbNamespace = runtimeId;
-    env.height = 1;
-    env.timestamp = 4_001;
+    env.state.height = 1;
+    env.state.timestamp = 4_001;
     env.quietRuntimeLogs = true;
     env.frameLogs = [{
       id: 1,
-      timestamp: env.timestamp,
+      timestamp: env.state.timestamp,
       level: 'info',
       category: 'system',
       message: 'durable-wal-activity',

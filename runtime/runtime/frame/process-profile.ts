@@ -82,10 +82,10 @@ export const createRuntimeProcessProfile = (
   const marks: Record<string, number> = {};
   const metrics: RuntimeProcessProfileMetrics = {
     ...(enabled && triggerReason ? { triggerReason } : {}),
-    heightBefore: liveEnv.height,
-    heightAfter: liveEnv.height,
-    timestampBefore: liveEnv.timestamp,
-    timestampAfter: liveEnv.timestamp,
+    heightBefore: liveEnv.state.height,
+    heightAfter: liveEnv.state.height,
+    timestampBefore: liveEnv.state.timestamp,
+    timestampAfter: liveEnv.state.timestamp,
     runtimeTxs: 0,
     entityInputs: 0,
     entityTxs: 0,
@@ -112,8 +112,8 @@ export const createRuntimeProcessProfile = (
       liveEnv.activeProcessProgressStep = label;
     },
     finish(env) {
-      metrics.heightAfter = env.height;
-      metrics.timestampAfter = env.timestamp;
+      metrics.heightAfter = env.state.height;
+      metrics.timestampAfter = env.state.timestamp;
       const elapsedMs = Math.round(getPerfMs() - startedAt);
       if (cpuStart && nodeProcess?.cpuUsage) {
         const cpu = nodeProcess.cpuUsage(cpuStart);

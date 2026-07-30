@@ -129,7 +129,7 @@ export const areJEventReplicaKeysFinalizedThrough = (
   const target = Math.floor(Number(blockNumber));
   if (!Number.isFinite(target) || target < 0) return false;
   for (const replicaKey of replicaKeys) {
-    const replica = env.eReplicas?.get(replicaKey);
+    const replica = env.state.eReplicas?.get(replicaKey);
     if (!replica) return false;
     const finalized = Number(replica.state?.lastFinalizedJHeight ?? 0);
     if (!Number.isFinite(finalized) || finalized < target) return false;
@@ -154,7 +154,7 @@ export const isWatcherJHistoryRangeDurable = (
     throw new Error(`J_WATCHER_PENDING_SCAN_TIP_INVALID:${range.toBlock}`);
   }
   for (const replicaKey of range.replicaKeys) {
-    const replica = env.eReplicas?.get(replicaKey);
+    const replica = env.state.eReplicas?.get(replicaKey);
     if (!replica) return false;
     const anchor = getEntityCertifiedJAnchor(replica.state);
     if (anchor && anchor.height > range.toBlock) {

@@ -99,7 +99,7 @@ export const collectReachableConsumptionNodes = (
 };
 
 export const getLiveConsumptionAccumulatorStates = (env: EntityRuntimeContext): ConsumptionAccumulatorState[] =>
-  Array.from(env.eReplicas.values(), ({ state }) => state.consumptionAccumulator)
+  Array.from(env.state.eReplicas.values(), ({ state }) => state.consumptionAccumulator)
     .filter((state): state is ConsumptionAccumulatorState => Boolean(state));
 
 export const assertConsumptionRootsAvailable = (env: EntityRuntimeContext): void => {

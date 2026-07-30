@@ -25,8 +25,8 @@ export const runtimeInputWorkSummary = (input: RuntimeInput | undefined) => ({
 export const runtimeQuiesceWorkSummary = (env: RuntimeReplica) => ({
   runtimeId: env.runtimeId ?? null,
   scenarioMode: Boolean(env.scenarioMode),
-  height: env.height,
-  timestamp: env.timestamp,
+  height: env.state.height,
+  timestamp: env.state.timestamp,
   lifecycle: env.runtimeState?.lifecyclePhase ?? null,
   persistencePaused: Boolean(env.runtimeState?.persistencePaused),
   persistenceQuiescing: Boolean(env.runtimeState?.persistenceQuiescing),
@@ -38,12 +38,12 @@ export const runtimeQuiesceWorkSummary = (env: RuntimeReplica) => ({
   pendingOutputs: env.pendingOutputs?.length ?? 0,
   networkInbox: env.networkInbox?.length ?? 0,
   pendingNetworkOutputs: env.pendingNetworkOutputs?.length ?? 0,
-  jurisdictions: Array.from(env.jReplicas.entries(), ([name, replica]) => ({
+  jurisdictions: Array.from(env.state.jReplicas.entries(), ([name, replica]) => ({
     name,
     mode: replica.jadapter?.mode ?? null,
     watching: replica.jadapter?.isWatching?.() ?? false,
   })),
-  replicas: Array.from(env.eReplicas.entries()).flatMap(([key, replica]) => {
+  replicas: Array.from(env.state.eReplicas.entries()).flatMap(([key, replica]) => {
     const accounts = Array.from(replica.state.accounts.entries()).flatMap(([counterpartyId, account]) =>
       account.mempool.length > 0 || account.pendingFrame
         ? [{ counterpartyId, mempool: account.mempool.length, pendingFrame: account.pendingFrame?.height ?? null }]

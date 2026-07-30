@@ -29,7 +29,7 @@ const buildConsensusConfig = (signerId: string): ConsensusConfig => ({
 });
 
 const findEntityState = (env: ReturnType<typeof createEmptyEnv>, entityId: string): EntityState => {
-  for (const [replicaKey, replica] of env.eReplicas.entries()) {
+  for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
     if (replicaKey.startsWith(`${entityId}:`)) {
       return replica.state;
     }
@@ -56,7 +56,7 @@ describe('entity hub profile classification', () => {
   test('hub status is explicit state, not implied by hub config alone', async () => {
     const env = createHubProfileEnv('entity-hub-profile-runtime');
     env.activeJurisdiction = TEST_JURISDICTION.name;
-    env.jReplicas.set(TEST_JURISDICTION.name, {
+    env.state.jReplicas.set(TEST_JURISDICTION.name, {
       name: TEST_JURISDICTION.name,
       blockNumber: 0n,
       stateRoot: new Uint8Array(32),
@@ -143,7 +143,7 @@ describe('entity hub profile classification', () => {
   test('hub gossip metadata carries stable hub name across display profile updates', async () => {
     const env = createHubProfileEnv('entity-hub-profile-hub-name-runtime');
     env.activeJurisdiction = TEST_JURISDICTION.name;
-    env.jReplicas.set(TEST_JURISDICTION.name, {
+    env.state.jReplicas.set(TEST_JURISDICTION.name, {
       name: TEST_JURISDICTION.name,
       blockNumber: 0n,
       stateRoot: new Uint8Array(32),

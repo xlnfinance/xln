@@ -135,7 +135,7 @@ const handleInboundReliableReceipt = (
     });
   }
   if (registration === 'duplicate') return 'duplicate';
-  enqueueRuntimeInputs(env, undefined, undefined, undefined, env.timestamp, [receipt], options);
+  enqueueRuntimeInputs(env, undefined, undefined, undefined, env.state.timestamp, [receipt], options);
   return 'queued';
 };
 

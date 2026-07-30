@@ -43,7 +43,7 @@ const reservePollMs = (adapter: JAdapter): number => {
 const hasPendingRuntimeWork = (env: RuntimeReplica): boolean => {
   if (env.pendingOutputs?.length || env.networkInbox?.length) return true;
   if (env.runtimeMempool.runtimeTxs.length || env.runtimeMempool.entityInputs.length) return true;
-  return Array.from(env.jReplicas?.values() ?? []).some(replica => (replica.mempool?.length ?? 0) > 0);
+  return Array.from(env.state.jReplicas?.values() ?? []).some(replica => (replica.mempool?.length ?? 0) > 0);
 };
 
 const pollUntil = async (
@@ -76,7 +76,7 @@ export const waitForJBatchClear = (
 ): Promise<boolean> => pollUntil(
   () => withRuntimeCommittedRead(
     env,
-    () => !Array.from(env.jReplicas?.values() ?? [])
+    () => !Array.from(env.state.jReplicas?.values() ?? [])
       .some(j => (j.mempool?.length ?? 0) > 0) &&
       !hasPendingRuntimeWork(env),
   ),

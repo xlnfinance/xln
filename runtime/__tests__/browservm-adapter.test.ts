@@ -338,7 +338,7 @@ describe('BrowserVM JAdapter boundary', () => {
 
       const env = createEmptyEnv('browservm-adapter-boundary');
       env.scenarioMode = true;
-      env.timestamp = 1;
+      env.state.timestamp = 1;
       const jReplica = bindScenarioJReplica(
         env,
         createJReplica(env, 'BrowserVM Adapter', adapter.addresses.depository),
@@ -358,7 +358,7 @@ describe('BrowserVM JAdapter boundary', () => {
         'browservm://',
         Number(adapter.chainId),
       );
-      env.eReplicas.set(`${entityId}:${signerId}`, entityReplica);
+      env.state.eReplicas.set(`${entityId}:${signerId}`, entityReplica);
 
       adapter.startWatching(env);
       const events = await adapter.debugFundReserves(entityId, 1, 123n);

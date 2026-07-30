@@ -48,10 +48,10 @@ const secondValidatorId = addr('32');
 
 const envAt = (scannedThroughHeight: number, disputeDelayBlocks: number): RuntimeReplica => {
   const env = createEmptyEnv(`certified-j-height:${scannedThroughHeight}:${disputeDelayBlocks}`);
-  env.timestamp = 1_000;
+  env.state.timestamp = 1_000;
   env.quietRuntimeLogs = true;
   installJurisdictions(env, jurisdiction);
-  const replica = env.jReplicas.get(jurisdiction.name)!;
+  const replica = env.state.jReplicas.get(jurisdiction.name)!;
   replica.blockNumber = BigInt(scannedThroughHeight);
   replica.defaultDisputeDelayBlocks = disputeDelayBlocks;
   return env;

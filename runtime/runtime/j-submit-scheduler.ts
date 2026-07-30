@@ -61,7 +61,7 @@ const nextRetryAt = (replica: EntityReplica): number | null => {
 
 export const getNextJSubmitRetryTimestamp = (env: RuntimeReplica): number | null => {
   let next = Infinity;
-  for (const replica of env.eReplicas.values()) {
+  for (const replica of env.state.eReplicas.values()) {
     if (!isEntityActiveLeader(replica) || !canSubmitLocally(env, replica.signerId)) continue;
     const sent = replica.state.jBatchState?.sentBatch;
     if (!sent || hasQueuedAbort(env, replica.entityId)) continue;
@@ -76,7 +76,7 @@ export const getNextJSubmitRetryTimestamp = (env: RuntimeReplica): number | null
 
 export const collectDueJSubmitRuntimeTxs = (env: RuntimeReplica, now: number): RetryJSubmitTx[] => {
   const retries: RetryJSubmitTx[] = [];
-  for (const replica of env.eReplicas.values()) {
+  for (const replica of env.state.eReplicas.values()) {
     if (!isEntityActiveLeader(replica) || !canSubmitLocally(env, replica.signerId)) continue;
     const sent = replica.state.jBatchState?.sentBatch;
     if (!sent || sent.terminalFailure || isBatchEmpty(sent.batch) || hasQueuedAbort(env, replica.entityId)) continue;

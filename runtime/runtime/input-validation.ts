@@ -30,7 +30,7 @@ const validateRuntimeJIngressLimits = (
   for (const [index, input] of runtimeInput.jInputs.entries()) {
     if (!input || !Array.isArray(input.jTxs)) reject(`Invalid J input at index ${index}`);
     const jurisdictionName = String(input.jurisdictionName || '');
-    if (!env.jReplicas.has(jurisdictionName)) {
+    if (!env.state.jReplicas.has(jurisdictionName)) {
       reject(`Unknown J jurisdiction: ${jurisdictionName}`);
     }
     totalTxs += input.jTxs.length;

@@ -95,7 +95,7 @@ const createRebalanceRun = (
     now: replica.state.timestamp,
     // `sentBatch.lastSubmittedAt` uses Runtime time. Comparing it with Entity
     // time would freeze age while the pending batch blocks Entity frames.
-    submitClockNow: env.timestamp,
+    submitClockNow: env.state.timestamp,
     strategy: normalizeRebalanceMatchingStrategy(config.matchingStrategy),
     liquidityFeeBps: config.rebalanceLiquidityFeeBps ?? config.minFeeBps ?? 1n,
     policyVersion:

@@ -15,7 +15,7 @@ export const assertPersistedContractConfigReady = (
   env: RuntimeReplica,
   label: string,
 ): void => {
-  for (const [name, replica] of env.jReplicas.entries()) {
+  for (const [name, replica] of env.state.jReplicas.entries()) {
     try {
       requireDurableJurisdictionStack(replica);
     } catch (cause) {
@@ -30,7 +30,7 @@ const findJurisdictionByName = (
   name: string,
 ): [string, JReplica] | null => {
   const expected = String(name || '').trim().toLowerCase();
-  for (const entry of env.jReplicas.entries()) {
+  for (const entry of env.state.jReplicas.entries()) {
     if (String(entry[0] || '').trim().toLowerCase() === expected) {
       return entry;
     }
@@ -103,7 +103,7 @@ export const registerCommittedSingleSignerWallets = (
   env: RuntimeReplica,
   entityIds?: ReadonlySet<string>,
 ): void => {
-  for (const replica of env.eReplicas.values()) {
+  for (const replica of env.state.eReplicas.values()) {
     if (entityIds && !entityIds.has(replica.entityId.toLowerCase())) continue;
     registerSingleSignerWallet(env, replica);
   }

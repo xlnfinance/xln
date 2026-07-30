@@ -75,7 +75,7 @@ const makeState = (entityId: string, signerId: string): EntityState => ({
 
 const installJurisdiction = (env: ReturnType<typeof createEmptyEnv>): void => {
   env.activeJurisdiction = JURISDICTION.name;
-  env.jReplicas.set(JURISDICTION.name, {
+  env.state.jReplicas.set(JURISDICTION.name, {
     name: JURISDICTION.name,
     blockNumber: 0n,
     stateRoot: null,

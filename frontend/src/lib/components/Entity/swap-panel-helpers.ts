@@ -91,8 +91,8 @@ function readSwapReplicaMap(frame: SwapPanelFrame): Map<string, EntityReplica> |
   const projectionReplicas = (frame as SwapPanelProjectionSource | null | undefined)?.replicas;
   if (projectionReplicas instanceof Map) return projectionReplicas as Map<string, EntityReplica>;
   if (Array.isArray(projectionReplicas)) return replicaMapFromArray(projectionReplicas);
-  const source = frame as { eReplicas?: unknown } | null | undefined;
-  return source?.eReplicas instanceof Map ? source.eReplicas as Map<string, EntityReplica> : null;
+  const source = frame as { state?: { eReplicas?: unknown } } | null | undefined;
+  return source?.state?.eReplicas instanceof Map ? source.state.eReplicas as Map<string, EntityReplica> : null;
 }
 
 function materializeSwapReplica(candidate: EntityReplica): EntityReplica {

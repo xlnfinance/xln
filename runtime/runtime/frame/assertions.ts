@@ -58,7 +58,7 @@ const assertAccountFrames = async (
 };
 
 export async function assertRuntimeStateStrict(env: RuntimeReplica): Promise<void> {
-  for (const [replicaKey, replica] of env.eReplicas.entries()) {
+  for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
     validateEntityState(replica.state, `strictScenario.${replicaKey}`);
     for (const [counterpartyId, account] of replica.state.accounts.entries()) {
       await assertAccountFrames(account, replicaKey, counterpartyId);

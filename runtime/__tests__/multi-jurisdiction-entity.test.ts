@@ -77,7 +77,7 @@ const installJurisdiction = (env: RuntimeReplica, jurisdiction: JurisdictionConf
         ...jadapter,
       } as Partial<JAdapter> & { setBlockTimestamp: () => void }
     : undefined;
-  env.jReplicas.set(jurisdiction.name, createTestJReplica({
+  env.state.jReplicas.set(jurisdiction.name, createTestJReplica({
     name: jurisdiction.name,
     rpcs: [jurisdiction.address],
     chainId: jurisdiction.chainId,
@@ -222,7 +222,7 @@ describe('multi-jurisdiction entity binding', () => {
   };
 
   const findState = (env: RuntimeReplica, entityId: string) =>
-    Array.from(env.eReplicas.values()).find((replica) => replica.state.entityId === entityId)?.state;
+    Array.from(env.state.eReplicas.values()).find((replica) => replica.state.entityId === entityId)?.state;
 
   test('rejects importing the same entity into a second jurisdiction', async () => {
     const env = makeEnv('multi-jurisdiction-conflict');

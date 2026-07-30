@@ -77,7 +77,7 @@ export const generateHookPingsWithDeps = (
   env: RuntimeReplica,
   deps: RuntimeWakeDeps,
   nowMs = deps.getRuntimeNowMs(env),
-  queuedAt = env.timestamp ?? 0,
+  queuedAt = env.state.timestamp ?? 0,
 ): void => {
   deps.requireRuntimeMempool(env);
   const pings: RoutedEntityInput[] = createDueScheduledWakeInputs(env, nowMs);

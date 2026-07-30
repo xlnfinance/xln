@@ -823,7 +823,7 @@ const buildEntityPlan = (env: RuntimeReplica, entityId: string, entries: Replica
 
 export const buildCertifiedEntityLineagePlan = (env: RuntimeReplica): CertifiedEntityLineagePlan => {
   const byEntity = new Map<string, ReplicaEntry[]>();
-  for (const [rawReplicaKey, replica] of env.eReplicas.entries()) {
+  for (const [rawReplicaKey, replica] of env.state.eReplicas.entries()) {
     if (!replica?.state) continue;
     const entityId = normalizeEntityId(replica.entityId || replica.state.entityId || '');
     if (!entityId) continue;
@@ -874,7 +874,7 @@ export const rebaseCertifiedEntityLineageAtRuntimeCheckpoint = (
     endpointEvidence.set(endpointKey(anchor.entityId, anchor.height, anchor.frameHash), anchor);
   }
   for (const [replicaKey, links] of validated.lineageByReplicaKey) {
-    const replica = env.eReplicas.get(replicaKey);
+    const replica = env.state.eReplicas.get(replicaKey);
     const evidenceEntityId = normalizeEntityId(replica?.entityId || replica?.state?.entityId || '');
     if (!evidenceEntityId && links.length > 0) {
       throw new Error(`STORAGE_ENTITY_LINEAGE_CHECKPOINT_REPLICA_MISSING:${replicaKey}`);
@@ -889,7 +889,7 @@ export const rebaseCertifiedEntityLineageAtRuntimeCheckpoint = (
       });
     }
   }
-  for (const [rawReplicaKey, replica] of env.eReplicas) {
+  for (const [rawReplicaKey, replica] of env.state.eReplicas) {
     if (!replica?.state) continue;
     const entityId = normalizeEntityId(replica.entityId || replica.state.entityId || '');
     if (!entityId) continue;
@@ -919,12 +919,12 @@ export const rebaseCertifiedEntityLineageAtRuntimeCheckpoint = (
       };
       return { entry, anchor: base };
     });
-    const replicaSetRoot = computeRuntimeCheckpointReplicaSetRoot(env.height, pending);
+    const replicaSetRoot = computeRuntimeCheckpointReplicaSetRoot(env.state.height, pending);
     for (const { entry, anchor } of pending) {
       const checkpointed: CertifiedEntityLineageAnchor = {
         ...anchor,
         runtimeCheckpoint: {
-          runtimeHeight: env.height,
+          runtimeHeight: env.state.height,
           replicaSetRoot,
         },
       };
@@ -955,7 +955,7 @@ export const rebaseCertifiedEntityLineageAtRuntimeCheckpoint = (
  */
 export const buildRuntimeCheckpointLineagePlan = (env: RuntimeReplica): CertifiedEntityLineagePlan => {
   const entriesByEntity = new Map<string, ReplicaEntry[]>();
-  for (const [rawReplicaKey, replica] of env.eReplicas) {
+  for (const [rawReplicaKey, replica] of env.state.eReplicas) {
     if (!replica?.state) continue;
     const entityId = normalizeEntityId(replica.entityId || replica.state.entityId || '');
     if (!entityId) continue;
@@ -1061,11 +1061,11 @@ export const buildRuntimeCheckpointLineagePlan = (env: RuntimeReplica): Certifie
       }
       return { entry, anchor };
     });
-    const replicaSetRoot = computeRuntimeCheckpointReplicaSetRoot(env.height, pending);
+    const replicaSetRoot = computeRuntimeCheckpointReplicaSetRoot(env.state.height, pending);
     for (const { entry, anchor } of pending) {
       anchorByReplicaKey.set(entry.replicaKey, {
         ...anchor,
-        runtimeCheckpoint: { runtimeHeight: env.height, replicaSetRoot },
+        runtimeCheckpoint: { runtimeHeight: env.state.height, replicaSetRoot },
       });
       const certifiedLineage = entry.replica.certifiedFrameLineage;
       if (certifiedLineage && certifiedLineage.length > 0) {
@@ -1087,14 +1087,17 @@ export const buildRuntimeCheckpointLineagePlan = (env: RuntimeReplica): Certifie
 export const refreshRuntimeCheckpointLineageForEntity = (env: RuntimeReplica, rawEntityId: string): void => {
   const entityId = normalizeEntityId(rawEntityId);
   const replicas = new Map(
-    [...env.eReplicas.entries()].filter(
+    [...env.state.eReplicas.entries()].filter(
       ([, replica]) => normalizeEntityId(replica.entityId || replica.state.entityId || '') === entityId,
     ),
   );
   if (replicas.size === 0) {
     throw new Error(`STORAGE_RUNTIME_CHECKPOINT_ENTITY_MISSING:${entityId}`);
   }
-  const plan = buildRuntimeCheckpointLineagePlan({ ...env, eReplicas: replicas });
+  const plan = buildRuntimeCheckpointLineagePlan({
+    ...env,
+    state: { ...env.state, eReplicas: replicas },
+  });
   for (const [replicaKey, replica] of replicas) {
     const lineage = plan.lineageByReplicaKey.get(replicaKey);
     if (lineage && lineage.length > 0) replica.certifiedFrameLineage = structuredClone(lineage);
@@ -1120,7 +1123,7 @@ export const beginRuntimeCheckpointLineageRefresh = (
   rawEntityId: string,
 ): RuntimeCheckpointLineageRefreshGuard => {
   const entityId = normalizeEntityId(rawEntityId);
-  const snapshots = [...env.eReplicas.entries()]
+  const snapshots = [...env.state.eReplicas.entries()]
     .filter(([, replica]) => normalizeEntityId(replica.entityId || replica.state.entityId || '') === entityId)
     .map(([replicaKey, replica]) => ({
       replicaKey,
@@ -1136,7 +1139,7 @@ export const beginRuntimeCheckpointLineageRefresh = (
   return {
     finalize: (): boolean => {
       const advanced = snapshots.some(snapshot => {
-        const replica = env.eReplicas.get(snapshot.replicaKey);
+        const replica = env.state.eReplicas.get(snapshot.replicaKey);
         if (!replica) {
           throw new Error(`STORAGE_RUNTIME_CHECKPOINT_REPLICA_DISAPPEARED:${snapshot.replicaKey}`);
         }
@@ -1144,7 +1147,7 @@ export const beginRuntimeCheckpointLineageRefresh = (
       });
       if (advanced) return true;
       for (const snapshot of snapshots) {
-        const replica = env.eReplicas.get(snapshot.replicaKey)!;
+        const replica = env.state.eReplicas.get(snapshot.replicaKey)!;
         if (snapshot.certifiedFrameLineage) {
           replica.certifiedFrameLineage = structuredClone(snapshot.certifiedFrameLineage);
         } else {
@@ -1162,7 +1165,7 @@ export const beginRuntimeCheckpointLineageRefresh = (
 };
 
 export const applyCertifiedEntityLineagePlan = (env: RuntimeReplica, plan: CertifiedEntityLineagePlan): void => {
-  for (const [replicaKey, replica] of env.eReplicas.entries()) {
+  for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
     const lineage = plan.lineageByReplicaKey.get(String(replicaKey));
     if (lineage && lineage.length > 0) {
       replica.certifiedFrameLineage = structuredClone(lineage);

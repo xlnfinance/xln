@@ -85,7 +85,7 @@ if (registerReliableIngress(env, peerRuntimeId, stalePrecommit).kind !== 'enqueu
   throw new Error('RELIABLE_RECEIPT_ONLY_INGRESS_NOT_ENQUEUED');
 }
 await processRuntime(env, [stalePrecommit]);
-if (env.height !== 3) throw new Error(`RELIABLE_RECEIPT_ONLY_RUNTIME_HEIGHT:${env.height}`);
+if (env.state.height !== 3) throw new Error(`RELIABLE_RECEIPT_ONLY_RUNTIME_HEIGHT:${env.state.height}`);
 if ((env.runtimeState?.pendingReliableIngress?.size ?? 0) !== 0) {
   throw new Error('RELIABLE_RECEIPT_ONLY_PENDING_NOT_CLEARED');
 }

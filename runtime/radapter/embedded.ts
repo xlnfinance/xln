@@ -130,7 +130,7 @@ export class EmbeddedRuntimeAdapter implements RuntimeAdapter {
     this.requireCommandReady(env);
     this.deps.validateRuntimeInputAdmission(env, input);
     this.deps.enqueueRuntimeInput(env, input);
-    return { height: Math.max(0, Math.floor(Number(env.height ?? 0))) };
+    return { height: Math.max(0, Math.floor(Number(env.state.height ?? 0))) };
   }
 
   async submitCrossJurisdictionIntent(
@@ -190,7 +190,7 @@ export class EmbeddedRuntimeAdapter implements RuntimeAdapter {
     this.publishedRuntimeId = String(env.runtimeId || this.configuredRuntimeId || 'embedded')
       .trim()
       .toLowerCase();
-    this.publishedHeight = Math.max(0, Math.floor(Number(env.height ?? 0)));
+    this.publishedHeight = Math.max(0, Math.floor(Number(env.state.height ?? 0)));
     this.publishedCommandReady = readiness.ready;
     this.publishedCommandReadyReason = readiness.reason;
   }

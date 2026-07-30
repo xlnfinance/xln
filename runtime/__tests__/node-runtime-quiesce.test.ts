@@ -70,7 +70,7 @@ describe('node runtime quiesce', () => {
       },
       isWatching: () => watching,
     };
-    env.jReplicas.set('quiesce-race', {
+    env.state.jReplicas.set('quiesce-race', {
       name: 'quiesce-race',
       blockNumber: 0n,
       stateRoot: new Uint8Array(32),
@@ -115,7 +115,7 @@ describe('node runtime quiesce', () => {
       entityProviderAddress: '0x000000000000000000000000000000000000beef',
     };
     env.activeJurisdiction = jurisdiction.name;
-    env.jReplicas.set(jurisdiction.name, {
+    env.state.jReplicas.set(jurisdiction.name, {
       ...jurisdiction,
       blockNumber: 0n,
       stateRoot: new Uint8Array(32),
@@ -157,8 +157,8 @@ describe('node runtime quiesce', () => {
     });
 
     expect(result).toEqual({ runtimeDrained: true, runtimeIdle: true });
-    expect(env.height).toBe(1);
-    expect(env.eReplicas.has(`${entityId}:${signerId}`)).toBe(true);
+    expect(env.state.height).toBe(1);
+    expect(env.state.eReplicas.has(`${entityId}:${signerId}`)).toBe(true);
     expect(hasRuntimeWork(env)).toBe(false);
     await closeRuntimeDb(env);
     await closeInfraDb(env);
@@ -200,7 +200,7 @@ describe('node runtime quiesce', () => {
       entityProviderAddress: '0x000000000000000000000000000000000000beef',
     };
     env.activeJurisdiction = jurisdiction.name;
-    env.jReplicas.set(jurisdiction.name, {
+    env.state.jReplicas.set(jurisdiction.name, {
       ...jurisdiction,
       blockNumber: 0n,
       stateRoot: new Uint8Array(32),
@@ -238,7 +238,7 @@ describe('node runtime quiesce', () => {
     });
     expect(env.runtimeMempool?.runtimeTxs).toHaveLength(1);
     expect(hasRuntimeWork(env)).toBe(true);
-    expect(env.height).toBe(0);
+    expect(env.state.height).toBe(0);
     expect(env.history).toHaveLength(0);
 
     let persisted = false;
@@ -253,18 +253,18 @@ describe('node runtime quiesce', () => {
           expect(env.runtimeState?.p2p).toBeNull();
           expect(env.runtimeState?.persistenceQuiescing).toBe(true);
           expect(env.runtimeState?.persistencePaused).toBe(true);
-          expect(env.height).toBeGreaterThanOrEqual(1);
-          expect(env.eReplicas.has(`${entityId}:${runtimeId}`)).toBe(true);
+          expect(env.state.height).toBeGreaterThanOrEqual(1);
+          expect(env.state.eReplicas.has(`${entityId}:${runtimeId}`)).toBe(true);
           expect(env.runtimeMempool?.runtimeTxs).toHaveLength(0);
           expect(env.runtimeMempool?.entityInputs).toHaveLength(0);
           expect(hasRuntimeWork(env)).toBe(false);
-          expect((await readPersistedStorageHead(env))?.latestHeight).toBe(env.height);
+          expect((await readPersistedStorageHead(env))?.latestHeight).toBe(env.state.height);
           const journals = await readPersistedFrameJournals(env, {
             fromHeight: 1,
-            toHeight: env.height,
-            limit: env.height,
+            toHeight: env.state.height,
+            limit: env.state.height,
           });
-          expect(journals.at(-1)?.height).toBe(env.height);
+          expect(journals.at(-1)?.height).toBe(env.state.height);
           expect(journals.some(journal => journal.runtimeInput.runtimeTxs.some(
             tx => tx.type === 'importReplica' && tx.entityId === entityId,
           ))).toBe(true);
@@ -331,7 +331,7 @@ describe('node runtime quiesce', () => {
       entityProviderAddress: '0x000000000000000000000000000000000000beef',
     };
     env.activeJurisdiction = jurisdiction.name;
-    env.jReplicas.set(jurisdiction.name, {
+    env.state.jReplicas.set(jurisdiction.name, {
       ...jurisdiction,
       blockNumber: 0n,
       stateRoot: new Uint8Array(32),
@@ -373,8 +373,8 @@ describe('node runtime quiesce', () => {
         quietMs: 1,
         resumePersistenceAfterCheckpoint: true,
         persist: async () => {
-          expect(env.height).toBe(1);
-          expect(env.eReplicas.has(`${entityId}:${signerId}`)).toBe(true);
+          expect(env.state.height).toBe(1);
+          expect(env.state.eReplicas.has(`${entityId}:${signerId}`)).toBe(true);
           expect(await readPersistedStorageHead(env)).toBeNull();
           await persistRestoredEnvToDB(env);
         },

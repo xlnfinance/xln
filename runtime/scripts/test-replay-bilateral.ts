@@ -35,7 +35,7 @@ async function main() {
   env.runtimeId = runtimeId;
   env.dbNamespace = runtimeId;
   env.scenarioMode = true;
-  env.timestamp = 1000;
+  env.state.timestamp = 1000;
   env.quietRuntimeLogs = true;
 
   const signer1 = deriveSignerAddressSync(seed, '1');
@@ -61,7 +61,7 @@ async function main() {
     entityInputs: [],
   });
   await processRuntime(env, []);
-  console.log(`Frame 1: height=${env.height}`);
+  console.log(`Frame 1: height=${env.state.height}`);
 
   // Frame 2: openAccount A→B
   enqueueRuntimeInput(env, {
@@ -72,18 +72,18 @@ async function main() {
     }],
   });
   await processRuntime(env, []);
-  console.log(`Frame 2 (openAccount): height=${env.height}`);
+  console.log(`Frame 2 (openAccount): height=${env.state.height}`);
 
   // Run frames to let bilateral settle
   for (let i = 0; i < 8; i++) {
     enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: [{ entityId: entityA, signerId: signer1, entityTxs: [] }] });
     await processRuntime(env, []);
   }
-  console.log(`After settling: height=${env.height}`);
+  console.log(`After settling: height=${env.state.height}`);
 
   // Capture before-reload state
   const beforeHashes: Record<string, string> = {};
-  for (const [key, replica] of env.eReplicas.entries()) {
+  for (const [key, replica] of env.state.eReplicas.entries()) {
     for (const [cpId, acc] of (replica.state.accounts || new Map()).entries()) {
       beforeHashes[`${key.slice(0,12)}→${cpId.slice(0,12)}`] = `h=${acc.currentHeight} hash=${(acc.currentFrame?.stateHash || 'none').slice(0, 24)}`;
     }
@@ -100,10 +100,10 @@ async function main() {
 
   const restored = await loadEnvFromDB(runtimeId, seed);
   assert(restored, 'restored env from db');
-  assert(restored.height === env.height, `height mismatch: ${restored.height} !== ${env.height}`);
+  assert(restored.state.height === env.state.height, `height mismatch: ${restored.state.height} !== ${env.state.height}`);
 
   const afterHashes: Record<string, string> = {};
-  for (const [key, replica] of restored.eReplicas.entries()) {
+  for (const [key, replica] of restored.state.eReplicas.entries()) {
     for (const [cpId, acc] of (replica.state.accounts || new Map()).entries()) {
       afterHashes[`${key.slice(0,12)}→${cpId.slice(0,12)}`] = `h=${acc.currentHeight} hash=${(acc.currentFrame?.stateHash || 'none').slice(0, 24)}`;
     }

@@ -42,7 +42,7 @@ const attach = (
     jadapter: adapter,
   };
   env.jAdapter = adapter;
-  env.jReplicas.set(jurisdiction.name, replica);
+  env.state.jReplicas.set(jurisdiction.name, replica);
 };
 
 describe('durable numbered registration intent', () => {
@@ -107,7 +107,7 @@ describe('durable numbered registration intent', () => {
       );
       await commitRuntimeInput(restored, { runtimeTxs: completionTxs, entityInputs: [] });
       expect(getNumberedRegistrationRecord(restored, request.intentId)?.status).toBe('completed');
-      expect(restored.eReplicas.size).toBe(1);
+      expect(restored.state.eReplicas.size).toBe(1);
     } finally {
       await adapter.close();
     }

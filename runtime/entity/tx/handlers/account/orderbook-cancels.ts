@@ -94,7 +94,7 @@ export function routeRemoteCrossJurisdictionBookCancels(
       sourceHubState,
       route,
       cancel.accountId,
-      Number(sourceHubState.timestamp || env.timestamp || 0),
+      Number(sourceHubState.timestamp || env.state.timestamp || 0),
     );
     outputs.push(buildCrossJurisdictionEntityOutput(bookOwnerEntityId, bookOwnerSignerId, [{
       type: 'removeCrossJurisdictionBookOrder',

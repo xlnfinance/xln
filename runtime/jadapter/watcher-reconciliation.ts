@@ -33,7 +33,7 @@ export const collectWatcherCanonicalAudit = (
   watcherReplica: JReplica,
   lastSyncedBlock: number,
 ): WatcherCanonicalAudit => {
-  const relevantReplicaEntries = [...state.eReplicas.entries()].filter(
+  const relevantReplicaEntries = [...state.state.eReplicas.entries()].filter(
     ([, replica]) =>
       isEntityReplicaRelevantToWatcher(state, replica, watcherReplica),
   );

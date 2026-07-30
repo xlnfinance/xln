@@ -20,7 +20,7 @@ const normalize = (value: unknown): string => String(value ?? '').trim().toLower
 const findTargetReplica = (
   env: RuntimeReplica,
   identity: ReliableDeliveryIdentity,
-): EntityReplica | undefined => [...env.eReplicas.values()].find(replica =>
+): EntityReplica | undefined => [...env.state.eReplicas.values()].find(replica =>
   normalize(replica.entityId || replica.state.entityId) === identity.entityId &&
   normalize(replica.signerId) === identity.signerId);
 

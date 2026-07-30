@@ -110,7 +110,7 @@ export async function runDisputeLifecycle(_existingEnv?: RuntimeReplica): Promis
       // Entity timestamps are consensus state and advance only inside a signed
       // frame. The runtime clock makes scheduledWake due; its frame commits the
       // matching Entity timestamp without mutating a certified state in place.
-      env.timestamp = nextTs;
+      env.state.timestamp = nextTs;
     };
 
     const registered = await registerEntities(
@@ -185,7 +185,7 @@ export async function runDisputeLifecycle(_existingEnv?: RuntimeReplica): Promis
     assert(aliceAccountFrozen?.status === 'disputed', 'disputeStart must transition prepared account to disputed', env);
     assert(!aliceAccountFrozen?.pendingFrame, 'pendingFrame must be cleared on freeze', env);
     assert(!aliceAccountFrozen?.pendingAccountInput, 'pendingAccountInput must be cleared on freeze', env);
-    assert(env.jReplicas.size > 0, 'jReplicas missing', env);
+    assert(env.state.jReplicas.size > 0, 'jReplicas missing', env);
     assert(
       (findReplica(env, alice.id)[1].state.jBatchState?.batch?.disputeStarts?.length || 0) > 0,
       'disputeStart was not added to jBatch',
@@ -318,7 +318,7 @@ export async function runDisputeLifecycle(_existingEnv?: RuntimeReplica): Promis
 
     let autoFinalizeObserved = false;
     for (let i = 0; i < 40; i++) {
-      advanceRuntimeTimestamp((env.timestamp || 0) + 1000);
+      advanceRuntimeTimestamp((env.state.timestamp || 0) + 1000);
       await process(env);
       await syncChain(env, 3);
       await processJEvents(env);
@@ -335,8 +335,8 @@ export async function runDisputeLifecycle(_existingEnv?: RuntimeReplica): Promis
       const deadlineHook = aliceState.crontabState?.hooks?.get(`dispute-deadline:${hub.id.toLowerCase()}`);
       throw new Error(
         `ASSERTION FAILED: Auto dispute finalize did not complete after timeout ` +
-        `(runtimeTs=${env.timestamp} entityTs=${aliceState.timestamp} ` +
-        `jHeight=${String(env.jReplicas.values().next().value?.blockNumber ?? 'missing')} ` +
+        `(runtimeTs=${env.state.timestamp} entityTs=${aliceState.timestamp} ` +
+        `jHeight=${String(env.state.jReplicas.values().next().value?.blockNumber ?? 'missing')} ` +
         `timeout=${String(account?.activeDispute?.disputeTimeout ?? 'cleared')} ` +
         `observed=${String(account?.activeDispute?.observedOnChain ?? false)} ` +
         `finalizeQueued=${String(account?.activeDispute?.finalizeQueued ?? false)} ` +

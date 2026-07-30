@@ -17,7 +17,7 @@ test('every machine event reaches history only after commit flush', () => {
     },
   } as never;
 
-  env.timestamp = 123;
+  env.state.timestamp = 123;
   env.emit('OrdinaryCommittedFact', { entityId: '0x01', amount: '10' });
 
   expect(forwarded).toHaveLength(0);

@@ -173,7 +173,7 @@ test('local account opening rejects capacity overflow before cloning or insertio
   const state = makeState();
   fillAccounts(state, LIMITS.MAX_ACCOUNTS_PER_ENTITY);
   const env = createEmptyEnv('local-account-capacity');
-  env.eReplicas.set(`${counterpartyId}:peer`, {
+  env.state.eReplicas.set(`${counterpartyId}:peer`, {
     entityId: counterpartyId,
     signerId: 'peer',
     entityEncPubKey: '',
@@ -202,7 +202,7 @@ test('inbound mirrored-account insertion rejects capacity overflow before state 
   const state = makeState();
   fillAccounts(state, LIMITS.MAX_ACCOUNTS_PER_ENTITY);
   const env = createEmptyEnv('inbound-account-capacity');
-  env.eReplicas.set(`${counterpartyId}:peer`, {
+  env.state.eReplicas.set(`${counterpartyId}:peer`, {
     entityId: counterpartyId,
     signerId: 'peer',
     entityEncPubKey: '',
@@ -223,7 +223,7 @@ test('inbound mirrored-account insertion rejects capacity overflow before state 
 
 test('only an accepted signed genesis can reserve an Account slot', async () => {
   const env = createEmptyEnv('rejected-account-genesis');
-  env.timestamp = 1_000;
+  env.state.timestamp = 1_000;
   env.quietRuntimeLogs = true;
   const sourceSignerId = deriveSignerAddressSync(env.runtimeSeed!, 'source').toLowerCase();
   const targetSignerId = deriveSignerAddressSync(env.runtimeSeed!, 'target').toLowerCase();
@@ -231,7 +231,7 @@ test('only an accepted signed genesis can reserve an Account slot', async () => 
   registerSignerKey(env, targetSignerId, deriveSignerKeySync(env.runtimeSeed!, 'target'));
   const sourceEntityId = generateLazyEntityId([sourceSignerId], 1n).toLowerCase();
   const targetEntityId = generateLazyEntityId([targetSignerId], 1n).toLowerCase();
-  env.jReplicas.set('resource-bounds', {
+  env.state.jReplicas.set('resource-bounds', {
     name: 'resource-bounds',
     chainId: jurisdiction.chainId,
     rpcs: [],
@@ -261,7 +261,7 @@ test('only an accepted signed genesis can reserve an Account slot', async () => 
   });
   const sourceState = entityState(sourceEntityId, sourceSignerId);
   const targetState = entityState(targetEntityId, targetSignerId);
-  env.eReplicas.set(`${sourceEntityId}:${sourceSignerId}`, {
+  env.state.eReplicas.set(`${sourceEntityId}:${sourceSignerId}`, {
     entityId: sourceEntityId,
     signerId: sourceSignerId,
     entityEncPubKey: '',
@@ -270,7 +270,7 @@ test('only an accepted signed genesis can reserve an Account slot', async () => 
     mempool: [],
     state: sourceState,
   });
-  env.eReplicas.set(`${targetEntityId}:${targetSignerId}`, {
+  env.state.eReplicas.set(`${targetEntityId}:${targetSignerId}`, {
     entityId: targetEntityId,
     signerId: targetSignerId,
     entityEncPubKey: '',
@@ -290,7 +290,7 @@ test('only an accepted signed genesis can reserve an Account slot', async () => 
   proposer.currentFrame.accountStateRoot = computeAccountStateRoot(proposer);
   proposer.currentFrame.stateHash = proposer.currentFrame.accountStateRoot;
 
-  const proposed = await proposeAccountFrame(createAccountConsensusContext(env), proposer, env.timestamp, 0);
+  const proposed = await proposeAccountFrame(createAccountConsensusContext(env), proposer, env.state.timestamp, 0);
   if (!proposed.success || !proposed.accountInput?.proposal) {
     throw new Error(proposed.error || 'TEST_ACCOUNT_GENESIS_PROPOSAL_REQUIRED');
   }
@@ -385,7 +385,7 @@ test('single and batch Account mempool enqueue reject atomically at the shared c
 
 test('every committed Entity transition emits a size measurement without consumption changes', async () => {
   const env = createEmptyEnv('entity-size-every-commit');
-  env.timestamp = 2_000;
+  env.state.timestamp = 2_000;
   env.scenarioMode = true;
   const signerId = deriveSignerAddressSync(env.runtimeSeed!, 'validator').toLowerCase();
   registerSignerKey(env, signerId, deriveSignerKeySync(env.runtimeSeed!, 'validator'));
@@ -406,7 +406,7 @@ test('every committed Entity transition emits a size measurement without consump
     mempool: [],
     isProposer: true,
   };
-  env.eReplicas.set(`${state.entityId}:${signerId}`, replica);
+  env.state.eReplicas.set(`${state.entityId}:${signerId}`, replica);
   const previousLevel = process.env['XLN_LOG_LEVEL'];
   const previousScopes = process.env['XLN_LOG_SCOPES'];
   process.env['XLN_LOG_LEVEL'] = 'debug';

@@ -108,7 +108,7 @@ describe('scenario convergence timeout diagnostics', () => {
   test('reconnect advances to the exact durable retry boundary without mutating the envelope', () => {
     const env = createEmptyEnv('scenario-network-reconnect:exact-retry');
     env.scenarioMode = true;
-    env.timestamp = 1_999;
+    env.state.timestamp = 1_999;
     const output = networkOutput('3');
     env.pendingNetworkOutputs = [output];
     env.runtimeState!.deferredNetworkMeta = new Map([
@@ -117,14 +117,14 @@ describe('scenario convergence timeout diagnostics', () => {
 
     expect(env.pendingNetworkOutputs).toEqual([output]);
     expect(advanceScenarioToNextNetworkRetry(env)).toBe(2_000);
-    expect(env.timestamp).toBe(2_000);
+    expect(env.state.timestamp).toBe(2_000);
     expect(env.pendingNetworkOutputs).toEqual([output]);
   });
 
   test('an offline local validator releases pre-apply reliable ingress for exact reconnect retry', async () => {
     const env = createEmptyEnv('scenario-network-reconnect:release-local-ingress');
     env.scenarioMode = true;
-    env.timestamp = 1_000;
+    env.state.timestamp = 1_000;
     const receiverRuntimeId = env.runtimeId!;
     const sourceValidatorId = `0x${'33'.repeat(20)}`;
     const attestation: JPrefixAttestation = {

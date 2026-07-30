@@ -44,7 +44,7 @@ export const installCanonicalRegistrationEvidence = async (
   const source = options.source ?? 'EntityRegistered';
   const activationHeight = options.activationHeight ?? 5;
   const stackKey = getCertifiedBoardStackKey(jurisdiction);
-  const replica = Array.from(env.jReplicas.values()).find(candidate => (
+  const replica = Array.from(env.state.jReplicas.values()).find(candidate => (
     candidate.chainId === jurisdiction.chainId &&
     candidate.depositoryAddress?.toLowerCase() === jurisdiction.depositoryAddress.toLowerCase() &&
     candidate.entityProviderAddress?.toLowerCase() === jurisdiction.entityProviderAddress.toLowerCase()

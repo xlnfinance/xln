@@ -66,7 +66,7 @@ const makeEnv = (
       },
     },
   }]]),
-  jReplicas: overrides.jReplicas ?? new Map([['Local', {
+  jReplicas: overrides.state.jReplicas ?? new Map([['Local', {
     name: 'Local',
     chainId: 31337,
     rpcs: overrides.rpcs ?? ['http://127.0.0.1:8545'],

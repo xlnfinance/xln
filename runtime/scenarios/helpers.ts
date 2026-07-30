@@ -105,9 +105,9 @@ let strictScenarioOriginalDebug: typeof console.debug | null = null;
 let strictScenarioOriginalError: typeof console.error | null = null;
 
 const getScenarioTickMs = (env: RuntimeReplica): number => {
-  if (!env.jReplicas || env.jReplicas.size === 0) return 1;
+  if (!env.state.jReplicas || env.state.jReplicas.size === 0) return 1;
   let maxDelay = 0;
-  for (const replica of env.jReplicas.values()) {
+  for (const replica of env.state.jReplicas.values()) {
     const delay = typeof replica.blockDelayMs === 'number' ? replica.blockDelayMs : 0;
     if (delay > maxDelay) maxDelay = delay;
   }
@@ -118,7 +118,7 @@ export const advanceScenarioTime = (env: RuntimeReplica, stepMs?: number, force:
   if (!force && !env.scenarioMode) return;
   const step = Math.max(1, stepMs ?? getScenarioTickMs(env));
   // env.timestamp is typed as number - add step directly
-  env.timestamp = (env.timestamp || 0) + step;
+  env.state.timestamp = (env.state.timestamp || 0) + step;
 };
 
 export const advanceScenarioToNextNetworkRetry = (env: RuntimeReplica): number | null => {
@@ -135,7 +135,7 @@ export const advanceScenarioToNextNetworkRetry = (env: RuntimeReplica): number |
     nextRetryAt = Math.min(nextRetryAt, retry.nextRetryAt);
   }
   if (!Number.isFinite(nextRetryAt)) return null;
-  env.timestamp = Math.max(env.timestamp ?? 0, nextRetryAt);
+  env.state.timestamp = Math.max(env.state.timestamp ?? 0, nextRetryAt);
   return nextRetryAt;
 };
 
@@ -239,7 +239,7 @@ export function enableStrictScenario(env: RuntimeReplica, label: string): () => 
  * Find entity replica by ID prefix (handles "entityId:signerId" composite keys)
  */
 export function findReplica(env: RuntimeReplica, entityId: string): [string, EntityReplica] {
-  const entry = Array.from(env.eReplicas.entries()).find(([key]) => key.startsWith(entityId + ':'));
+  const entry = Array.from(env.state.eReplicas.entries()).find(([key]) => key.startsWith(entityId + ':'));
   if (!entry) {
     throw new Error(`Replica for entity ${entityId} not found`);
   }
@@ -419,7 +419,7 @@ export async function converge(env: RuntimeReplica, maxCycles = 10): Promise<voi
     if (pendingOutputs > 0 || pendingNetwork > 0 || pendingInbox > 0 || pendingInputs > 0) {
       hasWork = true;
     }
-    for (const [, replica] of env.eReplicas) {
+    for (const [, replica] of env.state.eReplicas) {
       // Check entity-level work (multi-signer consensus)
       if (replica.mempool.length > 0 || replica.proposal || replica.lockedFrame) {
         hasWork = true;
@@ -494,7 +494,7 @@ export async function convergeWithOffline(
     if (pendingOutputs > 0 || pendingNetwork > 0 || pendingInbox > 0 || pendingInputs > 0) {
       hasWork = true;
     }
-    for (const [, replica] of env.eReplicas) {
+    for (const [, replica] of env.state.eReplicas) {
       // Check entity-level work (multi-signer consensus) - CRITICAL for multi-sig
       if (replica.mempool.length > 0 || replica.proposal || replica.lockedFrame) {
         hasWork = true;
@@ -519,7 +519,7 @@ const throwScenarioConvergenceTimeout = (
   label: string,
   maxCycles: number,
 ): never => {
-  const entityBacklog = [...env.eReplicas.values()]
+  const entityBacklog = [...env.state.eReplicas.values()]
     .flatMap(replica => {
       const pendingAccounts = [...replica.state.accounts.values()]
         .filter(account => account.pendingFrame || accountHasProposableMempool(account, replica.state))
@@ -743,13 +743,13 @@ export function assertRuntimeIdle(env: RuntimeReplica, label: string = 'runtime'
   if (pendingInbox > 0) errors.push(`networkInbox=${pendingInbox}`);
   if (pendingNetwork > 0) errors.push(`pendingNetworkOutputs=${pendingNetwork}`);
 
-  for (const jReplica of env.jReplicas?.values() || []) {
+  for (const jReplica of env.state.jReplicas?.values() || []) {
     if (jReplica.mempool.length > 0) {
       errors.push(`jReplica:${jReplica.name} mempool=${jReplica.mempool.length}`);
     }
   }
 
-  for (const [replicaKey, replica] of env.eReplicas.entries()) {
+  for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
     for (const [counterpartyId, account] of replica.state.accounts.entries()) {
       if (account.pendingFrame) {
         errors.push(`pendingFrame ${replicaKey}↔${counterpartyId.slice(-4)}`);

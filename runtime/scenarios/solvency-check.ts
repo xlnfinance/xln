@@ -10,9 +10,9 @@ export function checkSolvency(env: RuntimeReplica, expected: bigint, label: stri
   let reserves = 0n;
   let collateral = 0n;
 
-  console.log(`[SOLVENCY ${label}] Checking ${env.eReplicas.size} replicas...`);
+  console.log(`[SOLVENCY ${label}] Checking ${env.state.eReplicas.size} replicas...`);
 
-  for (const [replicaKey, replica] of env.eReplicas) {
+  for (const [replicaKey, replica] of env.state.eReplicas) {
     let replicaReserves = 0n;
     for (const [, amount] of replica.state.reserves) {
       replicaReserves += amount;

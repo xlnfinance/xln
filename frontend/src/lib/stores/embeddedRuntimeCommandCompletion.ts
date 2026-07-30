@@ -1,6 +1,13 @@
 import { safeStringify } from '@xln/runtime/protocol/serialization';
 import type { EnvSnapshot, RuntimeInput } from '@xln/runtime/api/runtime-module';
 
+type RuntimeInputCommitRecord =
+  | Pick<EnvSnapshot, 'state' | 'runtimeInput'>
+  | { height: number; runtimeInput: RuntimeInput };
+
+const committedFrameHeight = (frame: RuntimeInputCommitRecord): number =>
+  'state' in frame ? frame.state.height : frame.height;
+
 type RuntimeInputPart = Readonly<{
   kind: string;
   owner: string;
@@ -92,7 +99,7 @@ export const runtimeFrameContainsSubmittedInput = (
 };
 
 export const findCommittedEmbeddedRuntimeInputHeight = (
-  history: readonly Pick<EnvSnapshot, 'height' | 'runtimeInput'>[],
+  history: readonly RuntimeInputCommitRecord[],
   submitted: RuntimeInput,
   afterHeight: number,
 ): number | null => {
@@ -101,14 +108,17 @@ export const findCommittedEmbeddedRuntimeInputHeight = (
   }
   let committedHeight: number | null = null;
   for (const frame of history) {
-    if (frame.height <= afterHeight || !runtimeFrameContainsSubmittedInput(frame.runtimeInput, submitted)) continue;
-    committedHeight = committedHeight === null ? frame.height : Math.min(committedHeight, frame.height);
+    const height = committedFrameHeight(frame);
+    if (height <= afterHeight || !runtimeFrameContainsSubmittedInput(frame.runtimeInput, submitted)) continue;
+    committedHeight = committedHeight === null
+      ? height
+      : Math.min(committedHeight, height);
   }
   return committedHeight;
 };
 
 export const findPersistedEmbeddedRuntimeInputHeight = async (
-  readFrame: (height: number) => Promise<Pick<EnvSnapshot, 'height' | 'runtimeInput'> | null>,
+  readFrame: (height: number) => Promise<RuntimeInputCommitRecord | null>,
   submitted: RuntimeInput,
   afterHeight: number,
   throughHeight: number,
@@ -121,7 +131,9 @@ export const findPersistedEmbeddedRuntimeInputHeight = async (
   }
   for (let height = afterHeight + 1; height <= throughHeight; height += 1) {
     const frame = await readFrame(height);
-    if (frame && runtimeFrameContainsSubmittedInput(frame.runtimeInput, submitted)) return frame.height;
+    if (frame && runtimeFrameContainsSubmittedInput(frame.runtimeInput, submitted)) {
+      return committedFrameHeight(frame);
+    }
   }
   return null;
 };

@@ -250,7 +250,7 @@ const restoreConsole = (original: ConsoleFns): void => {
   console.error = original.error;
 };
 
-const projectJReplicas = (jReplicas: RuntimeReplica['jReplicas'] | undefined): Map<string, unknown> => {
+const projectJReplicas = (jReplicas: RuntimeReplica['state']['jReplicas'] | undefined): Map<string, unknown> => {
   const projected = new Map<string, unknown>();
   for (const [key, replica] of jReplicas ?? new Map()) {
     projected.set(key, buildCanonicalJReplicaSnapshot(replica));
@@ -259,11 +259,11 @@ const projectJReplicas = (jReplicas: RuntimeReplica['jReplicas'] | undefined): M
 };
 
 const snapshotEnvProjection = (env: RuntimeReplica): Record<string, unknown> => ({
-  height: env.height,
-  timestamp: env.timestamp,
+  height: env.state.height,
+  timestamp: env.state.timestamp,
   runtimeId: env.runtimeId,
-  eReplicas: env.eReplicas,
-  jReplicas: projectJReplicas(env.jReplicas),
+  eReplicas: env.state.eReplicas,
+  jReplicas: projectJReplicas(env.state.jReplicas),
   runtimeInput: env.runtimeMempool,
   pendingOutputs: env.pendingOutputs ?? [],
   pendingNetworkOutputs: env.pendingNetworkOutputs ?? [],
@@ -271,11 +271,11 @@ const snapshotEnvProjection = (env: RuntimeReplica): Record<string, unknown> => 
 });
 
 const snapshotProjection = (snapshot: RuntimeReplica['history'][number]): Record<string, unknown> => ({
-  height: snapshot.height,
-  timestamp: snapshot.timestamp,
+  height: snapshot.state.height,
+  timestamp: snapshot.state.timestamp,
   runtimeId: snapshot.runtimeId,
-  eReplicas: snapshot.eReplicas,
-  jReplicas: projectJReplicas(snapshot.jReplicas),
+  eReplicas: snapshot.state.eReplicas,
+  jReplicas: projectJReplicas(snapshot.state.jReplicas),
   runtimeInput: snapshot.runtimeInput,
   runtimeOutputs: snapshot.runtimeOutputs,
   description: snapshot.description,
@@ -435,7 +435,7 @@ const cleanupScenarioEnv = async (env: RuntimeReplica): Promise<void> => {
 
   const adapters = new Set<unknown>();
   if (env.jAdapter) adapters.add(env.jAdapter);
-  for (const replica of env.jReplicas?.values() ?? []) {
+  for (const replica of env.state.jReplicas?.values() ?? []) {
     if (replica.jadapter) adapters.add(replica.jadapter);
   }
 
@@ -504,7 +504,7 @@ const runScenarioOnce = async (
     const verboseScenarioLogs = process.env['XLN_DETERMINISM_VERBOSE'] === '1';
     env.quietRuntimeLogs = !verboseScenarioLogs;
     env.scenarioLogLevel = verboseScenarioLogs ? 'debug' : 'error';
-    env.timestamp = INITIAL_TIMESTAMP;
+    env.state.timestamp = INITIAL_TIMESTAMP;
     env.runtimeConfig = {
       ...env.runtimeConfig,
       storage: {

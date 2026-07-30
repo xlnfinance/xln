@@ -77,7 +77,7 @@ test('entity workspace shell consumes a projected workspace view instead of trav
   expect(source).not.toContain('<ContextSwitcher');
   expect(source).toContain('on:entitySelect');
   expect(source).not.toContain('buildEntityWorkspaceView(env');
-  expect(source).not.toContain('source?.eReplicas');
+  expect(source).not.toContain('source?.state.eReplicas');
   expect(source).not.toContain('function findEntityReplica');
   expect(source).not.toContain('workspaceReplica');
 });
@@ -248,11 +248,11 @@ test('user mode remote workspace mounts from RuntimeView instead of RuntimeRepli
   expect(userMode).not.toContain('appRuntimeAdapterActiveEntityId');
 
   const remoteEffectStart = userMode.indexOf('if (!isRemoteRuntime) return;');
-  const remoteEffectEnd = userMode.indexOf('$effect(() => {\n    if (isRemoteRuntime || !currentFrame?.eReplicas)', remoteEffectStart);
+  const remoteEffectEnd = userMode.indexOf('$effect(() => {\n    if (isRemoteRuntime || !currentFrame?.state.eReplicas)', remoteEffectStart);
   expect(remoteEffectStart).toBeGreaterThan(0);
   expect(remoteEffectEnd).toBeGreaterThan(remoteEffectStart);
   const remoteEffect = userMode.slice(remoteEffectStart, remoteEffectEnd);
-  expect(remoteEffect).not.toContain('currentFrame?.eReplicas');
+  expect(remoteEffect).not.toContain('currentFrame?.state.eReplicas');
   expect(remoteEffect).not.toContain('findReplicaByEntityInFrame');
   expect(remoteEffect).not.toContain('firstReplicaWithRelationshipsInFrame');
 

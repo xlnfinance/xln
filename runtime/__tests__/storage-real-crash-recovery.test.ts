@@ -127,7 +127,7 @@ describe('real process storage crash recovery', () => {
     const restored = await loadEnvFromDB(runtimeId, seed);
     if (!restored) throw new Error('board-root lag fixture did not restore');
     try {
-      const roots = Array.from(restored.eReplicas.values(), (replica) => (
+      const roots = Array.from(restored.state.eReplicas.values(), (replica) => (
         replica.state.certifiedBoardState?.boardRegistryRoot
       )).filter((root): root is string => Boolean(root));
       expect(new Set(roots).size).toBe(2);
@@ -211,7 +211,7 @@ describe('real process storage crash recovery', () => {
       const restored = await loadEnvFromDB(runtimeId, seed);
       if (!restored) throw new Error('real crash fixture did not restore');
       try {
-        expect(restored.height).toBe(2);
+        expect(restored.state.height).toBe(2);
         expect(
           (await readHistoryViewHead(
             getHistoryViewDb(restored),
@@ -223,7 +223,7 @@ describe('real process storage crash recovery', () => {
         const entityId = generateNumberedEntityId(2).toLowerCase();
         const expectedKeysA = deriveLocalEntityCryptoKeys(restored, entityId, signerA);
         const expectedKeysB = deriveLocalEntityCryptoKeys(restored, entityId, signerB);
-        const replica = Array.from(restored.eReplicas.values()).find((candidate) => (
+        const replica = Array.from(restored.state.eReplicas.values()).find((candidate) => (
           candidate.entityId === entityId && candidate.signerId === signerB
         ));
         expect(replica?.state.height).toBe(0);
@@ -274,7 +274,7 @@ describe('real process storage crash recovery', () => {
           })),
         });
 
-        const submitReplica = Array.from(restored.eReplicas.values()).find((candidate) => (
+        const submitReplica = Array.from(restored.state.eReplicas.values()).find((candidate) => (
           candidate.entityId === entityId && candidate.signerId === signerA
         ));
         expect(submitReplica?.state.height).toBe(1);
@@ -335,8 +335,8 @@ describe('real process storage crash recovery', () => {
         expect(await readRawOrNull(currentDb, keyLiveReplicaMeta(entityId, signerB))).toBeNull();
         expect(await readRawOrNull(currentDb, keyLiveReplicaMeta(entityId, signerA))).toBeNull();
 
-        restored.height += 1;
-        restored.timestamp += 1;
+        restored.state.height += 1;
+        restored.state.timestamp += 1;
         await saveEnvToDB(restored, { runtimeTxs: [], entityInputs: [] }, []);
         const committedHead = await readStorageHead(getRuntimeWalDb(restored));
         expect(committedHead?.latestHeight).toBe(3);
@@ -389,7 +389,7 @@ describe('real process storage crash recovery', () => {
       expect(await readRawOrNull(historyDb, keySnapshotManifest(2))).toBeNull();
       await historyDb.put(KEY_HEAD, encodeBuffer({ ...head, latestSnapshotHeight: 2 }));
 
-      await expect(createSnapshot(currentDb, historyDb, 3, restored.timestamp + 1))
+      await expect(createSnapshot(currentDb, historyDb, 3, restored.state.timestamp + 1))
         .rejects.toThrow('STORAGE_VERIFY_SNAPSHOT_MANIFEST_MISSING: height=2');
       expect(await countSnapshotBodyKeys(historyDb, 2)).toBeGreaterThan(0);
     } finally {
@@ -438,8 +438,8 @@ describe('real process storage crash recovery', () => {
           snapshotPeriodFrames: 1,
           retainSnapshots: 3,
         };
-        restored.height += 1;
-        restored.timestamp += 1;
+        restored.state.height += 1;
+        restored.state.timestamp += 1;
         await saveEnvToDB(restored, { runtimeTxs: [], entityInputs: [] }, []);
 
         expect((await readStorageHead(historyDb))?.latestSnapshotHeight).toBe(3);

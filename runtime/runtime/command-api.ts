@@ -64,8 +64,8 @@ export const createRuntimeCommandApi = (dependencies: RuntimeCommandDependencies
 
     const envelope: RuntimeEntityInputsEnvelope = {
       sourceRuntimeId,
-      sourceRuntimeHeight: Math.max(0, Math.floor(Number(env.height || 0))),
-      sourceRuntimeTimestamp: Math.max(0, Math.floor(Number(env.timestamp || 0))),
+      sourceRuntimeHeight: Math.max(0, Math.floor(Number(env.state.height || 0))),
+      sourceRuntimeTimestamp: Math.max(0, Math.floor(Number(env.state.timestamp || 0))),
       entityInputs: [],
       crossJurisdictionIntent: structuredClone(canonicalRoute),
     };

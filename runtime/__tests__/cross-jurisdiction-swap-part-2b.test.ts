@@ -188,15 +188,15 @@ const makeLocalCrossJRoutingDeps = (): RuntimeEntityRoutingDeps => ({
   },
   extractEntityId: replicaKey => replicaKey.split(':')[0] || '',
   hasLocalSignerForEntity: (current, entityId) =>
-    Array.from(current.eReplicas.values()).some(replica => replica.entityId.toLowerCase() === entityId.toLowerCase()),
+    Array.from(current.state.eReplicas.values()).some(replica => replica.entityId.toLowerCase() === entityId.toLowerCase()),
   hasLocalSignerForEntitySigner: (current, entityId, signerId) =>
-    Array.from(current.eReplicas.values()).some(
+    Array.from(current.state.eReplicas.values()).some(
       replica =>
         replica.entityId.toLowerCase() === entityId.toLowerCase() &&
         replica.signerId.toLowerCase() === signerId.toLowerCase(),
     ),
   resolveSoleLocalSignerForEntity: (current, entityId) => {
-    const signers = Array.from(current.eReplicas.values())
+    const signers = Array.from(current.state.eReplicas.values())
       .filter(replica => replica.entityId.toLowerCase() === entityId.toLowerCase())
       .map(replica => replica.signerId);
     return signers.length === 1 ? signers[0]! : null;
@@ -208,7 +208,7 @@ describe('cross-jurisdiction hashledger swap', () => {
   const makeTargetDisputeRouteSelectionFixture = (scenario: string) => {
     const env = createEmptyEnv(scenario);
     env.scenarioMode = true;
-    env.timestamp = 50_000;
+    env.state.timestamp = 50_000;
     env.quietRuntimeLogs = true;
     const sourceJ = makeJurisdiction('Ethereum', 1, '11', '12');
     const targetJ = makeJurisdiction('Base', 8453, '21', '22');
@@ -252,10 +252,10 @@ describe('cross-jurisdiction hashledger swap', () => {
               amount: 90n,
             },
             status: 'resting',
-            createdAt: env.timestamp,
-            updatedAt: env.timestamp,
+            createdAt: env.state.timestamp,
+            updatedAt: env.state.timestamp,
           },
-          { runtimeSeed: 'test-seed', sourceDisputeDelayMs: 5_000, now: env.timestamp },
+          { runtimeSeed: 'test-seed', sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
         ),
         status: options.status ?? 'resting',
       };
@@ -568,7 +568,7 @@ describe('cross-jurisdiction hashledger swap', () => {
 
   test('clear request reveals one source pull binary and can cancel remainder', async () => {
     const env = createEmptyEnv('cross-clear-delayed-seed');
-    env.timestamp = 10_000;
+    env.state.timestamp = 10_000;
     env.quietRuntimeLogs = true;
     const eth = makeJurisdiction('Ethereum', 1, '11', '12');
     const base = makeJurisdiction('Base', 8453, '21', '22');
@@ -606,11 +606,11 @@ describe('cross-jurisdiction hashledger swap', () => {
           amount: 900n,
         },
         status: 'resting',
-        createdAt: env.timestamp,
-        updatedAt: env.timestamp,
+        createdAt: env.state.timestamp,
+        updatedAt: env.state.timestamp,
         expiresAt: 70_000,
       },
-      { runtimeSeed: env.runtimeSeed, sourceDisputeDelayMs: 5_000, now: env.timestamp },
+      { runtimeSeed: env.runtimeSeed, sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
     );
     const route = {
       ...prepared,
@@ -650,7 +650,7 @@ describe('cross-jurisdiction hashledger swap', () => {
             'source',
           ),
           createdHeight: 0,
-          createdTimestamp: env.timestamp,
+          createdTimestamp: env.state.timestamp,
         },
       ],
     ]);
@@ -677,7 +677,7 @@ describe('cross-jurisdiction hashledger swap', () => {
           partialRoot: route.targetPull!.partialRoot,
           crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'target'),
           createdHeight: 0,
-          createdTimestamp: env.timestamp,
+          createdTimestamp: env.state.timestamp,
         },
       ],
     ]);
@@ -729,7 +729,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       stagedTargetClose.newState.accounts.get(targetUser)!,
       stagedTargetClose.accountTxs![0]!.tx,
       byTargetHub,
-      env.timestamp,
+      env.state.timestamp,
       1,
     );
     expect(targetCloseResult.success, targetCloseResult.error).toBe(true);
@@ -752,7 +752,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     };
     invalidProposalAccount.mempool = [invalidClose];
     await expect(
-      proposeAccountFrame(createAccountConsensusContext(env), invalidProposalAccount, env.timestamp, state.lastFinalizedJHeight),
+      proposeAccountFrame(createAccountConsensusContext(env), invalidProposalAccount, env.state.timestamp, state.lastFinalizedJHeight),
     ).rejects.toThrow('CROSS_J_PULL_CLOSE_PROPOSAL_FAILED');
     expect(invalidProposalAccount.mempool).toEqual([invalidClose]);
     expect(invalidProposalAccount.pendingFrame).toBeUndefined();
@@ -762,7 +762,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       accountAfterClear,
       materialized.accountTxs![0]!.tx,
       bySourceHub,
-      env.timestamp,
+      env.state.timestamp,
       1,
     );
     expect(resolveResult.success, resolveResult.error).toBe(true);
@@ -773,7 +773,7 @@ describe('cross-jurisdiction hashledger swap', () => {
 
   test('target cross_pull_close rejects lower valid reveal than source close proof', async () => {
     const env = createEmptyEnv('cross-close-lower-ratio-reject');
-    env.timestamp = 10_000;
+    env.state.timestamp = 10_000;
     env.quietRuntimeLogs = true;
     const eth = makeJurisdiction('Ethereum', 1, '11', '12');
     const base = makeJurisdiction('Base', 8453, '21', '22');
@@ -801,11 +801,11 @@ describe('cross-jurisdiction hashledger swap', () => {
           amount: 900n,
         },
         status: 'resting',
-        createdAt: env.timestamp,
-        updatedAt: env.timestamp,
+        createdAt: env.state.timestamp,
+        updatedAt: env.state.timestamp,
         expiresAt: 70_000,
       },
-      { runtimeSeed: env.runtimeSeed, sourceDisputeDelayMs: 5_000, now: env.timestamp },
+      { runtimeSeed: env.runtimeSeed, sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
     );
     const highRatio = 0x8000;
     const lowRatio = 0x4000;
@@ -859,7 +859,7 @@ describe('cross-jurisdiction hashledger swap', () => {
           partialRoot: highRoute.targetPull!.partialRoot,
           crossJurisdiction: buildCrossJurisdictionPullBinding({ ...highRoute, sourceCloseProof: highProof }, 'target'),
           createdHeight: 0,
-          createdTimestamp: env.timestamp,
+          createdTimestamp: env.state.timestamp,
         },
       ],
     ]);
@@ -872,7 +872,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         data: { pullId: highRoute.targetPull!.pullId, binary: lowBinary, proof: lowProof },
       },
       byTargetUser,
-      env.timestamp,
+      env.state.timestamp,
       1,
     );
     expect(lowerProofResult.success).toBe(false);
@@ -886,7 +886,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         data: { pullId: highRoute.targetPull!.pullId, binary: lowBinary, proof: highProof },
       },
       byTargetUser,
-      env.timestamp,
+      env.state.timestamp,
       2,
     );
     expect(lowerBinaryResult.success).toBe(false);
@@ -896,7 +896,7 @@ describe('cross-jurisdiction hashledger swap', () => {
 
   test('target cross_pull_close rejects user-authored economics before target binding has fill progress', async () => {
     const env = createEmptyEnv('cross-close-forged-target-economics');
-    env.timestamp = 10_000;
+    env.state.timestamp = 10_000;
     env.quietRuntimeLogs = true;
     const eth = makeJurisdiction('Ethereum', 1, '11', '12');
     const base = makeJurisdiction('Base', 8453, '21', '22');
@@ -924,14 +924,14 @@ describe('cross-jurisdiction hashledger swap', () => {
           amount: 900n,
         },
         status: 'resting',
-        createdAt: env.timestamp,
-        updatedAt: env.timestamp,
+        createdAt: env.state.timestamp,
+        updatedAt: env.state.timestamp,
         expiresAt: 70_000,
       },
       {
         runtimeSeed: env.runtimeSeed,
         sourceDisputeDelayMs: 5_000,
-        now: env.timestamp,
+        now: env.state.timestamp,
       },
     );
     const fillRatio = 0x8000;
@@ -974,7 +974,7 @@ describe('cross-jurisdiction hashledger swap', () => {
           partialRoot: targetPull.partialRoot,
           crossJurisdiction: buildCrossJurisdictionPullBinding(prepared, 'target'),
           createdHeight: 0,
-          createdTimestamp: env.timestamp,
+          createdTimestamp: env.state.timestamp,
         },
       ],
     ]);
@@ -990,7 +990,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         },
       },
       targetUser.toLowerCase() < targetHub.toLowerCase(),
-      env.timestamp,
+      env.state.timestamp,
       1,
     );
 
@@ -1002,7 +1002,7 @@ describe('cross-jurisdiction hashledger swap', () => {
 
   test('direct cancelPull cannot release a committed cross-j partial fill', async () => {
     const env = createEmptyEnv('cross-direct-cancel-blocked');
-    env.timestamp = 90_000;
+    env.state.timestamp = 90_000;
     env.quietRuntimeLogs = true;
     const eth = makeJurisdiction('Ethereum', 1, '11', '12');
     const base = makeJurisdiction('Base', 8453, '21', '22');
@@ -1159,7 +1159,7 @@ describe('cross-jurisdiction hashledger swap', () => {
 
   test('direct cancelPull cannot release an unfilled cross-j target pull', async () => {
     const env = createEmptyEnv('cross-target-direct-cancel-blocked');
-    env.timestamp = 10_000;
+    env.state.timestamp = 10_000;
     env.quietRuntimeLogs = true;
     const eth = makeJurisdiction('Ethereum', 1, '11', '12');
     const base = makeJurisdiction('Base', 8453, '21', '22');
@@ -1188,11 +1188,11 @@ describe('cross-jurisdiction hashledger swap', () => {
           amount: 900n,
         },
         status: 'target_locked',
-        createdAt: env.timestamp,
-        updatedAt: env.timestamp,
+        createdAt: env.state.timestamp,
+        updatedAt: env.state.timestamp,
         expiresAt: 70_000,
       },
-      { runtimeSeed: 'cross-target-direct-cancel-blocked-seed', sourceDisputeDelayMs: 5_000, now: env.timestamp },
+      { runtimeSeed: 'cross-target-direct-cancel-blocked-seed', sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
     );
     state.crossJurisdictionSwaps?.set(route.orderId, route);
 
@@ -1310,7 +1310,7 @@ describe('cross-jurisdiction hashledger swap', () => {
 
   test('target user cannot resolve a cross-j pull even after observing the Hub proof', async () => {
     const env = createEmptyEnv('cross-target-resolve-guard');
-    env.timestamp = 10_000;
+    env.state.timestamp = 10_000;
     env.quietRuntimeLogs = true;
     const eth = makeJurisdiction('Ethereum', 1, '11', '12');
     const base = makeJurisdiction('Base', 8453, '21', '22');
@@ -1339,11 +1339,11 @@ describe('cross-jurisdiction hashledger swap', () => {
           amount: 900n,
         },
         status: 'resting',
-        createdAt: env.timestamp,
-        updatedAt: env.timestamp,
+        createdAt: env.state.timestamp,
+        updatedAt: env.state.timestamp,
         expiresAt: 70_000,
       },
-      { runtimeSeed: 'cross-target-resolve-guard-seed', sourceDisputeDelayMs: 5_000, now: env.timestamp },
+      { runtimeSeed: 'cross-target-resolve-guard-seed', sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
     );
     targetState.crossJurisdictionSwaps?.set(route.orderId, { ...route, status: 'resting' });
     const targetAccount = targetState.accounts.get(targetHub);
@@ -1369,7 +1369,7 @@ describe('cross-jurisdiction hashledger swap', () => {
           partialRoot: route.targetPull!.partialRoot,
           crossJurisdiction: buildCrossJurisdictionPullBinding({ ...route, status: 'target_locked' }, 'target'),
           createdHeight: 1,
-          createdTimestamp: env.timestamp,
+          createdTimestamp: env.state.timestamp,
         },
       ],
     ]);
@@ -1417,7 +1417,7 @@ describe('cross-jurisdiction hashledger swap', () => {
 
   test('source user routes cross-j clear through the source Account', async () => {
     const env = createEmptyEnv('cross-clear-source-account');
-    env.timestamp = 10_000;
+    env.state.timestamp = 10_000;
     env.quietRuntimeLogs = true;
     const eth = makeJurisdiction('Ethereum', 1, '11', '12');
     const base = makeJurisdiction('Base', 8453, '21', '22');
@@ -1452,11 +1452,11 @@ describe('cross-jurisdiction hashledger swap', () => {
           amount: 900n,
         },
         status: 'resting',
-        createdAt: env.timestamp,
-        updatedAt: env.timestamp,
+        createdAt: env.state.timestamp,
+        updatedAt: env.state.timestamp,
         expiresAt: 70_000,
       },
-      { runtimeSeed: env.runtimeSeed, sourceDisputeDelayMs: 5_000, now: env.timestamp },
+      { runtimeSeed: env.runtimeSeed, sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
     );
     const restingRoute = {
       ...prepared,
@@ -1526,7 +1526,7 @@ describe('cross-jurisdiction hashledger swap', () => {
 
   test('clear request closes live cross-j offer before revealing pull', async () => {
     const env = createEmptyEnv('cross-clear-closes-offer-first');
-    env.timestamp = 10_000;
+    env.state.timestamp = 10_000;
     env.quietRuntimeLogs = true;
     const eth = makeJurisdiction('Ethereum', 1, '11', '12');
     const base = makeJurisdiction('Base', 8453, '21', '22');
@@ -1555,11 +1555,11 @@ describe('cross-jurisdiction hashledger swap', () => {
           amount: 900n,
         },
         status: 'resting',
-        createdAt: env.timestamp,
-        updatedAt: env.timestamp,
+        createdAt: env.state.timestamp,
+        updatedAt: env.state.timestamp,
         expiresAt: 70_000,
       },
-      { runtimeSeed: 'cross-clear-offer-first', sourceDisputeDelayMs: 5_000, now: env.timestamp },
+      { runtimeSeed: 'cross-clear-offer-first', sourceDisputeDelayMs: 5_000, now: env.state.timestamp },
     );
     const route = {
       ...prepared,
@@ -1599,7 +1599,7 @@ describe('cross-jurisdiction hashledger swap', () => {
           fullHash: route.sourcePull!.fullHash,
           partialRoot: route.sourcePull!.partialRoot,
           createdHeight: 0,
-          createdTimestamp: env.timestamp,
+          createdTimestamp: env.state.timestamp,
         },
       ],
     ]);

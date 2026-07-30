@@ -66,7 +66,7 @@ const installTargetReplica = (
 ): void => {
   const attestation = output.jPrefixAttestations?.values().next().value;
   if (!attestation) throw new Error('TEST_J_PREFIX_ATTESTATION_MISSING');
-  env.eReplicas.set(`${output.entityId}:${output.signerId}`, {
+  env.state.eReplicas.set(`${output.entityId}:${output.signerId}`, {
     entityId: output.entityId,
     signerId: output.signerId,
     entityEncPubKey: '',

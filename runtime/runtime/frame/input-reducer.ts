@@ -87,7 +87,7 @@ const createApplyProfiler = (): ApplyProfiler => {
       const elapsedMs = Math.round(getPerfMs() - start);
       if (APPLY_PROFILE_ENABLED || elapsedMs >= APPLY_SLOW_MS) {
         runtimeLog.info('apply.profile', {
-          height: env.height,
+          height: env.state.height,
           elapsedMs,
           runtimeTxs: runtimeTxs.length,
           entityInputs: result.appliedRuntimeInput.entityInputs.length,
@@ -100,7 +100,7 @@ const createApplyProfiler = (): ApplyProfiler => {
           phases: cumulativeMarksToPhases(marks, elapsedMs),
         });
       }
-      if (DEBUG) runtimeLog.debug('tick.completed', { height: env.height - 1, elapsedMs });
+      if (DEBUG) runtimeLog.debug('tick.completed', { height: env.state.height - 1, elapsedMs });
     },
   };
 };

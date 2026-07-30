@@ -6,7 +6,7 @@ import { notifyRuntimeSyncAfterCommit } from '../storage/runtime-storage';
 describe('post-commit Runtime sync notification', () => {
   test('reports a broken channel without changing the durable frame', () => {
     const env = createEmptyEnv('runtime-sync-notification-failure');
-    env.height = 17;
+    env.state.height = 17;
     const closeCalls: number[] = [];
 
     const error = notifyRuntimeSyncAfterCommit(env, {
@@ -16,13 +16,13 @@ describe('post-commit Runtime sync notification', () => {
           throw new Error('CHANNEL_BROKEN');
         },
         close: () => {
-          closeCalls.push(env.height);
+          closeCalls.push(env.state.height);
         },
       }),
     });
 
     expect(error?.message).toBe('RUNTIME_SYNC_NOTIFICATION_FAILED:height=17');
-    expect(env.height).toBe(17);
+    expect(env.state.height).toBe(17);
     expect(closeCalls).toEqual([17]);
     expect(env.runtimeState?.runtimeSyncChannel).toBeNull();
     expect(env.runtimeState?.runtimeSyncNotificationFailure).toEqual({
@@ -33,7 +33,7 @@ describe('post-commit Runtime sync notification', () => {
 
   test('clears the previous failure after a successful notification', () => {
     const env = createEmptyEnv('runtime-sync-notification-recovery');
-    env.height = 18;
+    env.state.height = 18;
     env.runtimeState!.runtimeSyncNotificationFailure = {
       height: 17,
       message: 'previous failure',

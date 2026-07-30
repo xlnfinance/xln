@@ -66,7 +66,7 @@ const frozenRepaymentReplica = () => {
   state.accounts.set(counterpartyId, account);
   addReplica(env, state, signerId);
   addReplica(env, makeState(counterpartyId, counterpartySignerId, jurisdiction), counterpartySignerId);
-  const replica = env.eReplicas.get(`${entityId}:${signerId}`);
+  const replica = env.state.eReplicas.get(`${entityId}:${signerId}`);
   if (!replica) throw new Error('TEST_REPLICA_MISSING');
   return { env, replica: replica as EntityReplica, account, entityId, signerId };
 };
@@ -75,7 +75,7 @@ describe('deferred Account mempool scheduling', () => {
   test('a frozen-only mempool remains durable without waking empty Entity frames', async () => {
     const { env, replica, account, entityId, signerId } = frozenRepaymentReplica();
 
-    const proposal = await proposeAccountFrame(createAccountConsensusContext(env), account, env.timestamp);
+    const proposal = await proposeAccountFrame(createAccountConsensusContext(env), account, env.state.timestamp);
     expect(proposal.success).toBe(false);
     expect(proposal.error).toContain('deferred');
     expect(account.mempool.map((tx) => tx.type)).toEqual(['lending_repay']);
@@ -97,7 +97,7 @@ describe('deferred Account mempool scheduling', () => {
 
   test('a semantic J prefix finalizes even while an unrelated repayment is frozen', async () => {
     const { env, replica, account, entityId, signerId } = frozenRepaymentReplica();
-    env.timestamp = 2_000;
+    env.state.timestamp = 2_000;
     replica.state.prevFrameHash = `0x${'50'.repeat(32)}`;
     const jHeight = 1;
     const jBlockHash = `0x${'51'.repeat(32)}`;

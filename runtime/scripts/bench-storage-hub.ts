@@ -195,7 +195,7 @@ const runQuiet = async <T>(enabled: boolean, fn: () => Promise<T>): Promise<T> =
 };
 
 const findReplica = (env: RuntimeReplica, participant: Participant): EntityReplica => {
-  const replica = env.eReplicas.get(`${participant.entityId}:${participant.signerId}`);
+  const replica = env.state.eReplicas.get(`${participant.entityId}:${participant.signerId}`);
   if (!replica) {
     throw new Error(`REPLICA_NOT_FOUND: ${participant.name}`);
   }
@@ -401,7 +401,7 @@ const describeRouteLockRefs = (
 
 const summarizeOpenHtlcLocks = (env: RuntimeReplica): OpenHtlcLockStats => {
   const stats: OpenHtlcLockStats = { total: 0, entityLockBook: 0, accountLocks: 0, htlcRoutes: 0, samples: [] };
-  for (const replica of env.eReplicas.values()) {
+  for (const replica of env.state.eReplicas.values()) {
     const entityId = String(replica.state.entityId || '').slice(0, 10);
     for (const lock of replica.state.lockBook?.values?.() ?? []) {
       stats.entityLockBook += 1;
@@ -572,7 +572,7 @@ async function main() {
   env.dbNamespace = runtimeId;
   env.quietRuntimeLogs = true;
   env.scenarioMode = true;
-  env.timestamp = 1;
+  env.state.timestamp = 1;
   env.runtimeConfig = {
     ...(env.runtimeConfig || {}),
     snapshotIntervalFrames: snapshotInterval,
@@ -608,7 +608,7 @@ async function main() {
     stateRoot: new Uint8Array(32),
     mempool: [],
     blockDelayMs: 0,
-    lastBlockTimestamp: env.timestamp,
+    lastBlockTimestamp: env.state.timestamp,
     position: { x: 0, y: 0, z: 0 },
     depositoryAddress: jurisdiction.depositoryAddress,
     entityProviderAddress: jurisdiction.entityProviderAddress,
@@ -620,7 +620,7 @@ async function main() {
       deltaTransformer: '0x000000000000000000000000000000000000de17',
     },
   };
-  env.jReplicas.set(jurisdiction.name, benchJReplica);
+  env.state.jReplicas.set(jurisdiction.name, benchJReplica);
 
   const hub = makeParticipant(seed, 1, 'hub');
   const users: Participant[] = [];
@@ -634,7 +634,7 @@ async function main() {
   const importStartedAt = getPerfMs();
   await runQuiet(!verbose, () => importParticipants(env, [hub, ...users], importBatch, jurisdiction));
   const importMs = getPerfMs() - importStartedAt;
-  console.log(`Imported replicas: ${env.eReplicas.size} in ${importMs.toFixed(2)}ms`);
+  console.log(`Imported replicas: ${env.state.eReplicas.size} in ${importMs.toFixed(2)}ms`);
 
   const openStartedAt = getPerfMs();
   for (let offset = 0; offset < users.length; offset += openBatch) {
@@ -648,7 +648,7 @@ async function main() {
           runtimeId,
           entityId: hub.entityId,
           counterpartyId: user.entityId,
-          timestamp: env.timestamp,
+          timestamp: env.state.timestamp,
         }),
       );
     }
@@ -845,7 +845,7 @@ async function main() {
   let crashRecoveredHeight: number | null = null;
   if (storageEnabled) {
     if (hasFlag('--debug-replica-meta')) {
-      for (const replica of env.eReplicas.values()) {
+      for (const replica of env.state.eReplicas.values()) {
         for (const { frame } of replica.certifiedFrameLineage ?? []) {
           const recomputed = createEntityFrameHashFromStateRoot(
             frame.parentFrameHash,
@@ -898,7 +898,7 @@ async function main() {
       storageLatestFirstMismatchLoadedJson = comparison.firstMismatchLoadedJson;
     }
     storageMerkleBuildMs = getPerfMs() - liveMerkleStartedAt;
-    for (let height = 1; height <= env.height; height += recoveryScanStep) {
+    for (let height = 1; height <= env.state.height; height += recoveryScanStep) {
       const recoveryStartedAt = getPerfMs();
       const recovered = await loadOptionalEntityStateFromStorageDb(env, hub.entityId, height);
       const recoveryMs = getPerfMs() - recoveryStartedAt;
@@ -915,7 +915,7 @@ async function main() {
     }
     storageHistoricalHeight = Math.max(
       storageFirstPresentHeight ?? 1,
-      Math.min(env.height - 1, storageSnapshotPeriod),
+      Math.min(env.state.height - 1, storageSnapshotPeriod),
     );
     const historicalLoadStartedAt = getPerfMs();
     const historical = await loadOptionalEntityStateFromStorageDb(env, hub.entityId, storageHistoricalHeight);
@@ -941,7 +941,7 @@ async function main() {
     crashRecoveryMs = getPerfMs() - crashStartedAt;
     if (!recoveredEnv) throw new Error('CRASH_RECOVERY_LOAD_NULL');
     const recoveredHub = findReplica(recoveredEnv, hub);
-    crashRecoveredHeight = recoveredEnv.height;
+    crashRecoveredHeight = recoveredEnv.state.height;
     crashRecoveredHubAccountCount = recoveredHub.state.accounts.size;
     await closeRuntimeDb(recoveredEnv);
     await closeInfraDb(recoveredEnv);
@@ -1089,7 +1089,7 @@ async function main() {
         importBatch,
         openBatch,
         paymentBatch,
-        envHeight: env.height,
+        envHeight: env.state.height,
         currentSnapshotBytes,
         hubEntityBytes,
         hubCoreProjectedBytes,

@@ -481,15 +481,15 @@ async function uploadRuntimeRecoverySnapshot(runtimeId: string, env: RuntimeRepl
   const normalizedRuntimeId = normalizeRuntimeId(runtimeId);
   const runtime = get(runtimesState).runtimes[normalizedRuntimeId];
   if (!runtime?.seed) return;
-  if (Number(env.height || 0) <= 0) return;
-  if (!(env.eReplicas instanceof Map) || env.eReplicas.size === 0) return;
+  if (Number(env.state.height || 0) <= 0) return;
+  if (!(env.state.eReplicas instanceof Map) || env.state.eReplicas.size === 0) return;
   const towers = getConfiguredRecoveryTowers(runtime);
   if (towers.length === 0) return;
 
   const previous = runtimeRecoveryUploadMeta.get(normalizedRuntimeId);
-  if (previous && Number(env.height || 0) < previous.lastUploadedHeight) return;
+  if (previous && Number(env.state.height || 0) < previous.lastUploadedHeight) return;
 
-  const height = Math.max(0, Math.floor(Number(env.height || 0)));
+  const height = Math.max(0, Math.floor(Number(env.state.height || 0)));
   if (shouldSkipRuntimeRecoveryUploadAtHeight(previous, height)) return;
   const signers = buildRuntimeRecoverySigners(runtime);
   const meta = buildRuntimeRecoveryMeta(runtime);
@@ -769,7 +769,7 @@ const getRuntimeFatalDiagnostics = (env: RuntimeReplica, replicaName?: string): 
       timestamp: entry.timestamp ?? null,
     }));
   const recentLogs = cleanLogs.slice(-8);
-  const replica = replicaName ? env.jReplicas.get(replicaName) : env.jReplicas.values().next().value;
+  const replica = replicaName ? env.state.jReplicas.get(replicaName) : env.state.jReplicas.values().next().value;
   const jState = replica
     ? {
         name: replica.name ?? null,
@@ -785,8 +785,8 @@ const getRuntimeFatalDiagnostics = (env: RuntimeReplica, replicaName?: string): 
   return JSON.stringify(
     {
       runtimeId: env.runtimeId ?? null,
-      height: env.height ?? null,
-      latestHeight: env.height ?? null,
+      height: env.state.height ?? null,
+      latestHeight: env.state.height ?? null,
       loopActive: env.runtimeState?.loopActive ?? null,
       jState,
       recentErrors,
@@ -1202,7 +1202,7 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
     throw new Error(`[VaultStore] Strict restore failed for ${runtime.id.slice(0, 12)}: persisted env missing`);
   }
 
-  if (env && (!env.jReplicas || env.jReplicas.size === 0)) {
+  if (env && (!env.state.jReplicas || env.state.jReplicas.size === 0)) {
     if (strictRestore && !restoredFromTower) {
       throw new Error(
         `[VaultStore] Strict restore failed for ${runtime.id.slice(0, 12)}: restored env missing jReplicas`,
@@ -1219,17 +1219,17 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
   }
 
   const hasLiveJAdapter = (targetEnv: RuntimeReplica | null): boolean => {
-    if (!targetEnv?.jReplicas || targetEnv.jReplicas.size === 0) return false;
-    for (const [, jReplica] of targetEnv.jReplicas.entries()) {
+    if (!targetEnv?.state.jReplicas || targetEnv.state.jReplicas.size === 0) return false;
+    for (const [, jReplica] of targetEnv.state.jReplicas.entries()) {
       if (hasConnectedJurisdictionAdapter(jReplica)) return true;
     }
     return false;
   };
 
   const hasEntityReplica = (targetEntityId: string): boolean => {
-    if (!env?.eReplicas) return false;
+    if (!env?.state.eReplicas) return false;
     const target = String(targetEntityId).toLowerCase();
-    for (const key of env.eReplicas.keys()) {
+    for (const key of env.state.eReplicas.keys()) {
       const [entityId] = String(key).split(':');
       if (String(entityId || '').toLowerCase() === target) return true;
     }
@@ -1240,7 +1240,7 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
     for (const signer of runtime.signers || []) {
       if (!signer?.entityId) continue;
       if (!hasEntityReplica(signer.entityId)) {
-        const restoredEntityKeys = env.eReplicas ? Array.from(env.eReplicas.keys()).map(key => String(key)) : [];
+        const restoredEntityKeys = env.state.eReplicas ? Array.from(env.state.eReplicas.keys()).map(key => String(key)) : [];
         errorLog.log(
           `[VaultStore] Strict restore failed for ${runtime.id.slice(0, 12)}: missing restored entity ${signer.entityId.slice(0, 12)}`,
           'Runtime Restore',
@@ -1311,7 +1311,7 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
     env.runtimeSeed = runtimeSeed;
     env.runtimeId = runtimeIdLower;
     env.dbNamespace = runtimeIdLower;
-    for (const [name, jReplica] of env.jReplicas.entries()) {
+    for (const [name, jReplica] of env.state.jReplicas.entries()) {
       if (!hasRuntimeJurisdictionAddresses(jReplica)) {
         throw new Error(`RUNTIME_RESTORE_JURISDICTION_CONTRACTS_INCOMPLETE:${name}`);
       }
@@ -1468,7 +1468,7 @@ function registerRuntimeResumeListener(): void {
       const height = Number(event.data?.height ?? 0);
       if (!runtimeId || !Number.isFinite(height) || height <= 0) return;
       const runtimeEntry = get(runtimes).get(runtimeId);
-      const currentHeight = Number(runtimeEntry?.env?.height ?? 0);
+      const currentHeight = Number(runtimeEntry?.env?.state.height ?? 0);
       if (height <= currentHeight) return;
       void vaultOperations.refreshActiveRuntimeFromDbIfBehind().catch(error => {
         errorLog.log('Broadcast refresh failed', 'Runtime Resume', { runtimeId, height, currentHeight, error });
@@ -1565,7 +1565,7 @@ export const vaultOperations = {
       if (typeof xln.getPersistedLatestHeight !== 'function') return false;
 
       const persistedLatestHeight = Number((await xln.getPersistedLatestHeight(env)) || 0);
-      const currentHeight = Number(env.height || 0);
+      const currentHeight = Number(env.state.height || 0);
       if (persistedLatestHeight <= currentHeight) return false;
 
       await registerRuntimeSignerKeys(runtime, xln);
@@ -1682,14 +1682,14 @@ export const vaultOperations = {
             `importJ(${config.name}) failed: runtime loop halted\n${getRuntimeFatalDiagnostics(latestEnv, config.name)}`,
           );
         }
-        return hasRuntimeJurisdictionAddresses(latestEnv.jReplicas?.get?.(config.name));
+        return hasRuntimeJurisdictionAddresses(latestEnv.state.jReplicas?.get?.(config.name));
       },
       `importJ(${config.name})`,
       45_000,
       () => getRuntimeFatalDiagnostics(getLatestEnv(), config.name),
     );
     await waitForCondition(
-      () => hasRuntimeJurisdictionAddresses(getLatestEnv().jReplicas?.get?.(config.name)),
+      () => hasRuntimeJurisdictionAddresses(getLatestEnv().state.jReplicas?.get?.(config.name)),
       `importJ(${config.name}).addresses`,
       45_000,
       50,
@@ -1705,7 +1705,7 @@ export const vaultOperations = {
     if (normalizeRuntimeId(get(activeRuntimeId)) === runtimeId) {
       setXlnEnvironment(finalEnv);
     }
-    const imported = finalEnv.jReplicas?.get(config.name);
+    const imported = finalEnv.state.jReplicas?.get(config.name);
     return {
       ...config,
       ...(imported?.entityProviderDeploymentBlock !== undefined
@@ -2163,12 +2163,12 @@ export const vaultOperations = {
               ],
               entityInputs: [],
             },
-            () => hasRuntimeJurisdictionAddresses(newEnv?.jReplicas?.get?.(secondary.name)),
+            () => hasRuntimeJurisdictionAddresses(newEnv?.state.jReplicas?.get?.(secondary.name)),
             `createRuntime.importJ(${secondary.name})`,
             45_000,
           );
           await waitForCondition(
-            () => hasRuntimeJurisdictionAddresses(newEnv?.jReplicas?.get?.(secondary.name)),
+            () => hasRuntimeJurisdictionAddresses(newEnv?.state.jReplicas?.get?.(secondary.name)),
             `createRuntime.importJ(${secondary.name}).addresses`,
             45_000,
           );
@@ -2221,7 +2221,7 @@ export const vaultOperations = {
             entityInputs: [],
           },
           () => {
-            const reps = newEnv?.eReplicas;
+            const reps = newEnv?.state.eReplicas;
             if (!reps?.keys) return false;
             const entityIdNorm = String(entityId).toLowerCase();
             for (const key of reps.keys()) {

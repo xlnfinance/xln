@@ -975,7 +975,7 @@ const initializeEntityFrameState = (
     : normalized;
   clearEntityFrameEvents(state);
   state.crontabState ??= initCrontab();
-  const timestamp = frameTimestamp ?? env.timestamp;
+  const timestamp = frameTimestamp ?? env.state.timestamp;
   if (!Number.isSafeInteger(timestamp) || timestamp < 0) {
     throw new Error(`ENTITY_FRAME_TIMESTAMP_INVALID:${String(timestamp)}`);
   }

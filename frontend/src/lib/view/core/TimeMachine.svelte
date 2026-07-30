@@ -87,7 +87,7 @@
     const targetIndex = $timeIndex < 0 ? $history.length - 1 : Math.max(0, Math.min($timeIndex, $history.length - 1));
     const frame = $history[targetIndex];
     if (frame) {
-      const jReplicas = Array.from(frame.jReplicas.values()) as JReplica[];
+      const jReplicas = Array.from(frame.state.jReplicas.values()) as JReplica[];
       const stateRoot = jReplicas[0]?.stateRoot;
       const browserVMState = frame.browserVMState;
       const hasBrowserVMState = !!browserVMState &&
@@ -228,11 +228,11 @@
   // Format time from frame
   function formatTime(frameIndex: number): string {
     const snapshot = $history[frameIndex];
-    if (!snapshot?.timestamp) return '0:00.000';
+    if (!snapshot?.state.timestamp) return '0:00.000';
 
     // CRITICAL: timestamps are bigint in XLN, convert to number for math
-    const firstTimestamp = Number($history[0]?.timestamp || 0n);
-    const currentTimestamp = Number(snapshot.timestamp);
+    const firstTimestamp = Number($history[0]?.state.timestamp || 0n);
+    const currentTimestamp = Number(snapshot.state.timestamp);
     const elapsed = currentTimestamp - firstTimestamp;
 
     const minutes = Math.floor(elapsed / 60000);
@@ -504,7 +504,7 @@
   }
 
   async function scanRemoteHeight() {
-    const fallbackHeight = Number($history[selectedFrameIndex]?.height || $runtimeControllerHandle.height || 0);
+    const fallbackHeight = Number($history[selectedFrameIndex]?.state.height || $runtimeControllerHandle.height || 0);
     const raw = remoteScanHeightDraft.trim() || String(Math.max(1, Math.floor(fallbackHeight || 1)));
     const requestedHeight = Math.max(1, Math.floor(Number(raw)));
     if (!Number.isFinite(requestedHeight) || requestedHeight < 1) {
@@ -611,7 +611,7 @@
   $: progressPercent = maxTimeIndex > 0 ? (selectedFrameIndex / maxTimeIndex) * 100 : 0;
   $: selectedRuntimeHistoryHeight = isRemoteRuntime
     ? Number($runtimeHistoryFrames[selectedFrameIndex]?.height || 0)
-    : Number($history[selectedFrameIndex]?.height || 0);
+    : Number($history[selectedFrameIndex]?.state.height || 0);
   $: selectedRuntimeViewHeight = $isLive
     ? null
     : Math.max(0, Math.floor(selectedRuntimeHistoryHeight));

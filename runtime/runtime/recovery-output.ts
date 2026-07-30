@@ -79,7 +79,7 @@ const queueLocalReliableOutputs = (
     inputs,
     undefined,
     undefined,
-    env.timestamp,
+    env.state.timestamp,
     receipts,
   );
   return retained;
@@ -97,8 +97,8 @@ export const applyRecoveryRuntimeOutputPlan = (
       : {
           ...output,
           sourceRuntimeFrame: {
-            height: env.height,
-            timestamp: env.timestamp,
+            height: env.state.height,
+            timestamp: env.state.timestamp,
           },
         },
   );

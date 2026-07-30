@@ -73,7 +73,7 @@ test('account input without frame or settlement action fails fast', async () => 
   env.runtimeSeed = 'account-input-empty-failfast-seed';
   env.runtimeId = `0x${'33'.repeat(20)}`;
   const state = makeEntityState();
-  env.eReplicas.set(`${counterpartyId}:counterparty-signer`, {
+  env.state.eReplicas.set(`${counterpartyId}:counterparty-signer`, {
     entityId: counterpartyId,
     signerId: 'counterparty-signer',
     entityEncPubKey: '',
@@ -95,7 +95,7 @@ test('account input without frame or settlement action fails fast', async () => 
     runtimeId: env.runtimeId,
     entityId,
     counterpartyId,
-    timestamp: env.timestamp,
+    timestamp: env.state.timestamp,
   });
   const previousScopes = process.env['XLN_LOG_SCOPES'];
   process.env['XLN_LOG_SCOPES'] = 'none';

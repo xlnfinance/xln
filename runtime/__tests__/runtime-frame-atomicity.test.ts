@@ -106,7 +106,7 @@ const makeAliasedBoardRuntimeInput = (): {
 
 const installJurisdiction = (env: RuntimeReplica): void => {
   env.activeJurisdiction = jurisdiction.name;
-  env.jReplicas.set(jurisdiction.name, createTestJReplica({
+  env.state.jReplicas.set(jurisdiction.name, createTestJReplica({
     name: jurisdiction.name,
     rpcs: [jurisdiction.address!],
     chainId: jurisdiction.chainId,
@@ -174,7 +174,7 @@ const installValidatorReplica = (
     isProposer: false,
     state: makeEntityState(entityId, config),
   };
-  env.eReplicas.set(`${entityId}:${validator}`, replica);
+  env.state.eReplicas.set(`${entityId}:${validator}`, replica);
   return replica;
 };
 
@@ -268,7 +268,7 @@ describe('runtime frame atomicity', () => {
     env.runtimeState!.processingPromise = new Promise<void>(resolve => {
       releaseWriter = resolve;
     });
-    const heightBefore = env.height;
+    const heightBefore = env.state.height;
     const waitingProcess = processRuntime(env);
 
     env.runtimeState!.lifecyclePhase = 'halted';
@@ -280,7 +280,7 @@ describe('runtime frame atomicity', () => {
     releaseWriter();
 
     await expect(waitingProcess).rejects.toThrow('RUNTIME_PROCESS_HALTED');
-    expect(env.height).toBe(heightBefore);
+    expect(env.state.height).toBe(heightBefore);
     expect(env.runtimeState?.processingPromise).toBeNull();
   });
 
@@ -682,7 +682,7 @@ describe('runtime frame atomicity', () => {
     enqueueRuntimeInput(env, { runtimeTxs: [cursorTx], entityInputs: [] });
     await processRuntime(env);
 
-    const persisted = await readStorageFrameRecord(getRuntimeWalDb(env), env.height);
+    const persisted = await readStorageFrameRecord(getRuntimeWalDb(env), env.state.height);
     expect(persisted?.runtimeInput.runtimeTxs).toEqual([{
       type: 'advanceJWatcherCursor',
       data: {
@@ -707,11 +707,11 @@ describe('runtime frame atomicity', () => {
       padding: 'x'.repeat(4 * 1024 * 1024 + 1),
     } as RoutedEntityInput & { padding: string };
 
-    expect(handleInboundP2PEntityInput(env, sourceRuntimeId, input, env.timestamp))
+    expect(handleInboundP2PEntityInput(env, sourceRuntimeId, input, env.state.timestamp))
       .toEqual({ kind: 'queued' });
     input.padding = '';
     for (let index = 0; index < 1_024; index += 1) {
-      expect(handleInboundP2PEntityInput(env, sourceRuntimeId, input, env.timestamp))
+      expect(handleInboundP2PEntityInput(env, sourceRuntimeId, input, env.state.timestamp))
         .toEqual({ kind: 'queued' });
     }
     const reliable = createTestReliableReceipt(env, replica.entityId, replica.signerId);
@@ -776,7 +776,7 @@ describe('runtime frame atomicity', () => {
       signerId: otherReplica.signerId,
       entityTxs: [],
     };
-    expect(handleInboundP2PEntityInput(otherEnv, address('53'), otherInput, otherEnv.timestamp))
+    expect(handleInboundP2PEntityInput(otherEnv, address('53'), otherInput, otherEnv.state.timestamp))
       .toEqual({ kind: 'queued' });
     expect(otherEnv.runtimeMempool?.entityInputs).toEqual([{ ...otherInput, from: address('53') }]);
     expect(activeEnv.runtimeMempool?.entityInputs).toHaveLength(0);
@@ -793,7 +793,7 @@ describe('runtime frame atomicity', () => {
         activeEnv,
         address('54'),
         postFrameInput,
-        activeEnv.timestamp,
+        activeEnv.state.timestamp,
       )).toEqual({ kind: 'queued' });
       expect(activeEnv.runtimeMempool?.entityInputs)
         .toEqual([{ ...postFrameInput, from: address('54') }]);
@@ -806,14 +806,14 @@ describe('runtime frame atomicity', () => {
     const env = createEmptyEnv(`runtime apply atomicity ${TEST_RUN_ID}`);
     env.scenarioMode = true;
     env.quietRuntimeLogs = true;
-    env.timestamp = 1_000;
+    env.state.timestamp = 1_000;
     installJurisdiction(env);
 
     const leader = address('11');
     const validator = address('12');
     const replica = installValidatorReplica(env, leader, validator);
     env.runtimeState!.entityRuntimeHints = new Map([
-      [hash('21'), { runtimeId: address('22'), seenAt: env.timestamp }],
+      [hash('21'), { runtimeId: address('22'), seenAt: env.state.timestamp }],
     ]);
 
     const remoteEntityId = hash('31');
@@ -850,7 +850,7 @@ describe('runtime frame atomicity', () => {
     const ingress: RuntimeInput = {
       runtimeTxs: [imported],
       entityInputs: [first, second],
-      timestamp: env.timestamp,
+      timestamp: env.state.timestamp,
     };
     const ingressBytes = safeStringify({
       runtimeTxs: ingress.runtimeTxs,
@@ -862,22 +862,22 @@ describe('runtime frame atomicity', () => {
     const control = createEmptyEnv(`runtime apply atomicity control ${TEST_RUN_ID}`);
     control.scenarioMode = true;
     control.quietRuntimeLogs = true;
-    control.timestamp = env.timestamp;
+    control.state.timestamp = env.state.timestamp;
     installJurisdiction(control);
     const controlReplica = installValidatorReplica(control, leader, validator);
     control.runtimeState!.entityRuntimeHints = new Map([
-      [hash('21'), { runtimeId: address('22'), seenAt: control.timestamp }],
-      [controlReplica.entityId, { runtimeId: address('23'), seenAt: control.timestamp }],
+      [hash('21'), { runtimeId: address('22'), seenAt: control.state.timestamp }],
+      [controlReplica.entityId, { runtimeId: address('23'), seenAt: control.state.timestamp }],
     ]);
     enqueueRuntimeInput(control, {
       runtimeTxs: [structuredClone(imported)],
       entityInputs: [structuredClone(first)],
-      timestamp: control.timestamp,
+      timestamp: control.state.timestamp,
     });
     await processRuntime(control);
-    expect(control.eReplicas.get(`${controlReplica.entityId}:${validator}`)?.mempool).toHaveLength(1);
+    expect(control.state.eReplicas.get(`${controlReplica.entityId}:${validator}`)?.mempool).toHaveLength(1);
     expect(control.runtimeState?.entityRuntimeHints?.get(remoteEntityId)?.runtimeId).toBe(remoteRuntimeId);
-    expect(control.eReplicas.get(`${imported.entityId}:${imported.signerId}`)?.certifiedFrameAnchor)
+    expect(control.state.eReplicas.get(`${imported.entityId}:${imported.signerId}`)?.certifiedFrameAnchor)
       .toBeDefined();
 
     const replicaBefore = safeStringify(buildCanonicalEntityReplicaSnapshot(replica));
@@ -886,22 +886,22 @@ describe('runtime frame atomicity', () => {
 
     await expect(processRuntime(env)).rejects.toThrow('RUNTIME_ENTITY_INPUT_UNKNOWN_TARGET');
 
-    const restored = env.eReplicas.get(`${replica.entityId}:${validator}`);
+    const restored = env.state.eReplicas.get(`${replica.entityId}:${validator}`);
     expect(restored).toBeDefined();
     expect(safeStringify(restored)).toBe(replicaBefore);
     expect(restored?.mempool).toEqual([]);
     expect(restored?.proposal).toBeUndefined();
     expect(restored?.lockedFrame).toBeUndefined();
     expect(restored?.lastConsensusProgressAt).toBeUndefined();
-    expect(env.eReplicas.has(`${imported.entityId}:${imported.signerId}`)).toBe(false);
-    expect([...env.eReplicas.values()].some(candidate => candidate.certifiedFrameAnchor)).toBe(false);
-    expect([...env.eReplicas.values()].some(candidate => candidate.certifiedFrameLineage?.length)).toBe(false);
+    expect(env.state.eReplicas.has(`${imported.entityId}:${imported.signerId}`)).toBe(false);
+    expect([...env.state.eReplicas.values()].some(candidate => candidate.certifiedFrameAnchor)).toBe(false);
+    expect([...env.state.eReplicas.values()].some(candidate => candidate.certifiedFrameLineage?.length)).toBe(false);
     expect(safeStringify(env.runtimeState!.entityRuntimeHints)).toBe(hintsBefore);
     expect(env.runtimeState!.entityRuntimeHints?.has(remoteEntityId)).toBe(false);
     expect(safeStringify(exactQueuedInput(env))).toBe(ingressBytes);
     expect(env.runtimeMempool?.queuedAt).toBe(1_000);
-    expect(env.height).toBe(0);
-    expect(env.timestamp).toBe(1_000);
+    expect(env.state.height).toBe(0);
+    expect(env.state.timestamp).toBe(1_000);
   });
 
   test('post-mutation LevelDB failure halts unreadable RAM and retains exact input', async () => {
@@ -920,10 +920,10 @@ describe('runtime frame atomicity', () => {
     enqueueRuntimeInput(env, { runtimeTxs: [baselineImport], entityInputs: [] });
     await processRuntime(env);
 
-    const baselineReplica = env.eReplicas.get(`${baselineImport.entityId}:${baselineImport.signerId}`);
+    const baselineReplica = env.state.eReplicas.get(`${baselineImport.entityId}:${baselineImport.signerId}`);
     if (!baselineReplica) throw new Error('TEST_BASELINE_REPLICA_MISSING');
-    const heightBefore = env.height;
-    const timestampBefore = env.timestamp;
+    const heightBefore = env.state.height;
+    const timestampBefore = env.state.timestamp;
 
     await corruptCurrentHeadAhead(env);
 
@@ -973,8 +973,8 @@ describe('runtime frame atomicity', () => {
     const baselineImport = localImportReplicaTx(env, '7');
     enqueueRuntimeInput(env, { runtimeTxs: [baselineImport], entityInputs: [] });
     await processRuntime(env);
-    const heightBefore = env.height;
-    const timestampBefore = env.timestamp;
+    const heightBefore = env.state.height;
+    const timestampBefore = env.state.timestamp;
     await corruptCurrentHeadAhead(env);
 
     const attemptedImport = importReplicaTx('8');
@@ -1007,7 +1007,7 @@ describe('runtime frame atomicity', () => {
     }
     expect(observedDetachedIngressTail).toBe(true);
     try {
-      expect(handleInboundP2PEntityInput(env, sourceRuntimeId, frameB, env.timestamp))
+      expect(handleInboundP2PEntityInput(env, sourceRuntimeId, frameB, env.state.timestamp))
         .toEqual({ kind: 'queued' });
       await expect(processPromise).rejects.toThrow('STORAGE_CURRENT_AHEAD_OF_HISTORY');
 
@@ -1042,7 +1042,7 @@ describe('runtime frame atomicity', () => {
     const baselineImport = localImportReplicaTx(env, '9');
     enqueueRuntimeInput(env, { runtimeTxs: [baselineImport], entityInputs: [] });
     await processRuntime(env);
-    const heightBefore = env.height;
+    const heightBefore = env.state.height;
 
     const frameA = importReplicaTx('a');
     enqueueRuntimeInput(env, { runtimeTxs: [frameA], entityInputs: [] });
@@ -1067,7 +1067,7 @@ describe('runtime frame atomicity', () => {
     };
     const sourceRuntimeId = address('a4');
     try {
-      expect(handleInboundP2PEntityInput(env, sourceRuntimeId, frameB, env.timestamp))
+      expect(handleInboundP2PEntityInput(env, sourceRuntimeId, frameB, env.state.timestamp))
         .toEqual({ kind: 'queued' });
       // The transport accepted frameB while this R-frame was running. It belongs
       // to the next frame even if persistence quiesces before this frame commits.
@@ -1076,8 +1076,8 @@ describe('runtime frame atomicity', () => {
       env.runtimeState!.persistencePaused = true;
       await processPromise;
 
-      expect(env.height).toBe(heightBefore + 1);
-      expect(env.eReplicas.has(`${frameA.entityId}:${frameA.signerId}`)).toBe(true);
+      expect(env.state.height).toBe(heightBefore + 1);
+      expect(env.state.eReplicas.has(`${frameA.entityId}:${frameA.signerId}`)).toBe(true);
       expect(env.runtimeMempool?.entityInputs).toEqual([{ ...frameB, from: sourceRuntimeId }]);
       expect(env.runtimeState?.pendingReliableIngress?.size ?? 0).toBe(0);
     } finally {

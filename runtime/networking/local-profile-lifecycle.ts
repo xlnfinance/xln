@@ -24,7 +24,7 @@ const hasLocalSigner = (env: RuntimeReplica, signerId: string): boolean => {
 
 const entityReplicas = (env: RuntimeReplica, entityId: string): EntityReplica[] => {
   const normalizedEntityId = normalize(entityId);
-  return [...env.eReplicas.values()].filter(
+  return [...env.state.eReplicas.values()].filter(
     (replica) => normalize(replica.entityId) === normalizedEntityId,
   );
 };
@@ -100,7 +100,7 @@ export const collectDueLocalProfileCertificationInputs = (
     ? new Set([...candidateEntityIds].map(normalize))
     : undefined;
   const localEntityIds = new Set(
-    [...env.eReplicas.values()]
+    [...env.state.eReplicas.values()]
       .filter((replica) => (!candidates || candidates.has(normalize(replica.entityId))))
       .filter((replica) => hasLocalSigner(env, replica.signerId))
       .map((replica) => normalize(replica.entityId)),

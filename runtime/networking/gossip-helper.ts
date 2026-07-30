@@ -43,7 +43,7 @@ const buildProfileJurisdiction = (state: EntityState): ProfileJurisdiction | und
 
 const buildProfileMirrors = (env: RuntimeReplica, entityState: EntityState): ProfileMirror[] => {
   const mirrors = new Map<string, ProfileMirror>();
-  for (const replica of env.eReplicas?.values?.() || []) {
+  for (const replica of env.state.eReplicas?.values?.() || []) {
     const entityId = String(replica?.state?.entityId || replica?.entityId || '').trim();
     if (!entityId || entityId.toLowerCase() === entityState.entityId.toLowerCase()) continue;
     if (getSignerPrivateKeyIfAvailable(env, replica.signerId) === null) continue;
@@ -170,7 +170,7 @@ export const createProfileSignerResolver = (env: RuntimeReplica): ProfileSignerR
 export const getNextProfileTimestamp = (env: RuntimeReplica, entityId: string, fallbackTimestamp?: number): number => {
   const existingProfile = env.gossip.getProfiles().find((profile) => profile.entityId === entityId);
   const lastTimestamp = existingProfile?.lastUpdated ?? 0;
-  const candidate = typeof fallbackTimestamp === 'number' ? fallbackTimestamp : env.timestamp;
+  const candidate = typeof fallbackTimestamp === 'number' ? fallbackTimestamp : env.state.timestamp;
   return Math.max(1, lastTimestamp + 1, candidate);
 };
 

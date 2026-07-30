@@ -416,7 +416,7 @@ const collectCertifiedBoardHistoryRoots = async (
   const remember = (root: string | undefined): void => {
     if (root) roots.add(root);
   };
-  for (const { state } of env.eReplicas.values()) remember(certifiedBoardRoot(state));
+  for (const { state } of env.state.eReplicas.values()) remember(certifiedBoardRoot(state));
   for (const height of await listSnapshotHeights(walDb)) {
     const docs = await readSnapshotDocs(walDb, height);
     for (const doc of docs) if (doc.family === 'entity') remember(certifiedBoardRoot(doc.value));
@@ -824,14 +824,14 @@ const runStorageSnapshotLifecycle = async (
     const snapshot = await createSnapshot(
       db,
       walDb,
-      options.env.height,
-      options.env.timestamp,
+      options.env.state.height,
+      options.env.state.timestamp,
       options.onPersistenceBoundary,
     );
     snapshotDocs = snapshot.docCount;
     snapshotBytes = snapshot.bytes;
     retainedHistoryBytes += snapshotBytes;
-    latestSnapshotHeight = options.env.height;
+    latestSnapshotHeight = options.env.state.height;
     const publishedHead = {
       ...(await readHead(walDb, config)),
       latestSnapshotHeight,
@@ -899,7 +899,7 @@ const runStorageSnapshotLifecycle = async (
     const rotated = await options.rotateEpochDb(
       options.env,
       latestSnapshotHeight,
-      options.env.timestamp,
+      options.env.state.timestamp,
     );
     epochDbRotated = rotated !== false;
     if (epochDbRotated) {
@@ -969,14 +969,14 @@ const prepareStorageFrameSave = async (options: StorageFrameSaveOptions) => {
   const appliedRuntimeInput =
     options.currentFrameInput ?? { runtimeTxs: [], entityInputs: [] };
   const snapshotDue =
-    options.env.height === 1 ||
-    options.env.height % config.snapshotPeriodFrames === 0;
+    options.env.state.height === 1 ||
+    options.env.state.height % config.snapshotPeriodFrames === 0;
   const snapshotRequiredByBytes =
     head.epochReplayBytes + encodeBuffer(appliedRuntimeInput).byteLength >=
     config.epochMaxBytes;
   const shouldMaterialize =
-    options.env.height === 1 ||
-    options.env.height % config.materializePeriodFrames === 0 ||
+    options.env.state.height === 1 ||
+    options.env.state.height % config.materializePeriodFrames === 0 ||
     snapshotDue ||
     snapshotRequiredByBytes;
 
@@ -1004,7 +1004,7 @@ const prepareStorageFrameSave = async (options: StorageFrameSaveOptions) => {
   const diffStartedAt = options.getPerfMs();
   const framePuts = buildDocPuts(options.env, frameTouched, replicaLookup);
   const frameBookDels = buildBookDeletionsFromOverlay(frameOverlayRecords);
-  const diff = buildDiffRecord(options.env.height, framePuts, frameBookDels);
+  const diff = buildDiffRecord(options.env.state.height, framePuts, frameBookDels);
   options.onPersistenceProgress?.('diff-built');
 
   return {
@@ -1045,21 +1045,21 @@ const resolveStorageAppendPosition = async (
   | { previousFrame: StorageFrameRecord | null; prevFrameHash: string }
 > => {
   if (options.stopStaleWriterOnHeadAhead) {
-    if (head.latestHeight > options.env.height) {
+    if (head.latestHeight > options.env.state.height) {
       return { staleWriterStopped: true };
     }
-    if (head.latestHeight === options.env.height) {
+    if (head.latestHeight === options.env.state.height) {
       const persisted = await readStorageFrameRecord(
         walDb,
-        options.env.height,
+        options.env.state.height,
       );
       if (persisted) return { staleWriterStopped: true };
     }
   }
-  if (head.latestHeight !== options.env.height - 1) {
+  if (head.latestHeight !== options.env.state.height - 1) {
     throw new Error(
       `STORAGE_APPEND_INVARIANT_FAILED: refusing to write frame ` +
-      `${options.env.height} after persisted head ${head.latestHeight}`,
+      `${options.env.state.height} after persisted head ${head.latestHeight}`,
     );
   }
   const previous =
@@ -1134,11 +1134,11 @@ const logReplicaMetaDebug = (
 ): void => {
   if (process.env['XLN_STORAGE_DEBUG_REPLICA_META'] !== '1') return;
   storageLog.info('replica_meta.debug', {
-    height: env.height,
+    height: env.state.height,
     digest: commitment.digest,
     checkpoint: checkpointed,
     consumptionNodes: getConsumptionNodeStore(env).size,
-    consumptionRoots: [...env.eReplicas.values()].map(replica => ({
+    consumptionRoots: [...env.state.eReplicas.values()].map(replica => ({
       entityId: replica.entityId,
       root: replica.state.consumptionAccumulator?.root ?? null,
       count: replica.state.consumptionAccumulator?.count?.toString() ?? null,
@@ -1200,8 +1200,8 @@ const prepareStorageStateCommitments = async (
 
   const canonicalHashDue =
     config.canonicalHashPeriodFrames > 0 &&
-    (options.env.height === 1 ||
-      options.env.height % config.canonicalHashPeriodFrames === 0);
+    (options.env.state.height === 1 ||
+      options.env.state.height % config.canonicalHashPeriodFrames === 0);
   const pendingNetworkOutputs =
     options.currentFrameOutputs ?? options.env.pendingNetworkOutputs ?? [];
   const runtimeMachineForPostState =
@@ -1350,15 +1350,15 @@ const buildStorageFrameRecordPlan = (
     options.currentFrameOutputs ?? [],
   );
   const frameBase: StorageFrameRecord = {
-    height: options.env.height,
-    timestamp: options.env.timestamp,
+    height: options.env.state.height,
+    timestamp: options.env.state.timestamp,
     prevFrameHash,
     replicaMetaDigest: commitments.replicaMetaCommitment.digest,
     replicaMetaCheckpoint: checkpointedLineagePlan !== null,
     replicaMetaStateMode: commitments.replicaMetaStateMode,
     postStateHash: computeStoragePostStateHash({
-      height: options.env.height,
-      timestamp: options.env.timestamp,
+      height: options.env.state.height,
+      timestamp: options.env.state.timestamp,
       replicaMetaDigest: commitments.replicaMetaCommitment.digest,
       runtimeMachine: commitments.runtimeMachineForPostState,
     }),
@@ -1406,8 +1406,8 @@ const buildStorageFrameRecordPlan = (
     ...frameBase,
     frameHash: computeStorageFrameHash(frameBase),
   } satisfies StorageFrameRecord;
-  const frameKey = keyFrame(options.env.height);
-  const diffKey = keyDiff(options.env.height);
+  const frameKey = keyFrame(options.env.state.height);
+  const diffKey = keyDiff(options.env.state.height);
   const frameBuffer = encodeBuffer(frameRecord);
   const diffBuffer = encodeBuffer(diff);
   const nodeBytes =
@@ -1430,8 +1430,8 @@ const buildStorageFrameRecordPlan = (
     touchedAccounts,
     touchedBookEntities,
     historyViewPuts: buildHistoryViewPuts({
-      height: options.env.height,
-      timestamp: options.env.timestamp,
+      height: options.env.state.height,
+      timestamp: options.env.state.timestamp,
       runtimeInput: appliedRuntimeInput,
       logs: frameLogs,
       touchedEntities,
@@ -1530,9 +1530,9 @@ const buildStorageCommitBatches = (
 
   const nextHead: StorageHead = {
     schemaVersion: STORAGE_SCHEMA_VERSION,
-    latestHeight: options.env.height,
+    latestHeight: options.env.state.height,
     latestMaterializedHeight: prepared.shouldMaterialize
-      ? options.env.height
+      ? options.env.state.height
       : Math.max(
           0,
           Math.floor(Number(prepared.head.latestMaterializedHeight ?? 0)),
@@ -1586,14 +1586,14 @@ const commitStorageFrame = async (
   if (frame.historyViewPuts.length > 0) {
     if (!(await options.tryOpenHistoryViewDb(options.env))) {
       throw new Error(
-        `HISTORY_VIEW_DB_OPEN_FAILED:height=${options.env.height}`,
+        `HISTORY_VIEW_DB_OPEN_FAILED:height=${options.env.state.height}`,
       );
     }
     const snapshots = await listSnapshotHeights(prepared.walDb);
     const reconciled = await reconcileHistoryViews({
       viewDb: options.getHistoryViewDb(options.env),
       firstWalHeight: snapshots[0] ?? 1,
-      latestWalHeight: options.env.height,
+      latestWalHeight: options.env.state.height,
       readWalFrame: height =>
         readStorageFrameRecord(prepared.walDb, height),
       config: prepared.config,
@@ -1644,7 +1644,7 @@ const commitStorageFrame = async (
     const viewDb = options.getHistoryViewDb(options.env);
     const result = await pruneHistoryViewRetention({
       db: viewDb,
-      height: options.env.height,
+      height: options.env.state.height,
       head: await readHistoryViewHead(viewDb, prepared.config),
       config: prepared.config,
       ...(options.onPersistenceBoundary
@@ -1704,7 +1704,7 @@ const finishStorageFrameSave = (
   if (verbose) {
     storageLog.info('persist.frame', {
       runtimeId: String(options.env.runtimeId || '').slice(0, 12),
-      frame: options.env.height,
+      frame: options.env.state.height,
       puts: prepared.diff.puts.length,
       dels: prepared.diff.dels.length,
       frameBytes: frame.frameBuffer.byteLength,

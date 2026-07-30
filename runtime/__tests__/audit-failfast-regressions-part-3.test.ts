@@ -437,8 +437,8 @@ const attachSigningReplica = (env: ReturnType<typeof createEmptyEnv>, entityId: 
   const config = makeSingleSignerConfigFor(signerId);
   const jurisdiction = config.jurisdiction!;
   const depository = browserDepository ?? jurisdiction.depositoryAddress;
-  if (!env.jReplicas.has('__audit_test__')) {
-    env.jReplicas.set('__audit_test__', {
+  if (!env.state.jReplicas.has('__audit_test__')) {
+    env.state.jReplicas.set('__audit_test__', {
       name: '__audit_test__',
       chainId: jurisdiction.chainId,
       rpcs: [],
@@ -458,7 +458,7 @@ const attachSigningReplica = (env: ReturnType<typeof createEmptyEnv>, entityId: 
       position: { x: 0, y: 0, z: 0 },
     });
   }
-  env.eReplicas.set(`${entityId}:${signerId}`, {
+  env.state.eReplicas.set(`${entityId}:${signerId}`, {
     entityId,
     signerId,
     entityEncPubKey: '',
@@ -494,7 +494,7 @@ const ensureCanonicalCommandBoardAuthority = async (env: RuntimeReplica, state: 
     }
     return;
   }
-  let replica = Array.from(env.jReplicas.values()).find(
+  let replica = Array.from(env.state.jReplicas.values()).find(
     candidate =>
       candidate.chainId === jurisdiction.chainId &&
       candidate.depositoryAddress?.toLowerCase() === jurisdiction.depositoryAddress.toLowerCase() &&
@@ -514,7 +514,7 @@ const buildQuorumAuthorizedFrameTxs = async (
   env: RuntimeReplica,
   state: EntityState,
   collectiveTxs: EntityTx[],
-  frameTimestamp: number = env.timestamp,
+  frameTimestamp: number = env.state.timestamp,
 ): Promise<EntityTx[]> => {
   await ensureCanonicalCommandBoardAuthority(env, state);
   const [proposer, ...otherValidators] = state.config.validators;
@@ -701,7 +701,7 @@ const sealAuditJSubmitAttempts = (env: RuntimeReplica, inputs: JInput[]): void =
         attemptId,
         batchGeneration,
       };
-      const existing = Array.from(env.eReplicas.values()).find(
+      const existing = Array.from(env.state.eReplicas.values()).find(
         replica =>
           replica.entityId.toLowerCase() === jTx.entityId.toLowerCase() &&
           replica.signerId.toLowerCase() === signerId.toLowerCase(),
@@ -743,7 +743,7 @@ const sealAuditJSubmitAttempts = (env: RuntimeReplica, inputs: JInput[]): void =
         submitAttempts: jTx.data.runtimeSubmitAttempt.attemptNumber,
         lastSubmittedAt: jTx.data.runtimeSubmitAttempt.attemptedAt,
       };
-      env.eReplicas.set(`${jTx.entityId}:${signerId}`, replica);
+      env.state.eReplicas.set(`${jTx.entityId}:${signerId}`, replica);
     }
   }
   registerPendingCommittedJOutbox(env, inputs);
@@ -764,7 +764,7 @@ describe('audit fail-fast regressions', () => {
     const env = createEmptyEnv(seed);
     env.scenarioMode = true;
     env.quietRuntimeLogs = true;
-    env.timestamp = 20_000;
+    env.state.timestamp = 20_000;
     const { signerId, entityId } = registerLazySigner(seed, '1');
     const counterpartyId = `0x${'34'.repeat(32)}`;
     const state = makeEntityState(entityId);
@@ -1000,7 +1000,7 @@ describe('audit fail-fast regressions', () => {
     const batchHash = `0x${'11'.repeat(32)}`;
     const env = createEmptyEnv('j-submit-fail-fast');
     env.runtimeId = signerId;
-    env.timestamp = 123;
+    env.state.timestamp = 123;
     env.scenarioMode = false;
     const state = makeEntityState(entityId);
     state.jBatchState = {
@@ -1029,7 +1029,7 @@ describe('audit fail-fast regressions', () => {
         submitAttempts: 1,
       },
     };
-    env.eReplicas.set(`${entityId}:1`, {
+    env.state.eReplicas.set(`${entityId}:1`, {
       entityId,
       signerId,
       entityEncPubKey: '',
@@ -1038,7 +1038,7 @@ describe('audit fail-fast regressions', () => {
       isProposer: true,
       state,
     } as EntityReplica);
-    env.jReplicas = new Map([
+    env.state.jReplicas = new Map([
       [
         'Testnet',
         {
@@ -1080,7 +1080,7 @@ describe('audit fail-fast regressions', () => {
                 signerId,
                 runtimeSubmitAttempt: { attemptId: 'transient-attempt-1', attemptNumber: 1, attemptedAt: 123 },
               },
-              timestamp: env.timestamp,
+              timestamp: env.state.timestamp,
             } as any,
           ],
         },
@@ -1127,7 +1127,7 @@ describe('audit fail-fast regressions', () => {
     const batch = { ...createEmptyBatch(), disputeFinalizations: [disputeFinalize] };
     const env = createEmptyEnv('j-submit-stale-dispute-finalize');
     env.runtimeId = signerId;
-    env.timestamp = 125;
+    env.state.timestamp = 125;
     const state = makeEntityState(entityId);
     state.jBatchState = {
       batch: createEmptyBatch(),
@@ -1146,7 +1146,7 @@ describe('audit fail-fast regressions', () => {
         submitAttempts: 1,
       },
     };
-    env.eReplicas.set(`${entityId}:1`, {
+    env.state.eReplicas.set(`${entityId}:1`, {
       entityId,
       signerId,
       entityEncPubKey: '',
@@ -1157,7 +1157,7 @@ describe('audit fail-fast regressions', () => {
     } as EntityReplica);
     let submitCalls = 0;
     let accountReadCalls = 0;
-    env.jReplicas = new Map([
+    env.state.jReplicas = new Map([
       [
         'Testnet',
         {
@@ -1196,7 +1196,7 @@ describe('audit fail-fast regressions', () => {
                 signerId,
                 runtimeSubmitAttempt: { attemptId: 'reconcile-before-1', attemptNumber: 1, attemptedAt: 125 },
               },
-              timestamp: env.timestamp,
+              timestamp: env.state.timestamp,
             } as any,
             {
               type: 'batch',
@@ -1209,7 +1209,7 @@ describe('audit fail-fast regressions', () => {
                 batchSize: 0,
                 runtimeSubmitAttempt: { attemptId: 'reconcile-before-2', attemptNumber: 1, attemptedAt: 125 },
               },
-              timestamp: env.timestamp,
+              timestamp: env.state.timestamp,
             } as any,
           ],
         },
@@ -1232,10 +1232,10 @@ describe('audit fail-fast regressions', () => {
     const initialProofbodyHash = `0x${'cd'.repeat(32)}`;
     const env = createEmptyEnv('j-submit-post-failure-reconcile');
     env.runtimeId = signerId;
-    env.timestamp = 126;
+    env.state.timestamp = 126;
     let accountReadCalls = 0;
     let submitCalls = 0;
-    env.jReplicas = new Map([
+    env.state.jReplicas = new Map([
       [
         'Testnet',
         {
@@ -1294,7 +1294,7 @@ describe('audit fail-fast regressions', () => {
                 signerId,
                 runtimeSubmitAttempt: { attemptId: 'reconcile-after-1', attemptNumber: 1, attemptedAt: 126 },
               },
-              timestamp: env.timestamp,
+              timestamp: env.state.timestamp,
             } as any,
             {
               type: 'batch',
@@ -1307,7 +1307,7 @@ describe('audit fail-fast regressions', () => {
                 batchSize: 0,
                 runtimeSubmitAttempt: { attemptId: 'reconcile-after-2', attemptNumber: 1, attemptedAt: 126 },
               },
-              timestamp: env.timestamp,
+              timestamp: env.state.timestamp,
             } as any,
           ],
         },
@@ -1334,8 +1334,8 @@ describe('audit fail-fast regressions', () => {
     const signerId = `0x${'cf'.repeat(20)}`;
     const env = createEmptyEnv('j-submit-unproven-e5');
     env.runtimeId = signerId;
-    env.timestamp = 126;
-    env.jReplicas = new Map([
+    env.state.timestamp = 126;
+    env.state.jReplicas = new Map([
       [
         'Testnet',
         {
@@ -1376,7 +1376,7 @@ describe('audit fail-fast regressions', () => {
                 signerId,
                 runtimeSubmitAttempt: { attemptId: 'fatal-e5-1', attemptNumber: 1, attemptedAt: 126 },
               },
-              timestamp: env.timestamp,
+              timestamp: env.state.timestamp,
             } as any,
           ],
         },
@@ -1399,7 +1399,7 @@ describe('audit fail-fast regressions', () => {
     const batchHash = `0x${'12'.repeat(32)}`;
     const env = createEmptyEnv('j-submit-staticcall-fail-fast');
     env.runtimeId = signerId;
-    env.timestamp = 124;
+    env.state.timestamp = 124;
     env.scenarioMode = false;
     const state = makeEntityState(entityId);
     state.jBatchState = {
@@ -1428,7 +1428,7 @@ describe('audit fail-fast regressions', () => {
         submitAttempts: 1,
       },
     };
-    env.eReplicas.set(`${entityId}:1`, {
+    env.state.eReplicas.set(`${entityId}:1`, {
       entityId,
       signerId,
       entityEncPubKey: '',
@@ -1437,7 +1437,7 @@ describe('audit fail-fast regressions', () => {
       isProposer: true,
       state,
     } as EntityReplica);
-    env.jReplicas = new Map([
+    env.state.jReplicas = new Map([
       [
         'Testnet',
         {
@@ -1478,7 +1478,7 @@ describe('audit fail-fast regressions', () => {
                 signerId,
                 runtimeSubmitAttempt: { attemptId: 'fatal-e3-1', attemptNumber: 1, attemptedAt: 124 },
               },
-              timestamp: env.timestamp,
+              timestamp: env.state.timestamp,
             } as any,
           ],
         },
@@ -1504,9 +1504,9 @@ describe('audit fail-fast regressions', () => {
     const remoteSignerId = `0x${'22'.repeat(20)}`;
     const env = createEmptyEnv('j-submit-non-local-signer-skip');
     env.runtimeId = localRuntimeId;
-    env.timestamp = 125;
+    env.state.timestamp = 125;
     let adapterCalls = 0;
-    env.jReplicas = new Map([
+    env.state.jReplicas = new Map([
       [
         'Testnet',
         {
@@ -1550,7 +1550,7 @@ describe('audit fail-fast regressions', () => {
                 signerId: remoteSignerId,
                 runtimeSubmitAttempt: { attemptId: 'non-local-1', attemptNumber: 1, attemptedAt: 125 },
               },
-              timestamp: env.timestamp,
+              timestamp: env.state.timestamp,
             } as any,
           ],
         },
@@ -1573,9 +1573,9 @@ describe('audit fail-fast regressions', () => {
     const localScenarioSignerId = '97';
     const env = createEmptyEnv('j-submit-local-multi-signer');
     env.runtimeId = runtimeId;
-    env.timestamp = 126;
+    env.state.timestamp = 126;
     let adapterCalls = 0;
-    env.jReplicas = new Map([
+    env.state.jReplicas = new Map([
       [
         'Testnet',
         {
@@ -1620,7 +1620,7 @@ describe('audit fail-fast regressions', () => {
                 signerId: localScenarioSignerId,
                 runtimeSubmitAttempt: { attemptId: 'local-multisig-1', attemptNumber: 1, attemptedAt: 126 },
               },
-              timestamp: env.timestamp,
+              timestamp: env.state.timestamp,
             } as any,
           ],
         },
@@ -1633,9 +1633,9 @@ describe('audit fail-fast regressions', () => {
 
   test('submitRuntimeJOutbox rejects non-empty consensus batch before adapter when hanko is missing', async () => {
     const env = createEmptyEnv('j-submit-unsealed-batch');
-    env.timestamp = 123;
+    env.state.timestamp = 123;
     let adapterCalls = 0;
-    env.jReplicas = new Map([
+    env.state.jReplicas = new Map([
       [
         'Testnet',
         {
@@ -1677,7 +1677,7 @@ describe('audit fail-fast regressions', () => {
                 entityNonce: 1,
                 runtimeSubmitAttempt: { attemptId: 'missing-hanko-1', attemptNumber: 1, attemptedAt: 123 },
               },
-              timestamp: env.timestamp,
+              timestamp: env.state.timestamp,
             } as any,
           ],
         },
@@ -1883,7 +1883,7 @@ describe('audit fail-fast regressions', () => {
       baseFee: 999n,
       rebalanceLiquidityFeeBps: 88n,
     };
-    env.eReplicas.set(`${hubId}:hub`, {
+    env.state.eReplicas.set(`${hubId}:hub`, {
       entityId: hubId,
       signerId: 'hub',
       entityEncPubKey: '',
@@ -2155,7 +2155,7 @@ describe('audit fail-fast regressions', () => {
       routingFeePPM: 0,
       baseFee: 999n,
     };
-    withSibling.eReplicas.set(`${entityId}:misleading`, {
+    withSibling.state.eReplicas.set(`${entityId}:misleading`, {
       entityId,
       signerId: 'misleading',
       entityEncPubKey: '',
@@ -2385,7 +2385,7 @@ describe('audit fail-fast regressions', () => {
     const replica = makeReplicaMissingPrevFrameHash();
     const queuedTx: EntityTx = { type: 'chatMessage', data: { message: 'full' } };
     replica.mempool = Array.from({ length: LIMITS.MEMPOOL_SIZE }, () => queuedTx);
-    env.eReplicas.set(`${replica.entityId}:${replica.signerId}`, replica);
+    env.state.eReplicas.set(`${replica.entityId}:${replica.signerId}`, replica);
     const remoteEntityId = `0x${'52'.repeat(32)}`;
 
     const result = await applyMergedEntityInputs(
@@ -2427,7 +2427,7 @@ describe('audit fail-fast regressions', () => {
     const env = createEmptyEnv(seed);
     env.scenarioMode = true;
     env.quietRuntimeLogs = true;
-    env.timestamp = 42_000;
+    env.state.timestamp = 42_000;
     const { signerId, entityId } = registerLazySigner(seed, '1');
     const collectiveTxs: EntityTx[] = [
       {
@@ -2448,16 +2448,16 @@ describe('audit fail-fast regressions', () => {
       env,
       honestBaseState,
       frameTxs,
-      env.timestamp,
+      env.state.timestamp,
     );
     const honestNewState: EntityState = {
       ...honestFrameState,
       entityId,
       height: 1,
-      timestamp: env.timestamp,
+      timestamp: env.state.timestamp,
       leaderState: { activeValidatorId: signerId, view: 0, changedAtHeight: 0 },
     };
-    const frameHash = await createEntityFrameHash('genesis', 1, env.timestamp, frameTxs, honestNewState);
+    const frameHash = await createEntityFrameHash('genesis', 1, env.state.timestamp, frameTxs, honestNewState);
     const hashesToSign = buildEntityHashesToSign(entityId, 1, frameHash, collectedHashes);
     const stateRoot = computeCanonicalEntityConsensusStateHash(honestNewState);
     const authorityRoot = computeEntityFrameAuthorityRoot(buildEntityFrameAuthority(honestNewState));
@@ -2481,7 +2481,7 @@ describe('audit fail-fast regressions', () => {
         parentFrameHash: 'genesis',
         stateRoot,
         authorityRoot,
-        timestamp: env.timestamp,
+        timestamp: env.state.timestamp,
         txs: frameTxs,
         events: [],
         hash: frameHash,

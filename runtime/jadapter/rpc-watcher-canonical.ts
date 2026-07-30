@@ -28,7 +28,7 @@ const clearPendingRewindIfApplied = (
 ): boolean => {
   if (session.pendingRewindReplicaKeys.length === 0) return false;
   const stillPending = session.pendingRewindReplicaKeys.some(replicaKey => {
-    const replica = activeEnv.eReplicas.get(replicaKey);
+    const replica = activeEnv.state.eReplicas.get(replicaKey);
     if (!replica?.jHistory) return false;
     const certifiedAnchor = getEntityCertifiedJAnchor(replica.state);
     return !certifiedAnchor || replica.jHistory.scannedThroughHeight > certifiedAnchor.height;

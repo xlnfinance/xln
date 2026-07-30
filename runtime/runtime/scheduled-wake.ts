@@ -173,7 +173,7 @@ export const rebuildScheduledWakeIndex = (env: RuntimeReplica): void => {
   index.generations.clear();
   index.replicas.clear();
   index.initialized = true;
-  for (const replica of env.eReplicas.values()) refreshReplica(env, replica);
+  for (const replica of env.state.eReplicas.values()) refreshReplica(env, replica);
 };
 
 export const refreshScheduledWakeIndex = (env: RuntimeReplica, entityIds?: ReadonlySet<string>): void => {
@@ -186,7 +186,7 @@ export const refreshScheduledWakeIndex = (env: RuntimeReplica, entityIds?: Reado
     ? new Set([...entityIds].map(entityId => entityId.toLowerCase()))
     : null;
   const liveKeys = new Set<string>();
-  for (const replica of env.eReplicas.values()) {
+  for (const replica of env.state.eReplicas.values()) {
     const key = replicaKey(replica.entityId, replica.signerId);
     liveKeys.add(key);
     const indexedReplica = index.replicas.get(key);
@@ -224,7 +224,7 @@ export const createDueScheduledWakeInputs = (env: RuntimeReplica, now: number): 
   const queued = new Set((env.runtimeMempool?.entityInputs ?? [])
     .filter(input => input.leaderTimeoutVote || input.entityTxs?.some(tx => tx.type === 'scheduledWake'))
     .map(input => replicaKey(input.entityId, input.signerId)));
-  for (const replica of env.eReplicas.values()) {
+  for (const replica of env.state.eReplicas.values()) {
     if (replica.mempool.some(tx => tx.type === 'scheduledWake')) {
       queued.add(replicaKey(replica.entityId, replica.signerId));
     }

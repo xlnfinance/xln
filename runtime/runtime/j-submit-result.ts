@@ -106,7 +106,7 @@ const assertValidJSubmitResult = (data: RecordJSubmitResultTx['data']): void => 
 
 const findRecordedResultFingerprint = (env: RuntimeReplica, attemptId: string): string | null => {
   let fingerprint: string | null = null;
-  for (const replica of env.eReplicas.values()) {
+  for (const replica of env.state.eReplicas.values()) {
     const local = replica.jSubmitState;
     if (!local) continue;
     const journalFingerprint = Object.prototype.hasOwnProperty.call(local.resultFingerprints ?? {}, attemptId)
@@ -211,7 +211,7 @@ const nextJSubmitState = (
   const next = {
     ...local,
     lastResultAttemptId: tx.data.attemptId,
-    lastResultAt: env.timestamp,
+    lastResultAt: env.state.timestamp,
     lastResultOutcome: tx.data.outcome,
     lastResultFingerprint: resultFingerprint,
     ...journal,
@@ -226,7 +226,7 @@ const nextJSubmitState = (
     const code = tx.data.outcome === 'transientFailure' ? 'J_SUBMIT_TRANSIENT' : 'J_SUBMIT_FATAL';
     const failure = {
       message,
-      failedAt: env.timestamp,
+      failedAt: env.state.timestamp,
       failure: classifyRuntimeJBatchFailure(code, message),
       ...(tx.data.adapterFailure ? { adapterFailure: structuredClone(tx.data.adapterFailure) } : {}),
     };

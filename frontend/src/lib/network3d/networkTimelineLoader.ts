@@ -31,8 +31,8 @@ export const timelineIndexFromBrowserRuntime = (runtime: Runtime): RuntimeTimeli
   if (!id) throw new Error('NETWORK_TIMELINE_RUNTIME_ID_REQUIRED');
   const frames = (env?.history ?? []).map((snapshot) => ({
     runtimeId: id,
-    height: Math.max(0, Math.floor(Number(snapshot.height || 0))),
-    timestamp: Math.max(0, Math.floor(Number(snapshot.timestamp || 0))),
+    height: Math.max(0, Math.floor(Number(snapshot.state.height || 0))),
+    timestamp: Math.max(0, Math.floor(Number(snapshot.state.timestamp || 0))),
     stateHash: String((snapshot as EnvSnapshot & { stateHash?: string }).stateHash || ''),
     materialized: true,
     graphChanged: localFrameChangedGraph(snapshot),
@@ -322,7 +322,7 @@ export const readNetworkRuntimeFrame = async (
   const targetHeight = Math.max(1, Math.floor(Number(height || 0)));
   if (runtime.type === 'local') {
     const env = unwrapLiveRuntimeEnv(runtime.env) ?? runtime.env;
-    const frame = (env?.history ?? []).find((candidate) => Number(candidate.height) === targetHeight);
+    const frame = (env?.history ?? []).find((candidate) => Number(candidate.state.height) === targetHeight);
     if (!frame) throw new Error(`NETWORK_TIMELINE_BROWSER_FRAME_MISSING:${runtime.id}:h${targetHeight}`);
     return frame;
   }

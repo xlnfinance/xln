@@ -285,7 +285,7 @@ const buildDurableRuntimeStateSnapshot = (
       ? {
           certifiedBoardNodes: collectReachableCertifiedBoardNodes(
             getCertifiedBoardNodeStore(env),
-            [...env.eReplicas.values()]
+            [...env.state.eReplicas.values()]
               .map((replica) => replica.state.certifiedBoardState?.boardRegistryRoot)
               .filter((root): root is string => Boolean(root)),
           ),
@@ -377,11 +377,11 @@ const cloneLogs = (logs: RuntimeReplica['frameLogs'] | undefined): RuntimeReplic
   return logs.map(entry => ({ ...entry }));
 };
 
-const requireRuntimeJReplicas = (env: RuntimeReplica): RuntimeReplica['jReplicas'] => {
-  if (!(env.jReplicas instanceof Map)) {
+const requireRuntimeJReplicas = (env: RuntimeReplica): RuntimeReplica['state']['jReplicas'] => {
+  if (!(env.state.jReplicas instanceof Map)) {
     throw new Error('RUNTIME_SNAPSHOT_J_REPLICAS_MISSING');
   }
-  return env.jReplicas;
+  return env.state.jReplicas;
 };
 
 export const buildCanonicalRuntimeStateSnapshot = (
@@ -397,8 +397,8 @@ export const buildCanonicalRuntimeStateSnapshot = (
   });
   const browserVMState = options?.browserVMState ?? env.browserVMState;
   return {
-    height: env.height,
-    timestamp: env.timestamp,
+    height: env.state.height,
+    timestamp: env.state.timestamp,
     ...(env.runtimeId ? { runtimeId: env.runtimeId } : {}),
     ...(env.activeJurisdiction ? { activeJurisdiction: env.activeJurisdiction } : {}),
     ...(browserVMState
@@ -410,7 +410,7 @@ export const buildCanonicalRuntimeStateSnapshot = (
     ...(env.pendingOutputs ? { pendingOutputs: cloneRuntimeOutputs(env.pendingOutputs) } : {}),
     ...(env.networkInbox ? { networkInbox: cloneRuntimeOutputs(env.networkInbox) } : {}),
     ...(env.pendingNetworkOutputs ? { pendingNetworkOutputs: cloneRuntimeOutputs(env.pendingNetworkOutputs) } : {}),
-    eReplicas: Array.from(env.eReplicas.entries()).map(([replicaKey, replica]) => [
+    eReplicas: Array.from(env.state.eReplicas.entries()).map(([replicaKey, replica]) => [
       replicaKey,
       buildCanonicalEntityReplicaSnapshot(
         replica,
@@ -475,7 +475,7 @@ export const restoreDurableRuntimeSnapshot = (
     ? cloneIsolatedRoutedEntityInputs(snapshot['pendingNetworkOutputs'] as RoutedEntityInput[])
     : [];
   if (Array.isArray(snapshot['jReplicas'])) {
-    env.jReplicas = new Map(snapshot['jReplicas'].map((entry) => {
+    env.state.jReplicas = new Map(snapshot['jReplicas'].map((entry) => {
       if (!Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== 'string') {
         throw new Error('RUNTIME_MACHINE_J_REPLICA_ENTRY_INVALID');
       }
@@ -507,11 +507,13 @@ export const buildCanonicalEnvSnapshot = (
 
   const logs = cloneLogs(options.logs);
   return {
-    height: core.height,
-    timestamp: core.timestamp,
+    state: {
+      height: core.height,
+      timestamp: core.timestamp,
+      eReplicas: new Map(core.eReplicas),
+      jReplicas: new Map(core.jReplicas),
+    },
     ...(core.runtimeId ? { runtimeId: core.runtimeId } : {}),
-    eReplicas: new Map(core.eReplicas),
-    jReplicas: new Map(core.jReplicas),
     ...(core.browserVMState ? { browserVMState: core.browserVMState } : {}),
     runtimeInput: cloneRuntimeInput(options.runtimeInput),
     runtimeOutputs: cloneRuntimeOutputs(options.runtimeOutputs),

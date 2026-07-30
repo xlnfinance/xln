@@ -59,14 +59,14 @@ export const runCommittedRuntimeEffects = async (
       undefined,
       [runtimeTx],
       undefined,
-      env.scenarioMode ? env.timestamp : getWallClockMs(),
+      env.scenarioMode ? env.state.timestamp : getWallClockMs(),
     );
   });
   profile.mark('runtimeInfra');
 
   finalizeCommittedReceiptDeliveries(env, frame);
   if (effects.queuedJSubmitRetries.length > 0) {
-    deps.enqueueRuntimeInputs(env, undefined, effects.queuedJSubmitRetries, undefined, env.timestamp);
+    deps.enqueueRuntimeInputs(env, undefined, effects.queuedJSubmitRetries, undefined, env.state.timestamp);
   }
 
   await dispatchCommittedEntityOutputs(env, effects.changedEntityIds, effects.outputPlan, effects.routing);

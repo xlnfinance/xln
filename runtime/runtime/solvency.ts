@@ -56,7 +56,7 @@ const canonicalAmount = (value: unknown, context: string): bigint => {
 
 const selectCanonicalStates = (env: RuntimeReplica): EntityState[] => {
   const selected = new Map<string, { signerId: string; state: EntityState }>();
-  for (const replica of env.eReplicas.values()) {
+  for (const replica of env.state.eReplicas.values()) {
     const entityId = String(replica.state?.entityId || '')
       .trim()
       .toLowerCase();

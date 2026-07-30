@@ -42,7 +42,7 @@ const signAndBroadcastLocalVote = async (
     ...entityInput,
     leaderTimeoutVote: cloneIsolatedEntityLeaderTimeoutVote(vote),
   };
-  workingReplica.lastConsensusProgressAt = env.timestamp;
+  workingReplica.lastConsensusProgressAt = env.state.timestamp;
   for (const validatorId of workingReplica.state.config.validators) {
     if (validatorId.toLowerCase() === workingReplica.signerId.toLowerCase()) {
       continue;
@@ -126,7 +126,7 @@ const installLeaderCertificate = (
     }
   }
   workingReplica.pendingLeaderCertificate = certificate;
-  workingReplica.lastConsensusProgressAt = env.timestamp;
+  workingReplica.lastConsensusProgressAt = env.state.timestamp;
   entityLog.warn('leader.view_change_certified', {
     entity: shortId(workingReplica.entityId),
     from: shortId(vote.previousLeaderId),

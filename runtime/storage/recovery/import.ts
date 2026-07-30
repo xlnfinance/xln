@@ -83,8 +83,8 @@ const collectCertifiedStorageDocs = (
 };
 
 const readRestoredFrameCoordinates = (env: RuntimeReplica): { height: number; timestamp: number } => {
-  const height = Number(env.height);
-  const timestamp = Number(env.timestamp);
+  const height = Number(env.state.height);
+  const timestamp = Number(env.state.timestamp);
   if (!Number.isSafeInteger(height) || height <= 0) throw new Error('RECOVERY_PERSIST_HEIGHT_REQUIRED');
   if (!Number.isSafeInteger(timestamp) || timestamp < 0) {
     throw new Error('RECOVERY_PERSIST_TIMESTAMP_INVALID');
@@ -98,7 +98,7 @@ const persistRestoredRuntimeStateUnlocked = async (
   coordinates: { height: number; timestamp: number },
   options: PersistRestoredRuntimeOptions,
 ): Promise<void> => {
-  for (const replica of env.eReplicas.values()) {
+  for (const replica of env.state.eReplicas.values()) {
     assertCertifiedJHistoryIntegrity(replica.state);
     assertValidatorJHistoryMatchesCertifiedAnchor(replica.state, replica.jHistory);
   }
@@ -106,7 +106,7 @@ const persistRestoredRuntimeStateUnlocked = async (
   const materialized = collectCertifiedStorageDocs(lineagePlan);
   const boardNodes = collectReachableCertifiedBoardNodes(
     getCertifiedBoardNodeStore(env),
-    Array.from(env.eReplicas.values(), ({ state }) => state.certifiedBoardState?.boardRegistryRoot).filter(
+    Array.from(env.state.eReplicas.values(), ({ state }) => state.certifiedBoardState?.boardRegistryRoot).filter(
       (root): root is string => Boolean(root),
     ),
   );

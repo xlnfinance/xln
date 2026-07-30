@@ -108,7 +108,7 @@ const pendingMatchesResult = (
 
 const findRecordedFingerprint = (env: RuntimeReplica, attemptId: string): string | null => {
   let found: string | null = null;
-  for (const replica of env.eReplicas.values()) {
+  for (const replica of env.state.eReplicas.values()) {
     const local = replica.entityProviderActionSubmitState;
     if (!local) continue;
     const journal = local.resultFingerprints?.[attemptId];
@@ -268,7 +268,7 @@ export const applyRecordEntityProviderActionResultRuntimeTx = (
   const next: EntityProviderActionSubmitState = {
     ...local,
     lastResultAttemptId: tx.data.attemptId,
-    lastResultAt: env.timestamp,
+    lastResultAt: env.state.timestamp,
     lastResultOutcome: tx.data.outcome,
     lastResultFingerprint: fingerprint,
     ...journal,
@@ -279,7 +279,7 @@ export const applyRecordEntityProviderActionResultRuntimeTx = (
   } else {
     const failure = {
       message: String(tx.data.message ?? 'unknown'),
-      failedAt: env.timestamp,
+      failedAt: env.state.timestamp,
       ...(tx.data.adapterFailure ? { adapterFailure: structuredClone(tx.data.adapterFailure) } : {}),
     };
     next.lastFailure = failure;

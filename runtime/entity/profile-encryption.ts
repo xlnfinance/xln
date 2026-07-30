@@ -72,7 +72,7 @@ export const buildValidatorEncryptionBoard = (
 const findLocalReplica = (env: EntityRuntimeContext, entityId: string, signerId: string) => {
   const entity = entityKey(entityId);
   const signer = signerKey(signerId);
-  for (const replica of env.eReplicas.values()) {
+  for (const replica of env.state.eReplicas.values()) {
     if (entityKey(replica.entityId) === entity && signerKey(replica.signerId) === signer) return replica;
   }
   return null;
@@ -136,7 +136,7 @@ export const collectLocalProfileEncryptionAnnouncements = (
   entityIds?: ReadonlySet<string>,
 ): ValidatorEncryptionAnnouncement[] => {
   const announcements: ValidatorEncryptionAnnouncement[] = [];
-  for (const replica of env.eReplicas.values()) {
+  for (const replica of env.state.eReplicas.values()) {
     if (entityIds && !entityIds.has(entityKey(replica.entityId))) continue;
     if (!hasLocalSignerKey(env, replica.signerId)) continue;
     const board = buildValidatorEncryptionBoard(env, replica.state);
@@ -151,7 +151,7 @@ export const acceptProfileEncryptionAnnouncement = (
   env: EntityRuntimeContext,
   announcement: ValidatorEncryptionAnnouncement,
 ): ValidatorEncryptionAttestation[] => {
-  const localReplica = [...env.eReplicas.values()].find(
+  const localReplica = [...env.state.eReplicas.values()].find(
     (replica) => entityKey(replica.entityId) === entityKey(announcement.board.entityId),
   );
   if (!localReplica) throw new Error(`PROFILE_ENCRYPTION_ENTITY_NOT_LOCAL: entity=${announcement.board.entityId}`);

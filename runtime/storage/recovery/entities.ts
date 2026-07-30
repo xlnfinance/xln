@@ -33,7 +33,7 @@ const installPersistedEntityReplicas = async (
   latestHeight: number,
   selectedSnapshotHeight: number,
 ): Promise<void> => {
-  env.eReplicas = new Map();
+  env.state.eReplicas = new Map();
   for (const [entityId, state] of restoredStates.entries()) {
     const persistedMetas =
       targetHeight === latestHeight
@@ -129,7 +129,7 @@ const installPersistedEntityReplicas = async (
           meta.jPrefixRound,
         );
       }
-      env.eReplicas.set(
+      env.state.eReplicas.set(
         formatReplicaKey(createReplicaKey(entityId, signerId)),
         restoredReplica,
       );
@@ -144,7 +144,7 @@ const hydrateRestoredEntityDags = async (
   const walDb = deps.getRuntimeWalDb(env);
   const boardRoots = new Set(
     Array.from(
-      env.eReplicas.values(),
+      env.state.eReplicas.values(),
       replica => replica.state.certifiedBoardState?.boardRegistryRoot,
     ).filter((value): value is string => Boolean(value)),
   );

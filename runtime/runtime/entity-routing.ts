@@ -175,7 +175,7 @@ const findInputReplica = (
   env: RuntimeReplica,
   input: RoutedEntityInput,
 ): EntityReplica | null =>
-  env.eReplicas.get(
+  env.state.eReplicas.get(
     `${normalizeEntityKey(input.entityId)}:${normalizeEntityKey(input.signerId)}`,
   ) ?? null;
 
@@ -793,7 +793,7 @@ export const selectMatchedCrossJAccountInputPairs = (
 };
 
 const runtimeRoutingTimestamp = (env: RuntimeReplica): number => {
-  const timestamp = Math.floor(Number(env.timestamp ?? 0));
+  const timestamp = Math.floor(Number(env.state.timestamp ?? 0));
   return Number.isFinite(timestamp) && timestamp >= 0 ? timestamp : 0;
 };
 
@@ -938,7 +938,7 @@ const findInboundTargetReplica = (
 ): EntityReplica | undefined => {
   const entityId = normalizeEntityKey(input.entityId);
   const signerId = normalizeEntityKey(input.signerId);
-  return [...env.eReplicas.values()].find(replica =>
+  return [...env.state.eReplicas.values()].find(replica =>
     normalizeEntityKey(replica.entityId) === entityId &&
     normalizeEntityKey(replica.signerId) === signerId);
 };
@@ -975,7 +975,7 @@ export const validateInboundP2PEntityInput = (
   options: RuntimeInboundEntityInputOptions = {},
 ): RuntimeInboundEntityInputValidation => {
   const context = inboundEntityContext(input);
-  const localReplicaExists = Array.from(env.eReplicas.keys()).some(key => {
+  const localReplicaExists = Array.from(env.state.eReplicas.keys()).some(key => {
     const [entityKey] = String(key).split(':');
     return normalizeEntityKey(entityKey || '') === context.targetEntityId;
   });
@@ -1158,10 +1158,10 @@ const appendCrossJurisdictionIntentInput = (
   ) {
     throw new Error('INBOUND_CROSS_J_INTENT_HUB_SIBLINGS_NOT_LOCAL');
   }
-  const sourceHubReplica = [...env.eReplicas.values()].find(replica =>
+  const sourceHubReplica = [...env.state.eReplicas.values()].find(replica =>
     normalizeEntityKey(replica.entityId) === sourceHubEntityId &&
     normalizeEntityKey(replica.signerId) === sourceHubSignerId);
-  const targetHubReplica = [...env.eReplicas.values()].find(replica =>
+  const targetHubReplica = [...env.state.eReplicas.values()].find(replica =>
     normalizeEntityKey(replica.entityId) === targetHubEntityId &&
     normalizeEntityKey(replica.signerId) === targetHubSignerId);
   if (sourceHubReplica?.state.profile.isHub !== true || targetHubReplica?.state.profile.isHub !== true) {

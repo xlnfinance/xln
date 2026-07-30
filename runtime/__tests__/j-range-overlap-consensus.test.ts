@@ -91,7 +91,7 @@ describe('overlapping finalized J-range consensus', () => {
       mempool: [],
       isProposer: true,
     };
-    env.eReplicas.set(leaderKey, leader);
+    env.state.eReplicas.set(leaderKey, leader);
 
     const applyWatcherPoll = async (height: number, amount: string, fromHeight: number) => {
       const observation = {
@@ -119,7 +119,7 @@ describe('overlapping finalized J-range consensus', () => {
       if (!built) {
         return {
           outcome: { kind: 'committed' as const },
-          workingReplica: env.eReplicas.get(leaderKey)!,
+          workingReplica: env.state.eReplicas.get(leaderKey)!,
           outputs: [] as EntityInput[],
         };
       }
@@ -127,17 +127,17 @@ describe('overlapping finalized J-range consensus', () => {
       if (built.input.entityInputs.length === 0) {
         return {
           outcome: { kind: 'committed' as const },
-          workingReplica: env.eReplicas.get(leaderKey)!,
+          workingReplica: env.state.eReplicas.get(leaderKey)!,
           outputs: [] as EntityInput[],
         };
       }
       if (built.input.entityInputs.length !== 1) throw new Error('TEST_J_RANGE_INPUT_COUNT_INVALID');
       const result = await applyEntityInput(
         env,
-        env.eReplicas.get(leaderKey)!,
+        env.state.eReplicas.get(leaderKey)!,
         built.input.entityInputs[0]!,
       );
-      env.eReplicas.set(leaderKey, result.workingReplica);
+      env.state.eReplicas.set(leaderKey, result.workingReplica);
       return result;
     };
 
@@ -169,7 +169,7 @@ describe('overlapping finalized J-range consensus', () => {
       signerId: leaderId,
       jPrefixAttestations: new Map([[validatorId, validatorHead]]),
     });
-    env.eReplicas.set(leaderKey, firstQuorum.workingReplica);
+    env.state.eReplicas.set(leaderKey, firstQuorum.workingReplica);
     const firstProposal = frameAtHeight(firstQuorum.outputs, 1);
     await applyWatcherPoll(12, '12', 8);
 
@@ -200,10 +200,10 @@ describe('overlapping finalized J-range consensus', () => {
 
     const firstCommit = await applyEntityInput(
       env,
-      env.eReplicas.get(leaderKey)!,
+      env.state.eReplicas.get(leaderKey)!,
       firstPrecommit,
     );
-    env.eReplicas.set(leaderKey, firstCommit.workingReplica);
+    env.state.eReplicas.set(leaderKey, firstCommit.workingReplica);
     frameAtHeight(firstCommit.outputs, 1);
     const validatorAfterFirstCommit = firstValidation;
     expect(validatorAfterFirstCommit.workingReplica.state.lastFinalizedJHeight).toBe(7);
@@ -217,7 +217,7 @@ describe('overlapping finalized J-range consensus', () => {
       firstCommit.workingReplica,
       validatorSuffixHead,
     );
-    env.eReplicas.set(leaderKey, secondProposalResult.workingReplica);
+    env.state.eReplicas.set(leaderKey, secondProposalResult.workingReplica);
     const secondProposal = frameAtHeight(secondProposalResult.outputs, 2);
     const validatorReadyForSuffix = validatorAfterFirstCommit.workingReplica;
 
@@ -301,7 +301,7 @@ describe('overlapping finalized J-range consensus', () => {
 
     const secondCommit = await applyEntityInput(
       env,
-      env.eReplicas.get(leaderKey)!,
+      env.state.eReplicas.get(leaderKey)!,
       secondPrecommit,
     );
     expect(secondCommit.workingReplica.state.lastFinalizedJHeight).toBe(12);

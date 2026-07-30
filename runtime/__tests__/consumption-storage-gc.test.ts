@@ -112,7 +112,7 @@ test('snapshot retention keeps old witnesses until their roots are pruned, then 
   env.quietRuntimeLogs = true;
   env.runtimeConfig = { storage: { enabled: false } };
   env.activeJurisdiction = jurisdiction.name;
-  env.jReplicas.set(jurisdiction.name, {
+  env.state.jReplicas.set(jurisdiction.name, {
     ...jurisdiction,
     blockNumber: 0n,
     stateRoot: new Uint8Array(32),
@@ -142,7 +142,7 @@ test('snapshot retention keeps old witnesses until their roots are pruned, then 
     entityInputs: [],
   });
   await processRuntime(env, []);
-  const replica = Array.from(env.eReplicas.values())[0]!;
+  const replica = Array.from(env.state.eReplicas.values())[0]!;
 
   let accumulator = createEmptyConsumptionAccumulator();
   let replacement: ReturnType<typeof applyConsumptionOutput> | undefined;
@@ -207,8 +207,8 @@ test('snapshot retention keeps old witnesses until their roots are pruned, then 
   accumulator = replacement.state;
   replica.state = { ...replica.state, consumptionAccumulator: accumulator };
   refreshGenesisAnchor(replica);
-  env.height += 1;
-  env.timestamp += 1;
+  env.state.height += 1;
+  env.state.timestamp += 1;
   applyRuntimeStorageChanges(env, [{ family: 'entity', entityId }]);
   await save();
 

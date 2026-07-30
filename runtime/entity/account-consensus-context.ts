@@ -12,7 +12,7 @@ const resolveSettlementBoardAuthority = async (
 ): Promise<string | undefined> => {
   if (certifiedBoardHash) return certifiedBoardHash;
   const source = sourceEntityId.toLowerCase();
-  const states = [...env.eReplicas.values()]
+  const states = [...env.state.eReplicas.values()]
     .map(replica => replica.state)
     .filter(state => state.entityId.toLowerCase() === source);
   if (states.length === 0) return undefined;
@@ -48,10 +48,10 @@ export const createAccountConsensusContext = (
   env: EntityRuntimeContext,
   jClaimNodeStore: AccountJClaimNodeStore = getAccountJClaimNodeStore(env),
 ): AccountConsensusContext => ({
-  runtimeTimestamp: env.timestamp,
+  runtimeTimestamp: env.state.timestamp,
   quietLogs: env.quietRuntimeLogs === true,
   emitRuntimeEvents: true,
-  jReplicas: env.jReplicas,
+  jReplicas: env.state.jReplicas,
   jClaimNodeStore,
   verifyHanko: (hanko, hash, expectedEntityId, authority) =>
     verifyHankoForHash(hanko, hash, expectedEntityId, env, authority),

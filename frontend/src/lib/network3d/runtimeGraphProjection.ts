@@ -232,7 +232,7 @@ const accountState = (
 };
 
 const projectEnvJMachines = (env: RuntimeGraphEnvFrame, source: RuntimeGraphSource): RuntimeGraphJMachineState[] =>
-  Array.from(env.jReplicas?.entries?.() ?? []).map(([key, machine]) => {
+  Array.from(env.state.jReplicas?.entries?.() ?? []).map(([key, machine]) => {
     const value = machine as { name?: unknown; blockNumber?: unknown; position?: unknown };
     const name = text(value.name || key);
     return {
@@ -246,10 +246,10 @@ const projectEnvJMachines = (env: RuntimeGraphEnvFrame, source: RuntimeGraphSour
   }).sort((left, right) => left.jMachineId.localeCompare(right.jMachineId));
 
 export const projectRuntimeEnv = (env: RuntimeGraphEnvFrame, options: ProjectionOptions): RuntimeGraphProjection => {
-  const source = sourceOf(options, env.height, env.timestamp);
+  const source = sourceOf(options, env.state.height, env.state.timestamp);
   const profiles = profileMap(env);
   const selected = new Map<string, RuntimeGraphNodeState>();
-  for (const replica of env.eReplicas?.values?.() ?? []) {
+  for (const replica of env.state.eReplicas?.values?.() ?? []) {
     const candidate = nodeFromReplica(replica, source, profiles.get(id(replica.entityId)));
     if (!candidate.entityId) continue;
     const existing = selected.get(candidate.entityId);

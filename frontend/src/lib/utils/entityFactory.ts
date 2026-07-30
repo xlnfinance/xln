@@ -15,7 +15,7 @@ type JurisdictionConfig = {
   chainId?: number;
 };
 
-type JReplica = RuntimeReplica['jReplicas'] extends Map<string, infer T> ? T : never;
+type JReplica = RuntimeReplica['state']['jReplicas'] extends Map<string, infer T> ? T : never;
 
 const inflightAutoCreates = new Map<string, Promise<string | null>>();
 let isCreatingJMachine = false;
@@ -112,7 +112,7 @@ export async function createEphemeralEntity(
   await waitForCondition(
     () => {
       const expected = String(entityId).toLowerCase();
-      for (const key of runtimeEnv.eReplicas.keys()) {
+      for (const key of runtimeEnv.state.eReplicas.keys()) {
         const repEntity = String(key).split(':')[0];
         if (String(repEntity || '').toLowerCase() === expected) return true;
       }
@@ -126,7 +126,7 @@ export async function createEphemeralEntity(
 
 function findReplicaBySigner(env: RuntimeReplica, signerId: string, jurisdictionName?: string | null): EntityReplica | null {
   const jurisdictionLower = String(jurisdictionName || '').trim().toLowerCase();
-  for (const replica of env.eReplicas.values()) {
+  for (const replica of env.state.eReplicas.values()) {
     const replicaJurisdiction = String(replica.state?.config?.jurisdiction?.name || '').trim().toLowerCase();
     if (
       replica.signerId.toLowerCase() === signerId.toLowerCase() &&
@@ -139,7 +139,7 @@ function findReplicaBySigner(env: RuntimeReplica, signerId: string, jurisdiction
 }
 
 function listJMachineNames(env: RuntimeReplica): string[] {
-  return Array.from(env.jReplicas.keys());
+  return Array.from(env.state.jReplicas.keys());
 }
 
 function formatJMachineNames(env: RuntimeReplica): string {
@@ -150,14 +150,14 @@ function formatJMachineNames(env: RuntimeReplica): string {
 function getJReplica(env: RuntimeReplica, name?: string): JReplica | null {
   const normalized = normalizeJurisdictionKey(name);
   if (name) {
-    const direct = env.jReplicas.get(name);
+    const direct = env.state.jReplicas.get(name);
     if (direct) return direct;
-    for (const replica of env.jReplicas.values()) {
+    for (const replica of env.state.jReplicas.values()) {
       if (normalizeJurisdictionKey(replica?.name) === normalized) return replica;
     }
     return null;
   }
-  return env.jReplicas.values().next().value ?? null;
+  return env.state.jReplicas.values().next().value ?? null;
 }
 
 function buildJurisdictionConfig(env: RuntimeReplica, name?: string): JurisdictionConfig | null {

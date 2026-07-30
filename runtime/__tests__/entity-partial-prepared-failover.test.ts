@@ -62,7 +62,7 @@ describe('partial prepared failover', () => {
     const env = createEmptyEnv('entity-partial-prepared-failover');
     env.scenarioMode = true;
     env.quietRuntimeLogs = true;
-    env.timestamp = 20_000;
+    env.state.timestamp = 20_000;
     const proposerId = deriveSignerAddressSync(env.runtimeSeed!, '1').toLowerCase();
     const board: ConsensusConfig = {
       mode: 'proposer-based',

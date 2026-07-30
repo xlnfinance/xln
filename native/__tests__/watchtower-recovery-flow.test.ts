@@ -91,7 +91,7 @@ const installJurisdiction = (env: ReturnType<typeof xln.createEmptyEnv>, name = 
     entityProviderAddress: addr('12'),
   };
   env.activeJurisdiction = jurisdiction.name;
-  env.jReplicas.set(jurisdiction.name, {
+  env.state.jReplicas.set(jurisdiction.name, {
     name: jurisdiction.name,
     blockNumber: 0n,
     stateRoot: null,
@@ -258,7 +258,7 @@ describe('watchtower recovery full flow', () => {
     });
     await xln.processRuntime(env);
     await xln.processRuntime(env);
-    const restoredJReplica = env.jReplicas.get(jurisdictionName);
+    const restoredJReplica = env.state.jReplicas.get(jurisdictionName);
     if (!restoredJReplica?.depositoryAddress || !restoredJReplica.entityProviderAddress) {
       throw new Error('RESTORE_FLOW_JURISDICTION_IMPORT_FAILED');
     }
@@ -359,7 +359,7 @@ describe('watchtower recovery full flow', () => {
     expect(restored).not.toBeNull();
     expect(restored?.bundle.runtimeHeight).toBe(bundle.runtimeHeight);
     expect(restored?.env.runtimeId).toBe(runtimeId);
-    expect(restored?.env.eReplicas.size).toBe(env.eReplicas.size);
+    expect(restored?.env.eReplicas.size).toBe(env.state.eReplicas.size);
     expect(runtime.signers[0]?.entityId).toBe(entityId);
     await xln.closeRuntimeDb(restored!.env);
     await xln.closeInfraDb(restored!.env);
@@ -367,8 +367,8 @@ describe('watchtower recovery full flow', () => {
     const reloaded = await xln.loadEnvFromDB(runtimeId, runtimeSeed);
     expect(reloaded).not.toBeNull();
     expect(reloaded?.runtimeId).toBe(runtimeId);
-    expect(reloaded?.height).toBe(bundle.runtimeHeight);
-    expect(reloaded?.eReplicas.size).toBe(env.eReplicas.size);
+    expect(reloaded?.state.height).toBe(bundle.runtimeHeight);
+    expect(reloaded?.state.eReplicas.size).toBe(env.state.eReplicas.size);
     await xln.closeRuntimeDb(reloaded!);
     await xln.closeInfraDb(reloaded!);
     await xln.closeRuntimeDb(env);
@@ -413,7 +413,7 @@ describe('watchtower recovery full flow', () => {
     });
     await xln.processRuntime(env);
 
-    const replica = [...env.eReplicas.values()][0];
+    const replica = [...env.state.eReplicas.values()][0];
     expect(replica).toBeTruthy();
     const account = makeAccount(entityId, counterpartyId, watchSeed);
     account.counterpartyDisputeProofNonce = 9;
@@ -524,7 +524,7 @@ describe('watchtower recovery full flow', () => {
     });
     await xln.processRuntime(env);
 
-    const replica = [...env.eReplicas.values()][0];
+    const replica = [...env.state.eReplicas.values()][0];
     expect(replica).toBeTruthy();
     const account = makeAccount(entityId, counterpartyId, watchSeed);
     account.counterpartyDisputeProofNonce = 9;

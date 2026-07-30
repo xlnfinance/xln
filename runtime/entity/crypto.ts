@@ -82,7 +82,7 @@ export const assertPersistedLocalEntityCryptoKeys = (
 };
 
 export const assertLocalEntityCryptoKeys = (env: EntityRuntimeContext): void => {
-  for (const [replicaKey, replica] of env.eReplicas.entries()) {
+  for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
     const signerId = extractSignerId(replicaKey);
     canonicalizeLocalEntityCryptoKeys(env, replica.entityId, signerId, replica);
   }

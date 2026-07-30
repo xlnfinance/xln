@@ -197,7 +197,7 @@ const buildOrdinaryProposal = async (
 describe('validator J-prefix consensus', () => {
   test('locally derives a pending-event prefix before finalizing a lazy single-validator collective action', async () => {
     const env = createEmptyEnv('j-prefix-on-demand-lazy-event');
-    env.timestamp = 2_000;
+    env.state.timestamp = 2_000;
     env.quietRuntimeLogs = true;
     const validatorId = installOwnKey(env, 'on-demand-lazy-validator');
     entityId = generateLazyEntityId([validatorId], 1n);
@@ -259,7 +259,7 @@ describe('validator J-prefix consensus', () => {
 
   test('locally derives an empty prefix before finalizing a registered single-validator collective action', async () => {
     const env = createEmptyEnv('j-prefix-on-demand-registered-empty');
-    env.timestamp = 2_000;
+    env.state.timestamp = 2_000;
     env.quietRuntimeLogs = true;
     const validatorId = installOwnKey(env, 'on-demand-registered-validator');
     entityId = generateLazyEntityId([validatorId], 1n);
@@ -347,7 +347,7 @@ describe('validator J-prefix consensus', () => {
       isProposer: true,
       jHistory: history,
     };
-    env.eReplicas.set(`${entityId}:${validatorId}`, replica);
+    env.state.eReplicas.set(`${entityId}:${validatorId}`, replica);
 
     expect(hasEntityLeaderWork(replica)).toBe(true);
     expect(hasRuntimeWork(env)).toBe(false);
@@ -355,7 +355,7 @@ describe('validator J-prefix consensus', () => {
 
   test('certifies the highest contiguous prefix while a sparse later event remains pending', async () => {
     const env = createEmptyEnv('j-prefix-sparse-event-contiguous-catch-up');
-    env.timestamp = 2_000;
+    env.state.timestamp = 2_000;
     env.quietRuntimeLogs = true;
     const validatorId = installOwnKey(env, 'sparse-event-contiguous-validator');
     entityId = generateLazyEntityId([validatorId], 1n);
@@ -544,7 +544,7 @@ describe('validator J-prefix consensus', () => {
     const validatorEnv = createEmptyEnv('j-prefix-isolated-validator');
     const thirdEnv = createEmptyEnv('j-prefix-isolated-third');
     for (const env of [proposerEnv, validatorEnv, thirdEnv]) {
-      env.timestamp = 2_000;
+      env.state.timestamp = 2_000;
       env.quietRuntimeLogs = true;
     }
     const proposerId = installOwnKey(proposerEnv, 'isolated-proposer');
@@ -910,7 +910,7 @@ describe('validator J-prefix consensus', () => {
 
   test('rolls one frozen base round, keeps a scheduled wake first while finalizing the J suffix, then stops', async () => {
     const env = createEmptyEnv('j-prefix-frozen-base-roll');
-    env.timestamp = 2_000;
+    env.state.timestamp = 2_000;
     env.quietRuntimeLogs = true;
     const validatorId = installOwnKey(env, 'frozen-base-validator');
     entityId = generateLazyEntityId([validatorId], 1n);
@@ -958,7 +958,7 @@ describe('validator J-prefix consensus', () => {
         },
       ],
     });
-    env.eReplicas.set(`${entityId}:${validatorId}`, replica);
+    env.state.eReplicas.set(`${entityId}:${validatorId}`, replica);
     expect(replica.mempool).toEqual([]);
     expect(hasEntityLeaderWork(replica)).toBe(true);
     expect(hasRuntimeWork(env)).toBe(true);
@@ -975,7 +975,7 @@ describe('validator J-prefix consensus', () => {
     expect(rolled.workingReplica.jPrefixRound?.targetEntityHeight).toBe(2);
     expect(rolled.workingReplica.jPrefixRound?.certificate?.selected.scannedThroughHeight).toBe(11);
 
-    env.timestamp = 3_000;
+    env.state.timestamp = 3_000;
     rolled.workingReplica.mempool.push({
       type: 'scheduledWake',
       data: {
@@ -999,7 +999,7 @@ describe('validator J-prefix consensus', () => {
       'j_event',
     ]);
 
-    env.timestamp = 4_000;
+    env.state.timestamp = 4_000;
     const idle = await applyEntityInput(env, finalized.workingReplica, {
       entityId,
       signerId: validatorId,
@@ -1008,7 +1008,7 @@ describe('validator J-prefix consensus', () => {
     expect(idle.workingReplica.state.height).toBe(2);
     expect(idle.workingReplica.state.prevFrameHash).toBe(finalized.workingReplica.state.prevFrameHash);
     expect(idle.outputs).toEqual([]);
-    env.eReplicas.set(`${entityId}:${validatorId}`, idle.workingReplica);
+    env.state.eReplicas.set(`${entityId}:${validatorId}`, idle.workingReplica);
     expect(hasEntityLeaderWork(idle.workingReplica)).toBe(false);
     expect(hasRuntimeWork(env)).toBe(false);
   });
@@ -1076,7 +1076,7 @@ describe('validator J-prefix consensus', () => {
 
   test('does not roll a frozen base round for an authenticated empty suffix at any distance', async () => {
     const env = createEmptyEnv('j-prefix-frozen-empty-liveness-roll');
-    env.timestamp = 2_000;
+    env.state.timestamp = 2_000;
     env.quietRuntimeLogs = true;
     const validatorId = installOwnKey(env, 'frozen-empty-validator');
     entityId = generateLazyEntityId([validatorId], 1n);
@@ -1102,7 +1102,7 @@ describe('validator J-prefix consensus', () => {
     );
 
     replica.jHistory = observedThrough(110, false);
-    env.eReplicas.set(`${entityId}:${validatorId}`, replica);
+    env.state.eReplicas.set(`${entityId}:${validatorId}`, replica);
 
     expect(hasEntityLeaderWork(replica)).toBe(false);
     expect(hasRuntimeWork(env)).toBe(false);
@@ -1112,7 +1112,7 @@ describe('validator J-prefix consensus', () => {
 
   test('freezes H11 vote, preserves a semantic H12 event, then automatically finalizes H12 next round', async () => {
     const env = createEmptyEnv('j-prefix-next-round-carry');
-    env.timestamp = 2_000;
+    env.state.timestamp = 2_000;
     env.quietRuntimeLogs = true;
     const validatorId = installOwnKey(env, 'next-round-validator');
     entityId = generateLazyEntityId([validatorId], 1n);
@@ -1175,7 +1175,7 @@ describe('validator J-prefix consensus', () => {
     );
     expect(restoredRound).toEqual(first.workingReplica.jPrefixRound!);
 
-    env.timestamp = 3_000;
+    env.state.timestamp = 3_000;
     const second = await applyEntityInput(env, first.workingReplica, {
       entityId,
       signerId: validatorId,
@@ -1186,7 +1186,7 @@ describe('validator J-prefix consensus', () => {
     expect(second.workingReplica.state.reserves.get(1)).toBe(120n);
     expect(second.workingReplica.jPrefixRound).toBeUndefined();
 
-    env.timestamp = 4_000;
+    env.state.timestamp = 4_000;
     const third = await applyEntityInput(env, second.workingReplica, {
       entityId,
       signerId: validatorId,
@@ -1208,7 +1208,7 @@ describe('validator J-prefix consensus', () => {
 
   test('does not auto-roll a header-only head observed after the current vote before liveness is due', async () => {
     const env = createEmptyEnv('j-prefix-header-only-no-post-commit-roll');
-    env.timestamp = 2_000;
+    env.state.timestamp = 2_000;
     env.quietRuntimeLogs = true;
     const validatorId = installOwnKey(env, 'header-only-no-post-commit-roll-validator');
     entityId = generateLazyEntityId([validatorId], 1n);
@@ -1253,14 +1253,14 @@ describe('validator J-prefix consensus', () => {
       ),
     ).toBe(false);
 
-    env.eReplicas.set(`${entityId}:${validatorId}`, committed.workingReplica);
+    env.state.eReplicas.set(`${entityId}:${validatorId}`, committed.workingReplica);
     expect(hasEntityLeaderWork(committed.workingReplica)).toBe(false);
     expect(hasRuntimeWork(env)).toBe(false);
   });
 
   test('single signer finalizes an arbitrarily long empty J-prefix without a timer wake', async () => {
     const env = createEmptyEnv('j-prefix-budgeted-empty-catch-up');
-    env.timestamp = 2_000;
+    env.state.timestamp = 2_000;
     env.quietRuntimeLogs = true;
     const validatorId = installOwnKey(env, 'budgeted-empty-validator');
     entityId = generateLazyEntityId([validatorId], 1n);
@@ -1300,7 +1300,7 @@ describe('validator J-prefix consensus', () => {
           output.entityId === entityId && output.signerId === validatorId && output.entityTxs?.length === 0
         )).toBe(true);
       }
-      env.timestamp += 1;
+      env.state.timestamp += 1;
     }
 
     expect(replica.state.lastFinalizedJHeight).toBe(5_783);
@@ -1351,13 +1351,13 @@ describe('validator J-prefix consensus', () => {
       isProposer: false,
       jHistory: observedThrough(10, false),
     };
-    proposerEnv.eReplicas.set(`${entityId}:${proposerId}`, proposerReplica);
-    validatorEnv.eReplicas.set(`${entityId}:${validatorId}`, validatorReplica);
-    laggingEnv.eReplicas.set(`${entityId}:${laggingId}`, laggingReplica);
+    proposerEnv.state.eReplicas.set(`${entityId}:${proposerId}`, proposerReplica);
+    validatorEnv.state.eReplicas.set(`${entityId}:${validatorId}`, validatorReplica);
+    laggingEnv.state.eReplicas.set(`${entityId}:${laggingId}`, laggingReplica);
 
     for (const timestamp of [2_000, 62_001]) {
-      proposerEnv.timestamp = timestamp;
-      validatorEnv.timestamp = timestamp;
+      proposerEnv.state.timestamp = timestamp;
+      validatorEnv.state.timestamp = timestamp;
       const proposal = await buildOrdinaryProposal(proposerEnv, proposerReplica.state, proposerId, timestamp);
       const result = await applyEntityInput(validatorEnv, validatorReplica, {
         entityId,

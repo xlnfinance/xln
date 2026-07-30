@@ -257,7 +257,7 @@ describe('entity panel model helpers', () => {
     expect(source).toContain('isSameJurisdictionEntityInReplicas(activeReplicas');
     expect(source).not.toContain('getEnvReplicaMap(activeEnv');
     expect(source).not.toContain('getGossipProfiles(activeEnv');
-    expect(source).not.toContain('env?.jReplicas');
+    expect(source).not.toContain('env?.state.jReplicas');
     expect(source).not.toContain('function findReplicaForTab');
     expect(source).not.toContain('getRuntimeId(activeEnv');
     expect(source).not.toContain('getCurrentEntityJurisdictionName(activeEnv');

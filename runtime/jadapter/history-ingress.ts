@@ -142,7 +142,7 @@ export function buildJHistoryRangeRuntimeInput(
   const entityInputs: EntityInput[] = [];
   const scannedReplicaKeys: string[] = [];
   const finalityReplicaKeys: string[] = [];
-  for (const [replicaKey, replica] of env.eReplicas.entries()) {
+  for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
     if (watcherReplica && !isEntityReplicaRelevantToWatcher(env, replica, watcherReplica)) continue;
     const entityId = String(replica.state.entityId || replica.entityId || '').toLowerCase();
     const signerId = String(replica.signerId || '').toLowerCase();

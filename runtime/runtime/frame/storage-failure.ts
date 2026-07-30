@@ -19,8 +19,8 @@ const haltRuntimeForRecovery = (
   transitionRuntimeLifecycle(state, 'halted');
   state.fatalDebugPayload = {
     message,
-    height: Math.max(0, runtime.height),
-    timestamp: Math.max(0, runtime.timestamp),
+    height: Math.max(0, runtime.state.height),
+    timestamp: Math.max(0, runtime.state.timestamp),
   };
   state.stopLoop?.();
 };

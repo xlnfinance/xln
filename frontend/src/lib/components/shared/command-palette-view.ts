@@ -21,7 +21,7 @@ type EnvLike = {
     validatedProfiles?: unknown;
     profiles?: unknown;
   };
-  eReplicas?: unknown;
+  state?: { eReplicas?: unknown };
 };
 
 const normalizeEntityId = (value: unknown): string => String(value || '').trim().toLowerCase();
@@ -63,8 +63,8 @@ export function buildCommandPaletteView(env: EnvLike | null | undefined): Comman
     });
   }
 
-  if (env?.eReplicas instanceof Map) {
-    for (const [key, replicaRaw] of env.eReplicas.entries()) {
+  if (env?.state?.eReplicas instanceof Map) {
+    for (const [key, replicaRaw] of env.state.eReplicas.entries()) {
       const state = readRecord(readRecord(replicaRaw)['state']);
       const profile = readRecord(state['profile']);
       const metadata = readRecord(profile['metadata']);

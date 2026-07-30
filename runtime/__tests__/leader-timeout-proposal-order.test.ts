@@ -87,7 +87,7 @@ const buildFixture = async (label: string): Promise<RaceFixture> => {
   env.scenarioMode = true;
   env.quietRuntimeLogs = true;
   env.runtimeConfig = { storage: { enabled: false } };
-  env.timestamp = 20_000;
+  env.state.timestamp = 20_000;
   const state = baseState(env);
   const proposerId = state.config.validators[0]!;
   const proposer = replica(state, proposerId);
@@ -155,7 +155,7 @@ const buildCertifiedCommitInput = async (fixture: RaceFixture): Promise<RoutedEn
       signerId,
     });
     if (signerId === '2') {
-      fixture.env.eReplicas.set(`${fixture.state.entityId}:2`, validated.workingReplica);
+      fixture.env.state.eReplicas.set(`${fixture.state.entityId}:2`, validated.workingReplica);
     }
     const precommit = validated.outputs.find(
       output => output.signerId === proposerId && (output.hashPrecommits?.size ?? 0) > 0,
@@ -189,7 +189,7 @@ describe('leader timeout / old-view proposal ordering regression', () => {
 
   test('never signs an old-view proposal after its own timeout vote and can certify failover', async () => {
     const fixture = await buildFixture('leader-order-monotonic');
-    fixture.env.eReplicas.set(`${fixture.state.entityId}:2`, replica(fixture.state, '2'));
+    fixture.env.state.eReplicas.set(`${fixture.state.entityId}:2`, replica(fixture.state, '2'));
 
     await applyRuntimeInput(fixture.env, {
       runtimeTxs: [],
@@ -207,7 +207,7 @@ describe('leader timeout / old-view proposal ordering regression', () => {
       ],
     });
 
-    const target = fixture.env.eReplicas.get(`${fixture.state.entityId}:2`);
+    const target = fixture.env.state.eReplicas.get(`${fixture.state.entityId}:2`);
     expect(target?.pendingLeaderCertificate?.toView).toBe(1);
     expect(target?.lockedFrame?.leader.view).not.toBe(0);
     expect(target?.leaderVotes?.size).toBe(3);
@@ -222,7 +222,7 @@ describe('leader timeout / old-view proposal ordering regression', () => {
 
   test('does not trust an arbitrary Hanko marker ahead of a due timeout under the frame cap', async () => {
     const fixture = await buildFixture('leader-order-fake-hanko');
-    fixture.env.eReplicas.set(`${fixture.state.entityId}:2`, replica(fixture.state, '2'));
+    fixture.env.state.eReplicas.set(`${fixture.state.entityId}:2`, replica(fixture.state, '2'));
     const poisoned = structuredClone(fixture.proposalInput);
     poisoned.proposedFrame!.hankos = ['0x01'];
     const selected = prioritizeEntityConsensusInputs(
@@ -239,11 +239,11 @@ describe('leader timeout / old-view proposal ordering regression', () => {
       const keys = deriveLocalEntityCryptoKeys(fixture.env, fixture.state.entityId, signerId);
       localReplica.entityEncPubKey = keys.publicKey;
       localReplica.entityEncPrivKey = keys.privateKey;
-      fixture.env.eReplicas.set(`${fixture.state.entityId}:${signerId}`, localReplica);
+      fixture.env.state.eReplicas.set(`${fixture.state.entityId}:${signerId}`, localReplica);
     }
     fixture.env.runtimeState = { ...fixture.env.runtimeState, maxEntityInputsPerFrame: 1 };
     await processRuntime(fixture.env, [poisoned, fixture.localVoteInput]);
-    const target = fixture.env.eReplicas.get(`${fixture.state.entityId}:2`);
+    const target = fixture.env.state.eReplicas.get(`${fixture.state.entityId}:2`);
     expect(target?.leaderVotes?.has('2')).toBe(true);
     expect(fixture.env.runtimeMempool?.entityInputs.some(input => input.proposedFrame?.hash === poisoned.proposedFrame?.hash))
       .toBe(true);
@@ -252,7 +252,7 @@ describe('leader timeout / old-view proposal ordering regression', () => {
   test('cryptographically prioritizes and applies a real 3-of-4 commit before a same-height timeout', async () => {
     const fixture = await buildFixture('leader-order-certified-commit');
     const proposerId = fixture.state.config.validators[0]!;
-    fixture.env.eReplicas.set(`${fixture.state.entityId}:2`, replica(fixture.state, '2'));
+    fixture.env.state.eReplicas.set(`${fixture.state.entityId}:2`, replica(fixture.state, '2'));
     const commit = await buildCertifiedCommitInput(fixture);
     const vote = signedTimeoutInput(fixture.env, fixture.state, '2', '3');
     const verifiedCommit = (input: RoutedEntityInput) =>
@@ -285,13 +285,13 @@ describe('leader timeout / old-view proposal ordering regression', () => {
     uppercaseCommit.signerId = proposerId;
     uppercaseCommit.proposedFrame!.hash =
       `0x${uppercaseCommit.proposedFrame!.hash.slice(2).toUpperCase()}`;
-    fixture.env.eReplicas.set(`${fixture.state.entityId}:${proposerId}`, fixture.proposer);
+    fixture.env.state.eReplicas.set(`${fixture.state.entityId}:${proposerId}`, fixture.proposer);
     expect(verifiedCommit(uppercaseCommit)).toBe(false);
     const uppercaseResult = await applyEntityInput(fixture.env, fixture.proposer, uppercaseCommit);
     expect(uppercaseResult.outcome).toEqual({ kind: 'rejected', code: 'COMMIT_DIGEST_NON_CANONICAL' });
     expect(uppercaseResult.workingReplica.state.height).toBe(0);
 
-    const targetBeforeCommit = fixture.env.eReplicas.get(`${fixture.state.entityId}:2`)!;
+    const targetBeforeCommit = fixture.env.state.eReplicas.get(`${fixture.state.entityId}:2`)!;
     const originalLocalManifest = structuredClone(targetBeforeCommit.candidate!.hashesToSign);
     const originalLockedManifest = structuredClone(targetBeforeCommit.lockedFrame!.hashesToSign!);
     const secondaryHash = {
@@ -331,7 +331,7 @@ describe('leader timeout / old-view proposal ordering regression', () => {
       runtimeTxs: [],
       entityInputs: [vote, commit],
     });
-    const target = fixture.env.eReplicas.get(`${fixture.state.entityId}:2`);
+    const target = fixture.env.state.eReplicas.get(`${fixture.state.entityId}:2`);
     expect(target?.state.height).toBe(1);
     expect(target?.state.prevFrameHash).toBe(commit.proposedFrame?.hash);
     expect(target?.lockedFrame).toBeUndefined();

@@ -186,7 +186,7 @@ export const collectCommittedEntityResult = (
   result: Awaited<ReturnType<typeof applyEntityInputToReplica>>,
   context: RuntimeEntityInputBatchContext,
 ): void => {
-  env.eReplicas.set(replicaKey, result.nextReplica);
+  env.state.eReplicas.set(replicaKey, result.nextReplica);
   applyStorageChanges(env, result.nextReplica.state, result.storageChanges);
   publishEntityCandidateEffects(env, result.candidateEffects);
   routeCommittedEntityOutputs(env, result.outputs, context);
@@ -234,7 +234,7 @@ export const drainImmediateCrossJurisdictionOutputs = async (
       'Immediate cross-j target replica disappeared',
       { entityId: input.entityId, signerId },
     );
-    const replica = env.eReplicas.get(replicaKey);
+    const replica = env.state.eReplicas.get(replicaKey);
     assertRuntimeEntityIngress(
       replica,
       'RUNTIME_CROSS_J_LOCAL_REPLICA_EMPTY',

@@ -24,9 +24,9 @@ const getIncidentMap = (env: RuntimeReplica): Map<string, RuntimeSecurityInciden
 };
 
 const incidentTimestamp = (env: RuntimeReplica): number => {
-  const timestamp = Number(env.timestamp);
+  const timestamp = Number(env.state.timestamp);
   if (!Number.isSafeInteger(timestamp) || timestamp < 0) {
-    throw new Error(`RUNTIME_SECURITY_INCIDENT_TIMESTAMP_INVALID:${String(env.timestamp)}`);
+    throw new Error(`RUNTIME_SECURITY_INCIDENT_TIMESTAMP_INVALID:${String(env.state.timestamp)}`);
   }
   return timestamp;
 };

@@ -1941,8 +1941,8 @@ function resolveSwapLogicalClock(sourceReplica: EntityReplica | null | undefined
   logicalTimestamp: number;
   logicalHeight: number;
 } {
-  const logicalTimestamp = readLogicalNumber(sourceReplica?.state?.timestamp ?? runtimeEnv?.timestamp);
-  const logicalHeight = readLogicalNumber(sourceReplica?.state?.height ?? runtimeEnv?.height);
+  const logicalTimestamp = readLogicalNumber(sourceReplica?.state?.timestamp ?? runtimeEnv?.state.timestamp);
+  const logicalHeight = readLogicalNumber(sourceReplica?.state?.height ?? runtimeEnv?.state.height);
   if (logicalTimestamp <= 0 || logicalHeight <= 0) {
     throw new Error('Swap runtime clock is unavailable');
   }

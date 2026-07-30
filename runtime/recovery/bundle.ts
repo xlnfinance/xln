@@ -235,8 +235,8 @@ export const buildRuntimeRecoveryBundle = (
     version: RECOVERY_BUNDLE_VERSION as 1,
     kind: options.kind ?? 'snapshot',
     runtimeId,
-    runtimeHeight: Math.max(0, Math.floor(Number(env.height || 0))),
-    runtimeTimestamp: Math.max(0, Math.floor(Number(env.timestamp || 0))),
+    runtimeHeight: Math.max(0, Math.floor(Number(env.state.height || 0))),
+    runtimeTimestamp: Math.max(0, Math.floor(Number(env.state.timestamp || 0))),
     createdAt: Math.max(0, Math.floor(Number(options.createdAt ?? Date.now()))),
     signers,
     ...(options.meta ? { meta: structuredClone(options.meta) } : {}),
@@ -283,7 +283,7 @@ export const buildRuntimeRecoveryCheckpointBundle = (
   if (
     !Number.isSafeInteger(runtimeHeight)
     || runtimeHeight < 0
-    || runtimeHeight > Math.floor(Number(env.height || 0))
+    || runtimeHeight > Math.floor(Number(env.state.height || 0))
   ) {
     throw new Error(`RECOVERY_BUNDLE_CHECKPOINT_HEIGHT_INVALID:${String(checkpoint['height'])}`);
   }

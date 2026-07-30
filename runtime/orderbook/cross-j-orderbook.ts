@@ -24,7 +24,7 @@ const crossJBookLog = createStructuredLogger('crossj.orderbook');
 export const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 
 export const deterministicEntityTimestamp = (state: EntityState, env?: EntityRuntimeContext): number =>
-  Number(state.timestamp || env?.timestamp || 0);
+  Number(state.timestamp || env?.state.timestamp || 0);
 
 export const applyCommittedSwapCancelsToOrderbook = (
   env: EntityRuntimeContext,

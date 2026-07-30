@@ -36,7 +36,7 @@ type CrossJurisdictionClearResult = {
 };
 
 const deterministicEntityTimestamp = (state: EntityState, env: EntityRuntimeContext): number =>
-  Number(state.timestamp || env.timestamp || 0);
+  Number(state.timestamp || env.state.timestamp || 0);
 
 const cancelOrderbookOfferIfPresent = (
   state: EntityState,

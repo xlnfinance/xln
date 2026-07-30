@@ -111,7 +111,7 @@ export const wrapCertifiedEntityOutputs = (
     if (isLocalRuntimeProtocolOutput(output)) {
       if (!emitLocalRuntimeOutputs) return [];
       const targetEntityId = output.entityId.trim().toLowerCase();
-      const localTarget = Array.from(env.eReplicas.values()).some(
+      const localTarget = Array.from(env.state.eReplicas.values()).some(
         replica =>
           replica.entityId.toLowerCase() === targetEntityId &&
           replica.signerId.toLowerCase() === output.signerId.toLowerCase(),

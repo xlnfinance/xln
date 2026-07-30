@@ -204,7 +204,7 @@ const applyRuntimeInput = createRuntimeInputReducer({
       env.scenarioMode === true || readRuntimeMetadata(env, ENV_APPLY_ALLOWED_KEY) === true,
       'RUNTIME_APPLY_DIRECT_CALL',
       'applyRuntimeInput must be invoked via process()/WAL replay (non-scenario)',
-      { runtimeId: env.runtimeId, height: env.height },
+      { runtimeId: env.runtimeId, height: env.state.height },
     );
   },
   isReplay: env => readRuntimeMetadata(env, ENV_REPLAY_MODE_KEY) === true,
@@ -243,7 +243,7 @@ export const queueEntityInput = async (
       [{ entityId: targetEntityId, signerId: targetSignerId, entityTxs: [tx] }],
       undefined,
       undefined,
-      target.timestamp,
+      target.state.timestamp,
     );
   }, env, entityId, signerId, txData);
 };

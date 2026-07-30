@@ -57,7 +57,7 @@ const installJurisdiction = (env: ReturnType<typeof createEmptyEnv>): JReplica =
     },
     position: { x: 0, y: 0, z: 0 },
   } satisfies JReplica;
-  env.jReplicas.set(JURISDICTION.name, replica);
+  env.state.jReplicas.set(JURISDICTION.name, replica);
   return replica;
 };
 
@@ -276,7 +276,7 @@ describe('external wallet observed state', () => {
       mempool: [],
       hankoWitness: new Map(),
     };
-    env.timestamp = seededReplica.state.timestamp;
+    env.state.timestamp = seededReplica.state.timestamp;
     const headerHash = (height: number): string => `0x${height.toString(16).padStart(64, '0')}`;
     seededReplica.jHistory = {
       jurisdictionRef: getJEventJurisdictionRef(JURISDICTION),
@@ -289,7 +289,7 @@ describe('external wallet observed state', () => {
         return [height, headerHash(height)];
       })),
     };
-    env.eReplicas.set(`${entityId}:${signerId}`, seededReplica);
+    env.state.eReplicas.set(`${entityId}:${signerId}`, seededReplica);
 
     const input = buildJEventsRuntimeInput(env, [{
       name: 'ExternalWalletSnapshot',
@@ -308,7 +308,7 @@ describe('external wallet observed state', () => {
     expect(input).not.toBeNull();
     await applyRuntimeInput(env, input!);
 
-    const replica = env.eReplicas.get(`${entityId}:${signerId}`);
+    const replica = env.state.eReplicas.get(`${entityId}:${signerId}`);
     expect(replica?.mempool).toEqual([]);
     expect(replica?.state.externalWallet?.balances.get(signerId)?.get(TOKEN)?.balance).toBe(2_500n);
     expect(replica?.state.externalWallet?.allowances.get(signerId)?.get(`${TOKEN}:${SPENDER}`)?.allowance).toBe(900n);

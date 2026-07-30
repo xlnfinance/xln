@@ -136,7 +136,7 @@ const queueBatchResult = (
   extra: { message?: string; txHash?: string; adapterFailure?: JAdapterFailure } = {},
 ): void => {
   const resultTx = makeJSubmitResultRuntimeTx(jTx, jurisdictionName, outcome, extra);
-  deps.enqueueRuntimeInputs(env, undefined, [resultTx], undefined, env.timestamp);
+  deps.enqueueRuntimeInputs(env, undefined, [resultTx], undefined, env.state.timestamp);
   jSubmitLog.info('tx.result_queued', {
     entityId: shortId(jTx.entityId),
     jurisdictionName,
@@ -154,7 +154,7 @@ const queueEntityProviderActionResult = (
   extra: { message?: string; txHash?: string; adapterFailure?: JAdapterFailure } = {},
 ): void => {
   const resultTx = makeEntityProviderActionResultRuntimeTx(jTx, jurisdictionName, outcome, extra);
-  deps.enqueueRuntimeInputs(env, undefined, [resultTx], undefined, env.timestamp);
+  deps.enqueueRuntimeInputs(env, undefined, [resultTx], undefined, env.state.timestamp);
   jSubmitLog.info('entity_provider_action.result_queued', {
     entityId: shortId(jTx.entityId),
     jurisdictionName,
@@ -294,7 +294,7 @@ const resolveJSubmitAdapter = async (
   jurisdictionName: string,
   activeJTxs: JTx[],
 ): Promise<{ adapter: JAdapter; replica: JReplica } | null> => {
-  const replica = env.jReplicas?.get(jurisdictionName);
+  const replica = env.state.jReplicas?.get(jurisdictionName);
   if (!replica) {
     const failure = classifyJAdapterFailure(`missing_jReplica:${jurisdictionName}`, {
       category: 'transient',
@@ -400,7 +400,7 @@ const submitJTxToAdapter = async (
     env,
     ...(signerId ? { signerId } : {}),
     ...(signerPrivateKey ? { signerPrivateKey } : {}),
-    timestamp: jTx.timestamp ?? env.timestamp,
+    timestamp: jTx.timestamp ?? env.state.timestamp,
   });
 };
 
@@ -517,7 +517,7 @@ const submitJInput = async (
 
   // Submission does not own the watcher cursor. The authoritative J-height
   // path is watcher poll -> processEventBatch.
-  context.replica.lastBlockTimestamp = env.timestamp;
+  context.replica.lastBlockTimestamp = env.state.timestamp;
 };
 
 /**

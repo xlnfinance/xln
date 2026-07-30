@@ -29,16 +29,16 @@ const removeRuntimeStorage = (runtimeId: string): void => {
 
 const prepareFrame = (seed: string) => {
   const live = createEmptyEnv(seed);
-  live.height = 7;
-  live.timestamp = 700;
+  live.state.height = 7;
+  live.state.timestamp = 700;
   const stopped = { count: 0 };
   ensureRuntimeState(live).stopLoop = () => {
     stopped.count += 1;
   };
 
   const transaction = createRuntimeFrameTransaction(live);
-  live.height = 8;
-  live.timestamp = 800;
+  live.state.height = 8;
+  live.state.timestamp = 800;
   const frame = createFrameExecutionState();
   frame.transaction = transaction;
   return { live, transaction, frame, stopped };
@@ -91,7 +91,7 @@ describe('Runtime WAL storage failure boundary', () => {
     // The owned Runtime has already mutated. This helper only classifies WAL
     // durability; the enclosing frame failure path halts and restores input.
     // Rolling State back here would reintroduce the deleted shadow Runtime.
-    expect(live.height).toBe(8);
+    expect(live.state.height).toBe(8);
     expect(transaction.published).toBe(false);
     expect(frame.commitDisposition).toBe('undurable');
     expect(frame.reliableReceiptStateDurable).toBe(false);
@@ -109,8 +109,8 @@ describe('Runtime WAL storage failure boundary', () => {
       frame,
     );
 
-    expect(live.height).toBe(8);
-    expect(live.timestamp).toBe(800);
+    expect(live.state.height).toBe(8);
+    expect(live.state.timestamp).toBe(800);
     expect(transaction.published).toBe(true);
     expect(frame.commitDisposition).toBe('committed');
     expect(frame.reliableReceiptStateDurable).toBe(true);
@@ -130,8 +130,8 @@ describe('Runtime WAL storage failure boundary', () => {
       frame,
     );
 
-    expect(live.height).toBe(8);
-    expect(live.timestamp).toBe(800);
+    expect(live.state.height).toBe(8);
+    expect(live.state.timestamp).toBe(800);
     expect(transaction.published).toBe(false);
     expect(frame.commitDisposition).toBe('unknown');
     expect(frame.reliableReceiptStateDurable).toBe(false);
@@ -151,7 +151,7 @@ describe('Runtime WAL storage failure boundary', () => {
       frame,
     );
 
-    expect(live.height).toBe(8);
+    expect(live.state.height).toBe(8);
     expect(transaction.published).toBe(false);
     expect(frame.commitDisposition).toBe('conflict');
     expect(frame.reliableReceiptStateDurable).toBe(false);
@@ -193,7 +193,7 @@ test('real write timeout makes mutated RAM unreadable until restart loads WAL tr
   const restored = await loadEnvFromDB(runtimeId, seed);
   if (!restored) throw new Error('timeout fixture did not leave durable Runtime state');
   try {
-    expect(restored.height).toBe(2);
+    expect(restored.state.height).toBe(2);
   } finally {
     await closeRuntimeDb(restored);
     await closeInfraDb(restored);

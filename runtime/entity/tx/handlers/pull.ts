@@ -23,7 +23,7 @@ type CrossPullCloseTx = Extract<EntityTx, { type: 'crossPullClose' }>;
 type CancelPullTx = Extract<EntityTx, { type: 'cancelPull' | 'pullCancelExpired' }>;
 type PullResult = { newState: EntityState; outputs: EntityInput[]; accountTxs: AccountTxTarget[] };
 
-const now = (state: EntityState, env: EntityRuntimeContext): number => Number(state.timestamp || env.timestamp || 0);
+const now = (state: EntityState, env: EntityRuntimeContext): number => Number(state.timestamp || env.state.timestamp || 0);
 const createResult = (state: EntityState, options?: ApplyEntityTxOptions): PullResult => ({
   newState: prepareEntityTxState(state, options?.mutableFrameState),
   outputs: [],
@@ -230,7 +230,7 @@ export const handleCrossPullCloseEntityTx = (env: EntityRuntimeContext, state: E
     if (!isCrossJurisdictionRouteTransitionAllowed(route.status, 'clearing')) {
       return fail(result, `❌ Cross-j target pull close ${pullId.slice(0, 8)} blocked: route ${route.status}->clearing`);
     }
-    transitionCrossJurisdictionRouteStatus(route, 'clearing', result.newState.timestamp || env.timestamp);
+    transitionCrossJurisdictionRouteStatus(route, 'clearing', result.newState.timestamp || env.state.timestamp);
   }
   result.newState.crossJurisdictionSwaps?.set(route.orderId, route);
   result.accountTxs.push({ accountId, tx: { type: 'cross_pull_close', data: { pullId, binary, proof } } });

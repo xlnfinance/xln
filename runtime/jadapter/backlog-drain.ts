@@ -69,7 +69,7 @@ const requireSafeBlock = (value: unknown, label: string): number => {
 
 const getUniqueWatcherAdapters = (env: RuntimeReplica): JAdapter[] => {
   const adapters = new Set<JAdapter>();
-  for (const replica of env.jReplicas.values()) {
+  for (const replica of env.state.jReplicas.values()) {
     const adapter = replica.jadapter;
     if (adapter) adapters.add(adapter);
   }
@@ -115,7 +115,7 @@ export const captureTrustedJWatcherTargets = async (env: RuntimeReplica): Promis
 const relevantReplicas = (
   env: RuntimeReplica,
   watcherReplica: JReplica,
-): Array<[string, EntityReplica]> => [...env.eReplicas.entries()]
+): Array<[string, EntityReplica]> => [...env.state.eReplicas.entries()]
   .filter(([, replica]) => isEntityReplicaRelevantToWatcher(env, replica, watcherReplica))
   .sort(([left], [right]) => left.localeCompare(right));
 

@@ -29,7 +29,7 @@ const addAdmittedTransactions = (
   const { env, workingReplica } = context;
   if (admitted.length === 0) return [];
   if (!localCanPropose && workingReplica.lastConsensusProgressAt === undefined) {
-    workingReplica.lastConsensusProgressAt = env.timestamp;
+    workingReplica.lastConsensusProgressAt = env.state.timestamp;
   }
   const voteCount = supplied.filter(tx => tx.type === 'vote').length;
   if (voteCount > 0) {
@@ -123,7 +123,7 @@ export const admitEntityTransactions = async (
     entityLog.info('replica_meta.admission_debug', {
       entityId: workingReplica.entityId,
       entityHeight: workingReplica.state.height,
-      runtimeHeight: env.height,
+      runtimeHeight: env.state.height,
       supplied: supplied.map(tx => tx.type),
       secretAware: secretAware.map(tx => tx.type),
       admitted: admitted.map(tx => tx.type),

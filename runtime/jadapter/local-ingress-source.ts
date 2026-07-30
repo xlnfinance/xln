@@ -49,7 +49,7 @@ export const bindLocalJEventIngressSource = (
   if (!source || typeof source !== 'object') {
     throw new Error(`J_EVENT_LOCAL_SOURCE_REQUIRED:${context}`);
   }
-  const matches = [...(env.jReplicas?.entries() ?? [])].filter(([, replica]) =>
+  const matches = [...(env.state.jReplicas?.entries() ?? [])].filter(([, replica]) =>
     replica === source || replica.jadapter === source
   );
   if (matches.length === 0) {

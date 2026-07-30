@@ -121,7 +121,7 @@ const collectDeliveries = (
 ): Delivery[] => {
   const deliveries: Delivery[] = [];
   const watcherRef = watcher ? getJEventJurisdictionRef(watcher) : '';
-  for (const [replicaKey, replica] of env.eReplicas) {
+  for (const [replicaKey, replica] of env.state.eReplicas) {
     if (watcher && !isEntityReplicaRelevantToWatcher(env, replica, watcher)) continue;
     const jurisdictionRef = getJEventJurisdictionRef(replica.state.config.jurisdiction);
     if (watcher && jurisdictionRef !== watcherRef) {

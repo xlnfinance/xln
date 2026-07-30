@@ -84,7 +84,7 @@ const installVoteTarget = (env: RuntimeReplica): {
     mempool: [],
     isProposer: false,
   };
-  env.eReplicas.set(`${entityId}:${signerId}`, replica);
+  env.state.eReplicas.set(`${entityId}:${signerId}`, replica);
   const voteBody = buildEntityLeaderVoteBody(state);
   const vote: EntityLeaderTimeoutVote = {
     ...voteBody,
@@ -115,7 +115,7 @@ const installJurisdiction = (env: RuntimeReplica): JurisdictionConfig => {
     entityProviderAddress: `0x${'12'.repeat(20)}`,
   };
   env.activeJurisdiction = jurisdiction.name;
-  env.jReplicas.set(jurisdiction.name, createTestJReplica({
+  env.state.jReplicas.set(jurisdiction.name, createTestJReplica({
     name: jurisdiction.name,
     rpcs: [],
     chainId: jurisdiction.chainId,
@@ -146,8 +146,8 @@ describe('leader timeout vote durability', () => {
 
     await applyRuntimeInput(env, voteRuntimeInput(replica, vote));
 
-    expect(env.eReplicas.get(`${replica.entityId}:${replica.signerId}`)?.leaderVotes?.size).toBe(1);
-    expect(env.height).toBe(1);
+    expect(env.state.eReplicas.get(`${replica.entityId}:${replica.signerId}`)?.leaderVotes?.size).toBe(1);
+    expect(env.state.height).toBe(1);
   });
 
   test('restores a standalone sub-quorum vote from authoritative LevelDB history', async () => {
@@ -185,8 +185,8 @@ describe('leader timeout vote durability', () => {
       entityInputs: [],
     });
     await processRuntime(env, []);
-    expect(env.height).toBe(1);
-    const replica = env.eReplicas.get(`${entityId}:${signerId}`);
+    expect(env.state.height).toBe(1);
+    const replica = env.state.eReplicas.get(`${entityId}:${signerId}`);
     if (!replica) throw new Error('LEADER_TIMEOUT_VOTE_REPLICA_MISSING');
     const recoverySigners = [{
       index: 0,
@@ -209,8 +209,8 @@ describe('leader timeout vote durability', () => {
 
     enqueueRuntimeInput(env, voteRuntimeInput(replica, vote));
     await processRuntime(env, []);
-    expect(env.height).toBe(2);
-    const frame = await readPersistedFrameJournal(env, env.height);
+    expect(env.state.height).toBe(2);
+    const frame = await readPersistedFrameJournal(env, env.state.height);
     if (!frame) throw new Error('LEADER_TIMEOUT_VOTE_JOURNAL_MISSING');
     const tailBundle = buildRuntimeRecoveryBundle(env, {
       signers: recoverySigners,
@@ -319,8 +319,8 @@ describe('leader timeout vote durability', () => {
     const restored = await loadEnvFromDB(env.runtimeId, seed);
     if (!restored) throw new Error('LEADER_TIMEOUT_VOTE_RESTORE_MISSING');
     try {
-      const restoredReplica = restored.eReplicas.get(`${replica.entityId}:${replica.signerId}`);
-      expect(restored.height).toBe(2);
+      const restoredReplica = restored.state.eReplicas.get(`${replica.entityId}:${replica.signerId}`);
+      expect(restored.state.height).toBe(2);
       expect(restoredReplica?.leaderVotes?.get(vote.voterId)).toEqual(vote);
     } finally {
       await closeRuntimeDb(restored);
@@ -332,8 +332,8 @@ describe('leader timeout vote durability', () => {
       { runtimeSeed: seed, runtimeId: env.runtimeId },
     );
     try {
-      const recoveredReplica = recoveredFromJournal.eReplicas.get(`${replica.entityId}:${replica.signerId}`);
-      expect(recoveredFromJournal.height).toBe(2);
+      const recoveredReplica = recoveredFromJournal.state.eReplicas.get(`${replica.entityId}:${replica.signerId}`);
+      expect(recoveredFromJournal.state.height).toBe(2);
       expect(recoveredReplica?.leaderVotes?.get(vote.voterId)).toEqual(vote);
     } finally {
       await closeRuntimeDb(recoveredFromJournal);

@@ -202,7 +202,7 @@ describe('orderbook matching fallback execution mapping', () => {
 
   test('applies committed cross-j book progress before matcher sees the next snapshot', () => {
     const env = createEmptyEnv('cross-book-progress');
-    env.timestamp = 2;
+    env.state.timestamp = 2;
     const lot = SWAP_LOT_SCALE;
     const sourceTotal = 40_000n * lot;
     const targetTotal = quoteAmountAtPrice(2, 1, sourceTotal, 25_000_000n);
@@ -1245,7 +1245,7 @@ describe('orderbook matching fallback execution mapping', () => {
     } as any;
 
     const runtimeEnv = createEmptyEnv('cross-j-expired-book-fill-security-status');
-    runtimeEnv.timestamp = entityState.timestamp;
+    runtimeEnv.state.timestamp = entityState.timestamp;
     runtimeEnv.error = () => undefined;
     const candidateEffects: EntityCandidateEffect[] = [];
     expect(() => processCommittedOrderbookSwaps(

@@ -241,7 +241,7 @@ async function main() {
     stateRoot: null,
     mempool: [],
     blockDelayMs: 0,
-    lastBlockTimestamp: env.timestamp,
+    lastBlockTimestamp: env.state.timestamp,
     position: { x: 0, y: 0, z: 0 },
     depositoryAddress: jurisdiction.depositoryAddress,
     entityProviderAddress: jurisdiction.entityProviderAddress,
@@ -251,7 +251,7 @@ async function main() {
       entityProvider: jurisdiction.entityProviderAddress,
     },
   };
-  env.jReplicas.set(jurisdiction.name, jReplica);
+  env.state.jReplicas.set(jurisdiction.name, jReplica);
 
   enqueueRuntimeInput(env, {
     runtimeTxs: [
@@ -289,7 +289,7 @@ async function main() {
     entityInputs: [],
   });
   await processRuntime(env, []);
-  assert(env.height === 1, `expected genesis frame 1, got ${env.height}`);
+  assert(env.state.height === 1, `expected genesis frame 1, got ${env.state.height}`);
 
   enqueueRuntimeInput(env, {
     runtimeTxs: [],
@@ -311,7 +311,7 @@ async function main() {
     ],
   });
   await processRuntime(env, []);
-  assert(Number(env.height) === 2, `expected live frame 2, got ${env.height}`);
+  assert(Number(env.state.height) === 2, `expected live frame 2, got ${env.state.height}`);
 
   const liveSnapshot = buildRuntimeCheckpointSnapshot(env);
   await drainBackgroundPersistence();
@@ -329,11 +329,11 @@ async function main() {
   replayEnv.runtimeId = runtimeId;
   replayEnv.dbNamespace = runtimeId;
   const checkpoint = readCheckpointSnapshot(checkpointSnapshot);
-  replayEnv.height = checkpoint.height ?? 0;
-  replayEnv.timestamp = checkpoint.timestamp ?? 0;
+  replayEnv.state.height = checkpoint.height ?? 0;
+  replayEnv.state.timestamp = checkpoint.timestamp ?? 0;
   replayEnv.activeJurisdiction = checkpoint.activeJurisdiction;
-  replayEnv.eReplicas = new Map(checkpoint.eReplicas);
-  replayEnv.jReplicas = new Map(checkpoint.jReplicas);
+  replayEnv.state.eReplicas = new Map(checkpoint.eReplicas);
+  replayEnv.state.jReplicas = new Map(checkpoint.jReplicas);
   if (checkpoint.browserVMState) {
     replayEnv.browserVMState = checkpoint.browserVMState;
   }
@@ -342,8 +342,8 @@ async function main() {
   const replayModeKey = Symbol.for('xln.runtime.env.replay.mode');
   (replayEnv as unknown as Record<PropertyKey, unknown>)[replayModeKey] = true;
   (replayEnv as unknown as Record<PropertyKey, unknown>)[applyAllowedKey] = true;
-  replayEnv.height = 1;
-  replayEnv.timestamp = Number(frame2.timestamp ?? replayEnv.timestamp);
+  replayEnv.state.height = 1;
+  replayEnv.state.timestamp = Number(frame2.timestamp ?? replayEnv.state.timestamp);
   await (await import('../runtime.ts')).applyRuntimeInput(replayEnv, frame2.runtimeInput);
   (replayEnv as unknown as Record<PropertyKey, unknown>)[applyAllowedKey] = false;
 
@@ -370,8 +370,8 @@ async function main() {
           replay: replaySerialized.slice(Math.max(0, firstDiffAt - 160), firstDiffAt + 160),
         }
       : null;
-  const liveReplica = Array.from(env.eReplicas.values()).find((replica) => replica.entityId === entityA);
-  const replayReplica = Array.from(replayEnv.eReplicas.values()).find((replica) => replica.entityId === entityA);
+  const liveReplica = Array.from(env.state.eReplicas.values()).find((replica) => replica.entityId === entityA);
+  const replayReplica = Array.from(replayEnv.state.eReplicas.values()).find((replica) => replica.entityId === entityA);
   const liveAccounts = liveReplica
     ? Array.from(liveReplica.state.accounts.entries()).map(([key, account]) => ({
         key,

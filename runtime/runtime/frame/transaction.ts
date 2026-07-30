@@ -112,8 +112,8 @@ export const publishRuntimeFrameTransaction = (
     runtimeInputHasQueuedWork(mergedMempool) ||
     (state.pendingProfileCertificationEntityIds?.size ?? 0) > 0;
   rebuildScheduledWakeIndex(liveEnv);
-  for (const replica of liveEnv.jReplicas.values()) {
-    replica.jadapter?.setBlockTimestamp?.(liveEnv.timestamp);
+  for (const replica of liveEnv.state.jReplicas.values()) {
+    replica.jadapter?.setBlockTimestamp?.(liveEnv.state.timestamp);
   }
   transaction.published = true;
   return liveEnv;

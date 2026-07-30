@@ -67,7 +67,7 @@ const importBoardReplicas = (entityId: string, config: ConsensusConfig, x: numbe
 type GovernanceVote = readonly [signerId: string, choice: 'yes' | 'no'];
 
 const requireReplica = (env: RuntimeReplica, entityId: string, signerId: string): EntityReplica => {
-  const replica = env.eReplicas.get(`${entityId}:${signerId}`);
+  const replica = env.state.eReplicas.get(`${entityId}:${signerId}`);
   if (!replica) throw new Error(`MULTISIG_REPLICA_MISSING:${entityId}:${signerId}`);
   return replica;
 };
@@ -228,8 +228,8 @@ export async function multiSig(env: RuntimeReplica): Promise<void> {
     const equalShares = (validators: string[]): Record<string, bigint> =>
       Object.fromEntries(validators.map(validator => [validator, 1n]));
 
-    if (env.scenarioMode && env.height === 0) {
-      env.timestamp = 1;
+    if (env.scenarioMode && env.state.height === 0) {
+      env.state.timestamp = 1;
     }
 
     console.log('═══════════════════════════════════════════════════════════════');
@@ -377,7 +377,7 @@ export async function multiSig(env: RuntimeReplica): Promise<void> {
     const setupHeights: number[] = [];
     for (const validator of alice.validators) {
       const key = `${alice.id}:${validator}`;
-      const replica = env.eReplicas.get(key);
+      const replica = env.state.eReplicas.get(key);
       const height = replica?.state.height || 0;
       const hasPending = Boolean(replica?.proposal || replica?.lockedFrame || (replica?.mempool.length || 0) > 0);
       const pendingDetails = [
@@ -394,7 +394,7 @@ export async function multiSig(env: RuntimeReplica): Promise<void> {
     }
 
     for (const validator of registered.validators) {
-      const replica = env.eReplicas.get(`${registered.id}:${validator}`);
+      const replica = env.state.eReplicas.get(`${registered.id}:${validator}`);
       assert((replica?.state.height || 0) > 0, `Registered validator ${validator} committed initial entity tx`);
       assert(
         (replica?.state.reserves.get(USDC) || 0n) === usd(1_000),
@@ -435,7 +435,7 @@ export async function multiSig(env: RuntimeReplica): Promise<void> {
       await syncChain(env, 8);
 
       for (const validator of board.validators) {
-        const replica = env.eReplicas.get(`${board.id}:${validator}`);
+        const replica = env.state.eReplicas.get(`${board.id}:${validator}`);
         assert(!!replica, `${board.name} validator ${validator} replica exists`);
         assert(hasFinalizedHankoBatch(replica!), `${board.name} validator ${validator} finalized HankoBatchProcessed`);
         assert(
@@ -594,14 +594,14 @@ export async function multiSig(env: RuntimeReplica): Promise<void> {
 
     const [, aliceRep3] = findReplica(env, alice.id);
     const finalHeight = aliceRep3.state.height;
-    const totalEntityPending = Array.from(env.eReplicas.values()).filter(
+    const totalEntityPending = Array.from(env.state.eReplicas.values()).filter(
       replica => replica.proposal || replica.lockedFrame || replica.mempool.length > 0,
     ).length;
 
     console.log(`\n📊 Final state:`);
     console.log(`   Alice height: ${finalHeight}`);
     console.log(`   Active entity proposals: ${totalEntityPending}`);
-    console.log(`   Hub height: ${env.eReplicas.get(`${hub.id}:${hub.signer}`)?.state.height || 0}`);
+    console.log(`   Hub height: ${env.state.eReplicas.get(`${hub.id}:${hub.signer}`)?.state.height || 0}`);
 
     assert(
       finalHeight >= Math.max(...setupHeights) + 1,

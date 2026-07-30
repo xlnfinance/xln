@@ -629,7 +629,7 @@ describe('J validator-local history and Entity-finalized ranges', () => {
         blocks: [eventBlock(12, '12')],
       }),
     };
-    env.eReplicas.set(`${entityId}:${leaderId}`, replica);
+    env.state.eReplicas.set(`${entityId}:${leaderId}`, replica);
 
     await expect(applyRuntimeTx(env, markLocalJAuthorityRuntimeTx({
       type: 'rewindJHistory',
@@ -669,7 +669,7 @@ describe('J validator-local history and Entity-finalized ranges', () => {
         blocks: [],
       }, entityState),
     };
-    env.eReplicas.set(`${entityId}:${leaderId}`, replica);
+    env.state.eReplicas.set(`${entityId}:${leaderId}`, replica);
 
     await expect(applyRuntimeTx(env, markLocalJAuthorityRuntimeTx({
       type: 'rewindJHistory',
@@ -740,7 +740,7 @@ describe('J validator-local history and Entity-finalized ranges', () => {
         storageChanges: [],
       },
     };
-    env.eReplicas.set(`${entityId}:${validatorId}`, replica);
+    env.state.eReplicas.set(`${entityId}:${validatorId}`, replica);
 
     await expect(applyRuntimeTx(env, markLocalJAuthorityRuntimeTx({
       type: 'rewindJHistory',
@@ -780,7 +780,7 @@ describe('J validator-local history and Entity-finalized ranges', () => {
       mempool: [],
       isProposer: true,
     };
-    env.eReplicas.set(`${entityId}:${leaderId}`, replica);
+    env.state.eReplicas.set(`${entityId}:${leaderId}`, replica);
 
     await expect(applyRuntimeTx(env, markLocalJAuthorityRuntimeTx({
       type: 'observeJRange',
@@ -831,7 +831,7 @@ describe('J validator-local history and Entity-finalized ranges', () => {
       isProposer: true,
       jHistory: localHistory,
     };
-    env.eReplicas.set(`${entityId}:${leaderId}`, replica);
+    env.state.eReplicas.set(`${entityId}:${leaderId}`, replica);
 
     await expect(applyRuntimeTx(env, markLocalJAuthorityRuntimeTx({
       type: 'observeJRange',
@@ -879,7 +879,7 @@ describe('J validator-local history and Entity-finalized ranges', () => {
       isProposer: true,
       jHistory: localHistory,
     };
-    env.eReplicas.set(`${entityId}:${leaderId}`, replica);
+    env.state.eReplicas.set(`${entityId}:${leaderId}`, replica);
     const malformedBlock = {
       ...eventBlock(9, '9'),
       eventsHash: `0x${'ff'.repeat(32)}`,
@@ -931,7 +931,7 @@ describe('J validator-local history and Entity-finalized ranges', () => {
       isProposer: true,
       jHistory: corruptHistory,
     };
-    env.eReplicas.set(`${entityId}:${leaderId}`, replica);
+    env.state.eReplicas.set(`${entityId}:${leaderId}`, replica);
 
     await expect(applyRuntimeTx(env, markLocalJAuthorityRuntimeTx({
       type: 'observeJRange',
@@ -979,7 +979,7 @@ describe('J validator-local history and Entity-finalized ranges', () => {
       isProposer: true,
       jHistory: localHistory,
     };
-    env.eReplicas.set(`${entityId}:${leaderId}`, replica);
+    env.state.eReplicas.set(`${entityId}:${leaderId}`, replica);
 
     await applyRuntimeTx(env, markLocalJAuthorityRuntimeTx({
       type: 'observeJRange',
@@ -1049,7 +1049,7 @@ describe('J validator-local history and Entity-finalized ranges', () => {
       mempool: [],
       isProposer: true,
     };
-    env.eReplicas.set(`${entityId}:${leaderId}`, replica);
+    env.state.eReplicas.set(`${entityId}:${leaderId}`, replica);
 
     await expect(applyRuntimeTx(env, markLocalJAuthorityRuntimeTx({
       type: 'observeJRange',

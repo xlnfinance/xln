@@ -258,8 +258,8 @@ export const prepareStorageCanonicalStateHashes = (
   return {
     canonicalEntityHashes,
     canonicalStateHash: computeCanonicalRuntimeStateHash(
-      env.height,
-      env.timestamp,
+      env.state.height,
+      env.state.timestamp,
       canonicalEntityHashes,
       runtimeMachine,
     ),

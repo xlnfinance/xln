@@ -70,7 +70,7 @@ export const verifyRecoveryJournalFrame = (
   }
   const postStateHash = computeStoragePostStateHash({
     height,
-    timestamp: env.timestamp,
+    timestamp: env.state.timestamp,
     replicaMetaDigest: commitment.digest,
     runtimeMachine: buildReplayVerifiableRuntimeMachineSnapshot(env, {
       pendingNetworkOutputs: env.pendingNetworkOutputs ?? [],

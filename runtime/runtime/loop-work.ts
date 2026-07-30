@@ -60,7 +60,7 @@ const entityMempoolNeedsWake = (replica: EntityReplica): boolean =>
 
 export const collectAccountMempoolWakeInputs = (env: RuntimeReplica): EntityInput[] => {
   const inputs: EntityInput[] = [];
-  for (const replica of env.eReplicas.values()) {
+  for (const replica of env.state.eReplicas.values()) {
     const entityId = String(replica.entityId || replica.state.entityId).trim().toLowerCase();
     const signerId = String(replica.signerId || '').trim().toLowerCase();
     if (!entityId || !signerId) continue;
@@ -73,7 +73,7 @@ export const collectAccountMempoolWakeInputs = (env: RuntimeReplica): EntityInpu
 
 export const collectEntityMempoolWakeInputs = (env: RuntimeReplica): EntityInput[] => {
   const inputs: EntityInput[] = [];
-  for (const replica of env.eReplicas.values()) {
+  for (const replica of env.state.eReplicas.values()) {
     if (!entityMempoolNeedsWake(replica)) continue;
     const entityId = String(replica.entityId || replica.state.entityId).trim().toLowerCase();
     const signerId = String(replica.signerId || '').trim().toLowerCase();
@@ -83,10 +83,10 @@ export const collectEntityMempoolWakeInputs = (env: RuntimeReplica): EntityInput
 };
 
 const hasEntityMempoolWakeInput = (env: RuntimeReplica): boolean =>
-  [...env.eReplicas.values()].some(entityMempoolNeedsWake);
+  [...env.state.eReplicas.values()].some(entityMempoolNeedsWake);
 
 const hasAccountMempoolWakeInput = (env: RuntimeReplica): boolean =>
-  [...env.eReplicas.values()].some(replica =>
+  [...env.state.eReplicas.values()].some(replica =>
     hasProposableAccount(replica.state),
   );
 
@@ -94,7 +94,7 @@ const runtimeWakeDeps = {
   ensureRuntimeState,
   requireRuntimeMempool,
   enqueueRuntimeInputs,
-  getRuntimeNowMs: (env: RuntimeReplica) => env.timestamp ?? 0,
+  getRuntimeNowMs: (env: RuntimeReplica) => env.state.timestamp ?? 0,
 };
 
 export const hasDueEntityHooks = (env: RuntimeReplica): boolean =>
@@ -118,7 +118,7 @@ export const resolveRuntimeWorkReason = (
   if ((mempool.reliableReceipts?.length ?? 0) > 0) return 'reliable-receipt';
   if (
     deps.runtimeInputHasQueuedWork(mempool) &&
-    (mempool.queuedAt ?? 0) > (env.timestamp ?? 0)
+    (mempool.queuedAt ?? 0) > (env.state.timestamp ?? 0)
   ) {
     return 'future-queued-input';
   }
@@ -244,8 +244,8 @@ export const resolveNextWallClockWakeTimestamp = (
 
 export const generateHookPings = (
   env: RuntimeReplica,
-  nowMs = env.timestamp ?? 0,
-  queuedAt = env.timestamp ?? 0,
+  nowMs = env.state.timestamp ?? 0,
+  queuedAt = env.state.timestamp ?? 0,
 ): void => {
   if (env.runtimeState?.persistenceQuiescing) return;
   generateHookPingsWithDeps(env, runtimeWakeDeps, nowMs, queuedAt);

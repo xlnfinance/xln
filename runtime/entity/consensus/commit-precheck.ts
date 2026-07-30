@@ -14,7 +14,7 @@ const normalize = (value: unknown): string =>
 const exactReplica = (env: EntityRuntimeContext, input: EntityConsensusInput): EntityReplica | null => {
   const entityId = normalize(input.entityId);
   const signerId = normalize(input.signerId);
-  for (const replica of env.eReplicas.values()) {
+  for (const replica of env.state.eReplicas.values()) {
     if (normalize(replica.entityId || replica.state.entityId) !== entityId) continue;
     if (normalize(replica.signerId) !== signerId) continue;
     return replica;

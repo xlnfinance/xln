@@ -196,7 +196,7 @@ const certifyNextFrame = async (
   txs: EntityTx[],
 ): Promise<{ state: EntityState; link: CertifiedEntityFrameLink }> => {
   const height = state.height + 1;
-  const timestamp = env.timestamp;
+  const timestamp = env.state.timestamp;
   const applied = await applyEntityFrame(env, state, txs, timestamp);
   const postStateWithoutHead: EntityState = {
     ...applied.newState,
@@ -272,7 +272,7 @@ env.runtimeConfig = {
   },
 };
 env.activeJurisdiction = jurisdiction.name;
-env.jReplicas.set(jurisdiction.name, {
+env.state.jReplicas.set(jurisdiction.name, {
   ...jurisdiction,
   blockNumber: 0n,
   stateRoot: new Uint8Array(32),
@@ -321,7 +321,7 @@ await processRuntime(env, []);
 // Install the exact Entity-certified authority only after the bootstrap frame.
 // The following save must therefore publish every newly-referenced immutable
 // node in the same authoritative batch as the root-bearing Entity documents.
-const firstReplica = Array.from(env.eReplicas.values()).find((candidate) => (
+const firstReplica = Array.from(env.state.eReplicas.values()).find((candidate) => (
   candidate.entityId === entityId && candidate.signerId === signerA
 ));
 if (!firstReplica) throw new Error('crash fixture authority replica missing');
@@ -349,7 +349,7 @@ const collectiveTxs: EntityTx[] = [{
   data: {},
 }, {
   type: 'chatMessage',
-  data: { message: 'certified-height-one', timestamp: env.timestamp },
+  data: { message: 'certified-height-one', timestamp: env.state.timestamp },
 }];
 const proposalTx = buildCollectiveEntityProposalTx(signerA, collectiveTxs);
 if (proposalTx.type !== 'propose') throw new Error('crash fixture collective proposal missing');
@@ -357,7 +357,7 @@ const proposalId = generateProposalId(
   env,
   proposalTx.data.action,
   signerA,
-  { ...firstReplica.state, timestamp: env.timestamp },
+  { ...firstReplica.state, timestamp: env.state.timestamp },
 );
 const certifiedHeightOne = await certifyNextFrame(
   firstReplica.state,
@@ -379,7 +379,7 @@ const certifiedHeightOne = await certifyNextFrame(
 firstReplica.state = certifiedHeightOne.state;
 firstReplica.certifiedFrameLineage = [certifiedHeightOne.link];
 
-const replica = Array.from(env.eReplicas.values()).find((candidate) => (
+const replica = Array.from(env.state.eReplicas.values()).find((candidate) => (
   candidate.entityId === entityId && candidate.signerId === signerB
 ));
 if (!replica) throw new Error('crash fixture replica missing');
@@ -433,12 +433,12 @@ const quorumHanko = await buildQuorumHanko(
   firstReplica.state.config,
   firstReplica.state,
 );
-for (const candidate of env.eReplicas.values()) {
+for (const candidate of env.state.eReplicas.values()) {
   candidate.state.htlcNotes = new Map([
     [`lock:0x${'ef'.repeat(32)}`, `private-note:${candidate.signerId}`],
   ]);
 }
-const proposerReplica = Array.from(env.eReplicas.values()).find((candidate) => (
+const proposerReplica = Array.from(env.state.eReplicas.values()).find((candidate) => (
   candidate.entityId === entityId && candidate.signerId === signerA
 ));
 if (!proposerReplica) throw new Error('crash fixture proposer replica missing');
@@ -446,7 +446,7 @@ proposerReplica.hankoWitness = new Map([[batchHash, {
   hanko: quorumHanko,
   type: 'jBatch',
   entityHeight: proposerReplica.state.height,
-  createdAt: env.timestamp,
+  createdAt: env.state.timestamp,
 }]]);
 
 if (!recoveryLagMode && !recoveryBoardRootLagMode) {
@@ -479,22 +479,22 @@ if (!recoveryLagMode && !recoveryBoardRootLagMode) {
   );
   // Live process() assigns the new Runtime frame's height and timestamp before
   // applying its input. Replay does the same, so attempt bytes stay identical.
-  env.height += 1;
-  env.timestamp += 1;
+  env.state.height += 1;
+  env.state.timestamp += 1;
 }
-const [retry] = collectDueJSubmitRuntimeTxs(env, env.timestamp);
+const [retry] = collectDueJSubmitRuntimeTxs(env, env.state.timestamp);
 if (!retry) throw new Error('crash fixture J-submit retry missing');
 registerPendingCommittedJOutbox(env, await applyRuntimeTx(env, retry, { isReplay: true }));
 const appliedRuntimeInput = cloneIsolatedRuntimeInput({ runtimeTxs: [retry], entityInputs: [] });
 applyRuntimeStorageChanges(env, [{ family: 'entity', entityId }]);
 
 if (recoveryLagMode || recoveryBoardRootLagMode) {
-  env.height += 1;
-  env.timestamp += 1;
-  const laggingEntry = Array.from(env.eReplicas.entries()).find(([, candidate]) => (
+  env.state.height += 1;
+  env.state.timestamp += 1;
+  const laggingEntry = Array.from(env.state.eReplicas.entries()).find(([, candidate]) => (
     candidate.entityId === entityId && candidate.signerId === signerB
   ));
-  const certifiedEntry = Array.from(env.eReplicas.entries()).find(([, candidate]) => (
+  const certifiedEntry = Array.from(env.state.eReplicas.entries()).find(([, candidate]) => (
     candidate.entityId === entityId && candidate.signerId === signerA
   ));
   if (!laggingEntry || !certifiedEntry) throw new Error('recovery lag fixture replicas missing');
@@ -506,7 +506,7 @@ if (recoveryLagMode || recoveryBoardRootLagMode) {
         entityId,
         previousBoardHash: registeredBoardHash,
         newBoardHash: registeredBoardHash,
-        previousBoardValidUntil: String(Math.floor(env.timestamp / 1_000) + 7 * 24 * 60 * 60),
+        previousBoardValidUntil: String(Math.floor(env.state.timestamp / 1_000) + 7 * 24 * 60 * 60),
       },
       blockNumber: rotationHeight,
       blockHash: blockHash('04'),
@@ -556,7 +556,7 @@ if (recoveryLagMode || recoveryBoardRootLagMode) {
     certifiedEntry[1].jPrefixRound = undefined;
   }
   // A Map's insertion order is transport timing, never a canonical state selector.
-  env.eReplicas = new Map([laggingEntry, certifiedEntry]);
+  env.state.eReplicas = new Map([laggingEntry, certifiedEntry]);
   await persistRestoredEnvToDB(env);
   await closeRuntimeDb(env);
   await closeInfraDb(env);

@@ -109,7 +109,7 @@ export const selectEntityProposal = async (
     entityLog.info('replica_meta.selection_debug', {
       entityId: replica.entityId,
       entityHeight: replica.state.height,
-      runtimeHeight: env.height,
+      runtimeHeight: env.state.height,
       mempool: replica.mempool.map(tx => tx.type),
       selected: proposalTxs.map(tx => tx.type),
       reason: proposalSelection.reason ?? null,

@@ -241,7 +241,7 @@
   function buildFrameVisual(frame: EnvSnapshot, option: ScenarioOption): FrameVisual {
     const rawNodes: Array<FrameNode & { rawX: number; rawY: number }> = [];
     const nodeById = new Map<string, FrameNode & { rawX: number; rawY: number }>();
-    const replicaEntries = mapEntries<Record<string, unknown>>(frame.eReplicas);
+    const replicaEntries = mapEntries<Record<string, unknown>>(frame.state.eReplicas);
 
     replicaEntries.forEach(([replicaKey, replica], index) => {
       const state = asRecord(replica['state']);
@@ -299,7 +299,7 @@
       }
     }
 
-    const title = String(frame.meta?.title || frame.meta?.subtitle?.title || `Frame ${frame.height}`);
+    const title = String(frame.meta?.title || frame.meta?.subtitle?.title || `Frame ${frame.state.height}`);
     const description = String(frame.description || frame.narrative || option.description);
     const collapse = option.id === 'hub-collapse' && (
       activeDisputes > 0 ||
@@ -324,7 +324,7 @@
     env.scenarioJAdapterMode = 'browservm';
     env.quietRuntimeLogs = true;
     env.scenarioLogLevel = 'error';
-    env.timestamp = env.timestamp || 1;
+    env.state.timestamp = env.state.timestamp || 1;
     env.runtimeConfig = {
       ...env.runtimeConfig,
       storage: {
@@ -339,7 +339,7 @@
   function stopPreviewInfra(env: RuntimeReplica | null, label = 'preview'): string[] {
     const diagnostics: string[] = [];
     if (!env) return diagnostics;
-    for (const [, jReplica] of mapEntries<Record<string, unknown>>(env.jReplicas)) {
+    for (const [, jReplica] of mapEntries<Record<string, unknown>>(env.state.jReplicas)) {
       const adapter = asRecord(jReplica['jadapter']);
       try {
         if (typeof adapter['stopWatching'] === 'function') {
@@ -383,7 +383,7 @@
     if (!env || !frame) return;
     setXlnEnvironment(env);
     history.set(frames);
-    currentHeight.set(frame.height);
+    currentHeight.set(frame.state.height);
     timeOperations.updateMaxTimeIndex();
     timeOperations.goToTimeIndex(index);
   }
@@ -505,7 +505,7 @@
       `scenario=${option.id}`,
       `runtime=${option.runtimeId}`,
       `frame=${index + 1}/${totalFrames}`,
-      `height=${frame.height}`,
+      `height=${frame.state.height}`,
       `title=${frameVisual.title}`,
       `inputs=${inputCount}`,
       `outputs=${outputCount}`,

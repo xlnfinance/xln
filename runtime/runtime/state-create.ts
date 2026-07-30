@@ -56,9 +56,9 @@ export const createRuntimeStateApi = (deps: RuntimeStateCreateDeps) => {
         deps.trackInfraDbWrite(env, write);
       },
       getLiveProfiles: () => {
-        if (!env?.eReplicas?.size) return [];
+        if (!env?.state.eReplicas?.size) return [];
         const profiles = new Map<string, Profile>();
-        for (const [replicaKey, replica] of env.eReplicas) {
+        for (const [replicaKey, replica] of env.state.eReplicas) {
           const entityId = extractEntityId(replicaKey);
           const signerId = extractSignerId(replicaKey);
           if (
@@ -73,7 +73,7 @@ export const createRuntimeStateApi = (deps: RuntimeStateCreateDeps) => {
             env.gossip?.getProfiles?.().find(profile => profile.entityId === entityId)?.lastUpdated ?? 0;
           profiles.set(
             entityId,
-            buildLocalEntityProfile(env, replica.state, Math.max(existingTimestamp + 1, env.timestamp || 1)),
+            buildLocalEntityProfile(env, replica.state, Math.max(existingTimestamp + 1, env.state.timestamp || 1)),
           );
         }
         return [...profiles.values()];
@@ -81,10 +81,12 @@ export const createRuntimeStateApi = (deps: RuntimeStateCreateDeps) => {
     });
 
     env = {
-      eReplicas: new Map(),
-      jReplicas: new Map(),
-      height: 0,
-      timestamp: 0,
+      state: {
+        eReplicas: new Map(),
+        jReplicas: new Map(),
+        height: 0,
+        timestamp: 0,
+      },
       runtimeSeed: seedText,
       ...(resolvedRuntimeId ? { runtimeId: resolvedRuntimeId } : {}),
       ...(dbNamespace ? { dbNamespace } : {}),

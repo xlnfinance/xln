@@ -20,7 +20,7 @@ export const cleanupRuntimeStorage = (runtimeId: string): void => {
 };
 
 export const findJSubmitCrashReplica = (env: RuntimeReplica, entityId: string) => {
-  const replica = Array.from(env.eReplicas.values()).find((candidate) => candidate.entityId === entityId);
+  const replica = Array.from(env.state.eReplicas.values()).find((candidate) => candidate.entityId === entityId);
   if (!replica) throw new Error(`J submit crash fixture replica missing: ${entityId}`);
   return replica;
 };

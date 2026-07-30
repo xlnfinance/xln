@@ -227,7 +227,7 @@ const installReplica = (env: RuntimeReplica, state: EntityState, signerId: strin
     mempool: [],
     isProposer: true,
   };
-  env.eReplicas.set(`${state.entityId}:${signerId}`, replica);
+  env.state.eReplicas.set(`${state.entityId}:${signerId}`, replica);
 };
 
 const reliableRecoveryProjection = (env: RuntimeReplica): Record<string, unknown> => ({
@@ -367,7 +367,7 @@ describe('ordered reliable Entity catch-up', () => {
       routingDeps,
     });
     expect(futureAttempt.appliedEntityInputs).toEqual([]);
-    expect(receiver.eReplicas.get(`${initialState.entityId}:${signerId}`)?.state.height).toBe(0);
+    expect(receiver.state.eReplicas.get(`${initialState.entityId}:${signerId}`)?.state.height).toBe(0);
     expect(commitReliableIngress(receiver, futureAttempt.appliedEntityInputs)).toEqual([]);
     releaseUncommittedReliableIngress(receiver, [h2], futureAttempt.appliedEntityInputs);
     expect(receiver.runtimeState?.pendingReliableIngress?.size ?? 0).toBe(0);
@@ -389,7 +389,7 @@ describe('ordered reliable Entity catch-up', () => {
       routingDeps,
     });
     expect(firstCommit.appliedEntityInputs).toHaveLength(1);
-    expect(restarted.eReplicas.get(`${initialState.entityId}:${signerId}`)?.state.height).toBe(1);
+    expect(restarted.state.eReplicas.get(`${initialState.entityId}:${signerId}`)?.state.height).toBe(1);
     const h1Commits = commitReliableIngress(restarted, firstCommit.appliedEntityInputs);
     expect(h1Commits).toHaveLength(1);
     finalizeReliableIngressCommit(restarted, h1Commits);
@@ -407,7 +407,7 @@ describe('ordered reliable Entity catch-up', () => {
       routingDeps,
     });
     expect(secondCommit.appliedEntityInputs).toHaveLength(1);
-    expect(restarted.eReplicas.get(`${initialState.entityId}:${signerId}`)?.state.height).toBe(2);
+    expect(restarted.state.eReplicas.get(`${initialState.entityId}:${signerId}`)?.state.height).toBe(2);
     const h2Commits = commitReliableIngress(restarted, secondCommit.appliedEntityInputs);
     expect(h2Commits).toHaveLength(1);
     finalizeReliableIngressCommit(restarted, h2Commits);
@@ -456,12 +456,12 @@ describe('ordered reliable Entity catch-up', () => {
         sender.pendingNetworkOutputs = structuredClone(outputs);
 
         const restart = (): void => {
-          const replica = receiver.eReplicas.get(`${initialState.entityId}:${signerId}`);
+          const replica = receiver.state.eReplicas.get(`${initialState.entityId}:${signerId}`);
           if (!replica) throw new Error('FAULT_MATRIX_REPLICA_MISSING');
           const machine = buildDurableRuntimeMachineSnapshot(receiver);
           const restarted = createRuntime(receiverSeed);
           registerSignerKey(restarted, signerId, signerKey);
-          restarted.eReplicas.set(
+          restarted.state.eReplicas.set(
             `${initialState.entityId}:${signerId}`,
             structuredClone(replica),
           );
@@ -527,7 +527,7 @@ describe('ordered reliable Entity catch-up', () => {
         }
 
         expect(sender.pendingNetworkOutputs).toEqual([]);
-        expect(receiver.eReplicas.get(
+        expect(receiver.state.eReplicas.get(
           `${initialState.entityId}:${signerId}`,
         )?.state.height).toBe(4);
         expect(receiver.runtimeState?.pendingReliableIngress?.size ?? 0).toBe(0);
@@ -551,18 +551,18 @@ describe('ordered reliable Entity catch-up', () => {
     const certificateSigners = [leaderSignerId, signerId];
     const initialState = createEntityState(signerId, certificateSigners, 2n);
     installReplica(receiver, initialState, signerId);
-    const receiverReplica = receiver.eReplicas.get(`${initialState.entityId}:${signerId}`)!;
+    const receiverReplica = receiver.state.eReplicas.get(`${initialState.entityId}:${signerId}`)!;
     receiverReplica.isProposer = false;
     const receiverEntityKeys = deriveLocalEntityCryptoKeys(receiver, initialState.entityId, signerId);
     receiverReplica.entityEncPubKey = receiverEntityKeys.publicKey;
     receiverReplica.entityEncPrivKey = receiverEntityKeys.privateKey;
     installReplica(receiver, initialState, leaderSignerId);
-    const leaderReplica = receiver.eReplicas.get(`${initialState.entityId}:${leaderSignerId}`)!;
+    const leaderReplica = receiver.state.eReplicas.get(`${initialState.entityId}:${leaderSignerId}`)!;
     const leaderEntityKeys = deriveLocalEntityCryptoKeys(receiver, initialState.entityId, leaderSignerId);
     leaderReplica.entityEncPubKey = leaderEntityKeys.publicKey;
     leaderReplica.entityEncPrivKey = leaderEntityKeys.privateKey;
     collectLocalProfileEncryptionAnnouncements(receiver);
-    receiver.eReplicas.delete(`${initialState.entityId}:${leaderSignerId}`);
+    receiver.state.eReplicas.delete(`${initialState.entityId}:${leaderSignerId}`);
     const manifest = getCompleteProfileEncryptionManifest(receiver, receiverReplica.state);
     if (!manifest) throw new Error('TEST_LOCAL_PROFILE_MANIFEST_MISSING');
     initialState.profileEncryptionManifest = structuredClone(manifest);
@@ -611,16 +611,16 @@ describe('ordered reliable Entity catch-up', () => {
       entityInputs: [],
     });
     await processRuntime(receiver, []);
-    expect(receiver.height).toBe(1);
+    expect(receiver.state.height).toBe(1);
 
-    expect(receiver.eReplicas.get(`${initialState.entityId}:${signerId}`)?.state.height).toBe(0);
+    expect(receiver.state.eReplicas.get(`${initialState.entityId}:${signerId}`)?.state.height).toBe(0);
     expect(receiver.pendingOutputs ?? []).toEqual([]);
     expect(receiver.networkInbox ?? []).toEqual([]);
     receiver.pendingNetworkOutputs = [structuredClone(h2)];
     await processRuntime(receiver, []);
-    const firstTickReplica = receiver.eReplicas.get(`${initialState.entityId}:${signerId}`);
+    const firstTickReplica = receiver.state.eReplicas.get(`${initialState.entityId}:${signerId}`);
     expect(firstTickReplica?.state.height, safeStringify({
-      runtimeHeight: receiver.height,
+      runtimeHeight: receiver.state.height,
       runtimeMempool: receiver.runtimeMempool,
       historyInput: receiver.history?.at(-1)?.runtimeInput,
       replica: firstTickReplica,
@@ -629,7 +629,7 @@ describe('ordered reliable Entity catch-up', () => {
     expect(receiver.runtimeMempool?.entityInputs).toEqual([h2]);
 
     await processRuntime(receiver, []);
-    expect(receiver.eReplicas.get(`${initialState.entityId}:${signerId}`)?.state.height).toBe(0);
+    expect(receiver.state.eReplicas.get(`${initialState.entityId}:${signerId}`)?.state.height).toBe(0);
     expect(receiver.pendingNetworkOutputs).toEqual([h2]);
     expect(receiver.runtimeMempool?.entityInputs).toEqual([h2]);
 
@@ -653,14 +653,14 @@ describe('ordered reliable Entity catch-up', () => {
     // duplicate reordered H+2 into the same R-frame: before the durability
     // barrier this applied H+1 and H+2 before a single WAL save.
     await processRuntime(restarted, []);
-    expect(restarted.eReplicas.get(`${initialState.entityId}:${signerId}`)?.state.height).toBe(0);
+    expect(restarted.state.eReplicas.get(`${initialState.entityId}:${signerId}`)?.state.height).toBe(0);
     const committedFrameTrace = startRuntimeHistoryTraceForTesting(restarted);
     try {
       await processRuntime(restarted, [structuredClone(h2)]);
     } finally {
       committedFrameTrace.stop();
     }
-    const afterHeightOneReplica = restarted.eReplicas.get(`${initialState.entityId}:${signerId}`);
+    const afterHeightOneReplica = restarted.state.eReplicas.get(`${initialState.entityId}:${signerId}`);
     expect(afterHeightOneReplica?.state.height).toBe(1);
     expect(afterHeightOneReplica?.state.prevFrameHash).toBe(heightOne.frame.hash);
     expect(committedFrameTrace.snapshots.at(-1)?.runtimeInput.entityInputs
@@ -679,12 +679,12 @@ describe('ordered reliable Entity catch-up', () => {
     });
     const replicaMetaDigest = buildStorageReplicaMetaCommitment(restarted).digest;
     const journal: PersistedFrameJournal = {
-      height: committedHistoryFrame.height,
-      timestamp: committedHistoryFrame.timestamp,
+      height: committedHistoryFrame.state.height,
+      timestamp: committedHistoryFrame.state.timestamp,
       replicaMetaDigest,
       postStateHash: computeStoragePostStateHash({
-        height: committedHistoryFrame.height,
-        timestamp: committedHistoryFrame.timestamp,
+        height: committedHistoryFrame.state.height,
+        timestamp: committedHistoryFrame.state.timestamp,
         replicaMetaDigest,
         runtimeMachine: replayMachineAfterHeightOne,
       }),
@@ -695,8 +695,8 @@ describe('ordered reliable Entity catch-up', () => {
       runtimeOutputs: structuredClone(restarted.pendingNetworkOutputs ?? []),
       runtimeMachine: durableMachineAfterHeightOne,
       runtimeStateHash: computeCanonicalRuntimeStateHash(
-        restarted.height,
-        restarted.timestamp,
+        restarted.state.height,
+        restarted.state.timestamp,
         computeCanonicalEntityHashesFromEnv(restarted),
         durableMachineAfterHeightOne,
       ),
@@ -750,16 +750,16 @@ describe('ordered reliable Entity catch-up', () => {
 
     const afterHeightOneSnapshot = buildDurableRuntimeMachineSnapshot(restarted);
     const afterHeightOneRestart = createRuntime(receiverSeed);
-    afterHeightOneRestart.eReplicas.set(
+    afterHeightOneRestart.state.eReplicas.set(
       `${initialState.entityId}:${signerId}`,
       structuredClone(afterHeightOneReplica!),
     );
-    afterHeightOneRestart.eReplicas.get(`${initialState.entityId}:${signerId}`)!.isProposer = false;
+    afterHeightOneRestart.state.eReplicas.get(`${initialState.entityId}:${signerId}`)!.isProposer = false;
     restoreDurableRuntimeSnapshot(afterHeightOneRestart, afterHeightOneSnapshot);
 
     for (let tick = 0; tick < 8; tick += 1) {
       await processRuntime(afterHeightOneRestart, []);
-      const replica = afterHeightOneRestart.eReplicas.get(`${initialState.entityId}:${signerId}`);
+      const replica = afterHeightOneRestart.state.eReplicas.get(`${initialState.entityId}:${signerId}`);
       if (
         replica?.state.height === 2 &&
         replica.state.prevFrameHash === heightTwo.frame.hash &&
@@ -768,7 +768,7 @@ describe('ordered reliable Entity catch-up', () => {
       ) break;
     }
 
-    const finalReplica = afterHeightOneRestart.eReplicas.get(`${initialState.entityId}:${signerId}`);
+    const finalReplica = afterHeightOneRestart.state.eReplicas.get(`${initialState.entityId}:${signerId}`);
     expect(finalReplica?.state.height).toBe(2);
     expect(finalReplica?.state.prevFrameHash).toBe(heightTwo.frame.hash);
     expect(afterHeightOneRestart.pendingNetworkOutputs, safeStringify({

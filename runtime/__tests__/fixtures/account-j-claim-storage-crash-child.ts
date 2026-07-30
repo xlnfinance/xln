@@ -84,7 +84,7 @@ const storageConfig = {
     canonicalHashPeriodFrames: 0,
     accountMerkleRadix: 16,
 };
-env.jReplicas.set(jurisdiction.name, {
+env.state.jReplicas.set(jurisdiction.name, {
   ...jurisdiction,
   blockNumber: 0n,
   stateRoot: new Uint8Array(32),
@@ -124,7 +124,7 @@ enqueueRuntimeInput(env, {
 });
 await processRuntime(env, []);
 
-const replica = Array.from(env.eReplicas.values()).find((candidate) => candidate.entityId === entityId);
+const replica = Array.from(env.state.eReplicas.values()).find((candidate) => candidate.entityId === entityId);
 if (!replica) throw new Error('ACCOUNT_J_CRASH_REPLICA_MISSING');
 const opened = await handleOpenAccountEntityTx(replica.state, {
   type: 'openAccount',
@@ -135,7 +135,7 @@ const opened = await handleOpenAccountEntityTx(replica.state, {
   },
 }, createAccountConsensusContext(env));
 replica.state = opened.newState;
-const counterpartyReplica = Array.from(env.eReplicas.values()).find((candidate) => (
+const counterpartyReplica = Array.from(env.state.eReplicas.values()).find((candidate) => (
   candidate.entityId === counterpartyId
 ));
 if (!counterpartyReplica) throw new Error('ACCOUNT_J_CRASH_COUNTERPARTY_REPLICA_MISSING');
@@ -189,7 +189,7 @@ account.mempool = [{
 const proposed = await proposeAccountFrame(
   createAccountConsensusContext(env),
   account,
-  env.timestamp,
+  env.state.timestamp,
   7,
 );
 if (!proposed.success || !proposed.accountInput) {
@@ -204,7 +204,7 @@ const peerValidation = await applyAccountInput(
   createAccountConsensusContext(env, new Map()),
   structuredClone(counterpartyAccount),
   sealedProposal,
-  { entityTimestamp: env.timestamp, finalizedJHeight: 7 },
+  { entityTimestamp: env.state.timestamp, finalizedJHeight: 7 },
 );
 if (!peerValidation.success || !peerValidation.response) {
   throw new Error(`ACCOUNT_J_CRASH_ACK_FAILED:${peerValidation.error ?? 'missing-response'}`);
@@ -236,7 +236,7 @@ await saveRuntimeFrameToStorage({
   formatPerfMs: (value) => value.toFixed(2),
 });
 
-env.timestamp += 1;
+env.state.timestamp += 1;
 const runtimeInput = {
   runtimeTxs: [],
   entityInputs: [{
@@ -246,7 +246,7 @@ const runtimeInput = {
   }],
 };
 const appliedRuntime = await applyRuntimeInput(env, runtimeInput);
-const committedReplica = Array.from(env.eReplicas.values()).find((candidate) => candidate.entityId === entityId);
+const committedReplica = Array.from(env.state.eReplicas.values()).find((candidate) => candidate.entityId === entityId);
 const committedAccount = committedReplica?.state.accounts.get(counterpartyId);
 if (!committedAccount) throw new Error('ACCOUNT_J_CRASH_COMMITTED_ACCOUNT_MISSING');
 const side = committedAccount.leftEntity === entityId ? 'left' as const : 'right' as const;

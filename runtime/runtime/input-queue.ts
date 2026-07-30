@@ -44,11 +44,11 @@ const normalizeIngressTimestamp = (env: RuntimeReplica, explicitTimestamp?: numb
   if (typeof explicitTimestamp === 'number' && Number.isFinite(explicitTimestamp) && explicitTimestamp > 0) {
     const sanitizedTimestamp = Math.floor(explicitTimestamp);
     if (env.scenarioMode) return sanitizedTimestamp;
-    const logicalNow = env.timestamp ?? 0;
+    const logicalNow = env.state.timestamp ?? 0;
     const maxAcceptedTimestamp = Math.max(logicalNow, getWallClockMs() + TIMING.TIMESTAMP_DRIFT_MS);
     return Math.max(logicalNow, Math.min(sanitizedTimestamp, maxAcceptedTimestamp));
   }
-  return env.timestamp ?? 0;
+  return env.state.timestamp ?? 0;
 };
 
 /**
@@ -130,7 +130,7 @@ export const enqueueRuntimeInputsWithDeps = (
 
 export const enqueueRuntimeInput = (env: RuntimeReplica, runtimeInput: RuntimeInput): void => {
   const ingressTimestamp = env.scenarioMode
-    ? (runtimeInput.timestamp ?? env.timestamp ?? 0)
+    ? (runtimeInput.timestamp ?? env.state.timestamp ?? 0)
     : (runtimeInput.timestamp ?? getWallClockMs());
   enqueueRuntimeInputsWithDeps(
     env,

@@ -564,14 +564,14 @@ const sameImportedJurisdiction = (target: JurisdictionConfig, replica: unknown):
 };
 
 const hasJurisdictionReplica = (env: RuntimeReplica, jurisdiction: JurisdictionConfig): boolean => {
-  for (const replica of env.jReplicas?.values?.() || []) {
+  for (const replica of env.state.jReplicas?.values?.() || []) {
     if (sameImportedJurisdiction(jurisdiction, replica)) return true;
   }
   return false;
 };
 
 const hasLiveJurisdictionAdapter = (env: RuntimeReplica, jurisdiction: JurisdictionConfig): boolean => {
-  for (const replica of env.jReplicas?.values?.() || []) {
+  for (const replica of env.state.jReplicas?.values?.() || []) {
     if (sameImportedJurisdiction(jurisdiction, replica)) {
       return Boolean(replica?.jadapter);
     }
@@ -673,7 +673,7 @@ export const waitForTokenCatalog = async (jadapter: JAdapter, rounds = 80): Prom
 };
 
 const findJurisdictionAdapters = (env: RuntimeReplica, jurisdiction: JurisdictionConfig): JAdapter[] =>
-  [...(env.jReplicas?.values?.() ?? [])]
+  [...(env.state.jReplicas?.values?.() ?? [])]
     .filter(replica => sameImportedJurisdiction(jurisdiction, replica) && Boolean(replica.jadapter))
     .map(replica => replica.jadapter!);
 
@@ -697,7 +697,7 @@ export const waitForJurisdictionAdapter = async (
     `JURISDICTION_ADAPTER_NOT_READY name=${jurisdiction.name} ` +
       `stack=${getJurisdictionIdentityRef(jurisdiction) || 'invalid'} ` +
       `active=${String(env.activeJurisdiction || 'none')} ` +
-      `jReplicas=${Array.from(env.jReplicas?.keys?.() || []).join(',') || 'none'} ` +
+      `jReplicas=${Array.from(env.state.jReplicas?.keys?.() || []).join(',') || 'none'} ` +
       `runtimeMempool=${Number(env.runtimeMempool?.runtimeTxs?.length || 0)}`,
   );
 };
@@ -710,9 +710,9 @@ const waitForReplicaReady = async (env: RuntimeReplica, entityId: string, rounds
 };
 
 export const ensureJurisdictionReplica = (env: RuntimeReplica, jadapter: JAdapter, rpcUrl: string): void => {
-  const activeName = env.activeJurisdiction || Array.from(env.jReplicas?.keys?.() || [])[0];
+  const activeName = env.activeJurisdiction || Array.from(env.state.jReplicas?.keys?.() || [])[0];
   if (!activeName) return;
-  const replica = env.jReplicas?.get(activeName);
+  const replica = env.state.jReplicas?.get(activeName);
   if (!replica) return;
   replica.depositoryAddress = jadapter.addresses.depository;
   replica.entityProviderAddress = jadapter.addresses.entityProvider;
@@ -1254,9 +1254,9 @@ const canonicalizeLocalCrossJurisdictionRoute = (
 };
 
 const requireMarketMakerQuoteTimestamp = (env: RuntimeReplica): number => {
-  const timestamp = Math.floor(Number(env.timestamp));
+  const timestamp = Math.floor(Number(env.state.timestamp));
   if (!Number.isFinite(timestamp) || timestamp <= 0) {
-    throw new Error(`MARKET_MAKER_CROSS_TIMESTAMP_INVALID:${String(env.timestamp)}`);
+    throw new Error(`MARKET_MAKER_CROSS_TIMESTAMP_INVALID:${String(env.state.timestamp)}`);
   }
   return timestamp;
 };

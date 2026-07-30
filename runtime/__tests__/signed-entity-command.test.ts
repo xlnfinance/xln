@@ -81,7 +81,7 @@ const setup = (label: string) => {
   const seed = `signed-command:${label}`;
   const env = createEmptyEnv(seed);
   env.scenarioMode = true;
-  env.timestamp = 1_000;
+  env.state.timestamp = 1_000;
   const privateKey = deriveSignerKeySync(seed, 'validator');
   const signerId = deriveSignerAddressSync(seed, 'validator').toLowerCase();
   registerSignerKey(env, signerId, privateKey);
@@ -119,7 +119,7 @@ const setup = (label: string) => {
     mempool: [],
     isProposer: true,
   };
-  env.eReplicas.set(`${id}:${signerId}`, replica);
+  env.state.eReplicas.set(`${id}:${signerId}`, replica);
   return { env, signerId, state, replica };
 };
 
@@ -149,10 +149,10 @@ const setupNumericAliasBoard = () => {
   const id = hashBoard(encodeBoard(config, env)).toLowerCase();
   const base = setup('alias-template').state;
   const state: EntityState = { ...base, entityId: id, config };
-  env.eReplicas.clear();
+  env.state.eReplicas.clear();
   for (const signerId of validators) {
     const keys = deriveLocalEntityCryptoKeys(env, id, signerId);
-    env.eReplicas.set(`${id}:${signerId}`, {
+    env.state.eReplicas.set(`${id}:${signerId}`, {
       entityId: id,
       signerId,
       entityEncPubKey: keys.publicKey,
@@ -171,7 +171,7 @@ const setupNumericAliasBoard = () => {
 const setupNoJurisdictionMultisig = () => {
   const env = createEmptyEnv('signed-command:no-j-multisig');
   env.scenarioMode = true;
-  env.timestamp = 2_000;
+  env.state.timestamp = 2_000;
   const signers = ['a', 'b'].map(label => {
     const signer = deriveSignerAddressSync(env.runtimeSeed!, label).toLowerCase();
     registerSignerKey(env, signer, deriveSignerKeySync(env.runtimeSeed!, label));
@@ -266,7 +266,7 @@ describe('signed Entity command admission', () => {
 
     await processRuntime(env, []);
 
-    const committed = Array.from(env.eReplicas.values()).find(
+    const committed = Array.from(env.state.eReplicas.values()).find(
       replica => replica.entityId === state.entityId && replica.signerId === signerId,
     );
     expect(committed?.state.hubRebalanceConfig?.routingFeePPM).toBe(777);
@@ -294,11 +294,11 @@ describe('signed Entity command admission', () => {
       }],
     });
 
-    const committed = env.eReplicas.get(`${state.entityId}:${signerId}`);
+    const committed = env.state.eReplicas.get(`${state.entityId}:${signerId}`);
     expect(committed?.state.height).toBe(1);
     expect(committed && readEntityFrameEventMessages(committed.state))
       .toContain(`${signerId}: durable internal commit`);
-    expect(env.height).toBe(1);
+    expect(env.state.height).toBe(1);
     expect(applied.appliedRuntimeInput.entityInputs).toEqual([{
       entityId: state.entityId,
       signerId,
@@ -518,7 +518,7 @@ describe('signed Entity command admission', () => {
         { lastSequence: 1n, lastSemanticHash: semanticHash },
       ]]),
     };
-    env.eReplicas.set(`${targetEntityId}:${proposer}`, {
+    env.state.eReplicas.set(`${targetEntityId}:${proposer}`, {
       entityId: targetEntityId,
       signerId: proposer,
       entityEncPubKey: '',
@@ -609,7 +609,7 @@ describe('signed Entity command admission', () => {
     } as EntityTx;
     const empty = createEmptyEnv('reissue-routing-empty');
     const populated = createEmptyEnv('reissue-routing-populated');
-    populated.eReplicas.set(`${targetEntityId}:${staleTopologySigner}`, {
+    populated.state.eReplicas.set(`${targetEntityId}:${staleTopologySigner}`, {
       entityId: targetEntityId,
       signerId: staleTopologySigner,
       entityEncPubKey: '',
@@ -996,7 +996,7 @@ describe('signed Entity command admission', () => {
   test('weighted no quorum rejects a proposal and frees proposer capacity', async () => {
     const env = createEmptyEnv('signed-command:no-quorum');
     env.scenarioMode = true;
-    env.timestamp = 3_000;
+    env.state.timestamp = 3_000;
     const signers = ['a', 'b', 'c'].map(label => {
       const signer = deriveSignerAddressSync(env.runtimeSeed!, label).toLowerCase();
       registerSignerKey(env, signer, deriveSignerKeySync(env.runtimeSeed!, label));

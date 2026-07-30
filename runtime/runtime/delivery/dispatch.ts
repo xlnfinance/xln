@@ -118,7 +118,7 @@ const buildRuntimeEntityInputsEnvelope = (
       }
     : undefined);
   const envelopeFrame = atomicCrossJurisdictionPair
-    ? { height: env.height, timestamp: env.timestamp }
+    ? { height: env.state.height, timestamp: env.state.timestamp }
     : firstFrame;
   const entityInputs = outputs.map(output => {
     const frame = requireOutputRuntimeFrame(output);
@@ -488,8 +488,8 @@ export const sendEntityInputWithRouting = (
     : {
         ...input,
         sourceRuntimeFrame: {
-          height: env.height,
-          timestamp: env.timestamp,
+          height: env.state.height,
+          timestamp: env.state.timestamp,
         },
       };
   const pendingBeforePlan = buildPendingNetworkOutputs(pruneReceiptedReliableOutputs(env, [
@@ -507,7 +507,7 @@ export const sendEntityInputWithRouting = (
   }
   env.pendingNetworkOutputs = [];
   if (localOutputs.length > 0) {
-    deps.enqueueRuntimeInputs(env, localOutputs, undefined, undefined, env.timestamp);
+    deps.enqueueRuntimeInputs(env, localOutputs, undefined, undefined, env.state.timestamp);
   }
   const deferred = dispatchEntityOutputs(env, remoteOutputs, deps);
   const remainingDeferred = [...deferredOutputs, ...deferred];

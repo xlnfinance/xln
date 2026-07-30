@@ -340,10 +340,10 @@ const makeTestViewPageLoader =
     },
   ) => {
     const normalizedEntityId = String(requestedEntityId).toLowerCase();
-    const replica = Array.from(env.eReplicas.values()).find(
+    const replica = Array.from(env.state.eReplicas.values()).find(
       item => String(item.entityId).toLowerCase() === normalizedEntityId,
     );
-    if (!replica || height !== env.height) return null;
+    if (!replica || height !== env.state.height) return null;
     const accountLimit = readTestPageLimit(query?.accountsLimit ?? query?.limit, 10);
     const accountCursor = String(query?.accountsCursor ?? query?.cursor ?? '').toLowerCase();
     const accountDirection = query?.sortDir === 'desc' ? 'desc' : 'asc';

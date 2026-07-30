@@ -326,21 +326,24 @@ const makeEnv = (seed: string, entityId: string, state: EntityState): RuntimeRep
   const runtimeId = deriveRuntimeIdFromSeed(seed);
   if (!runtimeId) throw new Error('BENCH_RUNTIME_ID_DERIVATION_FAILED');
   const env = {
-    height: state.height,
-    timestamp: state.timestamp,
+    state: {
+      height: state.height,
+      timestamp: state.timestamp,
+      eReplicas: new Map<string, EntityReplica>([
+        [`${entityId}:bench-signer`, {
+          entityId,
+          signerId: 'bench-signer',
+          entityEncPubKey: 'bench-pub',
+          entityEncPrivKey: 'bench-priv',
+          mempool: [],
+          isProposer: true,
+          state,
+        } as EntityReplica],
+      ]),
+      jReplicas: new Map(),
+    },
     runtimeSeed: seed,
     runtimeId,
-    eReplicas: new Map<string, EntityReplica>([
-      [`${entityId}:bench-signer`, {
-        entityId,
-        signerId: 'bench-signer',
-        entityEncPubKey: 'bench-pub',
-        entityEncPrivKey: 'bench-priv',
-        mempool: [],
-        isProposer: true,
-        state,
-      } as EntityReplica],
-    ]),
     runtimeState: {},
   } as RuntimeReplica;
   // This benchmark owns its command consumer below; the synthetic Runtime is
@@ -592,18 +595,18 @@ const touchAccounts = async (
   startIndex: number,
   count: number,
 ): Promise<number> => {
-  const state = Array.from(env.eReplicas.values())[0]!.state;
+  const state = Array.from(env.state.eReplicas.values())[0]!.state;
   const docs: StorageDoc[] = [];
   const limit = Math.min(cli.accounts, startIndex + count);
-  env.height = Math.max(0, Math.floor(Number(env.height ?? 0))) + 1;
-  env.timestamp = Math.max(0, Math.floor(Number(env.timestamp ?? 0))) + 100;
-  state.height = env.height;
-  state.timestamp = env.timestamp;
+  env.state.height = Math.max(0, Math.floor(Number(env.state.height ?? 0))) + 1;
+  env.state.timestamp = Math.max(0, Math.floor(Number(env.state.timestamp ?? 0))) + 100;
+  state.height = env.state.height;
+  state.timestamp = env.state.timestamp;
   for (let index = startIndex; index < limit; index += 1) {
     const counterpartyId = normalizeEntityId(randomEntityId(cli.seed, index));
-    const account = makeAccount(entityId, counterpartyId, env.height, env.timestamp);
-    account.currentFrame.prevFrameHash = `bench-${env.height - 1}`;
-    account.currentFrame.stateHash = `0x${createHash('sha256').update(`${env.height}:${counterpartyId}`).digest('hex')}`;
+    const account = makeAccount(entityId, counterpartyId, env.state.height, env.state.timestamp);
+    account.currentFrame.prevFrameHash = `bench-${env.state.height - 1}`;
+    account.currentFrame.stateHash = `0x${createHash('sha256').update(`${env.state.height}:${counterpartyId}`).digest('hex')}`;
     if (state.accounts.has(counterpartyId)) state.accounts.set(counterpartyId, account);
     docs.push({ family: 'account', entityId, counterpartyId, value: account as StorageAccountDoc });
   }
@@ -613,7 +616,7 @@ const touchAccounts = async (
     value: projectEntityCoreDoc(state),
   });
   const writeStarted = nowMs();
-  entityHashDocsRef.current = await writeDocs(db, docs, entityHashDocsRef.current, env.height);
+  entityHashDocsRef.current = await writeDocs(db, docs, entityHashDocsRef.current, env.state.height);
   return nowMs() - writeStarted;
 };
 
@@ -627,17 +630,17 @@ const insertNewAccountsAfterRead = async (
   count: number,
 ): Promise<number> => {
   if (count <= 0) return 0;
-  const state = Array.from(env.eReplicas.values())[0]!.state;
+  const state = Array.from(env.state.eReplicas.values())[0]!.state;
   const docs: StorageDoc[] = [];
-  env.height = Math.max(0, Math.floor(Number(env.height ?? 0))) + 1;
-  env.timestamp = Math.max(0, Math.floor(Number(env.timestamp ?? 0))) + 100;
-  state.height = env.height;
-  state.timestamp = env.timestamp;
+  env.state.height = Math.max(0, Math.floor(Number(env.state.height ?? 0))) + 1;
+  env.state.timestamp = Math.max(0, Math.floor(Number(env.state.timestamp ?? 0))) + 100;
+  state.height = env.state.height;
+  state.timestamp = env.state.timestamp;
   for (let index = startIndex; index < startIndex + count; index += 1) {
     const counterpartyId = normalizeEntityId(randomEntityId(`${cli.seed}:new-after-read`, index));
-    const account = makeAccount(entityId, counterpartyId, env.height, env.timestamp);
-    account.currentFrame.prevFrameHash = `bench-${env.height - 1}`;
-    account.currentFrame.stateHash = `0x${createHash('sha256').update(`${env.height}:${counterpartyId}`).digest('hex')}`;
+    const account = makeAccount(entityId, counterpartyId, env.state.height, env.state.timestamp);
+    account.currentFrame.prevFrameHash = `bench-${env.state.height - 1}`;
+    account.currentFrame.stateHash = `0x${createHash('sha256').update(`${env.state.height}:${counterpartyId}`).digest('hex')}`;
     if (cli.memory !== 'none') state.accounts.set(counterpartyId, account);
     docs.push({ family: 'account', entityId, counterpartyId, value: account as StorageAccountDoc });
   }
@@ -647,7 +650,7 @@ const insertNewAccountsAfterRead = async (
     value: projectEntityCoreDoc(state),
   });
   const writeStarted = nowMs();
-  entityHashDocsRef.current = await writeDocs(db, docs, entityHashDocsRef.current, env.height);
+  entityHashDocsRef.current = await writeDocs(db, docs, entityHashDocsRef.current, env.state.height);
   return nowMs() - writeStarted;
 };
 
@@ -708,7 +711,7 @@ const runSnapshotRotationProbe = async (
     await writeBatch(historyBatch);
 
     const snapshotStarted = nowMs();
-    const snapshot = await createSnapshot(db, historyDb, head.latestHeight, env.timestamp);
+    const snapshot = await createSnapshot(db, historyDb, head.latestHeight, env.state.timestamp);
     const snapshotMs = nowMs() - snapshotStarted;
     if (snapshot.docCount !== liveDocs) {
       throw new Error(`ROTATION_PROBE_SNAPSHOT_DOC_MISMATCH: snapshot=${snapshot.docCount} live=${liveDocs}`);
@@ -834,14 +837,14 @@ async function main() {
     entityHashDocsRef.current = cli.seedMode === 'bulk'
       ? await seedHubBulk(cli, trace, db, entityId, state)
       : await seedHub(cli, trace, db, entityId, state);
-    env.height = state.height;
-    env.timestamp = state.timestamp;
+    env.state.height = state.height;
+    env.state.timestamp = state.timestamp;
     storageReadHeight = state.height;
-    env.height = storageReadHeight + 1;
-    env.timestamp += 1;
+    env.state.height = storageReadHeight + 1;
+    env.state.timestamp += 1;
     trace.mark('storage-read.probe-height', {
       persistedHeight: storageReadHeight,
-      runtimeCurrentHeight: env.height,
+      runtimeCurrentHeight: env.state.height,
       storageBackedReason: 'atHeight below current runtime height',
     });
     forceGc(trace, 'post-seed.gc');
@@ -1067,7 +1070,7 @@ async function main() {
         durableMs: Math.round(newAfterReadMs * 1000) / 1000,
         storageWriteMs: Math.round(newAfterReadDurableMs * 1000) / 1000,
         inMemoryAccounts: state.accounts.size,
-        height: env.height,
+        height: env.state.height,
       });
     }
 
@@ -1094,7 +1097,7 @@ async function main() {
         count: cli.touchPerRound,
         wireMs: Math.round(wireMs * 1000) / 1000,
         durableMs: Math.round(durableMs * 1000) / 1000,
-        height: env.height,
+        height: env.state.height,
       });
     }
 
@@ -1123,7 +1126,7 @@ async function main() {
       tryOpenDb: async () => true,
       getRuntimeDb: () => db,
       entityId,
-      height: coldRestartHead?.latestHeight ?? env.height,
+      height: coldRestartHead?.latestHeight ?? env.state.height,
       accountQuery: { limit: cli.pageLimit },
       bookQuery: { limit: cli.pageLimit },
     });

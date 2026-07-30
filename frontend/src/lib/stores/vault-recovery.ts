@@ -365,9 +365,9 @@ export const normalizeJurisdictionKey = (value: string | null | undefined): stri
     .trim()
     .toLowerCase();
 
-export type RuntimeJReplica = RuntimeReplica['jReplicas'] extends Map<string, infer T> ? T : never;
+export type RuntimeJReplica = RuntimeReplica['state']['jReplicas'] extends Map<string, infer T> ? T : never;
 
-export type RuntimeEntityReplica = RuntimeReplica['eReplicas'] extends Map<string, infer T> ? T : never;
+export type RuntimeEntityReplica = RuntimeReplica['state']['eReplicas'] extends Map<string, infer T> ? T : never;
 
 export const getJReplicaJurisdictionName = (replica: RuntimeJReplica | null | undefined, fallback = ''): string =>
   String(replica?.name || fallback || '').trim();
@@ -375,9 +375,9 @@ export const getJReplicaJurisdictionName = (replica: RuntimeJReplica | null | un
 export const findJReplicaByName = (env: RuntimeReplica, name: string): RuntimeJReplica | undefined => {
   const normalized = normalizeJurisdictionKey(name);
   if (!normalized) return undefined;
-  const direct = env.jReplicas?.get(name);
+  const direct = env.state.jReplicas?.get(name);
   if (direct) return direct;
-  for (const replica of env.jReplicas?.values?.() || []) {
+  for (const replica of env.state.jReplicas?.values?.() || []) {
     if (normalizeJurisdictionKey(replica?.name) === normalized) return replica;
   }
   return undefined;
@@ -394,7 +394,7 @@ export const getEntityReplicaEntityId = (key: string, replica: RuntimeEntityRepl
 export const findEntityReplicaByEntityId = (env: RuntimeReplica, entityId: string): RuntimeEntityReplica | undefined => {
   const target = normalizeEntityId(entityId);
   if (!target) return undefined;
-  for (const [key, replica] of env.eReplicas?.entries?.() || []) {
+  for (const [key, replica] of env.state.eReplicas?.entries?.() || []) {
     if (getEntityReplicaEntityId(String(key), replica) === target) return replica;
   }
   return undefined;
@@ -408,7 +408,7 @@ export const findEntityReplicaByEntityAndSigner = (
   const targetEntity = normalizeEntityId(entityId);
   const targetSigner = normalizeRuntimeId(signerId);
   if (!targetEntity || !targetSigner) return undefined;
-  for (const [key, replica] of env.eReplicas?.entries?.() || []) {
+  for (const [key, replica] of env.state.eReplicas?.entries?.() || []) {
     const [keyEntityId, keySignerId] = String(key || '').split(':');
     const replicaEntity = getEntityReplicaEntityId(String(key), replica);
     const replicaSigner = normalizeRuntimeId(replica?.signerId || keySignerId || '');

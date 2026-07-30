@@ -50,7 +50,7 @@ const collectJOutbox = (
   const inputs = validateJInputs(runtimeInput.jInputs, 'RUNTIME_INPUT_J');
   runtimeLog.debug('joutbox.incoming', { jInputs: inputs.length });
   for (const input of inputs) {
-    if (!env.jReplicas.has(input.jurisdictionName)) {
+    if (!env.state.jReplicas.has(input.jurisdictionName)) {
       rejectRuntimeInput(`Unknown J jurisdiction: ${input.jurisdictionName}`);
     }
     runtimeLog.debug('joutbox.collect', {

@@ -48,7 +48,7 @@ const nextRetryAt = (replica: EntityReplica): number | null => {
 
 export const getNextEntityProviderActionRetryTimestamp = (env: RuntimeReplica): number | null => {
   let next = Infinity;
-  for (const replica of env.eReplicas.values()) {
+  for (const replica of env.state.eReplicas.values()) {
     if (!isEntityActiveLeader(replica) || !canSubmitEntityProviderActionLocally(env, replica.signerId)) continue;
     const identity = retryIdentity(replica);
     if (!identity || hasPendingCommittedEntityProviderAction(env, identity)) continue;
@@ -63,7 +63,7 @@ export const collectDueEntityProviderActionRuntimeTxs = (
   now: number,
 ): RetryActionTx[] => {
   const retries: RetryActionTx[] = [];
-  for (const replica of env.eReplicas.values()) {
+  for (const replica of env.state.eReplicas.values()) {
     if (!isEntityActiveLeader(replica) || !canSubmitEntityProviderActionLocally(env, replica.signerId)) continue;
     const identity = retryIdentity(replica);
     if (!identity) continue;

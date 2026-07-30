@@ -62,13 +62,13 @@ export const readRuntimeAdapterCommandFrontier = (
   const frontier = env.runtimeState?.runtimeAdapterCommandFrontiers?.get(laneId.toLowerCase());
   if (!frontier) return undefined;
   return frontier.expiresAtMs === null
-    || frontier.expiresAtMs > Math.max(0, Number(env.timestamp || 0))
+    || frontier.expiresAtMs > Math.max(0, Number(env.state.timestamp || 0))
     ? frontier
     : undefined;
 };
 
 export const countActiveRuntimeAdapterCommandLanes = (env: RuntimeReplica): number => {
-  const nowMs = Math.max(0, Number(env.timestamp || 0));
+  const nowMs = Math.max(0, Number(env.state.timestamp || 0));
   let count = 0;
   for (const frontier of env.runtimeState?.runtimeAdapterCommandFrontiers?.values() ?? []) {
     if (frontier.expiresAtMs === null || frontier.expiresAtMs > nowMs) count += 1;
@@ -92,7 +92,7 @@ export const applyRuntimeAdapterCommandMarker = (
   const data = validateRuntimeAdapterCommandMarker(raw);
   env.runtimeState ??= {};
   const frontiers = env.runtimeState.runtimeAdapterCommandFrontiers ?? new Map();
-  pruneExpiredCommandFrontiers(frontiers, Math.max(0, Number(env.timestamp || 0)));
+  pruneExpiredCommandFrontiers(frontiers, Math.max(0, Number(env.state.timestamp || 0)));
   const prior = frontiers.get(data.laneId);
   const expectedSequence = (prior?.lastContiguousSequence ?? 0) + 1;
   if (data.sequence !== expectedSequence) {
@@ -108,7 +108,7 @@ export const applyRuntimeAdapterCommandMarker = (
     lastContiguousSequence: data.sequence,
     lastInputHash: data.inputHash,
     lastCommandId: data.commandId,
-    observedHeight: Math.max(0, Number(env.height || 0)) + 1,
+    observedHeight: Math.max(0, Number(env.state.height || 0)) + 1,
     expiresAtMs: data.expiresAtMs,
   });
   env.runtimeState.runtimeAdapterCommandFrontiers = frontiers;

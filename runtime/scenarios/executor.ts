@@ -329,7 +329,7 @@ async function handleImport(
     if (position) console.log(`  📍 Positioned at (${position.x}, ${position.y}, ${position.z})`);
   }
   console.log(`  📦 Added ${results.length} entities to existing runtime state`);
-  console.log(`  🌐 Total entities now: ${env.eReplicas.size}`);
+  console.log(`  🌐 Total entities now: ${env.state.eReplicas.size}`);
 }
 
 /**
@@ -484,7 +484,7 @@ async function handleGrid(
 
   // Helper to check if account already exists
   const hasAccount = (from: string, to: string): boolean => {
-    for (const replica of env.eReplicas.values()) {
+    for (const replica of env.state.eReplicas.values()) {
       if (replica.entityId === from && replica.state?.accounts?.has(to)) {
         return true;
       }
@@ -739,7 +739,7 @@ async function handlePayRandom(
   console.log(`  🎲 Executing ${count} random payments (${minHops}-${maxHops} hops, ${minAmount}-${maxAmount} amount)`);
 
   // Get all entities from runtime state (not just scenario context)
-  const allEntityIds = Array.from(env.eReplicas.keys())
+  const allEntityIds = Array.from(env.state.eReplicas.keys())
     .map(key => key.split(':')[0])
     .filter((id, idx, arr) => arr.indexOf(id) === idx); // unique
 
@@ -766,8 +766,8 @@ async function handlePayRandom(
     if (!sourceEntityId || !destEntityId) continue;
 
     // Get signer from replica
-    const replicaKey = Array.from(env.eReplicas.keys()).find(k => k.startsWith(sourceEntityId + ':'));
-    const replica = replicaKey ? env.eReplicas.get(replicaKey) : null;
+    const replicaKey = Array.from(env.state.eReplicas.keys()).find(k => k.startsWith(sourceEntityId + ':'));
+    const replica = replicaKey ? env.state.eReplicas.get(replicaKey) : null;
     if (!replica) {
       console.warn(`  ⚠️  No replica found for ${sourceEntityId.slice(0, 10)}`);
       continue;
@@ -840,9 +840,9 @@ async function handleR2R(
   }
 
   // Get signer from replica
-  const replicaKeys = Array.from(env.eReplicas.keys());
+  const replicaKeys = Array.from(env.state.eReplicas.keys());
   const fromReplicaKey = replicaKeys.find(k => k.startsWith(fromEntityId + ':'));
-  const fromReplica = fromReplicaKey ? env.eReplicas.get(fromReplicaKey) : null;
+  const fromReplica = fromReplicaKey ? env.state.eReplicas.get(fromReplicaKey) : null;
 
   if (!fromReplica) {
     throw new Error(`R2R: No replica found for entity ${fromEntityId.slice(0, 10)}`);
@@ -888,9 +888,9 @@ async function handleFund(
   }
 
   // Get signer from replica
-  const fundReplicaKeys = Array.from(env.eReplicas.keys());
+  const fundReplicaKeys = Array.from(env.state.eReplicas.keys());
   const replicaKey = fundReplicaKeys.find(k => k.startsWith(entityId + ':'));
-  const replica = replicaKey ? env.eReplicas.get(replicaKey) : null;
+  const replica = replicaKey ? env.state.eReplicas.get(replicaKey) : null;
 
   if (!replica) {
     throw new Error(`Fund: No replica found for entity ${entityId.slice(0, 10)}`);

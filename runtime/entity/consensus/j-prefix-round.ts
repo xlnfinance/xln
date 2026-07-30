@@ -106,7 +106,7 @@ export const ensureLocalJPrefixAttestation = (
     replica.jPrefixRound,
     new Map([[sourceValidatorId, attestation]]),
   );
-  replica.lastConsensusProgressAt = env.timestamp;
+  replica.lastConsensusProgressAt = env.state.timestamp;
   for (const validatorId of replica.state.config.validators) {
     if (validatorId.trim().toLowerCase() === sourceValidatorId) continue;
     entityOutbox.push({

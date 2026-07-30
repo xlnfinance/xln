@@ -215,7 +215,7 @@ export const buildCertifiedRegistrationEvidence = (
 };
 
 const assertExactLocalStack = (env: RuntimeReplica, evidence: CertifiedRegistrationEvidence): JReplica => {
-  const matches = Array.from(env.jReplicas.values()).filter(replica => jReplicaStackKey(replica) === evidence.stackKey);
+  const matches = Array.from(env.state.jReplicas.values()).filter(replica => jReplicaStackKey(replica) === evidence.stackKey);
   if (matches.length !== 1) {
     throw new Error(`J_AUTHORITY_STACK_LOCAL_MATCH_INVALID:${evidence.stackKey}:${matches.length}`);
   }

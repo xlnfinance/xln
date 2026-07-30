@@ -125,7 +125,7 @@ const refreshTerminalFrontiers = (
     const identity = active.body.identity;
     if (!shouldRefresh(frontierKey, identity)) continue;
     const appliedJPrefixRoundCommitted = identity.kind === 'j-prefix-attestation' &&
-      [...env.eReplicas.values()].some(replica =>
+      [...env.state.eReplicas.values()].some(replica =>
         (replica.entityId || replica.state.entityId).trim().toLowerCase() === identity.entityId &&
         replica.signerId.trim().toLowerCase() === identity.signerId &&
         replica.state.height >= identity.height,

@@ -61,7 +61,7 @@ test('live Entity memory keeps certified lineage while LevelDB keeps frame histo
     entityProviderAddress: '0x000000000000000000000000000000000000bEEF',
   };
   env.activeJurisdiction = jurisdiction.name;
-  env.jReplicas.set(jurisdiction.name, {
+  env.state.jReplicas.set(jurisdiction.name, {
     ...jurisdiction,
     blockNumber: 0n,
     stateRoot: null,
@@ -106,7 +106,7 @@ test('live Entity memory keeps certified lineage while LevelDB keeps frame histo
     await processRuntime(env, []);
   }
 
-  const replica = [...env.eReplicas.values()].find(candidate => candidate.entityId === entityId);
+  const replica = [...env.state.eReplicas.values()].find(candidate => candidate.entityId === entityId);
   expect(replica?.state.height).toBe(2);
   expect(replica?.certifiedFrameLineage?.map(link => link.frame.height)).toEqual([1, 2]);
   expect(env.history).toEqual([]);

@@ -71,7 +71,7 @@ export const buildLocalRuntimeOwner = (input: {
 const hasLocalOwnerReplica = (env: RuntimeReplica, entityId: string, signerId: string): boolean => {
   const targetEntityId = normalize(entityId);
   const targetSignerId = normalize(signerId);
-  return Array.from(env.eReplicas.values()).some((replica) => (
+  return Array.from(env.state.eReplicas.values()).some((replica) => (
     normalize(replica.entityId || replica.state.entityId) === targetEntityId
     && normalize(replica.signerId) === targetSignerId
   ));
@@ -87,9 +87,9 @@ export const ensureLocalRuntimeOwner = async (
   },
 ): Promise<{ entityId: string; created: boolean; height: number }> => {
   if (hasLocalOwnerReplica(env, owner.entityId, owner.signerId)) {
-    return { entityId: owner.entityId, created: false, height: env.height };
+    return { entityId: owner.entityId, created: false, height: env.state.height };
   }
-  const expectedHeight = env.height + 1;
+  const expectedHeight = env.state.height + 1;
   const timeoutMs = Math.max(1_000, Math.floor(Number(deps.timeoutMs ?? 30_000)));
   await new Promise<void>((resolve, reject) => {
     let settled = false;
@@ -127,5 +127,5 @@ export const ensureLocalRuntimeOwner = async (
       entityInputs: [],
     });
   });
-  return { entityId: owner.entityId, created: true, height: env.height };
+  return { entityId: owner.entityId, created: true, height: env.state.height };
 };

@@ -314,7 +314,7 @@ const inferRecoverySignersForAdapter = (env: RuntimeReplica): RuntimeRecoverySig
   let entityId = '';
   let jurisdiction = '';
   let name = 'Runtime signer';
-  for (const [key, replica] of env.eReplicas?.entries?.() || []) {
+  for (const [key, replica] of env.state.eReplicas?.entries?.() || []) {
     const signerId = normalizeRuntimeIdForRecovery(replica?.signerId);
     const validators = [
       ...Object.keys(replica?.state?.config?.shares || {}),
@@ -357,7 +357,7 @@ const buildPeerRecoveryBundleRead = async (
   }
   const bundle = buildRuntimeRecoveryBundle(ctx.env, {
     signers: inferRecoverySignersForAdapter(ctx.env),
-    createdAt: Math.max(0, Math.floor(Number(ctx.env.timestamp || ctx.env.height || 0))),
+    createdAt: Math.max(0, Math.floor(Number(ctx.env.state.timestamp || ctx.env.state.height || 0))),
     meta: { activeSignerIndex: 0 },
   });
   const encrypted = await encryptRuntimeRecoveryBundle(bundle, runtimeSeed);
@@ -419,7 +419,7 @@ const readActivityQuery = (
   };
 };
 
-const envHeight = (env: RuntimeReplica): number => Math.max(0, Math.floor(Number(env.height ?? 0)));
+const envHeight = (env: RuntimeReplica): number => Math.max(0, Math.floor(Number(env.state.height ?? 0)));
 
 const latestHeadHeight = (head: StorageHead): number =>
   Math.max(0, Math.floor(Number(head.latestHeight ?? 0)));
@@ -446,7 +446,7 @@ const assertRequestedHeightAvailable = (
 
 const findReplica = (env: RuntimeReplica, entityId: string): EntityReplica | null => {
   const normalized = normalizeEntityId(entityId);
-  for (const replica of env.eReplicas?.values?.() ?? []) {
+  for (const replica of env.state.eReplicas?.values?.() ?? []) {
     if (normalizeEntityId(replica.entityId) === normalized) return replica;
   }
   return null;
@@ -611,7 +611,7 @@ const resolveEntityState = async (
 const listLiveEntitySummaries = (
   ctx: RuntimeAdapterResolveContext,
 ): RuntimeAdapterEntitySummary[] => {
-  const liveReplicas = Array.from(ctx.env.eReplicas?.values?.() ?? [])
+  const liveReplicas = Array.from(ctx.env.state.eReplicas?.values?.() ?? [])
     .map((replica) => {
       const isHub = isHubState(replica.state);
       const jurisdiction = jurisdictionSummary(replica.state.config?.jurisdiction);
@@ -1301,7 +1301,7 @@ const chooseDefaultActiveEntityId = (
 
   const available = new Set(entities.map((entity) => normalizeEntityId(entity.entityId)).filter(Boolean));
   let best: { entityId: string; score: number } | null = null;
-  for (const replica of ctx.env.eReplicas?.values?.() ?? []) {
+  for (const replica of ctx.env.state.eReplicas?.values?.() ?? []) {
     const entityId = normalizeEntityId(replica.entityId);
     if (!entityId || !available.has(entityId)) continue;
     const score = scoreDefaultLiveEntity(replica);
@@ -1501,7 +1501,7 @@ const captureLiveGraph = (
     );
   }
   const localEntityIds = new Set(
-    Array.from(ctx.env.eReplicas?.values?.() ?? [])
+    Array.from(ctx.env.state.eReplicas?.values?.() ?? [])
       .map(replica => normalizeEntityId(replica.entityId)),
   );
   const entities: RuntimeAdapterGraphEntityFrame[] = [];
@@ -1607,7 +1607,7 @@ const projectGraphFrame = async (
   const entityLimit = readBoundedLimit(query?.limit, 500);
   const accountsLimit = readBoundedLimit(query?.accountsLimit, 500);
   const capturedRuntimeId = normalizeEntityId(String(ctx.env.runtimeId || ''));
-  const capturedTimestamp = Math.max(0, Math.floor(Number(ctx.env.timestamp || 0)));
+  const capturedTimestamp = Math.max(0, Math.floor(Number(ctx.env.state.timestamp || 0)));
 
   // A live graph read is a projection of the in-memory R-frame, not a
   // historical storage query. Capture every graph DTO before the first await:

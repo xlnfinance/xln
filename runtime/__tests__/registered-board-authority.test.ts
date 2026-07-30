@@ -263,7 +263,7 @@ const buildRegisteredProfile = async (): Promise<{
   localEnv.runtimeSeed = 'registered-board-authority:runtime';
   registerSignerKey(localEnv, signer, privateKey);
   const localKeys = deriveLocalEntityCryptoKeys(localEnv, registeredEntityId, signer);
-  localEnv.eReplicas.set(`${registeredEntityId}:${signer}`, {
+  localEnv.state.eReplicas.set(`${registeredEntityId}:${signer}`, {
     entityId: registeredEntityId,
     signerId: signer,
     entityEncPubKey: localKeys.publicKey,
@@ -318,7 +318,7 @@ const remoteObserverEnv = (boardHash: string): RuntimeReplica => {
   const signerId = addr('91');
   const state = makeState(entity('99'), signerId, jurisdiction);
   installEvents(env, state, [event('FoundationBootstrapped', blockHash('31')), event('EntityRegistered', boardHash)]);
-  env.eReplicas.set(`${state.entityId}:${signerId}`, {
+  env.state.eReplicas.set(`${state.entityId}:${signerId}`, {
     entityId: state.entityId,
     signerId,
     entityEncPubKey: '',
@@ -594,7 +594,7 @@ describe('registered Entity certified board authority', () => {
     const receiverEnv = createEmptyEnv('registry-output-durable-receiver');
     registerSignerKey(receiverEnv, receiverSigner, receiverPrivateKey);
     receiverEnv.runtimeSeed = 'registry-output-durable-receiver';
-    receiverEnv.timestamp = 10;
+    receiverEnv.state.timestamp = 10;
     receiverEnv.scenarioMode = true;
     receiverEnv.quietRuntimeLogs = true;
     const receiver = makeState(receiverEntityId, receiverSigner, jurisdiction);
@@ -700,7 +700,7 @@ describe('registered Entity certified board authority', () => {
   test('partial board config cannot precommit rotation; synchronized validators commit it', async () => {
     const env = createEmptyEnv('registry-board-handover-consensus');
     env.runtimeSeed = 'registry-board-handover-consensus';
-    env.timestamp = 100;
+    env.state.timestamp = 100;
     env.scenarioMode = true;
     env.quietRuntimeLogs = true;
     const keyA = deriveSignerKeySync('registry-board-handover-consensus', '1');
@@ -730,7 +730,7 @@ describe('registered Entity certified board authority', () => {
     const registration = event('EntityRegistered', oldBoard);
     const rotation = event('BoardActivated', newBoard, { height: 3, previousBoardHash: oldBoard });
     const baseState = makeState(registeredEntityId, signerA, jurisdiction);
-    env.timestamp = baseState.timestamp;
+    env.state.timestamp = baseState.timestamp;
     baseState.config = oldConfig;
     baseState.prevFrameHash = blockHash('aa');
     baseState.leaderState = { activeValidatorId: signerA, view: 0, changedAtHeight: 0 };
@@ -738,7 +738,7 @@ describe('registered Entity certified board authority', () => {
     certifyEventPrefix(baseState, [foundation, registration]);
     const counterpartyEntityId = generateLazyEntityId([signerC], 1n).toLowerCase();
     const counterpartyState = makeState(counterpartyEntityId, signerC, jurisdiction);
-    env.eReplicas.set(`${counterpartyEntityId}:${signerC}`, {
+    env.state.eReplicas.set(`${counterpartyEntityId}:${signerC}`, {
       entityId: counterpartyEntityId,
       signerId: signerC,
       entityEncPubKey: '',
@@ -925,7 +925,7 @@ describe('registered Entity certified board authority', () => {
       },
     });
 
-    env.eReplicas.set(`${registeredEntityId}:${signerA}`, committed.workingReplica);
+    env.state.eReplicas.set(`${registeredEntityId}:${signerA}`, committed.workingReplica);
     refreshScheduledWakeIndex(env, new Set([registeredEntityId]));
     const wakeValidatorReplica = {
       entityId: registeredEntityId,
@@ -978,8 +978,8 @@ describe('registered Entity certified board authority', () => {
     // Validators replay the same committed Account with independent hosting
     // topologies. Recipient routing must remain derivable from its certified
     // counterparty Hanko after the target replica disappears locally.
-    env.eReplicas.delete(`${counterpartyEntityId}:${signerC}`);
-    expect([...env.eReplicas.values()].some(replica =>
+    env.state.eReplicas.delete(`${counterpartyEntityId}:${signerC}`);
+    expect([...env.state.eReplicas.values()].some(replica =>
       replica.state.entityId.toLowerCase() === counterpartyEntityId)).toBe(false);
     const wakePrepared = await applyEntityInput(env, {
       ...wakeValidatorReplica,
@@ -1033,7 +1033,7 @@ describe('registered Entity certified board authority', () => {
         frameHash: certifiedFrameHash,
       }),
     );
-    env.eReplicas.set(`${registeredEntityId}:${signerA}`, resealCommitted.workingReplica);
+    env.state.eReplicas.set(`${registeredEntityId}:${signerA}`, resealCommitted.workingReplica);
     expect((await verifyHankoForHash(
       nestedReseal.data.reseal.frameHanko!,
       certifiedFrameHash,
@@ -1114,7 +1114,7 @@ describe('registered Entity certified board authority', () => {
   for (const corruption of ['missing', 'corrupt', 'cycle'] as const) {
     test(`profile verification propagates certified-board ${corruption} corruption`, async () => {
       const { profile, localEnv } = await buildRegisteredProfile();
-      const state = [...localEnv.eReplicas.values()][0]!.state;
+      const state = [...localEnv.state.eReplicas.values()][0]!.state;
       if (corruption === 'cycle') {
         installEvents(localEnv, state, [event('EntityRegistered', blockHash('42'), {
           entityId: generateNumberedEntityId(3),
@@ -1242,7 +1242,7 @@ describe('registered Entity certified board authority', () => {
     const latest = makeState(entity('71'), addr('71'), jurisdiction);
     installEvents(env, stale, prefix);
     installEvents(env, latest, [...prefix, ...rotations]);
-    env.eReplicas.set('stale', {
+    env.state.eReplicas.set('stale', {
       entityId: stale.entityId,
       signerId: addr('70'),
       entityEncPubKey: '',
@@ -1250,7 +1250,7 @@ describe('registered Entity certified board authority', () => {
       state: stale,
       mempool: [],
     } as EntityReplica);
-    env.eReplicas.set('latest', {
+    env.state.eReplicas.set('latest', {
       entityId: latest.entityId,
       signerId: addr('71'),
       entityEncPubKey: '',
@@ -1283,7 +1283,7 @@ describe('registered Entity certified board authority', () => {
       ...conflict.certifiedBoardState!,
       boardRegistryRoot: conflictUpdate.root,
     };
-    env.eReplicas.set('conflict', {
+    env.state.eReplicas.set('conflict', {
       entityId: conflict.entityId,
       signerId: addr('72'),
       entityEncPubKey: '',
@@ -1367,7 +1367,7 @@ describe('registered Entity certified board authority', () => {
 
   test('local config without certified membership cannot authorize a numbered Hanko', async () => {
     const { profile, localEnv } = await buildRegisteredProfile();
-    const localState = [...localEnv.eReplicas.values()][0]!.state;
+    const localState = [...localEnv.state.eReplicas.values()][0]!.state;
     delete localState.certifiedBoardState;
     expect((await verifyProfileSignature(profile, localEnv)).valid).toBe(false);
     expect((await verifyHankoForHash(
@@ -1377,7 +1377,7 @@ describe('registered Entity certified board authority', () => {
 
   test('previous board verifies through nested claims at the exclusive seven-day boundary and survives restore', async () => {
     const { profile, localEnv, boardHash: previousBoardHash, privateKey } = await buildRegisteredProfile();
-    const state = [...localEnv.eReplicas.values()][0]!.state;
+    const state = [...localEnv.state.eReplicas.values()][0]!.state;
     const currentBoardHash = blockHash('66');
     const previousBoardValidUntil = 1_700_604_800;
     installEvents(localEnv, state, [event('BoardActivated', currentBoardHash, {
@@ -1420,7 +1420,7 @@ describe('registered Entity certified board authority', () => {
       ],
     });
 
-    localEnv.timestamp = previousBoardValidUntil * 1_000 - 1;
+    localEnv.state.timestamp = previousBoardValidUntil * 1_000 - 1;
     expect((await verifyHankoForHash(
       hanko,
       profileHash,
@@ -1452,7 +1452,7 @@ describe('registered Entity certified board authority', () => {
     const restored = await restoreEnvFromCheckpointSnapshot(buildRuntimeCheckpointSnapshot(localEnv), {
       runtimeId: addr('88'),
     });
-    restored.timestamp = localEnv.timestamp;
+    restored.state.timestamp = localEnv.state.timestamp;
     expect((await verifyHankoForHash(
       hanko,
       profileHash,
@@ -1467,7 +1467,7 @@ describe('registered Entity certified board authority', () => {
       restored,
     )).valid).toBe(true);
 
-    restored.timestamp = previousBoardValidUntil * 1_000;
+    restored.state.timestamp = previousBoardValidUntil * 1_000;
     expect((await verifyHankoForHash(
       hanko,
       profileHash,
@@ -1497,7 +1497,7 @@ describe('registered Entity certified board authority', () => {
       runtimeId: localEnv.runtimeId,
     });
     expect(resolveObserverCertifiedBoardHash(
-      [...restored.eReplicas.values()][0]!.state,
+      [...restored.state.eReplicas.values()][0]!.state,
       getCertifiedBoardNodeStore(restored),
       registeredEntityId,
     )).toBe(boardHash);

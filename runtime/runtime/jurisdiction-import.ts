@@ -163,7 +163,7 @@ const findJurisdictionReplica = (
   name: string,
 ): [string, JReplica] | null => {
   const wanted = jurisdictionNameKey(name);
-  for (const entry of env.jReplicas.entries()) {
+  for (const entry of env.state.jReplicas.entries()) {
     if (jurisdictionNameKey(entry[0]) === wanted) return entry;
   }
   return null;
@@ -205,7 +205,7 @@ export const applyImportJurisdictionIntent = (
 ): void => {
   const request = normalizeJurisdictionImportRequest(runtimeTx.data);
   if (request.rpcs.length === 0) {
-    const conflictingReplica = [...env.jReplicas.entries()].find(([name, replica]) =>
+    const conflictingReplica = [...env.state.jReplicas.entries()].find(([name, replica]) =>
       jurisdictionNameKey(name) !== jurisdictionNameKey(request.name) &&
       Array.isArray(replica.rpcs) && replica.rpcs.length === 0);
     const conflictingIntent = [...(env.runtimeState?.pendingJurisdictionImports?.values() ?? [])]
@@ -335,7 +335,7 @@ const assertWatcherIdentityAvailable = (
   env: RuntimeReplica,
   result: JurisdictionImportResult,
 ): void => {
-  for (const [name, replica] of env.jReplicas.entries()) {
+  for (const [name, replica] of env.state.jReplicas.entries()) {
     if (Number(replica.chainId) !== result.chainId) continue;
     const rawDepository = replica.depositoryAddress ?? replica.contracts?.depository;
     if (!rawDepository) continue;
@@ -367,14 +367,14 @@ export const applyCompleteImportJurisdiction = (
   } else {
     assertWatcherIdentityAvailable(env, result);
     const stateRoot = result.stateRoot ? ethers.getBytes(result.stateRoot) : null;
-    env.jReplicas.set(result.name, {
+    env.state.jReplicas.set(result.name, {
       name: result.name,
       blockNumber: BigInt(result.blockNumber),
       stateRoot,
       mempool: [],
       blockDelayMs: 300,
       ...(result.blockTimeMs ? { blockTimeMs: result.blockTimeMs } : {}),
-      lastBlockTimestamp: env.timestamp,
+      lastBlockTimestamp: env.state.timestamp,
       position: { x: 0, y: 50, z: 0 },
       depositoryAddress: result.contracts.depository,
       entityProviderAddress: result.contracts.entityProvider,

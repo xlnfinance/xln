@@ -19,10 +19,13 @@ import type { EntityReplica } from './types';
  * merely to avoid threading a value through the owning composition root.
  */
 export interface EntityRuntimeContext {
-  eReplicas: Map<string, EntityReplica>;
-  jReplicas: Map<string, JReplica>;
-  height: number;
-  timestamp: number;
+  /** The exact committed parent State visible to this Entity transition. */
+  state: {
+    eReplicas: Map<string, EntityReplica>;
+    jReplicas: Map<string, JReplica>;
+    height: number;
+    timestamp: number;
+  };
   runtimeSeed?: string | undefined;
   runtimeId?: string | undefined;
   activeJurisdiction?: string | undefined;

@@ -70,7 +70,7 @@ test('CommandPalette consumes CommandPaletteView instead of owning runtime env r
   expect(palette).toContain('findCommandPaletteEntities');
   expect(palette).not.toContain('xlnEnvironment');
   expect(palette).not.toContain('xlnFunctions');
-  expect(palette).not.toContain('env.eReplicas');
+  expect(palette).not.toContain('env.state.eReplicas');
   expect(palette).not.toContain('validatedProfiles');
   expect(view).toContain('buildCommandPaletteView(viewEnv)');
   expect(view).toContain('buildCommandPaletteViewFromRuntimeView');

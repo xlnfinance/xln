@@ -125,7 +125,7 @@ describe('HTLC dispute secret publication liveness', () => {
     installTrustedJurisdiction(env);
     env.quietRuntimeLogs = true;
     const state = makeState(entityId, signerId, jurisdiction, counterpartyId);
-    env.eReplicas.set(`${entityId}:${signerId}`, {
+    env.state.eReplicas.set(`${entityId}:${signerId}`, {
       entityId,
       signerId,
       state,

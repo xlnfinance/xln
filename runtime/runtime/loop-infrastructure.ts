@@ -53,7 +53,7 @@ export const tryOpenRuntimeStorageDb = (
 export const rotateRuntimeStorageEpochDb = (
   env: RuntimeReplica,
   snapshotHeight: number,
-  timestamp = env.timestamp,
+  timestamp = env.state.timestamp,
 ): Promise<boolean> =>
   rotateStorageEpochDb(env, storageDeps, snapshotHeight, timestamp);
 

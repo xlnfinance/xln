@@ -19,7 +19,7 @@ const runtimeLog = createStructuredLogger('runtime');
 
 const collectLocallySignableEntityIds = (env: RuntimeReplica): Set<string> => {
   const entityIds = new Set<string>();
-  for (const replicaKey of env.eReplicas.keys()) {
+  for (const replicaKey of env.state.eReplicas.keys()) {
     const signerId = extractSignerId(replicaKey);
     if (!signerId || getSignerPrivateKeyIfAvailable(env, signerId) === null) continue;
     entityIds.add(extractEntityId(replicaKey).toLowerCase());
@@ -97,10 +97,10 @@ export const runCommittedRecoveryBarrier = async (
   const jInputCount = jSideEffectCount + runtimeInfraEffectCount;
   if (!barrier || (remoteCount === 0 && jInputCount === 0)) return;
   try {
-    await barrier(env, { height: env.height, remoteOutputCount: remoteCount, jInputCount });
+    await barrier(env, { height: env.state.height, remoteOutputCount: remoteCount, jInputCount });
   } catch (error) {
     env.error('system', 'RECOVERY_BACKUP_BARRIER_FAILED', {
-      height: env.height,
+      height: env.state.height,
       remoteOutputCount: remoteCount,
       jInputCount,
       reason: error instanceof Error ? error.message : String(error),

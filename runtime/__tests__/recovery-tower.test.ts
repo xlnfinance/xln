@@ -82,7 +82,7 @@ const installJurisdiction = (env: ReturnType<typeof createEmptyEnv>): Jurisdicti
     entityProviderAddress: addr('12'),
   };
   env.activeJurisdiction = jurisdiction.name;
-  env.jReplicas.set(jurisdiction.name, createTestJReplica({
+  env.state.jReplicas.set(jurisdiction.name, createTestJReplica({
     name: jurisdiction.name,
     rpcs: [],
     chainId: jurisdiction.chainId,
@@ -262,9 +262,9 @@ describe('runtime recovery tower', () => {
     expect(decrypted.checkpointHash).toBe(bundle.checkpointHash);
     expect(restoredPersistedHash).toBe(originalPersistedHash);
     expect(restoredEnv.runtimeId).toBe(runtimeId);
-    expect(restoredEnv.height).toBe(env.height);
-    expect(restoredEnv.eReplicas.size).toBe(env.eReplicas.size);
-    expect(restoredEnv.jReplicas.size).toBe(env.jReplicas.size);
+    expect(restoredEnv.state.height).toBe(env.state.height);
+    expect(restoredEnv.state.eReplicas.size).toBe(env.state.eReplicas.size);
+    expect(restoredEnv.state.jReplicas.size).toBe(env.state.jReplicas.size);
     expect(restoredEnv.runtimeMempool).toEqual(env.runtimeMempool);
     expect(restoredEnv.runtimeConfig).toEqual(env.runtimeConfig);
     expect(restoredEnv.runtimeState?.maxEntityInputsPerFrame).toBe(123);
@@ -309,7 +309,7 @@ describe('runtime recovery tower', () => {
   test('recovery bundle preserves in-flight consensus state and compresses large checkpoints below tower body cap', async () => {
     const { env, runtimeSeed, runtimeId, entityId, wallet, jurisdiction } = await buildRuntimeEnv();
     const replicaKey = `${entityId}:${runtimeId}`;
-    const replica = env.eReplicas.get(replicaKey);
+    const replica = env.state.eReplicas.get(replicaKey);
     expect(replica, 'test replica must exist').toBeTruthy();
     const bloatedState = structuredClone(replica!.state);
     bloatedState.messages = Array.from({ length: 100 }, (_, index) => `transient-${index}-${'x'.repeat(512)}`);
@@ -448,7 +448,7 @@ describe('runtime recovery tower', () => {
     });
     await processRuntime(env);
 
-    const frame = await readPersistedFrameJournal(env, env.height);
+    const frame = await readPersistedFrameJournal(env, env.state.height);
     expect(frame, 'journal frame must be persisted before building tail bundle').toBeTruthy();
     expect(frame?.runtimeMachine, 'ordinary WAL must not repeat the complete R-machine').toBeUndefined();
     // Ordinary sparse WAL frames carry exact inputs/transport fences plus the
@@ -472,18 +472,18 @@ describe('runtime recovery tower', () => {
 
     expect(tailBundle.baseRuntimeHeight).toBe(baseHeight);
     expect(tailBundle.baseCheckpointHash).toBe(baseHash);
-    expect(tailBundle.runtimeHeight).toBe(env.height);
+    expect(tailBundle.runtimeHeight).toBe(env.state.height);
     expect(restoredPersistedHash).toBe(originalPersistedHash);
-    expect(restoredEnv.height).toBe(env.height);
-    expect(restoredEnv.eReplicas.size).toBe(env.eReplicas.size);
+    expect(restoredEnv.state.height).toBe(env.state.height);
+    expect(restoredEnv.state.eReplicas.size).toBe(env.state.eReplicas.size);
 
     const recording = buildRuntimeRecording([snapshotBundle, tailBundle], 10_002);
     expect(validateRuntimeRecording(recording).manifestHash).toBe(recording.manifestHash);
     const detached = openDetachedRuntimeRecording(recording, runtimeSeed);
     const baseProjection = await detached.readAtHeight(baseHeight);
-    expect(baseProjection.height).toBe(baseHeight);
-    const targetProjection = await detached.readAtHeight(env.height);
-    expect(targetProjection.height).toBe(env.height);
+    expect(baseProjection.state.height).toBe(baseHeight);
+    const targetProjection = await detached.readAtHeight(env.state.height);
+    expect(targetProjection.state.height).toBe(env.state.height);
     expect(computePersistedEnvStateHash(buildRuntimeCheckpointSnapshot(targetProjection)))
       .toBe(originalPersistedHash);
     await detached.close();
@@ -493,7 +493,7 @@ describe('runtime recovery tower', () => {
       signers,
       createdAt: 10_003,
     });
-    expect(validateRuntimeRecording(persistedRecording).targetHeight).toBe(env.height);
+    expect(validateRuntimeRecording(persistedRecording).targetHeight).toBe(env.state.height);
     const tamperedRecording = structuredClone(persistedRecording);
     tamperedRecording.targetHeight += 1;
     expect(() => validateRuntimeRecording(tamperedRecording))

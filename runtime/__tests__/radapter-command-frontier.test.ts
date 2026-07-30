@@ -21,8 +21,8 @@ const marker = (sequence: number) => ({
 
 test('runtime adapter command marker is local-only and survives durable restore', async () => {
   const env = createEmptyEnv('radapter-frontier-restore');
-  env.height = 7;
-  env.timestamp = 700;
+  env.state.height = 7;
+  env.state.timestamp = 700;
   const tx = { type: 'recordRuntimeAdapterCommand' as const, data: marker(1) };
 
   await expect(applyRuntimeTx(env, tx)).rejects.toThrow('RADAPTER_COMMAND_RUNTIME_TX_UNAUTHORIZED');
@@ -42,7 +42,7 @@ test('runtime adapter command marker is local-only and survives durable restore'
 
 test('one million committed commands keep one bounded lane frontier', () => {
   const env = createEmptyEnv('radapter-frontier-million');
-  env.timestamp = 1;
+  env.state.timestamp = 1;
   for (let sequence = 1; sequence <= 1_000_000; sequence += 1) {
     applyRuntimeAdapterCommandMarker(env, marker(sequence));
   }

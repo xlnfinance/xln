@@ -67,7 +67,7 @@ const createCommittedAccountFixture = async (): Promise<{
   env.scenarioMode = true;
   env.quietRuntimeLogs = true;
   env.activeJurisdiction = jurisdiction.name;
-  env.jReplicas.set(jurisdiction.name, jurisdictionReplica());
+  env.state.jReplicas.set(jurisdiction.name, jurisdictionReplica());
 
   const signerId = env.runtimeId?.toLowerCase();
   if (!signerId) throw new Error('TEST_RUNTIME_ID_MISSING');
@@ -89,7 +89,7 @@ const createCommittedAccountFixture = async (): Promise<{
     entityInputs: [],
   });
 
-  const replica = env.eReplicas.get(`${entityId}:${signerId}`);
+  const replica = env.state.eReplicas.get(`${entityId}:${signerId}`);
   if (!replica) throw new Error('TEST_ENTITY_REPLICA_MISSING');
   const opened = await applyEntityTx(env, replica.state, {
     type: 'openAccount',
