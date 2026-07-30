@@ -1,12 +1,16 @@
 import type {
-  EnvSnapshot,
   RuntimeAdapter,
   RuntimeAdapterGraphFrame,
   RuntimeAdapterTimelineIndexPage,
+  RuntimeActivityEvent,
 } from '@xln/runtime/api/runtime-module';
 import { RemoteRuntimeAdapter } from '../../../../runtime/radapter/remote';
 import type { Runtime } from '$lib/stores/runtimeStore';
-import { unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
+import { getRuntimeControllerAdapter } from '$lib/stores/runtimeControllerStore';
+import {
+  adapterNetworkTimelineSource,
+  type NetworkTimelineSource,
+} from './networkTimelineSource';
 import {
   normalizeRuntimeTimelineIndex,
   type RuntimeTimelineIndex,
@@ -18,26 +22,27 @@ const REMOTE_CONNECT_TIMEOUT_MS = 6_000;
 
 const runtimeId = (value: unknown): string => String(value || '').trim().toLowerCase();
 
-const localFrameChangedGraph = (snapshot: EnvSnapshot): boolean => {
-  const input = snapshot.runtimeInput;
-  if ((input.runtimeTxs?.length ?? 0) > 0 || (input.jInputs?.length ?? 0) > 0) return true;
-  return (input.entityInputs ?? []).some((entry) => (entry.entityTxs?.length ?? 0) > 0);
-};
-
-export const timelineIndexFromBrowserRuntime = (runtime: Runtime): RuntimeTimelineIndex => {
-  if (runtime.type !== 'local') throw new Error(`NETWORK_TIMELINE_BROWSER_RUNTIME_REQUIRED:${runtime.id}`);
-  const env = unwrapLiveRuntimeEnv(runtime.env) ?? runtime.env;
-  const id = runtimeId(runtime.id || env?.runtimeId);
+/**
+ * Reader for one runtime, local or remote.
+ *
+ * A local runtime is NOT a special case: its embedded adapter serves the same read paths
+ * (timeline-index / graph-frame / activity) from persisted storage. Reading `env.history`
+ * instead — as this module used to — always yielded zero frames, because the runtime keeps
+ * no in-memory history by design (RECENT_RUNTIME_HISTORY_LIMIT = 0).
+ *
+ * Returns null when no reader exists for a local runtime (it is not the connected one).
+ * That is a genuine "we have no source" state, not a swallowed failure: read errors from an
+ * adapter we do have still propagate.
+ */
+export const networkTimelineSourceFor = async (runtime: Runtime): Promise<NetworkTimelineSource | null> => {
+  const id = runtimeId(runtime.id);
   if (!id) throw new Error('NETWORK_TIMELINE_RUNTIME_ID_REQUIRED');
-  const frames = (env?.history ?? []).map((snapshot) => ({
-    runtimeId: id,
-    height: Math.max(0, Math.floor(Number(snapshot.state.height || 0))),
-    timestamp: Math.max(0, Math.floor(Number(snapshot.state.timestamp || 0))),
-    stateHash: String((snapshot as EnvSnapshot & { stateHash?: string }).stateHash || ''),
-    materialized: true,
-    graphChanged: localFrameChangedGraph(snapshot),
-  }));
-  return normalizeRuntimeTimelineIndex({ runtimeId: id, frames });
+  if (runtime.type !== 'local') {
+    return adapterNetworkTimelineSource(id, await timelineRemoteReaders.adapterFor(runtime));
+  }
+  const adapter = getRuntimeControllerAdapter();
+  if (!adapter || runtimeId(adapter.runtimeId) !== id) return null;
+  return adapterNetworkTimelineSource(id, adapter);
 };
 
 export const readTimelineIndexPages = async (
@@ -272,17 +277,6 @@ export const subscribeNetworkRuntimeChanges = async (
   };
 };
 
-export const loadNetworkTimelineIndexes = async (runtimeMap: Map<string, Runtime>): Promise<RuntimeTimelineIndex[]> => {
-  const sorted = Array.from(runtimeMap.values()).sort((left, right) => runtimeId(left.id).localeCompare(runtimeId(right.id)));
-  pruneNetworkTimelineReaders(runtimeMap);
-  const indexes: RuntimeTimelineIndex[] = [];
-  for (const runtime of sorted) {
-    if (runtime.type === 'local') indexes.push(timelineIndexFromBrowserRuntime(runtime));
-    else indexes.push(await readTimelineIndexPages(await timelineRemoteReaders.adapterFor(runtime), runtime.id));
-  }
-  return indexes;
-};
-
 const readRemoteRuntimeGraphFrameWithPool = async (
   runtime: Runtime,
   readers: RemoteRuntimeReaderPool,
@@ -314,19 +308,4 @@ export const readRemoteRuntimeGraphFrame = async (
   subscriptionGeneration?: number,
 ): Promise<RuntimeAdapterGraphFrame> =>
   readRemoteRuntimeGraphFrameWithPool(runtime, graphRemoteReaders, height, subscriptionGeneration);
-
-export const readNetworkRuntimeFrame = async (
-  runtime: Runtime,
-  height: number,
-): Promise<EnvSnapshot | RuntimeAdapterGraphFrame> => {
-  const targetHeight = Math.max(1, Math.floor(Number(height || 0)));
-  if (runtime.type === 'local') {
-    const env = unwrapLiveRuntimeEnv(runtime.env) ?? runtime.env;
-    const frame = (env?.history ?? []).find((candidate) => Number(candidate.state.height) === targetHeight);
-    if (!frame) throw new Error(`NETWORK_TIMELINE_BROWSER_FRAME_MISSING:${runtime.id}:h${targetHeight}`);
-    return frame;
-  }
-  return await readRemoteRuntimeGraphFrameWithPool(runtime, timelineRemoteReaders, targetHeight);
-};
-
 export const disconnectNetworkTimelineReaders = (): void => timelineRemoteReaders.disconnectAll();

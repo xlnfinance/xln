@@ -141,8 +141,15 @@ describe('frontend time-machine current env contract', () => {
 
   test('merged graph scope does not replace wallet time travel controls', () => {
     const source = read('frontend/src/lib/view/core/TimeMachine.svelte');
+    const dock = read('frontend/src/lib/view/DockRoot.svelte');
+    const wallet = read('frontend/src/lib/view/UserModePanel.svelte');
 
-    expect(source).toContain("$runtimeGraphScope === 'merged' && $appState.mode === 'dev'");
+    // The NetworkMachine scrubber belongs to the dock. Keying it off the global app mode
+    // left the embedded workspace (dock rendered while mode is 'user') on the legacy
+    // scrubber, which reads permanently empty in-memory history.
+    expect(source).toContain("{#if dockMode && $runtimeGraphScope === 'merged'}");
+    expect(dock).toContain('dockMode');
+    expect(wallet).not.toContain('dockMode\n');
     expect(source).toContain('data-testid="time-machine-remote-scan"');
     expect(source).toContain('data-testid="network-machine-mode-toggle"');
   });

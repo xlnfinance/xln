@@ -48,7 +48,14 @@ describe('RuntimeGraphFrameCache', () => {
     expect(source).toContain('const graphRemoteReaders = new RemoteRuntimeReaderPool();');
     expect(source).toContain('disconnectNetworkTimelineReaders = (): void => timelineRemoteReaders.disconnectAll()');
     expect(source).not.toContain('disconnectNetworkTimelineReaders = (): void => graphRemoteReaders.disconnectAll()');
-    expect(source).toContain('readRemoteRuntimeGraphFrameWithPool(runtime, timelineRemoteReaders, targetHeight)');
+    // Historical reads go through networkTimelineSourceFor, which must borrow the timeline
+    // pool. Borrowing the live graph pool would let timeline disposal kill live rendering.
+    const sourceResolver = source.slice(
+      source.indexOf('export const networkTimelineSourceFor'),
+      source.indexOf('export const readTimelineIndexPages'),
+    );
+    expect(sourceResolver).toContain('timelineRemoteReaders.adapterFor(runtime)');
+    expect(sourceResolver).not.toContain('graphRemoteReaders');
   });
 
   test('a stale failed refresh cannot overwrite or clear the latest applied frame', async () => {

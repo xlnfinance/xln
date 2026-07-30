@@ -1645,6 +1645,52 @@ test('runtime adapter timeline-index returns a bounded compact timestamp page', 
   expect(page.nextBeforeHeight).toBe(5);
 });
 
+test('runtime adapter timeline-index reports an empty timeline before the first frame is persisted', async () => {
+  // Fresh runtime: nothing committed live, nothing persisted.
+  const baseEnv = makeEnv();
+  const env: RuntimeReplica = {
+    ...baseEnv,
+    state: { ...baseEnv.state, height: 0 },
+  };
+  // A runtime that has not committed a frame yet is an empty timeline, not a bad request.
+  // Rejecting it made every fresh browser runtime surface a broken time machine.
+  const page = await resolveRuntimeAdapterRead<{
+    entries: unknown[];
+    latestHeight: number;
+    scannedHeights: number;
+    nextBeforeHeight: number | null;
+  }>(
+    {
+      env,
+      readHead: async () => ({
+        schemaVersion: STORAGE_SCHEMA_VERSION,
+        latestHeight: 0,
+        latestSnapshotHeight: 0,
+        snapshotPeriodFrames: 2,
+        retainSnapshots: 3,
+        epochMaxBytes: 1_000,
+        accountMerkleRadix: 16,
+        epochReplayBytes: 0,
+        retainedHistoryBytes: 0,
+      }),
+      readFrame: async () => null,
+    },
+    'timeline-index',
+  );
+
+  expect(page.entries).toEqual([]);
+  expect(page.latestHeight).toBe(0);
+  expect(page.scannedHeights).toBe(0);
+  expect(page.nextBeforeHeight).toBeNull();
+
+  // An explicit out-of-range cursor is still a client error.
+  await expect(resolveRuntimeAdapterRead(
+    { env, readHead: async () => ({ schemaVersion: STORAGE_SCHEMA_VERSION, latestHeight: 0, latestSnapshotHeight: 0, snapshotPeriodFrames: 2, retainSnapshots: 3, epochMaxBytes: 1_000, accountMerkleRadix: 16, epochReplayBytes: 0, retainedHistoryBytes: 0 }), readFrame: async () => null },
+    'timeline-index',
+    { beforeHeight: 1 },
+  )).rejects.toThrow('beforeHeight must be an integer greater than 1');
+});
+
 test('runtime adapter receipt read returns ingress receipt status over websocket protocol', async () => {
   const env = makeEnv();
   const receipt = await resolveRuntimeAdapterRead<Record<string, unknown>>(
