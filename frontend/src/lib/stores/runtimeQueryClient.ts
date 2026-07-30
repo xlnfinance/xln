@@ -11,7 +11,7 @@ import type {
   RuntimeAdapterTimelineIndexPage,
   RuntimeAdapterViewFrame,
 } from '@xln/runtime/api/runtime-module';
-import type { StorageHead } from '@xln/runtime/storage/types';
+import type { StorageAccountDoc, StorageHead } from '@xln/runtime/storage/types';
 import {
   getRuntimeControllerAdapter,
   runtimeAdapter,
@@ -145,6 +145,20 @@ export class RuntimeQueryClient {
 
   readViewFrame(query: RuntimeAdapterReadQuery = {}): Promise<RuntimeAdapterViewFrame> {
     return this.cachedRead<RuntimeAdapterViewFrame>('view-frame', query);
+  }
+
+  readAccount(
+    entityId: string,
+    counterpartyId: string,
+    query: RuntimeAdapterReadQuery = {},
+  ): Promise<StorageAccountDoc> {
+    const owner = String(entityId || '').trim().toLowerCase();
+    const counterparty = String(counterpartyId || '').trim().toLowerCase();
+    if (!owner || !counterparty) throw new Error('RUNTIME_ACCOUNT_PROJECTION_ID_MISSING');
+    return this.cachedRead<StorageAccountDoc>(
+      `entity/${encodeURIComponent(owner)}/account/${encodeURIComponent(counterparty)}`,
+      query,
+    );
   }
 
   readHistoryFrameBatch(query: RuntimeAdapterReadQuery): Promise<RuntimeAdapterHistoryFrameBatch> {

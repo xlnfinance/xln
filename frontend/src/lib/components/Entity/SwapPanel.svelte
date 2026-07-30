@@ -13,7 +13,10 @@ import {
 import type { Profile } from '@xln/runtime/api/runtime-module';
 import type { SwapBookEntry } from '@xln/runtime/api/runtime-module';
 import { submitActiveCrossJurisdictionIntent, submitEntityInputs, submitRuntimeInput, xlnFunctions } from '../../stores/xlnStore';
-import { readRuntimeEntityProjectionFrame } from '../../stores/runtimeViewStore';
+import {
+  readRuntimeAccountProjection,
+  readRuntimeEntityProjectionFrame,
+} from '../../stores/runtimeViewStore';
 import { toasts } from '../../stores/toastStore';
 import { errorLog } from '../../stores/errorLogStore';
 import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
@@ -83,6 +86,7 @@ import {
   remainingOfferUsd,
   type ClosedOrderStatus,
   type ClosedOrderView,
+  type AccountOrderHistory,
   type OfferLifecycle,
   type OfferLike,
   type SwapCompletionModal,
@@ -263,6 +267,7 @@ let placingSwapOffer = false;
 let swapRuntimeView: SwapPanelRuntimeView = buildSwapPanelRuntimeView(null);
 let detailedSourceReplica: EntityReplica | null = null;
 let detailedTargetReplica: EntityReplica | null = null;
+let detailedOrderAccount: AccountOrderHistory | null = null;
 let cachedSourceReplica: EntityReplica | null = null;
 const detailedReplicaByEntityId = new Map<
   string,
@@ -272,6 +277,8 @@ let sourceProjectionKey = '';
 let sourceProjectionRequestId = 0;
 let targetProjectionKey = '';
 let targetProjectionRequestId = 0;
+let orderAccountProjectionKey = '';
+let orderAccountProjectionRequestId = 0;
 $: activeXlnFunctions = $xlnFunctions;
 $: activeFrame = env;
 $: runtimeEnv = unwrapLiveRuntimeEnv(activeFrame);
@@ -348,6 +355,33 @@ async function refreshDetailedTargetReplica(key: string, entityId: string): Prom
     errorLog.log(submitError, 'Swap Panel', { entityId, error });
   }
 }
+
+async function refreshDetailedOrderAccount(
+  key: string,
+  entityId: string,
+  accountId: string,
+): Promise<void> {
+  const requestId = ++orderAccountProjectionRequestId;
+  try {
+    const projected = await readRuntimeAccountProjection(entityId, accountId);
+    if (
+      requestId !== orderAccountProjectionRequestId ||
+      key !== orderAccountProjectionKey
+    ) return;
+    detailedOrderAccount = {
+      swapOrderHistory: projected.swapOrderHistory ?? new Map(),
+      swapClosedOrders: projected.swapClosedOrders ?? new Map(),
+    };
+  } catch (error) {
+    if (
+      requestId !== orderAccountProjectionRequestId ||
+      key !== orderAccountProjectionKey
+    ) return;
+    detailedOrderAccount = null;
+    submitError = `Account projection unavailable: ${toErrorMessage(error)}`;
+    errorLog.log(submitError, 'Swap Panel', { entityId, accountId, error });
+  }
+}
 // Get available accounts (counterparties)
 $: accounts = currentReplica?.state?.accounts ? Array.from(currentReplica.state.accounts.keys()) : [];
 $: baseAccountIds = accounts.map((id) => String(id)).sort();
@@ -387,6 +421,20 @@ $: activeOrderAccountId =
     : resolveHubIdCandidate(selectedBookAccountId, hubAccountIds, isHubAccount) ||
       resolveHubIdCandidate(createOrderAccountId, hubAccountIds, isHubAccount) ||
       fallbackHubAccountId;
+$: {
+  const nextKey = `${runtimeHeight}:${sourceEntityIdValue}:${activeOrderAccountId}`;
+  if (nextKey !== orderAccountProjectionKey) {
+    orderAccountProjectionKey = nextKey;
+    detailedOrderAccount = null;
+    if (activeIsLive && sourceEntityIdValue && activeOrderAccountId) {
+      void refreshDetailedOrderAccount(
+        nextKey,
+        sourceEntityIdValue,
+        activeOrderAccountId,
+      );
+    }
+  }
+}
 $: activeBookHubId = (() => {
   const sourceHubId = String(
     activeOrderAccountId || selectedRouteOption?.sourceHubEntityId || fallbackHubAccountId || selectedBookAccountId || createOrderAccountId || '',
@@ -2374,19 +2422,26 @@ $: ownOrderbookEntityIds = Array.from(
       .filter(Boolean),
   ),
 );
-function accountMachines(): Array<{ accountId: string; account: AccountReplica }> {
+function accountMachines(): Array<{ accountId: string; account: AccountOrderHistory }> {
   if (!(currentReplica?.state?.accounts instanceof Map)) return [];
-  return Array.from(currentReplica.state.accounts.entries()).map(([accountId, account]) => ({
-    accountId: String(accountId),
-    account,
-  }));
+  return Array.from(currentReplica.state.accounts.entries()).map(([accountId, account]) => {
+    const normalizedAccountId = String(accountId).trim().toLowerCase();
+    return {
+      accountId: String(accountId),
+      account:
+        detailedOrderAccount && normalizedAccountId === activeOrderAccountId
+          ? detailedOrderAccount
+          : account,
+    };
+  });
 }
-function collectPanelOfferLifecycles(selectSource: (account: AccountReplica) => Map<string, unknown> | undefined): OfferLifecycle[] {
+function collectPanelOfferLifecycles(selectSource: (account: AccountOrderHistory) => Map<string, unknown> | undefined): OfferLifecycle[] {
   return collectOfferLifecyclesFrom(accountMachines(), selectSource, computeSwapPriceTicksSafe);
 }
 $: {
   currentReplica;
   activeXlnFunctions;
+  detailedOrderAccount;
   offerLifecycles = collectPanelOfferLifecycles((account) => account.swapOrderHistory);
   closedOfferLifecycles = collectPanelOfferLifecycles((account) => account.swapClosedOrders);
 }

@@ -97,6 +97,10 @@ export type ComputeSwapPriceTicks = (
 ) => bigint;
 
 export type TokenInfoReader = (tokenId: number) => { decimals?: unknown; symbol?: unknown } | null | undefined;
+export type AccountOrderHistory = Pick<
+  AccountReplica,
+  'swapOrderHistory' | 'swapClosedOrders'
+>;
 
 export function offerLifecycleKey(accountId: string, offerId: string): string {
   return `${String(accountId || '').trim()}:${String(offerId || '').trim()}`;
@@ -250,8 +254,8 @@ export function computeOfferExecutionSummary(
 }
 
 export function collectOfferLifecyclesFrom(
-  accountMachines: Array<{ accountId: string; account: AccountReplica }>,
-  selectSource: (account: AccountReplica) => Map<string, unknown> | undefined,
+  accountMachines: Array<{ accountId: string; account: AccountOrderHistory }>,
+  selectSource: (account: AccountOrderHistory) => Map<string, unknown> | undefined,
   computeSwapPriceTicks: ComputeSwapPriceTicks,
 ): OfferLifecycle[] {
   const lifecycles: OfferLifecycle[] = [];

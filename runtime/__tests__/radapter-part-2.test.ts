@@ -550,6 +550,10 @@ test('runtime adapter view-frame excludes unbounded account internals from remot
       };
     } | null;
   }>({ env }, 'view-frame', { entityId, accountsLimit: 1, booksLimit: 1 });
+  const accountPoint = await resolveRuntimeAdapterRead<{
+    swapOrderHistory?: Map<string, unknown>;
+    swapClosedOrders?: Map<string, unknown>;
+  }>({ env }, `entity/${entityId}/account/${counterpartyId}`);
   const encoded = encodeRuntimeAdapterMessage({ v: 1, inReplyTo: 'account-budget', ok: true, payload: frame });
   const compact = frame.activeEntity?.accounts.items[0];
 
@@ -565,12 +569,14 @@ test('runtime adapter view-frame excludes unbounded account internals from remot
   expect(compact?.disputeProofBodiesByHash).toBeUndefined();
   expect(compact?.disputeArgumentSnapshotsByHash).toBeUndefined();
   expect(compact?.settlementWorkspace).toBeUndefined();
-  expect(compact?.swapOrderHistory?.size).toBe(100);
-  expect(compact?.swapOrderHistory?.has('history-0')).toBe(false);
-  expect(compact?.swapOrderHistory?.has('history-19999')).toBe(true);
-  expect(compact?.swapClosedOrders?.size).toBe(100);
-  expect(compact?.swapClosedOrders?.has('closed-0')).toBe(false);
-  expect(compact?.swapClosedOrders?.has('closed-19999')).toBe(true);
+  expect(compact?.swapOrderHistory).toBeUndefined();
+  expect(compact?.swapClosedOrders).toBeUndefined();
+  expect(accountPoint.swapOrderHistory?.size).toBe(20);
+  expect(accountPoint.swapOrderHistory?.has('history-0')).toBe(false);
+  expect(accountPoint.swapOrderHistory?.has('history-19999')).toBe(true);
+  expect(accountPoint.swapClosedOrders?.size).toBe(20);
+  expect(accountPoint.swapClosedOrders?.has('closed-0')).toBe(false);
+  expect(accountPoint.swapClosedOrders?.has('closed-19999')).toBe(true);
   expect(compact?.leftPendingJClaims).toEqual(createEmptyAccountJClaimAccumulator());
   expect(compact?.rightPendingJClaims).toEqual(createEmptyAccountJClaimAccumulator());
   expect(compact?.boardResealMigration).toEqual(account.boardResealMigration);

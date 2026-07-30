@@ -864,7 +864,10 @@ const compactAccountProofBodyForView = (proofBody: StorageAccountDoc['proofBody'
   ...withDefinedProp('htlcLocks', compactArrayTail(proofBody.htlcLocks, 20)),
 });
 
-const compactAccountDocForView = (doc: StorageAccountDoc): StorageAccountDoc => {
+const compactAccountDocForView = (
+  doc: StorageAccountDoc,
+  includeSwapHistory = false,
+): StorageAccountDoc => {
   const compact: StorageAccountDoc = {
     leftEntity: doc.leftEntity,
     rightEntity: doc.rightEntity,
@@ -880,12 +883,6 @@ const compactAccountDocForView = (doc: StorageAccountDoc): StorageAccountDoc => 
     // bounded tail so a committed Runtime view can render and cancel recent
     // orders without reaching into the live mutable replica.
     swapOffers: compactMapTail(doc.swapOffers, 100) ?? new Map(),
-    // These maps are bounded Account read-models, not the forever frame
-    // archive. Keep their recent tail in the committed view: replacing a live
-    // replica with this projection must never make a just-closed order vanish
-    // from the UI. Older activity remains queryable from Account frame history.
-    swapOrderHistory: compactMapTail(doc.swapOrderHistory, 100) ?? new Map(),
-    swapClosedOrders: compactMapTail(doc.swapClosedOrders, 100) ?? new Map(),
     globalCreditLimits: doc.globalCreditLimits,
     currentHeight: doc.currentHeight,
     pendingSignatures: [],
@@ -912,6 +909,13 @@ const compactAccountDocForView = (doc: StorageAccountDoc): StorageAccountDoc => 
 
   const pulls = compactMapTail(doc.pulls, 20);
   if (pulls) compact.pulls = pulls;
+  if (includeSwapHistory) {
+    // Account history is a point-read concern. Putting it in every Account of
+    // an aggregate Entity view multiplies payload size by the page width and
+    // can make an otherwise healthy Runtime uninspectable.
+    compact.swapOrderHistory = compactMapTail(doc.swapOrderHistory, 20) ?? new Map();
+    compact.swapClosedOrders = compactMapTail(doc.swapClosedOrders, 20) ?? new Map();
+  }
   if (doc.pendingFrame) compact.pendingFrame = compactAccountFrameForView(doc.pendingFrame);
   if (doc.lastOutboundFrameAck) compact.lastOutboundFrameAck = doc.lastOutboundFrameAck;
   if (doc.pendingForwards) compact.pendingForwards = doc.pendingForwards;
@@ -1266,7 +1270,7 @@ const compactViewPageForRemote = (entityId: string, view: {
   core: compactEntityCoreForRemote(view.core),
   accounts: {
     ...view.accounts,
-    items: view.accounts.items.map(compactAccountDocForView),
+    items: view.accounts.items.map((account) => compactAccountDocForView(account)),
     summary: accountPageSummaryForView(entityId, view.accounts),
   },
   books: {
@@ -1896,14 +1900,14 @@ const resolveScopedRuntimeAdapterRead = async <T>(
           const replica = findReplica(ctx.env, entityId);
           if (!replica) throw new RuntimeAdapterError('E_NOT_FOUND', `entity not found: ${normalizeEntityId(entityId)}`);
           const account = replica.state.accounts.get(accountId);
-          const page = singleAccountPage(accountId, account ? compactAccountDocForView(projectAccountDoc(account)) : null, limit);
+          const page = singleAccountPage(accountId, account ? compactAccountDocForView(projectAccountDoc(account), true) : null, limit);
           return { ...page, summary: accountPageSummaryForView(entityId, page) } as T;
         }
         if (!ctx.loadEntityAccountDoc) {
           throw new RuntimeAdapterError('E_BAD_QUERY', 'historical account reads are unavailable for this adapter');
         }
         const account = await ctx.loadEntityAccountDoc(entityId, accountId, targetHeight);
-        const page = singleAccountPage(accountId, account ? compactAccountDocForView(account) : null, limit);
+        const page = singleAccountPage(accountId, account ? compactAccountDocForView(account, true) : null, limit);
         return { ...page, summary: accountPageSummaryForView(entityId, page) } as T;
       }
       const isCurrentHeight = height === null || targetHeight === envHeight(ctx.env);
@@ -1921,12 +1925,12 @@ const resolveScopedRuntimeAdapterRead = async <T>(
         }
         const loaded = await ctx.loadEntityAccountDoc(entityId, counterpartyId, height);
         if (!loaded) throw new RuntimeAdapterError('E_NOT_FOUND', `account not found at height ${height}: ${normalizeEntityId(entityId)}/${counterpartyId}`);
-        return compactAccountDocForView(loaded) as T;
+        return compactAccountDocForView(loaded, true) as T;
       }
       const { state } = await resolveEntityState(ctx, entityId, query);
       const account = state.accounts.get(counterpartyId);
       if (!account) throw new RuntimeAdapterError('E_NOT_FOUND', `account not found: ${normalizeEntityId(entityId)}/${counterpartyId}`);
-      return compactAccountDocForView(projectAccountDoc(account)) as T;
+      return compactAccountDocForView(projectAccountDoc(account), true) as T;
     }
 
     const { state, replica } = await resolveEntityState(ctx, entityId, query);

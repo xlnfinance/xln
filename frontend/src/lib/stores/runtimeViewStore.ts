@@ -5,7 +5,7 @@ import type {
   RuntimeAdapterStatus,
   RuntimeAdapterViewFrame,
 } from '@xln/runtime/api/runtime-module';
-import type { StorageHead } from '@xln/runtime/storage/types';
+import type { StorageAccountDoc, StorageHead } from '@xln/runtime/storage/types';
 import {
   runtimeAdapter,
   runtimeAdapterHeight,
@@ -140,6 +140,30 @@ export const readRuntimeEntityProjectionFrame = async (
     throw new Error(`RUNTIME_ENTITY_PROJECTION_MISMATCH:${normalizedEntityId}:${projectedEntityId || 'missing'}`);
   }
   return frame;
+};
+
+/**
+ * Point-read one Account when a panel needs bounded Account-owned detail.
+ *
+ * Aggregate Entity frames intentionally omit lifecycle history so their wire
+ * size stays independent of `accountsLimit`. The selected Account can include
+ * its recent read-model tail without multiplying that cost by every row.
+ */
+export const readRuntimeAccountProjection = async (
+  entityId: string,
+  counterpartyId: string,
+): Promise<StorageAccountDoc> => {
+  const normalizedEntityId = normalizeEntityIdForRuntimeView(entityId);
+  const normalizedCounterpartyId = normalizeEntityIdForRuntimeView(counterpartyId);
+  if (!normalizedEntityId || !normalizedCounterpartyId) {
+    throw new Error('RUNTIME_ACCOUNT_PROJECTION_ID_MISSING');
+  }
+  const atHeight = get(runtimeView).atHeight;
+  return runtimeQueryClient.readAccount(
+    normalizedEntityId,
+    normalizedCounterpartyId,
+    runtimeViewQueryAtHeight({}, atHeight),
+  );
 };
 
 export const emptyRuntimeViewHistoryScan = (endpoint = ''): RuntimeViewHistoryScanState => ({
