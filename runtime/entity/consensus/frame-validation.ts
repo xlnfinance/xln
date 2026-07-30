@@ -226,19 +226,22 @@ function assertProposedEntityFrame(
       `${context} cannot carry proposer-supplied execution state or outputs`,
     );
   }
-  if (frame['hashesToSign'] !== undefined) {
-    const hashes = validateArray<unknown>(
-      frame['hashesToSign'],
-      `${context}.hashesToSign`,
+  const hashes = validateArray<unknown>(
+    frame['hashesToSign'],
+    `${context}.hashesToSign`,
+  );
+  if (hashes.length === 0) {
+    throw new FinancialDataCorruptionError(
+      `${context}.hashesToSign cannot be empty`,
     );
-    hashes.forEach((value, index) => {
-      const item = `${context}.hashesToSign[${index}]`;
-      const entry = validateObject(value, item);
-      validateString(entry['hash'], `${item}.hash`);
-      validateString(entry['type'], `${item}.type`);
-      validateString(entry['context'], `${item}.context`);
-    });
   }
+  hashes.forEach((value, index) => {
+    const item = `${context}.hashesToSign[${index}]`;
+    const entry = validateObject(value, item);
+    validateString(entry['hash'], `${item}.hash`);
+    validateString(entry['type'], `${item}.type`);
+    validateString(entry['context'], `${item}.context`);
+  });
   if (frame['collectedSigs'] !== undefined) {
     const signatures = validateMapInstance(
       frame['collectedSigs'],

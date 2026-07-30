@@ -91,9 +91,7 @@ const cloneProposedEntityFrame = (
       ...(frame.jPrefixCertificate
         ? { jPrefixCertificate: cloneJPrefixCertificate(frame.jPrefixCertificate) }
         : {}),
-      ...(frame.hashesToSign
-        ? { hashesToSign: frame.hashesToSign.map(hashToSign => ({ ...hashToSign })) }
-        : {}),
+      hashesToSign: frame.hashesToSign.map(hashToSign => ({ ...hashToSign })),
       ...(frame.collectedSigs
         ? {
             collectedSigs: new Map(Array.from(frame.collectedSigs, ([signerId, signatures]) => [

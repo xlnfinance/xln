@@ -23,14 +23,6 @@ import {
 } from './leader';
 import { calculateQuorumPower } from './replica-validation';
 
-const fallbackFrameHashToSign = (hash: string, height: number): HashToSign[] => [
-  {
-    hash,
-    type: 'entityFrame',
-    context: `entity-frame:${height}`,
-  },
-];
-
 export const normalizePrecommitBundles = (
   config: ConsensusConfig,
   bundles: Map<string, string[]>,
@@ -57,21 +49,21 @@ export const normalizePrecommitBundles = (
 export const verifyHashPrecommitSignatures = (
   env: EntityRuntimeContext,
   signerId: string,
-  hashesToSign: HashToSign[] | undefined,
-  frameHash: string,
-  frameHeight: number,
+  hashesToSign: HashToSign[],
   sigs: string[],
   context: string,
 ): boolean => {
-  const expectedHashes = hashesToSign?.length ? hashesToSign : fallbackFrameHashToSign(frameHash, frameHeight);
-  if (sigs.length !== expectedHashes.length) {
+  if (hashesToSign.length === 0) {
+    throw new Error(`${context}:EMPTY_HASH_MANIFEST`);
+  }
+  if (sigs.length !== hashesToSign.length) {
     log.error(
-      `❌ ${context}: signature count mismatch from ${signerId}: got ${sigs.length}, expected ${expectedHashes.length}`,
+      `❌ ${context}: signature count mismatch from ${signerId}: got ${sigs.length}, expected ${hashesToSign.length}`,
     );
     return false;
   }
-  for (let i = 0; i < expectedHashes.length; i++) {
-    const hashInfo = expectedHashes[i];
+  for (let i = 0; i < hashesToSign.length; i++) {
+    const hashInfo = hashesToSign[i];
     const sig = sigs[i];
     if (!hashInfo || !sig) {
       log.error(`❌ ${context}: missing signature[${i}] from ${signerId}`);
@@ -100,7 +92,7 @@ export const hasVerifiedPreparedQuorum = (
   }
   const signatures = normalizePrecommitBundles(state.config, frame.collectedSigs ?? new Map(), context);
   for (const [signerId, bundle] of signatures) {
-    if (!verifyHashPrecommitSignatures(env, signerId, hashes, frame.hash, frame.height, bundle, context)) {
+    if (!verifyHashPrecommitSignatures(env, signerId, hashes, bundle, context)) {
       throw new Error(`${context}_SIGNATURE_INVALID:${frame.hash}:${signerId}`);
     }
   }
@@ -249,8 +241,6 @@ const validatePreparedFrameEvidence = (
         env,
         signerId,
         hashes,
-        evidence.hash,
-        evidence.height,
         signatures,
         'ENTITY_PREPARED_EVIDENCE',
       )

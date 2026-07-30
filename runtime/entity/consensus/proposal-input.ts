@@ -173,8 +173,6 @@ const signAndLockProposal = async (
         env,
         signerId,
         execution.hashesToSign,
-        frame.hash,
-        frame.height,
         signatures,
         'PROPOSAL_PRECOMMIT_REJECTED',
       )

@@ -73,8 +73,6 @@ const buildCommitHankos = async (
         env,
         signerId,
         hashes,
-        frame.hash,
-        frame.height,
         signatures,
         'COMMIT_REJECTED',
       )

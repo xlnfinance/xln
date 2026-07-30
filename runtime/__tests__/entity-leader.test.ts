@@ -293,6 +293,12 @@ describe('entity leader policy', () => {
       events: [],
       hash: committedHash,
       leader: { proposerSignerId: 'ceo', view: 0 },
+      hashesToSign: buildEntityHashesToSign(
+        committedState.entityId,
+        1,
+        committedHash,
+        [],
+      ),
     };
     const nextFrame: ProposedEntityFrame = {
       height: 2,
@@ -304,6 +310,12 @@ describe('entity leader policy', () => {
       events: [],
       hash: nextHash,
       leader: { proposerSignerId: 'ceo', view: 0 },
+      hashesToSign: buildEntityHashesToSign(
+        committedState.entityId,
+        2,
+        nextHash,
+        [],
+      ),
     };
     const replica: EntityReplica = {
       entityId: committedState.entityId,

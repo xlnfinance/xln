@@ -102,8 +102,6 @@ const mergeVerifiedPrecommits = (
       env,
       signerId,
       execution.hashesToSign,
-      proposal.hash,
-      proposal.height,
       signatures,
       'PRECOMMIT_REJECTED',
     )) {

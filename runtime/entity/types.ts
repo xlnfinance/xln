@@ -404,7 +404,7 @@ export interface ProposedEntityFrame {
 
   // HANKO SYSTEM:
   // 1. During frame creation: proposer collects hashes that need signing
-  hashesToSign?: HashToSign[];  // Entity frame hash + account-level hashes with types
+  hashesToSign: HashToSign[];  // Entity frame hash + account-level hashes with types
 
   // 2. During precommit: validators send EOA signatures (one per hash)
   // signerId -> array of EOA signatures (indexes match hashesToSign[])
