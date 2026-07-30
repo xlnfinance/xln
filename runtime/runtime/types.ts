@@ -631,7 +631,7 @@ export interface RuntimeInfrastructure {
   numberedRegistrationIntents?: Map<string, NumberedRegistrationRecord>;
   runtimeAdapterCommandFrontiers?: Map<
     string,
-    import('../radapter/command-frontier').RuntimeAdapterCommandFrontier
+    import('./command-frontier').RuntimeAdapterCommandFrontier
   >;
 }
 

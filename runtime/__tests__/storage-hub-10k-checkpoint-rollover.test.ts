@@ -4,8 +4,8 @@ import { join } from 'node:path';
 
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
 import { generateLazyEntityId } from '../entity/factory';
-import { runtimeAdapterOwnerCommandLaneId } from '../radapter/command-frontier';
-import { markLocalRuntimeAdapterCommandTx } from '../radapter/command-frontier-auth';
+import { runtimeAdapterOwnerCommandLaneId } from '../runtime/command-frontier';
+import { markLocalRuntimeAdapterCommandTx } from '../runtime/command-frontier-auth';
 import {
   closeInfraDb,
   closeRuntimeDb,

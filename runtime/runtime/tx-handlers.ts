@@ -26,8 +26,8 @@ import { normalizeRuntimeId } from '../networking/runtime-id';
 import type { EntityReplica, EntityState } from '../entity/types';
 import type { RuntimeReplica, RuntimeTx } from './types';
 import type { JInput } from '../jurisdiction/input';
-import { applyRuntimeAdapterCommandMarker } from '../radapter/command-frontier';
-import { assertRuntimeAdapterCommandTxAuthorized } from '../radapter/command-frontier-auth';
+import { applyRuntimeAdapterCommandMarker } from './command-frontier';
+import { assertRuntimeAdapterCommandTxAuthorized } from './command-frontier-auth';
 import {
   applyRetryJSubmitRuntimeTx,
   assertJSubmitRuntimeTxAuthorized,

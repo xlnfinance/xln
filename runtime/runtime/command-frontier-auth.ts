@@ -1,4 +1,4 @@
-import type { RuntimeTx } from '../runtime/types';
+import type { RuntimeTx } from './types';
 
 type CommandMarkerTx = Extract<RuntimeTx, { type: 'recordRuntimeAdapterCommand' }>;
 const LOCAL_RUNTIME_ADAPTER_COMMAND = Symbol('xln.local-runtime-adapter-command');

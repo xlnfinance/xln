@@ -3,7 +3,7 @@ import type { RuntimeReplica, RuntimeInput } from '../types';
 import { copyLocalJAuthorityRuntimeTxAuthorization } from '../../jurisdiction/registration-evidence';
 import { cloneIsolatedRuntimeInput } from '../../runtime/input-clone';
 import { copyDeterministicHtlcTestSecretCapability } from '../../protocol/htlc/test-secret-capability';
-import { copyLocalRuntimeAdapterCommandAuthorization } from '../../radapter/command-frontier-auth';
+import { copyLocalRuntimeAdapterCommandAuthorization } from '../command-frontier-auth';
 import { buildCanonicalRuntimeStateSnapshot } from '../../storage/wal/snapshot';
 import { encodeBuffer } from '../../storage/codec';
 import { copyLocalEntityProviderActionRuntimeTxAuthorization } from '../entity-provider-action-submit-auth';

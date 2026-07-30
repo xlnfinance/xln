@@ -38,17 +38,6 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   behavior. Keep source code, comments, errors and canonical documents in
   English. Intentional localization and multilingual user content are allowed
   only through the exact localization-assets allowlist.
-- [ ] Enforce the canonical Runtime → Entity → Account cascade documented at
-  the top of `AGENTS.md` as the first architecture gate. Use the same
-  `*Machine/*Replica`, `*State`, `*Input`, `*Tx`, `*Frame`, `*Output` and phase
-  vocabulary at every layer without a shared base class. Inputs control their
-  machine and contain that layer's transactions; outputs return to the parent;
-  only Runtime interprets committed outputs as post-WAL external effects.
-  Delete or correct docs, comments, types and helpers that blur local
-  `AccountTx[]` with signed bilateral `AccountInput`.
-  Preserve the enforced lower-layer ownership boundaries when moving code:
-  pass the smallest deterministic value or capability required by a transition
-  and never hide an upward dependency behind a neutral barrel or re-export.
 - [ ] Make the audit surface mechanically legible after the function split.
   Keep production runtime at zero explicit `any` and zero TypeScript
   suppressions; drive the exact `as unknown as` debt to zero through typed
@@ -256,17 +245,13 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   above; do not invent empty `RuntimeOutput` or `AccountOutput` aliases merely
   for naming symmetry. Derive output unions only from real reducer results.
   Public API removals require an explicit compatibility decision.
-- [ ] Remove the last ratcheted production double assertion by replacing the
-  partial Tron `TransactionResponse` fiction with the narrow transport result
-  actually consumed. Do not fabricate Ethereum nonce, gas or block fields for
-  a TRON protobuf transaction merely to satisfy `ethers.Signer`.
 - [ ] Complete the verified owner-path cleanup and ratchet every removed edge:
-  move Runtime command-frontier state out of `radapter`, persistence
-  query/history DTOs out of `radapter` and `api`, and the RuntimeInput
-  debt-enforcement builder out of `protocol`. Internal Runtime and storage
-  modules must import concrete JAdapter owners, never its public facade. These
-  are path/ownership batches only; do not mix them with protocol behavior
-  changes.
+  move persistence query/history DTOs out of `radapter` and `api`. Internal
+  Runtime and storage modules must import concrete JAdapter owners, never its
+  public facade. These are path/ownership batches only; do not mix them with
+  protocol behavior changes. The Activity projection move waits for the
+  independently edited Time Machine/3D consumer so no compatibility re-export
+  or cross-worktree conflict is introduced.
 - [ ] Replace the remaining generic/fallback configuration and routing shapes:
   require exact owner schemas for every remaining control/config object. Add
   dependency gates for the newly corrected directions so the old import graph

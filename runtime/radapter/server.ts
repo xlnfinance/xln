@@ -50,8 +50,8 @@ import {
   readRuntimeAdapterCommandFrontier,
   runtimeAdapterCommandLaneId,
   runtimeAdapterOwnerCommandLaneId,
-} from './command-frontier';
-import { markLocalRuntimeAdapterCommandTx } from './command-frontier-auth';
+} from '../runtime/command-frontier';
+import { markLocalRuntimeAdapterCommandTx } from '../runtime/command-frontier-auth';
 import { verifyRuntimeAdapterOwnerBinding } from './owner-binding';
 import { encodeBinaryPayload } from '../storage/binary-codec';
 import { XLN_PROTOCOL_VERSION } from '../protocol/version';

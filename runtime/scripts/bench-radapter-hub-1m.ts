@@ -11,7 +11,7 @@ import { transitionRuntimeLifecycle } from '../runtime/lifecycle';
 
 import { deriveRuntimeAdapterCapabilityToken } from '../radapter/auth';
 import { decodeRuntimeAdapterRequest } from '../radapter/codec';
-import { applyRuntimeAdapterCommandMarker } from '../radapter/command-frontier';
+import { applyRuntimeAdapterCommandMarker } from '../runtime/command-frontier';
 import { RemoteRuntimeAdapter } from '../radapter/remote';
 import type { RuntimeAdapterReadQuery } from '../radapter/types';
 import { createBook, createOrderbookExtState, DEFAULT_SPREAD_DISTRIBUTION } from '../orderbook';
