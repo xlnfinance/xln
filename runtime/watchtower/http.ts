@@ -12,13 +12,13 @@ import {
 } from '../storage/recovery/crypto';
 import type { WatchtowerStore } from './store';
 import { runWatchtowerSweep } from './action';
-import type { PushStore } from '../push/store';
+import type { PushStore } from './push/store';
 import {
   PUSH_REGISTRATION_MAX_CLOCK_SKEW_MS,
   verifyPushRegistration,
   verifyPushUnregister,
-} from '../push/registration';
-import type { PushRegistrationRequestV1, PushUnregisterRequestV1 } from '../push/types';
+} from './push/registration';
+import type { PushRegistrationRequestV1, PushUnregisterRequestV1 } from './push/types';
 
 const DEFAULT_MAX_JSON_BODY_BYTES = 128 * 1024;
 const SMALL_MAX_JSON_BODY_BYTES = 8 * 1024;

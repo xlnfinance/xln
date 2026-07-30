@@ -9,7 +9,7 @@
 import { mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { Level } from 'level';
-import { serializeTaggedJson } from '../protocol/serialization';
+import { serializeTaggedJson } from '../../protocol/serialization';
 import { decodeStoredPushRegistration } from './registration';
 import type { StoredPushRegistration } from './types';
 

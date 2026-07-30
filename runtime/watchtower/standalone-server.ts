@@ -19,8 +19,8 @@ import {
 import { runWatchtowerSweep } from './action';
 import { runDisputeWatchSweep } from './dispute-watch';
 import { createWatchtowerStore, type WatchtowerStore } from './store';
-import { createPushStore, type PushStore } from '../push/store';
-import { createPushSender, type PushSenderConfig } from '../push/sender';
+import { createPushStore, type PushStore } from './push/store';
+import { createPushSender, type PushSenderConfig } from './push/sender';
 import { createStructuredLogger } from '../infra/logger';
 import {
   createSweepHealthTracker,

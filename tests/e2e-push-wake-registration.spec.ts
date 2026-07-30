@@ -21,7 +21,7 @@ import {
   buildPushRegistrationMessage,
   buildPushUnregisterMessage,
   hashPushToken,
-} from '../runtime/push/registration';
+} from '../runtime/watchtower/push/registration';
 
 const APP_BASE_URL = requireIsolatedBaseUrl('E2E_BASE_URL');
 const INIT_TIMEOUT = 30_000;

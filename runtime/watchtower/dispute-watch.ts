@@ -12,9 +12,9 @@
 import { Interface } from 'ethers';
 import { createXlnJsonRpcProvider } from '../jadapter';
 import { assertWatchtowerRpcUrlAllowed } from './action';
-import { buildDisputeWakeNotification, disputeWakeCollapseKey, selectWakeTargets } from '../push/dispute-wake';
+import { buildDisputeWakeNotification, disputeWakeCollapseKey, selectWakeTargets } from './push/dispute-wake';
 import { createStructuredLogger } from '../infra/logger';
-import type { DisputeWakeEvent, PushSender, StoredPushRegistration } from '../push/types';
+import type { DisputeWakeEvent, PushSender, StoredPushRegistration } from './push/types';
 
 const DISPUTE_STARTED_ABI = [
   'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bytes32 proofbodyHash, bytes32 watchSeed, bytes starterInitialArguments, bytes starterIncrementedArguments, uint256 disputeTimeout)',

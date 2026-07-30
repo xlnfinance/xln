@@ -11,8 +11,8 @@ import {
   requireBoundaryInteger,
   requireBoundaryRecord,
   requireExactBoundaryKeys,
-} from '../protocol/boundary-validation';
-import { deserializeTaggedJson } from '../protocol/serialization';
+} from '../../protocol/boundary-validation';
+import { deserializeTaggedJson } from '../../protocol/serialization';
 import type {
   PushPlatformV1,
   PushRegistrationRequestV1,

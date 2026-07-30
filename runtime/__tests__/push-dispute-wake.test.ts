@@ -10,16 +10,16 @@ import {
   buildPushUnregisterMessage,
   hashPushToken,
   verifyPushRegistration,
-} from '../push/registration';
-import { createPushStore } from '../push/store';
+} from '../watchtower/push/registration';
+import { createPushStore } from '../watchtower/push/store';
 import { handlePushRegister, handlePushUnregister } from '../watchtower/http';
 import {
   buildDisputeWakeNotification,
   disputeWakeCollapseKey,
   selectWakeTargets,
-} from '../push/dispute-wake';
+} from '../watchtower/push/dispute-wake';
 import { runDisputeWatchSweep, type DisputeWatchStore } from '../watchtower/dispute-watch';
-import type { PushNotificationV1, PushSender, StoredPushRegistration } from '../push/types';
+import type { PushNotificationV1, PushSender, StoredPushRegistration } from '../watchtower/push/types';
 
 const DEPOSITORY = '0x000000000000000000000000000000000000dead';
 const CHAIN_ID = 31337;
