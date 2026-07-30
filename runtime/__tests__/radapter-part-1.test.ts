@@ -144,6 +144,7 @@ const makeEnv = (): RuntimeState =>
       lifecyclePhase: 'running',
       loopActive: true,
     },
+    jReplicas: new Map(),
     eReplicas: new Map<string, EntityReplica>([
       [
         `${entityId}:signer`,

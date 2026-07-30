@@ -95,6 +95,7 @@ const makeEnv = (account: AccountState, reserves: Array<[number, bigint]>): Runt
   ({
     height: 7,
     timestamp: 1234,
+    jReplicas: new Map(),
     eReplicas: new Map<string, EntityReplica>([
       [`${entityId}:${signerIds[0]}`, {
         entityId,
