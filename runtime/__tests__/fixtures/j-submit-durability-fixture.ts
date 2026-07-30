@@ -70,7 +70,6 @@ export const makeJSubmitDurabilityFixture = () => {
     entityId,
     signerId,
     entityEncPubKey: '',
-    entityEncPrivKey: '',
     state: makeState(),
     mempool: [],
     isProposer: true,

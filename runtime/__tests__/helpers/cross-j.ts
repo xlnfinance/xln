@@ -175,7 +175,6 @@ export const addReplica = (env: RuntimeReplica, state: EntityState, signerId: st
     entityId: state.entityId,
     signerId,
     entityEncPubKey: keys.publicKey,
-    entityEncPrivKey: keys.privateKey,
     state,
     mempool: [],
     isProposer,

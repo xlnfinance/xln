@@ -14,7 +14,10 @@ import {
   tryOpenStorageDb,
 } from '../runtime';
 import { deriveSignerAddressSync } from '../account/crypto';
-import { deriveLocalEntityCryptoKeys } from '../entity/crypto';
+import {
+  deriveLocalEntityCryptoKeys,
+  requireEntityEncryptionPrivateKey,
+} from '../entity/crypto';
 import { ENTITY_FRAME_EVENT_COLLECTOR } from '../entity/frame-event-collector';
 import { getEntityLeaderState } from '../entity/consensus/leader';
 import { buildJPrefixCertificate } from '../jurisdiction/j-prefix-consensus';
@@ -229,7 +232,9 @@ describe('real process storage crash recovery', () => {
         expect(replica?.state.height).toBe(0);
         expect(replica && Object.hasOwn(replica.state, 'messages')).toBeFalse();
         expect(replica?.entityEncPubKey).toBe(expectedKeysB.publicKey);
-        expect(replica?.entityEncPrivKey).toBe(expectedKeysB.privateKey);
+        expect(requireEntityEncryptionPrivateKey(restored, entityId, signerB))
+          .toBe(expectedKeysB.privateKey);
+        expect(replica && Object.hasOwn(replica, 'entityEncPrivKey')).toBeFalse();
         expect(replica?.state.htlcNotes).toEqual(new Map([
           [`lock:0x${'ef'.repeat(32)}`, `private-note:${signerB}`],
         ]));
@@ -286,7 +291,10 @@ describe('real process storage crash recovery', () => {
         expect(submitReplica?.certifiedFrameAnchor?.runtimeCheckpoint)
           .toEqual(replica?.certifiedFrameAnchor?.runtimeCheckpoint);
         expect(submitReplica?.entityEncPubKey).toBe(expectedKeysA.publicKey);
-        expect(submitReplica?.entityEncPrivKey).toBe(expectedKeysA.privateKey);
+        expect(requireEntityEncryptionPrivateKey(restored, entityId, signerA))
+          .toBe(expectedKeysA.privateKey);
+        expect(submitReplica && Object.hasOwn(submitReplica, 'entityEncPrivKey'))
+          .toBeFalse();
         expect(submitReplica?.state.htlcNotes).toEqual(new Map([
           [`lock:0x${'ef'.repeat(32)}`, `private-note:${signerA}`],
         ]));

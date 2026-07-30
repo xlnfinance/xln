@@ -70,7 +70,6 @@ const cloneEntityReplicaWithPolicy = (
     entityId: replica.entityId,
     signerId: replica.signerId,
     entityEncPubKey: replica.entityEncPubKey,
-    entityEncPrivKey: replica.entityEncPrivKey,
     state: shareFrameState
       ? replica.state
       : cloneState(replica.state, forSnapshot),

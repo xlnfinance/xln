@@ -6,6 +6,52 @@ import type { EntityRuntimeContext } from './runtime-context';
 const bytesToHex = (bytes: Uint8Array): string =>
   `0x${Array.from(bytes).map(byte => byte.toString(16).padStart(2, '0')).join('')}`;
 
+const entityEncryptionKeyId = (entityId: string, signerId: string): string =>
+  `${entityId.toLowerCase()}:${signerId.toLowerCase()}`;
+
+const rememberEntityEncryptionPrivateKey = (
+  env: EntityRuntimeContext,
+  entityId: string,
+  signerId: string,
+  privateKey: string,
+): void => {
+  env.infrastructure ??= {};
+  env.infrastructure.entityEncryptionPrivateKeys ??= new Map();
+  env.infrastructure.entityEncryptionPrivateKeys.set(
+    entityEncryptionKeyId(entityId, signerId),
+    privateKey,
+  );
+};
+
+/**
+ * Resolve a validator-local encryption secret from Runtime infrastructure.
+ *
+ * A local signer may deterministically rederive a missing cache entry. Remote
+ * replica data can never supply this value: accepting a peer/WAL copy would
+ * turn untrusted machine state into local key authority.
+ */
+export const requireEntityEncryptionPrivateKey = (
+  env: EntityRuntimeContext,
+  entityId: string,
+  signerId: string,
+): string => {
+  const keyId = entityEncryptionKeyId(entityId, signerId);
+  const cached = env.infrastructure?.entityEncryptionPrivateKeys?.get(keyId);
+  if (cached) return cached;
+  if (!hasLocalSignerKey(env, signerId)) {
+    throw new Error(
+      `ENTITY_ENCRYPTION_PRIVATE_KEY_UNAVAILABLE:entity=${entityId}:signer=${signerId}`,
+    );
+  }
+  const privateKey = deriveLocalEntityCryptoKeys(
+    env,
+    entityId,
+    signerId,
+  ).privateKey;
+  rememberEntityEncryptionPrivateKey(env, entityId, signerId, privateKey);
+  return privateKey;
+};
+
 export const hasLocalSignerKey = (env: EntityRuntimeContext, signerId: string): boolean => {
   return getSignerPrivateKeyIfAvailable(env, signerId) !== null;
 };
@@ -25,15 +71,20 @@ export const resolveReplicaEntityCryptoKeys = (
   env: EntityRuntimeContext,
   entityId: string,
   signerId: string,
-  existing?: { publicKey?: string; privateKey?: string },
-): { publicKey: string; privateKey: string; isLocal: boolean } => {
+  existing?: { publicKey?: string },
+): { publicKey: string; isLocal: boolean } => {
   if (hasLocalSignerKey(env, signerId)) {
     const keys = deriveLocalEntityCryptoKeys(env, entityId, signerId);
-    return { ...keys, isLocal: true };
+    rememberEntityEncryptionPrivateKey(
+      env,
+      entityId,
+      signerId,
+      keys.privateKey,
+    );
+    return { publicKey: keys.publicKey, isLocal: true };
   }
   return {
     publicKey: String(existing?.publicKey || ''),
-    privateKey: String(existing?.privateKey || ''),
     isLocal: false,
   };
 };
@@ -42,7 +93,7 @@ export const canonicalizeLocalEntityCryptoKeys = (
   env: EntityRuntimeContext,
   entityId: string,
   signerId: string,
-  replica: { entityEncPubKey?: string; entityEncPrivKey?: string },
+  replica: { entityEncPubKey?: string },
 ): void => {
   if (!hasLocalSignerKey(env, signerId)) return;
   const { publicKey, privateKey } = deriveLocalEntityCryptoKeys(env, entityId, signerId);
@@ -53,7 +104,7 @@ export const canonicalizeLocalEntityCryptoKeys = (
     );
   }
   replica.entityEncPubKey = publicKey;
-  replica.entityEncPrivKey = privateKey;
+  rememberEntityEncryptionPrivateKey(env, entityId, signerId, privateKey);
 };
 
 /**
@@ -75,6 +126,12 @@ export const assertPersistedLocalEntityCryptoKeys = (
       `expectedPub=${expected.publicKey} actualPub=${String(replica.entityEncPubKey || '')}`,
     );
   }
+  rememberEntityEncryptionPrivateKey(
+    env,
+    entityId,
+    signerId,
+    expected.privateKey,
+  );
 };
 
 export const assertLocalEntityCryptoKeys = (env: EntityRuntimeContext): void => {

@@ -462,7 +462,6 @@ const attachSigningReplica = (env: ReturnType<typeof createEmptyEnv>, entityId: 
     entityId,
     signerId,
     entityEncPubKey: '',
-    entityEncPrivKey: '',
     mempool: [],
     isProposer: true,
     state: {
@@ -571,7 +570,6 @@ const makeReplicaMissingPrevFrameHash = (): EntityReplica => ({
   entityId: `0x${'11'.repeat(32)}`,
   signerId: '1',
   entityEncPubKey: '',
-  entityEncPrivKey: '',
   mempool: [],
   isProposer: true,
   state: {
@@ -730,7 +728,6 @@ const sealAuditJSubmitAttempts = (env: RuntimeReplica, inputs: JInput[]): void =
           entityId: jTx.entityId,
           signerId,
           entityEncPubKey: '',
-          entityEncPrivKey: '',
           mempool: [],
           isProposer: true,
           state,
@@ -793,7 +790,6 @@ describe('audit fail-fast regressions', () => {
       entityId,
       signerId,
       entityEncPubKey: '',
-      entityEncPrivKey: '',
       mempool: [],
       isProposer: true,
       state,
@@ -1033,7 +1029,6 @@ describe('audit fail-fast regressions', () => {
       entityId,
       signerId,
       entityEncPubKey: '',
-      entityEncPrivKey: '',
       mempool: [],
       isProposer: true,
       state,
@@ -1150,7 +1145,6 @@ describe('audit fail-fast regressions', () => {
       entityId,
       signerId,
       entityEncPubKey: '',
-      entityEncPrivKey: '',
       mempool: [],
       isProposer: true,
       state,
@@ -1432,7 +1426,6 @@ describe('audit fail-fast regressions', () => {
       entityId,
       signerId,
       entityEncPubKey: '',
-      entityEncPrivKey: '',
       mempool: [],
       isProposer: true,
       state,
@@ -1887,7 +1880,6 @@ describe('audit fail-fast regressions', () => {
       entityId: hubId,
       signerId: 'hub',
       entityEncPubKey: '',
-      entityEncPrivKey: '',
       state: hubState,
     } as never);
 
@@ -2159,7 +2151,6 @@ describe('audit fail-fast regressions', () => {
       entityId,
       signerId: 'misleading',
       entityEncPubKey: '',
-      entityEncPrivKey: '',
       state: misleadingOwner,
     } as never);
 
@@ -2466,7 +2457,6 @@ describe('audit fail-fast regressions', () => {
       entityId,
       signerId,
       entityEncPubKey: '',
-      entityEncPrivKey: '',
       mempool: [],
       isProposer: false,
       state: makeEntityState(entityId),

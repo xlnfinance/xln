@@ -296,7 +296,6 @@ const addReplica = (
     entityId,
     signerId,
     entityEncPubKey: '',
-    entityEncPrivKey: '',
     mempool: [],
     isProposer: true,
     state: {

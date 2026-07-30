@@ -34,6 +34,8 @@ export interface EntityRuntimeContext {
     entityConsensusStateWarningBytes?: number;
   } | undefined;
   infrastructure?: {
+    /** Validator-local encryption secrets keyed by `entityId:signerId`. */
+    entityEncryptionPrivateKeys?: Map<string, string>;
     consumptionNodes?: ConsumptionNodeStore;
     pendingConsumptionNodes?: ConsumptionNodeStore;
     pendingConsumptionNodeDeletes?: Set<string>;

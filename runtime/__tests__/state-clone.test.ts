@@ -163,7 +163,6 @@ const makeProjectionReplica = () => ({
   entityId: `0x${'aa'.repeat(32)}`,
   signerId: `0x${'11'.repeat(20)}`,
   entityEncPubKey: '',
-  entityEncPrivKey: '',
   isProposer: false,
   state: {
     entityId: `0x${'aa'.repeat(32)}`,

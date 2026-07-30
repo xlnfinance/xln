@@ -72,7 +72,7 @@ describe('runtime remote replica import', () => {
     const replica = env.state.eReplicas.get(`${entityId}:${signerId}`);
     expect(replica).toBeDefined();
     expect(replica?.entityEncPubKey).toBe('');
-    expect(replica?.entityEncPrivKey).toBe('');
+    expect(replica && Object.hasOwn(replica, 'entityEncPrivKey')).toBeFalse();
     expect(replica?.state.lastFinalizedJHeight).toBe(0);
     expect(env.gossip.getProfiles().some(profile => profile.entityId === entityId)).toBe(false);
 

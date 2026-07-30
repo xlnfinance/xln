@@ -100,7 +100,6 @@ const installPersistedEntityReplicas = async (
         entityId,
         signerId,
         entityEncPubKey: encryptionKeys.publicKey,
-        entityEncPrivKey: encryptionKeys.privateKey,
         state: replicaState,
         mempool: requiresExactReplica ? meta!.mempool : [],
         isProposer,

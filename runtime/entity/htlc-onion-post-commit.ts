@@ -23,6 +23,7 @@ import type { EntityOutput, EntityReplica } from './types';
 import type { EntityRuntimeContext } from './runtime-context';
 import type { EntityTx } from '../types/entity-tx';
 import { verifyCertifiedEntityOutput } from './consensus/output-certification';
+import { requireEntityEncryptionPrivateKey } from './crypto';
 
 const log = createStructuredLogger('entity.htlc_onion_post_commit');
 
@@ -114,13 +115,17 @@ const decryptAdvance = async (
   if (proposerAttestations[0]!.encryptionPublicKey !== normalized(replica.entityEncPubKey)) {
     throw new Error('HTLC_DEFAULT_PROPOSER_ENCRYPTION_KEY_MISMATCH');
   }
-  if (!replica.entityEncPrivKey) throw new Error('HTLC_DEFAULT_PROPOSER_PRIVATE_KEY_MISSING');
+  const privateKey = requireEntityEncryptionPrivateKey(
+    env,
+    replica.entityId,
+    replica.signerId,
+  );
   const plaintext = await decryptBytesForLocalValidator(
     layer,
     buildValidatorEncryptionBoard(env, replica.state),
     proposerSignerId,
     replica.entityEncPubKey,
-    replica.entityEncPrivKey,
+    privateKey,
     layer.contextHash,
     new NobleCryptoProvider(),
   );
@@ -144,13 +149,17 @@ const decryptSecretOfferPayload = async (
     lock.secretOffer!,
   );
   const proposerSignerId = normalized(replica.state.config.validators[0]);
-  if (!replica.entityEncPrivKey) throw new Error('HTLC_DEFAULT_PROPOSER_PRIVATE_KEY_MISSING');
+  const privateKey = requireEntityEncryptionPrivateKey(
+    env,
+    replica.entityId,
+    replica.signerId,
+  );
   const plaintext = await decryptBytesForLocalValidator(
     offer,
     buildValidatorEncryptionBoard(env, replica.state),
     proposerSignerId,
     replica.entityEncPubKey,
-    replica.entityEncPrivKey,
+    privateKey,
     htlcSecretOfferContextHash(replica.entityId, accountId, lock),
     new NobleCryptoProvider(),
   );

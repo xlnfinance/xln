@@ -222,7 +222,6 @@ const installReplica = (env: RuntimeReplica, state: EntityState, signerId: strin
     entityId: state.entityId,
     signerId,
     entityEncPubKey: keys.publicKey,
-    entityEncPrivKey: keys.privateKey,
     state: structuredClone(state),
     mempool: [],
     isProposer: true,
@@ -249,7 +248,6 @@ describe('ordered reliable Entity catch-up', () => {
       entityId: state.entityId,
       signerId,
       entityEncPubKey: '',
-      entityEncPrivKey: '',
       state,
       mempool: [],
       isProposer: true,
@@ -313,7 +311,6 @@ describe('ordered reliable Entity catch-up', () => {
       entityId: initialState.entityId,
       signerId: catchUpSignerId,
       entityEncPubKey: '',
-      entityEncPrivKey: '',
       state: structuredClone(initialState),
       mempool: [],
       isProposer: false,
@@ -555,12 +552,10 @@ describe('ordered reliable Entity catch-up', () => {
     receiverReplica.isProposer = false;
     const receiverEntityKeys = deriveLocalEntityCryptoKeys(receiver, initialState.entityId, signerId);
     receiverReplica.entityEncPubKey = receiverEntityKeys.publicKey;
-    receiverReplica.entityEncPrivKey = receiverEntityKeys.privateKey;
     installReplica(receiver, initialState, leaderSignerId);
     const leaderReplica = receiver.state.eReplicas.get(`${initialState.entityId}:${leaderSignerId}`)!;
     const leaderEntityKeys = deriveLocalEntityCryptoKeys(receiver, initialState.entityId, leaderSignerId);
     leaderReplica.entityEncPubKey = leaderEntityKeys.publicKey;
-    leaderReplica.entityEncPrivKey = leaderEntityKeys.privateKey;
     collectLocalProfileEncryptionAnnouncements(receiver);
     receiver.state.eReplicas.delete(`${initialState.entityId}:${leaderSignerId}`);
     const manifest = getCompleteProfileEncryptionManifest(receiver, receiverReplica.state);

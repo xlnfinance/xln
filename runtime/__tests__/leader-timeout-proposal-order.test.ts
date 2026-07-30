@@ -67,7 +67,6 @@ const replica = (state: EntityState, signerId: string): EntityReplica => ({
   entityId: state.entityId,
   signerId,
   entityEncPubKey: '',
-  entityEncPrivKey: '',
   state: structuredClone(state),
   mempool: [],
   isProposer: signerId === state.config.validators[0],
@@ -238,7 +237,6 @@ describe('leader timeout / old-view proposal ordering regression', () => {
       const localReplica = replica(fixture.state, signerId);
       const keys = deriveLocalEntityCryptoKeys(fixture.env, fixture.state.entityId, signerId);
       localReplica.entityEncPubKey = keys.publicKey;
-      localReplica.entityEncPrivKey = keys.privateKey;
       fixture.env.state.eReplicas.set(`${fixture.state.entityId}:${signerId}`, localReplica);
     }
     fixture.env.infrastructure = { ...fixture.env.infrastructure, maxEntityInputsPerFrame: 1 };

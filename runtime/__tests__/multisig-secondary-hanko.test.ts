@@ -232,7 +232,6 @@ const createMultisigAccountState = (
     entityId,
     signerId: localSignerId,
     entityEncPubKey: localKeys.publicKey,
-    entityEncPrivKey: localKeys.privateKey,
     mempool: [],
     isProposer: localSignerId === authority.validators[0],
     state,
@@ -242,7 +241,6 @@ const createMultisigAccountState = (
     entityId: counterpartyId,
     signerId: counterpartySigner,
     entityEncPubKey: '',
-    entityEncPrivKey: '',
     mempool: [],
     isProposer: true,
     state: {
@@ -698,7 +696,6 @@ describe('multisig secondary Hanko production', () => {
     if (!outbound) throw new Error('TEST_OUTBOUND_ENTITY_PROPOSAL_MISSING');
 
     const wireJson = safeStringify(outbound);
-    expect(wireJson).not.toContain(setup.replica.entityEncPrivKey);
     expect(wireJson).not.toContain('entityEncPrivKey');
     expect(wireJson).not.toContain('"newState"');
     expect(wireJson).not.toContain('"outputs"');
@@ -741,7 +738,7 @@ describe('multisig secondary Hanko production', () => {
         ...structuredClone(proposal),
         // Replica-local secrets are never valid Entity frame fields. Inject one
         // explicitly so transport validation proves it cannot cross consensus.
-        entityEncPrivKey: validator.replica.entityEncPrivKey,
+        entityEncryptionPrivateKey: `0x${'42'.repeat(32)}`,
       } as never,
     });
     expect(secretRejected.outcome).toEqual({ kind: 'rejected', code: 'ENTITY_INPUT_INVALID' });
@@ -1144,7 +1141,6 @@ describe('multisig secondary Hanko production', () => {
       entityId: targetEntityId,
       signerId: targetValidators[0]!,
       entityEncPubKey: '',
-      entityEncPrivKey: '',
       state: structuredClone(targetTemplate),
       mempool: [],
       isProposer: true,
@@ -1153,7 +1149,6 @@ describe('multisig secondary Hanko production', () => {
       entityId: targetEntityId,
       signerId: targetValidators[1]!,
       entityEncPubKey: '',
-      entityEncPrivKey: '',
       state: structuredClone(targetTemplate),
       mempool: [],
       isProposer: false,

@@ -321,7 +321,6 @@ describe('budgeted exact J-prefix catch-up', () => {
       entityId: state.entityId,
       signerId: proposerId,
       entityEncPubKey: '',
-      entityEncPrivKey: '',
       state: structuredClone(state),
       mempool: [],
       isProposer: true,

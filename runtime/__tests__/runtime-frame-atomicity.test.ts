@@ -169,7 +169,6 @@ const installValidatorReplica = (
     entityId,
     signerId: validator,
     entityEncPubKey: '',
-    entityEncPrivKey: '',
     mempool: [],
     isProposer: false,
     state: makeEntityState(entityId, config),
@@ -534,7 +533,6 @@ describe('runtime frame atomicity', () => {
         entityId: signerId,
         signerId,
         entityEncPubKey: '',
-        entityEncPrivKey: '',
         mempool: [],
         isProposer: index === 0,
         state: {

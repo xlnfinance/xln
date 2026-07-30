@@ -70,7 +70,6 @@ const installTargetReplica = (
     entityId: output.entityId,
     signerId: output.signerId,
     entityEncPubKey: '',
-    entityEncPrivKey: '',
     isProposer: false,
     mempool: [],
     state: {

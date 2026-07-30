@@ -90,7 +90,6 @@ const makeReplica = (state: EntityState, signer: string, isProposer: boolean): E
   entityId: state.entityId,
   signerId: signer,
   entityEncPubKey: '',
-  entityEncPrivKey: '',
   state,
   mempool: [],
   isProposer,
@@ -102,7 +101,6 @@ const attachLocalEntityKeys = (
 ): EntityReplica => {
   const keys = deriveLocalEntityCryptoKeys(env, replica.entityId, replica.signerId);
   replica.entityEncPubKey = keys.publicKey;
-  replica.entityEncPrivKey = keys.privateKey;
   return replica;
 };
 

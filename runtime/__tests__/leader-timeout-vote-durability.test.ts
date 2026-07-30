@@ -79,7 +79,6 @@ const installVoteTarget = (env: RuntimeReplica): {
     entityId,
     signerId,
     entityEncPubKey: localKeys.publicKey,
-    entityEncPrivKey: localKeys.privateKey,
     state,
     mempool: [],
     isProposer: false,

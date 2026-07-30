@@ -212,7 +212,7 @@ const validateJPrefixRound = (value: unknown, context: string): void => {
   }
 };
 
-type EntityReplicaMetadata = Omit<EntityReplica, 'entityEncPrivKey'>;
+type EntityReplicaMetadata = EntityReplica;
 
 function assertEntityReplicaMetadata(
   replica: Record<string, unknown>,
@@ -266,17 +266,6 @@ function assertEntityReplica(
   context: string,
 ): asserts replica is Record<string, unknown> & EntityReplica {
   assertEntityReplicaMetadata(replica, context);
-  const privateKey = replica['entityEncPrivKey'];
-  if (typeof privateKey !== 'string') {
-    throw new FinancialDataCorruptionError(
-      `${context}.entityEncPrivKey must be a string`,
-    );
-  }
-  if (Boolean(replica.entityEncPubKey) !== Boolean(privateKey)) {
-    throw new FinancialDataCorruptionError(
-      `${context} encryption keypair must be both present or both absent`,
-    );
-  }
 }
 
 export const validateEntityReplica = (

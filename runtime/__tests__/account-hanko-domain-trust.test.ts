@@ -66,7 +66,6 @@ const installReplica = (
     entityId,
     signerId: key.slice(-40),
     entityEncPubKey: '',
-    entityEncPrivKey: '',
     isProposer: true,
     mempool: [],
     state: { entityId, config: { jurisdiction } },

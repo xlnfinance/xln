@@ -53,6 +53,15 @@ for (const path of listFiles('runtime', '.ts')) {
   }
   const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true);
   const visit = (node: ts.Node): void => {
+    if (
+      ts.isPropertySignature(node) &&
+      ts.isIdentifier(node.name) &&
+      node.name.text === 'entityEncPrivKey'
+    ) {
+      violations.push(
+        `${path}:${file.getLineAndCharacterOfPosition(node.name.getStart()).line + 1}:private-key-in-state-shape`,
+      );
+    }
     if (ts.isImportSpecifier(node) && node.propertyName) {
       violations.push(`${path}:${file.getLineAndCharacterOfPosition(node.getStart()).line + 1}:import-alias:${node.getText(file)}`);
     }

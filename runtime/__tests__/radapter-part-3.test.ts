@@ -150,7 +150,6 @@ const makeEnv = (): RuntimeReplica =>
             entityId,
             signerId: 'signer',
             entityEncPubKey: 'pub',
-            entityEncPrivKey: 'priv',
             mempool: [],
             isProposer: true,
             state: {

@@ -89,7 +89,6 @@ const installReplica = (env: RuntimeReplica, state: EntityState, signerId: strin
     entityId: state.entityId,
     signerId,
     entityEncPubKey: '',
-    entityEncPrivKey: '',
     state: structuredClone(state),
     mempool: [],
     isProposer: false,
@@ -101,7 +100,6 @@ const installReplica = (env: RuntimeReplica, state: EntityState, signerId: strin
 const installFixtureEncryptionKeys = (env: RuntimeReplica, replica: EntityReplica): void => {
   const keys = deriveLocalEntityCryptoKeys(env, replica.entityId, replica.signerId);
   replica.entityEncPubKey = keys.publicKey;
-  replica.entityEncPrivKey = keys.privateKey;
 };
 
 export const prepareCatchupFixtureReplica = async (

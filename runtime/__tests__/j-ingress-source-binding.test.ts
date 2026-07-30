@@ -57,7 +57,6 @@ const entityReplica = (
   entityId: id,
   signerId,
   entityEncPubKey: '',
-  entityEncPrivKey: '',
   mempool: [],
   isProposer: true,
   state: {

@@ -5,6 +5,7 @@ import {
   assertLocalEntityCryptoKeys,
   assertPersistedLocalEntityCryptoKeys,
   deriveLocalEntityCryptoKeys,
+  requireEntityEncryptionPrivateKey,
 } from '../entity/crypto';
 import { createEmptyEnv, generateLazyEntityId } from '../runtime';
 import { applyRuntimeTx } from '../runtime/tx-handlers';
@@ -63,7 +64,6 @@ describe('runtime entity crypto', () => {
       entityId,
       signerId,
       entityEncPubKey: keys.publicKey,
-      entityEncPrivKey: `0x${'00'.repeat(32)}`,
       isProposer: true,
       mempool: [],
       state: {
@@ -76,7 +76,9 @@ describe('runtime entity crypto', () => {
 
     const replica = env.state.eReplicas.get(`${entityId}:${signerId}`);
     expect(replica?.entityEncPubKey).toBe(keys.publicKey);
-    expect(replica?.entityEncPrivKey).toBe(keys.privateKey);
+    expect(requireEntityEncryptionPrivateKey(env, entityId, signerId))
+      .toBe(keys.privateKey);
+    expect(replica && Object.hasOwn(replica, 'entityEncPrivKey')).toBeFalse();
   });
 
   test('rejects local replicas whose public encryption key belongs to another derivation', () => {
@@ -91,7 +93,6 @@ describe('runtime entity crypto', () => {
       entityId,
       signerId,
       entityEncPubKey: `0x${'11'.repeat(32)}`,
-      entityEncPrivKey: `0x${'22'.repeat(32)}`,
       isProposer: true,
       mempool: [],
       state: {
@@ -134,7 +135,6 @@ describe('runtime entity crypto', () => {
       entityId,
       signerId,
       entityEncPubKey: keys.publicKey,
-      entityEncPrivKey: `0x${'00'.repeat(32)}`,
       isProposer: true,
       mempool: [],
       state: {
@@ -157,6 +157,8 @@ describe('runtime entity crypto', () => {
 
     const replica = env.state.eReplicas.get(`${entityId}:${signerId}`);
     expect(replica?.entityEncPubKey).toBe(keys.publicKey);
-    expect(replica?.entityEncPrivKey).toBe(keys.privateKey);
+    expect(requireEntityEncryptionPrivateKey(env, entityId, signerId))
+      .toBe(keys.privateKey);
+    expect(replica && Object.hasOwn(replica, 'entityEncPrivKey')).toBeFalse();
   });
 });

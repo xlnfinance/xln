@@ -317,7 +317,6 @@ const installStaleJPrefixAuthority = (
     entityId: output.entityId,
     signerId: output.signerId,
     entityEncPubKey: '',
-    entityEncPrivKey: '',
     isProposer: false,
     mempool: [],
     state: {
@@ -349,7 +348,6 @@ const ensureAppliedAuthority = (env: RuntimeReplica, output: DeliverableEntityIn
     entityId: output.entityId,
     signerId: output.signerId,
     entityEncPubKey: '',
-    entityEncPrivKey: '',
     isProposer: false,
     mempool: [],
     state: {
@@ -680,7 +678,6 @@ describe('durable scoped reliable delivery receipts', () => {
       entityId: targetEntityId,
       signerId: validatorId,
       entityEncPubKey: '',
-      entityEncPrivKey: '',
       state,
       mempool: [],
       isProposer: true,

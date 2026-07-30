@@ -17,7 +17,6 @@ describe('lending API boundary', () => {
           entityId: HUB,
           signerId: SIGNER,
           entityEncPubKey: '',
-          entityEncPrivKey: '',
           state: {
             entityId: HUB,
             lending: { pools: new Map(), loans: new Map() },

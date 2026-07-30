@@ -465,7 +465,6 @@ const attachSigningReplica = (env: ReturnType<typeof createEmptyEnv>, entityId: 
     entityId,
     signerId,
     entityEncPubKey: '',
-    entityEncPrivKey: '',
     mempool: [],
     isProposer: true,
     state: {
@@ -580,7 +579,6 @@ const makeReplicaMissingPrevFrameHash = (): EntityReplica => ({
   entityId: `0x${'11'.repeat(32)}`,
   signerId: '1',
   entityEncPubKey: '',
-  entityEncPrivKey: '',
   mempool: [],
   isProposer: true,
   state: {
@@ -739,7 +737,6 @@ const sealAuditJSubmitAttempts = (env: RuntimeReplica, inputs: JInput[]): void =
           entityId: jTx.entityId,
           signerId,
           entityEncPubKey: '',
-          entityEncPrivKey: '',
           mempool: [],
           isProposer: true,
           state,

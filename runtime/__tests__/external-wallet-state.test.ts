@@ -270,7 +270,6 @@ describe('external wallet observed state', () => {
       entityId,
       signerId,
       entityEncPubKey: '',
-      entityEncPrivKey: '',
       isProposer: true,
       state: makeState(entityId, signerId),
       mempool: [],

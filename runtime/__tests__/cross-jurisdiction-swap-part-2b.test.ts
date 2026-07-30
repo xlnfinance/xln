@@ -695,7 +695,6 @@ describe('cross-jurisdiction hashledger swap', () => {
         entityId: sourceHub,
         signerId: sourceHubSigner,
         entityEncPubKey: '',
-        entityEncPrivKey: '',
         state: result.newState,
         mempool: [],
       } as EntityReplica,

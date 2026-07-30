@@ -87,7 +87,6 @@ const env = (): RuntimeReplica => {
     entityId: LEFT,
     signerId: `0x${'66'.repeat(20)}`,
     entityEncPubKey: '',
-    entityEncPrivKey: '',
     state: {
       entityId: LEFT,
       config: {

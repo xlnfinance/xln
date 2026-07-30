@@ -334,7 +334,6 @@ const makeEnv = (seed: string, entityId: string, state: EntityState): RuntimeRep
           entityId,
           signerId: 'bench-signer',
           entityEncPubKey: 'bench-pub',
-          entityEncPrivKey: 'bench-priv',
           mempool: [],
           isProposer: true,
           state,

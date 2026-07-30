@@ -347,8 +347,7 @@ type EntityPersistenceSplitKeys =
   | 'accounts'
   | 'orderbookExt'
   | 'htlcNotes';
-/** Process-local secrets are rederived from Runtime signer material on restore. */
-type ReplicaPersistenceSplitKeys = 'entityEncPrivKey';
+type ReplicaPersistenceSplitKeys = never;
 
 export type AccountPersistenceCoverage = AssertNoUnclassifiedPersistenceKeys<
   Exclude<keyof AccountReplica, keyof StorageAccountDoc>

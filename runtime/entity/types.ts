@@ -538,9 +538,8 @@ export interface EntityReplica {
    * Validator-local X25519 identity. The signed public-key manifest is Entity
    * consensus state; this derived keypair belongs to one validator replica and
    * must never enter an Entity frame, State root, or remote replica snapshot.
-   */
+  */
   entityEncPubKey: string;
-  entityEncPrivKey: string;
   state: EntityState;
   mempool: EntityTx[];
   proposal?: EntityFrame;

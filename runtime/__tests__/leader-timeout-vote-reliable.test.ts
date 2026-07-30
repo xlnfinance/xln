@@ -99,7 +99,6 @@ const installVoteTarget = (
     entityId,
     signerId,
     entityEncPubKey: localKeys.publicKey,
-    entityEncPrivKey: localKeys.privateKey,
     state,
     mempool: [],
     isProposer: false,

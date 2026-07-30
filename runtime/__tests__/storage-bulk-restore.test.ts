@@ -45,7 +45,6 @@ const canonicalHash = (state: EntityState): string => computeCanonicalEntityHash
   entityId: state.entityId,
   signerId: 'signer',
   entityEncPubKey: '',
-  entityEncPrivKey: '',
   mempool: [],
   isProposer: true,
   state,

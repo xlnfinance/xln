@@ -102,7 +102,6 @@ const makeEnv = (account: AccountState, reserves: Array<[number, bigint]>): Runt
         entityId,
         signerId: signerIds[0]!,
         entityEncPubKey: '',
-        entityEncPrivKey: '',
         mempool: [],
         isProposer: true,
         state: {

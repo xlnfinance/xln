@@ -148,7 +148,6 @@ const makeEnv = (): RuntimeReplica =>
             entityId,
             signerId: 'signer',
             entityEncPubKey: 'pub',
-            entityEncPrivKey: 'priv',
             mempool: [],
             isProposer: true,
             state: {
@@ -700,7 +699,6 @@ test('runtime adapter direct read paths return compact read snapshots', async ()
   account.settlementWorkspace = { notes: 'w'.repeat(100_000) };
   account.swapOrderHistory = new Map([['history', { note: 'h'.repeat(100_000), resolves: [] }]]);
   account.swapClosedOrders = new Map([['closed', { note: 'c'.repeat(100_000), resolves: [] }]]);
-  replica.entityEncPrivKey = 'private-key';
   replica.state.nonces = new Map(
     Array.from({ length: 500 }, (_, index) => [`0x${index.toString(16).padStart(64, '0')}`, index]),
   );
@@ -726,7 +724,6 @@ test('runtime adapter direct read paths return compact read snapshots', async ()
   } as any;
 
   const liveEntity = await resolveRuntimeAdapterRead<{
-    entityEncPrivKey: string;
     nonces: Map<string, number>;
     crontabState?: unknown;
     jBatchState?: {
@@ -846,7 +843,6 @@ test('current stored view frame overlays local identity without mixing a later l
         signerId?: string;
         isProposer?: boolean;
         entityEncPubKey?: string;
-        entityEncPrivKey?: string;
         height: number;
         timestamp: number;
         prevFrameHash?: string;
@@ -1390,7 +1386,6 @@ test('runtime adapter view frame defaults to the live entity with real relations
     entityId: emptyEntityId,
     signerId: 'empty-signer',
     entityEncPubKey: '',
-    entityEncPrivKey: '',
     state: {
       ...primary.state,
       entityId: emptyEntityId,
@@ -1433,7 +1428,6 @@ test('runtime adapter historical batch without entityId defaults to live entity 
     entityId: emptyEntityId,
     signerId: 'empty-signer',
     entityEncPubKey: '',
-    entityEncPrivKey: '',
     state: {
       ...primary.state,
       entityId: emptyEntityId,
@@ -1756,7 +1750,6 @@ test('runtime adapter view frame honors the requested entity id', async () => {
     entityId: secondEntityId,
     signerId: 'other-signer',
     entityEncPubKey: '',
-    entityEncPrivKey: '',
     state: {
       ...first.state,
       entityId: secondEntityId,
@@ -2606,7 +2599,6 @@ test('runtime adapter view-frame caps route-heavy core maps under wire budget', 
   const env = makeEnv();
   const replica = Array.from(env.state.eReplicas.values())[0]!;
   const largeNote = 'x'.repeat(4_000);
-  replica.entityEncPrivKey = 'secret-key-must-not-leave-server';
   replica.state.crossJurisdictionSwaps = new Map();
   for (let index = 0; index < 400; index += 1) {
     const id = `route-${index.toString().padStart(3, '0')}`;
@@ -2641,7 +2633,6 @@ test('runtime adapter view-frame caps route-heavy core maps under wire budget', 
   const frame = await resolveRuntimeAdapterRead<{
     activeEntity: {
       core: {
-        entityEncPrivKey: string;
         htlcRoutes: Map<string, unknown>;
         htlcNotes?: Map<string, unknown>;
         crossJurisdictionSwaps?: Map<string, unknown>;

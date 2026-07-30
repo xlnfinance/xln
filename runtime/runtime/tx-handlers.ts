@@ -374,7 +374,6 @@ const buildCheckpointReplica = (
     entityId: identity.entityId,
     signerId: identity.signerId,
     entityEncPubKey: replicaKeys.publicKey,
-    entityEncPrivKey: replicaKeys.privateKey,
     mempool: [],
     isProposer: runtimeTx.data.isProposer,
     state,
@@ -402,7 +401,6 @@ const buildGenesisReplica = (
     entityId: identity.entityId,
     signerId: identity.signerId,
     entityEncPubKey: replicaKeys.publicKey,
-    entityEncPrivKey: replicaKeys.privateKey,
     mempool: [],
     isProposer: runtimeTx.data.isProposer,
     state: {

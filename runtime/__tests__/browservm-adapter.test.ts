@@ -13,7 +13,6 @@ const makeReplica = (entityId: string, signerId: string): EntityReplica =>
     entityId,
     signerId,
     entityEncPubKey: '',
-    entityEncPrivKey: '',
     mempool: [],
     isProposer: true,
     state: {

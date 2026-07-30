@@ -187,7 +187,6 @@ const addReplica = (
     entityId,
     signerId,
     entityEncPubKey: `0x${'aa'.repeat(32)}`,
-    entityEncPrivKey: `0x${'bb'.repeat(32)}`,
     mempool: [],
     isProposer: true,
     state: makeEntityState(entityId, signerId, jurisdiction),

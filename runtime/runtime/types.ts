@@ -438,6 +438,8 @@ export interface RuntimeState {
 
 /** One live Runtime instance: committed State plus local machine machinery. */
 export interface RuntimeInfrastructure {
+  /** Validator-local secrets; never enter Runtime State, WAL, or history. */
+  entityEncryptionPrivateKeys?: Map<string, string>;
   lifecyclePhase?: 'booting' | 'running' | 'quiescing' | 'stopped' | 'halted';
   loopActive?: boolean;
   halted?: boolean;

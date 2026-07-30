@@ -77,7 +77,6 @@ test('account input without frame or settlement action fails fast', async () => 
     entityId: counterpartyId,
     signerId: 'counterparty-signer',
     entityEncPubKey: '',
-    entityEncPrivKey: '',
     isProposer: true,
     mempool: [],
     state: {
