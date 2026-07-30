@@ -65,11 +65,14 @@ export const updateWatcherJurisdictionCursor = (
   ).trim().toLowerCase();
   if (!depository) throw new Error('J_WATCHER_DEPOSITORY_MISSING:cursor-update');
   const replicaChainId = watcherChainIdOf(replica);
+  if (replicaChainId === null) {
+    throw new Error('J_WATCHER_CHAIN_ID_MISSING:cursor-update');
+  }
   const cursorTx: Extract<RuntimeTx, { type: 'advanceJWatcherCursor' }> = {
     type: 'advanceJWatcherCursor',
     data: {
       depositoryAddress: depository,
-      ...(replicaChainId === null ? {} : { chainId: replicaChainId }),
+      chainId: replicaChainId,
       blockNumber,
     },
   };

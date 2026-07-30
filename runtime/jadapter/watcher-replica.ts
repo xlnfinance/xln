@@ -45,16 +45,6 @@ export const findWatcherJurisdictionReplica = (
       );
     }
 
-    // Old scenario fixtures can omit chainId. A unique Depository address
-    // remains an unambiguous selector; duplicate addresses still fail closed.
-    if (
-      normalizedChainId !== null &&
-      depository &&
-      addressMatches.length === 1 &&
-      watcherChainIdOf(addressMatches[0]) === null
-    ) {
-      return addressMatches[0]!;
-    }
     return null;
   }
 

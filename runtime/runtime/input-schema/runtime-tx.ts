@@ -219,10 +219,10 @@ const validateRuntimeTxData = (type: string, value: unknown, code: string): void
   else if (type === 'observeJRange') validateJObservationData(value, code);
   else if (type === 'advanceJWatcherCursor') {
     const data = requireBoundaryRecord(value, code);
-    requireExactBoundaryKeys(data, ['depositoryAddress', 'blockNumber'], ['chainId'], `${code}_FIELDS`);
+    requireExactBoundaryKeys(data, ['depositoryAddress', 'chainId', 'blockNumber'], [], `${code}_FIELDS`);
     requireAddress(data['depositoryAddress'], `${code}_DEPOSITORY`);
     requireBoundaryInteger(data['blockNumber'], `${code}_BLOCK_NUMBER`);
-    if (data['chainId'] !== undefined) requireBoundaryInteger(data['chainId'], `${code}_CHAIN_ID`, 1);
+    requireBoundaryInteger(data['chainId'], `${code}_CHAIN_ID`, 1);
   } else if (type === 'rewindJHistory') {
     const data = requireBoundaryRecord(value, code);
     requireExactBoundaryKeys(data, [

@@ -50,13 +50,13 @@ const makeJReplica = (
   name: string,
   blockNumber: bigint,
   depositoryAddress: string,
-  chainId?: number,
+  chainId = 31_337,
   entityProviderAddress?: string,
 ): JReplica => ({
   name,
   blockNumber,
   depositoryAddress,
-  ...(chainId !== undefined ? { chainId } : {}),
+  chainId,
   ...(entityProviderAddress !== undefined ? { entityProviderAddress } : {}),
   stateRoot: new Uint8Array(32),
   mempool: [],
@@ -602,19 +602,18 @@ describe('JAdapter watcher ingress', () => {
     expect(wakandaEntity.jHistory).toBeUndefined();
   });
 
-  test('watcher accepts a unique legacy replica without chainId but never guesses between duplicates', () => {
+  test('watcher rejects a replica whose exact chain identity is missing', () => {
     const sharedDepository = `0x${'ac'.repeat(20)}`;
-    const legacy = makeJReplica('Legacy', 40n, sharedDepository);
-    const env = makeCursorEnv('jadapter-cursor-legacy-chain', [legacy], legacy.name);
+    const incomplete = makeJReplica('Incomplete', 40n, sharedDepository);
+    delete incomplete.chainId;
+    const env = makeCursorEnv('jadapter-cursor-missing-chain', [incomplete], incomplete.name);
 
-    expect(findWatcherJurisdictionReplica(env, sharedDepository, 31337)).toBe(legacy);
-    expect(getWatcherStartBlock(env, sharedDepository, 31337)).toBe(41);
-
-    const duplicate = makeJReplica('Legacy Duplicate', 41n, sharedDepository);
-    env.jReplicas.set(duplicate.name, duplicate);
     expect(findWatcherJurisdictionReplica(env, sharedDepository, 31337)).toBeNull();
     expect(() => getWatcherStartBlock(env, sharedDepository, 31337)).toThrow(
       /J_WATCHER_JURISDICTION_NOT_FOUND:start-block/,
+    );
+    expect(() => updateWatcherJurisdictionCursor(env, 41, sharedDepository)).toThrow(
+      'J_WATCHER_CHAIN_ID_MISSING:cursor-update',
     );
   });
 

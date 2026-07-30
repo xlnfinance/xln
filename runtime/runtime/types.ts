@@ -289,8 +289,7 @@ export type RuntimeTx =
       type: 'advanceJWatcherCursor';
       data: {
         depositoryAddress: string;
-        /** Missing only for a unique legacy replica that predates persisted chainId. */
-        chainId?: number;
+        chainId: number;
         blockNumber: number;
       };
     }

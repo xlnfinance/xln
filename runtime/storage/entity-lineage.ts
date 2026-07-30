@@ -492,7 +492,14 @@ const assertReplicaMatchesCertifiedHeight = (entry: ReplicaEntry, link: Certifie
   }
 };
 
-const buildLegacyEntityPlan = (
+/**
+ * Bind an Entity to this Runtime before its first local checkpoint exists.
+ *
+ * This is not compatibility recovery. A Runtime may import an already-live
+ * Entity at H>0, so it must verify the complete certified H0→H chain before
+ * its next R-WAL checkpoint can become the local anchor.
+ */
+const buildUncheckpointedEntityBootstrapPlan = (
   env: RuntimeState,
   entityId: string,
   entries: ReplicaEntry[],
@@ -734,11 +741,13 @@ const buildCheckpointedEntityPlan = (
   if (anchored.length === 0) {
     throw new Error(`STORAGE_ENTITY_LINEAGE_RUNTIME_CHECKPOINT_MISSING:${entityId}`);
   }
-  const legacyAnchor = entries.find(
+  const uncheckpointedAnchor = entries.find(
     entry => entry.replica.certifiedFrameAnchor && !entry.replica.certifiedFrameAnchor.runtimeCheckpoint,
   );
-  if (legacyAnchor) {
-    throw new Error(`STORAGE_ENTITY_LINEAGE_RUNTIME_CHECKPOINT_LEGACY_MIX:${entityId}:${legacyAnchor.replicaKey}`);
+  if (uncheckpointedAnchor) {
+    throw new Error(
+      `STORAGE_ENTITY_LINEAGE_CHECKPOINT_MODE_MIX:${entityId}:${uncheckpointedAnchor.replicaKey}`,
+    );
   }
   for (const { anchor } of anchored) assertLineageAnchor(env, entityId, anchor);
   assertCheckpointSet(entityId, anchored);
@@ -804,11 +813,11 @@ const buildCheckpointedEntityPlan = (
 const buildEntityPlan = (env: RuntimeState, entityId: string, entries: ReplicaEntry[]): EntityLineagePlan => {
   const checkpointed = entries.some(entry => Boolean(entry.replica.certifiedFrameAnchor?.runtimeCheckpoint));
   if (checkpointed) return buildCheckpointedEntityPlan(env, entityId, entries);
-  const legacy = buildLegacyEntityPlan(env, entityId, entries);
+  const bootstrap = buildUncheckpointedEntityBootstrapPlan(env, entityId, entries);
   return {
-    selected: legacy.selected,
-    lineages: new Map([[legacy.ownerKey, legacy.lineage]]),
-    anchors: new Map([[legacy.ownerKey, legacy.anchor]]),
+    selected: bootstrap.selected,
+    lineages: new Map([[bootstrap.ownerKey, bootstrap.lineage]]),
+    anchors: new Map([[bootstrap.ownerKey, bootstrap.anchor]]),
   };
 };
 
