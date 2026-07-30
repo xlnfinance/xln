@@ -1,6 +1,7 @@
 import { chacha20poly1305 } from '@noble/ciphers/chacha.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import type { CryptoProvider } from '../crypto/provider';
+import { decodeBase64Bytes, encodeBase64Bytes } from '../base64';
 import { serializeTaggedJson } from '../serialization';
 import { MAX_HTLC_BINARY_LAYER_BYTES } from './binary-codec';
 import { assertExactMultiRecipientCiphertextSchema } from './multi-recipient-schema';
@@ -57,21 +58,6 @@ const assertBase64Bound = (value: string, maxChars: number, code: string): void 
   }
 };
 
-const bytesToBase64 = (bytes: Uint8Array): string => {
-  let binary = '';
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary);
-};
-
-const base64ToBytes = (value: string): Uint8Array => {
-  try {
-    const binary = atob(value);
-    return Uint8Array.from(binary, (char) => char.charCodeAt(0));
-  } catch {
-    throw new Error('HTLC_CIPHERTEXT_BASE64_INVALID');
-  }
-};
-
 const bytesToHex = (bytes: Uint8Array): string => {
   let hex = '0x';
   for (const byte of bytes) hex += byte.toString(16).padStart(2, '0');
@@ -88,7 +74,7 @@ const hexToBytes = (value: string): Uint8Array => {
 };
 
 const contentKeyFromGeneratedPair = (privateKey: string): Uint8Array => {
-  const bytes = base64ToBytes(privateKey);
+  const bytes = decodeBase64Bytes(privateKey, 'HTLC_CIPHERTEXT_BASE64_INVALID');
   if (bytes.length !== 32) throw new Error(`HTLC_CONTENT_KEY_LENGTH_INVALID: ${bytes.length}`);
   return bytes;
 };
@@ -116,7 +102,7 @@ export const encryptBytesForValidatorManifest = async (
   const key = contentKeyFromGeneratedPair(generated.privateKey);
   const nonce = contentNonce(key, manifest.hash, normalizedContextHash);
   const cipher = chacha20poly1305(key, nonce, contentAad(manifest.hash, normalizedContextHash));
-  const ciphertext = bytesToBase64(cipher.encrypt(plaintextBytes));
+  const ciphertext = encodeBase64Bytes(cipher.encrypt(plaintextBytes));
   const normalizedRecipientSignerId = String(recipientSignerId ?? '').trim().toLowerCase();
   const recipientAttestations = manifest.attestations.filter(
     (attestation) => attestation.signerId === normalizedRecipientSignerId,
@@ -135,7 +121,7 @@ export const encryptBytesForValidatorManifest = async (
     manifest,
     profileCertification: certification,
     contextHash: normalizedContextHash,
-    nonce: bytesToBase64(nonce),
+    nonce: encodeBase64Bytes(nonce),
     ciphertext,
     recipients,
   };
@@ -254,9 +240,11 @@ export const decryptBytesForLocalValidator = async (
   const unwrapped = await cryptoProvider.decrypt(matching[0]!.wrappedKey, localPrivateKey);
   const contentKey = hexToBytes(unwrapped);
   const expectedNonce = contentNonce(contentKey, manifest.hash, contextHash);
-  if (ciphertext.nonce !== bytesToBase64(expectedNonce)) throw new Error('HTLC_MULTI_RECIPIENT_NONCE_MISMATCH');
+  if (ciphertext.nonce !== encodeBase64Bytes(expectedNonce)) throw new Error('HTLC_MULTI_RECIPIENT_NONCE_MISMATCH');
   const cipher = chacha20poly1305(contentKey, expectedNonce, contentAad(manifest.hash, contextHash));
-  const plaintext = cipher.decrypt(base64ToBytes(ciphertext.ciphertext));
+  const plaintext = cipher.decrypt(
+    decodeBase64Bytes(ciphertext.ciphertext, 'HTLC_CIPHERTEXT_BASE64_INVALID'),
+  );
   if (plaintext.length > MAX_HTLC_PLAINTEXT_BYTES) throw new Error('HTLC_DECRYPTED_PLAINTEXT_TOO_LARGE');
   return plaintext;
 };

@@ -12,6 +12,7 @@
 import type { CryptoProvider, CryptoKeyPair } from './provider';
 import { x25519 } from '@noble/curves/ed25519.js';
 import { chacha20poly1305 } from '@noble/ciphers/chacha.js';
+import { decodeBase64Bytes, encodeBase64Bytes } from '../base64';
 
 export type NobleCryptoProviderOptions = {
   deterministicSeed?: string;
@@ -29,8 +30,8 @@ export class NobleCryptoProvider implements CryptoProvider {
       : x25519.keygen();
 
     return {
-      publicKey: this.bytesToBase64(keyPair.publicKey),
-      privateKey: this.bytesToBase64(keyPair.secretKey)
+      publicKey: encodeBase64Bytes(keyPair.publicKey),
+      privateKey: encodeBase64Bytes(keyPair.secretKey)
     };
   }
 
@@ -85,12 +86,12 @@ export class NobleCryptoProvider implements CryptoProvider {
     packed.set(nonce, 32);
     packed.set(ciphertext, 44);
 
-    return this.bytesToBase64(packed);
+    return encodeBase64Bytes(packed);
   }
 
   async decrypt(encryptedData: string, privateKey: string): Promise<string> {
     // Unpack: ephemeralPub (32) + nonce (12) + ciphertext (rest)
-    const packed = this.base64ToBytes(encryptedData);
+    const packed = decodeBase64Bytes(encryptedData);
     const ephemeralPub = packed.slice(0, 32);
     const nonce = packed.slice(32, 44);
     const ciphertext = packed.slice(44);
@@ -110,25 +111,6 @@ export class NobleCryptoProvider implements CryptoProvider {
     const plaintext = cipher.decrypt(ciphertext);
 
     return new TextDecoder().decode(plaintext);
-  }
-
-  // Utility: Uint8Array → Base64
-  private bytesToBase64(bytes: Uint8Array): string {
-    let binary = '';
-    for (let i = 0; i < bytes.length; i++) {
-      binary += String.fromCharCode(bytes[i]!);
-    }
-    return btoa(binary);
-  }
-
-  // Utility: Base64 → Uint8Array
-  private base64ToBytes(base64: string): Uint8Array {
-    const binary = atob(base64);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) {
-      bytes[i] = binary.charCodeAt(i);
-    }
-    return bytes;
   }
 
   private async generateDeterministicKeyPair(label: string): Promise<{ publicKey: Uint8Array; secretKey: Uint8Array }> {

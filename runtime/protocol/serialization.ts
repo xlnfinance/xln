@@ -3,6 +3,8 @@
  * One canonical codec is used for logs, network payloads, and persisted snapshots.
  */
 
+import { decodeBase64Bytes, encodeBase64Bytes } from './base64';
+
 const ALWAYS_EXCLUDED_KEYS = new Set(['provider', 'ethersProvider']);
 
 type JsonPrimitive = string | number | boolean | null;
@@ -104,27 +106,6 @@ const isTypedArrayView = (value: unknown): value is Exclude<ArrayBufferView, Dat
 const toUint8Bytes = (view: ArrayBufferView): Uint8Array =>
   new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
 
-const bytesToBase64 = (bytes: Uint8Array): string => {
-  if (typeof Buffer !== 'undefined') return Buffer.from(bytes).toString('base64');
-  let binary = '';
-  const chunkSize = 0x8000;
-  for (let index = 0; index < bytes.length; index += chunkSize) {
-    const chunk = bytes.subarray(index, Math.min(index + chunkSize, bytes.length));
-    binary += String.fromCharCode(...chunk);
-  }
-  return btoa(binary);
-};
-
-const base64ToBytes = (base64: string): Uint8Array => {
-  if (typeof Buffer !== 'undefined') return new Uint8Array(Buffer.from(base64, 'base64'));
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-  return bytes;
-};
-
 const cloneArrayBuffer = (bytes: Uint8Array): ArrayBuffer => {
   const copy = new Uint8Array(bytes.length);
   copy.set(bytes);
@@ -181,7 +162,7 @@ const normalizeSerializableValue = (
       return {
         __xlnType: 'TypedArray',
         kind,
-        value: bytesToBase64(toUint8Bytes(input)),
+        value: encodeBase64Bytes(toUint8Bytes(input)),
       };
     }
   }
@@ -252,7 +233,7 @@ const decodeTaggedJson = (value: unknown): unknown => {
     case 'TypedArray': {
       const ctor = TYPED_ARRAY_CTORS[value.kind as TypedArrayKind];
       if (!ctor) return value;
-      return new ctor(cloneArrayBuffer(base64ToBytes(value.value)));
+      return new ctor(cloneArrayBuffer(decodeBase64Bytes(value.value)));
     }
     case 'Buffer':
       return typeof Buffer !== 'undefined'

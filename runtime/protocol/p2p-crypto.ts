@@ -10,6 +10,7 @@
 import { x25519 } from '@noble/curves/ed25519.js';
 import { chacha20poly1305 } from '@noble/ciphers/chacha.js';
 import { sha256 } from '@noble/hashes/sha2.js';
+import { decodeBase64Bytes, encodeBase64Bytes } from './base64';
 import { safeStringify, safeParse } from './serialization';
 
 export type P2PKeyPair = {
@@ -129,7 +130,7 @@ export function encryptJSON(
   const json = safeStringify(data);
   const plaintext = new TextEncoder().encode(json);
   const encrypted = encryptMessage(plaintext, recipientPubKey);
-  return bytesToBase64(encrypted);
+  return encodeBase64Bytes(encrypted);
 }
 
 /**
@@ -139,7 +140,7 @@ export function decryptJSON<T = unknown>(
   encryptedBase64: string,
   privateKey: Uint8Array
 ): T {
-  const encrypted = base64ToBytes(encryptedBase64);
+  const encrypted = decodeBase64Bytes(encryptedBase64);
   const plaintext = decryptMessage(encrypted, privateKey);
   const json = new TextDecoder().decode(plaintext);
   // CRITICAL: Use safeParse to restore BigInt values from string encoding
@@ -167,28 +168,3 @@ export function hexToPubKey(hex: string): Uint8Array {
   }
   return bytes;
 }
-
-// Utility: Uint8Array → Base64
-function bytesToBase64(bytes: Uint8Array): string {
-  let binary = '';
-  for (let i = 0; i < bytes.length; i++) {
-    const byte = bytes[i];
-    if (byte !== undefined) {
-      binary += String.fromCharCode(byte);
-    }
-  }
-  return btoa(binary);
-}
-
-// Utility: Base64 → Uint8Array
-function base64ToBytes(base64: string): Uint8Array {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes;
-}
-
-// Export utilities for external use
-export { bytesToBase64, base64ToBytes };
