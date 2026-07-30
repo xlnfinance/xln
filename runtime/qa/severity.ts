@@ -19,15 +19,6 @@ export type QaSeveritySignal = {
 
 const QA_SEVERITIES = new Set<QaSeverity>(['OK', 'WARN', 'DEGRADED', 'FAIL', 'BLOCKED', 'UNKNOWN']);
 
-const QA_SEVERITY_RANK: Record<QaSeverity, number> = {
-  OK: 0,
-  WARN: 1,
-  DEGRADED: 2,
-  FAIL: 3,
-  BLOCKED: 4,
-  UNKNOWN: 5,
-};
-
 const asFiniteSince = (value: unknown): number | null => {
   const numeric = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(numeric) && numeric >= 0 ? numeric : null;
@@ -95,10 +86,4 @@ export const assertQaSeveritySignal = (value: unknown, label: string): void => {
   if (typeof record['owner'] !== 'string' || !record['owner'].trim()) throw new Error(`${label}_OWNER_REQUIRED`);
   if (!Array.isArray(record['evidence'])) throw new Error(`${label}_EVIDENCE_REQUIRED`);
 };
-
-export const worstQaSeverity = (signals: readonly QaSeveritySignal[]): QaSeverity =>
-  signals.reduce<QaSeverity>((worst, signal) => {
-    const severity = signal.severity;
-    return QA_SEVERITY_RANK[severity] > QA_SEVERITY_RANK[worst] ? severity : worst;
-  }, 'OK');
 

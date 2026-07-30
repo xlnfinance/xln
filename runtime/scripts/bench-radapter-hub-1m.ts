@@ -819,7 +819,7 @@ async function main() {
   process.env['XLN_RADAPTER_AUTH_SEED'] = cli.seed;
   process.env['XLN_RADAPTER_MAX_MESSAGE_BYTES'] = process.env['XLN_RADAPTER_MAX_MESSAGE_BYTES'] || String(4 * 1024 * 1024);
 
-  let server: ReturnType<typeof Bun.serve> | null = null;
+  let server: Bun.Server<undefined> | null = null;
   const entityHashDocsRef = { current: new Map<string, StorageEntityHashDoc>() };
   let pendingWrite: Promise<number> = Promise.resolve(0);
   const readLatencyMs: number[] = [];
@@ -871,7 +871,7 @@ async function main() {
       },
     });
 
-    server = Bun.serve({
+    server = Bun.serve<undefined>({
       hostname: '127.0.0.1',
       port: cli.port,
       fetch(request, bunServer) {
@@ -880,7 +880,7 @@ async function main() {
         return new Response('XLN radapter 1M hub bench', { status: 200 });
       },
       websocket: {
-        async message(ws: ServerWebSocket<unknown>, message: string | Buffer) {
+        async message(ws: ServerWebSocket<undefined>, message: string | Buffer) {
           try {
             const decoded = decodeRuntimeAdapterRequest(message);
             await handleRuntimeAdapterMessage(ws, decoded, env, {
@@ -921,7 +921,7 @@ async function main() {
             closeInvalidRuntimeAdapterMessage(ws, error);
           }
         },
-        close(ws: ServerWebSocket<unknown>) {
+        close(ws: ServerWebSocket<undefined>) {
           forgetRuntimeAdapterClient(ws);
         },
       },

@@ -372,12 +372,10 @@ export async function processWithOffline(
     });
   }
 
-  // Reliable local delivery registers an ingress owner before queueing the
-  // EntityInput. The scenario's offline filter models a transport drop before
-  // the receiver applies that input. Release the matching non-durable owner so
-  // the retained sender outbox can enqueue the exact body again on reconnect;
-  // otherwise registration reports `pending` forever and the test harness
-  // creates a deadlock that cannot occur across a real failed transport hop.
+  // An externally delivered input may already own an undurable ingress slot.
+  // The offline harness drops it before the receiver frame applies, so release
+  // that exact ownership claim. Locally generated continuations are registered
+  // only by their applying frame and therefore make this operation a no-op.
   releaseUncommittedReliableIngress(
     env,
     [...droppedPending, ...droppedQueued, ...droppedInputs],

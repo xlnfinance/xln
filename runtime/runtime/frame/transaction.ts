@@ -3,6 +3,9 @@ import { requireRuntimeMempool } from '../input-queue';
 import { ensureRuntimeInfrastructure } from '../runtime-infrastructure';
 import { rebuildScheduledWakeIndex } from '../scheduled-wake';
 import { getLiveJAdapterEntries } from '../live-jadapters';
+import { normalizeRuntimeId } from '../../networking/runtime-id';
+import { getInputReliableIdentity } from '../reliable-delivery';
+import { reliableIdentityExactKey } from '../reliable-frontier';
 
 export { cloneRuntimeFrameMempool } from './clone';
 
@@ -26,7 +29,15 @@ export const createRuntimeFrameTransaction = (
 ): RuntimeFrameTransaction => {
   const frameMempool = requireRuntimeMempool(liveEnv);
   const activeMempool: RuntimeInput = { runtimeTxs: [], entityInputs: [] };
-  ensureRuntimeInfrastructure(liveEnv).inFlightEntityInputs = frameMempool.entityInputs.length;
+  const infrastructure = ensureRuntimeInfrastructure(liveEnv);
+  infrastructure.inFlightEntityInputs = frameMempool.entityInputs.length;
+  infrastructure.inFlightReliableInputKeys = new Set(
+    frameMempool.entityInputs.flatMap(input => {
+      if (!normalizeRuntimeId(input.from)) return [];
+      const identity = getInputReliableIdentity(input);
+      return identity ? [reliableIdentityExactKey(identity)] : [];
+    }),
+  );
   liveEnv.runtimeMempool = activeMempool;
   return {
     liveEnv,

@@ -11,15 +11,12 @@ type Violation = {
 
 const ROOT = process.cwd();
 const SCAN_ROOTS = [
-  'runtime/account/tx',
-  'runtime/entity/consensus',
-  'runtime/entity/tx',
+  'runtime/account',
+  'runtime/entity',
+  'runtime/jurisdiction',
+  'runtime/runtime/frame',
 ];
-const SCAN_FILES = [
-  'runtime/account/consensus/index.ts',
-  'runtime/entity/scheduler.ts',
-  'runtime/extensions/lending.ts',
-];
+const SCAN_FILES = ['runtime/extensions/lending.ts'];
 const EXCLUDE_PARTS = [
   '/__tests__/',
   '/typechain/',
@@ -34,7 +31,19 @@ const BANNED_PATTERNS: Array<{ pattern: RegExp; rule: string }> = [
   { pattern: /\bsetInterval\s*\(/, rule: 'setInterval' },
   { pattern: /\brandomBytes\s*\(/, rule: 'randomBytes' },
   { pattern: /\brandomUUID\s*\(/, rule: 'randomUUID' },
+  { pattern: /\bgetRandomValues\s*\(/, rule: 'getRandomValues' },
 ];
+
+// These calls operate only on the live replica envelope or external ingress;
+// none contributes bytes to Runtime, Entity, Account, or Jurisdiction state.
+// Keep every exception exact so adding another nondeterministic call fails CI.
+const ALLOWED_INFRA_CALLS = new Set([
+  'runtime/entity/htlc/payment-admission.ts:getRandomValues',
+  'runtime/jurisdiction/config.ts:Date.now',
+  'runtime/jurisdiction/config.ts:setTimeout',
+  'runtime/runtime/frame/process-profile.ts:Date.now',
+  'runtime/runtime/frame/start.ts:Date.now',
+]);
 
 const toRel = (abs: string): string => path.relative(ROOT, abs).replace(/\\/g, '/');
 const isCodeFile = (rel: string): boolean => /\.(ts|tsx|js|jsx)$/.test(rel) && !rel.endsWith('.d.ts');
@@ -73,7 +82,7 @@ function findViolations(file: string, text: string): Violation[] {
   lines.forEach((line, index) => {
     if (isCommentLine(line)) return;
     for (const { pattern, rule } of BANNED_PATTERNS) {
-      if (pattern.test(line)) {
+      if (pattern.test(line) && !ALLOWED_INFRA_CALLS.has(`${file}:${rule}`)) {
         violations.push({
           file,
           line: index + 1,
@@ -122,6 +131,7 @@ async function runStaticDeterminismGuard(): Promise<void> {
 
 async function main(): Promise<void> {
   await runStaticDeterminismGuard();
+  if (process.argv.includes('--static-only')) return;
   await runDeterminismTests();
 }
 

@@ -71,8 +71,11 @@ const quadraticReference = (
 };
 
 describe('durable receipt-only input merge', () => {
-  test('is byte-identical to first-match semantics for a 1000-input wave', () => {
-    const applied = Array.from({ length: 1_000 }, (_, index) => frameInput(index));
+  test('is byte-identical to first-match semantics for a representative input wave', () => {
+    // The reference intentionally performs the former quadratic scan. Keep the
+    // sample large enough to prove equivalence without making the test suite
+    // benchmark one million cryptographic identity decodes.
+    const applied = Array.from({ length: 200 }, (_, index) => frameInput(index));
     const receipts = applied.map((input, index) => ({
       ...structuredClone(input),
       from: runtimeId((index % 7) + 1),

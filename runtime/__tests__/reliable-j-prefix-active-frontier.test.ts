@@ -6,6 +6,8 @@ import {
   finalizeReliableIngressCommit,
   registerReliableIngress,
 } from '../runtime/reliable-delivery';
+import { applyRecoveryRuntimeOutputPlan } from '../runtime/recovery-output';
+import type { RuntimeOutputRoutingDeps } from '../runtime/output-routing';
 import { buildDurableRuntimeMachineSnapshot, restoreDurableRuntimeSnapshot } from '../storage/wal/snapshot';
 import { createEmptyEnv } from '../runtime';
 import type { DeliverableEntityInput, RuntimeReplica } from '../runtime/types';
@@ -107,6 +109,49 @@ const installTargetReplica = (
 };
 
 describe('reliable applied J-prefix active frontier', () => {
+  test('registers a local reliable continuation only in the frame that applies it', () => {
+    const receiver = runtime('reliable-j-prefix-local-continuation');
+    const output = jPrefixOutput(receiver.runtimeId!, 11, '41');
+    const queued: DeliverableEntityInput[] = [];
+    const routing: RuntimeOutputRoutingDeps = {
+      ensureRuntimeInfrastructure: env => (env.infrastructure ??= {}),
+      getP2P: () => null,
+      enqueueRuntimeInputs: () => undefined,
+      extractEntityId: key => key.split(':')[0] ?? '',
+      hasLocalSignerForEntity: () => true,
+      hasLocalSignerForEntitySigner: () => true,
+      resolveSoleLocalSignerForEntity: () => output.signerId,
+      resolveRuntimeIdForEntity: () => receiver.runtimeId!,
+      resolveRuntimeIdForCrossJurisdictionEntity: () => receiver.runtimeId!,
+    };
+
+    const plan = applyRecoveryRuntimeOutputPlan(
+      receiver,
+      [output],
+      routing,
+      (env, inputs) => {
+        queued.push(...(inputs ?? []));
+        env.runtimeMempool.entityInputs.push(...(inputs ?? []));
+      },
+    );
+
+    expect(queued).toHaveLength(1);
+    expect(queued[0]?.from).toBe(receiver.runtimeId);
+    expect(plan.retainedLocalReliableOutputs).toHaveLength(1);
+    expect(receiver.infrastructure?.pendingReliableIngress?.size ?? 0).toBe(0);
+
+    applyRecoveryRuntimeOutputPlan(
+      receiver,
+      [],
+      routing,
+      (env, inputs) => {
+        queued.push(...(inputs ?? []));
+        env.runtimeMempool.entityInputs.push(...(inputs ?? []));
+      },
+    );
+    expect(queued).toHaveLength(1);
+  });
+
   test('retires after restart when the target Entity height commits without retaining its attestation', () => {
     const sender = runtime('reliable-j-prefix-frontier-sender');
     const receiver = runtime('reliable-j-prefix-frontier-receiver');

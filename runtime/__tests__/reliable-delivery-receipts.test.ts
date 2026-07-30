@@ -31,6 +31,7 @@ import {
 } from '../entity/consensus/output-certification';
 import { generateLazyEntityId } from '../entity/factory';
 import { applyMergedEntityInputs } from '../runtime/entity-inputs';
+import { orderReliableEntityInputsWithinSourceLanes } from '../runtime/frame/input-admission';
 import { recordValidatorJHistory } from '../jurisdiction/local-history';
 import { buildDurableRuntimeMachineSnapshot, restoreDurableRuntimeSnapshot } from '../storage/wal/snapshot';
 import {
@@ -430,6 +431,23 @@ const commitTerminalAccountAtReceiver = (
 };
 
 describe('durable scoped reliable delivery receipts', () => {
+  test('orders one reliable source lane by protocol height without moving unrelated input slots', () => {
+    const receiver = runtime('reliable-ingress-lane-order-receiver');
+    const senderRuntimeId = runtime('reliable-ingress-lane-order-sender').runtimeId!;
+    const unrelated = frameOutput(receiver.runtimeId!, 3, `0x${'31'.repeat(32)}`);
+    unrelated.from = runtime('reliable-ingress-lane-order-unrelated').runtimeId!;
+    const height11 = precommitOutput(receiver.runtimeId!, [[signerId('d1'), ['0x11']]], 11, `0x${'11'.repeat(32)}`);
+    const height10 = precommitOutput(receiver.runtimeId!, [[signerId('d1'), ['0x10']]], 10, `0x${'10'.repeat(32)}`);
+    height11.from = senderRuntimeId;
+    height10.from = senderRuntimeId;
+
+    const ordered = orderReliableEntityInputsWithinSourceLanes([height11, unrelated, height10]);
+
+    expect(ordered[0]?.hashPrecommitFrame?.height).toBe(10);
+    expect(ordered[1]).toBe(unrelated);
+    expect(ordered[2]?.hashPrecommitFrame?.height).toBe(11);
+  });
+
   test('certified Account ACK keeps exact receipt identity across restart and semantic reissue GC', () => {
     const sender = runtime('reliable-receipt-certified-account-sender');
     const receiver = runtime('reliable-receipt-certified-account-receiver');

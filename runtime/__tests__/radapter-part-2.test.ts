@@ -197,6 +197,7 @@ const makeEnv = (): RuntimeReplica =>
                       stateHash: `0x${'02'.repeat(32)}`,
                       accountStateRoot: `0x${'01'.repeat(32)}`,
                       deltas: [],
+                      byLeft: true,
                     },
                     deltas: new Map(),
                     locks: new Map(),

@@ -150,11 +150,6 @@ export const cloneEntityReplica = (
   forSnapshot = false,
 ): EntityReplica => cloneEntityReplicaWithPolicy(replica, forSnapshot, true);
 
-export const cloneTrustedEntityReplica = (
-  replica: EntityReplica,
-  forSnapshot = false,
-): EntityReplica => cloneEntityReplicaWithPolicy(replica, forSnapshot, false);
-
 /**
  * Fork the small consensus envelope without copying Entity frame State.
  *

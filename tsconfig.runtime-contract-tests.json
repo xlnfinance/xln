@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.runtime.json",
+  "files": [
+    "runtime/__tests__/entity-consensus-state-root.test.ts"
+  ]
+}

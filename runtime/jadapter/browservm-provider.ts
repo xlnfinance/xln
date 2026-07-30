@@ -47,6 +47,7 @@ import { getBootstrapTokenAmountBySymbol } from '../jurisdiction/bootstrap-econo
 import {
   decodeBrowserVmEvents,
   toBrowserVmReceiptLogs,
+  type BrowserVmEventCarrier,
   type EthereumLog,
 } from './browservm-events';
 import type { JEvent } from './types';
@@ -801,7 +802,7 @@ export class BrowserVMProvider {
         console.log('[BrowserVM] Events before revert:', result.execResult.logs.length);
         const events = decodeBrowserVmEvents(
           result.execResult.logs as EthereumLog[],
-          [this.depositoryInterface, this.accountInterface, this.entityProviderInterface],
+          this.eventCarriers(),
           this.blockHeight,
           this.blockHash,
           bytesToHex(tx.hash()),
@@ -1957,7 +1958,7 @@ export class BrowserVMProvider {
     this.log(`🔊 [BrowserVM] emitEvents ENTRY: raw logs=${logs.length}, callbacks=${this.eventCallbacks.size}`);
     const events = decodeBrowserVmEvents(
       logs,
-      [this.depositoryInterface, this.accountInterface, this.entityProviderInterface],
+      this.eventCarriers(),
       this.blockHeight,
       this.blockHash,
       transactionHash,
@@ -1978,6 +1979,28 @@ export class BrowserVMProvider {
     }
 
     return events;
+  }
+
+  /**
+   * ABI decoding is strict only for contracts owned by this BrowserVM stack.
+   * Logs from ERC20s and other callers are telemetry; a malformed log from a
+   * known protocol contract is corruption and must stop ingestion.
+   */
+  private eventCarriers(): BrowserVmEventCarrier[] {
+    const carriers: BrowserVmEventCarrier[] = [];
+    if (this.depositoryAddress && this.depositoryInterface && this.accountInterface) {
+      carriers.push({
+        address: this.depositoryAddress.toString(),
+        interfaces: [this.depositoryInterface, this.accountInterface],
+      });
+    }
+    if (this.entityProviderAddress && this.entityProviderInterface) {
+      carriers.push({
+        address: this.entityProviderAddress.toString(),
+        interfaces: [this.entityProviderInterface],
+      });
+    }
+    return carriers;
   }
 
   /** Get next available entity number from EntityProvider contract */

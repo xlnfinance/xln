@@ -375,7 +375,13 @@ export const pruneHistoryViewRetention = async (options: {
 }> => {
   const height = Math.max(1, Math.floor(Number(options.height)));
   const nextHead = options.head;
-  if (nextHead.retainedBytes <= options.config.historyViewMaxBytes || height <= options.config.historyViewRetainFrames) {
+  const retainFrames = options.config.historyViewRetainFrames;
+  const countCutoff = retainFrames === Number.MAX_SAFE_INTEGER
+    ? 0
+    : Math.max(0, height - retainFrames);
+  const countLimitExceeded = countCutoff > nextHead.latestPrunedRuntimeHeight;
+  const byteLimitExceeded = nextHead.retainedBytes > options.config.historyViewMaxBytes;
+  if (!countLimitExceeded && !byteLimitExceeded) {
     return {
       prunedBytes: 0,
       retainedBytes: nextHead.retainedBytes,
@@ -384,7 +390,13 @@ export const pruneHistoryViewRetention = async (options: {
     };
   }
 
-  const cutoff = height - options.config.historyViewRetainFrames;
+  // Count and byte limits are independent upper bounds. A count of one means
+  // "latest finalized Runtime frame only"; two means latest plus one previous.
+  // When the byte budget is tighter, keep the latest frame and discard the
+  // rebuildable prefix in one bounded range operation. The authoritative WAL
+  // is untouched, so this local view can always be recreated.
+  const byteCutoff = byteLimitExceeded ? height - 1 : 0;
+  const cutoff = Math.max(countCutoff, byteCutoff);
   const pruned = await pruneHistoryViewBeforeRuntimeHeight(
     options.db,
     cutoff,

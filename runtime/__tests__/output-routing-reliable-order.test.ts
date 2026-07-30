@@ -220,6 +220,7 @@ const crossJProposalOutput = (
               accountStateRoot: `0x${'de'.repeat(32)}`,
               stateHash: `0x${(leg === 'source' ? 'ef' : 'f0').repeat(32)}`,
               deltas: [],
+              byLeft: fromEntityId < toEntityId,
             },
           },
         },

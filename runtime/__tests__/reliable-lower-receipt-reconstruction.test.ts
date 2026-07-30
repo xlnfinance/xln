@@ -73,7 +73,10 @@ describe('bounded lower reliable receipt reconstruction', () => {
     await processRuntime(receiver, [h2]);
     const replica = receiver.state.eReplicas.get(`${initialState.entityId}:${targetSignerId}`);
     expect(replica?.state.height).toBe(2);
-    expect(replica?.certifiedFrameLineage?.some(link => link.frame.hash === heightOne.frame.hash)).toBe(true);
+    expect(replica?.certifiedFrameAnchor?.height).toBe(1);
+    expect(replica?.certifiedFrameAnchor?.frameHash).toBe(heightOne.frame.hash);
+    expect(replica?.certifiedFrameLineage?.map(link => link.frame.hash))
+      .toEqual([heightTwo.frame.hash]);
 
     const runtimeSnapshot = buildDurableRuntimeMachineSnapshot(receiver);
     const replicaSnapshot = buildCanonicalEntityReplicaSnapshot(replica!);

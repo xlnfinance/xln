@@ -1,5 +1,12 @@
 import type { EntityState } from '../entity/types';
-import type { JurisdictionEventBlock, JurisdictionEventData, ValidatorJBlockHeader, ValidatorJEventBlock, ValidatorJHistory } from '../types/jurisdiction-events';
+import type {
+  JurisdictionEvent,
+  JurisdictionEventBlock,
+  JurisdictionEventData,
+  ValidatorJBlockHeader,
+  ValidatorJEventBlock,
+  ValidatorJHistory,
+} from '../types/jurisdiction-events';
 import {
   canonicalDisputeFinalizationEvidenceHash,
   canonicalJurisdictionEventsHash,
@@ -138,7 +145,17 @@ const assertDisplayBlockIntegrity = (
   if (!/^0x[0-9a-f]{64}$/.test(blockHash)) {
     throw new Error(`J_HISTORY_FINALITY_BLOCK_HASH_CORRUPTION:${height}`);
   }
-  const normalizedEvents = requireCanonicalJurisdictionEvents(block.events);
+  let normalizedEvents: JurisdictionEvent[];
+  try {
+    normalizedEvents = requireCanonicalJurisdictionEvents(block.events);
+  } catch (cause) {
+    // The decoder remains strict, but callers need the certified block height
+    // to locate corrupt durable history. Preserve both layers: a stable
+    // history-integrity code outside and the exact decoder failure as cause.
+    throw new Error(`J_HISTORY_FINALITY_EVENT_BODY_CORRUPTION:${height}`, {
+      cause,
+    });
+  }
   if (!Array.isArray(block.events) || normalizedEvents.length !== block.events.length) {
     throw new Error(`J_HISTORY_FINALITY_EVENT_BODY_CORRUPTION:${height}`);
   }

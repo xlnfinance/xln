@@ -620,12 +620,17 @@ describe('ordered reliable Entity catch-up', () => {
       replica: firstTickReplica,
     }, 2)).toBe(0);
     expect(receiver.pendingNetworkOutputs).toEqual([h2]);
-    expect(receiver.runtimeMempool?.entityInputs).toEqual([h2]);
+    expect(receiver.runtimeMempool?.entityInputs).toEqual([{
+      ...h2,
+      from: receiver.runtimeId,
+    }]);
 
     await processRuntime(receiver, []);
     expect(receiver.state.eReplicas.get(`${initialState.entityId}:${signerId}`)?.state.height).toBe(0);
     expect(receiver.pendingNetworkOutputs).toEqual([h2]);
-    expect(receiver.runtimeMempool?.entityInputs).toEqual([h2]);
+    // H+2 remains in the durable outbox after its one queued attempt. Keeping
+    // another copy in the Runtime mempool would multiply it on every retry.
+    expect(receiver.runtimeMempool?.entityInputs).toEqual([]);
 
     const recoverySigners = [{
       index: 0,

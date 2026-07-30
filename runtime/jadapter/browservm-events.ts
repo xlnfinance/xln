@@ -19,6 +19,11 @@ export type BrowserVmReceiptLog = {
   logIndex: number;
 };
 
+export type BrowserVmEventCarrier = {
+  address: string;
+  interfaces: readonly ethers.Interface[];
+};
+
 const formatLogAddress = (address: EthereumLog[0]): string => {
   if (typeof address === 'string') return address;
   if (address instanceof Uint8Array) return bytesToHex(address);
@@ -44,20 +49,22 @@ export const toBrowserVmReceiptLogs = (
 
 export const decodeBrowserVmEvents = (
   logs: EthereumLog[],
-  interfaces: Array<ethers.Interface | null>,
+  carriers: readonly BrowserVmEventCarrier[],
   blockNumber: number,
   blockHash: string,
   transactionHash: string,
 ): JEvent[] => {
-  const parsers = interfaces.filter((iface): iface is ethers.Interface => iface !== null);
-  if (parsers.length === 0) return [];
-
   const decoded: JEvent[] = [];
   for (const [logIndex, log] of logs.entries()) {
+    const address = formatLogAddress(log[0]).toLowerCase();
+    const carrier = carriers.find(candidate => candidate.address.toLowerCase() === address);
+    if (!carrier) continue;
+
     const topics = log[1].map((topic: Uint8Array) => bytesToHex(topic));
     const data = bytesToHex(log[2]);
 
-    for (const iface of parsers) {
+    let parsedKnownLog = false;
+    for (const iface of carrier.interfaces) {
       try {
         const parsed = iface.parseLog({ topics, data });
         if (!parsed) continue;
@@ -72,10 +79,16 @@ export const decodeBrowserVmEvents = (
           transactionHash,
           logIndex,
         });
+        parsedKnownLog = true;
         break;
       } catch {
-        // Try the next interface; BrowserVM combines events from multiple contracts.
+        // One carrier can expose both Depository and linked Account events.
       }
+    }
+    if (!parsedKnownLog) {
+      throw new Error(
+        `BROWSERVM_KNOWN_CONTRACT_LOG_INVALID:${address}:topic=${topics[0] ?? 'missing'}`,
+      );
     }
   }
   return decoded;

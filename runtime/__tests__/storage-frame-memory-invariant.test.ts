@@ -33,7 +33,7 @@ afterEach(async () => {
   }
 });
 
-test('live Entity memory keeps certified lineage while LevelDB keeps frame history', async () => {
+test('live Entity memory keeps only the post-checkpoint tail while LevelDB keeps frame history', async () => {
   const seed = `frame-memory-invariant-${Date.now()} alpha beta gamma`;
   const env = createEmptyEnv(seed);
   created.push(env);
@@ -108,7 +108,8 @@ test('live Entity memory keeps certified lineage while LevelDB keeps frame histo
 
   const replica = [...env.state.eReplicas.values()].find(candidate => candidate.entityId === entityId);
   expect(replica?.state.height).toBe(2);
-  expect(replica?.certifiedFrameLineage?.map(link => link.frame.height)).toEqual([1, 2]);
+  expect(replica?.certifiedFrameAnchor?.height).toBe(1);
+  expect(replica?.certifiedFrameLineage?.map(link => link.frame.height)).toEqual([2]);
   expect(env.history).toEqual([]);
 
   const persisted = await readPersistedEntityFrameHistory(env, entityId, 10);

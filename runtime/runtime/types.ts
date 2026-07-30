@@ -490,6 +490,8 @@ export interface RuntimeInfrastructure {
   stateMutationInFlight?: boolean;
   /** Entity inputs detached from the live mempool and owned by the active runtime frame. */
   inFlightEntityInputs?: number;
+  /** Reliable identities detached into the frame currently owned by the single writer. */
+  inFlightReliableInputKeys?: Set<string>;
   p2p?: RuntimeP2P | null | undefined;
   pendingP2PConfig?: RuntimeP2PConfig | null;
   lastP2PConfig?: RuntimeP2PConfig | null;

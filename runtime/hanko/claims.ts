@@ -209,28 +209,3 @@ export const verifyCanonicalHanko = (input: Readonly<{
   }
   return { targetEntityId: target, envelope, signatures, claims };
 };
-
-export const extractHankoSemanticClaims = (
-  envelope: HankoEnvelope,
-  signatures: readonly HankoRecoveredSignature[],
-): readonly HankoSemanticClaim[] => envelope.claims.map((claim, claimIndex) => {
-  if (claim.entityIndexes.length === 0 || claim.entityIndexes.length !== claim.weights.length) {
-    throw new Error(`HANKO_CLAIM_SHAPE_INVALID:${claimIndex}`);
-  }
-  const firstClaimIndex = envelope.placeholders.length + signatures.length;
-  const members = claim.entityIndexes.map((rawIndex, memberIndex) => {
-    if (rawIndex > MAX_SAFE_INDEX) throw new Error(`HANKO_ENTITY_INDEX_OOB:${claimIndex}:${memberIndex}`);
-    const index = Number(rawIndex);
-    const weight = asBoardPower(claim.weights[memberIndex]!, `WEIGHT:${claimIndex}:${memberIndex}`);
-    if (index < envelope.placeholders.length) return { entityId: envelope.placeholders[index]!, weight };
-    if (index < firstClaimIndex) return { entityId: signatures[index - envelope.placeholders.length]!.signerEntityId, weight };
-    const nested = index - firstClaimIndex;
-    if (nested >= envelope.claims.length) throw new Error(`HANKO_ENTITY_INDEX_OOB:${claimIndex}:${memberIndex}`);
-    return { entityId: envelope.claims[nested]!.entityId, weight };
-  });
-  const threshold = asBoardPower(claim.threshold, `THRESHOLD:${claimIndex}`);
-  assertUnique(members.map((member) => member.entityId), `HANKO_DUPLICATE_BOARD_MEMBER:${claimIndex}`);
-  if (!isAddressEntityId(members[0]!.entityId)) throw new Error(`HANKO_FIRST_MEMBER_EOA_REQUIRED:${claimIndex}`);
-  const delays = resolveHankoBoardDelays(claim);
-  return { entityId: claim.entityId, members, threshold, delays };
-});

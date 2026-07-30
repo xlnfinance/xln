@@ -91,13 +91,27 @@ const mutators = {
     state.lastFinalizedJHeight = 9;
   },
   jBlockChain: state => {
-    state.jBlockChain.push({ jHeight: 9, jBlockHash: `0x${'55'.repeat(32)}`, eventsHash: `0x${'66'.repeat(32)}` });
+    state.jBlockChain.push({
+      jurisdictionRef: 'evm:31337',
+      jHeight: 9,
+      jBlockHash: `0x${'55'.repeat(32)}`,
+      eventsHash: `0x${'66'.repeat(32)}`,
+      events: [],
+      finalizedAt: 100,
+      proposerSignerId: '1',
+      proposerSignature: `0x${'77'.repeat(65)}`,
+    });
   },
   jHistoryFinality: state => {
     state.jHistoryFinality = {
-      scannedThroughHeight: 9,
+      jurisdictionRef: 'evm:31337',
+      baseHeight: 1,
+      finalizedThroughHeight: 9,
       tipBlockHash: `0x${'55'.repeat(32)}`,
       eventHistoryRoot: `0x${'66'.repeat(32)}`,
+      proposerSignerId: '1',
+      proposerSignature: `0x${'77'.repeat(65)}`,
+      entityHeight: 1,
     };
   },
   certifiedBoardState: state => {
@@ -222,6 +236,9 @@ test('bounded J event bodies are a deletable display cache, not consensus author
       jBlockHash: `0x${'55'.repeat(32)}`,
       eventsHash: `0x${'66'.repeat(32)}`,
       events: [],
+      finalizedAt: 100,
+      proposerSignerId: '1',
+      proposerSignature: `0x${'77'.repeat(65)}`,
     },
   ];
   const withoutDisplayBody = structuredClone(withDisplayBody);
@@ -365,7 +382,7 @@ test('Entity consensus root excludes only typed Account replica caches', () => {
   expect(computeCanonicalEntityConsensusStateHash(left)).not.toBe(computeCanonicalEntityConsensusStateHash(right));
 
   (right.accounts.get(counterpartyId) as unknown as { status: string }).status = 'active';
-  (right.accounts.get(counterpartyId) as unknown as Record<string, unknown>).boardResealMigration = {
+  (right.accounts.get(counterpartyId) as unknown as Record<string, unknown>)['boardResealMigration'] = {
     activationJHeight: 9,
     activationLogIndex: 2,
     reason: 'bilateral-frame-uncertified',
@@ -436,8 +453,12 @@ test('Entity consensus root binds incremental book commitments but not the deriv
   expect(computeCanonicalEntityConsensusStateHash(derivedIndexOnly)).toBe(baselineRoot);
 
   const bookChanged = structuredClone(baseline);
-  bookChanged.orderbookExt!.books.get('1/2')!.eventHash = 99n;
-  delete bookChanged.orderbookExt!.books.get('1/2')!.commitmentHash;
+  const changedBook = bookChanged.orderbookExt!.books.get('1/2')!;
+  const { commitmentHash: _commitmentHash, ...bookWithoutCachedCommitment } = changedBook;
+  bookChanged.orderbookExt!.books.set('1/2', {
+    ...bookWithoutCachedCommitment,
+    eventHash: 99n,
+  });
   expect(computeCanonicalEntityConsensusStateHash(bookChanged)).not.toBe(baselineRoot);
 
   const referralChanged = structuredClone(baseline);

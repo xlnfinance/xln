@@ -122,9 +122,9 @@
       <small>GiB · rebuildable from WAL</small>
     </label>
     <label>
-      <span>Minimum history frames</span>
+      <span>Runtime history frames</span>
       <input bind:value={historyRetainFrames} inputmode="numeric" placeholder="Unlimited" data-testid="storage-history-frames" />
-      <small>Frames retained even when the byte limit is reached</small>
+      <small>1 = latest only · 2 = latest plus one previous</small>
     </label>
   </div>
 

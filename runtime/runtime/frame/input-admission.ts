@@ -8,6 +8,7 @@ import {
   getInputReliableIdentity,
   registerReliableIngress,
 } from '../reliable-delivery';
+import { compareReliableIdentityPosition } from '../reliable-frontier';
 import {
   validateExternalEntityInputTargets,
   RuntimeEntityInputApplyError,
@@ -106,6 +107,50 @@ const validateEntityInputs = (
     }
   });
 
+/**
+ * Transport arrival order is not consensus order.
+ *
+ * Reorder only positions from the same authenticated Runtime and protocol
+ * lane. This lets H settle before H+1 without moving unrelated Entity inputs
+ * or breaking an atomic cross-J cohort's position relative to other work.
+ */
+export const orderReliableEntityInputsWithinSourceLanes = (
+  inputs: readonly RoutedEntityInput[],
+): RoutedEntityInput[] => {
+  const ordered = [...inputs];
+  const positionsByLane = new Map<string, number[]>();
+  ordered.forEach((input, index) => {
+    const sourceRuntimeId = normalizeRuntimeId(input.from);
+    // Locally scheduled consensus intents are not transport ingress yet. Some
+    // intentionally lack the sender signature that their routed form must
+    // carry, so reliable identity decoding begins only after provenance exists.
+    if (!sourceRuntimeId) return;
+    const identity = getInputReliableIdentity(input);
+    if (!identity) return;
+    const key = `${sourceRuntimeId}:${identity.laneKey}`;
+    const positions = positionsByLane.get(key) ?? [];
+    positions.push(index);
+    positionsByLane.set(key, positions);
+  });
+  for (const positions of positionsByLane.values()) {
+    if (positions.length < 2) continue;
+    const lane = positions
+      .map((position, stableIndex) => ({
+        input: ordered[position]!,
+        identity: getInputReliableIdentity(ordered[position]!)!,
+        stableIndex,
+      }))
+      .sort((left, right) =>
+        compareReliableIdentityPosition(left.identity, right.identity) ||
+        left.stableIndex - right.stableIndex)
+      .map(entry => entry.input);
+    positions.forEach((position, index) => {
+      ordered[position] = lane[index]!;
+    });
+  }
+  return ordered;
+};
+
 const registerReliableEntityInputs = (
   env: RuntimeReplica,
   inputs: RoutedEntityInput[],
@@ -164,7 +209,9 @@ export const validateRuntimeInputIngress = (
 ): Omit<PreparedRuntimeIngress, 'immediateReliableReceipts'> => {
   validateRuntimeInputShapeAndLimits(env, runtimeInput, rejectRuntimeInput);
   const jOutbox = collectJOutbox(env, runtimeInput);
-  const entityInputs = validateEntityInputs(env, runtimeInput, isReplay, deps);
+  const entityInputs = orderReliableEntityInputsWithinSourceLanes(
+    validateEntityInputs(env, runtimeInput, isReplay, deps),
+  );
   validateExternalEntityInputTargets(env, entityInputs, runtimeInput.runtimeTxs);
   return {
     runtimeTxs: [...runtimeInput.runtimeTxs],

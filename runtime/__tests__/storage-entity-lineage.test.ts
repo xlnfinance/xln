@@ -377,9 +377,7 @@ describe('certified Entity storage lineage', () => {
     const commitment = buildStorageReplicaMetaCommitment(env);
     const meta = decodeBuffer<StorageReplicaMeta>(commitment.entries[0]!.value);
 
-    expect(meta.certifiedFrameLineage ?? []).toHaveLength(20);
-    expect(meta.certifiedFrameLineage?.[0]?.frame.height).toBe(1);
-    expect(meta.certifiedFrameLineage?.at(-1)?.frame.height).toBe(20);
+    expect(meta.certifiedFrameLineage ?? []).toHaveLength(0);
     expect(meta.certifiedFrameAnchor?.height).toBe(20);
     expect(meta.certifiedFrameAnchor?.frameHash).toBe(state.prevFrameHash);
     expect(meta.certifiedFrameAnchor?.stateRoot).toBe(stateRootBefore);
@@ -450,14 +448,14 @@ describe('certified Entity storage lineage', () => {
     expect(computeCanonicalEntityConsensusStateHash(state)).toBe(stateRootBefore);
   });
 
-  test('keeps every certified Entity link when publishing a rolling checkpoint anchor', async () => {
+  test('prunes certified Entity links after publishing a durable rolling checkpoint anchor', async () => {
     const { env, signerId, state: heightOne } = await installCertifiedImportFixture(
       'storage-lineage-multi-entity-frame-runtime-frame',
     );
     applyCertifiedEntityLineagePlan(env, buildRuntimeCheckpointLineagePlan(env));
     const replica = env.state.eReplicas.get(`${heightOne.entityId}:${signerId}`)!;
     expect(replica.certifiedFrameAnchor?.height).toBe(1);
-    expect(replica.certifiedFrameLineage ?? []).toHaveLength(1);
+    expect(replica.certifiedFrameLineage ?? []).toHaveLength(0);
 
     const heightTwo = await certifyNextFrame(env, signerId, heightOne, []);
     const heightThree = await certifyNextFrame(env, signerId, heightTwo.state, []);
@@ -471,8 +469,7 @@ describe('certified Entity storage lineage', () => {
     expect(() => buildCertifiedEntityLineagePlan(env)).not.toThrow();
     applyCertifiedEntityLineagePlan(env, buildRuntimeCheckpointLineagePlan(env));
     expect(replica.certifiedFrameAnchor?.height).toBe(3);
-    expect(replica.certifiedFrameLineage ?? []).toHaveLength(3);
-    expect(replica.certifiedFrameLineage?.map(link => link.frame.height)).toEqual([1, 2, 3]);
+    expect(replica.certifiedFrameLineage ?? []).toHaveLength(0);
   });
 
   test('repeat import preserves an already-published H0 anchor exactly', async () => {

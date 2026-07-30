@@ -60,18 +60,6 @@ export const extractCrossJurisdictionRouteFromTx = (
   return route && typeof route === 'object' ? route as CrossJurisdictionSwapRoute : null;
 };
 
-export const getCrossJurisdictionRouteEntityIds = (route: CrossJurisdictionSwapRoute): string[] => {
-  const ids = [
-    route.source?.entityId,
-    route.target?.counterpartyEntityId,
-    route.source?.counterpartyEntityId,
-    route.target?.entityId,
-    route.bookOwnerEntityId,
-    route.hubEntityId,
-  ].map(normalizeEntityRef).filter(Boolean);
-  return [...new Set(ids)];
-};
-
 export const isCrossJurisdictionSiblingPair = (
   route: CrossJurisdictionSwapRoute,
   sourceEntityId: string,

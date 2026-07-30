@@ -257,6 +257,7 @@ describe('storage frame journal retention', () => {
         ...(env.runtimeConfig?.storage || {}),
         snapshotPeriodFrames: 1,
         retainSnapshots: 1,
+        retainSnapshots: 1,
       },
     };
 
@@ -1464,6 +1465,7 @@ describe('storage frame journal retention', () => {
       storage: {
         ...(env.runtimeConfig?.storage || {}),
         snapshotPeriodFrames: 1,
+        retainSnapshots: 1,
       },
     };
     env.quietRuntimeLogs = true;

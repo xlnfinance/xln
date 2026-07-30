@@ -1433,7 +1433,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         starterInitialArguments,
         starterIncrementedArguments: '0x',
         disputeTimeout: 100,
-        jNonce: 1,
+        watchSeed: state.accounts.get(hub)!.watchSeed,
       },
     };
     const signed = prepareJEventInput(env, user, signer, {
@@ -1561,7 +1561,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         starterInitialArguments,
         starterIncrementedArguments: '0x',
         disputeTimeout: 100,
-        jNonce: 1,
+        watchSeed: state.accounts.get(sourceHub)!.watchSeed,
       },
     };
     const signed = prepareJEventInput(env, sourceUser, signer, {
@@ -2161,7 +2161,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         starterInitialArguments: '0x',
         starterIncrementedArguments: '0x',
         disputeTimeout: 100,
-        jNonce: 1,
+        watchSeed: targetState.accounts.get(targetHub)!.watchSeed,
       },
     };
     const signed = prepareJEventInput(env, targetUser, targetSigner, {

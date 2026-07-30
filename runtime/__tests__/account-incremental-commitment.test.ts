@@ -47,6 +47,7 @@ const account = (offerCount: number): AccountState => ({
     accountStateRoot: `0x${'00'.repeat(32)}`,
     stateHash: '',
     deltas: [],
+    byLeft: true,
   },
   deltas: new Map(),
   locks: new Map(),

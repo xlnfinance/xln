@@ -152,6 +152,3 @@ export async function verifyProfileSignature(profile: Profile, env?: EntityRunti
   if (!entityResult.valid) return { valid: false, reason: 'entity_certification_invalid', hash };
   return verifyRuntimeRouteSignature(canonicalProfile);
 }
-
-export const hasValidProfileSignature = (profile: Profile): boolean =>
-  Boolean(profile.metadata.profileHanko && profile.runtimeSignerId && profile.runtimeSignature);

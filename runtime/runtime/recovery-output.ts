@@ -14,10 +14,9 @@ import {
 import {
   applyReliableDeliveryReceipts,
   matchReceiptsToOutputs,
-  registerReliableIngress,
-  registerReliableReceiptIngress,
   type ReliableIngressCommit,
 } from './reliable-delivery';
+import { reliableIdentityExactKey } from './reliable-frontier';
 
 export type RuntimeContinuationEnqueuer = (
   env: RuntimeReplica,
@@ -53,25 +52,44 @@ const queueLocalReliableOutputs = (
     throw new Error('RELIABLE_LOCAL_RUNTIME_ID_MISSING');
   }
   const inputs: RoutedEntityInput[] = [];
-  const receipts: ReliableDeliveryReceipt[] = [];
   const retained: RoutedEntityInput[] = [];
+  const queuedReliableKeys = new Set(
+    [
+      ...(env.runtimeMempool?.entityInputs ?? []).flatMap(input => {
+        const identity = getReliableOutputIdentity(input);
+        return identity ? [reliableIdentityExactKey(identity)] : [];
+      }),
+      ...[...(env.infrastructure?.pendingReliableIngress?.values() ?? [])]
+        .map(entry => reliableIdentityExactKey(entry.identity)),
+      ...(env.infrastructure?.inFlightReliableInputKeys ?? []),
+    ],
+  );
   for (const originated of localOutputs) {
     const { sourceRuntimeFrame: _sourceRuntimeFrame, ...output } = originated;
     if (!getReliableOutputIdentity(output)) {
       inputs.push(output);
       continue;
     }
-    const deliverable = { ...output, runtimeId: runtimeId! };
+    // Loopback uses the same authenticated provenance and receipt protocol as
+    // remote transport. Runtime creates both fields here, so the next frame
+    // registers the input once and can durably retire the retained outbox item.
+    const deliverable = {
+      ...output,
+      runtimeId: runtimeId!,
+      from: runtimeId!,
+    };
     retained.push(deliverable);
-    const registration = registerReliableIngress(
-      env,
-      runtimeId!,
-      deliverable,
+    // The current WAL persists both this retained outbox item and the next
+    // Runtime mempool. Registering receiver ingress here would register it a
+    // second time when that next frame actually applies the input, causing the
+    // admission layer to suppress its own local continuation as "pending".
+    // Registration therefore belongs exclusively to the applying frame.
+    const reliableKey = reliableIdentityExactKey(
+      getReliableOutputIdentity(deliverable)!,
     );
-    if (registration.kind === 'enqueue') inputs.push(deliverable);
-    if (registration.kind === 'receipt') {
-      registerReliableReceiptIngress(env, registration.receipt);
-      receipts.push(registration.receipt);
+    if (!queuedReliableKeys.has(reliableKey)) {
+      queuedReliableKeys.add(reliableKey);
+      inputs.push(deliverable);
     }
   }
   enqueueRuntimeContinuation(
@@ -80,7 +98,6 @@ const queueLocalReliableOutputs = (
     undefined,
     undefined,
     env.state.timestamp,
-    receipts,
   );
   return retained;
 };

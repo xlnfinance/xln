@@ -1585,7 +1585,7 @@ describe('audit fail-fast regressions', () => {
     ).rejects.toThrow('RUNTIME_REPLICA_NOT_FOUND');
   });
 
-  test('process requeues oversized runtime input instead of silently dropping it', async () => {
+  test('rejects an oversized ingress atomically before it enters the Runtime mempool', async () => {
     const env = createEmptyEnv('audit-regression-seed');
     env.scenarioMode = true;
     env.quietRuntimeLogs = true;
@@ -1595,9 +1595,10 @@ describe('audit fail-fast regressions', () => {
       entityTxs: [],
     }));
 
-    await expect(processRuntime(env, inputs)).rejects.toThrow('Too many entity inputs');
+    await expect(processRuntime(env, inputs))
+      .rejects.toThrow('RUNTIME_MEMPOOL_CAPACITY_EXCEEDED:entityInputs:10001:10000');
     expect(env.state.height).toBe(0);
-    expect(env.runtimeMempool?.entityInputs.length).toBe(10001);
+    expect(env.runtimeMempool?.entityInputs.length).toBe(0);
   });
 
   test('safeStringify throws instead of hashing a placeholder string', () => {

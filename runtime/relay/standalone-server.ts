@@ -18,7 +18,7 @@ type StandaloneRelayOptions = {
 };
 
 export type StandaloneRelayServer = {
-  server: ReturnType<typeof Bun.serve>;
+  server: Bun.Server<undefined>;
   store: RelayStore;
   close: () => void;
   sendToRuntime: (runtimeId: string, message: RuntimeWsMessage) => void;
@@ -33,7 +33,7 @@ export const startStandaloneRelayServer = (options: StandaloneRelayOptions): Sta
   const store = createRelayStore(options.serverId);
   const localRuntimeId = normalizeRuntimeId(options.serverRuntimeId || options.serverId) || options.serverId;
   const helloChallenges = createHelloChallengeRegistry();
-  let serverRef: ReturnType<typeof Bun.serve> | null = null;
+  let serverRef: Bun.Server<undefined> | null = null;
 
   const routerConfig: RelayRouterConfig = {
     store,
@@ -45,7 +45,7 @@ export const startStandaloneRelayServer = (options: StandaloneRelayOptions): Sta
     consumeHelloChallenge: (ws, challenge) => helloChallenges.consume(ws, challenge),
   };
 
-  const server = Bun.serve({
+  const server = Bun.serve<undefined>({
     hostname: options.host || '0.0.0.0',
     port: options.port,
     fetch(request) {

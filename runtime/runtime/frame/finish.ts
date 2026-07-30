@@ -110,6 +110,7 @@ export const finishRuntimeFrame = (
   if (profile.outcome === 'unknown') profile.outcome = 'thrown';
   profile.finish(env);
   state.inFlightEntityInputs = 0;
+  state.inFlightReliableInputKeys = new Set();
   delete liveEnv.activeProcessProgressAt;
   delete liveEnv.activeProcessProgressStep;
   releaseWriter();

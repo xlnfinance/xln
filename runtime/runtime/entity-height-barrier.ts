@@ -1,5 +1,8 @@
 import type { EntityReplica } from '../entity/types';
 import type { RuntimeReplica, RoutedEntityInput, RuntimeInput } from './types';
+import { normalizeRuntimeId } from '../networking/runtime-id';
+import { getInputReliableIdentity } from './reliable-delivery';
+import { reliableIdentityExactKey } from './reliable-frontier';
 
 const normalize = (value: unknown): string => String(value ?? '').trim().toLowerCase();
 
@@ -40,6 +43,33 @@ const possibleCommittedHeight = (
   // retained for the next durable R-frame instead of crossing the WAL boundary.
   if ((input.entityTxs?.length ?? 0) > 0) return currentHeight + 1;
   return null;
+};
+
+const dedupeDeferredReliableInputs = (
+  env: RuntimeReplica,
+  inputs: readonly RoutedEntityInput[],
+): RoutedEntityInput[] => {
+  const retained: RoutedEntityInput[] = [];
+  const exactSources = new Set<string>();
+  for (const input of inputs) {
+    const identity = getInputReliableIdentity(input);
+    if (!identity) {
+      retained.push(input);
+      continue;
+    }
+    // A locally supplied duplicate and its loopback-routed copy are the same
+    // delivery. Distinct authenticated remote sources remain separate because
+    // each is owed its own durable receipt after the body commits.
+    const sourceRuntimeId =
+      normalizeRuntimeId(input.from) ||
+      normalizeRuntimeId(env.runtimeId) ||
+      'local';
+    const key = `${sourceRuntimeId}:${reliableIdentityExactKey(identity)}`;
+    if (exactSources.has(key)) continue;
+    exactSources.add(key);
+    retained.push(input);
+  }
+  return retained;
 };
 
 /**
@@ -91,7 +121,10 @@ export const applyEntityHeightDurabilityBarrier = (
 
   if (deferred.length === 0) return 0;
   runtimeInput.entityInputs = selected;
-  mempool.entityInputs = [...deferred, ...mempool.entityInputs];
+  mempool.entityInputs = [
+    ...dedupeDeferredReliableInputs(env, deferred),
+    ...mempool.entityInputs,
+  ];
   mempool.queuedAt = mempool.queuedAt ?? queuedAt;
   return deferred.length;
 };

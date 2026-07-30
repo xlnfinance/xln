@@ -2701,7 +2701,7 @@ const handleStaticRequest = async (
   );
 };
 
-const server = Bun.serve({
+const server = Bun.serve<OrchestratorWebSocket['data']>({
   hostname: args.host,
   port: args.port,
   idleTimeout: 120,
@@ -2853,7 +2853,7 @@ const server = Bun.serve({
   },
   websocket: {
     open(ws) {
-      const relayWs = ws as OrchestratorWebSocket;
+      const relayWs = ws;
       if (relayWs.data.type === 'relay') relayHelloChallenges.issue(relayWs);
       pushDebugEvent(relayStore, {
         event: 'ws_open',
@@ -2874,7 +2874,7 @@ const server = Bun.serve({
           }
         }
         if (marketMessage) {
-          Promise.resolve(marketSubscriptionStack.handleMessage(ws as OrchestratorWebSocket, marketMessage)).catch(error => {
+          Promise.resolve(marketSubscriptionStack.handleMessage(ws, marketMessage)).catch(error => {
             const reason = serializeError(error);
             pushDebugEvent(relayStore, {
               event: 'error',
@@ -2890,7 +2890,7 @@ const server = Bun.serve({
           return;
         }
         if (!peerMessage) throw new Error('RELAY_MESSAGE_DECODE_INVARIANT');
-        Promise.resolve(relayRoute(routerConfig, ws as OrchestratorWebSocket, peerMessage)).catch(error => {
+        Promise.resolve(relayRoute(routerConfig, ws, peerMessage)).catch(error => {
           const reason = serializeError(error);
           pushDebugEvent(relayStore, {
             event: 'error',
@@ -2922,7 +2922,7 @@ const server = Bun.serve({
       }
     },
     close(ws) {
-      const relayWs = ws as OrchestratorWebSocket;
+      const relayWs = ws;
       relayHelloChallenges.forget(relayWs);
       cleanupRpcMarketSubscription(relayWs);
       forgetRelaySocketRuntimeId(relayWs);

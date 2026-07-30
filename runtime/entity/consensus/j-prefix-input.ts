@@ -15,6 +15,7 @@ import {
 } from './input-types';
 import { entityLog } from './entity-log';
 import { ensureLocalJPrefixAttestation } from './j-prefix-round';
+import type { EntityReplica } from '../types';
 
 const verifyAttestationRound = (context: ApplyEntityInputContext): 'stale' | 'current' | 'future' => {
   const { env, entityInput, workingReplica } = context;
@@ -41,7 +42,10 @@ const verifyAttestationRound = (context: ApplyEntityInputContext): 'stale' | 'cu
   return disposition;
 };
 
-const rebroadcastLocalAttestation = (context: ApplyEntityInputContext): void => {
+const rebroadcastLocalAttestation = (
+  context: ApplyEntityInputContext,
+  priorRound: EntityReplica['jPrefixRound'],
+): void => {
   const { entityInput, entityOutbox, workingReplica } = context;
   const incoming = entityInput.jPrefixAttestations!;
   for (const [signerId, attestation] of incoming) {
@@ -49,7 +53,7 @@ const rebroadcastLocalAttestation = (context: ApplyEntityInputContext): void => 
     if (normalizedSignerId !== workingReplica.signerId.trim().toLowerCase()) {
       continue;
     }
-    const previous = workingReplica.jPrefixRound?.attestations.get(normalizedSignerId);
+    const previous = priorRound?.attestations.get(normalizedSignerId);
     if (previous && encodeCanonicalConsensusValue(previous) === encodeCanonicalConsensusValue(attestation)) {
       continue;
     }
@@ -119,6 +123,9 @@ export const handleJPrefixAttestations = (context: ApplyEntityInputContext): App
   }
   workingReplica.jPrefixRound = merged;
   if (changed) workingReplica.lastConsensusProgressAt = env.state.timestamp;
-  rebroadcastLocalAttestation(context);
+  // Watchers deliver this validator's already-signed local vote as input.
+  // Compare against the pre-merge round: comparing after assignment makes the
+  // new vote look like a duplicate and silently suppresses peer fanout.
+  rebroadcastLocalAttestation(context, priorRound);
   return null;
 };

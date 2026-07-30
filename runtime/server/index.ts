@@ -67,6 +67,7 @@ import {
   hasConnectedEncryptedRelayClient,
   resolveRequestClientIp,
   sendEntityInputDirectViaRelaySocketDelivery,
+  type RelaySocketData,
   type RelaySocket,
 } from './relay-direct';
 import { createServerRpcMessageHandler } from './rpc-ws';
@@ -806,7 +807,7 @@ const handleHttpRequest = async (
   options: XlnServerOptions,
   session: ServerSession,
   req: Request,
-  server: Server,
+  server: Server<RelaySocketData>,
 ): Promise<Response | undefined> => {
   const pathname = new URL(req.url).pathname;
   const localPairingResponse = await localPairingController.handle(req, pathname, session.env);
@@ -991,7 +992,7 @@ const handleWebSocketClose = (session: ServerSession, ws: RelaySocket, code: num
 };
 
 const createHttpServer = (options: XlnServerOptions, session: ServerSession) =>
-  Bun.serve({
+  Bun.serve<RelaySocketData>({
     port: options.port,
     hostname: options.host ?? '127.0.0.1',
     fetch: (req, server) => handleHttpRequest(options, session, req, server),

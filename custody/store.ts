@@ -139,7 +139,7 @@ export class CustodyStore {
 
   private ensureDepositColumn(columnName: string, alterSql: string): void {
     const columns = this.db
-      .query<{ name: string }>('PRAGMA table_info(deposits)')
+      .query<{ name: string }, []>('PRAGMA table_info(deposits)')
       .all()
       .map(row => row.name);
     if (!columns.includes(columnName)) {
@@ -149,7 +149,7 @@ export class CustodyStore {
 
   private ensureWithdrawalColumn(columnName: string, alterSql: string): void {
     const columns = this.db
-      .query<{ name: string }>('PRAGMA table_info(withdrawals)')
+      .query<{ name: string }, []>('PRAGMA table_info(withdrawals)')
       .all()
       .map(row => row.name);
     if (!columns.includes(columnName)) {
@@ -163,7 +163,7 @@ export class CustodyStore {
 
   getSessionByToken(token: string): SessionRecord | null {
     const row = this.db
-      .query<{ token: string; user_id: string; created_at: number; last_seen_at: number }>(
+      .query<{ token: string; user_id: string; created_at: number; last_seen_at: number }, [string]>(
         'SELECT token, user_id, created_at, last_seen_at FROM sessions WHERE token = ?1',
       )
       .get(token);
@@ -177,7 +177,7 @@ export class CustodyStore {
   }
 
   userExists(userId: string): boolean {
-    const row = this.db.query<{ found: number }>('SELECT 1 AS found FROM sessions WHERE user_id = ?1 LIMIT 1').get(userId);
+    const row = this.db.query<{ found: number }, [string]>('SELECT 1 AS found FROM sessions WHERE user_id = ?1 LIMIT 1').get(userId);
     return !!row?.found;
   }
 
@@ -197,7 +197,7 @@ export class CustodyStore {
 
   getBalances(userId: string): BalanceRecord[] {
     const rows = this.db
-      .query<{ token_id: number; amount_minor: string; updated_at: number }>(
+      .query<{ token_id: number; amount_minor: string; updated_at: number }, [string]>(
         'SELECT token_id, amount_minor, updated_at FROM balances WHERE user_id = ?1 ORDER BY token_id ASC',
       )
       .all(userId);
@@ -210,7 +210,7 @@ export class CustodyStore {
 
   getBalanceAmount(userId: string, tokenId: number): bigint {
     const row = this.db
-      .query<{ amount_minor: string }>('SELECT amount_minor FROM balances WHERE user_id = ?1 AND token_id = ?2')
+      .query<{ amount_minor: string }, [string, number]>('SELECT amount_minor FROM balances WHERE user_id = ?1 AND token_id = ?2')
       .get(userId, tokenId);
     return row ? toBigInt(row.amount_minor) : 0n;
   }
@@ -350,7 +350,7 @@ export class CustodyStore {
   }
 
   listSubmittingWithdrawals(): WithdrawalRecord[] {
-    const rows = this.db.query<{ id: string }>(
+    const rows = this.db.query<{ id: string }, []>(
       `SELECT id FROM withdrawals WHERE status = 'submitting' ORDER BY created_at ASC, id ASC`,
     ).all();
     return rows.map(row => {
@@ -511,7 +511,7 @@ export class CustodyStore {
         finalized_at: number | null;
         frame_height: number | null;
         started_at_ms: number | null;
-      }>(
+      }, [string]>(
         `SELECT id, user_id, token_id, amount_minor, requested_amount_minor, fee_minor, target_entity_id, description, status, hashlock,
                 route_json, command_id, command_sequence, daemon_error, created_at, updated_at, finalized_at, frame_height, started_at_ms
          FROM withdrawals WHERE id = ?1`,
@@ -543,7 +543,7 @@ export class CustodyStore {
 
   getWithdrawalByHashlock(hashlock: string): WithdrawalRecord | null {
     const row = this.db
-      .query<{ id: string }>('SELECT id FROM withdrawals WHERE hashlock = ?1 LIMIT 1')
+      .query<{ id: string }, [string]>('SELECT id FROM withdrawals WHERE hashlock = ?1 LIMIT 1')
       .get(hashlock);
     return row ? this.getWithdrawalById(row.id) : null;
   }
@@ -561,7 +561,7 @@ export class CustodyStore {
         frame_height: number;
         created_at: number;
         started_at_ms: number | null;
-      }>(
+      }, [string, number]>(
         `SELECT event_key, user_id, token_id, amount_minor, description, from_entity_id, hashlock, frame_height, created_at, started_at_ms
          FROM deposits WHERE user_id = ?1 ORDER BY created_at DESC LIMIT ?2`,
       )
@@ -588,7 +588,7 @@ export class CustodyStore {
         finalized_at: number | null;
         frame_height: number | null;
         started_at_ms: number | null;
-      }>(
+      }, [string, number]>(
         `SELECT id, user_id, token_id, amount_minor, requested_amount_minor, fee_minor, target_entity_id, description, status, hashlock,
                 route_json, command_id, command_sequence, daemon_error, created_at, updated_at, finalized_at, frame_height, started_at_ms
          FROM withdrawals WHERE user_id = ?1 ORDER BY created_at DESC LIMIT ?2`,
@@ -643,7 +643,7 @@ export class CustodyStore {
   }
 
   getStateNumber(key: string, fallback = 0): number {
-    const row = this.db.query<{ value: string }>('SELECT value FROM service_state WHERE key = ?1').get(key);
+    const row = this.db.query<{ value: string }, [string]>('SELECT value FROM service_state WHERE key = ?1').get(key);
     if (!row) return fallback;
     const parsed = Number(row.value);
     return Number.isFinite(parsed) ? parsed : fallback;

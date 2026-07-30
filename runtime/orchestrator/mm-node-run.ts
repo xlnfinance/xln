@@ -799,7 +799,7 @@ const quiesceMarketMakerRuntime = async (
 };
 
 const createMarketMakerHttpHandler =
-  (deps: MarketMakerHttpHandlerDeps): ((request: Request, server: Bun.Server) => Promise<Response | undefined>) =>
+  (deps: MarketMakerHttpHandlerDeps): ((request: Request, server: Bun.Server<{ type?: string }>) => Promise<Response | undefined>) =>
   async (request, server) => {
     const releaseHttp = deps.httpDrain.begin();
     try {
@@ -1290,7 +1290,7 @@ const selectMarketMakerCrossQuoteJobs = (
 
 type MarketMakerShutdownDeps = {
   env: RuntimeReplica;
-  server: Bun.Server;
+  server: Bun.Server<{ type?: string }>;
   httpDrain: ReturnType<typeof createHttpDrainTracker>;
   stopRuntimeLoops: () => void;
 };
@@ -2064,7 +2064,7 @@ const createMarketMakerNodeContext = (
 };
 
 type StartedMarketMakerServices = {
-  server: Bun.Server;
+  server: Bun.Server<{ type?: string }>;
   httpDrain: ReturnType<typeof createHttpDrainTracker>;
   primaryContext: MarketMakerEntityContext;
 };
@@ -2122,7 +2122,7 @@ const startMarketMakerServices = async (context: MarketMakerNodeContext): Promis
     isMutatingIngressReady: () => state.externalIngressReady,
   });
   const httpDrain = createHttpDrainTracker();
-  const server = Bun.serve({
+  const server = Bun.serve<{ type?: string }>({
     hostname: resolvedArgs.apiHost,
     port: resolvedArgs.apiPort,
     idleTimeout: 120,

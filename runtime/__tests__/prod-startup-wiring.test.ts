@@ -79,7 +79,8 @@ describe('production startup wiring', () => {
     };
     const releaseGate = readFileSync(join(repoRoot, 'runtime/scripts/run-release-gate.ts'), 'utf8');
 
-    expect(packageJson.scripts['check:src']).not.toContain('check:determinism');
+    expect(packageJson.scripts['check:src'].split('&&').map(command => command.trim()))
+      .not.toContain('bun run check:determinism');
     expect(releaseGate).toContain(
       "{ name: 'deterministic replay oracle', command: 'bun run check:determinism', timeoutMs: 600_000 }",
     );
@@ -1249,7 +1250,7 @@ describe('production startup wiring', () => {
 
   test('market-maker control lifecycle exists before the HTTP server accepts teardown', () => {
     const mmNode = readMarketMakerNodeSource();
-    const serverStart = mmNode.indexOf('const server = Bun.serve({');
+    const serverStart = mmNode.indexOf('const server = Bun.serve');
     const lifecycleDeclarations = ['shuttingDown: false,', 'stopRuntimeLoops: () => {'];
 
     expect(serverStart).toBeGreaterThan(0);

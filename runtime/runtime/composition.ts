@@ -1,12 +1,9 @@
 import { runtimeIsBrowser } from '../infra/runtime-process';
 export { getLiveJAdapter, getLiveJAdapterEntries } from './live-jadapters';
 
-// Bump this on runtime bundle changes that must be reflected in frontend immediately.
-const RUNTIME_BUILD_ID = '2026-07-18-16:00Z';
 // The testnet exposes one canonical runtime contract. Breaking changes replace
 // v1 in place; there are no compatibility branches inside the state machine.
 export const RUNTIME_SCHEMA_VERSION = 1;
-export const RUNTIME_BUILD = RUNTIME_BUILD_ID;
 
 import { assertBrowserVMJurisdiction } from '../jadapter/browservm-registry';
 import { attachEventEmitters } from './env-events';
@@ -195,10 +192,6 @@ export {
   ensureGossipProfiles,
   clearGossip,
 };
-export const initEnv = (seed?: string | null): RuntimeReplica => {
-  return createEmptyEnv(seed ?? null);
-};
-
 const applyRuntimeInput = createRuntimeInputReducer({
   assertApplyAllowed: env => {
     failfastAssert(

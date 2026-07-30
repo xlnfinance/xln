@@ -578,6 +578,20 @@ describe('validator J-prefix consensus', () => {
     expect(proposerReplica.proposal).toBeUndefined();
 
     const proposerHead = proposerReplica.jPrefixRound!.attestations.get(proposerId)!;
+    const watcherIngress = await applyEntityInput(
+      proposerEnv,
+      makeReplica(proposerId, true),
+      {
+        entityId,
+        signerId: proposerId,
+        jPrefixAttestations: new Map([[proposerId, proposerHead]]),
+      },
+    );
+    expect(
+      watcherIngress.outputs.filter(output =>
+        output.jPrefixAttestations?.has(proposerId),
+      ).map(output => output.signerId).sort(),
+    ).toEqual([thirdId, validatorId].sort());
     const { signature: _proposerSignature, ...proposerUnsigned } = proposerHead;
     const proposerDigest = hashJPrefixAttestation(proposerUnsigned);
     expect(() => signAccountFrame(proposerEnv, validatorId, proposerDigest)).toThrow('MISSING_SIGNER_KEY');

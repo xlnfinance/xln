@@ -178,8 +178,12 @@ const assertNoPendingOrderGap = (
     compareReliableIdentityPosition(entry, identity) === 0)) {
     assertReliableLaneCompatible(candidate, identity, 'RELIABLE_INGRESS_LANE_ORDER_CONFLICT');
   }
-  if (pending.some(candidate => compareReliableIdentityPosition(candidate, identity) > 0)) {
-    throw new Error(`RELIABLE_INGRESS_PENDING_ORDER_REGRESSION:${identity.kind}:${identity.height}`);
+  const higher = pending.find(candidate => compareReliableIdentityPosition(candidate, identity) > 0);
+  if (higher) {
+    throw new Error(
+      `RELIABLE_INGRESS_PENDING_ORDER_REGRESSION:${identity.kind}:` +
+      `${identity.height}:${higher.height}`,
+    );
   }
   return pending.length > 0;
 };

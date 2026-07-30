@@ -12,6 +12,7 @@ import {
   signAccountFrame,
 } from '../../account/crypto';
 import { createEmptyAccountJClaimAccumulator } from '../../account/j-claim-accumulator';
+import { LIMITS } from '../../config/constants';
 import { EMPTY_ACCOUNT_STATE_ROOT } from '../../account/state-root';
 import { deriveAccountWatchSeed } from '../../protocol/account-watch-seed';
 import { createEntityFrameHashFromStateRoot } from '../../entity/consensus/frame';
@@ -126,7 +127,7 @@ const oversizedAccount: AccountState = {
     stateHash: '',
     byLeft: entityId === leftEntity,
   },
-  deltas: new Map(Array.from({ length: 400 }, (_, tokenId) => {
+  deltas: new Map(Array.from({ length: LIMITS.MAX_ACCOUNT_TOKEN_ROWS }, (_, tokenId) => {
     const delta = createDefaultDelta(tokenId);
     delta.offdelta = BigInt(tokenId);
     return [tokenId, delta];

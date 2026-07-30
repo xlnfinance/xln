@@ -930,13 +930,12 @@ export const rebaseCertifiedEntityLineageAtRuntimeCheckpoint = (
       };
       assertLineageAnchor(env, entityId, checkpointed);
       anchorByReplicaKey.set(entry.replicaKey, checkpointed);
-      const certifiedLineage = validated.lineageByReplicaKey.get(entry.replicaKey);
-      if (certifiedLineage && certifiedLineage.length > 0) {
-        // A Runtime checkpoint accelerates recovery; it is not a pruning
-        // authority. Keep the complete locally certified audit chain until a
-        // separate, explicit pruning protocol defines an equivalent proof.
-        lineageByReplicaKey.set(entry.replicaKey, structuredClone(certifiedLineage));
-      }
+      // The synced Runtime WAL makes this endpoint durable before the plan is
+      // installed in memory. Full Entity certificates remain in the Entity
+      // history view; the live replica needs only this anchor plus links
+      // certified after it. Pruning earlier would make a failed WAL write lose
+      // recovery evidence, while retaining the full prefix would make memory
+      // grow with Entity age.
     }
   }
   return {
@@ -1067,13 +1066,9 @@ export const buildRuntimeCheckpointLineagePlan = (env: RuntimeReplica): Certifie
         ...anchor,
         runtimeCheckpoint: { runtimeHeight: env.state.height, replicaSetRoot },
       });
-      const certifiedLineage = entry.replica.certifiedFrameLineage;
-      if (certifiedLineage && certifiedLineage.length > 0) {
-        // Checkpoint publication cannot silently destroy audit evidence. The
-        // Runtime WAL is a second durable copy, not a substitute for the lineage
-        // committed by replica metadata.
-        lineageByReplicaKey.set(entry.replicaKey, structuredClone(certifiedLineage));
-      }
+      // Deliberately leave the post-checkpoint lineage empty. The commit path
+      // installs this plan only after the synced WAL batch succeeds. Subsequent
+      // Entity frames append a short, independently verifiable tail.
     }
   }
   return { lookup, lineageByReplicaKey, anchorByReplicaKey };

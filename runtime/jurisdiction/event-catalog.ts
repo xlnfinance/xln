@@ -1,12 +1,47 @@
-// Single source of truth for contract events accepted by J consensus.
-// Keep this list aligned with Depository.sol; adapters only decode transport.
+/**
+ * Exhaustive event policy for protocol-owned contracts.
+ *
+ * `consensus` events enter the deterministic J → Entity cascade. `telemetry`
+ * events are deliberately decoded and ignored. The ABI parity gate rejects a
+ * Solidity event that has not received an explicit policy here.
+ */
+export const DEPOSITORY_J_EVENTS = {
+  consensus: [
+    'ReserveUpdated', 'SecretRevealed', 'AccountSettled',
+    'DisputeStarted', 'DisputeFinalized',
+    'DebtCreated', 'DebtEnforced', 'DebtForgiven',
+    'HankoBatchProcessed', 'BatchOperationSkipped',
+  ],
+  telemetry: [
+    'CooperativeClose', 'TokenRegistered', 'TransformerClauseSkipped',
+    'TransformerDeltaClamped', 'WatchtowerCounterDisputeExecuted',
+  ],
+} as const;
+
+export const ENTITY_PROVIDER_J_EVENTS = {
+  consensus: [
+    'FoundationBootstrapped', 'EntityRegistered', 'BoardActivated',
+    'EntityProviderActionExecuted', 'EntityProviderActionCancelled',
+  ],
+  telemetry: [
+    'ApprovalForAll', 'BoardProposed', 'ControlSharesReleased',
+    'FoundationActionExecuted', 'GovernanceEnabled', 'NameAssigned',
+    'NameTransferred', 'ProposalCancelled', 'TransferBatch',
+    'TransferSingle', 'URI',
+  ],
+} as const;
+
+// These events are authenticated from tracked ERC20 receipts rather than
+// emitted by Depository or EntityProvider.
+export const SYNTHETIC_J_EVENTS = [
+  'ExternalWalletSnapshot',
+  'ExternalWalletDelta',
+] as const;
+
 export const CANONICAL_J_EVENTS = [
-  'FoundationBootstrapped', 'EntityRegistered', 'BoardActivated',
-  'ReserveUpdated', 'SecretRevealed', 'AccountSettled',
-  'ExternalWalletSnapshot', 'ExternalWalletDelta',
-  'DisputeStarted', 'DisputeFinalized', 'DebtCreated', 'DebtEnforced', 'DebtForgiven', 'HankoBatchProcessed',
-  'BatchOperationSkipped',
-  'EntityProviderActionExecuted', 'EntityProviderActionCancelled',
+  ...ENTITY_PROVIDER_J_EVENTS.consensus,
+  ...DEPOSITORY_J_EVENTS.consensus,
+  ...SYNTHETIC_J_EVENTS,
 ] as const;
 
 export type CanonicalJEvent = (typeof CANONICAL_J_EVENTS)[number];

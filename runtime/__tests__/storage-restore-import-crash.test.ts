@@ -10,6 +10,7 @@ import {
   loadEnvFromDB,
 } from '../runtime';
 import { deriveSignerAddressSync } from '../account/crypto';
+import { LIMITS } from '../config/constants';
 import { generateLazyEntityId } from '../entity/factory';
 import { dbRootPath } from '../runtime/platform';
 import { readStorageHead, recoverStorageDbFromHistory } from '../storage';
@@ -76,9 +77,10 @@ describe('restored checkpoint atomic publication', () => {
         expect(replica?.lastConsensusProgressAt).toBe(expectedHeight * 1_000);
         expect(replica?.state.consumptionAccumulator?.count).toBe(1n);
         const oversizedAccount = replica?.state.accounts.get(`0x${'ff'.repeat(32)}`);
-        expect(oversizedAccount?.deltas.size).toBe(400);
+        expect(oversizedAccount?.deltas.size).toBe(LIMITS.MAX_ACCOUNT_TOKEN_ROWS);
         expect(oversizedAccount?.deltas.get(0)?.offdelta).toBe(0n);
-        expect(oversizedAccount?.deltas.get(399)?.offdelta).toBe(399n);
+        expect(oversizedAccount?.deltas.get(LIMITS.MAX_ACCOUNT_TOKEN_ROWS - 1)?.offdelta)
+          .toBe(BigInt(LIMITS.MAX_ACCOUNT_TOKEN_ROWS - 1));
         const firstIdentity = {
           targetEntityId: entityId,
           sourceEntityId: `0x${'22'.repeat(32)}`,

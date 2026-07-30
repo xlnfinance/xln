@@ -21,7 +21,6 @@ import type {
   RuntimeSwap,
   RuntimeAllowance,
   ProofBodyResult,
-  DisputeConfig,
 } from './proof-body.ts';
 import type { ProofBodyStruct, TransformerClauseStruct } from '../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository.ts';
 import type { DeltaTransformer } from '../../../jurisdictions/typechain-types/contracts/DeltaTransformer.ts';
@@ -440,16 +439,6 @@ export function createCooperativeDisputeProofHash(
     starterInitialArgumentsHash,
   );
 }
-
-/**
- * Default dispute config (conservative)
- * Values are encoded in 10-block units. 576 * 10 = 5760 blocks,
- * roughly 24 hours at 15-second block time.
- */
-export const DEFAULT_DISPUTE_CONFIG: DisputeConfig = {
-  leftDisputeDelay: 576,
-  rightDisputeDelay: 576,
-};
 
 /**
  * Create settlement hash for bilateral signature with explicit nonce

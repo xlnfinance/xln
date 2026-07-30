@@ -281,10 +281,11 @@ describe('real process storage crash recovery', () => {
           candidate.entityId === entityId && candidate.signerId === signerA
         ));
         expect(submitReplica?.state.height).toBe(1);
-        // Checkpointing retains full lineage by default (pruning is a
-        // separate, explicit operator action) — this replica committed one
-        // frame since genesis, so that one certified link survives restore.
-        expect(submitReplica?.certifiedFrameLineage ?? []).toHaveLength(1);
+        // The synced Runtime checkpoint is the durable anchor. Recovery keeps
+        // that endpoint and rebuilds only links certified after it, so a
+        // checkpoint exactly at H1 restores with an empty in-memory tail.
+        expect(submitReplica?.certifiedFrameAnchor?.height).toBe(1);
+        expect(submitReplica?.certifiedFrameLineage ?? []).toHaveLength(0);
         expect(submitReplica?.certifiedFrameAnchor?.height).toBe(1);
         expect(submitReplica?.certifiedFrameAnchor?.runtimeCheckpoint)
           .toEqual(replica?.certifiedFrameAnchor?.runtimeCheckpoint);

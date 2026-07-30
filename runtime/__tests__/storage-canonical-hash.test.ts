@@ -49,6 +49,7 @@ const makeAccount = (frameStateHash: string): AccountState =>
       accountStateRoot: `0x${'00'.repeat(32)}`,
       stateHash: `0x${'01'.repeat(32)}`,
       deltas: [],
+      byLeft: entityId < counterpartyId,
     },
     deltas: new Map([[1, {
       tokenId: 1,
@@ -79,6 +80,7 @@ const makeAccount = (frameStateHash: string): AccountState =>
       accountStateRoot: `0x${'00'.repeat(32)}`,
       stateHash: frameStateHash,
       deltas: [],
+      byLeft: entityId < counterpartyId,
     }],
     pendingWithdrawals: new Map(),
     requestedRebalance: new Map(),

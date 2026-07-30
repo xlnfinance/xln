@@ -2,7 +2,12 @@ import { describe, expect, test } from 'bun:test';
 
 import { createEmptyEnv } from '../runtime';
 import { resolveStorageRuntimeConfig } from '../storage';
-import { DEFAULT_EPOCH_MAX_BYTES } from '../storage/keys';
+import {
+  DEFAULT_EPOCH_MAX_BYTES,
+  DEFAULT_HISTORY_VIEW_MAX_BYTES,
+  DEFAULT_HISTORY_VIEW_RETAIN_FRAMES,
+  DEFAULT_RETAIN_SNAPSHOTS,
+} from '../storage/keys';
 import { ensureRuntimeConfig } from '../runtime/loop-environment';
 import { measureRuntimeFrameCloneBytes } from '../runtime/frame/clone';
 
@@ -32,8 +37,18 @@ describe('storage config', () => {
     expect(resolveStorageRuntimeConfig(env).canonicalHashPeriodFrames).toBe(0);
     expect(resolveStorageRuntimeConfig(env).materializePeriodFrames).toBe(100);
     expect(resolveStorageRuntimeConfig(env).snapshotPeriodFrames).toBe(10_000);
-    expect(resolveStorageRuntimeConfig(env).epochMaxBytes).toBe(Number.MAX_SAFE_INTEGER);
-    expect(DEFAULT_EPOCH_MAX_BYTES).toBe(Number.MAX_SAFE_INTEGER);
+    expect(resolveStorageRuntimeConfig(env)).toMatchObject({
+      retainSnapshots: Number.MAX_SAFE_INTEGER,
+      epochMaxBytes: Number.MAX_SAFE_INTEGER,
+      historyViewMaxBytes: Number.MAX_SAFE_INTEGER,
+      historyViewRetainFrames: Number.MAX_SAFE_INTEGER,
+    });
+    expect([
+      DEFAULT_RETAIN_SNAPSHOTS,
+      DEFAULT_EPOCH_MAX_BYTES,
+      DEFAULT_HISTORY_VIEW_MAX_BYTES,
+      DEFAULT_HISTORY_VIEW_RETAIN_FRAMES,
+    ]).toEqual(Array(4).fill(Number.MAX_SAFE_INTEGER));
     env.runtimeConfig = { storage: { canonicalHashPeriodFrames: 37 } };
     expect(resolveStorageRuntimeConfig(env).canonicalHashPeriodFrames).toBe(37);
   });

@@ -51,9 +51,11 @@ export const assertStorageSchemaVersion = (
   return stored;
 };
 export const DEFAULT_SNAPSHOT_PERIOD_FRAMES = 10_000;
-export const DEFAULT_RETAIN_SNAPSHOTS = 2;
 // Archival storage is unlimited unless the local operator explicitly chooses
-// a quota. Runtime state never changes because of this local policy.
+// a quota. Snapshot count follows the same rule: silently deleting historical
+// checkpoints by default would make "blank means unlimited" false. Runtime
+// state never changes because of this local policy.
+export const DEFAULT_RETAIN_SNAPSHOTS = Number.MAX_SAFE_INTEGER;
 export const DEFAULT_EPOCH_MAX_BYTES = Number.MAX_SAFE_INTEGER;
 export const DEFAULT_HISTORY_VIEW_MAX_BYTES = Number.MAX_SAFE_INTEGER;
 export const DEFAULT_HISTORY_VIEW_RETAIN_FRAMES = Number.MAX_SAFE_INTEGER;

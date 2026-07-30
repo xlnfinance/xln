@@ -37,6 +37,76 @@ afterEach(() => {
 });
 
 describe('independent frame history retention', () => {
+  test('treats the frame count as an exact latest-frame retention bound', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'xln-frame-count-retention-'));
+    roots.push(root);
+    const db = new Level<Buffer, Buffer>(root, {
+      keyEncoding: 'buffer',
+      valueEncoding: 'buffer',
+    });
+    await db.batch()
+      .put(keyHistoryViewRuntimeActivity(1), Buffer.from('one'))
+      .put(keyHistoryViewRuntimeActivity(2), Buffer.from('two'))
+      .put(keyHistoryViewRuntimeActivity(3), Buffer.from('three'))
+      .write();
+
+    const result = await pruneHistoryViewRetention({
+      db,
+      height: 3,
+      head: {
+        schemaVersion: STORAGE_SCHEMA_VERSION,
+        latestHeight: 3,
+        latestPrunedRuntimeHeight: 0,
+        retainedBytes: 11,
+        maxBytes: Number.MAX_SAFE_INTEGER,
+        retainFrames: 2,
+      },
+      config: {
+        ...config,
+        historyViewMaxBytes: Number.MAX_SAFE_INTEGER,
+        historyViewRetainFrames: 2,
+      },
+    });
+
+    expect(result.latestPrunedRuntimeHeight).toBe(1);
+    expect(await readRawOrNull(db, keyHistoryViewRuntimeActivity(1))).toBeNull();
+    expect(await readRawOrNull(db, keyHistoryViewRuntimeActivity(2))).toEqual(Buffer.from('two'));
+    expect(await readRawOrNull(db, keyHistoryViewRuntimeActivity(3))).toEqual(Buffer.from('three'));
+    await db.close();
+  });
+
+  test('retains history forever when both local limits are blank', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'xln-frame-unlimited-retention-'));
+    roots.push(root);
+    const db = new Level<Buffer, Buffer>(root, {
+      keyEncoding: 'buffer',
+      valueEncoding: 'buffer',
+    });
+    await db.put(keyHistoryViewRuntimeActivity(1), Buffer.from('one'));
+
+    const result = await pruneHistoryViewRetention({
+      db,
+      height: 10,
+      head: {
+        schemaVersion: STORAGE_SCHEMA_VERSION,
+        latestHeight: 10,
+        latestPrunedRuntimeHeight: 0,
+        retainedBytes: Number.MAX_SAFE_INTEGER,
+        maxBytes: Number.MAX_SAFE_INTEGER,
+        retainFrames: Number.MAX_SAFE_INTEGER,
+      },
+      config: {
+        ...config,
+        historyViewMaxBytes: Number.MAX_SAFE_INTEGER,
+        historyViewRetainFrames: Number.MAX_SAFE_INTEGER,
+      },
+    });
+
+    expect(result.prunedKeys).toBe(0);
+    expect(await readRawOrNull(db, keyHistoryViewRuntimeActivity(1))).toEqual(Buffer.from('one'));
+    await db.close();
+  });
+
   test('Runtime compaction removes activity indexes but preserves Entity and Account frame bodies', async () => {
     const root = mkdtempSync(join(tmpdir(), 'xln-frame-history-retention-'));
     roots.push(root);

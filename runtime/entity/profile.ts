@@ -91,9 +91,6 @@ export type Profile = {
 export const isHubProfile = (profile: Profile): boolean =>
   profile.metadata.isHub === true;
 
-export const isRoutableProfile = (profile: Profile): boolean =>
-  isHubProfile(profile);
-
 const normalizeX25519Key = (raw: unknown): string | null => {
   if (typeof raw !== 'string') return null;
   const trimmed = raw.trim();
