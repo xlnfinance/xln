@@ -74,7 +74,6 @@ test('hub persists 20k non-empty R-wal across 10k checkpoint rollover and cold r
   const jurisdiction: JurisdictionConfig = {
     name: 'hub-10k-checkpoint-test',
     address: 'browservm://hub-10k-checkpoint-test',
-    rpcs: ['browservm://hub-10k-checkpoint-test'],
     chainId: 31_337,
     depositoryAddress: '0x000000000000000000000000000000000000dEaD',
     entityProviderAddress: '0x000000000000000000000000000000000000bEEF',

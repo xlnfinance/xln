@@ -46,6 +46,7 @@ import {
   keySnapshotReplicaMeta,
 } from '../storage/keys';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
+import { buildEntityHashesToSign } from '../entity/consensus/hanko-witness';
 import { generateLazyEntityId } from '../entity/factory';
 import { buildRouteOutputKey } from '../runtime/output-routing';
 import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
@@ -105,6 +106,7 @@ describe('storage frame journal retention', () => {
     try {
       const jurisdiction: JurisdictionConfig = {
         name: 'post-state-divergence',
+        address: 'browservm://post-state-divergence',
         chainId: 31337,
         depositoryAddress: '0x0000000000000000000000000000000000000011',
         entityProviderAddress: '0x0000000000000000000000000000000000000012',
@@ -976,6 +978,11 @@ describe('storage frame journal retention', () => {
         txs: [],
         events: [],
         leader: { proposerSignerId: `0x${'73'.repeat(20)}`, view: 0 },
+        hashesToSign: buildEntityHashesToSign(
+          `0x${'72'.repeat(32)}`,
+          22,
+          `0x${'77'.repeat(32)}`,
+        ),
         collectedSigs: new Map(),
       },
     } satisfies DeliverableEntityInput;
@@ -1471,23 +1478,12 @@ describe('storage frame journal retention', () => {
     const entityB = generateLazyEntityId([signerB], 1n).toLowerCase();
     const jurisdiction = {
       name: 'frame-retention-test',
+      address: 'browservm://frame-retention-test',
       depositoryAddress: '0x000000000000000000000000000000000000dEaD',
       entityProviderAddress: '0x000000000000000000000000000000000000bEEF',
       chainId: 31337,
     };
-    env.activeJurisdiction = jurisdiction.name;
-    env.jReplicas.set(jurisdiction.name, {
-      name: jurisdiction.name,
-      depositoryAddress: jurisdiction.depositoryAddress,
-      entityProviderAddress: jurisdiction.entityProviderAddress,
-      chainId: jurisdiction.chainId,
-      contracts: {
-        depository: jurisdiction.depositoryAddress,
-        entityProvider: jurisdiction.entityProviderAddress,
-        account: '0x000000000000000000000000000000000000ac01',
-        deltaTransformer: '0x000000000000000000000000000000000000de17',
-      },
-    } as never);
+    installTestJurisdiction(env, jurisdiction);
 
     enqueueRuntimeInput(env, {
       timestamp: env.timestamp,

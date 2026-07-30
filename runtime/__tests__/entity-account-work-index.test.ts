@@ -41,7 +41,7 @@ describe('Entity Account work indexes', () => {
       ...account.currentFrame,
       height: 1,
       timestamp: 1,
-      prevFrameHash: `0x${'11'.repeat(32)}`,
+      prevFrameHash: 'genesis',
       stateHash: `0x${'22'.repeat(32)}`,
     };
     account.pendingFrame = pendingFrame;

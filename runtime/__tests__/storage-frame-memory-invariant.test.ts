@@ -54,6 +54,7 @@ test('live Entity memory keeps certified lineage while LevelDB keeps frame histo
   registerSignerKey(env, signerId, deriveSignerKeySync(seed, '1'));
   const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
   const jurisdiction = {
+    address: 'browservm://frame-memory-testnet',
     name: 'frame-memory-testnet',
     chainId: 31_337,
     depositoryAddress: '0x000000000000000000000000000000000000dEaD',

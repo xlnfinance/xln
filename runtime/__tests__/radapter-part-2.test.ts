@@ -196,7 +196,7 @@ const makeEnv = (): RuntimeState =>
                     jHeight: 0,
                     accountTxs: [],
                     prevFrameHash: 'genesis',
-                    stateHash: '0x1',
+                    stateHash: `0x${'02'.repeat(32)}`,
                     accountStateRoot: `0x${'01'.repeat(32)}`,
                     deltas: [],
                   },

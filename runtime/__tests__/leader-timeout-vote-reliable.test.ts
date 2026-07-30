@@ -13,6 +13,7 @@ import {
   buildEntityLeaderCertificate,
   hashEntityLeaderVoteBody,
 } from '../entity/consensus/leader';
+import { buildEntityHashesToSign } from '../entity/consensus/hanko-witness';
 import { generateLazyEntityId } from '../entity/factory';
 import { deriveLocalEntityCryptoKeys } from '../entity/crypto';
 import { initCrontab } from '../entity/scheduler';
@@ -362,6 +363,11 @@ describe('reliable leader timeout vote delivery', () => {
       txs: [],
       events: [],
       leader: { proposerSignerId: vote.previousLeaderId, view: vote.fromView },
+      hashesToSign: buildEntityHashesToSign(
+        replica.entityId,
+        vote.targetHeight,
+        `0x${'43'.repeat(32)}`,
+      ),
       collectedSigs: new Map(),
     };
     expect(getReliableOutputIdentity(prepared)?.frameHash)

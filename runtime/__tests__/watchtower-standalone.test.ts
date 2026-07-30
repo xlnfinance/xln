@@ -9,9 +9,10 @@ import { createEmptyEnv, enqueueRuntimeInput, processRuntime } from '../runtime.
 import { buildRuntimeRecoveryBundle } from '../recovery/bundle';
 import { buildTowerAppointmentOwnerMessage, encryptRuntimeRecoveryBundle } from '../recovery/crypto';
 import { serializeTaggedJson } from '../protocol/serialization';
-import type { JReplica, JurisdictionConfig, TowerAppointmentV1 } from '../api/runtime-module';
+import type { JurisdictionConfig, TowerAppointmentV1 } from '../api/runtime-module';
 import { decodeStoredLookupDoc } from '../watchtower/store-decode';
 import { startStandaloneWatchtowerServer, type StandaloneWatchtowerServer } from '../watchtower/standalone-server';
+import { createTestJReplica } from './helpers/j-replica';
 
 const addr = (byte: string): string => `0x${byte.repeat(20)}`;
 const servers: StandaloneWatchtowerServer[] = [];
@@ -42,7 +43,7 @@ const installJurisdiction = (env: ReturnType<typeof createEmptyEnv>): Jurisdicti
     entityProviderAddress: addr('12'),
   };
   env.activeJurisdiction = jurisdiction.name;
-  env.jReplicas.set(jurisdiction.name, {
+  env.jReplicas.set(jurisdiction.name, createTestJReplica({
     name: jurisdiction.name,
     rpcs: [jurisdiction.address],
     chainId: jurisdiction.chainId,
@@ -54,7 +55,7 @@ const installJurisdiction = (env: ReturnType<typeof createEmptyEnv>): Jurisdicti
       account: addr('13'),
       deltaTransformer: addr('14'),
     },
-  } as JReplica);
+  }));
   return jurisdiction;
 };
 

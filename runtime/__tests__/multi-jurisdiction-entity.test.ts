@@ -32,8 +32,8 @@ import { canonicalizeProfile, parseProfile } from '../entity/profile';
 import { computeValidatorEncryptionAttestationDigest } from '../protocol/htlc/validator-encryption';
 import type { ConsensusConfig, JurisdictionConfig } from '../entity/types';
 import type { RuntimeState } from '../runtime/types';
-import type { JReplica } from '../types/jurisdiction-runtime';
 import { installCanonicalRegistrationEvidence } from './helpers/registration-evidence';
+import { createTestJReplica } from './helpers/j-replica';
 import { resolveDbPath } from '../storage/runtime-dbs';
 import { SigningKey, computeAddress } from 'ethers';
 
@@ -77,7 +77,7 @@ const installJurisdiction = (env: RuntimeState, jurisdiction: JurisdictionConfig
         ...jadapter,
       } as Partial<JAdapter> & { setBlockTimestamp: () => void }
     : undefined;
-  env.jReplicas.set(jurisdiction.name, {
+  env.jReplicas.set(jurisdiction.name, createTestJReplica({
     name: jurisdiction.name,
     rpcs: [jurisdiction.address],
     chainId: jurisdiction.chainId,
@@ -92,7 +92,7 @@ const installJurisdiction = (env: RuntimeState, jurisdiction: JurisdictionConfig
     ...(jurisdiction.blockTimeMs !== undefined ? { blockTimeMs: jurisdiction.blockTimeMs } : {}),
     watcherConfirmationDepth: 0,
     ...(adapter ? { jadapter: adapter as JAdapter } : {}),
-  } as JReplica);
+  }));
 };
 
 const makeConfig = (signerId: string, jurisdiction: JurisdictionConfig): ConsensusConfig => ({

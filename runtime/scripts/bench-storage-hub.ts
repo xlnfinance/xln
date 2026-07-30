@@ -595,6 +595,7 @@ async function main() {
   }
   env.runtimeState.persistencePaused = !persist && !storageEnabled;
   const jurisdiction = {
+    address: 'browservm://bench',
     name: 'bench',
     depositoryAddress: '0x000000000000000000000000000000000000dEaD',
     entityProviderAddress: '0x000000000000000000000000000000000000bEEF',

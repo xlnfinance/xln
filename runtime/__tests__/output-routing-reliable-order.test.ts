@@ -24,6 +24,7 @@ import {
   deriveSignerKeySync,
   registerSignerKey,
 } from '../account/crypto';
+import { buildEntityHashesToSign } from '../entity/consensus/hanko-witness';
 import {
   closeInfraDb,
   closeRuntimeDb,
@@ -34,6 +35,9 @@ import {
 import { deliveryAccepted, deliveryFailure } from '../protocol/payments/delivery-result';
 import type { DeliverableEntityInput, RuntimeState, RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../runtime/types';
 import type { JPrefixAttestation } from '../types/jurisdiction-events';
+import type { AccountTx } from '../types/account';
+import type { CrossJurisdictionSwapRoute } from '../types/cross-jurisdiction';
+import { cloneCrossJurisdictionRoute } from '../extensions/cross-j';
 
 const runtimeId = (byte: string): string => `0x${byte.repeat(20)}`;
 const entityId = (byte: string): string => `0x${byte.repeat(32)}`;
@@ -79,6 +83,11 @@ const entityFrameOutput = (
     txs: [],
     events: [],
     leader: { proposerSignerId: targetSignerId, view: 0 },
+    hashesToSign: buildEntityHashesToSign(
+      target,
+      height,
+      `0xentity-frame-${height}`,
+    ),
     collectedSigs: new Map([[targetSignerId, [`0xsignature-${height}`]]]),
     ...(hankos ? { hankos } : {}),
   } as never,
@@ -118,6 +127,8 @@ const crossJProposalOutput = (
   const route = {
     orderId: 'cross-j-adjacent-runtime-wal',
     routeHash,
+    makerEntityId: sourceEntityId,
+    hubEntityId: sourceHubEntityId,
     source: {
       jurisdiction: 'stack:1:source',
       entityId: sourceEntityId,
@@ -135,6 +146,7 @@ const crossJProposalOutput = (
     sourcePull: {
       pullId: 'source-pull',
       tokenId: 1,
+      amount: 10n,
       signedAmount: -10n,
       revealedUntilTimestamp: 900,
       fullHash,
@@ -143,6 +155,7 @@ const crossJProposalOutput = (
     targetPull: {
       pullId: 'target-pull',
       tokenId: 2,
+      amount: 20n,
       signedAmount: -20n,
       revealedUntilTimestamp: 1_000,
       fullHash,
@@ -152,16 +165,17 @@ const crossJProposalOutput = (
     createdAt: 1,
     updatedAt: 1,
     expiresAt: 2_000,
-  };
+  } satisfies CrossJurisdictionSwapRoute;
   const pull = leg === 'source' ? route.sourcePull : route.targetPull;
-  const accountTxs = [
+  const { signedAmount, ...pullProof } = pull;
+  const accountTxs: AccountTx[] = [
     {
       type: 'pull_lock',
       data: {
-        ...pull,
-        amount: pull.signedAmount,
+        ...pullProof,
+        amount: signedAmount,
         crossJurisdiction: { orderId: route.orderId, routeHash, leg },
-        crossJurisdictionRoute: route,
+        crossJurisdictionRoute: cloneCrossJurisdictionRoute(route),
       },
     },
     ...(leg === 'source'
@@ -175,7 +189,7 @@ const crossJProposalOutput = (
               wantTokenId: 2,
               wantAmount: 20n,
               timeInForce: 0,
-              crossJurisdiction: route,
+              crossJurisdiction: cloneCrossJurisdictionRoute(route),
             },
           },
         ]
@@ -209,7 +223,7 @@ const crossJProposalOutput = (
             },
           },
         },
-      } as never,
+      },
     ],
   };
 };

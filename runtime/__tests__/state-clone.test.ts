@@ -90,15 +90,15 @@ const makeManualFallbackAccount = () => ({
   status: 'active',
   mempool: [{
     type: 'direct_payment',
-    data: { tokenId: 1, amount: 10n, nested: { memo: 'original' } },
+    data: { tokenId: 1, amount: 10n },
   }],
   currentFrame: {
     height: 0,
     timestamp: 0,
     jHeight: 0,
     accountTxs: [],
-    prevFrameHash: 'genesis',
-    stateHash: 'genesis',
+    prevFrameHash: '',
+    stateHash: '',
     accountStateRoot: `0x${'00'.repeat(32)}`,
     byLeft: true,
     deltas: [],
@@ -634,8 +634,8 @@ describe('state cloning', () => {
         timestamp: 0,
         jHeight: 0,
         accountTxs: [],
-        prevFrameHash: 'genesis',
-        stateHash: 'genesis',
+        prevFrameHash: '',
+        stateHash: '',
         accountStateRoot: `0x${'00'.repeat(32)}`,
         byLeft: true,
         deltas: [],
@@ -667,12 +667,12 @@ describe('state cloning', () => {
     delete (account as Record<string, unknown>).uncloneable;
     const cloned = cloneAccountState(account as any);
 
-    (cloned.mempool[0] as any).data.nested.memo = 'mutated';
+    (cloned.mempool[0] as any).data.amount = 999n;
     (cloned.disputeProofBodiesByHash as any).proof.offdeltas[0] = 999n;
     (cloned.disputeArgumentSnapshotsByHash as any).proof.plan.paymentHashlocks.push('hashlock-2');
     (cloned.swapOffers.get('offer-1') as any).crossJurisdiction.source.amount = 999n;
 
-    expect((account.mempool[0] as any).data.nested.memo).toBe('original');
+    expect((account.mempool[0] as any).data.amount).toBe(10n);
     expect((account.disputeProofBodiesByHash as any).proof.offdeltas).toEqual([1n]);
     expect((account.disputeArgumentSnapshotsByHash as any).proof.plan.paymentHashlocks).toEqual(['hashlock-1']);
     expect((account.swapOffers.get('offer-1') as any).crossJurisdiction.source.amount).toBe(100n);

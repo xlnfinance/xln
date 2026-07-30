@@ -4,6 +4,7 @@ import { mergeDurableReceiptOnlyInputs } from '../runtime/reliable-durable-input
 import { getInputReliableIdentity } from '../runtime/reliable-receipt';
 import { reliableIdentityExactKey } from '../runtime/reliable-frontier';
 import { splitRoutedOutputByDeliveryLane } from '../runtime/output-routing';
+import { buildEntityHashesToSign } from '../entity/consensus/hanko-witness';
 import { safeStringify } from '../protocol/serialization';
 import type { RoutedEntityInput } from '../runtime/types';
 
@@ -28,6 +29,11 @@ const frameInput = (index: number, from?: string): RoutedEntityInput => ({
     txs: [],
     events: [],
     leader: { proposerSignerId: signerId(index + 1), view: 0 },
+    hashesToSign: buildEntityHashesToSign(
+      entityId(index + 1),
+      1,
+      `0x${index.toString(16).padStart(64, '0')}`,
+    ),
     collectedSigs: new Map(),
   },
 });

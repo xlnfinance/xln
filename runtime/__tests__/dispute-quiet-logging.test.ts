@@ -31,6 +31,7 @@ const makeEntityState = (): EntityState => ({
       swapOffers: new Map(),
       globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
       currentHeight: 1,
+      pendingSignatures: [],
       rollbackCount: 0,
       leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
       rightPendingJClaims: createEmptyAccountJClaimAccumulator(),

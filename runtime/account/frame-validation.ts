@@ -36,7 +36,7 @@ const decodeFrameHash = (
       );
   if (!valid) {
     throw new FinancialDataCorruptionError(
-      `${context}.${field} is invalid for height ${height}`,
+      `${context}.${field} is invalid for height ${height}:value=${hash}`,
     );
   }
   return hash;

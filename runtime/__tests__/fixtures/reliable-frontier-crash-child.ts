@@ -21,6 +21,7 @@ import {
   prepareCatchupFixtureReplica,
   registerCatchupFixtureSigners,
 } from './reliable-local-catchup-fixture';
+import { buildEntityHashesToSign } from '../../entity/consensus/hanko-witness';
 import type {
   DeliverableEntityInput,
   RuntimeState,
@@ -158,6 +159,11 @@ env.pendingNetworkOutputs = [{
     txs: [],
     events: [],
     leader: { proposerSignerId: senderActiveIdentity.signerId, view: 0 },
+    hashesToSign: buildEntityHashesToSign(
+      senderActiveIdentity.entityId,
+      pendingHeight,
+      digest('22'),
+    ),
     collectedSigs: new Map(),
   },
 } satisfies DeliverableEntityInput];

@@ -6,6 +6,7 @@ import {
   isAccountWriteLaneIdle,
   summarizeRuntimeQuiescence,
 } from '../orchestrator/mesh-common';
+import { buildEntityHashesToSign } from '../entity/consensus/hanko-witness';
 import type { AccountState } from '../types/account';
 import type { DeliverableEntityInput } from '../runtime/types';
 import type { EntityReplica } from '../entity/types';
@@ -22,6 +23,11 @@ test('bootstrap quiescence counts only reliable outbox and live Account work', (
       hash: `0x${'44'.repeat(32)}`,
       txs: [],
       leader: { proposerSignerId: `0x${'33'.repeat(20)}`, view: 0 },
+      hashesToSign: buildEntityHashesToSign(
+        `0x${'22'.repeat(32)}`,
+        2,
+        `0x${'44'.repeat(32)}`,
+      ),
       collectedSigs: new Map(),
     },
   } satisfies DeliverableEntityInput;

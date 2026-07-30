@@ -632,7 +632,7 @@ test('two board rotations in one finalized J range collapse to the latest reseal
     height: 1,
     timestamp: 1,
     jHeight: 2,
-    prevFrameHash: digest('d6'),
+    prevFrameHash: 'genesis',
     accountStateRoot: digest('d7'),
     stateHash: digest('d7'),
   };

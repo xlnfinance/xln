@@ -35,11 +35,14 @@ import {
 import type { AccountInput } from '../types/account';
 import type { ConsensusConfig, EntityInput, EntityReplica, EntityState, JurisdictionConfig } from '../entity/types';
 import type { RuntimeState, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../runtime/types';
-import type { JReplica } from '../types/jurisdiction-runtime';
 import { enableStrictScenario } from '../scenarios/helpers';
-import { cloneAccountInputWithoutPostCommitHankos } from '../entity/consensus/hanko-witness';
+import {
+  buildEntityHashesToSign,
+  cloneAccountInputWithoutPostCommitHankos,
+} from '../entity/consensus/hanko-witness';
 import { markLocalJAuthorityRuntimeTx } from '../jurisdiction/registration-evidence';
 import { readStorageFrameRecord } from '../storage/read';
+import { createTestJReplica } from './helpers/j-replica';
 
 const TEST_RUN_ID = `${process.pid}-${Date.now()}`;
 const cleanupNamespaces: string[] = [];
@@ -103,7 +106,7 @@ const makeAliasedBoardRuntimeInput = (): {
 
 const installJurisdiction = (env: RuntimeState): void => {
   env.activeJurisdiction = jurisdiction.name;
-  env.jReplicas.set(jurisdiction.name, {
+  env.jReplicas.set(jurisdiction.name, createTestJReplica({
     name: jurisdiction.name,
     rpcs: [jurisdiction.address!],
     chainId: jurisdiction.chainId,
@@ -115,7 +118,7 @@ const installJurisdiction = (env: RuntimeState): void => {
       entityProvider: jurisdiction.entityProviderAddress,
       deltaTransformer: address('f1'),
     },
-  } as JReplica);
+  }));
 };
 
 const board = (leader: string, validator: string): ConsensusConfig => ({
@@ -393,6 +396,7 @@ describe('runtime frame atomicity', () => {
       events: [],
       hash: hash('d4'),
       leader: { proposerSignerId: address('d5'), view: 0 },
+      hashesToSign: buildEntityHashesToSign(hash('d7'), 1, hash('d2')),
     };
     const sharedSignatures = [`0x${'d6'.repeat(65)}`];
     const preparedVote = {
@@ -418,6 +422,7 @@ describe('runtime frame atomicity', () => {
           parentFrameHash: preparedFrame.hash,
           txs: frameTxs(),
           hash: hash('d9'),
+          hashesToSign: buildEntityHashesToSign(hash('d7'), 2, hash('d2')),
           leader: {
             proposerSignerId: address('da'),
             view: 1,

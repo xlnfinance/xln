@@ -33,7 +33,6 @@ import { buildRuntimeCheckpointSnapshot } from '../storage/wal';
 import { computePersistedEnvStateHash } from '../storage/wal/hash';
 import { createWatchtowerStore } from '../watchtower/store';
 import { handleRecoveryDiscover, handleTowerAppointment, handleTowerRestore } from '../watchtower/http';
-import type { JReplica } from '../types/jurisdiction-runtime';
 import type { JurisdictionConfig } from '../entity/types';
 import type { Profile } from '../entity/profile';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
@@ -47,6 +46,8 @@ import { buildSingleSignerHanko } from '../hanko/batch';
 import { deriveEncryptionKeyPair, pubKeyToHex } from '../protocol/p2p-crypto';
 import { computeProfileHash, signProfileRuntimeRoute } from '../entity/profile-signing';
 import { computeValidatorEncryptionAttestationDigest } from '../protocol/htlc/validator-encryption';
+import { createTestJReplica } from './helpers/j-replica';
+import { buildEntityHashesToSign } from '../entity/consensus/hanko-witness';
 
 const addr = (byte: string): string => `0x${byte.repeat(20)}`;
 const x25519 = (byte: string): string => `0x${byte.repeat(32)}`;
@@ -75,13 +76,13 @@ afterEach(async () => {
 const installJurisdiction = (env: ReturnType<typeof createEmptyEnv>): JurisdictionConfig => {
   const jurisdiction: JurisdictionConfig = {
     name: 'RecoveryTestnet',
-    address: '',
+    address: 'browservm://recovery-testnet',
     chainId: 31337,
     depositoryAddress: addr('11'),
     entityProviderAddress: addr('12'),
   };
   env.activeJurisdiction = jurisdiction.name;
-  env.jReplicas.set(jurisdiction.name, {
+  env.jReplicas.set(jurisdiction.name, createTestJReplica({
     name: jurisdiction.name,
     rpcs: [],
     chainId: jurisdiction.chainId,
@@ -93,7 +94,7 @@ const installJurisdiction = (env: ReturnType<typeof createEmptyEnv>): Jurisdicti
       account: addr('13'),
       deltaTransformer: addr('14'),
     },
-  } as JReplica);
+  }));
   return jurisdiction;
 };
 
@@ -328,6 +329,7 @@ describe('runtime recovery tower', () => {
         proposerSignerId: replica!.signerId,
         view: replica!.state.leaderState?.view ?? 0,
       },
+      hashesToSign: buildEntityHashesToSign(entityId, pendingHeight, computeCanonicalEntityConsensusStateHash(bloatedState)),
     };
     replica!.proposal = pendingFrame;
     replica!.lockedFrame = structuredClone(pendingFrame);

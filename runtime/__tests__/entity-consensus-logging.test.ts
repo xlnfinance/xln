@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 test('entity consensus core uses structured logging only', () => {
   const source = [
-    'shared.ts',
+    'entity-log.ts',
     'input-consensus.ts',
     'frame-application.ts',
   ].map(file => readFileSync(join(process.cwd(), 'runtime/entity/consensus', file), 'utf8')).join('\n');
