@@ -44,13 +44,12 @@ function getMLXUrl(modelId: string): string | null {
   return instance?.port ? `http://localhost:${instance.port}` : null;
 }
 
-// Legacy compatibility shim - points to most recently loaded model
+// Aggregate status projected from the independently managed model processes.
 const mlxState = {
   get activeModel(): string | null {
     const loaded = Array.from(loadedMLXModels.values()).filter(m => !m.loading && m.process);
     return loaded.length > 0 ? loaded[loaded.length - 1]!.modelId : null;
   },
-  set activeModel(_: string | null) { /* no-op for compatibility */ },
   get loading(): boolean { return Array.from(loadedMLXModels.values()).some(m => m.loading); },
   get loadProgress(): string {
     const loading = Array.from(loadedMLXModels.values()).find(m => m.loading);
