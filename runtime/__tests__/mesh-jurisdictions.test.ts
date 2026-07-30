@@ -32,6 +32,13 @@ const withJurisdictions = <T>(payload: Record<string, unknown>, fn: () => T): T 
   }
 };
 
+const jurisdictionsDocument = (jurisdictions: Record<string, unknown>) => ({
+  version: '1',
+  lastUpdated: '2026-01-01T00:00:00.000Z',
+  jurisdictions,
+  defaults: { timeout: 60, retryAttempts: 3, gasLimit: 10_000_000 },
+});
+
 const stack = (
   name: string,
   rpc: string,
@@ -42,7 +49,11 @@ const stack = (
   name,
   chainId: Number.parseInt(depository.slice(2, 4), 16) || 1,
   entityProviderDeploymentBlock: 2,
+  blockTimeMs: 1_000,
   rpc,
+  explorer: '',
+  currency: 'TEST',
+  status: 'active',
   contracts: {
     depository,
     entityProvider,
@@ -54,13 +65,10 @@ const stack = (
 
 describe('mesh jurisdiction config resolution', () => {
   test('matches public primary rpc without relying on arrakis key or label', () => {
-    withJurisdictions({
-      version: '1',
-      jurisdictions: {
+    withJurisdictions(jurisdictionsDocument({
         tron: stack('Tron', '/rpc2', '0x2200000000000000000000000000000000000000', '0x2300000000000000000000000000000000000000'),
         renamedPrimary: stack('Whatever Label', '/rpc', '0x1100000000000000000000000000000000000000', '0x1200000000000000000000000000000000000000'),
-      },
-    }, () => {
+    }), () => {
       const resolved = resolveMeshJurisdictionConfig('http://127.0.0.1:8545');
 
       expect(resolved.name).toBe('Whatever Label');
@@ -70,13 +78,10 @@ describe('mesh jurisdiction config resolution', () => {
   });
 
   test('uses explicit primary marker when no rpc override is available', () => {
-    withJurisdictions({
-      version: '1',
-      jurisdictions: {
+    withJurisdictions(jurisdictionsDocument({
         secondaryFirst: stack('Tron', '/rpc2', '0x2200000000000000000000000000000000000000', '0x2300000000000000000000000000000000000000'),
         base: stack('Base Mainnet', 'https://base.example.invalid', '0x3300000000000000000000000000000000000000', '0x3400000000000000000000000000000000000000', { primary: true }),
-      },
-    }, () => {
+    }), () => {
       const resolved = resolveMeshJurisdictionConfig('');
 
       expect(resolved.name).toBe('Base Mainnet');
@@ -85,41 +90,47 @@ describe('mesh jurisdiction config resolution', () => {
   });
 
   test('fails closed when no configured jurisdiction has required contracts', () => {
-    withJurisdictions({
-      version: '1',
-      jurisdictions: {
-        incomplete: {
-          name: 'Incomplete',
-          chainId: 1,
-          rpc: '/rpc',
-          contracts: { depository: '0x1' },
-        },
+    withJurisdictions(jurisdictionsDocument({
         legacyPartial: {
           name: 'Legacy Partial',
           chainId: 1,
+          blockTimeMs: 1_000,
           rpc: '/rpc',
+          explorer: '',
+          currency: 'TEST',
+          status: 'active',
           contracts: {
             depository: '0x0000000000000000000000000000000000000001',
             entityProvider: '0x0000000000000000000000000000000000000002',
           },
         },
-      },
-    }, () => {
+    }), () => {
       expect(() => resolveMeshJurisdictionConfig('/rpc')).toThrow('JURISDICTION_NOT_FOUND');
     });
   });
 
   test('keeps public TRON deployments out of an ephemeral local mesh', () => {
-    withJurisdictions({
-      version: '1',
-      jurisdictions: {
+    withJurisdictions(jurisdictionsDocument({
         localTron: stack('Tron', '/rpc2', '0x2200000000000000000000000000000000000000', '0x2300000000000000000000000000000000000000'),
         nile: stack('TRON Nile', 'https://nile.trongrid.io/jsonrpc', '0x3300000000000000000000000000000000000000', '0x3400000000000000000000000000000000000000'),
-      },
-    }, () => {
+    }), () => {
       const secondary = resolveSecondaryJurisdictions('http://127.0.0.1:8545');
 
       expect(secondary.map((entry) => entry.name)).toEqual(['Tron']);
+    });
+  });
+
+  test('rejects a non-boolean primary marker instead of silently demoting it', () => {
+    withJurisdictions(jurisdictionsDocument({
+      base: stack(
+        'Base Mainnet',
+        'https://base.example.invalid',
+        '0x3300000000000000000000000000000000000000',
+        '0x3400000000000000000000000000000000000000',
+        { primary: 'true' },
+      ),
+    }), () => {
+      expect(() => resolveMeshJurisdictionConfig('')).toThrow('JURISDICTION_base_PRIMARY');
     });
   });
 });

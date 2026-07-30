@@ -13,6 +13,7 @@ import { createStructuredLogger } from '../infra/logger';
 import {
   requireBoundaryInteger,
   requireBoundaryRecord,
+  requireBoolean,
   requireExactBoundaryKeys,
   requireFiniteNumber,
   requireString,
@@ -25,6 +26,7 @@ interface JurisdictionConfig {
   name: string;
   chainId: number;
   blockTimeMs: number;
+  primary?: boolean;
   entityProviderDeploymentBlock?: number;
   rpc: string;
   rebalancePolicyUsd?: {
@@ -153,6 +155,9 @@ const decodeJurisdiction = (
     explorer: requireText(entry['explorer'], `${code}_EXPLORER`),
     currency: requireString(entry['currency'], `${code}_CURRENCY`),
     status: requireString(entry['status'], `${code}_STATUS`),
+    ...(entry['primary'] === undefined
+      ? {}
+      : { primary: requireBoolean(entry['primary'], `${code}_PRIMARY`) }),
     ...(entry['entityProviderDeploymentBlock'] === undefined
       ? {}
       : {
