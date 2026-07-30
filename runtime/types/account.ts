@@ -428,7 +428,7 @@ export interface AccountFrame {
   prevFrameHash: string; // Hash of previous frame (creates chain linkage, not state linkage)
   accountStateRoot: string; // Canonical RLP/radix-Merkle root of bilateral Account state
   stateHash: string;
-  byLeft?: boolean; // Who proposed this frame (left or right entity)
+  byLeft: boolean; // Signed proposer side; every frame must bind it explicitly.
   // One source of truth for account-frame token state. Compact offdelta arrays
   // and token id arrays are derived by helpers when logs/proofs need them.
   deltas: Delta[];

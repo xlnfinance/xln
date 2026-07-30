@@ -33,6 +33,7 @@ import {
 import type { EntityTxReducerResult } from '../apply';
 import { createStructuredLogger, shortHash, shortId } from '../../../infra/logger';
 import { getEntityLeaderState } from '../../consensus/leader';
+import { requireBoundaryUint } from '../../../protocol/boundary-validation';
 
 const jBatchActionLog = createStructuredLogger('entity.jbatch');
 
@@ -87,7 +88,7 @@ const prepareBroadcast = (
       batch: cloneJBatch(state.jBatchState!.batch),
       batchHash,
       encodedBatch,
-      entityNonce: Number(nextNonce),
+      entityNonce: requireBoundaryUint(nextNonce, 'J_BROADCAST_ENTITY_NONCE_INVALID'),
       batchGeneration,
       ...(entityTx.data?.feeOverrides ? { feeOverrides: { ...entityTx.data.feeOverrides } } : {}),
       batchSize,
@@ -116,7 +117,10 @@ const commitBroadcast = (
     batch,
     batchHash: prepared.batchHash,
     encodedBatch: prepared.encodedBatch,
-    entityNonce: Number(prepared.nextNonce),
+    entityNonce: requireBoundaryUint(
+      prepared.nextNonce,
+      'J_BROADCAST_ENTITY_NONCE_INVALID',
+    ),
     firstSubmittedAt: state.timestamp,
     lastSubmittedAt: 0,
     submitAttempts: 0,

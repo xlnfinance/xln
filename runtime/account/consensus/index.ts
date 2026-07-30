@@ -194,7 +194,7 @@ async function verifySenderFrameHash(
     accountStateRoot: receivedFrame.accountStateRoot,
     deltas: receivedFrame.deltas,
     stateHash: '', // Computed by createFrameHash
-    ...(receivedFrame.byLeft === undefined ? {} : { byLeft: receivedFrame.byLeft }),
+    byLeft: receivedFrame.byLeft,
   };
   const recomputedSenderHash = await createFrameHash(senderHashFrame);
 
@@ -235,7 +235,7 @@ const replayIncomingFrameOnClone = async (
     const result = await applyAccountTx(
       clonedMachine,
       accountTx,
-      receivedFrame.byLeft!,
+      receivedFrame.byLeft,
       receivedFrame.timestamp,
       frameJHeight,
       true,
@@ -373,7 +373,7 @@ const reexecuteIncomingFrame = async (
     const commitResult = await applyAccountTx(
       account,
       tx,
-      receivedFrame.byLeft!,
+      receivedFrame.byLeft,
       receivedFrame.timestamp,
       frameJHeight,
       false,

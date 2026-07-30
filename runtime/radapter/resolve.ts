@@ -854,7 +854,7 @@ const compactAccountFrameForView = (
   prevFrameHash: frame.prevFrameHash,
   accountStateRoot: frame.accountStateRoot,
   stateHash: frame.stateHash,
-  ...withDefinedProp('byLeft', frame.byLeft),
+  byLeft: frame.byLeft,
   deltas: Array.isArray(frame.deltas) ? frame.deltas.slice(0, deltaLimit) : [],
 });
 
@@ -1451,7 +1451,7 @@ const projectGraphAccountFrame = (
   prevFrameHash: frame.prevFrameHash,
   accountStateRoot: frame.accountStateRoot,
   stateHash: frame.stateHash,
-  ...withDefinedProp('byLeft', frame.byLeft),
+  byLeft: frame.byLeft,
   accountTxs: projectGraphAccountActivities(frame.accountTxs),
   accountTxCount: frame.accountTxs.length,
 });

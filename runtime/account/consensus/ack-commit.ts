@@ -139,7 +139,7 @@ const applyPendingFrameTransactions = async (
     const result = await applyAccountTx(
       account,
       tx,
-      pendingFrame.byLeft!,
+      pendingFrame.byLeft,
       pendingFrame.timestamp,
       jHeight,
       false,

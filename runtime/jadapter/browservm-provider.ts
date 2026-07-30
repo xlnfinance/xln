@@ -28,6 +28,7 @@ import {
 import { safeStringify } from '../protocol/serialization.js';
 import { createStructuredLogger } from '../infra/logger';
 import { isLeftEntity, normalizeEntityId } from '../entity/id';
+import { requireBoundaryUint } from '../protocol/boundary-validation';
 import type { EntityProviderActionIntent } from '../types/entity-provider-actions';
 import {
   assertEntityProviderActionIntent,
@@ -1909,7 +1910,10 @@ export class BrowserVMProvider {
     }
 
     const accountInfo = await this.getAccountInfo(leftEntity, rightEntity);
-    const settlementNonce = Number(accountInfo.nonce + 1n);
+    const settlementNonce = requireBoundaryUint(
+      accountInfo.nonce + 1n,
+      'BROWSERVM_SETTLEMENT_NONCE_INVALID',
+    );
     const batch = createEmptyBatch();
     batchAddSettlement(
       { batch, jurisdiction: null, lastBroadcast: 0, broadcastCount: 0, failedAttempts: 0, status: 'empty' },

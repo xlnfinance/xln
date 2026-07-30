@@ -55,9 +55,9 @@ export const decodeAccountFrame = (
     frame,
     [
       'height', 'timestamp', 'jHeight', 'accountTxs', 'prevFrameHash',
-      'accountStateRoot', 'stateHash', 'deltas',
+      'accountStateRoot', 'stateHash', 'deltas', 'byLeft',
     ],
-    ['byLeft'],
+    [],
     `${context}.fields`,
   );
   const height = requireBoundaryInteger(frame['height'], `${context}.height`);
@@ -71,7 +71,7 @@ export const decodeAccountFrame = (
     );
   }
   const byLeft = frame['byLeft'];
-  if (byLeft !== undefined && typeof byLeft !== 'boolean') {
+  if (typeof byLeft !== 'boolean') {
     throw new FinancialDataCorruptionError(`${context}.byLeft must be boolean`);
   }
 
@@ -96,9 +96,7 @@ export const decodeAccountFrame = (
     deltas: validateArray(frame['deltas'], `${context}.deltas`).map(
       (delta, index) => validateDelta(delta, `${context}.deltas[${index}]`),
     ),
-    ...(byLeft === undefined
-      ? {}
-      : { byLeft }),
+    byLeft,
   };
   if (decoded.height > 0 && decoded.timestamp <= 0) {
     throw new FinancialDataCorruptionError(

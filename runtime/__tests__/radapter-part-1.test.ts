@@ -191,6 +191,7 @@ const makeEnv = (): RuntimeReplica =>
                       prevFrameHash: 'genesis',
                       stateHash: `0x${'02'.repeat(32)}`,
                       accountStateRoot: `0x${'01'.repeat(32)}`,
+                      byLeft: true,
                       deltas: [],
                     },
                     deltas: new Map(),

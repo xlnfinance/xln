@@ -10,7 +10,7 @@ export const cloneIsolatedAccountFrame = (frame: AccountFrame): AccountFrame => 
   prevFrameHash: frame.prevFrameHash,
   accountStateRoot: frame.accountStateRoot,
   stateHash: frame.stateHash,
-  ...(frame.byLeft !== undefined ? { byLeft: frame.byLeft } : {}),
+  byLeft: frame.byLeft,
   deltas: frame.deltas.map(delta => ({ ...delta })),
 });
 

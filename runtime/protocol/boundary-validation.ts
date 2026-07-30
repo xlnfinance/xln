@@ -65,6 +65,35 @@ export const requireBoundaryInteger = (
   return Number(value);
 };
 
+/**
+ * Decode an external uint into the JavaScript integer representation used by
+ * replica state. Converting uint256 with Number(value) first is forbidden:
+ * values above 2^53 would round and could alias a different financial nonce.
+ */
+export const requireBoundaryUint = (
+  value: unknown,
+  code: string,
+): number => {
+  let integer: bigint;
+  try {
+    if (typeof value === 'bigint') {
+      integer = value;
+    } else if (typeof value === 'number' && Number.isSafeInteger(value)) {
+      integer = BigInt(value);
+    } else if (typeof value === 'string' && /^(0|[1-9]\d*)$/.test(value)) {
+      integer = BigInt(value);
+    } else {
+      throw new Error(code);
+    }
+  } catch {
+    throw new Error(`${code}:${String(value)}`);
+  }
+  if (integer < 0n || integer > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new Error(`${code}:${String(value)}`);
+  }
+  return Number(integer);
+};
+
 export const validateFrameLogEntries = (value: unknown, invalidCode: string): FrameLogEntry[] => {
   if (!Array.isArray(value)) throw new Error(invalidCode);
   return value.map((entry, index) => {

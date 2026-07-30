@@ -66,36 +66,10 @@ import {
   applyReserveUpdatedJEvent,
   applySecretRevealedJEvent,
 } from './j-events-observations';
+import { requireBoundaryUint } from '../../protocol/boundary-validation';
 
 const jEventLog = createStructuredLogger('j.event');
 const normalizeSignerId = (value: unknown): string => String(value || '').trim().toLowerCase();
-const MAX_SAFE_NONCE = BigInt(Number.MAX_SAFE_INTEGER);
-
-/**
- * Solidity exposes dispute nonces as uint256 while AccountReplica deliberately
- * uses JavaScript safe integers. Convert through BigInt so an adversarial
- * value can never round to a different nonce before consensus compares it.
- */
-const decodeAccountNonce = (value: unknown, code: string): number => {
-  let nonce: bigint;
-  try {
-    if (typeof value === 'bigint') {
-      nonce = value;
-    } else if (typeof value === 'number' && Number.isSafeInteger(value)) {
-      nonce = BigInt(value);
-    } else if (typeof value === 'string' && /^\d+$/.test(value)) {
-      nonce = BigInt(value);
-    } else {
-      throw new Error('invalid');
-    }
-  } catch {
-    throw new Error(`${code}:${String(value)}`);
-  }
-  if (nonce < 0n || nonce > MAX_SAFE_NONCE) {
-    throw new Error(`${code}:${String(value)}`);
-  }
-  return Number(nonce);
-};
 
 const incrementAccountNonce = (nonce: number, code: string): number => {
   if (nonce >= Number.MAX_SAFE_INTEGER) throw new Error(`${code}:${nonce}`);
@@ -502,8 +476,8 @@ const initializeStartedDispute = async (
 
   const weAreStarter = senderStr === entityIdNorm;
   const disputeTimeout = Number(data.disputeTimeout);
-  const initialNonce = decodeAccountNonce(nonce, 'J_EVENT_DISPUTE_NONCE_INVALID');
-  const jNonce = decodeAccountNonce(
+  const initialNonce = requireBoundaryUint(nonce, 'J_EVENT_DISPUTE_NONCE_INVALID');
+  const jNonce = requireBoundaryUint(
     data.jNonce ?? nonce,
     'J_EVENT_DISPUTE_J_NONCE_INVALID',
   );
@@ -663,7 +637,7 @@ const resolveFinalizationEvidence = (
     );
   }
   const primary = evidence[0];
-  const initialNonce = decodeAccountNonce(
+  const initialNonce = requireBoundaryUint(
     data.initialNonce,
     'J_EVENT_DISPUTE_INITIAL_NONCE_INVALID',
   );
@@ -675,7 +649,7 @@ const resolveFinalizationEvidence = (
   if (primary) {
     eventJNonce = evidenceIsUnsignedUnilateral
       ? incrementAccountNonce(initialNonce, 'J_EVENT_DISPUTE_FINAL_NONCE_OVERFLOW')
-      : decodeAccountNonce(
+      : requireBoundaryUint(
           primary.finalNonce,
           'J_EVENT_DISPUTE_FINAL_NONCE_INVALID',
         );
